@@ -34,6 +34,37 @@
  *   버킷 — 스펙 명시("동적 키: 변수·템플릿·삼항") 그대로, 뒤에 보간이 붙어도 재분류가
  *   안 생기게 일관되게 다룬다.
  *
+ * ## ③ 번역자를 «파라미터»로 받는 함수(CHANGES, 유나 디자인 게이트 지적 2026-09-09)
+ * `function C({ t }: { t: ReturnType<typeof useTranslations> })`류(hooks가 아니라 부모가
+ * 만든 `t`를 물려받는 자식 컴포넌트/헬퍼 — 예: trust-utils.tsx의 `Translator` 타입 별칭,
+ * insights-board-metric-cell.tsx의 `tContent`/`tBoard`)는 `useTranslations`/
+ * `getTranslations` 호출 자체가 그 함수 안에 없어 바인딩이 안 잡혔다 — 그 결과 그 안의
+ * 호출들이 리터럴·동적 어느 버킷에도 안 들고(`keyFromCall`이 `bindings.has()`에서 조용히
+ * return) 자기완전성 항등식(리터럴+동적=총)마저 이 구멍을 못 드러냈다(항등식은 «세어진
+ * 것들 사이»에서만 성립 — 실측 10파일·리터럴 79·동적 10건이 통째로 안 세어짐).
+ *
+ * 처방: 함수 파라미터의 타입 주석이 번역자 형이면 그 파라미터 이름을 바인딩으로 등록하되
+ * 네임스페이스는 **모른다**(호출자가 어느 네임스페이스의 `t`를 넘겼는지는 이 파일 혼자서는
+ * 알 수 없다 — 크로스파일 타입 추론은 안 한다) — 그래서 그 바인딩을 통한 호출은 리터럴이어도
+ * **무조건 동적 버킷**(실존 검사 불가·「안 세어짐」0, 실존을 지어내지 않는다). 번역자 형은
+ * 실측상 이 저장소에 정확히 두 축으로 나타난다(PO 1차 제안은 `k`/`messageKey`/`id`까지
+ * 파라미터 이름을 넓히자는 것이었으나, 전수 스캔이 반증했다 — 아래 ㉣):
+ *   ⓐ 「호출 가능한 값」 자체 — `ReturnType<typeof useTranslations>` 직접, 또는 그 형과
+ *      구조적으로 같은 로컬 함수 타입 별칭(`type Translator = (key: string, values?) =>
+ *      string`, trust-utils.tsx) — 파라미터에 직접 쓰이든(`t: Translator`) 프로퍼티로
+ *      감싸이든(`{ t }: { t: ReturnType<...> }`) 동일하게 잡는다.
+ *   ⓑ call-signature 인터페이스(`interface X { (key: string, values?): string }`) —
+ *      derive-attention-queue.ts 등 6곳의 `*Translator` 관례(파일마다 로컬 재선언 — next-intl
+ *      오버로드 제네릭과 결합 안 하려는 의도적 패턴). 멤버가 그 call-signature 하나뿐인
+ *      인터페이스만 번역자로 본다(프로퍼티가 섞이면 다른 개념일 수 있어 제외).
+ * ⓐⓑ 둘 다 **파라미터 이름이 정확히 `key`, 첫 인자 타입이 `string`, (반환 타입 주석이
+ * 있다면) 그것도 `string`**이어야 매치한다 — 실측(전수 스캔): 이 세 조건을 만족하는 함수형/
+ * call-signature는 이 저장소에 40여 곳 있고 전부 `key`(그 안의 최상위 바인딩 변수명은
+ * `t`/`tContent`/`tOutcome` 등 다양) — `k`/`messageKey`는 0건, `id`는 있으나(예:
+ * `resolveName?: (id: string) => string`) 전부 반환 타입이 `string | null` 등 정확히
+ * `string`이 아니거나 번역자와 무관한 이름-리졸버라 이름 조건을 넓히면 오히려 오탐이 된다
+ * (PO 1차 grounding 정정 — CHANGES 재정정에 반영).
+ *
  * ## 못 잡는 것(⚠️)
  *   ㉠ 네임스페이스 자체가 동적(`useTranslations(nsVar)`)인 바인딩은 등록하지 않는다 —
  *      그 var를 통한 이후 호출은 바인딩 미매칭이라 리터럴도 동적도 아닌 채로 조용히
@@ -44,6 +75,9 @@
  *      오분류 가능 — 실측상 이 저장소에 이런 형은 없다(전부 함수 스코프당 정확히 1개
  *      선언).
  *   ㉢ `.d.ts`·타입 전용 파일은 스캔하되 실질 호출이 없어 자연히 기여 0.
+ *   ㉣ 번역자 파라미터 이름이 `key`가 아닌 다른 이름(`k`·`messageKey` 등)이면 여전히
+ *      안 잡힌다 — 실측 0건(이 저장소의 모든 실 번역자 call-signature/함수형이 `key`를
+ *      쓴다). 생기면 이름 조건을 그 하나만 추가(무분별한 확장은 오탐, 위 ⓐⓑ 실측 참조).
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
@@ -87,8 +121,145 @@ function namespaceFromArgs(args: readonly ts.Expression[]): string | null {
   return null;
 }
 
+// ③ 「직접 ReturnType<typeof useTranslations>」 구조 판정.
+function isDirectTranslatorReturnType(t: ts.TypeNode): boolean {
+  if (!ts.isTypeReferenceNode(t) || !ts.isIdentifier(t.typeName) || t.typeName.text !== 'ReturnType') {
+    return false;
+  }
+  const arg = t.typeArguments?.[0];
+  return !!arg && ts.isTypeQueryNode(arg) && ts.isIdentifier(arg.exprName) && arg.exprName.text === 'useTranslations';
+}
+
+// ③ CHANGES 정정(페드루 PO, 유나 재실측 2026-09-09) — 파라미터 «이름»만으로 번역자를 잡으면
+// 무관 콜백(첫 인자가 우연히 `key`라는 이름이지만 string이 아니거나 시그니처가 다른 것 —
+// 실측 37파일·223호출 오탐 위험)이 섞인다. 그래서 이름뿐 아니라 **첫 파라미터의 타입 주석이
+// `string`, 반환 타입 주석이 있다면 그것도 `string`**인지까지 구조로 확인한다(둘째 인자
+// `values?`는 선택이라 형만 다양해도 무관 — 첫 인자·반환만 계약의 핵심).
+//
+// PO는 `ts.Program`+`checker.getTypeAtLocation`(의미론적 타입체크)을 제안했으나, 이 저장소의
+// 다른 모든 가드(verify-no-handrolled-card.ts 등)가 Program 없는 단일 소스파일 AST walk이고
+// 이 가드 자신의 모듈 docstring도 그 관례를 "새 기전 발명 금지"로 명시한다 — 여기서 실제로
+// 필요한 건 「타입 검사」가 아니라 「이 정확한 어노테이션 문구가 있나」이므로(전부 로컬
+// 리터럴 타입 주석, 크로스파일 추론 불요) 구문 검사로 동등한 정밀도를 얻을 수 있다(오탐
+// 조건도 동일하게 닫힌다) — Program 구성 비용·이 파일군의 유일한 새 기전을 들이지 않는다.
+function isStringKeywordType(t: ts.TypeNode): boolean {
+  return t.kind === ts.SyntaxKind.StringKeyword;
+}
+
+function isTranslatorCallLikeShape(parameters: readonly ts.ParameterDeclaration[], returnType: ts.TypeNode | undefined): boolean {
+  const first = parameters[0];
+  if (!first || !ts.isIdentifier(first.name) || first.name.text !== 'key') return false;
+  if (!first.type || !isStringKeywordType(first.type)) return false;
+  if (returnType && !isStringKeywordType(returnType)) return false;
+  return true;
+}
+
+// ③ 「(key: string, ...) => string」 함수형 — trust-utils.tsx의 `Translator` 타입 별칭.
+function isTranslatorFunctionShape(t: ts.TypeNode): boolean {
+  if (!ts.isFunctionTypeNode(t)) return false;
+  return isTranslatorCallLikeShape(t.parameters, t.type);
+}
+
+// ③ call-signature 인터페이스(`interface X { (key: string, values?): string }`) —
+// derive-attention-queue.ts/command-palette-actions.ts/org-briefing derive-*.ts 6곳의
+// `*Translator` 관례(파일마다 로컬 재선언 — next-intl 오버로드 제네릭과 결합 안 하려는
+// 의도적 패턴, derive-attention-queue.ts 주석). 멤버가 정확히 하나의 call-signature뿐이고
+// 다른 멤버가 없어야 한다(순수 호출-형만 번역자로 본다 — 프로퍼티가 섞인 인터페이스는
+// «번역자+α» 다른 개념일 수 있어 오분류 방지).
+function interfaceCallSignatureShape(node: ts.InterfaceDeclaration): ts.CallSignatureDeclaration | null {
+  if (node.members.length !== 1) return null;
+  const only = node.members[0];
+  return ts.isCallSignatureDeclaration(only) ? only : null;
+}
+
+function isTranslatorTypeStructural(t: ts.TypeNode): boolean {
+  return isDirectTranslatorReturnType(t) || isTranslatorFunctionShape(t);
+}
+
+function isTranslatorParamType(t: ts.TypeNode, aliasNames: Set<string>): boolean {
+  if (isTranslatorTypeStructural(t)) return true;
+  return ts.isTypeReferenceNode(t) && ts.isIdentifier(t.typeName) && aliasNames.has(t.typeName.text);
+}
+
+// ③ 타입 리터럴(인라인 `{ t: ReturnType<...> }` 또는 `interface X { t: Translator }`) 멤버
+// 중 번역자 형인 프로퍼티 이름만 뽑는다 — apply-recipe-dialog.tsx(인라인 ReturnType)·
+// facebook-page-select-card.tsx/insights-board-metric-cell.tsx(named interface,
+// ReturnType 직접)·trust-utils.tsx(named interface 멤버가 로컬 별칭 `Translator`를 참조)
+// 전부 이 형(구조분해 파라미터 + 번역자 프로퍼티). aliasNames는 멤버 타입이 «별칭
+// 참조」일 때도 판정하려고 받는다(isTranslatorParamType과 같은 축).
+function translatorPropNamesInMembers(members: readonly ts.TypeElement[], aliasNames: Set<string>): Set<string> {
+  const names = new Set<string>();
+  for (const member of members) {
+    if (
+      ts.isPropertySignature(member) && member.type
+      && ts.isIdentifier(member.name) && isTranslatorParamType(member.type, aliasNames)
+    ) {
+      names.add(member.name.text);
+    }
+  }
+  return names;
+}
+
+// ③ 파일 하나에서 「번역자와 구조적으로 같은」 로컬 타입을 전부 모은다(선언 순서 무관 —
+// 이름으로 참조되니 본 walk 前에 한 번 훑는다). 두 단계로 나눈다 — propNamesByType가
+// 멤버 타입을 aliasNames로 판정해야 하므로(trust-utils.tsx: interface 멤버가 `Translator`
+// 별칭을 참조) aliasNames를 먼저 완성한 뒤에 propNamesByType을 계산한다.
+//   aliasNames — 타입 자체가 번역자 형인 별칭(단순 파라미터: `t: Translator`).
+//   propNamesByType — 타입(별칭/interface)이 번역자 프로퍼티를 담은 객체형일 때, 그
+//     프로퍼티 이름 집합(구조분해 파라미터: `{ t }: FooProps`).
+function collectTranslatorTypeInfo(sf: ts.SourceFile): {
+  aliasNames: Set<string>;
+  propNamesByType: Map<string, Set<string>>;
+} {
+  const aliasNames = new Set<string>();
+  function visitAliases(node: ts.Node): void {
+    if (ts.isTypeAliasDeclaration(node) && isTranslatorTypeStructural(node.type)) {
+      aliasNames.add(node.name.text);
+    }
+    // call-signature interface — 함수 타입 별칭과 동형(둘 다 「호출하면 string」인 값).
+    if (ts.isInterfaceDeclaration(node)) {
+      const callSig = interfaceCallSignatureShape(node);
+      if (callSig && isTranslatorCallLikeShape(callSig.parameters, callSig.type)) {
+        aliasNames.add(node.name.text);
+      }
+    }
+    node.forEachChild(visitAliases);
+  }
+  visitAliases(sf);
+
+  const propNamesByType = new Map<string, Set<string>>();
+  function visitProps(node: ts.Node): void {
+    if (ts.isTypeAliasDeclaration(node) && ts.isTypeLiteralNode(node.type)) {
+      const props = translatorPropNamesInMembers(node.type.members, aliasNames);
+      if (props.size > 0) propNamesByType.set(node.name.text, props);
+    }
+    if (ts.isInterfaceDeclaration(node)) {
+      const props = translatorPropNamesInMembers(node.members, aliasNames);
+      if (props.size > 0) propNamesByType.set(node.name.text, props);
+    }
+    node.forEachChild(visitProps);
+  }
+  visitProps(sf);
+
+  return { aliasNames, propNamesByType };
+}
+
+// ③ 구조분해 파라미터(`{ t, tc }: FooProps` 또는 `{ t }: { t: ReturnType<...> }`)의 타입에서
+// 번역자 프로퍼티 이름 집합을 얻는다 — 인라인 타입 리터럴은 그 자리서, named 타입은
+// propNamesByType로 조회.
+function translatorPropNamesOfParamType(
+  t: ts.TypeNode, propNamesByType: Map<string, Set<string>>, aliasNames: Set<string>,
+): Set<string> {
+  if (ts.isTypeLiteralNode(t)) return translatorPropNamesInMembers(t.members, aliasNames);
+  if (ts.isTypeReferenceNode(t) && ts.isIdentifier(t.typeName)) {
+    return propNamesByType.get(t.typeName.text) ?? new Set();
+  }
+  return new Set();
+}
+
 // 파일 하나를 top-down walk — 바인딩(varName→ns)은 「마지막 선언이 이긴다」(모듈 docstring
-// ① 참조). 호출은 그 시점까지의 바인딩 상태로 판정한다.
+// ① 참조). 호출은 그 시점까지의 바인딩 상태로 판정한다. ns 값 `null`은 ③(번역자
+// 파라미터) — 바인딩은 있으나 네임스페이스를 몰라 그 호출은 항상 동적 버킷.
 export function scanFileContent(content: string, file: string): {
   literalRefs: KeyRef[]; dynamicCount: number; totalCallCount: number; hasBindings: boolean;
 } {
@@ -108,7 +279,10 @@ export function scanFileContent(content: string, file: string): {
     );
   }
 
-  const bindings = new Map<string, string>();
+  // string = 알려진 네임스페이스(리터럴 검사 가능). null = ③ 번역자 파라미터(바인딩은
+  // 있으나 네임스페이스를 몰라 그 호출은 항상 동적 버킷).
+  const bindings = new Map<string, string | null>();
+  const { aliasNames: translatorAliasNames, propNamesByType } = collectTranslatorTypeInfo(sf);
   const literalRefs: KeyRef[] = [];
   let dynamicCount = 0;
   let totalCallCount = 0;
@@ -126,9 +300,9 @@ export function scanFileContent(content: string, file: string): {
   function keyFromCall(node: ts.CallExpression, varName: string): void {
     if (!bindings.has(varName)) return;
     totalCallCount += 1;
+    const ns = bindings.get(varName)!;
     const arg = node.arguments[0];
-    if (arg && ts.isStringLiteral(arg)) {
-      const ns = bindings.get(varName)!;
+    if (ns !== null && arg && ts.isStringLiteral(arg)) {
       const fullKey = ns ? `${ns}.${arg.text}` : arg.text;
       const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
       literalRefs.push({ file, line, fullKey });
@@ -140,6 +314,29 @@ export function scanFileContent(content: string, file: string): {
   function walk(node: ts.Node): void {
     if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
       registerBindingFromInitializer(node.name.text, node.initializer);
+    }
+    // ③ 번역자 파라미터 — 네임스페이스는 모르니 null 바인딩(호출은 항상 동적으로 카운트,
+    // 「안 세어짐」을 없앤다). 단순 이름(`t: Translator`)과 구조분해(`{ t }: FooProps`)
+    // 둘 다 다룬다.
+    if (ts.isParameter(node) && node.type) {
+      if (ts.isIdentifier(node.name)) {
+        if (isTranslatorParamType(node.type, translatorAliasNames)) {
+          bindings.set(node.name.text, null);
+        }
+      } else if (ts.isObjectBindingPattern(node.name)) {
+        const translatorProps = translatorPropNamesOfParamType(node.type, propNamesByType, translatorAliasNames);
+        if (translatorProps.size > 0) {
+          for (const element of node.name.elements) {
+            if (!ts.isIdentifier(element.name)) continue; // 중첩 구조분해는 스코프 밖.
+            const propKey = element.propertyName && ts.isIdentifier(element.propertyName)
+              ? element.propertyName.text
+              : element.name.text;
+            if (translatorProps.has(propKey)) {
+              bindings.set(element.name.text, null);
+            }
+          }
+        }
+      }
     }
     if (ts.isCallExpression(node)) {
       const callee = node.expression;

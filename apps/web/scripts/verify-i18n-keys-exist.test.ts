@@ -167,6 +167,127 @@ describe('scanFileContent — story #5ead8723 AC1/AC2/AC3(셀프테스트 6)', (
   });
 });
 
+// story #5ead8723 CHANGES(유나 디자인 게이트 지적, 2026-09-09) — 번역자를 파라미터로
+// 받는 함수(useTranslations 호출이 그 함수 안에 없음)는 처음엔 바인딩이 전혀 안 잡혀
+// 그 안의 호출이 리터럴·동적 어느 버킷에도 안 들었다(totalCallCount=0, 완전히 안 세어짐
+// — 실측 10파일·89건). ⭐이 describe 전체가 그 회귀의 pin이다: 아래 4형 전부 total > 0
+// (동적 버킷)이어야 한다 — 0이면 다시 안 보이게 된 것.
+describe('scanFileContent — story #5ead8723 CHANGES③(번역자 파라미터, 유나 지적)', () => {
+  it('⭐단순 이름 파라미터 + 직접 ReturnType<typeof useTranslations> — 동적으로 카운트(안 세어짐 0)', () => {
+    const src = `
+      function TrustBadge({ t }: { t: ReturnType<typeof useTranslations> }) {
+        return t('trustColdStart');
+      }
+    `;
+    const result = scanFileContent(src, 'fake.tsx');
+    expect(result.totalCallCount).toBe(1);
+    expect(result.dynamicCount).toBe(1);
+    expect(result.literalRefs).toEqual([]);
+  });
+
+  it('⭐단순 이름 파라미터 + 로컬 함수형 타입 별칭(trust-utils.tsx의 Translator와 동형)', () => {
+    const src = `
+      type Translator = (key: string, values?: Record<string, string | number>) => string;
+      export function TrustBadge({ hitRate, t }: { hitRate: number; t: Translator }) {
+        return t('trustColdStart');
+      }
+    `;
+    const result = scanFileContent(src, 'fake.tsx');
+    expect(result.totalCallCount).toBe(1);
+    expect(result.dynamicCount).toBe(1);
+  });
+
+  it('⭐구조분해 파라미터 + 인라인 타입 리터럴(apply-recipe-dialog.tsx와 동형)', () => {
+    const src = `
+      export function ApplyRecipeDialog({
+        target, t, tc,
+      }: {
+        target: unknown;
+        t: ReturnType<typeof useTranslations>;
+        tc: ReturnType<typeof useTranslations>;
+      }) {
+        return [t('a'), tc('b')];
+      }
+    `;
+    const result = scanFileContent(src, 'fake.tsx');
+    expect(result.totalCallCount).toBe(2);
+    expect(result.dynamicCount).toBe(2);
+  });
+
+  it('⭐구조분해 파라미터 + named interface(facebook-page-select-card.tsx/insights-board-metric-cell.tsx와 동형)', () => {
+    const src = `
+      interface Props {
+        channel: string;
+        t: ReturnType<typeof useTranslations>;
+      }
+      export function Card({ channel, t }: Props) {
+        return t('label');
+      }
+    `;
+    const result = scanFileContent(src, 'fake.tsx');
+    expect(result.totalCallCount).toBe(1);
+    expect(result.dynamicCount).toBe(1);
+  });
+
+  it('⭐call-signature 인터페이스(derive-attention-queue.ts 등 6곳의 *Translator 관례)', () => {
+    const src = `
+      interface ClusterTranslator {
+        (key: string, values?: Record<string, string | number>): string;
+      }
+      export function deriveAttentionClusters(attention: unknown[], t: ClusterTranslator) {
+        return t('attentionEmpty');
+      }
+    `;
+    const result = scanFileContent(src, 'fake.tsx');
+    expect(result.totalCallCount).toBe(1);
+    expect(result.dynamicCount).toBe(1);
+  });
+
+  // ⭐PO 1차 grounding 정정(오탐 방지) — 파라미터 이름을 `key` 하나로 좁게 유지하는 이유.
+  // `id: string`을 받고 `string`을 반환하는 것만으로는 번역자가 아니다(예: 이름 리졸버).
+  // `k`/`messageKey`/`id`까지 이름 조건을 넓히자는 1차 제안은 전수 스캔으로 반증됐다
+  // (실 저장소에 `k`/`messageKey` 번역자 0건, `id` 매치는 전부 무관 리졸버).
+  it('오탐 방지 — (id: string) => string 형 「이름 리졸버」는 번역자로 안 잡는다', () => {
+    const src = `
+      function AttentionRow({ resolveName }: { resolveName: (id: string) => string }) {
+        return resolveName('u1');
+      }
+    `;
+    const result = scanFileContent(src, 'fake.tsx');
+    expect(result.totalCallCount).toBe(0);
+  });
+
+  it('구조분해 파라미터가 번역자 프로퍼티를 안 가진 named interface는 무관(오탐 0)', () => {
+    const src = `
+      interface Props {
+        channel: string;
+        isOwner: boolean;
+      }
+      export function Card({ channel, isOwner }: Props) {
+        return channel + String(isOwner);
+      }
+    `;
+    const result = scanFileContent(src, 'fake.tsx');
+    expect(result.totalCallCount).toBe(0);
+  });
+
+  // 자기완전성(리터럴+동적=총)은 이 새 바인딩 축이 섞여도 그대로 성립해야 한다.
+  it('번역자 파라미터 호출과 일반 useTranslations 호출이 한 파일에 섞여도 리터럴+동적=총', () => {
+    const src = `
+      function Parent() {
+        const t = useTranslations('parent');
+        return [t('parentKey'), <Child t={t} />];
+      }
+      function Child({ t }: { t: ReturnType<typeof useTranslations> }) {
+        return t('childKey');
+      }
+    `;
+    const result = scanFileContent(src, 'fake.tsx');
+    expect(result.literalRefs.length + result.dynamicCount).toBe(result.totalCallCount);
+    expect(result.totalCallCount).toBe(2);
+  });
+});
+
 // ⭐양성대조(story #5ead8723 판별) — develop HEAD 실 소스에 대해 이 가드가 실제로 통과하는지,
 // 그리고 뮤테이션(존재하지 않는 키 삽입)을 걸면 실제로 RED가 되는지 왕복 확認한다.
 describe('scanRepo — 양성대조(실 develop 소스)', () => {
@@ -199,5 +320,28 @@ describe('scanRepo — 양성대조(실 develop 소스)', () => {
     const koMessages = JSON.parse(readFileSync(KO_PATH, 'utf8'));
     const fakeRef = { file: 'mutation-kill-fixture.tsx', line: 1, fullKey: 'nav.thisKeyWillNeverExist12345' };
     expect(resolveMessageKey(koMessages, fakeRef.fullKey)).toBe(false);
+  });
+
+  // ⭐되돌리면 RED — 유나·PO가 CHANGES에서 직접 지목한 실 파일 10개(①②의 4개 + ③ call-
+  // signature 인터페이스 관례 6개). story #5ead8723 CHANGES 처방 前엔 전부 totalCallCount=0
+  // (바인딩이 전혀 안 잡혀 안 보이던 상태)이었다.
+  it('⭐유나·PO 지목 실 파일 10개 — 번역자 파라미터 호출이 더 이상 완전히 안 보이지 않는다(total > 0)', () => {
+    const files = [
+      'app/(authenticated)/organization/trust/trust-utils.tsx',
+      'components/organization/apply-recipe-dialog.tsx',
+      'components/insights-board/insights-board-metric-cell.tsx',
+      'components/channel-connect/facebook-page-select-card.tsx',
+      'components/attention-queue/derive-attention-queue.ts',
+      'components/command-palette/command-palette-actions.ts',
+      'components/org-briefing/derive-workforce-face.ts',
+      'components/org-briefing/derive-now-face.ts',
+      'components/org-briefing/derive-loop-face.ts',
+      'components/org-briefing/derive-attention-clusters.ts',
+    ];
+    for (const rel of files) {
+      const content = readFileSync(path.join(SRC_ROOT, rel), 'utf8');
+      const result = scanFileContent(content, rel);
+      expect(result.totalCallCount, `${rel} totalCallCount`).toBeGreaterThan(0);
+    }
   });
 });
