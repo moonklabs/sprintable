@@ -541,5 +541,34 @@ describe('ContentPostListPage (story #3368)', () => {
 
       expect(container.textContent).not.toContain(koMessages.content.archivedToast);
     });
+
+    // PO 추가(08:12Z) — 「보관됨 보기」가 이미 켜진 화면에서 보관하면 토스트는 뜨되
+    // 액션은 없다(그 액션은 "지금 있는 곳으로 가라"가 돼 의미가 없다 — 뮤테이션 표적).
+    it('⭐「보관됨 보기」가 이미 켜진 상태에서 「보관」 클릭 — 토스트는 뜨지만 액션 버튼은 없다(PO 추가 08:12Z)', async () => {
+      stubFetchStateful([{ ...DRAFT_A, can_archive: true, is_deleted: false }]);
+      await act(async () => {
+        root.render(wrap(<ContentPostListPage />));
+      });
+      await flush();
+      const toggle = container.querySelector('[data-testid="content-show-archived-toggle"]') as HTMLButtonElement;
+      await act(async () => {
+        toggle.click();
+      });
+      await flush();
+
+      const archiveButton = container.querySelector('[data-testid="content-archive-action"]') as HTMLButtonElement;
+      await act(async () => {
+        archiveButton.click();
+      });
+      await flush();
+
+      expect(container.textContent).toContain(koMessages.content.archivedToast);
+      // showArchived=true인 상태라 헤더 토글은 이미 hideArchivedToggle로 바뀌어 있다 —
+      // showArchivedToggle 라벨을 가진 버튼이 전혀 없어야 한다(헤더에도 토스트에도 없음).
+      const showArchivedLabelButtons = [...container.querySelectorAll('button')].filter(
+        (b) => b.textContent === koMessages.content.showArchivedToggle,
+      );
+      expect(showArchivedLabelButtons.length).toBe(0);
+    });
   });
 });

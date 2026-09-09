@@ -137,9 +137,13 @@ export default function ChannelPostListPage() {
         if (!showArchived && isDeleted) return prev.filter((d) => d.draft_id !== draft.draft_id);
         return prev.map((d) => (d.draft_id === draft.draft_id ? { ...d, is_deleted: isDeleted } : d));
       });
-      // story #3734(유나 CHANGES) — content/page.tsx(site-posts)와 동형(그 파일 주석 참조).
+      // story #3734(유나 CHANGES·PO 추가 08:12Z) — content/page.tsx(site-posts)와 동형
+      // (그 파일 주석 참조 — action은 !showArchived일 때만).
       if (isDeleted) {
-        addToast({ title: t('archivedToast'), action: { label: t('showArchivedToggle'), onClick: () => setShowArchived(true) } });
+        addToast({
+          title: t('archivedToast'),
+          action: showArchived ? undefined : { label: t('showArchivedToggle'), onClick: () => setShowArchived(true) },
+        });
       }
     } finally {
       setArchivingId(null);

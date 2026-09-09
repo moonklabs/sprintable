@@ -141,8 +141,14 @@ export default function ContentPostListPage() {
       // story #3734(유나 CHANGES) — 보관 직후 행이 그냥 사라지면 「삭제」로 읽힌다(데이터
       // 이름이 is_deleted라 더욱). 「어디로 갔는지」 토스트 + 「보관됨 보기」 액션(기존
       // 토글 낱말 재사용) — 보관 해제는 이미 화면에 남아 있는 상태의 되돌리기라 안 띄운다.
+      // PO 추가(08:12Z) — 액션은 !showArchived일 때만 붙인다. 이미 「보관됨 보기」가
+      // 켜진 화면에서 그 액션은 "지금 있는 곳으로 가라"가 된다(컨트롤은 그려진 순간
+      // "할 수 있다"를 약속하는 자리 — 이미 그 상태인데 누르라고 하면 안 됨).
       if (isDeleted) {
-        addToast({ title: t('archivedToast'), action: { label: t('showArchivedToggle'), onClick: () => setShowArchived(true) } });
+        addToast({
+          title: t('archivedToast'),
+          action: showArchived ? undefined : { label: t('showArchivedToggle'), onClick: () => setShowArchived(true) },
+        });
       }
     } finally {
       setArchivingId(null);
