@@ -7,7 +7,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { PageHeader } from '@/components/ui/page-header';
 import { ListRow } from '@/components/ui/list-row';
-import { ToastContainer, useToast } from '@/components/ui/toast';
+import { useToast } from '@/components/ui/toast';
 import {
   formatMinorCurrency, majorToMinor, minorToMajor,
   type GenerationBudgetState, type GenerationBudgetCurrency,
@@ -258,7 +258,7 @@ export default function ContentRulesPage() {
   const t = useTranslations('contentRules');
   const tContent = useTranslations('content');
   const locale = useLocale();
-  const { toasts, addToast, dismissToast } = useToast();
+  const { addToast } = useToast();
 
   const [rules, setRules] = useState<ContentRules>(EMPTY_RULES);
   const [loadedRules, setLoadedRules] = useState<ContentRules>(EMPTY_RULES);
@@ -720,7 +720,6 @@ export default function ContentRulesPage() {
           ) : null}
         </>
       ) : null}
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }

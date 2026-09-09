@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { useTranslations } from 'next-intl';
 
 export interface ToastAction {
@@ -95,7 +95,20 @@ function Toast({ item, onDismiss }: ToastProps) {
   );
 }
 
-export function useToast() {
+interface ToastContextValue {
+  toasts: ToastItem[];
+  addToast: (toast: Omit<ToastItem, 'id'>) => void;
+  dismissToast: (id: string) => void;
+}
+
+// story #3759 — useToast()는 예전엔 호출부마다 독립된 useState였다(31곳 호출부 = 31개
+// 서로 안 보이는 토스트 목록). 셸(dashboard-shell.tsx)이 딱 한 번 <ToastProvider>로 감싸고,
+// 그 안의 모든 useToast() 호출이 이 하나의 Context를 공유 — addToast 하나면 어디서
+// 불러도 같은 목록에 쌓이고, 렌더는 셸의 BottomDock 하나(포털 없음, 트리 그대로 — 위치가
+// 이미 셸 최상단이라 포털로 옮길 이유가 없다)만 한다.
+const ToastContext = createContext<ToastContextValue | null>(null);
+
+export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
 
   const addToast = useCallback((toast: Omit<ToastItem, 'id'>) => {
@@ -107,7 +120,33 @@ export function useToast() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
-  return { toasts, addToast, dismissToast };
+  const value = useMemo(() => ({ toasts, addToast, dismissToast }), [toasts, addToast, dismissToast]);
+
+  return <ToastContext.Provider value={value}>{children}</ToastContext.Provider>;
+}
+
+export function useToast(): ToastContextValue {
+  const ctx = useContext(ToastContext);
+  // story #3759(페드루 PO 지적, #4106 재검토) — 이전 판은 Provider 밖에서도 로컬 useState로
+  // «조용히 성공»했다. 오늘은 39곳 호출부가 전부 DashboardShell 자식이라 안 터지지만,
+  // 내일 로그인/초대/공개 페이지에서 useToast()를 부르면 addToast가 허공에 쌓이고(아무도
+  // 안 그림) 에러 0으로 사라진다 — fail-silent. 이제 폴백은 테스트 환경(`NODE_ENV===
+  // 'test'`, vitest 기본값)에서만 산다. 프로덕션에선 즉시 throw(fail-closed) — 훅 규칙상
+  // 조건부로 훅을 못 부르므로 로컬 useState/useCallback 자체는 여전히 무조건 호출하고,
+  // «반환값»만 환경에 따라 고른다(호출은 항상 같은 순서 — hooks 규칙 준수).
+  const [localToasts, setLocalToasts] = useState<ToastItem[]>([]);
+  const localAddToast = useCallback((toast: Omit<ToastItem, 'id'>) => {
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    setLocalToasts((prev) => [...prev.slice(-4), { ...toast, id }]);
+  }, []);
+  const localDismissToast = useCallback((id: string) => {
+    setLocalToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+  if (ctx) return ctx;
+  if (process.env.NODE_ENV === 'test') {
+    return { toasts: localToasts, addToast: localAddToast, dismissToast: localDismissToast };
+  }
+  throw new Error('useToast must be used within <ToastProvider> (dashboard-shell.tsx)');
 }
 
 export function ToastContainer({
@@ -119,15 +158,62 @@ export function ToastContainer({
 }) {
   if (toasts.length === 0) return null;
 
+  // story #3759 — 예전엔 이 컴포넌트가 직접 position fixed로 우하단에 자리잡았다(호출부
+  // 31곳 = 독립된 fixed 좌표 31벌). 지금은 셸의 BottomDock(components/nav 폴더의 dock 컬럼
+  // 소유 컴포넌트) 딱 한 곳이 렌더하고, 그 dock 컬럼(fixed 위치+--bottom-dock-inset)의
+  // flex 자식으로만 존재한다 — 위치 계산은 컬럼이 갖고, 이 컴포넌트는 순수 레이아웃 없는
+  // 카드 스택이다.
+  // 컬럼 자체는 pointer-events-none(빈 공간 클릭 통과)이라 실제 카드가 있는 이 자리는
+  // pointer-events-auto로 되돌린다.
+  //
+  // story #3759 CHANGES(페드루 PO 지적, #4106) — 컬럼이 min-h-0으로 실제 예산을 갖게 되면서
+  // (bottom-dock.tsx), 토스트가 너무 많이 쌓이면 이 스택이 넘치는 몫을 진다. 넘칠 때 잘려야
+  // 하는 건 «가장 오래된» 토스트다(어차피 5~8초면 사라질 항목 — 방금 연 패널이나 방금 뜬
+  // 새 토스트를 밀어내는 것보다 이쪽이 맞다). `toasts` 배열은 오래된→새것 순(addToast가
+  // 끝에 붙인다)인데, 그대로 flex-col로 렌더하면 «오래된 게 위·새것이 아래»가 되어
+  // overflow-hidden이 새것(아래쪽, main-axis 끝)을 자른다 — 반대다. 배열을 뒤집어 DOM을
+  // 새것-먼저로 만들고 flex-col-reverse를 쓰면: 새것(1번째 DOM 자식)이 main-start(컬럼
+  // 하단 쪽)에 고정되고, 오래된 것들이 그 위로 갈수록 밀려 올라가 컨테이너 상단 밖으로
+  // 먼저 넘친다 — 정상 범위(안 넘칠 때)의 시각 순서(오래된 위·새것 아래)는 그대로
+  // 유지하면서(flex-col-reverse가 그 배치를 재현), 넘칠 때만 오래된 쪽이 먼저 잘린다.
+  //
+  // story #3759 CHANGES 2차(유나 定+페드루 判, #4106 — 정정 캡처가 패널 top≥0인데 최신
+  // 토스트가 27px 조각으로만 보이는 걸 실제로 보고서야 내린 판정) — «토스트 한 장은
+  // 언제나 온전히. 그 다음부터는 패널보다 먼저 양보한다»(우선순위: 토스트 1장 > 패널 >
+  // 토스트 2장째부터). 근거: 반쯤 그려진 토스트는 「누를 수 있다」고 말해 놓고(role=status·
+  // 되돌리기 버튼 살아있음) 못 누르게 하는 거짓 어포던스 — 8초짜리 「되돌리기」 액션이 실린
+  // 토스트가 조각으로 잘리면 사용자가 그 버튼을 못 찾는다. 패널은 사용자가 스스로 연
+  // 지속 표면이라 줄어도 내용을 안 잃는다(자체 overflow-y-auto 스크롤).
+  //
+  // story #3759 CHANGES 3차(유나 ⛔+페드루 判 동의, #4106) — 1차 처방(`min-h-[5.5rem]`)이
+  // 다시 회피 상수였다: 배포 CSS 위 실측으로 제목만 58px·제목+짧은 본문 74px·제목+두 줄
+  // 감기는 본문 90px — 88px(5.5rem) 바닥이 90px 토스트를 2px 못 덮어 «온전» 약속이 그
+  // 자리서 깨졌다(#3759 자체 목표 — 회피 상수를 «수식에서» 없앤 것인데 그 자리에 또 다른
+  // 상수가 들어온 모순). 처방은 다시 구조로: 배열 전체를 하나의 min-h 스택에 욱여넣는
+  // 대신, 최신 한 장만 별도 `shrink-0` 래퍼로 분리한다 — shrink-0은 그 장의 실제 높이가
+  // 58이든 90이든 «절대 안 줄어듦»을 무조건 보장한다(수치 비교가 필요 없다). 나머지
+  // (오래된 것들)는 별개의 `min-h-0 overflow-hidden` 서브스택 — flexbox가 부족한 공간을
+  // 전부 이 서브스택에서만 뺏어가고(그다음 패널에서), shrink-0 래퍼는 애초에 후보에서
+  // 빠진다.
+  // DOM 순서 주의: 컨테이너 자체가 flex-col-reverse라 «1번째 DOM 자식이 main-start(=
+  // 이 전체 레인의 바닥, 런처 쪽)»다. 그래서 shrink-0 래퍼(최신)가 반드시 먼저 와야
+  // 최신이 바닥에 남는다 — 서브스택을 먼저 두면 최신이 위로 올라가 버린다(그 반대는
+  // #3759 CHANGES 2차까지의 단일 스택 규약과도 어긋남).
+  const newest = toasts[toasts.length - 1];
+  const older = toasts.slice(0, -1);
+  const olderNewestFirst = [...older].reverse();
   return (
-    // story #3756 — bottom은 셸 소유 --bottom-dock-inset(dashboard-shell.tsx 하위에서만
-    // 값이 세워짐, globals.css `.dashboard-shell-root`)을 참조한다. 이전엔 이 컴포넌트가
-    // safe-area-inset-bottom만 알고 모바일 탭 바 높이(4rem)를 몰라, 탭 바 위에 뜬 토스트가
-    // 넷째 탭을 덮었다 — 이제 lg 미만에서는 그 값이 자동으로 더해진다(추측 0).
-    <div className="fixed right-4 bottom-[calc(var(--bottom-dock-inset)+1rem)] z-50 flex flex-col gap-2">
-      {toasts.map((t) => (
-        <Toast key={t.id} item={t} onDismiss={onDismiss} />
-      ))}
+    <div className="pointer-events-auto flex min-h-0 flex-col-reverse gap-2">
+      <div className="shrink-0">
+        <Toast item={newest} onDismiss={onDismiss} />
+      </div>
+      {older.length > 0 && (
+        <div className="flex min-h-0 flex-col-reverse gap-2 overflow-hidden">
+          {olderNewestFirst.map((t) => (
+            <Toast key={t.id} item={t} onDismiss={onDismiss} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

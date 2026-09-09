@@ -22,7 +22,7 @@ import { useSseMultiplexerContext } from '@/components/realtime-provider';
 import { escapeMarkdownLinkText } from '@/components/chat/chat-input-entity-tokens';
 import { fetchWithAuth } from '@/lib/db/client';
 import { buildApproverPickerOptions } from '@/lib/approver-picker-options';
-import { useToast, ToastContainer } from '@/components/ui/toast';
+import { useToast } from '@/components/ui/toast';
 import { TossSheet } from '@/components/chat/toss-sheet';
 
 export interface ApprovalTarget {
@@ -132,7 +132,7 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
   // story #3084(2026-08-25 층3) — 토스 성공/409 안내용. 이 카드 인스턴스 로컬(다른 카드
   // 인스턴스와 공유 안 함) — attachment-file.tsx와 동일 선례, ToastContainer도 이 카드가
   // 직접 렌더한다(fixed 오버레이라 DOM 위치 무관하게 뜬다).
-  const { toasts, addToast, dismissToast } = useToast();
+  const { addToast } = useToast();
 
   const fetchGate = useCallback(async () => {
     try {
@@ -363,7 +363,6 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
           />
         }
       />
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
       <GateDiscussDialog
         open={discussDialogOpen}
         onOpenChange={setDiscussDialogOpen}

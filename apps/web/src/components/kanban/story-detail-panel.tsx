@@ -51,7 +51,7 @@ import {
   Dialog, DialogContent, DialogDescription,
   DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
-import { ToastContainer, useToast } from '@/components/ui/toast';
+import { useToast } from '@/components/ui/toast';
 import { useSyntheticParentTabHistory } from '@/hooks/use-synthetic-parent-tab-history';
 import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { HumanOnlyAction } from '@/components/ui/human-only-action';
@@ -364,7 +364,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
   // 위(편집모드 우선 취소) 자체 핸들러가 있어 여기선 Tab 트랩+포커스 반환만 담당한다
   // (handleEscape:false — 이중 핸들러로 편집모드 취소 로직을 건너뛰지 않도록).
   const panelTrapRef = useFocusTrap(true, onClose, { handleEscape: false });
-  const { toasts, addToast, dismissToast } = useToast();
+  const { addToast } = useToast();
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [comments, setComments] = useState<Comment[]>([]);
@@ -2364,7 +2364,6 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
         </DialogContent>
       </Dialog>
 
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </>
   );
 }

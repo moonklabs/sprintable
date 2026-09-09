@@ -22,7 +22,7 @@ import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { useMediaQuery } from '@/lib/use-media-query';
 import { getEventTypeCopy } from '@/services/notification-display';
 import { hasDesktopNotifyBridge, notifyViaDesktopBridge } from '@/lib/desktop-notify-bridge';
-import { ToastContainer, useToast } from '@/components/ui/toast';
+import { useToast } from '@/components/ui/toast';
 
 type FilterTab = 'all' | 'story' | 'system';
 
@@ -362,7 +362,7 @@ export function NotificationBell() {
   const router = useRouter();
   const t = useTranslations('inbox');
   const { currentTeamMemberId, projectId } = useDashboardContext();
-  const { toasts, addToast, dismissToast } = useToast();
+  const { addToast } = useToast();
   const [open, setOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   // null = 로딩 중, array = 로드 완료
@@ -631,7 +631,6 @@ export function NotificationBell() {
           />
         </div>
       )}
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }

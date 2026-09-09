@@ -227,13 +227,13 @@ describe('SupportWidgetLauncher — story #3260 3차(3274로 우측 이전): 모
     expect(container.querySelector('[role="dialog"]')).toBeNull();
   });
 
-  it('모바일 + 채팅-리스트(/chats, id 없음) — 기존처럼 --bottom-dock-inset 기준 위치에 그대로 뜬다', async () => {
+  it('모바일 + 채팅-리스트(/chats, id 없음) — 기존처럼 뜬다(story #3759 — 위치는 BottomDock 소유, 이 컴포넌트는 pointer-events-auto만)', async () => {
     setInnerWidth(500);
     usePathnameMock.mockReturnValue('/chats');
     await mount();
     const btn = container.querySelector('button') as HTMLButtonElement;
     expect(btn).toBeTruthy();
-    expect(btn.className).toContain('bottom-[calc(var(--bottom-dock-inset)+5rem)]');
+    expect(btn.className).toContain('pointer-events-auto');
   });
 
   it('모바일 + 채팅과 무관한 라우트(/board) — 기존처럼 그대로 뜬다(채팅-상세만 예외)', async () => {
@@ -252,28 +252,39 @@ describe('SupportWidgetLauncher — story #3260 3차(3274로 우측 이전): 모
   });
 });
 
-// story #3274(선생님 확定 2026-09-01) — 우하단 배치+토스트/저장오류 배너 corner 회피.
-// 사이드바 회피 로직을 걷은 대신 새 충돌축(toast.tsx·kanban-board.tsx 둘 다 `fixed right-4`)을
-// 여유값으로 넘어선다 — 반응형 분기 없이 모바일/데스크톱 동일 formula.
-// story #3756 — 고정 bottom-20(5rem)이 safe-area-inset-bottom을 몰라 노치 기기에서 탭 바
-// 실 점유 구간을 못 따라갔다(토스트가 넷째 탭을 덮는 사고) — 이제 셸 소유
-// --bottom-dock-inset(탭 바 높이+safe-area, lg 이상은 safe-area만) 위에 같은 5rem 여유를 얹는다.
-describe('SupportWidgetLauncher — story #3274: 우하단 배치+토스트 corner 회피', () => {
-  it('데스크톱 — right-5·--bottom-dock-inset 기준 클래스로 뜬다(사이드바 관련 인라인 style 없음)', async () => {
+// story #3274(선생님 확定 2026-09-01) — 우하단 배치. 사이드바 회피 로직을 걷은 대신
+// story #3756이 새 충돌축(toast.tsx·kanban-board.tsx의 `fixed right-4`)을 --bottom-dock-inset
+// 하나로 통일했고, story #3759가 그마저도 걷었다 — 이 컴포넌트는 이제 fixed/bottom/right
+// 클래스를 «전혀» 갖지 않는다(회피 상수 0). 위치는 BottomDock(components/nav/bottom-dock.tsx)
+// 소유 컬럼의 평범한 flex 자식이라는 사실만으로 성립 — 이 파일은 BottomDock 없이 단독
+// 마운트하므로 그 fixed 컬럼 자체는 검증 밖(bottom-dock.test.tsx가 그 축을 커버), 여기서는
+// "이 컴포넌트 자신이 더 이상 위치를 계산하지 않는다"만 고정한다.
+describe('SupportWidgetLauncher — story #3759: 위치 계산 회피 상수 제거', () => {
+  it('데스크톱 — 버튼에 fixed/bottom-/right- 클래스가 없다(pointer-events-auto만, 사이드바 관련 인라인 style도 없음)', async () => {
     await mount();
     const btn = container.querySelector('button') as HTMLButtonElement;
-    expect(btn.className).toContain('right-5');
-    expect(btn.className).toContain('bottom-[calc(var(--bottom-dock-inset)+5rem)]');
+    const classes = btn.className.split(/\s+/);
+    expect(classes).toContain('pointer-events-auto');
+    expect(classes).not.toContain('fixed');
+    expect(classes.some((c) => /^bottom-/.test(c))).toBe(false);
+    expect(classes.some((c) => /^right-\d/.test(c))).toBe(false);
     expect(btn.style.left).toBe('');
     expect(btn.style.right).toBe('');
   });
 
-  it('오버레이 패널도 런처와 같은 우측 오프셋(right-5)을 공유한다', async () => {
+  it('오버레이 패널도 fixed/bottom-/right- 클래스가 없다(BottomDock 컬럼의 flex 자식으로만 위치)', async () => {
     await mount();
     const btn = container.querySelector('button') as HTMLButtonElement;
     await act(async () => { btn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     const panel = container.querySelector('[role="dialog"]') as HTMLElement;
-    expect(panel.className).toContain('right-5');
+    const classes = panel.className.split(/\s+/);
+    expect(classes).toContain('pointer-events-auto');
+    expect(classes).not.toContain('fixed');
+    // story #3759 — h-[min(480px,calc(100vh-var(--bottom-dock-inset)-6rem))]는 정당(높이
+    // 상한이 --bottom-dock-inset을 «참조»하는 것과 스스로 bottom-*으로 위치를 잡는 것은
+    // 다르다) — 클래스 토큰 자체(공백으로 나뉜 것)가 bottom-/right-\d로 «시작»하는지만 본다.
+    expect(classes.some((c) => /^bottom-/.test(c))).toBe(false);
+    expect(classes.some((c) => /^right-\d/.test(c))).toBe(false);
   });
 });
 

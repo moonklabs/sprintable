@@ -10,7 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { OperatorInput, OperatorSelect, OperatorTextarea } from '@/components/ui/operator-control';
-import { ToastContainer, useToast } from '@/components/ui/toast';
+import { useToast } from '@/components/ui/toast';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { useTouchSafePointerSensor } from '@/hooks/use-touch-safe-pointer-sensor';
 import { cn } from '@/lib/utils';
@@ -196,7 +196,7 @@ export default function RetroSessionPage() {
   const [advancing, setAdvancing] = useState(false);
   const [advanceError, setAdvanceError] = useState<string | null>(null);
   const [votedItemIds, setVotedItemIds] = useState<Set<string>>(new Set());
-  const { toasts, addToast, dismissToast } = useToast();
+  const { addToast } = useToast();
 
   const [sprintOutcome, setSprintOutcome] = useState<{
     status: OutcomeStatus; hypothesis: string | null; result: OutcomeResult | null; metric?: string;
@@ -886,7 +886,6 @@ export default function RetroSessionPage() {
         </div>
       </div>
 
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </>
   );
 }

@@ -72,10 +72,27 @@ afterEach(async () => {
   vi.resetModules();
 });
 
+// story #3759 — RetroSessionPage가 useToast()로 공유 Context를 구독한다. afterEach의
+// vi.resetModules() 때문에 «같은» 새로 뜬 @/components/ui/toast 인스턴스를 함께 동적
+// import한다(kanban-board.test.tsx와 동형 처방).
 async function mount() {
   const { default: RetroSessionPage } = await import('./page');
   const { RetroRouteProvider } = await import('../retro-context');
-  await act(async () => { root.render(wrap(RetroRouteProvider, <RetroSessionPage />)); });
+  const { ToastProvider, ToastContainer, useToast } = await import('@/components/ui/toast');
+
+  function TestToastRenderer() {
+    const { toasts, dismissToast } = useToast();
+    return <ToastContainer toasts={toasts} onDismiss={dismissToast} />;
+  }
+
+  await act(async () => {
+    root.render(wrap(RetroRouteProvider, (
+      <ToastProvider>
+        <RetroSessionPage />
+        <TestToastRenderer />
+      </ToastProvider>
+    )));
+  });
   await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 }
 

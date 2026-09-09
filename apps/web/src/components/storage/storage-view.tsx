@@ -6,7 +6,7 @@ import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Badge } from '@/components/ui/badge';
-import { ToastContainer, useToast } from '@/components/ui/toast';
+import { useToast } from '@/components/ui/toast';
 import { useContextualPanelState } from '@/components/ui/contextual-panel-layout';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useFocusTrap } from '@/hooks/use-focus-trap';
@@ -59,7 +59,7 @@ export function resolveAssetDeepLinkAction(params: {
 // projectName 은 순수 표시용(폴더 트리 헤더)이라 전역 컨텍스트 그대로 유지(artifacts와 동형).
 export function StorageView({ projectId }: { projectId: string }) {
   const t = useTranslations('storage');
-  const { toasts, addToast, dismissToast } = useToast();
+  const { addToast } = useToast();
   const { projectName } = useDashboardContext();
   const searchParams = useSearchParams();
 
@@ -485,7 +485,6 @@ export function StorageView({ projectId }: { projectId: string }) {
         onDeleted={handleDeleted}
       />
 
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }

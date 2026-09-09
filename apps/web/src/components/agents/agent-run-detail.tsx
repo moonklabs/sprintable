@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { PageHeader } from '@/components/ui/page-header';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
-import { useToast, ToastContainer } from '@/components/ui/toast';
+import { useToast } from '@/components/ui/toast';
 import { canManuallyRetryRun, getRunErrorDisplay, getRunFailureDisposition } from '@/services/agent-run-history';
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatRelativeTime } from '@/lib/storage/format';
@@ -83,7 +83,7 @@ export function AgentRunDetail({
   const t = useTranslations('agentRuns');
   const tc = useTranslations('common');
   const displayTimezone = resolveDisplayTimezone().tz;
-  const { toasts, addToast, dismissToast } = useToast();
+  const { addToast } = useToast();
   const [run, setRun] = useState<RunDetail | null>(null);
   const [loading, setLoading] = useState(true);
   // story #1989: fetch 자체에 try/catch가 없어 네트워크 실패(오프라인 등) 시 fetch가 throw →
@@ -286,7 +286,6 @@ export function AgentRunDetail({
           displayTimezone={displayTimezone}
         />
       </div>
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </>
   );
 }

@@ -30,7 +30,7 @@ import { useMessageRangeSelection } from '@/hooks/use-message-range-selection';
 import { CitationComposeBar, type CitationSaveState } from './citation-compose-bar';
 import { StoryPickerDialog } from '@/components/canvas/story-picker-dialog';
 import { EmptyState } from '@/components/ui/empty-state';
-import { ToastContainer, useToast } from '@/components/ui/toast';
+import { useToast } from '@/components/ui/toast';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { fetchWithAuth } from '@/lib/db/client';
 import { useChatRail } from '@/app/(authenticated)/chats/chat-rail-context';
@@ -135,7 +135,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   // agent-management-tab.tsx의 동일 CTA와 문구 일치).
   const ta = useTranslations('agents');
   const isMobile = useIsMobile();
-  const { toasts, addToast, dismissToast } = useToast();
+  const { addToast } = useToast();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   // story #3638(유나 디자인 CHANGES 2026-09-07) — 초기 로드(:349) 실패가 messages를
   // 빈 배열로 남겨 「대화를 시작하세요」를 그렸다 — 메시지가 있는 대화를 «없다»고
@@ -1186,7 +1186,6 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
           </div>
         )}
       </div>
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
       {/* story #2349 — 「안 바뀌는 것」을 말하는 문장이 핵심(PO 규격, 빼지 않는다). */}
       <ConfirmDialog
         open={blockConfirmTarget !== null}

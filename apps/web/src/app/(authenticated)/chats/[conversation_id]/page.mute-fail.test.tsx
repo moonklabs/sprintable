@@ -78,19 +78,30 @@ function stubFetch(muteOk: boolean) {
   }));
 }
 
+// story #3759 — ConversationPage가 useToast()로 공유 Context를 구독한다. afterEach의
+// vi.resetModules() 때문에 «같은» 새로 뜬 @/components/ui/toast 인스턴스를 함께 동적
+// import한다(kanban-board.test.tsx와 동형 처방).
 async function mount() {
   const { default: ConversationPage } = await import('./page');
   const { TopBarProvider, useTopBar } = await import('@/components/nav/top-bar-context');
+  const { ToastProvider, ToastContainer, useToast } = await import('@/components/ui/toast');
   function TopBarRenderer() {
     const { title, actions } = useTopBar();
     return <div>{title}{actions}</div>;
   }
+  function TestToastRenderer() {
+    const { toasts, dismissToast } = useToast();
+    return <ToastContainer toasts={toasts} onDismiss={dismissToast} />;
+  }
   await act(async () => {
     root.render(wrap(
-      <TopBarProvider>
-        <TopBarRenderer />
-        <ConversationPage />
-      </TopBarProvider>,
+      <ToastProvider>
+        <TopBarProvider>
+          <TopBarRenderer />
+          <ConversationPage />
+        </TopBarProvider>
+        <TestToastRenderer />
+      </ToastProvider>,
     ));
   });
   await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });

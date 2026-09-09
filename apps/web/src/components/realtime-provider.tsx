@@ -1,7 +1,6 @@
 'use client';
 
 import { createContext, useContext } from 'react';
-import { ToastContainer, useToast } from '@/components/ui/toast';
 import { useSseMultiplexer, type SseMultiplexerHandle } from '@/lib/realtime/sse-multiplexer';
 
 // story #2078(E-ARCH 0단계) — 피처플래그: OFF(기본)면 presence·notification·chat 훅이 각자
@@ -40,7 +39,6 @@ interface RealtimeProviderProps {
 }
 
 export function RealtimeProvider({ currentTeamMemberId, children }: RealtimeProviderProps) {
-  const { toasts, dismissToast } = useToast();
   // 플래그 OFF면 enabled=false를 넘겨 훅 내부에서 EventSource를 아예 안 열게 한다(이중 연결 방지).
   const multiplexer = useSseMultiplexer(currentTeamMemberId, SSE_MULTIPLEX_ENABLED);
 
@@ -48,7 +46,6 @@ export function RealtimeProvider({ currentTeamMemberId, children }: RealtimeProv
     <SseMultiplexerContext.Provider value={SSE_MULTIPLEX_ENABLED ? multiplexer : null}>
       <SseConnectedContext.Provider value={SSE_MULTIPLEX_ENABLED ? multiplexer.connected : false}>
         {children}
-        <ToastContainer toasts={toasts} onDismiss={dismissToast} />
       </SseConnectedContext.Provider>
     </SseMultiplexerContext.Provider>
   );

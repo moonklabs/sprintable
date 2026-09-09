@@ -11,7 +11,7 @@ import { useDocSync, type SaveStatus } from '@/components/docs/use-doc-sync';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
-import { ToastContainer, useToast } from '@/components/ui/toast';
+import { useToast } from '@/components/ui/toast';
 import { ChevronDown, ChevronRight, Plus, X, Menu, Search, FileText } from 'lucide-react';
 import { DocsShell } from '@/components/docs/docs-shell';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
@@ -68,7 +68,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
   const searchParams = useSearchParams();
   const t = useTranslations('docs');
   const tc = useTranslations('common');
-  const { toasts, addToast, dismissToast } = useToast();
+  const { addToast } = useToast();
 
   const [tree, setTree] = useState<Doc[]>([]);
   const [selectedDoc, setSelectedDoc] = useState<DocDetail | null>(null);
@@ -753,7 +753,6 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
         )}
       </div>
 
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </>
   );
 }

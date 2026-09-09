@@ -15,6 +15,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../../../messages/ko.json';
+import { ToastProvider, ToastContainer, useToast } from '@/components/ui/toast';
 
 const { useDashboardContextMock } = vi.hoisted(() => ({ useDashboardContextMock: vi.fn() }));
 
@@ -36,10 +37,21 @@ import ChannelPostListPage from './page';
 let container: HTMLDivElement;
 let root: Root;
 
+// story #3759 — 이 컴포넌트가 useToast()로 공유 Context를 구독한다. 정적 import된
+// 컴포넌트라(파일 상단) vi.resetModules()의 영향을 안 받는 이 파일 자체의 정적
+// ToastProvider로 감싸면 된다(동적 재-import 처방 불요, content/page.test.tsx와 동형).
+function TestToastRenderer() {
+  const { toasts, dismissToast } = useToast();
+  return <ToastContainer toasts={toasts} onDismiss={dismissToast} />;
+}
+
 function wrap(node: React.ReactNode) {
   return (
     <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
-      {node}
+      <ToastProvider>
+        {node}
+        <TestToastRenderer />
+      </ToastProvider>
     </NextIntlClientProvider>
   );
 }

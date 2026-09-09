@@ -11,7 +11,7 @@ import { AgentIdentity } from '@/components/ui/agent-identity';
 import { ApprovalsQueue } from '@/components/inbox/approvals-queue';
 import { AttentionQueueView } from '@/components/attention-queue/attention-queue-view';
 import { useDashboardContext } from '../../dashboard/dashboard-shell';
-import { useToast, ToastContainer } from '@/components/ui/toast';
+import { useToast } from '@/components/ui/toast';
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
@@ -227,7 +227,7 @@ export default function InboxPage() {
   const [pagedBeyondFirst, setPagedBeyondFirst] = useState(false);
   const [workflowExecs, setWorkflowExecs] = useState<WorkflowExecItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const { toasts, addToast, dismissToast } = useToast();
+  const { addToast } = useToast();
 
   const refreshNotifications = useCallback(async () => {
     if (pagedBeyondFirst) return;
@@ -803,7 +803,6 @@ export default function InboxPage() {
         )}
       </div>
 
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </>
   );
 }

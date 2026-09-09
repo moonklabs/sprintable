@@ -2,6 +2,7 @@
 
 import type { ComponentType } from 'react';
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import { Check, ChevronDown, LayoutGrid, LayoutList, Search, Workflow, Plus } from 'lucide-react';
@@ -22,7 +23,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { useToast, ToastContainer } from '@/components/ui/toast';
+import { useToast } from '@/components/ui/toast';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useSseNotifications } from '@/hooks/use-sse-notifications';
 import { KanbanColumn } from './kanban-column';
@@ -141,7 +142,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   const orgSyncVersion = useOrgSyncVersion();
   const t = useTranslations('board');
   const locale = useLocale();
-  const { toasts, addToast, dismissToast } = useToast();
+  const { addToast } = useToast();
   const [transitionError, setTransitionError] = useState<string | null>(null);
   // story #2154 — 이 배너는 4초 후 자동 setTransitionError(null)로만 해소되고, 재시도 直前에
   // 명시적으로 null 리셋하지 않는다(#2400이 남긴 latent gap). 4초 내 동일 사유가 재발하면
@@ -318,7 +319,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   // 이미 로드된(페이지네이션으로 fetch된) 카드만 in-place 패치 — 전체 재fetch를 하지 않으므로
   // 스크롤 위치·컬럼 순서가 흔들리지 않는다(AC3, #2050에서 배운 레이아웃 시프트 축과 동일 원리).
   // 아직 로드 안 된 카드(다른 컬럼 페이지네이션 밖)의 신규 진입은 이 스토리 스코프 밖으로 둔다.
-  const { currentTeamMemberId, orgId } = useDashboardContext();
+  const { currentTeamMemberId, orgId, bottomDockBannerSlot } = useDashboardContext();
   // story #3287([도메인탈고정·축1 Phase1]) — org별 표시 라벨 오버라이드. canonical
   // status(col.id, drag/전이/색상 전부 이걸로 판정)는 절대 안 바뀐다 — statusLabel()이
   // 있으면 그 문구로 컬럼 헤더 텍스트만 치환하고, 없으면(오버라이드 미설정) 기존
@@ -1200,19 +1201,22 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
-      {transitionError && (
+      {/* story #3759 — 예전엔 이 배너가 직접 우하단 좌표(position fixed + bottom 오프셋)를
+          계산했다(toast.tsx·지원 런처와 각자 따로). 지금은 셸의 BottomDock이 소유한 dock
+          컬럼(같은 열의 넷째 식구)으로 포털한다 — bottomDockBannerSlot이 아직 없으면(마운트
+          레이스의 짧은 순간) 그 프레임만 렌더를 건너뛴다(크래시 대신 무해한 스킵,
+          dashboard-shell.tsx 주석 참고). */}
+      {transitionError && bottomDockBannerSlot && createPortal(
         // story #2154 — handleDragEnd/handleChangeStatus/handleCreateStory가 실패 시점마다
         // bumpTransitionErrorNonce()를 함께 호출해, 4초 내 동일 사유가 재발해도 key가 바뀌어
         // 항상 새 DOM 노드로 재낭독된다(#2400이 남긴 latent gap 해소).
         // story #3007(로드맵 P2·PR-E, L1) — 토스트성 배너는 floating이라 --elev-overlay.
         // story 3466 후속(무효 유틸 4곳) — text-destructive-foreground는 이 테마에
         // 매핑이 없는 no-op(라이트 3.55·다크 3.00, AA 미달). trust-seal.tsx 선례.
-        // story #3756 — bottom = 셸 소유 --bottom-dock-inset 참조(toast.tsx와 동일 formula) —
-        // 탭 바 높이를 모르고 뷰포트 바닥 기준 bottom-4로 떠 넷째 탭을 덮던 결함 계열.
-        <div key={transitionErrorNonce} role="alert" aria-live="assertive" aria-atomic="true" className="fixed right-4 bottom-[calc(var(--bottom-dock-inset)+1rem)] z-50 rounded-md border border-destructive bg-destructive px-4 py-3 text-sm text-white dark:text-proof-bg shadow-[var(--elev-overlay)]">
+        <div key={transitionErrorNonce} role="alert" aria-live="assertive" aria-atomic="true" className="pointer-events-auto rounded-md border border-destructive bg-destructive px-4 py-3 text-sm text-white dark:text-proof-bg shadow-[var(--elev-overlay)]">
           ⚠️ {transitionError}
-        </div>
+        </div>,
+        bottomDockBannerSlot,
       )}
 
       {/* Board header */}

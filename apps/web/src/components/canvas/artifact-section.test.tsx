@@ -8,6 +8,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import { ArtifactSection } from './artifact-section';
+import { ToastProvider, ToastContainer, useToast } from '@/components/ui/toast';
 import koMessagesRaw from '../../../messages/ko.json';
 import enMessagesRaw from '../../../messages/en.json';
 
@@ -39,12 +40,21 @@ afterEach(async () => {
   vi.clearAllMocks();
 });
 
+// story #3759 — ArtifactSection이 useToast()로 공유 Context를 구독한다(정적 import, resetModules 무영향).
+function TestToastRenderer() {
+  const { toasts, dismissToast } = useToast();
+  return <ToastContainer toasts={toasts} onDismiss={dismissToast} />;
+}
+
 async function mount(locale: 'ko' | 'en' = 'ko') {
   const messages = locale === 'ko' ? koMessages : enMessages;
   await act(async () => {
     root.render(
       <NextIntlClientProvider locale={locale} messages={messages} timeZone="Asia/Seoul">
-        <ArtifactSection storyId="story-1" />
+        <ToastProvider>
+          <ArtifactSection storyId="story-1" />
+          <TestToastRenderer />
+        </ToastProvider>
       </NextIntlClientProvider>,
     );
   });

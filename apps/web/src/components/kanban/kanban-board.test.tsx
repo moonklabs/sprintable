@@ -63,6 +63,12 @@ vi.mock('@dnd-kit/core', async (importOriginal) => {
 
 let container: HTMLDivElement;
 let root: Root;
+// story #3759 — kanban-board.tsx는 이제 저장오류 배너를 useDashboardContext().
+// bottomDockBannerSlot으로 포털한다(BottomDock 소유 dock 컬럼 실물 대신 테스트용 DOM
+// 노드). `container`(createRoot 대상) 밖에 별도로 붙인다 — createRoot는 자기 container의
+// 자식 전체를 소유해 렌더마다 지우므로, container 안에 미리 넣어두면 첫 렌더에 사라진다.
+// 배너 관련 단언은 `bannerSlot`을 직접 쿼리한다(container 대신).
+let bannerSlot: HTMLDivElement;
 
 function wrap(node: React.ReactNode) {
   return (
@@ -144,10 +150,15 @@ function dispatchSse(eventName: string, data: unknown) {
 beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
+  bannerSlot = document.createElement('div');
+  document.body.appendChild(bannerSlot);
   root = createRoot(container);
   stubLocalStorage();
   stubEventSource();
-  useDashboardContextMock.mockReturnValue({ currentTeamMemberId: 'me-1', projectMemberships: [], orgMemberships: [], currentMemberType: 'human' });
+  useDashboardContextMock.mockReturnValue({
+    currentTeamMemberId: 'me-1', projectMemberships: [], orgMemberships: [], currentMemberType: 'human',
+    bottomDockBannerSlot: bannerSlot,
+  });
   capturedDragEndHandlers.length = 0;
   isMobileMock = false;
 });
@@ -155,13 +166,34 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => { root.unmount(); });
   container.remove();
+  bannerSlot.remove();
   vi.unstubAllGlobals();
   vi.resetModules();
 });
 
+// story #3759 — kanban-board.tsx가 useToast()로 공유 Context를 구독한다. afterEach의
+// vi.resetModules()가 모듈 레지스트리를 지우므로, 이 파일 최상단에서 한 번 정적 import한
+// ToastProvider/ToastContainer/useToast와 kanban-board.tsx가(동적 import 뒤) 실제로 읽는
+// 모듈 인스턴스가 서로 달라져(각자 다른 createContext() 결과물) Provider 밖 에러가 났다 —
+// kanban-board.tsx와 «같은» 새로 뜬 모듈 인스턴스를 매 mount()마다 함께 동적 import해
+// 이 파일도 그 인스턴스를 쓴다(정적 import 사본 0, 같은 자리에서 같이 새로 뜬다).
 async function mount() {
   const { KanbanBoard } = await import('./kanban-board');
-  await act(async () => { root.render(wrap(<KanbanBoard projectId="proj-1" wsSlug="ws-1" projSlug="proj-1" />)); });
+  const { ToastProvider, ToastContainer, useToast } = await import('@/components/ui/toast');
+
+  function TestToastRenderer() {
+    const { toasts, dismissToast } = useToast();
+    return <ToastContainer toasts={toasts} onDismiss={dismissToast} />;
+  }
+
+  await act(async () => {
+    root.render(wrap(
+      <ToastProvider>
+        <KanbanBoard projectId="proj-1" wsSlug="ws-1" projSlug="proj-1" />
+        <TestToastRenderer />
+      </ToastProvider>,
+    ));
+  });
   await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 }
 
@@ -260,9 +292,11 @@ describe('KanbanBoard — 보드 first-touch 절제된 배너', () => {
 // 단독 실행(부하 적음)에서는 우연히 통과하고 287파일 전체 스위트(부하 큼·이벤트루프 지터
 // 증가)에서만 간헐적으로 실패하는 결과 불안정을 냈다(직접 확認 — 전체 스위트 3회 중 2회
 // 실패, 파일 단독은 항상 통과). 고정 틱 대신 실제 DOM 조건이 나타날 때까지 짧게 폴링한다.
+// story #3759 — 이 배너는 이제 container가 아니라 bannerSlot(BottomDock 대역 DOM 노드)으로
+// 포털된다(createPortal) — 쿼리 대상도 그에 맞춰 bannerSlot으로.
 async function waitForAlert(): Promise<Element | null> {
   for (let i = 0; i < 20; i++) {
-    const el = container.querySelector('[role="alert"]');
+    const el = bannerSlot.querySelector('[role="alert"]');
     if (el) return el;
     await act(async () => { await Promise.resolve(); });
   }
@@ -273,7 +307,7 @@ async function waitForAlert(): Promise<Element | null> {
 // 단순히 "alert가 있다"만 보면 아직 언마운트되지 않은 1차 알림을 그대로 재포착해 오탐할 수 있다.
 async function waitForFreshAlert(excludeNode: Element): Promise<Element | null> {
   for (let i = 0; i < 20; i++) {
-    const el = container.querySelector('[role="alert"]');
+    const el = bannerSlot.querySelector('[role="alert"]');
     if (el && el !== excludeNode) return el;
     await act(async () => { await Promise.resolve(); });
   }
@@ -912,7 +946,10 @@ describe('StoryDetailPanel — 영구삭제 트리거 authz(story #2104)', () =>
   });
 
   it('agent면 스토리 영구삭제 트리거가 안 뜬다', async () => {
-    useDashboardContextMock.mockReturnValue({ currentTeamMemberId: 'me-1', projectMemberships: [], orgMemberships: [], currentMemberType: 'agent' });
+    useDashboardContextMock.mockReturnValue({
+      currentTeamMemberId: 'me-1', projectMemberships: [], orgMemberships: [], currentMemberType: 'agent',
+      bottomDockBannerSlot: bannerSlot,
+    });
     stubFetch([{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium' }]);
     await mount();
     await openPanel('S1');
@@ -1321,6 +1358,7 @@ describe('KanbanBoard — org 라벨 오버라이드 소비(#3287 AC4)', () => {
   beforeEach(() => {
     useDashboardContextMock.mockReturnValue({
       currentTeamMemberId: 'me-1', orgId: 'org-1', projectMemberships: [], orgMemberships: [], currentMemberType: 'human',
+      bottomDockBannerSlot: bannerSlot,
     });
   });
 

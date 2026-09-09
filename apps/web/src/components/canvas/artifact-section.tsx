@@ -14,7 +14,7 @@ import { adaptComments, type BeArtifactComment, type CommentThread } from '@/ser
 import { derivePendingCanonicalizeVersion, type CanonicalizeGateLookup } from '@/services/canvas-canonicalize';
 import { deriveNodeOperations, type ArtifactNode } from '@/services/canvas-nodes';
 import { listSpecPins, type SpecPin } from '@/services/canvas-spec-pins';
-import { ToastContainer, useToast } from '@/components/ui/toast';
+import { useToast } from '@/components/ui/toast';
 
 import { fetchWithAuth } from '@/lib/db/client';
 
@@ -81,7 +81,7 @@ export function ArtifactSection({ storyId, memberMap = {}, className }: Artifact
   // 남기고 사용자에게는 아무 신호가 없었다(편집 모드는 유지되지만 "왜"가 안 보임 — doc §3
   // 클래스). onCommit={() => void handleXxx(...)}로 반환값을 버리는 호출부라 커밋에서
   // 직접 알린다.
-  const { toasts, addToast, dismissToast } = useToast();
+  const { addToast } = useToast();
   const [items, setItems] = useState<ArtifactItem[]>([]);
   // C3-S7 휴먼 딸깍 편집 — 어느 artifact가 편집 모드인지(tree만 진입·viewer가 게이트). 커밋 성공
   // 후 종료해 fresh 재로드(BE가 버전마다 node.id 리매핑하므로 stale id 재사용 원천 차단).
@@ -278,14 +278,12 @@ export function ArtifactSection({ storyId, memberMap = {}, className }: Artifact
           onCommit={(committed, summary) => void handleCreateCommit(committed, summary)}
           onDone={() => setCreating(false)}
         />
-        <ToastContainer toasts={toasts} onDismiss={dismissToast} />
       </div>
     );
   }
 
   return (
     <div className={className}>
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
       {items.map((item) => {
         const { artifact, versions, threads, nodes, pendingCanonicalizeVersion, specPins } = item;
         // 편집 모드 = 뷰어 대신 편집기(같은 자리). tree 진입은 viewer의 onEnterEdit 게이트가 보장.

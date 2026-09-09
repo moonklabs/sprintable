@@ -5,7 +5,7 @@ import { AlertTriangle, Link2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Dialog, DialogClose, DialogContent } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { ToastContainer, useToast } from '@/components/ui/toast';
+import { useToast } from '@/components/ui/toast';
 import { StorageSourceUsageList } from './storage-source-usage-list';
 import type { Asset } from '@/lib/storage/types';
 
@@ -18,7 +18,7 @@ interface StorageDeleteDialogProps {
 
 export function StorageDeleteDialog({ asset, open, onOpenChange, onDeleted }: StorageDeleteDialogProps) {
   const t = useTranslations('storage');
-  const { toasts, addToast, dismissToast } = useToast();
+  const { addToast } = useToast();
   const [deleting, setDeleting] = useState(false);
 
   const usageCount = asset?.source_links.length ?? 0;
@@ -103,7 +103,6 @@ export function StorageDeleteDialog({ asset, open, onOpenChange, onDeleted }: St
           ) : null}
         </DialogContent>
       </Dialog>
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </>
   );
 }

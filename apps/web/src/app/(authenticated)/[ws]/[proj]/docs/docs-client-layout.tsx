@@ -17,7 +17,7 @@ import { useTreeExpanded } from '@/components/docs/use-tree-expanded';
 import { Button } from '@/components/ui/button';
 import { CountBadge } from '@/components/ui/count-badge';
 import { EmptyState } from '@/components/ui/empty-state';
-import { ToastContainer, useToast } from '@/components/ui/toast';
+import { useToast } from '@/components/ui/toast';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { ChevronDown, ChevronLeft, ChevronRight, FileText, FolderPlus, Plus, X } from 'lucide-react';
 import { DocsLayoutContext, type Doc, type DocSortMode, type DocUpdate } from './docs-context';
@@ -50,7 +50,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
   const tc = useTranslations('common');
   const { recentSlugs, pushRecent } = useRecentDocs(projectId);
   const { expandFolder } = useTreeExpanded(projectId);
-  const { toasts, addToast, dismissToast } = useToast();
+  const { addToast } = useToast();
 
   const { scrollContainer, setHidden } = useTopBar();
   const isMobile = useMediaQuery('(max-width: 1023px)');
@@ -660,7 +660,6 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
         </div>
       </div>
 
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </DocsLayoutContext.Provider>
   );
 }

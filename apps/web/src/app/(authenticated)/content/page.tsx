@@ -15,7 +15,7 @@ import { PageHeader } from '@/components/ui/page-header';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { ToastContainer, useToast } from '@/components/ui/toast';
+import { useToast } from '@/components/ui/toast';
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
@@ -112,7 +112,7 @@ export default function ContentPostListPage() {
   const [showArchived, setShowArchived] = useState(false);
   const [archivingId, setArchivingId] = useState<string | null>(null);
   const [statusTab, setStatusTab] = useState<StatusTab>('all');
-  const { toasts, addToast, dismissToast } = useToast();
+  const { addToast } = useToast();
 
   useEffect(() => {
     if (!orgId) return;
@@ -417,7 +417,6 @@ export default function ContentPostListPage() {
           {tBoard('tasksPartialCount', { loaded: shownCount, total: totalCount })}
         </p>
       ) : null}
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }

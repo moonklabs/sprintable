@@ -29,16 +29,28 @@ vi.mock('next/navigation', () => ({
 }));
 
 import ContentPostListPage from './page';
+import { ToastProvider, ToastContainer, useToast } from '@/components/ui/toast';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let container: HTMLDivElement;
 let root: Root;
 
+// story #3759 — ContentPostListPage는 정적 import(위)라 afterEach의 vi.resetModules()로
+// 다시 뜨지 않는다 — 이 파일의 정적 ToastProvider와 같은 모듈 인스턴스를 계속 참조하므로
+// (kanban-board.test.tsx류의 동적 재-import 처방 불요) 여기서 그냥 감싸면 된다.
+function TestToastRenderer() {
+  const { toasts, dismissToast } = useToast();
+  return <ToastContainer toasts={toasts} onDismiss={dismissToast} />;
+}
+
 function wrap(node: React.ReactNode) {
   return (
     <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
-      {node}
+      <ToastProvider>
+        {node}
+        <TestToastRenderer />
+      </ToastProvider>
     </NextIntlClientProvider>
   );
 }

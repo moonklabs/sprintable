@@ -13,7 +13,7 @@ import { StoryCard } from '@/components/kanban/story-card';
 import { StoryDetailPanel, type Task } from '@/components/kanban/story-detail-panel';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useOrgDomainLabels } from '@/hooks/use-org-domain-labels';
-import { useToast, ToastContainer } from '@/components/ui/toast';
+import { useToast } from '@/components/ui/toast';
 import { WorkspaceFrameTabs } from '@/components/workspace/workspace-frame-tabs';
 import {
   COLUMNS, TRUST_COLUMNS, TRUST_COLUMN_TO_STATUS,
@@ -280,7 +280,7 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
   // StoryDetailPanel이 "정말 0개"와 구별을 못 했다(kanban-board.tsx와 동형 갭).
   const [storyTasksLoading, setStoryTasksLoading] = useState(false);
   const [loadingMoreStoryTasks, setLoadingMoreStoryTasks] = useState(false);
-  const { toasts, addToast, dismissToast } = useToast();
+  const { addToast } = useToast();
 
   useEffect(() => { setAxisMode(loadAxisMode(projectId)); }, [projectId]);
 
@@ -551,7 +551,6 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
 
   return (
     <>
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
       <TopBarSlot title={<h1 className="text-sm font-medium">{t('epicSwimlaneTitle')}</h1>} showContextChip />
       <div className="space-y-3 p-4">
         <WorkspaceFrameTabs active="epic" />

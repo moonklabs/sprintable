@@ -5,7 +5,15 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { StorageDeleteDialog } from './storage-delete-dialog';
+import { ToastProvider, ToastContainer, useToast } from '@/components/ui/toast';
 import type { Asset, AssetSourceLink } from '@/lib/storage/types';
+
+// story #3759 — StorageDeleteDialog가 useToast()로 공유 Context를 구독한다(정적 import,
+// resetModules 무영향). 실패-토스트를 실측하는 한 테스트에만 필요하지만, 공용 헬퍼로 둔다.
+function TestToastRenderer() {
+  const { toasts, dismissToast } = useToast();
+  return <ToastContainer toasts={toasts} onDismiss={dismissToast} />;
+}
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -122,7 +130,10 @@ describe('StorageDeleteDialog — #3241 삭제 왕복 + 에러 카피', () => {
     act(() => {
       root.render(
         <NextIntlClientProvider locale="ko" messages={koMessages}>
-          <StorageDeleteDialog asset={makeAsset(0)} open onOpenChange={onOpenChange} onDeleted={() => {}} />
+          <ToastProvider>
+            <StorageDeleteDialog asset={makeAsset(0)} open onOpenChange={onOpenChange} onDeleted={() => {}} />
+            <TestToastRenderer />
+          </ToastProvider>
         </NextIntlClientProvider>,
       );
     });
