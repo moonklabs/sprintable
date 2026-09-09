@@ -45,7 +45,10 @@ function hasKey(messages: unknown, dotted: string): boolean {
 // 새 템플릿 조합 키(`t(\`prefix_${var}\`)` 형태)를 만들면 이 표가 조용히 낡는다. 그 상태로는
 // 가드가 계속 초록인데 새 키만 화면에 그대로 뜬다 — 새 조합 키를 추가할 때 반드시 여기 항목을
 // 같이 추가할 것.
-const TEMPLATE_KEY_TABLE: Array<[string, string[], string]> = [
+// story #3728 — export되어 verify-no-unused-i18n-keys.ts(reverse-key 가드)가 재사용한다.
+// 이 표에 등록된 조합 키는 "사용됨"으로 간주(정적 스캔이 못 보는 동적 조합의 알려진
+// 유한 부분집합) — 복제 0, 소비처가 이 표 하나를 SSOT로 같이 본다.
+export const TEMPLATE_KEY_TABLE: Array<[string, string[], string]> = [
   ['proofCapsule.risk.', ['low', 'medium', 'high'], 'proof-capsule.tsx RISK_KEY 값 타입'],
   ['settings.mcpConnections.status.', ['active', 'error', 'pending_oauth', 'disconnected'], 'mcp-connection-settings.tsx McpConnectionSummary.status'],
   ['settings.mcpConnections.auth.', ['oauth', 'api_key', 'api_token'], 'mcp-connection-settings.tsx McpConnectionSummary.authStrategy'],
@@ -65,6 +68,12 @@ const TEMPLATE_KEY_TABLE: Array<[string, string[], string]> = [
   ['loops.status', ['Draft', 'Briefing', 'Generating', 'Deciding', 'Executing', 'Measuring', 'Closed', 'Abandoned'], 'loop-status-badge.tsx LoopStatus'],
   ['settings.notification_category_', ['story', 'task', 'sprint', 'system'], 'settings/page.tsx NOTIFICATION_CATEGORIES'],
   ['settings.event_', ['story', 'story_assigned', 'task', 'task_assigned', 'task_completed', 'sprint_closed', 'info', 'warning', 'system', 'standup_reminder', 'reward', 'invitation'], 'settings/page.tsx NOTIFICATION_CATEGORIES[].types'],
+  // story #3728(unused-key 역방향 가드 착수 중 발견) — recruiter-client.tsx WakeMethodBody의
+  // `t.rich(\`kitOrientingWakeBody_${method}\`, ...)`가 애초에 이 표에 등록된 적이 없던
+  // 진짜 사각(이 가드 자신의 미검출 갭). 'unknown'은 별도 분기(kitOrientingWakeBodyUnknown,
+  // 위 t('...') 정적 호출로 이미 잡힘)라 여기 값 목록에서 제외 — RuntimeWakeMethod(services/
+  // recruit.ts)의 나머지 5값. 5키 전부 ko/en에 이미 존재 확認(신규 추가 아님).
+  ['recruiter.kitOrientingWakeBody_', ['channel-plugin', 'channel-plugin-marketplace', 'connector-host', 'connector-sidecar', 'connector-sdk'], 'services/recruit.ts RuntimeWakeMethod(\'unknown\' 제외 — 별도 분기)'],
 ];
 
 describe('i18n 템플릿 리터럴 조합 키 커버리지 — 정적 가드 사각지대의 유한 부분집합 (#2228)', () => {

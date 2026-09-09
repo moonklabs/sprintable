@@ -117,9 +117,15 @@ const HOOK_BIND_RE = /const\s+(\w+)\s*=\s*(?:await\s+)?(?:useTranslations|getTra
  * 양성을 낸다. 룩비하인드에 `.`을 추가해 「바로 앞이 단어문자·`$`·`.` 중 어느 것도 아닐
  * 때만」 매치하도록 좁힌다 — 로컬 `t()` 직접 호출(정상 케이스)은 앞이 공백·`(`·`{` 등이라
  * 영향 없고, 멤버 접근(`xxx.t(...)`)만 제외된다.
+ *
+ * story #3728(미르코, unused-key 역방향 가드 착수 중 발견) — `t.rich('key', {...})`
+ * (next-intl의 리치텍스트 렌더 API, 21개 실사용처 실측)는 `varName\(`이 리터럴로 "t("를
+ * 요구해 "t.rich("엔 안 걸렸다. `(?:\.rich)?`를 `\(` 앞에 얹는다 — 룩비하인드는 `varName`
+ * 시작 위치 그대로라 `acc.t.rich(...)` 같은 멤버 접근은 여전히 배제된다(위 #3149 보호
+ * 그대로 유지, 시작 문자 앞이 `.`이면 애초에 매치 자체가 시작 안 함).
  */
 function extractKeyUsages(content, varName) {
-  const re = new RegExp(`(?<![\\w$.])${escapeRegExp(varName)}\\(\\s*['"]([\\w.]+)['"]`, 'g');
+  const re = new RegExp(`(?<![\\w$.])${escapeRegExp(varName)}(?:\\.rich)?\\(\\s*['"]([\\w.]+)['"]`, 'g');
   return [...content.matchAll(re)].map((m) => m[1]);
 }
 

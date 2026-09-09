@@ -67,6 +67,23 @@ describe('extractKeyUsages — 멤버접근(`obj.t(...)`)은 로컬 t() 호출�
   });
 });
 
+// story #3728 — t.rich('key', {...})(next-intl 리치텍스트 렌더 API)는 위 varName\( 정규식이
+// 리터럴 "t(" 시작을 요구해 안 잡혔다(21개 실사용처 실측, unused-key 역방향 가드 착수 중 발견).
+describe('extractKeyUsages — t.rich(...)도 로컬 t()와 동형으로 잡힌다(story #3728)', () => {
+  it('t.rich(\'key\', {...})가 잡힌다(실사례: proof-capsule.tsx t.rich(\'gate.owner\', ...))', () => {
+    expect(extractKeyUsages("t.rich('gate.owner', { name });", 't')).toEqual(['gate.owner']);
+  });
+
+  it('멤버접근 acc.t.rich(...)는 여전히 안 잡힌다(#3149 보호가 .rich 확장 뒤에도 유지)', () => {
+    expect(extractKeyUsages("acc.t.rich('title', {});", 't')).toEqual([]);
+  });
+
+  it('한 파일에 t(...)와 t.rich(...)가 공존하면 둘 다 잡힌다', () => {
+    const content = "t('plain');\nt.rich('richOne', {});";
+    expect(extractKeyUsages(content, 't')).toEqual(['plain', 'richOne']);
+  });
+});
+
 describe('extractHookBindings — useTranslations/getTranslations 훅 바인딩 추출', () => {
   it('const 변수명 = useTranslations(ns) 패턴을 잡는다', () => {
     const map = extractHookBindings("const t = useTranslations('nav');");
