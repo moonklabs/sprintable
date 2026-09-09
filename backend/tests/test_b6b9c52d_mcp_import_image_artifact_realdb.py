@@ -2,14 +2,28 @@
 BE 엔드포인트(`POST /api/v2/visual-artifacts/import-image`). crux: content-type/size 검증·
 base64 디코드 실패 처리·업로드→create_artifact 위임 왕복(source=imported·html_blob 노드·
 canonical url)·story_id cross-org 스코프 차단(create_artifact의 _assert_link_target_in_scope
-재사용 확인, C1-S3 crux①과 동형)."""
+재사용 확인, C1-S3 crux①과 동형).
+
+story #3753 — 저장 直前 `validate_image_bytes`(구조 검증)가 새로 걸렸다. 「성공」 표본은
+전부 실제 PNG 바이트여야 통과한다(예전엔 `os.urandom(...)`로도 통과했다 — 그때는 구조를
+안 봤기 때문. 지금은 그 자체가 이 관문이 실제로 일하고 있다는 증거다)."""
 from __future__ import annotations
 
 import base64
+import io
 import os
 import uuid
 
 import pytest
+
+
+def _png_bytes(n: int = 4) -> bytes:
+    from PIL import Image
+
+    img = Image.new("RGB", (n, n), color=(12, 34, 56))
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
 
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
 
@@ -186,7 +200,7 @@ async def test_import_image_success_creates_artifact_with_canonical_url():
         await _setup_app(app, Session, seeded["org_a_id"], seeded["project_a_id"])
         client = _client_for(app)
         try:
-            image_bytes = os.urandom(1024)
+            image_bytes = _png_bytes()
             resp = await _post_import(
                 client, title="Sketch v1",
                 image_base64=base64.b64encode(image_bytes).decode(), content_type="image/png",
@@ -237,10 +251,90 @@ async def test_import_image_cross_org_story_link_blocked():
         try:
             resp = await _post_import(
                 client, title="Injected",
-                image_base64=base64.b64encode(os.urandom(16)).decode(), content_type="image/png",
+                image_base64=base64.b64encode(_png_bytes()).decode(), content_type="image/png",
                 story_id=str(seeded["story_b_id"]),
             )
             assert resp.status_code == 404, resp.text
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# story #3753 AC2 — 저장 直前 구조 검증(validate_image_bytes) 관문
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _corrupted_png_bytes_matching_incident() -> bytes:
+    """실사고(artifact `b3f60ca8-4c65-44de-a7e9-bc5b5dcf5e01`) 재현: 유효 시그니처+IHDR+
+    첫 IDAT(4096B, 유효 CRC)까지는 정상이나 그 다음 청크 타입이 알파벳이 아닌 바이트로
+    깨져 있다 — PO가 직접 실측한 손상 패턴과 동형(청크 프레이밍 붕괴)."""
+    import struct
+    import zlib
+
+    def _chunk(chunk_type: bytes, data: bytes) -> bytes:
+        return (
+            struct.pack(">I", len(data)) + chunk_type + data
+            + struct.pack(">I", zlib.crc32(chunk_type + data) & 0xFFFFFFFF)
+        )
+
+    signature = b"\x89PNG\r\n\x1a\n"
+    ihdr = _chunk(b"IHDR", struct.pack(">IIBBBBB", 4, 4, 8, 2, 0, 0, 0))
+    idat = _chunk(b"IDAT", zlib.compress(b"\x00" * 100)[:4096].ljust(4096, b"\x00"))
+    corrupted_next_header = struct.pack(">I", 100) + b"\x7f\x9f\x00\x00"  # 깨진 청크 타입
+    return signature + ihdr + idat + corrupted_next_header
+
+
+@pytest.mark.anyio
+async def test_import_image_rejects_structurally_corrupted_png_422_image_corrupt():
+    """AC2 양성대조 — 실사고와 동형으로 손상된 PNG 바이트(매직/base64/size는 전부 유효)는
+    422 IMAGE_CORRUPT로 거절되고 artifact가 생성되지 않는다. validate_image_bytes를
+    빼면(되돌리면) 이 요청이 201로 통과한다(RED 조건, PR 작업 중 실측 확認됨)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s)
+        await _setup_app(app, Session, seeded["org_a_id"], seeded["project_a_id"])
+        client = _client_for(app)
+        try:
+            resp = await _post_import(
+                client, title="Corrupted",
+                image_base64=base64.b64encode(_corrupted_png_bytes_matching_incident()).decode(),
+                content_type="image/png",
+            )
+            assert resp.status_code == 422, resp.text
+            body = resp.json()
+            assert body["error"]["code"] == "IMAGE_CORRUPT"
+            assert "chunk" in body["error"]["message"].lower()
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_import_image_rejects_garbage_bytes_with_valid_image_content_type_422():
+    """content_type=image/png인데 실제로는 완전 무관한 바이트(실사고 이전엔 os.urandom도
+    통과했던 것과 동형 시나리오) — 매직 바이트 자체가 안 맞아 즉시 422 IMAGE_CORRUPT."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s)
+        await _setup_app(app, Session, seeded["org_a_id"], seeded["project_a_id"])
+        client = _client_for(app)
+        try:
+            resp = await _post_import(
+                client, title="Not An Image",
+                image_base64=base64.b64encode(os.urandom(1024)).decode(), content_type="image/png",
+            )
+            assert resp.status_code == 422, resp.text
+            assert resp.json()["error"]["code"] == "IMAGE_CORRUPT"
         finally:
             await client.aclose()
     finally:

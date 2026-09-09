@@ -20,6 +20,7 @@ from app.models.channel_post_image import ChannelPostImage
 from app.models.channel_post_version import ChannelPostVersion
 from app.models.pm import Story
 from app.services.content_rules import get_org_content_rules, lint_content
+from app.services.image_integrity import ImageIntegrityError, validate_image_bytes
 from app.services.project_auth import require_project_access
 from app.services.channel_posts import (
     ChannelConnectionAuthError,
@@ -918,7 +919,13 @@ async def post_channel_post_image_import(
     (VisualArtifact가 아니라 ChannelPostImage) — 새 연결 개념(두 시스템 사이 참조)을
     만드는 대신 서버가 직접 GCS에 쓴 뒤 기존 confirm_channel_post_image_upload를 그대로
     재사용한다(검증/변환/해시/봉인 로직 사본 0, `_confirm_image_upload_or_raise`로 에러
-    매핑도 confirm과 공유)."""
+    매핑도 confirm과 공유).
+
+    story #3753 — `import_channel_post_image`(내부에서 `put_object`로 GCS에 쓴다) 호출
+    前에 `validate_image_bytes`를 통과해야 한다(visual_artifacts.py::import_image_artifact와
+    동일 관문 — 매직 바이트·PNG 청크 walk·PIL 디코드). 실패하면 422 `IMAGE_CORRUPT`로
+    즉시 거부하고 저장 자체를 안 한다(confirm 内부의 사후 PIL 디코드-then-delete-orphan
+    경로보다 앞에서 막는다 — 깨진 바이트가 GCS에 닿는 순간 자체가 아예 없다)."""
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
     if not body.content_type.startswith("image/"):
@@ -930,6 +937,12 @@ async def post_channel_post_image_import(
     except (binascii.Error, ValueError) as exc:
         raise HTTPException(
             status_code=400, detail={"code": "VALIDATION_ERROR", "message": "image_base64 is not valid base64"},
+        ) from exc
+    try:
+        validate_image_bytes(body.content_type, image_bytes)
+    except ImageIntegrityError as exc:
+        raise HTTPException(
+            status_code=422, detail={"code": "IMAGE_CORRUPT", "message": exc.reason},
         ) from exc
 
     member_id = uuid.UUID(auth.user_id)
