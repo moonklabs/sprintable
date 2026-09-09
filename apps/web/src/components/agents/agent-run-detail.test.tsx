@@ -17,14 +17,13 @@ function failedRunResponse() {
     json: async () => ({
       data: {
         id: 'run-1', agent_id: 'agent-1', agent_name: '테스트 에이전트', deployment_id: null,
-        session_id: null, memo_id: null, story_id: null, trigger: 'manual', model: null,
+        memo_id: null, story_id: null, trigger: 'manual', model: null,
         llm_provider: null, llm_provider_key: null, status: 'failed', duration_ms: 1000,
         llm_call_count: 1, input_tokens: null, output_tokens: null, cost_usd: null,
         computed_cost_cents: 0, per_run_cap_cents: null, billing_notes: [],
         result_summary: null, error_message: '실패했습니다', last_error_code: 'E1',
         retry_count: 0, max_retries: 3, next_retry_at: null, failure_disposition: null,
-        continuity_debug: null,
-        memory_compaction_policy: null, started_at: null, finished_at: null,
+        started_at: null, finished_at: null,
         created_at: '2026-08-07T00:00:00Z',
       },
     }),

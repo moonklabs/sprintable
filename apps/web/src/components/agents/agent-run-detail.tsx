@@ -15,45 +15,11 @@ import { formatRelativeTime } from '@/lib/storage/format';
 import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { agentRunStatusBadgeVariant, type AgentRunStatus } from '@/lib/agent-run-status';
 
-interface MemoryRetrievalBucket {
-  queriedCount: number;
-  inScopeCount: number;
-  blockedCount: number;
-  injectedIds: string[];
-}
-
-interface MemoryRetrievalDiagnostics {
-  session: MemoryRetrievalBucket;
-  longTerm: MemoryRetrievalBucket;
-  totalInjected: number;
-  droppedByTokenBudget: number;
-}
-
-interface ContinuityDebugInfo {
-  sessionId: string | null;
-  snapshotPresent: boolean;
-  snapshotMemoryCount: number;
-  restoredFromSnapshot: boolean;
-  memoryRetrievalDiagnostics: MemoryRetrievalDiagnostics | null;
-}
-
-interface MemoryCompactionPolicy {
-  keepCriteria: string[];
-  deleteCriteria: string[];
-  typeQuota: Record<string, number>;
-  thresholds: {
-    minImportance: number;
-    maxAgeDays: number;
-    duplicateSimilarity: number;
-  };
-}
-
 interface RunDetail {
   id: string;
   agent_id: string;
   agent_name: string | null;
   deployment_id: string | null;
-  session_id: string | null;
   memo_id: string | null;
   story_id: string | null;
   trigger: string;
@@ -76,8 +42,6 @@ interface RunDetail {
   max_retries: number | null;
   next_retry_at: string | null;
   failure_disposition: 'retry_scheduled' | 'retry_launched' | 'retry_exhausted' | 'non_retryable' | null;
-  continuity_debug: ContinuityDebugInfo | null;
-  memory_compaction_policy: MemoryCompactionPolicy | null;
   started_at: string | null;
   finished_at: string | null;
   created_at: string;
@@ -199,8 +163,6 @@ export function AgentRunDetail({
   const errorDisplay = getRunErrorDisplay(run.error_message, run.last_error_code);
   const failureDisposition = getRunFailureDisposition(run);
   const canRetry = canManuallyRetryRun(run);
-  const retrievalDiagnostics = run.continuity_debug?.memoryRetrievalDiagnostics ?? null;
-  const compactionPolicy = run.memory_compaction_policy;
 
   return (
     <>
@@ -263,7 +225,6 @@ export function AgentRunDetail({
           </SectionCardHeader>
           <SectionCardBody>
             <div className="mb-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              <MetaCard label={t('sessionId')} value={run.session_id ?? '-'} />
               <MetaCard label={t('providerLabel')} value={run.llm_provider_key ?? '-'} />
               <MetaCard label={t('billingModeLabel')} value={formatBillingModeLabel(t, run.llm_provider)} />
               <MetaCard label={t('modelLabel')} value={run.model ?? '-'} />
@@ -312,67 +273,6 @@ export function AgentRunDetail({
               </div>
             )}
 
-            {retrievalDiagnostics && (
-              <div className="mb-4 rounded-xl border border-white/8 bg-white/4 px-4 py-3">
-                <p className="text-sm font-medium text-foreground">{t('memoryRetrievalTitle')}</p>
-                <div className="mt-3 grid gap-3 md:grid-cols-2">
-                  <MemoryBucketCard
-                    label={t('memoryRetrievalSession')}
-                    bucket={retrievalDiagnostics.session}
-                    queriedLabel={t('memoryRetrievalQueried')}
-                    inScopeLabel={t('memoryRetrievalInScope')}
-                    blockedLabel={t('memoryRetrievalBlocked')}
-                    injectedIdsLabel={t('memoryRetrievalInjectedIds')}
-                  />
-                  <MemoryBucketCard
-                    label={t('memoryRetrievalLongTerm')}
-                    bucket={retrievalDiagnostics.longTerm}
-                    queriedLabel={t('memoryRetrievalQueried')}
-                    inScopeLabel={t('memoryRetrievalInScope')}
-                    blockedLabel={t('memoryRetrievalBlocked')}
-                    injectedIdsLabel={t('memoryRetrievalInjectedIds')}
-                  />
-                </div>
-                <div className="mt-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
-                  <Badge variant="chip">{t('memoryRetrievalTotalInjected')}: {retrievalDiagnostics.totalInjected}</Badge>
-                  <Badge variant="chip">{t('memoryRetrievalDropped')}: {retrievalDiagnostics.droppedByTokenBudget}</Badge>
-                </div>
-              </div>
-            )}
-
-            {compactionPolicy && (
-              <div className="mb-4 rounded-xl border border-white/8 bg-white/4 px-4 py-3">
-                <p className="text-sm font-medium text-foreground">{t('memoryCompactionTitle')}</p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {t('memoryCompactionThresholds', {
-                    minImportance: compactionPolicy.thresholds.minImportance,
-                    maxAgeDays: compactionPolicy.thresholds.maxAgeDays,
-                    duplicateSimilarity: compactionPolicy.thresholds.duplicateSimilarity,
-                  })}
-                </p>
-                <div className="mt-3 grid gap-3 md:grid-cols-2">
-                  <CriteriaList title={t('memoryCompactionKeep')} items={compactionPolicy.keepCriteria} />
-                  <CriteriaList title={t('memoryCompactionDelete')} items={compactionPolicy.deleteCriteria} />
-                </div>
-                <div className="mt-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
-                  {Object.entries(compactionPolicy.typeQuota).map(([type, quota]) => (
-                    <Badge key={type} variant="chip">{type}: {quota}</Badge>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {run.continuity_debug && (
-              <div className="mb-4 rounded-xl border border-white/8 bg-white/4 px-4 py-3">
-                <p className="text-sm font-medium text-foreground">{t('continuityDebugTitle')}</p>
-                <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                  <MetaCard label={t('sessionId')} value={run.continuity_debug.sessionId ?? '-'} />
-                  <MetaCard label={t('continuitySnapshotPresent')} value={run.continuity_debug.snapshotPresent ? t('booleanYes') : t('booleanNo')} />
-                  <MetaCard label={t('continuitySnapshotCount')} value={String(run.continuity_debug.snapshotMemoryCount)} />
-                  <MetaCard label={t('continuityRestored')} value={run.continuity_debug.restoredFromSnapshot ? t('booleanYes') : t('booleanNo')} />
-                </div>
-              </div>
-            )}
           </SectionCardBody>
         </SectionCard>
       </div>
@@ -402,41 +302,3 @@ function MetaCard({ label, value }: { label: string; value: string }) {
   );
 }
 
-function MemoryBucketCard({
-  label,
-  bucket,
-  queriedLabel,
-  inScopeLabel,
-  blockedLabel,
-  injectedIdsLabel,
-}: {
-  label: string;
-  bucket: MemoryRetrievalBucket;
-  queriedLabel: string;
-  inScopeLabel: string;
-  blockedLabel: string;
-  injectedIdsLabel: string;
-}) {
-  return (
-    <div className="rounded-xl border border-white/8 bg-white/3 px-4 py-3 text-sm text-muted-foreground">
-      <p className="font-medium text-foreground">{label}</p>
-      <div className="mt-2 space-y-1">
-        <p>{queriedLabel}: {bucket.queriedCount}</p>
-        <p>{inScopeLabel}: {bucket.inScopeCount}</p>
-        <p>{blockedLabel}: {bucket.blockedCount}</p>
-        <p className="break-all">{injectedIdsLabel}: {bucket.injectedIds.length > 0 ? bucket.injectedIds.join(', ') : '-'}</p>
-      </div>
-    </div>
-  );
-}
-
-function CriteriaList({ title, items }: { title: string; items: string[] }) {
-  return (
-    <div className="rounded-xl border border-white/8 bg-white/3 px-4 py-3">
-      <p className="text-sm font-medium text-foreground">{title}</p>
-      <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
-        {items.map((item) => <li key={item}>{item}</li>)}
-      </ul>
-    </div>
-  );
-}

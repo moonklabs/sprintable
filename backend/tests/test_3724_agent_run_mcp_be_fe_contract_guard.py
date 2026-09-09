@@ -190,10 +190,10 @@ GUARD2_GRANDFATHER_SAAS_OVERLAY: dict[str, str] = {
     "billing_notes": "SaaS 계층(OSS-stub 관례) — 이 저장소 범위 밖, 손 안 댐",
 }
 
-# ⓑ 임시(후속 스토리가 닫으면 실제로 줄어드는 목록) — #3725(5, AgentRunResponse additive)·
-# #3730(3, session_id·continuity_debug·memory_compaction_policy 은퇴 — #3726 決) 각각이
-# 닫는다. #3721(tool_call_history·tool_audit_trail)은 이미 착지해 목록에서 빠졌다(카운트
-# 15→13→8로 줄어든 이력 그대로 — 그 자체가 이 가드의 "줄어드는" 계약이 실제로 지켜진다는
+# ⓑ 임시(후속 스토리가 닫으면 실제로 줄어드는 목록) — #3725(5, AgentRunResponse additive)가
+# 마저 닫는다. #3721(tool_call_history·tool_audit_trail)·#3730(session_id·continuity_debug·
+# memory_compaction_policy 은퇴 — #3726 決)은 이미 착지해 목록에서 빠졌다(카운트
+# 15→13→8→5로 줄어든 이력 그대로 — 그 자체가 이 가드의 "줄어드는" 계약이 실제로 지켜진다는
 # 증거).
 GUARD2_GRANDFATHER_PENDING: dict[str, str] = {
     "deployment_id": "story #3725 — DB 컬럼 실재(agent_runs.deployment_id), 응답 스키마에만 없음",
@@ -201,9 +201,6 @@ GUARD2_GRANDFATHER_PENDING: dict[str, str] = {
     "retry_count": "story #3725 — DB 컬럼 실재, 응답 스키마에만 없음",
     "max_retries": "story #3725 — DB 컬럼 실재, 응답 스키마에만 없음",
     "next_retry_at": "story #3725 — DB 컬럼 실재, 응답 스키마에만 없음",
-    "session_id": "story #3730 — 은퇴 대상(BE 전수 grep 0, #3726 決)",
-    "continuity_debug": "story #3730 — 은퇴 대상(BE 전수 grep 0, #3726 決)",
-    "memory_compaction_policy": "story #3730 — 은퇴 대상(BE 전수 grep 0, #3726 決)",
 }
 
 
@@ -256,11 +253,11 @@ def test_guard2_saas_overlay_grandfather_count_pinned():
 
 
 def test_guard2_pending_grandfather_count_pinned():
-    """임시 목록은 후속 스토리(#3725·#3730)가 닫히는 대로 실제로 줄어들어야 한다 — 이미
-    #3721(2개)이 착지해 15→13→8로 준 이력 그대로."""
-    assert len(GUARD2_GRANDFATHER_PENDING) == 8, (
-        f"GUARD2_GRANDFATHER_PENDING 항목 수가 8이 아니라 {len(GUARD2_GRANDFATHER_PENDING)} — "
-        "늘었으면 새 phantom 필드가 또 생긴 것(원인 리뷰 필요), 줄었으면 후속 스토리(#3725/#3730)가 "
+    """임시 목록은 후속 스토리(#3725)가 닫히는 대로 실제로 줄어들어야 한다 — 이미
+    #3721(2개)·#3730(3개)이 착지해 15→13→8→5로 준 이력 그대로."""
+    assert len(GUARD2_GRANDFATHER_PENDING) == 5, (
+        f"GUARD2_GRANDFATHER_PENDING 항목 수가 5가 아니라 {len(GUARD2_GRANDFATHER_PENDING)} — "
+        "늘었으면 새 phantom 필드가 또 생긴 것(원인 리뷰 필요), 줄었으면 후속 스토리(#3725)가 "
         "그만큼 닫힌 것이니 이 상수·주석도 같이 정리할 것."
     )
 
