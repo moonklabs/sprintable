@@ -79,11 +79,16 @@ const METRIC_LABEL_KEYS: Record<BoardMetric, string> = {
 };
 
 // insight-snapshot-block.tsx(story #3499)의 STATUS_LABEL_KEYS와 동일 관례 — content
-// 네임스페이스 기존 키를 그대로 재사용한다(unsupported는 그 파일과 동일하게 전용 문장
-// 키 하나뿐이라 이 맵에 없다, pending도 이제 없다 — 아래 statusFilterLabel에서 둘 다
-// 별도 분기). story #3746 — dead_letter 옵션·키 은퇴.
-const STATUS_FILTER_LABEL_KEYS: Partial<Record<(typeof STATUS_FILTER_OPTIONS)[number], string>> = {
+// 네임스페이스 기존 키를 그대로 재사용한다(pending은 이 맵에 없다 — 아래
+// statusFilterLabel에서 별도 분기, insightsBoard 전용 낱말이라 다른 네임스페이스).
+// story #3746(PO CHANGES①②, 2026-09-09) — 이 맵도 셀·block에서 걷은 바로 그
+// `Partial<Record>`+`!` 클래스였다(옵션 하나가 빠져도 tsc가 안 막던 자리) —
+// `Record`(비-Partial, pending 제외)로 바꿔 captured/failed/unsupported 셋
+// 전부 채운다. unsupported는 문장(insightSnapshotUnsupported, 상세 블록 전용)
+// 대신 셀과 같은 명사구(insightStatusUnsupported)로 통일 — 한 통엔 한 낱말.
+const STATUS_FILTER_LABEL_KEYS: Record<Exclude<(typeof STATUS_FILTER_OPTIONS)[number], 'pending'>, string> = {
   captured: 'insightStatusCaptured',
+  unsupported: 'insightStatusUnsupported',
   failed: 'insightStatusFailed',
 };
 
@@ -281,9 +286,8 @@ export default function InsightsBoardPage() {
   // (insightsBoard.statusFilterPending)이라 content 네임스페이스 기존 「대기 중」과
   // 다른 자리(그 키는 다른 화면이 계속 쓴다, 값 두 벌 아님 — 통 자체가 다르다).
   const statusFilterLabel = (status: (typeof STATUS_FILTER_OPTIONS)[number]): string => {
-    if (status === 'unsupported') return tContent('insightSnapshotUnsupported');
     if (status === 'pending') return t('statusFilterPending');
-    return tContent(STATUS_FILTER_LABEL_KEYS[status]!);
+    return tContent(STATUS_FILTER_LABEL_KEYS[status]);
   };
 
   // story #3656(유나 낱말 確定 2026-09-07) — 묶음 축 토글 라벨.

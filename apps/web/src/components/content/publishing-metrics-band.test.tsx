@@ -62,6 +62,19 @@ function stubFetch(byWindow: Record<string, typeof FULL_METRICS | { status: numb
 }
 
 describe('PublishingMetricsBand(story #3484, §18)', () => {
+  // story #3746(PO CHANGES⑦, 2026-09-09) — 표 바로 아래로 이주하며 붙인 제목.
+  // 기간 문구(「지난 N일 — 화면 기간을 따릅니다」류)는 화면 자체의 기간 컨트롤과
+  // 중복이라 안 그린다 — 이 테스트는 제목만 pin하고 기간 문구 부재도 같이 확認.
+  it('⭐제목 「발행 품질」이 뜨고, 기간 문구는 따로 안 그린다(화면 기간 컨트롤과 중복 방지)', async () => {
+    stubFetch({ '7d': FULL_METRICS });
+    await act(async () => { root.render(wrap(<PublishingMetricsBand orgId="org-1" window="7d" />)); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="publishing-metrics-title"]')?.textContent)
+      .toBe(koMessages.content.publishingMetricsTitle);
+    expect(container.textContent).not.toMatch(/지난\s*\d+\s*일/);
+  });
+
   it('⭐성능 값이 채워지고, 사고 둘이 모두 0이면 사고 항목은 아무것도 안 뜬다(story #3735 B2 — 0을 굳이 요약하지 않는다)', async () => {
     stubFetch({ '7d': FULL_METRICS });
     await act(async () => { root.render(wrap(<PublishingMetricsBand orgId="org-1" window="7d" />)); });

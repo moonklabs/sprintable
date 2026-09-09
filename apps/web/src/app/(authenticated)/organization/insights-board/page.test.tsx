@@ -261,11 +261,14 @@ describe('InsightsBoardPage — 쿼리 파라미터(story #3503)', () => {
       // 「전체 상태」+통 넷 = 정확히 5개(다섯 번째가 몰래 늘면(예: dead_letter 부활) 이 길이 자체가 어긋난다).
       expect(items).toHaveLength(5);
       expect(items).not.toContain('자동 재시도 멈춤');
+      // PO CHANGES②(2026-09-09) — 드롭다운은 선택지 자리(명사구)라 상세 블록 전용
+      // 문장(insightSnapshotUnsupported)이 아니라 셀과 같은 명사구(insightStatusUnsupported)
+      // 를 쓴다(한 통 한 낱말).
       expect(items).toEqual([
         koMessages.insightsBoard.statusFilterAll,
         koMessages.insightsBoard.statusFilterPending,
         koMessages.content.insightStatusCaptured,
-        koMessages.content.insightSnapshotUnsupported,
+        koMessages.content.insightStatusUnsupported,
         koMessages.content.insightStatusFailed,
       ]);
     });

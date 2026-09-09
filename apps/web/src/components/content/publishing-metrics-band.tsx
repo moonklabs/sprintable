@@ -86,39 +86,47 @@ export function PublishingMetricsBand({ orgId, window: win }: { orgId: string; w
 
   return (
     <div
-      className="flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-md border border-border bg-muted/20 p-3 text-xs text-foreground"
+      className="rounded-md border border-border bg-muted/20 p-3 text-xs text-foreground"
       data-testid="publishing-metrics-band"
     >
-      {loadFailed ? (
-        <span className="text-muted-foreground" data-testid="publishing-metrics-load-failed">
-          {t('publishingMetricsLoadFailed')}
-        </span>
-      ) : metrics ? (
-        <>
-          <span data-testid="publishing-metrics-on-time-rate">
-            {t('publishingMetricsOnTimeRateLabel')} {formatOnTimeRate(metrics.on_time_rate, t)}
+      {/* PO CHANGES⑦(2026-09-09) — 표 바로 아래라 구획 경계는 최소한(별도 카드 톤
+          없이 작은 라벨 한 줄). 기간(「지난 N일 — 화면 기간을 따릅니다」류)은 안
+          그린다 — 이 화면 자체의 기간 컨트롤이 이미 있어 중복이다. */}
+      <p className="mb-1.5 font-medium text-foreground" data-testid="publishing-metrics-title">
+        {t('publishingMetricsTitle')}
+      </p>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+        {loadFailed ? (
+          <span className="text-muted-foreground" data-testid="publishing-metrics-load-failed">
+            {t('publishingMetricsLoadFailed')}
           </span>
-          {/* story #3735(B1·B2, 유나 定 2026-09-09) — 복구 p50/p95(엔지니어 지표)·
-              사고 둘 다 0일 때의 「중복·승인 없는 호출 0」 요약 줄을 걷었다. 0이면
-              아예 안 적는다는 §18-1/§18-3의 "행동" 규율을 "사고"에도 그대로
-              맞춘다(0을 굳이 「이상 없음」으로 적지 않는다). */}
-          {metrics.duplicate_publications > 0 ? (
-            <span data-testid="publishing-metrics-duplicate">
-              {t('publishingMetricsDuplicateNonzero', { count: metrics.duplicate_publications })}
+        ) : metrics ? (
+          <>
+            <span data-testid="publishing-metrics-on-time-rate">
+              {t('publishingMetricsOnTimeRateLabel')} {formatOnTimeRate(metrics.on_time_rate, t)}
             </span>
-          ) : null}
-          {metrics.unapproved_adapter_calls > 0 ? (
-            <span data-testid="publishing-metrics-unapproved">
-              {t('publishingMetricsUnapprovedNonzero', { count: metrics.unapproved_adapter_calls })}
-            </span>
-          ) : null}
-          {metrics.computed_at ? (
-            <span className="ml-auto text-muted-foreground" data-testid="publishing-metrics-computed-at">
-              {t('publishingMetricsComputedAt', { time: formatScheduledAt(metrics.computed_at, displayTimezone).display })}
-            </span>
-          ) : null}
-        </>
-      ) : null}
+            {/* story #3735(B1·B2, 유나 定 2026-09-09) — 복구 p50/p95(엔지니어 지표)·
+                사고 둘 다 0일 때의 「중복·승인 없는 호출 0」 요약 줄을 걷었다. 0이면
+                아예 안 적는다는 §18-1/§18-3의 "행동" 규율을 "사고"에도 그대로
+                맞춘다(0을 굳이 「이상 없음」으로 적지 않는다). */}
+            {metrics.duplicate_publications > 0 ? (
+              <span data-testid="publishing-metrics-duplicate">
+                {t('publishingMetricsDuplicateNonzero', { count: metrics.duplicate_publications })}
+              </span>
+            ) : null}
+            {metrics.unapproved_adapter_calls > 0 ? (
+              <span data-testid="publishing-metrics-unapproved">
+                {t('publishingMetricsUnapprovedNonzero', { count: metrics.unapproved_adapter_calls })}
+              </span>
+            ) : null}
+            {metrics.computed_at ? (
+              <span className="ml-auto text-muted-foreground" data-testid="publishing-metrics-computed-at">
+                {t('publishingMetricsComputedAt', { time: formatScheduledAt(metrics.computed_at, displayTimezone).display })}
+              </span>
+            ) : null}
+          </>
+        ) : null}
+      </div>
     </div>
   );
 }
