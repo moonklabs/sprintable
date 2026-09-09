@@ -1751,10 +1751,23 @@ jobs:
       # 빨갛게 만든다(같은 head가 그 전엔 초록이었다 — 외부 미러 동기화 타이밍 문제).
       # 우리는 google-chrome apt 패키지를 안 쓴다(playwright가 자체 번들 chromium을 깐다) —
       # 그 소스 자체를 지워 이 미러 의존을 0으로 만든다.
-      - name: Remove flaky google-chrome apt source (story #3751)
+      # story #3751 v2(페드루 PO 실측 2026-09-09 18:14Z) — v1(`rm google-chrome*.list`)이
+      # 불발이었다: 잡이 초록이어도 apt update 로그에 `Get:* dl.google.com`이 그대로 서
+      # (미러가 그 사이 회복해 초록이었을 뿐, 처방 덕이 아니다 — "잡 초록"은 이 처방의
+      # 양성대조가 못 된다). 원인 짐작 — noble 러너 이미지는 소스가 `.list` 파일이 아니라
+      # deb822(`google-chrome.sources`) 형태이거나 `/etc/apt/sources.list` 본문에 직접 있어
+      # 이름 글롭이 빈 매치였을 수 있다. 이름이 아니라 **내용**(dl.google.com 문자열)으로
+      # 찾아 지우고, 지운 뒤에도 apt update가 그 호스트를 당기면 **fail-closed**(양성대조를
+      # 이 스텝 자체가 강제) — 미러가 멀쩡해도 소스가 안 지워졌으면 빨강이어야 한다.
+      - name: Remove google-chrome apt source (story #3751)
         run: |
-          sudo rm -f /etc/apt/sources.list.d/google-chrome*.list
-          sudo apt-get update
+          sudo grep -rlE 'dl\.google\.com' /etc/apt/sources.list /etc/apt/sources.list.d/ 2>/dev/null | tee /tmp/google-src.txt
+          xargs -r -a /tmp/google-src.txt sudo rm -f
+          sudo apt-get update 2>&1 | tee /tmp/apt-update.log
+          if grep -q 'dl\.google\.com' /tmp/apt-update.log; then
+            echo '::error title=google-chrome apt source still active::제거 뒤에도 apt update가 dl.google.com을 당긴다 (story #3751)'
+            exit 1
+          fi
 
       - name: Install Playwright chromium
         run: pnpm --filter web exec playwright install --with-deps chromium
