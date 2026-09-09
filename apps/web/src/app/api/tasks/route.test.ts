@@ -135,11 +135,24 @@ describe('/api/tasks GET — cursor pagination hasMore/nextCursor 과대조회(s
     expect(calledWith.limit).toBe(6);
   });
 
-  it('리포지토리가 요청보다 1건 더(6행) 주면 hasMore=true·nextCursor=5번째 행의 created_at(양성대조)', async () => {
-    h.list
-      .mockResolvedValueOnce([task('1'), task('2'), task('3'), task('4'), task('5'), task('6')]) // main page(6=limit+1)
-      .mockResolvedValueOnce([]) // counts: all
-      .mockResolvedValueOnce([]); // counts: done
+  // 카디르 재-QA(2026-09-09 04:17, codex mutation-kill 실측) — h.list가 호출 인자와
+  // 무관하게 고정 배열을 반환하면 이 테스트는 buildCursorPageMeta의 산술(6>5)만
+  // 재검증하는 동어반복이라, +1을 지워 리포지토리에 limit=5가 가도(mock이 여전히
+  // 6행을 주므로) GREEN인 채 남는다(경계 테스트만 RED로 잡혔다). limit-aware mock으로
+  // «리포지토리가 실제로 받은 limit」에 따라 반환량이 갈리게 해 결과 단언 자체가
+  // +1 전달에 의존하게 만든다.
+  function limitAwarePool(pool: ReturnType<typeof task>[]) {
+    return (args: { limit?: number; status?: string }) => {
+      let rows = pool;
+      if (args.status) rows = rows.filter((t) => t.status === args.status);
+      if (typeof args.limit === 'number') rows = rows.slice(0, args.limit);
+      return Promise.resolve(rows);
+    };
+  }
+
+  it('리포지토리가 요청보다 1건 더(6행) 주면 hasMore=true·nextCursor=5번째 행의 created_at(양성대조, limit-aware — +1 제거 시 RED 실측)', async () => {
+    const pool = [task('1'), task('2'), task('3'), task('4'), task('5'), task('6')];
+    h.list.mockImplementation(limitAwarePool(pool));
     const res = await GET(new Request('http://localhost/api/tasks?story_id=s1&limit=5'));
     const body = await res.json();
     expect(body.data).toHaveLength(5);
@@ -148,10 +161,8 @@ describe('/api/tasks GET — cursor pagination hasMore/nextCursor 과대조회(s
   });
 
   it('리포지토리가 정확히 요청분(5행)만 주면 hasMore=false(마지막 페이지, 무회귀)', async () => {
-    h.list
-      .mockResolvedValueOnce([task('1'), task('2'), task('3'), task('4'), task('5')])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([]);
+    const pool = [task('1'), task('2'), task('3'), task('4'), task('5')];
+    h.list.mockImplementation(limitAwarePool(pool));
     const res = await GET(new Request('http://localhost/api/tasks?story_id=s1&limit=5'));
     const body = await res.json();
     expect(body.data).toHaveLength(5);
