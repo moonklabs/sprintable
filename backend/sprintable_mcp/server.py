@@ -24,7 +24,14 @@ from mcp.types import Tool as MCPTool
 from pydantic import BaseModel, ConfigDict, model_validator
 from pydantic.fields import PydanticUndefined
 
-from .api_client import _api_key_override, client, reset_project_override, set_project_override
+from .api_client import (
+    _api_key_override,
+    client,
+    reset_project_override,
+    reset_tool_name_override,
+    set_project_override,
+    set_tool_name_override,
+)
 from .config import settings
 from .response import ok
 from .schemas import SprintableInput
@@ -262,10 +269,16 @@ def _flat(name: str, doc: str, input_cls: type[BaseModel], fn):
         # 85429ee0: per-call project_id override → contextvar(tool 호출 스코프). client.project_id +
         # X-Project-Id 헤더에 반영(org-agent 멀티프로젝트 grant). 미지정이면 키 default(무회귀).
         _tok = set_project_override(kwargs.get("project_id"))
+        # story #3722(Trust·PR2) — 이 도구 이름(레지스트리 name, 118 도구 전부의 단일 지점)을
+        # 호출 스코프 contextvar에 실어 request()가 X-Sprintable-Tool 헤더로 BE에 전달(_project_
+        # override와 동형 set/reset 패턴). BE tool_call_recording 미들웨어가 기록 행의 tool
+        # 컬럼을 채우는 유일한 경로 — 도구 함수(fn)마다 손으로 태그하지 않는다.
+        _tool_tok = set_tool_name_override(name)
         try:
             result = await fn(input_cls(**kwargs))
         finally:
             reset_project_override(_tok)
+            reset_tool_name_override(_tool_tok)
         asyncio.create_task(_heartbeat_fire_forget())
         return result
 

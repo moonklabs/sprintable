@@ -3714,7 +3714,18 @@
     "retryFailedTitle": "Retry failed",
     "retryFailedBody": "Could not schedule a retry. Please try again later.",
     "runHistory": "Run history",
-    "runHistoryDescription": "View past agent executions and their outcomes."
+    "runHistoryDescription": "View past agent executions and their outcomes.",
+    "toolCallsTitle": "Tool calls",
+    "toolCallsEmptyPending": "No records yet.",
+    "toolCallsEmptyNone": "This run didn't use any tools.",
+    "toolCallsLoadError": "Couldn't load tool call records.",
+    "toolCallsLoadingMore": "Loading…",
+    "toolCallsSuccessBadge": "Success",
+    "toolCallsFailedBadge": "Failed",
+    "toolCallsInputSummaryLabel": "Input summary",
+    "toolCallsErrorSummary": "This call failed",
+    "toolCallsErrorToggle": "View server response",
+    "toolCallsUnnamedCall": "Unnamed call"
   },
   "hypotheses": {
     "sectionTitle": "Hypotheses",

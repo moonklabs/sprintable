@@ -3714,7 +3714,18 @@
     "retryFailedTitle": "재시도 실패",
     "retryFailedBody": "재시도를 예약하지 못했습니다. 나중에 다시 시도해 주세요.",
     "runHistory": "실행 기록",
-    "runHistoryDescription": "에이전트 실행 이력과 결과를 확인합니다."
+    "runHistoryDescription": "에이전트 실행 이력과 결과를 확인합니다.",
+    "toolCallsTitle": "도구 호출",
+    "toolCallsEmptyPending": "아직 기록이 없습니다.",
+    "toolCallsEmptyNone": "이 실행은 도구를 쓰지 않았습니다.",
+    "toolCallsLoadError": "도구 호출 기록을 불러오지 못했습니다.",
+    "toolCallsLoadingMore": "불러오는 중…",
+    "toolCallsSuccessBadge": "성공",
+    "toolCallsFailedBadge": "실패",
+    "toolCallsInputSummaryLabel": "입력 요약",
+    "toolCallsErrorSummary": "이 호출이 실패했습니다",
+    "toolCallsErrorToggle": "서버 응답 보기",
+    "toolCallsUnnamedCall": "이름 없는 호출"
   },
   "hypotheses": {
     "sectionTitle": "가설",
