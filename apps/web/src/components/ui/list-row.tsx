@@ -36,7 +36,10 @@ export function ListRow({
         {mark}
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium text-foreground">{title}</p>
-          {subtitle ? <p className="truncate text-xs text-muted-foreground">{subtitle}</p> : null}
+          {/* story #3743 CHANGES ①(페드루 PO, 2026-09-09 12:54Z) — 부제를 한 줄로
+              자르면(truncate) 시안이 요구하는 긴 한 문장(Facebook 만료 안내 등)이
+              말줄임된다. 문장마다 줄이는 대신 부제 자체를 2줄까지 줄바꿈 허용. */}
+          {subtitle ? <p className="line-clamp-2 text-xs text-muted-foreground">{subtitle}</p> : null}
         </div>
         {status}
         {action}
