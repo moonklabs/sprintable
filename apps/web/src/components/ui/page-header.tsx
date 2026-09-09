@@ -13,14 +13,30 @@ import { cn } from '@/lib/utils';
  *   h1을 소유한다. eyebrow(여정/컨텍스트 라벨, 예: 소속 에픽·목표명 — Task→Trust 서사
  *   훅으로 활용 가능)+title+description+actions.
  *
- * **규칙(한 화면에 title을 그리는 표면은 하나만):** top-bar 슬롯의 `title`과 PageHeader의
- * `title`을 같은 화면에서 동시에 쓰지 않는다 — 어느 쪽이 title을 갖는지는 화면 타입으로 정한다.
- *   - **루트/목록형 화면**(보드·목표목록 등 컨텍스트를 "훑는" 화면): top-bar 슬롯이 title을
- *     가진다(현재 관례 — TopBarSlot 소비처 다수). PageHeader는 안 쓰거나 title 없이 actions만.
- *   - **콘텐츠 본문이 두꺼운 상세/도구 화면**(내부 대시보드·상세 패널 등 PageHeader 기존
- *     소비처 2곳): PageHeader가 title을 가진다 — 이런 화면은 보통 top-bar 슬롯을 title 없이
- *     쓰거나 아예 안 쓴다.
- * 새 화면을 만들 때 이 표를 참고해 딱 하나만 고른다(dual-header 방지).
+ * **규칙(한 화면에 title을 그리는 표면은 하나만, 2026-09-09 개정 — 아래 이력 참조):**
+ * 목록형·상세형 구분 없이 **PageHeader가 title+설명+주 액션**을 갖는다. top-bar 슬롯은
+ * **컨텍스트 칩·전역 액션**만 갖고 title을 안 갖는다. dual-header 금지는 그대로다 —
+ * 바뀐 것은 «어느 쪽이 갖나»이지 «둘 다 가져도 되나»가 아니다.
+ *
+ *   사유 둘 — ①이 개정의 범위는 «시안 두 번째 판 ①~⑦이 덮는 화면»뿐이다(①이 블로그·
+ *   채널 두 목록을 한 벌로 덮어 화면 수를 세면 갈리므로 수로 안 적는다) — 그 재설계가
+ *   「화면마다 주 액션 1개를 **제목 줄 오른쪽**에」로 정했다. top-bar는 전역 chrome이라
+ *   거기에 화면별 액션을 두면 **전역 바가 화면마다 바뀐다.** ②비교 제품 실캡처(Buffer·
+ *   Vercel·GitHub·Customer.io)가 전부 «본문 제목 줄 우측 주 액션»이고, **top-bar에
+ *   화면별 액션을 두는 제품은 캡처 0**이다(doc c0d16102 §4-2).
+ *
+ *   ⚠️기존 TopBarSlot title 소비처는 **줄어들기만 한다**(새로 늘리지 않는다). 화면을 만질
+ *   때 하나씩 옮기고, 이 개정 자체의 범위는 «시안 두 번째 판 ①~⑦이 덮는 화면»뿐이다
+ *   (다른 소비처는 그대로 둠).
+ *   ⚠️`verify-nav-label-matches-title`(PAIRINGS 5쌍 중 `org-trust ↔ trustSlotTitle`)이 이
+ *   파일과 무관해 보여도 걸리는 자리다 — 화면을 PageHeader로 옮길 때 title **키**를 그대로
+ *   쓰면 무해하고, 옮기며 키를 "예쁘게" 갈면 그 가드가 RED된다. 이관은 표면만 바꾸고 키는
+ *   그대로 둔다.
+ *
+ * 이력 — ~2026-09-09: 목록형은 top-bar가 title을 가졌음(PageHeader는 안 쓰거나 title
+ * 없이 actions만) · 유나 定·페드루 PO 決로 위와 같이 개정. 이 주석이 그 규칙의 유일한
+ * 기록이라 옛 문장을 지우지 않고 이력으로 남긴다 — 옛 리뷰·PR 코멘트가 이 규칙을 근거로
+ * 들었을 때 어느 쪽이 맞는지 다시 재지 않도록.
  */
 // story #2969 §1.3/§2 C행(doc proofline-system-layer-2969, PR-6) — Display tier(에디토리얼
 // 디스플레이 타이포) 적용: font-bold(700)→--font-weight-editorial-heading(820)·
