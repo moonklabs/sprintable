@@ -21,25 +21,14 @@
 import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
+// story #3716(재발 차단, verify-no-new-raw-fetch-api.ts #4062 오탐 후속) — 이 파일이
+// 자체 stripComments()를 독립 구현으로 들고 있던 것 자체가 그 오탐 클래스였다(파서
+// 복제 2곳이 서로 다른 결함을 갖는 #3149/#3156과 동형). i18n-key-coverage.test.ts·
+// verify-no-new-raw-fetch-api.ts와 같은 공유 구현(story #3023 정규식 리터럴 백틱
+// 픽스 포함)으로 통일한다 — 복제 0.
+import { stripComments } from '../../../../scripts/i18n-key-parser.js';
 
 const SRC_ROOT = path.resolve(__dirname, '..');
-
-function stripComments(text: string): string {
-  let out = text.replace(/\/\*[\s\S]*?\*\//g, '');
-  out = out
-    .split('\n')
-    .map((line) => {
-      const idx = line.indexOf('//');
-      if (idx === -1) return line;
-      const before = line.slice(0, idx);
-      const quotes = (before.match(/"/g) || []).length
-        + (before.match(/'/g) || []).length
-        + (before.match(/`/g) || []).length;
-      return quotes % 2 === 0 ? before : line;
-    })
-    .join('\n');
-  return out;
-}
 
 function collectSourceFiles(dir: string): string[] {
   const out: string[] = [];

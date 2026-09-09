@@ -24,6 +24,13 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+// story #3716(카디르 재현, #4062 오탐 1회) — 이 가드는 주석을 안 벗겨 «주석 속 백틱
+// fetch(`/api/…`)»도 실 호출로 셌다. i18n-key-coverage.test.ts가 이미 쓰는 공유
+// stripComments()(scripts/i18n-key-parser.js, story #3156 통합·#3023 정규식 리터럴
+// 백틱 픽스 포함)를 그대로 재사용한다 — 복제 0. plain CJS·repo-root scripts/(apps/web
+// 워크스페이스 밖) — moduleResolution:bundler+allowJs라 tsx/vitest 양쪽에서 그대로
+// 해석된다(i18n-key-coverage.test.ts 선례와 동일 패턴).
+import { stripComments } from '../../../scripts/i18n-key-parser.js';
 
 const SRC_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src');
 const EXT_RE = /\.(tsx?|ts)$/;
@@ -60,7 +67,10 @@ function stablePrefix(url: string): string {
 export function extractRawFetchApiCalls(content: string, file: string): RawFetchHit[] {
   if (EXEMPT_FILES.has(file)) return [];
   const hits: RawFetchHit[] = [];
-  for (const m of content.matchAll(RAW_FETCH_RE)) {
+  // story #3716 — 주석·문자열 리터럴 안의 fetch(`/api/…`)는 실 호출이 아니다(#4062에서
+  // 디디의 설명 주석이 정확히 이 자리에 걸려 CI가 빨개졌다). 정규식 스캔 前에 벗긴다.
+  const stripped = stripComments(content) as string;
+  for (const m of stripped.matchAll(RAW_FETCH_RE)) {
     const url = m[2] ?? '';
     if (!url.startsWith('/api/')) continue;
     // fetchWithAuth(...)/rateLimitedFetch(...) 호출은 `fetch(`로 시작하지 않으므로 이
