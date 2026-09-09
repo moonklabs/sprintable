@@ -2238,7 +2238,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                 {/* Comment input */}
                 <div className="space-y-2">
                   <textarea
-                    placeholder="Add a comment..."
+                    placeholder={t('commentInputPlaceholder')}
                     value={commentInput}
                     onChange={(e) => setCommentInput(e.target.value)}
                     className="flex field-sizing-content min-h-[80px] w-full resize-none rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
@@ -2254,7 +2254,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                       onClick={handleSubmitComment}
                       disabled={!commentInput.trim() || submittingComment}
                     >
-                      {submittingComment ? t('loading') : 'Comment'}
+                      {submittingComment ? t('loading') : t('commentSubmit')}
                     </Button>
                   </div>
                 </div>
@@ -2293,7 +2293,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                 {loadingActivities ? (
                   <p className="text-sm text-muted-foreground">{t('loading')}</p>
                 ) : activities.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No activity yet</p>
+                  <p className="text-sm text-muted-foreground">{t('noActivity')}</p>
                 ) : (
                   <>
                     <ul className="space-y-2">
