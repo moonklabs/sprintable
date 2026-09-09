@@ -194,7 +194,11 @@ async def create_agent_run(
 
     # story #2161: "시작할 때 이미 끝날 시각을 갖고 태어나게" — deadline_at은 클라 미제공(항상
     # 서버 계산, A2ATask.deadline_at 선례와 동형·클라가 자기 기한을 임의 연장 못 하게).
-    run = await repo.create(
+    #
+    # story #3727 — started_at/finished_at은 미제공 시 각각 DB server_default(now())/NULL을
+    # 그대로 둔다(named-arg로 항상 넘기면 미제공=None이 그 기본값을 덮어써 버린다 — 「생략」과
+    # 「명시적 null」을 create 경로에서도 가른다, UpdateAgentRun의 exclude_unset과 동형 원칙).
+    create_fields: dict = dict(
         org_id=org_id,
         agent_id=body.agent_id,
         project_id=body.project_id,
@@ -211,6 +215,11 @@ async def create_agent_run(
         cost_usd=body.cost_usd,
         deadline_at=datetime.now(timezone.utc) + timedelta(hours=AGENT_RUN_TIMEOUT_HOURS),
     )
+    if body.started_at is not None:
+        create_fields["started_at"] = body.started_at
+    if body.finished_at is not None:
+        create_fields["finished_at"] = body.finished_at
+    run = await repo.create(**create_fields)
     name_map = await _agent_name_map(session, {run.agent_id})
     return AgentRunResponse.model_validate(run).model_copy(update={"agent_name": name_map.get(run.agent_id)})
 
