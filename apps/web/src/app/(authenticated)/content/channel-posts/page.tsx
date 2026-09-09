@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import { fetchWithAuth } from '@/lib/db/client';
@@ -161,15 +162,21 @@ export default function ChannelPostListPage() {
           <p className="text-sm text-muted-foreground">{t('channelPostsDescription')}</p>
         </div>
         <div className="flex shrink-0 items-center gap-4">
-          {/* story #3734 — content/page.tsx(site-posts)와 동형 토글. */}
-          <button
+          {/* story #3734 — content/page.tsx(site-posts)와 동형 토글.
+              story #3739(카디르 CI 적발, verify-no-new-raw-button.ts #3164) — raw
+              button 태그를 Button으로(content/page.tsx와 동형 보정). 페드루
+              CHANGES(2026-09-09, PR#4084) — variant="link"가 정본(ghost+
+              hover:bg-transparent는 다크 hover 배경이 안 지워지는 회귀, content/
+              page.tsx 주석 참조) + rest 밑줄 유지(underline 명시). */}
+          <Button
             type="button"
+            variant="link"
             onClick={() => setShowArchived((v) => !v)}
-            className="text-sm text-foreground underline underline-offset-4"
+            className="h-auto min-h-0 min-w-0 px-0 text-sm font-normal text-foreground underline"
             data-testid="channel-posts-show-archived-toggle"
           >
             {showArchived ? t('hideArchivedToggle') : t('showArchivedToggle')}
-          </button>
+          </Button>
           <Link href="/content/channel-posts/calendar" className="text-sm text-foreground underline underline-offset-4" data-testid="channel-posts-calendar-link">
             {t('channelPostsCalendarLinkCta')}
           </Link>
@@ -314,11 +321,17 @@ export default function ChannelPostListPage() {
                     </td>
                     <td className="px-3 py-2.5">
                       {draft.can_archive ? (
-                        <button
+                        // story #3739(카디르 CI 적발, verify-no-new-raw-button.ts #3164) —
+                        // raw button 태그를 Button으로(content/page.tsx와 동형 보정). 페드루
+                        // CHANGES(2026-09-09, PR#4084) — variant="link"가 정본(content/
+                        // page.tsx 주석 참조 — ghost+hover:bg-transparent는 다크 hover
+                        // 배경이 안 지워지는 회귀) + rest 밑줄 유지(underline 명시).
+                        <Button
                           type="button"
+                          variant="link"
                           onClick={() => void handleArchiveToggle(draft)}
                           disabled={archivingId === draft.draft_id}
-                          className="text-sm text-foreground underline underline-offset-4 disabled:opacity-50"
+                          className="h-auto min-h-0 min-w-0 px-0 text-sm font-normal text-foreground underline disabled:opacity-50"
                           data-testid="channel-post-archive-action"
                           aria-label={t('archiveRowAriaLabel', {
                             n: index + 1,
@@ -326,7 +339,7 @@ export default function ChannelPostListPage() {
                           })}
                         >
                           {draft.is_deleted ? t('unarchiveAction') : t('archiveAction')}
-                        </button>
+                        </Button>
                       ) : null}
                     </td>
                   </tr>

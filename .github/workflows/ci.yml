@@ -1564,6 +1564,28 @@ jobs:
         run: |
           pnpm --filter web verify:no-fetch-response-without-ok-check -- --selftest
 
+      # story #3305(P0 핫픽스 #3701 재발 가드, AC3) 회귀가드 — fetchWithAuth()가 BFF
+      # route(/api/...)를 건너뛰고 백엔드 /api/v2/*를 직접 겨냥하면 FAIL(grandfather
+      # baseline 없음 — 착수 시점 전수 0건 확認됨, 신규 위반 즉시 차단). story
+      # #3739(2026-09-09) — package.json엔 있었으나 ci.yml에 안 물려 있던 것을 재가동.
+      - name: "Verify no direct backend /api/v2 call (story #3305 regression guard)"
+        run: pnpm --filter web verify:no-direct-backend-v2-call
+
+      # story #3164(DS 게이트 A) 회귀가드 — raw <button>이 새로 늘면 FAIL(baseline-freeze,
+      # Button@ui/button으로 전환하거나 EXEMPT_FILES에 등재). story #3739(2026-09-09) —
+      # package.json엔 있었으나 ci.yml에 안 물려 있어 약 8일 재실행 이력이 없던 채 raw
+      # button이 실제로 늘었다(재가동 시점 실측 RED, baseline 재측정·drift grandfather 후
+      # 재가동 — raw-button-baseline.json _comment 참조).
+      - name: "Verify no new raw <button> (story #3164 regression guard)"
+        run: pnpm --filter web verify:no-new-raw-button
+
+      # story #3739(2026-09-09) 메타 가드 — package.json에 등재된 verify:* 스크립트
+      # 집합이 이 ci.yml에서 실제로 부르는 집합의 부분집합이 아니면(새 verify:* 스크립트를
+      # 만들고 여기 안 물리면) FAIL. story #3736 ⑪·이 스토리 자신(no-direct-backend-v2-call·
+      # no-new-raw-button)이 겪은 「만들어졌는데 도는 자리 없음」 클래스의 재발을 막는다.
+      - name: "Verify ci.yml wires every package.json verify:* script (story #3739 meta guard)"
+        run: pnpm --filter web verify:ci-wires-all-verify-scripts
+
       - name: Test
         # set -o pipefail so vitest's non-zero exit propagates through `| tail` instead
         # of being masked by tail's 0 — without it the unit-test gate was a no-op
