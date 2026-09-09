@@ -86,6 +86,28 @@ describe('extractRawFetchApiCalls — 주석·문자열 안 fetch 오탐 봉쇄(
     );
     expect(hits).toEqual([]);
   });
+
+  // (d) 페드루 PO 지적(2026-09-09, 유나 PASS 뒤 fail-open 칸) — (a)~(c)는 전부 «오탐을
+  // 막는» 방향이다. 놓치는 방향(fail-open)은 문자열 리터럴 안의 `//`가 «진짜 주석
+  // 시작」으로 오인돼 그 뒤(같은 줄의 실 raw fetch)가 통째로 지워지는 경우 — 3716
+  // AC1 「문자열 리터럴 안」 낱말이 정확히 이 칸이다.
+  it('(d) 문자열 리터럴 안의 `//`(URL 등) 뒤에 와도 같은 줄의 실 raw fetch를 놓치지 않는다(fail-open 방지)', () => {
+    const hits = extractRawFetchApiCalls(
+      "const cdn = 'https://cdn.example.com//assets'; const r = await fetch('/api/real');",
+      'components/some-file.ts',
+    );
+    expect(hits).toHaveLength(1);
+    expect(hits[0]!.urlPrefix).toBe('/api/real');
+  });
+
+  it('(d-2) 백틱 템플릿 리터럴 안의 `//`(URL 등) 뒤에 와도 같은 줄의 실 raw fetch를 놓치지 않는다', () => {
+    const hits = extractRawFetchApiCalls(
+      'const base = `${origin}//x`; const r = await fetch(\'/api/real\');',
+      'components/some-file.ts',
+    );
+    expect(hits).toHaveLength(1);
+    expect(hits[0]!.urlPrefix).toBe('/api/real');
+  });
 });
 
 // story #2691 — 선언된 baseline 크기를 고정해 조용한 증감(리뷰 없는 추가/삭제)을 막는다
