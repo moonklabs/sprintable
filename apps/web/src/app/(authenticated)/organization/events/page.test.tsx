@@ -51,9 +51,12 @@ function asMember() {
   });
 }
 
+// story #3745(BE name 필수화) — 실 프리셋은 항상 name을 갖는다(0245/0274 시드 관례,
+// 0358이 잔존 1건도 백필). 픽스처도 실물과 같은 모양으로.
 function preset(overrides: Record<string, unknown> = {}) {
   return {
     key: 'preset.gate.verdict',
+    name: '게이트 판정',
     org_id: null,
     payload_schema: { type: 'object', properties: {}, additionalProperties: false },
     routing: { escalation: { kind: 'server_derived', target: 'none' }, broadcast: { kind: 'server_derived', target: 'work_item_stakeholders' } },
@@ -69,6 +72,7 @@ function preset(overrides: Record<string, unknown> = {}) {
 function customNoId(overrides: Record<string, unknown> = {}) {
   return {
     key: 'org.moonklabs.work.decision',
+    name: '작업 판단',
     org_id: ORG_ID,
     payload_schema: { type: 'object', properties: {}, additionalProperties: false },
     routing: { escalation: { kind: 'server_derived', target: 'none' }, broadcast: { kind: 'server_derived', target: 'none' } },
@@ -142,6 +146,16 @@ function switchToAdvancedTab() {
   tabBtn.click();
 }
 
+// story #3745 — 이름 필드는 탭(기본/고급) 밖이라 두 경로 모두 이 헬퍼로 채운다. 대부분의
+// 기존 제출 테스트는 이름 자체를 안 따지므로 값 하나면 충분(빈 값이면 submit()이 그
+// 자리에서 막는다 — 새 클라측 선검증).
+function fillName(value: string) {
+  const nameInput = document.body.querySelector('#event-name') as HTMLInputElement;
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+  setter.call(nameInput, value);
+  nameInput.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
 describe('OrganizationEventsPage', () => {
   it('프리셋·커스텀 그룹을 나눠 렌더하고 관리자에겐 새 정의 버튼이 뜬다', async () => {
     mockFetches([preset(), customWithId()]);
@@ -173,17 +187,23 @@ describe('OrganizationEventsPage', () => {
 
   // 카디르 QA changes(#4082) — 부제 가드를 `def.name`만으로 완화(name!==key 비교 제거)하면
   // name===key 행(org 커스텀 4행 name=key 방치 사례와 동형)에도 부제가 또 떠 이 테스트가
-  // RED가 된다(raw 값 한 줄 두 번 회귀 — name이 없는 행은 애초에 def.name도 falsy라
-  // 그 완화로는 안 잡힘, 정확히 이 name===key 케이스로만 잡힌다).
-  it('story #3737(D2, 페드루 CHANGES②) — name===key(백필 안 된 org 커스텀) 행은 부제 없음·name≠key 행만 부제가 뜬다', async () => {
+  // RED가 된다(raw 값 한 줄 두 번 회귀 — 제목 자리 값(titleLabel)이 key와 같을 때만 안 뜬다).
+  // story #3745(페드루 PO 決·유나 定, #4090 이후 이어진 잔존 처방) — name이 아예 없는 행은
+  // 이제 제목이 「이름 없는 이벤트」(key가 아님)라 부제(key)가 정직하게 뜬다 — 옛
+  // `name || key` 폴백(raw 키가 제목 자리에 서던 결함)이 걷힌 결과.
+  it('story #3737(D2)+#3745 — name===key(백필 안 된 org 커스텀) 행만 부제 없음·이름 없는 행·name≠key 행은 부제(key)가 뜬다', async () => {
     mockFetches([
       customWithId({ id: 'def-samekey', key: 'org.moonklabs.same_as_key', name: 'org.moonklabs.same_as_key' }),
-      customWithId({ id: 'def-nameless', key: 'org.moonklabs.no_name' }), // name 자체가 없음 → 폴백
+      customWithId({ id: 'def-nameless', key: 'org.moonklabs.no_name', name: '' }), // name 자체가 없음 → 「이름 없는 이벤트」
       customWithId({ id: 'def-named', key: 'org.moonklabs.named', name: '배포 완료' }),
     ]);
     await mount();
+    // title===key인 자리(name을 key 그대로 등록한 옛 데이터)만 부제 억제 — 여기서만 raw
+    // 값이 두 번 서는 것을 막는다.
     expect(container.querySelector('[data-testid="event-def-key-subtitle-org.moonklabs.same_as_key"]')).toBeNull();
-    expect(container.querySelector('[data-testid="event-def-key-subtitle-org.moonklabs.no_name"]')).toBeNull();
+    // name이 없으면 제목이 「이름 없는 이벤트」(key가 아니다) — 부제로 key가 정직하게 뜬다.
+    expect(container.querySelector('[data-testid="event-def-key-subtitle-org.moonklabs.no_name"]')?.textContent).toBe('org.moonklabs.no_name');
+    expect(container.textContent).toContain(koMessages.organization.eventUnnamedDefinition);
     expect(container.querySelector('[data-testid="event-def-key-subtitle-org.moonklabs.named"]')?.textContent).toBe('org.moonklabs.named');
   });
 
@@ -229,7 +249,8 @@ describe('OrganizationEventsPage', () => {
   it('키 항목 클릭 시 payload_schema/routing JSON이 펼쳐진다', async () => {
     mockFetches([preset()]);
     await mount();
-    const keyBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === 'preset.gate.verdict')!;
+    // story #3745 — 행 제목이 name(게이트 판정)이라 key로는 못 찾는다.
+    const keyBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '게이트 판정')!;
     expect(container.textContent).not.toContain('"work_item_stakeholders"');
     await act(async () => { keyBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(container.textContent).toContain('"work_item_stakeholders"');
@@ -244,6 +265,7 @@ describe('OrganizationEventsPage', () => {
 
     const keyInput = document.body.querySelector('#event-key') as HTMLInputElement;
     await act(async () => {
+      fillName('내 이벤트'); // story #3745 — 이름 필수, 없으면 submit()이 그 자리에서 막는다.
       const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
       setter.call(keyInput, 'my_event');
       keyInput.dispatchEvent(new Event('input', { bubbles: true }));
@@ -254,6 +276,7 @@ describe('OrganizationEventsPage', () => {
     const postCall = calls.find((c) => c.method === 'POST' && c.url === '/api/events/definitions');
     expect(postCall).toBeDefined();
     const body = JSON.parse(postCall!.body!);
+    expect(body.name).toBe('내 이벤트');
     expect(body.key).toBe('org.moonklabs.my_event');
     expect(body.payload_schema).toEqual({ type: 'object', properties: {}, required: [], additionalProperties: false });
     expect(body.action_auth).toBeNull();
@@ -345,6 +368,7 @@ describe('OrganizationEventsPage', () => {
     await act(async () => { switchToAdvancedTab(); });
     const keyInput = document.body.querySelector('#event-key') as HTMLInputElement;
     await act(async () => {
+      fillName('테스트 이벤트'); // story #3745 — 이름 필수.
       const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
       setter.call(keyInput, 'x');
       keyInput.dispatchEvent(new Event('input', { bubbles: true }));
@@ -387,6 +411,9 @@ describe('OrganizationEventsPage — 이벤트 정의기(story #2670 A층)', () 
     await act(async () => { createBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
     await act(async () => {
+      // story #3745 — #definer-name(block_template 헤더용, 기존)과 #event-name(정의
+      // 목록 제목용, 신규)은 다른 값이다 — 둘 다 채운다.
+      fillName('릴리즈 흐름');
       setInputValue(dialogContent().querySelector('#definer-name') as HTMLInputElement, '릴리즈 흐름');
       setInputValue(dialogContent().querySelector('#definer-key') as HTMLInputElement, 'release_flow');
     });
@@ -428,6 +455,7 @@ describe('OrganizationEventsPage — 이벤트 정의기(story #2670 A층)', () 
     const createBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.organization.eventCreateCta)!;
     await act(async () => { createBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await act(async () => {
+      fillName('테스트'); // story #3745 — 이름 필수.
       setInputValue(dialogContent().querySelector('#definer-key') as HTMLInputElement, 'x');
     });
     const addStageBtn = [...dialogContent().querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.organization.definerAddStage))!;
@@ -460,6 +488,7 @@ describe('OrganizationEventsPage — 이벤트 정의기(story #2670 A층)', () 
     const createBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.organization.eventCreateCta)!;
     await act(async () => { createBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await act(async () => {
+      fillName('테스트'); // story #3745 — 이름 필수.
       setInputValue(dialogContent().querySelector('#definer-key') as HTMLInputElement, 'y');
     });
     const recordOnlyRadio = [...dialogContent().querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.organization.definerRoutingRecordTitle)) as HTMLButtonElement;
@@ -486,6 +515,27 @@ describe('OrganizationEventsPage — 이벤트 정의기(story #2670 A층)', () 
     await act(async () => { createBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     const submitBtn = [...dialogContent().querySelectorAll('button')].find((b) => b.textContent === koMessages.organization.eventCreateSubmit) as HTMLButtonElement;
     expect(submitBtn.disabled).toBe(true);
+  });
+
+  // story #3745 — 키 검증(definerKeyError, 위 테스트)과 같은 급의 fail-closed. 키·단계는
+  // 채우고 이름만 비운 상태를 따로 재 이름 자체가 원인임을 못박는다(되돌리면 RED).
+  it('⭐키·단계를 채워도 이름이 비어 있으면 저장 버튼이 비활성이다', async () => {
+    mockFetches([]);
+    await mount();
+    const createBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.organization.eventCreateCta)!;
+    await act(async () => { createBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => {
+      setInputValue(dialogContent().querySelector('#definer-key') as HTMLInputElement, 'z');
+    });
+    const addStageBtn = [...dialogContent().querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.organization.definerAddStage))!;
+    await act(async () => { addStageBtn.click(); });
+    await act(async () => {
+      setInputValue(dialogContent().querySelector('input[placeholder="' + koMessages.organization.definerStageNamePlaceholder + '"]') as HTMLInputElement, 'a');
+    });
+    const submitBtn = [...dialogContent().querySelectorAll('button')].find((b) => b.textContent === koMessages.organization.eventCreateSubmit) as HTMLButtonElement;
+    expect(submitBtn.disabled).toBe(true);
+    await act(async () => { fillName('이제 채움'); });
+    expect(submitBtn.disabled).toBe(false);
   });
 
   // AC3 — JSON→폼 왕복.
@@ -540,7 +590,7 @@ describe('OrganizationEventsPage — 발행 이력(story #2665)', () => {
     const calls: { url: string }[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       calls.push({ url });
-      if (url === '/api/events/definitions') return { ok: true, json: async () => [customWithId({ id: 'def-1', key: 'org.moonklabs.my_event' })] };
+      if (url === '/api/events/definitions') return { ok: true, json: async () => [customWithId({ id: 'def-1', key: 'org.moonklabs.my_event', name: '내 이벤트' })] };
       if (url.startsWith('/api/events/definitions/publish-history')) {
         return {
           ok: true,
@@ -552,7 +602,8 @@ describe('OrganizationEventsPage — 발행 이력(story #2665)', () => {
       return { ok: true, json: async () => ({}) };
     }));
     await mount();
-    const keyBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === 'org.moonklabs.my_event')!;
+    // story #3745 — 행 제목이 name이라 key로는 못 찾는다.
+    const keyBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '내 이벤트')!;
     await act(async () => { keyBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 
@@ -569,7 +620,8 @@ describe('OrganizationEventsPage — 발행 이력(story #2665)', () => {
   it('이력이 빈 배열이면 빈 상태 문구를 보인다', async () => {
     mockFetches([customWithId({ id: 'def-2', key: 'org.moonklabs.empty_event' })]);
     await mount();
-    const keyBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === 'org.moonklabs.empty_event')!;
+    // story #3745 — 행 제목이 name(customWithId 기본값 「작업 판단」)이라 key로는 못 찾는다.
+    const keyBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '작업 판단')!;
     await act(async () => { keyBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
     expect(container.textContent).toContain(koMessages.organization.eventPublishHistoryEmpty);
@@ -582,7 +634,7 @@ describe('OrganizationEventsPage — 발행 이력(story #2665)', () => {
       return { ok: true, json: async () => ({}) };
     }));
     await mount();
-    const keyBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === 'org.moonklabs.err_event')!;
+    const keyBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '작업 판단')!;
     await act(async () => { keyBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
     expect(container.textContent).toContain(koMessages.organization.eventPublishHistoryError);
@@ -594,7 +646,7 @@ describe('OrganizationEventsPage — 발행 이력(story #2665)', () => {
     asMember();
     const calls = mockFetches([customWithId({ id: 'def-4', key: 'org.moonklabs.member_view' })]);
     await mount();
-    const keyBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === 'org.moonklabs.member_view')!;
+    const keyBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '작업 판단')!;
     await act(async () => { keyBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
     expect(calls.some((c) => c.url.startsWith('/api/events/definitions/publish-history'))).toBe(false);
@@ -644,6 +696,7 @@ describe('OrganizationEventsPage — 고급 탭 key 문자셋 클라 선검증(s
     const keyInput = document.body.querySelector('#event-key') as HTMLInputElement;
     const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
     await act(async () => {
+      fillName('테스트'); // story #3745 — 이름도 채워야 저장이 열린다.
       setter.call(keyInput, 'bad-key');
       keyInput.dispatchEvent(new Event('input', { bubbles: true }));
     });

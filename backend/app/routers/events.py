@@ -26,7 +26,7 @@ from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 from sqlalchemy import String, and_, cast, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -2204,9 +2204,12 @@ async def get_onboarding_guide(
 class CreateEventDefinitionRequest(BaseModel):
     key: str
     # story #2792(2790 P1, PO 확定 2026-08-19 ①) — 사람용 표시 이름(드롭다운 등). key는
-    # 기계용 식별자로 그대로 둔다. 기본값 ""은 DB server_default와 동일 안전망 컨벤션(#2636
-    # 기존 호출부가 name 없이도 여전히 동작 — 신규 필드가 기존 계약을 안 깬다).
-    name: str = ""
+    # 기계용 식별자로 그대로 둔다.
+    # story #3745(페드루 PO 決 2026-09-09) — 옛 기본값 ""(#2636 하위호환 안전망)이 "이름
+    # 없는 정의"(화면에 코드 키가 그대로 서는 결함)의 발생 경로였다 — 기본값을 없애 필수화
+    # (누락 자체가 자동 422), 빈 문자열·공백뿐인 값도 검증기로 막는다. 기존 행은 무변
+    # (이 검증은 신규 생성부터만 적용).
+    name: str
     description: str | None = None
     payload_schema: dict
     routing: dict
@@ -2222,8 +2225,18 @@ class CreateEventDefinitionRequest(BaseModel):
     # 가드①) — 비어 있으면(신호형/측정형) 검증 스킵.
     stage_metadata: dict = {}
 
+    @field_validator("name")
+    @classmethod
+    def _name_not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("name은 비울 수 없습니다(공백뿐인 값도 안 됨)")
+        return v
+
 
 class UpdateEventDefinitionRequest(BaseModel):
+    # story #3745 — PATCH는 부분 갱신이라 None(=이 필드는 안 건드림)은 그대로 허용한다.
+    # 값을 실어 보내는 경우에만(빈 문자열·공백뿐인 값 포함) 막는다 — "이름을 지운다"는
+    # 요청 자체가 성립하지 않는다(정의는 항상 이름을 가진다는 계약).
     name: str | None = None
     description: str | None = None
     payload_schema: dict | None = None
@@ -2232,6 +2245,13 @@ class UpdateEventDefinitionRequest(BaseModel):
     block_template: dict | None = None
     action_auth: dict | None = None
     stage_metadata: dict | None = None
+
+    @field_validator("name")
+    @classmethod
+    def _name_not_blank_if_present(cls, v: str | None) -> str | None:
+        if v is not None and not v.strip():
+            raise ValueError("name은 비울 수 없습니다(공백뿐인 값도 안 됨)")
+        return v
 
 
 class EventDefinitionDetailResponse(BaseModel):
