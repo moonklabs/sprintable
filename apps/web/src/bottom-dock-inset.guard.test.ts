@@ -56,9 +56,16 @@ function findFixedBottomLines(): Hit[] {
 // «코너» 요소가 아님). 조용히 빼지 않고 파일+이유를 명시 등재한다.
 const FULL_WIDTH_ALLOWLIST: Record<string, string> = {
   'components/ui/sheet.tsx':
-    'data-[side=bottom]:bottom-0 — inset-x-0 전폭 바텀시트 프리미티브(코너 요소 아님)',
+    'data-[side=bottom]:bottom-0 — inset-x-0 전폭 바텀시트 프리미티브. 이 카드의 축은 '
+    + '"탭 바를 덮나"인데, 시트는 뜨는 동안 탭 바 자체가 뒤에 있어도 화면 전체를 이미 '
+    + '전경으로 덮는 모달류라(z-50, 배경 스크림 동반) "탭 바가 가려지는가"라는 질문 자체가 '
+    + '무의미하다(가려지는 게 그 UI의 목적).',
   'components/docs/doc-editor.tsx':
-    'fixed bottom-0 left-0 right-0 — 모바일 전폭 하단 편집 툴바(md:hidden), 코너 요소 아님',
+    'fixed bottom-0 left-0 right-0 — 모바일 문서 편집기의 하단 툴바(md:hidden)는 '
+    + '`isFocused`(에디터 포커스, 즉 온스크린 키보드가 올라온 상태)일 때만 translate-y-0로 '
+    + '뜬다. 포커스 中엔 키보드 자체가 화면 하단을 이미 물리적으로 가리는 상태라 그 아래 '
+    + '있던 탭 바는 그 순간 애초에 눌리는 대상이 아니다 — "고정 요소가 탭 바를 새로 가린다"는 '
+    + '이 카드의 결함 축이 성립하지 않는다(키보드가 이미 가리고 있던 자리) — 이 카드 밖.',
 };
 
 const DOCK_INSET_VAR = '--bottom-dock-inset';

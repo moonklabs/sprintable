@@ -121,11 +121,18 @@ export function SupportWidgetLauncher() {
         {open ? <X className="h-5 w-5" aria-hidden /> : <LifeBuoy className="h-5 w-5" aria-hidden />}
       </button>
       {open ? (
+        // story #3756(카디르 QA·codex 동일 정적계산) — bottom은 --bottom-dock-inset만큼
+        // 올랐는데 높이 상한(11rem)이 그 인상분을 안 빼 375×667(iPhone SE급)에서 패널 상단이
+        // 화면 밖(-17px)으로 밀려났다. 11rem = 패널 bottom 오프셋(8.75rem) + 상단 여백(2.25rem)
+        // — bottom이 --bottom-dock-inset만큼 더 올라간 만큼 상한도 똑같이 그 값을 뺀다(100vh -
+        // 11rem - var(--bottom-dock-inset)). lg 이상(dock-inset=0)에선 기존 계산과 완전히
+        // 동일(회귀 0) — 값은 그대로, 원천만 인셋 인지로 교체(story #3759에서 컬럼 재설계 시
+        // 이 수 자체가 걷힐 예정, 임시 처방).
         <div
           id={PANEL_ID}
           role="dialog"
           aria-label={t('panelTitle')}
-          className="fixed right-5 bottom-[calc(var(--bottom-dock-inset)+8.75rem)] z-40 flex h-[min(480px,calc(100vh-11rem))] w-[360px] max-w-[calc(100vw-2.5rem)] flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl"
+          className="fixed right-5 bottom-[calc(var(--bottom-dock-inset)+8.75rem)] z-40 flex h-[min(480px,calc(100vh-11rem-var(--bottom-dock-inset)))] w-[360px] max-w-[calc(100vw-2.5rem)] flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl"
         >
           <SupportWidgetPanelHeader onClose={() => setOpen(false)} />
           <SupportWidgetPanelBody session={session} />

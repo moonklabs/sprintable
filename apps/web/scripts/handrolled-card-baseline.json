@@ -280,7 +280,7 @@
     "components/standup/board-bridge-modal.tsx::flex w-full items-center justify-between gap-2 rounded-lg border border-border/70 bg-background p-2.5 text-left transition hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50",
     "components/standup/standup-board-card.tsx::flex flex-col rounded-xl border border-border bg-card shadow-[var(--elev-card)]",
     "components/standup/standup-history-section.tsx::rounded-lg border border-border bg-card p-3",
-    "components/support-widget/support-widget-launcher.tsx::fixed bottom-[8.75rem] right-5 z-40 flex h-[min(480px,calc(100vh-11rem))] w-[360px] max-w-[calc(100vw-2.5rem)] flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl",
+    "components/support-widget/support-widget-launcher.tsx::fixed right-5 bottom-[calc(var(--bottom-dock-inset)+8.75rem)] z-40 flex h-[min(480px,calc(100vh-11rem-var(--bottom-dock-inset)))] w-[360px] max-w-[calc(100vw-2.5rem)] flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl",
     "components/support-widget/support-widget-panel.tsx::min-w-0 flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50",
     "ee/components/billing/pricing-packs.tsx::rounded-2xl border border-border bg-card p-4",
     "ee/components/billing/pricing-plan-card.tsx::relative flex flex-col rounded-2xl border border-border bg-card p-4"
