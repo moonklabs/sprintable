@@ -83,6 +83,10 @@ class InsightsBoardResponse(BaseModel):
     rows: list[InsightsBoardRow]
     has_more: bool
     next_cursor: str | None
+    # story #3746(3734 §4-C) — 초안 1개 보관이 언어별 발행 행 N개를 한꺼번에 숨길 수
+    # 있다(work_item_id 조인, lang은 그 유니크 밖). include_deleted=True(「보관됨 보기」)
+    # 뷰에서는 무의미해 null.
+    hidden_count: int | None = None
 
 
 class MeasuredMetricValue(BaseModel):

@@ -114,11 +114,16 @@ function stubFetch(opts: {
   page2?: unknown[];
   followUp?: (init?: RequestInit) => { status: number; body: unknown };
   reconcile?: (init?: RequestInit) => { status: number; body: unknown };
+  // story #3746(3734 §4-C) — 숨은 건수(초안 보관이 언어별 발행 행 여러 개를
+  // 한꺼번에 숨긴 경우). include_deleted=true 뷰에선 null이 정직한 값이라
+  // 그 URL일 땐 hiddenCount와 무관하게 항상 null을 낸다.
+  hiddenCount?: number | null;
 }) {
   const page1 = opts.page1 ?? [ROW_A, ROW_B, ROW_C];
   const page1HasMore = opts.page1HasMore ?? false;
   const page1NextCursor = opts.page1NextCursor ?? null;
   const page2 = opts.page2 ?? [];
+  const hiddenCount = opts.hiddenCount ?? null;
   const calls: string[] = [];
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     calls.push(url);
@@ -146,10 +151,17 @@ function stubFetch(opts: {
     }
     if (url.includes('/insights-board')) {
       const usingCursor = url.includes('cursor=');
+      const includeDeleted = url.includes('include_deleted=true');
       const rows = usingCursor ? page2 : page1;
       return {
         ok: true, status: 200,
-        json: async () => ({ data: { rows, has_more: usingCursor ? false : page1HasMore, next_cursor: usingCursor ? null : page1NextCursor }, error: null, meta: null }),
+        json: async () => ({
+          data: {
+            rows, has_more: usingCursor ? false : page1HasMore, next_cursor: usingCursor ? null : page1NextCursor,
+            hidden_count: includeDeleted ? null : hiddenCount,
+          },
+          error: null, meta: null,
+        }),
       } as Response;
     }
     return { ok: false, status: 404, json: async () => ({ data: null, error: { code: 'NOT_FOUND' } }) } as Response;
@@ -171,9 +183,11 @@ describe('InsightsBoardPage — d1/d7 셀 3겹 null 축(story #3503)', () => {
     expect(rowACells[0]?.textContent).toBe('0');
 
     // Row B: d1=pending(상태만) · d7=failed(destructive 톤).
+    // story #3746(유나 v5) — 셀 라벨은 이제 「아직」(insightStatusWaiting, pending·
+    // in_progress 공용) — 대기 중」이 아니다(그 값은 필터 라벨로 이동).
     const rowBStatusCells = rows[1]!.querySelectorAll('[data-testid="insights-board-cell-status"]');
     expect(rowBStatusCells).toHaveLength(2);
-    expect(rowBStatusCells[0]?.textContent).toBe(koMessages.content.insightStatusPending);
+    expect(rowBStatusCells[0]?.textContent).toBe(koMessages.content.insightStatusWaiting);
     expect(rowBStatusCells[1]?.textContent).toBe(koMessages.content.insightStatusFailed);
     expect(rowBStatusCells[1]?.className).toContain('text-destructive');
     expect(rowBStatusCells[0]?.className).not.toContain('text-destructive');
@@ -196,6 +210,28 @@ describe('InsightsBoardPage — d1/d7 셀 3겹 null 축(story #3503)', () => {
     stubFetch({ page1: [] });
     await mount();
     expect(container.textContent).toContain(koMessages.insightsBoard.emptyTitle);
+  });
+
+  // story #3746(유나 픽셀 PASS 곁들임, 2026-09-09) — 「발행」 칸이 merge-base부터
+  // 상대 시각(formatRelativeTime)이었다 — 「그저께」류가 서로 다른 날을 겹쳐 가리고
+  // (정렬 축인데 눈으로 안 갈림)·d1/d7 앵커 기준인데 ±12h가 뭉개지고·7일 지나면
+  // 절대 표기로 넘어가 30d/90d 기간에선 한 열에 표기가 섞였다. §11-2 정본 절대
+  // 포맷(formatScheduledAt)으로 고정 — 이 화면의 다른 절대-시각 칸과 형이 맞는다.
+  //
+  // ROW_A~C는 고정 과거 날짜(2026-09-01 등)라 formatRelativeTime 자체가 이미
+  // 7일 초과 분기에서 formatScheduledAt로 위임한다(§ 위 주석 그대로) — 그
+  // 고정 픽스처로는 이 뮤테이션(포맷 함수를 되돌리는 것)이 안 걸린다. 이 테스트는
+  // «지금부터 2일 전»을 매번 계산해 formatRelativeTime이 정말 쓰였다면 반드시
+  // 상대 문구("2일 전"류)가 나올 자리를 만든다(뮤테이션 킬로 실제 확認 완료).
+  it('⭐「발행」 칸이 §11-2 정본 절대 포맷(MM-DD HH:mm)이다 — 상대 시각(예: N일 전) 아님', async () => {
+    const recentPublishedAt = new Date(Date.now() - 2 * 86400000).toISOString();
+    stubFetch({ page1: [{ ...ROW_A, published_at: recentPublishedAt }] });
+    await mount();
+
+    const rows = [...container.querySelectorAll('[data-testid="insights-board-row"]')];
+    const publishedCell = rows[0]!.querySelector('[data-testid="insights-board-published-at"]');
+    expect(publishedCell?.textContent).toMatch(/^\d{2}-\d{2} \d{2}:\d{2} /);
+    expect(publishedCell?.textContent).not.toMatch(/전|그저께|어제|오늘/);
   });
 });
 
@@ -227,6 +263,55 @@ describe('InsightsBoardPage — 쿼리 파라미터(story #3503)', () => {
     await openMenuAndClick('insights-board-status-trigger', koMessages.content.insightStatusFailed);
     const lastUrl = routerReplaceMock.mock.calls.at(-1)?.[0] as string;
     expect(lastUrl).toContain('status=failed');
+  });
+
+  // story #3746(유나 v5) — 출처는 InsightSnapshot.status(BE)다, FE가 지어내는 옵션이
+  // 아니다. 통 넷: 수집 대기(pending+in_progress)·수집됨·채널 미제공·실패.
+  // superseded는 옵션이 아니고(BE 기본 배제), dead_letter도 옵션이 아니다(유령,
+  // BE 서비스 전수 0건).
+  describe('InsightsBoardPage — 수집 상태 필터 통 넷(story #3746)', () => {
+    it('⭐뮤테이션 표적 — dead_letter는 필터 옵션 목록에 없다(전체 상태 메뉴 항목 전수)', async () => {
+      stubFetch({});
+      await mount();
+      const trigger = container.querySelector('[data-testid="insights-board-status-trigger"]') as HTMLElement;
+      await act(async () => {
+        trigger.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+        trigger.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+        trigger.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+      const items = [...document.querySelectorAll('[role="menuitem"]')].map((el) => el.textContent);
+      // 「전체 상태」+통 넷 = 정확히 5개(다섯 번째가 몰래 늘면(예: dead_letter 부활) 이 길이 자체가 어긋난다).
+      expect(items).toHaveLength(5);
+      expect(items).not.toContain('자동 재시도 멈춤');
+      // PO CHANGES②(2026-09-09) — 드롭다운은 선택지 자리(명사구)라 상세 블록 전용
+      // 문장(insightSnapshotUnsupported)이 아니라 셀과 같은 명사구(insightStatusUnsupported)
+      // 를 쓴다(한 통 한 낱말).
+      expect(items).toEqual([
+        koMessages.insightsBoard.statusFilterAll,
+        koMessages.insightsBoard.statusFilterPending,
+        koMessages.content.insightStatusCaptured,
+        koMessages.content.insightStatusUnsupported,
+        koMessages.content.insightStatusFailed,
+      ]);
+    });
+
+    it('⭐「수집 대기」를 고르면(pending+in_progress 한 통) router.replace 쿼리엔 status=pending이 실린다(값 두 벌 아님)', async () => {
+      stubFetch({});
+      await mount();
+      await openMenuAndClick('insights-board-status-trigger', koMessages.insightsBoard.statusFilterPending);
+      const lastUrl = routerReplaceMock.mock.calls.at(-1)?.[0] as string;
+      expect(lastUrl).toContain('status=pending');
+      expect(lastUrl).not.toContain('in_progress');
+    });
+
+    it('트리거에 status=pending이 URL에 실려 있으면 「수집 대기」 라벨을 보인다(content.insightStatusPending의 「대기 중」이 아니다)', async () => {
+      useSearchParamsMock.mockReturnValue(new URLSearchParams('status=pending'));
+      stubFetch({});
+      await mount();
+      const trigger = container.querySelector('[data-testid="insights-board-status-trigger"]');
+      expect(trigger?.textContent).toBe(koMessages.insightsBoard.statusFilterPending);
+      expect(trigger?.textContent).not.toBe(koMessages.content.insightStatusPending);
+    });
   });
 
   it('정렬 드롭다운에서 항목을 고르면 router.replace 쿼리에 sort 역할(role)이 실린다 — 지표는 URL엔 별도, 실제 fetch에서 합성된다', async () => {
@@ -273,6 +358,68 @@ describe('InsightsBoardPage — 쿼리 파라미터(story #3503)', () => {
     expect(firstCall).toContain('status=failed');
     expect(firstCall).toContain('sort=clicks_d7');
     expect(firstCall).toContain('sort_dir=asc');
+  });
+});
+
+// story #3746(3734 AC3 잔존 A) — 목록 두 화면(content/page.tsx·channel-posts/
+// page.tsx)과 같은 낱말·같은 파라미터명(showArchivedToggle/hideArchivedToggle·
+// include_deleted=true).
+describe('InsightsBoardPage — 보관됨 보기 토글·숨은 건수(story #3746)', () => {
+  it('⭐토글이 꺼진 기본 상태 — fetch 쿼리에 include_deleted가 안 실린다', async () => {
+    const calls = stubFetch({});
+    await mount();
+    const firstCall = calls.find((c) => c.includes('/insights-board'));
+    expect(firstCall).not.toContain('include_deleted');
+  });
+
+  it('⭐토글을 켜면(「보관됨 보기」 클릭) 라벨이 「보관됨 숨기기」로 바뀌고 include_deleted=true가 fetch 쿼리에 실린다', async () => {
+    const calls = stubFetch({});
+    await mount();
+    const toggle = container.querySelector('[data-testid="insights-board-show-archived-toggle"]') as HTMLElement;
+    expect(toggle.textContent).toBe(koMessages.content.showArchivedToggle);
+    await act(async () => { toggle.click(); });
+    await flush();
+    expect(toggle.textContent).toBe(koMessages.content.hideArchivedToggle);
+    const lastCall = calls.filter((c) => c.includes('/insights-board')).at(-1);
+    expect(lastCall).toContain('include_deleted=true');
+  });
+
+  it('⭐숨은 건수가 있으면(기본 뷰) 「N건 숨김」이 뜬다 — 셀 수 있을 때만', async () => {
+    stubFetch({ hiddenCount: 3 });
+    await mount();
+    expect(container.querySelector('[data-testid="insights-board-hidden-count"]')?.textContent)
+      .toBe(koMessages.insightsBoard.archivedHiddenCount.replace('{count}', '3'));
+  });
+
+  it('숨은 건수가 0이거나 모르면(null) 「N건 숨김」을 안 그린다(지어내지 않는다)', async () => {
+    stubFetch({ hiddenCount: 0 });
+    await mount();
+    expect(container.querySelector('[data-testid="insights-board-hidden-count"]')).toBeNull();
+  });
+
+  it('⭐보관됨 보기를 켠 뷰에선 숨은 건수 줄 자체를 안 그린다(그 뷰에선 무의미)', async () => {
+    stubFetch({ hiddenCount: 3 });
+    await mount();
+    const toggle = container.querySelector('[data-testid="insights-board-show-archived-toggle"]') as HTMLElement;
+    await act(async () => { toggle.click(); });
+    await flush();
+    expect(container.querySelector('[data-testid="insights-board-hidden-count"]')).toBeNull();
+  });
+
+  // 페드루/유나 定 — 「선택한 조건에 해당하는 발행 글이 아직 없습니다」는 사용자가
+  // 조건을 고른 적 없을 때(필터 0·보관됨 보기 꺼짐인데 빈 화면) 틀린 말이다.
+  it('⭐필터 0인데 빈 화면 + 숨은 건수 > 0 — 「조건」 문구가 아니라 보관 때문임을 말하는 문구가 뜬다', async () => {
+    stubFetch({ page1: [], hiddenCount: 5 });
+    await mount();
+    expect(container.textContent).toContain(koMessages.insightsBoard.archivedEmptyReason);
+    expect(container.textContent).not.toContain(koMessages.insightsBoard.emptyDescription);
+  });
+
+  it('필터 0인데 빈 화면 + 숨은 건수 0(진짜 아무것도 없음) — 원래 빈 상태 문구 그대로', async () => {
+    stubFetch({ page1: [], hiddenCount: 0 });
+    await mount();
+    expect(container.textContent).toContain(koMessages.insightsBoard.emptyDescription);
+    expect(container.textContent).not.toContain(koMessages.insightsBoard.archivedEmptyReason);
   });
 });
 

@@ -966,3 +966,230 @@ async def test_asset_hook_evidence_query_count_not_proportional_to_row_count():
         )
     finally:
         await engine.dispose()
+
+
+# story #3746(유나 v5, 2026-09-09) — 「수집 대기」는 pending+in_progress 한 통이다
+# (다음 발이 같다 — 기다린다). FE는 이 통을 status=pending 하나로 보낸다 — 서비스가
+# 그 값을 두 실 상태로 넓힌다.
+@pytest.mark.anyio
+async def test_status_filter_pending_matches_both_pending_and_in_progress():
+    from app.services.insights_board import list_insights_board
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            story_id = await _seed_story(s, org_id, project_id)
+            now = datetime.now(timezone.utc)
+            sp_pending = await _seed_site_post(
+                s, org_id=org_id, work_item_id=story_id, slug="post-pending", title="Pending",
+                published_at=now - timedelta(days=1),
+            )
+            await _seed_snapshot(
+                s, org_id=org_id, work_item_id=story_id, publication_id=sp_pending.id,
+                publication_kind="site_post", channel="hosted_site",
+                due_at=sp_pending.published_at + timedelta(days=1), status="pending",
+            )
+            sp_in_progress = await _seed_site_post(
+                s, org_id=org_id, work_item_id=story_id, slug="post-in-progress", title="InProgress",
+                published_at=now - timedelta(days=1),
+            )
+            await _seed_snapshot(
+                s, org_id=org_id, work_item_id=story_id, publication_id=sp_in_progress.id,
+                publication_kind="site_post", channel="hosted_site",
+                due_at=sp_in_progress.published_at + timedelta(days=1), status="in_progress",
+            )
+            sp_captured = await _seed_site_post(
+                s, org_id=org_id, work_item_id=story_id, slug="post-captured", title="Captured",
+                published_at=now - timedelta(days=1),
+            )
+            await _seed_snapshot(
+                s, org_id=org_id, work_item_id=story_id, publication_id=sp_captured.id,
+                publication_kind="site_post", channel="hosted_site",
+                due_at=sp_captured.published_at + timedelta(days=1), status="captured",
+                normalized={"views": 1, "impressions": None, "reach": None, "engagements": None,
+                            "clicks": None, "spend": None, "conversions": None},
+            )
+
+            result = await list_insights_board(s, org_id=org_id, window="30d", status="pending")
+
+        publication_ids = {r["publication_id"] for r in result["rows"]}
+        assert publication_ids == {sp_pending.id, sp_in_progress.id}
+        assert sp_captured.id not in publication_ids
+    finally:
+        await engine.dispose()
+
+
+# story #3746(유나 v5) — superseded는 목록의 원천(list_insights_board 스냅샷 배치
+# 조회)에서 기본 배제한다. 화면 넷이 같은 함수를 부르므로 단일화 지점은 여기 하나뿐
+# (화면마다 거르면 「동기화」가 아니라 「갈림」이 된다).
+@pytest.mark.anyio
+async def test_superseded_snapshot_never_surfaces_as_bucket_data():
+    """⭐되돌리면 RED — superseded 배제(`InsightSnapshot.status != "superseded"`)를
+    지우면 이 스냅샷이 d1 버킷 데이터로 다시 뜬다."""
+    from app.services.insights_board import list_insights_board
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            story_id = await _seed_story(s, org_id, project_id)
+            now = datetime.now(timezone.utc)
+            sp = await _seed_site_post(
+                s, org_id=org_id, work_item_id=story_id, slug="post-superseded-only", title="Superseded",
+                published_at=now - timedelta(days=1),
+            )
+            # 재발행이 회수한 옛 사이클의 pending 잔존 행 — 이 publication의 유일한
+            # 스냅샷이라, 배제가 없으면 이 값이 d1으로 뜬다.
+            await _seed_snapshot(
+                s, org_id=org_id, work_item_id=story_id, publication_id=sp.id,
+                publication_kind="site_post", channel="hosted_site",
+                due_at=sp.published_at + timedelta(days=1), status="superseded",
+            )
+
+            result = await list_insights_board(s, org_id=org_id, window="30d")
+
+        row = next(r for r in result["rows"] if r["publication_id"] == sp.id)
+        # 배제가 서 있으면 후보 자체가 없어 "미스케줄"(None)로 떨어진다 — superseded
+        # 행의 존재가 d1에 어떤 형태로도 새지 않는다.
+        assert row["d1"] is None
+    finally:
+        await engine.dispose()
+
+
+# story #3746(유나 v5, 정밀 근인) — label_snapshot_offset이 round(초/86400)라 ±12시간이
+# 같은 정수로 접힌다. 재발행 앵커가 12시간 미만 움직이면 옛 사이클 행(재발행 자가회수로
+# superseded)과 새 행이 둘 다 "1d"로 라벨될 수 있다 — 배제가 있으면 옛 행이 애초에
+# 후보에서 빠져 새 행이 결정적으로 그 칸을 차지한다(DB 반환 순서 무관).
+@pytest.mark.anyio
+async def test_narrow_window_republish_collision_prefers_fresh_over_superseded():
+    """⭐되돌리면 RED — superseded 배제를 지우면 이 표본에서 d1 값이 옛 행(정지된
+    값)과 새 행(진짜 값) 사이에서 DB 반환 순서에 좌우돼 비결정적이 된다."""
+    from app.services.insights_board import list_insights_board
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            story_id = await _seed_story(s, org_id, project_id)
+            now = datetime.now(timezone.utc)
+            # 재발행 뒤 최신 published_at.
+            published_at = now - timedelta(days=2)
+            sp = await _seed_site_post(
+                s, org_id=org_id, work_item_id=story_id, slug="post-republished", title="Republished",
+                published_at=published_at,
+            )
+            # 옛 사이클(재발행 前 anchor) 잔존 행 — due_at이 새 published_at 기준
+            # +23시간(반올림하면 "1d")인데, superseded로 회수됐다(옛 사이클 값이라
+            # 신뢰할 수 없다 — 여기 정규화값은 "틀린" 표본값 999로 표시해 혼입 시 바로
+            # 드러나게 한다).
+            await _seed_snapshot(
+                s, org_id=org_id, work_item_id=story_id, publication_id=sp.id,
+                publication_kind="site_post", channel="hosted_site",
+                due_at=published_at + timedelta(hours=23), status="superseded",
+                normalized={"views": 999, "impressions": None, "reach": None, "engagements": None,
+                            "clicks": None, "spend": None, "conversions": None},
+            )
+            # 새 사이클(재발행 後) 행 — due_at이 +25시간(반올림해도 "1d", 옛 행과 같은
+            # 라벨) — 이 값이 진짜다.
+            await _seed_snapshot(
+                s, org_id=org_id, work_item_id=story_id, publication_id=sp.id,
+                publication_kind="site_post", channel="hosted_site",
+                due_at=published_at + timedelta(hours=25), status="captured",
+                normalized={"views": 7, "impressions": None, "reach": None, "engagements": None,
+                            "clicks": None, "spend": None, "conversions": None},
+            )
+
+            result = await list_insights_board(s, org_id=org_id, window="30d")
+
+        row = next(r for r in result["rows"] if r["publication_id"] == sp.id)
+        assert row["d1"] is not None
+        assert row["d1"]["status"] == "captured"
+        assert row["d1"]["normalized"]["views"] == 7, "옛(superseded) 행의 값 999가 새 값을 덮으면 안 된다"
+    finally:
+        await engine.dispose()
+
+
+# story #3746(3734 §4-C, 유나 실측) — SitePost 유니크는 (org_id, lang, slug)라
+# work_item_id가 없다 — 초안 하나가 여러 lang의 발행 행에 걸린다. 그 초안 보관 하나가
+# 언어별 발행 행 N개를 한꺼번에 숨긴다 — hidden_count가 그 N을 낸다.
+@pytest.mark.anyio
+async def test_hidden_count_counts_all_lang_rows_hidden_by_one_archived_draft():
+    from app.services.insights_board import list_insights_board
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            story_id = await _seed_story(s, org_id, project_id)
+            now = datetime.now(timezone.utc)
+            # 원 초안 1개 — 보관됨.
+            await _seed_site_post_draft(
+                s, org_id=org_id, work_item_id=story_id, slug="multi-lang-post", deleted_at=now,
+            )
+            # 같은 초안에서 파생된 언어별 발행 행 2개(ko·en) — SitePost 유니크가
+            # (org_id, lang, slug)라 같은 work_item_id·slug로 둘 다 만들 수 있다.
+            sp_ko = await _seed_site_post(
+                s, org_id=org_id, work_item_id=story_id, slug="multi-lang-post", lang="ko",
+                title="다국어 글", published_at=now - timedelta(days=1),
+            )
+            sp_en = await _seed_site_post(
+                s, org_id=org_id, work_item_id=story_id, slug="multi-lang-post", lang="en",
+                title="Multi-lang post", published_at=now - timedelta(days=1),
+            )
+
+            result = await list_insights_board(s, org_id=org_id, window="30d")
+
+        assert result["rows"] == []  # 기본 뷰 — 보관돼 둘 다 안 보인다.
+        assert result["hidden_count"] == 2, f"ko·en 두 행이 한 초안 보관으로 숨었다 — {sp_ko.id}, {sp_en.id}"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_hidden_count_null_when_include_deleted_true():
+    """include_deleted=True(「보관됨 보기」 켠 뷰)에서는 이미 다 보이므로 hidden_count가
+    null이다 — 0으로 지어내지 않는다(그 값 자체가 무의미한 축)."""
+    from app.services.insights_board import list_insights_board
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            story_id = await _seed_story(s, org_id, project_id)
+            now = datetime.now(timezone.utc)
+            await _seed_site_post_draft(
+                s, org_id=org_id, work_item_id=story_id, slug="hidden-in-both", deleted_at=now,
+            )
+            await _seed_site_post(
+                s, org_id=org_id, work_item_id=story_id, slug="hidden-in-both", title="글",
+                published_at=now - timedelta(days=1),
+            )
+
+            result = await list_insights_board(s, org_id=org_id, window="30d", include_deleted=True)
+
+        assert result["hidden_count"] is None
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_hidden_count_zero_when_nothing_archived():
+    from app.services.insights_board import list_insights_board
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            story_id = await _seed_story(s, org_id, project_id)
+            now = datetime.now(timezone.utc)
+            await _seed_site_post(
+                s, org_id=org_id, work_item_id=story_id, slug="not-archived", title="글",
+                published_at=now - timedelta(days=1),
+            )
+
+            result = await list_insights_board(s, org_id=org_id, window="30d")
+
+        assert result["hidden_count"] == 0
+    finally:
+        await engine.dispose()

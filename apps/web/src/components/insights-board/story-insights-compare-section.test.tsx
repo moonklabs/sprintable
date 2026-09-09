@@ -169,11 +169,15 @@ describe('StoryInsightsCompareSection — story #3697', () => {
     expect(container.textContent).toContain(koMessages.insightsBoard.insightsBoardMetricUnavailable);
   });
 
-  it('d7 버킷 status가 pending이면 「대기 중」(AC3 — 수집 예정, InsightsBoardMetricCell 재사용)', async () => {
+  // story #3746(유나 v5, 2026-09-09) — InsightsBoardMetricCell의 pending 셀 라벨이
+  // 「대기 중」(insightStatusPending)에서 「아직」(insightStatusWaiting)으로 바뀌었다
+  // (pending·in_progress 공용 — 다음 발이 같다). 이 컴포넌트가 그 셀을 재사용하므로
+  // 여기도 같이 바뀐다.
+  it('d7 버킷 status가 pending이면 「아직」(AC3 — 수집 예정, InsightsBoardMetricCell 재사용)', async () => {
     stubFetchRows([blogRow({ d7: { status: 'pending', normalized: null, captured_at: null } })]);
     await act(async () => { root.render(wrap(<StoryInsightsCompareSection storyId="story-1" />)); });
     await flush();
-    expect(container.textContent).toContain(koMessages.content.insightStatusPending);
+    expect(container.textContent).toContain(koMessages.content.insightStatusWaiting);
   });
 
   it('발행물 카드에 후속 조치 버튼이 있고 클릭하면 FollowUpDialog가 뜬다(AC4)', async () => {

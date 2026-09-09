@@ -26,7 +26,6 @@ import { type ContentPostStatusInput } from '@/components/content/post-status';
 import { StatusChip } from '@/components/content/status-chip';
 import { AuthorKindBadge } from '@/components/content/author-kind-badge';
 import { isSandboxChannelDraft, SandboxTestBadge } from '@/components/content/sandbox-test-badge';
-import { PublishingMetricsBand } from '@/components/content/publishing-metrics-band';
 
 /**
  * story #3402(Phase1·마케팅운영, AC1/AC2/AC3, doc phase1-threads-post-manager-screen-design
@@ -295,10 +294,6 @@ export default function ChannelPostListPage() {
         </TabsList>
       </Tabs>
 
-      {/* story #3484(블루프린트 §7 Phase 1 실측 열) — 발행 계측 띠. 캘린더·연결
-          화면엔 안 얹는다(첫 슬라이스, PO 確定). 채널 연결 0 갈래에선 잴 게 없으니
-          같이 안 그린다. */}
-      {orgId && !hasNoChannels ? <PublishingMetricsBand orgId={orgId} /> : null}
 
       {connections !== null && !hasNoChannels ? (
         <div className="flex items-center justify-between gap-4">
@@ -425,8 +420,9 @@ export default function ChannelPostListPage() {
                           「—」 하나로 뭉갰다 — 「—」는 이제 "아직 예약 없음" 한 뜻만.
                           우선순위: 막힘(FailureActionBadge, 상시 답이 필요한 다음 발) >
                           발행됨(published_at, 계약에 이미 있음) > 예약(scheduled_at) >
-                          「—」. compact — 재시도 버튼은 상세로(N3 관례, 이 행 전체가
-                          이미 링크). */}
+                          「—」. compact — 재시도 버튼은 상세로(페드루 정정, 2026-09-09
+                          14:01Z 3746 — 「채널에서 확인했습니다」 체크+중복 경고가 2단계
+                          액션이라 목록 행에서 시작 못 한다). */}
                       {failureAction ? (
                         <FailureActionBadge action={failureAction} displayTimezone={displayTimezone} compact />
                       ) : draft.published_at ? (

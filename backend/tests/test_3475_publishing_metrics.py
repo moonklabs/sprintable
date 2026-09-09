@@ -499,6 +499,8 @@ async def test_response_key_set_matches_fe_publishing_metrics_interface_exactly(
 
 @pytest.mark.anyio
 async def test_invalid_window_returns_422():
+    """story #3746(2026-09-09) — 90d가 이제 유효값이라(아래 test_90d_window_accepted
+    참조) 이 테스트의 표본을 진짜 무효값으로 바꾼다(1y — 세 값 밖)."""
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -509,8 +511,41 @@ async def test_invalid_window_returns_422():
 
         _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
         async with _client_for(app) as client:
-            r = await client.get(f"/api/v2/organizations/{org_id}/publishing-metrics?window=90d")
+            r = await client.get(f"/api/v2/organizations/{org_id}/publishing-metrics?window=1y")
         assert r.status_code == 422, r.text
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_90d_window_accepted():
+    """⭐story #3746(2026-09-09) — 라우터가 90d를 받고, 서비스 삼항이 이진(7d 아니면
+    무조건 30일)이 아니라 3분기라 90d가 진짜 90일 창으로 계산된다(정정 前엔 라우터가
+    422를 냈고, 검증만 풀었다면 30일로 착시됐을 자리 — 표본으로 그 착시를 잡는다:
+    50일 전 정시 발행 하나를 심어 30d 창엔 안 잡히고 90d 창엔 잡히는지로 확認)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        now = datetime.now(timezone.utc)
+        async with Session() as s:
+            org_id, _ = await _seed_org(s)
+            owner_id = await _seed_human(s, org_id)
+            connection_id = await _seed_connection(s, org_id)
+
+            scheduled_at = now - timedelta(days=50)
+            await _seed_command_and_publication(s, org_id, connection_id, scheduled_at=scheduled_at, published_at=scheduled_at)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+        async with _client_for(app) as client:
+            r30 = await client.get(f"/api/v2/organizations/{org_id}/publishing-metrics?window=30d")
+            r90 = await client.get(f"/api/v2/organizations/{org_id}/publishing-metrics?window=90d")
+        assert r30.status_code == 200, r30.text
+        assert r90.status_code == 200, r90.text
+        assert r30.json()["on_time_denom"] == 0, "50일 전 발행이 30d 창에 잡히면 표본 전제가 틀렸다"
+        assert r90.json()["on_time_denom"] == 1, "90d가 30일로 착시되면 50일 전 발행이 안 잡힌다"
+        assert r90.json()["window"] == "90d"
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
