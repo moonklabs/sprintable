@@ -47,6 +47,11 @@ export type NavItemScope = 'project' | 'org';
 export interface NavItemConfig {
   id: string;
   labelKey: string;
+  // story #fddd0e6b(IA·⑦ 전체 메뉴, 유나 시안 ⑦ 판b 036c983a) — 「무엇이 여기 있나」 한 줄.
+  // /more 허브가 소비(팔레트는 이 카드 스코프 밖). 필수 — board·inbox는 /more에서 안
+  // 렌더되지만(MOBILE_HUB_EXCLUDE_IDS) «계약상 예약»이라 이 둘도 값을 가진다(제외가
+  // 풀리는 날 설명이 조용히 비지 않게 — 완전성 테스트가 23개 전부를 잰다).
+  descriptionKey: string;
   icon: LucideIcon;
   kind: NavItemKind;
   path: string;
@@ -103,11 +108,11 @@ export const NAV_GROUPS: NavGroupConfig[] = [
       // (loop-face.tsx:26 `/api/hypotheses?project_id=`·workforce-face.tsx:30 `/api/stories?
       // ...&project_id=`) — 화면 «일부»만 project라 표식이 "화면 전체에 대한 약속"을 못
       // 지킨다(PO 원칙: 혼합 화면은 project로도 org로도 정직할 수 없어 무표식).
-      { id: 'org-briefing', labelKey: 'orgBriefing', icon: Newspaper, kind: 'static', path: '/org-briefing' },
+      { id: 'org-briefing', labelKey: 'orgBriefing', descriptionKey: 'descOrgBriefing', icon: Newspaper, kind: 'static', path: '/org-briefing' },
       // story #9c5e82dc(IA·S3, PO 確定) — inbox는 scope 필드를 안 쓴다(애매). 메인 조회
       // (/api/notifications)가 project_id·org_id 둘 다 안 걸어 순수 사용자 개인 알림이다 —
       // project도 org도 아닌 계정 축이라 AC2 "화면은 모르는 것을 단정하지 않는다"로 무표식.
-      { id: 'inbox', labelKey: 'inbox', icon: Inbox, kind: 'static', path: '/inbox', badgeKey: 'inbox' },
+      { id: 'inbox', labelKey: 'inbox', descriptionKey: 'descInbox', icon: Inbox, kind: 'static', path: '/inbox', badgeKey: 'inbox' },
       // story #3179(S3c) — 'dashboard'(대시보드, /dashboard) 항목 제거. attention(S3a)·
       // pulse(S3b)가 chat으로 이전되며 /dashboard는 폐합(redirect-only 스텁)됐다 — 같은
       // 목적지(chat)로 가는 nav 항목이 CHAT_CENTER_ITEM과 중복될 이유가 없다.
@@ -129,11 +134,11 @@ export const NAV_GROUPS: NavGroupConfig[] = [
     id: 'dev',
     labelKey: 'zoneDev',
     items: [
-      { id: 'board', labelKey: 'board', icon: Workflow, kind: 'resource', path: 'flow', kbdHint: 'B', scope: 'project' },
-      { id: 'goals', labelKey: 'goals', icon: Layers, kind: 'resource', path: 'goals', scope: 'project' },
-      { id: 'loops', labelKey: 'loops', icon: FlaskConical, kind: 'resource', path: 'loops', scope: 'project' },
-      { id: 'standup', labelKey: 'standup', icon: Users, kind: 'resource', path: 'standup', kbdHint: 'S', scope: 'project' },
-      { id: 'retro', labelKey: 'retro', icon: Gauge, kind: 'resource', path: 'retro', kbdHint: 'R', scope: 'project' },
+      { id: 'board', labelKey: 'board', descriptionKey: 'descBoard', icon: Workflow, kind: 'resource', path: 'flow', kbdHint: 'B', scope: 'project' },
+      { id: 'goals', labelKey: 'goals', descriptionKey: 'descGoals', icon: Layers, kind: 'resource', path: 'goals', scope: 'project' },
+      { id: 'loops', labelKey: 'loops', descriptionKey: 'descLoops', icon: FlaskConical, kind: 'resource', path: 'loops', scope: 'project' },
+      { id: 'standup', labelKey: 'standup', descriptionKey: 'descStandup', icon: Users, kind: 'resource', path: 'standup', kbdHint: 'S', scope: 'project' },
+      { id: 'retro', labelKey: 'retro', descriptionKey: 'descRetro', icon: Gauge, kind: 'resource', path: 'retro', kbdHint: 'R', scope: 'project' },
     ],
   },
   {
@@ -159,7 +164,7 @@ export const NAV_GROUPS: NavGroupConfig[] = [
       // 운영은 마케터의 일상 행위라는 가름(§5-2)이 그대로 적용된다.
       // 근거: content/page.tsx 주석이 직접 "project 슬러그 불필요"라 명시(org_id 단일 스코프,
       // site-posts drafts backend가 organizations/{org_id}/... 경로), project 필터 0건.
-      { id: 'content', labelKey: 'content', icon: FileText, kind: 'static', path: '/content', scope: 'org' },
+      { id: 'content', labelKey: 'content', descriptionKey: 'descContent', icon: FileText, kind: 'static', path: '/content', scope: 'org' },
       // story #3402(Phase1·마케팅운영, PO 결정 2026-09-03 23:17Z) — 채널 포스트(Threads)
       // 관리 화면. NavItemConfig에 중첩 하위메뉴 구조가 없어(app-sidebar.tsx는 group.items를
       // 평평하게 순회) "블로그 포스트 아래" 배치는 이 배열에서 content 바로 뒤에 두는 것으로
@@ -167,7 +172,7 @@ export const NAV_GROUPS: NavGroupConfig[] = [
       // 경로(channel_post_drafts도 org 스코프, project 무관).
       // 근거: content/channel-posts/page.tsx에 project 관련 키워드 grep 0건(channel_post_
       // drafts도 content와 동형 org 단일 스코프).
-      { id: 'channel-posts', labelKey: 'channelPosts', icon: Share2, kind: 'static', path: '/content/channel-posts', scope: 'org' },
+      { id: 'channel-posts', labelKey: 'channelPosts', descriptionKey: 'descChannelPosts', icon: Share2, kind: 'static', path: '/content/channel-posts', scope: 'org' },
       // story #3376(페드루 PO 確定 2026-09-03) — 소셜 채널 OAuth 연결(조직이 소유한 외부
       // 계정·토큰). 예전 organization 구역에서 이관 — 「연결」 행위 자체는 마케터가 채널을
       // 붙이는 일상 실물이라 도메인 축(마케팅)으로 옮긴다(path 불변). story #ee78b047
@@ -175,17 +180,17 @@ export const NAV_GROUPS: NavGroupConfig[] = [
       // 포스트」의 접두어였다 — 이름이 스스로 갈라야 한다는 S2 AC1).
       // 근거: organization/channels/page.tsx에 project 관련 키워드 grep 0건 — 채널 OAuth
       // 연결은 org가 소유(project 무관).
-      { id: 'org-channels', labelKey: 'orgChannels', icon: Share2, kind: 'static', path: '/organization/channels', scope: 'org' },
+      { id: 'org-channels', labelKey: 'orgChannels', descriptionKey: 'descOrgChannels', icon: Share2, kind: 'static', path: '/organization/channels', scope: 'org' },
       // story #3472(페드루 PO 確定 2026-09-05) — 콘텐츠 규칙(금칙어·UTM 필수·톤·택소노미·
       // 채널 우선순위·브랜드 킷). 예전 organization 구역에서 이관 — path 불변.
       // 근거: organization/content-rules/page.tsx에 project 관련 키워드 grep 0건 — 규칙 세트가
       // org 단일 스코프(금칙어·톤·택소노미 등 조직 공통 정책).
-      { id: 'org-content-rules', labelKey: 'orgContentRules', icon: ListChecks, kind: 'static', path: '/organization/content-rules', scope: 'org' },
+      { id: 'org-content-rules', labelKey: 'orgContentRules', descriptionKey: 'descOrgContentRules', icon: ListChecks, kind: 'static', path: '/organization/content-rules', scope: 'org' },
       // story #3503(성과 보드 화면) — 발행된 글의 D+1/D+7 성과 표. 예전 organization
       // 구역에서 이관 — path 불변.
       // 근거: organization/insights-board/page.tsx에 project 관련 키워드 grep 0건 — 발행 글
       // 성과가 org 전체 집계(project로 안 거름).
-      { id: 'org-insights-board', labelKey: 'orgInsightsBoard', icon: TrendingUp, kind: 'static', path: '/organization/insights-board', scope: 'org' },
+      { id: 'org-insights-board', labelKey: 'orgInsightsBoard', descriptionKey: 'descOrgInsightsBoard', icon: TrendingUp, kind: 'static', path: '/organization/insights-board', scope: 'org' },
     ],
   },
   {
@@ -197,7 +202,7 @@ export const NAV_GROUPS: NavGroupConfig[] = [
       // `/api/activity-logs?project_id=...`를 건다 — project 전환 시 내용이 실제로 바뀐다.
       // 3600 문서의 "실측 8"은 구현 前 추정이었고(kind:'resource' 8항목만 셈), 이 화면은
       // kind가 'static'이라 그 신호에서 빠졌다 — 실 코드가 정본이라 project로 정정(8→9).
-      { id: 'activity', labelKey: 'activity', icon: ClipboardList, kind: 'static', path: '/activity', scope: 'project' },
+      { id: 'activity', labelKey: 'activity', descriptionKey: 'descActivity', icon: ClipboardList, kind: 'static', path: '/activity', scope: 'project' },
       // organization 흡수(시안 매핑표) — 신뢰 축의 실물이 이제 여기 있다(이전엔 organization
       // 그룹 소속). path 불변, 그룹 소속만 이동. 라벨도 zoneTrust와 겹치던 "신뢰"→"신뢰 센터"로
       // 정정(같은 구역 안에서 구역명과 항목명이 동어반복하지 않게, 시안 신뢰 센터 표기 그대로).
@@ -206,19 +211,19 @@ export const NAV_GROUPS: NavGroupConfig[] = [
       // project 무관이고, project_id는 team-members 조회로 표시 이름을 채우는 데만 쓰인다
       // (mergeMemberLookup 이름 보완 — 부수적) — 목록 자체는 project 전환에 안 바뀌므로 org
       // 유지(org-briefing·org-workforce와 달리 "일부 패널이 project"가 아니라 "이름표만").
-      { id: 'org-trust', labelKey: 'orgTrust', icon: Award, kind: 'static', path: '/organization/trust', scope: 'org' },
+      { id: 'org-trust', labelKey: 'orgTrust', descriptionKey: 'descOrgTrust', icon: Award, kind: 'static', path: '/organization/trust', scope: 'org' },
     ],
   },
   {
     id: 'knowledge',
     labelKey: 'zoneKnowledge',
     items: [
-      { id: 'docs', labelKey: 'docs', icon: BookOpen, kind: 'resource', path: 'docs', scope: 'project' },
-      { id: 'artifacts', labelKey: 'artifacts', icon: GalleryVerticalEnd, kind: 'resource', path: 'artifacts', scope: 'project' },
-      { id: 'storage', labelKey: 'storage', icon: HardDrive, kind: 'resource', path: 'storage', scope: 'project' },
+      { id: 'docs', labelKey: 'docs', descriptionKey: 'descDocs', icon: BookOpen, kind: 'resource', path: 'docs', scope: 'project' },
+      { id: 'artifacts', labelKey: 'artifacts', descriptionKey: 'descArtifacts', icon: GalleryVerticalEnd, kind: 'resource', path: 'artifacts', scope: 'project' },
+      { id: 'storage', labelKey: 'storage', descriptionKey: 'descStorage', icon: HardDrive, kind: 'resource', path: 'storage', scope: 'project' },
       // organization 흡수(시안 매핑표) — memory는 지식 축의 실물. path 불변, 그룹 소속만 이동.
       // 근거: memory/page.tsx에 project 관련 키워드 grep 0건 — 조직 공유 기억(org 단일 스코프).
-      { id: 'org-memory', labelKey: 'orgMemory', icon: Brain, kind: 'static', path: '/organization/memory', scope: 'org' },
+      { id: 'org-memory', labelKey: 'orgMemory', descriptionKey: 'descOrgMemory', icon: Brain, kind: 'static', path: '/organization/memory', scope: 'org' },
     ],
   },
   {
@@ -237,18 +242,18 @@ export const NAV_GROUPS: NavGroupConfig[] = [
       // 근거: OrgMembersSection의 project_ids는 초대할 때 «대상 프로젝트를 고르는» 액션
       // 파라미터일 뿐(org-members-section.tsx:144), 멤버 목록 자체를 현재 project로 거르지
       // 않는다 — 화면 콘텐츠가 project 전환에 안 바뀌므로 org.
-      { id: 'org-members', labelKey: 'orgMembers', icon: Users2, kind: 'static', path: '/organization/members', scope: 'org' },
+      { id: 'org-members', labelKey: 'orgMembers', descriptionKey: 'descOrgMembers', icon: Users2, kind: 'static', path: '/organization/members', scope: 'org' },
       // story #9c5e82dc(IA·S3, 카디르 QA 지적 반영·PO 정정 2026-09-08) — 애매로 재분류.
       // agents-page-tabs.tsx 4탭 중 기본(manage)·access는 project 무관(access는 오히려 «전
       // project를 한 매트릭스로» 보여줌)인데, stats 탭(agent-performance-panel.tsx:97-99
       // team-members/velocity-history/leaderboard 전부 `project_id=`)과 recruit 탭은
       // project 걸림 — 탭에 따라 갈리는 혼합 화면이라 무표식.
-      { id: 'org-workforce', labelKey: 'workforce', icon: Bot, kind: 'static', path: '/organization/workforce' },
+      { id: 'org-workforce', labelKey: 'workforce', descriptionKey: 'descWorkforce', icon: Bot, kind: 'static', path: '/organization/workforce' },
       // 근거: role-member.tsx류 권한 목록이 org_id 스코프(팀 전체 권한 매트릭스), project
       // 필터 없음.
-      { id: 'org-roles', labelKey: 'orgRoles', icon: Shield, kind: 'static', path: '/organization/roles', scope: 'org' },
+      { id: 'org-roles', labelKey: 'orgRoles', descriptionKey: 'descOrgRoles', icon: Shield, kind: 'static', path: '/organization/roles', scope: 'org' },
       // 근거: 조직 이벤트 정의(org 레벨 웹훅/트리거 카탈로그), project 필터 없음.
-      { id: 'org-events', labelKey: 'orgEvents', icon: Zap, kind: 'static', path: '/organization/events', scope: 'org' },
+      { id: 'org-events', labelKey: 'orgEvents', descriptionKey: 'descOrgEvents', icon: Zap, kind: 'static', path: '/organization/events', scope: 'org' },
       // story #3743(UI 재설계 ③, 페드루 PO 決) — 4180f67f가 열었던 org-connectors 항목을
       // 여기서 걷는다. 커넥터 화면(organization/connectors)이 채널 연결(organization/
       // channels)로 흡수·리다이렉트됐다 — nav에 같은 목적지 둘을 안 남긴다(⑦ IA 25→24
@@ -261,7 +266,7 @@ export const NAV_GROUPS: NavGroupConfig[] = [
       // story #9c5e82dc(IA·S3, PO 確定) — scope 필드를 안 쓴다(애매). 화면 전체 개념은
       // 계정 설정인데, 팀원 관리 탭 하나만 project_id를 쓴다(섞인 화면) — AC2 "화면은
       // 모르는 것을 단정하지 않는다"로 org/project 어느 쪽 표식도 안 붙인다.
-      { id: 'settings', labelKey: 'settings', icon: Settings, kind: 'static', path: '/settings' },
+      { id: 'settings', labelKey: 'settings', descriptionKey: 'descSettings', icon: Settings, kind: 'static', path: '/settings' },
     ],
   },
 ];
@@ -293,7 +298,10 @@ export const MOBILE_HUB_EXCLUDE_IDS = new Set(['board', 'inbox', 'chats']);
 // (app-sidebar.tsx)와 모바일 FAB(I4가 배선)가 이 한 항목을 직접 소비한다. path/badgeKey는
 // 옛 'now' 그룹 소속이던 시절과 완전히 동일(불변) — 위치만 승격.
 export const CHAT_CENTER_ITEM: NavItemConfig = {
-  id: 'chats', labelKey: 'chats', icon: MessageSquare, kind: 'static', path: '/chats', badgeKey: 'chats',
+  // story #fddd0e6b(IA·⑦ 전체 메뉴) — chats는 NAV_GROUPS 밖(구역 없는 1급 승격)이라
+  // /more의 23개 완전성 대상은 아니지만, NavItemConfig 타입 자체는 descriptionKey를
+  // 요구한다(팔레트 등 다른 소비처가 이 항목도 같은 타입으로 다룬다) — 값은 채운다.
+  id: 'chats', labelKey: 'chats', descriptionKey: 'descChats', icon: MessageSquare, kind: 'static', path: '/chats', badgeKey: 'chats',
 };
 
 // story #d986fd6c(IA·S4)의 «뷰포트 높이 역산 접힘» 전제(필요 높이(px) = 615.5 + 32×N)는
