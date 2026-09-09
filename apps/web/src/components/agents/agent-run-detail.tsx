@@ -3,48 +3,17 @@
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { AlertTriangle, ArrowLeft, CheckCircle2, Clock3, Cpu, Hash, RefreshCw, Zap } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Clock3, Cpu, Hash, RefreshCw, Zap } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { PageHeader } from '@/components/ui/page-header';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { useToast, ToastContainer } from '@/components/ui/toast';
-import { canManuallyRetryRun, getRunErrorDisplay, getRunFailureDisposition, getToolAuditOutcome } from '@/services/agent-run-history';
+import { canManuallyRetryRun, getRunErrorDisplay, getRunFailureDisposition } from '@/services/agent-run-history';
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { agentRunStatusBadgeVariant, type AgentRunStatus } from '@/lib/agent-run-status';
-
-interface ToolCallEntry {
-  type?: string;
-  name?: string;
-  tool?: string;
-  toolName?: string;
-  toolSource?: 'builtin' | 'external';
-  input?: unknown;
-  output?: unknown;
-  arguments?: unknown;
-  result?: unknown;
-  error?: string;
-  duration_ms?: number;
-  durationMs?: number;
-  timestamp?: string;
-  model?: string;
-  tokens?: { input?: number; output?: number };
-}
-
-interface ToolAuditEntry {
-  id: string;
-  run_id: string | null;
-  session_id: string | null;
-  event_type: string;
-  severity: 'debug' | 'info' | 'warn' | 'error' | 'security';
-  summary: string;
-  payload: unknown;
-  created_by: string | null;
-  created_at: string;
-  actor_name: string | null;
-}
 
 interface MemoryRetrievalBucket {
   queriedCount: number;
@@ -107,8 +76,6 @@ interface RunDetail {
   max_retries: number | null;
   next_retry_at: string | null;
   failure_disposition: 'retry_scheduled' | 'retry_launched' | 'retry_exhausted' | 'non_retryable' | null;
-  tool_call_history: ToolCallEntry[] | null;
-  tool_audit_trail: ToolAuditEntry[] | null;
   continuity_debug: ContinuityDebugInfo | null;
   memory_compaction_policy: MemoryCompactionPolicy | null;
   started_at: string | null;
@@ -135,34 +102,6 @@ function toLocaleStr(iso: string | null, locale: string, displayTimezone: string
 function formatBillingModeLabel(t: ReturnType<typeof useTranslations>, billingMode: RunDetail['llm_provider']): string {
   if (!billingMode) return '-';
   return t(`billingMode_${billingMode}`);
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
-}
-
-function getToolCallDisplay(entry: ToolCallEntry) {
-  const result = asRecord(entry.result);
-  const error = typeof entry.error === 'string'
-    ? entry.error
-    : typeof result?.error === 'string'
-      ? result.error
-      : null;
-
-  return {
-    name: entry.toolName ?? entry.name ?? entry.tool ?? 'Step',
-    source: entry.toolSource ?? (typeof result?.source === 'string' ? result.source : null),
-    durationMs: entry.durationMs ?? entry.duration_ms ?? null,
-    error,
-    userReason: typeof result?.user_reason === 'string' ? result.user_reason : null,
-    nextAction: typeof result?.next_action === 'string' ? result.next_action : null,
-    tokens: entry.tokens,
-  };
-}
-
-function getAuditPayloadField(payload: Record<string, unknown> | null, key: string): string | null {
-  const value = payload?.[key];
-  return typeof value === 'string' && value.length > 0 ? value : null;
 }
 
 export function AgentRunDetail({
@@ -257,8 +196,6 @@ export function AgentRunDetail({
     );
   }
 
-  const timeline: ToolCallEntry[] = Array.isArray(run.tool_call_history) ? run.tool_call_history : [];
-  const toolAuditTrail: ToolAuditEntry[] = Array.isArray(run.tool_audit_trail) ? run.tool_audit_trail : [];
   const errorDisplay = getRunErrorDisplay(run.error_message, run.last_error_code);
   const failureDisposition = getRunFailureDisposition(run);
   const canRetry = canManuallyRetryRun(run);
@@ -436,174 +373,6 @@ export function AgentRunDetail({
                 </div>
               </div>
             )}
-
-            {/* Timeline */}
-            <div>
-              <h3 className="mb-3 text-sm font-semibold text-foreground">
-                {t('timeline')} ({timeline.length})
-              </h3>
-              {timeline.length === 0 ? (
-                <p className="text-sm text-muted-foreground">{t('noTimelineEntries')}</p>
-              ) : (
-                <div className="relative space-y-0">
-                  {/* Vertical line */}
-                  <div className="absolute bottom-0 left-4 top-0 w-px bg-white/12" />
-                  {timeline.map((entry, idx) => {
-                    const display = getToolCallDisplay(entry);
-                    const isLlm = entry.type === 'llm_call' || entry.type === 'llm';
-                    const isTool = entry.type === 'tool_call' || entry.type === 'tool' || Boolean(entry.toolName) || Boolean(entry.tool);
-                    const hasError = Boolean(display.error);
-
-                    return (
-                      <div key={idx} className="relative flex gap-4 pb-4 pl-9">
-                        <div className={`absolute left-2.5 top-1.5 size-3 rounded-full border-2 ${
-                          hasError
-                            ? 'border-destructive bg-destructive-tint'
-                            : isLlm
-                              ? 'border-info bg-info/20' /* story #2023 AC6: LLM 호출=info(기계 축), 브랜드 블루=인간 서명 전용 */
-                              : 'border-success bg-success-tint'
-                        }`} />
-                        <div className="min-w-0 flex-1 rounded-xl border border-white/8 bg-white/4 px-3 py-2">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <Badge variant={isLlm ? 'info' : isTool ? (hasError ? 'destructive' : 'success') : 'outline'} className="text-[10px]">
-                              {isLlm ? 'LLM' : isTool ? 'TOOL' : (entry.type ?? 'step')}
-                            </Badge>
-                            <span className="text-xs font-medium text-foreground">
-                              {isLlm ? (entry.model ?? 'LLM call') : display.name}
-                            </span>
-                            {display.source && (
-                              <Badge variant="chip" className="text-[10px]">{display.source}</Badge>
-                            )}
-                            {display.durationMs != null && (
-                              <span className="text-[10px] text-muted-foreground">
-                                {formatDuration(display.durationMs)}
-                              </span>
-                            )}
-                            {display.tokens && (
-                              <span className="text-[10px] text-muted-foreground">
-                                {display.tokens.input ?? 0}/{display.tokens.output ?? 0} tok
-                              </span>
-                            )}
-                            {hasError ? (
-                              <AlertTriangle className="size-3.5 text-destructive" />
-                            ) : (
-                              <CheckCircle2 className="size-3.5 text-success/60" />
-                            )}
-                          </div>
-                          {hasError && (
-                            // story #3677(FE·대비·確定, 유나 표① 2026-09-07) — text-destructive/80
-                            // 이 이 카드 배경 위에서 두 테마 다 AA 미달(3.76/3.82)이었다. 알파
-                            // 제거 규칙: 시맨틱 색(destructive/muted/foreground 등) 알파 수정자는
-                            // /60 이상만·hover는 그 resting state보다 대비를 낮추지 않음·이중 알파
-                            // (반투명 배경 위에 알파 전경, 예 bg-white/3 위 text-*/N)는 픽셀 실측
-                            // 없이는 통과로 간주하지 않는다(유나 표 대조 필수).
-                            <div className="mt-1 space-y-1 text-xs text-destructive">
-                              <p>{display.error}</p>
-                              {display.userReason ? <p>{display.userReason}</p> : null}
-                              {display.nextAction ? <p>{display.nextAction}</p> : null}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            <div className="mt-6">
-              <h3 className="mb-3 text-sm font-semibold text-foreground">
-                {t('toolAuditTrail')} ({toolAuditTrail.length})
-              </h3>
-              {toolAuditTrail.length === 0 ? (
-                <p className="text-sm text-muted-foreground">{t('noToolAuditEntries')}</p>
-              ) : (
-                <div className="space-y-3">
-                  {toolAuditTrail.map((entry) => {
-                    const payload = asRecord(entry.payload);
-                    const outcome = getToolAuditOutcome({ eventType: entry.event_type, payload: entry.payload });
-                    const toolName = getAuditPayloadField(payload, 'tool_name') ?? entry.summary;
-                    const toolSource = getAuditPayloadField(payload, 'tool_source');
-                    const operatorReason = getAuditPayloadField(payload, 'operator_reason');
-                    const userReason = getAuditPayloadField(payload, 'user_reason');
-                    const nextAction = getAuditPayloadField(payload, 'next_action');
-                    const reasonCode = getAuditPayloadField(payload, 'reason_code');
-                    const serverName = getAuditPayloadField(payload, 'server_name');
-                    const error = getAuditPayloadField(payload, 'error');
-                    const detailSummary = getAuditPayloadField(payload, 'summary');
-                    const durationMs = payload && typeof payload.duration_ms === 'number' ? payload.duration_ms : null;
-
-                    return (
-                      <div key={entry.id} className="rounded-xl border border-white/8 bg-white/4 px-4 py-3">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Badge variant={outcome === 'denied' ? 'destructive' : outcome === 'failed' ? 'secondary' : 'success'}>
-                            {outcome === 'denied' ? t('toolAuditOutcomeDenied') : outcome === 'failed' ? t('toolAuditOutcomeFailed') : t('toolAuditOutcomeAllowed')}
-                          </Badge>
-                          <span className="text-sm font-medium text-foreground">{toolName}</span>
-                          {toolSource ? <Badge variant="chip">{t(`toolAuditSource_${toolSource}`)}</Badge> : null}
-                          <span className="text-xs text-muted-foreground">{toLocaleStr(entry.created_at, locale, displayTimezone)}</span>
-                        </div>
-                        <div className="mt-2 grid gap-2 text-sm text-muted-foreground md:grid-cols-2">
-                          <div>
-                            <span className="text-xs">{t('toolAuditActorLabel')}</span>
-                            <p className="mt-1 text-foreground">{entry.actor_name ?? run.agent_name ?? t('unknownAgent')}</p>
-                          </div>
-                          <div>
-                            <span className="text-xs">{t('toolAuditEventLabel')}</span>
-                            <p className="mt-1 break-all text-foreground">{entry.event_type}</p>
-                          </div>
-                          {reasonCode ? (
-                            <div>
-                              <span className="text-xs">{t('toolAuditReasonCodeLabel')}</span>
-                              <p className="mt-1 break-all text-foreground">{reasonCode}</p>
-                            </div>
-                          ) : null}
-                          {durationMs != null ? (
-                            <div>
-                              <span className="text-xs">{t('duration')}</span>
-                              <p className="mt-1 text-foreground">{formatDuration(durationMs)}</p>
-                            </div>
-                          ) : null}
-                          {serverName ? (
-                            <div>
-                              <span className="text-xs">{t('toolAuditServerLabel')}</span>
-                              <p className="mt-1 text-foreground">{serverName}</p>
-                            </div>
-                          ) : null}
-                        </div>
-                        {operatorReason ? (
-                          <div className="mt-3 rounded-xl border border-white/8 bg-white/3 px-3 py-3">
-                            <p className="text-xs font-semibold text-muted-foreground">{t('toolAuditOperatorReasonLabel')}</p>
-                            <p className="mt-1 text-sm text-foreground">{operatorReason}</p>
-                          </div>
-                        ) : null}
-                        {userReason ? (
-                          <div className="mt-3 rounded-xl border border-white/8 bg-white/3 px-3 py-3">
-                            <p className="text-xs font-semibold text-muted-foreground">{t('toolAuditUserReasonLabel')}</p>
-                            <p className="mt-1 text-sm text-foreground">{userReason}</p>
-                          </div>
-                        ) : null}
-                        {nextAction ? (
-                          <div className="mt-3 rounded-xl border border-white/8 bg-white/3 px-3 py-3">
-                            <p className="text-xs font-semibold text-muted-foreground">{t('toolAuditNextActionLabel')}</p>
-                            <p className="mt-1 text-sm text-foreground">{nextAction}</p>
-                          </div>
-                        ) : null}
-                        {error ? (
-                          // story #3677(FE·대비·確定, 유나 표① 2026-09-07) — bg-white/3(이 카드
-                          // 자체가 이미 반투명) 위 text-destructive/80은 이중 알파라 AA 미달
-                          // (3.82) — 알파 제거(규칙 근거는 위 hasError 블록 주석 참고).
-                          <p className="mt-3 text-sm text-destructive">{error}</p>
-                        ) : null}
-                        {!operatorReason && !userReason && !nextAction && detailSummary ? (
-                          <p className="mt-3 text-sm text-muted-foreground">{detailSummary}</p>
-                        ) : null}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
           </SectionCardBody>
         </SectionCard>
       </div>

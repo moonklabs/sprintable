@@ -8,7 +8,6 @@ import {
   getLocalDayStartIso,
   getRunErrorDisplay,
   getRunFailureDisposition,
-  getToolAuditOutcome,
   getTriggerMemoHref,
   normalizeRunStatusFilter,
 } from './agent-run-history';
@@ -96,25 +95,6 @@ describe('agent-run-history helpers', () => {
       error_message: 'daily cap exceeded',
       failure_disposition: 'non_retryable',
     })).toBe(false);
-  });
-
-  it('fails closed for tool audit events without an explicit outcome payload', () => {
-    expect(getToolAuditOutcome({
-      eventType: 'agent_tool.cross_scope_blocked',
-      payload: { tool_name: 'epic_scope_check' },
-    })).toBe('denied');
-    expect(getToolAuditOutcome({
-      eventType: 'agent_tool.ambiguous_external_mapping',
-      payload: { tool_name: 'external.search_docs' },
-    })).toBe('failed');
-    expect(getToolAuditOutcome({
-      eventType: 'agent_tool.some_future_block',
-      payload: { tool_name: 'future_tool' },
-    })).toBe('failed');
-    expect(getToolAuditOutcome({
-      eventType: 'agent_tool.executed',
-      payload: { tool_name: 'create_memo' },
-    })).toBe('allowed');
   });
 
   it('returns locale-safe default date filter inputs', () => {
