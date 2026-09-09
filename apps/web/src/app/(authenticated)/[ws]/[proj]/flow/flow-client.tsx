@@ -277,6 +277,7 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
             <NextMakerScreen
               projectId={projectId}
               memberMap={data?.memberMap ?? {}}
+              memberNamesLoadFailed={data?.partialErrors?.members ?? false}
               onSelectStory={handleSelectStory}
               selectedNodeId={selectedStoryId}
               focusGoalId={focusGoalId}
@@ -317,7 +318,7 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
             {t('drawerHeadingNoCount')}
           </summary>
           <div className="border-t border-border p-3">
-            <ExceptionStream items={exceptionItems} />
+            <ExceptionStream items={exceptionItems} loadFailed={data?.partialErrors?.attention ?? false} />
           </div>
         </details>
       </div>
