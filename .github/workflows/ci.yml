@@ -1519,6 +1519,13 @@ jobs:
       - name: "Verify no new raw fetch('/api/*') (story #2691 regression guard)"
         run: pnpm --filter web verify:no-new-raw-fetch-api
 
+      # story #3731 회귀가드(#3729 배포 58 실사고 후속): apps/web 안 비-테스트 파일이
+      # 프런트 Docker 빌드 컨텍스트(Dockerfile builder 스테이지 COPY 집합, 손 목록 아닌
+      # 파생값) 밖을 상대 import하면 실패한다. CI(전체 체크아웃)는 이 축을 원리상 못
+      # 재는데 실 Docker 빌드는 죽는다 — 그 간극을 이 가드가 메운다.
+      - name: "Verify frontend Docker import context (story #3731 regression guard)"
+        run: pnpm --filter web verify:frontend-docker-import-context
+
       # story #3557 회귀가드: aria-label={`Xyz...`}(영문 대문자로 시작하는 템플릿
       # 리터럴)이 새로 들어오면 실패한다 — #3899가 TagChip 하나를 i18n 키로 옮겼는데 같은
       # 부류(content-rules 이동 버튼 2·story-detail-panel 라벨 제거 1)가 유나 §17 #3912

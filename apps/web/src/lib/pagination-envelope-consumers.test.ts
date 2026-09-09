@@ -25,8 +25,9 @@ import path from 'node:path';
 // 자체 stripComments()를 독립 구현으로 들고 있던 것 자체가 그 오탐 클래스였다(파서
 // 복제 2곳이 서로 다른 결함을 갖는 #3149/#3156과 동형). i18n-key-coverage.test.ts·
 // verify-no-new-raw-fetch-api.ts와 같은 공유 구현(story #3023 정규식 리터럴 백틱
-// 픽스 포함)으로 통일한다 — 복제 0.
-import { stripComments } from '../../../../scripts/i18n-key-parser.js';
+// 픽스 포함)으로 통일한다 — 복제 0. story #3731 후속 — packages/scripts/로 이관
+// (Docker 빌드 컨텍스트 밖 참조 클래스 근본 봉쇄).
+import { stripComments } from '../../../../packages/scripts/i18n-key-parser.js';
 
 const SRC_ROOT = path.resolve(__dirname, '..');
 

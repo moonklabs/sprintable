@@ -20,16 +20,16 @@
 // story #3156 — 이 가드의 파서(stripComments·훅 바인딩 추출·extractKeyUsages)는
 // `scripts/check-i18n-keys.js`(CI 스크립트)와 완전 별개 독립 구현이었다. #3149(PR#3558)에서
 // 실증: 멤버접근 오귀속 결함을 한쪽만 고치자 다른 쪽이 같은 오탐으로 계속 붉혔다 — 파서를
-// `scripts/i18n-key-parser.js`(공유 모듈)로 일원화해 두 소비처가 같은 구현을 import한다.
-// 파서 자체의 회귀가드(extractKeyUsages 멤버접근 제외 등)는 `scripts/i18n-key-parser.test.js`
-// 로 이관됐다 — 여기 남기지 않는다(중복 방지, 그 파일이 정본).
+// 공유 모듈로 일원화해 두 소비처가 같은 구현을 import한다.
+// 파서 자체의 회귀가드(extractKeyUsages 멤버접근 제외 등)는 `packages/scripts/
+// i18n-key-parser.test.js`로 이관됐다 — 여기 남기지 않는다(중복 방지, 그 파일이 정본).
 import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-// story #3156: repo-root scripts/(node CJS, apps/web 워크스페이스 밖)의 공유 파서.
-// moduleResolution:bundler+allowJs라 vitest/tsc 양쪽에서 해석 가능(tsconfig.json의
-// @sprintable/* 크로스-패키지 import와 동일 패턴).
-import { stripComments, extractHookBindings, extractKeyUsages } from '../../../../scripts/i18n-key-parser.js';
+// story #3731 — packages/scripts/로 이관(Docker 빌드 컨텍스트 밖 참조 클래스 근본 봉쇄,
+// packages/는 builder 스테이지가 이미 COPY함). moduleResolution:bundler+allowJs라
+// vitest/tsc 양쪽에서 해석 가능(tsconfig.json의 @sprintable/* 크로스-패키지 import와 동일 패턴).
+import { stripComments, extractHookBindings, extractKeyUsages } from '../../../../packages/scripts/i18n-key-parser.js';
 import ko from '../../messages/ko.json';
 import en from '../../messages/en.json';
 

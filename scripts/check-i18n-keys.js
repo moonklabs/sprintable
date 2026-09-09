@@ -49,7 +49,10 @@
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
-const { flatten, escapeRegExp, stripComments, extractKeyUsages, extractHookBindings } = require('./i18n-key-parser');
+// story #3731 — 공유 파서를 packages/scripts/로 이관(Docker 빌드 컨텍스트 밖 참조 클래스
+// 근본 봉쇄, packages/는 builder 스테이지가 이미 COPY함). 이 파일(node로 직접 실행,
+// 로더 없음)은 상대 require만 바뀌었을 뿐 plain CJS 제약은 무변.
+const { flatten, escapeRegExp, stripComments, extractKeyUsages, extractHookBindings } = require('../packages/scripts/i18n-key-parser');
 
 const rootDir = path.join(__dirname, '..');
 

@@ -22,6 +22,7 @@
     "verify:reserved-first-segments-sync": "tsx scripts/verify-reserved-first-segments-sync.ts",
     "verify:migrated-resources-sync": "tsx scripts/verify-migrated-resources-sync.ts",
     "verify:no-new-raw-fetch-api": "tsx scripts/verify-no-new-raw-fetch-api.ts",
+    "verify:frontend-docker-import-context": "tsx scripts/verify-frontend-docker-import-context.ts",
     "verify:no-direct-backend-v2-call": "tsx scripts/verify-no-direct-backend-v2-call.ts",
     "verify:no-date-tolocalestring": "tsx scripts/verify-no-date-tolocalestring.ts",
     "verify:tint-foreground-contrast": "tsx scripts/verify-tint-foreground-contrast.ts",

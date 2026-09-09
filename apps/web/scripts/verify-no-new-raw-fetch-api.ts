@@ -26,11 +26,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 // story #3716(카디르 재현, #4062 오탐 1회) — 이 가드는 주석을 안 벗겨 «주석 속 백틱
 // fetch(`/api/…`)»도 실 호출로 셌다. i18n-key-coverage.test.ts가 이미 쓰는 공유
-// stripComments()(scripts/i18n-key-parser.js, story #3156 통합·#3023 정규식 리터럴
-// 백틱 픽스 포함)를 그대로 재사용한다 — 복제 0. plain CJS·repo-root scripts/(apps/web
-// 워크스페이스 밖) — moduleResolution:bundler+allowJs라 tsx/vitest 양쪽에서 그대로
-// 해석된다(i18n-key-coverage.test.ts 선례와 동일 패턴).
-import { stripComments } from '../../../scripts/i18n-key-parser.js';
+// stripComments()(story #3156 통합·#3023 정규식 리터럴 백틱 픽스 포함)를 그대로
+// 재사용한다 — 복제 0. story #3731 후속 — packages/scripts/로 이관(Docker 빌드
+// 컨텍스트 밖 참조 클래스 근본 봉쇄, packages/는 builder 스테이지가 이미 COPY함).
+// moduleResolution:bundler+allowJs라 tsx/vitest 양쪽에서 그대로 해석된다.
+import { stripComments } from '../../../packages/scripts/i18n-key-parser.js';
 
 const SRC_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src');
 const EXT_RE = /\.(tsx?|ts)$/;
