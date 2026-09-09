@@ -4,10 +4,19 @@
 // (globals.css `.dashboard-shell-root`, 탭 바 높이+safe-area)을 소유하고, 우하단
 // fixed 요소 전부가 그 변수로만 bottom을 잡는다(숫자 재추측 0).
 //
-// 이 가드는 그 계약을 소스 텍스트 수준에서 고정한다(story의 test① — jsdom엔 실 layout이
-// 없어 computed bottom을 잴 수 없으므로, 대신 ②"우하단 fixed 요소마다 변수 참조가
-// 있는가"를 전수 스캔·허용목록 0으로 검증한다. corner-count-badge-a11y.guard.test.ts와
-// 동형 컨벤션(전수 소비처 나열+개별 assert, 새 소비처가 생기면 이 파일도 함께 봐야 한다).
+// story #3759(유나 定 2026-09-09 20:55Z) — #3756은 각 소비처(토스트·런처·패널·배너)가
+// «따로» `fixed`+`--bottom-dock-inset`을 계산했다(회피 상수 잔존 — 런처의 5rem·패널의
+// 8.75rem). 「우하단은 한 열이다」로 다시 처방: 셸이 components/nav/bottom-dock.tsx
+// («그» 유일한 fixed 컬럼) 하나만 소유하고, 토스트/런처/패널/칸반배너는 전부 그 컬럼의
+// 평범한 flex 자식(토스트·배너는 포털)이라 fixed/bottom 클래스 자체가 없다 — 이 가드의
+// 판별식이 「우하단 소비처 4곳」에서 「컬럼 1곳」으로 줄어드는 것 자체가 story #3759의
+// 완료 증거다(스토리 acceptance criteria 원문).
+//
+// 이 가드는 그 계약을 소스 텍스트 수준에서 고정한다(story #3756의 test① — jsdom엔 실
+// layout이 없어 computed bottom을 잴 수 없으므로, 대신 ②"우하단 fixed 요소마다 변수
+// 참조가 있는가"를 전수 스캔·허용목록 0으로 검증한다. corner-count-badge-a11y.guard.
+// test.ts와 동형 컨벤션(전수 소비처 나열+개별 assert, 새 소비처가 생기면 이 파일도 함께
+// 봐야 한다).
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -35,6 +44,13 @@ function listSourceFiles(dir: string): string[] {
 // 전제하는 것과 동일) 줄 단위 검색으로 충분하다.
 const FIXED_LINE_RE = /\bfixed\b/;
 const BOTTOM_OFFSET_RE = /bottom-\S|bottom:\s*['"`]/;
+// story #3759(실전 3회 자가발견) — 이 가드 자신을 설명하는 주석 문장이 "fixed"와
+// "bottom-"(예: "bottom-dock.tsx"·"--bottom-dock-inset" 언급)을 한 줄에 같이 담으면
+// 코드가 아닌 주석이 소비처로 오탐된다. `//`·`/**` 블록의 ` * ` 이어지는 줄·`{/*` JSX
+// 주석 시작줄은 코드 라인이 아니므로 건너뛴다(완전한 블록-주석 추적은 아니지만, 이
+// 레포의 소비처가 전부 className 리터럴 한 줄짜리라는 전제와 대칭 — 실제 코드 줄은
+// 이 접두사들로 시작하지 않는다).
+const COMMENT_LINE_RE = /^\s*(\/\/|\*|\{\/\*)/;
 
 interface Hit { file: string; lineNumber: number; line: string }
 
@@ -43,6 +59,7 @@ function findFixedBottomLines(): Hit[] {
   for (const file of listSourceFiles(SRC_ROOT)) {
     const lines = readFileSync(file, 'utf-8').split('\n');
     lines.forEach((line, idx) => {
+      if (COMMENT_LINE_RE.test(line)) return;
       if (FIXED_LINE_RE.test(line) && BOTTOM_OFFSET_RE.test(line)) {
         hits.push({ file: file.replace(SRC_ROOT, ''), lineNumber: idx + 1, line });
       }
@@ -77,15 +94,11 @@ describe('우하단 fixed 요소는 --bottom-dock-inset을 통해서만 bottom�
     expect(hits.length).toBeGreaterThan(0);
   });
 
-  it('전폭 allowlist 밖 소비처가 정확히 4곳이다(새 소비처가 생기면 이 가드를 다시 본다)', () => {
+  it('전폭 allowlist 밖 소비처가 정확히 1곳(BottomDock 컬럼)이다(story #3759 판별식 — 4곳→1곳)', () => {
     const nonAllowlisted = hits.filter((h) => !(h.file in FULL_WIDTH_ALLOWLIST));
     const files = [...new Set(nonAllowlisted.map((h) => h.file))].sort();
-    expect(files).toEqual([
-      'components/kanban/kanban-board.tsx',
-      'components/support-widget/support-widget-launcher.tsx',
-      'components/ui/toast.tsx',
-    ].sort());
-    expect(nonAllowlisted.length).toBe(4); // toast 1 + launcher 2(버튼+패널) + kanban 1
+    expect(files).toEqual(['components/nav/bottom-dock.tsx']);
+    expect(nonAllowlisted.length).toBe(1);
   });
 
   it('allowlist 밖 매치는 전부 --bottom-dock-inset을 참조한다(허용목록 0 — 숫자 재추측 없음)', () => {
@@ -117,5 +130,20 @@ describe('가드 자체의 탐지력(양성대조)', () => {
     expect(FIXED_LINE_RE.test(syntheticBadLine)).toBe(true);
     expect(BOTTOM_OFFSET_RE.test(syntheticBadLine)).toBe(true);
     expect(syntheticBadLine.includes(DOCK_INSET_VAR)).toBe(false);
+    expect(COMMENT_LINE_RE.test(syntheticBadLine)).toBe(false); // 실 코드 줄 — 주석 필터에 안 걸림
+  });
+
+  // story #3759 실전 3회(토스트/런처/kanban 주석이 "fixed"+"bottom-dock.tsx"를 한 줄에
+  // 같이 적어 매번 오탐) — 그 정확한 재현과 필터가 실제로 그걸 건너뛴다는 것.
+  it('주석 줄(fixed+bottom-을 같이 언급)은 COMMENT_LINE_RE에 걸려 소비처로 안 잡힌다', () => {
+    const commentLines = [
+      '  // story #3759 — 예전엔 fixed였다 — 지금은 components/nav/bottom-dock.tsx가 대신한다',
+      '   * fixed로 자기 위치를 계산하지 않는다 — bottom-dock.tsx 소유 컬럼',
+      '      {/* fixed bottom-[calc(var(--bottom-dock-inset)+1rem)] 컬럼 설명 */}',
+    ];
+    for (const line of commentLines) {
+      expect(FIXED_LINE_RE.test(line) && BOTTOM_OFFSET_RE.test(line)).toBe(true); // 옛 가드라면 오탐
+      expect(COMMENT_LINE_RE.test(line)).toBe(true); // 새 필터가 실제로 걸러낸다
+    }
   });
 });

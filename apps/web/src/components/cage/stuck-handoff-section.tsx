@@ -5,7 +5,7 @@ import { useTranslations } from 'next-intl';
 import { AlertTriangle, Check, Loader2, RotateCcw, XCircle } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { ToastContainer, useToast } from '@/components/ui/toast';
+import { useToast } from '@/components/ui/toast';
 import { GateLineContext } from '@/components/cage/gate-line-context';
 import { StuckHandoffDetail } from '@/components/cage/stuck-handoff-detail';
 import type { KanbanMember, WorkflowLineStatus, WorkflowLineStepRun } from '@/components/kanban/types';
@@ -32,7 +32,7 @@ export function StuckHandoffSection({ storyId, memberMap = {} }: StuckHandoffSec
   const [step, setStep] = useState<WorkflowLineStepRun | null>(null);
   const [fallback, setFallback] = useState<FallbackState>('idle');
   const [withdraw, setWithdraw] = useState<WithdrawState>('idle');
-  const { toasts, addToast, dismissToast } = useToast();
+  const { addToast } = useToast();
 
   useEffect(() => {
     let cancelled = false;
@@ -160,7 +160,6 @@ export function StuckHandoffSection({ storyId, memberMap = {} }: StuckHandoffSec
           </Button>
         )}
       </div>
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }

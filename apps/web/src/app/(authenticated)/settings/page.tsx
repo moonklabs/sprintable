@@ -39,7 +39,7 @@ import { OperatorInput } from '@/components/ui/operator-control';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { LegalLinks, BusinessInfoBlock } from '@/components/legal/legal-footer';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { ToastContainer, useToast } from '@/components/ui/toast';
+import { useToast } from '@/components/ui/toast';
 import { NOTIFICATION_TYPES } from '@/lib/notification-types';
 import { isEEEnabled } from '@/lib/ee';
 import { isSupportWidgetEnabled } from '@/lib/support-widget-flag';
@@ -135,7 +135,7 @@ export default function SettingsPage() {
   const { orgId: ctxOrgId, orgMemberships } = useDashboardContext();
   const [activeTab, setActiveTab] = useState(() => resolveSettingsTab(searchParamsHook.get('tab')));
   const [lnbOpen, setLnbOpen] = useState(false);
-  const { toasts, addToast, dismissToast } = useToast();
+  const { addToast } = useToast();
 
   const handleTabChange = (tab: string) => {
     setActiveTab(tab);
@@ -1573,7 +1573,6 @@ export default function SettingsPage() {
           }}
         />
       ) : null}
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </>
   );
 }

@@ -39,7 +39,7 @@ import {
   Dialog, DialogContent, DialogDescription,
   DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
-import { ToastContainer, useToast } from '@/components/ui/toast';
+import { useToast } from '@/components/ui/toast';
 import { OutcomeStatusBadge } from '@/components/outcome/outcome-status-badge';
 import { HypothesesSummary } from '@/components/hypotheses/hypotheses-summary';
 import { EpicHypothesisDeclarationSection } from '@/components/epics/hypothesis-declaration-section';
@@ -948,7 +948,7 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
   const t = useTranslations('goals');
   const router = useRouter();
   const { wsSlug, projSlug } = useGoalsRoute();
-  const { toasts, addToast, dismissToast } = useToast();
+  const { addToast } = useToast();
   const [epics, setGoals] = useState<Goal[]>([]);
   const [selectedEpic, setSelectedEpic] = useState<Goal | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1347,7 +1347,6 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
         </DialogContent>
       </Dialog>
 
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </>
   );
 }

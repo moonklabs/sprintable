@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
-import { ToastContainer, useToast } from '@/components/ui/toast';
+import { useToast } from '@/components/ui/toast';
 import { EventDefinerForm } from '@/components/organization/event-definer-form';
 import {
   type DefinerFormState, deriveDefinition, emptyFormState, tryReverseParse, validateKeySuffix,
@@ -72,7 +72,7 @@ export default function OrganizationEventsPage() {
   const isAdmin = currentRole === 'admin' || currentRole === 'owner';
   const t = useTranslations('organization');
   const tc = useTranslations('common');
-  const { toasts, addToast, dismissToast } = useToast();
+  const { addToast } = useToast();
 
   const [defs, setDefs] = useState<EventDefinition[]>([]);
   const [loading, setLoading] = useState(true);
@@ -266,7 +266,6 @@ export default function OrganizationEventsPage() {
         tc={tc}
         addToast={addToast}
       />
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }

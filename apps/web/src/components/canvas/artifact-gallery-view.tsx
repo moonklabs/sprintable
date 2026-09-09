@@ -19,7 +19,7 @@ import { ArtifactExpandDialog } from './artifact-expand-dialog';
 import { ArtifactEditor } from './artifact-editor';
 import { StoryPickerDialog } from './story-picker-dialog';
 import { ImportArtifactDialog } from './import-artifact-dialog';
-import { ToastContainer, useToast } from '@/components/ui/toast';
+import { useToast } from '@/components/ui/toast';
 
 async function fetchJson<T>(url: string): Promise<T | null> {
   try {
@@ -155,7 +155,7 @@ export function ArtifactGalleryView({ projectId }: { projectId: string }) {
   const t = useTranslations('canvas');
   // story #3644(3632 후속) — handleCreateCommit 실패가 console.error만 남기고 사용자
   // 신호가 없었다(artifact-section.tsx와 동일 병).
-  const { toasts, addToast, dismissToast } = useToast();
+  const { addToast } = useToast();
   const [loading, setLoading] = useState(true);
   const [artifacts, setArtifacts] = useState<BeVisualArtifactSummary[]>([]);
   const [lookups, setLookups] = useState<GalleryLookups>({ epics: [], stories: [], sprints: [], docs: [] });
@@ -324,7 +324,6 @@ export function ArtifactGalleryView({ projectId }: { projectId: string }) {
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-6">
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
       <div className="mb-4">
         <h1 className="text-[20px] font-extrabold tracking-tight text-foreground">{t('galleryTitle')}</h1>
         <p className="mt-0.5 text-xs text-muted-foreground">{t('gallerySubtitle')}</p>

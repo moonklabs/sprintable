@@ -105,11 +105,25 @@ afterEach(async () => {
   vi.resetModules();
 });
 
+// story #3759 — DocsClientLayout이 useToast()로 공유 Context를 구독한다. afterEach의
+// vi.resetModules()가 모듈 레지스트리를 지우므로, DocsClientLayout과 «같은» 새로 뜬
+// @/components/ui/toast 인스턴스를 매 mount()마다 함께 동적 import한다(kanban-board.
+// test.tsx와 동형 처방 — 정적 import 사본 0).
 async function mount() {
   const { DocsClientLayout } = await import('./docs-client-layout');
+  const { ToastProvider, ToastContainer, useToast } = await import('@/components/ui/toast');
+
+  function TestToastRenderer() {
+    const { toasts, dismissToast } = useToast();
+    return <ToastContainer toasts={toasts} onDismiss={dismissToast} />;
+  }
+
   await act(async () => {
     root.render(wrap(
-      <DocsClientLayout wsSlug="ws1" projSlug="proj1" projectId="proj-1"><div>본문</div></DocsClientLayout>,
+      <ToastProvider>
+        <DocsClientLayout wsSlug="ws1" projSlug="proj1" projectId="proj-1"><div>본문</div></DocsClientLayout>
+        <TestToastRenderer />
+      </ToastProvider>,
     ));
   });
   await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });

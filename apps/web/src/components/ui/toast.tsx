@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { useTranslations } from 'next-intl';
 
 export interface ToastAction {
@@ -95,7 +95,20 @@ function Toast({ item, onDismiss }: ToastProps) {
   );
 }
 
-export function useToast() {
+interface ToastContextValue {
+  toasts: ToastItem[];
+  addToast: (toast: Omit<ToastItem, 'id'>) => void;
+  dismissToast: (id: string) => void;
+}
+
+// story #3759 — useToast()는 예전엔 호출부마다 독립된 useState였다(31곳 호출부 = 31개
+// 서로 안 보이는 토스트 목록). 셸(dashboard-shell.tsx)이 딱 한 번 <ToastProvider>로 감싸고,
+// 그 안의 모든 useToast() 호출이 이 하나의 Context를 공유 — addToast 하나면 어디서
+// 불러도 같은 목록에 쌓이고, 렌더는 셸의 BottomDock 하나(포털 없음, 트리 그대로 — 위치가
+// 이미 셸 최상단이라 포털로 옮길 이유가 없다)만 한다.
+const ToastContext = createContext<ToastContextValue | null>(null);
+
+export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
 
   const addToast = useCallback((toast: Omit<ToastItem, 'id'>) => {
@@ -107,7 +120,35 @@ export function useToast() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
-  return { toasts, addToast, dismissToast };
+  const value = useMemo(() => ({ toasts, addToast, dismissToast }), [toasts, addToast, dismissToast]);
+
+  return <ToastContext.Provider value={value}>{children}</ToastContext.Provider>;
+}
+
+export function useToast(): ToastContextValue {
+  const ctx = useContext(ToastContext);
+  // story #3759 — Provider가 있으면(실 앱 — dashboard-shell.tsx가 항상 최상단에서 감쌈)
+  // 그 공유 목록을 그대로 쓴다. 아래 로컬 useState/useCallback은 Provider가 «없을 때만»
+  // 쓰이는 폴백이지만, 조건부로 훅을 부르면(hooks 규칙 위반) 안 되므로 항상 호출은 하고
+  // 값만 고른다 — Provider가 있는 정상 경로에선 이 로컬 상태가 그냥 버려진다(공유 목록이
+  // 항상 그 자리를 대신하므로 낭비되는 리렌더 없음, setState가 한 번도 안 불림).
+  //
+  // 이 폴백이 존재하는 이유: 이 파일 밖 약 39곳의 격리 단위테스트(DashboardShell 없이
+  // 컴포넌트 하나만 단독 마운트)가 예전 local-useState 계약을 그대로 가정한다 — 그
+  // 자리에서 fail-closed로 죽이면 이 리팩터의 실제 스코프(우하단 배치 통합)와 무관한
+  // 파일 39곳을 전부 고쳐야 한다. 실 앱(Provider 항상 有)에서는 이 폴백 경로 자체가
+  // 실행되지 않으므로 원래 결함(31곳 분산)은 그대로 해소된 채다 — 폴백은 "테스트
+  // 격리 편의"이지 프로덕션 안전판이 아니다.
+  const [localToasts, setLocalToasts] = useState<ToastItem[]>([]);
+  const localAddToast = useCallback((toast: Omit<ToastItem, 'id'>) => {
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    setLocalToasts((prev) => [...prev.slice(-4), { ...toast, id }]);
+  }, []);
+  const localDismissToast = useCallback((id: string) => {
+    setLocalToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+  if (ctx) return ctx;
+  return { toasts: localToasts, addToast: localAddToast, dismissToast: localDismissToast };
 }
 
 export function ToastContainer({
@@ -119,12 +160,15 @@ export function ToastContainer({
 }) {
   if (toasts.length === 0) return null;
 
+  // story #3759 — 예전엔 이 컴포넌트가 직접 position fixed로 우하단에 자리잡았다(호출부
+  // 31곳 = 독립된 fixed 좌표 31벌). 지금은 셸의 BottomDock(components/nav 폴더의 dock 컬럼
+  // 소유 컴포넌트) 딱 한 곳이 렌더하고, 그 dock 컬럼(fixed 위치+--bottom-dock-inset)의
+  // flex 자식으로만 존재한다 — 위치 계산은 컬럼이 갖고, 이 컴포넌트는 순수 레이아웃 없는
+  // 카드 스택이다.
+  // 컬럼 자체는 pointer-events-none(빈 공간 클릭 통과)이라 실제 카드가 있는 이 자리는
+  // pointer-events-auto로 되돌린다.
   return (
-    // story #3756 — bottom은 셸 소유 --bottom-dock-inset(dashboard-shell.tsx 하위에서만
-    // 값이 세워짐, globals.css `.dashboard-shell-root`)을 참조한다. 이전엔 이 컴포넌트가
-    // safe-area-inset-bottom만 알고 모바일 탭 바 높이(4rem)를 몰라, 탭 바 위에 뜬 토스트가
-    // 넷째 탭을 덮었다 — 이제 lg 미만에서는 그 값이 자동으로 더해진다(추측 0).
-    <div className="fixed right-4 bottom-[calc(var(--bottom-dock-inset)+1rem)] z-50 flex flex-col gap-2">
+    <div className="pointer-events-auto flex flex-col gap-2">
       {toasts.map((t) => (
         <Toast key={t.id} item={t} onDismiss={onDismiss} />
       ))}

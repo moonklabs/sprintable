@@ -15,7 +15,7 @@ import { PageHeader } from '@/components/ui/page-header';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { ToastContainer, useToast } from '@/components/ui/toast';
+import { useToast } from '@/components/ui/toast';
 import { fetchWithAuth } from '@/lib/db/client';
 import { channelLabel } from '@/lib/channel-label';
 import { resolveDisplayTimezone, formatScheduledAt } from '@/components/content/schedule-format';
@@ -135,7 +135,7 @@ export default function ChannelPostListPage() {
   // 연결 0」). 조회 자체가 안 됐으면(loading) 아직 판별 못 함 — 빈 상태/목록 둘 다
   // 안 그린다(PO 明示 — "모른다"로 잘못 그리지 않는다).
   const [connections, setConnections] = useState<ChannelConnectionStatusItem[] | null>(null);
-  const { toasts, addToast, dismissToast } = useToast();
+  const { addToast } = useToast();
 
   useEffect(() => {
     if (!orgId) return;
@@ -519,7 +519,6 @@ export default function ChannelPostListPage() {
           {tBoard('tasksPartialCount', { loaded: shownCount, total: totalCount })}
         </p>
       ) : null}
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }

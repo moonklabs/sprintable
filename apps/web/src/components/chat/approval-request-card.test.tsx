@@ -921,10 +921,22 @@ describe('ApprovalRequestCard — story #3258 doc 요약/diff+논의요청 지�
       }
       return { ok: true, json: async () => ({}) };
     }));
+    // story #3759 — ApprovalRequestCard가 useToast()로 공유 Context를 구독한다. 이 파일은
+    // ApprovalRequestCard를 정적 import하므로(파일 상단) 같은 모듈 인스턴스를 계속
+    // 참조하는 정적 ToastProvider로 감싸면 된다(동적 재-import 처방 불요, content/page.
+    // test.tsx와 동형).
+    const { ToastProvider, ToastContainer, useToast } = await import('@/components/ui/toast');
+    function TestToastRenderer() {
+      const { toasts, dismissToast } = useToast();
+      return <ToastContainer toasts={toasts} onDismiss={dismissToast} />;
+    }
     await act(async () => {
       root.render(
         <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
-          <ApprovalRequestCard target={{ work_item_type: 'story', work_item_id: 'w-1', gate_id: 'g-1', actions: ['approve', 'reject'] }} />
+          <ToastProvider>
+            <ApprovalRequestCard target={{ work_item_type: 'story', work_item_id: 'w-1', gate_id: 'g-1', actions: ['approve', 'reject'] }} />
+            <TestToastRenderer />
+          </ToastProvider>
         </NextIntlClientProvider>,
       );
     });

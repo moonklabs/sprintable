@@ -17,7 +17,7 @@ import { OrphanStoriesPanel } from './orphan-stories-panel';
 import { FlowMultiLaneCanvas } from './flow-multi-lane-canvas';
 import { parseCursorMeta } from '@/lib/pagination';
 import { useOrgSyncVersion } from '@/lib/project-context-client';
-import { ToastContainer, useToast } from '@/components/ui/toast';
+import { useToast } from '@/components/ui/toast';
 import { fetchWithAuth } from '@/lib/db/client';
 
 interface NextMakerScreenProps {
@@ -149,7 +149,7 @@ export function NextMakerScreen({ projectId, memberMap, memberNamesLoadFailed = 
   // "실제로 다음이 생겼다"가 눈으로 보인다).
   const [promotedIds, setPromotedIds] = useState<Set<string>>(new Set());
   const [transitionedEpicIds, setTransitionedEpicIds] = useState<Set<string>>(new Set());
-  const { toasts, addToast, dismissToast } = useToast();
+  const { addToast } = useToast();
   // 「목표 정하기」(PO 판정 2026-07-31) — 배정된 스토리는 로컬에서 즉시 그 목표 소속으로
   // 반영한다. 재fetch 없이도 그 목표의 레인이 즉시 그 스토리를 받고 orphan 목록에서 즉시
   // 빠진다 — "안 보이면 잃는다"의 반대(배정하면 즉시 눈에 보이는 것).
@@ -379,7 +379,6 @@ export function NextMakerScreen({ projectId, memberMap, memberNamesLoadFailed = 
         onAssigned={handleOrphanAssigned}
       />
 
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }

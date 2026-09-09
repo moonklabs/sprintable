@@ -24,22 +24,19 @@ const PANEL_ID = 'support-widget-panel';
  * 로직(useSidebar 폭 읽기+동적 left 오프셋, story #3260 2차 finding)은 전부 걷었다 — 걷는
  * 이유는 우측으로 옮기면 좌측 고정 사이드바와 애초에 안 겹쳐 그 회피 자체가 무의미해졌기
  * 때문(사이드바가 사라진 게 아니라 이 컴포넌트가 반대편으로 이동해 그 축이 통째로 안 걸리게
- * 됨). 새 충돌축은 우하단을 이미 쓰는 toast.tsx(`fixed right-4`)·kanban-board.tsx 저장오류
- * 배너(`fixed right-4`) — 그 corner를 넘어 뜬다.
+ * 됨).
  *
- * story #3756 — 예전엔 `bottom-20`(5rem 고정)이 "모바일 탭 바 회피"와 "데스크톱 토스트/배너
- * 회피" 둘 다를 우연히 만족시킨다고 여겼으나, safe-area-inset-bottom을 안 더해 노치 기기에서
- * 실제 탭 바 점유 구간(4rem+safe-area)을 못 따라가 토스트가 넷째 탭을 덮는 사고가 났다(실측).
- * 지금은 셸 소유 `--bottom-dock-inset`(globals.css `.dashboard-shell-root`, 탭 바 높이+
- * safe-area — lg 이상은 safe-area만) 위에 이 런처 고유의 여유(5rem, toast.tsx 기준선보다
- * 위)를 얹는다 — `bottom-[calc(var(--bottom-dock-inset)+5rem)]`. 패널은 그 위(런처+3.75rem,
- * 기존 8.75rem-5rem 간격 그대로 보존)만 다시 참조 — 숫자 자체는 기존 시각 간격을 유지하되
- * 원천이 이제 안전-영역을 아는 한 변수다.
+ * story #3756 → #3759 — `bottom-20`(5rem 고정) → `--bottom-dock-inset`(탭 바 회피, safe-area
+ * 인지) 위 5rem으로 한 차례 고쳤으나, 그 5rem 자체가 «토스트/배너를 피하기 위한 회피 상수»였다
+ * (근거 없이 정한 값 — 토스트가 몇 장 쌓이면 다시 깨진다). 지금은 이 컴포넌트 자체가 더 이상
+ * `fixed`로 자기 위치를 계산하지 않는다 — 셸의 BottomDock(components/nav 폴더의 dock 컬럼
+ * 소유 컴포넌트)이 소유한 `flex flex-col-reverse` 컬럼의 평범한 자식일 뿐이라, "몇 장이
+ * 쌓였든 그 위"가 flexbox 레이아웃만으로 저절로 성립한다(계산 0, 유나 定 2026-09-09 20:55Z).
  *
- * 마운트 자리는 apps/web/src/app/dashboard/dashboard-shell.tsx의 `<SidebarProvider>` 안
- * (ShellBody와 형제) — `useSidebar().isMobile`(모바일 채팅-상세 판정에 여전히 필요)을
- * 읽어야 해서 SidebarProvider 밖에 두면 크래시한다. "로그인 후 화면만"은 이 마운트가
- * (authenticated)/layout.tsx 하위 DashboardShell 안이라는 사실 자체로 성립.
+ * 마운트 자리는 BottomDock을 거쳐 여전히 apps/web/src/app/dashboard/dashboard-shell.tsx의
+ * `<SidebarProvider>` 안(ShellBody와 형제) — `useSidebar().isMobile`(모바일 채팅-상세 판정에
+ * 여전히 필요)을 읽어야 해서 SidebarProvider 밖에 두면 크래시한다. "로그인 후 화면만"은 이
+ * 마운트가 (authenticated)/layout.tsx 하위 DashboardShell 안이라는 사실 자체로 성립.
  *
  * ⚠️본체 chat 실시간(realtime-provider.tsx `useSseMultiplexerContext()`)을 이 컴포넌트도,
  * use-support-widget-session.ts도 절대 구독하지 않는다 — Support Gateway는 물리적으로 다른
@@ -110,29 +107,32 @@ export function SupportWidgetLauncher() {
 
   return (
     <>
+      {/* story #3759 — fixed/bottom/right 0: BottomDock의 flex-col-reverse 컬럼이 이미
+          우하단에 고정돼 있어, 이 버튼은 그 안의 평범한 flex 자식이다. 컬럼 자체가
+          pointer-events-none(빈 공간 클릭 통과)이라 실제 버튼은 pointer-events-auto로
+          되돌린다. */}
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
         aria-controls={PANEL_ID}
         aria-label={open ? t('closeLabel') : t('launcherLabel')}
-        className="fixed right-5 bottom-[calc(var(--bottom-dock-inset)+5rem)] z-40 flex h-12 w-12 items-center justify-center rounded-full bg-foreground text-background shadow-lg transition-transform hover:scale-105 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
+        className="pointer-events-auto flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-foreground text-background shadow-lg transition-transform hover:scale-105 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
       >
         {open ? <X className="h-5 w-5" aria-hidden /> : <LifeBuoy className="h-5 w-5" aria-hidden />}
       </button>
       {open ? (
-        // story #3756(카디르 QA·codex 동일 정적계산) — bottom은 --bottom-dock-inset만큼
-        // 올랐는데 높이 상한(11rem)이 그 인상분을 안 빼 375×667(iPhone SE급)에서 패널 상단이
-        // 화면 밖(-17px)으로 밀려났다. 11rem = 패널 bottom 오프셋(8.75rem) + 상단 여백(2.25rem)
-        // — bottom이 --bottom-dock-inset만큼 더 올라간 만큼 상한도 똑같이 그 값을 뺀다(100vh -
-        // 11rem - var(--bottom-dock-inset)). lg 이상(dock-inset=0)에선 기존 계산과 완전히
-        // 동일(회귀 0) — 값은 그대로, 원천만 인셋 인지로 교체(story #3759에서 컬럼 재설계 시
-        // 이 수 자체가 걷힐 예정, 임시 처방).
+        // story #3759 — 패널도 fixed/bottom 회피 상수 0: 이 컴포넌트가 반환하는 Fragment의
+        // 두 번째 자식이라, BottomDock의 flex-col-reverse 컬럼 안에서 버튼(첫 자식) «위»에
+        // 자동으로 쌓인다(DOM 순서=버튼 먼저·패널 나중 → col-reverse라 나중 자식이 위).
+        // 높이 상한은 이제 "런처를 피하기 위한 계산"이 아니라 "패널 자신이 뷰포트를 못
+        // 넘는다"는 단순 안전판(6rem = 컬럼 gap+런처 높이+상단 여백 어림, 정밀 측정 불요 —
+        // flexbox가 나머지를 알아서 쌓는다).
         <div
           id={PANEL_ID}
           role="dialog"
           aria-label={t('panelTitle')}
-          className="fixed right-5 bottom-[calc(var(--bottom-dock-inset)+8.75rem)] z-40 flex h-[min(480px,calc(100vh-11rem-var(--bottom-dock-inset)))] w-[360px] max-w-[calc(100vw-2.5rem)] flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl"
+          className="pointer-events-auto flex h-[min(480px,calc(100vh-var(--bottom-dock-inset)-6rem))] w-[360px] max-w-[calc(100vw-2.5rem)] flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl"
         >
           <SupportWidgetPanelHeader onClose={() => setOpen(false)} />
           <SupportWidgetPanelBody session={session} />

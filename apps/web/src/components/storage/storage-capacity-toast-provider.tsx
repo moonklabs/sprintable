@@ -3,7 +3,7 @@
 import { useEffect, useRef } from 'react';
 import { useTranslations } from 'next-intl';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
-import { ToastContainer, useToast } from '@/components/ui/toast';
+import { useToast } from '@/components/ui/toast';
 import { fetchWithAuth } from '@/lib/db/client';
 
 /** 세션 1회 가드 — 같은 세션 새로고침 시 토스트 재노출 방지. */
@@ -18,7 +18,7 @@ const TOAST_SHOWN_KEY = 'storage-capacity-toast-shown';
 export function StorageCapacityToastProvider({ children }: { children: React.ReactNode }) {
   const t = useTranslations('storage');
   const { orgId } = useDashboardContext();
-  const { toasts, addToast, dismissToast } = useToast();
+  const { addToast } = useToast();
   const ranRef = useRef(false);
 
   useEffect(() => {
@@ -70,7 +70,6 @@ export function StorageCapacityToastProvider({ children }: { children: React.Rea
   return (
     <>
       {children}
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </>
   );
 }

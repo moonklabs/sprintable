@@ -19,7 +19,7 @@ import {
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { useGoalsRoute } from '../goals-context';
 import { EntityDispatchPanel } from '@/components/dispatch/entity-dispatch-panel';
-import { ToastContainer, useToast } from '@/components/ui/toast';
+import { useToast } from '@/components/ui/toast';
 import { OutcomeStatusBadge } from '@/components/outcome/outcome-status-badge';
 import { EpicStatusTransition } from '@/components/epics/epic-status-transition';
 import { HypothesesSection } from '@/components/hypotheses/hypotheses-section';
@@ -233,7 +233,7 @@ export default function EpicDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const { wsSlug, projSlug, projectId } = useGoalsRoute();
-  const { toasts, addToast, dismissToast } = useToast();
+  const { addToast } = useToast();
   const [epic, setEpic] = useState<Epic | null>(null);
   const [loading, setLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
@@ -604,7 +604,6 @@ export default function EpicDetailPage() {
         </DialogContent>
       </Dialog>
 
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </>
   );
 }
