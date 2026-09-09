@@ -130,15 +130,22 @@ export function SupportWidgetLauncher() {
         // max-h-(상한)다: 컬럼 자신이 이제 max-h 예산을 갖는데(bottom-dock.tsx), 패널이
         // «고정» 높이를 고집하면 토스트가 그 예산을 나눠 가지려 할 때 패널이 밀려 올라가
         // 뷰포트 위로 넘칠 수 있었다(375×667·토스트 1장에서 top -31, #3756이 세운
-        // "패널 top ≥ 0" 회귀). max-h + shrink-0(밀려도 절대 안 줄어듦 — 사용자가 지금
-        // 보고 있는 패널을 찌그러뜨리지 않는다) 조합이면, 컬럼이 좁아질 때 패널은
-        // 요구한 자리를 그대로 지키고 대신 토스트 스택 쪽이 넘치는 몫을 진다(같은 파일
-        // ToastContainer의 min-h-0 overflow-hidden 참고 — 낡은 토스트가 잘린다).
+        // "패널 top ≥ 0" 회귀).
+        //
+        // story #3759 CHANGES 2차(유나 定+페드루 判, #4106) — 처음엔 shrink-0(밀려도 절대
+        // 안 줄어듦)을 줬는데, 그러면 토스트 스택이 전부 눌려 최신 토스트까지 조각으로
+        // 잘렸다(정정 캡처 375×667·패널 열림·토스트 5장 → 스택 27px, 최신도 27px 조각).
+        // 우선순위를 다시 매겼다: «토스트 1장(항상 온전) > 패널 > 토스트 2장째부터».
+        // shrink-0을 걷고 min-h-0(flex 기본 min-height:auto가 컨텐츠만큼 안 줄어드는
+        // 것 해제)을 줘 패널이 이제 «양보하는 쪽»이 된다 — 그 대신 toast.tsx
+        // ToastContainer가 min-h-[5.5rem](카드 한 장+gap)로 최소 한 장은 절대 안
+        // 줄어드는 바닥을 가져, flexbox가 부족한 공간을 패널 쪽에서만 뺏어간다. max-h는
+        // 그대로 유지(패널이 무한정 커지진 않는다) — 패널 top ≥ 0 불변식은 여전히 성립.
         <div
           id={PANEL_ID}
           role="dialog"
           aria-label={t('panelTitle')}
-          className="pointer-events-auto flex max-h-[min(480px,calc(100vh-var(--bottom-dock-inset)-6rem))] w-[360px] max-w-[calc(100vw-2.5rem)] shrink-0 flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl"
+          className="pointer-events-auto flex max-h-[min(480px,calc(100vh-var(--bottom-dock-inset)-6rem))] w-[360px] max-w-[calc(100vw-2.5rem)] min-h-0 flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl"
         >
           <SupportWidgetPanelHeader onClose={() => setOpen(false)} />
           <SupportWidgetPanelBody session={session} />

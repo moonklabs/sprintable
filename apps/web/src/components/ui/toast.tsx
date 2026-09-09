@@ -167,20 +167,29 @@ export function ToastContainer({
   // pointer-events-auto로 되돌린다.
   //
   // story #3759 CHANGES(페드루 PO 지적, #4106) — 컬럼이 min-h-0으로 실제 예산을 갖게 되면서
-  // (bottom-dock.tsx), 토스트가 너무 많이 쌓이면 이 스택이 넘치는 몫을 진다(패널은
-  // shrink-0로 안 줄어듦). 넘칠 때 잘려야 하는 건 «가장 오래된» 토스트다(어차피 5~8초면
-  // 사라질 항목 — 방금 연 패널이나 방금 뜬 새 토스트를 밀어내는 것보다 이쪽이 맞다).
-  // `toasts` 배열은 오래된→새것 순(addToast가 끝에 붙인다)인데, 그대로 flex-col로
-  // 렌더하면 «오래된 게 위·새것이 아래»가 되어 overflow-hidden이 새것(아래쪽, main-axis
-  // 끝)을 자른다 — 반대다. 배열을 뒤집어 DOM을 새것-먼저로 만들고 flex-col-reverse를
-  // 쓰면: 새것(1번째 DOM 자식)이 main-start(컬럼 하단 쪽)에 고정되고, 오래된 것들이
-  // 그 위로 갈수록 밀려 올라가 컨테이너 상단 밖으로 먼저 넘친다 — 정상 범위(안 넘칠 때)의
-  // 시각 순서(오래된 위·새것 아래)는 그대로 유지하면서(flex-col-reverse가 그 배치를
-  // 재현), 넘칠 때만 오래된 쪽이 먼저 잘린다. min-h-0(flex 기본 min-height:auto가
-  // 내용만큼 안 줄어드는 것 해제)+overflow-hidden이 실제 클리핑을 발생시킨다.
+  // (bottom-dock.tsx), 토스트가 너무 많이 쌓이면 이 스택이 넘치는 몫을 진다. 넘칠 때 잘려야
+  // 하는 건 «가장 오래된» 토스트다(어차피 5~8초면 사라질 항목 — 방금 연 패널이나 방금 뜬
+  // 새 토스트를 밀어내는 것보다 이쪽이 맞다). `toasts` 배열은 오래된→새것 순(addToast가
+  // 끝에 붙인다)인데, 그대로 flex-col로 렌더하면 «오래된 게 위·새것이 아래»가 되어
+  // overflow-hidden이 새것(아래쪽, main-axis 끝)을 자른다 — 반대다. 배열을 뒤집어 DOM을
+  // 새것-먼저로 만들고 flex-col-reverse를 쓰면: 새것(1번째 DOM 자식)이 main-start(컬럼
+  // 하단 쪽)에 고정되고, 오래된 것들이 그 위로 갈수록 밀려 올라가 컨테이너 상단 밖으로
+  // 먼저 넘친다 — 정상 범위(안 넘칠 때)의 시각 순서(오래된 위·새것 아래)는 그대로
+  // 유지하면서(flex-col-reverse가 그 배치를 재현), 넘칠 때만 오래된 쪽이 먼저 잘린다.
+  //
+  // story #3759 CHANGES 2차(유나 定+페드루 判, #4106 — 정정 캡처가 패널 top≥0인데 최신
+  // 토스트가 27px 조각으로만 보이는 걸 실제로 보고서야 내린 판정) — «토스트 한 장은
+  // 언제나 온전히. 그 다음부터는 패널보다 먼저 양보한다»(우선순위: 토스트 1장 > 패널 >
+  // 토스트 2장째부터). 근거: 반쯤 그려진 토스트는 「누를 수 있다」고 말해 놓고(role=status·
+  // 되돌리기 버튼 살아있음) 못 누르게 하는 거짓 어포던스 — 8초짜리 「되돌리기」 액션이 실린
+  // 토스트가 조각으로 잘리면 사용자가 그 버튼을 못 찾는다. 패널은 사용자가 스스로 연
+  // 지속 표면이라 줄어도 내용을 안 잃는다(자체 overflow-y-auto 스크롤). `min-h-0`(예산
+  // 안에서 0까지 눌릴 수 있음)을 `min-h-[5.5rem]`(카드 한 장+gap, 2줄 토스트 기준)로
+  // 바꿔 이 스택 자신에게 «최소 한 장은 절대 안 줄어드는» 바닥을 준다 — 그 아래로는
+  // flexbox가 패널(support-widget-launcher.tsx, shrink-0 해제) 쪽에서 공간을 뺏어온다.
   const newestFirst = [...toasts].reverse();
   return (
-    <div className="pointer-events-auto flex min-h-0 flex-col-reverse gap-2 overflow-hidden">
+    <div className="pointer-events-auto flex min-h-[5.5rem] flex-col-reverse gap-2 overflow-hidden">
       {newestFirst.map((t) => (
         <Toast key={t.id} item={t} onDismiss={onDismiss} />
       ))}

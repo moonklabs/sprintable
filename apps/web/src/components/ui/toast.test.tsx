@@ -117,14 +117,15 @@ describe('Toast 접근성 (story #2096)', () => {
     expect(el?.className).not.toContain('shadow-lg');
   });
 
-  // story #3759 CHANGES(페드루 PO 지적, #4106) — 컬럼이 min-h-0 예산을 갖게 되면서 토스트
-  // 스택이 넘치는 몫을 진다(overflow-hidden). 잘려야 하는 건 «가장 오래된» 토스트다. jsdom엔
-  // 레이아웃 엔진이 없어 실제 클리핑(픽셀)은 못 재지만(로컬 puppeteer 실측은
-  // bottom-dock.tsx 코드 주석 참고 — 375×667·패널 열림·토스트 5장에서 최신은 항상 스택
-  // 자기 박스 안에 남고 오래된 것부터 그 박스 밖으로 밀려남을 실측 확認), «DOM 순서가
-  // 실제로 새것-먼저인가»는 jsdom이 그대로 잴 수 있는 실제 값이다 — flex-col-reverse가
-  // 그 DOM 순서를 «오래된 게 위·새것이 아래»라는 정상 시각 순서로 되돌리고, overflow가
-  // 나면 DOM 뒤쪽(오래된 것들)부터 컨테이너 박스 밖으로 밀려 잘린다.
+  // story #3759 CHANGES(페드루 PO 지적, #4106) — 컬럼이 높이 예산을 갖게 되면서 토스트
+  // 스택이 넘치는 몫을 진다(overflow-hidden). 잘려야 하는 건 «가장 오래된» 토스트다(최신은
+  // min-h-[5.5rem] 바닥으로 항상 온전 — CHANGES 2차). jsdom엔 레이아웃 엔진이 없어 실제
+  // 클리핑(픽셀)은 못 재지만(로컬 puppeteer 실측은 bottom-dock.tsx 코드 주석 참고 —
+  // 375×667·패널 열림+내용 채움·토스트 5장에서 최신 3장은 스택 자기 박스 안에 온전히 남고
+  // 오래된 2장만 그 박스 밖으로 밀려남을 실측 확認), «DOM 순서가 실제로 새것-먼저인가»는
+  // jsdom이 그대로 잴 수 있는 실제 값이다 — flex-col-reverse가 그 DOM 순서를 «오래된 게
+  // 위·새것이 아래»라는 정상 시각 순서로 되돌리고, overflow가 나면 DOM 뒤쪽(오래된 것들)
+  // 부터 컨테이너 박스 밖으로 밀려 잘린다.
   it('DOM 자식 순서가 새것-먼저다(newest-first) — 되돌리면(toasts 그대로 매핑) 이 assertion이 실패한다', async () => {
     const items = [
       toast({ id: 'oldest', title: '오래된' }),
@@ -138,13 +139,16 @@ describe('Toast 접근성 (story #2096)', () => {
     expect(rendered).toEqual([expect.stringContaining('새것'), expect.stringContaining('중간'), expect.stringContaining('오래된')]);
   });
 
-  it('컨테이너 wrapper가 flex-col-reverse + min-h-0 + overflow-hidden이다(정상 시각 순서 유지 + 넘치면 자름)', async () => {
+  // story #3759 CHANGES 2차(유나 定+페드루 判, #4106) — min-h-0(0까지 눌릴 수 있음)은 정정
+  // 캡처에서 최신 토스트까지 27px 조각으로 잘리는 걸 실제로 보고 min-h-[5.5rem](카드 한
+  // 장+gap 바닥)으로 교체됐다 — «토스트 1장은 항상 온전».
+  it('컨테이너 wrapper가 flex-col-reverse + min-h-[5.5rem] + overflow-hidden이다(최신 1장은 항상 온전·정상 시각 순서 유지)', async () => {
     await act(async () => {
       root.render(wrap(<ToastContainer toasts={[toast({ id: 't1' }), toast({ id: 't2' })]} onDismiss={() => {}} />));
     });
     const wrapperEl = container.querySelector('[role]')?.parentElement;
     expect(wrapperEl?.className).toContain('flex-col-reverse');
-    expect(wrapperEl?.className).toContain('min-h-0');
+    expect(wrapperEl?.className).toContain('min-h-[5.5rem]');
     expect(wrapperEl?.className).toContain('overflow-hidden');
   });
 });
