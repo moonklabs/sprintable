@@ -24,7 +24,12 @@ describe('scanContent — JsxText', () => {
   });
 });
 
-describe('scanContent — 대상 속성(placeholder/title/alt/aria-*)', () => {
+// story #3741(PO 判 (a), 2026-09-09 13:45Z) — 최초 판은 속성 축을 placeholder/title/
+// alt/aria-* 4개로 못 박았으나, 유나 재실측(4축 밖 한글 속성 3건/3파일 — description
+// 2·agentPlaceholder 1, "baseline 재측정 비용" 전제가 실측과 어긋남)에 따라 이름 명단을
+// 버리고 문자열 리터럴 값을 가진 JSX 속성이면 전부 본다("지정 경로만 막는 가드는 클래스를
+// 남긴다").
+describe('scanContent — 대상 속성(이름 불문, 문자열 리터럴 값을 가진 JSX 속성 전부)', () => {
   it('flags Hangul in placeholder', () => {
     const v = scanContent('const x = <input placeholder="이름을 입력하세요" />;', 'fake.tsx');
     expect(v).toHaveLength(1);
@@ -45,9 +50,12 @@ describe('scanContent — 대상 속성(placeholder/title/alt/aria-*)', () => {
     expect(v).toHaveLength(1);
   });
 
-  it('does not flag other attribute names(스토리 明示 4축 밖, ㉢)', () => {
-    const v = scanContent('const x = <Foo label="닫기" />;', 'fake.tsx');
-    expect(v).toEqual([]);
+  // 뮤테이션 표적 — 속성 이름 필터를 되살리면(예: Foo/label을 다시 걸러내면) 이
+  // 테스트가 실패해야 한다. 창건 사례(chats/page.tsx)와 동형 — 커스텀 컴포넌트 prop도
+  // 이제 대상이다.
+  it('⭐flags Hangul in a custom-component prop(4축 밖, PO 判 (a) — 뮤테이션 표적)', () => {
+    const v = scanContent('const x = <Foo label="닫기" description="설명" />;', 'fake.tsx');
+    expect(v).toHaveLength(2);
   });
 
   it('does not flag an attribute whose value is a dynamic expression, not a string literal', () => {
@@ -137,28 +145,28 @@ describe('computeNewViolations', () => {
 // `<EmptyState ... description="왼쪽에서 대화를 선택하세요" />`)로 자가 실제로 무언가를
 // 재는지 확認한다(합성 문자열만으론 통과 의식이 된다).
 //
-// PO 판정(2026-09-09 12:41Z, 그라운딩 자기모순 발견 뒤) — 창건 사례 그 자리는 `description`
-// (커스텀 EmptyState prop)에 박혀 있는데, 이 가드가 보는 축은 明示 ①JsxText·②placeholder/
-// title/alt/aria-* 넷뿐(㉢ — 다른 속성은 후속 판 확장 대상, 지금은 안 본다). 즉 창건 사례
-// 자체는 이 가드의 검증 표본이 될 수 없다(자기모순 — 안 보는 축의 자리를 "잡혀야 한다"고
-// 요구하는 셈). 처방 (b) — 창건 사례는 위 발견 기록으로 문서에 남기고, 검증 표본은 축
-// ①②「안」의 실 사례로 교체한다. 축 ②를 커스텀 prop까지 넓히는 안은 baseline 재측정
-// 비용이 커 별건(적기만, 이 스토리 스코프 밖).
-describe('실 사례(축 ②aria-label) — docs-client-layout.tsx의 실 위반이 지금도 잡힌다', () => {
-  const REAL_CASE_FILE = path.resolve(
-    __dirname,
-    '../src/app/(authenticated)/[ws]/[proj]/docs/docs-client-layout.tsx',
-  );
-  const REAL_CASE_REL = 'app/(authenticated)/[ws]/[proj]/docs/docs-client-layout.tsx';
+// 이 표본을 둘러싼 판정 이력(그대로 남긴다 — 같은 자리에서 왜 두 번 바뀌었는지):
+//   1차 처방 — 속성 축을 placeholder/title/alt/aria-* 4개로 못 박음(창건 사례의
+//     `description`은 이 축 밖).
+//   PO 판정 (b)(2026-09-09 12:41Z, 그라운딩 자기모순 발견 뒤) — 창건 사례가 가드 축
+//     밖이라 이 가드의 검증 표본이 될 수 없다는 자기모순을 발견, 검증 표본을 축 ①②
+//     「안」의 실 사례(docs-client-layout.tsx aria-label="닫기")로 잠시 교체.
+//   PO 판정 (a)(2026-09-09 13:45Z, 유나 재실측 뒤) — 4축 밖 한글 속성이 레포 전체
+//     3건/3파일뿐(재측정 비용 낮음 실측)이라 (b)의 전제가 무너짐 — 속성 이름 명단
+//     자체를 버려(파일 머리 주석 「PO 판정 (a)」 참조) 창건 사례가 이제 가드 축
+//     «안»에 든다. 검증 표본을 창건 사례로 원복.
+describe('창건 사례 — chats/page.tsx의 실 위반이 지금도 잡힌다', () => {
+  const FOUNDED_CASE_FILE = path.resolve(__dirname, '../src/app/(authenticated)/chats/page.tsx');
+  const FOUNDED_CASE_REL = 'app/(authenticated)/chats/page.tsx';
 
-  it('docs-client-layout.tsx가 실제로 aria-label="닫기" 자리를 아직 갖고 있다', () => {
-    const content = readFileSync(REAL_CASE_FILE, 'utf8');
-    expect(content).toContain('aria-label="닫기"');
+  it('chats/page.tsx가 실제로 description="왼쪽에서 대화를 선택하세요" 자리를 아직 갖고 있다', () => {
+    const content = readFileSync(FOUNDED_CASE_FILE, 'utf8');
+    expect(content).toContain('왼쪽에서 대화를 선택하세요');
   });
 
-  it('실 저장소 스캔이 이 실 사례를 담는다(자가 죽어있지 않다)', () => {
+  it('실 저장소 스캔이 이 창건 사례를 담는다(자가 죽어있지 않다)', () => {
     const violations = scanRepo(path.resolve(__dirname, '../src'));
-    const hit = violations.find((v) => v.file === REAL_CASE_REL && v.text === '닫기');
+    const hit = violations.find((v) => v.file === FOUNDED_CASE_REL && v.text === '왼쪽에서 대화를 선택하세요');
     expect(hit).toBeDefined();
   });
 });

@@ -1,17 +1,8 @@
 {
   "_comment": [
-    "story #3741(유나 전수 2026-09-09 08:46Z, doc 08c58b24) grandfather baseline — 이 가드",
-    "첫 도입 시점 develop의 기존 한글 하드코딩 UI 텍스트(JsxText·placeholder/title/alt/aria-*",
-    "속성). 마이그레이션 대상 아님 — 이 게이트는 \"더 늘지 않는다\"만 보장한다(freeze, 전량",
-    "i18n 키화는 후속 별건).",
-    "",
-    "단위 명시 — 아래 keys는 file::text 조합의 unique Set이다(같은 문자열이 한 파일 안에",
-    "여러 줄 반복되면 한 key로 묶인다). 원시 occurrence 카운트(exemption 적용 후, 중복",
-    "포함)는 230건으로 유나 전수치와 정확히 일치한다 — unique key로 접으면 207건(같은",
-    "파일 안 동일 문자열 반복분 23건이 겹친다). 파일 수는 49개(유나 전수 51개와 근소한",
-    "차이 — 서로 다른 스캔 방법론 간 통상 드리프트, 재조사하지 않음). EXEMPT_FILES(내부",
-    "도그푸드·terms·privacy·refund-policy, 44건/4파일)는 별도 — 스크립트 코드의",
-    "EXEMPT_FILES 목록 참조."
+    "story #3741(유나 전수 2026-09-09) grandfather baseline — 이 가드 첫 도입 시점 develop의 기존 한글 하드코딩 UI 텍스트(JsxText·JSX 문자열 속성값 전체).",
+    "마이그레이션 대상 아님 — 이 게이트는 \"더 늘지 않는다\"만 보장한다(freeze, 전량 i18n 키화는 후속 별건).",
+    "story #3741(PO 判 (a), 2026-09-09 13:45Z 재실측) — 최초 판은 속성 축을 placeholder/title/alt/aria-* 4개로 제한했으나, 유나 재실측(4축 밖 한글 속성 3건/3파일 — description 2·agentPlaceholder 1)에 따라 속성 이름 명단을 버리고 문자열 리터럴 값을 가진 JSX 속성 전부로 넓혔다(+3건). chats/page.tsx의 description=\"왼쪽에서 대화를 선택하세요\"(이 스토리의 창건 사례)가 이 재측정으로 baseline에 정식 편입됐다."
   ],
   "keys": [
     "app/(authenticated)/[ws]/[proj]/docs/docs-client-layout.tsx::닫기",
@@ -29,6 +20,7 @@
     "app/(authenticated)/chats/[conversation_id]/page.tsx::참여자 추가",
     "app/(authenticated)/chats/[conversation_id]/page.tsx::채팅",
     "app/(authenticated)/chats/layout.tsx::로딩 중…",
+    "app/(authenticated)/chats/page.tsx::왼쪽에서 대화를 선택하세요",
     "app/(authenticated)/inbox/page.tsx::워크플로우 실행",
     "app/(authenticated)/settings/page.tsx::Organization 기본 정보를 확인하고 수정합니다.",
     "app/(authenticated)/settings/page.tsx::Organization 삭제",
@@ -101,6 +93,7 @@
     "components/chat/chat-view.tsx::대화를 시작하세요",
     "components/chat/chat-view.tsx::불러오는 중…",
     "components/chat/chat-view.tsx::스레드",
+    "components/chat/chat-view.tsx::첫 메시지를 보내면 대화가 시작됩니다.",
     "components/chat/embed-card.tsx::· 관찰됨 ·",
     "components/chat/embed-card.tsx::결재자 지정하고 올리기",
     "components/chat/embed-card.tsx::결재함에서 보기",
@@ -214,6 +207,7 @@
     "components/settings/workflow-template-gallery-section.tsx::다시 시도",
     "components/settings/workflow-template-gallery-section.tsx::로딩 중...",
     "components/settings/workflow-template-gallery-section.tsx::배정 정보 로딩 중...",
+    "components/settings/workflow-template-gallery-section.tsx::에이전트 선택...",
     "components/settings/workflow-template-gallery-section.tsx::워크플로우 템플릿 갤러리",
     "components/settings/workflow-template-gallery-section.tsx::적용 가능한 워크플로우 템플릿이 없습니다.",
     "components/settings/workflow-template-gallery-section.tsx::적용됨",

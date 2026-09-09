@@ -6,8 +6,17 @@
  * 문제가 아니라 «영어 로케일 사용자가 한글을 그대로 본다» 문제다.
  *
  * `apps/web/scripts/verify-no-hardcoded-aria-label.ts`(story #3557)가 이미 있지만 그건
- * `aria-label={\`...\`}` 템플릿 리터럴 한 모양만 본다 — 보이는 본문(JSX 텍스트)·
- * `placeholder`/`title`/`alt`/`aria-*` 속성값을 보는 가드는 이 스토리 前엔 0이었다.
+ * `aria-label={\`...\`}` 템플릿 리터럴 한 모양만 본다 — 보이는 본문(JSX 텍스트)·속성값을
+ * 보는 가드는 이 스토리 前엔 0이었다.
+ *
+ * ## PO 판정 (a) — 축을 명단이 아니라 «한글 여부»로(2026-09-09 13:45Z, 유나 재실측)
+ * 최초 판은 속성 축을 `placeholder`/`title`/`alt`/`aria-*` 4개로 못 박았다(그 밖은 후속
+ * 확장 대상, ㉢ 각주). 유나가 레포 전체를 재실측하니 그 4축 밖에서 한글이 든 JSX 속성
+ * 리터럴은 **3건/3파일**뿐(`description` 2 · `agentPlaceholder` 1)이었다 — "baseline
+ * 재측정 비용이 커 별건"이라던 최초 판단의 전제(열 크기가 크다)가 실측과 어긋났다. 정정
+ * — 지정 속성 명단을 아예 버리고, **문자열 리터럴 값을 가진 JSX 속성이면 이름 불문 전부**
+ * 스캔한다(`isTargetAttrName`/`TARGET_ATTR_RE` 삭제) — "지정 경로만 막는 가드는 클래스를
+ * 남긴다"는 지적을 반영, 새 속성 이름이 또 나와도 이 가드가 놓치지 않는다.
  *
  * ## 기전 — AST(verify-no-handrolled-card.ts와 동형, 새 기전 발명 금지)
  * 정규식 줄 스캔이 아니라 TypeScript AST를 walk한다 — 이유는 «주석은 절대 안 잡혀야
@@ -17,9 +26,9 @@
  *
  * 대상 노드 둘:
  *   ① `JsxText`(엘리먼트 사이 보이는 텍스트) — 한글 유니코드 포함 시 위반.
- *   ② `JsxAttribute`의 문자열 리터럴 값 — 속성 이름이 `placeholder`/`title`/`alt`
- *      이거나 `aria-`로 시작할 때만(스토리 明示 축) 한글 포함 시 위반. `t('key')` 같은
- *      함수 호출값은 StringLiteral이 아니라 이 판정에 애초에 안 걸린다.
+ *   ② `JsxAttribute`의 문자열 리터럴 값 — 속성 이름 불문(위 PO 판정 (a)), 한글 포함 시
+ *      위반. `t('key')` 같은 함수 호출값은 StringLiteral이 아니라 이 판정에 애초에 안
+ *      걸린다.
  *
  * ## ③ .ts 파일은 「텍스트노드 모드」가 구조적으로 꺼진다
  * `.ts` 파일은 `ts.ScriptKind.TS`로 파싱한다(TSX 아님) — 그러면 `<`/`>`는 제네릭·비교
@@ -30,8 +39,8 @@
  * 된다 — 구조적 배제).
  *
  * ## 비목표
- * 기존 230건(baseline)을 전량 i18n 키로 옮기지 않는다 — 이 가드는 오직 «더 늘지
- * 않는다»만 보장한다. 전량 정리는 별건(스토리 明示).
+ * 기존 baseline(창건 시점 전수)을 전량 i18n 키로 옮기지 않는다 — 이 가드는 오직 «더
+ * 늘지 않는다»만 보장한다. 전량 정리는 별건(스토리 明示).
  *
  * ⚠️이 가드가 «못 잡는» 것:
  *   ㉠ 템플릿 리터럴 안의 한글(`` `${x} 왼쪽` ``류) — StringLiteral만 본다, 이유는
@@ -39,8 +48,6 @@
  *      크다) — 필요해지면 별도 축.
  *   ㉡ `t('key', { x: '한글 기본값' })`처럼 next-intl 폴백 인자 안의 한글 — 함수
  *      호출 인자까지는 안 본다(스토리 明示 축 밖).
- *   ㉢ `placeholder`/`title`/`alt`/`aria-*` 외의 다른 속성(`label` 등)에 박힌 한글 —
- *      스토리가 지정한 4축만 본다, 다른 속성은 후속 판 확장 대상.
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
@@ -51,6 +58,11 @@ import ts from 'typescript';
 // 일반 최종 사용자가 보는 제품 화면이 아니다: internal-dogfood는 무렌스 내부 전용
 // 임시 경로(env flag로 통제)이고, terms/privacy/refund-policy는 법적 고지 문서라
 // 한국어 원문이 그대로 서 있어도 되는 성격의 페이지(국문 법무 문서 번역은 별건 판단).
+//
+// story #3741(PO 明示, 2026-09-09 13:45Z) — 약관 셋(terms/privacy/refund-policy)의
+// 만료 조건: 영어 약관 문서가 실제로 서면(en 로케일에 대응하는 법무 번역이 착지하면)
+// 이 허용목록에서 걷는다 — 지금은 "국문 법무 문서라 정당한 예외"지만 미래엔 그 전제가
+// 사라진다는 뜻. internal-dogfood는 무렌스 내부 전용이라 만료 조건이 다르다(별건).
 export const EXEMPT_FILES = new Set<string>([
   'app/internal-dogfood/page.tsx',
   'app/terms/page.tsx',
@@ -59,11 +71,6 @@ export const EXEMPT_FILES = new Set<string>([
 ]);
 
 const HANGUL_RE = /[가-힣]/;
-
-const TARGET_ATTR_RE = /^(placeholder|title|alt)$/;
-function isTargetAttrName(name: string): boolean {
-  return TARGET_ATTR_RE.test(name) || name.startsWith('aria-');
-}
 
 export interface Violation {
   file: string;
@@ -93,7 +100,9 @@ export function scanContent(content: string, file: string): Violation[] {
   function walk(node: ts.Node): void {
     if (ts.isJsxText(node)) {
       addIfHangul(node, node.getText(sf));
-    } else if (ts.isJsxAttribute(node) && ts.isIdentifier(node.name) && isTargetAttrName(node.name.text)) {
+    } else if (ts.isJsxAttribute(node)) {
+      // story #3741(PO 判 (a), 2026-09-09 13:45Z) — 속성 이름 불문(위 파일 머리 주석
+      // 참조). 문자열 리터럴 값을 가진 JSX 속성이면 전부 본다.
       const init = node.initializer;
       if (init && ts.isStringLiteral(init)) {
         addIfHangul(init, init.text);
@@ -215,8 +224,13 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     const out: BaselineFile = {
       _comment: [
         'story #3741(유나 전수 2026-09-09) grandfather baseline — 이 가드 첫 도입 시점 develop의 ' +
-          '기존 한글 하드코딩 UI 텍스트(JsxText·placeholder/title/alt/aria-* 속성).',
+          '기존 한글 하드코딩 UI 텍스트(JsxText·JSX 문자열 속성값 전체).',
         '마이그레이션 대상 아님 — 이 게이트는 "더 늘지 않는다"만 보장한다(freeze, 전량 i18n 키화는 후속 별건).',
+        'story #3741(PO 判 (a), 2026-09-09 13:45Z 재실측) — 최초 판은 속성 축을 placeholder/' +
+          'title/alt/aria-* 4개로 제한했으나, 유나 재실측(4축 밖 한글 속성 3건/3파일 — ' +
+          'description 2·agentPlaceholder 1)에 따라 속성 이름 명단을 버리고 문자열 리터럴 ' +
+          '값을 가진 JSX 속성 전부로 넓혔다(+3건). chats/page.tsx의 description="왼쪽에서 ' +
+          '대화를 선택하세요"(이 스토리의 창건 사례)가 이 재측정으로 baseline에 정식 편입됐다.',
       ],
       keys,
     };
