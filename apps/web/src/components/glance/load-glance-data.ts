@@ -85,7 +85,11 @@ async function fetchJson(url: string): Promise<unknown> {
 export async function loadGlanceData(projectId: string): Promise<GlanceData> {
   const [epicsJson, overviewJson, membersJson, attentionJson] = await Promise.all([
     // wedge #2: order_by=position 옵트인 — 조타(큐레이션) 결과를 아크가 curated-first로 소비만
-    // 반영(드래그 없음). position 모드는 커서 미발행이나 아크는 원래 전량로드(limit=100)라 무관.
+    // 반영(드래그 없음). position 모드는 커서 미발행이나 아크는 최대 100건까지만 로드한다
+    // (story #3703 정정 — "전량로드"가 아니다. 에픽이 100개를 넘으면 이 fetch가 조용히
+    // 잘라 그 뒤는 안 보인다 — X-Total-Count는 BE가 이미 주는데(route.ts) 이 화면이 안
+    // 읽을 뿐, #4051과 동형 클래스인 주석-사실 갈림. 이 PR은 주석만 정정 — 잘림 자체의
+    // 처방은 별건).
     // story #2298/#2303: include=glance — participant_ids/focal_story를 같은 응답에 싣는다.
     fetchJson(`/api/goals?project_id=${projectId}&limit=100&order_by=position&include=glance`),
     fetchJson('/api/dashboard/overview'),

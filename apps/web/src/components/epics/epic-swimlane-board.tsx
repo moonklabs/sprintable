@@ -273,6 +273,9 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
   const [draggingActive, setDraggingActive] = useState(false);
   const [storyTasks, setStoryTasks] = useState<Task[]>([]);
   const [storyTasksNextCursor, setStoryTasksNextCursor] = useState<string | null>(null);
+  // story #3703(FE 완전성-정직) — /api/tasks의 meta.totalCount(story_id 지정 시 BE 항상
+  // 반환). 기존에도 fetch는 하고 있었지만 nextCursor만 뽑고 이 값은 버렸다.
+  const [storyTasksTotalCount, setStoryTasksTotalCount] = useState<number | null>(null);
   const [loadingMoreStoryTasks, setLoadingMoreStoryTasks] = useState(false);
   const { toasts, addToast, dismissToast } = useToast();
 
@@ -286,11 +289,13 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
     if (!selectedStoryId) {
       setStoryTasks([]);
       setStoryTasksNextCursor(null);
+      setStoryTasksTotalCount(null);
       return;
     }
     let cancelled = false;
     setStoryTasks([]);
     setStoryTasksNextCursor(null);
+    setStoryTasksTotalCount(null);
     (async () => {
       try {
         const res = await fetchWithAuth(`/api/tasks?story_id=${selectedStoryId}&limit=20`);
@@ -298,10 +303,12 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
         if (res.ok) {
           const json = await res.json();
           setStoryTasks(json.data ?? []);
-          setStoryTasksNextCursor(parseCursorMeta(json.meta, 'EpicSwimlaneBoard tasks').nextCursor);
+          const tasksMeta = parseCursorMeta(json.meta, 'EpicSwimlaneBoard tasks');
+          setStoryTasksNextCursor(tasksMeta.nextCursor);
+          setStoryTasksTotalCount(typeof tasksMeta.totalCount === 'number' ? tasksMeta.totalCount : null);
         }
       } catch {
-        if (!cancelled) { setStoryTasks([]); setStoryTasksNextCursor(null); }
+        if (!cancelled) { setStoryTasks([]); setStoryTasksNextCursor(null); setStoryTasksTotalCount(null); }
       }
     })();
     return () => { cancelled = true; };
@@ -654,6 +661,7 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
                 key={selectedStory.id}
                 story={selectedStory}
                 tasks={storyTasks}
+                tasksTotalCount={storyTasksTotalCount}
                 getStatusLabel={domainLabels.statusLabel}
                 getEntityTypeLabel={domainLabels.entityTypeLabel}
                 nextTasksCursor={storyTasksNextCursor}
@@ -669,7 +677,9 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
                         const existingIds = new Set(prev.map((task) => task.id));
                         return [...prev, ...((json.data ?? []) as Task[]).filter((task) => !existingIds.has(task.id))];
                       });
-                      setStoryTasksNextCursor(parseCursorMeta(json.meta, 'EpicSwimlaneBoard tasks(loadMore)').nextCursor);
+                      const tasksMeta = parseCursorMeta(json.meta, 'EpicSwimlaneBoard tasks(loadMore)');
+                      setStoryTasksNextCursor(tasksMeta.nextCursor);
+                      setStoryTasksTotalCount(typeof tasksMeta.totalCount === 'number' ? tasksMeta.totalCount : null);
                     }
                   } finally {
                     setLoadingMoreStoryTasks(false);
