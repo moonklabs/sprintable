@@ -26,13 +26,16 @@ export function AppCredentialsCard({
   onSaved: () => void;
 }) {
   const t = useTranslations('channelConnect');
-  const [editing, setEditing] = useState(false);
+  const effectiveSource = credentials?.effective_source ?? 'none';
+  // story #3743 CHANGES Ⓐ(페드루 PO, 2026-09-09 12:36Z) — 행의 다음 발("앱 자격
+  // 등록")로 이 카드가 열릴 때 effectiveSource==='none'이 유일한 경로다(이미 등록된
+  // 경우 ⋯의 "앱 자격 관리"로만 온다). 그 자리에서 또 "등록" 버튼을 한 번 더 누르게
+  // 하는 막다른 화면 대신, 처음부터 입력 폼이 서 있게 한다(같은 라벨 두 번 클릭 금지).
+  const [editing, setEditing] = useState(effectiveSource === 'none');
   const [appId, setAppId] = useState('');
   const [appSecret, setAppSecret] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const effectiveSource = credentials?.effective_source ?? 'none';
 
   const handleSave = async () => {
     setSaving(true);
@@ -81,9 +84,13 @@ export function AppCredentialsCard({
           <Alert variant="default" role="status">
             <AlertDescription>{t('appCredentialsPlatformActive')}</AlertDescription>
           </Alert>
-        ) : (
+        ) : editing ? null : (
           // 유나 design verdict(f9cab0c23) — "설정 미완"은 「아직 안 한 것」이지 실패가
           // 아니다(같은 화면 not_connected 칩도 bg-muted 중립). org/platform과 같은 톤으로.
+          // story #3743 CHANGES ②(페드루 PO, 2026-09-09 12:54Z) — editing=true(=이
+          // 카드가 처음부터 폼으로 열린 경로)면 이 배너가 칩·부제와 같은 사실을 세
+          // 번째로 반복한다("설정 미완 4× 반복"과 같은 클래스) — 폼이 열린 것 자체가
+          // 답이라 배너는 걷는다.
           <Alert variant="default" role="status">
             <AlertDescription>{t('appCredentialsNone')}</AlertDescription>
           </Alert>

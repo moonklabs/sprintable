@@ -35,6 +35,35 @@ export function channelLabel(channel: string, t: (key: string) => string): strin
   return key ? t(key) : channel;
 }
 
+// story #3743(UI 재설계 ③, 시안 a98386e6) — 행 목록의 표식(마크) 배경색. 순수 장식(사용자
+// 데이터 아님)이라 "지어내지 않는다" 규율 밖 — 채널 공식 브랜드색(시안 캡처 값 그대로),
+// 모르는 채널은 중립색 폴백(원문 텍스트를 지어내지 않는 channelLabel과 같은 fail-safe 축).
+const CHANNEL_MARK_COLORS: Record<string, string> = {
+  threads: '#121310',
+  instagram: '#C13584',
+  instagram_sandbox: '#C13584',
+  facebook: '#1877F2',
+  facebook_sandbox: '#5B6470',
+  stibee: '#2E7D6B',
+  wordpress: '#21759B',
+  webhook: '#5B6470',
+  hosted_site: '#3157FF',
+  sandbox: '#5B6470',
+};
+const CHANNEL_MARK_NEUTRAL = '#5B6470';
+
+export function channelMarkColor(channel: string): string {
+  return CHANNEL_MARK_COLORS[channel] ?? CHANNEL_MARK_NEUTRAL;
+}
+
+// 표식 안 2글자 — 채널 키 자체(영문)에서 파생(번역 문구 아님, 사람이 읽는 텍스트가 아니라
+// 아이콘 대용 이니셜이라 지어내지 않는다 규율 밖). `_sandbox` 접미는 벗겨 부모 채널과 같은
+// 이니셜을 쓴다(사람은 이름 줄로 이미 구분, 표식은 브랜드 식별만).
+export function channelMarkInitials(channel: string): string {
+  const base = channel.replace(/_sandbox$/, '');
+  return base.slice(0, 2).replace(/^./, (c) => c.toUpperCase());
+}
+
 // story #3661(3650 후속, 유나 판정 정정 2026-09-07) — mismatch Alert 문장이 account_label
 // null인 연결에서 account_id로 폴백했는데, webhook류는 그 값이 139자 URL이라 문장을
 // 관통했다("무엇이 갱신됐는지"가 URL에 묻힘). 폴백은 «채널명 + 식별자 짧은 꼬리»로

@@ -13,7 +13,6 @@ import {
   ListChecks,
   MessageSquare,
   Newspaper,
-  Plug,
   Settings,
   Share2,
   Shield,
@@ -250,9 +249,10 @@ export const NAV_GROUPS: NavGroupConfig[] = [
       { id: 'org-roles', labelKey: 'orgRoles', icon: Shield, kind: 'static', path: '/organization/roles', scope: 'org' },
       // 근거: 조직 이벤트 정의(org 레벨 웹훅/트리거 카탈로그), project 필터 없음.
       { id: 'org-events', labelKey: 'orgEvents', icon: Zap, kind: 'static', path: '/organization/events', scope: 'org' },
-      // story 4180f67f — 마케팅자동화 발행 커넥터(threads/stibee/instagram 등) org_config 설정
-      // 화면. 근거: connectors/page.tsx에 project 관련 키워드 grep 0건, org_config 단일 스코프.
-      { id: 'org-connectors', labelKey: 'orgConnectors', icon: Plug, kind: 'static', path: '/organization/connectors', scope: 'org' },
+      // story #3743(UI 재설계 ③, 페드루 PO 決) — 4180f67f가 열었던 org-connectors 항목을
+      // 여기서 걷는다. 커넥터 화면(organization/connectors)이 채널 연결(organization/
+      // channels)로 흡수·리다이렉트됐다 — nav에 같은 목적지 둘을 안 남긴다(⑦ IA 25→24
+      // 실물). 라우트 자체는 남아 리다이렉트만 한다(북마크·딥링크 무회귀).
     ],
   },
   {

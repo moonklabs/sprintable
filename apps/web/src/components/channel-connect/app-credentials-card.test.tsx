@@ -56,6 +56,36 @@ describe('AppCredentialsCard(story #3733)', () => {
     expect(container.textContent).not.toContain('조직 소유자');
   });
 
+  // story #3743 CHANGES Ⓐ+②(페드루 PO, #4090 리뷰 2026-09-09) — effectiveSource==='none'
+  // 이면(이 카드가 열리는 유일한 진입점 — 이미 등록된 경우는 다른 값으로만 온다) 처음
+  // 부터 입력 폼으로 열린다(같은 라벨 두 번 클릭 금지) — 그 대신 「설정 미완」 배너는
+  // 걷는다(칩·부제와 세 번째 반복이라).
+  it('⭐effectiveSource===none이면 처음부터 App ID·App Secret 입력란이 서고, 「등록」 버튼도 배너도 없다', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <AppCredentialsCard channel="threads" orgId="org-1" isOwner credentials={NONE_CREDENTIALS} onSaved={vi.fn()} />,
+      ));
+    });
+    expect(container.querySelector('input[type="password"]')).not.toBeNull();
+    expect(container.textContent).not.toContain(koMessages.channelConnect.appCredentialsRegisterAction);
+    expect(container.textContent).not.toContain(koMessages.channelConnect.appCredentialsNone);
+  });
+
+  it('effectiveSource===org(이미 등록)면 배너가 서고 폼은 안 열린 채(「다시 입력」 버튼만)', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <AppCredentialsCard
+          channel="threads" orgId="org-1" isOwner
+          credentials={{ configured: true, app_id_suffix: 'ab12', updated_by: null, updated_at: null, effective_source: 'org' }}
+          onSaved={vi.fn()}
+        />,
+      ));
+    });
+    expect(container.textContent).toContain(koMessages.channelConnect.appCredentialsOrgActive.replace('{suffix}', 'ab12'));
+    expect(container.querySelector('input[type="password"]')).toBeNull();
+    expect(container.textContent).toContain(koMessages.channelConnect.appCredentialsReenterAction);
+  });
+
   it('non-owner에게는 등록 액션 대신 소유자 이름을 실은 요청 안내가 선다', async () => {
     await act(async () => {
       root.render(wrap(
