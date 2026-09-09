@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { CheckCircle2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { Card } from '@/components/ui/card';
 import { fetchWithAuth } from '@/lib/db/client';
 import { cn } from '@/lib/utils';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
@@ -183,18 +184,18 @@ export function NowFace() {
       ) : null}
       {/* story #3009(로드맵 P2·PR-F, L1) — hover 시 인라인 카드 강조는 --elev-card(아래 3곳). */}
       {items === null ? (
-        <div className="rounded-2xl border border-border bg-card transition-shadow hover:shadow-[var(--elev-card)]">
+        <Card className="transition-shadow hover:shadow-[var(--elev-card)]">
           {Array.from({ length: 3 }).map((_, i) => <RowSkeleton key={i} />)}
-        </div>
+        </Card>
       ) : nothingPending ? (
-        <div className="rounded-2xl border border-border bg-card transition-shadow hover:shadow-[var(--elev-card)]">
+        <Card className="transition-shadow hover:shadow-[var(--elev-card)]">
           <div className="flex flex-col items-center gap-1.5 px-5 py-10 text-center">
             <CheckCircle2 className="size-5 text-success/70" aria-hidden="true" />
             <p className="text-sm font-medium text-foreground">{t('nowEmptyTitle')}</p>
           </div>
-        </div>
+        </Card>
       ) : list.length > 0 ? (
-        <div className="rounded-2xl border border-border bg-card transition-shadow hover:shadow-[var(--elev-card)]">
+        <Card className="transition-shadow hover:shadow-[var(--elev-card)]">
           {shown.map((item) => (
             <NowRow key={item.id} item={item} />
           ))}
@@ -207,7 +208,7 @@ export function NowFace() {
               {t('nowMore', { count: overflow })}
             </button>
           ) : null}
-        </div>
+        </Card>
       ) : null}
       {items && list.length > 0 ? (
         <p className="mt-2 px-1 text-[11.5px] text-muted-foreground">{t('nowFoot')}</p>

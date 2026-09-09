@@ -1382,6 +1382,14 @@ jobs:
       - name: "Verify no hand-rolled modal without accessibility (story #2061 regression guard)"
         run: pnpm --filter web verify:no-handrolled-modal
 
+      # story #3164(DS 게이트 키스톤) 회귀가드: rounded-{lg,xl,2xl}+border+카드표면 bg(bg-card/
+      # background/muted/popover)가 같은 className에 공존하는 손코딩 카드가 새로 들어오면 이
+      # 스텝이 실패한다(Card/SectionCard/GlassPanel/cardVariants()를 쓸 것). story #3164
+      # 착지(2026-09-01) 이후 이 스텝이 ci.yml에 안 물려 있어 약 8일간 무력했다 — story
+      # #3736(⑪)이 재가동하며 baseline을 그 사이 드리프트(신규 26건)까지 흡수해 재측정했다.
+      - name: "Verify no hand-rolled card without primitive (story #3164 regression guard)"
+        run: pnpm --filter web verify:no-handrolled-card
+
       # story #1933 회귀가드: request.url을 new URL()의 base로 쓰면 Cloud Run 내부 주소가
       # 새어 나간다(플랫폼 성질). auth/native·internal-dogfood 3곳을 resolveAppUrl(null)로
       # 고쳤고, 재도입되면 이 스텝이 실패한다.
