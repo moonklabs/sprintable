@@ -227,13 +227,13 @@ describe('SupportWidgetLauncher — story #3260 3차(3274로 우측 이전): 모
     expect(container.querySelector('[role="dialog"]')).toBeNull();
   });
 
-  it('모바일 + 채팅-리스트(/chats, id 없음) — 기존처럼 bottom-20에 그대로 뜬다', async () => {
+  it('모바일 + 채팅-리스트(/chats, id 없음) — 기존처럼 --bottom-dock-inset 기준 위치에 그대로 뜬다', async () => {
     setInnerWidth(500);
     usePathnameMock.mockReturnValue('/chats');
     await mount();
     const btn = container.querySelector('button') as HTMLButtonElement;
     expect(btn).toBeTruthy();
-    expect(btn.className).toContain('bottom-20');
+    expect(btn.className).toContain('bottom-[calc(var(--bottom-dock-inset)+5rem)]');
   });
 
   it('모바일 + 채팅과 무관한 라우트(/board) — 기존처럼 그대로 뜬다(채팅-상세만 예외)', async () => {
@@ -253,15 +253,17 @@ describe('SupportWidgetLauncher — story #3260 3차(3274로 우측 이전): 모
 });
 
 // story #3274(선생님 확定 2026-09-01) — 우하단 배치+토스트/저장오류 배너 corner 회피.
-// 사이드바 회피 로직을 걷은 대신 새 충돌축(toast.tsx·kanban-board.tsx 둘 다
-// `fixed bottom-4 right-4`)을 bottom-20으로 넘어선다 — 반응형 분기 없이 모바일/데스크톱
-// 동일 값(모바일=탭바 회피와 우연히 같은 값을 재사용).
+// 사이드바 회피 로직을 걷은 대신 새 충돌축(toast.tsx·kanban-board.tsx 둘 다 `fixed right-4`)을
+// 여유값으로 넘어선다 — 반응형 분기 없이 모바일/데스크톱 동일 formula.
+// story #3756 — 고정 bottom-20(5rem)이 safe-area-inset-bottom을 몰라 노치 기기에서 탭 바
+// 실 점유 구간을 못 따라갔다(토스트가 넷째 탭을 덮는 사고) — 이제 셸 소유
+// --bottom-dock-inset(탭 바 높이+safe-area, lg 이상은 safe-area만) 위에 같은 5rem 여유를 얹는다.
 describe('SupportWidgetLauncher — story #3274: 우하단 배치+토스트 corner 회피', () => {
-  it('데스크톱 — right-5·bottom-20 클래스로 뜬다(사이드바 관련 인라인 style 없음)', async () => {
+  it('데스크톱 — right-5·--bottom-dock-inset 기준 클래스로 뜬다(사이드바 관련 인라인 style 없음)', async () => {
     await mount();
     const btn = container.querySelector('button') as HTMLButtonElement;
     expect(btn.className).toContain('right-5');
-    expect(btn.className).toContain('bottom-20');
+    expect(btn.className).toContain('bottom-[calc(var(--bottom-dock-inset)+5rem)]');
     expect(btn.style.left).toBe('');
     expect(btn.style.right).toBe('');
   });

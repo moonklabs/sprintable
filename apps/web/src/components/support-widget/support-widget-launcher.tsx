@@ -25,9 +25,16 @@ const PANEL_ID = 'support-widget-panel';
  * 이유는 우측으로 옮기면 좌측 고정 사이드바와 애초에 안 겹쳐 그 회피 자체가 무의미해졌기
  * 때문(사이드바가 사라진 게 아니라 이 컴포넌트가 반대편으로 이동해 그 축이 통째로 안 걸리게
  * 됨). 새 충돌축은 우하단을 이미 쓰는 toast.tsx(`fixed right-4`)·kanban-board.tsx 저장오류
- * 배너(`fixed bottom-4 right-4`) — `bottom-20`(5rem)로 그 corner를 넘어 뜬다. 이 값은 모바일
- * MobileTabBar(h-16=64px) 회피에 쓰이던 것과 같은 값을 재사용한다(모바일=탭바, 데스크톱=
- * 토스트/배너 — 우연히 같은 오프셋이 둘 다 만족시켜 반응형 분기 자체가 불필요해졌다).
+ * 배너(`fixed right-4`) — 그 corner를 넘어 뜬다.
+ *
+ * story #3756 — 예전엔 `bottom-20`(5rem 고정)이 "모바일 탭 바 회피"와 "데스크톱 토스트/배너
+ * 회피" 둘 다를 우연히 만족시킨다고 여겼으나, safe-area-inset-bottom을 안 더해 노치 기기에서
+ * 실제 탭 바 점유 구간(4rem+safe-area)을 못 따라가 토스트가 넷째 탭을 덮는 사고가 났다(실측).
+ * 지금은 셸 소유 `--bottom-dock-inset`(globals.css `.dashboard-shell-root`, 탭 바 높이+
+ * safe-area — lg 이상은 safe-area만) 위에 이 런처 고유의 여유(5rem, toast.tsx 기준선보다
+ * 위)를 얹는다 — `bottom-[calc(var(--bottom-dock-inset)+5rem)]`. 패널은 그 위(런처+3.75rem,
+ * 기존 8.75rem-5rem 간격 그대로 보존)만 다시 참조 — 숫자 자체는 기존 시각 간격을 유지하되
+ * 원천이 이제 안전-영역을 아는 한 변수다.
  *
  * 마운트 자리는 apps/web/src/app/dashboard/dashboard-shell.tsx의 `<SidebarProvider>` 안
  * (ShellBody와 형제) — `useSidebar().isMobile`(모바일 채팅-상세 판정에 여전히 필요)을
@@ -109,7 +116,7 @@ export function SupportWidgetLauncher() {
         aria-expanded={open}
         aria-controls={PANEL_ID}
         aria-label={open ? t('closeLabel') : t('launcherLabel')}
-        className="fixed bottom-20 right-5 z-40 flex h-12 w-12 items-center justify-center rounded-full bg-foreground text-background shadow-lg transition-transform hover:scale-105 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
+        className="fixed right-5 bottom-[calc(var(--bottom-dock-inset)+5rem)] z-40 flex h-12 w-12 items-center justify-center rounded-full bg-foreground text-background shadow-lg transition-transform hover:scale-105 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
       >
         {open ? <X className="h-5 w-5" aria-hidden /> : <LifeBuoy className="h-5 w-5" aria-hidden />}
       </button>
@@ -118,7 +125,7 @@ export function SupportWidgetLauncher() {
           id={PANEL_ID}
           role="dialog"
           aria-label={t('panelTitle')}
-          className="fixed bottom-[8.75rem] right-5 z-40 flex h-[min(480px,calc(100vh-11rem))] w-[360px] max-w-[calc(100vw-2.5rem)] flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl"
+          className="fixed right-5 bottom-[calc(var(--bottom-dock-inset)+8.75rem)] z-40 flex h-[min(480px,calc(100vh-11rem))] w-[360px] max-w-[calc(100vw-2.5rem)] flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl"
         >
           <SupportWidgetPanelHeader onClose={() => setOpen(false)} />
           <SupportWidgetPanelBody session={session} />
