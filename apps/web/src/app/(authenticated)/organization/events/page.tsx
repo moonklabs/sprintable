@@ -293,8 +293,11 @@ function EventDefRow({
   // 붙을 stage가 아예 없으면 적용할 게 없다) — isCyclicDefinition()(loop-create-dialog SSOT)
   // 그대로 재사용. id 필요조건은 canMutate와 동일 이유(ApplyRecipeDialog가 /apply 호출에 id 필요).
   const canApply = isAdmin && !!def.id && isCyclicDefinition(def as unknown as EventDefinitionResponse);
-  // story #3745 — 제목 자리 값을 한 곳에서 계산해 아래 부제 판정도 같은 값을 본다.
-  const titleLabel = def.name || t('eventUnnamedDefinition');
+  // story #3745(name===key 잔존, 페드루 PO 決 2026-09-09) — `name || 폴백`만으론 org
+  // 커스텀 정의가 name=key로(코드 키를 그대로 이름 자리에) 등록된 옛 데이터를 못 잡는다
+  // (name이 빈 문자열이 아니라 truthy라 폴백이 안 걸림). 제목 자리 값을 한 곳에서
+  // 계산해 아래 부제 판정도 같은 값을 본다.
+  const titleLabel = def.name && def.name !== def.key ? def.name : t('eventUnnamedDefinition');
   return (
     <div className="p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">

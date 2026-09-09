@@ -185,22 +185,25 @@ describe('OrganizationEventsPage', () => {
     expect(presetHeading?.querySelector('span')?.textContent).toBe('1');
   });
 
-  // 카디르 QA changes(#4082) — 부제 가드를 `def.name`만으로 완화(name!==key 비교 제거)하면
-  // name===key 행(org 커스텀 4행 name=key 방치 사례와 동형)에도 부제가 또 떠 이 테스트가
-  // RED가 된다(raw 값 한 줄 두 번 회귀 — 제목 자리 값(titleLabel)이 key와 같을 때만 안 뜬다).
-  // story #3745(페드루 PO 決·유나 定, #4090 이후 이어진 잔존 처방) — name이 아예 없는 행은
-  // 이제 제목이 「이름 없는 이벤트」(key가 아님)라 부제(key)가 정직하게 뜬다 — 옛
-  // `name || key` 폴백(raw 키가 제목 자리에 서던 결함)이 걷힌 결과.
-  it('story #3737(D2)+#3745 — name===key(백필 안 된 org 커스텀) 행만 부제 없음·이름 없는 행·name≠key 행은 부제(key)가 뜬다', async () => {
+  // story #3745(name===key 잔존, 페드루 PO 決·유나 定 2026-09-09) — `name || 폴백`(#4082
+  // 판정 당시 것)은 name===key 행(org 커스텀이 이름 자리에 코드 키를 그대로 등록한 옛
+  // 데이터)을 못 잡았다 — name이 빈 문자열이 아니라 "org.moonklabs.same_as_key" 자체라
+  // 폴백이 안 걸려 title=key로 서던 실 결함(디디 3745 첫 절 그라운딩·PO 라이브 실측
+  // 10:15Z). ⭐되돌리면 RED — titleLabel 판정에서 `!== def.key` 비교를 빼면 이 행의
+  // 제목이 다시 raw key로 서고 부제(key와 동값)가 억제돼 raw 값이 제목 자리에만 선다.
+  it('⭐story #3745 — name===key(org 커스텀 방치)·이름 없는 행 둘 다 「이름 없는 이벤트」+부제(key)·name≠key 행만 제 이름', async () => {
     mockFetches([
       customWithId({ id: 'def-samekey', key: 'org.moonklabs.same_as_key', name: 'org.moonklabs.same_as_key' }),
       customWithId({ id: 'def-nameless', key: 'org.moonklabs.no_name', name: '' }), // name 자체가 없음 → 「이름 없는 이벤트」
       customWithId({ id: 'def-named', key: 'org.moonklabs.named', name: '배포 완료' }),
     ]);
     await mount();
-    // title===key인 자리(name을 key 그대로 등록한 옛 데이터)만 부제 억제 — 여기서만 raw
-    // 값이 두 번 서는 것을 막는다.
-    expect(container.querySelector('[data-testid="event-def-key-subtitle-org.moonklabs.same_as_key"]')).toBeNull();
+    // name===key 행도 이제 「이름 없는 이벤트」(제목 자리에 코드 키가 서지 않는다) — 부제로
+    // key가 정직하게 뜬다(raw 값이 한 줄에 두 번 서는 것과는 다른 문제 — 여긴 애초에 라벨이
+    // 없어 부제 하나로만 진실을 말한다).
+    const samekeyToggle = container.querySelector('[data-testid="event-def-toggle-org.moonklabs.same_as_key"]');
+    expect(samekeyToggle?.textContent).toBe(koMessages.organization.eventUnnamedDefinition);
+    expect(container.querySelector('[data-testid="event-def-key-subtitle-org.moonklabs.same_as_key"]')?.textContent).toBe('org.moonklabs.same_as_key');
     // name이 없으면 제목이 「이름 없는 이벤트」(key가 아니다) — 부제로 key가 정직하게 뜬다.
     expect(container.querySelector('[data-testid="event-def-key-subtitle-org.moonklabs.no_name"]')?.textContent).toBe('org.moonklabs.no_name');
     expect(container.textContent).toContain(koMessages.organization.eventUnnamedDefinition);

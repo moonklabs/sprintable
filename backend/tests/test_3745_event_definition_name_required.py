@@ -56,6 +56,21 @@ class TestCreateEventDefinitionRequestNameRequired:
             CreateEventDefinitionRequest(**_create_kwargs(name="   "))
         assert any(e["loc"] == ("name",) for e in ei.value.errors())
 
+    # ⭐되돌리면 RED④ — name===key(org 커스텀이 코드 키를 그대로 이름 자리에 등록한 옛
+    # 데이터와 동형 입력)도 거부. 빈 이름과 같은 결함 클래스(화면 제목 자리에 코드 키가
+    # 그대로 서게 만든다) — 페드루 PO 라이브 실측(10:15Z) 4건이 이 갈래.
+    def test_name_equals_key_rejected(self):
+        with pytest.raises(ValidationError) as ei:
+            CreateEventDefinitionRequest(**_create_kwargs(key="org.acme.widget.made", name="org.acme.widget.made"))
+        assert any(e["loc"] == ("name",) for e in ei.value.errors())
+
+    # name===key 검증이 strip 前 원문이 아니라 strip 後 값으로 도는지(앞뒤 공백만 다른
+    # name="  org.acme.widget.made  "도 사실상 key와 같다) 확認.
+    def test_name_equals_key_with_surrounding_whitespace_rejected(self):
+        with pytest.raises(ValidationError) as ei:
+            CreateEventDefinitionRequest(**_create_kwargs(key="org.acme.widget.made", name="  org.acme.widget.made  "))
+        assert any(e["loc"] == ("name",) for e in ei.value.errors())
+
 
 class TestUpdateEventDefinitionRequestNameOptionalButNotBlank:
     # ⭐되돌리면 RED③ — PATCH는 name 생략(None)이 "이 필드는 안 건드림"이라 유효하다.
