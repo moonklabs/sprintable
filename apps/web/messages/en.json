@@ -479,7 +479,7 @@
     "clusterSilentStallBucket1moPlus": "1mo+",
     "clusterSilentStallAgeDays": "{n}d",
     "clusterSilentStallUnassigned": "Unassigned",
-    "clusterViewAll": "View all {n} →",
+    "clusterViewAll": "View all {n}",
     "clusterViewLess": "Collapse",
     "clusterUnclosedTitle": "Loops never closed",
     "clusterUnclosedSub": "Past their measure date or missing an outcome verdict",

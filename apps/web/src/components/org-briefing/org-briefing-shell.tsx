@@ -3,6 +3,7 @@
 import { useTranslations } from 'next-intl';
 import { useSearchParams } from 'next/navigation';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Card } from '@/components/ui/card';
 import { NowFace } from './now-face';
 import { LoopFace } from './loop-face';
@@ -62,9 +63,14 @@ export function OrgBriefingShell() {
   return (
     <div className="mx-auto max-w-7xl space-y-6 p-4 lg:p-6">
       {showProjectBanner && (
-        <div className="rounded-xl border border-border bg-muted/40 px-4 py-3 text-sm text-foreground" role="status">
-          {projectBannerText}
-        </div>
+        // story #3748(잔여②, 페드루 PO 確定 2026-09-09) — 손코딩 카드가 아니라 안내
+        // 배너다. 집안 `Alert`의 default variant 값(border-border·bg-muted/40·
+        // text-foreground)이 이 리터럴과 그대로 같다 — role="status"만 명시로
+        // 유지(default variant의 자동 유도값은 role="alert", 이 배너는 그대로
+        // status가 맞다 — 사용자 조작을 막는 오류가 아니라 안내다).
+        <Alert role="status">
+          <AlertDescription>{projectBannerText}</AlertDescription>
+        </Alert>
       )}
       <div>
         <h1 className="text-lg font-semibold tracking-tight text-foreground">
