@@ -99,7 +99,7 @@ def _client_for(app):
 
 async def _setup_app(app, Session, user_id, org_id):
     from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
-    from app.dependencies.database import get_db
+    from tests.conftest import override_db_and_read
 
     async def _db():
         async with Session() as s:
@@ -116,7 +116,9 @@ async def _setup_app(app, Session, user_id, org_id):
     async def _org():
         return org_id
 
-    app.dependency_overrides[get_db] = _db
+    # story #2451(§6 Phase3, 카디르 guard 재지적) — get_db만 걸면 get_read_db를 놓치는
+    # whack-a-mole(4회 재발)이라 이 헬퍼 하나로만 건다(신규 테스트 세션 override 습관).
+    override_db_and_read(app, _db)
     app.dependency_overrides[get_current_user] = _auth
     app.dependency_overrides[get_verified_org_id] = _org
 
