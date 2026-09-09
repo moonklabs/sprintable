@@ -9,30 +9,12 @@
  * client.tsx`는 `loadGlanceData` 결과 중 `attentionSignals`·`memberMap`만 소비, roadmap은
  * 소비 0). story #4062 후속(같은 날, 페드루 PO 決) — `RoadmapStatus`·`RoadmapEpic`도 마저
  * 걷어냈다: 마지막 소비처였던 `derive-flow.ts`의 `deriveFlowLaneRows`가 그 사이 삭제되며
- * (유일 소비처 FlowLane 은퇴) 방금 소비처 0이 됐다 — 남기면 "살아 있는 추상". `BeFocalStory`
- * (→`derive-hero-envelope.ts`)는 여전히 실 소비처가 있어 남겨 둔다.
+ * (유일 소비처 FlowLane 은퇴) 방금 소비처 0이 됐다 — 남기면 "살아 있는 추상". story #3715
+ * 후속(같은 grep 스윕, 페드루 PO 決) — `BeFocalStory`도 마저 걷어냈다: 그때는 실 소비처로
+ * 남겨 둔 `derive-hero-envelope.ts`가 유일 소비처였던 glance-hero.tsx와 함께 #3715에서
+ * 삭제되며 방금 소비처 0이 됐다(같은 클래스 재발 — "여전히 산다"고 적어 둔 바로 다음
+ * 라운드에 죽는 사례, 판정은 항상 grep 재확認 시점 기준).
  */
-
-/** story #2298/#2303 — `?include=glance` 옵트인 시 `focal_story`에 실리는 9필드. `/api/glance/hero?story_id=`
- * 전체 웨이브를 대체(#2303 그라운딩: glance-hero.tsx + 호출체인이 실제로 읽는 필드만 — description·
- * envelope.claim/status·gate.status/decision_basis/auto_decision_reason·human_verified_by.member_id/role·
- * gates 전체배열은 화면이 안 읽어 의도적으로 뺐다). */
-export interface BeFocalStory {
-  id: string;
-  title: string;
-  status: string;
-  assignee_id: string | null;
-  assignee_ids: string[];
-  proof_count: number;
-  auto_verify: 'passed' | 'failed' | null;
-  gate: { gate_type: string; requires_human: boolean } | null;
-  trust: {
-    self_reported: boolean;
-    human_verified: boolean;
-    human_verified_by: { name: string } | null;
-    human_verified_at: string | null;
-  };
-}
 
 export type ProgressPhrase = 'notStarted' | 'justStarted' | 'underway' | 'almostThere' | 'wrappingUp';
 
