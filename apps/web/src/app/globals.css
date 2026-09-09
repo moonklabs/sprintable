@@ -904,3 +904,24 @@
 .tiptap [data-type="toggleContent"] { padding-left: 1.25rem; margin-left: 0.875rem; border-left: 2px solid hsl(var(--border)); margin-top: 0.25rem; }
 [data-type="toggleSummary"],
 .tiptap [data-type="toggleSummary"] { cursor: pointer; }
+
+/* ─── 하단 도크 인셋(story #3756) ───
+   MobileTabBar(nav/mobile-tab-bar.tsx)는 lg 미만(<1024px, hooks/use-mobile.ts
+   MOBILE_BREAKPOINT와 동일 SSOT)에서만 뷰포트 바닥에 고정 렌더된다. 우하단 fixed
+   요소(토스트·지원 위젯 런처/패널·칸반 저장오류 배너)가 각자 숫자를 추측하지 않도록,
+   dashboard-shell.tsx의 셸 루트(`.dashboard-shell-root`, SidebarProvider 래퍼)가
+   이 변수 하나를 소유한다 — 그 하위 전부가 `bottom: calc(var(--bottom-dock-inset) + Npx)`
+   형태로만 참조한다(숫자 재추측 금지).
+   --mobile-tab-bar-h는 탭 바 자기 자신의 실 높이(`h-[var(--mobile-tab-bar-h)]`,
+   mobile-tab-bar.tsx)와 같은 값을 가리키는 단일 토큰 — 탭 바 높이가 바뀌면 이
+   한 줄만 고치면 인셋도 함께 맞다(두 벌 상수 금지). */
+.dashboard-shell-root {
+  --mobile-tab-bar-h: 4rem;
+  --bottom-dock-inset: env(safe-area-inset-bottom);
+}
+
+@media (max-width: 1023px) {
+  .dashboard-shell-root {
+    --bottom-dock-inset: calc(var(--mobile-tab-bar-h) + env(safe-area-inset-bottom));
+  }
+}

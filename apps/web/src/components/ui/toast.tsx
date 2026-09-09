@@ -120,7 +120,11 @@ export function ToastContainer({
   if (toasts.length === 0) return null;
 
   return (
-    <div className="fixed right-4 z-50 flex flex-col gap-2" style={{ bottom: 'max(1rem, calc(env(safe-area-inset-bottom) + 1rem))' }}>
+    // story #3756 — bottom은 셸 소유 --bottom-dock-inset(dashboard-shell.tsx 하위에서만
+    // 값이 세워짐, globals.css `.dashboard-shell-root`)을 참조한다. 이전엔 이 컴포넌트가
+    // safe-area-inset-bottom만 알고 모바일 탭 바 높이(4rem)를 몰라, 탭 바 위에 뜬 토스트가
+    // 넷째 탭을 덮었다 — 이제 lg 미만에서는 그 값이 자동으로 더해진다(추측 0).
+    <div className="fixed right-4 bottom-[calc(var(--bottom-dock-inset)+1rem)] z-50 flex flex-col gap-2">
       {toasts.map((t) => (
         <Toast key={t.id} item={t} onDismiss={onDismiss} />
       ))}

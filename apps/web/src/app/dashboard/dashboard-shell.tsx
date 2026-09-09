@@ -391,7 +391,10 @@ export function DashboardShell({
       <RefreshProvider>
       <RealtimeProvider currentTeamMemberId={currentTeamMemberId}>
         <TopBarProvider>
-          <SidebarProvider className="h-svh">
+          {/* story #3756 — dashboard-shell-root가 --bottom-dock-inset·--mobile-tab-bar-h를
+              소유(globals.css). MobileTabBar·SupportWidgetLauncher 둘 다 이 아래 자손이라
+              상속으로 그 값을 읽는다. */}
+          <SidebarProvider className="h-svh dashboard-shell-root">
             <ShellBody
               currentTeamMemberId={currentTeamMemberId}
               showTopBar={showTopBar}

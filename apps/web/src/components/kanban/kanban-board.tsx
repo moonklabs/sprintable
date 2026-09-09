@@ -1208,7 +1208,9 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
         // story #3007(로드맵 P2·PR-E, L1) — 토스트성 배너는 floating이라 --elev-overlay.
         // story 3466 후속(무효 유틸 4곳) — text-destructive-foreground는 이 테마에
         // 매핑이 없는 no-op(라이트 3.55·다크 3.00, AA 미달). trust-seal.tsx 선례.
-        <div key={transitionErrorNonce} role="alert" aria-live="assertive" aria-atomic="true" className="fixed bottom-4 right-4 z-50 rounded-md border border-destructive bg-destructive px-4 py-3 text-sm text-white dark:text-proof-bg shadow-[var(--elev-overlay)]">
+        // story #3756 — bottom = 셸 소유 --bottom-dock-inset 참조(toast.tsx와 동일 formula) —
+        // 탭 바 높이를 모르고 뷰포트 바닥 기준 bottom-4로 떠 넷째 탭을 덮던 결함 계열.
+        <div key={transitionErrorNonce} role="alert" aria-live="assertive" aria-atomic="true" className="fixed right-4 bottom-[calc(var(--bottom-dock-inset)+1rem)] z-50 rounded-md border border-destructive bg-destructive px-4 py-3 text-sm text-white dark:text-proof-bg shadow-[var(--elev-overlay)]">
           ⚠️ {transitionError}
         </div>
       )}
