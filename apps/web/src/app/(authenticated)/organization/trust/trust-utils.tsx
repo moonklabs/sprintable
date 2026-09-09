@@ -1,12 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import { useLocale } from 'next-intl';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { formatRelativeTime } from '@/lib/storage/format';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 
 export interface OrgSummaryRow {
   member_id: string;
@@ -222,7 +220,6 @@ export function HistoryDrilldownTrigger({
 export function HistoryDrilldownPanel({
   open, snapshots, t,
 }: { open: boolean; snapshots: HistorySnapshot[] | null; t: Translator }) {
-  const locale = useLocale();
   const displayTimezone = resolveDisplayTimezone().tz;
   if (!open) return null;
   return (
@@ -234,9 +231,16 @@ export function HistoryDrilldownPanel({
       ) : (
         <>
           <Sparkline values={extractSparklineValues(snapshots)} />
+          {/* story #3749 CHANGES(페드루 PO, 유나 픽셀 캡처 e7410279 지적 2026-09-09
+              17:48Z) — 이력 행 시각이 `formatRelativeTime`이면 한 열에 "2분 전·
+              어제·5일 전·08-31 02:38 GMT+9"가 섞인다(#4093 「발행」 칸에서 이미
+              닫은 같은 클래스 — 7일이 지나면 절대 표기로 넘어가는 그 함수 자신의
+              분기 때문에 한 열 안에서 상대·절대가 섞인다). 定②(행 부제 "…기준")와
+              같은 §11-2 정본 절대 포맷으로 통일 — 한 화면 안에 두 표기 규율을
+              안 둔다. */}
           {snapshots.map((s) => (
             <div key={s.computed_at} className="flex items-center justify-between text-xs text-muted-foreground">
-              <span>{formatRelativeTime(s.computed_at, locale, displayTimezone)}</span>
+              <span>{formatScheduledAt(s.computed_at, displayTimezone).display}</span>
               <TrustBadge hitRate={s.hit_rate} resolved={s.resolved} t={t} />
             </div>
           ))}

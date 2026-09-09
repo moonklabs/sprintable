@@ -316,6 +316,54 @@ describe('OrganizationTrustPage — 「추이 보기」 펼침(HistoryDrilldown 
     expect(panel).not.toBeNull();
     expect(panel?.parentElement).toBe(row);
   });
+
+  // story #3749 CHANGES(페드루 PO, 유나 픽셀 캡처 e7410279 지적 2026-09-09 17:48Z) —
+  // 이력 행 시각이 formatRelativeTime이면 7일 안/밖이 섞인 이력에서 "2분 전"과
+  // "08-31 02:38 GMT+9"류가 한 열에 같이 선다(#4093 「발행」 칸과 같은 클래스).
+  // §11-2 절대 포맷(formatScheduledAt)으로 고정 — 스냅샷을 "지금부터 N분 전"(7일
+  // 안)과 "지금부터 10일 전"(7일 밖) 둘 다 매번 동적으로 계산해 심어, 어느 쪽도
+  // "N분 전"/"N일 전"류 상대 문구로 안 뜨는지 확認한다(고정 픽스처 날짜였다면
+  // #4093 뮤테이션 킬 때처럼 이 화면의 오늘 날짜에 따라 어느 한쪽만 우연히
+  // 절대로 위임돼 뮤테이션을 놓칠 위험이 있다 — 그 교훈 그대로 적용).
+  it('⭐이력 행 시각이 §11-2 절대 포맷이다 — 7일 안/밖 섞인 이력 둘 다 상대 시각(N분 전 등) 아님', async () => {
+    mountAsAdmin();
+    const withinWeek = new Date(Date.now() - 3 * 60 * 60000).toISOString(); // 3시간 전
+    const beyondWeek = new Date(Date.now() - 10 * 86400000).toISOString(); // 10일 전
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/trust-scores/org-summary') {
+        return {
+          ok: true, status: 200,
+          json: async () => ({ members: [{ member_id: 'm1', role_key: 'dev', role_label: '개발', hit_rate: 0.9, resolved: 5, computed_at: '2026-09-08T00:00:00Z', pending: 0 }] }),
+        };
+      }
+      if (url === '/api/org-members' || url.startsWith('/api/team-members')) {
+        return { ok: true, status: 200, json: async () => ({ data: [] }) };
+      }
+      if (url.startsWith('/api/trust-scores/history')) {
+        return {
+          ok: true, status: 200,
+          json: async () => ({
+            snapshots: [
+              { computed_at: withinWeek, hit_rate: 0.9, resolved: 5 },
+              { computed_at: beyondWeek, hit_rate: 0.8, resolved: 4 },
+            ],
+          }),
+        };
+      }
+      throw new Error('unexpected fetch: ' + url);
+    }));
+    await act(async () => { root.render(wrap(<OrganizationTrustPage />)); });
+    await flush();
+
+    const toggle = container.querySelector('[data-testid="trust-history-toggle"]') as HTMLElement;
+    await act(async () => { toggle.click(); });
+    await flush();
+
+    const panel = container.querySelector('[data-testid="trust-history-panel"]');
+    expect(panel?.textContent).toMatch(/\d{2}-\d{2} \d{2}:\d{2} .*\d{2}-\d{2} \d{2}:\d{2} /);
+    expect(panel?.textContent).not.toMatch(/분 전|시간 전|일 전|어제|오늘/);
+  });
 });
 
 describe('OrganizationTrustPage — 하단 참고 문장(定③)', () => {
