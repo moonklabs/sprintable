@@ -1421,6 +1421,13 @@ jobs:
       - name: "Verify no hanja in i18n message values (story #3432 regression guard)"
         run: pnpm --filter web verify:no-hanja-in-i18n
 
+      # story #5ead8723 회귀가드: 코드가 참조하는 i18n 키(useTranslations/getTranslations
+      # 바인딩별 리터럴 호출 — .rich/.raw/.has 포함)가 ko.json·en.json 둘 다에 말단 값으로
+      # 실존해야 한다 — next-intl은 못 찾은 키를 화면에 그대로 그린다(코드 낱말 노출).
+      # 동적 키(변수·템플릿·삼항)는 실패시키지 않고 수로만 센다.
+      - name: "Verify i18n keys referenced in code exist in ko/en (story #5ead8723 regression guard)"
+        run: pnpm --filter web verify:i18n-keys-exist
+
       # story #3486→#3493 회귀가드: 브라우저 로케일 의존 날짜 toLocaleString/
       # toLocaleDateString/toLocaleTimeString이 새로 생기면 실패한다 — 3436 묶음 8
       # 정본(formatRelativeTime/formatScheduledAt)이 있는데도 계속 새던 자리(유나
