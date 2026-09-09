@@ -121,6 +121,12 @@ export const NAV_GROUPS: NavGroupConfig[] = [
     // 'work'(zoneWork·「워크스페이스」)에서 마케팅 실물(content·channel-posts)이 「마케팅」
     // 구역으로 빠지며 남은 5항목(board·goals·loops·standup·retro)이 이 구역의 전부다 —
     // id·labelKey도 그 실체(개발/운영 리듬 도구)에 맞게 개명한다. path는 전부 불변.
+    //
+    // story #f81657f8(IA·S4/S1 후속, 유나 § 2026-09-09) — 구역 이름 축을 «누가 쓰나(팀)»에서
+    // «다루는 대상」으로 교체하며 ko/en 값만 「일감」/"Work"로 바꿨다 — id('dev')·labelKey
+    // ('zoneDev')는 그대로다(app-sidebar.tsx의 sidebar_group_collapsed localStorage가 id로
+    // 접힘 기억을 저장해서 개명하면 사람들 기억이 조용히 초기화된다). 이 id/labelKey 이름은
+    // 옛 축(팀)의 잔재 — 뜻은 카탈로그 값(라벨)이 SSOT다.
     id: 'dev',
     labelKey: 'zoneDev',
     items: [
@@ -136,6 +142,10 @@ export const NAV_GROUPS: NavGroupConfig[] = [
     // (content·channel-posts)과 조직 프레임에 흩어져 있던 마케팅 실물(org-channels·
     // org-content-rules·org-insights-board)을 도메인 축 하나로 묶는다 — 항목 5,
     // path는 전부 불변(묶음만 이동, 라우트 0).
+    //
+    // story #f81657f8 후속(유나 § 2026-09-09) — id/labelKey 유지 이유는 위 'dev' 구역 주석과
+    // 동일(localStorage 접힘 기억 보존). ko 값은 「마케팅」→「콘텐츠·채널」(en "Content &
+    // Channels")로 교체 — 「발행」은 ko.json에 이미 93줄이 «행위» 의미로 굳어 있어 기각.
     id: 'marketing',
     labelKey: 'zoneMarketing',
     items: [
@@ -286,56 +296,9 @@ export const CHAT_CENTER_ITEM: NavItemConfig = {
   id: 'chats', labelKey: 'chats', icon: MessageSquare, kind: 'static', path: '/chats', badgeKey: 'chats',
 };
 
-// story #d986fd6c(IA·S4, PO 정정 2026-09-08 07:19Z — budget=12 되돌림) — 첫 시도(budget
-// 누적, 순서 고정)는 페드루 PO의 07:01Z 판단이 "픽셀보다 구역 성격"으로 고른 추정치였는데,
-// 유나가 배포 54 라이브에서 실측한 관계식이 그 추정을 반증했다: 필요 뷰포트(px) =
-// 615.5 + 32×N(펼친 항목 수). 12항목엔 1000px가 필요해(900px엔 8·800px엔 5만 들어감)
-// AC1 "첫 화면 스크롤 없이"를 budget=12는 못 지킨다.
-//
-// 유나 실측 규칙으로 교체 — «budget 누적(순서 고정)»이 아니라 «현재 구역 인지 + 뷰포트
-// 조건»: 기본은 현재 활성 구역만 펼침(≤5항목 + 상시 행 1 = N 6 → 807.5px, 이 앱 최대
-// 구역 크기가 5라 항상 안전). 뷰포트 ≥872px(615.5+32×8=871.5 반올림)면 「오늘」(2항목)도 같이 펼친다(자주
-// 쓰는 진입점이라 조건이 맞으면 얹는다). 나머지는 접힘. 808px 미만은 접혀도 다 못
-// 맞추는 뷰포트라 "접힘의 약속 밖"으로 명시한다 — 그 경우의 도달성은 이 표면(사이드바)이
-// 아니라 모바일 허브·커맨드 팔레트가 이미 보장한다(AC2, depth≤2 무관).
-//
-// story #d986fd6c 후속(배포 55 라이브 재실측, 유나 § 2026-09-08 12:52Z) — 840은 대입한
-// N(펼친 항목 수)을 7(활성 구역 5+오늘 2)로 계산한 결과였는데, 실측하니 사이드바는
-// 라벨 없는 상시 행(설정) 1개를 그 상태에서도 늘 같이 그린다 — N 정의는 "그 상태에서
-// 사이드바가 그리는 모든 항목 행의 수"라 실제 N=8(활성 5+오늘 2+설정 1). 관계식
-// 615.5+32×N 자체는 라이브에서 그대로 섰다(크롬 311.5·base 304 실측 일치) — 대입값만
-// 정정한다.
-export interface GroupItemCount {
-  id: string;
-  itemCount: number;
-}
-
-// 615.5 + 32×8 = 871.5, 반올림해 872(N=8 — 활성 구역 최대 5 + 오늘 2 + 상시 행 1). 「오늘」을
-// 얹을지 가르는 뷰포트 문턱(유나 실측, 배포 55 라이브 재실측으로 840→872 정정).
-export const SIDEBAR_EXPAND_NOW_MIN_VIEWPORT_HEIGHT = 872;
-export const SIDEBAR_NOW_GROUP_ID = 'now';
-
-export interface ActiveZoneCollapseInput {
-  groups: readonly GroupItemCount[];
-  // 현재 라우트가 속한 구역 id. 어느 구역에도 안 걸리면(예: 챗 center·설정처럼 라벨 없는
-  // 유틸 그룹) null — "활성 구역이라 펼친다"는 규칙이 적용될 대상이 없다는 뜻이다.
-  activeGroupId: string | null;
-  // 마운트 전(SSR)엔 window가 없어 null — 그 상태에선 "「오늘」도 얹는다" 조건을 아직
-  // 모르니 보수적으로 안 얹는다(마운트 후 실측되면 재계산·하이드레이션 불일치 없음,
-  // sidebar_width와 동형 패턴).
-  viewportHeight: number | null;
-}
-
-export function computeActiveZoneCollapsedGroupIds(input: ActiveZoneCollapseInput): Set<string> {
-  const { groups, activeGroupId, viewportHeight } = input;
-  const expanded = new Set<string>();
-  if (activeGroupId) expanded.add(activeGroupId);
-  if (viewportHeight != null && viewportHeight >= SIDEBAR_EXPAND_NOW_MIN_VIEWPORT_HEIGHT) {
-    expanded.add(SIDEBAR_NOW_GROUP_ID);
-  }
-  const collapsed = new Set<string>();
-  for (const group of groups) {
-    if (!expanded.has(group.id)) collapsed.add(group.id);
-  }
-  return collapsed;
-}
+// story #d986fd6c(IA·S4)의 «뷰포트 높이 역산 접힘» 전제(필요 높이(px) = 615.5 + 32×N)는
+// 이 스토리(#f81657f8, 선생님 決 2026-09-09 01:28Z 「그냥 디폴트를 다 펼쳐두고 접을 수 있게
+// 하면 좋을 것 같다」)로 폐기됐다 — 기본값은 이제 뷰포트/활성 구역과 완전히 무관한 빈 Set
+// (전부 펼침)이다. 관계식·GroupItemCount·computeActiveZoneCollapsedGroupIds는 코드고고학이
+// 필요하면 git 이력(이 커밋 이전)에서 찾을 것 — 살아있는 추상으로 남겨두지 않는다.
+// 구역별 접기 토글+사람별 기억(app-sidebar.tsx의 collapsedOverrides)은 그대로다.

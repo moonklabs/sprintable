@@ -54,20 +54,18 @@ function stubLocalStorage() {
   });
 }
 
-// story #d986fd6c(IA·S4, PO 정정 2026-09-08 07:19Z) — 기본 접힘이 이제 활성 구역+뷰포트
-// 조건으로 매 렌더 파생돼(고정 budget 아님), 이 구조적 회귀가드들(원래 story #2681)이
-// 전제하던 "항상 전 항목 렌더"가 깨진다. 접힘 기능 자체와 무관한 이 테스트들은 접힘 전
-// 상태(구조)를 재는 게 목적이라 localStorage에 전 구역 펼침을 미리 심어 둔다(오버라이드가
-// 계산된 기본값을 항상 이긴다 — mergeStoredCollapsedOverrides) — 접힘 동작 자체는 아래
-// 별도 테스트가 다룬다.
+// story #f81657f8(IA·S4/S1 후속, 2026-09-09) — 기본 접힘 집합은 이제 항상 빈 Set(전부
+// 펼침)이라 이 helper는 엄밀히는 더 이상 필수가 아니다(기본값 자체가 이미 전부 펼침).
+// 그래도 "이 테스트는 접힘 前 구조를 재는 게 목적"이라는 의도를 명시적으로 남겨 두는 게
+// 읽기에 낫다고 판단해 그대로 둔다(오버라이드가 기본값과 같은 값을 다시 심을 뿐 — 무해).
 function expandAllGroups() {
   localStorage.setItem('sidebar_group_collapsed', JSON.stringify({
     now: false, dev: false, marketing: false, trust: false, knowledge: false, organization: false,
   }));
 }
 
-// jsdom 기본 innerHeight(768)는 「오늘」 얹기 문턱(872)에 못 미친다 — 문턱 위/아래 양쪽을
-// 재는 테스트를 위한 스텁.
+// story #f81657f8 후속 — 뷰포트 높이가 이제 기본 접힘 계산과 무관하다는 것 자체를 재는
+// 회귀가드용 스텁(옛 문턱 872는 폐기됐다).
 function stubViewportHeight(height: number) {
   Object.defineProperty(window, 'innerHeight', { value: height, writable: true, configurable: true });
 }
@@ -109,10 +107,13 @@ async function mount() {
 // PO)이 아직 없어 생긴 커플링이라 표면이 설 때까지 nav에 남긴다(②=ⓐ→되돌림, 유나 QA 처방).
 // story #a2b004f9(IA·S1, 2026-09-08) — 'work'(zoneWork)가 'dev'(zoneDev)로 개명되고
 // content·channel-posts가 신규 'marketing'(zoneMarketing) 구역으로 이관(org-channels·
-// org-content-rules·org-insights-board도 조직에서 마케팅으로 합류) — 그룹 소속만 이동,
+// org-content-rules·org-insights-board도 조직에서 마케팅(現 「콘텐츠·채널」, story #f81657f8
+// 후속 개명)으로 합류) — 그룹 소속만 이동,
 // 항목 24·모든 라벨·href는 무변(EXPECTED_HREF_BY_LABEL 그대로).
 const EXPECTED_GROUPS: Array<{ labelKey: string | null; labels: string[] }> = [
   { labelKey: 'zoneNow', labels: ['조직 브리핑', '알림'] },
+  // story #f81657f8(IA·S4/S1 후속, 유나 § 2026-09-09) — 구역 「이름」만 팀 축→대상 축으로
+  // 개명(id·labelKey 불변) — 아래 라벨 문자열도 그 새 값을 그대로 딴다.
   { labelKey: 'zoneDev', labels: ['보드', '목표', '실험실', '스탠드업', '회고'] },
   { labelKey: 'zoneMarketing', labels: ['블로그 포스트', '채널 포스트', '채널 연결', '콘텐츠 규칙', '성과 보드'] },
   { labelKey: 'zoneTrust', labels: ['활동 로그', '신뢰 센터'] },
@@ -172,11 +173,11 @@ const EXPECTED_HREF_BY_LABEL: Record<string, string> = {
 };
 
 describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story #2930 I1 4구역 재편', () => {
-  it('그룹 순서·라벨·항목 순서·라벨이 IA·S1 확定대로다(오늘→개발→마케팅→신뢰→지식→조직→설정)', async () => {
+  it('그룹 순서·라벨·항목 순서·라벨이 IA·S1 확定대로다(오늘→일감→콘텐츠·채널→신뢰→지식→조직→설정)', async () => {
     expandAllGroups();
     await mount();
     const groupLabels = [...container.querySelectorAll('[data-slot="sidebar-group-label"]')].map((el) => el.textContent);
-    expect(groupLabels).toEqual(['오늘', '개발', '마케팅', '신뢰', '지식', '조직']);
+    expect(groupLabels).toEqual(['오늘', '일감', '콘텐츠·채널', '신뢰', '지식', '조직']);
 
     const groups = [...container.querySelectorAll('[data-slot="sidebar-group"]')];
     expect(groups.length).toBe(EXPECTED_GROUPS.length);
@@ -195,7 +196,7 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story
     expect(eventsLink?.getAttribute('href')).toBe('/organization/events');
   });
 
-  it('리소스 항목(개발 그룹, org/project slug 없음)이 bare href로 폴백한다(기존 resourceLink 동작)', async () => {
+  it('리소스 항목(일감 그룹, org/project slug 없음)이 bare href로 폴백한다(기존 resourceLink 동작)', async () => {
     expandAllGroups();
     await mount();
     // startsWith 유지 — kbd 힌트 접미사가 붙는 항목이 있어 정확한 === 매칭은 못 쓴다.
@@ -350,76 +351,56 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story
     expect(link!.className).not.toContain('bg-proof-blue-soft');
   });
 
-  // story #d986fd6c(IA·S4, PO 정정 2026-09-08 07:19Z — 유나 실측 반영, 배포 55 라이브
-  // 재실측으로 840→872 정정) — budget-누적 규칙을 「현재 구역 인지 + 뷰포트 조건」으로
-  // 교체했다: 기본은 활성 구역만 펼침, 뷰포트 ≥872px면 「오늘」도 얹는다.
-  it('기본 상태는 활성 구역만 펼치고 나머지는 접는다(뷰포트<872, pathname=/dashboard → 활성 구역 없음)', async () => {
+  // story #f81657f8(IA·S4/S1 후속, 선생님 決 2026-09-09 01:28Z 「그냥 디폴트를 다 펼쳐두고
+  // 접을 수 있게 하면 좋을 것 같다」) — story #d986fd6c의 뷰포트 높이 역산 접힘 규칙(기본은
+  // 활성 구역만 펼침·뷰포트 ≥872px면 「오늘」도 얹음)을 폐기했다. 기본 접힘 집합은 이제
+  // 뷰포트/활성 구역과 완전히 무관한 빈 Set(전부 펼침) — 아래는 그 대체 회귀가드다
+  // (mutation-kill: 옛 규칙이 되살아나면 이 셋 다 RED로 돌아간다).
+  it('기억 없는 새 브라우저 — 활성 구역이 없어도(경로=/dashboard) 전 구역이 펼쳐진다(옛 규칙이면 전부 접혔어야 함)', async () => {
     stubViewportHeight(700);
-    await mount();
-    // pathname mock 기본값 '/dashboard'는 어느 nav 항목과도 안 맞아 활성 구역이 없다
-    // (dashboard 항목 자체가 story #3179로 삭제됨) — 「오늘」도 뷰포트 미달이라 안 얹혀
-    // 전 구역이 접힌다.
-    const orgBriefingLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('조직 브리핑'));
-    expect(orgBriefingLink).toBeUndefined();
-    const boardLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('보드'));
-    expect(boardLink).toBeUndefined();
-  });
-
-  it('활성 구역(현재 경로가 속한 구역)은 뷰포트 무관하게 펼쳐진다', async () => {
-    pathnameRef.current = '/organization/events';
-    stubViewportHeight(700);
-    await mount();
-    const eventsLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.includes('이벤트'));
-    expect(eventsLink).toBeDefined();
-    const membersLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('구성원'));
-    expect(membersLink).toBeDefined();
-    // 비활성 구역(개발)은 그대로 접힘.
-    const boardLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('보드'));
-    expect(boardLink).toBeUndefined();
-  });
-
-  it('뷰포트 ≥872이면 활성 구역 밖이어도 「오늘」이 함께 펼쳐진다', async () => {
-    pathnameRef.current = '/organization/events';
-    stubViewportHeight(900);
     await mount();
     const orgBriefingLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('조직 브리핑'));
     expect(orgBriefingLink).toBeDefined();
+    const boardLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('보드'));
+    expect(boardLink).toBeDefined();
+    // 구역 토글 버튼만 좁혀서 잰다 — 컨테이너 전체 button[aria-expanded]는 다른 컴포넌트
+    // (드롭다운·스위처 등)의 닫힌 트리거도 걸려 오탐한다.
+    const toggles = [...container.querySelectorAll('[data-slot="sidebar-group-label"]')];
+    expect(toggles.length).toBeGreaterThan(0);
+    expect(toggles.every((b) => b.getAttribute('aria-expanded') === 'true')).toBe(true);
   });
 
-  it('뷰포트 871(문턱 바로 아래)면 「오늘」은 안 얹힌다(경계값)', async () => {
+  it('활성 구역이 있어도(경로=조직/이벤트) 비활성 구역(일감)까지 펼쳐진다(옛 규칙이면 접혔어야 함)', async () => {
     pathnameRef.current = '/organization/events';
-    stubViewportHeight(871);
+    stubViewportHeight(700);
     await mount();
-    const orgBriefingLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('조직 브리핑'));
-    expect(orgBriefingLink).toBeUndefined();
+    const boardLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('보드'));
+    expect(boardLink).toBeDefined();
   });
 
-  // 배포 55 라이브 결함 회귀(페드루 PO 明示, 유나 § 실측) — 옛 문턱값(840)은 N=7(활성
-  // 5+오늘 2)만 세고 「설정」 그룹(labelKey 없음 — isCollapsible=false라 collapsedGroupIds와
-  // 무관하게 app-sidebar.tsx가 항상 그린다)을 안 세어 실제 렌더 항목이 8개인데 7개로
-  // 착각했다 — 그 결과 840서 「오늘」을 얹으면 스크롤이 났다. 840이 새 문턱(872) 아래로
-  // 떨어져 「오늘」이 접힌 채면 렌더 항목이 활성 구역(5)+설정(1)=6개로 줄어 스크롤이
-  // 안 난다(실측: 615.5+32×6=807.5 ≤ 840). 이 값이 다시 872 이상으로 낮아지면 재발한다.
-  it('뷰포트 840(옛 문턱값)에서도 「설정」은 항상 그려지고 「오늘」은 접힌다(배포 55 라이브 결함 회귀)', async () => {
-    pathnameRef.current = '/organization/events';
-    stubViewportHeight(840);
-    await mount();
-    const settingsLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('설정'));
-    expect(settingsLink).toBeDefined();
-    const orgBriefingLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('조직 브리핑'));
-    expect(orgBriefingLink).toBeUndefined();
+  it('뷰포트 높이 800과 1080 둘 다 기본값이 전부 펼침(접힘 0)이다 — 높이 의존 0', async () => {
+    for (const height of [800, 1080]) {
+      stubViewportHeight(height);
+      await mount();
+      const toggles = [...container.querySelectorAll('[data-slot="sidebar-group-label"]')];
+      expect(toggles.every((b) => b.getAttribute('aria-expanded') === 'true')).toBe(true);
+      await act(async () => { root.unmount(); });
+      container.remove();
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+    }
   });
 
   it('구역 헤더를 클릭하면 접히고(항목 DOM에서 사라짐) 다시 클릭하면 펴진다', async () => {
-    expandAllGroups();
     await mount();
-    const devHeader = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('개발'));
+    const devHeader = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('일감'));
     expect(devHeader).toBeDefined();
     expect(devHeader?.getAttribute('aria-expanded')).toBe('true');
 
     await act(async () => { devHeader!.click(); });
     expect([...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('보드'))).toBeUndefined();
-    const devHeaderAfter = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('개발'));
+    const devHeaderAfter = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('일감'));
     expect(devHeaderAfter?.getAttribute('aria-expanded')).toBe('false');
 
     await act(async () => { devHeaderAfter!.click(); });
@@ -433,18 +414,18 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story
   it('구역 토글 버튼의 aria-label이 그룹명+접힘상태를 담는다(카디르 QA a11y 처방)', async () => {
     expandAllGroups();
     await mount();
-    const devHeader = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('개발'));
-    expect(devHeader?.getAttribute('aria-label')).toBe('개발 접기');
+    const devHeader = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('일감'));
+    expect(devHeader?.getAttribute('aria-label')).toBe('일감 접기');
 
     await act(async () => { devHeader!.click(); });
-    const devHeaderAfter = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('개발'));
-    expect(devHeaderAfter?.getAttribute('aria-label')).toBe('개발 펼치기');
+    const devHeaderAfter = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('일감'));
+    expect(devHeaderAfter?.getAttribute('aria-label')).toBe('일감 펼치기');
   });
 
   it('접힘 상태가 localStorage에 사람별로 기억된다(AC3)', async () => {
     expandAllGroups();
     await mount();
-    const devHeader = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('개발'));
+    const devHeader = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('일감'));
     await act(async () => { devHeader!.click(); });
 
     const stored = JSON.parse(localStorage.getItem('sidebar_group_collapsed') ?? '{}');
@@ -456,7 +437,7 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story
     await mount();
     const boardLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('보드'));
     expect(boardLink).toBeUndefined();
-    const devHeader = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('개발'));
+    const devHeader = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('일감'));
     expect(devHeader?.getAttribute('aria-expanded')).toBe('false');
   });
 

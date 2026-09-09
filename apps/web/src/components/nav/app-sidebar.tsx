@@ -16,7 +16,6 @@ import { cn } from '@/lib/utils';
 import {
   NAV_GROUPS,
   CHAT_CENTER_ITEM,
-  computeActiveZoneCollapsedGroupIds,
 } from '@/lib/nav-config';
 import { useSseMultiplexerContext } from '@/components/realtime-provider';
 import {
@@ -169,43 +168,13 @@ export function AppSidebar({
 
   const openPalette = useCallback(() => setPaletteOpen(true), []);
 
-  // story #d986fd6c(IA·S4, PO 정정 2026-09-08 07:19Z) — 현재 라우트가 속한 구역. 렌더
-  // 루프와 같은 isActive/resourceLink 판정을 재사용해 "어느 구역이 활성인가"를 미리
-  // 한 번 훑는다(항목 배지·href 계산과 완전히 독립된 목적이라 렌더 루프 안에 끼워
-  // 넣지 않고 별도 pass로 둔다 — 접힘 여부가 항목 렌더 자체보다 먼저 정해져야 한다).
-  const activeGroupId = useMemo(() => {
-    for (const group of NAV_GROUPS) {
-      for (const item of group.items) {
-        const link = item.kind === 'static' ? { isActive: isActive(item.path) } : resourceLink(item.path);
-        if (link.isActive) return group.id;
-      }
-    }
-    return null;
-    // isActive/resourceLink는 pathname·orgSlug·currentProjectSlug에서 매 렌더 새로
-    // 만들어지는 클로저라 그 원시값들만 의존성으로 충분하다(함수 자체를 넣으면 항상
-    // 새 참조라 메모가 무의미해진다).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pathname, orgSlug, currentProjectSlug]);
-
-  // story #d986fd6c(IA·S4, PO 정정 2026-09-08 07:19Z) — 「오늘」을 얹을지 가르는 뷰포트
-  // 높이. SSR엔 window가 없어 null로 시작(하이드레이션 불일치 방지, sidebar_width와
-  // 동형 패턴) — 마운트 후 실측하고 resize에도 재측정한다.
-  const [viewportHeight, setViewportHeight] = useState<number | null>(null);
-  useEffect(() => {
-    const measure = () => setViewportHeight(window.innerHeight);
-    measure();
-    window.addEventListener('resize', measure);
-    return () => window.removeEventListener('resize', measure);
-  }, []);
-
-  const defaultCollapsedGroupIds = useMemo(
-    () => computeActiveZoneCollapsedGroupIds({
-      groups: NAV_GROUPS.map((g) => ({ id: g.id, itemCount: g.items.length })),
-      activeGroupId,
-      viewportHeight,
-    }),
-    [activeGroupId, viewportHeight],
-  );
+  // story #f81657f8(IA·S4 후속, 선생님 決 2026-09-09 01:28Z 「그냥 디폴트를 다 펼쳐두고
+  // 접을 수 있게 하면 좋을 것 같다」) — 예전엔 여기서 현재 라우트의 활성 구역+뷰포트 높이를
+  // 훑어 기본 접힘 집합을 역산했다(story #d986fd6c). 그 규칙 자체가 폐기됐으니 그 입력을
+  // 만들던 계산(activeGroupId·viewportHeight)도 이제 이 자리에선 쓸모가 없다 — 기본값은
+  // 뷰포트/활성 구역과 무관한 빈 Set(전부 펼침). 아래 collapsedOverrides(사람별 기억)가
+  // 유일한 접힘 경로다.
+  const defaultCollapsedGroupIds = useMemo(() => new Set<string>(), []);
 
   // story #d986fd6c(IA·S4) — 그룹별 접힘 «기억». 서버 렌더는 항상 빈 overrides({})로
   // 시작해(하이드레이션 불일치 방지, sidebar_width의 SIDEBAR_WIDTH_STORAGE_KEY 마운트-후
@@ -221,6 +190,7 @@ export function AppSidebar({
   useEffect(() => {
     const overrides = readStoredCollapsedOverrides();
     if (Object.keys(overrides).length > 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setCollapsedOverrides(overrides);
     }
   }, []);
