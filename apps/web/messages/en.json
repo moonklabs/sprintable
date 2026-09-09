@@ -29,6 +29,7 @@
     "enable_all": "Enable all",
     "disable_all": "Disable all",
     "deletedUser": "Deleted User",
+    "memberUnnamed": "Unnamed member",
     "unassigned": "Unassigned",
     "unknown": "Unknown",
     "noData": "No data",

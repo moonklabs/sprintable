@@ -173,7 +173,10 @@ async def _resolve_member_legacy(
     user = (await session.execute(
         select(User).where(User.id == user_id)
     )).scalar_one_or_none()
-    name = user.email if user else str(user_id)
+    # story #3755(별건 ④, 페드루 PO 決) — email은 name이 아니다. display_name 없으면
+    # 이메일도 id 문자열도 지어내지 않고 None(#3747 resolve_member_display_name 계약을
+    # resolver 전 경로로 — 신원은 위 om.id/user_id가 지키고 name은 표시 전용).
+    name = user.display_name if user else None
 
     # story #2901 — OrgMember·User 둘 다 avatar_url 컬럼이 없다(TeamMember/Member만 보유) —
     # 지어낼 수 없어 dataclass 기본값(None) 그대로 둔다. JWT-휴먼이 TeamMember 행도 없는
@@ -198,7 +201,8 @@ async def _resolve_member_anchor(
     """앵커 신원 해소 — members(+placement) 기반. 0075 ID 보존으로 레거시와 출력 동일(parity).
 
     에이전트(API키): members.id(=team_member.id), role=project_access.role, project_id=agent_project_profiles.project_id.
-    휴먼(JWT): members.id(=org_member.id), role=members.org_role, name=users.email(레거시 정합).
+    휴먼(JWT): members.id(=org_member.id), role=members.org_role, name=users.display_name
+    (story #3755 — email 폴백 0, 없으면 None).
     """
     is_api_key = bool(auth.claims.get("app_metadata", {}).get("api_key_id"))
 
@@ -256,7 +260,8 @@ async def _resolve_member_anchor(
     user = (await session.execute(
         select(User).where(User.id == user_id)
     )).scalar_one_or_none()
-    name = user.email if user else str(user_id)
+    # story #3755(별건 ④) — 위 legacy 분기와 동일 계약: email/id 폴백 0, None 정직.
+    name = user.display_name if user else None
 
     if m is None:
         # P0 핫픽스(members-sync 갭): members 앵커 행이 없는 org-member 폴백.
@@ -335,21 +340,23 @@ async def _lookup_members_by_ids_legacy(
         oms = (await session.execute(
             select(OrgMember).where(OrgMember.id.in_(missing))
         )).scalars().all()
-        # OrgMember의 display name: user.email 배치 조회
+        # story #3755(별건 ④) — OrgMember의 display name: user.display_name 배치 조회
+        # (email 폴백 0 — #3747 resolve_member_display_name 계약).
         user_ids = {m.user_id for m in oms if m.user_id}
-        users_map: dict[uuid.UUID, str] = {}
+        users_map: dict[uuid.UUID, str | None] = {}
         if user_ids:
             users = (await session.execute(
                 select(User).where(User.id.in_(user_ids))
             )).scalars().all()
-            users_map = {u.id: u.email for u in users}
+            users_map = {u.id: u.display_name for u in users}
 
         for om in oms:
             # story #2901 — om(OrgMember) 소싱, avatar_url 컬럼 없음(위 단일 resolve와 동일 사각).
+            # story #3755 — display_name 없으면(또는 user_id 자체가 없으면) None(id 문자열 0).
             result[om.id] = ResolvedMember(
                 id=om.id,
                 user_id=om.user_id,
-                name=users_map.get(om.user_id, str(om.user_id)) if om.user_id else str(om.id),
+                name=users_map.get(om.user_id) if om.user_id else None,
                 type="human",
                 role=om.role,
                 org_id=om.org_id,
@@ -431,14 +438,15 @@ async def _lookup_members_by_ids_anchor(
         )).all():
             proj_by_member.setdefault(mid_, pid)
 
-    # M1: 휴먼 display name은 users.email로 정합(레거시 OrgMember path + 단일 resolve와 동일).
+    # story #3755(별건 ④) — 휴먼 display name은 users.display_name(email 폴백 0, 레거시
+    # OrgMember path + 단일 resolve와 동일 계약 — #3747 resolve_member_display_name).
     human_user_ids = {m.user_id for m in resolved_member_for.values() if m.type == "human" and m.user_id}
-    email_by_user: dict[uuid.UUID, str] = {}
+    display_name_by_user: dict[uuid.UUID, str | None] = {}
     if human_user_ids:
-        for uid_, email in (await session.execute(
-            select(User.id, User.email).where(User.id.in_(human_user_ids))
+        for uid_, display_name in (await session.execute(
+            select(User.id, User.display_name).where(User.id.in_(human_user_ids))
         )).all():
-            email_by_user[uid_] = email
+            display_name_by_user[uid_] = display_name
 
     for orig_id, m in resolved_member_for.items():
         if m.type == "agent":
@@ -449,9 +457,10 @@ async def _lookup_members_by_ids_anchor(
                 avatar_url=m.avatar_url,
             )
         else:
+            # story #3755 — display_name 없으면(또는 user_id 자체가 없으면) None(id 문자열 0).
             result[orig_id] = ResolvedMember(
                 id=m.id, user_id=m.user_id,
-                name=email_by_user.get(m.user_id) if m.user_id else str(m.id),
+                name=display_name_by_user.get(m.user_id) if m.user_id else None,
                 type="human", role=m.org_role or "member", org_id=m.org_id, project_id=None,
                 avatar_url=m.avatar_url,
             )
@@ -594,9 +603,14 @@ async def resolve_member_identity(
     user = (await session.execute(
         select(User).where(User.id == om.user_id)
     )).scalar_one_or_none()
+    # story #3755(별건 ④, 페드루 PO 決 2026-09-09) — email은 name이 아니다. #3747에서
+    # 이 함수 대신 `resolve_member_display_name()`을 신설해 content-rules 한 화면만
+    # 처방했으나, 그건 국소 fix라 클래스가 남았다(같은 email 폴백이 활동 로그·대화·
+    # 이벤트 등 이 함수의 다른 호출부 전부에 그대로 있었다) — 이제 이 함수 자체를
+    # 같은 계약으로: display_name 없으면 이메일도 id 문자열도 지어내지 않고 None.
     return ResolvedMember(
         id=om.id, user_id=om.user_id,
-        name=user.email if user else str(om.id),
+        name=user.display_name if user else None,
         type="human", role=om.role, org_id=om.org_id,
         project_id=None, avatar_url=None,
     )
@@ -608,13 +622,16 @@ async def resolve_member_display_name(
     session: AsyncSession,
 ) -> str | None:
     """story #3747(①, 페드루 PO 確定 2026-09-09) — «사람에게 보여줄 이름» 전용 해소.
-    `resolve_member_identity()`의 OrgMember(grant-only 휴먼) 분기는 표시명이 없으면
-    이메일(`user.email`)로, 그마저 없으면 id 문자열로 채워 넣는다 — 그건 "신원을
-    잃지 않는다"는 그 함수의 목적엔 맞지만, 화면에 그대로 찍으면 이메일이 UI에
-    새는 사고가 된다(#3747 content-rules 헤더 부제·409 배너 두 자리에서 실제로
-    발생). 이 함수는 그 반대 계약이다 — TeamMember.name 또는 User.display_name
-    "만" 인정하고, 없으면 이메일도 id도 안 지어내고 그냥 None을 돌린다(호출부가
-    "이름 모름" 갈래로 정직하게 떨어진다, 지어내지 않는다 원칙)."""
+    이 함수를 신설했을 당시(#3747) `resolve_member_identity()`의 OrgMember(grant-only
+    휴먼) 분기는 표시명이 없으면 이메일(`user.email`)로, 그마저 없으면 id 문자열로
+    채워 넣었다 — 화면에 그대로 찍으면 이메일이 UI에 새는 사고였다(#3747
+    content-rules 헤더 부제·409 배너 두 자리에서 실제 발생). #3755(별건 ④)에서
+    그 email/id 폴백을 `resolve_member_identity()`·`resolve_member()`·
+    `lookup_members_by_ids()` 전 경로(5자리)로 걷어 이제 이 함수와 같은 계약이다 —
+    이 함수는 TeamMember만 보고(OrgMember 폴백 없음) 그 계약을 처음 세운 자리로
+    남는다. TeamMember.name 또는 User.display_name "만" 인정하고, 없으면 이메일도
+    id도 안 지어내고 그냥 None을 돌린다(호출부가 "이름 모름" 갈래로 정직하게
+    떨어진다, 지어내지 않는다 원칙)."""
     tm = (await session.execute(
         select(TeamMember).where(
             TeamMember.id == member_id,

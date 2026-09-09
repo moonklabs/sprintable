@@ -279,9 +279,15 @@ async def test_http_endpoint_creates_pending_low_risk_decision_gate():
 async def test_response_echoes_designated_approver_identity_for_self_verification():
     """story #d9c09f4b(2026-08-27, customer-zero) — 실사고 재발 방지: 카드 배달층은 무결했고
     호출자가 approver_member_id를 오지정(다른 실사람)한 게 진짜 원인이었다. 배달 성공/실패와
-    무관하게 응답이 "실제로 누구를 가리키는지" 이름/이메일로 에코해야 호출자가 즉시
+    무관하게 응답이 "실제로 누구를 가리키는지" 이름으로 에코해야 호출자가 즉시
     자가검증할 수 있다 — 이 테스트는 응답의 designated_approver_name이 seed 시 지정한
-    approver의 실제 email과 정확히 일치함을 고정한다(다른 값이면 즉시 RED)."""
+    approver의 display_name과 정확히 일치함을 고정한다(다른 값이면 즉시 RED).
+
+    story #3755(BE·표시명·결함 클래스) — 이 단언은 예전엔 email과 일치를 요구해 email
+    폴백을 계약으로 굳혀 두고 있었다(member_resolver.py가 email을 지어내지 않도록
+    고친 뒤 이 테스트가 그 회귀를 도로 요구하는 형). display_name 픽스처로 정정 —
+    `"@" not in name`을 클래스 계약으로 못 박는다(양성대조는
+    test_response_echoes_designated_approver_name_is_none_without_display_name)."""
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -292,12 +298,13 @@ async def test_response_echoes_designated_approver_identity_for_self_verificatio
             await _seed_human_member(s, org_id, user_id=caller_id, role="member")
             approver_user_id = uuid.uuid4()
             approver_email = f"designated-{approver_user_id.hex[:8]}@test.com"
+            approver_display_name = "지정 승인자"
             from app.core.security import hash_password
             from app.models.project import OrgMember
             from app.models.user import User
 
             s.add(User(
-                id=approver_user_id, email=approver_email,
+                id=approver_user_id, email=approver_email, display_name=approver_display_name,
                 hashed_password=hash_password("x"), is_active=True, email_verified=True,
             ))
             await s.commit()
@@ -317,7 +324,60 @@ async def test_response_echoes_designated_approver_identity_for_self_verificatio
             assert resp.status_code == 201, resp.text
             body = resp.json()
             assert body["designated_approver_id"] == str(approver_member_id)
-            assert body["designated_approver_name"] == approver_email
+            assert body["designated_approver_name"] == approver_display_name
+            # story #3755 — 클래스 계약: name류 필드에 이메일이 새면 안 된다.
+            assert "@" not in (body["designated_approver_name"] or "")
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_response_echoes_designated_approver_name_is_none_without_display_name():
+    """story #3755 양성대조 — approver의 User.display_name이 없으면
+    designated_approver_name은 email/id로 지어내지 않고 정직하게 None이다(member_resolver.py
+    email 폴백 0 계약이 이 응답 경로에도 실제로 걸려 있는지 확認 — 위 테스트만으로는
+    "display_name이 있을 때 잘 나온다"만 증명하지 "없을 때 email로 새지 않는다"는 증명이
+    안 된다)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s)
+            caller_id = uuid.uuid4()
+            await _seed_human_member(s, org_id, user_id=caller_id, role="member")
+            approver_user_id = uuid.uuid4()
+            approver_email = f"designated-{approver_user_id.hex[:8]}@test.com"
+            from app.core.security import hash_password
+            from app.models.project import OrgMember
+            from app.models.user import User
+
+            s.add(User(
+                id=approver_user_id, email=approver_email, display_name=None,
+                hashed_password=hash_password("x"), is_active=True, email_verified=True,
+            ))
+            await s.commit()
+            approver_member_id = uuid.uuid4()
+            s.add(OrgMember(id=approver_member_id, org_id=org_id, user_id=approver_user_id, role="admin"))
+            await s.commit()
+        await _setup_app_jwt(app, Session, org_id, project_id, caller_id)
+        client = _client_for(app)
+        try:
+            resp = await client.post(
+                "/api/v2/gates/decisions",
+                json={
+                    "question": "approach A or B?", "assumption": "A",
+                    "approver_member_id": str(approver_member_id),
+                },
+            )
+            assert resp.status_code == 201, resp.text
+            body = resp.json()
+            assert body["designated_approver_id"] == str(approver_member_id)
+            # ⭐되돌리면 RED — display_name 없으면 email로 지어내면 안 된다.
+            assert body["designated_approver_name"] is None
         finally:
             await client.aclose()
     finally:

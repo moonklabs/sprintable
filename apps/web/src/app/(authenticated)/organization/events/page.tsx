@@ -22,6 +22,7 @@ import { cyclicStages, isCyclicDefinition, type EventDefinitionResponse } from '
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { publishHistorySenderLabel } from '@/lib/member-display';
 
 // story #2664 — 목록(GET) 응답 모델(events.py EventDefinitionResponse)엔 아직 id가 없다
 // (BE #2663, PR#3069 재QA 중). id가 없는 항목은 수정/비활성 버튼을 아예 안 그린다 — #2663가
@@ -431,6 +432,7 @@ type PublishHistoryState = { kind: 'loading' } | { kind: 'resolved'; items: Publ
 
 function PublishHistorySection({ definitionKey, t }: { definitionKey: string; t: ReturnType<typeof useTranslations> }) {
   const locale = useLocale();
+  const tc = useTranslations('common');
   const displayTimezone = resolveDisplayTimezone().tz;
   const [state, setState] = useState<PublishHistoryState>({ kind: 'loading' });
 
@@ -463,7 +465,7 @@ function PublishHistorySection({ definitionKey, t }: { definitionKey: string; t:
         <ul className="space-y-1 rounded-md border border-border bg-muted/40 p-2">
           {state.items.map((item) => (
             <li key={item.id} className="flex flex-wrap items-center justify-between gap-2 text-xs">
-              <span className="text-foreground">{item.sender_name ?? t('eventPublishHistoryUnknownSender')}</span>
+              <span className="text-foreground">{publishHistorySenderLabel(item, t, tc)}</span>
               <span className="flex items-center gap-2 text-muted-foreground">
                 {formatRelativeTime(item.created_at, locale, displayTimezone)}
                 <Link href={`/chats/${item.conversation_id}`} className="text-primary hover:underline">

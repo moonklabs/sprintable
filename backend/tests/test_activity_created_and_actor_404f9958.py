@@ -1,7 +1,8 @@
 """404f9958: 활동로그 actor_name 미해석 + 생성 이벤트 미기록 회귀 가드.
 
-- Bug1: list_activity_logs가 actor_name을 lookup_members_by_ids(canonical/legacy+user.email)로
-  해소한다(직접 team_members 조회 → canonical 휴먼 누락 → '시스템' 표시 회귀 차단).
+- Bug1: list_activity_logs가 actor_name을 lookup_members_by_ids(canonical/legacy+user.
+  display_name — story #3755 前엔 user.email)로 해소한다(직접 team_members 조회 →
+  canonical 휴먼 누락 → '시스템' 표시 회귀 차단).
 - Bug2: story/sprint/doc 생성이 record_created_activity로 {entity}_created 활동을 큐잉한다.
 """
 from __future__ import annotations
@@ -94,7 +95,7 @@ async def test_record_created_activity_best_effort_on_resolve_failure(monkeypatc
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("actor_type,resolved_name", [
-    ("human", "alice@example.com"),   # 휴먼: user.email로 정합
+    ("human", "앨리스"),               # 휴먼: user.display_name으로 정합(story #3755 — email 폴백 0)
     ("agent", "디디 은와추쿠"),         # 에이전트: member name — canonical 경로가 둘 다 커버
 ])
 async def test_list_activity_logs_resolves_actor_name_via_member_resolver(
@@ -122,7 +123,7 @@ async def test_list_activity_logs_resolves_actor_name_via_member_resolver(
     db.execute = AsyncMock(side_effect=[count_res, items_res, entity_res])
 
     # canonical actor(휴먼/에이전트): actor_id가 team_members.id와 달라도 anchor resolver가
-    # 이름을 해소(휴먼=user.email, 에이전트=member name).
+    # 이름을 해소(휴먼=user.display_name — story #3755, 에이전트=member name).
     async def _fake_lookup(ids, session):
         return {actor: _resolved(actor, org, name=resolved_name, mtype=actor_type)}
 

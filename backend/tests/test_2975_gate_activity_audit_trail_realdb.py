@@ -78,9 +78,12 @@ async def _setup_app(app, Session, org_id, user_id):
     app.dependency_overrides[get_verified_org_id] = _org
 
 
-async def _seed_common(session, *, email_prefix: str = "po", org_role: str = "member"):
+async def _seed_common(session, *, email_prefix: str = "po", org_role: str = "member", display_name: str | None = None):
     """org_role — is_org_owner_or_admin(void 엔드포인트 인가)이 org_members.role을 직접 보므로
-    void 테스트는 'owner'|'admin' 필요. approve/undo는 project_access role(owner)로 충분."""
+    void 테스트는 'owner'|'admin' 필요. approve/undo는 project_access role(owner)로 충분.
+    display_name — story #3755 후: actor_name은 user.display_name으로 해석된다(email 폴백
+    0). None이면(기본) display_name 자체를 안 채운다 — actor_name이 None으로 정직하게
+    빠지는 경로를 원하는 호출부용."""
     from app.models.organization import Organization
     from app.models.project import OrgMember, Project
     from app.models.project_access import ProjectAccess
@@ -94,10 +97,8 @@ async def _seed_common(session, *, email_prefix: str = "po", org_role: str = "me
     session.add(project)
     await session.commit()
 
-    # User 모델엔 name 필드가 없다(member_resolver.py 실측 — OrgMember의 display name은
-    # user.email 배치 조회로 대체된다) — email에 식별 가능한 prefix를 심어 actor_name 대조.
     user = User(id=uuid.uuid4(), email=f"{email_prefix}-{uuid.uuid4().hex[:8]}@test.com",
-                hashed_password="x")
+                hashed_password="x", display_name=display_name)
     session.add(user)
     await session.commit()
     om = OrgMember(id=uuid.uuid4(), org_id=org.id, user_id=user.id, role=org_role)
@@ -110,7 +111,7 @@ async def _seed_common(session, *, email_prefix: str = "po", org_role: str = "me
     await session.commit()
 
     return {"org_id": org.id, "project_id": project.id, "user_id": user.id,
-            "member_id": om.id, "email": user.email}
+            "member_id": om.id, "email": user.email, "display_name": user.display_name}
 
 
 @_REAL_DB_SKIP
@@ -128,7 +129,7 @@ async def test_realdb_approve_then_undo_answers_mystery1_was_cancel_applied():
     engine, Session = await _session_factory()
     try:
         async with Session() as s:
-            seeded = await _seed_common(s, email_prefix="po")
+            seeded = await _seed_common(s, email_prefix="po", display_name="피오")
             story = Story(
                 id=uuid.uuid4(), org_id=seeded["org_id"], project_id=seeded["project_id"],
                 title="#2975 AC4 미스터리① 재현",
@@ -193,7 +194,7 @@ async def test_realdb_approve_actor_resolves_by_name_answers_mystery2():
     engine, Session = await _session_factory()
     try:
         async with Session() as s:
-            seeded = await _seed_common(s, email_prefix="teacher")
+            seeded = await _seed_common(s, email_prefix="teacher", display_name="선생님")
             story = Story(
                 id=uuid.uuid4(), org_id=seeded["org_id"], project_id=seeded["project_id"],
                 title="#2975 AC4 미스터리② 재현",
@@ -225,8 +226,8 @@ async def test_realdb_approve_actor_resolves_by_name_answers_mystery2():
             assert len(items) == 1
             assert items[0]["action"] == "gate_approved"
             assert items[0]["actor_id"] == str(seeded["member_id"])
-            # User엔 name 필드가 없어(member_resolver.py 실측) actor_name은 email로 해석된다.
-            assert items[0]["actor_name"] == seeded["email"], items[0]
+            # story #3755 — actor_name은 user.display_name으로 해석된다(email 폴백 0).
+            assert items[0]["actor_name"] == seeded["display_name"], items[0]
         finally:
             await client.aclose()
     finally:
