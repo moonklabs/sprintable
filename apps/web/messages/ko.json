@@ -5283,7 +5283,9 @@
     "generationBudgetLimitPlaceholder": "한도(비우면 정책 없음)",
     "generationBudgetSuspendedReadonly": "정지",
     "versionConflictFieldFact": "이 화면을 연 뒤에 「{field}」이(가) 바뀌었습니다.",
-    "versionConflictFieldWithName": "{name}님이 「{field}」을(를) 먼저 저장했습니다."
+    "versionConflictFieldWithName": "{name}님이 「{field}」을(를) 먼저 저장했습니다.",
+    "versionConflictFieldSelfOtherTab": "다른 탭에서 「{field}」을(를) 먼저 저장했습니다.",
+    "contentRulesUndoFailedPrefix": "되돌리지 못했습니다."
   },
   "insightsBoard": {
     "pageTitle": "성과 보드",

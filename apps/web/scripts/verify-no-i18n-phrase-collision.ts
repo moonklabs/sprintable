@@ -382,6 +382,13 @@ export const EXEMPT_PAIRS = new Set<string>([
   // 예외였다 — 같은 개념의 새 키 쌍으로 교체.
   'contentRules.saveAction <-> contentRules.versionConflictFieldWithName',
   'contentRules.contentRulesRowSaveSuccessToast <-> contentRules.versionConflictFieldWithName',
+  // story #3747(되돌리기 결함 fast-follow, 2026-09-09) — 유나 定으로 신설된
+  // versionConflictFieldSelfOtherTab("다른 탭에서 「{field}」을(를) 먼저 저장했습니다.")도
+  // WithName과 같은 문구 골격(«…을(를) 먼저 저장했습니다»)이라 위와 동일한 근거로
+  // "저장"이라는 낱말만 겹친다 — 동사 버튼/성공 토스트 vs 과거 수동형 서술이라
+  // 헷갈릴 자리가 아니다.
+  'contentRules.saveAction <-> contentRules.versionConflictFieldSelfOtherTab',
+  'contentRules.contentRulesRowSaveSuccessToast <-> contentRules.versionConflictFieldSelfOtherTab',
   // story #3517(§22-②·⑨, 2026-09-05) — content.commentsSectionTitleWithCount
   // ("댓글 {count}", 목록 얼굴 제목)·content.commentsDeletedCountLabel("지워진 댓글
   // {count}건", 헤더 부속 줄)·content.commentsSectionTitle("댓글", 미수집/오류 얼굴

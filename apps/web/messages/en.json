@@ -5283,7 +5283,9 @@
     "generationBudgetLimitPlaceholder": "Limit (leave blank for no policy)",
     "generationBudgetSuspendedReadonly": "Suspended",
     "versionConflictFieldFact": "\"{field}\" changed after you opened this screen.",
-    "versionConflictFieldWithName": "{name} already saved a change to \"{field}\"."
+    "versionConflictFieldWithName": "{name} already saved a change to \"{field}\".",
+    "versionConflictFieldSelfOtherTab": "Another tab already saved a change to \"{field}\".",
+    "contentRulesUndoFailedPrefix": "Couldn't undo."
   },
   "insightsBoard": {
     "pageTitle": "Performance board",
