@@ -6,6 +6,7 @@ import { Search } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Card, CardHeader } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { MOBILE_HUB_EXCLUDE_IDS, MOBILE_HUB_GROUP_ORDER, NAV_GROUPS } from '@/lib/nav-config';
 
@@ -81,13 +82,13 @@ export default function MorePage() {
       </div>
       <div className="relative mb-5">
         <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-        <input
+        <Input
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder={t('moreSearchPlaceholder')}
           aria-label={t('moreSearchPlaceholder')}
-          className="w-full rounded-md border border-border bg-background py-2 pl-9 pr-3 text-sm text-foreground"
+          className="pl-9"
           data-testid="more-search-input"
         />
       </div>
@@ -117,7 +118,10 @@ export default function MorePage() {
                       <Icon className="mt-0.5 size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.8} />
                       <span className="min-w-0">
                         <span className="block truncate text-sm">{t(item.labelKey)}</span>
-                        <span className="block truncate text-xs text-muted-foreground">{t(item.descriptionKey)}</span>
+                        {/* 페드루 PO CHANGES①(2026-09-09, 캡처 리뷰) — 설명은 잘리면 정보가
+                            조용히 버려진다(EN 긴 문안이 390px·sm 2열에서 「…」로 죽음). 제목
+                            줄만 truncate, 설명은 줄바꿈 허용. */}
+                        <span className="block text-xs text-muted-foreground">{t(item.descriptionKey)}</span>
                       </span>
                     </Link>
                   );
