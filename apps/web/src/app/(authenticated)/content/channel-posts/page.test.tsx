@@ -373,5 +373,62 @@ describe('ChannelPostListPage (story #3402)', () => {
       expect(container.querySelector('[data-testid="channel-posts-list-row"]')).not.toBeNull();
       expect(container.querySelector('[data-testid="channel-post-archived-badge"]')).toBeNull();
     });
+
+    // content/page.test.tsx(site-posts)와 동형 — §22-18 처방 검증.
+    it('⭐「보관」 버튼의 aria-label이 행 순번을 품어 두 행이 서로 다른 값을 갖는다(§22-18 처방 검증)', async () => {
+      stubFetch([
+        { ...DRAFT_A, draft_id: 'd1', can_archive: true },
+        { ...DRAFT_A, draft_id: 'd2', can_archive: true },
+      ]);
+      await act(async () => { root.render(wrap(<ChannelPostListPage />)); });
+      await flush();
+
+      const buttons = container.querySelectorAll('[data-testid="channel-post-archive-action"]');
+      expect(buttons).toHaveLength(2);
+      const labels = [...buttons].map((b) => b.getAttribute('aria-label'));
+      expect(labels[0]).not.toBeNull();
+      expect(labels[0]).not.toBe(labels[1]);
+      expect(labels[0]).toContain('1');
+      expect(labels[1]).toContain('2');
+    });
+
+    it('⭐「보관」 클릭 — 「보관했습니다」 토스트가 뜨고, 그 액션 클릭 시 「보관됨 보기」로 전환된다', async () => {
+      stubFetchStateful([{ ...DRAFT_A, can_archive: true, is_deleted: false }]);
+      await act(async () => { root.render(wrap(<ChannelPostListPage />)); });
+      await flush();
+
+      const button = container.querySelector('[data-testid="channel-post-archive-action"]') as HTMLButtonElement;
+      await act(async () => { button.click(); });
+      await flush();
+
+      expect(container.textContent).toContain(koMessages.content.archivedToast);
+      const toastActionButtons = [...container.querySelectorAll('button')].filter(
+        (b) => b.textContent === koMessages.content.showArchivedToggle,
+      );
+      expect(toastActionButtons.length).toBeGreaterThanOrEqual(1);
+
+      const toastAction = toastActionButtons[toastActionButtons.length - 1];
+      await act(async () => { toastAction.click(); });
+      await flush();
+
+      expect(container.querySelector('[data-testid="channel-posts-show-archived-toggle"]')?.textContent).toBe(
+        koMessages.content.hideArchivedToggle,
+      );
+    });
+
+    it('⭐「보관 해제」(restore) 클릭 — 토스트가 안 뜬다', async () => {
+      stubFetchStateful([{ ...DRAFT_A, can_archive: true, is_deleted: true }]);
+      await act(async () => { root.render(wrap(<ChannelPostListPage />)); });
+      await flush();
+      const toggle = container.querySelector('[data-testid="channel-posts-show-archived-toggle"]') as HTMLButtonElement;
+      await act(async () => { toggle.click(); });
+      await flush();
+
+      const restoreButton = container.querySelector('[data-testid="channel-post-archive-action"]') as HTMLButtonElement;
+      await act(async () => { restoreButton.click(); });
+      await flush();
+
+      expect(container.textContent).not.toContain(koMessages.content.archivedToast);
+    });
   });
 });

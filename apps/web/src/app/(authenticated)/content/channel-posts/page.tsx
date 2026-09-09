@@ -6,6 +6,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { EmptyState } from '@/components/ui/empty-state';
+import { ToastContainer, useToast } from '@/components/ui/toast';
 import { fetchWithAuth } from '@/lib/db/client';
 import { channelLabel } from '@/lib/channel-label';
 import { formatRelativeTime } from '@/lib/storage/format';
@@ -85,6 +86,7 @@ export default function ChannelPostListPage() {
   // story #3734 — content/page.tsx(site-posts)와 동형.
   const [showArchived, setShowArchived] = useState(false);
   const [archivingId, setArchivingId] = useState<string | null>(null);
+  const { toasts, addToast, dismissToast } = useToast();
 
   useEffect(() => {
     if (!orgId) return;
@@ -133,6 +135,10 @@ export default function ChannelPostListPage() {
         if (!showArchived && isDeleted) return prev.filter((d) => d.draft_id !== draft.draft_id);
         return prev.map((d) => (d.draft_id === draft.draft_id ? { ...d, is_deleted: isDeleted } : d));
       });
+      // story #3734(유나 CHANGES) — content/page.tsx(site-posts)와 동형(그 파일 주석 참조).
+      if (isDeleted) {
+        addToast({ title: t('archivedToast'), action: { label: t('showArchivedToggle'), onClick: () => setShowArchived(true) } });
+      }
     } finally {
       setArchivingId(null);
     }
@@ -207,7 +213,7 @@ export default function ChannelPostListPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {drafts.map((draft) => {
+              {drafts.map((draft, index) => {
                 // AC2 — 계약 필드(gate_status) 자체가 없으면 파생을 아예 부르지 않고 판별
                 // 불가(undefined)로 둔다(content/page.tsx와 동형 규율).
                 const hasGateContract = 'gate_status' in draft;
@@ -308,6 +314,10 @@ export default function ChannelPostListPage() {
                           disabled={archivingId === draft.draft_id}
                           className="text-sm text-foreground underline underline-offset-4 disabled:opacity-50"
                           data-testid="channel-post-archive-action"
+                          aria-label={t('archiveRowAriaLabel', {
+                            n: index + 1,
+                            label: draft.is_deleted ? t('unarchiveAction') : t('archiveAction'),
+                          })}
                         >
                           {draft.is_deleted ? t('unarchiveAction') : t('archiveAction')}
                         </button>
@@ -320,6 +330,7 @@ export default function ChannelPostListPage() {
           </table>
         </div>
       )}
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }

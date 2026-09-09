@@ -6,6 +6,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { EmptyState } from '@/components/ui/empty-state';
+import { ToastContainer, useToast } from '@/components/ui/toast';
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
@@ -77,6 +78,7 @@ export default function ContentPostListPage() {
   // story #3734 — 「보관됨 보기」 토글. 기본 false(목록에서 보관된 초안 기본 제외).
   const [showArchived, setShowArchived] = useState(false);
   const [archivingId, setArchivingId] = useState<string | null>(null);
+  const { toasts, addToast, dismissToast } = useToast();
 
   useEffect(() => {
     if (!orgId) return;
@@ -129,6 +131,12 @@ export default function ContentPostListPage() {
         if (!showArchived && isDeleted) return prev.filter((d) => d.draft_id !== draft.draft_id);
         return prev.map((d) => (d.draft_id === draft.draft_id ? { ...d, is_deleted: isDeleted } : d));
       });
+      // story #3734(유나 CHANGES) — 보관 직후 행이 그냥 사라지면 「삭제」로 읽힌다(데이터
+      // 이름이 is_deleted라 더욱). 「어디로 갔는지」 토스트 + 「보관됨 보기」 액션(기존
+      // 토글 낱말 재사용) — 보관 해제는 이미 화면에 남아 있는 상태의 되돌리기라 안 띄운다.
+      if (isDeleted) {
+        addToast({ title: t('archivedToast'), action: { label: t('showArchivedToggle'), onClick: () => setShowArchived(true) } });
+      }
     } finally {
       setArchivingId(null);
     }
@@ -184,7 +192,7 @@ export default function ContentPostListPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {drafts.map((draft) => {
+              {drafts.map((draft, index) => {
                 // 페드루 PO 리뷰(2026-09-03) — `draft.published_at != null`은 값이 null이든
                 // 키 자체가 없든(구 백엔드·응답 결손) 똑같이 false가 되어 "발행 안 됐다"로
                 // 단정한다. `'published_at' in draft`로 키 존재를 먼저 물어 키가 없으면
@@ -250,6 +258,14 @@ export default function ContentPostListPage() {
                           disabled={archivingId === draft.draft_id}
                           className="text-sm text-foreground underline underline-offset-4 disabled:opacity-50"
                           data-testid="content-archive-action"
+                          // story #3734(카디르 CI 적발) — 정적 라벨(「보관」/「보관 해제」)이
+                          // 행마다 똑같아 verify-no-new-repeated-row-action-names(§22-18
+                          // "유나의 자") 위반. 순번+보이는 라벨을 aria-label에 품는다(이웃
+                          // channelRowActionAriaLabel·orgMemberRowActionAriaLabel과 동형).
+                          aria-label={t('archiveRowAriaLabel', {
+                            n: index + 1,
+                            label: draft.is_deleted ? t('unarchiveAction') : t('archiveAction'),
+                          })}
                         >
                           {draft.is_deleted ? t('unarchiveAction') : t('archiveAction')}
                         </button>
@@ -262,6 +278,7 @@ export default function ContentPostListPage() {
           </table>
         </div>
       )}
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }

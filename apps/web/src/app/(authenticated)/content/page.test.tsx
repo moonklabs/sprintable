@@ -451,5 +451,86 @@ describe('ContentPostListPage (story #3368)', () => {
       expect(calls.length).toBe(callsAfterInitialLoad + 1);
       expect(calls[calls.length - 1]).toBe(`POST /api/organizations/${ORG_ID}/site-posts/drafts/d1/archive`);
     });
+
+    // 카디르 CI 적발(story #3734) — 정적 라벨(「보관」/「보관 해제」)이 행마다 똑같아
+    // verify-no-new-repeated-row-action-names(§22-18) 위반. aria-label에 순번+라벨을
+    // 품는 것으로 처방 — 여기서 그 값이 실제로 항목별로 갈리는지 직접 확認한다(가드
+    // 자신은 "aria-label 있다/없다"만 보고 값의 «품음 여부»는 안 잰다는 것이 스크립트
+    // 자체 ⚠️ 선언 — 이 assertion이 그 사각을 메운다).
+    it('⭐「보관」 버튼의 aria-label이 행 순번을 품어 두 행이 서로 다른 값을 갖는다(§22-18 처방 검증)', async () => {
+      stubFetch([
+        { ...DRAFT_A, draft_id: 'd1', can_archive: true },
+        { ...DRAFT_A, draft_id: 'd2', can_archive: true },
+      ]);
+      await act(async () => {
+        root.render(wrap(<ContentPostListPage />));
+      });
+      await flush();
+
+      const buttons = container.querySelectorAll('[data-testid="content-archive-action"]');
+      expect(buttons).toHaveLength(2);
+      const labels = [...buttons].map((b) => b.getAttribute('aria-label'));
+      expect(labels[0]).not.toBeNull();
+      expect(labels[0]).not.toBe(labels[1]);
+      expect(labels[0]).toContain('1');
+      expect(labels[1]).toContain('2');
+    });
+
+    // 유나 CHANGES(story #3734, PR#4079 코멘트) — 보관 직후 행이 그냥 사라지면 「삭제」로
+    // 읽힌다. 토스트(「보관했습니다」+「보관됨 보기」 액션)로 "어디로 갔는지"를 알린다.
+    it('⭐「보관」 클릭 — 「보관했습니다」 토스트가 뜨고, 그 액션 클릭 시 「보관됨 보기」로 전환된다', async () => {
+      stubFetchStateful([{ ...DRAFT_A, can_archive: true, is_deleted: false }]);
+      await act(async () => {
+        root.render(wrap(<ContentPostListPage />));
+      });
+      await flush();
+
+      const button = container.querySelector('[data-testid="content-archive-action"]') as HTMLButtonElement;
+      await act(async () => {
+        button.click();
+      });
+      await flush();
+
+      expect(container.textContent).toContain(koMessages.content.archivedToast);
+      const toastActionButtons = [...container.querySelectorAll('button')].filter(
+        (b) => b.textContent === koMessages.content.showArchivedToggle,
+      );
+      // 헤더 토글(이미 「보관됨 보기」로 그려진 상태)과 토스트 액션 버튼 둘 다 같은 라벨을
+      // 쓴다(유나 定 — 기존 토글 낱말 재사용) — 토스트 쪽을 눌러도 같은 효과인지 본다.
+      expect(toastActionButtons.length).toBeGreaterThanOrEqual(1);
+      const toggleBefore = container.querySelector('[data-testid="content-show-archived-toggle"]')?.textContent;
+      expect(toggleBefore).toBe(koMessages.content.showArchivedToggle);
+
+      const toastAction = toastActionButtons[toastActionButtons.length - 1];
+      await act(async () => {
+        toastAction.click();
+      });
+      await flush();
+
+      expect(container.querySelector('[data-testid="content-show-archived-toggle"]')?.textContent).toBe(
+        koMessages.content.hideArchivedToggle,
+      );
+    });
+
+    it('⭐「보관 해제」(restore) 클릭 — 토스트가 안 뜬다(되돌리기 자체는 이미 보이는 화면 상태의 반전이라 "어디로 갔는지" 안내가 불필요)', async () => {
+      stubFetchStateful([{ ...DRAFT_A, can_archive: true, is_deleted: true }]);
+      await act(async () => {
+        root.render(wrap(<ContentPostListPage />));
+      });
+      await flush();
+      const toggle = container.querySelector('[data-testid="content-show-archived-toggle"]') as HTMLButtonElement;
+      await act(async () => {
+        toggle.click();
+      });
+      await flush();
+
+      const restoreButton = container.querySelector('[data-testid="content-archive-action"]') as HTMLButtonElement;
+      await act(async () => {
+        restoreButton.click();
+      });
+      await flush();
+
+      expect(container.textContent).not.toContain(koMessages.content.archivedToast);
+    });
   });
 });
