@@ -1,9 +1,8 @@
 // @vitest-environment jsdom
 //
-// story #3472(BE #3825, 페드루 PO 確定 2026-09-05) — 조직 콘텐츠 규칙 화면. BE #3825가
-// 아직 병합 전이라 stub fetch로 계약(GET/PUT .../content-rules → {org_id, rules,
-// version})만 먼저 짠다(3450 BFF→화면 선례와 동형 — 라이브 왕복은 BE 착지 뒤).
-// organization/channels/page.test.tsx와 동형 harness.
+// story #3747(UI 재설계 ⑥, 유나 시안 e07f98c6 v3 — 구획 넷) — 「긴 폼 하나+저장 하나」를
+// 「규칙 목록 + 규칙마다 고치기」로. #3472/#3501/#3532/#3540/#3490의 기존 계약(권한·
+// 낙관적 잠금·색 스와치·UTM 자동 부착)은 그대로, 화면 구조만 행 목록으로 바뀐다.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -51,22 +50,26 @@ async function flush() {
 const RULES_V1 = {
   banned_terms: ['무료체험'], require_utm: true, tone: '친근하게' as string | null, taxonomy: ['공지'],
   channel_priority: ['threads', 'wordpress'],
-  brand_kit: { logo_url: 'https://x.example/logo.png' as string | undefined, colors: ['#111'], fonts: ['Pretendard'] },
+  brand_kit: { logo_url: 'https://x.example/logo.png', colors: ['#111'], fonts: ['Pretendard'] } as { logo_url?: string; colors?: string[]; fonts?: string[] },
   generation_budget: null as { limit_minor: number; currency: 'KRW' | 'USD'; period: 'month' } | null,
+  utm_rules: null as { enabled: boolean; default_source: string | null; default_medium: string | null; campaign_from: string; content_from: string } | null,
 };
 
 function stubFetch(opts: {
   rules?: typeof RULES_V1;
   version?: number;
+  updatedAt?: string | null;
+  updatedByName?: string | null;
   onPut?: (body: unknown) => { status: number; body?: unknown };
   budget?: { limit_minor: number | null; spent_minor: number; remaining_minor: number | null; currency: 'KRW' | 'USD' | null; period: 'month' };
-  // story #3501(doc a0da40c9 §20-4) — 409 재검증 경로가 실제로 별도 GET을 쳐 "새
-  // 서버값"을 얻는지 확認하려면, 그 GET이 «다른» 값을 돌려줘야 한다. 첫 PUT이
-  // 409를 낸 뒤부터 GET이 이 값을 돌려준다(그 전엔 rules/version 그대로).
+  // story #3501(§20-4) 재사용 — 409 뒤 재조회가 실제로 "새 서버값"을 얻는지 확認하려면
+  // 그 GET이 다른 값을 돌려줘야 한다. 첫 PUT이 409를 낸 뒤부터 GET이 이 값을 돌려준다.
   getAfterConflict?: { rules: typeof RULES_V1; version: number };
 }) {
   const rules = opts.rules ?? RULES_V1;
   const version = opts.version ?? 3;
+  const updatedAt = opts.updatedAt === undefined ? '2026-09-07T00:00:00Z' : opts.updatedAt;
+  const updatedBy = opts.updatedByName === undefined ? { member_id: 'm-owner', name: '송윤재' } : (opts.updatedByName === null ? null : { member_id: 'm-owner', name: opts.updatedByName });
   const budget = opts.budget ?? { limit_minor: null, spent_minor: 0, remaining_minor: null, currency: null, period: 'month' as const };
   let conflictTriggered = false;
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
@@ -74,14 +77,19 @@ function stubFetch(opts: {
       return new Response(JSON.stringify({ data: budget }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
     if (url.includes('/content-rules') && (!init || init.method === undefined || init.method === 'GET')) {
-      const current = conflictTriggered && opts.getAfterConflict ? opts.getAfterConflict : { rules, version };
-      return new Response(JSON.stringify({ data: { org_id: ORG_ID, rules: current.rules, version: current.version } }), {
+      const current = conflictTriggered && opts.getAfterConflict
+        ? { ...opts.getAfterConflict, updated_at: updatedAt, updated_by: updatedBy }
+        : { rules, version, updated_at: updatedAt, updated_by: updatedBy };
+      return new Response(JSON.stringify({ data: { org_id: ORG_ID, ...current } }), {
         status: 200, headers: { 'Content-Type': 'application/json' },
       });
     }
     if (url.includes('/content-rules') && init?.method === 'PUT') {
       const body = init.body ? JSON.parse(init.body as string) : null;
-      const result = opts.onPut?.(body) ?? { status: 200, body: { org_id: ORG_ID, rules: body?.rules ?? rules, version: version + 1 } };
+      const result = opts.onPut?.(body) ?? {
+        status: 200,
+        body: { org_id: ORG_ID, rules: body?.rules ?? rules, version: version + 1, updated_at: updatedAt, updated_by: updatedBy },
+      };
       if (result.status === 409) conflictTriggered = true;
       const ok = result.status < 400;
       return new Response(JSON.stringify(ok ? { data: result.body } : { data: null, error: result.body }), {
@@ -100,155 +108,172 @@ async function mount(role: string) {
   await flush();
 }
 
-describe('ContentRulesPage — 조회·표시(story #3472)', () => {
-  it('버전과 저장된 값이 보인다(owner)', async () => {
+function row(field: string) {
+  return container.querySelector(`[data-testid="content-rules-row-${field}"]`)!;
+}
+
+async function expandRow(field: string) {
+  const btn = container.querySelector(`[data-testid="content-rules-row-action-${field}"]`) as HTMLButtonElement;
+  await act(async () => { btn.click(); });
+  await flush();
+}
+
+function rowSaveButton() {
+  return container.querySelector('[data-testid="content-rules-row-save"]') as HTMLButtonElement;
+}
+
+describe('ContentRulesPage — 조회·표시(story #3747)', () => {
+  it('행마다 값이 보이고, 저장한 이력이 있으면 헤더 부제가 「마지막 변경 {날짜}·{이름}」이다', async () => {
     stubFetch({});
     await mount('owner');
-    expect(container.querySelector('[data-testid="content-rules-version"]')?.textContent).toBe(koMessages.contentRules.versionLabel.replace('{version}', '3'));
-    expect(container.textContent).toContain('무료체험');
-    expect((container.querySelector('#content-rules-tone') as HTMLInputElement)?.value).toBe('친근하게');
-    expect((container.querySelector('[data-testid="content-rules-require-utm"]') as HTMLInputElement)?.checked).toBe(true);
+    expect(row('banned_terms').textContent).toContain('무료체험');
+    expect(row('tone').textContent).toContain('친근하게');
+    const header = container.querySelector('[data-testid="content-rules-last-changed"]')!;
+    // story #3747 CHANGES(§11-2 정본 formatScheduledAt) — "MM-DD HH:mm TZ" 꼴(브라우저
+    // toLocaleString 아님). TZ는 테스트 실행 환경에 따라 달라 정규식으로만 pin.
+    expect(header.textContent).toMatch(/마지막 변경 09-07 \d{2}:\d{2} .+ · 송윤재/);
   });
 
-  it('⭐member는 편집 컨트롤이 없고 owner 전용 사유만 본다(읽기는 됨)', async () => {
+  it('⭐아직 한 번도 규칙을 안 정한 조직(row 자체가 없음) — 「아직 정한 적 없습니다」(빈 줄 아님)', async () => {
+    stubFetch({ updatedAt: null, updatedByName: null, rules: { ...RULES_V1, banned_terms: [], tone: null } });
+    await mount('owner');
+    const header = container.querySelector('[data-testid="content-rules-last-changed"]')!;
+    expect(header.textContent).toContain(koMessages.contentRules.pageNeverSetSuffix);
+    expect(header.textContent).not.toContain('마지막 변경');
+  });
+
+  it('updated_by_member_id가 null이면(이름 모름) 날짜만 — 지어내지 않는다', async () => {
+    stubFetch({ updatedByName: null });
+    await mount('owner');
+    const header = container.querySelector('[data-testid="content-rules-last-changed"]')!;
+    expect(header.textContent).toMatch(/마지막 변경 09-07 \d{2}:\d{2} /);
+  });
+
+  it('⭐member는 행 액션(고치기/정하기) 버튼이 없고 값은 그대로 본다(secret 아님)', async () => {
     stubFetch({});
     await mount('member');
-    expect(container.textContent).toContain('무료체험'); // 값은 보인다(secret 아님)
-    expect(container.querySelector('[data-testid="content-rules-save-button"]')).toBeNull();
-    expect(container.querySelector('[data-testid="content-rules-banned-terms-editor"]')).toBeNull();
-    expect(container.querySelector('[data-testid="content-rules-banned-terms-readonly"]')).not.toBeNull();
+    expect(row('banned_terms').textContent).toContain('무료체험');
+    expect(container.querySelector('[data-testid="content-rules-row-action-banned_terms"]')).toBeNull();
     expect(container.textContent).toContain(koMessages.contentRules.readOnlyReason);
   });
 
-  // 카디르군 REQUEST_CHANGES(2026-09-05, PR#3827) — require_utm 토글·tone·brand_kit
-  // logo_url 세 필드가 disabled={!isOwner}만 붙은 "살아 있는" input/checkbox였다
-  // (나머지 4필드=TagListEditor는 진작 읽기 전용 텍스트로 바뀌어 있었다 — 여섯 필드
-  // 전수 대신 readOnly 분기 하나만 보고 넘어간 최초 대조 갭). 여섯 필드 전수로 pin.
-  it('⭐member — 여섯 필드 전수: 살아있는 input/checkbox 0개, 값은 텍스트로 전부 보인다', async () => {
-    stubFetch({});
+  it('값이 없는 필드는 「안 정함」으로 보인다(톤·택소노미·채널우선순위·브랜드킷·utm_rules 전부)', async () => {
+    stubFetch({ rules: { ...RULES_V1, tone: null, taxonomy: [], channel_priority: [], brand_kit: {}, utm_rules: null } });
     await mount('member');
-    // 편집 가능한 폼 컨트롤이 화면 전체에 하나도 없다(살아있는 컨트롤=탭 순서에
-    // 남아 스크린리더가 여전히 편집 가능한 것으로 읽는다).
-    expect(container.querySelectorAll('input, textarea')).toHaveLength(0);
-
-    expect(container.querySelector('[data-testid="content-rules-require-utm"]')).toBeNull();
-    expect(container.querySelector('[data-testid="content-rules-require-utm-readonly"]')?.textContent)
-      .toBe(koMessages.contentRules.requireUtmOnLabel);
-    expect(container.querySelector('[data-testid="content-rules-tone-readonly"]')?.textContent).toBe('친근하게');
-    expect(container.querySelector('[data-testid="content-rules-brand-logo-readonly"]')?.textContent)
-      .toBe('https://x.example/logo.png');
+    expect(row('tone').textContent).toContain(koMessages.contentRules.contentRulesNotSetLabel);
+    expect(row('taxonomy').textContent).toContain(koMessages.contentRules.contentRulesNotSetLabel);
+    expect(row('channel_priority').textContent).toContain(koMessages.contentRules.contentRulesNotSetLabel);
+    expect(row('brand_kit').textContent).toContain(koMessages.contentRules.contentRulesNotSetLabel);
+    expect(row('utm_rules').textContent).toContain(koMessages.contentRules.contentRulesNotSetLabel);
   });
 
-  it('member — tone이 비어 있으면 「—」로 보인다(값 없음 표시, brand_kit 밖 필드는 회귀 0)', async () => {
-    stubFetch({ rules: { ...RULES_V1, tone: null, brand_kit: { ...RULES_V1.brand_kit, logo_url: undefined } } });
-    await mount('member');
-    expect(container.querySelector('[data-testid="content-rules-tone-readonly"]')?.textContent).toBe('—');
-    // story #3532(PO 確定⑤) — 「—」는 이 제품에서 «모른다·못 잰다»는 뜻으로 이미 쓰는
-    // 글자라, 브랜드 킷처럼 "아직 정하지 않았다"는 다른 사실엔 「안 정함」이 맞다.
-    expect(container.querySelector('[data-testid="content-rules-brand-logo-readonly"]')?.textContent).toBe('안 정함');
-  });
-
-});
-
-// story #3532(유나 §23, PO 確定 2026-09-06) — 검사 안 되는 넷(tone·taxonomy·
-// channel_priority·brand_kit)이 검사되는 둘(banned_terms·require_utm)과 같은
-// 모양으로 서 있어 "강제된다"로 읽힌다 — 안내 한 줄·로고 미리보기·색 스와치·
-// 빈 값 「안 정함」으로 뜻을 준다.
-describe('ContentRulesPage — 브랜드 킷에 뜻을 준다(story #3532)', () => {
-  it('⭐안내 문구가 한 번만 보인다(항목마다 반복 X)', async () => {
-    stubFetch({});
+  it('행 액션 라벨 — 값 있으면 「고치기」, 없으면 「정하기」(require_utm은 불리언이라 항상 「고치기」)', async () => {
+    stubFetch({ rules: { ...RULES_V1, tone: null, channel_priority: [] } });
     await mount('owner');
-    const notices = container.querySelectorAll('[data-testid="content-rules-advisory-notice"]');
-    expect(notices).toHaveLength(1);
-    expect(notices[0]?.textContent).toBe(koMessages.contentRules.contentRulesAdvisoryNotice);
-  });
-
-  it('⭐브랜드 킷 색·폰트가 비어 있으면 「안 정함」으로 보인다(「—」 아님)', async () => {
-    stubFetch({ rules: { ...RULES_V1, brand_kit: { ...RULES_V1.brand_kit, colors: [], fonts: [] } } });
-    await mount('member');
-    expect(container.querySelector('[data-testid="content-rules-brand-colors-empty"]')?.textContent).toBe('안 정함');
-    expect(container.querySelector('[data-testid="content-rules-brand-fonts-empty"]')?.textContent).toBe('안 정함');
-    // 브랜드 킷 밖(taxonomy)은 회귀 0 — 지금처럼 「—」 그대로.
-    expect(container.querySelector('[data-testid="content-rules-taxonomy-empty"]')).toBeNull();
-  });
-
-  it('⭐로고 URL이 있으면 미리보기 이미지가 뜬다(편집·읽기 모드 둘 다)', async () => {
-    stubFetch({});
-    await mount('owner');
-    const img = container.querySelector('[data-testid="content-rules-brand-logo-preview"]') as HTMLImageElement;
-    expect(img).not.toBeNull();
-    expect(img.src).toBe('https://x.example/logo.png');
-
-    await mount('member');
-    expect(container.querySelector('[data-testid="content-rules-brand-logo-preview"]')).not.toBeNull();
-  });
-
-  it('⭐로고 URL이 없으면 미리보기 자리 자체가 안 뜬다(「안 정함」은 텍스트 쪽이 이미 말한다)', async () => {
-    stubFetch({ rules: { ...RULES_V1, brand_kit: { ...RULES_V1.brand_kit, logo_url: undefined } } });
-    await mount('member');
-    expect(container.querySelector('[data-testid="content-rules-brand-logo-preview"]')).toBeNull();
-    expect(container.querySelector('[data-testid="content-rules-brand-logo-preview-failed"]')).toBeNull();
-  });
-
-  it('⭐로고 이미지 로드 실패(onError) — 「불러오지 못했습니다」로 바뀐다(깨진 이미지 아이콘 대신)', async () => {
-    stubFetch({});
-    await mount('owner');
-    const img = container.querySelector('[data-testid="content-rules-brand-logo-preview"]') as HTMLImageElement;
-    await act(async () => { img.dispatchEvent(new Event('error')); });
-    await flush();
-    expect(container.querySelector('[data-testid="content-rules-brand-logo-preview"]')).toBeNull();
-    expect(container.querySelector('[data-testid="content-rules-brand-logo-preview-failed"]')?.textContent)
-      .toBe(koMessages.contentRules.brandKitLogoLoadFailed);
-  });
-
-  it('⭐유효한 CSS 색이면 칩에 스와치가 붙는다', async () => {
-    stubFetch({ rules: { ...RULES_V1, brand_kit: { ...RULES_V1.brand_kit, colors: ['#3366ff'] } } });
-    await mount('member');
-    expect(container.querySelector('[data-testid="content-rules-brand-color-swatch"]')).not.toBeNull();
-  });
-
-  it('⭐CSS 색으로 안 읽히는 값이면 스와치 없이 문자열 그대로(형식 검증·오류 표시 0)', async () => {
-    stubFetch({ rules: { ...RULES_V1, brand_kit: { ...RULES_V1.brand_kit, colors: ['메인색'] } } });
-    await mount('member');
-    expect(container.querySelector('[data-testid="content-rules-brand-color-swatch"]')).toBeNull();
-    expect(container.querySelector('[data-testid="content-rules-brand-colors-readonly"]')?.textContent).toBe('메인색');
-  });
-
-  it('⭐화면 어휘에 「테마」·「토큰」이 없다(이건 우리 제품의 디자인 토큰이 아니다)', async () => {
-    stubFetch({});
-    await mount('owner');
-    expect(container.textContent).not.toContain('테마');
-    expect(container.textContent).not.toContain('토큰');
+    expect(container.querySelector('[data-testid="content-rules-row-action-banned_terms"]')?.textContent).toBe(koMessages.contentRules.contentRulesEditAction);
+    expect(container.querySelector('[data-testid="content-rules-row-action-tone"]')?.textContent).toBe(koMessages.contentRules.contentRulesSetAction);
+    expect(container.querySelector('[data-testid="content-rules-row-action-channel_priority"]')?.textContent).toBe(koMessages.contentRules.contentRulesSetAction);
+    expect(container.querySelector('[data-testid="content-rules-row-action-require_utm"]')?.textContent).toBe(koMessages.contentRules.contentRulesEditAction);
+    expect(container.querySelector('[data-testid="content-rules-row-action-utm_rules"]')?.textContent).toBe(koMessages.contentRules.contentRulesSetAction);
   });
 });
 
-describe('ContentRulesPage — 편집·저장(story #3472 계속)', () => {
-  it('⭐admin도 편집 컨트롤을 본다(story #3490 — owner만이던 자격을 owner·admin으로)', async () => {
+describe('ContentRulesPage — UTM 검사 3통(story #3747ⓒ, require_utm×utm_rules.enabled)', () => {
+  it('require_utm=false — 「꺼짐」', async () => {
+    stubFetch({ rules: { ...RULES_V1, require_utm: false, utm_rules: null } });
+    await mount('owner');
+    expect(container.querySelector('[data-testid="content-rules-require-utm-status"]')?.textContent).toContain(koMessages.contentRules.requireUtmOffLabel);
+  });
+
+  it('require_utm=true·utm_rules.enabled=false — 「켜짐」만(자동충족 문구 없음)', async () => {
+    stubFetch({ rules: { ...RULES_V1, require_utm: true, utm_rules: { enabled: false, default_source: null, default_medium: null, campaign_from: 'campaign_slug', content_from: 'draft_id' } } });
+    await mount('owner');
+    const status = container.querySelector('[data-testid="content-rules-require-utm-status"]')?.textContent ?? '';
+    expect(status).toContain(koMessages.contentRules.requireUtmOnLabel);
+    expect(status).not.toContain('자동 부착이 켜져 있어');
+  });
+
+  it('⭐require_utm=true·utm_rules.enabled=true — 자동 충족 문구("지금은 걸리지 않습니다")', async () => {
+    stubFetch({ rules: { ...RULES_V1, require_utm: true, utm_rules: { enabled: true, default_source: null, default_medium: null, campaign_from: 'campaign_slug', content_from: 'draft_id' } } });
+    await mount('owner');
+    expect(container.querySelector('[data-testid="content-rules-require-utm-status"]')?.textContent)
+      .toContain(koMessages.contentRules.requireUtmOnAutoFulfilledStatus);
+  });
+});
+
+describe('ContentRulesPage — UTM 자동 부착 3통(story #3747ⓒ, utm_rules null≠꺼짐)', () => {
+  it('⭐utm_rules===null — 「안 정함」(꺼짐 아님)', async () => {
+    stubFetch({ rules: { ...RULES_V1, utm_rules: null } });
+    await mount('owner');
+    const status = container.querySelector('[data-testid="content-rules-utm-rules-status"]')?.textContent ?? '';
+    expect(status).toContain(koMessages.contentRules.contentRulesNotSetLabel);
+    expect(status).not.toContain(koMessages.contentRules.utmRulesEnabledOffLabel);
+  });
+
+  it('utm_rules.enabled===false — 「꺼짐」', async () => {
+    stubFetch({ rules: { ...RULES_V1, utm_rules: { enabled: false, default_source: null, default_medium: null, campaign_from: 'campaign_slug', content_from: 'draft_id' } } });
+    await mount('owner');
+    expect(container.querySelector('[data-testid="content-rules-utm-rules-status"]')?.textContent).toContain(koMessages.contentRules.utmRulesEnabledOffLabel);
+  });
+
+  it('utm_rules.enabled===true — 「켜짐」+source·medium·content 값', async () => {
+    stubFetch({ rules: { ...RULES_V1, utm_rules: { enabled: true, default_source: 'sprintable', default_medium: 'social', campaign_from: 'campaign_slug', content_from: 'draft_id' } } });
+    await mount('owner');
+    const status = container.querySelector('[data-testid="content-rules-utm-rules-status"]')?.textContent ?? '';
+    expect(status).toContain(koMessages.contentRules.utmRulesEnabledOnLabel);
+    expect(status).toContain('sprintable');
+    expect(status).toContain('social');
+  });
+});
+
+describe('ContentRulesPage — 한 번에 한 행만 펼침(page 소유 expandedField)', () => {
+  it('한 행을 펼친 상태에서 다른 행을 펼치면 앞 행은 접힌다', async () => {
     stubFetch({});
-    await mount('admin');
-    expect(container.querySelector('[data-testid="content-rules-save-button"]')).not.toBeNull();
+    await mount('owner');
+    await expandRow('banned_terms');
     expect(container.querySelector('[data-testid="content-rules-banned-terms-editor"]')).not.toBeNull();
+
+    await expandRow('tone');
+    expect(container.querySelector('[data-testid="content-rules-banned-terms-editor"]')).toBeNull();
+    expect(container.querySelector('#content-rules-tone')).not.toBeNull();
+  });
+
+  it('같은 행 액션을 다시 누르면 접힌다', async () => {
+    stubFetch({});
+    await mount('owner');
+    await expandRow('tone');
+    expect(container.querySelector('#content-rules-tone')).not.toBeNull();
+    await expandRow('tone');
+    expect(container.querySelector('#content-rules-tone')).toBeNull();
   });
 });
 
-// story #3436 묶음11(페드루 PO 지적, 2026-09-06) — TagChip 제거 버튼의 접근성
-// 이름이 하드코딩 영문(`Remove ${item}`)이라 한국어 화면에서도 스크린리더가
-// 영어로 읽었다. §17-20 낱말 축과 같은 클래스(dep.remove 선례와 동형 형태).
-describe('ContentRulesPage — 태그 제거 버튼 접근성 이름(story #3436 묶음11)', () => {
-  it('제거 버튼 aria-label이 한국어 「{item} 제거」다(하드코딩 영문 회귀 방지)', async () => {
+describe('ContentRulesPage — 행 저장(story #3747 AC2)', () => {
+  it('⭐톤을 고쳐 저장하면 그 행이 새 값으로 반영되고 접히며 성공 토스트+되돌리기가 뜬다', async () => {
     stubFetch({});
     await mount('owner');
-    const editor = container.querySelector('[data-testid="content-rules-banned-terms-editor"]')!;
-    const removeBtn = editor.querySelector('button[aria-label]') as HTMLButtonElement;
-    expect(removeBtn.getAttribute('aria-label')).toBe('무료체험 제거');
-    expect(removeBtn.getAttribute('aria-label')).not.toContain('Remove');
-  });
-});
+    await expandRow('tone');
 
-describe('ContentRulesPage — 저장(story #3472 AC1)', () => {
-  it('⭐owner가 금칙어를 추가하고 저장하면 새 버전이 반영된다', async () => {
-    stubFetch({});
+    const toneInput = container.querySelector('#content-rules-tone') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setter.call(toneInput, '더 친근하게');
+      toneInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => { rowSaveButton().click(); });
+    await flush();
+
+    expect(container.querySelector('#content-rules-tone')).toBeNull(); // 접힘
+    expect(row('tone').textContent).toContain('더 친근하게');
+    expect(container.textContent).toContain(koMessages.contentRules.contentRulesRowSaveSuccessToast);
+    expect(container.textContent).toContain(koMessages.contentRules.contentRulesUndoAction);
+  });
+
+  it('⭐금칙어를 추가해 저장하면 PUT body에 rules 전체(다른 필드 포함)+expected_version이 실린다', async () => {
+    let sentBody: unknown = null;
+    stubFetch({ onPut: (body) => { sentBody = body; return { status: 200, body: { org_id: ORG_ID, rules: { ...RULES_V1, banned_terms: ['무료체험', '광고성문구'] }, version: 4, updated_at: '2026-09-07T00:00:00Z', updated_by: { member_id: 'm', name: '송윤재' } } }; } });
     await mount('owner');
+    await expandRow('banned_terms');
 
     const input = container.querySelector('[data-testid="content-rules-banned-terms-input"]') as HTMLInputElement;
     const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
@@ -258,479 +283,259 @@ describe('ContentRulesPage — 저장(story #3472 AC1)', () => {
       input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
     });
     await flush();
-    expect(container.textContent).toContain('광고성문구');
-
-    const saveBtn = container.querySelector('[data-testid="content-rules-save-button"]') as HTMLButtonElement;
-    await act(async () => { saveBtn.click(); });
+    await act(async () => { rowSaveButton().click(); });
     await flush();
 
-    expect(container.querySelector('[data-testid="content-rules-version"]')?.textContent).toBe(koMessages.contentRules.versionLabel.replace('{version}', '4'));
-    expect(container.textContent).toContain(koMessages.contentRules.saveSuccess.replace('{version}', '4'));
+    const body = sentBody as { rules?: typeof RULES_V1; expected_version?: number } | null;
+    expect(body?.expected_version).toBe(3);
+    expect(body?.rules?.banned_terms).toEqual(['무료체험', '광고성문구']);
+    expect(body?.rules?.tone).toBe('친근하게'); // 다른 필드는 그대로 실린다(통짜 PUT).
   });
 
-  it('403 CONTENT_RULES_ADMIN_ONLY — 인라인 문구', async () => {
+  it('⭐되돌리기 — 직전 값으로 다시 저장한다', async () => {
+    let putCount = 0;
+    stubFetch({
+      onPut: (body) => {
+        putCount += 1;
+        const b = body as { rules: typeof RULES_V1 };
+        return { status: 200, body: { org_id: ORG_ID, rules: b.rules, version: 3 + putCount, updated_at: '2026-09-07T00:00:00Z', updated_by: { member_id: 'm', name: '송윤재' } } };
+      },
+    });
+    await mount('owner');
+    await expandRow('tone');
+    const toneInput = container.querySelector('#content-rules-tone') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setter.call(toneInput, '바뀐 톤');
+      toneInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => { rowSaveButton().click(); });
+    await flush();
+    expect(row('tone').textContent).toContain('바뀐 톤');
+
+    const undoBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === koMessages.contentRules.contentRulesUndoAction) as HTMLButtonElement;
+    await act(async () => { undoBtn.click(); });
+    await flush();
+
+    expect(row('tone').textContent).toContain('친근하게');
+    expect(putCount).toBe(2);
+  });
+
+  it('403 CONTENT_RULES_ADMIN_ONLY — 그 행 안에 인라인 오류', async () => {
     stubFetch({ onPut: () => ({ status: 403, body: { code: 'CONTENT_RULES_ADMIN_ONLY' } }) });
     await mount('owner');
-    const saveBtn = container.querySelector('[data-testid="content-rules-save-button"]') as HTMLButtonElement;
-    await act(async () => { saveBtn.click(); });
+    await expandRow('tone');
+    await act(async () => { rowSaveButton().click(); });
     await flush();
-    expect(container.querySelector('[role="alert"]')?.textContent).toBe(koMessages.contentRules.errorOwnerOnly);
+    expect(row('tone').textContent).toContain(koMessages.contentRules.errorOwnerOnly);
   });
 
-  it('⭐422 CONTENT_RULES_INVALID(field 실려 옴) — 그 필드 옆에 표시', async () => {
-    stubFetch({ onPut: () => ({ status: 422, body: { code: 'CONTENT_RULES_INVALID', field: 'tone' } }) });
-    await mount('owner');
-    const saveBtn = container.querySelector('[data-testid="content-rules-save-button"]') as HTMLButtonElement;
-    await act(async () => { saveBtn.click(); });
-    await flush();
-    const toneInput = container.querySelector('#content-rules-tone')!;
-    const fieldError = toneInput.parentElement?.querySelector('.text-destructive');
-    expect(fieldError?.textContent).toBe(koMessages.contentRules.errorInvalidField);
-    // field 있는 422는 폼 상단 배너로는 안 뜬다(중복 표시 방지).
-    expect(container.querySelector('[role="alert"]')).toBeNull();
-  });
-
-  it('422 CONTENT_RULES_INVALID(field 없음) — 폼 상단 배너로 폴백', async () => {
+  it('422 CONTENT_RULES_INVALID — 그 행 안에 인라인 오류', async () => {
     stubFetch({ onPut: () => ({ status: 422, body: { code: 'CONTENT_RULES_INVALID' } }) });
     await mount('owner');
-    const saveBtn = container.querySelector('[data-testid="content-rules-save-button"]') as HTMLButtonElement;
-    await act(async () => { saveBtn.click(); });
+    await expandRow('tone');
+    await act(async () => { rowSaveButton().click(); });
     await flush();
-    expect(container.querySelector('[role="alert"]')?.textContent).toBe(koMessages.contentRules.errorInvalid);
-  });
-
-  it('⭐저장 요청 body에 expected_version이 로드된 버전 그대로 실린다', async () => {
-    let sentBody: unknown = null;
-    stubFetch({
-      onPut: (body) => { sentBody = body; return { status: 200, body: { org_id: ORG_ID, rules: RULES_V1, version: 4 } }; },
-    });
-    await mount('owner');
-    const saveBtn = container.querySelector('[data-testid="content-rules-save-button"]') as HTMLButtonElement;
-    await act(async () => { saveBtn.click(); });
-    await flush();
-    expect((sentBody as { expected_version?: number } | null)?.expected_version).toBe(3);
+    expect(row('tone').textContent).toContain(koMessages.contentRules.errorInvalidField);
   });
 });
 
-describe('ContentRulesPage — 낙관적 잠금 충돌(story #3501, doc a0da40c9 §20)', () => {
-  const SERVER_CHANGED = {
-    ...RULES_V1, banned_terms: ['서버측_새금칙'], // "먼저 저장된 변경" = banned_terms
-  };
-
-  it('⭐409(이름 있음) — "{이름}이 먼저 저장했습니다"+두 목록+저장 비활성+사유', async () => {
+describe('ContentRulesPage — 겹침 기반 낙관적 잠금(story #3747ⓐ, 페드루 정정 — PUT+겹침, PATCH 아님)', () => {
+  it('⭐겹치는 필드(서버도 내가 고친 그 필드를 바꿨음) — 충돌 배너, 재시도 안 함', async () => {
     stubFetch({
-      onPut: () => ({
-        status: 409,
-        body: { code: 'CONTENT_RULES_VERSION_CONFLICT', current_version: 4, updated_by: { member_id: 'm-1', name: '유나' } },
-      }),
-      getAfterConflict: { rules: SERVER_CHANGED, version: 4 },
+      onPut: () => ({ status: 409, body: { code: 'CONTENT_RULES_VERSION_CONFLICT', current_version: 4, updated_by: { member_id: 'm-1', name: '유나' } } }),
+      getAfterConflict: { rules: { ...RULES_V1, tone: '서버가 먼저 바꾼 톤' }, version: 4 },
     });
     await mount('owner');
-
-    // 내 로컬 편집 — tone을 바꾼다("되돌아갈 내 편집" = tone).
+    await expandRow('tone');
     const toneInput = container.querySelector('#content-rules-tone') as HTMLInputElement;
     const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
     await act(async () => {
       setter.call(toneInput, '내가 고친 톤');
       toneInput.dispatchEvent(new Event('input', { bubbles: true }));
     });
-
-    const saveBtn = container.querySelector('[data-testid="content-rules-save-button"]') as HTMLButtonElement;
-    await act(async () => { saveBtn.click(); });
+    await act(async () => { rowSaveButton().click(); });
     await flush();
 
     const banner = container.querySelector('[data-testid="content-rules-version-conflict"]');
-    expect(banner?.textContent).toContain(koMessages.contentRules.versionConflictFactWithName.replace('{name}', '유나'));
-    expect(banner?.textContent).not.toContain(koMessages.contentRules.versionConflictFact);
     expect(banner?.textContent).toContain(
-      koMessages.contentRules.versionConflictPriorChanged.replace('{list}', koMessages.contentRules.bannedTermsLabel),
+      koMessages.contentRules.versionConflictFieldWithName.replace('{name}', '유나').replace('{field}', koMessages.contentRules.toneLabel),
     );
-    expect(banner?.textContent).toContain(
-      koMessages.contentRules.versionConflictMyChanges.replace('{list}', koMessages.contentRules.toneLabel),
-    );
-
-    expect(saveBtn.disabled).toBe(true);
-    expect(container.querySelector('[data-testid="content-rules-save-disabled-reason"]')?.textContent)
-      .toBe(koMessages.contentRules.versionConflictSaveDisabledReason);
+    // 재시도 안 함 — 서버측 값(tone)으로 화면이 갈아끼워진다.
+    expect(row('tone').textContent).toContain('서버가 먼저 바꾼 톤');
   });
 
-  it('409(이름 없음) — 화면이 모르는 것은 지어내지 않고 일반 사실 문구만', async () => {
+  it('⭐안 겹치는 필드(서버는 다른 필드를 바꿨음) — 조용히 최신 버전으로 재저장, 자동 rebase 토스트', async () => {
+    let putCalls = 0;
     stubFetch({
-      onPut: () => ({
-        status: 409,
-        body: { code: 'CONTENT_RULES_VERSION_CONFLICT', current_version: 4, updated_by: null },
-      }),
-      getAfterConflict: { rules: SERVER_CHANGED, version: 4 },
+      onPut: (body) => {
+        putCalls += 1;
+        if (putCalls === 1) return { status: 409, body: { code: 'CONTENT_RULES_VERSION_CONFLICT', current_version: 4, updated_by: null } };
+        const b = body as { rules: typeof RULES_V1 };
+        return { status: 200, body: { org_id: ORG_ID, rules: b.rules, version: 5, updated_at: '2026-09-07T00:00:00Z', updated_by: { member_id: 'm', name: '송윤재' } } };
+      },
+      // 서버가 실제로 바꾼 건 banned_terms(내가 고치는 필드=tone과 안 겹침).
+      getAfterConflict: { rules: { ...RULES_V1, banned_terms: ['서버측_새금칙'] }, version: 4 },
     });
     await mount('owner');
-    const saveBtn = container.querySelector('[data-testid="content-rules-save-button"]') as HTMLButtonElement;
-    await act(async () => { saveBtn.click(); });
-    await flush();
-    const banner = container.querySelector('[data-testid="content-rules-version-conflict"]');
-    expect(banner?.textContent).toContain(koMessages.contentRules.versionConflictFact);
-  });
-
-  it('⭐"다시 불러오기" — 자동 병합도 조용한 폐기도 아니다: 서버값으로 갈아끼우고 되돌린 필드 이름을 한 줄 남긴다', async () => {
-    stubFetch({
-      onPut: () => ({
-        status: 409,
-        body: { code: 'CONTENT_RULES_VERSION_CONFLICT', current_version: 4, updated_by: null },
-      }),
-      getAfterConflict: { rules: SERVER_CHANGED, version: 4 },
-    });
-    await mount('owner');
-
+    await expandRow('tone');
     const toneInput = container.querySelector('#content-rules-tone') as HTMLInputElement;
     const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
     await act(async () => {
       setter.call(toneInput, '내가 고친 톤');
       toneInput.dispatchEvent(new Event('input', { bubbles: true }));
     });
-
-    const saveBtn = container.querySelector('[data-testid="content-rules-save-button"]') as HTMLButtonElement;
-    await act(async () => { saveBtn.click(); });
+    await act(async () => { rowSaveButton().click(); });
     await flush();
 
-    const reloadBtn = container.querySelector('[data-testid="content-rules-reload-button"]') as HTMLButtonElement;
-    await act(async () => { reloadBtn.click(); });
-    await flush();
-
-    // 서버값(SERVER_CHANGED)으로 실제로 갈아끼워졌다 — 내가 고친 톤이 아니라 원래 톤.
-    expect((container.querySelector('#content-rules-tone') as HTMLInputElement).value).toBe(RULES_V1.tone);
-    expect(container.textContent).toContain('서버측_새금칙');
-    expect(container.querySelector('[data-testid="content-rules-version"]')?.textContent)
-      .toBe(koMessages.contentRules.versionLabel.replace('{version}', '4'));
-
-    // 되돌린 필드 이름 한 줄이 남는다 — 값이 아니라 이름만.
-    expect(container.querySelector('[data-testid="content-rules-rolled-back-note"]')?.textContent).toBe(
-      koMessages.contentRules.versionConflictRolledBack.replace('{list}', koMessages.contentRules.toneLabel),
-    );
-
-    // 충돌이 풀려 저장 버튼이 다시 활성화된다.
-    expect((container.querySelector('[data-testid="content-rules-save-button"]') as HTMLButtonElement).disabled).toBe(false);
     expect(container.querySelector('[data-testid="content-rules-version-conflict"]')).toBeNull();
+    expect(putCalls).toBe(2); // 최초 409 + 자동 재저장 1회.
+    expect(row('tone').textContent).toContain('내가 고친 톤'); // 내 변경은 관철됐다.
+    expect(row('banned_terms').textContent).toContain('서버측_새금칙'); // 서버측 변경도 보존됐다.
+    expect(container.textContent).toContain(koMessages.contentRules.contentRulesAutoRebasedToast);
   });
 
-  it('겹치는 필드(진짜 충돌)가 각 목록의 맨 앞에 온다', async () => {
-    // 서버가 tone을 바꿨고(먼저 저장된 변경), 나도 tone을 바꿨다(되돌아갈 내 편집) — 겹침.
+  // ⭐되돌리면 무한재귀 — 자동 재저장 자체도 또 안 겹치는 409를 맞으면(드문 동시쓰기
+  // 폭주) 한 번만 재시도하고 멈춘다. loadedRules 기준선이 이 함수 호출 동안 안 바뀌어
+  // 두 번째부터는 겹침 판정 자체가 못 믿을 값이 되기도 한다(정확성+무한루프 방지 둘 다).
+  it('⭐재시도도 또 안 겹치는 409면 한 번만 재시도하고 멈춘다(무한 재귀 금지)', async () => {
+    let putCalls = 0;
     stubFetch({
-      onPut: () => ({
-        status: 409,
-        body: { code: 'CONTENT_RULES_VERSION_CONFLICT', current_version: 4, updated_by: null },
-      }),
-      getAfterConflict: { rules: { ...RULES_V1, tone: '서버가 바꾼 톤', banned_terms: ['서버측_새금칙'] }, version: 4 },
+      onPut: () => {
+        putCalls += 1;
+        return { status: 409, body: { code: 'CONTENT_RULES_VERSION_CONFLICT', current_version: 4 + putCalls, updated_by: null } };
+      },
+      getAfterConflict: { rules: { ...RULES_V1, banned_terms: ['서버측_새금칙'] }, version: 4 },
     });
     await mount('owner');
-
-    // 내 로컬 편집 — tone(겹침)과 require_utm(안 겹침) 둘 다 바꾼다.
+    await expandRow('tone');
     const toneInput = container.querySelector('#content-rules-tone') as HTMLInputElement;
     const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
     await act(async () => {
       setter.call(toneInput, '내가 고친 톤');
       toneInput.dispatchEvent(new Event('input', { bubbles: true }));
     });
-    const utmCheckbox = container.querySelector('[data-testid="content-rules-require-utm"]') as HTMLInputElement;
-    await act(async () => { utmCheckbox.click(); });
-
-    const saveBtn = container.querySelector('[data-testid="content-rules-save-button"]') as HTMLButtonElement;
-    await act(async () => { saveBtn.click(); });
+    await act(async () => { rowSaveButton().click(); });
     await flush();
 
-    const banner = container.querySelector('[data-testid="content-rules-version-conflict"]');
-    // §20-4 "겹치는 이름은 앞에 둔다" — tone(겹침)이 require_utm(안 겹침)보다 리스트
-    // 앞에 와야 정확한 문구가 된다(순서가 틀리면 이 exact-match가 깨진다).
-    const expectedMyChanges = [koMessages.contentRules.toneLabel, koMessages.contentRules.requireUtmLabel].join(', ');
-    expect(banner?.textContent).toContain(
-      koMessages.contentRules.versionConflictMyChanges.replace('{list}', expectedMyChanges),
-    );
+    expect(putCalls).toBe(2); // 최초 시도 + 재시도 1회뿐 — 그 이상 안 돈다.
+    expect(row('tone').textContent).toContain(koMessages.contentRules.saveFailed);
   });
 });
 
-describe('ContentRulesPage — 생성 비용 한도(story #3500, BE #3498 미착지 — fixture)', () => {
-  it('owner — 정책 미설정(null)이면 "정책 없음" 입력이 비어 있고 select도 없다', async () => {
-    stubFetch({});
-    await mount('owner');
-    const limitInput = container.querySelector('[data-testid="content-rules-generation-budget-limit"]') as HTMLInputElement;
-    expect(limitInput.value).toBe('');
-    expect(container.querySelector('[data-testid="content-rules-generation-budget-currency"]')).toBeNull();
-  });
-
-  it('member — 정책 미설정(null)이면 읽기 전용으로 "정책 없음"을 본다', async () => {
+describe('ContentRulesPage — 생성 비용 한도(story #3500 계약, 행으로 재배치)', () => {
+  it('정책 미설정(null)이면 「안 정함」', async () => {
     stubFetch({});
     await mount('member');
-    expect(container.querySelector('[data-testid="content-rules-generation-budget-readonly"]')?.textContent)
-      .toBe(koMessages.contentRules.generationBudgetNotSet);
-    expect(container.querySelector('[data-testid="content-rules-generation-budget-limit"]')).toBeNull();
+    expect(row('generation_budget').textContent).toContain(koMessages.contentRules.contentRulesNotSetLabel);
   });
 
-  it('member — limit_minor=0이면 읽기 전용으로 "정지"를 본다(정책 미설정과 다른 값)', async () => {
+  it('limit_minor=0이면 「정지」(정책 미설정과 다른 값)', async () => {
     stubFetch({ rules: { ...RULES_V1, generation_budget: { limit_minor: 0, currency: 'KRW', period: 'month' } } });
     await mount('member');
-    expect(container.querySelector('[data-testid="content-rules-generation-budget-readonly"]')?.textContent)
-      .toBe(koMessages.contentRules.generationBudgetSuspendedReadonly);
+    expect(row('generation_budget').textContent).toContain(koMessages.contentRules.generationBudgetSuspendedReadonly);
   });
 
-  it('member — 양수 한도면 값+통화를 읽기 전용으로 본다(§19-1 콤마 포맷)', async () => {
-    stubFetch({ rules: { ...RULES_V1, generation_budget: { limit_minor: 100000, currency: 'KRW', period: 'month' } } });
+  it('⭐양수 한도 — 금액+"지금까지 {씀}" 지출액이 같은 줄에 뜬다', async () => {
+    stubFetch({
+      rules: { ...RULES_V1, generation_budget: { limit_minor: 100000, currency: 'KRW', period: 'month' } },
+      budget: { limit_minor: 100000, spent_minor: 12400, remaining_minor: 87600, currency: 'KRW', period: 'month' },
+    });
     await mount('member');
-    const text = container.querySelector('[data-testid="content-rules-generation-budget-readonly"]')?.textContent ?? '';
-    expect(text).toBe('100,000원');
+    const text = row('generation_budget').textContent ?? '';
+    expect(text).toContain('100,000원');
+    expect(text).toContain(koMessages.contentRules.generationBudgetSpentSoFarSuffix.replace('{spent}', '12,400원'));
   });
 
-  it('member — USD 한도는 exponent 2로 변환돼 "$"+소수 2자리로 보인다(§19-1 회귀 방지 — KRW와 다른 자릿수)', async () => {
-    // limit_minor=30000(분단위, 센트) → USD exponent=2 → $300.00. 만약 exponent 변환을
-    // 빼먹고 KRW처럼 그대로 찍으면 "30,000$"류로 잘못 보여 이 단언이 깨진다.
-    stubFetch({ rules: { ...RULES_V1, generation_budget: { limit_minor: 30000, currency: 'USD', period: 'month' } } });
-    await mount('member');
-    const text = container.querySelector('[data-testid="content-rules-generation-budget-readonly"]')?.textContent ?? '';
-    expect(text).toBe('$300.00');
-  });
-
-  it('⭐owner가 한도를 입력하고 저장하면 새 버전에 그대로 반영된다(round-trip)', async () => {
-    stubFetch({});
+  it('owner가 한도를 입력하고 저장하면 그 행에 반영된다', async () => {
+    stubFetch({ onPut: (body) => ({ status: 200, body: { org_id: ORG_ID, rules: (body as { rules: typeof RULES_V1 }).rules, version: 4, updated_at: '2026-09-07T00:00:00Z', updated_by: { member_id: 'm', name: '송윤재' } } }) });
     await mount('owner');
-
+    await expandRow('generation_budget');
     const limitInput = container.querySelector('[data-testid="content-rules-generation-budget-limit"]') as HTMLInputElement;
     const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
     await act(async () => {
       setter.call(limitInput, '50000');
       limitInput.dispatchEvent(new Event('input', { bubbles: true }));
-      limitInput.dispatchEvent(new Event('change', { bubbles: true }));
     });
+    await act(async () => { rowSaveButton().click(); });
     await flush();
-
-    // currency select가 이제 나타난다(정책이 생겼으므로).
-    expect(container.querySelector('[data-testid="content-rules-generation-budget-currency"]')).not.toBeNull();
-
-    const saveBtn = container.querySelector('[data-testid="content-rules-save-button"]') as HTMLButtonElement;
-    await act(async () => { saveBtn.click(); });
-    await flush();
-
-    expect(container.querySelector('[data-testid="content-rules-version"]')?.textContent).toBe(koMessages.contentRules.versionLabel.replace('{version}', '4'));
-    const limitInputAfter = container.querySelector('[data-testid="content-rules-generation-budget-limit"]') as HTMLInputElement;
-    expect(limitInputAfter.value).toBe('50000');
-  });
-
-  it('owner — 한도 입력을 비우면 정책 전체가 null로 되돌아간다(0=정지와 다름)', async () => {
-    stubFetch({ rules: { ...RULES_V1, generation_budget: { limit_minor: 30000, currency: 'USD', period: 'month' } } });
-    await mount('owner');
-    const limitInput = container.querySelector('[data-testid="content-rules-generation-budget-limit"]') as HTMLInputElement;
-    // §19-1 — 입력은 큰단위(major)다. 30000분단위(센트)/exponent 2 = $300(큰단위).
-    expect(limitInput.value).toBe('300');
-
-    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
-    await act(async () => {
-      setter.call(limitInput, '');
-      limitInput.dispatchEvent(new Event('input', { bubbles: true }));
-    });
-    await flush();
-
-    expect(container.querySelector('[data-testid="content-rules-generation-budget-currency"]')).toBeNull();
-  });
-
-  it('잔량 3상태(GenerationBudgetIndicator)가 규칙 섹션 옆에도 뜬다', async () => {
-    stubFetch({ budget: { limit_minor: 100000, spent_minor: 20000, remaining_minor: 80000, currency: 'KRW', period: 'month' } });
-    await mount('owner');
-    expect(container.querySelector('[data-testid="generation-budget-remaining-full"]')).not.toBeNull();
+    expect(row('generation_budget').textContent).toContain('50,000원');
   });
 });
 
-describe('ContentRulesPage — 채널 우선순위 정렬(story #3472)', () => {
-  it('owner는 ↑/↓로 순서를 바꿀 수 있다', async () => {
+describe('ContentRulesPage — 브랜드 킷(story #3532 계승)', () => {
+  it('로고 URL·색 칩이 행 값 줄에 뜬다(폰트는 요약 줄엔 안 나옴, 폼 안에만)', async () => {
+    stubFetch({});
+    await mount('member');
+    const text = row('brand_kit').textContent ?? '';
+    expect(text).toContain('https://x.example/logo.png');
+    expect(text).toContain('#111');
+  });
+
+  it('⭐유효한 CSS 색이면 칩에 스와치가 붙는다(요약 줄)', async () => {
+    stubFetch({ rules: { ...RULES_V1, brand_kit: { ...RULES_V1.brand_kit, colors: ['#3366ff'] } } });
+    await mount('member');
+    expect(row('brand_kit').querySelector('[style*="background-color"]')).not.toBeNull();
+  });
+
+  it('로고·색 둘 다 없으면 「안 정함」', async () => {
+    stubFetch({ rules: { ...RULES_V1, brand_kit: {} } });
+    await mount('member');
+    const text = row('brand_kit').textContent ?? '';
+    expect(text).toContain(koMessages.contentRules.contentRulesNotSetLabel);
+  });
+
+  it('⭐폼을 펼치면 로고 미리보기·색·폰트 세 필드가 다 있다', async () => {
     stubFetch({});
     await mount('owner');
+    await expandRow('brand_kit');
+    expect(container.querySelector('[data-testid="content-rules-brand-logo-preview"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="content-rules-brand-colors-editor"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="content-rules-brand-fonts-editor"]')).not.toBeNull();
+  });
+});
+
+describe('ContentRulesPage — 채널 우선순위(story #3472 계승)', () => {
+  it('요약 줄에 순위+채널이 칩으로 뜬다', async () => {
+    stubFetch({});
+    await mount('member');
+    const text = row('channel_priority').textContent ?? '';
+    expect(text).toContain('1');
+    expect(text).toContain('threads');
+    expect(text).toContain('2');
+    expect(text).toContain('wordpress');
+  });
+
+  it('owner가 폼에서 ↑/↓로 순서를 바꿀 수 있다', async () => {
+    stubFetch({});
+    await mount('owner');
+    await expandRow('channel_priority');
     const list = container.querySelector('[data-testid="content-rules-channel-priority-list"]')!;
     expect(list.textContent).toMatch(/1\. threads[\s\S]*2\. wordpress/);
-
-    // story #3557(유나 確定) — 하드코딩 영문(`Move ${item} down`)이 한국어 화면에서도
-    // 영어로 읽히던 것을 i18n 키(moveItemDownAction)로 고쳤다 — 이 화면 기본 로케일(ko)
-    // 기준 실제 값으로 pin.
     const downBtn = Array.from(list.querySelectorAll('button')).find((b) => b.getAttribute('aria-label') === 'threads 아래로 이동') as HTMLButtonElement;
     await act(async () => { downBtn.click(); });
     await flush();
     expect(list.textContent).toMatch(/1\. wordpress[\s\S]*2\. threads/);
   });
+});
 
-  it('member는 순서 변경 버튼이 없다', async () => {
+// story #3436 묶음11 — TagChip 제거 버튼 접근성 이름이 한국어(하드코딩 영문 회귀 방지).
+describe('ContentRulesPage — 태그 제거 버튼 접근성 이름(story #3436 묶음11)', () => {
+  it('제거 버튼 aria-label이 한국어 「{item} 제거」다', async () => {
     stubFetch({});
-    await mount('member');
-    const list = container.querySelector('[data-testid="content-rules-channel-priority-list"]')!;
-    expect(list.querySelectorAll('button')).toHaveLength(0);
+    await mount('owner');
+    await expandRow('banned_terms');
+    const editor = container.querySelector('[data-testid="content-rules-banned-terms-editor"]')!;
+    const removeBtn = editor.querySelector('button[aria-label]') as HTMLButtonElement;
+    expect(removeBtn.getAttribute('aria-label')).toBe('무료체험 제거');
+    expect(removeBtn.getAttribute('aria-label')).not.toContain('Remove');
   });
 });
 
-// story #3540(BE #3506, PO 確定 2026-09-06) — UTM 자동 부착 정책(utm_rules) 편집.
-// build_tagged_link이 실제로 쓰는 값인데 이 화면에 편집 자리가 없던 갭을 메운다.
-describe('ContentRulesPage — UTM 자동 부착(story #3540)', () => {
-  it('utm_rules가 null(기본)이면 꺼짐 상태로 뜨고 하위 필드는 안 그려진다', async () => {
+describe('ContentRulesPage — 하단 문구(story #3747)', () => {
+  it('푸터에 「이름·날짜」 중복 없이 정본 문구만 있다', async () => {
     stubFetch({});
     await mount('owner');
-    expect((container.querySelector('[data-testid="content-rules-utm-rules-enabled"]') as HTMLInputElement)?.checked).toBe(false);
-    expect(container.querySelector('[data-testid="content-rules-utm-default-source"]')).toBeNull();
-  });
-
-  it('⭐owner가 켜면 하위 4필드가 기본값으로 나타난다(campaign_slug·draft_id)', async () => {
-    stubFetch({});
-    await mount('owner');
-    const toggle = container.querySelector('[data-testid="content-rules-utm-rules-enabled"]') as HTMLInputElement;
-    await act(async () => { toggle.click(); });
-    await flush();
-
-    expect(toggle.checked).toBe(true);
-    expect((container.querySelector('[data-testid="content-rules-utm-default-source"]') as HTMLInputElement).value).toBe('');
-    // 페드루 PO REQUIRED②(2026-09-06, #3892 리뷰) — campaign_from은 서술용 고정
-    // 안내 한 줄뿐(select 제거, BE docstring "값이 뭐든 동작 무변경").
-    expect(container.querySelector('[data-testid="content-rules-utm-campaign-from-fixed-note"]')).not.toBeNull();
-    expect((container.querySelector('[data-testid="content-rules-utm-content-from"]') as HTMLSelectElement).value).toBe('draft_id');
-  });
-
-  it('⭐owner가 값을 채우고 저장하면 PUT body의 utm_rules에 정확히 실린다(빈 문자열=null)', async () => {
-    let sentBody: unknown = null;
-    stubFetch({
-      onPut: (body) => { sentBody = body; return { status: 200, body: { org_id: ORG_ID, rules: RULES_V1, version: 4 } }; },
-    });
-    await mount('owner');
-
-    const toggle = container.querySelector('[data-testid="content-rules-utm-rules-enabled"]') as HTMLInputElement;
-    await act(async () => { toggle.click(); });
-    await flush();
-
-    const sourceInput = container.querySelector('[data-testid="content-rules-utm-default-source"]') as HTMLInputElement;
-    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
-    await act(async () => {
-      setter.call(sourceInput, 'newsletter');
-      sourceInput.dispatchEvent(new Event('input', { bubbles: true }));
-    });
-    await flush();
-
-    const contentFromSelect = container.querySelector('[data-testid="content-rules-utm-content-from"]') as HTMLSelectElement;
-    await act(async () => {
-      contentFromSelect.value = 'none';
-      contentFromSelect.dispatchEvent(new Event('change', { bubbles: true }));
-    });
-    await flush();
-
-    const saveBtn = container.querySelector('[data-testid="content-rules-save-button"]') as HTMLButtonElement;
-    await act(async () => { saveBtn.click(); });
-    await flush();
-
-    const utmRules = (sentBody as { rules?: { utm_rules?: unknown } } | null)?.rules?.utm_rules as
-      | { enabled: boolean; default_source: string | null; default_medium: string | null; campaign_from: string; content_from: string }
-      | undefined;
-    expect(utmRules).toEqual({
-      enabled: true, default_source: 'newsletter', default_medium: null,
-      campaign_from: 'campaign_slug', content_from: 'none',
-    });
-  });
-
-  it('⭐값이 있던 필드를 지우면(빈 문자열) 저장 시 null로 보내진다(안 정함)', async () => {
-    let sentBody: unknown = null;
-    stubFetch({
-      rules: {
-        ...RULES_V1,
-        utm_rules: {
-          enabled: true, default_source: 'old-value', default_medium: null,
-          campaign_from: 'campaign_slug', content_from: 'draft_id',
-        },
-      } as never,
-      onPut: (body) => { sentBody = body; return { status: 200, body: { org_id: ORG_ID, rules: RULES_V1, version: 4 } }; },
-    });
-    await mount('owner');
-
-    const sourceInput = container.querySelector('[data-testid="content-rules-utm-default-source"]') as HTMLInputElement;
-    expect(sourceInput.value).toBe('old-value');
-    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
-    await act(async () => {
-      setter.call(sourceInput, '');
-      sourceInput.dispatchEvent(new Event('input', { bubbles: true }));
-    });
-    await flush();
-
-    const saveBtn = container.querySelector('[data-testid="content-rules-save-button"]') as HTMLButtonElement;
-    await act(async () => { saveBtn.click(); });
-    await flush();
-
-    const utmRules = (sentBody as { rules?: { utm_rules?: { default_source?: unknown } } } | null)?.rules?.utm_rules;
-    expect(utmRules?.default_source).toBeNull();
-  });
-
-  it('로드된 utm_rules 값이 있으면 그대로 반영된다(owner)', async () => {
-    stubFetch({
-      rules: {
-        ...RULES_V1,
-        utm_rules: {
-          enabled: true, default_source: 'ig-bio', default_medium: null,
-          campaign_from: 'draft_id', content_from: 'none',
-        },
-      } as never,
-    });
-    await mount('owner');
-    expect((container.querySelector('[data-testid="content-rules-utm-rules-enabled"]') as HTMLInputElement).checked).toBe(true);
-    expect((container.querySelector('[data-testid="content-rules-utm-default-source"]') as HTMLInputElement).value).toBe('ig-bio');
-    expect((container.querySelector('[data-testid="content-rules-utm-default-medium"]') as HTMLInputElement).value).toBe('');
-    expect((container.querySelector('[data-testid="content-rules-utm-content-from"]') as HTMLSelectElement).value).toBe('none');
-  });
-
-  it('⭐campaign_from은 편집 UI 없이 로드값이 저장 시 그대로 보존된다(서술용 고정)', async () => {
-    let sentBody: unknown = null;
-    stubFetch({
-      rules: {
-        ...RULES_V1,
-        utm_rules: {
-          enabled: true, default_source: 'ig-bio', default_medium: null,
-          campaign_from: 'draft_id', content_from: 'none',
-        },
-      } as never,
-      onPut: (body) => { sentBody = body; return { status: 200, body: { org_id: ORG_ID, rules: RULES_V1, version: 4 } }; },
-    });
-    await mount('owner');
-    // campaign_from을 바꿀 UI 자체가 없다(select 제거).
-    expect(container.querySelector('[data-testid="content-rules-utm-campaign-from"]')).toBeNull();
-
-    const saveBtn = container.querySelector('[data-testid="content-rules-save-button"]') as HTMLButtonElement;
-    await act(async () => { saveBtn.click(); });
-    await flush();
-
-    const utmRules = (sentBody as { rules?: { utm_rules?: { campaign_from?: unknown } } } | null)?.rules?.utm_rules;
-    expect(utmRules?.campaign_from).toBe('draft_id');
-  });
-
-  it('member는 편집 컨트롤 없이 값만 읽는다(안 정함 표시 포함)', async () => {
-    stubFetch({
-      rules: {
-        ...RULES_V1,
-        utm_rules: {
-          enabled: true, default_source: null, default_medium: 'social',
-          campaign_from: 'campaign_slug', content_from: 'draft_id',
-        },
-      } as never,
-    });
-    await mount('member');
-    expect(container.querySelector('[data-testid="content-rules-utm-rules-enabled"]')).toBeNull();
-    expect(container.querySelector('[data-testid="content-rules-utm-rules-enabled-readonly"]')?.textContent).toBe('켜짐');
-    expect(container.querySelector('[data-testid="content-rules-utm-default-source-readonly"]')?.textContent).toBe('안 정함');
-    expect(container.querySelector('[data-testid="content-rules-utm-default-medium-readonly"]')?.textContent).toBe('social');
-  });
-
-  it('켰다가 다시 끄면 하위 필드는 사라지지만 값은 보존된다(다시 켜면 그대로)', async () => {
-    stubFetch({
-      rules: {
-        ...RULES_V1,
-        utm_rules: {
-          enabled: true, default_source: 'kept-value', default_medium: null,
-          campaign_from: 'campaign_slug', content_from: 'draft_id',
-        },
-      } as never,
-    });
-    await mount('owner');
-    const toggle = container.querySelector('[data-testid="content-rules-utm-rules-enabled"]') as HTMLInputElement;
-
-    await act(async () => { toggle.click(); }); // off
-    await flush();
-    expect(container.querySelector('[data-testid="content-rules-utm-default-source"]')).toBeNull();
-
-    await act(async () => { toggle.click(); }); // on again
-    await flush();
-    expect((container.querySelector('[data-testid="content-rules-utm-default-source"]') as HTMLInputElement).value).toBe('kept-value');
+    expect(container.textContent).toContain(koMessages.contentRules.contentRulesFooterNote);
   });
 });

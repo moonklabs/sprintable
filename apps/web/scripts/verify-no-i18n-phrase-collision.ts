@@ -370,13 +370,18 @@ export const EXEMPT_PAIRS = new Set<string>([
   // 정상 패턴(docs.title<->docs.indexDocCount류) — 같은 개념("남음")을 두 표면에서
   // 일관되게 쓰라는 게 디자인 지시 그 자체다.
   'content.generationBudgetRemainingCompact <-> content.generationBudgetRemainingLabel',
-  // story #3501(doc a0da40c9 §20, 2026-09-05) — contentRules.versionConflictPriorChanged
-  // ("먼저 저장된 변경: {list}", 충돌 배너 한 줄) <-> contentRules.saveAction("저장",
-  // 버튼 라벨). 겹치는 건 "저장"이라는 낱말뿐 — 하나는 "저장하다"는 동사 버튼이고
-  // 하나는 "(남이) 저장한" 과거 수동형 서술이라 화면에서 실제로 헷갈릴 자리가 아니다
-  // (#2352/#2365가 잡으려는 "같은 화면의 두 «수»가 헷갈리는" 병이 아니다 — {list}는
-  // 필드 이름 목록이지 숫자가 아니다).
-  'contentRules.saveAction <-> contentRules.versionConflictPriorChanged',
+  // story #3747(ⓐ 겹침 기반 충돌 배너, 2026-09-09, 3501 §20 재구조화 뒤 등재 갱신) —
+  // contentRules.versionConflictFieldWithName("{name}님이 「{field}」을(를) 먼저
+  // 저장했습니다", 행 단위 충돌 배너) <-> contentRules.saveAction("저장", 버튼 라벨)·
+  // contentRules.contentRulesRowSaveSuccessToast("저장했습니다", 성공 토스트). 겹치는
+  // 건 "저장"이라는 낱말뿐 — 하나는 "저장하다"는 동사 버튼/내 성공 결과고 하나는
+  // "(남이) 저장한" 과거 수동형 서술이라 화면에서 실제로 헷갈릴 자리가 아니다
+  // (#2352/#2365가 잡으려는 "같은 화면의 두 «수»가 헷갈리는" 병이 아니다 — {field}는
+  // 규칙 이름이지 숫자가 아니다). 옛 등재(contentRules.saveAction <->
+  // contentRules.versionConflictPriorChanged)는 그 키 자체가 이 스토리에서 걷혀 죽은
+  // 예외였다 — 같은 개념의 새 키 쌍으로 교체.
+  'contentRules.saveAction <-> contentRules.versionConflictFieldWithName',
+  'contentRules.contentRulesRowSaveSuccessToast <-> contentRules.versionConflictFieldWithName',
   // story #3517(§22-②·⑨, 2026-09-05) — content.commentsSectionTitleWithCount
   // ("댓글 {count}", 목록 얼굴 제목)·content.commentsDeletedCountLabel("지워진 댓글
   // {count}건", 헤더 부속 줄)·content.commentsSectionTitle("댓글", 미수집/오류 얼굴
