@@ -841,7 +841,7 @@ describe('EpicSwimlaneBoard — StoryDetailPanel 배선(story #2931, QA changes 
     await act(async () => { card.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
     await waitForCondition(() => container.textContent?.includes('실제태스크') ?? false, 'StoryDetailPanel 실 tasks fetch');
-    expect(container.textContent).toContain('Tasks (1)'); // 하드코딩 tasks=[]였다면 항상 (0).
+    expect(container.textContent).toContain('태스크 (1)'); // 하드코딩 tasks=[]였다면 항상 (0).
     expect(container.textContent).toContain('실제태스크');
   });
 

@@ -453,6 +453,17 @@ export const EXEMPT_PAIRS = new Set<string>([
   // 보간도 수가 아니라 상태 문자열({status})이라 AC4㉣ 근사가 성립하지 않는다.
   // 다시 볼 때: 가드가 보간을 숫자형으로 좁히면 이 예외는 저절로 불필요해진다.
   'common.cancel <-> content.channelPostsCommandNotCancellable',
+  // story #3723(2026-09-09, story-detail-panel.tsx 탭 라벨 i18n화) —
+  // board.tasks="태스크"(조회 中·수를 아직 모를 때의 탭 라벨) <-> board.tasksCountLabel
+  // ="태스크 ({count})"(응답 뒤 수가 붙는 같은 탭 라벨). docs.title<->docs.indexDocCount류
+  // 보다도 더 안전한 축이다 — 그쪽은 두 문구가 같은 화면에 "동시에" 보이지만, 이 쌍은
+  // 같은 <TabsTrigger> 한 자리를 두고 tasksLoading(조회 中)/응답 後로 서로 배타적으로
+  // 갈리는 두 상태라 화면에 동시에 걸릴 자리 자체가 없다(#2352/#2365가 잡으려는 "같은
+  // 화면의 두 «수»가 헷갈리는" 병이 성립할 여지 0).
+  'board.tasks <-> board.tasksCountLabel',
+  // board.comments="댓글" <-> board.commentsCountLabel="댓글 ({count})" — 위와 완전히
+  // 동형(같은 컴포넌트의 형제 탭, loadingComments 배타 상태).
+  'board.comments <-> board.commentsCountLabel',
 ]);
 
 // ⛔⭐오르테가군 지적(2026-07-31) — 이 목록에 «새로» 넣는 것은 PO 승인을 거친다. 이유 없이

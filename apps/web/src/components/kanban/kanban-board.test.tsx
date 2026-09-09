@@ -861,7 +861,7 @@ describe('KanbanBoard — handleStoryClick storyTasks 리셋·취소 가드(stor
     });
     expect(dialog().textContent).toContain('B태스크');
     expect(dialog().textContent).not.toContain('A2'); // A page2가 B 목록에 섞이면 안 됨.
-    expect(dialog().textContent).not.toContain('Tasks (5)'); // A의 총계(5)가 B 총계(1)를 덮으면 안 됨.
+    expect(dialog().textContent).not.toContain('태스크 (5)'); // A의 총계(5)가 B 총계(1)를 덮으면 안 됨.
   });
 
   // story #3709(FE 완전성-정직, 3704 후속) — 응답 前(조회 中)엔 tasks=[]·totalCount=null인데
