@@ -1,12 +1,20 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
+import { MoreHorizontal } from 'lucide-react';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { PageHeader } from '@/components/ui/page-header';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatRelativeTime } from '@/lib/storage/format';
@@ -26,6 +34,10 @@ import { AuthorKindBadge } from '@/components/content/author-kind-badge';
  * 빈 입력으로 호출)의 근본 수정. 목록 응답이 이제 상세 계약(story #3386)과 같은 필드명
  * (gate_status·reapproval_required·sealed_content_sha256·body_sha256·published_at)을
  * 배치로 실어온다 — 행마다 별도 조회 없음(N+1 금지, list_site_post_drafts() 참조).
+ *
+ * story #3744(UI 재설계 ①, 유나 시안 두 번째 판 — 미르코 2026-09-09) — 「관리자 덤프
+ * 표」를 사람이 읽는 판으로. PageHeader(제목+설명+주 액션 「대화 열기」) · 상태 탭 ·
+ * 열 4(제목·상태·마지막 수정·⋯) · 행 ⋯ 메뉴 · 부분 상태 줄 · Card 표 래퍼.
  */
 
 interface SitePostDraftListItem {
@@ -36,11 +48,6 @@ interface SitePostDraftListItem {
   title: string;
   current_version: number;
   latest_author_kind: 'agent' | 'human';
-  // story #3368 §6-3-1(유나 실측, 페드루 PO 확定 2026-09-03) — latest_author_kind 하나만
-  // 보이면 "에이전트가 쓰고 사람이 고친 글"과 "사람이 처음부터 쓴 글"이 목록에서
-  // 똑같이 human으로 보인다. 원작성 주체(1번 버전의 author_kind)를 별도 열로 분리한다
-  // — 디디군 S2 PR에 이 필드를 목록 항목에 얹으라 지시됨. 도착 前(지금)엔 옵셔널이라
-  // undefined — fail-closed로 "—"만 보인다(지어내지 않음).
   origin_author_kind?: 'agent' | 'human' | null;
   updated_at: string;
   gate_status?: string | null;
@@ -48,6 +55,10 @@ interface SitePostDraftListItem {
   sealed_content_sha256?: string | null;
   body_sha256: string;
   published_at?: string | null;
+  // story #3744(PO 決 2026-09-09) — 「발행됨」 행의 다음 발 「발행된 글 보기」용
+  // (content.publishViewLink 재사용, [draftId]/page.tsx:1629와 같은 낱말). 없으면(미발행
+  // 또는 public_site_base_url 미설정) 그 액션 자체를 안 그린다 — "—"도 안 쓴다(PO 明示).
+  public_url?: string | null;
   // story #3734 — 「보관」 배지·행 액션. can_archive는 서버가 (원저자 또는 org owner/
   // admin) 판정을 전부 마쳐 낸 bool 하나 — FE는 role 비교를 직접 안 한다(can_withdraw와
   // 동형 정책). 둘 다 키 부재 시 fail-closed(false) — "모른다=버튼 안 보임".
@@ -66,19 +77,41 @@ function realStr(v: string | null | undefined): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined;
 }
 
+type StatusTab = 'all' | 'draft' | 'pending' | 'approved' | 'published';
+
+// story #3744(유나 CHANGES·PO 채택, 2026-09-09) — 미르코의 최초 4탭 접기(승인됨→발행됨
+// 합침)를 정정: 「발행됨」 탭이 approved(=아직 사람이 「발행」을 안 누른 발행 가능 일감)를
+// 품으면 그 탭이 행의 실제 칩(「승인됨」)을 부정하는 꼴이 된다. 정본 = 5탭 전체/초안/승인
+// 대기/승인됨/발행됨, 탭 라벨은 contentStatus* 칩 키를 그대로 재사용(새 낱말 0). 「승인
+// 대기」는 reapproval_needed를 계속 포함(그 상태도 사람의 승인 조치가 필요하다는 점은
+// 동일). 상태를 판별 불가(undefined)면 '초안' 탭에 둔다(가장 보수적인 위치).
+function toStatusTab(status: string | undefined): Exclude<StatusTab, 'all'> {
+  if (status === 'pending' || status === 'reapproval_needed') return 'pending';
+  if (status === 'approved') return 'approved';
+  if (status === 'published') return 'published';
+  return 'draft';
+}
 
 export default function ContentPostListPage() {
   const { orgId } = useDashboardContext();
   const t = useTranslations('content');
+  // story #3744(페드루 스티어 2026-09-09) — 부분 상태 문구는 board.tasksPartialCount
+  // (「{total}개 중 {loaded}개 표시 중」, story-detail-panel.tsx 선례)를 재사용한다.
+  // 새 키를 안 만드는 이유 — 같은 문구를 두 namespace에 중복 등록하면 나중에 한쪽만
+  // 고쳐 드리프트(verify-no-i18n-phrase-collision류 클래스와 사촌).
+  const tBoard = useTranslations('board');
   const locale = useLocale();
+  const router = useRouter();
   const displayTimezone = resolveDisplayTimezone().tz;
 
   const [drafts, setDrafts] = useState<SitePostDraftListItem[]>([]);
+  const [totalCount, setTotalCount] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   // story #3734 — 「보관됨 보기」 토글. 기본 false(목록에서 보관된 초안 기본 제외).
   const [showArchived, setShowArchived] = useState(false);
   const [archivingId, setArchivingId] = useState<string | null>(null);
+  const [statusTab, setStatusTab] = useState<StatusTab>('all');
   const { toasts, addToast, dismissToast } = useToast();
 
   useEffect(() => {
@@ -96,8 +129,11 @@ export default function ContentPostListPage() {
         const res = await fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts?${qs}`);
         if (cancelled) return;
         if (res.ok) {
-          const json = (await res.json().catch(() => null)) as { data?: SitePostDraftListItem[] } | null;
+          const json = (await res.json().catch(() => null)) as
+            | { data?: SitePostDraftListItem[]; meta?: { total?: number | null } | null }
+            | null;
           setDrafts(json?.data ?? []);
+          setTotalCount(json?.meta?.total ?? null);
         } else {
           setLoadError(true);
         }
@@ -156,24 +192,63 @@ export default function ContentPostListPage() {
     }
   };
 
+  // story #3744 — 행마다 다섯 상태 파생을 미리 계산해 둔다(탭 필터·상태 칩·다음 발
+  // 버튼이 전부 이 값을 공유 — 세 곳에서 따로 파생하면 서로 다른 값을 낼 드리프트
+  // 표면이 생긴다).
+  const draftsWithStatus = useMemo(
+    () => drafts.map((draft) => {
+      const hasGateContract = 'gate_status' in draft;
+      const { status } = hasGateContract
+        ? deriveContentPostStatus({
+            gateStatus: toGateStatus(draft.gate_status),
+            reapprovalRequired: draft.reapproval_required ?? undefined,
+            sealedBodySha256: realStr(draft.sealed_content_sha256),
+            currentBodySha256: draft.body_sha256,
+            hasPublishedSitePost: 'published_at' in draft ? draft.published_at != null : undefined,
+          })
+        : { status: undefined };
+      return { draft, status, tab: toStatusTab(status) };
+    }),
+    [drafts],
+  );
+
+  const visibleRows = statusTab === 'all'
+    ? draftsWithStatus
+    : draftsWithStatus.filter((row) => row.tab === statusTab);
+
+  const shownCount = drafts.length;
+
+  const chatAction = (
+    <Button asChild variant="hero">
+      <Link href="/chats">{t('openChatCta')}</Link>
+    </Button>
+  );
+
   return (
     <div className="mx-auto w-full max-w-5xl space-y-6 p-6">
+      <PageHeader
+        title={t('title')}
+        description={t('description')}
+        actions={chatAction}
+      />
+
       <div className="flex items-center justify-between gap-4">
-        <div className="space-y-1">
-          <h1 className="text-lg font-semibold text-foreground">{t('title')}</h1>
-          <p className="text-sm text-muted-foreground">{t('description')}</p>
-        </div>
+        <Tabs value={statusTab} onValueChange={(v) => setStatusTab(v as StatusTab)}>
+          <TabsList>
+            <TabsTrigger value="all">{t('statusTabAll')}</TabsTrigger>
+            <TabsTrigger value="draft">{t('contentStatusDraft')}</TabsTrigger>
+            <TabsTrigger value="pending">{t('contentStatusPending')}</TabsTrigger>
+            <TabsTrigger value="approved">{t('contentStatusApproved')}</TabsTrigger>
+            <TabsTrigger value="published">{t('contentStatusPublished')}</TabsTrigger>
+          </TabsList>
+        </Tabs>
         {/* story #3734 — 「보관됨 보기」 토글(유나 定: 두 상태 문구 다 정함).
-            story #3739(카디르 CI 적발, verify-no-new-raw-button.ts #3164) — raw
-            button 태그를 Button으로. 페드루 CHANGES(2026-09-09, PR#4084) — 최초
-            variant="ghost"+hover:bg-transparent 보정(story #3177/#3183/#3215
-            선례)은 dark:hover:bg-muted/50이 별도 클래스라 안 지워져 다크 hover에
-            배경이 남는 회귀였다(유나 실측). 정본 = variant="link"(hover 배경 자체가
-            없어 지울 것이 없음)+색만 text-foreground로 덮기 — text-primary는
-            twMerge가 지우고 hover:underline은 상시 밑줄이라 무해. 두 번째 CHANGES
-            (유나 재확認) — link 변형 전환이 hover:underline만 주고 rest 밑줄은
-            안 준다는 점을 놓쳐 className의 명시 underline까지 같이 걷혀 rest 밑줄이
-            사라졌던 회귀도 정정(className 끝에 underline 유지). */}
+            story #3744(페드루 CHANGES 2026-09-09, PR#4084 낱말 정정 반영) — variant="ghost"+
+            hover:bg-transparent는 dark:hover:bg-muted/50이 별도 클래스라 안 지워져 다크
+            hover에 배경이 남는다(유나 실측). 정본 = variant="link"(hover 배경 자체가
+            없음)+색만 text-foreground로 덮기. 44px 터치 바닥은 이 h-auto 보정이 버리는
+            축이라 별건 적기만(페드루 지적, 3744 재편 스코프 — 이 파일은 임시 텍스트
+            링크 형이고 시안 실 배선 때 진짜 버튼/토글 컴포넌트로 교체된다). */}
         <Button
           type="button"
           variant="link"
@@ -195,118 +270,153 @@ export default function ContentPostListPage() {
         <div className="space-y-3" data-testid="content-list-loading">
           {[1, 2, 3].map((i) => <div key={i} className="h-12 animate-pulse rounded-md bg-muted" />)}
         </div>
-      ) : drafts.length === 0 ? (
+      ) : visibleRows.length === 0 ? (
         !loadError ? (
-          <EmptyState
-            title={showArchived ? t('archivedEmpty') : t('emptyTitle')}
-            description={showArchived ? undefined : t('emptyDescription')}
-          />
+          // story #3744(유나 CHANGES·PO 채택) — 탭이 「전체」가 아닌데 그 탭에 걸리는 행이
+          // 0이면(전체는 안 비었을 수 있다) "아직 초안이 없습니다"는 거짓 진술이 된다 —
+          // statusTabEmpty(설명·주 액션 없음, 탭을 바꾸라는 뜻 하나만)로 분기. 탭이
+          // 「전체」일 때만 기존 archivedEmpty/emptyTitle 분기로 내려간다.
+          statusTab !== 'all' ? (
+            <EmptyState title={t('statusTabEmpty')} />
+          ) : (
+            <EmptyState
+              title={showArchived ? t('archivedEmpty') : t('emptyTitle')}
+              description={showArchived ? undefined : t('emptyDescription')}
+              action={showArchived ? undefined : chatAction}
+            />
+          )
         ) : null
       ) : (
-        <div className="overflow-hidden rounded-md border border-border">
+        <Card className="overflow-hidden p-0">
           <table className="w-full text-sm">
             <thead className="bg-muted/50 text-xs text-muted-foreground">
               <tr>
                 <th className="px-3 py-2 text-left font-medium">{t('columnTitle')}</th>
                 <th className="px-3 py-2 text-left font-medium">{t('columnStatus')}</th>
-                <th className="px-3 py-2 text-left font-medium">{t('columnVersion')}</th>
-                <th className="px-3 py-2 text-left font-medium">{t('columnOriginAuthor')}</th>
-                <th className="px-3 py-2 text-left font-medium">{t('columnAuthor')}</th>
-                <th className="px-3 py-2 text-left font-medium">{t('columnUpdatedAt')}</th>
-                <th className="px-3 py-2 text-left font-medium">{t('columnActions')}</th>
+                <th className="px-3 py-2 text-left font-medium">{t('columnLastModified')}</th>
+                {/* story #3736 ⑤-보강 — 액션 열 머리는 빈 문자열(시각)이지만 sr-only로
+                    구조적 이름을 남긴다(스크린리더가 "이름 없는 열"로 읽지 않도록). */}
+                <th className="px-3 py-2 text-left font-medium">
+                  <span className="sr-only">{t('columnActionsSrLabel')}</span>
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {drafts.map((draft, index) => {
-                // 페드루 PO 리뷰(2026-09-03) — `draft.published_at != null`은 값이 null이든
-                // 키 자체가 없든(구 백엔드·응답 결손) 똑같이 false가 되어 "발행 안 됐다"로
-                // 단정한다. `'published_at' in draft`로 키 존재를 먼저 물어 키가 없으면
-                // undefined(모른다)를 넘긴다 — deriveContentPostStatus의 AC6 분기가 이걸
-                // 받아 status를 비운다(§3-1-1 "모른다≠다르다", AC4).
-                //
-                // gate_status는 그 축의 "모른다" 신호를 deriveContentPostStatus 자체가
-                // 표현하지 못한다(게이트 부재=draft와 게이트 신호 결손=모른다를 함수 안에서
-                // 구별할 방법이 없다) — 그래서 그 판단은 여기서 앞서 가로챈다: 계약 필드
-                // (gate_status) 자체가 없으면 파생을 아예 부르지 않고 행 전체를 판별
-                // 불가(undefined)로 둔다.
-                const hasGateContract = 'gate_status' in draft;
-                const { status } = hasGateContract
-                  ? deriveContentPostStatus({
-                      gateStatus: toGateStatus(draft.gate_status),
-                      reapprovalRequired: draft.reapproval_required ?? undefined,
-                      sealedBodySha256: realStr(draft.sealed_content_sha256),
-                      currentBodySha256: draft.body_sha256,
-                      hasPublishedSitePost: 'published_at' in draft ? draft.published_at != null : undefined,
-                    })
-                  : { status: undefined };
-                return (
-                  <tr key={draft.draft_id} data-testid="content-list-row">
-                    <td className="px-3 py-2.5 font-medium text-foreground">
-                      <Link href={`/content/${draft.draft_id}`} className="hover:underline">
-                        {draft.title}
-                      </Link>
-                    </td>
-                    <td className="px-3 py-2.5">
-                      {/* story #3734 — 보관된 행은 발행/게이트 파생 상태 대신 「보관됨」
-                          배지 하나(유나 §짝확認 — 「보관」 액션이 서면 상태 배지는
-                          「보관됨」이어야 한다). 파생 상태 자체는 무변(재보관 해제 시
-                          그대로 복귀). */}
-                      {draft.is_deleted ? (
-                        <span
-                          className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-foreground"
-                          data-testid="content-archived-badge"
-                        >
-                          {t('contentStatusArchived')}
-                        </span>
-                      ) : (
-                        <StatusChip status={status} />
-                      )}
-                    </td>
-                    <td className="px-3 py-2.5 text-muted-foreground">v{draft.current_version}</td>
-                    <td className="px-3 py-2.5" data-testid="content-origin-author">
-                      <AuthorKindBadge kind={draft.origin_author_kind} />
-                    </td>
-                    <td className="px-3 py-2.5" data-testid="content-latest-author">
+              {visibleRows.map(({ draft, status, tab }, index) => (
+                <tr key={draft.draft_id} data-testid="content-list-row">
+                  <td className="px-3 py-2.5 font-medium text-foreground">
+                    <Link href={`/content/${draft.draft_id}`} className="hover:underline">
+                      {draft.title}
+                    </Link>
+                  </td>
+                  <td className="px-3 py-2.5">
+                    {/* story #3734 — 보관된 행은 발행/게이트 파생 상태 대신 「보관됨」
+                        배지 하나(유나 §짝확認 — 「보관」 액션이 서면 상태 배지는
+                        「보관됨」이어야 한다). 파생 상태 자체는 무변(재보관 해제 시
+                        그대로 복귀). */}
+                    {draft.is_deleted ? (
+                      <span
+                        className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-foreground"
+                        data-testid="content-archived-badge"
+                      >
+                        {t('contentStatusArchived')}
+                      </span>
+                    ) : (
+                      <StatusChip status={status} />
+                    )}
+                  </td>
+                  <td className="px-3 py-2.5">
+                    <p className="text-muted-foreground">{formatRelativeTime(draft.updated_at, locale, displayTimezone)}</p>
+                    {/* story #3744 — 열 축소(§6-3-1의 원작성 주체 열 삭제 아님, 하위
+                        칸으로 강등). 원작성·최종수정이 갈리는 실제 케이스(에이전트가
+                        쓰고 사람이 고침)를 목록에서 계속 구별하려면 두 칩이 다 있어야
+                        한다 — origin_author_kind가 latest_author_kind와 같을 땐 반복
+                        정보라 origin 칩을 생략한다(같은 이름 두 번은 소음). */}
+                    <div className="mt-0.5 flex flex-wrap items-center gap-1" data-testid="content-latest-author">
                       <AuthorKindBadge kind={draft.latest_author_kind} />
-                    </td>
-                    <td className="px-3 py-2.5 text-muted-foreground">
-                      {formatRelativeTime(draft.updated_at, locale, displayTimezone)}
-                    </td>
-                    <td className="px-3 py-2.5">
-                      {/* story #3734 — can_archive 하나만 본다(FE는 role 비교 안 함,
-                          can_withdraw와 동형 정책). 확認 없음(유나 定 — 되돌릴 수 있는
-                          소프트 액션). */}
-                      {draft.can_archive ? (
+                    </div>
+                    {draft.origin_author_kind !== draft.latest_author_kind ? (
+                      <div className="mt-0.5 text-xs" data-testid="content-origin-author" title={t('columnOriginAuthor')}>
+                        <AuthorKindBadge kind={draft.origin_author_kind} />
+                      </div>
+                    ) : null}
+                  </td>
+                  <td className="px-3 py-2.5">
+                    <div className="flex items-center justify-end gap-1.5">
+                      {/* story #3744(페드루 CHANGES Ⓐ, 시안 v6) — 「상태 딱지는 사람을
+                          멈춰 세우고 다음 발은 움직인다·숨긴 액션은 터치에선 없는 것」.
+                          ⋯ 메뉴 뒤에 숨기지 않고 상시 보이는 outline 버튼으로(상태 뒤·⋯
+                          앞). 같은 동작을 두 자리에 두지 않는다 — ⋯ 메뉴엔 이제 보관/
+                          보관 해제만 남는다. */}
+                      {tab === 'pending' ? (
                         <Button
-                          type="button"
-                          variant="link"
-                          onClick={() => void handleArchiveToggle(draft)}
-                          disabled={archivingId === draft.draft_id}
-                          className="h-auto min-h-0 min-w-0 px-0 text-sm font-normal text-foreground underline disabled:opacity-50"
-                          data-testid="content-archive-action"
-                          // story #3734(카디르 CI 적발) — 정적 라벨(「보관」/「보관 해제」)이
-                          // 행마다 똑같아 verify-no-new-repeated-row-action-names(§22-18
-                          // "유나의 자") 위반. 순번+보이는 라벨을 aria-label에 품는다(이웃
-                          // channelRowActionAriaLabel·orgMemberRowActionAriaLabel과 동형).
-                          // story #3739(카디르 CI 적발, verify-no-new-raw-button.ts #3164) —
-                          // raw button 태그를 Button으로(위 토글과 동형 보정, 페드루
-                          // CHANGES 반영 — variant="link"가 정본, ghost 아님, underline 유지).
-                          aria-label={t('archiveRowAriaLabel', {
-                            n: index + 1,
-                            label: draft.is_deleted ? t('unarchiveAction') : t('archiveAction'),
-                          })}
+                          variant="outline" size="sm" onClick={() => router.push('/inbox?tab=gates')}
+                          // story #3592(§22-18 "유나의 자") — 이 버튼도 이제 상시 노출
+                          // 행 액션이라 archiveRowAriaLabel과 동형(순번+현재 라벨) 재사용.
+                          aria-label={t('archiveRowAriaLabel', { n: index + 1, label: t('approvalRequestViewCta') })}
                         >
-                          {draft.is_deleted ? t('unarchiveAction') : t('archiveAction')}
+                          {t('approvalRequestViewCta')}
                         </Button>
                       ) : null}
-                    </td>
-                  </tr>
-                );
-              })}
+                      {/* story #3744(PO 決) — public_url이 없으면(미발행 또는
+                          public_site_base_url 미설정) 버튼 자체를 안 그린다 — "—"도 안
+                          쓴다(비활성이 아니라 부재). */}
+                      {tab === 'published' && draft.public_url ? (
+                        <Button
+                          variant="outline" size="sm"
+                          onClick={() => window.open(draft.public_url!, '_blank', 'noopener,noreferrer')}
+                          aria-label={t('archiveRowAriaLabel', { n: index + 1, label: t('publishViewLink') })}
+                        >
+                          {t('publishViewLink')}
+                        </Button>
+                      ) : null}
+                      <DropdownMenu>
+                        <DropdownMenuTrigger
+                          className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+                          data-testid="content-row-actions-trigger"
+                          // story #3592(§22-18 "유나의 자") — 행마다 다른 접근 이름(순번
+                          // 품음). 이 트리거는 정적 라벨(⋯)뿐이라 값이 갈리지 않으면 이
+                          // 가드의 관할 밖 클래스로 다시 샌다 — 미리 순번을 품는다.
+                          aria-label={t('rowActionsAriaLabel', { n: index + 1 })}
+                        >
+                          <MoreHorizontal className="size-4" />
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          {draft.can_archive ? (
+                            <DropdownMenuItem
+                              onClick={() => void handleArchiveToggle(draft)}
+                              disabled={archivingId === draft.draft_id}
+                              data-testid="content-archive-action"
+                            >
+                              {draft.is_deleted ? t('unarchiveAction') : t('archiveAction')}
+                            </DropdownMenuItem>
+                          ) : null}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
-        </div>
+        </Card>
       )}
+
+      {/* story #3744 범위 ⑥ — 「N개 중 M개 표시 중」. totalCount가 null이면(헤더를
+          못 받음) 그 자리 전체를 안 그린다 — "이 페이지 수"를 "전체"로 위장하지 않는다
+          (한 페이지로 전체 단정 금지 클래스). 페이지네이션(「더 보기」 클릭 시 다음
+          페이지 로드)은 이 스토리 범위 밖(적기만 — limit 기본 50이 지금 규모 대비
+          충분히 넉넉해 실사용 hasMore가 거의 안 걸린다, 표시만 먼저 닫는다).
+          story #3744(유나 CHANGES·PO 채택) — shownCount(=drafts.length, 필터 前 서버
+          응답 개수)와 totalCount는 서버가 낸 같은 축의 두 수다. 하지만 표는 visibleRows
+          (탭으로 클라이언트 필터 後)를 그린다 — statusTab이 'all'이 아니면 shownCount≠표에
+          실제로 보이는 행 수라 「18개 중 18개」식 거짓 문장이 된다(서버가 탭별 count를
+          안 준다). totalCount===null 규율과 동형으로 statusTab==='all'일 때만 그린다. */}
+      {!loading && statusTab === 'all' && totalCount !== null && shownCount > 0 ? (
+        <p className="text-xs text-muted-foreground" data-testid="content-partial-state">
+          {tBoard('tasksPartialCount', { loaded: shownCount, total: totalCount })}
+        </p>
+      ) : null}
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
   );

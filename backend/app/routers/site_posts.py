@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -38,6 +38,7 @@ from app.services.site_posts import (
     SitePostSealMissingError,
     SitePostVersionNotFoundError,
     _lint_site_post_fields,
+    _resolve_public_site_display_url,
     archive_site_post_draft,
     create_site_post_draft_version,
     get_campaign,
@@ -46,6 +47,7 @@ from app.services.site_posts import (
     get_site_post_publication_info,
     is_agent_caller,
     list_site_post_draft_versions,
+    count_site_post_drafts,
     list_site_post_drafts,
     publish_site_post,
     publish_site_post_from_draft,
@@ -167,6 +169,13 @@ class SitePostDraftListItem(BaseModel):
     sealed_content_sha256: str | None = None
     body_sha256: str
     published_at: str | None = None
+    # story #3744(PO 決 2026-09-09) — 목록 「발행됨」 행의 다음 발 「발행된 글 보기」용
+    # (content.publishViewLink 재사용, 새 낱말 0). _resolve_public_site_display_url
+    # (story 194acb63)와 동형 — hosted_site 표시 전용 경로만(외부 목적지 WordPress/
+    # webhook의 permalink는 이 스토리 스코프 밖, 상세 화면이 get_site_post_external_
+    # publication_state로 이미 다룬다). post가 없으면(미발행) 또는 public_site_base_url
+    # 미설정이면 None — 지어내지 않는다(FE는 "—"도 안 쓰고 그 항목 자체를 안 그린다).
+    public_url: str | None = None
     # story #3514(Phase1·BE+FE·소형, 페드루 PO 確定 2026-09-05) — 단건 조회(lint-on-read)
     # 전용. channel_posts.py::ChannelPostDraftListItem.violations와 동형 — 목록 응답에선
     # 항상 None(행마다 lint하면 비용 N배, PO 明示 "단건만"). None="이 응답에선 안 쟀다"·
@@ -194,6 +203,7 @@ def _to_site_post_draft_list_item(
         reapproval_required=gate.reapproval_required if gate else None,
         sealed_content_sha256=gate.sealed_content_sha256 if gate else None,
         published_at=post.published_at.isoformat() if post else None,
+        public_url=_resolve_public_site_display_url(lang=post.lang, slug=post.slug) if post else None,
         violations=violations,
         is_deleted=draft.deleted_at is not None,
         can_archive=can_archive,
@@ -453,6 +463,7 @@ async def patch_site_post_draft_campaign(
 @router.get("/{org_id}/site-posts/drafts", response_model=list[SitePostDraftListItem])
 async def list_site_post_drafts_endpoint(
     org_id: uuid.UUID,
+    response: Response,
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     include_deleted: bool = Query(
@@ -466,12 +477,18 @@ async def list_site_post_drafts_endpoint(
 ) -> list[SitePostDraftListItem]:
     """story #3365 후속(S4 계약 갭, 페드루 PO 확定 2026-09-03) — S4 글 관리 화면이 열릴 때
     draft_id를 미리 알 방법이 없어 신설. 조직 멤버(휴먼·에이전트 모두) 읽기 가능 — 목록 조회는
-    승인·발행 경계 밖이라 human-only 제약 없음."""
+    승인·발행 경계 밖이라 human-only 제약 없음.
+
+    story #3744(2026-09-09) — X-Total-Count 헤더 추가(goals.py::list_epics_endpoint와
+    동형 관례). 목록 화면의 「N개 중 M개 표시 중」 부분 상태 표기용 — limit/offset과
+    무관한 전체 개수(현재 필터 적용 後)를 실어 보낸다."""
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
 
     requester_member_id, is_org_admin = await _resolve_member_best_effort(db, auth, org_id)
     rows = await list_site_post_drafts(db, org_id=org_id, limit=limit, offset=offset, include_deleted=include_deleted)
+    total = await count_site_post_drafts(db, org_id=org_id, include_deleted=include_deleted)
+    response.headers["X-Total-Count"] = str(total)
     return [
         _to_site_post_draft_list_item(
             draft, latest, origin, gate, post,
