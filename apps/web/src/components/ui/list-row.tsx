@@ -50,19 +50,15 @@ export function ListRow({
   );
 }
 
-const MARK_COLORS: Record<string, string> = {
-  neutral: 'bg-foreground',
-  blue: 'bg-[#3157FF]',
-};
-
-/** 시안의 30×30 색 표식(채널 이니셜류). color는 팔레트 자유값이 아니라 소수 프리셋 —
- * 임의 hex를 호출부가 지어내면 채널마다 색이 흩어진다(시안은 채널 브랜드색 고정 팔레트). */
-export function ListRowMark({ label, color = 'neutral' }: { label: string; color?: keyof typeof MARK_COLORS | string }) {
-  const bgClass = MARK_COLORS[color] ?? undefined;
+// 유나 지적(#4090 리뷰, 2026-09-09 13:13Z) — 이름 있는 프리셋(neutral/blue) 소비처가
+// 0이었다(모든 호출부가 channelMarkColor()의 hex를 그대로 넘긴다). 안 쓰는 갈래를
+// 남겨두지 않는다 — color는 hex 하나로.
+/** 시안의 30×30 색 표식(채널 이니셜류). */
+export function ListRowMark({ label, color }: { label: string; color: string }) {
   return (
     <span
-      className={cn('flex size-[30px] shrink-0 items-center justify-center rounded-md text-xs font-bold text-white', bgClass)}
-      style={bgClass ? undefined : { backgroundColor: color }}
+      className="flex size-[30px] shrink-0 items-center justify-center rounded-md text-xs font-bold text-white"
+      style={{ backgroundColor: color }}
       aria-hidden="true"
     >
       {label}

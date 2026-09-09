@@ -79,9 +79,9 @@ function ConnectorRow({ connector, t }: { connector: ConnectorItem; t: ReturnTyp
       subtitle={subtitle}
       status={<ConnectorReadinessChip ready={ready} t={t} />}
       action={ready ? undefined : (
-        <Link href="/chats">
-          <Button size="sm" variant="outline">{t('agentSetupAskAgentAction')}</Button>
-        </Link>
+        <Button asChild size="sm" variant="outline">
+          <Link href="/chats">{t('agentSetupAskAgentAction')}</Link>
+        </Button>
       )}
     />
   );

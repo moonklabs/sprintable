@@ -575,8 +575,9 @@ describe('OrganizationChannelsPage — oauth 연결 버튼 낱말 매트릭스(s
     }
     // 행마다 "연결 시험"(channelTestAction) 버튼도 "연결" 부분문자열을 포함해
     // 느슨한 include 매칭은 잘못된 버튼을 집는다 — 기대 전체 문자열과 정확히
-    // 일치하는 버튼을 직접 찾는다.
-    const btn = [...container.querySelectorAll('button')].find((b) => b.textContent === expectedText);
+    // 일치하는 버튼을 직접 찾는다. 유나 CHANGES(#4090 리뷰) — href 기반 다음 발은
+    // 이제 Button asChild(단일 <a> 요소)라 button 태그만으론 못 찾는다.
+    const btn = [...container.querySelectorAll('button, a')].find((b) => b.textContent === expectedText);
     expect(btn).not.toBeUndefined();
     if (count === 0) expect(btn?.textContent).not.toContain('추가');
   });
@@ -1792,6 +1793,13 @@ describe('OrganizationChannelsPage — 헤더 주 액션(story #3743)', () => {
     }));
   }
 
+  // jsdom이 scrollIntoView를 구현 안 해(goToChannel의 ?. 가드가 기본 조용히 건너뛴다) —
+  // 아래 두 테스트만 스파이로 갈아 호출 자체를 잰다. 다른 테스트 파일로 새는 것을
+  // 막기 위해 이 describe 블록 안에서만 되돌린다.
+  afterEach(() => {
+    delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+  });
+
   // story #3743(로컬 캡처 中 자가 발견 — 페드루 PO 확認) — 앱 자격 등록은 owner 전용인데
   // 헤더 버튼이 role 무관하게 서 있던 실 결함. 되돌리면(isOwnerStrict 조건 제거) RED.
   it('⭐비-소유자는 미등록 채널이 있어도 헤더 주 액션이 안 보인다(owner 전용, §5-2)', async () => {
@@ -1828,6 +1836,67 @@ describe('OrganizationChannelsPage — 헤더 주 액션(story #3743)', () => {
     await flush();
     expect(container.textContent).toContain(koMessages.channelConnect.channelThreads);
     expect(container.textContent).toContain(koMessages.channelConnect.channelLabelFacebook);
+  });
+
+  // 카디르 QA changes(#4090 리뷰, 2026-09-09 13:11Z) — 「클릭 뒤 동작」(그 행으로 스크롤+
+  // 펼침) 자체를 재는 단언이 0이었다(태그/메뉴 부재만 검사) — DropdownMenu로 갈아도
+  // 초록이었을 자리. scrollIntoView는 jsdom 미구현이라 스파이로 호출 자체를 잰다
+  // (실제 스크롤 여부가 아니라 "그 행을 대상으로 시도했다"만 확인 가능한 축).
+  it('⭐미등록 1개 — 헤더 버튼을 누르면 그 채널 행이 펼쳐지고 scrollIntoView가 그 행 대상으로 불린다', async () => {
+    stubFetchPerChannel([{ channel: 'threads', effectiveSource: 'none' }, { channel: 'facebook', effectiveSource: 'org' }]);
+    const scrollSpy = vi.fn();
+    Element.prototype.scrollIntoView = scrollSpy;
+    await mount('owner');
+    const btn = container.querySelector('[data-testid="channel-connect-header-register-action"]') as HTMLButtonElement;
+    expect(container.querySelector('[data-testid="channel-section-body"]')).toBeNull();
+    await act(async () => { btn.click(); });
+    await flush();
+    expect(container.querySelector('[data-testid="channel-section-body"]')).not.toBeNull();
+    expect(scrollSpy).toHaveBeenCalled();
+    const threadsSection = [...container.querySelectorAll('[data-testid="channel-section"]')].find((el) => el.textContent?.includes(koMessages.channelConnect.channelThreads));
+    expect(threadsSection?.querySelector('[data-testid="channel-section-body"]')).not.toBeNull();
+  });
+
+  it('⭐미등록 2개 이상 — 메뉴 항목을 고르면 그 채널 행이 펼쳐지고 scrollIntoView가 불린다', async () => {
+    stubFetchPerChannel([{ channel: 'threads', effectiveSource: 'none' }, { channel: 'facebook', effectiveSource: 'none' }]);
+    const scrollSpy = vi.fn();
+    Element.prototype.scrollIntoView = scrollSpy;
+    await mount('owner');
+    const trigger = container.querySelector('[data-testid="channel-connect-header-register-action"]');
+    await act(async () => { trigger!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+    const items = [...document.body.querySelectorAll('[role="menuitem"]')];
+    const facebookItem = items.find((el) => el.textContent === koMessages.channelConnect.channelLabelFacebook);
+    await act(async () => { facebookItem!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+    expect(scrollSpy).toHaveBeenCalled();
+    const facebookSection = [...container.querySelectorAll('[data-testid="channel-section"]')].find((el) => el.textContent?.includes(koMessages.channelConnect.channelLabelFacebook));
+    expect(facebookSection?.querySelector('[data-testid="channel-section-body"]')).not.toBeNull();
+    // threads 행은 안 펼쳐진 채(선택 대상이 아니다).
+    const threadsSection = [...container.querySelectorAll('[data-testid="channel-section"]')].find((el) => el.textContent?.includes(koMessages.channelConnect.channelThreads));
+    expect(threadsSection?.querySelector('[data-testid="channel-section-body"]')).toBeNull();
+  });
+
+  // 카디르 QA changes(#4090 리뷰) — 「펼침은 페이지당 1행」을 재는 테스트 0이었다(두
+  // 행 연속 펼쳐도 전체 초록). expandedChannel이 페이지 레벨 단일값이라는 계약을 직접
+  // pin — 되돌리면(채널별 로컬 expanded state로 바꾸면) RED.
+  it('⭐행 A를 펼친 뒤 행 B의 다음 발을 누르면 A는 접히고 B만 펼쳐진다(펼침은 페이지당 1행)', async () => {
+    stubFetchPerChannel([{ channel: 'threads', effectiveSource: 'none' }, { channel: 'facebook', effectiveSource: 'none' }]);
+    await mount('owner');
+    const registerBtns = () => [...container.querySelectorAll('[data-testid="channel-row-primary-register"]')] as HTMLButtonElement[];
+    await act(async () => { registerBtns()[0]!.click(); });
+    await flush();
+    expect(container.querySelectorAll('[data-testid="channel-section-body"]')).toHaveLength(1);
+    const threadsSection = [...container.querySelectorAll('[data-testid="channel-section"]')].find((el) => el.textContent?.includes(koMessages.channelConnect.channelThreads));
+    expect(threadsSection?.querySelector('[data-testid="channel-section-body"]')).not.toBeNull();
+
+    await act(async () => { registerBtns()[1]!.click(); });
+    await flush();
+    // 여전히 1행만 — threads가 아니라 facebook으로 바뀐다.
+    expect(container.querySelectorAll('[data-testid="channel-section-body"]')).toHaveLength(1);
+    expect(threadsSection?.querySelector('[data-testid="channel-section-body"]')).toBeNull();
+    const facebookSection = [...container.querySelectorAll('[data-testid="channel-section"]')].find((el) => el.textContent?.includes(koMessages.channelConnect.channelLabelFacebook));
+    expect(facebookSection?.querySelector('[data-testid="channel-section-body"]')).not.toBeNull();
   });
 });
 

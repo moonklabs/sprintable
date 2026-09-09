@@ -16,7 +16,7 @@ describe('ListRow', () => {
   it('renders mark·title·subtitle·status·action·menu·children in one row', async () => {
     const { container, root } = await mount(
       <ListRow
-        mark={<ListRowMark label="Th" color="neutral" />}
+        mark={<ListRowMark label="Th" color="#121310" />}
         title="Threads"
         subtitle="@moonklabs · 3일 전 확인"
         status={<span data-testid="status">연결됨</span>}
@@ -44,8 +44,10 @@ describe('ListRow', () => {
   });
 });
 
+// 유나 지적(#4090 리뷰, 2026-09-09 13:13Z) — 이름 있는 프리셋(neutral/blue)은 소비처
+// 0이라 걷었다 — color는 항상 hex 인라인 style 하나로.
 describe('ListRowMark', () => {
-  it('color=neutral이면 고정 팔레트 클래스, 그 외 값은 인라인 style로 폴백', async () => {
+  it('color는 항상 인라인 style(hex)로 그려진다', async () => {
     const { container, root } = await mount(<ListRowMark label="Fb" color="#1877F2" />);
     const mark = container.querySelector('span');
     expect(mark?.textContent).toBe('Fb');

@@ -302,9 +302,9 @@ function MeasurementConnectionsSection({
             title={t('measurementUtmLabel')}
             subtitle={<span data-testid="measurement-utm-status">{utmStatusText}</span>}
             action={utm.settings_path ? (
-              <a href={utm.settings_path} data-testid="measurement-utm-settings-link">
-                <Button size="sm" variant="outline">{t('measurementUtmSettingsLink')}</Button>
-              </a>
+              <Button asChild size="sm" variant="outline">
+                <a href={utm.settings_path} data-testid="measurement-utm-settings-link">{t('measurementUtmSettingsLink')}</a>
+              </Button>
             ) : undefined}
           />
         ) : null}
@@ -607,14 +607,14 @@ function ConnectionRow({
               {t('channelSandboxReauthUnavailableNote', { channel: channelLabel(conn.channel, t) })}
             </p>
           ) : isOwnerStrict ? (
-            <a href={`/api/oauth-channel/authorize?org=${orgId}&channel=${conn.channel}&connection_id=${conn.id}`}>
-              <Button
-                size="sm" variant="outline"
+            <Button asChild size="sm" variant="outline">
+              <a
+                href={`/api/oauth-channel/authorize?org=${orgId}&channel=${conn.channel}&connection_id=${conn.id}`}
                 aria-label={t('channelRowActionAriaLabel', { n: index + 1, label: t('channelReauthAction') })}
               >
                 {t('channelReauthAction')}
-              </Button>
-            </a>
+              </a>
+            </Button>
           ) : (
             <span className="text-xs text-muted-foreground">{t('channelOwnerOnlyReason')}</span>
           )
@@ -843,9 +843,9 @@ function ChannelSection({
           // 하나만(#4088과 같은 형). 행 다음 발은 전부 outline.
           action={primaryAction ? (
             primaryAction.href ? (
-              <a href={primaryAction.href}>
-                <Button variant="outline" size="sm" data-testid={primaryAction.testId}>{primaryAction.label}</Button>
-              </a>
+              <Button asChild variant="outline" size="sm">
+                <a href={primaryAction.href} data-testid={primaryAction.testId}>{primaryAction.label}</a>
+              </Button>
             ) : (
               <Button variant="outline" size="sm" onClick={primaryAction.onClick} disabled={primaryAction.disabled} data-testid={primaryAction.testId}>
                 {primaryAction.label}
@@ -935,9 +935,9 @@ function ChannelSection({
               자체가 primaryAction 몫이라 여기선 1개 이상일 때만(add-another). */}
           {credential_kind === 'oauth' && canStartConnect && connections.length >= 1 ? (
             isOwnerStrict ? (
-              <a href={connectHref}>
-                <Button size="sm">{t('channelConnectAnotherAction', { channel: channelLabel(channel, t) })}</Button>
-              </a>
+              <Button asChild size="sm">
+                <a href={connectHref}>{t('channelConnectAnotherAction', { channel: channelLabel(channel, t) })}</a>
+              </Button>
             ) : (
               // story #3436 묶음10(§5) — 「또 다른 계정 연결」도 owner 전용(같은
               // authorize_channel_connection 경로) — 버튼 대신 사유 한 줄.
