@@ -4,9 +4,20 @@
 // 화면마다 다른 낱말로 뜨거나, 조용히 빈 칸으로 사라지던 것)을 한 헬퍼로 수렴한다.
 // channel-label.ts의 (value, t) 시그니처와 동형 — 새 기전 발명 금지. 실 소비처(2026-09-09
 // 기준): activity-log-view.tsx·dashboard-activity-timeline.tsx(활동 로그 actor) ·
-// organization/events/page.tsx(이벤트 발행 이력 sender). 대화 참여자 화면은 이미 story
-// #3203/#3679가 「알 수 없는 멤버」로 별도 수렴해 둔 상태라 이 헬퍼를 안 쓴다(중복 수렴
-// 아님 — 그 화면은 이 결함 클래스의 영향을 받은 적이 없었다, PR #4105 델타 참고).
+// organization/events/page.tsx(이벤트 발행 이력 sender).
+//
+// 대화 참여자 화면(chats/[conversation_id]/page.tsx)은 이 헬퍼를 **안 쓰는게 아니라 못
+// 쓴다**(유나 디자인 게이트 정정, 2026-09-09) — 정정: 그 화면도 이 결함 클래스의 영향을
+// 실제로 받았다(conversations.py:398이 이 PR이 고친 lookup_members_by_ids를 그대로 쓰고
+// :417 name=resolved.name으로 흘려보낸다). 다만 참여자 응답 payload가 「실존 구성원인데
+// display_name만 없음」과 「orphan(member/alias 자체가 없음)」 둘 다 name=None으로 채우고
+// 그 둘을 가르는 필드가 없다(member_resolver.py의 orphan-fallback과 실존-무이름 분기가
+// 응답에 남기는 신호가 동일 — member_id·avatar_url·type·runtime_type뿐). 이 헬퍼가 전제로
+// 하는 "이름이 없다=이름 없는 구성원"이라는 단일 사실이 이 화면에선 두 사실(진짜 없음/
+// orphan) 중 하나를 지어내는 셈이라 적용하면 다른 방식으로 거짓말이 된다 — BE가
+// orphan에만 별도 신호(예: resolved:false)를 싣고 이 화면이 그 신호로 갈라 쓰는 처방은
+// story #3758(9번째 항목)로 분리했다.
+
 //
 // 유나 디자인 게이트 적기만②(2026-09-09) — `??`는 null/undefined만 잡고 빈 문자열은
 // 그대로 통과시킨다. BE가 ""를 name으로 준 적은 실측 0건이지만(전부 None 아니면 실
