@@ -205,6 +205,7 @@ async def create_agent_run(
         status=body.status,
         result_summary=body.result_summary,
         error_message=body.error_message,
+        last_error_code=body.last_error_code,
         input_tokens=body.input_tokens,
         output_tokens=body.output_tokens,
         cost_usd=body.cost_usd,
