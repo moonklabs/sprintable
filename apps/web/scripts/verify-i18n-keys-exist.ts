@@ -65,6 +65,21 @@
  * `string`이 아니거나 번역자와 무관한 이름-리졸버라 이름 조건을 넓히면 오히려 오탐이 된다
  * (PO 1차 grounding 정정 — CHANGES 재정정에 반영).
  *
+ * ## ⑤⑥ 커스텀 훅이 반환한 번역자(CHANGES 재재지적, 유나 2026-09-09)
+ * ③이 다루는 「함수 파라미터로 받는 번역자」와 겹치지 않는 다른 소비 형 — 커스텀 훅
+ * (`useAccountSwitcher`)이 내부에서 `useTranslations`를 불러 그 결과(`t`/`tc`)를 반환
+ * 객체에 담아 내보내면, 소비 파일 쪽에는 그 훅 호출 자체가 useTranslations/getTranslations가
+ * 아니라서(다른 파일 안에 있다) 바인딩이 전혀 안 잡혔다(profile-menu.tsx: totalCallCount
+ * 1 — 나머지 8곳이 안 세어짐). 두 형:
+ *   ⑤ 프로퍼티 접근 그대로 호출(`acc.t('key')`/`acc.tc('key')`, context-switcher-chip.tsx
+ *      8곳) — `acc`는 훅의 전체 반환 객체를 들고 있을 뿐 그 자체가 번역자가 아니다.
+ *   ⑥ 훅 반환값을 구조분해(`const { t, tc } = useAccountSwitcher(...)`, profile-menu.tsx
+ *      8곳) — initializer가 useTranslations/getTranslations가 **아닌** 임의 호출이다.
+ * ⑤⑥ 둘 다 프로퍼티/로컬 이름이 **정확히 `t` 또는 `tc`**일 때만 인정한다(③의 「이름
+ * 하나만 정밀하게」 원칙과 동형 — 전수 스캔: 이 두 이름 외 프로퍼티 접근/임의-호출
+ * 구조분해로 나타나는 형은 이 저장소에 0건, `useAccountSwitcher` 훅 하나뿐). 인정되면
+ * ③과 동일하게 네임스페이스를 모르니 **무조건 동적 버킷**.
+ *
  * ## 못 잡는 것(⚠️)
  *   ㉠ 네임스페이스 자체가 동적(`useTranslations(nsVar)`)인 바인딩은 등록하지 않는다 —
  *      그 var를 통한 이후 호출은 바인딩 미매칭이라 리터럴도 동적도 아닌 채로 조용히
@@ -100,6 +115,16 @@ export interface ScanResult {
 }
 
 const TRANSLATION_METHODS = new Set(['rich', 'raw', 'has']);
+
+// ⑤⑥ CHANGES(유나 디자인 게이트 재지적 2026-09-09) — 커스텀 훅이 `useTranslations`를
+// 내부에서 호출하고 그 결과(`t`/`tc`)를 반환하면, 소비 파일 입장에선 그 반환값이 「이
+// 파일 안에서 useTranslations를 직접 부르지 않은 번역자」가 된다(③ 번역자-파라미터와
+// 같은 처지 — 네임스페이스가 다른 파일 안에 있어 이 파일 혼자서는 모른다). 실측(전수
+// 스캔): 이 정확한 두 이름(`t`/`tc`)으로 나타나는 두 형뿐이다(context-switcher-chip.tsx
+// 프로퍼티 접근 8곳·profile-menu.tsx 구조분해 8곳, useAccountSwitcher 훅 하나 — 다른
+// 이름/다른 훅 0건) — 그래서 ③과 같은 정밀도 원칙(오탐 방지 위해 정확한 이름만)을
+// 여기도 유지한다: 이름이 정확히 `t`/`tc`일 때만 인정.
+const HOOK_RETURNED_TRANSLATOR_NAMES = new Set(['t', 'tc']);
 
 function namespaceFromArgs(args: readonly ts.Expression[]): string | null {
   if (args.length === 0) return '';
@@ -297,10 +322,8 @@ export function scanFileContent(content: string, file: string): {
     bindings.set(varName, ns);
   }
 
-  function keyFromCall(node: ts.CallExpression, varName: string): void {
-    if (!bindings.has(varName)) return;
+  function countCallWithNamespace(node: ts.CallExpression, ns: string | null): void {
     totalCallCount += 1;
-    const ns = bindings.get(varName)!;
     const arg = node.arguments[0];
     if (ns !== null && arg && ts.isStringLiteral(arg)) {
       const fullKey = ns ? `${ns}.${arg.text}` : arg.text;
@@ -311,9 +334,43 @@ export function scanFileContent(content: string, file: string): {
     }
   }
 
+  function keyFromCall(node: ts.CallExpression, varName: string): void {
+    if (!bindings.has(varName)) return;
+    countCallWithNamespace(node, bindings.get(varName)!);
+  }
+
   function walk(node: ts.Node): void {
-    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
-      registerBindingFromInitializer(node.name.text, node.initializer);
+    if (ts.isVariableDeclaration(node) && node.initializer) {
+      if (ts.isIdentifier(node.name)) {
+        registerBindingFromInitializer(node.name.text, node.initializer);
+      } else if (ts.isObjectBindingPattern(node.name)) {
+        // ⑥ 커스텀 훅이 반환한 번역자 구조분해(`const { t, tc } = useAccountSwitcher(...)`)
+        // — 훅 내부에서 useTranslations를 부르므로 initializer 자체는 useTranslations/
+        // getTranslations 호출이 아니다(어떤 호출이든 무관) — 로컬 이름이 정확히
+        // HOOK_RETURNED_TRANSLATOR_NAMES(t/tc)일 때만 unknown-ns(null) 바인딩.
+        for (const element of node.name.elements) {
+          if (!ts.isIdentifier(element.name)) continue;
+          const propKey = element.propertyName && ts.isIdentifier(element.propertyName)
+            ? element.propertyName.text
+            : element.name.text;
+          if (HOOK_RETURNED_TRANSLATOR_NAMES.has(propKey)) {
+            bindings.set(element.name.text, null);
+          }
+        }
+      }
+    }
+    // ⑤ 객체 프로퍼티 접근(`acc.t('key')`/`acc.tc('key')`) — ⑥과 쌍을 이루는 다른 소비
+    // 형(구조분해로 로컬 변수를 안 만들고 훅 반환 객체를 들고 있다가 프로퍼티로 바로
+    // 호출). `acc` 자체는 바인딩 대상이 아니고(번역자가 아니라 그 훅의 전체 반환 객체),
+    // 프로퍼티 이름이 정확히 t/tc일 때만 그 호출 자체를 unknown-ns로 즉시 카운트한다
+    // (사전 바인딩 등록 불요 — 이름 매치 자체가 신호).
+    if (
+      ts.isCallExpression(node)
+      && ts.isPropertyAccessExpression(node.expression)
+      && ts.isIdentifier(node.expression.name)
+      && HOOK_RETURNED_TRANSLATOR_NAMES.has(node.expression.name.text)
+    ) {
+      countCallWithNamespace(node, null);
     }
     // ③ 번역자 파라미터 — 네임스페이스는 모르니 null 바인딩(호출은 항상 동적으로 카운트,
     // 「안 세어짐」을 없앤다). 단순 이름(`t: Translator`)과 구조분해(`{ t }: FooProps`)

@@ -288,6 +288,63 @@ describe('scanFileContent — story #5ead8723 CHANGES③(번역자 파라미터,
   });
 });
 
+// story #5ead8723 CHANGES⑤⑥(유나 디자인 게이트 재재지적, 2026-09-09) — 커스텀 훅이
+// 내부에서 useTranslations를 부르고 그 결과(t/tc)를 반환하면, 소비 파일엔 useTranslations
+// 호출 자체가 없어 ③ 처방으로도 안 잡혔다(profile-menu.tsx totalCallCount 1 — 실제
+// 9여야 할 자리). ⭐이 describe 전체가 그 회귀의 pin이다.
+describe('scanFileContent — story #5ead8723 CHANGES⑤⑥(커스텀 훅이 반환한 번역자)', () => {
+  it('⭐⑤ 프로퍼티 접근 그대로 호출(acc.t(...)/acc.tc(...), context-switcher-chip.tsx와 동형)', () => {
+    const src = `
+      function ContextSwitcherChip() {
+        const acc = useAccountSwitcher(userName);
+        return [acc.t('title'), acc.tc('logout')];
+      }
+    `;
+    const result = scanFileContent(src, 'fake.tsx');
+    expect(result.totalCallCount).toBe(2);
+    expect(result.dynamicCount).toBe(2);
+    expect(result.literalRefs).toEqual([]);
+  });
+
+  it('⭐⑥ 훅 반환값 구조분해(const { t, tc } = useAccountSwitcher(...), profile-menu.tsx와 동형)', () => {
+    const src = `
+      function ProfileMenu() {
+        const { t, tc, busy } = useAccountSwitcher(userName);
+        return [t('title'), tc('logout'), busy];
+      }
+    `;
+    const result = scanFileContent(src, 'fake.tsx');
+    expect(result.totalCallCount).toBe(2);
+    expect(result.dynamicCount).toBe(2);
+  });
+
+  // 오탐 방지 — 프로퍼티/구조분해 이름이 t/tc가 아니면(예: 임의 콜백) 무관해야 한다.
+  it('오탐 방지 — 이름이 t/tc가 아닌 프로퍼티 접근·구조분해는 무관(전수 스캔 0건 확認과 동형)', () => {
+    const src = `
+      function Widget() {
+        const svc = useSomeService();
+        const { load, error } = useOtherHook();
+        return [svc.toggle('x'), load()];
+      }
+    `;
+    const result = scanFileContent(src, 'fake.tsx');
+    expect(result.totalCallCount).toBe(0);
+  });
+
+  // ⭐되돌리면 RED — 유나·PO가 CHANGES에서 직접 지목한 실 파일 2개.
+  it('⭐유나·PO 지목 실 파일 2개(context-switcher-chip.tsx·profile-menu.tsx) — total이 이전 최소치보다 커야 한다', () => {
+    const files: [string, number][] = [
+      ['components/nav/context-switcher-chip.tsx', 8],  // ⑤ 처방 前엔 0.
+      ['components/nav/profile-menu.tsx', 1],           // ⑥ 처방 前엔 정확히 1(나머지 8곳 안 세어짐).
+    ];
+    for (const [rel, priorMax] of files) {
+      const content = readFileSync(path.join(SRC_ROOT, rel), 'utf8');
+      const result = scanFileContent(content, rel);
+      expect(result.totalCallCount, `${rel} totalCallCount`).toBeGreaterThan(priorMax);
+    }
+  });
+});
+
 // ⭐양성대조(story #5ead8723 판별) — develop HEAD 실 소스에 대해 이 가드가 실제로 통과하는지,
 // 그리고 뮤테이션(존재하지 않는 키 삽입)을 걸면 실제로 RED가 되는지 왕복 확認한다.
 describe('scanRepo — 양성대조(실 develop 소스)', () => {
