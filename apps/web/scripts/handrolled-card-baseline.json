@@ -12,7 +12,8 @@
     "26건 — 이 26건은 이 스토리와 무관한 기존 부채, 「더 늘지 않는다」 계약대로 여기서 통째로",
     "grandfather한다). now-face.tsx·loop-face.tsx·attention-cluster-board.tsx 3개 키는 같은",
     "PR1이 Card primitive로 이관해 여기서 뺐다(story #3736 ⑪의 「원인 3파일」). 263키 → 270키",
-    "(신규 26건 grandfather - 3건 이관 제거 - 중복/재구성에 따른 소폭 차이)."
+    "(신규 26건 grandfather - 3건 이관 제거 - 중복/재구성에 따른 소폭 차이).",
+    "story #3743 그라운딩 前 잔존(2026-09-09, 페드루 PO 지적·배포 60 실픽셀) — org-briefing-shell.tsx(FaceSkeletonPanel)·workforce-face.tsx 2건이 loop-face.tsx와 같은 카드인데 Card primitive 이관에서 빠져 있었다(#3736 ⑪ 「원인 3파일」 당시 이 둘은 안 걸렸던 것으로 보임) — 이번에 마저 이관, 여기서 뺀다. 270키 → 268키."
   ],
   "keys": [
     "app/(authenticated)/[ws]/[proj]/docs/docs-client-layout.tsx::mx-2 mt-1.5 space-y-1.5 rounded-lg border border-border bg-card p-2",
@@ -234,9 +235,7 @@
     "components/meetings/audio-recorder.tsx::rounded-lg border bg-background p-4",
     "components/nav/context-switcher-chip.tsx::h-11 min-h-0 min-w-0 max-w-[190px] shrink-0 justify-start gap-2 overflow-hidden rounded-xl border border-border bg-card px-2 py-1.5 text-left font-normal hover:bg-muted disabled:opacity-60 lg:hidden",
     "components/nav/notification-bell.tsx::absolute right-0 top-full z-50 mt-1 hidden w-80 overflow-hidden rounded-lg border bg-background shadow-[var(--elev-overlay)] lg:flex lg:flex-col",
-    "components/org-briefing/org-briefing-shell.tsx::rounded-2xl border border-border bg-card p-4",
     "components/org-briefing/org-briefing-shell.tsx::rounded-xl border border-border bg-muted/40 px-4 py-3 text-sm text-foreground",
-    "components/org-briefing/workforce-face.tsx::rounded-2xl border border-border bg-card p-4 transition-shadow hover:shadow-[var(--elev-card)]",
     "components/organization/event-definer-form.tsx::flex items-center gap-1 rounded-xl border border-border bg-background pl-3",
     "components/organization/event-definer-form.tsx::flex items-center gap-2 rounded-lg border border-border bg-background px-2.5 py-1.5",
     "components/organization/event-definer-form.tsx::mt-3 rounded-xl border border-dashed border-border bg-muted/40 p-3",

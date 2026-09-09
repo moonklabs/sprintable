@@ -336,19 +336,9 @@ function SilentStallShell({
   );
 }
 
-// story #2830(§2 PO 보완 지시) — N 비포함·집계만 유지되는 3번째 카테고리(측정계획 없는 active
-// goal). 개별 목록·클릭 링크 없음(AC상 요건 없음), 카드 하단 옅은 보조 텍스트 한 줄로만 존재를
-// 알린다. 유나 스티어④ — "옅게"가 AA 밑으로 못 내려간다: text-muted-foreground(3.x대, AA 미달
-// 가능성)가 아니라 text-foreground 소형(11px)으로 대비는 지키되 크기/톤으로 옅음을 표현한다.
-function MeasurePlanMissingNote({ count }: { count: number }) {
-  const t = useTranslations('orgBriefing');
-  if (count <= 0) return null;
-  return (
-    <p className="border-t border-border bg-muted/30 px-4 py-2 text-[11px] text-foreground">
-      {t('clusterUnclosedMeasurePlanMissing', { count })}
-    </p>
-  );
-}
+// story #3735(B갈래, 유나 사전) — 「+N건은 측정 계획이 아직 없음」은 사용자 화면 밖(운영
+// 화면 몫)이라 걷는다. MeasurePlanMissingNote(옛 #2830)를 여기서 제거 — measurePlanMissing
+// GoalCount prop 자체(파생 계층)는 무변(이 스토리 범위 밖).
 
 // story #2843/#2844 — 명시 "측정 불가" 선언 goal 수. measure_plan_missing과 동형(N 비포함·
 // 집계만·개별 목록 없음) — 위조 채널 감시용(§4, unmeasurable 남발로 루프 N을 인위적으로
@@ -396,7 +386,9 @@ export function AttentionClusterBoard({
   silentStall,
   loop,
   loopTotalCount,
-  measurePlanMissingGoalCount,
+  // story #3735(B갈래) — 렌더 소비처 제거 후 미사용(파생 계층·prop 계약은 무변, 이 스토리
+  // 범위 밖). eslint no-unused-vars 관례대로 `_` 접두.
+  measurePlanMissingGoalCount: _measurePlanMissingGoalCount,
   unmeasurableGoalCount,
   authFailure = [],
   memberNames = {},
@@ -469,7 +461,6 @@ export function AttentionClusterBoard({
           {/* no-silent-cap(유나 스티어②) — 다 펼쳤어도 items[]가 top-20 cap이면 실제 총량과
               다를 수 있다는 것을 정직하게 알린다. */}
           {loopExpanded ? <LoopCapNotice shown={loop.length} total={loopTotalCount} /> : null}
-          <MeasurePlanMissingNote count={measurePlanMissingGoalCount} />
           <UnmeasurableGoalNote count={unmeasurableGoalCount} />
         </ClusterShell>
       ) : null}
