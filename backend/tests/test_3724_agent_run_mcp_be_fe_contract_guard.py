@@ -98,6 +98,28 @@ def test_guard1_grandfather_count_pinned():
     )
 
 
+def test_guard1_grandfather_entries_are_still_actual_violations():
+    """유나 판정(2026-09-09 05:41Z) — "줄어드는 목록에 줄어들 때를 알리는 자가 없다".
+    #3727이 착지해 필드가 스키마에 생겨도 grandfather 항목을 손으로 안 지우면 위 count-pin
+    은 계속 green(개수만 본다·내용은 안 본다)이라 조용히 stale해진다. 이 테스트는 각
+    항목이 "지금도" 실제 위반인지(= 그 필드가 아직 BE 스키마에 없는지) 직접 확인해 — 위반이
+    아니게 됐는데 목록에 남아 있으면 RED로 "이 항목을 빼라"고 강제한다."""
+    create_fields = set(CreateAgentRun.model_fields)
+    update_fields = set(UpdateAgentRun.model_fields)
+    schema_fields_by_tool = {"emit_event": create_fields, "update_run_status": update_fields}
+
+    stale: list[str] = []
+    for (tool, field), reason in GUARD1_GRANDFATHER.items():
+        if field in schema_fields_by_tool[tool]:
+            stale.append(f"{tool}.{field} (grandfather 사유: {reason})")
+
+    assert not stale, (
+        f"GUARD1_GRANDFATHER에 더 이상 실제 위반이 아닌 항목이 있다: {stale}. 해당 스토리가 "
+        "착지해 필드가 BE 스키마에 생겼다는 뜻 — GUARD1_GRANDFATHER에서 이 항목을 지우고 "
+        "test_guard1_grandfather_count_pinned의 카운트도 같이 줄일 것."
+    )
+
+
 # ── 가드③ — 3719 모양 전용(MCP Input 모델 ⊆ 실제 forward 튜플) ──────────────────────
 # run_id·agent_id·trigger·status는 body 조립 코드가 loop 밖에서 직접 넣거나(emit_event의
 # agent_id/trigger, update_run_status의 status) URL path로 쓴다(update_run_status의
@@ -240,4 +262,28 @@ def test_guard2_pending_grandfather_count_pinned():
         f"GUARD2_GRANDFATHER_PENDING 항목 수가 8이 아니라 {len(GUARD2_GRANDFATHER_PENDING)} — "
         "늘었으면 새 phantom 필드가 또 생긴 것(원인 리뷰 필요), 줄었으면 후속 스토리(#3725/#3730)가 "
         "그만큼 닫힌 것이니 이 상수·주석도 같이 정리할 것."
+    )
+
+
+def test_guard2_pending_grandfather_entries_are_still_actual_violations():
+    """유나 판정(2026-09-09 05:41Z)과 동형 — PENDING 항목이 "지금도" 실제 위반인지(= 그
+    필드가 아직 FE RunDetail에 있고 BE AgentRunResponse엔 없는지) 직접 확인한다. #3725/#3730
+    착지 뒤 이 목록에서 항목을 안 지우면 count-pin은 green인 채로 stale해지는데, 이 테스트가
+    그 창을 막는다. SaaS 영구 5(GUARD2_GRANDFATHER_SAAS_OVERLAY)는 대상 아님(줄어드는
+    목록이 아니라서 이 자가진단 밖)."""
+    response_fields = set(AgentRunResponse.model_fields)
+    fe_source = _FE_AGENT_RUN_DETAIL.read_text(encoding="utf-8")
+    fe_fields = set(_extract_ts_interface_field_names(fe_source, "RunDetail"))
+
+    stale = [
+        f"{field} (grandfather 사유: {reason})"
+        for field, reason in GUARD2_GRANDFATHER_PENDING.items()
+        if not (field in fe_fields and field not in response_fields)
+    ]
+
+    assert not stale, (
+        f"GUARD2_GRANDFATHER_PENDING에 더 이상 실제 위반이 아닌 항목이 있다: {stale}. 해당 "
+        "스토리가 착지해 응답 스키마에 필드가 생겼거나(#3725) FE 타입에서 그 필드가 삭제됐다는 "
+        "(#3730) 뜻 — GUARD2_GRANDFATHER_PENDING에서 이 항목을 지우고 "
+        "test_guard2_pending_grandfather_count_pinned의 카운트도 같이 줄일 것."
     )
