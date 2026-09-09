@@ -87,7 +87,7 @@ describe('ChannelPostCalendarPage (story #3422 ③)', () => {
       root.render(wrap(<ChannelPostCalendarPage />));
     });
     await flush();
-    expect(container.textContent).toContain(koMessages.content.channelPostsCalendarNoChannelsTitle);
+    expect(container.textContent).toContain(koMessages.content.channelPostsNoChannelsTitle);
     expect(container.querySelector('[data-testid="channel-post-calendar-grid"]')).toBeNull();
   });
 

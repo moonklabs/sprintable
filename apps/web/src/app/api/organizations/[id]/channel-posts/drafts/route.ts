@@ -10,7 +10,12 @@ export async function GET(request: Request, { params }: RouteParams) {
   const { id } = await params;
   const _r = await proxyToFastapiWithParams(request, '/api/v2/organizations/[id]/channel-posts/drafts', { id });
   if (!_r.ok) return _r;
-  return apiSuccess(await _r.json());
+  // story #3744(페드루 스티어 2026-09-09) — site-posts/drafts/route.ts와 동형(그 파일
+  // 주석 참조 — X-Total-Count를 meta.total로, api/stories/route.ts:69 관례 재사용).
+  const totalHeader = _r.headers.get('x-total-count');
+  const parsed = totalHeader === null ? null : Number(totalHeader);
+  const total = parsed !== null && Number.isFinite(parsed) ? parsed : undefined;
+  return apiSuccess(await _r.json(), total !== undefined ? { total } : undefined);
 }
 
 export async function POST(request: Request, { params }: RouteParams) {

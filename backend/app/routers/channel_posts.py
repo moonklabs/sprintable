@@ -8,7 +8,7 @@ import re
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -61,6 +61,7 @@ from app.services.channel_posts import (
     get_source_titles_and_latest_versions,
     is_agent_caller,
     list_channel_post_draft_versions,
+    count_channel_post_drafts,
     list_channel_post_drafts,
     publish_channel_post_draft,
     restore_channel_post_draft,
@@ -1221,6 +1222,7 @@ def _to_draft_list_item(
 @router.get("/{org_id}/channel-posts/drafts", response_model=list[ChannelPostDraftListItem])
 async def list_channel_post_drafts_endpoint(
     org_id: uuid.UUID,
+    response: Response,
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     scheduled_from: datetime | None = Query(
@@ -1259,7 +1261,12 @@ async def list_channel_post_drafts_endpoint(
     story #3423(캘린더 #3422 선행) — 날짜 필터 셋(scheduled_from/scheduled_to/
     unscheduled)이 없으면 기존 응답과 완전히 동일(회귀 0). 있으면 tz-aware를
     강제(naive는 비교 결과가 항상 어긋나는 #3414 nit J와 동일 함정)하고, unscheduled는
-    범위 파라미터와 상호 배타(둘 다 주면 "무엇을 원하는지" 모호해진다)."""
+    범위 파라미터와 상호 배타(둘 다 주면 "무엇을 원하는지" 모호해진다).
+
+    story #3744 — X-Total-Count 헤더 추가(site_posts.py와 동형 관례). 목록 화면(캘린더
+    아님)의 「N개 중 M개 표시 중」 부분 상태용 — org_id/include_withdrawn/include_deleted만
+    반영하고 캘린더 전용 축(scheduled_from/to/unscheduled)은 안 본다(목록 화면은 그 축을
+    안 쓰므로 무해 — 캘린더 화면은 이 헤더를 소비하지 않는다)."""
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
 
@@ -1294,6 +1301,10 @@ async def list_channel_post_drafts_endpoint(
         scheduled_from=scheduled_from, scheduled_to=scheduled_to, unscheduled=unscheduled,
         include_withdrawn=include_withdrawn, include_deleted=include_deleted,
     )
+    total = await count_channel_post_drafts(
+        db, org_id=org_id, include_withdrawn=include_withdrawn, include_deleted=include_deleted,
+    )
+    response.headers["X-Total-Count"] = str(total)
     source_titles = await get_source_titles_and_latest_versions(
         db, org_id=org_id,
         content_item_ids={row[0].source_content_item_id for row in rows if row[0].source_content_item_id},

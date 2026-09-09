@@ -987,6 +987,21 @@ async def list_channel_post_drafts(
     return result
 
 
+async def count_channel_post_drafts(
+    db: AsyncSession, *, org_id: uuid.UUID, include_withdrawn: bool = False, include_deleted: bool = False,
+) -> int:
+    """story #3744 — list_channel_post_drafts와 같은 org_id/include_withdrawn/
+    include_deleted 필터의 전체 개수(limit/offset·scheduled_from/to/unscheduled 무관 —
+    목록 화면은 그 캘린더 전용 축을 안 쓴다). site_posts.py::count_site_post_drafts와
+    동형 관례."""
+    stmt = select(func.count()).select_from(ChannelPostDraft).where(ChannelPostDraft.org_id == org_id)
+    if not include_deleted:
+        stmt = stmt.where(ChannelPostDraft.deleted_at.is_(None))
+    if not include_withdrawn:
+        stmt = stmt.where(ChannelPostDraft.status != "withdrawn")
+    return (await db.execute(stmt)).scalar_one()
+
+
 async def submit_channel_post_draft(
     db: AsyncSession,
     *,

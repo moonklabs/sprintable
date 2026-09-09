@@ -94,7 +94,7 @@ export default function ChannelPostCalendarPage() {
       ) : data.loading ? (
         <p className="text-sm text-muted-foreground">{t('channelPostsCalendarLoading')}</p>
       ) : channels.length === 0 ? (
-        <EmptyState title={t('channelPostsCalendarNoChannelsTitle')} description={t('channelPostsCalendarNoChannelsDescription')} />
+        <EmptyState title={t('channelPostsNoChannelsTitle')} description={t('channelPostsCalendarNoChannelsDescription')} />
       ) : (
         <>
           <UnscheduledLane items={data.unscheduled} displayTimezone={data.displayTimezone.tz} />

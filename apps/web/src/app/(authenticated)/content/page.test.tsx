@@ -21,6 +21,13 @@ vi.mock('@/app/dashboard/dashboard-shell', () => ({
   useDashboardContext: () => useDashboardContextMock(),
 }));
 
+// story #3744 — ⋯ 행 메뉴의 「승인 요청 보기」가 useRouter().push()로 이동한다(insights-
+// board/page.test.tsx와 동형 mock 관례).
+const { routerPushMock } = vi.hoisted(() => ({ routerPushMock: vi.fn() }));
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: routerPushMock }),
+}));
+
 import ContentPostListPage from './page';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -61,6 +68,17 @@ async function flush() {
   });
 }
 
+// story #3744 — 행 액션이 이제 ⋯ DropdownMenu 안에 있다(base-ui가 content를
+// document.body에 portal — container 스코프 밖). n번째(0-based) 행의 트리거를 눌러
+// 메뉴를 연다. dropdown-menu.test.tsx의 document.querySelector 관례와 동형.
+async function openRowMenu(n = 0) {
+  const triggers = container.querySelectorAll('[data-testid="content-row-actions-trigger"]');
+  await act(async () => {
+    (triggers[n] as HTMLElement).click();
+  });
+  await flush();
+}
+
 // story #3734(카디르 CI 적발·content-bff-route-coverage.guard.test.ts #3445) — 실
 // 코드가 `?`를 항상 템플릿 «안»에 두도록 바뀌어(가드가 `?` 밖 보간을 못 읽어서) 기본
 // 뷰(showArchived=false)도 이제 트레일링 빈 `?`를 붙여 부른다(`.../drafts?`) — 두
@@ -69,14 +87,14 @@ function stripTrailingBareQuery(url: string): string {
   return url.endsWith('?') ? url.slice(0, -1) : url;
 }
 
-function stubFetch(drafts: unknown[] | { status: number }) {
+function stubFetch(drafts: unknown[] | { status: number }, meta: { total: number | null } | null = null) {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
       const url = stripTrailingBareQuery(String(input));
       if (url === `/api/organizations/${ORG_ID}/site-posts/drafts`) {
         if (!Array.isArray(drafts)) return { ok: false, status: drafts.status, json: async () => ({}) };
-        return { ok: true, status: 200, json: async () => ({ data: drafts, error: null, meta: null }) };
+        return { ok: true, status: 200, json: async () => ({ data: drafts, error: null, meta }) };
       }
       throw new Error('unexpected fetch: ' + url);
     }),
@@ -133,7 +151,120 @@ describe('ContentPostListPage (story #3368)', () => {
     expect(container.textContent).toContain(koMessages.content.emptyTitle);
   });
 
-  it('⭐목록 응답의 제목·버전·작성 주체·수정 시각이 화면에 그대로 나온다(AC1)', async () => {
+  // story #3744 범위 ⑥ — X-Total-Count 기반 부분 상태 줄. 페드루 스티어(2026-09-09) —
+  // board.tasksPartialCount(story-detail-panel.tsx 선례) 재사용, 새 키 발명 0.
+  describe('부분 상태 줄(story #3744 ⑥)', () => {
+    it('⭐total 있음 — board.tasksPartialCount 문구가 뜬다', async () => {
+      stubFetch([DRAFT_A], { total: 5 });
+      await act(async () => { root.render(wrap(<ContentPostListPage />)); });
+      await flush();
+
+      expect(container.querySelector('[data-testid="content-partial-state"]')?.textContent).toBe(
+        koMessages.board.tasksPartialCount.replace('{total}', '5').replace('{loaded}', '1'),
+      );
+    });
+
+    it('⭐total이 null(헤더 못 받음) — 부분 상태 줄 자체를 안 그린다(한 페이지를 전체로 위장 금지)', async () => {
+      stubFetch([DRAFT_A], { total: null });
+      await act(async () => { root.render(wrap(<ContentPostListPage />)); });
+      await flush();
+
+      expect(container.querySelector('[data-testid="content-partial-state"]')).toBeNull();
+    });
+
+    it('meta 자체가 없음(구 계약) — 부분 상태 줄을 안 그린다(뮤테이션 표적 — ?? null 가드)', async () => {
+      stubFetch([DRAFT_A], null);
+      await act(async () => { root.render(wrap(<ContentPostListPage />)); });
+      await flush();
+
+      expect(container.querySelector('[data-testid="content-partial-state"]')).toBeNull();
+    });
+
+    it('0건이면 total이 있어도 부분 상태 줄을 안 그린다(빈 상태와 안 겹침)', async () => {
+      stubFetch([], { total: 0 });
+      await act(async () => { root.render(wrap(<ContentPostListPage />)); });
+      await flush();
+
+      expect(container.querySelector('[data-testid="content-partial-state"]')).toBeNull();
+    });
+
+    // 유나 CHANGES(2026-09-09, PO 채택) — shownCount(=drafts.length, 필터 前)는 표가
+    // 그리는 visibleRows(탭 필터 後)와 statusTab≠'all'일 때 어긋난다("18개 중 18개"
+    // 거짓 문장). 탭 켜진 채로는 이 줄 자체를 안 그린다.
+    it('⭐탭이 「전체」가 아니면(예: 초안) total이 있어도 부분 상태 줄을 안 그린다(뮤테이션 표적)', async () => {
+      stubFetch([DRAFT_A], { total: 5 });
+      await act(async () => { root.render(wrap(<ContentPostListPage />)); });
+      await flush();
+      expect(container.querySelector('[data-testid="content-partial-state"]')).not.toBeNull();
+
+      const draftTab = [...container.querySelectorAll('[role="tab"]')].find(
+        (el) => el.textContent === koMessages.content.contentStatusDraft,
+      ) as HTMLElement;
+      await act(async () => { draftTab.click(); });
+      await flush();
+
+      expect(container.querySelector('[data-testid="content-partial-state"]')).toBeNull();
+    });
+  });
+
+  // 유나 CHANGES(2026-09-09, PO 채택) — 최초 4탭(승인됨을 발행됨에 합침)은 그 탭 안의
+  // 행(칩 「승인됨」)을 부정했다. 정본 = 5탭, 라벨은 contentStatus* 칩 키 재사용.
+  describe('상태 탭 5개(story #3744, 유나 CHANGES)', () => {
+    it('⭐탭 5개가 전체·초안·승인 대기·승인됨·발행됨 순서로, contentStatus* 라벨 그대로 뜬다', async () => {
+      stubFetch([DRAFT_A]);
+      await act(async () => { root.render(wrap(<ContentPostListPage />)); });
+      await flush();
+
+      const labels = [...container.querySelectorAll('[role="tab"]')].map((el) => el.textContent);
+      expect(labels).toEqual([
+        koMessages.content.statusTabAll,
+        koMessages.content.contentStatusDraft,
+        koMessages.content.contentStatusPending,
+        koMessages.content.contentStatusApproved,
+        koMessages.content.contentStatusPublished,
+      ]);
+    });
+
+    it('⭐approved(미발행) 행은 「승인됨」 탭에 걸리고 「발행됨」 탭에는 안 걸린다(뮤테이션 표적 — 유나가 잡은 결함 그 자체)', async () => {
+      stubFetch([{ ...DRAFT_A, gate_status: 'approved', sealed_content_sha256: 'h1' }]);
+      await act(async () => { root.render(wrap(<ContentPostListPage />)); });
+      await flush();
+
+      const publishedTab = [...container.querySelectorAll('[role="tab"]')].find(
+        (el) => el.textContent === koMessages.content.contentStatusPublished,
+      ) as HTMLElement;
+      await act(async () => { publishedTab.click(); });
+      await flush();
+      expect(container.querySelector('[data-testid="content-list-row"]')).toBeNull();
+
+      const approvedTab = [...container.querySelectorAll('[role="tab"]')].find(
+        (el) => el.textContent === koMessages.content.contentStatusApproved,
+      ) as HTMLElement;
+      await act(async () => { approvedTab.click(); });
+      await flush();
+      expect(container.querySelector('[data-testid="content-list-row"]')).not.toBeNull();
+    });
+
+    it('⭐탭이 「전체」가 아닌데 그 탭에 걸리는 행이 0이면 statusTabEmpty(설명·액션 없음)를 그린다', async () => {
+      stubFetch([DRAFT_A]); // DRAFT_A는 초안 상태 — 발행됨 탭엔 안 걸림
+      await act(async () => { root.render(wrap(<ContentPostListPage />)); });
+      await flush();
+
+      const publishedTab = [...container.querySelectorAll('[role="tab"]')].find(
+        (el) => el.textContent === koMessages.content.contentStatusPublished,
+      ) as HTMLElement;
+      await act(async () => { publishedTab.click(); });
+      await flush();
+
+      expect(container.textContent).toContain(koMessages.content.statusTabEmpty);
+      // "전체" 탭의 emptyTitle/emptyDescription/대화 열기 액션은 이 갈래에서 안 뜬다.
+      expect(container.textContent).not.toContain(koMessages.content.emptyDescription);
+    });
+  });
+
+  it('⭐목록 응답의 제목·작성 주체·수정 시각이 화면에 그대로 나온다(AC1)', async () => {
+    // 페드루 CHANGES Ⓒ(시안 v6) — 제목 밑 버전 부제는 걷었다(상세의 일). 이 테스트는
+    // 그 목적을 유지하며 버전 단언만 뺀다.
     stubFetch([DRAFT_A]);
     await act(async () => {
       root.render(wrap(<ContentPostListPage />));
@@ -141,7 +272,6 @@ describe('ContentPostListPage (story #3368)', () => {
     await flush();
 
     expect(container.textContent).toContain('2호 글');
-    expect(container.textContent).toContain('v2');
     expect(container.textContent).toContain(koMessages.content.authorHuman);
   });
 
@@ -326,25 +456,27 @@ describe('ContentPostListPage (story #3368)', () => {
 
   // story #3734 — 「보관」 행 액션·「보관됨 보기」 토글.
   describe('보관(story #3734)', () => {
-    it('⭐can_archive=false — 「보관」 버튼이 안 보인다(fail-closed, can_withdraw와 동형 정책)', async () => {
+    it('⭐can_archive=false — 「보관」 항목이 ⋯ 메뉴에 안 보인다(fail-closed, can_withdraw와 동형 정책)', async () => {
       stubFetch([{ ...DRAFT_A, can_archive: false }]);
       await act(async () => {
         root.render(wrap(<ContentPostListPage />));
       });
       await flush();
+      await openRowMenu();
 
-      expect(container.querySelector('[data-testid="content-archive-action"]')).toBeNull();
+      expect(document.querySelector('[data-testid="content-archive-action"]')).toBeNull();
     });
 
-    it('⭐can_archive=true — 「보관」 버튼 클릭 시 POST .../archive를 호출하고, 기본 목록(보관됨 숨김)에서 그 행이 즉시 사라진다', async () => {
+    it('⭐can_archive=true — ⋯ 메뉴의 「보관」 클릭 시 POST .../archive를 호출하고, 기본 목록(보관됨 숨김)에서 그 행이 즉시 사라진다', async () => {
       const { state, calls } = stubFetchStateful([{ ...DRAFT_A, can_archive: true, is_deleted: false }]);
       await act(async () => {
         root.render(wrap(<ContentPostListPage />));
       });
       await flush();
+      await openRowMenu();
 
-      expect(container.textContent).toContain(koMessages.content.archiveAction);
-      const button = container.querySelector('[data-testid="content-archive-action"]') as HTMLButtonElement;
+      expect(document.body.textContent).toContain(koMessages.content.archiveAction);
+      const button = document.querySelector('[data-testid="content-archive-action"]') as HTMLElement;
       await act(async () => {
         button.click();
       });
@@ -356,7 +488,7 @@ describe('ContentPostListPage (story #3368)', () => {
       expect(container.textContent).toContain(koMessages.content.emptyTitle);
     });
 
-    it('⭐「보관됨 보기」 토글 — include_deleted=true로 재조회해 보관된 행이 「보관됨」 배지·「보관 해제」 버튼과 함께 보인다', async () => {
+    it('⭐「보관됨 보기」 토글 — include_deleted=true로 재조회해 보관된 행이 「보관됨」 배지·⋯ 메뉴에 「보관 해제」와 함께 보인다', async () => {
       stubFetchStateful([{ ...DRAFT_A, can_archive: true, is_deleted: true }]);
       await act(async () => {
         root.render(wrap(<ContentPostListPage />));
@@ -377,11 +509,12 @@ describe('ContentPostListPage (story #3368)', () => {
       expect(container.querySelector('[data-testid="content-archived-badge"]')?.textContent).toBe(
         koMessages.content.contentStatusArchived,
       );
-      const restoreButton = container.querySelector('[data-testid="content-archive-action"]');
+      await openRowMenu();
+      const restoreButton = document.querySelector('[data-testid="content-archive-action"]');
       expect(restoreButton?.textContent).toBe(koMessages.content.unarchiveAction);
     });
 
-    it('⭐「보관됨 보기」에서 「보관 해제」 클릭 — POST .../restore 호출 후에도 그 행은 목록에 남고(include_deleted=true는 "포함"이지 "전용"이 아니다) 배지·버튼만 뒤집힌다', async () => {
+    it('⭐「보관됨 보기」에서 ⋯ 메뉴의 「보관 해제」 클릭 — POST .../restore 호출 후에도 그 행은 목록에 남고(include_deleted=true는 "포함"이지 "전용"이 아니다) 배지·메뉴 항목만 뒤집힌다', async () => {
       const { state, calls } = stubFetchStateful([{ ...DRAFT_A, can_archive: true, is_deleted: true }]);
       await act(async () => {
         root.render(wrap(<ContentPostListPage />));
@@ -392,8 +525,9 @@ describe('ContentPostListPage (story #3368)', () => {
         toggle.click();
       });
       await flush();
+      await openRowMenu();
 
-      const restoreButton = container.querySelector('[data-testid="content-archive-action"]') as HTMLButtonElement;
+      const restoreButton = document.querySelector('[data-testid="content-archive-action"]') as HTMLElement;
       await act(async () => {
         restoreButton.click();
       });
@@ -403,12 +537,13 @@ describe('ContentPostListPage (story #3368)', () => {
       expect(state.get('d1')?.is_deleted).toBe(false);
       expect(container.querySelector('[data-testid="content-list-row"]')).not.toBeNull();
       expect(container.querySelector('[data-testid="content-archived-badge"]')).toBeNull();
-      expect(container.querySelector('[data-testid="content-archive-action"]')?.textContent).toBe(
+      await openRowMenu();
+      expect(document.querySelector('[data-testid="content-archive-action"]')?.textContent).toBe(
         koMessages.content.archiveAction,
       );
     });
 
-    it('⭐「보관됨 보기」 뷰에서 아직 안 보관된 행을 「보관」 클릭 — 행은 그대로 남고 배지·버튼이 「보관됨」/「보관 해제」로 뒤집힌다(include_deleted=true는 "포함", "전용" 아님 — 뮤테이션 표적)', async () => {
+    it('⭐「보관됨 보기」 뷰에서 아직 안 보관된 행을 ⋯ 메뉴에서 「보관」 클릭 — 행은 그대로 남고 배지·메뉴 항목이 「보관됨」/「보관 해제」로 뒤집힌다(include_deleted=true는 "포함", "전용" 아님 — 뮤테이션 표적)', async () => {
       const { state, calls } = stubFetchStateful([{ ...DRAFT_A, can_archive: true, is_deleted: false }]);
       await act(async () => {
         root.render(wrap(<ContentPostListPage />));
@@ -419,12 +554,13 @@ describe('ContentPostListPage (story #3368)', () => {
         toggle.click();
       });
       await flush();
-      // 토글 전환 직후엔 미보관 행이라 「보관」 버튼.
-      expect(container.querySelector('[data-testid="content-archive-action"]')?.textContent).toBe(
+      await openRowMenu();
+      // 토글 전환 직후엔 미보관 행이라 「보관」 항목.
+      expect(document.querySelector('[data-testid="content-archive-action"]')?.textContent).toBe(
         koMessages.content.archiveAction,
       );
 
-      const archiveButton = container.querySelector('[data-testid="content-archive-action"]') as HTMLButtonElement;
+      const archiveButton = document.querySelector('[data-testid="content-archive-action"]') as HTMLElement;
       await act(async () => {
         archiveButton.click();
       });
@@ -436,20 +572,22 @@ describe('ContentPostListPage (story #3368)', () => {
       expect(container.querySelector('[data-testid="content-archived-badge"]')?.textContent).toBe(
         koMessages.content.contentStatusArchived,
       );
-      expect(container.querySelector('[data-testid="content-archive-action"]')?.textContent).toBe(
+      await openRowMenu();
+      expect(document.querySelector('[data-testid="content-archive-action"]')?.textContent).toBe(
         koMessages.content.unarchiveAction,
       );
     });
 
-    it('⭐기본 뷰(보관됨 숨김)에서 「보관」 클릭 직후 로컬 낙관 갱신으로 행이 즉시 사라진다(재요청 없이)', async () => {
+    it('⭐기본 뷰(보관됨 숨김)에서 ⋯ 메뉴의 「보관」 클릭 직후 로컬 낙관 갱신으로 행이 즉시 사라진다(재요청 없이)', async () => {
       const { calls } = stubFetchStateful([{ ...DRAFT_A, can_archive: true, is_deleted: false }]);
       await act(async () => {
         root.render(wrap(<ContentPostListPage />));
       });
       await flush();
       const callsAfterInitialLoad = calls.length;
+      await openRowMenu();
 
-      const button = container.querySelector('[data-testid="content-archive-action"]') as HTMLButtonElement;
+      const button = document.querySelector('[data-testid="content-archive-action"]') as HTMLElement;
       await act(async () => {
         button.click();
       });
@@ -466,7 +604,9 @@ describe('ContentPostListPage (story #3368)', () => {
     // 품는 것으로 처방 — 여기서 그 값이 실제로 항목별로 갈리는지 직접 확認한다(가드
     // 자신은 "aria-label 있다/없다"만 보고 값의 «품음 여부»는 안 잰다는 것이 스크립트
     // 자체 ⚠️ 선언 — 이 assertion이 그 사각을 메운다).
-    it('⭐「보관」 버튼의 aria-label이 행 순번을 품어 두 행이 서로 다른 값을 갖는다(§22-18 처방 검증)', async () => {
+    // story #3744 — aria-label은 이제 ⋯ 트리거(data-testid="content-row-actions-trigger")에
+    // 있다(archive-action 자체는 메뉴 항목 텍스트, 접근 이름은 트리거가 갖는다).
+    it('⭐⋯ 메뉴 트리거의 aria-label이 행 순번을 품어 두 행이 서로 다른 값을 갖는다(§22-18 처방 검증)', async () => {
       stubFetch([
         { ...DRAFT_A, draft_id: 'd1', can_archive: true },
         { ...DRAFT_A, draft_id: 'd2', can_archive: true },
@@ -476,9 +616,9 @@ describe('ContentPostListPage (story #3368)', () => {
       });
       await flush();
 
-      const buttons = container.querySelectorAll('[data-testid="content-archive-action"]');
-      expect(buttons).toHaveLength(2);
-      const labels = [...buttons].map((b) => b.getAttribute('aria-label'));
+      const triggers = container.querySelectorAll('[data-testid="content-row-actions-trigger"]');
+      expect(triggers).toHaveLength(2);
+      const labels = [...triggers].map((b) => b.getAttribute('aria-label'));
       expect(labels[0]).not.toBeNull();
       expect(labels[0]).not.toBe(labels[1]);
       expect(labels[0]).toContain('1');
@@ -487,14 +627,15 @@ describe('ContentPostListPage (story #3368)', () => {
 
     // 유나 CHANGES(story #3734, PR#4079 코멘트) — 보관 직후 행이 그냥 사라지면 「삭제」로
     // 읽힌다. 토스트(「보관했습니다」+「보관됨 보기」 액션)로 "어디로 갔는지"를 알린다.
-    it('⭐「보관」 클릭 — 「보관했습니다」 토스트가 뜨고, 그 액션 클릭 시 「보관됨 보기」로 전환된다', async () => {
+    it('⭐⋯ 메뉴의 「보관」 클릭 — 「보관했습니다」 토스트가 뜨고, 그 액션 클릭 시 「보관됨 보기」로 전환된다', async () => {
       stubFetchStateful([{ ...DRAFT_A, can_archive: true, is_deleted: false }]);
       await act(async () => {
         root.render(wrap(<ContentPostListPage />));
       });
       await flush();
+      await openRowMenu();
 
-      const button = container.querySelector('[data-testid="content-archive-action"]') as HTMLButtonElement;
+      const button = document.querySelector('[data-testid="content-archive-action"]') as HTMLElement;
       await act(async () => {
         button.click();
       });
@@ -521,7 +662,7 @@ describe('ContentPostListPage (story #3368)', () => {
       );
     });
 
-    it('⭐「보관 해제」(restore) 클릭 — 토스트가 안 뜬다(되돌리기 자체는 이미 보이는 화면 상태의 반전이라 "어디로 갔는지" 안내가 불필요)', async () => {
+    it('⭐⋯ 메뉴에서 「보관 해제」(restore) 클릭 — 토스트가 안 뜬다(되돌리기 자체는 이미 보이는 화면 상태의 반전이라 "어디로 갔는지" 안내가 불필요)', async () => {
       stubFetchStateful([{ ...DRAFT_A, can_archive: true, is_deleted: true }]);
       await act(async () => {
         root.render(wrap(<ContentPostListPage />));
@@ -532,8 +673,9 @@ describe('ContentPostListPage (story #3368)', () => {
         toggle.click();
       });
       await flush();
+      await openRowMenu();
 
-      const restoreButton = container.querySelector('[data-testid="content-archive-action"]') as HTMLButtonElement;
+      const restoreButton = document.querySelector('[data-testid="content-archive-action"]') as HTMLElement;
       await act(async () => {
         restoreButton.click();
       });
@@ -544,7 +686,7 @@ describe('ContentPostListPage (story #3368)', () => {
 
     // PO 추가(08:12Z) — 「보관됨 보기」가 이미 켜진 화면에서 보관하면 토스트는 뜨되
     // 액션은 없다(그 액션은 "지금 있는 곳으로 가라"가 돼 의미가 없다 — 뮤테이션 표적).
-    it('⭐「보관됨 보기」가 이미 켜진 상태에서 「보관」 클릭 — 토스트는 뜨지만 액션 버튼은 없다(PO 추가 08:12Z)', async () => {
+    it('⭐「보관됨 보기」가 이미 켜진 상태에서 ⋯ 메뉴의 「보관」 클릭 — 토스트는 뜨지만 액션 버튼은 없다(PO 추가 08:12Z)', async () => {
       stubFetchStateful([{ ...DRAFT_A, can_archive: true, is_deleted: false }]);
       await act(async () => {
         root.render(wrap(<ContentPostListPage />));
@@ -555,8 +697,9 @@ describe('ContentPostListPage (story #3368)', () => {
         toggle.click();
       });
       await flush();
+      await openRowMenu();
 
-      const archiveButton = container.querySelector('[data-testid="content-archive-action"]') as HTMLButtonElement;
+      const archiveButton = document.querySelector('[data-testid="content-archive-action"]') as HTMLElement;
       await act(async () => {
         archiveButton.click();
       });
@@ -569,6 +712,105 @@ describe('ContentPostListPage (story #3368)', () => {
         (b) => b.textContent === koMessages.content.showArchivedToggle,
       );
       expect(showArchivedLabelButtons.length).toBe(0);
+    });
+  });
+
+  // story #3744(페드루 CHANGES Ⓐ, 시안 v6) — 상태 뒤 다음 발은 이제 ⋯ 메뉴 뒤에 숨지
+  // 않고 행에 상시 보이는 outline 버튼이다("상태 딱지는 사람을 멈춰 세우고 다음 발은
+  // 움직인다·숨긴 액션은 터치에선 없는 것"). ⋯ 메뉴엔 보관/보관 해제만 남는다.
+  describe('상태 뒤 다음 발(story #3744, Ⓐ 시안 v6 — 행에 상시 노출)', () => {
+    it('⭐승인 대기 행(gate_status=pending) — 「승인 요청 보기」 버튼이 행에 상시 보이고 클릭 시 /inbox?tab=gates로 이동한다', async () => {
+      stubFetch([{ ...DRAFT_A, gate_status: 'pending' }]);
+      await act(async () => { root.render(wrap(<ContentPostListPage />)); });
+      await flush();
+
+      const button = [...container.querySelectorAll('button')].find(
+        (el) => el.textContent === koMessages.content.approvalRequestViewCta,
+      ) as HTMLElement;
+      expect(button).toBeTruthy();
+      await act(async () => { button.click(); });
+      await flush();
+
+      expect(routerPushMock).toHaveBeenCalledWith('/inbox?tab=gates');
+    });
+
+    it('초안 행(gate_status=null) — 「승인 요청 보기」 버튼이 없다', async () => {
+      stubFetch([DRAFT_A]);
+      await act(async () => { root.render(wrap(<ContentPostListPage />)); });
+      await flush();
+
+      const button = [...container.querySelectorAll('button')].find(
+        (el) => el.textContent === koMessages.content.approvalRequestViewCta,
+      );
+      expect(button).toBeUndefined();
+    });
+
+    it('⭐발행됨 행(published_at 있음)+public_url 있음 — 「발행된 글 보기」 버튼이 행에 상시 보인다', async () => {
+      stubFetch([{
+        ...DRAFT_A, gate_status: 'approved', sealed_content_sha256: 'h1',
+        published_at: '2026-09-09T00:00:00Z', public_url: 'https://sprintable.ai/ko/blog/2ho-blog',
+      }]);
+      await act(async () => { root.render(wrap(<ContentPostListPage />)); });
+      await flush();
+
+      const button = [...container.querySelectorAll('button')].find(
+        (el) => el.textContent === koMessages.content.publishViewLink,
+      );
+      expect(button).toBeTruthy();
+    });
+
+    // PO 明示(2026-09-09) — public_url이 없으면(미발행 또는 public_site_base_url
+    // 미설정) 「—」가 아니라 버튼 자체를 안 그린다. 뮤테이션 표적 — public_url 가드를
+    // 지우면 이 테스트가 실패해야 한다.
+    it('발행됨 행이라도 public_url이 없으면 「발행된 글 보기」 버튼이 안 뜬다(뮤테이션 표적)', async () => {
+      stubFetch([{
+        ...DRAFT_A, gate_status: 'approved', sealed_content_sha256: 'h1',
+        published_at: '2026-09-09T00:00:00Z', public_url: null,
+      }]);
+      await act(async () => { root.render(wrap(<ContentPostListPage />)); });
+      await flush();
+
+      const button = [...container.querySelectorAll('button')].find(
+        (el) => el.textContent === koMessages.content.publishViewLink,
+      );
+      expect(button).toBeUndefined();
+    });
+
+    // 뮤테이션 표적 — ⋯ 메뉴 안에 같은 라벨의 항목을 남겨 두면(중복) 이 테스트가 잡는다.
+    it('⭐같은 동작을 ⋯ 메뉴에 중복해 두지 않는다 — 승인 대기 행의 ⋯ 메뉴엔 「승인 요청 보기」가 없다', async () => {
+      stubFetch([{ ...DRAFT_A, gate_status: 'pending', can_archive: true }]);
+      await act(async () => { root.render(wrap(<ContentPostListPage />)); });
+      await flush();
+      await openRowMenu();
+
+      const menuItem = [...document.querySelectorAll('[role="menuitem"]')].find(
+        (el) => el.textContent === koMessages.content.approvalRequestViewCta,
+      );
+      expect(menuItem).toBeUndefined();
+      // 보관은 여전히 메뉴 안에 남아 있어야 한다(사라지면 다른 결함).
+      expect(document.querySelector('[data-testid="content-archive-action"]')).not.toBeNull();
+    });
+
+    // §22-18 "유나의 자" — verify-no-new-repeated-row-action-names.ts가 aria-label
+    // «존재»만 보고 값이 실제로 항목별로 갈리는지는 안 잰다(스크립트 자체 ⚠️ 선언). 이
+    // assertion이 그 사각을 메운다(archive-action pin과 동형).
+    it('⭐「승인 요청 보기」 버튼의 aria-label이 행 순번을 품어 두 행이 서로 다른 값을 갖는다(§22-18 처방 검증)', async () => {
+      stubFetch([
+        { ...DRAFT_A, draft_id: 'd1', gate_status: 'pending' },
+        { ...DRAFT_A, draft_id: 'd2', gate_status: 'pending' },
+      ]);
+      await act(async () => { root.render(wrap(<ContentPostListPage />)); });
+      await flush();
+
+      const buttons = [...container.querySelectorAll('button')].filter(
+        (el) => el.textContent === koMessages.content.approvalRequestViewCta,
+      );
+      expect(buttons).toHaveLength(2);
+      const labels = buttons.map((b) => b.getAttribute('aria-label'));
+      expect(labels[0]).not.toBeNull();
+      expect(labels[0]).not.toBe(labels[1]);
+      expect(labels[0]).toContain('1');
+      expect(labels[1]).toContain('2');
     });
   });
 });

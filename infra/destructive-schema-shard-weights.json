@@ -1557,6 +1557,11 @@
       "file": "tests/test_3734_post_archive.py",
       "sec": 20.0,
       "source": "story-3734-post-soft-archive(2026-09-09, 페드루 PO 지적 — 신규 destructive_schema 파일 미등재. 로컬 raw pytest 11건 7.01s 실측 — 단일 배율(story #3383, ~6x)이 아니라 파일 크기가 가까운 세 이웃(test_3394_channel_post_list_be_fields.py 10건·test_3403_channel_post_draft_detail.py 7건·test_3614_channel_post_draft_withdraw.py 11건, 전부 이 파일과 같은 site_posts/channel_posts 도메인+ASGI 앱 기동 축)을 로컬에서 같이 재실측해 등재값 대비 개별 배율(22.0/6.95≈3.17·18.0/5.42≈3.32·15.0/6.94≈2.16, 평균≈2.88)을 구해 그 평균을 적용한 20.2s를 20.0으로 반올림 — 실 CI 샤드 로그로 재확認 필요)"
+    },
+    {
+      "file": "tests/test_3744_list_total_count.py",
+      "sec": 19.6,
+      "source": "story-3744-post-list-redesign(2026-09-09, PO 決 public_url 3건 추가로 재측정 — 신규 destructive_schema 파일, test_3734_post_archive.py와 동일 방법론 재사용) — 로컬 raw pytest 9건 6.79s 실측 × 같은 도메인 이웃 재측정 평균 배율(2.88, test_3734_post_archive.py source 필드 참조) = 19.6s — 실 CI 샤드 로그로 재확認 필요"
     }
   ]
 }
