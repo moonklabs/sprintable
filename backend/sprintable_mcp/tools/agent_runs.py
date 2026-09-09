@@ -21,6 +21,8 @@ class EmitEventInput(SprintableInput):
     result_summary: str | None = None
     status: RunStatus | None = None
     error_message: str | None = None
+    # story #3719 — CreateAgentRun에 last_error_code가 생겨 이제 생성 시점부터 실을 수 있다.
+    last_error_code: str | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
     started_at: str | None = None
@@ -31,6 +33,8 @@ class UpdateRunStatusInput(SprintableInput):
     run_id: str
     status: RunStatus
     error_message: str | None = None
+    # story #3719 — BE UpdateAgentRun엔 이미 있던 필드인데 이 도구가 안 실어 보내던 것을 배선.
+    last_error_code: str | None = None
     result_summary: str | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
@@ -54,7 +58,8 @@ async def emit_event(args: EmitEventInput) -> list[TextContent]:
             "project_id": client.require_project_id(),  # E-MCP-OPT ff6cb90d: try 안에서 호출(가이드 에러 캡처).
         }
         for field in ("model", "story_id", "memo_id", "result_summary", "status",
-                      "error_message", "input_tokens", "output_tokens", "started_at", "finished_at"):
+                      "error_message", "last_error_code", "input_tokens", "output_tokens",
+                      "started_at", "finished_at"):
             val = getattr(args, field)
             if val is not None:
                 body[field] = val
@@ -66,8 +71,8 @@ async def emit_event(args: EmitEventInput) -> list[TextContent]:
 async def update_run_status(args: UpdateRunStatusInput) -> list[TextContent]:
     """에이전트 런 상태 업데이트."""
     body: dict = {"status": args.status}
-    for field in ("error_message", "result_summary", "input_tokens", "output_tokens",
-                  "cost_usd", "started_at", "finished_at"):
+    for field in ("error_message", "last_error_code", "result_summary", "input_tokens",
+                  "output_tokens", "cost_usd", "started_at", "finished_at"):
         val = getattr(args, field)
         if val is not None:
             body[field] = val

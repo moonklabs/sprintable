@@ -23,6 +23,9 @@ class CreateAgentRun(BaseModel):
     # emit_event/update_run_status가 실어 보내도 Pydantic이 조용히 버렸다(extra=ignore 기본값)
     # — dev 전 프로젝트에 「failed + error_message」 실행이 0건이던 근본.
     error_message: str | None = None
+    # story #3719 — UpdateAgentRun엔 last_error_code가 있는데 CreateAgentRun엔 없어 생성
+    # 시점(emit_event 경로)엔 처음부터 채울 수 없었다(3707과 동형 갭, 반대편 스키마).
+    last_error_code: str | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
     cost_usd: float | None = None
