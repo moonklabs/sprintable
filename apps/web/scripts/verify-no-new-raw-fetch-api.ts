@@ -159,7 +159,6 @@ export const GRANDFATHER_BASELINE = new Set<string>([
   'components/chat/chat-view.tsx::/api/user-blocks',
   'components/chat/delivery-contract-modal.tsx::/api/conversations/',
   'components/chat/delivery-contract-modal.tsx::/api/notification-preferences',
-  'components/chat/embed-card.tsx::/api/docs/',
   'components/chat/embed-card.tsx::/api/docs/preview?q=',
   'components/chat/event-block-card.tsx::/api/events/publish',
   'components/chat/new-conversation-modal.tsx::/api/conversations',
@@ -196,7 +195,6 @@ export const GRANDFATHER_BASELINE = new Set<string>([
   'components/hypotheses/story-hypotheses-section.tsx::/api/hypotheses/',
   'components/inbox/approvals-queue.tsx::/api/gates/',
   'components/inbox/approvals-queue.tsx::/api/v1/hitl-requests/',
-  'components/inbox/decisions-waiting.tsx::/api/inbox/',
   'components/integrations/pr-link-section.tsx::/api/integrations/github/links',
   'components/integrations/pr-link-section.tsx::/api/integrations/github/links/',
   'components/kanban/kanban-board.tsx::/api/stories',
@@ -225,7 +223,6 @@ export const GRANDFATHER_BASELINE = new Set<string>([
   'components/settings/my-notification-channel-section.tsx::/api/webhooks/config/',
   'components/settings/my-notification-channel-section.tsx::/api/webhooks/config?id=',
   'components/settings/org-members-section.tsx::/api/org-members/',
-  'components/settings/set-password-section.tsx::/api/auth/set-password',
   'components/settings/standup-deadline-section.tsx::/api/project-settings',
   'components/settings/two-factor-section.tsx::/api/auth/2fa/disable',
   'components/settings/two-factor-section.tsx::/api/auth/2fa/setup',
@@ -257,6 +254,13 @@ export const GRANDFATHER_BASELINE = new Set<string>([
   'services/canvas-spec-pins.ts::/api/visual-artifacts/',
   'services/canvas.ts::/api/visual-artifacts',
   'services/stt-provider.ts::/api/meetings/',
+  // story #4062 후속(2026-09-09, 페드루 PO 決) — 3건 제거: components/chat/embed-card.tsx::
+  // /api/docs/(preview?q= 갈래는 여전히 실재, 그것만 남김)·components/inbox/decisions-
+  // waiting.tsx::/api/inbox/·components/settings/set-password-section.tsx::/api/auth/set-
+  // password. 재스캔에서 셋 다 이미 안 걸림(fetchWithAuth 전환 또는 삭제로 채무 자체가
+  // 없어짐, story #3295 workflow-template-gallery-section.tsx와 동형) — 「경로/모양 키」
+  // 가드가 리팩터를 신규로 오인하는 클래스라 grandfather를 새로 등재하는 우회 대신 목록을
+  // 사실과 맞춘다.
 ]);
 
 function main(): void {

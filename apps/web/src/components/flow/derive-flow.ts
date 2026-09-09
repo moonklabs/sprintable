@@ -1,44 +1,3 @@
-import type { RoadmapEpic } from '@/services/glance';
-
-// story #2224(IA v2.2 §2·§3) — 좌 레인 표시 상한. OverviewZone(overview-zone.tsx)의 `epics.slice(0,6)`
-// 관례와 일관되게 6으로 맞춘다(§7-1 노드 밀도 상한은 아직 미확定 — 이 값은 그 확定 전 임시 방어값).
-export const FLOW_LANE_CAP = 6;
-
-// GET /api/v2/analytics/epics-progress-lane?project_id= 계약(#2672+#2686). `epics`=5분류
-// (막힘·대기·진행·멈춤·그외) — #2672로 이미 착지했으나 오늘까지 FE 미배선이었다(유나 지적
-// 2026-07-30, "퍼센트가 틀린 말을 하고 있다"). `zones`=시간축 3분류(past/now/upcoming) — #2686
-// 급추가, epic-flow-nodes와 동일 정의 재사용. 두 맵 다 "story가 하나라도 있는 에픽"만 키를
-// 갖는다(에픽 없음은 결함이 아니라 사실 — 0-스토리 에픽은 응답에 없는 게 정직한 것).
-export interface EpicLaneCounts {
-  in_progress: number;
-  waiting: number;
-  blocked: number;
-  stalled: number;
-  other: number;
-}
-
-export interface EpicZoneCounts {
-  title: string | null;
-  total: number;
-  done: number;
-  pct: number;
-  past_cnt: number;
-  now_cnt: number;
-  upcoming_cnt: number;
-}
-
-export interface EpicsProgressLaneResponse {
-  epics: Record<string, EpicLaneCounts>;
-  zones: Record<string, EpicZoneCounts>;
-  stall_threshold_hours: number;
-  // story #3126(#2341 AC1 후속, 페드루 판정 2026-08-27) — stall_threshold_hours(168h, story
-  // 하나의 단기 정체 신호)와 「같은 질문 두 값」이 아니다: dormancy=goal 전체의 장기 활동
-  // 분류(fold/은퇴 판정). 위계상 세부가 먼저 시들고 상위가 나중에 은퇴하므로 값이 다른 게
-  // 정직하다 — `derive-next-maker.ts`의 옛 하드코딩 30일(THIRTY_DAYS_MS)을 이 값으로 대체한다.
-  dormancy_threshold_hours: number;
-  stories_without_epic: number;
-}
-
 export interface FlowLaneRow {
   id: string;
   title: string;
@@ -57,34 +16,11 @@ export interface FlowLaneRow {
   hasLaneData: boolean;
 }
 
-/** 로드맵 에픽 + epics-progress-lane 응답 → 좌 레인 행. laneData가 없으면(아직 fetch 전/실패)
- * 모든 분류 칸이 0·hasLaneData=false로 정직하게 빈다 — done/total/completionPct는 항상
- * epics-progress-lane의 zones가 있으면 그것을 우선한다(#2686이 title까지 한 곳에 실어 오는
- * 소스라 roadmap과 "두 벌 서지" 않는다, PO 판정 2026-07-30). */
-export function deriveFlowLaneRows(
-  roadmap: RoadmapEpic[],
-  laneData: EpicsProgressLaneResponse | null,
-): FlowLaneRow[] {
-  return roadmap.slice(0, FLOW_LANE_CAP).map((e) => {
-    const lane = laneData?.epics[e.id];
-    const zone = laneData?.zones[e.id];
-    return {
-      id: e.id,
-      title: e.title,
-      done: zone?.done ?? e.done,
-      total: zone?.total ?? e.total,
-      completionPct: zone?.pct ?? e.completionPct,
-      inProgress: lane?.in_progress ?? 0,
-      waiting: lane?.waiting ?? 0,
-      blocked: lane?.blocked ?? 0,
-      stalled: lane?.stalled ?? 0,
-      pastCnt: zone?.past_cnt ?? 0,
-      nowCnt: zone?.now_cnt ?? 0,
-      upcomingCnt: zone?.upcoming_cnt ?? 0,
-      hasLaneData: lane !== undefined,
-    };
-  });
-}
+// story #4062 후속(2026-09-09, 페드루 PO 決) — deriveFlowLaneRows·FLOW_LANE_CAP·
+// EpicLaneCounts·EpicZoneCounts·EpicsProgressLaneResponse를 여기서 걷어냈다. 유일
+// 소비처(FlowLane, flow-lane.tsx)가 #3710에서 삭제됐다 — 방금 소비처 0이 된 것을 남기면
+// "살아 있는 추상"이 된다. FlowLaneRow는 flow-canvas.tsx(별도 은퇴 스윕 #3715 대상)가
+// 여전히 타입으로 참조해 남긴다.
 
 // L3(시간축 캔버스) 재작업은 별도 PR — 유나 치수(L3-1~L3-6, 절대 px 좌표+110px 그리드) 전량
 // 수신 후 착수한다(PO 지시 2026-07-30, "절반만 보고 짓지 마시는"). 이 PR은 L2(좌 레인 플래그바)
