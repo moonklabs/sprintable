@@ -8,10 +8,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
+from app.models.agent_run_tool_call import AgentRunToolCall
 from app.models.project import Project
 from app.models.team import TeamMember
 from app.repositories.agent_run import AgentRunRepository
 from app.schemas.agent_run import AgentRunResponse, CreateAgentRun, UpdateAgentRun
+from app.schemas.agent_run_tool_call import AgentRunToolCallResponse
 from app.services.agent_run_lifecycle import AGENT_RUN_TIMEOUT_HOURS
 
 router = APIRouter(prefix="/api/v2/agent-runs", tags=["agent-runs", "Work"])
@@ -142,6 +144,43 @@ async def get_agent_run(
         raise HTTPException(status_code=404, detail="Agent run not found")
     name_map = await _agent_name_map(session, {run.agent_id})
     return AgentRunResponse.model_validate(run).model_copy(update={"agent_name": name_map.get(run.agent_id)})
+
+
+@router.get("/{id}/tool-calls", response_model=list[AgentRunToolCallResponse])
+async def list_agent_run_tool_calls(
+    id: uuid.UUID,
+    limit: int = Query(default=50, ge=1, le=200),
+    cursor: str | None = Query(default=None),
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+    repo: AgentRunRepository = Depends(_get_repo),
+) -> list[AgentRunToolCallResponse]:
+    """story #3722(Trust·BE) — AgentRunResponse엔 안 싣는다(크기·조회 축 분리, PO 確定).
+    같은 인가축(get_agent_run과 동일 — org 검증 후 has_project_access, 없거나 타org·
+    무접근권은 404). 최신순(created_at DESC) — cursor는 이전 페이지 마지막 행의
+    created_at(ISO 8601), list_agent_runs의 커서 관례와 동형."""
+    from app.services.project_auth import has_project_access
+
+    run = await repo.get(id)
+    if run is None or run.org_id != org_id:
+        raise HTTPException(status_code=404, detail="Agent run not found")
+    if not await has_project_access(session, uuid.UUID(auth.user_id), run.project_id, org_id):
+        raise HTTPException(status_code=404, detail="Agent run not found")
+
+    cursor_dt: datetime | None = None
+    if cursor:
+        try:
+            cursor_dt = datetime.fromisoformat(cursor)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid cursor (expected ISO 8601 datetime)")
+
+    q = select(AgentRunToolCall).where(AgentRunToolCall.run_id == id)
+    if cursor_dt is not None:
+        q = q.where(AgentRunToolCall.created_at < cursor_dt)
+    q = q.order_by(AgentRunToolCall.created_at.desc()).limit(limit)
+    rows = list((await session.execute(q)).scalars().all())
+    return [AgentRunToolCallResponse.model_validate(r) for r in rows]
 
 
 async def _agent_name_map(session: AsyncSession, agent_ids: set[uuid.UUID]) -> dict[uuid.UUID, str]:

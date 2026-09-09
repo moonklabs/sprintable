@@ -1352,6 +1352,14 @@ async def publication_commands_tick(
         except Exception as exc:
             logger.exception("unhandled-error-events sweep tick error: %s", exc)
             counts["unhandled_error_events_swept"] = {"error": "unhandled"}
+        # story #3722(2026-09-09) — agent_run_tool_calls 30일 보존 정리. 위 축들과 같은
+        # 피기백 사상(새 Cloud Scheduler 잡 0) — 독립 try.
+        try:
+            from app.services.tool_call_recording import sweep_old_tool_calls
+            counts["agent_run_tool_calls_swept"] = await sweep_old_tool_calls(session)
+        except Exception as exc:
+            logger.exception("agent-run-tool-calls sweep tick error: %s", exc)
+            counts["agent_run_tool_calls_swept"] = {"error": "unhandled"}
         return _ok(counts)
     except Exception as exc:
         logger.exception("publication-commands cron error: %s", exc)

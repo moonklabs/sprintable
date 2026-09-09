@@ -410,6 +410,13 @@ from app.services.au_metering import AUMeteringMiddleware  # noqa: E402
 
 app.add_middleware(AUMeteringMiddleware)
 
+# story #3722(Trust·BE) — 에이전트 인증 API 요청 1건 = agent_run_tool_calls 1행(서버
+# 관측 기록). AUMeteringMiddleware와 같은 SSOT(request.state.au_actor/au_org_id/
+# au_user_id)를 재사용 — 새 에이전트 판별 로직 0. fail-open(기록 실패가 요청에 영향 0).
+from app.services.tool_call_recording import ToolCallRecordingMiddleware  # noqa: E402
+
+app.add_middleware(ToolCallRecordingMiddleware)
+
 app.include_router(auth.router)
 app.include_router(health.router)
 app.include_router(activity_logs.router)

@@ -4,6 +4,7 @@ from app.models.agent_gateway import AgentEventCursor, AgentGatewaySession
 from app.models.agent_deployment import AgentAuditLog, AgentDeployment, AgentPersona
 from app.models.agent_routing_rule import AgentRoutingRule
 from app.models.agent_run import AgentRun
+from app.models.agent_run_tool_call import AgentRunToolCall
 from app.models.agent_session import AgentSession
 from app.models.auth_identity import AuthIdentity, AuthMigration, AuthMigrationEvent
 from app.models.auth_native_bootstrap import AuthNativeBootstrapCode
