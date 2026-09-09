@@ -194,6 +194,28 @@ async def test_recording_exception_never_breaks_the_response(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_deeply_nested_json_body_never_500s_the_original_request(monkeypatch):
+    """카디르 QA①(2026-09-09) — depth 32000(≈64000 bytes, 64KB 상한 아래)짜리 중첩
+    배열은 CPython C 가속 스캐너를 쓴 `json.loads()`도 RecursionError를 던진다(재현
+    확認). 이전 except는 ValueError/UnicodeDecodeError만 잡아 이 예외가 call_next
+    前 보호막 밖으로 새 원 요청 500이 됐다 — 이 스토리 자신의 "기록 실패는 원 요청을
+    안 막는다" 규율 위반. 지금은 200 그대로·기록은 input_summary 없이(body=None) 붙는다."""
+    client, recorded = _build_app(monkeypatch, au_actor="agent")
+    nested_json = ("[" * 32000 + "]" * 32000).encode("utf-8")
+    assert len(nested_json) < 64 * 1024
+    async with client:
+        resp = await client.post(
+            "/api/v2/stories/s-1/status", content=nested_json,
+            headers={"content-type": "application/json"},
+        )
+        await _drain_background_tasks()
+    assert resp.status_code == 200
+    assert len(recorded) == 1
+    summary = recorded[0]["input_summary"]
+    assert not summary or "body" not in summary
+
+
+@pytest.mark.anyio
 async def test_story_id_extracted_from_path_param_and_passed_to_attribution(monkeypatch):
     client, recorded = _build_app(monkeypatch, au_actor="agent")
     async with client:

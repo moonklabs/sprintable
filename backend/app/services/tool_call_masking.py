@@ -15,6 +15,13 @@ _DENYLIST_SUBSTRINGS = ("token", "key", "secret", "password", "authorization", "
 _VALUE_MAX_LEN = 120
 _SUMMARY_MAX_BYTES = 2048
 _REDACTED = "[REDACTED]"
+# 카디르 QA②(2026-09-09) — list→list→dict처럼 리스트 원소 안에서 다시 리스트가
+# 나오면 옛 구현(리스트 원소가 dict인지만 봄)은 그 안쪽을 그대로 통과시켜 비밀값이
+# 평문으로 DB에 남았다. 임의 깊이 재귀로 고치되, 그 재귀 자체가 이 스토리가 방금
+# 고친 것과 같은 클래스(RecursionError, `_parse_json_body`)를 마스킹 함수 자신
+# 안에서 되풀이하지 않도록 깊이 상한을 둔다 — 넘으면 그 아래는 통째 truncated.
+_MAX_DEPTH = 20
+_TRUNCATED = "[truncated]"
 
 
 def _is_denylisted_key(key: str) -> bool:
@@ -22,24 +29,28 @@ def _is_denylisted_key(key: str) -> bool:
     return any(sub in lowered for sub in _DENYLIST_SUBSTRINGS)
 
 
-def _mask_value(key: str, value: Any) -> Any:
-    if _is_denylisted_key(key):
-        return _REDACTED
+def _mask_recursive(value: Any, depth: int) -> Any:
+    if depth > _MAX_DEPTH:
+        return _TRUNCATED
     if isinstance(value, str):
         return value if len(value) <= _VALUE_MAX_LEN else value[:_VALUE_MAX_LEN] + "…"
     if isinstance(value, dict):
-        return mask_mapping(value)
-    if isinstance(value, list):
-        # story #3722 — 리스트는 top-level 키 마스킹 규칙이 안 미친다(키가 없다). 원소가
-        # dict면 재귀 마스킹, 아니면(문자열/숫자 등) 그대로 — 리스트 자체를 통째로
-        # [REDACTED]하지 않는다(입력 형태를 과하게 지우면 디버깅 가치가 없어진다).
-        return [mask_mapping(v) if isinstance(v, dict) else v for v in value]
+        return {
+            k: (_REDACTED if _is_denylisted_key(k) else _mask_recursive(v, depth + 1))
+            for k, v in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        # story #3722 — 리스트/튜플 원소는 키가 없다(denylist 판정 대상이 아니다).
+        # dict·list·tuple 어느 형태든 depth+1로 계속 내려간다(카디르 QA② 처방 —
+        # "지정 경로만"이 아니라 형태 클래스 전체를 잡는다).
+        return [_mask_recursive(v, depth + 1) for v in value]
     return value
 
 
 def mask_mapping(data: dict[str, Any]) -> dict[str, Any]:
-    """dict 하나를 얕게(재귀 포함) 마스킹 — 최상위·중첩 dict 키 전부 denylist 대조."""
-    return {k: _mask_value(k, v) for k, v in data.items()}
+    """dict 하나를 임의 깊이로 마스킹 — 최상위·중첩 dict 키 전부 denylist 대조,
+    list/tuple 안에 몇 겹이 있든 재귀한다(깊이 상한은 `_MAX_DEPTH` 참고)."""
+    return _mask_recursive(data, depth=0)
 
 
 def build_input_summary(

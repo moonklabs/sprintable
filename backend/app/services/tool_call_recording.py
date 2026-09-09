@@ -40,6 +40,13 @@ _MAX_BODY_BYTES = 64 * 1024  # 마스킹 前 원시 바디를 파싱 시도할 �
 
 
 async def _parse_json_body(request: Request) -> dict | None:
+    """카디르 QA①(2026-09-09) — 깊이 중첩된 JSON 배열(64KB 이하도 가능, 예: depth
+    32000 ≈ 64000 bytes)은 CPython C 가속 스캐너를 써도 `json.loads()`가 Python
+    재귀 한계를 넘겨 `RecursionError`를 던진다 — `ValueError`/`UnicodeDecodeError`
+    밖의 클래스라 예전 except가 못 잡았고, 이 함수를 부르는 자리(call_next 前)가
+    미들웨어 자신의 try/except 밖이라 원 요청 500으로 그대로 새 나갔다("기록 실패는
+    원 요청을 안 막는다"는 이 스토리 자신의 규율 위반). 예외 종류를 가리지 않는다 —
+    파싱은 기록 축 부가 작업일 뿐, 어떤 형태로 실패해도 None 폴백이 유일하게 맞는 답."""
     try:
         raw = await request.body()
     except Exception:
@@ -48,7 +55,7 @@ async def _parse_json_body(request: Request) -> dict | None:
         return None
     try:
         parsed = json.loads(raw)
-    except (ValueError, UnicodeDecodeError):
+    except Exception:
         return None
     return parsed if isinstance(parsed, dict) else None
 
@@ -117,7 +124,17 @@ class ToolCallRecordingMiddleware(BaseHTTPMiddleware):
         if request.url.path in STREAMING_PATHS:
             return await call_next(request)
 
-        body = await _parse_json_body(request) if request.method in {"POST", "PUT", "PATCH"} else None
+        # 카디르 QA①(2026-09-09) — call_next() 前 전부(지금은 바디 파싱뿐)를 감싼다.
+        # _parse_json_body 자체가 이미 모든 예외를 삼키지만, 이 자리가 이 미들웨어
+        # 자신의 유일한 call_next-前 코드라 다시 한번 fail-open으로 못박는다 — 원 요청은
+        # 이 기록 축의 어떤 실패에도 절대 500으로 새면 안 된다.
+        body: dict | None = None
+        try:
+            if request.method in {"POST", "PUT", "PATCH"}:
+                body = await _parse_json_body(request)
+        except Exception:
+            logger.error("tool-call recording body parse failed path=%s method=%s",
+                         request.url.path, request.method, exc_info=True)
 
         response = await call_next(request)
 
