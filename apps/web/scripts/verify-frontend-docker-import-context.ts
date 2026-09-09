@@ -10,15 +10,18 @@
  *   ㉡런타임 동적 경로(`import(변수)`·`fs.readFileSync(join(...))`) — 정적으로 못 푼다.
  *   ㉢builder 스테이지 밖(deps·runner)의 COPY — 다단계 구조가 바뀌면 STAGE도 같이 고칠 것.
  *   ㉣`.dockerignore` — COPY 대상이라도 무시 패턴에 걸리면 실제로는 안 실린다(후속 축).
- *   ㉤주석 속 import 문자열 — 정규식이 주석을 안 벗긴다(안전한 쪽 과탐).
- *     ⭐이 스토리가 i18n-key-parser.js를 packages/로 옮기면 그때 stripComments()를 여기서
- *     import 해 붙인다 — 지금 붙이면 «이 가드가 잡으려는 바로 그 위반»을 자기가 저지른다.
+ *   ㉤주석 속 import 문자열 — 커밋③(story #3731)에서 닫았다: 공유 파서
+ *     (packages/scripts/i18n-key-parser.js, 커밋②로 이관 완료)의 stripComments()를
+ *     스캔 前에 적용한다. 커밋①에서 바로 안 붙인 이유 — 이관 前엔 그 파서가 아직
+ *     레포 루트 scripts/에 있어, 여기서 import하면 이 가드 자신이 자기가 막으려는
+ *     «Docker 빌드 컨텍스트 밖 참조»를 저지르는 부트스트랩 역설이었다.
  *
  * 쓰기: tsx apps/web/scripts/verify-frontend-docker-import-context.ts
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { stripComments } from '../../../packages/scripts/i18n-key-parser.js';
 
 const APPS_WEB = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const REPO_ROOT = path.resolve(APPS_WEB, '../..');
@@ -102,7 +105,7 @@ export function scanRepository(): { violations: EscapingImport[]; scanned: numbe
   const violations: EscapingImport[] = [];
   for (const full of files) {
     const rel = path.relative(REPO_ROOT, full);
-    const source = readFileSync(full, 'utf8');
+    const source = stripComments(readFileSync(full, 'utf8')) as string; // AC㉤ — 주석 속 import 문자열 제외
     for (const spec of parseRelativeSpecifiers(source)) {
       if (!spec.startsWith('..')) continue; // 아래로만 내려가면 절대 못 벗어난다
       const resolved = path.relative(REPO_ROOT, path.resolve(path.dirname(full), spec));

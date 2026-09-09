@@ -7,7 +7,9 @@
 //     COPY --from=deps /app/packages ./packages가 빠져 packages/가 허용 밖(오탐)이 된다.
 //   ② dst를 그대로 접두로 쓰면 안 된다 — `COPY package.json ./`의 dst가 이미지 루트(/app)라
 //     레포 전체가 허용으로 열려 실 위반이 조용히 통과한다(가드가 아무것도 안 잡는 최악 형).
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
+import { writeFileSync, unlinkSync, existsSync } from 'node:fs';
+import path from 'node:path';
 import {
   parseCopiedPrefixes,
   parseRelativeSpecifiers,
@@ -120,5 +122,45 @@ describe('scanRepository — 실 저장소 스캔(현재 develop 기준)', () =>
     const { violations, scanned } = scanRepository();
     expect(scanned).toBeGreaterThan(1000); // 유나 실측 1,233개 규모 — 큰 폭 감소는 walk 로직 회귀 신호
     expect(violations).toEqual([]);
+  });
+});
+
+// AC㉤(커밋③) — 주석 속 import 문자열은 stripComments()로 제외된다. 이 자체는 scanRepository
+// 내부 파일 IO를 거치므로 여기선 parseRelativeSpecifiers+stripComments 조합을 직접 재확認한다
+// (파일시스템 픽스처 없이 순수 함수 레벨에서 mutation-kill 가능하게).
+describe('AC㉤ — 주석 속 import 문자열은 위반으로 안 잡힌다(story #3731 커밋③)', () => {
+  it('줄 주석 안의 상대 import 문자열은 파스 대상에서 빠진다', async () => {
+    const { stripComments } = await import('../../../packages/scripts/i18n-key-parser.js');
+    const source = "// import { x } from '../../../scripts/dead-example.js';\nimport { y } from '../lib/real.js';";
+    const specs = parseRelativeSpecifiers(stripComments(source) as string);
+    expect(specs).toEqual(['../lib/real.js']);
+  });
+
+  it('블록 주석 안의 상대 import 문자열도 빠진다', async () => {
+    const { stripComments } = await import('../../../packages/scripts/i18n-key-parser.js');
+    const source = "/* import { x } from '../../../scripts/dead-example.js'; */\nimport { y } from '../lib/real.js';";
+    const specs = parseRelativeSpecifiers(stripComments(source) as string);
+    expect(specs).toEqual(['../lib/real.js']);
+  });
+
+  // scanRepository() 자신이 실제로 stripComments를 거치는지(단순 유틸 정확성이 아니라
+  // «배선»)까지 재는 통합 테스트 — apps/web 안에 실 스캔 대상이 되는 임시 픽스처를
+  // 만들어(walk()가 스캔하는 실경로) 확認한다. mutation-kill: scanRepository 안
+  // stripComments 호출을 지우면 이 테스트가 RED로 걸린다(별도로 확認 완료).
+  describe('scanRepository 통합 — 배선 확認(실 임시 픽스처)', () => {
+    const fixturePath = path.resolve(__dirname, '__ac40-fixture.ts');
+
+    afterEach(() => {
+      if (existsSync(fixturePath)) unlinkSync(fixturePath);
+    });
+
+    it('apps/web 실경로에 주석 속 컨텍스트 밖 import를 심어도 위반으로 안 잡힌다', () => {
+      writeFileSync(
+        fixturePath,
+        "// import { x } from '../../../outside-context-in-a-comment.js';\nexport const noop = 1;\n",
+      );
+      const { violations } = scanRepository();
+      expect(violations.some((v) => v.file.endsWith('__ac40-fixture.ts'))).toBe(false);
+    });
   });
 });
