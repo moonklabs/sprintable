@@ -94,6 +94,20 @@ describe('AgentRunToolCallsSection', () => {
     expect(heading?.querySelector('span')?.textContent).toBe('7');
   });
 
+  // story #3722(카디르 QA changes, #4089 리뷰 2026-09-09) — 「attribution_reason 화면
+  // 미노출」 계약을 지키는 회귀 단언이 0개였다(뮤테이션: `<span>{row.attribution_reason}</span>`
+  // 넣어도 기존 17개 테스트가 그대로 통과). 값 자체를 뮤테이션 검출용 특이 문자열로 —
+  // 이 문자열이 화면 어디에도 안 서야 한다(입력 요약·에러 접기 등 어떤 자리로도).
+  it('⭐attribution_reason은 화면에 절대 안 그려진다(값을 렌더에 넣으면 이 단언이 RED)', async () => {
+    stubFetch(() => ({
+      ok: true,
+      json: async () => ({ data: [row({ attribution_reason: 'ambiguous_multi_run_same_story' })], meta: { totalCount: 1 } }),
+    }));
+    await mountSection();
+    await flush();
+    expect(container.textContent).not.toContain('ambiguous_multi_run_same_story');
+  });
+
   it('⭐페드루 PO 決(09:13Z) — tool 있으면 1차 라벨=tool, method+path는 부제로 демoted', async () => {
     stubFetch(() => ({
       ok: true,
