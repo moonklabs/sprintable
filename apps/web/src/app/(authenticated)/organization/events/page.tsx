@@ -146,8 +146,11 @@ export default function OrganizationEventsPage() {
         <>
           <SectionCard>
             <SectionCardHeader>
-              <h2 className="text-base font-semibold text-foreground">
-                {t('eventsCustomGroupTitle')} ({customDefs.length})
+              {/* story #3737(E절, 유나 定) — 수를 제목 문자열 안에 넣지 않는다.
+                  제목 고정 + 수는 옆 배지로(구현 (4)류와 같은 형 문제). */}
+              <h2 className="flex items-center gap-2 text-base font-semibold text-foreground">
+                {t('eventsCustomGroupTitle')}
+                <Badge variant="secondary">{customDefs.length}</Badge>
               </h2>
             </SectionCardHeader>
             <SectionCardBody>
@@ -178,8 +181,9 @@ export default function OrganizationEventsPage() {
 
           <SectionCard>
             <SectionCardHeader>
-              <h2 className="text-base font-semibold text-foreground">
-                {t('eventsPresetGroupTitle')} ({presetDefs.length})
+              <h2 className="flex items-center gap-2 text-base font-semibold text-foreground">
+                {t('eventsPresetGroupTitle')}
+                <Badge variant="secondary">{presetDefs.length}</Badge>
               </h2>
               <p className="mt-1 text-xs text-muted-foreground">{t('eventsPresetReadonlyNote')}</p>
             </SectionCardHeader>
