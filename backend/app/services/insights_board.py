@@ -35,12 +35,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.pagination import decode_cursor, decode_metric_cursor, encode_cursor, encode_metric_cursor
+from app.models.channel_post_draft import ChannelPostDraft
 from app.models.channel_publication import ChannelPublication
 from app.models.channel_post_version import ChannelPostVersion
 from app.models.gate import Gate
 from app.models.insight_snapshot import InsightSnapshot
 from app.models.pm import Story
 from app.models.site_post import SitePost
+from app.models.site_post_draft import SitePostDraft
 from app.services.insight_snapshots import (
     NORMALIZED_KEYS,
     assemble_channel_post_asset_evidence,
@@ -71,7 +73,13 @@ def _blog_external_url_expr(base_url: str | None):
     return literal(base_url) + literal("/") + SitePost.lang + literal("/blog/") + SitePost.slug
 
 
-def _build_union(*, org_id: uuid.UUID, channel: str | None, since: datetime):
+def _build_union(*, org_id: uuid.UUID, channel: str | None, since: datetime, include_deleted: bool = False):
+    """story #3734 AC3 후속(PO 라이브 판정 2026-09-09 10:16Z) — 보관(soft-delete)은
+    초안(`SitePostDraft`/`ChannelPostDraft`)의 `deleted_at`만 찍고 발행 기록
+    (`SitePost`/`ChannelPublication`)은 무변(설계대로, #3291 승인 불변화와 정합) —
+    그래서 이 보드가 그 사실을 몰랐다. 두 목록 화면과 같은 낱말 「보관됨 보기」를
+    그대로 재사용(`include_deleted`, 목록 두 곳과 동일 파라미터명) — `True`면
+    보관된 발행분도 포함(집계·감사용), 기본은 제외."""
     site_post_arm = select(
         SitePost.id.label("publication_id"),
         literal("site_post").label("kind"),
@@ -87,9 +95,24 @@ def _build_union(*, org_id: uuid.UUID, channel: str | None, since: datetime):
         # story #3656 — site_post는 소재/훅 개념 자체가 없어 항상 null(channel_post_
         # draft_id와 동일 이유).
         cast(literal(None), PG_UUID(as_uuid=True)).label("version_id"),
+    ).select_from(SitePost)
+    # story #3734 AC3 후속 — SitePost에 draft로의 FK가 없다(site_posts.py 서비스와 동형
+    # 관례). (org_id, work_item_id, slug)가 site_post_drafts의 unique 제약과 정확히
+    # 일치해 그 키로 원 초안을 되찾는다(lang은 그 제약 밖이라 join 키에 안 씀).
+    site_post_arm = site_post_arm.outerjoin(
+        SitePostDraft,
+        (SitePostDraft.org_id == SitePost.org_id)
+        & (SitePostDraft.work_item_id == SitePost.source_story_id)
+        & (SitePostDraft.slug == SitePost.slug),
     ).where(
         SitePost.org_id == org_id, SitePost.unpublished_at.is_(None), SitePost.published_at >= since,
     )
+    if not include_deleted:
+        # 매칭되는 초안이 없으면(SitePostDraft.id IS NULL) 보관 여부를 판정할 수 없으니
+        # 배제하지 않는다("모른다≠보관됨") — 있는데 deleted_at이 찍힌 경우만 뺀다.
+        site_post_arm = site_post_arm.where(
+            (SitePostDraft.id.is_(None)) | (SitePostDraft.deleted_at.is_(None))
+        )
     if channel is not None and channel != "hosted_site":
         site_post_arm = site_post_arm.where(literal(False))  # 이 팔 자체를 비운다(채널 불일치).
 
@@ -117,11 +140,19 @@ def _build_union(*, org_id: uuid.UUID, channel: str | None, since: datetime):
         .join(Gate, Gate.id == ChannelPublication.gate_id)
         .join(Story, Story.id == Gate.work_item_id)
         .outerjoin(ChannelPostVersion, ChannelPostVersion.id == ChannelPublication.version_id)
+        # story #3734 AC3 후속 — ChannelPostVersion.draft_id는 이미 조인돼 있다(위,
+        # channel_post_draft_id 라벨의 출처) — 그 draft_id로 ChannelPostDraft까지
+        # 한 단계 더 조인해 deleted_at을 본다.
+        .outerjoin(ChannelPostDraft, ChannelPostDraft.id == ChannelPostVersion.draft_id)
         .where(
             ChannelPublication.org_id == org_id, ChannelPublication.status == "published",
             ChannelPublication.published_at.is_not(None), ChannelPublication.published_at >= since,
         )
     )
+    if not include_deleted:
+        channel_pub_arm = channel_pub_arm.where(
+            (ChannelPostDraft.id.is_(None)) | (ChannelPostDraft.deleted_at.is_(None))
+        )
     if channel is not None:
         if channel == "hosted_site":
             channel_pub_arm = channel_pub_arm.where(literal(False))
@@ -135,14 +166,14 @@ async def list_insights_board(
     db: AsyncSession, *, org_id: uuid.UUID, window: str = "30d", channel: str | None = None,
     status: str | None = None, sort: str = "published_at", sort_dir: str = "desc",
     cursor: str | None = None, limit: int = 50, now: datetime | None = None,
-    work_item_id: uuid.UUID | None = None,
+    work_item_id: uuid.UUID | None = None, include_deleted: bool = False,
 ) -> dict[str, Any]:
     if window not in _WINDOW_DAYS:
         raise InsightsBoardInvalidWindowError(window)
     now = now or datetime.now(timezone.utc)
     since = now - timedelta(days=_WINDOW_DAYS[window])
 
-    rows_cte = _build_union(org_id=org_id, channel=channel, since=since)
+    rows_cte = _build_union(org_id=org_id, channel=channel, since=since, include_deleted=include_deleted)
     query = select(rows_cte)
 
     # story #bf290f69(Phase2·BE, 페드루 PO 確定 2026-09-08) — story별 성과 대조. 기존

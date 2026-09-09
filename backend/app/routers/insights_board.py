@@ -132,6 +132,12 @@ async def get_insights_board_endpoint(
     limit: int = Query(default=50, ge=1, le=200),
     # story #bf290f69 — story별 성과 대조(blog+social 발행물을 한 story로 좁혀 보기).
     work_item_id: uuid.UUID | None = Query(default=None),
+    include_deleted: bool = Query(
+        default=False,
+        description="story #3734 AC3 후속(PO 라이브 판정 2026-09-09) — true면 원 초안이 "
+        "보관된(deleted_at not null) 발행분도 포함한다. 목록 두 곳(site-posts·"
+        "channel-posts drafts)과 같은 파라미터명·같은 뜻 — 기본은 제외.",
+    ),
     db: AsyncSession = Depends(get_db),
     verified_org_id: uuid.UUID = Depends(get_verified_org_id),
     _auth: AuthContext = Depends(get_current_user),
@@ -143,7 +149,7 @@ async def get_insights_board_endpoint(
         result = await list_insights_board(
             db, org_id=org_id, window=window, channel=channel, status=status,
             sort=sort, sort_dir=sort_dir, cursor=cursor, limit=limit,
-            work_item_id=work_item_id,
+            work_item_id=work_item_id, include_deleted=include_deleted,
         )
     except InsightsBoardInvalidWindowError as exc:
         raise HTTPException(
