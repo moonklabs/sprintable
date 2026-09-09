@@ -59,6 +59,9 @@ interface ChannelPostDraftListItem {
   // source_content_item_id가 없으면(정상값) 그 줄 자체를 안 그린다.
   source_content_item_id?: string | null;
   source_title?: string | null;
+  // story #3734 — content/page.tsx(site-posts)와 동형. 둘 다 키 부재 시 fail-closed.
+  is_deleted?: boolean;
+  can_archive?: boolean;
 }
 
 // content/page.tsx::toGateStatus와 동형.
@@ -79,6 +82,9 @@ export default function ChannelPostListPage() {
   const [drafts, setDrafts] = useState<ChannelPostDraftListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
+  // story #3734 — content/page.tsx(site-posts)와 동형.
+  const [showArchived, setShowArchived] = useState(false);
+  const [archivingId, setArchivingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!orgId) return;
@@ -87,7 +93,8 @@ export default function ChannelPostListPage() {
       setLoading(true);
       setLoadError(false);
       try {
-        const res = await fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts`);
+        const qs = showArchived ? '?include_deleted=true' : '';
+        const res = await fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts${qs}`);
         if (cancelled) return;
         if (res.ok) {
           const json = (await res.json().catch(() => null)) as { data?: ChannelPostDraftListItem[] } | null;
@@ -105,7 +112,31 @@ export default function ChannelPostListPage() {
     return () => {
       cancelled = true;
     };
-  }, [orgId]);
+  }, [orgId, showArchived]);
+
+  // story #3734 — content/page.tsx(site-posts)의 handleArchiveToggle과 동형(그 파일
+  // 주석 참조 — include_deleted=true 뷰는 "포함"이지 "전용"이 아니라 그 안에서는 행을
+  // 안 뺀다, 기본 뷰에서 방금 보관된 경우만 뺀다).
+  const handleArchiveToggle = async (draft: ChannelPostDraftListItem) => {
+    if (!orgId || archivingId) return;
+    const action = draft.is_deleted ? 'restore' : 'archive';
+    setArchivingId(draft.draft_id);
+    try {
+      const res = await fetchWithAuth(
+        `/api/organizations/${orgId}/channel-posts/drafts/${draft.draft_id}/${action}`,
+        { method: 'POST' },
+      );
+      if (!res.ok) return;
+      const json = (await res.json().catch(() => null)) as { data?: { is_deleted: boolean } } | null;
+      const isDeleted = json?.data?.is_deleted ?? !draft.is_deleted;
+      setDrafts((prev) => {
+        if (!showArchived && isDeleted) return prev.filter((d) => d.draft_id !== draft.draft_id);
+        return prev.map((d) => (d.draft_id === draft.draft_id ? { ...d, is_deleted: isDeleted } : d));
+      });
+    } finally {
+      setArchivingId(null);
+    }
+  };
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-6 p-6">
@@ -117,9 +148,20 @@ export default function ChannelPostListPage() {
           <h1 className="text-lg font-semibold text-foreground">{t('channelPostsTitle')}</h1>
           <p className="text-sm text-muted-foreground">{t('channelPostsDescription')}</p>
         </div>
-        <Link href="/content/channel-posts/calendar" className="shrink-0 text-sm text-foreground underline underline-offset-4" data-testid="channel-posts-calendar-link">
-          {t('channelPostsCalendarLinkCta')}
-        </Link>
+        <div className="flex shrink-0 items-center gap-4">
+          {/* story #3734 — content/page.tsx(site-posts)와 동형 토글. */}
+          <button
+            type="button"
+            onClick={() => setShowArchived((v) => !v)}
+            className="text-sm text-foreground underline underline-offset-4"
+            data-testid="channel-posts-show-archived-toggle"
+          >
+            {showArchived ? t('hideArchivedToggle') : t('showArchivedToggle')}
+          </button>
+          <Link href="/content/channel-posts/calendar" className="text-sm text-foreground underline underline-offset-4" data-testid="channel-posts-calendar-link">
+            {t('channelPostsCalendarLinkCta')}
+          </Link>
+        </div>
       </div>
 
       {/* story #3484(블루프린트 §7 Phase 1 실측 열) — 발행 계측 띠. 캘린더·연결
@@ -138,7 +180,12 @@ export default function ChannelPostListPage() {
         </div>
       ) : drafts.length === 0 ? (
         // doc §2 — "새 글" 버튼이 없다: 초안은 에이전트가 API로만 만든다.
-        !loadError ? <EmptyState title={t('channelPostsEmptyTitle')} description={t('channelPostsEmptyDescription')} /> : null
+        !loadError ? (
+          <EmptyState
+            title={showArchived ? t('archivedEmpty') : t('channelPostsEmptyTitle')}
+            description={showArchived ? undefined : t('channelPostsEmptyDescription')}
+          />
+        ) : null
       ) : (
         <div className="overflow-hidden rounded-md border border-border">
           <table className="w-full text-sm">
@@ -156,6 +203,7 @@ export default function ChannelPostListPage() {
                 <th className="px-3 py-2 text-left font-medium">{t('channelPostsColumnOriginAuthor')}</th>
                 <th className="px-3 py-2 text-left font-medium">{t('channelPostsColumnAuthor')}</th>
                 <th className="px-3 py-2 text-left font-medium">{t('channelPostsColumnUpdatedAt')}</th>
+                <th className="px-3 py-2 text-left font-medium">{t('columnActions')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -221,7 +269,18 @@ export default function ChannelPostListPage() {
                     </td>
                     <td className="px-3 py-2.5">
                       <div className="flex flex-wrap items-center gap-1.5">
-                        <StatusChip status={view.status} />
+                        {/* story #3734 — content/page.tsx와 동형: 보관된 행은 「보관됨」
+                            배지 하나만(파생 상태 오버레이는 안 겹친다). */}
+                        {draft.is_deleted ? (
+                          <span
+                            className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-foreground"
+                            data-testid="channel-post-archived-badge"
+                          >
+                            {t('contentStatusArchived')}
+                          </span>
+                        ) : (
+                          <StatusChip status={view.status} />
+                        )}
                         {/* story f30da19a AC5 — T1(목록). §17-1 오버레이(칩은 그대로,
                             얹는다) — sandbox 연결로 만든 초안임을 진짜 초안과 나란히
                             구별한다(승인·발행 게이트 오통과 방지). */}
@@ -240,6 +299,19 @@ export default function ChannelPostListPage() {
                     </td>
                     <td className="px-3 py-2.5 text-muted-foreground">
                       {formatRelativeTime(draft.updated_at, locale, displayTimezone)}
+                    </td>
+                    <td className="px-3 py-2.5">
+                      {draft.can_archive ? (
+                        <button
+                          type="button"
+                          onClick={() => void handleArchiveToggle(draft)}
+                          disabled={archivingId === draft.draft_id}
+                          className="text-sm text-foreground underline underline-offset-4 disabled:opacity-50"
+                          data-testid="channel-post-archive-action"
+                        >
+                          {draft.is_deleted ? t('unarchiveAction') : t('archiveAction')}
+                        </button>
+                      ) : null}
                     </td>
                   </tr>
                 );

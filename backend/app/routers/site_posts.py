@@ -30,6 +30,7 @@ from app.services.site_posts import (
     SitePostApproverRoleMissingError,
     SitePostConnectionNotFoundError,
     SitePostDestinationKindMismatchError,
+    SitePostDraftForbiddenError,
     SitePostDraftNotFoundError,
     SitePostGateAlreadyHeldError,
     SitePostNotPublishedError,
@@ -37,6 +38,7 @@ from app.services.site_posts import (
     SitePostSealMissingError,
     SitePostVersionNotFoundError,
     _lint_site_post_fields,
+    archive_site_post_draft,
     create_site_post_draft_version,
     get_campaign,
     get_site_post_draft,
@@ -49,6 +51,7 @@ from app.services.site_posts import (
     publish_site_post_from_draft,
     request_site_post_external_publish,
     request_site_post_external_unpublish,
+    restore_site_post_draft,
     set_site_post_draft_campaign,
     submit_site_post_draft,
     unpublish_site_post,
@@ -79,6 +82,22 @@ async def _require_owner_or_admin(db: AsyncSession, auth: AuthContext, org_id: u
             },
         )
     return resolved
+
+
+async def _resolve_member_best_effort(
+    db: AsyncSession, auth: AuthContext, org_id: uuid.UUID,
+) -> tuple[uuid.UUID | None, bool]:
+    """story #3734 — 목록·단건 읽기 엔드포인트는 원래(#3365/#3514) human-only 제약이
+    없어 resolve_member()가 400을 던질 수 있는 호출자(예: TeamMember 행은 있지만
+    api_key_id 클레임 없이 들어오는 구형 인증 경로)도 지금까지 200을 받아 왔다.
+    can_archive 판정을 위해 신원이 필요하지만, 그 판정 하나 때문에 기존에 통과하던
+    읽기 요청을 400으로 깨면 안 된다(회귀 0 원칙) — 해소 실패는 "모른다"로 fail-safe
+    (can_archive는 언제나 False, `_to_site_post_draft_list_item`의 기본 동작과 동형)."""
+    try:
+        resolved = await resolve_member(auth, org_id, db)
+    except HTTPException:
+        return None, False
+    return resolved.id, resolved.role in ("owner", "admin")
 
 
 class CreateSitePostDraftVersionRequest(BaseModel):
@@ -133,6 +152,12 @@ class SitePostDraftListItem(BaseModel):
     latest_author_kind: str
     origin_author_kind: str
     updated_at: str
+    # story #3734 — 「보관」 배지·행 액션 판정. channel_posts.py::ChannelPostDraftListItem.
+    # can_withdraw(#3614)와 동형 정책: 서버가 (origin author 또는 org owner/admin)을 계산해
+    # bool 하나로 낸다. is_deleted는 SoftDeleteMixin.deleted_at의 존재 여부(값 자체는 안 싣는다
+    # — FE는 "보관됐는가"만 필요, 언제 보관됐는지는 이 스토리 스코프 밖).
+    is_deleted: bool = False
+    can_archive: bool = False
     # story #3384(Phase0 결함, 유나 원인 진단·페드루 PO 확定 2026-09-03) — 목록 상태 칩이
     # 항상 "초안"으로만 뜨던 결함의 근본 수정. 필드명은 상세 계약(story #3386)과 한 벌 —
     # 게이트 없음/발행 이력 없음이면 각각 None(지어내지 않는다, deriveContentPostStatus의
@@ -151,7 +176,14 @@ class SitePostDraftListItem(BaseModel):
 
 def _to_site_post_draft_list_item(
     draft, latest, origin, gate, post, *, violations: list[dict] | None = None,
+    requester_member_id: uuid.UUID | None = None, is_org_admin: bool = False,
 ) -> SitePostDraftListItem:
+    # story #3734 — can_archive 판정 위치는 channel_posts.py::_to_draft_list_item의
+    # can_withdraw와 동형(서버가 여기 한 곳에서만 판단, FE는 role 비교 안 함).
+    # requester_member_id 생략(목록 caller 다수가 아직 안 넘김) 시 fail-safe False.
+    can_archive = requester_member_id is not None and (
+        is_org_admin or str(origin.author_member_id) == str(requester_member_id)
+    )
     return SitePostDraftListItem(
         draft_id=draft.id, work_item_id=draft.work_item_id, slug=draft.slug,
         lang=latest.lang, title=latest.title, current_version=latest.version,
@@ -163,6 +195,8 @@ def _to_site_post_draft_list_item(
         sealed_content_sha256=gate.sealed_content_sha256 if gate else None,
         published_at=post.published_at.isoformat() if post else None,
         violations=violations,
+        is_deleted=draft.deleted_at is not None,
+        can_archive=can_archive,
     )
 
 
@@ -421,6 +455,11 @@ async def list_site_post_drafts_endpoint(
     org_id: uuid.UUID,
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
+    include_deleted: bool = Query(
+        default=False,
+        description="story #3734 — true면 보관된(deleted_at not null) 초안도 목록에 "
+        "포함한다(「보관됨 보기」 필터). 기본은 제외.",
+    ),
     db: AsyncSession = Depends(get_db),
     verified_org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
@@ -431,8 +470,15 @@ async def list_site_post_drafts_endpoint(
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
 
-    rows = await list_site_post_drafts(db, org_id=org_id, limit=limit, offset=offset)
-    return [_to_site_post_draft_list_item(draft, latest, origin, gate, post) for draft, latest, origin, gate, post in rows]
+    requester_member_id, is_org_admin = await _resolve_member_best_effort(db, auth, org_id)
+    rows = await list_site_post_drafts(db, org_id=org_id, limit=limit, offset=offset, include_deleted=include_deleted)
+    return [
+        _to_site_post_draft_list_item(
+            draft, latest, origin, gate, post,
+            requester_member_id=requester_member_id, is_org_admin=is_org_admin,
+        )
+        for draft, latest, origin, gate, post in rows
+    ]
 
 
 @router.get("/{org_id}/site-posts/drafts/{draft_id}", response_model=SitePostDraftListItem)
@@ -457,16 +503,91 @@ async def get_site_post_draft_detail_endpoint(
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
 
-    rows = await list_site_post_drafts(db, org_id=org_id, draft_id=draft_id, limit=1)
+    # story #3734 — 단건 조회는 보관 여부와 무관하게 항상 보인다(목록 기본 필터가
+    # 특정 URL로 들어온 초안을 조용히 404 취급하면 안 된다, withdraw #3614와 동형 관례).
+    rows = await list_site_post_drafts(db, org_id=org_id, draft_id=draft_id, limit=1, include_deleted=True)
     if not rows:
         raise HTTPException(status_code=404, detail=f"draft를 찾을 수 없습니다: {draft_id}")
     draft, latest, origin, gate, post = rows[0]
 
+    requester_member_id, is_org_admin = await _resolve_member_best_effort(db, auth, org_id)
     rule_row = await get_org_content_rules(db, org_id=org_id)
     violations = _lint_site_post_fields(
         rule_row.rules if rule_row else None, title=latest.title, summary=latest.summary, body_md=latest.body_md,
     )
-    return _to_site_post_draft_list_item(draft, latest, origin, gate, post, violations=violations)
+    return _to_site_post_draft_list_item(
+        draft, latest, origin, gate, post, violations=violations,
+        requester_member_id=requester_member_id, is_org_admin=is_org_admin,
+    )
+
+
+class ArchiveSitePostDraftResponse(BaseModel):
+    draft_id: uuid.UUID
+    is_deleted: bool
+
+
+@router.post(
+    "/{org_id}/site-posts/drafts/{draft_id}/archive", response_model=ArchiveSitePostDraftResponse,
+)
+async def archive_site_post_draft_endpoint(
+    org_id: uuid.UUID,
+    draft_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> ArchiveSitePostDraftResponse:
+    """story #3734 — 「보관」(화면 낱말, 유나 定). channel_posts.py::
+    withdraw_channel_post_draft_endpoint(#3614)와 동형 인가 축(origin author 또는
+    org owner/admin, human 제한 없음)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+
+    resolved = await resolve_member(auth, org_id, db)
+    is_org_admin = resolved.role in ("owner", "admin")
+    try:
+        draft = await archive_site_post_draft(
+            db, org_id=org_id, draft_id=draft_id,
+            requester_member_id=resolved.id, is_org_admin=is_org_admin,
+        )
+    except SitePostDraftNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SitePostDraftForbiddenError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "SITE_POST_ARCHIVE_FORBIDDEN", "message": str(exc)},
+        ) from exc
+    return ArchiveSitePostDraftResponse(draft_id=draft.id, is_deleted=draft.deleted_at is not None)
+
+
+@router.post(
+    "/{org_id}/site-posts/drafts/{draft_id}/restore", response_model=ArchiveSitePostDraftResponse,
+)
+async def restore_site_post_draft_endpoint(
+    org_id: uuid.UUID,
+    draft_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> ArchiveSitePostDraftResponse:
+    """story #3734 — 「보관 해제」. archive_site_post_draft_endpoint의 정확한 역."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+
+    resolved = await resolve_member(auth, org_id, db)
+    is_org_admin = resolved.role in ("owner", "admin")
+    try:
+        draft = await restore_site_post_draft(
+            db, org_id=org_id, draft_id=draft_id,
+            requester_member_id=resolved.id, is_org_admin=is_org_admin,
+        )
+    except SitePostDraftNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SitePostDraftForbiddenError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "SITE_POST_ARCHIVE_FORBIDDEN", "message": str(exc)},
+        ) from exc
+    return ArchiveSitePostDraftResponse(draft_id=draft.id, is_deleted=draft.deleted_at is not None)
 
 
 @router.get(

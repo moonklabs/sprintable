@@ -96,6 +96,17 @@ class SitePostDraftNotFoundError(Exception):
         super().__init__(f"draft를 찾을 수 없습니다: {draft_id}")
 
 
+class SitePostDraftForbiddenError(Exception):
+    """story #3734 — 보관/보관 해제는 이 초안의 origin author(versions[0].
+    author_member_id, 에이전트 포함) 또는 org owner/admin만 가능하다.
+    channel_posts.py::ChannelPostDraftForbiddenError(#3614)와 동형 — 작성자 본인이
+    자기 초안을 치우는 것도 정당하므로 human 제한이 없다. 403."""
+
+    def __init__(self, draft_id: uuid.UUID):
+        self.draft_id = draft_id
+        super().__init__(f"이 초안을 보관할 권한이 없습니다: {draft_id}")
+
+
 class SitePostVersionNotFoundError(Exception):
     def __init__(self, version_id: uuid.UUID | None):
         self.version_id = version_id
@@ -579,6 +590,61 @@ async def set_site_post_draft_campaign(
     return draft
 
 
+async def _require_site_post_draft_author_or_admin(
+    db: AsyncSession, *, draft_id: uuid.UUID, requester_member_id: uuid.UUID, is_org_admin: bool,
+) -> None:
+    """story #3734 — 보관/보관 해제 인가(channel_posts.py::withdraw_channel_post_draft
+    #3614와 동형 축: origin author 또는 org owner/admin, human 제한 없음)."""
+    versions = await list_site_post_draft_versions(db, draft_id=draft_id)
+    if not versions:
+        raise SitePostDraftNotFoundError(draft_id)
+    origin_author_member_id = versions[0].author_member_id
+    if not is_org_admin and str(origin_author_member_id) != str(requester_member_id):
+        raise SitePostDraftForbiddenError(draft_id)
+
+
+async def archive_site_post_draft(
+    db: AsyncSession, *, org_id: uuid.UUID, draft_id: uuid.UUID,
+    requester_member_id: uuid.UUID, is_org_admin: bool,
+) -> SitePostDraft:
+    """story #3734 — 「보관」(화면 낱말, 유나 定). site_post_drafts.deleted_at(SoftDeleteMixin)
+    을 세워 목록 기본 조회에서 뺀다. 삭제가 아니라 소프트 축이라 발행/승인 기록(Gate·
+    SitePost)은 완전히 무변 — #3291(external_publish 항상-수동 게이트) 정합. 발행된
+    draft도 보관 가능(공개 사이트 쪽 영향은 이 스토리 스코프 밖, 적기만). 멱등 — 이미
+    보관된 draft를 다시 호출해도 조용히 성공(인가는 멱등 반환보다 항상 먼저 —
+    channel_posts.py withdraw #3614 CHANGES와 동일 순서 규율)."""
+    draft = await get_site_post_draft(db, org_id=org_id, draft_id=draft_id)
+    if draft is None:
+        raise SitePostDraftNotFoundError(draft_id)
+    await _require_site_post_draft_author_or_admin(
+        db, draft_id=draft_id, requester_member_id=requester_member_id, is_org_admin=is_org_admin,
+    )
+    if draft.deleted_at is None:
+        draft.deleted_at = datetime.now(timezone.utc)
+        await db.commit()
+        await db.refresh(draft)
+    return draft
+
+
+async def restore_site_post_draft(
+    db: AsyncSession, *, org_id: uuid.UUID, draft_id: uuid.UUID,
+    requester_member_id: uuid.UUID, is_org_admin: bool,
+) -> SitePostDraft:
+    """story #3734 — 「보관 해제」. archive_site_post_draft의 정확한 역 — deleted_at을
+    비운다. 인가·멱등 규율 동일."""
+    draft = await get_site_post_draft(db, org_id=org_id, draft_id=draft_id)
+    if draft is None:
+        raise SitePostDraftNotFoundError(draft_id)
+    await _require_site_post_draft_author_or_admin(
+        db, draft_id=draft_id, requester_member_id=requester_member_id, is_org_admin=is_org_admin,
+    )
+    if draft.deleted_at is not None:
+        draft.deleted_at = None
+        await db.commit()
+        await db.refresh(draft)
+    return draft
+
+
 async def list_site_post_draft_versions(db: AsyncSession, *, draft_id: uuid.UUID) -> list[SitePostVersion]:
     stmt = (
         select(SitePostVersion)
@@ -591,6 +657,7 @@ async def list_site_post_draft_versions(db: AsyncSession, *, draft_id: uuid.UUID
 async def list_site_post_drafts(
     db: AsyncSession, *, org_id: uuid.UUID, limit: int = 50, offset: int = 0,
     draft_id: uuid.UUID | None = None,
+    include_deleted: bool = False,
 ) -> list[tuple[SitePostDraft, SitePostVersion, SitePostVersion, Gate | None, SitePost | None]]:
     """story #3365 후속(S4 계약 갭, 페드루 PO 확定 2026-09-03) — 조직 스코프 초안 목록. S4
     화면이 열릴 때 draft_id를 미리 알 방법이 없어 만든 자리 — 항목마다 최신 버전(title·lang·
@@ -611,7 +678,13 @@ async def list_site_post_drafts(
     story #3514(Phase1·BE+FE·소형, 페드루 PO 確定 2026-09-05) — `draft_id`를 주면 페이지
     쿼리에 단건 필터가 추가될 뿐(channel_posts.py::list_channel_post_drafts와 동형) —
     새 단건 조회 경로(`GET .../site-posts/drafts/{draft_id}`)가 이 함수를 그대로
-    재사용해 목록과 단건이 다른 값을 낼 드리프트 표면을 안 만든다."""
+    재사용해 목록과 단건이 다른 값을 낼 드리프트 표면을 안 만든다.
+
+    story #3734 — `include_deleted=False`(기본)면 보관된(`deleted_at` not null) 초안을
+    결과에서 뺀다(channel_posts.py::list_channel_post_drafts의 `include_withdrawn`과
+    동형 관례). **`draft_id` 단건 조회 호출자는 반드시 `include_deleted=True`로 넘길
+    것** — 직접 URL로 들어온 특정 초안을 목록 필터 기본값 때문에 조용히 404 취급하면
+    안 된다."""
     latest_version_ids = (
         select(
             SitePostVersion.draft_id,
@@ -649,6 +722,8 @@ async def list_site_post_drafts(
         .limit(limit)
         .offset(offset)
     )
+    if not include_deleted:
+        stmt = stmt.where(SitePostDraft.deleted_at.is_(None))
     if draft_id is not None:
         stmt = stmt.where(SitePostDraft.id == draft_id)
     page_rows = [(row[0], row[1], row[2]) for row in (await db.execute(stmt)).all()]

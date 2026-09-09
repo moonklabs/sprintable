@@ -75,6 +75,37 @@ function stubFetch(drafts: unknown[] | { status: number }) {
   );
 }
 
+// story #3734 — 실 BE 동작(목록 기본 제외·include_deleted=true 조회·archive/restore
+// POST가 draft.is_deleted를 뒤집음)을 상태 머신으로 흉내내는 stub. 위 stubFetch(정적
+// 목록 하나만)와 달리 토글·액션 클릭의 왕복(요청→상태 변화→재조회)까지 실제로 검증한다.
+function stubFetchStateful(initial: Array<Record<string, unknown> & { draft_id: string; is_deleted?: boolean }>) {
+  const state = new Map(initial.map((d) => [d.draft_id, { ...d }]));
+  const calls: string[] = [];
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      calls.push(`${init?.method ?? 'GET'} ${url}`);
+      const listBase = `/api/organizations/${ORG_ID}/site-posts/drafts`;
+      if (url === listBase || url === `${listBase}?include_deleted=true`) {
+        const includeDeleted = url.includes('include_deleted=true');
+        const rows = [...state.values()].filter((d) => includeDeleted || !d.is_deleted);
+        return { ok: true, status: 200, json: async () => ({ data: rows, error: null, meta: null }) };
+      }
+      const actionMatch = /\/site-posts\/drafts\/([^/]+)\/(archive|restore)$/.exec(url);
+      if (actionMatch && init?.method === 'POST') {
+        const [, draftId, action] = actionMatch;
+        const draft = state.get(draftId);
+        if (!draft) return { ok: false, status: 404, json: async () => ({}) };
+        draft.is_deleted = action === 'archive';
+        return { ok: true, status: 200, json: async () => ({ data: { draft_id: draftId, is_deleted: draft.is_deleted }, error: null, meta: null }) };
+      }
+      throw new Error('unexpected fetch: ' + url);
+    }),
+  );
+  return { state, calls };
+}
+
 const DRAFT_A = {
   draft_id: 'd1', work_item_id: 'w1', slug: '2ho-blog', lang: 'ko', title: '2호 글',
   current_version: 2, latest_author_kind: 'human', updated_at: '2026-09-03T03:52:00+00:00',
@@ -282,5 +313,143 @@ describe('ContentPostListPage (story #3368)', () => {
     const latestCell = container.querySelector('[data-testid="content-latest-author"]');
     expect(originCell?.querySelector('.proof-surface')).not.toBeNull();
     expect(latestCell?.querySelector('.proof-surface')).not.toBeNull();
+  });
+
+  // story #3734 — 「보관」 행 액션·「보관됨 보기」 토글.
+  describe('보관(story #3734)', () => {
+    it('⭐can_archive=false — 「보관」 버튼이 안 보인다(fail-closed, can_withdraw와 동형 정책)', async () => {
+      stubFetch([{ ...DRAFT_A, can_archive: false }]);
+      await act(async () => {
+        root.render(wrap(<ContentPostListPage />));
+      });
+      await flush();
+
+      expect(container.querySelector('[data-testid="content-archive-action"]')).toBeNull();
+    });
+
+    it('⭐can_archive=true — 「보관」 버튼 클릭 시 POST .../archive를 호출하고, 기본 목록(보관됨 숨김)에서 그 행이 즉시 사라진다', async () => {
+      const { state, calls } = stubFetchStateful([{ ...DRAFT_A, can_archive: true, is_deleted: false }]);
+      await act(async () => {
+        root.render(wrap(<ContentPostListPage />));
+      });
+      await flush();
+
+      expect(container.textContent).toContain(koMessages.content.archiveAction);
+      const button = container.querySelector('[data-testid="content-archive-action"]') as HTMLButtonElement;
+      await act(async () => {
+        button.click();
+      });
+      await flush();
+
+      expect(calls).toContain(`POST /api/organizations/${ORG_ID}/site-posts/drafts/d1/archive`);
+      expect(state.get('d1')?.is_deleted).toBe(true);
+      expect(container.querySelector('[data-testid="content-list-row"]')).toBeNull();
+      expect(container.textContent).toContain(koMessages.content.emptyTitle);
+    });
+
+    it('⭐「보관됨 보기」 토글 — include_deleted=true로 재조회해 보관된 행이 「보관됨」 배지·「보관 해제」 버튼과 함께 보인다', async () => {
+      stubFetchStateful([{ ...DRAFT_A, can_archive: true, is_deleted: true }]);
+      await act(async () => {
+        root.render(wrap(<ContentPostListPage />));
+      });
+      await flush();
+
+      // 기본 상태 — 보관된 행 제외이므로 빈 목록.
+      expect(container.textContent).toContain(koMessages.content.emptyTitle);
+
+      const toggle = container.querySelector('[data-testid="content-show-archived-toggle"]') as HTMLButtonElement;
+      expect(toggle.textContent).toBe(koMessages.content.showArchivedToggle);
+      await act(async () => {
+        toggle.click();
+      });
+      await flush();
+
+      expect(toggle.textContent).toBe(koMessages.content.hideArchivedToggle);
+      expect(container.querySelector('[data-testid="content-archived-badge"]')?.textContent).toBe(
+        koMessages.content.contentStatusArchived,
+      );
+      const restoreButton = container.querySelector('[data-testid="content-archive-action"]');
+      expect(restoreButton?.textContent).toBe(koMessages.content.unarchiveAction);
+    });
+
+    it('⭐「보관됨 보기」에서 「보관 해제」 클릭 — POST .../restore 호출 후에도 그 행은 목록에 남고(include_deleted=true는 "포함"이지 "전용"이 아니다) 배지·버튼만 뒤집힌다', async () => {
+      const { state, calls } = stubFetchStateful([{ ...DRAFT_A, can_archive: true, is_deleted: true }]);
+      await act(async () => {
+        root.render(wrap(<ContentPostListPage />));
+      });
+      await flush();
+      const toggle = container.querySelector('[data-testid="content-show-archived-toggle"]') as HTMLButtonElement;
+      await act(async () => {
+        toggle.click();
+      });
+      await flush();
+
+      const restoreButton = container.querySelector('[data-testid="content-archive-action"]') as HTMLButtonElement;
+      await act(async () => {
+        restoreButton.click();
+      });
+      await flush();
+
+      expect(calls).toContain(`POST /api/organizations/${ORG_ID}/site-posts/drafts/d1/restore`);
+      expect(state.get('d1')?.is_deleted).toBe(false);
+      expect(container.querySelector('[data-testid="content-list-row"]')).not.toBeNull();
+      expect(container.querySelector('[data-testid="content-archived-badge"]')).toBeNull();
+      expect(container.querySelector('[data-testid="content-archive-action"]')?.textContent).toBe(
+        koMessages.content.archiveAction,
+      );
+    });
+
+    it('⭐「보관됨 보기」 뷰에서 아직 안 보관된 행을 「보관」 클릭 — 행은 그대로 남고 배지·버튼이 「보관됨」/「보관 해제」로 뒤집힌다(include_deleted=true는 "포함", "전용" 아님 — 뮤테이션 표적)', async () => {
+      const { state, calls } = stubFetchStateful([{ ...DRAFT_A, can_archive: true, is_deleted: false }]);
+      await act(async () => {
+        root.render(wrap(<ContentPostListPage />));
+      });
+      await flush();
+      const toggle = container.querySelector('[data-testid="content-show-archived-toggle"]') as HTMLButtonElement;
+      await act(async () => {
+        toggle.click();
+      });
+      await flush();
+      // 토글 전환 직후엔 미보관 행이라 「보관」 버튼.
+      expect(container.querySelector('[data-testid="content-archive-action"]')?.textContent).toBe(
+        koMessages.content.archiveAction,
+      );
+
+      const archiveButton = container.querySelector('[data-testid="content-archive-action"]') as HTMLButtonElement;
+      await act(async () => {
+        archiveButton.click();
+      });
+      await flush();
+
+      expect(calls).toContain(`POST /api/organizations/${ORG_ID}/site-posts/drafts/d1/archive`);
+      expect(state.get('d1')?.is_deleted).toBe(true);
+      expect(container.querySelector('[data-testid="content-list-row"]')).not.toBeNull();
+      expect(container.querySelector('[data-testid="content-archived-badge"]')?.textContent).toBe(
+        koMessages.content.contentStatusArchived,
+      );
+      expect(container.querySelector('[data-testid="content-archive-action"]')?.textContent).toBe(
+        koMessages.content.unarchiveAction,
+      );
+    });
+
+    it('⭐기본 뷰(보관됨 숨김)에서 「보관」 클릭 직후 로컬 낙관 갱신으로 행이 즉시 사라진다(재요청 없이)', async () => {
+      const { calls } = stubFetchStateful([{ ...DRAFT_A, can_archive: true, is_deleted: false }]);
+      await act(async () => {
+        root.render(wrap(<ContentPostListPage />));
+      });
+      await flush();
+      const callsAfterInitialLoad = calls.length;
+
+      const button = container.querySelector('[data-testid="content-archive-action"]') as HTMLButtonElement;
+      await act(async () => {
+        button.click();
+      });
+      await flush();
+
+      expect(container.querySelector('[data-testid="content-list-row"]')).toBeNull();
+      // 낙관 갱신 — archive POST 하나만 추가되고, 목록 GET이 다시 안 나간다.
+      expect(calls.length).toBe(callsAfterInitialLoad + 1);
+      expect(calls[calls.length - 1]).toBe(`POST /api/organizations/${ORG_ID}/site-posts/drafts/d1/archive`);
+    });
   });
 });

@@ -46,6 +46,11 @@ interface SitePostDraftListItem {
   sealed_content_sha256?: string | null;
   body_sha256: string;
   published_at?: string | null;
+  // story #3734 — 「보관」 배지·행 액션. can_archive는 서버가 (원저자 또는 org owner/
+  // admin) 판정을 전부 마쳐 낸 bool 하나 — FE는 role 비교를 직접 안 한다(can_withdraw와
+  // 동형 정책). 둘 다 키 부재 시 fail-closed(false) — "모른다=버튼 안 보임".
+  is_deleted?: boolean;
+  can_archive?: boolean;
 }
 
 // content/[draftId]/page.tsx::toGateStatus와 동형 — external_publish는 휴먼 승인만
@@ -69,6 +74,9 @@ export default function ContentPostListPage() {
   const [drafts, setDrafts] = useState<SitePostDraftListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
+  // story #3734 — 「보관됨 보기」 토글. 기본 false(목록에서 보관된 초안 기본 제외).
+  const [showArchived, setShowArchived] = useState(false);
+  const [archivingId, setArchivingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!orgId) return;
@@ -77,7 +85,8 @@ export default function ContentPostListPage() {
       setLoading(true);
       setLoadError(false);
       try {
-        const res = await fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts`);
+        const qs = showArchived ? '?include_deleted=true' : '';
+        const res = await fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts${qs}`);
         if (cancelled) return;
         if (res.ok) {
           const json = (await res.json().catch(() => null)) as { data?: SitePostDraftListItem[] } | null;
@@ -95,13 +104,52 @@ export default function ContentPostListPage() {
     return () => {
       cancelled = true;
     };
-  }, [orgId]);
+  }, [orgId, showArchived]);
+
+  // story #3734 — 보관/보관 해제는 확認 없이 즉시 실행(되돌리기가 쉬운 소프트 액션이라
+  // withdraw류 파괴적 액션의 ConfirmDialog 관례를 안 따른다, 유나 定). 성공 시 로컬
+  // 목록에서 낙관적으로 갱신한다 — `include_deleted=true`(showArchived)는 "보관된
+  // 것만"이 아니라 "보관된 것도 포함"이라는 뜻(BE 쿼리 파라미터 이름 그대로)이라, 그
+  // 뷰에서는 보관하든 해제하든 행이 계속 보여야 한다(배지·버튼만 뒤집는다). 행을 아예
+  // 빼는 경우는 오직 하나 — 기본(showArchived=false) 뷰에서 방금 보관해 그 뷰의 필터
+  // 조건(미보관만)을 어긴 경우.
+  const handleArchiveToggle = async (draft: SitePostDraftListItem) => {
+    if (!orgId || archivingId) return;
+    const action = draft.is_deleted ? 'restore' : 'archive';
+    setArchivingId(draft.draft_id);
+    try {
+      const res = await fetchWithAuth(
+        `/api/organizations/${orgId}/site-posts/drafts/${draft.draft_id}/${action}`,
+        { method: 'POST' },
+      );
+      if (!res.ok) return;
+      const json = (await res.json().catch(() => null)) as { data?: { is_deleted: boolean } } | null;
+      const isDeleted = json?.data?.is_deleted ?? !draft.is_deleted;
+      setDrafts((prev) => {
+        if (!showArchived && isDeleted) return prev.filter((d) => d.draft_id !== draft.draft_id);
+        return prev.map((d) => (d.draft_id === draft.draft_id ? { ...d, is_deleted: isDeleted } : d));
+      });
+    } finally {
+      setArchivingId(null);
+    }
+  };
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-6 p-6">
-      <div className="space-y-1">
-        <h1 className="text-lg font-semibold text-foreground">{t('title')}</h1>
-        <p className="text-sm text-muted-foreground">{t('description')}</p>
+      <div className="flex items-center justify-between gap-4">
+        <div className="space-y-1">
+          <h1 className="text-lg font-semibold text-foreground">{t('title')}</h1>
+          <p className="text-sm text-muted-foreground">{t('description')}</p>
+        </div>
+        {/* story #3734 — 「보관됨 보기」 토글(유나 定: 두 상태 문구 다 정함). */}
+        <button
+          type="button"
+          onClick={() => setShowArchived((v) => !v)}
+          className="shrink-0 text-sm text-foreground underline underline-offset-4"
+          data-testid="content-show-archived-toggle"
+        >
+          {showArchived ? t('hideArchivedToggle') : t('showArchivedToggle')}
+        </button>
       </div>
 
       {loadError ? (
@@ -115,7 +163,12 @@ export default function ContentPostListPage() {
           {[1, 2, 3].map((i) => <div key={i} className="h-12 animate-pulse rounded-md bg-muted" />)}
         </div>
       ) : drafts.length === 0 ? (
-        !loadError ? <EmptyState title={t('emptyTitle')} description={t('emptyDescription')} /> : null
+        !loadError ? (
+          <EmptyState
+            title={showArchived ? t('archivedEmpty') : t('emptyTitle')}
+            description={showArchived ? undefined : t('emptyDescription')}
+          />
+        ) : null
       ) : (
         <div className="overflow-hidden rounded-md border border-border">
           <table className="w-full text-sm">
@@ -127,6 +180,7 @@ export default function ContentPostListPage() {
                 <th className="px-3 py-2 text-left font-medium">{t('columnOriginAuthor')}</th>
                 <th className="px-3 py-2 text-left font-medium">{t('columnAuthor')}</th>
                 <th className="px-3 py-2 text-left font-medium">{t('columnUpdatedAt')}</th>
+                <th className="px-3 py-2 text-left font-medium">{t('columnActions')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -159,7 +213,22 @@ export default function ContentPostListPage() {
                         {draft.title}
                       </Link>
                     </td>
-                    <td className="px-3 py-2.5"><StatusChip status={status} /></td>
+                    <td className="px-3 py-2.5">
+                      {/* story #3734 — 보관된 행은 발행/게이트 파생 상태 대신 「보관됨」
+                          배지 하나(유나 §짝확認 — 「보관」 액션이 서면 상태 배지는
+                          「보관됨」이어야 한다). 파생 상태 자체는 무변(재보관 해제 시
+                          그대로 복귀). */}
+                      {draft.is_deleted ? (
+                        <span
+                          className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-foreground"
+                          data-testid="content-archived-badge"
+                        >
+                          {t('contentStatusArchived')}
+                        </span>
+                      ) : (
+                        <StatusChip status={status} />
+                      )}
+                    </td>
                     <td className="px-3 py-2.5 text-muted-foreground">v{draft.current_version}</td>
                     <td className="px-3 py-2.5" data-testid="content-origin-author">
                       <AuthorKindBadge kind={draft.origin_author_kind} />
@@ -169,6 +238,22 @@ export default function ContentPostListPage() {
                     </td>
                     <td className="px-3 py-2.5 text-muted-foreground">
                       {formatRelativeTime(draft.updated_at, locale, displayTimezone)}
+                    </td>
+                    <td className="px-3 py-2.5">
+                      {/* story #3734 — can_archive 하나만 본다(FE는 role 비교 안 함,
+                          can_withdraw와 동형 정책). 확認 없음(유나 定 — 되돌릴 수 있는
+                          소프트 액션). */}
+                      {draft.can_archive ? (
+                        <button
+                          type="button"
+                          onClick={() => void handleArchiveToggle(draft)}
+                          disabled={archivingId === draft.draft_id}
+                          className="text-sm text-foreground underline underline-offset-4 disabled:opacity-50"
+                          data-testid="content-archive-action"
+                        >
+                          {draft.is_deleted ? t('unarchiveAction') : t('archiveAction')}
+                        </button>
+                      ) : null}
                     </td>
                   </tr>
                 );
