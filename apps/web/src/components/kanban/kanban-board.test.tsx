@@ -863,6 +863,31 @@ describe('KanbanBoard — handleStoryClick storyTasks 리셋·취소 가드(stor
     expect(dialog().textContent).not.toContain('A2'); // A page2가 B 목록에 섞이면 안 됨.
     expect(dialog().textContent).not.toContain('Tasks (5)'); // A의 총계(5)가 B 총계(1)를 덮으면 안 됨.
   });
+
+  // story #3709(FE 완전성-정직, 3704 후속) — 응답 前(조회 中)엔 tasks=[]·totalCount=null인데
+  // 로딩 신호가 없으면 StoryDetailPanel이 이걸 "정말 0개"로 오단정했다.
+  it('응답 前(조회 中)엔 "태스크가 없습니다" 대신 "불러오는 중"이 뜬다', async () => {
+    const aResponse = deferredTaskResponse();
+    stubFetchWithTasks(
+      [{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium' }],
+      { s1: () => aResponse.promise },
+    );
+    await mount();
+    await clickStory('S1'); // 응답 아직 안 옴(deferred) — 지금이 "조회 中" 창.
+
+    const dialog = () => container.querySelector('[role="dialog"]') as HTMLElement;
+    expect(dialog().textContent).not.toContain(koMessages.board.noTasks);
+    expect(dialog().textContent).toContain(koMessages.board.loading);
+
+    await act(async () => { // 응답 도착 — 진짜 0건이면 이제야 정당하게 "없습니다".
+      aResponse.resolve(taskOk([], 0));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(dialog().textContent).toContain(koMessages.board.noTasks);
+    expect(dialog().textContent).not.toContain(koMessages.board.loading);
+  });
 });
 
 // story #2104 — BE stories.py:1056(human-only 영구삭제 403)를 FE가 미리 안 보고 에이전트

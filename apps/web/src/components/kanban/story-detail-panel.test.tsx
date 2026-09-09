@@ -999,3 +999,40 @@ describe('StoryDetailPanel — tasksTotalCount(story #3703, 완전성-정직)', 
     expect(container.textContent).toContain('태스크가 없습니다');
   });
 });
+
+// story #3709(FE 완전성-정직, 3704 후속) — 조회 中(응답 前)엔 tasks=[]·tasksTotalCount=null
+// 상태가 tasksLoading 없이는 "정말 0개"와 구별이 안 갔다. flow-node-story-panel.tsx와
+// 같은 낱말(t('loading')="불러오는 중...")로 조회 중임을 그대로 드러낸다.
+describe('StoryDetailPanel — tasksLoading(story #3709, 완전성-정직)', () => {
+  function makeTask(id: string): Task {
+    return { id, title: `task-${id}`, status: 'todo' };
+  }
+
+  it('tasksLoading=true면 tasks=[]·tasksTotalCount=null이어도 "태스크가 없습니다" 대신 "불러오는 중"이 뜬다', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <StoryDetailPanel story={makeStory()} tasks={[]} tasksTotalCount={null} tasksLoading onClose={() => {}} />,
+      ));
+    });
+    expect(container.textContent).not.toContain(koMessages.board.noTasks);
+    expect(container.textContent).toContain(koMessages.board.loading);
+  });
+
+  it('tasksLoading=false(기본값, 미제공)면 기존 동작 그대로 — 회귀 0', async () => {
+    await act(async () => {
+      root.render(wrap(<StoryDetailPanel story={makeStory()} tasks={[]} tasksTotalCount={0} onClose={() => {}} />)); // tasksLoading 미제공
+    });
+    expect(container.textContent).toContain(koMessages.board.noTasks);
+    expect(container.textContent).not.toContain(koMessages.board.loading);
+  });
+
+  it('tasksLoading=true는 실제 태스크가 이미 있어도(예: 낙관적 이전 값 잔존) 우선한다 — 조회 中 신호가 최우선', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <StoryDetailPanel story={makeStory()} tasks={[makeTask('1')]} tasksTotalCount={1} tasksLoading onClose={() => {}} />,
+      ));
+    });
+    expect(container.textContent).toContain(koMessages.board.loading);
+    expect(container.textContent).not.toContain('task-1');
+  });
+});

@@ -88,6 +88,11 @@ interface StoryDetailPanelProps {
    * 진짜 총계를 말해야 「Tasks (20)」이 "총 20개"로 오독되지 않는다. 호출부가 안 넘기면
    * (null/undefined) tasks.length로 자연 폴백 — 하위호환. */
   tasksTotalCount?: number | null;
+  /** story #3709(FE 완전성-정직, 3704 후속) — 조회 중(응답 前)엔 tasks=[]·tasksTotalCount=null이
+   * «정말 0개»(빈 상태)와 구별이 안 갔다 — 호출부가 이 값을 true로 넘기는 동안은 빈 상태
+   * 대신 「불러오는 중」을 그린다. 기본 false — 안 넘기는 호출부는 회귀 0(항상 «조회 끝난
+   * 것»으로 취급, 기존 동작 그대로). */
+  tasksLoading?: boolean;
   nextTasksCursor?: string | null;
   loadingMoreTasks?: boolean;
   onLoadMoreTasks?: () => void;
@@ -348,7 +353,7 @@ export function DescriptionViewer({
   );
 }
 
-export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, nextTasksCursor = null, loadingMoreTasks = false, onLoadMoreTasks, onClose, onStoryUpdate, onDeleteSuccess, memberMap = {}, members = [], storyMap = {}, epicMap = {}, sprintMap = {}, onNavigate, projectId, overlayPosition, getStatusLabel, getEntityTypeLabel }: StoryDetailPanelProps) {
+export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLoading = false, nextTasksCursor = null, loadingMoreTasks = false, onLoadMoreTasks, onClose, onStoryUpdate, onDeleteSuccess, memberMap = {}, members = [], storyMap = {}, epicMap = {}, sprintMap = {}, onNavigate, projectId, overlayPosition, getStatusLabel, getEntityTypeLabel }: StoryDetailPanelProps) {
   const t = useTranslations('board');
   const locale = useLocale();
   const displayTimezone = resolveDisplayTimezone().tz;
@@ -2177,7 +2182,12 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, nextTas
                     시나리오(#4049/#4052 클래스)에서 이 PR이 막으려던 바로 그 오단정이
                     재발했다 — «정말 0개»와 «로드분만 0이고 더 있음»을 tasksTotalCount로
                     가른다. */}
-                {tasks.length === 0 && (tasksTotalCount == null || tasksTotalCount === 0) ? (
+                {tasksLoading ? (
+                  // story #3709(FE 완전성-정직) — 조회 중엔 flow-node-story-panel.tsx와 같은
+                  // 낱말(t('loading')="불러오는 중...")로 «아직 모름»을 그대로 드러낸다 —
+                  // 이 분기가 없으면 아래 tasks.length===0 분기가 «없음»으로 오단정한다.
+                  <p className="text-sm text-muted-foreground">{t('loading')}</p>
+                ) : tasks.length === 0 && (tasksTotalCount == null || tasksTotalCount === 0) ? (
                   <p className="text-sm text-muted-foreground">{t('noTasks')}</p>
                 ) : (
                   <>

@@ -165,6 +165,9 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadingMoreEpics, setLoadingMoreEpics] = useState(false);
   const [loadingMoreStoryTasks, setLoadingMoreStoryTasks] = useState(false);
+  // story #3709(FE 완전성-정직, 3704 후속) — 조회 中(응답 前)엔 tasks=[]·totalCount=null이라
+  // StoryDetailPanel이 "정말 0개"와 구별을 못 했다 — 이 플래그로 「불러오는 중」을 그린다.
+  const [storyTasksLoading, setStoryTasksLoading] = useState(false);
   // story #3704(유나 발견+카디르 비블로커, #4054 재리뷰 中) — handleStoryClick은 이벤트
   // 핸들러라 형제(epic-swimlane-board.tsx/flow-node-story-panel.tsx)처럼 effect cleanup의
   // `cancelled` 클로저를 못 쓴다(재실행을 트리거할 의존성 배열이 없다) — 대신 클릭마다
@@ -547,6 +550,9 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
     setStoryTasks([]);
     setStoryTasksNextCursor(null);
     setStoryTasksTotalCount(null);
+    // story #3709(FE 완전성-정직) — 조회 시작을 패널에 알린다(응답/실패/취소 어느 쪽이든
+    // 아래에서 이 요청 자신이 마지막에 false로 내린다).
+    setStoryTasksLoading(true);
 
     // story #3704 blocker② — 이 함수는 클릭마다 호출되는 이벤트 핸들러라 형제 두 곳처럼
     // effect cleanup의 `cancelled` 클로저를 못 쓴다. 요청 순번을 자기 클로저에 캡처해 두고,
@@ -581,11 +587,13 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
         setStoryTasksNextCursor(null);
         setStoryTasksTotalCount(null);
       }
+      setStoryTasksLoading(false);
     } catch {
       if (storyTasksRequestRef.current !== requestId) return;
       setStoryTasks([]);
       setStoryTasksNextCursor(null);
       setStoryTasksTotalCount(null);
+      setStoryTasksLoading(false);
     }
   }, [searchParams, router]);
 
@@ -1856,6 +1864,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
           story={selectedStory}
           tasks={storyTasks}
           tasksTotalCount={storyTasksTotalCount}
+          tasksLoading={storyTasksLoading}
           memberMap={memberMap}
           members={members}
           getStatusLabel={domainLabels.statusLabel}
