@@ -295,10 +295,15 @@ function EventDefRow({
             <button
               type="button"
               onClick={onToggleExpand}
-              className="truncate font-mono text-sm text-foreground hover:underline"
+              className="truncate text-sm text-foreground hover:underline"
+              data-testid={`event-def-toggle-${def.key}`}
             >
-              {def.key}
+              {def.name || def.key}
             </button>
+            {/* story #3737(D2, 유나 定) — 정의의 «사람 이름»(표시명)이 눌리는 컨트롤의
+                라벨이고, 코드 키는 그 아래 작은 글씨 부제로만. name이 비어 있으면(백필
+                안 된 org 커스텀 정의) key로 폴백 — 지어내지 않는다, 정직한 최후 수단. */}
+            <span className="truncate font-mono text-[11px] text-muted-foreground">{def.key}</span>
             <Badge variant={def.enabled ? 'success' : 'secondary'}>
               {def.enabled ? t('eventEnabledBadge') : t('eventDisabledBadge')}
             </Badge>

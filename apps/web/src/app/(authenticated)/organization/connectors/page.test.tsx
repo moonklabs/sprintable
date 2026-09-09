@@ -119,6 +119,34 @@ describe('OrganizationConnectorsPage — 조회(story 4180f67f)', () => {
     expect(container.textContent).toContain('a-brand-new-custom-connector');
   });
 
+  it('⭐story #3737(D3) — 제목은 raw connector_key가 아니라 channelLabel() 표시명, connector_key는 부제로 남는다', async () => {
+    asAdmin();
+    stubFetch([STIBEE_CONNECTOR]);
+    await act(async () => {
+      root.render(wrap(<OrganizationConnectorsPage />));
+    });
+    await flush();
+
+    const heading = container.querySelector('h2');
+    expect(heading?.textContent).toBe('스티비');
+    expect(heading?.textContent).not.toBe('stibee');
+    // connector_key는 화면에서 완전히 사라지면 안 된다(channel≠connector_key인
+    // 임의 커넥터를 못 가르는 회귀 방지) — 부제로 여전히 보인다.
+    expect(container.textContent).toContain('stibee');
+  });
+
+  it('story #3737(D3) — 모르는 channel은 지어내지 않고 원문 그대로 폴백(channelLabel 관례)', async () => {
+    asAdmin();
+    stubFetch([{ ...STIBEE_CONNECTOR, connector_key: 'weird', channel: 'a-totally-unknown-channel' }]);
+    await act(async () => {
+      root.render(wrap(<OrganizationConnectorsPage />));
+    });
+    await flush();
+
+    const heading = container.querySelector('h2');
+    expect(heading?.textContent).toBe('a-totally-unknown-channel');
+  });
+
   it('⭐requires_env는 이름만 뜨고 값 입력 UI가 없다(시크릿 미노출)', async () => {
     asAdmin();
     stubFetch([STIBEE_CONNECTOR]);

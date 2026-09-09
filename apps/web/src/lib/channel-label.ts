@@ -21,6 +21,13 @@ const CHANNEL_LABEL_KEYS: Record<string, string> = {
   // story #3549 REQUIRED 1(페드루 PO, 2026-09-06) — 실 Meta App Review 前엔 이
   // sandbox가 §13-8 라이브 검증의 유일한 길이라 facebook과 같이 선등록한다.
   facebook_sandbox: 'channelLabelFacebookSandbox',
+  // story #3737(D3, 유나 定 2026-09-09) — 커넥터 화면(organization/connectors)
+  // 섹션 제목이 connector_key를 그대로 뽑아 「stibee」가 raw로 떴다. channel_
+  // connector_map.py 확인: stibee 커넥터는 channel===connector_key(항등 매핑) —
+  // 이 맵에 얹는 게 안전(연결 화면과 커넥터 화면 둘 다 같은 표시명 정본 하나 재사용,
+  // 새 낱말 0). ⚠️임시 처방 — 진짜 정본(커넥터 등록 자체가 display_name을 가짐)은
+  // 다른 저장소(sprintable-agent-plugins의 *.schema.ts)에 있어 별건으로 남는다.
+  stibee: 'channelLabelStibee',
 };
 
 export function channelLabel(channel: string, t: (key: string) => string): string {

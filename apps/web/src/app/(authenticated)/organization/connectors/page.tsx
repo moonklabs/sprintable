@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { fetchWithAuth } from '@/lib/db/client';
+import { channelLabel } from '@/lib/channel-label';
 
 /**
  * story 4180f67f — 조직 커넥터 설정 화면. story #3317(레지스트리 API)이 서버·플러그인
@@ -124,7 +125,15 @@ function ConnectorCard({
       <SectionCardHeader>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-2">
-            <h2 className="font-mono text-sm font-semibold text-foreground">{connector.connector_key}</h2>
+            {/* story #3737(D3, 유나 定) — 섹션 제목은 connector_key raw 값이 아니라
+                표시명(channelLabel() 재사용 — channel===connector_key 항등 매핑
+                확인, channel_connector_map.py). 모르는 채널은 그대로 원문 폴백
+                (지어내지 않는다). connector_key는 이제 제목에서 안 보이므로(D2와
+                동형 — 이름 우선·키는 부제) 옆에 작은 글씨로 남긴다 — channel과
+                connector_key가 다를 수 있는 임의 커넥터(#3737 회귀가드 표본)를
+                화면에서 못 가르는 회귀를 막는다. */}
+            <h2 className="text-sm font-semibold text-foreground">{channelLabel(connector.channel, t)}</h2>
+            <span className="font-mono text-[11px] text-muted-foreground">{connector.connector_key}</span>
             <Badge variant="outline">v{connector.version}</Badge>
             <Badge variant="secondary">{connector.channel}</Badge>
             {(connector.kinds ?? []).map((k) => <Badge key={k} variant="outline">{k}</Badge>)}

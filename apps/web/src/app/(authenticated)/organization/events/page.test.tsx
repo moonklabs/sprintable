@@ -660,7 +660,9 @@ describe('OrganizationEventsPage — 정의 상세보기 사람 언어 기본(st
   }
 
   function expandRow(key: string) {
-    const btn = [...container.querySelectorAll('button')].find((b) => b.textContent === key)!;
+    // story #3737(D2) — 토글 버튼 라벨이 이제 name(있으면) 우선이라 key와 다를 수
+    // 있다(현재 텍스트가 아니라 data-testid로 안정적으로 찾는다).
+    const btn = container.querySelector(`[data-testid="event-def-toggle-${key}"]`) as HTMLButtonElement;
     return act(async () => { btn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
   }
 
@@ -769,7 +771,9 @@ describe('OrganizationEventsPage — 카탈로그 적용 진입점 + stage_metad
   }
 
   function expandRow(key: string) {
-    const btn = [...container.querySelectorAll('button')].find((b) => b.textContent === key)!;
+    // story #3737(D2) — 토글 버튼 라벨이 이제 name(있으면) 우선이라 key와 다를 수
+    // 있다(현재 텍스트가 아니라 data-testid로 안정적으로 찾는다).
+    const btn = container.querySelector(`[data-testid="event-def-toggle-${key}"]`) as HTMLButtonElement;
     return act(async () => { btn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
   }
 

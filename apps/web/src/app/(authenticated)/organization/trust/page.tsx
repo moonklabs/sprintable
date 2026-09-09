@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { HeartHandshake } from 'lucide-react';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { Badge } from '@/components/ui/badge';
 import { EmptyState } from '@/components/ui/empty-state';
 import { MemberRow } from '@/components/ui/member-row';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
@@ -89,8 +90,9 @@ export default function OrganizationTrustPage() {
           groupedRoster.map(([groupLabel, rows]) => (
             <SectionCard key={groupLabel}>
               <SectionCardHeader>
-                <h2 className="text-base font-semibold text-foreground">
-                  {groupLabel} ({rows.length})
+                <h2 className="flex items-center gap-2 text-base font-semibold text-foreground">
+                  {groupLabel}
+                  <Badge variant="secondary">{rows.length}</Badge>
                 </h2>
               </SectionCardHeader>
               <SectionCardBody>
