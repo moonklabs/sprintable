@@ -323,12 +323,24 @@ def _is_session_stale_after_password_change(user: User, session_started_at: obje
     판정 대상 밖 — 과거 시점을 알 방법이 없어 백필은 거짓 신호(0290 locale과 동형
     논지, 무제약=무회귀). session_started_at이 없거나 int가 아니면(레거시 토큰·
     #3247 seam 이전 발급) totp/disable과 동일하게 fail-closed(세션 무효로 본다) —
-    "판별 불가"를 "안전하다"로 해석하지 않는다(보안 결함 규율)."""
+    "판별 불가"를 "안전하다"로 해석하지 않는다(보안 결함 규율).
+
+    story #3750(BE·보안·bug, 미르코 그라운딩 2026-09-09) — 좌변(`password_set_at.
+    timestamp()`, 소수부 있는 float)과 우변(`session_started_at`, 토큰 클레임에
+    실린 `int(datetime.now(...).timestamp())`, 초 단위 절삭)을 서로 다른 단위로
+    비교했었다. 가입 핸들러가 `password_set_at`을 찍은 뒤(:671) flush·메타데이터
+    조회 await를 거쳐 토큰을 발급하는데(:702), 그 처리가 같은 정수 초 안에
+    끝나면 `1757437200.87 > 1757437200`이 True가 되어 방금 만든 세션이 "비밀번호
+    변경 뒤 stale"로 오판됐다(로컬·CI처럼 처리가 빠른 환경에서 흔함) — refresh·
+    switch-account·switch-project·switch-org 4곳이 이 함수를 공유해 강제
+    재로그인으로 번졌다. 좌변도 같은 단위(초 절삭)로 맞춘다 — 클레임을 float로
+    넓히는 대안은 토큰 계약 변경이라 안 한다. "같은 초에 세션이 시작됐다"는
+    stale이 아니다(다음 초부터가 stale — 기존 보안 판정은 그대로 유지)."""
     if user.password_set_at is None:
         return False
     if not isinstance(session_started_at, int):
         return True
-    return user.password_set_at.timestamp() > session_started_at
+    return int(user.password_set_at.timestamp()) > session_started_at
 
 
 def _explicit_revoke_values(now: datetime) -> dict:
