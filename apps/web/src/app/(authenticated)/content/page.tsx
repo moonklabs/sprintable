@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import { fetchWithAuth } from '@/lib/db/client';
@@ -162,15 +163,26 @@ export default function ContentPostListPage() {
           <h1 className="text-lg font-semibold text-foreground">{t('title')}</h1>
           <p className="text-sm text-muted-foreground">{t('description')}</p>
         </div>
-        {/* story #3734 — 「보관됨 보기」 토글(유나 定: 두 상태 문구 다 정함). */}
-        <button
+        {/* story #3734 — 「보관됨 보기」 토글(유나 定: 두 상태 문구 다 정함).
+            story #3739(카디르 CI 적발, verify-no-new-raw-button.ts #3164) — raw
+            button 태그를 Button으로. 페드루 CHANGES(2026-09-09, PR#4084) — 최초
+            variant="ghost"+hover:bg-transparent 보정(story #3177/#3183/#3215
+            선례)은 dark:hover:bg-muted/50이 별도 클래스라 안 지워져 다크 hover에
+            배경이 남는 회귀였다(유나 실측). 정본 = variant="link"(hover 배경 자체가
+            없어 지울 것이 없음)+색만 text-foreground로 덮기 — text-primary는
+            twMerge가 지우고 hover:underline은 상시 밑줄이라 무해. 두 번째 CHANGES
+            (유나 재확認) — link 변형 전환이 hover:underline만 주고 rest 밑줄은
+            안 준다는 점을 놓쳐 className의 명시 underline까지 같이 걷혀 rest 밑줄이
+            사라졌던 회귀도 정정(className 끝에 underline 유지). */}
+        <Button
           type="button"
+          variant="link"
           onClick={() => setShowArchived((v) => !v)}
-          className="shrink-0 text-sm text-foreground underline underline-offset-4"
+          className="h-auto min-h-0 min-w-0 shrink-0 px-0 text-sm font-normal text-foreground underline"
           data-testid="content-show-archived-toggle"
         >
           {showArchived ? t('hideArchivedToggle') : t('showArchivedToggle')}
-        </button>
+        </Button>
       </div>
 
       {loadError ? (
@@ -265,23 +277,27 @@ export default function ContentPostListPage() {
                           can_withdraw와 동형 정책). 확認 없음(유나 定 — 되돌릴 수 있는
                           소프트 액션). */}
                       {draft.can_archive ? (
-                        <button
+                        <Button
                           type="button"
+                          variant="link"
                           onClick={() => void handleArchiveToggle(draft)}
                           disabled={archivingId === draft.draft_id}
-                          className="text-sm text-foreground underline underline-offset-4 disabled:opacity-50"
+                          className="h-auto min-h-0 min-w-0 px-0 text-sm font-normal text-foreground underline disabled:opacity-50"
                           data-testid="content-archive-action"
                           // story #3734(카디르 CI 적발) — 정적 라벨(「보관」/「보관 해제」)이
                           // 행마다 똑같아 verify-no-new-repeated-row-action-names(§22-18
                           // "유나의 자") 위반. 순번+보이는 라벨을 aria-label에 품는다(이웃
                           // channelRowActionAriaLabel·orgMemberRowActionAriaLabel과 동형).
+                          // story #3739(카디르 CI 적발, verify-no-new-raw-button.ts #3164) —
+                          // raw button 태그를 Button으로(위 토글과 동형 보정, 페드루
+                          // CHANGES 반영 — variant="link"가 정본, ghost 아님, underline 유지).
                           aria-label={t('archiveRowAriaLabel', {
                             n: index + 1,
                             label: draft.is_deleted ? t('unarchiveAction') : t('archiveAction'),
                           })}
                         >
                           {draft.is_deleted ? t('unarchiveAction') : t('archiveAction')}
-                        </button>
+                        </Button>
                       ) : null}
                     </td>
                   </tr>
