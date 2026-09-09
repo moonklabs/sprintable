@@ -198,6 +198,37 @@ async function mount(role: string) {
   await flush();
 }
 
+// story #3743 CHANGES(페드루 PO 決 2026-09-09 11:44Z) — 행이 접힌 한 줄이 되며 앱 자격
+// 폼·연결 상세(Test/Disconnect 등)가 그 행의 다음 발 또는 ⋯로 골랐을 때만 인라인으로
+// 선다. 기존 테스트 다수가 "그 안의 버튼/폼이 항상 보인다"는 전제였으므로, 그 콘텐츠를
+// 보기 前에 이 헬퍼로 펼친다 — 다음 발 버튼(channel-row-primary-*)이 있으면 그것을,
+// 없으면 ⋯ 메뉴를 열어 라벨이 일치하는 항목을 클릭한다.
+async function expandChannelRow(opts: { viaMenuLabel?: string; rowChannel?: string } = {}) {
+  if (!opts.viaMenuLabel) {
+    const primaryBtn = [...container.querySelectorAll('button')].find((b) => b.dataset['testid']?.startsWith('channel-row-primary-'));
+    if (primaryBtn) {
+      await act(async () => { primaryBtn.click(); });
+      await flush();
+      return;
+    }
+  }
+  // 화면에 채널이 2개 이상이면 ⋯ 트리거도 여럿(채널마다 하나) — rowChannel로
+  // aria-label(channelRowMoreActionsAriaLabel="{channel} 더보기")을 지정해 그 행만 집는다.
+  const moreBtn = opts.rowChannel
+    ? [...container.querySelectorAll('[data-testid="channel-row-more-actions"]')].find(
+        (el) => el.getAttribute('aria-label') === koMessages.channelConnect.channelRowMoreActionsAriaLabel.replace('{channel}', opts.rowChannel!),
+      )
+    : container.querySelector('[data-testid="channel-row-more-actions"]');
+  await act(async () => { moreBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+  await flush();
+  // base-ui Menu.Popup은 Portal로 document.body 바로 아래(container 밖)에 뜬다 —
+  // container 안에서만 찾으면 늘 0건이다.
+  const items = [...document.body.querySelectorAll('[role="menuitem"]')];
+  const item = opts.viaMenuLabel ? items.find((el) => el.textContent === opts.viaMenuLabel) : items[0];
+  await act(async () => { item!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+  await flush();
+}
+
 describe('OrganizationChannelsPage — 목록·상태(story #3376)', () => {
   it('owner에게 연결된 계정과 상태 칩이 보인다', async () => {
     stubFetch({ connections: [CONNECTION_ACTIVE] });
@@ -206,13 +237,19 @@ describe('OrganizationChannelsPage — 목록·상태(story #3376)', () => {
     expect(container.textContent).toContain('연결됨');
   });
 
-  it('effective_source=none이면 연결 버튼이 비활성이고 이유가 버튼 옆에 뜬다', async () => {
+  // story #3743 CHANGES(④, 페드루 PO 決) — 옛 「비활성 연결 버튼+이유」는 §5-2 위반
+  // (그려진 컨트롤=할 수 있다는 약속). 이제 다음 발 자체가 「앱 자격 등록」(항상
+  // 활성)이고, 이유는 부제로 옮겨졌다 — 비활성 버튼은 어디에도 없다.
+  it('⭐effective_source=none이면 다음 발이 「앱 자격 등록」(활성)이고, 이유는 부제로 뜬다', async () => {
     stubFetch({ connections: [], credentials: { configured: false, app_id_suffix: null, effective_source: 'none' } });
     await mount('owner');
     expect(container.textContent).toContain('설정 미완');
-    const connectBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('연결'));
-    expect(connectBtn?.disabled).toBe(true);
     expect(container.textContent).toContain('먼저 앱 자격을 설정해야');
+    const registerBtn = container.querySelector('[data-testid="channel-row-primary-register"]') as HTMLButtonElement;
+    expect(registerBtn).not.toBeNull();
+    expect(registerBtn.disabled).toBeFalsy();
+    expect(container.querySelectorAll('button').length > 0
+      && [...container.querySelectorAll('button')].every((b) => !(b.textContent?.includes('연결') && b.disabled))).toBe(true);
   });
 
   // story #3603(페드루 PO 確定 2026-09-07, 유나 3597 관찰) — 연결 상태 승격이 이제
@@ -226,6 +263,9 @@ describe('OrganizationChannelsPage — 목록·상태(story #3376)', () => {
       }],
     });
     await mount('owner');
+    // story #3743 CHANGES — last_error 원문은 펼친 연결 상세(ConnectionRow) 안에만
+    // 있다(⋯ → 「연결 관리」로 연다, single conn이라 다음 발은 「다시 연결」뿐).
+    await expandChannelRow({ viaMenuLabel: koMessages.channelConnect.channelManageConnectionsAction });
     expect(container.textContent).toContain('토큰이 만료되었습니다(401)');
     expect(container.textContent).toContain('CHANNEL_TOKEN_EXPIRED');
   });
@@ -238,6 +278,7 @@ describe('OrganizationChannelsPage — 목록·상태(story #3376)', () => {
       }],
     });
     await mount('owner');
+    await expandChannelRow({ viaMenuLabel: koMessages.channelConnect.channelManageConnectionsAction });
     expect(container.textContent).toContain('토큰이 만료되었습니다(401)');
     expect(container.textContent).not.toContain('CHANNEL_TOKEN_EXPIRED');
   });
@@ -245,8 +286,11 @@ describe('OrganizationChannelsPage — 목록·상태(story #3376)', () => {
   it('member는 해제·다시 연결 버튼 대신 owner 안내 문구를 본다', async () => {
     // story #3504 — 해제·재인증은 owner 전용(_require_owner)이라 owner만 문구가 맞다
     // (옛 owner·admin 문구는 이 두 자리에선 거짓이었다).
+    // story #3743 CHANGES — reauth_required는 다음 발이 owner에게만 뜨므로 member는
+    // ⋯의 「연결 관리」로 펼쳐야 이 문구(ConnectionRow 내부, 무변경)가 보인다.
     stubFetch({ connections: [{ ...CONNECTION_ACTIVE, status: 'expired' }] });
     await mount('member');
+    await expandChannelRow({ viaMenuLabel: koMessages.channelConnect.channelManageConnectionsAction });
     const disconnectBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '해제');
     expect(disconnectBtn).toBeUndefined();
     expect(container.textContent).toContain('이 작업은 소유자만 할 수 있습니다');
@@ -255,6 +299,7 @@ describe('OrganizationChannelsPage — 목록·상태(story #3376)', () => {
   it('story #3504 — admin도 해제·재인증 버튼이 안 보이고(owner 전용) owner만 문구를 본다', async () => {
     stubFetch({ connections: [{ ...CONNECTION_ACTIVE, status: 'expired' }] });
     await mount('admin');
+    await expandChannelRow({ viaMenuLabel: koMessages.channelConnect.channelManageConnectionsAction });
     const disconnectBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '해제');
     expect(disconnectBtn).toBeUndefined();
     const reauthBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '다시 연결');
@@ -265,6 +310,7 @@ describe('OrganizationChannelsPage — 목록·상태(story #3376)', () => {
   it('story #3504 — 해제 실패(403 CHANNEL_CONNECTION_OWNER_ONLY)는 카드 안 문구로 표면화된다', async () => {
     stubFetch({ connections: [CONNECTION_ACTIVE], disconnectStatus: 403, disconnectErrorCode: 'CHANNEL_CONNECTION_OWNER_ONLY' });
     await mount('owner');
+    await expandChannelRow({ viaMenuLabel: koMessages.channelConnect.channelManageConnectionsAction });
     const disconnectBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '해제') as HTMLButtonElement;
     await act(async () => { disconnectBtn.click(); });
     await flush();
@@ -274,6 +320,7 @@ describe('OrganizationChannelsPage — 목록·상태(story #3376)', () => {
   it('story #3504 — 해제 실패(그 외 오류)는 일반 실패 문구로 표면화된다', async () => {
     stubFetch({ connections: [CONNECTION_ACTIVE], disconnectStatus: 500 });
     await mount('owner');
+    await expandChannelRow({ viaMenuLabel: koMessages.channelConnect.channelManageConnectionsAction });
     const disconnectBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '해제') as HTMLButtonElement;
     await act(async () => { disconnectBtn.click(); });
     await flush();
@@ -283,6 +330,7 @@ describe('OrganizationChannelsPage — 목록·상태(story #3376)', () => {
   it('member도 연결 시험은 할 수 있다', async () => {
     stubFetch({ connections: [CONNECTION_ACTIVE] });
     await mount('member');
+    await expandChannelRow({ viaMenuLabel: koMessages.channelConnect.channelManageConnectionsAction });
     const testBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '연결 시험');
     expect(testBtn).not.toBeUndefined();
     expect(testBtn?.disabled).toBeFalsy();
@@ -314,6 +362,7 @@ describe('OrganizationChannelsPage — 목록·상태(story #3376)', () => {
       return { ok: false, status: 404, json: async () => ({ data: null, error: { code: 'NOT_FOUND' } }) } as Response;
     }));
     await mount('owner');
+    await expandChannelRow({ viaMenuLabel: koMessages.channelConnect.channelManageConnectionsAction });
     const testBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '연결 시험') as HTMLButtonElement;
     await act(async () => { testBtn.click(); });
     await flush();
@@ -428,9 +477,9 @@ describe('OrganizationChannelsPage — 목록·상태(story #3376)', () => {
     await mount('owner');
     const reauthLink = [...container.querySelectorAll('a')].find((a) => a.textContent === '다시 연결');
     expect(reauthLink).toBeUndefined();
-    const note = container.querySelector('[data-testid="channel-sandbox-reauth-unavailable"]');
-    expect(note).not.toBeNull();
-    expect(note?.textContent).toContain('테스트용 연결은 다시 연결할 수 없습니다');
+    // story #3743 CHANGES — 이 문장은 이제 행의 부제 자리(ListRow subtitle)에 선다
+    // (testid는 펼친 상세 안 ConnectionRow 몫으로 남아 여기선 textContent로 확인).
+    expect(container.textContent).toContain('테스트용 연결은 다시 연결할 수 없습니다');
   });
 
   // story #3650 — dev 실측 재현: 재연결 대상과 콜백이 실제로 갱신한 행이 다르면
@@ -508,17 +557,23 @@ describe('OrganizationChannelsPage — oauth 연결 버튼 낱말 매트릭스(s
     }));
   }
 
+  // story #3743 CHANGES(②③, 페드루 PO 決) — 연결이 1개 이상(=healthy, 다음 발 없음)이면
+  // 「또 다른 계정 연결」은 더 이상 행에 항상 뜨는 버튼이 아니다 — ⋯로 펼쳐야 나온다
+  // (다음 발 자리는 count===0에서만 「연결하기」를 직접 쥔다, 그 외엔 ⋯ → 펼침).
   it.each([
-    { count: 0, expectedKey: 'channelConnectAction' as const },
-    { count: 1, expectedKey: 'channelConnectAnotherAction' as const },
-    { count: 2, expectedKey: 'channelConnectAnotherAction' as const },
-  ])('owner·연결 $count개 — 버튼 낱말이 $expectedKey', async ({ count, expectedKey }) => {
+    { count: 0, expectedKey: 'channelConnectAction' as const, viaMenu: false },
+    { count: 1, expectedKey: 'channelConnectAnotherAction' as const, viaMenu: true },
+    { count: 2, expectedKey: 'channelConnectAnotherAction' as const, viaMenu: true },
+  ])('owner·연결 $count개 — 버튼 낱말이 $expectedKey', async ({ count, expectedKey, viaMenu }) => {
     stubFetch({ connections: nConnections(count) });
     await mount('owner');
+    const expectedText = koMessages.channelConnect[expectedKey].replace('{channel}', 'Threads');
+    if (viaMenu) {
+      await expandChannelRow({ viaMenuLabel: expectedText });
+    }
     // 행마다 "연결 시험"(channelTestAction) 버튼도 "연결" 부분문자열을 포함해
     // 느슨한 include 매칭은 잘못된 버튼을 집는다 — 기대 전체 문자열과 정확히
     // 일치하는 버튼을 직접 찾는다.
-    const expectedText = koMessages.channelConnect[expectedKey].replace('{channel}', 'Threads');
     const btn = [...container.querySelectorAll('button')].find((b) => b.textContent === expectedText);
     expect(btn).not.toBeUndefined();
     if (count === 0) expect(btn?.textContent).not.toContain('추가');
@@ -527,6 +582,11 @@ describe('OrganizationChannelsPage — oauth 연결 버튼 낱말 매트릭스(s
   it.each([0, 1, 2])('member·연결 %i개 — 버튼 없이 전용 사유만(연결 수 무관, owner 전용 폭)', async (count) => {
     stubFetch({ connections: nConnections(count) });
     await mount('member');
+    // story #3743 CHANGES — member는 ⋯ 자체에 「다른 계정 연결」 항목이 없다(isOwnerOrAdmin
+    // 게이트) — count>=1이면 「연결 관리」만 있어 그걸로 펼쳐도 add-another 버튼은 안 뜬다.
+    if (count >= 1) {
+      await expandChannelRow({ viaMenuLabel: koMessages.channelConnect.channelManageConnectionsAction });
+    }
     const connectBtn = [...container.querySelectorAll('button')].find(
       (b) => b.textContent === koMessages.channelConnect.channelConnectAction.replace('{channel}', 'Threads')
         || b.textContent === koMessages.channelConnect.channelConnectAnotherAction.replace('{channel}', 'Threads'),
@@ -570,6 +630,8 @@ describe('OrganizationChannelsPage — 헤더 rollup 칩 임계값(story dd29e6d
   it('⭐연결 1개 — 헤더 자리 칩 1(항상)·행 컨테이너 안엔 0(같은 문장 두 번 안 남, 억제 대상이 뒤바뀜)', async () => {
     stubFetch({ connections: [CONNECTION_ACTIVE] });
     await mount('owner');
+    // story #3743 CHANGES — 연결 목록(channel-section-rows)은 이제 펼친 상세 안에만.
+    await expandChannelRow({ viaMenuLabel: koMessages.channelConnect.channelManageConnectionsAction });
     const header = container.querySelector('[data-testid="channel-section-header"]')!;
     const rows = container.querySelector('[data-testid="channel-section-rows"]')!;
     const headerChips = header.querySelectorAll('[data-status-chip]');
@@ -586,6 +648,8 @@ describe('OrganizationChannelsPage — 헤더 rollup 칩 임계값(story dd29e6d
       ],
     });
     await mount('owner');
+    // story #3743 CHANGES — 연결 2개면 다음 발 자체가 「연결 관리」(직접 펼침).
+    await expandChannelRow();
     const header = container.querySelector('[data-testid="channel-section-header"]')!;
     const rows = container.querySelector('[data-testid="channel-section-rows"]')!;
     const headerChips = header.querySelectorAll('[data-status-chip]');
@@ -596,9 +660,15 @@ describe('OrganizationChannelsPage — 헤더 rollup 칩 임계값(story dd29e6d
 });
 
 describe('OrganizationChannelsPage — 앱 자격(AC2, story #3376)', () => {
+  // story #3743 CHANGES — AppCredentialsCard는 이제 펼친 상세 안에만 있다. connections=[]
+  // +effectiveSource!=='none'이면 다음 발은 「연결하기」라 카드는 ⋯의 「{channel} 앱 자격」
+  // (appCredentialsTitle)로 펼쳐야 보인다.
+  const appCredMenuLabel = koMessages.channelConnect.appCredentialsTitle.replace('{channel}', 'Threads');
+
   it('org 자격이면 끝 4자리를, platform이면 공용 앱 문구를 보여준다(섞지 않는다)', async () => {
     stubFetch({ connections: [], credentials: { configured: true, app_id_suffix: 'ab12', effective_source: 'org' } });
     await mount('owner');
+    await expandChannelRow({ viaMenuLabel: appCredMenuLabel });
     expect(container.textContent).toContain('끝 4자리');
     expect(container.textContent).toContain('ab12');
     expect(container.textContent).not.toContain('공용 앱으로 연결합니다');
@@ -607,12 +677,14 @@ describe('OrganizationChannelsPage — 앱 자격(AC2, story #3376)', () => {
   it('platform 기본이면 「공용 앱」 문구가 뜨고 secret 값은 어디에도 없다', async () => {
     stubFetch({ connections: [], credentials: { configured: false, app_id_suffix: null, effective_source: 'platform' } });
     await mount('owner');
+    await expandChannelRow({ viaMenuLabel: appCredMenuLabel });
     expect(container.textContent).toContain('공용 앱으로 연결합니다');
   });
 
   it('owner가 등록 버튼을 누르면 App Secret 입력란이 password 타입으로 뜬다', async () => {
     stubFetch({ connections: [], credentials: { configured: false, app_id_suffix: null, effective_source: 'platform' } });
     await mount('owner');
+    await expandChannelRow({ viaMenuLabel: appCredMenuLabel });
     const registerBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '앱 자격 등록');
     await act(async () => { registerBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     const secretInput = container.querySelector('input[type="password"]');
@@ -711,7 +783,10 @@ describe('OrganizationChannelsPage — available-channels 목록 기반 렌더(s
     });
     await mount('owner');
     expect(container.querySelector('[data-testid="channel-connect-sandbox-button"]')).toBeNull();
-    // 배지는 여전히 뜬다(연결 자체가 사라진 게 아니다 — 버튼만 안 뜨는 것).
+    // 배지는 여전히 뜬다(연결 자체가 사라진 게 아니다 — 버튼만 안 뜨는 것) — 이제
+    // 펼친 상세(ConnectionRow) 안에만 있다. threads도 같은 화면에 있어(⋯ 둘) rowChannel로
+    // sandbox 행을 콕 집는다.
+    await expandChannelRow({ viaMenuLabel: koMessages.channelConnect.channelManageConnectionsAction, rowChannel: koMessages.channelConnect.channelLabelSandbox });
     expect(container.querySelector('[data-testid="channel-connect-sandbox-connection-badge"]')).not.toBeNull();
   });
 
@@ -787,6 +862,13 @@ describe('OrganizationChannelsPage — available-channels 목록 기반 렌더(s
     });
     await mount('owner');
     expect(container.textContent).toContain('WordPress');
+    // story #3743 CHANGES — 붙여넣기 폼은 다음 발(「WordPress 계정 연결」)로 펼쳐야 보인다
+    // (Threads도 같은 testid의 다음 발을 가져 helper의 첫 매치 대신 낱말로 직접 집는다).
+    const wpConnectBtn = [...container.querySelectorAll('button')].find(
+      (b) => b.textContent === koMessages.channelConnect.channelConnectAction.replace('{channel}', 'WordPress'),
+    ) as HTMLButtonElement;
+    await act(async () => { wpConnectBtn.click(); });
+    await flush();
     expect(container.querySelector('[data-testid="channel-connect-pasted-secret-button-wordpress"]')).not.toBeNull();
   });
 
@@ -865,6 +947,7 @@ describe('OrganizationChannelsPage — pasted_secret 자리 채움(story #3450 F
   it('⭐credential_kind===pasted_secret 채널에 PastedSecretConnectCard 토글 버튼이 뜬다(owner)', async () => {
     stubFetch({ connections: [], availableChannels: WORDPRESS_AVAILABLE });
     await mount('owner');
+    await expandChannelRow();
     expect(container.querySelector('[data-testid="channel-connect-pasted-secret-button-wordpress"]')).not.toBeNull();
   });
 
@@ -884,6 +967,7 @@ describe('OrganizationChannelsPage — pasted_secret 자리 채움(story #3450 F
   it('story #3504 — admin은 붙여넣기 연결 카드를 실제로 본다(owner|admin 폭)', async () => {
     stubFetch({ connections: [], availableChannels: WORDPRESS_AVAILABLE });
     await mount('admin');
+    await expandChannelRow();
     expect(container.querySelector('[data-testid="channel-connect-pasted-secret-button-wordpress"]')).not.toBeNull();
   });
 
@@ -919,6 +1003,7 @@ describe('OrganizationChannelsPage — pasted_secret 자리 채움(story #3450 F
       availableChannels: WORDPRESS_AVAILABLE,
     });
     await mount('owner');
+    await expandChannelRow({ viaMenuLabel: koMessages.channelConnect.channelManageConnectionsAction });
     expect(container.querySelector('[data-testid="channel-connect-secret-hint-conn-wp-1"]')?.textContent).toBe('현재 자격 끝 4자리 1234');
     expect(container.querySelector('[data-testid="channel-connect-replace-credential-button-conn-wp-1"]')).not.toBeNull();
   });
@@ -962,6 +1047,7 @@ describe('OrganizationChannelsPage — pasted_secret 자리 채움(story #3450 F
       return { ok: false, status: 404, json: async () => ({ data: null, error: { code: 'NOT_FOUND' } }) } as Response;
     }));
     await mount('owner');
+    await expandChannelRow({ viaMenuLabel: koMessages.channelConnect.channelManageConnectionsAction });
 
     const openBtn = container.querySelector('[data-testid="channel-connect-replace-credential-button-conn-wp-1"]') as HTMLButtonElement;
     await act(async () => { openBtn.click(); });

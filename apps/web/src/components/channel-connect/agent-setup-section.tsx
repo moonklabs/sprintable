@@ -84,6 +84,9 @@ export function AgentSetupSection({ orgId }: { orgId: string }) {
   useEffect(() => {
     if (!orgId) return;
     let cancelled = false;
+    // 마운트-fetch 패턴(setState를 effect 안에서 동기 호출)을 정적분석이 「cascading
+    // renders」로 잡는 기존 코드베이스 관례(now-strip.tsx·connect-step.tsx 등)를 따라 disable.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
     setLoadError(false);
     fetchWithAuth(`/api/organizations/${orgId}/connectors`)

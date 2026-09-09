@@ -3,14 +3,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, MoreHorizontal } from 'lucide-react';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { ListRow, ListRowMark } from '@/components/ui/list-row';
 import { PageHeader } from '@/components/ui/page-header';
-import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
+import { SectionCardBody } from '@/components/ui/section-card';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { fetchWithAuth } from '@/lib/db/client';
 import { channelConnectionIdentityLabel, channelLabel, channelMarkColor, channelMarkInitials } from '@/lib/channel-label';
@@ -413,6 +413,30 @@ function daysUntil(iso: string, now: Date = new Date()): number {
   return Math.max(0, Math.floor(ms / (24 * 60 * 60 * 1000)));
 }
 
+// story #3743(CHANGES, 페드루 PO 2026-09-09 11:44Z) — 행 재설계 뒤 이 문구가 ListRow의
+// subtitle 자리로도 서야 한다(옛: 행 아래 별도 <p>로만). 새 낱말·새 키 0 — ExpiringSoonNote/
+// ReauthNote 컴포넌트가 쓰던 것과 같은 t() 키를 문자열로만 뽑아 재사용(컴포넌트는 펼친
+// 상세(ConnectionRow) 안에서 그대로 유지 — 자리 둘이 같은 문구를 각자 필요한 형(JSX/문자열)
+// 으로 쓸 뿐, 계약은 하나).
+function expiringSoonSubtitleText({
+  isAutoRefreshInfo, tokenExpiresAt, t,
+}: {
+  isAutoRefreshInfo?: boolean;
+  tokenExpiresAt: string | null | undefined;
+  t: ReturnType<typeof useTranslations>;
+}): string {
+  const days = tokenExpiresAt ? daysUntil(tokenExpiresAt) : null;
+  const key = isAutoRefreshInfo ? 'channelExpiringInfoNote' : 'channelExpiringActionNote';
+  return days === null
+    ? t(key, { days: '' })
+    : t(key, { days: days < 1 ? t('channelExpiringToday') : t('channelExpiringDaysCount', { count: days }) });
+}
+
+function reauthSubtitleText(reason: 'expired' | 'revoked' | 'error' | undefined, t: ReturnType<typeof useTranslations>): string {
+  const key = reason === 'revoked' ? 'channelReauthRevoked' : reason === 'error' ? 'channelReauthError' : 'channelReauthExpired';
+  return t(key);
+}
+
 function ExpiringSoonNote({
   isAutoRefreshInfo, tokenExpiresAt, t,
 }: {
@@ -420,19 +444,11 @@ function ExpiringSoonNote({
   tokenExpiresAt: string | null | undefined;
   t: ReturnType<typeof useTranslations>;
 }) {
-  const days = tokenExpiresAt ? daysUntil(tokenExpiresAt) : null;
-  const key = isAutoRefreshInfo ? 'channelExpiringInfoNote' : 'channelExpiringActionNote';
-  // tokenExpiresAt이 없으면(계약 위반·구버전 응답) 실값을 지어내지 않고 날짜 절 없이.
-  return (
-    <p className="text-xs text-muted-foreground">
-      {days === null ? t(key, { days: '' }) : t(key, { days: days < 1 ? t('channelExpiringToday') : t('channelExpiringDaysCount', { count: days }) })}
-    </p>
-  );
+  return <p className="text-xs text-muted-foreground">{expiringSoonSubtitleText({ isAutoRefreshInfo, tokenExpiresAt, t })}</p>;
 }
 
 function ReauthNote({ reason, t }: { reason?: 'expired' | 'revoked' | 'error'; t: ReturnType<typeof useTranslations> }) {
-  const key = reason === 'revoked' ? 'channelReauthRevoked' : reason === 'error' ? 'channelReauthError' : 'channelReauthExpired';
-  return <p className="text-xs text-muted-foreground">{t(key)}</p>;
+  return <p className="text-xs text-muted-foreground">{reauthSubtitleText(reason, t)}</p>;
 }
 
 function ConnectionRow({
@@ -633,7 +649,7 @@ function ConnectionRow({
 
 function ChannelSection({
   item, connections, credentials, isOwnerStrict, isOwnerOrAdmin, orgId, onRefresh, t, pendingSelection,
-  sectionRef, ownerName,
+  sectionRef, ownerName, expanded, onExpand,
 }: {
   item: AvailableChannelItem;
   connections: ChannelConnectionResponse[];
@@ -648,11 +664,19 @@ function ChannelSection({
   pendingSelection?: { pendingId: string; candidates: FacebookPageCandidate[] };
   // story #3743(페드루 PO 決, 2026-09-09) — 헤더 「앱 자격 등록」 메뉴에서 이 채널을
   // 고르면 새 흐름을 만들지 않고 이 행으로 스크롤한다(폼은 그 자리에 항상 그대로 —
-  // 컴포넌트 정의 1). 본문이 항상 보이므로 펼침 상태는 따로 없다.
+  // 컴포넌트 정의 1).
   sectionRef?: React.Ref<HTMLDivElement>;
   ownerName?: string;
+  // story #3743 CHANGES(페드루 PO 決, 2026-09-09 11:44Z) — 시안 행 형(접힌 한 줄)으로
+  // 재정정. 페이지 전체가 「펼친 채널 하나」만 갖는다(expandedChannel, 부모가 소유) —
+  // 앱 자격 폼·연결 상세는 이 행의 다음 발 또는 헤더 메뉴로 골랐을 때만 그 행 아래
+  // 인라인으로 선다(한 번에 한 행).
+  expanded: boolean;
+  onExpand: () => void;
 }) {
   const { channel, credential_kind } = item;
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
   const rowStatuses = connections.map((c) =>
     deriveChannelConnectionStatus({
       serverStatus: c.status, tokenExpiresAt: c.token_expires_at, canAutoRefresh: c.can_auto_refresh,
@@ -712,17 +736,86 @@ function ChannelSection({
     }
   }, [orgId, channel, onRefresh, t]);
 
-  // story #3743(시안 a98386e6, 페드루 PO 決) — 행 목록 형(한 테두리 안 나뉜 목록)으로
-  // 재편 — 채널마다 SectionCard 낱개(카드 4장 반복 클래스, 3735 B갈래와 같은 문제)를
-  // ListRow 머리 한 줄+본문으로. 본문은 항상 보인다(접기/펼치기 없음) — 이 화면의 실 액션
-  // 밀도(테스트·해제·자격 교체·페이지 선택 등)가 시안의 4-채널 표본보다 훨씬 넓어(#3549·
-  // #3504 등 기존 스토리 다수가 이미 「그려진 컨트롤=할 수 있다는 약속」으로 조건화해
-  // 둔 자리들이라) 접으면 «급한 액션을 한 번 더 눌러야 보이는» 회귀가 된다 — 유나 검토
-  // 축에서 접기 형이 맞다고 나오면 다음 판에서 넣는다(지금은 안전한 쪽).
-  // story #3743 — 시안이 요구하는 부제(계정+마지막 확인)는 연결이 정확히 1개일 때만
-  // 뜻이 선다(둘 이상이면 어느 계정 얘기인지 한 줄로 못 줄인다 — 지어내지 않는다,
-  // #3486 identity label 재사용).
-  const subtitle = connections.length === 1 ? channelConnectionIdentityLabel(connections[0]!, t) : undefined;
+  const single = connections.length === 1 ? connections[0]! : null;
+  const singleDerived = single
+    ? deriveChannelConnectionStatus({
+        serverStatus: single.status, tokenExpiresAt: single.token_expires_at,
+        canAutoRefresh: single.can_auto_refresh, lastError: single.last_error,
+      })
+    : null;
+
+  // story #3743 CHANGES(⑤, 페드루 PO 決) — 부제 = 시안 문장. 연결이 정확히 1개일 때만
+  // 뜻이 선다(둘 이상이면 어느 계정 얘기인지 한 줄로 못 줄인다 — 지어내지 않는다, #3486
+  // identity label 재사용). 만료·재인증 문구는 옛 ExpiringSoonNote/ReauthNote와 같은
+  // 키(새 낱말 0) — 그 컴포넌트는 펼친 상세(ConnectionRow) 안에서 그대로 유지된다.
+  const subtitle = (() => {
+    if (connections.length === 0) {
+      return credential_kind === 'oauth' && effectiveSource === 'none' ? t('channelConfigIncompleteReason') : undefined;
+    }
+    if (single && singleDerived) {
+      if (singleDerived.status === 'reauth_required') {
+        return single.credential_kind === 'none'
+          ? t('channelSandboxReauthUnavailableNote', { channel: channelLabel(channel, t) })
+          : reauthSubtitleText(singleDerived.reauthReason, t);
+      }
+      if (singleDerived.status === 'expiring_soon') {
+        return expiringSoonSubtitleText({ isAutoRefreshInfo: singleDerived.isAutoRefreshInfo, tokenExpiresAt: single.token_expires_at, t });
+      }
+      return `${channelConnectionIdentityLabel(single, t)} · ${t('channelConnectedBy', { time: formatRelativeTime(single.created_at, locale, displayTimezone) })}`;
+    }
+    return undefined;
+  })();
+
+  const reauthHref = single ? `/api/oauth-channel/authorize?org=${orgId}&channel=${single.channel}&connection_id=${single.id}` : undefined;
+  const connectHref = `/api/oauth-channel/authorize?org=${orgId}&channel=${channel}`;
+
+  // story #3743 CHANGES(②, 페드루 PO 決) — 다음 발 1: 앱 자격 없음→「앱 자격 등록」·
+  // 만료 임박(다시 연결 필요)→「다시 연결」·연결됨→없음(Test/Disconnect는 ⋯ 안). 연결이
+  // 2개 이상이면(어느 계정 얘기인지 한 줄로 못 줄이는 것과 같은 이유로) 다음 발 자체가
+  // 모호해 「연결 관리」로 그 행 상세를 연다 — #3504/#3549 등 기존 스토리가 이미
+  // 「그려진 컨트롤=할 수 있다는 약속」으로 조건화해 둔 owner/owner|admin 폭은 그대로.
+  type PrimaryAction = { label: string; onClick?: () => void; href?: string; disabled?: boolean; testId: string };
+  const primaryAction: PrimaryAction | null = (() => {
+    if (connections.length === 0) {
+      if (credential_kind === 'oauth') {
+        if (effectiveSource === 'none') {
+          return isOwnerStrict ? { label: t('appCredentialsRegisterAction'), onClick: onExpand, testId: 'channel-row-primary-register' } : null;
+        }
+        return isOwnerStrict ? { label: t('channelConnectAction', { channel: channelLabel(channel, t) }), href: connectHref, testId: 'channel-row-primary-connect' } : null;
+      }
+      if (credential_kind === 'none') {
+        return isOwnerOrAdmin
+          ? { label: creatingSandbox ? t('channelConnectSandboxPendingCta') : t('channelConnectSandboxAction', { channel: channelLabel(channel, t) }), onClick: () => void handleCreateSandbox(), disabled: creatingSandbox, testId: 'channel-connect-sandbox-button' }
+          : null;
+      }
+      if (credential_kind === 'pasted_secret') {
+        return isOwnerOrAdmin ? { label: t('channelConnectAction', { channel: channelLabel(channel, t) }), onClick: onExpand, testId: 'channel-row-primary-connect' } : null;
+      }
+      return null;
+    }
+    if (single && singleDerived?.status === 'reauth_required' && single.credential_kind !== 'none') {
+      return isOwnerStrict ? { label: t('channelReauthAction'), href: reauthHref, testId: 'channel-row-primary-reauth' } : null;
+    }
+    if (connections.length > 1) {
+      return { label: t('channelManageConnectionsAction'), onClick: onExpand, testId: 'channel-row-primary-manage' };
+    }
+    return null;
+  })();
+
+  // story #3743 CHANGES(②, 페드루 PO 決) — ⋯(상시)는 다음 발 밖의 나머지: 연결 상세
+  // (Test/Disconnect 등은 그 안에서 그대로), 이미 등록된 앱 자격 보기·바꾸기, 또 다른
+  // 계정 연결. 항목이 하나도 없으면(권한 0·상태 무관) 트리거 자체를 안 그린다(빈
+  // 메뉴는 「그려진 컨트롤=할 수 있다」는 약속을 지키지 못한다).
+  const menuItems: { key: string; label: string; onClick: () => void }[] = [];
+  if (connections.length >= 1) {
+    menuItems.push({ key: 'manage', label: t('channelManageConnectionsAction'), onClick: onExpand });
+  }
+  if (credential_kind === 'oauth' && effectiveSource !== 'none') {
+    menuItems.push({ key: 'app-credentials', label: t('appCredentialsTitle', { channel: channelLabel(channel, t) }), onClick: onExpand });
+  }
+  if (canStartConnect && connections.length >= 1 && credential_kind !== 'none' && isOwnerOrAdmin) {
+    menuItems.push({ key: 'add-another', label: t('channelConnectAnotherAction', { channel: channelLabel(channel, t) }), onClick: onExpand });
+  }
 
   return (
     <div ref={sectionRef} data-testid="channel-section">
@@ -733,112 +826,108 @@ function ChannelSection({
           title={channelLabel(channel, t)}
           subtitle={subtitle}
           status={<ChannelStatusChip status={channelStatus} />}
-        />
-      </div>
-      <SectionCardBody className="space-y-4 border-t border-border">
-        {/* story #3743(페드루 PO 決) — 옛 화면은 AppCredentialsCard를 채널 목록 위에
-            독립 카드로 반복해 그 채널이 어떤 앱 자격을 쓰는지와 분리돼 있었다. 이제
-            그 채널의 펼친 자리 안으로 옮긴다(폼은 행 자리에 그대로·컴포넌트 정의 1
-            — AppCredentialsCard 자체는 무변경). */}
-        {credential_kind === 'oauth' ? (
-          <AppCredentialsCard
-            channel={channel}
-            orgId={orgId}
-            isOwner={isOwnerStrict}
-            ownerName={ownerName}
-            credentials={credentials}
-            onSaved={onRefresh}
-          />
-        ) : null}
-        {connections.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{t('channelNoConnections')}</p>
-        ) : (
-          <div className="divide-y divide-border overflow-hidden rounded-md border border-border" data-testid="channel-section-rows">
-            {connections.map((c, index) => (
-              <ConnectionRow key={c.id} conn={c} index={index} isOwnerStrict={isOwnerStrict} isOwnerOrAdmin={isOwnerOrAdmin} orgId={orgId} onDisconnected={onRefresh} t={t} showStatusChip={connections.length !== 1} />
-            ))}
-          </div>
-        )}
-        <div className="flex flex-col items-start gap-1">
-          {/* story #3504(PO 정본§5) — OAuth 연결은 owner 전용(authorize_channel_connection
-              = _require_owner). 권한을 먼저 판정해 안 그린다(옛 `<Button disabled>`는
-              §5-2가 금지한 "권한인데 비활성"이었다 — L275 문제였던 자리) — 그 다음에야
-              (owner인 경우에만) 자격 미설정이라는 **상태** 축을 disabled로 표현한다. */}
-          {credential_kind === 'oauth' && isFacebookOauthChannel && isOwnerStrict && !pendingSelection ? (
-            // story #3549(유나 §13-8①) — 「우리가 검사할 수 없는 조건」을 연결
-            // 시작 버튼 위에 미리 말한다. 비활성 사유가 아니다(canStartConnect는
-            // 별개 축) — 앱 자격 미등록 문구와 한 문장으로 합치지 않는다.
-            <p className="text-xs text-muted-foreground" data-testid="channel-connect-facebook-app-guidance">
-              {t('channelConnectFacebookAppGuidance')}
-            </p>
-          ) : null}
-          {credential_kind === 'oauth' && isFacebookOauthChannel && pendingSelection && connections.length === 0 ? (
-            <FacebookPageSelectCard
-              channel={channel} orgId={orgId} pendingId={pendingSelection.pendingId}
-              candidates={pendingSelection.candidates} isOwner={isOwnerStrict} onConnected={onRefresh} t={t}
-            />
-          ) : credential_kind === 'oauth' ? (
-            isOwnerStrict ? (
-              <a href={canStartConnect ? `/api/oauth-channel/authorize?org=${orgId}&channel=${channel}` : undefined}>
-                <Button size="sm" disabled={!canStartConnect}>
-                  {/* story #3436 묶음10(유나 §17-21⑧, PO 確定 2026-09-06) — 두 번째
-                      연결이 유의미한 채널(wordpress·webhook 실재)이라 sandbox(#3537)와
-                      달리 버튼은 유지하되, 연결이 이미 있을 때 "연결"이라는 낱말이
-                      거짓("추가로 생기는 게 없다"는 착각)이 되지 않게 이름을 가른다. */}
-                  {t(connections.length === 0 ? 'channelConnectAction' : 'channelConnectAnotherAction', { channel: channelLabel(channel, t) })}
-                </Button>
+          action={primaryAction ? (
+            primaryAction.href ? (
+              <a href={primaryAction.href}>
+                <Button size="sm" data-testid={primaryAction.testId}>{primaryAction.label}</Button>
               </a>
-            ) : null
-          ) : credential_kind === 'none' ? (
-            // story #3537(유나 18회차 발견, PO 確定 2026-09-06) — 배지는 연결 「행」의
-            // credential_kind(상태)로 그리는데, 이 버튼은 채널 「항목」의 credential_kind
-            // (성질)로만 그려 연결이 이미 있어도 「…연결 만들기」가 활성으로 남았다 —
-            // 이름이 "만들기"인데 새로 생기는 게 없으면 라벨이 거짓말이 된다(§17-21).
-            // connections는 이미 이 channel로 필터된 배열(부모 컴포넌트, 위 connections.
-            // length===0/!==1 판정과 같은 변수) — 활성/만료 등 상태 무관하게 행이 하나라도
-            // 있으면 버튼 자체를 안 그린다("다시 만들기" 경로는 의도적으로 두지 않는다).
-            // sandbox 생성은 owner|admin(create_sandbox_channel_connection = _require_owner_or_admin).
-            isOwnerOrAdmin && connections.length === 0 ? (
-              <Button
-                size="sm" onClick={() => void handleCreateSandbox()} disabled={creatingSandbox}
-                data-testid="channel-connect-sandbox-button"
-              >
-                {creatingSandbox ? t('channelConnectSandboxPendingCta') : t('channelConnectSandboxAction', { channel: channelLabel(channel, t) })}
+            ) : (
+              <Button size="sm" onClick={primaryAction.onClick} disabled={primaryAction.disabled} data-testid={primaryAction.testId}>
+                {primaryAction.label}
               </Button>
-            ) : null
-          ) : credential_kind === 'pasted_secret' ? (
-            // story #3450 FE 후속(3653a18c §2 "②발급해서 붙여넣기", PO 確定
-            // 2026-09-04 23:13Z) — 자리 채움. 붙여넣기 연결은 owner|admin
-            // (create_pasted_secret_channel_connection = _require_owner_or_admin).
+            )
+          ) : null}
+          menu={menuItems.length > 0 ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                aria-label={t('channelRowMoreActionsAriaLabel', { channel: channelLabel(channel, t) })}
+                data-testid="channel-row-more-actions"
+                className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+              >
+                <MoreHorizontal className="size-4" aria-hidden="true" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {menuItems.map((mi) => (
+                  <DropdownMenuItem key={mi.key} onClick={mi.onClick}>{mi.label}</DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : null}
+        />
+        {/* story #3743 CHANGES — 권한 부재로 다음 발이 안 보일 때의 사유·sandbox 오류는
+            펼침과 무관하게(행 밖 액션 결과라 접혀 있어도 보여야 한다) 행 바로 아래. */}
+        {credential_kind === 'oauth' && isFacebookOauthChannel && isOwnerStrict && connections.length === 0 && effectiveSource !== 'none' && !pendingSelection ? (
+          <p className="mt-1 text-xs text-muted-foreground" data-testid="channel-connect-facebook-app-guidance">
+            {t('channelConnectFacebookAppGuidance')}
+          </p>
+        ) : null}
+        {credential_kind === 'oauth' && !isOwnerStrict && connections.length === 0 && effectiveSource !== 'none' ? (
+          <p className="mt-1 text-xs text-muted-foreground">{t('channelConnectOwnerOnlyReason', { channel: channelLabel(channel, t) })}</p>
+        ) : null}
+        {credential_kind === 'none' && !isOwnerOrAdmin && connections.length === 0 ? (
+          <p className="mt-1 text-xs text-muted-foreground">{t('channelOwnerOrAdminOnlyReason')}</p>
+        ) : null}
+        {credential_kind === 'pasted_secret' && !isOwnerOrAdmin && connections.length === 0 ? (
+          <p className="mt-1 text-xs text-muted-foreground">{t('channelConnectOwnerOrAdminOnlyReason', { channel: channelLabel(channel, t) })}</p>
+        ) : null}
+        {credential_kind === 'none' && sandboxError ? (
+          <p className="mt-1 text-xs text-destructive" data-testid="channel-connect-sandbox-error">{sandboxError}</p>
+        ) : null}
+      </div>
+      {/* story #3743 CHANGES(③, 페드루 PO 決) — 앱 자격 폼·연결 상세는 그 행의 다음
+          발 또는 헤더 메뉴로 골랐을 때만 그 행 아래 인라인(한 번에 한 행 — expanded는
+          부모가 소유한 페이지 전역 「펼친 채널」 1개). Facebook 선택 대기 카드는
+          예외 — OAuth 콜백 리다이렉트가 이미 만든 상태라 펼침 여부와 무관하게 보인다. */}
+      {credential_kind === 'oauth' && isFacebookOauthChannel && pendingSelection && connections.length === 0 ? (
+        <SectionCardBody className="space-y-4 border-t border-border">
+          <FacebookPageSelectCard
+            channel={channel} orgId={orgId} pendingId={pendingSelection.pendingId}
+            candidates={pendingSelection.candidates} isOwner={isOwnerStrict} onConnected={onRefresh} t={t}
+          />
+        </SectionCardBody>
+      ) : null}
+      {expanded ? (
+        <SectionCardBody className="space-y-4 border-t border-border" data-testid="channel-section-body">
+          {credential_kind === 'oauth' ? (
+            <AppCredentialsCard
+              channel={channel}
+              orgId={orgId}
+              isOwner={isOwnerStrict}
+              ownerName={ownerName}
+              credentials={credentials}
+              onSaved={onRefresh}
+            />
+          ) : null}
+          {connections.length === 0 ? (
+            <p className="text-sm text-muted-foreground">{t('channelNoConnections')}</p>
+          ) : (
+            <div className="divide-y divide-border overflow-hidden rounded-md border border-border" data-testid="channel-section-rows">
+              {connections.map((c, index) => (
+                <ConnectionRow key={c.id} conn={c} index={index} isOwnerStrict={isOwnerStrict} isOwnerOrAdmin={isOwnerOrAdmin} orgId={orgId} onDisconnected={onRefresh} t={t} showStatusChip={connections.length !== 1} />
+              ))}
+            </div>
+          )}
+          {credential_kind === 'pasted_secret' ? (
             <PastedSecretConnectCard channel={channel} orgId={orgId} isOwner={isOwnerOrAdmin} connectionCount={connections.length} onConnected={onRefresh} t={t} />
           ) : null}
-          {credential_kind === 'oauth' && isOwnerStrict && !canStartConnect ? (
-            <p className="text-xs text-muted-foreground">{t('channelConfigIncompleteReason')}</p>
+          {/* story #3743 CHANGES(④) — 「Connect another …」는 canStartConnect일 때만
+              그린다(비활성 버튼을 그리지 않는다, §5-2 "그려진 컨트롤=할 수 있다는 약속").
+              story #3436 묶음10 — 두 번째 연결이 유의미한 채널(wordpress·webhook)이라
+              sandbox(#3537)와 달리 버튼은 유지, connections.length===0이면 이 버튼
+              자체가 primaryAction 몫이라 여기선 1개 이상일 때만(add-another). */}
+          {credential_kind === 'oauth' && canStartConnect && connections.length >= 1 ? (
+            isOwnerStrict ? (
+              <a href={connectHref}>
+                <Button size="sm">{t('channelConnectAnotherAction', { channel: channelLabel(channel, t) })}</Button>
+              </a>
+            ) : (
+              // story #3436 묶음10(§5) — 「또 다른 계정 연결」도 owner 전용(같은
+              // authorize_channel_connection 경로) — 버튼 대신 사유 한 줄.
+              <p className="text-xs text-muted-foreground">{t('channelConnectOwnerOnlyReason', { channel: channelLabel(channel, t) })}</p>
+            )
           ) : null}
-          {/* story #3504 — L297은 «한 자리가 두 폭»이었다(유나 지적). oauth는 owner
-              전용 문구, none(sandbox)은 owner|admin 문구 — credential_kind로 갈라야
-              한쪽에서 거짓이 안 남는다.
-              story #3436 묶음10(유나 §17-21⑨, PO 確定) — 이 버튼 자리 전용 사유로
-              channelOwnerOnlyReason(재인증·해제 등 6곳 공용)과 분리한다 — 공용 키를
-              바꾸면 그 6곳의 문구가 "이 작업"에서 뜻이 좁아진 문장으로 조용히
-              번져나간다. */}
-          {credential_kind === 'oauth' && !isOwnerStrict ? (
-            <p className="text-xs text-muted-foreground">{t('channelConnectOwnerOnlyReason', { channel: channelLabel(channel, t) })}</p>
-          ) : null}
-          {/* story #3537 — 액션 자체가 없는 자리(연결 이미 있음)에 권한 사유 문구를
-              남기면 "안 보이는 버튼을 왜 못 누르나"는 존재하지 않는 질문에 답하는
-              꼴이라 노이즈다 — 버튼과 조건을 맞춘다. */}
-          {credential_kind === 'none' && !isOwnerOrAdmin && connections.length === 0 ? (
-            <p className="text-xs text-muted-foreground">{t('channelOwnerOrAdminOnlyReason')}</p>
-          ) : null}
-          {/* story #3521계 유나 #3877 관찰(PO 確定 2026-09-06) — 이 자리는 권한
-              사유(§5-2, 위 두 블록처럼 muted)가 아니라 "액션 실패 결과" 슬롯이다
-              — 하우스 관례(40:1대비 destructive) 그대로. */}
-          {credential_kind === 'none' && sandboxError ? (
-            <p className="text-xs text-destructive" data-testid="channel-connect-sandbox-error">{sandboxError}</p>
-          ) : null}
-        </div>
-      </SectionCardBody>
+        </SectionCardBody>
+      ) : null}
     </div>
   );
 }
@@ -858,8 +947,10 @@ export default function OrganizationChannelsPage() {
   const [availableChannels, setAvailableChannels] = useState<AvailableChannelItem[]>([]);
   const [connections, setConnections] = useState<ChannelConnectionResponse[]>([]);
   const [credentialsByChannel, setCredentialsByChannel] = useState<Record<string, AppCredentialsStatusResponse>>({});
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState(false);
+  // 카디르 QA changes(#4090 리뷰, 2026-09-09) — 옛 loading/loadError 두 불리언을 load()
+  // 시작마다 나란히(setLoading(true); setLoadError(false);) 동기 호출하던 자리가 「effect
+  // 안 setState 동기 호출→cascading render」로 걸렸다. 한 상태로 합쳐 호출 지점마다 1회만.
+  const [loadState, setLoadState] = useState<'loading' | 'error' | 'ready'>('loading');
   // story #3733(유나 定 2026-09-09) — non-owner(admin 포함) 카드 안내에 소유자 표시명을
   // 실을 수 있으면 싣는다(이메일은 절대 안 싣는다). 출처=기존 GET /api/org-members(admin·
   // owner 전용, #3231) — 새 API 0. plain member는 이 호출이 403이라 자연히 못 얻고
@@ -868,15 +959,14 @@ export default function OrganizationChannelsPage() {
 
   const load = useCallback(async () => {
     if (!orgId) return;
-    setLoading(true);
-    setLoadError(false);
+    setLoadState('loading');
     try {
       const [availableRes, connsRes] = await Promise.all([
         fetchWithAuth(`/api/organizations/${orgId}/channel-connections/available-channels`),
         fetchWithAuth(`/api/organizations/${orgId}/channel-connections`),
       ]);
       if (!availableRes.ok || !connsRes.ok) {
-        setLoadError(true);
+        setLoadState('error');
         return;
       }
       if (!isOwnerStrict) {
@@ -915,13 +1005,16 @@ export default function OrganizationChannelsPage() {
         }
       }
       setCredentialsByChannel(nextCreds);
+      setLoadState('ready');
     } catch {
-      setLoadError(true);
-    } finally {
-      setLoading(false);
+      setLoadState('error');
     }
   }, [orgId, isOwnerStrict]);
 
+  // 카디르 QA changes(#4090 리뷰, 2026-09-09) — 마운트-fetch 패턴(load가 setLoadState를
+  // 비동기로 호출)을 정적분석이 "effect 안 setState"로 잡는 기존 코드베이스 관례
+  // (now-strip.tsx·connect-step.tsx 등)를 따라 disable.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { void load(); }, [load]);
 
   // story #3743(페드루 PO 決, 유나 확認 済 — Button+DropdownMenu·집안 선례 14곳·항목=
@@ -934,8 +1027,16 @@ export default function OrganizationChannelsPage() {
     (it) => it.credential_kind === 'oauth' && (credentialsByChannel[it.channel]?.effective_source ?? 'none') === 'none',
   );
   const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  // story #3743 CHANGES(③, 페드루 PO 決 2026-09-09 11:44Z) — 앱 자격 폼·연결 상세는
+  // 한 번에 한 행만 펼친다(페이지 전역 「펼친 채널」 1개). 헤더 메뉴로 고르거나 그
+  // 행의 다음 발을 누르면 이 값이 그 채널로 바뀐다.
+  const [expandedChannel, setExpandedChannel] = useState<string | null>(null);
   const goToChannel = useCallback((channel: string) => {
-    sectionRefs.current[channel]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    setExpandedChannel(channel);
+    // jsdom(테스트 환경)은 scrollIntoView를 구현하지 않는다 — 메서드 자체를 옵셔널
+    // 체이닝(?.)으로 감싸 없는 환경에서도(#3743 CHANGES로 이 경로 호출 빈도가 늘며
+    // 처음 드러난 자리) 조용히 건너뛴다.
+    sectionRefs.current[channel]?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
   }, []);
 
   // story #3540 — 「성과 수집」 섹션은 발행 채널 목록·연결 왕복과 별개 축(실패해도
@@ -954,6 +1055,7 @@ export default function OrganizationChannelsPage() {
       setMeasurementLoadError(true);
     }
   }, [orgId]);
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- 위 load()와 같은 관례
   useEffect(() => { void loadMeasurement(); }, [loadMeasurement]);
 
   const connected = searchParams.get('connected');
@@ -1076,13 +1178,13 @@ export default function OrganizationChannelsPage() {
           </AlertDescription>
         </Alert>
       ) : null}
-      {loadError ? (
+      {loadState === 'error' ? (
         <Alert variant="destructive" role="alert" aria-live="assertive" aria-atomic="true">
           <AlertDescription>{t('channelLoadFailed')}</AlertDescription>
         </Alert>
       ) : null}
 
-      {loading ? (
+      {loadState === 'loading' ? (
         <div className="space-y-3">
           {[1, 2].map((i) => <div key={i} className="h-24 animate-pulse rounded-md bg-muted" />)}
         </div>
@@ -1116,6 +1218,8 @@ export default function OrganizationChannelsPage() {
                   t={t}
                   ownerName={ownerName}
                   sectionRef={(el) => { sectionRefs.current[it.channel] = el; }}
+                  expanded={expandedChannel === it.channel}
+                  onExpand={() => goToChannel(it.channel)}
                   pendingSelection={
                     selectPendingChannel === it.channel && selectPendingId && selectPendingCandidates
                       ? { pendingId: selectPendingId, candidates: selectPendingCandidates }
