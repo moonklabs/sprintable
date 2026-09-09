@@ -1579,6 +1579,14 @@ jobs:
       - name: "Verify no new raw <button> (story #3164 regression guard)"
         run: pnpm --filter web verify:no-new-raw-button
 
+      # story #3741(유나 전수 2026-09-09 08:46Z) 회귀가드 — 영어 로케일 화면에 한글이
+      # 그대로 서는 하드코딩 문자열(JsxText·placeholder/title/alt/aria-* 속성)이 새로
+      # 늘면 FAIL(baseline-freeze, hardcoded-korean-ui-text-baseline.json 참조 — 창건
+      # 시점 230건 grandfather, 전량 i18n 키화는 별건). #3739가 겪은 「만들어졌는데
+      # 도는 자리 없음」 재발을 막기 위해 신설 즉시 여기 배선한다.
+      - name: "Verify no hardcoded Korean UI text (story #3741 regression guard)"
+        run: pnpm --filter web verify:no-hardcoded-korean-ui-text
+
       # story #3739(2026-09-09) 메타 가드 — package.json에 등재된 verify:* 스크립트
       # 집합이 이 ci.yml에서 실제로 부르는 집합의 부분집합이 아니면(새 verify:* 스크립트를
       # 만들고 여기 안 물리면) FAIL. story #3736 ⑪·이 스토리 자신(no-direct-backend-v2-call·
