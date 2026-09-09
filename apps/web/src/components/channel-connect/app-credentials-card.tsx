@@ -6,6 +6,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { fetchWithAuth } from '@/lib/db/client';
+import { channelLabel } from '@/lib/channel-label';
 import type { AppCredentialsPutResponse, AppCredentialsStatusResponse } from '@/components/channel-connect/types';
 
 /**
@@ -14,11 +15,13 @@ import type { AppCredentialsPutResponse, AppCredentialsStatusResponse } from '@/
  * 하나로 세 상태를 가른다 — `configured`(=조직이 등록했나)와 섞지 않는다(별개 축).
  */
 export function AppCredentialsCard({
-  channel, orgId, isOwner, credentials, onSaved,
+  channel, orgId, isOwner, ownerName, credentials, onSaved,
 }: {
   channel: string;
   orgId: string;
   isOwner: boolean;
+  // story #3733(유나 定) — 알 때만 보간(못 얻으면 unnamed 문구로 폴백, 이메일은 절대 안 싣는다).
+  ownerName?: string;
   credentials: AppCredentialsStatusResponse | undefined;
   onSaved: () => void;
 }) {
@@ -65,7 +68,7 @@ export function AppCredentialsCard({
   return (
     <SectionCard>
       <SectionCardHeader>
-        <h2 className="text-sm font-semibold text-foreground">{t('appCredentialsTitle', { channel })}</h2>
+        <h2 className="text-sm font-semibold text-foreground">{t('appCredentialsTitle', { channel: channelLabel(channel, t) })}</h2>
       </SectionCardHeader>
       <SectionCardBody className="space-y-3">
         {effectiveSource === 'org' ? (
@@ -137,7 +140,13 @@ export function AppCredentialsCard({
             </div>
           </div>
         )}
-        {!isOwner ? <p className="text-xs text-muted-foreground">{t('channelOwnerOnlyReason')}</p> : null}
+        {!isOwner ? (
+          <p className="text-xs text-muted-foreground">
+            {ownerName
+              ? t('appCredentialsAskOwnerNamed', { name: ownerName })
+              : t('appCredentialsAskOwner')}
+          </p>
+        ) : null}
       </SectionCardBody>
     </SectionCard>
   );

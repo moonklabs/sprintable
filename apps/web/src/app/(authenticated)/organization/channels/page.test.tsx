@@ -610,12 +610,14 @@ describe('OrganizationChannelsPage — 앱 자격(AC2, story #3376)', () => {
 
   it('member는 앱 자격 등록 버튼 자체가 없다', async () => {
     // story #3504 — 앱 자격 저장은 owner 전용(set_channel_app_credentials =
-    // _require_owner)이라 owner만 문구가 맞다.
+    // _require_owner)이라 owner만 문구가 맞다. story #3733(유나 定) — 그 문구가
+    // 이제 「조직 소유자에게 요청」안내로 바뀌었다(GET /api/org-members가 이 테스트
+    // 스텁엔 없어 unnamed 폴백 문구가 정답 — 이름을 지어내지 않는다).
     stubFetch({ connections: [], credentials: { configured: false, app_id_suffix: null, effective_source: 'platform' } });
     await mount('member');
     const registerBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '우리 조직 앱을 쓰려면 등록');
     expect(registerBtn).toBeUndefined();
-    expect(container.textContent).toContain('이 작업은 owner만 할 수 있습니다');
+    expect(container.textContent).toContain('조직 소유자에게 앱 자격 등록을 요청해 주세요.');
   });
 
   it('story #3504 — admin도 앱 자격 등록 버튼이 없다(owner 전용, admin은 owner|admin이 아니다)', async () => {
@@ -623,7 +625,7 @@ describe('OrganizationChannelsPage — 앱 자격(AC2, story #3376)', () => {
     await mount('admin');
     const registerBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '우리 조직 앱을 쓰려면 등록');
     expect(registerBtn).toBeUndefined();
-    expect(container.textContent).toContain('이 작업은 owner만 할 수 있습니다');
+    expect(container.textContent).toContain('조직 소유자에게 앱 자격 등록을 요청해 주세요.');
   });
 });
 
