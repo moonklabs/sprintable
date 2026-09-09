@@ -307,6 +307,12 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
         if (cancelled) return;
         if (res.ok) {
           const json = await res.json();
+          // story #3709 후속(카디르 재-QA, PR#4060, 2026-09-09) — 위 대조는 fetch 직후일
+          // 뿐, res.json() 자체가 비동기라 그 파싱 사이에 다른 스토리로 전환될 수 있다
+          // (kanban-board.tsx #3704 후속과 동형 갭) — 파싱 뒤 재대조 없으면 늦게 온 옛
+          // 응답이 새 스토리의 tasksLoading을 false로 내려 «조회 中»을 «없음»으로
+          // 오단정한다.
+          if (cancelled) return;
           setStoryTasks(json.data ?? []);
           const tasksMeta = parseCursorMeta(json.meta, 'EpicSwimlaneBoard tasks');
           setStoryTasksNextCursor(tasksMeta.nextCursor);
