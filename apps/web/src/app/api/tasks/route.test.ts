@@ -113,3 +113,49 @@ describe('/api/tasks GET — ids 배치 lookup 분기(#2262 PR②, task 자신�
     expect(calledWith.ids).toHaveLength(200);
   });
 });
+
+// story #3717(PO 배포 57 API 축 실측 03:50Z, #3713 후속) — #3713이 리포지토리 경계
+// 전달(cursor/limit)을 고치자 그 뒤에 숨어 있던 두 번째 결함이 드러났다: 이 라우트가
+// buildCursorPageMeta의 「limit+1 과대조회」 계약(items.length > limit으로 hasMore
+// 판정, lib/pagination.ts)을 안 지켜 리포지토리에 정확히 요청 limit만 전달했다 —
+// BE가 정확히 그만큼만 주니 어떤 limit에서도 hasMore가 영영 false였다(형제
+// stories/route.ts:114는 +1이 이미 있음). #4061의 픽스 테스트는 「경계 전달」(리포지토리가
+// 받은 query)만 쟀고 「응답 hasMore가 실제로 선다」(결과)는 안 쟀다 — 이번엔 결과를 잰다.
+describe('/api/tasks GET — cursor pagination hasMore/nextCursor 과대조회(story #3717)', () => {
+  beforeEach(() => {
+    Object.values(h).forEach((m) => m.mockReset());
+    h.getAuthContext.mockResolvedValue(agent());
+    h.createTaskRepository.mockResolvedValue({});
+  });
+
+  it('요청 limit=5인데 리포지토리엔 limit+1(6)이 전달된다(이 PR의 본질 — 지우면 RED)', async () => {
+    h.list.mockResolvedValue([]);
+    await GET(new Request('http://localhost/api/tasks?story_id=s1&limit=5'));
+    const calledWith = h.list.mock.calls[0]![0] as { limit?: number };
+    expect(calledWith.limit).toBe(6);
+  });
+
+  it('리포지토리가 요청보다 1건 더(6행) 주면 hasMore=true·nextCursor=5번째 행의 created_at(양성대조)', async () => {
+    h.list
+      .mockResolvedValueOnce([task('1'), task('2'), task('3'), task('4'), task('5'), task('6')]) // main page(6=limit+1)
+      .mockResolvedValueOnce([]) // counts: all
+      .mockResolvedValueOnce([]); // counts: done
+    const res = await GET(new Request('http://localhost/api/tasks?story_id=s1&limit=5'));
+    const body = await res.json();
+    expect(body.data).toHaveLength(5);
+    expect(body.meta.hasMore).toBe(true);
+    expect(body.meta.nextCursor).toBe(task('5').created_at);
+  });
+
+  it('리포지토리가 정확히 요청분(5행)만 주면 hasMore=false(마지막 페이지, 무회귀)', async () => {
+    h.list
+      .mockResolvedValueOnce([task('1'), task('2'), task('3'), task('4'), task('5')])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    const res = await GET(new Request('http://localhost/api/tasks?story_id=s1&limit=5'));
+    const body = await res.json();
+    expect(body.data).toHaveLength(5);
+    expect(body.meta.hasMore).toBe(false);
+    expect(body.meta.nextCursor).toBeNull();
+  });
+});

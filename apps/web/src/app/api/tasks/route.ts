@@ -105,7 +105,11 @@ export async function GET(request: Request) {
       assignee_id: assigneeId,
       status,
       status_ne: statusNe,
-      limit: pageInput.limit,
+      // story #3717(PO 배포 57 API 축 실측 03:50Z) — #3713이 리포지토리 경계 전달을
+      // 고치자(cursor/limit이 이제 실제로 BE에 감) 그 뒤에 숨어 있던 두 번째 결함이
+      // 드러났다: BE가 정확히 limit개만 주니 buildCursorPageMeta의 `items.length > limit`
+      // 계약(과대조회 필요)이 영영 false였다 — 형제 stories/route.ts:114와 동형으로 +1.
+      limit: pageInput.limit + 1, // RC3: 오버페치 → buildCursorPageMeta hasMore 판단
       cursor: pageInput.cursor,
     });
     const { page, meta } = buildCursorPageMeta(tasks, pageInput.limit, 'created_at');
