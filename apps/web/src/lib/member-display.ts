@@ -17,7 +17,6 @@
 // orphan) 중 하나를 지어내는 셈이라 적용하면 다른 방식으로 거짓말이 된다 — BE가
 // orphan에만 별도 신호(예: resolved:false)를 싣고 이 화면이 그 신호로 갈라 쓰는 처방은
 // story #3758(9번째 항목)로 분리했다.
-
 //
 // 유나 디자인 게이트 적기만②(2026-09-09) — `??`는 null/undefined만 잡고 빈 문자열은
 // 그대로 통과시킨다. BE가 ""를 name으로 준 적은 실측 0건이지만(전부 None 아니면 실
@@ -25,4 +24,23 @@
 // (표시할 이름이 없다)이라 다른 취급을 둘 이유가 없다.
 export function memberDisplayLabel(name: string | null | undefined, t: (key: string) => string): string {
   return name ? name : t('memberUnnamed');
+}
+
+// story #3755 CHANGES(카디르 QA 지적 2026-09-09) — organization/events/page.tsx의
+// PublishHistorySection용이었으나, `page.tsx`는 Next App Router가 named export 필드를
+// 화이트리스트로 검사하는 특수 모듈이라(metadata/generateMetadata/revalidate 등 정해진
+// 것 외 named export가 있으면 "is not a valid Page export field"로 next build가 실패
+// — tsc/vitest는 이 층을 안 잡는다, 3757 뒤 별건 가드 후보) 일반 헬퍼는 여기로.
+//
+// sender_id는 있는데 sender_name이 null(실존 발신자, display_name 미설정)인 경우와
+// sender_id 자체가 null(발신자 정보 자체가 없음)인 경우가 예전엔 둘 다
+// eventPublishHistoryUnknownSender("알 수 없음")로 뭉뚱그려졌다 — activity-log-view.tsx
+// auditActorProps와 동형 처방(sender_id 유무로 갈라 전자는 memberUnnamed).
+export function publishHistorySenderLabel(
+  item: { sender_id: string | null; sender_name: string | null },
+  t: (key: string) => string,
+  tc: (key: string) => string,
+): string {
+  if (!item.sender_id) return t('eventPublishHistoryUnknownSender');
+  return memberDisplayLabel(item.sender_name, tc);
 }
