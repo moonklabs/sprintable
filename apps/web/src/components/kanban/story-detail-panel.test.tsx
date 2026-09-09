@@ -1035,4 +1035,28 @@ describe('StoryDetailPanel — tasksLoading(story #3709, 완전성-정직)', () 
     expect(container.textContent).toContain(koMessages.board.loading);
     expect(container.textContent).not.toContain('task-1');
   });
+
+  // story #3709 후속(페드루 PO 지적, 유나 PASS 뒤 한 줄 더, 2026-09-09) — 탭 라벨
+  // 「Tasks (0)」이 조회 中에도 개수를 말해, 40px 아래 본문의 「불러오는 중...」과
+  // 같은 화면 두 세계였다(탭=아는 척, 본문=정직).
+  it('조회 中엔 탭 라벨이 개수를 안 보인다 — 응답 뒤엔 다시 보인다', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <StoryDetailPanel story={makeStory()} tasks={[]} tasksTotalCount={null} tasksLoading onClose={() => {}} />,
+      ));
+    });
+    const tasksTab = () => [...container.querySelectorAll('button')].find((b) => b.textContent?.startsWith('Tasks'));
+    expect(tasksTab()?.textContent).toBe('Tasks'); // "(0)" 없음 — 조회 中이라 아직 모른다.
+
+    await act(async () => { root.unmount(); });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root.render(wrap(
+        <StoryDetailPanel story={makeStory()} tasks={[makeTask('1')]} tasksTotalCount={1} onClose={() => {}} />,
+      ));
+    });
+    expect(tasksTab()?.textContent).toBe('Tasks (1)'); // 응답 뒤엔 지금처럼 수 표시.
+  });
 });

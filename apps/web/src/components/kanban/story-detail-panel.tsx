@@ -2170,7 +2170,11 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
             {/* Tabs for Tasks, Comments, Activity */}
             <Tabs defaultValue="tasks" className="w-full">
               <TabsList className="w-full">
-                <TabsTrigger value="tasks" className="flex-1">Tasks ({tasksTotalCount ?? tasks.length})</TabsTrigger>
+                {/* story #3709 후속(페드루 PO 지적, 유나 PASS 뒤 한 줄 더) — 조회 中엔
+                    개수를 아예 말하지 않는다. tasksLoading인데도 「Tasks (0)」을 그리면
+                    40px 아래 본문의 「불러오는 중...」과 같은 화면 두 세계가 재발한다
+                    (탭 라벨=아는 척·본문=정직, 서로 다른 사실을 동시에 말하는 꼴). */}
+                <TabsTrigger value="tasks" className="flex-1">{tasksLoading ? 'Tasks' : `Tasks (${tasksTotalCount ?? tasks.length})`}</TabsTrigger>
                 <TabsTrigger value="comments" className="flex-1">Comments ({comments.length})</TabsTrigger>
                 <TabsTrigger value="activity" className="flex-1">Activity</TabsTrigger>
               </TabsList>
@@ -2184,8 +2188,10 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                     가른다. */}
                 {tasksLoading ? (
                   // story #3709(FE 완전성-정직) — 조회 중엔 flow-node-story-panel.tsx와 같은
-                  // 낱말(t('loading')="불러오는 중...")로 «아직 모름»을 그대로 드러낸다 —
-                  // 이 분기가 없으면 아래 tasks.length===0 분기가 «없음»으로 오단정한다.
+                  // 계열(둘 다 t('loading')="불러오는 중..." 사용 — 실제 문자열 키는
+                  // flow-node의 flow.nodesLoading과 다르지만 같은 뜻을 같은 낱말로 말한다)로
+                  // «아직 모름»을 그대로 드러낸다 — 이 분기가 없으면 아래 tasks.length===0
+                  // 분기가 «없음»으로 오단정한다.
                   <p className="text-sm text-muted-foreground">{t('loading')}</p>
                 ) : tasks.length === 0 && (tasksTotalCount == null || tasksTotalCount === 0) ? (
                   <p className="text-sm text-muted-foreground">{t('noTasks')}</p>
