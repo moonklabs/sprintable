@@ -165,6 +165,11 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadingMoreEpics, setLoadingMoreEpics] = useState(false);
   const [loadingMoreStoryTasks, setLoadingMoreStoryTasks] = useState(false);
+  // story #3704(유나 발견+카디르 비블로커, #4054 재리뷰 中) — handleStoryClick은 이벤트
+  // 핸들러라 형제(epic-swimlane-board.tsx/flow-node-story-panel.tsx)처럼 effect cleanup의
+  // `cancelled` 클로저를 못 쓴다(재실행을 트리거할 의존성 배열이 없다) — 대신 클릭마다
+  // 증가시키는 요청 순번으로 "가장 최근 클릭의 응답만 반영"을 흉내낸다.
+  const storyTasksRequestRef = useRef(0);
 
   const selectedSprintId = searchParams.get('sprint_id') ?? '';
   const selectedEpicId = searchParams.get('epic_id') ?? '';
@@ -536,8 +541,18 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
 
   const handleStoryClick = useCallback(async (story: KanbanStory, { replace = false } = {}) => {
     setSelectedStory(story);
+    // story #3704 blocker① — storyTasks 자신도 세 값(tasks/nextCursor/totalCount)과 한 묶음으로
+    // 리셋한다. 전엔 이 줄이 빠져 있어, !res.ok(403/500 등)면 아래 if(res.ok) 블록을 통째로
+    // 건너뛰고 직전 스토리의 태스크 목록이 새 스토리 패널 밑에 그대로 남았다(catch만 비웠다).
+    setStoryTasks([]);
     setStoryTasksNextCursor(null);
     setStoryTasksTotalCount(null);
+
+    // story #3704 blocker② — 이 함수는 클릭마다 호출되는 이벤트 핸들러라 형제 두 곳처럼
+    // effect cleanup의 `cancelled` 클로저를 못 쓴다. 요청 순번을 자기 클로저에 캡처해 두고,
+    // 응답이 도착했을 때 "지금도 내가 최신 요청인지"를 대조 — A→B 연타에서 늦게 온 A의
+    // 응답이 B 패널의 tasks/nextCursor/totalCount를 덮는 것을 막는다.
+    const requestId = ++storyTasksRequestRef.current;
 
     // URL에 스토리 ID 반영
     const params = new URLSearchParams(searchParams);
@@ -550,13 +565,24 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
 
     try {
       const res = await fetchWithAuth(`/api/tasks?story_id=${story.id}&limit=20`);
+      if (storyTasksRequestRef.current !== requestId) return; // 그 사이 더 최신 클릭이 있었다 — 이 응답은 버린다.
       if (res.ok) {
         const json = await res.json();
+        // story #3704 후속(카디르 재-QA, PR#4055) — 위 대조는 fetch 직후일 뿐, res.json()
+        // 자체가 비동기라 그 파싱 사이에 더 최신 클릭이 순번을 올릴 수 있다 — 상태 반영
+        // «직전»(파싱 뒤)에 한 번 더 대조해야 그 창을 닫는다(안 닫으면 옛 결과가 새 클릭보다
+        // 늦게 커밋될 수 있다).
+        if (storyTasksRequestRef.current !== requestId) return;
         setStoryTasks(json.data ?? []);
         setStoryTasksNextCursor(json.meta?.nextCursor ?? null);
         setStoryTasksTotalCount(typeof json.meta?.totalCount === 'number' ? json.meta.totalCount : null);
+      } else {
+        setStoryTasks([]);
+        setStoryTasksNextCursor(null);
+        setStoryTasksTotalCount(null);
       }
     } catch {
+      if (storyTasksRequestRef.current !== requestId) return;
       setStoryTasks([]);
       setStoryTasksNextCursor(null);
       setStoryTasksTotalCount(null);
@@ -1839,9 +1865,20 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
           onLoadMoreTasks={async () => {
             if (!selectedStory || !storyTasksNextCursor) return;
             setLoadingMoreStoryTasks(true);
+            // story #3704 후속(유나 design CHANGES, PR#4055 재리뷰 2026-09-09) — 「더 보기」는
+            // handleStoryClick의 새 클릭이 아니라 «지금 열려있는 스토리 이어받기»라 순번을
+            // 올리지 않고 캡처만 한다. 패널이 onNavigate로 다른 스토리(B)로 넘어가면
+            // handleStoryClick이 순번을 올리므로, 이 응답이 늦게 와도 아래 대조에서 걸러진다
+            // (안 걸렀을 때: A page2가 B 패널에 append되고 totalCount까지 A 것으로 덮인다).
+            const requestId = storyTasksRequestRef.current;
             const res = await fetch(`/api/tasks?story_id=${selectedStory.id}&limit=20&cursor=${encodeURIComponent(storyTasksNextCursor)}`);
+            if (storyTasksRequestRef.current !== requestId) { setLoadingMoreStoryTasks(false); return; }
             if (res.ok) {
               const json = await res.json();
+              // story #3704 후속(카디르 재-QA, PR#4055) — res.json() 파싱 사이에도 다른
+              // 스토리로 이동할 수 있다(handleStoryClick이 순번을 올린다) — 상태 반영 직전에
+              // 한 번 더 대조.
+              if (storyTasksRequestRef.current !== requestId) { setLoadingMoreStoryTasks(false); return; }
               setStoryTasks((prev) => {
                 const existingIds = new Set(prev.map((t) => t.id));
                 return [...prev, ...(json.data ?? []).filter((t: Task) => !existingIds.has(t.id))];
