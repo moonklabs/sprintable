@@ -26,13 +26,16 @@ export function AppCredentialsCard({
   onSaved: () => void;
 }) {
   const t = useTranslations('channelConnect');
-  const [editing, setEditing] = useState(false);
+  const effectiveSource = credentials?.effective_source ?? 'none';
+  // story #3743 CHANGES Ⓐ(페드루 PO, 2026-09-09 12:36Z) — 행의 다음 발("앱 자격
+  // 등록")로 이 카드가 열릴 때 effectiveSource==='none'이 유일한 경로다(이미 등록된
+  // 경우 ⋯의 "앱 자격 관리"로만 온다). 그 자리에서 또 "등록" 버튼을 한 번 더 누르게
+  // 하는 막다른 화면 대신, 처음부터 입력 폼이 서 있게 한다(같은 라벨 두 번 클릭 금지).
+  const [editing, setEditing] = useState(effectiveSource === 'none');
   const [appId, setAppId] = useState('');
   const [appSecret, setAppSecret] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const effectiveSource = credentials?.effective_source ?? 'none';
 
   const handleSave = async () => {
     setSaving(true);

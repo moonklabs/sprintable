@@ -85,7 +85,42 @@ describe('AgentSetupSection', () => {
     expect(stibeeRow?.querySelector('[data-status-chip="needs_setup"]')).toBeTruthy();
     const link = stibeeRow?.querySelector('a');
     expect(link?.getAttribute('href')).toBe('/chats');
-    expect(stibeeRow?.textContent).toContain('create.senderEmail');
+    // story #3743 CHANGES Ⓒ(페드루 PO, 2026-09-09 12:36Z) — raw 필드 키(코드 값)가
+    // 제목·부제 자리에 서던 결함 정정 — 수 형(「필요한 설정 N개」)만, 키 이름은 0건.
+    expect(stibeeRow?.textContent).not.toContain('create.senderEmail');
+    expect(stibeeRow?.textContent).not.toContain('create.listId');
+    expect(stibeeRow?.textContent).toContain(
+      koMessages.channelConnect.agentSetupNeedsSetupHint.replace('{count}', '2'),
+    );
+  });
+
+  // story #3743 CHANGES Ⓒ(페드루 PO 지적, #4090 리뷰 2026-09-09 12:41Z) — setup_hint가
+  // 있으면(첫 미충족 필드 것) 그 사람 문장을 부제로 쓴다 — 수 형은 setup_hint가 없을
+  // 때만의 폴백.
+  it('⭐missing 필드에 setup_hint가 있으면 그 문장이 부제(수 형 대신)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/organizations/org-1/connectors') {
+        return {
+          ok: true,
+          json: async () => ({
+            data: [connector({
+              fields: [
+                { name: 'create.senderEmail', source: 'org_config', required: true, setup_hint: '발신 이메일 주소를 등록해야 합니다.' },
+                { name: 'create.listId', source: 'org_config', required: true },
+              ],
+            })],
+          }),
+        };
+      }
+      throw new Error('unexpected fetch: ' + url);
+    }));
+    await act(async () => { root.render(wrap(<AgentSetupSection orgId="org-1" />)); });
+    await flush();
+    const stibeeRow = container.querySelector('[data-testid="agent-setup-row-stibee"]');
+    expect(stibeeRow?.textContent).toContain('발신 이메일 주소를 등록해야 합니다.');
+    expect(stibeeRow?.textContent).not.toContain(
+      koMessages.channelConnect.agentSetupNeedsSetupHint.replace('{count}', '2'),
+    );
   });
 
   it('커넥터 0건이면 구획 자체를 안 그린다(없는 자리를 그리지 않는다)', async () => {

@@ -244,7 +244,9 @@ describe('OrganizationChannelsPage — 목록·상태(story #3376)', () => {
     stubFetch({ connections: [], credentials: { configured: false, app_id_suffix: null, effective_source: 'none' } });
     await mount('owner');
     expect(container.textContent).toContain('설정 미완');
-    expect(container.textContent).toContain('먼저 앱 자격을 설정해야');
+    // story #3743 CHANGES Ⓓ(페드루 PO, 2026-09-09 12:36Z) — 부제가 1280px에서 잘리던
+    // 결함 정정으로 짧은 시안 문장으로 교체.
+    expect(container.textContent).toContain(koMessages.channelConnect.channelConfigIncompleteReason);
     const registerBtn = container.querySelector('[data-testid="channel-row-primary-register"]') as HTMLButtonElement;
     expect(registerBtn).not.toBeNull();
     expect(registerBtn.disabled).toBeFalsy();

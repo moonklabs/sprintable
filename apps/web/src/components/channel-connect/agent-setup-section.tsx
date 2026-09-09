@@ -25,20 +25,25 @@ export interface ConnectorItem {
   connector_key: string;
   version: string;
   channel: string;
-  fields: Array<{ name: string; source: 'content' | 'org_config'; required?: boolean | null }>;
+  fields: Array<{ name: string; source: 'content' | 'org_config'; required?: boolean | null; setup_hint?: string | null }>;
   requires_env: string[];
   kinds: string[] | null;
   org_config: Record<string, unknown>;
 }
 
-export function missingRequiredConnectorFieldNames(connector: ConnectorItem): string[] {
+function missingRequiredConnectorFields(connector: ConnectorItem): ConnectorItem['fields'] {
+  // required===true만 센다(null·undefined는 "모름"이지 "필요함"이 아니다 — 지어내지
+  // 않는다). truthy 필터라 required가 boolean|null|undefined여도 true인 것만 남는다.
   return connector.fields
     .filter((f) => f.source === 'org_config' && f.required)
     .filter((f) => {
       const v = connector.org_config[f.name];
       return v === undefined || v === null || v === '';
-    })
-    .map((f) => f.name);
+    });
+}
+
+export function missingRequiredConnectorFieldNames(connector: ConnectorItem): string[] {
+  return missingRequiredConnectorFields(connector).map((f) => f.name);
 }
 
 // story #3743 — 커넥터 준비 상태는 채널 연결 상태(5종, connection-status.ts)와 다른
@@ -57,14 +62,21 @@ function ConnectorReadinessChip({ ready, t }: { ready: boolean; t: ReturnType<ty
 }
 
 function ConnectorRow({ connector, t }: { connector: ConnectorItem; t: ReturnType<typeof useTranslations> }) {
-  const missing = missingRequiredConnectorFieldNames(connector);
-  const ready = missing.length === 0;
+  const missingFields = missingRequiredConnectorFields(connector);
+  const ready = missingFields.length === 0;
+  // story #3743 CHANGES Ⓒ(페드루 PO, 2026-09-09 12:41Z 유나 定) — `name`(raw 필드 키,
+  // create.senderEmail류)은 어떤 경우에도 화면에 안 싣는다. `setup_hint`가 있으면(첫
+  // 미충족 필드 것) 그 사람 문장을 부제로, 없으면 수 형("~하세요" 없음 — 액션은
+  // 버튼 몫). fields엔 사람 라벨(title/label) 칸 자체가 없다(그라운딩 확認,
+  // backend/app/routers/connectors.py ConnectorFieldEntry).
+  const setupHint = missingFields.find((f) => f.setup_hint)?.setup_hint;
+  const subtitle = ready ? undefined : (setupHint ?? t('agentSetupNeedsSetupHint', { count: missingFields.length }));
   return (
     <ListRow
       data-testid={`agent-setup-row-${connector.connector_key}`}
       mark={<ListRowMark label={channelMarkInitials(connector.channel)} color={channelMarkColor(connector.channel)} />}
       title={t('agentSetupConnectorTitle', { channel: channelLabel(connector.channel, t) })}
-      subtitle={ready ? undefined : t('agentSetupNeedsSetupHint', { fields: missing.join(', ') })}
+      subtitle={subtitle}
       status={<ConnectorReadinessChip ready={ready} t={t} />}
       action={ready ? undefined : (
         <Link href="/chats">

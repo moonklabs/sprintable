@@ -239,6 +239,35 @@ function MeasurementConnectionsSection({
     }
   }, [orgId, onRefresh]);
 
+  const beaconStatusText = beacon && (
+    beacon.status === 'not_started'
+      ? t('measurementBeaconNotStarted')
+      : beacon.status === 'no_data_yet'
+        ? t('measurementBeaconNoDataYet')
+        : t('measurementBeaconHasData', {
+            time: beacon.last_seen_at ? formatRelativeTime(beacon.last_seen_at, locale, displayTimezone) : '',
+            // 페드루 PO REQUIRED③(2026-09-06, #3896 리뷰) — count_7d(0 포함,
+            // null≠0 원칙 — has_data 상태면 항상 실수라 BE가 이미 보장).
+            count: beacon.count_7d ?? 0,
+          })
+  );
+  const utmStatusText = utm && (
+    utm.status === 'auto' ? t('measurementUtmAuto') : utm.status === 'manual' ? t('measurementUtmManual') : t('measurementUtmOff')
+  );
+  // story #3583(페드루 PO 確定 2026-09-06, 유나 §13-9·CHANGES PR#3935) — 상태 낱말은
+  // 3종만 재사용(channelStatus{Connected,NotConnected,ReauthRequired}) — property_pending은
+  // 새 낱말을 짓지 않고 NotConnected로 접는다(그 대신 행 아래 속성 선택 UI 자체가
+  // "다음 걸음"을 보인다).
+  const ga4StatusText = ga4 && (
+    // 유나 CHANGES 필수②(PR#3935) — property_name이 없으면 「연결됨 · 」 구분자까지
+    // 함께 뺀다(§17-23 ⑤-1, 낱말만 빼면 구분자가 헛돈다).
+    ga4.status === 'connected'
+      ? (ga4.property_name ? `${t('channelStatusConnected')} · ${ga4.property_name}` : t('channelStatusConnected'))
+      : ga4.status === 'needs_reauth'
+        ? t('channelStatusReauthRequired')
+        : t('channelStatusNotConnected')
+  );
+
   return (
     <div className="space-y-4 border-t border-border pt-6" data-testid="measurement-connections-section">
       <div className="space-y-1">
@@ -246,158 +275,135 @@ function MeasurementConnectionsSection({
         <p className="text-xs text-muted-foreground">{t('measurementSectionSubtitle')}</p>
       </div>
 
-      {beacon ? (
-        <div className="space-y-2" data-testid="measurement-beacon-row">
-          <p className="text-sm font-medium text-foreground">{t('measurementBeaconLabel')}</p>
-          <p className="text-sm text-foreground" data-testid="measurement-beacon-status">
-            {beacon.status === 'not_started'
-              ? t('measurementBeaconNotStarted')
-              : beacon.status === 'no_data_yet'
-                ? t('measurementBeaconNoDataYet')
-                : t('measurementBeaconHasData', {
-                    time: beacon.last_seen_at ? formatRelativeTime(beacon.last_seen_at, locale, displayTimezone) : '',
-                    // 페드루 PO REQUIRED③(2026-09-06, #3896 리뷰) — count_7d(0 포함,
-                    // null≠0 원칙 — has_data 상태면 항상 실수라 BE가 이미 보장).
-                    count: beacon.count_7d ?? 0,
-                  })}
-          </p>
-          {!beaconPanel ? (
-            <Button size="sm" variant="outline" onClick={() => void handleShowBeaconKey()} disabled={beaconPanelLoading}>
-              {beacon.status === 'not_started' ? t('measurementBeaconStartAction') : t('measurementBeaconViewKeyAction')}
-            </Button>
-          ) : (
-            <BeaconKeyPanel publicKey={beaconPanel.publicKey} t={t} />
-          )}
-          {beaconPanelError ? (
-            <p className="text-xs text-destructive" data-testid="measurement-beacon-key-error">{t('measurementBeaconKeyFailed')}</p>
-          ) : null}
-        </div>
-      ) : null}
-
-      {utm ? (
-        <div className="space-y-2" data-testid="measurement-utm-row">
-          <p className="text-sm font-medium text-foreground">{t('measurementUtmLabel')}</p>
-          <p className="text-sm text-foreground" data-testid="measurement-utm-status">
-            {utm.status === 'auto'
-              ? t('measurementUtmAuto')
-              : utm.status === 'manual'
-                ? t('measurementUtmManual')
-                : t('measurementUtmOff')}
-          </p>
-          {utm.settings_path ? (
-            <a href={utm.settings_path} className="text-xs underline text-foreground" data-testid="measurement-utm-settings-link">
-              {t('measurementUtmSettingsLink')}
-            </a>
-          ) : null}
-        </div>
-      ) : null}
-
-      {/* story #3583(페드루 PO 確定 2026-09-06, 유나 §13-9·CHANGES PR#3935) — 문장
-          리듬(칩 X), beacon·utm과 같은 자리 규율. 상태 낱말은 3종만 재사용
-          (channelStatus{Connected,NotConnected,ReauthRequired}) — property_pending은
-          새 낱말을 짓지 않고 NotConnected로 접는다(그 대신 이 줄 아래 속성 선택 UI
-          자체가 "다음 걸음"을 보인다). */}
-      {ga4 ? (
-        <div className="space-y-2" data-testid="measurement-ga4-row">
-          <p className="text-sm font-medium text-foreground">{t('measurementGa4Label')}</p>
-          <p className="text-sm text-foreground" data-testid="measurement-ga4-status">
-            {/* 유나 CHANGES 필수②(PR#3935) — property_name이 없으면 「연결됨 · 」
-                구분자까지 함께 뺀다(§17-23 ⑤-1, 낱말만 빼면 구분자가 헛돈다). */}
-            {ga4.status === 'connected'
-              ? (ga4.property_name ? `${t('channelStatusConnected')} · ${ga4.property_name}` : t('channelStatusConnected'))
-              : ga4.status === 'needs_reauth'
-                ? t('channelStatusReauthRequired')
-                : t('channelStatusNotConnected')}
-          </p>
-          {/* 계약 보강(PO, PR#3935) — needs_reauth에 reason이 실리면 ConnectionRow와
-              같은 ReauthNote 낱말을 그대로 재사용한다. reason이 없으면(구버전 응답 등)
-              note 자체를 안 그린다. */}
-          {ga4.status === 'needs_reauth' && ga4.reason ? <ReauthNote reason={ga4.reason} t={t} /> : null}
-
-          {ga4.status === 'disconnected' || ga4.status === 'needs_reauth' ? (
-            <Button
-              size="sm" variant="outline" onClick={() => void handleGa4Authorize()}
-              disabled={ga4AuthorizeLoading} data-testid="measurement-ga4-authorize-button"
-            >
-              {ga4.status === 'needs_reauth' ? t('channelReauthAction') : t('channelConnectAction', { channel: 'GA4' })}
-            </Button>
-          ) : null}
-
-          {ga4.status === 'property_pending' ? (
-            <div className="space-y-2" data-testid="measurement-ga4-property-select">
-              {ga4PropertiesError ? (
-                <div className="flex flex-wrap items-center gap-2">
-                  <p className="text-xs text-destructive" data-testid="measurement-ga4-properties-error">
-                    {t('measurementGa4PropertiesLoadFailed')}
-                  </p>
-                  {/* 유나 CHANGES ④(PR#3935) — 자동 로딩이라 사람이 직접 다시 시킬
-                      방법이 버튼 없인 없다. */}
-                  <Button
-                    size="sm" variant="outline" onClick={() => setGa4PropertiesRetryToken((n) => n + 1)}
-                    data-testid="measurement-ga4-properties-retry-button"
-                  >
-                    {tCommon('retry')}
-                  </Button>
-                </div>
-              ) : !ga4Properties ? (
-                <p className="text-xs text-muted-foreground">{t('measurementGa4PropertiesLoading')}</p>
-              ) : ga4Properties.length === 0 ? (
-                // 유나 CHANGES 필수①(PR#3935) — 속성 0개는 드롭다운(빈 목록)이 아니라
-                // "어디 가서 무엇을 하면 되는지"를 말하는 문장.
-                <p className="text-xs text-muted-foreground" data-testid="measurement-ga4-no-properties">
-                  {t('measurementGa4NoProperties')}
-                </p>
-              ) : (
-                <div className="flex flex-wrap items-center gap-2">
-                  <select
-                    className="rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground"
-                    value={ga4SelectedPropertyId}
-                    onChange={(e) => setGa4SelectedPropertyId(e.target.value)}
-                    data-testid="measurement-ga4-property-dropdown"
-                  >
-                    <option value="">{t('measurementGa4PropertySelectPlaceholder')}</option>
-                    {ga4Properties.map((p) => (
-                      <option key={p.property_id} value={p.property_id}>{p.display_name}</option>
-                    ))}
-                  </select>
-                  <Button
-                    size="sm" onClick={() => void handleGa4Select()}
-                    disabled={!ga4SelectedPropertyId || ga4SelectLoading}
-                    data-testid="measurement-ga4-property-confirm"
-                  >
-                    {tCommon('confirm')}
-                  </Button>
-                </div>
-              )}
-            </div>
-          ) : null}
-
-          {ga4.status === 'connected' ? (
-            <div className="space-y-1">
-              <Button
-                size="sm" variant="outline" onClick={() => void handleGa4Disconnect()}
-                disabled={ga4DisconnectLoading} data-testid="measurement-ga4-disconnect-button"
-              >
-                {t('channelDisconnectAction')}
+      {/* story #3743 CHANGES(유나 시안 ③ v3 44ec0ad1, 페드루 PO 2026-09-09 12:42Z) —
+          이 셋도 행 목록 형(ListRow)으로. 낱말은 집안 키 그대로(새 키 0) — 형만 통일. */}
+      <div className="divide-y divide-border overflow-hidden rounded-md border border-border">
+        {beacon ? (
+          <ListRow
+            data-testid="measurement-beacon-row"
+            title={t('measurementBeaconLabel')}
+            subtitle={<span data-testid="measurement-beacon-status">{beaconStatusText}</span>}
+            action={!beaconPanel ? (
+              <Button size="sm" variant="outline" onClick={() => void handleShowBeaconKey()} disabled={beaconPanelLoading}>
+                {beacon.status === 'not_started' ? t('measurementBeaconStartAction') : t('measurementBeaconViewKeyAction')}
               </Button>
-              {/* 유나 §13-9⑤ 확定 — 확인 대화상자 없음, 누르기 前에 이미 서는 문장. */}
-              <p className="text-xs text-muted-foreground" data-testid="measurement-ga4-disconnect-effect">
-                {t('measurementGa4DisconnectEffect')}
-              </p>
-            </div>
-          ) : null}
+            ) : undefined}
+          >
+            {beaconPanel ? <BeaconKeyPanel publicKey={beaconPanel.publicKey} t={t} /> : null}
+            {beaconPanelError ? (
+              <p className="text-xs text-destructive" data-testid="measurement-beacon-key-error">{t('measurementBeaconKeyFailed')}</p>
+            ) : null}
+          </ListRow>
+        ) : null}
 
-          {/* 유나 CHANGES ⑤(PR#3935, 3575 ⑤ 동형) — 응답 있음(status 코드)/응답
-              없음(네트워크 자체가 안 닿음) 두 문장으로 가른다. */}
-          {ga4ActionError ? (
-            <p className="text-xs text-destructive" data-testid="measurement-ga4-action-error">
-              {ga4ActionError.status !== null
-                ? t('measurementGa4ActionFailedWithStatus', { status: ga4ActionError.status })
-                : t('measurementGa4ActionFailedNoResponse')}
-            </p>
-          ) : null}
-        </div>
-      ) : null}
+        {utm ? (
+          <ListRow
+            data-testid="measurement-utm-row"
+            title={t('measurementUtmLabel')}
+            subtitle={<span data-testid="measurement-utm-status">{utmStatusText}</span>}
+            action={utm.settings_path ? (
+              <a href={utm.settings_path} data-testid="measurement-utm-settings-link">
+                <Button size="sm" variant="outline">{t('measurementUtmSettingsLink')}</Button>
+              </a>
+            ) : undefined}
+          />
+        ) : null}
+
+        {ga4 ? (
+          <ListRow
+            data-testid="measurement-ga4-row"
+            title={t('measurementGa4Label')}
+            subtitle={<span data-testid="measurement-ga4-status">{ga4StatusText}</span>}
+            action={ga4.status === 'disconnected' || ga4.status === 'needs_reauth' ? (
+              <Button
+                size="sm" variant="outline" onClick={() => void handleGa4Authorize()}
+                disabled={ga4AuthorizeLoading} data-testid="measurement-ga4-authorize-button"
+              >
+                {ga4.status === 'needs_reauth' ? t('channelReauthAction') : t('channelConnectAction', { channel: 'GA4' })}
+              </Button>
+            ) : undefined}
+          >
+            {/* 계약 보강(PO, PR#3935) — needs_reauth에 reason이 실리면 ConnectionRow와
+                같은 ReauthNote 낱말을 그대로 재사용한다. reason이 없으면(구버전 응답
+                등) note 자체를 안 그린다. */}
+            {ga4.status === 'needs_reauth' && ga4.reason ? <ReauthNote reason={ga4.reason} t={t} /> : null}
+
+            {ga4.status === 'property_pending' ? (
+              <div className="space-y-2" data-testid="measurement-ga4-property-select">
+                {ga4PropertiesError ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-xs text-destructive" data-testid="measurement-ga4-properties-error">
+                      {t('measurementGa4PropertiesLoadFailed')}
+                    </p>
+                    {/* 유나 CHANGES ④(PR#3935) — 자동 로딩이라 사람이 직접 다시 시킬
+                        방법이 버튼 없인 없다. */}
+                    <Button
+                      size="sm" variant="outline" onClick={() => setGa4PropertiesRetryToken((n) => n + 1)}
+                      data-testid="measurement-ga4-properties-retry-button"
+                    >
+                      {tCommon('retry')}
+                    </Button>
+                  </div>
+                ) : !ga4Properties ? (
+                  <p className="text-xs text-muted-foreground">{t('measurementGa4PropertiesLoading')}</p>
+                ) : ga4Properties.length === 0 ? (
+                  // 유나 CHANGES 필수①(PR#3935) — 속성 0개는 드롭다운(빈 목록)이 아니라
+                  // "어디 가서 무엇을 하면 되는지"를 말하는 문장.
+                  <p className="text-xs text-muted-foreground" data-testid="measurement-ga4-no-properties">
+                    {t('measurementGa4NoProperties')}
+                  </p>
+                ) : (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <select
+                      className="rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground"
+                      value={ga4SelectedPropertyId}
+                      onChange={(e) => setGa4SelectedPropertyId(e.target.value)}
+                      data-testid="measurement-ga4-property-dropdown"
+                    >
+                      <option value="">{t('measurementGa4PropertySelectPlaceholder')}</option>
+                      {ga4Properties.map((p) => (
+                        <option key={p.property_id} value={p.property_id}>{p.display_name}</option>
+                      ))}
+                    </select>
+                    <Button
+                      size="sm" onClick={() => void handleGa4Select()}
+                      disabled={!ga4SelectedPropertyId || ga4SelectLoading}
+                      data-testid="measurement-ga4-property-confirm"
+                    >
+                      {tCommon('confirm')}
+                    </Button>
+                  </div>
+                )}
+              </div>
+            ) : null}
+
+            {ga4.status === 'connected' ? (
+              <div className="space-y-1">
+                <Button
+                  size="sm" variant="outline" onClick={() => void handleGa4Disconnect()}
+                  disabled={ga4DisconnectLoading} data-testid="measurement-ga4-disconnect-button"
+                >
+                  {t('channelDisconnectAction')}
+                </Button>
+                {/* 유나 §13-9⑤ 확定 — 확인 대화상자 없음, 누르기 前에 이미 서는 문장. */}
+                <p className="text-xs text-muted-foreground" data-testid="measurement-ga4-disconnect-effect">
+                  {t('measurementGa4DisconnectEffect')}
+                </p>
+              </div>
+            ) : null}
+
+            {/* 유나 CHANGES ⑤(PR#3935, 3575 ⑤ 동형) — 응답 있음(status 코드)/응답
+                없음(네트워크 자체가 안 닿음) 두 문장으로 가른다. */}
+            {ga4ActionError ? (
+              <p className="text-xs text-destructive" data-testid="measurement-ga4-action-error">
+                {ga4ActionError.status !== null
+                  ? t('measurementGa4ActionFailedWithStatus', { status: ga4ActionError.status })
+                  : t('measurementGa4ActionFailedNoResponse')}
+              </p>
+            ) : null}
+          </ListRow>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -793,7 +799,14 @@ function ChannelSection({
       }
       return null;
     }
-    if (single && singleDerived?.status === 'reauth_required' && single.credential_kind !== 'none') {
+    // story #3743 CHANGES Ⓑ(페드루 PO, 유나 ㉠ 표) — expiring_soon도 reauth_required와
+    // 같은 손(다음 발=「다시 연결」) — 단 isAutoRefreshInfo=true(자동 갱신 갈래)면
+    // 사람이 할 일이 없어(부제가 이미 "자동으로 갱신됩니다"를 말한다) 버튼 없음.
+    if (
+      single
+      && single.credential_kind !== 'none'
+      && (singleDerived?.status === 'reauth_required' || (singleDerived?.status === 'expiring_soon' && !singleDerived.isAutoRefreshInfo))
+    ) {
       return isOwnerStrict ? { label: t('channelReauthAction'), href: reauthHref, testId: 'channel-row-primary-reauth' } : null;
     }
     if (connections.length > 1) {
@@ -826,13 +839,15 @@ function ChannelSection({
           title={channelLabel(channel, t)}
           subtitle={subtitle}
           status={<ChannelStatusChip status={channelStatus} />}
+          // story #3743 CHANGES Ⓓ(페드루 PO, 2026-09-09 12:41Z) — 채운 파랑은 헤더
+          // 하나만(#4088과 같은 형). 행 다음 발은 전부 outline.
           action={primaryAction ? (
             primaryAction.href ? (
               <a href={primaryAction.href}>
-                <Button size="sm" data-testid={primaryAction.testId}>{primaryAction.label}</Button>
+                <Button variant="outline" size="sm" data-testid={primaryAction.testId}>{primaryAction.label}</Button>
               </a>
             ) : (
-              <Button size="sm" onClick={primaryAction.onClick} disabled={primaryAction.disabled} data-testid={primaryAction.testId}>
+              <Button variant="outline" size="sm" onClick={primaryAction.onClick} disabled={primaryAction.disabled} data-testid={primaryAction.testId}>
                 {primaryAction.label}
               </Button>
             )
@@ -898,15 +913,18 @@ function ChannelSection({
               onSaved={onRefresh}
             />
           ) : null}
-          {connections.length === 0 ? (
+          {/* story #3743 CHANGES Ⓐ(페드루 PO) — config_incomplete(oauth+자격 없음)면
+              "계정 연결 0"은 당연한 사실(칩·부제가 이미 그 뜻을 실었다) — 다른 세계의
+              문장을 겹쳐 싣지 않는다. */}
+          {connections.length === 0 && !(credential_kind === 'oauth' && effectiveSource === 'none') ? (
             <p className="text-sm text-muted-foreground">{t('channelNoConnections')}</p>
-          ) : (
+          ) : connections.length > 0 ? (
             <div className="divide-y divide-border overflow-hidden rounded-md border border-border" data-testid="channel-section-rows">
               {connections.map((c, index) => (
                 <ConnectionRow key={c.id} conn={c} index={index} isOwnerStrict={isOwnerStrict} isOwnerOrAdmin={isOwnerOrAdmin} orgId={orgId} onDisconnected={onRefresh} t={t} showStatusChip={connections.length !== 1} />
               ))}
             </div>
-          )}
+          ) : null}
           {credential_kind === 'pasted_secret' ? (
             <PastedSecretConnectCard channel={channel} orgId={orgId} isOwner={isOwnerOrAdmin} connectionCount={connections.length} onConnected={onRefresh} t={t} />
           ) : null}
