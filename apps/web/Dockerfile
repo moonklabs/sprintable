@@ -30,12 +30,12 @@ COPY --from=deps /app/packages ./packages
 COPY apps/web/ apps/web/
 # ee overlay (SaaS 빌드 시 주입, OSS에서는 빈 디렉토리 허용)
 COPY ee/ ee/
-# story #3729(배포 58 실사고, 2026-09-09) — 레포 루트 공유 스크립트(scripts/i18n-key-parser.js,
-# story #3156). apps/web 안 3파일(verify-no-new-raw-fetch-api.ts·i18n-key-coverage.test.ts·
-# pagination-envelope-consumers.test.ts)이 `../../../scripts/...`로 이 밖을 import하는데
-# builder 컨텍스트엔 없어 `pnpm build`의 타입체크가 Cannot find module로 죽었다(CI는 전체
-# 체크아웃이라 이 축을 안 잰다 — Docker 컨텍스트 전용 결함).
-COPY scripts/ scripts/
+# story #3731(3729 후속) — 레포 루트 scripts/를 여기 COPY하는 핫픽스는 걷었다. 공유
+# 파서(구 scripts/i18n-key-parser.js)를 packages/scripts/로 이관해 이미 위 `COPY
+# --from=deps /app/packages ./packages`가 담고 있다 — 루트 scripts/를 이 목록에 남겨
+# 두면 「apps/web 밖 import ⊆ COPY 집합」 가드(verify-frontend-docker-import-context.ts)의
+# 허용 접두에 scripts/가 들어가 그 가드가 «루트 scripts/ 재발»을 영영 못 보게 된다
+# (걷은 뒤 apps/web 비-테스트 전수 재스캔 0건 확認 — 이관이 근본 봉쇄임을 실측).
 WORKDIR /app/apps/web
 ENV NEXT_TELEMETRY_DISABLED=1
 # rewrites()가 빌드 시점에 routes-manifest.json으로 베이크인되므로 ARG로 주입 필요
