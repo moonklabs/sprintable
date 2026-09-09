@@ -51,14 +51,6 @@ function formatOnTimeRate(rate: number | null, t: Translator): string {
   return `${Math.round(rate * 100)}%`;
 }
 
-// PO 보정(2026-09-05, PR#3833 리뷰) — 「—」만 서면 이유 없이 "고장인가"로 읽힌다
-// (§18-2). recovery null의 뜻은 정시율과 다르다 — "이 기간에 실패가 없어 복구할
-// 것 자체가 없었다"이므로 별도 문구를 쓴다(정시율의 "발행이 없다"와 혼동 금지).
-function formatRecoveryMinutes(seconds: number | null, t: Translator): string {
-  if (seconds === null) return `${t('publishingMetricsUnmeasuredDash')} (${t('publishingMetricsRecoveryNoFailures')})`;
-  return t('publishingMetricsMinutesUnit', { minutes: Math.round(seconds / 60) });
-}
-
 export function PublishingMetricsBand({ orgId }: { orgId: string }) {
   const t = useTranslations('content');
   const [window_, setWindow] = useState<'7d' | '30d'>('7d');
@@ -99,7 +91,6 @@ export function PublishingMetricsBand({ orgId }: { orgId: string }) {
     void load(win);
   };
 
-  const accidentBothZero = metrics ? metrics.duplicate_publications === 0 && metrics.unapproved_adapter_calls === 0 : false;
   const displayTimezone = resolveDisplayTimezone().tz;
 
   return (
@@ -132,26 +123,20 @@ export function PublishingMetricsBand({ orgId }: { orgId: string }) {
           <span data-testid="publishing-metrics-on-time-rate">
             {t('publishingMetricsOnTimeRateLabel')} {formatOnTimeRate(metrics.on_time_rate, t)}
           </span>
-          <span data-testid="publishing-metrics-recovery">
-            {t('publishingMetricsRecoveryLabel')} p50 {formatRecoveryMinutes(metrics.recovery_seconds_p50, t)} / p95 {formatRecoveryMinutes(metrics.recovery_seconds_p95, t)}
-          </span>
-          {/* §18-1 — 사고 둘이 다 0이면 뭉쳐서 한 줄, 아니면 0이 아닌 것만 개별로. */}
-          {accidentBothZero ? (
-            <span data-testid="publishing-metrics-accident-zero">{t('publishingMetricsAccidentZero')}</span>
-          ) : (
-            <>
-              {metrics.duplicate_publications > 0 ? (
-                <span data-testid="publishing-metrics-duplicate">
-                  {t('publishingMetricsDuplicateNonzero', { count: metrics.duplicate_publications })}
-                </span>
-              ) : null}
-              {metrics.unapproved_adapter_calls > 0 ? (
-                <span data-testid="publishing-metrics-unapproved">
-                  {t('publishingMetricsUnapprovedNonzero', { count: metrics.unapproved_adapter_calls })}
-                </span>
-              ) : null}
-            </>
-          )}
+          {/* story #3735(B1·B2, 유나 定 2026-09-09) — 복구 p50/p95(엔지니어 지표)·
+              사고 둘 다 0일 때의 「중복·승인 없는 호출 0」 요약 줄을 걷었다. 0이면
+              아예 안 적는다는 §18-1/§18-3의 "행동" 규율을 "사고"에도 그대로
+              맞춘다(0을 굳이 「이상 없음」으로 적지 않는다). */}
+          {metrics.duplicate_publications > 0 ? (
+            <span data-testid="publishing-metrics-duplicate">
+              {t('publishingMetricsDuplicateNonzero', { count: metrics.duplicate_publications })}
+            </span>
+          ) : null}
+          {metrics.unapproved_adapter_calls > 0 ? (
+            <span data-testid="publishing-metrics-unapproved">
+              {t('publishingMetricsUnapprovedNonzero', { count: metrics.unapproved_adapter_calls })}
+            </span>
+          ) : null}
           {/* §18-3 — 링크가 곧 할 일. 0이면 안 적는다(뭉침 없음 — 행동 항목은 할
               일이 없으면 언급 자체가 없다). */}
           {metrics.connections_expired > 0 ? (

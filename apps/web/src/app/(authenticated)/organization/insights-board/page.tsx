@@ -19,7 +19,6 @@ import { channelLabel } from '@/lib/channel-label';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { InsightsBoardMetricCell } from '@/components/insights-board/insights-board-metric-cell';
-import { MeasuredMetricsCards } from '@/components/insights-board/measured-metrics-cards';
 import { InsightsBoardCommentsCell } from '@/components/insights-board/insights-board-comments-cell';
 import { FollowUpDialog } from '@/components/insights-board/follow-up-dialog';
 import { ReconcileResultLine } from '@/components/insights-board/reconcile-result-line';
@@ -82,13 +81,6 @@ const STATUS_FILTER_LABEL_KEYS: Partial<Record<(typeof STATUS_FILTER_OPTIONS)[nu
 const DEFAULT_WINDOW: InsightsBoardWindow = '7d';
 const DEFAULT_SORT_ROLE: SortRole = 'published_at';
 const DEFAULT_SORT_DIR: SortDir = 'desc';
-
-// story #3618 CHANGES 2(페드루 PO 채택, 유나 자리축) — 기간 조작은 화면에 하나(이
-// 페이지의 「기간」 선택 하나만) — MeasuredMetricsCards는 더는 자체 토글을 안 갖고
-// 이 페이지의 window를 그대로 따른다(중복 기간 조작 제거).
-function windowParamToDays(window: InsightsBoardWindow): 7 | 30 | 90 {
-  return Number(window.replace('d', '')) as 7 | 30 | 90;
-}
 
 // story #3620 AC3 — 행 액션 「원본과 대조」의 진행 상태 3분기(진행 中·실패·완료).
 type ReconcileRowState =
@@ -294,8 +286,6 @@ export default function InsightsBoardPage() {
         <h1 className="text-lg font-semibold text-foreground">{t('pageTitle')}</h1>
         <p className="text-sm text-muted-foreground">{t('pageDescription')}</p>
       </div>
-
-      {orgId && <MeasuredMetricsCards orgId={orgId} windowDays={windowParamToDays(windowParam)} />}
 
       <div className="flex flex-wrap items-center gap-2">
         <DropdownMenu>

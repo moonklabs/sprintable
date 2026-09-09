@@ -57,17 +57,16 @@ function stubFetch(byWindow: Record<string, typeof FULL_METRICS | { status: numb
 }
 
 describe('PublishingMetricsBand(story #3484, §18)', () => {
-  it('⭐다섯 값이 채워지면 성능 둘은 늘, 사고 둘은 모두 0이라 뭉쳐서 한 줄로 보인다', async () => {
+  it('⭐성능 값이 채워지고, 사고 둘이 모두 0이면 사고 항목은 아무것도 안 뜬다(story #3735 B2 — 0을 굳이 요약하지 않는다)', async () => {
     stubFetch({ '7d': FULL_METRICS });
     await act(async () => { root.render(wrap(<PublishingMetricsBand orgId="org-1" />)); });
     await flush();
 
     expect(container.querySelector('[data-testid="publishing-metrics-on-time-rate"]')?.textContent).toContain('98%');
-    expect(container.querySelector('[data-testid="publishing-metrics-recovery"]')?.textContent).toContain('4분');
-    expect(container.querySelector('[data-testid="publishing-metrics-recovery"]')?.textContent).toContain('12분');
-    expect(container.querySelector('[data-testid="publishing-metrics-accident-zero"]')?.textContent)
-      .toBe(koMessages.content.publishingMetricsAccidentZero);
-    // 사고 둘 다 0이므로 개별 항목은 안 뜬다.
+    // story #3735(B1) — 복구 p50/p95(엔지니어 지표) 렌더 자체가 걷혔다.
+    expect(container.querySelector('[data-testid="publishing-metrics-recovery"]')).toBeNull();
+    // story #3735(B2) — 「중복·승인 없는 호출 0」 요약 줄도 걷혔다(0이면 아예 무언급).
+    expect(container.querySelector('[data-testid="publishing-metrics-accident-zero"]')).toBeNull();
     expect(container.querySelector('[data-testid="publishing-metrics-duplicate"]')).toBeNull();
     expect(container.querySelector('[data-testid="publishing-metrics-unapproved"]')).toBeNull();
     // 행동 둘도 0이라 아예 안 뜬다(뭉침도 없음).
@@ -100,16 +99,6 @@ describe('PublishingMetricsBand(story #3484, §18)', () => {
     const el = container.querySelector('[data-testid="publishing-metrics-on-time-rate"]');
     expect(el?.textContent).toContain('—');
     expect(el?.textContent).toContain(koMessages.content.publishingMetricsUnmeasuredReason);
-  });
-
-  it('⭐PO 보정(2026-09-05, PR#3833 리뷰) — recovery_seconds가 null이면 「—」만이 아니라 «이유»도 함께 선다(§18-2, 「고장인가」로 안 읽히게)', async () => {
-    stubFetch({ '7d': { ...FULL_METRICS, recovery_seconds_p50: null, recovery_seconds_p95: null } });
-    await act(async () => { root.render(wrap(<PublishingMetricsBand orgId="org-1" />)); });
-    await flush();
-    const el = container.querySelector('[data-testid="publishing-metrics-recovery"]');
-    expect(el?.textContent).toContain('—');
-    expect(el?.textContent).not.toContain('분');
-    expect(el?.textContent).toContain(koMessages.content.publishingMetricsRecoveryNoFailures);
   });
 
   it('⭐조회 실패 — 「지표를 불러오지 못했습니다」(값 렌더 없음)', async () => {
