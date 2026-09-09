@@ -6,6 +6,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { CountBadge } from '@/components/ui/count-badge';
 import { Input } from '@/components/ui/input';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -150,7 +151,8 @@ export default function OrganizationEventsPage() {
                   제목 고정 + 수는 옆 배지로(구현 (4)류와 같은 형 문제). */}
               <h2 className="flex items-center gap-2 text-base font-semibold text-foreground">
                 {t('eventsCustomGroupTitle')}
-                <Badge variant="secondary">{customDefs.length}</Badge>
+                {/* 페드루 PO 적기만(#4082 리뷰) — CountBadge(trust/page.tsx와 동형). */}
+                <CountBadge count={customDefs.length} />
               </h2>
             </SectionCardHeader>
             <SectionCardBody>
@@ -183,7 +185,7 @@ export default function OrganizationEventsPage() {
             <SectionCardHeader>
               <h2 className="flex items-center gap-2 text-base font-semibold text-foreground">
                 {t('eventsPresetGroupTitle')}
-                <Badge variant="secondary">{presetDefs.length}</Badge>
+                <CountBadge count={presetDefs.length} />
               </h2>
               <p className="mt-1 text-xs text-muted-foreground">{t('eventsPresetReadonlyNote')}</p>
             </SectionCardHeader>
@@ -306,8 +308,18 @@ function EventDefRow({
             </button>
             {/* story #3737(D2, 유나 定) — 정의의 «사람 이름»(표시명)이 눌리는 컨트롤의
                 라벨이고, 코드 키는 그 아래 작은 글씨 부제로만. name이 비어 있으면(백필
-                안 된 org 커스텀 정의) key로 폴백 — 지어내지 않는다, 정직한 최후 수단. */}
-            <span className="truncate font-mono text-[11px] text-muted-foreground">{def.key}</span>
+                안 된 org 커스텀 정의) key로 폴백 — 지어내지 않는다, 정직한 최후 수단.
+                페드루 PO CHANGES②(#4082 리뷰, 2026-09-09) — 폴백이 걸린 행(name이
+                비어 버튼에 key가 이미 뜬 행)은 부제에 같은 key를 또 적으면 raw 값이
+                한 줄에 두 번 — name이 실재하고 key와 다를 때만 부제를 그린다. */}
+            {def.name && def.name !== def.key ? (
+              <span
+                data-testid={`event-def-key-subtitle-${def.key}`}
+                className="truncate font-mono text-[11px] text-muted-foreground"
+              >
+                {def.key}
+              </span>
+            ) : null}
             <Badge variant={def.enabled ? 'success' : 'secondary'}>
               {def.enabled ? t('eventEnabledBadge') : t('eventDisabledBadge')}
             </Badge>

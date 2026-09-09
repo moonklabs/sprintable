@@ -131,11 +131,12 @@ function ConnectorCard({
                 (지어내지 않는다). connector_key는 이제 제목에서 안 보이므로(D2와
                 동형 — 이름 우선·키는 부제) 옆에 작은 글씨로 남긴다 — channel과
                 connector_key가 다를 수 있는 임의 커넥터(#3737 회귀가드 표본)를
-                화면에서 못 가르는 회귀를 막는다. */}
+                화면에서 못 가르는 회귀를 막는다. 페드루 PO CHANGES①(#4082 리뷰,
+                2026-09-09) — channel 배지는 제목이 이미 그 표시명이라 raw 값이
+                한 줄에 두 번(제목 옆 부제+배지) 서던 잉여였다 — 걷는다. */}
             <h2 className="text-sm font-semibold text-foreground">{channelLabel(connector.channel, t)}</h2>
             <span className="font-mono text-[11px] text-muted-foreground">{connector.connector_key}</span>
             <Badge variant="outline">v{connector.version}</Badge>
-            <Badge variant="secondary">{connector.channel}</Badge>
             {(connector.kinds ?? []).map((k) => <Badge key={k} variant="outline">{k}</Badge>)}
           </div>
           {missing.length > 0 ? (

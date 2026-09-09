@@ -153,6 +153,40 @@ describe('OrganizationEventsPage', () => {
     expect([...container.querySelectorAll('button')].some((b) => b.textContent === koMessages.organization.eventCreateCta)).toBe(true);
   });
 
+  // 카디르 QA changes(#4082, 2026-09-09 08:34Z) — «셀렉터만 바뀐 테스트»가 아니라 되돌리면
+  // RED인 단언을 요구. 문자열 결합("커스텀 정의 (N)")으로 되돌리면 h2 textContent가 /\(\d+\)/에
+  // 걸려 이 테스트가 RED가 된다.
+  it('story #3737(E절) — 그룹 제목은 고정 문자열, 수는 h2 밖 Badge뿐(제목 문자열 안에 수를 안 넣는다)', async () => {
+    mockFetches([preset(), customWithId(), customWithId({ id: 'def-2', key: 'org.moonklabs.second' })]);
+    await mount();
+    const headings = [...container.querySelectorAll('h2')];
+    const customHeading = headings.find((h) => h.textContent?.includes(koMessages.organization.eventsCustomGroupTitle));
+    const presetHeading = headings.find((h) => h.textContent?.includes(koMessages.organization.eventsPresetGroupTitle));
+    expect(customHeading).toBeTruthy();
+    expect(presetHeading).toBeTruthy();
+    expect(customHeading?.textContent).not.toMatch(/\(\d+\)/);
+    expect(presetHeading?.textContent).not.toMatch(/\(\d+\)/);
+    // 페드루 PO 적기만(#4082) — Badge→CountBadge(plain span, data-slot 없음).
+    expect(customHeading?.querySelector('span')?.textContent).toBe('2');
+    expect(presetHeading?.querySelector('span')?.textContent).toBe('1');
+  });
+
+  // 카디르 QA changes(#4082) — 부제 가드를 `def.name`만으로 완화(name!==key 비교 제거)하면
+  // name===key 행(org 커스텀 4행 name=key 방치 사례와 동형)에도 부제가 또 떠 이 테스트가
+  // RED가 된다(raw 값 한 줄 두 번 회귀 — name이 없는 행은 애초에 def.name도 falsy라
+  // 그 완화로는 안 잡힘, 정확히 이 name===key 케이스로만 잡힌다).
+  it('story #3737(D2, 페드루 CHANGES②) — name===key(백필 안 된 org 커스텀) 행은 부제 없음·name≠key 행만 부제가 뜬다', async () => {
+    mockFetches([
+      customWithId({ id: 'def-samekey', key: 'org.moonklabs.same_as_key', name: 'org.moonklabs.same_as_key' }),
+      customWithId({ id: 'def-nameless', key: 'org.moonklabs.no_name' }), // name 자체가 없음 → 폴백
+      customWithId({ id: 'def-named', key: 'org.moonklabs.named', name: '배포 완료' }),
+    ]);
+    await mount();
+    expect(container.querySelector('[data-testid="event-def-key-subtitle-org.moonklabs.same_as_key"]')).toBeNull();
+    expect(container.querySelector('[data-testid="event-def-key-subtitle-org.moonklabs.no_name"]')).toBeNull();
+    expect(container.querySelector('[data-testid="event-def-key-subtitle-org.moonklabs.named"]')?.textContent).toBe('org.moonklabs.named');
+  });
+
   it('일반 멤버는 새 정의 버튼이 없고 읽기전용 안내가 뜬다', async () => {
     asMember();
     mockFetches([preset(), customWithId()]);
