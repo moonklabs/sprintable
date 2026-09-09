@@ -14,6 +14,7 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { agentRunStatusBadgeVariant, type AgentRunStatus } from '@/lib/agent-run-status';
+import { AgentRunToolCallsSection } from './agent-run-tool-calls-section';
 
 interface RunDetail {
   id: string;
@@ -47,7 +48,9 @@ interface RunDetail {
   created_at: string;
 }
 
-function formatDuration(ms: number | null): string {
+// story #3722(Trust·PR2) — agent-run-tool-calls-section.tsx가 같은 포맷 규칙을 재사용(초 단위
+// duration_ms 표시). export해 중복 정의를 피한다.
+export function formatDuration(ms: number | null): string {
   if (ms == null) return '-';
   if (ms < 1000) return `${ms}ms`;
   const s = ms / 1000;
@@ -58,7 +61,7 @@ function formatDuration(ms: number | null): string {
 }
 
 // story #3493 — started_at/finished_at/entry.created_at은 "기록"(정본 formatRelativeTime).
-function toLocaleStr(iso: string | null, locale: string, displayTimezone: string): string {
+export function toLocaleStr(iso: string | null, locale: string, displayTimezone: string): string {
   if (!iso) return '-';
   return formatRelativeTime(iso, locale, displayTimezone);
 }
@@ -275,6 +278,13 @@ export function AgentRunDetail({
 
           </SectionCardBody>
         </SectionCard>
+
+        <AgentRunToolCallsSection
+          runId={run.id}
+          runStatus={run.status}
+          locale={locale}
+          displayTimezone={displayTimezone}
+        />
       </div>
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </>
