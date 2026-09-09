@@ -28,9 +28,14 @@ GENERATED라 어느 쪽 Input에도 없고 있어서도 안 된다). #4067(#3719
 정상 — RED면 그게 새 발견.
 
 이 가드들을 실제로 짜는 과정에서 라이브 위반 18건(①·②)이 나왔다(그 자체가 가드의 가치
-증명) — 전부 grandfather로 담아 신규만 막는다. 각 항목은 후속 스토리가 있고, 그 스토리가
-닫히면 이 grandfather에서도 빠져야 한다(카운트-핀이 그 삭제를 강제한다 — 늘어나면 리뷰,
-줄어들면 카운트도 같이 줄여야 커밋된다).
+증명) — 전부 grandfather로 담아 신규만 막는다. #3721(2건)은 이미 착지해 목록에서 빠졌고
+(2026-09-09 05:27Z), #3726 그라운딩(같은 시각)이 가드② 잔여 13건 중 5건(llm_provider·
+llm_provider_key·computed_cost_cents·per_run_cap_cents·billing_notes)은 phantom이
+아니라 SaaS 오버레이 계층 필드임을 밝혀 PO 決로 별도 목록(`GUARD2_GRANDFATHER_SAAS_
+OVERLAY`, "줄어들지 않는" 영구 pin)으로 분리했다 — 나머지(가드① 3건 + 가드② 8건)만 후속
+스토리(#3725·#3730)가 닫히는 대로 실제로 줄어드는 `GUARD2_GRANDFATHER_PENDING`에 남는다.
+각 항목은 후속 스토리가 있고, 그 스토리가 닫히면 그 grandfather에서도 빠져야 한다
+(카운트-핀이 그 삭제를 강제한다 — 늘어나면 리뷰, 줄어들면 카운트도 같이 줄여야 커밋된다).
 """
 from __future__ import annotations
 
@@ -145,26 +150,38 @@ def test_guard3_grandfather_count_pinned():
     )
 
 
-# ── 가드② grandfather — story #3721(2)·#3725(5)·#3726(8, 2026-09-09 05:02Z 재계산 확定)
-# 가 각각 닫는다. #3726 몫 8개는 처음 6개로 셌다가(continuity_debug·memory_compaction_policy
-# 누락) 재검산으로 8개로 확정됐다(PO 확認 2026-09-09 05:02Z) — 이 재발이 이 가드 자체의
-# 필요성을 다시 증명한다.
-GUARD2_GRANDFATHER: dict[str, str] = {
-    "tool_call_history": "story #3721 — 은퇴 대상(BE 도구 호출 기록 개념 자체가 0)",
-    "tool_audit_trail": "story #3721 — 은퇴 대상(BE 도구 호출 기록 개념 자체가 0)",
+# ── 가드② grandfather — 두 갈래(2026-09-09 05:27Z PO 決, #3726 그라운딩 후속)
+#
+# ⓐ SaaS overlay(영구 — 이 OSS 저장소 범위 밖, 후속 스토리로 "닫히지" 않는다): #3726
+# 그라운딩이 밝힌 대로 llm_provider·llm_provider_key·computed_cost_cents·per_run_cap_cents·
+# billing_notes 5개는 phantom이 아니라 SaaS 계층 필드다 — check-feature.ts/usage-check.ts와
+# 같은 OSS-stub 관례(billing-limit-enforcer.ts의 호출부 0인 createBlockedBillingPatch()가
+# PATCH body에 이 5개 필드명을 정확히 그대로 구성하는 게 SaaS AgentRunResponse 실 모양의
+# 증거). 이 목록은 "줄어드는" 목록이 아니다 — SaaS 오버레이가 이 필드들을 채우는 배선은
+# 이 OSS 저장소 코드에 없다(있을 수도 없다). 카운트-핀은 "SaaS 오버레이가 몇 개인지"를
+# 고정하는 용도(늘면 새 OSS-stub 후보 리뷰, 줄면 그 필드가 OSS로 편입됐다는 뜻).
+GUARD2_GRANDFATHER_SAAS_OVERLAY: dict[str, str] = {
+    "llm_provider": "SaaS 계층(OSS-stub 관례) — 이 저장소 범위 밖, 손 안 댐",
+    "llm_provider_key": "SaaS 계층(OSS-stub 관례) — 이 저장소 범위 밖, 손 안 댐",
+    "computed_cost_cents": "SaaS 계층(OSS-stub 관례) — cost_usd와 다른 값(마크업 등 얹은 SaaS 계산값으로 추정), 이 저장소 범위 밖",
+    "per_run_cap_cents": "SaaS 계층(OSS-stub 관례) — 이 저장소 범위 밖, 손 안 댐",
+    "billing_notes": "SaaS 계층(OSS-stub 관례) — 이 저장소 범위 밖, 손 안 댐",
+}
+
+# ⓑ 임시(후속 스토리가 닫으면 실제로 줄어드는 목록) — #3725(5, AgentRunResponse additive)·
+# #3730(3, session_id·continuity_debug·memory_compaction_policy 은퇴 — #3726 決) 각각이
+# 닫는다. #3721(tool_call_history·tool_audit_trail)은 이미 착지해 목록에서 빠졌다(카운트
+# 15→13→8로 줄어든 이력 그대로 — 그 자체가 이 가드의 "줄어드는" 계약이 실제로 지켜진다는
+# 증거).
+GUARD2_GRANDFATHER_PENDING: dict[str, str] = {
     "deployment_id": "story #3725 — DB 컬럼 실재(agent_runs.deployment_id), 응답 스키마에만 없음",
     "failure_disposition": "story #3725 — DB 컬럼 실재, 응답 스키마에만 없음",
     "retry_count": "story #3725 — DB 컬럼 실재, 응답 스키마에만 없음",
     "max_retries": "story #3725 — DB 컬럼 실재, 응답 스키마에만 없음",
     "next_retry_at": "story #3725 — DB 컬럼 실재, 응답 스키마에만 없음",
-    "session_id": "story #3726 — BE 전수 grep 0(모델·스키마·라우터 어디에도 없음), 그라운딩만",
-    "llm_provider": "story #3726 — BE 전수 grep 0, 그라운딩만",
-    "llm_provider_key": "story #3726 — BE 전수 grep 0, 그라운딩만",
-    "computed_cost_cents": "story #3726 — BE 전수 grep 0, 그라운딩만(cost_usd와 「이름만 다른 같은 사실」인지 확인 대상)",
-    "per_run_cap_cents": "story #3726 — BE 전수 grep 0, 그라운딩만",
-    "billing_notes": "story #3726 — BE 전수 grep 0, 그라운딩만",
-    "continuity_debug": "story #3726 — BE 전수 grep 0, 그라운딩만",
-    "memory_compaction_policy": "story #3726 — BE 전수 grep 0, 그라운딩만",
+    "session_id": "story #3730 — 은퇴 대상(BE 전수 grep 0, #3726 決)",
+    "continuity_debug": "story #3730 — 은퇴 대상(BE 전수 grep 0, #3726 決)",
+    "memory_compaction_policy": "story #3730 — 은퇴 대상(BE 전수 grep 0, #3726 決)",
 }
 
 
@@ -193,10 +210,11 @@ def test_be_response_fields_are_superset_of_fe_type_fields():
     response_fields = set(AgentRunResponse.model_fields)
     fe_source = _FE_AGENT_RUN_DETAIL.read_text(encoding="utf-8")
     fe_fields = _extract_ts_interface_field_names(fe_source, "RunDetail")
+    grandfathered = {**GUARD2_GRANDFATHER_SAAS_OVERLAY, **GUARD2_GRANDFATHER_PENDING}
 
     violations = [
         field for field in fe_fields
-        if field not in response_fields and field not in GUARD2_GRANDFATHER
+        if field not in response_fields and field not in grandfathered
     ]
 
     assert not violations, (
@@ -207,9 +225,19 @@ def test_be_response_fields_are_superset_of_fe_type_fields():
     )
 
 
-def test_guard2_grandfather_count_pinned():
-    assert len(GUARD2_GRANDFATHER) == 15, (
-        f"GUARD2_GRANDFATHER 항목 수가 15가 아니라 {len(GUARD2_GRANDFATHER)} — 늘었으면 새 "
-        "phantom 필드가 또 생긴 것(원인 리뷰 필요), 줄었으면 후속 스토리(#3721/#3725/#3726)가 "
+def test_guard2_saas_overlay_grandfather_count_pinned():
+    """SaaS 오버레이 5개는 "줄어드는" 목록이 아니다 — 늘면 새 OSS-stub 필드 후보 리뷰,
+    줄면 그 필드가 OSS로 편입됐다는 뜻(둘 다 리뷰 필요, 조용한 변화 금지)."""
+    assert len(GUARD2_GRANDFATHER_SAAS_OVERLAY) == 5, (
+        f"GUARD2_GRANDFATHER_SAAS_OVERLAY 항목 수가 5가 아니라 {len(GUARD2_GRANDFATHER_SAAS_OVERLAY)}."
+    )
+
+
+def test_guard2_pending_grandfather_count_pinned():
+    """임시 목록은 후속 스토리(#3725·#3730)가 닫히는 대로 실제로 줄어들어야 한다 — 이미
+    #3721(2개)이 착지해 15→13→8로 준 이력 그대로."""
+    assert len(GUARD2_GRANDFATHER_PENDING) == 8, (
+        f"GUARD2_GRANDFATHER_PENDING 항목 수가 8이 아니라 {len(GUARD2_GRANDFATHER_PENDING)} — "
+        "늘었으면 새 phantom 필드가 또 생긴 것(원인 리뷰 필요), 줄었으면 후속 스토리(#3725/#3730)가 "
         "그만큼 닫힌 것이니 이 상수·주석도 같이 정리할 것."
     )
