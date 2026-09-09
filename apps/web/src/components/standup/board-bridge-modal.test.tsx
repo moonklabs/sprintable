@@ -166,6 +166,25 @@ describe('BoardBridgeModal — 디바운스 창 정직성(story #3703 CHANGES, �
     expect(document.body.textContent).toContain(koMessages.standup.bridgeNoStories); // 이제(정착 後)는 정당.
   });
 
+  it('보드 해제 후 같은 보드 재선택 — stale loadedKey 재사용으로 즉시 오단정하지 않는다(카디르 QA blocker②)', async () => {
+    fetchWithAuthMock.mockImplementation(async () => ({ ok: true, json: async () => ({ data: [story('s1', '보드1 스토리')] }) }));
+    await act(async () => {
+      root.render(wrap(
+        <BoardBridgeModal open onOpenChange={() => {}} boards={[BOARD]} alreadySelectedIds={[]} onSelectStory={() => {}} />,
+      ));
+    });
+    await selectBoard(BOARD.projectId);
+    await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+    expect(document.body.textContent).toContain('보드1 스토리');
+
+    await selectBoard(''); // 보드 해제.
+    await selectBoard(BOARD.projectId); // 같은 보드 재선택 — loadedKey가 `p1|` 그대로면 즉시 settled 오판.
+    expect(document.body.textContent).not.toContain(koMessages.standup.bridgeNoStories);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+    expect(document.body.textContent).toContain('보드1 스토리'); // 재fetch 정착 後 정상 표시.
+  });
+
   it('전환 직후 창에서 목록 행 버튼 자체가 없다(잘못된 짝 클릭 원천 차단)', async () => {
     fetchWithAuthMock.mockImplementation(async (url: string) => {
       const isBoard1 = url.includes(`project_id=${BOARD.projectId}`);
