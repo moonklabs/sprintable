@@ -494,7 +494,6 @@
     "clusterUnclosedShowMore": "{n}건 더보기",
     "clusterUnclosedCapNotice": "상위 {shown}건 표시 중 · 총 {total}건",
     "clusterUnclosedViewQueue": "전체 큐 보기",
-    "clusterUnclosedMeasurePlanMissing": "+{count}건은 측정 계획이 아직 없음",
     "clusterUnclosedUnmeasurableGoal": "{count}건은 측정 불가로 선언됨",
     "clusterAuthFailureTitle": "에이전트 인증 실패",
     "clusterAuthFailureSub": "API 키 문제로 요청이 반복 거부됨",

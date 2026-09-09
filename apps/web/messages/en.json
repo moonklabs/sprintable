@@ -494,7 +494,6 @@
     "clusterUnclosedShowMore": "Show {n} more",
     "clusterUnclosedCapNotice": "Showing top {shown} · {total} total",
     "clusterUnclosedViewQueue": "View full queue",
-    "clusterUnclosedMeasurePlanMissing": "+{count} have no measure plan yet",
     "clusterUnclosedUnmeasurableGoal": "{count} declared unmeasurable",
     "clusterAuthFailureTitle": "Agent auth failures",
     "clusterAuthFailureSub": "Requests keep being rejected due to API key issues",

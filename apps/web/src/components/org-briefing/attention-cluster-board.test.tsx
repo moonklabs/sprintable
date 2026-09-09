@@ -255,7 +255,10 @@ describe('AttentionClusterBoard', () => {
       expect(queueLink!.textContent).toBe(koMessages.orgBriefing.clusterUnclosedViewQueue);
     });
 
-    it('measurePlanMissingGoalCount는 N에 안 더해지고 보조 텍스트로만 노출된다', async () => {
+    // story #3735(B갈래, 유나 사전) — 「+N건은 측정 계획이 아직 없음」은 사용자 화면 밖(운영
+    // 화면 몫)이라 걷었다(옛 MeasurePlanMissingNote). N엔 여전히 안 더해지고(prop 계약
+    // 무변), 렌더 자체가 사라졌는지가 이 테스트의 새 단언 — 되돌리면(주석 처리 되돌리면) RED.
+    it('measurePlanMissingGoalCount는 N에 안 더해지고, 보조 텍스트 자체가 이제 없다', async () => {
       await act(async () => {
         root.render(wrap(
           <AttentionClusterBoard falsified={[]} silentStall={EMPTY_SILENT_STALL} loop={[loopItem({})]} loopTotalCount={1} measurePlanMissingGoalCount={40} unmeasurableGoalCount={0} />,
@@ -263,7 +266,8 @@ describe('AttentionClusterBoard', () => {
       });
       const countBadge = container.querySelector('.rounded-full.bg-card');
       expect(countBadge?.textContent).toBe('1'); // 40이 합산 안 됨
-      expect(container.textContent).toContain('40');
+      expect(container.textContent).not.toContain('40');
+      expect(container.textContent).not.toContain('측정 계획이 아직 없음');
     });
 
     // story #2843/#2844 — unmeasurableGoalCount도 measurePlanMissingGoalCount와 동형(N 비합산·보조텍스트).
@@ -363,5 +367,20 @@ describe('AttentionClusterBoard', () => {
       // memberId가 없으면 재발급 링크 자체를 안 만든다(어디로 갈지 지어낼 수 없음).
       expect(container.querySelectorAll('a')).toHaveLength(0);
     });
+  });
+});
+
+// story #3735(B갈래, 유나 사전, 페드루 PO 지적 2026-09-09 배포 60 실픽셀) — 「측정 계획이
+// 아직 없음」 잔존 확인(clusterUnclosedMeasurePlanMissing 키 삭제 검증). 되돌리면(ko/en.json에
+// 키를 다시 넣으면) RED — 낱말 grep 0건이 이 기능의 계약이다.
+describe('story #3735 B갈래 — 「측정 계획이 아직 없음」 낱말 grep 0건', () => {
+  it('ko.json/en.json에 clusterUnclosedMeasurePlanMissing 키가 없다', async () => {
+    const enMessages = (await import('../../../messages/en.json')).default;
+    expect(Object.keys(koMessages.orgBriefing)).not.toContain('clusterUnclosedMeasurePlanMissing');
+    expect(Object.keys(enMessages.orgBriefing)).not.toContain('clusterUnclosedMeasurePlanMissing');
+  });
+
+  it('ko.json 어디에도 「측정 계획이 아직 없음」 문자열이 없다', () => {
+    expect(JSON.stringify(koMessages)).not.toContain('측정 계획이 아직 없음');
   });
 });

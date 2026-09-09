@@ -3,6 +3,7 @@
 import { useTranslations } from 'next-intl';
 import { useSearchParams } from 'next/navigation';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { Card } from '@/components/ui/card';
 import { NowFace } from './now-face';
 import { LoopFace } from './loop-face';
 import { WorkforceFace } from './workforce-face';
@@ -17,8 +18,11 @@ import { WorkforceFace } from './workforce-face';
 // 3면 순차 fade-in stagger(lagom — clutter 추가 아닌 절제된 진입 리듬).
 
 function FaceSkeletonPanel({ title, subject }: { title: string; subject: string }) {
+  // 페드루 PO 지적(2026-09-09, 배포 60 실픽셀·유나군 정정) — loop-face.tsx/workforce-
+  // face.tsx와 같은 카드인데 옛 rounded-2xl 손코딩이 남아 있었다(projectId 미확定 상태라
+  // 평소엔 안 그려질 뿐 코드엔 있었다) — Card 프리미티브로 통일.
   return (
-    <div className="rounded-2xl border border-border bg-card p-4">
+    <Card className="p-4">
       <div className="mb-3 flex items-baseline gap-2.5">
         <h2 className="text-sm font-semibold text-foreground">{title}</h2>
         <span className="text-[11px] text-muted-foreground">{subject}</span>
@@ -33,7 +37,7 @@ function FaceSkeletonPanel({ title, subject }: { title: string; subject: string 
           <div className="h-2 w-20 animate-pulse rounded-full bg-muted" />
         </div>
       </div>
-    </div>
+    </Card>
   );
 }
 

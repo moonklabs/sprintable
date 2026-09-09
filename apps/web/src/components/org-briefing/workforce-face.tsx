@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Users, Bot } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { Card } from '@/components/ui/card';
 import {
   buildWorkforceFace, parseActiveEpics, parseEpicStories, parseTeamMembers,
   type WorkforceFaceItem, type WorkforceFaceTranslator,
@@ -99,7 +100,10 @@ export function WorkforceFace({ projectId }: { projectId: string }) {
 
   return (
     // story #3009(로드맵 P2·PR-F, L1) — hover 시 인라인 카드 강조는 --elev-card.
-    <div className="rounded-2xl border border-border bg-card p-4 transition-shadow hover:shadow-[var(--elev-card)]">
+    // 페드루 PO 지적(2026-09-09, 배포 60 실픽셀) — loop-face.tsx와 같은 카드인데 옛
+    // rounded-2xl 손코딩이 남아 있어 다른 코너값(loop-face는 Card 프리미티브의 4px)이
+    // 섞여 보였다 — Card 프리미티브로 통일.
+    <Card className="p-4 transition-shadow hover:shadow-[var(--elev-card)]">
       <div className="mb-3 flex items-baseline gap-2.5">
         <span className="size-1.5 shrink-0 rounded-full bg-success" aria-hidden="true" />
         <h2 className="text-sm font-semibold text-foreground">{t('workforceTitle')}</h2>
@@ -121,6 +125,6 @@ export function WorkforceFace({ projectId }: { projectId: string }) {
       ) : (
         data.items.map((item) => <WorkforceRow key={item.id} item={item} memberNames={data.memberNames} t={t} />)
       )}
-    </div>
+    </Card>
   );
 }
