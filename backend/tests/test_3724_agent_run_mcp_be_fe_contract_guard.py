@@ -32,10 +32,15 @@ GENERATED라 어느 쪽 Input에도 없고 있어서도 안 된다). #4067(#3719
 (2026-09-09 05:27Z), #3726 그라운딩(같은 시각)이 가드② 잔여 13건 중 5건(llm_provider·
 llm_provider_key·computed_cost_cents·per_run_cap_cents·billing_notes)은 phantom이
 아니라 SaaS 오버레이 계층 필드임을 밝혀 PO 決로 별도 목록(`GUARD2_GRANDFATHER_SAAS_
-OVERLAY`, "줄어들지 않는" 영구 pin)으로 분리했다 — 나머지(가드① 3건 + 가드② 8건)만 후속
-스토리(#3725·#3730)가 닫히는 대로 실제로 줄어드는 `GUARD2_GRANDFATHER_PENDING`에 남는다.
+OVERLAY`, "줄어들지 않는" 영구 pin)으로 분리했다 — 나머지(가드① 3건 + 가드② 8건)가 후속
+스토리(#3725·#3730)가 닫히는 대로 실제로 줄어드는 `GUARD2_GRANDFATHER_PENDING`에 남았다.
 각 항목은 후속 스토리가 있고, 그 스토리가 닫히면 그 grandfather에서도 빠져야 한다
 (카운트-핀이 그 삭제를 강제한다 — 늘어나면 리뷰, 줄어들면 카운트도 같이 줄여야 커밋된다).
+#3730(#4074)·#3727+#3725(#4072, 둘 다 2026-09-09) 전부 착지해 GUARD1_GRANDFATHER·
+GUARD2_GRANDFATHER_PENDING 둘 다 0(빈 dict)이다 — 이 파일의 카운트-핀·자가진단 테스트가
+그 실측을 매 리베이스마다 강제해 잡아냈다(유나 판정 2026-09-09 05:41Z가 우려한 "핀만
+green이고 내용은 stale" 상태가 실제로 두 번 재현→수리됨, #4072 리베이스 도중 자가진단
+테스트 2건이 정확히 그 상태를 RED로 잡은 것으로 실측 확認).
 """
 from __future__ import annotations
 
@@ -53,12 +58,10 @@ from sprintable_mcp.tools.agent_runs import (
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _FE_AGENT_RUN_DETAIL = _REPO_ROOT / "apps/web/src/components/agents/agent-run-detail.tsx"
 
-# ── 가드① grandfather — story #3727(1pt·medium)이 셋 다 닫는다 ─────────────────────────
-GUARD1_GRANDFATHER: dict[tuple[str, str], str] = {
-    ("emit_event", "started_at"): "story #3727 — CreateAgentRun에 없어 생성 시 조용히 버려짐",
-    ("emit_event", "finished_at"): "story #3727 — CreateAgentRun에 없어 생성 시 조용히 버려짐",
-    ("update_run_status", "started_at"): "story #3727 — UpdateAgentRun에 없어 갱신 시 조용히 버려짐(finished_at은 #2161이 이미 고쳐 위반 아님)",
-}
+# ── 가드① grandfather — story #3727이 셋 다 닫았다(#4072, 2026-09-09) ──────────────────
+# CreateAgentRun에 started_at·finished_at, UpdateAgentRun에 started_at을 추가해 MCP가
+# 이미 보내던 값이 더는 Pydantic extra=ignore로 조용히 버려지지 않는다 — 0건.
+GUARD1_GRANDFATHER: dict[tuple[str, str], str] = {}
 
 
 def test_mcp_forward_fields_are_subset_of_be_schema_fields():
@@ -91,10 +94,9 @@ def test_mcp_forward_fields_are_subset_of_be_schema_fields():
 def test_guard1_grandfather_count_pinned():
     """항목 수가 조용히 늘면(새 silent-drop) 리뷰 없이 못 지나가게, 줄면(#3727 착지) 이
     상수도 같이 줄이라는 신호."""
-    assert len(GUARD1_GRANDFATHER) == 3, (
-        f"GUARD1_GRANDFATHER 항목 수가 3이 아니라 {len(GUARD1_GRANDFATHER)} — 늘었으면 새 "
-        "silent-drop이 또 생긴 것(원인 리뷰 필요), 줄었으면 story #3727이 그만큼 닫힌 것이니 "
-        "이 상수·주석도 같이 정리할 것."
+    assert len(GUARD1_GRANDFATHER) == 0, (
+        f"GUARD1_GRANDFATHER 항목 수가 0이 아니라 {len(GUARD1_GRANDFATHER)} — story #3727이 "
+        "닫아 0으로 줄었다(#4072). 늘었으면 새 silent-drop이 생긴 것(원인 리뷰 필요)."
     )
 
 
@@ -190,18 +192,12 @@ GUARD2_GRANDFATHER_SAAS_OVERLAY: dict[str, str] = {
     "billing_notes": "SaaS 계층(OSS-stub 관례) — 이 저장소 범위 밖, 손 안 댐",
 }
 
-# ⓑ 임시(후속 스토리가 닫으면 실제로 줄어드는 목록) — #3725(5, AgentRunResponse additive)가
-# 마저 닫는다. #3721(tool_call_history·tool_audit_trail)·#3730(session_id·continuity_debug·
-# memory_compaction_policy 은퇴 — #3726 決)은 이미 착지해 목록에서 빠졌다(카운트
-# 15→13→8→5로 줄어든 이력 그대로 — 그 자체가 이 가드의 "줄어드는" 계약이 실제로 지켜진다는
-# 증거).
-GUARD2_GRANDFATHER_PENDING: dict[str, str] = {
-    "deployment_id": "story #3725 — DB 컬럼 실재(agent_runs.deployment_id), 응답 스키마에만 없음",
-    "failure_disposition": "story #3725 — DB 컬럼 실재, 응답 스키마에만 없음",
-    "retry_count": "story #3725 — DB 컬럼 실재, 응답 스키마에만 없음",
-    "max_retries": "story #3725 — DB 컬럼 실재, 응답 스키마에만 없음",
-    "next_retry_at": "story #3725 — DB 컬럼 실재, 응답 스키마에만 없음",
-}
+# ⓑ 임시(후속 스토리가 닫으면 실제로 줄어드는 목록) — #3725도 닫아(#4072, 2026-09-09)
+# 이제 0이다. #3721(tool_call_history·tool_audit_trail)·#3730(session_id·continuity_debug·
+# memory_compaction_policy 은퇴 — #3726 決)·#3725(AgentRunResponse additive 5필드) 전부
+# 착지해 목록에서 빠졌다(카운트 15→13→8→5→0으로 줄어든 이력 그대로 — 그 자체가 이 가드의
+# "줄어드는" 계약이 실제로 지켜진다는 증거).
+GUARD2_GRANDFATHER_PENDING: dict[str, str] = {}
 
 
 def _extract_ts_interface_field_names(source: str, interface_name: str) -> list[str]:
@@ -255,10 +251,9 @@ def test_guard2_saas_overlay_grandfather_count_pinned():
 def test_guard2_pending_grandfather_count_pinned():
     """임시 목록은 후속 스토리(#3725)가 닫히는 대로 실제로 줄어들어야 한다 — 이미
     #3721(2개)·#3730(3개)이 착지해 15→13→8→5로 준 이력 그대로."""
-    assert len(GUARD2_GRANDFATHER_PENDING) == 5, (
-        f"GUARD2_GRANDFATHER_PENDING 항목 수가 5가 아니라 {len(GUARD2_GRANDFATHER_PENDING)} — "
-        "늘었으면 새 phantom 필드가 또 생긴 것(원인 리뷰 필요), 줄었으면 후속 스토리(#3725)가 "
-        "그만큼 닫힌 것이니 이 상수·주석도 같이 정리할 것."
+    assert len(GUARD2_GRANDFATHER_PENDING) == 0, (
+        f"GUARD2_GRANDFATHER_PENDING 항목 수가 0이 아니라 {len(GUARD2_GRANDFATHER_PENDING)} — "
+        "story #3725가 닫아 0으로 줄었다(#4072). 늘었으면 새 phantom 필드가 생긴 것(원인 리뷰 필요)."
     )
 
 
