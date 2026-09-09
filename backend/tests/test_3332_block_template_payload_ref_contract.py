@@ -222,7 +222,7 @@ async def test_register_rejects_block_template_referencing_unknown_payload_key()
             with pytest.raises(HTTPException) as ei:
                 await create_event_definition(
                     CreateEventDefinitionRequest(
-                        key="org.acme3332.widget.made", payload_schema=_SCHEMA_WITH_TITLE,
+                        key="org.acme3332.widget.made", name="위젯 제작 완료", payload_schema=_SCHEMA_WITH_TITLE,
                         routing=_NONE_ROUTING,
                         block_template={"blocks": [{"type": "fields", "fields": [
                             {"label": "오타", "value": "{{payload.titel}}"},
@@ -248,7 +248,7 @@ async def test_register_accepts_valid_payload_reference():
 
             resp = await create_event_definition(
                 CreateEventDefinitionRequest(
-                    key="org.acme3332.widget.made", payload_schema=_SCHEMA_WITH_TITLE,
+                    key="org.acme3332.widget.made", name="위젯 제작 완료", payload_schema=_SCHEMA_WITH_TITLE,
                     routing=_NONE_ROUTING,
                     block_template={"blocks": [{"type": "fields", "fields": [
                         {"label": "제목", "value": "{{payload.title}}"},
@@ -280,7 +280,7 @@ async def test_patch_rejects_when_new_payload_schema_orphans_existing_block_temp
 
             created = await create_event_definition(
                 CreateEventDefinitionRequest(
-                    key="org.acme3332.widget.made", payload_schema=_SCHEMA_WITH_TITLE,
+                    key="org.acme3332.widget.made", name="위젯 제작 완료", payload_schema=_SCHEMA_WITH_TITLE,
                     routing=_NONE_ROUTING,
                     block_template={"blocks": [{"type": "fields", "fields": [
                         {"label": "제목", "value": "{{payload.title}}"},

@@ -89,7 +89,7 @@ async def test_register_rejects_schema_without_additional_properties_false():
             user_id = await _seed_org_member(s, org_id, role="admin")
 
             body = CreateEventDefinitionRequest(
-                key="org.acme.widget.made",
+                key="org.acme.widget.made", name="위젯 제작 완료",
                 payload_schema={"type": "object", "properties": {"widget_id": {"type": "string"}}},
                 routing=_NONE_ROUTING,
             )
@@ -113,7 +113,7 @@ async def test_register_accepts_schema_with_additional_properties_false():
             user_id = await _seed_org_member(s, org_id, role="admin")
 
             body = CreateEventDefinitionRequest(
-                key="org.acme.widget.made", payload_schema=_VALID_SCHEMA, routing=_NONE_ROUTING,
+                key="org.acme.widget.made", name="위젯 제작 완료", payload_schema=_VALID_SCHEMA, routing=_NONE_ROUTING,
             )
             resp = await create_event_definition(body, db=s, auth=_human_auth(user_id, org_id), org_id=org_id)
             assert resp.key == "org.acme.widget.made"
@@ -138,7 +138,7 @@ async def test_register_allows_target_none_despite_server_derived_ban():
             user_id = await _seed_org_member(s, org_id, role="owner")
 
             body = CreateEventDefinitionRequest(
-                key="org.acme.thing.done", payload_schema=_VALID_SCHEMA,
+                key="org.acme.thing.done", name="작업 완료", payload_schema=_VALID_SCHEMA,
                 routing={
                     "escalation": {"kind": "server_derived", "target": "none"},
                     "broadcast": {"kind": "payload_field", "member_id_field": "actor_member_id"},
@@ -164,7 +164,7 @@ async def test_register_still_rejects_other_server_derived_targets():
             user_id = await _seed_org_member(s, org_id, role="admin")
 
             body = CreateEventDefinitionRequest(
-                key="org.acme.thing.escalated", payload_schema=_VALID_SCHEMA,
+                key="org.acme.thing.escalated", name="작업 에스컬레이션", payload_schema=_VALID_SCHEMA,
                 routing={
                     "escalation": {"kind": "server_derived", "target": "work_item_stakeholders"},
                     "broadcast": {"kind": "server_derived", "target": "none"},
@@ -191,7 +191,7 @@ async def test_register_rejects_mismatched_org_slug_namespace():
             user_id = await _seed_org_member(s, org_id, role="admin")
 
             body = CreateEventDefinitionRequest(
-                key="org.globex.widget.made", payload_schema=_VALID_SCHEMA, routing=_NONE_ROUTING,
+                key="org.globex.widget.made", name="위젯 제작 완료", payload_schema=_VALID_SCHEMA, routing=_NONE_ROUTING,
             )
             with pytest.raises(HTTPException) as ei:
                 await create_event_definition(body, db=s, auth=_human_auth(user_id, org_id), org_id=org_id)
@@ -212,7 +212,7 @@ async def test_register_rejects_preset_prefixed_key():
             user_id = await _seed_org_member(s, org_id, role="admin")
 
             body = CreateEventDefinitionRequest(
-                key="preset.work.status_changed", payload_schema=_VALID_SCHEMA, routing=_NONE_ROUTING,
+                key="preset.work.status_changed", name="작업 상태 변경", payload_schema=_VALID_SCHEMA, routing=_NONE_ROUTING,
             )
             with pytest.raises(HTTPException) as ei:
                 await create_event_definition(body, db=s, auth=_human_auth(user_id, org_id), org_id=org_id)
@@ -235,7 +235,7 @@ async def test_register_rejects_non_admin_member():
             user_id = await _seed_org_member(s, org_id, role="member")
 
             body = CreateEventDefinitionRequest(
-                key="org.acme.widget.made", payload_schema=_VALID_SCHEMA, routing=_NONE_ROUTING,
+                key="org.acme.widget.made", name="위젯 제작 완료", payload_schema=_VALID_SCHEMA, routing=_NONE_ROUTING,
             )
             with pytest.raises(HTTPException) as ei:
                 await create_event_definition(body, db=s, auth=_human_auth(user_id, org_id), org_id=org_id)
@@ -258,7 +258,7 @@ async def test_register_duplicate_key_409():
             user_id = await _seed_org_member(s, org_id, role="admin")
 
             body = CreateEventDefinitionRequest(
-                key="org.acme.widget.made", payload_schema=_VALID_SCHEMA, routing=_NONE_ROUTING,
+                key="org.acme.widget.made", name="위젯 제작 완료", payload_schema=_VALID_SCHEMA, routing=_NONE_ROUTING,
             )
             await create_event_definition(body, db=s, auth=_human_auth(user_id, org_id), org_id=org_id)
             with pytest.raises(HTTPException) as ei:
@@ -286,7 +286,7 @@ async def test_patch_enabled_false_soft_deletes_without_version_bump():
 
             created = await create_event_definition(
                 CreateEventDefinitionRequest(
-                    key="org.acme.widget.made", payload_schema=_VALID_SCHEMA, routing=_NONE_ROUTING,
+                    key="org.acme.widget.made", name="위젯 제작 완료", payload_schema=_VALID_SCHEMA, routing=_NONE_ROUTING,
                 ),
                 db=s, auth=_human_auth(user_id, org_id), org_id=org_id,
             )
@@ -316,7 +316,7 @@ async def test_patch_payload_schema_bumps_version_and_revalidates():
 
             created = await create_event_definition(
                 CreateEventDefinitionRequest(
-                    key="org.acme.widget.made", payload_schema=_VALID_SCHEMA, routing=_NONE_ROUTING,
+                    key="org.acme.widget.made", name="위젯 제작 완료", payload_schema=_VALID_SCHEMA, routing=_NONE_ROUTING,
                 ),
                 db=s, auth=_human_auth(user_id, org_id), org_id=org_id,
             )
@@ -360,7 +360,7 @@ async def test_patch_cross_org_definition_404():
 
             created = await create_event_definition(
                 CreateEventDefinitionRequest(
-                    key="org.acme.widget.made", payload_schema=_VALID_SCHEMA, routing=_NONE_ROUTING,
+                    key="org.acme.widget.made", name="위젯 제작 완료", payload_schema=_VALID_SCHEMA, routing=_NONE_ROUTING,
                 ),
                 db=s, auth=_human_auth(user_a, org_a), org_id=org_a,
             )

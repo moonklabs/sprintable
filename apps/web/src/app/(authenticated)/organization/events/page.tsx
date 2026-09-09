@@ -293,6 +293,8 @@ function EventDefRow({
   // 붙을 stage가 아예 없으면 적용할 게 없다) — isCyclicDefinition()(loop-create-dialog SSOT)
   // 그대로 재사용. id 필요조건은 canMutate와 동일 이유(ApplyRecipeDialog가 /apply 호출에 id 필요).
   const canApply = isAdmin && !!def.id && isCyclicDefinition(def as unknown as EventDefinitionResponse);
+  // story #3745 — 제목 자리 값을 한 곳에서 계산해 아래 부제 판정도 같은 값을 본다.
+  const titleLabel = def.name || t('eventUnnamedDefinition');
   return (
     <div className="p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -304,15 +306,18 @@ function EventDefRow({
               className="truncate text-sm text-foreground hover:underline"
               data-testid={`event-def-toggle-${def.key}`}
             >
-              {def.name || def.key}
+              {titleLabel}
             </button>
             {/* story #3737(D2, 유나 定) — 정의의 «사람 이름»(표시명)이 눌리는 컨트롤의
-                라벨이고, 코드 키는 그 아래 작은 글씨 부제로만. name이 비어 있으면(백필
-                안 된 org 커스텀 정의) key로 폴백 — 지어내지 않는다, 정직한 최후 수단.
-                페드루 PO CHANGES②(#4082 리뷰, 2026-09-09) — 폴백이 걸린 행(name이
-                비어 버튼에 key가 이미 뜬 행)은 부제에 같은 key를 또 적으면 raw 값이
-                한 줄에 두 번 — name이 실재하고 key와 다를 때만 부제를 그린다. */}
-            {def.name && def.name !== def.key ? (
+                라벨이고, 코드 키는 그 아래 작은 글씨 부제로만.
+                story #3745(페드루 PO 決·유나 定 2026-09-09) — name이 비어 있으면(#3737
+                D2 잔존) 옛 `name || key` 폴백(raw 코드 키가 제목 자리에 서던 결함)을
+                걷고 정직한 「이름 없는 이벤트」로(지어낸 이름 아님 — 모름을 모름이라
+                쓴다, D2/D3와 같은 급). 부제는 제목이 이미 key와 같은 값이 아닐 때만
+                그린다(title===key인 자리, 예: org 커스텀 정의가 스스로 name=key로
+                등록한 옛 데이터)면 같은 값이 한 줄에 두 번 서는 것을 그대로 막는다
+                (#4082 CHANGES②와 같은 원칙 — 판정 축만 title로 일반화). */}
+            {titleLabel !== def.key ? (
               <span
                 data-testid={`event-def-key-subtitle-${def.key}`}
                 className="truncate font-mono text-[11px] text-muted-foreground"
@@ -485,6 +490,8 @@ function EventFormDialog({
 }) {
   const { currentTeamMemberId } = useDashboardContext();
   const prefix = `org.${orgSlug || '{org}'}.`;
+  // story #3745(페드루 PO 決) — 정의 편집 폼에 이름 필드(옛 화면엔 자리 자체가 없었다).
+  const [name, setName] = useState('');
   const [keySuffix, setKeySuffix] = useState('');
   const [payloadSchema, setPayloadSchema] = useState(DEFAULT_PAYLOAD_SCHEMA);
   const [routing, setRouting] = useState(DEFAULT_ROUTING);
@@ -510,6 +517,7 @@ function EventFormDialog({
   useEffect(() => {
     if (!open) return;
     if (mode === 'edit' && target) {
+      setName(target.name ?? '');
       setKeySuffix(target.key.startsWith(`org.${orgSlug}.`) ? target.key.slice(`org.${orgSlug}.`.length) : target.key);
       setPayloadSchema(JSON.stringify(target.payload_schema, null, 2));
       setRouting(JSON.stringify(target.routing, null, 2));
@@ -523,6 +531,7 @@ function EventFormDialog({
       else { setDefinerState(emptyFormState()); setTab('advanced'); setAdvancedOnly(true); }
       setSavedKey(target.key);
     } else {
+      setName('');
       setKeySuffix('');
       setPayloadSchema(DEFAULT_PAYLOAD_SCHEMA);
       setRouting(DEFAULT_ROUTING);
@@ -549,11 +558,15 @@ function EventFormDialog({
     setSaving(true);
     setError(null);
     try {
+      // story #3745 — BE가 이미 422로 막지만(공백뿐인 값도) 왕복 없이 그 자리에서 먼저
+      // 말해준다(정의 폼의 다른 필드들과 같은 클라측 선검증 관례, definerKeyError와 동형).
+      if (!name.trim()) throw new Error(t('eventNameRequiredError'));
       let body: Record<string, unknown>;
       if (tab === 'basic') {
         if (definerKeyError) throw new Error(definerKeyError === 'empty' ? t('definerKeyErrorEmpty') : t('definerKeyErrorCharset'));
         const derived = deriveDefinition(definerState, orgSlug);
         body = {
+          name: name.trim(),
           payload_schema: derived.payload_schema,
           routing: derived.routing,
           block_template: derived.block_template,
@@ -565,6 +578,7 @@ function EventFormDialog({
         const roles = rolesCsv.split(',').map((r) => r.trim()).filter(Boolean);
         const actionAuth = humanOnly || roles.length > 0 ? { human_only: humanOnly, role: roles } : null;
         body = {
+          name: name.trim(),
           payload_schema: parseJsonField(payloadSchema, t('eventPayloadSchemaLabel')),
           routing: parseJsonField(routing, t('eventRoutingLabel')),
           block_template: blockTemplate.trim() ? parseJsonField(blockTemplate, t('eventBlockTemplateLabel')) : null,
@@ -677,6 +691,25 @@ function EventFormDialog({
           {tab === 'advanced' ? <DialogDescription>{t('eventKeyPrefixHint', { slug: orgSlug || '{org}' })}</DialogDescription> : null}
         </DialogHeader>
         <div className="min-h-0 flex-1 overflow-y-auto px-1">
+          {/* story #3745(페드루 PO 決·유나 定 2026-09-09) — 이 필드가 화면 제목 자리에
+              쓰이는 유일한 소스다(둘 다 config가 아니라 그 위 표시명이라 basic/advanced
+              탭 구분과 무관 — 탭 전환에도 값이 안 사라지게 탭 조건 밖에 둔다). PATCH는
+              생략을 허용하지만 이 폼은 항상 실어 보낸다(수정 폼을 열면 현재 값이 이미
+              채워져 있어 "생략"할 이유가 없다 — 사람이 지우고 빈 채로 저장하면 서버가
+              422로 막는다, BE 계약 그대로 클라도 재확인). */}
+          <div className="mb-3">
+            <label className="mb-1 block text-[11px] font-semibold text-muted-foreground" htmlFor="event-name">
+              {t('eventNameLabel')}
+            </label>
+            <Input
+              id="event-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder={t('eventNamePlaceholder')}
+              className="text-sm"
+            />
+            {!name.trim() ? <p className="mt-1 text-[11px] text-muted-foreground">{t('eventNameHint')}</p> : null}
+          </div>
           {tab === 'basic' ? (
             <EventDefinerForm
               state={definerState}
@@ -740,7 +773,9 @@ function EventFormDialog({
           {mode === 'create' && savedKey ? null : (
             <Button
               onClick={() => void submit()}
-              disabled={saving || (tab === 'advanced' ? mode === 'create' && !!advancedKeyError : !!definerKeyError)}
+              // story #3745 — key 검증(definerKeyError/advancedKeyError)과 같은 fail-closed
+              // 관례(비활성, 클릭 뒤 에러 아님) — 이름도 같은 급의 필수 필드다.
+              disabled={saving || !name.trim() || (tab === 'advanced' ? mode === 'create' && !!advancedKeyError : !!definerKeyError)}
             >
               {saving ? '...' : mode === 'create' ? t('eventCreateSubmit') : t('eventEditSubmit')}
             </Button>
