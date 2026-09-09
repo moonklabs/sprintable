@@ -14,6 +14,12 @@
 // backend/app/models/insight_snapshot.py:52)의 실 값이 아니었다(BE 서비스 전수 0건 —
 // #3720/#3721이 걷은 것과 같은 유령 표면 클래스). 걷는다 — BE 모델의 실 여섯 값과
 // 정확히 일치시킨다(pending/in_progress/captured/unsupported/failed/superseded).
+//
+// story #3746(유나 design gate CHANGES, 2026-09-09) — 이 유니온의 «유일한» 정본이다.
+// `insight-snapshot-block.tsx`가 한때 같은 값을 별도로 재정의했었다 — 값이 같아도
+// 정의가 둘이면 한쪽만 고쳤을 때 다른 쪽 `Record<InsightSnapshotStatus, …>` 가드가
+// 조용히 안 걸린다(이 스토리가 닫으려던 결함 그대로 재발). 그 파일은 이제 여기서
+// import만 한다 — 새 소비처를 추가할 때도 재정의 대신 이 export를 쓸 것.
 export type InsightSnapshotStatus =
   | 'pending'
   | 'in_progress'

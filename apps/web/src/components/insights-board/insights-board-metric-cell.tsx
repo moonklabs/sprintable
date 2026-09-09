@@ -30,6 +30,13 @@ import type { InsightSnapshotBucketView } from './types';
 // 자리(카디르 QA가 CI에서 못 잡는 클래스). `Record`(비-Partial)로 바꿔 여섯 값 중
 // 하나라도 또 빠지면 이제 빌드가 막는다. pending·in_progress는 같은 통(「아직」 —
 // 다음 발이 같다, 축은 다음 발로 가른다) — insightStatusWaiting 신규 키(유나 定).
+//
+// story #3746(유나 design gate 적기만, 2026-09-09) — 같은 pending/in_progress 통이
+// 자리마다 다른 낱말로 선다: 필터="수집 대기"(statusFilterPending, 선택지 명사) ·
+// 이 표 칸="아직"(insightStatusWaiting, §21-2 명사구) · 상세 블록="대기 중"
+// (insightStatusPending, 문장). 하나로 안 맞춘 건 실수가 아니다 — 자리마다 폭이
+// 다르다(선택지·6열 좁은 칸·문장 블록)는 §17-19/§21-2 규율 그대로. 낱말 자체를
+// 하나로 맞추는 판단은 PO 손.
 const STATUS_LABEL_KEYS: Record<InsightSnapshotBucketView['status'], string> = {
   pending: 'insightStatusWaiting',
   in_progress: 'insightStatusWaiting',
@@ -73,7 +80,7 @@ export function InsightsBoardMetricCell({ bucket, metric, tContent, tBoard }: In
   // (ii) 버킷은 있지만 아직 수집 완료 전(또는 실패/미지원) — 상태 라벨만(명사구).
   if (bucket.status !== 'captured') {
     const toneClass = DESTRUCTIVE_STATUSES.has(bucket.status) ? 'text-destructive' : 'text-muted-foreground';
-    return <span className={toneClass} data-testid="insights-board-cell-status">{tContent(STATUS_LABEL_KEYS[bucket.status]!)}</span>;
+    return <span className={toneClass} data-testid="insights-board-cell-status">{tContent(STATUS_LABEL_KEYS[bucket.status])}</span>;
   }
 
   // (iii) captured — 선택 지표 값. normalized 자체가 없거나(방어적, 계약상 이례) 해당

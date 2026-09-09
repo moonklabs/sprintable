@@ -4,6 +4,12 @@ import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { formatScheduledAt } from '@/components/content/schedule-format';
+// story #3746(유나 design gate CHANGES, 2026-09-09) — 이 유니온을 여기서 다시
+// 정의하면 `components/insights-board/types.ts`의 같은 이름 정의와 «두 정본»이
+// 된다 — 값이 지금은 여섯으로 일치해도, 한쪽만 고치면 다른 쪽 `Record` 가드가
+// 조용히 안 걸린다(이 스토리가 닫으려던 결함 그대로 재발). 정의는 types.ts
+// 한 곳에만 두고 여기선 import(정본↔사본 없음, 값 하나).
+import type { InsightSnapshotStatus } from '@/components/insights-board/types';
 
 // story #3499(Phase2·FE, 게시물 성과 표면 1차) — BE #3497/PR#3844 계약(PO 確定
 // 2026-09-05) 그대로: normalized 7키(impressions/reach/views/engagements/clicks/
@@ -18,12 +24,6 @@ export interface InsightNormalizedMetrics {
   spend: number | null;
   conversions: number | null;
 }
-
-// story #3746(유나 v5, 2026-09-09) — `dead_letter`는 `InsightSnapshot.status`(BE,
-// backend/app/models/insight_snapshot.py:52)의 실 값이 아니었다(BE 서비스 전수
-// 0건 — 유령 표면, 걷는다). `in_progress`·`superseded`는 실사용 값인데 이 유니온이
-// 빠뜨렸었다 — BE 모델의 실 여섯 값과 정확히 일치시킨다.
-export type InsightSnapshotStatus = 'pending' | 'in_progress' | 'captured' | 'unsupported' | 'failed' | 'superseded';
 
 export interface InsightSnapshot {
   normalized: InsightNormalizedMetrics;
