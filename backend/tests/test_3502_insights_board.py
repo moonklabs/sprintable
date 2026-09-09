@@ -131,6 +131,35 @@ async def _seed_channel_post_image(session, *, org_id, draft_id, version_id, pos
     return image
 
 
+# story #3734 AC3 후속(2026-09-09) — 원 초안이 보관되면 발행분도 성과 보드 기본에서
+# 빠져야 한다는 회귀를 재는 시딩 헬퍼 둘. 기존 파일의 다른 헬퍼와 동형(직접 모델
+# construct, API 경유 안 함).
+async def _seed_site_post_draft(
+    session, *, org_id, work_item_id, slug, deleted_at=None,
+):
+    from app.models.site_post_draft import SitePostDraft
+
+    draft = SitePostDraft(
+        id=uuid.uuid4(), org_id=org_id, work_item_id=work_item_id, slug=slug,
+        deleted_at=deleted_at,
+    )
+    session.add(draft)
+    await session.commit()
+    return draft
+
+
+async def _seed_channel_post_draft_with_deleted_at(session, *, org_id, work_item_id, channel="instagram", deleted_at=None):
+    from app.models.channel_post_draft import ChannelPostDraft
+
+    draft = ChannelPostDraft(
+        id=uuid.uuid4(), org_id=org_id, work_item_id=work_item_id, channel=channel,
+        connection_id=uuid.uuid4(), deleted_at=deleted_at,
+    )
+    session.add(draft)
+    await session.commit()
+    return draft
+
+
 async def _seed_snapshot(
     session, *, org_id, work_item_id, publication_id, publication_kind, channel,
     due_at, status="captured", normalized=None,
@@ -410,6 +439,120 @@ async def test_unpublished_site_post_excluded():
 
             result = await list_insights_board(s, org_id=org_id, window="30d")
         assert result["rows"] == []
+    finally:
+        await engine.dispose()
+
+
+# story #3734 AC3 후속(PO 라이브 판정 2026-09-09 10:16Z) — 보관은 초안 deleted_at만
+# 찍고 발행 기록(SitePost/ChannelPublication)은 무변인데(설계대로, #3291 정합) 이
+# 보드가 그 사실을 몰라 보관된 초안의 발행분이 그대로 남아 있었다(실측: 라이브 첫
+# 화면 20행 중 17이 스모크 표본). 기본 제외 + include_deleted=True로 복귀 확認.
+@pytest.mark.anyio
+async def test_site_post_excluded_when_source_draft_archived():
+    from app.services.insights_board import list_insights_board
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            story_id = await _seed_story(s, org_id, project_id)
+            now = datetime.now(timezone.utc)
+            await _seed_site_post_draft(
+                s, org_id=org_id, work_item_id=story_id, slug="post-archived",
+                deleted_at=now,
+            )
+            sp = await _seed_site_post(
+                s, org_id=org_id, work_item_id=story_id, slug="post-archived", title="보관된 글",
+                published_at=now - timedelta(days=1),
+            )
+
+            result_default = await list_insights_board(s, org_id=org_id, window="30d")
+            result_included = await list_insights_board(s, org_id=org_id, window="30d", include_deleted=True)
+
+        assert result_default["rows"] == []
+        assert [r["publication_id"] for r in result_included["rows"]] == [sp.id]
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_site_post_not_excluded_when_no_matching_draft_exists():
+    """원 초안 매칭이 아예 안 되면(순수 발행 레코드만 있는 표본 등) 보관 여부를
+    판정할 수 없다 — "모른다≠보관됨"이라 배제하지 않는다(뮤테이션 표적: OR 절을
+    지우면 이 케이스도 신규 발행분처럼 빠져 버린다)."""
+    from app.services.insights_board import list_insights_board
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            story_id = await _seed_story(s, org_id, project_id)
+            now = datetime.now(timezone.utc)
+            sp = await _seed_site_post(
+                s, org_id=org_id, work_item_id=story_id, slug="post-no-draft", title="초안 없는 글",
+                published_at=now - timedelta(days=1),
+            )
+
+            result = await list_insights_board(s, org_id=org_id, window="30d")
+
+        assert [r["publication_id"] for r in result["rows"]] == [sp.id]
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_channel_publication_excluded_when_source_draft_archived():
+    from app.services.insights_board import list_insights_board
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            story_id = await _seed_story(s, org_id, project_id)
+            gate = await _seed_gate(s, org_id=org_id, work_item_id=story_id)
+            draft = await _seed_channel_post_draft_with_deleted_at(
+                s, org_id=org_id, work_item_id=story_id, deleted_at=datetime.now(timezone.utc),
+            )
+            version_id = uuid.uuid4()
+            await _seed_channel_post_version(s, draft_id=draft.id, version_id=version_id)
+            pub = await _seed_channel_publication(
+                s, org_id=org_id, gate_id=gate.id, channel="threads",
+                published_at=datetime.now(timezone.utc) - timedelta(days=1), version_id=version_id,
+            )
+
+            result_default = await list_insights_board(s, org_id=org_id, window="30d")
+            result_included = await list_insights_board(s, org_id=org_id, window="30d", include_deleted=True)
+
+        assert result_default["rows"] == []
+        assert [r["publication_id"] for r in result_included["rows"]] == [pub.id]
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_channel_publication_not_excluded_when_draft_not_archived():
+    """짝 확認 — 보관 안 된(deleted_at=None) 초안의 발행분은 기본 목록에도 그대로
+    남는다(회귀 없음, 기존 5행 표본 테스트와 같은 축이지만 이 파일의 새 join 경로가
+    멀쩡한 행까지 실수로 안 뺀다는 걸 직접 pin)."""
+    from app.services.insights_board import list_insights_board
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            story_id = await _seed_story(s, org_id, project_id)
+            gate = await _seed_gate(s, org_id=org_id, work_item_id=story_id)
+            draft = await _seed_channel_post_draft(s, org_id=org_id, work_item_id=story_id)
+            version_id = uuid.uuid4()
+            await _seed_channel_post_version(s, draft_id=draft.id, version_id=version_id)
+            pub = await _seed_channel_publication(
+                s, org_id=org_id, gate_id=gate.id, channel="threads",
+                published_at=datetime.now(timezone.utc) - timedelta(days=1), version_id=version_id,
+            )
+
+            result = await list_insights_board(s, org_id=org_id, window="30d")
+
+        assert [r["publication_id"] for r in result["rows"]] == [pub.id]
     finally:
         await engine.dispose()
 
