@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
+import { Card } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import {
@@ -79,7 +80,7 @@ export function LoopFace({ projectId }: { projectId: string }) {
 
   return (
     // story #3009(로드맵 P2·PR-F, L1) — hover 시 인라인 카드 강조는 --elev-card.
-    <div className="rounded-2xl border border-border bg-card p-4 transition-shadow hover:shadow-[var(--elev-card)]">
+    <Card className="p-4 transition-shadow hover:shadow-[var(--elev-card)]">
       <div className="mb-3 flex items-baseline gap-2.5">
         <span className="size-1.5 shrink-0 rounded-full bg-info" aria-hidden="true" />
         <h2 className="text-sm font-semibold text-foreground">{t('loopTitle')}</h2>
@@ -100,6 +101,6 @@ export function LoopFace({ projectId }: { projectId: string }) {
       ) : (
         items.map((item) => <LoopRow key={item.id} item={item} />)
       )}
-    </div>
+    </Card>
   );
 }

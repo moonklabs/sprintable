@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { RefreshCw, AlertTriangle, FolderOpen, KeyRound, ChevronDown, EyeOff } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { Card } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import type { AuthFailureClusterItem, AuthFailureReason, FalsifiedClusterItem, LoopClusterItem } from './derive-attention-clusters';
 import type { SilentStallBucket, SilentStallBucketKey } from './derive-silent-stall-clusters';
@@ -44,7 +45,7 @@ function ClusterShell({
 }) {
   const c = TONE_CLASS[tone];
   return (
-    <div className={cn('overflow-hidden rounded-2xl border bg-card', c.border)}>
+    <Card className={cn('overflow-hidden', c.border)}>
       <div className={cn('flex items-center gap-3 px-4 py-3', c.headerBg)}>
         <span className={cn('flex size-8 shrink-0 items-center justify-center rounded-lg', c.iconBg)} aria-hidden="true">
           {icon}
@@ -60,7 +61,7 @@ function ClusterShell({
         </span>
       </div>
       {children}
-    </div>
+    </Card>
   );
 }
 

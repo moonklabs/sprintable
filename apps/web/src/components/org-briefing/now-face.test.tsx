@@ -81,13 +81,16 @@ describe('NowFace', () => {
   });
 
   // story #3009(로드맵 P2·PR-F, L1) — hover 시 인라인 카드 강조는 --elev-card.
+  // story #3736 — Card primitive(data-slot="card")로 이관 후 손 rounded-2xl 셀렉터가
+  // 깨졌다(반경 값 자체도 card.tsx 정본대로 rounded-lg로 바뀜, #2969 §1.1). data-slot으로
+  // 잡으면 이런 primitive 내부 값 변경에 테스트가 안 흔들린다.
   it('카드 셸이 hover:shadow-[var(--elev-card)]를 쓰고 hover:shadow-sm은 안 쓴다', async () => {
     stubFetch(
       { action_queue: { items: [{ type: 'gate_approval', priority: 'warn', context: { kind: 'canonical' } }] }, attention: { items: [] } },
       { data: [] },
     );
     await mount();
-    const card = container.querySelector('.rounded-2xl.border.border-border.bg-card');
+    const card = container.querySelector('[data-slot="card"]');
     expect(card?.className).toContain('hover:shadow-[var(--elev-card)]');
     expect(card?.className).not.toMatch(/hover:shadow-sm(\s|$)/);
   });
