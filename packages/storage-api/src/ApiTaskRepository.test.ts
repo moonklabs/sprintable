@@ -87,3 +87,73 @@ describe('ApiTaskRepository.list — TaskListFilters 키 완전성(story #3713, 
     expect(Object.keys(TEST_VALUE_AND_EXPECTED_PARAM).sort()).toEqual(Object.keys(TASK_LIST_FILTER_KEYS).sort());
   });
 });
+
+// story #3718(FE 완전성-정직, 3713/3717 후속) — getStoryTaskCounts(tasks/route.ts)가
+// list(...).length로 총계를 셌다. BE tasks.py는 필터 適用 後·limit 適用 前 COUNT를
+// X-Total-Count 헤더로 이미 준다(goals.py와 동형 규약) — list().length는 BE 기본
+// 페이지 상한(미지정 시 1000)에 잘린 근사치라 총계로 못 쓴다. count()가 그 헤더를 읽는다.
+function stubFetchWithHeaders(totalCount: string | null) {
+  const headers = new Headers();
+  if (totalCount !== null) headers.set('x-total-count', totalCount);
+  const fetchMock = vi.fn(async () => ({
+    ok: true,
+    status: 200,
+    headers,
+    json: async () => ({ data: [] }),
+  })) as unknown as ReturnType<typeof vi.fn>;
+  vi.stubGlobal('fetch', fetchMock);
+  return fetchMock;
+}
+
+describe('ApiTaskRepository.count — X-Total-Count 헤더에서 진짜 총계를 읽는다(story #3718)', () => {
+  it('(a) 헤더 total=1500 → count()가 1500을 반환한다(목록 길이 1000 상한과 무관 — 되돌리면 RED)', async () => {
+    stubFetchWithHeaders('1500');
+    const repo = new ApiTaskRepository('token');
+    const n = await repo.count({ story_id: 's1' });
+    expect(n).toBe(1500);
+  });
+
+  it('(b) status=done 필터로 부르면 done count가 헤더값 그대로 온다(목록 길이 아님)', async () => {
+    const fetchMock = stubFetchWithHeaders('42');
+    const repo = new ApiTaskRepository('token');
+    const n = await repo.count({ story_id: 's1', status: 'done' });
+    expect(n).toBe(42);
+    const requestedUrl = (fetchMock.mock.calls[0]![0] as URL | string).toString();
+    expect(requestedUrl).toContain('status=done');
+    expect(requestedUrl).toContain('limit=1');
+  });
+
+  it('(c) 헤더가 없으면 null(0/false로 위장하지 않는다 — story #3705 규율 동형)', async () => {
+    stubFetchWithHeaders(null);
+    const repo = new ApiTaskRepository('token');
+    const n = await repo.count({ story_id: 's1' });
+    expect(n).toBeNull();
+  });
+
+  it('(c-2) 헤더값이 숫자로 파싱 불가하면 null', async () => {
+    stubFetchWithHeaders('not-a-number');
+    const repo = new ApiTaskRepository('token');
+    const n = await repo.count({ story_id: 's1' });
+    expect(n).toBeNull();
+  });
+
+  it('count()는 요청에 limit=1을 실어 행 자체는 최소화한다(집계 목적, 목록 표시 아님)', async () => {
+    const fetchMock = stubFetchWithHeaders('3');
+    const repo = new ApiTaskRepository('token');
+    await repo.count({ story_id: 's1' });
+    const requestedUrl = (fetchMock.mock.calls[0]![0] as URL | string).toString();
+    expect(requestedUrl).toContain('limit=1');
+    expect(requestedUrl).not.toContain('cursor=');
+  });
+});
+
+// (e) 기존 fastapiCall 호출부(list/create/getById/update/delete) 무회귀 — fastapiCallRaw
+// 공유 추출 뒤에도 body 반환 동작이 그대로인지 값으로 고정.
+describe('ApiTaskRepository — fastapiCallRaw 공유 추출 뒤 기존 fastapiCall 호출부 무회귀(story #3718 (e))', () => {
+  it('list()는 여전히 body(JSON) 그대로만 반환한다(헤더 래핑 없음 — stub과 동형)', async () => {
+    stubFetch();
+    const repo = new ApiTaskRepository('token');
+    const result = await repo.list({ story_id: 's1' });
+    expect(result).toEqual({ data: [] });
+  });
+});
