@@ -50,6 +50,21 @@ class PollEventsInput(SprintableInput):
     cursor: str | None = None  # 이전 호출의 X-Next-Cursor 헤더 값을 그대로 넘기면 다음 페이지.
 
 
+# story #3724 — 3707(스키마 없어 버려짐)·3719(스키마 있는데 도구가 안 보냄) 재발 봉쇄. 이
+# 튜플들이 실제 forward하는 키 집합의 유일 정본(핸들러도 이것만 순회) — 테스트가 이 이름
+# 그대로 import해 CreateAgentRun/UpdateAgentRun 필드 집합과 대조한다(부분집합이 아니면
+# #3707류 재발). "collections.abc"가 아니라 tuple로 고정해 오타(단일 문자열 순회) 방지.
+EMIT_EVENT_FORWARD_FIELDS: tuple[str, ...] = (
+    "model", "story_id", "memo_id", "result_summary", "status",
+    "error_message", "last_error_code", "input_tokens", "output_tokens",
+    "started_at", "finished_at",
+)
+UPDATE_RUN_STATUS_FORWARD_FIELDS: tuple[str, ...] = (
+    "error_message", "last_error_code", "result_summary", "input_tokens",
+    "output_tokens", "cost_usd", "started_at", "finished_at",
+)
+
+
 async def emit_event(args: EmitEventInput) -> list[TextContent]:
     """에이전트 런 이벤트 발행."""
     try:
@@ -57,9 +72,7 @@ async def emit_event(args: EmitEventInput) -> list[TextContent]:
             "agent_id": args.agent_id, "trigger": args.trigger,
             "project_id": client.require_project_id(),  # E-MCP-OPT ff6cb90d: try 안에서 호출(가이드 에러 캡처).
         }
-        for field in ("model", "story_id", "memo_id", "result_summary", "status",
-                      "error_message", "last_error_code", "input_tokens", "output_tokens",
-                      "started_at", "finished_at"):
+        for field in EMIT_EVENT_FORWARD_FIELDS:
             val = getattr(args, field)
             if val is not None:
                 body[field] = val
@@ -71,8 +84,7 @@ async def emit_event(args: EmitEventInput) -> list[TextContent]:
 async def update_run_status(args: UpdateRunStatusInput) -> list[TextContent]:
     """에이전트 런 상태 업데이트."""
     body: dict = {"status": args.status}
-    for field in ("error_message", "last_error_code", "result_summary", "input_tokens",
-                  "output_tokens", "cost_usd", "started_at", "finished_at"):
+    for field in UPDATE_RUN_STATUS_FORWARD_FIELDS:
         val = getattr(args, field)
         if val is not None:
             body[field] = val
