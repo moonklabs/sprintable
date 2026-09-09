@@ -15,7 +15,9 @@ import {
   isColdStart,
   mergeMemberLookup,
   sortGroupMembersByName,
-  HistoryDrilldown,
+  useHistoryDrilldown,
+  HistoryDrilldownPanel,
+  HistoryDrilldownTrigger,
   HitRateBar,
   TrustBadge,
   type OrgSummaryRow,
@@ -104,52 +106,26 @@ export default function OrganizationTrustPage() {
     : sortedRows.filter((row) => (row.role_label ?? row.role_key) === roleFilter);
 
   function renderAdminRow(row: OrgSummaryRow, index: number) {
-    const member = rosterMembers.get(row.member_id);
-    const name = member?.name ?? t('trustUnknownMember');
-    const roleLabel = row.role_label ?? row.role_key;
-    const coldStart = isColdStart(row.hit_rate, row.resolved);
     return (
-      <ListRow
+      <AdminRow
         key={`${row.member_id}-${row.role_key}`}
-        data-testid="trust-roster-row"
-        mark={<ListRowMark label={initial(name)} color={MARK_COLOR} />}
-        title={name}
-        subtitle={coldStart ? (
-          <ColdStartSubtitle roleLabel={roleLabel} pending={row.pending} t={t} />
-        ) : (
-          t('trustRoleComputedAt', { role: roleLabel, time: formatScheduledAt(row.computed_at, displayTimezone).display })
-        )}
-        status={coldStart ? (
-          <TrustBadge hitRate={row.hit_rate} resolved={row.resolved} t={t} />
-        ) : (
-          <HitRateCell hitRate={row.hit_rate as number} t={t} />
-        )}
-        action={<HistoryDrilldown memberId={row.member_id} roleKey={row.role_key} index={index} t={t} />}
+        row={row}
+        index={index}
+        name={rosterMembers.get(row.member_id)?.name ?? t('trustUnknownMember')}
+        t={t}
+        displayTimezone={displayTimezone}
       />
     );
   }
 
   function renderSelfRow(score: SelfScore, index: number) {
-    const roleLabel = score.role_label ?? score.role_key;
-    const coldStart = isColdStart(score.hit_rate, score.resolved);
     return (
-      <ListRow
+      <SelfRow
         key={score.role_key}
-        data-testid="trust-self-row"
-        mark={<ListRowMark label={initial(roleLabel)} color={MARK_COLOR} />}
-        title={roleLabel}
-        // self 뷰는 title이 이미 role_label이라(누구인지가 아니라 어느 역할인지가
-        // 축) 定②의 "{role} · {time} 기준"을 그대로 못 쓴다 — GET /trust-scores
-        // (자기 조회) 응답엔 애초에 computed_at 자체가 없다(스코어만, 스냅샷 메타
-        // 없음). 콜드스타트 사유 문장에도 role 접두를 안 붙인다(title에 이미 있어
-        // 중복) — admin 행과 다른 자리(showRole=false).
-        subtitle={coldStart ? <ColdStartSubtitle pending={score.pending} t={t} /> : null}
-        status={coldStart ? (
-          <TrustBadge hitRate={score.hit_rate} resolved={score.resolved} t={t} />
-        ) : (
-          <HitRateCell hitRate={score.hit_rate as number} t={t} />
-        )}
-        action={currentTeamMemberId ? <HistoryDrilldown memberId={currentTeamMemberId} roleKey={score.role_key} index={index} t={t} /> : undefined}
+        score={score}
+        index={index}
+        currentTeamMemberId={currentTeamMemberId}
+        t={t}
       />
     );
   }
@@ -231,6 +207,70 @@ export default function OrganizationTrustPage() {
         </p>
       ) : null}
     </div>
+  );
+}
+
+// story #3749 CHANGES(페드루 PO, 유나 픽셀 캡처 지적) — 펼침 패널이 `ListRow`의
+// `children`(행 아래 전폭) 자리로 가려면 트리거·패널이 각자 다른 DOM 위치에서 같은
+// 펼침 상태를 공유해야 한다 — 그 상태(useHistoryDrilldown)를 쥐는 자리가 이제 행
+// 컴포넌트 자체다(훅은 컴포넌트 안에서만 부를 수 있다, .map() 콜백 안 직접 호출 불가).
+function AdminRow({
+  row, index, name, t, displayTimezone,
+}: { row: OrgSummaryRow; index: number; name: string; t: ReturnType<typeof useTranslations>; displayTimezone: string }) {
+  const roleLabel = row.role_label ?? row.role_key;
+  const coldStart = isColdStart(row.hit_rate, row.resolved);
+  const drilldown = useHistoryDrilldown({ memberId: row.member_id, roleKey: row.role_key });
+  return (
+    <ListRow
+      data-testid="trust-roster-row"
+      mark={<ListRowMark label={initial(name)} color={MARK_COLOR} />}
+      title={name}
+      subtitle={coldStart ? (
+        <ColdStartSubtitle roleLabel={roleLabel} pending={row.pending} t={t} />
+      ) : (
+        t('trustRoleComputedAt', { role: roleLabel, time: formatScheduledAt(row.computed_at, displayTimezone).display })
+      )}
+      status={coldStart ? (
+        <TrustBadge hitRate={row.hit_rate} resolved={row.resolved} t={t} />
+      ) : (
+        <HitRateCell hitRate={row.hit_rate as number} t={t} />
+      )}
+      action={<HistoryDrilldownTrigger open={drilldown.open} toggle={drilldown.toggle} index={index} t={t} />}
+    >
+      <HistoryDrilldownPanel open={drilldown.open} snapshots={drilldown.snapshots} t={t} />
+    </ListRow>
+  );
+}
+
+function SelfRow({
+  score, index, currentTeamMemberId, t,
+}: { score: SelfScore; index: number; currentTeamMemberId: string | null | undefined; t: ReturnType<typeof useTranslations> }) {
+  const roleLabel = score.role_label ?? score.role_key;
+  const coldStart = isColdStart(score.hit_rate, score.resolved);
+  // story #3749(원 주석 그대로) — currentTeamMemberId가 없으면(이론상 self 뷰 진입
+  // 자체가 team member 전제라 드묾) 펼침 훅에 넘길 memberId가 없다 — 훅은 항상 호출
+  // 하되(rules-of-hooks) 빈 문자열로 fetch를 무해화하고 트리거 자체를 안 그린다.
+  const drilldown = useHistoryDrilldown({ memberId: currentTeamMemberId ?? '', roleKey: score.role_key });
+  return (
+    <ListRow
+      data-testid="trust-self-row"
+      mark={<ListRowMark label={initial(roleLabel)} color={MARK_COLOR} />}
+      title={roleLabel}
+      // self 뷰는 title이 이미 role_label이라(누구인지가 아니라 어느 역할인지가
+      // 축) 定②의 "{role} · {time} 기준"을 그대로 못 쓴다 — GET /trust-scores
+      // (자기 조회) 응답엔 애초에 computed_at 자체가 없다(스코어만, 스냅샷 메타
+      // 없음). 콜드스타트 사유 문장에도 role 접두를 안 붙인다(title에 이미 있어
+      // 중복) — admin 행과 다른 자리(showRole=false).
+      subtitle={coldStart ? <ColdStartSubtitle pending={score.pending} t={t} /> : null}
+      status={coldStart ? (
+        <TrustBadge hitRate={score.hit_rate} resolved={score.resolved} t={t} />
+      ) : (
+        <HitRateCell hitRate={score.hit_rate as number} t={t} />
+      )}
+      action={currentTeamMemberId ? <HistoryDrilldownTrigger open={drilldown.open} toggle={drilldown.toggle} index={index} t={t} /> : undefined}
+    >
+      {currentTeamMemberId ? <HistoryDrilldownPanel open={drilldown.open} snapshots={drilldown.snapshots} t={t} /> : null}
+    </ListRow>
   );
 }
 

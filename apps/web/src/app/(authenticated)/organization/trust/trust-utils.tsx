@@ -170,11 +170,16 @@ export function Sparkline({ values }: { values: number[] }) {
   );
 }
 
-export function HistoryDrilldown({ memberId, roleKey, index, t }: { memberId: string; roleKey: string; index: number; t: Translator }) {
+// story #3749 CHANGES(페드루 PO, 유나 픽셀 캡처 지적 2026-09-09 17:23Z) — 펼침(스파크
+// 라인+이력)이 행의 action 칸 «안»에 구겨져 있었다(캡처 실측) — 집안 `ListRow` 펼침
+// 슬롯 관례(③ 채널 연결 앱 자격 폼 = 행 아래 전폭, list-row.tsx의 `children`)를
+// 어긴 자리다. 트리거 버튼(행 다음 발 자리)과 펼침 패널(행 아래 전폭 자리)이 서로
+// 다른 DOM 위치(`ListRow`의 `action` prop vs `children`)로 가야 해서, 상태를 한
+// 컴포넌트 안에 가두던 원래 구조를 훅+트리거+패널 셋으로 쪼갠다(로직 자체는 무변경
+// — 토글 함수·지연 조회·데이터 모양 그대로, 렌더 위치만 갈린다).
+export function useHistoryDrilldown({ memberId, roleKey }: { memberId: string; roleKey: string }) {
   const [open, setOpen] = useState(false);
   const [snapshots, setSnapshots] = useState<HistorySnapshot[] | null>(null);
-  const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
 
   const toggle = async () => {
     if (!open && snapshots === null) {
@@ -189,43 +194,54 @@ export function HistoryDrilldown({ memberId, roleKey, index, t }: { memberId: st
     setOpen((v) => !v);
   };
 
+  return { open, snapshots, toggle };
+}
+
+// 「추이 보기」 트리거 — `ListRow`의 `action` 자리(행 다음 발 관례, #4090/#4093과
+// 동형 — variant="outline" size="sm"). §22-18(유나의 자) — 행마다 같은 정적
+// 라벨이라 aria-label에 순번+현재 라벨을 품긴다(archiveRowAriaLabel과 동형 관례).
+export function HistoryDrilldownTrigger({
+  open, toggle, index, t,
+}: { open: boolean; toggle: () => void; index: number; t: Translator }) {
   return (
-    <div>
-      {/* story #3749(재설계 ⑤, 시안 v3b) — 「추이 보기」를 상시 노출 outline 버튼으로
-          (행 다음 발 관례, #4090/#4093과 동형 — variant="outline" size="sm"). 펼침
-          로직 자체는 그대로(토글 함수·지연 조회 무변경). §22-18(유나의 자) — 행마다
-          같은 정적 라벨이라 aria-label에 순번+현재 라벨을 품긴다(archiveRowAriaLabel
-          과 동형 관례). */}
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        onClick={() => void toggle()}
-        data-testid="trust-history-toggle"
-        aria-label={t('trustHistoryToggleAriaLabel', { n: index + 1, label: t('trustHistoryToggle') })}
-      >
-        {t('trustHistoryToggle')}
-        {open ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
-      </Button>
-      {open ? (
-        <div className="mt-2 space-y-1">
-          {snapshots === null ? (
-            <div className="h-8 animate-pulse rounded-md bg-muted" />
-          ) : snapshots.length === 0 ? (
-            <p className="text-xs text-muted-foreground">{t('trustHistoryEmpty')}</p>
-          ) : (
-            <>
-              <Sparkline values={extractSparklineValues(snapshots)} />
-              {snapshots.map((s) => (
-                <div key={s.computed_at} className="flex items-center justify-between text-xs text-muted-foreground">
-                  <span>{formatRelativeTime(s.computed_at, locale, displayTimezone)}</span>
-                  <TrustBadge hitRate={s.hit_rate} resolved={s.resolved} t={t} />
-                </div>
-              ))}
-            </>
-          )}
-        </div>
-      ) : null}
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      onClick={() => void toggle()}
+      data-testid="trust-history-toggle"
+      aria-label={t('trustHistoryToggleAriaLabel', { n: index + 1, label: t('trustHistoryToggle') })}
+    >
+      {t('trustHistoryToggle')}
+      {open ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
+    </Button>
+  );
+}
+
+// 펼침 패널 — `ListRow`의 `children` 자리(행 아래 전폭, ③ 앱 자격 폼과 동형 슬롯).
+export function HistoryDrilldownPanel({
+  open, snapshots, t,
+}: { open: boolean; snapshots: HistorySnapshot[] | null; t: Translator }) {
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
+  if (!open) return null;
+  return (
+    <div className="mt-2 space-y-1" data-testid="trust-history-panel">
+      {snapshots === null ? (
+        <div className="h-8 animate-pulse rounded-md bg-muted" />
+      ) : snapshots.length === 0 ? (
+        <p className="text-xs text-muted-foreground">{t('trustHistoryEmpty')}</p>
+      ) : (
+        <>
+          <Sparkline values={extractSparklineValues(snapshots)} />
+          {snapshots.map((s) => (
+            <div key={s.computed_at} className="flex items-center justify-between text-xs text-muted-foreground">
+              <span>{formatRelativeTime(s.computed_at, locale, displayTimezone)}</span>
+              <TrustBadge hitRate={s.hit_rate} resolved={s.resolved} t={t} />
+            </div>
+          ))}
+        </>
+      )}
     </div>
   );
 }

@@ -257,6 +257,43 @@ describe('OrganizationTrustPage — 「추이 보기」 펼침(HistoryDrilldown 
 
     expect(container.textContent).toContain(koMessages.organization.trustHistoryToggle);
   });
+
+  // story #3749 CHANGES(페드루 PO, 유나 픽셀 캡처 지적 2026-09-09) — 펼침이 행의
+  // action 칸 «안»에 구겨져 있던 자리를 `ListRow`의 children(행 아래 전폭) 슬롯으로
+  // 옮겼다. 뮤테이션 표적 — 패널이 다시 action 안쪽(트리거의 형제가 아니라 자식)으로
+  // 돌아가면 이 단언이 깨져야 한다: 패널은 행 래퍼(`trust-roster-row`)의 «직계 자식»
+  // 이어야 한다(ListRow의 `{children}`은 마크/제목/상태/액션을 담은 flex 줄과 형제로
+  // 렌더된다 — action 안에 중첩되면 그 flex 줄의 손자가 된다).
+  it('⭐뮤테이션 표적 — 펼침 패널이 행 아래 전폭(children)이지 action 칸 안(중첩)이 아니다', async () => {
+    mountAsAdmin();
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/trust-scores/org-summary') {
+        return {
+          ok: true, status: 200,
+          json: async () => ({ members: [{ member_id: 'm1', role_key: 'dev', role_label: '개발', hit_rate: 0.9, resolved: 5, computed_at: '2026-09-08T00:00:00Z', pending: 0 }] }),
+        };
+      }
+      if (url === '/api/org-members' || url.startsWith('/api/team-members')) {
+        return { ok: true, status: 200, json: async () => ({ data: [] }) };
+      }
+      if (url.startsWith('/api/trust-scores/history')) {
+        return { ok: true, status: 200, json: async () => ({ snapshots: [{ computed_at: '2026-09-08T00:00:00Z', hit_rate: 0.9, resolved: 5 }] }) };
+      }
+      throw new Error('unexpected fetch: ' + url);
+    }));
+    await act(async () => { root.render(wrap(<OrganizationTrustPage />)); });
+    await flush();
+
+    const toggle = container.querySelector('[data-testid="trust-history-toggle"]') as HTMLElement;
+    await act(async () => { toggle.click(); });
+    await flush();
+
+    const row = container.querySelector('[data-testid="trust-roster-row"]');
+    const panel = row?.querySelector('[data-testid="trust-history-panel"]');
+    expect(panel).not.toBeNull();
+    expect(panel?.parentElement).toBe(row);
+  });
 });
 
 describe('OrganizationTrustPage — 하단 참고 문장(定③)', () => {
