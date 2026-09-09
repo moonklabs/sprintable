@@ -803,6 +803,11 @@ export default function OrganizationChannelsPage() {
   const [credentialsByChannel, setCredentialsByChannel] = useState<Record<string, AppCredentialsStatusResponse>>({});
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
+  // story #3733(유나 定 2026-09-09) — non-owner(admin 포함) 카드 안내에 소유자 표시명을
+  // 실을 수 있으면 싣는다(이메일은 절대 안 싣는다). 출처=기존 GET /api/org-members(admin·
+  // owner 전용, #3231) — 새 API 0. plain member는 이 호출이 403이라 자연히 못 얻고
+  // undefined로 남아 unnamed 문구로 폴백한다(지어내지 않는다).
+  const [ownerName, setOwnerName] = useState<string | undefined>(undefined);
 
   const load = useCallback(async () => {
     if (!orgId) return;
@@ -816,6 +821,18 @@ export default function OrganizationChannelsPage() {
       if (!availableRes.ok || !connsRes.ok) {
         setLoadError(true);
         return;
+      }
+      if (!isOwnerStrict) {
+        fetchWithAuth('/api/org-members').then(async (res) => {
+          if (!res.ok) return;
+          const json = (await res.json().catch(() => null)) as { data?: Array<{ role: string; name: string; email?: string | null }> } | null;
+          const owner = (json?.data ?? []).find((m) => m.role === 'owner');
+          // story #3733 라이브 캡처 실측(2026-09-09) — BE org-members는 실명이 없으면
+          // name을 email로 폴백한다(COALESCE(m.name, u.display_name, u.email)). 그
+          // 폴백을 그대로 쓰면 「이메일은 절대 안 싣는다」가 조용히 깨진다 — name이
+          // email과 같으면(=실명이 없다는 신호) 이름 없는 문구로 떨어뜨린다.
+          if (owner?.name && owner.name !== owner.email) setOwnerName(owner.name);
+        }).catch(() => undefined);
       }
       const availableJson = (await availableRes.json().catch(() => null)) as { data?: AvailableChannelItem[] } | null;
       // story #3450 후속(페드루 PO 確定 2026-09-05, f30da19a 2026-09-04 13:52Z 결정을
@@ -846,7 +863,7 @@ export default function OrganizationChannelsPage() {
     } finally {
       setLoading(false);
     }
-  }, [orgId]);
+  }, [orgId, isOwnerStrict]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -970,6 +987,7 @@ export default function OrganizationChannelsPage() {
               channel={it.channel}
               orgId={orgId ?? ''}
               isOwner={isOwnerStrict}
+              ownerName={ownerName}
               credentials={credentialsByChannel[it.channel]}
               onSaved={() => void load()}
             />
