@@ -34,6 +34,14 @@ def _mock_run(status: str = "running") -> MagicMock:
     r.cost_usd = None
     r.duration_ms = None
     r.last_error_code = None
+    # story #3725 — AgentRunResponse에 5필드 추가. MagicMock은 명시 안 하면 자동으로
+    # MagicMock을 만들어내(retry_count/max_retries는 int 필수라 ValidationError) agent_name과
+    # 동형으로 세팅.
+    r.deployment_id = None
+    r.failure_disposition = None
+    r.retry_count = 0
+    r.max_retries = 3
+    r.next_retry_at = None
     r.llm_call_count = 0
     r.run_metadata = {}
     r.created_at = datetime(2026, 4, 30, tzinfo=timezone.utc)
