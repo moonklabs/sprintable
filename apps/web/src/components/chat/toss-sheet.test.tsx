@@ -273,6 +273,17 @@ describe('TossSheet — 완결 실패를 완결인 척 안 함(story #3701 parti
     expect(document.body.textContent).toContain(koMessages.chats.approvalRequestTossPartialBanner);
   });
 
+  it('중간 페이지가 total 못 채운 채 빈 배열이면(서버 불완전 응답) partial로 남긴다(카디르 QA 블로커①)', async () => {
+    // total=2인데 1페이지째가 이미 빈 배열 — "다 걷었다"가 아니라 "채우다 만" 상태.
+    // pageData.length===0을 무조건 완결로 보면 이 경우가 조용히 삼켜진다.
+    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({ data: [], total: 2 }) }));
+    vi.stubGlobal('fetch', fetchMock);
+    await mount();
+
+    expect(document.body.textContent).toContain(koMessages.chats.approvalRequestTossPartialEmptyTitle);
+    expect(document.body.textContent).not.toContain(koMessages.chats.approvalRequestTossEmptyTitle);
+  });
+
   it('total이 없으면(계약 위반) 완결을 단정하지 않고 partial로 멈춘다', async () => {
     const page1 = [{ id: 'conv-a', type: 'group' as const, title: '방1', participants: [{ member_id: 'member-9', name: '선생님' }] }];
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: page1 }) }))); // total 없음

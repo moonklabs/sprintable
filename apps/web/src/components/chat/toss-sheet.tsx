@@ -129,7 +129,15 @@ export function TossSheet({
           sawPartial = true;
           break;
         }
-        if (pageData.length === 0 || all.length >= total) break;
+        if (pageData.length === 0) {
+          // story #3701(카디르 QA, design CHANGES② 블로커①) — 빈 페이지가 곧 "완결"은
+          // 아니다. total을 아직 못 채웠는데 서버가 빈 배열을 주면 그건 채우다 만
+          // 불완전 상태(#4049 has_more 무시와 동류) — all.length>=total일 때만 진짜
+          // 완결이고, 그 전에 빈 페이지가 오면 partial로 남긴다.
+          if (all.length < total) sawPartial = true;
+          break;
+        }
+        if (all.length >= total) break;
         if (page === MAX_PAGES - 1) sawPartial = true;
       }
       if (cancelToken.current) {
