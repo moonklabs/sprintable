@@ -61,11 +61,19 @@ async function flush() {
   });
 }
 
+// story #3734(카디르 CI 적발·content-bff-route-coverage.guard.test.ts #3445) — 실
+// 코드가 `?`를 항상 템플릿 «안»에 두도록 바뀌어(가드가 `?` 밖 보간을 못 읽어서) 기본
+// 뷰(showArchived=false)도 이제 트레일링 빈 `?`를 붙여 부른다(`.../drafts?`) — 두
+// stub 모두 트레일링 `?` 유무 둘 다 받아들이게 정규화한다.
+function stripTrailingBareQuery(url: string): string {
+  return url.endsWith('?') ? url.slice(0, -1) : url;
+}
+
 function stubFetch(drafts: unknown[] | { status: number }) {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input);
+      const url = stripTrailingBareQuery(String(input));
       if (url === `/api/organizations/${ORG_ID}/site-posts/drafts`) {
         if (!Array.isArray(drafts)) return { ok: false, status: drafts.status, json: async () => ({}) };
         return { ok: true, status: 200, json: async () => ({ data: drafts, error: null, meta: null }) };
@@ -84,8 +92,9 @@ function stubFetchStateful(initial: Array<Record<string, unknown> & { draft_id: 
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      calls.push(`${init?.method ?? 'GET'} ${url}`);
+      const rawUrl = String(input);
+      calls.push(`${init?.method ?? 'GET'} ${rawUrl}`);
+      const url = stripTrailingBareQuery(rawUrl);
       const listBase = `/api/organizations/${ORG_ID}/site-posts/drafts`;
       if (url === listBase || url === `${listBase}?include_deleted=true`) {
         const includeDeleted = url.includes('include_deleted=true');

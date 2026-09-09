@@ -95,8 +95,11 @@ export default function ChannelPostListPage() {
       setLoading(true);
       setLoadError(false);
       try {
-        const qs = showArchived ? '?include_deleted=true' : '';
-        const res = await fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts${qs}`);
+        // story #3734(카디르 CI 적발) — content/page.tsx(site-posts)와 동형(그 파일 주석
+        // 참조 — content-bff-route-coverage.guard.test.ts #3445가 `?`를 템플릿 밖에 두면
+        // 세그먼트를 못 읽는다).
+        const qs = showArchived ? 'include_deleted=true' : '';
+        const res = await fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts?${qs}`);
         if (cancelled) return;
         if (res.ok) {
           const json = (await res.json().catch(() => null)) as { data?: ChannelPostDraftListItem[] } | null;
@@ -121,13 +124,12 @@ export default function ChannelPostListPage() {
   // 안 뺀다, 기본 뷰에서 방금 보관된 경우만 뺀다).
   const handleArchiveToggle = async (draft: ChannelPostDraftListItem) => {
     if (!orgId || archivingId) return;
-    const action = draft.is_deleted ? 'restore' : 'archive';
     setArchivingId(draft.draft_id);
     try {
-      const res = await fetchWithAuth(
-        `/api/organizations/${orgId}/channel-posts/drafts/${draft.draft_id}/${action}`,
-        { method: 'POST' },
-      );
+      // story #3734(카디르 CI 적발) — content/page.tsx(site-posts)와 동형(그 파일 주석 참조).
+      const res = draft.is_deleted
+        ? await fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${draft.draft_id}/restore`, { method: 'POST' })
+        : await fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${draft.draft_id}/archive`, { method: 'POST' });
       if (!res.ok) return;
       const json = (await res.json().catch(() => null)) as { data?: { is_deleted: boolean } } | null;
       const isDeleted = json?.data?.is_deleted ?? !draft.is_deleted;

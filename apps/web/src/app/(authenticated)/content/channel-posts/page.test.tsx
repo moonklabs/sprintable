@@ -57,11 +57,17 @@ async function flush() {
   });
 }
 
+// story #3734(카디르 CI 적발) — content/page.test.tsx(site-posts)와 동형(그 파일
+// 주석 참조 — `?`가 항상 템플릿 안에 있어 기본 뷰도 트레일링 빈 `?`를 붙인다).
+function stripTrailingBareQuery(url: string): string {
+  return url.endsWith('?') ? url.slice(0, -1) : url;
+}
+
 function stubFetch(drafts: unknown[] | { status: number }) {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input);
+      const url = stripTrailingBareQuery(String(input));
       if (url === `/api/organizations/${ORG_ID}/channel-posts/drafts`) {
         if (!Array.isArray(drafts)) return { ok: false, status: drafts.status, json: async () => ({}) };
         return { ok: true, status: 200, json: async () => ({ data: drafts, error: null, meta: null }) };
@@ -79,8 +85,9 @@ function stubFetchStateful(initial: Array<Record<string, unknown> & { draft_id: 
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      calls.push(`${init?.method ?? 'GET'} ${url}`);
+      const rawUrl = String(input);
+      calls.push(`${init?.method ?? 'GET'} ${rawUrl}`);
+      const url = stripTrailingBareQuery(rawUrl);
       const listBase = `/api/organizations/${ORG_ID}/channel-posts/drafts`;
       if (url === listBase || url === `${listBase}?include_deleted=true`) {
         const includeDeleted = url.includes('include_deleted=true');

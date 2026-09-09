@@ -87,8 +87,12 @@ export default function ContentPostListPage() {
       setLoading(true);
       setLoadError(false);
       try {
-        const qs = showArchived ? '?include_deleted=true' : '';
-        const res = await fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts${qs}`);
+        // story #3734(카디르 CI 적발, content-bff-route-coverage.guard.test.ts #3445) —
+        // 가드는 fetchWithAuth 템플릿을 `?` «앞»에서 잘라 세그먼트로 쪼갠다. `?`가 템플릿
+        // 밖(qs 변수)에 있으면 세그먼트가 `drafts${qs}`(리터럴+보간 혼합)가 돼 디렉터리를
+        // 못 찾는다 — `?`를 템플릿 안에 둔다(qs는 앞 `?` 없이).
+        const qs = showArchived ? 'include_deleted=true' : '';
+        const res = await fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts?${qs}`);
         if (cancelled) return;
         if (res.ok) {
           const json = (await res.json().catch(() => null)) as { data?: SitePostDraftListItem[] } | null;
@@ -117,13 +121,16 @@ export default function ContentPostListPage() {
   // 조건(미보관만)을 어긴 경우.
   const handleArchiveToggle = async (draft: SitePostDraftListItem) => {
     if (!orgId || archivingId) return;
-    const action = draft.is_deleted ? 'restore' : 'archive';
     setArchivingId(draft.draft_id);
     try {
-      const res = await fetchWithAuth(
-        `/api/organizations/${orgId}/site-posts/drafts/${draft.draft_id}/${action}`,
-        { method: 'POST' },
-      );
+      // story #3734(카디르 CI 적발) — content-bff-route-coverage.guard.test.ts(#3445)는
+      // `fetchWithAuth` 호출식 «안»의 리터럴 URL만 스캔한다(변수에 담아 부르면 눈에서
+      // 사라져 "안 잰 것"이 된다). archive/restore는 디렉터리 자체가 다른 리터럴이라
+      // 변수(`action`)로 합칠 수 없다 — 호출을 둘로 분기한다(그래야 가드가 프록시
+      // 누락 클래스를 실제로 재는 자리가 된다).
+      const res = draft.is_deleted
+        ? await fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts/${draft.draft_id}/restore`, { method: 'POST' })
+        : await fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts/${draft.draft_id}/archive`, { method: 'POST' });
       if (!res.ok) return;
       const json = (await res.json().catch(() => null)) as { data?: { is_deleted: boolean } } | null;
       const isDeleted = json?.data?.is_deleted ?? !draft.is_deleted;
