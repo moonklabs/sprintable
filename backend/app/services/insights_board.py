@@ -29,7 +29,7 @@ from operator import gt as _gt
 from operator import lt as _lt
 from typing import Any
 
-from sqlalchemy import Integer, Text, cast, exists, literal, select, union_all
+from sqlalchemy import Integer, Text, cast, exists, func, literal, select, union_all
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -162,6 +162,21 @@ def _build_union(*, org_id: uuid.UUID, channel: str | None, since: datetime, inc
     return union_all(site_post_arm, channel_pub_arm).cte("insights_board_rows")
 
 
+async def _count_hidden_by_archive(
+    db: AsyncSession, *, org_id: uuid.UUID, channel: str | None, since: datetime,
+) -> int:
+    """story #3746(3734 §4-C, 유나 실측) — `SitePost` 유니크는 `(org_id, lang, slug)`
+    (work_item_id 없음, site_post.py:20)라 초안 하나가 여러 lang의 발행 행에 걸린다
+    — 그 초안 하나를 보관하면 join을 타는 모든 lang 행이 한꺼번에 기본 목록에서
+    빠진다(#4087). 화면이 "N건 숨김"을 못 말하던 자리 — 포함/제외 COUNT 차이로 낸다.
+    상태(status) 필터와는 무관하다(보관 자체가 뜻이라 그 축을 안 섞는다)."""
+    excluded_cte = _build_union(org_id=org_id, channel=channel, since=since, include_deleted=False)
+    included_cte = _build_union(org_id=org_id, channel=channel, since=since, include_deleted=True)
+    excluded_count = (await db.execute(select(func.count()).select_from(excluded_cte))).scalar_one()
+    included_count = (await db.execute(select(func.count()).select_from(included_cte))).scalar_one()
+    return max(0, included_count - excluded_count)
+
+
 async def list_insights_board(
     db: AsyncSession, *, org_id: uuid.UUID, window: str = "30d", channel: str | None = None,
     status: str | None = None, sort: str = "published_at", sort_dir: str = "desc",
@@ -184,10 +199,14 @@ async def list_insights_board(
         query = query.where(rows_cte.c.work_item_id == work_item_id)
 
     if status is not None:
+        # story #3746(유나 v5, 2026-09-09) — 「수집 대기」는 pending·in_progress 한
+        # 통이다(축은 다음 발로 가른다 — 둘 다 "기다린다"). FE는 이 통을 status=pending
+        # 하나로 보낸다(별도 파라미터 값 안 만든다) — 여기서 그 값을 둘로 넓힌다.
+        status_values = ("pending", "in_progress") if status == "pending" else (status,)
         query = query.where(exists(
             select(1).where(
                 InsightSnapshot.publication_id == rows_cte.c.publication_id,
-                InsightSnapshot.status == status,
+                InsightSnapshot.status.in_(status_values),
             )
         ))
 
@@ -300,11 +319,20 @@ async def list_insights_board(
 
     # 스냅샷 배치 조회(N+1 회피, assets.py 관례 동형) — 페이지 최대 `limit`건이라
     # publication_id도 최대 그만큼, 행당 스냅샷도 최대 2건이라 이 IN 조회 하나로 충분.
+    #
+    # story #3746(유나 v5, 2026-09-09) — `superseded`는 여기(원천)에서 기본 배제한다.
+    # 화면 넷(보드·상세·MCP 등)이 이 함수가 낸 같은 목록을 부르는데 화면마다 따로
+    # 거르면 「동기화」가 아니라 「갈림」이 된다 — 단일화 지점은 이 조회 하나뿐. 재발행이
+    # 새 사이클을 열며 회수한 옛 pending/in_progress 행이 여기서 애초에 후보 자체가
+    # 안 된다(같은 글의 새 행이 이미 그 자리에 있다 — 사라짐이 아니라 «대체»).
     publication_ids = [r.publication_id for r in page]
     snapshots_by_pub: dict[uuid.UUID, list[InsightSnapshot]] = {}
     if publication_ids:
         snap_rows = (await db.execute(
-            select(InsightSnapshot).where(InsightSnapshot.publication_id.in_(publication_ids))
+            select(InsightSnapshot).where(
+                InsightSnapshot.publication_id.in_(publication_ids),
+                InsightSnapshot.status != "superseded",
+            )
         )).scalars().all()
         for snap in snap_rows:
             snapshots_by_pub.setdefault(snap.publication_id, []).append(snap)
@@ -345,13 +373,23 @@ async def list_insights_board(
         # label_snapshot_offset(insight_snapshots.py) 공유 헬퍼로 뺐다(카디르 발견,
         # PR#4003 — MCP 3651이 이 자리와 별개로 인덱스 기반 라벨링을 갖고 있어 재발행
         # 스냅샷을 오라벨했다, 같은 규칙 한 자리).
+        #
+        # story #3746(유나 v5, 2026-09-09) — 정밀 근인: label_snapshot_offset이
+        # round(초/86400)라 ±12시간이 같은 정수로 접힌다. 재발행 앵커가 12시간
+        # 미만으로 움직이면 옛 사이클 행(위에서 이미 superseded는 걸렀지만, captured/
+        # failed/unsupported처럼 superseded 전이 대상이 아닌 이력 행은 여전히 후보로
+        # 남는다)과 새 행이 같은 라벨로 겹칠 수 있다 — DB 반환 순서에 기대지 않고
+        # `due_at`이 더 큰(최신 사이클) 쪽을 결정적으로 우선한다(둘 이상 후보가 실제로
+        # 겹치는 경우는 드물지만, 겹칠 때 "어느 쪽이 이기나"가 조회 순서에 달려 있으면
+        # 안 된다).
         d1 = d7 = None
+        d1_due_at = d7_due_at = None
         for snap in snapshots_by_pub.get(r.publication_id, []):
             label = label_snapshot_offset(due_at=snap.due_at, published_at=r.published_at)
-            if label == "1d":
-                d1 = snap
-            elif label == "7d":
-                d7 = snap
+            if label == "1d" and (d1 is None or snap.due_at > d1_due_at):
+                d1, d1_due_at = snap, snap.due_at
+            elif label == "7d" and (d7 is None or snap.due_at > d7_due_at):
+                d7, d7_due_at = snap, snap.due_at
         is_channel_pub = r.kind == "channel_publication"
         adapter = CHANNEL_ADAPTERS.get(r.channel) if is_channel_pub else None
         asset_sha256s, hook_key = assemble_channel_post_asset_evidence(
@@ -401,7 +439,13 @@ async def list_insights_board(
             last_metric = getattr(last, "metric_value", None)
             next_cursor = encode_metric_cursor(last_metric, last.published_at, last.publication_id)
 
-    return {"rows": rows_out, "has_more": has_more, "next_cursor": next_cursor}
+    # story #3746(3734 §4-C) — 기본(제외) 뷰에서만 뜻이 있다. include_deleted=True
+    # 뷰(「보관됨 보기」 켠 상태)에서는 이미 다 보이므로 항상 0/무의미(null) — 안 지어낸다.
+    hidden_count = None if include_deleted else await _count_hidden_by_archive(
+        db, org_id=org_id, channel=channel, since=since,
+    )
+
+    return {"rows": rows_out, "has_more": has_more, "next_cursor": next_cursor, "hidden_count": hidden_count}
 
 
 def _snapshot_view(snap: InsightSnapshot | None) -> dict[str, Any] | None:

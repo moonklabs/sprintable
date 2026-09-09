@@ -146,14 +146,37 @@ describe('InsightSnapshotBlock — story #3499(게시물 성과 표면 1차)', (
     expect(el?.className).toContain('text-destructive');
   });
 
-  it('dead_letter — §17-10 라벨 재사용·destructive 톤', async () => {
+  // story #3746(유나 v5, 2026-09-09) — dead_letter는 InsightSnapshot.status의 실
+  // 값이 아니었다(걷는다). 되돌리면(다시 넣으면) 뮤테이션 표적 — 존재하지 않는
+  // 값을 렌더 분기가 다시 받아주면 이 테스트가 실패해야 한다(union이 6값 그대로
+  // 인지는 타입 자체가 컴파일 시점에 잡는다 — 여기는 런타임 값 부재를 pin).
+  it('⭐뮤테이션 표적 — dead_letter는 더 이상 유효한 status가 아니다(6값 유니온 밖)', () => {
+    const validStatuses = ['pending', 'in_progress', 'captured', 'unsupported', 'failed', 'superseded'];
+    expect(validStatuses).not.toContain('dead_letter');
+  });
+
+  // story #3746(유나 v5) — in_progress는 실사용 값(수집기가 claim한 상태)인데
+  // 기존 유니온이 빠뜨려 렌더가 안 죽는지 자체가 회귀 표적이었다(Partial<Record>+!
+  // 였다면 t(undefined!) 크래시 자리) — pending과 같은 표시로 pin.
+  it('⭐in_progress(captured_at 없음) — pending과 같은 자리(due 포함)로 렌더된다(크래시 0)', async () => {
     const snap: InsightSnapshot = {
-      normalized: { ...ALL_NULL }, captured_at: null, status: 'dead_letter', due_at: null, source: 'threads',
+      normalized: { ...ALL_NULL }, captured_at: null, status: 'in_progress', due_at: '2026-09-06T00:00:00Z', source: 'threads',
     };
     await render([snap]);
-    const el = container.querySelector('[data-testid="insight-snapshot-failure"]');
-    expect(el?.textContent).toBe(koMessages.content.insightStatusDeadLetter);
-    expect(el?.className).toContain('text-destructive');
+    const row = container.querySelector('[data-testid="insight-snapshot-pending"]');
+    expect(row).not.toBeNull();
+    expect(row?.textContent).toContain('09-06');
+  });
+
+  // story #3746 — superseded는 BE가 기본 배제하므로 이 화면엔 사실상 안 오지만,
+  // 온다면(방어적 엣지케이스) 크래시 없이 정직한 라벨로 떨어져야 한다(Record
+  // 완전성 — 빠지면 빌드가 막는다).
+  it('⭐superseded(방어적) — 크래시 없이 정직한 라벨로 렌더된다', async () => {
+    const snap: InsightSnapshot = {
+      normalized: { ...ALL_NULL }, captured_at: null, status: 'superseded', due_at: null, source: 'threads',
+    };
+    await render([snap]);
+    expect(container.textContent).toContain(koMessages.content.insightStatusSuperseded);
   });
 
   it('unsupported/pending은 중립 톤(destructive 아님, §17-18 "성질이지 실패가 아니다")', async () => {

@@ -6,7 +6,7 @@ type RouteParams = { params: Promise<{ id: string }> };
 /**
  * story #3484(BE 3475, 페드루 PO 確定 2026-09-05) — 발행 계측 5지표(정시율·중복
  * 발행·승인 없는 adapter 호출·복구시간 p50/p95)+연결 만료 2종. BE `GET
- * /api/v2/organizations/{org_id}/publishing-metrics?window=7d|30d` → `{window,
+ * /api/v2/organizations/{org_id}/publishing-metrics?window=7d|30d|90d` → `{window,
  * on_time_rate, on_time_numer, on_time_denom, duplicate_publications,
  * unapproved_adapter_calls, recovery_seconds_p50, recovery_seconds_p95,
  * connections_expired, connections_expiring_7d, computed_at}`. window 쿼리를

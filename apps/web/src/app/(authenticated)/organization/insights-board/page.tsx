@@ -6,7 +6,9 @@ import { useLocale, useTranslations } from 'next-intl';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
+import { PageHeader } from '@/components/ui/page-header';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -25,6 +27,7 @@ import { ReconcileResultLine } from '@/components/insights-board/reconcile-resul
 import { parseInsightsBoardApiError } from '@/components/insights-board/insights-board-error';
 import { ASSET_LABEL_PREFIX_LENGTH, aggregateGroupBucket, groupInsightsBoardRows, type InsightsBoardGroupBy } from '@/components/insights-board/group-rows';
 import { DEFAULT_METRIC, METRIC_KEYS, type BoardMetric, type InsightsBoardResponse, type InsightsBoardRow, type InsightsBoardWindow } from '@/components/insights-board/types';
+import { PublishingMetricsBand } from '@/components/content/publishing-metrics-band';
 
 /**
  * story #3503 — 성과 보드 화면. BE #3502 의존(PR 브리프 헤더 참고, 이 파일 작성 시점
@@ -45,7 +48,14 @@ type SortDir = 'asc' | 'desc';
 
 const WINDOW_OPTIONS: InsightsBoardWindow[] = ['7d', '30d', '90d'];
 const SORT_ROLE_OPTIONS: SortRole[] = ['published_at', 'd1', 'd7'];
-const STATUS_FILTER_OPTIONS = ['pending', 'captured', 'unsupported', 'failed', 'dead_letter'] as const;
+// story #3746(유나 v5, 2026-09-09) — 출처는 `InsightSnapshot.status`(BE)다, FE가
+// 지어내는 옵션이 아니다. 첫 판(v3)이 FE 상수에서 옵션을 뽑아 유령(`dead_letter`,
+// BE 서비스 전수 0건 — #3720/#3721이 걷은 것과 같은 클래스)을 넣고 실사용 둘
+// (`in_progress`·`superseded`)을 빠뜨렸다. 정정 — 통 넷: `pending`(BE로 보낼 때
+// `in_progress`도 같이 묶인다, 서버가 그 값을 안다 — 아래 statusFilterLabel 참조)·
+// `captured`·`unsupported`·`failed`. `superseded`는 옵션이 아니라 BE 기본 배제
+// (insights_board.py 참조, "화면 넷이 같은 목록을 부르는데 화면마다 거르면 갈린다").
+const STATUS_FILTER_OPTIONS = ['pending', 'captured', 'unsupported', 'failed'] as const;
 // story #3656(Phase2·FE+BE, 페드루 PO 確定 2026-09-07) — 소재/훅 묶음 토글. 다른
 // 필터와 달리 이 축은 서버가 모른다(client-side groupBy, group-rows.ts) — BE 쿼리
 // 파라미터로 안 보낸다(buildQuery 불변).
@@ -70,12 +80,11 @@ const METRIC_LABEL_KEYS: Record<BoardMetric, string> = {
 
 // insight-snapshot-block.tsx(story #3499)의 STATUS_LABEL_KEYS와 동일 관례 — content
 // 네임스페이스 기존 키를 그대로 재사용한다(unsupported는 그 파일과 동일하게 전용 문장
-// 키 하나뿐이라 이 맵에 없다, 아래 statusFilterLabel에서 별도 분기).
+// 키 하나뿐이라 이 맵에 없다, pending도 이제 없다 — 아래 statusFilterLabel에서 둘 다
+// 별도 분기). story #3746 — dead_letter 옵션·키 은퇴.
 const STATUS_FILTER_LABEL_KEYS: Partial<Record<(typeof STATUS_FILTER_OPTIONS)[number], string>> = {
-  pending: 'insightStatusPending',
   captured: 'insightStatusCaptured',
   failed: 'insightStatusFailed',
-  dead_letter: 'insightStatusDeadLetter',
 };
 
 const DEFAULT_WINDOW: InsightsBoardWindow = '7d';
@@ -125,6 +134,14 @@ export default function InsightsBoardPage() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadErrorMessage, setLoadErrorMessage] = useState<string | null>(null);
+  // story #3746(3734 AC3 잔존 A) — 목록 두 화면(content/page.tsx·channel-posts/
+  // page.tsx)과 같은 낱말·같은 파라미터명(「보관됨 보기」·include_deleted=true).
+  // 기본 false(보관된 원 초안의 발행분은 기본 제외 — #4087).
+  const [showArchived, setShowArchived] = useState(false);
+  // story #3746(3734 §4-C) — 초안 1개 보관이 언어별 발행 행 N개를 한꺼번에 숨길 수
+  // 있다(work_item_id 기준 join, lang은 그 유니크 밖 — site_post.py:20). BE가 그
+  // 숨은 수를 셀 수 있을 때만 보낸다(모르면 null — 지어내지 않는다).
+  const [hiddenCount, setHiddenCount] = useState<number | null>(null);
   // doc a0da40c9 §21-5(유나 2026-09-05) — 제목 기본값(「[재발행] {원문 제목}」 등)을
   // 채워 보이려면 이 행의 원문 title이 필요하다 — publication_id만으론 부족해
   // row 전체를 들고 있는다.
@@ -176,9 +193,10 @@ export default function InsightsBoardPage() {
     if (statusParam) qs.set('status', statusParam);
     if (resolvedSort !== 'published_at') qs.set('sort', resolvedSort);
     if (sortDirParam !== DEFAULT_SORT_DIR) qs.set('sort_dir', sortDirParam);
+    if (showArchived) qs.set('include_deleted', 'true');
     if (cursor) qs.set('cursor', cursor);
     return qs.toString();
-  }, [windowParam, channelParam, statusParam, resolvedSort, sortDirParam]);
+  }, [windowParam, channelParam, statusParam, resolvedSort, sortDirParam, showArchived]);
 
   const load = useCallback(async () => {
     if (!orgId) return;
@@ -191,6 +209,7 @@ export default function InsightsBoardPage() {
         setRows(json?.data?.rows ?? []);
         setHasMore(json?.data?.has_more ?? false);
         setNextCursor(json?.data?.next_cursor ?? null);
+        setHiddenCount(json?.data?.hidden_count ?? null);
       } else {
         const body = (await res.json().catch(() => null)) as { detail?: unknown; error?: Record<string, unknown> } | null;
         const info = parseInsightsBoardApiError(body);
@@ -257,9 +276,15 @@ export default function InsightsBoardPage() {
     d7: t('sortD7', { metric: metricLabel }),
   };
 
-  const statusFilterLabel = (status: (typeof STATUS_FILTER_OPTIONS)[number]): string => (
-    status === 'unsupported' ? tContent('insightSnapshotUnsupported') : tContent(STATUS_FILTER_LABEL_KEYS[status]!)
-  );
+  // story #3746(유나 v5) — pending은 이제 「수집 대기」 한 통(BE로는 pending+in_progress
+  // 둘 다 이 값으로 보낸다, buildQuery의 status 파라미터 참조) — 이 통 전용 신규 낱말
+  // (insightsBoard.statusFilterPending)이라 content 네임스페이스 기존 「대기 중」과
+  // 다른 자리(그 키는 다른 화면이 계속 쓴다, 값 두 벌 아님 — 통 자체가 다르다).
+  const statusFilterLabel = (status: (typeof STATUS_FILTER_OPTIONS)[number]): string => {
+    if (status === 'unsupported') return tContent('insightSnapshotUnsupported');
+    if (status === 'pending') return t('statusFilterPending');
+    return tContent(STATUS_FILTER_LABEL_KEYS[status]!);
+  };
 
   // story #3656(유나 낱말 確定 2026-09-07) — 묶음 축 토글 라벨.
   const groupByLabel: Record<InsightsBoardGroupBy, string> = {
@@ -280,35 +305,38 @@ export default function InsightsBoardPage() {
   // 버튼 자체를 숨긴다 — 실패로 알리는 대신 애초에 안 보여준다.
   const canCreateFollowUp = currentMemberType !== 'agent';
 
+  // story #3746(①③ 개정, page-header.tsx 규율 — "화면마다 주 액션 1개를 제목 줄
+  // 오른쪽에") — 이 화면의 다음 발은 「읽는다」라 텍스트 버튼류 주 액션은 없다(시안
+  // v4). 그래도 기간 컨트롤은 이 화면 자체를 규정하는 값이라(§5 — 띠도 이 값을
+  // 따른다) 제목 줄 우측에 둔다 — «주 액션 자리»를 그 컨트롤이 채운다.
+  const windowControl = (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        className="inline-flex items-center gap-1.5 rounded-[0.5rem] border border-border bg-card px-[10px] py-[7px] text-[12px] text-muted-foreground"
+        data-testid="insights-board-window-trigger"
+      >
+        {t('windowLabel')} {t(`window${windowParam}`)}
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start">
+        <DropdownMenuGroup>
+          {WINDOW_OPTIONS.map((option) => (
+            <DropdownMenuItem
+              key={option}
+              onClick={() => updateQuery({ window: option === DEFAULT_WINDOW ? null : option })}
+            >
+              {t(`window${option}`)}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+
   return (
     <div className="mx-auto w-full max-w-6xl space-y-6 p-6">
-      <div className="space-y-1">
-        <h1 className="text-lg font-semibold text-foreground">{t('pageTitle')}</h1>
-        <p className="text-sm text-muted-foreground">{t('pageDescription')}</p>
-      </div>
+      <PageHeader title={t('pageTitle')} description={t('pageDescription')} actions={windowControl} />
 
       <div className="flex flex-wrap items-center gap-2">
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            className="inline-flex items-center gap-1.5 rounded-[0.5rem] border border-border bg-card px-[10px] py-[7px] text-[12px] text-muted-foreground"
-            data-testid="insights-board-window-trigger"
-          >
-            {t('windowLabel')} {t(`window${windowParam}`)}
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start">
-            <DropdownMenuGroup>
-              {WINDOW_OPTIONS.map((option) => (
-                <DropdownMenuItem
-                  key={option}
-                  onClick={() => updateQuery({ window: option === DEFAULT_WINDOW ? null : option })}
-                >
-                  {t(`window${option}`)}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
-
         <input
           value={channelParam}
           onChange={(e) => updateQuery({ channel: e.target.value || null })}
@@ -410,6 +438,25 @@ export default function InsightsBoardPage() {
         </DropdownMenu>
       </div>
 
+      {/* story #3746(3734 AC3 잔존 A) — 목록 두 화면과 같은 낱말·같은 뜻(`content.
+          showArchivedToggle`/`hideArchivedToggle` 재사용, 값 두 벌 안 만든다). 숨은
+          건수는 셀 수 있을 때만(hiddenCount null이면 안 그린다 — 모른다≠0). */}
+      <div className="flex flex-wrap items-center gap-3">
+        <Button
+          type="button" variant="link"
+          onClick={() => setShowArchived((v) => !v)}
+          className="h-auto min-h-0 min-w-0 px-0 text-sm font-normal text-foreground underline"
+          data-testid="insights-board-show-archived-toggle"
+        >
+          {showArchived ? tContent('hideArchivedToggle') : tContent('showArchivedToggle')}
+        </Button>
+        {!showArchived && hiddenCount !== null && hiddenCount > 0 ? (
+          <span className="text-xs text-muted-foreground" data-testid="insights-board-hidden-count">
+            {t('archivedHiddenCount', { count: hiddenCount })}
+          </span>
+        ) : null}
+      </div>
+
       {loadErrorMessage ? (
         <Alert variant="destructive" role="alert" aria-live="assertive" aria-atomic="true">
           <AlertDescription>{loadErrorMessage}</AlertDescription>
@@ -421,10 +468,22 @@ export default function InsightsBoardPage() {
           {[1, 2, 3].map((i) => <div key={i} className="h-12 animate-pulse rounded-md bg-muted" />)}
         </div>
       ) : rows.length === 0 ? (
-        !loadErrorMessage ? <EmptyState title={t('emptyTitle')} description={t('emptyDescription')} /> : null
+        !loadErrorMessage ? (
+          // story #3746(3734 AC3 잔존 A, 유나 定) — 「선택한 조건에 해당하는 발행 글이
+          // 아직 없습니다」는 사용자가 조건을 고른 적 없을 때(보관됨 보기를 안 켰는데
+          // 빈 화면) 틀린 말이다. 보관 때문에 비어 있는 갈래를 따로 가른다 — showArchived
+          // =false인데 hiddenCount>0이면 "지금 안 보이는 건 있는데 필터가 그걸 뺐다"는
+          // 뜻이라 그 자체가 답(보관된 것만 있다는 확定은 아니지만, 적어도 "조건" 탓으로
+          // 잘못 말하지 않는다).
+          !showArchived && hiddenCount !== null && hiddenCount > 0 ? (
+            <EmptyState title={t('emptyTitle')} description={t('archivedEmptyReason')} />
+          ) : (
+            <EmptyState title={t('emptyTitle')} description={t('emptyDescription')} />
+          )
+        ) : null
       ) : (
         <>
-          <div className="overflow-hidden rounded-md border border-border">
+          <Card className="overflow-hidden p-0">
             <table className="w-full text-sm">
               <thead className="bg-muted/50 text-xs text-muted-foreground">
                 <tr>
@@ -579,7 +638,7 @@ export default function InsightsBoardPage() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </Card>
 
           {hasMore ? (
             <div className="flex justify-center">
@@ -590,6 +649,13 @@ export default function InsightsBoardPage() {
           ) : null}
         </>
       )}
+
+      {/* story #3746(#3484 이주) — 채널 목록(content/channel-posts/page.tsx)에서
+          걷고 표 아래로. 발행 품질 셋만(정시율·중복·승인 없는 호출) — 연결 건강
+          (만료·7일 내 만료)은 ③(3743) 행 칩+cron 알림이 맡아 은퇴. 띠 자체 기간
+          컨트롤은 없다 — 이 화면의 windowParam을 그대로 따른다(7d/30d/90d 그대로,
+          띠가 자기 상태를 따로 안 갖는다). */}
+      {orgId ? <PublishingMetricsBand orgId={orgId} window={windowParam} /> : null}
 
       {followUpRow && orgId ? (
         <FollowUpDialog

@@ -6,10 +6,10 @@ import type { InsightSnapshotBucketView } from './types';
 // story #3503 — insight-snapshot-block.tsx(story #3499)의 패턴을 「표 셀 하나」 크기로
 // 축소한 신규 컴포넌트(PO 브리프 — 그 컴포넌트를 통째로 재사용하지 않는다, due_at·source
 // 등 히스토리 전용 필드가 이 버킷엔 없다). 재사용하는 것은 다음 세 원칙뿐:
-//   ① i18n 키 재사용 — pending/captured/failed/dead_letter/unsupported 상태 «라벨»은
-//      content 네임스페이스 기존 키를 그대로 부른다(같은 개념을 두 벌로 안 쓴다).
+//   ① i18n 키 재사용 — pending/in_progress/captured/failed/unsupported/superseded 상태
+//      «라벨»은 content 네임스페이스 기존 키를 그대로 부른다(같은 개념을 두 벌로 안 쓴다).
 //   ② captured→값만(배지 없음) 원칙.
-//   ③ failed/dead_letter만 destructive 톤, 나머지 중립.
+//   ③ failed만 destructive 톤, 나머지 중립.
 //
 // doc a0da40c9 §21-2(유나 2026-09-05, 정정) — 표 칸은 «문장이 아니라 명사구»다(6열
 // 표에서 문장은 행 높이를 무너뜨린다). §17-19가 이미 "배지·API·툴팁=문장, 자리가
@@ -22,15 +22,27 @@ import type { InsightSnapshotBucketView } from './types';
 //     이 보드 전용 명사구 insightsBoardMetricUnavailable("지표 미제공")를 쓴다.
 //   - 버킷 자체가 null인 사유는 insightsBoardBucketUnscheduled 자체를 명사구
 //     ("집계 예정 없음")로 바꿔 그대로 재사용한다.
-const STATUS_LABEL_KEYS: Partial<Record<InsightSnapshotBucketView['status'], string>> = {
-  pending: 'insightStatusPending',
+//
+// story #3746(유나 v5, 2026-09-09) — 「수집 상태 × 통 표」 재정정. dead_letter는
+// `InsightSnapshot.status`(BE)의 실 값이 아니었다(BE 서비스 전수 0건 — 유령 표면,
+// 걷는다). in_progress·superseded는 실사용 값인데 이 맵이 빠뜨렸었다 — `Partial<Record>`
+// +`!`가 그 구멍을 컴파일러에게 숨겨서 실제로 오면 `tContent(undefined!)`가 됐을
+// 자리(카디르 QA가 CI에서 못 잡는 클래스). `Record`(비-Partial)로 바꿔 여섯 값 중
+// 하나라도 또 빠지면 이제 빌드가 막는다. pending·in_progress는 같은 통(「아직」 —
+// 다음 발이 같다, 축은 다음 발로 가른다) — insightStatusWaiting 신규 키(유나 定).
+const STATUS_LABEL_KEYS: Record<InsightSnapshotBucketView['status'], string> = {
+  pending: 'insightStatusWaiting',
+  in_progress: 'insightStatusWaiting',
   captured: 'insightStatusCaptured',
   failed: 'insightStatusFailed',
-  dead_letter: 'insightStatusDeadLetter',
   unsupported: 'insightStatusUnsupported',
+  // superseded 행은 BE가 기본 목록에서 배제한다(story #3746 §11) — 이 셀에 사실상
+  // 안 온다. 그래도 맵을 비-Partial로 하려면 빠짐없이 채워야 하니 방어적으로 정직한
+  // 라벨을 둔다(지어낸 값이 아니라 "왜 안 온다" 그 자체를 말".
+  superseded: 'insightStatusSuperseded',
 };
 
-const DESTRUCTIVE_STATUSES: ReadonlySet<InsightSnapshotBucketView['status']> = new Set(['failed', 'dead_letter']);
+const DESTRUCTIVE_STATUSES: ReadonlySet<InsightSnapshotBucketView['status']> = new Set(['failed']);
 
 // story #3583(Phase2·마케팅운영, 페드루 PO 確定 2026-09-06 · 유나 §21-6-1) — captured인데
 // 값이 null인 사유 3갈래 중 이 하나만 새 낱말(「GA4 미연결」) — 나머지 5지표는 기존

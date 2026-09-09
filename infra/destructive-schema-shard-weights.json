@@ -1265,8 +1265,8 @@
     },
     {
       "file": "tests/test_3502_insights_board.py",
-      "sec": 22.0,
-      "source": "story-3604-insights-board-durations(PR#3959 CI 실측 — run 34078092461 job 101608057452, elapsed 22s. 로컬 격리측정 6.65~6.68s×2배 잠정값 14s보다 CI가 더 느렸다 — CPU-bound app.main import 없는 파일도 CI 배율이 로컬 대비 3x대. 실측치로 갱신)"
+      "sec": 45.0,
+      "source": "story-3746-insights-board-redesign(2026-09-09, 신규 테스트 6건 추가로 21→27건 — pending/in_progress 필터 통합·superseded 배제 2건·hidden_count 3건). 로컬 raw pytest 13.46s 실측 × 이 파일 자신의 기존 CI/로컬 배율(22.0/6.665≈3.30, story-3604 항목 그대로 재사용 — 같은 파일이라 이웃 재측정보다 이 배율이 더 정확) = 44.4s, 45.0으로 올림 — 실 CI 샤드 로그로 재확認 필요"
     },
     {
       "file": "tests/test_3510_member_role_sync.py",

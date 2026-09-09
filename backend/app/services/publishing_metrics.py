@@ -55,9 +55,11 @@ class PublishingMetrics:
     computed_at: datetime
 
 
+_WINDOW_DAYS = {"7d": 7, "30d": 30, "90d": 90}  # story #3746(2026-09-09) — 90d 신규 편입.
+
+
 def _window_start(window: str, *, now: datetime) -> datetime:
-    days = 7 if window == "7d" else 30
-    return now - timedelta(days=days)
+    return now - timedelta(days=_WINDOW_DAYS[window])
 
 
 async def _compute_on_time_rate(

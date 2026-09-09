@@ -42,10 +42,10 @@ async def get_publishing_metrics_endpoint(
 ) -> PublishingMetricsResponse:
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
-    if window not in ("7d", "30d"):
+    if window not in ("7d", "30d", "90d"):
         raise HTTPException(
             status_code=422,
-            detail={"code": "PUBLISHING_METRICS_INVALID_WINDOW", "message": "window must be 7d or 30d"},
+            detail={"code": "PUBLISHING_METRICS_INVALID_WINDOW", "message": "window must be 7d, 30d or 90d"},
         )
 
     metrics = await compute_publishing_metrics(db, org_id=org_id, window=window)
