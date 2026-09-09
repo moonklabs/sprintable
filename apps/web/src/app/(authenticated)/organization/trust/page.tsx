@@ -6,7 +6,7 @@ import { HeartHandshake } from 'lucide-react';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
-import { ListRow, ListRowMark } from '@/components/ui/list-row';
+import { ListRow } from '@/components/ui/list-row';
 import { PageHeader } from '@/components/ui/page-header';
 import { resolveDisplayTimezone, formatScheduledAt } from '@/components/content/schedule-format';
 import {
@@ -31,14 +31,26 @@ import { fetchWithAuth } from '@/lib/db/client';
 // 소수라 좁힐 필요가 옅다 — 시안·카드 둘 다 self 뷰의 칩을 요구하지 않는다).
 const ALL_ROLES = 'all' as const;
 
-// 사람 첫 글자 표식 — 시안이 요구하는 이니셜(1글자). 채널 목록(#3743)의 마크와 달리
-// 이 화면엔 "역할"이라는 카테고리 축이 색으로 구분될 이유가 없다(E-VERIFY 톤 — 등급/
-// 카테고리 컬러코딩 금지, trust-utils.tsx Sparkline/HitRateBar와 같은 규율) — 고정
-// 중립색 하나.
-const MARK_COLOR = 'var(--muted-foreground)';
-
 function initial(name: string): string {
   return (name.trim()[0] ?? '?').toUpperCase();
+}
+
+// story #3749 CHANGES(유나 定, 2026-09-09 17:28Z) — 원래 `ListRowMark`(채널 목록·
+// #3743용 30×30 색 «사각» 표식, 어두운 배경+흰 글자)를 그대로 재사용했으나 유나
+// 픽셀 캡처 지적 — 사람 표식은 이 레포에 이미 두 선례가 있고(team-activity-view.tsx
+// `ActorAvatar`·chat-list-view.tsx 참여자 표식) 둘 다 «연한 원+muted 글자색»이지
+// 어두운 사각+흰 글자가 아니다. `ListRowMark`는 채널 색 구분(의미 있는 색상 코딩)이
+// 용도라 그 자체를 바꾸면 채널 목록이 깨진다 — 이 화면 전용 표식을 따로 둔다(색
+// 코딩 없음, 이 화면엔 애초에 "역할"이 색으로 갈릴 이유가 없다는 원 판단은 무변).
+function PersonMark({ label }: { label: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      className="flex size-[30px] shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-muted-foreground"
+    >
+      {label}
+    </span>
+  );
 }
 
 export default function OrganizationTrustPage() {
@@ -223,7 +235,7 @@ function AdminRow({
   return (
     <ListRow
       data-testid="trust-roster-row"
-      mark={<ListRowMark label={initial(name)} color={MARK_COLOR} />}
+      mark={<PersonMark label={initial(name)} />}
       title={name}
       subtitle={coldStart ? (
         <ColdStartSubtitle roleLabel={roleLabel} pending={row.pending} t={t} />
@@ -254,7 +266,7 @@ function SelfRow({
   return (
     <ListRow
       data-testid="trust-self-row"
-      mark={<ListRowMark label={initial(roleLabel)} color={MARK_COLOR} />}
+      mark={<PersonMark label={initial(roleLabel)} />}
       title={roleLabel}
       // self 뷰는 title이 이미 role_label이라(누구인지가 아니라 어느 역할인지가
       // 축) 定②의 "{role} · {time} 기준"을 그대로 못 쓴다 — GET /trust-scores

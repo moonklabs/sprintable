@@ -225,6 +225,28 @@ describe('OrganizationTrustPage — 정상 행 부제·값(story #3749 定②)',
     expect(rateText?.textContent).toBe(koMessages.organization.trustHitRate.replace('{rate}', '82'));
     expect(container.querySelector('[data-testid="trust-roster-row"]')?.textContent).not.toContain(koMessages.organization.trustColdStart);
   });
+
+  // story #3749 CHANGES(유나 定①, 2026-09-09 17:28Z) — 사람 표식은 `bg-muted`+
+  // `text-muted-foreground` 원(team-activity-view.tsx ActorAvatar·chat-list-view.tsx
+  // 참여자 표식과 동형) — 채널 목록(#3743) 전용 `ListRowMark`(채운 배경+흰 글자·
+  // rounded-md 사각)를 사람 자리에 재사용하지 않는다.
+  it('⭐사람 표식이 원(rounded-full)+bg-muted/text-muted-foreground다(사각·흰 글자 아님)', async () => {
+    mountAsAdmin();
+    stubFetchAdmin([
+      { member_id: 'm1', role_key: 'dev', role_label: '개발', hit_rate: 0.82, resolved: 11, computed_at: '2026-09-08T00:00:00Z', pending: 0 },
+    ]);
+    await act(async () => { root.render(wrap(<OrganizationTrustPage />)); });
+    await flush();
+
+    const mark = container.querySelector('[data-testid="trust-roster-row"] [aria-hidden="true"]');
+    expect(mark).not.toBeNull();
+    expect(mark?.className).toContain('rounded-full');
+    expect(mark?.className).toContain('bg-muted');
+    expect(mark?.className).toContain('text-muted-foreground');
+    // ListRowMark(채널 색 표식)의 흔적 — 인라인 backgroundColor·흰 글자 클래스가 없어야 한다.
+    expect((mark as HTMLElement)?.style.backgroundColor).toBe('');
+    expect(mark?.className).not.toContain('text-white');
+  });
 });
 
 describe('OrganizationTrustPage — 「추이 보기」 펼침(HistoryDrilldown 무변경 회귀가드)', () => {
