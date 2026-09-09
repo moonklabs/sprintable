@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { HeartHandshake } from 'lucide-react';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { CountBadge } from '@/components/ui/count-badge';
 import { EmptyState } from '@/components/ui/empty-state';
 import { MemberRow } from '@/components/ui/member-row';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
@@ -89,8 +90,12 @@ export default function OrganizationTrustPage() {
           groupedRoster.map(([groupLabel, rows]) => (
             <SectionCard key={groupLabel}>
               <SectionCardHeader>
-                <h2 className="text-base font-semibold text-foreground">
-                  {groupLabel} ({rows.length})
+                <h2 className="flex items-center gap-2 text-base font-semibold text-foreground">
+                  {groupLabel}
+                  {/* 페드루 PO 적기만(#4082 리뷰, 2026-09-09) — 「제목+수」 자리는 집안
+                      전용 프리미티브 CountBadge로(soft-fill Badge 걷는 방향, #3050·
+                      kanban-list-view.tsx:63 선례). */}
+                  <CountBadge count={rows.length} />
                 </h2>
               </SectionCardHeader>
               <SectionCardBody>
