@@ -1,17 +1,36 @@
 """story #3724 — 2026-09-09 하루 3707(스키마 없어 버려짐)·3719(스키마 있는데 도구가 안
-보냄)·3720(FE만 있고 뒤가 없음) 세 인스턴스가 같은 두 경계에서 조용히 샌 클래스를 봉쇄.
+보냄)·3720(FE만 있고 뒤가 없음) 세 인스턴스가 같은 세 경계에서 조용히 샌 클래스를 봉쇄.
 
-가드①(MCP→BE): sprintable_mcp/tools/agent_runs.py의 emit_event·update_run_status가
-조립하는 body 필드 집합 ⊆ CreateAgentRun/UpdateAgentRun 필드 집합. 위반 = MCP가 실어
-보내도 Pydantic(extra=ignore)이 조용히 버리는 자리(3707류).
+세 가드가 각각 정확히 무슨 모양을 잡고 무슨 모양은 못 잡는지(페드루 PO 지적 2026-09-09
+05:15Z — 가드①·②만으로는 3719 모양을 못 잡는다는 게 맞았다, 도크스트링이 그걸 숨기면
+다음 사람이 "그 축은 CI가 본다"로 잘못 읽는다):
+
+가드①(MCP→BE): emit_event·update_run_status가 실제로 조립하는 body 필드 집합(forward
+튜플) ⊆ CreateAgentRun/UpdateAgentRun 필드 집합. **잡는 것**: forward 튜플에 있는 필드를
+BE 스키마가 아예 안 받아 Pydantic(extra=ignore)이 조용히 버리는 자리(3707류 — "보내는데
+버려짐"). **못 잡는 것**: MCP Input 모델엔 선언돼 있는데 forward 튜플에서 빠진 필드(3719
+모양 — "선언은 했는데 안 보냄". 이건 가드③의 몫).
 
 가드②(BE→FE): AgentRunResponse 필드 집합 ⊇ FE `agent-run-detail.tsx`의 RunDetail 타입이
-읽는 키. 위반 = 화면은 읽는데 API가 절대 안 주는 phantom 필드(3720류).
+읽는 키. **잡는 것**: 화면은 읽는데 API가 절대 안 주는 phantom 필드(3720류). **못 잡는
+것**: BE 응답에는 있는데 FE가 안 읽는 필드(그 자체로 버그가 아님 — 미사용 additive는 정상).
 
-이 가드를 실제로 짜는 과정에서 라이브 위반 18건이 나왔다(그 자체가 가드의 가치 증명) —
-전부 grandfather로 담아 신규만 막는다. 각 항목은 후속 스토리가 있고, 그 스토리가 닫히면
-이 grandfather에서도 빠져야 한다(카운트-핀이 그 삭제를 강제한다 — 늘어나면 리뷰, 줄어들면
-카운트도 같이 줄여야 커밋된다).
+가드③(MCP Input→forward, 3719 모양 전용): EmitEventInput/UpdateRunStatusInput이 캐폴러에
+노출하는 필드 집합(구조상 always-forwarded인 run_id·agent_id·trigger·status 4개는 body
+조립 코드가 loop 밖에서 직접 넣거나 URL path로 쓰므로 대조 제외) ⊆ 실제 forward 튜플.
+**잡는 것**: Input 모델(캐폴러가 부를 수 있는 인자)엔 선언했는데 forward 코드가 빠뜨려
+캐폴러가 그 인자를 줘도 네트워크 바디에 절대 안 실리는 자리(3719류 — 이 스토리가 실제로
+겪은 형: last_error_code가 UpdateAgentRun엔 있었는데 update_run_status가 body에 안
+실었다). **못 잡는 것**: BE Create/UpdateAgentRun 스키마엔 있는데 MCP Input 모델 자체가
+그 필드를 캐폴러 인자로 아예 안 만든 것(의도적 비노출 — 버그 아님, 예: duration_ms는
+GENERATED라 어느 쪽 Input에도 없고 있어서도 안 된다). #4067(#3719) 착지 뒤 rebase한
+지금(last_error_code가 이미 양쪽 다 배선됨) 가드③은 grandfather 0건으로 GREEN이어야
+정상 — RED면 그게 새 발견.
+
+이 가드들을 실제로 짜는 과정에서 라이브 위반 18건(①·②)이 나왔다(그 자체가 가드의 가치
+증명) — 전부 grandfather로 담아 신규만 막는다. 각 항목은 후속 스토리가 있고, 그 스토리가
+닫히면 이 grandfather에서도 빠져야 한다(카운트-핀이 그 삭제를 강제한다 — 늘어나면 리뷰,
+줄어들면 카운트도 같이 줄여야 커밋된다).
 """
 from __future__ import annotations
 
@@ -22,6 +41,8 @@ from app.schemas.agent_run import AgentRunResponse, CreateAgentRun, UpdateAgentR
 from sprintable_mcp.tools.agent_runs import (
     EMIT_EVENT_FORWARD_FIELDS,
     UPDATE_RUN_STATUS_FORWARD_FIELDS,
+    EmitEventInput,
+    UpdateRunStatusInput,
 )
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -69,6 +90,58 @@ def test_guard1_grandfather_count_pinned():
         f"GUARD1_GRANDFATHER 항목 수가 3이 아니라 {len(GUARD1_GRANDFATHER)} — 늘었으면 새 "
         "silent-drop이 또 생긴 것(원인 리뷰 필요), 줄었으면 story #3727이 그만큼 닫힌 것이니 "
         "이 상수·주석도 같이 정리할 것."
+    )
+
+
+# ── 가드③ — 3719 모양 전용(MCP Input 모델 ⊆ 실제 forward 튜플) ──────────────────────
+# run_id·agent_id·trigger·status는 body 조립 코드가 loop 밖에서 직접 넣거나(emit_event의
+# agent_id/trigger, update_run_status의 status) URL path로 쓴다(update_run_status의
+# run_id) — forward 튜플에 없어도 정상이라 대조에서 뺀다. project_id는 SprintableInput
+# 베이스 클래스 필드(모든 MCP 도구 공통, client.require_project_id()/헤더로 해소 —
+# 이 도구만의 body 필드가 아니다)라 agent_runs 전용 forward 튜플엔 애초에 없는 게 맞다.
+# (구조적 예외 — 신규 필드 추가 시 이 목록에 넣지 말 것. 여기 있다는 것 자체가 "루프 밖
+# 다른 경로로 이미 실린다"는 뜻이라 늘면 안 됨.)
+_EMIT_EVENT_STRUCTURAL_EXEMPT = {"agent_id", "trigger", "project_id"}
+_UPDATE_RUN_STATUS_STRUCTURAL_EXEMPT = {"run_id", "status", "project_id"}
+
+GUARD3_GRANDFATHER: dict[tuple[str, str], str] = {}
+
+
+def test_mcp_input_fields_are_subset_of_forward_fields():
+    """가드③ — Input 모델(캐폴러 인자)에 선언된 필드는 반드시 forward 튜플에 실려야
+    한다(신규 위반=RED). #4067(#3719) 착지 뒤 rebase한 지금 last_error_code가 이미 양쪽
+    다 배선돼 있어 grandfather 0건으로 GREEN이어야 정상 — 이 자리가 RED면 새 3719류 발견."""
+    violations: list[str] = []
+
+    emit_event_input_fields = set(EmitEventInput.model_fields) - _EMIT_EVENT_STRUCTURAL_EXEMPT
+    for field in emit_event_input_fields:
+        if field in EMIT_EVENT_FORWARD_FIELDS:
+            continue
+        if ("emit_event", field) in GUARD3_GRANDFATHER:
+            continue
+        violations.append(f"emit_event.{field}")
+
+    update_run_status_input_fields = set(UpdateRunStatusInput.model_fields) - _UPDATE_RUN_STATUS_STRUCTURAL_EXEMPT
+    for field in update_run_status_input_fields:
+        if field in UPDATE_RUN_STATUS_FORWARD_FIELDS:
+            continue
+        if ("update_run_status", field) in GUARD3_GRANDFATHER:
+            continue
+        violations.append(f"update_run_status.{field}")
+
+    assert not violations, (
+        "MCP Input 모델이 캐폴러 인자로 선언한 필드가 실제 forward 튜플엔 없다(story #3719류 "
+        f"— 캐폴러가 그 인자를 줘도 네트워크 바디에 절대 안 실림): {violations}. grandfather "
+        "목록에 없는 새 위반이면 forward 튜플에 그 필드를 추가하거나(의도치 않은 누락이면), "
+        "Input 모델에서 그 필드를 빼는(캐폴러에게 애초에 노출하면 안 되는 인자였다면) 처방이 "
+        "필요 — 이 테스트를 고쳐 통과시키지 말 것."
+    )
+
+
+def test_guard3_grandfather_count_pinned():
+    assert len(GUARD3_GRANDFATHER) == 0, (
+        f"GUARD3_GRANDFATHER 항목 수가 0이 아니라 {len(GUARD3_GRANDFATHER)} — #3719가 이미 "
+        "닫혀 있어야 할 클래스가 다시 열렸다는 뜻이니 원인부터 리뷰."
     )
 
 
