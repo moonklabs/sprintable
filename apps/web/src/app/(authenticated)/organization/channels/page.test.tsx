@@ -73,6 +73,9 @@ const AVAILABLE_CHANNELS_DEFAULT = [
 function stubFetch(opts: {
   connections?: unknown[];
   credentials?: { configured: boolean; app_id_suffix: string | null; effective_source: 'org' | 'platform' | 'none' };
+  // story #3733 — non-owner 「소유자에게 요청」 안내용 GET /api/org-members 스텁.
+  // 기본은 404(그 응답으로 falls back to unnamed — 대부분 테스트가 신경 안 써도 되게).
+  orgMembers?: Array<{ role: string; name: string; email?: string | null }>;
   // story f30da19a(AC2) — available-channels 목록을 테스트별로 바꿀 수 있게(sandbox
   // 포함/미포함·kind='blog' 필터 등).
   availableChannels?: { channel: string; display_name: string; credential_kind: string; kind: string }[];
@@ -165,6 +168,10 @@ function stubFetch(opts: {
     if (url.includes('/app-credentials')) {
       return { ok: true, status: 200, json: async () => ({ data: credentials }) } as Response;
     }
+    if (url.includes('/org-members')) {
+      if (!opts.orgMembers) return { ok: false, status: 403, json: async () => ({ data: null, error: { code: 'FORBIDDEN' } }) } as Response;
+      return { ok: true, status: 200, json: async () => ({ data: opts.orgMembers }) } as Response;
+    }
     if (url.includes('/channel-connections/facebook/select') && init?.method === 'POST') {
       const body = JSON.parse(String(init.body ?? '{}'));
       const result = opts.onFacebookSelect?.(body) ?? {
@@ -242,7 +249,7 @@ describe('OrganizationChannelsPage — 목록·상태(story #3376)', () => {
     await mount('member');
     const disconnectBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '해제');
     expect(disconnectBtn).toBeUndefined();
-    expect(container.textContent).toContain('이 작업은 owner만 할 수 있습니다');
+    expect(container.textContent).toContain('이 작업은 소유자만 할 수 있습니다');
   });
 
   it('story #3504 — admin도 해제·재인증 버튼이 안 보이고(owner 전용) owner만 문구를 본다', async () => {
@@ -252,7 +259,7 @@ describe('OrganizationChannelsPage — 목록·상태(story #3376)', () => {
     expect(disconnectBtn).toBeUndefined();
     const reauthBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '다시 연결');
     expect(reauthBtn).toBeUndefined();
-    expect(container.textContent).toContain('이 작업은 owner만 할 수 있습니다');
+    expect(container.textContent).toContain('이 작업은 소유자만 할 수 있습니다');
   });
 
   it('story #3504 — 해제 실패(403 CHANNEL_CONNECTION_OWNER_ONLY)는 카드 안 문구로 표면화된다', async () => {
@@ -261,7 +268,7 @@ describe('OrganizationChannelsPage — 목록·상태(story #3376)', () => {
     const disconnectBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '해제') as HTMLButtonElement;
     await act(async () => { disconnectBtn.click(); });
     await flush();
-    expect(container.textContent).toContain('이 작업은 owner만 할 수 있습니다');
+    expect(container.textContent).toContain('이 작업은 소유자만 할 수 있습니다');
   });
 
   it('story #3504 — 해제 실패(그 외 오류)는 일반 실패 문구로 표면화된다', async () => {
@@ -627,6 +634,29 @@ describe('OrganizationChannelsPage — 앱 자격(AC2, story #3376)', () => {
     expect(registerBtn).toBeUndefined();
     expect(container.textContent).toContain('조직 소유자에게 앱 자격 등록을 요청해 주세요.');
   });
+
+  // story #3733 로컬 라이브 캡처(2026-09-09) 실측 발견 — 실 org-members 응답은 실명이
+  // 없으면 name을 email로 폴백한다(BE COALESCE(m.name, u.display_name, u.email)). 그
+  // 폴백을 그대로 표시하면 「이메일은 절대 안 싣는다」가 조용히 깨진다.
+  it('org-members의 name이 email 폴백이면(실명 없음) 이름 없는 문구로 떨어진다 — 이메일 미노출', async () => {
+    stubFetch({
+      connections: [], credentials: { configured: false, app_id_suffix: null, effective_source: 'platform' },
+      orgMembers: [{ role: 'owner', name: 'owner@sprintable.dev', email: 'owner@sprintable.dev' }],
+    });
+    await mount('member');
+    expect(container.textContent).toContain('조직 소유자에게 앱 자격 등록을 요청해 주세요.');
+    expect(container.textContent).not.toContain('owner@sprintable.dev');
+  });
+
+  it('org-members의 name이 실명이면(email과 다름) 이름을 실은 안내가 선다', async () => {
+    stubFetch({
+      connections: [], credentials: { configured: false, app_id_suffix: null, effective_source: 'platform' },
+      orgMembers: [{ role: 'owner', name: '이윤재', email: 'owner@sprintable.dev' }],
+    });
+    await mount('member');
+    expect(container.textContent).toContain('조직 소유자 이윤재에게 앱 자격 등록을 요청해 주세요.');
+    expect(container.textContent).not.toContain('owner@sprintable.dev');
+  });
 });
 
 // story f30da19a(AC2) — CHANNELS 하드코딩 대신 available-channels 목록으로 렌더한다.
@@ -657,7 +687,7 @@ describe('OrganizationChannelsPage — available-channels 목록 기반 렌더(s
     stubFetch({ connections: [], availableChannels: AVAILABLE_WITH_SANDBOX });
     await mount('member');
     expect(container.querySelector('[data-testid="channel-connect-sandbox-button"]')).toBeNull();
-    expect(container.textContent).toContain('이 작업은 owner·admin만 할 수 있습니다');
+    expect(container.textContent).toContain('이 작업은 소유자·관리자만 할 수 있습니다');
   });
 
   it('story #3504 — admin에게도 sandbox 「연결 만들기」 버튼이 보인다(owner|admin 폭)', async () => {
@@ -697,7 +727,7 @@ describe('OrganizationChannelsPage — available-channels 목록 기반 렌더(s
     });
     await mount('member');
     expect(container.querySelector('[data-testid="channel-connect-sandbox-button"]')).toBeNull();
-    expect(container.textContent).not.toContain('이 작업은 owner·admin만 할 수 있습니다');
+    expect(container.textContent).not.toContain('이 작업은 소유자·관리자만 할 수 있습니다');
   });
 
   it('⭐#3537 — 다른 채널(threads)에만 연결이 있으면 sandbox 「연결 만들기」 버튼은 그대로 뜬다(channel 하드코딩 0, 일치로만 판정)', async () => {

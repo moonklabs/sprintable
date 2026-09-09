@@ -825,9 +825,13 @@ export default function OrganizationChannelsPage() {
       if (!isOwnerStrict) {
         fetchWithAuth('/api/org-members').then(async (res) => {
           if (!res.ok) return;
-          const json = (await res.json().catch(() => null)) as { data?: Array<{ role: string; name: string }> } | null;
+          const json = (await res.json().catch(() => null)) as { data?: Array<{ role: string; name: string; email?: string | null }> } | null;
           const owner = (json?.data ?? []).find((m) => m.role === 'owner');
-          if (owner?.name) setOwnerName(owner.name);
+          // story #3733 라이브 캡처 실측(2026-09-09) — BE org-members는 실명이 없으면
+          // name을 email로 폴백한다(COALESCE(m.name, u.display_name, u.email)). 그
+          // 폴백을 그대로 쓰면 「이메일은 절대 안 싣는다」가 조용히 깨진다 — name이
+          // email과 같으면(=실명이 없다는 신호) 이름 없는 문구로 떨어뜨린다.
+          if (owner?.name && owner.name !== owner.email) setOwnerName(owner.name);
         }).catch(() => undefined);
       }
       const availableJson = (await availableRes.json().catch(() => null)) as { data?: AvailableChannelItem[] } | null;
