@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useLocale } from 'next-intl';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 
@@ -14,6 +15,10 @@ export interface OrgSummaryRow {
   hit_rate: number | null;
   resolved: number | null;
   computed_at: string;
+  // story #3749(신뢰 센터 재설계) — 콜드스타트(resolved=0) 행의 부제가 "판정 대기
+  // 가설 N건" 문장을 내려면 필요. BE가 이미 metrics JSONB에 갖고 있던 값을 이
+  // 스토리에서 org-summary 응답에 배선(routers/trust_scores.py 1줄).
+  pending: number | null;
 }
 
 export interface HistorySnapshot {
@@ -27,6 +32,9 @@ export interface SelfScore {
   role_label: string | null;
   hit_rate: number | null;
   resolved: number | null;
+  // story #3749 — GET /trust-scores(자기 조회)는 compute_member_trust_scores()의
+  // score dict를 그대로 낸다 — pending은 이미 응답에 있었다(BE 무변경, FE 타입만 보강).
+  pending: number | null;
 }
 
 export interface RosterMember {
@@ -41,6 +49,17 @@ export type Translator = (key: string, values?: Record<string, string | number>)
 // 없는 상태를 반드시 구분한다(E-VERIFY: 0%처럼 안 보이게).
 export function isColdStart(hitRate: number | null, resolved: number | null): boolean {
   return hitRate === null || resolved === null || resolved === 0;
+}
+
+// story #3749(유나 定, 2026-09-09) — 콜드스타트 행 부제 두 갈래. 「3건 더」류 계약에
+// 없는 수는 짓지 않는다 — resolved===0∧pending>0이면 그 수만, pending===0이면 수
+// 자체를 안 쓴다("아직 판정한 가설이 없습니다"). 값은 호출부(page.tsx)가 `t()`로
+// 채운다 — 이 함수는 키 이름과 보간값만 돌려준다(순수 함수, i18n 훅 없음).
+export function coldStartReason(pending: number | null): { key: string; values?: { n: number } } {
+  if (pending !== null && pending > 0) {
+    return { key: 'trustColdStartPendingReason', values: { n: pending } };
+  }
+  return { key: 'trustColdStartEmptyReason' };
 }
 
 // 직무(role_key)별 그룹핑 — 순위/성과순 정렬 금지, role_label 이름순만(E-VERIFY 중립 정렬 규율).
@@ -97,6 +116,23 @@ export function TrustBadge({ hitRate, resolved, t }: { hitRate: number | null; r
   return <Badge variant="chip">{t('trustHitRate', { rate: Math.round(hitRate * 100) })}</Badge>;
 }
 
+// story #3749(유나 定 — "적중 막대") — Sparkline과 같은 E-VERIFY 톤 규율: 단일 중립색
+// (등급/순위 컬러코딩 0). 시각 보조일 뿐 값은 옆 "적중 {rate}%" 텍스트가 SSOT.
+export function HitRateBar({ hitRate }: { hitRate: number }) {
+  const pct = Math.round(hitRate * 100);
+  return (
+    <div
+      role="progressbar"
+      aria-valuenow={pct}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      className="h-1.5 w-12 shrink-0 overflow-hidden rounded-full bg-muted"
+    >
+      <div className="h-full rounded-full bg-muted-foreground" style={{ width: `${pct}%` }} />
+    </div>
+  );
+}
+
 // Ortega 지시(C2a 심화): history 드릴다운을 스파크라인으로 보강 — "성과 추이 그래프/감시"가
 // 아니라 이미 리스트로 노출 중인 데이터의 가독성 개선일 뿐이므로, 신규 데이터/신규 신호를
 // 만들지 않는다(숫자는 여전히 리스트가 SSOT). 콜드스타트(hit_rate=null) 지점은 값이 없어
@@ -134,7 +170,7 @@ export function Sparkline({ values }: { values: number[] }) {
   );
 }
 
-export function HistoryDrilldown({ memberId, roleKey, t }: { memberId: string; roleKey: string; t: Translator }) {
+export function HistoryDrilldown({ memberId, roleKey, index, t }: { memberId: string; roleKey: string; index: number; t: Translator }) {
   const [open, setOpen] = useState(false);
   const [snapshots, setSnapshots] = useState<HistorySnapshot[] | null>(null);
   const locale = useLocale();
@@ -155,14 +191,22 @@ export function HistoryDrilldown({ memberId, roleKey, t }: { memberId: string; r
 
   return (
     <div>
-      <button
+      {/* story #3749(재설계 ⑤, 시안 v3b) — 「추이 보기」를 상시 노출 outline 버튼으로
+          (행 다음 발 관례, #4090/#4093과 동형 — variant="outline" size="sm"). 펼침
+          로직 자체는 그대로(토글 함수·지연 조회 무변경). §22-18(유나의 자) — 행마다
+          같은 정적 라벨이라 aria-label에 순번+현재 라벨을 품긴다(archiveRowAriaLabel
+          과 동형 관례). */}
+      <Button
         type="button"
+        variant="outline"
+        size="sm"
         onClick={() => void toggle()}
-        className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+        data-testid="trust-history-toggle"
+        aria-label={t('trustHistoryToggleAriaLabel', { n: index + 1, label: t('trustHistoryToggle') })}
       >
         {t('trustHistoryToggle')}
         {open ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
-      </button>
+      </Button>
       {open ? (
         <div className="mt-2 space-y-1">
           {snapshots === null ? (

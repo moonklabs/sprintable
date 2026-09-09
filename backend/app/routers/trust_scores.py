@@ -93,6 +93,12 @@ async def get_trust_org_summary(
                 "role_label": row.metrics.get("role_label"),
                 "hit_rate": row.metrics.get("hit_rate"),
                 "resolved": row.metrics.get("resolved"),
+                # story #3749(신뢰 센터 재설계) — 콜드스타트(resolved=0) 행의 부제가
+                # "판정 대기 가설 N건" 문장을 내려면 이 수가 필요하다. compute_member_
+                # trust_scores()가 이미 각 role score dict에 pending을 싣고 metrics
+                # JSONB로 verbatim 저장해 왔다(trust_score.py:217) — 이 라우터만 그동안
+                # 응답에 안 실었다.
+                "pending": row.metrics.get("pending"),
                 "computed_at": row.computed_at.isoformat(),
             }
             for row in rows
