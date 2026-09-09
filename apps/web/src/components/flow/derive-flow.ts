@@ -1,48 +1,10 @@
-export interface FlowLaneRow {
-  id: string;
-  title: string;
-  done: number;
-  total: number;
-  completionPct: number;
-  inProgress: number;
-  waiting: number;
-  blocked: number;
-  stalled: number;
-  pastCnt: number;
-  nowCnt: number;
-  upcomingCnt: number;
-  /** epics-progress-lane 응답에 이 에픽 키가 아예 없을 때(스토리 0건인 에픽) 참 —
-   * 플래그바 대신 "모름"을 정직하게 그리라는 신호(§H-2, 없는 것을 0으로 지어내지 않는다). */
-  hasLaneData: boolean;
-}
-
-// story #4062 후속(2026-09-09, 페드루 PO 決) — deriveFlowLaneRows·FLOW_LANE_CAP·
-// EpicLaneCounts·EpicZoneCounts·EpicsProgressLaneResponse를 여기서 걷어냈다. 유일
-// 소비처(FlowLane, flow-lane.tsx)가 #3710에서 삭제됐다 — 방금 소비처 0이 된 것을 남기면
-// "살아 있는 추상"이 된다. FlowLaneRow는 flow-canvas.tsx(별도 은퇴 스윕 #3715 대상)가
-// 여전히 타입으로 참조해 남긴다.
+// story #3715(2026-09-09, 페드루 PO 決) — FlowCanvas(flow-canvas.tsx) 은퇴 스윕. `FlowLaneRow`
+// (#4062 후속에서 이미 flow-canvas.tsx만 남기고 나머지 4조각을 걷어냈던 그 타입)·
+// `derivePastRatio`·`EdgeSummary`·`deriveEdgeSummary`는 유일 소비처였던 flow-canvas.tsx가
+// 삭제되며 소비처 0이 됐다.
 
 // L3(시간축 캔버스) 재작업은 별도 PR — 유나 치수(L3-1~L3-6, 절대 px 좌표+110px 그리드) 전량
-// 수신 후 착수한다(PO 지시 2026-07-30, "절반만 보고 짓지 마시는"). 이 PR은 L2(좌 레인 플래그바)
-// 만 다룬다 — derivePastRatio(기존 단일 진행률 막대)는 flow-canvas.tsx가 그대로 쓰므로 무변경.
-
-/** done/total → "지나온 것" 폭 비율(0~100). total=0이면 0(시작 전 — 결핍 아님). */
-export function derivePastRatio(done: number, total: number): number {
-  if (total <= 0) return 0;
-  return Math.max(0, Math.min(100, Math.round((done / total) * 100)));
-}
-
-export interface EdgeSummary {
-  count: number;
-  /** count=0일 때만 참 — "연결 0건"과 "아직 하나도 안 이어졌다"를 구분하는 문구 트리거. */
-  isEmpty: boolean;
-}
-
-/** 간선 개수 → 요약. count는 항상 호출부가 실제 배열 길이로 넘긴다(리터럴 하드코딩 금지 —
- * PO 지시 2026-07-30: #2221 간선 데이터가 착지하면 이 값이 그 즉시 바뀌어야 한다). */
-export function deriveEdgeSummary(count: number): EdgeSummary {
-  return { count, isEmpty: count === 0 };
-}
+// 수신 후 착수한다(PO 지시 2026-07-30, "절반만 보고 짓지 마시는").
 
 // 노드 틀(2026-07-30, PO 판정 — 계약 착지 前에도 틀은 세운다) — GET
 // /api/v2/analytics/epic-flow-nodes?project_id=&epic_id=&upcoming_limit= 계약(까심 PR#2679)

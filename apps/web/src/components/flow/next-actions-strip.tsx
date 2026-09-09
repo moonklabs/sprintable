@@ -14,6 +14,10 @@ interface NextActionsStripProps {
   backlogByEpic: Map<string, NextMakerStory[]>;
   recentlyClosedTargetIds: Set<string>;
   memberMap: Record<string, MemberLite>;
+  /** story #3715(2026-09-09, 유나 문구 確定) — team-members fetch 실패 시(loadGlanceData
+   * `partialErrors.members`) memberMap이 빈 채로 내려온다 — "담당자가 없다"와 "이름을 못
+   * 불러왔다"를 갈라 헤더 아래 한 줄로 정직하게 알린다(카드마다 반복 안 함). */
+  memberNamesLoadFailed?: boolean;
   onSelectStory: (storyId: string) => void;
   onStoryPromoted: (storyId: string, epicId: string) => void;
   onPromoteFailed: (storyId: string) => void;
@@ -30,6 +34,7 @@ interface NextActionsStripProps {
  */
 export function NextActionsStrip({
   needsNextStems, quietCount, projectId, backlogByEpic, recentlyClosedTargetIds, memberMap,
+  memberNamesLoadFailed = false,
   onSelectStory, onStoryPromoted, onPromoteFailed, onGoalTransitioned,
 }: NextActionsStripProps) {
   const t = useTranslations('flow');
@@ -42,6 +47,9 @@ export function NextActionsStrip({
       <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
         {t('nextMakerNeedsNextHeading', { n: needsNextStems.length })}
       </p>
+      {memberNamesLoadFailed ? (
+        <p className="text-xs text-muted-foreground">{t('memberNamesLoadError')}</p>
+      ) : null}
       {needsNextStems.map((stem, i) => {
         // 정렬이 이미 about-to-stall → recently-active → quiet 순이라 quiet는 항상 꼬리의
         // 연속 구간 — 그 구간이 시작되는 지점에만 힌트 한 줄을 붙인다.

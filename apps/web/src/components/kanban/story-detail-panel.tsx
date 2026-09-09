@@ -921,9 +921,10 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
   const proofHuman = proofHumanId ? memberMap[proofHumanId] : null;
   const proofAgent = proofAgentId ? memberMap[proofAgentId] : null;
 
-  // story #2922 W2 — Workcell Evidence 구획 = ProofCapsule density="full" 실배선. glance-hero.tsx
-  // (GlanceHero의 buildEvidence/buildTrustSeal, 유일한 기존 density="full" 실 호출부)와 동일 규율:
-  // 신호 없는 필드는 절대 지어내지 않는다(no-fiction). claim=story.title(GlanceHero 선례 그대로).
+  // story #2922 W2 — Workcell Evidence 구획 = ProofCapsule density="full" 실배선. 그 당시
+  // 유일한 기존 density="full" 실 호출부(GlanceHero의 buildEvidence/buildTrustSeal, 옛
+  // GlanceHero 선례 — 지금은 삭제, story #3715)와 동일 규율: 신호 없는 필드는 절대 지어내지
+  // 않는다(no-fiction). claim=story.title(그 선례 그대로).
   const EVIDENCE_STATE_LABEL_BY_STATUS: Partial<Record<string, ProofState>> = {
     'in-progress': 'blue', 'in-review': 'amber', done: 'green',
   };

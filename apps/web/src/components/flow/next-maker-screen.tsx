@@ -23,6 +23,9 @@ import { fetchWithAuth } from '@/lib/db/client';
 interface NextMakerScreenProps {
   projectId: string;
   memberMap: Record<string, MemberLite>;
+  /** story #3715(2026-09-09) — loadGlanceData `partialErrors.members`를 그대로 통과시켜
+   * NextActionsStrip이 "담당자 없음"과 "이름 못 불러옴"을 가른다. */
+  memberNamesLoadFailed?: boolean;
   onSelectStory: (storyId: string) => void;
   /** story #2354 — 순수 통과 prop(FlowMapCanvas 참고, 노드 선택 고리 강조). */
   selectedNodeId?: string | null;
@@ -135,7 +138,7 @@ type LoadState =
  *
  * ⛔done 스토리는 이 화면에서 fetch하지 않는다(goals.total_stories/done_stories로 충분).
  */
-export function NextMakerScreen({ projectId, memberMap, onSelectStory, selectedNodeId = null, focusGoalId = null, refetchToken = 0 }: NextMakerScreenProps) {
+export function NextMakerScreen({ projectId, memberMap, memberNamesLoadFailed = false, onSelectStory, selectedNodeId = null, focusGoalId = null, refetchToken = 0 }: NextMakerScreenProps) {
   const t = useTranslations('flow');
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
   // story #2545(카디르 라이브 재QA 5단계) — org 불일치 자동교정(switch-org) 성공 直後 이
@@ -360,6 +363,7 @@ export function NextMakerScreen({ projectId, memberMap, onSelectStory, selectedN
         backlogByEpic={backlogByEpic}
         recentlyClosedTargetIds={state.kind === 'ready' ? state.recentlyClosedTargetIds : new Set()}
         memberMap={memberMap}
+        memberNamesLoadFailed={memberNamesLoadFailed}
         onSelectStory={onSelectStory}
         onStoryPromoted={handleStoryPromoted}
         onPromoteFailed={handlePromoteFailed}

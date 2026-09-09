@@ -187,6 +187,36 @@ describe('NextActionsStrip — 접힌 채 기본, 펼치면 승격/전환 동사
     expect(onGoalTransitioned).toHaveBeenCalledWith('e1');
   });
 
+  // story #3715(2026-09-09, 유나 문구 確定) — loadGlanceData의 partialErrors.members가
+  // 화면 소비처 0이던 것을 받을 자리. team-members fetch 실패 시 헤더 아래 한 줄로
+  // "담당자가 없다"와 "이름을 못 불러왔다"를 가른다(카드마다 반복 안 함).
+  it('memberNamesLoadFailed=true면 헤더 아래 한 줄이 뜬다(회귀: 되돌리면 실패)', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <NextActionsStrip
+          needsNextStems={[stem()]} quietCount={0} projectId="p1"
+          backlogByEpic={new Map()} recentlyClosedTargetIds={new Set()} memberMap={{}}
+          memberNamesLoadFailed
+          onSelectStory={() => {}} onStoryPromoted={() => {}} onPromoteFailed={() => {}} onGoalTransitioned={() => {}}
+        />,
+      ));
+    });
+    expect(container.textContent).toContain(koMessages.flow.memberNamesLoadError);
+  });
+
+  it('memberNamesLoadFailed=false(기본)면 그 줄이 없다(무회귀)', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <NextActionsStrip
+          needsNextStems={[stem()]} quietCount={0} projectId="p1"
+          backlogByEpic={new Map()} recentlyClosedTargetIds={new Set()} memberMap={{}}
+          onSelectStory={() => {}} onStoryPromoted={() => {}} onPromoteFailed={() => {}} onGoalTransitioned={() => {}}
+        />,
+      ));
+    });
+    expect(container.textContent).not.toContain(koMessages.flow.memberNamesLoadError);
+  });
+
   it('clicking the row again collapses it (toggle back)', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);

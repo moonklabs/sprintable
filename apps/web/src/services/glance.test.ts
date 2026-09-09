@@ -25,8 +25,9 @@ describe('derivePhrase (정성 진척 언어 — %는 보조)', () => {
 // client.tsx는 loadGlanceData 결과 중 attentionSignals·memberMap만 소비, roadmap 소비 0).
 // 그 함수들 자체도 services/glance.ts에서 함께 삭제됐다(아래 참고). RoadmapStatus·
 // RoadmapEpic도 #4062 후속(같은 날)에서 마저 삭제됐다 — 마지막 소비처였던 derive-flow.ts의
-// deriveFlowLaneRows가 그 사이 삭제되며 방금 소비처 0이 됐다. BeFocalStory(→derive-hero-
-// envelope.ts)만 실 소비처가 있어 타입으로 남았다.
+// deriveFlowLaneRows가 그 사이 삭제되며 방금 소비처 0이 됐다. BeFocalStory도 story #3715
+// 후속(같은 grep 스윕)에서 마저 삭제됐다 — 유일 소비처였던 derive-hero-envelope.ts가
+// glance-hero.tsx와 함께 #3715에서 죽었다.
 
 // story #2224(선생님 정정 2026-07-30) — filterMilestoneEvents/deriveVagueRecency 테스트를
 // 제거했다. 유일 소비처(LiveStream, §6 생동 스트림)가 /glance 삭제와 함께 죽은 코드가 됐고,

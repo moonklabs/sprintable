@@ -107,10 +107,11 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
   const [loading, setLoading] = useState(true);
 
   // ⛔결함 fix(2026-07-31, "다음을 만드는 화면" 착지 — 아티팩트 a920c25f v2) — 예전엔
-  // epics-progress-lane을 여기서 따로 fetch해 FlowLane/FlowCanvas에 먹였으나, 그 둘이
-  // NextMakerScreen으로 교체되며 그 컴포넌트가 같은 엔드포인트를 자기 몫(막힘 합계)으로
-  // 스스로 fetch한다 — 여기서 또 부르면 같은 요청을 두 번 쏘는 것이라 제거한다(§I-6 "두 벌
-  // 서지 않는다"의 거울상 — 이번엔 fetch 중복 쪽).
+  // epics-progress-lane을 여기서 따로 fetch해 FlowLane/FlowCanvas(둘 다 그때 이미 죽은
+  // 경로였다가 story #3715에서 삭제)에 먹였으나, 그 둘이 NextMakerScreen으로 교체되며 그
+  // 컴포넌트가 같은 엔드포인트를 자기 몫(막힘 합계)으로 스스로 fetch한다 — 여기서 또 부르면
+  // 같은 요청을 두 번 쏘는 것이라 제거한다(§I-6 "두 벌 서지 않는다"의 거울상 — 이번엔
+  // fetch 중복 쪽).
   const fetchData = useCallback((cancelledRef: { cancelled: boolean }) => {
     setLoading(true);
     void (async () => {
@@ -277,6 +278,7 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
             <NextMakerScreen
               projectId={projectId}
               memberMap={data?.memberMap ?? {}}
+              memberNamesLoadFailed={data?.partialErrors?.members ?? false}
               onSelectStory={handleSelectStory}
               selectedNodeId={selectedStoryId}
               focusGoalId={focusGoalId}
@@ -317,7 +319,7 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
             {t('drawerHeadingNoCount')}
           </summary>
           <div className="border-t border-border p-3">
-            <ExceptionStream items={exceptionItems} />
+            <ExceptionStream items={exceptionItems} loadFailed={data?.partialErrors?.attention ?? false} />
           </div>
         </details>
       </div>

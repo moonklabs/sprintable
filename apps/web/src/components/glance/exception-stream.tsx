@@ -23,6 +23,12 @@ interface ExceptionStreamProps {
    * 단독형을 안 씀)·「머지 가능」(그대로, 충돌 없음).
    */
   items?: AttentionQueueItem[];
+  /** story #3715(2026-09-09, 유나 문구 確定) — attention fetch 자체가 실패했을 때(loadGlanceData
+   * `partialErrors.attention`) "손이 필요한 것 없음"(exceptionsEmpty)과 같은 자리·같은 클래스로
+   * exceptionsLoadError를 대신 그린다 — "실패"와 "진짜 비어 있음"을 화면에서 갈라야 사용자가
+   * "지금 할 일이 없다"로 오인하지 않는다. items가 있어도(있을 리 없지만, 실패 시 항상 []) 이
+   * 플래그가 우선한다. */
+  loadFailed?: boolean;
 }
 
 const DOT_BY_STATE: Record<string, string> = {
@@ -37,8 +43,12 @@ const DOT_BY_STATE: Record<string, string> = {
  * (활동량/타임스탬프/순위 0). AttentionQueue 파생 재사용. no-fiction: 실 신호 없으면 억지 렌더 X →
  * 정직 빈상태. 디디 gate-fetch BE가 오면 상위(glance-board)가 파생 items를 내려준다.
  */
-export function ExceptionStream({ items = [] }: ExceptionStreamProps) {
+export function ExceptionStream({ items = [], loadFailed = false }: ExceptionStreamProps) {
   const t = useTranslations('glance');
+
+  if (loadFailed) {
+    return <p className="px-1 py-3 text-[11.5px] text-muted-foreground">{t('exceptionsLoadError')}</p>;
+  }
 
   if (items.length === 0) {
     return <p className="px-1 py-3 text-[11.5px] text-muted-foreground">{t('exceptionsEmpty')}</p>;
