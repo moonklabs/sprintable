@@ -30,13 +30,15 @@ export interface UpdateTaskInput {
   assignee_id?: string | null;
 }
 
+// story #3713 후속(페드루 PO CHANGES, 2026-09-09) — days_since 필드가 여기 있었으나
+// BE tasks 라우터엔 대응 Query 파라미터가 없어(project_id/status_ne/ids/limit/cursor만
+// 받음) 조용히 버려졌다 — 실사용처도 0이라 은퇴(route.ts 파싱도 같이 제거).
 export interface TaskListFilters extends PaginationOptions {
   story_id?: string;
   project_id?: string;
   assignee_id?: string;
   status?: string;
   status_ne?: string;
-  days_since?: number;
   /** story #2262 PR②(BE #2905) — 배치 lookup(comma-separated). Task엔 project_id 컬럼이
    * 없어(story_id NN) BE가 org-scope lookup 後 story_id→project_id로 접근권을 건다. */
   ids?: string[];
