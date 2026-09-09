@@ -1,11 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import { useLocale } from 'next-intl';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
-import { formatRelativeTime } from '@/lib/storage/format';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { Button } from '@/components/ui/button';
+import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 
 export interface OrgSummaryRow {
   member_id: string;
@@ -14,6 +13,10 @@ export interface OrgSummaryRow {
   hit_rate: number | null;
   resolved: number | null;
   computed_at: string;
+  // story #3749(신뢰 센터 재설계) — 콜드스타트(resolved=0) 행의 부제가 "판정 대기
+  // 가설 N건" 문장을 내려면 필요. BE가 이미 metrics JSONB에 갖고 있던 값을 이
+  // 스토리에서 org-summary 응답에 배선(routers/trust_scores.py 1줄).
+  pending: number | null;
 }
 
 export interface HistorySnapshot {
@@ -27,6 +30,9 @@ export interface SelfScore {
   role_label: string | null;
   hit_rate: number | null;
   resolved: number | null;
+  // story #3749 — GET /trust-scores(자기 조회)는 compute_member_trust_scores()의
+  // score dict를 그대로 낸다 — pending은 이미 응답에 있었다(BE 무변경, FE 타입만 보강).
+  pending: number | null;
 }
 
 export interface RosterMember {
@@ -41,6 +47,17 @@ export type Translator = (key: string, values?: Record<string, string | number>)
 // 없는 상태를 반드시 구분한다(E-VERIFY: 0%처럼 안 보이게).
 export function isColdStart(hitRate: number | null, resolved: number | null): boolean {
   return hitRate === null || resolved === null || resolved === 0;
+}
+
+// story #3749(유나 定, 2026-09-09) — 콜드스타트 행 부제 두 갈래. 「3건 더」류 계약에
+// 없는 수는 짓지 않는다 — resolved===0∧pending>0이면 그 수만, pending===0이면 수
+// 자체를 안 쓴다("아직 판정한 가설이 없습니다"). 값은 호출부(page.tsx)가 `t()`로
+// 채운다 — 이 함수는 키 이름과 보간값만 돌려준다(순수 함수, i18n 훅 없음).
+export function coldStartReason(pending: number | null): { key: string; values?: { n: number } } {
+  if (pending !== null && pending > 0) {
+    return { key: 'trustColdStartPendingReason', values: { n: pending } };
+  }
+  return { key: 'trustColdStartEmptyReason' };
 }
 
 // 직무(role_key)별 그룹핑 — 순위/성과순 정렬 금지, role_label 이름순만(E-VERIFY 중립 정렬 규율).
@@ -97,6 +114,23 @@ export function TrustBadge({ hitRate, resolved, t }: { hitRate: number | null; r
   return <Badge variant="chip">{t('trustHitRate', { rate: Math.round(hitRate * 100) })}</Badge>;
 }
 
+// story #3749(유나 定 — "적중 막대") — Sparkline과 같은 E-VERIFY 톤 규율: 단일 중립색
+// (등급/순위 컬러코딩 0). 시각 보조일 뿐 값은 옆 "적중 {rate}%" 텍스트가 SSOT.
+export function HitRateBar({ hitRate }: { hitRate: number }) {
+  const pct = Math.round(hitRate * 100);
+  return (
+    <div
+      role="progressbar"
+      aria-valuenow={pct}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      className="h-1.5 w-12 shrink-0 overflow-hidden rounded-full bg-muted"
+    >
+      <div className="h-full rounded-full bg-muted-foreground" style={{ width: `${pct}%` }} />
+    </div>
+  );
+}
+
 // Ortega 지시(C2a 심화): history 드릴다운을 스파크라인으로 보강 — "성과 추이 그래프/감시"가
 // 아니라 이미 리스트로 노출 중인 데이터의 가독성 개선일 뿐이므로, 신규 데이터/신규 신호를
 // 만들지 않는다(숫자는 여전히 리스트가 SSOT). 콜드스타트(hit_rate=null) 지점은 값이 없어
@@ -134,11 +168,16 @@ export function Sparkline({ values }: { values: number[] }) {
   );
 }
 
-export function HistoryDrilldown({ memberId, roleKey, t }: { memberId: string; roleKey: string; t: Translator }) {
+// story #3749 CHANGES(페드루 PO, 유나 픽셀 캡처 지적 2026-09-09 17:23Z) — 펼침(스파크
+// 라인+이력)이 행의 action 칸 «안»에 구겨져 있었다(캡처 실측) — 집안 `ListRow` 펼침
+// 슬롯 관례(③ 채널 연결 앱 자격 폼 = 행 아래 전폭, list-row.tsx의 `children`)를
+// 어긴 자리다. 트리거 버튼(행 다음 발 자리)과 펼침 패널(행 아래 전폭 자리)이 서로
+// 다른 DOM 위치(`ListRow`의 `action` prop vs `children`)로 가야 해서, 상태를 한
+// 컴포넌트 안에 가두던 원래 구조를 훅+트리거+패널 셋으로 쪼갠다(로직 자체는 무변경
+// — 토글 함수·지연 조회·데이터 모양 그대로, 렌더 위치만 갈린다).
+export function useHistoryDrilldown({ memberId, roleKey }: { memberId: string; roleKey: string }) {
   const [open, setOpen] = useState(false);
   const [snapshots, setSnapshots] = useState<HistorySnapshot[] | null>(null);
-  const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
 
   const toggle = async () => {
     if (!open && snapshots === null) {
@@ -153,35 +192,60 @@ export function HistoryDrilldown({ memberId, roleKey, t }: { memberId: string; r
     setOpen((v) => !v);
   };
 
+  return { open, snapshots, toggle };
+}
+
+// 「추이 보기」 트리거 — `ListRow`의 `action` 자리(행 다음 발 관례, #4090/#4093과
+// 동형 — variant="outline" size="sm"). §22-18(유나의 자) — 행마다 같은 정적
+// 라벨이라 aria-label에 순번+현재 라벨을 품긴다(archiveRowAriaLabel과 동형 관례).
+export function HistoryDrilldownTrigger({
+  open, toggle, index, t,
+}: { open: boolean; toggle: () => void; index: number; t: Translator }) {
   return (
-    <div>
-      <button
-        type="button"
-        onClick={() => void toggle()}
-        className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-      >
-        {t('trustHistoryToggle')}
-        {open ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
-      </button>
-      {open ? (
-        <div className="mt-2 space-y-1">
-          {snapshots === null ? (
-            <div className="h-8 animate-pulse rounded-md bg-muted" />
-          ) : snapshots.length === 0 ? (
-            <p className="text-xs text-muted-foreground">{t('trustHistoryEmpty')}</p>
-          ) : (
-            <>
-              <Sparkline values={extractSparklineValues(snapshots)} />
-              {snapshots.map((s) => (
-                <div key={s.computed_at} className="flex items-center justify-between text-xs text-muted-foreground">
-                  <span>{formatRelativeTime(s.computed_at, locale, displayTimezone)}</span>
-                  <TrustBadge hitRate={s.hit_rate} resolved={s.resolved} t={t} />
-                </div>
-              ))}
-            </>
-          )}
-        </div>
-      ) : null}
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      onClick={() => void toggle()}
+      data-testid="trust-history-toggle"
+      aria-label={t('trustHistoryToggleAriaLabel', { n: index + 1, label: t('trustHistoryToggle') })}
+    >
+      {t('trustHistoryToggle')}
+      {open ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
+    </Button>
+  );
+}
+
+// 펼침 패널 — `ListRow`의 `children` 자리(행 아래 전폭, ③ 앱 자격 폼과 동형 슬롯).
+export function HistoryDrilldownPanel({
+  open, snapshots, t,
+}: { open: boolean; snapshots: HistorySnapshot[] | null; t: Translator }) {
+  const displayTimezone = resolveDisplayTimezone().tz;
+  if (!open) return null;
+  return (
+    <div className="mt-2 space-y-1" data-testid="trust-history-panel">
+      {snapshots === null ? (
+        <div className="h-8 animate-pulse rounded-md bg-muted" />
+      ) : snapshots.length === 0 ? (
+        <p className="text-xs text-muted-foreground">{t('trustHistoryEmpty')}</p>
+      ) : (
+        <>
+          <Sparkline values={extractSparklineValues(snapshots)} />
+          {/* story #3749 CHANGES(페드루 PO, 유나 픽셀 캡처 e7410279 지적 2026-09-09
+              17:48Z) — 이력 행 시각이 `formatRelativeTime`이면 한 열에 "2분 전·
+              어제·5일 전·08-31 02:38 GMT+9"가 섞인다(#4093 「발행」 칸에서 이미
+              닫은 같은 클래스 — 7일이 지나면 절대 표기로 넘어가는 그 함수 자신의
+              분기 때문에 한 열 안에서 상대·절대가 섞인다). 定②(행 부제 "…기준")와
+              같은 §11-2 정본 절대 포맷으로 통일 — 한 화면 안에 두 표기 규율을
+              안 둔다. */}
+          {snapshots.map((s) => (
+            <div key={s.computed_at} className="flex items-center justify-between text-xs text-muted-foreground">
+              <span>{formatScheduledAt(s.computed_at, displayTimezone).display}</span>
+              <TrustBadge hitRate={s.hit_rate} resolved={s.resolved} t={t} />
+            </div>
+          ))}
+        </>
+      )}
     </div>
   );
 }

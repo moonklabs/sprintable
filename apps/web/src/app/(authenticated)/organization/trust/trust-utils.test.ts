@@ -22,7 +22,7 @@ describe('isColdStart (story 7e21a8b5 — E-VERIFY 콜드스타트 중립 판정
 
 describe('groupRosterByRole (E-VERIFY 중립 정렬 — 성과순 금지, 라벨 이름순만)', () => {
   const row = (member_id: string, role_key: string, role_label: string | null, hit_rate: number | null = null, resolved: number | null = 0) =>
-    ({ member_id, role_key, role_label, hit_rate, resolved, computed_at: '2026-07-15T00:00:00Z' });
+    ({ member_id, role_key, role_label, hit_rate, resolved, computed_at: '2026-07-15T00:00:00Z', pending: null });
 
   it('groups rows by role_label, sorted alphabetically regardless of hit_rate (순위 금지 회귀가드)', () => {
     // QA의 hit_rate(0.1)가 개발(0.95)보다 훨씬 낮게 설계 — hit_rate 내림차순 정렬이었다면
@@ -50,7 +50,7 @@ describe('groupRosterByRole (E-VERIFY 중립 정렬 — 성과순 금지, 라벨
 
 describe('sortGroupMembersByName (유나 가디언 지적 PR#2191 — within-group 순위 누수 fix)', () => {
   const row = (member_id: string, hit_rate: number | null = null, resolved: number | null = 0) =>
-    ({ member_id, role_key: 'dev', role_label: '개발', hit_rate, resolved, computed_at: '2026-07-15T00:00:00Z' });
+    ({ member_id, role_key: 'dev', role_label: '개발', hit_rate, resolved, computed_at: '2026-07-15T00:00:00Z', pending: null });
   const lookup = (entries: Array<[string, string]>) =>
     new Map<string, RosterMember>(entries.map(([id, name]) => [id, { id, name }]));
 
