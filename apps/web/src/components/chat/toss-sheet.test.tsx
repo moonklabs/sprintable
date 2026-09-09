@@ -457,6 +457,72 @@ describe('TossSheet — 완결 실패를 완결인 척 안 함(story #3701 parti
     expect(document.body.textContent).toContain('재오픈 방');
     expect(document.body.textContent).not.toContain('옛 응답 방');
   });
+
+  // story #3701(design CHANGES④, 페드루 — 카디르 재-QA qa:changes 재현, head 776cb4145) —
+  // open effect가 "이미 커밋됨"이면 cleanup 등록 자체를 건너뛰는(구코드) 조기 return이었다.
+  // 「이미 커밋된 데이터로 재오픈」한 렌더에서 재시도가 새 요청을 내고 응답 前에 닫으면, 그
+  // 닫힘엔 실행할 cleanup이 없어 순번이 안 올라가고, 닫힌 동안 도착한 그 옛 retry 응답이
+  // 조용히 커밋된 뒤 재오픈이 "이미 커밋됨"으로 또 오판해 재조회를 생략했다.
+  it('커밋된(partial) 데이터로 재오픈→재시도→응답 前 닫음→응답 도착→재오픈 순서에서도 재오픈이 항상 새로 부른다', async () => {
+    const firstCandidate = { id: 'conv-first', type: 'group' as const, title: '첫 로드 방', participants: [{ member_id: 'member-9', name: '선생님' }] };
+    const staleRetryCandidate = { id: 'conv-stale-retry', type: 'group' as const, title: '옛 재시도 방', participants: [{ member_id: 'member-9', name: '선생님' }] };
+    const finalCandidate = { id: 'conv-final', type: 'group' as const, title: '최종 방', participants: [{ member_id: 'member-9', name: '선생님' }] };
+
+    let resolveRetry: (v: { ok: boolean; json: () => Promise<unknown> }) => void = () => {};
+    const retryPending = new Promise<{ ok: boolean; json: () => Promise<unknown> }>((resolve) => { resolveRetry = resolve; });
+    let callCount = 0;
+    const fetchMock = vi.fn(async () => {
+      callCount += 1;
+      // 1번째(초기 로드) — total 없이 응답(계약 위반) → 즉시 partial 커밋(배너+재시도 노출 조건).
+      if (callCount === 1) return { ok: true, json: async () => ({ data: [firstCandidate] }) };
+      // 2번째(재시도) — 응답 前에 닫힐 것.
+      if (callCount === 2) return retryPending;
+      // 3번째(재오픈이 다시 부른 것) — 완결 성공.
+      return { ok: true, json: async () => ({ data: [finalCandidate], total: 1 }) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const onOpenChange = vi.fn();
+    const renderWith = (open: boolean) => act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <TossSheet
+            open={open} onOpenChange={onOpenChange} gateId="gate-1" projectId="proj-1"
+            currentTeamMemberId="member-1" designatedApproverId="member-9" designatedApproverName="선생님"
+            onTossed={vi.fn()} onAlreadyResolved={vi.fn()}
+          />
+        </NextIntlClientProvider>,
+      );
+    });
+
+    await renderWith(true); // 첫 열림 — total 없음 → partial 커밋(후보 1건 있어 배너 노출)
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(document.body.textContent).toContain('첫 로드 방');
+    expect(document.body.querySelector('[data-testid="toss-partial-notice"]')).not.toBeNull();
+
+    await renderWith(false); // 닫음(이미 커밋된 상태 — 이 cleanup은 순번을 안 올림, 정상)
+    await renderWith(true); // 재오픈 — 이미 커밋됐으니 재조회 생략(1회차 그대로)
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // 재시도 버튼 — 새 요청(2번째 mock 분기, pending)을 낸다.
+    const retryBtn = Array.from(document.body.querySelectorAll('button'))
+      .find((b) => b.textContent === koMessages.chats.approvalRequestTossPartialRetry);
+    await act(async () => { retryBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    await renderWith(false); // 응답 오기 前에 닫음 — 「이미 커밋된 상태로 재오픈했던」 렌더의
+    // cleanup이 이번엔 실제로 등록돼 있어야 한다(구코드 회귀 지점).
+
+    // 그제서야 옛 재시도 응답 도착 — 조용히 버려져야 한다.
+    await act(async () => { resolveRetry({ ok: true, json: async () => ({ data: [staleRetryCandidate], total: 1 }) }); });
+
+    await renderWith(true); // 재오픈 — 옛 재시도가 무효화됐으니 다시 부름(3번째 mock 분기)이어야 한다.
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(document.body.textContent).toContain('최종 방');
+    expect(document.body.textContent).not.toContain('옛 재시도 방');
+  });
 });
 
 // story #3203(선생님 실사고·2026-08-29) — 참가자 이름 해석 실패(BE orphan 폴백, name=null)

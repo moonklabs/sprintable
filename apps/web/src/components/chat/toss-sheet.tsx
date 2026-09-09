@@ -170,12 +170,17 @@ export function TossSheet({
     // 현재 순번까지 이미 반영(커밋)됐으면 재요청 생략 — "이미 다 불러온 목록"까지 열 때마다
     // 다시 부르면 재시도 버튼의 존재 의미가 없어진다. 아직 반영 안 됐으면(첫 열림이거나,
     // 진행 중이던 요청이 지난 닫힘에서 무효화됐거나) 무조건 새로 부른다.
-    if (loadedSeqRef.current === reqSeqRef.current) return;
-    loadConversations();
+    //
+    // story #3701(design CHANGES④, 페드루/카디르 재현, head 776cb4145) — 이 분기를 위의
+    // "재요청 생략" 조건에 걸어 조기 return 해버리면(예전 코드) cleanup 등록 자체를
+    // 건너뛴다. "이미 커밋된 데이터로 재오픈"한 렌더에서 재시도 버튼이 새 요청을 내고
+    // 응답 前에 닫으면, 그 닫힘엔 실행할 cleanup이 없어(직전 렌더가 cleanup을 아예 안
+    // 돌려줬으므로) reqSeqRef가 안 올라가고, 닫힌 동안 도착한 그 응답이 조용히 커밋된 뒤
+    // 재오픈이 "이미 커밋됨"으로 오판해 재조회를 또 생략한다 — "닫힘=미커밋 요청 무효화"
+    // 계약이 이 경로에서만 깨졌다. cleanup은 open인 한 매 렌더 항상 등록하고(무엇이 됐든
+    // 그 시점 최신 순번 기준으로 판단), "요청을 낼지" 여부만 별도로 분기한다.
+    if (loadedSeqRef.current !== reqSeqRef.current) loadConversations();
     return () => {
-      // story #3701(design CHANGES③, 페드루) — 닫힘 = 지금 진행 중인 요청(아직 커밋 전)을
-      // 무효화. 이미 커밋된 요청이면(loadedSeqRef가 현재 순번과 같으면) 건드리지 않아
-      // 재오픈 시 불필요한 재조회를 만들지 않는다.
       if (loadedSeqRef.current !== reqSeqRef.current) {
         reqSeqRef.current += 1;
       }
