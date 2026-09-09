@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
+from app.models.org_content_rule import OrgContentRule
 from app.services.content_rules import (
     ContentRulesVersionConflictError, get_org_content_rules, put_org_content_rules,
 )
@@ -42,10 +43,21 @@ async def _require_owner_or_admin(db: AsyncSession, auth: AuthContext, org_id: u
     return resolved
 
 
+class ContentRulesUpdatedBy(BaseModel):
+    member_id: uuid.UUID
+    name: str | None
+
+
 class ContentRulesResponse(BaseModel):
     org_id: uuid.UUID
     rules: dict
     version: int
+    # story #3747(ⓑ, 페드루 PO 確定 2026-09-09) — 지금까지 409 충돌 응답에서만
+    # 이름을 해소해 실었다(#3501). 화면 헤더 부제 「마지막 변경 {날짜}·{이름}」가
+    # 평상시(GET·PUT 성공)에도 이 값을 필요로 해 노출을 넓힌다 — 컬럼은 이미 있음
+    # (updated_at·updated_by_member_id, #3501), 새 필드 직렬화만.
+    updated_at: str | None = None
+    updated_by: ContentRulesUpdatedBy | None = None
 
 
 class GenerationBudgetRule(BaseModel):
@@ -117,9 +129,21 @@ class PutContentRulesRequest(BaseModel):
     expected_version: int
 
 
-class ContentRulesUpdatedBy(BaseModel):
-    member_id: uuid.UUID
-    name: str | None
+# story #3747(ⓑ, 페드루 PO 確定 2026-09-09) — GET·PUT 성공 응답 공용 조립. 409
+# 충돌 경로(#3501)와 같은 "이름은 있으면만 싣는다" 규율 — orphan 멤버라 해소
+# 실패하면 updated_by를 아예 안 싣는다(화면이 "누가"를 지어내지 않는다).
+async def _build_content_rules_response(
+    row: OrgContentRule, db: AsyncSession,
+) -> ContentRulesResponse:
+    updated_by = None
+    if row.updated_by_member_id is not None:
+        member = await resolve_member_identity(row.updated_by_member_id, row.org_id, db)
+        if member is not None:
+            updated_by = ContentRulesUpdatedBy(member_id=member.id, name=member.name)
+    return ContentRulesResponse(
+        org_id=row.org_id, rules=row.rules, version=row.version,
+        updated_at=row.updated_at.isoformat(), updated_by=updated_by,
+    )
 
 
 @router.get("/{org_id}/content-rules", response_model=ContentRulesResponse)
@@ -135,7 +159,7 @@ async def get_content_rules_endpoint(
     row = await get_org_content_rules(db, org_id=org_id)
     if row is None:
         return ContentRulesResponse(org_id=org_id, rules={}, version=0)
-    return ContentRulesResponse(org_id=row.org_id, rules=row.rules, version=row.version)
+    return await _build_content_rules_response(row, db)
 
 
 @router.put("/{org_id}/content-rules", response_model=ContentRulesResponse)
@@ -186,7 +210,7 @@ async def put_content_rules_endpoint(
                 "updated_by": updated_by.model_dump(mode="json") if updated_by else None,
             },
         ) from exc
-    return ContentRulesResponse(org_id=row.org_id, rules=row.rules, version=row.version)
+    return await _build_content_rules_response(row, db)
 
 
 class GenerationBudgetStatusResponse(BaseModel):

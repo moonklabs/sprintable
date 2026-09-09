@@ -183,7 +183,12 @@ async def test_owner_put_content_rules_reflected_in_get_and_version_plus_one():
         async with _client_for(app) as client:
             r_get0 = await client.get(f"/api/v2/organizations/{org_id}/content-rules")
             assert r_get0.status_code == 200, r_get0.text
-            assert r_get0.json() == {"org_id": str(org_id), "rules": {}, "version": 0}
+            # story #3747(ⓑ) — row가 아직 없으면(첫 GET) updated_at·updated_by 둘 다
+            # None(화면이 "누가"를 지어내지 않는다).
+            assert r_get0.json() == {
+                "org_id": str(org_id), "rules": {}, "version": 0,
+                "updated_at": None, "updated_by": None,
+            }
 
             r_put = await client.put(
                 f"/api/v2/organizations/{org_id}/content-rules",
@@ -195,6 +200,48 @@ async def test_owner_put_content_rules_reflected_in_get_and_version_plus_one():
             r_get1 = await client.get(f"/api/v2/organizations/{org_id}/content-rules")
         assert r_get1.json()["rules"]["banned_terms"] == ["테스트금칙"]
         assert r_get1.json()["version"] == 1
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+# story #3747(ⓑ, 페드루 PO 確定 2026-09-09) — 화면 헤더 부제 「마지막 변경 {날짜}·
+# {이름}」이 필요로 하는 값. 지금까지 409 충돌 응답에서만 이름을 해소했다(#3501) —
+# 평상시 GET·PUT 성공 응답에도 같은 해소가 실리는지 pin(⭐되돌리면 RED: updated_at·
+# updated_by를 응답에서 걷으면 이 테스트가 KeyError로 죽는다).
+@pytest.mark.anyio
+async def test_put_content_rules_populates_updated_at_and_updated_by():
+    from sqlalchemy import select
+
+    from app.main import app
+    from app.models.user import User
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            owner_id = await _seed_human(s, org_id, role="owner")
+            owner_email = (await s.execute(
+                select(User.email).where(User.id == owner_id)
+            )).scalar_one()
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+        async with _client_for(app) as client:
+            r_put = await client.put(
+                f"/api/v2/organizations/{org_id}/content-rules",
+                json={"rules": {"tone": "친근하게"}, "expected_version": 0},
+            )
+            assert r_put.status_code == 200, r_put.text
+            put_body = r_put.json()
+            assert put_body["updated_at"] is not None
+            assert put_body["updated_by"]["name"] == owner_email
+
+            r_get = await client.get(f"/api/v2/organizations/{org_id}/content-rules")
+        get_body = r_get.json()
+        # PUT 응답과 그 뒤 GET 응답이 같은 행을 본다 — updated_at·updated_by가 일치.
+        assert get_body["updated_at"] == put_body["updated_at"]
+        assert get_body["updated_by"]["member_id"] == put_body["updated_by"]["member_id"]
+        assert get_body["updated_by"]["name"] == owner_email
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
@@ -511,7 +558,11 @@ async def test_cross_org_rules_isolated():
         _setup_org_scoped_app(app, Session, org_b, user_id=owner_b)
         async with _client_for(app) as client:
             r_get_b = await client.get(f"/api/v2/organizations/{org_b}/content-rules")
-        assert r_get_b.json() == {"org_id": str(org_b), "rules": {}, "version": 0}
+        # story #3747(ⓑ) — org_b는 PUT된 적 없어(row 없음) updated_at·updated_by None.
+        assert r_get_b.json() == {
+            "org_id": str(org_b), "rules": {}, "version": 0,
+            "updated_at": None, "updated_by": None,
+        }
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
