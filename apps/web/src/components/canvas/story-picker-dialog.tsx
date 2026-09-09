@@ -4,15 +4,22 @@ import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { parseCursorMeta } from '@/lib/pagination';
 
 interface StoryPickerItem { id: string; title: string }
 
-async function fetchJson<T>(url: string): Promise<T | null> {
+// story #3706(FE 완전성-정직) — 예전엔 이 helper가 `json.data`만 반환하고 meta를
+// 통째로 버려서, 소비처(아래)가 meta.hasMore를 읽을 자리 자체가 없었다(board-bridge-modal.tsx는
+// 읽을 자리는 있는데 안 읽는 갭이었던 것과 달리, 여기는 한 단계 더한 갭). data/meta를
+// 봉투째 반환하도록 시그니처를 바꾼다 — 이 함수는 이 파일에서만 쓰여(grep 확認) 다른
+// 소비처 영향 0.
+async function fetchJson<T>(url: string): Promise<{ data: T; meta: unknown } | null> {
   try {
     const res = await fetch(url);
     if (!res.ok) return null;
-    const json = (await res.json()) as { data?: T };
-    return json.data ?? null;
+    const json = (await res.json()) as { data?: T; meta?: unknown };
+    if (json.data === undefined) return null;
+    return { data: json.data, meta: json.meta };
   } catch {
     return null;
   }
@@ -44,6 +51,8 @@ export function StoryPickerDialog({ open, onOpenChange, projectId, onSelect, all
   const [query, setQuery] = useState('');
   const [stories, setStories] = useState<StoryPickerItem[]>([]);
   const [loading, setLoading] = useState(false);
+  // story #3706 — meta.hasMore일 때만 뜨는 조건부 한 줄(board-bridge-modal.tsx와 같은 낱말).
+  const [hasMore, setHasMore] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -56,7 +65,11 @@ export function StoryPickerDialog({ open, onOpenChange, projectId, onSelect, all
         const params = new URLSearchParams({ project_id: projectId, limit: '20' });
         if (query.trim()) params.set('q', query.trim());
         const result = await fetchJson<StoryPickerItem[]>(`/api/stories?${params.toString()}`);
-        if (!cancelled) { setStories(result ?? []); setLoading(false); }
+        if (!cancelled) {
+          setStories(result?.data ?? []);
+          setHasMore(parseCursorMeta(result?.meta, 'StoryPickerDialog stories').hasMore);
+          setLoading(false);
+        }
       })();
     }, 250);
     return () => { cancelled = true; clearTimeout(handle); };
@@ -96,6 +109,9 @@ export function StoryPickerDialog({ open, onOpenChange, projectId, onSelect, all
             ))
           )}
         </div>
+        {!loading && hasMore ? (
+          <p className="px-1 pt-1 text-xs text-muted-foreground">{t('storyPickerMoreResults')}</p>
+        ) : null}
 
         {/* story #0692d5a7 — allowSkip 소비처에서만 「스토리 없이 만들기」. 스토리 0개면 이게
             데드엔드(닫기밖에 없던 자리)를 대체하는 유일한 진행 경로·스토리가 있으면 목록 아래

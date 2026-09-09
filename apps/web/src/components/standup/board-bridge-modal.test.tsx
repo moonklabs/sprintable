@@ -34,8 +34,8 @@ const BOARD_2: BoardBridgeBoard = { projectId: 'p2', projectName: 'Landing' };
 let container: HTMLDivElement;
 let root: Root;
 
-function stubStories(rows: BoardBridgeStory[]) {
-  fetchWithAuthMock.mockResolvedValue({ ok: true, json: async () => ({ data: rows }) });
+function stubStories(rows: BoardBridgeStory[], meta: { hasMore: boolean; nextCursor: string | null } = { hasMore: false, nextCursor: null }) {
+  fetchWithAuthMock.mockResolvedValue({ ok: true, json: async () => ({ data: rows, meta }) });
 }
 
 async function selectBoard(projectId: string = BOARD.projectId) {
@@ -257,5 +257,47 @@ describe('BoardBridgeModal — 디바운스 창 정직성(story #3703 CHANGES, �
 
     await act(async () => { await vi.advanceTimersByTimeAsync(250); });
     expect(document.body.textContent).toContain('보드1 스토리 v2'); // 이번 왕복 «자신의» 새 응답이 도착한 後에만 정착.
+  });
+});
+
+// story #3706(FE 완전성-정직) — limit=40 오버페치로 프록시가 항상 주는 meta.hasMore를
+// 예전엔 json?.data만 읽고 버렸다 — 일치가 40건을 넘어도 검색 상자가 있다는 이유만으로
+// "이게 전부"로 보였다. hasMore 조건부 한 줄 왕복 검증.
+describe('BoardBridgeModal — hasMore 조건부 한 줄(story #3706)', () => {
+  it('meta.hasMore=true면 「더 있음」 한 줄이 뜬다', async () => {
+    stubStories([story('s1', '보드1 스토리')], { hasMore: true, nextCursor: 's99' });
+    await act(async () => {
+      root.render(wrap(
+        <BoardBridgeModal open onOpenChange={() => {}} boards={[BOARD]} alreadySelectedIds={[]} onSelectStory={() => {}} />,
+      ));
+    });
+    await selectBoard();
+    await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+    expect(document.body.textContent).toContain(koMessages.standup.bridgeMoreResults);
+  });
+
+  it('meta.hasMore=false면 뜨지 않는다', async () => {
+    stubStories([story('s1', '보드1 스토리')], { hasMore: false, nextCursor: null });
+    await act(async () => {
+      root.render(wrap(
+        <BoardBridgeModal open onOpenChange={() => {}} boards={[BOARD]} alreadySelectedIds={[]} onSelectStory={() => {}} />,
+      ));
+    });
+    await selectBoard();
+    await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+    expect(document.body.textContent).not.toContain(koMessages.standup.bridgeMoreResults);
+  });
+
+  it('meta 자체가 없어도(규약 밖 응답) 죽지 않고 "더 없음"으로 안전하게 낙하한다(parseCursorMeta 위임)', async () => {
+    fetchWithAuthMock.mockResolvedValue({ ok: true, json: async () => ({ data: [story('s1', '보드1 스토리')] }) });
+    await act(async () => {
+      root.render(wrap(
+        <BoardBridgeModal open onOpenChange={() => {}} boards={[BOARD]} alreadySelectedIds={[]} onSelectStory={() => {}} />,
+      ));
+    });
+    await selectBoard();
+    await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+    expect(document.body.textContent).not.toContain(koMessages.standup.bridgeMoreResults);
+    expect(document.body.textContent).toContain('보드1 스토리');
   });
 });

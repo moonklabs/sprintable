@@ -12,6 +12,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { OperatorSelect } from '@/components/ui/operator-control';
 import { fetchWithAuth } from '@/lib/db/client';
+import { parseCursorMeta } from '@/lib/pagination';
 
 export interface BoardBridgeStory {
   id: string;
@@ -56,6 +57,11 @@ export function BoardBridgeModal({ open, onOpenChange, boards, alreadySelectedId
   // 창). loadedKey=「이 (보드,질의) 조합의 응답이 실제로 도착했다」를 별도로 추적해
   // settled로만 렌더 분기한다(loading 플래그 단독 신뢰 안 함).
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
+  // story #3706(FE 완전성-정직) — /api/stories 프록시(cursor 분기)는 limit=40 오버페치로
+  // meta.hasMore를 항상 준다(route.ts, buildCursorPageMeta). 예전엔 json?.data만 읽고
+  // 이 값을 버려서, 일치가 40건을 넘어도 검색 상자가 있다는 이유만으로 "이게 전부"처럼
+  // 보였다 — hasMore일 때만 뜨는 조건부 한 줄로 그 갭을 닫는다.
+  const [hasMore, setHasMore] = useState(false);
 
   useEffect(() => {
     if (!open) {
@@ -64,6 +70,7 @@ export function BoardBridgeModal({ open, onOpenChange, boards, alreadySelectedId
       setStories([]);
       setLoadError(null);
       setLoadedKey(null);
+      setHasMore(false);
     }
   }, [open]);
 
@@ -80,7 +87,7 @@ export function BoardBridgeModal({ open, onOpenChange, boards, alreadySelectedId
     // settled=false」다 — 그래서 이 effect가 재실행되는 매 순간(=의존성이 바뀔 때마다)
     // 첫 줄에서 무효화한다. 「완전 해제」도 이 재실행에 포함되므로 별도 처리가 필요 없다.
     setLoadedKey(null);
-    if (!selectedBoardId) { setStories([]); return; }
+    if (!selectedBoardId) { setStories([]); setHasMore(false); return; }
     let cancelled = false;
     // story-picker-dialog.tsx와 동형 — setLoading을 디바운스 콜백 안에 둬 effect 본문
     // 동기 setState를 피한다(react-hooks/set-state-in-effect).
@@ -93,10 +100,13 @@ export function BoardBridgeModal({ open, onOpenChange, boards, alreadySelectedId
         try {
           const res = await fetchWithAuth(`/api/stories?${params.toString()}`);
           if (!res.ok) throw new Error('failed to load stories');
-          const json = await res.json().catch(() => null) as { data?: BoardBridgeStory[] } | null;
-          if (!cancelled) setStories(json?.data ?? []);
+          const json = await res.json().catch(() => null) as { data?: BoardBridgeStory[]; meta?: unknown } | null;
+          if (!cancelled) {
+            setStories(json?.data ?? []);
+            setHasMore(parseCursorMeta(json?.meta, 'BoardBridgeModal stories').hasMore);
+          }
         } catch {
-          if (!cancelled) setLoadError(t('bridgeLoadFailed'));
+          if (!cancelled) { setLoadError(t('bridgeLoadFailed')); setHasMore(false); }
         } finally {
           if (!cancelled) {
             setLoading(false);
@@ -154,23 +164,28 @@ export function BoardBridgeModal({ open, onOpenChange, boards, alreadySelectedId
               ) : stories.length === 0 ? (
                 <p className="text-sm text-muted-foreground">{query.trim() ? t('bridgeSearchNoResults') : t('bridgeNoStories')}</p>
               ) : (
-                <div className="focus-inset max-h-64 space-y-1.5 overflow-y-auto">
-                  {stories.map((story) => {
-                    const alreadyAdded = alreadySelectedIds.includes(story.id);
-                    return (
-                      <button
-                        key={story.id}
-                        type="button"
-                        disabled={alreadyAdded}
-                        onClick={() => selectedBoard && onSelectStory(story, selectedBoard)}
-                        className="flex w-full items-center justify-between gap-2 rounded-lg border border-border/70 bg-background p-2.5 text-left transition hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        <span className="min-w-0 flex-1 truncate text-sm text-foreground">{story.title}</span>
-                        <Badge variant="outline">{alreadyAdded ? t('bridgeAlreadyAdded') : story.status}</Badge>
-                      </button>
-                    );
-                  })}
-                </div>
+                <>
+                  <div className="focus-inset max-h-64 space-y-1.5 overflow-y-auto">
+                    {stories.map((story) => {
+                      const alreadyAdded = alreadySelectedIds.includes(story.id);
+                      return (
+                        <button
+                          key={story.id}
+                          type="button"
+                          disabled={alreadyAdded}
+                          onClick={() => selectedBoard && onSelectStory(story, selectedBoard)}
+                          className="flex w-full items-center justify-between gap-2 rounded-lg border border-border/70 bg-background p-2.5 text-left transition hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <span className="min-w-0 flex-1 truncate text-sm text-foreground">{story.title}</span>
+                          <Badge variant="outline">{alreadyAdded ? t('bridgeAlreadyAdded') : story.status}</Badge>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {hasMore ? (
+                    <p className="mt-2 text-center text-xs text-muted-foreground">{t('bridgeMoreResults')}</p>
+                  ) : null}
+                </>
               )}
             </div>
           ) : null}
