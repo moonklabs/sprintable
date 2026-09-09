@@ -88,12 +88,22 @@ export function TossSheet({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [alreadyThereIds, setAlreadyThereIds] = useState<Set<string>>(new Set());
-  const fetchedRef = useRef(false);
-  const cancelledRef = useRef(false);
+  // story #3701(design CHANGES③, 페드루 — 카디르 QA 재현) — `fetchedRef`(한 번 불렀나)·
+  // `cancelledRef`(취소됐나) 두 공유 불리언으로 "어느 요청이 현재인가"를 표현하면 둘 다
+  // 완료 시점에만 리셋되는 래치라, 닫음(요청 pending)→재오픈(응답 미도착)→첫 응답 도착
+  // 순서에서 재오픈이 fetchedRef===true로 조기 return(새 요청 없음)하고 뒤늦은 첫 응답도
+  // cancelToken=true라 setLoading(false)를 못 불러 시트가 스켈레톤에 영구 고착됐다.
+  // 요청마다 순번(reqSeqRef)을 매겨 "이 응답이 아직 최신 요청의 것인지"를 직접 판별하고,
+  // 마지막으로 커밋(성공 반영)된 순번(loadedSeqRef)으로 "지금 순번까지 이미 반영됐는지"를
+  // 판별한다 — 늦게 도착한 응답은 상태를 건드리지 않고 조용히 버려지고, 재오픈 시점에
+  // 아직 반영 안 된 순번(진행 중이던 요청이 무효화됐거나 애초에 없었던 경우)이면 새로
+  // 부른다. 재시도 도중 닫힘도 같은 축으로 커버된다(재시도가 커밋 못 한 채 닫히면
+  // loadedSeqRef가 최신 순번을 못 따라가 재오픈 시 다시 부른다).
+  const reqSeqRef = useRef(0);
+  const loadedSeqRef = useRef(-1);
 
   const loadConversations = useCallback(() => {
-    cancelledRef.current = false;
-    const cancelToken = cancelledRef;
+    const mySeq = ++reqSeqRef.current;
     setLoading(true);
     setPartial(false);
     // story #3701 — `/api/conversations`는 has_more/next_cursor가 아니라 offset+total
@@ -140,18 +150,16 @@ export function TossSheet({
         if (all.length >= total) break;
         if (page === MAX_PAGES - 1) sawPartial = true;
       }
-      if (cancelToken.current) {
-        // story #3701(design CHANGES②, 유나) — 로드 도중 시트가 닫히면 여기서 그냥
-        // return하면 setLoading(false)를 영원히 못 불러 "영원한 스켈레톤"으로 굳는다
-        // (닫혀 있으니 안 보일 뿐, 다시 열어도 fetchedRef가 true라 재요청 자체가 없었다).
-        // fetchedRef를 되돌려 **다음 열림에서 처음부터 다시 로드**하게 한다 — "다시
-        // 열면 다시 부른다"가 "멈춘 채 아무것도 안 보여준다"보다 정직하다.
-        fetchedRef.current = false;
+      if (mySeq !== reqSeqRef.current) {
+        // story #3701(design CHANGES③, 페드루) — 그새 시트가 닫혔거나(cleanup이 새 순번을
+        // 만듦) 재시도 버튼이 새 요청을 냈다. 이 응답은 더 이상 최신이 아니니 상태를 건드리지
+        // 않고 조용히 버린다 — 안 그러면 늦게 도착한 옛 응답이 최신 요청의 결과를 덮어쓴다.
         return;
       }
       setConversations(all);
       setPartial(sawPartial);
       setLoading(false);
+      loadedSeqRef.current = mySeq;
     })();
   }, [projectId]);
 
@@ -159,11 +167,18 @@ export function TossSheet({
     if (!open) return;
     setError(null);
     setSelectedId(null);
-    if (fetchedRef.current) return;
-    fetchedRef.current = true;
+    // 현재 순번까지 이미 반영(커밋)됐으면 재요청 생략 — "이미 다 불러온 목록"까지 열 때마다
+    // 다시 부르면 재시도 버튼의 존재 의미가 없어진다. 아직 반영 안 됐으면(첫 열림이거나,
+    // 진행 중이던 요청이 지난 닫힘에서 무효화됐거나) 무조건 새로 부른다.
+    if (loadedSeqRef.current === reqSeqRef.current) return;
     loadConversations();
     return () => {
-      cancelledRef.current = true;
+      // story #3701(design CHANGES③, 페드루) — 닫힘 = 지금 진행 중인 요청(아직 커밋 전)을
+      // 무효화. 이미 커밋된 요청이면(loadedSeqRef가 현재 순번과 같으면) 건드리지 않아
+      // 재오픈 시 불필요한 재조회를 만들지 않는다.
+      if (loadedSeqRef.current !== reqSeqRef.current) {
+        reqSeqRef.current += 1;
+      }
     };
   }, [open, loadConversations]);
 
@@ -226,16 +241,26 @@ export function TossSheet({
             placeholder={t('approvalRequestTossSearchPlaceholder')}
           />
         </div>
-        <div className="max-h-72 overflow-y-auto px-2 pb-2">
-          {error ? <p role="alert" aria-live="assertive" className="px-2 pb-2 text-[11px] text-foreground">{error}</p> : null}
-          {!loading && partial ? (
-            <div className="mb-1.5 flex items-center justify-between gap-2 rounded-lg bg-muted px-2.5 py-1.5 text-[11px] text-muted-foreground">
+        {/* story #3701(design 재-review, 페드루/유나) — 배너는 "목록 전체"에 대한 사실이라
+            스크롤 영역 안에 있으면 후보가 늘어날 때 스크롤과 함께 시야 밖으로 밀려난다
+            (하우스 선례 storyComparePartialNotice와 동형 — 목록 밖·위에 고정). 후보가 0건일
+            땐 partial EmptyState가 같은 안내+재시도를 이미 말하므로 배너는 숨긴다(중복 문구·
+            중복 재시도 버튼 방지). */}
+        {!loading && partial && candidates.length > 0 ? (
+          <div className="px-4">
+            <div
+              data-testid="toss-partial-notice"
+              className="mb-1.5 flex items-center justify-between gap-2 rounded-lg bg-muted px-2.5 py-1.5 text-[11px] text-muted-foreground"
+            >
               <span>{t('approvalRequestTossPartialBanner')}</span>
               <button type="button" onClick={loadConversations} className="shrink-0 font-medium text-foreground underline underline-offset-2">
                 {t('approvalRequestTossPartialRetry')}
               </button>
             </div>
-          ) : null}
+          </div>
+        ) : null}
+        <div className="max-h-72 overflow-y-auto px-2 pb-2">
+          {error ? <p role="alert" aria-live="assertive" className="px-2 pb-2 text-[11px] text-foreground">{error}</p> : null}
           {loading ? (
             <div className="h-16 animate-pulse rounded-lg bg-muted" />
           ) : candidates.length === 0 ? (
