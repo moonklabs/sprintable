@@ -127,18 +127,13 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
 
 export function useToast(): ToastContextValue {
   const ctx = useContext(ToastContext);
-  // story #3759 — Provider가 있으면(실 앱 — dashboard-shell.tsx가 항상 최상단에서 감쌈)
-  // 그 공유 목록을 그대로 쓴다. 아래 로컬 useState/useCallback은 Provider가 «없을 때만»
-  // 쓰이는 폴백이지만, 조건부로 훅을 부르면(hooks 규칙 위반) 안 되므로 항상 호출은 하고
-  // 값만 고른다 — Provider가 있는 정상 경로에선 이 로컬 상태가 그냥 버려진다(공유 목록이
-  // 항상 그 자리를 대신하므로 낭비되는 리렌더 없음, setState가 한 번도 안 불림).
-  //
-  // 이 폴백이 존재하는 이유: 이 파일 밖 약 39곳의 격리 단위테스트(DashboardShell 없이
-  // 컴포넌트 하나만 단독 마운트)가 예전 local-useState 계약을 그대로 가정한다 — 그
-  // 자리에서 fail-closed로 죽이면 이 리팩터의 실제 스코프(우하단 배치 통합)와 무관한
-  // 파일 39곳을 전부 고쳐야 한다. 실 앱(Provider 항상 有)에서는 이 폴백 경로 자체가
-  // 실행되지 않으므로 원래 결함(31곳 분산)은 그대로 해소된 채다 — 폴백은 "테스트
-  // 격리 편의"이지 프로덕션 안전판이 아니다.
+  // story #3759(페드루 PO 지적, #4106 재검토) — 이전 판은 Provider 밖에서도 로컬 useState로
+  // «조용히 성공»했다. 오늘은 39곳 호출부가 전부 DashboardShell 자식이라 안 터지지만,
+  // 내일 로그인/초대/공개 페이지에서 useToast()를 부르면 addToast가 허공에 쌓이고(아무도
+  // 안 그림) 에러 0으로 사라진다 — fail-silent. 이제 폴백은 테스트 환경(`NODE_ENV===
+  // 'test'`, vitest 기본값)에서만 산다. 프로덕션에선 즉시 throw(fail-closed) — 훅 규칙상
+  // 조건부로 훅을 못 부르므로 로컬 useState/useCallback 자체는 여전히 무조건 호출하고,
+  // «반환값»만 환경에 따라 고른다(호출은 항상 같은 순서 — hooks 규칙 준수).
   const [localToasts, setLocalToasts] = useState<ToastItem[]>([]);
   const localAddToast = useCallback((toast: Omit<ToastItem, 'id'>) => {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -148,7 +143,10 @@ export function useToast(): ToastContextValue {
     setLocalToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
   if (ctx) return ctx;
-  return { toasts: localToasts, addToast: localAddToast, dismissToast: localDismissToast };
+  if (process.env.NODE_ENV === 'test') {
+    return { toasts: localToasts, addToast: localAddToast, dismissToast: localDismissToast };
+  }
+  throw new Error('useToast must be used within <ToastProvider> (dashboard-shell.tsx)');
 }
 
 export function ToastContainer({
@@ -167,9 +165,23 @@ export function ToastContainer({
   // 카드 스택이다.
   // 컬럼 자체는 pointer-events-none(빈 공간 클릭 통과)이라 실제 카드가 있는 이 자리는
   // pointer-events-auto로 되돌린다.
+  //
+  // story #3759 CHANGES(페드루 PO 지적, #4106) — 컬럼이 min-h-0으로 실제 예산을 갖게 되면서
+  // (bottom-dock.tsx), 토스트가 너무 많이 쌓이면 이 스택이 넘치는 몫을 진다(패널은
+  // shrink-0로 안 줄어듦). 넘칠 때 잘려야 하는 건 «가장 오래된» 토스트다(어차피 5~8초면
+  // 사라질 항목 — 방금 연 패널이나 방금 뜬 새 토스트를 밀어내는 것보다 이쪽이 맞다).
+  // `toasts` 배열은 오래된→새것 순(addToast가 끝에 붙인다)인데, 그대로 flex-col로
+  // 렌더하면 «오래된 게 위·새것이 아래»가 되어 overflow-hidden이 새것(아래쪽, main-axis
+  // 끝)을 자른다 — 반대다. 배열을 뒤집어 DOM을 새것-먼저로 만들고 flex-col-reverse를
+  // 쓰면: 새것(1번째 DOM 자식)이 main-start(컬럼 하단 쪽)에 고정되고, 오래된 것들이
+  // 그 위로 갈수록 밀려 올라가 컨테이너 상단 밖으로 먼저 넘친다 — 정상 범위(안 넘칠 때)의
+  // 시각 순서(오래된 위·새것 아래)는 그대로 유지하면서(flex-col-reverse가 그 배치를
+  // 재현), 넘칠 때만 오래된 쪽이 먼저 잘린다. min-h-0(flex 기본 min-height:auto가
+  // 내용만큼 안 줄어드는 것 해제)+overflow-hidden이 실제 클리핑을 발생시킨다.
+  const newestFirst = [...toasts].reverse();
   return (
-    <div className="pointer-events-auto flex flex-col gap-2">
-      {toasts.map((t) => (
+    <div className="pointer-events-auto flex min-h-0 flex-col-reverse gap-2 overflow-hidden">
+      {newestFirst.map((t) => (
         <Toast key={t.id} item={t} onDismiss={onDismiss} />
       ))}
     </div>

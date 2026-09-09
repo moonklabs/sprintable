@@ -7,11 +7,11 @@
 // AC4 — data-testid로 우회하지 않는다: 여기서 쓰는 셀렉터는 [role="alert"]/[role="status"]
 // 자체다. 접근성 속성이 곧 셀렉터라는 것을 테스트 스스로 증명한다.
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { act } from 'react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, Component } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
-import { ToastContainer, type ToastItem } from './toast';
+import { ToastContainer, ToastProvider, useToast, type ToastItem } from './toast';
 import koMessages from '../../../messages/ko.json';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -115,5 +115,115 @@ describe('Toast 접근성 (story #2096)', () => {
     expect(el?.className).toContain('shadow-[var(--elev-overlay)]');
     expect(el?.className).toContain('border-proof-line-strong');
     expect(el?.className).not.toContain('shadow-lg');
+  });
+
+  // story #3759 CHANGES(페드루 PO 지적, #4106) — 컬럼이 min-h-0 예산을 갖게 되면서 토스트
+  // 스택이 넘치는 몫을 진다(overflow-hidden). 잘려야 하는 건 «가장 오래된» 토스트다. jsdom엔
+  // 레이아웃 엔진이 없어 실제 클리핑(픽셀)은 못 재지만(로컬 puppeteer 실측은
+  // bottom-dock.tsx 코드 주석 참고 — 375×667·패널 열림·토스트 5장에서 최신은 항상 스택
+  // 자기 박스 안에 남고 오래된 것부터 그 박스 밖으로 밀려남을 실측 확認), «DOM 순서가
+  // 실제로 새것-먼저인가»는 jsdom이 그대로 잴 수 있는 실제 값이다 — flex-col-reverse가
+  // 그 DOM 순서를 «오래된 게 위·새것이 아래»라는 정상 시각 순서로 되돌리고, overflow가
+  // 나면 DOM 뒤쪽(오래된 것들)부터 컨테이너 박스 밖으로 밀려 잘린다.
+  it('DOM 자식 순서가 새것-먼저다(newest-first) — 되돌리면(toasts 그대로 매핑) 이 assertion이 실패한다', async () => {
+    const items = [
+      toast({ id: 'oldest', title: '오래된' }),
+      toast({ id: 'middle', title: '중간' }),
+      toast({ id: 'newest', title: '새것' }),
+    ];
+    await act(async () => {
+      root.render(wrap(<ToastContainer toasts={items} onDismiss={() => {}} />));
+    });
+    const rendered = [...container.querySelectorAll('[role]')].map((el) => el.textContent);
+    expect(rendered).toEqual([expect.stringContaining('새것'), expect.stringContaining('중간'), expect.stringContaining('오래된')]);
+  });
+
+  it('컨테이너 wrapper가 flex-col-reverse + min-h-0 + overflow-hidden이다(정상 시각 순서 유지 + 넘치면 자름)', async () => {
+    await act(async () => {
+      root.render(wrap(<ToastContainer toasts={[toast({ id: 't1' }), toast({ id: 't2' })]} onDismiss={() => {}} />));
+    });
+    const wrapperEl = container.querySelector('[role]')?.parentElement;
+    expect(wrapperEl?.className).toContain('flex-col-reverse');
+    expect(wrapperEl?.className).toContain('min-h-0');
+    expect(wrapperEl?.className).toContain('overflow-hidden');
+  });
+});
+
+// story #3759(페드루 PO 지적, #4106 재검토) — useToast()가 <ToastProvider> 밖에서 불려도
+// 예전 판은 로컬 useState로 «조용히 성공»했다(fail-silent — addToast가 허공에 쌓이고
+// 아무도 안 그린다, 에러 0). 지금은 그 폴백이 테스트 환경(NODE_ENV==='test', vitest
+// 기본값)에서만 살고, 그 외(=프로덕션)엔 즉시 throw한다. 이 describe는 그 계약 셋을
+// 직접 고정한다 — «가드(양성대조): Provider 없이 마운트한 컴포넌트가 non-test 환경
+// 흉내에서 throw」 요구를 정확히 충족.
+class ToastErrorBoundary extends Component<
+  { children: React.ReactNode; onError: (msg: string) => void },
+  { caught: boolean }
+> {
+  state = { caught: false };
+  static getDerivedStateFromError() {
+    return { caught: true };
+  }
+  componentDidCatch(err: unknown) {
+    this.props.onError(err instanceof Error ? err.message : String(err));
+  }
+  render() {
+    return this.state.caught ? null : this.props.children;
+  }
+}
+
+function ProbeUseToast() {
+  useToast();
+  return <div data-testid="probe-ok" />;
+}
+
+describe('useToast() Provider 계약(story #3759)', () => {
+  it('<ToastProvider> 안에서는 공유 Context를 그대로 반환한다(에러 0)', async () => {
+    let caughtMsg: string | null = null;
+    await act(async () => {
+      root.render(wrap(
+        <ToastProvider>
+          <ToastErrorBoundary onError={(m) => { caughtMsg = m; }}>
+            <ProbeUseToast />
+          </ToastErrorBoundary>
+        </ToastProvider>,
+      ));
+    });
+    expect(caughtMsg).toBeNull();
+    expect(container.querySelector('[data-testid="probe-ok"]')).not.toBeNull();
+  });
+
+  it('Provider 밖 + 테스트 환경(NODE_ENV=test, vitest 기본값)에서는 로컬 폴백으로 조용히 통과한다(에러 0 — 39곳 격리 단위테스트 계약)', async () => {
+    expect(process.env.NODE_ENV).toBe('test'); // 전제 확認 — vitest 기본값
+    let caughtMsg: string | null = null;
+    await act(async () => {
+      root.render(wrap(
+        <ToastErrorBoundary onError={(m) => { caughtMsg = m; }}>
+          <ProbeUseToast />
+        </ToastErrorBoundary>,
+      ));
+    });
+    expect(caughtMsg).toBeNull();
+    expect(container.querySelector('[data-testid="probe-ok"]')).not.toBeNull();
+  });
+
+  it('Provider 밖 + non-test 환경(프로덕션 흉내)에서는 즉시 throw한다(fail-closed — 양성대조)', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    let caughtMsg: string | null = null;
+    // 렌더 에러는 콘솔에도 찍힌다 — 이 테스트의 의도된 소음이므로 일시적으로 죽여 로그를 깔끔히.
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await act(async () => {
+        root.render(wrap(
+          <ToastErrorBoundary onError={(m) => { caughtMsg = m; }}>
+            <ProbeUseToast />
+          </ToastErrorBoundary>,
+        ));
+      });
+    } finally {
+      consoleErrorSpy.mockRestore();
+      vi.unstubAllEnvs();
+    }
+    expect(caughtMsg).toBe('useToast must be used within <ToastProvider> (dashboard-shell.tsx)');
+    expect(container.querySelector('[data-testid="probe-ok"]')).toBeNull();
   });
 });

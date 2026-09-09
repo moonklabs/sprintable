@@ -125,14 +125,20 @@ export function SupportWidgetLauncher() {
         // story #3759 — 패널도 fixed/bottom 회피 상수 0: 이 컴포넌트가 반환하는 Fragment의
         // 두 번째 자식이라, BottomDock의 flex-col-reverse 컬럼 안에서 버튼(첫 자식) «위»에
         // 자동으로 쌓인다(DOM 순서=버튼 먼저·패널 나중 → col-reverse라 나중 자식이 위).
-        // 높이 상한은 이제 "런처를 피하기 위한 계산"이 아니라 "패널 자신이 뷰포트를 못
-        // 넘는다"는 단순 안전판(6rem = 컬럼 gap+런처 높이+상단 여백 어림, 정밀 측정 불요 —
-        // flexbox가 나머지를 알아서 쌓는다).
+        //
+        // story #3759 CHANGES(유나 定+페드루 判, #4106) — 높이는 h-(고정)가 아니라
+        // max-h-(상한)다: 컬럼 자신이 이제 max-h 예산을 갖는데(bottom-dock.tsx), 패널이
+        // «고정» 높이를 고집하면 토스트가 그 예산을 나눠 가지려 할 때 패널이 밀려 올라가
+        // 뷰포트 위로 넘칠 수 있었다(375×667·토스트 1장에서 top -31, #3756이 세운
+        // "패널 top ≥ 0" 회귀). max-h + shrink-0(밀려도 절대 안 줄어듦 — 사용자가 지금
+        // 보고 있는 패널을 찌그러뜨리지 않는다) 조합이면, 컬럼이 좁아질 때 패널은
+        // 요구한 자리를 그대로 지키고 대신 토스트 스택 쪽이 넘치는 몫을 진다(같은 파일
+        // ToastContainer의 min-h-0 overflow-hidden 참고 — 낡은 토스트가 잘린다).
         <div
           id={PANEL_ID}
           role="dialog"
           aria-label={t('panelTitle')}
-          className="pointer-events-auto flex h-[min(480px,calc(100vh-var(--bottom-dock-inset)-6rem))] w-[360px] max-w-[calc(100vw-2.5rem)] flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl"
+          className="pointer-events-auto flex max-h-[min(480px,calc(100vh-var(--bottom-dock-inset)-6rem))] w-[360px] max-w-[calc(100vw-2.5rem)] shrink-0 flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl"
         >
           <SupportWidgetPanelHeader onClose={() => setOpen(false)} />
           <SupportWidgetPanelBody session={session} />

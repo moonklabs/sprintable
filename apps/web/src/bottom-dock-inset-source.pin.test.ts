@@ -94,3 +94,38 @@ describe('<ToastContainer> 렌더 자리 전수 1(story #3759 AC1) — 셸(Botto
     expect(content).toContain('<BottomDock />');
   });
 });
+
+// story #3759 CHANGES(유나 定+페드루 判, #4106) — 컬럼에 높이 예산이 없어 토스트가 쌓일수록
+// 패널이 뷰포트 위로 밀려났다(375×667·토스트 1장에서 패널 top -31, #3756이 세운 "패널
+// top ≥ 0" 회귀). 처방 3곳(컬럼 max-h+min-h-0 · 패널 shrink-0+max-h- · 토스트 스택
+// min-h-0+overflow-hidden)을 소스 텍스트 수준에서 고정 — 셋 중 하나라도 되돌리면 이 describe가
+// RED(jsdom엔 레이아웃 엔진이 없어 실제 겹침/클리핑 자체는 못 재므로, 로컬 puppeteer 실측
+// 수치는 bottom-dock.tsx의 코드 주석에 남긴다 — doc-editor.tsx의 기존 관례와 동형).
+describe('BottomDock 높이 예산 3종(story #3759 CHANGES, #4106) — 패널 top ≥ 0 회귀가드', () => {
+  it('bottom-dock.tsx 컬럼이 max-h 예산과 min-h-0을 갖는다(예산 없이 무한정 자라지 않는다)', () => {
+    const content = read('src/components/nav/bottom-dock.tsx');
+    expect(content).toContain('max-h-[calc(100vh-var(--bottom-dock-inset)-2rem)]');
+    expect(content).toContain('min-h-0');
+  });
+
+  it('support-widget-launcher.tsx 패널이 shrink-0 + max-h-(고정 h- 아님)다(밀려도 안 찌그러짐)', () => {
+    const content = read('src/components/support-widget/support-widget-launcher.tsx');
+    expect(content).toContain('shrink-0');
+    expect(content).toContain('max-h-[min(480px,calc(100vh-var(--bottom-dock-inset)-6rem))]');
+    // 옛 고정 h-[...] 리터럴이 되돌아오면(패널이 다시 "고정" 높이를 고집하면) 잡는다.
+    // (\b는 "max-h"의 "-h" 앞에서도 걸려 오탐하므로, 따옴표/공백 뒤에 바로 오는 단독
+    // "h-[min(..." 토큰인지를 직접 요구한다 — "max-h-["는 그 앞이 "x-"라 안 걸린다.)
+    expect(content).not.toMatch(/(?:"|\s)h-\[min\(480px,calc\(100vh-var\(--bottom-dock-inset\)-6rem\)\)\]/);
+  });
+
+  it('toast.tsx ToastContainer가 min-h-0 + overflow-hidden + flex-col-reverse로 스스로 넘치는 몫을 진다', () => {
+    const content = read('src/components/ui/toast.tsx');
+    expect(content).toContain('min-h-0 flex-col-reverse gap-2 overflow-hidden');
+  });
+
+  it('toast.tsx ToastContainer가 렌더 전 배열을 뒤집는다(새것-DOM-먼저 — 안 그러면 col-reverse가 최신을 자른다)', () => {
+    const content = read('src/components/ui/toast.tsx');
+    expect(content).toMatch(/\[\.\.\.toasts\]\.reverse\(\)/);
+    expect(content).toMatch(/newestFirst\.map\(/);
+  });
+});
