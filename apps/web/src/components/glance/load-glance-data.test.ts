@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { loadGlanceData } from './load-glance-data';
 
-function jsonResponse(data: unknown): Response {
-  return { ok: true, json: async () => ({ data }) } as Response;
+function jsonResponse(data: unknown, meta?: unknown): Response {
+  return { ok: true, json: async () => ({ data, meta: meta ?? null }) } as Response;
 }
 
 function mockEmptyFetch() {
@@ -28,7 +28,7 @@ describe('loadGlanceData (§10 데이터 소스 4종 단순 1회 fetch — dedup
     // story #2224(선생님 정정 2026-07-30): collaboration·events·activeEpicTitle 필드 삭제(소비처
     // CollaborationMap·LiveStream·glance-board.tsx가 /glance 삭제와 함께 전부 죽은 코드였다).
     expect(data).toEqual({
-      roadmap: [], totalEpicCount: 0, heroStory: null, memberMap: {}, attentionSignals: [], heroEnvelope: null,
+      roadmap: [], totalEpicCount: 0, roadmapPartial: null, heroStory: null, memberMap: {}, attentionSignals: [], heroEnvelope: null,
       // codex-silent-defect-sweep D-7 — 진짜 빈 데이터(fetch 성공, 내용 0건)는 partialErrors가
       // 전부 false여야 한다(fetch 실패와 구분되는 것이 이 필드의 존재 이유). story #2298: `stories`
       // 필드는 그 fetch 자체가 없어져 이 타입에서 삭제됐다.
@@ -280,5 +280,63 @@ describe('loadGlanceData (§10 데이터 소스 4종 단순 1회 fetch — dedup
     // story #2224: 고정 엔드포인트 수가 5→4로 줄었다(activity-logs 제거) — epics+glance·
     // overview·members·attention.
     expect(vi.mocked(fetch).mock.calls.length).toBe(8); // 4 endpoints × 2 calls
+  });
+});
+
+// story #3705 — `/api/goals?order_by=position`은 limit(최대 100)까지만 로드하는데, 예전엔
+// 로드분 수(`arc.totalCount`)를 "전체 개수"로 불러 에픽이 100건 넘는 프로젝트에서 "전체
+// 100개"로 조용히 단정했다(#4049/#4052/#4054와 동류). route.ts가 이제 meta.totalCount(BE
+// X-Total-Count)를 실으니 그걸 우선 쓴다.
+describe('loadGlanceData — totalEpicCount·roadmapPartial 완결성 정직화(story #3705)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function fetchWithGoals(goalsResponse: Response) {
+    return vi.fn(async (url: string) => {
+      if (url.startsWith('/api/goals')) return goalsResponse;
+      if (url.startsWith('/api/dashboard/overview')) return jsonResponse({ project_status: { epics: [] } });
+      if (url.startsWith('/api/team-members')) return jsonResponse([]);
+      if (url.startsWith('/api/glance/attention')) return jsonResponse({ items: [] });
+      return jsonResponse([]);
+    });
+  }
+
+  it('에픽 100건 로드·meta.totalCount=150 — totalEpicCount=150(로드분 아님)·roadmapPartial={shown:100,total:150}(되돌리면 실패)', async () => {
+    const epics = Array.from({ length: 100 }, (_, i) => ({
+      id: `e${i}`, title: `Epic ${i}`, status: 'active', created_at: '2026-07-01T00:00:00Z', participant_ids: [], focal_story: null,
+    }));
+    vi.stubGlobal('fetch', fetchWithGoals(jsonResponse(epics, { totalCount: 150 })));
+
+    const data = await loadGlanceData('proj-150');
+
+    expect(data.totalEpicCount).toBe(150);
+    // shown=로드분(fetch가 실제로 받아온 100건) — 아크 시각화 창(§9 bound=8)이 그중 일부만
+    // 화면에 그리는 것과는 별개 축(그건 이 story와 무관한 기존 의도된 동작).
+    expect(data.roadmapPartial).toEqual({ shown: 100, total: 150 });
+  });
+
+  it('에픽 40건·meta.totalCount=40(전량 로드) — roadmapPartial=null(무회귀)', async () => {
+    const epics = Array.from({ length: 40 }, (_, i) => ({
+      id: `e${i}`, title: `Epic ${i}`, status: 'active', created_at: '2026-07-01T00:00:00Z', participant_ids: [], focal_story: null,
+    }));
+    vi.stubGlobal('fetch', fetchWithGoals(jsonResponse(epics, { totalCount: 40 })));
+
+    const data = await loadGlanceData('proj-40');
+
+    expect(data.totalEpicCount).toBe(40);
+    expect(data.roadmapPartial).toBeNull();
+  });
+
+  it('meta.totalCount가 없으면(계약 위반) 로드분으로 graceful degrade하되 roadmapPartial=null(잘림 여부를 안다고 거짓말 안 함)', async () => {
+    const epics = Array.from({ length: 5 }, (_, i) => ({
+      id: `e${i}`, title: `Epic ${i}`, status: 'active', created_at: '2026-07-01T00:00:00Z', participant_ids: [], focal_story: null,
+    }));
+    vi.stubGlobal('fetch', fetchWithGoals(jsonResponse(epics))); // meta 없음
+
+    const data = await loadGlanceData('proj-no-meta');
+
+    expect(data.totalEpicCount).toBe(5); // 옛 동작으로 최선의 하한(로드분)
+    expect(data.roadmapPartial).toBeNull(); // "안 잘렸다"가 아니라 "모른다" — 그래도 null로 표현
   });
 });
