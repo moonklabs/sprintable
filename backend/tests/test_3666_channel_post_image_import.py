@@ -197,10 +197,13 @@ async def test_import_image_invalid_base64_returns_400():
 
 
 @pytest.mark.anyio
-async def test_import_image_undecodable_bytes_returns_422_same_as_confirm():
-    """content_type은 image/*로 통과해도 실제로 디코드 불가능한 바이트면(진짜 이미지가
-    아닌 쓰레기 bytes) confirm과 동일하게 422 CHANNEL_IMAGE_UNDECODABLE — 에러 매핑을
-    `_confirm_image_upload_or_raise`로 공유한다는 것의 직접 증거(신규 매핑 사본 0)."""
+async def test_import_image_undecodable_bytes_returns_422_image_corrupt():
+    """story #3753 — content_type은 image/*로 통과해도 실제로 디코드 불가능한 바이트면
+    (진짜 이미지가 아닌 쓰레기 bytes) 이제 confirm까지 안 가고 저장 直前 관문
+    (validate_image_bytes)에서 즉시 422 IMAGE_CORRUPT로 막힌다 — visual_artifacts.py::
+    import_image_artifact와 동일 코드(들쭉날쭉 금지, AC2). #3753 이전엔 이 케이스가
+    (put_object로 실제 GCS에 쓴 뒤) confirm 내부 PIL 디코드에서 뒤늦게 잡혀
+    CHANNEL_IMAGE_UNDECODABLE이었다 — 이제는 저장 자체를 안 한다(고아 객체 0)."""
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -216,7 +219,56 @@ async def test_import_image_undecodable_bytes_returns_422_same_as_confirm():
             draft_id = await _create_draft(client, org_id=org_id, connection_id=connection_id, story_id=story_id)
             r = await _import_image(client, org_id, draft_id, b"garbage-not-a-real-image-payload", content_type="image/png")
         assert r.status_code == 422, r.text
-        assert (r.json().get("error") or r.json())["code"] == "CHANNEL_IMAGE_UNDECODABLE"
+        assert (r.json().get("error") or r.json())["code"] == "IMAGE_CORRUPT"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_import_image_rejects_structurally_corrupted_png_before_storage():
+    """AC2 양성대조 — 실사고(artifact b3f60ca8)와 동형으로 손상된 PNG(유효 시그니처+IHDR+
+    첫 IDAT 4096B까지 정상, 그 다음 청크 타입이 깨짐)는 422 IMAGE_CORRUPT로 거절되고
+    ChannelPostImage 행이 하나도 생기지 않는다(저장 0 — put_object 호출 前에 걸린다는
+    것의 직접 증거, 되돌리면 이 요청이 201로 통과한다)."""
+    import struct
+    import zlib
+
+    from app.main import app
+    from app.models.channel_post_image import ChannelPostImage
+    from sqlalchemy import select
+
+    def _chunk(chunk_type: bytes, data: bytes) -> bytes:
+        return (
+            struct.pack(">I", len(data)) + chunk_type + data
+            + struct.pack(">I", zlib.crc32(chunk_type + data) & 0xFFFFFFFF)
+        )
+
+    signature = b"\x89PNG\r\n\x1a\n"
+    ihdr = _chunk(b"IHDR", struct.pack(">IIBBBBB", 4, 4, 8, 2, 0, 0, 0))
+    idat = _chunk(b"IDAT", zlib.compress(b"\x00" * 100)[:4096].ljust(4096, b"\x00"))
+    corrupted = signature + ihdr + idat + struct.pack(">I", 100) + b"\x7f\x9f\x00\x00"
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id)
+            story_id = await _seed_story(s, org_id, project_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+        async with _client_for(app) as client:
+            draft_id = await _create_draft(client, org_id=org_id, connection_id=connection_id, story_id=story_id)
+            r = await _import_image(client, org_id, draft_id, corrupted, content_type="image/png")
+        assert r.status_code == 422, r.text
+        assert (r.json().get("error") or r.json())["code"] == "IMAGE_CORRUPT"
+
+        async with Session() as verify_session:
+            rows = (await verify_session.execute(
+                select(ChannelPostImage).where(ChannelPostImage.draft_id == uuid.UUID(draft_id))
+            )).scalars().all()
+        assert rows == []
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()

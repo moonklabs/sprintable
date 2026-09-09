@@ -761,16 +761,23 @@ _TOOL_DEFS: list[tuple] = [
      " source는 \"created\"(기본) 또는 \"imported\"만 허용(다른 값은 422).",
      CreateArtifactInput, create_artifact),
     ("sprintable_import_image_artifact",
-     "[일감] base64 이미지 한 번으로 업로드+artifact 생성을 원콜로 처리(story b6b9c52d) —"
+     "[일감] 이미지 한 번으로 업로드+artifact 생성을 원콜로 처리(story b6b9c52d·#3753) —"
      " Bash/HTTP 클라이언트 접근이 없어 sprintable_create_artifact의 2단계 curl 플로우를 스스로"
-     " 못 타는 에이전트 전용 대안. ⭐스크린샷/시안/아이콘 등 **작은** 이미지 증거를 산출물로 남길"
-     " 때 이 도구로 — 단, image_base64는 도구 호출 인자 텍스트로 그대로 실리므로 호출하는 에이전트"
-     " 자신의 최대 출력 토큰 한도가 실질 상한이다(대략 수백 KB 이하 이미지 권장). BE 자체는"
-     " 최대 20MB까지 받지만, 그보다 큰 이미지는 이 도구로 못 보내니 Bash/HTTP 클라이언트가 있는"
-     " 에이전트라면 sprintable_create_artifact의 2단계 curl 플로우를 대신 쓴다."
-     " content_type은 image/*여야 함(아니면 422). story_id/doc_id(선택, sprintable_create_artifact와"
-     " 동형) — 맥락이 있으면 잇는 것을 권장, standalone도 정당. 반환은 get_artifact와 동형"
-     " artifact 상세(FE-import와 동일하게 렌더).",
+     " 못 타는 에이전트 전용 대안."
+     " ⭐파일이 로컬에 있으면 image_path를 써라(서버가 직접 읽어 바이트 정확 전송 — 모델 출력을"
+     " 안 거친다). image_base64는 파일시스템이 없는 에이전트 전용 대안이다 — 도구 호출 인자"
+     " 텍스트로 그대로 실리므로 호출하는 에이전트 자신이 그 base64 문자열을 «다시 타이핑»해야"
+     " 하고, 그 재타이핑 과정에서 오탈자 몇 자만 생겨도 이미지가 깨진 채로 저장된다(실사고"
+     " 확認·story #3753) — 대략 수백 KB 이하의 작은 이미지에만 쓰고, 그보다 크면 image_path나"
+     " sprintable_create_artifact의 2단계 curl 플로우(Bash/HTTP 클라이언트 전용, BE 자체 상한"
+     " 20MB)를 대신 쓴다. image_base64/image_path는 상호 배타(정확히 하나)."
+     " content_type은 image_base64 사용 시 필수(image/*여야 함, 아니면 422) — image_path는"
+     " 생략하면 확장자/매직 바이트로 자동 추정(판별 실패 시 오류, 직접 지정도 가능)."
+     " 저장 직전 이미지 구조를 서버가 검증한다(매직 바이트·PNG 청크·디코드) — 깨진 이미지는"
+     " 422 IMAGE_CORRUPT+사유로 거절되고 저장되지 않는다(사유를 그대로 돌려주니 다시 시도)."
+     " story_id/doc_id(선택, sprintable_create_artifact와 동형) — 맥락이 있으면 잇는 것을"
+     " 권장, standalone도 정당. 반환은 get_artifact와 동형 artifact 상세(FE-import와 동일하게"
+     " 렌더).",
      ImportImageArtifactInput, import_image_artifact),
     ("sprintable_get_artifact",
      "[일감] 시각 산출물 단건 조회(latest 버전 + nodes). ⭐편집/코멘트/핀 작업 전 먼저 현재 상태(노드"

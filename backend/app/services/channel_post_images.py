@@ -286,7 +286,13 @@ async def import_channel_post_image(
     대신, 서버가 그냥 자기 손으로(신뢰된 서버측 자격증명, signed-URL 우회) `_object_path`
     스코프에 바로 쓰고 confirm_channel_post_image_upload를 그대로 재사용한다(검증/변환/
     해시/봉인 로직 사본 0 — content_type은 오브젝트 키 확장자에만 쓰이고, 실제 포맷/
-    규격 검증은 confirm 내부의 PIL 디코드가 그대로 한다, 이 함수는 새 검증을 안 얹는다)."""
+    규격 검증은 confirm 내부의 PIL 디코드가 그대로 한다, 이 함수는 새 검증을 안 얹는다).
+
+    story #3753 — 이 함수 진입 前에 라우터(`channel_posts.py::post_channel_post_image_import`)가
+    `validate_image_bytes`(매직+PNG 청크 walk+PIL)를 이미 통과시킨다 — 그래서 이 함수가
+    받는 `image_bytes`는 원칙적으로 여기 `put_object` 시점에 이미 구조가 검증된 상태다.
+    confirm의 PIL 디코드는 그대로 남아 있다(3단계 업로드-URL/PUT/confirm 플로우는 브라우저가
+    직접 GCS에 쓰므로 이 사전 관문을 안 거친다 — confirm이 그 경로의 유일한 방어선)."""
     bucket = _require_bucket()
     ext = _MIME_TO_EXT.get(content_type, "bin")
     object_path = _object_path(org_id=org_id, draft_id=draft_id, ext=ext)

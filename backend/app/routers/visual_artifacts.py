@@ -16,6 +16,7 @@ from app.dependencies.database import get_db
 from app.models.asset import Asset
 from app.services.artifact_image_url import _canonicalize_props, sign_image_srcs_in_nodes
 from app.services.asset_registry import DEFAULT_CONTAINER
+from app.services.image_integrity import ImageIntegrityError, validate_image_bytes
 from app.services.storage import get_storage_provider
 from app.models.visual_artifact import (
     ArtifactComment, ArtifactExport, ArtifactNode, ArtifactSpecPin, ArtifactVersion, VisualArtifact,
@@ -213,7 +214,10 @@ async def import_image_artifact(
     api/visual-artifacts/import-image/route.ts)의 서버사이드 GCS 업로드 로직을 포팅하고, 그 뒤를
     이어 `create_artifact()`를 내부 함수 호출로 그대로 재사용(DB write 로직 사본 발명 0 — 두
     갈래가 다시 어긋나면 create_artifact 한쪽만 고치고 여기를 잊는 사고가 난다는 뜻이니, 이
-    엔드포인트를 건드릴 땐 그 함수도 같이 봐야 한다)."""
+    엔드포인트를 건드릴 땐 그 함수도 같이 봐야 한다).
+
+    story #3753 — GCS 업로드(`put_object`) 直前에 `validate_image_bytes`를 통과해야 한다
+    (매직 바이트·PNG 청크 walk·PIL 디코드). 실패하면 저장 자체를 안 한다(고아 객체 0)."""
     if not body.content_type.startswith("image/"):
         return _err("VALIDATION_ERROR", "content_type must be an image/* type", 400)
     try:
@@ -222,6 +226,10 @@ async def import_image_artifact(
         return _err("VALIDATION_ERROR", "image_base64 is not valid base64", 400)
     if len(image_bytes) > _MAX_IMPORT_IMAGE_BYTES:
         return _err("VALIDATION_ERROR", "image too large (max 20MB)", 413)
+    try:
+        validate_image_bytes(body.content_type, image_bytes)
+    except ImageIntegrityError as exc:
+        return _err("IMAGE_CORRUPT", exc.reason, 422)
 
     org_id, project_id = scope["org_id"], scope["project_id"]
     if not org_id:

@@ -5,6 +5,7 @@ C2-S6(story 0edca31e, 코멘트 왕복)+C3-S7(story 940266db, 편집 왕복)+C4-
 다른 리스크 클래스. deleted_at 타임스탬프 플립일 뿐 자식 row 물리삭제 없음)."""
 from __future__ import annotations
 
+import base64
 from typing import Literal
 
 from mcp.types import TextContent
@@ -141,10 +142,18 @@ class ImportImageArtifactInput(SprintableInput):
     텍스트로 그대로 실려 나가므로, 호출하는 에이전트 자신의 최대 출력 토큰 한도가 실질
     상한이다 — 작은 스케치/아이콘(대략 수백 KB 이하) 용도로 한정. 그보다 큰 이미지(최대
     20MB까지 BE는 받음)는 create_artifact 자체 설명에 있는 2단계 curl 플로우(Bash/HTTP
-    클라이언트가 있는 에이전트 전용)를 계속 쓴다."""
+    클라이언트가 있는 에이전트 전용)를 계속 쓴다.
+
+    story #3753 — image_base64의 근본 결함: 모델이 base64 문자열을 «다시 타이핑»해
+    싣는 통로라 바이트 정확 전송 보장이 없다(실사고: artifact b3f60ca8, 청크 프레이밍
+    붕괴로 저장). Bash 없이도 **로컬 파일시스템**은 있는 에이전트(이 MCP 서버 자체가
+    에이전트 머신의 로컬 프로세스, api_client.py로 HTTP만)를 위해 image_path를 추가 —
+    서버가 파일을 직접 읽어(open().read(), 모델 출력 0) base64 인코딩까지 자체 처리한다.
+    image_base64/image_path는 상호 배타(둘 다 지정·둘 다 미지정 모두 오류)."""
     title: str
-    image_base64: str
-    content_type: str
+    image_base64: str | None = None
+    image_path: str | None = None  # story #3753 — 로컬 파일 경로(바이트 정확, 모델 리타이핑 0)
+    content_type: str | None = None  # image_path만 주어지면 확장자/매직으로 추정(미판별 시 오류)
     story_id: str | None = None
     doc_id: str | None = None
 
@@ -185,14 +194,70 @@ async def create_artifact(args: CreateArtifactInput) -> list[TextContent]:
         return err(str(exc))
 
 
+# story #3753 — BE _MAX_IMPORT_IMAGE_BYTES(visual_artifacts.py)와 동일 상한 로컬 미러(이
+# 파일 안에서만 쓰는 로컬 상수 — MCP는 별도 프로세스라 app.* import 불가, 기존 GCS host
+# 문자열 중복 관례와 동형).
+_MAX_IMPORT_IMAGE_BYTES = 20 * 1024 * 1024
+
+_MAGIC_SNIFF: tuple[tuple[bytes, str], ...] = (
+    (b"\x89PNG\r\n\x1a\n", "image/png"),
+    (b"\xff\xd8\xff", "image/jpeg"),
+    (b"GIF8", "image/gif"),
+)
+
+
+def _sniff_content_type(path: str, data: bytes) -> str | None:
+    """story #3753 AC1 — image_path에 content_type 미지정 시 확장자 우선, 매직 바이트
+    보조로 추정. 둘 다 실패하면 None(호출부가 오류로 거절 — 추측해서 잘못 태그하지 않는다)."""
+    import mimetypes
+
+    guessed, _ = mimetypes.guess_type(path)
+    if guessed and guessed.startswith("image/"):
+        return guessed
+    for magic, content_type in _MAGIC_SNIFF:
+        if data.startswith(magic):
+            return content_type
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
 async def import_image_artifact(args: ImportImageArtifactInput) -> list[TextContent]:
-    """base64 이미지 한 번으로 업로드+artifact 생성을 원콜로 묶는다(story b6b9c52d) — BE
-    `/import-image`가 GCS 업로드부터 create_artifact 위임까지 내부에서 전부 처리, 반환은
-    get_artifact/list_artifacts와 동형 artifact 상세(FE-import(source="imported")와 동일 렌더)."""
+    """base64 이미지(또는 로컬 파일 경로) 한 번으로 업로드+artifact 생성을 원콜로 묶는다
+    (story b6b9c52d·#3753) — BE `/import-image`가 GCS 업로드부터 create_artifact 위임까지
+    내부에서 전부 처리, 반환은 get_artifact/list_artifacts와 동형 artifact 상세
+    (FE-import(source="imported")와 동일 렌더).
+
+    story #3753 — image_path(권장, 바이트 정확)와 image_base64(파일시스템 없는 에이전트용,
+    모델이 문자열을 리타이핑하는 통로라 손상 가능)는 상호 배타."""
     try:
-        body: dict = {
-            "title": args.title, "image_base64": args.image_base64, "content_type": args.content_type,
-        }
+        if bool(args.image_base64) == bool(args.image_path):
+            return err("image_base64와 image_path 중 정확히 하나만 지정해야 합니다.")
+
+        if args.image_path:
+            from pathlib import Path
+
+            path = Path(args.image_path)
+            if not path.is_file():
+                return err(f"image_path가 존재하는 일반 파일이 아닙니다: {args.image_path}")
+            data = path.read_bytes()
+            if len(data) > _MAX_IMPORT_IMAGE_BYTES:
+                return err(
+                    f"image_path 파일이 너무 큽니다({len(data)}B > {_MAX_IMPORT_IMAGE_BYTES}B, 최대 20MB)."
+                )
+            content_type = args.content_type or _sniff_content_type(args.image_path, data)
+            if not content_type:
+                return err(
+                    "image_path 파일의 content_type을 판별할 수 없습니다 — content_type을 직접 지정하세요."
+                )
+            image_base64 = base64.b64encode(data).decode()
+        else:
+            if not args.content_type:
+                return err("image_base64 사용 시 content_type은 필수입니다.")
+            image_base64 = args.image_base64
+            content_type = args.content_type
+
+        body: dict = {"title": args.title, "image_base64": image_base64, "content_type": content_type}
         if args.story_id:
             body["story_id"] = args.story_id
         if args.doc_id:
