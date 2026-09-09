@@ -7,11 +7,14 @@ events 관례 그대로 — 조회용 요약 테이블, 강제 조인 이유 0).
 
 ⚠️페드루 PO 지시(2026-09-09 07:28Z) — 미르코 #4079(3734, 0356_site_channel_post_
 drafts_soft_delete)와 revision 0356이 충돌해 #4079를 먼저 착지시키기로(선생님 급)
-0357·down_revision="0355"(임시)로 재번호했다. #4079 착지 뒤 develop 리베이스하며
-down_revision을 "0356"으로 한 번 더 고칠 것 — 지금은 과도기 상태.
+0357로 재번호했다. down_revision은 "0356"(#4079가 develop에 아직 안 착지한 지금은
+alembic sibling-collision 가드가 RED가 정상 — #4079 착지 뒤 rebase 한 번이면
+그린으로 정리된다). 페드루 PO 추가 지시(07:54Z) — #4079의 dual-head 대칭 가드가
+#4076이 0357(down 0355)로 열려 있는 한 #4079를 영원히 RED로 잡아 down을 다시
+"0356"으로 되돌림(과도기 down=0355는 폐기).
 
 Revision ID: 0357
-Revises: 0355
+Revises: 0356
 Create Date: 2026-09-09
 """
 from __future__ import annotations
@@ -22,7 +25,7 @@ from sqlalchemy.dialects import postgresql
 from alembic import op
 
 revision = "0357"
-down_revision = "0355"
+down_revision = "0356"
 branch_labels = None
 depends_on = None
 
