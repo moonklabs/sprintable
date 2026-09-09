@@ -39,15 +39,19 @@ export interface GlanceData {
   // 그 로드분 수를 "전체 개수"로 부르면 에픽이 100건을 넘는 프로젝트에서 "전체 100개"로
   // 조용히 단정하게 된다(#4049/#4052/#4054와 동류). BE가 응답 meta.totalCount로 진짜 총계를
   // 주게 됐으니(route.ts) 그걸 우선 쓴다 — BE가 계약 위반으로 그 값을 못 주는 드문 경우만
-  // 로드분으로 graceful degrade한다(그 경우의 "모른다"는 이 숫자가 아니라 `roadmapPartial`이
+  // 로드분으로 graceful degrade한다(그 경우의 "모른다"는 이 숫자가 아니라 `roadmapEpicCount`가
   // 대신 말한다 — 아래 참고).
   totalEpicCount: number;
-  // story #3705 — 로드분(`roadmap.length`)이 진짜 총계에 못 미치면(즉 100건 초과로 잘렸으면)
-  // {shown, total}을 싣는다. 로드분이 전량이거나 총계를 아예 모르면 null — "잘렸다"와 "안
-  // 잘렸다"와 "모른다" 셋을 구분한다(0/모름을 섞지 않는 house 관례). caller가 "M개 중 N개
-  // 표시" 또는 "더 있음" 안내를 붙일지 판단하는 재료 — 이 파일은 신호만 만들고, 렌더는
-  // caller 몫(이 story의 선언 범위 밖).
-  roadmapPartial: { shown: number; total: number } | null;
+  // 유나 design CHANGES②(PR #4059, 2026-09-09) — 예전 `roadmapPartial: {shown,total}|null`은
+  // "잘렸다"·"안 잘렸다"·"모른다" 셋을 구분한다고 주석에 적어 놓고 실제 값은 둘뿐이었다
+  // (null이 "안 잘림"과 "모름"을 겸함 — #4051이 고친 바로 그 클래스가 이 파일에 재발).
+  // 3상태 union으로 판별자를 명시한다 — 'exact'(총계를 알고 로드분이 그 총계)·'partial'
+  // (총계를 알고 로드분이 못 미침)·'unknown'(총계 자체를 모름, false/0으로 위장 안 함).
+  // caller(story #3710)가 kind로 분기해 "M개 중 N개"/"더 있음"/(문구 생략)을 그린다.
+  roadmapEpicCount:
+    | { kind: 'exact'; total: number }
+    | { kind: 'partial'; shown: number; total: number }
+    | { kind: 'unknown'; shown: number };
   // E-GLANCE 2D 재설계(dee92c96): hero = 현재(active) 에픽의 focal 활성 story·없으면 null(hero 미표시).
   heroStory: HeroStory | null;
   memberMap: Record<string, HeroMember>;
@@ -102,7 +106,7 @@ export async function loadGlanceData(projectId: string): Promise<GlanceData> {
     // (story #3703 정정 — "전량로드"가 아니다). story #3705 — 100건 넘는 프로젝트에서 이
     // fetch 자체는 여전히 잘리지만(그 자체의 근본 처방은 limit 자체를 없애거나 페이지네이션
     // 이어달리기를 붙이는 더 큰 별건), 이제 route.ts가 진짜 총계(meta.totalCount)를 같이
-    // 실어줘서 아래 `totalEpicCount`/`roadmapPartial`이 그 잘림을 "전체"라고 단정하지 않고
+    // 실어줘서 아래 `totalEpicCount`/`roadmapEpicCount`가 그 잘림을 "전체"라고 단정하지 않고
     // 정직하게 반영한다.
     // story #2298/#2303: include=glance — participant_ids/focal_story를 같은 응답에 싣는다.
     fetchJson(`/api/goals?project_id=${projectId}&limit=100&order_by=position&include=glance`),
@@ -125,7 +129,8 @@ export async function loadGlanceData(projectId: string): Promise<GlanceData> {
   // 싣는다. `arc.totalCount`(로드분 수, 예전 결함)가 아니라 이 값을 진짜 총계로 우선한다.
   // BE가 계약 위반으로 못 주면(드문 경우) null — totalEpicCount는 로드분으로 최선의
   // graceful degrade를 하되(FlowLane 등 기존 소비처 타입 breaking 없음), 그 "모른다"는
-  // 사실 자체는 roadmapPartial=null로 따로 정직하게 남는다(잘림 여부를 안다고 거짓말 안 함).
+  // 사실 자체는 roadmapEpicCount.kind='unknown'으로 따로 정직하게 남는다(잘림 여부를
+  // 안다고 거짓말 안 함).
   //
   // ⛔`arc.totalCount`(로드분, fetch가 실제로 받아온 건수)와 `roadmap.length`(아크가 시각화
   // 창 폭(§9 bound=8)으로 한 번 더 줄인 표시분)를 혼동하지 않는다 — 아크 windowing은 이
@@ -135,11 +140,17 @@ export async function loadGlanceData(projectId: string): Promise<GlanceData> {
   // 우리가 실제로 받아온 건수"뿐이다.
   const epicsMeta = (epicsJson && typeof epicsJson === 'object' ? (epicsJson as { meta?: unknown }).meta : null) as
     { totalCount?: number | null } | null;
-  const realTotalEpicCount = typeof epicsMeta?.totalCount === 'number' ? epicsMeta.totalCount : null;
-  const totalEpicCount = realTotalEpicCount ?? arc.totalCount;
-  const roadmapPartial = realTotalEpicCount !== null && realTotalEpicCount > arc.totalCount
-    ? { shown: arc.totalCount, total: realTotalEpicCount }
+  const realTotalEpicCount = typeof epicsMeta?.totalCount === 'number' && Number.isFinite(epicsMeta.totalCount)
+    ? epicsMeta.totalCount
     : null;
+  const totalEpicCount = realTotalEpicCount ?? arc.totalCount;
+  // 유나 design CHANGES②(PR #4059) — 판별자(kind)로 「총계를 안다」·「총계를 알고 잘렸다」·
+  // 「총계 자체를 모른다」 셋을 명시한다(예전 roadmapPartial=null이 뒤 둘을 겸했던 자리).
+  const roadmapEpicCount: GlanceData['roadmapEpicCount'] = realTotalEpicCount === null
+    ? { kind: 'unknown', shown: arc.totalCount }
+    : realTotalEpicCount > arc.totalCount
+      ? { kind: 'partial', shown: arc.totalCount, total: realTotalEpicCount }
+      : { kind: 'exact', total: realTotalEpicCount };
 
   const memberRows = unwrap<{ id: string; name: string; type?: string }[]>(membersJson) ?? [];
   const memberMap: Record<string, HeroMember> = {};
@@ -193,7 +204,7 @@ export async function loadGlanceData(projectId: string): Promise<GlanceData> {
   return {
     roadmap,
     totalEpicCount,
-    roadmapPartial,
+    roadmapEpicCount,
     heroStory,
     memberMap,
     attentionSignals,

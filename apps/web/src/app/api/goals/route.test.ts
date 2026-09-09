@@ -95,6 +95,20 @@ describe('/api/goals GET — position 모드 완결성 정직화(story #3705)', 
     expect(body.meta.hasMore).toBeNull();
   });
 
+  // 유나 design CHANGES①(PR #4059) — Number("abc")=NaN인데 `NaN === null`은 거짓이라
+  // 이 갈래를 놓치면 `hasMore=epics.length<NaN`이 false로 떨어지고, NaN은 JSON
+  // 직렬화에서 null이 돼 `{totalCount:null, hasMore:false}`("모르는데 확실하다")라는
+  // 성립 불가 봉투가 나간다. 헤더 없음(위 테스트)과 별개로, 있지만 숫자가 아닌 경우도 pin.
+  it('X-Total-Count 헤더가 숫자가 아니면(계약 위반) totalCount=null·hasMore=null(NaN이 false로 새지 않는다)', async () => {
+    h.proxyToFastapi.mockResolvedValue(fastapiOk([{ id: 'e0' }], { 'x-total-count': 'abc' }));
+
+    const res = await GET(new Request('http://localhost/api/goals?project_id=p&order_by=position&limit=100'));
+    const body = await res.json();
+
+    expect(body.meta.totalCount).toBeNull();
+    expect(body.meta.hasMore).toBeNull();
+  });
+
   it('limit을 요청 limit(≤100)으로 클램프해 업스트림에 보낸다(무제한 limit 우회 방지)', async () => {
     h.proxyToFastapi.mockResolvedValue(fastapiOk([], { 'x-total-count': '0' }));
 

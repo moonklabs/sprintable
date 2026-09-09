@@ -58,7 +58,15 @@ export async function GET(request: Request) {
       const totalHeader = _r.headers.get('x-total-count');
       // 총계를 못 받으면(계약 위반·프록시 실패) "이게 전부"라고 단정하지 않는다 — null(모름),
       // false로 위장하지 않는다.
-      const totalCount = totalHeader ? Number(totalHeader) : null;
+      //
+      // 유나 design CHANGES①(PR #4059, 2026-09-09) — `Number(totalHeader)`가 헤더 값이
+      // 숫자가 아닐 때(계약 위반) NaN이 되는데, `NaN === null`은 거짓이라 이 갈래를
+      // 못 잡고 `hasMore = epics.length < NaN`이 false로 떨어졌다. NaN은 JSON 직렬화에서
+      // null이 되므로 나가는 봉투가 `{totalCount:null, hasMore:false}`("총계는 모르는데
+      // 더 없는 건 확실하다") — 이 파일이 지키려는 "모르면 단정 안 함" 약속을 봉투 스스로
+      // 깨는 자리였다. Number.isFinite로 명시 가드해 숫자 아닌 헤더도 null로 통일한다.
+      const parsed = totalHeader === null ? null : Number(totalHeader);
+      const totalCount = parsed !== null && Number.isFinite(parsed) ? parsed : null;
       const hasMore = totalCount === null ? null : epics.length < totalCount;
       return apiSuccess(epics, { limit: pageInput.limit, hasMore, nextCursor: null, totalCount });
     }
