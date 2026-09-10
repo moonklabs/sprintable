@@ -47,6 +47,7 @@ from .tools.channel_posts import (
     GetPublicationInsightsInput, WithdrawChannelPostDraftInput,
     get_publication_insights, withdraw_channel_post_draft,
 )
+from .tools.content_rules import GetContentRulesInput, get_content_rules
 from .tools.decisions import RequestDecisionInput, request_decision
 from .tools.evidence import AddEvidenceInput, add_evidence
 from .tools.judgments import AddJudgmentInput, ListJudgmentsInput, add_judgment, list_judgments
@@ -1018,6 +1019,17 @@ _TOOL_DEFS: list[tuple] = [
      "미도래(pending)·실패(failed)면 null+사유. 한쪽이라도 미제공(null)인 지표는 델타도 "
      "null(0과 섞지 않음). 후속 스토리는 이 도구가 대신 안 만든다 — sprintable_add_story를 쓸 것.",
      GetPublicationInsightsInput, get_publication_insights),
+    # 조직 콘텐츠 규칙 읽기 — story #3769(2026-09-10). content_rules.py docstring(story
+    # #3471)이 약속한 「에이전트가 GET으로 읽는」 길의 MCP 표면. BE 신설 0(기존 GET 둘
+    # 병합). 초안 작성 전 먼저 호출하는 도구(create_channel_post_draft 계열)와 짝.
+    ("sprintable_get_content_rules",
+     "[조직] 조직 콘텐츠 규칙(참고 넷: tone·taxonomy·channel_priority·brand_kit + 기계검사 "
+     "둘: banned_terms·utm_rules/require_utm)과 생성 예산 상태(generation_budget_status)를 "
+     "함께 읽는다. 채널·사이트 글 초안을 쓰기 전에 먼저 이 도구를 불러 톤·택소노미·브랜드 "
+     "킷을 반영할 것 — 금칙어·UTM은 제출 시점에 서버가 기계로도 재검사하지만, 톤·택소노미· "
+     "채널 우선순위·브랜드 킷은 서버가 강제하지 않는 선언값이라 에이전트가 스스로 지켜야 "
+     "한다. 규칙을 한 번도 설정 안 한 조직은 rules:{}·version:0(빈 상태 그대로, 위반 아님).",
+     GetContentRulesInput, get_content_rules),
 ]
 
 for _name, _doc, _cls, _fn in _TOOL_DEFS:

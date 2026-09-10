@@ -83,12 +83,13 @@ def test_all_registered_tools_share_the_same_lockdown():
     추가로 122→123. story b6b9c52d(#2707 부수): sprintable_import_image_artifact 추가로
     123→124. story #3331: sprintable_list_conversations 추가로 124→125. story #3614:
     sprintable_withdraw_channel_post_draft 추가로 125→126. story #3651:
-    sprintable_get_publication_insights 추가로 126→127) 전부 arg_model이
+    sprintable_get_publication_insights 추가로 126→127. story #3769:
+    sprintable_get_content_rules 추가로 127→128) 전부 arg_model이
     extra=forbid로 잠겨 있어야 한다(상속 갈래 SprintableInput/BaseModel 안 가리고 전부)."""
     from sprintable_mcp import server as srv
 
     tools = srv.mcp._tool_manager.list_tools()
-    assert len(tools) == 127
+    assert len(tools) == 128
     unlocked = [
         t.name for t in tools
         if t.fn_metadata.arg_model.model_config.get("extra") != "forbid"

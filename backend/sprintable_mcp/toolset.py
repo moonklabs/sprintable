@@ -55,7 +55,9 @@ _GROUP_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     # story #3614 CHANGES가 "channel_post" 키워드로 최소 신설, story #3631이 백엔드
     # SSOT(app/services/mcp_toolset.py)와 동기화해 나머지 콘텐츠 도구 키워드로 완성.
     # "withdraw"는 의도적으로 제외(원본 주석 참고 — 미래 무관 도구 오분류 위험).
-    ("content", ("channel_post", "site_post", "channel_connection", "post_comment", "insight")),
+    # story #3769(2026-09-10): 백엔드 SSOT와 동기화 — sprintable_get_content_rules 신설.
+    ("content", ("channel_post", "site_post", "channel_connection", "post_comment", "insight",
+                 "content_rule")),
 ]
 
 _CORE = "core"
