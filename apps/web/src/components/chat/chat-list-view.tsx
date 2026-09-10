@@ -399,7 +399,10 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
       if (!append && projectId === projectIdRef.current) setLoadError(true);
       return false;
     } finally {
-      setLoading(false);
+      // 페드루 그라운딩(2026-09-10 12:34Z) — 위 loadError와 같은 축: A의 늦은 finally가
+      // B로 전환된 뒤 B의 loading을 조용히 꺼버리면(응답 도착 前인데도 "로딩 아님"으로
+      // 보임) B가 아직 안 왔는데도 순간 잘못된 화면(0건 등)이 뜬다.
+      if (projectId === projectIdRef.current) setLoading(false);
       setLoadingMore(false);
     }
   }, [projectId]);
@@ -426,7 +429,8 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
       if (!append && projectId === projectIdRef.current) setAgentLoadError(true);
     } finally {
       // story #3788(B-③ 후속) — agentLoading을 loading(my 탭)과 동형으로 finally에서 해소.
-      setAgentLoading(false);
+      // 페드루 그라운딩(2026-09-10 12:34Z) — 같은 stale-drop 가드를 loading 축에도.
+      if (projectId === projectIdRef.current) setAgentLoading(false);
     }
   }, [projectId]);
 
@@ -463,7 +467,16 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     router.push(`/chats/${conv.id}?${params.toString()}`);
   }, [t, router, projectId]);
 
-  useEffect(() => { void fetchConversations(0, false); }, [fetchConversations]);
+  // 카디르 QA(#4142) 뒤 페드루 그라운딩(2026-09-10 12:34Z) — 에이전트 탭의 project-switch
+  // 효과(아래)와 같은 형을 my 탭에도 미러. 예전엔 `fetchConversations`만 재호출해 새 응답이
+  // 오기 前까지 우측이 **이전 프로젝트**의 conversations.length를 그대로 단정했다(A 0건→B
+  // 있음으로 전환하면 순간 「대화가 없습니다」). 전환 즉시(fetchConversations identity가
+  // projectId 변경으로 바뀌는 매 순간) 목록을 비우고 로딩을 세운 뒤 새로 fetch한다.
+  useEffect(() => {
+    setConversations([]);
+    setLoading(true);
+    void fetchConversations(0, false);
+  }, [fetchConversations]);
 
   // perf(17960f86): agent 탭("전체/에이전트", include_agent_conversations=true)은 비기본 탭이라
   // mount 시 eager fetch(측정 ~663ms 낭비) 하지 않고, 사용자가 탭을 처음 열 때 1회만 lazy 로드.

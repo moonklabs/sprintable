@@ -802,3 +802,104 @@ describe('ChatListView — 실패 경로 stale-drop(story #3790 후속, 카디�
     expect(readRailCapture(container).error).toBe('false');
   });
 });
+
+describe('ChatListView — my 탭 project 전환 즉시 클리어+로딩(story #3790 후속 2, 페드루 그라운딩 12:34Z)', () => {
+  it('⭐project A(0건) → B로 전환 직후(B 응답 前) 우측이 "0건"으로 단정하지 않고 로딩을 말한다', async () => {
+    let resolveB: (() => void) | undefined;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/conversations/recent-outside-project')) {
+        return { ok: true, json: async () => ({ data: [] }) };
+      }
+      if (url.includes('project_id=proj-a') && url.includes('/api/conversations?') && !url.includes('include_agent_conversations=true')) {
+        return { ok: true, json: async () => ({ data: [], total: 0 }) };
+      }
+      if (url.includes('project_id=proj-b') && url.includes('/api/conversations?') && !url.includes('include_agent_conversations=true')) {
+        await new Promise<void>((resolve) => { resolveB = resolve; });
+        return { ok: true, json: async () => ({ data: [{ id: 'b1', type: 'dm', title: 'B 대화', latest_message: null, updated_at: '2026-09-10T00:00:00Z' }], total: 1 }) };
+      }
+      return { ok: false, status: 404, json: async () => null };
+    }));
+
+    await act(async () => {
+      root.render(wrap(
+        <ChatRailProvider>
+          <RailCapture />
+          <ChatListView projectId="proj-a" currentTeamMemberId="me-1" />
+        </ChatRailProvider>,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(readRailCapture(container).loading).toBe('false');
+    expect(readRailCapture(container).count).toBe('0');
+
+    await act(async () => {
+      root.render(wrap(
+        <ChatRailProvider>
+          <RailCapture />
+          <ChatListView projectId="proj-b" currentTeamMemberId="me-1" />
+        </ChatRailProvider>,
+      ));
+    });
+    // B의 fetch가 아직 resolveB에서 멈춰 있는 채로 — 우측은 A의 0건을 그대로 우기면 안 된다.
+    expect(resolveB).not.toBeUndefined();
+    const midSwitch = readRailCapture(container);
+    expect(midSwitch.loading).toBe('true');
+
+    await act(async () => { resolveB!(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    const settled = readRailCapture(container);
+    expect(settled.loading).toBe('false');
+    expect(settled.count).toBe('1');
+  });
+});
+
+describe('ChatListView — my 탭 finally의 stale-drop(story #3790 후속 2, 페드루 그라운딩)', () => {
+  it('⭐A pending 中 B로 전환(B도 pending) → A가 뒤늦게 성공해도 B의 로딩을 안 끈다', async () => {
+    let resolveA: (() => void) | undefined;
+    let resolveB: (() => void) | undefined;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/conversations/recent-outside-project')) {
+        return { ok: true, json: async () => ({ data: [] }) };
+      }
+      if (url.includes('project_id=proj-a') && url.includes('/api/conversations?') && !url.includes('include_agent_conversations=true')) {
+        await new Promise<void>((resolve) => { resolveA = resolve; });
+        return { ok: true, json: async () => ({ data: [{ id: 'a1', type: 'dm', title: 'A 대화', latest_message: null, updated_at: '2026-09-10T00:00:00Z' }], total: 1 }) };
+      }
+      if (url.includes('project_id=proj-b') && url.includes('/api/conversations?') && !url.includes('include_agent_conversations=true')) {
+        await new Promise<void>((resolve) => { resolveB = resolve; });
+        return { ok: true, json: async () => ({ data: [], total: 0 }) };
+      }
+      return { ok: false, status: 404, json: async () => null };
+    }));
+
+    await act(async () => {
+      root.render(wrap(
+        <ChatRailProvider>
+          <RailCapture />
+          <ChatListView projectId="proj-a" currentTeamMemberId="me-1" />
+        </ChatRailProvider>,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(resolveA).not.toBeUndefined();
+
+    await act(async () => {
+      root.render(wrap(
+        <ChatRailProvider>
+          <RailCapture />
+          <ChatListView projectId="proj-b" currentTeamMemberId="me-1" />
+        </ChatRailProvider>,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(resolveB).not.toBeUndefined();
+    expect(readRailCapture(container).loading).toBe('true');
+
+    // A가 뒤늦게 성공 — B는 아직 pending. A의 finally가 loading을 꺼버리면 안 된다.
+    await act(async () => { resolveA!(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(readRailCapture(container).loading).toBe('true');
+
+    await act(async () => { resolveB!(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(readRailCapture(container).loading).toBe('false');
+    expect(readRailCapture(container).count).toBe('0');
+  });
+});
