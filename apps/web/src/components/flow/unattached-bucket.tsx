@@ -202,10 +202,12 @@ export function UnattachedBucket({ projectId }: { projectId: string }) {
       try {
         const res = await fetchWithAuth(`/api/stories?project_id=${projectId}&unattached=true&limit=100`, { cache: 'no-store' });
         if (!res.ok) throw new Error('failed');
-        const json = await res.json() as { data?: BucketStory[]; meta?: { total?: number } };
+        // story #3761 — API 봉투 정본 `totalCount`(`total`은 은퇴, /api/stories?unattached=true
+        // 라우트가 이제 이 이름으로 낸다).
+        const json = await res.json() as { data?: BucketStory[]; meta?: { totalCount?: number | null } };
         if (!cancelled) {
           setStories(json.data ?? []);
-          setTotal(typeof json.meta?.total === 'number' ? json.meta.total : null);
+          setTotal(typeof json.meta?.totalCount === 'number' ? json.meta.totalCount : null);
         }
       } catch {
         if (!cancelled) { setStories([]); setLoadError(true); }

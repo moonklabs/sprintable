@@ -24,22 +24,23 @@ describe('/api/organizations/[id]/channel-posts/drafts (story #3402)', () => {
       request, '/api/v2/organizations/[id]/channel-posts/drafts', { id: 'org-1' },
     );
     expect(resp.status).toBe(200);
-    // story #3744(페드루 스티어) — meta.total(site-posts/drafts/route.test.ts와 동형,
-    // api/stories/route.ts:69 관례 재사용). X-Total-Count 미제공 시 meta 자체가 null.
-    await expect(resp.json()).resolves.toEqual({ data: list, error: null, meta: null });
+    // story #3744(페드루 스티어) → #3761(유나 낱말 定 정정) — meta.totalCount(정본, `total`
+    // 은퇴, site-posts/drafts/route.test.ts와 동형). X-Total-Count 미제공 시 totalCount:
+    // null로 «모른다»를 명시(meta 자체는 null 아님).
+    await expect(resp.json()).resolves.toEqual({ data: list, error: null, meta: { totalCount: null } });
   });
 
-  // story #3744(페드루 스티어) — X-Total-Count → meta.total(부분 상태 표기용).
-  it('GET — X-Total-Count 헤더가 있으면 meta.total로 실린다', async () => {
+  // story #3744(페드루 스티어) → #3761 — X-Total-Count → meta.totalCount(부분 상태 표기용).
+  it('GET — X-Total-Count 헤더가 있으면 meta.totalCount로 실린다', async () => {
     proxyToFastapiWithParams.mockResolvedValue(fastapiOk([], 200, { 'X-Total-Count': '7' }));
     const resp = await GET(new Request('http://test'), { params: Promise.resolve({ id: 'org-1' }) });
-    await expect(resp.json()).resolves.toEqual({ data: [], error: null, meta: { total: 7 } });
+    await expect(resp.json()).resolves.toEqual({ data: [], error: null, meta: { totalCount: 7 } });
   });
 
-  it('GET — 헤더 값이 숫자가 아니면(계약 위반) meta:null로 떨어진다', async () => {
+  it('GET — 헤더 값이 숫자가 아니면(계약 위반) totalCount:null로 떨어진다', async () => {
     proxyToFastapiWithParams.mockResolvedValue(fastapiOk([], 200, { 'X-Total-Count': 'nope' }));
     const resp = await GET(new Request('http://test'), { params: Promise.resolve({ id: 'org-1' }) });
-    await expect(resp.json()).resolves.toEqual({ data: [], error: null, meta: null });
+    await expect(resp.json()).resolves.toEqual({ data: [], error: null, meta: { totalCount: null } });
   });
 
   it('GET — !ok 응답은 그대로 pass-through', async () => {

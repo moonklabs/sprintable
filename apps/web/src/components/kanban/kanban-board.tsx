@@ -294,10 +294,15 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
     const res = await fetchWithAuth(`/api/stories?${params}`);
     if (!res.ok) return { stories: [], total: 0, nextCursor: null };
     // RC: 헤더 대신 JSON body meta에서 cursor/total 읽기 (proxy 헤더 strip 방지)
-    const json = await res.json() as { data?: KanbanStory[]; meta?: { nextCursor?: string | null; hasMore?: boolean; total?: number } };
+    // story #3761 후속(카디르 QA 지적, PR#4109 검수 中 발견) — 은퇴한 `total` 대신 정본
+    // `totalCount` 읽기. 이 status 기반 호출은 buildCursorPageMeta 경로(pagination.ts)를
+    // 타는데 그 meta엔 애초 total/totalCount 자체가 없다(hasMore/nextCursor만) — 이름을
+    // 무엇으로 읽든 항상 undefined라 `?? stories.length` 폴백이 그대로 걸린다(동작 무변,
+    // 순수 낱말 정본화).
+    const json = await res.json() as { data?: KanbanStory[]; meta?: { nextCursor?: string | null; hasMore?: boolean; totalCount?: number | null } };
     const stories = json.data ?? [];
     const nextCursor = json.meta?.nextCursor ?? null;
-    const total = json.meta?.total ?? stories.length;
+    const total = json.meta?.totalCount ?? stories.length;
     return { stories, total, nextCursor };
   }, [projectId, selectedSprintId, selectedAssigneeId]);
 

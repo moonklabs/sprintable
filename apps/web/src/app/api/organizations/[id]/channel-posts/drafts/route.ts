@@ -10,12 +10,13 @@ export async function GET(request: Request, { params }: RouteParams) {
   const { id } = await params;
   const _r = await proxyToFastapiWithParams(request, '/api/v2/organizations/[id]/channel-posts/drafts', { id });
   if (!_r.ok) return _r;
-  // story #3744(페드루 스티어 2026-09-09) — site-posts/drafts/route.ts와 동형(그 파일
-  // 주석 참조 — X-Total-Count를 meta.total로, api/stories/route.ts:69 관례 재사용).
+  // story #3744(페드루 스티어 2026-09-09) → #3761(유나 낱말 定 정정) — site-posts/drafts/
+  // route.ts와 동형(그 파일 주석 참조). X-Total-Count를 meta.totalCount로(정본, goals/tasks
+  // 관례 — `total`은 은퇴) — 헤더가 없거나 숫자가 아니면 키 생략이 아니라 `null`로 «모른다».
   const totalHeader = _r.headers.get('x-total-count');
   const parsed = totalHeader === null ? null : Number(totalHeader);
-  const total = parsed !== null && Number.isFinite(parsed) ? parsed : undefined;
-  return apiSuccess(await _r.json(), total !== undefined ? { total } : undefined);
+  const totalCount = parsed !== null && Number.isFinite(parsed) ? parsed : null;
+  return apiSuccess(await _r.json(), { totalCount });
 }
 
 export async function POST(request: Request, { params }: RouteParams) {

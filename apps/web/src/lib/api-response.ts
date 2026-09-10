@@ -7,8 +7,12 @@ import { NextResponse } from 'next/server';
  * 실패: { data: null, error: { code: string, message: string, details?: Record<string, unknown> }, meta: null }
  */
 
+// story #3761(별건 ②, 유나 낱말 定 정정) — 목록 총계는 정본 하나로: `totalCount`
+// (goals/tasks/tool-calls가 이미 쓰던 형 — `null` = 「총계를 모른다」를 말할 수 있다).
+// `total`은 은퇴 — 같은 사실(전체 수)이 두 이름으로 갈리면 소비처가 화면마다 다른 키를
+// 읽게 된다(story #3744 grounding).
 export interface ApiMeta {
-  total?: number;
+  totalCount?: number | null;
   page?: number;
   limit?: number;
   [key: string]: unknown;

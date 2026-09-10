@@ -102,7 +102,7 @@ function stripTrailingBareQuery(url: string): string {
 function stubFetch(
   drafts: unknown[] | { status: number },
   connections: unknown[] = ONE_ACTIVE_CONNECTION,
-  meta: { total: number | null } | null = null,
+  meta: { totalCount: number | null } | null = null,
 ) {
   vi.stubGlobal(
     'fetch',
@@ -538,7 +538,7 @@ describe('ChannelPostListPage (story #3402)', () => {
     });
 
     it('⭐탭이 「전체」가 아니면 total이 있어도 부분 상태 줄을 안 그린다(뮤테이션 표적)', async () => {
-      stubFetch([DRAFT_A], ONE_ACTIVE_CONNECTION, { total: 5 });
+      stubFetch([DRAFT_A], ONE_ACTIVE_CONNECTION, { totalCount: 5 });
       await act(async () => { root.render(wrap(<ChannelPostListPage />)); });
       await flush();
       expect(container.querySelector('[data-testid="channel-posts-partial-state"]')).not.toBeNull();

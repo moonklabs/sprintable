@@ -99,7 +99,7 @@ function stripTrailingBareQuery(url: string): string {
   return url.endsWith('?') ? url.slice(0, -1) : url;
 }
 
-function stubFetch(drafts: unknown[] | { status: number }, meta: { total: number | null } | null = null) {
+function stubFetch(drafts: unknown[] | { status: number }, meta: { totalCount: number | null } | null = null) {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
@@ -167,7 +167,7 @@ describe('ContentPostListPage (story #3368)', () => {
   // board.tasksPartialCount(story-detail-panel.tsx 선례) 재사용, 새 키 발명 0.
   describe('부분 상태 줄(story #3744 ⑥)', () => {
     it('⭐total 있음 — board.tasksPartialCount 문구가 뜬다', async () => {
-      stubFetch([DRAFT_A], { total: 5 });
+      stubFetch([DRAFT_A], { totalCount: 5 });
       await act(async () => { root.render(wrap(<ContentPostListPage />)); });
       await flush();
 
@@ -177,7 +177,7 @@ describe('ContentPostListPage (story #3368)', () => {
     });
 
     it('⭐total이 null(헤더 못 받음) — 부분 상태 줄 자체를 안 그린다(한 페이지를 전체로 위장 금지)', async () => {
-      stubFetch([DRAFT_A], { total: null });
+      stubFetch([DRAFT_A], { totalCount: null });
       await act(async () => { root.render(wrap(<ContentPostListPage />)); });
       await flush();
 
@@ -193,7 +193,7 @@ describe('ContentPostListPage (story #3368)', () => {
     });
 
     it('0건이면 total이 있어도 부분 상태 줄을 안 그린다(빈 상태와 안 겹침)', async () => {
-      stubFetch([], { total: 0 });
+      stubFetch([], { totalCount: 0 });
       await act(async () => { root.render(wrap(<ContentPostListPage />)); });
       await flush();
 
@@ -204,7 +204,7 @@ describe('ContentPostListPage (story #3368)', () => {
     // 그리는 visibleRows(탭 필터 後)와 statusTab≠'all'일 때 어긋난다("18개 중 18개"
     // 거짓 문장). 탭 켜진 채로는 이 줄 자체를 안 그린다.
     it('⭐탭이 「전체」가 아니면(예: 초안) total이 있어도 부분 상태 줄을 안 그린다(뮤테이션 표적)', async () => {
-      stubFetch([DRAFT_A], { total: 5 });
+      stubFetch([DRAFT_A], { totalCount: 5 });
       await act(async () => { root.render(wrap(<ContentPostListPage />)); });
       await flush();
       expect(container.querySelector('[data-testid="content-partial-state"]')).not.toBeNull();
