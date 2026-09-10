@@ -1630,6 +1630,12 @@ jobs:
       - name: "Verify no hardcoded Korean UI text (story #3741 regression guard)"
         run: pnpm --filter web verify:no-hardcoded-korean-ui-text
 
+      # story #3770(2026-09-10) — 원시 role 값(org owner/admin/member·participation/trust
+      # implementation 등)을 t() 없이 JSX 텍스트에 그리는 클래스 회귀가드(설정 프로필
+      # 「역할 admin」류 재발 방지).
+      - name: "Verify no raw role JSX text (story #3770 regression guard)"
+        run: pnpm --filter web verify:no-raw-role-jsx-text
+
       # story #3739(2026-09-09) 메타 가드 — package.json에 등재된 verify:* 스크립트
       # 집합이 이 ci.yml에서 실제로 부르는 집합의 부분집합이 아니면(새 verify:* 스크립트를
       # 만들고 여기 안 물리면) FAIL. story #3736 ⑪·이 스토리 자신(no-direct-backend-v2-call·

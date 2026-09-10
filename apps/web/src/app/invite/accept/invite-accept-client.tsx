@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { inviteErrorMessage } from '@/lib/invite-error-message';
+import { orgRoleLabel } from '@/lib/org-member-role';
 
 interface InviteAcceptClientProps {
   token: string;
@@ -68,7 +69,7 @@ export function InviteAcceptClient({ token, orgName, role, email, projects }: In
           </div>
           <div className="mt-2 flex items-center justify-between text-sm">
             <span className="text-muted-foreground">{t('profileRole')}</span>
-            <span className="font-medium text-foreground/85 capitalize">{role}</span>
+            <span className="font-medium text-foreground/85">{orgRoleLabel(role, t)}</span>
           </div>
           <div className="mt-2 flex items-center justify-between gap-4 text-sm">
             <span className="shrink-0 text-muted-foreground">{t('acceptProjectsRow')}</span>

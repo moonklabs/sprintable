@@ -17,6 +17,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { fetchWithAuth } from '@/lib/db/client';
+import { resolveRoleLabel } from '@/app/(authenticated)/organization/trust/trust-utils';
 
 interface OrgAgent {
   id: string;
@@ -64,6 +65,7 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
   const t = useTranslations('settings');
   const ta = useTranslations('agents');
   const tc = useTranslations('common');
+  const to = useTranslations('organization');
   const [agents, setAgents] = useState<OrgAgent[]>([]);
   const [grantCounts, setGrantCounts] = useState<Record<string, number>>({});
   const [isAdmin, setIsAdmin] = useState(false);
@@ -226,7 +228,7 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
                     </div>
                     <div className="mt-1 flex flex-wrap items-center gap-2">
                       <Badge variant="secondary">{t('agentMember')}</Badge>
-                      <Badge variant="outline">{agent.role}</Badge>
+                      <Badge variant="outline">{resolveRoleLabel(agent.role, null, to)}</Badge>
                       <Badge variant="info">{ta('manageProjectsGranted', { count: grantCounts[agent.id] ?? 0 })}</Badge>
                       {agent.verified === false ? (
                         <Badge variant="warning">{ta('agentNotConnected')}</Badge>

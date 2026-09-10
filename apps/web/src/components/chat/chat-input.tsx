@@ -17,6 +17,8 @@ import {
 import { getFileIcon } from '@/lib/file-icon';
 import { commandName, dequoteLiteral, isCommand } from '@/lib/command-classifier';
 import { resolveRuntimeStatus, runtimeLabel } from '@/lib/runtime-capabilities';
+import { orgRoleLabel } from '@/lib/org-member-role';
+import { resolveRoleLabel } from '@/app/(authenticated)/organization/trust/trust-utils';
 import type { SendAttachment } from '@/hooks/use-chat-sse';
 import type { Asset } from '@/lib/storage/types';
 import { imageFilesFromClipboard } from '@/lib/clipboard-image';
@@ -113,6 +115,24 @@ interface MentionMember {
   id: string;
   name: string;
   role?: string | null;
+  // story #3770 — 휴먼(org role: owner/admin/member)·에이전트(trust role: implementation
+  // 등) 둘 다 이 목록에 섞여 온다(/api/members). role 낱말 축은 이 둘이 서로 다른 정본을
+  // 쓰므로(orgRoleLabel vs resolveRoleLabel), 어느 쪽인지 판별할 이 필드가 필요하다.
+  type?: string;
+}
+
+// story #3770 — /api/members(backend/app/routers/members.py::MemberResponse)가 휴먼은
+// org_members.role(owner/admin/member), 에이전트는 team_members.role(participation/
+// trust role: implementation 등)을 같은 `role` 필드에 섞어 돌려준다. type으로 갈라
+// 각각 맞는 정본을 쓴다(섞지 않는다 — 미확認 type은 원문 그대로, 지어내지 않는다).
+function mentionMemberRoleLabel(
+  member: MentionMember,
+  tSettings: (key: string) => string,
+  tOrg: (key: string, values?: Record<string, string | number>) => string,
+): string {
+  if (!member.role) return '';
+  if (member.type === 'agent') return resolveRoleLabel(member.role, null, tOrg);
+  return orgRoleLabel(member.role, tSettings);
 }
 
 // story #2032 — 대화별 임시저장(localStorage). 대화 전환은 ChatView가 key={conversation_id}로
@@ -176,6 +196,8 @@ interface ChatInputProps {
 export function ChatInput({ onSend, onUploadFile, disabled, placeholder, projectId, onMentionIdsChange, commandTargets, threadId, onEscape, currentTeamMemberId, participants, prefillCommand }: ChatInputProps) {
   const t = useTranslations('chats');
   const tc = useTranslations('common');
+  const tSettings = useTranslations('settings');
+  const tOrg = useTranslations('organization');
   // story #3289(도메인탈고정·축1 Phase1 FE잔여, AC2) — 「네비」 실측 결과 사이드바/브레드크럼엔
   // entity_type 렌더지점이 없고, 실제 렌더처는 이 `#` 엔티티 피커(chat-input-entity-tokens.ts
   // entityTypeLabel())였다. 그 코어 파일은 AC3 판정 대상(diff 0 규율, #2264)이라 손대지
@@ -269,7 +291,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
       })
       .then((json) => {
         if (cancelled) return;
-        const all: MentionMember[] = (json.data ?? []).map((m: { id: string; name: string; role?: string | null }) => ({ id: m.id, name: m.name, role: m.role }));
+        const all: MentionMember[] = (json.data ?? []).map((m: { id: string; name: string; role?: string | null; type?: string }) => ({ id: m.id, name: m.name, role: m.role, type: m.type }));
         const q = mentionQuery.toLowerCase();
         setMentionMembers(q ? all.filter((m) => m.name.toLowerCase().includes(q)) : all);
         setMentionIndex(0);
@@ -811,7 +833,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
                   className={`w-full px-3 py-2 text-left text-sm transition ${idx === mentionIndex ? 'bg-accent text-foreground font-medium' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
                 >
                   <span className="font-medium text-primary">@</span>{member.name}
-                  {member.role ? <span className="ml-2 text-xs opacity-60">{member.role}</span> : null}
+                  {member.role ? <span className="ml-2 text-xs opacity-60">{mentionMemberRoleLabel(member, tSettings, tOrg)}</span> : null}
                 </button>
               </li>
             ))}

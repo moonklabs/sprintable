@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useTranslations } from 'next-intl';
 import { AlertTriangle } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -14,6 +15,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { fetchWithAuth } from '@/lib/db/client';
+import { resolveRoleLabel } from '@/app/(authenticated)/organization/trust/trust-utils';
 
 interface AffectedProject {
   project_id: string;
@@ -34,6 +36,7 @@ export function RemoveOrgMemberDialog({
   onConfirm,
   onCancel,
 }: RemoveOrgMemberDialogProps) {
+  const to = useTranslations('organization');
   const [loading, setLoading] = useState(true);
   const [affected, setAffected] = useState<AffectedProject[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -96,7 +99,7 @@ export function RemoveOrgMemberDialog({
               {affected.map((p) => (
                 <div key={p.project_id} className="flex items-center justify-between gap-3 py-1 text-sm">
                   <span className="truncate text-foreground">{p.project_name}</span>
-                  <Badge variant="outline" className="capitalize">{p.role}</Badge>
+                  <Badge variant="outline">{resolveRoleLabel(p.role, null, to)}</Badge>
                 </div>
               ))}
             </div>

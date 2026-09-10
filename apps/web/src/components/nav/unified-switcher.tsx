@@ -24,6 +24,7 @@ import { Button } from '@/components/ui/button';
 import { SidebarMenuButton } from '@/components/ui/sidebar';
 import { CreateOrganizationDialog } from '@/components/nav/create-organization-dialog';
 import { useUnifiedSwitcher, withSwitchedSlugs, type OrgSwitcherItem, type ProjectSwitcherItem } from '@/hooks/use-unified-switcher';
+import { orgRoleLabel } from '@/lib/org-member-role';
 
 // story #2076: 로직(withSwitchedSlugs 포함)이 hooks/use-unified-switcher.ts로 이동했다 —
 // 사이드바(UnifiedSwitcher, ≥1024)와 신규 ContextSwitcherChip(top-bar 칩+바텀시트, <1024)이
@@ -58,6 +59,7 @@ export function UnifiedSwitcher({
 }: UnifiedSwitcherProps) {
   const t = useTranslations('nav');
   const tCommon = useTranslations('common');
+  const tSettings = useTranslations('settings');
   const s = useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjectId });
 
   return (
@@ -147,7 +149,7 @@ export function UnifiedSwitcher({
                         <OrgInitial name={org.orgName} />
                         {org.orgName}
                         {org.role && (
-                          <span className="text-[9px] font-normal capitalize normal-case opacity-60">{org.role}</span>
+                          <span className="text-[9px] font-normal opacity-60">{orgRoleLabel(org.role, tSettings)}</span>
                         )}
                       </span>
                     </DropdownMenuLabel>

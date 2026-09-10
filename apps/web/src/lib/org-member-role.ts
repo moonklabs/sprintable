@@ -28,3 +28,21 @@ export function canEditOrgMemberRole(params: {
   if (currentUserId != null && member.user_id != null && currentUserId === member.user_id) return false;
   return true;
 }
+
+/**
+ * story #3770(페드루 PO 確定 2026-09-10) — org 역할(owner/admin/member) 낱말 정본.
+ * org-members-section.tsx의 로컬 함수였던 것을 이 자리로 이관(3화면 공용이던
+ * canEditOrgMemberRole과 동일 사유 — 컴포넌트 트리가 갈라져 있어 로직만 한 곳에
+ * 모은다). 새 i18n 키 0 — roleOwner/roleAdmin/roleMember는 기존 값 그대로 재사용.
+ *
+ * 호출부(`profile.role`·`preview.role`·switcher의 `org.role`)가 API 원문 그대로라
+ * 타입이 `string`(엄격 유니온 아님) — 알려진 세 값이 아니면 원문을 그대로 돌려준다
+ * (resolveRoleLabel의 "모르는 키는 원문 pass-through" 방어와 동형, 화면이 값을 지어
+ * 내지 않는다).
+ */
+export function orgRoleLabel(role: string, t: (key: string) => string): string {
+  if (role === 'owner') return t('roleOwner');
+  if (role === 'admin') return t('roleAdmin');
+  if (role === 'member') return t('roleMember');
+  return role;
+}
