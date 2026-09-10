@@ -14,10 +14,14 @@ type Stage = { kind: 'idle' } | { kind: 'cropping'; url: string } | { kind: 'upl
  * 에이전트 카드(workforce/[id]) 양쪽이 동일 컴포넌트를 소비 — 목업 규칙("설정 표면 = 양쪽").
  */
 export function AvatarEditCard({
-  memberId, name, avatarUrl, actorType, onUpdated, bigSize = 72,
+  memberId, name, label, avatarUrl, actorType, onUpdated, bigSize = 72,
 }: {
   memberId: string;
-  name: string;
+  // story #3791(유나 定) — Avatar와 같은 계약: 이니셜 재료(null 허용, 없으면 아이콘 tier).
+  // memberDisplayLabel() 같은 표시-문구를 여기 넘기지 말 것(가짜 이니셜) — 그건 label로.
+  name: string | null;
+  /** 표시 텍스트/접근성 이름. 생략 시 name을 그대로 쓴다. */
+  label?: string;
   avatarUrl: string | null;
   actorType: 'human' | 'agent';
   onUpdated: (newAvatarUrl: string | null) => void;
@@ -91,9 +95,9 @@ export function AvatarEditCard({
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-4">
-        <Avatar name={name} avatarUrl={avatarUrl} actorType={actorType} size={bigSize} />
+        <Avatar name={name} label={label} avatarUrl={avatarUrl} actorType={actorType} size={bigSize} />
         <div>
-          <div className="mb-2 text-sm font-semibold text-foreground">{name}</div>
+          <div className="mb-2 text-sm font-semibold text-foreground">{label ?? name}</div>
           <div className="flex gap-2">
             <Button size="sm" disabled={stage.kind === 'uploading'} onClick={() => inputRef.current?.click()}>
               {t('avatarChange')}

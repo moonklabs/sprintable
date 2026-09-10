@@ -96,6 +96,87 @@ describe('MyProfileSection — 역할 낱말(story #3770 실사고 재현)', () 
   });
 });
 
+describe('MyProfileSection — display_name 없는 계정 크래시 재발 방지(story #3791)', () => {
+  // BE(app/schemas/me.py MeResponse)가 display_name 미설정 휴먼을 정직하게 name=null로
+  // 돌린다(story #3755/#3758) — 이 자리가 그 null을 그대로 Avatar에 넘겨 name.trim()이
+  // 죽던 실 크래시(디디 2026-09-10 11:55Z, #4141 캡처 中 발견) 재현·고정.
+  it('⭐profile.name=null이어도 크래시 없이 렌더되고 「이름 없는 구성원」이 뜬다', async () => {
+    vi.stubGlobal('fetch', vi.fn());
+    const fetchWithAuthMock = vi.fn((url: string) => {
+      if (url === '/api/me') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ data: { id: 'm-1', name: null, email: 'noname@moonklabs.com', type: 'human', role: 'member' } }),
+        });
+      }
+      if (url.startsWith('/api/team-members/')) return Promise.resolve({ ok: true, json: async () => ({ data: { avatar_url: null } }) });
+      return Promise.resolve({ ok: false, json: async () => ({ data: null }) });
+    });
+    vi.doMock('@/lib/db/client', () => ({ fetchWithAuth: fetchWithAuthMock }));
+    vi.resetModules();
+    const { MyProfileSection: Section } = await import('./my-profile-section');
+
+    await act(async () => { root.render(wrap(<Section />)); });
+    await flush();
+
+    expect(container.textContent).toContain(koMessages.common.memberUnnamed);
+    vi.doUnmock('@/lib/db/client');
+  });
+
+  it('음성대조 — profile.name이 실 문자열이면 그대로 뜬다(회귀 없음)', async () => {
+    vi.stubGlobal('fetch', vi.fn());
+    const fetchWithAuthMock = vi.fn((url: string) => {
+      if (url === '/api/me') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ data: { id: 'm-1', name: '홍길동', email: 'hong@moonklabs.com', type: 'human', role: 'member' } }),
+        });
+      }
+      if (url.startsWith('/api/team-members/')) return Promise.resolve({ ok: true, json: async () => ({ data: { avatar_url: null } }) });
+      return Promise.resolve({ ok: false, json: async () => ({ data: null }) });
+    });
+    vi.doMock('@/lib/db/client', () => ({ fetchWithAuth: fetchWithAuthMock }));
+    vi.resetModules();
+    const { MyProfileSection: Section } = await import('./my-profile-section');
+
+    await act(async () => { root.render(wrap(<Section />)); });
+    await flush();
+
+    expect(container.textContent).toContain('홍길동');
+    expect(container.textContent).not.toContain(koMessages.common.memberUnnamed);
+    vi.doUnmock('@/lib/db/client');
+  });
+
+  it('편집 입력창은 name=null이어도 빈 문자열로 시작한다(「이름 없는 구성원」을 편집 가능한 값처럼 넣지 않음)', async () => {
+    vi.stubGlobal('fetch', vi.fn());
+    const fetchWithAuthMock = vi.fn((url: string) => {
+      if (url === '/api/me') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ data: { id: 'm-1', name: null, email: null, type: 'human', role: 'member' } }),
+        });
+      }
+      if (url.startsWith('/api/team-members/')) return Promise.resolve({ ok: true, json: async () => ({ data: { avatar_url: null } }) });
+      return Promise.resolve({ ok: false, json: async () => ({ data: null }) });
+    });
+    vi.doMock('@/lib/db/client', () => ({ fetchWithAuth: fetchWithAuthMock }));
+    vi.resetModules();
+    const { MyProfileSection: Section } = await import('./my-profile-section');
+
+    await act(async () => { root.render(wrap(<Section />)); });
+    await flush();
+
+    const editButton = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.settings.profileEdit);
+    expect(editButton).toBeTruthy();
+    await act(async () => { editButton!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    const input = container.querySelector('input') as HTMLInputElement;
+    expect(input).not.toBeNull();
+    expect(input.value).toBe('');
+    vi.doUnmock('@/lib/db/client');
+  });
+});
+
 describe('MyProfileSection — 실패 렌더에 「로딩 중」 잔존 재발 방지(story #3772 CHANGES, 페드루 픽셀 지적 2026-09-10)', () => {
   it('⭐/api/me 실패(500) → tc(\'loading\')("로딩 중...") 문구가 안 남는다(null 렌더)', async () => {
     vi.stubGlobal('fetch', vi.fn());

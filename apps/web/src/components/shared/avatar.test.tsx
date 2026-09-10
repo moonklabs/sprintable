@@ -147,6 +147,74 @@ describe('Avatar — story #2887 S2g', () => {
     expect(container.textContent).toContain('송');
   });
 
+  // story #3791(display_name 없는 계정 크래시, 유나 定 12:00Z·페드루 재검토 12:14Z) —
+  // BE(app/schemas/me.py MeResponse)가 display_name 미설정 휴먼을 정직하게 name=null로
+  // 돌린다(story #3755/#3758). 호출부가 그 null을 그대로 넘겨도(정규화 누락) Avatar
+  // 자신이 안 죽어야 한다 — 되돌리면(a11yName 걷고 원시 name.trim() 복원) 이 자리들이
+  // 정확히 RED(TypeError로 렌더 자체가 실패).
+  //
+  // ⚠️폴백 글자를 새로 짓지 않는다 — name=null이면 무조건 아이콘 tier(이미 있던 3단
+  // 폴백 그대로)다. memberDisplayLabel() 같은 표시-문구는 name이 아니라 label로 받아
+  // aria-label에만 쓴다 — label을 name에 잘못 넘기면 그 문구의 첫 글자가 가짜 이니셜로
+  // 뜬다(이 스토리가 막으려는 바로 그 결함, #4143 코드리뷰 실물 확認).
+  it('name=null이어도 안 죽고 아이콘 tier로 렌더된다(이니셜 텍스트 0)', async () => {
+    await act(async () => {
+      root.render(wrap(<Avatar name={null} avatarUrl={null} actorType="human" />));
+    });
+    expect(container.querySelector('img')).toBeNull();
+    expect(container.querySelector('svg')).not.toBeNull(); // User 아이콘 폴백.
+    expect(container.textContent).toBe(''); // 이니셜 텍스트가 전혀 없다(아이콘만).
+  });
+
+  it('name=null·label="이름 없는 구성원"이면 아이콘 tier를 유지하되(가짜 이니셜 「이」 없음) aria-label만 label을 쓴다', async () => {
+    await act(async () => {
+      root.render(wrap(<Avatar name={null} label="이름 없는 구성원" avatarUrl={null} actorType="human" />));
+    });
+    expect(container.querySelector('img')).toBeNull();
+    expect(container.querySelector('svg')).not.toBeNull(); // 여전히 아이콘 tier(이니셜 tier로 안 넘어감).
+    expect(container.textContent).toBe(''); // 「이」(label 첫 글자) 같은 가짜 이니셜이 안 뜬다.
+    const span = container.querySelector('span[aria-label]');
+    expect(span?.getAttribute('aria-label')).toBe('이름 없는 구성원');
+  });
+
+  it('name=""(빈 문자열)이어도 안 죽고 아이콘 폴백으로 렌더된다', async () => {
+    await act(async () => {
+      root.render(wrap(<Avatar name="" avatarUrl={null} actorType="human" />));
+    });
+    expect(container.querySelector('img')).toBeNull();
+    expect(container.querySelector('svg')).not.toBeNull();
+  });
+
+  it('name이 공백뿐이어도 안 죽고 아이콘 폴백으로 렌더된다(trim 후 빈 문자열과 동일 취급)', async () => {
+    await act(async () => {
+      root.render(wrap(<Avatar name="   " avatarUrl={null} actorType="human" />));
+    });
+    expect(container.querySelector('img')).toBeNull();
+    expect(container.querySelector('svg')).not.toBeNull();
+  });
+
+  it('name이 실명이면 이니셜 tier를 쓰고 aria-label도 name 그대로다(label 미지정 — 회귀 없음)', async () => {
+    await act(async () => {
+      root.render(wrap(<Avatar name="송윤재" avatarUrl={null} actorType="human" />));
+    });
+    const span = container.querySelector('span[aria-label]');
+    expect(span?.getAttribute('aria-label')).toBe('송윤재');
+    expect(container.textContent).toContain('송');
+  });
+
+  it('name=null이어도 agent 아바타 툴팁이 안 죽는다(이름 없이 "Agent" 단독)', async () => {
+    await act(async () => {
+      root.render(wrap(<Avatar name={null} actorType="agent" />));
+    });
+    const trigger = container.querySelector('[data-slot="tooltip-trigger"]') as HTMLElement;
+    expect(trigger).not.toBeNull();
+    await act(async () => {
+      trigger.focus();
+      await new Promise((r) => setTimeout(r, 900));
+    });
+    expect(document.body.querySelector('[data-slot="tooltip-content"]')).not.toBeNull();
+  });
+
   it('avatar_url이 바뀌면(교체 업로드) 이전 에러 상태를 잊고 새 URL을 다시 시도한다', async () => {
     await act(async () => {
       root.render(wrap(<Avatar name="송윤재" avatarUrl="https://example.com/broken.png" actorType="human" />));

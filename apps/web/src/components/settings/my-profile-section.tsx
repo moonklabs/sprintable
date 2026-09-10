@@ -10,10 +10,14 @@ import { AvatarEditCard } from '@/components/shared/avatar-edit-card';
 
 import { fetchWithAuth } from '@/lib/db/client';
 import { orgRoleLabel } from '@/lib/org-member-role';
+import { memberDisplayLabel } from '@/lib/member-display';
 
 interface MyProfile {
   id: string;
-  name: string;
+  // story #3791 — BE(app/schemas/me.py MeResponse)가 display_name 없는 휴먼을 정직하게
+  // name=null로 돌린다(story #3755/#3758) — 이 인터페이스가 그걸 안 반영해(non-null
+  // string으로 거짓말) Avatar의 name.trim()이 그대로 죽었다(로컬 타입 동기화 결함 클래스).
+  name: string | null;
   email: string | null;
   type: string;
   role: string;
@@ -62,7 +66,9 @@ export function MyProfileSection({ onLoadError }: MyProfileSectionProps = {}) {
     if (!res.ok) { setLoadFailed(true); onLoadError?.(); return; }
     const json = await res.json() as { data: MyProfile };
     setProfile(json.data);
-    setEditName(json.data.name);
+    // story #3791 — 편집 입력창은 "빈 채로 새로 타이핑" 시작이 맞다(memberDisplayLabel의
+    // 「이름 없는 구성원」 표시-문구를 편집 가능한 값인 척 입력창에 넣지 않는다).
+    setEditName(json.data.name ?? '');
     setAvatarUrl(await fetchAvatarUrl(json.data.id));
   }, [onLoadError]);
 
@@ -107,6 +113,7 @@ export function MyProfileSection({ onLoadError }: MyProfileSectionProps = {}) {
         <AvatarEditCard
           memberId={profile.id}
           name={profile.name}
+          label={memberDisplayLabel(profile.name, tc)}
           avatarUrl={avatarUrl}
           actorType="human"
           onUpdated={setAvatarUrl}
@@ -126,13 +133,13 @@ export function MyProfileSection({ onLoadError }: MyProfileSectionProps = {}) {
                 <Button size="sm" disabled={saving} onClick={() => void handleSave()}>
                   {saving ? tc('loading') : tc('save')}
                 </Button>
-                <Button size="sm" variant="ghost" disabled={saving} onClick={() => { setEditing(false); setEditName(profile.name); }}>
+                <Button size="sm" variant="ghost" disabled={saving} onClick={() => { setEditing(false); setEditName(profile.name ?? ''); }}>
                   {tc('cancel')}
                 </Button>
               </div>
             ) : (
               <div className="flex items-center gap-2">
-                <span>{profile.name}</span>
+                <span>{memberDisplayLabel(profile.name, tc)}</span>
                 <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={() => setEditing(true)}>
                   {t('profileEdit')}
                 </Button>
