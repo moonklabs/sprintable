@@ -388,6 +388,13 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
                 className="border-0 rounded-none bg-transparent"
                 meta={member.joined_at ? t('orgMemberJoinedMeta', { time: formatRelativeTime(member.joined_at, locale, displayTimezone) }) : undefined}
                 actions={
+                  // story #3771(PO 별건 ㉓·유나 r65) — 역할 열/액션 열을 항상 둘 다 렌더한다
+                  // (행마다 열의 뜻이 같게). 역할 변경 불가 행(소유자·자기 자신)은 select 대신
+                  // 배지가 서지만, 그 배지가 «제거» 버튼이 있던 자리로 밀려 앉으면 세로로 읽을
+                  // 때 상태 딱지와 행동 버튼이 한 열에 섞인다(라이브 캡처로 실측된 결함) — 액션
+                  // 열은 canEdit=false일 때도 같은 Button(같은 텍스트·크기, 그래서 폭이 로케일과
+                  // 무관하게 정확히 같다)을 invisible로 그려 자리만 지킨다(클릭 불가·
+                  // aria-hidden — 보조기술 목록엔 아예 안 나온다).
                   <>
                     {canEdit ? (
                       <select
@@ -402,9 +409,21 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
                     ) : (
                       <Badge variant={isThisOwner ? 'info' : 'secondary'}>{orgRoleLabel(member.role, t)}</Badge>
                     )}
-                    {canEdit && (
+                    {canEdit ? (
                       <Button
                         size="sm" variant="glass" onClick={() => setRemoveDialogMemberId(member.id)}
+                        aria-label={t('orgMemberRowActionAriaLabel', { n: index + 1, label: t('removeFromProject') })}
+                      >
+                        {t('removeFromProject')}
+                      </Button>
+                    ) : (
+                      // story #3592 회귀 가드(verify-repeated-row-action-names) — aria-hidden이라
+                      // 보조기술엔 안 읽혀도 정적 스캔은 행마다 반복되는 라벨을 그대로 잡는다.
+                      // 실 버튼과 동일하게 순번을 품은 aria-label을 붙인다(무해 — aria-hidden이
+                      // 우선해 결국 안 읽힌다).
+                      <Button
+                        size="sm" variant="glass" tabIndex={-1} aria-hidden="true"
+                        className="invisible pointer-events-none"
                         aria-label={t('orgMemberRowActionAriaLabel', { n: index + 1, label: t('removeFromProject') })}
                       >
                         {t('removeFromProject')}
