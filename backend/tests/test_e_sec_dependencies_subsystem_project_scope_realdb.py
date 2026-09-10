@@ -411,3 +411,67 @@ async def test_dependency_graph_filters_inaccessible_project():
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+# ── locale(story #3786 — 공용 i18n 카탈로그 슬라이스 1) ─────────────────────────
+# 카디르 판정 기준: "치환한 자리에 Accept-Language: en 요청 시 en detail이 실제로 내려오는
+# 통합 테스트(양성대조: ko 요청은 ko)". 실 영문 문장이 아니라 "요청 로케일에 따라 카탈로그가
+# 실제로 갈린다"를 검증한다 — en 문장 자체는 유나 定(PENDING이어도 이 테스트는 무변으로
+# 통과해야 한다, 값이 무엇이든 ko와 달라야 한다는 것만 본다).
+
+
+@pytest.mark.anyio
+async def test_update_dependency_not_found_detail_follows_accept_language_ko():
+    from app.main import app
+    from app.services.i18n_catalog import t
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s)
+        await _setup_app(app, Session, seeded["caller_id"], seeded["org_id"])
+        client = _client_for(app)
+        try:
+            resp = await client.patch(
+                f"/api/v2/dependencies/{uuid.uuid4()}", json={"dep_type": "depends_on"},
+                headers={"Accept-Language": "ko"},
+            )
+            assert resp.status_code == 404, resp.text
+            assert resp.json()["error"]["message"] == t("dependencies.not_found", "ko")
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_update_dependency_not_found_detail_follows_accept_language_en():
+    """⭐양성대조 — en 요청은 en 카탈로그 값(ko와 다른 값)을 받는다. 되돌리면(라우트가 로케일을
+    무시하고 ko를 고정 반환하면) 이 테스트가 실패한다(뮤테이션 자리 — PR CHANGES 라운드에서
+    Accept-Language 배선 자체를 지워 실측 확認할 것)."""
+    from app.main import app
+    from app.services.i18n_catalog import t
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s)
+        await _setup_app(app, Session, seeded["caller_id"], seeded["org_id"])
+        client = _client_for(app)
+        try:
+            resp = await client.patch(
+                f"/api/v2/dependencies/{uuid.uuid4()}", json={"dep_type": "depends_on"},
+                headers={"Accept-Language": "en"},
+            )
+            assert resp.status_code == 404, resp.text
+            detail = resp.json()["error"]["message"]
+            assert detail == t("dependencies.not_found", "en")
+            assert detail != t("dependencies.not_found", "ko"), (
+                "en 요청인데 ko와 같은 문구가 내려옴 — 로케일 배선이 실제로 안 먹히고 있다."
+            )
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()

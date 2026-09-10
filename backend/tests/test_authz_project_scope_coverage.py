@@ -284,6 +284,18 @@ def test_list_docs_ids_branch_closed_the_two_hop_known_gap():
 # ── false positive: 실제로는 안전 — org/user-level(project 축 없음)·self-derived·
 #    JWT-project 스코프·인라인/1-hop 가드(v1 정적스캔 미인식). 영구 allowlist(이유 필수). ──
 _ID_MUTATION_FALSE_POSITIVE_ALLOWLIST: dict[str, str] = {
+    # story #3786 — dependencies.py의 update/delete는 까심 QA CI FAILURE 원칙(2026-07-08,
+    # agents.py::get_agent_connection_artifact/_connection_artifact 선례)에 따라 Header() DI
+    # 마커를 라우트 진입점(update_dependency/delete_dependency)에서만 받고, 실 로직(가드 호출
+    # `_assert_item_project_access` 포함)은 `_update_dependency`/`_delete_dependency`로
+    # 위임했다 — 스캐너의 `_called_names(target.endpoint)`는 진입점 자기 body만 보고
+    # 위임 호출은 재귀 안 함(v1 제약, 이 파일 docstring에 이미 명시된 한계와 동종). 실 가드는
+    # 살아 있다 — test_e_sec_dependencies_subsystem_project_scope_realdb.py::
+    # test_update_dependency_cross_project_blocked_404_not_changed/
+    # test_delete_dependency_cross_project_blocked_404_not_deleted가 실 404를 증명한다. 그
+    # 테스트를 지우거나 약화시키면 이 면제의 근거도 함께 사라진다.
+    "app.routers.dependencies:update_dependency": "1-hop 위임(_update_dependency)의 _assert_item_project_access — v1 스캔 미인식, realdb로 실증",
+    "app.routers.dependencies:delete_dependency": "동일 위임 패턴 — realdb로 실증(위 항목과 동일 근거)",
     # JWT project_id로 리소스 fetch 스코프(비-스푸퍼블) — SELF_DERIVED
     "app.routers.agent_deployments:delete_deployment": "JWT project_id 스코프로 deployment fetch(비-스푸퍼블)",
     "app.routers.agent_deployments:patch_deployment": "동일 JWT project_id 스코프",
