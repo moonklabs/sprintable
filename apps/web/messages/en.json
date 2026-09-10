@@ -1809,6 +1809,7 @@
     "inviteEmailRequired": "Please enter an email address.",
     "roleMember": "Member",
     "roleAdmin": "Admin",
+    "roleOwner": "Owner",
     "addMemberInviteSuccess": "Invite sent.",
     "addMemberInviteError": "Failed to send invite. Please try again shortly.",
     "addMemberAgentRequired": "Enter a name and project.",

@@ -41,6 +41,16 @@ interface OrgMembersSectionProps {
   currentRole: string;
 }
 
+// story #3758(페드루 그라운딩 지적 2026-09-09 — 캡처 리뷰 중 발견, 낱말 축은 아니지만 같은
+// "한 화면 두 언어" 병) — role select/badge가 t() 없이 "Admin"/"Member" 원문 리터럴과
+// member.role raw enum을 그대로 그렸다(번역 누락, 충돌이 아니라 미번역 그 자체). 정본
+// 값은 이미 있다(settings.roleOwner/roleAdmin/roleMember) — 새 키 발명 없이 그대로 매핑.
+function orgRoleLabel(role: 'owner' | 'admin' | 'member', t: (key: string) => string): string {
+  if (role === 'owner') return t('roleOwner');
+  if (role === 'admin') return t('roleAdmin');
+  return t('roleMember');
+}
+
 export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps) {
   const [members, setMembers] = useState<OrgMember[]>([]);
   const [invites, setInvites] = useState<OrgInvite[]>([]);
@@ -278,8 +288,8 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
                 value={inviteRole}
                 onValueChange={(v) => setInviteRole(v as 'admin' | 'member')}
                 options={[
-                  { value: 'member', label: 'Member' },
-                  { value: 'admin', label: 'Admin' },
+                  { value: 'member', label: t('roleMember') },
+                  { value: 'admin', label: t('roleAdmin') },
                 ]}
               />
               <Button variant="hero" size="lg" onClick={() => void handleInvite()} disabled={!inviteEmail.trim() || inviting}>
@@ -390,11 +400,11 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
                         disabled={changingRoleId === member.id}
                         onChange={(e) => void handleChangeRole(member.id, e.target.value as 'admin' | 'member')}
                       >
-                        <option value="admin">Admin</option>
-                        <option value="member">Member</option>
+                        <option value="admin">{t('roleAdmin')}</option>
+                        <option value="member">{t('roleMember')}</option>
                       </select>
                     ) : (
-                      <Badge variant={isThisOwner ? 'info' : 'secondary'} className="capitalize">{member.role}</Badge>
+                      <Badge variant={isThisOwner ? 'info' : 'secondary'}>{orgRoleLabel(member.role, t)}</Badge>
                     )}
                     {canEdit && (
                       <Button

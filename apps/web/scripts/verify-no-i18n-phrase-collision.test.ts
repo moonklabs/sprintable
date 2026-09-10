@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
   countDynamicKeyCalls,
   EXEMPT_PAIRS,
+  findMemberSynonymCollisions,
   findSubstringCollisions,
   flattenMessages,
   GRANDFATHER_BASELINE,
@@ -342,6 +343,51 @@ describe('GRANDFATHER_LIVE_COUNT_TEST — 「선언된 수」와 「지금 실�
     expect(GRANDFATHER_BASELINE.size).toBeGreaterThan(0); // sanity: baseline은 안 비었다
     const { exemptHit } = scanRepository();
     expect(exemptHit.size).toBe(EXEMPT_PAIRS.size);
+  });
+});
+
+// story #3758(BE·표시명·결함 클래스 별건④, 페드루/유나 2026-09-09 — 「구성원」/「멤버」
+// 동의어 충돌을 인스턴스 손목록이 아니라 자로 닫는다) — baseline 0 pin. 다음 사람이
+// 이 자리(8키 중 하나)를 되돌리면 이 테스트가 즉시 RED가 되어 CI가 말한다(exempt/
+// grandfather 없음 — 이 축은 발견되면 그 자리에서 고치는 게 규칙).
+describe('MEMBER_SYNONYM_BASELINE_TEST — story #3758(「구성원」/「멤버」 동의어 축)', () => {
+  it('실제 저장소 스캔에서 지금 걸리는 동의어 충돌은 0건이다', () => {
+    const { memberSynonymFindings } = scanRepository();
+    expect(memberSynonymFindings.size).toBe(0);
+  });
+});
+
+describe('findMemberSynonymCollisions — story #3758', () => {
+  it('⭐양성대조 — 한 파일에 「구성원」 담은 값과 「멤버」 담은 값이 같이 있으면 잡는다(수 무관)', () => {
+    const phrases = new Map([
+      ['ns.a', { value: '구성원 추가', numberAdjacent: false }],
+      ['ns.b', { value: '멤버가 없습니다.', numberAdjacent: false }],
+    ]);
+    expect(findMemberSynonymCollisions(phrases).length).toBe(1);
+  });
+
+  it('음성대조 — 「멤버」만 쓰는 파일은 짝이 안 생겨 저절로 빠진다(안 갈리면 안 따라온다)', () => {
+    const phrases = new Map([
+      ['ns.a', { value: '멤버 추가', numberAdjacent: false }],
+      ['ns.b', { value: '멤버가 없습니다.', numberAdjacent: false }],
+    ]);
+    expect(findMemberSynonymCollisions(phrases)).toEqual([]);
+  });
+
+  it('음성대조 — 「구성원」만 쓰는 파일도 짝이 안 생긴다', () => {
+    const phrases = new Map([
+      ['ns.a', { value: '구성원 추가', numberAdjacent: false }],
+      ['ns.b', { value: '구성원이 없습니다.', numberAdjacent: false }],
+    ]);
+    expect(findMemberSynonymCollisions(phrases)).toEqual([]);
+  });
+
+  it('음성대조 — 둘 다 없는 무관 값끼리는 당연히 무관', () => {
+    const phrases = new Map([
+      ['ns.a', { value: '프로젝트 추가', numberAdjacent: false }],
+      ['ns.b', { value: '삭제됐습니다.', numberAdjacent: false }],
+    ]);
+    expect(findMemberSynonymCollisions(phrases)).toEqual([]);
   });
 });
 
