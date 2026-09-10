@@ -25,9 +25,16 @@ export interface FailureActionBadgeProps {
    * `<Button>`을 그대로 넣으면 인터랙티브 요소가 중첩된다(a>button, 무효 HTML). 카드
    * 소비처는 compact=true로 라벨만 받는다 — 재시도는 상세로 들어가서 한다. */
   compact?: boolean;
+  /** story #3402 갭 후속(페드루 PO 지적, 2026-09-10) — needs_check는 unmapped error_code의
+   * fail-closed 기본값이라 site_post 외부 발행 명령(`content/[draftId]/page.tsx`)에도
+   * 실제로 도달한다. 그 화면엔 확認 다이얼로그·체크리스트 관문 자체가 없어, action.
+   * needsRecheck만 보고 배지·CTA를 needs_check 것으로 바꾸면 "없는 관문을 약속"하는
+   * 거짓 문면이 된다. 이 prop이 true인 소비처(channel_posts 상세, 실제 관문이 있음)만
+   * needsRecheck를 반영 — 기본 false(정직한 일반 dead_letter 문면이 거짓 약속보다 낫다). */
+  recheckGate?: boolean;
 }
 
-export function FailureActionBadge({ action, onRetryClick, displayTimezone, compact }: FailureActionBadgeProps) {
+export function FailureActionBadge({ action, onRetryClick, displayTimezone, compact, recheckGate }: FailureActionBadgeProps) {
   const t = useTranslations('content');
 
   if (action.kind === 'blocked') {
@@ -71,14 +78,17 @@ export function FailureActionBadge({ action, onRetryClick, displayTimezone, comp
     );
   }
   if (action.kind === 'dead_letter') {
-    // story #3402 갭(PO 채택 ㉡, 2026-09-10) — needsRecheck면 문면·CTA 라벨만
-    // needs_check 것(채널 확認 관문)을 쓴다. 버튼 자체의 존재·활성 여부(command_
+    // story #3402 갭(PO 채택 ㉡, 2026-09-10) — needsRecheck ∧ recheckGate면 문면·CTA
+    // 라벨만 needs_check 것(채널 확認 관문)을 쓴다. 버튼 자체의 존재·활성 여부(command_
     // status=dead_letter)는 안 바뀐다 — 체크 前 확認 게이트는 이 버튼이 여는
-    // ConfirmDialog 안(page.tsx)에서 이뤄진다.
+    // ConfirmDialog 안(page.tsx)에서 이뤄진다. recheckGate=false(기본, site_post 외부
+    // 발행 등 실제 관문이 없는 소비처)면 needsRecheck가 true여도 일반 dead_letter
+    // 문면 그대로 — 없는 관문을 약속하지 않는다(페드루 PO 지적, 2026-09-10 ②).
+    const showRecheckWording = action.needsRecheck && recheckGate;
     return (
       <div className="space-y-1" data-testid="channel-post-failure-badge">
         <p className="text-xs text-destructive">
-          {action.needsRecheck ? t('channelPostsFailureNeedsCheck') : t('channelPostsFailureDeadLetter')}
+          {showRecheckWording ? t('channelPostsFailureNeedsCheck') : t('channelPostsFailureDeadLetter')}
         </p>
         {compact ? null : (
           <>
@@ -86,7 +96,7 @@ export function FailureActionBadge({ action, onRetryClick, displayTimezone, comp
               variant="outline" size="sm" onClick={onRetryClick} disabled={!onRetryClick}
               data-testid="channel-post-failure-retry-button"
             >
-              {action.needsRecheck ? t('channelPostsFailureCheckedRetryCta') : t('channelPostsFailureRetryCta')}
+              {showRecheckWording ? t('channelPostsFailureCheckedRetryCta') : t('channelPostsFailureRetryCta')}
             </Button>
             {onRetryClick ? null : (
               <p className="text-xs text-muted-foreground" data-testid="channel-post-failure-retry-disabled-reason">

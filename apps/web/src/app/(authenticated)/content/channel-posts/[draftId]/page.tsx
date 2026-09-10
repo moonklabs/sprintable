@@ -1981,6 +1981,10 @@ export default function ChannelPostEditPage() {
         {failureAction ? (
           <FailureActionBadge
             action={failureAction} displayTimezone={displayTimezone}
+            // story #3402 갭 후속(페드루 PO, 2026-09-10 ②) — 이 화면(상세)엔 아래
+            // ConfirmDialog가 실제 needs_check 관문(체크리스트·확認버튼 disabled)을
+            // 제공한다 — recheckGate=true라 needsRecheck 문면이 「약속을 지키는」 곳.
+            recheckGate
             onRetryClick={() => { setRetryChecklistConfirmed(false); setRetryConfirmOpen(true); }}
           />
         ) : null}
