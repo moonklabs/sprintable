@@ -2525,7 +2525,7 @@
     "channelPostsRetryConfirmChecklist": "I checked the channel",
     "channelPostsRetryConfirmAction": "Retry",
     "channelPostsRetryConfirmPendingCta": "Retrying…",
-    "channelPostsRetrySuccess": "Retry requested — it's back in the automatic retry queue.",
+    "channelPostsRetrySuccess": "Retry requested — it'll try once more on the next pass, and stop again if that fails.",
     "channelPostsRetryFailed": "Couldn't retry.",
     "errorPublicationCommandNotFound": "There's no schedule to cancel.",
     "errorChannelPostNotPublished": "This hasn't been published yet, so it can't be removed.",
