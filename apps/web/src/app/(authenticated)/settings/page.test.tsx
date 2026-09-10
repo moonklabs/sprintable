@@ -10,6 +10,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../../messages/ko.json';
+import enMessages from '../../../../messages/en.json';
 
 const { useDashboardContextMock } = vi.hoisted(() => ({
   useDashboardContextMock: vi.fn(),
@@ -437,6 +438,75 @@ describe('SettingsPage — story #3789: 조직 탭·삭제 다이얼로그 i18n 
       (b) => b.textContent === koMessages.settings.orgDeleteConfirmCta,
     );
     expect(confirmDeleteBtn).not.toBeUndefined();
+  });
+
+  // story #3789(페드루 지적 2026-09-10, 유나 r68 실 렌더) — en 값이 ICU plural
+  // 미분기라 count=1에도 항상 복수형("1 projects deleted permanently")이 떴다.
+  // agents.workflowRuleCount와 동형 ICU plural(one/other)로 정정(ko는 조사/복수
+  // 구분이 없어 무변). 이 ns 테스트 파일은 wrap()/mount()가 locale="ko"로 고정돼
+  // 있어(위) en 검증은 이 자리만 별도로 NextIntlClientProvider locale="en"을 직접
+  // 쓴다.
+  describe('삭제 다이얼로그 — en ICU plural(story #3789)', () => {
+    function wrapEn(node: React.ReactNode) {
+      return (
+        <NextIntlClientProvider locale="en" messages={enMessages} timeZone="Asia/Seoul">
+          {node}
+        </NextIntlClientProvider>
+      );
+    }
+
+    async function mountOrgTabEn(fetchWithAuthMock: ReturnType<typeof mockOrgFetch>) {
+      vi.doMock('next/navigation', () => ({
+        useRouter: () => ({ replace: vi.fn(), refresh: vi.fn(), push: vi.fn(), prefetch: vi.fn() }),
+        useSearchParams: () => new URLSearchParams('tab=organization'),
+        usePathname: () => '/settings',
+      }));
+      vi.doMock('@/lib/db/client', () => ({ fetchWithAuth: fetchWithAuthMock }));
+      const { default: SettingsPage } = await import('./page');
+      await act(async () => { root.render(wrapEn(<SettingsPage />)); });
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    }
+
+    it('count=0 — 복수형("0 projects deleted permanently")', async () => {
+      await mountOrgTabEn(mockOrgFetch({ impact: { project_count: 0, member_count: 0, has_active_subscription: false } }));
+      const deleteBtn = Array.from(container.querySelectorAll('button')).find(
+        (b) => b.textContent === enMessages.settings.orgDeleteTitle,
+      ) as HTMLButtonElement;
+      await act(async () => { deleteBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+      const text = document.body.textContent ?? '';
+      expect(text).toContain('0 projects deleted permanently');
+      expect(text).toContain('0 members lose access');
+    });
+
+    it('count=1 — 단수형("1 project deleted permanently"·"1 member loses access"), 복수형 문구는 안 뜬다', async () => {
+      await mountOrgTabEn(mockOrgFetch({ impact: { project_count: 1, member_count: 1, has_active_subscription: false } }));
+      const deleteBtn = Array.from(container.querySelectorAll('button')).find(
+        (b) => b.textContent === enMessages.settings.orgDeleteTitle,
+      ) as HTMLButtonElement;
+      await act(async () => { deleteBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+      const text = document.body.textContent ?? '';
+      expect(text).toContain('1 project deleted permanently');
+      expect(text).toContain('1 member loses access');
+      expect(text).not.toContain('1 projects');
+      expect(text).not.toContain('1 members');
+    });
+
+    it('count=7(복수) — 복수형("7 projects deleted permanently"·"7 members lose access")', async () => {
+      await mountOrgTabEn(mockOrgFetch({ impact: { project_count: 7, member_count: 7, has_active_subscription: false } }));
+      const deleteBtn = Array.from(container.querySelectorAll('button')).find(
+        (b) => b.textContent === enMessages.settings.orgDeleteTitle,
+      ) as HTMLButtonElement;
+      await act(async () => { deleteBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+      const text = document.body.textContent ?? '';
+      expect(text).toContain('7 projects deleted permanently');
+      expect(text).toContain('7 members lose access');
+    });
   });
 
   it('API 키 탭 — 이관 안내가 rich text(<strong>)로 렌더되고, 이동 버튼은 agentManagementCta를 쓴다', async () => {
