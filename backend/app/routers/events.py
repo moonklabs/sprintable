@@ -1403,7 +1403,28 @@ async def _render_gate_verdict_message(db: AsyncSession, *, org_id: uuid.UUID, p
             # draft_id가 site_post_drafts에 있는지로 도메인을 가른다 — destination
             # 문자열(hosted_site/wordpress/webhook vs threads)에 기대는 것보다
             # 채널 목록이 늘어나도 안 깨지는 축이다.
+            #
+            # story #3369 후속(자기점검 2차, 유나 실측·페드루 지시 2026-09-10) — 위
+            # #3487 주석은 "hosted_site 공통"이라 적었지만 실제로는 아니다:
+            # `gate_service.py::_maybe_create_scheduled_publication_command`가
+            # `destination_channel == "hosted_site"`면 publication_command 생성을
+            # 그 자리에서 건너뛴다("내부 동기 경로 그대로 — publication_command 불요").
+            # 즉 hosted_site 승인은 워커가 자동으로 발행하지 않는다 — 휴먼이 여전히
+            # 화면에서 «발행»/«재발행»을 직접 눌러야 한다. 이 표면의 수신자는 항상
+            # 에이전트(위 주석)라, hosted_site draft에 옛 문구("다음 워커 tick에
+            # 발행됩니다")를 그대로 보내면 에이전트가 "할 일 없음"으로 오판해 사람에게
+            # 재발행이 필요하다는 것을 못 알릴 수 있다.
+            #
+            # story #4155 유나 CHANGES(2026-09-10) — 위 수정이 connection_id 유무를
+            # 대리값으로 썼는데, `gate_service.py:1037-1072`엔 외부 목적지(connection_id
+            # 있음)인데도 command를 안 만들고 return하는 경로가 6개(_mark_unresolved 5·
+            # _mark_scope_mismatch 1 — scope mismatch는 설계된 도달 상태) 있어 그 경로
+            # 에서도 이 대리값이 "명령이 만들어졌다"로 잘못 읽었다. 대리값을 버리고 실제
+            # `PublicationCommand` 존재 여부를 직접 조회한다(gate_id로, 인덱스 有) — 이
+            # 한 조회가 hosted_site(애초에 명령 자체가 없는 경로)와 외부-이지만-생성
+            # 실패(위 6경로) 둘 다를 같은 방식으로 정확히 잡는다.
             is_site_post = False
+            site_post_command_exists = False
             if draft_id:
                 try:
                     draft_uuid = uuid.UUID(draft_id)
@@ -1414,7 +1435,12 @@ async def _render_gate_verdict_message(db: AsyncSession, *, org_id: uuid.UUID, p
                     is_site_post = (await db.execute(
                         select(SitePostDraft.id).where(SitePostDraft.id == draft_uuid)
                     )).scalar_one_or_none() is not None
-            if is_site_post:
+            if is_site_post and gate_row is not None:
+                from app.models.publication_command import PublicationCommand
+                site_post_command_exists = (await db.execute(
+                    select(PublicationCommand.id).where(PublicationCommand.gate_id == gate_row.id)
+                )).first() is not None
+            if is_site_post and site_post_command_exists:
                 lines.append(
                     "- 다음 행동: 없음 — 승인으로 발행 명령이 만들어졌고 다음 워커 "
                     "tick(최대 1분)에 발행됩니다. 결과는 원문 상세 «발행 결과» 줄에서 "
