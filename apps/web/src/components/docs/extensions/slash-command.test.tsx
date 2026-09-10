@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { calculatePopupPosition, defaultSlashItems } from './slash-command';
+import {
+  buildSlashMenuCategories,
+  calculatePopupPosition,
+  createSlashCommandExtension,
+  type SlashMenuStrings,
+} from './slash-command';
+import enMessages from '../../../../messages/en.json';
+import koMessages from '../../../../messages/ko.json';
 
 // ---------------------------------------------------------------------------
 // calculatePopupPosition — pure unit tests
@@ -100,54 +107,11 @@ describe('calculatePopupPosition', () => {
 });
 
 // ---------------------------------------------------------------------------
-// defaultSlashItems — sanity checks
-// ---------------------------------------------------------------------------
-
-describe('defaultSlashItems', () => {
-  it('includes expected block types', () => {
-    const titles = defaultSlashItems.map((i) => i.title);
-    expect(titles).toContain('Heading 1');
-    expect(titles).toContain('Bullet List');
-    expect(titles).toContain('Code Block');
-    expect(titles).toContain('Table');
-    expect(titles).toContain('Callout');
-  });
-
-  it('each item has a non-empty title, icon, and command function', () => {
-    for (const item of defaultSlashItems) {
-      expect(item.title.length).toBeGreaterThan(0);
-      // icon is an FC<{ className?: string }> (lucide component), not a string — assert it exists
-      expect(item.icon).toBeTruthy();
-      expect(typeof item.command).toBe('function');
-    }
-  });
-});
-
-// ---------------------------------------------------------------------------
-// SlashMenu component — keyboard navigation + rendering
-// ---------------------------------------------------------------------------
-
-// We need to import SlashMenu; it's not exported, so we test indirectly through
-// a thin wrapper that re-exports the internals we care about.
-// Since the component is defined with forwardRef inside the module, we test
-// the rendered output via a simple integration: render the list and assert.
-
-// Re-export the component from the module for testing. If it becomes exported
-// in the future, this pattern can be replaced with a direct import.
-import { SlashCommandExtension, buildSlashMenuCategories, createSlashCommandExtension, slashMenuCategories, type SlashMenuStrings } from './slash-command';
-
-describe('SlashCommandExtension', () => {
-  it('is created with name "slashCommand"', () => {
-    expect(SlashCommandExtension.name).toBe('slashCommand');
-  });
-});
-
-// ---------------------------------------------------------------------------
 // createSlashCommandExtension / buildSlashMenuCategories — story ab2fd813(#2028)
+// story #3782 — module-scope 상수 slashMenuCategories/defaultSlashItems/
+// SlashCommandExtension(자기 테스트 외 소비처 0)를 걷으며, 이 상수들만 보던 assertion을
+// 라이브 경로(buildSlashMenuCategories/createSlashCommandExtension)의 출력으로 옮겼다.
 // ---------------------------------------------------------------------------
-
-import enMessages from '../../../../messages/en.json';
-import koMessages from '../../../../messages/ko.json';
 
 // raw messages/{ko,en}.json nest each item description one level deeper
 // (`items.<key>.description`) than the flat `SlashMenuStrings` interface —
@@ -177,10 +141,39 @@ function stringsFromMessages(messages: { docs: { slashMenu: RawSlashMenuMessages
 
 const KOREAN_RE = /[가-힣]/;
 
-describe('buildSlashMenuCategories — EN strings carry no Korean leakage', () => {
-  const enStrings = stringsFromMessages(enMessages as unknown as { docs: { slashMenu: RawSlashMenuMessages } });
-  const enCategories = buildSlashMenuCategories(enStrings);
+const enStrings = stringsFromMessages(enMessages as unknown as { docs: { slashMenu: RawSlashMenuMessages } });
+const koStrings = stringsFromMessages(koMessages as unknown as { docs: { slashMenu: RawSlashMenuMessages } });
+const enCategories = buildSlashMenuCategories(enStrings);
+const koCategories = buildSlashMenuCategories(koStrings);
 
+// story #3782 — 이전엔 defaultSlashItems(module-scope ko 고정 상수, 자기 테스트 외
+// 소비처 0)의 항목 형(title/icon/command)을 직접 쟀다. 그 상수를 걷으며 같은 불변식을
+// 라이브 경로의 출력(buildSlashMenuCategories)으로 옮긴다 — title은 로케일 무관 검색
+// 키라 en/ko 어느 쪽으로 재도 동일(아래 'item titles stay identical' 테스트가 그 불변식
+// 자체를 고정).
+describe('buildSlashMenuCategories(strings) — item shape (story #3782, defaultSlashItems 후속)', () => {
+  const items = enCategories.flatMap((c) => c.items);
+
+  it('includes expected block types (title = locale-invariant search key)', () => {
+    const titles = items.map((i) => i.title);
+    expect(titles).toContain('Heading 1');
+    expect(titles).toContain('Bullet List');
+    expect(titles).toContain('Code Block');
+    expect(titles).toContain('Table');
+    expect(titles).toContain('Callout');
+  });
+
+  it('each item has a non-empty title, icon, and command function', () => {
+    for (const item of items) {
+      expect(item.title.length).toBeGreaterThan(0);
+      // icon is an FC<{ className?: string }> (lucide component), not a string — assert it exists
+      expect(item.icon).toBeTruthy();
+      expect(typeof item.command).toBe('function');
+    }
+  });
+});
+
+describe('buildSlashMenuCategories — EN strings carry no Korean leakage', () => {
   it('every category label is Korean-free', () => {
     for (const cat of enCategories) {
       expect(KOREAN_RE.test(cat.label)).toBe(false);
@@ -195,37 +188,47 @@ describe('buildSlashMenuCategories — EN strings carry no Korean leakage', () =
     }
   });
 
-  it('item titles stay identical to the static (search-key) fallback regardless of locale', () => {
-    const staticTitles = slashMenuCategories.flatMap((c) => c.items.map((i) => i.title));
-    const localizedTitles = enCategories.flatMap((c) => c.items.map((i) => i.title));
-    expect(localizedTitles).toEqual(staticTitles);
+  // story #3782 — 이전엔 module-scope 상수 slashMenuCategories(ko 고정)와 비교했으나 그
+  // 상수 자체가 테스트 전용 죽은 export라 걷었다. title이 로케일 무관 검색 키라는 게 본래
+  // 불변식이므로, en/ko 두 로케일 결과를 서로 비교해도 같은 불변식을 고정할 수 있다.
+  it('item titles stay identical across locales (locale-invariant search key)', () => {
+    const enTitles = enCategories.flatMap((c) => c.items.map((i) => i.title));
+    const koTitles = koCategories.flatMap((c) => c.items.map((i) => i.title));
+    expect(enTitles).toEqual(koTitles);
   });
 
-  it('produces the same category/item counts as the static fallback', () => {
-    expect(enCategories.length).toBe(slashMenuCategories.length);
-    expect(enCategories.flatMap((c) => c.items).length).toBe(slashMenuCategories.flatMap((c) => c.items).length);
+  it('produces the same category/item counts across locales', () => {
+    expect(enCategories.length).toBe(koCategories.length);
+    expect(enCategories.flatMap((c) => c.items).length).toBe(koCategories.flatMap((c) => c.items).length);
   });
 });
 
+// story #3782 — 이전엔 module-scope 상수 slashMenuCategories(i18n 이전 원본 한글 고정값)와
+// 비교했으나 그 상수 자체가 테스트 전용 죽은 export라 걷었다. 아래 배열은 그 상수가 갖고
+// 있던 정확한 값(2026-09-10 삭제 직전 실측, 카테고리·항목 순서 그대로)을 이 테스트에 그대로
+// 얼려 둔 것 — ko.json이 조용히 다른 뜻으로 바뀌는 것(오타·의미변형)을 계속 잡아낸다.
+const KO_DESCRIPTIONS_FROZEN_AT_MIGRATION = [
+  '큰 제목', '중간 제목', '작은 제목',
+  '순서 없는 목록', '순서 있는 목록', '체크리스트',
+  '코드 블록', '인용구', '강조 박스', '표 삽입',
+  '이미지 삽입', '파일 첨부', '외부 URL 임베드', '다이어그램 삽입',
+  '2단/3단 컬럼 레이아웃', 'LaTeX 블록 수식', 'LaTeX 인라인 수식', '접기/펼치기 블록', '다른 문서 임베드', '구분선',
+];
+
 describe('buildSlashMenuCategories — KO strings still carry the original Korean copy', () => {
-  it('description text matches the pre-i18n static fallback 1:1 (no meaning drift)', () => {
-    const koStrings = stringsFromMessages(koMessages as unknown as { docs: { slashMenu: RawSlashMenuMessages } });
-    const koCategories = buildSlashMenuCategories(koStrings);
+  it('description text matches the pre-i18n golden copy 1:1 (no meaning drift)', () => {
     const koDescriptions = koCategories.flatMap((c) => c.items.map((i) => i.description));
-    const staticDescriptions = slashMenuCategories.flatMap((c) => c.items.map((i) => i.description));
-    expect(koDescriptions).toEqual(staticDescriptions);
+    expect(koDescriptions).toEqual(KO_DESCRIPTIONS_FROZEN_AT_MIGRATION);
   });
 });
 
 describe('createSlashCommandExtension(strings)', () => {
   it('builds an Extension named "slashCommand" regardless of injected strings', () => {
-    const enStrings = stringsFromMessages(enMessages as unknown as { docs: { slashMenu: RawSlashMenuMessages } });
     const ext = createSlashCommandExtension(enStrings);
     expect(ext.name).toBe('slashCommand');
   });
 
   it('filters suggestion items by title (English search key), not by localized description', () => {
-    const enStrings = stringsFromMessages(enMessages as unknown as { docs: { slashMenu: RawSlashMenuMessages } });
     const ext = createSlashCommandExtension(enStrings);
     const options = ext.options as { suggestion: { items: (arg: { query: string }) => { title: string }[] } };
     const matches = options.suggestion.items({ query: 'heading' });
