@@ -158,7 +158,6 @@ export const GRANDFATHER_BASELINE = new Set<string>([
   'app/onboarding/onboarding-telemetry.ts::/api/onboarding/events',
   'components/agents/access-matrix-tab.tsx::/api/projects/',
   'components/agents/agent-management-tab.tsx::/api/team-members/',
-  'components/agents/agent-run-detail.tsx::/api/v1/agent-runs/',
   'components/cage/gate-undo-button.tsx::/api/gates/',
   'components/cage/stuck-handoff-section.tsx::/api/stories/',
   'components/canvas/import-artifact-dialog.tsx::/api/visual-artifacts/import-image',

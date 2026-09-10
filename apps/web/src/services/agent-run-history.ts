@@ -26,11 +26,6 @@ export function getRunFailureDisposition(input: RetryableFailureInput & { failur
   return getFailureDisposition(input);
 }
 
-export function canManuallyRetryRun(input: RetryableFailureInput & { failure_disposition?: AgentRunFailureDisposition | null }) {
-  const disposition = getRunFailureDisposition(input);
-  return input.status === 'failed' && disposition !== 'retry_scheduled' && disposition !== 'retry_launched' && disposition !== 'non_retryable';
-}
-
 function parseLocalDateInput(dateInput: string) {
   const [year, month, day] = dateInput.split('-').map(Number);
   return { year, month, day };
