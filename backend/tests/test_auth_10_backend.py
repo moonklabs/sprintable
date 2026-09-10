@@ -258,3 +258,130 @@ async def test_get_me_has_password_false():
         assert resp.json()["has_password"] is False
     finally:
         app.dependency_overrides.clear()
+
+
+# ─── GET /api/v2/me — totp_enabled 필드(story #3768) ─────────────────────────
+# 설정 화면(two-factor-section.tsx)이 상태를 알려고 POST /totp/setup을 마운트마다
+# 부르던 것(매번 새 시크릿을 DB에 쓰는 클래스)을 이 필드 읽기로 교체 — has_password와
+# 동일 패턴(정상 분기: MeResponse.model_validate(member) 뒤 data.totp_enabled 채움).
+
+@pytest.mark.anyio
+async def test_get_me_totp_enabled_true():
+    """TOTP 켜진 사용자 → totp_enabled: true."""
+    from app.dependencies.auth import get_current_user
+    client, session, app = await _client()
+    try:
+        uid = uuid.uuid4()
+        ctx = _make_auth_ctx(uid)
+        ctx.claims = {"app_metadata": {}}
+
+        project = MagicMock()
+        project.name = "Test Project"
+        member = MagicMock()
+        member.id = uuid.uuid4()
+        member.user_id = uid
+        member.org_id = uuid.uuid4()
+        member.project_id = uuid.uuid4()
+        member.name = "Test User"
+        member.type = "human"
+        member.role = "member"
+        member.is_active = True
+        member.email = "user@example.com"
+        member.project_name = None
+        member.has_password = None
+        member.totp_enabled = None
+        member.project = project
+
+        user_mock = MagicMock()
+        user_mock.id = uid
+        user_mock.email = "user@example.com"
+        user_mock.hashed_password = "irrelevant"
+        user_mock.totp_enabled = True
+
+        async def override_auth():
+            return ctx
+
+        app.dependency_overrides[get_current_user] = override_auth
+
+        call_count = 0
+
+        async def mock_execute(stmt, *args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            r = MagicMock()
+            if call_count == 1:
+                r.scalars.return_value.first.return_value = member
+            else:
+                r.scalar_one_or_none.return_value = user_mock
+            return r
+
+        session.execute = mock_execute
+
+        async with client as c:
+            resp = await c.get("/api/v2/me")
+
+        assert resp.status_code == 200
+        assert resp.json()["totp_enabled"] is True
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_get_me_totp_enabled_false():
+    """TOTP 안 켠 사용자 → totp_enabled: false(«모름»으로 새지 않는다)."""
+    from app.dependencies.auth import get_current_user
+    client, session, app = await _client()
+    try:
+        uid = uuid.uuid4()
+        ctx = _make_auth_ctx(uid)
+        ctx.claims = {"app_metadata": {}}
+
+        project = MagicMock()
+        project.name = "Test Project"
+        member = MagicMock()
+        member.id = uuid.uuid4()
+        member.user_id = uid
+        member.org_id = uuid.uuid4()
+        member.project_id = uuid.uuid4()
+        member.name = "Test User"
+        member.type = "human"
+        member.role = "member"
+        member.is_active = True
+        member.email = "user@example.com"
+        member.project_name = None
+        member.has_password = None
+        member.totp_enabled = None
+        member.project = project
+
+        user_mock = MagicMock()
+        user_mock.id = uid
+        user_mock.email = "user@example.com"
+        user_mock.hashed_password = "irrelevant"
+        user_mock.totp_enabled = False
+
+        async def override_auth():
+            return ctx
+
+        app.dependency_overrides[get_current_user] = override_auth
+
+        call_count = 0
+
+        async def mock_execute(stmt, *args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            r = MagicMock()
+            if call_count == 1:
+                r.scalars.return_value.first.return_value = member
+            else:
+                r.scalar_one_or_none.return_value = user_mock
+            return r
+
+        session.execute = mock_execute
+
+        async with client as c:
+            resp = await c.get("/api/v2/me")
+
+        assert resp.status_code == 200
+        assert resp.json()["totp_enabled"] is False
+    finally:
+        app.dependency_overrides.clear()
