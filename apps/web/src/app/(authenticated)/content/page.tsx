@@ -326,7 +326,15 @@ export default function ContentPostListPage() {
                     )}
                   </td>
                   <td className="px-3 py-2.5">
-                    <p className="text-muted-foreground">{formatRelativeTime(draft.updated_at, locale, displayTimezone)}</p>
+                    {/* story #3368 자기점검(페드루 지적 2026-09-10) — #3744가 열을 줄이며
+                        「현재 버전」 v{n}을 통째로 빠뜨렸다(원작성 주체처럼 하위 칸으로
+                        강등된 게 아니라 흔적 자체가 사라짐 — 데이터(draft.current_version)
+                        는 그대로 fetch되고 있었다). origin_author_kind 강등과 같은 자리에
+                        같은 형(작은 mono 보조 문구)으로 복원한다. */}
+                    <p className="text-muted-foreground">
+                      {formatRelativeTime(draft.updated_at, locale, displayTimezone)}
+                      <span className="ml-1 font-mono" data-testid="content-current-version">· v{draft.current_version}</span>
+                    </p>
                     {/* story #3744 — 열 축소(§6-3-1의 원작성 주체 열 삭제 아님, 하위
                         칸으로 강등). 원작성·최종수정이 갈리는 실제 케이스(에이전트가
                         쓰고 사람이 고침)를 목록에서 계속 구별하려면 두 칩이 다 있어야

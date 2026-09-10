@@ -224,6 +224,19 @@ class GateResponse(BaseModel):
     sealed_content_version: int | None = None
     sealed_content_sha256: str | None = None
     sealed_content_body: str | None = None
+    # story #3367(3자기점검, 페드루 지적 2026-09-10) — AC7("결재 카드에서... 목적지를
+    # 확認할 수 있고")의 입력. Gate ORM 컬럼명과 일치라 from_attributes로 자동 채워짐
+    # (sealed_content_*와 동일 선례). null=hosted_site(site_posts.py::_reseal_gate_on_
+    # new_version 관례 그대로), 그 외는 ChannelConnection.id — FE가 그 값으로 실제
+    # 연결(WordPress/webhook 등)을 표시명으로 잇는 건 그 연결의 channel을 별도로 알아야
+    # 해 이번 조각 밖(#3450이 착지하며 그 축을 마저 잇는다, PR 코멘트 참고).
+    sealed_destination_connection_id: uuid.UUID | None = None
+    # story #3367(3자기점검, 페드루 지적 2026-09-10) — AC7의 나머지 축("마지막 수정
+    # 주체"). sealed_content_body의 작성자가 아니라(그건 «봉인 당시» 작성자·approved
+    # 뒤 편집이면 옛 버전에 묶여 있다) draft의 **지금** 최신 버전 author_kind — list_
+    # gates()가 neutral_facts.draft_id로 배치 enrich(N+1 0, sealed_doc_id와 동일 선례).
+    # 다른 gate_type·draft_id 없는 옛 external_publish 행은 None(지어내지 않는다).
+    latest_author_kind: str | None = None
     # story #3569(Phase2·BE·소형, 페드루 PO 確定 2026-09-06) — concept_approval 전용
     # sealing(story #3561/#3922). sealed_content_*와 동일 선례 — Gate ORM 컬럼명과
     # 일치라 from_attributes로 자동 채워짐(다른 gate_type은 전부 None).
@@ -776,6 +789,48 @@ async def list_gates(
         for resp, g in zip(responses, gates):
             if g.sealed_doc_id is not None:
                 resp.sealed_doc_title = sealed_doc_title_by_id.get(g.sealed_doc_id)
+
+    # story #3367(3자기점검, 페드루 지적 2026-09-10) — AC7("마지막 수정 주체")의 입력.
+    # sealed_content_body의 작성자(봉인 시점, approved 뒤 편집이면 옛 버전에 묶임)가
+    # 아니라 draft의 **지금** 최신 버전 author_kind다 — sealed_doc_ids 배치(위)와 동일
+    # 선례(독립 1회 배치·N+1 0). external_publish 게이트만 대상(gate_type 축) — neutral_
+    # facts.draft_id는 site_posts.py::submit_site_post_draft/_reseal_gate_on_new_version이
+    # 문자열로 심는다(_reseal_gate_on_new_version:509 그라운딩 確認).
+    latest_author_draft_ids: dict[uuid.UUID, uuid.UUID] = {}
+    for resp, g in zip(responses, gates):
+        if g.gate_type != "external_publish":
+            continue
+        raw_draft_id = (g.neutral_facts or {}).get("draft_id")
+        if not raw_draft_id:
+            continue
+        try:
+            latest_author_draft_ids[resp.id] = uuid.UUID(str(raw_draft_id))
+        except ValueError:
+            continue
+    if latest_author_draft_ids:
+        from app.models.site_post_version import SitePostVersion
+
+        latest_version_ids = (
+            select(
+                SitePostVersion.draft_id,
+                func.max(SitePostVersion.version).label("max_version"),
+            )
+            .where(SitePostVersion.draft_id.in_(set(latest_author_draft_ids.values())))
+            .group_by(SitePostVersion.draft_id)
+            .subquery()
+        )
+        author_rows = (await session.execute(
+            select(SitePostVersion.draft_id, SitePostVersion.author_kind).join(
+                latest_version_ids,
+                (SitePostVersion.draft_id == latest_version_ids.c.draft_id)
+                & (SitePostVersion.version == latest_version_ids.c.max_version),
+            )
+        )).all()
+        latest_author_kind_by_draft_id = {did: kind for did, kind in author_rows}
+        for resp in responses:
+            draft_id = latest_author_draft_ids.get(resp.id)
+            if draft_id is not None:
+                resp.latest_author_kind = latest_author_kind_by_draft_id.get(draft_id)
 
     # doc-side enrich 2종 Doc 조회를 **한 배치**로(org-scope·soft-delete 가드·N+1 0):
     #  ⓐ work_item_summary(24f5ae18): work_item_type=='doc' gate → title/slug.

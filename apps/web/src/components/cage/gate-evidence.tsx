@@ -11,6 +11,7 @@ import type { GateItem } from '@/components/kanban/types';
 import { parseEntityRef, unescapeReferenceLabel } from '@/components/chat/entity-ref';
 import { EntityChip, getEntityHref } from '@/components/chat/embed-card';
 import { isCommentReplyGate } from '@/components/cage/gate-risk';
+import { AuthorKindBadge } from '@/components/content/author-kind-badge';
 
 /**
  * H1-S8 머지 verdict 게이트 evidence(read-only 표시). 3 surface(GateInbox row·story detail·
@@ -189,6 +190,15 @@ interface RecipeApprovalFacts {
   // 서식을 있는 그대로 보여준다, contentBody의 "요약→전문" 확장과 다른 결).
   sealedDocRef: ParsedReferenceToken | null;
   sealedDocBodySha256: string | null;
+  // story #3367(3자기점검, 페드루 지적 2026-09-10) — AC7("마지막 수정 주체·목적지").
+  // 봉인 축(contentBody 등)과 달리 이 둘은 "지금" 값이다(latestAuthorKind는 approved
+  // 뒤 편집이면 봉인 작성자와 갈릴 수 있다 — 그게 이 필드의 존재 이유).
+  latestAuthorKind: 'agent' | 'human' | null;
+  // Gate ORM 실 컬럼이라 모든 gate_type 응답에 항상 present(null 포함, sealed_doc_id와
+  // 동일 선례) — "hosted_site"와 "이 축이 없는 gate_type"을 이 필드 하나로는 못
+  // 가른다. 렌더는 contentVersion/contentSha256(site_posts 식별 신호)과 같은 조건에
+  // 묶는다(아래 RecipeApprovalFactsBlock — «모른다≠다르다» 규율은 그 조건 분기가 진다).
+  destinationConnectionId: string | null;
 }
 
 function recipeApprovalFacts(gate: GateItem): RecipeApprovalFacts | null {
@@ -229,6 +239,9 @@ function recipeApprovalFacts(gate: GateItem): RecipeApprovalFacts | null {
     isResolved: gate.status === 'approved' || gate.status === 'rejected' || gate.status === 'auto_passed',
     sealedDocRef,
     sealedDocBodySha256: realString(gate.sealed_doc_body_sha256),
+    latestAuthorKind: gate.latest_author_kind === 'agent' || gate.latest_author_kind === 'human'
+      ? gate.latest_author_kind : null,
+    destinationConnectionId: realString(gate.sealed_destination_connection_id) ?? null,
   };
   const hasAny = isCommentReply ||
     facts.workItemRef || facts.draftDocRef || facts.draftDocSummary || facts.channel || facts.stage ||
@@ -633,6 +646,27 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
           {facts.contentVersion !== null ? `${t('recipeApprovalVersionLabel')} v${facts.contentVersion}` : null}
           {facts.contentVersion !== null && facts.contentSha256 ? ' · ' : null}
           {facts.contentSha256 ? `${t('recipeApprovalSealedHashLabel')} ${facts.contentSha256.slice(0, 12)}…` : null}
+        </p>
+      ) : null}
+      {/* story #3367(3자기점검, 페드루 지적 2026-09-10) — AC7("마지막 수정 주체·
+          목적지를 확認할 수 있고"). 위 버전/해시 줄과 같은 site_posts 식별 조건
+          (contentVersion/contentSha256)에 묶는다 — 다른 gate_type엔 이 축 자체가
+          없다(«모른다≠다르다», sealed_destination_connection_id는 Gate 실 컬럼이라
+          항상 present라 이 조건 없이는 다른 gate_type에도 "호스팅 블로그"가 새 나갈
+          뻔했다). 목적지가 커넥션(WordPress/webhook)이면 이번 조각은 표시명을 안
+          지어내고 그 존재만 원문 짧은 꼬리로 남긴다(#3450이 어댑터 표시명을 잇는다). */}
+      {facts.contentVersion !== null || facts.contentSha256 ? (
+        <p className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-muted-foreground">
+          <span>
+            <span>{t('recipeApprovalLatestAuthorLabel')} · </span>
+            <AuthorKindBadge kind={facts.latestAuthorKind} />
+          </span>
+          <span>
+            {t('recipeApprovalDestinationLabel')} ·{' '}
+            {facts.destinationConnectionId === null
+              ? t('recipeApprovalDestinationHostedSite')
+              : `…${facts.destinationConnectionId.slice(-8)}`}
+          </span>
         </p>
       ) : null}
       {/* story #3560(concept_approval, 페드루 PO 確定 2026-09-06) — 봉인 doc은

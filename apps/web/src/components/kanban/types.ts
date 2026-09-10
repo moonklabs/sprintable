@@ -134,6 +134,15 @@ export interface GateItem {
   sealed_doc_id?: string | null;
   sealed_doc_body_sha256?: string | null;
   sealed_doc_title?: string | null;
+  // story #3367(3자기점검, 페드루 지적 2026-09-10) — AC7("승인 대상의... 마지막 수정
+  // 주체, 목적지를 확認할 수 있고"). null=hosted_site(site_posts.py::_reseal_gate_on_
+  // new_version 관례)·그 외는 ChannelConnection.id(표시명 해소는 #3450 착지 뒤 — 지금은
+  // WordPress/webhook 목적지가 이 경로에 실질 도달하지 않는다, gate-evidence.tsx 참고).
+  sealed_destination_connection_id?: string | null;
+  // draft의 **지금** 최신 버전 author_kind — sealed_content_body의 작성자(봉인 시점,
+  // approved 뒤 편집이면 옛 버전에 묶임)와 다를 수 있다. external_publish 게이트만·
+  // draft_id 배치 enrich(BE gates.py) 대상이 아니면 undefined.
+  latest_author_kind?: 'agent' | 'human' | null;
 }
 
 // story #2054: 결재함 통합 인박스에서 HitlRequest(gate_approval park) 항목 최소 스키마(BE
