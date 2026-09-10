@@ -80,6 +80,11 @@ export interface InsightsBoardRow {
   // null — 소급 백필 없음(신규 발행부터만 채워진다).
   asset_sha256s: string[] | null;
   hook_key: string | null;
+  // story #3766(별건 ⑩, 3746 §3 유나 定) — 「사람 차례」 발행 명령 축. 채널 포스트
+  // 목록의 CommandStatus(failure-action.ts)와 같은 값 집합·같은 뜻(같은
+  // PublicationCommand 행) — 새 낱말 0. 수집 상태 축(d1/d7·comments_*)과는 다른
+  // 축이라 필터 대상이 아니라 행 배지 전용. site_post 행은 항상 null.
+  command_status: string | null;
 }
 
 export interface InsightsBoardResponse {

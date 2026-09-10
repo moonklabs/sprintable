@@ -27,6 +27,8 @@ import { parseInsightsBoardApiError } from '@/components/insights-board/insights
 import { ASSET_LABEL_PREFIX_LENGTH, aggregateGroupBucket, groupInsightsBoardRows, type InsightsBoardGroupBy } from '@/components/insights-board/group-rows';
 import { DEFAULT_METRIC, METRIC_KEYS, type BoardMetric, type InsightsBoardResponse, type InsightsBoardRow, type InsightsBoardWindow } from '@/components/insights-board/types';
 import { PublishingMetricsBand } from '@/components/content/publishing-metrics-band';
+import { deriveFailureAction, type CommandStatus } from '@/components/content/failure-action';
+import { FailureActionBadge } from '@/components/content/failure-action-badge';
 
 /**
  * story #3503 — 성과 보드 화면. BE #3502 의존(PR 브리프 헤더 참고, 이 파일 작성 시점
@@ -556,6 +558,17 @@ export default function InsightsBoardPage() {
                   // 를 낸다 — 버튼 자체를 그 행엔 안 보여준다(follow-up 사람전용 게이트와
                   // 동형: 실패로 알리는 대신 애초에 숨긴다).
                   const canReconcile = row.kind === 'channel_publication';
+                  // story #3766(별건 ⑩, 3746 §3 유나 定) — 「사람 차례」 발행 명령 축은
+                  // 필터가 아니라 행 배지로만 선다. deriveFailureAction(단일 판정
+                  // 출처, failure-action.ts)을 그대로 재사용하되 이 배지는 command
+                  // Status 하나만 먹인다(failure_kind/next_retry_at/reason_code는
+                  // 이 보드에 안 실려 있다 — voided/needs_check/auto_retry/processing
+                  // 은 그 필드들이 있어야 판정되므로 여기선 애초에 안 뜬다). dead_letter·
+                  // blocked 둘만 그 판정에 필요한 입력이 commandStatus 하나뿐이라
+                  // 이 좁은 조인으로도 정확히 그 둘만 걸린다.
+                  const rowFailureAction = deriveFailureAction({ commandStatus: row.command_status as CommandStatus | null });
+                  const showFailureBadge = rowFailureAction?.kind === 'dead_letter' || rowFailureAction?.kind === 'blocked';
+                  const hasRowActions = canCreateFollowUp || canReconcile;
                   return (
                     <Fragment key={row.publication_id}>
                   <tr
@@ -598,34 +611,51 @@ export default function InsightsBoardPage() {
                       <InsightsBoardCommentsCell row={row} t={t} />
                     </td>
                     <td className="px-3 py-2.5">
+                      {/* story #3766(별건 ⑩, 유나 定 — issuecomment 2026-09-10 02:11Z)
+                          — 상태 딱지(FailureActionBadge)는 행동 자리(아래 버튼 div)와
+                          다른 자리를 쓴다: 행동칸에 섞으면 「자리가 뜻을 바꾼다」(PR#4107
+                          별건 ㉓과 동형 클래스 — 소유자 배지가 제거 열에 얹혀 세로로
+                          「소유자/제거/제거」로 읽히던 결함). 물음(왜 막혔나)이 생긴
+                          자리에 답이 있도록 배지가 버튼 줄 «위». 배지 없으면 그 줄
+                          노드 자체가 없다(①, 빈 줄이 gap만 먹지 않게). */}
+                      {showFailureBadge && rowFailureAction ? (
+                        <div className="mb-1.5 leading-tight">
+                          <FailureActionBadge action={rowFailureAction} displayTimezone={displayTimezone} compact />
+                        </div>
+                      ) : null}
                       {/* story #3592(§17-20 ⑧·§22-18 동형) — 행마다 같은 「후속 조치」
-                          접근 이름이라 보조기술 버튼 목록에서 어느 행인지 못 가른다. */}
-                      <div className="flex flex-wrap gap-1.5">
-                        {canCreateFollowUp ? (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => setFollowUpRow(row)}
-                            data-testid="insights-board-follow-up-button"
-                            aria-label={t('rowActionAriaLabel', { n: index + 1, label: t('followUpAction') })}
-                          >
-                            {t('followUpAction')}
-                          </Button>
-                        ) : null}
-                        {/* story #3620 AC3 — 「원본과 대조」, 진행 中 비활성. */}
-                        {canReconcile ? (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => void handleReconcile(row)}
-                            disabled={reconcile?.status === 'loading'}
-                            data-testid="insights-board-reconcile-button"
-                            aria-label={t('rowActionAriaLabel', { n: index + 1, label: t('reconcileAction') })}
-                          >
-                            {reconcile?.status === 'loading' ? t('reconcileInProgress') : t('reconcileAction')}
-                          </Button>
-                        ) : null}
-                      </div>
+                          접근 이름이라 보조기술 버튼 목록에서 어느 행인지 못 가른다.
+                          story #3766 — 버튼 div도 조건부(②, canCreateFollowUp·
+                          canReconcile 둘 다 false면 빈 flex div 자체를 안 남긴다 —
+                          배지가 뜬 행에서 그 빈 자리가 특히 눈에 띄는 걸 막는다). */}
+                      {hasRowActions ? (
+                        <div className="flex flex-wrap gap-1.5">
+                          {canCreateFollowUp ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => setFollowUpRow(row)}
+                              data-testid="insights-board-follow-up-button"
+                              aria-label={t('rowActionAriaLabel', { n: index + 1, label: t('followUpAction') })}
+                            >
+                              {t('followUpAction')}
+                            </Button>
+                          ) : null}
+                          {/* story #3620 AC3 — 「원본과 대조」, 진행 中 비활성. */}
+                          {canReconcile ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => void handleReconcile(row)}
+                              disabled={reconcile?.status === 'loading'}
+                              data-testid="insights-board-reconcile-button"
+                              aria-label={t('rowActionAriaLabel', { n: index + 1, label: t('reconcileAction') })}
+                            >
+                              {reconcile?.status === 'loading' ? t('reconcileInProgress') : t('reconcileAction')}
+                            </Button>
+                          ) : null}
+                        </div>
+                      ) : null}
                     </td>
                   </tr>
                   {reconcile && reconcile.status !== 'loading' ? (

@@ -41,6 +41,7 @@ from app.models.channel_post_version import ChannelPostVersion
 from app.models.gate import Gate
 from app.models.insight_snapshot import InsightSnapshot
 from app.models.pm import Story
+from app.models.publication_command import PublicationCommand
 from app.models.site_post import SitePost
 from app.models.site_post_draft import SitePostDraft
 from app.services.insight_snapshots import (
@@ -95,6 +96,11 @@ def _build_union(*, org_id: uuid.UUID, channel: str | None, since: datetime, inc
         # story #3656 — site_post는 소재/훅 개념 자체가 없어 항상 null(channel_post_
         # draft_id와 동일 이유).
         cast(literal(None), PG_UUID(as_uuid=True)).label("version_id"),
+        # story #3766(별건 ⑩) — site_post 발행 흐름은 이 쿼리가 gate를 아예 조인하지
+        # 않는다(channel_pub_arm과 달리 site_post_arm엔 Gate 조인이 없다 — site_post
+        # 쪽 gate 경로 자체가 이 스토리 스코프 밖, comments_count·channel_post_draft_id
+        # 와 동일 이유로 null). command_status도 그래서 항상 null.
+        cast(literal(None), PG_UUID(as_uuid=True)).label("gate_id"),
     ).select_from(SitePost)
     # story #3734 AC3 후속 — SitePost에 draft로의 FK가 없다(site_posts.py 서비스와 동형
     # 관례). (org_id, work_item_id, slug)가 site_post_drafts의 unique 제약과 정확히
@@ -135,6 +141,12 @@ def _build_union(*, org_id: uuid.UUID, channel: str | None, since: datetime, inc
             # sources)의 키. 이미 조인돼 있는 ChannelPublication에서 바로 뽑는다
             # (추가 조인 0 — channel_post_draft_id와 같은 열에서 파생).
             ChannelPublication.version_id.label("version_id"),
+            # story #3766(별건 ⑩, 3746 §3 유나 定) — 「사람 차례」 발행 명령 축
+            # (command_status)은 gate_id로 PublicationCommand를 되짚는다
+            # (channel_posts.py::_channel_post_to_list_item과 동형 관례 — gate당
+            # 최신 명령 1건, "최근 생성" 기준). Gate는 위에서 이미 조인돼 있다(title
+            # 조회용) — 추가 조인 0, 열만 하나 더 뽑는다.
+            Gate.id.label("gate_id"),
         )
         .select_from(ChannelPublication)
         .join(Gate, Gate.id == ChannelPublication.gate_id)
@@ -353,6 +365,23 @@ async def list_insights_board(
     comments_last_collected_at_by_pub = await get_last_collected_at_by_publication_ids(
         db, publication_ids=channel_pub_ids,
     )
+    # story #3766(별건 ⑩, 3746 §3 유나 定) — 발행 명령 상태 배치(N+1 회피, 위 스냅샷·
+    # 댓글 배치와 동형). channel_posts.py::list_channel_post_drafts(951-959)와 정확히
+    # 같은 패턴 — gate_id로 IN 조회 후 created_at DESC로 gate당 첫 행(=최신)만
+    # dict.setdefault로 남긴다. site_post 행은 gate_id가 애초 null(위 UNION 참고)이라
+    # 이 배치엔 안 들어가고 command_status도 항상 null — 「발행 명령 축」 자체가
+    # site_post 쪽엔 없는 개념이다(이 스토리 스코프 밖, 별건).
+    gate_ids = [r.gate_id for r in page if r.gate_id is not None]
+    latest_command_by_gate: dict[uuid.UUID, PublicationCommand] = {}
+    if gate_ids:
+        cmd_rows = (await db.execute(
+            select(PublicationCommand)
+            .where(PublicationCommand.gate_id.in_(gate_ids))
+            .order_by(PublicationCommand.created_at.desc())
+        )).scalars().all()
+        for c in cmd_rows:
+            latest_command_by_gate.setdefault(c.gate_id, c)
+
     from app.services.channel_adapters import CHANNEL_ADAPTERS
 
     # story #3656(페드루 PO CHANGES, 2026-09-07) — 소재/훅 배치 조회(N+1 회피, 위
@@ -420,6 +449,13 @@ async def list_insights_board(
             # 0건·hook_key 미기입은 각각 null(소급 백필 없음 — 신규 발행부터만).
             "asset_sha256s": asset_sha256s,
             "hook_key": hook_key,
+            # story #3766(별건 ⑩) — 채널 포스트 목록 응답(ChannelPostDraftListItem.
+            # command_status)과 같은 이름·같은 뜻(같은 PublicationCommand 행) — 새
+            # 낱말 0. site_post 행은 gate_id가 null이라 latest_command_by_gate에
+            # 애초 못 들어가 이 조회도 자연히 None.
+            "command_status": (
+                latest_command_by_gate[r.gate_id].status if r.gate_id in latest_command_by_gate else None
+            ),
         })
 
     # story #3697(유나 § — 「지금 아무도 안 따라간다」가 계약을 참으로 만들지 않는다) —
