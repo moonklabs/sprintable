@@ -329,6 +329,37 @@ describe('DocsClientLayout — story #3784 loading/loadError 컨텍스트 실 �
     expect(container.textContent).toContain('불러오지 못했습니다');
   });
 
+  // story #3784(카디르 QA·페드루 재현, 10:02Z) — 실패 뒤 「다시 시도」를 누른 순간부터 그
+  // 재시도가 응답하기 전까지, fetchTree()가 loading을 다시 켜지 않으면
+  // loading=false·loadError=false·tree=[]인 순간이 생겨 두 페인이 또 "없어요"를 단정한다
+  // (원 결함의 재발 — 뮤테이션 대상: fetchTree 시작의 setLoading(true)를 걷으면 이 자리가
+  // 정확히 RED).
+  it('실패 뒤 「다시 시도」 pending 中엔 양쪽 다 "없어요"가 아니라 로딩 문구가 선다', async () => {
+    let resolveRetry!: (v: { ok: boolean; json: () => Promise<unknown> }) => void;
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: false, json: async () => null })
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveRetry = resolve; }));
+    vi.stubGlobal('fetch', fetchMock);
+    await mountWithIndex();
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain('불러오지 못했습니다');
+
+    const retryButton = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('다시 시도'));
+    expect(retryButton).toBeTruthy();
+    await act(async () => { retryButton!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    // 재시도 fetch가 아직 안 풀린 시점(pending) — 양쪽 다 "없어요" 단정 0, 로딩 문구는 有.
+    expect(container.textContent).not.toContain('아직 쌓인 문서가 없어요');
+    expect(container.textContent).not.toContain('불러오지 못했습니다');
+    expect(container.textContent).toContain('불러오는 중');
+
+    await act(async () => {
+      resolveRetry({ ok: true, json: async () => ({ data: [DOC_A, DOC_B], meta: { hasMore: false, nextCursor: null } }) });
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    });
+    expect(container.textContent).toContain('문서A'); // 재시도 성공 후엔 정상 렌더.
+  });
+
   // story #3784(유나 짚음, 09:34Z) — 오른쪽 DocsIndex만 가르면 왼쪽 사이드바 트리가
   // "0건"(빈 EmptyState "문서를 선택하세요")으로 조용히 남아 같은 화면이 두 말을 한다.
   it('트리 fetch 실패 시 왼쪽 사이드바도 "문서를 선택하세요"가 아니라 같은 실패 문구+다시 시도를 그린다', async () => {

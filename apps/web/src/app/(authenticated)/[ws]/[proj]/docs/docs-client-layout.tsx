@@ -158,8 +158,12 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
 
   const fetchTree = useCallback(async (tags?: string[], cursor?: string | null) => {
     if (!projectId) return;
-    // story #3784 — 재시도(에러 배너의 「다시 시도」 포함)가 이전 실패 신호를 그대로 물고
-    // 있지 않도록, 시도 시작 시 먼저 걷는다(성공하면 그대로 false·실패하면 catch가 다시 켠다).
+    // story #3784(페드루 짚음 10:02Z) — 재시도(에러 배너의 「다시 시도」 포함)가 이전 실패
+    // 신호를 그대로 물고 있지 않도록, 시도 시작 시 먼저 걷는다(성공하면 그대로 false·실패하면
+    // catch가 다시 켠다). loading도 같이 켜야 한다 — 안 켜면 재시도 pending 동안 loading=false·
+    // loadError=false·tree=[]가 되어 양쪽이 다시 "없어요"를 잘못 단정한다(카디르 재현). cursor가
+    // 있는 "더 보기" 호출은 docsLoadingMore가 이미 그 UX를 담당하므로 건드리지 않는다.
+    if (!cursor) setLoading(true);
     setLoadError(false);
     try {
       // story #2191 — "view=tree"는 죽은 파라미터였다(/api/docs가 그 값을 아예 안 읽어
@@ -532,9 +536,19 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
           // 그 자리에 한 줄 + 텍스트 재시도로.
           <div className="px-2 py-4">
             <p className="text-xs text-muted-foreground">{t('indexLoadError')}</p>
-            <button type="button" onClick={() => void fetchTree(selectedTags.length ? selectedTags : undefined)} className="mt-1 text-xs text-foreground underline hover:no-underline">
+            {/* 유나 정정(10:01Z) — raw 버튼 요소가 DS 게이트 A(verify-no-new-raw-button)를
+                건드렸다. 이 레일 자리의 정본은 variant="link"(hover 배경 자체가 없음 —
+                content/page.tsx:248 실측 그대로, ghost는 좁은 레일에서 hover 사각형이
+                뜬다). 색은 문구가 아니라 행동에 싣는다(오른쪽 destructive 문구와 대칭). */}
+            <Button
+              type="button"
+              variant="link"
+              size="xs"
+              onClick={() => void fetchTree(selectedTags.length ? selectedTags : undefined)}
+              className="mt-1 h-auto px-0 text-xs"
+            >
               {tc('retry')}
-            </button>
+            </Button>
           </div>
         ) : tree.length === 0 ? (
           // story #3784(페드루 짚음 09:49Z) — 고를 문서가 0건인데 왼쪽은 "선택하세요"
