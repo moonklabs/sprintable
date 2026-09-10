@@ -28,38 +28,38 @@ describe('/api/organizations/[id]/site-posts/drafts (story #3368)', () => {
       request, '/api/v2/organizations/[id]/site-posts/drafts', { id: 'org-1' },
     );
     expect(resp.status).toBe(200);
-    // story #3744(페드루 스티어) — meta.total(api/stories/route.ts:69 관례 재사용,
-    // totalCount 아님). X-Total-Count 미제공 시 meta 자체가 null.
-    await expect(resp.json()).resolves.toEqual({ data: list, error: null, meta: null });
+    // story #3744(페드루 스티어) → #3761(유나 낱말 定 정정) — meta.totalCount(정본, `total`
+    // 은퇴). X-Total-Count 미제공 시 totalCount: null로 «모른다»를 명시(meta 자체는 null 아님).
+    await expect(resp.json()).resolves.toEqual({ data: list, error: null, meta: { totalCount: null } });
   });
 
-  // story #3744(페드루 스티어) — X-Total-Count → meta.total(부분 상태 표기용).
-  it('GET — X-Total-Count 헤더가 있으면 meta.total로 실린다', async () => {
+  // story #3744(페드루 스티어) → #3761 — X-Total-Count → meta.totalCount(부분 상태 표기용).
+  it('GET — X-Total-Count 헤더가 있으면 meta.totalCount로 실린다', async () => {
     proxyToFastapiWithParams.mockResolvedValue(fastapiOk([], 200, { 'X-Total-Count': '42' }));
     const resp = await GET(new Request('http://test'), { params: Promise.resolve({ id: 'org-1' }) });
-    await expect(resp.json()).resolves.toEqual({ data: [], error: null, meta: { total: 42 } });
+    await expect(resp.json()).resolves.toEqual({ data: [], error: null, meta: { totalCount: 42 } });
   });
 
-  it('GET — X-Total-Count 헤더가 없으면 meta 자체가 null("모른다"·0으로 위장 안 함)', async () => {
+  it('GET — X-Total-Count 헤더가 없으면 meta.totalCount: null("모른다"·0으로 위장 안 함)', async () => {
     proxyToFastapiWithParams.mockResolvedValue(fastapiOk([]));
     const resp = await GET(new Request('http://test'), { params: Promise.resolve({ id: 'org-1' }) });
-    await expect(resp.json()).resolves.toEqual({ data: [], error: null, meta: null });
+    await expect(resp.json()).resolves.toEqual({ data: [], error: null, meta: { totalCount: null } });
   });
 
   // 뮤테이션 표적 — Number.isFinite 가드를 지우면 헤더가 숫자 아닐 때 NaN이 JSON
-  // 직렬화에서 null이 돼 "모른다"와 구분이 안 되지만, 그 경로도 결국 meta:null로
+  // 직렬화에서 null이 돼 "모른다"와 구분이 안 되지만, 그 경로도 결국 totalCount:null로
   // 떨어지긴 한다 — 진짜 표적은 "숫자 헤더를 실제로 파싱하는지"다(항상 undefined를
   // 반환하는 구현도 이 값 하나만으론 못 잡으므로 유한값 케이스를 명시로 잰다, 위 42 테스트).
-  it('GET — 헤더 값이 숫자가 아니면(계약 위반) meta:null로 떨어진다(진짜 아님을 위장 안 함)', async () => {
+  it('GET — 헤더 값이 숫자가 아니면(계약 위반) totalCount:null로 떨어진다(진짜 아님을 위장 안 함)', async () => {
     proxyToFastapiWithParams.mockResolvedValue(fastapiOk([], 200, { 'X-Total-Count': 'not-a-number' }));
     const resp = await GET(new Request('http://test'), { params: Promise.resolve({ id: 'org-1' }) });
-    await expect(resp.json()).resolves.toEqual({ data: [], error: null, meta: null });
+    await expect(resp.json()).resolves.toEqual({ data: [], error: null, meta: { totalCount: null } });
   });
 
   it('GET — 0건도 빈 배열로 정상 통과(에러 아님)', async () => {
     proxyToFastapiWithParams.mockResolvedValue(fastapiOk([]));
     const resp = await GET(new Request('http://test'), { params: Promise.resolve({ id: 'org-1' }) });
-    await expect(resp.json()).resolves.toEqual({ data: [], error: null, meta: null });
+    await expect(resp.json()).resolves.toEqual({ data: [], error: null, meta: { totalCount: null } });
   });
 
   it('GET — !ok 응답은 그대로 pass-through', async () => {

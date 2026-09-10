@@ -1436,6 +1436,12 @@ jobs:
       - name: "Verify App Router route file named exports are whitelisted (story #3760 regression guard)"
         run: pnpm --filter web verify:route-file-exports
 
+      # story #3761 회귀가드: 목록 응답 meta의 총계가 `total`/`totalCount` 두 이름으로 갈려
+      # 있었다 — 정본은 `totalCount`(number | null, null="모른다", goals/tasks 관례). API
+      # route.ts에 은퇴한 `total` 메타 프로퍼티가 다시 들어오면 이 스텝이 실패한다.
+      - name: "Verify no legacy meta.total property in API routes (story #3761 regression guard)"
+        run: pnpm --filter web verify:no-legacy-meta-total
+
       # story #3486→#3493 회귀가드: 브라우저 로케일 의존 날짜 toLocaleString/
       # toLocaleDateString/toLocaleTimeString이 새로 생기면 실패한다 — 3436 묶음 8
       # 정본(formatRelativeTime/formatScheduledAt)이 있는데도 계속 새던 자리(유나

@@ -78,7 +78,7 @@ describe('/api/stories GET — unattached=true 분기(story #2534, 카디르 QA 
     h.createStoryRepository.mockResolvedValue({});
   });
 
-  it('StoryService를 안 거치고 raw proxy로 통과하며, X-Total-Count 헤더를 meta.total로 옮긴다', async () => {
+  it('StoryService를 안 거치고 raw proxy로 통과하며, X-Total-Count 헤더를 meta.totalCount로 옮긴다', async () => {
     h.proxyToFastapi.mockResolvedValue(new Response(
       JSON.stringify([story('1')]),
       { status: 200, headers: { 'x-total-count': '2180' } },
@@ -86,17 +86,19 @@ describe('/api/stories GET — unattached=true 분기(story #2534, 카디르 QA 
     const res = await GET(new Request('http://localhost/api/stories?project_id=p&unattached=true&limit=100'));
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.meta.total).toBe(2180);
+    expect(body.meta.totalCount).toBe(2180);
     expect(body.data).toHaveLength(1);
     // StoryService.list()가 이 분기에서 호출되지 않는다(raw proxy 경로).
     expect(h.list).not.toHaveBeenCalled();
   });
 
-  it('X-Total-Count 헤더가 없으면(예외 상황) meta.total을 안 지어낸다(meta=null)', async () => {
+  // story #3761 — 헤더 없으면 meta 자체를 생략(null)하는 게 아니라 totalCount: null로
+  // «모른다»를 명시한다(goals/tasks 관례).
+  it('X-Total-Count 헤더가 없으면(예외 상황) meta.totalCount: null로 «모른다»를 명시한다', async () => {
     h.proxyToFastapi.mockResolvedValue(new Response(JSON.stringify([]), { status: 200 }));
     const res = await GET(new Request('http://localhost/api/stories?project_id=p&unattached=true'));
     const body = await res.json();
-    expect(body.meta).toBeNull();
+    expect(body.meta).toEqual({ totalCount: null });
   });
 
   it('BE 에러 응답이면 그대로 통과시킨다(200 아닌 응답 삼키지 않음)', async () => {
@@ -125,7 +127,7 @@ describe('/api/stories GET — no_sprint=true 분기 라우팅(story #3160)', ()
     const res = await GET(new Request('http://localhost/api/stories?project_id=p&no_sprint=true&exclude_status=done,in-review'));
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.meta.total).toBe(9);
+    expect(body.meta.totalCount).toBe(9);
     expect(h.list).not.toHaveBeenCalled();
     // raw proxy는 원본 쿼리스트링을 그대로 전달(fastapi-proxy.ts url.search) — exclude_status가
     // 이 분기에선 화이트리스트 없이 이미 통과한다는 것을 호출 인자로 확인.

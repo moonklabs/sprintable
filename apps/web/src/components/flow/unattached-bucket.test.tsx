@@ -48,11 +48,11 @@ function jsonRes(data: unknown) {
   return Promise.resolve(new Response(JSON.stringify({ data }), { status: 200 }));
 }
 
-// 카디르 QA HIGH(2026-08-09) — /api/stories?unattached=true 실 응답은 meta.total(BE
-// X-Total-Count 헤더 값)을 함께 낸다(route.ts 실물 반영). 카운트 테스트는 이 형태를 그대로
-// 재현해야 stories.length로 조용히 되돌아가는 회귀를 잡는다.
+// 카디르 QA HIGH(2026-08-09) — /api/stories?unattached=true 실 응답은 meta.totalCount(BE
+// X-Total-Count 헤더 값, story #3761 정본 — `total`은 은퇴)를 함께 낸다(route.ts 실물 반영).
+// 카운트 테스트는 이 형태를 그대로 재현해야 stories.length로 조용히 되돌아가는 회귀를 잡는다.
 function jsonResWithTotal(data: unknown[], total: number) {
-  return Promise.resolve(new Response(JSON.stringify({ data, meta: { total } }), { status: 200 }));
+  return Promise.resolve(new Response(JSON.stringify({ data, meta: { totalCount: total } }), { status: 200 }));
 }
 
 // attachment-suggestions는 reference-candidates와 동형 raw thin-proxy(래핑 없음) —

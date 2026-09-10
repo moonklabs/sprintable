@@ -32,7 +32,9 @@ export async function GET(request: Request) {
       limit: requestedLimit,
       hasMore,
       nextCursor: hasMore ? nextCursor : null,
-      ...(totalHeader !== null ? { total: Number(totalHeader) } : {}),
+      // story #3761 — `total` 은퇴, 정본 `totalCount`(goals/tasks 관례) — 헤더 없으면
+      // 키 생략이 아니라 `totalCount: null`로 «모른다»를 명시한다.
+      totalCount: totalHeader !== null ? Number(totalHeader) : null,
     });
   } catch (err: unknown) {
     return handleApiError(err);

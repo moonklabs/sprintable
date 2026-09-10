@@ -130,10 +130,10 @@ export default function ContentPostListPage() {
         if (cancelled) return;
         if (res.ok) {
           const json = (await res.json().catch(() => null)) as
-            | { data?: SitePostDraftListItem[]; meta?: { total?: number | null } | null }
+            | { data?: SitePostDraftListItem[]; meta?: { totalCount?: number | null } | null }
             | null;
           setDrafts(json?.data ?? []);
-          setTotalCount(json?.meta?.total ?? null);
+          setTotalCount(json?.meta?.totalCount ?? null);
         } else {
           setLoadError(true);
         }

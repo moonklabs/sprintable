@@ -22,14 +22,14 @@ export async function GET(request: Request, { params }: RouteParams) {
   const { id } = await params;
   const _r = await proxyToFastapiWithParams(request, '/api/v2/organizations/[id]/site-posts/drafts', { id });
   if (!_r.ok) return _r;
-  // story #3744(페드루 스티어 2026-09-09) — X-Total-Count를 meta.total로 실어 보낸다.
-  // api/stories/route.ts:69의 기존 관례(ApiMeta.total) 재사용 — 한 개념에 이름 둘 금지.
-  // Number.isFinite로 명시 가드해 헤더가 숫자가 아니면 undefined(모름), NaN을 JSON
-  // 직렬화해 거짓 false로 착시하지 않는다.
+  // story #3744(페드루 스티어 2026-09-09) → #3761(유나 낱말 定 정정) — X-Total-Count를
+  // meta.totalCount로 실어 보낸다(정본, goals/tasks 관례 — `total`은 은퇴, 한 개념에
+  // 이름 둘 금지). Number.isFinite로 명시 가드해 헤더가 숫자가 아니면 null(모름), NaN을
+  // JSON 직렬화해 거짓 false로 착시하지 않는다.
   const totalHeader = _r.headers.get('x-total-count');
   const parsed = totalHeader === null ? null : Number(totalHeader);
-  const total = parsed !== null && Number.isFinite(parsed) ? parsed : undefined;
-  return apiSuccess(await _r.json(), total !== undefined ? { total } : undefined);
+  const totalCount = parsed !== null && Number.isFinite(parsed) ? parsed : null;
+  return apiSuccess(await _r.json(), { totalCount });
 }
 
 export async function POST(request: Request, { params }: RouteParams) {
