@@ -1905,7 +1905,7 @@
     "sessionNotFound": "Session not found.",
     "phaseNext": "Next phase",
     "nextPhase": "Next phase",
-    "advancing": "Advancing...",
+    "advancing": "Advancing phase…",
     "export": "Export",
     "exportCopied": "Copied to clipboard.",
     "exportFailed": "Failed to export.",

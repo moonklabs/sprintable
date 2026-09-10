@@ -1905,7 +1905,7 @@
     "sessionNotFound": "세션을 찾을 수 없습니다.",
     "phaseNext": "다음 단계",
     "nextPhase": "다음 단계로",
-    "advancing": "진행 중...",
+    "advancing": "단계 전환 중…",
     "export": "내보내기",
     "exportCopied": "클립보드에 복사됐습니다.",
     "exportFailed": "내보내기에 실패했습니다.",
