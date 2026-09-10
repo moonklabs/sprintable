@@ -241,3 +241,89 @@ describe('SettingsPage — story #3762: adminChecked 로딩 vs 권한없음 분�
     expect(container.textContent).toContain(koMessages.settings.tabProjects);
   });
 });
+
+// story #3772 — 프로필 탭 섹션 넷(내 프로필·비밀번호·연결된 계정·2FA)이 각자 /api/me를
+// 읽다 실패하면 이유 없이 조용히 사라졌다(3762·3768이 만든 결함이 아니라 드러낸 자리).
+// 탭 한 자리(배너 1개)에서 사유+재시도를 말하고, 재시도가 섹션 넷을 다시 fetch하게
+// 하는지 검증한다.
+describe('SettingsPage — story #3772: 프로필 탭 /api/me 실패 배너', () => {
+  it('⭐/api/me가 reject하면 상단 배너 1개(사유+재시도) · 섹션마다 중복 배너 0', async () => {
+    vi.doMock('next/navigation', () => ({
+      useRouter: () => ({ replace: vi.fn(), refresh: vi.fn(), push: vi.fn(), prefetch: vi.fn() }),
+      useSearchParams: () => new URLSearchParams('tab=profile'),
+      usePathname: () => '/settings',
+    }));
+    const fetchWithAuthMock = vi.fn((url: string) => {
+      if (url === '/api/me') return Promise.reject(new Error('network down'));
+      return Promise.resolve({ ok: false, json: async () => ({ data: null }) });
+    });
+    vi.doMock('@/lib/db/client', () => ({ fetchWithAuth: fetchWithAuthMock }));
+    const { default: SettingsPage } = await import('./page');
+    await mount(<SettingsPage />);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    const banners = Array.from(container.querySelectorAll('[role="alert"]')).filter(
+      (el) => el.textContent?.includes(koMessages.settings.accountInfoLoadError),
+    );
+    expect(banners).toHaveLength(1);
+    expect(container.textContent).toContain(koMessages.common.retry);
+  });
+
+  it('/api/me가 전부 성공이면 배너 0(무변)', async () => {
+    vi.doMock('next/navigation', () => ({
+      useRouter: () => ({ replace: vi.fn(), refresh: vi.fn(), push: vi.fn(), prefetch: vi.fn() }),
+      useSearchParams: () => new URLSearchParams('tab=profile'),
+      usePathname: () => '/settings',
+    }));
+    const fetchWithAuthMock = vi.fn((url: string) => {
+      if (url === '/api/me') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            data: {
+              id: 'm-1', name: '테스트', email: 't@moonklabs.com', type: 'human', role: 'member',
+              has_password: true, linked_providers: [], totp_enabled: false,
+            },
+          }),
+        });
+      }
+      if (url.startsWith('/api/team-members/')) return Promise.resolve({ ok: true, json: async () => ({ data: { avatar_url: null } }) });
+      return Promise.resolve({ ok: false, json: async () => ({ data: null }) });
+    });
+    vi.doMock('@/lib/db/client', () => ({ fetchWithAuth: fetchWithAuthMock }));
+    const { default: SettingsPage } = await import('./page');
+    await mount(<SettingsPage />);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    expect(container.textContent).not.toContain(koMessages.settings.accountInfoLoadError);
+  });
+
+  it('재시도 클릭 → 섹션 넷이 /api/me를 다시 부른다(리마운트로 재-fetch)', async () => {
+    vi.doMock('next/navigation', () => ({
+      useRouter: () => ({ replace: vi.fn(), refresh: vi.fn(), push: vi.fn(), prefetch: vi.fn() }),
+      useSearchParams: () => new URLSearchParams('tab=profile'),
+      usePathname: () => '/settings',
+    }));
+    const fetchWithAuthMock = vi.fn((url: string) => {
+      if (url === '/api/me') return Promise.reject(new Error('network down'));
+      return Promise.resolve({ ok: false, json: async () => ({ data: null }) });
+    });
+    vi.doMock('@/lib/db/client', () => ({ fetchWithAuth: fetchWithAuthMock }));
+    const { default: SettingsPage } = await import('./page');
+    await mount(<SettingsPage />);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    const callsBeforeRetry = fetchWithAuthMock.mock.calls.filter((c) => c[0] === '/api/me').length;
+    expect(callsBeforeRetry).toBeGreaterThan(0);
+
+    const retryButton = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent === koMessages.common.retry,
+    ) as HTMLButtonElement;
+    expect(retryButton).not.toBeUndefined();
+    await act(async () => { retryButton.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    const callsAfterRetry = fetchWithAuthMock.mock.calls.filter((c) => c[0] === '/api/me').length;
+    expect(callsAfterRetry).toBeGreaterThan(callsBeforeRetry);
+  });
+});

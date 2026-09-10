@@ -13,7 +13,15 @@ import { fetchWithAuth } from '@/lib/db/client';
 // 동형: hasPassword===null·linkedProviders===null이면 섹션을 안 그린다).
 type TwoFaState = 'loading' | 'unknown' | 'disabled' | 'enrolling' | 'enabled';
 
-export function TwoFactorSection() {
+export interface TwoFactorSectionProps {
+  // story #3772 — my-profile-section.tsx와 동형(탭 컨테이너에 초기 로드 실패 알림).
+  // typeof totp_enabled !== 'boolean' 분기(malformed 응답)는 네트워크/HTTP 실패가
+  // 아니라 별도 데이터 이상 신호라 이 콜백 대상 밖(story #3772 AC 범위: "network가
+  // 죽거나 /api/me가 비-ok" 두 경우만).
+  onLoadError?: () => void;
+}
+
+export function TwoFactorSection({ onLoadError }: TwoFactorSectionProps = {}) {
   const t = useTranslations('settings');
   const [state, setState] = useState<TwoFaState>('loading');
   const [provUri, setProvUri] = useState<string | null>(null);
@@ -32,8 +40,8 @@ export function TwoFactorSection() {
     // handleSetup(사용자의 「켜기」 클릭)에만 남는다.
     (async () => {
       let res: Response;
-      try { res = await fetchWithAuth('/api/me'); } catch { setState('unknown'); return; }
-      if (!res.ok) { setState('unknown'); return; }
+      try { res = await fetchWithAuth('/api/me'); } catch { setState('unknown'); onLoadError?.(); return; }
+      if (!res.ok) { setState('unknown'); onLoadError?.(); return; }
       const json = await res.json() as { data?: { totp_enabled?: boolean | null } };
       // 카디르 QA(2026-09-10) — BE MeResponse.totp_enabled는 `bool | None`이라 실제로
       // null이 오는 분기가 있다(user 없는 org_member 폴백·api_key/user_id 없는 경로) —
@@ -42,7 +50,7 @@ export function TwoFactorSection() {
       if (typeof json.data?.totp_enabled !== 'boolean') { setState('unknown'); return; }
       setState(json.data.totp_enabled ? 'enabled' : 'disabled');
     })();
-  }, []);
+  }, [onLoadError]);
 
   const handleSetup = async () => {
     setBusy(true);

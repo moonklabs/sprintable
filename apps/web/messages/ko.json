@@ -1329,6 +1329,7 @@
     "profileName": "이름",
     "profileEmail": "이메일",
     "profileRole": "역할",
+    "accountInfoLoadError": "계정 정보를 불러오지 못했습니다.",
     "profileTrustScore": "신뢰 점수",
     "profileSaveError": "저장에 실패했습니다. 다시 시도해 주세요.",
     "profileEdit": "편집",
@@ -2833,7 +2834,7 @@
     "statusConflict": "충돌: 다른 사용자가 이 문서를 수정했습니다",
     "statusRemoteChanged": "이 문서가 원격에서 업데이트되었습니다",
     "statusError": "저장 실패",
-    "retry": "재시도",
+    "retry": "다시 시도",
     "conflictReload": "최신 버전 불러오기",
     "conflictOverwrite": "내 변경사항으로 덮어쓰기",
     "remoteRefresh": "새로고침",
@@ -3642,7 +3643,7 @@
     "matrixLegendBlocked": "차단",
     "matrixAdminOnlyHint": "관리자만 편집할 수 있습니다.",
     "matrixLoadError": "매트릭스를 불러오지 못했습니다.",
-    "matrixRetry": "재시도"
+    "matrixRetry": "다시 시도"
   },
   "agentRuns": {
     "eyebrow": "실행 기록",
@@ -4293,7 +4294,7 @@
     "approvalRequestTossPartialEmptyBody": "다시 불러오면 나타날 수 있습니다",
     "approvalRequestTossEmptyBody": "{name}님이 참여한 대화가 필요합니다",
     "approvalRequestTossPartialBanner": "일부 대화만 불러왔습니다 · 목록이 완전하지 않을 수 있습니다",
-    "approvalRequestTossPartialRetry": "다시 불러오기",
+    "approvalRequestTossPartialRetry": "다시 시도",
     "approvalRequestTossSuccessToast": "{conversation}(으)로 보냈습니다",
     "approvalRequestTossAlreadyThereChip": "이미 있음",
     "approvalRequestTossAlreadyThereToast": "{conversation}에 이미 있습니다",
@@ -4612,7 +4613,7 @@
     "fallbackNotifyOwner": "소유자에게 재전달",
     "fallbackNotifying": "통지 중…",
     "fallbackNotified": "이미 통지됨",
-    "fallbackRetry": "재시도",
+    "fallbackRetry": "다시 시도",
     "fallbackNotifySuccess": "소유자에게 통지했습니다",
     "fallbackNotifyError": "통지에 실패했습니다",
     "withdrawRequest": "요청 철회",

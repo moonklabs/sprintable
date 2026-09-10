@@ -28,7 +28,13 @@ async function fetchAvatarUrl(memberId: string): Promise<string | null> {
   return json.data.avatar_url ?? null;
 }
 
-export function MyProfileSection() {
+export interface MyProfileSectionProps {
+  // story #3772 — /api/me 초기 로드 실패를 탭 컨테이너에 알린다(섹션 자체는 여전히
+  // 조용히 「모름」으로 안 그린다·배너는 탭이 한 곳에서 낸다, 같은 사실 네 번 금지).
+  onLoadError?: () => void;
+}
+
+export function MyProfileSection({ onLoadError }: MyProfileSectionProps = {}) {
   const t = useTranslations('settings');
   const tc = useTranslations('common');
   const [profile, setProfile] = useState<MyProfile | null>(null);
@@ -37,6 +43,13 @@ export function MyProfileSection() {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // story #3772 CHANGES(페드루 PO 픽셀 지적 2026-09-10 — #4126 캡처①/② 실측) — `!profile`
+  // 하나로 "아직 로딩 중"과 "로드 실패"를 같이 가리던 게 문제였다: 탭이 상단 배너로
+  // 실패를 이미 말하는데 이 섹션은 여전히 `tc('loading')`("로딩 중...")를 그려, 같은
+  // 화면에 "불러오지 못했습니다"와 "로딩 중"이 나란히 서는 모순이 생겼다(실 캡처로
+  // 확認). loadFailed로 두 상태를 가른다 — 실패면 이 섹션도 조용히 null(나머지 세
+  // 섹션과 동형, linked-accounts-section.tsx:104/two-factor-section.tsx:151 참고).
+  const [loadFailed, setLoadFailed] = useState(false);
 
   const fetchProfile = useCallback(async () => {
     // story #3762 CHANGES(카디르 QA — /api/me reject 경로 테스트 中 발견, 페드루 PO
@@ -45,13 +58,13 @@ export function MyProfileSection() {
     // 아니라) 이 아래 await가 그대로 throw해 `void fetchProfile()`(:49) 밖으로
     // unhandled rejection이 샜다. 최소 방어만(빈 폴백, 별도 에러 배너는 이 섹션 범위 밖).
     let res: Response;
-    try { res = await fetchWithAuth('/api/me'); } catch { return; }
-    if (!res.ok) return;
+    try { res = await fetchWithAuth('/api/me'); } catch { setLoadFailed(true); onLoadError?.(); return; }
+    if (!res.ok) { setLoadFailed(true); onLoadError?.(); return; }
     const json = await res.json() as { data: MyProfile };
     setProfile(json.data);
     setEditName(json.data.name);
     setAvatarUrl(await fetchAvatarUrl(json.data.id));
-  }, []);
+  }, [onLoadError]);
 
   useEffect(() => { void fetchProfile(); }, [fetchProfile]);
 
@@ -77,7 +90,10 @@ export function MyProfileSection() {
     }
   };
 
-  if (!profile) return <div className="text-sm text-muted-foreground">{tc('loading')}</div>;
+  if (!profile) {
+    if (loadFailed) return null;
+    return <div className="text-sm text-muted-foreground">{tc('loading')}</div>;
+  }
 
   return (
     <SectionCard>
