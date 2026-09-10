@@ -6,8 +6,9 @@ import re
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
+from pydantic import ValidationError
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -204,7 +205,7 @@ async def create_artifact(
 
 @router.post("/import-image", status_code=201)
 async def import_image_artifact(
-    body: ImportImageArtifactRequest,
+    request: Request,
     auth: AuthContext = Depends(get_current_user),
     scope: dict = Depends(get_scope_context),
     session: AsyncSession = Depends(get_db),
@@ -217,7 +218,36 @@ async def import_image_artifact(
     엔드포인트를 건드릴 땐 그 함수도 같이 봐야 한다).
 
     story #3753 — GCS 업로드(`put_object`) 直前에 `validate_image_bytes`를 통과해야 한다
-    (매직 바이트·PNG 청크 walk·PIL 디코드). 실패하면 저장 자체를 안 한다(고아 객체 0)."""
+    (매직 바이트·PNG 청크 walk·PIL 디코드). 실패하면 저장 자체를 안 한다(고아 객체 0).
+
+    story #3767 — 이 입구는 JSON(base64)만 받는데, 도구 설명이 한때 멀티파트/구v1 경로를
+    가리켜 에이전트가 multipart나 raw 이미지 바이트를 그대로 body에 실어 보내는 경우가
+    있었다. `body: ImportImageArtifactRequest`(FastAPI 자동 Pydantic 파싱)로 두면 그
+    비-JSON 바이트가 파싱 실패 시 `RequestValidationError.errors()`의 `input` 필드에
+    원본 bytes 그대로 담기고, FastAPI 기본 `jsonable_encoder`가 그 bytes를 UTF-8로
+    `.decode()`하려다(PNG 매직 바이트 등은 유효한 UTF-8이 아님) **500**으로 죽는다(이
+    레포 코드가 아니라 FastAPI 자신의 기본 검증-에러 인코더 안에서 터지는 것 — 실측
+    확認, traceback이 `fastapi/encoders.py`에서 끝남). 그래서 Pydantic 자동 바디 대신
+    `Request`를 직접 받아 Content-Type을 먼저 본다 — 그 크래시 경로 자체를 안 태운다.
+    """
+    content_type_header = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
+    if content_type_header != "application/json":
+        return _err(
+            "UNSUPPORTED_MEDIA_TYPE",
+            "Content-Type must be application/json — this endpoint takes a base64-encoded "
+            "image in a JSON body ({\"title\", \"image_base64\", \"content_type\", ...}), not "
+            "multipart/form-data.",
+            415,
+        )
+    try:
+        raw_json = await request.json()
+    except Exception:
+        return _err("VALIDATION_ERROR", "Request body must be valid JSON", 422)
+    try:
+        body = ImportImageArtifactRequest.model_validate(raw_json)
+    except ValidationError as exc:
+        return _err("VALIDATION_ERROR", exc.errors()[0]["msg"] if exc.errors() else "Invalid request body", 422)
+
     if not body.content_type.startswith("image/"):
         return _err("VALIDATION_ERROR", "content_type must be an image/* type", 400)
     try:
