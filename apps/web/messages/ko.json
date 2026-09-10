@@ -2389,6 +2389,7 @@
     "insightStatusSuperseded": "새 회차로 대체됨",
     "insightSnapshotPendingWithDue": "스냅샷 예정 · {due}",
     "insightSnapshotUnsupported": "이 채널은 성과를 제공하지 않습니다",
+    "insightSnapshotFailed": "성과를 수집하지 못했습니다",
     "channelPostsTitle": "채널 포스트",
     "channelPostsDescription": "Threads 등 채널에 실릴 글의 초안·승인·발행을 관리합니다.",
     "channelPostsLoadFailed": "채널 포스트 목록을 불러오지 못했습니다.",

@@ -136,13 +136,21 @@ describe('InsightSnapshotBlock — story #3499(게시물 성과 표면 1차)', (
     expect(container.querySelector('[data-testid="insight-metric-value"]')).toBeNull();
   });
 
-  it('failed — §17-10 라벨 재사용·destructive 톤', async () => {
+  it('failed — 전용 문장(insightSnapshotFailed)·destructive 톤·「다시 시도」 없음', async () => {
+    // story #3499 후속(페드루 지시·유나 3426 실픽셀, 2026-09-10) — §17-10 공유 라벨
+    // (insightStatusFailed, "실패" 한 낱말)은 insights-board-metric-cell.tsx의 표 셀
+    // 명사구 전제와 이 블록의 형제 unsupported 문장 전제가 부딪혀 더는 못 같이 쓴다
+    // (PO 채택 안 (b) — 소비처가 하나라는 전제가 깨져 전용 키 신설). attempt_count가
+    // 이 화면엔 안 내려오므로(모르는 것을 단정하지 않는다) "다시 시도" 낱말이 없어야
+    // 한다.
     const snap: InsightSnapshot = {
       normalized: { ...ALL_NULL }, captured_at: null, status: 'failed', due_at: null, source: 'threads',
     };
     await render([snap]);
     const el = container.querySelector('[data-testid="insight-snapshot-failure"]');
-    expect(el?.textContent).toBe(koMessages.content.insightStatusFailed);
+    expect(el?.textContent).toBe(koMessages.content.insightSnapshotFailed);
+    expect(el?.textContent).not.toBe(koMessages.content.insightStatusFailed);
+    expect(el?.textContent).not.toContain('다시 시도');
     expect(el?.className).toContain('text-destructive');
   });
 
