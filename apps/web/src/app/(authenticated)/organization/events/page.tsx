@@ -18,6 +18,7 @@ import {
 } from '@/components/organization/event-definer-logic';
 import { EventDefinitionSummary } from '@/components/organization/event-definition-summary';
 import { ApplyRecipeDialog } from '@/components/organization/apply-recipe-dialog';
+import { stageRoleLabel } from '@/lib/stage-role';
 import { cyclicStages, isCyclicDefinition, type EventDefinitionResponse } from '@/components/loops/loop-create-dialog';
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatRelativeTime } from '@/lib/storage/format';
@@ -399,7 +400,7 @@ function EventDefRow({
                   return (
                     <li key={stage} className="break-words">
                       <span className="font-medium text-foreground">{meta?.action ?? stage}</span>
-                      {meta?.role ? <> ({meta.role})</> : null}
+                      {meta?.role ? <> ({stageRoleLabel(meta.role, t)})</> : null}
                       {meta?.gate ? <div>{t('eventStageMetaGateLabel', { type: meta.gate.type ?? '' })}</div> : null}
                       {meta?.capability ? <div>{t('eventStageMetaCapabilityLabel', { kind: meta.capability.kind ?? '' })}</div> : null}
                     </li>
