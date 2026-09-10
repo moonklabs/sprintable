@@ -184,9 +184,18 @@ describe('SettingsPage — story #3762: adminChecked 로딩 vs 권한없음 분�
   // 그 경로가 테스트로 고정돼 있지 않았다 — 이 카드의 판정선("스켈레톤이 영원히 안
   // 걷히지 않는다")이 실제로 reject 경로에서도 성립하는지 여기서 잰다.
   it('/api/me가 reject해도(네트워크 다운) 스켈레톤이 걷히고 non-admin 탭은 서고 admin 전용 탭만 숨는다', async () => {
-    // 이 페이지에서 /api/me를 부르는 자리가 여럿(SettingsPage 자신의 loadContext()·
-    // MyProfileSection 등)이라 전부 reject시킨다 — my-profile-section.tsx가 이 테스트로
-    // 처음 드러난 자체 unhandled rejection 갭(별도 수정, 같은 PR)을 갖고 있었다.
+    // story #3762 CHANGES(카디르 QA 재지적) — 이 파일 최상단 mock이 tab=appearance라
+    // MyProfileSection(activeTab==='profile'일 때만 마운트, page.tsx:847-849)이 애초
+    // 렌더되지 않아, my-profile-section.tsx의 try/catch를 빼는 뮤테이션을 돌려도 이
+    // 테스트가 그 파일을 안 재서 그대로 통과했다("이 테스트로 처음 드러난 갭"이라던
+    // 앞 회차 커밋 메시지가 부정확했다 — 실제로는 처음부터 그 세 파일을 재지 못했다).
+    // tab=profile로 마운트해 MyProfileSection·SetPasswordSection·LinkedAccountsSection
+    // 셋 다 실제로 마운트되는 경로에서 reject를 잰다.
+    vi.doMock('next/navigation', () => ({
+      useRouter: () => ({ replace: vi.fn(), refresh: vi.fn(), push: vi.fn(), prefetch: vi.fn() }),
+      useSearchParams: () => new URLSearchParams('tab=profile'),
+      usePathname: () => '/settings',
+    }));
     const fetchWithAuthMock = vi.fn((url: string) => {
       if (url === '/api/me') return Promise.reject(new Error('network down'));
       return Promise.resolve({ ok: false, json: async () => ({ data: null }) });
@@ -195,6 +204,12 @@ describe('SettingsPage — story #3762: adminChecked 로딩 vs 권한없음 분�
     const { default: SettingsPage } = await import('./page');
     await mount(<SettingsPage />);
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    // MyProfileSection이 실제로 마운트돼(tab=profile) fetchProfile()의 reject 경로가
+    // 실행됐는지부터 확認한다 — 이게 없으면 아래 스켈레톤/탭 단언이 통과해도 이
+    // 테스트가 my-profile-section.tsx를 안 잰 것일 수 있다.
+    expect(fetchWithAuthMock.mock.calls.some((c) => c[0] === '/api/me')).toBe(true);
+    expect(container.textContent).toContain(koMessages.settings.tabProfile);
 
     // 스켈레톤이 영원히 안 걷히지 않는다(finally가 adminChecked=true를 확정).
     expect(container.querySelectorAll('[data-testid="settings-tab-skeleton"]').length).toBe(0);
