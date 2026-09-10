@@ -3,13 +3,12 @@
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { AlertTriangle, ArrowLeft, Clock3, Cpu, Hash, RefreshCw, Zap } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Clock3, Cpu, Hash, Zap } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { PageHeader } from '@/components/ui/page-header';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
-import { useToast } from '@/components/ui/toast';
-import { canManuallyRetryRun, getRunErrorDisplay, getRunFailureDisposition } from '@/services/agent-run-history';
+import { getRunErrorDisplay, getRunFailureDisposition } from '@/services/agent-run-history';
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
@@ -83,14 +82,12 @@ export function AgentRunDetail({
   const t = useTranslations('agentRuns');
   const tc = useTranslations('common');
   const displayTimezone = resolveDisplayTimezone().tz;
-  const { addToast } = useToast();
   const [run, setRun] = useState<RunDetail | null>(null);
   const [loading, setLoading] = useState(true);
   // story #1989: fetch 자체에 try/catch가 없어 네트워크 실패(오프라인 등) 시 fetch가 throw →
   // setLoading(false)가 영영 안 불려 스켈레톤이 무한 행("loading은 finally에서 해소" 하우스룰
   // 위반). loadError로 실패를 별도 상태화해 재시도 affordance를 노출한다.
   const [loadError, setLoadError] = useState(false);
-  const [retrying, setRetrying] = useState(false);
   const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
@@ -113,24 +110,6 @@ export function AgentRunDetail({
     void load();
     return () => { cancelled = true; };
   }, [runId, retryKey]);
-
-  const handleRetry = async () => {
-    setRetrying(true);
-    try {
-      const res = await fetch(`/api/v1/agent-runs/${runId}/retry`, { method: 'POST' });
-      if (res.ok) {
-        addToast({ title: t('retrySuccessTitle'), body: t('retrySuccessBody'), type: 'success' });
-      } else {
-        // story #2485 — 그라운딩(2026-08-06): 이 라우트(POST .../retry)는 backend에
-        // 존재하지 않아 항상 404다(BE 미구현 — 별도 이슈로 보고, FE에서 code로 갈라도
-        // 해결 안 됨). raw 서버 message 노출만 우선 제거.
-        addToast({ title: t('retryFailedTitle'), body: t('retryFailedBody'), type: 'warning' });
-      }
-    } catch {
-      addToast({ title: t('retryFailedTitle'), body: t('retryFailedBody'), type: 'warning' });
-    }
-    setRetrying(false);
-  };
 
   if (loading) {
     return (
@@ -165,7 +144,6 @@ export function AgentRunDetail({
 
   const errorDisplay = getRunErrorDisplay(run.error_message, run.last_error_code);
   const failureDisposition = getRunFailureDisposition(run);
-  const canRetry = canManuallyRetryRun(run);
 
   return (
     <>
@@ -176,12 +154,6 @@ export function AgentRunDetail({
           description={`${t('runId')}: ${run.id.slice(0, 8)}…`}
           actions={
             <div className="flex items-center gap-2">
-              {canRetry && (
-                <Button variant="hero" size="lg" onClick={handleRetry} disabled={retrying}>
-                  <RefreshCw className={`mr-2 size-4 ${retrying ? 'animate-spin' : ''}`} />
-                  {retrying ? tc('loading') : tc('retry')}
-                </Button>
-              )}
               <Button variant="glass" size="lg" onClick={onBack}>
                 <ArrowLeft className="mr-2 size-4" />
                 {t('backToList')}
