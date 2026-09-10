@@ -28,6 +28,7 @@ import {
 } from '@/lib/runtime-capabilities';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { resolveRoleLabel } from '@/app/(authenticated)/organization/trust/trust-utils';
 
 /** 런타임 상태(6종 중 ①~⑤) → 배지·헬퍼 표현. ⑥(드롭다운 dot)은 AC 범위 외(§11). */
 const RUNTIME_STATUS_UI: Record<
@@ -99,6 +100,7 @@ function isWebhookUrlAllowed(url: string): boolean {
 export default function AgentDetailPage() {
   const t = useTranslations('settings');
   const tc = useTranslations('common');
+  const to = useTranslations('organization');
   const router = useRouter();
   const { id } = useParams<{ id: string }>();
   const { addToast } = useToast();
@@ -415,7 +417,7 @@ export default function AgentDetailPage() {
                   </div>
                   <div className="mt-1 flex items-center gap-2">
                     <Badge variant="secondary">{t('agentMember')}</Badge>
-                    <Badge variant="outline">{agent.role}</Badge>
+                    <Badge variant="outline">{resolveRoleLabel(agent.role, null, to)}</Badge>
                     {/* story #3092(2단계, 표면3) — 커넥터 필드. runtime_type null이면 생략
                         (전역 폴백 규칙 — 추측·「미지정」류 문구 금지). 공식 로고는 법무
                         사인오프 전이라 이번엔 텍스트만(로고 트랙은 후속 스코프). */}

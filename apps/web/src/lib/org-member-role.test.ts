@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canEditOrgMemberRole } from './org-member-role';
+import { canEditOrgMemberRole, orgRoleLabel } from './org-member-role';
 
 describe('canEditOrgMemberRole(story #3491, BE org_members.py::update_org_member 미러)', () => {
   it('⭐admin caller — owner도 자기 자신도 아닌 member는 편집 가능(FE=BE 폭 정정의 핵심)', () => {
@@ -48,5 +48,27 @@ describe('canEditOrgMemberRole(story #3491, BE org_members.py::update_org_member
     expect(canEditOrgMemberRole({
       currentRole: 'owner', currentUserId: 'u-owner', member: { role: 'admin', user_id: 'u-other' },
     })).toBe(true);
+  });
+});
+
+describe('orgRoleLabel(story #3770 — 원시 role 값 t() 없이 노출 재발 방지)', () => {
+  const t = (key: string) => ({ roleOwner: '소유자', roleAdmin: '관리자', roleMember: '구성원' }[key] ?? `[${key}]`);
+
+  it('⭐owner/admin/member 셋 다 번역된 값을 돌려준다(설정 프로필 「역할 admin」 실사고 재현)', () => {
+    expect(orgRoleLabel('owner', t)).toBe('소유자');
+    expect(orgRoleLabel('admin', t)).toBe('관리자');
+    expect(orgRoleLabel('member', t)).toBe('구성원');
+  });
+
+  // 뮤테이션 대조 — 원시 값을 그대로 돌려주면(번역 호출 자체를 빼면) 이 자리가 반드시
+  // 잡아낸다는 것 자체를 자가 증명.
+  it('뮤테이션 대조 — t() 호출 없이 원문 그대로 돌려주면 이 테스트가 FAIL한다(가드 자체 검산)', () => {
+    const identity = (v: string) => orgRoleLabel(v, (k) => k);
+    expect(identity('admin')).not.toBe('관리자');
+    expect(identity('admin')).toBe('roleAdmin');
+  });
+
+  it('음성대조 — 알려지지 않은 값(엔티티 시드 오류 등)은 원문을 그대로 돌려준다(지어내지 않는다)', () => {
+    expect(orgRoleLabel('unknown-role', t)).toBe('unknown-role');
   });
 });

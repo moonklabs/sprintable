@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useTranslations } from 'next-intl';
 import { Shield, ShieldOff, Loader2 } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -10,6 +11,7 @@ import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui
 import { cn } from '@/lib/utils';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { orgRoleLabel } from '@/lib/org-member-role';
 
 interface OrgMember {
   id: string;            // org_member.id
@@ -30,6 +32,7 @@ interface ProjectAccessSectionProps {
 }
 
 export function ProjectAccessSection({ projectId }: ProjectAccessSectionProps) {
+  const t = useTranslations('settings');
   const [orgMembers, setOrgMembers] = useState<OrgMember[]>([]);
   const [grants, setGrants] = useState<ProjectGrant[]>([]);
   const [loading, setLoading] = useState(true);
@@ -211,12 +214,12 @@ export function ProjectAccessSection({ projectId }: ProjectAccessSectionProps) {
                   actions={
                     <>
                       {granted && grant ? (
-                        <Badge variant="outline" className="capitalize text-xs">
-                          {grant.role}
+                        <Badge variant="outline" className="text-xs">
+                          {orgRoleLabel(grant.role, t)}
                         </Badge>
                       ) : isOwner ? (
-                        <Badge variant="info" className="capitalize text-xs">
-                          {member.role}
+                        <Badge variant="info" className="text-xs">
+                          {orgRoleLabel(member.role, t)}
                         </Badge>
                       ) : null}
                       {isOwner ? (

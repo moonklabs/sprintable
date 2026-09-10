@@ -9,6 +9,7 @@ import { TrustScoreCard } from '@/components/cage/trust-score-card';
 import { AvatarEditCard } from '@/components/shared/avatar-edit-card';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { orgRoleLabel } from '@/lib/org-member-role';
 
 interface MyProfile {
   id: string;
@@ -131,7 +132,7 @@ export function MyProfileSection() {
           </div>
           <div className="flex items-center gap-4 py-2.5">
             <span className="w-20 shrink-0 text-muted-foreground">{t('profileRole')}</span>
-            <span>{profile.role}</span>
+            <span>{orgRoleLabel(profile.role, t)}</span>
           </div>
         </div>
 

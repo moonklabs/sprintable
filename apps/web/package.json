@@ -46,6 +46,7 @@
     "verify:no-new-repeated-row-action-names": "tsx scripts/verify-repeated-row-action-names.ts",
     "verify:no-fetch-response-without-ok-check": "tsx scripts/verify-no-fetch-response-without-ok-check.ts",
     "verify:no-hardcoded-korean-ui-text": "tsx scripts/verify-no-hardcoded-korean-ui-text.ts",
+    "verify:no-raw-role-jsx-text": "tsx scripts/verify-no-raw-role-jsx-text.ts",
     "e2e": "playwright test",
     "e2e:contrast": "playwright test contrast-guard.spec.ts",
     "e2e:ui": "playwright test --ui",

@@ -11,12 +11,25 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { NextIntlClientProvider } from 'next-intl';
 import { ProjectAccessSection } from './project-access-section';
+import koMessages from '../../../messages/ko.json';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let container: HTMLDivElement;
 let root: Root;
+
+// story #3770 — orgRoleLabel(role, t) 도입으로 이 섹션이 useTranslations('settings')를
+// 쓰게 됐다(grant.role/member.role 배지 낱말 정본 경유). NextIntlClientProvider 없이
+// 렌더하면 "context not found"로 throw — org-members-section.test.tsx와 동형으로 감쌈.
+function wrap(node: React.ReactNode) {
+  return (
+    <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+      {node}
+    </NextIntlClientProvider>
+  );
+}
 
 beforeEach(() => {
   container = document.createElement('div');
@@ -43,7 +56,7 @@ describe('ProjectAccessSection — 인가는 서버 응답으로 판정(story #3
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await act(async () => { root.render(<ProjectAccessSection projectId="proj-1" />); });
+    await act(async () => { root.render(wrap(<ProjectAccessSection projectId="proj-1" />)); });
     await flush();
 
     expect(container.textContent).toContain('관리자 전용 페이지입니다');
@@ -62,7 +75,7 @@ describe('ProjectAccessSection — 인가는 서버 응답으로 판정(story #3
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await act(async () => { root.render(<ProjectAccessSection projectId="proj-1" />); });
+    await act(async () => { root.render(wrap(<ProjectAccessSection projectId="proj-1" />)); });
     await flush();
 
     expect(container.textContent).not.toContain('관리자 전용 페이지입니다');
@@ -79,7 +92,7 @@ describe('ProjectAccessSection — 인가는 서버 응답으로 판정(story #3
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await act(async () => { root.render(<ProjectAccessSection projectId="proj-1" />); });
+    await act(async () => { root.render(wrap(<ProjectAccessSection projectId="proj-1" />)); });
     await flush();
 
     expect(calls).not.toContain('/api/org-members');

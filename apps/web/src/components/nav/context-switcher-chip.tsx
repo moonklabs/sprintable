@@ -21,6 +21,7 @@ import { Button } from '@/components/ui/button';
 import { CreateOrganizationDialog } from '@/components/nav/create-organization-dialog';
 import { useUnifiedSwitcher, type OrgSwitcherItem, type ProjectSwitcherItem } from '@/hooks/use-unified-switcher';
 import { useAccountSwitcher } from '@/hooks/use-account-switcher';
+import { orgRoleLabel } from '@/lib/org-member-role';
 
 interface ContextSwitcherChipProps {
   orgs: OrgSwitcherItem[];
@@ -58,6 +59,7 @@ function OrgInitial({ name, className }: { name: string; className?: string }) {
 export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProjectId, userName }: ContextSwitcherChipProps) {
   const t = useTranslations('nav');
   const tCommon = useTranslations('common');
+  const tSettings = useTranslations('settings');
   const s = useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjectId });
   const accountsEnabled = !!userName;
   // 훅은 항상 무조건 호출한다(userName 없어도) — 아래 accountsEnabled로 렌더만 게이팅.
@@ -198,7 +200,7 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
                   <div className="flex items-center gap-1.5 px-2 py-1.5 text-[11px] font-medium text-muted-foreground">
                     <OrgInitial name={org.orgName} className="flex size-[18px] shrink-0 items-center justify-center rounded-[5px] bg-muted text-[9px] font-semibold text-muted-foreground" />
                     {org.orgName}
-                    {org.role && <span className="text-[9px] font-normal capitalize normal-case opacity-60">{org.role}</span>}
+                    {org.role && <span className="text-[9px] font-normal opacity-60">{orgRoleLabel(org.role, tSettings)}</span>}
                   </div>
                   {isLoading ? (
                     <div className="flex items-center gap-2 px-4 py-2.5 text-sm text-muted-foreground">
