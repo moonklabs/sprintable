@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useTranslations } from 'next-intl';
 import { Node, mergeAttributes } from '@tiptap/core';
 import Suggestion, { type SuggestionOptions } from '@tiptap/suggestion';
 import { PluginKey } from '@tiptap/pm/state';
@@ -18,6 +19,8 @@ interface WikiLinkDoc {
 }
 
 function WikiLinkView({ node, editor }: ReactNodeViewProps) {
+  // story #3776(1층A) — "문서를 찾을 수 없습니다" 문구, docs ns의 기존 notFound 키 재사용.
+  const t = useTranslations('docs');
   const title = node.attrs.title as string;
   const slug = node.attrs.slug as string | null;
   const [exists, setExists] = useState<boolean | null>(null);
@@ -54,7 +57,7 @@ function WikiLinkView({ node, editor }: ReactNodeViewProps) {
     <NodeViewWrapper as="span" contentEditable={false}>
       <span
         onClick={handleClick}
-        title={isNotFound ? '문서를 찾을 수 없습니다' : title}
+        title={isNotFound ? t('notFound') : title}
         className={`inline-flex cursor-pointer items-center gap-1 rounded px-1 py-0.5 text-sm transition-colors ${
           isNotFound
             ? 'bg-destructive-tint text-foreground hover:brightness-95'
@@ -136,9 +139,15 @@ export const WikiLinkNode = Node.create<WikiLinkOptions>({
 function WikiLinkMenu({
   items,
   command,
+  notFoundLabel,
 }: {
   items: WikiLinkDoc[];
   command: (item: WikiLinkDoc) => void;
+  /** story #3776(1층A) — 이 컴포넌트는 `createWikiLinkSuggestion`이 `createRoot()`로 앱
+   * React 트리 밖에(NextIntlClientProvider 없이) 띄우는 팝업이라 `useTranslations`를 여기서
+   * 못 부른다(호출 즉시 throw) — `createSlashCommandExtension(slashMenuStrings)`(doc-editor.tsx)
+   * 와 동형으로, 호출부(컨텍스트 있는 실 React 컴포넌트)에서 미리 번역해 문자열로 넘긴다. */
+  notFoundLabel: string;
 }) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -157,7 +166,7 @@ function WikiLinkMenu({
   if (items.length === 0) {
     return (
       <div className="w-56 rounded-xl border border-white/10 bg-card p-3 text-xs text-muted-foreground shadow-[var(--elev-overlay)]">
-        문서를 찾을 수 없습니다
+        {notFoundLabel}
       </div>
     );
   }
@@ -185,7 +194,13 @@ function WikiLinkMenu({
 
 // ─── Suggestion Factory ───────────────────────────────────────────────────────
 
-export function createWikiLinkSuggestion(projectId: string | undefined): Partial<SuggestionOptions> {
+export function createWikiLinkSuggestion(
+  projectId: string | undefined,
+  // story #3776(1층A) — createSlashCommandExtension(slashMenuStrings)와 동형으로, 이
+  // 팝업은 앱 React 트리 밖(createRoot)에 뜨므로 호출부(실 컴포넌트, 훅 컨텍스트 有)에서
+  // 이미 번역된 문자열로 받는다.
+  notFoundLabel: string,
+): Partial<SuggestionOptions> {
   let popup: HTMLElement | null = null;
   let root: Root | null = null;
 
@@ -226,6 +241,7 @@ export function createWikiLinkSuggestion(projectId: string | undefined): Partial
             command={(item) => {
               props.command(item);
             }}
+            notFoundLabel={notFoundLabel}
           />,
         );
       },
@@ -240,6 +256,7 @@ export function createWikiLinkSuggestion(projectId: string | undefined): Partial
           <WikiLinkMenu
             items={props.items as WikiLinkDoc[]}
             command={(item) => { props.command(item); }}
+            notFoundLabel={notFoundLabel}
           />,
         );
       },

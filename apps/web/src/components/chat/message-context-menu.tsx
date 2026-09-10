@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
+import { useTranslations } from 'next-intl';
 import { MessageSquareReply, Copy, ShieldOff, Trash2, Quote } from 'lucide-react';
 
 export interface CiteAction {
@@ -30,6 +31,8 @@ interface MessageContextMenuProps {
 }
 
 export function MessageContextMenu({ x, y, isMine, onReply, onCopy, onDelete, onClose, citeAction, isDeleted = false, onBlock }: MessageContextMenuProps) {
+  // story #3776(1층A) — "사용자 차단" 항목, chats ns의 기존 blockUserConfirmConfirm 키 재사용.
+  const tChats = useTranslations('chats');
   const menuRef = useRef<HTMLDivElement>(null);
 
   // Close on outside click or Escape
@@ -86,7 +89,7 @@ export function MessageContextMenu({ x, y, isMine, onReply, onCopy, onDelete, on
           className="flex w-full items-center gap-2.5 px-3 py-2 text-sm hover:bg-muted"
         >
           <ShieldOff className="h-3.5 w-3.5 text-muted-foreground" />
-          사용자 차단
+          {tChats('blockUserConfirmConfirm')}
         </button>
       )}
       {citeAction && (

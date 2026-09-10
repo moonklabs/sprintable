@@ -340,7 +340,7 @@ describe('Workcell Evidence layer (Proof Capsule 재사용 · null=정직한 빈
             proofState: 'green', stateLabel: '증명 완료', claim: '재시도 로직 구현 완료',
             human: { name: '윤재', role: 'human' }, density: 'full',
             evidence: { acMet: 4, acTotal: 4, autoVerify: 'passed' },
-            gate: { risk: '낮음', action: 'Merge gate 열기' },
+            gate: { risk: 'low', action: 'Merge gate 열기' },
           }}
         />
       </NextIntlClientProvider>,

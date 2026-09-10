@@ -112,7 +112,7 @@ describe('ProofCapsule (optional fields — evidence/gate/agent 없이도 정직
       <ProofCapsule
         {...BASE}
         evidence={{ acMet: 4, acTotal: 4, autoVerify: 'passed', diff: { add: 142, del: 18 } }}
-        gate={{ risk: '낮음', action: 'Merge gate 열기' }}
+        gate={{ risk: 'low', action: 'Merge gate 열기' }}
         density="full"
       />,
     );
@@ -139,7 +139,7 @@ describe('ProofCapsule (안티패턴 자체 체크 — 도크트린 준수 회�
 
   it('does not use a fully-rounded (999px pill) shape for the gate action button (small circular status dots are fine, buttons are not)', () => {
     const markup = renderWithIntl(
-      <ProofCapsule {...BASE} gate={{ risk: '보통', action: '결재 →' }} density="row" />,
+      <ProofCapsule {...BASE} gate={{ risk: 'medium', action: '결재 →' }} density="row" />,
     );
     const gateButtonMatch = markup.match(/<a class="([^"]*)"/);
     expect(gateButtonMatch).not.toBeNull();
@@ -215,7 +215,7 @@ describe('ProofCapsule (안티패턴 자체 체크 — 도크트린 준수 회�
         {...BASE}
         density="full"
         evidence={{ acMet: 1, acTotal: 1 }}
-        gate={{ risk: '낮음', action: '결재' }}
+        gate={{ risk: 'low', action: '결재' }}
         human={{ name: '유나', role: '' }}
       />,
     );
@@ -246,7 +246,7 @@ describe('ProofCapsule (human optional — Board card 확산, bf9037cb) — 다�
   it('omits the Human gate section when gate is provided but human is not (도크트린⑤ — 책임자 없이 게이트 없음)', () => {
     const { human: _human, ...withoutHuman } = BASE;
     const markup = renderWithIntl(
-      <ProofCapsule {...withoutHuman} gate={{ risk: '낮음', action: 'Merge gate 열기' }} density="full" />,
+      <ProofCapsule {...withoutHuman} gate={{ risk: 'low', action: 'Merge gate 열기' }} density="full" />,
     );
     expect(markup).not.toContain('Human gate');
     expect(markup).not.toContain('Merge gate 열기');
@@ -378,7 +378,7 @@ describe('ProofCapsule (EN locale — regression: 전면 하드코딩 한국어�
         agent={{ name: 'Alex', initial: 'A' }}
         now="2h ago"
         evidence={{ acMet: 4, acTotal: 4, autoVerify: 'passed', proofCount: 3 }}
-        gate={{ risk: '낮음', action: 'Open merge gate' }}
+        gate={{ risk: 'low', action: 'Open merge gate' }}
         density="full"
       />,
     );
@@ -403,9 +403,9 @@ describe('ProofCapsule (EN locale — regression: 전면 하드코딩 한국어�
 
   it('translates all three risk levels correctly (canonical ko literal -> EN label, not passthrough)', () => {
     const cases = [
-      { risk: '낮음' as const, expected: 'Risk: Low' },
-      { risk: '보통' as const, expected: 'Risk: Medium' },
-      { risk: '높음' as const, expected: 'Risk: High' },
+      { risk: 'low' as const, expected: 'Risk: Low' },
+      { risk: 'medium' as const, expected: 'Risk: Medium' },
+      { risk: 'high' as const, expected: 'Risk: High' },
     ];
     for (const { risk, expected } of cases) {
       const markup = renderWithIntlEn(

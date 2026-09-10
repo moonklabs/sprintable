@@ -40,6 +40,9 @@ export function WorkflowTemplateGallerySection({
   orgId?: string;
 }) {
   const _t = useTranslations('settings');
+  // story #3776(1층A) — 배정 UI 문구는 이미 organization ns에 있던 이벤트 적용 화면과
+  // 글자가 같은 기존 키를 그대로 재사용한다.
+  const tOrg = useTranslations('organization');
 
   const [definitions, setDefinitions] = useState<EventDefinitionResponse[]>([]);
   const [agents, setAgents] = useState<TeamMember[]>([]);
@@ -257,7 +260,7 @@ export function WorkflowTemplateGallerySection({
         )}
 
         {loadingBindings && (
-          <p className="mt-4 text-xs text-muted-foreground">배정 정보 로딩 중...</p>
+          <p className="mt-4 text-xs text-muted-foreground">{tOrg('eventApplyLoadingBindings')}</p>
         )}
 
         {selected && !loadingBindings && (
@@ -265,7 +268,7 @@ export function WorkflowTemplateGallerySection({
             <div>
               <h3 className="font-semibold text-sm text-foreground">{selected.name || selected.key} — 역할 매핑</h3>
               <p className="mt-0.5 text-xs text-muted-foreground">
-                각 단계에 프로젝트 에이전트를 연결하세요. 기존 배정이 있으면 아래에 표시됩니다.
+                {tOrg('eventApplyRoleMappingHint')}
               </p>
             </div>
 
@@ -275,7 +278,7 @@ export function WorkflowTemplateGallerySection({
               agents={agents}
               roleMapping={roleMapping}
               onChange={(stage, agentId) => setRoleMapping(prev => ({ ...prev, [stage]: agentId }))}
-              agentPlaceholder="에이전트 선택..."
+              agentPlaceholder={tOrg('eventApplyAgentPlaceholder')}
             />
 
             {applyWarnings.length > 0 && (
