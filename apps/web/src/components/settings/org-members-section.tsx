@@ -43,8 +43,9 @@ interface OrgMembersSectionProps {
 
 // story #3758(페드루 그라운딩 지적 2026-09-09 — 캡처 리뷰 중 발견, 낱말 축은 아니지만 같은
 // "한 화면 두 언어" 병) — role select/badge가 t() 없이 "Admin"/"Member" 원문 리터럴과
-// member.role raw enum을 그대로 그렸다(번역 누락, 충돌이 아니라 미번역 그 자체). 정본
-// 값은 이미 있다(settings.roleOwner/roleAdmin/roleMember) — 새 키 발명 없이 그대로 매핑.
+// member.role raw enum을 그대로 그렸다(번역 누락, 충돌이 아니라 미번역 그 자체).
+// roleAdmin/roleMember는 기존 값 재사용 — roleOwner만 이 PR에서 신규 추가(정정,
+// 페드루 지적 2026-09-10: "정본 값이 이미 있다"는 서술은 셋 다가 아니라 둘만 참이었다).
 function orgRoleLabel(role: 'owner' | 'admin' | 'member', t: (key: string) => string): string {
   if (role === 'owner') return t('roleOwner');
   if (role === 'admin') return t('roleAdmin');
