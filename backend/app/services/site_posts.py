@@ -557,6 +557,9 @@ async def _reseal_gate_on_new_version(
     gate.sealed_content_version = version.version
     gate.sealed_content_sha256 = version.body_sha256
     gate.sealed_content_body = version.body_md
+    # story #3370 AC2 — submit() 경로와 동형(JSONB in-place 미감지, 항상 재할당).
+    # neutral_facts.version_id를 최신 버전으로 계속 동기화(pending 中 편집마다).
+    gate.neutral_facts = {**(gate.neutral_facts or {}), "version_id": str(version.id)}
     # story e4fc29fa(조각③a) — 목적지 축도 content 축과 동형으로 pending 中엔 매 편집마다
     # 최신 draft.connection_id로 계속 동기화한다(재상신 왕복 불요, content_version과 같은
     # 이유). approved 뒤 편집은 위 분기에서 이미 이 대입 자체에 도달 안 함(sealed_content_*
@@ -911,6 +914,11 @@ async def submit_site_post_draft(
         # 필드들과 동형으로 neutral_facts에 얹는다 — 링크가 아니라 참조 정보다(PO
         # 2026-09-03 13:33Z, 에이전트에겐 실행 권유 아님).
         "draft_id": str(draft.id),
+        # story #3370 AC2(유나 실측 2026-09-10 13:23Z) — 판정 통지(에이전트 표면)가
+        # draft_id를 version처럼 오독할 여지를 없앤다. target은 지금 (재)봉인되는 바로 그
+        # 버전 행(sealed_content_sha256==target.body_sha256과 동시에 찍힘) — draft_id와
+        # 다른 축(초안 자체 vs 그 초안의 특정 버전).
+        "version_id": str(target.id),
     }
 
     # 페드루 PO 리뷰(2026-09-03 05:59Z) — 기본 역할이 없으면 가짜 uuid로 게이트를 만드는

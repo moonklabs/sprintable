@@ -681,6 +681,9 @@ async def _reseal_gate_on_new_version(
     gate.sealed_content_sha256 = version.body_sha256
     gate.sealed_content_body = version.text
     gate.sealed_media_sha256 = version.image_sha256
+    # story #3370 AC2 — site_posts.py 동형(JSONB in-place 미감지, 항상 재할당).
+    # neutral_facts.version_id를 최신 버전으로 계속 동기화(pending 中 편집마다).
+    gate.neutral_facts = {**(gate.neutral_facts or {}), "version_id": str(version.id)}
 
 
 async def get_channel_post_draft(
@@ -1137,6 +1140,8 @@ async def submit_channel_post_draft(
         # story #3404 — 이 게이트 슬롯을 "쥔" 초안 식별(위 차단 판정의 유일한 근거).
         # 재상신·재승인 요청도 매번 같은 값을 다시 써 넣는다(no-op이지만 명시).
         "draft_id": str(draft.id),
+        # story #3370 AC2 — site_posts.py 동형(target=지금 봉인되는 그 버전 행).
+        "version_id": str(target.id),
     }
 
     role_id = await _default_role_id(db, org_id)

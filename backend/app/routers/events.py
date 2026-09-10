@@ -1307,6 +1307,13 @@ async def _render_gate_verdict_message(db: AsyncSession, *, org_id: uuid.UUID, p
         lines.append(f"- work_item_id: {work_item_id_raw}")
 
     lines.append(f"- 게이트: {gate_type} → {verdict}")
+    # story #3370 AC2(유나 실측 2026-09-10 13:23Z) — 게이트가 종류로만 표기되고 있었다
+    # (gate_id는 아래 재조회 대상으로만 쓰이고 사람이 읽는 줄로는 한 번도 안 나갔다).
+    # 에이전트 표면(이 함수)이 AC2의 「gate ID」 요구를 실제로 충족하려면 값 자체를 찍어야
+    # 한다 — payload에 항상 있음(story #3487, 이 함수의 유일한 발행부가 항상 채움).
+    gate_id_raw = payload.get("gate_id")
+    if gate_id_raw:
+        lines.append(f"- gate_id: {gate_id_raw}")
 
     # story 1cd72bfc(2026-09-02, 담롱 4바퀴 승인 실측·PO 확定) — 이전엔 verdict=="rejected"
     # 게이트가 있어 승인(approved) 판정에 사유가 있어도(예: "Ddddd") 원천 차단됐다.
@@ -1318,6 +1325,7 @@ async def _render_gate_verdict_message(db: AsyncSession, *, org_id: uuid.UUID, p
 
     draft_doc_ref: str | None = None
     draft_id: str | None = None
+    version_id: str | None = None
     # story #3359 — 레시피 stage 게이트의 neutral_facts엔 게이트 생성 시점(recipe_gate_
     # hooks.py::_build_approval_neutral_facts)에 이미 stage/channel이 박혀 있다. 이
     # payload 자체엔 없어(preset.gate.verdict 계약 불변) 아래 gate_row 재조회에서만
@@ -1330,7 +1338,7 @@ async def _render_gate_verdict_message(db: AsyncSession, *, org_id: uuid.UUID, p
     # gate_type, status) 재조회+`order_by(resolved_at desc).limit(1)`는 "가장 최근
     # resolved"인 게이트를 고르는 것이지 "지금 이 이벤트가 말하는" 그 게이트가 아니다
     # — 옛 payload(gate_id 없음, 레거시 큐 재생 등)에 대한 하위호환 폴백으로만 유지.
-    gate_id_raw = payload.get("gate_id")
+    # (gate_id_raw는 위에서 이미 구했다 — 「gate_id:」 줄과 이 재조회가 같은 값을 쓴다.)
     if work_item_type and work_item_id is not None and gate_type:
         if gate_id_raw:
             try:
@@ -1355,6 +1363,13 @@ async def _render_gate_verdict_message(db: AsyncSession, *, org_id: uuid.UUID, p
             # 모두에서 만들어지지 않는다) — 링크가 아니라 참조로만 싣는다(PO 2026-09-03
             # 13:33Z, 실행 권유 아님).
             draft_id = facts.get("draft_id")
+            # story #3370 AC2(유나 실측 2026-09-10 13:23Z) — draft_id(초안 자체 식별)와
+            # version_id(그 초안 중 «이번에 봉인·판정된» 특정 버전)는 다른 축이다. 이전엔
+            # version 자리가 아예 없어 draft_id를 version처럼 오독할 여지가 있었다 —
+            # site_posts.py/channel_posts.py의 submit/reseal 훅이 neutral_facts에 새로
+            # stamp한 값(gate.sealed_content_sha256과 동시에 찍히는, 그 sha256이 가리키는
+            # 실제 버전 행의 id)을 그대로 읽는다.
+            version_id = facts.get("version_id")
             gate_stage = facts.get("stage")
             _channel_raw = facts.get("channel")
             gate_channel = _channel_raw if isinstance(_channel_raw, str) and _channel_raw and _channel_raw != "미확認" else None
@@ -1362,6 +1377,8 @@ async def _render_gate_verdict_message(db: AsyncSession, *, org_id: uuid.UUID, p
         lines.append(f"- 대상 산출물: {draft_doc_ref}")
     if draft_id:
         lines.append(f"- draft_id: {draft_id}")
+    if version_id:
+        lines.append(f"- version_id: {version_id}")
 
     # story #3387(결함·오도 문구, PO 2026-09-03 13:33Z 스코프 확定) — gate_type=
     # external_publish는 이 아래 레시피 전용 문구(다른 gate_type용, 변경 없음)를 타지
