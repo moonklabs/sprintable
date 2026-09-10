@@ -835,3 +835,100 @@ async def test_submit_without_default_role_returns_409_approver_role_missing():
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_partial_failure_between_version_insert_and_gate_reopen_rolls_back_both():
+    """story #3367 AC5(부분 성공 롤백) — 디디 자기점검(2026-09-10)이 "②와 같은 함수 안
+    단일 commit이라 구조적으로 보장"이라 적어 두고 «관측하는 테스트는 없다»로 남긴 자리를
+    실제 관측으로 바꾼다(페드루 지시, 새 카드 아님·코드 변경 0·테스트만).
+
+    `create_site_post_draft_version()`은 버전 INSERT(flush만, 커밋 아님) →
+    `_reseal_gate_on_new_version()`(게이트 상태를 in-memory로만 되돌림) → 콘텐츠 규칙 lint →
+    단일 `await db.commit()` 순서다(site_posts.py:434-472). lint 단계(`_lint_site_post_fields`)
+    에서 예외를 주입해 "버전은 이미 flush됐고 게이트도 이미 pending으로 되돌아간" 그 중간
+    지점에서 트랜잭션을 끊는다 — 이 시점에 관측 가능한 상태가 «변경된 최신본+기존 승인 유지»
+    (버전만 새로 생기고 게이트는 approved로 남는, AC5가 금지하는 바로 그 상태)로 굳어지는지,
+    아니면 온전히 롤백돼 둘 다 원래대로 돌아가는지를 새 세션(같은 트랜잭션이 아닌 별도 연결)
+    으로 재조회해 직접 잰다.
+    """
+    from unittest.mock import patch
+
+    import app.services.site_posts as site_posts_mod
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            human_id = await _seed_human(s, org_id)
+            story_id = await _seed_story(s, org_id, project_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id)
+        async with _client_for(app) as client:
+            r_draft = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts",
+                json=_draft_body(work_item_id=story_id),
+            )
+            draft_id = r_draft.json()["draft_id"]
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        async with _client_for(app) as client:
+            r_submit = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts/{draft_id}/submit", json={},
+            )
+        gate_id = uuid.UUID(r_submit.json()["gate_id"])
+        sealed_before = r_submit.json()["content_sha256"]
+
+        async with Session() as s:
+            await _approve_gate_directly(s, gate_id)
+
+        async with Session() as s:
+            from app.models.site_post_version import SitePostVersion
+            from sqlalchemy import func, select
+            version_count_before = (await s.execute(
+                select(func.count()).select_from(SitePostVersion).where(
+                    SitePostVersion.draft_id == uuid.UUID(draft_id)
+                )
+            )).scalar_one()
+        assert version_count_before == 1
+
+        # 승인된 게이트를 편집 — 버전 INSERT(flush)·게이트 pending 되돌림(in-memory)까지는
+        # 정상 진행되고, 그 다음 단계(lint)에서 강제로 터뜨려 commit 전에 트랜잭션을 끊는다.
+        with patch.object(
+            site_posts_mod, "_lint_site_post_fields",
+            side_effect=RuntimeError("주입된 부분 성공 결함 — commit 전에 터진다"),
+        ):
+            async with _client_for(app) as client:
+                with pytest.raises(RuntimeError):
+                    await client.post(
+                        f"/api/v2/organizations/{org_id}/site-posts/drafts",
+                        json=_draft_body(work_item_id=story_id, title="2호 글(부분 성공 주입)"),
+                    )
+
+        # 별도 새 세션으로 재조회 — 같은 트랜잭션의 잔상이 아니라 실제로 커밋된 DB 상태.
+        async with Session() as s:
+            from app.models.gate import Gate
+            from app.models.site_post_version import SitePostVersion
+            from sqlalchemy import func, select
+
+            gate = (await s.execute(select(Gate).where(Gate.id == gate_id))).scalar_one()
+            version_count_after = (await s.execute(
+                select(func.count()).select_from(SitePostVersion).where(
+                    SitePostVersion.draft_id == uuid.UUID(draft_id)
+                )
+            )).scalar_one()
+
+        assert version_count_after == version_count_before, (
+            "부분 성공 — 버전 INSERT가 롤백되지 않고 남았다(AC5 위반: 변경된 최신본이 존재)"
+        )
+        assert gate.status == "approved", (
+            "부분 성공 — 게이트 되돌림만 커밋되고 버전은 롤백됐다(비대칭 부분 성공, AC5 위반)"
+        )
+        assert gate.reapproval_required is False, "부분 성공인데 reapproval_required가 새 상태로 남았다"
+        assert gate.sealed_content_sha256 == sealed_before, "부분 성공인데 봉인 값이 갱신된 채 남았다"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
