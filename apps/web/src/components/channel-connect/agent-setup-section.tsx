@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
 import { ListRow, ListRowMark } from '@/components/ui/list-row';
 import { fetchWithAuth } from '@/lib/db/client';
 import { channelLabel, channelMarkColor, channelMarkInitials } from '@/lib/channel-label';
@@ -124,9 +125,11 @@ export function AgentSetupSection({ orgId }: { orgId: string }) {
         <h2 className="text-sm font-semibold text-foreground">{t('agentSetupTitle')}</h2>
         <p className="text-xs text-muted-foreground">{t('agentSetupDescription')}</p>
       </div>
-      <div className="divide-y divide-border overflow-hidden rounded-md border border-border">
+      {/* story #3785(유나·페드루 라이브 재측 r67 — 선생님 원 캡처의 그 상자) — 1층 규칙:
+          Card(surface='solid'). */}
+      <Card className="divide-y divide-border overflow-hidden">
         {connectors.map((c) => <ConnectorRow key={c.connector_key} connector={c} t={t} />)}
-      </div>
+      </Card>
     </div>
   );
 }

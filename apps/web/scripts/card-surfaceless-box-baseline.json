@@ -2,7 +2,8 @@
   "_comment": [
     "story #3785(PO 실측 2026-09-10) grandfather baseline — 이 가드 첫 도입 시점 develop의 기존 카드-표면-미적용 클래스(className=\"…rounded-(md|lg|xl) border border-border(/NN)?…\" · bg- 없음).",
     "마이그레이션 대상 아님 — 이 게이트는 \"더 늘지 않는다\"만 보장한다(freeze, 전량 정리는 후속 스윕 판).",
-    "정적 상한이지 실수가 아니다 — 라이브 하네스(e2e/card-surface-guard.spec.ts)가 주 가드, 이 baseline은 보조."
+    "정적 상한이지 실수가 아니다 — 라이브 하네스(e2e/card-surface-guard.spec.ts)가 주 가드, 이 baseline은 보조.",
+    "story #3785(2026-09-10, 유나 r67 라이브 재측 — 20→1 남은 마지막 스팟) — components/channel-connect/agent-setup-section.tsx:127(channels/page.tsx:1260이 부르는 자식, 선생님 원 캡처의 그 상자)를 Card로 전환. baseline에서 걷음."
   ],
   "counts": {
     "app/(authenticated)/[ws]/[proj]/docs/docs-index.tsx": 1,
@@ -30,7 +31,6 @@
     "components/agents/member-notification-preferences-summary.tsx": 1,
     "components/agents/messaging-policy-section.tsx": 2,
     "components/canvas/import-artifact-dialog.tsx": 2,
-    "components/channel-connect/agent-setup-section.tsx": 1,
     "components/channel-connect/facebook-page-select-card.tsx": 1,
     "components/chat/delivery-contract-modal.tsx": 1,
     "components/content/comment-convert-to-task-dialog.tsx": 1,
