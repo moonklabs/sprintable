@@ -929,9 +929,10 @@ export function EmbedCard({
 // story #2262 AC1(2026-08-08) — doc `flow-map-blueprint-v1` §2-3 표기 세 조각의 「표면」.
 // 스토리 본문의 AC1 정의 그대로: form은 'mention'|'embed'|'proof' 셋뿐(FORMS,
 // backend/app/models/reference.py) — 채팅 멘션 파서는 오늘 "mention"만 낸다(다른 값은
-// 문서·증빙 경로가 낼 수 있어 표는 셋 다 갖춘다). story #3776(1층B) — 'proof'는 formLabel()
-// 이 chats.reportEvidenceLabel로 먼저 가로채 이 표를 안 거친다(아래).
-const FORM_LABELS: Record<string, string> = { mention: '멘션', embed: '임베드' };
+// 문서·증빙 경로가 낼 수 있어 표는 셋 다 갖춘다). story #3776(1층B, 페드루 재검토 10:07Z) —
+// 이 셋은 닫힌 열거라 한 화면의 같은 값 목록 안에 섞이면 한쪽만 번역되는 게 더 나쁘다
+// (en에서 "Evidence" 옆에 "멘션"이 서는 자리). formLabel()이 이제 셋 다 chats ns 키로
+// 가로챈다 — 이 상수는 폐기.
 
 // 「지점」 — referenced_at(이 참조가 «언제 생겼나»)을 짧게. 블루프린트 예시("7/26 스레드")와
 // 같은 월/일 압축 표기 — 채팅 칩은 그 자체가 스레드 맥락이라 별도 "스레드" 접미어를 안 붙인다.
@@ -990,10 +991,16 @@ export function EntityChip({
 } & VariantProps<typeof entityChipLabelVariants>) {
   // story #3776(1층A) — "결재함에서 보기" 딥링크 CTA, content ns의 기존 submitGateLink 키 재사용.
   const tContent = useTranslations('content');
-  // story #3776(1층B) — FORM_LABELS의 "근거", chats ns의 기존 reportEvidenceLabel 키 재사용
-  // (mention/embed 두 라벨은 대응 키 없어 2층, FORM_LABELS 원시값 그대로 유지).
+  // story #3776(1층B, 페드루 재검토 10:07Z) — "근거"는 chats ns의 기존 reportEvidenceLabel
+  // 키, "멘션"/"임베드"는 신설 embedFormMention/embedFormEmbed 키(닫힌 3값 열거라 하나만
+  // 번역되면 en에서 두 언어가 섞인다 — 셋을 함께 1층으로 처리).
   const tChats = useTranslations('chats');
-  const formLabel = (form: string) => (form === 'proof' ? tChats('reportEvidenceLabel') : (FORM_LABELS[form] ?? form));
+  const formLabel = (form: string) => {
+    if (form === 'proof') return tChats('reportEvidenceLabel');
+    if (form === 'mention') return tChats('embedFormMention');
+    if (form === 'embed') return tChats('embedFormEmbed');
+    return form;
+  };
   const [showModal, setShowModal] = useState(false);
   // story #461e9a54(P0) — 채팅 트리(ReadingPanelProvider 하위)에서는 패널로, 밖(doc-content-
   // renderer.tsx·story-detail-panel.tsx 등)에서는 null이라 기존 Dialog 모달로 폴백(회귀 0).
