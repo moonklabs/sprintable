@@ -248,6 +248,41 @@ describe('OrgMembersSection — 역할 변경 게이트가 BE 인가 폭과 같�
   });
 });
 
+// story #3771(PO 별건 ㉓·유나 r65 라이브 픽셀) — 역할 변경 불가 행(소유자·자기 자신)의
+// 배지가 제거 버튼 자리로 밀려 세로 정렬이 「소유자/제거/제거」로 섞였다. 액션 열은
+// canEdit 무관하게 항상 같은 개수(2: 역할 슬롯+액션 슬롯)를 렌더해야 한다 — 액션
+// 슬롯은 canEdit=false일 때도 같은 텍스트의 Button을 invisible로 그려 폭을 지킨다.
+describe('OrgMembersSection — 역할 열/액션 열 자리 고정(story #3771)', () => {
+  it('⭐owner 행·자기 자신 행도 "제거" 버튼 엘리먼트가 DOM에 있다(자리만 invisible) — member 행은 보이는 버튼', async () => {
+    await mountAsAdmin(
+      [
+        { id: 'row-owner', user_id: 'u-owner', role: 'owner' },
+        { id: 'row-self', user_id: 'u-admin-self', role: 'admin' },
+        { id: 'row-other', user_id: 'u-member', role: 'member' },
+      ],
+      'u-admin-self',
+    );
+
+    const removeButtons = Array.from(container.querySelectorAll('button'))
+      .filter((b) => b.textContent === koMessages.settings.removeFromProject);
+    // 세 행 전부(owner·self·member) "제거" 버튼 엘리먼트 자체는 존재해야 한다(자리 고정).
+    expect(removeButtons.length).toBe(3);
+
+    const [ownerBtn, selfBtn, otherBtn] = removeButtons;
+    expect(ownerBtn.className).toContain('invisible');
+    expect(ownerBtn.getAttribute('aria-hidden')).toBe('true');
+    expect(ownerBtn.tabIndex).toBe(-1);
+
+    expect(selfBtn.className).toContain('invisible');
+    expect(selfBtn.getAttribute('aria-hidden')).toBe('true');
+
+    // member 행(변경 가능)의 버튼은 실제로 보이고 클릭 가능해야 한다 — 회귀 0.
+    expect(otherBtn.className).not.toContain('invisible');
+    expect(otherBtn.getAttribute('aria-hidden')).not.toBe('true');
+    expect(otherBtn.tabIndex).not.toBe(-1);
+  });
+});
+
 // story #3606(잔여, 페드루 PO 確定 2026-09-07) — 이 파일 전체가 t() 없는 하드코딩
 // 한글이라 en 로케일에서도 한국어가 그대로 노출됐다(초대 폼 제목·설명·성공/실패
 // 배너·멤버/초대 목록 헤딩·행 액션 버튼 등). 실 렌더(멤버 1행+대기 초대 1행 —
