@@ -305,7 +305,6 @@
   },
   "dashboard": {
     "title": "Dashboard",
-    "projects": "Projects",
     "ccZoneActions": "Your actions now",
     "ccClearTitle": "All clear",
     "ccClearBody": "Nothing needs your attention right now",
@@ -340,10 +339,6 @@
     "ccMinAgo": "{n}m ago",
     "ccHourAgo": "{n}h ago",
     "ccDayAgo": "{n}d ago",
-    "recentDocs": "Recent docs",
-    "inProgress": "In Progress",
-    "inReview": "In Review",
-    "blocked": "Blocked",
     "standup": "Standup",
     "ccGateTypeQa": "QA",
     "ccGateTypePrReview": "PR review",
@@ -1814,7 +1809,6 @@
     "runtimeTypeSaved": "Runtime type saved"
   },
   "shell": {
-    "projects": "Projects",
     "projectSelectPrompt": "Select current project",
     "projectSelectDescription": "Choose the current project from the header switcher to activate this surface."
   },
