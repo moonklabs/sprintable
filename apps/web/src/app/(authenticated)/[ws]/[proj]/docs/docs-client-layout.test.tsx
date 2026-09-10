@@ -343,4 +343,15 @@ describe('DocsClientLayout — story #3784 loading/loadError 컨텍스트 실 �
     await act(async () => { retryButton!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(fetchMock.mock.calls.length).toBeGreaterThan(callsBefore); // 재시도가 fetchTree()를 다시 친다.
   });
+
+  // story #3784(페드루 짚음, 09:49Z) — 로드 완료·진짜 0건일 때도 왼쪽("문서를
+  // 선택하세요")과 오른쪽("아직 쌓인 문서가 없어요")이 다른 말을 하던 자리. 같은
+  // 사실은 같은 낱말로 — 왼쪽도 emptyTitle 한 줄만(CTA는 오른쪽+상단 바에 이미
+  // 있어 뺀다).
+  it('로드 완료·진짜 0건이면 왼쪽 사이드바도 "문서를 선택하세요"가 아니라 "아직 쌓인 문서가 없어요"를 그린다(CTA 없음)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: [], meta: { hasMore: false, nextCursor: null } }) })));
+    await mount();
+    expect(container.textContent).not.toContain('문서를 선택하세요');
+    expect(container.textContent).toContain('아직 쌓인 문서가 없어요');
+  });
 });

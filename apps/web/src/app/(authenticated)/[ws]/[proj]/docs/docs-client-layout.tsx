@@ -16,7 +16,6 @@ import { DocSearchResults, type DocSearchResult } from '@/components/docs/doc-se
 import { useTreeExpanded } from '@/components/docs/use-tree-expanded';
 import { Button } from '@/components/ui/button';
 import { CountBadge } from '@/components/ui/count-badge';
-import { EmptyState } from '@/components/ui/empty-state';
 import { useToast } from '@/components/ui/toast';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { ChevronDown, ChevronLeft, ChevronRight, FileText, FolderPlus, Plus, X } from 'lucide-react';
@@ -538,7 +537,13 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
             </button>
           </div>
         ) : tree.length === 0 ? (
-          <EmptyState title={t('title')} description={t('selectDoc')} className="mt-2 bg-background/70" action={<Button size="sm" onClick={handleNewDoc}><Plus className="mr-1 h-4 w-4" />{t('newDoc')}</Button>} />
+          // story #3784(페드루 짚음 09:49Z) — 고를 문서가 0건인데 왼쪽은 "선택하세요"
+          // (`selectDoc`)를 말하고 오른쪽(DocsIndex)은 "아직 쌓인 문서가 없어요"
+          // (`emptyTitle`)를 말하던 자리 — 같은 사실은 같은 낱말로. CTA도 뺀다(오른쪽
+          // 빈 상태+상단 바에 이미 「새 문서」 둘이 있어 여기까지 셋이면 과함).
+          // `selectDoc`은 그대로 둔다 — docs-shell-client.tsx의 "문서는 있는데 미선택"
+          // 자리는 이 분기가 아니라 별도 자리다.
+          <p className="px-2 py-4 text-xs text-muted-foreground">{t('emptyTitle')}</p>
         ) : (
           <>
             <RecentsSection
