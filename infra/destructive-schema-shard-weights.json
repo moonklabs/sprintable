@@ -1562,6 +1562,11 @@
       "file": "tests/test_3744_list_total_count.py",
       "sec": 19.6,
       "source": "story-3744-post-list-redesign(2026-09-09, PO 決 public_url 3건 추가로 재측정 — 신규 destructive_schema 파일, test_3734_post_archive.py와 동일 방법론 재사용) — 로컬 raw pytest 9건 6.79s 실측 × 같은 도메인 이웃 재측정 평균 배율(2.88, test_3734_post_archive.py source 필드 참조) = 19.6s — 실 CI 샤드 로그로 재확認 필요"
+    },
+    {
+      "file": "tests/test_3766_insights_board_command_status.py",
+      "sec": 3.3,
+      "source": "story-3766(2026-09-10) — 신규 파일 실측(로컬, sprintable/backend/.venv pytest 직접 3회 실행 average≈3.23s·최고 3.27s, 3.3s로 등재). measure_destructive_durations_local.py 전체 배치 재측정(템플릿 DB sprintable_test_tpl·role sprintable 필요)이 아니라 이 신규 파일 1건만 별도 스크래치 DB(backend_test_3766_weights)에서 3회 반복 실측한 값 — 로컬이 CI보다 ~6배 빠르다는 _snapshot_policy 전제 그대로(절대시간 아님, 상대 비중 목적) 원값 그대로 등재. 실 CI 샤드 로그로 재확認 필요(AC2 재측정 규칙)."
     }
   ]
 }
