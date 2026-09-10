@@ -1,17 +1,26 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { getOrgProjectAuthContext, proxyToFastapiWithParams } = vi.hoisted(() => ({
+// story #3778 CHANGES — 로케일 해석은 getLocale()(src/i18n/request.ts, 화면과 동일
+// 함수) 하나로 통일했다. 이 라우트는 그 결과 문자열을 그대로 Accept-Language로
+// forward만 한다 — 쿠키/헤더 폴백 로직 자체는 request.test.ts가 별도로 고정한다.
+const { getOrgProjectAuthContext, proxyToFastapiWithParams, getLocaleMock } = vi.hoisted(() => ({
   getOrgProjectAuthContext: vi.fn(),
   proxyToFastapiWithParams: vi.fn(),
+  getLocaleMock: vi.fn(),
 }));
 
 vi.mock('@/lib/auth-helpers', () => ({ getOrgProjectAuthContext }));
 vi.mock('@/lib/fastapi-proxy', () => ({ proxyToFastapiWithParams }));
+vi.mock('@/i18n/request', () => ({ getLocale: getLocaleMock }));
 
 import { GET } from './route';
 
 function makeAgent() {
   return { id: 'agent-1', type: 'agent', rateLimitExceeded: false, rateLimitRemaining: 299, rateLimitResetAt: 0 };
+}
+
+function makeRequest() {
+  return new Request('http://localhost/api/retro-sessions/session-1/export?project_id=project-1');
 }
 
 // story #3774 — BE `retros.py::export_session`은 JSON 봉투가 아니라 마크다운 텍스트를
@@ -22,7 +31,9 @@ describe('GET /api/retro-sessions/[id]/export', () => {
   beforeEach(() => {
     getOrgProjectAuthContext.mockReset();
     proxyToFastapiWithParams.mockReset();
+    getLocaleMock.mockReset();
     getOrgProjectAuthContext.mockResolvedValue(makeAgent());
+    getLocaleMock.mockResolvedValue('en');
   });
 
   it('returns 401 when not authenticated', async () => {
@@ -82,5 +93,66 @@ describe('GET /api/retro-sessions/[id]/export', () => {
     );
 
     expect(response.status).toBe(403);
+  });
+});
+
+describe('GET /api/retro-sessions/[id]/export — story #3778 로케일 forward', () => {
+  beforeEach(() => {
+    getOrgProjectAuthContext.mockReset();
+    proxyToFastapiWithParams.mockReset();
+    getLocaleMock.mockReset();
+    getOrgProjectAuthContext.mockResolvedValue(makeAgent());
+    proxyToFastapiWithParams.mockResolvedValue(
+      new Response('# doc', { status: 200, headers: { 'Content-Type': 'text/markdown' } }),
+    );
+  });
+
+  it('⭐getLocale()의 결과(en)를 Accept-Language로 그대로 실어 BE 호출에 넘긴다', async () => {
+    getLocaleMock.mockResolvedValue('en');
+
+    await GET(makeRequest(), { params: Promise.resolve({ id: 'session-1' }) });
+
+    expect(proxyToFastapiWithParams).toHaveBeenCalledWith(
+      expect.anything(),
+      '/api/v2/retros/[id]/export',
+      { id: 'session-1' },
+      { extraHeaders: { 'Accept-Language': 'en' } },
+    );
+  });
+
+  it('getLocale()이 ko를 돌려주면 그대로 ko를 넘긴다', async () => {
+    getLocaleMock.mockResolvedValue('ko');
+
+    await GET(makeRequest(), { params: Promise.resolve({ id: 'session-1' }) });
+
+    expect(proxyToFastapiWithParams).toHaveBeenCalledWith(
+      expect.anything(),
+      '/api/v2/retros/[id]/export',
+      { id: 'session-1' },
+      { extraHeaders: { 'Accept-Language': 'ko' } },
+    );
+  });
+
+  // story #3778 CHANGES(유나 design:changes) — 최초본은 쿠키가 없으면 extraHeaders
+  // 자체를 안 보냈다(BE 기본값에 맡김 — 그게 바로 "화면은 en인데 문서는 ko"였던 병의
+  // 경로). 지금은 getLocale()이 항상 구체적인 로케일을 돌려주므로(자체 기본값 en까지
+  // 포함) extraHeaders가 never undefined다 — 그 자체가 회귀가드.
+  it('⭐getLocale()은 항상 구체값을 돌려주므로 extraHeaders가 undefined로 빠지는 경우가 없다', async () => {
+    getLocaleMock.mockResolvedValue('en'); // getLocale() 자신의 기본값(쿠키·헤더 둘 다 없을 때)
+
+    await GET(makeRequest(), { params: Promise.resolve({ id: 'session-1' }) });
+
+    const call = proxyToFastapiWithParams.mock.calls[0];
+    expect(call?.[3]).toEqual({ extraHeaders: { 'Accept-Language': 'en' } });
+    expect(call?.[3]?.extraHeaders).not.toBeUndefined();
+  });
+
+  it('인증 실패면 401 — BE 호출 자체를 안 한다', async () => {
+    getOrgProjectAuthContext.mockResolvedValue(null);
+
+    const res = await GET(makeRequest(), { params: Promise.resolve({ id: 'session-1' }) });
+
+    expect(res.status).toBe(401);
+    expect(proxyToFastapiWithParams).not.toHaveBeenCalled();
   });
 });

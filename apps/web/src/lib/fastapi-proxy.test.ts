@@ -86,6 +86,49 @@ describe('fastapi-proxy — X-Project-Id override passthrough (story 7d6b770b �
   });
 });
 
+// story #3778 — 회고 내보내기 BFF가 next-intl locale 쿠키를 Accept-Language로 실어
+// BE(retros.py::export_session)에 전달하는 경로. 전역 forward 목록(x-project-id 등)과
+// 달리 options.extraHeaders로 호출부가 명시 opt-in한 헤더만 실린다.
+describe('fastapi-proxy — extraHeaders opt-in passthrough(story #3778)', () => {
+  beforeEach(() => {
+    getServerSessionMock.mockReset();
+    getServerSessionMock.mockResolvedValue({ access_token: 'token-1', org_id: 'org-1', project_id: 'proj-1' });
+    global.fetch = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+  });
+
+  it('extraHeaders로 넘긴 헤더가 그대로 FastAPI 호출에 실린다', async () => {
+    const request = new Request('http://localhost/api/retro-sessions/abc/export');
+
+    await proxyToFastapi(request, '/api/v2/retros/abc/export', { extraHeaders: { 'Accept-Language': 'en' } });
+
+    const [, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    expect(headers['Accept-Language']).toBe('en');
+  });
+
+  it('extraHeaders를 안 넘기면 안 실림(옵트인 — 다른 라우트 무회귀)', async () => {
+    const request = new Request('http://localhost/api/retro-sessions/abc/export');
+
+    await proxyToFastapi(request, '/api/v2/retros/abc/export');
+
+    const [, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    expect(headers['Accept-Language']).toBeUndefined();
+  });
+
+  it('proxyToFastapiWithParams도 extraHeaders를 그대로 전달한다', async () => {
+    const request = new Request('http://localhost/api/retro-sessions/abc/export');
+
+    await proxyToFastapiWithParams(request, '/api/v2/retros/[id]/export', { id: 'abc' }, {
+      extraHeaders: { 'Accept-Language': 'ko' },
+    });
+
+    const [, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    expect(headers['Accept-Language']).toBe('ko');
+  });
+});
+
 // story #2190 — proxyToFastapi가 응답 헤더를 Content-Type 하나만 남기고 전부 버려서, board
 // 분기(list_stories)가 X-Total-Count/X-Next-Cursor로만 내보내는 커서 페이지네이션 신호가
 // 호출부(stories/backlog route)에 도달하기 前에 사라지던 결함의 회귀가드. 허용목록만 옮기고
