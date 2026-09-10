@@ -442,7 +442,7 @@ async def test_undo_endpoint_maps_window_expired_to_403():
 async def test_discuss_endpoint_non_approver_403_service_not_called():
     """⭐discuss는 승인/거부와 동일 자격 — non-doc 게이트에서 project owner/admin 아니면 403."""
     from app.routers import gates as gates_mod
-    from app.routers.gates import request_gate_discussion_endpoint, GateDiscussionRequest
+    from app.routers.gates import _request_gate_discussion_endpoint, GateDiscussionRequest
     from fastapi import HTTPException
     caller = _resolved_human()
     # story #3319 — designated_approver_id: _authorize_gate_approve_equivalent가 이제 이 필드를
@@ -460,7 +460,8 @@ async def test_discuss_endpoint_non_approver_403_service_not_called():
         session = AsyncMock()
         session.execute = AsyncMock(return_value=result)
         with pytest.raises(HTTPException) as ei:
-            await request_gate_discussion_endpoint(
+            await _request_gate_discussion_endpoint(
+                resolved_locale="ko",
                 id=uuid.uuid4(), body=GateDiscussionRequest(reason="사유"), session=session,
                 org_id=uuid.uuid4(), auth=SimpleNamespace(user_id=str(uuid.uuid4())),
             )
@@ -472,7 +473,7 @@ async def test_discuss_endpoint_non_approver_403_service_not_called():
 async def test_discuss_endpoint_agent_caller_403():
     """⭐승인/거부와 동일하게 에이전트(비휴먼)는 discuss 요청도 불가."""
     from app.routers import gates as gates_mod
-    from app.routers.gates import request_gate_discussion_endpoint, GateDiscussionRequest
+    from app.routers.gates import _request_gate_discussion_endpoint, GateDiscussionRequest
     from fastapi import HTTPException
     from app.services.member_resolver import ResolvedMember
     caller = ResolvedMember(id=uuid.uuid4(), user_id=uuid.uuid4(), name="agent", type="agent",
@@ -481,7 +482,8 @@ async def test_discuss_endpoint_agent_caller_403():
         session = AsyncMock()
         session.execute = AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: None))
         with pytest.raises(HTTPException) as ei:
-            await request_gate_discussion_endpoint(
+            await _request_gate_discussion_endpoint(
+                resolved_locale="ko",
                 id=uuid.uuid4(), body=GateDiscussionRequest(reason="사유"), session=session,
                 org_id=uuid.uuid4(), auth=SimpleNamespace(user_id=str(uuid.uuid4())),
             )
@@ -491,7 +493,7 @@ async def test_discuss_endpoint_agent_caller_403():
 @pytest.mark.anyio
 async def test_discuss_endpoint_forces_actor_from_auth():
     from app.routers import gates as gates_mod
-    from app.routers.gates import request_gate_discussion_endpoint, GateDiscussionRequest
+    from app.routers.gates import _request_gate_discussion_endpoint, GateDiscussionRequest
     caller = _resolved_human()
     fake_gate = SimpleNamespace(id=uuid.uuid4(), gate_type="artifact_canonicalize", work_item_type="visual_artifact",
                                 work_item_id=uuid.uuid4(), designated_approver_id=None)
@@ -502,7 +504,8 @@ async def test_discuss_endpoint_forces_actor_from_auth():
          patch.object(gates_mod.GateResponse, "model_validate", lambda g: "OK"):
         session = AsyncMock()
         session.execute = AsyncMock(return_value=result)
-        await request_gate_discussion_endpoint(
+        await _request_gate_discussion_endpoint(
+                resolved_locale="ko",
             id=uuid.uuid4(), body=GateDiscussionRequest(reason="사유"), session=session,
             org_id=uuid.uuid4(), auth=SimpleNamespace(user_id=str(uuid.uuid4())),
         )

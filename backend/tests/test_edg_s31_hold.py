@@ -182,17 +182,19 @@ async def test_hold_unhold_endpoints_non_admin_403():
     from unittest.mock import AsyncMock, patch
     from fastapi import HTTPException
     from app.routers import gates as gates_mod
-    from app.routers.gates import GateHoldRequest, hold_gate_endpoint, unhold_gate_endpoint
+    from app.routers.gates import GateHoldRequest, _hold_gate_endpoint, _unhold_gate_endpoint
     holdfn, unholdfn = AsyncMock(), AsyncMock()
     with patch.object(gates_mod, "resolve_member", AsyncMock(return_value=_resolved_human())), \
          patch.object(gates_mod, "is_org_owner_or_admin", AsyncMock(return_value=False)), \
          patch.object(gates_mod, "hold_gate", holdfn), \
          patch.object(gates_mod, "unhold_gate", unholdfn):
         with pytest.raises(HTTPException) as ei1:
-            await hold_gate_endpoint(id=uuid.uuid4(), body=GateHoldRequest(), session=AsyncMock(),
+            await _hold_gate_endpoint(
+                resolved_locale="ko",id=uuid.uuid4(), body=GateHoldRequest(), session=AsyncMock(),
                                      org_id=uuid.uuid4(), auth=SimpleNamespace(user_id=str(uuid.uuid4())))
         with pytest.raises(HTTPException) as ei2:
-            await unhold_gate_endpoint(id=uuid.uuid4(), session=AsyncMock(),
+            await _unhold_gate_endpoint(
+                resolved_locale="ko",id=uuid.uuid4(), session=AsyncMock(),
                                        org_id=uuid.uuid4(), auth=SimpleNamespace(user_id=str(uuid.uuid4())))
     assert ei1.value.status_code == 403 and ei2.value.status_code == 403
     holdfn.assert_not_awaited()
@@ -205,14 +207,15 @@ async def test_hold_endpoint_forces_holder_from_auth():
     from types import SimpleNamespace
     from unittest.mock import AsyncMock, patch
     from app.routers import gates as gates_mod
-    from app.routers.gates import GateHoldRequest, hold_gate_endpoint
+    from app.routers.gates import GateHoldRequest, _hold_gate_endpoint
     caller = _resolved_human()
     holdfn = AsyncMock(return_value=SimpleNamespace())
     with patch.object(gates_mod, "resolve_member", AsyncMock(return_value=caller)), \
          patch.object(gates_mod, "is_org_owner_or_admin", AsyncMock(return_value=True)), \
          patch.object(gates_mod, "hold_gate", holdfn), \
          patch.object(gates_mod.GateResponse, "model_validate", lambda g: "OK"):
-        await hold_gate_endpoint(id=uuid.uuid4(), body=GateHoldRequest(reason="대기"), session=AsyncMock(),
+        await _hold_gate_endpoint(
+                resolved_locale="ko",id=uuid.uuid4(), body=GateHoldRequest(reason="대기"), session=AsyncMock(),
                                  org_id=uuid.uuid4(), auth=SimpleNamespace(user_id=str(uuid.uuid4())))
     # hold_gate(session, org_id, gate_id, holder_id, reason, held_until) — holder=caller.id
     assert holdfn.call_args.args[3] == caller.id

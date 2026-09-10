@@ -76,9 +76,10 @@ async def test_gate_transition_forces_resolver_id_to_caller(monkeypatch):
     # 검증을 우회하므로, mock 이 대신 그 불변식(auth.user_id 가 resolved 대상과 일관됨)을 지켜야
     # 한다. 이 파일의 관심사(resolver_id 강제)와는 무관 — patch 로 rule B 자체도 우회한다.
     monkeypatch.setattr(gm, "_non_doc_gate_approvable", AsyncMock(return_value=True))
-    await gm.transition_gate_endpoint(
+    await gm._transition_gate_endpoint(
         uuid.uuid4(), body, background_tasks=BackgroundTasks(),
-        session=_sess, org_id=uuid.uuid4(), auth=MagicMock(user_id=str(caller_id)))
+        session=_sess, org_id=uuid.uuid4(), auth=MagicMock(user_id=str(caller_id)),
+        resolved_locale="ko")
     assert captured["resolver_id"] == caller_id  # ⭐조작된 spoofed 가 아니라 인증 caller
     assert captured["resolver_id"] != spoofed
 

@@ -86,7 +86,7 @@ def test_transition_rejects_non_review_status():
 async def test_transition_forces_resolver_ignoring_body():
     """⭐resolver_id = 인증 caller 강제(body.resolver_id[타인 UUID] 무시)."""
     from app.routers import gates as mod
-    from app.routers.gates import GateTransitionRequest, transition_gate_endpoint
+    from app.routers.gates import GateTransitionRequest, _transition_gate_endpoint
     caller = _human()
     forged = uuid.uuid4()  # 타인 UUID
     captured = {}
@@ -104,7 +104,8 @@ async def test_transition_forces_resolver_ignoring_body():
          patch.object(mod, "_non_doc_gate_approvable", AsyncMock(return_value=True)):
         # story #2027: _non_doc_gate_session()의 gate_type="merge"는 고위험(_HIGH_RISK_GATE_TYPES)이라
         # 이 파일의 관심사(resolver_id 강제)와 무관한 사유-강제 가드를 note+evidence_viewed로 우회.
-        await transition_gate_endpoint(
+        await _transition_gate_endpoint(
+                resolved_locale="ko",
             id=uuid.uuid4(), body=GateTransitionRequest(status="approved", resolver_id=forged, note="테스트 사유", evidence_viewed=True),
             background_tasks=BackgroundTasks(),
             session=_non_doc_gate_session(), org_id=uuid.uuid4(),
@@ -117,7 +118,7 @@ async def test_transition_forces_resolver_ignoring_body():
 async def test_transition_agent_rejected_403():
     """agent caller 는 approve/reject 403(휴먼 전용)."""
     from app.routers import gates as mod
-    from app.routers.gates import GateTransitionRequest, transition_gate_endpoint
+    from app.routers.gates import GateTransitionRequest, _transition_gate_endpoint
     from app.services.member_resolver import ResolvedMember
     from fastapi import HTTPException
     agent = ResolvedMember(id=uuid.uuid4(), user_id=None, name="a", type="agent",
@@ -125,7 +126,8 @@ async def test_transition_agent_rejected_403():
     from fastapi import BackgroundTasks
     with patch.object(mod, "resolve_member", AsyncMock(return_value=agent)):
         with pytest.raises(HTTPException) as ei:
-            await transition_gate_endpoint(
+            await _transition_gate_endpoint(
+                resolved_locale="ko",
                 id=uuid.uuid4(), body=GateTransitionRequest(status="approved"),
                 background_tasks=BackgroundTasks(),
                 session=AsyncMock(), org_id=uuid.uuid4(),

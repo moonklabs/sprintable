@@ -1,5 +1,5 @@
 """story #3365(Phase0 S1) AC4(승인 절반) — 페드루 PO 확定(2026-09-03): «승인 API» 403은
-신규 엔드포인트·신규 코드가 아니라 기존 gates.py `transition_gate_endpoint`
+신규 엔드포인트·신규 코드가 아니라 기존 gates.py `_transition_gate_endpoint`
 (`_authorize_gate_approve_equivalent`, `resolved.type != "human"` → 403)가 이미 전 gate_type에
 걸쳐 강제한다. 이 테스트는 그 기존 가드를 `external_publish` gate_type에 회귀로 고정한다
 (신규 동작 없음 — 기존 가드 재확인).
@@ -23,7 +23,7 @@ async def test_agent_cannot_approve_external_publish_gate_existing_guard_pinned(
     from fastapi import BackgroundTasks, HTTPException
 
     from app.routers import gates as gates_mod
-    from app.routers.gates import GateTransitionRequest, transition_gate_endpoint
+    from app.routers.gates import GateTransitionRequest, _transition_gate_endpoint
     from app.services.member_resolver import ResolvedMember
 
     agent = ResolvedMember(
@@ -36,7 +36,8 @@ async def test_agent_cannot_approve_external_publish_gate_existing_guard_pinned(
 
     with patch.object(gates_mod, "resolve_member", AsyncMock(return_value=agent)):
         with pytest.raises(HTTPException) as exc_info:
-            await transition_gate_endpoint(
+            await _transition_gate_endpoint(
+                resolved_locale="ko",
                 id=uuid.uuid4(),
                 body=GateTransitionRequest(status="approved"),
                 background_tasks=BackgroundTasks(),
@@ -61,7 +62,7 @@ async def test_resubmit_required_guard_does_not_fire_for_non_site_post_gate_type
     from fastapi import BackgroundTasks, HTTPException
 
     from app.routers import gates as gates_mod
-    from app.routers.gates import GateTransitionRequest, transition_gate_endpoint
+    from app.routers.gates import GateTransitionRequest, _transition_gate_endpoint
     from app.services.member_resolver import ResolvedMember
 
     human = ResolvedMember(
@@ -93,7 +94,8 @@ async def test_resubmit_required_guard_does_not_fire_for_non_site_post_gate_type
          patch.object(gates_mod, "transition_gate", _fake_transition), \
          patch.object(gates_mod.GateResponse, "model_validate", staticmethod(lambda g: g)):
         try:
-            await transition_gate_endpoint(
+            await _transition_gate_endpoint(
+                resolved_locale="ko",
                 id=uuid.uuid4(),
                 body=GateTransitionRequest(status="approved", note="테스트 사유", evidence_viewed=True),
                 background_tasks=BackgroundTasks(),

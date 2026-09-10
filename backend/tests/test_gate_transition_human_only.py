@@ -14,7 +14,7 @@ import pytest
 from fastapi import BackgroundTasks, HTTPException
 
 from app.routers import gates as gates_mod
-from app.routers.gates import GateTransitionRequest, transition_gate_endpoint
+from app.routers.gates import GateTransitionRequest, _transition_gate_endpoint
 from app.services.member_resolver import ResolvedMember
 from tests.gate_mock_factory import make_gate
 
@@ -59,7 +59,8 @@ async def _call(status: str, member_type: str):
          patch.object(gates_mod, "transition_gate", transition), \
          patch.object(gates_mod, "_non_doc_gate_approvable", AsyncMock(return_value=True)), \
          patch.object(gates_mod.GateResponse, "model_validate", lambda g: "OK"):
-        result = await transition_gate_endpoint(
+        result = await _transition_gate_endpoint(
+                resolved_locale="ko",
             id=uuid.uuid4(), body=body, background_tasks=BackgroundTasks(),
             session=session, org_id=org_id, auth=SimpleNamespace(user_id=str(uuid.uuid4())),
         )
@@ -89,7 +90,8 @@ async def test_agent_approve_does_not_call_transition():
     with patch.object(gates_mod, "resolve_member", AsyncMock(return_value=_resolved("agent"))), \
          patch.object(gates_mod, "transition_gate", transition):
         with pytest.raises(HTTPException):
-            await transition_gate_endpoint(
+            await _transition_gate_endpoint(
+                resolved_locale="ko",
                 id=uuid.uuid4(), body=GateTransitionRequest(status="approved"),
                 background_tasks=BackgroundTasks(),
                 session=AsyncMock(), org_id=uuid.uuid4(), auth=SimpleNamespace(),
