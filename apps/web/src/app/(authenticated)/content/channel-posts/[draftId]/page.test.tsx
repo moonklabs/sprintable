@@ -1606,7 +1606,14 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     // 카디르 QA①·유나 §8 — 회수도 "무엇이 멈추나"·"되돌릴 수 있나" 별도 노드 확인.
     const what = document.body.querySelector('[data-testid="channel-post-unpublish-confirm-what"]');
     const reversible = document.body.querySelector('[data-testid="channel-post-unpublish-confirm-reversible"]');
-    expect(what?.textContent).toBe(koMessages.content.channelPostsUnpublishConfirmWhat);
+    // story #3426 후속(페드루 지시·유나 435fd06d 실측, 2026-09-10) — 이 문구가
+    // 채널 무관하게 「Threads」를 박아 놨었다. 이 스토리의 표본 draft가 channel:
+    // 'threads'(70행)라 보간 결과가 우연히 옛 값과 같아 보이지만, 지금은 실제로
+    // channelLabel('threads', t) 보간을 거친 값 — 템플릿 그대로가 아니다(아래
+    // sandbox 표본 테스트가 그 차이를 실제로 가른다).
+    expect(what?.textContent).toBe(
+      koMessages.content.channelPostsUnpublishConfirmWhat.replace('{channel}', koMessages.content.channelThreads),
+    );
     expect(reversible?.textContent).toBe(koMessages.content.channelPostsUnpublishConfirmReversible);
     expect(what).not.toBe(reversible);
 
@@ -1623,9 +1630,41 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     // 같은 모양으로 맞춘다: publication_status='unpublished'·published_at=null·permalink=null.
     // 리로드 없이 「회수됨」 오버레이가 뜨고, 발행됨 정보 카드·회수 버튼은 사라진다.
     expect(container.querySelector('[data-testid="channel-post-unpublished-notice"]')?.textContent)
-      .toBe(koMessages.content.channelPostsUnpublishedNotice);
+      .toBe(koMessages.content.channelPostsUnpublishedNotice.replace('{channel}', koMessages.content.channelThreads));
     expect(container.querySelector('[data-testid="channel-post-published-info"]')).toBeNull();
     expect(container.querySelector('[data-testid="channel-post-unpublish-button"]')).toBeNull();
+  });
+
+  // story #3426 후속(페드루 지시·유나 435fd06d 실측, 2026-09-10) — 회수 확認 다이얼로그
+  // "무엇이 멈추나" 문구가 채널 무관하게 「Threads」를 박아 놨었다. sandbox 초안(헤더는
+  // 이미 channelLabel(draft.channel, t)로 정확히 그린다, :1921)으로 렌더해 그 채널의
+  // 라벨로 보간되는지 직접 잰다. 뮤테이션 대상: page.tsx의
+  // `t('channelPostsUnpublishConfirmWhat', { channel: channelLabel(...) })`에서 두
+  // 번째 인자(보간)를 걷으면 이 테스트가 RED가 되어야 한다(rendered text가 그대로
+  // "{channel}에서…"로 나가 아래 toBe가 실패).
+  it('⭐회수 확認 다이얼로그 — sandbox 초안은 「Threads」가 아니라 그 채널 라벨로 보간된다', async () => {
+    stubFetch({
+      draftDetail: {
+        channel: 'sandbox', gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+        publication_status: 'published', permalink: 'https://x', published_at: '2026-09-04T00:00:00Z',
+      } as never,
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const trigger = container.querySelector('[data-testid="channel-post-unpublish-button"]') as HTMLButtonElement;
+    await act(async () => {
+      trigger.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+
+    const what = document.body.querySelector('[data-testid="channel-post-unpublish-confirm-what"]');
+    expect(what?.textContent).toBe(
+      koMessages.content.channelPostsUnpublishConfirmWhat.replace('{channel}', koMessages.content.channelLabelSandbox),
+    );
+    expect(what?.textContent).not.toContain(koMessages.content.channelThreads);
   });
 
   // 페드루 PO nit(2026-09-04 09:07Z) — 이전 판 테스트명이 "서버 문구가 보인다"였지만
@@ -3365,6 +3404,24 @@ describe('ChannelPostEditPage — §17-15 processing_kind 오버레이 우선순
 
     expect(container.querySelector('[data-testid="channel-post-unpublished-notice"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="channel-post-awaiting-container-notice"]')).toBeNull();
+  });
+
+  // story #3426 후속(페드루 지시·유나 435fd06d 실측, 2026-09-10) — 「회수됨」 오버레이도
+  // 같은 결함(채널 무관 「Threads」 하드코딩)이 있었다. sandbox 초안으로 렌더해 그 채널의
+  // 라벨로 보간되는지 잰다. 뮤테이션 대상: 위 확認 다이얼로그 테스트와 같은 자리(page.tsx의
+  // 보간 인자)를 걷으면 이 테스트도 함께 RED가 되어야 한다.
+  it('⭐행5(신규) — 회수됨 오버레이도 sandbox 초안은 「Threads」가 아니라 그 채널 라벨', async () => {
+    stubFetch({ draftDetail: { channel: 'sandbox', publication_status: 'unpublished', processing_kind: null } as never });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const notice = container.querySelector('[data-testid="channel-post-unpublished-notice"]');
+    expect(notice?.textContent).toBe(
+      koMessages.content.channelPostsUnpublishedNotice.replace('{channel}', koMessages.content.channelLabelSandbox),
+    );
+    expect(notice?.textContent).not.toContain(koMessages.content.channelThreads);
   });
 });
 

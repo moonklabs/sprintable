@@ -2167,7 +2167,14 @@ export default function ChannelPostEditPage() {
           // 우선한다(이 분기가 processing_kind 분기보다 먼저 온다).
           return (
             <Alert role="status" data-testid="channel-post-unpublished-notice">
-              <AlertDescription>{t('channelPostsUnpublishedNotice')}</AlertDescription>
+              <AlertDescription>
+                {/* story #3426 후속(페드루 지시·유나 435fd06d 실측, 2026-09-10) — 이
+                    자리가 채널 무관하게 「Threads」를 문자열에 박아 놨었다. 이 화면은
+                    sandbox·facebook_sandbox·instagram_sandbox 초안도 서므로(헤더는
+                    이미 :1921에서 channelLabel(draft.channel, t)로 정확히 그린다 —
+                    같은 정본 재사용, 새 낱말 0) 그 채널의 라벨로 보간한다. */}
+                {t('channelPostsUnpublishedNotice', { channel: channelLabel(draft.channel, t) })}
+              </AlertDescription>
             </Alert>
           );
         }
@@ -2402,7 +2409,9 @@ export default function ChannelPostEditPage() {
           title={t('channelPostsUnpublishConfirmTitle')}
           description={(
             <>
-              <span className="block" data-testid="channel-post-unpublish-confirm-what">{t('channelPostsUnpublishConfirmWhat')}</span>
+              <span className="block" data-testid="channel-post-unpublish-confirm-what">
+                {t('channelPostsUnpublishConfirmWhat', { channel: channelLabel(draft.channel, t) })}
+              </span>
               <span className="block" data-testid="channel-post-unpublish-confirm-reversible">{t('channelPostsUnpublishConfirmReversible')}</span>
             </>
           )}
