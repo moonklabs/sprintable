@@ -444,7 +444,12 @@ export function AppSidebar({
       </SidebarContent>
 
       <SidebarFooter className="space-y-2 p-2">
-        {userName && <ProfileMenu name={userName} />}
+        {/* story #3775(유나 定 2026-09-10) — 이름 없는(OAuth 신규 가입) 사용자는 이전엔
+            이 칩 자체가 안 그려져 설정으로 가는 경로 하나가 통째로 막혀 있었다(결함,
+            유도 장치가 아니다). 이름 유무와 무관하게 항상 그린다 — 이름 없을 때의
+            표시(「이름 없는 구성원」)와 「이름 설정」 메뉴 항목은 ProfileMenu 내부에서
+            처리(공용 memberDisplayLabel 재사용, story #3755/#3758과 같은 헬퍼). */}
+        <ProfileMenu name={userName ?? null} />
         <div className="flex items-center gap-1">
           <LocaleSwitcher />
           <ThemeToggle />
