@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { Check } from 'lucide-react';
@@ -37,23 +37,30 @@ export function LinkedAccountsSection({ onLoadError }: LinkedAccountsSectionProp
   const [unlinking, setUnlinking] = useState<ProviderId | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  const refresh = async () => {
+  // story #3772 CHANGES(카디르 QA b5ca5e384·07:36Z) — 이 함수는 초기 로드뿐 아니라
+  // OAuth 연결 성공(:64)·연동 해제 성공(:98) 뒤 후속 refresh에도 재사용된다. 후속
+  // refresh가 실패해도 onLoadError를 무조건 부르면 "연결됨" 성공 메시지 직후 부모
+  // 탭의 「불러오지 못했습니다」 배너가 뜨는 오탐이 난다(codex vitest probe 재현) —
+  // "onLoadError는 초기 로드 경로에서만"이 원 설계였는데 재사용 시 그 경계가 깨졌다.
+  // isInitialLoad로 호출부가 경로를 명시한다(후속 refresh는 실패해도 기존 `message`
+  // state로만 사용자에게 알리고, 부모 탭 배너는 건드리지 않는다).
+  const refresh = useCallback(async (isInitialLoad = false) => {
     // story #3762 CHANGES(카디르 QA — /api/me reject 경로 테스트 中 발견, my-profile-
     // section.tsx와 동형 갭·페드루 PO 정정 — verify:no-fetch-response-without-ok-check
     // (#3688) 가드가 읽는 try/catch+res.ok 형으로) — 네트워크 자체가 죽으면(HTTP 에러
     // 응답이 아니라) fetchWithAuth가 reject해 이 아래 await가 그대로 throw,
     // `void refresh()`(:44) 밖으로 unhandled rejection이 샜다.
     let res: Response;
-    try { res = await fetchWithAuth('/api/me'); } catch { onLoadError?.(); return; }
-    if (!res.ok) { onLoadError?.(); return; }
+    try { res = await fetchWithAuth('/api/me'); } catch { if (isInitialLoad) onLoadError?.(); return; }
+    if (!res.ok) { if (isInitialLoad) onLoadError?.(); return; }
     const json = await res.json() as { data?: { linked_providers?: ProviderId[]; has_password?: boolean } };
     setLinkedProviders(json.data?.linked_providers ?? []);
     setHasPassword(json.data?.has_password ?? null);
-  };
+  }, [onLoadError]);
 
   useEffect(() => {
-    void refresh();
-  }, []);
+    void refresh(true);
+  }, [refresh]);
 
   useEffect(() => {
     const linked = searchParams.get('linked');
@@ -74,7 +81,7 @@ export function LinkedAccountsSection({ onLoadError }: LinkedAccountsSectionProp
             : t('linkedAccountsErrorConnectFailed');
       setMessage({ type: 'error', text });
     }
-  }, [searchParams, t]);
+  }, [searchParams, t, refresh]);
 
   const handleUnlink = async (provider: ProviderId) => {
     setUnlinking(provider);

@@ -183,3 +183,42 @@ describe('LinkedAccountsSection — /api/me 실패 시 로딩 문구 잔존 없�
     expect(container.textContent).not.toContain(koMessages.common.loading);
   });
 });
+
+// story #3772 CHANGES(카디르 QA b5ca5e384·07:36Z) — refresh()는 초기 로드뿐 아니라
+// OAuth 연결·연동 해제 성공 뒤 후속 갱신에도 재사용된다. 후속 refresh가 실패해도
+// onLoadError가 또 불리면, 부모 탭(settings/page.tsx)의 「불러오지 못했습니다」 배너가
+// 방금 뜬 "연결 해제되었습니다" 성공 메시지 바로 아래 뜨는 모순이 난다(codex vitest
+// probe로 실제 재현됨) — isInitialLoad 구분이 원 설계였는데 재사용 시 그 경계가 깨졌던
+// 자리를 여기서 고정한다.
+describe('LinkedAccountsSection — story #3772 CHANGES(카디르 QA b5ca5e384) 후속 refresh는 onLoadError를 안 부른다', () => {
+  it('⭐연동 해제 성공 뒤 후속 refresh 실패 → onLoadError는 초기 로드 1회만(추가 호출 0), 성공 메시지는 그대로 남는다', async () => {
+    const onLoadError = vi.fn();
+    let meCallCount = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/me') {
+        meCallCount += 1;
+        if (meCallCount === 1) {
+          return { ok: true, json: async () => ({ data: { linked_providers: ['google', 'apple'], has_password: false } }) };
+        }
+        // 후속(연동 해제 뒤) refresh — 이번엔 실패시킨다.
+        return { ok: false, json: async () => ({ error: { code: 'INTERNAL' } }) };
+      }
+      if (url === '/api/auth/oauth/unlink' && init) {
+        return { ok: true, json: async () => ({}) };
+      }
+      throw new Error('unexpected fetch: ' + url);
+    }));
+    const { LinkedAccountsSection } = await import('./linked-accounts-section');
+    await act(async () => { root.render(wrap(<LinkedAccountsSection onLoadError={onLoadError} />)); });
+    await flush();
+    expect(onLoadError).not.toHaveBeenCalled();
+
+    const btn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '연결 해제');
+    await act(async () => { btn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    // ⭐되돌리면(refresh의 isInitialLoad 구분 제거) RED — 후속 refresh 실패가 onLoadError를 또 부른다.
+    expect(onLoadError).not.toHaveBeenCalled();
+    expect(container.textContent).toContain('계정 연결이 해제되었습니다');
+  });
+});
