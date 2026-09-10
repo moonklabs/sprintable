@@ -1442,9 +1442,9 @@ async def _render_gate_verdict_message(db: AsyncSession, *, org_id: uuid.UUID, p
                 )).first() is not None
             if is_site_post and site_post_command_exists:
                 lines.append(
-                    "- 다음 행동: 할 일 없음 — 승인으로 발행 명령이 만들어졌고 다음 워커 "
+                    "- 다음 행동: 없음 — 승인으로 발행 명령이 만들어졌고 다음 워커 "
                     "tick(최대 1분)에 발행됩니다. 결과는 원문 상세 «발행 결과» 줄에서 "
-                    "확인합니다."
+                    "확認합니다."
                 )
             else:
                 lines.append("- 다음 행동: 할 일 없음 — 발행은 휴먼이 화면에서 합니다.")

@@ -194,10 +194,10 @@ app/routers/events.py::- 다음 단계로 넘기는 발행 예시: publish_event
 app/routers/events.py::- 다음 행동:
 app/routers/events.py::- 다음 행동: channel=
 app/routers/events.py::- 다음 행동: 산출물을 수정한 뒤, 같은 레시피 정의의 approve stage 이벤트를 다시 발행하세요(payload.previous_output_doc_id=수정본 id) — 게이트는 그 발행으로 자동 재오픈됩니다.
+app/routers/events.py::- 다음 행동: 없음 — 승인으로 발행 명령이 만들어졌고 다음 워커 tick(최대 1분)에 발행됩니다. 결과는 원문 상세 «발행 결과» 줄에서 확認합니다.
 app/routers/events.py::- 다음 행동: 이 정의의 다음 stage 이벤트를 발행하세요(publish 단계라면 이 승인 게이트를 확인하는 발행 도구를 쓰세요).
 app/routers/events.py::- 다음 행동: 할 일 없음 — 다시 올릴지는 작성자가 정합니다.
 app/routers/events.py::- 다음 행동: 할 일 없음 — 발행은 휴먼이 화면에서 합니다.
-app/routers/events.py::- 다음 행동: 할 일 없음 — 승인으로 발행 명령이 만들어졌고 다음 워커 tick(최대 1분)에 발행됩니다. 결과는 원문 상세 «발행 결과» 줄에서 확인합니다.
 app/routers/events.py::- 단계 `
 app/routers/events.py::- 대상 산출물:
 app/routers/events.py::- 사유:
