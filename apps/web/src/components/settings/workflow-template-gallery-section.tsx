@@ -171,7 +171,8 @@ export function WorkflowTemplateGallerySection({
         setApplyWarnings(data.warnings ?? []);
         setAppliedKeys(prev => new Set(prev).add(selected.key));
       } else {
-        setApplyResult({ ok: false, message: data.error?.message ?? '적용 실패' });
+        // story #3776(1층A) — "적용 실패", organization ns의 기존 eventApplyErrorGeneric 키 재사용.
+        setApplyResult({ ok: false, message: data.error?.message ?? tOrg('eventApplyErrorGeneric') });
       }
     } catch {
       setApplyResult({ ok: false, message: '네트워크 오류' });
@@ -309,7 +310,9 @@ export function WorkflowTemplateGallerySection({
               disabled={applying || requiredStages.some(s => !roleMapping[s])}
               onClick={() => void handleApply()}
             >
-              {applying ? '적용 중...' : (appliedKeys.has(selected.key) ? '재적용(덮어쓰기)' : '적용하기')}
+              {/* story #3776(1층A) — "적용 중..."/"적용하기", organization ns의 기존
+                  eventApplySubmitting/eventApplySubmit 키 재사용("재적용(덮어쓰기)"는 대응 키 없어 2층). */}
+              {applying ? tOrg('eventApplySubmitting') : (appliedKeys.has(selected.key) ? '재적용(덮어쓰기)' : tOrg('eventApplySubmit'))}
             </Button>
           </div>
         )}
