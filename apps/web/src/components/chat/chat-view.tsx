@@ -129,6 +129,8 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   const router = useRouter();
   const pathname = usePathname();
   const t = useTranslations('chats');
+  // story #3783 — "불러오는 중…", common ns의 기존 loading 키 재사용.
+  const tc = useTranslations('common');
   const locale = useLocale();
   const displayTimezone = resolveDisplayTimezone().tz;
   // story #3194 — 'agents' 네임스페이스의 viewConnectionSettings 키를 그대로 재사용(발명 0,
@@ -954,7 +956,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
             )}
             {loading ? (
               <div className="flex h-full items-center justify-center">
-                <p className="text-sm text-muted-foreground">불러오는 중…</p>
+                <p className="text-sm text-muted-foreground">{tc('loading')}</p>
               </div>
             ) : messages.length === 0 && messagesLoadFailed ? (
               <div className="flex h-full items-center justify-center">
@@ -982,7 +984,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
                       disabled={loadingMore}
                       className="text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
                     >
-                      {loadingMore ? '불러오는 중…' : '이전 메시지 보기'}
+                      {loadingMore ? tc('loading') : '이전 메시지 보기'}
                     </button>
                   </div>
                 )}

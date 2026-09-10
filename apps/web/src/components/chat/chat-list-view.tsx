@@ -309,6 +309,8 @@ const PAGE_LIMIT = 30;
 
 export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChange }: ChatListViewProps) {
   const t = useTranslations('chats');
+  // story #3783 — "불러오는 중…", common ns의 기존 loading 키 재사용.
+  const tc = useTranslations('common');
   const router = useRouter();
   // perf(17960f86): role 은 DashboardContext(서버 /api/v2/me 투영)에서 — 채팅 진입마다 `/api/me`
   // 재호출하던 round-trip 제거. /me checkRole 과 동일한 effective role 이라 게이트 의미 보존.
@@ -532,7 +534,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
 
   const myListContent = loading ? (
     <div className="flex h-full items-center justify-center">
-      <p className="text-sm text-muted-foreground">불러오는 중…</p>
+      <p className="text-sm text-muted-foreground">{tc('loading')}</p>
     </div>
   ) : conversations.length === 0 ? (
     <div className="flex h-full items-center justify-center">
@@ -568,7 +570,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
           disabled={loadingMore}
           className="h-auto w-full rounded-lg py-2 text-xs font-normal text-muted-foreground transition hover:text-foreground disabled:opacity-50"
         >
-          {loadingMore ? '불러오는 중…' : `더 보기 (${myTotal - conversations.length}건)`}
+          {loadingMore ? tc('loading') : `더 보기 (${myTotal - conversations.length}건)`}
         </Button>
       )}
     </div>

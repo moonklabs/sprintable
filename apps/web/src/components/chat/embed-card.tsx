@@ -683,7 +683,7 @@ export function EntityPreviewModal({
       {loading ? (
         <div className="flex items-center justify-center gap-2 py-8 text-xs text-muted-foreground">
           <span className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
-          불러오는 중…
+          {tc('loading')}
         </div>
       ) : notFound ? (
         <p className="py-4 text-xs text-muted-foreground">대상을 찾을 수 없습니다.</p>

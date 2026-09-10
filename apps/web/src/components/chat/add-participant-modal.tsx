@@ -103,7 +103,7 @@ export function AddParticipantModal({
           )}
           <p className="mb-2 text-xs text-muted-foreground">{t('selectMembers')}</p>
           {loading ? (
-            <div className="py-6 text-center text-sm text-muted-foreground">불러오는 중…</div>
+            <div className="py-6 text-center text-sm text-muted-foreground">{tc('loading')}</div>
           ) : available.length === 0 ? (
             <div className="py-6 text-center text-sm text-muted-foreground">추가 가능한 팀원이 없는</div>
           ) : (
