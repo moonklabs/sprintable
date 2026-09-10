@@ -238,7 +238,16 @@ async def test_submit_seals_pending_gate_with_target_version():
         assert gate.sealed_content_body == "# 제목\n\n본문입니다."
         assert gate.neutral_facts["destination"] == "hosted_site"
         assert gate.neutral_facts["draft_author_member_id"] == str(agent_id)
-        assert gate.neutral_facts["requested_by_member_id"] == str(human_id)
+        # story #3370(유나 실측·페드루 정정 2026-09-10) — human_id는 users.id(raw)다.
+        # 상신자는 org_member.id로 봉인돼야 한다(auth.py:146 계약) — users.id 그대로
+        # 봉인되던 게 3370의 실 결함이었다. 이 assert는 그 정정을 정확히 pin한다.
+        from app.models.project import OrgMember
+        async with Session() as s:
+            human_org_member_id = (await s.execute(
+                select(OrgMember.id).where(OrgMember.org_id == org_id, OrgMember.user_id == human_id)
+            )).scalar_one()
+        assert gate.neutral_facts["requested_by_member_id"] == str(human_org_member_id)
+        assert gate.neutral_facts["requested_by_member_id"] != str(human_id)
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()

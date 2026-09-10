@@ -977,10 +977,17 @@ async def _resolve_public_url(
     db: AsyncSession, *, org_id: uuid.UUID, lang: str, slug: str, backend_base_url: str,
 ) -> str:
     """사람용 URL 조립 — 조직 설정 `site` 커넥터의 org_config.site_base_url이 있으면
-    그것 + `/{lang}/blog/{slug}`(PO 보정, doc 62fc03ee §4). 없으면(오늘은 어느 org도
-    `site` 커넥터를 등록하지 않았다 — 실측 확認) 공개 API URL로 fallback한다(AC4: "설정이
-    없으면 공개 API URL을 반환"). 새 env 상수를 만들지 않는다 — 공개 API가 이 백엔드
-    자신이 서빙하는 라우트라 호출 시점의 `request.base_url`(backend_base_url)로 충분하다."""
+    그것 + `/{lang}/blog/{slug}`(PO 보정, doc 62fc03ee §4). 없으면 공개 API URL로
+    fallback한다(AC4: "설정이 없으면 공개 API URL을 반환") — 공개 API가 이 백엔드 자신이
+    서빙하는 라우트라 호출 시점의 `request.base_url`(backend_base_url)로 조립한다.
+
+    ⚠️주석 정정(페드루 PO 지적, 2026-09-10) — "오늘은 어느 org도 site 커넥터를 등록하지
+    않았다"·"새 env 상수를 만들지 않는다"는 작성 당시 실측이었으나 낡았다. 전역
+    `settings.public_site_base_url`(deploy SSOT) 상수가 그 뒤 실제로 생겼고(§4의
+    `_resolve_public_site_display_url`이 씀) — 이 함수(발행 액션이 조립하는 URL)는
+    그 상수를 안 쓴다. 그 폴백(backend_base_url 조립)이 원인이었던 결함 때문에 S8 상세
+    화면 표시는 별도 함수로 분리됐다(`_resolve_public_site_display_url` 그 자체 docstring
+    참고) — 이 함수는 발행 시점 URL 조립 용도로 의도적으로 남아 있다."""
     from app.services.connector_registry import get_org_connector
 
     connector = await get_org_connector(db, org_id=org_id, connector_key="site")

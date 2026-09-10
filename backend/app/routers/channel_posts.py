@@ -60,7 +60,6 @@ from app.services.channel_posts import (
     get_channel_post_draft,
     get_site_post_draft,
     get_source_titles_and_latest_versions,
-    is_agent_caller,
     list_channel_post_draft_versions,
     count_channel_post_drafts,
     list_channel_post_drafts,
@@ -115,7 +114,7 @@ from app.services.channel_post_videos import (
     get_channel_post_video_for_version,
 )
 from app.services.generation_budget import GenerationBudgetExceededError
-from app.services.member_resolver import resolve_member
+from app.services.member_resolver import resolve_member, resolve_member_db_verified
 
 router = APIRouter(prefix="/api/v2/organizations", tags=["channel-posts"])
 
@@ -538,8 +537,18 @@ async def post_channel_post_draft_version(
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
 
-    member_id = uuid.UUID(auth.user_id)
-    actor_type = "agent" if await is_agent_caller(db, org_id=org_id, member_id=member_id) else "human"
+    # story #3370(페드루 지적, 유나 실측 2026-09-10 — site_posts.py:671과 동형 클래스) —
+    # auth.user_id는 휴먼(JWT)이면 users.id다(auth.py 계약) — org 멤버 id가 아니다.
+    # 원시로 author_member_id에 넣으면 휴먼 작성자가 org_member.id로 안 풀린다(FE
+    # 표시·알림 라우팅 등 멤버 id 소비처 전부 깨짐). `resolve_member_db_verified()`
+    # (member_resolver.py, 이 스토리에서 신설)가 API키(에이전트)는 team_member.id,
+    # JWT(휴먼)는 org_member.id로 갈라 돌려준다 — actor_type도 같은 호출에서 나와
+    # (is_agent_caller 별도 조회 불요) 쿼리 1회 절감. `resolve_member()`(클레임 기반)
+    # 대신 이 변형을 쓰는 이유는 이 파일의 기존 테스트 하네스가 agent 호출자를 api_key_id
+    # 클레임 없이 team_member.id만 넘기는 관례로 짜여 있어서다(resolve_member_db_verified
+    # 자신의 docstring에 그라운딩 기록 — 이 스토리에서 실측).
+    resolved = await resolve_member_db_verified(auth, org_id, db)
+    member_id, actor_type = resolved.id, resolved.type
 
     try:
         version, channel, violations = await create_channel_post_draft_version(
@@ -714,8 +723,9 @@ async def post_channel_post_video_confirm(
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
 
-    member_id = uuid.UUID(auth.user_id)
-    actor_type = "agent" if await is_agent_caller(db, org_id=org_id, member_id=member_id) else "human"
+    # story #3370(페드루 지적 2026-09-10 — 같은 클래스, post_channel_post_draft_version과 동형).
+    resolved = await resolve_member_db_verified(auth, org_id, db)
+    member_id, actor_type = resolved.id, resolved.type
 
     try:
         version, video_row = await confirm_channel_post_video_upload(
@@ -889,8 +899,9 @@ async def post_channel_post_image_confirm(
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
 
-    member_id = uuid.UUID(auth.user_id)
-    actor_type = "agent" if await is_agent_caller(db, org_id=org_id, member_id=member_id) else "human"
+    # story #3370(페드루 지적 2026-09-10 — 같은 클래스, post_channel_post_draft_version과 동형).
+    resolved = await resolve_member_db_verified(auth, org_id, db)
+    member_id, actor_type = resolved.id, resolved.type
 
     version, image_row = await _confirm_image_upload_or_raise(
         confirm_channel_post_image_upload(
@@ -945,8 +956,9 @@ async def post_channel_post_image_import(
             status_code=422, detail={"code": "IMAGE_CORRUPT", "message": exc.reason},
         ) from exc
 
-    member_id = uuid.UUID(auth.user_id)
-    actor_type = "agent" if await is_agent_caller(db, org_id=org_id, member_id=member_id) else "human"
+    # story #3370(페드루 지적 2026-09-10 — 같은 클래스, post_channel_post_draft_version과 동형).
+    resolved = await resolve_member_db_verified(auth, org_id, db)
+    member_id, actor_type = resolved.id, resolved.type
 
     version, image_row = await _confirm_image_upload_or_raise(
         import_channel_post_image(
@@ -1060,10 +1072,17 @@ async def delete_channel_post_image_endpoint(
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
 
-    member_id = uuid.UUID(auth.user_id)
-    actor_type = "agent" if await is_agent_caller(db, org_id=org_id, member_id=member_id) else "human"
-
-    await _require_channel_post_draft_project_access(db, org_id=org_id, draft_id=draft_id, member_id=member_id)
+    # story #3370(페드루 지적 2026-09-10) — 이 access 체크(_require_channel_post_draft_
+    # project_access → require_project_access)는 raw auth.user_id(users.id)를 받게 설계돼
+    # 있다(project_auth.py::_project_access_predicate가 OrgMember.user_id==user_id로 휴먼을
+    # 판정 — org_member.id를 넘기면 오히려 깨진다). 그래서 access 체크엔 raw id를 그대로
+    # 쓰고, author_member_id로 **영속되는** 값만 resolve_member()의 멤버 id로 분리한다
+    # (한 변수를 access축·저장축 둘 다에 쓰면 어느 한쪽이 깨진다 — 축 혼용 금지).
+    await _require_channel_post_draft_project_access(
+        db, org_id=org_id, draft_id=draft_id, member_id=uuid.UUID(auth.user_id),
+    )
+    resolved = await resolve_member_db_verified(auth, org_id, db)
+    member_id, actor_type = resolved.id, resolved.type
 
     try:
         new_version, remaining = await delete_channel_post_image(
@@ -1096,10 +1115,13 @@ async def reorder_channel_post_images_endpoint(
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
 
-    member_id = uuid.UUID(auth.user_id)
-    actor_type = "agent" if await is_agent_caller(db, org_id=org_id, member_id=member_id) else "human"
-
-    await _require_channel_post_draft_project_access(db, org_id=org_id, draft_id=draft_id, member_id=member_id)
+    # story #3370(페드루 지적 2026-09-10) — delete_channel_post_image_endpoint와 동형 축
+    # 분리(access 체크=raw auth.user_id, author_member_id 영속=resolve_member() 멤버 id).
+    await _require_channel_post_draft_project_access(
+        db, org_id=org_id, draft_id=draft_id, member_id=uuid.UUID(auth.user_id),
+    )
+    resolved = await resolve_member_db_verified(auth, org_id, db)
+    member_id, actor_type = resolved.id, resolved.type
 
     try:
         new_version, ordered = await reorder_channel_post_images(
@@ -1479,10 +1501,14 @@ async def submit_channel_post_draft_endpoint(
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
 
+    # story #3370(유나 실측·페드루 정정 2026-09-10) — site_posts.py::submit_site_post_
+    # draft_endpoint와 동형 결함(같은 클래스, 형제 엔드포인트) — auth.user_id는 휴먼(JWT)
+    # 이면 users.id다, org 멤버 id가 아니다. resolve_member()로 정정.
+    resolved_requester = await resolve_member_db_verified(auth, org_id, db)
     try:
         gate, version_id = await submit_channel_post_draft(
             db, org_id=org_id, draft_id=draft_id, version_id=body.version_id,
-            requester_member_id=uuid.UUID(auth.user_id), scheduled_at=body.scheduled_at,
+            requester_member_id=resolved_requester.id, scheduled_at=body.scheduled_at,
             estimated_cost_minor=body.estimated_cost_minor,
         )
     except GenerationBudgetExceededError as exc:
