@@ -428,9 +428,14 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
                         {t('removeFromProject')}
                       </Button>
                     ) : (
+                      // story #3592 회귀 가드(verify-repeated-row-action-names) — aria-hidden이라
+                      // 보조기술엔 안 읽혀도 정적 스캔은 행마다 반복되는 라벨을 그대로 잡는다.
+                      // 실 버튼과 동일하게 순번을 품은 aria-label을 붙인다(무해 — aria-hidden이
+                      // 우선해 결국 안 읽힌다).
                       <Button
                         size="sm" variant="glass" tabIndex={-1} aria-hidden="true"
                         className="invisible pointer-events-none"
+                        aria-label={t('orgMemberRowActionAriaLabel', { n: index + 1, label: t('removeFromProject') })}
                       >
                         {t('removeFromProject')}
                       </Button>
