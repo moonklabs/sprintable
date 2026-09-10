@@ -246,6 +246,14 @@ def main() -> int:
     print(f"[story #3779 2층] 화면 도달 부분집합(휴리스틱 6종, 최소치) — {len(hits)}건 / {len(by_file)}파일")
     print(f"  사유별: {json.dumps(by_reason, ensure_ascii=False)}")
     print()
+
+    # story #3793(email_copy 82→0 목표가 3786 EXEMPT_FILES와 동형 함정이었던 그라운딩,
+    # 페드루 PO 재가 2026-09-10 12:51Z) — email_copy.py는 패턴③ file-level 설계상 ko 카피가
+    # 존재하는 한 구조적으로 0 불가(움직일 수 없는 바닥). 다음 카드가 이 수를 또 "줄일 목표"로
+    # 잘못 집지 않도록 요약에 바닥을 분리해 명시한다.
+    email_copy_floor = len(by_file.get(EMAIL_COPY_FILE, []))
+    print(f"  닿는 합계 {len(hits)} · email_copy 바닥 {email_copy_floor}(구조적, 0 불가) · 줄일 수 있는 것 {len(hits) - email_copy_floor}")
+    print()
     for file_label in sorted(by_file):
         file_hits = by_file[file_label]
         print(f"  {file_label}: {len(file_hits)}건")
