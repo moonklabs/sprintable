@@ -4,7 +4,9 @@
     "마이그레이션 대상 아님 — 이 게이트는 \"더 늘지 않는다\"만 보장한다(freeze, 전량 i18n 키화는 후속 별건).",
     "story #3741(PO 判 (a), 2026-09-09 13:45Z 재실측) — 최초 판은 속성 축을 placeholder/title/alt/aria-* 4개로 제한했으나, 유나 재실측(4축 밖 한글 속성 3건/3파일 — description 2·agentPlaceholder 1)에 따라 속성 이름 명단을 버리고 문자열 리터럴 값을 가진 JSX 속성 전부로 넓혔다(+3건). chats/page.tsx의 description=\"왼쪽에서 대화를 선택하세요\"(이 스토리의 창건 사례)가 이 재측정으로 baseline에 정식 편입됐다.",
     "story #3776(2026-09-10, PO 判 05:29Z·05:34Z) — 가드 축을 «렌더 자리 화이트리스트»에서 «.tsx 안 모든 StringLiteral, 렌더 아닌 자리(비교 피연산자·switch case·객체/인터페이스 키·obj['한글'] 인덱스·import/export 지정자·타입 위치·console/logger 인자·문자열 검사 메서드 인자)만 부정목록으로 제외»로 뒤집으며 baseline에 145개 신규 키(원시 158건, file::text dedup) 편입 — 유나 독립 재측정(354키/402발생)과 키±1·발생±1로 수렴, 서로 다른 두 구현이 같은 실측치에 도달해 교차검증됐다. 이 확장으로 baseline이 두 번째로 늘었다(첫 확장은 위 3776 ③-c 절 — 그 절은 이 절로 대체됐다, 화이트리스트 축은 폐기).",
-    "story #3776 유나 재검토(2026-09-10 06:03Z) — 1층A 기계 치환 17건 中 6곳(고유 키 7개, 동일 텍스트가 2 파일에 있는 「대화」 포함)이 «글자는 같으나 키가 아닌» 오탐이었다: settings/page.tsx의 Organization 설정(aria 전용 키를 보이는 글자에 재사용)·플랜(결제 다이얼로그 전용)·영구 삭제(goals 도메인 버튼)·chat-view.tsx/thread-panel.tsx의 대화(storage 파일-종류 라벨)·file-viewer.tsx의 불러오지 못했습니다.(브랜드킷 로고 전용)·project-access-section.tsx의 접근 권한(키 이름이 값과 어긋나는 기존 카탈로그 결함, 3776 범위 밖) — 전부 되돌리고 baseline에 grandfather로 복귀. 1층A 유지분은 10건뿐."
+    "story #3776 유나 재검토(2026-09-10 06:03Z) — 1층A 기계 치환 17건 中 6곳(고유 키 7개, 동일 텍스트가 2 파일에 있는 「대화」 포함)이 «글자는 같으나 키가 아닌» 오탐이었다: settings/page.tsx의 Organization 설정(aria 전용 키를 보이는 글자에 재사용)·플랜(결제 다이얼로그 전용)·영구 삭제(goals 도메인 버튼)·chat-view.tsx/thread-panel.tsx의 대화(storage 파일-종류 라벨)·file-viewer.tsx의 불러오지 못했습니다.(브랜드킷 로고 전용)·project-access-section.tsx의 접근 권한(키 이름이 값과 어긋나는 기존 카탈로그 결함, 3776 범위 밖) — 전부 되돌리고 baseline에 grandfather로 복귀. 1층A 유지분은 10건뿐.",
+    "story #3776 PR②(2026-09-10, 유나 43건 목록 中 잔여 검증분) — 6건 기계 치환: chats/[conversation_id]/page.tsx 그룹 채팅→chats.groupSection · mobile-selection-menu.tsx 굵게/기울임→docs.toolbarBold/toolbarItalic(docs-shell-client.tsx·[slug]/page.tsx 데스크톱 툴팁과 동형) · workflow-template-gallery-section.tsx 적용 실패/적용 중.../적용하기→organization.eventApplyErrorGeneric/eventApplySubmitting/eventApplySubmit.",
+    "story #3776 PR②(2026-09-10, slash-command.tsx — 페드루/유나 재검토 + 카디르 QA 재실측 08:49Z 최종 수치) — 이 파일 안 한글 리터럴은 두 성격으로 갈린다. 가드 자체(scanContent) 실측: 발생 31건 · module-level(`slashMenuCategories`, 죽은 코드) 28건 · baseline 등재 고유 키 30건(발생-고유 차 1은 「토글 제목」이 module-level·폴백 두 자리에 똑같이 있어 file::text dedup으로 1키에 겹쳐 잡히기 때문). (1) `slashMenuCategories`(63~280행) — module-level 상수라 그 자리에서 `t()`를 원리적으로 못 부른다. import하는 곳이 `slash-command.test.tsx`뿐(실 소비처 doc-editor.tsx는 `pickAndUpload`·`createSlashCommandExtension`·`SlashMenuStrings` 타입만 가져간다)이라 프로덕션에 안 그려지는 죽은 코드 — 죽은 export(`slashMenuCategories`/`defaultSlashItems`/`SlashCommandExtension`) 제거는 「하드코딩 한글」과 다른 축(「죽은 export 걷기」)이라 3776 범위 밖, 유나가 별건 카드(#3782)로 연다. 그 별건이 착지하면 고유 키 30 中 27건(module-level 전용, 시작/끝/토글 제목 3건 제외)이 통째로 stale이 되어 이 가드가 스스로 알려준다 — 「토글 제목」은 module-level이 사라져도 폴백이 계속 그 값을 내므로 stale이 안 된다(걷을 조건 = #3782 착지, stale 대상은 27건). (2) `buildSlashMenuCategories`(329행~)의 optional 폴백 기본값 3건(시작·끝·토글 제목, 330~332행) — 이건 살아 있는 경로(`createSlashCommandExtension`→`doc-editor.tsx`)의 정당한 영구 폴백이다. 현재 호출부(`doc-editor.tsx:153-154`)가 `docs.slashMenu.mermaidDefault.{start,end}`·`docs.slashMenu.toggleDefaultTitle`을 이미 채워 넘기므로 이 폴백은 실행되지 않지만(유나가 1차 실측에서 「안 채운다」고 봤던 건 118~150행만 읽은 창 오류였음 — 153~154행 확認 후 정정), 그 두 필드를 못 넘기는 미래의 다른 호출자를 위한 optional 계약 방어라 걷을 조건이 없다 — 27건과 같은 줄로 읽지 말 것."
   ],
   "keys": [
     "app/(authenticated)/[ws]/[proj]/docs/docs-client-layout.tsx::닫기",
@@ -16,7 +18,6 @@
     "app/(authenticated)/[ws]/[proj]/goals/goals-client.tsx::목표 삭제에 실패했습니다.",
     "app/(authenticated)/[ws]/[proj]/sprints/sprints-client.tsx::명",
     "app/(authenticated)/[ws]/[proj]/sprints/sprints-client.tsx::목표",
-    "app/(authenticated)/chats/[conversation_id]/page.tsx::그룹 채팅",
     "app/(authenticated)/chats/[conversation_id]/page.tsx::로딩 중…",
     "app/(authenticated)/chats/[conversation_id]/page.tsx::방 이름 편집",
     "app/(authenticated)/chats/[conversation_id]/page.tsx::알림 꺼짐",
@@ -244,8 +245,6 @@
     "components/docs/extensions/slash-command.tsx::표 삽입",
     "components/docs/extensions/toggle-block.tsx::접기",
     "components/docs/extensions/toggle-block.tsx::펼치기",
-    "components/docs/mobile-selection-menu.tsx::굵게",
-    "components/docs/mobile-selection-menu.tsx::기울임",
     "components/docs/mobile-selection-menu.tsx::링크",
     "components/docs/mobile-selection-menu.tsx::인라인 코드",
     "components/docs/mobile-selection-menu.tsx::취소선",
@@ -321,10 +320,7 @@
     "components/settings/workflow-template-gallery-section.tsx::워크플로우 템플릿 갤러리",
     "components/settings/workflow-template-gallery-section.tsx::재적용(덮어쓰기)",
     "components/settings/workflow-template-gallery-section.tsx::적용 가능한 워크플로우 템플릿이 없습니다.",
-    "components/settings/workflow-template-gallery-section.tsx::적용 실패",
-    "components/settings/workflow-template-gallery-section.tsx::적용 중...",
     "components/settings/workflow-template-gallery-section.tsx::적용됨",
-    "components/settings/workflow-template-gallery-section.tsx::적용하기",
     "components/settings/workflow-template-gallery-section.tsx::주의",
     "components/settings/workflow-template-gallery-section.tsx::템플릿 목록을 불러오지 못했습니다.",
     "components/settings/workflow-template-gallery-section.tsx::템플릿을 선택해 단계별 담당 에이전트를 배정합니다.",

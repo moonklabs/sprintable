@@ -62,7 +62,8 @@ function formatHeaderTitle(
 ): string {
   if (meta.title) return meta.title;
   const others = meta.participants.filter((p) => p.member_id !== currentMemberId);
-  if (others.length === 0) return meta.type === 'dm' ? 'DM' : '그룹 채팅';
+  // story #3776(1층A) — "그룹 채팅", chats ns의 기존 groupSection 키 재사용.
+  if (others.length === 0) return meta.type === 'dm' ? 'DM' : t('groupSection');
   // story #3203(카디르 QA·PO 지시) — 같은 participants 계약 소비처, chat-list-view.tsx의
   // formatParticipantNames와 동일 사람언어 폴백으로 통일('?'는 비인간어). story #3758
   // (9번째) — resolved 비트로 「알 수 없는 구성원」(orphan)과 「이름 없는 구성원」(실존·
