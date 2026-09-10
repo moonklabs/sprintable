@@ -677,6 +677,97 @@ describe('InsightsBoardPage — 원본과 대조 행 액션(story #3620)', () =>
   });
 });
 
+// story #3766(별건 ⑩, 3746 §3 유나 定) — 「사람 차례」 발행 명령 축은 필터가 아니라
+// 행 배지(FailureActionBadge, compact)로만 선다. 자리는 유나 정(issuecomment
+// 2026-09-10 02:11Z 갈음): 행동칸(후속 조치·원본과 대조 버튼) «위» 별도 줄, 배지
+// 없으면 그 줄 노드 자체가 없고(①), 버튼 div도 canCreateFollowUp||canReconcile일
+// 때만 렌더한다(②).
+describe('InsightsBoardPage — 「사람 차례」 행 배지(story #3766)', () => {
+  const ROW_DEAD_LETTER = {
+    publication_id: 'pub-dl', kind: 'channel_publication', channel: 'threads', work_item_id: 'wi-dl',
+    title: '글 DL', published_at: '2026-09-01T00:00:00Z', external_url: null, connection_id: 'conn-1',
+    d1: null, d7: null, command_status: 'dead_letter',
+  };
+  const ROW_BLOCKED = {
+    publication_id: 'pub-bl', kind: 'channel_publication', channel: 'threads', work_item_id: 'wi-bl',
+    title: '글 BL', published_at: '2026-09-01T00:00:00Z', external_url: null, connection_id: 'conn-2',
+    d1: null, d7: null, command_status: 'blocked',
+  };
+  // 뮤테이션 대조 — dead_letter/blocked가 아닌 다른 command_status는(자동으로 풀리는
+  // 갈래거나 이 화면엔 안 실리는 failure_kind가 필요한 갈래라) 배지가 안 떠야 한다.
+  const ROW_PENDING = {
+    publication_id: 'pub-pd', kind: 'channel_publication', channel: 'threads', work_item_id: 'wi-pd',
+    title: '글 PD', published_at: '2026-09-01T00:00:00Z', external_url: null, connection_id: 'conn-3',
+    d1: null, d7: null, command_status: 'pending',
+  };
+  const ROW_VOIDED = {
+    publication_id: 'pub-vd', kind: 'channel_publication', channel: 'threads', work_item_id: 'wi-vd',
+    title: '글 VD', published_at: '2026-09-01T00:00:00Z', external_url: null, connection_id: 'conn-4',
+    d1: null, d7: null, command_status: 'voided',
+  };
+
+  it('⭐dead_letter 행엔 배지("발행 실패" 계열 문구)가 뜬다', async () => {
+    stubFetch({ page1: [ROW_DEAD_LETTER] });
+    await mount();
+    const row = container.querySelector('[data-testid="insights-board-row"]')!;
+    const badge = row.querySelector('[data-testid="channel-post-failure-badge"]');
+    expect(badge).not.toBeNull();
+    expect(badge!.textContent).toBe(koMessages.content.channelPostsFailureDeadLetter);
+  });
+
+  it('⭐blocked 행엔 배지가 뜬다', async () => {
+    stubFetch({ page1: [ROW_BLOCKED] });
+    await mount();
+    const row = container.querySelector('[data-testid="insights-board-row"]')!;
+    const badge = row.querySelector('[data-testid="channel-post-failure-badge"]');
+    expect(badge).not.toBeNull();
+    expect(badge!.textContent).toBe(koMessages.content.channelPostsFailureBlocked);
+  });
+
+  // 뮤테이션 대조 — BE 필드(command_status)가 응답에서 빠지면(undefined) 배지도 0.
+  it('뮤테이션 대조 — command_status 자체가 없으면(BE 필드 누락 시뮬) 배지가 안 뜬다', async () => {
+    const { command_status: _omit, ...rowWithoutField } = ROW_DEAD_LETTER;
+    void _omit;
+    stubFetch({ page1: [rowWithoutField] });
+    await mount();
+    const row = container.querySelector('[data-testid="insights-board-row"]')!;
+    expect(row.querySelector('[data-testid="channel-post-failure-badge"]')).toBeNull();
+  });
+
+  it('pending·voided는 배지가 안 뜬다(이 보드엔 failure_kind/reasonCode가 없어 그 갈래는 애초에 판정 불가)', async () => {
+    stubFetch({ page1: [ROW_PENDING, ROW_VOIDED] });
+    await mount();
+    const rows = [...container.querySelectorAll('[data-testid="insights-board-row"]')];
+    expect(rows[0]!.querySelector('[data-testid="channel-post-failure-badge"]')).toBeNull();
+    expect(rows[1]!.querySelector('[data-testid="channel-post-failure-badge"]')).toBeNull();
+  });
+
+  it('배지가 뜬 행에서도 행동 버튼(후속 조치·원본과 대조)은 그대로 같이 선다(자리만 갈림, 행동 자체는 무변)', async () => {
+    stubFetch({ page1: [ROW_DEAD_LETTER] });
+    await mount();
+    const row = container.querySelector('[data-testid="insights-board-row"]')!;
+    expect(row.querySelector('[data-testid="insights-board-reconcile-button"]')).not.toBeNull();
+  });
+
+  // ①② — 배지도 버튼도 없을 때 그 자리 자체가 남지 않는다(빈 flex div가 gap만
+  // 먹는 회귀 방지). site_post 행(canReconcile=false)이면서 command_status가 없는
+  // 행으로 재는다 — canCreateFollowUp은 useDashboardContext mock의
+  // currentMemberType='human'이라 기본 true인 만큼, agent로 바꿔 버튼 축까지 끈다.
+  it('①② 배지도 행동 버튼도 없으면 그 td가 완전히 빈다(빈 wrapper 노드 0)', async () => {
+    useDashboardContextMock.mockReturnValue({ orgId: ORG_ID, currentMemberType: 'agent' });
+    const rowNoActionsNoBadge = {
+      publication_id: 'pub-none', kind: 'site_post', channel: 'hosted_site', work_item_id: 'wi-none',
+      title: '글 없음', published_at: '2026-09-01T00:00:00Z', external_url: null, connection_id: null,
+      d1: null, d7: null, command_status: null,
+    };
+    stubFetch({ page1: [rowNoActionsNoBadge] });
+    await mount();
+    const row = container.querySelector('[data-testid="insights-board-row"]')!;
+    const actionCell = row.querySelectorAll('td')[6] as HTMLElement;
+    expect(actionCell.children.length).toBe(0);
+  });
+});
+
 // story #3656(Phase2·FE+BE, 페드루 PO 確定 2026-09-07) — 소재/훅 묶음 토글. BE(#3656
 // 절반)가 아직 안 착지해 asset_sha256s/hook_key가 실린 목 행으로 먼저 짓는다(PO
 // 지시 — FE 절반 지금, BE는 #4002 착지 뒤 같은 브랜치에).

@@ -77,6 +77,11 @@ class InsightsBoardRow(BaseModel):
     # 0건·hook_key 미기입은 각각 null.
     asset_sha256s: list[str] | None = None
     hook_key: str | None = None
+    # story #3766(별건 ⑩, 3746 §3 유나 定) — 「사람 차례」 발행 명령 축. 채널 포스트
+    # 목록 응답(ChannelPostDraftListItem.command_status)과 같은 이름·같은 뜻(같은
+    # PublicationCommand 행) — 새 낱말 0. 수집 상태 축(d1/d7·comments_*)과는 다른
+    # 축이라 섞지 않는다(필터 대상 아님 — 행 배지 전용). site_post 행은 항상 null.
+    command_status: str | None = None
 
 
 class InsightsBoardResponse(BaseModel):
