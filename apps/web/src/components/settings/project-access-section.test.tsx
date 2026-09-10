@@ -17,16 +17,6 @@ import koMessages from '../../../messages/ko.json';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-// story #3776(1층A) — ProjectAccessSection이 settings ns의 useTranslations('접근 권한'
-// 제목)를 부르게 되며 next-intl 컨텍스트가 필요해졌다(blocked-users-section.test.tsx 선례 동형).
-function wrap(node: React.ReactNode) {
-  return (
-    <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
-      {node}
-    </NextIntlClientProvider>
-  );
-}
-
 let container: HTMLDivElement;
 let root: Root;
 
