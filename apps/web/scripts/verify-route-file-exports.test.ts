@@ -72,6 +72,50 @@ describe('scanFileContent — story #3760 AC1/AC2(셀프테스트)', () => {
     expect(scanFileContent(src, 'fake/page.tsx')).toEqual([]);
   });
 
+  // story #3760 CHANGES(카디르 QA, #4108) — export type/interface는 «놓친» 게 아니라
+  // 의도된 정책(타입 전용 export는 컴파일 시 완전히 지워져 Next가 검사하는 런타임 export
+  // 객체에 애초에 안 나타난다)이다. 이전 diff엔 이 정책이 셀프테스트로 박혀있지 않아
+  // "잡든 안 잡든 표시가 안 됐다" — 이 테스트가 그 정책을 명시로 고정한다.
+  it('export type/export interface는 정책상 무시된다(GREEN — 타입 전용은 런타임 export 객체에 안 나타남)', () => {
+    const src = `
+      export type PageProps = { params: { id: string } };
+      export interface Metadata2 { title: string; }
+      export default function Page() { return null; }
+    `;
+    expect(scanFileContent(src, 'fake/page.tsx')).toEqual([]);
+  });
+
+  // story #3760 CHANGES(카디르 QA, #4108) — export enum은 타입이 아니라 런타임 객체(값)로
+  // 컴파일된다 — export type/interface와 다른 축, 화이트리스트 밖이면 잡혀야 한다.
+  it('⭐export enum(런타임 객체) — 화이트리스트 밖이면 RED', () => {
+    const src = `
+      export enum Status { Draft, Published }
+      export default function Page() { return null; }
+    `;
+    const violations = scanFileContent(src, 'fake/page.tsx');
+    expect(violations).toEqual([{ file: 'fake/page.tsx', line: 2, name: 'Status' }]);
+  });
+
+  // story #3760 CHANGES(카디르 QA, #4108) — `export * as ns from '...'`은 `export * from`
+  // (타깃을 못 읽어 fail-closed)과 다르다: 로컬 이름(ns)이 정적으로 있으므로 화이트리스트와
+  // 직접 대조 가능하다 — 화이트리스트 밖이면 RED.
+  it('⭐export * as ns from(네임스페이스 값 재수출) — 화이트리스트 밖이면 RED', () => {
+    const src = `
+      export * as helpers from './helpers';
+      export default function Page() { return null; }
+    `;
+    const violations = scanFileContent(src, 'fake/page.tsx');
+    expect(violations).toEqual([{ file: 'fake/page.tsx', line: 2, name: 'helpers' }]);
+  });
+
+  it('export * as metadata from — 이름이 화이트리스트 안이면 GREEN(이례적이지만 정직하게 통과)', () => {
+    const src = `
+      export * as metadata from './metadata-namespace';
+      export default function Page() { return null; }
+    `;
+    expect(scanFileContent(src, 'fake/page.tsx')).toEqual([]);
+  });
+
   // 재수출 형(AC2) — `export { x }`가 화이트리스트 밖 이름이면 RED, 안이면 GREEN. 재명명
   // (`export { y as metadata }`)은 "밖에서 보이는 이름"(metadata) 기준으로 판정한다.
   it('⭐export { x } 재수출 — 화이트리스트 밖이면 RED', () => {

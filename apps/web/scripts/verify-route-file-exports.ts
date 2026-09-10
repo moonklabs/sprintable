@@ -25,6 +25,14 @@
  * 알 수 없다 — 「모르면 안전하다고 가정」이 아니라 「모르면 위반」으로 fail-closed(이
  * 파일군 전체의 관례와 동형, cross-module 추론은 하지 않는다).
  *
+ * ## `export type`/`export interface` — 의도적으로 무시(정책, 사각 아님)
+ * TypeScript의 타입 전용 export는 컴파일 시점에 완전히 지워진다(`isolatedModules` 하의
+ * `export type` 명시형은 물론, 일반 `export interface`도 값으로 내려오지 않는다) — Next.js가
+ * 라우트 export 계약을 검사하는 대상은 «컴파일된 모듈의 런타임 export 객체»이므로 타입
+ * 전용 이름은 애초에 그 객체에 나타나지 않는다. 이 가드가 `ts.isInterfaceDeclaration`·
+ * `ts.isTypeAliasDeclaration`을 walk에서 아예 건드리지 않는 것은 «놓친» 게 아니라 이
+ * 정책을 그대로 구현한 것 — 셀프테스트가 그 정책 자체를 픽스처로 고정한다(아래 참조).
+ *
  * ## 못 잡는 것(⚠️)
  *   ㉠ 동적으로 계산된 export 이름(`export const [computed] = ...`)은 TS 문법상 존재하지
  *      않으므로 해당 없음.
@@ -110,6 +118,13 @@ export function scanFileContent(content: string, file: string): ExportViolation[
       report(name, stmt);
       continue;
     }
+    // story #3760 CHANGES(카디르 QA, #4108) — `export enum X {}`은 타입이 아니라 «런타임
+    // 객체»(값)로 컴파일된다 — export type/interface와 다른 축(위 정책 참조), 이름을
+    // 판정해야 하는 값 export다.
+    if (ts.isEnumDeclaration(stmt) && hasExportModifier(stmt)) {
+      report(stmt.name.text, stmt);
+      continue;
+    }
     if (ts.isVariableStatement(stmt) && hasExportModifier(stmt)) {
       for (const decl of stmt.declarationList.declarations) {
         for (const name of bindingNames(decl.name)) report(name, stmt);
@@ -127,6 +142,11 @@ export function scanFileContent(content: string, file: string): ExportViolation[
         for (const spec of stmt.exportClause.elements) {
           report(spec.name.text, spec); // spec.name = 외부에서 보이는 이름(재명명 후).
         }
+      } else if (stmt.exportClause && ts.isNamespaceExport(stmt.exportClause)) {
+        // story #3760 CHANGES(카디르 QA, #4108) — `export * as ns from '...'`은 `export *
+        // from`(타깃을 못 읽어 fail-closed)과 다르다: 이 형은 로컬 이름(`ns`)이 정적으로
+        // 있으므로 그 이름을 화이트리스트와 직접 대조할 수 있다(모르는 값이 아니다).
+        report(stmt.exportClause.name.text, stmt.exportClause);
       } else if (!stmt.exportClause) {
         // `export * from '...'` — 타깃을 resolve 안 하므로 뭐가 나가는지 모른다 → fail-closed RED.
         report('* (export * from — 재수출 대상 이름을 정적으로 모름, fail-closed)', stmt);
