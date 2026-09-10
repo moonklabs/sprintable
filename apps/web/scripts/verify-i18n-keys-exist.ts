@@ -80,6 +80,28 @@
  * 구조분해로 나타나는 형은 이 저장소에 0건, `useAccountSwitcher` 훅 하나뿐). 인정되면
  * ③과 동일하게 네임스페이스를 모르니 **무조건 동적 버킷**.
  *
+ * ## A″ — t() 계열 호출 «밖»의 리터럴(story #3765, 3757-b)
+ * 위 ①②③⑤⑥은 전부 "번역자를 통해 실제로 호출되는 자리"만 본다 — 그런데 리터럴 키
+ * 이름이 t() 호출의 인자가 «아니라» 다른 함수의 인자로, 또는 조회 테이블의 값으로만
+ * 코드에 등장하고 그 함수/테이블이 내부에서 그 값을 변수로 `t(변수)`하는 형(간접
+ * fallback-key 전달)은 위 신호 어디에도 안 걸린다(story #3757 삭제 작업 중 실물로 발견
+ * — `invite.acceptFailed`·`dashboard.ccGateType*` 13건, #4112). 두 하위형:
+ *   (A) 번역자 co-argument — `inviteErrorMessage(tInvite, code, 'acceptFailed')`처럼
+ *       이미 바인딩된 번역자 변수를 다른 함수 호출의 인자로 넘기면서 리터럴 문자열도
+ *       같은 호출의 다른 인자로 넘긴다. 번역자의 ns가 알려지면(예: `tInvite`) 정밀한
+ *       전체경로(`invite.acceptFailed`)를 만든다.
+ *   (B) `Record<string, string>` 조회 테이블 값 — `gate-type-label.ts`의
+ *       `GATE_TYPE_LABEL_KEYS`처럼 리터럴이 테이블 «값»으로만 존재하고 그 테이블을
+ *       나중에 `t(table[x])`로 소비한다. 테이블이 선언된 파일이 ns를 하나 이상 열면
+ *       (useTranslations 리터럴) 그 ns(들)로 전체경로를 좁힌다(동음이의 다른 ns를
+ *       안 건드리는 핵심 장치 — 예: `epic-status-transition.tsx`의 `LABEL_KEY`는
+ *       그 파일이 'goals'만 여니 `goals.statusActive`만 내고 `dashboard.statusActive`는
+ *       안 건드린다). 파일이 ns를 하나도 안 열면(gate-type-label.ts처럼 t를 파라미터로만
+ *       받는 순수 헬퍼) ns를 알 방법이 구조적으로 없어 관대한 낱말 축으로만 떨어진다.
+ * 정밀도 원칙: ns를 알 수 있으면 반드시 전체경로로 좁힌다 — 관대한 낱말 축은 최후
+ * 수단이다(동음이의 오탐 방지, `ScanResult.indirectLookupRefs`/`indirectLookupWords`
+ * 필드 docstring 참조).
+ *
  * ## 못 잡는 것(⚠️)
  *   ㉠ 네임스페이스 자체가 동적(`useTranslations(nsVar)`)인 바인딩은 등록하지 않는다 —
  *      그 var를 통한 이후 호출은 바인딩 미매칭이라 리터럴도 동적도 아닌 채로 조용히
@@ -125,6 +147,36 @@ export interface ScanResult {
   // 대가로 관대하게 살린다). ko/en 어느 네임스페이스의 말단이든 이 집합의 문자열과 정확히
   // 같으면 「죽지 않았다」로 본다 — 죽은-키 판정(이 파일 밖 소비처)이 쓰는 재료.
   unknownNsLiteralWords: Set<string>;
+  // story #3765(3757-b, 되살린 14의 클래스 자체를 자에 코드화) — 층 A″(유나 정의).
+  // 「t() 계열 호출 밖의 다른 문자열 리터럴이 리프 키 경로/낱말과 일치 = 살아 있음」
+  // 두 구조적 하위형:
+  //   (A) 「번역자 co-argument」 — 이미 바인딩된 번역자 변수를 그 t() 호출 자체가
+  //       아니라 다른 함수 호출의 인자로 «같이» 넘기면서, 그 호출의 다른 인자로
+  //       리터럴 문자열도 같이 넘기는 형(`inviteErrorMessage(tInvite, code,
+  //       'acceptFailed')` — invite-accept-client.tsx). 번역자의 ns가 알려져 있으면
+  //       (`tInvite`처럼) 정밀한 전체경로(`invite.acceptFailed`)를 만든다 — «어느
+  //       호출을 통해 이 리터럴이 실제로 그 ns의 t()에 닿을지»를 이 파일 혼자 증명할
+  //       순 없지만, 번역자 자체가 그 호출의 인자로 명시적으로 전달됐다는 사실 자체가
+  //       충분히 강한 신호(호출 그래프 추론 없이도 같은 콜 표현식 안에서 구문적으로
+  //       확認됨).
+  //   (B) 「Record<string,string> 조회 테이블 값」 — `const X: Record<string,string> =
+  //       {a: 'ccGateTypeQa', ...}`(gate-type-label.ts) 형. 테이블이 선언된 파일
+  //       자신이 어느 ns를 여는지(useTranslations 리터럴) 알면 그 ns(들)로 전체경로를
+  //       만들고(예: epic-status-transition.tsx의 `LABEL_KEY: Record<string,string>`은
+  //       그 파일이 'goals'를 열므로 `goals.statusActive`만 만든다 — «dashboard.
+  //       statusActive»라는 동음이의 다른 ns 키는 안 건드린다), 파일 자신이 ns를
+  //       하나도 안 열면(gate-type-label.ts처럼 t를 파라미터로만 받는 헬퍼) ns를 알
+  //       방법이 없으니 관대한 낱말 축(indirectLookupWords)으로만 떨어뜨린다.
+  // 정밀도 원칙: ns를 알 수 있으면 반드시 전체경로로 좁힌다(관대한 낱말 축은 ns를 알
+  // 방법이 구조적으로 없을 때만 최후 수단) — 동음이의 9건(billing.grandfathered/keep/
+  // via·common.next/unassigned·dashboard.statusActive·sprints.create·
+  // activityLog.description·invite.description)이 이 축으로 잘못 되살아나지 않게
+  // 하는 핵심 장치. 9건은 애초에 (A)의 co-argument 조건도(번역자와 같이 안 넘어감)
+  // (B)의 Record<string,string> 초기화식 조건도(타입 유니언·삼항 비교·JSDoc 주석·
+  // JSX 속성·배열 리터럴 원소일 뿐 object literal의 Record<string,string> 프로퍼티
+  // 값이 아님) 구조적으로 만족하지 않는다 — 별도 deny-list 불요, 형 자체가 갈린다.
+  indirectLookupRefs: KeyRef[];
+  indirectLookupWords: Set<string>;
 }
 
 const TRANSLATION_METHODS = new Set(['rich', 'raw', 'has']);
@@ -208,6 +260,16 @@ function interfaceCallSignatureShape(node: ts.InterfaceDeclaration): ts.CallSign
   if (node.members.length !== 1) return null;
   const only = node.members[0];
   return ts.isCallSignatureDeclaration(only) ? only : null;
+}
+
+// ⓑ story #3765 — `Record<string, string>` 정확히 그 두 타입인자(둘 다 string 키워드)인
+// 타입 참조 판정. `Record<GoalStatus, string>`처럼 첫 타입인자가 string이 아니면 매치
+// 안 함(그 경우는 이미 층 B — 그 ns 자체가 동적 호출로 held-back되는 케이스가 실측상
+// 전부라 A″가 안 다뤄도 안전, `goals.statusActive` 실측 확認).
+function isRecordStringStringType(t: ts.TypeNode): boolean {
+  if (!ts.isTypeReferenceNode(t) || !ts.isIdentifier(t.typeName) || t.typeName.text !== 'Record') return false;
+  const args = t.typeArguments;
+  return !!args && args.length === 2 && isStringKeywordType(args[0]) && isStringKeywordType(args[1]);
 }
 
 function isTranslatorTypeStructural(t: ts.TypeNode): boolean {
@@ -301,6 +363,7 @@ function translatorPropNamesOfParamType(
 export function scanFileContent(content: string, file: string): {
   literalRefs: KeyRef[]; dynamicCount: number; totalCallCount: number; hasBindings: boolean;
   dynamicNamespaces: Set<string>; unknownNsLiteralWords: Set<string>;
+  indirectLookupRefs: KeyRef[]; indirectLookupWords: Set<string>;
 } {
   const sf = ts.createSourceFile(file, content, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const parseDiagnostics = (sf as unknown as { parseDiagnostics?: ts.Diagnostic[] }).parseDiagnostics;
@@ -327,6 +390,13 @@ export function scanFileContent(content: string, file: string): {
   let totalCallCount = 0;
   const dynamicNamespaces = new Set<string>();
   const unknownNsLiteralWords = new Set<string>();
+  // story #3765(층 A″) — 원재료만 이 파일 하나의 단일 walk 안에서 같이 모은다(별도
+  // 전체-트리 재순회 2회를 안 하려는 성능 처방, 페드루 PO 지적 2026-09-10 — CI가
+  // A″ 도입 뒤 실 소스 전수 스캔 테스트에서 5s 타임아웃을 침). 판정(바인딩이 알려진
+  // ns인지/unknown-ns인지, 파일이 어떤 ns들을 여는지)은 여전히 walk 완결 뒤(아래)
+  // 한다 — bindings가 이 시점엔 아직 다 안 채워졌을 수 있어서(변수 재선언 등).
+  const translatorCoArgCandidates: { boundVar: string; literal: string; line: number }[] = [];
+  const recordTableCandidates: { value: string; line: number }[] = [];
 
   function registerBindingFromInitializer(varName: string, initRaw: ts.Expression): void {
     const init = ts.isAwaitExpression(initRaw) ? initRaw.expression : initRaw;
@@ -428,14 +498,70 @@ export function scanFileContent(content: string, file: string): {
       ) {
         keyFromCall(node, callee.expression.text);
       }
+      // story #3765(층 A″ 조건 A) — 「번역자 co-argument」 원재료를 같은 방문에서 같이
+      // 뽑는다(별도 전체-트리 재순회 없음). 판정은 walk 완결 뒤(bindings 완결 후).
+      const idArgs = node.arguments.filter((a): a is ts.Identifier => ts.isIdentifier(a));
+      if (idArgs.length > 0) {
+        const litArgs = node.arguments.filter((a): a is ts.StringLiteral => ts.isStringLiteral(a));
+        if (litArgs.length > 0) {
+          const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
+          for (const idArg of idArgs) {
+            for (const lit of litArgs) translatorCoArgCandidates.push({ boundVar: idArg.text, literal: lit.text, line });
+          }
+        }
+      }
+    }
+    // story #3765(층 A″ 조건 B) — 「Record<string,string> 조회 테이블 값」 원재료도 같은
+    // 방문에서 같이 뽑는다. ns 스코핑 판정은 walk 완결 뒤.
+    if (
+      ts.isVariableDeclaration(node) && node.type && isRecordStringStringType(node.type)
+      && node.initializer && ts.isObjectLiteralExpression(node.initializer)
+    ) {
+      for (const prop of node.initializer.properties) {
+        if (ts.isPropertyAssignment(prop) && ts.isStringLiteral(prop.initializer)) {
+          const line = sf.getLineAndCharacterOfPosition(prop.initializer.getStart(sf)).line + 1;
+          recordTableCandidates.push({ value: prop.initializer.text, line });
+        }
+      }
     }
     node.forEachChild(walk);
   }
   walk(sf);
 
+  // story #3765(층 A″) — bindings가 이제 완결됐으니(파일 전체 walk 끝) 조건(A)/(B) 원재료를
+  // 판정한다. ns를 알 수 있으면 반드시 전체경로로 좁힌다(관대한 낱말 축은 ns를 알 방법이
+  // 구조적으로 없을 때만 — 모듈 docstring 참조).
+  const indirectLookupRefs: KeyRef[] = [];
+  const indirectLookupWords = new Set<string>();
+
+  for (const { boundVar, literal, line } of translatorCoArgCandidates) {
+    if (!bindings.has(boundVar)) continue;
+    const ns = bindings.get(boundVar)!;
+    if (ns !== null) {
+      indirectLookupRefs.push({ file, line, fullKey: ns ? `${ns}.${literal}` : literal });
+    } else {
+      indirectLookupWords.add(literal);
+    }
+  }
+
+  const knownNamespacesInFile = new Set<string>();
+  for (const ns of bindings.values()) {
+    if (ns !== null) knownNamespacesInFile.add(ns);
+  }
+  for (const { value, line } of recordTableCandidates) {
+    if (knownNamespacesInFile.size > 0) {
+      for (const ns of knownNamespacesInFile) {
+        indirectLookupRefs.push({ file, line, fullKey: ns ? `${ns}.${value}` : value });
+      }
+    } else {
+      indirectLookupWords.add(value);
+    }
+  }
+
   return {
     literalRefs, dynamicCount, totalCallCount, hasBindings: bindings.size > 0,
     dynamicNamespaces, unknownNsLiteralWords,
+    indirectLookupRefs, indirectLookupWords,
   };
 }
 
@@ -470,6 +596,8 @@ export function scanRepo(srcRoot: string, minExpectedFiles: number = MIN_EXPECTE
   let filesWithBindings = 0;
   const dynamicNamespaces = new Set<string>();
   const unknownNsLiteralWords = new Set<string>();
+  const indirectLookupRefs: KeyRef[] = [];
+  const indirectLookupWords = new Set<string>();
   for (const abs of files) {
     const rel = path.relative(srcRoot, abs).split(path.sep).join('/');
     const content = readFileSync(abs, 'utf8');
@@ -480,10 +608,13 @@ export function scanRepo(srcRoot: string, minExpectedFiles: number = MIN_EXPECTE
     if (result.hasBindings) filesWithBindings += 1;
     for (const ns of result.dynamicNamespaces) dynamicNamespaces.add(ns);
     for (const w of result.unknownNsLiteralWords) unknownNsLiteralWords.add(w);
+    indirectLookupRefs.push(...result.indirectLookupRefs);
+    for (const w of result.indirectLookupWords) indirectLookupWords.add(w);
   }
   return {
     literalRefs, dynamicCount, totalCallCount, filesWithBindings,
     dynamicNamespaces, unknownNsLiteralWords,
+    indirectLookupRefs, indirectLookupWords,
   };
 }
 
