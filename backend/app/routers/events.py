@@ -1413,10 +1413,18 @@ async def _render_gate_verdict_message(db: AsyncSession, *, org_id: uuid.UUID, p
             # 화면에서 «발행»/«재발행»을 직접 눌러야 한다. 이 표면의 수신자는 항상
             # 에이전트(위 주석)라, hosted_site draft에 옛 문구("다음 워커 tick에
             # 발행됩니다")를 그대로 보내면 에이전트가 "할 일 없음"으로 오판해 사람에게
-            # 재발행이 필요하다는 것을 못 알릴 수 있다 — connection_id 유무(외부 목적지
-            # 만 명령 자동생성)로 한 번 더 가른다.
+            # 재발행이 필요하다는 것을 못 알릴 수 있다.
+            #
+            # story #4155 유나 CHANGES(2026-09-10) — 위 수정이 connection_id 유무를
+            # 대리값으로 썼는데, `gate_service.py:1037-1072`엔 외부 목적지(connection_id
+            # 있음)인데도 command를 안 만들고 return하는 경로가 6개(_mark_unresolved 5·
+            # _mark_scope_mismatch 1 — scope mismatch는 설계된 도달 상태) 있어 그 경로
+            # 에서도 이 대리값이 "명령이 만들어졌다"로 잘못 읽었다. 대리값을 버리고 실제
+            # `PublicationCommand` 존재 여부를 직접 조회한다(gate_id로, 인덱스 有) — 이
+            # 한 조회가 hosted_site(애초에 명령 자체가 없는 경로)와 외부-이지만-생성
+            # 실패(위 6경로) 둘 다를 같은 방식으로 정확히 잡는다.
             is_site_post = False
-            site_post_has_connection = False
+            site_post_command_exists = False
             if draft_id:
                 try:
                     draft_uuid = uuid.UUID(draft_id)
@@ -1424,17 +1432,19 @@ async def _render_gate_verdict_message(db: AsyncSession, *, org_id: uuid.UUID, p
                     draft_uuid = None
                 if draft_uuid is not None:
                     from app.models.site_post_draft import SitePostDraft
-                    _site_draft_row = (await db.execute(
-                        select(SitePostDraft.connection_id).where(SitePostDraft.id == draft_uuid)
-                    )).one_or_none()
-                    if _site_draft_row is not None:
-                        is_site_post = True
-                        site_post_has_connection = _site_draft_row[0] is not None
-            if is_site_post and site_post_has_connection:
+                    is_site_post = (await db.execute(
+                        select(SitePostDraft.id).where(SitePostDraft.id == draft_uuid)
+                    )).scalar_one_or_none() is not None
+            if is_site_post and gate_row is not None:
+                from app.models.publication_command import PublicationCommand
+                site_post_command_exists = (await db.execute(
+                    select(PublicationCommand.id).where(PublicationCommand.gate_id == gate_row.id)
+                )).first() is not None
+            if is_site_post and site_post_command_exists:
                 lines.append(
-                    "- 다음 행동: 없음 — 승인으로 발행 명령이 만들어졌고 다음 워커 "
+                    "- 다음 행동: 할 일 없음 — 승인으로 발행 명령이 만들어졌고 다음 워커 "
                     "tick(최대 1분)에 발행됩니다. 결과는 원문 상세 «발행 결과» 줄에서 "
-                    "확認합니다."
+                    "확인합니다."
                 )
             else:
                 lines.append("- 다음 행동: 할 일 없음 — 발행은 휴먼이 화면에서 합니다.")
