@@ -89,6 +89,7 @@ export function CommentReplyDialog({
   initialDraft, draftPrefillFetchFailed, onFetchReplyText,
 }: CommentReplyDialogProps) {
   const t = useTranslations('content');
+  const tc = useTranslations('common');
   const [text, setText] = useState(initialText ?? '');
   const [draft, setDraft] = useState<{ id: string; text: string } | null>(initialDraft ?? null);
   const [submitting, setSubmitting] = useState(false);
@@ -249,7 +250,7 @@ export function CommentReplyDialog({
             <DialogFooter className="shrink-0">
               <DialogClose render={<Button type="button" variant="ghost" disabled={submitting} onClick={onClose}>{t('commentsConvertCancel')}</Button>} />
               <Button type="submit" disabled={submitting || !text.trim()} data-testid="comments-reply-draft-button">
-                {submitting ? t('commentsReplySavingDraft') : t('commentsReplySaveDraftCta')}
+                {submitting ? tc('saving') : t('commentsReplySaveDraftCta')}
               </Button>
             </DialogFooter>
           </form>

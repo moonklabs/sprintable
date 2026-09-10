@@ -181,11 +181,11 @@ export function WorkflowTriggerTypesSection() {
                         size="sm"
                         onClick={() => void handleSaveEdit(tt.id)}
                         disabled={!editLabel.trim() || saving === tt.id}
-                        aria-label={t('workflowToggleAriaLabel', { n: index + 1, label: saving === tt.id ? t('workflowSaving') : tc('save') })}
+                        aria-label={t('workflowToggleAriaLabel', { n: index + 1, label: saving === tt.id ? tc('saving') : tc('save') })}
                       >
                         {/* story #3608(유나 §22-18 ④-2)+#3606(aria-label 배선) 병합 —
                             "..."는 아무 말도 안 한다, 낱말("저장 중…")로. */}
-                        {saving === tt.id ? t('workflowSaving') : tc('save')}
+                        {saving === tt.id ? tc('saving') : tc('save')}
                       </Button>
                       <Button
                         variant="glass"
@@ -255,11 +255,11 @@ export function WorkflowTriggerTypesSection() {
                                 size="sm"
                                 onClick={() => void handleDelete(tt.id)}
                                 disabled={deletingId === tt.id}
-                                aria-label={t('workflowToggleAriaLabel', { n: index + 1, label: deletingId === tt.id ? t('workflowDeleting') : tc('confirm') })}
+                                aria-label={t('workflowToggleAriaLabel', { n: index + 1, label: deletingId === tt.id ? tc('deleting') : tc('confirm') })}
                               >
                                 {/* story #3608(+#3606 aria-label 배선 병합) — "..."는
                                     아무 말도 안 한다, 낱말("삭제 중…")로. */}
-                                {deletingId === tt.id ? t('workflowDeleting') : tc('confirm')}
+                                {deletingId === tt.id ? tc('deleting') : tc('confirm')}
                               </Button>
                               <Button
                                 variant="glass"

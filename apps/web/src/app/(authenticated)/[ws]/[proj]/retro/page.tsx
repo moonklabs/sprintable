@@ -182,7 +182,7 @@ export default function RetroPage() {
                 </OperatorSelect>
               ) : null}
               <Button variant="default" onClick={handleCreate} disabled={!title.trim() || !orgId || creating}>
-                {creating ? t('creating') : t('create')}
+                {creating ? tc('creating') : t('create')}
               </Button>
             </div>
             {createError ? (

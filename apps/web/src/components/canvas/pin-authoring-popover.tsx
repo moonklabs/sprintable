@@ -27,6 +27,7 @@ interface PinAuthoringPopoverProps {
  */
 export function PinAuthoringPopover({ open, onOpenChange, initialDescription, onSave, onDelete }: PinAuthoringPopoverProps) {
   const t = useTranslations('canvas');
+  const tc = useTranslations('common');
   const [description, setDescription] = useState(initialDescription);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(false);
@@ -82,7 +83,7 @@ export function PinAuthoringPopover({ open, onOpenChange, initialDescription, on
               {t('specPinCancelAction')}
             </Button>
             <Button size="sm" onClick={() => void handleSave()} disabled={!canSave}>
-              {saving ? t('specPinSavingAction') : t('specPinSaveAction')}
+              {saving ? tc('saving') : t('specPinSaveAction')}
             </Button>
           </div>
         </DialogFooter>

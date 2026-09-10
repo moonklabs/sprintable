@@ -284,7 +284,7 @@ export default function DocSlugPage() {
 
   const docActions = (
     <>
-      <InlineSaveIndicator status={saveStatus} onAction={save} t={t} />
+      <InlineSaveIndicator status={saveStatus} onAction={save} t={t} tc={tc} />
       <button
         type="button"
         onClick={handleCopyMarkdown}

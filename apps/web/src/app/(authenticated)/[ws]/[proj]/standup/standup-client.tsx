@@ -114,6 +114,7 @@ interface StandupClientProps {
 // 내려준다 — useDashboardContext()(전역 "현재 프로젝트")가 아니라 URL 이 가리키는 project.
 export default function StandupPage({ projectId }: StandupClientProps) {
   const t = useTranslations('standup');
+  const tc = useTranslations('common');
   const { currentTeamMemberId, projectMemberships } = useDashboardContext();
 
   const [date, setDate] = useState(() => formatSeoulDate());
@@ -771,7 +772,7 @@ export default function StandupPage({ projectId }: StandupClientProps) {
 
                             <div className="flex flex-wrap items-center gap-3 pt-1">
                               <Button variant="hero" size="lg" onClick={() => void handleSave()} disabled={saving}>
-                                {saving ? t('saving') : t('save')}
+                                {saving ? tc('saving') : t('save')}
                               </Button>
                               <Button variant="outline" onClick={() => setEditingSelf(false)}>{t('cancel')}</Button>
                               {saveError ? <p className="text-sm text-destructive">{saveError}</p> : null}

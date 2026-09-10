@@ -54,6 +54,7 @@ export function HypothesisResolveDialog({
   onCancel: () => void;
 }) {
   const t = useTranslations('hypotheses');
+  const tc = useTranslations('common');
   const md = hypothesis.metric_definition;
   const [verdict, setVerdict] = useState<'verified' | 'falsified'>(initialTarget);
   const [actual, setActual] = useState('');
@@ -161,7 +162,7 @@ export function HypothesisResolveDialog({
           <DialogFooter className="shrink-0">
             <DialogClose render={<Button type="button" variant="ghost" disabled={submitting} onClick={onCancel}>{t('cancel')}</Button>} />
             <Button type="submit" disabled={!canSubmit} className="bg-brand text-brand-foreground hover:bg-brand/90">
-              {submitting ? t('saving') : t('resolveSubmit')}
+              {submitting ? tc('saving') : t('resolveSubmit')}
             </Button>
           </DialogFooter>
         </form>

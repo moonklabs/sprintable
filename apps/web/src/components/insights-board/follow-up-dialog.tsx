@@ -37,6 +37,7 @@ const KIND_OPTIONS: FollowUpKind[] = ['republish', 'edit', 'stop'];
 
 export function FollowUpDialog({ orgId, publicationId, originalTitle, onClose }: FollowUpDialogProps) {
   const t = useTranslations('insightsBoard');
+  const tc = useTranslations('common');
   const [kind, setKind] = useState<FollowUpKind>('republish');
   const kindLabel: Record<FollowUpKind, string> = {
     republish: t('followUpKindRepublish'),
@@ -188,7 +189,7 @@ export function FollowUpDialog({ orgId, publicationId, originalTitle, onClose }:
             <DialogFooter className="shrink-0">
               <DialogClose render={<Button type="button" variant="ghost" disabled={submitting} onClick={onClose}>{t('followUpCancel')}</Button>} />
               <Button type="submit" disabled={submitting}>
-                {submitting ? t('followUpSubmitting') : t('followUpSubmit')}
+                {submitting ? tc('creating') : t('followUpSubmit')}
               </Button>
             </DialogFooter>
           </form>

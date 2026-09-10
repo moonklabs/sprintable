@@ -36,6 +36,7 @@ export function HypothesisForm({
   onCancel: () => void;
 }) {
   const t = useTranslations('hypotheses');
+  const tc = useTranslations('common');
   const [value, setValue] = useState<HypothesisFormValue>(initial ?? EMPTY);
   const md = value.metric_definition;
   const setMd = (patch: Partial<MetricDefinition>) =>
@@ -135,7 +136,7 @@ export function HypothesisForm({
           disabled={!canSubmit}
           className="rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-50"
         >
-          {submitting ? t('saving') : t('add')}
+          {submitting ? tc('saving') : t('add')}
         </button>
       </div>
     </form>
