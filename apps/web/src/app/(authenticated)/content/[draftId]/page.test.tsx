@@ -1222,7 +1222,9 @@ describe('ContentPostEditPage — 같은 스토리의 채널 글(story 15e481ce 
   });
 
   // 유나 사전 스티어(2026-09-04, PR#3799 head)① — 목록 머리에 개수를 보인다.
-  it('목록 머리에 변형 개수가 보인다', async () => {
+  // story #3764(UI 점검 B·E절, 유나 定) 갱신 — 수를 제목 문자열 안에 넣지 않는다. 제목
+  // 고정 + 수는 옆 CountBadge로(이벤트 화면 events/page.tsx와 동형).
+  it('목록 머리에 변형 개수가 보인다(제목 고정 + CountBadge, story #3764)', async () => {
     stubFetchWithVersions([VERSION_1], undefined, undefined, {
       variants: [
         { draft_id: 'cp-1', channel: 'threads', connection_id: 'conn-1', gate_status: null, body_sha256: 'h1', publication_status: null, published_at: null },
@@ -1231,8 +1233,10 @@ describe('ContentPostEditPage — 같은 스토리의 채널 글(story 15e481ce 
     });
     await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
     await flush();
-    expect(container.querySelector('[data-testid="content-variants-list"] p')?.textContent)
-      .toBe(`${koMessages.content.channelPostsVariantsListLabel} (2)`);
+    const label = container.querySelector('[data-testid="content-variants-list"] p');
+    expect(label?.textContent).not.toMatch(new RegExp(`${koMessages.content.channelPostsVariantsListLabel}\\s*\\(`));
+    expect(label?.textContent).toContain(koMessages.content.channelPostsVariantsListLabel);
+    expect(label?.querySelector('span')?.textContent).toContain('2');
   });
 
   // 유나 사전 스티어② — published_at이 있으면 그 시각을 보인다(없으면 안 그림).

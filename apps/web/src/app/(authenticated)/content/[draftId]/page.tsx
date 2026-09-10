@@ -1353,8 +1353,13 @@ export default function ContentPostEditPage() {
           있으면 그 자리 자체를 안 그린다. */}
       {variants.length > 0 ? (
         <div className="space-y-2 rounded-md border border-border p-3 text-sm" data-testid="content-variants-list">
+          {/* story #3764(UI 점검 B·E절, 유나 定 재정정) — 수를 제목 문자열 안에 넣지
+              않는다. 단 이 라벨(text-xs font-medium text-muted-foreground)은 CountBadge
+              를 쓰는 자리(구성원·권한·이벤트, text-base font-semibold)보다 약한
+              위계다 — 위계가 그릇을 고른다: 약한 라벨엔 제목과 같은 대역의 수. */}
           <p className="text-xs font-medium text-muted-foreground">
-            {t('channelPostsVariantsListLabel')} ({variants.length})
+            {t('channelPostsVariantsListLabel')}
+            <span className="ml-1.5 tabular-nums text-muted-foreground">{variants.length}</span>
           </p>
           <ul className="space-y-1.5">
             {variants.map((v) => {

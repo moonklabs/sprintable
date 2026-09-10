@@ -17,8 +17,14 @@ export function UnscheduledLane({ items, displayTimezone }: UnscheduledLaneProps
   if (items.length === 0) return null;
   return (
     <section aria-label={t('channelPostsCalendarUnscheduledLaneLabel')} data-testid="channel-post-unscheduled-lane" className="space-y-2 rounded-md border border-border p-3">
+      {/* story #3764(UI 점검 B·E절, 유나 定 재정정) — 수를 제목 문자열 안에 넣지
+          않는다. 이 제목(text-sm font-medium)도 CountBadge를 쓰는 강한 제목
+          (text-base font-semibold)보다 약해 CountBadge(font-bold+테두리+엠보스)를
+          얹으면 수가 제목을 이긴다 — 위계가 그릇을 고른다: 약한 제목엔 제목과 같은
+          대역의 수. */}
       <h2 className="text-sm font-medium text-foreground">
-        {t('channelPostsCalendarUnscheduledLaneTitle', { count: items.length })}
+        {t('channelPostsCalendarUnscheduledLaneTitle')}
+        <span className="ml-1.5 tabular-nums text-muted-foreground">{items.length}</span>
       </h2>
       <div className="flex flex-wrap gap-2">
         {items.map((item) => (
