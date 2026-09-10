@@ -180,8 +180,23 @@ def _to_response(row, *, reconnect_mismatch_target_id: uuid.UUID | None = None) 
     adapter = get_channel_adapter(row.channel)
     max_text_length = adapter.max_text_length if adapter is not None and adapter.max_text_length > 0 else None
     supports_unpublish = adapter is not None and adapter.supports_unpublish
+    # story #3419(유나 실측·페드루 지적 2026-09-10) — truthy 가드 누락 결함. hosted_site·
+    # wordpress·webhook(channel_adapters.py:397·424·439)은 「회수 지원·요구 스코프
+    # 비움」을 선언한다(supports_unpublish=True·unpublish_required_scope=None) — 그런데
+    # `None in scopes`는 scopes에 실제로 None이 들어있지 않은 한 항상 False라 이 세
+    # 채널이 전부 has_required_scope=False(→can_unpublish=False·scope_insufficient)로
+    # 나갔다. 회수 구현은 실재(site_posts.py:1187 _call_blog_module_unpublish)라
+    # 「되는 것을 권한 없음이라 단정」한 거짓 값이고, scope_insufficient의 뜻(재연결하면
+    # 풀림)이 요구 스코프 자체가 None이라 영영 안 풀리는 모순까지 낳는다. 서비스 층
+    # `channel_posts.py::unpublish_channel_post`(1832)가 이미 쓰는 truthy 가드(`if
+    # adapter.unpublish_required_scope and … not in`)와 같은 모양으로 맞춘다 — 요구
+    # 스코프가 아예 없으면 스코프 검사 자체를 통과시킨다.
     has_required_scope = bool(
-        supports_unpublish and adapter.unpublish_required_scope in (row.scopes or [])
+        supports_unpublish
+        and (
+            not adapter.unpublish_required_scope
+            or adapter.unpublish_required_scope in (row.scopes or [])
+        )
     )
     can_unpublish = supports_unpublish and has_required_scope
     if can_unpublish:
