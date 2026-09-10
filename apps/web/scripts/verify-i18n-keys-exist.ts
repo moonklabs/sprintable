@@ -360,52 +360,6 @@ function translatorPropNamesOfParamType(
 // 파일 하나를 top-down walk — 바인딩(varName→ns)은 「마지막 선언이 이긴다」(모듈 docstring
 // ① 참조). 호출은 그 시점까지의 바인딩 상태로 판정한다. ns 값 `null`은 ③(번역자
 // 파라미터) — 바인딩은 있으나 네임스페이스를 몰라 그 호출은 항상 동적 버킷.
-// story #3765 — 조건(A) 「번역자 co-argument」 원재료 수집. 콜 표현식 하나의 인자 목록
-// 안에 (바인딩된 식별자, 문자열 리터럴)이 함께 있으면 그 조합 전부를 낸다 — 판정(바인딩이
-// 실제로 알려진 ns인지, unknown-ns인지)은 이 파일 밖(main walk 뒤, bindings가 완결된 뒤)
-// 에서 한다(바인딩이 이 콜보다 뒤에 선언되는 순서 역전 케이스까지 안전하게 다루려는 것 —
-// 실측상 0건이지만 별도 pass라 비용도 거의 없다).
-function collectTranslatorCoArgLiterals(sf: ts.SourceFile): { boundVar: string; literal: string; line: number }[] {
-  const out: { boundVar: string; literal: string; line: number }[] = [];
-  function visit(node: ts.Node): void {
-    if (ts.isCallExpression(node)) {
-      const idArgs = node.arguments.filter((a): a is ts.Identifier => ts.isIdentifier(a));
-      const litArgs = node.arguments.filter((a): a is ts.StringLiteral => ts.isStringLiteral(a));
-      if (idArgs.length > 0 && litArgs.length > 0) {
-        const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
-        for (const idArg of idArgs) {
-          for (const lit of litArgs) out.push({ boundVar: idArg.text, literal: lit.text, line });
-        }
-      }
-    }
-    node.forEachChild(visit);
-  }
-  visit(sf);
-  return out;
-}
-
-// story #3765 — 조건(B) 「Record<string,string> 조회 테이블 값」 원재료 수집. ns 스코핑
-// 판정도 마찬가지로 main walk 뒤(파일 전체의 bindings가 완결된 뒤)에서 한다.
-function collectRecordStringStringTableValues(sf: ts.SourceFile): { value: string; line: number }[] {
-  const out: { value: string; line: number }[] = [];
-  function visit(node: ts.Node): void {
-    if (
-      ts.isVariableDeclaration(node) && node.type && isRecordStringStringType(node.type)
-      && node.initializer && ts.isObjectLiteralExpression(node.initializer)
-    ) {
-      for (const prop of node.initializer.properties) {
-        if (ts.isPropertyAssignment(prop) && ts.isStringLiteral(prop.initializer)) {
-          const line = sf.getLineAndCharacterOfPosition(prop.initializer.getStart(sf)).line + 1;
-          out.push({ value: prop.initializer.text, line });
-        }
-      }
-    }
-    node.forEachChild(visit);
-  }
-  visit(sf);
-  return out;
-}
-
 export function scanFileContent(content: string, file: string): {
   literalRefs: KeyRef[]; dynamicCount: number; totalCallCount: number; hasBindings: boolean;
   dynamicNamespaces: Set<string>; unknownNsLiteralWords: Set<string>;
@@ -436,6 +390,13 @@ export function scanFileContent(content: string, file: string): {
   let totalCallCount = 0;
   const dynamicNamespaces = new Set<string>();
   const unknownNsLiteralWords = new Set<string>();
+  // story #3765(층 A″) — 원재료만 이 파일 하나의 단일 walk 안에서 같이 모은다(별도
+  // 전체-트리 재순회 2회를 안 하려는 성능 처방, 페드루 PO 지적 2026-09-10 — CI가
+  // A″ 도입 뒤 실 소스 전수 스캔 테스트에서 5s 타임아웃을 침). 판정(바인딩이 알려진
+  // ns인지/unknown-ns인지, 파일이 어떤 ns들을 여는지)은 여전히 walk 완결 뒤(아래)
+  // 한다 — bindings가 이 시점엔 아직 다 안 채워졌을 수 있어서(변수 재선언 등).
+  const translatorCoArgCandidates: { boundVar: string; literal: string; line: number }[] = [];
+  const recordTableCandidates: { value: string; line: number }[] = [];
 
   function registerBindingFromInitializer(varName: string, initRaw: ts.Expression): void {
     const init = ts.isAwaitExpression(initRaw) ? initRaw.expression : initRaw;
@@ -537,6 +498,31 @@ export function scanFileContent(content: string, file: string): {
       ) {
         keyFromCall(node, callee.expression.text);
       }
+      // story #3765(층 A″ 조건 A) — 「번역자 co-argument」 원재료를 같은 방문에서 같이
+      // 뽑는다(별도 전체-트리 재순회 없음). 판정은 walk 완결 뒤(bindings 완결 후).
+      const idArgs = node.arguments.filter((a): a is ts.Identifier => ts.isIdentifier(a));
+      if (idArgs.length > 0) {
+        const litArgs = node.arguments.filter((a): a is ts.StringLiteral => ts.isStringLiteral(a));
+        if (litArgs.length > 0) {
+          const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
+          for (const idArg of idArgs) {
+            for (const lit of litArgs) translatorCoArgCandidates.push({ boundVar: idArg.text, literal: lit.text, line });
+          }
+        }
+      }
+    }
+    // story #3765(층 A″ 조건 B) — 「Record<string,string> 조회 테이블 값」 원재료도 같은
+    // 방문에서 같이 뽑는다. ns 스코핑 판정은 walk 완결 뒤.
+    if (
+      ts.isVariableDeclaration(node) && node.type && isRecordStringStringType(node.type)
+      && node.initializer && ts.isObjectLiteralExpression(node.initializer)
+    ) {
+      for (const prop of node.initializer.properties) {
+        if (ts.isPropertyAssignment(prop) && ts.isStringLiteral(prop.initializer)) {
+          const line = sf.getLineAndCharacterOfPosition(prop.initializer.getStart(sf)).line + 1;
+          recordTableCandidates.push({ value: prop.initializer.text, line });
+        }
+      }
     }
     node.forEachChild(walk);
   }
@@ -548,7 +534,7 @@ export function scanFileContent(content: string, file: string): {
   const indirectLookupRefs: KeyRef[] = [];
   const indirectLookupWords = new Set<string>();
 
-  for (const { boundVar, literal, line } of collectTranslatorCoArgLiterals(sf)) {
+  for (const { boundVar, literal, line } of translatorCoArgCandidates) {
     if (!bindings.has(boundVar)) continue;
     const ns = bindings.get(boundVar)!;
     if (ns !== null) {
@@ -562,7 +548,7 @@ export function scanFileContent(content: string, file: string): {
   for (const ns of bindings.values()) {
     if (ns !== null) knownNamespacesInFile.add(ns);
   }
-  for (const { value, line } of collectRecordStringStringTableValues(sf)) {
+  for (const { value, line } of recordTableCandidates) {
     if (knownNamespacesInFile.size > 0) {
       for (const ns of knownNamespacesInFile) {
         indirectLookupRefs.push({ file, line, fullKey: ns ? `${ns}.${value}` : value });
