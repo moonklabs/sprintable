@@ -628,11 +628,22 @@ export interface RepositoryScanResult {
 
 /** main()에서 뽑아낸 전 저장소 스캔 — story #2410, GRANDFATHER_LIVE_COUNT_TEST가 이걸 불러
  * "지금 실제로 걸리는 grandfather 수"를 고정한다(console.log 경고만으로는 다음 사람이
- * 노이즈로 읽고 넘기는 것을 막는다, PO 지적). */
-export function scanRepository(): RepositoryScanResult {
+ * 노이즈로 읽고 넘기는 것을 막는다, PO 지적).
+ *
+ * story #3758(카디르 qa:changes 2026-09-09 — findMemberSynonymCollisions 자체는 순수
+ * 함수 유닛 테스트 38건이 지키지만, 그 함수를 이 스캔 파이프라인 안에서 실제로 호출하는지
+ * (호출부 자체를 지우는 뮤테이션)는 아무 테스트도 안 쟀다 — 「함수가 있다」와 「배선이
+ * 닫혔다」는 다른 사실). 옵션 인자로 `srcRoot`/`messagesPath`를 받아 임시 픽스처 디렉터리를
+ * 겨냥할 수 있게 열어 둔다(scanRepoCounts, verify-repeated-row-action-names.ts와 동형
+ * 관례) — main()·기존 모든 그랜드파더/exempt 테스트는 인자 생략으로 실 저장소 그대로. */
+export function scanRepository(
+  overrides: { srcRoot?: string; messagesPath?: string } = {},
+): RepositoryScanResult {
+  const srcRoot = overrides.srcRoot ?? SRC_ROOT;
+  const messagesPath = overrides.messagesPath ?? MESSAGES_PATH;
   const files: string[] = [];
-  walk(SRC_ROOT, files);
-  const messages = flattenMessages(JSON.parse(readFileSync(MESSAGES_PATH, 'utf8')));
+  walk(srcRoot, files);
+  const messages = flattenMessages(JSON.parse(readFileSync(messagesPath, 'utf8')));
 
   let totalDynamicCalls = 0;
   const newFindings = new Map<string, CollisionPair>();
@@ -658,7 +669,7 @@ export function scanRepository(): RepositoryScanResult {
       phrases.set(qualifiedKey, { value, numberAdjacent: isNumberAdjacent(value) });
     }
 
-    const rel = path.relative(SRC_ROOT, abs).split(path.sep).join('/');
+    const rel = path.relative(srcRoot, abs).split(path.sep).join('/');
     for (const c of findSubstringCollisions(phrases)) {
       const pk = pairKey(c.keyA, c.keyB);
       const pair: CollisionPair = { keyA: c.keyA, keyB: c.keyB, valueA: c.valueA, valueB: c.valueB, file: rel };
