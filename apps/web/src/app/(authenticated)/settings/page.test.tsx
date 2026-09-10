@@ -177,6 +177,35 @@ describe('SettingsPage — story #3762: adminChecked 로딩 vs 권한없음 분�
     expect(container.textContent).toContain(koMessages.settings.tabMembers);
   });
 
+  // story #3762 CHANGES(카디르 QA 지적, probe 재현) — loadContext()의 /api/me가
+  // reject(네트워크 다운 등)하는 경로는 PR 최초본 테스트가 pending/성공만 덮어 커버 0이었다.
+  // try/catch로 isAdmin=false를 잡고 finally로 adminChecked=true를 확정하는 게 코드
+  // 계약이라 동작 자체는 정상(스켈레톤이 영원히 안 걷히고, admin 전용 탭만 숨는다)인데
+  // 그 경로가 테스트로 고정돼 있지 않았다 — 이 카드의 판정선("스켈레톤이 영원히 안
+  // 걷히지 않는다")이 실제로 reject 경로에서도 성립하는지 여기서 잰다.
+  it('/api/me가 reject해도(네트워크 다운) 스켈레톤이 걷히고 non-admin 탭은 서고 admin 전용 탭만 숨는다', async () => {
+    // 이 페이지에서 /api/me를 부르는 자리가 여럿(SettingsPage 자신의 loadContext()·
+    // MyProfileSection 등)이라 전부 reject시킨다 — my-profile-section.tsx가 이 테스트로
+    // 처음 드러난 자체 unhandled rejection 갭(별도 수정, 같은 PR)을 갖고 있었다.
+    const fetchWithAuthMock = vi.fn((url: string) => {
+      if (url === '/api/me') return Promise.reject(new Error('network down'));
+      return Promise.resolve({ ok: false, json: async () => ({ data: null }) });
+    });
+    vi.doMock('@/lib/db/client', () => ({ fetchWithAuth: fetchWithAuthMock }));
+    const { default: SettingsPage } = await import('./page');
+    await mount(<SettingsPage />);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    // 스켈레톤이 영원히 안 걷히지 않는다(finally가 adminChecked=true를 확정).
+    expect(container.querySelectorAll('[data-testid="settings-tab-skeleton"]').length).toBe(0);
+    // adminChecked만 요구하는 탭(members·organization·projects)은 선다.
+    expect(container.textContent).toContain(koMessages.settings.tabMembers);
+    expect(container.textContent).toContain(koMessages.settings.tabOrganization);
+    // adminChecked && isAdmin을 요구하는 admin 전용 탭은 숨는다(isAdmin=false로 확정).
+    expect(container.textContent).not.toContain(koMessages.settings.tabWorkflowPolicies);
+    expect(container.textContent).not.toContain(koMessages.settings.tabUsage);
+  });
+
   // story c4980e70이 org-members 탭을 /organization/members로 승격했는데 트리거만
   // HIDDEN_SETTINGS_TABS 가드가 빠져 있었다(story #3762 발견) — 판정 후에도 그 트리거
   // 자체가 렌더되면 안 된다(딥링크는 next.config.ts redirects()가 서버에서 걷어가지만,
