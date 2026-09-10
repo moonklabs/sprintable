@@ -326,6 +326,74 @@ async def test_follow_up_creation_rate_direct_and_indirect_matches():
         await engine.dispose()
 
 
+@pytest.mark.anyio
+async def test_follow_up_creation_rate_end_to_end_via_real_endpoint_not_hand_seeded_evidence():
+    """페드루 자기점검 요청(2026-09-10 14:04Z)이 잡은 갭 — 위 세 테스트는 전부
+    `Evidence(payload={"publication_id": ...})`를 **손으로 직접** 심는다
+    (`create_publication_follow_up`을 한 번도 안 부른다). 그래서 그 함수가 실제로
+    찍는 payload 모양이 이 계산 로직이 찾는 모양과 «우연히» 같은지, 아니면 어느 한쪽만
+    고쳐져도 조용히 갈리는지(story #3696류 선언≠구현 갭)를 이 세 테스트로는 못 잡는다
+    — 뮤테이션으로 실증(아래 주석).
+
+    이 테스트는 실제 라우터(`POST .../follow-ups`)를 호출해 진짜로 만들어진 Story+
+    Evidence 위에서 지표를 재계산한다 — 두 코드 경로(생성부·집계부)가 정말로 같은
+    자리(payload.publication_id)를 보는지 엔드투엔드로 잠근다.
+
+    뮤테이션 self-check(수행 済, 기록만) — `create_publication_follow_up`의
+    `Evidence.payload`에서 `"publication_id": str(publication_id)` 키를 제거하면:
+    기존 3개 테스트(위)는 **전부 그대로 GREEN**(직접 Evidence를 심어 그 함수 자체를
+    안 거치므로) — 이 테스트만 RED(생성률이 0으로 떨어짐, 정확히 카드가 요청한
+    「링크 stamp 제거 → 생성률 0」). 원복 후 재GREEN 확인 완료."""
+    from app.main import app
+    from app.models.insight_snapshot import InsightSnapshot
+    from app.services.measured_metrics import compute_measured_metrics
+    from tests.test_3471_org_content_rules_lint import _seed_human
+    from tests.test_3502_insights_board_endpoints import _seed_site_post
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id, role="member")
+            from tests.test_3471_org_content_rules_lint import _seed_story
+            story_id = await _seed_story(s, org_id, project_id, title="원문 글")
+            sp = await _seed_site_post(
+                s, org_id=org_id, work_item_id=story_id, slug="post-e2e-fu", title="E2E FU",
+                published_at=datetime.now(timezone.utc) - timedelta(days=1),
+            )
+            now = datetime.now(timezone.utc)
+            s.add(InsightSnapshot(
+                id=uuid.uuid4(), org_id=org_id, publication_id=sp.id, publication_kind="site_post",
+                work_item_id=story_id, channel="sandbox", external_id=None,
+                due_at=now, captured_at=now, status="captured",
+            ))
+            await s.commit()
+
+        from tests.test_3471_org_content_rules_lint import _client_for, _setup_org_scoped_app
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        async with _client_for(app) as client:
+            r = await client.post(
+                f"/api/v2/organizations/{org_id}/publications/{sp.id}/follow-ups",
+                json={"kind": "republish"},
+            )
+        assert r.status_code == 201, r.text
+
+        async with Session() as s:
+            result = await compute_measured_metrics(s, org_id=org_id, days=7)
+            metric = result["follow_up_creation_rate"]
+            assert metric["denominator"] == 1
+            assert metric["numerator"] == 1, (
+                "실 엔드포인트가 만든 Evidence가 집계 쿼리에 안 잡혔다 — "
+                "create_publication_follow_up의 payload 모양과 _compute_follow_up_creation_rate가 "
+                "찾는 모양이 갈렸을 가능성(story #3696류 선언≠구현 갭)"
+            )
+            assert metric["value"] == 1.0
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
 # ─── 뮤테이션 대조 ────────────────────────────────────────────────────────────
 
 
