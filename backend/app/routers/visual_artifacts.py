@@ -43,7 +43,7 @@ from app.schemas.visual_artifact import (
     VisualArtifactDetail,
     VisualArtifactSummary,
 )
-from app.services.member_resolver import filter_org_member_ids
+from app.services.member_resolver import filter_org_member_ids, resolve_member_db_verified
 from app.services.notification_dispatch import dispatch_notification
 from app.services.project_auth import assert_target_in_caller_org
 
@@ -154,7 +154,12 @@ async def create_artifact(
 
     await _assert_link_target_in_scope(session, org_id, project_id, body)
 
-    created_by = uuid.UUID(auth.user_id)
+    # story #3370(카디르 QA 지적, 페드루 재검토 2026-09-10 — #4156 리뷰) —
+    # VisualArtifact.created_by는 이 뒤 _notify_artifact_updated의 target_member_ids
+    # 계산(artifact.created_by - editor_id)에 그대로 쓰인다 — 영속 멤버 id 소비처라
+    # resolve_member_db_verified()로 정정(agent 판정은 DB 실측이라 이 파일의 기존
+    # 테스트 하네스와 정합, member_resolver.py 자신의 docstring 그라운딩 참고).
+    created_by = (await resolve_member_db_verified(auth, org_id, session)).id
     # 뷰어 통합 재설계(story 1948d19d): canvas_bounds SSOT=버전(아래 version.canvas_bounds).
     # artifact.canvas_bounds는 latest_version_number와 동형 denorm 캐시 — 항상 최신 버전과 동기화.
     canvas_bounds_dict = body.canvas_bounds.model_dump() if body.canvas_bounds else None
@@ -612,7 +617,11 @@ async def delete_artifact(
     artifact = await _get_artifact_or_404(session, org_id, project_id, id)
     if artifact is None:
         return _err("NOT_FOUND", "Artifact not found", 404)
-    if artifact.created_by != uuid.UUID(auth.user_id):
+    # story #3370(카디르 QA 지적 2026-09-10) — artifact.created_by는 이제(위 create_
+    # artifact 정정) 영속 멤버 id다. 이 소유권 비교도 같은 축으로 맞추지 않으면
+    # 원작성자 본인이 raw auth.user_id(≠자신의 멤버 id)와 안 맞아 자기 것도 못 지우는
+    # 회귀가 난다.
+    if artifact.created_by != (await resolve_member_db_verified(auth, org_id, session)).id:
         return _err("FORBIDDEN", "생성자만 삭제할 수 있습니다", 403)
     from datetime import datetime, timezone
     artifact.deleted_at = datetime.now(timezone.utc)
@@ -698,7 +707,9 @@ async def add_artifact_comment(
         if parent_owner != artifact.id:
             return _err("NOT_FOUND", "Parent comment not found on this artifact", 404)
 
-    created_by = uuid.UUID(auth.user_id)
+    # story #3370(카디르 QA 지적 2026-09-10) — created_by가 line 724의 target_member_ids
+    # 계산(dispatch_notification 수신자)에 직접 쓰인다 — 영속 멤버 id 소비처.
+    created_by = (await resolve_member_db_verified(auth, org_id, session)).id
     comment = ArtifactComment(
         id=uuid.uuid4(), artifact_id=artifact.id, org_id=org_id, project_id=project_id,
         node_id=body.node_id, anchor_x=body.anchor_x, anchor_y=body.anchor_y,
@@ -754,8 +765,10 @@ async def resolve_artifact_comment(
     if comment is None:
         return _err("NOT_FOUND", "Comment not found", 404)
     from datetime import datetime, timezone
+    # story #3370(카디르 QA 지적 2026-09-10) — resolved_by는 created_by와 동형 영속
+    # 「누가 했나」 필드(ArtifactComment.created_by와 같은 컬럼군) — 같은 축으로 정정.
     comment.resolved = True
-    comment.resolved_by = uuid.UUID(auth.user_id)
+    comment.resolved_by = (await resolve_member_db_verified(auth, org_id, session)).id
     comment.resolved_at = datetime.now(timezone.utc)
     await session.flush()
     await session.refresh(comment)
@@ -1048,7 +1061,10 @@ async def complete_png_export(
         from ee.plan_limits import check_storage_capacity  # type: ignore[import]
         await check_storage_capacity(session, org_id, [{"url": body.object_path}])
 
-    created_by = uuid.UUID(auth.user_id)
+    # story #3370(카디르 QA 지적 2026-09-10) — created_by가 이 함수 뒤쪽
+    # target_member_ids 계산(dispatch_notification 수신자)에 그대로 쓰인다 —
+    # 영속 멤버 id 소비처.
+    created_by = (await resolve_member_db_verified(auth, org_id, session)).id
     asset_id = await _upsert_export_asset(
         session, org_id=org_id, project_id=project_id, object_path=body.object_path,
         name=f"{artifact.title}-v{version_number}.png", content_type="image/png",
@@ -1122,7 +1138,10 @@ async def create_html_export(
         from ee.plan_limits import check_storage_capacity  # type: ignore[import]
         await check_storage_capacity(session, org_id, [{"url": object_path}])
 
-    created_by = uuid.UUID(auth.user_id)
+    # story #3370(카디르 QA 지적 2026-09-10) — created_by가 이 함수 뒤쪽
+    # target_member_ids 계산(dispatch_notification 수신자)에 그대로 쓰인다 —
+    # 영속 멤버 id 소비처.
+    created_by = (await resolve_member_db_verified(auth, org_id, session)).id
     asset_id = await _upsert_export_asset(
         session, org_id=org_id, project_id=project_id, object_path=object_path,
         name=f"{artifact.title}-v{version_number}.html", content_type="text/html; charset=utf-8",
@@ -1371,7 +1390,10 @@ async def edit_artifact(
         if comment_owner != artifact.id:
             return _err("FORBIDDEN", "source_comment_id가 이 artifact 소속이 아닙니다", 403)
 
-    actor_id = uuid.UUID(auth.user_id)
+    # story #3370(카디르 QA 지적 2026-09-10) — actor_id가 _apply_artifact_edit 내부
+    # ArtifactVersion.created_by(영속)와 _notify_artifact_updated의 editor_id(target_
+    # member_ids 제외 축) 둘 다에 쓰인다 — 영속 멤버 id 소비처.
+    actor_id = (await resolve_member_db_verified(auth, org_id, session)).id
 
     # 뷰어 통합 재설계(story 1948d19d): canvas_bounds는 버전 단위 SSOT — 무-mutate 버전 원칙대로
     # operations 없이 canvas_bounds만 와도(model_validator가 둘 다 없는 요청은 거름) 새 버전을
@@ -1422,7 +1444,9 @@ async def propose_canonical_version(
     if version is None:
         return _err("NOT_FOUND", "Artifact version not found", 404)
 
-    proposer_id = uuid.UUID(auth.user_id)
+    # story #3370(카디르 QA 지적 2026-09-10) — proposer_id가 create_gate의 requester
+    # member_id + neutral_facts.requested_by_member_id(영속) 둘 다에 쓰인다.
+    proposer_id = (await resolve_member_db_verified(auth, org_id, session)).id
     gate = await create_gate(
         session, org_id, artifact.id, "visual_artifact", "artifact_canonicalize",
         proposer_id, uuid.uuid4(),  # role_id: always-manual이라 disposition 미사용(placeholder)

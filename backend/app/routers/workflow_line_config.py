@@ -18,6 +18,7 @@ from app.dependencies.database import get_db
 from app.models.gate import Gate
 from app.models.workflow_line import ENTITY_TYPES, WorkflowLineDefinitionVersion
 from app.services.gate_service import transition_gate
+from app.services.member_resolver import resolve_member_db_verified
 from app.services.project_auth import get_project_role, is_org_owner_or_admin
 from app.services.workflow_line_config import (
     PublishLintError,
@@ -134,9 +135,18 @@ async def create_draft_version(
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
 ) -> VersionResponse:
+    # story #3370(카디르 QA 지적, 유나 실측·페드루 재검토 2026-09-10 — #4156 리뷰) —
+    # access 체크(project_auth.py::get_project_role/is_org_owner_or_admin)는 raw
+    # auth.user_id(휴먼이면 users.id)를 받게 설계돼 있다(그 함수들 자신의 docstring —
+    # "휴먼: project_access는 org_member_id→users.id로" — dual-accept 아니라 애초에
+    # users.id 축). 하지만 `create_draft()`가 영속하는 컬럼명 자체가
+    # `created_by_member_id` — 이름 그대로 멤버 id를 기대한다. 두 축을 분리한다
+    # (site_posts.py::post_site_post_draft_version과 동형 — access축=raw·저장축=
+    # resolve_member_db_verified()).
     actor = uuid.UUID(auth.user_id)
     await _require_draft_author(session, actor, org_id, body.project_id)
-    version = await create_draft(session, org_id, body.project_id, body.entity_type, body.config, actor)
+    resolved = await resolve_member_db_verified(auth, org_id, session)
+    version = await create_draft(session, org_id, body.project_id, body.entity_type, body.config, resolved.id)
     await session.commit()
     # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.
     await session.refresh(version)
@@ -221,11 +231,17 @@ async def request_publish_version(
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
 ) -> PublishResponse:
+    # story #3370(카디르 QA 지적 2026-09-10) — access축(raw)·저장축(resolve_member_
+    # db_verified()) 분리. `request_publish()`가 `member_id`를 `requested_by_member_id`
+    # neutral_facts에 그대로 싣는다(workflow_line_config.py::request_publish 자신의
+    # create_gate 호출부) — self-approval 판정(assert_not_self_approval)이 그 값과
+    # 비교하므로 축이 틀리면 자기승인 탐지 자체가 무력화된다.
     actor = uuid.UUID(auth.user_id)
     await _require_publisher(session, actor, org_id)
+    resolved = await resolve_member_db_verified(auth, org_id, session)
     version = await _load_version(session, org_id, version_id)
     try:
-        version, gate = await request_publish(session, org_id, version, actor)
+        version, gate = await request_publish(session, org_id, version, resolved.id)
     except PublishLintError as e:
         await session.commit()  # lint_status/errors persist
         raise HTTPException(status_code=422, detail={"error": "publish_lint_failed", "lint_errors": e.errors})
@@ -246,8 +262,15 @@ async def approve_publish(
     auth: AuthContext = Depends(get_current_user),
 ) -> VersionResponse:
     """publish gate 승인 → version published 확정. org owner/admin + self-approval 금지."""
+    # story #3370(카디르 QA 지적 2026-09-10) — access축(raw)·저장축(resolve_member_
+    # db_verified()) 분리. `assert_not_self_approval`이 gate.neutral_facts["requested_
+    # by_member_id"](영속 멤버 id)와 문자열 비교한다(workflow_line_config.py 자신의
+    # docstring) — resolver_id를 raw auth.user_id 그대로 넘기면 휴먼끼리는 절대 같은
+    # 값이 될 수 없어(users.id vs org_member.id) 자기승인 탐지가 사실상 항상 통과(무력화)
+    # 였다. transition_gate(resolver_id=)·complete_publish(resolver_id=)도 같은 축.
     actor = uuid.UUID(auth.user_id)
     await _require_publisher(session, actor, org_id)
+    resolved = await resolve_member_db_verified(auth, org_id, session)
     version = await _load_version(session, org_id, version_id)
     if version.review_gate_id is None:
         raise HTTPException(status_code=409, detail="version has no publish gate (request-publish first)")
@@ -259,13 +282,13 @@ async def approve_publish(
     if gate is None:
         raise HTTPException(status_code=409, detail="publish gate not found")
     try:
-        assert_not_self_approval(gate, actor, version.id)
+        assert_not_self_approval(gate, resolved.id, version.id)
     except SelfApprovalError:
         raise HTTPException(status_code=403, detail="self-approval forbidden: requester cannot approve own publish")
     try:
         # transition_gate 레일 재사용 → 직후 complete_publish 콜백(내부 특수분기 금지).
-        gate = await transition_gate(session, org_id, version.review_gate_id, "approved", resolver_id=actor)
-        version = await complete_publish(session, version, gate, resolver_id=actor)
+        gate = await transition_gate(session, org_id, version.review_gate_id, "approved", resolver_id=resolved.id)
+        version = await complete_publish(session, version, gate, resolver_id=resolved.id)
     except SelfApprovalError:
         raise HTTPException(status_code=403, detail="self-approval forbidden: requester cannot approve own publish")
     except ValueError as e:
@@ -300,14 +323,17 @@ async def reject_publish(
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
 ) -> VersionResponse:
+    # story #3370(카디르 QA 지적 2026-09-10) — access축(raw)·저장축(resolve_member_
+    # db_verified()) 분리(승인 엔드포인트와 동형).
     actor = uuid.UUID(auth.user_id)
     await _require_publisher(session, actor, org_id)
+    resolved = await resolve_member_db_verified(auth, org_id, session)
     version = await _load_version(session, org_id, version_id)
     if version.review_gate_id is not None:
         try:
             await transition_gate(
                 session, org_id, version.review_gate_id, "rejected",
-                resolver_id=actor, note=body.reason,
+                resolver_id=resolved.id, note=body.reason,
             )
         except ValueError:
             pass  # gate already resolved — version 전이만 반영(body.reason은 위에서 이미 비어있지 않음이 보장됨)

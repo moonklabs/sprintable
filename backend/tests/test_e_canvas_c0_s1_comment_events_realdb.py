@@ -44,7 +44,7 @@ async def _session_factory():
 
 async def _seed(session):
     """org + project + 3 agents(author·assignee·mentioned) + story(assignee 배정)."""
-    from app.models.member import Member
+    from app.models.member import AgentProjectProfile, Member
     from app.models.organization import Organization
     from app.models.project import Project
     from app.models.project_access import ProjectAccess
@@ -67,6 +67,22 @@ async def _seed(session):
         for m in (author, assignee, mentioned)
     ]
     session.add_all(grants)
+    # story #3370(카디르 QA 지적 2026-09-10) — resolve_member_db_verified()가 team_members
+    # 테이블에서 agent를 찾는다(site_posts.py::is_agent_caller와 동형 predicate). 실서비스는
+    # 0088 VIEW가 members⋈agent_project_profiles를 그 이름으로 투영하지만, 이 스위트의
+    # `Base.metadata.create_all()`은 TeamMember 모델을 평 테이블로 만들어(VIEW SQL 미실행)
+    # anchor 시딩만으론 안 보인다 — 같은 id로 TeamMember 행도 나란히 심는다(agent_project_
+    # profiles도 함께 두는 건 실 VIEW 스키마와의 정합을 위해 — 어느 한쪽만 있어도 되는
+    # 환경이 아니라 실서비스 그림자를 그대로 남겨 둔다).
+    from app.models.team import TeamMember
+    session.add_all([
+        AgentProjectProfile(id=uuid.uuid4(), member_id=m.id, project_id=project.id)
+        for m in (author, assignee, mentioned)
+    ])
+    session.add_all([
+        TeamMember(id=m.id, org_id=org.id, project_id=project.id, type="agent", name=m.name, is_active=True)
+        for m in (author, assignee, mentioned)
+    ])
 
     story = Story(id=uuid.uuid4(), org_id=org.id, project_id=project.id, title="C0-S1 Story", status="in-progress")
     session.add(story)

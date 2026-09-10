@@ -46,10 +46,11 @@ async def _seed(session):
     propose 호출은 auth.user_id를 그대로 created_by/requested_by로 쓰므로(멤버 조회 없음)
     creator == proposer(agent, 자기 산출물 제안)로 단순화. approve/reject만 resolve_member를
     타므로 그 경로에만 실 휴먼 row가 필요하다."""
-    from app.models.member import Member
+    from app.models.member import AgentProjectProfile, Member
     from app.models.organization import Organization
     from app.models.project import OrgMember, Project
     from app.models.project_access import ProjectAccess
+    from app.models.team import TeamMember
     from app.models.user import User
     from app.models.visual_artifact import ArtifactVersion, VisualArtifact
 
@@ -66,6 +67,19 @@ async def _seed(session):
     await session.commit()
     session.add(ProjectAccess(
         id=uuid.uuid4(), project_id=project.id, member_id=creator.id, permission="granted", role="member",
+    ))
+    session.add(AgentProjectProfile(id=uuid.uuid4(), member_id=creator.id, project_id=project.id))
+    # story #3370(카디르 QA 지적 2026-09-10) — propose_canonical_version이 이제
+    # resolve_member_db_verified()(DB 실측)를 탄다. agent 판정 predicate는 site_posts.py::
+    # is_agent_caller와 동형(TeamMember.id==raw_id) — 실서비스는 0088 VIEW가 members⋈
+    # agent_project_profiles를 team_members로 투영하지만, 이 테스트 스위트의 `Base.
+    # metadata.create_all()`는 TeamMember 모델을 그 이름 그대로 **평 테이블**로 만들어
+    # (진짜 VIEW SQL을 안 태움) anchor 시딩(Member+AgentProjectProfile)만으로는 그 자리에
+    # 아무것도 안 보인다 — 같은 id로 TeamMember 행도 나란히 심어야 실측 가능(멤버 id
+    # 값 자체는 그대로라 이 파일의 다른 creator.id 참조와 전부 정합).
+    session.add(TeamMember(
+        id=creator.id, org_id=org.id, project_id=project.id, type="agent",
+        name="creator-agent", is_active=True,
     ))
     await session.commit()
 
@@ -99,7 +113,13 @@ def _client_for(app):
 
 
 async def _setup_propose_app(app, Session, org_id, project_id, user_id):
-    """propose 호출용 — get_db + get_current_user(app_metadata.org_id/project_id)."""
+    """propose 호출용 — get_db + get_current_user(app_metadata.org_id/project_id).
+
+    story #3370(카디르 QA 지적 2026-09-10) — user_id는 이 파일에서 항상 creator agent의
+    Member.id다. resolve_member_db_verified()의 agent 판정은 auth 클레임(api_key_id)이
+    아니라 DB 실측이지만, `_verify_org_membership`(상위 org 소속 검증)은 여전히 클레임
+    기반 스코프체크(_check_api_key_scope)를 거치므로 api_key_id를 실어 agent 호출임을
+    일관되게 밝힌다(propose는 «AI는 제안만» 문서화 의도와도 정합)."""
     from app.dependencies.auth import AuthContext, get_current_user
     from app.dependencies.database import get_db
 
@@ -115,7 +135,7 @@ async def _setup_propose_app(app, Session, org_id, project_id, user_id):
     async def _auth():
         return AuthContext(
             user_id=str(user_id), email="proposer@test",
-            claims={"app_metadata": {"org_id": str(org_id), "project_id": str(project_id)}},
+            claims={"app_metadata": {"org_id": str(org_id), "project_id": str(project_id), "api_key_id": "test-key"}},
         )
 
     app.dependency_overrides[get_db] = _db
