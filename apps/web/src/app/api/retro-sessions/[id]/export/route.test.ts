@@ -1,17 +1,25 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { getOrgProjectAuthContext, proxyToFastapiWithParams } = vi.hoisted(() => ({
+// story #3778 — next-intl `locale` 쿠키를 읽어 BE에 Accept-Language로 전달하는지
+// 검증(retro-sessions/[id]/route.test.ts와 동형 mock 패턴).
+const { getOrgProjectAuthContext, proxyToFastapiWithParams, cookieGet } = vi.hoisted(() => ({
   getOrgProjectAuthContext: vi.fn(),
   proxyToFastapiWithParams: vi.fn(),
+  cookieGet: vi.fn(),
 }));
 
 vi.mock('@/lib/auth-helpers', () => ({ getOrgProjectAuthContext }));
 vi.mock('@/lib/fastapi-proxy', () => ({ proxyToFastapiWithParams }));
+vi.mock('next/headers', () => ({ cookies: vi.fn(async () => ({ get: cookieGet })) }));
 
 import { GET } from './route';
 
 function makeAgent() {
   return { id: 'agent-1', type: 'agent', rateLimitExceeded: false, rateLimitRemaining: 299, rateLimitResetAt: 0 };
+}
+
+function makeRequest() {
+  return new Request('http://localhost/api/retro-sessions/session-1/export?project_id=project-1');
 }
 
 // story #3774 — BE `retros.py::export_session`은 JSON 봉투가 아니라 마크다운 텍스트를
@@ -22,6 +30,7 @@ describe('GET /api/retro-sessions/[id]/export', () => {
   beforeEach(() => {
     getOrgProjectAuthContext.mockReset();
     proxyToFastapiWithParams.mockReset();
+    cookieGet.mockReset();
     getOrgProjectAuthContext.mockResolvedValue(makeAgent());
   });
 
@@ -82,5 +91,52 @@ describe('GET /api/retro-sessions/[id]/export', () => {
     );
 
     expect(response.status).toBe(403);
+  });
+});
+
+describe('GET /api/retro-sessions/[id]/export — story #3778 로케일 forward', () => {
+  beforeEach(() => {
+    getOrgProjectAuthContext.mockReset();
+    proxyToFastapiWithParams.mockReset();
+    cookieGet.mockReset();
+    getOrgProjectAuthContext.mockResolvedValue(makeAgent());
+    proxyToFastapiWithParams.mockResolvedValue(
+      new Response('# doc', { status: 200, headers: { 'Content-Type': 'text/markdown' } }),
+    );
+  });
+
+  it('⭐locale 쿠키 값(en)을 Accept-Language로 그대로 실어 BE 호출에 넘긴다', async () => {
+    cookieGet.mockImplementation((name: string) => (name === 'locale' ? { value: 'en' } : undefined));
+
+    await GET(makeRequest(), { params: Promise.resolve({ id: 'session-1' }) });
+
+    expect(proxyToFastapiWithParams).toHaveBeenCalledWith(
+      expect.anything(),
+      '/api/v2/retros/[id]/export',
+      { id: 'session-1' },
+      { extraHeaders: { 'Accept-Language': 'en' } },
+    );
+  });
+
+  it('locale 쿠키가 없으면 extraHeaders 자체를 안 넘긴다(BE 자체 기본값 ko에 맡김)', async () => {
+    cookieGet.mockReturnValue(undefined);
+
+    await GET(makeRequest(), { params: Promise.resolve({ id: 'session-1' }) });
+
+    expect(proxyToFastapiWithParams).toHaveBeenCalledWith(
+      expect.anything(),
+      '/api/v2/retros/[id]/export',
+      { id: 'session-1' },
+      { extraHeaders: undefined },
+    );
+  });
+
+  it('인증 실패면 401 — BE 호출 자체를 안 한다', async () => {
+    getOrgProjectAuthContext.mockResolvedValue(null);
+
+    const res = await GET(makeRequest(), { params: Promise.resolve({ id: 'session-1' }) });
+
+    expect(res.status).toBe(401);
+    expect(proxyToFastapiWithParams).not.toHaveBeenCalled();
   });
 });

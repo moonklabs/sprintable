@@ -39,6 +39,11 @@ async function resolveAuthHeader(request: Request): Promise<string | null> {
 interface ProxyOptions {
   /** 인증 없이도 허용할 경우 true */
   public?: boolean;
+  // story #3778 — 회고 내보내기처럼 BE가 낱말 선택(로케일)을 알아야 하는 소수 라우트용.
+  // 전역 forward 목록(line 68 부근)에 안 얹는다 — 그 목록은 "요청 자체가 원래 갖고
+  // 있던 신호"를 그대로 통과시키는 자리이고, 로케일은 그 라우트(route.ts)가 next-intl
+  // 쿠키에서 직접 읽어 이번 호출에만 실어야 하는 값이라 별도 옵션으로 좁힌다.
+  extraHeaders?: Record<string, string>;
 }
 
 /**
@@ -69,6 +74,7 @@ export async function proxyToFastapi(
     const v = request.headers.get(h);
     if (v) headers[h] = v;
   }
+  if (options.extraHeaders) Object.assign(headers, options.extraHeaders);
 
   const hasBody = request.method !== 'GET' && request.method !== 'HEAD';
   const body = hasBody ? await request.text() : undefined;

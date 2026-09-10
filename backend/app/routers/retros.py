@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +14,9 @@ from app.services import retro_hypothesis_seed as seed_svc
 from app.services import retro_synthesis as synth_svc
 from app.services.member_resolver import canonicalize_member_id, lookup_members_by_ids, resolve_member
 from app.services.project_auth import require_project_access
+from app.services.retro_export_i18n import (
+    action_status_label, export_string, phase_label, resolve_export_locale, votes_label,
+)
 from app.repositories.retro import (
     RetroActionRepository,
     RetroItemRepository,
@@ -687,11 +690,13 @@ async def update_action(
 @router.get("/{id}/export")
 async def export_session(
     id: uuid.UUID,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
     repo: RetroSessionRepository = Depends(_get_session_repo),
 ) -> Response:
     session = await _require_retro_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
+    locale = resolve_export_locale(request.headers.get("accept-language"))
 
     item_repo = RetroItemRepository(db)
     action_repo = RetroActionRepository(db)
@@ -701,19 +706,19 @@ async def export_session(
 
     lines = [
         f"# {session.title}",
-        f"**Phase:** {session.phase}",
+        f"{export_string('phase_prefix', locale)} {phase_label(session.phase, locale)}",
         "",
-        "## 잘된 점 (Good)",
-        *[f"- {i.text} ({i.vote_count} votes)" for i in items if i.category == "good"],
+        export_string("section_good", locale),
+        *[f"- {i.text} ({votes_label(i.vote_count, locale)})" for i in items if i.category == "good"],
         "",
-        "## 아쉬운 점 (Bad)",
-        *[f"- {i.text} ({i.vote_count} votes)" for i in items if i.category == "bad"],
+        export_string("section_bad", locale),
+        *[f"- {i.text} ({votes_label(i.vote_count, locale)})" for i in items if i.category == "bad"],
         "",
-        "## 개선할 점 (Improve)",
-        *[f"- {i.text} ({i.vote_count} votes)" for i in items if i.category == "improve"],
+        export_string("section_improve", locale),
+        *[f"- {i.text} ({votes_label(i.vote_count, locale)})" for i in items if i.category == "improve"],
         "",
-        "## Action Items",
-        *[f"- [{a.status}] {a.title}" for a in actions],
+        export_string("section_actions", locale),
+        *[f"- [{action_status_label(a.status, locale)}] {a.title}" for a in actions],
     ]
 
     return Response(content="\n".join(lines), media_type="text/markdown")
