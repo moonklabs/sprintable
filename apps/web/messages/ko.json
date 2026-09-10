@@ -579,7 +579,7 @@
     "eventApplyAgentPlaceholder": "에이전트 선택...",
     "eventApplySelectProjectHint": "적용할 프로젝트를 먼저 선택하세요.",
     "eventApplyRoleMappingHint": "각 단계에 프로젝트 에이전트를 연결하세요. 기존 배정이 있으면 아래에 표시됩니다.",
-    "eventApplyLoadingBindings": "배정 정보 로딩 중...",
+    "eventApplyLoadingBindings": "배정 정보를 불러오는 중…",
     "eventApplyAgentsEmpty": "이 프로젝트에 에이전트가 없습니다.",
     "eventApplyAgentsLoadError": "에이전트 목록을 불러오지 못했습니다.",
     "eventApplyAgentsRetry": "다시 시도",
@@ -4392,7 +4392,7 @@
     "actionDocCreated": "문서 {entity} 생성"
   },
   "agentPerformance": {
-    "loading": "퍼포먼스 데이터 로딩 중...",
+    "loading": "퍼포먼스 데이터를 불러오는 중…",
     "agentStatsTitle": "에이전트 통계",
     "agentStatsDescription": "에이전트별 완료 스토리, 배정 스토리, 평균 리드타임입니다.",
     "velocityTitle": "팀 벨로시티",
