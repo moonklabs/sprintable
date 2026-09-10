@@ -1971,8 +1971,14 @@ export default function ChannelPostEditPage() {
             failureAction===undefined면(정상 대기·완료 등) 아예 안 그린다. story
             f061c1a3 — onRetryClick은 확認 다이얼로그를 여는 것까지만(실제 BFF 호출은
             다이얼로그의 onConfirm=handleRetry). dead_letter·needs_check가 아니면 배지가
-            버튼 자체를 안 그려 이 콜백은 안 쓰인다. */}
-        {failureAction ? (
+            버튼 자체를 안 그려 이 콜백은 안 쓰인다.
+
+            story #3402 갭(페드루 지시, 2026-09-10) — action.kind==='processing'은 아래
+            channelPostsAwaitingContainerNotice 알림과 문장이 겹친다(알림이 배지 문구를
+            글자 그대로 포함 + 「다음 발」까지 지님). 목록(page.tsx:427)엔 이 알림이 없어
+            배지가 유일한 신호라 그대로 두고, 상세는 알림이 대신하므로 이 상태에서만
+            배지를 안 그린다. */}
+        {failureAction && failureAction.kind !== 'processing' ? (
           <FailureActionBadge
             action={failureAction} displayTimezone={displayTimezone}
             onRetryClick={() => { setRetryChecklistConfirmed(false); setRetryConfirmOpen(true); }}

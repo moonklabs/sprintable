@@ -3334,6 +3334,31 @@ describe('ChannelPostEditPage — §17-15 processing_kind 오버레이 우선순
     expect(container.querySelector('[data-testid="channel-post-partial-success-notice"]')).toBeNull();
   });
 
+  // story #3402 갭(페드루 지시, 2026-09-10) — 실데이터는 processing_kind='awaiting_
+  // container'에 항상 command_status='pending'이 딸려 온다(위 주석 — BE 620beefc
+  // 판정식). 그 조합에서 FailureActionBadge(「자동으로 이어서 처리 중입니다.」)가
+  // 알림(그 문장을 글자 그대로 포함)과 겹쳐 서던 걸 배지 쪽만 억제한다. 뮤테이션
+  // 대상: page.tsx의 `failureAction.kind !== 'processing'` 가드를 걷으면 이 테스트가
+  // RED(문장이 정확히 1회가 아니라 2회 나옴)여야 한다.
+  it('행1-b — command_status=pending도 같이 오면(실데이터 형) 겹치는 문장이 정확히 1회만 선다', async () => {
+    stubFetch({
+      draftDetail: {
+        publication_status: 'container_created',
+        processing_kind: 'awaiting_container',
+        command_status: 'pending',
+      } as never,
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-awaiting-container-notice"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="channel-post-failure-badge"]')).toBeNull();
+    const occurrences = container.textContent?.split(koMessages.content.channelPostsFailureProcessing).length ?? 0;
+    expect(occurrences - 1).toBe(1);
+  });
+
   it('행2 — processing_kind=null·container_created → partialSuccess 그대로(무회귀)', async () => {
     stubFetch({ draftDetail: { publication_status: 'container_created', processing_kind: null } as never });
     await act(async () => {
