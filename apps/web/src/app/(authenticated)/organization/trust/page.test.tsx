@@ -115,9 +115,11 @@ describe('OrganizationTrustPage — 역할 칩(story #3749, 3737 D1 정신 계�
 
     const chips = [...container.querySelectorAll('[data-testid="trust-role-filter-role"]')];
     expect(chips).toHaveLength(2);
-    const implChip = chips.find((c) => c.textContent?.startsWith('구현'));
+    // story #3735(D1) — role_key='implementation'은 기본 5키라 DB role_label("구현")
+    // 대신 i18n 정본(trustRoleLabelImplementation="개발")으로 뜬다(DB 무변, FE 해석만).
+    const implChip = chips.find((c) => c.textContent?.startsWith('개발'));
     const qaChip = chips.find((c) => c.textContent?.startsWith('QA'));
-    expect(implChip?.textContent).toBe(koMessages.organization.trustRoleFilter.replace('{role}', '구현').replace('{n}', '2'));
+    expect(implChip?.textContent).toBe(koMessages.organization.trustRoleFilter.replace('{role}', '개발').replace('{n}', '2'));
     expect(qaChip?.textContent).toBe(koMessages.organization.trustRoleFilter.replace('{role}', 'QA').replace('{n}', '1'));
   });
 

@@ -9,6 +9,7 @@ import { MemberRow } from '@/components/ui/member-row';
 import { RemoveOrgMemberDialog } from '@/components/settings/remove-org-member-dialog';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { Badge } from '@/components/ui/badge';
+import { CountBadge } from '@/components/ui/count-badge';
 import { OperatorInput } from '@/components/ui/operator-control';
 import { OperatorDropdownSelect } from '@/components/ui/operator-dropdown-select';
 import { useRenderNonce } from '@/hooks/use-render-nonce';
@@ -371,7 +372,12 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
       {/* 멤버 목록 */}
       <SectionCard>
         <SectionCardHeader>
-          <h2 className="text-base font-semibold text-foreground">{t('orgMembersListHeading', { count: members.length })}</h2>
+          {/* story #3735(UI 점검 B·E절, 유나 定) — 수를 제목 문자열 안에 넣지 않는다.
+              제목 고정 + 수는 옆 CountBadge로(이벤트 화면 events/page.tsx와 동형). */}
+          <h2 className="flex items-center gap-2 text-base font-semibold text-foreground">
+            {t('orgMembersListHeading')}
+            <CountBadge count={members.length} />
+          </h2>
         </SectionCardHeader>
         <SectionCardBody>
           {/* HARD 픽셀 딴판 fix: 박시 per-member 카드 → project-access와 동일 de-boxy divide-y(공유 MemberRow flat·양 surface 정합) */}

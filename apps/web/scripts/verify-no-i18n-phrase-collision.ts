@@ -406,7 +406,24 @@ export const EXEMPT_PAIRS = new Set<string>([
   // 부분문자열로 겹친다. docs.title<->docs.indexDocCount류와 정확히 같은 클래스 — 역할
   // 배지("구성원")와 목록 카운트/행 순번이 화면에서 실제로 헷갈릴 자리가 아니다.
   'settings.orgMemberRowActionAriaLabel <-> settings.roleMember',
-  'settings.orgMembersListHeading <-> settings.roleMember',
+  // story #3735(UI 점검 B·E절, 유나 定 2026-09-10) — orgMembersListHeading이 "구성원
+  // ({count})"에서 "구성원"(수는 옆 CountBadge로 이동)으로 바뀌며 numberAdjacent를
+  // 잃었다 — settings.orgMembersListHeading <-> settings.roleMember 짝은 양쪽 다
+  // numberAdjacent가 아니게 돼 이 스캔축(부분문자열+numberAdjacent 필요) 자체가 더는
+  // 안 걸린다(죽은 예외 제거, 재등재 불요 — 가드가 스스로 안 겹친다는 걸 안다).
+  //
+  // 대신 값이 짧아지며 같은 파일(org-members-section.tsx) 안 다른 numberAdjacent
+  // 문구 둘과 새로 부분문자열로 겹친다. 둘 다 docs.title<->docs.indexDocCount류(짧은
+  // 라벨이 그 라벨을 포함하는 긴 문구의 일부일 뿐인 정상 패턴) — 화면에서 실제로
+  // 헷갈릴 자리가 아니다.
+  // ① memberLimitExceededError("무료 플랜은 구성원을 {limit}명까지 초대할 수
+  //    있습니다", 플랜 한도 초과 토스트) — 섹션 제목("구성원")과 이 토스트 문장이
+  //    동시에 눈에 들어올 일이 없다(토스트는 실패 시에만·제목은 상시).
+  'settings.memberLimitExceededError <-> settings.orgMembersListHeading',
+  // ② orgMemberRowActionAriaLabel("{n}번째 구성원 {label}", 행 액션 버튼의 접근성
+  //    이름·시각적으로 안 보임) — 섹션 제목("구성원")과 스크린리더 전용 문구라
+  //    헷갈릴 표면 자체가 없다.
+  'settings.orgMemberRowActionAriaLabel <-> settings.orgMembersListHeading',
   // story #3422(2026-09-04, ②-c FailureActionBadge) — channelPostsFailureAutoRetryAt
   // ({time} 보간 있음) <-> channelPostsFailureRetryCta("다시 시도", 보간 없음). 겹치는
   // 건 "다시 시도"라는 흔한 동사구 하나뿐 — auto_retry(자동, 버튼 없음)와 dead_letter

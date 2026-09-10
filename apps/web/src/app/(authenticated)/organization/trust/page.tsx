@@ -14,6 +14,7 @@ import {
   groupRosterByRole,
   isColdStart,
   mergeMemberLookup,
+  resolveRoleLabel,
   sortGroupMembersByName,
   useHistoryDrilldown,
   HistoryDrilldownPanel,
@@ -111,11 +112,11 @@ export default function OrganizationTrustPage() {
   // story #3749 — 정렬 = 이름순(기존 sortGroupMembersByName 재사용, 순위 0). 칩용
   // 그룹은 groupRosterByRole을 그대로 재사용(SectionCard로 안 그리고 칩 라벨+수만
   // 뽑는다) — 새 그룹 함수를 또 만들지 않는다.
-  const groupedByRole = groupRosterByRole(rosterRows);
+  const groupedByRole = groupRosterByRole(rosterRows, t);
   const sortedRows = sortGroupMembersByName(rosterRows, rosterMembers);
   const visibleRows = roleFilter === ALL_ROLES
     ? sortedRows
-    : sortedRows.filter((row) => (row.role_label ?? row.role_key) === roleFilter);
+    : sortedRows.filter((row) => resolveRoleLabel(row.role_key, row.role_label, t) === roleFilter);
 
   function renderAdminRow(row: OrgSummaryRow, index: number) {
     return (
@@ -229,7 +230,7 @@ export default function OrganizationTrustPage() {
 function AdminRow({
   row, index, name, t, displayTimezone,
 }: { row: OrgSummaryRow; index: number; name: string; t: ReturnType<typeof useTranslations>; displayTimezone: string }) {
-  const roleLabel = row.role_label ?? row.role_key;
+  const roleLabel = resolveRoleLabel(row.role_key, row.role_label, t);
   const coldStart = isColdStart(row.hit_rate, row.resolved);
   const drilldown = useHistoryDrilldown({ memberId: row.member_id, roleKey: row.role_key });
   return (
@@ -257,7 +258,7 @@ function AdminRow({
 function SelfRow({
   score, index, currentTeamMemberId, t,
 }: { score: SelfScore; index: number; currentTeamMemberId: string | null | undefined; t: ReturnType<typeof useTranslations> }) {
-  const roleLabel = score.role_label ?? score.role_key;
+  const roleLabel = resolveRoleLabel(score.role_key, score.role_label, t);
   const coldStart = isColdStart(score.hit_rate, score.resolved);
   // story #3749(원 주석 그대로) — currentTeamMemberId가 없으면(이론상 self 뷰 진입
   // 자체가 team member 전제라 드묾) 펼침 훅에 넘길 memberId가 없다 — 훅은 항상 호출
