@@ -34,8 +34,12 @@ export function TwoFactorSection() {
       let res: Response;
       try { res = await fetchWithAuth('/api/me'); } catch { setState('unknown'); return; }
       if (!res.ok) { setState('unknown'); return; }
-      const json = await res.json() as { data?: { totp_enabled?: boolean } };
-      if (json.data?.totp_enabled === undefined) { setState('unknown'); return; }
+      const json = await res.json() as { data?: { totp_enabled?: boolean | null } };
+      // 카디르 QA(2026-09-10) — BE MeResponse.totp_enabled는 `bool | None`이라 실제로
+      // null이 오는 분기가 있다(user 없는 org_member 폴백·api_key/user_id 없는 경로) —
+      // `=== undefined`만 보면 null이 «false(꺼짐)»로 단정돼 이 스토리가 막으려던
+      // 「모름≠꺼짐」 결함이 그대로 재발한다. boolean 타입 검사로 undefined/null 둘 다 잡는다.
+      if (typeof json.data?.totp_enabled !== 'boolean') { setState('unknown'); return; }
       setState(json.data.totp_enabled ? 'enabled' : 'disabled');
     })();
   }, []);

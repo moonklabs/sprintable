@@ -103,6 +103,21 @@ describe('TwoFactorSection — 마운트 읽기 계약(story #3768)', () => {
     expect(container.textContent).toBe('');
     expect(enableButton()).toBeFalsy();
   });
+
+  // ⭐되돌리면 RED — 카디르 QA(2026-09-10): BE MeResponse.totp_enabled는 `bool | None`이라
+  // null이 오는 실 분기가 있다(user 없는 org_member 폴백 등). `=== undefined`만 보면 null이
+  // 「꺼짐」으로 단정돼 이 스토리가 막으려던 「모름≠꺼짐」 결함이 그대로 재발한다.
+  it('⭐/api/me가 totp_enabled: null을 주면(BE 계약상 실제 분기) 「모름」 — 「꺼짐」으로 단정 안 함', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/me') return { ok: true, json: async () => ({ data: { totp_enabled: null } }) };
+      throw new Error('unexpected fetch: ' + url);
+    }));
+    await act(async () => { root.render(wrap(<TwoFactorSection />)); });
+    await flush();
+
+    expect(container.textContent).toBe('');
+    expect(enableButton()).toBeFalsy();
+  });
 });
 
 describe('TwoFactorSection — error.code 분기 (story #2485)', () => {
