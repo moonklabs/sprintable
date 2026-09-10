@@ -157,6 +157,17 @@ export function AppSidebar({
     if (isMobile) setOpenMobile(false);
   }, [pathname, isMobile, setOpenMobile]);
 
+  // story #3762(유나 §定) — SidebarContent가 흔한 뷰포트(≤900px)보다 길어져(신뢰 이후
+  // 구역이 스크롤해야 보인다, .scrollbar-visible로 어포던스는 확보) 딥링크/새로고침으로
+  // 그 구역에 바로 들어와도 활성 항목이 화면 밖이면 여전히 못 찾는다 — 활성 경로가
+  // 바뀔 때 그 항목만 뷰로 당겨온다. channels/page.tsx:1057과 동형(jsdom엔
+  // scrollIntoView 자체가 없어 메서드까지 옵셔널 체이닝) — block:'nearest'(페이지
+  // 자체는 안 흔들고 사이드바 내부만 스크롤, 'start'는 항목을 상단에 박아 불필요한 점프).
+  const activeMenuItemRef = useRef<HTMLAnchorElement | null>(null);
+  useEffect(() => {
+    activeMenuItemRef.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [pathname]);
+
   // story #1981 — GNB 결재함 배지 semantic 교체: "안 읽은 알림 수"(/api/notifications/count)
   // 대신 "내가 승인 가능한 pending 게이트 수"(/api/gates?status=pending&assigned_to_me=true)로.
   // mobile-tab-bar.tsx가 이미 같은 계약으로 쓰던 것(story #1974 개인화·#1960 held fix 반영,
@@ -346,13 +357,17 @@ export function AppSidebar({
         </Link>
       </div>
 
-      <SidebarContent>
+      <SidebarContent className="scrollbar-visible">
         {/* story #2681 — 데스크톱 GNB와 모바일 /more 허브(S2)가 한 정의(NAV_GROUPS)에서
             파생된다(doc mobile-ia-full-completion-2678 §2.5-3). 그룹·항목 목록 자체는
             nav-config.ts가 유일한 출처이고, 여기선 오직 순회+렌더만 한다 — 순서·라벨·아이콘·
             그룹핑은 이 리팩터 전과 동일(시각 회귀 0, AC1). story #2930 I1 — 이제 4구역+관리
             프레임 순서(오늘→워크스페이스→신뢰→지식→조직→설정)로 재편됐다. chats는 위
-            챗 center로 승격돼 이 순회 밖이라 badgeKey는 이제 'inbox' 하나만 실질 도달한다. */}
+            챗 center로 승격돼 이 순회 밖이라 badgeKey는 이제 'inbox' 하나만 실질 도달한다.
+            story #3762 — 4구역+관리 프레임 전체 높이가 흔한 뷰포트(≤900px)를 넘어서며
+            전역 스크롤바 숨김(#2165)까지 겹쳐 신뢰 아래 구역이 스크롤 가능한데도 "없다"로
+            보였다(그라운딩: org/role 무관 재현 — CSS overflow affordance 결함, 컨텍스트
+            문제 아님). .scrollbar-visible은 story #2528과 동일한 기존 옵트인 패턴. */}
         {NAV_GROUPS.map((group) => {
           // story #d986fd6c(IA·S4) — 라벨 없는 유틸 그룹(설정)은 접기 대상이 아니다(항목
           // 1개뿐이라 접어 봤자 얻는 게 없고, ia-4zone 확定이 이미 "라벨 없는 유틸 그룹"
@@ -399,7 +414,7 @@ export function AppSidebar({
                   return (
                     <SidebarMenuItem key={item.id}>
                       <SidebarMenuButton
-                        render={<Link href={link.href} />}
+                        render={<Link href={link.href} ref={link.isActive ? activeMenuItemRef : undefined} />}
                         isActive={link.isActive}
                         tooltip={label}
                       >

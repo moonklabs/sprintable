@@ -144,3 +144,56 @@ describe('SettingsPage — story #3274: 설정 > 문의 탭', () => {
     expect(container.textContent).not.toContain(koMessages.supportWidget.panelTitle);
   });
 });
+
+// story #3762(그라운딩) — 진짜 결함은 「숨김 탭」이 아니라 adminChecked(/api/me 응답 전)
+// 구간에 걸린 비-숨김 admin 탭들(members·organization·projects 등)이 null로 빠져 레일이
+// 통째로 짧아지는 것이었다(로딩=권한없음 conflation). loadContext()의 /api/me가 아직
+// pending인 순간을 붙잡아 그 구간엔 「자리」(스켈레톤)가 있고, 응답 후에만 진짜 탭/숨김이
+// 확정되는지를 잰다.
+describe('SettingsPage — story #3762: adminChecked 로딩 vs 권한없음 분리', () => {
+  it('/api/me가 아직 pending인 동안 admin 탭 자리에 스켈레톤이 있고 레일이 비지 않는다', async () => {
+    let resolveMe: ((res: { ok: boolean; json: () => Promise<unknown> }) => void) | undefined;
+    const fetchWithAuthMock = vi.fn((url: string) => {
+      if (url === '/api/me') {
+        return new Promise((resolve) => { resolveMe = resolve; });
+      }
+      return Promise.resolve({ ok: false, json: async () => ({ data: null }) });
+    });
+    vi.doMock('@/lib/db/client', () => ({ fetchWithAuth: fetchWithAuthMock }));
+    const { default: SettingsPage } = await import('./page');
+    await mount(<SettingsPage />);
+
+    // /api/me가 아직 안 풀렸다 — adminChecked=false 구간.
+    expect(container.querySelectorAll('[data-testid="settings-tab-skeleton"]').length).toBeGreaterThan(0);
+    expect(container.textContent).not.toContain(koMessages.settings.tabMembers);
+
+    await act(async () => {
+      resolveMe?.({ ok: true, json: async () => ({ data: { role: 'admin', user_id: 'u1' } }) });
+      await Promise.resolve(); await Promise.resolve();
+    });
+
+    // 판정 후엔 스켈레톤이 걷히고 실제 admin 탭이 선다.
+    expect(container.querySelectorAll('[data-testid="settings-tab-skeleton"]').length).toBe(0);
+    expect(container.textContent).toContain(koMessages.settings.tabMembers);
+  });
+
+  // story c4980e70이 org-members 탭을 /organization/members로 승격했는데 트리거만
+  // HIDDEN_SETTINGS_TABS 가드가 빠져 있었다(story #3762 발견) — 판정 후에도 그 트리거
+  // 자체가 렌더되면 안 된다(딥링크는 next.config.ts redirects()가 서버에서 걷어가지만,
+  // Settings 안에서 탭 클릭으로는 여전히 도달 가능했던 별도 결함).
+  it('adminChecked 후에도 org-members 탭 트리거는 뜨지 않는다(승격 완료, 회귀 pin)', async () => {
+    const fetchWithAuthMock = vi.fn((url: string) => {
+      if (url === '/api/me') return Promise.resolve({ ok: true, json: async () => ({ data: { role: 'admin', user_id: 'u1', name: '테스트' } }) });
+      return Promise.resolve({ ok: false, json: async () => ({ data: null }) });
+    });
+    vi.doMock('@/lib/db/client', () => ({ fetchWithAuth: fetchWithAuthMock }));
+    const { default: SettingsPage } = await import('./page');
+    await mount(<SettingsPage />);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(container.textContent).not.toContain(koMessages.settings.tabOrgMembers);
+    // 승격 목적지(조직·프로젝트) 트리거는 정상 렌더 — 가드가 그룹 전체를 과잉 차단하지 않는다.
+    expect(container.textContent).toContain(koMessages.settings.tabOrganization);
+    expect(container.textContent).toContain(koMessages.settings.tabProjects);
+  });
+});

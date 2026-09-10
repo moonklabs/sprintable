@@ -100,6 +100,19 @@ const NOTIFICATION_CATEGORIES = [
 
 type NotificationCategoryKey = typeof NOTIFICATION_CATEGORIES[number]['key'];
 
+// story #3762 — adminChecked(/api/me 응답 전) 구간엔 이 자리가 "권한 없음"이 아니라
+// "아직 모름"이다. null로 비우면 콜드 진입 시 레일이 통째로 짧아져 그 탭들이 애초에 없던
+// 것처럼 보인다(로딩≠권한없음 클래스 결함) — 판정 전엔 자리만 스켈레톤으로 지키고,
+// 판정 뒤에만 null(진짜 숨김)로 확정한다.
+function SettingsTabSkeleton() {
+  return (
+    <div className="flex h-8 items-center gap-2 px-3" data-testid="settings-tab-skeleton" aria-hidden="true">
+      <div className="size-4 animate-pulse rounded bg-muted" />
+      <div className="h-3 w-16 animate-pulse rounded bg-muted" />
+    </div>
+  );
+}
+
 function isWebhookUrlAllowed(url: string): boolean {
   if (!url) return true;
   if (/^https:\/\//i.test(url)) return true;
@@ -713,18 +726,21 @@ export default function SettingsPage() {
                 {t('tabAiAgents')}
               </TabsTrigger>
             ) : null}
+            {!adminChecked ? <SettingsTabSkeleton /> : null}
             {adminChecked ? (
               <TabsTrigger value="members">
                 <Users className="h-4 w-4" />
                 {t('tabMembers')}
               </TabsTrigger>
             ) : null}
+            {!adminChecked && !HIDDEN_SETTINGS_TABS.has('workflow') ? <SettingsTabSkeleton /> : null}
             {adminChecked && isAdmin && !HIDDEN_SETTINGS_TABS.has('workflow') ? (
               <TabsTrigger value="workflow">
                 <GitBranch className="h-4 w-4" />
                 {t('tabWorkflow')}
               </TabsTrigger>
             ) : null}
+            {!adminChecked ? <SettingsTabSkeleton /> : null}
             {adminChecked && isAdmin ? (
               <TabsTrigger value="workflow-policies">
                 <ShieldCheck className="h-4 w-4" />
@@ -732,6 +748,14 @@ export default function SettingsPage() {
               </TabsTrigger>
             ) : null}
 
+            {!adminChecked ? (
+              <>
+                <span className="truncate px-2 pb-1 pt-4 text-[10px] font-medium text-muted-foreground">{t('organizationSettings')}</span>
+                <SettingsTabSkeleton />
+                <SettingsTabSkeleton />
+                {!HIDDEN_SETTINGS_TABS.has('org-members') ? <SettingsTabSkeleton /> : null}
+              </>
+            ) : null}
             {adminChecked ? (
               <>
                 <span className="truncate px-2 pb-1 pt-4 text-[10px] font-medium text-muted-foreground">{t('organizationSettings')}</span>
@@ -739,10 +763,15 @@ export default function SettingsPage() {
                   <FolderKanban className="h-4 w-4" />
                   {t('tabOrganization')}
                 </TabsTrigger>
-                <TabsTrigger value="org-members">
-                  <Users className="h-4 w-4" />
-                  {t('tabOrgMembers')}
-                </TabsTrigger>
+                {/* story c4980e70: org-members = /organization/members로 승격(딥링크는 next.config.ts
+                    redirects()가 서버에서 걷어간다) — 트리거·콘텐츠 둘 다 HIDDEN_SETTINGS_TABS에서
+                    차단해야 하는데 트리거만 빠져 있었다(story #3762 발견·회귀 pin). */}
+                {!HIDDEN_SETTINGS_TABS.has('org-members') ? (
+                  <TabsTrigger value="org-members">
+                    <Users className="h-4 w-4" />
+                    {t('tabOrgMembers')}
+                  </TabsTrigger>
+                ) : null}
                 <TabsTrigger value="projects">
                   <FolderKanban className="h-4 w-4" />
                   {t('tabProjects')}
@@ -751,6 +780,13 @@ export default function SettingsPage() {
               </>
             ) : null}
 
+            {!adminChecked ? (
+              <>
+                <span className="truncate px-2 pb-1 pt-4 text-[10px] font-medium text-muted-foreground">{t('billing')}</span>
+                <SettingsTabSkeleton />
+                <SettingsTabSkeleton />
+              </>
+            ) : null}
             {adminChecked && isAdmin ? (
               <>
                 <span className="truncate px-2 pb-1 pt-4 text-[10px] font-medium text-muted-foreground">{t('billing')}</span>
