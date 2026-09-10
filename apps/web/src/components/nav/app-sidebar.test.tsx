@@ -89,10 +89,10 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-async function mount() {
+async function mount(userName?: string) {
   await act(async () => {
     root.render(withProviders(
-      <AppSidebar projectMemberships={[]} chatUnreadTotal={0} />,
+      <AppSidebar projectMemberships={[]} chatUnreadTotal={0} userName={userName} />,
     ));
   });
   await act(async () => { await Promise.resolve(); await Promise.resolve(); });
@@ -474,5 +474,53 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story
     expandAllGroups();
     await mount();
     expect(scrollIntoViewMock).toHaveBeenCalledWith({ block: 'nearest' });
+  });
+});
+
+// story #3775(카디르 QA 재발견 06:16Z) — 이전 처방(`{userName && <ProfileMenu/>}` → 항상
+// 렌더)이 실제로 맞는지 이 파일의 26개 테스트 중 어느 하나도 안 쟀다: 전부 `mount()`가
+// userName을 안 넘겨(undefined) 게이팅을 되돌려도 전부 그대로 통과했다 — 사고 재발 지점을
+// 아무도 안 잼. 이 스위트가 정확히 그 자리(AppSidebar 레벨에서 userName이 빈 값일 때
+// ProfileMenu가 실제로 마운트되는지)를 잰다(profile-menu.test.tsx는 ProfileMenu 단위
+// 테스트라 AppSidebar의 호출부 게이팅 자체는 못 잡는다 — 다른 컴포넌트, 다른 갭).
+describe('AppSidebar — story #3775 셸 결함(userName 빈 값이어도 ProfileMenu가 항상 렌더된다)', () => {
+  // ⭐되돌리면(app-sidebar.tsx가 `{userName && <ProfileMenu .../>}`로 되돌아가면) RED —
+  // userName이 undefined일 때 트리거 자체가 안 그려져야 실패한다.
+  it('⭐userName을 안 넘기면(undefined) 그래도 ProfileMenu(칩+「이름 설정」)가 렌더된다', async () => {
+    expandAllGroups();
+    await mount(undefined);
+    const trigger = container.querySelector('[data-slot="sidebar-footer"] [data-slot="dropdown-menu-trigger"]') as HTMLElement;
+    expect(trigger).toBeTruthy();
+    expect(trigger.textContent).toContain(koMessages.common.memberUnnamed);
+
+    await act(async () => { trigger.click(); });
+    const content = document.querySelector('[data-slot="dropdown-menu-content"]');
+    const setNameItem = Array.from(content!.querySelectorAll('a')).find(
+      (a) => a.textContent?.includes(koMessages.accountSwitcher.setName),
+    );
+    expect(setNameItem).toBeTruthy();
+    expect(setNameItem?.getAttribute('href')).toBe('/settings');
+  });
+
+  it('userName이 빈 문자열이어도 동형(칩+「이름 설정」)', async () => {
+    expandAllGroups();
+    await mount('');
+    const trigger = container.querySelector('[data-slot="sidebar-footer"] [data-slot="dropdown-menu-trigger"]') as HTMLElement;
+    expect(trigger).toBeTruthy();
+    expect(trigger.textContent).toContain(koMessages.common.memberUnnamed);
+  });
+
+  it('userName이 있으면(기존 회귀) 「이름 설정」 항목이 없다', async () => {
+    expandAllGroups();
+    await mount('송윤재');
+    const trigger = container.querySelector('[data-slot="sidebar-footer"] [data-slot="dropdown-menu-trigger"]') as HTMLElement;
+    expect(trigger.textContent).not.toContain(koMessages.common.memberUnnamed);
+
+    await act(async () => { trigger.click(); });
+    const content = document.querySelector('[data-slot="dropdown-menu-content"]');
+    const setNameItem = Array.from(content!.querySelectorAll('*')).find(
+      (el) => el.textContent === koMessages.accountSwitcher.setName,
+    );
+    expect(setNameItem).toBeFalsy();
   });
 });
