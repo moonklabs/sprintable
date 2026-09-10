@@ -272,7 +272,11 @@ export default function ConversationPage() {
               <Avatar
                 // story #3203(카디르 QA·PO 지시) — 같은 participants 계약 소비처, 사람언어 폴백 통일.
                 // story #3758(9번째) — resolved 비트로 갈라 그린다.
-                name={participantDisplayLabel(headerAvatarParticipant, t, tc)}
+                // story #3791(페드루 재검토 12:23Z) — name(이니셜 재료)에 표시-폴백 문구를
+                // 넘기면 그 문구 첫 글자가 가짜 이니셜로 뜬다(「이름 없는 구성원」→「이」 등)
+                // — name은 원시, 표시 문구는 label로.
+                name={headerAvatarParticipant.name ?? null}
+                label={participantDisplayLabel(headerAvatarParticipant, t, tc)}
                 avatarUrl={headerAvatarParticipant.avatar_url ?? null}
                 actorType={headerAvatarParticipant.type === 'agent' ? 'agent' : 'human'}
                 size={24}

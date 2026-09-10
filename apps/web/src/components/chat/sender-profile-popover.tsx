@@ -8,7 +8,13 @@ import { Avatar } from '@/components/shared/avatar';
 interface SenderProfilePopoverProps {
   x: number;
   y: number;
+  /** 표시 텍스트(팝업 제목·aria-label) — 호출부가 이미 낱말 폴백("당신"/"팀" 등)을
+   * 적용해 넘긴다. */
   name: string;
+  /** story #3791(페드루 재검토 12:23Z) — Avatar 이니셜 «재료»(원시). name(표시 문구)을
+   * 그대로 Avatar에 넘기면 그 첫 글자가 가짜 이니셜로 뜬다 — 이 필드가 그 경계를
+   * 가른다. 생략 시(name 자체가 이미 실명인 소비처) name을 재료로도 그대로 쓴다. */
+  rawName?: string;
   isAgent: boolean;
   /** story #2968(카디르 QA #3397 MEDIUM) — chat-bubble.tsx가 이미 들고 있던 sender_avatar_url을
    * 안 넘겨 이 팝업만 Bot/User 하드코딩 아이콘에 머물러 있었다. avatar.tsx 정본 배선. */
@@ -24,7 +30,7 @@ interface SenderProfilePopoverProps {
 // story #2349 — "상대 프로필" 진입점. 이 제품에 다른 멤버를 보는 화면이 없었다(net-new 표면,
 // 그라운딩 확認됨) — message-context-menu.tsx와 같은 위치-고정 팝업 패턴을 그대로 재사용해
 // 새 상호작용 패턴을 발명하지 않는다.
-export function SenderProfilePopover({ x, y, name, isAgent, avatarUrl, runtimeType, onClose, onBlock }: SenderProfilePopoverProps) {
+export function SenderProfilePopover({ x, y, name, rawName, isAgent, avatarUrl, runtimeType, onClose, onBlock }: SenderProfilePopoverProps) {
   // story #3776(1층A) — "사용자 차단" 버튼, chats ns의 기존 blockUserConfirmConfirm 키 재사용.
   const tChats = useTranslations('chats');
   const ref = useRef<HTMLDivElement>(null);
@@ -57,7 +63,14 @@ export function SenderProfilePopover({ x, y, name, isAgent, avatarUrl, runtimeTy
       style={{ left: clampedX, top: clampedY }}
     >
       <div className="flex items-center gap-2.5 px-3 py-1.5">
-        <Avatar name={name} avatarUrl={avatarUrl ?? null} actorType={isAgent ? 'agent' : 'human'} size={32} runtimeType={runtimeType ?? null} />
+        <Avatar
+          name={rawName ?? name}
+          label={rawName !== undefined ? name : undefined}
+          avatarUrl={avatarUrl ?? null}
+          actorType={isAgent ? 'agent' : 'human'}
+          size={32}
+          runtimeType={runtimeType ?? null}
+        />
         <span className="truncate text-sm font-medium text-foreground">{name}</span>
       </div>
       {onBlock && (

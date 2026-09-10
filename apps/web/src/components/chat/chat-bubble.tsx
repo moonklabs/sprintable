@@ -522,7 +522,12 @@ export function ChatBubble({
                 Avatar가 정본(사본 분화 금지) — shape(에이전트=circle·human=square)·idle blue 링·
                 working citron 펄스·human 테두리는 전부 avatar.tsx 내부가 결정한다. */}
             <Avatar
-              name={displayName}
+              // story #3791(페드루 재검토 12:23Z) — name(이니셜 재료)에 표시-폴백 문구
+              // (displayName="당신"/"팀" 등)를 넘기면 그 첫 글자가 가짜 이니셜로 뜬다 —
+              // name은 원시 sender_name(빈 문자열이면 자동으로 아이콘 tier), 표시 문구는
+              // label로.
+              name={message.sender_name}
+              label={displayName}
               avatarUrl={message.sender_avatar_url ?? null}
               actorType={isAgent ? 'agent' : 'human'}
               size={28}
@@ -791,6 +796,7 @@ export function ChatBubble({
           x={profilePopover.x}
           y={profilePopover.y}
           name={displayName}
+          rawName={message.sender_name}
           isAgent={isAgent}
           avatarUrl={message.sender_avatar_url ?? null}
           runtimeType={isAgent ? message.sender_runtime_type : null}

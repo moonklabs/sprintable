@@ -124,6 +124,23 @@ describe('SenderProfilePopover — story #3106 runtimeType 배선', () => {
   });
 });
 
+// story #3791(페드루 재검토 12:23Z) — chat-bubble.tsx가 표시-폴백 문구(displayName=
+// "당신"/"팀" 등)를 name으로, 원시 sender_name을 rawName으로 갈라 넘긴다. rawName이
+// 빈 문자열(이름 없는 발신자)이면 Avatar가 그 표시 문구의 첫 글자를 가짜 이니셜로
+// 짓지 않고 아이콘 tier로 떨어져야 한다 — 되돌리면(Avatar에 rawName 대신 name을 그대로
+// 넘기면) RED.
+describe('SenderProfilePopover — story #3791(rawName/name 분리)', () => {
+  it('rawName=""(이름 없는 발신자)이면 아이콘 tier로 떨어지고 표시 문구(name) 첫 글자를 지어내지 않는다', async () => {
+    await act(async () => {
+      root.render(wrap(<SenderProfilePopover x={0} y={0} name="팀" rawName="" isAgent={false} onClose={NOOP} />));
+    });
+    expect(container.querySelector('img')).toBeNull();
+    // 이니셜 tier였다면 initials('팀')="팀"이 렌더됐을 것 — 아이콘 tier이므로 그 텍스트가 없다.
+    const initialsSpan = container.querySelector('span[aria-label="팀"]');
+    expect(initialsSpan?.textContent).toBe('');
+  });
+});
+
 // story #3000 로드맵 PR-B(L1) — floating 팝업은 --elev-overlay 토큰이어야 한다(shadow-md
 // 리터럴 회귀가드).
 describe('SenderProfilePopover — 로드맵 PR-B L1(floating elev-overlay)', () => {
