@@ -207,3 +207,57 @@ async def test_list_gates_batches_latest_author_kind_lookup_no_n_plus_1():
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_sealed_destination_channel_batch_enrich_and_null_for_hosted_site():
+    """story #3367(유나 CHANGES 2026-09-10) — sealed_destination_connection_id가
+    non-null인 게이트만 그 연결의 channel을 배치 조회해 sealed_destination_channel에
+    싣는다(FE가 uuid 대신 channelLabel()로 표시). hosted_site(connection_id=null)
+    게이트는 채널 조회 대상 자체가 아니라 항상 null.
+
+    뮤테이션 대상 — list_gates()의 dest_connection_ids 배치 enrich 블록을 제거하면
+    이 테스트가 RED여야 한다."""
+    from app.main import app
+    from app.models.channel_connection import ChannelConnection
+    from app.models.gate import Gate
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id, role="owner")
+            story_id = await _seed_story(s, org_id, project_id)
+
+            connection = ChannelConnection(
+                id=uuid.uuid4(), org_id=org_id, channel="wordpress", account_id="acct-1",
+            )
+            s.add(connection)
+            await s.commit()
+
+            gate_hosted = Gate(
+                id=uuid.uuid4(), org_id=org_id, work_item_id=story_id, work_item_type="story",
+                gate_type="external_publish", status="pending", neutral_facts={},
+                sealed_destination_connection_id=None,
+            )
+            gate_wp = Gate(
+                id=uuid.uuid4(), org_id=org_id, work_item_id=story_id, work_item_type="story",
+                gate_type="external_publish", status="pending", neutral_facts={},
+                sealed_destination_connection_id=connection.id,
+            )
+            s.add_all([gate_hosted, gate_wp])
+            await s.commit()
+            gate_hosted_id, gate_wp_id = gate_hosted.id, gate_wp.id
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        async with _client_for(app) as client:
+            r_list = await client.get(
+                "/api/v2/gates", params={"ids": f"{gate_hosted_id},{gate_wp_id}"},
+            )
+        assert r_list.status_code == 200, r_list.text
+        rows = {row["id"]: row for row in r_list.json()}
+        assert rows[str(gate_hosted_id)]["sealed_destination_channel"] is None
+        assert rows[str(gate_wp_id)]["sealed_destination_channel"] == "wordpress"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()

@@ -136,9 +136,12 @@ export interface GateItem {
   sealed_doc_title?: string | null;
   // story #3367(3자기점검, 페드루 지적 2026-09-10) — AC7("승인 대상의... 마지막 수정
   // 주체, 목적지를 확認할 수 있고"). null=hosted_site(site_posts.py::_reseal_gate_on_
-  // new_version 관례)·그 외는 ChannelConnection.id(표시명 해소는 #3450 착지 뒤 — 지금은
-  // WordPress/webhook 목적지가 이 경로에 실질 도달하지 않는다, gate-evidence.tsx 참고).
+  // new_version 관례)·그 외는 ChannelConnection.id.
   sealed_destination_connection_id?: string | null;
+  // story #3367(유나 CHANGES 2026-09-10) — sealed_destination_connection_id가
+  // non-null인 행의 실제 channel(예: "wordpress") — FE가 lib/channel-label.ts::
+  // channelLabel()로 표시명을 낸다(uuid 원문을 승인자에게 보이지 않는다).
+  sealed_destination_channel?: string | null;
   // draft의 **지금** 최신 버전 author_kind — sealed_content_body의 작성자(봉인 시점,
   // approved 뒤 편집이면 옛 버전에 묶임)와 다를 수 있다. external_publish 게이트만·
   // draft_id 배치 enrich(BE gates.py) 대상이 아니면 undefined.

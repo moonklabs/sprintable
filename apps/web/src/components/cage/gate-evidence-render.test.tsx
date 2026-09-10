@@ -462,7 +462,30 @@ describe('GateEvidence — 레시피 approve 게이트 승인 대상 실물 렌�
       expect(container.textContent).toContain(koMessages.cage.recipeApprovalDestinationHostedSite);
     });
 
-    it('⭐destination=커넥션 UUID·latest_author_kind=agent — 「에이전트」 배지가 뜨고 목적지는 원문 짧은 꼬리(표시명을 지어내지 않는다)', async () => {
+    it('⭐destination=커넥션(WordPress)·latest_author_kind=agent — 「에이전트」 배지가 뜨고 목적지는 channelLabel() 표시명(uuid 노출 0)', async () => {
+      const gate = recipeApprovalGate(
+        { channel: 'wordpress', stage: 'approve' },
+        {
+          sealed_content_version: 1, sealed_content_sha256: 'abc',
+          sealed_destination_connection_id: '99999999-8888-7777-6666-555544443333',
+          sealed_destination_channel: 'wordpress',
+          latest_author_kind: 'agent',
+        },
+      );
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+      expect(container.textContent).toContain(koMessages.content.authorAgent);
+      expect(container.textContent).toContain(koMessages.content.channelLabelWordpress);
+      expect(container.textContent).not.toContain('99999999');
+      expect(container.textContent).not.toContain('44443333');
+      // 호스팅 블로그 문구가 잘못 새지 않는다(destination이 실제로 non-null인데).
+      expect(container.textContent).not.toContain(koMessages.cage.recipeApprovalDestinationHostedSite);
+    });
+
+    it('destination=커넥션인데 sealed_destination_channel이 없으면(연결 삭제 등 예외) uuid를 보이지 않고 「—」로 떨어진다', async () => {
       const gate = recipeApprovalGate(
         { channel: 'wordpress', stage: 'approve' },
         {
@@ -476,10 +499,9 @@ describe('GateEvidence — 레시피 approve 게이트 승인 대상 실물 렌�
       root = createRoot(container);
       await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
 
-      expect(container.textContent).toContain(koMessages.content.authorAgent);
-      expect(container.textContent).toContain('…44443333');
-      // 호스팅 블로그 문구가 잘못 새지 않는다(destination이 실제로 non-null인데).
-      expect(container.textContent).not.toContain(koMessages.cage.recipeApprovalDestinationHostedSite);
+      expect(container.textContent).not.toContain('99999999');
+      expect(container.textContent).not.toContain('44443333');
+      expect(container.textContent).toContain('—');
     });
 
     it('latest_author_kind가 없으면(구버전 게이트) AuthorKindBadge의 fail-safe(「—」류)로 떨어진다(지어내지 않는다)', async () => {

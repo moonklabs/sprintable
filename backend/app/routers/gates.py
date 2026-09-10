@@ -227,10 +227,15 @@ class GateResponse(BaseModel):
     # story #3367(3자기점검, 페드루 지적 2026-09-10) — AC7("결재 카드에서... 목적지를
     # 확認할 수 있고")의 입력. Gate ORM 컬럼명과 일치라 from_attributes로 자동 채워짐
     # (sealed_content_*와 동일 선례). null=hosted_site(site_posts.py::_reseal_gate_on_
-    # new_version 관례 그대로), 그 외는 ChannelConnection.id — FE가 그 값으로 실제
-    # 연결(WordPress/webhook 등)을 표시명으로 잇는 건 그 연결의 channel을 별도로 알아야
-    # 해 이번 조각 밖(#3450이 착지하며 그 축을 마저 잇는다, PR 코멘트 참고).
+    # new_version 관례 그대로), 그 외는 ChannelConnection.id.
     sealed_destination_connection_id: uuid.UUID | None = None
+    # story #3367(유나 CHANGES, 페드루 재검토 2026-09-10) — sealed_destination_
+    # connection_id 하나만으론 FE가 uuid 원문 꼬리를 승인자에게 보여줄 수밖에 없다
+    # (확認 불가능한 값으로 서명을 요구하는 결함). 그 연결의 channel(예: "wordpress")을
+    # 같이 실어 FE가 집안 정본 lib/channel-label.ts::channelLabel()로 표시명을 낸다 —
+    # null(hosted_site)은 그 자체가 이미 목적지 신호라 이 필드도 항상 null. list_gates()
+    # 가 sealed_destination_connection_id와 같은 배치(N+1 0)로 채운다.
+    sealed_destination_channel: str | None = None
     # story #3367(3자기점검, 페드루 지적 2026-09-10) — AC7의 나머지 축("마지막 수정
     # 주체"). sealed_content_body의 작성자가 아니라(그건 «봉인 당시» 작성자·approved
     # 뒤 편집이면 옛 버전에 묶여 있다) draft의 **지금** 최신 버전 author_kind — list_
@@ -831,6 +836,27 @@ async def list_gates(
             draft_id = latest_author_draft_ids.get(resp.id)
             if draft_id is not None:
                 resp.latest_author_kind = latest_author_kind_by_draft_id.get(draft_id)
+
+    # story #3367(유나 CHANGES, 페드루 재검토 2026-09-10) — sealed_destination_
+    # connection_id(위, Gate 실 컬럼)가 non-null인 행의 실제 channel(예:
+    # "wordpress")을 배치 조회(org-scope·N+1 0, sealed_doc_ids와 동일 선례). null인
+    # 행(hosted_site)은 조회 대상에서 원천 제외 — 그 자체가 이미 완결된 목적지 신호라
+    # 채널 조회가 필요 없다.
+    dest_connection_ids = {
+        g.sealed_destination_connection_id for g in gates if g.sealed_destination_connection_id is not None
+    }
+    if dest_connection_ids:
+        from app.models.channel_connection import ChannelConnection
+
+        channel_rows = (await session.execute(
+            select(ChannelConnection.id, ChannelConnection.channel).where(
+                ChannelConnection.id.in_(dest_connection_ids), ChannelConnection.org_id == org_id,
+            )
+        )).all()
+        channel_by_connection_id = {cid: channel for cid, channel in channel_rows}
+        for resp, g in zip(responses, gates):
+            if g.sealed_destination_connection_id is not None:
+                resp.sealed_destination_channel = channel_by_connection_id.get(g.sealed_destination_connection_id)
 
     # doc-side enrich 2종 Doc 조회를 **한 배치**로(org-scope·soft-delete 가드·N+1 0):
     #  ⓐ work_item_summary(24f5ae18): work_item_type=='doc' gate → title/slug.
