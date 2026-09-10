@@ -104,7 +104,14 @@ async def _create_dependency(
     if body.item_type not in ITEM_TYPES:
         raise HTTPException(status_code=422, detail=f"item_type must be one of {sorted(ITEM_TYPES)}")
     if body.from_id == body.to_id:
-        raise HTTPException(status_code=422, detail=t("dependencies.self_reference_not_allowed", resolved_locale))
+        # story #3786(유나 定 §2) — explicit code(house 관례: admin_billing.py 등 {"code",
+        # "message"} dict detail → main.py:282가 error.code로 실음). FE story-detail-panel.tsx가
+        # 예전엔 message 문자열에서 "사이클"을 찾아 cycle/self-reference를 갈랐는데(en 로케일
+        # 착지 순간 거짓이 되는 반창고, 파일 자체 주석도 인정) 이 code로 갈아탄다.
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "DEPENDENCY_SELF_REFERENCE", "message": t("dependencies.self_reference_not_allowed", resolved_locale)},
+        )
 
     # 양쪽-아이템 게이트(AC1): from·to 둘 다 caller 접근권 있는 project의 아이템이어야 한다. 접근권
     # 없는 project의 아이템을 링크에 끼워 그 project 상태를 조작하는 것을 차단(cross-project 자체는
@@ -120,7 +127,10 @@ async def _create_dependency(
 
     # 사이클 탐지는 org-wide 유지(AC3 — cross-project 사이클도 잡아야 하므로 project-partition 금지).
     if await would_create_cycle(session, org_id, body.from_id, body.to_id, body.item_type):
-        raise HTTPException(status_code=422, detail=t("dependencies.cycle_not_allowed", resolved_locale))
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "DEPENDENCY_CYCLE", "message": t("dependencies.cycle_not_allowed", resolved_locale)},
+        )
 
     # P0-04(doc trust-pipeline-be-design §4 훅②): trust_stage mutation 전 스냅샷(blocked 신호는 story
     # +blocks 타입만 영향 — to_id가 막히는 쪽).

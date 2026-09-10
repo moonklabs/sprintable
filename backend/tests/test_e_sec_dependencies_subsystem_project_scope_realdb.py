@@ -475,3 +475,99 @@ async def test_update_dependency_not_found_detail_follows_accept_language_en():
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+# ── explicit code(story #3786, 유나 定 §2) — FE story-detail-panel.tsx:750이 예전엔
+# message 문자열에서 "사이클"을 찾아 cycle/self-reference를 갈랐다. en 로케일 착지가 그
+# 반창고를 깨므로(en message엔 "사이클"이 없음) BE가 explicit code를 실어 FE가 그 code로
+# 가르게 한다 — 아래는 그 code가 실제로 내려오는지 봉인.
+
+@pytest.mark.anyio
+async def test_create_dependency_self_reference_has_explicit_code():
+    from app.main import app
+    from app.services.i18n_catalog import t
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s)
+        await _setup_app(app, Session, seeded["caller_id"], seeded["org_id"])
+        client = _client_for(app)
+        try:
+            resp = await client.post("/api/v2/dependencies", json={
+                "from_id": str(seeded["a3"]), "to_id": str(seeded["a3"]),
+                "dep_type": "blocks", "item_type": "story",
+            })
+            assert resp.status_code == 422, resp.text
+            error = resp.json()["error"]
+            assert error["code"] == "DEPENDENCY_SELF_REFERENCE"
+            assert error["message"] == t("dependencies.self_reference_not_allowed", "ko")
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_create_dependency_cycle_has_explicit_code():
+    """⭐dep_aa(a1→a2)가 이미 있는 상태에서 역방향(a2→a1)을 걸면 cycle — code로 갈린다."""
+    from app.main import app
+    from app.services.i18n_catalog import t
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s)
+        await _setup_app(app, Session, seeded["caller_id"], seeded["org_id"])
+        client = _client_for(app)
+        try:
+            resp = await client.post("/api/v2/dependencies", json={
+                "from_id": str(seeded["a2"]), "to_id": str(seeded["a1"]),
+                "dep_type": "blocks", "item_type": "story",
+            })
+            assert resp.status_code == 422, resp.text
+            error = resp.json()["error"]
+            assert error["code"] == "DEPENDENCY_CYCLE"
+            assert error["message"] == t("dependencies.cycle_not_allowed", "ko")
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_create_dependency_cycle_en_message_has_no_korean_word(
+):
+    """story #3786(유나 定 §2·확인 축2) — en Accept-Language로 사이클을 실제로 일으켰을 때
+    응답 message에 한글 "사이클" 낱말이 없어야 한다(문자열 매칭 반창고를 code로 갈아탄
+    증거 — 예전 FE는 이 문자열에 의존했다). code 자체는 로케일 무관 상수."""
+    from app.main import app
+    from app.services.i18n_catalog import t
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s)
+        await _setup_app(app, Session, seeded["caller_id"], seeded["org_id"])
+        client = _client_for(app)
+        try:
+            resp = await client.post(
+                "/api/v2/dependencies",
+                json={
+                    "from_id": str(seeded["a2"]), "to_id": str(seeded["a1"]),
+                    "dep_type": "blocks", "item_type": "story",
+                },
+                headers={"Accept-Language": "en"},
+            )
+            assert resp.status_code == 422, resp.text
+            error = resp.json()["error"]
+            assert error["code"] == "DEPENDENCY_CYCLE"
+            assert error["message"] == t("dependencies.cycle_not_allowed", "en")
+            assert "사이클" not in error["message"]
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()

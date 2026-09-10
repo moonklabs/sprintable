@@ -35,33 +35,33 @@ class UnknownMessageKeyError(KeyError):
 # key → {locale: template}. `.format(**params)`로 렌더 — 지금 슬라이스 1의 모든 문자열은
 # 파라미터가 없는 plain literal이라 params 없이도 그대로 반환된다(향후 슬라이스가 f-string
 # 동적 값이 섞인 문장을 옮길 때 이 메커니즘을 그대로 재사용).
-## ⛔en 문장 = 유나 定(PO 判, PO 뻐꾸기 금지) — 카드에 ko 원문 목록(키·ko·자리)을 올려
-## 유나 답을 기다린다. en이 실 문장으로 채워지기 전까지 이 dict는 PENDING 마커로 남긴다.
-## **PENDING_EN인 채로 머지 금지**(카드 明示) — 이 파일이 그 상태면 아직 미완성.
-_PENDING_EN = "⛔PENDING_EN(유나 定 대기 — story #3786)"
-
+## en 문장 = 유나 定(2026-09-10, 카드 코멘트 착지) — 이 레포 404/409/422 detail 관례
+## (`<Noun> not found`·`<Noun> already exists`·거절 문장형) 실측 대조 근거로 확定됨.
 _CATALOG: dict[str, dict[str, str]] = {
     # story #3786 슬라이스 1 — dependencies.py(8건, 고유 키 5개: "의존성을 찾을 수 없음"이
     # 4개 호출부에서 재사용됨).
     "dependencies.item_not_found": {
         "ko": "의존성 대상 아이템을 찾을 수 없음",
-        "en": _PENDING_EN,
+        # 새로 짓지 않고 이 레포에 이미 4회 있는 문자열을 재사용(유나 定) — 이 게이트가
+        # create/list/update/delete/graph 공유 자리라 목적어를 좁히지 않는 편이 정확하다.
+        "en": "Item not found",
     },
     "dependencies.self_reference_not_allowed": {
         "ko": "자기참조 의존성은 허용되지 않음",
-        "en": _PENDING_EN,
+        # 집안 `Cannot link a story to itself`와 같은 결(422 거절 문장형, 유나 定).
+        "en": "An item cannot depend on itself",
     },
     "dependencies.already_exists": {
         "ko": "이미 존재하는 의존성",
-        "en": _PENDING_EN,
+        "en": "Dependency already exists",
     },
     "dependencies.cycle_not_allowed": {
         "ko": "사이클이 발생하는 의존성은 허용되지 않음",
-        "en": _PENDING_EN,
+        "en": "This dependency would create a cycle",
     },
     "dependencies.not_found": {
         "ko": "의존성을 찾을 수 없음",
-        "en": _PENDING_EN,
+        "en": "Dependency not found",
     },
 }
 

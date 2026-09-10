@@ -37,8 +37,8 @@ def test_unknown_key_raises_instead_of_silently_falling_back():
 
 def test_known_key_renders_without_raising():
     key = next(iter(MessageCatalog.keys()))
-    # PENDING_EN 상태에서도(유나 답 전) 크래시 없이 문자열을 반환해야 한다 — 내용 검증은
-    # 슬라이스별 통합 테스트 몫, 여기는 "예외 없이 렌더된다"만 고정.
+    # 등록된 키는 크래시 없이 문자열을 반환해야 한다 — 내용 검증은 슬라이스별 통합
+    # 테스트 몫, 여기는 "예외 없이 렌더된다"만 고정.
     assert isinstance(t(key, "ko"), str)
     assert isinstance(t(key, "en"), str)
 

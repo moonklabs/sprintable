@@ -1052,7 +1052,6 @@ app/services/hypothesis_outcome_confirm.py::measuring 상태만 판정 초안 �
 app/services/hypothesis_outcome_confirm.py::가설을 찾을 수 없습니다.
 app/services/hypothesis_outcome_confirm.py::불법 전이:
 app/services/hypothesis_outcome_confirm.py::중 하나여야 합니다.
-app/services/i18n_catalog.py::⛔PENDING_EN(유나 定 대기 — story #3786)
 app/services/i18n_catalog.py::사이클이 발생하는 의존성은 허용되지 않음
 app/services/i18n_catalog.py::의존성 대상 아이템을 찾을 수 없음
 app/services/i18n_catalog.py::의존성을 찾을 수 없음

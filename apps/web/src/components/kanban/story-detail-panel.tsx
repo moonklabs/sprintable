@@ -737,17 +737,13 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
       } else if (res.status === 409) {
         addToast({ type: 'warning', title: t('dep.duplicateConnection') });
       } else if (res.status === 422) {
-        // story #2485 — 그라운딩(2026-08-06): `json.detail`은 실 envelope에 없는 필드라
-        // 이 분기는 항상 false였다(사이클/자기참조 구분이 한 번도 실제로 안 됐다 —
-        // 항상 dep.invalidSelf로 샘). backend create_dependency()는 두 케이스 모두
-        // 동일 generic code(UNPROCESSABLE_ENTITY)를 내고 구분용 code가 따로 없다
-        // (그라운딩 확認) — 지금은 message 원문("사이클이 발생하는...")에 실제로 그
-        // 한국어 문구가 있어 올바른 필드(error.message)로 고치면 최소한 이 구분은
-        // 다시 동작한다. 다만 message 문자열 매칭은 여전히 반창고다 — backend가
-        // CYCLE_DETECTED/SELF_REFERENCE 같은 explicit code를 내도록 하는 게 근본
-        // fix(별도 이슈로 보고, backend/ 스코프).
-        const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
-        addToast({ type: 'error', title: json?.error?.message?.includes('사이클') ? t('dep.cycleDetected') : t('dep.invalidSelf') });
+        // story #3786(유나 定 §2, 근본 fix) — 이 자리는 예전에 message 원문에서 한국어
+        // "사이클" 낱말을 찾아 cycle/self-reference를 갈랐다(반창고, en 로케일이 착지하면
+        // 그 낱말 자체가 없어져 항상 거짓이 되는 결함). BE(dependencies.py)가 이제
+        // DEPENDENCY_CYCLE/DEPENDENCY_SELF_REFERENCE를 explicit code로 실어 보내므로
+        // 그 code로 가른다 — 로케일 무관, 문자열 매칭 완전 제거.
+        const json = await res.json().catch(() => null) as { error?: { code?: string } } | null;
+        addToast({ type: 'error', title: json?.error?.code === 'DEPENDENCY_CYCLE' ? t('dep.cycleDetected') : t('dep.invalidSelf') });
       } else {
         addToast({ type: 'error', title: t('dep.addFailed') });
       }
