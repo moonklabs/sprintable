@@ -91,18 +91,11 @@ function walkTsxFiles(dir: string, out: string[]): void {
 }
 
 // ALLOWLIST — story #3770 실 트리 전수 스캔이 PO가 짚은 7자리 외에 6곳을 더 찾았다. 4곳은
-// 같은 병(org/trust 역할, 정본 경유로 닫음)이었고, 남은 2곳은 **다른 축**이다:
-// `EventDefinition.stage_metadata[stage].role`(워크플로 단계 담당자 라벨 — "Agent"/
-// "Human"/"PO"/"Dev"/"Lead"/"Reviewer" 등, `sprintable_get_workflow_guide` 출력 자체가
-// 이 낱말들을 원어 그대로 굵게 쓴다·org/trust 역할 정본 셋 어디에도 이 값 집합이 없다).
-// org-members.tsx/roles/page.tsx류 "사람의 조직 내 위치"와 다른 개념(워크플로 정의가
-// 선언한 "이 단계는 누가"이고, 값 자체가 시스템 전역에서 관례적으로 비-번역 라벨로
-// 취급된다 — trustRoleLabelPo="PO"/trustRoleLabelDevops="DevOps"와 같은 결의 축). 새 정본
-// 신설은 이 스토리 범위 밖 — 페드루에게 별건 등재 요청, 여기는 이유와 함께 명시 예외.
-const ALLOWLIST: ReadonlySet<string> = new Set([
-  'app/(authenticated)/organization/events/page.tsx:402',
-  'components/loops/loop-create-dialog.tsx:320',
-]);
+// 같은 병(org/trust 역할, 정본 경유로 닫음)이었고, 남은 2곳(`EventDefinition.
+// stage_metadata[stage].role` 워크플로 단계 담당자 라벨)은 story #3773이 `stageRoleLabel()`
+// 정본을 신설해 닫았다 — 이 가드가 스스로 RED로 잡아 알려준 대로 걷는다(죽은 ALLOWLIST
+// 항목 자가검출, 유나 확認).
+const ALLOWLIST: ReadonlySet<string> = new Set([]);
 
 export interface ScanRepoResult {
   refs: RawRoleJsxRef[];

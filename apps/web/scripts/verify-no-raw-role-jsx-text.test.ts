@@ -58,10 +58,12 @@ describe('scanJsxFileContent — story #3770 셀프테스트', () => {
 });
 
 describe('scanRepo — story #3770(실 트리 실행)', () => {
-  it('실 트리(apps/web/src) — 위반 0건, ALLOWLIST 2건(event stage role — 다른 축, 전부 실제로 걸림)', () => {
+  // story #3773 — event stage role 2곳이 stageRoleLabel() 정본으로 닫혀 ALLOWLIST가 비었다
+  // (죽은 ALLOWLIST 자가검출 — 유나 확認대로 이 가드가 스스로 RED로 잡았고, 그 항목을 걷었다).
+  it('실 트리(apps/web/src) — 위반 0건, ALLOWLIST 0건(story #3773으로 전량 닫힘)', () => {
     const { refs, fileCount, allowlistHit } = scanRepo(SRC_ROOT);
     expect(fileCount).toBeGreaterThan(400);
     expect(refs).toEqual([]);
-    expect(allowlistHit.size).toBe(2);
+    expect(allowlistHit.size).toBe(0);
   });
 });
