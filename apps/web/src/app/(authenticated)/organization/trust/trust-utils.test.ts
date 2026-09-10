@@ -66,6 +66,16 @@ describe('resolveRoleLabel (story #3735·D1 — 기본 5키 i18n 정본, 커스�
     // 위는 우연히 i18n 값과 같아 구분이 안 되므로, 다른 값으로 재확인.
     expect(resolveRoleLabel('growth', '구현', stubT)).toBe('구현');
   });
+
+  // story #3735 CHANGES(카디르 QA 지적) — DEFAULT_ROLE_LABEL_KEY가 객체 리터럴이라
+  // role_key가 Object.prototype 이름(constructor·toString·hasOwnProperty 등)이면
+  // 상속 함수가 truthy로 걸려 "커스텀이 이긴다" 계약이 깨진다(함수 객체가 t()에
+  // 들어가는 사고). Object.hasOwn 가드가 그 자리를 막는지 직접 잰다.
+  it('role_key가 Object.prototype 이름이어도(constructor 등) 커스텀 DB label이 그대로 이긴다', () => {
+    expect(resolveRoleLabel('constructor', '조직 커스텀', stubT)).toBe('조직 커스텀');
+    expect(resolveRoleLabel('toString', '조직 커스텀2', stubT)).toBe('조직 커스텀2');
+    expect(resolveRoleLabel('hasOwnProperty', null, stubT)).toBe('hasOwnProperty');
+  });
 });
 
 describe('groupRosterByRole (E-VERIFY 중립 정렬 — 성과순 금지, 라벨 이름순만)', () => {

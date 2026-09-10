@@ -75,7 +75,11 @@ const DEFAULT_ROLE_LABEL_KEY: Record<string, string> = {
 };
 
 export function resolveRoleLabel(roleKey: string, roleLabel: string | null, t: Translator): string {
-  const i18nKey = DEFAULT_ROLE_LABEL_KEY[roleKey];
+  // story #3735 CHANGES(카디르 QA 지적) — 객체 리터럴 인덱싱은 role_key가
+  // 'constructor'/'toString' 같은 Object.prototype 이름이면 상속받은 함수가
+  // truthy로 걸려 커스텀 DB label 대신 그 함수 객체가 t()에 들어간다("커스텀이
+  // 이긴다" 계약 위반). Object.hasOwn으로 이 자리의 실 프로퍼티인지부터 확認한다.
+  const i18nKey = Object.hasOwn(DEFAULT_ROLE_LABEL_KEY, roleKey) ? DEFAULT_ROLE_LABEL_KEY[roleKey] : undefined;
   if (i18nKey) return t(i18nKey);
   return roleLabel ?? roleKey;
 }
