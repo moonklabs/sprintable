@@ -6,7 +6,6 @@ import { useLocale, useTranslations } from 'next-intl';
 import { BookOpen, LayoutGrid, List as ListIcon, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useDocsLayout, type Doc } from './docs-context';
 import { docUrl } from '@/components/docs/lib/doc-project-url';
 import { DOC_STATUS_TONE, toDocStatusFilter, docStatusLabelKey, type DocStatusFilter } from '@/components/docs/lib/doc-status-tone';
@@ -112,16 +111,21 @@ export function DocsIndex() {
   }
 
   if (loadError) {
+    // story #3784(유나 정정 09:40Z) — settings/page.tsx의 Alert destructive 배너는
+    // 배너 「아래」에 계속 그려지는 섹션들이 있다는 전제 위에 선다(870-873행). 이
+    // 0건 분기(아래)는 early return이라 "위"가 없는 빈 페인이 된다 — 배너를 얹을
+    // 자리 자체가 없다. 집안에 이미 같은 형(early return + 빈 페인 중앙)을 가른
+    // 정본이 chat-view.tsx의 messagesLoadFailed다 — 그 형 그대로.
     return (
       <div className="flex h-full items-center justify-center p-4 lg:p-6">
-        <Alert variant="destructive" className="w-full max-w-lg">
-          <AlertDescription className="flex items-center justify-between gap-3">
-            <span>{t('indexLoadError')}</span>
-            <Button size="sm" variant="outline" onClick={() => void fetchTree()}>
-              {tc('retry')}
-            </Button>
-          </AlertDescription>
-        </Alert>
+        <div className="flex flex-col items-center gap-3 text-center">
+          <p role="alert" aria-live="assertive" aria-atomic="true" className="text-sm text-destructive">
+            {t('indexLoadError')}
+          </p>
+          <Button size="sm" variant="outline" onClick={() => void fetchTree()}>
+            {tc('retry')}
+          </Button>
+        </div>
       </div>
     );
   }
