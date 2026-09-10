@@ -7,6 +7,7 @@ import { useTranslations } from 'next-intl';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
 import { OperatorInput, OperatorTextarea } from '@/components/ui/operator-control';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
@@ -483,7 +484,10 @@ export default function StandupPage({ projectId }: StandupClientProps) {
             <>
               {/* 스프린트 섹션 — 접을 수 있는 컴팩트 카드 (d9847ef0: project-scoped — projectId 있을 때만) */}
               {projectId ? (
-              <div className="rounded-xl border border-border bg-background">
+              // story #3785(유나·페드루 라이브 실측 확定) — bg-background는 페이지 배경을
+              // 그대로 덧칠한 것이라 border-only와 같은 결함(배경과 한 색). 1층 규칙:
+              // Card(surface='solid').
+              <Card>
                 <button
                   type="button"
                   className="flex w-full flex-wrap items-center justify-between gap-3 px-4 py-3 text-left"
@@ -581,7 +585,7 @@ export default function StandupPage({ projectId }: StandupClientProps) {
                     )}
                   </div>
                 ) : null}
-              </div>
+              </Card>
               ) : (
                 <div className="rounded-xl border border-dashed border-border bg-background p-6">
                   <EmptyState title={t('projectScopedHint')} />

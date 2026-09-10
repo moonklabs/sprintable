@@ -11,6 +11,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { ListRow, ListRowMark } from '@/components/ui/list-row';
 import { PageHeader } from '@/components/ui/page-header';
 import { SectionCardBody } from '@/components/ui/section-card';
+import { Card } from '@/components/ui/card';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { fetchWithAuth } from '@/lib/db/client';
 import { channelConnectionIdentityLabel, channelLabel, channelMarkColor, channelMarkInitials } from '@/lib/channel-label';
@@ -277,7 +278,10 @@ function MeasurementConnectionsSection({
 
       {/* story #3743 CHANGES(유나 시안 ③ v3 44ec0ad1, 페드루 PO 2026-09-09 12:42Z) —
           이 셋도 행 목록 형(ListRow)으로. 낱말은 집안 키 그대로(새 키 0) — 형만 통일. */}
-      <div className="divide-y divide-border overflow-hidden rounded-md border border-border">
+      {/* story #3785(유나 定) — 페이지 배경 위 테두리만 있는 상자는 배경과 한 색이라
+          경계가 안 보인다(1층 규칙: Card/SectionCard, surface='solid'). rounded-md는
+          Card 기본 radius(rounded-lg, §1.1 크리스프 값)로 갈아끼워진다. */}
+      <Card className="divide-y divide-border overflow-hidden">
         {beacon ? (
           <ListRow
             data-testid="measurement-beacon-row"
@@ -403,7 +407,7 @@ function MeasurementConnectionsSection({
             ) : null}
           </ListRow>
         ) : null}
-      </div>
+      </Card>
     </div>
   );
 }
@@ -919,11 +923,12 @@ function ChannelSection({
           {connections.length === 0 && !(credential_kind === 'oauth' && effectiveSource === 'none') ? (
             <p className="text-sm text-muted-foreground">{t('channelNoConnections')}</p>
           ) : connections.length > 0 ? (
-            <div className="divide-y divide-border overflow-hidden rounded-md border border-border" data-testid="channel-section-rows">
+            // story #3785(유나·페드루 라이브 실측 확定) — 1층 규칙: Card(surface='solid').
+            <Card className="divide-y divide-border overflow-hidden" data-testid="channel-section-rows">
               {connections.map((c, index) => (
                 <ConnectionRow key={c.id} conn={c} index={index} isOwnerStrict={isOwnerStrict} isOwnerOrAdmin={isOwnerOrAdmin} orgId={orgId} onDisconnected={onRefresh} t={t} showStatusChip={connections.length !== 1} />
               ))}
-            </div>
+            </Card>
           ) : null}
           {credential_kind === 'pasted_secret' ? (
             <PastedSecretConnectCard channel={channel} orgId={orgId} isOwner={isOwnerOrAdmin} connectionCount={connections.length} onConnected={onRefresh} t={t} />
@@ -1222,7 +1227,11 @@ export default function OrganizationChannelsPage() {
               description={t('channelsEmptyDescription')}
             />
           ) : (
-            <div className="divide-y divide-border overflow-hidden rounded-md border border-border">
+            // story #3785(유나·페드루 라이브 실측 확定) — 1층 규칙: Card(surface='solid').
+            // 이 목록 전체가 한 Card — 안의 ChannelSection이 펼쳐질 때 그리는 연결 목록
+            // (channel-section-rows)은 실측상 별도의 1층 자리로 잡혀 자기 Card를 또
+            // 진다(위 ChannelSection 정의부 참고 — 중첩만으로 2층이 되지 않는 자리).
+            <Card className="divide-y divide-border overflow-hidden">
               {availableChannels.map((it) => (
                 <ChannelSection
                   key={it.channel}
@@ -1245,7 +1254,7 @@ export default function OrganizationChannelsPage() {
                   }
                 />
               ))}
-            </div>
+            </Card>
           )}
 
           <AgentSetupSection orgId={orgId ?? ''} />
