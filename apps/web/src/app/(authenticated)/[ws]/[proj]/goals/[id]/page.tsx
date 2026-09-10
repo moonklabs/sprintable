@@ -9,6 +9,7 @@ import remarkGfm from 'remark-gfm';
 import { ArrowLeft, Pencil, Trash2, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { CountBadge } from '@/components/ui/count-badge';
 import { EmptyState } from '@/components/ui/empty-state';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
@@ -525,8 +526,11 @@ export default function EpicDetailPage() {
 
         {/* Stories — grouped by status */}
         <section className="space-y-4">
-          <h2 className="text-xs font-medium text-muted-foreground">
-            {t('stories')} ({stories.length})
+          {/* story #3764(UI 점검 B·E절, 유나 定) — 수를 제목 문자열 안에 넣지 않는다.
+              제목 고정 + 수는 옆 CountBadge로(이벤트 화면 events/page.tsx와 동형). */}
+          <h2 className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+            {t('stories')}
+            <CountBadge count={stories.length} />
           </h2>
           {stories.length === 0 ? (
             <p className="text-sm italic text-muted-foreground">{t('noStories')}</p>

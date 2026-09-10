@@ -49,4 +49,17 @@ describe('UnscheduledLane — story #3422 doc §11-1', () => {
     expect(lane?.textContent).toContain('2');
     expect(container.querySelectorAll('[data-testid="channel-post-calendar-card"]').length).toBe(2);
   });
+
+  // story #3764(UI 점검 B·E절, 유나 定) — 수를 제목 문자열 안에 넣지 않는다. 레인
+  // 제목이 "날짜 미정 (N)" 한 문자열이 아니라 제목 고정("날짜 미정") + 별도
+  // CountBadge로 갈라졌는지 회귀로 고정한다.
+  it('레인 제목이 제목 고정 + CountBadge로 갈라진다(story #3764)', async () => {
+    await act(async () => {
+      root.render(wrap(<UnscheduledLane items={[ITEM('d1'), ITEM('d2')]} displayTimezone="Asia/Seoul" />));
+    });
+    const heading = container.querySelector('[data-testid="channel-post-unscheduled-lane"] h2');
+    expect(heading).not.toBeNull();
+    expect(heading!.textContent).not.toMatch(/날짜 미정\s*\(/);
+    expect(heading!.querySelector('span')?.textContent).toContain('2');
+  });
 });

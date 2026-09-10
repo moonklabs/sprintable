@@ -1437,6 +1437,13 @@ jobs:
       - name: "Verify every top-level i18n namespace has at least one reference signal (story #3757 regression guard)"
         run: pnpm --filter web verify:i18n-namespace-referenced
 
+      # story #3764 회귀가드: 「제목 안의 수」(「구성원 (13)」류) — 제목은 고정 문자열,
+      # 수는 옆 CountBadge로 갈라야 한다(story #3735/#4111이 조직 구성원·권한 화면에서
+      # 먼저 닫은 클래스, 이 스토리가 나머지 세 자리를 마저 닫으며 가드로 승격). JSX
+      # 조립형({t()} ({n}))과 i18n 값형(끝이 ({count})) 둘 다 잡는다.
+      - name: "Verify no count-in-title-string (story #3764 regression guard)"
+        run: pnpm --filter web verify:no-count-in-title-string
+
       # story #3760 회귀가드: App Router 라우트 파일(page/layout/template/loading/error/
       # not-found/default.tsx)의 named export가 Next.js 화이트리스트 밖이면 next build에서만
       # 죽는다(tsc·vitest는 이 계약을 모른다 — 실물: #4105, publishHistorySenderLabel을

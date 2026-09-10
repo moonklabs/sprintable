@@ -7,6 +7,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
+import { CountBadge } from '@/components/ui/count-badge';
 import { Button } from '@/components/ui/button';
 import { fetchWithAuth } from '@/lib/db/client';
 import { channelLabel } from '@/lib/channel-label';
@@ -1353,8 +1354,11 @@ export default function ContentPostEditPage() {
           있으면 그 자리 자체를 안 그린다. */}
       {variants.length > 0 ? (
         <div className="space-y-2 rounded-md border border-border p-3 text-sm" data-testid="content-variants-list">
-          <p className="text-xs font-medium text-muted-foreground">
-            {t('channelPostsVariantsListLabel')} ({variants.length})
+          {/* story #3764(UI 점검 B·E절, 유나 定) — 수를 제목 문자열 안에 넣지 않는다.
+              제목 고정 + 수는 옆 CountBadge로(이벤트 화면 events/page.tsx와 동형). */}
+          <p className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+            {t('channelPostsVariantsListLabel')}
+            <CountBadge count={variants.length} />
           </p>
           <ul className="space-y-1.5">
             {variants.map((v) => {

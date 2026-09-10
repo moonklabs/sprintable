@@ -131,6 +131,30 @@ describe('EpicDetailPage — cross-project stale 응답 폴백 (story f401139e)'
   });
 });
 
+// story #3764(UI 점검 B·E절, 유나 定) — 수를 제목 문자열 안에 넣지 않는다. 「스토리」
+// 섹션 헤더가 "스토리 (N)" 한 문자열이 아니라 제목 고정("스토리") + 별도 CountBadge로
+// 갈라졌는지 회귀로 고정한다.
+describe('EpicDetailPage — 스토리 섹션 헤더 제목 고정 + CountBadge(story #3764)', () => {
+  it('헤더가 "스토리 (N)" 한 문자열이 아니라 제목("스토리")과 수(CountBadge)가 갈라져 있다', async () => {
+    await mount(vi.fn(async () => ({
+      ok: true, status: 200,
+      json: async () => ({
+        data: epicFixture({
+          project_id: 'proj-1',
+          stories: [
+            { id: 's1', title: 'A', status: 'ready-for-dev', story_number: 1 },
+            { id: 's2', title: 'B', status: 'done', story_number: 2 },
+          ],
+        }),
+      }),
+    })));
+    const heading = Array.from(container.querySelectorAll('h2')).find((h) => h.textContent?.includes(koMessages.goals.stories));
+    expect(heading).toBeDefined();
+    expect(heading!.textContent).not.toMatch(/\(/);
+    expect(heading!.querySelector('span')?.textContent).toContain('2');
+  });
+});
+
 describe('EpicDetailPage — 403 vs 404 분리 (story #2545)', () => {
   it('org-sync 성립 여지가 있는(mismatch pending) 403이면 replace 없이 로딩 상태를 유지한다(#2545 원 시나리오)', async () => {
     // story #2587 AC3 — 이 테스트의 진짜 의도는 "org-sync가 아직 이 403을 되돌릴 수 있을

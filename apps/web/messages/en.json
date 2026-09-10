@@ -2478,7 +2478,7 @@
     "channelLabelFacebook": "Facebook",
     "channelLabelFacebookSandbox": "Facebook (test)",
     "channelLabelStibee": "Stibee",
-    "channelPostsCalendarUnscheduledLaneTitle": "No date set ({count})",
+    "channelPostsCalendarUnscheduledLaneTitle": "No date set",
     "channelPostsCalendarUnscheduledLaneLabel": "Drafts without a scheduled date",
     "channelPostsCalendarRangePrevWeek": "Previous week",
     "channelPostsCalendarRangeNextWeek": "Next week",
