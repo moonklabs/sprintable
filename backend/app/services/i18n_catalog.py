@@ -143,7 +143,9 @@ _CATALOG: dict[str, dict[str, str]] = {
         # 「다른 방에도 보내기」로 정렬(별건 승인, 이 카드에 동봉). 「게이트 유형」도 화면
         # 낱말 「결재」로.
         "ko": "이 결재는 다른 방에 보낼 수 없습니다.",
-        "en": "This gate type cannot be sent to another room",
+        # 유나 정정(2026-09-10 13:50Z, 페드루 전달) — 시트 en이 "this approval"이라
+        # ko와 같은 화면·같은 낱말("gate type"이 아니라 "approval")로 맞춘다.
+        "en": "This approval can't be sent to another room",
     },
     "gates.toss_requester_or_designated_only": {
         "ko": "상신자 또는 지정 결재자 본인만 다른 방에 보낼 수 있습니다.",
