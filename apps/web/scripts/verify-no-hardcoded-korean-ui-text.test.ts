@@ -161,18 +161,24 @@ describe('computeNewViolations', () => {
 //     방향어 자체가 모바일 거짓이라 폐기·i18n 키로 이관). 창건 사례가 더는 살아있는
 //     위반이 아니므로 자가진단 표본을 PO 판정 (b)가 이미 검증했던 같은 대체 실사례
 //     (`docs-client-layout.tsx aria-label="닫기"`, 지금도 baseline에 살아있음)로 교체한다.
-describe('창건 사례 — docs-client-layout.tsx aria-label="닫기"의 실 위반이 지금도 잡힌다', () => {
-  const FOUNDED_CASE_FILE = path.resolve(__dirname, '../src/app/(authenticated)/[ws]/[proj]/docs/docs-client-layout.tsx');
-  const FOUNDED_CASE_REL = 'app/(authenticated)/[ws]/[proj]/docs/docs-client-layout.tsx';
+//   story #3788 rebase(2026-09-10 11:1x, develop 08107dc81 위) — 위 대체 실사례도 그 사이
+//     #4132(3776 PR③)가 수리해 baseline stale로 걸렸다. 두 표본 모두 짧은 기간에 수리된
+//     건 이 가드가 평소 빠르게 작동해 baseline이 빠르게 줄고 있다는 증거이지 결함이
+//     아니다 — 표본은 그때그때 살아있는 실 위반으로 교체하는 것이 이 파일의 관례
+//     (「합성 문자열만으론 통과 의식」이라는 원 취지가 여전히 우선). settings/page.tsx는
+//     30여 건이 몰려 있어 단기간 완전 소진 위험이 낮은 자리로 표본을 옮긴다.
+describe('창건 사례 — app/unsubscribe/page.tsx의 실 위반이 지금도 잡힌다', () => {
+  const FOUNDED_CASE_FILE = path.resolve(__dirname, '../src/app/unsubscribe/page.tsx');
+  const FOUNDED_CASE_REL = 'app/unsubscribe/page.tsx';
 
-  it('docs-client-layout.tsx가 실제로 aria-label="닫기" 자리를 아직 갖고 있다', () => {
+  it('app/unsubscribe/page.tsx가 실제로 「링크가 유효하지 않거나 만료되었습니다.」 자리를 아직 갖고 있다', () => {
     const content = readFileSync(FOUNDED_CASE_FILE, 'utf8');
-    expect(content).toContain('aria-label="닫기"');
+    expect(content).toContain('링크가 유효하지 않거나 만료되었습니다.');
   });
 
   it('실 저장소 스캔이 이 창건 사례를 담는다(자가 죽어있지 않다)', () => {
     const violations = scanRepo(path.resolve(__dirname, '../src'));
-    const hit = violations.find((v) => v.file === FOUNDED_CASE_REL && v.text === '닫기');
+    const hit = violations.find((v) => v.file === FOUNDED_CASE_REL && v.text === '링크가 유효하지 않거나 만료되었습니다.');
     expect(hit).toBeDefined();
   });
 });

@@ -554,16 +554,25 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   const myConvIds = new Set(conversations.map((c) => c.id));
   const agentOnlyConvs = allConversations.filter((c) => !myConvIds.has(c.id));
 
+  // 카디르 QA(#4139, 772f755e9 재현) — 세션 中 role이 admin/owner→member로 하향되면(리마운트
+  // 없이 me.role만 갱신) Tabs 자체는 isAdminOrOwner 가드로 사라지는데, activeList state는
+  // 'agent'에 남아 있어 안 보이는 탭의 count를 아웃렛에 계속 공급했다(왼쪽 「대화가
+  // 없습니다」·오른쪽 「선택하면…」 모순 재발). 처방 둘 다: ①isAgent 판정 자체에
+  // isAdminOrOwner를 게이트 ②isAdminOrOwner가 꺼지는 전환에서 activeList를 'my'로 리셋.
+  useEffect(() => {
+    if (!isAdminOrOwner) setActiveList('my');
+  }, [isAdminOrOwner]);
+
   // story #3788(B-③ 후속, 페드루 그라운딩 2026-09-10 10:43Z) — «보이는 목록»만 센다. my
   // 탭 0건이어도 사용자가 지금 에이전트 탭을 보고 있고 거기 N건이 있으면 우측 outlet이
   // 「대화가 없습니다」를 말하면 안 된다(카드가 원래 잡던 모순이 탭 하나 옆으로 옮겨 앉는
   // 사례) — activeList로 어느 탭의 loading/count를 밀지 가른다.
   useEffect(() => {
-    const isAgent = activeList === 'agent';
-    chatRail?.setActiveList(activeList);
+    const isAgent = isAdminOrOwner && activeList === 'agent';
+    chatRail?.setActiveList(isAgent ? 'agent' : 'my');
     chatRail?.setConversationsLoading(isAgent ? agentLoading : loading);
     chatRail?.setConversationCount(isAgent ? agentOnlyConvs.length : conversations.length);
-  }, [chatRail, activeList, loading, agentLoading, conversations.length, agentOnlyConvs.length]);
+  }, [chatRail, isAdminOrOwner, activeList, loading, agentLoading, conversations.length, agentOnlyConvs.length]);
 
   const myListContent = loading ? (
     <div className="flex h-full items-center justify-center">

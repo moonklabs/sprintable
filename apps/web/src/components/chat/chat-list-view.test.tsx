@@ -601,4 +601,44 @@ describe('ChatListView — ChatRailContext 탭 게이트(story #3788 B-③ 후�
     expect(rail.activeList).toBe('my');
     expect(rail.count).toBe('0');
   });
+
+  // 카디르 QA(#4139, 772f755e9 재현) — 세션 中 role이 admin/owner→member로 하향되면(리마운트
+  // 없이 me.role만 갱신) Tabs는 사라지는데 activeList가 'agent'에 남아 안 보이는 탭의 count를
+  // 계속 공급했었다. 뮤테이션 대표: isAdminOrOwner 게이트/리셋 effect 둘 다 지워야 RED.
+  it('⭐admin+에이전트 탭 활성 中 role이 member로 하향(리마운트 없음) → count는 my 것(0)·activeList는 my로 리셋', async () => {
+    useDashboardContextMock.mockReturnValue({ role: 'admin' });
+    stubFetchByTab([], [AGENT_ITEM]);
+    await act(async () => {
+      root.render(wrap(
+        <ChatRailProvider>
+          <RailCapture />
+          <ChatListView projectId="proj-current" currentTeamMemberId="me-1" />
+        </ChatRailProvider>,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    const agentTab = [...container.querySelectorAll('[role="tab"]')].find((el) => el.textContent?.includes('에이전트'));
+    await act(async () => { agentTab!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(readRailCapture(container).activeList).toBe('agent');
+
+    // 리마운트 없이 같은 root에 재렌더 — mock 반환값만 바뀐 채로 다음 렌더가 새 role을 읽는다
+    // (실제로는 me.role SSE/폴 갱신이 만드는 상황, 여기선 mock 스왑으로 흉내).
+    useDashboardContextMock.mockReturnValue({ role: 'member' });
+    await act(async () => {
+      root.render(wrap(
+        <ChatRailProvider>
+          <RailCapture />
+          <ChatListView projectId="proj-current" currentTeamMemberId="me-1" />
+        </ChatRailProvider>,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    const rail = readRailCapture(container);
+    expect(container.querySelectorAll('[role="tab"]')).toHaveLength(0);
+    expect(rail.activeList).toBe('my');
+    expect(rail.count).toBe('0');
+  });
 });
