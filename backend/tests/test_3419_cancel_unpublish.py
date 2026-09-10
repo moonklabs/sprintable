@@ -838,3 +838,39 @@ async def test_connection_list_unpublish_blocked_reason_unsupported_for_adapter_
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_connection_list_can_unpublish_true_for_scopeless_adapters():
+    """story #3419(유나 실측·페드루 지적 2026-09-10) — truthy 가드 누락 회귀 pin.
+    hosted_site·wordpress·webhook(channel_adapters.py)은 「회수 지원(supports_
+    unpublish=True)·요구 스코프 비움(unpublish_required_scope=None)」을 선언한다 —
+    이 경우 `None in scopes`가 실제로 이 세 채널을 항상 can_unpublish=False+
+    scope_insufficient로 오판정했다(회수 구현이 실재하는데도, 재연결해도 영영 안
+    풀리는 자기모순까지). 스코프 없음=요구 스코프 자체가 없다는 뜻이라 그냥 통과해야
+    한다 — wordpress·webhook 둘 다 scopes=[](server_default) 그대로 검사.
+
+    뮤테이션 대상 — _to_response의 truthy 가드(`not adapter.unpublish_required_scope
+    or`)를 제거하면 이 테스트가 RED여야 한다."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id, role="member")
+            wordpress_connection_id = await _seed_connection(s, org_id, channel="wordpress")
+            webhook_connection_id = await _seed_connection(s, org_id, channel="webhook")
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        async with _client_for(app) as client:
+            r = await client.get(f"/api/v2/organizations/{org_id}/channel-connections")
+        assert r.status_code == 200, r.text
+        items = r.json()
+        for connection_id in (wordpress_connection_id, webhook_connection_id):
+            row = [it for it in items if it["id"] == str(connection_id)][0]
+            assert row["can_unpublish"] is True, row
+            assert row["unpublish_blocked_reason"] is None, row
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
