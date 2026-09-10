@@ -14,6 +14,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { fetchWithAuth } from '@/lib/db/client';
+import { stageRoleLabel } from '@/lib/stage-role';
 
 /** BE _GA4_SUPPORTED_METRICS(backend/app/schemas/story.py)와 동기 — 모르는 지표는 BE가 422. */
 const GA4_METRICS = ['activeUsers', 'newUsers', 'sessions', 'conversions', 'eventCount', 'screenPageViews'] as const;
@@ -89,6 +90,9 @@ export function LoopCreateDialog({
   const t = useTranslations('loops');
   const th = useTranslations('hypotheses');
   const tf = useTranslations('flow');
+  // story #3773 — stageRoleLabel 정본 키가 organization ns에 있다(trustRoleLabel*와 같은
+  // 집, 유나 定 — 워크플로 단계 role 어휘를 org/trust 역할 어휘 옆에 둔다).
+  const to = useTranslations('organization');
 
   const [title, setTitle] = useState('');
   const [mode, setMode] = useState<Mode>('new');
@@ -317,7 +321,7 @@ export function LoopCreateDialog({
                       return (
                         <li key={stage} className="break-words">
                           <span className="font-medium text-foreground">{meta?.action ?? stage}</span>
-                          {meta?.role ? <> ({meta.role})</> : null}
+                          {meta?.role ? <> ({stageRoleLabel(meta.role, to)})</> : null}
                         </li>
                       );
                     })}

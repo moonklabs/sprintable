@@ -873,9 +873,13 @@ describe('OrganizationEventsPage — 카탈로그 적용 진입점 + stage_metad
     await expandRow('org.moonklabs.recipe.cyclic');
 
     expect(container.textContent).toContain('초안 작성');
-    expect(container.textContent).toContain('Writer');
+    expect(container.textContent).toContain('Writer'); // 조직 커스텀 값 — 정본 밖이라 원어 그대로(story #3773).
     expect(container.textContent).toContain('검토');
-    expect(container.textContent).toContain('Reviewer');
+    // story #3773 — 'Reviewer'는 프리셋 13종 중 하나라 이제 stageRoleLabel()을 거쳐
+    // '검토자'로 뜬다(회귀 아님 — 이 테스트 자신의 "사람 언어로 뜬다" 의도가 오히려 이제
+    // 실제로 참이 됨). 되돌리면(role 정본 걷어내면) 원어 'Reviewer'가 다시 새 나온다.
+    expect(container.textContent).toContain('검토자');
+    expect(container.textContent).not.toContain('Reviewer');
     expect(container.textContent).toContain('qa');
     expect(container.textContent).toContain('publish');
   });
