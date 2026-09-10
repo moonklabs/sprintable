@@ -10,6 +10,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { ChatListView } from './chat-list-view';
+import { ChatRailProvider, useChatRailOptional } from '@/app/(authenticated)/chats/chat-rail-context';
 
 // story #3177(S3a) — ChatListView가 이제 NowStrip을 항상 마운트한다. 이 테스트의 관심사는
 // 대화 목록 자체(SSE/아바타/URL 조립)라 NowStrip의 전역 RefreshContext 폴링 배선까지
@@ -507,5 +508,97 @@ describe('ChatListView — 끊김+폴링 배너(story #3621, useChatSse mock 오
       vi.useRealTimers();
       useChatSseMock.mockReturnValue({ connected: true, polling: false });
     }
+  });
+});
+
+// story #3788(B-③ 후속, 페드루 그라운딩 2026-09-10 10:43Z) — 「내 대화」 0건 + 에이전트 대화
+// N건 + 사용자가 「에이전트」 탭을 보고 있을 때, ChatRailContext로 끌어올리는 값은 my 탭이
+// 아니라 **지금 보이는(에이전트) 탭**의 것이어야 한다. 이게 안 되면 왼쪽엔 대화가 줄줄이
+// 있는데 우측 outlet(chats/page.tsx)이 「대화가 없습니다」를 말하는 모순이 재발한다(카드가
+// 원래 잡던 모순이 탭 하나 옆으로 옮겨 앉는 사례).
+// DOM으로 읽는다(외부 변수 재할당 대신) — data-* 속성이 곧 단언 대상이라 React 훅
+// 불변성 규칙·TS 좁히기 문제 둘 다 안 만난다.
+function RailCapture() {
+  const rail = useChatRailOptional();
+  return (
+    <div
+      data-testid="rail-capture"
+      data-active-list={rail?.activeList ?? ''}
+      data-loading={String(rail?.conversationsLoading ?? '')}
+      data-count={String(rail?.conversationCount ?? '')}
+    />
+  );
+}
+
+function readRailCapture(c: HTMLElement) {
+  const el = c.querySelector('[data-testid="rail-capture"]') as HTMLElement | null;
+  return {
+    activeList: el?.dataset.activeList,
+    loading: el?.dataset.loading,
+    count: el?.dataset.count,
+  };
+}
+
+function stubFetchByTab(myItems: unknown[], agentItems: unknown[]) {
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (url.includes('/api/conversations/recent-outside-project')) {
+      return { ok: true, json: async () => ({ data: [] }) };
+    }
+    if (url.includes('/api/conversations?') && url.includes('include_agent_conversations=true')) {
+      return { ok: true, json: async () => ({ data: agentItems, total: agentItems.length }) };
+    }
+    if (url.includes('/api/conversations?')) {
+      return { ok: true, json: async () => ({ data: myItems, total: myItems.length }) };
+    }
+    return { ok: false, status: 404, json: async () => null };
+  }));
+}
+
+const AGENT_ITEM = {
+  id: 'conv-agent-1', type: 'dm', title: '올리베이라와의 대화',
+  latest_message: null, updated_at: '2026-09-10T00:00:00Z', unread_count: 0,
+  participants: [{ member_id: 'agent-1', name: '올리베이라', avatar_url: null, type: 'agent' }],
+};
+
+describe('ChatListView — ChatRailContext 탭 게이트(story #3788 B-③ 후속)', () => {
+  it('⭐「내 대화」 0건 + 에이전트 N건 + 에이전트 탭 활성 → conversationCount는 N(0 아님)', async () => {
+    useDashboardContextMock.mockReturnValue({ role: 'admin' }); // 탭 자체가 admin/owner 전용(677행)
+    stubFetchByTab([], [AGENT_ITEM]);
+    await act(async () => {
+      root.render(wrap(
+        <ChatRailProvider>
+          <RailCapture />
+          <ChatListView projectId="proj-current" currentTeamMemberId="me-1" />
+        </ChatRailProvider>,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    const agentTab = [...container.querySelectorAll('[role="tab"]')].find((el) => el.textContent?.includes('에이전트'));
+    expect(agentTab).not.toBeUndefined();
+    await act(async () => { agentTab!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    const rail = readRailCapture(container);
+    expect(rail.activeList).toBe('agent');
+    expect(rail.loading).toBe('false');
+    expect(rail.count).toBe('1');
+  });
+
+  it('my 탭이 활성일 때는 my 탭 카운트(0)를 민다(에이전트 N건은 안 보이므로 무시)', async () => {
+    stubFetchByTab([], [AGENT_ITEM]);
+    await act(async () => {
+      root.render(wrap(
+        <ChatRailProvider>
+          <RailCapture />
+          <ChatListView projectId="proj-current" currentTeamMemberId="me-1" />
+        </ChatRailProvider>,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    const rail = readRailCapture(container);
+    expect(rail.activeList).toBe('my');
+    expect(rail.count).toBe('0');
   });
 });

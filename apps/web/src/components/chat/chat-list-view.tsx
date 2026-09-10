@@ -322,11 +322,18 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   // agent 탭(allConversations·include_agent_conversations) 첫 활성화 1회만 fetch 하기 위한 가드.
   const agentLoadedRef = useRef(false);
   const [loading, setLoading] = useState(true);
+  // story #3788(B-③ 후속, 유나 定·페드루 그라운딩 2026-09-10 10:43Z) — agent 탭 첫 로드
+  // 여부를 알리는 render 신호. `loading`(my 탭)과 동형 — 최초 1회 로드만 재는 얕은 신호이고
+  // (project 전환 시 재로드 직전에만 별도로 true로 되돌린다), 그 밖엔 재무장하지 않는다.
+  const [agentLoading, setAgentLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [myOffset, setMyOffset] = useState(0);
   const [myTotal, setMyTotal] = useState(0);
   const [agentOffset, setAgentOffset] = useState(0);
   const [agentTotal, setAgentTotal] = useState(0);
+  // story #3788(B-③ 후속) — 사용자가 지금 보고 있는 탭. ChatRailContext로 끌어올려(아래)
+  // 우측 outlet이 «보이는 목록»을 세도록 한다(안 보이는 탭의 0/N은 모순을 안 만든다).
+  const [activeList, setActiveList] = useState<'my' | 'agent'>('my');
   const [internalShowModal, setInternalShowModal] = useState(false);
   const showModal = open !== undefined ? open : internalShowModal;
   const setShowModal = onOpenChange ?? setInternalShowModal;
@@ -341,15 +348,12 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   const convsRef = useRef(conversations);
   useEffect(() => { convsRef.current = conversations; }, [conversations]);
 
-  // story #3788(B-③, 유나 定 2026-09-10 카드 착지) — "내 대화" 목록 로드 상태를
-  // ChatRailContext로 끌어올려(DocsLayoutContext 형) 우측 outlet(chats/page.tsx)이 로딩·0건·
-  // 있음 셋 중 어느 세계인지 갈라 「선택하세요」와 왼쪽의 「대화가 없습니다」가 동시에 서는
-  // 모순을 막는다. optional이라 ChatRailProvider 밖(격리 단위테스트)에서는 조용히 no-op.
+  // story #3788(B-③, 유나 定·페드루 그라운딩 2026-09-10) — 목록 로드 상태를 ChatRailContext로
+  // 끌어올린다(DocsLayoutContext 형). 실제 lift 효과는 activeList/agentOnlyConvs가 갖춰진
+  // 아래(agentOnlyConvs 정의 뒤)에 있다 — «보이는 탭»의 값만 밀어야 하기 때문(10:43Z 그라운딩:
+  // my 0건이어도 사용자가 지금 에이전트 탭을 보고 있고 거기 N건이 있으면 우측이 「없다」고
+  // 말하면 안 된다). optional이라 ChatRailProvider 밖(격리 단위테스트)에서는 조용히 no-op.
   const chatRail = useChatRailOptional();
-  useEffect(() => {
-    chatRail?.setConversationsLoading(loading);
-    chatRail?.setConversationCount(conversations.length);
-  }, [chatRail, loading, conversations.length]);
 
   // 전환 in-flight 경합 가드(RC): fetch 응답 적용 시점에 여전히 같은 프로젝트인지 검증해 stale 응답을
   // drop 한다. render 단계 동기라 async resolve 시 항상 최신 projectId 를 가리킨다(assignee last-write-wins 동류).
@@ -381,16 +385,21 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   }, [projectId]);
 
   const fetchAllConversations = useCallback(async (nextOffset = 0, append = false) => {
-    const res = await fetchWithAuth(
-      `/api/conversations?project_id=${projectId}&include_agent_conversations=true&limit=${PAGE_LIMIT}&offset=${nextOffset}`
-    );
-    if (!res.ok) return;
-    const json = await res.json() as { data: ConversationItem[]; total: number };
-    if (projectId !== projectIdRef.current) return; // 전환됨 — stale 응답 drop(B 화면 안 덮음)
-    const items = json.data ?? [];
-    setAllConversations((prev) => append ? [...prev, ...items] : items);
-    setAgentOffset(nextOffset + items.length);
-    setAgentTotal(json.total ?? 0);
+    try {
+      const res = await fetchWithAuth(
+        `/api/conversations?project_id=${projectId}&include_agent_conversations=true&limit=${PAGE_LIMIT}&offset=${nextOffset}`
+      );
+      if (!res.ok) return;
+      const json = await res.json() as { data: ConversationItem[]; total: number };
+      if (projectId !== projectIdRef.current) return; // 전환됨 — stale 응답 drop(B 화면 안 덮음)
+      const items = json.data ?? [];
+      setAllConversations((prev) => append ? [...prev, ...items] : items);
+      setAgentOffset(nextOffset + items.length);
+      setAgentTotal(json.total ?? 0);
+    } finally {
+      // story #3788(B-③ 후속) — agentLoading을 loading(my 탭)과 동형으로 finally에서 해소.
+      setAgentLoading(false);
+    }
   }, [projectId]);
 
   // story #2168 PR-② — 프로젝트 밖 최근 대화. BE가 이미 인가로 거른 5개만 주므로 페이지네이션
@@ -445,7 +454,9 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     setAllConversations([]);
     setAgentOffset(0);
     setAgentTotal(0);
-    if (wasLoaded) loadAgentConversationsOnce();
+    // story #3788(B-③ 후속) — 재로드 직전에만 agentLoading을 되돌린다(clear 직후의 순간
+    // length===0을 「진짜 0건」으로 우측이 오독하지 않게 — 위 conversations 클리어와 같은 축).
+    if (wasLoaded) { setAgentLoading(true); loadAgentConversationsOnce(); }
   }, [projectId, loadAgentConversationsOnce]);
 
   const handleConversationMessage = useCallback((payload: { conversation_id?: string; content?: string; created_at?: string }) => {
@@ -542,6 +553,17 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
 
   const myConvIds = new Set(conversations.map((c) => c.id));
   const agentOnlyConvs = allConversations.filter((c) => !myConvIds.has(c.id));
+
+  // story #3788(B-③ 후속, 페드루 그라운딩 2026-09-10 10:43Z) — «보이는 목록»만 센다. my
+  // 탭 0건이어도 사용자가 지금 에이전트 탭을 보고 있고 거기 N건이 있으면 우측 outlet이
+  // 「대화가 없습니다」를 말하면 안 된다(카드가 원래 잡던 모순이 탭 하나 옆으로 옮겨 앉는
+  // 사례) — activeList로 어느 탭의 loading/count를 밀지 가른다.
+  useEffect(() => {
+    const isAgent = activeList === 'agent';
+    chatRail?.setActiveList(activeList);
+    chatRail?.setConversationsLoading(isAgent ? agentLoading : loading);
+    chatRail?.setConversationCount(isAgent ? agentOnlyConvs.length : conversations.length);
+  }, [chatRail, activeList, loading, agentLoading, conversations.length, agentOnlyConvs.length]);
 
   const myListContent = loading ? (
     <div className="flex h-full items-center justify-center">
@@ -655,7 +677,14 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
         />
       </div>
       {isAdminOrOwner ? (
-        <Tabs defaultValue="my" onValueChange={(v) => { if (v === 'agent') loadAgentConversationsOnce(); }} className="flex min-h-0 flex-1 flex-col">
+        <Tabs
+          defaultValue="my"
+          onValueChange={(v) => {
+            if (v === 'agent') loadAgentConversationsOnce();
+            setActiveList(v as 'my' | 'agent');
+          }}
+          className="flex min-h-0 flex-1 flex-col"
+        >
           <TabsList className="mx-4 mt-2 w-auto self-start">
             <TabsTrigger value="my">{t('myChatsTab')}</TabsTrigger>
             <TabsTrigger value="agent">{t('agentChatsTab')}</TabsTrigger>

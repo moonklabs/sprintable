@@ -35,6 +35,12 @@ interface ChatRailContextValue {
   setConversationsLoading: (value: boolean) => void;
   conversationCount: number;
   setConversationCount: (value: number) => void;
+  /** story #3788(B-③ 후속, 페드루 그라운딩 2026-09-10 10:43Z) — 좌측 레일에는 "내 대화"·
+   * "에이전트" 두 탭이 있고 `conversationsLoading`/`conversationCount`는 **지금 보이는 탭**의
+   * 값이어야 한다(안 보이는 탭의 0/N은 우측과 모순을 만들지 않는다 — my 0건이어도 사용자가
+   * 에이전트 탭을 보고 있고 거기 N건이 있으면 「없다」고 말하면 안 된다). */
+  activeList: 'my' | 'agent';
+  setActiveList: (value: 'my' | 'agent') => void;
 }
 
 const ChatRailContext = createContext<ChatRailContextValue | null>(null);
@@ -47,6 +53,7 @@ export function ChatRailProvider({ children }: { children: ReactNode }) {
   // 단정하지 않는다.
   const [conversationsLoading, setConversationsLoading] = useState(true);
   const [conversationCount, setConversationCount] = useState(0);
+  const [activeList, setActiveList] = useState<'my' | 'agent'>('my');
 
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 1279px)');
@@ -78,8 +85,9 @@ export function ChatRailProvider({ children }: { children: ReactNode }) {
       railMode, toggleManualExpand, setReadingOpen,
       conversationsLoading, setConversationsLoading,
       conversationCount, setConversationCount,
+      activeList, setActiveList,
     }),
-    [railMode, toggleManualExpand, setReadingOpen, conversationsLoading, conversationCount],
+    [railMode, toggleManualExpand, setReadingOpen, conversationsLoading, conversationCount, activeList],
   );
 
   return <ChatRailContext.Provider value={value}>{children}</ChatRailContext.Provider>;
