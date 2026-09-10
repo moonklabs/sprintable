@@ -441,6 +441,100 @@ describe('GateEvidence — 레시피 approve 게이트 승인 대상 실물 렌�
     expect(container.textContent).not.toContain(koMessages.cage.recipeApprovalSealedHashLabel);
   });
 
+  // story #3367(3자기점검, 페드루 지적 2026-09-10) — AC7("마지막 수정 주체·목적지").
+  describe('마지막 수정 주체·목적지(story #3367 AC7)', () => {
+    it('⭐destination=null(hosted_site)·latest_author_kind=human — 「마지막 수정 주체 · 휴먼」·「목적지 · 호스팅 블로그」가 뜬다', async () => {
+      const gate = recipeApprovalGate(
+        { channel: 'hosted_site', stage: 'approve' },
+        {
+          sealed_content_version: 3, sealed_content_sha256: 'abcdef0123456789',
+          sealed_destination_connection_id: null, latest_author_kind: 'human',
+        },
+      );
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+      expect(container.textContent).toContain(koMessages.cage.recipeApprovalLatestAuthorLabel);
+      expect(container.textContent).toContain(koMessages.content.authorHuman);
+      expect(container.textContent).toContain(koMessages.cage.recipeApprovalDestinationLabel);
+      expect(container.textContent).toContain(koMessages.cage.recipeApprovalDestinationHostedSite);
+    });
+
+    it('⭐destination=커넥션(WordPress)·latest_author_kind=agent — 「에이전트」 배지가 뜨고 목적지는 channelLabel() 표시명(uuid 노출 0)', async () => {
+      const gate = recipeApprovalGate(
+        { channel: 'wordpress', stage: 'approve' },
+        {
+          sealed_content_version: 1, sealed_content_sha256: 'abc',
+          sealed_destination_connection_id: '99999999-8888-7777-6666-555544443333',
+          sealed_destination_channel: 'wordpress',
+          latest_author_kind: 'agent',
+        },
+      );
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+      expect(container.textContent).toContain(koMessages.content.authorAgent);
+      expect(container.textContent).toContain(koMessages.content.channelLabelWordpress);
+      expect(container.textContent).not.toContain('99999999');
+      expect(container.textContent).not.toContain('44443333');
+      // 호스팅 블로그 문구가 잘못 새지 않는다(destination이 실제로 non-null인데).
+      expect(container.textContent).not.toContain(koMessages.cage.recipeApprovalDestinationHostedSite);
+    });
+
+    it('destination=커넥션인데 sealed_destination_channel이 없으면(연결 삭제 등 예외) uuid를 보이지 않고 「—」로 떨어진다', async () => {
+      const gate = recipeApprovalGate(
+        { channel: 'wordpress', stage: 'approve' },
+        {
+          sealed_content_version: 1, sealed_content_sha256: 'abc',
+          sealed_destination_connection_id: '99999999-8888-7777-6666-555544443333',
+          latest_author_kind: 'agent',
+        },
+      );
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+      expect(container.textContent).not.toContain('99999999');
+      expect(container.textContent).not.toContain('44443333');
+      expect(container.textContent).toContain('—');
+    });
+
+    it('latest_author_kind가 없으면(구버전 게이트) AuthorKindBadge의 fail-safe(「—」류)로 떨어진다(지어내지 않는다)', async () => {
+      const gate = recipeApprovalGate(
+        { channel: 'hosted_site' },
+        { sealed_content_version: 1, sealed_content_sha256: 'abc' },
+      );
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+      expect(container.textContent).toContain(koMessages.content.originAuthorUnknown);
+    });
+
+    // story #3367(디디 뮤테이션 셀프체크) — sealed_destination_connection_id는 Gate
+    // 실 컬럼이라 «모든» gate_type 응답에 항상 present(null 포함). 이 축의 렌더를
+    // site_posts 식별 조건(contentVersion/contentSha256)에 안 묶으면 S2 봉인(sealed_
+    // content_*)이 아직 안 착지한 recipe-approval 게이트(channel·stage만 있고 버전·
+    // 해시가 없는 옛 행)에도 "호스팅 블로그"가 새 나간다 — 그 회귀를 직접 pin(recipeFacts
+    // 자체는 not-null이라 RecipeApprovalFactsBlock까지는 도달하는, 더 정밀한 표본).
+    it('⭐channel·stage만 있고 sealed_content_version/sha256이 없으면(S2 미착지) 목적지·마지막 수정 주체 줄이 안 뜬다', async () => {
+      const gate = recipeApprovalGate({ channel: 'hosted_site', stage: 'approve' });
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+      expect(container.textContent).not.toContain(koMessages.cage.recipeApprovalDestinationLabel);
+      expect(container.textContent).not.toContain(koMessages.cage.recipeApprovalLatestAuthorLabel);
+    });
+  });
+
   // story #3560(concept_approval 봉인 doc, 페드루 PO 確定 2026-09-06) — sealed_content_*와
   // 동형이나 대상이 doc. contentBody(전문 펼침)와 달리 doc 링크만(제목=글자·해시 앞 12자).
   it('⭐concept_approval 봉인 doc — 제목이 클릭 가능한 링크로, 해시 앞 12자가 나란히 뜬다(전체 해시는 아님)', async () => {

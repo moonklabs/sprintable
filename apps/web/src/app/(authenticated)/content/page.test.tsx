@@ -466,6 +466,20 @@ describe('ContentPostListPage (story #3368)', () => {
     expect(latestCell?.querySelector('.proof-surface')).not.toBeNull();
   });
 
+  // story #3368 자기점검(페드루 지적 2026-09-10) — #3744가 열을 줄이며 「현재 버전」 v{n}을
+  // 통째로 빠뜨렸다(원작성 주체처럼 하위 칸으로 강등된 게 아니라 흔적 자체가 사라짐 —
+  // draft.current_version은 그대로 fetch되고 있었는데 렌더 자리가 없었다).
+  it('⭐목록 행에 현재 버전 v{n}이 보인다(#3744 회귀 pin)', async () => {
+    stubFetch([{ ...DRAFT_A, current_version: 3 }]);
+    await act(async () => {
+      root.render(wrap(<ContentPostListPage />));
+    });
+    await flush();
+
+    const versionCell = container.querySelector('[data-testid="content-current-version"]');
+    expect(versionCell?.textContent).toContain('v3');
+  });
+
   // story #3734 — 「보관」 행 액션·「보관됨 보기」 토글.
   describe('보관(story #3734)', () => {
     it('⭐can_archive=false — 「보관」 항목이 ⋯ 메뉴에 안 보인다(fail-closed, can_withdraw와 동형 정책)', async () => {

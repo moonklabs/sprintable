@@ -1567,6 +1567,11 @@
       "file": "tests/test_3766_insights_board_command_status.py",
       "sec": 3.3,
       "source": "story-3766(2026-09-10) — 신규 파일 실측(로컬, sprintable/backend/.venv pytest 직접 3회 실행 average≈3.23s·최고 3.27s, 3.3s로 등재). measure_destructive_durations_local.py 전체 배치 재측정(템플릿 DB sprintable_test_tpl·role sprintable 필요)이 아니라 이 신규 파일 1건만 별도 스크래치 DB(backend_test_3766_weights)에서 3회 반복 실측한 값 — 로컬이 CI보다 ~6배 빠르다는 _snapshot_policy 전제 그대로(절대시간 아님, 상대 비중 목적) 원값 그대로 등재. 실 CI 샤드 로그로 재확認 필요(AC2 재측정 규칙)."
+    },
+    {
+      "file": "tests/test_3367_gate_latest_author_and_destination.py",
+      "sec": 3.1,
+      "source": "story-3368(자기점검 갭, 2026-09-10) — 신규 파일 실측(로컬, sprintable/backend/.venv pytest --durations=0 직접 1회 실행, 3건 합계 3.11s — test_3766 등재 선례와 동일 방법론, 로컬이 CI보다 빠르다는 전제 그대로 원값 등재). 실 CI 샤드 로그로 재확認 필요(AC2 재측정 규칙)."
     }
   ]
 }
