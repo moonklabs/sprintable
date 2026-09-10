@@ -183,7 +183,7 @@ describe('ApprovalsQueue', () => {
       return { ok: true, json: async () => [] };
     }));
     await mount();
-    expect(container.textContent).not.toContain('게이트 조회 중...');
+    expect(container.textContent).not.toContain('게이트 조회 중…');
     expect(container.querySelector('[data-testid="gate-inbox-load-error"]')).not.toBeNull();
     expect(container.textContent).not.toContain('살아남은 항목');
   });

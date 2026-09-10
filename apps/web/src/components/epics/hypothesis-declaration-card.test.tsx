@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 //
 // story #3637(유나 silent-failure-sweep-3632, doc 자리 B) — L1 선례 조회(fetchPrecedents)
-// 실패를 setPrecedents([])로 그리면 "비슷한 가설 조회 중..." 로딩 문구가 조용히 사라져
+// 실패를 setPrecedents([])로 그리면 "비슷한 가설 조회 중…" 로딩 문구가 조용히 사라져
 // "찾아봤는데 없다"로 읽힌다. precedentsFailed 플래그로 declareL1LoadError 문장이 그
 // 자리에 서는지 검증.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
