@@ -2525,7 +2525,7 @@
     "channelPostsRetryConfirmChecklist": "채널에서 확인했습니다",
     "channelPostsRetryConfirmAction": "다시 시도",
     "channelPostsRetryConfirmPendingCta": "시도하는 중…",
-    "channelPostsRetrySuccess": "다시 시도 요청을 보냈습니다 — 자동 재시도 대기열에 올라갔습니다.",
+    "channelPostsRetrySuccess": "다시 시도 요청을 보냈습니다 — 다음 처리 때 한 번 더 시도하고, 그래도 실패하면 다시 멈춥니다.",
     "channelPostsRetryFailed": "다시 시도하지 못했습니다.",
     "errorPublicationCommandNotFound": "취소할 예약이 없습니다.",
     "errorChannelPostNotPublished": "아직 발행되지 않아 회수할 수 없습니다.",

@@ -2213,6 +2213,16 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
       expect(container.querySelector('[data-testid="channel-post-failure-badge"]')).toBeNull();
     });
 
+    it('story #3449(유나 실측·페드루 정정 2026-09-10) — 재시도 성공 문구가 반복을 약속하지 않는다(1회뿐, 실패하면 다시 멈춘다)', async () => {
+      // 실제로는 다음 tick 한 번만 더 시도하고(attempt_count 보존) 실패하면 곧바로
+      // dead_letter로 되돌아간다(서비스 :227) — "자동 재시도 대기열"이라는 옛 문구는
+      // 반복 재시도를 약속하는 것으로 읽혀 이 실동작과 어긋났다. 새 문구는 "한 번 더
+      // 시도하고, 그래도 실패하면 다시 멈춘다"는 뜻을 정확히 담아야 한다.
+      expect(koMessages.content.channelPostsRetrySuccess).not.toContain('대기열');
+      expect(koMessages.content.channelPostsRetrySuccess).toContain('한 번 더');
+      expect(koMessages.content.channelPostsRetrySuccess).toContain('그래도 실패하면');
+    });
+
     it('AC1 — 403(HUMAN_ONLY)은 서버 문장을 그대로 보인다(삼키지 않음)', async () => {
       stubFetch({
         draftDetail: { command_status: 'dead_letter', command_id: 'cmd-1' },
