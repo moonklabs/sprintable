@@ -1428,6 +1428,14 @@ jobs:
       - name: "Verify i18n keys referenced in code exist in ko/en (story #5ead8723 regression guard)"
         run: pnpm --filter web verify:i18n-keys-exist
 
+      # story #3760 회귀가드: App Router 라우트 파일(page/layout/template/loading/error/
+      # not-found/default.tsx)의 named export가 Next.js 화이트리스트 밖이면 next build에서만
+      # 죽는다(tsc·vitest는 이 계약을 모른다 — 실물: #4105, publishHistorySenderLabel을
+      # page.tsx에 named export로 뒀다가 build만 빨강). route.ts는 대상 밖(HTTP 메서드 export가
+      # 정상).
+      - name: "Verify App Router route file named exports are whitelisted (story #3760 regression guard)"
+        run: pnpm --filter web verify:route-file-exports
+
       # story #3486→#3493 회귀가드: 브라우저 로케일 의존 날짜 toLocaleString/
       # toLocaleDateString/toLocaleTimeString이 새로 생기면 실패한다 — 3436 묶음 8
       # 정본(formatRelativeTime/formatScheduledAt)이 있는데도 계속 새던 자리(유나
