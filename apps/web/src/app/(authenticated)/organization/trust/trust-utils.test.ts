@@ -1,6 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { isColdStart, groupRosterByRole, mergeMemberLookup, sortGroupMembersByName, extractSparklineValues, sparklinePoints } from './trust-utils';
+import { isColdStart, groupRosterByRole, mergeMemberLookup, resolveRoleLabel, sortGroupMembersByName, extractSparklineValues, sparklinePoints } from './trust-utils';
 import type { RosterMember, HistorySnapshot } from './trust-utils';
+
+// story #3735(D1) — groupRosterByRole이 이제 t(Translator)를 받아 기본 5키(role_key)면
+// i18n 정본을 쓴다(trust-utils.test.ts 아래 별도 describe가 그 경로를 직접 잰다). 이
+// 기존 스위트의 픽스처는 role_key='dev'(기본 5키 밖 — 커스텀 취급이라 role_label을
+// 그대로 쓴다)·'qa'(기본 5키 — i18n 경유)를 섞어 쓰므로, 실제 ko.json 값과 동일한
+// 스텁을 줘 순수 함수 계약(role_key→i18n)까지 같이 지킨다.
+const stubT = (key: string): string => ({
+  trustRoleLabelImplementation: '개발',
+  trustRoleLabelPo: 'PO',
+  trustRoleLabelQa: 'QA',
+  trustRoleLabelDesign: '디자인',
+  trustRoleLabelDevops: 'DevOps',
+} as Record<string, string>)[key] ?? key;
 
 describe('isColdStart (story 7e21a8b5 — E-VERIFY 콜드스타트 중립 판정)', () => {
   it('is cold-start when hit_rate is null (표본 없음)', () => {
@@ -20,6 +33,51 @@ describe('isColdStart (story 7e21a8b5 — E-VERIFY 콜드스타트 중립 판정
   });
 });
 
+// story #3735(D1, 유나 定) — role_label은 DB값(조직 생성 시 1회 시드, locale 무관)이라
+// i18n이 아니다. DB 무변 — 기본 5키(role_key로만 판정)면 i18n 정본이 role_label을
+// 앞지르고(실제 바뀌는 낱말: "구현"→"개발" 하나), 기본 5키가 아니면(=조직이 만든 커스텀
+// 역할) DB의 role_label이 그대로 이긴다.
+describe('resolveRoleLabel (story #3735·D1 — 기본 5키 i18n 정본, 커스텀은 DB가 이긴다)', () => {
+  it('기본 5키(implementation)는 DB role_label("구현")을 무시하고 i18n 정본("개발")을 쓴다', () => {
+    expect(resolveRoleLabel('implementation', '구현', stubT)).toBe('개발');
+  });
+
+  it('기본 5키(po·qa·design·devops)도 i18n 정본을 쓴다 — 실측상 기존 DB 값과 이미 같아 문구는 안 바뀐다', () => {
+    expect(resolveRoleLabel('po', 'PO', stubT)).toBe('PO');
+    expect(resolveRoleLabel('qa', 'QA', stubT)).toBe('QA');
+    expect(resolveRoleLabel('design', '디자인', stubT)).toBe('디자인');
+    expect(resolveRoleLabel('devops', 'DevOps', stubT)).toBe('DevOps');
+  });
+
+  it('기본 5키가 아니면(커스텀 역할) DB role_label이 이긴다 — FE가 조직이 지은 이름을 덮지 않는다', () => {
+    expect(resolveRoleLabel('growth', '그로스', stubT)).toBe('그로스');
+  });
+
+  it('커스텀 역할인데 role_label이 null이면 role_key로 폴백한다(기존 계약 보존)', () => {
+    expect(resolveRoleLabel('growth', null, stubT)).toBe('growth');
+  });
+
+  // 뮤테이션 대조 — role_key 판정을 role_label 판정으로 잘못 바꾸면(예: label==='구현'으로
+  // 분기) 이 케이스가 못 잡는 사각이 생긴다는 것 자체를 자가 증명. 기본 키인데 커스텀
+  // 조직이 우연히 같은 label 문자열을 안 쓰는 상황을 반대로 검산 — role_key가 유일한
+  // 판정축임을 고정.
+  it('role_key가 유일한 판정축이다 — 커스텀 role_key에 기본 키와 같은 label이 와도 커스텀 취급', () => {
+    expect(resolveRoleLabel('growth', 'PO', stubT)).toBe('PO');
+    // 위는 우연히 i18n 값과 같아 구분이 안 되므로, 다른 값으로 재확인.
+    expect(resolveRoleLabel('growth', '구현', stubT)).toBe('구현');
+  });
+
+  // story #3735 CHANGES(카디르 QA 지적) — DEFAULT_ROLE_LABEL_KEY가 객체 리터럴이라
+  // role_key가 Object.prototype 이름(constructor·toString·hasOwnProperty 등)이면
+  // 상속 함수가 truthy로 걸려 "커스텀이 이긴다" 계약이 깨진다(함수 객체가 t()에
+  // 들어가는 사고). Object.hasOwn 가드가 그 자리를 막는지 직접 잰다.
+  it('role_key가 Object.prototype 이름이어도(constructor 등) 커스텀 DB label이 그대로 이긴다', () => {
+    expect(resolveRoleLabel('constructor', '조직 커스텀', stubT)).toBe('조직 커스텀');
+    expect(resolveRoleLabel('toString', '조직 커스텀2', stubT)).toBe('조직 커스텀2');
+    expect(resolveRoleLabel('hasOwnProperty', null, stubT)).toBe('hasOwnProperty');
+  });
+});
+
 describe('groupRosterByRole (E-VERIFY 중립 정렬 — 성과순 금지, 라벨 이름순만)', () => {
   const row = (member_id: string, role_key: string, role_label: string | null, hit_rate: number | null = null, resolved: number | null = 0) =>
     ({ member_id, role_key, role_label, hit_rate, resolved, computed_at: '2026-07-15T00:00:00Z', pending: null });
@@ -33,18 +91,18 @@ describe('groupRosterByRole (E-VERIFY 중립 정렬 — 성과순 금지, 라벨
       row('m2', 'dev', '개발', 0.95, 10),
       row('m3', 'dev', '개발', 0.99, 10),
     ];
-    const grouped = groupRosterByRole(rows);
+    const grouped = groupRosterByRole(rows, stubT);
     expect(grouped.map(([label]) => label)).toEqual(['QA', '개발']);
     expect(grouped.find(([label]) => label === '개발')?.[1]).toHaveLength(2);
   });
 
-  it('falls back to role_key when role_label is null', () => {
-    const grouped = groupRosterByRole([row('m1', 'dev', null)]);
+  it('falls back to role_key when role_label is null(기본 5키 밖 — 커스텀 취급)', () => {
+    const grouped = groupRosterByRole([row('m1', 'dev', null)], stubT);
     expect(grouped).toEqual([['dev', [row('m1', 'dev', null)]]]);
   });
 
   it('returns empty for an empty roster', () => {
-    expect(groupRosterByRole([])).toEqual([]);
+    expect(groupRosterByRole([], stubT)).toEqual([]);
   });
 });
 

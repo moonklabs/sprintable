@@ -299,3 +299,52 @@ describe('OrgMembersSection — en 로케일 한글 노출 0(story #3606, i18n �
     expect('Members (1) 가입').toMatch(HANGUL_RE);
   });
 });
+
+// story #3735(UI 점검 B·E절, 유나 定) — 수를 제목 문자열 안에 넣지 않는다. 목록 헤더가
+// "구성원 ({count})" 한 문자열이 아니라 제목 고정("구성원") + 별도 CountBadge로 갈라졌는지
+// 회귀로 고정한다(이벤트 화면 events/page.tsx와 동형).
+describe('OrgMembersSection — 목록 헤더 제목 고정 + CountBadge(story #3735)', () => {
+  it('헤더가 「구성원 (N)」 한 문자열이 아니라 제목("구성원")과 수(CountBadge)가 갈라져 있다', async () => {
+    await mountAsAdmin([
+      { id: 'm1', user_id: 'u1', role: 'owner', name: 'A' },
+      { id: 'm2', user_id: 'u2', role: 'member', name: 'B' },
+      { id: 'm3', user_id: 'u3', role: 'member', name: 'C' },
+    ], 'u1');
+
+    // "조직 전체 구성원"(orgMembersHeading, 상단 초대 카드 제목)도 "구성원"을 포함해
+    // 구별해야 한다 — 목록 헤더는 CountBadge(span)를 갖는 쪽 하나뿐이다.
+    const headings = Array.from(container.querySelectorAll('h2')).filter((h) => h.textContent?.includes('구성원'));
+    expect(headings.length).toBeGreaterThan(1);
+    const heading = headings.find((h) => h.querySelector('span'));
+    expect(heading).toBeDefined();
+    // 제목 자체엔 괄호 수식이 없다 — "구성원 (3)"처럼 한 문자열로 붙어 있으면 실패.
+    expect(heading!.textContent).not.toMatch(/구성원\s*\(/);
+    // 수는 헤더 안 별도 요소(CountBadge)로 존재한다.
+    const badge = heading!.querySelector('span');
+    expect(badge?.textContent).toContain('3');
+  });
+
+  // story #3735 CHANGES(유나 재검토) — 옆 "초대 대기" 섹션 헤더가 옛 괄호 형("초대 대기
+  // ({count})")으로 남아 같은 화면 안 두 형이 세로로 나란히 서는 불일치가 있었다. 초대
+  // 대기 1건 이상이면 이 섹션이 함께 선다(유나 실측) — 같은 처방으로 통일됐는지 고정.
+  it('「초대 대기」 헤더도 같은 처방(제목 고정 + CountBadge)이다 — 두 헤더 형이 갈리지 않는다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/org-members') {
+        return { ok: true, json: async () => ({ data: [{ id: 'm1', user_id: 'u1', name: 'A', role: 'owner', created_at: '2026-09-01T00:00:00Z' }] }) };
+      }
+      if (url === '/api/organizations/org-1/invites') {
+        return { ok: true, json: async () => ({ data: [{ id: 'inv-1', email: 'x@example.com', role: 'member', status: 'pending', expires_at: '2026-09-10T00:00:00Z' }] }) };
+      }
+      if (url === '/api/projects') return { ok: true, json: async () => ({ data: [] }) };
+      if (url === '/api/me') return { ok: true, json: async () => ({ data: { user_id: 'u1' } }) };
+      throw new Error('unexpected fetch: ' + url);
+    }));
+    await act(async () => { root.render(wrap(<OrgMembersSection orgId="org-1" currentRole="admin" />)); });
+    await flush();
+
+    const heading = Array.from(container.querySelectorAll('h2')).find((h) => h.textContent?.includes('초대 대기'));
+    expect(heading).toBeDefined();
+    expect(heading!.textContent).not.toMatch(/초대 대기\s*\(/);
+    expect(heading!.querySelector('span')?.textContent).toContain('1');
+  });
+});

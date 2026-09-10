@@ -60,11 +60,35 @@ export function coldStartReason(pending: number | null): { key: string; values?:
   return { key: 'trustColdStartEmptyReason' };
 }
 
+// story #3735(D1, 유나 定 2026-09-10) — role_label은 DB값(organization.py
+// DEFAULT_PARTICIPATION_ROLES 시드, 조직 생성 시 1회 한글 고정 기록 — locale 무관·"구현"이
+// 그 예)이라 i18n이 아니다. DB는 무변(적기만) — 기본 5키(무엇이 "기본"인지는 role_key로만
+// 판정 가능·label 문자열로는 커스텀과 구분 불가)면 이 자리에서 i18n 정본으로 한 단계
+// 앞질러 대체하고, 그 5키가 아니면(=조직이 직접 만든 커스텀 역할) DB의 role_label을 그대로
+// 쓴다(커스텀이 이긴다 — 조직이 지은 이름을 FE가 덮어쓸 권한이 없다).
+const DEFAULT_ROLE_LABEL_KEY: Record<string, string> = {
+  implementation: 'trustRoleLabelImplementation',
+  po: 'trustRoleLabelPo',
+  qa: 'trustRoleLabelQa',
+  design: 'trustRoleLabelDesign',
+  devops: 'trustRoleLabelDevops',
+};
+
+export function resolveRoleLabel(roleKey: string, roleLabel: string | null, t: Translator): string {
+  // story #3735 CHANGES(카디르 QA 지적) — 객체 리터럴 인덱싱은 role_key가
+  // 'constructor'/'toString' 같은 Object.prototype 이름이면 상속받은 함수가
+  // truthy로 걸려 커스텀 DB label 대신 그 함수 객체가 t()에 들어간다("커스텀이
+  // 이긴다" 계약 위반). Object.hasOwn으로 이 자리의 실 프로퍼티인지부터 확認한다.
+  const i18nKey = Object.hasOwn(DEFAULT_ROLE_LABEL_KEY, roleKey) ? DEFAULT_ROLE_LABEL_KEY[roleKey] : undefined;
+  if (i18nKey) return t(i18nKey);
+  return roleLabel ?? roleKey;
+}
+
 // 직무(role_key)별 그룹핑 — 순위/성과순 정렬 금지, role_label 이름순만(E-VERIFY 중립 정렬 규율).
-export function groupRosterByRole(rows: OrgSummaryRow[]): Array<[string, OrgSummaryRow[]]> {
+export function groupRosterByRole(rows: OrgSummaryRow[], t: Translator): Array<[string, OrgSummaryRow[]]> {
   const groups = new Map<string, OrgSummaryRow[]>();
   for (const row of rows) {
-    const key = row.role_label ?? row.role_key;
+    const key = resolveRoleLabel(row.role_key, row.role_label, t);
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key)!.push(row);
   }

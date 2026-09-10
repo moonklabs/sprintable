@@ -7,6 +7,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { MemberRow } from '@/components/ui/member-row';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
+import { CountBadge } from '@/components/ui/count-badge';
 
 import { fetchWithAuth } from '@/lib/db/client';
 import { canEditOrgMemberRole } from '@/lib/org-member-role';
@@ -141,8 +142,11 @@ export default function OrganizationRolesPage() {
         return (
           <SectionCard key={role}>
             <SectionCardHeader>
-              <h2 className="text-base font-semibold text-foreground">
-                {t(ROLE_LABEL_KEY[role])} ({group.length})
+              {/* story #3735(UI 점검 B·E절, 유나 定) — 수를 제목 문자열 안에 넣지 않는다.
+                  제목 고정 + 수는 옆 CountBadge로(이벤트 화면 events/page.tsx와 동형). */}
+              <h2 className="flex items-center gap-2 text-base font-semibold text-foreground">
+                {t(ROLE_LABEL_KEY[role])}
+                <CountBadge count={group.length} />
               </h2>
             </SectionCardHeader>
             <SectionCardBody>
