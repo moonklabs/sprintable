@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
 import { useTopBar } from '@/components/nav/top-bar-context';
 import { useMediaQuery } from '@/lib/use-media-query';
@@ -16,7 +16,6 @@ import { DocSearchResults, type DocSearchResult } from '@/components/docs/doc-se
 import { useTreeExpanded } from '@/components/docs/use-tree-expanded';
 import { Button } from '@/components/ui/button';
 import { CountBadge } from '@/components/ui/count-badge';
-import { EmptyState } from '@/components/ui/empty-state';
 import { useToast } from '@/components/ui/toast';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { ChevronDown, ChevronLeft, ChevronRight, FileText, FolderPlus, Plus, X } from 'lucide-react';
@@ -63,6 +62,13 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
 
   const [tree, setTree] = useState<Doc[]>([]);
   const [loading, setLoading] = useState(true);
+  // story #3784 — DocsIndex가 "아직 로딩 중"과 "fetch 실패"를 "정말 0건"과 가르는 데 쓴다.
+  const [loadError, setLoadError] = useState(false);
+  // story #3784(페드루 재검토 10:11Z) — 태그 필터 토글마다(:194 effect, cursor 없이
+  // fetchTree 재호출) loading을 다시 켜면 이미 보여줄 트리가 있는데도 마스트헤드·필터행까지
+  // 통째 비는 회귀가 생긴다. "fetch 中"이 아니라 "지금 보여줄 게 없다"를 로딩 조건으로
+  // 삼는다 — ref인 이유: tree를 deps에 넣으면 이 값을 쓰는 effect(:194)가 루프가 된다.
+  const hasContentRef = useRef(false);
   const [treeDrawerOpen, setTreeDrawerOpen] = useState(false);
   // 모바일 트리거 칩 breadcrumb: 현재 문서명(flat tree에서 slug 조회·미선택 시 폴백).
   const currentDocTitle = currentSlug ? (tree.find((d) => d.slug === currentSlug)?.title ?? null) : null;
@@ -157,6 +163,15 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
 
   const fetchTree = useCallback(async (tags?: string[], cursor?: string | null) => {
     if (!projectId) return;
+    // story #3784(페드루 짚음 10:02Z·10:11Z 재검토) — 재시도(에러 배너의 「다시 시도」
+    // 포함)가 이전 실패 신호를 그대로 물고 있지 않도록, 시도 시작 시 먼저 걷는다(성공하면
+    // 그대로 false·실패하면 catch가 다시 켠다). 로딩 조건은 «fetch 中»이 아니라 «지금 보여줄
+    // 게 없다»(hasContentRef) — 안 그러면 태그 필터 토글마다(:216 근방 effect, cursor 없이
+    // fetchTree 재호출) 이미 보여줄 트리가 있는데도 마스트헤드·필터행까지 통째 비는 회귀가
+    // 생긴다(유나 재현). cursor가 있는 "더 보기" 호출은 docsLoadingMore가 이미 그 UX를
+    // 담당하므로 건드리지 않는다.
+    if (!cursor && !hasContentRef.current) setLoading(true);
+    setLoadError(false);
     try {
       // story #2191 — "view=tree"는 죽은 파라미터였다(/api/docs가 그 값을 아예 안 읽어
       // 항상 무커서 일반 목록 분기로 떨어졌다). #2540 이후 BE/FE 둘 다 커서를 실제로
@@ -174,8 +189,13 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
       }
       setDocsHasMore(meta?.hasMore ?? false);
       setDocsNextCursor(meta?.nextCursor ?? null);
+      hasContentRef.current = (data?.length ?? 0) > 0;
     } catch {
       // tree fetch failed — keep existing
+      setLoadError(true);
+      // 실패 뒤 재시도 때는 다시 로딩을 세워야 한다(카디르 재현) — hasContentRef를 걷어
+      // 위 setLoading(true) 조건이 다음 호출에서 막히지 않게 한다.
+      hasContentRef.current = false;
     } finally {
       setLoading(false);
       setDocsLoadingMore(false);
@@ -520,8 +540,35 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
           />
         ) : loading ? (
           <p className="px-2 py-4 text-xs text-muted-foreground">{t('loading')}</p>
+        ) : loadError ? (
+          // story #3784(유나 짚음) — 오른쪽 DocsIndex가 실패 배너로 갈라졌는데 이 트리가
+          // "0건"으로 남으면 한 화면이 두 말을 하는 자리가 그대로 남는다. 같은 키
+          // (indexLoadError, "문서 목록")를 쓰되 폭이 좁아 Alert 대신 로딩 문구가 서던
+          // 그 자리에 한 줄 + 텍스트 재시도로.
+          <div className="px-2 py-4">
+            <p className="text-xs text-muted-foreground">{t('indexLoadError')}</p>
+            {/* 유나 정정(10:01Z) — raw 버튼 요소가 DS 게이트 A(verify-no-new-raw-button)를
+                건드렸다. 이 레일 자리의 정본은 variant="link"(hover 배경 자체가 없음 —
+                content/page.tsx:248 실측 그대로, ghost는 좁은 레일에서 hover 사각형이
+                뜬다). 색은 문구가 아니라 행동에 싣는다(오른쪽 destructive 문구와 대칭). */}
+            <Button
+              type="button"
+              variant="link"
+              size="xs"
+              onClick={() => void fetchTree(selectedTags.length ? selectedTags : undefined)}
+              className="mt-1 h-auto px-0 text-xs"
+            >
+              {tc('retry')}
+            </Button>
+          </div>
         ) : tree.length === 0 ? (
-          <EmptyState title={t('title')} description={t('selectDoc')} className="mt-2 bg-background/70" action={<Button size="sm" onClick={handleNewDoc}><Plus className="mr-1 h-4 w-4" />{t('newDoc')}</Button>} />
+          // story #3784(페드루 짚음 09:49Z) — 고를 문서가 0건인데 왼쪽은 "선택하세요"
+          // (`selectDoc`)를 말하고 오른쪽(DocsIndex)은 "아직 쌓인 문서가 없어요"
+          // (`emptyTitle`)를 말하던 자리 — 같은 사실은 같은 낱말로. CTA도 뺀다(오른쪽
+          // 빈 상태+상단 바에 이미 「새 문서」 둘이 있어 여기까지 셋이면 과함).
+          // `selectDoc`은 그대로 둔다 — docs-shell-client.tsx의 "문서는 있는데 미선택"
+          // 자리는 이 분기가 아니라 별도 자리다.
+          <p className="px-2 py-4 text-xs text-muted-foreground">{t('emptyTitle')}</p>
         ) : (
           <>
             <RecentsSection
@@ -563,7 +610,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
 
 
   return (
-    <DocsLayoutContext.Provider value={{ wsSlug, projSlug, projectId, tree, setTree, handleNewDoc, fetchTree, pendingDocUpdate, clearPendingDocUpdate, expandFolder, openTreeDrawer: openDrawer }}>
+    <DocsLayoutContext.Provider value={{ wsSlug, projSlug, projectId, tree, setTree, loading, loadError, handleNewDoc, fetchTree, pendingDocUpdate, clearPendingDocUpdate, expandFolder, openTreeDrawer: openDrawer }}>
       {/* 근본 재구현(2076 회귀 후속, 유나양 규격) — currentSlug 없음(목록)=켬, 있음(문서 하나)=
           끔. 이 shell은 단일 문서가 화면을 꽉 채우는 구조(목록+본문 동시 2단 아님)라 이 분기가
           맞다(2단 shell이었다면 항상 켜야 함 — 유나양 규격 예외 조항). */}

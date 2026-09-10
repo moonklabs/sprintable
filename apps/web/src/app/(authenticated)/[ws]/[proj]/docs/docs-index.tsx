@@ -55,10 +55,11 @@ function StatusChip({ status }: { status: string | undefined }) {
 
 export function DocsIndex() {
   const t = useTranslations('docs');
+  const tc = useTranslations('common');
   const locale = useLocale();
   const displayTimezone = resolveDisplayTimezone().tz;
   const router = useRouter();
-  const { tree, handleNewDoc, wsSlug, projSlug } = useDocsLayout();
+  const { tree, handleNewDoc, wsSlug, projSlug, loading, loadError, fetchTree } = useDocsLayout();
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null); // null = 전체
   const [statusFilter, setStatusFilter] = useState<StatusFilter | null>(null);
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
@@ -102,6 +103,32 @@ export function DocsIndex() {
   // 통일해 에디터 직행 1스텝으로 되돌린다 — 리더는 에디터 상단의 opt-in "읽기 보기" 링크로만
   // 진입(삭제 아님, default만 이동).
   const goToDoc = (slug: string) => router.push(docUrl(wsSlug, projSlug, slug));
+
+  // story #3784 — "아직 안 옴"·"실패"·"정말 0건"을 가른다. 로딩 中엔 조용히 아무것도
+  // 그리지 않는다(사이드바가 이미 로딩 중 신호를 그린다 — 이 존까지 스켈레톤을 겹칠 이유 0).
+  if (loading) {
+    return null;
+  }
+
+  if (loadError) {
+    // story #3784(유나 정정 09:40Z) — settings/page.tsx의 Alert destructive 배너는
+    // 배너 「아래」에 계속 그려지는 섹션들이 있다는 전제 위에 선다(870-873행). 이
+    // 0건 분기(아래)는 early return이라 "위"가 없는 빈 페인이 된다 — 배너를 얹을
+    // 자리 자체가 없다. 집안에 이미 같은 형(early return + 빈 페인 중앙)을 가른
+    // 정본이 chat-view.tsx의 messagesLoadFailed다 — 그 형 그대로.
+    return (
+      <div className="flex h-full items-center justify-center p-4 lg:p-6">
+        <div className="flex flex-col items-center gap-3 text-center">
+          <p role="alert" aria-live="assertive" aria-atomic="true" className="text-sm text-destructive">
+            {t('indexLoadError')}
+          </p>
+          <Button size="sm" variant="outline" onClick={() => void fetchTree()}>
+            {tc('retry')}
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   // story #2955 §6(PO 요건②) — "문서를 선택하세요" 재현 금지. 0건은 에러가 아니라 만들
   // 데이터로서 설계 — 첫 문서 CTA + 왜 0인지 맥락(신규 프로젝트) 병기.

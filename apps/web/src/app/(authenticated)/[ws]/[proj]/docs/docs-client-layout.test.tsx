@@ -11,6 +11,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../../../../messages/ko.json';
 import { DocsClientLayout } from './docs-client-layout';
+import { DocsIndex } from './docs-index';
 
 const { pushMock } = vi.hoisted(() => ({ pushMock: vi.fn() }));
 vi.mock('next/navigation', () => ({
@@ -135,6 +136,44 @@ describe('DocsClientLayout — 레일 v2 재조립 후 6 능력 회귀가드(§1
     await act(async () => { await Promise.resolve(); });
     expect(calls.some((u) => u.includes('tags=') && u.includes('%EC%8A%A4%ED%8E%99') === false ? u.includes('tags=') : true)).toBe(true);
     expect(calls.some((u) => u.includes('tags='))).toBe(true);
+  });
+
+  // story #3784(페드루 재검토 10:11Z) — 이미 트리가 있는 상태에서 태그를 토글하면
+  // fetchTree가 cursor 없이 재호출된다(:201 effect, selectedTags deps). 그 재호출이
+  // pending인 동안에도 «지금 보여줄 게 없다»는 거짓이므로 로딩 화면으로 전체를 갈아끼우면
+  // 안 된다(마스트헤드·필터행·기존 목록이 살아있어야 함) — hasContentRef가 이 판정을 진다.
+  it('③문서가 이미 있는 상태에서 태그 토글 — pending 中에도 로딩 화면으로 안 갈리고 기존 목록·필터행이 유지된다', async () => {
+    let resolveSecond!: (v: { ok: boolean; json: () => Promise<unknown> }) => void;
+    let callCount = 0;
+    const fetchMock = vi.fn(async () => {
+      callCount += 1;
+      if (callCount === 1) return { ok: true, json: async () => ({ data: [DOC_A, DOC_B], meta: { hasMore: false, nextCursor: null } }) };
+      return new Promise((resolve) => { resolveSecond = resolve; });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await mount();
+    // 기본(grouped) 뷰는 그룹 헤더가 접혀 있어 문서명이 안 보인다 — "내 폴더"(DocTree)로
+    // 전환해 루트 문서를 바로 드러낸다(⑤뷰모드 테스트와 동형).
+    const foldersTab = [...container.querySelectorAll('button')].find((b) => b.textContent === '내 폴더');
+    await act(async () => { foldersTab!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(container.textContent).toContain('문서A');
+
+    const tagToggle = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('태그'));
+    expect(tagToggle).toBeTruthy();
+    await act(async () => { tagToggle!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const tagChip = [...container.querySelectorAll('button')].find((b) => b.textContent === '#스펙');
+    expect(tagChip).toBeTruthy();
+    await act(async () => { tagChip!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    // 두 번째 fetch(태그 반영)가 아직 pending — 로딩 문구 0·기존 목록·필터행(「태그」 토글) 유지.
+    expect(container.textContent).not.toContain('불러오는 중');
+    expect(container.textContent).toContain('문서A');
+    expect(tagToggle!.isConnected).toBe(true);
+
+    await act(async () => {
+      resolveSecond({ ok: true, json: async () => ({ data: [DOC_B], meta: { hasMore: false, nextCursor: null } }) });
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    });
+    expect(container.textContent).toContain('문서B');
   });
 
   // story #3053(2984-S5) — 선택 태그 칩은 헤어라인(border-proof-line+bg-transparent)을 쓰고
@@ -290,5 +329,98 @@ describe('DocsClientLayout — 로드맵 P2·PR-E L1(모바일 드로어 elevati
     expect(panel).toBeTruthy();
     expect(panel?.className).toContain('shadow-[var(--elev-overlay)]');
     expect(panel?.className).not.toMatch(/(^|\s)shadow-lg(\s|$)/);
+  });
+});
+
+// story #3784(카디르 QA·PO 짚음) — DocsLayoutContextType에 loading이 없어 DocsIndex가
+// "아직 안 옴"과 "0건"을 못 가르던 실사고. 실 소비처 구성(page.tsx = DocsClientLayout이
+// DocsIndex를 children으로 감싸는 형)을 그대로 재현해 컨텍스트 실 배선을 검증한다 —
+// docs-index.test.tsx의 useDocsLayout() 모킹 테스트는 컴포넌트 로직만 잰다(배선 자체는
+// 안 잰다).
+describe('DocsClientLayout — story #3784 loading/loadError 컨텍스트 실 배선(DocsIndex 실 자식)', () => {
+  async function mountWithIndex() {
+    await act(async () => {
+      root.render(wrap(
+        <DocsClientLayout wsSlug="ws1" projSlug="proj1" projectId="proj-1"><DocsIndex /></DocsClientLayout>,
+      ));
+    });
+  }
+
+  it('트리 fetch가 아직 안 끝난 순간엔 DocsIndex가 "아직 쌓인 문서가 없어요"를 안 그린다(로딩 게이트 실 배선)', async () => {
+    let resolveFetch!: (v: { ok: boolean; json: () => Promise<unknown> }) => void;
+    vi.stubGlobal('fetch', vi.fn(() => new Promise((resolve) => { resolveFetch = resolve; })));
+    await mountWithIndex();
+    // fetch가 아직 안 풀린 시점(pending) — 로딩 中.
+    expect(container.textContent).not.toContain('아직 쌓인 문서가 없어요');
+    await act(async () => {
+      resolveFetch({ ok: true, json: async () => ({ data: [DOC_A, DOC_B], meta: { hasMore: false, nextCursor: null } }) });
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    });
+    expect(container.textContent).toContain('문서A'); // 로드 완료 후엔 정상 렌더.
+  });
+
+  it('트리 fetch가 실패(ok:false)하면 DocsIndex가 "아직 쌓인 문서가 없어요"가 아니라 실패 배너를 그린다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, json: async () => null })));
+    await mountWithIndex();
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).not.toContain('아직 쌓인 문서가 없어요');
+    expect(container.textContent).toContain('불러오지 못했습니다');
+  });
+
+  // story #3784(카디르 QA·페드루 재현, 10:02Z) — 실패 뒤 「다시 시도」를 누른 순간부터 그
+  // 재시도가 응답하기 전까지, fetchTree()가 loading을 다시 켜지 않으면
+  // loading=false·loadError=false·tree=[]인 순간이 생겨 두 페인이 또 "없어요"를 단정한다
+  // (원 결함의 재발 — 뮤테이션 대상: fetchTree 시작의 setLoading(true)를 걷으면 이 자리가
+  // 정확히 RED).
+  it('실패 뒤 「다시 시도」 pending 中엔 양쪽 다 "없어요"가 아니라 로딩 문구가 선다', async () => {
+    let resolveRetry!: (v: { ok: boolean; json: () => Promise<unknown> }) => void;
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: false, json: async () => null })
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveRetry = resolve; }));
+    vi.stubGlobal('fetch', fetchMock);
+    await mountWithIndex();
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain('불러오지 못했습니다');
+
+    const retryButton = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('다시 시도'));
+    expect(retryButton).toBeTruthy();
+    await act(async () => { retryButton!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    // 재시도 fetch가 아직 안 풀린 시점(pending) — 양쪽 다 "없어요" 단정 0, 로딩 문구는 有.
+    expect(container.textContent).not.toContain('아직 쌓인 문서가 없어요');
+    expect(container.textContent).not.toContain('불러오지 못했습니다');
+    expect(container.textContent).toContain('불러오는 중');
+
+    await act(async () => {
+      resolveRetry({ ok: true, json: async () => ({ data: [DOC_A, DOC_B], meta: { hasMore: false, nextCursor: null } }) });
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    });
+    expect(container.textContent).toContain('문서A'); // 재시도 성공 후엔 정상 렌더.
+  });
+
+  // story #3784(유나 짚음, 09:34Z) — 오른쪽 DocsIndex만 가르면 왼쪽 사이드바 트리가
+  // "0건"(빈 EmptyState "문서를 선택하세요")으로 조용히 남아 같은 화면이 두 말을 한다.
+  it('트리 fetch 실패 시 왼쪽 사이드바도 "문서를 선택하세요"가 아니라 같은 실패 문구+다시 시도를 그린다', async () => {
+    const fetchMock = vi.fn(async () => ({ ok: false, json: async () => null }));
+    vi.stubGlobal('fetch', fetchMock);
+    await mount();
+    expect(container.textContent).not.toContain('문서를 선택하세요');
+    expect(container.textContent).toContain('불러오지 못했습니다');
+    const callsBefore = fetchMock.mock.calls.length;
+    const retryButton = [...container.querySelectorAll('button')].find((b) => b.textContent === '다시 시도');
+    expect(retryButton).toBeTruthy();
+    await act(async () => { retryButton!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(callsBefore); // 재시도가 fetchTree()를 다시 친다.
+  });
+
+  // story #3784(페드루 짚음, 09:49Z) — 로드 완료·진짜 0건일 때도 왼쪽("문서를
+  // 선택하세요")과 오른쪽("아직 쌓인 문서가 없어요")이 다른 말을 하던 자리. 같은
+  // 사실은 같은 낱말로 — 왼쪽도 emptyTitle 한 줄만(CTA는 오른쪽+상단 바에 이미
+  // 있어 뺀다).
+  it('로드 완료·진짜 0건이면 왼쪽 사이드바도 "문서를 선택하세요"가 아니라 "아직 쌓인 문서가 없어요"를 그린다(CTA 없음)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: [], meta: { hasMore: false, nextCursor: null } }) })));
+    await mount();
+    expect(container.textContent).not.toContain('문서를 선택하세요');
+    expect(container.textContent).toContain('아직 쌓인 문서가 없어요');
   });
 });

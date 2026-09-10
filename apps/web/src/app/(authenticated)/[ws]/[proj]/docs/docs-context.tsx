@@ -44,6 +44,13 @@ interface DocsLayoutContextType {
   projectId: string | undefined;
   tree: Doc[];
   setTree: Dispatch<SetStateAction<Doc[]>>;
+  /** story #3784 — 트리 fetch 진행 중(초기값 true, 로컬 sidebar와 동일 신호). 소비처(DocsIndex)가
+   * 이 필드 없이 `tree.length===0`만 보면 "아직 안 옴"과 "정말 0건"을 못 가른다. */
+  loading: boolean;
+  /** story #3784 — 트리 fetch가 실패했다(하드 실패, `docs-client-layout.tsx`의 catch가
+   * "keep existing"으로 조용히 삼키던 신호를 여기로 올린다). 성공하면 다음 fetch 시작 시 false로
+   * 되돌아간다(sticky 아님). */
+  loadError: boolean;
   handleNewDoc: () => void;
   fetchTree: () => Promise<void>;
   pendingDocUpdate: DocUpdate | null;
