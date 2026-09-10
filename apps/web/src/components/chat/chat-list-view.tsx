@@ -326,6 +326,11 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   // 여부를 알리는 render 신호. `loading`(my 탭)과 동형 — 최초 1회 로드만 재는 얕은 신호이고
   // (project 전환 시 재로드 직전에만 별도로 true로 되돌린다), 그 밖엔 재무장하지 않는다.
   const [agentLoading, setAgentLoading] = useState(true);
+  // story #3790(유나 定) — "아직 로딩 中"·"fetch 실패"·"정말 0건"을 가른다(docs
+  // hasContentRef 자리와 같은 클래스, docs-client-layout.tsx:64 참고). 시도 시작 시 먼저
+  // 걷고, 실패하면 catch가 다시 켠다.
+  const [loadError, setLoadError] = useState(false);
+  const [agentLoadError, setAgentLoadError] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [myOffset, setMyOffset] = useState(0);
   const [myTotal, setMyTotal] = useState(0);
@@ -364,11 +369,25 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   // 폴 간격을 좁히거나(성공) 넓힌다(실패, sse-polling-fallback.ts). 기존 호출부(`void
   // fetchConversations(...)`)는 반환값을 안 봐 회귀 0.
   const fetchConversations = useCallback(async (nextOffset = 0, append = false): Promise<boolean> => {
+    // story #3790 — "더 보기"(append) 실패는 이미 그려진 목록을 통째로 실패 화면으로
+    // 덮지 않는다(그 실패는 loadingMore 버튼 자리가 이미 담당). 전체/최초 로드(append=false)
+    // 실패만 loadError로 세계를 가른다. 재시도(retry)는 항상 append=false로 부른다.
+    //
+    // 카디르 QA(#4142, 9e6bd5c8d 재현) — 성공 경로는 `projectId !== projectIdRef.current`로
+    // stale 응답을 거르는데 실패 경로(!res.ok·catch)는 그 검사가 없어, 프로젝트 A pending
+    // 中 B로 전환 → B 성공 렌더 → 뒤늦게 도착한 A의 실패가 B 화면을 덮는 클래스가 있었다
+    // ("지정 경로만 막는 fix는 클래스를 남긴다"). 이 클로저가 캡처한 `projectId`(이 호출을
+    // 일으킨 시점의 프로젝트)를 응답 시점의 `projectIdRef.current`(최신)와 항상 먼저
+    // 대조 — 성공/실패 두 경로가 같은 가드를 탄다.
+    if (!append) setLoadError(false);
     try {
       const res = await fetchWithAuth(
         `/api/conversations?project_id=${projectId}&limit=${PAGE_LIMIT}&offset=${nextOffset}`
       );
-      if (!res.ok) return false;
+      if (!res.ok) {
+        if (!append && projectId === projectIdRef.current) setLoadError(true);
+        return false;
+      }
       const json = await res.json() as { data: ConversationItem[]; total: number };
       if (projectId !== projectIdRef.current) return false; // 전환됨 — stale 응답 drop(현 화면 안 덮음)
       const items = json.data ?? [];
@@ -377,28 +396,41 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
       setMyTotal(json.total ?? 0);
       return true;
     } catch {
+      if (!append && projectId === projectIdRef.current) setLoadError(true);
       return false;
     } finally {
-      setLoading(false);
+      // 페드루 그라운딩(2026-09-10 12:34Z) — 위 loadError와 같은 축: A의 늦은 finally가
+      // B로 전환된 뒤 B의 loading을 조용히 꺼버리면(응답 도착 前인데도 "로딩 아님"으로
+      // 보임) B가 아직 안 왔는데도 순간 잘못된 화면(0건 등)이 뜬다.
+      if (projectId === projectIdRef.current) setLoading(false);
       setLoadingMore(false);
     }
   }, [projectId]);
 
   const fetchAllConversations = useCallback(async (nextOffset = 0, append = false) => {
+    // 카디르 QA(#4142) — 위 fetchConversations와 동형 stale-drop 가드(성공/실패 두 경로
+    // 대칭).
+    if (!append) setAgentLoadError(false);
     try {
       const res = await fetchWithAuth(
         `/api/conversations?project_id=${projectId}&include_agent_conversations=true&limit=${PAGE_LIMIT}&offset=${nextOffset}`
       );
-      if (!res.ok) return;
+      if (!res.ok) {
+        if (!append && projectId === projectIdRef.current) setAgentLoadError(true);
+        return;
+      }
       const json = await res.json() as { data: ConversationItem[]; total: number };
       if (projectId !== projectIdRef.current) return; // 전환됨 — stale 응답 drop(B 화면 안 덮음)
       const items = json.data ?? [];
       setAllConversations((prev) => append ? [...prev, ...items] : items);
       setAgentOffset(nextOffset + items.length);
       setAgentTotal(json.total ?? 0);
+    } catch {
+      if (!append && projectId === projectIdRef.current) setAgentLoadError(true);
     } finally {
       // story #3788(B-③ 후속) — agentLoading을 loading(my 탭)과 동형으로 finally에서 해소.
-      setAgentLoading(false);
+      // 페드루 그라운딩(2026-09-10 12:34Z) — 같은 stale-drop 가드를 loading 축에도.
+      if (projectId === projectIdRef.current) setAgentLoading(false);
     }
   }, [projectId]);
 
@@ -435,7 +467,16 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     router.push(`/chats/${conv.id}?${params.toString()}`);
   }, [t, router, projectId]);
 
-  useEffect(() => { void fetchConversations(0, false); }, [fetchConversations]);
+  // 카디르 QA(#4142) 뒤 페드루 그라운딩(2026-09-10 12:34Z) — 에이전트 탭의 project-switch
+  // 효과(아래)와 같은 형을 my 탭에도 미러. 예전엔 `fetchConversations`만 재호출해 새 응답이
+  // 오기 前까지 우측이 **이전 프로젝트**의 conversations.length를 그대로 단정했다(A 0건→B
+  // 있음으로 전환하면 순간 「대화가 없습니다」). 전환 즉시(fetchConversations identity가
+  // projectId 변경으로 바뀌는 매 순간) 목록을 비우고 로딩을 세운 뒤 새로 fetch한다.
+  useEffect(() => {
+    setConversations([]);
+    setLoading(true);
+    void fetchConversations(0, false);
+  }, [fetchConversations]);
 
   // perf(17960f86): agent 탭("전체/에이전트", include_agent_conversations=true)은 비기본 탭이라
   // mount 시 eager fetch(측정 ~663ms 낭비) 하지 않고, 사용자가 탭을 처음 열 때 1회만 lazy 로드.
@@ -563,20 +604,65 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     if (!isAdminOrOwner) setActiveList('my');
   }, [isAdminOrOwner]);
 
+  // story #3790(유나 定) — 재시도는 항상 append=false(전체 재조회)로 부른다. 시작 시
+  // 해당 loading을 명시적으로 다시 세운다 — 실패 뒤엔 보여줄 게 없으므로 "지금 로딩
+  // 中"이 맞다(재요청마다 무조건 세우는 게 아니라 실패 복구라는 특정 계기에서만).
+  const retryMyConversations = useCallback(() => {
+    setLoading(true);
+    void fetchConversations(0, false);
+  }, [fetchConversations]);
+
+  const retryAgentConversations = useCallback(() => {
+    setAgentLoading(true);
+    void fetchAllConversations(0, false);
+  }, [fetchAllConversations]);
+
+  const retryActiveList = useCallback(() => {
+    if (isAdminOrOwner && activeList === 'agent') retryAgentConversations();
+    else retryMyConversations();
+  }, [isAdminOrOwner, activeList, retryMyConversations, retryAgentConversations]);
+
   // story #3788(B-③ 후속, 페드루 그라운딩 2026-09-10 10:43Z) — «보이는 목록»만 센다. my
   // 탭 0건이어도 사용자가 지금 에이전트 탭을 보고 있고 거기 N건이 있으면 우측 outlet이
   // 「대화가 없습니다」를 말하면 안 된다(카드가 원래 잡던 모순이 탭 하나 옆으로 옮겨 앉는
   // 사례) — activeList로 어느 탭의 loading/count를 밀지 가른다.
+  // story #3790 후속 — 같은 원칙을 실패 축에도 적용한다: conversationsLoadError도 활성
+  // 탭 것만 민다(로딩·실패·0건 판단 순서는 이 값을 읽는 쪽 — chats/page.tsx — 이 가른다).
   useEffect(() => {
     const isAgent = isAdminOrOwner && activeList === 'agent';
     chatRail?.setActiveList(isAgent ? 'agent' : 'my');
     chatRail?.setConversationsLoading(isAgent ? agentLoading : loading);
     chatRail?.setConversationCount(isAgent ? agentOnlyConvs.length : conversations.length);
-  }, [chatRail, isAdminOrOwner, activeList, loading, agentLoading, conversations.length, agentOnlyConvs.length]);
+    chatRail?.setConversationsLoadError(isAgent ? agentLoadError : loadError);
+    chatRail?.setRetryConversations(retryActiveList);
+  }, [
+    chatRail, isAdminOrOwner, activeList, loading, agentLoading, conversations.length, agentOnlyConvs.length,
+    loadError, agentLoadError, retryActiveList,
+  ]);
 
   const myListContent = loading ? (
     <div className="flex h-full items-center justify-center">
       <p className="text-sm text-muted-foreground">{tc('loading')}</p>
+    </div>
+  ) : loadError ? (
+    // story #3790(유나 定) — 오른쪽 outlet이 실패 배너로 갈라졌는데 이 레일이 「대화가
+    // 없습니다」(0건)로 남으면 한 화면이 두 말을 하는 자리가 그대로 남는다(docs
+    // indexLoadError와 같은 형 — 같은 키를 좌우가 공유). 폭이 좁아 Alert 대신 한 줄 +
+    // 텍스트 재시도.
+    <div className="px-2 py-4">
+      <p className="text-xs text-muted-foreground">{t('conversationsLoadFailed')}</p>
+      {/* raw button 요소 금지(DS 게이트 A, verify-no-new-raw-button) — variant="link"가 이
+          레일 자리의 정본(ghost는 좁은 폭에서 hover 사각형이 남음, content/page.tsx:248
+          실측). 색은 문구가 아니라 행동에만 싣는다(우측은 반대로 문구가 destructive). */}
+      <Button
+        type="button"
+        variant="link"
+        size="xs"
+        onClick={retryMyConversations}
+        className="mt-1 h-auto px-0 text-xs"
+      >
+        {tc('retry')}
+      </Button>
     </div>
   ) : conversations.length === 0 ? (
     <div className="flex h-full items-center justify-center">
@@ -638,7 +724,26 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     </>
   );
 
-  const agentConversationList = agentOnlyConvs.length === 0 ? (
+  const agentConversationList = agentLoading ? (
+    // story #3790 — 이 탭은 여태 loading 갈래가 없어 첫 로드 中에도 0건 문구가 잠깐
+    // 스쳤다(my 탭과 형을 맞춘다, 실패 축 신설과 같은 정리 범위).
+    <div className="flex h-full items-center justify-center">
+      <p className="text-sm text-muted-foreground">{tc('loading')}</p>
+    </div>
+  ) : agentLoadError ? (
+    <div className="px-2 py-4">
+      <p className="text-xs text-muted-foreground">{t('conversationsLoadFailed')}</p>
+      <Button
+        type="button"
+        variant="link"
+        size="xs"
+        onClick={retryAgentConversations}
+        className="mt-1 h-auto px-0 text-xs"
+      >
+        {tc('retry')}
+      </Button>
+    </div>
+  ) : agentOnlyConvs.length === 0 ? (
     <div className="flex h-full items-center justify-center">
       <EmptyState title={t('noAgentConversations')} className="w-full max-w-xs" />
     </div>

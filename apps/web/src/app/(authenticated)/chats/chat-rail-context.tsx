@@ -41,6 +41,15 @@ interface ChatRailContextValue {
    * 에이전트 탭을 보고 있고 거기 N건이 있으면 「없다」고 말하면 안 된다). */
   activeList: 'my' | 'agent';
   setActiveList: (value: 'my' | 'agent') => void;
+  /** story #3790(유나 定 2026-09-10) — 활성 탭의 목록 fetch가 실패했음을 끌어올린다.
+   * 로딩·실패·0건 세 세계를 좌우가 같은 낱말로 말하게 한다(story #3784와 같은 축) —
+   * 0건 판정보다 먼저 봐야 「실패」가 「없다」로 오독되지 않는다. */
+  conversationsLoadError: boolean;
+  setConversationsLoadError: (value: boolean) => void;
+  /** 우측 outlet(`chats/page.tsx`)의 재시도 버튼이 부른다 — 실제 재조회는 좌측 레일
+   * (`ChatListView`)의 활성 탭 로더가 쥐고 있으므로 그 함수 자체를 끌어올린다. */
+  retryConversations: () => void;
+  setRetryConversations: (fn: () => void) => void;
 }
 
 const ChatRailContext = createContext<ChatRailContextValue | null>(null);
@@ -54,6 +63,14 @@ export function ChatRailProvider({ children }: { children: ReactNode }) {
   const [conversationsLoading, setConversationsLoading] = useState(true);
   const [conversationCount, setConversationCount] = useState(0);
   const [activeList, setActiveList] = useState<'my' | 'agent'>('my');
+  const [conversationsLoadError, setConversationsLoadError] = useState(false);
+  // 함수 값 자체를 state로 들고 있으려면 setState에 팩토리 형(() => fn)으로 넘겨야 한다
+  // (그냥 fn을 넘기면 React가 "updater 함수"로 오인해 즉시 호출한다) — setRetryConversations는
+  // 그 함정을 감싸는 얇은 래퍼.
+  const [retryConversations, setRetryConversationsState] = useState<() => void>(() => () => {});
+  const setRetryConversations = useCallback((fn: () => void) => {
+    setRetryConversationsState(() => fn);
+  }, []);
 
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 1279px)');
@@ -86,8 +103,13 @@ export function ChatRailProvider({ children }: { children: ReactNode }) {
       conversationsLoading, setConversationsLoading,
       conversationCount, setConversationCount,
       activeList, setActiveList,
+      conversationsLoadError, setConversationsLoadError,
+      retryConversations, setRetryConversations,
     }),
-    [railMode, toggleManualExpand, setReadingOpen, conversationsLoading, conversationCount, activeList],
+    [
+      railMode, toggleManualExpand, setReadingOpen, conversationsLoading, conversationCount, activeList,
+      conversationsLoadError, retryConversations, setRetryConversations,
+    ],
   );
 
   return <ChatRailContext.Provider value={value}>{children}</ChatRailContext.Provider>;
