@@ -43,7 +43,7 @@ afterEach(async () => {
 });
 
 const LONG_LABEL = '이것은 아주 길고 상세한 스토리 제목으로 산문 속에서 문장을 익사시킬 수 있다';
-const META = { form: 'mention', referencedAt: '2026-07-26T00:00:00.000Z' };
+const META = { form: 'mention' as const, referencedAt: '2026-07-26T00:00:00.000Z' };
 
 describe('EntityChip variant=inline(기본) — story #2886', () => {
   it('긴 라벨은 truncate 클래스를 갖고, referenceMeta/status가 컨테이너 텍스트에 상시 노출되지 않는다', async () => {

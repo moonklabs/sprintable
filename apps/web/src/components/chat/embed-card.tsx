@@ -19,6 +19,7 @@ import { sanitizeDocHtml } from '@/components/docs/doc-content-renderer';
 import { fetchWithAuth } from '@/lib/db/client';
 import { parseEntityRef } from './entity-ref';
 import { useReadingPanel } from './reading-panel-context';
+import type { ReferenceForm } from './embed-renderer';
 // story #2888(S2a) — 이관 후 재수출(기존 소비처 4곳 import 경로 무변경, 회귀 0). 정본은
 // entity-registry.tsx 참고.
 import { ENTITY_ICONS, ENTITY_COLORS, GRAY_STATE_COLOR, resolveEntityIcon, EntityGlyph } from './entity-registry';
@@ -982,7 +983,7 @@ export function EntityChip({
   ghost?: boolean;
   /** story #2262 AC1 — 「사실성 · 표면 · 지점」. null이면(유령이거나 references 자체가
    * 없는 경로) 표기하지 않는다 — 모르는 것을 지어내지 않는다(가디언 §H-2와 같은 원칙). */
-  referenceMeta?: { form: string; referencedAt: string } | null;
+  referenceMeta?: { form: ReferenceForm; referencedAt: string } | null;
   /** story #2262 AC2 PR② — 배치조회(chat-view.tsx) 결과. 호출부가 안 넘기면(undefined,
    * 배치조회 배선이 없는 기존 호출부 — 예: 과거 테스트) `{kind:'loading'}`으로 안전하게
    * 폴백한다(has-status면 "아직 모름", no-status-concept이면 "상태 없음" — renderEntityStatusLabel이
@@ -991,16 +992,19 @@ export function EntityChip({
 } & VariantProps<typeof entityChipLabelVariants>) {
   // story #3776(1층A) — "결재함에서 보기" 딥링크 CTA, content ns의 기존 submitGateLink 키 재사용.
   const tContent = useTranslations('content');
-  // story #3776(1층B, 페드루 재검토 10:07Z) — "근거"는 chats ns의 기존 reportEvidenceLabel
-  // 키, "멘션"/"임베드"는 신설 embedFormMention/embedFormEmbed 키(닫힌 3값 열거라 하나만
-  // 번역되면 en에서 두 언어가 섞인다 — 셋을 함께 1층으로 처리).
+  // story #3776(1층B, 페드루 재검토 10:07Z·10:14Z) — "근거"는 chats ns의 기존
+  // reportEvidenceLabel 키, "멘션"/"임베드"는 신설 embedFormMention/embedFormEmbed 키(닫힌
+  // 3값 열거라 하나만 번역되면 en에서 두 언어가 섞인다 — 셋을 함께 1층으로 처리).
+  // `Record<ReferenceForm, string>` 한 표로 — form이 ReferenceForm(embed-renderer.ts에서
+  // 이미 좁혀짐)이라 이 표에 키 하나가 비면 TS가 컴파일에서 잡는다(exhaustive, 원시값
+  // 폴백 없음 — story #3770 클래스, 화면에 원시 식별자가 새는 통로를 안 새로 심는다).
   const tChats = useTranslations('chats');
-  const formLabel = (form: string) => {
-    if (form === 'proof') return tChats('reportEvidenceLabel');
-    if (form === 'mention') return tChats('embedFormMention');
-    if (form === 'embed') return tChats('embedFormEmbed');
-    return form;
+  const FORM_LABEL_KEYS: Record<ReferenceForm, string> = {
+    mention: 'embedFormMention',
+    embed: 'embedFormEmbed',
+    proof: 'reportEvidenceLabel',
   };
+  const formLabel = (form: ReferenceForm) => tChats(FORM_LABEL_KEYS[form]);
   const [showModal, setShowModal] = useState(false);
   // story #461e9a54(P0) — 채팅 트리(ReadingPanelProvider 하위)에서는 패널로, 밖(doc-content-
   // renderer.tsx·story-detail-panel.tsx 등)에서는 null이라 기존 Dialog 모달로 폴백(회귀 0).
