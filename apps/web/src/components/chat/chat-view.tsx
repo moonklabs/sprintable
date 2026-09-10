@@ -967,8 +967,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
             ) : messages.length === 0 ? (
               <div className="flex h-full items-center justify-center">
                 <EmptyState
-                  title="대화를 시작하세요"
-                  description="첫 메시지를 보내면 대화가 시작됩니다."
+                  title={t('messagesEmptyTitle')}
                   className="w-full max-w-xs"
                 />
               </div>

@@ -17,6 +17,7 @@ import { Avatar } from '@/components/shared/avatar';
 import { Button } from '@/components/ui/button';
 import { NowStrip } from './now-strip';
 import { PulseCard } from './pulse-card';
+import { useChatRailOptional } from '@/app/(authenticated)/chats/chat-rail-context';
 
 import { fetchWithAuth } from '@/lib/db/client';
 import { participantDisplayLabel } from '@/lib/member-display';
@@ -340,6 +341,16 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   const convsRef = useRef(conversations);
   useEffect(() => { convsRef.current = conversations; }, [conversations]);
 
+  // story #3788(B-③, 유나 定 2026-09-10 카드 착지) — "내 대화" 목록 로드 상태를
+  // ChatRailContext로 끌어올려(DocsLayoutContext 형) 우측 outlet(chats/page.tsx)이 로딩·0건·
+  // 있음 셋 중 어느 세계인지 갈라 「선택하세요」와 왼쪽의 「대화가 없습니다」가 동시에 서는
+  // 모순을 막는다. optional이라 ChatRailProvider 밖(격리 단위테스트)에서는 조용히 no-op.
+  const chatRail = useChatRailOptional();
+  useEffect(() => {
+    chatRail?.setConversationsLoading(loading);
+    chatRail?.setConversationCount(conversations.length);
+  }, [chatRail, loading, conversations.length]);
+
   // 전환 in-flight 경합 가드(RC): fetch 응답 적용 시점에 여전히 같은 프로젝트인지 검증해 stale 응답을
   // drop 한다. render 단계 동기라 async resolve 시 항상 최신 projectId 를 가리킨다(assignee last-write-wins 동류).
   const projectIdRef = useRef(projectId);
@@ -598,7 +609,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
 
   const agentConversationList = agentOnlyConvs.length === 0 ? (
     <div className="flex h-full items-center justify-center">
-      <EmptyState title={t('noAgentConversations')} description="" className="w-full max-w-xs" />
+      <EmptyState title={t('noAgentConversations')} className="w-full max-w-xs" />
     </div>
   ) : (
     <div>

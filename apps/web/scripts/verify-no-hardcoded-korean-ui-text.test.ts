@@ -142,11 +142,11 @@ describe('computeNewViolations', () => {
   });
 });
 
-// story #3741 ⑥ — 창건 사례(유나 08:46Z 전수, chats/page.tsx:19 —
+// story #3741 ⑥ — 창건 사례(유나 08:46Z 전수, 원래는 chats/page.tsx:19 —
 // `<EmptyState ... description="왼쪽에서 대화를 선택하세요" />`)로 자가 실제로 무언가를
 // 재는지 확認한다(합성 문자열만으론 통과 의식이 된다).
 //
-// 이 표본을 둘러싼 판정 이력(그대로 남긴다 — 같은 자리에서 왜 두 번 바뀌었는지):
+// 이 표본을 둘러싼 판정 이력(그대로 남긴다 — 같은 자리에서 왜 세 번 바뀌었는지):
 //   1차 처방 — 속성 축을 placeholder/title/alt/aria-* 4개로 못 박음(창건 사례의
 //     `description`은 이 축 밖).
 //   PO 판정 (b)(2026-09-09 12:41Z, 그라운딩 자기모순 발견 뒤) — 창건 사례가 가드 축
@@ -156,18 +156,23 @@ describe('computeNewViolations', () => {
 //     3건/3파일뿐(재측정 비용 낮음 실측)이라 (b)의 전제가 무너짐 — 속성 이름 명단
 //     자체를 버려(파일 머리 주석 「PO 판정 (a)」 참조) 창건 사례가 이제 가드 축
 //     «안»에 든다. 검증 표본을 창건 사례로 원복.
-describe('창건 사례 — chats/page.tsx의 실 위반이 지금도 잡힌다', () => {
-  const FOUNDED_CASE_FILE = path.resolve(__dirname, '../src/app/(authenticated)/chats/page.tsx');
-  const FOUNDED_CASE_REL = 'app/(authenticated)/chats/page.tsx';
+//   story #3788(2026-09-10, 유나 定) — 창건 사례 그 자리(`chats/page.tsx`의
+//     description="왼쪽에서 대화를 선택하세요")가 실제로 수리됐다(B-③, 「왼쪽에서」 같은
+//     방향어 자체가 모바일 거짓이라 폐기·i18n 키로 이관). 창건 사례가 더는 살아있는
+//     위반이 아니므로 자가진단 표본을 PO 판정 (b)가 이미 검증했던 같은 대체 실사례
+//     (`docs-client-layout.tsx aria-label="닫기"`, 지금도 baseline에 살아있음)로 교체한다.
+describe('창건 사례 — docs-client-layout.tsx aria-label="닫기"의 실 위반이 지금도 잡힌다', () => {
+  const FOUNDED_CASE_FILE = path.resolve(__dirname, '../src/app/(authenticated)/[ws]/[proj]/docs/docs-client-layout.tsx');
+  const FOUNDED_CASE_REL = 'app/(authenticated)/[ws]/[proj]/docs/docs-client-layout.tsx';
 
-  it('chats/page.tsx가 실제로 description="왼쪽에서 대화를 선택하세요" 자리를 아직 갖고 있다', () => {
+  it('docs-client-layout.tsx가 실제로 aria-label="닫기" 자리를 아직 갖고 있다', () => {
     const content = readFileSync(FOUNDED_CASE_FILE, 'utf8');
-    expect(content).toContain('왼쪽에서 대화를 선택하세요');
+    expect(content).toContain('aria-label="닫기"');
   });
 
   it('실 저장소 스캔이 이 창건 사례를 담는다(자가 죽어있지 않다)', () => {
     const violations = scanRepo(path.resolve(__dirname, '../src'));
-    const hit = violations.find((v) => v.file === FOUNDED_CASE_REL && v.text === '왼쪽에서 대화를 선택하세요');
+    const hit = violations.find((v) => v.file === FOUNDED_CASE_REL && v.text === '닫기');
     expect(hit).toBeDefined();
   });
 });

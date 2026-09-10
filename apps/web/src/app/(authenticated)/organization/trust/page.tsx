@@ -155,7 +155,7 @@ export default function OrganizationTrustPage() {
         rosterRows.length === 0 ? (
           <EmptyState
             icon={<HeartHandshake className="size-8" />}
-            title={t('trustSlotTitle')}
+            title={t('trustEmptyTitle')}
             description={t('trustEmptyRoster')}
           />
         ) : (
@@ -200,8 +200,7 @@ export default function OrganizationTrustPage() {
       ) : selfScores.length === 0 ? (
         <EmptyState
           icon={<HeartHandshake className="size-8" />}
-          title={t('trustSlotTitle')}
-          description={t('trustEmptySelf')}
+          title={t('trustEmptyTitle')}
         />
       ) : (
         <>
