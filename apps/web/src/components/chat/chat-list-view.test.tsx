@@ -526,6 +526,7 @@ function RailCapture() {
       data-active-list={rail?.activeList ?? ''}
       data-loading={String(rail?.conversationsLoading ?? '')}
       data-count={String(rail?.conversationCount ?? '')}
+      data-error={String(rail?.conversationsLoadError ?? '')}
     />
   );
 }
@@ -536,6 +537,7 @@ function readRailCapture(c: HTMLElement) {
     activeList: el?.dataset.activeList,
     loading: el?.dataset.loading,
     count: el?.dataset.count,
+    error: el?.dataset.error,
   };
 }
 
@@ -640,5 +642,113 @@ describe('ChatListView — ChatRailContext 탭 게이트(story #3788 B-③ 후�
     expect(container.querySelectorAll('[role="tab"]')).toHaveLength(0);
     expect(rail.activeList).toBe('my');
     expect(rail.count).toBe('0');
+  });
+});
+
+// story #3790(유나 定) — 대화 목록 fetch 실패가 「대화가 없습니다」(0건)로 떨어지지 않는다.
+// 로딩·실패·0건 세 세계를 좌우가 같은 낱말(chats.conversationsLoadFailed)로 말한다.
+function stubFetchWithFailure(which: 'my' | 'agent') {
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (url.includes('/api/conversations/recent-outside-project')) {
+      return { ok: true, json: async () => ({ data: [] }) };
+    }
+    const isAgentUrl = url.includes('/api/conversations?') && url.includes('include_agent_conversations=true');
+    if (url.includes('/api/conversations?')) {
+      if ((which === 'my' && !isAgentUrl) || (which === 'agent' && isAgentUrl)) {
+        return { ok: false, status: 500, json: async () => null };
+      }
+      return { ok: true, json: async () => ({ data: [], total: 0 }) };
+    }
+    return { ok: false, status: 404, json: async () => null };
+  }));
+}
+
+describe('ChatListView — 목록 fetch 실패 축(story #3790)', () => {
+  it('⭐my 탭 fetch 실패 → 레일이 0건(noConversations)이 아니라 실패 문구를 말한다', async () => {
+    stubFetchWithFailure('my');
+    await act(async () => {
+      root.render(wrap(
+        <ChatRailProvider>
+          <RailCapture />
+          <ChatListView projectId="proj-current" currentTeamMemberId="me-1" />
+        </ChatRailProvider>,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    expect(container.textContent).toContain(koMessages.chats.conversationsLoadFailed);
+    expect(container.textContent).not.toContain(koMessages.chats.noConversations);
+    const rail = readRailCapture(container);
+    expect(rail.error).toBe('true');
+    expect(rail.loading).toBe('false');
+  });
+
+  it('agent 탭 fetch 실패(my는 성공) → 에이전트 탭 활성 시 좌우가 모두 실패를 말한다(my N건 무관)', async () => {
+    useDashboardContextMock.mockReturnValue({ role: 'admin' });
+    stubFetchWithFailure('agent');
+    await act(async () => {
+      root.render(wrap(
+        <ChatRailProvider>
+          <RailCapture />
+          <ChatListView projectId="proj-current" currentTeamMemberId="me-1" />
+        </ChatRailProvider>,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    const agentTab = [...container.querySelectorAll('[role="tab"]')].find((el) => el.textContent?.includes('에이전트'));
+    await act(async () => { agentTab!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    expect(container.textContent).toContain(koMessages.chats.conversationsLoadFailed);
+    expect(container.textContent).not.toContain(koMessages.chats.noAgentConversations);
+    const rail = readRailCapture(container);
+    expect(rail.activeList).toBe('agent');
+    expect(rail.error).toBe('true');
+  });
+
+  it('재시도 클릭 → 재조회 中 로딩(0건 아님)을 거쳐 성공하면 실패 문구가 사라진다', async () => {
+    let attempt = 0;
+    // 두 번째(재시도) 응답은 수동으로 붙들어 "아직 응답 전" 창을 결정적으로 관측한다
+    // (마이크로태스크가 act() 한 틱 안에서 다 풀려버리면 로딩 창을 못 잡는 레이스 방지).
+    let resolveRetry: (() => void) | undefined;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/conversations/recent-outside-project')) {
+        return { ok: true, json: async () => ({ data: [] }) };
+      }
+      if (url.includes('/api/conversations?') && !url.includes('include_agent_conversations=true')) {
+        attempt += 1;
+        if (attempt === 1) return { ok: false, status: 500, json: async () => null };
+        await new Promise<void>((resolve) => { resolveRetry = resolve; });
+        return { ok: true, json: async () => ({ data: [], total: 0 }) };
+      }
+      return { ok: false, status: 404, json: async () => null };
+    }));
+    await act(async () => {
+      root.render(wrap(
+        <ChatRailProvider>
+          <RailCapture />
+          <ChatListView projectId="proj-current" currentTeamMemberId="me-1" />
+        </ChatRailProvider>,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain(koMessages.chats.conversationsLoadFailed);
+
+    const retryBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.common.retry);
+    expect(retryBtn).not.toBeUndefined();
+    await act(async () => {
+      retryBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve(); await Promise.resolve();
+    });
+
+    // 재조회가 resolveRetry에서 멈춰 있는 동안 — 로딩(0건도 실패도 아님).
+    expect(resolveRetry).not.toBeUndefined();
+    expect(container.textContent).not.toContain(koMessages.chats.conversationsLoadFailed);
+    expect(container.textContent).not.toContain(koMessages.chats.noConversations);
+
+    await act(async () => { resolveRetry!(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).not.toContain(koMessages.chats.conversationsLoadFailed);
+    expect(container.textContent).toContain(koMessages.chats.noConversations);
   });
 });
