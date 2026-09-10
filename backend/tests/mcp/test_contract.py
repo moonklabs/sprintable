@@ -121,6 +121,9 @@ EXPECTED_TOOLS = {
     "sprintable_withdraw_channel_post_draft",
     # 발행물 인사이트 (1) — story #3651: 1일·7일 스냅샷 조회 + 델타. 이 도메인 둘째 도구.
     "sprintable_get_publication_insights",
+    # 콘텐츠 규칙 읽기 (1) — story #3769: content_rules.py docstring이 약속한 「에이전트가
+    # GET으로 읽는」 길의 MCP 표면(BE 신설 0, 기존 GET 둘 병합).
+    "sprintable_get_content_rules",
     # smoke
     "ping",
 }
@@ -149,8 +152,9 @@ def test_total_tool_count():
     # story #3331: sprintable_list_conversations 1종 신설(내 참여 방 목록 — 알림 미도달 백스톱) — 124→125.
     # story #3614: sprintable_withdraw_channel_post_draft 1종 신설(채널 글 초안 폐기 — 이 도메인
     # 첫 MCP 도구) — 125→126. story #3651: sprintable_get_publication_insights 1종 신설(발행물
-    # 1일·7일 인사이트 스냅샷+델타 — 이 도메인 둘째 도구) — 126→127.
-    assert len(_TOOLS) == 127  # story b6b9c52d(#2707 부수): sprintable_import_image_artifact 신설 123→124
+    # 1일·7일 인사이트 스냅샷+델타 — 이 도메인 둘째 도구) — 126→127. story #3769:
+    # sprintable_get_content_rules 1종 신설(조직 콘텐츠 규칙 읽기) — 127→128.
+    assert len(_TOOLS) == 128  # story b6b9c52d(#2707 부수): sprintable_import_image_artifact 신설 123→124
 
 
 def test_all_expected_tools_registered():

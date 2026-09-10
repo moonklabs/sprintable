@@ -84,6 +84,7 @@ def test_tool_names_and_param_models_untouched():
     story #3331: sprintable_list_conversations 1종 신설(내 참여 방 목록 — 알림 미도달
     백스톱) — 123→124. story #3614: sprintable_withdraw_channel_post_draft 1종 신설(채널 글
     초안 폐기, [일감] 축 — 콘텐츠 초안도 작업 단위 work item) — 124→125. story #3651:
-    sprintable_get_publication_insights 1종 신설(발행물 1일·7일 인사이트) — 125→126."""
-    assert len(_TOOL_DEFS) == 126
+    sprintable_get_publication_insights 1종 신설(발행물 1일·7일 인사이트) — 125→126.
+    story #3769: sprintable_get_content_rules 1종 신설(조직 콘텐츠 규칙 읽기) — 126→127."""
+    assert len(_TOOL_DEFS) == 127
     assert all(name.startswith("sprintable_") for name in _TOOLS)

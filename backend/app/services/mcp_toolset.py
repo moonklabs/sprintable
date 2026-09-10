@@ -74,7 +74,11 @@ _GROUP_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     # "withdraw"는 의도적으로 뺐다 — 이 하나의 동사만으로 미래의 무관한 도구(예: 보상/지갑
     # 인출류)까지 이 그룹으로 잘못 끌어올 위험이 "channel_post" 등 구체 키워드보다 크다.
     # 지금 유일한 실 도구(withdraw_channel_post_draft)는 "channel_post" 키워드로 이미 잡힌다.
-    ("content", ("channel_post", "site_post", "channel_connection", "post_comment", "insight")),
+    # story #3769(2026-09-10): "content_rule" — sprintable_get_content_rules(신설, 콘텐츠
+    # 규칙 읽기)도 같은 콘텐츠 파이프라인 도구다. "channel_post"/"site_post" 등과 겹치지
+    # 않는 독립 키워드(순서 의존 없음).
+    ("content", ("channel_post", "site_post", "channel_connection", "post_comment", "insight",
+                 "content_rule")),
 ]
 
 _CORE = "core"  # ping/notifications-check 등 기본 — 항상 허용
@@ -320,6 +324,9 @@ _ORG_SCOPED_PATH_GROUP_SEGMENTS: tuple[tuple[str, str], ...] = (
     ("insights", "content"),
     ("insights-board", "content"),
     ("publishing-metrics", "content"),
+    # story #3769(2026-09-10): sprintable_get_content_rules 신설로 "MCP 도구/키워드 0건"
+    # 사유가 더 이상 사실이 아니게 됐다 — 예외 목록(아래)에서 이리로 이관.
+    ("content-rules", "content"),
 )
 
 # story #3654(정적 가드) — `test_3654_org_scoped_content_rest_group.py`의 가드 테스트가
@@ -334,8 +341,15 @@ _ORG_SCOPED_PATH_GROUP_SEGMENTS: tuple[tuple[str, str], ...] = (
 _ORG_SCOPED_UNMAPPED_SEGMENTS_WITH_REASON: dict[str, str] = {
     "campaigns": "MCP 도구/키워드 0건(REST·MCP 양쪽 다 core 취급 — 이 스토리가 새로 벌리는 격차 아님)",
     "connectors": "MCP 도구/키워드 0건(connectors.py, 위와 동형)",
-    "content-rules": "MCP 도구/키워드 0건(content_rules.py, 콘텐츠 거버넌스 설정 — 산출물 자체가 아님)",
-    "generation-budget": "MCP 도구/키워드 0건(content_rules.py, 생성 한도 조회 — 산출물 자체가 아님)",
+    # story #3769(2026-09-10): "content-rules"는 sprintable_get_content_rules 신설로
+    # _ORG_SCOPED_PATH_GROUP_SEGMENTS(위)로 이관 — 여기 목록에선 제거(이중 등재 금지,
+    # test_content_group_reason_dict_has_no_overlap_with_mapped_segments 참고).
+    # "generation-budget"은 그 도구가 내부적으로 함께 읽어 응답에 병합하지만(비 1:1 REST
+    # 프록시), 이 세그먼트 자체를 독립 매핑하진 않는다 — 이유가 "0건"에서 "간접 소비"로
+    # 바뀌었을 뿐 REST 직접 호출 경로는 여전히 미매핑(permissive) 그대로 둔다(범위 밖 —
+    # 별도 필요성이 생기면 그때 매핑).
+    "generation-budget": "MCP 도구/키워드 있음(sprintable_get_content_rules가 간접 소비, 3769) — "
+                          "REST 1:1 전용 도구는 여전히 0건, 세그먼트 직접 매핑은 범위 밖으로 보류",
     "domain-labels": "MCP 도구/키워드 0건(domain_labels.py, 사이트 도메인 설정·admin류)",
     "gate-config": "MCP 도구/키워드 0건(gate_config.py, 승인 게이트 거버넌스 설정·admin류)",
     "measurement-connections": "MCP 도구/키워드 0건(measurement_connections.py, GA4 연결 설정)",
@@ -511,6 +525,8 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
     # 발행물 인사이트(story #3651) — 이름에 "insight"가 있어 _GROUP_KEYWORDS의 "content"
     # 그룹(3631 신설)이 이미 커버한다(위 withdraw와 달리 새 갭이 아니다).
     "sprintable_get_publication_insights",
+    # 콘텐츠 규칙 읽기(story #3769) — "content_rule" 키워드로 "content" 그룹.
+    "sprintable_get_content_rules",
 )
 
 # picker 표시 순서(비파괴 먼저). order 필드 힌트 + 배열 순서 둘 다 이 순서.
