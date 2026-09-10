@@ -116,6 +116,61 @@ async def _post_import(client, **body):
     return await client.post("/api/v2/visual-artifacts/import-image", json=body)
 
 
+# story #3767 — 이 입구는 JSON(base64)만 받는다. 도구 설명이 한때 옛(v2 없는) 경로+
+# multipart/form-data를 가리켜, 그대로 따른 에이전트가 이 v2 JSON 입구에 multipart나
+# raw 이미지 바이트를 보내면 FastAPI 기본 검증-에러 인코더가 그 bytes를 UTF-8
+# decode하려다 500으로 죽었다(레포 코드가 아니라 FastAPI 자신의 jsonable_encoder 안 —
+# fastapi/encoders.py에서 끝나는 traceback으로 실측 확認). Content-Type을 먼저 보는
+# 처방(request.headers 직접 확인) 뒤에는 4xx여야 한다 — 되돌리면(Request 대신
+# `body: ImportImageArtifactRequest` 자동 파싱으로 되돌리면) 아래 두 테스트가 500으로 RED.
+
+@pytest.mark.anyio
+async def test_import_image_rejects_multipart_with_415_not_500():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s)
+        await _setup_app(app, Session, seeded["org_a_id"], seeded["project_a_id"])
+        client = _client_for(app)
+        try:
+            resp = await client.post(
+                "/api/v2/visual-artifacts/import-image",
+                files={"file": ("screenshot.png", b"\x89PNG\r\n\x1a\n" + b"\x00" * 20, "image/png")},
+            )
+            assert resp.status_code == 415, resp.text
+            assert resp.json()["error"]["code"] == "UNSUPPORTED_MEDIA_TYPE"
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_import_image_rejects_raw_non_utf8_bytes_with_4xx_not_500():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s)
+        await _setup_app(app, Session, seeded["org_a_id"], seeded["project_a_id"])
+        client = _client_for(app)
+        try:
+            resp = await client.post(
+                "/api/v2/visual-artifacts/import-image",
+                content=b"\x89PNG\r\n\x1a\n" + b"\x00" * 20,
+            )
+            assert resp.status_code < 500, resp.text
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
 @pytest.mark.anyio
 async def test_import_image_rejects_non_image_content_type():
     from app.main import app
