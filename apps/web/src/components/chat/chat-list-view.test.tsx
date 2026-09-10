@@ -752,3 +752,53 @@ describe('ChatListView — 목록 fetch 실패 축(story #3790)', () => {
     expect(container.textContent).toContain(koMessages.chats.noConversations);
   });
 });
+
+describe('ChatListView — 실패 경로 stale-drop(story #3790 후속, 카디르 QA #4142)', () => {
+  it('⭐project A pending 中 project B로 전환 → B 성공 렌더 뒤 A의 뒤늦은 실패가 B 화면을 안 덮는다', async () => {
+    let resolveAFailure: (() => void) | undefined;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/conversations/recent-outside-project')) {
+        return { ok: true, json: async () => ({ data: [] }) };
+      }
+      if (url.includes('project_id=proj-a') && url.includes('/api/conversations?') && !url.includes('include_agent_conversations=true')) {
+        // A는 응답을 붙들어 뒀다가(아래에서 수동 해소) 실패로 떨어진다.
+        await new Promise<void>((resolve) => { resolveAFailure = resolve; });
+        return { ok: false, status: 500, json: async () => null };
+      }
+      if (url.includes('project_id=proj-b') && url.includes('/api/conversations?') && !url.includes('include_agent_conversations=true')) {
+        return { ok: true, json: async () => ({ data: [], total: 0 }) };
+      }
+      return { ok: false, status: 404, json: async () => null };
+    }));
+
+    await act(async () => {
+      root.render(wrap(
+        <ChatRailProvider>
+          <RailCapture />
+          <ChatListView projectId="proj-a" currentTeamMemberId="me-1" />
+        </ChatRailProvider>,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    // A의 fetch가 아직 resolveAFailure에서 멈춰 있는 채로 — 프로젝트를 B로 전환.
+    expect(resolveAFailure).not.toBeUndefined();
+
+    await act(async () => {
+      root.render(wrap(
+        <ChatRailProvider>
+          <RailCapture />
+          <ChatListView projectId="proj-b" currentTeamMemberId="me-1" />
+        </ChatRailProvider>,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    // B는 빠르게 성공 — 0건 화면이 정상적으로 섰다.
+    expect(container.textContent).toContain(koMessages.chats.noConversations);
+    expect(container.textContent).not.toContain(koMessages.chats.conversationsLoadFailed);
+
+    // 이제야 A의 실패가 뒤늦게 도착 — B 화면을 덮으면 안 된다.
+    await act(async () => { resolveAFailure!(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).not.toContain(koMessages.chats.conversationsLoadFailed);
+    expect(readRailCapture(container).error).toBe('false');
+  });
+});

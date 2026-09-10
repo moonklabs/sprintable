@@ -372,13 +372,20 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     // story #3790 — "더 보기"(append) 실패는 이미 그려진 목록을 통째로 실패 화면으로
     // 덮지 않는다(그 실패는 loadingMore 버튼 자리가 이미 담당). 전체/최초 로드(append=false)
     // 실패만 loadError로 세계를 가른다. 재시도(retry)는 항상 append=false로 부른다.
+    //
+    // 카디르 QA(#4142, 9e6bd5c8d 재현) — 성공 경로는 `projectId !== projectIdRef.current`로
+    // stale 응답을 거르는데 실패 경로(!res.ok·catch)는 그 검사가 없어, 프로젝트 A pending
+    // 中 B로 전환 → B 성공 렌더 → 뒤늦게 도착한 A의 실패가 B 화면을 덮는 클래스가 있었다
+    // ("지정 경로만 막는 fix는 클래스를 남긴다"). 이 클로저가 캡처한 `projectId`(이 호출을
+    // 일으킨 시점의 프로젝트)를 응답 시점의 `projectIdRef.current`(최신)와 항상 먼저
+    // 대조 — 성공/실패 두 경로가 같은 가드를 탄다.
     if (!append) setLoadError(false);
     try {
       const res = await fetchWithAuth(
         `/api/conversations?project_id=${projectId}&limit=${PAGE_LIMIT}&offset=${nextOffset}`
       );
       if (!res.ok) {
-        if (!append) setLoadError(true);
+        if (!append && projectId === projectIdRef.current) setLoadError(true);
         return false;
       }
       const json = await res.json() as { data: ConversationItem[]; total: number };
@@ -389,7 +396,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
       setMyTotal(json.total ?? 0);
       return true;
     } catch {
-      if (!append) setLoadError(true);
+      if (!append && projectId === projectIdRef.current) setLoadError(true);
       return false;
     } finally {
       setLoading(false);
@@ -398,13 +405,15 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   }, [projectId]);
 
   const fetchAllConversations = useCallback(async (nextOffset = 0, append = false) => {
+    // 카디르 QA(#4142) — 위 fetchConversations와 동형 stale-drop 가드(성공/실패 두 경로
+    // 대칭).
     if (!append) setAgentLoadError(false);
     try {
       const res = await fetchWithAuth(
         `/api/conversations?project_id=${projectId}&include_agent_conversations=true&limit=${PAGE_LIMIT}&offset=${nextOffset}`
       );
       if (!res.ok) {
-        if (!append) setAgentLoadError(true);
+        if (!append && projectId === projectIdRef.current) setAgentLoadError(true);
         return;
       }
       const json = await res.json() as { data: ConversationItem[]; total: number };
@@ -414,7 +423,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
       setAgentOffset(nextOffset + items.length);
       setAgentTotal(json.total ?? 0);
     } catch {
-      if (!append) setAgentLoadError(true);
+      if (!append && projectId === projectIdRef.current) setAgentLoadError(true);
     } finally {
       // story #3788(B-③ 후속) — agentLoading을 loading(my 탭)과 동형으로 finally에서 해소.
       setAgentLoading(false);
