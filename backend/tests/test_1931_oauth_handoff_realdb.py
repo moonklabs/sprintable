@@ -825,3 +825,74 @@ async def test_oauth_handoff_code_not_consumable_via_attested_native_consume(mon
             assert exc_info.value.status_code in (401, 400)
     finally:
         await engine.dispose()
+
+
+# ─── story #3649(BE·보안·prod, PO 대조 발견 2026-09-07) — 이 핸드오프도 로그인이라
+# session_started_at을 실어야 한다(안 그러면 password_set_at 있는 유저가 refresh에서
+# 조용히 락아웃) ─────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.anyio
+async def test_consume_mints_session_started_at_and_refresh_succeeds_for_password_changed_user(monkeypatch):
+    """양성대조 — password_set_at이 있는(과거에 비밀번호를 변경/설정한 적 있는) 유저가
+    이 핸드오프로 로그인해도, 그 직후 첫 refresh가 200이어야 한다(#3649의 세션 무효화
+    판정이 session_started_at 누락을 fail-closed로 보는데, 이 로그인 경로가 그 클레임을
+    실었다면 막힐 이유가 없다는 것을 실경로로 증명 — auth_firebase_internal.py:759
+    누락 실사고 재발 방지)."""
+    from datetime import datetime, timedelta, timezone
+
+    from app.routers.auth_firebase_internal import consume_oauth_handoff, issue_oauth_handoff
+
+    _setup_common(monkeypatch)
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            user_id = await _seed_eligible_user(s)
+            from sqlalchemy import update as sa_update
+            from app.models.user import User
+            await s.execute(
+                sa_update(User).where(User.id == user_id).values(
+                    password_set_at=datetime.now(timezone.utc) - timedelta(days=30),
+                )
+            )
+            await s.commit()
+
+        verifier, challenge = _pkce_pair()
+        async with Session() as s:
+            issued = await issue_oauth_handoff(_FakeRequest(), _issue_req(user_id, challenge), authorization=None, db=s)
+
+        async with Session() as s:
+            consumed = await consume_oauth_handoff(
+                _FakeRequest(), _consume_req(issued.code, verifier), authorization=None, db=s,
+            )
+
+        from app.core.security import decode_jwt
+        claims = decode_jwt(consumed.access_token)
+        assert isinstance(claims.get("session_started_at"), int), (
+            "oauth-handoff/consume이 session_started_at을 안 실었다 — #3649 재발"
+        )
+
+        from app.main import app
+
+        async def _db():
+            async with Session() as s:
+                try:
+                    yield s
+                    await s.commit()
+                except Exception:
+                    await s.rollback()
+                    raise
+
+        from tests.conftest import override_db_and_read
+        override_db_and_read(app, _db)
+        from httpx import ASGITransport, AsyncClient
+        try:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+                refresh_resp = await c.post(
+                    "/api/v2/auth/refresh", json={"refresh_token": consumed.refresh_token},
+                )
+            assert refresh_resp.status_code == 200, refresh_resp.text
+        finally:
+            app.dependency_overrides.clear()
+    finally:
+        await engine.dispose()

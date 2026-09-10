@@ -167,11 +167,17 @@ async def get_org_member(
 
 
 async def _revoke_user_refresh_tokens(session: AsyncSession, user_id: uuid.UUID) -> None:
-    """해당 사용자의 refresh token 전량 revoke."""
+    """해당 사용자의 refresh token 전량 revoke. story #3649(보안 결함) — auth.py의
+    단일 seam(_explicit_revoke_values)을 그대로 써 expires_at도 함께 내린다
+    (관리자 강제 폐기, 회전 경합 straggler 아님 — auth.py::refresh_token() 유예창이
+    이 RT들을 재사용 대상에서 뺀다)."""
+    from app.routers.auth import _explicit_revoke_values
+
+    _now = datetime.now(timezone.utc)
     await session.execute(
         update(RefreshToken)
         .where(RefreshToken.user_id == user_id, RefreshToken.revoked_at.is_(None))
-        .values(revoked_at=datetime.now(timezone.utc))
+        .values(**_explicit_revoke_values(_now))
     )
 
 

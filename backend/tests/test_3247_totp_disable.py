@@ -232,27 +232,35 @@ async def test_disable_with_password_set_before_session_started_succeeds():
 
 
 @pytest.mark.anyio
-async def test_password_too_recent_survives_token_refresh():
-    """PO 2라운드 지적의 핵심 AC — set-password→refresh→disable 회귀. 1라운드 방어(iat
-    대조)는 refresh 왕복 한 번에 뚫렸다(카디르+codex 실증: refresh가 iat을 매번 새로
-    찍어 password_set_at을 추월시킴). 이 테스트는 실제 POST /api/v2/auth/refresh를
-    관통시켜, 그 결과 새 access 토큰의 session_started_at이 **원 토큰과 동일하게
-    이월**됨(재로그인 때만 갱신되는 값이라 refresh로는 못 미룸)을 직접 증명한다 —
-    로직 재현이 아니라 실경로 증명(3605/3617 처방 동형)."""
+async def test_password_too_recent_blocks_refresh_itself_story_3649():
+    """PO 2라운드 지적의 핵심 AC — set-password→refresh→disable 회귀(원래 이름:
+    test_password_too_recent_survives_token_refresh). story #3649(2026-09-07,
+    카디르 codex 재현 확定)가 같은 판정(session_started_at < password_set_at)을
+    refresh() 자체에도 걸어, 이 시나리오는 이제 refresh 단계에서 이미 401
+    SESSION_INVALIDATED로 막힌다 — totp/disable까지 갈 필요조차 없어졌다(더 이른
+    층에서 막힘, 우회 표면이 아예 줄어든 것이지 이 테스트가 검증하던 «refresh가
+    session_started_at을 못 미룬다» 사실 자체는 무변 — 여전히 새 토큰의
+    session_started_at이 원값 그대로임을 decode해 직접 확認한다). 1라운드 방어(iat
+    대조)는 refresh 왕복 한 번에 뚫렸다(카디르+codex 실증) — session_started_at
+    seam이 그 우회를 막는다."""
     from app.core.security import create_tokens, decode_jwt, hash_password
     from app.main import app
     from tests.conftest import override_db_and_read
 
-    original_session_started_at = int(time.time()) - 3600  # 세션은 1시간 전 시작
+    # story #3649 — 타임라인을 refresh() 자체의 새 게이트도 정확히 반영하도록 조정한다:
+    # T0 세션 시작 → T1 refresh(그 시점 password_set_at=None이라 #3649 게이트 통과,
+    # 200) → T2 비밀번호 심음(refresh «후») → T3 그 리프레시된 토큰으로 disable 시도.
+    # #3649의 refresh 게이트는 T1 시점 평가라 이 T2(그 뒤 변경)를 못 잡는다 — 이래서
+    # totp/disable 자체 재검증이 여전히 필요한 방어선이다(자리별 처방 걷지 않기).
+    original_session_started_at = int(time.time()) - 3600  # T0: 세션은 1시간 전 시작
     original_tokens = create_tokens(
         str(USER_ID), email="u@example.com", app_metadata={},
         session_started_at=original_session_started_at,
     )
 
-    password_set_at = datetime.now(timezone.utc)  # 방금(원 세션 시작보다 나중) 비밀번호 심음
-    user = _make_user(
+    refresh_time_user = _make_user(
         totp_enabled=True, totp_secret=pyotp.random_base32(),
-        hashed_password=hash_password("just-planted"), password_set_at=password_set_at,
+        hashed_password=hash_password("just-planted"), password_set_at=None,  # T1: 아직 안 바뀜
     )
 
     mock_session = AsyncMock()
@@ -270,14 +278,16 @@ async def test_password_too_recent_survives_token_refresh():
 
     override_db_and_read(app, override_db)
     try:
-        with patch("app.routers.auth._get_user_by_id", new=AsyncMock(return_value=user)), \
+        with patch("app.routers.auth._get_user_by_id", new=AsyncMock(return_value=refresh_time_user)), \
              patch("app.routers.auth._build_app_metadata", new=AsyncMock(return_value={})):
             from httpx import ASGITransport, AsyncClient
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
                 refresh_resp = await c.post(
                     "/api/v2/auth/refresh", json={"refresh_token": original_tokens["refresh_token"]},
                 )
-            assert refresh_resp.status_code == 200
+            # T1 시점엔 password_set_at이 아직 없어 story #3649 게이트를 그대로 통과(200)
+            # — 이 refresh 자체는 막힐 이유가 없다는 것도 이 테스트가 같이 증명한다.
+            assert refresh_resp.status_code == 200, refresh_resp.text
             new_access_token = refresh_resp.json()["data"]["access_token"]
             new_claims = decode_jwt(new_access_token)
 
@@ -287,10 +297,19 @@ async def test_password_too_recent_survives_token_refresh():
             assert new_claims["session_started_at"] == original_session_started_at
             assert new_claims["iat"] > original_session_started_at
 
-            # 그 새 토큰으로 disable 시도 → password_set_at이 session_started_at(원값)
-            # 보다 나중이라 여전히 거부돼야 한다(refresh 우회 실패 확認). _get_user_by_id
-            # patch를 이 호출까지 이어서(totp_disable도 그 함수를 쓴다) mock_session의
-            # 잔여 execute mock(위 원자 rotation용)을 안 타게 유지.
+            # T2 — 그 뒤(refresh 완료 후) 비밀번호를 심는다.
+            password_set_at = datetime.now(timezone.utc)
+            user = _make_user(
+                totp_enabled=True, totp_secret=pyotp.random_base32(),
+                hashed_password=hash_password("just-planted"), password_set_at=password_set_at,
+            )
+
+            # T3 — 그 새(리프레시된) 토큰으로 disable 시도 → password_set_at(T2)이
+            # session_started_at(T0, 원값 그대로 이월)보다 나중이라 여전히 거부돼야
+            # 한다(#3649의 refresh 게이트는 T1 시점 평가라 T2를 못 잡음 — disable
+            # 자체 재검증이 그 갭을 메운다). _get_user_by_id patch를 이 호출까지
+            # 이어서(totp_disable도 그 함수를 쓴다) mock_session의 잔여 execute
+            # mock(위 원자 rotation용)을 안 타게 유지.
             async def override_auth():
                 ctx = MagicMock()
                 ctx.user_id = str(USER_ID)
@@ -299,10 +318,11 @@ async def test_password_too_recent_survives_token_refresh():
 
             from app.dependencies.auth import get_current_user
             app.dependency_overrides[get_current_user] = override_auth
-            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-                disable_resp = await c.post(
-                    "/api/v2/auth/totp/disable", json={"password": "just-planted"},
-                )
+            with patch("app.routers.auth._get_user_by_id", new=AsyncMock(return_value=user)):
+                async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+                    disable_resp = await c.post(
+                        "/api/v2/auth/totp/disable", json={"password": "just-planted"},
+                    )
             assert disable_resp.status_code == 403
             assert disable_resp.json()["error"]["code"] == "PASSWORD_TOO_RECENT"
     finally:

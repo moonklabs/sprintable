@@ -756,9 +756,15 @@ async def consume_oauth_handoff(
     from app.routers.auth import _build_app_metadata, _store_refresh_token
 
     app_metadata = await _build_app_metadata(user, db)
+    # story #3649(PO 대조 발견, 2026-09-07) — 이 경로가 로그인(새 세션 시작)인데
+    # session_started_at을 안 실었다. login()/oauth_callback()(auth.py)과 동형으로
+    # 지금 시각을 찍는다 — 안 그러면 password_set_at이 있는 유저가 이 핸드오프로
+    # 로그인한 뒤 첫 refresh/switch-*에서 #3649의 세션 무효화 판정(fail-closed,
+    # session_started_at이 int가 아니면 stale로 본다)에 걸려 조용히 락아웃된다.
     tokens = create_tokens(
         str(user.id), user.email, app_metadata,
         auth_source=_OAUTH_HANDOFF_AUTH_SOURCE, device_attested=False,
+        session_started_at=int(datetime.now(timezone.utc).timestamp()),
     )
     refresh_expires_at = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
     # story #3121 AC3 — RT 저장과 같은 commit에 실린다(_store_refresh_token이 commit).

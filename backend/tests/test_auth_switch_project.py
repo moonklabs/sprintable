@@ -21,6 +21,10 @@ def _make_user(last_project_id=None) -> MagicMock:
     u.hashed_password = ""
     u.is_active = True
     u.last_project_id = last_project_id
+    # story #3649 — MagicMock 기본값은 None이 아니라 truthy MagicMock이라
+    # _is_session_stale_after_password_change의 "password_set_at is None"
+    # 단락이 안 걸려 이 파일의 세션 무효화 무관 테스트들이 401로 오탐됐다.
+    u.password_set_at = None
     return u
 
 
