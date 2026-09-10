@@ -238,6 +238,7 @@ async def get_me(
                     is_active=True,
                     has_password=bool(user.hashed_password) if user else None,
                     linked_providers=_linked_providers(user) if user else [],
+                    totp_enabled=bool(user.totp_enabled) if user else None,
                 )
 
     if member is None:
@@ -254,6 +255,7 @@ async def get_me(
             data.has_password = bool(user.hashed_password)
             data.linked_providers = _linked_providers(user)
             data.email = user.email  # E-ONBOARDING S2: User.email 노출
+            data.totp_enabled = bool(user.totp_enabled)  # story #3768
 
     # S-MBR-03: org owner/admin → effective role 상속. /me role이 JWT role과 일치하도록.
     if not is_api_key and member.user_id:

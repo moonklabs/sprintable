@@ -25,6 +25,10 @@ class MeResponse(BaseModel):
     # 이상 상태(가입 rail 어딘가 결함)라 unlink 가드(auth.py LAST_LOGIN_METHOD)가 막는다 —
     # 이 응답 필드는 순수 표시용, unlink 허용 판정은 서버가 매번 다시 계산한다(신뢰 안 함).
     linked_providers: list[str] = []
+    # story #3768 — 설정 화면의 TwoFactorSection이 상태를 알려고 POST /totp/setup을
+    # «마운트마다» 불러 매번 새 시크릿을 DB에 썼다(읽어야 할 자리에 쓰기). has_password와
+    # 같은 자리에 읽기 전용으로 노출 — User.totp_enabled 그대로, 새 개념 0.
+    totp_enabled: bool | None = None
 
 
 class UpdateMe(BaseModel):

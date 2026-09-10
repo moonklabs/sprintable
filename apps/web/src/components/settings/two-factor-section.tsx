@@ -5,8 +5,13 @@ import { useTranslations } from 'next-intl';
 import { ShieldCheck } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
+import { fetchWithAuth } from '@/lib/db/client';
 
-type TwoFaState = 'loading' | 'disabled' | 'enrolling' | 'enabled';
+// story #3768 — 'unknown'은 'loading'과 렌더는 같지만(둘 다 null) 의미가 다르다: 'loading'은
+// 아직 응답을 안 받은 것, 'unknown'은 /api/me가 실패해 상태를 «모르는» 채로 끝난 것 —
+// 「모름」을 「꺼짐」으로 단정하지 않는다(set-password-section/linked-accounts-section과
+// 동형: hasPassword===null·linkedProviders===null이면 섹션을 안 그린다).
+type TwoFaState = 'loading' | 'unknown' | 'disabled' | 'enrolling' | 'enabled';
 
 export function TwoFactorSection() {
   const t = useTranslations('settings');
@@ -22,19 +27,20 @@ export function TwoFactorSection() {
   const [disablePassword, setDisablePassword] = useState('');
 
   useEffect(() => {
-    // Attempt setup to detect current 2FA state
+    // story #3768 — 상태를 알려고 setup을 «부르지» 않는다(그건 새 시크릿을 매번 DB에
+    // 쓰는 쪽이다, auth.py:1160). /api/me의 totp_enabled를 읽기만 한다 — setup POST는
+    // handleSetup(사용자의 「켜기」 클릭)에만 남는다.
     (async () => {
-      const res = await fetch('/api/auth/2fa/setup', { method: 'POST' });
-      const json = await res.json() as { data?: { secret: string; uri: string }; error?: { code: string } };
-      if (res.status === 409 && json.error?.code === 'TOTP_ALREADY_ENABLED') {
-        setState('enabled');
-      } else if (res.ok && json.data) {
-        setProvUri(json.data.uri);
-        setSecret(json.data.secret);
-        setState('enrolling');
-      } else {
-        setState('disabled');
-      }
+      let res: Response;
+      try { res = await fetchWithAuth('/api/me'); } catch { setState('unknown'); return; }
+      if (!res.ok) { setState('unknown'); return; }
+      const json = await res.json() as { data?: { totp_enabled?: boolean | null } };
+      // 카디르 QA(2026-09-10) — BE MeResponse.totp_enabled는 `bool | None`이라 실제로
+      // null이 오는 분기가 있다(user 없는 org_member 폴백·api_key/user_id 없는 경로) —
+      // `=== undefined`만 보면 null이 «false(꺼짐)»로 단정돼 이 스토리가 막으려던
+      // 「모름≠꺼짐」 결함이 그대로 재발한다. boolean 타입 검사로 undefined/null 둘 다 잡는다.
+      if (typeof json.data?.totp_enabled !== 'boolean') { setState('unknown'); return; }
+      setState(json.data.totp_enabled ? 'enabled' : 'disabled');
     })();
   }, []);
 
@@ -132,7 +138,9 @@ export function TwoFactorSection() {
     }
   };
 
-  if (state === 'loading') return null;
+  // story #3768 — 'unknown'(/api/me 실패)도 'loading'과 같이 렌더 안 함 — 「모름」을
+  // 「꺼짐」으로 단정해 twoFactorEnable 버튼을 잘못 그리지 않는다.
+  if (state === 'loading' || state === 'unknown') return null;
 
   return (
     <SectionCard>
