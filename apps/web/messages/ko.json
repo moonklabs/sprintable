@@ -56,6 +56,7 @@
   },
   "accountSwitcher": {
     "title": "계정",
+    "setName": "이름 설정",
     "addAccount": "계정 추가",
     "signOutThis": "이 계정 로그아웃",
     "signOutAll": "모든 계정 로그아웃",
