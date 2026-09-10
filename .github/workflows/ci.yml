@@ -1428,6 +1428,15 @@ jobs:
       - name: "Verify i18n keys referenced in code exist in ko/en (story #5ead8723 regression guard)"
         run: pnpm --filter web verify:i18n-keys-exist
 
+      # story #3757 회귀가드 — messages→코드 역방향(죽은 키), 최상위 네임스페이스 단위.
+      # `check-i18n-keys.js`(#2371, 루트 정규식 스캐너)가 「여섯 표기」 중 넷을 몰라 다수를
+      # 거짓 사망으로 잡던 것 대신, verify-i18n-keys-exist.ts(위 스텝, 여섯 표기 검증됨)를
+      # 재사용해 A(리터럴)·A′(unknown-ns 낱말)·B(동적 ns 보류)·C(데이터 카탈로그)·D(비공개
+      # SaaS 오버레이 정적 스냅샷) 네 신호 중 하나도 없는 ns만 fail-closed로 잡는다(키 단위
+      # 삭제 판정은 이 가드 밖 — story #3757 AC2, 사람이 직접 읽는다).
+      - name: "Verify every top-level i18n namespace has at least one reference signal (story #3757 regression guard)"
+        run: pnpm --filter web verify:i18n-namespace-referenced
+
       # story #3760 회귀가드: App Router 라우트 파일(page/layout/template/loading/error/
       # not-found/default.tsx)의 named export가 Next.js 화이트리스트 밖이면 next build에서만
       # 죽는다(tsc·vitest는 이 계약을 모른다 — 실물: #4105, publishHistorySenderLabel을

@@ -112,6 +112,19 @@ export interface ScanResult {
   dynamicCount: number;
   totalCallCount: number;
   filesWithBindings: number;
+  // story #3757(별건 ⑤ 후속) — 「동적 호출이 하나라도 있는 네임스페이스」 집합. ns가
+  // 알려진(문자열) 바인딩을 통한 동적 호출만 담는다 — ③/⑤/⑥(번역자 파라미터·훅 반환)의
+  // unknown-ns(null) 동적 호출은 애초에 「어느 ns를 held back할지」를 모르므로 여기 안
+  // 들어간다(그쪽은 개별 낱말 축 A′로 별도 다룸, 이 필드와는 다른 축).
+  dynamicNamespaces: Set<string>;
+  // story #3757 — 층 A′(유나 정의): unknown-ns(③/⑤/⑥ 번역자 파라미터/훅 반환) 바인딩을
+  // 통한 호출이라도 인자가 여전히 문자열 리터럴이면(가장 흔한 실 패턴 — member-display.ts의
+  // `memberDisplayLabel(name, t)`가 `t('memberUnnamed')`를 리터럴로 부른다), 정확한
+  // namespace.key 전체경로는 못 지어도 그 "낱말"(마지막 세그먼트) 자체는 안다 — 그 낱말이
+  // «어느 네임스페이스 밑에도» 죽었다고 오판되지 않게(과소살해 방지, 정확한 ns를 못 좁히는
+  // 대가로 관대하게 살린다). ko/en 어느 네임스페이스의 말단이든 이 집합의 문자열과 정확히
+  // 같으면 「죽지 않았다」로 본다 — 죽은-키 판정(이 파일 밖 소비처)이 쓰는 재료.
+  unknownNsLiteralWords: Set<string>;
 }
 
 const TRANSLATION_METHODS = new Set(['rich', 'raw', 'has']);
@@ -287,6 +300,7 @@ function translatorPropNamesOfParamType(
 // 파라미터) — 바인딩은 있으나 네임스페이스를 몰라 그 호출은 항상 동적 버킷.
 export function scanFileContent(content: string, file: string): {
   literalRefs: KeyRef[]; dynamicCount: number; totalCallCount: number; hasBindings: boolean;
+  dynamicNamespaces: Set<string>; unknownNsLiteralWords: Set<string>;
 } {
   const sf = ts.createSourceFile(file, content, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const parseDiagnostics = (sf as unknown as { parseDiagnostics?: ts.Diagnostic[] }).parseDiagnostics;
@@ -311,6 +325,8 @@ export function scanFileContent(content: string, file: string): {
   const literalRefs: KeyRef[] = [];
   let dynamicCount = 0;
   let totalCallCount = 0;
+  const dynamicNamespaces = new Set<string>();
+  const unknownNsLiteralWords = new Set<string>();
 
   function registerBindingFromInitializer(varName: string, initRaw: ts.Expression): void {
     const init = ts.isAwaitExpression(initRaw) ? initRaw.expression : initRaw;
@@ -331,6 +347,11 @@ export function scanFileContent(content: string, file: string): {
       literalRefs.push({ file, line, fullKey });
     } else {
       dynamicCount += 1;
+      if (ns !== null) {
+        dynamicNamespaces.add(ns);
+      } else if (arg && ts.isStringLiteral(arg)) {
+        unknownNsLiteralWords.add(arg.text);
+      }
     }
   }
 
@@ -412,7 +433,10 @@ export function scanFileContent(content: string, file: string): {
   }
   walk(sf);
 
-  return { literalRefs, dynamicCount, totalCallCount, hasBindings: bindings.size > 0 };
+  return {
+    literalRefs, dynamicCount, totalCallCount, hasBindings: bindings.size > 0,
+    dynamicNamespaces, unknownNsLiteralWords,
+  };
 }
 
 const EXT_RE = /\.tsx?$/;
@@ -431,16 +455,21 @@ function walkDir(dir: string, out: string[]): void {
   }
 }
 
-export function scanRepo(srcRoot: string): ScanResult {
+// story #3757 — minExpectedFiles 오버라이드 가능(기본값=실 저장소 기준 MIN_EXPECTED_FILES).
+// 임시 픽스처 디렉터리(파일 수십 개 미만)로 이 함수를 끝까지 돌리는 통합 테스트가
+// 이 자기방어 체크에 걸리지 않게 여는 것 — 실 저장소 스캔(인자 생략)의 안전판은 그대로.
+export function scanRepo(srcRoot: string, minExpectedFiles: number = MIN_EXPECTED_FILES): ScanResult {
   const files: string[] = [];
   walkDir(srcRoot, files);
-  if (files.length < MIN_EXPECTED_FILES) {
+  if (files.length < minExpectedFiles) {
     throw new Error(`FAIL: 검사 대상 파일이 ${files.length}개뿐(srcRoot=${srcRoot}) — 가드가 헛돌고 있다.`);
   }
   const literalRefs: KeyRef[] = [];
   let dynamicCount = 0;
   let totalCallCount = 0;
   let filesWithBindings = 0;
+  const dynamicNamespaces = new Set<string>();
+  const unknownNsLiteralWords = new Set<string>();
   for (const abs of files) {
     const rel = path.relative(srcRoot, abs).split(path.sep).join('/');
     const content = readFileSync(abs, 'utf8');
@@ -449,8 +478,13 @@ export function scanRepo(srcRoot: string): ScanResult {
     dynamicCount += result.dynamicCount;
     totalCallCount += result.totalCallCount;
     if (result.hasBindings) filesWithBindings += 1;
+    for (const ns of result.dynamicNamespaces) dynamicNamespaces.add(ns);
+    for (const w of result.unknownNsLiteralWords) unknownNsLiteralWords.add(w);
   }
-  return { literalRefs, dynamicCount, totalCallCount, filesWithBindings };
+  return {
+    literalRefs, dynamicCount, totalCallCount, filesWithBindings,
+    dynamicNamespaces, unknownNsLiteralWords,
+  };
 }
 
 // story #5ead8723 AC1/AC2 — 점 경로를 메시지 트리에서 내려가 **말단**(string)까지 도달해야

@@ -129,6 +129,87 @@ describe('scanFileContent — story #5ead8723 AC1/AC2/AC3(셀프테스트 6)', (
     expect(result.totalCallCount).toBe(3);
   });
 
+  // story #3757 — dynamicNamespaces(ns 단위 죽은 키 가드가 「이 ns는 동적 호출이 있어
+  // 하위 전부 보류」를 판단하는 재료). ns가 알려진 바인딩을 통한 동적 호출만 담는다.
+  describe('dynamicNamespaces — story #3757', () => {
+    it('⭐ns가 알려진 바인딩의 동적 호출은 그 ns를 dynamicNamespaces에 담는다', () => {
+      const src = `
+        const t = useTranslations('loops');
+        t(\`status\${s}\`);
+      `;
+      const result = scanFileContent(src, 'fake.tsx');
+      expect(result.dynamicNamespaces).toEqual(new Set(['loops']));
+    });
+
+    it('리터럴 호출만 있으면 dynamicNamespaces는 비어 있다', () => {
+      const src = `
+        const t = useTranslations('nav');
+        t('dashboard');
+      `;
+      const result = scanFileContent(src, 'fake.tsx');
+      expect(result.dynamicNamespaces).toEqual(new Set());
+    });
+
+    it('unknown-ns(③ 번역자 파라미터) 동적 호출은 dynamicNamespaces에 안 담긴다(어느 ns인지 모름)', () => {
+      const src = `
+        function C({ t }: { t: ReturnType<typeof useTranslations> }) {
+          return t(dynamicKey);
+        }
+      `;
+      const result = scanFileContent(src, 'fake.tsx');
+      expect(result.dynamicNamespaces).toEqual(new Set());
+      expect(result.dynamicCount).toBe(1);
+    });
+
+    it('한 파일에 여러 ns가 각각 동적 호출을 가지면 전부 담는다', () => {
+      const src = `
+        const t = useTranslations('a');
+        const t2 = useTranslations('b');
+        t(dynamicVar);
+        t2(dynamicVar);
+      `;
+      const result = scanFileContent(src, 'fake.tsx');
+      expect(result.dynamicNamespaces).toEqual(new Set(['a', 'b']));
+    });
+  });
+
+  // story #3757 — unknownNsLiteralWords(층 A′). unknown-ns(③/⑤/⑥) 바인딩을 통한 호출이라도
+  // 인자가 리터럴이면 그 낱말은 안다 — 정확한 namespace.key는 못 지어도 "이 낱말 자체는
+  // 죽지 않았다"를 죽은-키 판정 쪽에 넘긴다.
+  describe('unknownNsLiteralWords — story #3757', () => {
+    it('⭐번역자 파라미터를 통한 리터럴 호출은 그 낱말을 unknownNsLiteralWords에 담는다(member-display.ts 실 형)', () => {
+      const src = `
+        function memberDisplayLabel(name: string | null, t: (key: string) => string): string {
+          return name ? name : t('memberUnnamed');
+        }
+      `;
+      const result = scanFileContent(src, 'fake.tsx');
+      expect(result.unknownNsLiteralWords).toEqual(new Set(['memberUnnamed']));
+      expect(result.literalRefs).toEqual([]); // ns를 모르니 전체경로 리터럴로는 안 잡힘(동적 카운트로만)
+      expect(result.dynamicCount).toBe(1);
+    });
+
+    it('알려진 ns 바인딩의 리터럴 호출은 unknownNsLiteralWords에 안 담긴다(literalRefs로 이미 잡힘)', () => {
+      const src = `
+        const t = useTranslations('nav');
+        t('dashboard');
+      `;
+      const result = scanFileContent(src, 'fake.tsx');
+      expect(result.unknownNsLiteralWords).toEqual(new Set());
+    });
+
+    it('unknown-ns 바인딩이라도 인자가 동적(변수)이면 낱말을 못 얻으므로 안 담긴다', () => {
+      const src = `
+        function C(t: (key: string) => string, dynamicKey: string) {
+          return t(dynamicKey);
+        }
+      `;
+      const result = scanFileContent(src, 'fake.tsx');
+      expect(result.unknownNsLiteralWords).toEqual(new Set());
+      expect(result.dynamicCount).toBe(1);
+    });
+  });
+
   it('네임스페이스 없는(루트) useTranslations()도 지원한다', () => {
     const src = `
       const t = useTranslations();

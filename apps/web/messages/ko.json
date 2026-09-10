@@ -28,22 +28,15 @@
     "goToLogin": "로그인으로 이동",
     "enable_all": "전체 켜기",
     "disable_all": "전체 끄기",
-    "deletedUser": "삭제된 사용자",
     "memberUnnamed": "이름 없는 구성원",
-    "unassigned": "미할당",
     "unknown": "알 수 없음",
     "noData": "데이터 없음",
     "loading": "로딩 중...",
     "loadMore": "더 보기",
     "error": "문제가 발생했습니다",
     "errorDescription": "페이지를 불러오는 중 오류가 발생했습니다.",
-    "locale_en": "English",
-    "locale_ko": "한국어",
     "upgradeRequired": "업그레이드가 필요합니다",
     "upgradePlan": "요금제 업그레이드",
-    "operatorSurface": "운영 표면",
-    "back": "이전",
-    "next": "다음",
     "close": "닫기",
     "add": "추가",
     "confirm": "확인"
@@ -66,7 +59,6 @@
     "addAccount": "계정 추가",
     "signOutThis": "이 계정 로그아웃",
     "signOutAll": "모든 계정 로그아웃",
-    "switching": "전환 중…",
     "switchFailed": "계정 전환에 실패했습니다. 다시 시도해 주세요.",
     "reloginRequired": "재로그인 필요",
     "capReached": "계정 한도에 도달했습니다",
@@ -313,23 +305,7 @@
   },
   "dashboard": {
     "title": "대시보드",
-    "noProjectTitle": "이 조직에는 아직 프로젝트가 없어요",
-    "noProjectDescription": "새 프로젝트를 만들면 보드와 스프린트를 시작할 수 있어요.",
-    "noProjectAction": "새 프로젝트 만들기",
     "projects": "프로젝트",
-    "activeSprints": "활성 스프린트",
-    "viewAll": "전체 보기 →",
-    "kanbanBoard": "칸반 보드 →",
-    "noProjects": "프로젝트가 없습니다",
-    "noActiveSprints": "활성 스프린트가 없습니다",
-    "orgFallback": "조직",
-    "commandCenter": "커맨드 센터",
-    "commandCenterDescription": "업무를 막는 요소를 풀고, 스프린트 상태를 확인하고, 문서로 바로 이동할 수 있는 운영 허브입니다.",
-    "ccFleet": "함대 {count}",
-    "ccFleetBreakdownPending": "상태 집계 준비중",
-    "ccFleetOnlineWorking": "온라인 {online} · 작업중 {working}",
-    "ccFlowTooltip": "프로젝트 흐름 보기",
-    "ccLoading": "불러오는 중…",
     "ccZoneActions": "지금 내 할 일",
     "ccClearTitle": "괜찮습니다",
     "ccClearBody": "지금 처리할 일이 없습니다",
@@ -351,6 +327,24 @@
     "ccChangedSince": "내 것 {count}건에 변경이 있었습니다",
     "ccLastSeenSuffix": "마지막으로 본 것은 {ago}입니다",
     "ccGateGeneric": "게이트",
+    "ccAgentStuck": "{gate} 대기 중",
+    "ccAttentionAuthFailure": "인증 실패 {count}회",
+    "ccAttentionDays": "{days}일째",
+    "ccAttentionGeneric": "확인 필요",
+    "ccRiskFailedRuns": "최근 7일 실패 실행",
+    "ccCycleTitle": "사이클 타임",
+    "ccCycleValue": "평균 {days}일 (최근 30일 · {n}건)",
+    "ccCycleEmpty": "최근 30일 완료 없음",
+    "ccContributionTitle": "완료 기여",
+    "ccContributionValue": "에이전트 {agent} · 사람 {human} · 미배정 {unassigned}",
+    "ccMinAgo": "{n}분 전",
+    "ccHourAgo": "{n}시간 전",
+    "ccDayAgo": "{n}일 전",
+    "recentDocs": "최근 문서",
+    "inProgress": "진행 중",
+    "inReview": "리뷰 중",
+    "blocked": "차단됨",
+    "standup": "스탠드업",
     "ccGateTypeQa": "QA",
     "ccGateTypePrReview": "PR 리뷰",
     "ccGateTypeMerge": "머지",
@@ -363,78 +357,7 @@
     "ccGateTypeArtifactCanonicalize": "정본화",
     "ccGateTypeAgentDecisionRequest": "판단 요청",
     "ccGateTypeSupportEscalationReview": "고객지원 검토",
-    "ccGateTypeConceptApproval": "컨셉 결재",
-    "ccAgentStuck": "{gate} 대기 중",
-    "ccAttentionAuthFailure": "인증 실패 {count}회",
-    "ccAttentionDays": "{days}일째",
-    "ccAttentionGeneric": "확인 필요",
-    "ccZoneOverview": "프로젝트 현황",
-    "ccEpicsTitle": "목표 진척",
-    "ccOutcome": "가설 적중",
-    "ccEpicsEmpty": "진행 중인 목표가 없습니다",
-    "ccRiskPending": "리스크 지표 준비중",
-    "ccRiskFailedRuns": "최근 7일 실패 실행",
-    "ccCyclePending": "사이클 타임 준비중",
-    "ccCycleTitle": "사이클 타임",
-    "ccCycleValue": "평균 {days}일 (최근 30일 · {n}건)",
-    "ccCycleEmpty": "최근 30일 완료 없음",
-    "ccContributionPending": "기여 지표 준비중",
-    "ccContributionTitle": "완료 기여",
-    "ccContributionValue": "에이전트 {agent} · 사람 {human} · 미배정 {unassigned}",
-    "ccItemOverdue": "기한 초과 지표",
-    "ccItemCostTrend": "비용 추세",
-    "ccNotYetShownLabel": "아직 표시하지 않는 것 — {items}",
-    "ccNotYetShownFooter": "준비되는 대로 표시됩니다.",
-    "ccRecentTitle": "최근 변화",
-    "ccRecentEmpty": "최근 변화가 없습니다",
-    "ccChangeStoryCreated": "스토리 생성",
-    "ccChangeStoryStatus": "스토리 상태 변경",
-    "ccChangeSprintStarted": "스프린트 시작",
-    "ccChangeSprintClosed": "스프린트 종료",
-    "ccChangeDocCreated": "문서 생성",
-    "ccChangeRunCompleted": "실행 완료",
-    "ccChangeRunFailed": "실행 실패",
-    "ccChangeGeneric": "{object} 변경",
-    "ccMinAgo": "{n}분 전",
-    "ccHourAgo": "{n}시간 전",
-    "ccDayAgo": "{n}일 전",
-    "projectsHint": "보드나 문서로 바로 이동하는 시작점입니다.",
-    "activeSprintsHint": "현재 전달 구간에 집중해 주세요",
-    "pendingWork": "대기 중 작업",
-    "openBoard": "보드 열기",
-    "projectEntryDescription": "전달 작업으로 진입하는 커맨드 센터 진입점",
-    "createProjectHint": "프로젝트를 만들면 커맨드 센터가 열립니다.",
-    "sprintHealth": "스프린트 상태",
-    "noActiveSprintsDescription": "현재 팀을 막고 있는 활성 스프린트가 없습니다.",
-    "recentDocs": "최근 문서",
-    "noDocsYet": "문서가 아직 없습니다",
-    "noDocsYetDescription": "결정과 핸드오프를 문서로 쌓습니다.",
-    "policyDocs": "정책 문서",
-    "noPolicyDocs": "정책 문서가 없습니다",
-    "noPolicyDocsDescription": "스프린트나 목표에 연결되면 여기 나타납니다.",
-    "noProjectAccess": "아직 접근 가능한 프로젝트가 없습니다",
-    "noProjectAccessDescription": "조직에는 합류했지만 아직 프로젝트 배정이 없는 상태입니다. 관리자신에게 프로젝트 배정을 요청하면 됩니다.",
-    "currentProjectHome": "현재 프로젝트 홈",
-    "statusActive": "활성",
-    "inProgress": "진행 중",
-    "inReview": "리뷰 중",
-    "blocked": "차단됨",
-    "openStories": "전체 열림",
-    "assignedToMe": "나에게 할당됨",
-    "noAssignedStories": "할당된 스토리가 없습니다",
-    "startSprint": "스프린트 시작하기",
-    "viewBoard": "보드 보기",
-    "writeDocs": "문서 작성",
-    "noAgentBanner": "AI 에이전트를 연결하면 더 많은 일을 위임할 수 있어요",
-    "noAgentBannerCta": "에이전트 연결",
-    "newStory": "새 스토리",
-    "standup": "스탠드업",
-    "sprintCycle": "스프린트 사이클",
-    "inProgressStories": "처리 중 스토리",
-    "hitlPending": "HITL 대기",
-    "hitlPendingDesc": "승인 게이트 대기 (준비 중)",
-    "sprintCycleProgress": "기간 진행",
-    "agentsActive": "{count}명 활성"
+    "ccGateTypeConceptApproval": "컨셉 결재"
   },
   "proofCapsule": {
     "claim": {
@@ -1886,15 +1809,9 @@
     "runtimeTypeSaved": "런타임 타입 저장됨"
   },
   "shell": {
-    "workspaceLabel": "운영 워크스페이스",
-    "projectLabel": "프로젝트",
-    "projectAttached": "현재 프로젝트 연결됨",
-    "projectPending": "프로젝트 컨텍스트 연결 대기",
     "projects": "프로젝트",
     "projectSelectPrompt": "현재 프로젝트 선택",
-    "projectSelectDescription": "헤더의 프로젝트 스위처에서 현재 프로젝트를 선택하면 이 화면이 활성화됩니다.",
-    "searchPlaceholder": "작업, 문서, 운영 표면 검색 준비 중...",
-    "primaryCta": "보드 열기"
+    "projectSelectDescription": "헤더의 프로젝트 스위처에서 현재 프로젝트를 선택하면 이 화면이 활성화됩니다."
   },
   "standup": {
     "orgLevelTitle": "오늘의 스탠드업",
@@ -2968,26 +2885,66 @@
         "advanced": "고급"
       },
       "items": {
-        "heading1": { "description": "큰 제목" },
-        "heading2": { "description": "중간 제목" },
-        "heading3": { "description": "작은 제목" },
-        "bulletList": { "description": "순서 없는 목록" },
-        "orderedList": { "description": "순서 있는 목록" },
-        "checklist": { "description": "체크리스트" },
-        "codeBlock": { "description": "코드 블록" },
-        "blockquote": { "description": "인용구" },
-        "callout": { "description": "강조 박스" },
-        "table": { "description": "표 삽입" },
-        "image": { "description": "이미지 삽입" },
-        "file": { "description": "파일 첨부" },
-        "embed": { "description": "외부 URL 임베드" },
-        "mermaidDiagram": { "description": "다이어그램 삽입" },
-        "columns": { "description": "2단/3단 컬럼 레이아웃" },
-        "mathBlock": { "description": "LaTeX 블록 수식" },
-        "mathInline": { "description": "LaTeX 인라인 수식" },
-        "toggle": { "description": "접기/펼치기 블록" },
-        "pageEmbed": { "description": "다른 문서 임베드" },
-        "horizontalRule": { "description": "구분선" }
+        "heading1": {
+          "description": "큰 제목"
+        },
+        "heading2": {
+          "description": "중간 제목"
+        },
+        "heading3": {
+          "description": "작은 제목"
+        },
+        "bulletList": {
+          "description": "순서 없는 목록"
+        },
+        "orderedList": {
+          "description": "순서 있는 목록"
+        },
+        "checklist": {
+          "description": "체크리스트"
+        },
+        "codeBlock": {
+          "description": "코드 블록"
+        },
+        "blockquote": {
+          "description": "인용구"
+        },
+        "callout": {
+          "description": "강조 박스"
+        },
+        "table": {
+          "description": "표 삽입"
+        },
+        "image": {
+          "description": "이미지 삽입"
+        },
+        "file": {
+          "description": "파일 첨부"
+        },
+        "embed": {
+          "description": "외부 URL 임베드"
+        },
+        "mermaidDiagram": {
+          "description": "다이어그램 삽입"
+        },
+        "columns": {
+          "description": "2단/3단 컬럼 레이아웃"
+        },
+        "mathBlock": {
+          "description": "LaTeX 블록 수식"
+        },
+        "mathInline": {
+          "description": "LaTeX 인라인 수식"
+        },
+        "toggle": {
+          "description": "접기/펼치기 블록"
+        },
+        "pageEmbed": {
+          "description": "다른 문서 임베드"
+        },
+        "horizontalRule": {
+          "description": "구분선"
+        }
       },
       "embedPrompt": "임베드할 URL을 입력하세요 (YouTube, Figma 등):",
       "mermaidDefault": {
@@ -3014,7 +2971,6 @@
     "noData": "데이터 없음",
     "noHistory": "거래 내역 없음",
     "unknown": "알 수 없음",
-    "adminOnly": "관리자 권한 필요",
     "grantFailed": "지급 실패",
     "adminOnlyHint": "조직 관리자/소유자만 리워드 지급 가능"
   },
@@ -3038,14 +2994,8 @@
     "actionMerge": "병합",
     "actionDecide": "결정",
     "actionCoordinate": "조율",
-    "kindApproval": "결재 필요",
-    "kindDecision": "방향 확인 필요",
-    "kindBlocker": "막힘",
-    "kindMention": "응답 필요",
     "actionApprove": "결재",
-    "actionConfirm": "확인",
-    "actionResolve": "해소",
-    "actionReply": "답"
+    "actionConfirm": "확인"
   },
   "inbox": {
     "attentionTabLabel": "오늘",
@@ -3137,13 +3087,11 @@
   },
   "invite": {
     "title": "조직 초대",
-    "description": "초대를 수락하면 해당 조직에 합류합니다.",
     "accept": "초대 수락",
     "success": "합류 완료!",
     "redirecting": "대시보드로 이동 중...",
     "loading": "로딩 중...",
     "invalidToken": "유효하지 않은 초대 링크입니다.",
-    "acceptFailed": "초대 수락에 실패했습니다.",
     "accepting": "수락 중...",
     "authFailed": "인증에 실패했습니다. 다시 시도해주세요.",
     "inviteNotFound": "초대를 찾을 수 없습니다.",
@@ -3162,7 +3110,8 @@
     "submit": "합류하기",
     "invitedByOrg": "{org}에서 초대했습니다.",
     "signupEmail": "{email} 계정으로 가입됩니다.",
-    "decline": "거절 (나중에)"
+    "decline": "거절 (나중에)",
+    "acceptFailed": "초대 수락에 실패했습니다."
   },
   "resetPassword": {
     "title": "새 비밀번호 설정",
@@ -3261,28 +3210,7 @@
   "billing": {
     "title": "결제 관리",
     "loading": "불러오는 중...",
-    "currentPlan": "현재 플랜",
-    "nextBilling": "다음 결제일",
-    "via": "결제 수단:",
-    "updatePaymentMethod": "결제 수단 변경",
-    "grandfathered": "기존 구독자 혜택이 적용된 플랜입니다 (가격 보장)",
-    "upgradeCtaDesc": "Team 또는 Pro로 업그레이드하여 더 많은 기능을 사용하세요",
-    "upgradeCta": "업그레이드",
-    "invoices": "인보이스 내역",
-    "cancelSubscription": "구독 취소",
-    "cancelDesc": "구독을 취소하면 결제 기간 만료 후 무료 플랜으로 전환됩니다.",
-    "cancelBtn": "구독 취소",
-    "cancelModalTitle": "구독 취소",
-    "cancelModalDesc": "취소 방식을 선택하세요.",
-    "cancelEndOfPeriod": "현재 결제 기간 만료 후 취소",
-    "cancelImmediately": "즉시 취소 (환불 없음)",
-    "keep": "유지하기",
-    "confirmCancel": "취소 확인",
-    "cancelFailed": "구독 취소 실패",
-    "statusBilled": "결제 완료",
     "statusPending": "대기 중",
-    "statusRefunded": "환불됨",
-    "statusFailed": "실패",
     "auWarnTitle": "자동화 사용량이 {pct}%에 도달했습니다",
     "auWarnDesc": "이번 달 자동화(AU) 사용량이 한도의 80%를 넘었습니다. 플랜을 업그레이드하거나 다음 달 초기화를 기다려 주세요.",
     "auWarn90Title": "자동화 사용량 한도 임박({pct}%) — 관리자 메일 안내",
@@ -4150,7 +4078,6 @@
   "sprints": {
     "title": "스프린트",
     "loading": "로딩 중...",
-    "noProject": "프로젝트가 선택되지 않았습니다.",
     "noSprints": "아직 시작한 스프린트가 없어요",
     "noSprintsDescription": "스프린트는 한 번의 집중 사이클이에요. 시작할 때 가설을 선언하고, 끝나면 배운 것을 종합합니다.",
     "noSprintsCta": "첫 스프린트 시작하기",
@@ -4171,7 +4098,6 @@
     "startDate": "시작일",
     "endDate": "종료일",
     "cancel": "취소",
-    "create": "생성",
     "createError": "스프린트 생성에 실패했습니다.",
     "activate": "스프린트 시작",
     "close": "스프린트 종료",
@@ -4192,7 +4118,6 @@
     "goalPlaceholder": "이번 스프린트에서 무엇을 완수하는가?",
     "capacityLabel": "공수",
     "teamSizeLabel": "인원",
-    "hypothesisSection": "효과 가설",
     "delete": "스프린트 삭제",
     "deleteConfirmTitle": "스프린트를 삭제할까요?",
     "deleteConfirmBody": "이 작업은 되돌릴 수 없습니다. 연결된 스토리는 백로그로 이동되고 회고·스탠드업 연결이 해제됩니다.",
@@ -4214,7 +4139,6 @@
     "declareStatementLabel": "가설 statement",
     "declareStatementPlaceholder": "이 스프린트에서 무엇을 검증하는지",
     "declareDraftCta": "AI 초안으로 시작",
-    "declareDrafting": "제안 중...",
     "declareDraftNoteTitle": "AI 초안 — 검토·수정 후 확정하세요.",
     "declareDraftNoteBody": "확정은 당신이 한다 — 편집하거나 그대로 두세요.",
     "declareGa4DateRangePlaceholder": "측정 기간(일)",
@@ -4490,13 +4414,6 @@
   },
   "activityLog": {
     "title": "활동 로그",
-    "eyebrow": "활동",
-    "description": "프로젝트 활동 내역 — 누가, 언제, 어떤 엔티티에 무엇을 했는지 확인합니다.",
-    "colTime": "시간",
-    "colActor": "수행자",
-    "colAction": "액션",
-    "colEntity": "엔티티",
-    "colContext": "컨텍스트",
     "filterAll": "전체",
     "filterActor": "수행자",
     "filterAction": "액션 (입력하여 필터)",
@@ -4508,8 +4425,7 @@
     "reload": "새로고침",
     "loadMore": "더 보기",
     "forbiddenTitle": "접근 권한 없음",
-    "forbiddenDescription": "활동 로그를 조회할 권한이 없습니다.",
-    "noProject": "선택된 프로젝트가 없습니다."
+    "forbiddenDescription": "활동 로그를 조회할 권한이 없습니다."
   },
   "teamActivity": {
     "title": "활동",
