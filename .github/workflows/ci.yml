@@ -1676,6 +1676,15 @@ jobs:
       - name: "Verify no new raw <button> (story #3164 regression guard)"
         run: pnpm --filter web verify:no-new-raw-button
 
+      # story #3785(PO 실측 2026-09-10) 보조 가드 — 페이지 배경 위 「테두리만 있는 상자」
+      # (카드 표면 bg-card 미적용) 클래스가 새로 늘면 FAIL(baseline-freeze,
+      # card-surfaceless-box-baseline.json 참조). 정적 상한이지 실수가 아니다 — 실 판정
+      # authority는 e2e/card-surface-guard.spec.ts(라이브 DOM 하네스, 판정선 5조건 +
+      # 라우트별 양성대조 3종). story #3739가 겪은 「만들어졌는데 도는 자리 없음」 재발을
+      # 막기 위해 신설 즉시 여기 배선한다.
+      - name: "Verify no card-surfaceless box (story #3785 regression guard)"
+        run: pnpm --filter web verify:no-card-surfaceless-box
+
       # story #3741(유나 전수 2026-09-09 08:46Z) 회귀가드 — 영어 로케일 화면에 한글이
       # 그대로 서는 하드코딩 문자열(JsxText·placeholder/title/alt/aria-* 속성)이 새로
       # 늘면 FAIL(baseline-freeze, hardcoded-korean-ui-text-baseline.json 참조 — 창건
@@ -1879,6 +1888,13 @@ jobs:
       # owner 로그인 → playwright/.auth/owner.json storageState를 만든 뒤 contrast-guard.spec을 돈다.
       - name: Run contrast-guard e2e (axe color-contrast)
         run: pnpm --filter web e2e:contrast
+
+      # story #3785(2026-09-10) — 이 잡이 이미 세운 풀스택(같은 storageState) 위에 얹는다.
+      # 판정선 5조건 + 라우트별 양성대조 3종(표면 있는/투명/bg-background 재도색 합성 카드
+      # 주입) — 「배경 위 무표면 상자 = 0」을 실 렌더 픽셀로 판정(주 가드, 정적 baseline은
+      # verify:no-card-surfaceless-box가 보조).
+      - name: Run card-surface e2e (background-adjacent surfaceless box)
+        run: pnpm --filter web e2e:card-surface
 
       - name: Dump backend log on failure
         if: failure()

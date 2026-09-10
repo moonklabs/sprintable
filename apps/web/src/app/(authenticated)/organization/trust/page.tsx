@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl';
 import { HeartHandshake } from 'lucide-react';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
 import { ListRow } from '@/components/ui/list-row';
 import { PageHeader } from '@/components/ui/page-header';
@@ -192,9 +193,10 @@ export default function OrganizationTrustPage() {
                 </Button>
               ))}
             </div>
-            <div className="divide-y divide-border rounded-md border border-border">
+            {/* story #3785(유나 定) — 1층 규칙: Card(surface='solid'). */}
+            <Card className="divide-y divide-border">
               {visibleRows.map(renderAdminRow)}
-            </div>
+            </Card>
           </>
         )
       ) : selfScores.length === 0 ? (
@@ -206,9 +208,9 @@ export default function OrganizationTrustPage() {
       ) : (
         <>
           <h2 className="text-base font-semibold text-foreground">{t('trustSelfTitle')}</h2>
-          <div className="divide-y divide-border rounded-md border border-border">
+          <Card className="divide-y divide-border">
             {selfScores.map(renderSelfRow)}
-          </div>
+          </Card>
         </>
       )}
 

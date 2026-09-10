@@ -5,6 +5,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { EmptyState } from '@/components/ui/empty-state';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Badge } from '@/components/ui/badge';
+import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { OperatorDropdownSelect } from '@/components/ui/operator-dropdown-select';
 import { OperatorInput } from '@/components/ui/operator-control';
@@ -114,7 +115,12 @@ export default function RewardsPage() {
         <div className="mx-auto w-full max-w-3xl space-y-5 p-6">
 
           {/* 리더보드 */}
-          <div className="rounded-xl border border-border bg-background">
+          {/* story #3785(유나 定, 페드루 재측定 10:47Z) — bg-background는 페이지 배경을
+              그대로 덧칠한 것이라 border-only와 같은 결함(배경과 한 색). 1층 규칙: Card
+              (surface='solid'). 안의 행(rounded-lg border border-border/60)은 손대지
+              않는다 — 이 Card가 표면을 지면 행의 nearest opaque ancestor가 body가 아니게
+              되어 자동으로 2층이 된다(2층 기본값 = 테두리만, 지금 그 모양 그대로). */}
+          <Card>
             <div className="flex items-center justify-between border-b border-border/60 px-4 py-3">
               <h2 className="text-sm font-semibold text-foreground">🏆 {t('leaderboard')}</h2>
               <div className="inline-flex rounded-lg border border-border bg-muted/30 p-0.5">
@@ -157,10 +163,12 @@ export default function RewardsPage() {
                 </div>
               )}
             </div>
-          </div>
+          </Card>
 
           {/* 포상/벌금 지급 */}
-          <div className="rounded-xl border border-border bg-background">
+          {/* story #3785 — 위와 같은 이유(bg-background=배경 재도색). 이 섹션은 목록이
+              아니라 폼이라 divide-y 대상 행이 없다. */}
+          <Card>
             <div className="border-b border-border/60 px-4 py-3">
               <h2 className="text-sm font-semibold text-foreground">💰 {t('grantReward')}</h2>
               <p className="mt-0.5 text-xs text-muted-foreground">{t('adminOnlyHint')}</p>
@@ -201,10 +209,11 @@ export default function RewardsPage() {
                 </Button>
               </div>
             </div>
-          </div>
+          </Card>
 
           {/* 거래 내역 */}
-          <div className="rounded-xl border border-border bg-background">
+          {/* story #3785 — 위 리더보드와 같은 이유·같은 처방(행은 안 건드림). */}
+          <Card>
             <div className="border-b border-border/60 px-4 py-3">
               <h2 className="text-sm font-semibold text-foreground">📋 {t('history')}</h2>
             </div>
@@ -230,7 +239,7 @@ export default function RewardsPage() {
                 </div>
               )}
             </div>
-          </div>
+          </Card>
 
         </div>
       </div>

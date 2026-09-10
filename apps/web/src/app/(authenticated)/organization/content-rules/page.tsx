@@ -5,6 +5,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
 import { PageHeader } from '@/components/ui/page-header';
 import { ListRow } from '@/components/ui/list-row';
 import { useToast } from '@/components/ui/toast';
@@ -487,7 +488,9 @@ export default function ContentRulesPage() {
         </div>
       ) : loadState === 'ready' ? (
         <>
-          <div className="overflow-hidden rounded-md border border-border">
+          {/* story #3785(유나 定) — 페이지 배경 위 테두리만 있는 상자는 배경과 한 색이라
+              경계가 안 보인다(1층 규칙: Card, surface='solid'). */}
+          <Card className="overflow-hidden">
             {/* ① 초안 검사 */}
             <SectionBar title={t('contentRulesInspectionSectionTitle')} description={t('contentRulesInspectionSectionDescription')} />
             <div className="divide-y divide-border">
@@ -702,7 +705,7 @@ export default function ContentRulesPage() {
                 />
               </RuleRowShell>
             </div>
-          </div>
+          </Card>
 
           <p className="text-xs text-muted-foreground">{t('contentRulesFooterNote')}</p>
 
