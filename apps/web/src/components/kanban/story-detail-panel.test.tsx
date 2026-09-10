@@ -1099,3 +1099,52 @@ describe('StoryDetailPanel — tasksLoading(story #3709, 완전성-정직)', () 
     expect(tasksTab()?.textContent).toBe('태스크 (1)'); // 응답 뒤엔 지금처럼 수 표시.
   });
 });
+
+// story #3786(유나 定 §2·확인 축2) — 의존성 추가 422 응답에서 cycle/self-reference를
+// error.code로 가른다(예전엔 message 문자열에서 한글 "사이클"을 찾는 반창고였다 — en
+// 로케일 착지 순간 항상 거짓이 됐을 자리). 아래 두 테스트는 message에 "사이클"이 **없는**
+// 상태(en을 흉내)에서도 code만으로 정확히 갈리는지 고정한다.
+describe('StoryDetailPanel — 의존성 추가 422 cycle/self-reference 판정(story #3786)', () => {
+  function stubDepFlow(errorPayload: { code: string; message: string }) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith('/api/stories?')) {
+        return { ok: true, json: async () => ({ data: [{ id: 'cand-1', title: 'Candidate Story', story_number: 9, is_reference_candidate: true }] }) };
+      }
+      if (url === '/api/dependencies' && init?.method === 'POST') {
+        return { ok: false, status: 422, json: async () => ({ error: errorPayload }) };
+      }
+      return { ok: false, json: async () => null };
+    }));
+  }
+
+  async function openAddDepAndClickCandidate() {
+    await act(async () => {
+      root.render(wrap(
+        <StoryDetailPanel story={makeStory()} tasks={[]} onClose={() => {}} projectId="proj-1" />,
+      ));
+    });
+    const addBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.trim() === koMessages.board.dep.add);
+    expect(addBtn).not.toBeUndefined();
+    await act(async () => { addBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    const candidateBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('Candidate Story'));
+    expect(candidateBtn).not.toBeUndefined();
+    await act(async () => { candidateBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+  }
+
+  it('⭐code=DEPENDENCY_CYCLE(en message, "사이클" 없음) → cycleDetected 토스트(message 문자열과 무관)', async () => {
+    stubDepFlow({ code: 'DEPENDENCY_CYCLE', message: 'This dependency would create a cycle' });
+    await openAddDepAndClickCandidate();
+    expect(container.textContent).toContain(koMessages.board.dep.cycleDetected);
+    expect(container.textContent).not.toContain(koMessages.board.dep.invalidSelf);
+  });
+
+  it('code=DEPENDENCY_SELF_REFERENCE(en message) → invalidSelf 토스트', async () => {
+    stubDepFlow({ code: 'DEPENDENCY_SELF_REFERENCE', message: 'An item cannot depend on itself' });
+    await openAddDepAndClickCandidate();
+    expect(container.textContent).toContain(koMessages.board.dep.invalidSelf);
+    expect(container.textContent).not.toContain(koMessages.board.dep.cycleDetected);
+  });
+});

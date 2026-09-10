@@ -20,8 +20,17 @@ grep(421파일/3539건)이 주석 안 따옴표 강조까지 오탐했던 것과
   (인자가 f-string이어도 span으로 걸러지므로 안전).
 - **tests/·alembic/** — 스캔 루트를 `backend/app`으로 한정해 구조적으로 제외(둘 다
   `app/`의 형제 디렉터리지 안이 아니다 — 별도 탐색 로직 불요).
-- **EXEMPT 0** — 카드 明示: 이 레이어는 무배제 원칙. 예외가 필요해지면 이 스크립트가
-  아니라 PO 승인 하 명시적으로 추가한다(지금은 빈 세트).
+- **EXEMPT_FILES(이름 붙은 유일 예외 1건, story #3786 페드루 PO 明示 2026-09-10 12:24Z)**
+  — `app/services/i18n_catalog.py`. 무배제 원칙은 "코드에 박힌 하드코딩 한글"을 겨냥한
+  것이지, 이 파일처럼 ko/en 키를 **정본으로 보관하는 자리**는 애초에 "하드코딩"이 아니다
+  (반대로 세면 ①http_detail류 슬라이스가 문자열을 라우터에서 이 카탈로그로 "옮길" 때마다
+  1층 총량이 안 줄어 진짜 진척(2층 도달가능 수)과 1층 숫자가 영영 어긋나고, ②카탈로그에
+  새 키를 추가할 때마다 이 가드가 "신규 한글"로 계속 RED가 난다 — 카탈로그의 존재 이유
+  자체와 이 가드가 구조적으로 충돌). 그 파일의 ko/en 짝 무결성은 별도 가드
+  (`test_3786_i18n_catalog.py`의 가드 1·2)가 이미 지킨다 — 이 파일 하나를 빼도 "한글이
+  코드에 새로 박히는 것"을 못 잡는 구멍이 생기지 않는다. 다른 모든 파일은 여전히 EXEMPT
+  0(이 예외가 무배제 원칙 자체를 깨는 것이 아니다 — story #3779 카드 본문에도 이 줄을
+  남긴다).
 
 ## 대상 밖(다른 가드의 몫)
 `HTTPException(detail=...)`류 영문 에러 코드 문장은 이 가드가 아니라
@@ -53,6 +62,11 @@ from pathlib import Path
 APP_DIR = "app"
 LOG_METHODS = {"debug", "info", "warning", "warn", "error", "exception", "critical", "log"}
 LOG_BASE_NAMES = {"logger", "_logger"}
+
+# story #3786(페드루 PO 明示 2026-09-10 12:24Z) — 이름 붙은 유일 예외. i18n_catalog.py는
+# ko/en 문자열의 "정본 자리"라 이 가드(코드에 박힌 하드코딩 한글)의 겨냥 대상이 아니다.
+# 그 파일 자신의 ko/en 짝 무결성은 test_3786_i18n_catalog.py의 가드 1·2가 지킨다.
+EXEMPT_FILES = frozenset({"app/services/i18n_catalog.py"})
 
 # self-assert — 재료가 비정상적으로 적으면(스캔이 헛돌고 있으면) 조용한 통과 대신 죽는다
 # (story #3164/#3741류 관례).
@@ -145,6 +159,8 @@ def scan_repo(backend_root: Path) -> list[Violation]:
     violations: list[Violation] = []
     for f in files:
         file_label = str(f.relative_to(backend_root))
+        if file_label in EXEMPT_FILES:
+            continue
         source = f.read_text(encoding="utf-8")
         try:
             violations.extend(scan_source(source, file_label))
