@@ -162,6 +162,7 @@ function MdBody({ content }: { content: string }) {
 
 function EpicEditInline({ epic, onSaved, onCancel }: { epic: Epic; onSaved: (e: Epic) => void; onCancel: () => void }) {
   const t = useTranslations('goals');
+  const tc = useTranslations('common');
   const [title, setTitle] = useState(epic.title);
   const [description, setDescription] = useState(epic.description ?? '');
   const [objective, setObjective] = useState(epic.objective ?? '');
@@ -218,7 +219,7 @@ function EpicEditInline({ epic, onSaved, onCancel }: { epic: Epic; onSaved: (e: 
       <div className="flex justify-end gap-2">
         <Button variant="ghost" size="sm" onClick={onCancel}>{t('cancel')}</Button>
         <Button size="sm" disabled={saving || !title.trim()} onClick={() => void handleSave()}>
-          {saving ? t('saving') : t('saveChanges')}
+          {saving ? tc('saving') : t('saveChanges')}
         </Button>
       </div>
     </div>
@@ -229,6 +230,7 @@ function EpicEditInline({ epic, onSaved, onCancel }: { epic: Epic; onSaved: (e: 
 
 export default function EpicDetailPage() {
   const t = useTranslations('goals');
+  const tc = useTranslations('common');
   const displayTimezone = resolveDisplayTimezone().tz;
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -606,7 +608,7 @@ export default function EpicDetailPage() {
               onClick={() => void handleDelete()}
               disabled={deleting}
             >
-              {deleting ? t('deleting') : t('deleteConfirmButton')}
+              {deleting ? tc('deleting') : t('deleteConfirmButton')}
             </Button>
           </DialogFooter>
         </DialogContent>

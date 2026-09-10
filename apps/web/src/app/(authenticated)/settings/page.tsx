@@ -1083,7 +1083,7 @@ export default function SettingsPage() {
                                 onClick={() => void handleSaveOrgName()}
                               >
                                 {/* story #3776(1층B) — "저장", common ns의 기존 save 키 재사용(유나 정정 — 폼 크롬은 common 소관). */}
-                                {savingOrgName ? '저장 중…' : tc('save')}
+                                {savingOrgName ? tc('saving') : tc('save')}
                               </Button>
                             </div>
                           ) : (
@@ -1544,7 +1544,7 @@ export default function SettingsPage() {
                   confirmWithoutImpact,
                 })}
               >
-                {deletingOrg ? '삭제 중…' : '영구 삭제'}
+                {deletingOrg ? tc('deleting') : '영구 삭제'}
               </Button>
             </div>
           </DialogContent>

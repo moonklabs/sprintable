@@ -195,7 +195,7 @@ export function CreateOrganizationDialog({
           <DialogFooter>
             <DialogClose render={<Button type="button" variant="ghost" disabled={creating}>{tc('cancel')}</Button>} />
             <Button type="submit" disabled={!canSubmit}>
-              {creating ? t('switcherCreating') : t('switcherCreateButton')}
+              {creating ? tc('creating') : t('switcherCreateButton')}
             </Button>
           </DialogFooter>
         </form>

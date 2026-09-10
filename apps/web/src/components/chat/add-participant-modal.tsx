@@ -156,7 +156,7 @@ export function AddParticipantModal({
             {tc('cancel')}
           </Button>
           <Button size="sm" onClick={() => void handleAdd()} disabled={!selected || adding}>
-            {adding ? t('adding') : t('addParticipants')}
+            {adding ? tc('adding') : t('addParticipants')}
           </Button>
         </div>
       </DialogContent>

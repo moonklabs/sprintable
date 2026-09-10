@@ -45,10 +45,11 @@ interface DocsShellClientProps {
   projectId?: string;
 }
 
-/** Pure helper — exported for unit tests */
-export function getDocSaveStatusText(status: SaveStatus, t: (key: string) => string): string | null {
+/** Pure helper — exported for unit tests. story #3787 — 「저장 중…」 딱지는 이제 common.saving
+ * 하나(다른 namespace라 별도 tc 인자로 받는다, docs.statusSaving은 걷음). */
+export function getDocSaveStatusText(status: SaveStatus, t: (key: string) => string, tc: (key: string) => string): string | null {
   const map: Partial<Record<SaveStatus, string>> = {
-    saving: t('statusSaving'),
+    saving: tc('saving'),
     saved: t('statusSaved'),
     unsaved: t('statusUnsaved'),
     error: t('statusError'),

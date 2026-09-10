@@ -88,6 +88,7 @@ export function LoopCreateDialog({
   onCreated: (loop: { id: string }) => void;
 }) {
   const t = useTranslations('loops');
+  const tc = useTranslations('common');
   const th = useTranslations('hypotheses');
   const tf = useTranslations('flow');
   // story #3773 — stageRoleLabel 정본 키가 organization ns에 있다(trustRoleLabel*와 같은
@@ -546,7 +547,7 @@ export function LoopCreateDialog({
             {goalComplete ? t('createLoopGoalComplete') : t('createLoopValidationHint')}
           </span>
           <Button onClick={() => void handleSubmit()} disabled={!canSubmit}>
-            {submitting ? t('createLoopSubmitting') : t('createLoopSubmit')}
+            {submitting ? tc('creating') : t('createLoopSubmit')}
           </Button>
         </DialogFooter>
       </DialogContent>

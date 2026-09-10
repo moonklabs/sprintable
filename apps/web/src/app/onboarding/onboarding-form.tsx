@@ -72,6 +72,7 @@ interface OnboardingFormProps {
 
 export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProps = {}) {
   const t = useTranslations('onboarding');
+  const tc = useTranslations('common');
 
   const [step, setStep] = useState<Step>(initialStep ?? 'org');
   const [orgName, setOrgName] = useState('');
@@ -499,7 +500,7 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
               onClick={() => void handleCreateOrg()}
               disabled={!orgName.trim() || !orgSlug.trim() || !slugValid || loading}
             >
-              {loading ? t('creating') : t('createOrg')}
+              {loading ? tc('creating') : t('createOrg')}
             </Button>
           </div>
         )}
@@ -531,7 +532,7 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
               onClick={() => void handleCreateProject()}
               disabled={!projectName.trim() || loading}
             >
-              {loading ? t('creating') : t('createProjectAction')}
+              {loading ? tc('creating') : t('createProjectAction')}
             </Button>
           </div>
         )}
@@ -565,7 +566,7 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
               onClick={() => void handleCreateAgent()}
               disabled={!agentName.trim() || loading}
             >
-              {loading ? t('creating') : t('createAgentAction')}
+              {loading ? tc('creating') : t('createAgentAction')}
             </Button>
             <Button
               variant="glass"

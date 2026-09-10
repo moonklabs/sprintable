@@ -212,6 +212,7 @@ export default function ContentPostEditPage() {
   const { draftId } = useParams<{ draftId: string }>();
   const { orgId, role } = useDashboardContext();
   const t = useTranslations('content');
+  const tc = useTranslations('common');
 
   const [versions, setVersions] = useState<SitePostVersion[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1332,7 +1333,7 @@ export default function ContentPostEditPage() {
               disabled={!selectedConnectionId || creatingVariant || variantTextEmpty}
               data-testid="content-create-variant-button"
             >
-              {creatingVariant ? t('channelPostsCreateVariantPendingCta') : t('channelPostsCreateVariantCta')}
+              {creatingVariant ? tc('creating') : t('channelPostsCreateVariantCta')}
             </Button>
           </div>
           {variantTextEmpty ? (
@@ -1576,7 +1577,7 @@ export default function ContentPostEditPage() {
         <div className="space-y-1">
           <div className="flex flex-wrap gap-2">
             <Button type="button" onClick={() => void handleSave()} disabled={saving}>
-              {saving ? t('editSavingCta') : t('editSaveCta')}
+              {saving ? tc('saving') : t('editSaveCta')}
             </Button>
             <Button type="button" variant="outline" onClick={() => void handleSubmitForApproval()} disabled={saving || submitting || hasBlockingViolations}>
               {submitting ? t('submitPendingCta') : t('submitCta')}

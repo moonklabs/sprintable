@@ -946,6 +946,7 @@ interface GoalsClientProps {
 
 export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
   const t = useTranslations('goals');
+  const tc = useTranslations('common');
   const router = useRouter();
   const { wsSlug, projSlug } = useGoalsRoute();
   const { addToast } = useToast();
@@ -1341,7 +1342,7 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
               onClick={() => { if (deleteConfirmId) void handleDeleteEpic(deleteConfirmId); }}
               disabled={deleting}
             >
-              {deleting ? t('deleting') : t('deleteConfirmButton')}
+              {deleting ? tc('deleting') : t('deleteConfirmButton')}
             </Button>
           </DialogFooter>
         </DialogContent>

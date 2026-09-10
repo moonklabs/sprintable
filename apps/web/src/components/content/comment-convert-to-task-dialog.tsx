@@ -34,6 +34,7 @@ export interface CommentConvertToTaskDialogProps {
 
 export function CommentConvertToTaskDialog({ postTitle, comment, onClose, onSubmit }: CommentConvertToTaskDialogProps) {
   const t = useTranslations('content');
+  const tc = useTranslations('common');
   const prefillTitle = `${t('commentsConvertDialogTitlePrefix')} ${postTitle}`;
   const [title, setTitle] = useState(prefillTitle);
   const [note, setNote] = useState('');
@@ -134,7 +135,7 @@ export function CommentConvertToTaskDialog({ postTitle, comment, onClose, onSubm
             <DialogFooter className="shrink-0">
               <DialogClose render={<Button type="button" variant="ghost" disabled={submitting} onClick={onClose}>{t('commentsConvertCancel')}</Button>} />
               <Button type="submit" disabled={submitting}>
-                {submitting ? t('commentsConvertSubmitting') : t('commentsConvertSubmit')}
+                {submitting ? tc('creating') : t('commentsConvertSubmit')}
               </Button>
             </DialogFooter>
           </form>

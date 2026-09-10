@@ -33,6 +33,7 @@ const ERROR_TEXT: Record<'error_permission' | 'error_invalid' | 'error_network',
 
 export function CitationComposeBar({ mode, selectedCount, saveState, onCancel, onSave }: CitationComposeBarProps) {
   const t = useTranslations('chats');
+  const tc = useTranslations('common');
   const isError = ERROR_STATES.includes(saveState);
 
   return (
@@ -61,7 +62,7 @@ export function CitationComposeBar({ mode, selectedCount, saveState, onCancel, o
                 disabled={saveState === 'saving'}
                 className="rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-50"
               >
-                {saveState === 'saving' ? t('citationSaving') : t('citationSaveToStory')}
+                {saveState === 'saving' ? tc('saving') : t('citationSaveToStory')}
               </button>
             ) : null}
           </>

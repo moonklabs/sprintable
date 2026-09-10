@@ -64,6 +64,7 @@ export function StandupFeedbackDialog({
   onDeleteFeedback,
 }: StandupFeedbackDialogProps) {
   const t = useTranslations('standup');
+  const tc = useTranslations('common');
   const [showFeedbackForm, setShowFeedbackForm] = useState(false);
   const [feedbackText, setFeedbackText] = useState('');
   const [reviewType, setReviewType] = useState<StandupReviewType>('comment');
@@ -298,7 +299,7 @@ export function StandupFeedbackDialog({
                           />
                           <div className="flex flex-wrap gap-2">
                             <Button variant="hero" size="sm" onClick={() => void saveFeedbackEdit(item)} disabled={savingFeedbackId === item.id || !editingFeedbackText.trim()}>
-                              {savingFeedbackId === item.id ? t('saving') : t('saveFeedback')}
+                              {savingFeedbackId === item.id ? tc('saving') : t('saveFeedback')}
                             </Button>
                             <Button variant="outline" size="sm" onClick={() => { setEditingFeedbackId(null); setEditingFeedbackText(''); setEditingReviewType('comment'); }}>
                               {t('cancel')}
@@ -365,7 +366,7 @@ export function StandupFeedbackDialog({
                 )}
                 <div className="flex flex-wrap gap-2">
                   <Button variant="hero" size="sm" onClick={() => void submitFeedback()} disabled={submittingFeedback || !feedbackText.trim()}>
-                    {submittingFeedback ? t('saving') : t('submitFeedback')}
+                    {submittingFeedback ? tc('saving') : t('submitFeedback')}
                   </Button>
                   <Button variant="outline" size="sm" onClick={() => { setShowFeedbackForm(false); setReviewMode(false); setReviewType('comment'); }}>
                     {t('cancel')}

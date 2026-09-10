@@ -180,6 +180,7 @@ function RetroEntrySkeleton() {
 
 export default function RetroSessionPage() {
   const t = useTranslations('retro');
+  const tc = useTranslations('common');
   const { projectId, wsSlug, projSlug } = useRetroRoute();
   const { currentTeamMemberId } = useDashboardContext();
   const params = useParams<{ id: string }>();
@@ -778,7 +779,7 @@ export default function RetroSessionPage() {
                                   disabled={!newItemText[category].trim() || addingItem === category}
                                   className="w-full"
                                 >
-                                  {addingItem === category ? t('addingItem') : t('addItem')}
+                                  {addingItem === category ? tc('adding') : t('addItem')}
                                 </Button>
                               </div>
                             ) : null}
@@ -874,7 +875,7 @@ export default function RetroSessionPage() {
                           onClick={() => void addAction()}
                           disabled={!newActionText.trim() || addingAction}
                         >
-                          {addingAction ? t('addingAction') : t('addAction')}
+                          {addingAction ? tc('adding') : t('addAction')}
                         </Button>
                       </div>
                     </div>

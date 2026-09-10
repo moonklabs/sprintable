@@ -54,6 +54,7 @@ interface OrgGatePolicySectionProps {
 
 export function OrgGatePolicySection({ canEdit }: OrgGatePolicySectionProps) {
   const t = useTranslations('orgGatePolicy');
+  const tc = useTranslations('common');
   const [loading, setLoading] = useState(true);
   const [posture, setPosture] = useState<Posture>('balanced');
   const [approverId, setApproverId] = useState<string>(''); // '' = 미지정(현행)
@@ -221,7 +222,7 @@ export function OrgGatePolicySection({ canEdit }: OrgGatePolicySectionProps) {
 
             {canEdit ? (
               <Button type="button" size="sm" onClick={() => void handleSave()} disabled={saving}>
-                {saving ? t('saving') : t('save')}
+                {saving ? tc('saving') : t('save')}
               </Button>
             ) : null}
           </>

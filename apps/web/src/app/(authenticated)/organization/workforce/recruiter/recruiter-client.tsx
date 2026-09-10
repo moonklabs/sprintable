@@ -294,6 +294,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
   // 리로드하므로 마운트 시점 값이면 충분(별도 리스너 불필요).
   const locale = useLocale();
   const t = useTranslations('recruiter');
+  const tc = useTranslations('common');
   const tAgents = useTranslations('agents');
   // story d82c1092: 스코프 step(§3③) 카피는 AddAgentForm에서 그대로 하베스트(신규 토큰 0).
   const tSettings = useTranslations('settings');
@@ -1066,7 +1067,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                     disabled={equipCreating || (scopeMode === 'projects' && scopeProjectIds.length === 0)}
                     onClick={() => void handleEquipCreate()}
                   >
-                    {equipCreating ? t('equipCreating') : t('equipCreateCta')}
+                    {equipCreating ? tc('creating') : t('equipCreateCta')}
                   </Button>
                 ) : (
                   <Button

@@ -800,7 +800,7 @@ function RowEditForm<V>({
       {children(draft, setDraft)}
       <div className="flex gap-2">
         <Button size="sm" onClick={() => onSave(draft)} disabled={saving} data-testid="content-rules-row-save">
-          {saving ? t('savingCta') : t('saveAction')}
+          {saving ? tc('saving') : t('saveAction')}
         </Button>
         <Button size="sm" variant="outline" onClick={onCancel} disabled={saving}>{tCancel(t, tc)}</Button>
       </div>
@@ -871,7 +871,7 @@ function UtmRulesEditForm({ value, onSave, onCancel, saving, t }: {
       ) : null}
       <div className="flex gap-2">
         <Button size="sm" onClick={() => onSave(draft)} disabled={saving} data-testid="content-rules-row-save">
-          {saving ? t('savingCta') : t('saveAction')}
+          {saving ? tc('saving') : t('saveAction')}
         </Button>
         <Button size="sm" variant="outline" onClick={onCancel} disabled={saving}>{tCancel(t, tc)}</Button>
       </div>
@@ -923,7 +923,7 @@ function GenerationBudgetEditForm({ value, onSave, onCancel, saving, t }: {
       <p className="text-xs text-muted-foreground">{t('generationBudgetRowHint')}</p>
       <div className="flex gap-2">
         <Button size="sm" onClick={() => onSave(draft)} disabled={saving} data-testid="content-rules-row-save">
-          {saving ? t('savingCta') : t('saveAction')}
+          {saving ? tc('saving') : t('saveAction')}
         </Button>
         <Button size="sm" variant="outline" onClick={onCancel} disabled={saving}>{tCancel(t, tc)}</Button>
       </div>
@@ -961,7 +961,7 @@ function BrandKitEditForm({ value, onSave, onCancel, saving, t }: {
       </div>
       <div className="flex gap-2">
         <Button size="sm" onClick={() => onSave(draft)} disabled={saving} data-testid="content-rules-row-save">
-          {saving ? t('savingCta') : t('saveAction')}
+          {saving ? tc('saving') : t('saveAction')}
         </Button>
         <Button size="sm" variant="outline" onClick={onCancel} disabled={saving}>{tCancel(t, tc)}</Button>
       </div>

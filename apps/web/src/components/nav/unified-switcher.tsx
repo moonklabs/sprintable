@@ -244,7 +244,7 @@ export function UnifiedSwitcher({
             <DialogFooter>
               <DialogClose render={<Button type="button" variant="ghost" disabled={s.creating}>{tCommon('cancel')}</Button>} />
               <Button type="submit" disabled={!s.newProjectName.trim() || s.creating}>
-                {s.creating ? t('switcherCreating') : t('switcherCreateButton')}
+                {s.creating ? tCommon('creating') : t('switcherCreateButton')}
               </Button>
             </DialogFooter>
           </form>

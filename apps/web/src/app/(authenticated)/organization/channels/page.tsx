@@ -686,6 +686,7 @@ function ChannelSection({
 }) {
   const { channel, credential_kind } = item;
   const locale = useLocale();
+  const tc = useTranslations('common');
   const displayTimezone = resolveDisplayTimezone().tz;
   const rowStatuses = connections.map((c) =>
     deriveChannelConnectionStatus({
@@ -795,7 +796,7 @@ function ChannelSection({
       }
       if (credential_kind === 'none') {
         return isOwnerOrAdmin
-          ? { label: creatingSandbox ? t('channelConnectSandboxPendingCta') : t('channelConnectSandboxAction', { channel: channelLabel(channel, t) }), onClick: () => void handleCreateSandbox(), disabled: creatingSandbox, testId: 'channel-connect-sandbox-button' }
+          ? { label: creatingSandbox ? tc('creating') : t('channelConnectSandboxAction', { channel: channelLabel(channel, t) }), onClick: () => void handleCreateSandbox(), disabled: creatingSandbox, testId: 'channel-connect-sandbox-button' }
           : null;
       }
       if (credential_kind === 'pasted_secret') {

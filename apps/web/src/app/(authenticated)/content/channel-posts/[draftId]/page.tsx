@@ -2757,7 +2757,7 @@ export default function ChannelPostEditPage() {
       </div>
       <div className="flex gap-2">
         <Button onClick={handleSave} disabled={saving || imageUploadInProgress || videoUploadInProgress} data-testid="channel-post-save-button">
-          {saving ? t('editSavingCta') : t('editSaveCta')}
+          {saving ? tc('saving') : t('editSaveCta')}
         </Button>
         <Button
           onClick={() => void handleSubmitForApproval()}
