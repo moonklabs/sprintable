@@ -6,7 +6,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { NextIntlClientProvider } from 'next-intl';
 import { EntityPreviewModal } from './embed-card';
+import koMessages from '../../../messages/ko.json';
 
 let container: HTMLDivElement;
 let root: Root;
@@ -52,7 +54,9 @@ describe('EntityPreviewModal gate 분기 — story #2889/S2d', () => {
     });
     await act(async () => {
       root.render(
-        <EntityPreviewModal entityType="gate" entityId="g-1" title={null} status={null} href={null} onClose={() => {}} embedded />,
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <EntityPreviewModal entityType="gate" entityId="g-1" title={null} status={null} href={null} onClose={() => {}} embedded />
+        </NextIntlClientProvider>,
       );
     });
     await flush();
@@ -68,7 +72,9 @@ describe('EntityPreviewModal gate 분기 — story #2889/S2d', () => {
     }));
     await act(async () => {
       root.render(
-        <EntityPreviewModal entityType="gate" entityId="g-2" title={null} status={null} href={null} onClose={() => {}} embedded />,
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <EntityPreviewModal entityType="gate" entityId="g-2" title={null} status={null} href={null} onClose={() => {}} embedded />
+        </NextIntlClientProvider>,
       );
     });
     await flush();
@@ -81,7 +87,9 @@ describe('EntityPreviewModal gate 분기 — story #2889/S2d', () => {
     stubFetchWithAuth(async () => ({ ok: false, json: async () => ({}) }));
     await act(async () => {
       root.render(
-        <EntityPreviewModal entityType="gate" entityId="g-3" title={null} status={null} href={null} onClose={() => {}} embedded />,
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <EntityPreviewModal entityType="gate" entityId="g-3" title={null} status={null} href={null} onClose={() => {}} embedded />
+        </NextIntlClientProvider>,
       );
     });
     await flush();

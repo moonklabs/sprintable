@@ -43,6 +43,8 @@ export function WorkflowTemplateGallerySection({
   // story #3776(1층A) — 배정 UI 문구는 이미 organization ns에 있던 이벤트 적용 화면과
   // 글자가 같은 기존 키를 그대로 재사용한다.
   const tOrg = useTranslations('organization');
+  // story #3776(1층B) — "로딩 중..."/"다시 시도", common ns의 기존 loading/retry 키 재사용.
+  const tc = useTranslations('common');
 
   const [definitions, setDefinitions] = useState<EventDefinitionResponse[]>([]);
   const [agents, setAgents] = useState<TeamMember[]>([]);
@@ -188,7 +190,7 @@ export function WorkflowTemplateGallerySection({
           <h2 className="text-base font-semibold text-foreground">워크플로우 템플릿 갤러리</h2>
         </SectionCardHeader>
         <SectionCardBody>
-          <p className="text-sm text-muted-foreground">로딩 중...</p>
+          <p className="text-sm text-muted-foreground">{tc('loading')}</p>
         </SectionCardBody>
       </SectionCard>
     );
@@ -209,7 +211,7 @@ export function WorkflowTemplateGallerySection({
             data-testid="workflow-gallery-load-error"
           >
             <span>템플릿 목록을 불러오지 못했습니다.</span>
-            <Button variant="outline" size="sm" onClick={() => void loadData()}>다시 시도</Button>
+            <Button variant="outline" size="sm" onClick={() => void loadData()}>{tc('retry')}</Button>
           </div>
         </SectionCardBody>
       </SectionCard>

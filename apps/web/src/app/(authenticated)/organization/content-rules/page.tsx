@@ -791,6 +791,7 @@ function RowEditForm<V>({
   children: (draft: V, setDraft: (v: V) => void) => React.ReactNode;
 }) {
   const [draft, setDraft] = useState<V>(initial);
+  const tc = useTranslations('common');
   return (
     <div className="space-y-3">
       {children(draft, setDraft)}
@@ -798,16 +799,16 @@ function RowEditForm<V>({
         <Button size="sm" onClick={() => onSave(draft)} disabled={saving} data-testid="content-rules-row-save">
           {saving ? t('savingCta') : t('saveAction')}
         </Button>
-        <Button size="sm" variant="outline" onClick={onCancel} disabled={saving}>{tCancel(t)}</Button>
+        <Button size="sm" variant="outline" onClick={onCancel} disabled={saving}>{tCancel(t, tc)}</Button>
       </div>
     </div>
   );
 }
 
-function tCancel(t: ReturnType<typeof useTranslations>): string {
-  // common 네임스페이스 cancel과 동형 문구를 이 화면 안에서만 재사용(별도 t 인스턴스
-  // 안 늘림 — contentRules 안에 이미 있는 표현 재사용).
-  return t.has('cancelAction') ? t('cancelAction') : '취소';
+// story #3776(1층B) — 예전 '취소' 원시 폴백을 common ns의 기존 cancel 키로 교체(호출부
+// 4곳이 각자 useTranslations('common')을 새로 열어 tc로 넘긴다).
+function tCancel(t: ReturnType<typeof useTranslations>, tc: ReturnType<typeof useTranslations>): string {
+  return t.has('cancelAction') ? t('cancelAction') : tc('cancel');
 }
 
 function UtmRulesEditForm({ value, onSave, onCancel, saving, t }: {
@@ -820,6 +821,7 @@ function UtmRulesEditForm({ value, onSave, onCancel, saving, t }: {
   const [draft, setDraft] = useState<UtmRules>(value ?? {
     enabled: false, default_source: null, default_medium: null, campaign_from: 'campaign_slug', content_from: 'draft_id',
   });
+  const tc = useTranslations('common');
   return (
     <div className="space-y-3">
       <label className="flex items-center gap-2 text-sm text-foreground">
@@ -868,7 +870,7 @@ function UtmRulesEditForm({ value, onSave, onCancel, saving, t }: {
         <Button size="sm" onClick={() => onSave(draft)} disabled={saving} data-testid="content-rules-row-save">
           {saving ? t('savingCta') : t('saveAction')}
         </Button>
-        <Button size="sm" variant="outline" onClick={onCancel} disabled={saving}>{tCancel(t)}</Button>
+        <Button size="sm" variant="outline" onClick={onCancel} disabled={saving}>{tCancel(t, tc)}</Button>
       </div>
     </div>
   );
@@ -882,6 +884,7 @@ function GenerationBudgetEditForm({ value, onSave, onCancel, saving, t }: {
   t: ReturnType<typeof useTranslations>;
 }) {
   const [draft, setDraft] = useState<GenerationBudget | null>(value);
+  const tc = useTranslations('common');
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -919,7 +922,7 @@ function GenerationBudgetEditForm({ value, onSave, onCancel, saving, t }: {
         <Button size="sm" onClick={() => onSave(draft)} disabled={saving} data-testid="content-rules-row-save">
           {saving ? t('savingCta') : t('saveAction')}
         </Button>
-        <Button size="sm" variant="outline" onClick={onCancel} disabled={saving}>{tCancel(t)}</Button>
+        <Button size="sm" variant="outline" onClick={onCancel} disabled={saving}>{tCancel(t, tc)}</Button>
       </div>
     </div>
   );
@@ -933,6 +936,7 @@ function BrandKitEditForm({ value, onSave, onCancel, saving, t }: {
   t: ReturnType<typeof useTranslations>;
 }) {
   const [draft, setDraft] = useState<BrandKit>(value);
+  const tc = useTranslations('common');
   return (
     <div className="space-y-3">
       <div className="space-y-1.5">
@@ -956,7 +960,7 @@ function BrandKitEditForm({ value, onSave, onCancel, saving, t }: {
         <Button size="sm" onClick={() => onSave(draft)} disabled={saving} data-testid="content-rules-row-save">
           {saving ? t('savingCta') : t('saveAction')}
         </Button>
-        <Button size="sm" variant="outline" onClick={onCancel} disabled={saving}>{tCancel(t)}</Button>
+        <Button size="sm" variant="outline" onClick={onCancel} disabled={saving}>{tCancel(t, tc)}</Button>
       </div>
     </div>
   );

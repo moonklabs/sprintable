@@ -220,9 +220,10 @@ export default function ConversationPage() {
     );
   }
 
+  // story #3776(1층B) — "채팅"(폴백 제목), chats ns의 기존 title 키 재사용.
   const headerTitle = meta
     ? formatHeaderTitle(meta, currentTeamMemberId, t, tc)
-    : (meta === null ? '채팅' : '로딩 중…');
+    : (meta === null ? t('title') : '로딩 중…');
 
   // story #2968 — 리스트(chat-list-view.tsx)와 동일 원칙: 1:1(DM)만 상대가 특정되므로
   // avatar.tsx 정본으로 실사진을 보여준다. group은 다인원이라 대표 사진이 없어 미표시 유지.
@@ -264,7 +265,8 @@ export default function ConversationPage() {
               className="flex flex-shrink-0 items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
             >
               <ChevronLeft className="h-4 w-4" />
-              <span className="lg:hidden">채팅</span>
+              {/* story #3776(1층B) — "채팅", chats ns의 기존 title 키 재사용(위 225행과 동형). */}
+              <span className="lg:hidden">{t('title')}</span>
             </button>
             {headerAvatarParticipant && (
               <Avatar
@@ -327,10 +329,11 @@ export default function ConversationPage() {
                 type="button"
                 onClick={() => setShowAddParticipant(true)}
                 className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition hover:bg-muted hover:text-foreground"
-                title="참여자 추가"
+                // story #3776(1층B) — "참여자 추가", chats ns의 기존 addParticipants 키 재사용.
+                title={t('addParticipants')}
               >
                 <UserPlus className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">참여자 추가</span>
+                <span className="hidden sm:inline">{t('addParticipants')}</span>
               </button>
               {/* story #2621 v1 — 전달 계약 편집 진입점(대화 설정). */}
               <button

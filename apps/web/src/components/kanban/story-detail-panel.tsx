@@ -355,6 +355,8 @@ export function DescriptionViewer({
 
 export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLoading = false, nextTasksCursor = null, loadingMoreTasks = false, onLoadMoreTasks, onClose, onStoryUpdate, onDeleteSuccess, memberMap = {}, members = [], storyMap = {}, epicMap = {}, sprintMap = {}, onNavigate, projectId, overlayPosition, getStatusLabel, getEntityTypeLabel }: StoryDetailPanelProps) {
   const t = useTranslations('board');
+  // story #3776(1층B) — "닫기"/"취소", common ns의 기존 close/cancel 키 재사용.
+  const tc = useTranslations('common');
   const locale = useLocale();
   const displayTimezone = resolveDisplayTimezone().tz;
   // story #1959(P2-S3): 딥링크 매니페스트(story_detail→parentTab=all) — 콜드 진입 시 "전체"
@@ -1841,7 +1843,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                   onClick={() => setShowLabelPicker((v) => !v)}
                   className="h-auto min-h-0 min-w-0 rounded px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground hover:bg-muted"
                 >
-                  {showLabelPicker ? '닫기' : '+ 추가'}
+                  {showLabelPicker ? tc('close') : '+ 추가'}
                 </Button>
               </div>
 
@@ -2349,7 +2351,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
           </DialogHeader>
           <DialogFooter>
             <Button variant="ghost" size="sm" onClick={() => setShowDeleteConfirm(false)} disabled={deleting}>
-              취소
+              {tc('cancel')}
             </Button>
             <Button
               variant="destructive"

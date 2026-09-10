@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useTranslations } from 'next-intl';
 import { ChevronDown, ChevronUp, ShieldCheck } from 'lucide-react';
 import { EmbedCard } from './embed-card';
 import { ApprovalRequestCard } from './approval-request-card';
@@ -113,6 +114,8 @@ function ArtifactCarousel({ refs, onOpenReadingPanel }: { refs: EmbedGroupProps[
  * 약한 텍스트 레코드 여럿). default 3행 + 「+N 더보기」 → 펼치면 전체 + 「접기」. 각 행은
  * EmbedCard(비-artifact 폼 = 아이콘+라벨+상태 압축 pill)를 그대로 재사용. */
 function ConciseList({ entityType, refs, onOpenReadingPanel }: { entityType: string; refs: EmbedGroupProps['refs']; onOpenReadingPanel?: EmbedGroupProps['onOpenReadingPanel'] }) {
+  // story #3776(1층B) — "접기", chats ns의 기존 reportCollapse 키 재사용.
+  const tChats = useTranslations('chats');
   const [expanded, setExpanded] = useState(false);
   const visible = expanded ? refs : refs.slice(0, LIST_DEFAULT_VISIBLE);
   const hiddenCount = refs.length - LIST_DEFAULT_VISIBLE;
@@ -129,7 +132,7 @@ function ConciseList({ entityType, refs, onOpenReadingPanel }: { entityType: str
           onClick={() => setExpanded((v) => !v)}
           className="text-xs font-medium text-primary hover:underline"
         >
-          {expanded ? '접기' : `+${hiddenCount} 더보기`}
+          {expanded ? tChats('reportCollapse') : `+${hiddenCount} 더보기`}
         </button>
       )}
     </div>

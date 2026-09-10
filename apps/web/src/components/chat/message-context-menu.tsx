@@ -33,6 +33,8 @@ interface MessageContextMenuProps {
 export function MessageContextMenu({ x, y, isMine, onReply, onCopy, onDelete, onClose, citeAction, isDeleted = false, onBlock }: MessageContextMenuProps) {
   // story #3776(1층A) — "사용자 차단" 항목, chats ns의 기존 blockUserConfirmConfirm 키 재사용.
   const tChats = useTranslations('chats');
+  // story #3776(1층B) — "삭제", common ns의 기존 delete 키 재사용.
+  const tc = useTranslations('common');
   const menuRef = useRef<HTMLDivElement>(null);
 
   // Close on outside click or Escape
@@ -113,7 +115,7 @@ export function MessageContextMenu({ x, y, isMine, onReply, onCopy, onDelete, on
             className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-foreground hover:bg-destructive-tint"
           >
             <Trash2 className="h-3.5 w-3.5" />
-            삭제
+            {tc('delete')}
           </button>
         </>
       )}

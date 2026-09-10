@@ -397,6 +397,8 @@ export function EntityPreviewModal({
   // parity.test.ts가 BE ENTITY_RESOLVERS와 엄격 대조하는 자리)엔 못 들어간다. 그 계약 밖에서
   // gate 전용 fetch/href/렌더를 독립적으로 붙인다(parity 가드 무영향) — GateSummary(아래)가
   // 유일한 소비 지점.
+  // story #3776(1층B) — "닫기" aria-label, common ns의 기존 close 키 재사용.
+  const tc = useTranslations('common');
   const hasFetchStrategy = entityType === 'doc' || entityType === 'gate' || Boolean(ENTITY_API[entityType]);
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(hasFetchStrategy);
@@ -660,7 +662,7 @@ export function EntityPreviewModal({
         type="button"
         onClick={onClose}
         className="mt-0.5 shrink-0 text-muted-foreground hover:text-foreground"
-        aria-label="닫기"
+        aria-label={tc('close')}
       >
         <X className="h-4 w-4" />
       </button>
@@ -927,8 +929,9 @@ export function EmbedCard({
 // story #2262 AC1(2026-08-08) — doc `flow-map-blueprint-v1` §2-3 표기 세 조각의 「표면」.
 // 스토리 본문의 AC1 정의 그대로: form은 'mention'|'embed'|'proof' 셋뿐(FORMS,
 // backend/app/models/reference.py) — 채팅 멘션 파서는 오늘 "mention"만 낸다(다른 값은
-// 문서·증빙 경로가 낼 수 있어 표는 셋 다 갖춘다).
-const FORM_LABELS: Record<string, string> = { mention: '멘션', embed: '임베드', proof: '근거' };
+// 문서·증빙 경로가 낼 수 있어 표는 셋 다 갖춘다). story #3776(1층B) — 'proof'는 formLabel()
+// 이 chats.reportEvidenceLabel로 먼저 가로채 이 표를 안 거친다(아래).
+const FORM_LABELS: Record<string, string> = { mention: '멘션', embed: '임베드' };
 
 // 「지점」 — referenced_at(이 참조가 «언제 생겼나»)을 짧게. 블루프린트 예시("7/26 스레드")와
 // 같은 월/일 압축 표기 — 채팅 칩은 그 자체가 스레드 맥락이라 별도 "스레드" 접미어를 안 붙인다.
@@ -987,6 +990,10 @@ export function EntityChip({
 } & VariantProps<typeof entityChipLabelVariants>) {
   // story #3776(1층A) — "결재함에서 보기" 딥링크 CTA, content ns의 기존 submitGateLink 키 재사용.
   const tContent = useTranslations('content');
+  // story #3776(1층B) — FORM_LABELS의 "근거", chats ns의 기존 reportEvidenceLabel 키 재사용
+  // (mention/embed 두 라벨은 대응 키 없어 2층, FORM_LABELS 원시값 그대로 유지).
+  const tChats = useTranslations('chats');
+  const formLabel = (form: string) => (form === 'proof' ? tChats('reportEvidenceLabel') : (FORM_LABELS[form] ?? form));
   const [showModal, setShowModal] = useState(false);
   // story #461e9a54(P0) — 채팅 트리(ReadingPanelProvider 하위)에서는 패널로, 밖(doc-content-
   // renderer.tsx·story-detail-panel.tsx 등)에서는 null이라 기존 Dialog 모달로 폴백(회귀 0).
@@ -1049,7 +1056,7 @@ export function EntityChip({
           항상 펼친다 — inline(기본)은 아래 tooltip으로 격납. */}
       {showInlineMeta && referenceMeta ? (
         <span className="opacity-70">
-          · 관찰됨 · {FORM_LABELS[referenceMeta.form] ?? referenceMeta.form} · {formatReferencePoint(referenceMeta.referencedAt)}
+          · 관찰됨 · {formLabel(referenceMeta.form)} · {formatReferencePoint(referenceMeta.referencedAt)}
         </span>
       ) : null}
       {showInlineMeta && statusLabel ? <span className="opacity-70">· {statusLabel}</span> : null}
@@ -1080,7 +1087,7 @@ export function EntityChip({
       <p className="font-semibold">{label}</p>
       <div className="space-y-0.5 border-t border-background/20 pt-1">
         {statusLabel ? tooltipRow('상태', statusLabel) : null}
-        {referenceMeta ? tooltipRow('참조 형태', FORM_LABELS[referenceMeta.form] ?? referenceMeta.form) : null}
+        {referenceMeta ? tooltipRow('참조 형태', formLabel(referenceMeta.form)) : null}
         {referenceMeta ? tooltipRow('관찰', formatReferencePoint(referenceMeta.referencedAt)) : null}
       </div>
     </div>

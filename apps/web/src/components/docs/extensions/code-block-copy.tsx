@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect, useRef, useId } from 'react';
+import { useTranslations } from 'next-intl';
 import { Node, mergeAttributes } from '@tiptap/core';
 import { ReactNodeViewRenderer, NodeViewWrapper, NodeViewContent, type ReactNodeViewProps } from '@tiptap/react';
 import { ChevronDown } from 'lucide-react';
@@ -95,6 +96,8 @@ function MermaidBlockView({ node, editor, selected }: ReactNodeViewProps) {
 // ─── Shiki Code Block View ────────────────────────────────────────────────────
 
 function ShikiBlockView({ node, editor, selected }: ReactNodeViewProps) {
+  // story #3776(1층B) — "복사됨"/"복사", docs ns의 기존 codeCopied/codeCopy 키 재사용.
+  const t = useTranslations('docs');
   const [copied, setCopied] = useState(false);
   const [highlightedHtml, setHighlightedHtml] = useState('');
   const [showLangMenu, setShowLangMenu] = useState(false);
@@ -194,7 +197,7 @@ function ShikiBlockView({ node, editor, selected }: ReactNodeViewProps) {
             onClick={handleCopy}
             className="rounded-md border border-border bg-card px-3 py-1.5 text-[11px] font-medium text-muted-foreground transition hover:text-foreground"
           >
-            {copied ? '복사됨' : '복사'}
+            {copied ? t('codeCopied') : t('codeCopy')}
           </button>
         </div>
 

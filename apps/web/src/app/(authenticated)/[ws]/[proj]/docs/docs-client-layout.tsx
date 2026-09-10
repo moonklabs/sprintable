@@ -654,7 +654,8 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
         >
           <div className="flex flex-shrink-0 items-center justify-between border-b border-border/80 px-4 py-3">
             <span className="text-sm font-medium text-foreground">{t('title')}</span>
-            <button type="button" onClick={closeDrawer} className="rounded p-1 text-muted-foreground hover:text-foreground" aria-label="닫기"><X className="size-4" /></button>
+            {/* story #3776(1층B) — "닫기", common ns의 기존 close 키 재사용. */}
+            <button type="button" onClick={closeDrawer} className="rounded p-1 text-muted-foreground hover:text-foreground" aria-label={tc('close')}><X className="size-4" /></button>
           </div>
           <div className="focus-inset flex-1 overflow-y-auto">{sidebarContent}</div>
         </div>
