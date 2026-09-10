@@ -2311,12 +2311,18 @@ async def _toss_gate_endpoint(
     if _gate.status != "pending":
         raise HTTPException(
             status_code=409,
-            detail={"code": "gate_already_resolved", "message": "이미 처리된 결재는 토스할 수 없습니다."},
+            detail={
+                "code": "gate_already_resolved",
+                "message": t("gates.toss_gate_already_resolved", resolved_locale),
+            },
         )
     if _gate.designated_approver_id is None:
         raise HTTPException(
             status_code=422,
-            detail={"code": "no_designated_approver", "message": "지정 결재자가 없는 게이트는 토스할 수 없습니다."},
+            detail={
+                "code": "no_designated_approver",
+                "message": t("gates.toss_no_designated_approver", resolved_locale),
+            },
         )
 
     from app.services.gate_service import resolve_designatable_gate_context

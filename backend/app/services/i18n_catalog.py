@@ -151,6 +151,20 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "상신자 또는 지정 결재자 본인만 다른 방에 보낼 수 있습니다.",
         "en": "Only the submitter or the designated approver can send this approval to another room",
     },
+    # story #3793 후속(페드루 전달 유나 定, 2026-09-10 13:57Z) — 원래 http_detail 20건
+    # 밖(이미 code 붙어 있어 스캐너가 안 잡음, 카드 코멘트 표 주석 참고)이었으나, toss
+    # 어휘 정렬 김에 이 둘도 같은 PR에서 카탈로그로 이관.
+    "gates.toss_no_designated_approver": {
+        "ko": "지정 결재자가 없는 결재는 다른 방에 보낼 수 없습니다.",
+        "en": "An approval with no designated approver can't be sent to another room.",
+    },
+    # 페드루 判(2026-09-10 13:57Z, "선택·미르코 판단") — 같은 toss 자리·같은 어휘 정렬
+    # 이유라 같이 이관. FE는 code로 갈아끼우지만 API 직접 소비자(에이전트 등)에겐
+    # message 원문이 그대로 노출된다.
+    "gates.toss_gate_already_resolved": {
+        "ko": "이미 처리된 결재는 다른 방에 보낼 수 없습니다.",
+        "en": "An approval that's already been decided can't be sent to another room.",
+    },
     "gates.require_owner_generic": {
         "ko": "이 액션은 org owner 만 가능합니다.",
         "en": "This action requires org owner",

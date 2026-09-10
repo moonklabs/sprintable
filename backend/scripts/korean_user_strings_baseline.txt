@@ -253,9 +253,7 @@ app/routers/gates.py::본인을 결재자로 지정할 수 없습니다.
 app/routers/gates.py::승인 뒤 내용이 바뀌었습니다. 재상신(submit)한 뒤 다시 승인해주세요.
 app/routers/gates.py::위임 대상이 이 조직의 결재 권한자(owner/admin)가 아닙니다.
 app/routers/gates.py::이미 처리된 결재는 위임할 수 없습니다.
-app/routers/gates.py::이미 처리된 결재는 토스할 수 없습니다.
 app/routers/gates.py::이미 처리된 결재입니다. 되돌리려면 PO에게 재검토를 요청해주세요.
-app/routers/gates.py::지정 결재자가 없는 게이트는 토스할 수 없습니다.
 app/routers/gates.py::지정한 결재자는 결재 자격(owner/admin)이 없습니다.
 app/routers/goals.py::"glance"면 participant_ids/focal_story가 추가로 붙는다(story #2298, 옵트인).
 app/routers/goals.py::Goal 삭제는 휴먼 멤버만 가능합니다 (에이전트 API키 차단)
