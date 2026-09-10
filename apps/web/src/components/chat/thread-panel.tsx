@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
+import { useTranslations } from 'next-intl';
 import { ArrowLeft, MessageSquare, X } from 'lucide-react';
 import type { ChatMessage } from '@/hooks/use-chat-sse';
 import { normalizeToMessage } from '@/hooks/use-chat-sse';
@@ -86,6 +87,8 @@ export function ThreadPanel({
   setGateByKey,
   onMarkRead,
 }: ThreadPanelProps) {
+  // story #3783 — "불러오는 중…", common ns의 기존 loading 키 재사용.
+  const tc = useTranslations('common');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -248,7 +251,7 @@ export function ThreadPanel({
           그대로 유지. */}
       <div className="flex-1 overflow-y-auto pt-0 pb-3 pr-4">
         {loading ? (
-          <p className="text-center text-sm text-muted-foreground">불러오는 중…</p>
+          <p className="text-center text-sm text-muted-foreground">{tc('loading')}</p>
         ) : messages.length === 0 ? (
           <p className="text-center text-sm text-muted-foreground">아직 답글이 없습니다.</p>
         ) : (

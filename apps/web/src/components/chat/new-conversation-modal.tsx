@@ -124,7 +124,7 @@ export function NewConversationModal({ projectId, onClose, onCreated }: NewConve
         <div className="max-h-[60vh] overflow-y-auto px-4 py-3">
           <p className="mb-2 text-xs text-muted-foreground">{t('selectMembers')}</p>
           {loading ? (
-            <div className="py-6 text-center text-sm text-muted-foreground">불러오는 중…</div>
+            <div className="py-6 text-center text-sm text-muted-foreground">{tc('loading')}</div>
           ) : (
             <ul className="space-y-1">
               {members.map((m) => (
