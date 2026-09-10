@@ -2599,7 +2599,7 @@
     "channelPostsImageRemoveAction": "Remove",
     "channelPostsImageRemoveActionLabel": "Remove image {position}",
     "channelPostsAwaitingContainerNotice": "This is being automatically continued. Please check back shortly.",
-    "channelPostsPublicationFailedNotice": "Publishing failed — republishing this draft will continue that attempt."
+    "channelPostsPublicationFailedNotice": "Publishing failed — this attempt will continue on the next publish."
   },
   "docs": {
     "title": "Docs",

@@ -2599,7 +2599,7 @@
     "channelPostsImageRemoveAction": "삭제",
     "channelPostsImageRemoveActionLabel": "{position}번째 이미지 삭제",
     "channelPostsAwaitingContainerNotice": "자동으로 이어서 처리 중입니다. 잠시 후 다시 확인해 주세요.",
-    "channelPostsPublicationFailedNotice": "발행에 실패했습니다 — 이 초안을 다시 발행하면 이 시도를 이어서 처리합니다."
+    "channelPostsPublicationFailedNotice": "발행에 실패했습니다 — 이 시도는 다음 발행에서 이어서 처리됩니다."
   },
   "docs": {
     "title": "문서",
