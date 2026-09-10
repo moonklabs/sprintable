@@ -95,3 +95,54 @@ describe('MyProfileSection — 역할 낱말(story #3770 실사고 재현)', () 
     }
   });
 });
+
+describe('MyProfileSection — 실패 렌더에 「로딩 중」 잔존 재발 방지(story #3772 CHANGES, 페드루 픽셀 지적 2026-09-10)', () => {
+  it('⭐/api/me 실패(500) → tc(\'loading\')("로딩 중...") 문구가 안 남는다(null 렌더)', async () => {
+    vi.stubGlobal('fetch', vi.fn());
+    const fetchWithAuthMock = vi.fn((url: string) => {
+      if (url === '/api/me') return Promise.resolve({ ok: false, status: 500, json: async () => ({ error: { code: 'INTERNAL' } }) });
+      return Promise.resolve({ ok: false, json: async () => ({ data: null }) });
+    });
+    vi.doMock('@/lib/db/client', () => ({ fetchWithAuth: fetchWithAuthMock }));
+    vi.resetModules();
+    const { MyProfileSection: Section } = await import('./my-profile-section');
+
+    await act(async () => { root.render(wrap(<Section />)); });
+    await flush();
+
+    expect(container.textContent).not.toContain(koMessages.common.loading);
+    expect(container.innerHTML).toBe('');
+    vi.doUnmock('@/lib/db/client');
+  });
+
+  it('/api/me reject(네트워크 다운) → 마찬가지로 로딩 문구 0', async () => {
+    vi.stubGlobal('fetch', vi.fn());
+    const fetchWithAuthMock = vi.fn((url: string) => {
+      if (url === '/api/me') return Promise.reject(new Error('network down'));
+      return Promise.resolve({ ok: false, json: async () => ({ data: null }) });
+    });
+    vi.doMock('@/lib/db/client', () => ({ fetchWithAuth: fetchWithAuthMock }));
+    vi.resetModules();
+    const { MyProfileSection: Section } = await import('./my-profile-section');
+
+    await act(async () => { root.render(wrap(<Section />)); });
+    await flush();
+
+    expect(container.textContent).not.toContain(koMessages.common.loading);
+    vi.doUnmock('@/lib/db/client');
+  });
+
+  it('음성대조 — 아직 응답 전(pending)이면 로딩 문구가 정상적으로 보인다(회귀 없음)', async () => {
+    vi.stubGlobal('fetch', vi.fn());
+    const fetchWithAuthMock = vi.fn(() => new Promise(() => {})); // 영구 pending
+    vi.doMock('@/lib/db/client', () => ({ fetchWithAuth: fetchWithAuthMock }));
+    vi.resetModules();
+    const { MyProfileSection: Section } = await import('./my-profile-section');
+
+    await act(async () => { root.render(wrap(<Section />)); });
+    await flush();
+
+    expect(container.textContent).toContain(koMessages.common.loading);
+    vi.doUnmock('@/lib/db/client');
+  });
+});

@@ -164,3 +164,22 @@ describe('LinkedAccountsSection — story #3149 i18n 배선 회귀가드', () =>
     expect(container.textContent).toContain('Connect another sign-in method to this account');
   });
 });
+
+// story #3772 CHANGES(페드루 PO 픽셀 지적 2026-09-10 — my-profile-section.tsx에서 실측된
+// "실패 배너 아래 로딩 문구 잔존" 클래스, 네 섹션 전부 같은 검사) — 이 섹션은 이미
+// `linkedProviders === null`(로딩·실패 공통) → return null이라 회귀가 아니지만, 네 섹션
+// 동형 보장 규율대로 핀을 남긴다.
+describe('LinkedAccountsSection — /api/me 실패 시 로딩 문구 잔존 없음(story #3772 CHANGES 핀)', () => {
+  it('⭐/api/me 실패(500) → 빈 렌더(로딩 문구 포함 0)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/me') return { ok: false, status: 500, json: async () => ({ error: { code: 'INTERNAL' } }) };
+      throw new Error('unexpected fetch: ' + url);
+    }));
+    const { LinkedAccountsSection } = await import('./linked-accounts-section');
+    await act(async () => { root.render(wrap(<LinkedAccountsSection />)); });
+    await flush();
+
+    expect(container.textContent).toBe('');
+    expect(container.textContent).not.toContain(koMessages.common.loading);
+  });
+});
