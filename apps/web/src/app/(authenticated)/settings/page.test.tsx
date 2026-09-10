@@ -327,3 +327,131 @@ describe('SettingsPage — story #3772: 프로필 탭 /api/me 실패 배너', ()
     expect(callsAfterRetry).toBeGreaterThan(callsBeforeRetry);
   });
 });
+
+// story #3789 — settings/page.tsx 통짜 한글 30건 슬라이스. 조직 탭·삭제 다이얼로그가
+// 실제로 카탈로그 값을 렌더하는지(신설 키 배선)와, 「영구 삭제」 버튼/문장 조각 두 키가
+// 서로 다른 값으로 갈렸는지, ICU count 자리표시자가 0/1/복수에서 실제로 치환되는지를 잰다.
+describe('SettingsPage — story #3789: 조직 탭·삭제 다이얼로그 i18n 배선', () => {
+  function mockOrgFetch(overrides: {
+    orgId?: string;
+    org?: { id: string; name: string; slug: string; plan?: string; role?: string };
+    impact?: { project_count: number; member_count: number; has_active_subscription: boolean } | null;
+  } = {}) {
+    const orgId = overrides.orgId ?? 'org-1';
+    const org = overrides.org ?? { id: orgId, name: '문클랩', slug: 'moonklabs', plan: 'pro', role: 'owner' };
+    return vi.fn((url: string) => {
+      if (url === '/api/me') return Promise.resolve({ ok: true, json: async () => ({ data: { role: 'admin', user_id: 'u1' } }) });
+      if (url === '/api/current-project') return Promise.resolve({ ok: true, json: async () => ({ data: { project_id: 'p1', org_id: orgId } }) });
+      if (url === '/api/organizations') return Promise.resolve({ ok: true, json: async () => ({ data: [org] }) });
+      if (url === `/api/organizations/${orgId}/impact`) {
+        if (overrides.impact === null) return Promise.resolve({ ok: false, json: async () => ({ data: null }) });
+        return Promise.resolve({ ok: true, json: async () => ({ data: overrides.impact ?? { project_count: 0, member_count: 0, has_active_subscription: false } }) });
+      }
+      return Promise.resolve({ ok: false, json: async () => ({ data: null }) });
+    });
+  }
+
+  async function mountOrgTab(fetchWithAuthMock: ReturnType<typeof mockOrgFetch>) {
+    vi.doMock('next/navigation', () => ({
+      useRouter: () => ({ replace: vi.fn(), refresh: vi.fn(), push: vi.fn(), prefetch: vi.fn() }),
+      useSearchParams: () => new URLSearchParams('tab=organization'),
+      usePathname: () => '/settings',
+    }));
+    vi.doMock('@/lib/db/client', () => ({ fetchWithAuth: fetchWithAuthMock }));
+    const { default: SettingsPage } = await import('./page');
+    await mount(<SettingsPage />);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+  }
+
+  it('조직 탭 — 신설 키(섹션 제목·설명·slug 불변 안내·플랜·내 역할)가 실제로 렌더된다', async () => {
+    await mountOrgTab(mockOrgFetch());
+    const text = container.textContent ?? '';
+    expect(text).toContain(koMessages.settings.orgSectionTitle);
+    expect(text).toContain(koMessages.settings.orgSectionDescription);
+    expect(text).toContain(koMessages.settings.orgSlugImmutable);
+    expect(text).toContain(koMessages.settings.orgPlanLabel);
+    expect(text).toContain(koMessages.settings.orgMyRoleLabel);
+    // 표기 축 — 이 화면에 "Organization"·"Project"·"Member" 영문 명사가 0건.
+    expect(text).not.toContain('Organization');
+    expect(text).not.toContain('Project ');
+    expect(text).not.toContain('Member ');
+  });
+
+  it('조직 탭 — Danger Zone 경고문·삭제 버튼이 신설 키를 쓴다(다이얼로그 제목과 같은 키 재사용)', async () => {
+    await mountOrgTab(mockOrgFetch());
+    const text = container.textContent ?? '';
+    expect(text).toContain(koMessages.settings.orgDeleteWarning);
+    // 섹션의 삭제 버튼과 다이얼로그 제목이 같은 키(orgDeleteTitle)를 쓴다 — 최소 1회 등장.
+    expect(text).toContain(koMessages.settings.orgDeleteTitle);
+  });
+
+  it('삭제 다이얼로그 — impact 0건이면 프로젝트/구성원 문장이 count=0으로 렌더된다(ICU 자리표시자 실치환)', async () => {
+    await mountOrgTab(mockOrgFetch({ impact: { project_count: 0, member_count: 0, has_active_subscription: false } }));
+    const deleteBtn = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent === koMessages.settings.orgDeleteTitle,
+    ) as HTMLButtonElement;
+    expect(deleteBtn).not.toBeUndefined();
+    await act(async () => { deleteBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    // Dialog(components/ui/dialog.tsx)는 DialogPortal로 document.body에 렌더된다 —
+    // container 안이 아니라 body 전체를 잰다.
+    const text = document.body.textContent ?? '';
+    expect(text).toContain('프로젝트 0개 영구 삭제');
+    expect(text).toContain('구성원 0명 접근 불가');
+    // 활성 구독이 없으면 그 경고문은 안 뜬다.
+    expect(text).not.toContain(koMessages.settings.orgDeleteImpactSubscription);
+  });
+
+  it('삭제 다이얼로그 — impact 1/다건이면 count가 실제 값으로 치환되고, 활성 구독 경고가 뜬다', async () => {
+    await mountOrgTab(mockOrgFetch({ impact: { project_count: 1, member_count: 7, has_active_subscription: true } }));
+    const deleteBtn = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent === koMessages.settings.orgDeleteTitle,
+    ) as HTMLButtonElement;
+    await act(async () => { deleteBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    const text = document.body.textContent ?? '';
+    expect(text).toContain('프로젝트 1개 영구 삭제');
+    expect(text).toContain('구성원 7명 접근 불가');
+    expect(text).toContain(koMessages.settings.orgDeleteImpactSubscription);
+  });
+
+  it('삭제 다이얼로그 — 확인 문구가 조직 이름을 담고, 「영구 삭제」 버튼은 문장 조각(orgDeleteImpactProjects)과 다른 값(orgDeleteConfirmCta)을 쓴다', async () => {
+    await mountOrgTab(mockOrgFetch({ org: { id: 'org-1', name: '뭉클랩', slug: 'moonklabs', plan: 'pro', role: 'owner' }, impact: { project_count: 2, member_count: 3, has_active_subscription: false } }));
+    const deleteBtn = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent === koMessages.settings.orgDeleteTitle,
+    ) as HTMLButtonElement;
+    await act(async () => { deleteBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    const text = document.body.textContent ?? '';
+    // 조사 검산 — 받침 있는 이름("뭉클랩")도 문장이 자리표시자를 문장 끝(em dash 뒤)에 둬
+    // 조사 없이 성립한다.
+    expect(text).toContain('확인을 위해 조직 이름을 그대로 입력하세요 — 뭉클랩');
+
+    // 「영구 삭제」가 두 뜻으로 갈렸다 — 버튼 라벨(orgDeleteConfirmCta)과 문장 조각
+    // (orgDeleteImpactProjects)은 서로 다른 카탈로그 값이다.
+    expect(koMessages.settings.orgDeleteConfirmCta).not.toBe(koMessages.settings.orgDeleteImpactProjects);
+    const confirmDeleteBtn = Array.from(document.body.querySelectorAll('button')).find(
+      (b) => b.textContent === koMessages.settings.orgDeleteConfirmCta,
+    );
+    expect(confirmDeleteBtn).not.toBeUndefined();
+  });
+
+  it('API 키 탭 — 이관 안내가 rich text(<strong>)로 렌더되고, 이동 버튼은 agentManagementCta를 쓴다', async () => {
+    vi.doMock('next/navigation', () => ({
+      useRouter: () => ({ replace: vi.fn(), refresh: vi.fn(), push: vi.fn(), prefetch: vi.fn() }),
+      useSearchParams: () => new URLSearchParams('tab=api-keys'),
+      usePathname: () => '/settings',
+    }));
+    vi.doMock('@/lib/db/client', () => ({ fetchWithAuth: mockOrgFetch() }));
+    const { default: SettingsPage } = await import('./page');
+    await mount(<SettingsPage />);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    const strongEls = Array.from(container.querySelectorAll('strong'));
+    expect(strongEls.some((el) => el.textContent === '에이전트 관리')).toBe(true);
+    expect(container.textContent).toContain(koMessages.settings.agentManagementCta);
+  });
+});

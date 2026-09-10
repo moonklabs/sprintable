@@ -134,7 +134,7 @@ describe('CreateOrganizationDialog — PLAN_LIMIT_EXCEEDED envelope (story #2470
     await fillAndSubmit();
 
     expect(document.body.textContent).not.toContain('brand new raw string');
-    expect(document.body.textContent).toContain('Organization을 만들지 못했습니다');
+    expect(document.body.textContent).toContain('조직을 만들지 못했습니다');
   });
 
   it('en locale에선 영문 배너로 렌더된다(회귀 없음)', async () => {
@@ -166,7 +166,7 @@ describe('CreateOrganizationDialog — i18n (story #2482)', () => {
     vi.stubGlobal('fetch', vi.fn());
     await mount('ko');
 
-    expect(document.body.textContent).toContain('새 Organization 만들기');
+    expect(document.body.textContent).toContain('새 조직 만들기');
     expect(document.body.textContent).toContain('이름');
     expect(document.body.textContent).toContain('Slug');
     expect(document.body.textContent).toContain('취소');
@@ -207,7 +207,7 @@ describe('CreateOrganizationDialog — i18n (story #2482)', () => {
     })));
     await mount('ko');
     await fillAndSubmit();
-    expect(document.body.textContent).toContain('Organization을 만들지 못했습니다. 잠시 후 다시 시도해 주세요.');
+    expect(document.body.textContent).toContain('조직을 만들지 못했습니다. 잠시 후 다시 시도해 주세요.');
   });
 
   // 양성대조(AC) — 라벨 하나를 하드코딩으로 되돌리면 이 검사가 실제로 빨간불이어야 한다.
@@ -218,7 +218,7 @@ describe('CreateOrganizationDialog — i18n (story #2482)', () => {
   it('양성대조 — 하드코딩 되돌림을 가정: en에서 한국어 문구가 섞이면 실패한다', async () => {
     vi.stubGlobal('fetch', vi.fn());
     await mount('en');
-    expect(document.body.textContent).not.toContain('새 Organization 만들기');
+    expect(document.body.textContent).not.toContain('새 조직 만들기');
     expect(document.body.textContent).not.toContain('이름 *');
   });
 });
