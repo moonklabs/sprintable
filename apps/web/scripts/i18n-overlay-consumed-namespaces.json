@@ -2,7 +2,7 @@
   "_comment": "story #3757 — 비공개 SaaS 오버레이(moonklabs/sprintable-saas)가 여는 최상위 i18n 네임스페이스 목록. CI는 그 저장소에 접근할 수 없어(private repo, 별도 접근권) 이 저장소 안에 정적으로 등재한다 — 등재≠배선(그 자체가 실시간 검증이 아니라는 뜻, 아래 만료 조건 참고).",
   "overlay_commit_sha": "eea5a6dd90750413f9371ed6126905dd00f9f9d4",
   "overlay_commit_date": "2026-05-01",
-  "measured_by": "디캄포 은두카쿠, 2026-09-10 — shallow clone(`git clone --depth 1 https://github.com/moonklabs/sprintable-saas.git`) 뒤 `useTranslations\\(['\"][a-zA-Z.]+['\"]\\)|getTranslations\\(...\\)` 정규식 전수 스캔(유나 표 v2/v3 6ns와 일치 재확認: common 3·settings 2·usage 1·pricing 1·nav 1·meeting 1 호출부).",
+  "measured_by": "디캄포 은두카쿠, 2026-09-10 — shallow clone(`git clone --depth 1 https://github.com/moonklabs/sprintable-saas.git`) 뒤 `useTranslations\\(['\"][a-zA-Z.]+['\"]\\)|getTranslations\\(...\\)` 정규식 전수 스캔(유나 표 v2/v3 6ns와 일치 재확認: common 3·settings 2·usage 1·pricing 1·nav 1·meeting 1 호출부). 유나가 독립 재확認(2026-09-10) — 자기 로컬 HEAD sha `75079f8`(같은 커밋 메시지, `eea5a6d`와 46초 차 — amend/rebase로 재작성된 동일 내용 커밋으로 추정)에서도 같은 6ns를 얻어 재현.",
   "namespaces": ["common", "settings", "usage", "pricing", "nav", "meeting"],
-  "expiry_condition": "오버레이 저장소의 최신 커밋 sha가 위 overlay_commit_sha와 달라지면 이 목록은 만료된 것으로 간주 — 재측정(같은 방법론) 없이 이 파일만 믿고 ns 가드 판정을 내리면 안 된다. 재측정 시 이 파일 전체(sha·date·namespaces)를 갱신할 것. 오버레이 저장소 접근권이 없는 세션(대부분의 CI 실행)은 이 파일을 그대로 신뢰하되, 그 신뢰가 '최종 커밋이 2026-05-01로 멈춰 있다'는 사실에 기반한 잠정치임을 verify-i18n-namespace-referenced.ts 콘솔 출력에 항상 명시한다."
+  "expiry_condition": "유나 지적(2026-09-10, design review) — sha 불일치를 '즉시 만료'로 두면 이 파일이 실제로 유효한 채로도 거짓 만료가 난다(위 measured_by 사례가 실증: 두 세션이 다른 sha를 봤지만 ns 목록은 완전히 동일했다). 만료의 진짜 축은 '오버레이가 여는 ns 목록이 바뀌었나'이지 'sha 문자열이 같은가'가 아니다 — sha 불일치는 **즉시 만료가 아니라 재측정 트리거**로 다룬다: 같은 방법론으로 다시 재보고 namespaces 배열이 실제로 달라졌을 때만 이 파일 전체(sha·date·namespaces)를 갱신한다. 오버레이 저장소 접근권이 없는 세션(대부분의 CI 실행)은 이 파일을 그대로 신뢰하되, 그 신뢰가 '최종 커밋이 2026-05-01 전후로 멈춰 있다'는 사실에 기반한 잠정치임을 verify-i18n-namespace-referenced.ts 콘솔 출력에 항상 명시한다."
 }
