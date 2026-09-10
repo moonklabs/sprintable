@@ -29,10 +29,14 @@ grep(421파일/3539건)이 주석 안 따옴표 강조까지 오탐했던 것과
 문자열이 실제로 사용자에게 닿는가"는 안 본다(2층은 별도 스크립트/카드, 이 카드의 산출물
 목록으로 남긴다).
 
-## 계약 — story #3741/#2335와 동일
+## 계약 — 카드 處方 ① "stale RED"(3776 ③-b 형, story #3741/#2335보다 한 단계 더 엄격)
 baseline(`korean_user_strings_baseline.txt`)에 없는 새 한글 문자열 리터럴이 있으면 FAIL.
-baseline에 있는데 이번 스캔에서 안 걸리면(코드가 고쳐졌거나 삭제됐으면) stale로 경고만
-(비차단) — CI의 별도 git-diff 스텝이 baseline 파일 자체가 "줄기만" 허용되도록 막는다.
+baseline에 있는데 이번 스캔에서 안 걸리면(코드가 고쳐졌거나 삭제됐으면) **그것도 FAIL**
+(stale RED, 페드루 PO 지적 2026-09-10 08:17Z) — "줄기만 허용" git-diff CI 스텝은 baseline이
+«늘어나는» 것만 막지, 이미 있는 항목이 실물과 안 맞게 된 것(고쳤는데 목록에서 안 뺀 것)은
+못 잡는다. 그래서 stale도 이 스크립트 자신이 FAIL로 잡는다 — baseline 정리는 사람이 그
+FAIL 메시지를 보고 직접 그 줄을 지운다(자동 걷기 없음, story #3776의 grandfather 정리
+관례와 동일).
 
 ⚠️이 가드가 «못 잡는» 것:
   ㉠ f-string의 `{expr}` 안에 동적으로 조립되는 한글(변수 값 자체) — 리터럴 조각만 본다.
@@ -187,6 +191,16 @@ def write_baseline(path: Path, keys: set[str]) -> None:
     path.write_text(header + "\n".join(sorted(keys)) + "\n", encoding="utf-8")
 
 
+def evaluate(violations: list[Violation], baseline: set[str]) -> tuple[list[Violation], list[str]]:
+    """(new_violations, stale) — main()과 테스트가 같은 판정 심볼을 공유(story #3164
+    PR#3580 관례, verify-no-hardcoded-korean-ui-text.ts computeNewViolations와 동형).
+    파일시스템을 건드리지 않아 단위테스트로 직접 부를 수 있다."""
+    new_violations = [v for v in violations if violation_key(v) not in baseline]
+    grandfathered_keys = {violation_key(v) for v in violations if violation_key(v) in baseline}
+    stale = sorted(baseline - grandfathered_keys)
+    return new_violations, stale
+
+
 def main() -> int:
     backend_root = Path(__file__).resolve().parent.parent
     try:
@@ -196,19 +210,18 @@ def main() -> int:
         return 1
     baseline = load_baseline(backend_root / BASELINE_FILE)
 
-    new_violations = [v for v in violations if violation_key(v) not in baseline]
-    grandfathered_keys = {violation_key(v) for v in violations if violation_key(v) in baseline}
-    stale = sorted(baseline - grandfathered_keys)
+    new_violations, stale = evaluate(violations, baseline)
 
     file_count = len({v.file for v in violations})
     print(
         f"[story #3779] BE 한글 사용자 문장 스캔 — 검출 {len(violations)}건/{file_count}파일 · "
         f"baseline(grandfather) {len(baseline)}건 · 신규 {len(new_violations)}건"
     )
-    if stale:
-        print(f"  ⚠️ baseline에 등재됐으나 이번 스캔에서 안 걸린(고쳐졌다면 목록에서 빼도 되는): {len(stale)}건")
+
+    ok = True
 
     if new_violations:
+        ok = False
         print("\nFAIL: baseline에 없는 BE 한글 사용자 문장 발견(story #3779 회귀):")
         for v in sorted(new_violations, key=lambda v: (v.file, v.line)):
             print(f"  - {v.file}:{v.line} \"{v.text}\"")
@@ -217,9 +230,28 @@ def main() -> int:
             "(story #3778 retro_export_i18n.py류)로 옮기거나 코드/FE번역 축(story #3779 처방②)으로"
             " 옮길 것. logger.*(운영자 전용) 오탐이면 logger/_logger 호출로 감싸져 있는지 확認."
         )
+
+    # 페드루 PO 지적(2026-09-10 08:17Z) — stale을 경고(⚠️)로만 두고 exit 0을 반환하면
+    # 「고쳐졌는데 baseline에 죽은 항목으로 조용히 남는」 클래스가 재발한다(story #3776
+    # ③-b가 이미 잡은 그 성질, 이 카드 處方 ①이 원래 요구했던 "stale RED"). CI의 별도
+    # "baseline은 줄기만 허용" git-diff 스텝은 «늘어남»만 막지, 이미 있는 baseline 항목이
+    # 실물과 안 맞게 된 것(고쳤는데 안 뺀 것)은 못 잡는다 — 그래서 이 스크립트 자신이
+    # stale을 FAIL로 잡아야 한다(baseline 파일 수정은 사람이 직접, 자동 걷기 없음).
+    if stale:
+        ok = False
+        print(f"\nFAIL: baseline에 있으나 이번 스캔에서 안 걸린(stale) {len(stale)}건:")
+        for k in stale:
+            print(f"  - {k}")
+        print(
+            "\n→ 그 자리가 실제로 고쳐졌다면(더는 한글 리터럴이 아니게 됐거나 삭제됐다면) "
+            f"{BASELINE_FILE}에서 그 줄을 지울 것 — grandfather는 «지금 있는 걸 봐준다»지 "
+            "«한 번 등재되면 영원히 유효하다»가 아니다(story #2335/#3741과 동일 규율)."
+        )
+
+    if not ok:
         return 1
 
-    print("\nOK: baseline 초과 없음(0건 증가 — «전부 깨끗»이 아니라 «안 늘었다»는 뜻).")
+    print("\nOK: baseline 초과 없음(0건 증가) · stale 0건(모두 실물과 일치) — «전부 깨끗»이 아니라 «안 늘고 안 썩었다»는 뜻.")
     return 0
 
 

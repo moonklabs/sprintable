@@ -14,6 +14,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 from verify_no_new_korean_user_strings import (  # noqa: E402
+    evaluate,
     scan_source,
     violation_key,
 )
@@ -146,6 +147,36 @@ def test_violation_key_escapes_embedded_newlines():
     key = violation_key(v)
     assert "\n" not in key
     assert key == "app/services/email_copy.py::첫 줄\\n둘째 줄"
+
+
+# ─── ⭐stale RED(페드루 PO 지적 2026-09-10 08:17Z, 카드 處方 ① "stale RED") ──────
+#
+# 최초 구현은 stale을 ⚠️ 경고만 찍고 exit 0을 반환했다 — 「고쳐졌는데 baseline에 죽은
+# 항목으로 조용히 남는」 클래스(오늘 유나가 별건에서 잡은 것과 동형, story #3776 ③-b가
+# 이미 세운 성질)를 재발시켰던 자리. evaluate()가 stale을 정확히 보고하는지 고정한다.
+
+
+def test_evaluate_flags_baseline_entry_with_no_matching_violation_as_stale():
+    """baseline에 가짜(실물 없는) 키를 심으면 stale로 잡혀야 한다 — 되돌리면(stale을
+    다시 경고만으로 낮추면) main()이 exit 0을 반환해 이 클래스가 재발한다."""
+    source = 'x = "실제로 있는 한글"'
+    violations = scan_source(source, "app/services/fixture.py")
+    baseline = {
+        "app/services/fixture.py::실제로 있는 한글",
+        "app/services/fixture.py::가짜_유령_문자열_이제_없음",
+    }
+    new_violations, stale = evaluate(violations, baseline)
+    assert new_violations == []
+    assert stale == ["app/services/fixture.py::가짜_유령_문자열_이제_없음"]
+
+
+def test_evaluate_reports_no_stale_when_baseline_matches_exactly():
+    source = 'x = "실제로 있는 한글"'
+    violations = scan_source(source, "app/services/fixture.py")
+    baseline = {"app/services/fixture.py::실제로 있는 한글"}
+    new_violations, stale = evaluate(violations, baseline)
+    assert new_violations == []
+    assert stale == []
 
 
 if __name__ == "__main__":
