@@ -138,6 +138,44 @@ describe('DocsClientLayout — 레일 v2 재조립 후 6 능력 회귀가드(§1
     expect(calls.some((u) => u.includes('tags='))).toBe(true);
   });
 
+  // story #3784(페드루 재검토 10:11Z) — 이미 트리가 있는 상태에서 태그를 토글하면
+  // fetchTree가 cursor 없이 재호출된다(:201 effect, selectedTags deps). 그 재호출이
+  // pending인 동안에도 «지금 보여줄 게 없다»는 거짓이므로 로딩 화면으로 전체를 갈아끼우면
+  // 안 된다(마스트헤드·필터행·기존 목록이 살아있어야 함) — hasContentRef가 이 판정을 진다.
+  it('③문서가 이미 있는 상태에서 태그 토글 — pending 中에도 로딩 화면으로 안 갈리고 기존 목록·필터행이 유지된다', async () => {
+    let resolveSecond!: (v: { ok: boolean; json: () => Promise<unknown> }) => void;
+    let callCount = 0;
+    const fetchMock = vi.fn(async () => {
+      callCount += 1;
+      if (callCount === 1) return { ok: true, json: async () => ({ data: [DOC_A, DOC_B], meta: { hasMore: false, nextCursor: null } }) };
+      return new Promise((resolve) => { resolveSecond = resolve; });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await mount();
+    // 기본(grouped) 뷰는 그룹 헤더가 접혀 있어 문서명이 안 보인다 — "내 폴더"(DocTree)로
+    // 전환해 루트 문서를 바로 드러낸다(⑤뷰모드 테스트와 동형).
+    const foldersTab = [...container.querySelectorAll('button')].find((b) => b.textContent === '내 폴더');
+    await act(async () => { foldersTab!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(container.textContent).toContain('문서A');
+
+    const tagToggle = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('태그'));
+    expect(tagToggle).toBeTruthy();
+    await act(async () => { tagToggle!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const tagChip = [...container.querySelectorAll('button')].find((b) => b.textContent === '#스펙');
+    expect(tagChip).toBeTruthy();
+    await act(async () => { tagChip!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    // 두 번째 fetch(태그 반영)가 아직 pending — 로딩 문구 0·기존 목록·필터행(「태그」 토글) 유지.
+    expect(container.textContent).not.toContain('불러오는 중');
+    expect(container.textContent).toContain('문서A');
+    expect(tagToggle!.isConnected).toBe(true);
+
+    await act(async () => {
+      resolveSecond({ ok: true, json: async () => ({ data: [DOC_B], meta: { hasMore: false, nextCursor: null } }) });
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    });
+    expect(container.textContent).toContain('문서B');
+  });
+
   // story #3053(2984-S5) — 선택 태그 칩은 헤어라인(border-proof-line+bg-transparent)을 쓰고
   // 옛 bg-proof-blue-soft 채움은 안 쓴다. 태그 접었을 때 카운트는 CountBadge(mono+엠보스)로.
   it('④재질 — 선택 태그 칩이 헤어라인을 쓰고 bg-proof-blue-soft는 안 쓴다, 접으면 CountBadge가 뜬다', async () => {

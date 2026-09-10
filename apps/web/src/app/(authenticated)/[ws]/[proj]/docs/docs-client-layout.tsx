@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
 import { useTopBar } from '@/components/nav/top-bar-context';
 import { useMediaQuery } from '@/lib/use-media-query';
@@ -64,6 +64,11 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
   const [loading, setLoading] = useState(true);
   // story #3784 — DocsIndex가 "아직 로딩 중"과 "fetch 실패"를 "정말 0건"과 가르는 데 쓴다.
   const [loadError, setLoadError] = useState(false);
+  // story #3784(페드루 재검토 10:11Z) — 태그 필터 토글마다(:194 effect, cursor 없이
+  // fetchTree 재호출) loading을 다시 켜면 이미 보여줄 트리가 있는데도 마스트헤드·필터행까지
+  // 통째 비는 회귀가 생긴다. "fetch 中"이 아니라 "지금 보여줄 게 없다"를 로딩 조건으로
+  // 삼는다 — ref인 이유: tree를 deps에 넣으면 이 값을 쓰는 effect(:194)가 루프가 된다.
+  const hasContentRef = useRef(false);
   const [treeDrawerOpen, setTreeDrawerOpen] = useState(false);
   // 모바일 트리거 칩 breadcrumb: 현재 문서명(flat tree에서 slug 조회·미선택 시 폴백).
   const currentDocTitle = currentSlug ? (tree.find((d) => d.slug === currentSlug)?.title ?? null) : null;
@@ -158,12 +163,14 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
 
   const fetchTree = useCallback(async (tags?: string[], cursor?: string | null) => {
     if (!projectId) return;
-    // story #3784(페드루 짚음 10:02Z) — 재시도(에러 배너의 「다시 시도」 포함)가 이전 실패
-    // 신호를 그대로 물고 있지 않도록, 시도 시작 시 먼저 걷는다(성공하면 그대로 false·실패하면
-    // catch가 다시 켠다). loading도 같이 켜야 한다 — 안 켜면 재시도 pending 동안 loading=false·
-    // loadError=false·tree=[]가 되어 양쪽이 다시 "없어요"를 잘못 단정한다(카디르 재현). cursor가
-    // 있는 "더 보기" 호출은 docsLoadingMore가 이미 그 UX를 담당하므로 건드리지 않는다.
-    if (!cursor) setLoading(true);
+    // story #3784(페드루 짚음 10:02Z·10:11Z 재검토) — 재시도(에러 배너의 「다시 시도」
+    // 포함)가 이전 실패 신호를 그대로 물고 있지 않도록, 시도 시작 시 먼저 걷는다(성공하면
+    // 그대로 false·실패하면 catch가 다시 켠다). 로딩 조건은 «fetch 中»이 아니라 «지금 보여줄
+    // 게 없다»(hasContentRef) — 안 그러면 태그 필터 토글마다(:216 근방 effect, cursor 없이
+    // fetchTree 재호출) 이미 보여줄 트리가 있는데도 마스트헤드·필터행까지 통째 비는 회귀가
+    // 생긴다(유나 재현). cursor가 있는 "더 보기" 호출은 docsLoadingMore가 이미 그 UX를
+    // 담당하므로 건드리지 않는다.
+    if (!cursor && !hasContentRef.current) setLoading(true);
     setLoadError(false);
     try {
       // story #2191 — "view=tree"는 죽은 파라미터였다(/api/docs가 그 값을 아예 안 읽어
@@ -182,9 +189,13 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
       }
       setDocsHasMore(meta?.hasMore ?? false);
       setDocsNextCursor(meta?.nextCursor ?? null);
+      hasContentRef.current = (data?.length ?? 0) > 0;
     } catch {
       // tree fetch failed — keep existing
       setLoadError(true);
+      // 실패 뒤 재시도 때는 다시 로딩을 세워야 한다(카디르 재현) — hasContentRef를 걷어
+      // 위 setLoading(true) 조건이 다음 호출에서 막히지 않게 한다.
+      hasContentRef.current = false;
     } finally {
       setLoading(false);
       setDocsLoadingMore(false);
