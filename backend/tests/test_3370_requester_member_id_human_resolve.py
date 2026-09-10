@@ -2,8 +2,10 @@
 깨지던 결함의 회귀 pin. `auth.user_id`는 휴먼(JWT)이면 `users.id`다(auth.py:146 계약) —
 org 멤버 id(org_member.id/team_member.id)가 아니다. 여러 라우터가 이 값을 **영속되는**
 member-id 컬럼(author_member_id·created_by_member_id·requested_by_member_id)에 원시로
-넣고 있었다 — site_posts.py:671(이미 별도 커밋으로 정정)과 같은 클래스가 channel_posts.py
-계열 6곳 + channel_post_comment_replies.py 1곳에 번져 있었다(전수 grep, PR 본문 참고).
+넣고 있었다 — site_posts.py:671과 같은 클래스가 site_posts.py 자신의 :356(페드루 2차
+리뷰 지적, is_agent_caller 원시-id 조합이 boolean 체크뿐인 :298/:838과 달리 :356은
+author_member_id를 실제로 영속한다)·channel_posts.py 계열 6곳·channel_post_comment_
+replies.py 1곳·activity_logs.py EE RBAC 필터에 번져 있었다(전수 grep, PR 본문 참고).
 전부 `resolve_member(auth, org_id, db)`(API키=team_member.id·JWT=org_member.id, auth.py
 계약 그대로)로 정정 — 새 해소 기전 발명 0, 기존 site_posts.py 처방 재사용뿐.
 
@@ -29,6 +31,9 @@ from tests.test_3374_channel_posts import (
     _seed_story,
     _session_factory,
     _setup_org_scoped_app,
+)
+from tests.test_3367_site_post_submit_gate_seal import (
+    _draft_body as _site_draft_body,
 )
 
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
@@ -140,6 +145,45 @@ async def test_post_channel_post_draft_version_human_author_resolves_to_org_memb
         async with Session() as s:
             version = (
                 await s.execute(select(ChannelPostVersion).where(ChannelPostVersion.id == uuid.UUID(version_id)))
+            ).scalar_one()
+        assert version.author_member_id == org_member_id
+        assert version.author_member_id != user_id
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_post_site_post_draft_version_human_author_resolves_to_org_member_id():
+    """뮤테이션 대상 — post_site_post_draft_version의 resolve_member_db_verified() 호출을
+    되돌리면 RED(SitePostVersion.author_member_id가 users.id로 떨어짐). 페드루 2차 리뷰
+    지적(2026-09-10) — channel_posts.py 형제는 고쳤으나 site_posts.py 자신의 :356이
+    빠져 있었다."""
+    from app.main import app
+    from app.models.site_post_version import SitePostVersion
+    from sqlalchemy import select
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            user_id, org_member_id = await _seed_human_org_member(s, org_id)
+            story_id = await _seed_story(s, org_id, project_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=user_id)
+        async with _client_for(app) as client:
+            r_draft = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts",
+                json=_site_draft_body(work_item_id=story_id),
+            )
+        assert r_draft.status_code == 201, r_draft.text
+        payload = r_draft.json()
+        assert payload["author_kind"] == "human"
+        version_id = payload["version_id"]
+
+        async with Session() as s:
+            version = (
+                await s.execute(select(SitePostVersion).where(SitePostVersion.id == uuid.UUID(version_id)))
             ).scalar_one()
         assert version.author_member_id == org_member_id
         assert version.author_member_id != user_id

@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
-from app.services.member_resolver import resolve_member
+from app.services.member_resolver import resolve_member, resolve_member_db_verified
 from app.routers.insight_snapshots import InsightSnapshotView
 from app.services.generation_budget import GenerationBudgetExceededError
 from app.services.insight_snapshots import get_latest_insight_snapshot
@@ -352,8 +352,14 @@ async def post_site_post_draft_version(
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
 
-    member_id = uuid.UUID(auth.user_id)
-    actor_type = "agent" if await is_agent_caller(db, org_id=org_id, member_id=member_id) else "human"
+    # story #3370(페드루 지적, 2차 리뷰 2026-09-10) — is_agent_caller 원시-id 조합은 이
+    # 라우트의 은형제 `submit_channel_post_draft_endpoint`류와 같은 결함이었다 —
+    # author_member_id가 **영속** 컬럼이라 원시 auth.user_id(휴먼이면 users.id)를 그대로
+    # 쓰면 휴먼 작성자가 org_member.id로 안 풀린다. `resolve_member_db_verified()`로
+    # 정정(agent 판정은 이전과 동일 DB 실측 — is_agent_caller 재발명 0, 내부에서 동일
+    # predicate를 쓴다).
+    resolved = await resolve_member_db_verified(auth, org_id, db)
+    member_id, actor_type = resolved.id, resolved.type
 
     # story #3437(페드루 PO 리뷰 B1) — 요청 body에 campaign_id 키가 실제로 있었을 때만
     # 서비스에 명시로 넘긴다(model_fields_set) — 생략은 캐리포워드, 서비스 기본 센티널이
@@ -674,7 +680,6 @@ async def submit_site_post_draft_endpoint(
     # 아니라 site_posts.py::is_agent_caller와 동형 DB 실측이라, 이 라우트를 왕복하는
     # 기존 destructive_schema 테스트(agent_id를 api_key_id 클레임 없이 넘기는 관례)가
     # 안 깨진다(그 함수 자신의 docstring에 그라운딩 기록).
-    from app.services.member_resolver import resolve_member_db_verified
     resolved_requester = await resolve_member_db_verified(auth, org_id, db)
     try:
         gate, version_id = await submit_site_post_draft(

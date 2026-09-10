@@ -161,7 +161,22 @@ async def resolve_member_db_verified(
     발명 0 — 기존 두 축의 조합일 뿐).
 
     project_id 스코프는 지원하지 않는다(이 축을 쓰는 현재 호출부가 전부 project 스코프
-    불요 — 필요해지면 그때 얹는다, resolve_member()를 쓰면 된다)."""
+    불요 — 필요해지면 그때 얹는다, resolve_member()를 쓰면 된다).
+
+    ⚠️fail-closed 안전성(페드루 2차 리뷰 지적 2026-09-10, `_resolve_member_legacy`류
+    폴백 없음이 안전한 이유) — 상위 `get_verified_org_id`→`_verify_org_membership`
+    (auth.py:593)은 더 넓게 받는다: `OrgMember(user_id==raw) ∪ TeamMember(id==raw,
+    active, **타입 무관**)`. 이 함수는 `OrgMember(user_id==raw) ∪ TeamMember(id==raw,
+    type=='agent')`만 받으므로 차집합은 「`type != 'agent'`인 TeamMember 행이 raw_id
+    (JWT 휴먼이면 users.id)로 매치하는」 호출자 — 그 집합이 **구조적으로 공집합**이다:
+    `team_members`는 0088부터 물리테이블이 아니라 VIEW(alembic/versions/0088_team_
+    members_projection_view.py)이고, `type='human'` 분기의 `id`는 `members.id`다.
+    0075(alembic/versions/0075_member_ssot_anchor_tables.py:11,110) 확定 — "휴먼
+    members.id = org_members.id(Phase0 ID 보존)" — `users.id`가 아니다. 즉 휴먼
+    TeamMember 행의 `id`는 애초에 `org_members.id`라 JWT의 `auth.user_id`(users.id)와
+    같은 값일 수가 없다(서로 다른 테이블의 독립 PK, uuid 충돌이 아니면 불가능) — 상위
+    가드가 그 `TeamMember(타입 무관)` 분기로 통과시키는 호출자는 전부 agent뿐이고, 그건
+    이 함수의 agent 분기가 이미 받는다. 막히는 집합=∅."""
     raw_id = uuid.UUID(auth.user_id)
 
     tm = (await session.execute(
