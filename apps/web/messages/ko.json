@@ -305,7 +305,6 @@
   },
   "dashboard": {
     "title": "대시보드",
-    "projects": "프로젝트",
     "ccZoneActions": "지금 내 할 일",
     "ccClearTitle": "괜찮습니다",
     "ccClearBody": "지금 처리할 일이 없습니다",
@@ -340,10 +339,6 @@
     "ccMinAgo": "{n}분 전",
     "ccHourAgo": "{n}시간 전",
     "ccDayAgo": "{n}일 전",
-    "recentDocs": "최근 문서",
-    "inProgress": "진행 중",
-    "inReview": "리뷰 중",
-    "blocked": "차단됨",
     "standup": "스탠드업",
     "ccGateTypeQa": "QA",
     "ccGateTypePrReview": "PR 리뷰",
@@ -1814,7 +1809,6 @@
     "runtimeTypeSaved": "런타임 타입 저장됨"
   },
   "shell": {
-    "projects": "프로젝트",
     "projectSelectPrompt": "현재 프로젝트 선택",
     "projectSelectDescription": "헤더의 프로젝트 스위처에서 현재 프로젝트를 선택하면 이 화면이 활성화됩니다."
   },
