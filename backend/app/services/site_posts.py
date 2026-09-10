@@ -1452,6 +1452,26 @@ async def publish_site_post_external_command(db: AsyncSession, command: "Publica
     else:
         row.status, row.external_id, row.permalink, row.published_at = "published", external_id, permalink, now
 
+    # story #3369 후속(자기점검 2차, 유나 실측·페드루 지시 2026-09-10) — 이 워커
+    # 경로(외부 목적지 발행)는 site_post_published 감사 로그를 한 번도 남기지 않고
+    # 있었다. hosted_site 동기 경로(publish_site_post_from_draft, 위쪽)는 매 호출마다
+    # 이 액션을 남기는데, 이 함수는 e4fc29fa③c로 나중에 추가된 별도 구현이라(channel_
+    # posts.py처럼 즉시/예약 두 경로가 publish_channel_post_draft 하나를 공유하는 형이
+    # 아니다) 그 기록이 안 옮겨왔다 — 재승인→재발행 감사 이력이 외부 목적지 draft에서는
+    # 처음부터 끝까지 전무했다(재발행만의 결함이 아니라 최초 발행부터). entity_type은
+    # channel_posts.py::publish_channel_post_draft의 channel_post_published 관례를
+    # 그대로 따른다(row가 여기서도 ChannelPublication이므로 같은 축).
+    from app.services.activity_log import ActivityLogService
+
+    await ActivityLogService(db).record(
+        org_id=command.org_id, action="site_post_published", actor_type="platform", actor_id=None,
+        entity_type="channel_publication", entity_id=row.id,
+        context={
+            "gate_id": str(command.gate_id), "version_id": str(version.id),
+            "permalink": row.permalink, "external_id": row.external_id,
+            "requested_by_member_id": str(command.requested_by_member_id),
+        },
+    )
     # story #3497 — 발행 성공 콜백(같은 트랜잭션, commit은 호출자 몫 — publication_
     # command.py::_process_one_site_post_command와 동형 경계).
     from app.services.insight_snapshots import schedule_insight_snapshots

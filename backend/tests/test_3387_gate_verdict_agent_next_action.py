@@ -36,20 +36,47 @@ class _FakeResult:
     def scalar_one_or_none(self):
         return self._row
 
+    def one_or_none(self):
+        return self._row
 
-def _fake_db(gate_row=None, *, site_post_draft_exists: bool = False):
-    """story #3487 — 두 번째 db.execute 호출(SitePostDraft 존재 확인, verdict==
+
+class _NoConnection:
+    """site_post_draft_exists=True인데 connection_id를 안 정한 기존 호출부(옛
+    "아무 connection이나" 뜻) — 하위호환 sentinel, 실제로는 안 쓰인다(모든 호출부가
+    아래 site_post_connection_id를 명시)."""
+
+
+def _fake_db(
+    gate_row=None, *, site_post_draft_exists: bool = False,
+    site_post_connection_id: uuid.UUID | None = _NoConnection,
+):
+    """story #3487 — 두 번째 db.execute 호출(SitePostDraft.connection_id 조회, verdict==
     approved·draft_id 있을 때만 일어난다)을 첫 번째(Gate 조회)와 다르게 응답해야
     한다 — 호출 순서로 가른다(이 함수의 유일한 소비자가 순서를 그렇게 고정한다).
-    `db.get(Gate, ...)`(gate_id 있는 신규 경로)도 같은 gate_row를 돌려준다."""
-    db = AsyncMock()
-    call_count = {"n": 0}
+    `db.get(Gate, ...)`(gate_id 있는 신규 경로)도 같은 gate_row를 돌려준다.
 
-    async def _execute(*_args, **_kwargs):
-        call_count["n"] += 1
-        if call_count["n"] == 1:
-            return _FakeResult(gate_row)
-        return _FakeResult(uuid.uuid4() if site_post_draft_exists else None)
+    story #3369 후속(자기점검 2차, 2026-09-10) — 이전엔 "site_post 존재 여부"만
+    boolean으로 흉내냈다(연결 없는 값은 uuid.uuid4()를 그냥 채워 hosted_site도 늘
+    "connection 있음"으로 오분류했다). 이제 `select(SitePostDraft.connection_id)`가
+    Row(단일 컬럼)를 돌려주므로, 없으면 None(draft 자체 없음)·있으면 (connection_id,)
+    (hosted_site면 그 값 자체가 None)를 흉내낸다 — `site_post_connection_id`가
+    명시(`_NoConnection` sentinel 아님)되면 그 값을, 아니면(하위호환) site_post_draft_
+    exists만 보고 hosted_site(connection_id=None)로 기본 흉내낸다."""
+    db = AsyncMock()
+    conn_id = None if site_post_connection_id is _NoConnection else site_post_connection_id
+
+    async def _execute(query, *_args, **_kwargs):
+        # story #3369 후속(2026-09-10) — 이전엔 "첫 execute=gate, 둘째 execute=
+        # site_post"를 호출 순서로만 가르는 call-count 흉내였다. payload에 gate_id가
+        # 있으면 실제 코드는 db.get(Gate, ...)로 gate row를 얻어(execute를 아예 안
+        # 탄다) 그 뒤 SitePostDraft 조회가 execute의 «첫» 호출이 된다 — call-count
+        # 가정이 그 경로에서 깨진다(뮤테이션 테스트가 실제로 이 자리에서 TypeError로
+        # 적발했다). 쿼리가 겨누는 테이블로 직접 가른다 — 호출 순서·개수에 안 기댄다.
+        if "site_post_drafts" in str(query):
+            if not site_post_draft_exists:
+                return _FakeResult(None)
+            return _FakeResult((conn_id,))
+        return _FakeResult(gate_row)
 
     db.execute = AsyncMock(side_effect=_execute)
     db.get = AsyncMock(return_value=gate_row)
@@ -81,11 +108,18 @@ def _stub_work_item_ref(monkeypatch):
     monkeypatch.setattr(events_module, "_render_event_notification_work_item_ref", _fake_ref)
 
 
-async def _render(payload: dict, gate_row=None, *, site_post_draft_exists: bool = False) -> str:
+async def _render(
+    payload: dict, gate_row=None, *, site_post_draft_exists: bool = False,
+    site_post_connection_id: uuid.UUID | None = _NoConnection,
+) -> str:
     from app.routers.events import _render_gate_verdict_message
 
     return await _render_gate_verdict_message(
-        _fake_db(gate_row, site_post_draft_exists=site_post_draft_exists), org_id=uuid.uuid4(), payload=payload,
+        _fake_db(
+            gate_row, site_post_draft_exists=site_post_draft_exists,
+            site_post_connection_id=site_post_connection_id,
+        ),
+        org_id=uuid.uuid4(), payload=payload,
     )
 
 
@@ -112,18 +146,40 @@ class TestExternalPublishAgentNextAction:
         ))
         assert "- 다음 행동: 할 일 없음 — 다시 올릴지는 작성자가 정합니다." in text
 
-    async def test_site_post_approved_says_worker_tick_not_human_screen(self):
-        """story #3487 — site_post(외부 목적지·hosted_site 공통)는 승인 즉시 워커가
-        다음 tick에 발행한다(실동작). draft_id가 site_post_drafts에 있으면 새 문구."""
+    async def test_site_post_external_destination_approved_says_worker_tick_not_human_screen(self):
+        """story #3487 — site_post 외부 목적지(WordPress 등, connection_id 있음)는
+        승인 즉시 워커가 다음 tick에 발행한다(실동작). draft_id가 site_post_drafts에
+        있고 connection_id도 있으면 새 문구."""
         draft_id = str(uuid.uuid4())
         gate_row = _FakeGateRow({"draft_id": draft_id})
         text = await _render(
             _payload(gate_type="external_publish", verdict="approved"),
-            gate_row=gate_row, site_post_draft_exists=True,
+            gate_row=gate_row, site_post_draft_exists=True, site_post_connection_id=uuid.uuid4(),
         )
         assert "발행은 휴먼이 화면에서 합니다" not in text
         assert "다음 워커 tick" in text
         assert "발행 결과" in text
+
+    async def test_site_post_hosted_site_approved_keeps_human_screen_text(self):
+        """story #3369 후속(자기점검 2차, 2026-09-10) — hosted_site(connection_id=
+        None)는 #3487 옛 주석이 틀리게 "공통"이라 적었던 그 자리: 승인해도
+        publication_command가 안 생긴다(gate_service.py::_maybe_create_scheduled_
+        publication_command가 destination_channel=="hosted_site"면 그 자리에서
+        return한다) — 휴먼이 여전히 화면에서 직접 «발행»/«재발행»을 눌러야 한다.
+        이 표면 수신자(에이전트)에게 "다음 워커 tick에 발행됩니다"(거짓)를 보내면
+        사람에게 재발행이 필요하다는 것을 못 알릴 위험이 있다 — 옛 문구 그대로여야
+        한다.
+
+        뮤테이션 대상: events.py의 `site_post_has_connection` 체크를 지우면(즉 예전처럼
+        is_site_post만 보면) 이 테스트가 RED가 되어야 한다."""
+        draft_id = str(uuid.uuid4())
+        gate_row = _FakeGateRow({"draft_id": draft_id})
+        text = await _render(
+            _payload(gate_type="external_publish", verdict="approved"),
+            gate_row=gate_row, site_post_draft_exists=True, site_post_connection_id=None,
+        )
+        assert "- 다음 행동: 할 일 없음 — 발행은 휴먼이 화면에서 합니다." in text
+        assert "다음 워커 tick" not in text
 
     async def test_channel_post_approved_keeps_old_text_regression(self):
         """AC2 회귀 0 — channel_post(예약 상신)는 draft_id가 있어도(channel_posts.py도
@@ -144,7 +200,7 @@ class TestExternalPublishAgentNextAction:
         site_post_draft_exists=True를 반영 못 하고 RED가 된다."""
         draft_id = str(uuid.uuid4())
         gate_row = _FakeGateRow({"draft_id": draft_id}, id_=uuid.uuid4())
-        db = _fake_db(gate_row, site_post_draft_exists=True)
+        db = _fake_db(gate_row, site_post_draft_exists=True, site_post_connection_id=uuid.uuid4())
         from app.routers.events import _render_gate_verdict_message
 
         text = await _render_gate_verdict_message(
