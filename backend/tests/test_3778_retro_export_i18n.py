@@ -32,10 +32,12 @@ class TestResolveExportLocale:
     def test_case_and_whitespace_tolerant(self) -> None:
         assert resolve_export_locale(" EN ") == "en"
 
-    def test_missing_or_unsupported_falls_back_to_ko(self) -> None:
-        assert resolve_export_locale(None) == "ko"
-        assert resolve_export_locale("") == "ko"
-        assert resolve_export_locale("ja") == "ko"
+    def test_missing_or_unsupported_falls_back_to_en(self) -> None:
+        """story #3778 CHANGES(유나 design:changes 2026-09-10) — 화면 정본
+        (src/i18n/request.ts DEFAULT_LOCALE)과 동일 기본값으로 정정(ko가 아니라 en)."""
+        assert resolve_export_locale(None) == "en"
+        assert resolve_export_locale("") == "en"
+        assert resolve_export_locale("ja") == "en"
 
 
 class TestPhaseLabel:

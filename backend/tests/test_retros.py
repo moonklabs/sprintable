@@ -1161,11 +1161,10 @@ def _export_mock_execute(retro_session, items, actions):
 
 
 @pytest.mark.anyio
-async def test_export_default_locale_is_ko_human_words_not_raw_keys():
-    """Accept-Language 미지정 → ko 기본(화면 src/i18n/request.ts 폴백과 동형). phase
-    'vote'가 raw 그대로 안 남고(구 결함 재현: 원문은 f"**Phase:** {session.phase}"라
-    'vote'가 그대로 샜다) 화면 낱말 「우선순위」로, action.status 'open'도 raw 'open'이
-    아니라 「진행 중」으로 뜬다."""
+async def test_export_explicit_ko_header_human_words_not_raw_keys():
+    """Accept-Language: ko(명시) → phase 'vote'가 raw 그대로 안 남고(구 결함 재현: 원문은
+    f"**Phase:** {session.phase}"라 'vote'가 그대로 샜다) 화면 낱말 「우선순위」로,
+    action.status 'open'도 raw 'open'이 아니라 「진행 중」으로 뜬다."""
     client, session, app = await _client()
     try:
         retro_session = _mock_session("vote")
@@ -1175,7 +1174,10 @@ async def test_export_default_locale_is_ko_human_words_not_raw_keys():
 
         with _allow_project_access():
             async with client as c:
-                resp = await c.get(f"/api/v2/retros/{SESSION_ID}/export")
+                resp = await c.get(
+                    f"/api/v2/retros/{SESSION_ID}/export",
+                    headers={"Accept-Language": "ko"},
+                )
 
         assert resp.status_code == 200
         text = resp.text
@@ -1186,6 +1188,33 @@ async def test_export_default_locale_is_ko_human_words_not_raw_keys():
         assert "[진행 중] CI 속도 개선" in text
         assert "open" not in text
         assert "(2표)" in text  # ko votes 정본(retro.votes = "{count}표")
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_export_no_accept_language_header_defaults_to_en():
+    """story #3778 CHANGES(유나 design:changes 2026-09-10) — Accept-Language 헤더
+    자체가 없으면(BFF를 안 거치는 직접 호출 등) en 기본(화면 src/i18n/request.ts::
+    getLocale()의 DEFAULT_LOCALE과 동형 — 예전엔 ko가 기본이라 BFF가 쿠키 부재 시
+    헤더를 아예 안 보내던 경로에서 «화면은 영어인데 문서는 한국어»가 났다)."""
+    client, session, app = await _client()
+    try:
+        retro_session = _mock_session("action")
+        item = _mock_item()
+        action = _mock_action()
+        session.execute = _export_mock_execute(retro_session, [item], [action])
+
+        with _allow_project_access():
+            async with client as c:
+                resp = await c.get(f"/api/v2/retros/{SESSION_ID}/export")
+
+        assert resp.status_code == 200
+        text = resp.text
+        assert "**Phase:** Action" in text
+        assert "## Good" in text
+        assert "잘된" not in text
+        assert "(2 votes)" in text
     finally:
         app.dependency_overrides.clear()
 
@@ -1220,9 +1249,9 @@ async def test_export_accept_language_en_switches_whole_document():
 
 
 @pytest.mark.anyio
-async def test_export_unsupported_accept_language_falls_back_to_ko():
-    """지원 밖 값(예: 'ja')은 조용히 ko로(지어내지 않는다 — resolve_export_locale
-    기본값 규율)."""
+async def test_export_unsupported_accept_language_falls_back_to_en():
+    """지원 밖 값(예: 'ja')은 조용히 en으로(지어내지 않는다 — resolve_export_locale
+    기본값 규율, 화면 정본과 동형으로 en 정정)."""
     client, session, app = await _client()
     try:
         retro_session = _mock_session("collect")
@@ -1236,7 +1265,7 @@ async def test_export_unsupported_accept_language_falls_back_to_ko():
                 )
 
         assert resp.status_code == 200
-        assert "**단계:** 수집" in resp.text
+        assert "**Phase:** Collect" in resp.text
     finally:
         app.dependency_overrides.clear()
 

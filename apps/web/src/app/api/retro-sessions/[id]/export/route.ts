@@ -1,8 +1,8 @@
-import { cookies } from 'next/headers';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { getOrgProjectAuthContext } from '@/lib/auth-helpers';
 import { proxyToFastapiWithParams } from '@/lib/fastapi-proxy';
+import { getLocale } from '@/i18n/request';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -14,15 +14,18 @@ export async function GET(request: Request, { params }: RouteParams) {
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
 
-    // story #3778(PO 決 2026-09-10) — 영어 로케일 사용자가 내보내면 한국어 문서를 받던
-    // 병. BE는 화면의 로케일 쿠키를 자동으로 못 본다(server-to-server 호출) — src/i18n/
-    // request.ts와 동일한 쿠키(`locale`)를 여기서 직접 읽어 Accept-Language로 실어
-    // 보낸다(BE가 그 값으로 문서 언어를 고른다, retros.py::export_session).
-    const cookieStore = await cookies();
-    const locale = cookieStore.get('locale')?.value;
+    // story #3778 CHANGES(유나 design:changes 2026-09-10) — 최초본은 `locale` 쿠키를
+    // 여기서 직접 읽었는데, 쿠키가 없으면(로케일 스위처를 한 번도 안 건드린 신규
+    // 사용자 — 세팅 자리는 locale-switcher.tsx 단 한 곳) 헤더 자체를 안 보내 BE가
+    // 자기 기본값(ko)으로 떨어졌다 — 정작 화면은 같은 상황에서 Accept-Language로
+    // en을 고르므로(`src/i18n/request.ts::getLocale()`) "화면 폴백과 동형"이라던 주석이
+    // 거짓이었다(기본값 다름·헤더 폴백 단계가 아예 빠짐). 해석 로직을 그 함수 하나로
+    // 통일 — route는 결과만 그대로 forward한다(BE는 그 문자열 자체를 Accept-Language로
+    // 받는다, retros.py::export_session).
+    const locale = await getLocale();
 
     const _r = await proxyToFastapiWithParams(request, '/api/v2/retros/[id]/export', { id }, {
-      extraHeaders: locale ? { 'Accept-Language': locale } : undefined,
+      extraHeaders: { 'Accept-Language': locale },
     });
     if (!_r.ok) return _r;
     if (_r.status === 204) return apiSuccess({ ok: true });
