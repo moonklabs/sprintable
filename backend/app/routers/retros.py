@@ -690,6 +690,14 @@ async def update_action(
 @router.get("/{id}/export")
 async def export_session(
     id: uuid.UUID,
+    # story #3778 CHANGES(카디르 QA 2026-09-10) — `request: Request | None = None`으로
+    # "직접 호출 하위호환"을 노렸으나 FastAPI가 `Request`를 특수 주입 타입으로 인식하는
+    # 것은 정확히 어노테이션이 `Request`(Optional/Union 아님)일 때뿐이다 — `Request | None`
+    # 으로 바꾸는 순간 FastAPI가 이걸 일반 Pydantic 필드로 취급해 스키마 생성에 실패,
+    # **라우트 등록 자체가 죽는다**(모듈 임포트 시점 에러라 이 파일을 import하는 모든
+    # 테스트가 연쇄로 깨짐 — 직접호출 테스트 1개보다 훨씬 큰 폭발반경, 실측으로 발견).
+    # 그래서 시그니처는 그대로 두고(`Request` 그대로, 기본값 없음) 직접 호출 테스트
+    # 쪽에서 request를 명시로 넘기게 고쳤다(test_retro_grouping_vote_count_realdb.py).
     request: Request,
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
