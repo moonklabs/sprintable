@@ -27,6 +27,20 @@ interface ChatRailContextValue {
   toggleManualExpand: () => void;
   /** ChatView가 ReadingPanel 열림 여부를 보고한다. */
   setReadingOpen: (open: boolean) => void;
+  /** story #3788(B-③, 유나 定 2026-09-10 카드 착지) — 좌측 레일(`ChatListView`)이 "내 대화"
+   * 목록 로드 상태를 여기로 끌어올린다(lift, docs `DocsLayoutContext`와 같은 자리). 우측
+   * outlet(`chats/page.tsx`)이 이 둘로 로딩·0건·있음 세 갈래를 가른다 — "대화가 없습니다"
+   * (왼쪽)와 "선택하세요"(오른쪽)가 동시에 서는 모순(두 세계 동시 진술)을 막는다. */
+  conversationsLoading: boolean;
+  setConversationsLoading: (value: boolean) => void;
+  conversationCount: number;
+  setConversationCount: (value: number) => void;
+  /** story #3788(B-③ 후속, 페드루 그라운딩 2026-09-10 10:43Z) — 좌측 레일에는 "내 대화"·
+   * "에이전트" 두 탭이 있고 `conversationsLoading`/`conversationCount`는 **지금 보이는 탭**의
+   * 값이어야 한다(안 보이는 탭의 0/N은 우측과 모순을 만들지 않는다 — my 0건이어도 사용자가
+   * 에이전트 탭을 보고 있고 거기 N건이 있으면 「없다」고 말하면 안 된다). */
+  activeList: 'my' | 'agent';
+  setActiveList: (value: 'my' | 'agent') => void;
 }
 
 const ChatRailContext = createContext<ChatRailContextValue | null>(null);
@@ -35,6 +49,11 @@ export function ChatRailProvider({ children }: { children: ReactNode }) {
   const [readingOpen, setReadingOpenState] = useState(false);
   const [isBelowXl, setIsBelowXl] = useState(false);
   const [manuallyExpanded, setManuallyExpanded] = useState(false);
+  // ChatListView의 초기 loading 상태(true)와 짝을 맞춘다 — 첫 렌더에서 "0건"으로 잘못
+  // 단정하지 않는다.
+  const [conversationsLoading, setConversationsLoading] = useState(true);
+  const [conversationCount, setConversationCount] = useState(0);
+  const [activeList, setActiveList] = useState<'my' | 'agent'>('my');
 
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 1279px)');
@@ -62,8 +81,13 @@ export function ChatRailProvider({ children }: { children: ReactNode }) {
   const toggleManualExpand = useCallback(() => setManuallyExpanded((v) => !v), []);
 
   const value = useMemo(
-    () => ({ railMode, toggleManualExpand, setReadingOpen }),
-    [railMode, toggleManualExpand, setReadingOpen],
+    () => ({
+      railMode, toggleManualExpand, setReadingOpen,
+      conversationsLoading, setConversationsLoading,
+      conversationCount, setConversationCount,
+      activeList, setActiveList,
+    }),
+    [railMode, toggleManualExpand, setReadingOpen, conversationsLoading, conversationCount, activeList],
   );
 
   return <ChatRailContext.Provider value={value}>{children}</ChatRailContext.Provider>;
@@ -73,4 +97,14 @@ export function useChatRail(): ChatRailContextValue {
   const ctx = useContext(ChatRailContext);
   if (!ctx) throw new Error('useChatRail must be used within ChatRailProvider');
   return ctx;
+}
+
+/** story #3788 — `ChatListView`는 격리 단위테스트에서 `ChatRailProvider` 없이 단독 렌더되는
+ * 자리가 있다(chat-list-view.test.tsx). Provider 밖이면 null을 돌려주는 논-throw 버전 —
+ * `setConversationsLoading`/`setConversationCount` 호출부는 null이면 조용히 스킵한다(story
+ * #3759 useToast() 그레이스풀 폴백과 동형 — 무관한 기존 테스트를 강제로 안 건드리면서
+ * 프로덕션(Provider 항상 有)에선
+ * 원 기능 그대로 작동). */
+export function useChatRailOptional(): ChatRailContextValue | null {
+  return useContext(ChatRailContext);
 }

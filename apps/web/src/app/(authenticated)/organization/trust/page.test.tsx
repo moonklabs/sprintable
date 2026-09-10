@@ -414,13 +414,13 @@ describe('OrganizationTrustPage — 「내 신뢰」 self 뷰(story #3749 §6, �
     expect(row?.textContent?.match(/개발/g)?.length).toBe(1);
   });
 
-  it('빈 self 뷰는 trustEmptySelf 문구를 보인다', async () => {
+  it('빈 self 뷰는 trustEmptyTitle 문구를 보인다(story #3788 — trustEmptySelf 삭제, 제목이 대신)', async () => {
     mountAsSelf();
     stubFetchSelf([]);
     await act(async () => { root.render(wrap(<OrganizationTrustPage />)); });
     await flush();
 
-    expect(container.textContent).toContain(koMessages.organization.trustEmptySelf);
+    expect(container.textContent).toContain(koMessages.organization.trustEmptyTitle);
   });
 });
 

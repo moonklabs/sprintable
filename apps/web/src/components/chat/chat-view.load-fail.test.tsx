@@ -102,14 +102,14 @@ describe('ChatView — 초기 로드 실패 시 문장(story #3638)', () => {
     stubFetch(false);
     await mount();
     expect(container.textContent).toContain(koMessages.chats.messagesLoadFailed);
-    expect(container.textContent).not.toContain('대화를 시작하세요');
+    expect(container.textContent).not.toContain(koMessages.chats.messagesEmptyTitle);
   });
 
   // 뮤테이션 대표 — 진짜 빈 대화(로드 성공, 메시지 0건)면 기존 empty state 그대로.
   it('진짜 빈 대화(로드 성공)면 "대화를 시작하세요"가 뜨고 messagesLoadFailed는 안 뜬다', async () => {
     stubFetch(true);
     await mount();
-    expect(container.textContent).toContain('대화를 시작하세요');
+    expect(container.textContent).toContain(koMessages.chats.messagesEmptyTitle);
     expect(container.textContent).not.toContain(koMessages.chats.messagesLoadFailed);
   });
 
@@ -117,7 +117,7 @@ describe('ChatView — 초기 로드 실패 시 문장(story #3638)', () => {
     stubFetchThrows();
     await mount();
     expect(container.textContent).toContain(koMessages.chats.messagesLoadFailed);
-    expect(container.textContent).not.toContain('대화를 시작하세요');
+    expect(container.textContent).not.toContain(koMessages.chats.messagesEmptyTitle);
   });
 
   // PO 決(2026-09-07) — 성공 경로의 setMessagesLoadFailed(false) 리셋을 지키는 표본이
@@ -142,13 +142,13 @@ describe('ChatView — 초기 로드 실패 시 문장(story #3638)', () => {
     }));
     await mount();
     expect(container.textContent).toContain(koMessages.chats.messagesLoadFailed);
-    expect(container.textContent).not.toContain('대화를 시작하세요');
+    expect(container.textContent).not.toContain(koMessages.chats.messagesEmptyTitle);
 
     ok = true;
     const opts = useChatSseMock.mock.calls[useChatSseMock.mock.calls.length - 1][0] as { onPoll: () => Promise<boolean> };
     await act(async () => { await opts.onPoll(); });
 
     expect(container.textContent).not.toContain(koMessages.chats.messagesLoadFailed);
-    expect(container.textContent).toContain('대화를 시작하세요');
+    expect(container.textContent).toContain(koMessages.chats.messagesEmptyTitle);
   });
 });
