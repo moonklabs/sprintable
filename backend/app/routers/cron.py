@@ -17,7 +17,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.dependencies.database import get_db, get_worker_db
-from app.models.agent_run import AgentRun
 from app.models.agent_session import AgentSession
 from app.models.asset import Asset
 from app.models.hitl import HitlRequest
@@ -421,62 +420,19 @@ async def zero_referenced_entities_check(
         return _err("INTERNAL_ERROR", "Internal server error", 500)
 
 
-# ─── GET /api/v2/internal/cron/retry-agent-runs ────────────────────────────────
-
-@router.get("/retry-agent-runs")
-async def retry_agent_runs(
-    request: Request,
-    dry_run: bool = Query(default=False),
-    session: AsyncSession = Depends(get_db),
-) -> JSONResponse:
-    verify_cron(request)
-    try:
-        now = datetime.now(timezone.utc)
-
-        # next_retry_at이 도래한 failed run의 retry-eligible 필터. dry_run/실행이 **동일 필터**를
-        # 써야 preview 수 == 실제 처리 건수가 보장된다(스케줄 가동 전 surge 규모 정확).
-        eligible_filter = (
-            AgentRun.status == "failed",
-            AgentRun.next_retry_at.is_not(None),
-            AgentRun.next_retry_at <= now,
-            AgentRun.retry_count < AgentRun.max_retries,
-        )
-
-        # dry_run: read-only preview — eligible count만 반환·mutate/commit 0(가동 전 안전 점검).
-        if dry_run:
-            count = (
-                await session.execute(
-                    select(func.count()).select_from(AgentRun).where(*eligible_filter)
-                )
-            ).scalar_one()
-            return _ok({"dry_run": True, "eligible_count": int(count)})
-
-        # next_retry_at이 도래한 failed run 조회
-        result = await session.execute(select(AgentRun).where(*eligible_filter))
-        pending = list(result.scalars().all())
-
-        retried: list[dict] = []
-        final_failures: list[dict] = []
-
-        for run in pending:
-            if run.retry_count >= run.max_retries:
-                run.failure_disposition = "final"
-                final_failures.append({"run_id": str(run.id), "status": "final_failure"})
-            else:
-                run.status = "queued"
-                run.next_retry_at = None
-                retried.append({"run_id": str(run.id), "status": "retried"})
-
-        await session.commit()
-
-        return _ok({
-            "retried": retried,
-            "final_failures": final_failures,
-            "total": len(retried) + len(final_failures),
-        })
-    except Exception as exc:
-        logger.exception("cron error: %s", exc)
-        return _err("INTERNAL_ERROR", "Internal server error", 500)
+# story #3781(PO 判 2026-09-10 09:47Z) — 이 자리에 있던 GET /retry-agent-runs 엔드포인트는
+# 은퇴됐다. 그라운딩(미르코): `next_retry_at`을 non-null로 채우는 코드가 backend 전체에
+# 0건이라(모델 필드 자체는 남아있음 — `deployment_lifecycle.py::build_cards`가 읽어 실
+# API 응답(`DeploymentCardResponse.latest_failed_run`)에 싣는 살아있는 소비처가 있어 컬럼은
+# 보존) 이 엔드포인트의 WHERE(`next_retry_at IS NOT NULL AND <= now`)는 대상 실행 존재
+# 여부와 무관하게 원리적으로 영원히 0행을 골랐다 — "돌지만 절대 못 고른다". PO 실측:
+# Cloud Scheduler엔 `retry-agent-runs-dev`가 10분 주기로 등록돼 있었으나(그 잡 자체는
+# PO가 배포 뒤 별도로 삭제) dev DB `agent_runs.status='queued'` 행은 0건(이 엔드포인트가
+# 만드는 그 전이가 실제로 한 번도 성공한 적이 없었다는 뜻 — 데이터 마이그레이션 불요).
+# `status="queued"`는 이 엔드포인트 전용 개념이 아니라
+# `deployment_lifecycle.py`의 배포 suspend/activate/fail/terminate 생명주기가 쓰는 정식
+# 상태이기도 하다(_hold_queued_runs/_resume_held_runs/_fail_queued_runs) — 그 메커니즘은
+# 이 은퇴 범위 밖, 손대지 않았다.
 
 
 # ─── POST /api/v2/internal/cron/score-ga4-outcomes ────────────────────────────
