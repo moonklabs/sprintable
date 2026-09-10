@@ -527,15 +527,16 @@ describe('TossSheet — 완결 실패를 완결인 척 안 함(story #3701 parti
 
 // story #3203(선생님 실사고·2026-08-29) — 참가자 이름 해석 실패(BE orphan 폴백, name=null)
 // 시 uuid가 그대로 새던 표시결함 pin. conversationDisplayName의 그룹-무참가자 폴백(conv.id
-// 앞 8자)·참가자 이름 폴백('?') 둘 다 사람 언어("알 수 없는 멤버")로 통일했다.
+// 앞 8자)·참가자 이름 폴백('?') 둘 다 사람 언어("알 수 없는 구성원")로 통일했다.
 describe('TossSheet — 참가자 이름 해석 실패 폴백(story #3203)', () => {
-  it('DM 상대의 name이 null이면 "알 수 없는 멤버"로 뜬다 — uuid도 물음표도 아니다', async () => {
+  it('DM 상대의 name이 null이고 resolved=false면 "알 수 없는 구성원"으로 뜬다 — uuid도 물음표도 아니다', async () => {
+    // story #3758(9번째) — 낱말 정("멤버"→"구성원") + resolved 비트 명시.
     const convs = [
-      { id: 'conv-orphan-1', type: 'dm', title: null, participants: [{ member_id: 'member-9', name: null }, { member_id: 'member-1', name: '나' }] },
+      { id: 'conv-orphan-1', type: 'dm', title: null, participants: [{ member_id: 'member-9', name: null, resolved: false }, { member_id: 'member-1', name: '나', resolved: true }] },
     ];
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: convs, total: convs.length }) })));
     await mount();
-    expect(document.body.textContent).toContain('알 수 없는 멤버');
+    expect(document.body.textContent).toContain('알 수 없는 구성원');
     expect(document.body.textContent).not.toContain('conv-orph');
   });
 });

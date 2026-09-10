@@ -1,9 +1,16 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { memberDisplayLabel, publishHistorySenderLabel } from './member-display';
+import { memberDisplayLabel, participantDisplayLabel, publishHistorySenderLabel } from './member-display';
 
 function t(key: string): string {
   const table: Record<string, string> = { memberUnnamed: '이름 없는 구성원' };
+  return table[key] ?? key;
+}
+
+// chats 네임스페이스(unknownMember는 t('common')이 아니라 t('chats') 쪽 키 — 실 호출부와
+// 동형으로 별도 함수).
+function tChats(key: string): string {
+  const table: Record<string, string> = { unknownMember: '알 수 없는 구성원' };
   return table[key] ?? key;
 }
 
@@ -52,5 +59,32 @@ describe('publishHistorySenderLabel — story #3755', () => {
   // 같은 낱말로, 유나 지적①).
   it('⭐sender_id는 있는데 sender_name이 null이면 「이름 없는 구성원」(「알 수 없음」 아님)', () => {
     expect(publishHistorySenderLabel({ sender_id: 's-2', sender_name: null }, tEvents, t)).toBe('이름 없는 구성원');
+  });
+});
+
+// story #3758(9번째, PO 決 2026-09-09) — 대화 참여자 전용. resolved 비트로 「알 수 없는
+// 구성원」(orphan)과 「이름 없는 구성원」(실존·표시명 없음)을 가른다.
+describe('participantDisplayLabel — story #3758', () => {
+  it('name이 있으면 resolved 무관 그대로 돌린다', () => {
+    expect(participantDisplayLabel({ name: '피오', resolved: true }, tChats, t)).toBe('피오');
+  });
+
+  // ⭐되돌리면 RED — resolved=false(진짜 orphan)면 name 값과 무관하게 「알 수 없는 구성원」.
+  it('⭐resolved=false면 「알 수 없는 구성원」(orphan — email/uuid 지어내기 금지)', () => {
+    expect(participantDisplayLabel({ name: null, resolved: false }, tChats, t)).toBe('알 수 없는 구성원');
+  });
+
+  // ⭐되돌리면 RED — resolved=true인데 name이 null(실존 구성원, 표시명만 없음)이면
+  // 「이름 없는 구성원」이어야 한다(orphan과 다른 문구 — 같은 사실이 아니므로).
+  it('⭐resolved=true인데 name이 null이면 「이름 없는 구성원」(orphan과 다른 문구)', () => {
+    expect(participantDisplayLabel({ name: null, resolved: true }, tChats, t)).toBe('이름 없는 구성원');
+  });
+
+  // ⭐되돌리면 RED — `resolved` 필드 자체가 없는(레거시/아직 안 지나간) 호출부는 BE
+  // ResolvedMember.resolved 기본값(True)과 짝 맞춰 "실존"으로 읽어야 한다. undefined를
+  // falsy로 처리해 무조건 「알 수 없는 구성원」으로 떨어지면 이름 있는 기존 참여자들이
+  // 전부 이 문구로 잘못 뜬다(실제로 최초 구현에서 이 회귀가 났었다).
+  it('⭐resolved 필드 자체가 없으면(undefined) "실존"으로 읽어 name을 그대로 쓴다', () => {
+    expect(participantDisplayLabel({ name: '피오' }, tChats, t)).toBe('피오');
   });
 });

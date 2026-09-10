@@ -165,11 +165,15 @@ export default function OrganizationRolesPage() {
                               disabled={changingId === member.id}
                               onChange={(e) => void handleChangeRole(member.id, e.target.value as 'admin' | 'member')}
                             >
-                              <option value="admin">Admin</option>
-                              <option value="member">Member</option>
+                              <option value="admin">{t(ROLE_LABEL_KEY.admin)}</option>
+                              <option value="member">{t(ROLE_LABEL_KEY.member)}</option>
                             </select>
                           ) : (
-                            <Badge variant={isThisOwner ? 'info' : 'secondary'} className="capitalize">{member.role}</Badge>
+                            // story #3758(페드루 그라운딩 지적 — 캡처 리뷰 중 발견) — select와
+                            // 동형, 이 화면이 이미 갖고 있던 ROLE_LABEL_KEY 재사용(그룹 헤더와
+                            // 같은 정본 낱말, 새 키 발명 없음). "Admin"/"Member" 원문 리터럴 +
+                            // raw enum capitalize는 t() 없이 그리던 미번역 자리였다.
+                            <Badge variant={isThisOwner ? 'info' : 'secondary'}>{t(ROLE_LABEL_KEY[member.role])}</Badge>
                           )
                         }
                       />

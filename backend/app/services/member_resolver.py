@@ -24,6 +24,13 @@ from app.services.project_auth import has_project_access
 
 logger = logging.getLogger(__name__)
 
+# story #3758 — 서버가 직접 조립하는 한국어 알림 문구(next-intl 밖, conversations.py
+# mention/message 알림 title 등)용 공용 폴백. FE `common.memberUnnamed`(member-display.ts)
+# 와 같은 값 — 이름 없는 실존 구성원을 f-string에 그대로 꽂으면 "None님이..."로 새는
+# 자리를 막는다. 여기가 SSOT(ResolvedMember와 같은 자리) — 새 문구를 다른 파일에서
+# 따로 짓지 않는다.
+UNNAMED_MEMBER_LABEL = "이름 없는 구성원"
+
 
 @dataclass
 class ResolvedMember:
@@ -38,7 +45,14 @@ class ResolvedMember:
     (셋 다 None 안전) — conversations.py(_fetch_conversation_participants)만 FE로
     그대로 흘려보내는데, FE Participant.name은 원래 `string | null`이었다(폴백
     로직이 처음부터 null을 전제하고 설계돼 있었다는 뜻 — 이 fix는 그 계약을
-    실제로 채우는 것)."""
+    실제로 채우는 것).
+
+    story #3758(별건 ④ 9번째, PO 決 2026-09-09) — `name=None`은 두 가지 서로 다른
+    사실을 뭉뚱그린다: 「실존 구성원인데 표시명만 없음」과 「orphan(member/alias
+    자체가 해소 안 됨)」. batch 조회(lookup_members_by_ids) 소비처 중 conversations.py
+    참여자 목록처럼 이 둘을 다르게 그려야 하는 화면이 있는데, name=None 하나로는
+    구별이 안 됐다. `resolved` 필드로 가른다 — 정의는 이 dataclass 한 자리(소비처마다
+    orphan-id 집합을 따로 들고 재동기화하는 방식은 기각, PO 決)."""
     id: uuid.UUID
     user_id: uuid.UUID | None      # users.id (휴먼) | None (에이전트)
     name: str | None
@@ -47,6 +61,9 @@ class ResolvedMember:
     org_id: uuid.UUID
     project_id: uuid.UUID | None = field(default=None)
     avatar_url: str | None = field(default=None)
+    # story #3758 — orphan-fallback placeholder(진짜 member/alias 해소 실패)만 False.
+    # 실존 구성원(표시명만 없음)은 그대로 True — name=None과 독립된 축.
+    resolved: bool = field(default=True)
 
 
 def is_human_member_condition(member_id_col, *, user_id: uuid.UUID | None = None):
@@ -365,7 +382,8 @@ async def _lookup_members_by_ids_legacy(
 
     # orphan/삭제 멤버: TM도 OrgMember도 아닌 ID → fallback(크래시 방지). story #3203 —
     # name=None(예전엔 str(mid)[:8] — uuid 노출 표시결함 원인지 중 하나, ResolvedMember
-    # 클래스 docstring 참고).
+    # 클래스 docstring 참고). story #3758 — resolved=False(진짜 orphan임을 소비처가
+    # 구별할 수 있게).
     for mid in ids:
         if mid not in result:
             result[mid] = ResolvedMember(
@@ -374,6 +392,7 @@ async def _lookup_members_by_ids_legacy(
                 type="human", role="member",
                 org_id=uuid.UUID(int=0),
                 project_id=None,
+                resolved=False,
             )
 
     return result
@@ -467,11 +486,13 @@ async def _lookup_members_by_ids_anchor(
 
     # 3. 진짜 orphan(member/alias 모두 없음) — telemetry-only + 크래시 방지 placeholder.
     # story #3203 — name=None(legacy 경로와 동형 fix, ResolvedMember docstring 참고).
+    # story #3758 — resolved=False(진짜 orphan임을 소비처가 구별할 수 있게).
     for oid in ids - set(result.keys()):
         logger.warning("member_resolver(anchor): unresolved orphan id=%s — no member/alias", oid)
         result[oid] = ResolvedMember(
             id=oid, user_id=None, name=None,
             type="human", role="member", org_id=uuid.UUID(int=0), project_id=None,
+            resolved=False,
         )
 
     return result

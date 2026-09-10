@@ -29,6 +29,7 @@ import {
 } from './chat-input-entity-tokens';
 import { useEntityPicker } from '@/hooks/use-entity-picker';
 import { fetchWithAuth } from '@/lib/db/client';
+import { participantDisplayLabel } from '@/lib/member-display';
 import { extractBackendErrorMessage } from '@/lib/api-error-message';
 
 // story #2264(C-6): 토큰조립/그룹핑/라벨은 이제 참조 코어(chat-input-entity-tokens.ts)에
@@ -159,7 +160,9 @@ interface ChatInputProps {
   // (본인 제외) 0명이면 STEER 토글 자체를 숨긴다(대상 없이는 발행이 원천 불가 — 신규
   // 발행경로가 필요 없는 화면에 죽은 버튼을 심지 않는다, graceful).
   currentTeamMemberId?: string;
-  participants?: { member_id: string; name: string | null }[];
+  // story #3758(9번째, PO 決) — resolved optional·BE 기본값(True)과 짝 맞춰 필드 자체가
+  // 없으면 "실존"으로 읽는다(participantDisplayLabel).
+  participants?: { member_id: string; name: string | null; resolved?: boolean }[];
   /** story #92f00dc4(doc exec-command-final-spec-92f00dc4 §🎯) — 모호 후보 클릭 =
    * «입력창을 해소된 명령으로 채움(즉시 집행 아님, 사람이 Enter로 확認)». 부모(chat-view)가
    * 후보 클릭 시 이 값을 갱신하면(같은 text라도 매번 새 nonce) 아래 effect가 입력창을
@@ -172,6 +175,7 @@ interface ChatInputProps {
 
 export function ChatInput({ onSend, onUploadFile, disabled, placeholder, projectId, onMentionIdsChange, commandTargets, threadId, onEscape, currentTeamMemberId, participants, prefillCommand }: ChatInputProps) {
   const t = useTranslations('chats');
+  const tc = useTranslations('common');
   // story #3289(도메인탈고정·축1 Phase1 FE잔여, AC2) — 「네비」 실측 결과 사이드바/브레드크럼엔
   // entity_type 렌더지점이 없고, 실제 렌더처는 이 `#` 엔티티 피커(chat-input-entity-tokens.ts
   // entityTypeLabel())였다. 그 코어 파일은 AC3 판정 대상(diff 0 규율, #2264)이라 손대지
@@ -709,8 +713,9 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
               {steerTargets.map((p) => (
                 // story #3203(카디르 QA 블로킹) — BE가 orphan participant.name을 이제 null로
                 // 실어보낸다(예전엔 uuid 앞 8자였으나 그마저 없어짐) — p.member_id 그대로 쓰면
-                // 36자 uuid 전체가 노출된다(예전보다 더 심함). 사람 언어 폴백으로 통일.
-                <option key={p.member_id} value={p.member_id}>{p.name ?? t('unknownMember')}</option>
+                // 36자 uuid 전체가 노출된다(예전보다 더 심함). 사람 언어 폴백으로 통일. story
+                // #3758(9번째) — resolved 비트로 갈라 그린다(participantDisplayLabel).
+                <option key={p.member_id} value={p.member_id}>{participantDisplayLabel(p, t, tc)}</option>
               ))}
             </select>
             <div className="relative min-w-0 flex-1">

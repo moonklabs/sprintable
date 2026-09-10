@@ -36,6 +36,7 @@ from app.services.asset_registry import DEFAULT_CONTAINER, sync_attachment_asset
 from app.services.command_classifier import classify_command
 from app.services.event_seq import assign_recipient_seq
 from app.services.member_resolver import (
+    UNNAMED_MEMBER_LABEL,
     ResolvedMember,
     filter_human_member_ids,
     filter_org_member_ids,
@@ -414,12 +415,18 @@ async def _fetch_conversation_participants(
         # 이 삼항은 방어적 죽은 분기. 예전엔 여기서도 uuid 앞 8자를 지어냈으나(FE로 그대로
         # 새는 표시결함 원인지 중 하나), 이제 resolved.name 자체가 orphan이면 None이라
         # (member_resolver.py 참고) FE Participant.name(`string | null`) 계약과 맞는다.
+        # story #3758(9번째, PO 決) — name=None만으로는 「실존·이름 없음」과 「orphan」을
+        # 못 가른다 — ResolvedMember.resolved 비트를 그대로 payload에 실어 FE가 두 갈래를
+        # (activity-log-view.tsx의 actor_id 유무 분기와 동형으로) 가르게 한다. orphan
+        # placeholder도 방어적으로 없는 경우(위 주석)엔 resolved=False로 맞춘다(정직 —
+        # 이 참여자가 실제로 무엇인지 하나도 모른다는 사실 그대로).
         conv_participants[r.conversation_id].append({
             "member_id": str(r.member_id),
             "name": resolved.name if resolved else None,
             "avatar_url": getattr(resolved, "avatar_url", None) if resolved else None,
             "type": resolved.type if resolved else "human",
             "runtime_type": runtime_type_map.get(r.member_id),
+            "resolved": resolved.resolved if resolved else False,
         })
     return conv_participants
 
@@ -2939,7 +2946,10 @@ async def send_message(
                         await dispatch_notification(
                             db, org_id=org_id, event_type="conversation.mention",
                             target_member_ids=human_mention_targets,
-                            title=f"{sender.name}님이 회원님을 멘션했습니다",
+                            # story #3758 — sender.name이 None일 수 있다(ResolvedMember/
+                            # TeamMember 둘 다 name nullable 완화 뒤) — 그대로 f-string에
+                            # 꽂으면 "None님이..."로 샌다.
+                            title=f"{sender.name or UNNAMED_MEMBER_LABEL}님이 회원님을 멘션했습니다",
                             body=(msg.content or "")[:200],
                             reference_type="conversation", reference_id=conversation_id,
                             source_project_id=conv.project_id,
@@ -2977,7 +2987,8 @@ async def send_message(
                     await dispatch_notification(
                         db, org_id=org_id, event_type="conversation.message",
                         target_member_ids=message_targets,
-                        title=f"{sender.name}님의 새 메시지",
+                        # story #3758 — 위 mention 블록과 동형(sender.name None-safe).
+                        title=f"{sender.name or UNNAMED_MEMBER_LABEL}님의 새 메시지",
                         body=(msg.content or "")[:200],
                         reference_type="conversation", reference_id=conversation_id,
                         source_project_id=conv.project_id,

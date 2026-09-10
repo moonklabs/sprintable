@@ -20,7 +20,7 @@ from app.schemas.team_member import (
 )
 from app.services.agent_onboarding_config import build_agent_mcp_config_bundle
 from app.services.avatar_upload import AvatarUploadError, confirm_upload, create_upload_url, delete_avatar
-from app.services.member_resolver import assert_caller_is_member, is_caller_member
+from app.services.member_resolver import UNNAMED_MEMBER_LABEL, assert_caller_is_member, is_caller_member
 from app.services.project_auth import has_project_access
 
 
@@ -409,8 +409,12 @@ async def create_team_member(
                 org_id=org_id,
                 event_type="agent_joined",
                 target_member_ids=admin_ids,
+                # story #3758 — actor는 휴먼일 수도 있고(team_members 뷰 휴먼 분기), 그
+                # name이 이제 nullable(members.name 완화)이라 그대로 f-string에 꽂으면
+                # "None(에이전트)이..."로 샌다. member(신규 에이전트)는 생성 필수 필드라
+                # None 걱정 없음.
                 title=f"새 에이전트 합류: {member.name}",
-                body=f"{actor.name}(에이전트)이 {member.name}을 생성했습니다.",
+                body=f"{actor.name or UNNAMED_MEMBER_LABEL}(에이전트)이 {member.name}을 생성했습니다.",
                 reference_type="team_member",
                 reference_id=member.id,
                 # story #1953: 신규 에이전트(member) 자신의 project_id — TeamMember.project_id

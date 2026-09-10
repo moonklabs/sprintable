@@ -13,7 +13,7 @@ class MeResponse(BaseModel):
     org_id: uuid.UUID
     project_id: uuid.UUID
     user_id: uuid.UUID | None = None
-    name: str
+    name: str | None  # story #3758 — org_members-only 폴백 분기가 display_name 없으면 None을 정직하게 돌림(email/id 폴백 0)
     email: str | None = None  # E-ONBOARDING S2: User.email 노출
     type: str
     role: str

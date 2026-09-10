@@ -67,10 +67,14 @@ class TeamMemberRepository(BaseRepository[TeamMember]):
         id = org_member.id = canonical 휴먼 신원(/api/me·standup author_id·_MISSING_SQL 과 동일
         기준 → 자기 카드 편집/제출 매칭 정합). name/avatar 는 canonical members 우선, users 폴백
         (백필 갭 안전망). 반환은 TeamMemberResponse 와 호환되는 dict.
+
+        story #3758 — email 폴백 제거(name 슬롯에 email/빈문자 지어내지 않음, 둘 다 없으면
+        None 정직). `test_standup_org_roster_166051f0.py`의 noacc@ pin이 이 자리의 예전(email
+        폴백) 동작을 pin하던 것이라 이 fix로 함께 뒤집힘(PO 決 2026-09-09).
         """
         sql = (
             "SELECT om.id AS id, om.user_id AS user_id, om.role AS role, om.created_at AS created_at, "
-            "       COALESCE(m.name, u.display_name, u.email, '') AS name, m.avatar_url AS avatar_url "
+            "       COALESCE(NULLIF(m.name, ''), NULLIF(u.display_name, '')) AS name, m.avatar_url AS avatar_url "
             "FROM org_members om "
             "JOIN users u ON u.id = om.user_id "
             "LEFT JOIN members m ON m.org_id = om.org_id AND m.user_id = om.user_id "

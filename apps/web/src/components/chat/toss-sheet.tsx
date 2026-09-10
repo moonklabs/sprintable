@@ -9,10 +9,14 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetFooter } from '@/components/ui/sheet';
 import { cn } from '@/lib/utils';
 import { fetchWithAuth } from '@/lib/db/client';
+import { participantDisplayLabel } from '@/lib/member-display';
 
 interface TossParticipant {
   member_id: string;
   name: string | null;
+  // story #3758(9번째, PO 決) — chats/[conversation_id]/page.tsx의 Participant와 동일 계약.
+  // optional — BE 기본값(True)과 짝 맞춰 필드 자체가 없으면 "실존"으로 읽는다.
+  resolved?: boolean;
 }
 
 interface TossConversation {
@@ -30,14 +34,17 @@ function conversationDisplayName(
   conv: TossConversation,
   currentTeamMemberId: string,
   t: (key: string) => string,
+  tc: (key: string) => string,
 ): string {
   if (conv.title) return conv.title;
   const others = (conv.participants ?? []).filter((p) => p.member_id !== currentTeamMemberId);
   // story #3203 — group 무참가자 폴백이 conv.id 앞 8자를 지어냈다(uuid 노출 표시결함,
   // chat-list-view.tsx의 formatParticipantNames와 동형 fix — unknownMember로 통일).
-  // 참가자 이름 해석 실패(BE participant.name=null)도 '?' 대신 같은 문구.
+  // 참가자 이름 해석 실패(BE participant.name=null)도 '?' 대신 같은 문구. story #3758
+  // (9번째) — resolved 비트로 「알 수 없는 구성원」(orphan)과 「이름 없는 구성원」(실존·
+  // 표시명 없음)을 갈라 그린다(participantDisplayLabel).
   if (others.length === 0) return conv.type === 'dm' ? 'DM' : t('unknownMember');
-  return others.map((p) => p.name ?? t('unknownMember')).join(', ');
+  return others.map((p) => participantDisplayLabel(p, t, tc)).join(', ');
 }
 
 export interface TossSheetProps {
@@ -76,6 +83,7 @@ export function TossSheet({
   onTossed, onAlreadyResolved,
 }: TossSheetProps) {
   const t = useTranslations('chats');
+  const tc = useTranslations('common');
   const [conversations, setConversations] = useState<TossConversation[] | null>(null);
   const [loading, setLoading] = useState(false);
   // story #3701(design CHANGES, 유나 — "완결 못 하면 완결인 척 안 한다") — 전량 로드가
@@ -193,7 +201,7 @@ export function TossSheet({
     );
     const q = query.trim().toLowerCase();
     if (!q) return list;
-    return list.filter((c) => conversationDisplayName(c, currentTeamMemberId, t).toLowerCase().includes(q));
+    return list.filter((c) => conversationDisplayName(c, currentTeamMemberId, t, tc).toLowerCase().includes(q));
   }, [conversations, designatedApproverId, query, currentTeamMemberId, t]);
 
   const submit = async () => {
@@ -212,7 +220,7 @@ export function TossSheet({
         const inserted = body?.inserted ?? true;
         setAlreadyThereIds((prev) => new Set(prev).add(selectedId));
         onOpenChange(false);
-        onTossed(target ? conversationDisplayName(target, currentTeamMemberId, t) : '', inserted);
+        onTossed(target ? conversationDisplayName(target, currentTeamMemberId, t, tc) : '', inserted);
         return;
       }
       const body = await res.json().catch(() => null) as { error?: { message?: string; code?: string } } | null;
@@ -287,7 +295,7 @@ export function TossSheet({
             )
           ) : (
             candidates.map((c) => {
-              const name = conversationDisplayName(c, currentTeamMemberId, t);
+              const name = conversationDisplayName(c, currentTeamMemberId, t, tc);
               const selected = selectedId === c.id;
               // story #3094(유나 규격 §2 .pick.done) — 이 세션에서 이미 토스 시도한 대상.
               const alreadyThere = alreadyThereIds.has(c.id);

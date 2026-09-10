@@ -242,6 +242,39 @@ export function findSubstringCollisions(
   return collisions;
 }
 
+// story #3758(BE·표시명·결함 클래스 별건④, 유나 2회차 CHANGES 2026-09-09 — 손목록이 두 번
+// 새 나갔다고 스스로 지적하며 요청한 자 축) — 「구성원」/「멤버」 동의어 충돌. 이건
+// findSubstringCollisions의 부분문자열 축(#2352·#2365, numberAdjacent 필요)과 다른
+// 별개 축이다: 두 값이 서로를 포함하지 않아도(부분문자열 무관) 같은 개념을 다른 낱말로
+// 부르면 그 자체가 결함(nav.orgMembers=「구성원」이 정본 진입점, 페드루/유나 定 2026-09-09).
+// numberAdjacent 무관 — 「멤버 추가」/「구성원이 없습니다」처럼 수 없는 라벨도 걸려야
+// 한다(#2352·#2365가 잡는 "두 «수»가 헷갈리는" 병이 아니라 다른 병이므로 그 축의
+// 전제를 안 빌려온다). baseline=0(그랜드파더/exempt 없음 — 발견되면 그 자리에서 고친다,
+// 페드루 지시 "0 아니면 그 목록이 처방").
+const MEMBER_SYNONYM_A = '구성원';
+const MEMBER_SYNONYM_B = '멤버';
+
+export function findMemberSynonymCollisions(
+  phrases: Map<string, { value: string; numberAdjacent: boolean }>,
+): Array<{ keyA: string; keyB: string; valueA: string; valueB: string }> {
+  const entries = [...phrases.entries()].filter(([, v]) => v.value.trim().length > 0);
+  const collisions: Array<{ keyA: string; keyB: string; valueA: string; valueB: string }> = [];
+  for (let i = 0; i < entries.length; i += 1) {
+    for (let j = i + 1; j < entries.length; j += 1) {
+      const [keyA, a] = entries[i];
+      const [keyB, b] = entries[j];
+      const aHasGu = a.value.includes(MEMBER_SYNONYM_A);
+      const aHasMem = a.value.includes(MEMBER_SYNONYM_B);
+      const bHasGu = b.value.includes(MEMBER_SYNONYM_A);
+      const bHasMem = b.value.includes(MEMBER_SYNONYM_B);
+      if ((aHasGu && bHasMem) || (aHasMem && bHasGu)) {
+        collisions.push({ keyA, keyB, valueA: a.value, valueB: b.value });
+      }
+    }
+  }
+  return collisions;
+}
+
 // AC5 — 지금은 실제로 안 겹치지만 이 스캔이 걸릴 수 있는 자리. 항목마다 이유+재검토 시점.
 // «영구 정상»으로 코드로 확認된 것만 여기 온다 — GRANDFATHER_BASELINE(아래, 미triage 채무)과
 // 다르다.
@@ -276,10 +309,19 @@ export function findSubstringCollisions(
 // 기준으로 재스캔해도 이 항목은 여전히 필요하다(아래 게이트 로그로 확認) — #2792의 임시
 // 항목과 달리 이건 #2410의 근본 fix로 해소되는 축이 아니라서 그대로 남는다.
 // story #2485(2026-08-06) — settings.tabProjects/roleMember <-> onboarding/settings의
-// PLAN_LIMIT_EXCEEDED 안내문 2쌍. sprints.days와 같은 축(길이 짧은 일반명사 키가 긴
-// 문장에 우연히 포함) — #2352/#2365가 잡으려는 "같은 화면에 선 두 «수»가 헷갈리는" 병이
-// 아니다: tabProjects/roleMember 양쪽 다 그 자체엔 수가 없다(단순 라벨). 겹치는 건 오직
-// "프로젝트"/"멤버"라는 공통 명사 부분이지, 두 카운트가 시각적으로 혼동되는 상황이 아니다.
+// PLAN_LIMIT_EXCEEDED 안내문 2쌍이었다. sprints.days와 같은 축(길이 짧은 일반명사 키가
+// 긴 문장에 우연히 포함) — #2352/#2365가 잡으려는 "같은 화면에 선 두 «수»가 헷갈리는"
+// 병이 아니다: tabProjects/roleMember 양쪽 다 그 자체엔 수가 없다(단순 라벨). 겹치는
+// 건 오직 "프로젝트"/"멤버"라는 공통 명사 부분이지, 두 카운트가 시각적으로 혼동되는
+// 상황이 아니다. story #3758(2026-09-09, 낱말 정 1회차 — settings.roleMember "멤버"→
+// "구성원") — roleMember 쪽 짝이 그 순간엔 죽은 예외였다(양성대조: exemptHit 41→40).
+// ⚠️정정(같은 스토리 2회차, 유나 CHANGES) — `memberLimitExceededError`도 "멤버를"→
+// "구성원을"로 같이 바뀌면서 **같은 파일(add-member-modal.tsx) 안에서 "구성원"이라는
+// 낱말로 다시 충돌**이 살아났다(부분문자열 축 그대로, 겹치는 낱말만 멤버→구성원으로
+// 이동). "면제는 그 이유가 사라지면 함께 사라진다"는 맞았으나, 이유(두 값이 같은
+// 파일에서 짧은 라벨과 긴 문장으로 겹친다는 사실 자체)는 안 사라졌다 — 겹치는
+// «낱말»이 바뀐 것과 «겹침 자체»가 없어진 것은 다른 사실이라 재등재한다. tabProjects
+// 짝은 그대로 아래 남아 있다.
 // story #2955(2026-08-23, docs-index.tsx) — docs.title="문서"(마스트헤드 H1, 수 없음)
 // <-> docs.indexDocCount="{count}개 문서"(dek의 총 문서 수). 같은 파일에 이미 그라운핑된
 // 동형 쌍(docs.title <-> docs.searchResultCount="{count}개 문서 일치", 위 GRANDFATHER_
@@ -351,7 +393,20 @@ export const EXEMPT_PAIRS = new Set<string>([
   'docs.indexDocCount <-> docs.title',
   'sprints.days <-> sprints.overdueBadge',
   'onboarding.projectLimitExceededError <-> settings.tabProjects',
+  // story #3758 2회차(위 docstring 정정 참고) — memberLimitExceededError가 "구성원을"로
+  // 바뀌며 add-member-modal.tsx 안에서 roleMember="구성원"(단순 라벨)과 다시 겹친다.
+  // tabProjects 짝과 완전히 동형(짧은 라벨 vs 그 라벨을 포함하는 긴 안내문) — 실제
+  // 화면에서 역할 배지("구성원")와 플랜 한도 안내문("...구성원을 5명까지...")이 헷갈릴
+  // 자리가 아니다.
   'settings.memberLimitExceededError <-> settings.roleMember',
+  // story #3758 3회차(페드루 그라운딩 지적 — 역할 select/badge가 t() 없이 "Admin"/"Member"
+  // 원문 리터럴을 그리던 미번역 자리를 settings.roleMember/roleAdmin으로 고치며 신규
+  // 사용) — 같은 파일(org-members-section.tsx) 안에서 "구성원"(역할 라벨, 짧은 단순
+  // 명사)이 그 목록의 헤더("구성원 ({count})")·행 aria-label("{n}번째 구성원 {label}")과
+  // 부분문자열로 겹친다. docs.title<->docs.indexDocCount류와 정확히 같은 클래스 — 역할
+  // 배지("구성원")와 목록 카운트/행 순번이 화면에서 실제로 헷갈릴 자리가 아니다.
+  'settings.orgMemberRowActionAriaLabel <-> settings.roleMember',
+  'settings.orgMembersListHeading <-> settings.roleMember',
   // story #3422(2026-09-04, ②-c FailureActionBadge) — channelPostsFailureAutoRetryAt
   // ({time} 보간 있음) <-> channelPostsFailureRetryCta("다시 시도", 보간 없음). 겹치는
   // 건 "다시 시도"라는 흔한 동사구 하나뿐 — auto_retry(자동, 버튼 없음)와 dead_letter
@@ -566,15 +621,29 @@ export interface RepositoryScanResult {
   grandfatherHit: Set<string>;
   // story #3582 — 글자·숫자 0개라 비교 쌍 자체를 안 만든 (namespace.key) 집합.
   symbolOnlyExcluded: Set<string>;
+  // story #3758 — 「구성원」/「멤버」 동의어 충돌(파일 스코프, numberAdjacent 무관).
+  // baseline 0 — exempt/grandfather 없음, 걸리면 그 자리에서 고친다.
+  memberSynonymFindings: Map<string, CollisionPair>;
 }
 
 /** main()에서 뽑아낸 전 저장소 스캔 — story #2410, GRANDFATHER_LIVE_COUNT_TEST가 이걸 불러
  * "지금 실제로 걸리는 grandfather 수"를 고정한다(console.log 경고만으로는 다음 사람이
- * 노이즈로 읽고 넘기는 것을 막는다, PO 지적). */
-export function scanRepository(): RepositoryScanResult {
+ * 노이즈로 읽고 넘기는 것을 막는다, PO 지적).
+ *
+ * story #3758(카디르 qa:changes 2026-09-09 — findMemberSynonymCollisions 자체는 순수
+ * 함수 유닛 테스트 38건이 지키지만, 그 함수를 이 스캔 파이프라인 안에서 실제로 호출하는지
+ * (호출부 자체를 지우는 뮤테이션)는 아무 테스트도 안 쟀다 — 「함수가 있다」와 「배선이
+ * 닫혔다」는 다른 사실). 옵션 인자로 `srcRoot`/`messagesPath`를 받아 임시 픽스처 디렉터리를
+ * 겨냥할 수 있게 열어 둔다(scanRepoCounts, verify-repeated-row-action-names.ts와 동형
+ * 관례) — main()·기존 모든 그랜드파더/exempt 테스트는 인자 생략으로 실 저장소 그대로. */
+export function scanRepository(
+  overrides: { srcRoot?: string; messagesPath?: string } = {},
+): RepositoryScanResult {
+  const srcRoot = overrides.srcRoot ?? SRC_ROOT;
+  const messagesPath = overrides.messagesPath ?? MESSAGES_PATH;
   const files: string[] = [];
-  walk(SRC_ROOT, files);
-  const messages = flattenMessages(JSON.parse(readFileSync(MESSAGES_PATH, 'utf8')));
+  walk(srcRoot, files);
+  const messages = flattenMessages(JSON.parse(readFileSync(messagesPath, 'utf8')));
 
   let totalDynamicCalls = 0;
   const newFindings = new Map<string, CollisionPair>();
@@ -582,6 +651,7 @@ export function scanRepository(): RepositoryScanResult {
   const exemptHit = new Set<string>();
   const grandfatherHit = new Set<string>();
   const symbolOnlyExcluded = new Set<string>();
+  const memberSynonymFindings = new Map<string, CollisionPair>();
 
   for (const abs of files) {
     const content = readFileSync(abs, 'utf8');
@@ -599,7 +669,7 @@ export function scanRepository(): RepositoryScanResult {
       phrases.set(qualifiedKey, { value, numberAdjacent: isNumberAdjacent(value) });
     }
 
-    const rel = path.relative(SRC_ROOT, abs).split(path.sep).join('/');
+    const rel = path.relative(srcRoot, abs).split(path.sep).join('/');
     for (const c of findSubstringCollisions(phrases)) {
       const pk = pairKey(c.keyA, c.keyB);
       const pair: CollisionPair = { keyA: c.keyA, keyB: c.keyB, valueA: c.valueA, valueB: c.valueB, file: rel };
@@ -612,13 +682,29 @@ export function scanRepository(): RepositoryScanResult {
         newFindings.set(pk, pair);
       }
     }
+
+    // story #3758 — 「구성원」/「멤버」 동의어 축(baseline 0, exempt/grandfather 없음).
+    // 파일 스코프라 (file, pairKey) 조합으로 키를 삼는다 — 같은 (keyA,keyB) 쌍이라도
+    // 두 파일에서 각각 독립적으로 걸리면 둘 다 별개 finding.
+    for (const c of findMemberSynonymCollisions(phrases)) {
+      const mk = `${rel}::${pairKey(c.keyA, c.keyB)}`;
+      if (!memberSynonymFindings.has(mk)) {
+        memberSynonymFindings.set(mk, { keyA: c.keyA, keyB: c.keyB, valueA: c.valueA, valueB: c.valueB, file: rel });
+      }
+    }
   }
 
-  return { files, totalDynamicCalls, newFindings, grandfathered, exemptHit, grandfatherHit, symbolOnlyExcluded };
+  return {
+    files, totalDynamicCalls, newFindings, grandfathered, exemptHit, grandfatherHit,
+    symbolOnlyExcluded, memberSynonymFindings,
+  };
 }
 
 function main(): void {
-  const { files, totalDynamicCalls, newFindings, grandfathered, exemptHit, grandfatherHit, symbolOnlyExcluded } = scanRepository();
+  const {
+    files, totalDynamicCalls, newFindings, grandfathered, exemptHit, grandfatherHit,
+    symbolOnlyExcluded, memberSynonymFindings,
+  } = scanRepository();
 
   const staleExempt = [...EXEMPT_PAIRS].filter((pk) => !exemptHit.has(pk));
   const staleGrandfather = [...GRANDFATHER_BASELINE].filter((pk) => !grandfatherHit.has(pk));
@@ -646,7 +732,10 @@ function main(): void {
     }
   }
 
+  let failed = false;
+
   if (newFindings.size > 0) {
+    failed = true;
     console.log(`\n❌ FAIL: 새 부분문자열 충돌 ${newFindings.size}건(grandfather 밖 — 신규):`);
     for (const c of [...newFindings.values()].sort((a, b) => a.file.localeCompare(b.file))) {
       console.log(`  - [${c.file}] ${c.keyA}="${c.valueA}" <-> ${c.keyB}="${c.valueB}"`);
@@ -655,10 +744,29 @@ function main(): void {
       '\n→ 「같은 파일이 렌더하는, 수와 함께 서는 두 문구가 부분문자열로 겹친다」 — #2352·#2365와 같은 클래스.' +
         ' 정말 안 겹치는 게 맞으면 EXEMPT_PAIRS에, 지금은 못 고치지만 알고 있는 채무면 GRANDFATHER_BASELINE에 이유와 함께 등재.',
     );
+  }
+
+  if (memberSynonymFindings.size > 0) {
+    failed = true;
+    console.log(`\n❌ FAIL: 「구성원」/「멤버」 동의어 충돌 ${memberSynonymFindings.size}건(baseline 0 — exempt/grandfather 없음):`);
+    for (const c of [...memberSynonymFindings.values()].sort((a, b) => a.file.localeCompare(b.file))) {
+      console.log(`  - [${c.file}] ${c.keyA}="${c.valueA}" <-> ${c.keyB}="${c.valueB}"`);
+    }
+    console.log(
+      '\n→ story #3758(페드루/유나 定 2026-09-09) — 「구성원」이 정본(nav.orgMembers 진입점 기준),' +
+        ' 「멤버」는 phase-out 대상. 한 파일 안에 둘이 같이 서면 그 파일에서 「구성원」으로 통일할 것' +
+        '(조사 이/가·을/를·은/는은 받침 유무에 맞춰 손으로 — 기계 치환 금지, #3758 리뷰 실사고).',
+    );
+  }
+
+  if (failed) {
     process.exit(1);
   }
 
-  console.log(`OK: 새 부분문자열 충돌 0건(grandfather ${grandfathered.size}건은 위 목록대로 남아있음 — 신규만 막는다)`);
+  console.log(
+    `OK: 새 부분문자열 충돌 0건(grandfather ${grandfathered.size}건은 위 목록대로 남아있음 — 신규만 막는다) · ` +
+      `「구성원」/「멤버」 동의어 충돌 0건`,
+  );
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

@@ -18,7 +18,12 @@ class TeamMember(Base, OrgScopedMixin, TimestampMixin):
     )
     user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     type: Mapped[str] = mapped_column(String(20), nullable=False)  # 'human' | 'agent'
-    name: Mapped[str] = mapped_column(Text, nullable=False)
+    # story #3758 — team_members는 members ⋈ project_access VIEW(0088)라 이 컬럼이 실제로
+    # 강제하는 제약이 없다(뷰 자체엔 NOT NULL이 안 걸린다). 휴먼 분기는 members.name을
+    # 그대로 투영하는데 그 컬럼이 이 스토리로 nullable이 됐으니(app/models/member.py) 이
+    # ORM 타입도 진실대로 Optional — 에이전트는 생성 흐름상 항상 실명이 채워지지만 그건
+    # 이 컬럼 선언이 강제하는 게 아니라 쓰기 경로의 관례일 뿐이다.
+    name: Mapped[str | None] = mapped_column(Text, nullable=True)
     role: Mapped[str] = mapped_column(String(50), nullable=False, default="member")
     avatar_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     agent_config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
