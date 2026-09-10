@@ -451,4 +451,28 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story
     const toggles = [...container.querySelectorAll('button[aria-expanded]')];
     expect(toggles.some((b) => b.textContent?.includes('설정'))).toBe(false);
   });
+
+  // story #3762(그라운딩·유나 §定) — 4구역+관리 프레임 전체 높이가 흔한 뷰포트(≤900px)를
+  // 넘어서는데 전역 스크롤바 숨김(#2165, globals.css:733-737)까지 겹쳐 신뢰 아래 구역이
+  // 스크롤 가능한데도 "없다"로 보였다(그라운딩: org/role 무관 재현, orgMemberships/
+  // adminChecked와 무관한 순수 CSS overflow affordance 결함). .scrollbar-visible은
+  // globals.css:755의 기존 옵트인(#2528과 동일 패턴) — 새 CSS 없이 클래스만 얹는다.
+  it('SidebarContent가 scrollbar-visible 옵트인 클래스를 쓴다(전역 스크롤바 숨김 하 어포던스, 되돌리면 RED)', async () => {
+    await mount();
+    const content = container.querySelector('[data-slot="sidebar-content"]');
+    expect(content?.className).toContain('scrollbar-visible');
+  });
+
+  // story #3762 — 딥링크·새로고침으로 신뢰 이후 구역(스크롤해야 보이는 영역)에 바로
+  // 들어와도 활성 항목을 찾을 신호가 없었다. channels/page.tsx:1057과 동형 패턴
+  // (jsdom 미구현이라 스파이로 호출 자체를 잰다) — block:'nearest'만 검증한다
+  // ('start'로 되돌아가면 페이지 전체가 불필요하게 점프하는 회귀).
+  it('활성 항목이 있으면 scrollIntoView({block:"nearest"})가 불린다(딥링크 진입 시 활성 항목 자동 노출)', async () => {
+    const scrollIntoViewMock = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoViewMock;
+    pathnameRef.current = '/organization/events';
+    expandAllGroups();
+    await mount();
+    expect(scrollIntoViewMock).toHaveBeenCalledWith({ block: 'nearest' });
+  });
 });
