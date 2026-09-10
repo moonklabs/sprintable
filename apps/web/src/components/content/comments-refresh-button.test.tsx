@@ -244,7 +244,7 @@ describe('CommentsRefreshButton', () => {
     act(() => { btn.click(); });
     await act(async () => { await Promise.resolve(); });
     expect(btn.disabled).toBe(true);
-    expect(btn.textContent).toBe('수집 중...');
+    expect(btn.textContent).toBe('수집 중…');
     await act(async () => { resolvePromise({ ok: true }); await Promise.resolve(); });
   });
 });
