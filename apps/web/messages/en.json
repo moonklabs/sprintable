@@ -1384,7 +1384,7 @@
     "orgMembersListHeading": "Members",
     "orgMemberJoinedMeta": "Joined {time}",
     "orgMembersEmpty": "No members.",
-    "orgInvitesListHeading": "Pending invites ({count})",
+    "orgInvitesListHeading": "Pending invites",
     "orgInviteMeta": "{role} · Expires: {date}",
     "orgInviteCopyLinkTitle": "Copy invite link",
     "orgInviteCopyLinkUnavailableTitle": "Link unavailable",

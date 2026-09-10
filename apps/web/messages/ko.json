@@ -1384,7 +1384,7 @@
     "orgMembersListHeading": "구성원",
     "orgMemberJoinedMeta": "{time} 가입",
     "orgMembersEmpty": "구성원이 없습니다.",
-    "orgInvitesListHeading": "초대 대기 ({count})",
+    "orgInvitesListHeading": "초대 대기",
     "orgInviteMeta": "{role} · 만료: {date}",
     "orgInviteCopyLinkTitle": "초대 링크 복사",
     "orgInviteCopyLinkUnavailableTitle": "링크 사용 불가",

@@ -453,7 +453,13 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
       {invites.length > 0 && (
         <SectionCard>
           <SectionCardHeader>
-            <h2 className="text-base font-semibold text-foreground">{t('orgInvitesListHeading', { count: invites.length })}</h2>
+            {/* story #3735 CHANGES(유나 재검토) — orgMembersListHeading(:377)만 새 형으로
+                옮기고 이 옆 헤더는 옛 괄호 형으로 남겨 같은 화면 안 두 형이 세로로 나란히
+                서는 불일치를 만들었다. 같은 처방으로 통일. */}
+            <h2 className="flex items-center gap-2 text-base font-semibold text-foreground">
+              {t('orgInvitesListHeading')}
+              <CountBadge count={invites.length} />
+            </h2>
           </SectionCardHeader>
           <SectionCardBody>
             <div className="divide-y divide-border overflow-hidden rounded-md border border-border">

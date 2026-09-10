@@ -518,15 +518,18 @@ export const EXEMPT_PAIRS = new Set<string>([
   // "초대"류 문구와 같이 렌더하게 됐다. ⚠️초안 사유("초대 카드·대기 목록이 같이 안
   // 선다")는 거짓이었다 — 초대 폼 카드(버튼 자리)와 대기 목록 카드는 실제로 같은
   // 화면의 형제 섹션이라 대기 초대가 1건이라도 있으면 같이 선다(유나 실측 정정).
-  // 근거는 둘째 문장뿐: orgInviteRowActionAriaLabel·orgInvitesListHeading은 항상
-  // «순번/개수와 함께»만 서는 aria-label·헤딩 문장인 반면 settings.invite는 그
-  // 자체로 완결된 짧은 버튼 라벨이다 — #2352/#2365가 잡으려는 병은 "같은 화면의
-  // 두 «수»가 헷갈리는" 것인데, invite 자체엔 수가 없어 그 축의 혼동이 성립하지
-  // 않는다(memberLimitExceededError도 동형 — 수({limit})는 있지만 문장 전체가
-  // 정책 한도 안내라 "초대" 단어 하나가 버튼과 헷갈릴 리스크가 아니다).
+  // 근거는 둘째 문장뿐: orgInviteRowActionAriaLabel은 항상 «순번/개수와 함께»만
+  // 서는 aria-label 문장인 반면 settings.invite는 그 자체로 완결된 짧은 버튼
+  // 라벨이다 — #2352/#2365가 잡으려는 병은 "같은 화면의 두 «수»가 헷갈리는" 것인데,
+  // invite 자체엔 수가 없어 그 축의 혼동이 성립하지 않는다(memberLimitExceededError도
+  // 동형 — 수({limit})는 있지만 문장 전체가 정책 한도 안내라 "초대" 단어 하나가
+  // 버튼과 헷갈릴 리스크가 아니다).
   'settings.invite <-> settings.memberLimitExceededError',
   'settings.invite <-> settings.orgInviteRowActionAriaLabel',
-  'settings.invite <-> settings.orgInvitesListHeading',
+  // story #3735 CHANGES(유나 재검토 2026-09-10) — settings.orgInvitesListHeading이
+  // "초대 대기 ({count})"에서 "초대 대기"(수는 옆 CountBadge로 이동, orgMembersListHeading과
+  // 같은 처방)로 바뀌며 numberAdjacent를 잃었다 — 위 짝은 양쪽 다 numberAdjacent가
+  // 아니게 돼 이 스캔축 자체가 더는 안 걸린다(죽은 예외 제거, 재등재 불요).
   // story #3641 — 버튼 라벨(행위) ↔ 그 행위가 불가한 이유 문장. «두 셈» 혼동이 아니고
   // 보간도 수가 아니라 상태 문자열({status})이라 AC4㉣ 근사가 성립하지 않는다.
   // 다시 볼 때: 가드가 보간을 숫자형으로 좁히면 이 예외는 저절로 불필요해진다.
