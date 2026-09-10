@@ -88,16 +88,26 @@ function walkSourceFiles(dir: string, out: string[]): void {
   }
 }
 
-// story #3761 후속(PR#4109 카디르 발견분 fix 中, 미르코 2026-09-10) — 이 가드를 실 트리에
-// 처음 돌리자 kanban-board.tsx:300(fix, 이번 PR) 말고 derive-loop-queue.ts:77도 걸렸다.
-// 후자는 *다른 축*이다 — `/api/v2/loop-measure-due/queue`(BE FastAPI v2 직결, 이 PR이
-// 건드린 Next route.ts 4곳과 무관한 별도 엔드포인트)의 응답을 읽는 자리라 story #3761의
-// `ApiMeta.totalCount` 정본화 범위 밖이고(BE 봉투 자체가 다른 축), grep 확認상 그 반환값
-// (`LoopQueuePage.total`)을 쓰는 소비처가 0곳이라 이름을 무엇으로 바꿔도 동작은 안
-// 바뀌는 죽은 필드다(loop-queue-client.tsx는 `page.items`만 쓴다). 유나가 PR#4109 리뷰에서
-// 이미 "죽은 필드·회귀 아님"으로 적기만 표시했다 — 이 PR(#4109/3761) 스코프 밖 파일이라
-// 임의로 고치지 않고(스코프 발산 금지) 근거와 함께 면제한다. 재검토 시점 = 이 필드를 실제
-// 소비하는 자리가 생기거나 loop-queue 엔드포인트가 손볼 때.
+// story #3761 후속(PR#4109 카디르 발견분 fix 中, 미르코 2026-09-10 — 카디르 qa:changes로
+// 정정 2026-09-10) — 이 가드를 실 트리에 처음 돌리자 kanban-board.tsx:300(fix, 이번 PR)
+// 말고 derive-loop-queue.ts:77도 걸렸다.
+//
+// ⚠️정정: 최초 등재 문구("소비처 0곳·죽은 필드")는 **사실이 아니었다** — grep 범위를
+// `deriveLoopQueue`/`LoopQueuePage`로만 좁혀서 `page.total`(다른 변수명 경로로 흘러가는
+// 실 소비)을 놓쳤다(카디르 QA 적발, 유나의 앞선 "죽은 필드" 적기만도 같은 착오). 실측:
+// `loop-queue-client.tsx:118` `setTotal(page.total)` → `:146` `hasNext = offset +
+// PAGE_SIZE < total`(다음 페이지 버튼 활성/비활성) + `:185` `pageSummary` 문구("1-20 /
+// 47")를 이 값으로 그린다 — **살아 있는 필드**다.
+//
+// 그래도 면제는 유효하다 — 근거는 "죽은 필드"가 아니라 **"다른 봉투"**: 이 값은
+// `/api/v2/loop-measure-due/queue`(BE FastAPI v2 직결, 이 PR이 건드린 Next `route.ts`
+// 4곳·`ApiMeta` 봉투와 무관한 별도 엔드포인트·자체 필드명 관례)의 응답이라 story #3761의
+// `ApiMeta.totalCount` 정본화(BFF `route.ts` 응답 봉투 축) 범위 밖이다 — 이 가드가 지키는
+// 계약(Next route.ts↔FE 소비처의 `meta.totalCount` 낱말 통일)과 애초 다른 계약이다.
+// 이 PR(#4109/3761) 스코프 밖 파일이라 임의로 고치지 않고(스코프 발산 금지) 면제한다.
+// 재검토 시점 = BE v2 loop-queue 응답이 ApiMeta/totalCount 관례로 마이그레이션되거나, 이
+// 엔드포인트에 Next route.ts 래퍼가 생길 때(그 전까지는 살아 있는 정상 코드 — 삭제 대상
+// 아님).
 const ALLOWLIST: ReadonlySet<string> = new Set([
   'components/loop-queue/derive-loop-queue.ts:77',
 ]);
