@@ -11,6 +11,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../../../../messages/ko.json';
 import { DocsClientLayout } from './docs-client-layout';
+import { DocsIndex } from './docs-index';
 
 const { pushMock } = vi.hoisted(() => ({ pushMock: vi.fn() }));
 vi.mock('next/navigation', () => ({
@@ -290,5 +291,56 @@ describe('DocsClientLayout — 로드맵 P2·PR-E L1(모바일 드로어 elevati
     expect(panel).toBeTruthy();
     expect(panel?.className).toContain('shadow-[var(--elev-overlay)]');
     expect(panel?.className).not.toMatch(/(^|\s)shadow-lg(\s|$)/);
+  });
+});
+
+// story #3784(카디르 QA·PO 짚음) — DocsLayoutContextType에 loading이 없어 DocsIndex가
+// "아직 안 옴"과 "0건"을 못 가르던 실사고. 실 소비처 구성(page.tsx = DocsClientLayout이
+// DocsIndex를 children으로 감싸는 형)을 그대로 재현해 컨텍스트 실 배선을 검증한다 —
+// docs-index.test.tsx의 useDocsLayout() 모킹 테스트는 컴포넌트 로직만 잰다(배선 자체는
+// 안 잰다).
+describe('DocsClientLayout — story #3784 loading/loadError 컨텍스트 실 배선(DocsIndex 실 자식)', () => {
+  async function mountWithIndex() {
+    await act(async () => {
+      root.render(wrap(
+        <DocsClientLayout wsSlug="ws1" projSlug="proj1" projectId="proj-1"><DocsIndex /></DocsClientLayout>,
+      ));
+    });
+  }
+
+  it('트리 fetch가 아직 안 끝난 순간엔 DocsIndex가 "아직 쌓인 문서가 없어요"를 안 그린다(로딩 게이트 실 배선)', async () => {
+    let resolveFetch!: (v: { ok: boolean; json: () => Promise<unknown> }) => void;
+    vi.stubGlobal('fetch', vi.fn(() => new Promise((resolve) => { resolveFetch = resolve; })));
+    await mountWithIndex();
+    // fetch가 아직 안 풀린 시점(pending) — 로딩 中.
+    expect(container.textContent).not.toContain('아직 쌓인 문서가 없어요');
+    await act(async () => {
+      resolveFetch({ ok: true, json: async () => ({ data: [DOC_A, DOC_B], meta: { hasMore: false, nextCursor: null } }) });
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    });
+    expect(container.textContent).toContain('문서A'); // 로드 완료 후엔 정상 렌더.
+  });
+
+  it('트리 fetch가 실패(ok:false)하면 DocsIndex가 "아직 쌓인 문서가 없어요"가 아니라 실패 배너를 그린다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, json: async () => null })));
+    await mountWithIndex();
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).not.toContain('아직 쌓인 문서가 없어요');
+    expect(container.textContent).toContain('불러오지 못했습니다');
+  });
+
+  // story #3784(유나 짚음, 09:34Z) — 오른쪽 DocsIndex만 가르면 왼쪽 사이드바 트리가
+  // "0건"(빈 EmptyState "문서를 선택하세요")으로 조용히 남아 같은 화면이 두 말을 한다.
+  it('트리 fetch 실패 시 왼쪽 사이드바도 "문서를 선택하세요"가 아니라 같은 실패 문구+다시 시도를 그린다', async () => {
+    const fetchMock = vi.fn(async () => ({ ok: false, json: async () => null }));
+    vi.stubGlobal('fetch', fetchMock);
+    await mount();
+    expect(container.textContent).not.toContain('문서를 선택하세요');
+    expect(container.textContent).toContain('불러오지 못했습니다');
+    const callsBefore = fetchMock.mock.calls.length;
+    const retryButton = [...container.querySelectorAll('button')].find((b) => b.textContent === '다시 시도');
+    expect(retryButton).toBeTruthy();
+    await act(async () => { retryButton!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(callsBefore); // 재시도가 fetchTree()를 다시 친다.
   });
 });

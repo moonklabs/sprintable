@@ -63,6 +63,8 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
 
   const [tree, setTree] = useState<Doc[]>([]);
   const [loading, setLoading] = useState(true);
+  // story #3784 — DocsIndex가 "아직 로딩 중"과 "fetch 실패"를 "정말 0건"과 가르는 데 쓴다.
+  const [loadError, setLoadError] = useState(false);
   const [treeDrawerOpen, setTreeDrawerOpen] = useState(false);
   // 모바일 트리거 칩 breadcrumb: 현재 문서명(flat tree에서 slug 조회·미선택 시 폴백).
   const currentDocTitle = currentSlug ? (tree.find((d) => d.slug === currentSlug)?.title ?? null) : null;
@@ -157,6 +159,9 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
 
   const fetchTree = useCallback(async (tags?: string[], cursor?: string | null) => {
     if (!projectId) return;
+    // story #3784 — 재시도(에러 배너의 「다시 시도」 포함)가 이전 실패 신호를 그대로 물고
+    // 있지 않도록, 시도 시작 시 먼저 걷는다(성공하면 그대로 false·실패하면 catch가 다시 켠다).
+    setLoadError(false);
     try {
       // story #2191 — "view=tree"는 죽은 파라미터였다(/api/docs가 그 값을 아예 안 읽어
       // 항상 무커서 일반 목록 분기로 떨어졌다). #2540 이후 BE/FE 둘 다 커서를 실제로
@@ -176,6 +181,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
       setDocsNextCursor(meta?.nextCursor ?? null);
     } catch {
       // tree fetch failed — keep existing
+      setLoadError(true);
     } finally {
       setLoading(false);
       setDocsLoadingMore(false);
@@ -520,6 +526,17 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
           />
         ) : loading ? (
           <p className="px-2 py-4 text-xs text-muted-foreground">{t('loading')}</p>
+        ) : loadError ? (
+          // story #3784(유나 짚음) — 오른쪽 DocsIndex가 실패 배너로 갈라졌는데 이 트리가
+          // "0건"으로 남으면 한 화면이 두 말을 하는 자리가 그대로 남는다. 같은 키
+          // (indexLoadError, "문서 목록")를 쓰되 폭이 좁아 Alert 대신 로딩 문구가 서던
+          // 그 자리에 한 줄 + 텍스트 재시도로.
+          <div className="px-2 py-4">
+            <p className="text-xs text-muted-foreground">{t('indexLoadError')}</p>
+            <button type="button" onClick={() => void fetchTree(selectedTags.length ? selectedTags : undefined)} className="mt-1 text-xs text-foreground underline hover:no-underline">
+              {tc('retry')}
+            </button>
+          </div>
         ) : tree.length === 0 ? (
           <EmptyState title={t('title')} description={t('selectDoc')} className="mt-2 bg-background/70" action={<Button size="sm" onClick={handleNewDoc}><Plus className="mr-1 h-4 w-4" />{t('newDoc')}</Button>} />
         ) : (
@@ -563,7 +580,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
 
 
   return (
-    <DocsLayoutContext.Provider value={{ wsSlug, projSlug, projectId, tree, setTree, handleNewDoc, fetchTree, pendingDocUpdate, clearPendingDocUpdate, expandFolder, openTreeDrawer: openDrawer }}>
+    <DocsLayoutContext.Provider value={{ wsSlug, projSlug, projectId, tree, setTree, loading, loadError, handleNewDoc, fetchTree, pendingDocUpdate, clearPendingDocUpdate, expandFolder, openTreeDrawer: openDrawer }}>
       {/* 근본 재구현(2076 회귀 후속, 유나양 규격) — currentSlug 없음(목록)=켬, 있음(문서 하나)=
           끔. 이 shell은 단일 문서가 화면을 꽉 채우는 구조(목록+본문 동시 2단 아님)라 이 분기가
           맞다(2단 shell이었다면 항상 켜야 함 — 유나양 규격 예외 조항). */}

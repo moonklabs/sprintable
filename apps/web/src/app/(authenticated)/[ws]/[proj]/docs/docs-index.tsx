@@ -6,6 +6,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { BookOpen, LayoutGrid, List as ListIcon, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useDocsLayout, type Doc } from './docs-context';
 import { docUrl } from '@/components/docs/lib/doc-project-url';
 import { DOC_STATUS_TONE, toDocStatusFilter, docStatusLabelKey, type DocStatusFilter } from '@/components/docs/lib/doc-status-tone';
@@ -55,10 +56,11 @@ function StatusChip({ status }: { status: string | undefined }) {
 
 export function DocsIndex() {
   const t = useTranslations('docs');
+  const tc = useTranslations('common');
   const locale = useLocale();
   const displayTimezone = resolveDisplayTimezone().tz;
   const router = useRouter();
-  const { tree, handleNewDoc, wsSlug, projSlug } = useDocsLayout();
+  const { tree, handleNewDoc, wsSlug, projSlug, loading, loadError, fetchTree } = useDocsLayout();
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null); // null = 전체
   const [statusFilter, setStatusFilter] = useState<StatusFilter | null>(null);
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
@@ -102,6 +104,27 @@ export function DocsIndex() {
   // 통일해 에디터 직행 1스텝으로 되돌린다 — 리더는 에디터 상단의 opt-in "읽기 보기" 링크로만
   // 진입(삭제 아님, default만 이동).
   const goToDoc = (slug: string) => router.push(docUrl(wsSlug, projSlug, slug));
+
+  // story #3784 — "아직 안 옴"·"실패"·"정말 0건"을 가른다. 로딩 中엔 조용히 아무것도
+  // 그리지 않는다(사이드바가 이미 로딩 중 신호를 그린다 — 이 존까지 스켈레톤을 겹칠 이유 0).
+  if (loading) {
+    return null;
+  }
+
+  if (loadError) {
+    return (
+      <div className="flex h-full items-center justify-center p-4 lg:p-6">
+        <Alert variant="destructive" className="w-full max-w-lg">
+          <AlertDescription className="flex items-center justify-between gap-3">
+            <span>{t('indexLoadError')}</span>
+            <Button size="sm" variant="outline" onClick={() => void fetchTree()}>
+              {tc('retry')}
+            </Button>
+          </AlertDescription>
+        </Alert>
+      </div>
+    );
+  }
 
   // story #2955 §6(PO 요건②) — "문서를 선택하세요" 재현 금지. 0건은 에러가 아니라 만들
   // 데이터로서 설계 — 첫 문서 CTA + 왜 0인지 맥락(신규 프로젝트) 병기.
