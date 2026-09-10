@@ -50,8 +50,6 @@ function hasKey(messages: unknown, dotted: string): boolean {
 // 유한 부분집합) — 복제 0, 소비처가 이 표 하나를 SSOT로 같이 본다.
 export const TEMPLATE_KEY_TABLE: Array<[string, string[], string]> = [
   ['proofCapsule.risk.', ['low', 'medium', 'high'], 'proof-capsule.tsx RISK_KEY 값 타입'],
-  ['settings.mcpConnections.status.', ['active', 'error', 'pending_oauth', 'disconnected'], 'mcp-connection-settings.tsx McpConnectionSummary.status'],
-  ['settings.mcpConnections.auth.', ['oauth', 'api_key', 'api_token'], 'mcp-connection-settings.tsx McpConnectionSummary.authStrategy'],
   ['gateConfig.work_', ['done', 'merge'], 'gate-level-matrix.tsx WORK_TYPES'],
   ['gateConfig.actor_', ['agent', 'human'], 'gate-level-matrix.tsx ACTOR_TYPES'],
   ['standup.reviewType_', ['comment', 'approve', 'request_changes'], 'standup-feedback-dialog.tsx StandupReviewType'],
