@@ -1870,6 +1870,12 @@ export default function ChannelPostEditPage() {
     reasonCode: draft.command_reason_code,
     processingKind: draft.processing_kind,
   });
+  // story #3402 갭(PO 채택 ㉡, 2026-09-10) — BE가 needs_check를 즉시 dead_letter로
+  // 접어(publication_command.py:695-698) kind==='needs_check' 갈래가 라이브에서
+  // 도달 불가였다. dead_letter 안에서도 needsRecheck면 같은 2단계 관문(체크 前
+  // 확認 버튼 비활성)을 쓴다 — 아래 ConfirmDialog 세 자리가 이 값 하나로 갈린다.
+  const isNeedsCheckGate = failureAction?.kind === 'needs_check'
+    || (failureAction?.kind === 'dead_letter' && failureAction.needsRecheck);
   const displayTimezone = resolveDisplayTimezone().tz;
 
   // B2(페드루 PO, 2026-09-04 13:27Z·code-review 지적) — 이미지 업로드가 confirm까지
@@ -1986,11 +1992,12 @@ export default function ChannelPostEditPage() {
             // 카디르 QA①·유나 §8과 동형 — 「무엇이·되돌릴 수 있나」는 별도 노드(§17-13).
             <>
               <span className="block" data-testid="channel-post-retry-confirm-what">
-                {failureAction?.kind === 'needs_check' ? t('channelPostsRetryConfirmWhatNeedsCheck') : t('channelPostsRetryConfirmWhatDeadLetter')}
+                {isNeedsCheckGate ? t('channelPostsRetryConfirmWhatNeedsCheck') : t('channelPostsRetryConfirmWhatDeadLetter')}
               </span>
               <span className="block" data-testid="channel-post-retry-confirm-reversible">{t('channelPostsRetryConfirmReversible')}</span>
-              {/* AC2 — needs_check만 2단계: 체크 前엔 확認 버튼 비활성. */}
-              {failureAction?.kind === 'needs_check' ? (
+              {/* AC2 — needs_check(dead_letter 안의 needsRecheck 포함)만 2단계:
+                  체크 前엔 확認 버튼 비활성. */}
+              {isNeedsCheckGate ? (
                 <label className="mt-2 flex items-center gap-2 text-sm text-foreground">
                   <input
                     type="checkbox" checked={retryChecklistConfirmed}
@@ -2004,7 +2011,7 @@ export default function ChannelPostEditPage() {
           )}
           cancelLabel={tc('cancel')}
           confirmLabel={retrying ? t('channelPostsRetryConfirmPendingCta') : t('channelPostsRetryConfirmAction')}
-          confirmDisabled={retrying || (failureAction?.kind === 'needs_check' && !retryChecklistConfirmed)}
+          confirmDisabled={retrying || (isNeedsCheckGate && !retryChecklistConfirmed)}
           destructive={false}
           onConfirm={() => void handleRetry()}
         />

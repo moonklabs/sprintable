@@ -71,16 +71,22 @@ export function FailureActionBadge({ action, onRetryClick, displayTimezone, comp
     );
   }
   if (action.kind === 'dead_letter') {
+    // story #3402 갭(PO 채택 ㉡, 2026-09-10) — needsRecheck면 문면·CTA 라벨만
+    // needs_check 것(채널 확認 관문)을 쓴다. 버튼 자체의 존재·활성 여부(command_
+    // status=dead_letter)는 안 바뀐다 — 체크 前 확認 게이트는 이 버튼이 여는
+    // ConfirmDialog 안(page.tsx)에서 이뤄진다.
     return (
       <div className="space-y-1" data-testid="channel-post-failure-badge">
-        <p className="text-xs text-destructive">{t('channelPostsFailureDeadLetter')}</p>
+        <p className="text-xs text-destructive">
+          {action.needsRecheck ? t('channelPostsFailureNeedsCheck') : t('channelPostsFailureDeadLetter')}
+        </p>
         {compact ? null : (
           <>
             <Button
               variant="outline" size="sm" onClick={onRetryClick} disabled={!onRetryClick}
               data-testid="channel-post-failure-retry-button"
             >
-              {t('channelPostsFailureRetryCta')}
+              {action.needsRecheck ? t('channelPostsFailureCheckedRetryCta') : t('channelPostsFailureRetryCta')}
             </Button>
             {onRetryClick ? null : (
               <p className="text-xs text-muted-foreground" data-testid="channel-post-failure-retry-disabled-reason">

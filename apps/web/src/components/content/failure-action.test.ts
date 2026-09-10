@@ -13,8 +13,17 @@ describe('deriveFailureAction', () => {
     expect(deriveFailureAction({ commandStatus: 'voided' })).toEqual({ kind: 'voided', reasonCode: null });
   });
 
-  it('⭐dead_letter — failureKind와 무관하게 dead_letter(자동 재시도 끝남, §17-13 수동 재시도 버튼 대상)', () => {
-    expect(deriveFailureAction({ commandStatus: 'dead_letter', failureKind: 'transient' })).toEqual({ kind: 'dead_letter' });
+  it('⭐dead_letter — 버튼 유무는 failureKind와 무관하게 dead_letter(자동 재시도 끝남, §17-13 수동 재시도 버튼 대상)', () => {
+    expect(deriveFailureAction({ commandStatus: 'dead_letter', failureKind: 'transient' })).toEqual({ kind: 'dead_letter', needsRecheck: false });
+  });
+
+  // story #3402 갭(유나 실측·PO 채택 ㉡, 2026-09-10) — BE가 needs_check를 즉시
+  // dead_letter로 접기(publication_command.py:695-698) 때문에 이 조합이 실제로
+  // 오는 형이다. 뮤테이션: needsRecheck 계산을 지우면(또는 항상 false로 고정하면)
+  // 이 테스트가 RED여야 한다.
+  it('⭐dead_letter ∧ failureKind=needs_check — needsRecheck:true(§17-2 2단계 관문이 dead_letter 안에서도 선다)', () => {
+    expect(deriveFailureAction({ commandStatus: 'dead_letter', failureKind: 'needs_check' }))
+      .toEqual({ kind: 'dead_letter', needsRecheck: true });
   });
 
   it('⭐blocked — failureKind와 무관하게 blocked(연결 문제, §17-13 버튼 없음)', () => {
