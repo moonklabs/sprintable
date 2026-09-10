@@ -38,13 +38,14 @@ export function MyProfileSection() {
   const [error, setError] = useState<string | null>(null);
 
   const fetchProfile = useCallback(async () => {
-    // story #3762 CHANGES(카디르 QA — /api/me reject 경로 테스트 中 발견) — 네트워크
-    // 자체가 죽어 fetchWithAuth가 reject하면(HTTP 에러 응답이 아니라) 이 아래 await가
-    // 그대로 throw해 `void fetchProfile()`(:49) 밖으로 unhandled rejection이 샜다.
-    // org-members-section.tsx의 fetchOrgImpact와 동형 — 최소 방어만(빈 폴백, 별도 에러
-    // 배너는 이 섹션 범위 밖).
-    const res = await fetchWithAuth('/api/me').catch(() => null);
-    if (!res?.ok) return;
+    // story #3762 CHANGES(카디르 QA — /api/me reject 경로 테스트 中 발견, 페드루 PO
+    // 정정 — verify:no-fetch-response-without-ok-check(#3688) 가드가 읽는 try/catch+
+    // res.ok 형으로) — 네트워크 자체가 죽어 fetchWithAuth가 reject하면(HTTP 에러 응답이
+    // 아니라) 이 아래 await가 그대로 throw해 `void fetchProfile()`(:49) 밖으로
+    // unhandled rejection이 샜다. 최소 방어만(빈 폴백, 별도 에러 배너는 이 섹션 범위 밖).
+    let res: Response;
+    try { res = await fetchWithAuth('/api/me'); } catch { return; }
+    if (!res.ok) return;
     const json = await res.json() as { data: MyProfile };
     setProfile(json.data);
     setEditName(json.data.name);

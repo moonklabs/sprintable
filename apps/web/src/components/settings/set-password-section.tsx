@@ -48,10 +48,12 @@ export function SetPasswordSection() {
   useEffect(() => {
     (async () => {
       // story #3762 CHANGES(카디르 QA — /api/me reject 경로 테스트 中 발견, my-profile-
-      // section.tsx와 동형 갭) — 네트워크 자체가 죽으면(HTTP 에러 응답이 아니라)
-      // fetchWithAuth가 reject해 이 IIFE 밖으로 unhandled rejection이 샜다.
-      const res = await fetchWithAuth('/api/me').catch(() => null);
-      if (!res?.ok) return;
+      // section.tsx와 동형 갭·페드루 PO 정정 — verify:no-fetch-response-without-ok-check
+      // (#3688) 가드가 읽는 try/catch+res.ok 형으로) — 네트워크 자체가 죽으면(HTTP 에러
+      // 응답이 아니라) fetchWithAuth가 reject해 이 IIFE 밖으로 unhandled rejection이 샜다.
+      let res: Response;
+      try { res = await fetchWithAuth('/api/me'); } catch { return; }
+      if (!res.ok) return;
       const json = await res.json() as { data?: { has_password?: boolean } };
       setHasPassword(json.data?.has_password ?? null);
     })();
