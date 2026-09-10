@@ -1008,3 +1008,88 @@ async def test_compute_insight_snapshot_counts_tallies_by_status_within_window()
             assert counts == {"captured": 2, "failed": 1, "unsupported": 1}
     finally:
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_threads_429_retries_up_to_attempt_cap_without_connection_escalation(monkeypatch):
+    """story #3497 AC5(한도=429) — 자기점검(2026-09-10)이 남긴 정직한 갭을 닫는다.
+
+    그라운딩(코드 실측, 추정 아님): `insight_snapshots.py`의 429 경로는
+    `InsightFetchError(error_code="CHANNEL_RATE_LIMITED", ...)`를 던질 뿐 응답의
+    `Retry-After` 헤더를 읽지 않고(`_fetch_threads`/`_fetch_instagram`/`_fetch_facebook`
+    셋 다 무헤더), `InsightSnapshot`에는 `next_attempt_at` 컬럼 자체가 없다(모델 실측 —
+    `attempt_count`뿐). #3414 `publication_command`(별도 도메인)의 지수 백오프+
+    Retry-After 인지 메커니즘과는 **다른 축**이다 — `CHANNEL_RATE_LIMITED`는
+    `classify_failure_kind()`가 `_TRANSIENT_CODES`(`publication_command.py:74`)로
+    분류해 `process_due_insight_snapshots`의 TRANSIENT 분기(attempt_count 상한 5·
+    상한 前엔 지연 없이 즉시 재시도 가능한 pending 복귀)를 탄다 — 헤더 기반 지연도,
+    커넥션 상태 승격도 이 경로엔 없다(승격은 CHANNEL_TOKEN_EXPIRED류 CONNECTION
+    분기 전용).
+
+    그래서 이 테스트는 Pedro가 요청한 문면("Retry-After 백오프·next_attempt_at")
+    그대로가 아니라 **실제로 존재하는 메커니즘**(attempt_count 상한 5·상한 도달 전
+    pending 유지·연결 상태 불변)을 잰다 — 존재하지 않는 계산을 지어내 테스트하지
+    않는다.
+
+    뮤테이션: `process_due_insight_snapshots`의 상한 비교(`attempt_count >= 5`)를
+    반대로 뒤집으면(`< 5`) 상한이 반대로 작동해 이 테스트가 RED — 원복 확認은
+    PR 본문에 기록."""
+    import httpx
+
+    from app.models.channel_connection import ChannelConnection
+    from app.models.insight_snapshot import InsightSnapshot
+    from app.services.insight_snapshots import process_due_insight_snapshots, schedule_insight_snapshots
+    from sqlalchemy import select
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            connection = await _seed_channel_connection(s, org_id)
+            pub = await _seed_channel_publication(s, org_id=org_id, connection_id=connection.id, channel="threads")
+            work_item_id = uuid.uuid4()
+
+            # +7d 오프셋은 아직 due 전이게, +1d만 잡히도록 anchor를 잡는다(한 스냅샷만
+            # 추적 — 401 테스트의 "2행 동시 잡힘"과 다른 관심사라 의도적으로 격리).
+            await schedule_insight_snapshots(
+                s, org_id=org_id, work_item_id=work_item_id, publication_id=pub.id,
+                publication_kind="channel_publication", channel="threads", external_id=pub.external_id,
+                anchor_at=datetime.now(timezone.utc) - timedelta(days=1, minutes=5),
+            )
+            await s.commit()
+
+            _patch_threads_transport(
+                monkeypatch, lambda request: httpx.Response(429, json={"error": {"message": "rate limited"}}),
+            )
+
+            snap_id = (await s.execute(
+                select(InsightSnapshot.id).where(InsightSnapshot.publication_id == pub.id)
+                .order_by(InsightSnapshot.due_at.asc()).limit(1)
+            )).scalar_one()
+
+            # 상한(5) 도달 前 4회 — 매번 pending 복귀(지연 없음, next_attempt_at 없는
+            # 설계 그대로 같은 tick 안에서도 바로 재수집 가능해야 한다).
+            for attempt in range(1, 5):
+                counts = await process_due_insight_snapshots(s)
+                assert counts["pending_retry"] == 1, (attempt, counts)
+                assert counts["failed"] == 0, (attempt, counts)
+                snap = await s.get(InsightSnapshot, snap_id)
+                assert snap.status == "pending"
+                assert snap.attempt_count == attempt
+                assert snap.error_code == "CHANNEL_RATE_LIMITED"
+
+            # 5번째 — 상한 도달, failed로 종결.
+            counts = await process_due_insight_snapshots(s)
+            assert counts["failed"] == 1, counts
+            assert counts["pending_retry"] == 0, counts
+
+            snap = await s.get(InsightSnapshot, snap_id)
+            assert snap.status == "failed"
+            assert snap.attempt_count == 5
+            assert snap.error_code == "CHANNEL_RATE_LIMITED"
+
+            # 한도(429)는 연결 상태를 승격하지 않는다(토큰만료 401과 다른 축).
+            refreshed_conn = await s.get(ChannelConnection, connection.id)
+            assert refreshed_conn.status == "active", "429가 연결 상태를 잘못 승격했다"
+    finally:
+        await engine.dispose()
