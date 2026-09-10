@@ -202,7 +202,11 @@ function ConversationRow({
           책임). group은 특정 1인 사진이 의미가 없어(다인원) 기존 아이콘 자리를 유지한다. */}
       {oneOnOneParticipant ? (
         <Avatar
-          name={oneOnOneParticipant.name ?? (isAgentConv ? t('agent') : 'DM')}
+          // story #3791(페드루 재검토 12:23Z) — name(이니셜 재료)에 표시-폴백 문구를 넘기면
+          // 그 문구 첫 글자가 가짜 이니셜로 뜬다(「에이전트」→「에」·"DM"→"D") — name은
+          // 원시, 표시 문구는 label로.
+          name={oneOnOneParticipant.name ?? null}
+          label={oneOnOneParticipant.name ?? (isAgentConv ? t('agent') : 'DM')}
           avatarUrl={oneOnOneParticipant.avatar_url ?? null}
           actorType={isAgentConv || oneOnOneParticipant.type === 'agent' ? 'agent' : 'human'}
           size={36}
