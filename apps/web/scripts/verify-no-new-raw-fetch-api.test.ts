@@ -113,8 +113,8 @@ describe('extractRawFetchApiCalls — 주석·문자열 안 fetch 오탐 봉쇄(
 // story #2691 — 선언된 baseline 크기를 고정해 조용한 증감(리뷰 없는 추가/삭제)을 막는다
 // (verify-no-i18n-phrase-collision.ts의 GRANDFATHER_BASELINE_COUNT_TEST와 동일 관례).
 describe('GRANDFATHER_BASELINE_COUNT_TEST — 41번째부터는 review 없이 조용히 못 늘어난다(관례 재사용)', () => {
-  it('story #4062 후속 — 이미 안 걸리는 죽은 grandfather 항목 3건(embed-card.tsx::/api/docs/·decisions-waiting.tsx::/api/inbox/·set-password-section.tsx::/api/auth/set-password) 제거로 158건으로 줄었다', () => {
-    expect(GRANDFATHER_BASELINE.size).toBe(158);
+  it('story #2487 후속 — ai-settings.tsx 삭제(BE 라우트 0건, 표면 걷기)로 grandfather 항목 1건 줄어 157건', () => {
+    expect(GRANDFATHER_BASELINE.size).toBe(157);
   });
 
   it('EXEMPT_FILES는 10개 파일(pre-auth·공개 라우트·primitive 구현) 그대로다(story #ab2a503f — app/set-password/confirm/page.tsx 추가, 카디르 QA 처방)', () => {

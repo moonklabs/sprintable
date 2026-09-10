@@ -59,7 +59,6 @@
     "components/settings/agent-project-access-section.tsx": 2,
     "components/settings/gate-level-matrix.tsx": 3,
     "components/settings/linked-accounts-section.tsx": 1,
-    "components/settings/mcp-connection-settings.tsx": 3,
     "components/settings/my-notification-channel-section.tsx": 4,
     "components/settings/org-gate-policy-section.tsx": 1,
     "components/settings/project-access-section.tsx": 1,
