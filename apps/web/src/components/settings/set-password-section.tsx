@@ -24,7 +24,12 @@ function countCategories(rules: ReturnType<typeof checkPasswordRules>) {
 // 동일 컨벤션 유지"라고 명시했을 만큼 이쪽이 하드코딩 영문의 원조였다. next-intl로 이관
 // (`setPassword*`, linkedAccounts*와 동형 컨벤션). has_password=false(소셜 로그인 전용)일 때만
 // 렌더돼 노출 빈도가 낮았을 뿐, 소셜 온보딩 신규 사용자에겐 정확히 이 조건이 걸린다.
-export function SetPasswordSection() {
+export interface SetPasswordSectionProps {
+  // story #3772 — my-profile-section.tsx와 동형(탭 컨테이너에 초기 로드 실패 알림).
+  onLoadError?: () => void;
+}
+
+export function SetPasswordSection({ onLoadError }: SetPasswordSectionProps = {}) {
   const t = useTranslations('settings');
   const [hasPassword, setHasPassword] = useState<boolean | null>(null);
   const [password, setPassword] = useState('');
@@ -52,12 +57,12 @@ export function SetPasswordSection() {
       // (#3688) 가드가 읽는 try/catch+res.ok 형으로) — 네트워크 자체가 죽으면(HTTP 에러
       // 응답이 아니라) fetchWithAuth가 reject해 이 IIFE 밖으로 unhandled rejection이 샜다.
       let res: Response;
-      try { res = await fetchWithAuth('/api/me'); } catch { return; }
-      if (!res.ok) return;
+      try { res = await fetchWithAuth('/api/me'); } catch { onLoadError?.(); return; }
+      if (!res.ok) { onLoadError?.(); return; }
       const json = await res.json() as { data?: { has_password?: boolean } };
       setHasPassword(json.data?.has_password ?? null);
     })();
-  }, []);
+  }, [onLoadError]);
 
   // has_password 필드 없거나 true면 렌더링하지 않는
   if (hasPassword !== false) return null;

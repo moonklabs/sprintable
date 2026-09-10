@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -147,6 +147,18 @@ export default function SettingsPage() {
   const searchParamsHook = useSearchParams();
   const { orgId: ctxOrgId, orgMemberships } = useDashboardContext();
   const [activeTab, setActiveTab] = useState(() => resolveSettingsTab(searchParamsHook.get('tab')));
+  // story #3772 — 프로필 탭 섹션 넷(내 프로필·비밀번호·연결된 계정·2FA)이 각자 /api/me를
+  // 읽다 실패하면 «이유 없이» 조용히 사라졌다. 섹션은 그대로 두고(각자의 「모름」 렌더
+  // 로직 무변) 탭 한 자리에서만 사유+재시도를 말한다(같은 사실 네 번 금지). retryNonce를
+  // key로 써서 재시도 클릭이 섹션 넷을 통째로 리마운트(=재-fetch)한다(상세페이지
+  // key-remount 정본과 동형, 섹션별 refetch 함수를 새로 노출할 필요가 없다).
+  const [profileLoadFailed, setProfileLoadFailed] = useState(false);
+  const [profileRetryNonce, setProfileRetryNonce] = useState(0);
+  const handleProfileSectionLoadError = useCallback(() => setProfileLoadFailed(true), []);
+  const handleProfileTabRetry = useCallback(() => {
+    setProfileLoadFailed(false);
+    setProfileRetryNonce((n) => n + 1);
+  }, []);
   const [lnbOpen, setLnbOpen] = useState(false);
   const { addToast } = useToast();
 
@@ -844,10 +856,25 @@ export default function SettingsPage() {
 
             <TabsContent value="profile">
               <div className="space-y-6">
-                <MyProfileSection />
-                <SetPasswordSection />
-                <LinkedAccountsSection />
-                <TwoFactorSection />
+                {profileLoadFailed && (
+                  <Alert variant="destructive">
+                    <AlertDescription className="flex items-center justify-between gap-3">
+                      <span>{t('accountInfoLoadError')}</span>
+                      <Button size="sm" variant="outline" onClick={handleProfileTabRetry}>
+                        {tc('retry')}
+                      </Button>
+                    </AlertDescription>
+                  </Alert>
+                )}
+                {/* story #3772 — key=retryNonce로 넷을 통째 리마운트해 재-fetch(상세페이지
+                    key-remount 정본). 섹션 각자의 onLoadError가 처음 하나만 배너를 올리면
+                    되므로 중복 호출 무관(idempotent setState). */}
+                <div key={profileRetryNonce} className="space-y-6">
+                  <MyProfileSection onLoadError={handleProfileSectionLoadError} />
+                  <SetPasswordSection onLoadError={handleProfileSectionLoadError} />
+                  <LinkedAccountsSection onLoadError={handleProfileSectionLoadError} />
+                  <TwoFactorSection onLoadError={handleProfileSectionLoadError} />
+                </div>
                 {currentProjectId && (
                   <MyNotificationChannelSection
                     projectId={currentProjectId}

@@ -24,7 +24,12 @@ const PROVIDERS: { id: ProviderId; label: string }[] = [
 // 톤을 그대로 따랐는데, 그 톤 자체가 선생님 실기기에서 "설정 화면 전체가 한국어인데
 // 여기만 영문"으로 발견된 결함이었다(투자조사: 3rd-party 위젯 아님 — 이 레포 컴포넌트,
 // i18n만 미배선). next-intl로 이관. Google/Apple은 브랜드 고유명사라 번역 대상 제외.
-export function LinkedAccountsSection() {
+export interface LinkedAccountsSectionProps {
+  // story #3772 — my-profile-section.tsx와 동형(탭 컨테이너에 초기 로드 실패 알림).
+  onLoadError?: () => void;
+}
+
+export function LinkedAccountsSection({ onLoadError }: LinkedAccountsSectionProps = {}) {
   const t = useTranslations('settings');
   const searchParams = useSearchParams();
   const [linkedProviders, setLinkedProviders] = useState<ProviderId[] | null>(null);
@@ -39,8 +44,8 @@ export function LinkedAccountsSection() {
     // 응답이 아니라) fetchWithAuth가 reject해 이 아래 await가 그대로 throw,
     // `void refresh()`(:44) 밖으로 unhandled rejection이 샜다.
     let res: Response;
-    try { res = await fetchWithAuth('/api/me'); } catch { return; }
-    if (!res.ok) return;
+    try { res = await fetchWithAuth('/api/me'); } catch { onLoadError?.(); return; }
+    if (!res.ok) { onLoadError?.(); return; }
     const json = await res.json() as { data?: { linked_providers?: ProviderId[]; has_password?: boolean } };
     setLinkedProviders(json.data?.linked_providers ?? []);
     setHasPassword(json.data?.has_password ?? null);
