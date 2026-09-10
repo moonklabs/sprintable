@@ -457,6 +457,64 @@ describe('ChatListView — 참가자 이름 해석 실패 폴백(story #3203)', 
   });
 });
 
+// story #3791(카디르 QA 정정 12:52Z) — oneOnOneParticipant.name이 null이 아니라 빈 문자열
+// ""인 경우(`??`는 null/undefined만 잡고 ""는 통과시켜 걸렸던 자리 — codex 재현, 일반/
+// 에이전트 탭 둘 다). Avatar의 label이 빈 문자열로 새면 아이콘 tier에서 aria-label=""가
+// 되는데, 되돌리면(?.trim() || fallback을 다시 ?? fallback으로) 이 두 테스트가 정확히
+// 그 결함을 재현해야 한다.
+describe('ChatListView — 참가자 name="" 폴백(story #3791, 카디르 재현)', () => {
+  it('일반(DM) 탭 — name=""이면 아바타 aria-label이 "DM"으로 뜬다(빈 문자열 아님)', async () => {
+    stubFetchWithConversations([{
+      id: 'conv-dm-empty-1', type: 'dm', title: null,
+      latest_message: null, updated_at: '2026-08-29T00:00:00Z', unread_count: 0,
+      participants: [
+        { member_id: 'me-1', name: '나', avatar_url: null, type: 'human', resolved: true },
+        { member_id: 'them-empty-1', name: '', avatar_url: null, type: 'human', resolved: true },
+      ],
+    }]);
+    await mount();
+    const avatarSpan = container.querySelector('span[aria-label]');
+    expect(avatarSpan).not.toBeNull();
+    expect(avatarSpan?.getAttribute('aria-label')).toBe('DM');
+  });
+
+  it('에이전트 탭 — name=""이면 아바타 aria-label이 "에이전트"로 뜬다(빈 문자열 아님)', async () => {
+    useDashboardContextMock.mockReturnValue({ role: 'admin' });
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/conversations/recent-outside-project')) {
+        return { ok: true, json: async () => ({ data: [] }) };
+      }
+      if (url.includes('include_agent_conversations=true')) {
+        return {
+          ok: true,
+          json: async () => ({
+            data: [{
+              id: 'conv-agent-dm-empty-1', type: 'dm', title: null,
+              latest_message: null, updated_at: '2026-08-23T00:00:00Z', unread_count: 0,
+              participants: [
+                { member_id: 'me-1', name: '나', avatar_url: null, type: 'human', resolved: true },
+                { member_id: 'agent-empty-1', name: '', avatar_url: null, type: 'agent', resolved: true },
+              ],
+            }],
+            total: 1,
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({ data: [], total: 0 }) };
+    }));
+    await mount();
+
+    const agentTab = [...container.querySelectorAll('[role="tab"]')].find((el) => el.textContent?.includes('에이전트'));
+    expect(agentTab).not.toBeUndefined();
+    await act(async () => { agentTab!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    const avatarSpan = container.querySelector('span[aria-label]');
+    expect(avatarSpan).not.toBeNull();
+    expect(avatarSpan?.getAttribute('aria-label')).toBe('에이전트');
+  });
+});
+
 // story #3621(유나 CHANGES, 2026-09-07) — chat-view.tsx·chat-list-view.tsx 둘 다 같은
 // ConnectionLostBanner를 쓴다(단일화, 문구 갈라짐 방지). {connected:false, polling:true}를
 // 직접 모킹해 실제로 그 배너가 서는지 확인한다 — 이전엔 두 뷰 테스트가 전부 polling:false만

@@ -177,6 +177,27 @@ describe('Avatar — story #2887 S2g', () => {
     expect(span?.getAttribute('aria-label')).toBe('이름 없는 구성원');
   });
 
+  // story #3791(카디르 QA 정정 12:52Z) — 호출부가 `name ?? fallback`류로 label을 지어
+  // 넘기면 name=""일 때 `??`가 ""를 안 잡아(null/undefined만 잡음) label 자체가 ""로
+  // 샐 수 있다(chat-list-view.tsx 실측 재현). Avatar 자신이 label=""을 곧이곧대로 쓰지
+  // 않고 name으로 폴백해야 호출부 실수에도 aria-label=""이 안 새는 단일 방어선이 된다.
+  it('label=""(빈 문자열)·name="송윤재"면 label을 곧이곧대로 안 쓰고 name으로 폴백한다', async () => {
+    await act(async () => {
+      root.render(wrap(<Avatar name="송윤재" label="" avatarUrl={null} actorType="human" />));
+    });
+    const span = container.querySelector('span[aria-label]');
+    expect(span?.getAttribute('aria-label')).toBe('송윤재'); // "" 그대로가 아니라 name.
+  });
+
+  it('label=""·name=null(또는 "")이면 aria-label 속성 자체를 생략한다(빈 문자열 노출 0)', async () => {
+    await act(async () => {
+      root.render(wrap(<Avatar name={null} label="" avatarUrl={null} actorType="human" />));
+    });
+    const span = container.querySelector('span');
+    expect(span).not.toBeNull();
+    expect(span?.hasAttribute('aria-label')).toBe(false);
+  });
+
   it('name=""(빈 문자열)이어도 안 죽고 아이콘 폴백으로 렌더된다', async () => {
     await act(async () => {
       root.render(wrap(<Avatar name="" avatarUrl={null} actorType="human" />));

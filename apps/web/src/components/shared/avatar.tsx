@@ -56,10 +56,15 @@ export interface AvatarProps {
 export function Avatar({
   name, label, avatarUrl, actorType, size = 32, presenceStatus, isWorking = false, runtimeType = null, className,
 }: AvatarProps) {
-  // story #3791(유나 定 12:00Z) — 접근성 이름은 label 우선, 없으면 name 그대로(빈 문자열
-  // 대신 attribute 자체를 생략 — 아래 undefined). 이니셜 계산은 이 값이 아니라 원시
-  // name?.trim()으로 따로 판정한다(밑 tier 분기).
-  const a11yName = label ?? name ?? undefined;
+  // story #3791(유나 定 12:00Z·카디르 QA 정정 12:52Z) — 접근성 이름은 label 우선, 없으면
+  // name 그대로(빈 문자열 대신 attribute 자체를 생략 — 아래 undefined). `??`는 null/
+  // undefined만 잡고 빈 문자열은 통과시켜 호출부가 `name ?? fallback`류로 label을 지어
+  // 넘기면(빈 이름이 ??를 안 타 그대로 온다) aria-label=""로 새는 결함이 있었다(카디르
+  // 재현 — chat-list-view.tsx 일반/에이전트 탭 둘 다) — label·name 둘 다 trim 후 빈
+  // 값이면 다음 단계로 넘어가는 형으로 방어한다(호출부 실수에도 이 컴포넌트 자신이
+  // 안 새는 단일 지점). 이니셜 계산은 이 값이 아니라 원시 name?.trim()으로 따로
+  // 판정한다(밑 tier 분기).
+  const a11yName = (label?.trim() ? label : undefined) ?? (name?.trim() ? name : undefined);
   const isAgent = actorType === 'agent';
   const dotSize = size >= 40 ? 'md' : 'sm';
   const iconSize = Math.round(size * 0.5);
