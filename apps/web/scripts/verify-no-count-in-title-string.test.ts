@@ -88,9 +88,9 @@ describe('scanRepo — story #3764(실 트리 실행)', () => {
     expect(fileCount).toBeGreaterThan(400);
     expect(jsxRefs).toEqual([]);
     expect(i18nRefs).toEqual([]);
-    // ① 탭 라벨 2키(영구) + ② #4111 소관 2키(orgMembersListHeading·orgInvitesListHeading,
-    // ko/en 둘 다 걸려 4 hit) — #4111 머지 전 지금 develop 기준.
-    expect(jsxAllowlistHit.size).toBe(1);
-    expect(i18nAllowlistHit.size).toBe(4);
+    // #4111이 develop에 머지되며 그 소관 일시 예외 3건(JSX 1+i18n 2)이 죽어 걷혔다
+    // (202870e0f 위 rebase) — 지금 남은 건 탭 라벨 영구 예외 2키(i18n)뿐, JSX는 0.
+    expect(jsxAllowlistHit.size).toBe(0);
+    expect(i18nAllowlistHit.size).toBe(2);
   });
 });

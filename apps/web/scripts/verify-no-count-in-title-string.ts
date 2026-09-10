@@ -26,18 +26,14 @@
  *    카드가 든 billing 미터 음성대조 표본과 정확히 같은 이유로 안 걸린다(합성 픽스처로
  *    셀프테스트가 고정).
  *
- * ## ALLOWLIST — 두 갈래
- *  ① **탭 라벨(E절 명시 예외)**: `board.tasksCountLabel`("태스크 ({count})")·
- *     `board.commentsCountLabel`("댓글 ({count})") — 그 자리 자체가 «수를 세는 자리»
- *     (탭 라벨 관례, doc E절). 영구 예외.
- *  ② **#4111(story #3735) 소관, 이 PR 스코프 밖**: 이 브랜치가 develop 5c55c8d10(#4111
- *     머지 前)에서 갈라져 `organization/roles/page.tsx`의 `{t(ROLE_LABEL_KEY[role])}
- *     ({group.length})`(JSX 축)·`settings.orgMembersListHeading`("구성원 ({count})")·
- *     `settings.orgInvitesListHeading`("초대 대기 ({count})", i18n 값 축 둘 다)이 아직
- *     옛 형이다 — #3735가 같은 처방으로 이미 고치는 중(#4111 head b460c772)이라 이
- *     PR에서 중복 수정하지 않는다(스코프 발산 금지). **일시 예외 — #4111 머지 뒤 이
- *     develop을 재fetch하면 죽은 예외가 되니 그때 걷는다**(죽은 예외는 이 가드 자체가
- *     실패시켜 알려준다).
+ * ## ALLOWLIST — 탭 라벨(E절 명시 예외)
+ * `board.tasksCountLabel`("태스크 ({count})")·`board.commentsCountLabel`("댓글
+ * ({count})") — 그 자리 자체가 «수를 세는 자리»(탭 라벨 관례, doc E절). 영구 예외.
+ *
+ * (과거 이력 — #4111(story #3735) 소관 일시 예외 3건(`organization/roles/page.tsx`
+ * JSX 축·`settings.orgMembersListHeading`·`settings.orgInvitesListHeading` i18n 값
+ * 축)은 #4111이 develop에 머지되며 죽은 예외가 됐다(이 가드 자체가 실패시켜 알려준
+ * 대로) — 202870e0f 위로 rebase하며 걷었다.)
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
@@ -147,20 +143,16 @@ export function scanI18nMessages(messages: Record<string, unknown>): I18nTitleCo
   return refs;
 }
 
-// ALLOWLIST ① — 탭 라벨(E절 명시 예외, 영구).
+// ALLOWLIST — 탭 라벨(E절 명시 예외, 영구).
 const I18N_ALLOWLIST: ReadonlySet<string> = new Set([
   'board.tasksCountLabel',
   'board.commentsCountLabel',
 ]);
 
-// ALLOWLIST ② — #4111(story #3735) 소관, 이 PR 스코프 밖(머지되면 죽는 예외 — 걷을 것).
-const JSX_ALLOWLIST: ReadonlySet<string> = new Set([
-  'app/(authenticated)/organization/roles/page.tsx:145',
-]);
-const I18N_ALLOWLIST_PENDING_4111: ReadonlySet<string> = new Set([
-  'settings.orgMembersListHeading',
-  'settings.orgInvitesListHeading',
-]);
+// story #3764 rebase(202870e0f, #4111 머지 뒤) — #4111 소관 일시 예외 3건(roles JSX·
+// orgMembersListHeading·orgInvitesListHeading)이 죽어(가드가 스스로 잡음) 걷었다.
+// JSX 축엔 지금 영구 예외가 없다 — 기전은 남겨 두되(빈 Set) 새 예외가 생기면 여기 등재.
+const JSX_ALLOWLIST: ReadonlySet<string> = new Set([]);
 
 export interface ScanRepoResult {
   jsxRefs: JsxTitleCountRef[];
@@ -206,7 +198,6 @@ export function scanRepo(srcRoot: string, koMessages: Record<string, unknown>, e
   const i18nAllowlistHit = new Set<string>();
   const i18nRefs = allI18nRefs.filter((r) => {
     if (I18N_ALLOWLIST.has(r.key)) { i18nAllowlistHit.add(r.key); return false; }
-    if (I18N_ALLOWLIST_PENDING_4111.has(r.key)) { i18nAllowlistHit.add(r.key); return false; }
     return true;
   });
   // ko/en 어느 쪽이든 걸리면 등재된 것으로 친다(양쪽 다 안 걸리면 dead).
@@ -226,11 +217,11 @@ function main(): number {
 
   console.log(
     `[가드] 「제목 안의 수」 스캔 — .tsx ${fileCount}개 · JSX 조립형 ${jsxRefs.length}건(면제 ${jsxAllowlistHit.size}/${JSX_ALLOWLIST.size}) ` +
-      `· i18n 값형 ${i18nRefs.length}건(면제 ${i18nAllowlistHit.size}/${I18N_ALLOWLIST.size + I18N_ALLOWLIST_PENDING_4111.size}).`,
+      `· i18n 값형 ${i18nRefs.length}건(면제 ${i18nAllowlistHit.size}/${I18N_ALLOWLIST.size}).`,
   );
 
   const deadJsx = [...JSX_ALLOWLIST].filter((k) => !jsxAllowlistHit.has(k));
-  const deadI18n = [...I18N_ALLOWLIST, ...I18N_ALLOWLIST_PENDING_4111].filter((k) => !i18nAllowlistHit.has(k));
+  const deadI18n = [...I18N_ALLOWLIST].filter((k) => !i18nAllowlistHit.has(k));
   if (deadJsx.length > 0 || deadI18n.length > 0) {
     console.error('\nFAIL: 죽은 ALLOWLIST 항목(더 이상 안 걸림 — 걷어낼 것):');
     for (const k of deadJsx) console.error(`  [JSX] ${k}`);
