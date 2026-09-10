@@ -19,6 +19,7 @@ import { sanitizeDocHtml } from '@/components/docs/doc-content-renderer';
 import { fetchWithAuth } from '@/lib/db/client';
 import { parseEntityRef } from './entity-ref';
 import { useReadingPanel } from './reading-panel-context';
+import type { ReferenceForm } from './embed-renderer';
 // story #2888(S2a) — 이관 후 재수출(기존 소비처 4곳 import 경로 무변경, 회귀 0). 정본은
 // entity-registry.tsx 참고.
 import { ENTITY_ICONS, ENTITY_COLORS, GRAY_STATE_COLOR, resolveEntityIcon, EntityGlyph } from './entity-registry';
@@ -397,6 +398,8 @@ export function EntityPreviewModal({
   // parity.test.ts가 BE ENTITY_RESOLVERS와 엄격 대조하는 자리)엔 못 들어간다. 그 계약 밖에서
   // gate 전용 fetch/href/렌더를 독립적으로 붙인다(parity 가드 무영향) — GateSummary(아래)가
   // 유일한 소비 지점.
+  // story #3776(1층B) — "닫기" aria-label, common ns의 기존 close 키 재사용.
+  const tc = useTranslations('common');
   const hasFetchStrategy = entityType === 'doc' || entityType === 'gate' || Boolean(ENTITY_API[entityType]);
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(hasFetchStrategy);
@@ -660,7 +663,7 @@ export function EntityPreviewModal({
         type="button"
         onClick={onClose}
         className="mt-0.5 shrink-0 text-muted-foreground hover:text-foreground"
-        aria-label="닫기"
+        aria-label={tc('close')}
       >
         <X className="h-4 w-4" />
       </button>
@@ -927,8 +930,10 @@ export function EmbedCard({
 // story #2262 AC1(2026-08-08) — doc `flow-map-blueprint-v1` §2-3 표기 세 조각의 「표면」.
 // 스토리 본문의 AC1 정의 그대로: form은 'mention'|'embed'|'proof' 셋뿐(FORMS,
 // backend/app/models/reference.py) — 채팅 멘션 파서는 오늘 "mention"만 낸다(다른 값은
-// 문서·증빙 경로가 낼 수 있어 표는 셋 다 갖춘다).
-const FORM_LABELS: Record<string, string> = { mention: '멘션', embed: '임베드', proof: '근거' };
+// 문서·증빙 경로가 낼 수 있어 표는 셋 다 갖춘다). story #3776(1층B, 페드루 재검토 10:07Z) —
+// 이 셋은 닫힌 열거라 한 화면의 같은 값 목록 안에 섞이면 한쪽만 번역되는 게 더 나쁘다
+// (en에서 "Evidence" 옆에 "멘션"이 서는 자리). formLabel()이 이제 셋 다 chats ns 키로
+// 가로챈다 — 이 상수는 폐기.
 
 // 「지점」 — referenced_at(이 참조가 «언제 생겼나»)을 짧게. 블루프린트 예시("7/26 스레드")와
 // 같은 월/일 압축 표기 — 채팅 칩은 그 자체가 스레드 맥락이라 별도 "스레드" 접미어를 안 붙인다.
@@ -978,7 +983,7 @@ export function EntityChip({
   ghost?: boolean;
   /** story #2262 AC1 — 「사실성 · 표면 · 지점」. null이면(유령이거나 references 자체가
    * 없는 경로) 표기하지 않는다 — 모르는 것을 지어내지 않는다(가디언 §H-2와 같은 원칙). */
-  referenceMeta?: { form: string; referencedAt: string } | null;
+  referenceMeta?: { form: ReferenceForm; referencedAt: string } | null;
   /** story #2262 AC2 PR② — 배치조회(chat-view.tsx) 결과. 호출부가 안 넘기면(undefined,
    * 배치조회 배선이 없는 기존 호출부 — 예: 과거 테스트) `{kind:'loading'}`으로 안전하게
    * 폴백한다(has-status면 "아직 모름", no-status-concept이면 "상태 없음" — renderEntityStatusLabel이
@@ -987,6 +992,19 @@ export function EntityChip({
 } & VariantProps<typeof entityChipLabelVariants>) {
   // story #3776(1층A) — "결재함에서 보기" 딥링크 CTA, content ns의 기존 submitGateLink 키 재사용.
   const tContent = useTranslations('content');
+  // story #3776(1층B, 페드루 재검토 10:07Z·10:14Z) — "근거"는 chats ns의 기존
+  // reportEvidenceLabel 키, "멘션"/"임베드"는 신설 embedFormMention/embedFormEmbed 키(닫힌
+  // 3값 열거라 하나만 번역되면 en에서 두 언어가 섞인다 — 셋을 함께 1층으로 처리).
+  // `Record<ReferenceForm, string>` 한 표로 — form이 ReferenceForm(embed-renderer.ts에서
+  // 이미 좁혀짐)이라 이 표에 키 하나가 비면 TS가 컴파일에서 잡는다(exhaustive, 원시값
+  // 폴백 없음 — story #3770 클래스, 화면에 원시 식별자가 새는 통로를 안 새로 심는다).
+  const tChats = useTranslations('chats');
+  const FORM_LABEL_KEYS: Record<ReferenceForm, string> = {
+    mention: 'embedFormMention',
+    embed: 'embedFormEmbed',
+    proof: 'reportEvidenceLabel',
+  };
+  const formLabel = (form: ReferenceForm) => tChats(FORM_LABEL_KEYS[form]);
   const [showModal, setShowModal] = useState(false);
   // story #461e9a54(P0) — 채팅 트리(ReadingPanelProvider 하위)에서는 패널로, 밖(doc-content-
   // renderer.tsx·story-detail-panel.tsx 등)에서는 null이라 기존 Dialog 모달로 폴백(회귀 0).
@@ -1049,7 +1067,7 @@ export function EntityChip({
           항상 펼친다 — inline(기본)은 아래 tooltip으로 격납. */}
       {showInlineMeta && referenceMeta ? (
         <span className="opacity-70">
-          · 관찰됨 · {FORM_LABELS[referenceMeta.form] ?? referenceMeta.form} · {formatReferencePoint(referenceMeta.referencedAt)}
+          · 관찰됨 · {formLabel(referenceMeta.form)} · {formatReferencePoint(referenceMeta.referencedAt)}
         </span>
       ) : null}
       {showInlineMeta && statusLabel ? <span className="opacity-70">· {statusLabel}</span> : null}
@@ -1080,7 +1098,7 @@ export function EntityChip({
       <p className="font-semibold">{label}</p>
       <div className="space-y-0.5 border-t border-background/20 pt-1">
         {statusLabel ? tooltipRow('상태', statusLabel) : null}
-        {referenceMeta ? tooltipRow('참조 형태', FORM_LABELS[referenceMeta.form] ?? referenceMeta.form) : null}
+        {referenceMeta ? tooltipRow('참조 형태', formLabel(referenceMeta.form)) : null}
         {referenceMeta ? tooltipRow('관찰', formatReferencePoint(referenceMeta.referencedAt)) : null}
       </div>
     </div>

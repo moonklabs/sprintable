@@ -1066,7 +1066,8 @@ export default function SettingsPage() {
                     <>
                       <div className="space-y-4">
                         <div className="space-y-1.5">
-                          <label className="text-sm font-medium text-foreground">이름</label>
+                          {/* story #3776(1층B) — "이름", settings ns의 기존 profileName 키 재사용. */}
+                          <label className="text-sm font-medium text-foreground">{t('profileName')}</label>
                           {(currentOrgRole === 'owner' || currentOrgRole === 'admin') ? (
                             <div className="flex items-center gap-2">
                               <input
@@ -1081,7 +1082,8 @@ export default function SettingsPage() {
                                 disabled={!editOrgName.trim() || editOrgName === orgInfo.name || savingOrgName}
                                 onClick={() => void handleSaveOrgName()}
                               >
-                                {savingOrgName ? '저장 중…' : '저장'}
+                                {/* story #3776(1층B) — "저장", common ns의 기존 save 키 재사용(유나 정정 — 폼 크롬은 common 소관). */}
+                                {savingOrgName ? '저장 중…' : tc('save')}
                               </Button>
                             </div>
                           ) : (
@@ -1486,7 +1488,8 @@ export default function SettingsPage() {
                     onClick={() => void fetchOrgImpact()}
                     disabled={orgImpactLoading}
                   >
-                    다시 시도
+                    {/* story #3776(1층B) — "다시 시도", common ns의 기존 retry 키 재사용. */}
+                    {tc('retry')}
                   </Button>
                   <label className="flex items-start gap-2 pt-1">
                     <input
@@ -1524,7 +1527,8 @@ export default function SettingsPage() {
                 onClick={() => { setShowDeleteOrgConfirm(false); setDeleteOrgConfirmName(''); }}
                 disabled={deletingOrg}
               >
-                취소
+                {/* story #3776(1층B) — "취소", common ns의 기존 cancel 키 재사용. */}
+                {tc('cancel')}
               </Button>
               <Button
                 variant="destructive"

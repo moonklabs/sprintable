@@ -541,7 +541,8 @@ export function DocEditor({
                 if (url) editor.chain().focus().setLink({ href: url }).run();
               }
             }}
-            title="링크"
+            // story #3776(1층B) — "링크", docs ns의 기존 toolbarLink 키 재사용.
+            title={tEditor('toolbarLink')}
           >
             <Link2 className="size-3.5" />
           </BubbleButton>

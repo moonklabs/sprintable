@@ -830,7 +830,8 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
       {/* Goal */}
       {selected.goal ? (
         <p className="mb-3 rounded-lg border border-border bg-muted/20 px-3 py-2 text-sm text-foreground">
-          <span className="mr-1.5 inline-flex items-center gap-1 align-middle text-xs font-medium text-muted-foreground"><Target className="size-3 shrink-0" />목표</span>
+          {/* story #3776(1층B) — "목표", sprints ns의 기존 goalLabel 키 재사용(같은 화면의 스프린트 목표). */}
+          <span className="mr-1.5 inline-flex items-center gap-1 align-middle text-xs font-medium text-muted-foreground"><Target className="size-3 shrink-0" />{t('goalLabel')}</span>
           {selected.goal}
         </p>
       ) : null}

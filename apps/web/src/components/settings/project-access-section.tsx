@@ -150,7 +150,8 @@ export function ProjectAccessSection({ projectId }: ProjectAccessSectionProps) {
           <h2 className="text-base font-semibold text-foreground">접근 권한</h2>
         </SectionCardHeader>
         <SectionCardBody>
-          <p className="text-sm font-medium text-foreground">관리자 전용 페이지입니다</p>
+          {/* story #3776(1층B) — "관리자 전용 페이지입니다", settings ns의 기존 orgMembersAdminOnly 키 재사용. */}
+          <p className="text-sm font-medium text-foreground">{t('orgMembersAdminOnly')}</p>
           <p className="mt-1 text-sm text-muted-foreground">이 프로젝트의 관리자·소유자만 접근 권한을 관리할 수 있습니다.</p>
         </SectionCardBody>
       </SectionCard>

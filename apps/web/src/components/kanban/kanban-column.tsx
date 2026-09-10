@@ -344,7 +344,8 @@ export function KanbanColumn({
                 disabled={loadingMore}
                 className="w-full rounded-md px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted/50 disabled:opacity-50"
               >
-                {loadingMore ? '불러오는 중...' : '더 보기'}
+                {/* story #3776(1층B) — "불러오는 중..."/"더 보기", board ns의 기존 loading/loadMore 키 재사용. */}
+                {loadingMore ? t('loading') : t('loadMore')}
               </button>
             </div>
           )}

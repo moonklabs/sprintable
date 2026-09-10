@@ -55,7 +55,11 @@ describe('EmbedGroup — 간결 리스트(story 등 텍스트류)', () => {
   it('3개 이하면 더보기 버튼 없이 전부 보인다', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({}) })));
     await act(async () => {
-      root.render(<EmbedGroup entityType="story" refs={REFS_3} />);
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <EmbedGroup entityType="story" refs={REFS_3} />
+        </NextIntlClientProvider>,
+      );
     });
     expect(container.textContent).toContain('스토리 하나');
     expect(container.textContent).toContain('스토리 셋');
@@ -65,7 +69,11 @@ describe('EmbedGroup — 간결 리스트(story 등 텍스트류)', () => {
   it('5개면 기본 3행만 보이고 「+2 더보기」가 뜬다 — 클릭하면 전체+「접기」로 바뀐다', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({}) })));
     await act(async () => {
-      root.render(<EmbedGroup entityType="story" refs={REFS_5} />);
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <EmbedGroup entityType="story" refs={REFS_5} />
+        </NextIntlClientProvider>,
+      );
     });
     expect(container.textContent).toContain('스토리 하나');
     expect(container.textContent).toContain('스토리 셋');
@@ -152,7 +160,11 @@ describe('EmbedGroup — story #2905 open-panel 클릭 왕복(회귀가드)', ()
   it('간결 리스트 항목 클릭 시 onOpenReadingPanel이 올바른 ReadingPanelTarget으로 호출된다', async () => {
     const onOpenReadingPanel = vi.fn();
     await act(async () => {
-      root.render(<EmbedGroup entityType="story" refs={REFS_3} onOpenReadingPanel={onOpenReadingPanel} />);
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <EmbedGroup entityType="story" refs={REFS_3} onOpenReadingPanel={onOpenReadingPanel} />
+        </NextIntlClientProvider>,
+      );
     });
     const itemButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('스토리 하나'));
     expect(itemButton).toBeTruthy();

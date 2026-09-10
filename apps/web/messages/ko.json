@@ -4115,6 +4115,8 @@
     "reportViewFull": "전문 보기 →",
     "reportCollapse": "접기",
     "reportEvidenceLabel": "근거",
+    "embedFormMention": "멘션",
+    "embedFormEmbed": "임베드",
     "reportNextActionLabel": "다음",
     "unreadMarker": "여기부터 안읽음",
     "citationAnchored": "여기부터 인용 — 끝 메시지를 마저 골라 주세요",

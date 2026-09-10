@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useTranslations } from 'next-intl';
 import { Download, Expand, File, FileCode, FileText, Film, Image as ImageIcon, Loader2, Music, X, type LucideIcon } from 'lucide-react';
 import { fetchWithAuth } from '@/lib/db/client';
 import { downloadAsset, openExternal } from '@/lib/native-shell-bridge';
@@ -104,6 +105,10 @@ async function signAttachment(target: AttachmentTarget, disposition: 'inline' | 
  * 받는 편이 만료 이슈보다 낫다).
  */
 export function FileViewer({ target, onClose }: { target: AttachmentTarget; onClose: () => void }) {
+  // story #3776(1층B) — "다운로드"/"다시 시도", chats/common ns의 기존
+  // mediaDownload/retry 키 재사용.
+  const tChats = useTranslations('chats');
+  const tc = useTranslations('common');
   const format = resolveFormat(target.contentType, target.label);
   const [state, setState] = useState<SignState>({ kind: 'fetching' });
   const [downloading, setDownloading] = useState(false);
@@ -161,8 +166,8 @@ export function FileViewer({ target, onClose }: { target: AttachmentTarget; onCl
           onClick={() => void handleDownload()}
           disabled={downloading}
           className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
-          aria-label="다운로드"
-          title="다운로드"
+          aria-label={tChats('mediaDownload')}
+          title={tChats('mediaDownload')}
         >
           <Download className="h-4 w-4" />
         </button>
@@ -202,7 +207,7 @@ export function FileViewer({ target, onClose }: { target: AttachmentTarget; onCl
               onClick={retry}
               className="mt-1 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
             >
-              다시 시도
+              {tc('retry')}
             </button>
           </div>
         )}

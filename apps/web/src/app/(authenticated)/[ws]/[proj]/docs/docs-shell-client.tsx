@@ -740,7 +740,8 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
                   type="button"
                   onClick={() => setTreeDrawerOpen(false)}
                   className="rounded p-1 text-muted-foreground hover:text-foreground"
-                  aria-label="닫기"
+                  // story #3776(1층B) — "닫기", common ns의 기존 close 키 재사용.
+                  aria-label={tc('close')}
                 >
                   <X className="size-4" />
                 </button>

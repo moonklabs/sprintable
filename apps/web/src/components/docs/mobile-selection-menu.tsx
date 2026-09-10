@@ -80,7 +80,8 @@ export function MobileSelectionMenu({ editor }: { editor: Editor | null }) {
     { icon: Code, label: '인라인 코드', action: () => editor.chain().focus().toggleCode().run(), active: editor.isActive('code') },
     {
       icon: Link2,
-      label: '링크',
+      // story #3776(1층B) — "링크", docs ns의 기존 toolbarLink 키 재사용(doc-editor와 같은 컨트롤).
+      label: t('toolbarLink'),
       action: () => {
         if (editor.isActive('link')) { editor.chain().focus().unsetLink().run(); return; }
         const url = window.prompt('URL:');

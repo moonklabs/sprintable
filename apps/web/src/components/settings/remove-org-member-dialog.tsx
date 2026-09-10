@@ -37,6 +37,9 @@ export function RemoveOrgMemberDialog({
   onCancel,
 }: RemoveOrgMemberDialogProps) {
   const to = useTranslations('organization');
+  // story #3776(1층B) — "취소"/"제거", common/settings ns의 기존 cancel/removeFromProject 키 재사용.
+  const tc = useTranslations('common');
+  const ts = useTranslations('settings');
   const [loading, setLoading] = useState(true);
   const [affected, setAffected] = useState<AffectedProject[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -114,14 +117,14 @@ export function RemoveOrgMemberDialog({
 
         <DialogFooter>
           <Button variant="ghost" onClick={onCancel} disabled={confirming}>
-            취소
+            {tc('cancel')}
           </Button>
           <Button
             variant="destructive"
             onClick={() => void handleConfirm()}
             disabled={loading || !!error || confirming}
           >
-            {confirming ? '...' : '제거'}
+            {confirming ? '...' : ts('removeFromProject')}
           </Button>
         </DialogFooter>
       </DialogContent>
