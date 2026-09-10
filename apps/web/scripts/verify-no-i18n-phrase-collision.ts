@@ -545,6 +545,29 @@ export const EXEMPT_PAIRS = new Set<string>([
   // board.comments="댓글" <-> board.commentsCountLabel="댓글 ({count})" — 위와 완전히
   // 동형(같은 컴포넌트의 형제 탭, loadingComments 배타 상태).
   'board.comments <-> board.commentsCountLabel',
+  // story #3789(2026-09-10, settings/page.tsx 신설 키 4건) — 조직 삭제 다이얼로그·탭이
+  // 신설되며 그 안의 짧은 일반명사 라벨이 같은 파일의 긴 문장에 우연히 포함됐다. 아래
+  // 셋은 onboarding.projectLimitExceededError<->settings.tabProjects(#2485, 위 393행)와
+  // 정확히 같은 클래스 — 「프로젝트」·「플랜」·「삭제」모두 그 자체엔 수가 없는 짧은
+  // 라벨/탭 제목/버튼 동사고, 헷갈리는 건 «두 개의 서로 다른 수»가 아니라 그 라벨을
+  // 포함하는 긴 안내 문장 하나뿐이다(docs.title<->docs.indexDocCount류 정상 패턴).
+  'settings.orgDeleteImpactProjects <-> settings.tabProjects',
+  // orgPlanLabel="플랜"(조직 탭 필드 라벨) <-> onboarding.projectLimitExceededError
+  // ("무료 플랜은 프로젝트를 {limit}개까지...", 온보딩 플랜-한도 토스트) — 두 화면이
+  // 동시에 뜨는 자리가 아니고, "플랜"이라는 공통 명사 하나만 겹친다.
+  'onboarding.projectLimitExceededError <-> settings.orgPlanLabel',
+  // deleteProject="삭제"(프로젝트 관리 섹션의 다른 행 버튼) <-> orgDeleteImpactProjects
+  // ("프로젝트 {count}개 영구 삭제", 조직 삭제 영향도 문장 안의 "영구 삭제") — 서로
+  // 다른 대상(프로젝트 행 삭제 버튼 vs 조직 전체 삭제 영향도 서술)이 우연히 "삭제"
+  // 한 글자만 공유한다.
+  'settings.deleteProject <-> settings.orgDeleteImpactProjects',
+  // orgDeleteConfirmCta="영구 삭제"(다이얼로그 확인 버튼 라벨) <-> orgDeleteImpactProjects
+  // ("프로젝트 {count}개 영구 삭제", 영향도 문장 조각) — 이 스토리(#3789) 자체가 요구한
+  // 의도된 분리다: 유나 定 §5 "「영구 삭제」가 두 뜻이다 — 반드시 둘로 갈라야 한다"(버튼
+  // 라벨 vs 문장 조각, en에서 `Delete permanently` vs `deleted permanently`로 애초에
+  // 같은 문자열일 수 없다). 한국어 자연문이 "영구 삭제"라는 같은 구를 버튼과 서술 양쪽에
+  // 쓰는 것 자체가 정상이라 부분문자열 겹침은 이 설계의 결과이지 결함이 아니다.
+  'settings.orgDeleteConfirmCta <-> settings.orgDeleteImpactProjects',
 ]);
 
 // ⛔⭐오르테가군 지적(2026-07-31) — 이 목록에 «새로» 넣는 것은 PO 승인을 거친다. 이유 없이

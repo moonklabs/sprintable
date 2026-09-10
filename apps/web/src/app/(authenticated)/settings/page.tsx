@@ -697,7 +697,7 @@ export default function SettingsPage() {
       const refresh = await fetch('/api/webhooks/config');
       if (refresh.ok) { const j = await refresh.json() as { data?: WebhookConfig[] }; setWebhooks(j.data ?? []); }
     } catch {
-      setWebhookErrors((prev) => ({ ...prev, [memberId]: '네트워크 오류 — 다시 시도하세요.' }));
+      setWebhookErrors((prev) => ({ ...prev, [memberId]: t('webhookNetworkError') }));
     } finally {
       setWebhookSaving(null);
     }
@@ -896,14 +896,14 @@ export default function SettingsPage() {
               <SectionCard>
                 <SectionCardBody>
                   <p className="text-sm text-muted-foreground">
-                    에이전트 API Key 관리는 <strong>에이전트 관리</strong>로 이관됐습니다.
+                    {t.rich('agentApiKeyMoved', { b: (chunks) => <strong>{chunks}</strong> })}
                   </p>
                   <button
                     type="button"
                     onClick={() => router.push('/organization/workforce')}
                     className="mt-3 rounded-md border border-border px-3 py-1.5 text-sm text-foreground hover:bg-muted transition-colors"
                   >
-                    에이전트 관리로 이동
+                    {t('agentManagementCta')}
                   </button>
                 </SectionCardBody>
               </SectionCard>
@@ -1057,8 +1057,8 @@ export default function SettingsPage() {
               <SectionCard>
                 <SectionCardHeader>
                   <div className="space-y-1">
-                    <h2 className="text-base font-semibold text-foreground">Organization 설정</h2>
-                    <p className="text-sm text-muted-foreground">Organization 기본 정보를 확인하고 수정합니다.</p>
+                    <h2 className="text-base font-semibold text-foreground">{t('orgSectionTitle')}</h2>
+                    <p className="text-sm text-muted-foreground">{t('orgSectionDescription')}</p>
                   </div>
                 </SectionCardHeader>
                 <SectionCardBody className="space-y-6">
@@ -1095,19 +1095,19 @@ export default function SettingsPage() {
                         <div className="space-y-1.5">
                           <label className="text-sm font-medium text-foreground">Slug</label>
                           <p className="rounded-md border border-input bg-muted/30 px-3 py-2 font-mono text-sm text-muted-foreground">{orgInfo.slug}</p>
-                          <p className="text-xs text-muted-foreground">slug는 변경할 수 없습니다.</p>
+                          <p className="text-xs text-muted-foreground">{t('orgSlugImmutable')}</p>
                         </div>
 
                         {orgInfo.plan && (
                           <div className="space-y-1.5">
-                            <label className="text-sm font-medium text-foreground">플랜</label>
+                            <label className="text-sm font-medium text-foreground">{t('orgPlanLabel')}</label>
                             <p className="rounded-md border border-input bg-muted/30 px-3 py-2 text-sm text-foreground capitalize">{orgInfo.plan}</p>
                           </div>
                         )}
 
                         {currentOrgRole && (
                           <div className="space-y-1.5">
-                            <label className="text-sm font-medium text-foreground">내 역할</label>
+                            <label className="text-sm font-medium text-foreground">{t('orgMyRoleLabel')}</label>
                             <p className="rounded-md border border-input bg-muted/30 px-3 py-2 text-sm text-foreground capitalize">{currentOrgRole}</p>
                           </div>
                         )}
@@ -1146,12 +1146,12 @@ export default function SettingsPage() {
                   <SectionCardHeader className="border-b border-destructive/20">
                     <div className="space-y-1">
                       <h2 className="text-base font-semibold text-destructive">{t('dangerZone')}</h2>
-                      <p className="text-sm text-foreground">Organization을 삭제하면 모든 Project, Member, 데이터가 영구적으로 제거됩니다.</p>
+                      <p className="text-sm text-foreground">{t('orgDeleteWarning')}</p>
                     </div>
                   </SectionCardHeader>
                   <SectionCardBody>
                     <Button variant="destructive" onClick={() => void handleOpenDeleteOrg()}>
-                      Organization 삭제
+                      {t('orgDeleteTitle')}
                     </Button>
                   </SectionCardBody>
                 </SectionCard>
@@ -1364,7 +1364,7 @@ export default function SettingsPage() {
                     </SectionCard>
                   </div>
                 ) : (
-                  <p className="text-sm text-muted-foreground">프로젝트를 선택해주세요.</p>
+                  <p className="text-sm text-muted-foreground">{t('noProject')}</p>
                 )}
               </div>
             </TabsContent>
@@ -1454,7 +1454,7 @@ export default function SettingsPage() {
           }}
         >
           <DialogContent className="max-w-md space-y-4 border-destructive/30" showCloseButton={false}>
-            <DialogTitle className="text-lg font-semibold text-destructive">Organization 삭제</DialogTitle>
+            <DialogTitle className="text-lg font-semibold text-destructive">{t('orgDeleteTitle')}</DialogTitle>
 
             {/* 영향도 */}
             {orgImpactLoading ? (
@@ -1463,14 +1463,14 @@ export default function SettingsPage() {
               </div>
             ) : orgImpact ? (
               <div className="rounded-md border border-border bg-muted/30 p-3 space-y-1 text-sm">
-                <p className="text-muted-foreground">삭제 시 영향 범위:</p>
+                <p className="text-muted-foreground">{t('orgDeleteImpactTitle')}</p>
                 <ul className="space-y-0.5 text-foreground">
-                  <li>• Project <span className="font-semibold">{orgImpact.project_count}개</span> 영구 삭제</li>
-                  <li>• Member <span className="font-semibold">{orgImpact.member_count}명</span> 접근 불가</li>
+                  <li>{t('orgDeleteImpactProjects', { count: orgImpact.project_count })}</li>
+                  <li>{t('orgDeleteImpactMembers', { count: orgImpact.member_count })}</li>
                   {/* story #2590(TIER1) — 조상(bg-muted/30)이 pale이라 text-warning도 대비 미달
                       (교차-요소). tint 위 계열색 글자는 text-foreground(#2420 규칙). */}
                   {orgImpact.has_active_subscription && (
-                    <li className="text-foreground">• 활성 구독이 있습니다 — 삭제 전 구독을 취소해주세요.</li>
+                    <li className="text-foreground">{t('orgDeleteImpactSubscription')}</li>
                   )}
                 </ul>
               </div>
@@ -1480,7 +1480,7 @@ export default function SettingsPage() {
               // 아래), 재시도 또는 명시 인정(탈출구)만 남긴다. 서버(#2898)가 최종 방어선.
               <Alert variant="warning">
                 <AlertDescription className="space-y-3">
-                  <p>영향 범위를 확인할 수 없습니다. 지금은 삭제를 진행할 수 없습니다.</p>
+                  <p>{t('orgDeleteImpactUnavailable')}</p>
                   <Button
                     type="button"
                     variant="outline"
@@ -1499,8 +1499,8 @@ export default function SettingsPage() {
                       onChange={(e) => setConfirmWithoutImpact(e.target.checked)}
                     />
                     <span className="space-y-0.5">
-                      <span className="block">영향 범위를 확인하지 못한 상태로 삭제합니다.</span>
-                      <span className="block text-xs">확인 없이 삭제한 것으로 기록됩니다.</span>
+                      <span className="block">{t('orgDeleteWithoutImpact')}</span>
+                      <span className="block text-xs">{t('orgDeleteWithoutImpactAudit')}</span>
                     </span>
                   </label>
                 </AlertDescription>
@@ -1509,7 +1509,7 @@ export default function SettingsPage() {
 
             <div className="space-y-1.5">
               <label className="text-sm font-medium text-foreground">
-                확인을 위해 Organization 이름 <span className="font-mono text-destructive">{orgInfo.name}</span>을 입력하세요.
+                {t('orgDeleteConfirmPrompt', { name: orgInfo.name })}
               </label>
               <input
                 className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-destructive"
@@ -1544,7 +1544,7 @@ export default function SettingsPage() {
                   confirmWithoutImpact,
                 })}
               >
-                {deletingOrg ? tc('deleting') : '영구 삭제'}
+                {deletingOrg ? tc('deleting') : t('orgDeleteConfirmCta')}
               </Button>
             </div>
           </DialogContent>
