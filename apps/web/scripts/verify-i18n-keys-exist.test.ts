@@ -210,6 +210,99 @@ describe('scanFileContent — story #5ead8723 AC1/AC2/AC3(셀프테스트 6)', (
     });
   });
 
+  // story #3765(3757-b) — 층 A″. #4112에서 손으로 되살린 14건(invite.acceptFailed·
+  // dashboard.ccGateType* 13)의 실 형을 픽스처로 재현한다.
+  describe('indirectLookupRefs/indirectLookupWords — story #3765(층 A″)', () => {
+    it('⭐(A) 번역자 co-argument — invite-error-message.ts 실 형(ns 알려짐 → 전체경로)', () => {
+      const src = `
+        const tInvite = useTranslations('invite');
+        function inviteErrorMessage(t, code, fallbackKey) {
+          return t(fallbackKey);
+        }
+        inviteErrorMessage(tInvite, code, 'acceptFailed');
+      `;
+      const result = scanFileContent(src, 'fake.tsx');
+      expect(result.indirectLookupRefs).toEqual([{ file: 'fake.tsx', line: 6, fullKey: 'invite.acceptFailed' }]);
+      expect(result.indirectLookupWords).toEqual(new Set());
+    });
+
+    it('(A) 번역자가 unknown-ns(파라미터로 받은 t)면 낱말로만 떨어진다', () => {
+      const src = `
+        function C(t: (key: string) => string, code: string) {
+          return helper(t, code, 'someFallback');
+        }
+      `;
+      const result = scanFileContent(src, 'fake.tsx');
+      expect(result.indirectLookupWords).toEqual(new Set(['someFallback']));
+      expect(result.indirectLookupRefs).toEqual([]);
+    });
+
+    it('⭐(B) Record<string,string> 조회 테이블 — gate-type-label.ts 실 형(파일이 ns를 하나도 안 열면 관대한 낱말 축)', () => {
+      const src = `
+        const GATE_TYPE_LABEL_KEYS: Record<string, string> = {
+          qa: 'ccGateTypeQa',
+          pr_review: 'ccGateTypePrReview',
+        };
+        export function gateTypeLabel(t, gateType) {
+          return t(GATE_TYPE_LABEL_KEYS[gateType] ?? 'ccGateGeneric');
+        }
+      `;
+      const result = scanFileContent(src, 'fake.tsx');
+      expect(result.indirectLookupWords).toEqual(new Set(['ccGateTypeQa', 'ccGateTypePrReview']));
+      expect(result.indirectLookupRefs).toEqual([]);
+    });
+
+    it('⭐(B) 같은 파일이 ns를 열면(epic-status-transition.tsx 실 형) 그 ns로만 전체경로를 좁힌다 — 동음이의 다른 ns는 안 건드림', () => {
+      const src = `
+        const LABEL_KEY: Record<string, string> = {
+          draft: 'statusDraft',
+          active: 'statusActive',
+        };
+        function C() {
+          const t = useTranslations('goals');
+          return t(LABEL_KEY[status] ?? 'statusDraft');
+        }
+      `;
+      const result = scanFileContent(src, 'fake.tsx');
+      expect(new Set(result.indirectLookupRefs.map((r) => r.fullKey))).toEqual(
+        new Set(['goals.statusDraft', 'goals.statusActive']),
+      );
+      // ⭐되돌리면 RED — dashboard.statusActive(동음이의, 다른 ns)는 이 파일이 'goals'만 여니
+      // 여기서 나오면 안 된다(관대한 낱말 축으로 새지 않는다는 정밀도 원칙의 핵심 pin).
+      expect(result.indirectLookupRefs.some((r) => r.fullKey === 'dashboard.statusActive')).toBe(false);
+      expect(result.indirectLookupWords).toEqual(new Set());
+    });
+
+    it('동음이의 9건류 — 번역자 co-argument도 Record<string,string> 초기화식도 아니면 아무 신호도 안 낸다', () => {
+      const src = `
+        type CompactionVerdict = 'keep' | 'delete';
+        function f(): CompactionVerdict {
+          const seedKey = x === 'keep' ? 'seedKeep' : 'seedKill';
+          formData.get('description');
+          this.unavailable('create');
+          return 'keep';
+        }
+      `;
+      const result = scanFileContent(src, 'fake.tsx');
+      expect(result.indirectLookupRefs).toEqual([]);
+      expect(result.indirectLookupWords).toEqual(new Set());
+    });
+
+    // 뮤테이션 셀프체크(스토리 AC) — 자가 진짜 테이블 값을 읽는지: 값 하나를 오타로 바꾸면
+    // 그 정확한 문자열은 더 이상 안 나오고(다른 무의미한 문자열로 바뀌었을 뿐이니 당연하지만,
+    // 「하드코딩된 목록이 아니라 실제로 소스를 읽는다」는 사실 자체를 이 대조가 고정한다).
+    it('⭐뮤테이션: 테이블 값 오타 → 원래 값은 더 이상 낱말 축에 없다(자가 실제 값을 읽음)', () => {
+      const src = `
+        const GATE_TYPE_LABEL_KEYS: Record<string, string> = {
+          qa: 'ccGateTypeQaTYPO',
+        };
+      `;
+      const result = scanFileContent(src, 'fake.tsx');
+      expect(result.indirectLookupWords.has('ccGateTypeQa')).toBe(false);
+      expect(result.indirectLookupWords).toEqual(new Set(['ccGateTypeQaTYPO']));
+    });
+  });
+
   it('네임스페이스 없는(루트) useTranslations()도 지원한다', () => {
     const src = `
       const t = useTranslations();
