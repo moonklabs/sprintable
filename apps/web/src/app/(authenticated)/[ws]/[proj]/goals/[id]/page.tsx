@@ -9,7 +9,6 @@ import remarkGfm from 'remark-gfm';
 import { ArrowLeft, Pencil, Trash2, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { CountBadge } from '@/components/ui/count-badge';
 import { EmptyState } from '@/components/ui/empty-state';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
@@ -526,11 +525,16 @@ export default function EpicDetailPage() {
 
         {/* Stories — grouped by status */}
         <section className="space-y-4">
-          {/* story #3764(UI 점검 B·E절, 유나 定) — 수를 제목 문자열 안에 넣지 않는다.
-              제목 고정 + 수는 옆 CountBadge로(이벤트 화면 events/page.tsx와 동형). */}
-          <h2 className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+          {/* story #3764(UI 점검 B·E절, 유나 定 재정정) — 수를 제목 문자열 안에 넣지
+              않는다. 단 이 제목(text-xs font-medium text-muted-foreground)은 이미
+              CountBadge를 쓰는 자리(구성원·권한·이벤트, text-base font-semibold)보다
+              약한 위계다 — CountBadge(font-mono font-bold+테두리+엠보스)를 그대로
+              얹으면 수가 제목보다 강해져 E절이 막으려는 병(제목이 매번 달라 못
+              알아본다)을 다른 방식으로 되풀이한다. 위계가 그릇을 고른다 — 약한
+              제목엔 제목과 같은 대역의 수(tabular-nums, muted). */}
+          <h2 className="text-xs font-medium text-muted-foreground">
             {t('stories')}
-            <CountBadge count={stories.length} />
+            <span className="ml-1.5 tabular-nums text-muted-foreground">{stories.length}</span>
           </h2>
           {stories.length === 0 ? (
             <p className="text-sm italic text-muted-foreground">{t('noStories')}</p>
