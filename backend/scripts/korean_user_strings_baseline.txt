@@ -1052,11 +1052,6 @@ app/services/hypothesis_outcome_confirm.py::measuring 상태만 판정 초안 �
 app/services/hypothesis_outcome_confirm.py::가설을 찾을 수 없습니다.
 app/services/hypothesis_outcome_confirm.py::불법 전이:
 app/services/hypothesis_outcome_confirm.py::중 하나여야 합니다.
-app/services/i18n_catalog.py::사이클이 발생하는 의존성은 허용되지 않음
-app/services/i18n_catalog.py::의존성 대상 아이템을 찾을 수 없음
-app/services/i18n_catalog.py::의존성을 찾을 수 없음
-app/services/i18n_catalog.py::이미 존재하는 의존성
-app/services/i18n_catalog.py::자기참조 의존성은 허용되지 않음
 app/services/insight_snapshots.py::Facebook 서버 오류:
 app/services/insight_snapshots.py::Facebook 액세스 토큰이 만료되었습니다
 app/services/insight_snapshots.py::Facebook 인사이트 API 한도 초과
