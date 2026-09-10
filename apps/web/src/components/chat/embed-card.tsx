@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
@@ -984,6 +985,8 @@ export function EntityChip({
    * entityType으로 그 둘을 이미 가른다). */
   entityStatus?: EntityStatusFetchState;
 } & VariantProps<typeof entityChipLabelVariants>) {
+  // story #3776(1층A) — "결재함에서 보기" 딥링크 CTA, content ns의 기존 submitGateLink 키 재사용.
+  const tContent = useTranslations('content');
   const [showModal, setShowModal] = useState(false);
   // story #461e9a54(P0) — 채팅 트리(ReadingPanelProvider 하위)에서는 패널로, 밖(doc-content-
   // renderer.tsx·story-detail-panel.tsx 등)에서는 null이라 기존 Dialog 모달로 폴백(회귀 0).
@@ -1105,7 +1108,7 @@ export function EntityChip({
           onClick={(e) => e.stopPropagation()}
           className="inline-flex shrink-0 items-center rounded border border-border px-1.5 py-0.5 text-xs font-medium text-muted-foreground no-underline hover:bg-muted"
         >
-          결재함에서 보기
+          {tContent('submitGateLink')}
         </Link>
       ) : null
     ) : null;

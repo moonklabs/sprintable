@@ -1162,7 +1162,7 @@ export default function SettingsPage() {
                 <SectionCard className="border-destructive/20 bg-destructive-tint mt-6">
                   <SectionCardHeader className="border-b border-destructive/20">
                     <div className="space-y-1">
-                      <h2 className="text-base font-semibold text-destructive">위험 구역</h2>
+                      <h2 className="text-base font-semibold text-destructive">{t('dangerZone')}</h2>
                       <p className="text-sm text-foreground">Organization을 삭제하면 모든 Project, Member, 데이터가 영구적으로 제거됩니다.</p>
                     </div>
                   </SectionCardHeader>

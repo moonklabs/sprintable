@@ -7,7 +7,9 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { NextIntlClientProvider } from 'next-intl';
 import { FileViewer } from './file-viewer';
+import koMessages from '../../../messages/ko.json';
 import type { ReadingPanelTarget } from './reading-panel';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -38,7 +40,13 @@ function mount(node: React.ReactElement) {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
-  act(() => { root.render(node); });
+  act(() => {
+    root.render(
+      <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+        {node}
+      </NextIntlClientProvider>,
+    );
+  });
 }
 
 async function waitFor(check: () => boolean, timeoutMs = 5000) {

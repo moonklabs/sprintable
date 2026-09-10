@@ -208,7 +208,7 @@ export function DocEditor({
       WikiLinkNode.configure({
         projectId,
         onNavigate,
-        suggestion: createWikiLinkSuggestion(projectId),
+        suggestion: createWikiLinkSuggestion(projectId, tEditor('notFound')),
       }),
       createSlashCommandExtension(slashMenuStrings),
       PageEmbedExtension.configure({ currentDocId, onNavigate }),

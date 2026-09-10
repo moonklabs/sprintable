@@ -936,7 +936,6 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
   // pickRelevantMergeGate(미종결 우선·동순위는 최근 PR 우선)로 하나를 고른다 — 옛
   // "배열의 첫 번째"는 실사고1/2의 근본원인과 같은 축(어느 PR인지 무작위로 고정)이었다.
   const mergeGate = pickRelevantMergeGate(chipGates) ?? null;
-  const GATE_RISK_MAP: Record<'low' | 'high', '낮음' | '높음'> = { low: '낮음', high: '높음' };
   const ciResult = mergeGate?.neutral_facts?.['ci_result'];
   const evidenceAutoVerify: 'passed' | 'failed' | null = ciResult === 'pass' ? 'passed' : ciResult === 'fail' ? 'failed' : null;
   const workcellEvidenceSignal: ProofCapsuleEvidence | undefined = evidenceAutoVerify ? { autoVerify: evidenceAutoVerify } : undefined;
@@ -951,7 +950,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
   // 다시 열자고 하면 no-fiction 위반(이미 끝난 결정을 대기 중처럼 보여줌).
   const workcellGate: ProofCapsuleGate | undefined =
     mergeGate && mergeGate.status === 'pending'
-      ? { risk: mergeGate.risk_grade ? GATE_RISK_MAP[mergeGate.risk_grade] : undefined, action: t('workcellGateAction'), href: `/gates/${mergeGate.id}` }
+      ? { risk: mergeGate.risk_grade ?? undefined, action: t('workcellGateAction'), href: `/gates/${mergeGate.id}` }
       : undefined;
   const workcellEvidence: ProofCapsuleProps | null =
     evidenceProofState && evidenceStateLabel && (workcellEvidenceSignal || workcellTrustSeal || workcellGate)

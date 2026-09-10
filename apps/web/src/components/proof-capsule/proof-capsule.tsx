@@ -31,8 +31,12 @@ export interface ProofCapsuleEvidence {
 
 export interface ProofCapsuleGate {
   /** full 밀도(Human gate)만 사용 — Attention Queue의 row 밀도는 위험도 표시가 없어 생략 가능.
-   * 값 자체는 canonical(비-i18n) 식별자 — 표시 시점에 `proofCapsule.risk.*` 로 번역(§RISK_KEY). */
-  risk?: '낮음' | '보통' | '높음';
+   * story #3776 — 예전엔 한글(`'낮음'|'보통'|'높음'`)이 BE→호출부→이 컴포넌트 두 모듈
+   * 사이를 canonical 식별자로 돌았다(GATE_RISK_MAP이 BE의 'low'|'high'를 한글로 바꾸고,
+   * 이 컴포넌트의 RISK_KEY가 그걸 다시 영어로 되돌려 t(`risk.${..}`)를 불렀다 — 한글이
+   * "식별자"로만 쓰이고 한 번도 안 그려졌다). BE 원값(`risk_grade`, kanban/types.ts)과
+   * 동형으로 통일 — 표시 시점에 `proofCapsule.risk.*`로 번역(GateRow). */
+  risk?: 'low' | 'medium' | 'high';
   action: string;
   href?: string;
   /** row 밀도(Attention Queue 재사용)에서 개입유형별 버튼 톤 분기. 기본 primary(기존
@@ -167,11 +171,6 @@ function StateHeader({ state, label }: { state: ProofState; label: string }) {
   );
 }
 
-/** canonical(비-i18n) risk 식별자 → `proofCapsule.risk.*` 번역키. */
-const RISK_KEY: Record<NonNullable<ProofCapsuleGate['risk']>, 'low' | 'medium' | 'high'> = {
-  '낮음': 'low', '보통': 'medium', '높음': 'high',
-};
-
 function EvidenceRow({ evidence, sweep }: { evidence: ProofCapsuleEvidence; sweep: boolean }) {
   const t = useTranslations('proofCapsule');
   return (
@@ -225,7 +224,7 @@ function GateRow({ gate, human }: { gate: ProofCapsuleGate; human: ProofCapsuleH
       <div className="flex flex-wrap items-center gap-3.5 text-[13px] text-proof-ink-2">
         <span>{t.rich('gate.owner', { name: human.name, b: (chunks) => <b className="text-proof-ink">{chunks}</b> })}</span>
         {gate.risk ? (
-          <span className="font-mono text-[10.5px]">{t('gate.risk', { risk: t(`risk.${RISK_KEY[gate.risk]}`) })}</span>
+          <span className="font-mono text-[10.5px]">{t('gate.risk', { risk: t(`risk.${gate.risk}`) })}</span>
         ) : null}
         {/* story #3054(2984-S6) — 헤어라인+elev CTA 채택, bg-proof-blue-soft 채움 폐지. */}
         <a

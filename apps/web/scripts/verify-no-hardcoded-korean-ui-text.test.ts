@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import {
-  computeNewViolations, EXEMPT_FILES, loadBaseline, scanContent, scanRepo, violationKey,
+  computeDeadExemptFiles, computeNewViolations, computeStaleBaseline, EXEMPT_FILES, loadBaseline,
+  scanContent, scanRepo, violationKey,
 } from './verify-no-hardcoded-korean-ui-text';
 
 describe('scanContent — JsxText', () => {
@@ -177,6 +178,182 @@ describe('EXEMPT_FILES — 내부 도그푸드·약관(스토리 明示 ④)', (
     for (const exempt of EXEMPT_FILES) {
       expect(violations.some((v) => v.file === exempt)).toBe(false);
     }
+  });
+});
+
+// story #3776(유나 지적 06:09Z) — EXEMPT_FILES는 baseline stale 검사와 달리 자가만료가
+// 없었다(scanRepo가 그냥 건너뛸 뿐) — #2485가 착지해 verify-email/set-password 두 파일이
+// i18n 배선돼도 아무도 EXEMPT_FILES에서 걷으라고 안 알려주는 위험. computeDeadExemptFiles가
+// 그 두 파일을 baseline stale과 동형으로 자가검출한다.
+describe('computeDeadExemptFiles — story #3776(EXEMPT 자가만료)', () => {
+  it('실 저장소 — 지금은 EXEMPT 파일 전부 한글이 실재한다(0건 아님, 죽은 예외 없음)', () => {
+    const dead = computeDeadExemptFiles(path.resolve(__dirname, '../src'));
+    expect(dead).toEqual([]);
+  });
+
+  // 실제 EXEMPT_FILES 멤버 경로에 파일을 만들어(임시 srcRoot) 진짜 함수를 그대로 돌린다
+  // (EXEMPT_FILES 자체는 export const라 갈아끼우지 않고, computeDeadExemptFiles가 실제로
+  // 참조하는 그 Set의 실제 경로 하나를 골라 임시 파일시스템에 재현).
+  it('⭐한글 0건인 EXEMPT 파일은 죽은 예외로 잡힌다(임시 srcRoot에 실 경로 재현)', () => {
+    const target = [...EXEMPT_FILES][0]!; // 예: 'app/internal-dogfood/page.tsx'
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'korean-ui-dead-exempt-'));
+    const abs = path.join(dir, ...target.split('/'));
+    mkdirSync(path.dirname(abs), { recursive: true });
+    writeFileSync(abs, "export function C() { return <div>English only</div>; }");
+    const dead = computeDeadExemptFiles(dir);
+    expect(dead).toContain(target);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('한글이 남아 있는 EXEMPT 파일은 죽은 예외로 안 잡힌다(대조군, 실 경로 재현)', () => {
+    const target = [...EXEMPT_FILES][0]!;
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'korean-ui-live-exempt-'));
+    const abs = path.join(dir, ...target.split('/'));
+    mkdirSync(path.dirname(abs), { recursive: true });
+    writeFileSync(abs, "export function C() { return <div>한글 있음</div>; }");
+    const dead = computeDeadExemptFiles(dir);
+    expect(dead).not.toContain(target);
+    rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+// story #3776(③-c) — JsxExpression 안 식 문자열 리터럴 축.
+// story #3776(③, PO 判 2026-09-10 05:29Z) — 자리 화이트리스트를 버리고 «렌더 아닌
+// 자리 부정목록»으로 뒤집었다. .tsx의 모든 StringLiteral이 기본 대상이고,
+// isNonRenderStringLiteralPosition()에 걸리는 자리만 빠진다.
+describe('scanContent — .tsx 문자열 리터럴 전부(부정목록만 제외, story #3776 ③)', () => {
+  it('flags a bare string literal directly inside {}', () => {
+    const v = scanContent("const x = <div>{'바로'}</div>;", 'fake.tsx');
+    expect(v).toHaveLength(1);
+    expect(v[0]!.text).toBe('바로');
+  });
+
+  it('flags the Hangul branch of a ternary inside {}', () => {
+    const v = scanContent("const x = <div>{cond ? '한글' : t('key')}</div>;", 'fake.tsx');
+    expect(v).toHaveLength(1);
+    expect(v[0]!.text).toBe('한글');
+  });
+
+  it('flags a Hangul fallback in a || expression inside {}', () => {
+    const v = scanContent("const x = <div>{name || '기본값'}</div>;", 'fake.tsx');
+    expect(v).toHaveLength(1);
+    expect(v[0]!.text).toBe('기본값');
+  });
+
+  // story #3776 반전 근거 — «렌더 값이 옵션 배열을 거쳐 화면에 닿는» 자리(유나
+  // theme-settings.tsx:42-44 실사례와 동형). 이제 객체 리터럴 «값»도 잡힌다.
+  it('flags a Hangul object-literal VALUE inside an array later consumed by .map()(옵션 배열 label)', () => {
+    const v = scanContent(
+      "const OPTIONS = [{ value: 'light', label: '라이트 모드' }]; const x = <div>{OPTIONS.map(o => <span>{o.label}</span>)}</div>;",
+      'fake.tsx',
+    );
+    expect(v.map((x) => x.text)).toContain('라이트 모드');
+  });
+
+  // story #3776 반전 근거 — `toast('한글')`처럼 호출 인자를 거쳐 화면(토스트 UI)에
+  // 닿는 자리. 함수 호출 인자를 일괄 배제하던 구판 규칙을 버렸다.
+  it('flags a Hangul string literal passed as a plain function call argument(toast 등)', () => {
+    const v = scanContent("function C() { toast('저장했어요'); return <div />; }", 'fake.tsx');
+    expect(v.map((x) => x.text)).toContain('저장했어요');
+  });
+
+  // JSX 속성 «식»(구판 ②·③의 경계에 있던 자리) — placeholder="한글"뿐 아니라
+  // placeholder={cond ? '한글' : ''}도 이제 걸린다(유나 05:29Z 지적 — 구판이 놓친 자리).
+  it('flags Hangul inside a JSX attribute EXPRESSION(not just a direct string literal)', () => {
+    const v = scanContent("const x = <input placeholder={cond ? '한글' : ''} />;", 'fake.tsx');
+    expect(v.map((x) => x.text)).toContain('한글');
+  });
+
+  it('does not flag string literal call arguments that are i18n keys(no Hangul, moot regardless of axis)', () => {
+    const v = scanContent("const x = <div>{t('key')}</div>;", 'fake.tsx');
+    expect(v).toEqual([]);
+  });
+
+  // 중첩 JSX 이중 계수 0 — 각 StringLiteral 노드는 단일 walk에서 정확히 한 번만
+  // 방문된다(구판의 walk-분기 이원화 자체가 사라졌다).
+  it('flags Hangul inside JSX nested inside a call argument exactly once(no double counting)', () => {
+    const v = scanContent("const x = <div>{items.map(i => <span>{'각각'}</span>)}</div>;", 'fake.tsx');
+    expect(v).toHaveLength(1);
+    expect(v[0]!.text).toBe('각각');
+  });
+
+  // ⭐되돌리면(비교 연산자 배제를 지우면) RED — 비교 피연산자는 불린만 만들 뿐
+  // 화면에 그려지지 않는다.
+  it('⭐does not flag a Hangul comparison operand(=== is not a render position)', () => {
+    const v = scanContent("const x = <div>{status === '완료' ? a : b}</div>;", 'fake.tsx');
+    expect(v).toEqual([]);
+  });
+
+  it('but still flags the ternary branches themselves even when the condition compares Hangul', () => {
+    const v = scanContent("const x = <div>{status === '완료' ? '다됨' : '진행중'}</div>;", 'fake.tsx');
+    expect(v.map((x) => x.text).sort()).toEqual(['다됨', '진행중']);
+  });
+
+  // ⭐되돌리면(switch case 배제를 지우면) RED.
+  it('⭐does not flag a Hangul string used as a switch case value(matching, not rendered)', () => {
+    const content = [
+      "function label(x) { switch (x) { case '한글케이스': return a; default: return b; } }",
+    ].join('\n');
+    expect(scanContent(content, 'fake.tsx')).toEqual([]);
+  });
+
+  // ⭐되돌리면(PropertyAssignment.name 배제를 지우면) RED — 키는 데이터 조회용,
+  // 값(레이블 등)만 렌더된다.
+  it('⭐does not flag a Hangul object-literal KEY(value position is separately covered above)', () => {
+    const v = scanContent("const x = <div>{lookup['한글키']}</div>; const o = { '한글': 1 };", 'fake.tsx');
+    expect(v).toEqual([]);
+  });
+
+  it('does not flag Hangul in an import/export module specifier', () => {
+    const v = scanContent("import Foo from './한글경로';", 'fake.tsx');
+    expect(v).toEqual([]);
+  });
+
+  it('does not flag Hangul in a literal type position', () => {
+    const v = scanContent("type Status = '한글타입';", 'fake.tsx');
+    expect(v).toEqual([]);
+  });
+
+  // ⭐되돌리면(console.* 배제를 지우면) RED — 개발자 콘솔 로그는 사용자 화면이
+  // 아니다(유나 05:31Z 실사례 — console.error 22키가 안 섞여야 한다).
+  it('⭐does not flag Hangul inside a console.error(...) call argument', () => {
+    const v = scanContent("console.error('전송 실패', err);", 'fake.tsx');
+    expect(v).toEqual([]);
+  });
+
+  it('does not flag Hangul inside a this.logger.error(...) call argument', () => {
+    const v = scanContent("this.logger.error('전송 실패', { err });", 'fake.tsx');
+    expect(v).toEqual([]);
+  });
+
+  // ⭐되돌리면(문자열 검사 메서드 배제를 지우면) RED.
+  it('⭐does not flag Hangul inside a .includes()/.startsWith() check argument', () => {
+    const v1 = scanContent("const ok = s.includes('한글검사');", 'fake.tsx');
+    const v2 = scanContent("const ok = s.startsWith('한글검사');", 'fake.tsx');
+    expect(v1).toEqual([]);
+    expect(v2).toEqual([]);
+  });
+
+  it('sees through parenthesized expressions(no special-casing needed — full-scan already reaches every StringLiteral)', () => {
+    const v = scanContent("const x = <div>{(flag ? '한글' : b)}</div>;", 'fake.tsx');
+    expect(v).toHaveLength(1);
+    expect(v[0]!.text).toBe('한글');
+  });
+});
+
+// story #3776(③-b, PO 判) — 죽은 baseline 항목(고쳐졌는데 목록에서 안 지운 것)을
+// main()이 스스로 RED로 잡는다(예전엔 ⚠️ 경고·exit 0이었다).
+describe('computeStaleBaseline — story #3776(③-b)', () => {
+  it('does not flag a baseline key whose violation is still present', () => {
+    const v = { file: 'fake.tsx', line: 1, text: '아직 있음' };
+    expect(computeStaleBaseline([v], new Set([violationKey(v)]))).toEqual([]);
+  });
+
+  // ⭐되돌리면(computeStaleBaseline을 예전 「⚠️ 경고만」 동작으로 되돌리면 — main()이
+  // 이 값을 실패 판정에 안 쓰면) RED. 고쳐진 자리를 baseline에서 안 지워도 CI가 초록으로
+  // 남는 회귀를 이 테스트가 막는다.
+  it('⭐flags a baseline key whose violation no longer exists in the scan(fixed but not removed)', () => {
+    expect(computeStaleBaseline([], new Set(['fake.tsx::더는 없음']))).toEqual(['fake.tsx::더는 없음']);
   });
 });
 

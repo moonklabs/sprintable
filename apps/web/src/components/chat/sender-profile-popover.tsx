@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
+import { useTranslations } from 'next-intl';
 import { ShieldOff } from 'lucide-react';
 import { Avatar } from '@/components/shared/avatar';
 
@@ -24,6 +25,8 @@ interface SenderProfilePopoverProps {
 // 그라운딩 확認됨) — message-context-menu.tsx와 같은 위치-고정 팝업 패턴을 그대로 재사용해
 // 새 상호작용 패턴을 발명하지 않는다.
 export function SenderProfilePopover({ x, y, name, isAgent, avatarUrl, runtimeType, onClose, onBlock }: SenderProfilePopoverProps) {
+  // story #3776(1층A) — "사용자 차단" 버튼, chats ns의 기존 blockUserConfirmConfirm 키 재사용.
+  const tChats = useTranslations('chats');
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -66,7 +69,7 @@ export function SenderProfilePopover({ x, y, name, isAgent, avatarUrl, runtimeTy
             className="flex w-full items-center gap-2.5 px-3 py-2 text-sm hover:bg-muted"
           >
             <ShieldOff className="h-3.5 w-3.5 text-muted-foreground" />
-            사용자 차단
+            {tChats('blockUserConfirmConfirm')}
           </button>
         </>
       )}

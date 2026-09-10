@@ -2,9 +2,21 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { NextIntlClientProvider } from 'next-intl';
 import { SenderProfilePopover } from './sender-profile-popover';
+import koMessages from '../../../messages/ko.json';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+// story #3776(1층A) — SenderProfilePopover가 chats ns의 useTranslations('사용자 차단' 라벨)
+// 를 부르게 되며 next-intl 컨텍스트가 필요해졌다(blocked-users-section.test.tsx 선례 동형).
+function wrap(node: React.ReactNode) {
+  return (
+    <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+      {node}
+    </NextIntlClientProvider>
+  );
+}
 
 let container: HTMLDivElement;
 let root: Root;
@@ -25,14 +37,14 @@ const NOOP = () => {};
 describe('SenderProfilePopover — story #2349 "상대 프로필" 진입점', () => {
   it('이름을 그린다', async () => {
     await act(async () => {
-      root.render(<SenderProfilePopover x={0} y={0} name="오르테가" isAgent onClose={NOOP} />);
+      root.render(wrap(<SenderProfilePopover x={0} y={0} name="오르테가" isAgent onClose={NOOP} />));
     });
     expect(container.textContent).toContain('오르테가');
   });
 
   it('onBlock을 안 주면 「사용자 차단」 버튼이 안 그려진다', async () => {
     await act(async () => {
-      root.render(<SenderProfilePopover x={0} y={0} name="오르테가" isAgent onClose={NOOP} />);
+      root.render(wrap(<SenderProfilePopover x={0} y={0} name="오르테가" isAgent onClose={NOOP} />));
     });
     expect(container.textContent).not.toContain('사용자 차단');
   });
@@ -41,7 +53,7 @@ describe('SenderProfilePopover — story #2349 "상대 프로필" 진입점', ()
     const onBlock = vi.fn();
     const onClose = vi.fn();
     await act(async () => {
-      root.render(<SenderProfilePopover x={0} y={0} name="민" isAgent={false} onClose={onClose} onBlock={onBlock} />);
+      root.render(wrap(<SenderProfilePopover x={0} y={0} name="민" isAgent={false} onClose={onClose} onBlock={onBlock} />));
     });
     const btn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('사용자 차단'));
     expect(btn).not.toBeUndefined();
@@ -53,7 +65,7 @@ describe('SenderProfilePopover — story #2349 "상대 프로필" 진입점', ()
   it('Escape를 누르면 onClose가 불린다', async () => {
     const onClose = vi.fn();
     await act(async () => {
-      root.render(<SenderProfilePopover x={0} y={0} name="민" isAgent={false} onClose={onClose} />);
+      root.render(wrap(<SenderProfilePopover x={0} y={0} name="민" isAgent={false} onClose={onClose} />));
     });
     await act(async () => {
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
@@ -64,7 +76,7 @@ describe('SenderProfilePopover — story #2349 "상대 프로필" 진입점', ()
   it('바깥을 클릭하면 onClose가 불린다', async () => {
     const onClose = vi.fn();
     await act(async () => {
-      root.render(<SenderProfilePopover x={0} y={0} name="민" isAgent={false} onClose={onClose} />);
+      root.render(wrap(<SenderProfilePopover x={0} y={0} name="민" isAgent={false} onClose={onClose} />));
     });
     await act(async () => {
       document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
@@ -76,9 +88,9 @@ describe('SenderProfilePopover — story #2349 "상대 프로필" 진입점', ()
   // 이 팝업에 안 넘겨 Bot/User 하드코딩 아이콘에 머물러 있었다. avatar.tsx 정본 배선.
   it('avatarUrl을 주면 Bot/User 아이콘 대신 avatar.tsx 정본이 실사진(<img>)을 렌더한다', async () => {
     await act(async () => {
-      root.render(
+      root.render(wrap(
         <SenderProfilePopover x={0} y={0} name="유나" isAgent={false} avatarUrl="https://storage.googleapis.com/bucket/avatar/a.png" onClose={NOOP} />,
-      );
+      ));
     });
     const img = container.querySelector('img');
     expect(img).not.toBeNull();
@@ -87,7 +99,7 @@ describe('SenderProfilePopover — story #2349 "상대 프로필" 진입점', ()
 
   it('avatarUrl을 안 주면(레거시) avatar.tsx 정본의 이니셜 폴백으로 떨어진다(img 없음)', async () => {
     await act(async () => {
-      root.render(<SenderProfilePopover x={0} y={0} name="유나" isAgent={false} onClose={NOOP} />);
+      root.render(wrap(<SenderProfilePopover x={0} y={0} name="유나" isAgent={false} onClose={NOOP} />));
     });
     expect(container.querySelector('img')).toBeNull();
   });
@@ -98,7 +110,7 @@ describe('SenderProfilePopover — story #2349 "상대 프로필" 진입점', ()
 describe('SenderProfilePopover — story #3106 runtimeType 배선', () => {
   it('runtimeType을 주면 아바타에 커넥터 공식 아이콘이 뜬다', async () => {
     await act(async () => {
-      root.render(<SenderProfilePopover x={0} y={0} name="오르테가" isAgent runtimeType="claude-code" onClose={NOOP} />);
+      root.render(wrap(<SenderProfilePopover x={0} y={0} name="오르테가" isAgent runtimeType="claude-code" onClose={NOOP} />));
     });
     const disk = container.querySelector('.rounded-full.ring-2.ring-background');
     expect(disk?.querySelector('img')?.getAttribute('src')).toBe('/connector-icons/claude-code.jpg');
@@ -106,7 +118,7 @@ describe('SenderProfilePopover — story #3106 runtimeType 배선', () => {
 
   it('runtimeType을 안 주면(레거시) "Agent" 텍스트 폴백 그대로다(회귀 없음)', async () => {
     await act(async () => {
-      root.render(<SenderProfilePopover x={0} y={0} name="오르테가" isAgent onClose={NOOP} />);
+      root.render(wrap(<SenderProfilePopover x={0} y={0} name="오르테가" isAgent onClose={NOOP} />));
     });
     expect(container.querySelector('.rounded-full.ring-2.ring-background')).toBeNull();
   });
@@ -117,7 +129,7 @@ describe('SenderProfilePopover — story #3106 runtimeType 배선', () => {
 describe('SenderProfilePopover — 로드맵 PR-B L1(floating elev-overlay)', () => {
   it('팝오버 컨테이너가 shadow-[var(--elev-overlay)]를 쓰고 shadow-md는 안 쓴다', async () => {
     await act(async () => {
-      root.render(<SenderProfilePopover x={0} y={0} name="오르테가" isAgent onClose={NOOP} />);
+      root.render(wrap(<SenderProfilePopover x={0} y={0} name="오르테가" isAgent onClose={NOOP} />));
     });
     const popover = container.querySelector('[role="dialog"]');
     expect(popover?.className).toContain('shadow-[var(--elev-overlay)]');
