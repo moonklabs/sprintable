@@ -2389,6 +2389,7 @@
     "insightStatusUnsupported": "Not provided by channel",
     "insightSnapshotPendingWithDue": "Snapshot due · {due}",
     "insightSnapshotUnsupported": "This channel doesn't provide performance data",
+    "insightSnapshotFailed": "Couldn't collect performance data",
     "channelPostsTitle": "Channel Posts",
     "channelPostsDescription": "Manage drafts, approvals, and publishing for channel posts (Threads, etc.).",
     "channelPostsLoadFailed": "Failed to load channel posts.",

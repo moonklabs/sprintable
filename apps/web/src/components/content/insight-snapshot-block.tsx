@@ -181,7 +181,13 @@ export function InsightSnapshotBlock({ snapshots, orgTimezone, locale, publicati
                 </span>
               ) : snap.status === 'failed' ? (
                 <span className={toneClass} data-testid="insight-snapshot-failure">
-                  {t(STATUS_LABEL_KEYS.failed)}
+                  {/* story #3499 후속(페드루 지시·유나 3426 실픽셀, 2026-09-10) —
+                      insights-board-metric-cell.tsx의 §17-10 상태 라벨(명사구·표 셀
+                      전제)과 이 블록(문장·형제 unsupported도 문장)은 다른 문법을 요구해
+                      한 키를 더는 같이 못 쓴다(전제가 바뀜 — 소비처 1곳 가정이 깨짐).
+                      「다시 시도합니다」는 쓰지 않는다 — 이 화면엔 attempt_count가 안
+                      내려와 재시도 여부를 화면이 모른다(모르는 것을 단정하지 않는다). */}
+                  {t('insightSnapshotFailed')}
                 </span>
               ) : snap.status === 'captured' && snap.captured_at ? (
                 <span data-testid="insight-snapshot-captured">
