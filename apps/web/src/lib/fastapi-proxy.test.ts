@@ -3,14 +3,25 @@
 // FastAPI로 그대로 전달되는지(스테일 JWT project_id로 덮이지 않는지) 증명.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { getServerSessionMock } = vi.hoisted(() => ({
+const { getServerSessionMock, getLocaleMock } = vi.hoisted(() => ({
   getServerSessionMock: vi.fn(),
+  getLocaleMock: vi.fn(),
 }));
 
 vi.mock('@/lib/db/server', () => ({ getServerSession: getServerSessionMock }));
+vi.mock('@/i18n/request', () => ({ getLocale: getLocaleMock }));
 
 import { proxyToFastapi, proxyToFastapiWithParams, proxyToFastapiWrapped, mapApiError } from './fastapi-proxy';
 import { NotFoundError, ForbiddenError } from '@sprintable/core-storage';
+
+// story #3786 후속(2026-09-10) — 이 파일의 다른 describe 블록들은 Accept-Language와
+// 무관한 축을 검증하므로, 그 블록들에서 getLocale()이 매번 'en'을 주도록 파일 전역
+// 기본값을 하나 둔다(개별 블록에서 따로 안 건드리면 이 값). 아래 전용 블록만 이
+// 기본값을 재정의/실패시켜 실제 forwarding 로직을 검증한다.
+beforeEach(() => {
+  getLocaleMock.mockReset();
+  getLocaleMock.mockResolvedValue('en');
+});
 
 // story #2488 — packages/storage-api/src/utils.ts와 완전 동일한 사본(중복 구현)이라
 // 같은 회귀가드를 여기도 둔다(합치는 consolidation은 별개, PO 확定).
@@ -86,37 +97,76 @@ describe('fastapi-proxy — X-Project-Id override passthrough (story 7d6b770b �
   });
 });
 
-// story #3778 — 회고 내보내기 BFF가 next-intl locale 쿠키를 Accept-Language로 실어
-// BE(retros.py::export_session)에 전달하는 경로. 전역 forward 목록(x-project-id 등)과
-// 달리 options.extraHeaders로 호출부가 명시 opt-in한 헤더만 실린다.
-describe('fastapi-proxy — extraHeaders opt-in passthrough(story #3778)', () => {
+// story #3778 최초본은 회고 내보내기 route 하나만 extraHeaders로 Accept-Language를
+// opt-in 하는 구조였다. story #3786 후속(유나 실측·페드루 그라운딩 2026-09-10) —
+// 그 opt-in 전제가 사고였다: 전역 forward 목록에 없어 BFF 경유 요청 484개 전부가
+// getLocale()이 실제로 아는 앱 언어를 BE에 못 실었다(BE i18n 카탈로그 en이 웹앱
+// 사용자에게 도달 0). 이제 공통 계층이 매 호출마다 getLocale()을 기본으로 싣고,
+// extraHeaders는 라우트별 override 용도로만 남는다.
+describe('fastapi-proxy — Accept-Language 공통층 기본 forwarding(story #3786 후속)', () => {
   beforeEach(() => {
     getServerSessionMock.mockReset();
     getServerSessionMock.mockResolvedValue({ access_token: 'token-1', org_id: 'org-1', project_id: 'proj-1' });
     global.fetch = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
   });
 
-  it('extraHeaders로 넘긴 헤더가 그대로 FastAPI 호출에 실린다', async () => {
-    const request = new Request('http://localhost/api/retro-sessions/abc/export');
-
-    await proxyToFastapi(request, '/api/v2/retros/abc/export', { extraHeaders: { 'Accept-Language': 'en' } });
-
-    const [, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
-    const headers = init.headers as Record<string, string>;
-    expect(headers['Accept-Language']).toBe('en');
-  });
-
-  it('extraHeaders를 안 넘기면 안 실림(옵트인 — 다른 라우트 무회귀)', async () => {
+  it('extraHeaders를 안 넘겨도 getLocale()의 값이 Accept-Language로 실린다(공통층 기본)', async () => {
+    getLocaleMock.mockResolvedValue('en');
     const request = new Request('http://localhost/api/retro-sessions/abc/export');
 
     await proxyToFastapi(request, '/api/v2/retros/abc/export');
 
     const [, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
     const headers = init.headers as Record<string, string>;
+    expect(headers['Accept-Language']).toBe('en');
+  });
+
+  it('ko 사용자는 ko가 실린다(getLocale()이 소스)', async () => {
+    getLocaleMock.mockResolvedValue('ko');
+    const request = new Request('http://localhost/api/gates/g1/toss');
+
+    await proxyToFastapi(request, '/api/v2/gates/g1/toss');
+
+    const [, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    expect(headers['Accept-Language']).toBe('ko');
+  });
+
+  it('extraHeaders로 명시 override하면 그 값이 getLocale() 기본값을 이긴다(라우트별 override 유지)', async () => {
+    getLocaleMock.mockResolvedValue('en');
+    const request = new Request('http://localhost/api/retro-sessions/abc/export');
+
+    await proxyToFastapi(request, '/api/v2/retros/abc/export', { extraHeaders: { 'Accept-Language': 'ko' } });
+
+    const [, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    expect(headers['Accept-Language']).toBe('ko');
+  });
+
+  it('getLocale()이 던지면(요청 스코프 밖 등) 원 요청의 Accept-Language 헤더로 폴백한다', async () => {
+    getLocaleMock.mockRejectedValue(new Error('next/headers 요청 스코프 밖'));
+    const request = new Request('http://localhost/api/me', { headers: { 'Accept-Language': 'ja' } });
+
+    await proxyToFastapi(request, '/api/v2/me');
+
+    const [, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    expect(headers['Accept-Language']).toBe('ja');
+  });
+
+  it('getLocale()이 던지고 원 요청에도 Accept-Language가 없으면 안 실린다(값을 지어내지 않는다)', async () => {
+    getLocaleMock.mockRejectedValue(new Error('next/headers 요청 스코프 밖'));
+    const request = new Request('http://localhost/api/me');
+
+    await proxyToFastapi(request, '/api/v2/me');
+
+    const [, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
+    const headers = init.headers as Record<string, string>;
     expect(headers['Accept-Language']).toBeUndefined();
   });
 
-  it('proxyToFastapiWithParams도 extraHeaders를 그대로 전달한다', async () => {
+  it('proxyToFastapiWithParams도 getLocale()을 기본으로 싣고 extraHeaders가 넘어오면 override한다', async () => {
+    getLocaleMock.mockResolvedValue('en');
     const request = new Request('http://localhost/api/retro-sessions/abc/export');
 
     await proxyToFastapiWithParams(request, '/api/v2/retros/[id]/export', { id: 'abc' }, {

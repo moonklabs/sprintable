@@ -1,26 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-// story #3778 CHANGES — 로케일 해석은 getLocale()(src/i18n/request.ts, 화면과 동일
-// 함수) 하나로 통일했다. 이 라우트는 그 결과 문자열을 그대로 Accept-Language로
-// forward만 한다 — 쿠키/헤더 폴백 로직 자체는 request.test.ts가 별도로 고정한다.
-const { getOrgProjectAuthContext, proxyToFastapiWithParams, getLocaleMock } = vi.hoisted(() => ({
+// story #3786 후속(2026-09-10) — 이 라우트가 직접 풀던 getLocale()→extraHeaders 배선은
+// 공통 프록시 계층(fastapi-proxy.ts::proxyToFastapi)의 기본 동작으로 이관됐다(공통층
+// 우선, 중복 계산 제거). 로케일 forwarding 자체의 회귀가드는 이제
+// apps/web/src/lib/fastapi-proxy.test.ts가 진다 — 이 파일은 이 라우트 고유의 계약
+// (markdown 원문 재봉투·401·4xx/5xx 그대로 전달)만 고정한다.
+const { getOrgProjectAuthContext, proxyToFastapiWithParams } = vi.hoisted(() => ({
   getOrgProjectAuthContext: vi.fn(),
   proxyToFastapiWithParams: vi.fn(),
-  getLocaleMock: vi.fn(),
 }));
 
 vi.mock('@/lib/auth-helpers', () => ({ getOrgProjectAuthContext }));
 vi.mock('@/lib/fastapi-proxy', () => ({ proxyToFastapiWithParams }));
-vi.mock('@/i18n/request', () => ({ getLocale: getLocaleMock }));
 
 import { GET } from './route';
 
 function makeAgent() {
   return { id: 'agent-1', type: 'agent', rateLimitExceeded: false, rateLimitRemaining: 299, rateLimitResetAt: 0 };
-}
-
-function makeRequest() {
-  return new Request('http://localhost/api/retro-sessions/session-1/export?project_id=project-1');
 }
 
 // story #3774 — BE `retros.py::export_session`은 JSON 봉투가 아니라 마크다운 텍스트를
@@ -31,9 +27,7 @@ describe('GET /api/retro-sessions/[id]/export', () => {
   beforeEach(() => {
     getOrgProjectAuthContext.mockReset();
     proxyToFastapiWithParams.mockReset();
-    getLocaleMock.mockReset();
     getOrgProjectAuthContext.mockResolvedValue(makeAgent());
-    getLocaleMock.mockResolvedValue('en');
   });
 
   it('returns 401 when not authenticated', async () => {
@@ -94,65 +88,33 @@ describe('GET /api/retro-sessions/[id]/export', () => {
 
     expect(response.status).toBe(403);
   });
-});
-
-describe('GET /api/retro-sessions/[id]/export — story #3778 로케일 forward', () => {
-  beforeEach(() => {
-    getOrgProjectAuthContext.mockReset();
-    proxyToFastapiWithParams.mockReset();
-    getLocaleMock.mockReset();
-    getOrgProjectAuthContext.mockResolvedValue(makeAgent());
-    proxyToFastapiWithParams.mockResolvedValue(
-      new Response('# doc', { status: 200, headers: { 'Content-Type': 'text/markdown' } }),
-    );
-  });
-
-  it('⭐getLocale()의 결과(en)를 Accept-Language로 그대로 실어 BE 호출에 넘긴다', async () => {
-    getLocaleMock.mockResolvedValue('en');
-
-    await GET(makeRequest(), { params: Promise.resolve({ id: 'session-1' }) });
-
-    expect(proxyToFastapiWithParams).toHaveBeenCalledWith(
-      expect.anything(),
-      '/api/v2/retros/[id]/export',
-      { id: 'session-1' },
-      { extraHeaders: { 'Accept-Language': 'en' } },
-    );
-  });
-
-  it('getLocale()이 ko를 돌려주면 그대로 ko를 넘긴다', async () => {
-    getLocaleMock.mockResolvedValue('ko');
-
-    await GET(makeRequest(), { params: Promise.resolve({ id: 'session-1' }) });
-
-    expect(proxyToFastapiWithParams).toHaveBeenCalledWith(
-      expect.anything(),
-      '/api/v2/retros/[id]/export',
-      { id: 'session-1' },
-      { extraHeaders: { 'Accept-Language': 'ko' } },
-    );
-  });
-
-  // story #3778 CHANGES(유나 design:changes) — 최초본은 쿠키가 없으면 extraHeaders
-  // 자체를 안 보냈다(BE 기본값에 맡김 — 그게 바로 "화면은 en인데 문서는 ko"였던 병의
-  // 경로). 지금은 getLocale()이 항상 구체적인 로케일을 돌려주므로(자체 기본값 en까지
-  // 포함) extraHeaders가 never undefined다 — 그 자체가 회귀가드.
-  it('⭐getLocale()은 항상 구체값을 돌려주므로 extraHeaders가 undefined로 빠지는 경우가 없다', async () => {
-    getLocaleMock.mockResolvedValue('en'); // getLocale() 자신의 기본값(쿠키·헤더 둘 다 없을 때)
-
-    await GET(makeRequest(), { params: Promise.resolve({ id: 'session-1' }) });
-
-    const call = proxyToFastapiWithParams.mock.calls[0];
-    expect(call?.[3]).toEqual({ extraHeaders: { 'Accept-Language': 'en' } });
-    expect(call?.[3]?.extraHeaders).not.toBeUndefined();
-  });
 
   it('인증 실패면 401 — BE 호출 자체를 안 한다', async () => {
     getOrgProjectAuthContext.mockResolvedValue(null);
 
-    const res = await GET(makeRequest(), { params: Promise.resolve({ id: 'session-1' }) });
+    const res = await GET(
+      new Request('http://localhost/api/retro-sessions/session-1/export?project_id=project-1'),
+      { params: Promise.resolve({ id: 'session-1' }) },
+    );
 
     expect(res.status).toBe(401);
     expect(proxyToFastapiWithParams).not.toHaveBeenCalled();
+  });
+
+  // story #3786 후속 — 이 라우트가 더는 extraHeaders를 스스로 계산하지 않는다는 것을
+  // 고정한다(공통 프록시 계층이 getLocale()을 기본으로 싣는다 — fastapi-proxy.test.ts
+  // 「Accept-Language 공통층 기본 forwarding」 블록에서 검증). options 인자 자체를
+  // 안 넘기는 3-arg 호출이 이 라우트의 정상 형이다.
+  it('proxyToFastapiWithParams를 options 없이(3-arg) 호출한다 — extraHeaders 자체 계산 없음', async () => {
+    await GET(
+      new Request('http://localhost/api/retro-sessions/session-1/export?project_id=project-1'),
+      { params: Promise.resolve({ id: 'session-1' }) },
+    );
+
+    expect(proxyToFastapiWithParams).toHaveBeenCalledWith(
+      expect.anything(),
+      '/api/v2/retros/[id]/export',
+      { id: 'session-1' },
+    );
   });
 });

@@ -5,6 +5,7 @@
 
 import { getServerSession } from '@/lib/db/server';
 import { apiError, apiSuccess, ApiErrors } from '@/lib/api-response';
+import { getLocale } from '@/i18n/request';
 
 // story #2499 — 이 파일이 packages/storage-api/src/utils.ts와 완전 동일한 mapApiError/
 // fastapiCall 사본을 따로 갖고 있어(#2488에서 같은 버그를 두 곳에 각각 고쳐야 했다),
@@ -39,10 +40,14 @@ async function resolveAuthHeader(request: Request): Promise<string | null> {
 interface ProxyOptions {
   /** 인증 없이도 허용할 경우 true */
   public?: boolean;
-  // story #3778 — 회고 내보내기처럼 BE가 낱말 선택(로케일)을 알아야 하는 소수 라우트용.
-  // 전역 forward 목록(line 68 부근)에 안 얹는다 — 그 목록은 "요청 자체가 원래 갖고
-  // 있던 신호"를 그대로 통과시키는 자리이고, 로케일은 그 라우트(route.ts)가 next-intl
-  // 쿠키에서 직접 읽어 이번 호출에만 실어야 하는 값이라 별도 옵션으로 좁힌다.
+  // story #3786 후속(유나 실측 2026-09-10 14:09Z, 페드루 그라운딩) — 예전엔 이 옵션이
+  // "로케일은 소수 라우트(#3778 회고 내보내기)만 개별로 싣는 값"이라고 적혀 있었으나,
+  // 그 전제 자체가 실 사고였다: 전역 forward 목록에 Accept-Language가 없어 BFF 경유
+  // 요청 전부(proxyToFastapi 소비 라우트 484개)에서 BE i18n 카탈로그(#3779/#3786/#3793)
+  // en 문장이 끊겼다 — BE 직접 호출(예: curl)은 en이 오는데 웹앱 경유는 ko 원문
+  // (toss-sheet류 raw message 통과 경로). 지금은 아래에서 getLocale()로 앱이 실제로
+  // 보여주는 언어를 항상 Accept-Language로 실어 보낸다 — 이 옵션은 그 값을 라우트별로
+  // override하고 싶을 때만 쓴다(대부분 안 써도 된다).
   extraHeaders?: Record<string, string>;
 }
 
@@ -73,6 +78,18 @@ export async function proxyToFastapi(
   for (const h of ['x-forwarded-for', 'x-real-ip', 'x-api-key', 'x-org-id', 'x-project-id']) {
     const v = request.headers.get(h);
     if (v) headers[h] = v;
+  }
+  // story #3786 후속(유나 실측·페드루 그라운딩 2026-09-10) — getLocale()(쿠키→
+  // Accept-Language 헤더→기본값 순, src/i18n/request.ts)이 앱 화면이 실제로 그리는
+  // 그 언어를 그대로 돌려준다 — 화면과 BE 응답 언어가 갈리지 않게 항상 싣는다.
+  // getLocale()은 next/headers의 cookies()/headers()에 기대므로(요청 스코프 밖에서
+  // 부르면 던짐) 실패하면 원 요청의 Accept-Language를 그대로 통과시키는 것으로
+  // 폴백한다(집 밖 컨텍스트에서도 이 프록시가 안 죽게).
+  try {
+    headers['Accept-Language'] = await getLocale();
+  } catch {
+    const fallback = request.headers.get('Accept-Language');
+    if (fallback) headers['Accept-Language'] = fallback;
   }
   if (options.extraHeaders) Object.assign(headers, options.extraHeaders);
 
