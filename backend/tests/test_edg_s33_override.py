@@ -197,11 +197,12 @@ async def test_override_endpoint_non_owner_403():
     from unittest.mock import AsyncMock, patch
     from fastapi import BackgroundTasks, HTTPException
     from app.routers import gates as gates_mod
-    from app.routers.gates import GateOverrideRequest, override_gate_endpoint
+    from app.routers.gates import GateOverrideRequest, _override_gate_endpoint
     with patch.object(gates_mod, "resolve_member", AsyncMock(return_value=_resolved_owner())), \
          patch.object(gates_mod, "is_org_owner", AsyncMock(return_value=False)):  # admin이지만 owner 아님
         with pytest.raises(HTTPException) as ei:
-            await override_gate_endpoint(
+            await _override_gate_endpoint(
+                resolved_locale="ko",
                 id=uuid.uuid4(), body=GateOverrideRequest(decision="approved", reason="x"),
                 background_tasks=BackgroundTasks(),
                 session=AsyncMock(), org_id=uuid.uuid4(),

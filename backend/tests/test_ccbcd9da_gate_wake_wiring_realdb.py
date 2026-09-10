@@ -161,7 +161,7 @@ async def test_transition_gate_endpoint_wakes_after_commit(monkeypatch):
     가 실제로 호출되는지 검증(전엔 무호출=무음)."""
     from fastapi import BackgroundTasks
     from app.routers import gates as gates_mod
-    from app.routers.gates import GateTransitionRequest, transition_gate_endpoint
+    from app.routers.gates import GateTransitionRequest, _transition_gate_endpoint
     from app.services.member_resolver import ResolvedMember
     from unittest.mock import AsyncMock, patch
 
@@ -196,7 +196,8 @@ async def test_transition_gate_endpoint_wakes_after_commit(monkeypatch):
                 bg = BackgroundTasks()
                 # story #2027: gate_type="custom_review"는 risk 매트릭스 폴백(미분류→고위험)이라
                 # 이 파일의 관심사(wake 배선)와 무관한 사유-강제 가드를 note+evidence_viewed로 우회.
-                await transition_gate_endpoint(
+                await _transition_gate_endpoint(
+                resolved_locale="ko",
                     id=seeded["gate"], body=GateTransitionRequest(status="approved", note="테스트 사유", evidence_viewed=True),
                     background_tasks=bg,
                     session=s2, org_id=seeded["org"],

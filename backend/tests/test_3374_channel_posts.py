@@ -358,7 +358,7 @@ async def test_approve_after_edit_is_blocked_until_resubmit_seals_new_version():
     "external_publish"로만 스코프, site 특정 로직 0)가 코드 변경 없이 channel_posts의
     external_publish 게이트에도 그대로 적용됨을 직접 확認한다."""
     from app.main import app
-    from app.routers.gates import GateTransitionRequest, transition_gate_endpoint
+    from app.routers.gates import GateTransitionRequest, _transition_gate_endpoint
     from app.services.member_resolver import ResolvedMember
 
     engine, Session = await _session_factory()
@@ -425,7 +425,8 @@ async def test_approve_after_edit_is_blocked_until_resubmit_seals_new_version():
             with patch.object(gates_mod, "resolve_member", AsyncMock(return_value=approver)), \
                  patch.object(gates_mod, "_non_doc_gate_approvable", AsyncMock(return_value=True)):
                 with pytest.raises(HTTPException) as exc_info:
-                    await transition_gate_endpoint(
+                    await _transition_gate_endpoint(
+                resolved_locale="ko",
                         id=gate_id, body=GateTransitionRequest(status="approved"),
                         background_tasks=BackgroundTasks(), session=s, org_id=org_id, auth=_FakeAuth(),
                     )
@@ -456,7 +457,7 @@ async def test_double_edit_without_resubmit_between_still_requires_and_allows_re
     "이미 봉인돼 있다"로 조용히 넘어가 승인이 영구히 409 SITE_POST_RESUBMIT_REQUIRED
     로 막힌다."""
     from app.main import app
-    from app.routers.gates import GateTransitionRequest, transition_gate_endpoint
+    from app.routers.gates import GateTransitionRequest, _transition_gate_endpoint
     from app.services.member_resolver import ResolvedMember
 
     engine, Session = await _session_factory()
@@ -540,7 +541,8 @@ async def test_double_edit_without_resubmit_between_still_requires_and_allows_re
         async with Session() as s:
             with patch.object(gates_mod, "resolve_member", AsyncMock(return_value=approver)), \
                  patch.object(gates_mod, "_non_doc_gate_approvable", AsyncMock(return_value=True)):
-                approved = await transition_gate_endpoint(
+                approved = await _transition_gate_endpoint(
+                resolved_locale="ko",
                     id=gate_id, body=GateTransitionRequest(status="approved", note="재검토 완료", evidence_viewed=True),
                     background_tasks=BackgroundTasks(), session=s, org_id=org_id, auth=_FakeAuth(),
                 )

@@ -13,7 +13,7 @@ step_run)=None 폴백도 `gate_service.resolve_work_item_project_id()`로 projec
 테스트 구성:
 - resolve_work_item_project_id 타입별 분기(story/task/doc/미인식) — mocked session, 신규 쿼리
   없이 검증(요청 순수 로직).
-- routers/gates.py 제네릭 create_gate_endpoint — mocked session, project_id 조회→threading 확인.
+- routers/gates.py 제네릭 _create_gate_endpoint — mocked session, project_id 조회→threading 확인.
 - merge_verdict_gate.evaluate_merge_gate — mocked cage 의존성, project_id threading 확인.
 - workflow_line_config.request_publish — 실 Postgres(org-level None·project-level 값 둘 다).
 - gate_service.override_gate — 실 Postgres, sr=None 폴백이 실제로 project_id를 조회하는지 확인.
@@ -114,7 +114,7 @@ async def test_generic_gate_endpoint_threads_resolved_project_id():
     """POST /api/v2/gates(work_item_type='story')가 project_id를 조회해 create_gate로
     넘겨야 한다(story #1968 스코프①)."""
     from app.routers import gates as gates_mod
-    from app.routers.gates import GateCreateRequest, create_gate_endpoint
+    from app.routers.gates import GateCreateRequest, _create_gate_endpoint
 
     org_id, work_item_id, project_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
     session = AsyncMock()
@@ -133,7 +133,8 @@ async def test_generic_gate_endpoint_threads_resolved_project_id():
          patch("app.services.project_auth.has_project_access", AsyncMock(return_value=True)), \
          patch.object(gates_mod, "create_gate", AsyncMock(return_value=gate)) as create_spy, \
          patch.object(gates_mod.GateResponse, "model_validate", lambda g: "OK"):
-        await create_gate_endpoint(body=body, session=session, org_id=org_id, _auth=auth)
+        await _create_gate_endpoint(
+                resolved_locale="ko",body=body, session=session, org_id=org_id, _auth=auth)
 
     resolve_spy.assert_awaited_once_with(session, org_id, "story", work_item_id)
     assert create_spy.await_args.kwargs["project_id"] == project_id
@@ -144,7 +145,7 @@ async def test_generic_gate_endpoint_known_agnostic_type_passes_none():
     """#2237(②): KNOWN_PROJECT_AGNOSTIC_WORK_ITEM_TYPES 명시 allowlist(예: wf_line_version)에
     있는 타입만 project_id=None 그대로 통과한다(진짜 project-무관 타입 — 크래시 아님)."""
     from app.routers import gates as gates_mod
-    from app.routers.gates import GateCreateRequest, create_gate_endpoint
+    from app.routers.gates import GateCreateRequest, _create_gate_endpoint
 
     org_id, work_item_id = uuid.uuid4(), uuid.uuid4()
     session = AsyncMock()
@@ -159,7 +160,8 @@ async def test_generic_gate_endpoint_known_agnostic_type_passes_none():
                        AsyncMock(return_value=None)), \
          patch.object(gates_mod, "create_gate", AsyncMock(return_value=gate)) as create_spy, \
          patch.object(gates_mod.GateResponse, "model_validate", lambda g: "OK"):
-        await create_gate_endpoint(body=body, session=session, org_id=org_id, _auth=SimpleNamespace())
+        await _create_gate_endpoint(
+                resolved_locale="ko",body=body, session=session, org_id=org_id, _auth=SimpleNamespace())
 
     assert create_spy.await_args.kwargs["project_id"] is None
 
@@ -171,7 +173,7 @@ async def test_generic_gate_endpoint_unclassified_type_rejected_fail_closed():
     통과였다 — 새 work_item_type이 조용히 다시 뚫리는 재발 클래스를 막는다)."""
     from fastapi import HTTPException
     from app.routers import gates as gates_mod
-    from app.routers.gates import GateCreateRequest, create_gate_endpoint
+    from app.routers.gates import GateCreateRequest, _create_gate_endpoint
 
     org_id, work_item_id = uuid.uuid4(), uuid.uuid4()
     session = AsyncMock()
@@ -182,7 +184,8 @@ async def test_generic_gate_endpoint_unclassified_type_rejected_fail_closed():
 
     with patch.object(gates_mod, "resolve_work_item_project_id", AsyncMock(return_value=None)):
         with pytest.raises(HTTPException) as ei:
-            await create_gate_endpoint(
+            await _create_gate_endpoint(
+                resolved_locale="ko",
                 body=body, session=session, org_id=org_id,
                 _auth=SimpleNamespace(user_id=str(uuid.uuid4())),
             )

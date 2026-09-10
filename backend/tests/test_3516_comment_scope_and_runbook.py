@@ -195,7 +195,7 @@ async def test_agent_scope_matrix():
             assert resolved.type == "agent"
             gate_row = await s.get(Gate, gate_id)
             with pytest.raises(HTTPException) as exc_info:
-                await _authorize_gate_approve_equivalent(s, gate_row, resolved, auth, org_id)
+                await _authorize_gate_approve_equivalent(s, gate_row, resolved, auth, org_id, "ko")
             assert exc_info.value.status_code == 403
     finally:
         await engine.dispose()

@@ -1,6 +1,6 @@
-"""#2237(WRITE②) — POST /api/v2/gates(create_gate_endpoint) project-scope IDOR, 실 PG.
+"""#2237(WRITE②) — POST /api/v2/gates(_create_gate_endpoint) project-scope IDOR, 실 PG.
 
-갭: create_gate_endpoint 는 resolve_work_item_project_id() 로 project_id 를 조회만 할 뿐(gate_service.py),
+갭: _create_gate_endpoint 는 resolve_work_item_project_id() 로 project_id 를 조회만 할 뿐(gate_service.py),
 caller 가 그 project 에 접근권이 있는지는 전혀 검증하지 않았다 — 형제 get_gate_endpoint(GET /{id})는
 동일 project_id 에 has_project_access 를 강제하는데(story #1970) create 경로만 빠져 있었다(#2200 A급
 전수 적출). 同org 비-project 멤버가 접근권 없는 project 의 story/doc/task 를 work_item 으로 임의
@@ -87,13 +87,14 @@ async def _gate_count(Session, work_item_id):
 @pytest.mark.anyio
 async def test_create_gate_own_project_200():
     """회귀0: PROJ_A grant caller가 PROJ_A story를 work_item으로 qa 게이트 생성 → 성공."""
-    from app.routers.gates import GateCreateRequest, create_gate_endpoint
+    from app.routers.gates import GateCreateRequest, _create_gate_endpoint
     eng, Session = await _engine()
     try:
         async with Session() as s:
             await _seed(s)
         async with Session() as s:
-            resp = await create_gate_endpoint(
+            resp = await _create_gate_endpoint(
+                resolved_locale="ko",
                 body=GateCreateRequest(
                     work_item_id=STORY_A, work_item_type="story", gate_type="qa",
                     member_id=uuid.uuid4(), role_id=uuid.uuid4(),
@@ -110,14 +111,15 @@ async def test_create_gate_own_project_200():
 async def test_create_gate_cross_project_blocked_404_not_created():
     """봉인: 접근권 없는 PROJ_B story를 work_item으로 게이트 생성 시도 → 404 + **생성 0건**
     (직전 재조회로 뮤테이션 실증). 수정 前엔 project_id 조회만 하고 접근권 검증이 없어 201로 통과했다."""
-    from app.routers.gates import GateCreateRequest, create_gate_endpoint
+    from app.routers.gates import GateCreateRequest, _create_gate_endpoint
     eng, Session = await _engine()
     try:
         async with Session() as s:
             await _seed(s)
         async with Session() as s:
             with pytest.raises(HTTPException) as ei:
-                await create_gate_endpoint(
+                await _create_gate_endpoint(
+                resolved_locale="ko",
                     body=GateCreateRequest(
                         work_item_id=STORY_B, work_item_type="story", gate_type="qa",
                         member_id=uuid.uuid4(), role_id=uuid.uuid4(),

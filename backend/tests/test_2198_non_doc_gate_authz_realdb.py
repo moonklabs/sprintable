@@ -4,13 +4,13 @@ artifact_canonicalize 등) 인가 갭 — 세 증상이 하나의 뿌리(rule B 
 ```
 ① 큐 필터        _non_doc_gate_approvable (story #1974)                ← 이미 옳게 좁았음
 ② can_approve    list_gates·get_gate_endpoint 둘 다 non-doc 은 계산 자체를 안 해 기본값 False  ← 없음
-③ 승인 엔드포인트 transition_gate_endpoint = 휴먼 org 멤버이기만 하면 통과                    ← 가장 넓음
+③ 승인 엔드포인트 _transition_gate_endpoint = 휴먼 org 멤버이기만 하면 통과                    ← 가장 넓음
 ```
 
 처방 = 새 규칙 발명 없이 이미 있던 rule B(``_non_doc_gate_approvable``)를 ②③에 마저 배선.
 
 ⛔SoD(self-approval) 는 의도적으로 안 넣는다(오르테가 PO 판정, 2026-07-27) — 근거는 gates.py
-transition_gate_endpoint 의 non-doc elif 분기 주석에 그대로 남겨 뒀다(저자성 없음·상신자=에이전트라
+_transition_gate_endpoint 의 non-doc elif 분기 주석에 그대로 남겨 뒀다(저자성 없음·상신자=에이전트라
 사람 대 사람 SoD 자리가 거의 없음·1인 org 교착 재발 위험·추적은 resolver_id 강제 기록으로 이미 확보).
 
 ⛔라이브 승인 POST 로 검증하지 않는다(오르테가 지시) — 이 파일은 격리된 로컬 throwaway realdb만
@@ -140,13 +140,13 @@ async def test_get_gate_can_approve_true_for_project_owner_false_for_member():
         await eng.dispose()
 
 
-# ───────────────────────── transition_gate_endpoint: 실 인가 강제 ─────────────────────────
+# ───────────────────────── _transition_gate_endpoint: 실 인가 강제 ─────────────────────────
 
 @pytest.mark.anyio
 async def test_transition_non_doc_gate_forbidden_for_member_allowed_for_owner():
     """#2198 의 본체 — ③(가장 넓던 자리)이 실제로 좁아졌는지. 격리 로컬 throwaway DB 에서 실제
     transition 을 수행(라이브 배포 시스템 무접촉) — #2027 과 동일한 검증 방식."""
-    from app.routers.gates import GateTransitionRequest, transition_gate_endpoint
+    from app.routers.gates import GateTransitionRequest, _transition_gate_endpoint
     eng, Session = await _engine()
     try:
         async with Session() as s:
@@ -154,7 +154,8 @@ async def test_transition_non_doc_gate_forbidden_for_member_allowed_for_owner():
         # 무자격(project member, owner/admin 아님) → 403·상태 미변경.
         async with Session() as s:
             with pytest.raises(HTTPException) as ei:
-                await transition_gate_endpoint(
+                await _transition_gate_endpoint(
+                resolved_locale="ko",
                     id=gate_id, body=GateTransitionRequest(status="approved", note="시도"),
                     background_tasks=BackgroundTasks(), session=s, org_id=ORG, auth=_auth(MEMBER_USER),
                 )
@@ -165,7 +166,8 @@ async def test_transition_non_doc_gate_forbidden_for_member_allowed_for_owner():
             assert g == "pending"  # 403 이 실제로 상태변경을 막았는지(뮤테이션 0) 재조회로 확認.
         # 자격자(project owner) → 승인 성공.
         async with Session() as s:
-            resp = await transition_gate_endpoint(
+            resp = await _transition_gate_endpoint(
+                resolved_locale="ko",
                 # story #2027 AC2: note+evidence_viewed 동봉 — 이 파일의 관심사(#2198 인가)와
                 # 무관한 고위험 사유-강제 가드를 우회.
                 id=gate_id, body=GateTransitionRequest(status="approved", note="승인 사유", evidence_viewed=True),
@@ -180,7 +182,7 @@ async def test_transition_non_doc_gate_forbidden_for_member_allowed_for_owner():
 async def test_transition_doc_approval_gate_still_unaffected():
     """#2198 이 doc_approval 분기(elif 이전 if)를 안 건드렸는지 회귀 확認 — 무관 gate_type 은
     non-doc elif 에 아예 안 들어간다(SimpleNamespace work_item_type 몰라도 무관)."""
-    from app.routers.gates import GateTransitionRequest, transition_gate_endpoint
+    from app.routers.gates import GateTransitionRequest, _transition_gate_endpoint
     eng, Session = await _engine()
     try:
         async with Session() as s:
@@ -216,7 +218,8 @@ async def test_transition_doc_approval_gate_still_unaffected():
             await s.commit()
             gate_id = gate.id
         async with Session() as s:
-            resp = await transition_gate_endpoint(
+            resp = await _transition_gate_endpoint(
+                resolved_locale="ko",
                 # story #2027 AC2: note+evidence_viewed 동봉 — 이 파일의 관심사(#2198 인가)와
                 # 무관한 고위험 사유-강제 가드를 우회.
                 id=gate_id, body=GateTransitionRequest(status="approved", note="doc 승인", evidence_viewed=True),
@@ -234,7 +237,7 @@ async def test_transition_artifact_canonicalize_gate_human_only_not_project_owne
     없는, merge 게이트라면 위 테스트에서 403 나는 바로 그 사용자)로도 승인이 통과해야 한다.
     이 테스트가 없으면 다음 사람이 #2198 의 rule B 를 "전 타입 균일"로 되돌려 이 회귀를
     재현할 수 있다 — _non_doc_can_approve 표를 직접 겨냥해 고정."""
-    from app.routers.gates import GateTransitionRequest, transition_gate_endpoint
+    from app.routers.gates import GateTransitionRequest, _transition_gate_endpoint
     eng, Session = await _engine()
     try:
         async with Session() as s:
@@ -275,7 +278,8 @@ async def test_transition_artifact_canonicalize_gate_human_only_not_project_owne
             await s.commit()
             gate_id_holder["id"] = gate.id
         async with Session() as s:
-            resp = await transition_gate_endpoint(
+            resp = await _transition_gate_endpoint(
+                resolved_locale="ko",
                 # story #2027 AC2: note+evidence_viewed 동봉 — 이 파일의 관심사(#2198 인가)와
                 # 무관한 고위험 사유-강제 가드를 우회.
                 id=gate_id_holder["id"], body=GateTransitionRequest(status="approved", note="정본화 승인", evidence_viewed=True),

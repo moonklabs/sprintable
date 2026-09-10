@@ -161,13 +161,14 @@ async def test_void_endpoint_non_admin_403():
     from unittest.mock import AsyncMock, patch
     from fastapi import HTTPException
     from app.routers import gates as gates_mod
-    from app.routers.gates import GateVoidRequest, void_gate_endpoint
+    from app.routers.gates import GateVoidRequest, _void_gate_endpoint
     voidfn = AsyncMock()
     with patch.object(gates_mod, "resolve_member", AsyncMock(return_value=_resolved_human())), \
          patch.object(gates_mod, "is_org_owner_or_admin", AsyncMock(return_value=False)), \
          patch.object(gates_mod, "void_gate", voidfn):
         with pytest.raises(HTTPException) as ei:
-            await void_gate_endpoint(
+            await _void_gate_endpoint(
+                resolved_locale="ko",
                 id=uuid.uuid4(), body=GateVoidRequest(reason="x"), session=AsyncMock(),
                 org_id=uuid.uuid4(), auth=SimpleNamespace(user_id=str(uuid.uuid4())))
     assert ei.value.status_code == 403
@@ -180,14 +181,15 @@ async def test_void_endpoint_forces_voider_from_auth():
     from types import SimpleNamespace
     from unittest.mock import AsyncMock, patch
     from app.routers import gates as gates_mod
-    from app.routers.gates import GateVoidRequest, void_gate_endpoint
+    from app.routers.gates import GateVoidRequest, _void_gate_endpoint
     caller = _resolved_human()
     voidfn = AsyncMock(return_value=SimpleNamespace())
     with patch.object(gates_mod, "resolve_member", AsyncMock(return_value=caller)), \
          patch.object(gates_mod, "is_org_owner_or_admin", AsyncMock(return_value=True)), \
          patch.object(gates_mod, "void_gate", voidfn), \
          patch.object(gates_mod.GateResponse, "model_validate", lambda g: "OK"):
-        await void_gate_endpoint(
+        await _void_gate_endpoint(
+                resolved_locale="ko",
             id=uuid.uuid4(), body=GateVoidRequest(reason="오발행"), session=AsyncMock(),
             org_id=uuid.uuid4(), auth=SimpleNamespace(user_id=str(uuid.uuid4())))
     # void_gate(session, org_id, gate_id, voider_id, reason) — 위치인자 voider=caller.id·reason 전달.

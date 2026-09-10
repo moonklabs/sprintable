@@ -63,6 +63,112 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "의존성을 찾을 수 없음",
         "en": "Dependency not found",
     },
+    # story #3793(3779 3층 ②) — gates.py http_detail 20건. en = 유나 定(2026-09-10, 카드
+    # 코멘트 착지) — 이 레포 라우터 en detail 768건 실측 관례(마침표 0%·문장 첫 글자
+    # 대문자·"X — Y" em-dash 안내형·집안 어순 "admin/owner") 근거로 확定됨. 마지막 두 건
+    # (toss_unsupported_gate_type/toss_requester_or_designated_only)은 「토스」를 그대로
+    # 옮기지 않는다 — 화면 어디에도 그 낱말이 없고(`chats.approvalRequestTossTrigger` 등의
+    # 표시 문구는 ko/en 둘 다 「다른 방에 보내기/Send to another room」) 유나가 그 은유
+    # 누출을 지적했다(ko 원문 두 건의 「토스」 자체는 이 카드 범위 밖 — 별건으로 남김).
+    "gates.create_doc_gate_not_allowed": {
+        "ko": "doc 결재 게이트는 doc 상신 경로로만 생성됩니다 (직접 생성 불가).",
+        "en": "Doc approval gates are created only through the doc submission flow — direct creation is not allowed",
+    },
+    "gates.approve_human_only": {
+        "ko": "게이트 승인/거부는 휴먼 멤버만 가능합니다 (에이전트 승인 불가).",
+        "en": "Only human members can approve or reject a gate — agents cannot approve",
+    },
+    "gates.approve_self_not_allowed": {
+        "ko": "본인이 상신한 doc 결재는 본인이 승인/거부할 수 없습니다 (self-approval 금지·상신자 미검증 차단).",
+        "en": "You cannot approve or reject a doc approval you submitted — self-approval is not allowed",
+    },
+    "gates.approve_no_doc_access": {
+        "ko": "doc 결재 권한이 없습니다 (대상 프로젝트 접근 필요).",
+        "en": "No permission to act on this doc approval — access to the target project is required",
+    },
+    "gates.approve_no_project_admin_access": {
+        "ko": "이 게이트를 승인/거부할 권한이 없습니다 (해당 프로젝트의 owner/admin이어야 합니다). 프로젝트 관리자에게 권한을 요청하세요.",
+        "en": "No permission to approve or reject this gate — project owner/admin required; ask a project admin for access",
+    },
+    "gates.transition_high_risk_note_required": {
+        "ko": "고위험(risk_grade=high) 게이트 승인은 사유(note) 입력이 필수입니다.",
+        "en": "Approving a high-risk gate (risk_grade=high) requires a note",
+    },
+    "gates.transition_high_risk_evidence_required": {
+        "ko": "고위험(risk_grade=high) 게이트 승인은 근거 열람 확인(evidence_viewed=true)이 필수입니다.",
+        "en": "Approving a high-risk gate (risk_grade=high) requires confirming you reviewed the evidence (evidence_viewed=true)",
+    },
+    "gates.reevaluate_merge_only": {
+        "ko": "merge 게이트만 재평가를 지원합니다.",
+        "en": "Only merge gates support re-evaluation",
+    },
+    "gates.reevaluate_no_pr_info": {
+        "ko": "게이트에 연결된 PR 정보가 없어 재평가할 수 없습니다.",
+        "en": "Cannot re-evaluate — this gate has no linked PR",
+    },
+    "gates.reevaluate_no_github_app": {
+        "ko": "GitHub App 설치가 없어 재평가할 수 없습니다.",
+        "en": "Cannot re-evaluate — no GitHub App installation",
+    },
+    "gates.reevaluate_token_fetch_failed": {
+        "ko": "GitHub 인증 토큰 발급 실패 — 잠시 후 다시 시도해 주세요.",
+        "en": "GitHub auth token request failed — please try again shortly",
+    },
+    "gates.reevaluate_pr_fetch_failed": {
+        "ko": "GitHub PR 정보 조회 실패 — 잠시 후 다시 시도해 주세요.",
+        "en": "GitHub PR lookup failed — please try again shortly",
+    },
+    "gates.reevaluate_head_sha_unavailable": {
+        "ko": "GitHub PR head SHA를 확인할 수 없습니다.",
+        "en": "Couldn't determine the GitHub PR head SHA",
+    },
+    "gates.void_owner_admin_only": {
+        "ko": "게이트 무효화는 org owner/admin 만 가능합니다.",
+        "en": "Voiding a gate requires org admin/owner",
+    },
+    "gates.require_admin_generic": {
+        "ko": "이 액션은 org owner/admin 만 가능합니다.",
+        "en": "This action requires org admin/owner",
+    },
+    "gates.delegate_designated_only": {
+        "ko": "지정 결재자 본인만 위임할 수 있습니다.",
+        "en": "Only the designated approver can delegate",
+    },
+    "gates.delegate_self_not_allowed": {
+        "ko": "본인에게 위임할 수 없습니다.",
+        "en": "You cannot delegate to yourself",
+    },
+    "gates.toss_unsupported_gate_type": {
+        # 페드루 PO 전달 유나 定(2026-09-10 13:08Z) — ko도 「토스」 은유를 걷어 화면 낱말
+        # 「다른 방에도 보내기」로 정렬(별건 승인, 이 카드에 동봉). 「게이트 유형」도 화면
+        # 낱말 「결재」로.
+        "ko": "이 결재는 다른 방에 보낼 수 없습니다.",
+        # 유나 정정(2026-09-10 13:50Z, 페드루 전달) — 시트 en이 "this approval"이라
+        # ko와 같은 화면·같은 낱말("gate type"이 아니라 "approval")로 맞춘다.
+        "en": "This approval can't be sent to another room",
+    },
+    "gates.toss_requester_or_designated_only": {
+        "ko": "상신자 또는 지정 결재자 본인만 다른 방에 보낼 수 있습니다.",
+        "en": "Only the submitter or the designated approver can send this approval to another room",
+    },
+    # story #3793 후속(페드루 전달 유나 定, 2026-09-10 13:57Z) — 원래 http_detail 20건
+    # 밖(이미 code 붙어 있어 스캐너가 안 잡음, 카드 코멘트 표 주석 참고)이었으나, toss
+    # 어휘 정렬 김에 이 둘도 같은 PR에서 카탈로그로 이관.
+    "gates.toss_no_designated_approver": {
+        "ko": "지정 결재자가 없는 결재는 다른 방에 보낼 수 없습니다.",
+        "en": "An approval with no designated approver can't be sent to another room.",
+    },
+    # 페드루 判(2026-09-10 13:57Z, "선택·미르코 판단") — 같은 toss 자리·같은 어휘 정렬
+    # 이유라 같이 이관. FE는 code로 갈아끼우지만 API 직접 소비자(에이전트 등)에겐
+    # message 원문이 그대로 노출된다.
+    "gates.toss_gate_already_resolved": {
+        "ko": "이미 처리된 결재는 다른 방에 보낼 수 없습니다.",
+        "en": "An approval that's already been decided can't be sent to another room.",
+    },
+    "gates.require_owner_generic": {
+        "ko": "이 액션은 org owner 만 가능합니다.",
+        "en": "This action requires org owner",
+    },
 }
 
 

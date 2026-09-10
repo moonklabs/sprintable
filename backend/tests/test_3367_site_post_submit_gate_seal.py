@@ -365,7 +365,7 @@ async def test_approve_after_edit_is_blocked_until_resubmit_seals_new_version():
     길은 gates.py가 409 SITE_POST_RESUBMIT_REQUIRED로 막는다 — 빠져나가는 길은 submit()
     재호출(새 버전으로 재봉인+플래그 해제) 뿐이다."""
     from app.main import app
-    from app.routers.gates import GateTransitionRequest, transition_gate_endpoint
+    from app.routers.gates import GateTransitionRequest, _transition_gate_endpoint
     from app.services.member_resolver import ResolvedMember
 
     engine, Session = await _session_factory()
@@ -431,7 +431,8 @@ async def test_approve_after_edit_is_blocked_until_resubmit_seals_new_version():
             with patch.object(gates_mod, "resolve_member", AsyncMock(return_value=approver)), \
                  patch.object(gates_mod, "_non_doc_gate_approvable", AsyncMock(return_value=True)):
                 with pytest.raises(HTTPException) as exc_info:
-                    await transition_gate_endpoint(
+                    await _transition_gate_endpoint(
+                resolved_locale="ko",
                         id=gate_id, body=GateTransitionRequest(status="approved"),
                         background_tasks=BackgroundTasks(), session=s, org_id=org_id, auth=_FakeAuth(),
                     )
@@ -486,7 +487,7 @@ async def test_double_edit_without_resubmit_between_still_requires_and_allows_re
     수정 後 기대값 — submit()이 조기 return을 안 타고 reapproval_required=False까지
     재봉인해, 그 뒤 승인이 200으로 통과한다."""
     from app.main import app
-    from app.routers.gates import GateTransitionRequest, transition_gate_endpoint
+    from app.routers.gates import GateTransitionRequest, _transition_gate_endpoint
     from app.services.member_resolver import ResolvedMember
 
     engine, Session = await _session_factory()
@@ -581,7 +582,8 @@ async def test_double_edit_without_resubmit_between_still_requires_and_allows_re
                 # 추정) — 이 테스트의 관심사(SITE_POST_RESUBMIT_REQUIRED 해소)와 무관한
                 # 별도 가드라 note를 채워 지나간다(위 test_approve_after_edit_...는 그
                 # 가드 前에 409로 끝나 이 자리에 안 닿았을 뿐, 신규 요구사항이 아니다).
-                approved = await transition_gate_endpoint(
+                approved = await _transition_gate_endpoint(
+                resolved_locale="ko",
                     id=gate_id, body=GateTransitionRequest(status="approved", note="재검토 완료", evidence_viewed=True),
                     background_tasks=BackgroundTasks(), session=s, org_id=org_id, auth=_FakeAuth(),
                 )
