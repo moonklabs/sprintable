@@ -23,7 +23,6 @@
     "components/chat/new-conversation-modal.tsx::fetchWithAuth(`/api/members?is_active=true&project_id=${projectId}`)",
     "components/organization/apply-recipe-dialog.tsx::const res = await fetchWithAuth(`/api/events/definitions/${target.id}/apply`, {",
     "components/settings/agent-project-access-section.tsx::const g = await fetchWithAuth(`/api/projects/${projectId}/access`).catch(() => null);",
-    "components/settings/mcp-connection-settings.tsx::const response = await fetchWithAuth(`/api/projects/${projectId}/mcp-connections`, { cache: 'no-store' });",
     "components/settings/org-members-section.tsx::const res = await fetchWithAuth(`/api/organizations/${orgId}/invites`, {",
     "components/settings/set-password-section.tsx::const res = await fetchWithAuth('/api/auth/set-password/request', {",
     "components/settings/workflow-template-gallery-section.tsx::const r = await fetchWithAuth(`/api/events/definitions/${d.id}/bindings?project_id=${projectId}`).catch(() => null);",

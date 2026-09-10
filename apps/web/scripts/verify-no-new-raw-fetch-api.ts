@@ -226,7 +226,6 @@ export const GRANDFATHER_BASELINE = new Set<string>([
   'components/nav/notification-bell.tsx::/api/event-notifications/',
   'components/nav/notification-bell.tsx::/api/event-notifications/read-all',
   'components/settings/add-member-modal.tsx::/api/organizations/',
-  'components/settings/ai-settings.tsx::/api/projects/',
   'components/settings/blocked-users-section.tsx::/api/user-blocks/',
   'components/settings/gate-level-matrix.tsx::/api/organizations/',
   'components/settings/gate-level-matrix.tsx::/api/projects/',

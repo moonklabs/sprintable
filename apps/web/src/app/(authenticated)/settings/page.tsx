@@ -5,18 +5,15 @@ import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { BarChart2, Bell, Bot, CreditCard, FolderKanban, GitBranch, LifeBuoy, Menu, Palette, Plus, ShieldCheck, Trash2, User, Users, Webhook, X } from 'lucide-react';
+import { BarChart2, Bell, CreditCard, FolderKanban, GitBranch, LifeBuoy, Menu, Palette, Plus, ShieldCheck, Trash2, User, Users, Webhook, X } from 'lucide-react';
 import { UsageDashboard } from '@/components/settings/usage-dashboard';
 import { OrgMembersSection } from '@/components/settings/org-members-section';
 import { AddMemberModal } from '@/components/settings/add-member-modal';
 import { ProjectAccessSection } from '@/components/settings/project-access-section';
 
-import { AiSettingsSection } from '@/components/settings/ai-settings';
 import { MyProfileSection } from '@/components/settings/my-profile-section';
 import { MyNotificationChannelSection } from '@/components/settings/my-notification-channel-section';
 import { BlockedUsersSection } from '@/components/settings/blocked-users-section';
-import { ByomKeyManagement } from '@/components/settings/byom-key-management';
-import { McpConnectionSettings } from '@/components/settings/mcp-connection-settings';
 import { WorkflowTriggerTypesSection } from '@/components/settings/workflow-trigger-types-section';
 import { RecurringRecipesSection } from '@/components/settings/recurring-recipes-section';
 import { WorkflowExecutionHistorySection } from '@/components/settings/workflow-execution-history-section';
@@ -119,9 +116,15 @@ function isWebhookUrlAllowed(url: string): boolean {
   return /^http:\/\/(localhost|127\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)/i.test(url);
 }
 
-// E-SETTINGS-IA: deprecate(숨김)된 settings 탭. 컴포넌트/route는 보존(reversible) —
-// 탭 트리거·콘텐츠·딥링크(?tab=)만 차단한다. 재노출 시 이 set에서 제거만 하면 IA 위치 복원.
-// story c4980e70: org-members 탭 = /organization/members로 승격(회귀 0 위해 코드는 보존, LNB에서만 숨김).
+// E-SETTINGS-IA: deprecate(숨김)된 settings 탭.
+// - 'workflow'·'org-members'는 컴포넌트/route 보존(reversible) — 탭 트리거·콘텐츠·
+//   딥링크(?tab=)만 차단, 재노출 시 이 set에서 제거만 하면 IA 위치 복원.
+//   story c4980e70: org-members 탭 = /organization/members로 승격(회귀 0 위해 코드는
+//   보존, LNB에서만 숨김).
+// - 'ai'는 story #2487(PO 決 2026-09-10)로 컴포넌트·BFF route·i18n 키까지 전부 삭제됐다
+//   (BE 라우트 0건 — Sprintable이 고객사 모델키/MCP연결을 호스팅하는 모델을 접었다는
+//   판단, 재노출은 새 구현이 필요·set에서 제거만으론 복원 안 됨). 이 문자열은 과거 딥링크
+//   (?tab=ai) 방어 폴백 용도로만 남긴다.
 const HIDDEN_SETTINGS_TABS = new Set<string>(['ai', 'workflow', 'org-members']);
 const DEFAULT_SETTINGS_TAB = 'profile';
 
@@ -732,12 +735,6 @@ export default function SettingsPage() {
             )}
 
             <span className="px-2 pb-1 pt-4 text-[10px] font-medium text-muted-foreground">{t('projectSettings')}</span>
-            {currentProjectId && !HIDDEN_SETTINGS_TABS.has('ai') ? (
-              <TabsTrigger value="ai">
-                <Bot className="h-4 w-4" />
-                {t('tabAiAgents')}
-              </TabsTrigger>
-            ) : null}
             {!adminChecked ? <SettingsTabSkeleton /> : null}
             {adminChecked ? (
               <TabsTrigger value="members">
@@ -1055,22 +1052,6 @@ export default function SettingsPage() {
                 </SectionCard>
               </div>
             </TabsContent>
-
-            {/* E-SETTINGS-IA: deprecate 숨김. activeTab은 resolveSettingsTab로 'ai' 도달 불가지만,
-                content도 gate off하여 딥링크/forceMount 어떤 경로로도 렌더 안 되게 한다. 컴포넌트는 보존. */}
-            {!HIDDEN_SETTINGS_TABS.has('ai') ? (
-              <TabsContent value="ai">
-                <div className="space-y-6">
-                  {currentProjectId ? (
-                    <>
-                      <AiSettingsSection projectId={currentProjectId} />
-                      <McpConnectionSettings projectId={currentProjectId} />
-                      <ByomKeyManagement projectId={currentProjectId} />
-                    </>
-                  ) : null}
-                </div>
-              </TabsContent>
-            ) : null}
 
             <TabsContent value="organization">
               <SectionCard>

@@ -181,8 +181,6 @@
     "components/release-notes/whats-new-button.tsx": 1,
     "components/settings/add-member-modal.tsx": 1,
     "components/settings/agent-project-access-section.tsx": 1,
-    "components/settings/ai-settings.tsx": 1,
-    "components/settings/byom-key-management.tsx": 1,
     "components/settings/gate-level-matrix.tsx": 1,
     "components/settings/linked-accounts-section.tsx": 1,
     "components/settings/org-members-section.tsx": 2,

@@ -41,7 +41,6 @@ export const ALLOWLIST = new Set([
   'components/landing/landing-page.tsx',
   'components/retro/sprint-close-cockpit.tsx',
   'components/settings/org-members-section.tsx',
-  'components/settings/slack-integration-settings.tsx',
   'components/settings/workflow-trigger-types-section.tsx',
   'components/standup/standup-feedback-dialog.tsx',
   'components/ui/input.tsx',
