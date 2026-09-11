@@ -356,7 +356,8 @@
     "ccGateTypeArtifactCanonicalize": "정본화",
     "ccGateTypeAgentDecisionRequest": "판단 요청",
     "ccGateTypeSupportEscalationReview": "고객지원 검토",
-    "ccGateTypeConceptApproval": "컨셉 결재"
+    "ccGateTypeConceptApproval": "컨셉 결재",
+    "ccGateTypeAdsBoost": "홍보"
   },
   "proofCapsule": {
     "claim": {

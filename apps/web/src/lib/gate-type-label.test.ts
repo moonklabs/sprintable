@@ -15,6 +15,7 @@ describe('gateTypeLabel/gateTypeLabelKey — story #3565', () => {
       ccGateTypeArtifactCanonicalize: '정본화', ccGateTypeAgentDecisionRequest: '판단 요청',
       ccGateTypeSupportEscalationReview: '고객지원 검토',
       ccGateTypeConceptApproval: '컨셉 결재',
+      ccGateTypeAdsBoost: '홍보',
     };
     return map[key] ?? key;
   };
@@ -31,6 +32,11 @@ describe('gateTypeLabel/gateTypeLabelKey — story #3565', () => {
   // story #3560(제작 작업대, 페드루 PO 確定 2026-09-06) — concept_approval 등재.
   it('⭐concept_approval이 사람 낱말 「컨셉 결재」로 뜬다(라벨 제거 시 일반 「게이트」로 떨어지면 RED — 뮤테이션)', () => {
     expect(gateTypeLabel(t, 'concept_approval')).toBe('컨셉 결재');
+  });
+
+  // story #3806(Phase3·3-2 PR5, 유나 §절 2026-09-11) — ads_boost 등재.
+  it('⭐ads_boost가 사람 낱말 「홍보」로 뜬다(원시값 "ads_boost" 노출 방지)', () => {
+    expect(gateTypeLabel(t, 'ads_boost')).toBe('홍보');
   });
 
   it('⭐미등재 값·null·undefined는 원시값이 아니라 일반 「게이트」로 떨어진다', () => {

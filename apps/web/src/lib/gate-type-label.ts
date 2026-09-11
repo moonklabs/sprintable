@@ -38,6 +38,11 @@ export const GATE_TYPE_LABEL_KEYS: Record<string, string> = {
   // backend/app/routers/docs.py::POST /docs/{id}/concept-approval. `qa`로
   // 흉내내지 않는다(다른 메커니즘=다른 낱말) — doc_approval(시스템전용)과도 별개.
   concept_approval: 'ccGateTypeConceptApproval',
+  // story #3806(Phase3·3-2 PR5, 유나 §절 2026-09-11) — 「홍보」(Meta 한국어 UI
+  // 관례, en "Boost"). backend/app/services/gate_service.py::create_gate가
+  // gate_type="ads_boost"로 생성(PR2), _ALWAYS_MANUAL_GATE_TYPES에도 등재(PR3
+  // 워커 fix 시점 확認 — 실제 지출이 걸려 external_publish보다 강한 사유).
+  ads_boost: 'ccGateTypeAdsBoost',
 };
 
 /**

@@ -356,7 +356,8 @@
     "ccGateTypeArtifactCanonicalize": "anchor approval",
     "ccGateTypeAgentDecisionRequest": "decision request",
     "ccGateTypeSupportEscalationReview": "support review",
-    "ccGateTypeConceptApproval": "concept approval"
+    "ccGateTypeConceptApproval": "concept approval",
+    "ccGateTypeAdsBoost": "boost"
   },
   "proofCapsule": {
     "claim": {
