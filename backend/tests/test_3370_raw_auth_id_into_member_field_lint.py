@@ -2,15 +2,23 @@
 범위를 코드 자체가 아니라 합성 소스 문자열로 pin한다(test_no_team_members_view_dml_in_tests.py
 의 #2523 스캐너 자체검증 관례와 동형 — 단발 probe가 아니라 CI가 계속 지키게 하는 것).
 
-실 저장소 상태(0건 여부)를 검증하는 통합 테스트는 이 파일이 아니라 별도(스코프 판단 대기 —
-2026-09-11 실측: E-AGENT-* 도메인(agent_deployments.py 등)에서 이 규칙과 정확히 같은 클래스의
-기존 위반 14건이 발견돼, #3370 원 스윕 범위(channel_posts/visual_artifacts/workflow_line_
-config 축) 밖의 별건인지 페드루 PO 판단 대기 中 — 이 파일은 스캐너의 판정 로직 자체만 고정)."""
+2026-09-11 실측: 도입 시점 E-AGENT-* 도메인(agent_deployments.py 등)에서 이 규칙과 정확히
+같은 클래스의 기존 위반 14건이 발견됐다 — 페드루 PO 판단②'(칸의 뜻으로 가름)에 따라 10건은
+resolve_member_db_verified()로 정정(이 파일 하단 인스턴스 핀 참고), 4건(dependencies.py 3·
+agent_sessions.py 1)은 소비처가 없는 users.id 자리라 인라인 `# member-id-lint: user-id-field`
+마커로 처리 — `test_repo_has_zero_violations`가 그 최종 상태(0건)를 고정한다."""
 from __future__ import annotations
 
 import ast
 
-from scripts.lint_raw_auth_id_into_member_field import findings_for_source, scan_function, scan_repo
+import pytest
+
+from scripts.lint_raw_auth_id_into_member_field import (
+    ScanIncompleteError,
+    findings_for_source,
+    scan_function,
+    scan_repo,
+)
 
 
 def _findings_in(source: str) -> list[tuple[int, str, str]]:
@@ -191,6 +199,38 @@ def test_marker_only_silences_its_own_line_not_sibling_violations():
 # resolve_member_db_verified()로 정정·dependencies.py 3·agent_sessions.py 1은 SSE
 # payload/JSON 감사 블롭이라 인라인 마커로 처리) — 이 테스트는 그 정정이 실제로 반영된
 # 뒤의 최종 상태(0건)를 고정한다.
+
+
+# ─── 완전성 자기 확認(페드루 PO 조건부 PASS 조건1, 2026-09-11) ────────────────────
+# scan_repo가 스캔 루트 부재·파일 0개를 "위반 0건"으로 조용히 흘리지 않고 ScanIncompleteError
+# 로 즉시 실패하는지 고정한다(fails-silent 클래스 원천봉쇄 자체를 pin).
+
+
+def test_scan_repo_raises_when_a_root_is_missing(tmp_path):
+    (tmp_path / "app" / "routers").mkdir(parents=True)
+    (tmp_path / "app" / "routers" / "x.py").write_text("async def f(auth, repo):\n    pass\n")
+    (tmp_path / "app" / "services").mkdir(parents=True)
+    (tmp_path / "app" / "services" / "y.py").write_text("async def f(auth, repo):\n    pass\n")
+    # "ee" 루트를 아예 안 만든다 — 3개 중 하나 실종.
+    with pytest.raises(ScanIncompleteError):
+        scan_repo(scan_roots=["app/routers", "app/services", "ee"], backend_root=tmp_path)
+
+
+def test_scan_repo_raises_when_zero_files_scanned(tmp_path):
+    for root in ("app/routers", "app/services", "ee"):
+        (tmp_path / root).mkdir(parents=True)
+    # 세 루트 다 실존하지만 .py 파일이 하나도 없다.
+    with pytest.raises(ScanIncompleteError):
+        scan_repo(scan_roots=["app/routers", "app/services", "ee"], backend_root=tmp_path)
+
+
+def test_scan_repo_succeeds_when_roots_exist_with_files(tmp_path):
+    for root in ("app/routers", "app/services", "ee"):
+        d = tmp_path / root
+        d.mkdir(parents=True)
+        (d / "x.py").write_text("async def f(auth, repo):\n    pass\n")
+    # 예외 없이 정상 반환(빈 리스트 — 위반 0건과 "헛돎" 0건을 구분하는 정상 경로).
+    assert scan_repo(scan_roots=["app/routers", "app/services", "ee"], backend_root=tmp_path) == []
 
 
 def test_repo_has_zero_violations():

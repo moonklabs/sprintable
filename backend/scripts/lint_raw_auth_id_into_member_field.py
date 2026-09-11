@@ -23,6 +23,17 @@ API키는 team_member.id 그대로)를 영속 멤버-id 칼럼/kwarg 자리에 �
 자신이 발견한 자리를 전부 고친 결과) — lint_commit_before_validate.py(story #2459)와 동일
 계약: 처음부터 0건이라 grandfather 관용이 불필요, 위반이 하나라도 있으면 즉시 FAIL한다.
 
+## 완전성 자기 확認(페드루 PO 조건부 PASS 조건1, 2026-09-11)
+1차본은 `scan_repo()`가 스캔 루트 부재를 `continue`로 삼켜, 파일 0개여도 "위반 0건"을
+그대로 OK로 찍는 fails-silent 구멍이 있었다(「추출된 것만 순회」 클래스 —
+test_no_team_members_view_dml_in_tests.py의 자기 확認 관례·korean_user_strings
+MIN_EXPECTED_FILES 자기 assert와 동형 원칙 위반). 정정 — `SCAN_ROOTS` 3개 각각 실존을
+assert하고, 스캔한 .py 파일 수가 0이면 `ScanIncompleteError`로 즉시 실패한다. 이 실패는
+"위반 0건"(exit 1이 아니라 별도 종료코드 2)과 구분한다 — 「가드가 헛돌고 있다」와
+「가드가 돌았는데 깨끗하다」는 다른 신호라 CI 로그에서도 갈라 보여야 한다.
+⚠️`lint_commit_before_validate.py` 템플릿도 같은 구멍을 그대로 갖고 있다 — 그건 이
+PR 스코프 밖(페드루 PO 明示, 적기만·후속 별건).
+
 ## 인라인 예외(페드루 PO 지시 2026-09-11 — 「칸의 뜻」이 원래 users.id인 자리)
 2026-09-11 사후 감사에서 도입 시점 baseline이 실제로는 14건이었다(agent_deployments 5·
 agent_personas 2·agent_routing_rules 1·agents 1·billing_keys 1은 칸이 org 멤버 id를
@@ -162,29 +173,56 @@ def findings_for_source(source: str) -> list[tuple[int, str, str, str]]:
     return out
 
 
-def scan_file(path: Path) -> list[tuple[str, int, str, str, str]]:
+def scan_file(path: Path, backend_root: Path | None = None) -> list[tuple[str, int, str, str, str]]:
     try:
         source = path.read_text(encoding="utf-8")
         findings = findings_for_source(source)
     except SyntaxError:
         return []
-    rel = str(path.relative_to(BACKEND_ROOT))
+    rel = str(path.relative_to(backend_root if backend_root is not None else BACKEND_ROOT))
     return [(rel, lineno, func, kwarg, reason) for lineno, func, kwarg, reason in findings]
 
 
-def scan_repo() -> list[tuple[str, int, str, str, str]]:
+class ScanIncompleteError(RuntimeError):
+    """story #3370(페드루 PO 조건부 PASS 2026-09-11) — scan_repo가 스캔 루트 부재를
+    `continue`로 삼키면 파일 0개로 조용히 "0건 OK"를 거짓 보고하는 fails-silent 클래스
+    (「추출된 것만 순회」— test_no_team_members_view_dml_in_tests.py의 자기 확認 관례,
+    korean_user_strings MIN_EXPECTED_FILES 자기 assert와 동형 원칙). 이 예외는 "위반
+    0건"과 구분되는 "가드 자체가 헛돌고 있다"는 신호라 main()이 별도 종료코드(2)로 뗀다."""
+
+
+def scan_repo(
+    scan_roots: list[str] | None = None, backend_root: Path | None = None,
+) -> list[tuple[str, int, str, str, str]]:
+    roots = scan_roots if scan_roots is not None else SCAN_ROOTS
+    root = backend_root if backend_root is not None else BACKEND_ROOT
+
     findings: list[tuple[str, int, str, str, str]] = []
-    for root in SCAN_ROOTS:
-        root_path = BACKEND_ROOT / root
+    scanned_files = 0
+    for r in roots:
+        root_path = root / r
         if not root_path.exists():
-            continue
+            raise ScanIncompleteError(
+                f"스캔 루트가 없다 — {root_path}(SCAN_ROOTS={roots} 중 하나 실종). "
+                "루트 부재를 조용히 건너뛰면 파일 0개로 \"위반 0건\"을 거짓 보고한다 "
+                "— 디렉터리 구조가 바뀌었으면 SCAN_ROOTS를 갱신할 것."
+            )
         for path in sorted(root_path.rglob("*.py")):
-            findings.extend(scan_file(path))
+            scanned_files += 1
+            findings.extend(scan_file(path, backend_root=root))
+    if scanned_files == 0:
+        raise ScanIncompleteError(
+            f"스캔 대상 .py 파일이 0개(SCAN_ROOTS={roots}) — 가드가 헛돌고 있다."
+        )
     return findings
 
 
 def main() -> int:
-    findings = scan_repo()
+    try:
+        findings = scan_repo()
+    except ScanIncompleteError as e:
+        print(f"FAIL(가드 자체 결함, story #3370 조건부 PASS 조건1): {e}")
+        return 2
     if findings:
         print(
             f"FAIL: raw auth.user_id가 영속 멤버-id kwarg에 그대로 흘러든 자리 {len(findings)}건 "
