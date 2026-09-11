@@ -1710,14 +1710,109 @@ describe('ContentPostEditPage — 외부 목적지 발행 결과(story #3479, �
     expect(container.querySelector('[data-testid="content-external-publication-info"]')).toBeNull();
   });
 
-  it('⭐command dead_letter — FailureActionBadge 재시도 버튼 클릭 → 공용 BFF(publication-commands/{id}/retry) 호출', async () => {
+  // story #3369(Phase2·FE, 페드루 PO 確定 2026-09-11) — channel_posts 상세의 needs_check
+  // 2단계 관문을 site_post 외부발행 상세에도 이식(recheckGate=true, 새 컴포넌트·새
+  // 낱말 0). ConfirmDialog는 Portal이라 document.body에 뜬다(unpublish 다이얼로그
+  // 테스트와 동형).
+  describe('⭐3369 — needs_check 2단계 관문(dead_letter ∧ failure_kind=needs_check)', () => {
+    it('⭐배지·CTA부터 needs_check 것 — recheckGate=true라 「밖에 나갔는지 모르는 실패」 문면이 선다', async () => {
+      stubFetchWithVersions([VERSION_1], undefined, undefined, {
+        publication: {
+          published_at: null, url: null, published_by_member_id: null, published_body_sha256: null,
+          destination: 'webhook',
+          channel_publication: null,
+          command: { id: 'cmd-1', command_status: 'dead_letter', attempt_count: 5, failure_kind: 'needs_check', next_retry_at: null, dead_letter_at: '2026-09-05T00:00:00Z', command_reason_code: null, last_error: 'timeout' },
+        },
+      });
+      await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+      await flush();
+      await flush();
+
+      // ⭐뮤테이션 핀 1 — recheckGate를 안 넘기면(또는 지우면) FailureActionBadge가
+      // 일반 dead_letter 문면(channelPostsFailureDeadLetter)+CTA(channelPostsFailureRetryCta)를
+      // 그린다 — 이 두 단언이 RED가 되어야 그 회귀를 잡는다.
+      expect(container.querySelector('[data-testid="channel-post-failure-badge"]')?.textContent)
+        .toContain(koMessages.content.channelPostsFailureNeedsCheck);
+      const retryBtn = container.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement;
+      expect(retryBtn.textContent).toBe(koMessages.content.channelPostsFailureCheckedRetryCta);
+      expect(retryBtn.disabled).toBe(false);
+    });
+
+    it('⭐체크 前엔 확認 버튼 비활성 · 체크 後 활성 · 확認 시 공용 BFF(publication-commands/{id}/retry) 1회', async () => {
+      let retried: string | null = null;
+      let retryCallCount = 0;
+      stubFetchWithVersions([VERSION_1], undefined, undefined, {
+        publication: {
+          published_at: null, url: null, published_by_member_id: null, published_body_sha256: null,
+          destination: 'webhook',
+          channel_publication: null,
+          command: { id: 'cmd-1', command_status: 'dead_letter', attempt_count: 5, failure_kind: 'needs_check', next_retry_at: null, dead_letter_at: '2026-09-05T00:00:00Z', command_reason_code: null, last_error: 'timeout' },
+        },
+        onRetryPublicationCommand: (commandId) => { retried = commandId; retryCallCount += 1; return { status: 200, body: { id: commandId, status: 'pending' } }; },
+      });
+      await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+      await flush();
+      await flush();
+
+      const retryBtn = container.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement;
+      await act(async () => { retryBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      await flush();
+
+      expect(document.body.querySelector('[data-testid="content-retry-confirm-what"]')?.textContent)
+        .toBe(koMessages.content.channelPostsRetryConfirmWhatNeedsCheck);
+      const checklist = document.body.querySelector('[data-testid="content-retry-confirm-checklist"]') as HTMLInputElement;
+      expect(checklist).not.toBeNull();
+      const confirmBtn = [...document.body.querySelectorAll('button')].filter((b) => b !== retryBtn)
+        .find((b) => b.textContent === koMessages.content.channelPostsRetryConfirmAction) as HTMLButtonElement;
+      // ⭐뮤테이션 핀 2 — confirmDisabled 조건에서 체크리스트 항을 걷으면(체크 없이도
+      // 확認 가능해지면) 이 단언이 RED다.
+      expect(confirmBtn.disabled).toBe(true);
+      expect(retried).toBeNull();
+
+      await act(async () => { checklist.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      expect(confirmBtn.disabled).toBe(false);
+
+      await act(async () => { confirmBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      await flush();
+
+      expect(retried).toBe('cmd-1');
+      expect(retryCallCount).toBe(1);
+    });
+
+    it('취소를 누르면 호출 0 — 체크리스트도 리셋된다(다음에 다시 열면 미체크 상태)', async () => {
+      let retryCallCount = 0;
+      stubFetchWithVersions([VERSION_1], undefined, undefined, {
+        publication: {
+          published_at: null, url: null, published_by_member_id: null, published_body_sha256: null,
+          destination: 'webhook',
+          channel_publication: null,
+          command: { id: 'cmd-1', command_status: 'dead_letter', attempt_count: 5, failure_kind: 'needs_check', next_retry_at: null, dead_letter_at: '2026-09-05T00:00:00Z', command_reason_code: null, last_error: 'timeout' },
+        },
+        onRetryPublicationCommand: () => { retryCallCount += 1; return { status: 200, body: { id: 'cmd-1', status: 'pending' } }; },
+      });
+      await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+      await flush();
+      await flush();
+
+      const retryBtn = container.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement;
+      await act(async () => { retryBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      await flush();
+
+      const cancelBtn = [...document.body.querySelectorAll('button')].filter((b) => b !== retryBtn).find((b) => b.textContent === koMessages.common.cancel);
+      expect(cancelBtn).toBeDefined();
+      await act(async () => { cancelBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      expect(retryCallCount).toBe(0);
+    });
+  });
+
+  it('command dead_letter(needs_check 아님) — 확認 다이얼로그엔 체크리스트가 없고 확認 즉시 재시도된다(회귀 0)', async () => {
     let retried: string | null = null;
     stubFetchWithVersions([VERSION_1], undefined, undefined, {
       publication: {
         published_at: null, url: null, published_by_member_id: null, published_body_sha256: null,
         destination: 'webhook',
         channel_publication: null,
-        command: { id: 'cmd-1', command_status: 'dead_letter', attempt_count: 5, failure_kind: 'needs_check', next_retry_at: null, dead_letter_at: '2026-09-05T00:00:00Z', command_reason_code: null, last_error: 'timeout' },
+        command: { id: 'cmd-1', command_status: 'dead_letter', attempt_count: 5, failure_kind: null, next_retry_at: null, dead_letter_at: '2026-09-05T00:00:00Z', command_reason_code: null, last_error: 'timeout' },
       },
       onRetryPublicationCommand: (commandId) => { retried = commandId; return { status: 200, body: { id: commandId, status: 'pending' } }; },
     });
@@ -1728,7 +1823,14 @@ describe('ContentPostEditPage — 외부 목적지 발행 결과(story #3479, �
     const retryBtn = container.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement;
     expect(retryBtn).not.toBeNull();
     expect(retryBtn.disabled).toBe(false);
-    await act(async () => { retryBtn.click(); });
+    await act(async () => { retryBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    expect(document.body.querySelector('[data-testid="content-retry-confirm-checklist"]')).toBeNull();
+    const confirmBtn = [...document.body.querySelectorAll('button')].filter((b) => b !== retryBtn)
+      .find((b) => b.textContent === koMessages.content.channelPostsRetryConfirmAction) as HTMLButtonElement;
+    expect(confirmBtn.disabled).toBe(false);
+    await act(async () => { confirmBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await flush();
 
     expect(retried).toBe('cmd-1');
