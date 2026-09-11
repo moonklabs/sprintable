@@ -1597,6 +1597,11 @@
       "file": "tests/test_3805_engagement_items.py",
       "sec": 14.6,
       "source": "story-3805(PR#4173 CI FAILURE 정정, 2026-09-11, 카디르 실측 전달) — 신규 destructive_schema 파일 미등재분 등록."
+    },
+    {
+      "file": "tests/test_3806_ads_boost_gate.py",
+      "sec": 6.5,
+      "source": "story-3806(Phase3·3-2 PR2, 페드루 PO 確定 2026-09-11) — 신규 파일 실측(로컬, uv run pytest --durations=0 직접 1회 실행, 10건 call+setup 합계 약 6.5s — test_3766 등재 선례와 동일 방법론)"
     }
   ]
 }

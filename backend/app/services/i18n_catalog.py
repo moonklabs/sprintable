@@ -232,6 +232,32 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "알 수 없는 처리 상태입니다.",
         "en": "Unknown triage status",
     },
+    # story #3806(Phase3·3-2 PR2, 페드루 PO 確定 2026-09-11) — ads_boost 게이트
+    # 라우터(app/routers/ads_boost.py)의 5개 사용자 문장. 유나 §절 카드 본문 착지
+    # (2026-09-11) — boost의 사람 낱말="홍보"(en Boost), 재승인 409 user_message는
+    # 이 레포 다른 재승인류와 동형("예산/기간이 바뀌어 재승인이 필요합니다"류)이나
+    # 이 PR엔 재승인 자체가 409를 별도로 내지 않아(201로 그대로 반환·reapproval_
+    # required 필드로 신호) 해당 문장은 등재 대상 밖 — 미사용.
+    "ads_boost.create_human_only": {
+        "ko": "광고 홍보(boost) 요청은 휴먼 멤버만 가능합니다(에이전트는 제안만).",
+        "en": "Only human members can request an ads boost (agents may only propose).",
+    },
+    "ads_boost.invalid_schedule": {
+        "ko": "시작 시각은 종료 시각보다 빨라야 합니다.",
+        "en": "The start time must be earlier than the end time.",
+    },
+    "ads_boost.publication_not_found": {
+        "ko": "이 조직에 없는 발행물입니다.",
+        "en": "Publication not found in this organization.",
+    },
+    "ads_boost.approver_role_missing": {
+        "ko": "승인할 사람이 지정되지 않았습니다 — 승인자 역할을 먼저 두어주세요.",
+        "en": "No one is set up to approve this — please set an approver role first.",
+    },
+    "ads_boost.budget_exceeds_seal": {
+        "ko": "요청 예산이 봉인된 예산({sealed_budget_minor})보다 큽니다 — 증액은 지원하지 않습니다.",
+        "en": "The requested budget exceeds the sealed budget ({sealed_budget_minor}) — increasing it is not supported.",
+    },
 }
 
 

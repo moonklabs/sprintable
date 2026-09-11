@@ -349,6 +349,10 @@ _ALWAYS_MANUAL_GATE_TYPES: frozenset[str] = frozenset(
         # work_item 승인. external_publish와 동일 근거(판단이 존재 이유) — org posture
         # 무관 항상 pending.
         "concept_approval",
+        # story #3806(Phase3·3-2, 페드루 PO 確定 2026-09-11) — 광고비 집행(Meta Ads
+        # boost). external_publish(#3291)보다도 더 강한 이유 — 돈이 실제로 나가는
+        # 불가역 외부 발신이다. org posture(permissive 포함) 무관 항상 사람이 승인.
+        "ads_boost",
     }
 )
 # ⚠️story #2709 — agent_decision_request가 항상 manual(=posture 무관 항상 pending)인 이유:

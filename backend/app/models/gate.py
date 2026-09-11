@@ -168,6 +168,19 @@ class Gate(Base):
     # 자체는 doc이 아니라 그 doc이 근거로 삼는 Story/Task라는 점만 다르다).
     sealed_doc_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     sealed_doc_body_sha256: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #3806(Phase3·3-2 PR2, 페드루 PO 確定 2026-09-11) — `ads_boost` 전용 봉인 축
+    # (위 sealed_doc_*와 같은 공유-nullable 관례 — 그 gate_type이 아니면 항상 null).
+    # external_publish의 sealed_content_*를 재사용하지 않는 이유 — 계약이 다르다(발행물
+    # 자체의 봉인이 아니라 "그 발행물을 얼마·언제까지 홍보할지"의 봉인, PO 明示). 「변경=
+    # 재승인」 판정은 external_publish/concept_approval과 동형(approved 뒤 값이 바뀌면
+    # pending+reapproval_required 재오픈) — 단 예산 «증액»만은 그 재오픈 경로 자체를 안
+    # 타고 422(app/services/ads_boost.py::AdsBudgetExceedsSealError, 자동 증액 불가가
+    # 블루프린트 §7 Phase 3 AC 본문이라 봉인 규칙보다 우선하는 별도 축).
+    sealed_ads_budget_minor: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    sealed_ads_currency: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sealed_ads_starts_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    sealed_ads_ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    sealed_ads_objective: Mapped[str | None] = mapped_column(Text, nullable=True)
     # 승인 후 수정으로 시스템이 되돌린 pending인지(사람이 처음 상신한 pending과 구분 — S4가
     # "재승인 필요" 배지를 그릴 신호) — 새 명시 submit()이 재봉인하면 False로 복귀한다.
     reapproval_required: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
