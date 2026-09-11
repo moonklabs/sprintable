@@ -235,3 +235,37 @@ async def test_spend_fetch_fails_gracefully_without_run():
             assert row.error_code == "ADS_SPEND_NOT_STARTED"
     finally:
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_organic_insights_list_endpoint_excludes_paid_rows():
+    """페드루 PO 確定(2026-09-11, 판단 콜② 답) — 기존 GET .../insights(organic 조회
+    축)가 paid 행을 섞어 돌려주면 실측 결함(offset_label이 boost 시작 시각 anchor를
+    publish 시각 기준으로 잘못 대조할 수 있고, 이 엔드포인트의 계약 자체가 organic
+    전용이라 paid는 GET .../ads-boosts/{gate_id}/spend가 전담해야 한다). 이 테스트가
+    바로 그 「반환 0」을 실측으로 고정한다."""
+    from app.main import app
+    from tests.test_3475_publishing_metrics import _client_for, _setup_org_scoped_app
+    from tests.test_e4fc29fa_site_post_orchestration import _session_factory
+
+    engine, Session, org_id, project_id, owner_id, gate_id = await _setup_approved_gate(await _session_factory())
+    try:
+        await _start_boost(Session, org_id, gate_id, owner_id)
+
+        from app.models.gate import Gate
+        from sqlalchemy import select
+
+        async with Session() as s:
+            gate = (await s.execute(select(Gate).where(Gate.id == gate_id))).scalar_one()
+            publication_id = uuid.UUID(gate.scope_key)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+        async with _client_for(app) as client:
+            r = await client.get(f"/api/v2/organizations/{org_id}/publications/{publication_id}/insights")
+        assert r.status_code == 200, r.text
+        channels = {row["channel"] for row in r.json()}
+        assert "ads_sandbox" not in channels, f"paid 행이 organic 목록에 섞였다: {channels}"
+        assert "meta_ads" not in channels
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
