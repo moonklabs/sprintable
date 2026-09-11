@@ -277,6 +277,16 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
         await _process_one_comment_reply_command(db, command, now=now)
         return
 
+    # story #3806(Phase3·3-2 PR3 워커 fix, 페드루 PO 確定 2026-09-11) — 이 분기가
+    # 없으면 ads_boost 커맨드가 아래 channel_post 전용 기본 분기로 떨어져 매번
+    # CHANNEL_POST_DRAFT_NOT_FOUND로 오분류·Meta API 호출 0(카드 「실행」 스코프
+    # 미완성으로 실측한 결함, PR 4 착수 직전 발견).
+    if command.content_kind == "ads_boost":
+        from app.services.ads_boost_execution import process_one_ads_boost_command
+
+        await process_one_ads_boost_command(db, command, now=now)
+        return
+
     from app.models.channel_post_version import ChannelPostVersion
     from app.services.channel_posts import (
         ChannelConnectionAuthError,

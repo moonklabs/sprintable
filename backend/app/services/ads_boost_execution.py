@@ -187,3 +187,174 @@ async def request_ads_boost_resume(
     return await _request_toggle(
         db, org_id=org_id, gate_id=gate_id, requester_member_id=requester_member_id, operation=OP_RESUME,
     )
+
+
+class AdsBoostAdapterUnavailableError(Exception):
+    """워커 실행 시점 재검증 실패 — 게이트가 더는 approved가 아니거나(재오픈됨) ·
+    광고 계정 연결이 사라졌거나 active가 아니거나 · 원 발행물을 못 찾음(전부 워커
+    자리에서 아예 캠페인 API를 호출하지 않는 「재시도 개념 자체가 안 맞는」 종류,
+    site_posts.py::SitePostReapprovalRequiredError류와 동형 판단)."""
+
+    def __init__(self, code: str, message: str):
+        self.code = code
+        self.message = message
+        super().__init__(message)
+
+
+async def _resolve_execution_context(db: AsyncSession, command: PublicationCommand) -> dict:
+    """워커 처리 직전 재검증 + 실행에 필요한 모든 것을 한 번에 모은다 — gate.status
+    재확認(요청 시점과 워커 pickup 시점 사이 재오픈될 수 있다, publish_channel_
+    post_draft류 재검증 관례와 동형) · 광고 계정 connection(active) · 원 발행물의
+    object_story_id(Meta Page post ad 필수 재료, PR 2 그라운딩 ⑤)."""
+    from app.models.channel_connection import ChannelConnection
+    from app.models.channel_publication import ChannelPublication
+    from app.services.channel_credential_crypto import decrypt_channel_credential
+
+    gate = (await db.execute(select(Gate).where(Gate.id == command.gate_id))).scalar_one_or_none()
+    if gate is None or gate.gate_type != _ADS_BOOST_GATE_TYPE:
+        raise AdsBoostAdapterUnavailableError("ADS_BOOST_GATE_MISSING", f"gate not found: {command.gate_id}")
+    if gate.status != "approved":
+        raise AdsBoostAdapterUnavailableError(
+            "ADS_BOOST_GATE_NOT_APPROVED", f"gate no longer approved (status={gate.status}): {gate.id}",
+        )
+
+    conn = (await db.execute(
+        select(ChannelConnection).where(ChannelConnection.id == gate.sealed_ads_connection_id)
+    )).scalar_one_or_none()
+    if conn is None or conn.status != "active":
+        raise AdsBoostAdapterUnavailableError(
+            "ADS_BOOST_CONNECTION_UNAVAILABLE", f"ad connection unavailable: {gate.sealed_ads_connection_id}",
+        )
+
+    publication = None
+    if gate.scope_key:
+        try:
+            publication_id = uuid.UUID(gate.scope_key)
+        except ValueError:
+            publication_id = None
+        if publication_id is not None:
+            publication = (await db.execute(
+                select(ChannelPublication).where(ChannelPublication.id == publication_id)
+            )).scalar_one_or_none()
+    if publication is None or not publication.external_id:
+        raise AdsBoostAdapterUnavailableError(
+            "ADS_BOOST_ORIGINAL_PUBLICATION_MISSING", f"original publication missing: {gate.scope_key}",
+        )
+    origin_conn = (await db.execute(
+        select(ChannelConnection).where(ChannelConnection.id == publication.connection_id)
+    )).scalar_one_or_none()
+    if origin_conn is None:
+        raise AdsBoostAdapterUnavailableError(
+            "ADS_BOOST_ORIGIN_CONNECTION_MISSING", f"origin connection missing: {publication.connection_id}",
+        )
+
+    module_path = "app.services.ads_sandbox_campaign" if conn.channel == "ads_sandbox" else "app.services.meta_ads_campaign"
+    import importlib
+    module = importlib.import_module(module_path)
+
+    return {
+        "gate": gate, "module": module,
+        "ad_account_id": conn.account_id, "access_token": decrypt_channel_credential(conn.encrypted_access_token),
+        "object_story_id": f"{origin_conn.account_id}_{publication.external_id}",
+    }
+
+
+async def process_one_ads_boost_command(db: AsyncSession, command: PublicationCommand, *, now) -> None:
+    """`app/services/publication_command.py::_process_one_command`의 content_kind==
+    "ads_boost" 분기가 이 함수로 넘긴다(site_post/comment_reply와 동형 위임 패턴).
+    실패 시 `apply_command_failure`(publication_command.py)를 그대로 재사용 —
+    백오프·connection 승격 로직 재구현 금지."""
+    from app.services.publication_command import (
+        STATUS_BLOCKED_UNAPPROVED,
+        apply_command_failure,
+        record_publication_attempt,
+    )
+
+    attempt_started_at = now
+    try:
+        ctx = await _resolve_execution_context(db, command)
+    except AdsBoostAdapterUnavailableError as exc:
+        await record_publication_attempt(
+            db, command=command, approval_check="missing" if exc.code == "ADS_BOOST_GATE_NOT_APPROVED" else "ok",
+            adapter_called=False, started_at=attempt_started_at, finished_at=now, result_code=None,
+        )
+        command.status = STATUS_BLOCKED_UNAPPROVED
+        command.last_error = str(exc)[:2000]
+        return
+
+    gate, module = ctx["gate"], ctx["module"]
+    run = await _get_or_create_run(db, org_id=command.org_id, gate_id=gate.id)
+    is_sandbox = getattr(module, "__name__", "").endswith("ads_sandbox_campaign")
+
+    try:
+        import httpx
+
+        async with httpx.AsyncClient(timeout=20) as client:
+            if command.operation == OP_BOOST_START:
+                result = await module.create_boost_campaign(
+                    client, ad_account_id=ctx["ad_account_id"], access_token=ctx["access_token"],
+                    object_story_id=ctx["object_story_id"], budget_minor=gate.sealed_ads_budget_minor,
+                    currency=gate.sealed_ads_currency, starts_at_iso=gate.sealed_ads_starts_at.isoformat(),
+                    ends_at_iso=gate.sealed_ads_ends_at.isoformat(), objective=gate.sealed_ads_objective,
+                )
+                run.campaign_id, run.adset_id, run.ad_id = result["campaign_id"], result["adset_id"], result["ad_id"]
+                await module.set_campaign_status(
+                    client, campaign_id=run.campaign_id, access_token=ctx["access_token"], status="ACTIVE",
+                )
+                run.status = "running"
+                run.started_at = now
+            elif command.operation == OP_PAUSE:
+                if run.campaign_id is None:
+                    raise AdsBoostAdapterUnavailableError(
+                        "ADS_BOOST_NOT_STARTED_AT_PROVIDER", f"no campaign_id yet: {gate.id}",
+                    )
+                await module.set_campaign_status(
+                    client, campaign_id=run.campaign_id, access_token=ctx["access_token"], status="PAUSED",
+                )
+                # [sandbox:pause-delayed] — ads_sandbox_campaign.py 모듈 docstring
+                # 참고. 그 마커가 objective에 있으면 "접수는 성공했지만 아직 반영
+                # 안 됨"을 run.status에 그대로 반영한다(paused로 못 박지 않는다).
+                if is_sandbox and "[sandbox:pause-delayed]" in (gate.sealed_ads_objective or ""):
+                    run.status = "pause_pending"
+                else:
+                    run.status = "paused"
+                    run.paused_at = now
+            else:  # OP_RESUME
+                if run.campaign_id is None:
+                    raise AdsBoostAdapterUnavailableError(
+                        "ADS_BOOST_NOT_STARTED_AT_PROVIDER", f"no campaign_id yet: {gate.id}",
+                    )
+                await module.set_campaign_status(
+                    client, campaign_id=run.campaign_id, access_token=ctx["access_token"], status="ACTIVE",
+                )
+                run.status = "running"
+                run.paused_at = None
+
+        await record_publication_attempt(
+            db, command=command, approval_check="ok", adapter_called=True,
+            started_at=attempt_started_at, finished_at=now, result_code="completed",
+        )
+        command.status = "completed"
+        command.last_error = None
+        command.failure_kind = None
+    except Exception as exc:  # noqa: BLE001 — publication_command.py 2중 방어와 동형.
+        error_code = getattr(exc, "code", None) or "ADS_BOOST_PROVIDER_ERROR"
+        last_error = getattr(exc, "message", None) or str(exc)
+        run.last_error = last_error[:2000]
+        await record_publication_attempt(
+            db, command=command, approval_check="ok", adapter_called=True,
+            started_at=attempt_started_at, finished_at=now, result_code=error_code,
+        )
+        await apply_command_failure(db, command, error_code=error_code, last_error=last_error, now=now)
+
+
+async def _get_or_create_run(db: AsyncSession, *, org_id: uuid.UUID, gate_id: uuid.UUID):
+    from app.models.ads_boost_run import AdsBoostRun
+
+    run = (await db.execute(select(AdsBoostRun).where(AdsBoostRun.gate_id == gate_id))).scalar_one_or_none()
+    if run is not None:
+        return run
+    run = AdsBoostRun(id=uuid.uuid4(), org_id=org_id, gate_id=gate_id)
+    db.add(run)
+    await db.flush()
+    return run

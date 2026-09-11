@@ -154,6 +154,7 @@ from app.models.org_content_rule import OrgContentRule
 from app.models.publication_attempt import PublicationAttempt
 from app.models.insight_snapshot import InsightSnapshot
 from app.models.channel_publication_reconciliation import ChannelPublicationReconciliation
+from app.models.ads_boost_run import AdsBoostRun
 
 __all__ = [
     "RoleTemplate",
