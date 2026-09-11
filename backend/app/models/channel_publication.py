@@ -23,12 +23,21 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
 
+# story #3808(Phase3·3-3 PR2, 카디르 QA 실측 2026-09-11 — #3395/PR#3752 동시발행
+# 500 재발 처방) — 제약 이름의 유일한 정본. channel_posts.py의 동시 발행 경합
+# IntegrityError 판정(SAVEPOINT 안, constraint_name 문자열 비교)이 이 상수를
+# import해서 쓴다 — 제약 이름이 여기(모델)와 그쪽(서비스) 두 곳에 각자 하드코딩
+# 돼 있으면 한쪽만 바뀔 때(이번처럼 sequence 열 추가로 이름이 바뀐 경우) 조용히
+# 어긋나 경합 처리가 통째로 죽는다(카디르 QA가 잡은 실 회귀 — 판정이 항상
+# raise로 떨어져 threads/instagram/facebook 전 채널에서 동시 발행 2건 500 재발).
+UQ_GATE_VERSION_SEQUENCE_CONSTRAINT_NAME = "uq_channel_publications_gate_version_sequence"
+
 
 class ChannelPublication(Base):
     __tablename__ = "channel_publications"
     __table_args__ = (
         UniqueConstraint(
-            "gate_id", "version_id", "sequence", name="uq_channel_publications_gate_version_sequence",
+            "gate_id", "version_id", "sequence", name=UQ_GATE_VERSION_SEQUENCE_CONSTRAINT_NAME,
         ),
     )
 
