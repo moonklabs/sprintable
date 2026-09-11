@@ -284,7 +284,10 @@ async def get_permalink(client: httpx.AsyncClient, *, access_token: str, media_i
 # 결함 클래스를 여기서도 막는다).
 _COMMENTS_URL_TMPL = _GRAPH_BASE + "/{post_id}/comments"
 _COMMENT_REPLY_URL_TMPL = _GRAPH_BASE + "/{comment_id}/comments"
-_COMMENTS_FIELDS = "id,message,from,created_time"
+# story #3805(Phase3·3-1·PR 4, 페드루 PO 確定 2026-09-11 12:12Z) — `parent` 추가
+# (Meta Graph API Comment 레퍼런스 문서 확認 — "이 댓글이 답인 부모 댓글", 오브젝트
+# 형태 {id, ...}). 실 응답 채움 여부는 배포 뒤 PO 라이브 확認.
+_COMMENTS_FIELDS = "id,message,from,created_time,parent"
 _REPLIES_MAX_PAGES = 10
 
 
@@ -319,6 +322,16 @@ async def fetch_replies(
             item["username"] = frm.get("name")
             item["from_id"] = frm.get("id")
             item["timestamp"] = raw.get("created_time")
+            # story #3805 PR 4 — `parent`(오브젝트 {id,...})를 공용 계약
+            # `parent_external_id`로 끌어올림(threads_publish.py::fetch_replies와
+            # 동형).
+            parent = raw.get("parent") or {}
+            if parent.get("id"):
+                item["parent_external_id"] = parent.get("id")
+            # story #3805 PR 4 후속(페드루 PO 確定 2026-09-11 12:29Z, 「조용히 0」
+            # 처방) — threads_publish.py와 동형, `parent` 키 유무 자체를 실어
+            # 보낸다.
+            item["parent_field_observed"] = "parent" in raw
             items.append(item)
         summary_total = (body.get("summary") or {}).get("total_count")
         if isinstance(summary_total, int):

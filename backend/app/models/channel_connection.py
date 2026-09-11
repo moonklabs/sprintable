@@ -65,3 +65,9 @@ class ChannelConnection(Base, TimestampMixin, OrgScopedMixin):
     # (§2 규격 3, app_id_suffix와 동형 — 원문은 절대 저장/반환하지 않는다, 끝 4자리뿐).
     # oauth 채널은 이 값을 안 씀(NULL 그대로).
     secret_hint: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #3805(Phase3·3-1·PR 4 후속, 페드루 PO 確定 2026-09-11 12:29Z) — 「조용히 0」
+    # 처방. null=최근 수집에서 parent 필드 키가 응답에 있었다(답글 구분 가능).
+    # 값 有=마지막으로 그 키가 부재로 관측된 시각 — collect_comments_for_publication이
+    # 매 수집마다 이 연결의 raw 응답을 보고 갱신(자가치유: 다음 수집에 키가 다시
+    # 나타나면 null로 되돌림).
+    reply_detection_unavailable_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

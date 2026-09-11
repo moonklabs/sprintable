@@ -17,6 +17,7 @@ import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { CommentReplyDialog, type CommentReplyOutcome } from '@/components/content/comment-reply-dialog';
 import { CommentConvertToTaskDialog } from '@/components/content/comment-convert-to-task-dialog';
 import type { CommentItem } from '@/components/content/comments-section';
+import { shouldShowReplyDetectionUnavailable } from './collection-status';
 
 /**
  * story #3805(Phase3·3-1·PR 2[FE]→PR 3, 유나 §절·08:14Z/08:40Z 낱말·범위 정정) —
@@ -40,10 +41,26 @@ import type { CommentItem } from '@/components/content/comments-section';
  * 그 필드들을 "아직 모름"(null/0) 기본값으로 채운다. 그 자체가 새 사실을
  * 지어내는 게 아니라 다이얼로그가 실제로 쓰는 값(sentRepliesCount 배너 등)만
  * 정확성이 낮아질 뿐이라 fail-closed로 안전한 방향(과소 표시)이다.
+ *
+ * PR 4(페드루 PO 確定 2026-09-11 12:12Z) — 인바운드 중첩 답글 수집으로 kind
+ * (comment|reply)가 되살아난다. PR 3에서 뺐던 「종류」 열·필터를 복귀 — 이번엔
+ * outbound 답글 편입(PR 3에서 되돌린 설계 오류)이 아니라 BE가 parent_comment_id
+ * 有無로 판정하는 인바운드 값이다. 답글 행도 댓글 행과 똑같이 「답변」·「작업으로
+ * 전환」 액션을 그대로 쓴다(둘 다 같은 channel_post_comments 테이블 행이라 BE가
+ * comment_id로 못 찾는 문제 자체가 없다 — PR 3 이전 구버전처럼 답글 행 액션을
+ * 숨길 이유가 없다).
  */
 
 const TRIAGE_STATUSES = ['open', 'in_progress', 'done', 'skipped'] as const;
 type TriageStatus = (typeof TRIAGE_STATUSES)[number];
+
+const ITEM_KINDS = ['comment', 'reply'] as const;
+type ItemKind = (typeof ITEM_KINDS)[number];
+
+const KIND_LABEL_KEY: Record<ItemKind, string> = {
+  comment: 'engagementKindComment',
+  reply: 'engagementKindReply',
+};
 
 const STATUS_LABEL_KEY: Record<TriageStatus, string> = {
   open: 'engagementStatusOpen',
@@ -74,6 +91,8 @@ interface EngagementItem {
   // PR 3 — 읽기전용 「답변함」 마커. null=이 댓글에 발송된 답글이 아직 없음
   // (트리아지 상태와 독립 — 답변함이어도 open일 수 있다).
   answered_at: string | null;
+  // PR 4 — comment|reply. BE가 parent_comment_id 有無로 판정(저장값 아님).
+  kind: ItemKind;
 }
 
 interface EngagementListResponse {
@@ -87,6 +106,9 @@ interface CollectionStatusItem {
   channel: string;
   account_label: string | null;
   last_collected_at: string | null;
+  // PR 4 후속(페드루 PO 確定 2026-09-11 12:29Z, 「조용히 0」 처방) — 최근 수집
+  // 응답에 parent 필드 키가 없었다(권한·API 버전) — kind 판정을 신뢰할 수 없다.
+  reply_detection_unavailable: boolean;
 }
 
 interface OrgMemberOption {
@@ -108,6 +130,7 @@ export default function ChannelPostsEngagementPage() {
 
   const [statusFilter, setStatusFilter] = useState<TriageStatus | 'all'>('open');
   const [channelFilter, setChannelFilter] = useState<string>('all');
+  const [kindFilter, setKindFilter] = useState<ItemKind | 'all'>('all');
   const [items, setItems] = useState<EngagementItem[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -126,6 +149,7 @@ export default function ChannelPostsEngagementPage() {
       const params = new URLSearchParams();
       if (statusFilter !== 'all') params.set('status', statusFilter);
       if (channelFilter !== 'all') params.set('channel', channelFilter);
+      if (kindFilter !== 'all') params.set('kind', kindFilter);
       if (cursor) params.set('cursor', cursor);
       const res = await fetchWithAuth(`/api/organizations/${orgId}/engagement/items?${params.toString()}`);
       if (!res.ok) { setLoadError(true); return; }
@@ -139,7 +163,7 @@ export default function ChannelPostsEngagementPage() {
     } finally {
       if (replace) setLoading(false);
     }
-  }, [orgId, statusFilter, channelFilter]);
+  }, [orgId, statusFilter, channelFilter, kindFilter]);
 
   useEffect(() => { void loadPage(null, true); }, [loadPage]);
 
@@ -259,7 +283,7 @@ export default function ChannelPostsEngagementPage() {
     ? t(openCount.hasMore ? 'engagementOpenCountAtLeast' : 'engagementOpenCountExact', { n: openCount.n })
     : null;
 
-  const filtersActive = statusFilter !== 'open' || channelFilter !== 'all';
+  const filtersActive = statusFilter !== 'open' || channelFilter !== 'all' || kindFilter !== 'all';
 
   return (
     <div className="mx-auto w-full max-w-6xl space-y-6 p-6">
@@ -293,6 +317,12 @@ export default function ChannelPostsEngagementPage() {
                     channel: channelLabel(c.channel, t), time: formatRelativeTime(c.last_collected_at, locale, displayTimezone),
                   })
                 : t('engagementCollectionStatusNotCollected', { channel: channelLabel(c.channel, t) })}
+              {shouldShowReplyDetectionUnavailable(c) ? (
+                <>
+                  {' · '}
+                  {t('engagementReplyDetectionUnavailable')}
+                </>
+              ) : null}
             </span>
           ))}
         </div>
@@ -327,6 +357,20 @@ export default function ChannelPostsEngagementPage() {
             ))}
           </select>
         </label>
+        <label className="flex items-center gap-2 text-sm">
+          <span className="text-muted-foreground">{t('engagementFilterKindLabel')}</span>
+          <select
+            className="rounded-md border border-border bg-background px-2 py-1 text-sm"
+            value={kindFilter}
+            onChange={(e) => setKindFilter(e.target.value as ItemKind | 'all')}
+            data-testid="engagement-filter-kind"
+          >
+            <option value="all">{t('engagementFilterKindAll')}</option>
+            {ITEM_KINDS.map((k) => (
+              <option key={k} value={k}>{t(KIND_LABEL_KEY[k])}</option>
+            ))}
+          </select>
+        </label>
       </div>
 
       {patchError ? (
@@ -346,7 +390,7 @@ export default function ChannelPostsEngagementPage() {
           <EmptyState
             title={t('engagementEmptyFilteredTitle')}
             action={(
-              <Button variant="outline" onClick={() => { setStatusFilter('open'); setChannelFilter('all'); }}>
+              <Button variant="outline" onClick={() => { setStatusFilter('open'); setChannelFilter('all'); setKindFilter('all'); }}>
                 {t('engagementClearFiltersCta')}
               </Button>
             )}
@@ -360,6 +404,7 @@ export default function ChannelPostsEngagementPage() {
             <thead className="border-b border-border bg-muted/40 text-xs font-medium text-muted-foreground">
               <tr>
                 <th className="px-3 py-2">{t('engagementColumnChannel')}</th>
+                <th className="px-3 py-2">{t('engagementColumnKind')}</th>
                 <th className="px-3 py-2">{t('engagementColumnPreview')}</th>
                 <th className="px-3 py-2">{t('engagementColumnCapturedAt')}</th>
                 <th className="px-3 py-2">{t('engagementColumnStatus')}</th>
@@ -377,6 +422,11 @@ export default function ChannelPostsEngagementPage() {
                 return (
                   <tr key={item.id} className="border-b border-border last:border-0">
                     <td className="px-3 py-2 align-top">{channelLabel(item.channel, t)}</td>
+                    <td className="px-3 py-2 align-top">
+                      <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                        {t(KIND_LABEL_KEY[item.kind])}
+                      </span>
+                    </td>
                     <td className="max-w-xs px-3 py-2 align-top">
                       <p className="text-xs font-medium text-muted-foreground">
                         {item.author_display_name ?? t('originAuthorUnknown')}

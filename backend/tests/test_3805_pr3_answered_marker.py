@@ -101,8 +101,10 @@ async def test_answered_at_null_when_no_sent_reply():
         item = r.json()["items"][0]
         assert item["id"] == str(comment.id)
         assert item["answered_at"] is None
-        # 뮤테이션 대상 아님 — «kind» 필드가 없어야 한다(답글 편입 되돌림 확인).
-        assert "kind" not in item
+        # story #3805 PR 4(페드루 PO 確定 2026-09-11 12:12Z) — kind가 되살아났다.
+        # 이번엔 outbound 답글 편입(PR 3에서 되돌린 설계 오류)이 아니라 인바운드
+        # parent_comment_id 有無로 판정 — 이 댓글은 parent가 없는 최상위 댓글.
+        assert item["kind"] == "comment"
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()

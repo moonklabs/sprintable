@@ -222,7 +222,14 @@ _REPLIES_URL_TMPL = "https://graph.threads.net/v1.0/{media_id}/pending_replies"
 # 확認했으나, 그 문서 자체가 "moderation pending queue" 프레이밍이라 "소유 게시물의
 # 모든 댓글"과 정확히 같은 것인지는 라이브 왕복 전엔 확실하지 않다. sandbox까지가 이
 # 스토리 라이브 범위(PO 明示) — Threads 실계정 시점에 재확認 필요.
-_REPLIES_FIELDS = "id,text,username,timestamp,has_replies,is_reply,hide_status,reply_approval_status"
+# story #3805(Phase3·3-1·PR 4, 페드루 PO 確定 2026-09-11 12:12Z) — `replied_to`
+# (즉시 부모 media id)·`root_post`(트리 최상위 media id) 추가(Meta Threads API
+# 공식 문서 확認·실 응답 채움 여부는 배포 뒤 PO 라이브 확認). is_reply는 기존에
+# 이미 요청하고 있었으나 `raw`에만 저장되고 미소비였다 — 이번에 parent_external_id
+# 로 끌어올려 소비한다.
+_REPLIES_FIELDS = (
+    "id,text,username,timestamp,has_replies,is_reply,hide_status,reply_approval_status,replied_to,root_post"
+)
 # 페드루 PO REQUIRED(2026-09-05, PR#3865 리뷰) — 이 media의 댓글이 한 페이지를
 # 넘으면 첫 페이지만 보고 "응답에 없다=삭제됐다"로 리컨실하는 순간 2페이지 이후
 # 댓글이 매 수집마다 조용히 소프트 삭제되는 결함이 있었다(sandbox=항상 2건 고정
@@ -257,7 +264,31 @@ async def fetch_replies(
         if resp.status_code != 200:
             raise error_from_response("THREADS_FETCH_REPLIES_FAILED", resp)
         body = resp.json()
-        items.extend(body.get("data") or [])
+        # story #3805 PR 4 — `replied_to`를 공용 계약 `parent_external_id`로 끌어올림
+        # (instagram_publish.py/facebook_publish.py의 parent 필드 끌어올림과 동형
+        # — collect_comments_for_publication은 채널별 원시 필드 이름을 모른다).
+        # is_reply=false(최상위 댓글)면 replied_to가 없거나 media 자신을 가리킬 수
+        # 있어(문서 미확定) is_reply=true일 때만 신뢰한다.
+        for raw in body.get("data") or []:
+            item = dict(raw)
+            if raw.get("is_reply") and raw.get("replied_to"):
+                item["parent_external_id"] = raw.get("replied_to")
+            # story #3805 PR 4 후속(페드루 PO 確定 2026-09-11 12:29Z, 「조용히 0」
+            # 처방) — `replied_to` 키 자체의 유무(null 아님)를 공용 계약
+            # `parent_field_observed`로 실어 보낸다. collect_comments_for_publication
+            # 이 이 신호로 "답글이 진짜 0건"과 "이 API 버전/권한이 그 필드를 아예
+            # 안 준다"를 구분한다. ⚠️ Threads만 예외: is_reply=false(최상위 댓글)는
+            # replied_to가 구조적으로 없는 게 정상(부모가 없으니까)이라 이걸 "구분
+            # 불가"로 잘못 세면 정상 배치 대부분이 오탐(대부분 항목이 최상위 댓글)
+            # — is_reply 키 자체가 없으면(더 구버전) 판정 불가로 관측 실패, is_reply
+            # =true인데 replied_to가 없을 때만 진짜 "구분 불가"다.
+            if "is_reply" not in raw:
+                item["parent_field_observed"] = False
+            elif raw.get("is_reply"):
+                item["parent_field_observed"] = "replied_to" in raw
+            else:
+                item["parent_field_observed"] = True
+            items.append(item)
         summary_total = (body.get("summary") or {}).get("total_count")
         if isinstance(summary_total, int):
             reported_total = summary_total

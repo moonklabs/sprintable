@@ -44,6 +44,13 @@ class ChannelPostComment(Base):
     # 양방향 링크(그라운딩 ③: 그 전엔 story.description에 comment_id를 텍스트로만
     # 심어 단방향이었다). null=아직 전환 안 됨.
     linked_story_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # story #3805(Phase3·3-1·PR 4, 페드루 PO 確定 2026-09-11 12:12Z) — 인바운드
+    # 중첩 답글(남이 우리 댓글에 단 답글, outbound인 ChannelPostCommentReply와는
+    # 무관). 외부 parent 댓글 id → 이 테이블의 내부 id로 해소된 값만 담는다
+    # (collect_comments_for_publication이 같은 publication 안에서 조회해 채움).
+    # null=최상위 댓글이거나, 답글인데 부모가 아직 안 수집됨(그 경우도 외부 parent
+    # id는 raw에 보존돼 유실 0). FK 없음(이 파일 관례와 동형).
+    parent_comment_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
