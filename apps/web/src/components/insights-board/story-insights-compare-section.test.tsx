@@ -70,7 +70,7 @@ function blogRow(overrides: Partial<InsightsBoardRow> = {}): InsightsBoardRow {
     title: '블로그 글', published_at: '2026-09-01T00:00:00Z', external_url: 'https://example.com/post',
     connection_id: null, d1: capturedBucket(), d7: capturedBucket(),
     comments_count: null, channel_post_draft_id: null, comments_last_collected_at: null, comments_supported: false,
-    asset_sha256s: null, hook_key: null, command_status: null,
+    asset_sha256s: null, hook_key: null, command_status: null, ads_boost: null,
     ...overrides,
   };
 }
@@ -81,7 +81,7 @@ function socialRow(overrides: Partial<InsightsBoardRow> = {}): InsightsBoardRow 
     title: '소셜 포스트', published_at: '2026-09-01T00:00:00Z', external_url: null,
     connection_id: 'conn-1', d1: capturedBucket(), d7: capturedBucket(),
     comments_count: 3, channel_post_draft_id: 'draft-1', comments_last_collected_at: '2026-09-02T00:00:00Z', comments_supported: true,
-    asset_sha256s: null, hook_key: null, command_status: null,
+    asset_sha256s: null, hook_key: null, command_status: null, ads_boost: null,
     ...overrides,
   };
 }

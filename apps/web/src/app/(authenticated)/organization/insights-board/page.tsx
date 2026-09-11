@@ -2,7 +2,7 @@
 
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -20,6 +20,7 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { channelLabel } from '@/lib/channel-label';
 import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { InsightsBoardMetricCell } from '@/components/insights-board/insights-board-metric-cell';
+import { AdsSpendCell } from '@/components/insights-board/ads-spend-cell';
 import { InsightsBoardCommentsCell } from '@/components/insights-board/insights-board-comments-cell';
 import { FollowUpDialog } from '@/components/insights-board/follow-up-dialog';
 import { ReconcileResultLine } from '@/components/insights-board/reconcile-result-line';
@@ -108,6 +109,7 @@ export default function InsightsBoardPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const t = useTranslations('insightsBoard');
+  const locale = useLocale();
   const tContent = useTranslations('content');
   // story #3583(정정, 2026-09-10) — GA4 유입 지표 null 사유의 needs_reauth 갈래가
   // 채널 연결 화면 기존 낱말을 재사용한다(새 낱말 0, PO 確定).
@@ -524,6 +526,10 @@ export default function InsightsBoardPage() {
                     {t('columnD7')} {metricLabel}
                   </th>
                   <th className="px-3 py-2 text-left font-medium">{t('columnComments')}</th>
+                  {/* story #3806(Phase3·3-2 PR5 조각⑥, 유나 §절 §3) — 「광고비」 분리 칸.
+                      정렬 대상 아님(§3에 정렬 언급 0 — d1/d7 정렬 축과 별개 개념, 헤더
+                      클릭 정렬은 애초 이 화면 전체에서 금지·§21-4). */}
+                  <th className="px-3 py-2 text-left font-medium">{t('columnAdsSpend')}</th>
                   <th className="px-3 py-2 text-left font-medium">{t('columnActions')}</th>
                 </tr>
               </thead>
@@ -557,7 +563,7 @@ export default function InsightsBoardPage() {
                         ga4ConnectionStatus={ga4ConnectionStatus}
                       />
                     </td>
-                    <td colSpan={2} />
+                    <td colSpan={3} />
                   </tr>
                 ) : null}
                 {group.rows.map((row) => {
@@ -626,6 +632,9 @@ export default function InsightsBoardPage() {
                     <td className="px-3 py-2.5 text-muted-foreground" data-testid="insights-board-comments-cell">
                       <InsightsBoardCommentsCell row={row} t={t} />
                     </td>
+                    <td className="px-3 py-2.5" data-testid="insights-board-ads-spend-cell">
+                      <AdsSpendCell adsBoost={row.ads_boost} tBoard={t} tContent={tContent} locale={locale} />
+                    </td>
                     <td className="px-3 py-2.5">
                       {/* story #3766(별건 ⑩, 유나 定 — issuecomment 2026-09-10 02:11Z)
                           — 상태 딱지(FailureActionBadge)는 행동 자리(아래 버튼 div)와
@@ -676,7 +685,7 @@ export default function InsightsBoardPage() {
                   </tr>
                   {reconcile && reconcile.status !== 'loading' ? (
                     <tr data-testid="insights-board-reconcile-result-row">
-                      <td colSpan={7} className="px-3 py-1.5 text-xs">
+                      <td colSpan={8} className="px-3 py-1.5 text-xs">
                         {reconcile.status === 'error' ? (
                           <span className="text-destructive" data-testid="insights-board-reconcile-error">
                             {reconcile.message}
