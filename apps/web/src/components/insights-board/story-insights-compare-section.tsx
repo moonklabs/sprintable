@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { InsightsBoardMetricCell } from './insights-board-metric-cell';
 import { FollowUpDialog } from './follow-up-dialog';
 import { declaredMetricsForChannel } from './channel-declared-metrics';
-import { METRIC_KEYS, type BoardMetric, type InsightsBoardResponse, type InsightsBoardRow } from './types';
+import { METRIC_KEYS, type BoardMetric, type Ga4ConnectionStatus, type InsightsBoardResponse, type InsightsBoardRow } from './types';
 
 /**
  * story #3697(Phase2·FE, 유나 § 確定 2026-09-08) — 한 story(캠페인)의 발행물을 blog/social
@@ -45,12 +45,14 @@ function isBlogRow(row: InsightsBoardRow): boolean {
 }
 
 function PublicationCard({
-  row, orgId, tBoard, tContent,
+  row, orgId, tBoard, tContent, tChannelConnect, ga4ConnectionStatus,
 }: {
   row: InsightsBoardRow;
   orgId: string;
   tBoard: ReturnType<typeof useTranslations>;
   tContent: ReturnType<typeof useTranslations>;
+  tChannelConnect: ReturnType<typeof useTranslations>;
+  ga4ConnectionStatus: Ga4ConnectionStatus;
 }) {
   const [followUpOpen, setFollowUpOpen] = useState(false);
   const declared = declaredMetricsForChannel(row.channel);
@@ -95,8 +97,18 @@ function PublicationCard({
                     <span className="ml-1 text-[11px] text-muted-foreground">({tBoard(sourceLabelKey)})</span>
                   ) : null}
                 </td>
-                <td className="py-1"><InsightsBoardMetricCell bucket={row.d1} metric={metric} tContent={tContent} tBoard={tBoard} /></td>
-                <td className="py-1"><InsightsBoardMetricCell bucket={row.d7} metric={metric} tContent={tContent} tBoard={tBoard} /></td>
+                <td className="py-1">
+                  <InsightsBoardMetricCell
+                    bucket={row.d1} metric={metric} tContent={tContent} tBoard={tBoard}
+                    tChannelConnect={tChannelConnect} ga4ConnectionStatus={ga4ConnectionStatus}
+                  />
+                </td>
+                <td className="py-1">
+                  <InsightsBoardMetricCell
+                    bucket={row.d7} metric={metric} tContent={tContent} tBoard={tBoard}
+                    tChannelConnect={tChannelConnect} ga4ConnectionStatus={ga4ConnectionStatus}
+                  />
+                </td>
               </tr>
             ))}
           </tbody>
@@ -116,13 +128,15 @@ function PublicationCard({
 }
 
 function AxisGroup({
-  titleKey, rows, orgId, tBoard, tContent,
+  titleKey, rows, orgId, tBoard, tContent, tChannelConnect, ga4ConnectionStatus,
 }: {
   titleKey: string;
   rows: InsightsBoardRow[];
   orgId: string;
   tBoard: ReturnType<typeof useTranslations>;
   tContent: ReturnType<typeof useTranslations>;
+  tChannelConnect: ReturnType<typeof useTranslations>;
+  ga4ConnectionStatus: Ga4ConnectionStatus;
 }) {
   if (rows.length === 0) return null;
   return (
@@ -130,7 +144,10 @@ function AxisGroup({
       <p className="text-xs font-medium text-muted-foreground">{tBoard(titleKey)}</p>
       <div className="space-y-2">
         {rows.map((row) => (
-          <PublicationCard key={row.publication_id} row={row} orgId={orgId} tBoard={tBoard} tContent={tContent} />
+          <PublicationCard
+            key={row.publication_id} row={row} orgId={orgId} tBoard={tBoard} tContent={tContent}
+            tChannelConnect={tChannelConnect} ga4ConnectionStatus={ga4ConnectionStatus}
+          />
         ))}
       </div>
     </div>
@@ -145,6 +162,10 @@ export function StoryInsightsCompareSection({ storyId }: StoryInsightsCompareSec
   const { orgId } = useDashboardContext();
   const tBoard = useTranslations('insightsBoard');
   const tContent = useTranslations('content');
+  // story #3583(2026-09-10) — 이 섹션은 org-wide 보드(page.tsx)와 별도 조회라 값도
+  // 따로 든다(같은 org당 1값이라 결과는 같지만, 조회 자체를 공유하지 않는다).
+  const tChannelConnect = useTranslations('channelConnect');
+  const [ga4ConnectionStatus, setGa4ConnectionStatus] = useState<Ga4ConnectionStatus>('not_connected');
   const [rows, setRows] = useState<InsightsBoardRow[] | null>(null);
   // story #3697(유나 § ②) — has_more는 kind별 상한(BE)에 잘린 게 있는지만 말한다(몇 건인지는
   // 모른다 — 수를 지어내지 않는다). 섹션 수준 한 줄로만 쓴다(어느 축이 잘렸는지는 has_more가
@@ -173,6 +194,7 @@ export function StoryInsightsCompareSection({ storyId }: StoryInsightsCompareSec
         if (cancelled) return;
         setRows(json?.data?.rows ?? []);
         setHasMore(json?.data?.has_more ?? false);
+        setGa4ConnectionStatus(json?.data?.ga4_connection_status ?? 'not_connected');
       } catch {
         if (!cancelled) setRows([]);
       }
@@ -193,8 +215,14 @@ export function StoryInsightsCompareSection({ storyId }: StoryInsightsCompareSec
           {tBoard('storyComparePartialNotice')}
         </p>
       ) : null}
-      <AxisGroup titleKey="storyCompareAxisBlog" rows={blogRows} orgId={orgId} tBoard={tBoard} tContent={tContent} />
-      <AxisGroup titleKey="storyCompareAxisSocial" rows={socialRows} orgId={orgId} tBoard={tBoard} tContent={tContent} />
+      <AxisGroup
+        titleKey="storyCompareAxisBlog" rows={blogRows} orgId={orgId} tBoard={tBoard} tContent={tContent}
+        tChannelConnect={tChannelConnect} ga4ConnectionStatus={ga4ConnectionStatus}
+      />
+      <AxisGroup
+        titleKey="storyCompareAxisSocial" rows={socialRows} orgId={orgId} tBoard={tBoard} tContent={tContent}
+        tChannelConnect={tChannelConnect} ga4ConnectionStatus={ga4ConnectionStatus}
+      />
     </div>
   );
 }

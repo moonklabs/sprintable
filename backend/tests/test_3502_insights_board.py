@@ -1193,3 +1193,95 @@ async def test_hidden_count_zero_when_nothing_archived():
         assert result["hidden_count"] == 0
     finally:
         await engine.dispose()
+
+
+# story #3583(Phase2·마케팅운영, 페드루 PO 確定 2026-09-10) — 성과 보드 셀이 GA4 유입
+# 지표(inflow_sessions·inflow_users) null의 원인을 「지표 키 이름」만으로 «GA4 미연결»로
+# 단정하던 결함. 실제로는 연결이 살아 있어도(GA4 처리 지연·해당 창 유입 0·일시
+# OAuthError) null일 수 있다(_fetch_ga4_inflow_metrics, insight_snapshots.py:~915 —
+# `if inflow and …`) — 원인은 「연결 상태」가 정한다. 진리표 4행(GA4Connection 행 없음·
+# property_pending·needs_reauth·connected) — 뮤테이션 대상: _derive_board_ga4_
+# connection_status를 「행 존재 여부만」으로 되돌리면(connected/needs_reauth 구별 소실)
+# 아래 needs_reauth·connected 행 2건이 RED여야 한다.
+async def _seed_ga4_connection(session, *, org_id, status, property_id="properties/123"):
+    from app.models.ga4_connection import GA4Connection
+
+    conn = GA4Connection(
+        id=uuid.uuid4(), org_id=org_id,
+        encrypted_access_token="enc-access-token", encrypted_refresh_token="enc-refresh-token",
+        property_id=property_id if status == "connected" else None,
+        status=status,
+    )
+    session.add(conn)
+    await session.commit()
+    return conn
+
+
+@pytest.mark.anyio
+async def test_ga4_connection_status_not_connected_when_no_row():
+    """행1 — GA4Connection 행 자체가 없음(연결한 적 없음) → not_connected."""
+    from app.services.insights_board import list_insights_board
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            result = await list_insights_board(s, org_id=org_id, window="30d")
+
+        assert result["ga4_connection_status"] == "not_connected"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_ga4_connection_status_not_connected_when_property_pending():
+    """행2 — 토큰만 있고 속성 미선택(콜백 직후) → not_connected(fetch 자체가 안 됨)."""
+    from app.services.insights_board import list_insights_board
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_ga4_connection(s, org_id=org_id, status="property_pending")
+
+            result = await list_insights_board(s, org_id=org_id, window="30d")
+
+        assert result["ga4_connection_status"] == "not_connected"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_ga4_connection_status_needs_reauth():
+    """행3 — 사람이 다시 연결해야 풀림 → needs_reauth(연결 자체는 있었다)."""
+    from app.services.insights_board import list_insights_board
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_ga4_connection(s, org_id=org_id, status="needs_reauth")
+
+            result = await list_insights_board(s, org_id=org_id, window="30d")
+
+        assert result["ga4_connection_status"] == "needs_reauth"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_ga4_connection_status_connected():
+    """행4 — 토큰+property 둘 다 있음 → connected(이 상태의 inflow null은 "집계 대기")."""
+    from app.services.insights_board import list_insights_board
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_ga4_connection(s, org_id=org_id, status="connected")
+
+            result = await list_insights_board(s, org_id=org_id, window="30d")
+
+        assert result["ga4_connection_status"] == "connected"
+    finally:
+        await engine.dispose()

@@ -87,6 +87,8 @@ export interface InsightsBoardRow {
   command_status: string | null;
 }
 
+export type Ga4ConnectionStatus = 'not_connected' | 'needs_reauth' | 'connected';
+
 export interface InsightsBoardResponse {
   rows: InsightsBoardRow[];
   has_more: boolean;
@@ -95,6 +97,12 @@ export interface InsightsBoardResponse {
   // 있다(work_item_id 기준 join, lang은 그 유니크 밖). 셀 수 있을 때만 정수, 모르면
   // null(지어내지 않는다) — 기본(include_deleted=false) 뷰에서만 뜻이 있다.
   hidden_count: number | null;
+  // story #3583(2026-09-10, 페드루 PO 確定) — org당 GA4 연결 1값(ga4_connections
+  // unique 제약, 행마다가 아니다). InsightsBoardMetricCell이 inflow_* 지표 null의
+  // 원인을 이 값으로 가른다 — 「지표 키 이름」만으로 «GA4 미연결»을 단정하던 결함의
+  // 처방(insight_snapshots.py::_fetch_ga4_inflow_metrics는 연결이 살아 있어도
+  // 처리 지연·해당 창 유입 0·일시 OAuthError로 null을 그대로 둘 수 있다).
+  ga4_connection_status: Ga4ConnectionStatus;
 }
 
 export type InsightsBoardWindow = '7d' | '30d' | '90d';

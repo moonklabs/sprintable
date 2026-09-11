@@ -1,7 +1,7 @@
 'use client';
 
 import type { useTranslations } from 'next-intl';
-import type { InsightSnapshotBucketView } from './types';
+import type { Ga4ConnectionStatus, InsightSnapshotBucketView } from './types';
 
 // story #3503 — insight-snapshot-block.tsx(story #3499)의 패턴을 「표 셀 하나」 크기로
 // 축소한 신규 컴포넌트(PO 브리프 — 그 컴포넌트를 통째로 재사용하지 않는다, due_at·source
@@ -51,10 +51,13 @@ const STATUS_LABEL_KEYS: Record<InsightSnapshotBucketView['status'], string> = {
 
 const DESTRUCTIVE_STATUSES: ReadonlySet<InsightSnapshotBucketView['status']> = new Set(['failed']);
 
-// story #3583(Phase2·마케팅운영, 페드루 PO 確定 2026-09-06 · 유나 §21-6-1) — captured인데
-// 값이 null인 사유 3갈래 중 이 하나만 새 낱말(「GA4 미연결」) — 나머지 5지표는 기존
-// insightsBoardMetricUnavailable 그대로. inflow_* 지표가 null인 것은 이 채널·행 자체가
-// GA4를 아직 안 붙였다는 뜻(BE 계약 — 붙었는데 값만 없는 경우는 여기 안 온다).
+// story #3583(Phase2·마케팅운영, 페드루 PO 確定 2026-09-06 정정 2026-09-10) — captured인데
+// 값이 null인 사유 3갈래 중 이 지표 2개만 새 낱말 — 나머지 5지표는 기존
+// insightsBoardMetricUnavailable 그대로. **정정(2026-09-10)**: 이전 주석 "붙었는데 값만
+// 없는 경우는 여기 안 온다"는 거짓이었다 — insight_snapshots.py::_fetch_ga4_inflow_
+// metrics(`if inflow and …`)는 연결이 살아 있어도(GA4 처리 지연으로 rows=[]·해당 창
+// 유입 0·일시 OAuthError) null을 그대로 둔다. 그래서 원인을 지표 키 이름이 아니라
+// 응답의 `ga4_connection_status`(org당 1값)로 가른다 — 아래 참고.
 const GA4_INFLOW_METRICS = new Set(['inflow_sessions', 'inflow_users']);
 
 export interface InsightsBoardMetricCellProps {
@@ -64,9 +67,17 @@ export interface InsightsBoardMetricCellProps {
   tContent: ReturnType<typeof useTranslations>;
   /** insightsBoard 네임스페이스 t — 이 보드 전용 신규 문구(미스케줄 사유)만. */
   tBoard: ReturnType<typeof useTranslations>;
+  /** story #3583(정정, 2026-09-10) — needs_reauth 갈래가 채널 연결 화면의 기존 낱말
+   * `channelStatusReauthRequired`(channelConnect 네임스페이스)를 재사용한다 — 새
+   * 낱말을 만들지 않는다(PO 確定). */
+  tChannelConnect: ReturnType<typeof useTranslations>;
+  /** story #3583(정정, 2026-09-10) — GA4_INFLOW_METRICS가 null일 때 사유를 가르는 축.
+   * org당 1값(InsightsBoardResponse.ga4_connection_status)이라 호출부가 그대로 넘긴다
+   * (이 컴포넌트가 다시 조회하지 않는다). GA4 아닌 지표엔 안 쓰인다. */
+  ga4ConnectionStatus: Ga4ConnectionStatus;
 }
 
-export function InsightsBoardMetricCell({ bucket, metric, tContent, tBoard }: InsightsBoardMetricCellProps) {
+export function InsightsBoardMetricCell({ bucket, metric, tContent, tBoard, tChannelConnect, ga4ConnectionStatus }: InsightsBoardMetricCellProps) {
   // (i) 버킷 자체가 없음 — 아직 스케줄되지 않음/존재하지 않음.
   if (bucket === null) {
     return (
@@ -88,11 +99,22 @@ export function InsightsBoardMetricCell({ bucket, metric, tContent, tBoard }: In
   // (§21-2 — 사유는 명사구 insightsBoardMetricUnavailable, 문장 아님).
   const value = bucket.normalized?.[metric] ?? null;
   if (value === null) {
-    const reasonKey = GA4_INFLOW_METRICS.has(metric) ? 'insightsBoardGa4NotConnected' : 'insightsBoardMetricUnavailable';
+    // story #3583(정정, 2026-09-10) — GA4 두 지표는 이제 「키 이름」이 아니라 org의
+    // 실 연결 상태로 사유를 가른다(위 GA4_INFLOW_METRICS 주석 참고). connected인데
+    // null인 경우는 "미연결"이 아니라 "아직 안 왔다" — 신설 낱말 「집계 대기」로
+    // 구분한다(insightsBoardMetricUnavailable "지표 미제공"과 뜻이 다르다: 저건
+    // 채널 자체가 이 지표를 영원히 안 준다는 뜻, 이건 곧 올 수 있다는 뜻).
+    const reasonNode = GA4_INFLOW_METRICS.has(metric)
+      ? ga4ConnectionStatus === 'not_connected'
+        ? tBoard('insightsBoardGa4NotConnected')
+        : ga4ConnectionStatus === 'needs_reauth'
+          ? tChannelConnect('channelStatusReauthRequired')
+          : tBoard('insightsBoardGa4AggregationPending')
+      : tBoard('insightsBoardMetricUnavailable');
     return (
       <span data-testid="insights-board-cell-value-dash">
         <span>{tContent('insightMetricUnavailableDash')}</span>
-        <span className="ml-1 text-xs text-muted-foreground">{tBoard(reasonKey)}</span>
+        <span className="ml-1 text-xs text-muted-foreground">{reasonNode}</span>
       </span>
     );
   }

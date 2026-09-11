@@ -25,7 +25,7 @@ import { FollowUpDialog } from '@/components/insights-board/follow-up-dialog';
 import { ReconcileResultLine } from '@/components/insights-board/reconcile-result-line';
 import { parseInsightsBoardApiError } from '@/components/insights-board/insights-board-error';
 import { ASSET_LABEL_PREFIX_LENGTH, aggregateGroupBucket, groupInsightsBoardRows, type InsightsBoardGroupBy } from '@/components/insights-board/group-rows';
-import { DEFAULT_METRIC, METRIC_KEYS, type BoardMetric, type InsightsBoardResponse, type InsightsBoardRow, type InsightsBoardWindow } from '@/components/insights-board/types';
+import { DEFAULT_METRIC, METRIC_KEYS, type BoardMetric, type Ga4ConnectionStatus, type InsightsBoardResponse, type InsightsBoardRow, type InsightsBoardWindow } from '@/components/insights-board/types';
 import { PublishingMetricsBand } from '@/components/content/publishing-metrics-band';
 import { deriveFailureAction, type CommandStatus } from '@/components/content/failure-action';
 import { FailureActionBadge } from '@/components/content/failure-action-badge';
@@ -109,6 +109,9 @@ export default function InsightsBoardPage() {
   const searchParams = useSearchParams();
   const t = useTranslations('insightsBoard');
   const tContent = useTranslations('content');
+  // story #3583(정정, 2026-09-10) — GA4 유입 지표 null 사유의 needs_reauth 갈래가
+  // 채널 연결 화면 기존 낱말을 재사용한다(새 낱말 0, PO 確定).
+  const tChannelConnect = useTranslations('channelConnect');
   // story #3656 — 훅 미태깅 묶음 라벨은 새 낱말을 안 만들고 docs 네임스페이스 기존
   // 키(indexCategoryUncategorized, 「미분류」)를 재사용한다(유나 確定).
   const tDocs = useTranslations('docs');
@@ -147,6 +150,10 @@ export default function InsightsBoardPage() {
   // 있다(work_item_id 기준 join, lang은 그 유니크 밖 — site_post.py:20). BE가 그
   // 숨은 수를 셀 수 있을 때만 보낸다(모르면 null — 지어내지 않는다).
   const [hiddenCount, setHiddenCount] = useState<number | null>(null);
+  // story #3583(2026-09-10) — org당 1값(응답 전체에 실림, 행마다가 아니다). 기본값
+  // not_connected는 「아직 안 왔다」 쪽으로 낙관하지 않는다(로딩 中 GA4 셀이 우연히
+  // "집계 대기"를 보이는 것보다 "미연결"이 더 안전한 기본 — 실응답이 곧 덮는다).
+  const [ga4ConnectionStatus, setGa4ConnectionStatus] = useState<Ga4ConnectionStatus>('not_connected');
   // doc a0da40c9 §21-5(유나 2026-09-05) — 제목 기본값(「[재발행] {원문 제목}」 등)을
   // 채워 보이려면 이 행의 원문 title이 필요하다 — publication_id만으론 부족해
   // row 전체를 들고 있는다.
@@ -215,6 +222,7 @@ export default function InsightsBoardPage() {
         setHasMore(json?.data?.has_more ?? false);
         setNextCursor(json?.data?.next_cursor ?? null);
         setHiddenCount(json?.data?.hidden_count ?? null);
+        setGa4ConnectionStatus(json?.data?.ga4_connection_status ?? 'not_connected');
       } else {
         const body = (await res.json().catch(() => null)) as { detail?: unknown; error?: Record<string, unknown> } | null;
         const info = parseInsightsBoardApiError(body);
@@ -538,13 +546,15 @@ export default function InsightsBoardPage() {
                     <td className="px-3 py-2 text-muted-foreground">
                       <InsightsBoardMetricCell
                         bucket={aggregateGroupBucket(group.rows, 'd1')} metric={metricParam}
-                        tContent={tContent} tBoard={t}
+                        tContent={tContent} tBoard={t} tChannelConnect={tChannelConnect}
+                        ga4ConnectionStatus={ga4ConnectionStatus}
                       />
                     </td>
                     <td className="px-3 py-2 text-muted-foreground">
                       <InsightsBoardMetricCell
                         bucket={aggregateGroupBucket(group.rows, 'd7')} metric={metricParam}
-                        tContent={tContent} tBoard={t}
+                        tContent={tContent} tBoard={t} tChannelConnect={tChannelConnect}
+                        ga4ConnectionStatus={ga4ConnectionStatus}
                       />
                     </td>
                     <td colSpan={2} />
@@ -602,10 +612,16 @@ export default function InsightsBoardPage() {
                       {formatScheduledAt(row.published_at, displayTimezone).display}
                     </td>
                     <td className="px-3 py-2.5 text-muted-foreground">
-                      <InsightsBoardMetricCell bucket={row.d1} metric={metricParam} tContent={tContent} tBoard={t} />
+                      <InsightsBoardMetricCell
+                        bucket={row.d1} metric={metricParam} tContent={tContent} tBoard={t}
+                        tChannelConnect={tChannelConnect} ga4ConnectionStatus={ga4ConnectionStatus}
+                      />
                     </td>
                     <td className="px-3 py-2.5 text-muted-foreground">
-                      <InsightsBoardMetricCell bucket={row.d7} metric={metricParam} tContent={tContent} tBoard={t} />
+                      <InsightsBoardMetricCell
+                        bucket={row.d7} metric={metricParam} tContent={tContent} tBoard={t}
+                        tChannelConnect={tChannelConnect} ga4ConnectionStatus={ga4ConnectionStatus}
+                      />
                     </td>
                     <td className="px-3 py-2.5 text-muted-foreground" data-testid="insights-board-comments-cell">
                       <InsightsBoardCommentsCell row={row} t={t} />
