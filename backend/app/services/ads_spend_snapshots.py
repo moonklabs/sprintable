@@ -19,6 +19,7 @@ Meta 외 다른 ad 채널이 추가돼도 대시보드가 채널명 나열 없�
 from __future__ import annotations
 
 import importlib
+import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -29,6 +30,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.ads_boost_run import AdsBoostRun
 from app.models.gate import Gate
 from app.models.insight_snapshot import InsightSnapshot
+
+logger = logging.getLogger(__name__)
 
 _ADS_BOOST_GATE_TYPE = "ads_boost"
 _PAID_CHANNELS = ("meta_ads", "ads_sandbox")
@@ -189,11 +192,17 @@ async def _enforce_spend_cap(db: AsyncSession, *, gate: Gate, run, now: datetime
             db, org_id=gate.org_id, gate_id=gate.id, requester_member_id=gate.resolver_id,
             initiated_by="scheduler",
         )
-    except (AdsBoostGateNotFoundError, AdsBoostGateNotApprovedError, AdsBoostAlreadyInStateError, AdsBoostNotStartedError):
+    except (AdsBoostGateNotFoundError, AdsBoostGateNotApprovedError, AdsBoostAlreadyInStateError, AdsBoostNotStartedError) as exc:
         # 이미 중지됐거나(사람이 먼저 pause) 게이트가 그 사이 재오픈된 경우 —
         # 「상한 도달」 관측 자체는 위에서 이미 확정됐으니 이 건은 이 워커의
-        # 실패가 아니다.
-        pass
+        # 실패가 아니다(재-raise 안 함). 다만 story #3806(Phase3·3-2 PR 13, 페드루
+        # PO 確定 2026-09-11 19:58Z) — 「조용히 지나가는 자리 0」: 이 삼킴이
+        # AdsBoostNotStartedError(명령 사슬 정체성 결함, 이 PR이 근본수정)처럼
+        # 실은 버그의 증거일 수도 있다 — 최소 로그는 남겨 다음 사고 때 흔적이
+        # 있게 한다(재-raise는 여전히 안 함, 이 함수의 반환 계약 무변경).
+        logger.warning(
+            "ads_spend_cap_pause_request_skipped gate_id=%s exception=%s", gate.id, type(exc).__name__,
+        )
     except Exception:  # noqa: BLE001 — publication_command.py와 동형 2중 방어.
         await db.rollback()
     return True

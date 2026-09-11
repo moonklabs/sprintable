@@ -105,15 +105,18 @@ async def _resolve_gate(db: AsyncSession, *, org_id: uuid.UUID, gate_id: uuid.UU
     return gate
 
 
-async def _latest_toggle(
-    db: AsyncSession, *, org_id: uuid.UUID, destination: uuid.UUID, approved_version: uuid.UUID,
-) -> PublicationCommand | None:
+async def _latest_toggle(db: AsyncSession, *, gate_id: uuid.UUID) -> PublicationCommand | None:
+    """story #3806(Phase3·3-2 PR 13, 페드루 PO 確定 2026-09-11 19:58Z 정정) —
+    「명령 사슬 정체성」은 `gate_id`(PublicationCommand 자체 컬럼)다, `(destination,
+    approved_version)`이 아니다. `approved_version`(=gate.sealed_ads_boost_version_id)
+    은 재봉인마다 새로 발급되는 값이라 "재봉인해도 실행 중 run은 하나"라는 불변식을
+    못 담는다 — 감액 재봉인 뒤 이 스코프로 조회하면 최초 실행 당시(낡은 version)의
+    토글 이력을 못 찾아 「한 번도 토글된 적 없다」로 오판했다(라이브 재측 中 PO
+    발견: 실행 중인데 「중지」가 409, 상한 도달 자동 중지도 조용히 실패)."""
     return (await db.execute(
         select(PublicationCommand)
         .where(
-            PublicationCommand.org_id == org_id,
-            PublicationCommand.destination == destination,
-            PublicationCommand.approved_version == approved_version,
+            PublicationCommand.gate_id == gate_id,
             PublicationCommand.operation.in_((OP_PAUSE, OP_RESUME)),
         )
         .order_by(PublicationCommand.toggle_seq.desc())
@@ -147,18 +150,19 @@ async def _request_toggle(
     destination = gate.sealed_ads_connection_id
     approved_version = gate.sealed_ads_boost_version_id
 
+    # story #3806(Phase3·3-2 PR 13 정정) — gate_id로 스코프(위 _latest_toggle
+    # docstring과 동형 이유) — 감액 재봉인으로 approved_version이 바뀌어도 "이
+    # 게이트가 시작된 적 있나"는 그대로 참이어야 한다.
     started = (await db.execute(
         select(PublicationCommand.id).where(
-            PublicationCommand.org_id == org_id,
-            PublicationCommand.destination == destination,
-            PublicationCommand.approved_version == approved_version,
+            PublicationCommand.gate_id == gate.id,
             PublicationCommand.operation == OP_BOOST_START,
         )
     )).scalar_one_or_none()
     if started is None:
         raise AdsBoostNotStartedError(gate.id)
 
-    latest = await _latest_toggle(db, org_id=org_id, destination=destination, approved_version=approved_version)
+    latest = await _latest_toggle(db, gate_id=gate.id)
 
     if latest is None:
         if operation == OP_RESUME:
