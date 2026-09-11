@@ -17,6 +17,7 @@ from tests.test_e4fc29fa_site_post_orchestration import (
 )
 from tests.test_3475_publishing_metrics import _seed_human, _client_for, _setup_org_scoped_app
 from tests.test_3497_insight_snapshots import _seed_channel_connection
+from tests.test_3561_concept_approval_gate import _seed_story
 
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
 
@@ -487,6 +488,100 @@ async def test_inactive_ad_connection_returns_422():
             )
         assert r.status_code == 422, r.text
         assert r.json()["error"]["code"] == "ADS_BOOST_INVALID_AD_CONNECTION"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_general_gates_list_and_detail_expose_sealed_ads_fields():
+    """3자기점검(PR5, 페드루 지적 없이 디디 자체 발견) — POST .../boosts 응답(BoostResponse,
+    ads_boost.py 전용 스키마)은 sealed_ads_* 를 이미 냈지만, FE 결재함(approvals-queue.tsx)이
+    실제로 읽는 건 **일반** `/api/v2/gates`(list)·`/api/v2/gates/{id}`(detail) — 그 응답
+    스키마(GateResponse, gates.py)엔 이 필드들이 PR2 때부터 누락돼 있었다(Gate ORM 컬럼은
+    있는데 Pydantic 응답모델 등재만 빠짐 — sealed_content_*/sealed_doc_*와 동일 선례를
+    안 따른 것). 뮤테이션 대상 — gates.py의 sealed_ads_* 필드 선언 6개를 지우면 이 테스트가
+    RED여야 한다."""
+    from app.main import app
+
+    engine, Session, org_id, project_id, owner_id, _pub, _work_item_id, ad_conn_id = await _setup(await _session_factory())
+    try:
+        # story #3806 request_ads_boost()가 work_item_type을 항상 "story"로 고정 생성한다
+        # (app/services/ads_boost.py:157) — _setup()의 _seed_publication은 draft.work_item_id를
+        # 임의 uuid로 심어(story 실물 아님) 이제까지 /boosts POST 응답만 검증하는 테스트에선
+        # 드러나지 않았지만, /api/v2/gates 조회는 resolve_work_item_project_id("story", id)로
+        # 실 Story를 찾으려다 실패 → project 경계 밖으로 fail-closed 404(gates.py 주석 그대로,
+        # 존재 비노출 규율). 실 Story를 심어 publication의 work_item_id로 지정해야 한다.
+        async with Session() as s:
+            story_id = await _seed_story(s, org_id, project_id)
+            conn = await _seed_channel_connection(s, org_id, channel="threads")
+            pub2, work_item_id = await _seed_publication(
+                s, org_id=org_id, connection_id=conn.id, work_item_id=story_id,
+            )
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+        async with _client_for(app) as client:
+            r_create = await client.post(
+                f"/api/v2/organizations/{org_id}/publications/{pub2.id}/boosts",
+                json=_boost_body(ad_connection_id=ad_conn_id, budget_minor=50_000, currency="KRW", objective="REACH"),
+            )
+            assert r_create.status_code == 201, r_create.text
+            gate_id = r_create.json()["gate_id"]
+
+            r_list = await client.get(
+                "/api/v2/gates", params={"work_item_id": str(work_item_id), "work_item_type": "story"},
+            )
+            assert r_list.status_code == 200, r_list.text
+            list_row = next(g for g in r_list.json() if g["id"] == gate_id)
+
+            r_detail = await client.get(f"/api/v2/gates/{gate_id}")
+            assert r_detail.status_code == 200, r_detail.text
+            detail_row = r_detail.json()
+
+        for row in (list_row, detail_row):
+            assert row["gate_type"] == "ads_boost"
+            assert row["sealed_ads_connection_id"] == str(ad_conn_id)
+            assert row["sealed_ads_budget_minor"] == 50_000
+            assert row["sealed_ads_currency"] == "KRW"
+            assert row["sealed_ads_objective"] == "REACH"
+            assert row["sealed_ads_starts_at"] is not None
+            assert row["sealed_ads_ends_at"] is not None
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_non_ads_boost_gate_has_null_sealed_ads_fields():
+    from app.main import app
+    from app.models.gate import Gate
+
+    engine, Session, org_id, project_id, owner_id, _pub, _work_item_id, _ad_conn_id = await _setup(await _session_factory())
+    try:
+        async with Session() as s:
+            # test_3569와 동형 — work_item_type="story"는 resolve_work_item_project_id가
+            # 실 Story 행을 찾으려 시도하므로(project 경계 fail-closed, gates.py 주석) 임의
+            # uuid가 아니라 실 Story를 심어야 get_gate_endpoint가 404로 흡수하지 않는다.
+            story_id = await _seed_story(s, org_id, project_id)
+            gate = Gate(
+                id=uuid.uuid4(), org_id=org_id, work_item_id=story_id, work_item_type="story",
+                gate_type="merge", status="pending", neutral_facts={},
+            )
+            s.add(gate)
+            await s.commit()
+            gate_id = gate.id
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+        async with _client_for(app) as client:
+            r_detail = await client.get(f"/api/v2/gates/{gate_id}")
+        assert r_detail.status_code == 200, r_detail.text
+        body = r_detail.json()
+        assert body["sealed_ads_connection_id"] is None
+        assert body["sealed_ads_budget_minor"] is None
+        assert body["sealed_ads_currency"] is None
+        assert body["sealed_ads_starts_at"] is None
+        assert body["sealed_ads_ends_at"] is None
+        assert body["sealed_ads_objective"] is None
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
