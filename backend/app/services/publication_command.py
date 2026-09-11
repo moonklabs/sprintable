@@ -132,10 +132,17 @@ async def create_or_get_publication_command(
     db: AsyncSession, *, org_id: uuid.UUID, gate_id: uuid.UUID, destination: uuid.UUID,
     approved_version: uuid.UUID, requested_by_member_id: uuid.UUID,
     scheduled_at: datetime | None, operation: str = "publish", content_kind: str = "channel_post",
+    toggle_seq: int = 0,
 ) -> tuple[PublicationCommand, bool]:
-    """멱등 upsert(블루프린트 §3 키: org_id+destination+approved_version+operation) —
-    기존 행이 있으면 그대로 반환(재생성 0, Threads 이중 POST 방지의 근원 축 하나).
-    반환값 둘째 원소는 "새로 만들었는지"(호출부 분기·테스트 편의).
+    """멱등 upsert(블루프린트 §3 키: org_id+destination+approved_version+operation+
+    toggle_seq — story #3806 PR3가 toggle_seq를 추가, 그 전까지는 항상 0이라
+    publish/unpublish/reply 호출부는 전부 무변경). 기존 행이 있으면 그대로 반환
+    (재생성 0, Threads 이중 POST 방지의 근원 축 하나). 반환값 둘째 원소는
+    "새로 만들었는지"(호출부 분기·테스트 편의).
+
+    `toggle_seq`는 이 함수가 스스로 계산하지 않는다 — 호출부(예: ads_boost_execution.py
+    ::_resolve_toggle_seq)가 "이 요청이 기존 비종결 토글의 재클릭인지, 새 토글인지"를
+    먼저 판정해 값을 넘긴다(이 함수는 순수 upsert만).
 
     story #3395(PR#3757)와 동형 동시성 방어 — 진짜 동시 요청 2건이 둘 다 아래 select에서
     None을 보고 각자 INSERT하면 UNIQUE 위반이 난다. SAVEPOINT로 감싸 위반 시 이 INSERT만
@@ -149,6 +156,7 @@ async def create_or_get_publication_command(
             PublicationCommand.destination == destination,
             PublicationCommand.approved_version == approved_version,
             PublicationCommand.operation == operation,
+            PublicationCommand.toggle_seq == toggle_seq,
         )
     )).scalar_one_or_none()
     if existing is not None:
@@ -158,6 +166,7 @@ async def create_or_get_publication_command(
         id=uuid.uuid4(), org_id=org_id, gate_id=gate_id, destination=destination,
         approved_version=approved_version, operation=operation, scheduled_at=scheduled_at,
         status="pending", requested_by_member_id=requested_by_member_id, content_kind=content_kind,
+        toggle_seq=toggle_seq,
     )
     try:
         async with db.begin_nested():
@@ -176,6 +185,7 @@ async def create_or_get_publication_command(
                 PublicationCommand.destination == destination,
                 PublicationCommand.approved_version == approved_version,
                 PublicationCommand.operation == operation,
+                PublicationCommand.toggle_seq == toggle_seq,
             )
         )).scalar_one()
         return winner, False
