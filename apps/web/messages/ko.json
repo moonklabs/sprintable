@@ -5363,5 +5363,13 @@
     "reconcileVerdictMatch": "일치",
     "reconcileVerdictMismatch": "불일치",
     "reconcileVerdictUnmeasured": "미측정"
+  },
+  "desktop": {
+    "loading": "불러오는 중…",
+    "title": "데스크톱 앱",
+    "versionLabel": "버전 {version}",
+    "buildLabel": "빌드 {sha}",
+    "notarizationNotice": "Apple 공증 전 내부용입니다.",
+    "downloadCta": "다운로드"
   }
 }
