@@ -114,7 +114,74 @@ async def _resolve_spend_context(db: AsyncSession, snapshot: InsightSnapshot) ->
     return {
         "module": module, "campaign_id": run.campaign_id,
         "access_token": decrypt_channel_credential(conn.encrypted_access_token),
+        # story #3806(Phase3·3-2 PR 11) — 캡처 직후 상한 판정(_enforce_spend_cap)이
+        # 이미 여기서 조회한 gate·run을 그대로 재사용(추가 쿼리 0).
+        "gate": gate, "run": run,
     }
+
+
+async def _captured_spend_minor_for_gate(db: AsyncSession, *, org_id: uuid.UUID, publication_id: uuid.UUID) -> int:
+    """story #3806(Phase3·3-2 PR 11) — `get_ads_boost_spend_summary`가 이미 하던
+    "그 gate의 캡처된 paid spend 합" 계산을 추출(드리프트 금지 — 상한 판정
+    (`_enforce_spend_cap`)과 조회 API가 같은 계산을 각자 다시 적으면 나중에
+    한쪽만 고쳐질 위험)."""
+    snapshots = (await db.execute(
+        select(InsightSnapshot).where(
+            InsightSnapshot.org_id == org_id, InsightSnapshot.publication_id == publication_id,
+            InsightSnapshot.source == _PAID_SOURCE, InsightSnapshot.status == "captured",
+        )
+    )).scalars().all()
+    return sum((s.normalized or {}).get("spend") or 0 for s in snapshots)
+
+
+async def _enforce_spend_cap(db: AsyncSession, *, gate: Gate, run, now: datetime) -> bool:
+    """story #3806(Phase3·3-2 PR 11, 페드루 PO 確定 2026-09-11 16:20Z) — 「상한 내
+    실행」의 실물: 캡처된 paid 지출 합이 봉인 예산에 도달/초과하면 자동으로 중지
+    명령을 낸다(scheduler 귀속, PR6·PR8의 `initiated_by` 사상 재사용). `run.
+    cap_reached_at`이 이미 찍혀 있으면 즉시 반환(1회만 — 매 tick 재요청 금지,
+    `_request_toggle`의 더블클릭 재사용/거부 방어와는 별개의 앞단 게이트).
+    반환값은 이번 호출에서 실제로 상한을 새로 판정했는지(테스트 가시성용)."""
+    if run.cap_reached_at is not None:
+        return False
+    if gate.sealed_ads_budget_minor is None or not gate.scope_key:
+        return False
+
+    captured = await _captured_spend_minor_for_gate(
+        db, org_id=gate.org_id, publication_id=uuid.UUID(gate.scope_key),
+    )
+    if captured < gate.sealed_ads_budget_minor:
+        return False
+
+    # 「도달했다」는 사실은 중지 명령의 성패와 무관하게 확정(먼저 커밋) — 아래
+    # request_ads_boost_pause가 이미-paused 등으로 거부돼도 매 tick 재판정하지
+    # 않는다(사실 관측과 그에 대한 대응 조치를 별개 실패단위로 취급).
+    run.cap_reached_at = now
+    await db.commit()
+
+    if gate.resolver_id is None:
+        return True  # PR6과 동형 방어 — 귀속 불가 상태는 이론상 불가하나 침묵 안 함.
+
+    from app.services.ads_boost_execution import (
+        AdsBoostAlreadyInStateError,
+        AdsBoostGateNotApprovedError,
+        AdsBoostGateNotFoundError,
+        AdsBoostNotStartedError,
+        request_ads_boost_pause,
+    )
+
+    try:
+        await request_ads_boost_pause(
+            db, org_id=gate.org_id, gate_id=gate.id, requester_member_id=gate.resolver_id,
+            initiated_by="scheduler",
+        )
+    except (AdsBoostGateNotFoundError, AdsBoostGateNotApprovedError, AdsBoostAlreadyInStateError, AdsBoostNotStartedError):
+        # 이미 중지됐거나(사람이 먼저 pause) 게이트가 그 사이 재오픈된 경우 —
+        # 「상한 도달」 관측 자체는 위에서 이미 확정됐으니 이 건은 이 워커의
+        # 실패가 아니다.
+        pass
+    except Exception:  # noqa: BLE001 — publication_command.py와 동형 2중 방어.
+        await db.rollback()
+    return True
 
 
 async def process_due_ads_spend_snapshots(db: AsyncSession, *, now: datetime | None = None) -> dict[str, int]:
@@ -140,7 +207,7 @@ async def process_due_ads_spend_snapshots(db: AsyncSession, *, now: datetime | N
         snapshot.status = "in_progress"
     await db.commit()
 
-    counts = {"captured": 0, "failed": 0, "error": 0}
+    counts = {"captured": 0, "failed": 0, "error": 0, "capped": 0}
     for snapshot in rows:
         try:
             ctx = await _resolve_spend_context(db, snapshot)
@@ -161,6 +228,11 @@ async def process_due_ads_spend_snapshots(db: AsyncSession, *, now: datetime | N
             snapshot.error_code = None
             await db.commit()
             counts["captured"] += 1
+            # story #3806(Phase3·3-2 PR 11) — 이 캡처가 상한을 새로 넘겼는지 즉시
+            # 판정(같은 tick 안, 다음 tick까지 안 미룬다 — 「상한 내 실행」은 발견
+            # 즉시 멈추는 것이 취지).
+            if await _enforce_spend_cap(db, gate=ctx["gate"], run=ctx["run"], now=now):
+                counts["capped"] += 1
         except AdsSpendFetchError as exc:
             snapshot.error_code = exc.code
             snapshot.status = "failed"
@@ -226,8 +298,12 @@ async def get_ads_boost_spend_summary(db: AsyncSession, *, org_id: uuid.UUID, ga
         )
     )).scalar_one_or_none()
 
-    captured_spend_minor = sum(
-        (s.normalized or {}).get("spend") or 0 for s in snapshots if s.status == "captured"
+    # story #3806(Phase3·3-2 PR 11) — _enforce_spend_cap과 같은 계산(드리프트 금지,
+    # 이 파일 상단 `_captured_spend_minor_for_gate` docstring 참고). 위에서 이미
+    # 가져온 `snapshots`로 직접 합해도 값은 같지만, 두 소비처가 각자 다시 적으면
+    # 나중에 한쪽만 고쳐질 위험을 없애기 위해 공유 함수를 그대로 부른다.
+    captured_spend_minor = await _captured_spend_minor_for_gate(
+        db, org_id=org_id, publication_id=uuid.UUID(gate.scope_key),
     )
     return {
         "gate_id": gate.id,
@@ -237,6 +313,10 @@ async def get_ads_boost_spend_summary(db: AsyncSession, *, org_id: uuid.UUID, ga
         "captured_spend_minor": captured_spend_minor,
         "remaining_minor": (gate.sealed_ads_budget_minor or 0) - captured_spend_minor,
         "run_status": run.status if run is not None else None,
+        # story #3806(Phase3·3-2 PR 11, §7 실측 열 「상한 초과 0건」의 장치) — run이
+        # 없으면(미실행) 당연히 null, run은 있는데 아직 미도달이어도 null(지어내지
+        # 않는다) — 도달한 시각이 찍혀야만 값이 있다.
+        "cap_reached_at": run.cap_reached_at if run is not None else None,
         "snapshots": [
             {
                 "due_at": s.due_at, "captured_at": s.captured_at, "status": s.status,

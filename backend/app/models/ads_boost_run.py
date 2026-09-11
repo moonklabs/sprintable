@@ -41,6 +41,11 @@ class AdsBoostRun(Base):
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default="pending")
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     paused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # story #3806(Phase3·3-2 PR 11, 페드루 PO 確定 2026-09-11 16:20Z) — 캡처된 paid
+    # 지출 합이 gate.sealed_ads_budget_minor에 도달/초과한 순간(1회, 0368 마이그).
+    # null=미도달 — 지어내지 않는다. 이 값이 찍힌 뒤에만 자동 중지를 시도해 매 tick
+    # 재-중지 요청을 안 보내는 멱등 게이트(ads_spend_snapshots.py::_enforce_spend_cap).
+    cap_reached_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

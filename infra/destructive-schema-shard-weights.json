@@ -1620,8 +1620,8 @@
     },
     {
       "file": "tests/test_3806_ads_boost_spend.py",
-      "sec": 6.4,
-      "source": "story-3806(Phase3·3-2 PR4, 페드루 PO 追加 確定 2026-09-11 — offset_label 판단 콜② 답으로 organic 목록 필터 테스트 1건 추가) — 재측(로컬, uv run pytest --durations=0 직접 1회 실행, 7건 wall time 약 6.4s — test_3766 등재 선례와 동일 방법론)"
+      "sec": 8.1,
+      "source": "story-3806(Phase3·3-2 PR 11, 페드루 PO 確定 2026-09-11 16:20Z — 상한 판정 테스트 3건+PR8 initiated_by 테스트 1건 누적 추가) — 재측(로컬, uv run pytest --durations=0 직접 1회 실행, 12건 wall time 약 8.1s — test_3766 등재 선례와 동일 방법론)"
     },
     {
       "file": "tests/test_3805_pr4_reply_collection.py",
@@ -1637,6 +1637,11 @@
       "file": "tests/test_3806_ads_boost_starts_cron_wiring.py",
       "sec": 1.8,
       "source": "story-3806(Phase3·3-2 PR 6, 페드루 PO 確定 2026-09-11 13:27Z — cron 배선 회귀, test_3527_comment_collection_cron_wiring.py 선례와 동형) — 신규 파일 실측(로컬, uv run pytest --durations=0 직접 1회 실행, 2건 call+setup 합산 약 1.8s — test_3766 등재 선례와 동일 방법론)"
+    },
+    {
+      "file": "tests/test_3806_ads_boost_spend_cron_wiring.py",
+      "sec": 3.1,
+      "source": "story-3806(Phase3·3-2 PR 11, 페드루 PO 確定 2026-09-11 16:20Z — process_due_ads_spend_snapshots cron 미배선 갭 처방, test_3806_ads_boost_starts_cron_wiring.py 선례와 동형) — 신규 파일 실측(로컬, uv run pytest --durations=0 직접 1회 실행, 2건 wall time 약 3.1s — test_3766 등재 선례와 동일 방법론)"
     }
   ]
 }

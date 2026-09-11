@@ -129,6 +129,119 @@ async def test_process_due_ads_spend_snapshots_captures_with_source_paid():
 
 
 @pytest.mark.anyio
+async def test_capture_exceeding_budget_auto_pauses_and_stamps_cap_reached_at():
+    """story #3806(Phase3·3-2 PR 11, 페드루 PO 確定 2026-09-11 16:20Z) — 「상한 내
+    실행」의 실물. budget_minor=10_000(<sandbox 고정 12,345/스냅샷)로 봉인해 첫
+    캡처만으로 이미 초과 — 그 tick 안에서 즉시 자동 중지 명령(scheduler 귀속)이
+    나가고 `AdsBoostRun.cap_reached_at`이 찍히는지 확認. 두 스냅샷이 같은 tick에서
+    처리돼도(각자 12,345) `capped`가 정확히 1(멱등 — 두 번째 캡처는 이미 찍힌
+    cap_reached_at을 보고 조용히 스킵)인지까지 pin.
+    뮤테이션 대상: `process_due_ads_spend_snapshots`가 캡처 후 `_enforce_spend_cap`을
+    안 부르면(또는 그 함수가 `run.cap_reached_at`을 안 찍으면) 아래 세 단언이 전부
+    실패한다."""
+    from app.models.ads_boost_run import AdsBoostRun
+    from app.models.publication_command import PublicationCommand
+    from app.services.ads_boost_execution import OP_PAUSE
+    from app.services.ads_spend_snapshots import process_due_ads_spend_snapshots
+    from sqlalchemy import select
+    from tests.test_e4fc29fa_site_post_orchestration import _session_factory
+
+    engine, Session, org_id, project_id, owner_id, gate_id = await _setup_approved_gate(
+        await _session_factory(), budget_minor=10_000,
+    )
+    try:
+        await _start_boost(Session, org_id, gate_id, owner_id)
+
+        async with Session() as s:
+            await _make_spend_snapshots_due(s, org_id, gate_id)
+
+        async with Session() as s:
+            counts = await process_due_ads_spend_snapshots(s)
+        assert counts["captured"] == 2, counts
+        assert counts["capped"] == 1, counts  # 두 번째 캡처는 이미 도달 후라 재판정 스킵.
+
+        async with Session() as s:
+            run = (await s.execute(select(AdsBoostRun).where(AdsBoostRun.gate_id == gate_id))).scalar_one()
+            assert run.cap_reached_at is not None
+
+            pause_cmd = (await s.execute(
+                select(PublicationCommand).where(
+                    PublicationCommand.gate_id == gate_id, PublicationCommand.operation == OP_PAUSE,
+                )
+            )).scalar_one_or_none()
+        assert pause_cmd is not None, "상한 도달 시 자동 중지 명령이 생성돼야 한다"
+        assert pause_cmd.initiated_by == "scheduler"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_capture_within_budget_does_not_trigger_cap():
+    """budget_minor=100_000(기본, 2스냅샷 합 24,690 < 100,000)이면 상한 미도달 —
+    cap_reached_at·자동중지 둘 다 없어야 한다(지어낸 조기종료 금지)."""
+    from app.models.ads_boost_run import AdsBoostRun
+    from app.models.publication_command import PublicationCommand
+    from app.services.ads_boost_execution import OP_PAUSE
+    from app.services.ads_spend_snapshots import process_due_ads_spend_snapshots
+    from sqlalchemy import select
+    from tests.test_e4fc29fa_site_post_orchestration import _session_factory
+
+    engine, Session, org_id, project_id, owner_id, gate_id = await _setup_approved_gate(await _session_factory())
+    try:
+        await _start_boost(Session, org_id, gate_id, owner_id)
+
+        async with Session() as s:
+            await _make_spend_snapshots_due(s, org_id, gate_id)
+
+        async with Session() as s:
+            counts = await process_due_ads_spend_snapshots(s)
+        assert counts["captured"] == 2, counts
+        assert counts["capped"] == 0, counts
+
+        async with Session() as s:
+            run = (await s.execute(select(AdsBoostRun).where(AdsBoostRun.gate_id == gate_id))).scalar_one()
+            assert run.cap_reached_at is None
+
+            pause_cmd = (await s.execute(
+                select(PublicationCommand).where(
+                    PublicationCommand.gate_id == gate_id, PublicationCommand.operation == OP_PAUSE,
+                )
+            )).scalar_one_or_none()
+        assert pause_cmd is None
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_spend_endpoint_serializes_cap_reached_at():
+    """§7 실측 열 「상한 초과 0건」의 장치 — /spend 응답 직렬화 확認(PR8이 겪은
+    "컬럼은 있는데 응답엔 없다" 클래스 재발 방지, 이번엔 자체 pin)."""
+    from app.main import app
+    from app.services.ads_spend_snapshots import process_due_ads_spend_snapshots
+    from tests.test_3475_publishing_metrics import _client_for, _setup_org_scoped_app
+    from tests.test_e4fc29fa_site_post_orchestration import _session_factory
+
+    engine, Session, org_id, project_id, owner_id, gate_id = await _setup_approved_gate(
+        await _session_factory(), budget_minor=10_000,
+    )
+    try:
+        await _start_boost(Session, org_id, gate_id, owner_id)
+        async with Session() as s:
+            await _make_spend_snapshots_due(s, org_id, gate_id)
+        async with Session() as s:
+            await process_due_ads_spend_snapshots(s)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+        async with _client_for(app) as client:
+            r = await client.get(f"/api/v2/organizations/{org_id}/ads-boosts/{gate_id}/spend")
+        assert r.status_code == 200, r.text
+        assert r.json()["cap_reached_at"] is not None
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_organic_loop_skips_paid_channel_snapshots():
     """process_due_insight_snapshots(organic 루프)가 paid 채널 행을 안 건드려야
     한다 — 안 그러면 insight_metrics=() 게이트에 걸려 즉시 'unsupported'로
