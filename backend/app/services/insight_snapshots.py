@@ -108,10 +108,24 @@ async def list_insight_snapshots_for_publication(
 ) -> list[InsightSnapshot]:
     """story #3497 조각3(조회 API) — 스냅샷 목록(due_at 오름차순, +1d 먼저). org
     격리는 호출자(라우터)가 이미 검증한 뒤 이 함수를 부른다는 전제(다른 서비스
-    함수들과 동형 — org_id는 여기서도 WHERE에 걸어 이중 방어)."""
+    함수들과 동형 — org_id는 여기서도 WHERE에 걸어 이중 방어).
+
+    story #3806(Phase3·3-2 PR4, 페드루 PO 確定 2026-09-11) — `channel NOT IN
+    ('meta_ads','ads_sandbox')` 제외. paid 행이 이 목록에 섞이면 두 가지가
+    깨진다: ① `label_snapshot_offset`이 `due_at - published_at`으로 라벨을
+    내는데 paid의 due_at anchor는 boost 시작 시각(publish 시각 아님)이라 그
+    계산이 의미를 잃는다(대개 None으로 떨어지긴 하나, boost가 발행 직후
+    시작되면 우연히 1d/7d에 근접해 오라벨될 수 있다) ② 이 엔드포인트의 계약
+    자체가 organic 인사이트 조회다 — paid는 `GET .../ads-boosts/{gate_id}/
+    spend`(PR4 신규)가 전담. 그 엔드포인트가 이 목록과 겹치지 않도록 가른다."""
+    from app.services.ads_spend_snapshots import _PAID_CHANNELS
+
     rows = (await db.execute(
         select(InsightSnapshot)
-        .where(InsightSnapshot.org_id == org_id, InsightSnapshot.publication_id == publication_id)
+        .where(
+            InsightSnapshot.org_id == org_id, InsightSnapshot.publication_id == publication_id,
+            InsightSnapshot.channel.notin_(_PAID_CHANNELS),
+        )
         .order_by(InsightSnapshot.due_at.asc())
     )).scalars().all()
     return list(rows)
