@@ -27,7 +27,7 @@ from tests.test_2288_command_center_gate_type_waiting_realdb import _make_member
 pytestmark = [
     # 페드루 PO CHANGES(2026-09-07, 3877/3878 전례) — command_center 테스트가 `app.main`의
     # 전역 엔진·실 HTTP 클라이언트를 거치는 신규 real-DB 파일이라 destructive_schema 짝(모듈
-    # 마커+infra/destructive-schema-shard-weights.json 등재)이 요구된다 — 미등재면 샤드 가드가
+    # 마커+infra/destructive-schema-shard-weights.jsonl 등재)이 요구된다 — 미등재면 샤드 가드가
     # 빨개진다.
     pytest.mark.destructive_schema,
     pytest.mark.skipif(not _REAL_DB_URL, reason="통합 테스트는 실 PG(PARITY/ALEMBIC_DATABASE_URL) 필요"),

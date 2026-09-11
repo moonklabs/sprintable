@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """story #3383 — 로컬 사전점검용 재측정 도구. 템플릿 DB(sprintable_test_tpl, 미리
 `build_destructive_schema_template.py`로 만들어져 있어야 한다)에서 매 destructive_schema
-파일을 클론해 돌리고 실 소요를 재 `infra/destructive-schema-shard-weights.json`에 쓴다.
+파일을 클론해 돌리고 실 소요를 재 `infra/destructive-schema-shard-weights.jsonl`에 쓴다.
 
 ⚠️ 이 로컬 절대시간은 CI 절대시간이 아니다(로컬이 CI보다 ~6배 빠르다, story #3383 실측 —
 GH Actions 공유 러너 특성) — **PR 머지 전 최종 커밋 스냅샷은 항상 실 CI 로그(각 샤드
@@ -28,7 +28,12 @@ from pathlib import Path
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 REPO_ROOT = BACKEND_DIR.parent
-WEIGHTS_PATH = REPO_ROOT / "infra" / "destructive-schema-shard-weights.json"
+# story #3812 — jsonl(파일당 1줄) + 별도 meta.json(드물게 바뀌는 메타). 이 도구는
+# "전체 재측정"(사람이 드물게 손으로 돌리는 유지보수 도구, 매 PR이 건드리는 append-
+# hot-path가 아니다)이라 전체 덮어쓰기가 여전히 맞는 동작 — 다만 그 결과물의 «형식»은
+# 상시 소비처(shard_destructive_tests.py)와 맞춰야 하므로 여기도 새 포맷으로 쓴다.
+WEIGHTS_PATH = REPO_ROOT / "infra" / "destructive-schema-shard-weights.jsonl"
+WEIGHTS_META_PATH = REPO_ROOT / "infra" / "destructive-schema-shard-weights.meta.json"
 
 # story #3465 — 이 전체 재측정 실행은 모든 파일을 같은 배치로 잰다(개별 파일마다 다른
 # provenance를 붙일 근거가 없다 — 실행 시각을 SOURCE_LABEL에 박아 최소한 "언제 이
@@ -77,7 +82,7 @@ def main() -> int:
     # story #3397 — total_files/total_sec는 더 이상 기록하지 않는다(files 배열에서
     # 파생 가능한 값을 별도로 저장했던 것이 매 PR 병합마다 git 충돌을 냈다 — #3742·
     # #3752 실사고). check_staleness()는 이제 len(files)로 직접 판정한다.
-    payload = {
+    meta_payload = {
         "_snapshot_policy": (
             "story #3383(2026-09-03) — 로컬 재측정(템플릿 DB 적용 후). 로컬 절대시간은 CI의 "
             "~1/6이지만(실측), 파일 간 상대 비중은 LPT 배분에 유효하다. 재측정 기준은 이전과 "
@@ -85,9 +90,12 @@ def main() -> int:
             "1.5배 이상 벌어짐, (c) 25분 천장 대비 여유가 다시 좁아짐."
         ),
         "measured_at": "2026-09-03",
-        "files": sorted(results, key=lambda r: -r["sec"]),
     }
-    WEIGHTS_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+    WEIGHTS_META_PATH.write_text(json.dumps(meta_payload, ensure_ascii=False, indent=2) + "\n")
+    sorted_results = sorted(results, key=lambda r: str(r["file"]))
+    WEIGHTS_PATH.write_text(
+        "\n".join(json.dumps(r, ensure_ascii=False) for r in sorted_results) + "\n"
+    )
     print(f"OK: {WEIGHTS_PATH} 갱신 완료 — {len(results)}개 파일, 합계 {total_sec:.1f}s", file=sys.stderr)
     return 0
 
