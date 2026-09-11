@@ -79,7 +79,9 @@ async def test_cron_tick_captures_due_ads_spend_snapshot_via_worker_db(monkeypat
             )
         assert r.status_code == 200, r.text
         body = r.json()["data"]
-        assert body["ads_spend_snapshots"]["captured"] == 2, body
+        # story #3809(PR 4a) — 최초 예약이 1건뿐이라(_start_boost 직후) 이 tick
+        # 1회로는 캡처 1건만(다음 캡처는 그 자리서 이어 예약될 뿐 아직 안 due).
+        assert body["ads_spend_snapshots"]["captured"] == 1, body
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
