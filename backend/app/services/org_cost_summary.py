@@ -34,17 +34,30 @@ from app.services.generation_budget import compute_generation_budget_status
 
 async def get_org_ads_cost_summary(db: AsyncSession, *, org_id: uuid.UUID) -> dict:
     """승인된(status=="approved") ads_boost 게이트 집합 기준 예산·지출·상한. 그
-    집합이 비어 있으면(승인된 boost가 org에 0건) 전부 0/None — 지어내지 않는다."""
+    집합이 비어 있으면(승인된 boost가 org에 0건) 전부 0/None — 지어내지 않는다.
+
+    story #3809(Phase3·3-7 PR 2b, 페드루 PO 確定 2026-09-11 18:46Z) — 통화 안전.
+    `sealed_ads_currency`는 게이트별 nullable 값이라 org 안에 서로 다른 통화의
+    승인 boost가 섞일 수 있다(막는 장치 0). 그 경우 `sealed_budget_minor`/
+    `captured_spend_minor`/`remaining_minor`를 그냥 더하면 "달러+원을 그냥 더한
+    숫자"가 나온다 — 통화가 하나로 안 모이면(0건 제외 — 0은 "더할 게 없다"는
+    정직한 사실이지 "섞였다"가 아니다) 세 합계 필드를 전부 None으로 낸다(지어낸
+    숫자보다 "모른다"가 정직하다)."""
     gates = (await db.execute(
         select(Gate).where(
             Gate.org_id == org_id, Gate.gate_type == _ADS_BOOST_GATE_TYPE, Gate.status == "approved",
         )
     )).scalars().all()
 
-    sealed_budget_minor_sum = sum(g.sealed_ads_budget_minor or 0 for g in gates)
+    distinct_currencies = {g.sealed_ads_currency for g in gates if g.sealed_ads_currency}
+    # 0건(더할 게 없음)·1건(그 통화로 확정) 둘 다 "섞이지 않음" — 2개 이상만 섞임.
+    currency = next(iter(distinct_currencies), None) if len(distinct_currencies) <= 1 else None
+    mixed_currencies = len(distinct_currencies) > 1
+
+    sealed_budget_minor_sum: int | None = sum(g.sealed_ads_budget_minor or 0 for g in gates)
 
     publication_ids = [uuid.UUID(g.scope_key) for g in gates if g.scope_key]
-    captured_spend_minor_sum = 0
+    captured_spend_minor_sum: int | None = 0
     if publication_ids:
         # story #3806 가드(test_3806_organic_snapshots_only_guard.py) 처방(페드루
         # PO 지적 2026-09-11 17:44Z) — 손으로 InsightSnapshot을 직접 필터하지 않고
@@ -58,6 +71,13 @@ async def get_org_ads_cost_summary(db: AsyncSession, *, org_id: uuid.UUID) -> di
         )).scalars().all()
         captured_spend_minor_sum = sum((s.normalized or {}).get("spend") or 0 for s in snapshots)
 
+    remaining_minor: int | None = sealed_budget_minor_sum - captured_spend_minor_sum
+
+    if mixed_currencies:
+        sealed_budget_minor_sum = None
+        captured_spend_minor_sum = None
+        remaining_minor = None
+
     gate_ids = [g.id for g in gates]
     cap_reached_count = 0
     if gate_ids:
@@ -68,9 +88,10 @@ async def get_org_ads_cost_summary(db: AsyncSession, *, org_id: uuid.UUID) -> di
 
     return {
         "approved_boost_count": len(gates),
+        "sealed_ads_currency": currency,
         "sealed_budget_minor": sealed_budget_minor_sum,
         "captured_spend_minor": captured_spend_minor_sum,
-        "remaining_minor": sealed_budget_minor_sum - captured_spend_minor_sum,
+        "remaining_minor": remaining_minor,
         "cap_reached_count": cap_reached_count,
     }
 
@@ -115,6 +136,12 @@ async def get_org_cost_summary(db: AsyncSession, *, org_id: uuid.UUID, now: date
         "generation_cost_spent_minor": generation["spent_minor"] if generation is not None else None,
         "generation_cost_period_start": generation["period_start"] if generation is not None else None,
         "generation_cost_period_end": generation["period_end"] if generation is not None else None,
+        # story #3809(Phase3·3-7 PR 2b, 페드루 PO 確定 2026-09-11 18:46Z) — PR#3848
+        # PO 지침②("FE가 'KRW' 추정 절대금지")를 이 응답도 지킨다. compute_
+        # generation_budget_status가 이미 통화를 계산해 두고도 이 함수가 그 필드를
+        # 조용히 버려(그라운딩 中 자체발견) 카드가 통화기호를 못 낼 뻔했다 — 그대로
+        # 통과만.
+        "generation_currency": generation["currency"] if generation is not None else None,
         # story #3809 그라운딩②(2026-09-11) — X 비용 원장 자체가 이 시점 코드에
         # 없다(실측 확認). "0"으로 지어내지 않고 미측정을 null로 예약만 한다.
         "x_cost_spent_minor": None,
