@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { Loader2 } from 'lucide-react';
+import { AlertTriangle, Loader2 } from 'lucide-react';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 
@@ -102,12 +103,17 @@ export function DesktopDownloadCard() {
           <span data-testid="desktop-download-build-sha">{' · '}{t('buildLabel', { sha: buildSha })}</span>
         ) : null}
       </p>
-      <p className="text-xs text-muted-foreground" data-testid="desktop-download-notarization-notice">
-        {t('notarizationNotice')}
-      </p>
-      <p className="text-xs text-muted-foreground" data-testid="desktop-download-gatekeeper-notice">
-        {t('gatekeeperNotice')}
-      </p>
+      {/* [SID:3810] 슬라이스13② — 두 경고를 한 위계로: 「지금 해야 할 일」(우클릭→열기)을
+          AlertTitle로 먼저 보이고, 「왜」(공증 전 내부용)는 AlertDescription으로 덧붙인다.
+          이전엔 둘 다 위 메타 정보(버전·대상 플랫폼)와 같은 text-xs text-muted-foreground라
+          경고라는 게 눈에 안 띄었다(유나 지적). */}
+      <Alert variant="warning">
+        <AlertTriangle className="h-4 w-4" />
+        <AlertTitle data-testid="desktop-download-gatekeeper-notice">{t('gatekeeperNotice')}</AlertTitle>
+        <AlertDescription data-testid="desktop-download-notarization-notice">
+          {t('notarizationNotice')}
+        </AlertDescription>
+      </Alert>
       <Button asChild size="sm" data-testid="desktop-download-button">
         <a href={downloadUrl} download>{t('downloadCta')}</a>
       </Button>
