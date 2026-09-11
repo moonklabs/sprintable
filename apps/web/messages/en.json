@@ -4799,6 +4799,7 @@
     "sigRequestChanges": "Request changes",
     "sigApproveAndSign": "Approve & sign",
     "gateReapprovalResubmitWaiting": "The author is revising the content and needs to resubmit for approval.",
+    "adsBoostReapprovalWaiting": "The budget or schedule changed and needs reapproval.",
     "gateActivityHistoryTitle": "Approval history",
     "gateActivityActorFallback": "Unknown",
     "gateActivityEmpty": "No approval history yet",

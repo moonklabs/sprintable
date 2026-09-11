@@ -331,6 +331,51 @@ describe('ApprovalsQueue', () => {
     expect(approveButton?.hasAttribute('disabled')).toBe(false);
   });
 
+  // story #3806(Phase3·3-2 PR5, 정정3 — 페드루 PO 리뷰 2026-09-11 13:00Z 실측) —
+  // ads_boost의 「변경됨·재승인 필요」는 글 게이트(작성자가 본문을 수정...) 문장이
+  // 아니라 §1 원문(예산/기간이 바뀌어...)을 써야 한다.
+  it('⭐ads_boost·reapproval_required=true — §1 전용 문장이 뜨고 글 게이트 문장은 안 뜬다', async () => {
+    mockFetches(
+      [gate({
+        id: 'g-ads-resubmit', gate_type: 'ads_boost', can_approve: true, requires_human: true,
+        reapproval_required: true,
+      })],
+      [],
+    );
+    await mount();
+    expect(container.textContent).toContain(koMessages.cage.adsBoostReapprovalWaiting);
+    expect(container.textContent).not.toContain(koMessages.cage.gateReapprovalResubmitWaiting);
+  });
+
+  // story #3806(Phase3·3-2 PR5, 정정2 — 페드루 PO 리뷰 2026-09-11 13:00Z 실측) — 유나
+  // §절 §1 「결재 카드 봉인 5필드」는 이 큐 카드 자체에 있어야 한다(상세 페이지뿐이면
+  // 안 됨). 봉인값이 있으면 카드에 예산·기간·목표가 실제로 그려지는지 검증.
+  it('⭐ads_boost 게이트 카드에 봉인 총예산·기간·목표가 사람 낱말로 실제 DOM에 나타난다', async () => {
+    mockFetches(
+      [gate({
+        id: 'g-ads-sealed', gate_type: 'ads_boost', can_approve: true, requires_human: true,
+        sealed_ads_budget_minor: 50_000, sealed_ads_currency: 'KRW',
+        sealed_ads_starts_at: '2026-09-12T00:00:00Z', sealed_ads_ends_at: '2026-09-19T00:00:00Z',
+        sealed_ads_objective: 'POST_ENGAGEMENT',
+      })],
+      [],
+    );
+    await mount();
+    const text = container.textContent ?? '';
+    expect(text).toContain('50,000원');
+    expect(text).toContain('참여');
+    expect(text).not.toContain('POST_ENGAGEMENT');
+  });
+
+  it('ads_boost가 아닌 게이트 카드는 봉인 예산 블록을 안 그린다(지어내지 않는다)', async () => {
+    mockFetches(
+      [gate({ id: 'g-not-ads', gate_type: 'external_publish', can_approve: true, requires_human: true })],
+      [],
+    );
+    await mount();
+    expect(container.querySelector('[data-testid="inbox-ads-boost-sealed"]')).toBeNull();
+  });
+
   it('story #3038 AC4(PO #3188 오서명 실사고) — 같은 work_item의 merge 게이트 2장이 pr_number로 서로 구분된다', async () => {
     mockFetches(
       [

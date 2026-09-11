@@ -147,7 +147,10 @@ describe('BoostExecutionControl — story #3806(Phase3·3-2 PR5, 유나 §절 §
     await act(async () => { startBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
     const dialogText = document.body.querySelector('[data-testid="boost-start-confirm-dialog"]')?.textContent ?? '';
-    expect(dialogText).toContain('POST_ENGAGEMENT');
+    // story #3806(정정1, 페드루 PO 리뷰 2026-09-11 13:00Z) — 원시 enum이 아니라 사람
+    // 낱말(유나 §절 낱말표)로 떠야 한다.
+    expect(dialogText).toContain('참여');
+    expect(dialogText).not.toContain('POST_ENGAGEMENT');
     expect(dialogText).toContain('50,000원');
   });
 

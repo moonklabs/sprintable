@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -14,6 +14,9 @@ import { GateUndoButton, UNDO_WINDOW_MS } from '@/components/cage/gate-undo-butt
 import { GateDiscussDialog } from '@/components/cage/gate-discuss-dialog';
 import { GateSignatureApproval } from '@/components/cage/gate-signature-approval';
 import { gateTypeLabel } from '@/lib/gate-type-label';
+import { adsBoostObjectiveLabel } from '@/lib/ads-boost-objective-label';
+import { formatMinorCurrency, type GenerationBudgetCurrency } from '@/components/content/generation-budget-indicator';
+import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import type { GateInboxItem, GateItem, HitlInboxItem } from '@/components/kanban/types';
 import { ProofCapsule, type ProofState } from '@/components/proof-capsule/proof-capsule';
@@ -138,6 +141,12 @@ export function ApprovalsQueue() {
   // 'dashboard' 네임스페이스에 산다(공용 헬퍼로 옮긴 것은 로직뿐, 키 위치는
   // 그대로) — 이 화면 자체 t는 'cage'라 별도로 받는다.
   const tDashboard = useTranslations('dashboard');
+  // story #3806(정정2, 페드루 PO 리뷰 2026-09-11 13:00Z) — 봉인 5필드 표시는 §1
+  // 「결재 카드」 그 자체(이 큐 카드)에 있어야 한다는 실측 지적. formatMinorCurrency
+  // (content ns)·formatScheduledAt 재사용 — gate-evidence.tsx와 동일 포맷터.
+  const tContent = useTranslations('content');
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
   const router = useRouter();
   // story #2103 — BE `PATCH /api/v1/hitl-requests/{id}`가 human-only 불변식이다(gates.py
   // transition_gate_endpoint와 동형, resolved.type != "human" → 403). #2091(게이트 상세)과
@@ -499,6 +508,27 @@ export function ApprovalsQueue() {
             {decisionFacts ? (
               <p className="text-[11px] text-muted-foreground">#{gate.work_item_id.slice(0, 8)}</p>
             ) : null}
+            {/* story #3806(Phase3·3-2 PR5, 유나 §절 §1 「결재 카드 봉인 5필드」 — 정정2,
+                페드루 PO 리뷰 2026-09-11 13:00Z 실측) — 이 큐 카드 자체가 「결재 카드」다.
+                상세 페이지(GateEvidence)에만 있던 봉인 표시를 여기에도 낸다(같은 포맷터
+                재사용, 새 표시 로직 0). ads_boost가 아닌 gate_type은 sealed_ads_budget_
+                minor가 항상 null이라 이 블록이 안 그려진다. */}
+            {gate.gate_type === 'ads_boost' && gate.sealed_ads_budget_minor != null ? (
+              <p className="text-[11px] text-muted-foreground" data-testid="inbox-ads-boost-sealed">
+                {gate.sealed_ads_currency
+                  ? formatMinorCurrency(gate.sealed_ads_budget_minor, gate.sealed_ads_currency as GenerationBudgetCurrency, locale, tContent)
+                  : gate.sealed_ads_budget_minor}
+                {gate.sealed_ads_starts_at && gate.sealed_ads_ends_at ? (
+                  <>
+                    {' · '}
+                    {formatScheduledAt(gate.sealed_ads_starts_at, displayTimezone).display}
+                    {' ~ '}
+                    {formatScheduledAt(gate.sealed_ads_ends_at, displayTimezone).display}
+                  </>
+                ) : null}
+                {gate.sealed_ads_objective ? ` · ${adsBoostObjectiveLabel(gate.sealed_ads_objective, tContent)}` : ''}
+              </p>
+            ) : null}
             {/* story #3038 AC4(페드루 전언, PO #3188 오서명 실사고) — 같은 work_item(스토리)의
                 merge 게이트가 여러 개(PR마다 1개, story #2893)면 제목만으론 동명 2장이 된다.
                 pr_number·head SHA는 이미 GateResponse에 있었지만(from_attributes 자동 채움)
@@ -694,8 +724,11 @@ export function ApprovalsQueue() {
             {isResubmitWaiting ? (
               // §3-1-2-1 — 판정이 아니라 관측(§3-2와 같은 원칙): 작성자가 손볼 차례라는
               // 사실만 전달하고, 승인/반려 버튼은 아래에서 비활성으로 그 사실을 강제한다.
+              // story #3806(정정3, 페드루 PO 리뷰 2026-09-11 13:00Z) — 「작성자가 본문을
+              // 수정해...」는 글 게이트(doc/content) 전용 문장이다. ads_boost는 본문이
+              // 아니라 예산·기간이 바뀌는 축이라 §1 원문 그대로 별도 문장을 쓴다.
               <p className="mt-2 rounded-lg bg-muted/40 px-2.5 py-1.5 text-[11px] text-muted-foreground">
-                {t('gateReapprovalResubmitWaiting')}
+                {gate.gate_type === 'ads_boost' ? t('adsBoostReapprovalWaiting') : t('gateReapprovalResubmitWaiting')}
               </p>
             ) : null}
             {gateErrors[gate.id] ? (

@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatMinorCurrency, type GenerationBudgetCurrency } from '@/components/content/generation-budget-indicator';
+import { adsBoostObjectiveLabel } from '@/lib/ads-boost-objective-label';
 import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 
 // story #3806(Phase3·3-2 PR5, 유나 §절 §2 「중지 스위치」) — 실행 중인 홍보의 중지/재개.
@@ -132,7 +133,7 @@ export function BoostExecutionControl({
               {sealedAdsObjective ? (
                 <p>
                   <span className="text-muted-foreground">{t('adsBoostObjectiveLabel')} · </span>
-                  <span className="text-foreground">{sealedAdsObjective}</span>
+                  <span className="text-foreground">{adsBoostObjectiveLabel(sealedAdsObjective, tContent)}</span>
                 </p>
               ) : null}
             </div>

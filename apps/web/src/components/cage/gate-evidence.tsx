@@ -14,6 +14,7 @@ import { isCommentReplyGate } from '@/components/cage/gate-risk';
 import { AuthorKindBadge } from '@/components/content/author-kind-badge';
 import { channelLabel } from '@/lib/channel-label';
 import { formatMinorCurrency, type GenerationBudgetCurrency } from '@/components/content/generation-budget-indicator';
+import { adsBoostObjectiveLabel } from '@/lib/ads-boost-objective-label';
 
 /**
  * H1-S8 머지 verdict 게이트 evidence(read-only 표시). 3 surface(GateInbox row·story detail·
@@ -640,7 +641,7 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
           {facts.adsObjective ? (
             <p>
               <span className="text-muted-foreground">{t('adsBoostObjectiveLabel')} · </span>
-              <span className="text-foreground">{facts.adsObjective}</span>
+              <span className="text-foreground">{adsBoostObjectiveLabel(facts.adsObjective, tContent)}</span>
             </p>
           ) : null}
         </div>

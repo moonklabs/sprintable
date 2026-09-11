@@ -467,7 +467,10 @@ describe('GateEvidence — 레시피 approve 게이트 승인 대상 실물 렌�
     expect(container.textContent).toContain(koMessages.cage.adsBoostScheduleLabel);
     expect(container.textContent).toContain('7일'); // 2026-09-12~19 = 7일
     expect(container.textContent).toContain(koMessages.cage.adsBoostObjectiveLabel);
-    expect(container.textContent).toContain('POST_ENGAGEMENT');
+    // story #3806(정정1, 페드루 PO 리뷰 2026-09-11 13:00Z) — 원시 enum이 아니라 사람
+    // 낱말(유나 §절 낱말표)로 떠야 한다.
+    expect(container.textContent).toContain('참여');
+    expect(container.textContent).not.toContain('POST_ENGAGEMENT');
   });
 
   it('ads_boost가 아닌 gate_type은 봉인 예산 라벨 자체를 그리지 않는다(지어내지 않음)', async () => {
