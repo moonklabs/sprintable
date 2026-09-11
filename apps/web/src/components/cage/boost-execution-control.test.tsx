@@ -62,6 +62,49 @@ describe('BoostExecutionControl — story #3806(Phase3·3-2 PR5, 유나 §절 §
     expect(document.body.querySelector('[data-testid="boost-start-trigger"]')).toBeNull();
   });
 
+  // story #3806 PR 9②(PR8 #4185, 페드루 PO 確定 2026-09-11) — /spend가 신규
+  // initiated_by를 실으면 「시작: ...」 한 줄이 뜬다. PR8 착지 前엔 이 필드가
+  // 응답에 없어(undefined) 항상 숨어야 한다 — falsy-safe 회귀 가드.
+  it('⭐initiated_by="human" — 「시작: 사람 클릭」이 뜬다', async () => {
+    mockedFetch.mockResolvedValueOnce(jsonResponse({ data: { run_status: 'running', initiated_by: 'human' } }));
+    await act(async () => {
+      root.render(wrap(
+        <BoostExecutionControl orgId="org-1" gateId="gate-1" {...SEALED} sealedAdsStartsAt="2026-09-01T00:00:00Z" />,
+      ));
+    });
+    await flush();
+
+    expect(document.body.querySelector('[data-testid="boost-execution-initiated-by"]')?.textContent)
+      .toBe(koMessages.cage.boostExecutionInitiatedByHuman);
+  });
+
+  it('⭐initiated_by="scheduler" — 「시작: 예약 실행(자동) {date}」가 봉인 starts_at으로 뜬다', async () => {
+    mockedFetch.mockResolvedValueOnce(jsonResponse({ data: { run_status: 'running', initiated_by: 'scheduler' } }));
+    await act(async () => {
+      root.render(wrap(
+        <BoostExecutionControl orgId="org-1" gateId="gate-1" {...SEALED} sealedAdsStartsAt="2026-09-01T09:00:00Z" />,
+      ));
+    });
+    await flush();
+
+    const text = document.body.querySelector('[data-testid="boost-execution-initiated-by"]')?.textContent ?? '';
+    expect(text).toContain('예약 실행(자동)');
+    expect(text).toContain('09-01');
+    expect(text).not.toContain('사람 클릭');
+  });
+
+  it('initiated_by가 응답에 없으면(PR8 미착지·구 데이터) 「시작: ...」 줄 자체가 안 뜬다(falsy-safe)', async () => {
+    mockedFetch.mockResolvedValueOnce(jsonResponse({ data: { run_status: 'running' } }));
+    await act(async () => {
+      root.render(wrap(
+        <BoostExecutionControl orgId="org-1" gateId="gate-1" {...SEALED} sealedAdsStartsAt="2026-09-01T00:00:00Z" />,
+      ));
+    });
+    await flush();
+
+    expect(document.body.querySelector('[data-testid="boost-execution-initiated-by"]')).toBeNull();
+  });
+
   it('⭐run_status="paused" — 「중지됨」 표시 + 「재개」 버튼만 뜬다', async () => {
     mockedFetch.mockResolvedValueOnce(jsonResponse({ data: { run_status: 'paused' } }));
     await act(async () => {

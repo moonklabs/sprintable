@@ -33,6 +33,11 @@ export interface BoostExecutionControlProps {
 }
 
 type RunStatus = 'pending' | 'running' | 'paused' | 'failed';
+// story #3806 PR 9②(PR8 #4185, 페드루 PO 確定 2026-09-11) — boost_start 커맨드의
+// initiated_by. /spend(SpendSummaryResponse)에 실린다 — POST /start 응답
+// (CommandResponse)에도 있지만 scheduler 기동분은 이 화면이 그 POST를 절대 안
+// 거치므로(PR6 워커가 직접 실행) /spend가 유일한 관측 축(PR8 diff 확認).
+type InitiatedBy = 'scheduler' | 'human';
 
 export function BoostExecutionControl({
   orgId, gateId, sealedAdsBudgetMinor, sealedAdsCurrency, sealedAdsStartsAt, sealedAdsEndsAt, sealedAdsObjective,
@@ -42,6 +47,7 @@ export function BoostExecutionControl({
   const locale = useLocale();
   const displayTimezone = resolveDisplayTimezone().tz;
   const [runStatus, setRunStatus] = useState<RunStatus | null>(null);
+  const [initiatedBy, setInitiatedBy] = useState<InitiatedBy | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [startConfirmOpen, setStartConfirmOpen] = useState(false);
   const [pauseConfirmOpen, setPauseConfirmOpen] = useState(false);
@@ -51,8 +57,11 @@ export function BoostExecutionControl({
   const load = () => {
     fetchWithAuth(`/api/organizations/${orgId}/ads-boosts/${gateId}/spend`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`status ${r.status}`))))
-      .then((json: { data?: { run_status: RunStatus | null } }) => {
+      .then((json: { data?: { run_status: RunStatus | null; initiated_by?: InitiatedBy | null } }) => {
         setRunStatus(json.data?.run_status ?? null);
+        // story #3806 PR 9② — PR8(#4185) 착지 前엔 이 필드가 응답에 없어 항상
+        // undefined→null로 떨어진다(falsy-safe, 아래 렌더가 자동으로 숨는다).
+        setInitiatedBy(json.data?.initiated_by ?? null);
         setLoaded(true);
       })
       .catch(() => setLoaded(true));
@@ -161,6 +170,20 @@ export function BoostExecutionControl({
           {runStatus === 'running' ? t('boostExecutionStatusRunning') : t('boostExecutionStatusPaused')}
         </span>
       </p>
+      {/* story #3806 PR 9②(PR8 #4185) — initiated_by 없으면(PR8 미착지·boost_start
+          커맨드 자체가 없는 과거 데이터 등) 조용히 숨는다(지어내지 않는다). scheduler는
+          봉인 starts_at(이미 아는 값, 새 타임스탬프 필드 0)을 그대로 보여준다. */}
+      {initiatedBy === 'human' ? (
+        <p className="text-xs text-muted-foreground" data-testid="boost-execution-initiated-by">
+          {t('boostExecutionInitiatedByHuman')}
+        </p>
+      ) : initiatedBy === 'scheduler' ? (
+        <p className="text-xs text-muted-foreground" data-testid="boost-execution-initiated-by">
+          {t('boostExecutionInitiatedByScheduler', {
+            date: sealedAdsStartsAt ? formatScheduledAt(sealedAdsStartsAt, displayTimezone).display : '',
+          })}
+        </p>
+      ) : null}
       {actionError ? <p className="text-xs text-destructive" data-testid="boost-execution-error">{actionError}</p> : null}
       {runStatus === 'running' ? (
         <Button variant="outline" size="sm" onClick={() => setPauseConfirmOpen(true)} data-testid="boost-pause-trigger">
