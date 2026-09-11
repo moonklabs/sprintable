@@ -1,6 +1,12 @@
 """story #3806(Phase3·3-2 PR2, 페드루 PO 確定 2026-09-11) — Meta Ads boost 요청.
 승인된 발행물(현재는 `ChannelPublication`만 — hosted_site/blog는 boost 대상이 아니다,
-그라운딩 확認)에 총예산·통화·기간·목표를 실어 `ads_boost` 게이트를 연다.
+그라운딩 확認)에 총예산·통화·기간·목표·**태울 광고 계정**을 실어 `ads_boost` 게이트를 연다.
+
+`ad_connection_id`는 페드루 PO 追加 確定(2026-09-11, PR 3 착수 직전 보완) — 광고
+계정도 승인 대상의 일부다("이 예산을 이 계정에"). org의 meta_ads/ads_sandbox 연결에
+유일성 제약이 없어(PR 1이 복수 계정 전제로 설계) 실행 시점 단일조회로는 모호함이
+남는다 — 그래서 요청 시점에 명시 지정+검증(같은 org·채널∈meta_ads|ads_sandbox·
+status=active, 아니면 `AdsBoostInvalidAdConnectionError`)해 게이트 자신이 봉인한다.
 
 ## 「변경=재승인」 규칙(카드 PO 確定, 3367 봉인 규칙 동형)
 같은 publication에 이 함수를 다시 부르면(work_item_id가 같아 create_gate가 기존
@@ -22,6 +28,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.channel_connection import ChannelConnection
 from app.models.channel_post_draft import ChannelPostDraft
 from app.models.channel_post_version import ChannelPostVersion
 from app.models.channel_publication import ChannelPublication
@@ -32,6 +39,7 @@ from app.services.workflow_line_config import _default_role_id
 
 _ADS_BOOST_GATE_TYPE = "ads_boost"
 _VOID_REASON_ADS_BOOST_CHANGED = "ADS_BOOST_TERMS_CHANGED"
+_AD_CONNECTION_CHANNELS = ("meta_ads", "ads_sandbox")
 
 
 class AdsBoostPublicationNotFoundError(Exception):
@@ -56,6 +64,19 @@ class AdsBoostApproverRoleMissingError(Exception):
         # 영문 고정 — 위 AdsBoostPublicationNotFoundError와 동일 이유(내부 진단 전용).
         self.org_id = org_id
         super().__init__(f"org has no default approver role: {org_id}")
+
+
+class AdsBoostInvalidAdConnectionError(Exception):
+    """페드루 PO 追加 確定(2026-09-11) — `ad_connection_id`가 이 org 소유가 아니거나·
+    meta_ads/ads_sandbox 채널이 아니거나·status != "active"면 여기서 막는다(422).
+    존재 자체는 비노출할 이유가 없다 — publication_id와 달리 이건 호출자가 이미
+    자기 org의 연결 목록에서 고른 값이라 IDOR 우려가 없다, 다만 필드별 원인은
+    한 코드로 뭉뚱그린다(메시지가 채널연결 구조를 캐는 오라클이 되지 않게)."""
+
+    def __init__(self, ad_connection_id: uuid.UUID):
+        # 영문 고정 — 위 다른 예외들과 동일 이유(내부 진단 전용).
+        self.ad_connection_id = ad_connection_id
+        super().__init__(f"invalid ad connection for boost: {ad_connection_id}")
 
 
 class AdsBudgetExceedsSealError(Exception):
@@ -102,13 +123,28 @@ async def _resolve_publication_and_work_item(
     return publication, work_item_id
 
 
+async def _validate_ad_connection(db: AsyncSession, *, org_id: uuid.UUID, ad_connection_id: uuid.UUID) -> None:
+    conn = (await db.execute(
+        select(ChannelConnection).where(ChannelConnection.id == ad_connection_id)
+    )).scalar_one_or_none()
+    if (
+        conn is None
+        or conn.org_id != org_id
+        or conn.channel not in _AD_CONNECTION_CHANNELS
+        or conn.status != "active"
+    ):
+        raise AdsBoostInvalidAdConnectionError(ad_connection_id)
+
+
 async def request_ads_boost(
-    db: AsyncSession, *, org_id: uuid.UUID, publication_id: uuid.UUID, budget_minor: int, currency: str,
-    starts_at: datetime, ends_at: datetime, objective: str, requester_member_id: uuid.UUID,
+    db: AsyncSession, *, org_id: uuid.UUID, publication_id: uuid.UUID, ad_connection_id: uuid.UUID,
+    budget_minor: int, currency: str, starts_at: datetime, ends_at: datetime, objective: str,
+    requester_member_id: uuid.UUID,
 ) -> Gate:
     publication, work_item_id = await _resolve_publication_and_work_item(
         db, org_id=org_id, publication_id=publication_id,
     )
+    await _validate_ad_connection(db, org_id=org_id, ad_connection_id=ad_connection_id)
 
     role_id = await _default_role_id(db, org_id)
     if role_id is None:
@@ -151,6 +187,7 @@ async def request_ads_boost(
     gate.sealed_ads_starts_at = starts_at
     gate.sealed_ads_ends_at = ends_at
     gate.sealed_ads_objective = objective
+    gate.sealed_ads_connection_id = ad_connection_id
 
     await db.flush()
     return gate

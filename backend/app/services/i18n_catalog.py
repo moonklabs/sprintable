@@ -250,6 +250,14 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "이 조직에 없는 발행물입니다.",
         "en": "Publication not found in this organization.",
     },
+    # 페드루 PO 追加 確定(2026-09-11, PR 3 착수 직전 보완) — ad_connection_id 검증
+    # 실패(존재 안 함/타 org/채널 불일치/비활성) 전부 이 한 문장으로 뭉뚱그린다
+    # (필드별 원인 노출은 채널연결 구조를 캐는 오라클이 된다, ads_boost.py 예외
+    # docstring과 동일 판단).
+    "ads_boost.invalid_ad_connection": {
+        "ko": "지정한 광고 계정 연결을 쓸 수 없습니다 — 이 조직의 활성 Meta 광고 계정 연결인지 확인하세요.",
+        "en": "The specified ad account connection can't be used — check that it's an active Meta ads connection in this organization.",
+    },
     "ads_boost.approver_role_missing": {
         "ko": "승인할 사람이 지정되지 않았습니다 — 승인자 역할을 먼저 두어주세요.",
         "en": "No one is set up to approve this — please set an approver role first.",

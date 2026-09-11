@@ -181,6 +181,13 @@ class Gate(Base):
     sealed_ads_starts_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     sealed_ads_ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     sealed_ads_objective: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 페드루 PO 追加 確定(2026-09-11, PR 3 착수 직전 보완) — 광고 계정도 승인 대상의
+    # 일부다("이 예산을 이 계정에"). FK 없음(channel_connections와 동일 관례) — org의
+    # meta_ads/ads_sandbox 연결에 유일성 제약이 없어(PR 1이 복수 계정 전제) 어느
+    # 계정에 태울지를 게이트 자신이 봉인해야 PR 3(실행)가 모호함 없이 destination을
+    # 고를 수 있다. 다른 sealed_ads_* 열과 같은 「변경=재승인」 규칙(증액 예외는
+    # budget_minor에만 해당, 이 열은 값이 바뀌면 그냥 일반 재오픈 대상).
+    sealed_ads_connection_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     # 승인 후 수정으로 시스템이 되돌린 pending인지(사람이 처음 상신한 pending과 구분 — S4가
     # "재승인 필요" 배지를 그릴 신호) — 새 명시 submit()이 재봉인하면 False로 복귀한다.
     reapproval_required: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))

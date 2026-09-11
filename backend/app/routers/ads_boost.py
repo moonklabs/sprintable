@@ -15,6 +15,7 @@ from app.dependencies.database import get_db
 from app.services.agent_onboarding_config import resolve_locale_from_request
 from app.services.ads_boost import (
     AdsBoostApproverRoleMissingError,
+    AdsBoostInvalidAdConnectionError,
     AdsBoostPublicationNotFoundError,
     AdsBudgetExceedsSealError,
     request_ads_boost,
@@ -41,6 +42,10 @@ async def _require_human(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID,
 
 
 class CreateBoostRequest(BaseModel):
+    # 페드루 PO 追加 確定(2026-09-11) — 광고 계정도 승인 대상의 일부("이 예산을 이
+    # 계정에"). meta_ads|ads_sandbox 채널·같은 org·status=active 연결이어야 함
+    # (app/services/ads_boost.py::_validate_ad_connection, 아니면 422).
+    ad_connection_id: uuid.UUID
     budget_minor: int = Field(gt=0)
     currency: str
     starts_at: datetime
@@ -52,6 +57,7 @@ class BoostResponse(BaseModel):
     gate_id: uuid.UUID
     status: str
     reapproval_required: bool
+    sealed_ads_connection_id: uuid.UUID
     sealed_ads_budget_minor: int
     sealed_ads_currency: str
     sealed_ads_starts_at: str
@@ -106,9 +112,9 @@ async def _create_ads_boost_endpoint(
 
     try:
         gate = await request_ads_boost(
-            db, org_id=org_id, publication_id=publication_id, budget_minor=body.budget_minor,
-            currency=body.currency, starts_at=body.starts_at, ends_at=body.ends_at,
-            objective=body.objective, requester_member_id=resolved.id,
+            db, org_id=org_id, publication_id=publication_id, ad_connection_id=body.ad_connection_id,
+            budget_minor=body.budget_minor, currency=body.currency, starts_at=body.starts_at,
+            ends_at=body.ends_at, objective=body.objective, requester_member_id=resolved.id,
         )
     except AdsBoostPublicationNotFoundError as exc:
         raise HTTPException(
@@ -116,6 +122,14 @@ async def _create_ads_boost_endpoint(
             detail={
                 "code": "ADS_BOOST_PUBLICATION_NOT_FOUND",
                 "message": t("ads_boost.publication_not_found", resolved_locale),
+            },
+        ) from exc
+    except AdsBoostInvalidAdConnectionError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "ADS_BOOST_INVALID_AD_CONNECTION",
+                "message": t("ads_boost.invalid_ad_connection", resolved_locale),
             },
         ) from exc
     except AdsBoostApproverRoleMissingError as exc:
@@ -145,6 +159,7 @@ async def _create_ads_boost_endpoint(
     # 전부와 동형, 이중 커밋 방지).
     return BoostResponse(
         gate_id=gate.id, status=gate.status, reapproval_required=gate.reapproval_required,
+        sealed_ads_connection_id=gate.sealed_ads_connection_id,
         sealed_ads_budget_minor=gate.sealed_ads_budget_minor, sealed_ads_currency=gate.sealed_ads_currency,
         sealed_ads_starts_at=gate.sealed_ads_starts_at.isoformat(), sealed_ads_ends_at=gate.sealed_ads_ends_at.isoformat(),
         sealed_ads_objective=gate.sealed_ads_objective,

@@ -84,25 +84,29 @@ async def _seed_publication(session, *, org_id, connection_id, work_item_id=None
     return pub, draft.work_item_id
 
 
-def _boost_body(*, budget_minor=100_000, currency="KRW", objective="POST_ENGAGEMENT", hours_from_now=1):
+def _boost_body(*, ad_connection_id, budget_minor=100_000, currency="KRW", objective="POST_ENGAGEMENT", hours_from_now=1):
     now = datetime.now(timezone.utc)
     return {
+        "ad_connection_id": str(ad_connection_id),
         "budget_minor": budget_minor, "currency": currency, "objective": objective,
         "starts_at": (now + timedelta(hours=hours_from_now)).isoformat(),
         "ends_at": (now + timedelta(hours=hours_from_now, days=7)).isoformat(),
     }
 
 
-async def _setup(session_factory_result, *, seed_role=True):
+async def _setup(session_factory_result, *, seed_role=True, ad_channel="ads_sandbox", ad_status="active"):
     engine, Session = session_factory_result
     async with Session() as s:
         org_id, project_id = await _seed_org(s)
         owner_id = await _seed_human(s, org_id, role="owner")
         conn = await _seed_channel_connection(s, org_id, channel="threads")
+        # 페드루 PO 追加 確定(2026-09-11) — boost는 원 발행물 연결(threads 등)과
+        # 별개로 광고 계정 연결(meta_ads|ads_sandbox)을 명시 지정해야 한다.
+        ad_conn = await _seed_channel_connection(s, org_id, channel=ad_channel, status=ad_status)
         if seed_role:
             await _seed_default_role(s, org_id)
         pub, work_item_id = await _seed_publication(s, org_id=org_id, connection_id=conn.id)
-    return engine, Session, org_id, project_id, owner_id, pub, work_item_id
+    return engine, Session, org_id, project_id, owner_id, pub, work_item_id, ad_conn.id
 
 
 @pytest.mark.anyio
@@ -111,17 +115,18 @@ async def test_fresh_boost_creates_pending_gate_with_sealed_five():
     from app.models.gate import Gate
     from sqlalchemy import select
 
-    engine, Session, org_id, project_id, owner_id, pub, _ = await _setup(await _session_factory())
+    engine, Session, org_id, project_id, owner_id, pub, _, ad_conn_id = await _setup(await _session_factory())
     try:
         _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
         async with _client_for(app) as client:
             r = await client.post(
-                f"/api/v2/organizations/{org_id}/publications/{pub.id}/boosts", json=_boost_body(),
+                f"/api/v2/organizations/{org_id}/publications/{pub.id}/boosts", json=_boost_body(ad_connection_id=ad_conn_id),
             )
         assert r.status_code == 201, r.text
         body = r.json()
         assert body["status"] == "pending"
         assert body["reapproval_required"] is False
+        assert body["sealed_ads_connection_id"] == str(ad_conn_id)
         assert body["sealed_ads_budget_minor"] == 100_000
         assert body["sealed_ads_currency"] == "KRW"
         assert body["sealed_ads_objective"] == "POST_ENGAGEMENT"
@@ -139,14 +144,14 @@ async def test_fresh_boost_creates_pending_gate_with_sealed_five():
 async def test_agent_key_gets_403():
     from app.main import app
 
-    engine, Session, org_id, project_id, owner_id, pub, _ = await _setup(await _session_factory())
+    engine, Session, org_id, project_id, owner_id, pub, _, ad_conn_id = await _setup(await _session_factory())
     try:
         async with Session() as s:
             agent_id = await _seed_agent(s, org_id, project_id)
         _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
         async with _client_for(app) as client:
             r = await client.post(
-                f"/api/v2/organizations/{org_id}/publications/{pub.id}/boosts", json=_boost_body(),
+                f"/api/v2/organizations/{org_id}/publications/{pub.id}/boosts", json=_boost_body(ad_connection_id=ad_conn_id),
             )
         assert r.status_code == 403, r.text
         assert r.json()["error"]["code"] == "ADS_BOOST_CREATE_HUMAN_ONLY"
@@ -159,12 +164,12 @@ async def test_agent_key_gets_403():
 async def test_unknown_publication_returns_404():
     from app.main import app
 
-    engine, Session, org_id, project_id, owner_id, _pub, _ = await _setup(await _session_factory())
+    engine, Session, org_id, project_id, owner_id, _pub, _, ad_conn_id = await _setup(await _session_factory())
     try:
         _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
         async with _client_for(app) as client:
             r = await client.post(
-                f"/api/v2/organizations/{org_id}/publications/{uuid.uuid4()}/boosts", json=_boost_body(),
+                f"/api/v2/organizations/{org_id}/publications/{uuid.uuid4()}/boosts", json=_boost_body(ad_connection_id=ad_conn_id),
             )
         assert r.status_code == 404, r.text
         assert r.json()["error"]["code"] == "ADS_BOOST_PUBLICATION_NOT_FOUND"
@@ -184,6 +189,7 @@ async def test_cross_org_publication_returns_same_404():
             org_a, _ = await _seed_org(s)
             owner_a = await _seed_human(s, org_a, role="owner")
             await _seed_default_role(s, org_a)
+            ad_conn_a = await _seed_channel_connection(s, org_a, channel="ads_sandbox")
             org_b, _ = await _seed_org(s)
             conn_b = await _seed_channel_connection(s, org_b, channel="threads")
             pub_b, _ = await _seed_publication(s, org_id=org_b, connection_id=conn_b.id)
@@ -191,7 +197,8 @@ async def test_cross_org_publication_returns_same_404():
         _setup_org_scoped_app(app, Session, org_a, user_id=owner_a)
         async with _client_for(app) as client:
             r = await client.post(
-                f"/api/v2/organizations/{org_a}/publications/{pub_b.id}/boosts", json=_boost_body(),
+                f"/api/v2/organizations/{org_a}/publications/{pub_b.id}/boosts",
+                json=_boost_body(ad_connection_id=ad_conn_a.id),
             )
         assert r.status_code == 404, r.text
         assert r.json()["error"]["code"] == "ADS_BOOST_PUBLICATION_NOT_FOUND"
@@ -204,10 +211,10 @@ async def test_cross_org_publication_returns_same_404():
 async def test_invalid_schedule_returns_422():
     from app.main import app
 
-    engine, Session, org_id, project_id, owner_id, pub, _ = await _setup(await _session_factory())
+    engine, Session, org_id, project_id, owner_id, pub, _, ad_conn_id = await _setup(await _session_factory())
     try:
         _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
-        body = _boost_body()
+        body = _boost_body(ad_connection_id=ad_conn_id)
         body["ends_at"] = body["starts_at"]  # 시작=종료 → 무효
         async with _client_for(app) as client:
             r = await client.post(f"/api/v2/organizations/{org_id}/publications/{pub.id}/boosts", json=body)
@@ -222,12 +229,12 @@ async def test_invalid_schedule_returns_422():
 async def test_approver_role_missing_returns_409():
     from app.main import app
 
-    engine, Session, org_id, project_id, owner_id, pub, _ = await _setup(await _session_factory(), seed_role=False)
+    engine, Session, org_id, project_id, owner_id, pub, _, ad_conn_id = await _setup(await _session_factory(), seed_role=False)
     try:
         _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
         async with _client_for(app) as client:
             r = await client.post(
-                f"/api/v2/organizations/{org_id}/publications/{pub.id}/boosts", json=_boost_body(),
+                f"/api/v2/organizations/{org_id}/publications/{pub.id}/boosts", json=_boost_body(ad_connection_id=ad_conn_id),
             )
         assert r.status_code == 409, r.text
         assert r.json()["error"]["code"] == "ADS_BOOST_APPROVER_ROLE_MISSING"
@@ -240,20 +247,20 @@ async def test_approver_role_missing_returns_409():
 async def test_resubmit_while_pending_same_or_lower_budget_reseals_in_place():
     from app.main import app
 
-    engine, Session, org_id, project_id, owner_id, pub, _ = await _setup(await _session_factory())
+    engine, Session, org_id, project_id, owner_id, pub, _, ad_conn_id = await _setup(await _session_factory())
     try:
         _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
         async with _client_for(app) as client:
             r1 = await client.post(
                 f"/api/v2/organizations/{org_id}/publications/{pub.id}/boosts",
-                json=_boost_body(budget_minor=100_000, objective="POST_ENGAGEMENT"),
+                json=_boost_body(ad_connection_id=ad_conn_id, budget_minor=100_000, objective="POST_ENGAGEMENT"),
             )
             assert r1.status_code == 201, r1.text
             gate_id = r1.json()["gate_id"]
 
             r2 = await client.post(
                 f"/api/v2/organizations/{org_id}/publications/{pub.id}/boosts",
-                json=_boost_body(budget_minor=80_000, objective="OUTCOME_ENGAGEMENT"),
+                json=_boost_body(ad_connection_id=ad_conn_id, budget_minor=80_000, objective="OUTCOME_ENGAGEMENT"),
             )
         assert r2.status_code == 201, r2.text
         body2 = r2.json()
@@ -285,13 +292,13 @@ async def test_resubmit_while_approved_lower_budget_reopens_and_voids_pending_co
     from app.models.publication_command import PublicationCommand
     from sqlalchemy import select
 
-    engine, Session, org_id, project_id, owner_id, pub, _ = await _setup(await _session_factory())
+    engine, Session, org_id, project_id, owner_id, pub, _, ad_conn_id = await _setup(await _session_factory())
     try:
         _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
         async with _client_for(app) as client:
             r1 = await client.post(
                 f"/api/v2/organizations/{org_id}/publications/{pub.id}/boosts",
-                json=_boost_body(budget_minor=100_000),
+                json=_boost_body(ad_connection_id=ad_conn_id, budget_minor=100_000),
             )
         assert r1.status_code == 201, r1.text
         gate_id = uuid.UUID(r1.json()["gate_id"])
@@ -314,7 +321,7 @@ async def test_resubmit_while_approved_lower_budget_reopens_and_voids_pending_co
         async with _client_for(app) as client:
             r2 = await client.post(
                 f"/api/v2/organizations/{org_id}/publications/{pub.id}/boosts",
-                json=_boost_body(budget_minor=90_000),
+                json=_boost_body(ad_connection_id=ad_conn_id, budget_minor=90_000),
             )
         assert r2.status_code == 201, r2.text
         body2 = r2.json()
@@ -338,20 +345,20 @@ async def test_resubmit_higher_budget_returns_422_and_seal_unchanged_while_pendi
     from app.models.gate import Gate
     from sqlalchemy import select
 
-    engine, Session, org_id, project_id, owner_id, pub, _ = await _setup(await _session_factory())
+    engine, Session, org_id, project_id, owner_id, pub, _, ad_conn_id = await _setup(await _session_factory())
     try:
         _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
         async with _client_for(app) as client:
             r1 = await client.post(
                 f"/api/v2/organizations/{org_id}/publications/{pub.id}/boosts",
-                json=_boost_body(budget_minor=100_000),
+                json=_boost_body(ad_connection_id=ad_conn_id, budget_minor=100_000),
             )
             assert r1.status_code == 201, r1.text
             gate_id = uuid.UUID(r1.json()["gate_id"])
 
             r2 = await client.post(
                 f"/api/v2/organizations/{org_id}/publications/{pub.id}/boosts",
-                json=_boost_body(budget_minor=150_000),
+                json=_boost_body(ad_connection_id=ad_conn_id, budget_minor=150_000),
             )
         assert r2.status_code == 422, r2.text
         detail = r2.json()["error"]
@@ -376,13 +383,13 @@ async def test_resubmit_higher_budget_while_approved_returns_422_and_gate_stays_
     from app.models.gate import Gate
     from sqlalchemy import select
 
-    engine, Session, org_id, project_id, owner_id, pub, _ = await _setup(await _session_factory())
+    engine, Session, org_id, project_id, owner_id, pub, _, ad_conn_id = await _setup(await _session_factory())
     try:
         _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
         async with _client_for(app) as client:
             r1 = await client.post(
                 f"/api/v2/organizations/{org_id}/publications/{pub.id}/boosts",
-                json=_boost_body(budget_minor=100_000),
+                json=_boost_body(ad_connection_id=ad_conn_id, budget_minor=100_000),
             )
         assert r1.status_code == 201, r1.text
         gate_id = uuid.UUID(r1.json()["gate_id"])
@@ -393,7 +400,7 @@ async def test_resubmit_higher_budget_while_approved_returns_422_and_gate_stays_
         async with _client_for(app) as client:
             r2 = await client.post(
                 f"/api/v2/organizations/{org_id}/publications/{pub.id}/boosts",
-                json=_boost_body(budget_minor=200_000),
+                json=_boost_body(ad_connection_id=ad_conn_id, budget_minor=200_000),
             )
         assert r2.status_code == 422, r2.text
         assert r2.json()["error"]["code"] == "ADS_BUDGET_EXCEEDS_SEAL"
@@ -403,6 +410,94 @@ async def test_resubmit_higher_budget_while_approved_returns_422_and_gate_stays_
             assert gate.status == "approved", "거부된 증액 시도가 승인 상태를 재오픈시키면 안 된다"
             assert gate.sealed_ads_budget_minor == 100_000
             assert gate.reapproval_required is False
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_unknown_ad_connection_id_returns_422():
+    from app.main import app
+
+    engine, Session, org_id, project_id, owner_id, pub, _, _ad_conn_id = await _setup(await _session_factory())
+    try:
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+        async with _client_for(app) as client:
+            r = await client.post(
+                f"/api/v2/organizations/{org_id}/publications/{pub.id}/boosts",
+                json=_boost_body(ad_connection_id=uuid.uuid4()),
+            )
+        assert r.status_code == 422, r.text
+        assert r.json()["error"]["code"] == "ADS_BOOST_INVALID_AD_CONNECTION"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_wrong_channel_ad_connection_returns_422():
+    """boost 대상 원 발행물의 threads 연결을 광고 계정으로 잘못 준 경우 — 채널
+    축(meta_ads|ads_sandbox)이 아니면 존재/활성 여부와 무관하게 거부돼야 한다."""
+    from app.main import app
+
+    engine, Session, org_id, project_id, owner_id, pub, _, _ad_conn_id = await _setup(await _session_factory())
+    try:
+        async with Session() as s:
+            wrong_channel_conn = await _seed_channel_connection(s, org_id, channel="threads")
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+        async with _client_for(app) as client:
+            r = await client.post(
+                f"/api/v2/organizations/{org_id}/publications/{pub.id}/boosts",
+                json=_boost_body(ad_connection_id=wrong_channel_conn.id),
+            )
+        assert r.status_code == 422, r.text
+        assert r.json()["error"]["code"] == "ADS_BOOST_INVALID_AD_CONNECTION"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_inactive_ad_connection_returns_422():
+    from app.main import app
+
+    engine, Session, org_id, project_id, owner_id, pub, _, _ad_conn_id = await _setup(
+        await _session_factory(), ad_status="expired",
+    )
+    try:
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+        async with _client_for(app) as client:
+            r = await client.post(
+                f"/api/v2/organizations/{org_id}/publications/{pub.id}/boosts",
+                json=_boost_body(ad_connection_id=_ad_conn_id),
+            )
+        assert r.status_code == 422, r.text
+        assert r.json()["error"]["code"] == "ADS_BOOST_INVALID_AD_CONNECTION"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_cross_org_ad_connection_returns_422():
+    """타 org 소유 광고 계정 연결을 지정하면 — publication_not_found(404)과 달리
+    이 필드는 호출자가 이미 자기 org 목록에서 고른 값이라는 전제가 있어(카드 예외
+    docstring), IDOR 방지 목적의 404 은폐가 아니라 명시 422로 거부한다."""
+    from app.main import app
+
+    engine, Session, org_id, project_id, owner_id, pub, _, _ad_conn_id = await _setup(await _session_factory())
+    try:
+        async with Session() as s:
+            other_org_id, _ = await _seed_org(s)
+            other_org_ad_conn = await _seed_channel_connection(s, other_org_id, channel="ads_sandbox")
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+        async with _client_for(app) as client:
+            r = await client.post(
+                f"/api/v2/organizations/{org_id}/publications/{pub.id}/boosts",
+                json=_boost_body(ad_connection_id=other_org_ad_conn.id),
+            )
+        assert r.status_code == 422, r.text
+        assert r.json()["error"]["code"] == "ADS_BOOST_INVALID_AD_CONNECTION"
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
