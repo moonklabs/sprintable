@@ -18,6 +18,19 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
+@pytest.fixture(autouse=True)
+def _mock_resolve_member_db_verified(monkeypatch):
+    """story #3370 회귀 클래스 정정(페드루 PO 지시 2026-09-11) — test_s41.py와 동형 사유
+    (create_persona/update_persona가 이제 actor_id를 쓰기 前 resolve_member_db_verified()
+    로 실측한다 — 이 파일의 순수 AsyncMock 세션은 그 조회를 감당 못 한다)."""
+    resolved = MagicMock()
+    resolved.id = uuid.uuid4()
+    monkeypatch.setattr(
+        "app.routers.agent_personas.resolve_member_db_verified",
+        AsyncMock(return_value=resolved),
+    )
+
+
 async def _client():
     from app.main import app
     ctx = MagicMock()

@@ -151,7 +151,8 @@ async def _create_dependency(
         from app.services.trust_pipeline import maybe_emit_trust_stage_changed
 
         await maybe_emit_trust_stage_changed(
-            session, org_id, body.to_id, _trust_before, actor_id=user_id
+            session, org_id, body.to_id, _trust_before,
+            actor_id=user_id,  # member-id-lint: user-id-field — SSE 이벤트 payload용(비영속, 사람 이름 해소 소비처 없음, story #3370 2026-09-11 확認)
         )
 
     # story #3180 후속(카디르 QA REQUEST_CHANGES, PR#3593) — «attention.changed»는 FE가 수신
@@ -260,7 +261,8 @@ async def _update_dependency(
         from app.services.trust_pipeline import maybe_emit_trust_stage_changed
 
         await maybe_emit_trust_stage_changed(
-            repo.session, repo.org_id, dep.to_id, _trust_before, actor_id=user_id
+            repo.session, repo.org_id, dep.to_id, _trust_before,
+            actor_id=user_id,  # member-id-lint: user-id-field — SSE 이벤트 payload용(비영속, 사람 이름 해소 소비처 없음, story #3370 2026-09-11 확認)
         )
 
     # story #3180 후속(카디르 QA REQUEST_CHANGES, PR#3593) — commit-then-publish로 정렬(create_
@@ -324,7 +326,8 @@ async def _delete_dependency(
         from app.services.trust_pipeline import maybe_emit_trust_stage_changed
 
         await maybe_emit_trust_stage_changed(
-            repo.session, repo.org_id, dep.to_id, _trust_before, actor_id=user_id
+            repo.session, repo.org_id, dep.to_id, _trust_before,
+            actor_id=user_id,  # member-id-lint: user-id-field — SSE 이벤트 payload용(비영속, 사람 이름 해소 소비처 없음, story #3370 2026-09-11 확認)
         )
 
     # story #3180 후속(카디르 QA REQUEST_CHANGES, PR#3593) — commit-then-publish로 정렬(위

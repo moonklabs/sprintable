@@ -63,7 +63,7 @@ async def transition_session(
             session_id=id,
             org_id=org_id,
             project_id=project_id,
-            actor_id=uuid.UUID(auth.user_id),
+            actor_id=uuid.UUID(auth.user_id),  # member-id-lint: user-id-field — session_metadata JSON 감사 블롭 문자열용(FK 아님, 사람 이름 해소 소비처 없음, story #3370 2026-09-11 확認)
             status=body.status,
             reason=body.reason,
         )
