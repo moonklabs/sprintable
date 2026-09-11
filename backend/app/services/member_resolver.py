@@ -137,6 +137,75 @@ async def resolve_member(
     return await _resolve_member_legacy(auth, org_id, session, project_id)
 
 
+async def resolve_member_db_verified(
+    auth: AuthContext,
+    org_id: uuid.UUID,
+    session: AsyncSession,
+) -> ResolvedMember:
+    """story #3370(페드루 지적 2026-09-10) — `resolve_member()`와 같은 목적(휴먼(JWT)=
+    auth.user_id(users.id)를 org_member.id로, 에이전트(API키)는 team_member.id 그대로)
+    이지만, agent 판정을 auth 클레임(``app_metadata.api_key_id``)이 아니라 **DB 실측**
+    (TeamMember.type=='agent'·is_active, site_posts.py::is_agent_caller와 동일 predicate)
+    으로 한다.
+
+    왜 별도 함수인가 — `resolve_member()`로 직접 바꿔 보니 site_posts.py/channel_posts.py
+    submit 계열 엔드포인트를 왕복하는 기존 destructive_schema 테스트 수십 개가 전부
+    400 "Organization member not found"로 깨졌다(실측: test_3367_site_post_submit_gate_
+    seal.py 등). 원인 — 그 테스트들의 `_setup_org_scoped_app(..., user_id=agent_id)`
+    호출부가 `agent=True`(api_key_id 클레임) 없이 agent의 team_member.id만 auth.user_id로
+    넘기는 관례로 광범위하게 짜여 있다(is_agent_caller가 원래 DB로 판정해 클레임 유무가
+    무관했던 계약에 맞춰진 테스트 하네스). 그 계약 자체가 `is_agent_caller`의 설계 의도
+    (클레임을 안 믿고 DB의 실제 멤버 타입으로 판정 — actor_type fail-closed, 이 함수
+    자신의 docstring 그대로)와 더 맞기도 해, 테스트 수십 곳을 고치는 대신 이 축을
+    보존하는 별도 해소 함수로 정정한다(site_posts.py 자신의 축과 정합·새 판정 원칙
+    발명 0 — 기존 두 축의 조합일 뿐).
+
+    project_id 스코프는 지원하지 않는다(이 축을 쓰는 현재 호출부가 전부 project 스코프
+    불요 — 필요해지면 그때 얹는다, resolve_member()를 쓰면 된다).
+
+    ⚠️fail-closed 안전성(페드루 2차 리뷰 지적 2026-09-10, `_resolve_member_legacy`류
+    폴백 없음이 안전한 이유) — 상위 `get_verified_org_id`→`_verify_org_membership`
+    (auth.py:593)은 더 넓게 받는다: `OrgMember(user_id==raw) ∪ TeamMember(id==raw,
+    active, **타입 무관**)`. 이 함수는 `OrgMember(user_id==raw) ∪ TeamMember(id==raw,
+    type=='agent')`만 받으므로 차집합은 「`type != 'agent'`인 TeamMember 행이 raw_id
+    (JWT 휴먼이면 users.id)로 매치하는」 호출자 — 그 집합이 **구조적으로 공집합**이다:
+    `team_members`는 0088부터 물리테이블이 아니라 VIEW(alembic/versions/0088_team_
+    members_projection_view.py)이고, `type='human'` 분기의 `id`는 `members.id`다.
+    0075(alembic/versions/0075_member_ssot_anchor_tables.py:11,110) 확定 — "휴먼
+    members.id = org_members.id(Phase0 ID 보존)" — `users.id`가 아니다. 즉 휴먼
+    TeamMember 행의 `id`는 애초에 `org_members.id`라 JWT의 `auth.user_id`(users.id)와
+    같은 값일 수가 없다(서로 다른 테이블의 독립 PK, uuid 충돌이 아니면 불가능) — 상위
+    가드가 그 `TeamMember(타입 무관)` 분기로 통과시키는 호출자는 전부 agent뿐이고, 그건
+    이 함수의 agent 분기가 이미 받는다. 막히는 집합=∅."""
+    raw_id = uuid.UUID(auth.user_id)
+
+    tm = (await session.execute(
+        select(TeamMember).where(
+            TeamMember.org_id == org_id, TeamMember.id == raw_id, TeamMember.type == "agent",
+            TeamMember.is_active.is_(True),
+        ).limit(1)
+    )).scalars().first()
+    if tm is not None:
+        return ResolvedMember(
+            id=tm.id, user_id=None, name=tm.name, type="agent", role=tm.role,
+            org_id=tm.org_id, project_id=tm.project_id, avatar_url=tm.avatar_url,
+        )
+
+    om = (await session.execute(
+        select(OrgMember).where(
+            OrgMember.org_id == org_id, OrgMember.user_id == raw_id, OrgMember.deleted_at.is_(None),
+        )
+    )).scalar_one_or_none()
+    if om is None:
+        raise HTTPException(status_code=400, detail="Organization member not found")
+
+    user = (await session.execute(select(User).where(User.id == raw_id))).scalar_one_or_none()
+    return ResolvedMember(
+        id=om.id, user_id=raw_id, name=user.display_name if user else None, type="human",
+        role=om.role, org_id=org_id,
+    )
+
+
 async def _resolve_member_legacy(
     auth: AuthContext,
     org_id: uuid.UUID,

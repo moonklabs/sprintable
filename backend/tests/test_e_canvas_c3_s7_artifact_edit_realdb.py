@@ -117,9 +117,26 @@ def _client_for(app):
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 
-async def _setup_app(app, Session, org_id, project_id, user_id=None):
+async def _setup_app(app, Session, org_id, project_id, user_id=None, *, is_agent: bool = False):
     from app.dependencies.auth import AuthContext, get_current_user
     from app.dependencies.database import get_db
+
+    if user_id is None:
+        # story #3370(카디르 QA 지적 2026-09-10) — resolve_member_db_verified()는 실
+        # DB 조회라, 예전처럼 "신원 무관, 무작위 uuid 하나면 충분"했던 관례가 더 이상
+        # 안 통한다(400 Organization member not found). 이 파일의 관심사는 caller
+        # 신원 자체가 아니라 다른 축이라 실 OrgMember 하나를 여기서 대신 심는다
+        # (개별 테스트 수정 없이 이 헬퍼 한 곳만 — 기존 명시 user_id 호출부는 그대로).
+        from app.models.project import OrgMember
+        from app.models.user import User
+        async with Session() as s:
+            u = User(id=uuid.uuid4(), email=f"phantom-{uuid.uuid4().hex[:8]}@test.dev", hashed_password="x")
+            s.add(u)
+            await s.commit()
+            om = OrgMember(id=uuid.uuid4(), org_id=org_id, user_id=u.id, role="owner")
+            s.add(om)
+            await s.commit()
+            user_id = u.id
 
     async def _db():
         async with Session() as s:
@@ -131,10 +148,13 @@ async def _setup_app(app, Session, org_id, project_id, user_id=None):
                 raise
 
     async def _auth():
-        return AuthContext(
-            user_id=str(user_id or uuid.uuid4()), email="caller@test",
-            claims={"app_metadata": {"org_id": str(org_id), "project_id": str(project_id)}},
-        )
+        claims: dict = {"app_metadata": {"org_id": str(org_id), "project_id": str(project_id)}}
+        if is_agent:
+            # story #3370(카디르 QA 지적 2026-09-10) — is_agent=True 호출부는 user_id가
+            # 실 TeamMember.id(에이전트)임을 스스로 보장해야 한다(agent_editor 케이스,
+            # resolve_member_db_verified의 agent 판정은 이 클레임 + DB 실측 둘 다 씀).
+            claims["app_metadata"]["api_key_id"] = "test-key"
+        return AuthContext(user_id=str(user_id or uuid.uuid4()), email="caller@test", claims=claims)
 
     app.dependency_overrides[get_db] = _db
     app.dependency_overrides[get_current_user] = _auth
@@ -302,7 +322,17 @@ async def test_ac4_human_edits_agent_creator_notified():
         async with Session() as s:
             seeded = await _seed(s, creator_type="agent")
 
-        human_editor_id = uuid.uuid4()
+        # story #3370(카디르 QA 지적 2026-09-10) — resolve_member_db_verified()가 실
+        # OrgMember 행을 찾는다.
+        async with Session() as s:
+            from app.models.project import OrgMember
+            from app.models.user import User
+            human_editor_user = User(id=uuid.uuid4(), email=f"editor-{uuid.uuid4().hex[:8]}@test.dev", hashed_password="x")
+            s.add(human_editor_user)
+            await s.commit()
+            s.add(OrgMember(id=uuid.uuid4(), org_id=seeded["org_id"], user_id=human_editor_user.id, role="owner"))
+            await s.commit()
+            human_editor_id = human_editor_user.id
         await _setup_app(app, Session, seeded["org_id"], seeded["project_id"], user_id=human_editor_id)
         client = _client_for(app)
         try:
@@ -348,6 +378,12 @@ async def test_ac4_agent_edits_human_creator_notified():
             )
             s.add(agent_editor)
             await s.commit()
+            # story #3370(카디르 QA 지적 2026-09-10) — resolve_member_db_verified()의 agent
+            # 판정은 team_members VIEW 실측(site_posts.py::is_agent_caller 동형 predicate)이다.
+            # team_members는 0088+부터 물리 테이블이 아니라 VIEW라 CI 공유 alembic DB에서
+            # TeamMember 직접 삽입은 크래시한다(#4156) — 0110 grant-only 3번째 UNION 브랜치가
+            # `project_access(permission='granted')`만으로 agent 행을 투영하므로 아래
+            # ProjectAccess 하나로 충분하다(TeamMember 직접 삽입 불필요·유해).
             s.add(ProjectAccess(
                 id=uuid.uuid4(), project_id=seeded["project_id"], member_id=agent_editor.id,
                 permission="granted", role="member",
@@ -355,7 +391,7 @@ async def test_ac4_agent_edits_human_creator_notified():
             await s.commit()
             agent_editor_id = agent_editor.id
 
-        await _setup_app(app, Session, seeded["org_id"], seeded["project_id"], user_id=agent_editor_id)
+        await _setup_app(app, Session, seeded["org_id"], seeded["project_id"], user_id=agent_editor_id, is_agent=True)
         client = _client_for(app)
         try:
             resp = await client.post(

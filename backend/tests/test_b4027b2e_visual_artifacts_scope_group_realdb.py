@@ -71,9 +71,25 @@ def _client_for(app):
 
 
 async def _setup_app_api_key(app, Session, org_id, project_id, *, scope: list[str]):
-    """API-key AuthContext — api_key_id 마커가 있어야 _check_api_key_scope가 게이트를 적용."""
+    """API-key AuthContext — api_key_id 마커가 있어야 _check_api_key_scope가 게이트를 적용.
+
+    story #3370(카디르 QA 지적 2026-09-10) — resolve_member_db_verified()는 team_members
+    VIEW에서 실측한다(예전엔 무작위 uuid로도 충분했다·범위 게이트 통과만 재는 이 파일의
+    관심사와 무관). team_members는 0088+부터 물리 테이블이 아니라 members⋈
+    agent_project_profiles를 투영하는 VIEW(CI 공유 alembic DB에서 직접 INSERT하면
+    "cannot insert into view" 크래시, #4156) — Member+AgentProjectProfile을 심어 그
+    id를 그대로 쓴다(TeamMember 직접 삽입 불필요·유해)."""
     from app.dependencies.auth import AuthContext, get_current_user
     from app.dependencies.database import get_db
+    from app.models.member import AgentProjectProfile, Member
+
+    async with Session() as s:
+        m = Member(id=uuid.uuid4(), org_id=org_id, type="agent", name="agent", is_active=True)
+        s.add(m)
+        await s.commit()
+        s.add(AgentProjectProfile(id=uuid.uuid4(), member_id=m.id, project_id=project_id))
+        await s.commit()
+        agent_id = m.id
 
     async def _db():
         async with Session() as s:
@@ -86,7 +102,7 @@ async def _setup_app_api_key(app, Session, org_id, project_id, *, scope: list[st
 
     async def _auth():
         return AuthContext(
-            user_id=str(uuid.uuid4()), email=None,
+            user_id=str(agent_id), email=None,
             claims={"app_metadata": {
                 "org_id": str(org_id), "project_id": str(project_id),
                 "api_key_id": str(uuid.uuid4()), "scope": scope,
@@ -98,8 +114,22 @@ async def _setup_app_api_key(app, Session, org_id, project_id, *, scope: list[st
 
 
 async def _setup_app_jwt(app, Session, org_id, project_id):
+    """story #3370(카디르 QA 지적 2026-09-10) — resolve_member_db_verified()는 실
+    OrgMember 행을 찾는다 — 실 휴먼을 심어 그 user_id를 그대로 쓴다(_setup_app류
+    다른 canvas 테스트 파일과 동형 처방)."""
     from app.dependencies.auth import AuthContext, get_current_user
     from app.dependencies.database import get_db
+    from app.models.project import OrgMember
+    from app.models.user import User
+
+    async with Session() as s:
+        u = User(id=uuid.uuid4(), email=f"human-{uuid.uuid4().hex[:8]}@test.dev", hashed_password="x")
+        s.add(u)
+        await s.commit()
+        om = OrgMember(id=uuid.uuid4(), org_id=org_id, user_id=u.id, role="owner")
+        s.add(om)
+        await s.commit()
+        human_user_id = u.id
 
     async def _db():
         async with Session() as s:
@@ -112,7 +142,7 @@ async def _setup_app_jwt(app, Session, org_id, project_id):
 
     async def _auth():
         return AuthContext(
-            user_id=str(uuid.uuid4()), email="human@test",
+            user_id=str(human_user_id), email="human@test",
             claims={"app_metadata": {"org_id": str(org_id), "project_id": str(project_id)}},
         )
 

@@ -24,8 +24,7 @@ from app.services.channel_post_comment_replies import (
     get_comment_reply_view,
     submit_comment_reply,
 )
-from app.services.member_resolver import resolve_member
-from app.services.site_posts import is_agent_caller
+from app.services.member_resolver import resolve_member, resolve_member_db_verified
 
 router = APIRouter(prefix="/api/v2/organizations", tags=["channel-post-comment-replies"])
 
@@ -198,8 +197,12 @@ async def create_comment_reply_draft_endpoint(
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
 
-    member_id = uuid.UUID(auth.user_id)
-    created_by_kind = "agent" if await is_agent_caller(db, org_id=org_id, member_id=member_id) else "human"
+    # story #3370(페드루 지적 2026-09-10 — site_posts.py:671과 동형 클래스) — auth.user_id는
+    # 휴먼(JWT)이면 users.id다, org 멤버 id가 아니다. created_by_member_id는 영속 컬럼이라
+    # `resolve_member_db_verified()`(member_resolver.py, agent 판정 DB 실측·기존 테스트
+    # 하네스와 정합 — 자신의 docstring 참고)의 멤버 id로 정정(actor_type도 같은 호출에서 나옴).
+    resolved = await resolve_member_db_verified(auth, org_id, db)
+    member_id, created_by_kind = resolved.id, resolved.type
 
     try:
         reply = await create_comment_reply_draft(

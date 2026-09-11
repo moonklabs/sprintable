@@ -1577,6 +1577,16 @@
       "file": "tests/test_3369_site_post_external_publish_activity_log.py",
       "sec": 42.0,
       "source": "story #3369 후속(2026-09-10) — 신규 destructive_schema 파일(외부 목적지 site_post 발행 감사로그 실 WordPress 스텁+실 워커 왕복). 로컬 실측 call+setup+teardown=6.85s(disposable PG, --durations=0) — story #3383 6배 스케일(로컬→CI) 적용해 ~42s로 등재. 실 CI 샤드 로그로 재확認 필요(AC2 재측정 규칙)."
+    },
+    {
+      "file": "tests/test_3370_requester_member_id_human_resolve.py",
+      "sec": 3.7,
+      "source": "story-3370(휴먼 requester/author member-id 회귀, 2026-09-10, 페드루 2차 리뷰 site_posts.py 11번째 자리 추가) — 신규 파일 실측(로컬, uv run pytest --durations=0 직접 1회 실행, 5건 합계 3.71s — test_3766 등재 선례와 동일 방법론)"
+    },
+    {
+      "file": "tests/test_3370_workflow_line_and_visual_artifacts_member_id.py",
+      "sec": 3.0,
+      "source": "story-3370(카디르 QA 재발견 후속, 2026-09-10) — 신규 파일 실측(로컬, uv run pytest --durations=0 직접 1회 실행, 7건 합계 약 3.0s — test_3766 등재 선례와 동일 방법론)"
     }
   ]
 }
