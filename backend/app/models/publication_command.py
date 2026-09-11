@@ -31,8 +31,15 @@ from app.core.database import Base
 class PublicationCommand(Base):
     __tablename__ = "publication_commands"
     __table_args__ = (
+        # story #3806(Phase3·3-2 PR3, 페드루 PO 追加 確定 2026-09-11) — toggle_seq를
+        # 키에 포함(0362 마이그가 정본, 여기는 미러 — 이름을 맞춰 둬 grep 한 번으로
+        # 짝이 맞는지 확인 가능, 0340의 CHECK 관례와 동일 원칙). ads_boost의 pause/
+        # resume은 같은 승인주기(같은 approved_version) 안에서 여러 번 토글될 수
+        # 있어 옛 4열 키(그 조합 평생 한 번)로는 표현 못 한다 — toggle_seq가 "그
+        # 승인주기의 N번째 토글"을 구분한다. 다른 content_kind는 이 열이 항상 0이라
+        # 기존 의미가 안 바뀐다.
         UniqueConstraint(
-            "org_id", "destination", "approved_version", "operation",
+            "org_id", "destination", "approved_version", "operation", "toggle_seq",
             name="uq_publication_commands_idempotency",
         ),
         # story #3516 조각② 라이브 핫픽스(마이그 0340, 2026-09-05) — 0323이 이 CHECK를
@@ -42,7 +49,7 @@ class PublicationCommand(Base):
         # 정본, 이건 그 정본의 미러 — 이름을 반드시 같게 유지할 것(`ck_publication_
         # commands_content_kind`), 새 값을 추가할 땐 이 두 곳을 항상 같이 고칠 것.
         CheckConstraint(
-            "content_kind IN ('channel_post', 'site_post', 'comment_reply')",
+            "content_kind IN ('channel_post', 'site_post', 'comment_reply', 'ads_boost')",
             name="ck_publication_commands_content_kind",
         ),
     )
@@ -53,6 +60,12 @@ class PublicationCommand(Base):
     destination: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     approved_version: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     operation: Mapped[str] = mapped_column(Text, nullable=False, server_default="publish")
+    # story #3806(Phase3·3-2 PR3, 페드루 PO 追加 確定 2026-09-11) — 위 UniqueConstraint
+    # 참조. channel_post/site_post/comment_reply는 항상 0(그 조합 평생 한 번인
+    # 기존 의미 그대로). ads_boost의 pause/resume만 0을 벗어나며 "그 승인주기의
+    # N번째 토글"을 센다(app/services/ads_boost_execution.py::_resolve_toggle_seq가
+    # 유일한 채움 경로 — boost_start는 항상 0 고정으로 명시 전달).
+    toggle_seq: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     # story e4fc29fa(조각③c) — 'channel_post'|'site_post'. approved_version이 어느
     # 테이블(ChannelPostVersion|SitePostVersion)을 가리키는지의 유일한 판별축(워커
     # 분기) — FK 없음 관례라 이 컬럼 없이는 워커가 두 도메인을 못 구분한다.

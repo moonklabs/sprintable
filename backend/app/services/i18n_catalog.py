@@ -266,6 +266,37 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "요청 예산이 봉인된 예산({sealed_budget_minor})보다 큽니다 — 증액은 지원하지 않습니다.",
         "en": "The requested budget exceeds the sealed budget ({sealed_budget_minor}) — increasing it is not supported.",
     },
+    # story #3806(Phase3·3-2 PR3, 페드루 PO 確定 2026-09-11) — ads_boost 실행·중지·
+    # 재개 라우터(app/routers/ads_boost_execution.py)의 사용자 문장. PR 2와 같은
+    # 「홍보」(en Boost) 낱말 유지(유나 §절 카드 본문, 2026-09-11 착지).
+    "ads_boost.execute_human_only": {
+        "ko": "광고 홍보(boost) 실행·중지·재개는 휴먼 멤버만 가능합니다.",
+        "en": "Only human members can start, pause, or resume an ads boost.",
+    },
+    "ads_boost.gate_not_found": {
+        "ko": "이 조직에 없는 광고 홍보(boost) 건입니다.",
+        "en": "Ads boost not found in this organization.",
+    },
+    "ads_boost.gate_not_approved": {
+        "ko": "아직 승인되지 않은 광고 홍보(boost) 건입니다.",
+        "en": "This ads boost hasn't been approved yet.",
+    },
+    "ads_boost.not_started": {
+        "ko": "아직 시작하지 않은 광고 홍보(boost) 건입니다.",
+        "en": "This ads boost hasn't been started yet.",
+    },
+    "ads_boost.already_paused": {
+        "ko": "이미 중지된 광고 홍보(boost) 건입니다.",
+        "en": "This ads boost is already paused.",
+    },
+    "ads_boost.not_paused": {
+        "ko": "중지 상태가 아닌 광고 홍보(boost) 건입니다.",
+        "en": "This ads boost is not paused.",
+    },
+    "ads_boost.already_running": {
+        "ko": "이미 진행 중인 광고 홍보(boost) 건입니다.",
+        "en": "This ads boost is already running.",
+    },
 }
 
 
