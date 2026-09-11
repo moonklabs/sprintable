@@ -480,7 +480,27 @@ const GATE_ACTIVITY_LABEL_KEY: Record<string, string> = {
   // refresh_ads_boost_spend_now(ads_spend_snapshots.py)가 남기는 액션. 매핑
   // 누락 시 raw 키가 그대로 노출되던 걸 실 캡처로 적발.
   ads_spend_refresh_requested: 'gateActivityActionAdsSpendRefreshRequested',
+  // story #3806(Phase3·3-2 PR 14, 페드루 PO 確定 2026-09-11 19:52Z) —
+  // process_one_ads_boost_command 실행 성공 지점 신설 액션(ads_boost_execution.py
+  // ::_ACTIVITY_ACTION_BY_OP). ads_boost_paused는 scheduler+cap_reached 조합일
+  // 때만 아래 adsBoostActivityLabel()이 별도 문구로 덮어쓴다(이 맵은 그 기본값).
+  ads_boost_started: 'gateActivityActionAdsBoostStarted',
+  ads_boost_paused: 'gateActivityActionAdsBoostPaused',
+  ads_boost_resumed: 'gateActivityActionAdsBoostResumed',
 };
+
+// story #3806(Phase3·3-2 PR 14) — ads_boost_paused 한 action이 두 얼굴이다: 사람이
+// 「중지」를 눌렀거나(일반 문구), 상한 도달로 scheduler가 자동 중지했거나(별도 문구
+// — 사용자가 "왜 멈췄는지" 화면에서 바로 읽어야 한다는 게 이 PR의 존재 이유 그
+// 자체). context는 BE가 이미 실어 보낸다(ads_boost_execution.py::activity_context
+// — {initiated_by, reason?}), 여기서 새로 지어내지 않는다.
+function adsBoostActivityLabel(item: GateActivityLogItem, t: ReturnType<typeof useTranslations>): string | null {
+  if (item.action !== 'ads_boost_paused') return null;
+  if (item.context['initiated_by'] === 'scheduler' && item.context['reason'] === 'cap_reached') {
+    return t('gateActivityActionAdsBoostAutoPausedCapReached');
+  }
+  return null;
+}
 
 /**
  * story #2975 AC4(PO 확定 2026-08-24) — 「누가·언제·무엇을·어느 SHA에」 결재했는지. 2026-08-23
@@ -529,11 +549,12 @@ export function GateActivityHistory({ gateId, refreshKey }: { gateId: string; re
           {items.map((item) => {
             const sha = typeof item.context['head_sha'] === 'string' ? (item.context['head_sha'] as string) : null;
             const labelKey = GATE_ACTIVITY_LABEL_KEY[item.action];
+            const adsBoostLabel = adsBoostActivityLabel(item, t);
             return (
               <li key={item.id} className="text-[11px] text-muted-foreground">
                 <span className="font-medium text-foreground">{item.actor_name ?? t('gateActivityActorFallback')}</span>
                 {' · '}
-                {labelKey ? t(labelKey) : item.action}
+                {adsBoostLabel ?? (labelKey ? t(labelKey) : item.action)}
                 {sha ? <span className="ml-1 font-mono">{t('githubCheckShaLabel', { sha: sha.slice(0, 7) })}</span> : null}
                 {/* story #3493 — 게이트 활동 로그 항목은 "기록"(정본 formatRelativeTime). */}
                 <span className="ml-1">· {formatRelativeTime(item.created_at, locale, displayTimezone)}</span>

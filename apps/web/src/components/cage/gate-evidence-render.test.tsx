@@ -909,6 +909,53 @@ describe('GateActivityHistory — 결재 이력 실 응답 shape 마운트(story
     expect(container.textContent).not.toContain('ads_spend_refresh_requested');
   });
 
+  // story #3806(Phase3·3-2 PR 14, 페드루 PO 確定 2026-09-11 19:52Z) — boost start/
+  // pause/resume 명령 실행 성공 지점 신설 액션 3개. 사람 pause(initiated_by="human")
+  // 는 일반 문구, scheduler+cap_reached 조합만 별도 문구("왜 멈췄는지" 화면에서
+  // 바로 읽혀야 한다는 이 PR의 존재 이유).
+  it('ads_boost_started/paused/resumed — raw 키 아니라 정식 문구로 뜬다', async () => {
+    vi.mocked(fetchWithAuth).mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve([
+        { id: 'log-3', action: 'ads_boost_resumed', actor_id: 'm-1', actor_name: '미르코', context: { initiated_by: 'human' }, created_at: '2026-09-11T20:00:00Z' },
+        { id: 'log-2', action: 'ads_boost_paused', actor_id: 'm-1', actor_name: '미르코', context: { initiated_by: 'human' }, created_at: '2026-09-11T19:59:00Z' },
+        { id: 'log-1', action: 'ads_boost_started', actor_id: 'm-1', actor_name: '미르코', context: { initiated_by: 'human' }, created_at: '2026-09-11T19:58:00Z' },
+      ]),
+    } as Response);
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateActivityHistory gateId="gate-1" />)); });
+
+    expect(container.textContent).toContain(koMessages.cage.gateActivityActionAdsBoostStarted);
+    expect(container.textContent).toContain(koMessages.cage.gateActivityActionAdsBoostPaused);
+    expect(container.textContent).toContain(koMessages.cage.gateActivityActionAdsBoostResumed);
+    expect(container.textContent).not.toContain('ads_boost_started');
+    expect(container.textContent).not.toContain('ads_boost_paused');
+    expect(container.textContent).not.toContain('ads_boost_resumed');
+  });
+
+  it('⭐scheduler+cap_reached pause는 「자동 중지(광고비 상한 도달)」 별도 문구(사람 pause와 다른 문구)', async () => {
+    vi.mocked(fetchWithAuth).mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve([
+        {
+          id: 'log-1', action: 'ads_boost_paused', actor_id: 'm-1', actor_name: '미르코',
+          context: { initiated_by: 'scheduler', reason: 'cap_reached' }, created_at: '2026-09-11T19:41:17Z',
+        },
+      ]),
+    } as Response);
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateActivityHistory gateId="gate-1" />)); });
+
+    expect(container.textContent).toContain(koMessages.cage.gateActivityActionAdsBoostAutoPausedCapReached);
+    expect(container.textContent).not.toContain(koMessages.cage.gateActivityActionAdsBoostPaused);
+  });
+
   // story #3806(Phase3·3-2 PR 12) — 「눌렀는데 아무 일도 없었다」 결함 처방 — 형제
   // BoostExecutionControl의 뮤테이션이 이 컴포넌트에 반영되는 유일한 경로(refreshKey).
   it('refreshKey가 바뀌면 재조회한다(형제 컴포넌트 뮤테이션 반영 경로)', async () => {
