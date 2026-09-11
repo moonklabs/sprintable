@@ -369,7 +369,8 @@ _ORG_SCOPED_UNMAPPED_SEGMENTS_WITH_REASON: dict[str, str] = {
     # 전제)가 아니라 이 목록이 맞는 방향 — AC4가 에이전트를 실행/예산 API에서
     # 명시적으로 배제(제안만)하므로 MCP 도구 자체를 0건으로 유지하는 것이 설계
     # 의도. engagement(#3805)와 반대 방향.
-    "ads-boosts": "휴먼 전용(3806 AC4: 에이전트는 제안만·실행/예산 API 접근 0)·MCP 도구 0건",
+    "ads-boosts": "human-only (3806 AC4: agents propose only, no execution/budget API access); "
+                  "no MCP tool exposes it",
 }
 
 
