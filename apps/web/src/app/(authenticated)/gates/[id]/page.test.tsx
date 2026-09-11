@@ -761,3 +761,55 @@ describe('GateDetailPage — story #3128 대상 실물 진입 경로', () => {
     expect(link).toBeTruthy();
   });
 });
+
+// story #3806 PR 10(페드루 PO 실측 2026-09-11 16:18Z 라이브 캡처 — 결함 1) — ads_boost
+// 실행 블록이 gate.status==='approved'로만 게이트돼 있어, 승인 뒤 예산·기간을 바꿔 게이트가
+// pending으로 재오픈(reapproval_required)되면 needsAction=true 분기 전체가 켜지면서 실행
+// 블록(실행 중·중지)이 통째로 사라졌다 — run_status가 실제로 'running'이라도 화면에서
+// 중지 스위치를 잃는다(재승인할 때까지). mount()는 /ads-boosts/.../spend를 커스터마이즈
+// 못 해(기본 폴백 {data:[]}) 이 describe는 자체 fetch mock을 쓴다.
+describe('GateDetailPage — ads_boost 실행 블록은 needsAction/gate.status와 무관(story #3806 PR 10)', () => {
+  const adsBoostGate = (overrides: Partial<GateItem> = {}) => gate({
+    gate_type: 'ads_boost', can_approve: true, risk_grade: 'high',
+    sealed_ads_budget_minor: 50_000, sealed_ads_currency: 'KRW',
+    sealed_ads_starts_at: '2026-09-01T00:00:00Z', sealed_ads_ends_at: '2026-09-19T00:00:00Z',
+    sealed_ads_objective: 'POST_ENGAGEMENT',
+    ...overrides,
+  });
+
+  async function mountWithSpend(gateFixture: GateItem, spend: { run_status: string | null }) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/gates/gate-1') return { ok: true, status: 200, json: async () => ({ data: gateFixture }) };
+      if (url.includes('/ads-boosts/') && url.includes('/spend')) return { ok: true, json: async () => ({ data: spend }) };
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    const { default: GateDetailPage } = await import('./page');
+    const { TopBarProvider } = await import('@/components/nav/top-bar-context');
+    await act(async () => { root.render(wrap(<GateDetailPage />, TopBarProvider)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+  }
+
+  it('⭐status=pending·requires_human=true(재승인 대기)여도 run_status=running이면 「중지」 버튼이 그대로 뜬다', async () => {
+    await mountWithSpend(
+      adsBoostGate({ status: 'pending', requires_human: true, reapproval_required: true }),
+      { run_status: 'running' },
+    );
+    expect(document.body.querySelector('[data-testid="boost-pause-trigger"]')).not.toBeNull();
+  });
+
+  it('status=approved(정상 승인 상태)에서도 회귀 없이 그대로 뜬다(기존 동작 pin)', async () => {
+    await mountWithSpend(
+      adsBoostGate({ status: 'approved', requires_human: false }),
+      { run_status: 'running' },
+    );
+    expect(document.body.querySelector('[data-testid="boost-pause-trigger"]')).not.toBeNull();
+  });
+
+  it('run_status=null(진짜 미승인·최초 요청)이면 지어내지 않고 실행 블록 자체가 안 뜬다', async () => {
+    await mountWithSpend(
+      adsBoostGate({ status: 'pending', requires_human: true, sealed_ads_starts_at: null }),
+      { run_status: null },
+    );
+    expect(document.body.querySelector('[data-testid="boost-execution-control"]')).toBeNull();
+  });
+});

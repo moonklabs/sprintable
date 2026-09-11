@@ -404,20 +404,6 @@ export default function GateDetailPage() {
                     {isUndoEligible(gate, currentTeamMemberId) ? (
                       <GateUndoButton gateId={gate.id} onUndone={() => void fetchGate()} />
                     ) : null}
-                    {/* story #3806(Phase3·3-2 PR5, 유나 §절 §2) — ads_boost·승인됨 게이트의
-                        시작/중지/재개. 상태 3 중 「승인됨」(approved)일 때만 — 「승인 대기」는
-                        needsAction 분기가 이미 따로 처리(액션 버튼), 「변경됨·재승인 필요」는
-                        isResubmitWaiting류로 별개(gate.status가 다시 pending으로 재오픈됨). */}
-                    {gate.gate_type === 'ads_boost' && gate.status === 'approved' && gate.org_id ? (
-                      <BoostExecutionControl
-                        orgId={gate.org_id} gateId={gate.id}
-                        sealedAdsBudgetMinor={gate.sealed_ads_budget_minor ?? null}
-                        sealedAdsCurrency={gate.sealed_ads_currency ?? null}
-                        sealedAdsStartsAt={gate.sealed_ads_starts_at ?? null}
-                        sealedAdsEndsAt={gate.sealed_ads_ends_at ?? null}
-                        sealedAdsObjective={gate.sealed_ads_objective ?? null}
-                      />
-                    ) : null}
                   </div>
                 ) : !canAct ? (
                   // story #2091(P0) — needsAction=true(게이트 자체는 사람 판단이 필요)이지만
@@ -515,6 +501,27 @@ export default function GateDetailPage() {
                     </Button>
                   </div>
                 )}
+
+                {/* story #3806 PR 10(페드루 PO 실측 2026-09-11 16:18Z — 결함 1) — ads_boost
+                    실행 블록(실행 중/시작·중지)을 gate.status===`'approved'`로 게이트하면
+                    「승인됨→예산·기간 변경→pending 재오픈(reapproval_required)」 도중 실제로는
+                    아직 run_status='running'(집행 中)인데도 화면에서 통째로 사라져 중지 스위치를
+                    잃는다(재승인까지). needsAction/canAct 분기와도 무관하게 항상 마운트해(위
+                    §2902·§2975 AC4와 같은 원칙) `BoostExecutionControl` 자신의 run_status
+                    폴링이 판단한다 — gate.status가 pending이든 approved든 「결재 대기(변경
+                    재승인)」 배지와 「실행 중 · 중지」가 같은 화면에 공존(다른 메커니즘=다른
+                    낱말로, 뭉개지 않는다). sealed_ads_starts_at이 아직 없으면(진짜 미승인·최초
+                    요청) 컴포넌트 자신이 null을 반환해 지어내지 않는다. */}
+                {gate.gate_type === 'ads_boost' && gate.org_id ? (
+                  <BoostExecutionControl
+                    orgId={gate.org_id} gateId={gate.id}
+                    sealedAdsBudgetMinor={gate.sealed_ads_budget_minor ?? null}
+                    sealedAdsCurrency={gate.sealed_ads_currency ?? null}
+                    sealedAdsStartsAt={gate.sealed_ads_starts_at ?? null}
+                    sealedAdsEndsAt={gate.sealed_ads_ends_at ?? null}
+                    sealedAdsObjective={gate.sealed_ads_objective ?? null}
+                  />
+                ) : null}
 
                 {/* story #2902(후보 B, S2h①③ list_entity_backlinks 확장 소비처) — 「이 게이트를
                     언급한 대화」 역참조. 기성 EntityBacklinksSection(3곳 소비 중) 그대로 재사용 —
