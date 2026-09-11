@@ -44,6 +44,14 @@ OP_BOOST_START = "boost_start"
 OP_PAUSE = "pause"
 OP_RESUME = "resume"
 
+# story #3806(Phase3·3-2 PR 13) — process_one_ads_boost_command 실행 성공 지점의
+# ActivityLog action 키. FE gate-evidence.tsx::GATE_ACTIVITY_LABEL_KEY와 1:1 대응.
+_ACTIVITY_ACTION_BY_OP = {
+    OP_BOOST_START: "ads_boost_started",
+    OP_PAUSE: "ads_boost_paused",
+    OP_RESUME: "ads_boost_resumed",
+}
+
 # publication_command.py::BATCH_SIZE·channel_post_comments.py::BATCH_SIZE와 동형 값
 # (신규 상수 발명 0 — 그 둘을 import하면 이 모듈의 gate_type 무관 워커 배치와
 # 우연히 같은 상수를 공유하게 돼 오히려 결합이 생긴다, 여기선 리터럴로 동형만).
@@ -428,6 +436,29 @@ async def process_one_ads_boost_command(db: AsyncSession, command: PublicationCo
                 )
                 run.status = "running"
                 run.paused_at = None
+
+        # story #3806(Phase3·3-2 PR 13, 페드루 PO 確定 2026-09-11 19:52Z) — 「중지
+        # 스위치·상한 도달 자동 중지」가 3806 AC인데 그 실행이 결재 이력에 한 줄도
+        # 안 남으면(PR11까지 이 축 ActivityLog 호출 0건이었음, 라이브 재측 中
+        # 자체발견) 사용자가 자기 광고가 왜 멈췄는지 화면에서 알 길이 없다. **요청
+        # 시점(명령 생성)엔 안 남긴다** — 그건 이미 command 테이블 자체가 사실이고,
+        # 여기(실행 성공 지점)에서만 기록한다. actor는 명령의 requested_by_member_id
+        # (scheduler 귀속 pause도 항상 사람 resolver_id로 채워져 있다 —
+        # ads_boost_execution.py::request_ads_boost_pause 그대로) — human/scheduler
+        # 구분은 actor가 아니라 context.initiated_by가 담당한다.
+        from app.services.activity_log import ActivityLogService
+
+        activity_context: dict = {"initiated_by": command.initiated_by or "human"}
+        if command.operation == OP_PAUSE and command.initiated_by == "scheduler":
+            # 이 조합(scheduler 귀속 pause)의 유일한 발생원은 _enforce_spend_cap
+            # (ads_spend_snapshots.py)의 상한 도달 자동 중지뿐이다(다른 scheduler
+            # 발신 pause 경로 0, grep 확認) — reason을 지어내지 않고 그 사실 그대로.
+            activity_context["reason"] = "cap_reached"
+        await ActivityLogService(db).record(
+            org_id=command.org_id, action=_ACTIVITY_ACTION_BY_OP[command.operation],
+            actor_id=command.requested_by_member_id, actor_type="human",
+            entity_type="gate", entity_id=gate.id, context=activity_context,
+        )
 
         await record_publication_attempt(
             db, command=command, approval_check="ok", adapter_called=True,
