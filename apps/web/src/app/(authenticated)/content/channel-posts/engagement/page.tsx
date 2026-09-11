@@ -336,9 +336,12 @@ export default function ChannelPostsEngagementPage() {
               </tr>
             </thead>
             <tbody>
-              {items.map((item) => {
+              {items.map((item, index) => {
                 const tone = STATUS_TONE[(item.triage_status as TriageStatus) in STATUS_TONE ? (item.triage_status as TriageStatus) : 'open'];
                 const assignedName = memberName(item.assignee_member_id);
+                // story #3592 회귀 가드(verify-repeated-row-action-names.ts) — 반복 행
+                // 액션은 순번을 aria-label에 품긴다(comments-section.tsx와 동형 키 재사용).
+                const ordinal = index + 1;
                 return (
                   <tr key={item.id} className="border-b border-border last:border-0">
                     <td className="px-3 py-2 align-top">{channelLabel(item.channel, t)}</td>
@@ -388,11 +391,17 @@ export default function ChannelPostsEngagementPage() {
                     </td>
                     <td className="whitespace-nowrap px-3 py-2 align-top text-right">
                       {item.linked_story_id ? null : (
-                        <Button variant="ghost" size="sm" onClick={() => setConvertTargetId(item.id)}>
+                        <Button
+                          variant="ghost" size="sm" onClick={() => setConvertTargetId(item.id)}
+                          aria-label={t('commentsConvertToTaskAriaLabel', { n: ordinal, label: t('commentsConvertToTaskCta') })}
+                        >
                           {t('commentsConvertToTaskCta')}
                         </Button>
                       )}
-                      <Button variant="ghost" size="sm" onClick={() => setReplyTargetId(item.id)}>
+                      <Button
+                        variant="ghost" size="sm" onClick={() => setReplyTargetId(item.id)}
+                        aria-label={t('commentsReplyAriaLabel', { n: ordinal, label: t('commentsReplyCta') })}
+                      >
                         {t('commentsReplyCta')}
                       </Button>
                     </td>
