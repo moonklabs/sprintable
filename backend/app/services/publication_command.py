@@ -132,7 +132,7 @@ async def create_or_get_publication_command(
     db: AsyncSession, *, org_id: uuid.UUID, gate_id: uuid.UUID, destination: uuid.UUID,
     approved_version: uuid.UUID, requested_by_member_id: uuid.UUID,
     scheduled_at: datetime | None, operation: str = "publish", content_kind: str = "channel_post",
-    toggle_seq: int = 0,
+    toggle_seq: int = 0, initiated_by: str | None = None,
 ) -> tuple[PublicationCommand, bool]:
     """멱등 upsert(블루프린트 §3 키: org_id+destination+approved_version+operation+
     toggle_seq — story #3806 PR3가 toggle_seq를 추가, 그 전까지는 항상 0이라
@@ -149,7 +149,13 @@ async def create_or_get_publication_command(
     롤백하고(바깥 트랜잭션은 오염 안 됨), constraint 이름을 확인한 뒤(다른 원인까지
     "경합"으로 오판하지 않도록 — approval_delivery.py QA 교훈) 진 쪽은 이긴 쪽이 커밋한
     행을 재조회해 그대로 반환한다(완료 대기 불요 — #3757과 다른 점, 여기 command는
-    "완결된 발행 결과"가 아니라 감사 원장이라 어느 상태든 반환해도 무방)."""
+    "완결된 발행 결과"가 아니라 감사 원장이라 어느 상태든 반환해도 무방).
+
+    story #3806(Phase3·3-2 PR 6 정정, 페드루 PO 定 2026-09-11 13:42Z) — `initiated_by`
+    ('scheduler'|'human'|None, 0367)는 기존 행이 있으면(위 "그대로 반환") 안 덮어쓴다
+    — 먼저 만든 쪽의 값이 그대로 남는다(이 함수의 멱등 원칙과 동형: 「먼저 된 쪽이
+    이김」이 상태뿐 아니라 이 축에도 적용). 대부분 호출부는 None(기존 의미 불변) —
+    ads_boost_execution.py만 명시로 채운다."""
     existing = (await db.execute(
         select(PublicationCommand).where(
             PublicationCommand.org_id == org_id,
@@ -166,7 +172,7 @@ async def create_or_get_publication_command(
         id=uuid.uuid4(), org_id=org_id, gate_id=gate_id, destination=destination,
         approved_version=approved_version, operation=operation, scheduled_at=scheduled_at,
         status="pending", requested_by_member_id=requested_by_member_id, content_kind=content_kind,
-        toggle_seq=toggle_seq,
+        toggle_seq=toggle_seq, initiated_by=initiated_by,
     )
     try:
         async with db.begin_nested():

@@ -114,7 +114,39 @@ async def test_due_approved_gate_gets_boost_start_command():
             command = await _get_boost_start_command(s, org_id, gate_id)
         assert command is not None
         assert command.requested_by_member_id == owner_id  # gate.resolver_id 귀속
+        # story #3806 PR 6 정정(페드루 PO 定 2026-09-11 13:42Z) — 「누가 시작했나」
+        # 두 세계 처방. 뮤테이션 대상: process_due_ads_boost_starts의
+        # request_ads_boost_start 호출에서 initiated_by="scheduler"를 걷으면(또는
+        # publication_command.py::create_or_get_publication_command가 그 값을
+        # 안 저장하면) 이 단언이 실패한다.
+        assert command.initiated_by == "scheduler"
     finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_human_triggered_start_is_marked_initiated_by_human():
+    """뮤테이션 대상: `start_ads_boost_endpoint`(사람 경로)가 initiated_by="human"을
+    안 넘기면 이 단언이 실패한다 — 워커 경로(scheduler)와의 구분이 이 값 하나에
+    달려 있다."""
+    from app.main import app
+
+    engine, Session, org_id, owner_id, gate_id = await _setup_gate(
+        await _session_factory(), hours_from_now=1, approve=True,
+    )
+    try:
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+        async with _client_for(app) as client:
+            r = await client.post(f"/api/v2/organizations/{org_id}/ads-boosts/{gate_id}/start")
+        assert r.status_code == 201, r.text
+        app.dependency_overrides.clear()
+
+        async with Session() as s:
+            command = await _get_boost_start_command(s, org_id, gate_id)
+        assert command is not None
+        assert command.initiated_by == "human"
+    finally:
+        app.dependency_overrides.clear()
         await engine.dispose()
 
 

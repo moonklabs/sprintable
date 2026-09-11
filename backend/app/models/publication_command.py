@@ -52,6 +52,14 @@ class PublicationCommand(Base):
             "content_kind IN ('channel_post', 'site_post', 'comment_reply', 'ads_boost')",
             name="ck_publication_commands_content_kind",
         ),
+        # story #3806(Phase3·3-2 PR 6 정정, 페드루 PO 定 2026-09-11 13:42Z) — 0367
+        # 마이그의 정본 미러(위 content_kind 관례와 동형 — 이름 `ck_publication_
+        # commands_initiated_by` 반드시 일치 유지, create_all() 기반 로컬 테스트가
+        # 이 제약을 보게 하는 목적).
+        CheckConstraint(
+            "initiated_by IS NULL OR initiated_by IN ('scheduler', 'human')",
+            name="ck_publication_commands_initiated_by",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -83,6 +91,12 @@ class PublicationCommand(Base):
     failure_kind: Mapped[str | None] = mapped_column(Text, nullable=True)
     dead_letter_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     requested_by_member_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    # story #3806(Phase3·3-2 PR 6 정정, 페드루 PO 定 2026-09-11 13:42Z) — 「누가
+    # 시작했나」 두 세계 처방(0367). `requested_by_member_id`만으로는 자동 워커와
+    # 사람 클릭을 구분 못 한다(승인자 본인이 직접 누르면 둘 다 같은 member_id).
+    # null=이 정보를 모르는 기존 행(이 컬럼 도입 전 데이터·다른 content_kind는
+    # 채울 이유가 없어 계속 null로 둔다 — ads_boost의 boost_start만 채움).
+    initiated_by: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False,

@@ -123,12 +123,17 @@ async def _latest_toggle(
 
 async def request_ads_boost_start(
     db: AsyncSession, *, org_id: uuid.UUID, gate_id: uuid.UUID, requester_member_id: uuid.UUID,
+    initiated_by: str,
 ) -> PublicationCommand:
+    """`initiated_by` ∈ {"human", "scheduler"} — 페드루 PO 定(2026-09-11 13:42Z,
+    「누가 시작했나」 두 세계 처방). 필수 kwarg(기본값 0)로 둬 새 호출부가 이 축을
+    빠뜨리면 즉시 TypeError로 드러나게 한다(조용히 None으로 새는 것을 막는다)."""
     gate = await _resolve_gate(db, org_id=org_id, gate_id=gate_id)
     command, _ = await create_or_get_publication_command(
         db, org_id=org_id, gate_id=gate.id, destination=gate.sealed_ads_connection_id,
         approved_version=gate.sealed_ads_boost_version_id, requested_by_member_id=requester_member_id,
         scheduled_at=None, operation=OP_BOOST_START, content_kind=_ADS_BOOST_CONTENT_KIND, toggle_seq=0,
+        initiated_by=initiated_by,
     )
     await db.commit()
     return command
@@ -249,6 +254,7 @@ async def process_due_ads_boost_starts(db: AsyncSession, *, now=None) -> dict[st
         try:
             await request_ads_boost_start(
                 db, org_id=org_id, gate_id=gate_id, requester_member_id=resolver_id,
+                initiated_by="scheduler",
             )
             counts["started"] += 1
         except (AdsBoostGateNotFoundError, AdsBoostGateNotApprovedError):

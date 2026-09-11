@@ -105,7 +105,7 @@ async def _start_ads_boost_endpoint(
     resolved = await _require_human(db, auth, org_id, resolved_locale)
     try:
         command = await request_ads_boost_start(
-            db, org_id=org_id, gate_id=gate_id, requester_member_id=resolved.id,
+            db, org_id=org_id, gate_id=gate_id, requester_member_id=resolved.id, initiated_by="human",
         )
     except (AdsBoostGateNotFoundError, AdsBoostGateNotApprovedError) as exc:
         _raise_common_error(exc, resolved_locale)

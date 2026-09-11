@@ -1630,8 +1630,8 @@
     },
     {
       "file": "tests/test_3806_ads_boost_starts_worker.py",
-      "sec": 4.6,
-      "source": "story-3806(Phase3·3-2 PR 6, 페드루 PO 確定 2026-09-11 13:27Z — 봉인 starts_at 자동 실행 워커) — 신규 파일 실측(로컬, uv run pytest --durations=0 직접 1회 실행, 6건 call+setup 합산 약 4.6s — test_3766 등재 선례와 동일 방법론)"
+      "sec": 5.5,
+      "source": "story-3806(Phase3·3-2 PR 6, 페드루 PO 確定 2026-09-11 13:27Z·13:42Z 정정(initiated_by 테스트 1건 추가) — 봉인 starts_at 자동 실행 워커) — 재측(로컬, uv run pytest --durations=0 직접 1회 실행, 7건 call+setup 합산 약 5.5s — test_3766 등재 선례와 동일 방법론)"
     },
     {
       "file": "tests/test_3806_ads_boost_starts_cron_wiring.py",
