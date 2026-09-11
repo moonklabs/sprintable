@@ -134,11 +134,38 @@ async def test_float_metrics_get_real_delta_not_null(monkeypatch):
     assert body["delta_1d_to_7d"]["ctr"] is None  # 1일값이 null(미제공)이라 여전히 null
 
 
+async def test_direct_publication_id_cross_org_surfaces_404_not_fake_reason(monkeypatch):
+    """story #3796(페드루 PO 確定 2026-09-10, 유나 실측) — 3651 원래 설계는 publication_id
+    직접 조회 경로에서 org WHERE절 불일치를 빈 목록으로 떨어뜨려(아래
+    test_draft_id_without_publication_surfaces_be_error_as_text의 예전 docstring이 그
+    갭을 그대로 명시했었다), 이 계층이 그 빈 목록을 "스냅샷이 2건 미만…"이라는 거짓
+    delta_unavailable_reason으로 번역해 냈다(데이터는 안 새지만 "기다리면 된다"로
+    읽히는 오도 — 진실은 "네 org 것이 아니다"). BE(insight_snapshots.py 라우터)가
+    이제 이 경우 404를 낸다 — SprintableApiError를 삼키지 않고 그대로 err()로 전파돼야
+    한다(거짓 사유 조합 0)."""
+    from sprintable_mcp.tools import channel_posts
+    from sprintable_mcp.api_client import SprintableApiError
+
+    async def _raise(path: str, **_kwargs):
+        raise SprintableApiError(404, "이 조직에 없는 발행물입니다", None)
+
+    monkeypatch.setattr(channel_posts.client, "get", _raise)
+    monkeypatch.setattr(type(channel_posts.client), "org_id", property(lambda self: "org-1"))
+
+    result = await channel_posts.get_publication_insights(
+        channel_posts.GetPublicationInsightsInput(publication_id="pub-foreign-org"),
+    )
+    assert result[0].text.startswith("Error:")
+    assert "이 조직에 없는 발행물" in result[0].text
+    assert "delta_unavailable_reason" not in result[0].text
+    assert "스냅샷이 2건 미만" not in result[0].text
+
+
 async def test_draft_id_without_publication_surfaces_be_error_as_text(monkeypatch):
     """다른 org의 draft_id(또는 존재하지 않는 draft_id)를 주면 draft 상세 조회 자체가
-    BE에서 404로 거부된다 — SprintableApiError를 삼키지 않고 그대로 err()로 낸다(3651
-    AC1 「다른 org publication → 404/403」의 실제 발생 지점: publication_id 직접 조회는
-    org WHERE절 불일치가 빈 목록으로 떨어지는 기존 설계라, 거부는 draft_id 경로에서 난다)."""
+    BE에서 404로 거부된다 — SprintableApiError를 삼키지 않고 그대로 err()로 낸다(draft_id
+    편의 축 자신의 org 경계 — publication_id 직접 조회 축의 경계 정정은 위
+    test_direct_publication_id_cross_org_surfaces_404_not_fake_reason·story #3796)."""
     from sprintable_mcp.tools import channel_posts
     from sprintable_mcp.api_client import SprintableApiError
 

@@ -8,16 +8,19 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import get_current_user
 from app.dependencies.auth import get_verified_org_id
 from app.dependencies.database import get_db
+from app.services.agent_onboarding_config import resolve_locale_from_request
+from app.services.i18n_catalog import t
 from app.services.insight_snapshots import (
     label_snapshot_offset,
     list_insight_snapshots_for_publication,
+    resolve_publication_org_id,
     resolve_publication_published_at,
 )
 
@@ -50,15 +53,52 @@ async def list_publication_insights_endpoint(
     db: AsyncSession = Depends(get_db),
     verified_org_id: uuid.UUID = Depends(get_verified_org_id),
     _auth=Depends(get_current_user),
+    locale: str | None = None,
+    accept_language: str | None = Header(None, alias="Accept-Language"),
+) -> list[InsightSnapshotView]:
+    """story #3796 — 라우트 진입점, `Header()` DI 마커는 여기서만 받는다(까심 QA CI FAILURE
+    원칙, i18n_catalog.py 모듈 docstring 참조). 직접-호출(realdb·유닛) 테스트는
+    `_list_publication_insights_endpoint`를 불러야 한다."""
+    return await _list_publication_insights_endpoint(
+        org_id, publication_id, db=db, verified_org_id=verified_org_id, _auth=_auth,
+        resolved_locale=resolve_locale_from_request(locale, accept_language),
+    )
+
+
+async def _list_publication_insights_endpoint(
+    org_id: uuid.UUID,
+    publication_id: uuid.UUID,
+    *,
+    db: AsyncSession,
+    verified_org_id: uuid.UUID,
+    _auth,
+    resolved_locale: str,
 ) -> list[InsightSnapshotView]:
     """AC6 — 스냅샷 목록(raw_payload 제외 — 원본은 디버그 전용, 이 조회 축에 실을
-    필요가 없다). 존재하지 않는 publication_id는 빈 목록으로 응답한다(그 자체가
-    "이 발행엔 아직 스냅샷이 없다"는 정직한 사실 — 404로 지어내지 않는다, org
-    경계는 org_id mismatch일 때만 403)."""
+    필요가 없다).
+
+    story #3796(페드루 PO 確定 2026-09-10, 유나 실측 — 2차 CHANGES 2026-09-11) —
+    **계약 변경**: "애초에 존재하지 않는 publication_id"와 "타 org 소유로 실존"을
+    가르는 축을 404/200으로 노출하면(1차 처방이 그랬다) 호출자가 그 둘을 구분해
+    "이 id가 실존하는지"를 org 경계 밖에서 열거(enumerate)할 수 있다 — docstring의
+    "존재 자체를 비노출"과 응답이 실제로는 어긋나는 자기모순(같은 화면 두 문장이
+    다른 세계를 말하는 것). 가름선을 **소유**로 다시 긋는다 — `owner_org_id`가
+    `None`(애초에 미존재)이든 caller org와 다른 실제 org든, 어느 쪽이든 "내 org
+    것이 아니다"는 사실은 같으므로 **둘 다 404**로 동일하게 응답한다(응답 바디·
+    status 완전히 구분 불가). "내 org 소유인데 스냅샷만 0건"일 때만 빈 목록(그
+    자체가 "이 발행엔 아직 스냅샷이 없다"는 정직한 사실 — 지어내지 않는다). 3497의
+    옛 계약("애초에 미존재=빈 목록")은 이 스토리로 폐기·404로 갱신됐다(해당 테스트도
+    같이 고쳤다)."""
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
 
     rows = await list_insight_snapshots_for_publication(db, org_id=org_id, publication_id=publication_id)
+    if not rows:
+        owner_org_id = await resolve_publication_org_id(db, publication_id=publication_id)
+        if owner_org_id != org_id:
+            raise HTTPException(
+                status_code=404, detail=t("insight_snapshots.publication_not_found_in_org", resolved_locale),
+            )
     # story #3651 CHANGES — 이 publication의 «지금» published_at 1회 조회(행마다 반복
     # 조회 0, 어차피 폴리모픽 publication_id 하나당 kind는 하나다 — rows[0]에서 그대로
     # 읽는다). 스냅샷이 없으면 조회 자체를 스킵(빈 목록 반환은 그대로 유지).
