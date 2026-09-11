@@ -14,7 +14,7 @@ describe('/api/organizations/[id]/ads-boosts/[gateId]/spend (story #3806)', () =
   it('GET — FastAPI GET .../spend로 위임하고 { data } 봉투로 래핑', async () => {
     const result = {
       gate_id: 'gate-1', sealed_ads_budget_minor: 100_000, sealed_ads_currency: 'KRW',
-      captured_spend_minor: 24_690, remaining_minor: 75_310,
+      captured_spend_minor: 24_690, remaining_minor: 75_310, run_status: 'running',
       snapshots: [
         { due_at: '2026-09-13T00:00:00Z', captured_at: '2026-09-13T00:01:00Z', status: 'captured', spend_minor: 12_345 },
         { due_at: '2026-09-19T00:00:00Z', captured_at: null, status: 'pending', spend_minor: null },

@@ -26,6 +26,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.ads_boost_run import AdsBoostRun
 from app.models.gate import Gate
 from app.models.insight_snapshot import InsightSnapshot
 
@@ -188,6 +189,17 @@ async def get_ads_boost_spend_summary(db: AsyncSession, *, org_id: uuid.UUID, ga
         ).order_by(InsightSnapshot.due_at.asc())
     )).scalars().all()
 
+    # story #3806(Phase3·3-2 PR5, 디디 3자기점검 — 페드루 지적 없이 자체 발견) — pause/
+    # resume UI가 「실행 중/중지됨」을 그리려면 AdsBoostRun.status(PR3 워커 fix가 만든
+    # 「Meta 쪽 지금 상태」 최종 관측값, ads_boost_run.py 모델 docstring)가 필요한데,
+    # 지금 어떤 라우터도 이 값을 클라이언트에 노출하지 않는다(grep 0건) — /spend가
+    # 이미 per-gate-id 조회 자리라 그 한 번의 왕복에 얹는다(2번째 GET 신설 안 함).
+    # run이 아직 없으면(gate 승인 직후·실행 요청 前) None — "미실행"과 "pending"을
+    # 뭉개지 않는다(지어내지 않는다).
+    run = (await db.execute(
+        select(AdsBoostRun).where(AdsBoostRun.org_id == org_id, AdsBoostRun.gate_id == gate_id)
+    )).scalar_one_or_none()
+
     captured_spend_minor = sum(
         (s.normalized or {}).get("spend") or 0 for s in snapshots if s.status == "captured"
     )
@@ -197,6 +209,7 @@ async def get_ads_boost_spend_summary(db: AsyncSession, *, org_id: uuid.UUID, ga
         "sealed_ads_currency": gate.sealed_ads_currency,
         "captured_spend_minor": captured_spend_minor,
         "remaining_minor": (gate.sealed_ads_budget_minor or 0) - captured_spend_minor,
+        "run_status": run.status if run is not None else None,
         "snapshots": [
             {
                 "due_at": s.due_at, "captured_at": s.captured_at, "status": s.status,
