@@ -5363,5 +5363,16 @@
     "reconcileVerdictMatch": "Match",
     "reconcileVerdictMismatch": "Mismatch",
     "reconcileVerdictUnmeasured": "Unmeasured"
+  },
+  "desktop": {
+    "loading": "Loading…",
+    "title": "Desktop app",
+    "targetLabel": "For macOS (Apple Silicon)",
+    "versionLabel": "Version {version}",
+    "buildLabel": "Build {sha}",
+    "notarizationNotice": "For internal use before Apple notarization.",
+    "gatekeeperNotice": "The first time you open it, right-click the file and choose \"Open\".",
+    "downloadCta": "Download",
+    "unavailable": "Not available right now."
   }
 }

@@ -174,9 +174,11 @@ describe('scanRepo — story #3760 AC1/AC4(실 트리 실행)', () => {
   // 화이트리스트) pin. 되돌리면(화이트리스트 밖 export가 실 트리에 들어오면) RED.
   // story #3805(PR 2[FE], 페드루 실측 2026-09-11 10:13Z) — content/channel-posts/
   // engagement/page.tsx 신설로 100→101(named export 위반 0건은 그대로 — default export만).
-  it('실 트리(apps/web/src/app) — 라우트 파일 101개·위반 0건', () => {
+  // story #3807(AC3, 페드루 PO 確定 2026-09-11) — (authenticated)/desktop/page.tsx
+  // 신설로 101→102(named export 위반 0건은 그대로 — default export만).
+  it('실 트리(apps/web/src/app) — 라우트 파일 102개·위반 0건', () => {
     const { violations, fileCount } = scanRepo(APP_ROOT);
-    expect(fileCount).toBe(101);
+    expect(fileCount).toBe(102);
     expect(violations).toEqual([]);
   });
 });

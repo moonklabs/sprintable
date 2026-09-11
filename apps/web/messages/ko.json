@@ -5363,5 +5363,16 @@
     "reconcileVerdictMatch": "일치",
     "reconcileVerdictMismatch": "불일치",
     "reconcileVerdictUnmeasured": "미측정"
+  },
+  "desktop": {
+    "loading": "불러오는 중…",
+    "title": "데스크톱 앱",
+    "targetLabel": "대상 macOS (Apple Silicon)",
+    "versionLabel": "버전 {version}",
+    "buildLabel": "빌드 {sha}",
+    "notarizationNotice": "Apple 공증 전 내부용입니다.",
+    "gatekeeperNotice": "처음 열 때는 파일을 우클릭한 뒤 「열기」를 선택하세요.",
+    "downloadCta": "다운로드",
+    "unavailable": "지금은 받을 수 없습니다."
   }
 }
