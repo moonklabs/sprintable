@@ -303,6 +303,12 @@ export default function ContentPostEditPage() {
   // story #3479(BE #3476) — 외부 목적지 발행 재시도. 공용 BFF(publication-commands/
   // {id}/retry) — content_kind 무관, command_id 하나로 서버가 대상을 안다.
   const [retryingCommand, setRetryingCommand] = useState(false);
+  // story #3369(Phase2·FE, 페드루 PO 確定 2026-09-11) — channel_posts 상세
+  // (content/channel-posts/[draftId]/page.tsx)의 needs_check 2단계 관문을 그대로
+  // 이식한다 — 「밖에 나갔는지 모르는 실패」를 곧바로 재시도로 넘기지 않고, 채널에서
+  // 확認했다는 체크가 끝나야 확認 버튼이 열린다(recheckGate 이 화면에서 켬).
+  const [retryConfirmOpen, setRetryConfirmOpen] = useState(false);
+  const [retryChecklistConfirmed, setRetryChecklistConfirmed] = useState(false);
 
   // story 15e481ce(#3453 AC1) — 「Threads 변형 만들기」. 활성 연결 목록·이미 만든 변형
   // 목록은 서로 다른 조회(연결=channel-connections, 변형=variants) — 같이 로드한다.
@@ -998,7 +1004,13 @@ export default function ContentPostEditPage() {
     setRetryingCommand(true);
     try {
       const res = await fetchWithAuth(`/api/organizations/${orgId}/publication-commands/${commandId}/retry`, { method: 'POST' });
-      if (res.ok) void loadPublication();
+      if (res.ok) {
+        // story #3369 — channel_posts 상세 handleRetry와 동형(성공 시 다이얼로그 닫고
+        // 체크 상태 리셋).
+        setRetryConfirmOpen(false);
+        setRetryChecklistConfirmed(false);
+        void loadPublication();
+      }
     } finally {
       setRetryingCommand(false);
     }
@@ -1076,6 +1088,11 @@ export default function ContentPostEditPage() {
         reasonCode: publication.command.command_reason_code,
       })
     : undefined;
+  // story #3369(channel_posts 상세 isNeedsCheckGate와 동형) — dead_letter 안에서도
+  // needsRecheck면 「밖에 나갔는지 모르는 실패」다. ConfirmDialog 세 자리(문면·체크박스·
+  // confirmDisabled)가 이 값 하나로 갈린다.
+  const isExternalNeedsCheckGate = externalFailureAction?.kind === 'needs_check'
+    || (externalFailureAction?.kind === 'dead_letter' && externalFailureAction.needsRecheck);
 
   return (
     <div className="mx-auto w-full max-w-3xl space-y-6 p-6">
@@ -1292,10 +1309,42 @@ export default function ContentPostEditPage() {
           {publication.command && externalFailureAction ? (
             <FailureActionBadge
               action={externalFailureAction}
-              onRetryClick={() => void handleRetryPublicationCommand(publication.command!.id)}
               displayTimezone={displayTimezone}
+              // story #3369 — 아래 ConfirmDialog가 실제 needs_check 관문(체크리스트·
+              // 확認버튼 disabled)을 제공한다 — recheckGate=true라 needsRecheck
+              // 문면이 「약속을 지키는」 곳(channel_posts 상세와 동형).
+              recheckGate
+              onRetryClick={() => { setRetryChecklistConfirmed(false); setRetryConfirmOpen(true); }}
             />
           ) : null}
+          <ConfirmDialog
+            open={retryConfirmOpen}
+            onOpenChange={(next) => { setRetryConfirmOpen(next); if (!next) setRetryChecklistConfirmed(false); }}
+            title={t('channelPostsRetryConfirmTitle')}
+            description={(
+              <>
+                <span className="block" data-testid="content-retry-confirm-what">
+                  {isExternalNeedsCheckGate ? t('channelPostsRetryConfirmWhatNeedsCheck') : t('channelPostsRetryConfirmWhatDeadLetter')}
+                </span>
+                <span className="block" data-testid="content-retry-confirm-reversible">{t('channelPostsRetryConfirmReversible')}</span>
+                {isExternalNeedsCheckGate ? (
+                  <label className="mt-2 flex items-center gap-2 text-sm text-foreground">
+                    <input
+                      type="checkbox" checked={retryChecklistConfirmed}
+                      onChange={(e) => setRetryChecklistConfirmed(e.target.checked)}
+                      data-testid="content-retry-confirm-checklist"
+                    />
+                    {t('channelPostsRetryConfirmChecklist')}
+                  </label>
+                ) : null}
+              </>
+            )}
+            cancelLabel={tc('cancel')}
+            confirmLabel={retryingCommand ? t('channelPostsRetryConfirmPendingCta') : t('channelPostsRetryConfirmAction')}
+            confirmDisabled={retryingCommand || (isExternalNeedsCheckGate && !retryChecklistConfirmed)}
+            destructive={false}
+            onConfirm={() => void handleRetryPublicationCommand(publication.command!.id)}
+          />
         </div>
       ) : null}
 
