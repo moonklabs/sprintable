@@ -58,6 +58,11 @@ _CHANNEL_BLOCK_START_RE = re.compile(
 EXPECTED_BACKEND_CHANNELS = frozenset({
     "threads", "instagram", "facebook", "facebook_sandbox", "hosted_site",
     "wordpress", "webhook", "sandbox", "instagram_sandbox",
+    # story #3806(Phase3·3-2 PR1) — meta_ads/ads_sandbox 둘 다 insight_metrics
+    # 미선언(빈 튜플 기본값·콘텐츠 발행 채널이 아니라 이 지표 축 자체가 안 맞음,
+    # channel_adapters.py 항목 주석 참고) — extract_backend_declared_metrics가
+    # []로 등재하고 find_drift도 FE 부재=[] 폴백이라 drift 0(신규 FE 등재 불요).
+    "meta_ads", "ads_sandbox",
 })
 
 

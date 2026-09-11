@@ -77,6 +77,24 @@
   캡처 자체가 그 창을 훨씬 지나 도는 실 스케줄(_SNAPSHOT_OFFSETS=1일·7일)이라
   라이브에서 stored>live를 절대 못 만들어 기각됐다.
 
+- `[sandbox:account-unverified]`(story #3806 §5, ads_sandbox 전용, 라이브 런북용) —
+  ⚠️이 파일이 읽는 마커가 아니다(카탈로그 완전성을 위해 여기 등재만 함). 실제
+  소비처는 `ads_sandbox_oauth.py::list_ad_accounts` — `create_container`의 text
+  인자가 아니라 sandbox 앱 자격(`channel_app_credentials`, channel="ads_sandbox")의
+  `app_id` 접미(`:account-unverified`)로 읽는다(facebook_sandbox_oauth.py의 페이지
+  수 마커 관례와 동형 — 발행물 텍스트가 아니라 OAuth 콜백 단계 마커라 이 축이
+  자연스럽다). 계정 1개가 그대로 반환되지만 `account_status=7`(Meta 공식
+  PENDING_RISK_REVIEW enum)이 실린다.
+- `[sandbox:review-rejected]`(story #3806 §5, ads_sandbox 전용, 라이브 런북용) —
+  ⚠️위와 동일 축(app_id 접미 `:review-rejected`) — `list_ad_accounts` 자체가
+  `MetaAdsOAuthError("META_ADS_ACCOUNT_REVIEW_REJECTED", ...)`로 즉시 실패한다
+  (개별 계정이 아니라 앱 자격 전체가 광고 API를 못 쓰는 상태 시뮬 — 「계정 0개」
+  와는 다른 사실이라 다른 코드로 구분).
+- `[sandbox:budget-exceeded]`·`[sandbox:pause-delayed]`(story #3806 §5) — **예약만,
+  미구현**. boost 요청(PR2)·중지 명령(PR3) 자체가 아직 없어 걸 자리가 없다 — 그
+  PR에서 마커 소비처를 신설할 때 이 카탈로그도 갱신할 것(카드 §5가 지정한 4마커
+  중 나머지 둘, 「정직하게 적어둔다」 house 관례 — 지어낸 완료 표시 금지).
+
 마커는 서로 배타적으로 다루지 않는다(먼저 매치되는 것을 그대로 적용) — 실패 마커 3종은
 텍스트 안 어디에든, 컨테이너 마커 2종과 자유롭게 조합 가능(단, 컨테이너 마커 2종은
 이미지 첨부 초안에서만 의미 있음, 위 참고)."""
