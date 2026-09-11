@@ -63,6 +63,15 @@
   `publish_container`를 거쳐 media_id 문자열 자체에 싣는다(서버 메모리 0, 위 stateless
   계약 그대로) — 지연은 댓글 재수집 5분 rate-limit보다 짧게 잡혀 있어(60초) 처음 refresh
   뒤 rate-limit이 풀리는 시점(5분 뒤)엔 이미 댓글이 사라져 있다.
+- `[sandbox:insight-drift]`(story #3620 AC5, 라이브 런북용) — ⚠️이 파일이 읽는 마커가
+  아니다(카탈로그 완전성을 위해 여기 등재만 함). 실제 소비처는
+  `insight_snapshots.py::_fetch_sandbox` — `create_container`의 `text` 인자가 아니라
+  발행된 `ChannelPostVersion.text`를 직접 읽고, 상태는 media_id 인코딩이 아니라
+  이미 영속된 `ChannelPublication.published_at`을 앵커로 재사용한다(이 함수 자체는
+  sandbox·facebook_sandbox·instagram_sandbox 3채널 인사이트 fetch 공용 dispatch라
+  채널별 media_id 형식에 얽매이지 않기 위함). 발행 후 60초 지나 reconcile하면 views가
+  고정폭(50) 감소해 stored(캡처 스냅샷)>live(재조회)로 mismatch가 실제로 선다 — 3620이
+  막혀 있던 "sandbox insights는 결정적이라 감소 재현 불가" 갭의 처방.
 
 마커는 서로 배타적으로 다루지 않는다(먼저 매치되는 것을 그대로 적용) — 실패 마커 3종은
 텍스트 안 어디에든, 컨테이너 마커 2종과 자유롭게 조합 가능(단, 컨테이너 마커 2종은

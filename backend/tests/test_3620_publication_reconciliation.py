@@ -9,12 +9,16 @@ from __future__ import annotations
 
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
 from tests.test_e4fc29fa_site_post_orchestration import _seed_org, _session_factory
-from tests.test_3497_insight_snapshots import _seed_channel_connection, _seed_channel_publication
+from tests.test_3497_insight_snapshots import (
+    _enable_sandbox_adapter,
+    _seed_channel_connection,
+    _seed_channel_publication,
+)
 
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
 
@@ -48,6 +52,40 @@ def _configure_secrets(monkeypatch):
     importlib.reload(crypto_module)
     yield
     importlib.reload(crypto_module)
+
+
+async def _seed_sandbox_publication_with_version_text(
+    session, *, org_id, connection_id, publication_id, text: str, published_at: datetime,
+):
+    """story #3620(페드루 지시 2026-09-10) — `[sandbox:insight-drift]` 마커 재현 전용.
+    `_seed_channel_publication`(test_3497)과 달리 version_id를 무작위 UUID로 두지
+    않고 실 `ChannelPostVersion`(+그 FK가 요구하는 `ChannelPostDraft`)을 심어
+    `_fetch_sandbox`가 실제로 그 text를 읽게 한다."""
+    from app.models.channel_post_draft import ChannelPostDraft
+    from app.models.channel_post_version import ChannelPostVersion
+    from app.models.channel_publication import ChannelPublication
+
+    draft = ChannelPostDraft(
+        id=uuid.uuid4(), org_id=org_id, work_item_id=uuid.uuid4(), channel="sandbox", connection_id=connection_id,
+    )
+    session.add(draft)
+    await session.commit()
+
+    version = ChannelPostVersion(
+        id=uuid.uuid4(), draft_id=draft.id, version=1, text=text, body_sha256="deadbeef",
+        author_member_id=uuid.uuid4(), author_kind="human",
+    )
+    session.add(version)
+    await session.commit()
+
+    pub = ChannelPublication(
+        id=publication_id, org_id=org_id, gate_id=uuid.uuid4(), version_id=version.id,
+        connection_id=connection_id, channel="sandbox", status="published",
+        external_id="sandbox-media-1", published_at=published_at,
+    )
+    session.add(pub)
+    await session.commit()
+    return pub
 
 
 async def _seed_captured_snapshot(session, *, org_id, publication_id, channel, normalized: dict):
@@ -340,5 +378,131 @@ async def test_reconciliation_mismatch_count_all_match_is_real_zero_not_dash():
             assert metric["value"] == 0
             assert metric["value"] is not None  # 「—」(None)와 0 혼동 방지 — 측정은 됐다.
             assert metric["value"] == pytest.approx(0.0)
+    finally:
+        await engine.dispose()
+
+
+# ─── [sandbox:insight-drift] 마커(story #3620, 페드루 지시 2026-09-10 — AC5 갭 처방) ──
+# `_fetch_sandbox`가 publication_id만으로 결정되는 순수함수라 "예약 캡처"와 "reconcile
+# 재조회"가 항상 같은 값을 내던(라이브에서 불일치 재현 불가) 갭의 처방 자체를 종단 검증
+# — `_fetch_for_snapshot`을 몽키패치하지 않고 실제 sandbox 경로를 그대로 태운다.
+# publication_id는 매번 새로 뽑는다(이 파일의 다른 테스트들과 같은 DB를 공유·행이
+# 테스트 사이에 안 비워지는 관례 — 고정 id는 재실행 시 PK 충돌) · baseline views는
+# 그 id로부터 실제 프로덕션 공식(seed=int(hex[:8],16)%500)을 그대로 재계산해 고정값을
+# 하드코딩하지 않는다 — drift 50을 뺀 뒤에도 0 밑으로 안 내려가도록 baseline>100만 채택.
+
+
+def _random_publication_id_with_min_baseline_views(min_views: int = 100) -> uuid.UUID:
+    for _ in range(200):
+        candidate = uuid.uuid4()
+        if int(candidate.hex[:8], 16) % 500 >= min_views:
+            return candidate
+    raise AssertionError("200회 시도에도 baseline views 조건을 만족하는 uuid4를 못 뽑음")
+
+
+@pytest.mark.anyio
+async def test_reconcile_sandbox_insight_drift_marker_past_threshold_creates_mismatch(_enable_sandbox_adapter):
+    """마커+발행 후 60초 경과 — live views가 baseline보다 50 작게 나와 stored(=baseline
+    그대로 캡처된 스냅샷) > live가 되어 mismatch가 실제로 선다."""
+    from app.services.publication_reconciliation import reconcile_publication
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, _ = await _seed_org(s)
+            conn = await _seed_channel_connection(s, org_id, channel="sandbox")
+            publication_id = _random_publication_id_with_min_baseline_views()
+            baseline_views = int(publication_id.hex[:8], 16) % 500
+            published_at = datetime.now(timezone.utc) - timedelta(seconds=61)
+            pub = await _seed_sandbox_publication_with_version_text(
+                s, org_id=org_id, connection_id=conn.id, publication_id=publication_id,
+                text="본문 [sandbox:insight-drift] 마커 포함", published_at=published_at,
+            )
+            # 캡처 스냅샷은 마커 도입 前(=drift 없는 baseline 그대로)을 흉내 — 예약
+            # 캡처가 발행 직후(60초 창 안)에 돌았다는 뜻과 같은 시나리오.
+            await _seed_captured_snapshot(
+                s, org_id=org_id, publication_id=pub.id, channel="sandbox",
+                normalized={
+                    "impressions": None, "reach": None, "views": baseline_views,
+                    "engagements": None, "clicks": None, "spend": None, "conversions": None,
+                },
+            )
+            member_id = uuid.uuid4()
+
+            record = await reconcile_publication(s, org_id=org_id, publication_id=pub.id, requested_by_member_id=member_id)
+
+            assert record.live_raw["views"] == baseline_views - 50
+            assert record.verdicts["views"] == "mismatch"
+            assert record.has_mismatch is True
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_reconcile_sandbox_insight_drift_marker_before_threshold_still_matches(_enable_sandbox_adapter):
+    """마커는 있지만 발행 후 60초가 아직 안 지났으면 drift 미적용 — live==baseline, match."""
+    from app.services.publication_reconciliation import reconcile_publication
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, _ = await _seed_org(s)
+            conn = await _seed_channel_connection(s, org_id, channel="sandbox")
+            publication_id = _random_publication_id_with_min_baseline_views()
+            baseline_views = int(publication_id.hex[:8], 16) % 500
+            published_at = datetime.now(timezone.utc)  # 방금 발행 — 60초 창 안
+            pub = await _seed_sandbox_publication_with_version_text(
+                s, org_id=org_id, connection_id=conn.id, publication_id=publication_id,
+                text="본문 [sandbox:insight-drift] 마커 포함", published_at=published_at,
+            )
+            await _seed_captured_snapshot(
+                s, org_id=org_id, publication_id=pub.id, channel="sandbox",
+                normalized={
+                    "impressions": None, "reach": None, "views": baseline_views,
+                    "engagements": None, "clicks": None, "spend": None, "conversions": None,
+                },
+            )
+            member_id = uuid.uuid4()
+
+            record = await reconcile_publication(s, org_id=org_id, publication_id=pub.id, requested_by_member_id=member_id)
+
+            assert record.live_raw["views"] == baseline_views
+            assert record.verdicts["views"] == "match"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_reconcile_sandbox_no_marker_never_drifts_even_after_threshold(_enable_sandbox_adapter):
+    """마커가 없으면 60초가 지나도 절대 안 바뀐다 — 뮤테이션 가드(마커 검사를 빼먹으면
+    이 테스트가 RED가 아니라, 위 두 테스트가 마커 유무와 무관하게 항상 drift가 걸려
+    이 테스트만 거꾸로 RED — 마커 조건 자체가 살아있는지 고정)."""
+    from app.services.publication_reconciliation import reconcile_publication
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, _ = await _seed_org(s)
+            conn = await _seed_channel_connection(s, org_id, channel="sandbox")
+            publication_id = _random_publication_id_with_min_baseline_views()
+            baseline_views = int(publication_id.hex[:8], 16) % 500
+            published_at = datetime.now(timezone.utc) - timedelta(seconds=61)
+            pub = await _seed_sandbox_publication_with_version_text(
+                s, org_id=org_id, connection_id=conn.id, publication_id=publication_id,
+                text="마커 없는 평범한 본문", published_at=published_at,
+            )
+            await _seed_captured_snapshot(
+                s, org_id=org_id, publication_id=pub.id, channel="sandbox",
+                normalized={
+                    "impressions": None, "reach": None, "views": baseline_views,
+                    "engagements": None, "clicks": None, "spend": None, "conversions": None,
+                },
+            )
+            member_id = uuid.uuid4()
+
+            record = await reconcile_publication(s, org_id=org_id, publication_id=pub.id, requested_by_member_id=member_id)
+
+            assert record.live_raw["views"] == baseline_views
+            assert record.verdicts["views"] == "match"
     finally:
         await engine.dispose()

@@ -197,15 +197,48 @@ def _normalize(*, declared_metrics: tuple[str, ...], values: dict[str, int]) -> 
     }
 
 
-def _fetch_sandbox(*, publication_id: uuid.UUID) -> dict[str, Any]:
+# story #3620(페드루 지시 2026-09-10 — AC5 갭 처방) — 이 스토리 자기점검이 확認한
+# 갭: _fetch_sandbox가 publication_id만으로 결정되는 순수함수라, 「예약 캡처」(발행
+# 직후 저장되는 스냅샷)와 「reconcile 재조회」(사람이 나중에 누르는 라이브 값)가 항상
+# 같은 값을 내 라이브에서 불일치를 재현할 방법이 없었다(카드 "갭" 절 — sandbox 마커로
+# "감소" 재현 불가). 이 마커는 발행 후 일정 시간이 지나면 views 한 축을 고정폭 축소해
+# 진짜 시간차 불일치(stored>live)를 만든다 — comment-2-deleted 마커와 같은 stateless-
+# 시간창 기법이되, 이 함수는 sandbox·facebook_sandbox·instagram_sandbox 3채널 공용
+# dispatch라 채널별 media_id 인코딩(그 마커가 쓰는 방식) 대신 이미 영속된
+# ChannelPublication.published_at을 앵커로 재사용한다(신규 컬럼·신규 서버 상태 0).
+_MARKER_INSIGHT_DRIFT = "[sandbox:insight-drift]"
+_INSIGHT_DRIFT_AFTER_SECONDS = 60
+_INSIGHT_DRIFT_DELTA = 50
+
+
+async def _fetch_sandbox(db: AsyncSession, *, publication_id: uuid.UUID) -> dict[str, Any]:
     """story 5b27b32f와 동일 취지 — 실 provider 없이 정규화·evidence 파이프라인
-    전체를 라이브로 실측하기 위한 결정적 합성값(publication_id 기반, 매 호출 동일
-    값 — 진짜 API처럼 "그때그때 값이 바뀌는" 것을 흉내 내지 않는다, 재현성 우선)."""
+    전체를 라이브로 실측하기 위한 결정적 합성값(publication_id 기반, 마커 없으면
+    매 호출 동일 값 — 진짜 API처럼 "그때그때 값이 바뀌는" 것을 흉내 내지 않는다,
+    재현성 우선). `[sandbox:insight-drift]` 마커(story #3620)가 있으면 위 예외 —
+    자세한 설명은 바로 위 모듈 주석."""
     seed = int(publication_id.hex[:8], 16)
     raw = {
         "impressions": seed % 1000, "reach": seed % 700, "views": seed % 500,
         "engagements": seed % 100, "clicks": seed % 50, "spend": 0, "conversions": seed % 5,
     }
+
+    pub_row = (await db.execute(
+        select(ChannelPublication.published_at, ChannelPublication.version_id)
+        .where(ChannelPublication.id == publication_id)
+    )).first()
+    if pub_row is not None and pub_row.published_at is not None and pub_row.version_id is not None:
+        version_text = (await db.execute(
+            select(ChannelPostVersion.text).where(ChannelPostVersion.id == pub_row.version_id)
+        )).scalar_one_or_none()
+        if (
+            version_text is not None
+            and _MARKER_INSIGHT_DRIFT in version_text
+            and raw["views"] > 0
+            and datetime.now(timezone.utc) >= pub_row.published_at + timedelta(seconds=_INSIGHT_DRIFT_AFTER_SECONDS)
+        ):
+            raw = {**raw, "views": max(0, raw["views"] - _INSIGHT_DRIFT_DELTA)}
+
     return {"raw": raw, "values": raw}
 
 
@@ -521,7 +554,7 @@ async def _fetch_for_snapshot(db: AsyncSession, snapshot: InsightSnapshot) -> di
     전제(호출자 `process_due_insight_snapshots`가 그 판정을 한다 — 여기선 순수 dispatch
     만, "이 채널을 아는지 모르는지" 판단을 두 곳에 중복 안 둔다)."""
     if snapshot.channel == "sandbox":
-        return _fetch_sandbox(publication_id=snapshot.publication_id)
+        return await _fetch_sandbox(db, publication_id=snapshot.publication_id)
     if snapshot.channel == "hosted_site":
         return await _fetch_hosted_site(db, org_id=snapshot.org_id, publication_id=snapshot.publication_id)
     if snapshot.channel == "threads":
@@ -539,7 +572,7 @@ async def _fetch_for_snapshot(db: AsyncSession, snapshot: InsightSnapshot) -> di
     # 'failed'였다). 두 sandbox 채널 다 여기서 명시 — 어댑터 선언과 dispatch를
     # 짝으로 유지한다(AC3 가드 test_3696가 이 짝을 구조적으로 계속 대조한다).
     if snapshot.channel in ("facebook_sandbox", "instagram_sandbox"):
-        return _fetch_sandbox(publication_id=snapshot.publication_id)
+        return await _fetch_sandbox(db, publication_id=snapshot.publication_id)
     raise InsightFetchError(
         error_code="INSIGHT_CHANNEL_NOT_IMPLEMENTED",
         message=f"insight_metrics는 선언됐지만 fetch dispatch가 없습니다: {snapshot.channel}",
