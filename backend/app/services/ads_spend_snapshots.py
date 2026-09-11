@@ -88,16 +88,29 @@ def classify_insight_source(channel: str) -> str:
 
 async def schedule_ads_spend_snapshots(
     db: AsyncSession, *, org_id: uuid.UUID, work_item_id: uuid.UUID, publication_id: uuid.UUID,
-    channel: str, anchor_at: datetime,
+    channel: str, anchor_at: datetime, ends_at: datetime | None = None,
 ) -> None:
-    """boost_start 성공 직후(같은 트랜잭션, commit은 호출자 몫 — insight_snapshots.py
-    ::schedule_insight_snapshots와 동형 계약) **첫 캡처(anchor+1d) 한 건만** 연다
-    — 이후 매 24h 반복은 `process_due_ads_spend_snapshots`가 캡처마다 스스로
-    이어 예약한다(PR4a, 아래 함수 docstring 참고). `anchor_at`은 호출자가 이미
-    확정한 시각(run.started_at)을 그대로 넘긴다 — 재처리마다 새로 재면
-    UNIQUE(publication_id, due_at) 멱등이 무력화되는 것도 동형(그 함수 docstring
-    그대로)."""
+    """boost_start 성공 직후·resume 성공 직후(같은 트랜잭션, commit은 호출자 몫 —
+    insight_snapshots.py::schedule_insight_snapshots와 동형 계약) **다음 캡처
+    한 건만**(anchor+24h) 연다 — 이후 매 24h 반복은 `process_due_ads_spend_
+    snapshots`가 캡처마다 스스로 이어 예약한다(PR4a, 아래 함수 docstring 참고).
+
+    story #3809(PR 4a 정정, 카디르 QA 실측 2026-09-11 21:47Z) — resume 재사용
+    처방. pause로 이어 예약 체인이 소진(pending 0)된 뒤 resume해도 이 함수가
+    resume 경로에서 안 불리면(원래 boost_start 1곳에서만 호출) 재예약이
+    영원히 0 — 재개된 boost는 캡처도 상한 판정도 다시는 안 도는, 3806이
+    처방한 것과 같은 "조용히 끊긴 사슬" 클래스. `ends_at`을 넘겼으면(resume이
+    이미 종료 시점 이후 일어난 드문 경우) 지어내지 않고 스킵(0건) — boost_
+    start 호출부도 극단적으로 짧은 기간(1일 미만)이면 이 경계에 걸릴 수 있어
+    항상 넘겨받는다.
+
+    `anchor_at`은 호출자가 이미 확정한 시각(boost_start의 run.started_at·
+    resume의 `now`)을 그대로 넘긴다 — 재처리마다 새로 재면 UNIQUE(publication_id,
+    due_at) 멱등이 무력화되는 것도 동형(insight_snapshots.py 동형 함수
+    docstring 그대로)."""
     due_at = anchor_at + _INITIAL_SNAPSHOT_OFFSET
+    if ends_at is not None and due_at > ends_at:
+        return
     stmt = pg_insert(InsightSnapshot).values(
         id=uuid.uuid4(), org_id=org_id, work_item_id=work_item_id, publication_id=publication_id,
         publication_kind="channel_publication", channel=channel, external_id=None, due_at=due_at,

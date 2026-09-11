@@ -374,6 +374,80 @@ async def test_pause_after_capture_stops_further_scheduling():
 
 
 @pytest.mark.anyio
+async def test_resume_after_chain_exhausted_reschedules_next_capture():
+    """story #3809(Phase3·3-7 PR 4a 정정, 카디르 QA 실측 2026-09-11 21:47Z) —
+    pause로 이어 예약 체인이 소진(pending 0)된 뒤 resume해도 재예약이 영원히
+    0이던 결함(schedule_ads_spend_snapshots 호출부가 boost_start 1곳뿐)의
+    실물 재현+처방 확認. 위 test_pause_after_capture_stops_further_scheduling
+    과 동형으로 체인을 소진시킨 뒤, resume이 재예약을 살리고, 두 번째
+    pause→resume(체인이 이미 살아 있는 채)에서는 여벌을 더 얹지 않는지(정확히
+    1건 유지)까지 pin.
+    뮤테이션 대상: resume 분기의 재예약 호출을 걷으면 resume 뒤 pending이
+    여전히 0이라 아래 첫 단언이 RED."""
+    from app.models.ads_boost_run import AdsBoostRun
+    from app.services.ads_boost_execution import request_ads_boost_pause, request_ads_boost_resume
+    from app.services.ads_spend_snapshots import process_due_ads_spend_snapshots
+    from app.services.publication_command import process_due_publication_commands
+    from sqlalchemy import select
+    from tests.test_e4fc29fa_site_post_orchestration import _session_factory
+
+    engine, Session, org_id, project_id, owner_id, gate_id = await _setup_approved_gate(await _session_factory())
+    try:
+        await _start_boost(Session, org_id, gate_id, owner_id)
+
+        # 체인 소진 — 1번째 캡처 처리 후 곧바로 중지, 그 다음 예약(pending 1건)도
+        # 강제로 due시켜 처리해 pending을 0으로 만든다(위 테스트와 동형 절차).
+        async with Session() as s:
+            await _make_spend_snapshots_due(s, org_id, gate_id)
+        async with Session() as s:
+            await process_due_ads_spend_snapshots(s)
+
+        async with Session() as s:
+            await request_ads_boost_pause(s, org_id=org_id, gate_id=gate_id, requester_member_id=owner_id)
+        async with Session() as s:
+            assert (await process_due_publication_commands(s))["completed"] == 1
+
+        async with Session() as s:
+            await _make_spend_snapshots_due(s, org_id, gate_id)
+        async with Session() as s:
+            await process_due_ads_spend_snapshots(s)
+
+        async with Session() as s:
+            rows = await _get_spend_snapshots(s, org_id, gate_id)
+        assert len(rows) == 2 and all(r.status == "captured" for r in rows), rows  # 체인 소진(pending 0) 확認.
+
+        # resume — 소진된 체인이 다시 열려야 한다(pending 정확히 1).
+        async with Session() as s:
+            await request_ads_boost_resume(s, org_id=org_id, gate_id=gate_id, requester_member_id=owner_id)
+        async with Session() as s:
+            assert (await process_due_publication_commands(s))["completed"] == 1
+        async with Session() as s:
+            run = (await s.execute(select(AdsBoostRun).where(AdsBoostRun.gate_id == gate_id))).scalar_one()
+            assert run.status == "running"
+            rows = await _get_spend_snapshots(s, org_id, gate_id)
+        pending = [r for r in rows if r.status == "pending"]
+        assert len(pending) == 1, "resume 뒤 체인이 재예약돼야 한다(PO 처방)"
+
+        # 두 번째 pause→resume 사이클 — 이번엔 체인이 이미 살아 있으므로(pending
+        # 1건) resume이 여벌을 더 얹으면 안 된다(정확히 1건 유지).
+        async with Session() as s:
+            await request_ads_boost_pause(s, org_id=org_id, gate_id=gate_id, requester_member_id=owner_id)
+        async with Session() as s:
+            assert (await process_due_publication_commands(s))["completed"] == 1
+        async with Session() as s:
+            await request_ads_boost_resume(s, org_id=org_id, gate_id=gate_id, requester_member_id=owner_id)
+        async with Session() as s:
+            assert (await process_due_publication_commands(s))["completed"] == 1
+
+        async with Session() as s:
+            rows = await _get_spend_snapshots(s, org_id, gate_id)
+        pending = [r for r in rows if r.status == "pending"]
+        assert len(pending) == 1, "이미 pending이 있으면 resume이 여벌을 더 얹으면 안 된다"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_spend_endpoint_serializes_cap_reached_at():
     """§7 실측 열 「상한 초과 0건」의 장치 — /spend 응답 직렬화 확認(PR8이 겪은
     "컬럼은 있는데 응답엔 없다" 클래스 재발 방지, 이번엔 자체 pin)."""
