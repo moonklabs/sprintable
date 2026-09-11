@@ -3,6 +3,8 @@
 // story #3376(Phase1·마케팅운영) — 채널 연결 화면. content/page.test.tsx·organization/
 // connectors/page.test.tsx와 동형 harness(useDashboardContext 목·NextIntlClientProvider·
 // createRoot·stubFetch). useSearchParams는 next/navigation 자체를 목으로 대체한다.
+import { existsSync } from 'fs';
+import { join } from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -1800,6 +1802,17 @@ describe('OrganizationChannelsPage — 광고 계정 연결 「선택 대기」(
     { channel: 'ads_sandbox', display_name: 'Ads Sandbox', credential_kind: 'oauth', kind: 'social' },
   ];
 
+  // story #3806 PR 7(페드루 PO 리뷰 2026-09-11 14:16Z 실측 — 진짜 결함) — 위 stubFetch가
+  // url.includes()로 global.fetch를 통째로 가로채기 때문에, 아래 테스트들은 실제 Next.js
+  // BFF 라우트 파일이 존재하는지와 무관하게 항상 초록이었다(그 파일이 없으면 브라우저에서
+  // 404가 났는데도 이 스위트는 못 잡음 — 실측: meta-ads/select/route.ts가 처음엔 아예
+  // 없었다). fetch mock으로는 못 잡는 이 갭을 route-ia-cleanup-3167.test.ts와 동형인
+  // existsSync 핀으로 별도 고정한다(파일이 사라지면 이 한 줄이 즉시 RED).
+  it('⭐meta-ads/select BFF 라우트 파일이 실제로 존재한다(facebook/select와 동형 — fetch mock이 못 잡는 갭)', () => {
+    const routeFile = join(__dirname, '../../../api/organizations/[id]/channel-connections/meta-ads/select/route.ts');
+    expect(existsSync(routeFile)).toBe(true);
+  });
+
   // Facebook describe 블록의 selectPendingQuery와 동형(그 함수는 그 describe
   // 스코프에 갇혀 있어 재사용 불가 — 새 이름으로 로컬 복제, candidate 축만 account_id).
   function selectPendingQuery(
@@ -1889,6 +1902,31 @@ describe('OrganizationChannelsPage — 광고 계정 연결 「선택 대기」(
       .toBe(koMessages.channelConnect.channelConnectAdAccountSelectInvalidAccount);
     const submitBtn = container.querySelector('[data-testid="channel-connect-ad-account-select-submit"]') as HTMLButtonElement;
     expect(submitBtn.disabled).toBe(true);
+  });
+
+  // story #3806 PR 7(페드루 PO 리뷰 2026-09-11 14:16Z 실측 — 실사고) — BFF 라우트가
+  // 없어 404가 났을 때(또는 그 어떤 알려진 코드도 아닌 실패) 카드가 «눌렀는데 아무 일도
+  // 없음»으로 남던 결함의 회귀 가드. body에 error.code가 없는 실패(HTML 404·5xx류와
+  // 같은 급)를 흉내 — 라디오 목록·선택은 그대로 유지되고(재시도 가능) 오류 문장이 뜬다.
+  it('⭐ads_sandbox — 알려진 코드가 아닌 실패(404 등)는 빈 반응이 아니라 오류 문장을 보이고 선택·목록을 유지한다', async () => {
+    useSearchParamsMock.mockReturnValue(selectPendingQuery(
+      [{ account_id: 'a1', name: 'X' }], {}, 'ads_sandbox',
+    ));
+    stubFetch({
+      connections: [], availableChannels: ADS_SANDBOX_AVAILABLE,
+      onMetaAdsSelect: () => ({ status: 404, body: {} }),
+    });
+    await mount('owner');
+    const radioA1 = container.querySelector('input[type="radio"][value="a1"]') as HTMLInputElement;
+    await act(async () => { radioA1.click(); });
+    await act(async () => { (container.querySelector('[data-testid="channel-connect-ad-account-select-submit"]') as HTMLButtonElement).click(); });
+    await flush();
+    expect(container.querySelector('[data-testid="channel-connect-select-unknown-error"]')?.textContent)
+      .toBe(koMessages.channelConnect.channelConnectSelectUnknownError);
+    // 목록·선택 유지 — 재시도 가능(빈 반응이 아니되 라디오를 다시 고르게 강요하지 않는다).
+    expect(radioA1.checked).toBe(true);
+    const submitBtn = container.querySelector('[data-testid="channel-connect-ad-account-select-submit"]') as HTMLButtonElement;
+    expect(submitBtn.disabled).toBe(false);
   });
 
   it('member는 ads_sandbox 선택 대기 상태에서도 라디오 목록이 아니라 owner 전용 사유만 본다(광고 계정 채널 낱말표 등재 확認)', async () => {

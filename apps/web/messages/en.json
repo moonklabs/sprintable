@@ -2054,6 +2054,7 @@
     "channelConnectAdAccountSelectInstruction": "Choose the ad account to connect.",
     "channelConnectAdAccountNoAccounts": "No ad accounts available to connect — this account manages no ad account, or ad account list permission wasn't granted.",
     "channelConnectAdAccountSelectInvalidAccount": "That ad account can't be connected right now — choose a different ad account.",
+    "channelConnectSelectUnknownError": "Couldn't save your selection — please try again.",
     "channelConnectOwnerOnlyReason": "Only an owner can connect a {channel} account.",
     "channelThreads": "Threads",
     "channelLabelHostedSite": "Sprintable blog",

@@ -2054,6 +2054,7 @@
     "channelConnectAdAccountSelectInstruction": "연결할 광고 계정을 고르세요.",
     "channelConnectAdAccountNoAccounts": "연결할 수 있는 광고 계정이 없습니다 — 이 계정이 관리하는 광고 계정이 없거나, 광고 계정 목록 권한을 허용하지 않았습니다.",
     "channelConnectAdAccountSelectInvalidAccount": "그 광고 계정은 지금 연결할 수 없습니다 — 다른 광고 계정을 고르세요.",
+    "channelConnectSelectUnknownError": "선택을 저장하지 못했습니다 — 다시 시도해 주세요.",
     "channelConnectOwnerOnlyReason": "{channel} 계정 연결은 소유자만 할 수 있습니다.",
     "channelThreads": "Threads",
     "channelLabelHostedSite": "Sprintable 블로그",

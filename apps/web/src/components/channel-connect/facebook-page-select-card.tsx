@@ -48,6 +48,12 @@ const INVALID_PAGE_CODE = 'CHANNEL_OAUTH_PENDING_SELECTION_INVALID_PAGE';
 // meta_ads_select_account_endpoint)의 대응 코드(Page의 INVALID_PAGE와 동형, 값만
 // 다름).
 const INVALID_ACCOUNT_CODE = 'CHANNEL_OAUTH_PENDING_SELECTION_INVALID_ACCOUNT';
+// story #3806 PR 7(페드루 PO 리뷰 2026-09-11 14:16Z 실측) — select 호출이 위 알려진
+// 코드 중 어느 것도 아닌 응답(라우트 부재 404 HTML·5xx·네트워크 예외)으로 실패하면
+// 이전엔 errorCode가 null로 남아 카드가 아무 반응 없이 그대로였다(「눌렀는데 아무 일도
+// 없음」 — §22-15② "빈 반응 금지"와 같은 급의 결함). 알려진 코드가 하나도 안 맞을 때
+// 이 sentinel로 떨어져 최소한 사람이 알아채고 다시 시도할 수 있게 한다.
+const GENERIC_ERROR_CODE = 'CHANNEL_SELECT_UNKNOWN_ERROR';
 
 // story #3806 PR 7 — 이 카드가 보는 채널이 Page(facebook류)인지 광고 계정
 // (meta_ads/ads_sandbox)인지는 channel 문자열로만 가른다(isFacebookOauthChannel과
@@ -128,11 +134,11 @@ export function FacebookPageSelectCard({
         return;
       }
       const errBody = (await res.json().catch(() => null)) as { error?: { code?: string } } | null;
-      const code = errBody?.error?.code ?? null;
+      const code = errBody?.error?.code ?? GENERIC_ERROR_CODE;
       setErrorCode(code);
       if (code === invalidSelectionCode) setSelectedId(null);
     } catch {
-      setErrorCode(null);
+      setErrorCode(GENERIC_ERROR_CODE);
     } finally {
       setSubmitting(false);
     }
@@ -174,6 +180,14 @@ export function FacebookPageSelectCard({
           data-testid={adAccount ? 'channel-connect-ad-account-select-invalid-account' : 'channel-connect-facebook-select-invalid-page'}
         >
           {t(adAccount ? 'channelConnectAdAccountSelectInvalidAccount' : 'channelConnectFacebookSelectInvalidPage')}
+        </p>
+      ) : null}
+      {/* story #3806 PR 7(페드루 PO 리뷰 2026-09-11 14:16Z 실측) — 알려진 코드 중
+          어느 것도 아닌 실패(BFF 라우트 부재 404·5xx·네트워크 예외)의 최소 안내.
+          라디오 목록은 그대로 두고(선택 유지) 다시 「연결」을 누르면 재시도된다. */}
+      {errorCode === GENERIC_ERROR_CODE ? (
+        <p className="text-xs text-destructive" data-testid="channel-connect-select-unknown-error">
+          {t('channelConnectSelectUnknownError')}
         </p>
       ) : null}
       <p className="text-xs font-medium text-muted-foreground">{t(instructionKey)}</p>
