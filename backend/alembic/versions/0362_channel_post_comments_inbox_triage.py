@@ -10,9 +10,13 @@ additive로 얹는다.
   동형, 값만 담는 참조).
 - linked_story_id: nullable — 「작업으로 전환」의 양방향 링크(그라운딩 ③).
 
-Revision ID: 0361
+Revision ID: 0362
 Revises: 0360
 Create Date: 2026-09-11
+
+CI 정정(2026-09-11, sibling-PR revision collision guard) — 원래 0361로 지었으나
+PR #4174(gate_sealed_ads_boost)도 같은 시각 0361을 써 충돌 — 0362로 재번호(다른
+필드/로직 변경 없음, down_revision은 그대로 0360).
 """
 from __future__ import annotations
 
@@ -20,7 +24,7 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision = "0361"
+revision = "0362"
 down_revision = "0360"
 branch_labels = None
 depends_on = None
