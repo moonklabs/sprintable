@@ -96,7 +96,7 @@ describe('OrgCostSummaryCard(story #3809, PR3)', () => {
     stubFetchFailed(500);
     await act(async () => { root.render(wrap(<OrgCostSummaryCard orgId="org-1" />)); });
     await flush();
-    expect(container.querySelector('[data-testid="org-cost-summary-card-failed"]')?.textContent).toBe('비용 원장을 불러오지 못했습니다.');
+    expect(container.querySelector('[data-testid="org-cost-summary-card-failed"]')?.textContent).toBe('비용 요약을 불러오지 못했습니다.');
   });
 
   it('승인된 광고 홍보 0건 — 「없습니다」만, 0을 숫자로 안 그린다', async () => {

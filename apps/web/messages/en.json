@@ -5318,7 +5318,7 @@
     "columnD7": "D+7",
     "columnComments": "Comments",
     "orgCostSummaryTitle": "Organization cost summary",
-    "orgCostLoadFailed": "Failed to load the cost ledger.",
+    "orgCostLoadFailed": "Failed to load the cost summary.",
     "orgCostAdsNoApprovedBoosts": "No approved ad boosts.",
     "orgCostAdsApprovedCount": "{count} approved ad boost(s)",
     "orgCostAdsCurrencyMixed": "Currencies differ, so totals aren't shown.",
