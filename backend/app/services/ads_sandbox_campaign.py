@@ -55,3 +55,16 @@ async def set_campaign_status(
     client: httpx.AsyncClient, *, campaign_id: str, access_token: str, status: str,
 ) -> None:
     return  # sandbox — 항상 성공. pause-delayed 판정은 호출부 몫(위 모듈 docstring).
+
+
+# story #3806(Phase3·3-2 PR4, 페드루 PO 確定 2026-09-11) — 결정적 고정값(ads_sandbox_
+# oauth.py::list_ad_accounts의 「이름·id는 절대 안 바뀐다」 원칙과 동형) — 해시 유도
+# 대신 고정 상수를 쓴 이유는 테스트가 정확한 값을 assert할 수 있게(해시면 테스트가
+# 같은 계산을 재구현해야 한다, 취약).
+_FIXED_SPEND_MINOR = 12_345
+
+
+async def get_campaign_spend_minor(
+    client: httpx.AsyncClient, *, campaign_id: str, access_token: str,
+) -> int:
+    return _FIXED_SPEND_MINOR

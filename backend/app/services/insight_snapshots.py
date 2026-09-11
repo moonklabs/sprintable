@@ -688,7 +688,15 @@ async def _finalize_snapshot_write(db: AsyncSession, snapshot: InsightSnapshot, 
 async def process_due_insight_snapshots(db: AsyncSession, *, now: datetime | None = None) -> dict[str, int]:
     """story #3497 그라운딩④ — `process_due_publication_commands`와 동형 SKIP LOCKED
     2단계 커밋(클레임 commit → 개별 처리 commit/rollback 격리). due_at이 도래한
-    status='pending' 스냅샷을 배치로 집어 처리한다."""
+    status='pending' 스냅샷을 배치로 집어 처리한다.
+
+    story #3806(Phase3·3-2 PR4, 페드루 PO 確定 2026-09-11) — `channel IN ('meta_ads',
+    'ads_sandbox')`는 이 루프 밖(ads_spend_snapshots.py::process_due_ads_spend_
+    snapshots가 전담, 「다른 파이프라인」— channel_adapters.py 그 두 어댑터
+    docstring 참고). 제외 안 하면 이 루프가 먼저 집어 insight_metrics=() 게이트에
+    걸려 즉시 'unsupported'로 종결시켜 버린다(두 워커 tick이 같은 pending 행을
+    경합하는 것도 별개 문제)."""
+    from app.services.ads_spend_snapshots import _PAID_CHANNELS
     from app.services.channel_adapters import CHANNEL_ADAPTERS
     from app.services.publication_command import classify_failure_kind, FAILURE_KIND_CONNECTION, FAILURE_KIND_TRANSIENT
 
@@ -696,6 +704,7 @@ async def process_due_insight_snapshots(db: AsyncSession, *, now: datetime | Non
     rows = (await db.execute(
         select(InsightSnapshot).where(
             InsightSnapshot.status == "pending", InsightSnapshot.due_at <= now,
+            InsightSnapshot.channel.notin_(_PAID_CHANNELS),
         ).order_by(InsightSnapshot.due_at.asc())
         .limit(BATCH_SIZE)
         .with_for_update(skip_locked=True)
