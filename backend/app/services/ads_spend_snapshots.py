@@ -36,6 +36,18 @@ _SNAPSHOT_OFFSETS = (timedelta(days=1), timedelta(days=7))
 BATCH_SIZE = 50
 
 
+def organic_snapshots_only(stmt):
+    """story #3806(Phase3·3-2 PR4, 페드루 PO 追加 確定 2026-09-11) — paid 채널
+    제외를 쓰는 **유일한** 자리. `insight_snapshots.py`의 두 소비처(캡처 루프·조회
+    목록)가 각자 `.where(channel.notin_(_PAID_CHANNELS))`를 따로 적었을 때 실측
+    결함(조회 목록이 그 절을 빠뜨려 paid 행이 섞여 나옴)이 실제로 났다 — 상수 하나
+    공유로는 "적용을 잊는" 클래스 자체를 못 막는다(_PAID_CHANNELS는 이미 공유였다,
+    깜빡한 건 «호출» 쪽). 이 술어 함수 하나로 모아 앞으로의 세 번째·네 번째
+    소비처도 이 함수를 부르는 것만으로 자동으로 막히게 한다 — `.where()`를 손으로
+    다시 쓰지 않는 것 자체가 강제다."""
+    return stmt.where(InsightSnapshot.channel.notin_(_PAID_CHANNELS))
+
+
 async def schedule_ads_spend_snapshots(
     db: AsyncSession, *, org_id: uuid.UUID, work_item_id: uuid.UUID, publication_id: uuid.UUID,
     channel: str, anchor_at: datetime,
