@@ -96,6 +96,9 @@ function stubFetch(opts: {
   onMeteringKey?: () => { status: number; body?: unknown };
   // story #3549 — Facebook Page 「선택 대기」 select 호출.
   onFacebookSelect?: (body: unknown) => { status: number; body: unknown; nextConnections?: unknown[] };
+  // story #3806 PR 7 — meta_ads/ads_sandbox 「선택 대기」 select 호출(별도 엔드포인트,
+  // onFacebookSelect와 동형 관례).
+  onMetaAdsSelect?: (body: unknown) => { status: number; body: unknown; nextConnections?: unknown[] };
   // story #3583 — GA4 인증/속성 목록/속성 선택/해제. select·disconnect 성공 뒤
   // onRefresh()가 다시 부르는 GET이 새 상태를 보게 하려면 nextMeasurementConnections로
   // 교체한다(onFacebookSelect의 nextConnections와 같은 관례).
@@ -178,6 +181,19 @@ function stubFetch(opts: {
         status: 201,
         body: { id: 'conn-fb-1', channel: 'facebook', account_id: body.page_id, account_label: '선택된 페이지', status: 'active', credential_kind: 'oauth' },
         nextConnections: [{ ...CONNECTION_ACTIVE, id: 'conn-fb-1', channel: 'facebook', account_id: body.page_id, account_label: '선택된 페이지' }],
+      };
+      const ok = result.status < 400;
+      if (ok && result.nextConnections) connections = result.nextConnections;
+      return { ok, status: result.status, json: async () => (ok ? { data: result.body } : { data: null, error: (result.body as { error?: unknown })?.error ?? result.body }) } as Response;
+    }
+    // story #3806 PR 7 — meta_ads/ads_sandbox 「선택 대기」 select(별도 엔드포인트,
+    // 위 facebook/select와 동형 관례 · candidate 축은 account_id).
+    if (url.includes('/channel-connections/meta-ads/select') && init?.method === 'POST') {
+      const body = JSON.parse(String(init.body ?? '{}'));
+      const result = opts.onMetaAdsSelect?.(body) ?? {
+        status: 201,
+        body: { id: 'conn-ads-1', channel: 'ads_sandbox', account_id: body.account_id, account_label: '선택된 광고 계정', status: 'active', credential_kind: 'oauth' },
+        nextConnections: [{ ...CONNECTION_ACTIVE, id: 'conn-ads-1', channel: 'ads_sandbox', account_id: body.account_id, account_label: '선택된 광고 계정' }],
       };
       const ok = result.status < 400;
       if (ok && result.nextConnections) connections = result.nextConnections;
@@ -1771,6 +1787,118 @@ describe('OrganizationChannelsPage — Facebook Page 연결(story #3549)', () =>
     expect(selectCalled).toBe(true);
     expect(container.querySelector('[data-testid="channel-connect-facebook-select"]')).toBeNull();
     expect(container.textContent).toContain('Sandbox Page 1');
+  });
+});
+
+// story #3806 PR 7(페드루 PO 確定 2026-09-11, 「적기만 아니라 3806 첫 출시 결함」) —
+// meta_ads/ads_sandbox도 콜백이 광고 계정 2개 이상이면 같은 「선택 대기」 갈래를
+// 타는데(channel_connections.py `_meta_ads_channel_connection_callback`), 이 화면의
+// 선택 카드가 isFacebookOauthChannel로만 게이트돼 있어 안 뜨던 결함의 회귀 가드
+// (실 Meta 계정도 보통 계정이 여럿이라 라이브에서도 막히는 결함이었다).
+describe('OrganizationChannelsPage — 광고 계정 연결 「선택 대기」(story #3806 PR 7)', () => {
+  const ADS_SANDBOX_AVAILABLE = [
+    { channel: 'ads_sandbox', display_name: 'Ads Sandbox', credential_kind: 'oauth', kind: 'social' },
+  ];
+
+  // Facebook describe 블록의 selectPendingQuery와 동형(그 함수는 그 describe
+  // 스코프에 갇혀 있어 재사용 불가 — 새 이름으로 로컬 복제, candidate 축만 account_id).
+  function selectPendingQuery(
+    candidates: { account_id: string; name: string }[], extra: Record<string, string> = {}, channel = 'ads_sandbox',
+  ) {
+    return new URLSearchParams({
+      select_pending: channel, pending_id: 'pending-1',
+      candidates: JSON.stringify(candidates), ...extra,
+    });
+  }
+
+  it('⭐ads_sandbox — select_pending=ads_sandbox면 계정 2개 라디오 목록(이름+id)이 뜬다(정정 前엔 isFacebookOauthChannel 게이트에 막혀 0)', async () => {
+    useSearchParamsMock.mockReturnValue(selectPendingQuery(
+      [{ account_id: 'sandbox-ads-account-1', name: 'Sandbox Ads Account 1' }, { account_id: 'sandbox-ads-account-2', name: 'Sandbox Ads Account 2' }],
+      {}, 'ads_sandbox',
+    ));
+    stubFetch({ connections: [], availableChannels: ADS_SANDBOX_AVAILABLE });
+    await mount('owner');
+    const select = container.querySelector('[data-testid="channel-connect-ad-account-select"]')!;
+    expect(select).not.toBeNull();
+    expect(select.textContent).toContain('Sandbox Ads Account 1');
+    expect(select.textContent).toContain('sandbox-ads-account-1');
+    expect(select.textContent).toContain('Sandbox Ads Account 2');
+    const radios = select.querySelectorAll('input[type="radio"]') as NodeListOf<HTMLInputElement>;
+    expect(radios.length).toBe(2);
+    // 「광고 계정」 낱말 분기(페드루 PO 요청 — 페이지/계정 문구 분기) — Facebook Page
+    // 낱말이 아니라 광고 계정 낱말이 뜬다.
+    expect(select.textContent).toContain(koMessages.channelConnect.channelConnectAdAccountSelectInstruction);
+    expect(select.textContent).not.toContain(koMessages.channelConnect.channelConnectFacebookSelectInstruction);
+  });
+
+  it('⭐ads_sandbox — 계정을 고르면 `meta-ads/select`(account_id 축)로 제출되고 같은 자리가 연결 행으로 바뀐다', async () => {
+    useSearchParamsMock.mockReturnValue(selectPendingQuery(
+      [{ account_id: 'sandbox-ads-account-1', name: 'Sandbox Ads Account 1' }], {}, 'ads_sandbox',
+    ));
+    let selectedBody: unknown = null;
+    stubFetch({
+      connections: [], availableChannels: ADS_SANDBOX_AVAILABLE,
+      onMetaAdsSelect: (body) => {
+        selectedBody = body;
+        return {
+          status: 201,
+          body: { id: 'conn-ads-1', channel: 'ads_sandbox', account_id: 'sandbox-ads-account-1', account_label: 'Sandbox Ads Account 1', status: 'active', credential_kind: 'oauth' },
+          nextConnections: [{ ...CONNECTION_ACTIVE, id: 'conn-ads-1', channel: 'ads_sandbox', account_id: 'sandbox-ads-account-1', account_label: 'Sandbox Ads Account 1' }],
+        };
+      },
+    });
+    await mount('owner');
+    const radio = container.querySelector('input[type="radio"][value="sandbox-ads-account-1"]') as HTMLInputElement;
+    await act(async () => { radio.click(); });
+    const submitBtn = container.querySelector('[data-testid="channel-connect-ad-account-select-submit"]') as HTMLButtonElement;
+    expect(submitBtn.disabled).toBe(false);
+    await act(async () => { submitBtn.click(); });
+    await flush();
+    // stubFetch는 url.includes('/channel-connections/meta-ads/select')일 때만
+    // onMetaAdsSelect를 태운다 — page_id가 아니라 account_id 바디로 제출한다는
+    // 증거(facebook/select와 다른 계약).
+    expect(selectedBody).toEqual({ pending_id: 'pending-1', account_id: 'sandbox-ads-account-1' });
+    expect(container.querySelector('[data-testid="channel-connect-ad-account-select"]')).toBeNull();
+    expect(container.textContent).toContain('Sandbox Ads Account 1');
+  });
+
+  it('ads_sandbox — 후보 0개는 광고 계정 전용 문구(페이지 문구 아님)를 보인다', async () => {
+    useSearchParamsMock.mockReturnValue(selectPendingQuery([], {}, 'ads_sandbox'));
+    stubFetch({ connections: [], availableChannels: ADS_SANDBOX_AVAILABLE });
+    await mount('owner');
+    expect(container.querySelector('[data-testid="channel-connect-ad-account-no-accounts"]')?.textContent)
+      .toBe(koMessages.channelConnect.channelConnectAdAccountNoAccounts);
+    expect(container.querySelector('[data-testid="channel-connect-ad-account-select"]')).toBeNull();
+  });
+
+  it('ads_sandbox — select 실패 INVALID_ACCOUNT는 광고 계정 전용 문구를 보이며 선택이 해제된다', async () => {
+    useSearchParamsMock.mockReturnValue(selectPendingQuery(
+      [{ account_id: 'a1', name: 'X' }, { account_id: 'a2', name: 'Y' }], {}, 'ads_sandbox',
+    ));
+    stubFetch({
+      connections: [], availableChannels: ADS_SANDBOX_AVAILABLE,
+      onMetaAdsSelect: () => ({ status: 400, body: { error: { code: 'CHANNEL_OAUTH_PENDING_SELECTION_INVALID_ACCOUNT' } } }),
+    });
+    await mount('owner');
+    const radioA1 = container.querySelector('input[type="radio"][value="a1"]') as HTMLInputElement;
+    await act(async () => { radioA1.click(); });
+    await act(async () => { (container.querySelector('[data-testid="channel-connect-ad-account-select-submit"]') as HTMLButtonElement).click(); });
+    await flush();
+    expect(container.querySelector('[data-testid="channel-connect-ad-account-select-error"]')).toBeNull();
+    expect(container.querySelector('[data-testid="channel-connect-ad-account-select-invalid-account"]')?.textContent)
+      .toBe(koMessages.channelConnect.channelConnectAdAccountSelectInvalidAccount);
+    const submitBtn = container.querySelector('[data-testid="channel-connect-ad-account-select-submit"]') as HTMLButtonElement;
+    expect(submitBtn.disabled).toBe(true);
+  });
+
+  it('member는 ads_sandbox 선택 대기 상태에서도 라디오 목록이 아니라 owner 전용 사유만 본다(광고 계정 채널 낱말표 등재 확認)', async () => {
+    useSearchParamsMock.mockReturnValue(selectPendingQuery([{ account_id: 'a1', name: 'X' }], {}, 'ads_sandbox'));
+    stubFetch({ connections: [], availableChannels: ADS_SANDBOX_AVAILABLE });
+    await mount('member');
+    expect(container.querySelector('[data-testid="channel-connect-ad-account-select"]')).toBeNull();
+    expect(container.textContent).toContain(
+      koMessages.channelConnect.channelConnectOwnerOnlyReason.replace('{channel}', koMessages.channelConnect.channelLabelAdsSandbox),
+    );
   });
 });
 
