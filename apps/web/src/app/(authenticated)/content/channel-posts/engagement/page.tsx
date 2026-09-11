@@ -6,6 +6,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { getEntityHref } from '@/components/chat/embed-card';
@@ -323,7 +324,7 @@ export default function ChannelPostsEngagementPage() {
           <EmptyState title={t('engagementEmptyTitle')} description={t('engagementEmptyDescription')} />
         )
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-border">
+        <Card className="overflow-x-auto p-0">
           <table className="w-full min-w-[720px] text-left text-sm">
             <thead className="border-b border-border bg-muted/40 text-xs font-medium text-muted-foreground">
               <tr>
@@ -417,7 +418,7 @@ export default function ChannelPostsEngagementPage() {
               </Button>
             </div>
           ) : null}
-        </div>
+        </Card>
       )}
 
       {replyTarget ? (
