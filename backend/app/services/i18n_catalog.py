@@ -297,6 +297,14 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "이미 진행 중인 광고 홍보(boost) 건입니다.",
         "en": "This ads boost is already running.",
     },
+    # story #3806(Phase3·3-2 PR 12, 페드루 PO 確定 2026-09-11 17:26Z) — 「광고비
+    # 다시 수집」 429 rate-limit 문구(comments/refresh와 동형 뜻, 그 파일은 이
+    # 가드(#3779) 시행 前 코드라 baseline 잔존 — 여기서 새로 만드는 자리는 처음부터
+    # 이 카탈로그를 거친다).
+    "ads_boost.spend_refresh_rate_limited": {
+        "ko": "{seconds}초 뒤 다시 시도하세요.",
+        "en": "Please try again in {seconds} seconds.",
+    },
 }
 
 

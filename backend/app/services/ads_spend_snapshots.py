@@ -202,11 +202,15 @@ async def _enforce_spend_cap(db: AsyncSession, *, gate: Gate, run, now: datetime
 class AdsSpendRefreshRateLimitedError(Exception):
     """story #3806(Phase3·3-2 PR 12) — `CommentRefreshRateLimitedError`(channel_
     post_comments.py)와 동형. `retry_after_seconds`를 실어 호출부(라우터)가 429
-    Retry-After 헤더로 그대로 옮긴다."""
+    Retry-After 헤더로 그대로 옮긴다. story #3779 BE 한글 사용자 문장 가드(2026-09-11
+    17:51Z CI 적발) — 그 형제 클래스는 가드 시행 前 코드라 메시지를 raw 문자열로
+    생성자에 실었지만(baseline 잔존), 이 클래스는 신규라 그 패턴을 반복하지 않는다
+    — 사용자 문장은 라우터가 `t("ads_boost.spend_refresh_rate_limited", ...)`로
+    직접 조립한다(이 예외 자신의 `str()`은 로그용 영문 고정 문구일 뿐)."""
 
     def __init__(self, *, retry_after_seconds: int):
         self.retry_after_seconds = retry_after_seconds
-        super().__init__(f"{retry_after_seconds}초 뒤 다시 시도하세요")
+        super().__init__(f"ads spend refresh rate limited, retry after {retry_after_seconds}s")
 
 
 async def refresh_ads_boost_spend_now(

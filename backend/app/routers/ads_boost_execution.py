@@ -317,7 +317,10 @@ async def _refresh_ads_boost_spend_endpoint(
     except AdsSpendRefreshRateLimitedError as exc:
         raise HTTPException(
             status_code=429,
-            detail={"code": "ADS_SPEND_REFRESH_RATE_LIMITED", "message": str(exc)},
+            detail={
+                "code": "ADS_SPEND_REFRESH_RATE_LIMITED",
+                "message": t("ads_boost.spend_refresh_rate_limited", resolved_locale, seconds=exc.retry_after_seconds),
+            },
             headers={"Retry-After": str(exc.retry_after_seconds)},
         ) from exc
     except (AdsBoostGateNotFoundError, AdsBoostGateNotApprovedError) as exc:
