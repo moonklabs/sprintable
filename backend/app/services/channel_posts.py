@@ -1361,6 +1361,21 @@ async def publish_channel_post_draft(
         db, org_id=org_id, estimated_cost_minor=gate.sealed_estimated_cost_minor,
     )
 
+    # story #3808(Phase3·3-3 PR3, 페드루 PO 確定 2026-09-11) — X 종량 API 지출 월
+    # 상한. 위 3498 체크(생성비, 무변경)와 병렬 — 다른 지갑(kind="api_usage_cost")
+    # 이라 서로 안 갉아먹는다. x/x_sandbox만 대상(다른 채널은 API 종량 개념 자체가
+    # 없음). estimated_cost_minor = 단가 × 세그먼트 수 — PR2는 실 호출부를 항상
+    # N=1로 통과시키므로 지금은 항상 단가 그 자체(스레드 N≥2는 PR5 몫). 이 블록에서
+    # 구한 `x_unit_cost_minor`는 아래 함수 끝(발행 성공 뒤 evidence 기록)에서도
+    # 재사용한다(같은 요청 안 재조회 0).
+    x_unit_cost_minor: int | None = None
+    if draft.channel in ("x", "x_sandbox"):
+        from app.services.x_publish_budget import check_api_usage_budget_or_raise, get_api_usage_unit_cost_minor
+
+        content_rules_row = await get_org_content_rules(db, org_id=org_id)
+        x_unit_cost_minor = get_api_usage_unit_cost_minor(content_rules_row.rules if content_rules_row else None)
+        await check_api_usage_budget_or_raise(db, org_id=org_id, estimated_cost_minor=x_unit_cost_minor)
+
     # 멱등 — 이미 완료된 발행이면 새 POST 없이 그대로 반환(뮤테이션 대상: 이 UNIQUE
     # 조회를 제거하면 같은 버전 재요청이 Threads에 두 번 POST된다).
     existing = (await db.execute(
@@ -1772,6 +1787,18 @@ async def publish_channel_post_draft(
         external_id=row.external_id, anchor_at=row.published_at,
     )
     await db.commit()
+
+    # story #3808(Phase3·3-3 PR3) — 발행 성공 뒤 X 종량 API 지출 evidence 기록(위
+    # 체크와 같은 x/x_sandbox 한정 축). row.sequence(PR2 — x/x_sandbox는 항상 1)를
+    # 그대로 실어 publication_id+sequence 멱등(재시도·재발행 이중 계상 0).
+    if draft.channel in ("x", "x_sandbox") and x_unit_cost_minor is not None:
+        from app.services.x_publish_budget import record_api_usage_cost_evidence
+
+        await record_api_usage_cost_evidence(
+            db, org_id=org_id, work_item_id=draft.work_item_id, publication_id=row.id,
+            sequence=row.sequence, cost_minor=x_unit_cost_minor,
+        )
+
     return row
 
 

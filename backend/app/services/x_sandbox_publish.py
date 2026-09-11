@@ -9,7 +9,15 @@ AC2 결정적 마커 4종(카드 원문) — 앞 3종은 기존 sandbox 어휘 �
 어휘 0), `duplicate-post`만 X 신설(실 X가 완전 동일 내용 재게시를 거부하는
 공개 알려진 정책 — 정확한 HTTP status는 ⚠️미확認이라 `classify_graph_error_
 code`의 401/403 폴백(CHANNEL_TOKEN_EXPIRED로 오분류)과 안 겹치는 400으로
-시뮬레이션한다, 실 X 왕복 뒤 재확認 대상)."""
+시뮬레이션한다, 실 X 왕복 뒤 재확認 대상).
+
+story #3808 PR3(2026-09-11) — 5번째 마커 `[sandbox:api-budget-exceeded]`.
+ads_sandbox_campaign.py::_BUDGET_EXCEEDED_MARKER와 동형 축 — 우리 조직 규칙
+(`api_usage_budget`, x_publish_budget.py::check_api_usage_budget_or_raise)이
+막는 «우리 상한»과는 다른 축, "X 공급자 자신의 계정 종량 상한에 걸렸다"는
+provider-측 거부를 흉내낸다(두 축이 다른 이유: 우리 상한은 create_container
+호출 前에 이미 걸러지므로, 이 마커가 여기서 걸린다는 것 자체가 "우리 통과는
+됐지만 provider가 별도로 거부"하는 시나리오 재현)."""
 from __future__ import annotations
 
 import uuid
@@ -22,6 +30,7 @@ _MARKER_429 = "[sandbox:429]"
 _MARKER_PROVIDER_ERROR = "[sandbox:provider-error]"
 _MARKER_EXPIRED_TOKEN = "[sandbox:expired-token]"
 _MARKER_DUPLICATE_POST = "[sandbox:duplicate-post]"
+_MARKER_API_BUDGET_EXCEEDED = "[sandbox:api-budget-exceeded]"
 
 
 def _raise_if_marked(text: str) -> None:
@@ -44,6 +53,12 @@ def _raise_if_marked(text: str) -> None:
     if _MARKER_DUPLICATE_POST in text:
         raise ThreadsPublishError(
             "SANDBOX_X_DUPLICATE_POST", "sandbox: [sandbox:duplicate-post] marker simulation", status_code=400,
+        )
+    if _MARKER_API_BUDGET_EXCEEDED in text:
+        raise ThreadsPublishError(
+            "SANDBOX_X_API_BUDGET_EXCEEDED",
+            "sandbox: [sandbox:api-budget-exceeded] marker simulation — provider account spend cap reached",
+            status_code=402,
         )
 
 

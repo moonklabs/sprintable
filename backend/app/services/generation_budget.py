@@ -5,7 +5,15 @@
 billing_ledger)과 무접촉이다: 생성 비용은 고객이 자기 AI 공급자에 쓰는 돈이라 조직의
 «정책값»(`org_content_rules.rules.generation_budget`)일 뿐이다. `limit_minor`에서
 evidence(type=metric·payload.kind=generation_cost·기간 내)의 cost_minor 합을 뺀 값이
-잔량이다."""
+잔량이다.
+
+story #3808(Phase3·3-3 PR3, 페드루 PO 確定 2026-09-11) — `kind`/`rule_key` 파라미터화.
+X 종량 API 비용(월 상한)도 이 계산 프리미티브(period_window+evidence 합산+거부 신호)를
+그대로 재사용하지만, «다른 지갑»이라 kind="generation_cost"로 뭉개면 두 예산 잔량이
+서로 갉아먹는다 — `compute_generation_budget_status`/`check_generation_budget_or_raise`
+둘 다 `kind`/`rule_key` 키워드 인자를 받게 하고 기본값은 기존 값 그대로(회귀 0, 기존
+호출부는 인자를 안 넘기므로 무변경) — X 전용 호출(`app/services/x_publish_budget.py`)만
+`kind="api_usage_cost", rule_key="api_usage_budget"`를 넘긴다."""
 from __future__ import annotations
 
 import uuid
@@ -19,21 +27,30 @@ from app.models.evidence import Evidence
 from app.services.content_rules import get_org_content_rules
 
 _GENERATION_COST_KIND = "generation_cost"
+_GENERATION_BUDGET_RULE_KEY = "generation_budget"
 _SUPPORTED_PERIODS = frozenset({"month"})
 
 
 class GenerationBudgetExceededError(Exception):
     """AC2·AC4의 공용 거부 신호 — submit 시점·발행 직전 재검사 둘 다 이 예외 하나로
     통일한다(호출부 라우터가 각자 상황에 맞는 HTTP status로 감싼다). detail 4값은
-    story 確定 그대로(limit·spent·estimated·remaining)."""
+    story 確定 그대로(limit·spent·estimated·remaining).
 
-    def __init__(self, *, limit_minor: int, spent_minor: int, estimated_cost_minor: int, remaining_minor: int):
+    story #3808 — `rule_key`(기본 "generation_budget")를 실어 메시지에 어느 예산인지
+    드러낸다(X api_usage_budget 재사용 시 "generation budget exceeded"라는 오도성
+    메시지가 안 나오게, 신규 필드 하나뿐 — 기존 호출부는 인자 없이 그대로 기본값)."""
+
+    def __init__(
+        self, *, limit_minor: int, spent_minor: int, estimated_cost_minor: int, remaining_minor: int,
+        rule_key: str = _GENERATION_BUDGET_RULE_KEY,
+    ):
         self.limit_minor = limit_minor
         self.spent_minor = spent_minor
         self.estimated_cost_minor = estimated_cost_minor
         self.remaining_minor = remaining_minor
+        self.rule_key = rule_key
         super().__init__(
-            f"generation budget exceeded: limit={limit_minor} spent={spent_minor} "
+            f"{rule_key} exceeded: limit={limit_minor} spent={spent_minor} "
             f"estimated={estimated_cost_minor} remaining={remaining_minor}"
         )
 
@@ -51,14 +68,19 @@ def _period_window(period: str, now: datetime) -> tuple[datetime, datetime]:
 
 async def compute_generation_budget_status(
     db: AsyncSession, *, org_id: uuid.UUID, now: datetime | None = None,
+    kind: str = _GENERATION_COST_KIND, rule_key: str = _GENERATION_BUDGET_RULE_KEY,
 ) -> dict[str, Any] | None:
     """규칙 자체가 없으면(«규칙 없음») None — 호출자는 이걸 "검사 없음"으로 읽는다.
     「규칙 없음」과 「0 한도(정지)」를 가르는 유일한 신호가 이 반환값이다: None=규칙
-    없음(검사 스킵) · dict(limit_minor=0, ...)=정지(0보다 큰 어떤 추정치도 거부)."""
+    없음(검사 스킵) · dict(limit_minor=0, ...)=정지(0보다 큰 어떤 추정치도 거부).
+
+    story #3808 — `kind`/`rule_key`는 evidence 축과 규칙 네임스페이스를 각각
+    가리킨다(둘 다 항상 같이 바뀐다 — 서로 다른 kind가 같은 rule_key를 쓰거나
+    그 반대는 설계상 없음, 그래서 별도 매핑 테이블 없이 호출부가 쌍으로 넘긴다)."""
     row = await get_org_content_rules(db, org_id=org_id)
     if row is None:
         return None
-    budget = (row.rules or {}).get("generation_budget")
+    budget = (row.rules or {}).get(rule_key)
     if not budget:
         return None
     limit_minor = int(budget["limit_minor"])
@@ -71,7 +93,7 @@ async def compute_generation_budget_status(
     rows = (await db.execute(
         select(Evidence.payload).where(
             Evidence.org_id == org_id, Evidence.type == "metric",
-            Evidence.payload["kind"].astext == _GENERATION_COST_KIND,
+            Evidence.payload["kind"].astext == kind,
             Evidence.created_at >= start, Evidence.created_at < end,
         )
     )).scalars().all()
@@ -101,17 +123,22 @@ async def compute_generation_budget_status(
 
 async def check_generation_budget_or_raise(
     db: AsyncSession, *, org_id: uuid.UUID, estimated_cost_minor: int | None, now: datetime | None = None,
+    kind: str = _GENERATION_COST_KIND, rule_key: str = _GENERATION_BUDGET_RULE_KEY,
 ) -> None:
     """AC2·AC4의 공용 판정 지점 — submit 시점·발행 직전 둘 다 이 함수 하나를 부른다
     (story #3414/#3478의 "판정 지점 하나" 관례 그대로). estimated_cost_minor가 None이면
-    검사 자체를 안 한다(호출자가 이 축을 아예 안 실었다는 뜻 — AC2 "미설정이면 통과")."""
+    검사 자체를 안 한다(호출자가 이 축을 아예 안 실었다는 뜻 — AC2 "미설정이면 통과").
+
+    story #3808 — `kind`/`rule_key`는 compute_generation_budget_status()로 그대로
+    전달(기본값 무변경 — 기존 호출부 회귀 0)."""
     if estimated_cost_minor is None:
         return
-    status = await compute_generation_budget_status(db, org_id=org_id, now=now)
+    status = await compute_generation_budget_status(db, org_id=org_id, now=now, kind=kind, rule_key=rule_key)
     if status is None:
         return
     if estimated_cost_minor > status["remaining_minor"]:
         raise GenerationBudgetExceededError(
             limit_minor=status["limit_minor"], spent_minor=status["spent_minor"],
             estimated_cost_minor=estimated_cost_minor, remaining_minor=status["remaining_minor"],
+            rule_key=rule_key,
         )
