@@ -25,19 +25,25 @@ _MARKER_DUPLICATE_POST = "[sandbox:duplicate-post]"
 
 
 def _raise_if_marked(text: str) -> None:
+    """.message는 provider 원문 축(threads_publish.py::ThreadsPublishError 상단
+    딱지 그대로) — 로그·디버그용 영문 기술 문구지 사람에게 보이는 최종 문장이
+    아니다. x_oauth.py/x_sandbox_oauth.py(PR1)와 동형으로 영문 유지 — 한글로
+    쓰면 story #3779 baseline 「줄기만 허용」 ratchet에 걸린다(기존 facebook_
+    sandbox_publish.py류 한글 마커 문구는 이 ratchet 도입 前 grandfather된
+    것이라 재사용 불가, 신규 파일은 이 함정을 피해야 한다)."""
     if _MARKER_429 in text:
-        raise ThreadsPublishError("SANDBOX_X_RATE_LIMITED", "sandbox: [sandbox:429] 마커 시뮬레이션", status_code=429)
+        raise ThreadsPublishError("SANDBOX_X_RATE_LIMITED", "sandbox: [sandbox:429] marker simulation", status_code=429)
     if _MARKER_PROVIDER_ERROR in text:
         raise ThreadsPublishError(
-            "SANDBOX_X_PROVIDER_ERROR", "sandbox: [sandbox:provider-error] 마커 시뮬레이션", status_code=502,
+            "SANDBOX_X_PROVIDER_ERROR", "sandbox: [sandbox:provider-error] marker simulation", status_code=502,
         )
     if _MARKER_EXPIRED_TOKEN in text:
         raise ThreadsPublishError(
-            "SANDBOX_X_TOKEN_EXPIRED", "sandbox: [sandbox:expired-token] 마커 시뮬레이션", status_code=401,
+            "SANDBOX_X_TOKEN_EXPIRED", "sandbox: [sandbox:expired-token] marker simulation", status_code=401,
         )
     if _MARKER_DUPLICATE_POST in text:
         raise ThreadsPublishError(
-            "SANDBOX_X_DUPLICATE_POST", "sandbox: [sandbox:duplicate-post] 마커 시뮬레이션", status_code=400,
+            "SANDBOX_X_DUPLICATE_POST", "sandbox: [sandbox:duplicate-post] marker simulation", status_code=400,
         )
 
 

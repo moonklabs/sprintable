@@ -1284,7 +1284,3 @@ app/services/workflow_parallel_approval.py::이미 그 멤버가 결재자입니
 app/services/workflow_parallel_approval.py::항목의
 app/services/workflow_violation.py::' 전이:
 app/services/workflow_violation.py::단계 건너뜀
-app/services/x_sandbox_publish.py::sandbox: [sandbox:429] 마커 시뮬레이션
-app/services/x_sandbox_publish.py::sandbox: [sandbox:duplicate-post] 마커 시뮬레이션
-app/services/x_sandbox_publish.py::sandbox: [sandbox:expired-token] 마커 시뮬레이션
-app/services/x_sandbox_publish.py::sandbox: [sandbox:provider-error] 마커 시뮬레이션
