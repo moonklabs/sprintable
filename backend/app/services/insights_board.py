@@ -45,6 +45,7 @@ from app.models.pm import Story
 from app.models.publication_command import PublicationCommand
 from app.models.site_post import SitePost
 from app.models.site_post_draft import SitePostDraft
+from app.services.ads_spend_snapshots import organic_snapshots_only
 from app.services.insight_snapshots import (
     NORMALIZED_KEYS,
     assemble_channel_post_asset_evidence,
@@ -238,11 +239,18 @@ async def list_insights_board(
         # 통이다(축은 다음 발로 가른다 — 둘 다 "기다린다"). FE는 이 통을 status=pending
         # 하나로 보낸다(별도 파라미터 값 안 만든다) — 여기서 그 값을 둘로 넓힌다.
         status_values = ("pending", "in_progress") if status == "pending" else (status,)
+        # story #3806(Phase3·3-2 PR5, 디디 3자기점검 — 자체발견) — ?status= 필터는
+        # organic 수집 상태 축이다(§3746 v5, «수집 대기»류). paid(ads_boost) 스냅샷도
+        # 같은 publication_id·같은 status 값 집합(pending/in_progress/captured/failed)을
+        # 쓰므로, organic_snapshots_only() 없이는 paid 전용 boost가 걸린 publication의
+        # 행이 organic 수집이 이미 끝났어도 paid 스냅샷의 상태 때문에 필터에 잘못
+        # 걸리거나 빠질 수 있다 — PR4가 확立한 유일한 방어 지점(insight_snapshots.py
+        # 두 소비처와 동일 선례) 재사용, 새 필터 로직 발명 0.
         query = query.where(exists(
-            select(1).where(
+            organic_snapshots_only(select(1).where(
                 InsightSnapshot.publication_id == rows_cte.c.publication_id,
                 InsightSnapshot.status.in_(status_values),
-            )
+            ))
         ))
 
     if sort == "published_at":
@@ -269,12 +277,18 @@ async def list_insights_board(
         # PO 確定 (c) — (metric NULLS LAST, published_at DESC, id) 3키 컴포지트. 스칼라
         # 서브쿼리 하나로 그 publication의 해당 버킷(+1일 또는 +7일) 정규화값을 뽑는다
         # (스냅샷 표시용 배치 조회와 별개 — 정렬은 SQL이 해야 keyset 커서가 성립한다).
+        # story #3806(Phase3·3-2 PR5, 디디 3자기점검) — 정렬 지표도 organic 축이다.
+        # paid 스냅샷의 due_at이 우연히 published_at+1d/+7d와 같은 날로 반올림되면
+        # (label_snapshot_offset과 별개로, 이 스칼라 서브쿼리는 정확한 due_at 등치
+        # 비교라 우연 일치는 드물지만 anchor_at=run.started_at이 published_at과
+        # 가까운 boost는 실제로 겹칠 수 있다) organic_snapshots_only() 없이는 그
+        # 행이 이 정렬축에 paid 값을 섞어 넣을 수 있다 — 위 status 필터와 동일 근거.
         metric_col = (
-            select(cast(InsightSnapshot.normalized[metric].astext, Integer))
+            organic_snapshots_only(select(cast(InsightSnapshot.normalized[metric].astext, Integer))
             .where(
                 InsightSnapshot.publication_id == rows_cte.c.publication_id,
                 InsightSnapshot.due_at == rows_cte.c.published_at + timedelta(days=offset_days),
-            )
+            ))
             .correlate(rows_cte)
             .scalar_subquery()
         ).label("metric_value")
@@ -363,11 +377,17 @@ async def list_insights_board(
     publication_ids = [r.publication_id for r in page]
     snapshots_by_pub: dict[uuid.UUID, list[InsightSnapshot]] = {}
     if publication_ids:
+        # story #3806(Phase3·3-2 PR5, 디디 3자기점검) — d1/d7 버킷 원천도 organic
+        # 전용이다. anchor_at(paid, run.started_at)과 published_at(organic)이 가까운
+        # boost는 label_snapshot_offset(아래 루프)이 paid 스냅샷의 due_at을 1d/7d로
+        # 반올림해 organic 버킷 자리에 paid 지출값을 끼워 넣을 수 있다 — 「paid≠organic
+        # 섞지 않음」(유나 §절 §3)이 이 원천부터 깨지면 조각⑥의 광고비 분리 칸 자체가
+        # 무의미해진다. organic_snapshots_only()로 원천에서 차단.
         snap_rows = (await db.execute(
-            select(InsightSnapshot).where(
+            organic_snapshots_only(select(InsightSnapshot).where(
                 InsightSnapshot.publication_id.in_(publication_ids),
                 InsightSnapshot.status != "superseded",
-            )
+            ))
         )).scalars().all()
         for snap in snap_rows:
             snapshots_by_pub.setdefault(snap.publication_id, []).append(snap)
