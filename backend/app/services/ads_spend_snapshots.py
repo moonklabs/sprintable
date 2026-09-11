@@ -36,7 +36,15 @@ logger = logging.getLogger(__name__)
 _ADS_BOOST_GATE_TYPE = "ads_boost"
 _PAID_CHANNELS = ("meta_ads", "ads_sandbox")
 _PAID_SOURCE = "paid"
-_SNAPSHOT_OFFSETS = (timedelta(days=1), timedelta(days=7))
+# story #3809(Phase3·3-7 PR 4a, 페드루 PO 確定 2026-09-11 21:16Z) — 원래 +1d·+7d
+# 고정 2개뿐이던 스케줄(PR6, `_SNAPSHOT_OFFSETS`)이 org 비용 원장의 「paid 지출
+# 시계열」 축의 재료 부족 근본원인이었다(그라운딩 확認: 매일 반복 캡처 워커
+# 자체가 없어 대부분 날짜에 캡처가 없음). 처방: 최초 1건만 예약(anchor+1d)하고,
+# 캡처마다 process_due_ads_spend_snapshots가 다음 캡처(그 캡처의 due_at+24h)를
+# 그 자리서 스스로 이어 예약한다(끝나는 날 1회 포함·중지되면 예약 중단) — 아래
+# 두 상수가 그 계약의 정본.
+_INITIAL_SNAPSHOT_OFFSET = timedelta(days=1)
+_RECURRING_SNAPSHOT_INTERVAL = timedelta(hours=24)
 BATCH_SIZE = 50
 # story #3806(Phase3·3-2 PR 12, 페드루 PO 確定 2026-09-11 17:26Z) — 댓글
 # `comments/refresh`(channel_post_comments.py::_REFRESH_MIN_INTERVAL)와 동형 값·
@@ -80,20 +88,45 @@ def classify_insight_source(channel: str) -> str:
 
 async def schedule_ads_spend_snapshots(
     db: AsyncSession, *, org_id: uuid.UUID, work_item_id: uuid.UUID, publication_id: uuid.UUID,
-    channel: str, anchor_at: datetime,
+    channel: str, anchor_at: datetime, ends_at: datetime | None = None,
 ) -> None:
-    """boost_start 성공 직후(같은 트랜잭션, commit은 호출자 몫 — insight_snapshots.py
-    ::schedule_insight_snapshots와 동형 계약) +1d·+7d 두 행을 연다. `anchor_at`은
-    호출자가 이미 확정한 시각(run.started_at)을 그대로 넘긴다 — 재처리마다 새로
-    재면 UNIQUE(publication_id, due_at) 멱등이 무력화되는 것도 동형(그 함수 docstring
-    그대로)."""
-    for due_at in (anchor_at + offset for offset in _SNAPSHOT_OFFSETS):
-        stmt = pg_insert(InsightSnapshot).values(
-            id=uuid.uuid4(), org_id=org_id, work_item_id=work_item_id, publication_id=publication_id,
-            publication_kind="channel_publication", channel=channel, external_id=None, due_at=due_at,
-            status="pending",
-        ).on_conflict_do_nothing(constraint="uq_insight_snapshots_publication_due_at")
-        await db.execute(stmt)
+    """boost_start 성공 직후·resume 성공 직후(같은 트랜잭션, commit은 호출자 몫 —
+    insight_snapshots.py::schedule_insight_snapshots와 동형 계약) **다음 캡처
+    한 건만**(anchor+24h) 연다 — 이후 매 24h 반복은 `process_due_ads_spend_
+    snapshots`가 캡처마다 스스로 이어 예약한다(PR4a, 아래 함수 docstring 참고).
+
+    story #3809(PR 4a 정정, 카디르 QA 실측 2026-09-11 21:47Z) — resume 재사용
+    처방. pause로 이어 예약 체인이 소진(pending 0)된 뒤 resume해도 이 함수가
+    resume 경로에서 안 불리면(원래 boost_start 1곳에서만 호출) 재예약이
+    영원히 0 — 재개된 boost는 캡처도 상한 판정도 다시는 안 도는, 3806이
+    처방한 것과 같은 "조용히 끊긴 사슬" 클래스. `ends_at`을 넘겼으면(resume이
+    이미 종료 시점 이후 일어난 드문 경우) 지어내지 않고 스킵(0건) — boost_
+    start 호출부도 극단적으로 짧은 기간(1일 미만)이면 이 경계에 걸릴 수 있어
+    항상 넘겨받는다.
+
+    `anchor_at`은 호출자가 이미 확정한 시각(boost_start의 run.started_at·
+    resume의 `now`)을 그대로 넘긴다 — 재처리마다 새로 재면 UNIQUE(publication_id,
+    due_at) 멱등이 무력화되는 것도 동형(insight_snapshots.py 동형 함수
+    docstring 그대로)."""
+    due_at = anchor_at + _INITIAL_SNAPSHOT_OFFSET
+    if ends_at is not None and due_at > ends_at:
+        return
+    stmt = pg_insert(InsightSnapshot).values(
+        id=uuid.uuid4(), org_id=org_id, work_item_id=work_item_id, publication_id=publication_id,
+        publication_kind="channel_publication", channel=channel, external_id=None, due_at=due_at,
+        status="pending",
+    ).on_conflict_do_nothing(constraint="uq_insight_snapshots_publication_due_at")
+    await db.execute(stmt)
+
+
+def _next_snapshot_due_at(*, previous_due_at: datetime, ends_at: datetime | None) -> datetime | None:
+    """다음 캡처 due_at(이전 due_at+24h) — `ends_at`을 지나면(끝나는 날 자체는
+    포함·그 다음날부터 제외) None(더 안 잰다). `ends_at`이 없으면(이론상 불가 —
+    ads_boost 생성 시 항상 필수, 방어적으로만) 안전하게 중단."""
+    if ends_at is None:
+        return None
+    next_due_at = previous_due_at + _RECURRING_SNAPSHOT_INTERVAL
+    return next_due_at if next_due_at <= ends_at else None
 
 
 class AdsSpendFetchError(Exception):
@@ -356,6 +389,25 @@ async def process_due_ads_spend_snapshots(db: AsyncSession, *, now: datetime | N
             # 즉시 멈추는 것이 취지).
             if await _enforce_spend_cap(db, gate=ctx["gate"], run=ctx["run"], now=now):
                 counts["capped"] += 1
+
+            # story #3809(Phase3·3-7 PR 4a, 페드루 PO 確定 2026-09-11 21:16Z) —
+            # 캡처마다 다음 캡처를 그 자리서 이어 예약(멱등 upsert, PR6 스케줄링
+            # 관례 그대로). run.status!="running"(사람이 먼저 pause) 또는
+            # cap_reached_at이 방금(또는 이전에) 찍혔으면(위 _enforce_spend_cap이
+            # 같은 run 객체를 그 자리서 mutate) 더 안 잇는다 — 어차피 곧 멈출
+            # boost를 위해 미래 캡처를 예약하는 건 낭비다.
+            if ctx["run"].status == "running" and ctx["run"].cap_reached_at is None:
+                next_due_at = _next_snapshot_due_at(
+                    previous_due_at=snapshot.due_at, ends_at=ctx["gate"].sealed_ads_ends_at,
+                )
+                if next_due_at is not None:
+                    stmt = pg_insert(InsightSnapshot).values(
+                        id=uuid.uuid4(), org_id=snapshot.org_id, work_item_id=snapshot.work_item_id,
+                        publication_id=snapshot.publication_id, publication_kind=snapshot.publication_kind,
+                        channel=snapshot.channel, external_id=None, due_at=next_due_at, status="pending",
+                    ).on_conflict_do_nothing(constraint="uq_insight_snapshots_publication_due_at")
+                    await db.execute(stmt)
+                    await db.commit()
         except AdsSpendFetchError as exc:
             snapshot.error_code = exc.code
             snapshot.status = "failed"

@@ -47,6 +47,13 @@ _EXEMPT_FILES: dict[str, str] = {
         "채널/소스 필터를 다시 안 적음), organic_snapshots_only()를 자기 자신에게 부를 "
         "이유가 없다."
     ),
+    "app/services/ads_boost_execution.py": (
+        "story #3809(Phase3·3-7 PR 4a 정정) — resume 실행 성공 지점이 「이미 pending "
+        "캡처 예약이 있나」를 확認하는 자리(재예약 중복 방지, PR4a 카디르 QA 실측 처방). "
+        "이 파일도 org_cost_summary.py와 동형으로 `paid_snapshots_only()`를 그대로 호출 "
+        "— ads_boost 실행부는 애초 paid(ads_boost) 채널 스냅샷만 다루는 파일이라 "
+        "organic_snapshots_only()를 부를 이유가 없다."
+    ),
 }
 
 

@@ -401,14 +401,16 @@ async def process_one_ads_boost_command(db: AsyncSession, command: PublicationCo
                 )
                 run.status = "running"
                 run.started_at = now
-                # story #3806(Phase3·3-2 PR4, 페드루 PO 確定 2026-09-11) — boost_start
-                # 성공 즉시 paid 지출 +1d/+7d 스냅샷 예약(insight_snapshots.py의
-                # publish 성공 시 스케줄링과 동형 시점 — "그 사건이 확정된 순간").
+                # story #3806(Phase3·3-2 PR4)·#3809(PR 4a 정정) — boost_start
+                # 성공 즉시 paid 지출 스냅샷 예약(insight_snapshots.py의 publish
+                # 성공 시 스케줄링과 동형 시점 — "그 사건이 확정된 순간"). 최초
+                # 1건(anchor+24h)만 열고 이후는 캡처마다 스스로 이어 예약(PR4a).
                 from app.services.ads_spend_snapshots import schedule_ads_spend_snapshots
 
                 await schedule_ads_spend_snapshots(
                     db, org_id=command.org_id, work_item_id=gate.work_item_id,
                     publication_id=ctx["publication_id"], channel=ctx["ad_channel"], anchor_at=now,
+                    ends_at=gate.sealed_ads_ends_at,
                 )
             elif command.operation == OP_PAUSE:
                 if run.campaign_id is None:
@@ -436,6 +438,29 @@ async def process_one_ads_boost_command(db: AsyncSession, command: PublicationCo
                 )
                 run.status = "running"
                 run.paused_at = None
+                # story #3809(PR 4a 정정, 카디르 QA 실측 2026-09-11 21:47Z) — pause로
+                # 이어 예약 체인이 소진(pending 0)된 뒤 resume해도 이 호출이 없으면
+                # 재예약이 영원히 0(schedule_ads_spend_snapshots 원래 호출부가
+                # boost_start 1곳뿐이었다) — 재개된 boost가 캡처·상한 판정 둘 다
+                # 다시는 안 도는 "조용히 끊긴 사슬". 체인이 **소진됐을 때만** 다시
+                # 연다 — pending 행이 아직 남아 있으면(예: 그 행이 due 前에 pause가
+                # 걸린 경우) 여벌 예약을 더 얹지 않는다(멱등 upsert가 막는 건 "같은
+                # due_at 중복"뿐이라, "다른 due_at의 여벌"은 이 존재확認이 막는다).
+                from app.models.insight_snapshot import InsightSnapshot
+                from app.services.ads_spend_snapshots import paid_snapshots_only, schedule_ads_spend_snapshots
+
+                has_pending_spend_snapshot = (await db.execute(
+                    paid_snapshots_only(select(InsightSnapshot.id).where(
+                        InsightSnapshot.publication_id == ctx["publication_id"],
+                        InsightSnapshot.status == "pending",
+                    )).limit(1)
+                )).scalar_one_or_none()
+                if has_pending_spend_snapshot is None:
+                    await schedule_ads_spend_snapshots(
+                        db, org_id=command.org_id, work_item_id=gate.work_item_id,
+                        publication_id=ctx["publication_id"], channel=ctx["ad_channel"], anchor_at=now,
+                        ends_at=gate.sealed_ads_ends_at,
+                    )
 
         # story #3806(Phase3·3-2 PR 13, 페드루 PO 確定 2026-09-11 19:52Z) — 「중지
         # 스위치·상한 도달 자동 중지」가 3806 AC인데 그 실행이 결재 이력에 한 줄도

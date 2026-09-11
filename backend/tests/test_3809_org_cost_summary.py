@@ -115,8 +115,10 @@ async def test_org_ads_cost_summary_sums_approved_boost_budget_and_captured_spen
             summary = await get_org_ads_cost_summary(s, org_id=org_id)
         assert summary["approved_boost_count"] == 1
         assert summary["sealed_budget_minor"] == 100_000
-        assert summary["captured_spend_minor"] == 12_345 * 2
-        assert summary["remaining_minor"] == 100_000 - 12_345 * 2
+        # story #3809(PR 4a) — 최초 예약은 1건뿐(anchor+1d)이라 이 tick 1회로는
+        # 캡처도 1건(다음 캡처는 그 자리서 이어 예약될 뿐 이 tick엔 아직 안 due).
+        assert summary["captured_spend_minor"] == 12_345
+        assert summary["remaining_minor"] == 100_000 - 12_345
         assert summary["cap_reached_count"] == 0
     finally:
         await engine.dispose()
@@ -331,10 +333,13 @@ async def test_paid_spend_daily_series_aggregates_by_captured_date():
     engine, Session, org_id, project_id, owner_id, gate_id = await _setup_approved_gate(await _session_factory())
     try:
         await _start_boost(Session, org_id, gate_id, owner_id)
-        async with Session() as s:
-            await _make_spend_snapshots_due(s, org_id, gate_id)
-        async with Session() as s:
-            await process_due_ads_spend_snapshots(s)
+        # story #3809(PR 4a) — 최초 예약은 1건뿐이라(anchor+1d) 캡처 2건을 만들려면
+        # (due시킴→처리→다음 예약이 그 자리서 생김) 그 사이클을 두 번 돈다.
+        for _ in range(2):
+            async with Session() as s:
+                await _make_spend_snapshots_due(s, org_id, gate_id)
+            async with Session() as s:
+                await process_due_ads_spend_snapshots(s)
 
         # 두 스냅샷의 captured_at을 서로 다른 날(어제·오늘)로 갈라 그룹화가 실제로
         # 날짜 단위인지 확認(둘 다 같은 tick·같은 now로 캡처돼 원래는 같은 날이다).
