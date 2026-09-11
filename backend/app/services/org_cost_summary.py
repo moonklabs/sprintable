@@ -101,26 +101,56 @@ async def get_org_paid_spend_daily_series(db: AsyncSession, *, org_id: uuid.UUID
     트렌드 열람용이라 게이트 현재 status와 무관하게 「그날 실제로 캡처된」 사실을
     그대로 낸다(과거 지출은 게이트가 그 뒤 재오픈/종료돼도 안 사라진다). due_at이
     아니라 `captured_at`으로 가른다 — due_at은 +1d/+7d 스케줄링 anchor일 뿐 실제
-    수집 시각이 아니다(ads_spend_snapshots.py 모듈 docstring과 동형 구분)."""
+    수집 시각이 아니다(ads_spend_snapshots.py 모듈 docstring과 동형 구분).
+
+    story #3809(Phase3·3-7 PR 4b, 페드루 PO 確定 2026-09-11 23:08Z) — 통화 안전
+    (PR2b와 동형 규율). `spend_minor`는 게이트별 `sealed_ads_currency` 없이는
+    의미가 없다(서로 다른 통화를 그냥 더하면 지어낸 숫자) — 날짜별로 그날
+    캡처분의 distinct 통화가 정확히 1개(결측 0건 포함)면 그 통화로 합계, 그
+    외(통화 결측·2개 이상 섞임)면 그 날짜 포인트는 `currency`·`spend_minor`
+    둘 다 null로 낸다(숫자 대신 「집계 못 함」 표시만 가능하게)."""
+    gates = (await db.execute(
+        select(Gate.scope_key, Gate.sealed_ads_currency).where(
+            Gate.org_id == org_id, Gate.gate_type == _ADS_BOOST_GATE_TYPE,
+        )
+    )).all()
+    currency_by_publication_id: dict[uuid.UUID, str | None] = {}
+    for scope_key, currency in gates:
+        if not scope_key:
+            continue
+        try:
+            currency_by_publication_id[uuid.UUID(scope_key)] = currency
+        except ValueError:
+            continue
+
     rows = (await db.execute(
-        paid_snapshots_only(select(InsightSnapshot.captured_at, InsightSnapshot.normalized).where(
+        paid_snapshots_only(select(
+            InsightSnapshot.captured_at, InsightSnapshot.normalized, InsightSnapshot.publication_id,
+        ).where(
             InsightSnapshot.org_id == org_id,
             InsightSnapshot.status == "captured", InsightSnapshot.captured_at.isnot(None),
         ))
     )).all()
 
-    by_day: dict[str, int] = defaultdict(int)
-    for captured_at, normalized in rows:
+    by_day_spend: dict[str, int] = defaultdict(int)
+    by_day_currencies: dict[str, set[str | None]] = defaultdict(set)
+    for captured_at, normalized, publication_id in rows:
         day = captured_at.date().isoformat()
-        by_day[day] += (normalized or {}).get("spend") or 0
+        by_day_spend[day] += (normalized or {}).get("spend") or 0
+        by_day_currencies[day].add(currency_by_publication_id.get(publication_id))
 
-    # 이 함수가 이미 `source == _PAID_SOURCE`로만 걸러 왔으니 매 항목의 값은
-    # 자명하게 "paid"다 — classify_insight_source()를 가짜 채널 인자로 부르는
-    # 대신 그 상수를 직접 쓴다(그 함수는 원채널→분류가 필요한 자리 전용).
-    return [
-        {"date": day, "spend_minor": spend, "source": _PAID_SOURCE}
-        for day, spend in sorted(by_day.items())
-    ]
+    points = []
+    for day in sorted(by_day_spend):
+        currencies = by_day_currencies[day]
+        if len(currencies) == 1 and None not in currencies:
+            currency, spend_minor = next(iter(currencies)), by_day_spend[day]
+        else:
+            currency, spend_minor = None, None
+        # 이 함수가 이미 `source == _PAID_SOURCE`로만 걸러 왔으니 매 항목의 값은
+        # 자명하게 "paid"다 — classify_insight_source()를 가짜 채널 인자로 부르는
+        # 대신 그 상수를 직접 쓴다(그 함수는 원채널→분류가 필요한 자리 전용).
+        points.append({"date": day, "spend_minor": spend_minor, "currency": currency, "source": _PAID_SOURCE})
+    return points
 
 
 async def get_org_cost_summary(db: AsyncSession, *, org_id: uuid.UUID, now: datetime | None = None) -> dict:

@@ -169,7 +169,10 @@ class OrgAdsCostSummaryView(BaseModel):
 
 class PaidSpendDailyPointView(BaseModel):
     date: str
-    spend_minor: int
+    # story #3809(Phase3·3-7 PR 4b, 페드루 PO 確定 2026-09-11 23:08Z) — 통화 안전
+    # (PR2b 동형). 그 날짜 캡처분의 통화가 하나로 안 모이면(결측·섞임) 둘 다 null.
+    spend_minor: int | None
+    currency: str | None
     source: Literal["paid", "organic"]
 
 
