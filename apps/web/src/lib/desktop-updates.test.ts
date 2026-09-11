@@ -16,10 +16,22 @@ describe('fetchDesktopUpdateManifest', () => {
     });
     const body = await fetchDesktopUpdateManifest(mockFetch as unknown as typeof fetch);
     expect(body).toBe(FIXTURE_MANIFEST);
-    expect(mockFetch).toHaveBeenCalledWith(
-      'https://storage.googleapis.com/sprintable-desktop-releases-dev/macos/latest/macos.json',
-      { cache: 'no-store' },
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    const [calledUrl, calledOptions] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(calledOptions).toEqual({ cache: 'no-store' });
+    // [SID:3811] 캐시버스터 — GCS 앞단 캐시가 URL을 키로 삼아도 매 호출 새 쿼리스트링이면
+    // 안 먹힌다. 정확한 타임스탬프 값은 안 보되(고정하면 헛도는 테스트), 형태는 실측한다.
+    expect(calledUrl).toMatch(
+      /^https:\/\/storage\.googleapis\.com\/sprintable-desktop-releases-dev\/macos\/latest\/macos\.json\?_t=\d+-[a-z0-9]+$/,
     );
+  });
+
+  it('busts the cache with a different query string on each call — two calls must not hit the same URL', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({ ok: true, text: async () => FIXTURE_MANIFEST });
+    await fetchDesktopUpdateManifest(mockFetch as unknown as typeof fetch);
+    await fetchDesktopUpdateManifest(mockFetch as unknown as typeof fetch);
+    const urls = mockFetch.mock.calls.map((c) => c[0] as string);
+    expect(urls[0]).not.toBe(urls[1]);
   });
 
   it('throws DesktopManifestUnavailableError when GCS returns non-2xx — mutation guard: bucket object missing/gone must not surface as a broken 200', async () => {
