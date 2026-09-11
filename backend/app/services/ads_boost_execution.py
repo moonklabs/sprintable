@@ -3,10 +3,10 @@
 `destination=gate.sealed_ads_connection_id`(PR 2가 봉인한 광고 계정) ·
 `approved_version=gate.sealed_ads_boost_version_id`(PR 2가 매 재봉인마다 새로 발급한
 값, 3367 sealed_content_version 동형 질문에 대한 페드루 「PR 2 실물에 맞춰」 답) ·
-`content_kind="ads_boost"`(0362 마이그가 CHECK에 추가) · `operation ∈
+`content_kind="ads_boost"`(0364 마이그가 CHECK에 추가) · `operation ∈
 {"boost_start","pause","resume"}`.
 
-## 「토글」 설계(페드루 PO 追加 確定, PR 3 착수 직후 — 0362 마이그 docstring과 동형)
+## 「토글」 설계(페드루 PO 追加 確定, PR 3 착수 직후 — 0364 마이그 docstring과 동형)
 `boost_start`는 `site_posts.py`의 publish/unpublish와 동형 1회성 — 그 승인주기
 (=그 approved_version)당 정확히 한 번, `toggle_seq=0` 고정.
 

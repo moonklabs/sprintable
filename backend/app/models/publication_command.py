@@ -32,7 +32,7 @@ class PublicationCommand(Base):
     __tablename__ = "publication_commands"
     __table_args__ = (
         # story #3806(Phase3·3-2 PR3, 페드루 PO 追加 確定 2026-09-11) — toggle_seq를
-        # 키에 포함(0362 마이그가 정본, 여기는 미러 — 이름을 맞춰 둬 grep 한 번으로
+        # 키에 포함(0364 마이그가 정본, 여기는 미러 — 이름을 맞춰 둬 grep 한 번으로
         # 짝이 맞는지 확인 가능, 0340의 CHECK 관례와 동일 원칙). ads_boost의 pause/
         # resume은 같은 승인주기(같은 approved_version) 안에서 여러 번 토글될 수
         # 있어 옛 4열 키(그 조합 평생 한 번)로는 표현 못 한다 — toggle_seq가 "그
