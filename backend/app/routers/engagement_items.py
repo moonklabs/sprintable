@@ -9,24 +9,28 @@ Review scope 미확認이라 2차, 큐 항목 종류 예약값을 코드에 두�
 (`/inbox`는 알림이 이미 점유): FE `/content/channel-posts/engagement` · BE
 `GET/PATCH /{org}/engagement/items` · `GET /{org}/engagement/collection-status`.
 상태 4 enum 중 4번째 값은 `skipped`(ko 「넘김」·en Skipped — `ignored` 대신, 유나
-대안 채택)."""
+대안 채택).
+
+PR 3(페드루 PO 確定 2026-09-11 09:31Z) — 답글 편입. 응답에 `kind`(comment|reply)
+판별자 추가. PATCH path segment 이름은 하위호환 위해 `{comment_id}` 그대로 두되
+(FE BFF가 이미 그 이름으로 배선돼 있다 — 새 라우트 0) 실제로는 comment_id 또는
+reply_id 어느 쪽이든 받는다(서비스 레이어가 두 테이블을 다 본다)."""
 from __future__ import annotations
 
 import uuid
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.error_envelope import human_error
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
-from app.models.channel_post_comment import ChannelPostComment
 from app.services.agent_onboarding_config import resolve_locale_from_request
 from app.services.channel_post_comments import (
     EngagementItemInvalidStatusError,
     EngagementItemNotFoundError,
+    resolve_engagement_item_org_id,
     get_engagement_collection_status,
     list_engagement_items,
     patch_engagement_item,
@@ -55,9 +59,10 @@ async def _require_human(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID,
 
 class EngagementItemResponse(BaseModel):
     id: uuid.UUID
+    kind: str
     publication_id: uuid.UUID
     channel: str
-    external_comment_id: str
+    external_comment_id: str | None
     author_display_name: str | None
     text: str
     captured_at: str
@@ -88,11 +93,13 @@ class EngagementCollectionStatusResponse(BaseModel):
     connections: list[EngagementCollectionStatusItem]
 
 
-def _item_response(c) -> EngagementItemResponse:
+def _item_response(c: dict) -> EngagementItemResponse:
     return EngagementItemResponse(
-        id=c.id, publication_id=c.publication_id, channel=c.channel, external_comment_id=c.external_comment_id,
-        author_display_name=c.author_display_name, text=c.text, captured_at=c.captured_at.isoformat(),
-        triage_status=c.triage_status, assignee_member_id=c.assignee_member_id, linked_story_id=c.linked_story_id,
+        id=c["id"], kind=c["kind"], publication_id=c["publication_id"], channel=c["channel"],
+        external_comment_id=c["external_comment_id"], author_display_name=c["author_display_name"],
+        text=c["text"], captured_at=c["captured_at"].isoformat(),
+        triage_status=c["triage_status"], assignee_member_id=c["assignee_member_id"],
+        linked_story_id=c["linked_story_id"],
     )
 
 
@@ -101,6 +108,7 @@ async def list_engagement_items_endpoint(
     org_id: uuid.UUID,
     status: str | None = Query(default=None),
     channel: str | None = Query(default=None),
+    kind: str | None = Query(default=None),
     cursor: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
@@ -108,12 +116,13 @@ async def list_engagement_items_endpoint(
     auth: AuthContext = Depends(get_current_user),
 ) -> EngagementItemListResponse:
     """조직 멤버(휴먼·에이전트 모두) 읽기 가능 — 댓글 열람 관례(3516 AC4)와 동형.
-    limit/offset이 아니라 cursor(그라운딩 ① — 3713류 재발 방지)."""
+    limit/offset이 아니라 cursor(그라운딩 ① — 3713류 재발 방지). PR 3(답글 편입)
+    — `kind`(comment|reply) 필터 추가, 생략하면 두 갈래 다(UNION)."""
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
 
     result = await list_engagement_items(
-        db, org_id=org_id, status=status, channel=channel, cursor=cursor, limit=limit,
+        db, org_id=org_id, status=status, channel=channel, kind=kind, cursor=cursor, limit=limit,
     )
 
     return EngagementItemListResponse(
@@ -139,27 +148,29 @@ async def patch_engagement_item_endpoint(
 
     CI 정정 ②(2026-09-11, 카디르 실측·페드루 전달) — PATH_ID 뮤테이션 축 가드: path
     `comment_id`를 org 스코프 없이 그대로 받는 PATCH라 정적 스캐너가 미가드로 잡는다.
-    `assert_target_in_caller_org`(project_auth.py, IDOR 방어 공용 지점)로 대상 댓글의
+    `assert_target_in_caller_org`(project_auth.py, IDOR 방어 공용 지점)로 대상의
     실제 org_id를 caller org와 대조 — 존재 비노출 404(assets.py::_scope_filter·
     channel_posts.py 형제 패턴과 동형, allowlist 등재가 아니라 실 가드로 해소). project
     access(has_project_access)까지는 이 스토리 범위 밖(댓글 계열 전체가 org 스코프뿐 —
-    별건, 페드루 확認)."""
+    별건, 페드루 확認).
+
+    PR 3(답글 편입) — path segment 이름은 하위호환 위해 `comment_id` 그대로지만
+    실제로는 comment_id 또는 reply_id 어느 쪽이든 받는다(`resolve_engagement_item_
+    org_id`가 두 테이블 다 본다 — 새 라우트 0)."""
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
     resolved_locale = resolve_locale_from_request(locale, accept_language)
     await _require_human(db, auth, org_id, resolved_locale)
 
-    target_org_id = (await db.execute(
-        select(ChannelPostComment.org_id).where(ChannelPostComment.id == comment_id)
-    )).scalar_one_or_none()
+    target_org_id = await resolve_engagement_item_org_id(db, comment_id)
     assert_target_in_caller_org(
         org_id, target_org_id, not_found_detail=t("engagement_items.not_found", resolved_locale),
     )
 
     fields_set = body.model_fields_set
     try:
-        comment = await patch_engagement_item(
-            db, org_id=org_id, comment_id=comment_id,
+        item = await patch_engagement_item(
+            db, org_id=org_id, item_id=comment_id,
             triage_status=body.triage_status,
             assignee_member_id=body.assignee_member_id,
             assignee_member_id_set="assignee_member_id" in fields_set,
@@ -175,7 +186,7 @@ async def patch_engagement_item_endpoint(
             detail=human_error("ENGAGEMENT_ITEM_INVALID_STATUS", str(exc), user_message=message),
         ) from exc
 
-    return _item_response(comment)
+    return _item_response(item)
 
 
 @router.get("/{org_id}/engagement/collection-status", response_model=EngagementCollectionStatusResponse)

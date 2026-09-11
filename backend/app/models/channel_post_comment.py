@@ -73,6 +73,12 @@ class ChannelPostCommentReply(Base):
     created_by_member_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     created_by_kind: Mapped[str] = mapped_column(Text, nullable=False)  # 'human'|'agent'
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #3805(Phase3·3-1·PR 3, 페드루 PO 確定 2026-09-11) — 「반응」(Engagement)
+    # 답글 편입. channel_post_comments의 triage 3컬럼(0362)과 동형 — 큐가 댓글·답글
+    # 둘 다 같은 처리 상태 경로를 쓴다.
+    triage_status: Mapped[str] = mapped_column(Text, nullable=False, server_default="open")
+    assignee_member_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    linked_story_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
