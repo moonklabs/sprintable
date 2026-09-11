@@ -1355,3 +1355,83 @@ async def test_paid_channel_snapshot_does_not_satisfy_organic_status_filter():
         )
     finally:
         await engine.dispose()
+
+
+# story #3806(Phase3·3-2 PR5 조각⑥, 유나 §절 §3 「성과 보드 «광고비» 분리 칸」) —
+# ads_boost 요약 배치 enrich.
+@pytest.mark.anyio
+async def test_ads_boost_summary_attached_when_boost_requested():
+    """뮤테이션 대상 — ads_boost_by_pub enrich 블록을 제거하면 이 테스트가 RED여야
+    한다(row["ads_boost"]가 항상 None으로 떨어짐)."""
+    from app.models.ads_boost_run import AdsBoostRun
+    from app.models.gate import Gate
+    from app.services.insights_board import list_insights_board
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            story_id = await _seed_story(s, org_id, project_id)
+            pub_gate = await _seed_gate(s, org_id=org_id, work_item_id=story_id)
+            pub = await _seed_channel_publication(
+                s, org_id=org_id, gate_id=pub_gate.id, channel="facebook",
+                published_at=datetime.now(timezone.utc) - timedelta(days=2),
+            )
+            # 실 request_ads_boost() 대신 직접 구성(_seed_gate와 동형 관례 — 이
+            # 파일이 이미 external_publish 게이트도 직접 구성한다, 중복 재발명 아님).
+            ads_gate = Gate(
+                id=uuid.uuid4(), org_id=org_id, work_item_id=story_id, work_item_type="story",
+                gate_type="ads_boost", status="approved", scope_key=str(pub.id),
+                sealed_ads_budget_minor=100_000, sealed_ads_currency="KRW",
+            )
+            s.add(ads_gate)
+            await s.commit()
+            run = AdsBoostRun(
+                id=uuid.uuid4(), org_id=org_id, gate_id=ads_gate.id, status="running",
+                started_at=datetime.now(timezone.utc),
+            )
+            s.add(run)
+            await s.commit()
+            await _seed_snapshot(
+                s, org_id=org_id, work_item_id=story_id, publication_id=pub.id,
+                publication_kind="channel_publication", channel="meta_ads",
+                due_at=datetime.now(timezone.utc) + timedelta(days=1), status="captured",
+                normalized={"views": None, "impressions": None, "reach": None, "engagements": None,
+                            "clicks": None, "spend": 12_345, "conversions": None},
+            )
+
+            result = await list_insights_board(s, org_id=org_id, window="30d")
+        row = next(r for r in result["rows"] if r["publication_id"] == pub.id)
+        assert row["ads_boost"] is not None
+        assert row["ads_boost"]["gate_id"] == ads_gate.id
+        assert row["ads_boost"]["gate_status"] == "approved"
+        assert row["ads_boost"]["sealed_budget_minor"] == 100_000
+        assert row["ads_boost"]["sealed_currency"] == "KRW"
+        assert row["ads_boost"]["captured_spend_minor"] == 12_345
+        assert row["ads_boost"]["remaining_minor"] == 100_000 - 12_345
+        assert row["ads_boost"]["run_status"] == "running"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_ads_boost_summary_null_when_no_boost_requested():
+    """홍보 요청 자체가 없는 발행 — 「해당 없음」의 데이터 원천(None, 지어내지 않음)."""
+    from app.services.insights_board import list_insights_board
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            story_id = await _seed_story(s, org_id, project_id)
+            gate = await _seed_gate(s, org_id=org_id, work_item_id=story_id)
+            pub = await _seed_channel_publication(
+                s, org_id=org_id, gate_id=gate.id, channel="facebook",
+                published_at=datetime.now(timezone.utc) - timedelta(days=2),
+            )
+
+            result = await list_insights_board(s, org_id=org_id, window="30d")
+        row = next(r for r in result["rows"] if r["publication_id"] == pub.id)
+        assert row["ads_boost"] is None
+    finally:
+        await engine.dispose()

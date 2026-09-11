@@ -49,6 +49,17 @@ def organic_snapshots_only(stmt):
     return stmt.where(InsightSnapshot.channel.notin_(_PAID_CHANNELS))
 
 
+def paid_snapshots_only(stmt):
+    """story #3806(Phase3·3-2 PR5, 조각⑥ — 성과 보드 「광고비」 분리 칸) —
+    organic_snapshots_only()의 반대 방향 술어. 이 파일의 캡처 루프
+    (process_due_ads_spend_snapshots)는 anchor_at으로 이미 자기 행만 건드려
+    이 술어가 필요 없었지만, 조각⑥이 여러 publication_id를 한 번에 배치
+    조회하면서 organic 행과 섞이지 않게 명시 필터가 필요해졌다 — 같은 실수
+    (organic_snapshots_only 신설 계기)를 반대 방향으로 반복하지 않도록 이
+    파일 한 곳에 짝을 둔다."""
+    return stmt.where(InsightSnapshot.channel.in_(_PAID_CHANNELS))
+
+
 async def schedule_ads_spend_snapshots(
     db: AsyncSession, *, org_id: uuid.UUID, work_item_id: uuid.UUID, publication_id: uuid.UUID,
     channel: str, anchor_at: datetime,

@@ -44,8 +44,9 @@ from app.models.insight_snapshot import InsightSnapshot
 from app.models.pm import Story
 from app.models.publication_command import PublicationCommand
 from app.models.site_post import SitePost
+from app.models.ads_boost_run import AdsBoostRun
 from app.models.site_post_draft import SitePostDraft
-from app.services.ads_spend_snapshots import organic_snapshots_only
+from app.services.ads_spend_snapshots import organic_snapshots_only, paid_snapshots_only
 from app.services.insight_snapshots import (
     NORMALIZED_KEYS,
     assemble_channel_post_asset_evidence,
@@ -425,6 +426,57 @@ async def list_insights_board(
         for c in cmd_rows:
             latest_command_by_gate.setdefault(c.gate_id, c)
 
+    # story #3806(Phase3·3-2 PR5 조각⑥, 유나 §절 §3 「성과 보드 «광고비» 분리 칸」) —
+    # publication_id → ads_boost 요약 배치(N+1 회피, 위 배치들과 동형). 상관 키는
+    # Gate.scope_key(str(publication_id), ads_boost.py::request_ads_boost 확認) —
+    # publication_id마다 최대 1개 ads_boost 게이트(재승인도 같은 게이트 재사용, PR2
+    # 확定). paid_snapshots_only()로 organic 배치(snap_rows, 위)와 원천부터 분리 —
+    # 같은 InsightSnapshot 행을 두 번 다른 조건으로 긁는 게 아니라 애초에 서로 다른
+    # 채널 집합만 각자 본다.
+    ads_boost_gate_by_pub: dict[uuid.UUID, Gate] = {}
+    if publication_ids:
+        ads_boost_gates = (await db.execute(
+            select(Gate).where(
+                Gate.org_id == org_id, Gate.gate_type == "ads_boost",
+                Gate.scope_key.in_([str(pid) for pid in publication_ids]),
+            )
+        )).scalars().all()
+        for g in ads_boost_gates:
+            ads_boost_gate_by_pub[uuid.UUID(g.scope_key)] = g
+
+    ads_boost_by_pub: dict[uuid.UUID, dict[str, Any]] = {}
+    if ads_boost_gate_by_pub:
+        ads_gate_ids = [g.id for g in ads_boost_gate_by_pub.values()]
+        run_status_by_gate: dict[uuid.UUID, str] = {}
+        run_rows = (await db.execute(
+            select(AdsBoostRun).where(AdsBoostRun.gate_id.in_(ads_gate_ids))
+        )).scalars().all()
+        for run in run_rows:
+            run_status_by_gate[run.gate_id] = run.status
+
+        paid_snap_rows = (await db.execute(
+            paid_snapshots_only(select(InsightSnapshot).where(
+                InsightSnapshot.publication_id.in_(ads_boost_gate_by_pub.keys()),
+            ))
+        )).scalars().all()
+        captured_spend_by_pub: dict[uuid.UUID, int] = {}
+        for snap in paid_snap_rows:
+            if snap.status != "captured":
+                continue
+            spend = (snap.normalized or {}).get("spend") or 0
+            captured_spend_by_pub[snap.publication_id] = captured_spend_by_pub.get(snap.publication_id, 0) + spend
+
+        for pub_id, gate in ads_boost_gate_by_pub.items():
+            captured = captured_spend_by_pub.get(pub_id, 0)
+            ads_boost_by_pub[pub_id] = {
+                "gate_id": gate.id, "gate_status": gate.status,
+                "sealed_budget_minor": gate.sealed_ads_budget_minor,
+                "sealed_currency": gate.sealed_ads_currency,
+                "captured_spend_minor": captured,
+                "remaining_minor": (gate.sealed_ads_budget_minor or 0) - captured,
+                "run_status": run_status_by_gate.get(gate.id),
+            }
+
     from app.services.channel_adapters import CHANNEL_ADAPTERS
 
     # story #3656(페드루 PO CHANGES, 2026-09-07) — 소재/훅 배치 조회(N+1 회피, 위
@@ -499,6 +551,10 @@ async def list_insights_board(
             "command_status": (
                 latest_command_by_gate[r.gate_id].status if r.gate_id in latest_command_by_gate else None
             ),
+            # story #3806(Phase3·3-2 PR5 조각⑥) — ads_boost 요약. 이 publication에
+            # 홍보 요청 자체가 없으면 None(유나 §절 §3 「해당 없음」의 데이터 원천 —
+            # FE가 None을 「해당 없음」으로 렌더, 값을 지어내지 않는다).
+            "ads_boost": ads_boost_by_pub.get(r.publication_id),
         })
 
     # story #3697(유나 § — 「지금 아무도 안 따라간다」가 계약을 참으로 만들지 않는다) —

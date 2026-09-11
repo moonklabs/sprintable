@@ -82,6 +82,23 @@ class InsightsBoardRow(BaseModel):
     # PublicationCommand 행) — 새 낱말 0. 수집 상태 축(d1/d7·comments_*)과는 다른
     # 축이라 섞지 않는다(필터 대상 아님 — 행 배지 전용). site_post 행은 항상 null.
     command_status: str | None = None
+    # story #3806(Phase3·3-2 PR5 조각⑥, 유나 §절 §3 「성과 보드 «광고비» 분리 칸」) —
+    # 이 publication에 홍보 요청이 없으면 None(FE가 「해당 없음」으로 렌더 — 값을
+    # 지어내지 않는다). paid_snapshots_only()로 organic 지표(d1/d7)와 원천부터
+    # 분리(섞지 않음, §3 그대로).
+    ads_boost: "InsightsBoardAdsBoostView | None" = None
+
+
+class InsightsBoardAdsBoostView(BaseModel):
+    gate_id: uuid.UUID
+    gate_status: str
+    sealed_budget_minor: int | None
+    sealed_currency: str | None
+    captured_spend_minor: int
+    remaining_minor: int
+    # AdsBoostRun 행이 아직 없으면(시작 前) None — ads_boost_execution.py의
+    # SpendSummaryResponse.run_status와 동일 계약(단일 진실 — 새 규칙 발명 0).
+    run_status: str | None
 
 
 class InsightsBoardResponse(BaseModel):
