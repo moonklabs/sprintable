@@ -475,6 +475,41 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         kind="ads",
         requires_connection=True,
     ),
+    # story #3808(Phase3·3-3 PR1, 페드루 PO 確定 2026-09-11) — X(트위터) 서버 OAuth
+    # 2.0(PKCE 필수, threads_oauth.py와 달리 X는 PKCE 없이 authorization_code grant
+    # 자체를 거부한다 — 공개 문서 안정 사실, ⚠️미확認 표기 대상 아님). refresh_mode=
+    # "refresh_token"(표준 grant, `channel_adapters.py::can_auto_refresh`가 이미 True로
+    # 받는 값 — 그라운딩 정정, 신규 enum값 불요)이지만 X는 **1회용 회전**(매 재발급마다
+    # 새 refresh_token 발급·이전 값 즉시 무효)이라 `apply_refresh_result()`(channel_
+    # connection.py)의 새 refresh_token 슬롯 확장이 짝(이 PR 범위). scope에 반드시
+    # "offline.access"가 있어야 refresh_token 자체가 발급된다(공개 문서 확정 사실).
+    # ⚠️미확認 — authorize_url/token_url 정확 호스트(x.com vs twitter.com 이관 시점)는
+    # 실 앱 등록·왕복 시 재확認 필요.
+    "x": ChannelAdapterConfig(
+        authorize_url="https://x.com/i/oauth2/authorize",
+        token_url="https://api.x.com/2/oauth2/token",
+        scope="tweet.read tweet.write users.read offline.access",
+        refresh_mode="refresh_token",
+        credential_kind="oauth",
+        display_name="X",
+        kind="social",
+        requires_connection=True,
+        max_text_length=280,  # X 기본 티어 게시물 상한(공개 안정 사실, Premium 확장 상한은 범위 밖).
+    ),
+    "x_sandbox": ChannelAdapterConfig(
+        authorize_url="https://x.com/i/oauth2/authorize",
+        token_url="https://api.x.com/2/oauth2/token",
+        scope="tweet.read tweet.write users.read offline.access",
+        refresh_mode="refresh_token",
+        # ads_sandbox와 동형 이유 — 회전 마커를 sandbox 토큰 문자열 자체로 나르므로
+        # credential_kind="none"이 아니라 진짜 authorize→callback 라우터를 태운다
+        # (x_sandbox_oauth.py가 X 호출부만 페이크로 스왑).
+        credential_kind="oauth",
+        display_name="X Sandbox",
+        kind="social",
+        requires_connection=True,
+        max_text_length=280,
+    ),
 }
 
 # story 5b27b32f(Phase1·BE·테스트 인프라, 페드루 PO 확定 2026-09-04) — dev 전용 샌드박스
