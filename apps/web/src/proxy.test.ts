@@ -109,6 +109,11 @@ describe('proxy', () => {
     expect(response.status).toBe(200);
   });
 
+  it('treats /desktop/updates/macos.json as public — [SID:3807] 데스크톱 컴패니언이 로그인 세션 없이 업데이트를 확인하는 자리, 누락 시 /login 307로 튕겨 check_for_updates가 항상 실패한다', async () => {
+    const response = await middleware(makeRequest('/desktop/updates/macos.json'));
+    expect(response.status).toBe(200);
+  });
+
   it('treats /native/oauth-return as public (no cookie) — [P1] 실측(next start+curl)으로 발견: 누락 시 307-to-login으로 폴백 페이지가 렌더되지 않았다', async () => {
     // native 핸드오프 콜백은 이 응답에 웹 세션 쿠키를 세팅하지 않으므로(격리 rail) 쿠키 없는
     // 요청이 정상 케이스 — /auth/native와 동일 결함 클래스.
