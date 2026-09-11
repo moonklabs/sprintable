@@ -285,12 +285,18 @@ export default function ChannelPostListPage() {
       />
 
       {/* story #3744(페드루 CHANGES Ⓑ) — 목록/캘린더 뷰 전환. stock Tabs 재사용(새 세그먼트
-          컴포넌트 발명 0) — 「목록」은 이 화면 자신(no-op)이고 「캘린더」 선택은 그 route로
-          이동한다(캘린더는 별도 페이지라 탭 패널 전환이 아니라 네비게이션). */}
-      <Tabs value="list" onValueChange={(v) => { if (v === 'calendar') router.push('/content/channel-posts/calendar'); }}>
+          컴포넌트 발명 0) — 「목록」은 이 화면 자신(no-op)이고 「캘린더」·「반응」 선택은
+          그 route로 이동한다(둘 다 별도 페이지라 탭 패널 전환이 아니라 네비게이션).
+          story #3805(PR 2[FE], 유나 §절1) — 「반응」 세 번째 탭 추가, 새 사이드바 항목 0. */}
+      <Tabs value="list" onValueChange={(v) => {
+        if (v === 'calendar') router.push('/content/channel-posts/calendar');
+        if (v === 'engagement') router.push('/content/channel-posts/engagement');
+      }}
+      >
         <TabsList data-testid="channel-posts-view-switch">
           <TabsTrigger value="list">{t('channelPostsViewList')}</TabsTrigger>
           <TabsTrigger value="calendar" data-testid="channel-posts-calendar-link">{t('channelPostsViewCalendar')}</TabsTrigger>
+          <TabsTrigger value="engagement" data-testid="channel-posts-engagement-link">{t('channelPostsViewEngagement')}</TabsTrigger>
         </TabsList>
       </Tabs>
 
