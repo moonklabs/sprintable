@@ -16,7 +16,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import and_, case, func, literal, or_, select, union_all, update
+from sqlalchemy import and_, case, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -1109,14 +1109,8 @@ async def get_last_collected_at_by_publication_ids(
 # 08:14Z 정정 — 원래 `inbox/*`로 이름 붙였던 걸 `engagement/*`로 갈음(`/inbox`는
 # 알림이 이미 점유) + 상태 enum 4번째 값 `ignored`→`skipped`(ko 「넘김」·en Skipped,
 # 유나 대안 채택).
-# PR 3(페드루 PO 確定 2026-09-11 09:31Z) — 답글 편입. channel_post_comment_replies
-# (0365 additive, PR1의 채널_post_comments 3컬럼과 동형)도 같은 큐에 UNION ALL로
-# 합류한다 — `kind` 판별자(comment|reply)로 구분. 두 번째 커서 포맷 발명 금지(같은
-# 3키 encode_metric_cursor 그대로, item_at이 comment는 captured_at·reply는
-# created_at을 가리킬 뿐 같은 datetime 타입).
 
 _TRIAGE_STATUSES = ("open", "in_progress", "done", "skipped")
-_ITEM_KINDS = ("comment", "reply")
 
 
 class EngagementItemNotFoundError(Exception):
@@ -1140,105 +1134,40 @@ class EngagementItemInvalidStatusError(Exception):
         super().__init__(f"invalid triage_status: {status}")
 
 
-def _comment_item_query(org_id: uuid.UUID):
-    """PR 3(답글 편입) — comment 쪽 정규화 열(id·kind·publication_id·channel·
-    external_comment_id·author_display_name·text·item_at·triage 3필드). item_at은
-    댓글=captured_at(그라운딩 ① 그대로)."""
-    return select(
-        ChannelPostComment.id.label("id"),
-        literal("comment").label("kind"),
-        ChannelPostComment.publication_id.label("publication_id"),
-        ChannelPostComment.channel.label("channel"),
-        ChannelPostComment.external_comment_id.label("external_comment_id"),
-        ChannelPostComment.author_display_name.label("author_display_name"),
-        ChannelPostComment.text.label("text"),
-        ChannelPostComment.captured_at.label("item_at"),
-        ChannelPostComment.triage_status.label("triage_status"),
-        ChannelPostComment.assignee_member_id.label("assignee_member_id"),
-        ChannelPostComment.linked_story_id.label("linked_story_id"),
-    ).where(ChannelPostComment.org_id == org_id, ChannelPostComment.deleted_at.is_(None))
-
-
-def _reply_item_query(org_id: uuid.UUID):
-    """PR 3 — reply 쪽 정규화 열. channel/publication_id는 부모 댓글에서 조인해
-    끌어온다(답글 자체엔 그 열이 없다 — comment_id를 통해서만 안다). item_at은
-    답글=created_at(상신이 아니라 초안 생성 시각부터 큐에 보인다 — draft도 처리
-    대상이라는 그라운딩 판단·PATCH 자체가 draft 단계에서도 가능해야 한다).
-    external_comment_id/author_display_name은 답글에 없는 개념이라 null(지어내지
-    않는다 — comments-section.tsx의 «작성자는 채널이 준 만큼» 규율과 동형)."""
-    return select(
-        ChannelPostCommentReply.id.label("id"),
-        literal("reply").label("kind"),
-        ChannelPostComment.publication_id.label("publication_id"),
-        ChannelPostComment.channel.label("channel"),
-        literal(None).label("external_comment_id"),
-        literal(None).label("author_display_name"),
-        ChannelPostCommentReply.text.label("text"),
-        ChannelPostCommentReply.created_at.label("item_at"),
-        ChannelPostCommentReply.triage_status.label("triage_status"),
-        ChannelPostCommentReply.assignee_member_id.label("assignee_member_id"),
-        ChannelPostCommentReply.linked_story_id.label("linked_story_id"),
-    ).select_from(ChannelPostCommentReply).join(
-        ChannelPostComment, ChannelPostComment.id == ChannelPostCommentReply.comment_id,
-    ).where(ChannelPostCommentReply.org_id == org_id)
-
-
-def _row_to_item_dict(row) -> dict[str, Any]:
-    return {
-        "id": row.id, "kind": row.kind, "publication_id": row.publication_id, "channel": row.channel,
-        "external_comment_id": row.external_comment_id, "author_display_name": row.author_display_name,
-        "text": row.text, "captured_at": row.item_at, "triage_status": row.triage_status,
-        "assignee_member_id": row.assignee_member_id, "linked_story_id": row.linked_story_id,
-    }
-
-
 async def list_engagement_items(
     db: AsyncSession, *, org_id: uuid.UUID, status: str | None = None, channel: str | None = None,
-    kind: str | None = None, cursor: str | None = None, limit: int = 50,
+    cursor: str | None = None, limit: int = 50,
 ) -> dict[str, Any]:
-    """그라운딩 ①③④ — org 단위 큐. 정렬=open 우선(0)→그 외(1)→item_at desc→id desc
-    (마이그마다 정렬이 안 깨지게 3키 전부 cursor에 싣는다 — 3713류 「경계 넘는 이름이
-    다르면 조용히 버려진다」 재발 방지). priority 자체가 진짜 정렬키라
+    """그라운딩 ①③④ — org 단위 큐. 정렬=open 우선(0)→그 외(1)→captured_at desc→id
+    desc(마이그마다 정렬이 안 깨지게 3키 전부 cursor에 싣는다 — 3713류 「경계 넘는
+    이름이 다르면 조용히 버려진다」 재발 방지). priority 자체가 진짜 정렬키라
     encode_metric_cursor(3502 metric 정렬 선례)를 그대로 재사용 — 3번째 커서 포맷
-    발명 금지. 소프트 삭제된 댓글은 큐에서 제외(deleted_at IS NOT NULL).
+    발명 금지. 소프트 삭제된 댓글은 큐에서 제외(deleted_at IS NOT NULL)."""
+    priority_expr = case((ChannelPostComment.triage_status == "open", 0), else_=1)
 
-    PR 3(답글 편입) — comment·reply 두 정규화 SELECT를 UNION ALL로 합쳐 하나의
-    큐로 만든다(새 커서 포맷 0 — item_at 하나로 두 kind의 시간축을 통일해 기존
-    3키 커서 그대로 재사용). `kind` 필터가 있으면 그 갈래 하나만 조회(불필요한
-    UNION 생략 — 성능·가독성)."""
-    if kind == "comment":
-        base = _comment_item_query(org_id)
-    elif kind == "reply":
-        base = _reply_item_query(org_id)
-    else:
-        base = union_all(_comment_item_query(org_id), _reply_item_query(org_id))
-    items_sq = base.subquery("engagement_items")
-
-    priority_expr = case((items_sq.c.triage_status == "open", 0), else_=1)
-
-    conditions = []
+    conditions = [ChannelPostComment.org_id == org_id, ChannelPostComment.deleted_at.is_(None)]
     if status is not None:
-        conditions.append(items_sq.c.triage_status == status)
+        conditions.append(ChannelPostComment.triage_status == status)
     if channel is not None:
-        conditions.append(items_sq.c.channel == channel)
+        conditions.append(ChannelPostComment.channel == channel)
 
     if cursor is not None:
-        cur_priority, cur_item_at, cur_id = decode_metric_cursor(cursor)
+        cur_priority, cur_captured_at, cur_id = decode_metric_cursor(cursor)
         conditions.append(or_(
             priority_expr > cur_priority,
-            and_(priority_expr == cur_priority, items_sq.c.item_at < cur_item_at),
+            and_(priority_expr == cur_priority, ChannelPostComment.captured_at < cur_captured_at),
             and_(
-                priority_expr == cur_priority, items_sq.c.item_at == cur_item_at,
-                items_sq.c.id < cur_id,
+                priority_expr == cur_priority, ChannelPostComment.captured_at == cur_captured_at,
+                ChannelPostComment.id < cur_id,
             ),
         ))
 
     rows = (await db.execute(
-        select(items_sq)
+        select(ChannelPostComment)
         .where(*conditions)
-        .order_by(priority_expr.asc(), items_sq.c.item_at.desc(), items_sq.c.id.desc())
+        .order_by(priority_expr.asc(), ChannelPostComment.captured_at.desc(), ChannelPostComment.id.desc())
         .limit(limit + 1)
-    )).all()
+    )).scalars().all()
 
     has_more = len(rows) > limit
     page = list(rows[:limit])
@@ -1246,83 +1175,37 @@ async def list_engagement_items(
     if has_more and page:
         last = page[-1]
         last_priority = 0 if last.triage_status == "open" else 1
-        next_cursor = encode_metric_cursor(last_priority, last.item_at, last.id)
-    return {"items": [_row_to_item_dict(r) for r in page], "has_more": has_more, "next_cursor": next_cursor}
-
-
-async def resolve_engagement_item_org_id(db: AsyncSession, item_id: uuid.UUID) -> uuid.UUID | None:
-    """PR 3 — PATCH 대상이 comment/reply 어느 테이블 소속인지 모른 채 org 스코프부터
-    선조회(engagement_items.py의 assert_target_in_caller_org IDOR 가드가 쓴다).
-    댓글 먼저 본다(더 흔한 갈래) — 없으면 답글."""
-    org_id = (await db.execute(
-        select(ChannelPostComment.org_id).where(ChannelPostComment.id == item_id)
-    )).scalar_one_or_none()
-    if org_id is not None:
-        return org_id
-    return (await db.execute(
-        select(ChannelPostCommentReply.org_id).where(ChannelPostCommentReply.id == item_id)
-    )).scalar_one_or_none()
+        next_cursor = encode_metric_cursor(last_priority, last.captured_at, last.id)
+    return {"items": page, "has_more": has_more, "next_cursor": next_cursor}
 
 
 async def patch_engagement_item(
-    db: AsyncSession, *, org_id: uuid.UUID, item_id: uuid.UUID,
+    db: AsyncSession, *, org_id: uuid.UUID, comment_id: uuid.UUID,
     triage_status: str | None = None,
     assignee_member_id: uuid.UUID | None = None, assignee_member_id_set: bool = False,
-) -> dict[str, Any]:
+) -> ChannelPostComment:
     """PATCH — model_fields_set 관례(3437 §후속 동형): 생략=유지, 명시 null=해제.
     `assignee_member_id_set`이 라우터가 넘기는 "이 필드가 요청 본문에 있었나" 플래그
     (Pydantic exclude_unset)다. triage_status는 4상태 허용목록으로 fail-closed 검증
-    (오타 값이 조용히 저장되지 않는다).
-
-    PR 3(답글 편입) — `item_id`는 comment_id 또는 reply_id 둘 다일 수 있다(URL
-    path segment 이름은 하위호환 위해 그대로 `comment_id` — FE BFF 프록시가 이미
-    그 이름으로 배선돼 있어 값의 실제 뜻만 넓힌다, 새 라우트 0). 댓글 테이블을
-    먼저 보고 없으면 답글 테이블을 본다(두 번째 왕복은 흔치 않은 갈래에서만)."""
+    (오타 값이 조용히 저장되지 않는다)."""
     comment = (await db.execute(
         select(ChannelPostComment).where(
-            ChannelPostComment.id == item_id, ChannelPostComment.org_id == org_id,
+            ChannelPostComment.id == comment_id, ChannelPostComment.org_id == org_id,
         )
     )).scalar_one_or_none()
-    target: ChannelPostComment | ChannelPostCommentReply | None = comment
-    kind = "comment"
-    if target is None:
-        reply = (await db.execute(
-            select(ChannelPostCommentReply).where(
-                ChannelPostCommentReply.id == item_id, ChannelPostCommentReply.org_id == org_id,
-            )
-        )).scalar_one_or_none()
-        target = reply
-        kind = "reply"
-    if target is None:
-        raise EngagementItemNotFoundError(item_id)
+    if comment is None:
+        raise EngagementItemNotFoundError(comment_id)
 
     if triage_status is not None:
         if triage_status not in _TRIAGE_STATUSES:
             raise EngagementItemInvalidStatusError(status=triage_status)
-        target.triage_status = triage_status
+        comment.triage_status = triage_status
     if assignee_member_id_set:
-        target.assignee_member_id = assignee_member_id
+        comment.assignee_member_id = assignee_member_id
 
     await db.commit()
-    await db.refresh(target)
-
-    if kind == "comment":
-        return {
-            "id": target.id, "kind": "comment", "publication_id": target.publication_id,
-            "channel": target.channel, "external_comment_id": target.external_comment_id,
-            "author_display_name": target.author_display_name, "text": target.text,
-            "captured_at": target.captured_at, "triage_status": target.triage_status,
-            "assignee_member_id": target.assignee_member_id, "linked_story_id": target.linked_story_id,
-        }
-    parent = await db.get(ChannelPostComment, target.comment_id)
-    return {
-        "id": target.id, "kind": "reply",
-        "publication_id": parent.publication_id if parent else None,
-        "channel": parent.channel if parent else None,
-        "external_comment_id": None, "author_display_name": None, "text": target.text,
-        "captured_at": target.created_at, "triage_status": target.triage_status,
-        "assignee_member_id": target.assignee_member_id, "linked_story_id": target.linked_story_id,
-    }
+    await db.refresh(comment)
+    return comment
 
 
 async def get_engagement_collection_status(db: AsyncSession, *, org_id: uuid.UUID) -> list[dict[str, Any]]:
@@ -1358,3 +1241,34 @@ async def get_engagement_collection_status(db: AsyncSession, *, org_id: uuid.UUI
         }
         for c in connections
     ]
+
+
+async def get_latest_sent_reply_at_by_comment_ids(
+    db: AsyncSession, *, comment_ids: list[uuid.UUID],
+) -> dict[uuid.UUID, datetime]:
+    """PR 3(답변함 마커, 페드루 PO 定 2026-09-11 10:36Z) — 정정 배경: 「답글 편입」을
+    처음엔 `channel_post_comment_replies`를 큐에 UNION으로 합류시켜 구현했으나,
+    이 테이블은 author 개념이 `created_by_member_id`+`created_by_kind`('human'|
+    'agent') 하나뿐 — 고객이 남긴 값을 담을 자리가 스키마에 없어 **모든 행이
+    100% outbound**(우리가 쓴 답변)다. "받은 반응" 큐(inbound)에 outbound를
+    섞은 설계 오류였다(PO 실측 지적) — 되돌리고, 대신 이 함수로 댓글 행 옆에
+    읽기전용 「답변함 · 시각」만 보인다(트리아지 상태는 안 건드림 — 사람이 직접
+    done으로 옮긴다).
+
+    status="sent"만 잡는다(초안/대기/실패는 「아직 안 보냄」 — 답변함 아님).
+    "시각"은 이 레포에 「발송 성공 시각」 전용 컬럼이 없어(status 전환 시점을
+    별도로 안 남김) `updated_at`(상신 성공 시 sent로 바뀌며 갱신됨)을 근사값으로
+    쓴다 — 정확한 external 타임스탬프가 필요해지면 그때 전용 컬럼을 늘린다(이
+    스토리 범위 밖, 지금은 지어내지 않는 선에서 가장 가까운 값). comment_id 없으면
+    dict에서 빠짐(호출부가 `.get(comment_id)` → None="답변함 아님")."""
+    if not comment_ids:
+        return {}
+    rows = (await db.execute(
+        select(ChannelPostCommentReply.comment_id, func.max(ChannelPostCommentReply.updated_at))
+        .where(
+            ChannelPostCommentReply.comment_id.in_(comment_ids),
+            ChannelPostCommentReply.status == "sent",
+        )
+        .group_by(ChannelPostCommentReply.comment_id)
+    )).all()
+    return {comment_id: updated_at for comment_id, updated_at in rows}

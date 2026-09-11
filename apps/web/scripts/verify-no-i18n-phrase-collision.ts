@@ -568,6 +568,14 @@ export const EXEMPT_PAIRS = new Set<string>([
   // 같은 문자열일 수 없다). 한국어 자연문이 "영구 삭제"라는 같은 구를 버튼과 서술 양쪽에
   // 쓰는 것 자체가 정상이라 부분문자열 겹침은 이 설계의 결과이지 결함이 아니다.
   'settings.orgDeleteConfirmCta <-> settings.orgDeleteImpactProjects',
+  // story #3805(Phase3·3-1 PR 3, 페드루 PO 定 2026-09-11 10:36Z) — engagement/page.tsx
+  // 한 행 안에서 답변 CTA 버튼(commentsReplyCta="답변")과 읽기전용 답변함 마커
+  // (engagementAnsweredAt="답변함 · {time}")가 부분문자열로 겹친다. #2352/#2365가
+  // 잡으려는 병은 "같은 화면의 두 «수»가 헷갈린다"(예: 막힘 28 vs 막힘 0)인데, 이 쌍은
+  // 그 모양이 아니다 — 한쪽은 동사형 버튼(눌러서 답변을 «시작»), 다른 한쪽은 이미
+  // 발송된 답글의 발송 시각을 보여주는 정적 라벨(수가 아니라 상대시각 문자열)이라
+  // «두 수를 헷갈릴» 여지 자체가 없다(테이블 컬럼도 다르다 — 상태 열 vs 액션 열).
+  'content.commentsReplyCta <-> content.engagementAnsweredAt',
 ]);
 
 // ⛔⭐오르테가군 지적(2026-07-31) — 이 목록에 «새로» 넣는 것은 PO 승인을 거친다. 이유 없이

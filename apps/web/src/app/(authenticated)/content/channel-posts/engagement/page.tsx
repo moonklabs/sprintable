@@ -23,10 +23,15 @@ import type { CommentItem } from '@/components/content/comments-section';
  * 「반응」(Engagement) 화면. 채널 포스트 화면의 뷰 하나(목록·캘린더 옆) — 새
  * 사이드바 항목 0.
  *
- * PR 3(페드루 PO 確定 2026-09-11 09:31Z) — 답글 편입. ① BE `kind`(comment|reply)
- * 판별자 소비 — 「종류」 열·칩·필터 추가. ② 헤더 「미처리 N」 배지 = 필터 무관 항상
- * (별도 dedicated fetch, 현재 화면 필터와 독립) — PR 2에서 statusFilter==='open'일
- * 때만 보이던 갭(같은 헤더가 필터에 따라 다른 세계)을 닫는다.
+ * PR 3 정정(페드루 PO 定 2026-09-11 10:36Z) — 「답글 편입」(종류 열·칩·필터로
+ * channel_post_comment_replies 행을 큐에 합류)을 되돌렸다: 그 테이블은 author
+ * 개념이 우리 조직 멤버뿐이라(고객 값을 담을 자리가 스키마에 없음) 전 행이
+ * 100% outbound — "받은 반응"(inbound) 큐에 outbound를 섞은 설계 오류였다(PO
+ * 실측 지적, 캡처 리뷰 中 발견). 대신 댓글 행 옆에 읽기전용 「답변함 · 시각」
+ * (`answered_at`)만 보인다 — 트리아지 상태는 안 건드린다(사람이 직접 done으로
+ * 옮긴다). 헤더 「미처리 N」 배지 = 필터 무관 항상(별도 dedicated fetch, 현재
+ * 화면 필터와 독립) — PR 2에서 statusFilter==='open'일 때만 보이던 갭(같은
+ * 헤더가 필터에 따라 다른 세계)을 닫는 부분은 그대로 유지.
  *
  * 답변/작업 전환은 comments-section.tsx가 이미 쓰는 CommentReplyDialog/
  * CommentConvertToTaskDialog를 그대로 재사용한다(새 다이얼로그 0). 두 컴포넌트는
@@ -34,22 +39,11 @@ import type { CommentItem } from '@/components/content/comments-section';
  * 이 큐의 목록 계약(GET .../engagement/items)엔 그 필드가 없다 — 다이얼로그를 열 때만
  * 그 필드들을 "아직 모름"(null/0) 기본값으로 채운다. 그 자체가 새 사실을
  * 지어내는 게 아니라 다이얼로그가 실제로 쓰는 값(sentRepliesCount 배너 등)만
- * 정확성이 낮아질 뿐이라 fail-closed로 안전한 방향(과소 표시)이다. 답글(kind=
- * 'reply') 행엔 이 두 액션이 안 보인다 — «답변»·«작업으로 전환»은 받은 댓글
- * 개념이라 우리 답글 자신에 거는 게 의미가 없다(눌러도 BE가 comment_id로
- * 못 찾아 404가 나는 깨진 동작을 화면이 아예 안 보여주는 쪽을 택함).
+ * 정확성이 낮아질 뿐이라 fail-closed로 안전한 방향(과소 표시)이다.
  */
 
 const TRIAGE_STATUSES = ['open', 'in_progress', 'done', 'skipped'] as const;
 type TriageStatus = (typeof TRIAGE_STATUSES)[number];
-
-const ITEM_KINDS = ['comment', 'reply'] as const;
-type ItemKind = (typeof ITEM_KINDS)[number];
-
-const KIND_LABEL_KEY: Record<ItemKind, string> = {
-  comment: 'engagementKindComment',
-  reply: 'engagementKindReply',
-};
 
 const STATUS_LABEL_KEY: Record<TriageStatus, string> = {
   open: 'engagementStatusOpen',
@@ -68,7 +62,6 @@ const STATUS_TONE: Record<TriageStatus, { bg: string; text: string; dot: string 
 
 interface EngagementItem {
   id: string;
-  kind: ItemKind;
   publication_id: string;
   channel: string;
   external_comment_id: string | null;
@@ -78,6 +71,9 @@ interface EngagementItem {
   triage_status: string;
   assignee_member_id: string | null;
   linked_story_id: string | null;
+  // PR 3 — 읽기전용 「답변함」 마커. null=이 댓글에 발송된 답글이 아직 없음
+  // (트리아지 상태와 독립 — 답변함이어도 open일 수 있다).
+  answered_at: string | null;
 }
 
 interface EngagementListResponse {
@@ -112,7 +108,6 @@ export default function ChannelPostsEngagementPage() {
 
   const [statusFilter, setStatusFilter] = useState<TriageStatus | 'all'>('open');
   const [channelFilter, setChannelFilter] = useState<string>('all');
-  const [kindFilter, setKindFilter] = useState<ItemKind | 'all'>('all');
   const [items, setItems] = useState<EngagementItem[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -131,7 +126,6 @@ export default function ChannelPostsEngagementPage() {
       const params = new URLSearchParams();
       if (statusFilter !== 'all') params.set('status', statusFilter);
       if (channelFilter !== 'all') params.set('channel', channelFilter);
-      if (kindFilter !== 'all') params.set('kind', kindFilter);
       if (cursor) params.set('cursor', cursor);
       const res = await fetchWithAuth(`/api/organizations/${orgId}/engagement/items?${params.toString()}`);
       if (!res.ok) { setLoadError(true); return; }
@@ -145,12 +139,12 @@ export default function ChannelPostsEngagementPage() {
     } finally {
       if (replace) setLoading(false);
     }
-  }, [orgId, statusFilter, channelFilter, kindFilter]);
+  }, [orgId, statusFilter, channelFilter]);
 
   useEffect(() => { void loadPage(null, true); }, [loadPage]);
 
   // PR 3(페드루 PO 確定 2026-09-11) — 헤더 배지는 화면의 현재 필터와 독립된 별도
-  // fetch(status=open만, channel/kind 필터 없음)로 「항상」 채운다 — PR 2 갭
+  // fetch(status=open만, channel 필터 없음)로 「항상」 채운다 — PR 2 갭
   // (statusFilter==='open'일 때만 보이던, 같은 헤더가 필터에 따라 다른 세계였던
   // 문제)을 닫는다.
   const [openCount, setOpenCount] = useState<{ n: number; hasMore: boolean } | null>(null);
@@ -265,7 +259,7 @@ export default function ChannelPostsEngagementPage() {
     ? t(openCount.hasMore ? 'engagementOpenCountAtLeast' : 'engagementOpenCountExact', { n: openCount.n })
     : null;
 
-  const filtersActive = statusFilter !== 'open' || channelFilter !== 'all' || kindFilter !== 'all';
+  const filtersActive = statusFilter !== 'open' || channelFilter !== 'all';
 
   return (
     <div className="mx-auto w-full max-w-6xl space-y-6 p-6">
@@ -333,20 +327,6 @@ export default function ChannelPostsEngagementPage() {
             ))}
           </select>
         </label>
-        <label className="flex items-center gap-2 text-sm">
-          <span className="text-muted-foreground">{t('engagementFilterKindLabel')}</span>
-          <select
-            className="rounded-md border border-border bg-background px-2 py-1 text-sm"
-            value={kindFilter}
-            onChange={(e) => setKindFilter(e.target.value as ItemKind | 'all')}
-            data-testid="engagement-filter-kind"
-          >
-            <option value="all">{t('engagementFilterKindAll')}</option>
-            {ITEM_KINDS.map((k) => (
-              <option key={k} value={k}>{t(KIND_LABEL_KEY[k])}</option>
-            ))}
-          </select>
-        </label>
       </div>
 
       {patchError ? (
@@ -366,7 +346,7 @@ export default function ChannelPostsEngagementPage() {
           <EmptyState
             title={t('engagementEmptyFilteredTitle')}
             action={(
-              <Button variant="outline" onClick={() => { setStatusFilter('open'); setChannelFilter('all'); setKindFilter('all'); }}>
+              <Button variant="outline" onClick={() => { setStatusFilter('open'); setChannelFilter('all'); }}>
                 {t('engagementClearFiltersCta')}
               </Button>
             )}
@@ -380,7 +360,6 @@ export default function ChannelPostsEngagementPage() {
             <thead className="border-b border-border bg-muted/40 text-xs font-medium text-muted-foreground">
               <tr>
                 <th className="px-3 py-2">{t('engagementColumnChannel')}</th>
-                <th className="px-3 py-2">{t('engagementColumnKind')}</th>
                 <th className="px-3 py-2">{t('engagementColumnPreview')}</th>
                 <th className="px-3 py-2">{t('engagementColumnCapturedAt')}</th>
                 <th className="px-3 py-2">{t('engagementColumnStatus')}</th>
@@ -398,17 +377,10 @@ export default function ChannelPostsEngagementPage() {
                 return (
                   <tr key={item.id} className="border-b border-border last:border-0">
                     <td className="px-3 py-2 align-top">{channelLabel(item.channel, t)}</td>
-                    <td className="px-3 py-2 align-top">
-                      <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
-                        {t(KIND_LABEL_KEY[item.kind])}
-                      </span>
-                    </td>
                     <td className="max-w-xs px-3 py-2 align-top">
-                      {item.kind === 'comment' ? (
-                        <p className="text-xs font-medium text-muted-foreground">
-                          {item.author_display_name ?? t('originAuthorUnknown')}
-                        </p>
-                      ) : null}
+                      <p className="text-xs font-medium text-muted-foreground">
+                        {item.author_display_name ?? t('originAuthorUnknown')}
+                      </p>
                       <p className="line-clamp-2 whitespace-pre-wrap text-foreground">{item.text}</p>
                       {item.linked_story_id ? (
                         <a
@@ -434,6 +406,11 @@ export default function ChannelPostsEngagementPage() {
                           <option key={s} value={s}>{t(STATUS_LABEL_KEY[s])}</option>
                         ))}
                       </select>
+                      {item.answered_at ? (
+                        <p className="mt-1 text-xs text-muted-foreground" data-testid="engagement-answered-marker">
+                          {t('engagementAnsweredAt', { time: formatRelativeTime(item.answered_at, locale, displayTimezone) })}
+                        </p>
+                      ) : null}
                     </td>
                     <td className="px-3 py-2 align-top">
                       <select
@@ -450,24 +427,20 @@ export default function ChannelPostsEngagementPage() {
                       {assignedName ? null : null}
                     </td>
                     <td className="whitespace-nowrap px-3 py-2 align-top text-right">
-                      {item.kind === 'comment' ? (
-                        <>
-                          {item.linked_story_id ? null : (
-                            <Button
-                              variant="ghost" size="sm" onClick={() => setConvertTargetId(item.id)}
-                              aria-label={t('commentsConvertToTaskAriaLabel', { n: ordinal, label: t('commentsConvertToTaskCta') })}
-                            >
-                              {t('commentsConvertToTaskCta')}
-                            </Button>
-                          )}
-                          <Button
-                            variant="ghost" size="sm" onClick={() => setReplyTargetId(item.id)}
-                            aria-label={t('commentsReplyAriaLabel', { n: ordinal, label: t('commentsReplyCta') })}
-                          >
-                            {t('commentsReplyCta')}
-                          </Button>
-                        </>
-                      ) : null}
+                      {item.linked_story_id ? null : (
+                        <Button
+                          variant="ghost" size="sm" onClick={() => setConvertTargetId(item.id)}
+                          aria-label={t('commentsConvertToTaskAriaLabel', { n: ordinal, label: t('commentsConvertToTaskCta') })}
+                        >
+                          {t('commentsConvertToTaskCta')}
+                        </Button>
+                      )}
+                      <Button
+                        variant="ghost" size="sm" onClick={() => setReplyTargetId(item.id)}
+                        aria-label={t('commentsReplyAriaLabel', { n: ordinal, label: t('commentsReplyCta') })}
+                      >
+                        {t('commentsReplyCta')}
+                      </Button>
                     </td>
                   </tr>
                 );
