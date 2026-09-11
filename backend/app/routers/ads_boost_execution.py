@@ -220,6 +220,11 @@ class SpendSummaryResponse(BaseModel):
     # 정신 재사용) — 이 GET이 이미 gate_id 단건 조회 자리라 3번째 GET 신설 안 함.
     # boost_start 커맨드 자체가 없으면(gate 승인 직후·실행 前) None.
     initiated_by: str | None
+    # story #3806(Phase3·3-2 PR 11, 페드루 PO 確定 2026-09-11 16:20Z) — §7 실측 열
+    # 「상한 초과 0건」의 장치. 캡처 spend 합이 sealed_ads_budget_minor에 도달한
+    # 시각(ads_boost_runs.cap_reached_at, 0368) — run 자체가 없거나 미도달이면
+    # null(지어내지 않는다).
+    cap_reached_at: str | None
     snapshots: list[SpendSnapshotView]
 
 
@@ -257,6 +262,7 @@ async def _get_ads_boost_spend_endpoint(
         sealed_ads_currency=summary["sealed_ads_currency"], captured_spend_minor=summary["captured_spend_minor"],
         remaining_minor=summary["remaining_minor"], run_status=summary["run_status"],
         initiated_by=summary["initiated_by"],
+        cap_reached_at=summary["cap_reached_at"].isoformat() if summary["cap_reached_at"] else None,
         snapshots=[
             SpendSnapshotView(
                 due_at=s["due_at"].isoformat(), captured_at=s["captured_at"].isoformat() if s["captured_at"] else None,

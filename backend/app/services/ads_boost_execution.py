@@ -141,7 +141,7 @@ async def request_ads_boost_start(
 
 async def _request_toggle(
     db: AsyncSession, *, org_id: uuid.UUID, gate_id: uuid.UUID, requester_member_id: uuid.UUID,
-    operation: str,
+    operation: str, initiated_by: str | None = None,
 ) -> PublicationCommand:
     gate = await _resolve_gate(db, org_id=org_id, gate_id=gate_id)
     destination = gate.sealed_ads_connection_id
@@ -177,7 +177,7 @@ async def _request_toggle(
     command, _ = await create_or_get_publication_command(
         db, org_id=org_id, gate_id=gate.id, destination=destination, approved_version=approved_version,
         requested_by_member_id=requester_member_id, scheduled_at=None, operation=operation,
-        content_kind=_ADS_BOOST_CONTENT_KIND, toggle_seq=toggle_seq,
+        content_kind=_ADS_BOOST_CONTENT_KIND, toggle_seq=toggle_seq, initiated_by=initiated_by,
     )
     await db.commit()
     return command
@@ -185,9 +185,16 @@ async def _request_toggle(
 
 async def request_ads_boost_pause(
     db: AsyncSession, *, org_id: uuid.UUID, gate_id: uuid.UUID, requester_member_id: uuid.UUID,
+    initiated_by: str | None = None,
 ) -> PublicationCommand:
+    """story #3806(Phase3·3-2 PR 11, 페드루 PO 確定 2026-09-11 16:20Z) — `initiated_by`는
+    선택값(기본 None)이다: 사람 「홍보 중지」 경로(라우터)는 여전히 안 넘겨(boost_start와
+    달리 pause/resume은 애初부터 scheduler/human 구분 요건이 없었다, PR6 정정 배경
+    문서 참고) — 오직 `_enforce_spend_cap`(ads_spend_snapshots.py)의 자동 중지만
+    "scheduler"를 명시로 넘긴다."""
     return await _request_toggle(
         db, org_id=org_id, gate_id=gate_id, requester_member_id=requester_member_id, operation=OP_PAUSE,
+        initiated_by=initiated_by,
     )
 
 

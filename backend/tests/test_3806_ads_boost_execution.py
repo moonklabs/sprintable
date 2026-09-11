@@ -50,11 +50,13 @@ def _configure_secrets(monkeypatch):
     importlib.reload(crypto_module)
 
 
-async def _setup_approved_gate(session_factory_result, *, approve=True, objective="POST_ENGAGEMENT"):
+async def _setup_approved_gate(session_factory_result, *, approve=True, objective="POST_ENGAGEMENT", budget_minor=100_000):
     """PR 2 API 경유로 게이트를 만들고(봉인 6열 전부 실제로 채워짐), approve=True면
     바로 승인까지 전이시킨다. 반환: (engine, Session, org_id, owner_id, gate_id).
     `objective`는 워커 fix 테스트가 [sandbox:budget-exceeded]/[sandbox:pause-delayed]
-    마커를 실어 보내는 자리(ads_sandbox_campaign.py 모듈 docstring 참고)."""
+    마커를 실어 보내는 자리(ads_sandbox_campaign.py 모듈 docstring 참고). `budget_minor`는
+    PR 11(상한 판정) 테스트가 sandbox 고정 spend(12,345/스냅샷)와 대조해 상한을 의도적으로
+    낮게 봉인할 자리."""
     from app.main import app
 
     engine, Session = session_factory_result
@@ -70,7 +72,7 @@ async def _setup_approved_gate(session_factory_result, *, approve=True, objectiv
     async with _client_for(app) as client:
         r = await client.post(
             f"/api/v2/organizations/{org_id}/publications/{pub.id}/boosts",
-            json=_boost_body(ad_connection_id=ad_conn.id, objective=objective),
+            json=_boost_body(ad_connection_id=ad_conn.id, objective=objective, budget_minor=budget_minor),
         )
     assert r.status_code == 201, r.text
     gate_id = uuid.UUID(r.json()["gate_id"])

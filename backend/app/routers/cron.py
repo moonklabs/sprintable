@@ -1325,6 +1325,17 @@ async def publication_commands_tick(
         except Exception as exc:
             logger.exception("ads-boost-starts tick error: %s", exc)
             counts["ads_boost_starts"] = {"error": "unhandled"}
+        # story #3806(Phase3·3-2 PR 11, 페드루 PO 確定 2026-09-11 16:20Z) — 「만들어졌는데
+        # 도는 자리 없음」 처방: `process_due_ads_spend_snapshots`가 PR4에서 만들어진
+        # 뒤 어떤 cron 축에도 피기백되지 않아(3-7 그라운딩 도중 자체발견) paid 지출이
+        # 실제로는 한 번도 자동 수집되지 않고 있었다 — 위 축들과 같은 피기백 사상
+        # (새 Cloud Scheduler 잡 0)·독립 try.
+        try:
+            from app.services.ads_spend_snapshots import process_due_ads_spend_snapshots
+            counts["ads_spend_snapshots"] = await process_due_ads_spend_snapshots(session)
+        except Exception as exc:
+            logger.exception("ads-spend-snapshots tick error: %s", exc)
+            counts["ads_spend_snapshots"] = {"error": "unhandled"}
         return _ok(counts)
     except Exception as exc:
         logger.exception("publication-commands cron error: %s", exc)
