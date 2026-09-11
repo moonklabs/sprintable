@@ -50,7 +50,6 @@ async def _seed(session):
     from app.models.organization import Organization
     from app.models.project import OrgMember, Project
     from app.models.project_access import ProjectAccess
-    from app.models.team import TeamMember
     from app.models.user import User
     from app.models.visual_artifact import ArtifactVersion, VisualArtifact
 
@@ -71,16 +70,11 @@ async def _seed(session):
     session.add(AgentProjectProfile(id=uuid.uuid4(), member_id=creator.id, project_id=project.id))
     # story #3370(카디르 QA 지적 2026-09-10) — propose_canonical_version이 이제
     # resolve_member_db_verified()(DB 실측)를 탄다. agent 판정 predicate는 site_posts.py::
-    # is_agent_caller와 동형(TeamMember.id==raw_id) — 실서비스는 0088 VIEW가 members⋈
-    # agent_project_profiles를 team_members로 투영하지만, 이 테스트 스위트의 `Base.
-    # metadata.create_all()`는 TeamMember 모델을 그 이름 그대로 **평 테이블**로 만들어
-    # (진짜 VIEW SQL을 안 태움) anchor 시딩(Member+AgentProjectProfile)만으로는 그 자리에
-    # 아무것도 안 보인다 — 같은 id로 TeamMember 행도 나란히 심어야 실측 가능(멤버 id
-    # 값 자체는 그대로라 이 파일의 다른 creator.id 참조와 전부 정합).
-    session.add(TeamMember(
-        id=creator.id, org_id=org.id, project_id=project.id, type="agent",
-        name="creator-agent", is_active=True,
-    ))
+    # is_agent_caller와 동형(team_members VIEW 조회) — team_members는 0088+부터 물리
+    # 테이블이 아니라 members⋈agent_project_profiles(+grant-only 3번째 UNION 브랜치, 0110)를
+    # 투영하는 VIEW다. 위 ProjectAccess(granted)+AgentProjectProfile 두 실 테이블만으로
+    # VIEW가 그대로 agent 행을 투영하므로 TeamMember 직접 삽입은 불필요 — CI 공유
+    # alembic-migrated DB에서 그 삽입은 "cannot insert into view"로 크래시한다(#4156).
     await session.commit()
 
     approver_user = User(id=uuid.uuid4(), email=f"approver-{uuid.uuid4().hex[:8]}@test.com", hashed_password="x")

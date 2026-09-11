@@ -373,24 +373,20 @@ async def test_ac4_agent_edits_human_creator_notified():
         async with Session() as s:
             from app.models.member import Member
             from app.models.project_access import ProjectAccess
-            from app.models.team import TeamMember
             agent_editor = Member(
                 id=uuid.uuid4(), org_id=seeded["org_id"], type="agent", name="editor-agent", is_active=True,
             )
             s.add(agent_editor)
             await s.commit()
+            # story #3370(카디르 QA 지적 2026-09-10) — resolve_member_db_verified()의 agent
+            # 판정은 team_members VIEW 실측(site_posts.py::is_agent_caller 동형 predicate)이다.
+            # team_members는 0088+부터 물리 테이블이 아니라 VIEW라 CI 공유 alembic DB에서
+            # TeamMember 직접 삽입은 크래시한다(#4156) — 0110 grant-only 3번째 UNION 브랜치가
+            # `project_access(permission='granted')`만으로 agent 행을 투영하므로 아래
+            # ProjectAccess 하나로 충분하다(TeamMember 직접 삽입 불필요·유해).
             s.add(ProjectAccess(
                 id=uuid.uuid4(), project_id=seeded["project_id"], member_id=agent_editor.id,
                 permission="granted", role="member",
-            ))
-            # story #3370(카디르 QA 지적 2026-09-10) — resolve_member_db_verified()의 agent
-            # 판정은 team_members 테이블 직접 조회(site_posts.py::is_agent_caller 동형
-            # predicate)다 — 이 스위트는 Base.metadata.create_all()이라 실서비스 0088 VIEW를
-            # 안 태워, Member(anchor)만으론 그 조회에 안 잡힌다. 같은 id로 TeamMember도
-            # 나란히 심는다(다른 파일과 동형 처방).
-            s.add(TeamMember(
-                id=agent_editor.id, org_id=seeded["org_id"], project_id=seeded["project_id"],
-                type="agent", name="editor-agent", is_active=True,
             ))
             await s.commit()
             agent_editor_id = agent_editor.id

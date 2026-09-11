@@ -62,6 +62,8 @@ async def _seed(session):
     from app.models.organization import Organization
     from app.models.project import Project
     from app.models.pm import Story
+    from app.models.member import Member
+    from app.models.project_access import ProjectAccess
 
     org_a = Organization(id=uuid.uuid4(), name="Org A", slug=f"org-a-{uuid.uuid4().hex[:8]}")
     org_b = Organization(id=uuid.uuid4(), name="Org B", slug=f"org-b-{uuid.uuid4().hex[:8]}")
@@ -78,9 +80,20 @@ async def _seed(session):
     session.add_all([story_a, story_b])
     await session.commit()
 
+    # resolve_member_db_verified()는 fail-closed(DB 실측) — 실 create_artifact 왕복(201)이
+    # 필요한 테스트는 실 org_a 멤버를 태워야 한다(story #3370, member_resolver.py:194-200).
+    member_a = Member(id=uuid.uuid4(), org_id=org_a.id, type="agent", name="importer-agent", is_active=True)
+    session.add(member_a)
+    await session.commit()
+    session.add(ProjectAccess(
+        id=uuid.uuid4(), project_id=project_a.id, member_id=member_a.id, permission="granted", role="member",
+    ))
+    await session.commit()
+
     return {
         "org_a_id": org_a.id, "project_a_id": project_a.id,
         "story_a_id": story_a.id, "story_b_id": story_b.id,
+        "member_a_id": member_a.id,
     }
 
 
@@ -252,7 +265,7 @@ async def test_import_image_success_creates_artifact_with_canonical_url():
     try:
         async with Session() as s:
             seeded = await _seed(s)
-        await _setup_app(app, Session, seeded["org_a_id"], seeded["project_a_id"])
+        await _setup_app(app, Session, seeded["org_a_id"], seeded["project_a_id"], user_id=seeded["member_a_id"])
         client = _client_for(app)
         try:
             image_bytes = _png_bytes()

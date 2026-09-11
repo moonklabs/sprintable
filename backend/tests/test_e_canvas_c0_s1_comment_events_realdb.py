@@ -67,20 +67,17 @@ async def _seed(session):
         for m in (author, assignee, mentioned)
     ]
     session.add_all(grants)
-    # story #3370(카디르 QA 지적 2026-09-10) — resolve_member_db_verified()가 team_members
-    # 테이블에서 agent를 찾는다(site_posts.py::is_agent_caller와 동형 predicate). 실서비스는
-    # 0088 VIEW가 members⋈agent_project_profiles를 그 이름으로 투영하지만, 이 스위트의
-    # `Base.metadata.create_all()`은 TeamMember 모델을 평 테이블로 만들어(VIEW SQL 미실행)
-    # anchor 시딩만으론 안 보인다 — 같은 id로 TeamMember 행도 나란히 심는다(agent_project_
-    # profiles도 함께 두는 건 실 VIEW 스키마와의 정합을 위해 — 어느 한쪽만 있어도 되는
-    # 환경이 아니라 실서비스 그림자를 그대로 남겨 둔다).
-    from app.models.team import TeamMember
+    # story #3370(카디르 QA 지적 2026-09-10) — resolve_member_db_verified()가 team_members에서
+    # agent를 찾는다(site_posts.py::is_agent_caller와 동형 predicate). team_members는 0088+
+    # 부터 물리 테이블이 아니라 members⋈agent_project_profiles(+grant-only 3번째 분기,
+    # 0110)를 투영하는 VIEW다 — CI의 공유 alembic-migrated DB에서 이 VIEW는 진짜 쓰기 불가
+    # (INSERT 시 "cannot insert into view" 크래시, #4156). Member+AgentProjectProfile(+위
+    # ProjectAccess granted)만 심으면 VIEW의 agent 분기(0110 2번/3번 UNION 브랜치)가 그대로
+    # 투영하므로 TeamMember 직접 삽입은 불필요·유해(정적 가드 test_no_team_members_view_
+    # dml_in_tests.py 대상, list-comprehension 형태라 그 가드의 AST 스캔 사각을 뚫고 CI에서만
+    # 크래시했다).
     session.add_all([
         AgentProjectProfile(id=uuid.uuid4(), member_id=m.id, project_id=project.id)
-        for m in (author, assignee, mentioned)
-    ])
-    session.add_all([
-        TeamMember(id=m.id, org_id=org.id, project_id=project.id, type="agent", name=m.name, is_active=True)
         for m in (author, assignee, mentioned)
     ])
 
