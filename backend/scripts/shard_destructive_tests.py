@@ -9,7 +9,7 @@ CI 매트릭스 샤드로 나눈다.
 #3383은 ci.yml의 템플릿 DB 스텝으로 create_all() 반복 자체를 없애 오버헤드 크기 자체를
 줄인다 — 이 파일의 배분 로직과는 직교하는 별개 처방, 둘 다 필요).
 
-`infra/destructive-schema-shard-weights.json`(2026-07-28 스냅샷, 파일별 pytest 실행초)을
+`infra/destructive-schema-shard-weights.jsonl`(2026-07-28 스냅샷, 파일별 pytest 실행초)을
 greedy LPT(Longest Processing Time first)로 읽어 균형 배분한다. 스냅샷에 없는 새 파일은
 평균 가중치를 받는다 — ⛔discover(`pytest --collect-only`)가 항상 SSOT다. 스냅샷은 가중치
 힌트일 뿐이라 새 파일이 스냅샷에 없다는 이유로 빠지는 일은 없다(파일 목록은 매번 실제
@@ -46,9 +46,82 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BACKEND_DIR = REPO_ROOT / "backend"
-WEIGHTS_PATH = REPO_ROOT / "infra" / "destructive-schema-shard-weights.json"
+# story #3812(CI, 페드루 PO 確定 2026-09-11) — JSON 배열 「끝에 항목 추가」는 항목별
+# 필드로 쪼개도(#3465) git 3-way merge 관점에선 여전히 "같은 닫는 `]`/이전 마지막
+# 줄" 주변을 양쪽이 건드리는 것이라 인접 충돌이 구조적으로 남는다(2026-09-11 하루
+# rebase 충돌 6회 실측 — #4192×2·#4197·#4199·#4201×3, 실제 의미 충돌은 0건, 전부
+# 「둘 다 유지」로 끝남 — «파일 구조»가 만든 가짜 충돌). 처방: 항목을 JSON 배열이
+# 아니라 **JSON Lines**(파일당 정확히 1줄)로 저장 + `.gitattributes`의 `merge=union`
+# 드라이버 — union은 라인 단위로 "양쪽이 추가한 줄을 전부 포함"하므로 서로 다른
+# 파일에 대한 두 PR의 추가는 구조적으로 절대 충돌하지 않는다(실증: 두 브랜치가 각각
+# 1줄을 추가한 뒤 merge/rebase 둘 다 충돌 0, 카드 97d15c85 AC1). 자주 안 바뀌는
+# 메타(`_snapshot_policy`·`_drift_remeasure_procedure`·`measured_at`)는 append-hot-
+# path에서 빼 별도 `.meta.json`에 둔다(그 파일은 드물게 손으로만 바뀌므로 union이
+# 아니라도 충돌 위험이 낮다).
+WEIGHTS_PATH = REPO_ROOT / "infra" / "destructive-schema-shard-weights.jsonl"
+WEIGHTS_META_PATH = REPO_ROOT / "infra" / "destructive-schema-shard-weights.meta.json"
 
 _FILE_RE = re.compile(r"^tests/[a-zA-Z0-9_]+\.py")
+
+
+class DuplicateShardWeightEntryError(Exception):
+    """story #3812 — union 병합의 유일한 맹점(자인, 카드 재현 실측): 두 PR이 «같은»
+    파일에 각자 다른 항목을 추가하면 union은 충돌 없이 둘 다 조용히 남긴다(진짜 의미
+    충돌인데 git이 못 잡는 유일한 경우 — 실무에선 극히 드물다: 신규 destructive 파일에
+    같은 날 같은 이름으로 두 PR이 동시에 등재를 시도하는 경우뿐). fail-loud로 잡는다."""
+
+
+class MissingTrailingNewlineError(Exception):
+    """story #3812(페드루 PO 追加 지적 2026-09-11 22:08Z) — union merge 고전 함정:
+    파일이 개행으로 안 끝나면 그 다음 append가 «같은 물리 줄»에 이어붙어 두 JSON
+    객체가 구분자 없이 뭉개질 수 있다(예: `...1.0}{"file":"new"...}` — json.loads가
+    "Extra data"로 결국 죽긴 하지만 원인이 뭔지 한눈에 안 보인다). 이 가드는 그
+    사후 증상이 아니라 **원인**(파일이 개행으로 안 끝남)을 append 시도 훨씬 전인
+    로드 시점에 먼저, 더 읽기 쉬운 메시지로 잡는다 — «한 줄=JSON 객체 정확히 1개»
+    불변식을 파일 자체 형태로 강제."""
+
+
+def _load_full_data(weights_path: Path = WEIGHTS_PATH, meta_path: Path | None = None) -> dict:
+    """jsonl(파일당 1줄) + meta.json(드물게 바뀌는 메타)을 옛 단일 JSON과 같은
+    `{"_snapshot_policy":..., "measured_at":..., "files": [...]}` 모양으로 합쳐
+    돌려준다 — 기존 소비처(load_weights/load_raw_entries/check_staleness) 셋 다
+    이 모양에 의존하므로 그 계약을 그대로 지키면 호출부 변경이 0에 가깝다.
+
+    `meta_path` 생략 시 `weights_path`의 형제 파일(`<stem>.meta.json`)로 유도한다
+    (실 경로에선 정확히 WEIGHTS_META_PATH와 같은 이름이 나옴 — 우연이 아니라 테스트가
+    tmp_path에 가짜 weights_path를 쓸 때 실 레포의 meta.json을 실수로 안 집어먹게
+    하는 의도적 설계, story #3812)."""
+    if meta_path is None:
+        meta_path = weights_path.with_suffix(".meta.json")
+    meta: dict = {}
+    if meta_path.exists():
+        meta = json.loads(meta_path.read_text())
+    files: list[dict] = []
+    seen: dict[str, dict] = {}
+    if weights_path.exists():
+        raw = weights_path.read_text()
+        if raw and not raw.endswith("\n"):
+            raise MissingTrailingNewlineError(
+                f"{weights_path.name}이 개행으로 끝나지 않는다(story #3812) — union merge "
+                "고전 함정: 다음 append가 마지막 줄에 그대로 이어붙어 JSON 객체 2개가 구분자 "
+                "없이 뭉개질 수 있다. 파일 끝에 개행 1개를 추가할 것."
+            )
+        for line_no, line in enumerate(raw.splitlines(), start=1):
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            entry = json.loads(line)
+            prior = seen.get(entry["file"])
+            if prior is not None and prior != entry:
+                raise DuplicateShardWeightEntryError(
+                    f"{weights_path.name}:{line_no} — 파일 {entry['file']!r}이 서로 다른 "
+                    f"항목으로 두 번 등재됐다(union 병합 맹점, story #3812) — 값 하나로 합칠 것: "
+                    f"{prior} vs {entry}"
+                )
+            if prior is None:
+                seen[entry["file"]] = entry
+                files.append(entry)
+    return {**meta, "files": files}
 
 
 def discover_files(backend_dir: Path = BACKEND_DIR) -> list[str]:
@@ -67,9 +140,7 @@ def discover_files(backend_dir: Path = BACKEND_DIR) -> list[str]:
 
 
 def load_weights(weights_path: Path = WEIGHTS_PATH) -> dict[str, float]:
-    if not weights_path.exists():
-        return {}
-    data = json.loads(weights_path.read_text())
+    data = _load_full_data(weights_path)
     return {e["file"]: float(e["sec"]) for e in data.get("files", [])}
 
 
@@ -78,10 +149,7 @@ def load_raw_entries(weights_path: Path = WEIGHTS_PATH) -> list[dict]:
     이미 `{file: sec}`로 평탄화해 `source`를 버리므로, 그 필드를 검증하려는 호출자는 이
     함수를 쓴다(load_weights()의 계약은 그대로 유지 — partition() 등 기존 소비처가 이
     변경으로 안 흔들린다)."""
-    if not weights_path.exists():
-        return []
-    data = json.loads(weights_path.read_text())
-    return data.get("files", [])
+    return _load_full_data(weights_path).get("files", [])
 
 
 def entries_missing_source(entries: list[dict]) -> list[str]:
@@ -119,7 +187,7 @@ def check_staleness(
     가능한 합계 자체를 저장하지 않으면 이 충돌 소지가 원천 봉쇄된다."""
     if not weights_path.exists():
         return None
-    data = json.loads(weights_path.read_text())
+    data = _load_full_data(weights_path)
     snapshot_total = len(data.get("files", []))
     if not snapshot_total:
         return None
@@ -442,7 +510,7 @@ def _audit_durations_mode(
             direction = "과소 등재" if o["ratio"] >= RATIO_WARN_HIGH_MULTIPLIER else "과대 등재"
             print(
                 f"::warning::등재값 {direction}(story #3558): {o['file']} — 실측 {o['measured_sec']:.1f}s vs "
-                f"등재 {o['weight_sec']:.1f}s(×{o['ratio']:.2f}) — infra/destructive-schema-shard-weights.json 재측정 검토."
+                f"등재 {o['weight_sec']:.1f}s(×{o['ratio']:.2f}) — infra/destructive-schema-shard-weights.jsonl 재측정 검토."
             )
         print(f"경고 {len(outliers)}건(산출물 {len(measured)}건 중) — 실패 아님, story #3558 AC2", file=sys.stderr)
 
