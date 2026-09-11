@@ -441,6 +441,47 @@ describe('GateEvidence — 레시피 approve 게이트 승인 대상 실물 렌�
     expect(container.textContent).not.toContain(koMessages.cage.recipeApprovalSealedHashLabel);
   });
 
+  // story #3806(Phase3·3-2 PR5, 유나 §절 §1 「결재 카드 봉인 5필드」) — sealed_content_*
+  // 렌더 검증과 동형(순수함수 테스트만으론 실 마운트 렌더 여부를 못 잡는다, #2814 동일 근거).
+  it('⭐PR5 §1 — ads_boost 게이트의 봉인 총예산·기간·목표가 실제로 DOM에 나타난다', async () => {
+    const gate = recipeApprovalGate(
+      {},
+      {
+        gate_type: 'ads_boost',
+        sealed_ads_budget_minor: 50_000,
+        sealed_ads_currency: 'KRW',
+        sealed_ads_starts_at: '2026-09-12T00:00:00Z',
+        sealed_ads_ends_at: '2026-09-19T00:00:00Z',
+        sealed_ads_objective: 'POST_ENGAGEMENT',
+      },
+    );
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(container.textContent).toContain(koMessages.cage.adsBoostBudgetLabel);
+    // formatMinorCurrency(50_000, 'KRW', ...) — KRW exponent=0(minor=major) + ko
+    // messages.generationBudgetAmountKrw="{amount}원".
+    expect(container.textContent).toContain('50,000원');
+    expect(container.textContent).toContain(koMessages.cage.adsBoostScheduleLabel);
+    expect(container.textContent).toContain('7일'); // 2026-09-12~19 = 7일
+    expect(container.textContent).toContain(koMessages.cage.adsBoostObjectiveLabel);
+    expect(container.textContent).toContain('POST_ENGAGEMENT');
+  });
+
+  it('ads_boost가 아닌 gate_type은 봉인 예산 라벨 자체를 그리지 않는다(지어내지 않음)', async () => {
+    const gate = recipeApprovalGate({ channel: 'threads', stage: 'approve' });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(container.textContent).not.toContain(koMessages.cage.adsBoostBudgetLabel);
+    expect(container.textContent).not.toContain(koMessages.cage.adsBoostScheduleLabel);
+    expect(container.textContent).not.toContain(koMessages.cage.adsBoostObjectiveLabel);
+  });
+
   // story #3367(3자기점검, 페드루 지적 2026-09-10) — AC7("마지막 수정 주체·목적지").
   describe('마지막 수정 주체·목적지(story #3367 AC7)', () => {
     it('⭐destination=null(hosted_site)·latest_author_kind=human — 「마지막 수정 주체 · 휴먼」·「목적지 · 호스팅 블로그」가 뜬다', async () => {

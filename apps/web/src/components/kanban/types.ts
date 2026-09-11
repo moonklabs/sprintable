@@ -146,6 +146,15 @@ export interface GateItem {
   // approved 뒤 편집이면 옛 버전에 묶임)와 다를 수 있다. external_publish 게이트만·
   // draft_id 배치 enrich(BE gates.py) 대상이 아니면 undefined.
   latest_author_kind?: 'agent' | 'human' | null;
+  // story #3806(Phase3·3-2 PR5, 유나 §절 §1 「결재 카드 봉인 5필드」) — ads_boost
+  // 전용 sealing. sealed_content_*/sealed_doc_*와 동일 선례(다른 gate_type은 전부
+  // undefined/null). BE gates.py::GateResponse 등재(PR5 자체발견 fix, 위 커밋).
+  sealed_ads_budget_minor?: number | null;
+  sealed_ads_currency?: string | null;
+  sealed_ads_starts_at?: string | null;
+  sealed_ads_ends_at?: string | null;
+  sealed_ads_objective?: string | null;
+  sealed_ads_connection_id?: string | null;
 }
 
 // story #2054: 결재함 통합 인박스에서 HitlRequest(gate_approval park) 항목 최소 스키마(BE
