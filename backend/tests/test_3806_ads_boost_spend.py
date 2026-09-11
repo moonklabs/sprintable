@@ -179,6 +179,28 @@ async def test_spend_endpoint_returns_budget_and_captured_sum():
         assert body["remaining_minor"] == 100_000 - 12_345 * 2
         assert len(body["snapshots"]) == 2
         assert all(s["spend_minor"] == 12_345 for s in body["snapshots"])
+        # story #3806(PR5, 3자기점검) — pause/resume UI가 「실행 중」을 그릴 근거.
+        assert body["run_status"] == "running"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_spend_endpoint_run_status_null_before_boost_started():
+    """gate는 approved인데 boost_start를 아직 요청 안 한 상태(AdsBoostRun 행 자체가
+    없음) — run_status는 "미실행"을 뜻하는 None이지 "pending" 등 지어낸 값이 아니다."""
+    from app.main import app
+    from tests.test_3475_publishing_metrics import _client_for, _setup_org_scoped_app
+    from tests.test_e4fc29fa_site_post_orchestration import _session_factory
+
+    engine, Session, org_id, project_id, owner_id, gate_id = await _setup_approved_gate(await _session_factory())
+    try:
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+        async with _client_for(app) as client:
+            r = await client.get(f"/api/v2/organizations/{org_id}/ads-boosts/{gate_id}/spend")
+        assert r.status_code == 200, r.text
+        assert r.json()["run_status"] is None
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()

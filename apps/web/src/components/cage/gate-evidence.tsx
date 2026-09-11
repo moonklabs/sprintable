@@ -6,13 +6,15 @@ import { useLocale, useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatRelativeTime } from '@/lib/storage/format';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { resolveDisplayTimezone, formatScheduledAt } from '@/components/content/schedule-format';
 import type { GateItem } from '@/components/kanban/types';
 import { parseEntityRef, unescapeReferenceLabel } from '@/components/chat/entity-ref';
 import { EntityChip, getEntityHref } from '@/components/chat/embed-card';
 import { isCommentReplyGate } from '@/components/cage/gate-risk';
 import { AuthorKindBadge } from '@/components/content/author-kind-badge';
 import { channelLabel } from '@/lib/channel-label';
+import { formatMinorCurrency, type GenerationBudgetCurrency } from '@/components/content/generation-budget-indicator';
+import { adsBoostObjectiveLabel } from '@/lib/ads-boost-objective-label';
 
 /**
  * H1-S8 머지 verdict 게이트 evidence(read-only 표시). 3 surface(GateInbox row·story detail·
@@ -206,6 +208,14 @@ interface RecipeApprovalFacts {
   // (lib/channel-label.ts, 집안 정본)로 표시명을 낸다 — destinationConnectionId가
   // null(hosted_site)이면 이 필드는 무의미(항상 null, 아래 렌더가 안 읽는다).
   destinationChannel: string | null;
+  // story #3806(Phase3·3-2 PR5, 유나 §절 §1 「결재 카드 봉인 5필드」) — sealed_content_*/
+  // sealed_doc_*와 동일 선례(다른 gate_type은 전부 null). 통화·기간·목표는 §1 표
+  // 그대로(총예산은 adsBudgetMinor+adsCurrency 조합으로 formatMinorCurrency 재사용).
+  adsBudgetMinor: number | null;
+  adsCurrency: string | null;
+  adsStartsAt: string | null;
+  adsEndsAt: string | null;
+  adsObjective: string | null;
 }
 
 function recipeApprovalFacts(gate: GateItem): RecipeApprovalFacts | null {
@@ -250,11 +260,16 @@ function recipeApprovalFacts(gate: GateItem): RecipeApprovalFacts | null {
       ? gate.latest_author_kind : null,
     destinationConnectionId: realString(gate.sealed_destination_connection_id) ?? null,
     destinationChannel: realString(gate.sealed_destination_channel) ?? null,
+    adsBudgetMinor: typeof gate.sealed_ads_budget_minor === 'number' ? gate.sealed_ads_budget_minor : null,
+    adsCurrency: realString(gate.sealed_ads_currency),
+    adsStartsAt: realString(gate.sealed_ads_starts_at),
+    adsEndsAt: realString(gate.sealed_ads_ends_at),
+    adsObjective: realString(gate.sealed_ads_objective),
   };
   const hasAny = isCommentReply ||
     facts.workItemRef || facts.draftDocRef || facts.draftDocSummary || facts.channel || facts.stage ||
     facts.contentBody || facts.contentVersion !== null || facts.contentSha256 ||
-    facts.sealedDocRef || facts.sealedDocBodySha256;
+    facts.sealedDocRef || facts.sealedDocBodySha256 || facts.adsBudgetMinor !== null;
   return hasAny ? facts : null;
 }
 
@@ -589,9 +604,48 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
   // HostedSite/Wordpress 등)는 content ns에 산다(content/[draftId]/page.tsx 기존
   // 소비처와 동일 배선) — cage ns의 이 컴포넌트가 별도로 바인딩한다.
   const tContent = useTranslations('content');
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
   const [expanded, setExpanded] = useState(false);
   return (
     <div className="mt-1.5 space-y-1 rounded-lg bg-muted/40 px-2.5 py-1.5 text-[11.5px]">
+      {/* story #3806(Phase3·3-2 PR5, 유나 §절 §1 「결재 카드 봉인 5필드」) — 총예산·기간·
+          목표 순서 그대로(통화는 총예산 표시에 붙는다, §절 표 그대로). ads_boost가
+          아닌 gate_type은 adsBudgetMinor가 항상 null이라 이 블록 자체가 안 그려진다. */}
+      {facts.adsBudgetMinor !== null ? (
+        <div className="space-y-0.5">
+          <p>
+            <span className="text-muted-foreground">{t('adsBoostBudgetLabel')} · </span>
+            <span className="text-foreground font-medium">
+              {facts.adsCurrency
+                ? formatMinorCurrency(facts.adsBudgetMinor, facts.adsCurrency as GenerationBudgetCurrency, locale, tContent)
+                : facts.adsBudgetMinor}
+            </span>
+          </p>
+          {facts.adsStartsAt && facts.adsEndsAt ? (
+            <p>
+              <span className="text-muted-foreground">{t('adsBoostScheduleLabel')} · </span>
+              <span className="text-foreground">
+                {formatScheduledAt(facts.adsStartsAt, displayTimezone).display}
+                {' ~ '}
+                {formatScheduledAt(facts.adsEndsAt, displayTimezone).display}
+                {' '}
+                ({t('adsBoostScheduleDays', {
+                  days: Math.round(
+                    (new Date(facts.adsEndsAt).getTime() - new Date(facts.adsStartsAt).getTime()) / 86_400_000,
+                  ),
+                })})
+              </span>
+            </p>
+          ) : null}
+          {facts.adsObjective ? (
+            <p>
+              <span className="text-muted-foreground">{t('adsBoostObjectiveLabel')} · </span>
+              <span className="text-foreground">{adsBoostObjectiveLabel(facts.adsObjective, tContent)}</span>
+            </p>
+          ) : null}
+        </div>
+      ) : null}
       {facts.stage ? (
         <p>
           <span className="text-muted-foreground">{t('recipeApprovalStageLabel')} · </span>

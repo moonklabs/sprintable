@@ -763,7 +763,9 @@ describe('InsightsBoardPage — 「사람 차례」 행 배지(story #3766)', ()
     stubFetch({ page1: [rowNoActionsNoBadge] });
     await mount();
     const row = container.querySelector('[data-testid="insights-board-row"]')!;
-    const actionCell = row.querySelectorAll('td')[6] as HTMLElement;
+    // story #3806(PR5 조각⑥) — 광고비 칸이 comments 뒤·actions 앞에 신설돼 actions는
+    // 이제 8번째(index 7) 열이다(제목·채널·발행·d1·d7·댓글·광고비·행동).
+    const actionCell = row.querySelectorAll('td')[7] as HTMLElement;
     expect(actionCell.children.length).toBe(0);
   });
 });

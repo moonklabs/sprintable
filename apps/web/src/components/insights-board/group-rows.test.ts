@@ -8,7 +8,7 @@ function makeRow(overrides: Partial<InsightsBoardRow> & { publication_id: string
     title: '제목', published_at: '2026-09-01T00:00:00Z', external_url: null,
     connection_id: null, d1: null, d7: null, comments_count: null,
     channel_post_draft_id: null, comments_last_collected_at: null, comments_supported: false,
-    asset_sha256s: null, hook_key: null, command_status: null,
+    asset_sha256s: null, hook_key: null, command_status: null, ads_boost: null,
     ...overrides,
   };
 }

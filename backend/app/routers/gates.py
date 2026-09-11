@@ -255,6 +255,17 @@ class GateResponse(BaseModel):
     # list_gates/get_gate_endpoint가 각자 배치/단건 조회해 채운다. 삭제된 doc·
     # sealed_doc_id 자체가 없으면 null(지어내지 않는다).
     sealed_doc_title: str | None = None
+    # story #3806(Phase3·3-2 PR5, 3자기점검 — PR2가 Gate ORM 컬럼(models/gate.py:179-190)만
+    # 추가하고 이 응답 스키마 등재를 빠뜨려 API가 항상 None을 냈다) — ads_boost 전용 sealing.
+    # sealed_content_*/sealed_doc_*와 동일 선례 — Gate ORM 컬럼명과 일치라 from_attributes로
+    # 자동 채워짐(다른 gate_type은 전부 None, additive·하위호환). 유나 §절 §1 「결재 카드
+    # 봉인 5필드」(총예산·통화·기간·목표) + connection_id(표시는 안 하나 감사용 봉인 축).
+    sealed_ads_budget_minor: int | None = None
+    sealed_ads_currency: str | None = None
+    sealed_ads_starts_at: datetime | None = None
+    sealed_ads_ends_at: datetime | None = None
+    sealed_ads_objective: str | None = None
+    sealed_ads_connection_id: uuid.UUID | None = None
     reapproval_required: bool = False
     created_at: datetime
     updated_at: datetime

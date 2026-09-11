@@ -205,6 +205,10 @@ class SpendSummaryResponse(BaseModel):
     sealed_ads_currency: str
     captured_spend_minor: int
     remaining_minor: int
+    # story #3806(Phase3·3-2 PR5, 디디 3자기점검) — AdsBoostRun.status('pending'|
+    # 'running'|'paused'|'failed') 실 관측값. run 행이 아직 없으면 None(gate 승인
+    # 직후·실행 요청 前 — "미실행"을 지어낸 상태값으로 가리지 않는다).
+    run_status: str | None
     snapshots: list[SpendSnapshotView]
 
 
@@ -240,7 +244,7 @@ async def _get_ads_boost_spend_endpoint(
     return SpendSummaryResponse(
         gate_id=summary["gate_id"], sealed_ads_budget_minor=summary["sealed_ads_budget_minor"],
         sealed_ads_currency=summary["sealed_ads_currency"], captured_spend_minor=summary["captured_spend_minor"],
-        remaining_minor=summary["remaining_minor"],
+        remaining_minor=summary["remaining_minor"], run_status=summary["run_status"],
         snapshots=[
             SpendSnapshotView(
                 due_at=s["due_at"].isoformat(), captured_at=s["captured_at"].isoformat() if s["captured_at"] else None,

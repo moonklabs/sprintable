@@ -26,6 +26,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.ads_boost_run import AdsBoostRun
 from app.models.gate import Gate
 from app.models.insight_snapshot import InsightSnapshot
 
@@ -46,6 +47,17 @@ def organic_snapshots_only(stmt):
     소비처도 이 함수를 부르는 것만으로 자동으로 막히게 한다 — `.where()`를 손으로
     다시 쓰지 않는 것 자체가 강제다."""
     return stmt.where(InsightSnapshot.channel.notin_(_PAID_CHANNELS))
+
+
+def paid_snapshots_only(stmt):
+    """story #3806(Phase3·3-2 PR5, 조각⑥ — 성과 보드 「광고비」 분리 칸) —
+    organic_snapshots_only()의 반대 방향 술어. 이 파일의 캡처 루프
+    (process_due_ads_spend_snapshots)는 anchor_at으로 이미 자기 행만 건드려
+    이 술어가 필요 없었지만, 조각⑥이 여러 publication_id를 한 번에 배치
+    조회하면서 organic 행과 섞이지 않게 명시 필터가 필요해졌다 — 같은 실수
+    (organic_snapshots_only 신설 계기)를 반대 방향으로 반복하지 않도록 이
+    파일 한 곳에 짝을 둔다."""
+    return stmt.where(InsightSnapshot.channel.in_(_PAID_CHANNELS))
 
 
 async def schedule_ads_spend_snapshots(
@@ -188,6 +200,17 @@ async def get_ads_boost_spend_summary(db: AsyncSession, *, org_id: uuid.UUID, ga
         ).order_by(InsightSnapshot.due_at.asc())
     )).scalars().all()
 
+    # story #3806(Phase3·3-2 PR5, 디디 3자기점검 — 페드루 지적 없이 자체 발견) — pause/
+    # resume UI가 「실행 중/중지됨」을 그리려면 AdsBoostRun.status(PR3 워커 fix가 만든
+    # 「Meta 쪽 지금 상태」 최종 관측값, ads_boost_run.py 모델 docstring)가 필요한데,
+    # 지금 어떤 라우터도 이 값을 클라이언트에 노출하지 않는다(grep 0건) — /spend가
+    # 이미 per-gate-id 조회 자리라 그 한 번의 왕복에 얹는다(2번째 GET 신설 안 함).
+    # run이 아직 없으면(gate 승인 직후·실행 요청 前) None — "미실행"과 "pending"을
+    # 뭉개지 않는다(지어내지 않는다).
+    run = (await db.execute(
+        select(AdsBoostRun).where(AdsBoostRun.org_id == org_id, AdsBoostRun.gate_id == gate_id)
+    )).scalar_one_or_none()
+
     captured_spend_minor = sum(
         (s.normalized or {}).get("spend") or 0 for s in snapshots if s.status == "captured"
     )
@@ -197,6 +220,7 @@ async def get_ads_boost_spend_summary(db: AsyncSession, *, org_id: uuid.UUID, ga
         "sealed_ads_currency": gate.sealed_ads_currency,
         "captured_spend_minor": captured_spend_minor,
         "remaining_minor": (gate.sealed_ads_budget_minor or 0) - captured_spend_minor,
+        "run_status": run.status if run is not None else None,
         "snapshots": [
             {
                 "due_at": s.due_at, "captured_at": s.captured_at, "status": s.status,

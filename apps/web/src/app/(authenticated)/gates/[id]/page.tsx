@@ -9,6 +9,7 @@ import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { GateEvidence, GateActivityHistory, gateNeedsAction, gateDecision } from '@/components/cage/gate-evidence';
+import { BoostExecutionControl } from '@/components/cage/boost-execution-control';
 import { GateSignatureApproval } from '@/components/cage/gate-signature-approval';
 import { GateUndoButton, isUndoEligible } from '@/components/cage/gate-undo-button';
 import { GateDiscussDialog } from '@/components/cage/gate-discuss-dialog';
@@ -396,6 +397,20 @@ export default function GateDetailPage() {
                     {/* story #2631 — 오클릭 정정(방금 본인이 해소한 게이트, 5분 창). */}
                     {isUndoEligible(gate, currentTeamMemberId) ? (
                       <GateUndoButton gateId={gate.id} onUndone={() => void fetchGate()} />
+                    ) : null}
+                    {/* story #3806(Phase3·3-2 PR5, 유나 §절 §2) — ads_boost·승인됨 게이트의
+                        시작/중지/재개. 상태 3 중 「승인됨」(approved)일 때만 — 「승인 대기」는
+                        needsAction 분기가 이미 따로 처리(액션 버튼), 「변경됨·재승인 필요」는
+                        isResubmitWaiting류로 별개(gate.status가 다시 pending으로 재오픈됨). */}
+                    {gate.gate_type === 'ads_boost' && gate.status === 'approved' && gate.org_id ? (
+                      <BoostExecutionControl
+                        orgId={gate.org_id} gateId={gate.id}
+                        sealedAdsBudgetMinor={gate.sealed_ads_budget_minor ?? null}
+                        sealedAdsCurrency={gate.sealed_ads_currency ?? null}
+                        sealedAdsStartsAt={gate.sealed_ads_starts_at ?? null}
+                        sealedAdsEndsAt={gate.sealed_ads_ends_at ?? null}
+                        sealedAdsObjective={gate.sealed_ads_objective ?? null}
+                      />
                     ) : null}
                   </div>
                 ) : !canAct ? (

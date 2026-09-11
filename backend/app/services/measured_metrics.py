@@ -49,6 +49,7 @@ from app.models.channel_post_comment import CommentCollectionSchedule
 from app.models.channel_publication_reconciliation import ChannelPublicationReconciliation
 from app.models.evidence import Evidence
 from app.models.insight_snapshot import InsightSnapshot
+from app.services.ads_spend_snapshots import organic_snapshots_only
 from app.models.org_pageview_daily import OrgPageviewDaily
 from app.models.org_pageview_utm_daily import OrgPageviewUtmDaily
 
@@ -143,12 +144,17 @@ async def _captured_snapshot_publication_ids(
     """기간 내 captured 스냅샷이 있는 발행 집합 — follow_up_creation_rate·
     reconciliation_coverage_rate 두 지표가 같은 분모를 쓴다(둘 다 "이 기간에 실측
     스냅샷이 잡힌 발행"을 모집단으로 삼는 정의, story #3620이 #3618의 분모를
-    재사용)."""
+    재사용).
+
+    story #3806(Phase3·3-2 PR5, 디디 3자기점검) — organic_snapshots_only() 없이는
+    paid(ads_boost) 캡처만 있고 organic 캡처는 아직 없는 발행이 "실측 스냅샷이
+    잡힌 발행"으로 잘못 세어져, 두 지표의 분모가 부풀려진다(organic 수집 자체가
+    아직 안 됐는데 이미 됐다고 착시)."""
     return (await db.execute(
-        select(InsightSnapshot.publication_id).where(
+        organic_snapshots_only(select(InsightSnapshot.publication_id).where(
             InsightSnapshot.org_id == org_id, InsightSnapshot.status == "captured",
             InsightSnapshot.captured_at.is_not(None), InsightSnapshot.captured_at >= period_start,
-        ).distinct()
+        )).distinct()
     )).scalars().all()
 
 

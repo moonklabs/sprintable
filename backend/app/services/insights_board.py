@@ -44,7 +44,9 @@ from app.models.insight_snapshot import InsightSnapshot
 from app.models.pm import Story
 from app.models.publication_command import PublicationCommand
 from app.models.site_post import SitePost
+from app.models.ads_boost_run import AdsBoostRun
 from app.models.site_post_draft import SitePostDraft
+from app.services.ads_spend_snapshots import organic_snapshots_only, paid_snapshots_only
 from app.services.insight_snapshots import (
     NORMALIZED_KEYS,
     assemble_channel_post_asset_evidence,
@@ -238,11 +240,18 @@ async def list_insights_board(
         # 통이다(축은 다음 발로 가른다 — 둘 다 "기다린다"). FE는 이 통을 status=pending
         # 하나로 보낸다(별도 파라미터 값 안 만든다) — 여기서 그 값을 둘로 넓힌다.
         status_values = ("pending", "in_progress") if status == "pending" else (status,)
+        # story #3806(Phase3·3-2 PR5, 디디 3자기점검 — 자체발견) — ?status= 필터는
+        # organic 수집 상태 축이다(§3746 v5, «수집 대기»류). paid(ads_boost) 스냅샷도
+        # 같은 publication_id·같은 status 값 집합(pending/in_progress/captured/failed)을
+        # 쓰므로, organic_snapshots_only() 없이는 paid 전용 boost가 걸린 publication의
+        # 행이 organic 수집이 이미 끝났어도 paid 스냅샷의 상태 때문에 필터에 잘못
+        # 걸리거나 빠질 수 있다 — PR4가 확立한 유일한 방어 지점(insight_snapshots.py
+        # 두 소비처와 동일 선례) 재사용, 새 필터 로직 발명 0.
         query = query.where(exists(
-            select(1).where(
+            organic_snapshots_only(select(1).where(
                 InsightSnapshot.publication_id == rows_cte.c.publication_id,
                 InsightSnapshot.status.in_(status_values),
-            )
+            ))
         ))
 
     if sort == "published_at":
@@ -269,12 +278,18 @@ async def list_insights_board(
         # PO 確定 (c) — (metric NULLS LAST, published_at DESC, id) 3키 컴포지트. 스칼라
         # 서브쿼리 하나로 그 publication의 해당 버킷(+1일 또는 +7일) 정규화값을 뽑는다
         # (스냅샷 표시용 배치 조회와 별개 — 정렬은 SQL이 해야 keyset 커서가 성립한다).
+        # story #3806(Phase3·3-2 PR5, 디디 3자기점검) — 정렬 지표도 organic 축이다.
+        # paid 스냅샷의 due_at이 우연히 published_at+1d/+7d와 같은 날로 반올림되면
+        # (label_snapshot_offset과 별개로, 이 스칼라 서브쿼리는 정확한 due_at 등치
+        # 비교라 우연 일치는 드물지만 anchor_at=run.started_at이 published_at과
+        # 가까운 boost는 실제로 겹칠 수 있다) organic_snapshots_only() 없이는 그
+        # 행이 이 정렬축에 paid 값을 섞어 넣을 수 있다 — 위 status 필터와 동일 근거.
         metric_col = (
-            select(cast(InsightSnapshot.normalized[metric].astext, Integer))
+            organic_snapshots_only(select(cast(InsightSnapshot.normalized[metric].astext, Integer))
             .where(
                 InsightSnapshot.publication_id == rows_cte.c.publication_id,
                 InsightSnapshot.due_at == rows_cte.c.published_at + timedelta(days=offset_days),
-            )
+            ))
             .correlate(rows_cte)
             .scalar_subquery()
         ).label("metric_value")
@@ -363,11 +378,17 @@ async def list_insights_board(
     publication_ids = [r.publication_id for r in page]
     snapshots_by_pub: dict[uuid.UUID, list[InsightSnapshot]] = {}
     if publication_ids:
+        # story #3806(Phase3·3-2 PR5, 디디 3자기점검) — d1/d7 버킷 원천도 organic
+        # 전용이다. anchor_at(paid, run.started_at)과 published_at(organic)이 가까운
+        # boost는 label_snapshot_offset(아래 루프)이 paid 스냅샷의 due_at을 1d/7d로
+        # 반올림해 organic 버킷 자리에 paid 지출값을 끼워 넣을 수 있다 — 「paid≠organic
+        # 섞지 않음」(유나 §절 §3)이 이 원천부터 깨지면 조각⑥의 광고비 분리 칸 자체가
+        # 무의미해진다. organic_snapshots_only()로 원천에서 차단.
         snap_rows = (await db.execute(
-            select(InsightSnapshot).where(
+            organic_snapshots_only(select(InsightSnapshot).where(
                 InsightSnapshot.publication_id.in_(publication_ids),
                 InsightSnapshot.status != "superseded",
-            )
+            ))
         )).scalars().all()
         for snap in snap_rows:
             snapshots_by_pub.setdefault(snap.publication_id, []).append(snap)
@@ -404,6 +425,57 @@ async def list_insights_board(
         )).scalars().all()
         for c in cmd_rows:
             latest_command_by_gate.setdefault(c.gate_id, c)
+
+    # story #3806(Phase3·3-2 PR5 조각⑥, 유나 §절 §3 「성과 보드 «광고비» 분리 칸」) —
+    # publication_id → ads_boost 요약 배치(N+1 회피, 위 배치들과 동형). 상관 키는
+    # Gate.scope_key(str(publication_id), ads_boost.py::request_ads_boost 확認) —
+    # publication_id마다 최대 1개 ads_boost 게이트(재승인도 같은 게이트 재사용, PR2
+    # 확定). paid_snapshots_only()로 organic 배치(snap_rows, 위)와 원천부터 분리 —
+    # 같은 InsightSnapshot 행을 두 번 다른 조건으로 긁는 게 아니라 애초에 서로 다른
+    # 채널 집합만 각자 본다.
+    ads_boost_gate_by_pub: dict[uuid.UUID, Gate] = {}
+    if publication_ids:
+        ads_boost_gates = (await db.execute(
+            select(Gate).where(
+                Gate.org_id == org_id, Gate.gate_type == "ads_boost",
+                Gate.scope_key.in_([str(pid) for pid in publication_ids]),
+            )
+        )).scalars().all()
+        for g in ads_boost_gates:
+            ads_boost_gate_by_pub[uuid.UUID(g.scope_key)] = g
+
+    ads_boost_by_pub: dict[uuid.UUID, dict[str, Any]] = {}
+    if ads_boost_gate_by_pub:
+        ads_gate_ids = [g.id for g in ads_boost_gate_by_pub.values()]
+        run_status_by_gate: dict[uuid.UUID, str] = {}
+        run_rows = (await db.execute(
+            select(AdsBoostRun).where(AdsBoostRun.gate_id.in_(ads_gate_ids))
+        )).scalars().all()
+        for run in run_rows:
+            run_status_by_gate[run.gate_id] = run.status
+
+        paid_snap_rows = (await db.execute(
+            paid_snapshots_only(select(InsightSnapshot).where(
+                InsightSnapshot.publication_id.in_(ads_boost_gate_by_pub.keys()),
+            ))
+        )).scalars().all()
+        captured_spend_by_pub: dict[uuid.UUID, int] = {}
+        for snap in paid_snap_rows:
+            if snap.status != "captured":
+                continue
+            spend = (snap.normalized or {}).get("spend") or 0
+            captured_spend_by_pub[snap.publication_id] = captured_spend_by_pub.get(snap.publication_id, 0) + spend
+
+        for pub_id, gate in ads_boost_gate_by_pub.items():
+            captured = captured_spend_by_pub.get(pub_id, 0)
+            ads_boost_by_pub[pub_id] = {
+                "gate_id": gate.id, "gate_status": gate.status,
+                "sealed_budget_minor": gate.sealed_ads_budget_minor,
+                "sealed_currency": gate.sealed_ads_currency,
+                "captured_spend_minor": captured,
+                "remaining_minor": (gate.sealed_ads_budget_minor or 0) - captured,
+                "run_status": run_status_by_gate.get(gate.id),
+            }
 
     from app.services.channel_adapters import CHANNEL_ADAPTERS
 
@@ -479,6 +551,10 @@ async def list_insights_board(
             "command_status": (
                 latest_command_by_gate[r.gate_id].status if r.gate_id in latest_command_by_gate else None
             ),
+            # story #3806(Phase3·3-2 PR5 조각⑥) — ads_boost 요약. 이 publication에
+            # 홍보 요청 자체가 없으면 None(유나 §절 §3 「해당 없음」의 데이터 원천 —
+            # FE가 None을 「해당 없음」으로 렌더, 값을 지어내지 않는다).
+            "ads_boost": ads_boost_by_pub.get(r.publication_id),
         })
 
     # story #3697(유나 § — 「지금 아무도 안 따라간다」가 계약을 참으로 만들지 않는다) —

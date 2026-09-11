@@ -85,6 +85,20 @@ export interface InsightsBoardRow {
   // PublicationCommand 행) — 새 낱말 0. 수집 상태 축(d1/d7·comments_*)과는 다른
   // 축이라 필터 대상이 아니라 행 배지 전용. site_post 행은 항상 null.
   command_status: string | null;
+  // story #3806(Phase3·3-2 PR5 조각⑥, 유나 §절 §3 「성과 보드 «광고비» 분리 칸」) —
+  // 이 publication에 홍보 요청이 없으면 null(「해당 없음」 원천 — 지어내지 않는다).
+  ads_boost: AdsBoostSummaryView | null;
+}
+
+export interface AdsBoostSummaryView {
+  gate_id: string;
+  gate_status: string;
+  sealed_budget_minor: number | null;
+  sealed_currency: string | null;
+  captured_spend_minor: number;
+  remaining_minor: number;
+  // AdsBoostRun 행이 아직 없으면(시작 前) null.
+  run_status: 'pending' | 'running' | 'paused' | 'failed' | null;
 }
 
 export type Ga4ConnectionStatus = 'not_connected' | 'needs_reauth' | 'connected';
