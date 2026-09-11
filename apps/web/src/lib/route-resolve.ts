@@ -66,6 +66,10 @@ export const RESERVED_FIRST_SEGMENTS = new Set([
   // 라우트. `scripts/verify-reserved-first-segments-sync.ts`가 어긋남을 CI에서 잡는다.
   '.well-known', 'activity', 'api', 'apple-app-site-association', 'apple-icon.png', 'auth',
   'channel', 'chats', 'dashboard',
+  // [SID:3807] 슬라이스12 AC2 — 새 최상위 app/desktop/updates/macos.json(공개 업데이트
+  // 매니페스트 중계) 신설. 미등재 시 '/desktop/...'가 워크스페이스 slug로 오인될 수 있다
+  // (카디르 QA #4187 발견).
+  'desktop',
   'favicon.ico', 'forgot-password', 'gates', 'icon.svg', 'inbox', 'internal-dogfood',
   'invite', 'login', 'loop-queue', 'manifest.webmanifest', 'meetings', 'mfa', 'more',
   // [P1] iOS TestFlight 구글 로그인 후 404 인시던트 — AASA(.well-known/apple-app-site-association)
