@@ -110,6 +110,11 @@ const PUBLIC_PREFIX = [
   // 놓치면(위 두 개와 별개 가드 — route-resolve.ts RESERVED_FIRST_SEGMENTS와는 다른 축)
   // 방문자가 보호 라우트로 오인돼 /login 307로 튕긴다.
   '/refund-policy',
+  // [SID:3807] 슬라이스12 AC2(PO 確定 2026-09-11) — 데스크톱 컴패니언(sprintable-mobile)의
+  // check_for_updates가 인증 세션 없이 호출하는 업데이트 매니페스트 자리. 실 파일은 mobile
+  // 레포 CI(PR #95)가 만들어 GCS 공개읽기 버킷에 올린 걸 이 경로가 그대로 중계만 한다
+  // (route.ts §desktop/updates/macos.json, 본문 desktop-updates.ts).
+  '/desktop/updates/',
 ];
 
 export const SP_AT_COOKIE = 'sp_at';
