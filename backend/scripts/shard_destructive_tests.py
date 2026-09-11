@@ -71,6 +71,16 @@ class DuplicateShardWeightEntryError(Exception):
     같은 날 같은 이름으로 두 PR이 동시에 등재를 시도하는 경우뿐). fail-loud로 잡는다."""
 
 
+class MissingTrailingNewlineError(Exception):
+    """story #3812(페드루 PO 追加 지적 2026-09-11 22:08Z) — union merge 고전 함정:
+    파일이 개행으로 안 끝나면 그 다음 append가 «같은 물리 줄»에 이어붙어 두 JSON
+    객체가 구분자 없이 뭉개질 수 있다(예: `...1.0}{"file":"new"...}` — json.loads가
+    "Extra data"로 결국 죽긴 하지만 원인이 뭔지 한눈에 안 보인다). 이 가드는 그
+    사후 증상이 아니라 **원인**(파일이 개행으로 안 끝남)을 append 시도 훨씬 전인
+    로드 시점에 먼저, 더 읽기 쉬운 메시지로 잡는다 — «한 줄=JSON 객체 정확히 1개»
+    불변식을 파일 자체 형태로 강제."""
+
+
 def _load_full_data(weights_path: Path = WEIGHTS_PATH, meta_path: Path | None = None) -> dict:
     """jsonl(파일당 1줄) + meta.json(드물게 바뀌는 메타)을 옛 단일 JSON과 같은
     `{"_snapshot_policy":..., "measured_at":..., "files": [...]}` 모양으로 합쳐
@@ -89,7 +99,14 @@ def _load_full_data(weights_path: Path = WEIGHTS_PATH, meta_path: Path | None = 
     files: list[dict] = []
     seen: dict[str, dict] = {}
     if weights_path.exists():
-        for line_no, line in enumerate(weights_path.read_text().splitlines(), start=1):
+        raw = weights_path.read_text()
+        if raw and not raw.endswith("\n"):
+            raise MissingTrailingNewlineError(
+                f"{weights_path.name}이 개행으로 끝나지 않는다(story #3812) — union merge "
+                "고전 함정: 다음 append가 마지막 줄에 그대로 이어붙어 JSON 객체 2개가 구분자 "
+                "없이 뭉개질 수 있다. 파일 끝에 개행 1개를 추가할 것."
+            )
+        for line_no, line in enumerate(raw.splitlines(), start=1):
             line = line.strip()
             if not line or line.startswith("#"):
                 continue

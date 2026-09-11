@@ -118,6 +118,26 @@ def test_load_weights_duplicate_file_with_different_entry_raises():
             mod.load_weights(weights_path)
 
 
+def test_load_weights_missing_trailing_newline_raises(tmp_path):
+    """⭐story #3812(페드루 PO 追加 지적 2026-09-11 22:08Z) — union merge 고전 함정.
+    파일이 개행 없이 끝나면 다음 append가 마지막 줄에 이어붙어 JSON 객체 2개가
+    구분자 없이 뭉갤 수 있다 — 원인(개행 부재)을 append 훨씬 전, 로드 시점에
+    미리 fail-loud로 잡는다(사후 JSONDecodeError보다 읽기 쉬운 메시지)."""
+    mod = _load()
+    weights_path = tmp_path / "weights.jsonl"
+    weights_path.write_bytes(b'{"file": "tests/test_a.py", "sec": 1.0}')  # 개행 없음(의도)
+    with pytest.raises(mod.MissingTrailingNewlineError):
+        mod.load_weights(weights_path)
+
+
+def test_load_weights_with_trailing_newline_is_fine(tmp_path):
+    """양성대조 — 정상적으로 개행으로 끝나면 통과해야 한다(위 테스트와 대비되는 경계)."""
+    mod = _load()
+    weights_path = tmp_path / "weights.jsonl"
+    weights_path.write_bytes(b'{"file": "tests/test_a.py", "sec": 1.0}\n')
+    assert mod.load_weights(weights_path) == {"tests/test_a.py": 1.0}
+
+
 def test_load_weights_duplicate_file_with_identical_entry_is_fine(tmp_path):
     """양성대조 — 같은 파일에 «완전히 동일한» 항목이 두 번(예: cherry-pick 중복) 있는
     건 실 충돌이 아니므로 통과해야 한다(위 테스트와 대비되는 경계)."""
