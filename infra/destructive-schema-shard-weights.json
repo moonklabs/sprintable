@@ -1652,6 +1652,11 @@
       "file": "tests/test_3806_ads_boost_spend_refresh.py",
       "sec": 5.3,
       "source": "story-3806(Phase3·3-2 PR 12, 페드루 PO 確定 2026-09-11 17:26Z — 「광고비 다시 수집」 수동 갱신 엔드포인트, comments/refresh 동형) — 신규 파일 실측(로컬, uv run pytest --durations=0 직접 1회 실행, 7건 wall time 약 5.3s — test_3766 등재 선례와 동일 방법론)"
+    },
+    {
+      "file": "tests/test_3808_x_oauth.py",
+      "sec": 3.4,
+      "source": "story-3808(Phase3·3-3 PR1, 페드루 PO 確定 2026-09-11) — X OAuth 어댑터·PKCE·1회용 회전 refresh_token 신규 파일 실측(로컬, uv run pytest --durations=0 직접 1회 실행, 13건 wall time 약 3.4s — test_3806_ads_boost_spend_cron_wiring.py 선례와 동일 방법론, 실 CI 샤드 로그로 재확認 필요)"
     }
   ]
 }
