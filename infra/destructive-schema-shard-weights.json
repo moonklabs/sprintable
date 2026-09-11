@@ -1587,6 +1587,11 @@
       "file": "tests/test_3370_workflow_line_and_visual_artifacts_member_id.py",
       "sec": 3.0,
       "source": "story-3370(카디르 QA 재발견 후속, 2026-09-10) — 신규 파일 실측(로컬, uv run pytest --durations=0 직접 1회 실행, 7건 합계 약 3.0s — test_3766 등재 선례와 동일 방법론)"
+    },
+    {
+      "file": "tests/test_3806_meta_ads_account_connection.py",
+      "sec": 7.5,
+      "source": "story-3806(Phase3·3-2 PR1, Meta Ads 광고 계정 연결, 2026-09-11) — 신규 파일 실측(로컬, uv run pytest --durations=0 직접 1회 실행, 12건 전체 wall time 7.53s — test_3766 등재 선례와 동일 방법론)"
     }
   ]
 }
