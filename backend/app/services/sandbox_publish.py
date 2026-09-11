@@ -66,12 +66,16 @@
 - `[sandbox:insight-drift]`(story #3620 AC5, 라이브 런북용) — ⚠️이 파일이 읽는 마커가
   아니다(카탈로그 완전성을 위해 여기 등재만 함). 실제 소비처는
   `insight_snapshots.py::_fetch_sandbox` — `create_container`의 `text` 인자가 아니라
-  발행된 `ChannelPostVersion.text`를 직접 읽고, 상태는 media_id 인코딩이 아니라
-  이미 영속된 `ChannelPublication.published_at`을 앵커로 재사용한다(이 함수 자체는
-  sandbox·facebook_sandbox·instagram_sandbox 3채널 인사이트 fetch 공용 dispatch라
-  채널별 media_id 형식에 얽매이지 않기 위함). 발행 후 60초 지나 reconcile하면 views가
-  고정폭(50) 감소해 stored(캡처 스냅샷)>live(재조회)로 mismatch가 실제로 선다 — 3620이
-  막혀 있던 "sandbox insights는 결정적이라 감소 재현 불가" 갭의 처방.
+  발행된 `ChannelPostVersion.text`를 직접 읽는다(이 함수 자체는 sandbox·
+  facebook_sandbox·instagram_sandbox 3채널 인사이트 fetch 공용 dispatch라 채널별
+  media_id 형식에 얽매이지 않기 위함). 시간창이 아니라 **호출 갈래**로 가른다(2차
+  CHANGES, 2026-09-11) — 예약 캡처(`_fetch_for_snapshot(db, snapshot)`, live=False
+  기본값)는 마커가 있어도 항상 원값, reconcile(`publication_reconciliation.py`,
+  live=True)만 마커가 있으면 views가 고정폭(50) 감소해 stored(캡처 시점 원값)>
+  live(재조회)로 mismatch가 실제로 선다. 라이브 절차는 「오늘 마커 발행 → due_at
+  (+1d) 캡처 대기 → 원본과 대조 → 불일치 1」 — 1차 처방(발행+60초 경과)은 예약
+  캡처 자체가 그 창을 훨씬 지나 도는 실 스케줄(_SNAPSHOT_OFFSETS=1일·7일)이라
+  라이브에서 stored>live를 절대 못 만들어 기각됐다.
 
 마커는 서로 배타적으로 다루지 않는다(먼저 매치되는 것을 그대로 적용) — 실패 마커 3종은
 텍스트 안 어디에든, 컨테이너 마커 2종과 자유롭게 조합 가능(단, 컨테이너 마커 2종은

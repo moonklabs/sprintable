@@ -100,7 +100,10 @@ async def reconcile_publication(
     )
 
     try:
-        result = await _fetch_for_snapshot(db, transient)
+        # story #3620 2차 CHANGES(페드루 2026-09-11) — 이 호출만 live=True. sandbox
+        # 계열 3채널은 [sandbox:insight-drift] 마커가 있으면 이 축에서만 드리프트가
+        # 걸려(예약 캡처는 항상 원값) captured>live 진짜 mismatch가 라이브에서 선다.
+        result = await _fetch_for_snapshot(db, transient, live=True)
     except InsightFetchError as exc:
         if exc.error_code in _PRECHECK_ERROR_CODES:
             raise
