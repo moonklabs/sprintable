@@ -101,7 +101,7 @@ def _stub_work_item_ref(monkeypatch):
 
 async def _render(
     payload: dict, gate_row=None, *, site_post_draft_exists: bool = False,
-    site_post_command_exists: bool = False,
+    site_post_command_exists: bool = False, resolved_locale: str = "ko",
 ) -> str:
     from app.routers.events import _render_gate_verdict_message
 
@@ -110,7 +110,7 @@ async def _render(
             gate_row, site_post_draft_exists=site_post_draft_exists,
             site_post_command_exists=site_post_command_exists,
         ),
-        org_id=uuid.uuid4(), payload=payload,
+        org_id=uuid.uuid4(), payload=payload, resolved_locale=resolved_locale,
     )
 
 
@@ -273,3 +273,55 @@ class TestOtherGateTypesUnchanged:
         text = await _render(_payload(gate_type="qa", verdict="rejected", resolution_note="폐기 대상"))
         assert "다시 발행하세요" in text
         assert "자동 재오픈됩니다" in text
+
+
+class TestNextActionI18nCatalogMigration:
+    """story #3369(BE, 페드루 PO 確定 2026-09-11) — BE 한글 사용자 문장 가드(story #3779)가
+    이 두 「다음 행동」 문장을 신규 위반으로 잡아, baseline이 아니라 i18n_catalog로
+    이관했다(#3796/#3614와 같은 형). 여기서는 그 배선(render → t(key, resolved_locale))
+    자체를 카탈로그 값과 대조해 고정한다 — 값 자체는 위 TestExternalPublishAgentNextAction/
+    TestSitePostExternalDestination류가 이미 KO 리터럴로 pin하고 있다(회귀 0 확認 済)."""
+
+    async def test_human_only_branch_renders_en_from_catalog(self):
+        from app.services.i18n_catalog import t
+
+        text = await _render(
+            _payload(gate_type="external_publish", verdict="approved"), resolved_locale="en",
+        )
+        assert t("events.gate_verdict_next_action_publish_human_only", "en") in text
+        assert "할 일 없음" not in text  # ko 리터럴이 안 새어 들어온다.
+
+    async def test_publish_command_created_branch_renders_en_from_catalog(self):
+        from app.services.i18n_catalog import t
+
+        draft_id = str(uuid.uuid4())
+        gate_row = _FakeGateRow({"draft_id": draft_id})
+        text = await _render(
+            _payload(gate_type="external_publish", verdict="approved"),
+            gate_row=gate_row, site_post_draft_exists=True, site_post_command_exists=True,
+            resolved_locale="en",
+        )
+        assert t("events.gate_verdict_next_action_publish_command_created", "en") in text
+        assert "워커 tick" not in text
+
+    async def test_ko_default_matches_catalog_value_exactly(self):
+        """뮤테이션 표적 — 카탈로그 값과 렌더 결과가 문자 그대로 같은지(직접 비교, 부분
+        일치가 아니라)로 배선을 고정한다. 카탈로그 값이 바뀌었는데 렌더가 옛 하드코딩
+        문자열로 계속 새면(즉 t() 호출이 죽은 코드로 남으면) 이 단언이 RED다."""
+        from app.services.i18n_catalog import t
+
+        text = await _render(_payload(gate_type="external_publish", verdict="approved"))
+        expected = t("events.gate_verdict_next_action_publish_human_only", "ko")
+        assert f"- {expected}" in text
+
+    async def test_missing_catalog_key_raises_instead_of_silent_fallback(self, monkeypatch):
+        """⭐뮤테이션 — 카탈로그에서 키를 지우면(오타·삭제 등) 조용한 폴백 대신 즉시
+        UnknownMessageKeyError로 죽어야 한다(i18n_catalog.py 가드 2, story #3786).
+        _render_gate_verdict_message가 여전히 옛 하드코딩 문자열로 폴백하도록 되돌리면
+        이 테스트가 RED(예외가 안 남)여야 한다."""
+        import app.services.i18n_catalog as catalog_module
+        from app.services.i18n_catalog import UnknownMessageKeyError
+
+        monkeypatch.delitem(catalog_module._CATALOG, "events.gate_verdict_next_action_publish_human_only")
+        with pytest.raises(UnknownMessageKeyError):
+            await _render(_payload(gate_type="external_publish", verdict="approved"))
