@@ -26,11 +26,21 @@ commands` 자체의 열) 를 UNIQUE에 포함시켜 "같은 승인 주기의 N�
 같고 toggle_seq만 다른 행이 2개 이상 존재한 뒤) downgrade하면 옛 4열 UNIQUE
 재생성이 중복 위반으로 실패한다 — 이 마이그는 신규 기능이라 로컬 검증 시점엔
 그런 행이 없다는 전제로만 downgrade를 지원한다(운영 rollback은 별도 데이터
-정리 선행 필요, 0217류 선례와 같은 성격의 알려진 제약)."""
+정리 선행 필요, 0217류 선례와 같은 성격의 알려진 제약).
+
+## ads_boost_runs 신설(페드루 PO 追加 確定 2026-09-11, PR 3 워커 fix — 같은
+마이그에 동봉)
+`_process_one_command`가 content_kind=="ads_boost"를 오분기(channel_post
+전용 기본 분기로 떨어져 매번 CHANNEL_POST_DRAFT_NOT_FOUND로 즉시 실패, 실
+Meta API 호출 0)하던 결함을 여기서 같이 고친다 — 그 워커가 실제로 캠페인/
+광고세트/광고를 만들고 그 외부 id를 저장할 자리가 필요하다. gate 행 자신에는
+안 쓴다(sealed_* 불변성 보존, 이 파일 상단 모델 docstring 참고) — 1 gate =
+1 run(UNIQUE(gate_id))."""
 from __future__ import annotations
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects.postgresql import UUID
 
 revision = "0364"
 down_revision = "0363"
@@ -55,8 +65,32 @@ def upgrade() -> None:
     op.drop_constraint("ck_publication_commands_content_kind", "publication_commands", type_="check")
     op.create_check_constraint("ck_publication_commands_content_kind", "publication_commands", _NEW_CHECK_SQL)
 
+    op.create_table(
+        "ads_boost_runs",
+        sa.Column("id", UUID(as_uuid=True), primary_key=True),
+        sa.Column("org_id", UUID(as_uuid=True), nullable=False),
+        sa.Column("gate_id", UUID(as_uuid=True), nullable=False),
+        sa.Column("campaign_id", sa.Text(), nullable=True),
+        sa.Column("adset_id", sa.Text(), nullable=True),
+        sa.Column("ad_id", sa.Text(), nullable=True),
+        sa.Column("status", sa.Text(), nullable=False, server_default="pending"),
+        sa.Column("started_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("paused_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("last_error", sa.Text(), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(),
+            onupdate=sa.func.now(), nullable=False,
+        ),
+        sa.UniqueConstraint("gate_id", name="uq_ads_boost_runs_gate_id"),
+    )
+    op.create_index("ix_ads_boost_runs_org_id", "ads_boost_runs", ["org_id"])
+    op.create_index("ix_ads_boost_runs_gate_id", "ads_boost_runs", ["gate_id"])
+
 
 def downgrade() -> None:
+    op.drop_table("ads_boost_runs")
+
     op.drop_constraint("ck_publication_commands_content_kind", "publication_commands", type_="check")
     op.create_check_constraint("ck_publication_commands_content_kind", "publication_commands", _OLD_CHECK_SQL)
     op.drop_constraint("uq_publication_commands_idempotency", "publication_commands", type_="unique")
