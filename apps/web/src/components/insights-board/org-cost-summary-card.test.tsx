@@ -106,9 +106,23 @@ describe('OrgCostSummaryCard(story #3809, PR3)', () => {
     expect(container.querySelector('[data-testid="org-cost-ads-none"]')?.textContent).toBe('승인된 광고 홍보가 없습니다.');
     expect(container.querySelector('[data-testid="org-cost-ads-amounts"]')).toBeNull();
     expect(container.querySelector('[data-testid="org-cost-ads-currency-mixed"]')).toBeNull();
-    // 정책 없으면(null) 생성 비용 줄 자체를 안 그린다(§19-3과 동형 규율).
-    expect(container.querySelector('[data-testid="org-cost-generation-section"]')).toBeNull();
+    // story #3809(PO 라이브 캡처 정정 2026-09-11 20:57Z+유나 정정 21:00Z) — 정책
+    // 없으면(null) 줄 자체를 지우던 걸 되돌림(X축은 항상 「아직 측정 안 됨」 줄이
+    // 있는데 이 축만 침묵하면 0/미측정을 못 가른다) — X와 같은 결의 문장으로.
+    expect(container.querySelector('[data-testid="org-cost-generation-unmeasured"]')?.textContent).toBe('생성 비용은 아직 측정되지 않습니다.');
     expect(container.querySelector('[data-testid="org-cost-x-cost-unmeasured"]')?.textContent).toBe('X 비용은 아직 측정되지 않습니다.');
+  });
+
+  it('⭐생성 비용 정책은 있고 이 기간 지출 0 — 특별 문장 없이 그냥 「생성 비용 0원」(0 특별취급 과잉, 유나 지적)', async () => {
+    stubFetchOk({
+      ...NO_APPROVED_BOOSTS,
+      generation_cost_spent_minor: 0, generation_currency: 'KRW',
+      generation_cost_period_start: '2026-09-01T00:00:00Z', generation_cost_period_end: '2026-09-30T23:59:59Z',
+    });
+    await act(async () => { root.render(wrap(<OrgCostSummaryCard orgId="org-1" />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="org-cost-generation-amount"]')?.textContent).toBe('생성 비용 0원');
+    expect(container.querySelector('[data-testid="org-cost-generation-unmeasured"]')).toBeNull();
   });
 
   it('⭐양성대조① 단일 통화(KRW) — formatMinorCurrency로 실제 합계를 그린다(원화 소수점 0자리)', async () => {

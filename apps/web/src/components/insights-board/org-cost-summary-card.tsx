@@ -142,23 +142,37 @@ export function OrgCostSummaryCard({ orgId }: { orgId: string }) {
           )}
         </div>
 
-        {generation_cost_spent_minor !== null ? (
-          <div data-testid="org-cost-generation-section">
-            {generation_currency !== null ? (
-              <span data-testid="org-cost-generation-amount">
-                {t('orgCostGenerationSpent', {
-                  amount: formatMinorCurrency(generation_cost_spent_minor, generation_currency as GenerationBudgetCurrency, locale, tContent),
-                })}
-              </span>
-            ) : (
-              // PR#3848 PO 지침②(§19-1 재확認 규율) — 지출값은 있는데 통화가
-              // 없으면(서버 응답 불완전) 통화를 추정해 채우지 않는다.
-              <span className="text-muted-foreground" data-testid="org-cost-generation-failed">
-                {t('orgCostGenerationCheckFailed')}
-              </span>
-            )}
-          </div>
-        ) : null}
+        {/* story #3809(Phase3·3-7 PR 3, 페드루 PO 라이브 캡처 정정 2026-09-11 20:57Z
+            +유나 코드 선판정 정정 2026-09-11 21:00Z) — 원장이 3축(광고비·생성
+            비용·X 비용)인데 X축은 null이어도 「아직 측정되지 않습니다」 줄이
+            항상 있고, 이 축만 null일 때 줄 자체가 사라졌었다 — 한 축은 "없음"을
+            말하고 한 축은 침묵하면 0/미측정을 못 가른다. `compute_generation_
+            budget_status`(BE) 확認: null=정책(예산 한도) 자체가 없다(X와 동형
+            "이 축을 아직 안 잰다") — X와 같은 결로 "아직 측정되지 않습니다".
+            정책이 있으면 spent_minor는 0이든 양수든 항상 실수(real int)라 그냥
+            formatMinorCurrency로 그린다(0원도 지어낸 문장 없이 그대로 — 0을
+            특별취급해 새 문장을 짓는 게 오히려 과잉, 유나 지적). */}
+        <div data-testid="org-cost-generation-section">
+          {generation_cost_spent_minor === null ? (
+            <span className="text-muted-foreground" data-testid="org-cost-generation-unmeasured">
+              {t('orgCostGenerationUnmeasured')}
+            </span>
+          ) : generation_currency === null ? (
+            // PR#3848 PO 지침②(§19-1 재확認 규율) — 지출값은 있는데 통화가
+            // 없으면(서버 응답 불완전) 통화를 추정해 채우지 않는다. 실제 BE
+            // 계약상 이 조합은 발생하지 않지만(정책 있으면 currency 항상
+            // 채워짐) 방어적으로 유지.
+            <span className="text-muted-foreground" data-testid="org-cost-generation-failed">
+              {t('orgCostGenerationCheckFailed')}
+            </span>
+          ) : (
+            <span data-testid="org-cost-generation-amount">
+              {t('orgCostGenerationSpent', {
+                amount: formatMinorCurrency(generation_cost_spent_minor, generation_currency as GenerationBudgetCurrency, locale, tContent),
+              })}
+            </span>
+          )}
+        </div>
 
         {x_cost_spent_minor === null ? (
           <span className="text-muted-foreground" data-testid="org-cost-x-cost-unmeasured">
