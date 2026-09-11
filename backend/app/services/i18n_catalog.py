@@ -176,6 +176,28 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "이 조직에 없는 발행물입니다",
         "en": "Publication not found in this organization",
     },
+    # story #3806(Phase3·3-2 PR1, 페드루 PO 確定 2026-09-11) — Meta Ads 광고 계정
+    # 연결. channel_connections.py는 이 스토리 前엔 i18n_catalog을 안 쓰던 파일(기존
+    # 문구는 story #3779 baseline에 grandfather) — 새로 추가하는 4개만 카탈로그로
+    # (freeze 가드가 신규 0건을 요구, 파일 전체 이관은 이 PR 범위 밖).
+    "channel_connections.meta_ads_no_accounts_available": {
+        "ko": "연결할 수 있는 광고 계정이 없습니다 — 이 계정이 접근 가능한 Meta 광고 계정이 없거나, "
+              "광고 계정 권한을 허용하지 않았습니다.",
+        "en": "No ad accounts available to connect — this account has no accessible Meta ad accounts, "
+              "or ad account permissions were not granted.",
+    },
+    "channel_connections.pending_selection_forbidden_ads": {
+        "ko": "이 선택 대기 상태를 시작한 사람만 광고 계정을 고를 수 있습니다.",
+        "en": "Only the person who started this pending selection can choose an ad account.",
+    },
+    "channel_connections.pending_selection_invalid_account": {
+        "ko": "선택한 광고 계정이 이 선택 대기 상태의 후보 목록에 없습니다.",
+        "en": "The selected ad account is not in this pending selection's candidate list.",
+    },
+    "ads_sandbox.review_rejected": {
+        "ko": "이 앱 자격의 ads_management 권한 심사가 거부됐습니다 — Meta 앱 검수를 다시 신청해주세요.",
+        "en": "This app credential's ads_management permission review was rejected — please reapply for Meta App Review.",
+    },
     # story #3369(BE, 페드루 PO 確定 2026-09-11) — events.py::_render_gate_verdict_
     # message의 external_publish 승인 「다음 행동」 2갈래(site_post 발행 명령 자동 생성
     # vs 휴먼 화면 발행). BE 한글 사용자 문장 가드 baseline에서 이 2줄을 걷고 카탈로그로

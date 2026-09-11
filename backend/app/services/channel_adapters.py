@@ -37,7 +37,11 @@ class ChannelAdapterConfig:
     # (channel_post·Threads류)인지 블로그(site_post·hosted_site/wordpress/webhook류)
     # 인지. available-channels가 이 값을 그대로 노출해 FE가 "채널 연결"과 "블로그 목적지"
     # 화면을 분기한다(kind 자체가 SSOT — 문자열 목록을 어디서도 하드코딩하지 않는다).
-    kind: Literal["social", "blog"] = "social"
+    # story #3806(Phase3·3-2) — "ads"는 콘텐츠 발행 목적지가 아니라 기존 발행물을
+    # boost하는 실행 채널이라 "social"/"blog" 어느 쪽도 부정확하다(available-channels
+    # 화면이 이 값으로 묶어 보일 수 있어 FE 오분류 방지 목적, hosted_site 도입 때
+    # "blog"를 추가한 것과 같은 판단).
+    kind: Literal["social", "blog", "ads"] = "social"
     # story e4fc29fa(페드루 PO 리뷰 B1, 2026-09-04) — available-channels는 "연결 만들기"
     # 버튼 목록이다(그 엔드포인트 자체 목적). credential_kind="none"을 FE(#3435 AC2)가
     # 곧바로 "샌드박스 연결 만들기 버튼"으로 읽는다 — hosted_site도 credential_kind="none"
@@ -437,6 +441,39 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         # unpublish=webhook_publish.unpublish()(event:"unpublish" 신호 POST) — webhook
         # 도 스코프 개념이 없다(공유 비밀 하나가 전권).
         supports_unpublish=True,
+    ),
+    # story #3806(Phase3·3-2 PR1, 페드루 PO 確定 2026-09-11) — Meta Ads boost 첫 출시.
+    # 콘텐츠 필드(image_*/video_*/max_text_length 등)는 전부 미선언(0/빈값 기본) —
+    # 이 채널은 새 콘텐츠를 만들지 않고 기존 발행물을 참조만 한다(그라운딩① object_
+    # story_id, PR2 몫). insight_metrics도 미선언 — spend는 InsightSnapshot.source=
+    # "paid" 축(PR4)으로 별도 수집, 이 어댑터의 organic insight_metrics 선언과는
+    # 다른 파이프라인.
+    "meta_ads": ChannelAdapterConfig(
+        authorize_url="https://www.facebook.com/v21.0/dialog/oauth",
+        token_url="https://graph.facebook.com/v21.0/oauth/access_token",
+        # ⚠️미확認 — ads_management 하나로 boost(기존 페이지 게시물 참조)까지 충분한지,
+        # 페이지 자체 권한(pages_read_engagement류)도 같이 필요한지는 App Review 신청
+        # 시점에 재확認 필요(카드 그라운딩① 미확認 항목과 같은 축).
+        scope="ads_management",
+        refresh_mode="reissue_from_access_token",
+        credential_kind="oauth",
+        display_name="Meta Ads",
+        kind="ads",
+        requires_connection=True,
+    ),
+    "ads_sandbox": ChannelAdapterConfig(
+        authorize_url="https://www.facebook.com/v21.0/dialog/oauth",
+        token_url="https://graph.facebook.com/v21.0/oauth/access_token",
+        scope="ads_management",
+        refresh_mode="reissue_from_access_token",
+        # facebook_sandbox와 동형 이유(channel_adapters.py:328 근방 주석 참고) —
+        # 계정 수·상태 마커를 sandbox 앱 자격의 app_id 접미로 나르므로 credential_
+        # kind="none"(범용 `/sandbox` 엔드포인트)이 아니라 진짜 authorize→callback
+        # 라우터를 태워야 한다(ads_sandbox_oauth.py가 Meta 호출부만 페이크로 스왑).
+        credential_kind="oauth",
+        display_name="Meta Ads Sandbox",
+        kind="ads",
+        requires_connection=True,
     ),
 }
 

@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Literal
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
@@ -273,6 +273,32 @@ class FacebookSelectRequest(BaseModel):
     page_id: str
 
 
+class AdAccountCandidate(BaseModel):
+    """story #3806 — `PendingSelectionCandidate`(page_id/name)와 같은 계약 형이되
+    필드명이 계정 개념에 맞다(잘못된 이름 재사용 금지 — 광고 계정을 "페이지"로
+    부르면 FE·다음 사람 둘 다 헷갈린다). `account_status`/`disable_reason`은 Meta
+    원값 그대로(정규화 0 — meta_ads_oauth.py::list_ad_accounts 계약과 동일)."""
+    account_id: str
+    name: str
+    account_status: int | None = None
+    disable_reason: int | None = None
+
+
+class AdAccountPendingSelectionResponse(BaseModel):
+    """story #3806 — `PendingSelectionResponse`와 동형(카드 §5 「계정 2개+」 경로).
+    `kind` 판별자 값도 같은 문자열("pending_selection")로 둬 FE가 기존 facebook
+    선택 대기 처리 로직을 재사용할 수 있게(모양은 candidates 필드 타입만 다름)."""
+    kind: Literal["pending_selection"] = "pending_selection"
+    pending_id: uuid.UUID
+    candidates: list[AdAccountCandidate]
+    expires_at: str
+
+
+class MetaAdsSelectRequest(BaseModel):
+    pending_id: uuid.UUID
+    account_id: str
+
+
 class TestConnectionResponse(BaseModel):
     ok: bool
     account: dict | None = None
@@ -321,6 +347,19 @@ def _facebook_oauth_module(channel: str):
     사상(real/sandbox가 정확히 같은 함수 시그니처를 구현, 새 분기 로직 0)."""
     import importlib
     return importlib.import_module(_FACEBOOK_OAUTH_MODULE_PATHS[channel])
+
+
+_META_ADS_OAUTH_MODULE_PATHS = {
+    "meta_ads": "app.services.meta_ads_oauth",
+    "ads_sandbox": "app.services.ads_sandbox_oauth",
+}
+
+
+def _meta_ads_oauth_module(channel: str):
+    """story #3806 — `_facebook_oauth_module`과 동형 dispatch(별도 dict — facebook
+    계열 기존 코드 무변경, 새 채널군은 병렬 등재)."""
+    import importlib
+    return importlib.import_module(_META_ADS_OAUTH_MODULE_PATHS[channel])
 
 
 @router.get("/{org_id}/channel-connections", response_model=list[ChannelConnectionResponse])
@@ -491,6 +530,11 @@ async def authorize_channel_connection(
         # story #3547 — Facebook Login도 PKCE 미지원(facebook_oauth.py 상단 딱지).
         build_facebook_authorize_url = _facebook_oauth_module(channel).build_authorize_url
         url = build_facebook_authorize_url(redirect_uri=_redirect_uri(org_id, channel), state=state, app_id=app_id)
+    elif channel in ("meta_ads", "ads_sandbox"):
+        # story #3806 — Meta Ads도 같은 Graph OAuth 계열이라 PKCE 미지원(facebook과
+        # 동형 판단, meta_ads_oauth.py 상단 딱지).
+        build_meta_ads_authorize_url = _meta_ads_oauth_module(channel).build_authorize_url
+        url = build_meta_ads_authorize_url(redirect_uri=_redirect_uri(org_id, channel), state=state, app_id=app_id)
     else:
         raise HTTPException(status_code=404, detail=f"unsupported channel: {channel}")
     return AuthorizeResponse(url=url, state=state)
@@ -498,7 +542,11 @@ async def authorize_channel_connection(
 
 @router.post(
     "/{org_id}/channel-connections/{channel}/callback",
-    response_model=ChannelConnectionResponse | PendingSelectionResponse,
+    # story #3806 — AdAccountPendingSelectionResponse(meta_ads/ads_sandbox 2개+ 갈래)
+    # 추가. response_model은 함수 반환 타입 주석과 별개로 FastAPI가 실제 직렬화에
+    # 쓰는 계약이라(라우트 데코레이터 값이 SSOT) 여기서도 같이 넓혀야 한다 —
+    # 안 넓히면 ChannelConnectionResponse 필드 16개 "missing" 검증 에러로 500.
+    response_model=ChannelConnectionResponse | PendingSelectionResponse | AdAccountPendingSelectionResponse,
 )
 async def channel_connection_callback(
     org_id: uuid.UUID,
@@ -507,7 +555,12 @@ async def channel_connection_callback(
     db: AsyncSession = Depends(get_db),
     verified_org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
-) -> ChannelConnectionResponse | PendingSelectionResponse:
+    # story #3806 — additive(다른 채널 분기는 안 씀, meta_ads/ads_sandbox 사용자
+    # 문장 조립에만 필요 — i18n_catalog.py 모듈 docstring 관례, Header() DI는
+    # 이 얇은 엔드포인트에서만 받는다).
+    locale: str | None = None,
+    accept_language: str | None = Header(None, alias="Accept-Language"),
+) -> ChannelConnectionResponse | PendingSelectionResponse | AdAccountPendingSelectionResponse:
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
     resolved = await _require_owner(db, auth, org_id)
@@ -529,7 +582,7 @@ async def channel_connection_callback(
     if adapter is None:
         raise HTTPException(status_code=404, detail=f"unsupported channel: {channel}")
 
-    if channel not in ("threads", "instagram", "facebook", "facebook_sandbox"):
+    if channel not in ("threads", "instagram", "facebook", "facebook_sandbox", "meta_ads", "ads_sandbox"):
         raise HTTPException(status_code=404, detail=f"unsupported channel: {channel}")
 
     # authorize 단계와 별도로 다시 조회 — 콜백은 브라우저 왕복(수초~수분) 뒤라 그 사이 owner가
@@ -550,6 +603,15 @@ async def channel_connection_callback(
         return await _facebook_channel_connection_callback(
             db, org_id=org_id, channel=channel, code=body.code, app_id=app_id, app_secret=app_secret,
             requester_member_id=resolved.id, target_connection_id=oauth_state.connection_id,
+        )
+
+    if channel in ("meta_ads", "ads_sandbox"):
+        from app.services.agent_onboarding_config import resolve_locale_from_request
+
+        return await _meta_ads_channel_connection_callback(
+            db, org_id=org_id, channel=channel, code=body.code, app_id=app_id, app_secret=app_secret,
+            requester_member_id=resolved.id, target_connection_id=oauth_state.connection_id,
+            resolved_locale=resolve_locale_from_request(locale, accept_language),
         )
 
     # story #3320 — instagram_oauth.InstagramOAuthError는 ThreadsOAuthError와 같은
@@ -678,6 +740,168 @@ async def _facebook_channel_connection_callback(
         candidates=[PendingSelectionCandidate(**c) for c in candidates],
         expires_at=pending.expires_at.isoformat(),
     )
+
+
+async def _meta_ads_channel_connection_callback(
+    db: AsyncSession, *, org_id: uuid.UUID, channel: str, code: str, app_id: str, app_secret: str,
+    requester_member_id: uuid.UUID, resolved_locale: str, target_connection_id: uuid.UUID | None = None,
+) -> ChannelConnectionResponse | AdAccountPendingSelectionResponse:
+    """story #3806(Phase3·3-2 PR1) — `_facebook_channel_connection_callback`과 동형
+    구조(0/1/2+ 갈래) · 한 가지 진짜 차이: 광고 계정은 Facebook Page와 달리 계정별
+    access_token이 없다(장기 유저 토큰 하나로 `act_<id>` 경로를 스코프해 호출 —
+    meta_ads_oauth.py::list_ad_accounts docstring) — 그래서 1개/2+개 갈래 둘 다
+    **장기 유저 토큰 자체**를 저장 대상(connection.access_token 또는 pending
+    selection의 user_token)으로 쓴다, 페이지별 토큰을 꺼내 쓰지 않는다."""
+    from app.services.meta_ads_oauth import MetaAdsOAuthError
+    from app.services.channel_oauth_pending_selection import create_pending_selection
+    from app.services.i18n_catalog import t
+
+    adapter = get_channel_adapter(channel)
+    oauth_module = _meta_ads_oauth_module(channel)
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        try:
+            short_lived_token, _ = await oauth_module.exchange_code_for_short_lived_token(
+                client, code=code, redirect_uri=_redirect_uri(org_id, channel), app_id=app_id, app_secret=app_secret,
+            )
+            long_lived_token, _expires_in = await oauth_module.exchange_for_long_lived_token(
+                client, short_lived_token=short_lived_token, app_id=app_id, app_secret=app_secret,
+            )
+            accounts = await oauth_module.list_ad_accounts(client, user_access_token=long_lived_token)
+        except MetaAdsOAuthError as exc:
+            # story #3806 — code별로 사람 문장이 필요한 것만 i18n_catalog로 갈아 낀다
+            # (review-rejected). 나머지는 real facebook_oauth.py류와 동형으로 provider
+            # 원문 그대로(exc.message, 한글 아님 — #3779 가드 대상 아님).
+            message = (
+                t("ads_sandbox.review_rejected", resolved_locale)
+                if exc.code == "META_ADS_ACCOUNT_REVIEW_REJECTED" else exc.message
+            )
+            raise HTTPException(status_code=400, detail={"code": exc.code, "message": message}) from exc
+        finally:
+            del app_secret  # ⛔즉시 소비 후 폐기 — 더 들고 있지 않는다(기존 규율과 동형).
+
+    if not accounts:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHANNEL_META_ADS_NO_ACCOUNTS_AVAILABLE",
+                "message": t("channel_connections.meta_ads_no_accounts_available", resolved_locale),
+            },
+        )
+
+    if len(accounts) == 1:
+        account = accounts[0]
+        row = await upsert_channel_connection(
+            db, org_id=org_id, channel=channel, account_id=account["account_id"],
+            account_label=account["name"], credential_kind=adapter.credential_kind,
+            access_token=long_lived_token, refresh_token=None,
+            token_expires_at=None,  # facebook_channel_connection_callback과 동형 — ⚠️미확認.
+            refresh_mode=adapter.refresh_mode, scopes=adapter.scope.split(","), connected_by=requester_member_id,
+        )
+        mismatch_target_id = (
+            target_connection_id if target_connection_id is not None and target_connection_id != row.id else None
+        )
+        return _to_response(row, reconnect_mismatch_target_id=mismatch_target_id)
+
+    now = datetime.now(timezone.utc)
+    candidates = [
+        {
+            "account_id": a["account_id"], "name": a["name"],
+            "account_status": a.get("account_status"), "disable_reason": a.get("disable_reason"),
+        }
+        for a in accounts
+    ]
+    pending = await create_pending_selection(
+        db, org_id=org_id, requester_member_id=requester_member_id, channel=channel,
+        user_token=long_lived_token, candidates=candidates, now=now,
+    )
+    return AdAccountPendingSelectionResponse(
+        pending_id=pending.id,
+        candidates=[AdAccountCandidate(**c) for c in candidates],
+        expires_at=pending.expires_at.isoformat(),
+    )
+
+
+@router.post("/{org_id}/channel-connections/meta-ads/select", response_model=ChannelConnectionResponse)
+async def meta_ads_select_account_endpoint(
+    org_id: uuid.UUID,
+    body: MetaAdsSelectRequest,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+    locale: str | None = None,
+    accept_language: str | None = Header(None, alias="Accept-Language"),
+) -> ChannelConnectionResponse:
+    """story #3806 — `facebook_select_page_endpoint`와 동형(광고 계정 2개 이상
+    콜백 뒤 사람이 하나를 고르면 이 엔드포인트가 연결 행을 만든다). 광고 계정은
+    페이지와 달리 계정별 토큰이 없어(위 콜백 docstring) `/me/adaccounts` 재호출이
+    불요 — pending에 저장된 **장기 유저 토큰**을 그대로 연결에 쓴다(재호출 없이도
+    안전 — 그 토큰 자체가 이미 이 유저가 광고 계정에 접근 가능함을 증명한다,
+    facebook의 "페이지 토큰은 캐시 불신" 이유와 다른 축)."""
+    from app.services.channel_credential_crypto import decrypt_channel_credential
+    from app.services.channel_oauth_pending_selection import delete_pending_selection, get_pending_selection
+    from app.services.agent_onboarding_config import resolve_locale_from_request
+    from app.services.i18n_catalog import t
+
+    resolved_locale = resolve_locale_from_request(locale, accept_language)
+
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    resolved = await _require_owner(db, auth, org_id)
+
+    pending = await get_pending_selection(db, pending_id=body.pending_id, org_id=org_id)
+    if pending is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "CHANNEL_OAUTH_PENDING_SELECTION_NOT_FOUND",
+                # story #3806 — facebook_select_page_endpoint의 동일 문구를 그대로
+                # 재사용(같은 문자열 내용 — #3779 baseline에 이미 있어 신규 위반 아님).
+                "message": "선택 대기 상태를 찾을 수 없습니다(이미 사용됐거나 존재하지 않습니다).",
+            },
+        )
+    if pending.requester_member_id != resolved.id:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "CHANNEL_OAUTH_PENDING_SELECTION_FORBIDDEN",
+                "message": t("channel_connections.pending_selection_forbidden_ads", resolved_locale),
+            },
+        )
+    if pending.expires_at <= datetime.now(timezone.utc):
+        # 삭제는 스윕 몫(삭제 책임 단일화, facebook_select_page_endpoint와 동형 판단) —
+        # 여기서 안 지운다.
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "CHANNEL_OAUTH_PENDING_SELECTION_EXPIRED",
+                # story #3806 — facebook_select_page_endpoint와 동일 문구 재사용(#3779
+                # baseline에 이미 있음).
+                "message": "15분이 지나 선택 대기 상태가 만료됐습니다. 다시 연결해주세요.",
+            },
+        )
+    if pending.channel not in ("meta_ads", "ads_sandbox"):
+        raise HTTPException(status_code=404, detail=f"unsupported channel: {pending.channel}")
+    if not any(c.get("account_id") == body.account_id for c in pending.candidates):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "CHANNEL_OAUTH_PENDING_SELECTION_INVALID_ACCOUNT",
+                "message": t("channel_connections.pending_selection_invalid_account", resolved_locale),
+            },
+        )
+    candidate = next(c for c in pending.candidates if c["account_id"] == body.account_id)
+
+    adapter = get_channel_adapter(pending.channel)
+    long_lived_token = decrypt_channel_credential(pending.encrypted_user_token)
+    row = await upsert_channel_connection(
+        db, org_id=org_id, channel=pending.channel, account_id=candidate["account_id"],
+        account_label=candidate["name"], credential_kind=adapter.credential_kind,
+        access_token=long_lived_token, refresh_token=None, token_expires_at=None,
+        refresh_mode=adapter.refresh_mode, scopes=adapter.scope.split(","), connected_by=resolved.id,
+    )
+    await delete_pending_selection(db, pending_id=pending.id)
+    return _to_response(row)
 
 
 @router.post("/{org_id}/channel-connections/facebook/select", response_model=ChannelConnectionResponse)
