@@ -149,6 +149,24 @@ function stubFetch(opts: {
         json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body),
       } as Response;
     }
+    if (url.includes('/insights-board/cost-summary')) {
+      // story #3809(Phase3·3-7 PR 3) — 이 화면이 이제 OrgCostSummaryCard도 같이
+      // 마운트해 org 비용 원장을 별도로 fetch한다. 이 파일의 관심사는 그 카드가
+      // 아니라 기존 표(§행/필터/정렬 등)이므로, 카드는 항상 「승인된 광고 홍보
+      // 0건」의 최소 응답으로 조용히 통과시킨다(카드 자체 회귀는
+      // org-cost-summary-card.test.tsx 전담).
+      return {
+        ok: true, status: 200,
+        json: async () => ({
+          data: {
+            ads: { approved_boost_count: 0, sealed_ads_currency: null, sealed_budget_minor: 0, captured_spend_minor: 0, remaining_minor: 0, cap_reached_count: 0 },
+            generation_cost_spent_minor: null, generation_cost_period_start: null, generation_cost_period_end: null,
+            generation_currency: null, x_cost_spent_minor: null,
+          },
+          error: null, meta: null,
+        }),
+      } as Response;
+    }
     if (url.includes('/insights-board')) {
       const usingCursor = url.includes('cursor=');
       const includeDeleted = url.includes('include_deleted=true');
@@ -239,7 +257,7 @@ describe('InsightsBoardPage — 쿼리 파라미터(story #3503)', () => {
   it('window은 사용자가 뭘 고르든(기본값 포함) 항상 fetch 쿼리에 명시적으로 실린다', async () => {
     const calls = stubFetch({});
     await mount();
-    const firstCall = calls.find((c) => c.includes('/insights-board'));
+    const firstCall = calls.find((c) => c.includes('/insights-board?'));
     expect(firstCall).toContain('window=7d');
   });
 
@@ -352,7 +370,7 @@ describe('InsightsBoardPage — 쿼리 파라미터(story #3503)', () => {
     useSearchParamsMock.mockReturnValue(new URLSearchParams('channel=threads&status=failed&sort=d7&metric=clicks&sort_dir=asc&window=30d'));
     const calls = stubFetch({});
     await mount();
-    const firstCall = calls.find((c) => c.includes('/insights-board'));
+    const firstCall = calls.find((c) => c.includes('/insights-board?'));
     expect(firstCall).toContain('window=30d');
     expect(firstCall).toContain('channel=threads');
     expect(firstCall).toContain('status=failed');
@@ -368,7 +386,7 @@ describe('InsightsBoardPage — 보관됨 보기 토글·숨은 건수(story #37
   it('⭐토글이 꺼진 기본 상태 — fetch 쿼리에 include_deleted가 안 실린다', async () => {
     const calls = stubFetch({});
     await mount();
-    const firstCall = calls.find((c) => c.includes('/insights-board'));
+    const firstCall = calls.find((c) => c.includes('/insights-board?'));
     expect(firstCall).not.toContain('include_deleted');
   });
 

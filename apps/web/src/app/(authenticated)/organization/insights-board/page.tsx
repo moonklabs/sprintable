@@ -28,6 +28,7 @@ import { parseInsightsBoardApiError } from '@/components/insights-board/insights
 import { ASSET_LABEL_PREFIX_LENGTH, aggregateGroupBucket, groupInsightsBoardRows, type InsightsBoardGroupBy } from '@/components/insights-board/group-rows';
 import { DEFAULT_METRIC, METRIC_KEYS, type BoardMetric, type Ga4ConnectionStatus, type InsightsBoardResponse, type InsightsBoardRow, type InsightsBoardWindow } from '@/components/insights-board/types';
 import { PublishingMetricsBand } from '@/components/content/publishing-metrics-band';
+import { OrgCostSummaryCard } from '@/components/insights-board/org-cost-summary-card';
 import { deriveFailureAction, type CommandStatus } from '@/components/content/failure-action';
 import { FailureActionBadge } from '@/components/content/failure-action-badge';
 
@@ -349,6 +350,11 @@ export default function InsightsBoardPage() {
   return (
     <div className="mx-auto w-full max-w-6xl space-y-6 p-6">
       <PageHeader title={t('pageTitle')} description={t('pageDescription')} actions={windowControl} />
+
+      {/* story #3809(Phase3·3-7 PR 3) — 조직 비용 원장 카드. window/channel/status
+          필터와 무관한 org 전체 스코프(cost-summary API는 쿼리 파라미터가 없다) —
+          아래 표 필터 줄보다 위, 화면의 다른 무엇에도 종속되지 않는 자리. */}
+      {orgId ? <OrgCostSummaryCard orgId={orgId} /> : null}
 
       <div className="flex flex-wrap items-center gap-2">
         <input

@@ -1,0 +1,153 @@
+// @vitest-environment jsdom
+//
+// story #3809(Phase3·3-7 PR 3, 페드루 PO 確定 2026-09-11 19:00Z) — 조직 비용
+// 원장 카드. PO 명시 요청: 라이브 캡처(dev-app, PR2b 착지+배포75 뒤)에 앞서
+// «null/단일 통화 두 분기»를 vitest 화면 테스트로 먼저 닫아 둔다 — 아래
+// 「양성대조」 두 건이 그 요청의 실물(단일 KRW·섞임 null).
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { NextIntlClientProvider } from 'next-intl';
+import koMessages from '../../../messages/ko.json';
+import enMessages from '../../../messages/en.json';
+import { OrgCostSummaryCard } from './org-cost-summary-card';
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+function wrap(node: React.ReactNode, locale: 'ko' | 'en' = 'ko') {
+  const messages = locale === 'ko' ? koMessages : enMessages;
+  return (
+    <NextIntlClientProvider locale={locale} messages={messages} timeZone="Asia/Seoul">
+      {node}
+    </NextIntlClientProvider>
+  );
+}
+
+let container: HTMLDivElement;
+let root: Root;
+
+beforeEach(() => {
+  container = document.createElement('div');
+  document.body.appendChild(container);
+  root = createRoot(container);
+});
+
+afterEach(async () => {
+  await act(async () => { root.unmount(); });
+  container.remove();
+  vi.unstubAllGlobals();
+});
+
+async function flush() {
+  await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+}
+
+function stubFetchOk(data: unknown) {
+  vi.stubGlobal('fetch', vi.fn(async () =>
+    new Response(JSON.stringify({ data }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+  ));
+}
+
+function stubFetchFailed(status = 500) {
+  vi.stubGlobal('fetch', vi.fn(async () =>
+    new Response(JSON.stringify({ data: null, error: { code: 'FAILED' } }), { status }),
+  ));
+}
+
+const NO_APPROVED_BOOSTS = {
+  ads: {
+    approved_boost_count: 0, sealed_ads_currency: null, sealed_budget_minor: 0,
+    captured_spend_minor: 0, remaining_minor: 0, cap_reached_count: 0,
+  },
+  generation_cost_spent_minor: null, generation_cost_period_start: null,
+  generation_cost_period_end: null, generation_currency: null,
+  x_cost_spent_minor: null,
+};
+
+const SINGLE_CURRENCY = {
+  ads: {
+    approved_boost_count: 2, sealed_ads_currency: 'KRW', sealed_budget_minor: 150_000,
+    captured_spend_minor: 12_345, remaining_minor: 137_655, cap_reached_count: 0,
+  },
+  generation_cost_spent_minor: 5_000, generation_cost_period_start: '2026-09-01T00:00:00Z',
+  generation_cost_period_end: '2026-09-30T23:59:59Z', generation_currency: 'KRW',
+  x_cost_spent_minor: null,
+};
+
+const MIXED_CURRENCY = {
+  ads: {
+    approved_boost_count: 2, sealed_ads_currency: null, sealed_budget_minor: null,
+    captured_spend_minor: null, remaining_minor: null, cap_reached_count: 1,
+  },
+  generation_cost_spent_minor: null, generation_cost_period_start: null,
+  generation_cost_period_end: null, generation_currency: null,
+  x_cost_spent_minor: null,
+};
+
+describe('OrgCostSummaryCard(story #3809, PR3)', () => {
+  it('로딩 중엔 스켈레톤만(값 0건도 아니고, 문구도 아직 없음)', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
+    await act(async () => { root.render(wrap(<OrgCostSummaryCard orgId="org-1" />)); });
+    expect(container.querySelector('[data-testid="org-cost-summary-card-loading"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="org-cost-summary-card"]')).toBeNull();
+  });
+
+  it('로드 실패 — 실패 문구, 0이나 raw 숫자로 지어내지 않는다', async () => {
+    stubFetchFailed(500);
+    await act(async () => { root.render(wrap(<OrgCostSummaryCard orgId="org-1" />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="org-cost-summary-card-failed"]')?.textContent).toBe('비용 원장을 불러오지 못했습니다.');
+  });
+
+  it('승인된 광고 홍보 0건 — 「없습니다」만, 0을 숫자로 안 그린다', async () => {
+    stubFetchOk(NO_APPROVED_BOOSTS);
+    await act(async () => { root.render(wrap(<OrgCostSummaryCard orgId="org-1" />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="org-cost-ads-none"]')?.textContent).toBe('승인된 광고 홍보가 없습니다.');
+    expect(container.querySelector('[data-testid="org-cost-ads-amounts"]')).toBeNull();
+    expect(container.querySelector('[data-testid="org-cost-ads-currency-mixed"]')).toBeNull();
+    // 정책 없으면(null) 생성 비용 줄 자체를 안 그린다(§19-3과 동형 규율).
+    expect(container.querySelector('[data-testid="org-cost-generation-section"]')).toBeNull();
+    expect(container.querySelector('[data-testid="org-cost-x-cost-unmeasured"]')?.textContent).toBe('X 비용은 아직 측정되지 않습니다.');
+  });
+
+  it('⭐양성대조① 단일 통화(KRW) — formatMinorCurrency로 실제 합계를 그린다(원화 소수점 0자리)', async () => {
+    stubFetchOk(SINGLE_CURRENCY);
+    await act(async () => { root.render(wrap(<OrgCostSummaryCard orgId="org-1" />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="org-cost-ads-approved-count"]')?.textContent).toBe('승인된 광고 홍보 2건');
+    expect(container.querySelector('[data-testid="org-cost-ads-currency-mixed"]')).toBeNull();
+    expect(container.querySelector('[data-testid="org-cost-ads-amounts"]')?.textContent).toBe('예산 150,000원 · 지출 12,345원 · 잔여 137,655원');
+    expect(container.querySelector('[data-testid="org-cost-generation-amount"]')?.textContent).toBe('생성 비용 5,000원');
+  });
+
+  it('⭐양성대조② 통화 섞임(null) — 지어낸 숫자·raw 값 없이 안전 문구만, cap_reached는 별개 축이라 계속 보인다', async () => {
+    stubFetchOk(MIXED_CURRENCY);
+    await act(async () => { root.render(wrap(<OrgCostSummaryCard orgId="org-1" />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="org-cost-ads-approved-count"]')?.textContent).toBe('승인된 광고 홍보 2건');
+    expect(container.querySelector('[data-testid="org-cost-ads-currency-mixed"]')?.textContent).toBe('통화가 섞여 합계를 표시하지 않습니다.');
+    expect(container.querySelector('[data-testid="org-cost-ads-amounts"]')).toBeNull();
+    // null을 어떤 형태로든(0·"null"·raw) 숫자로 새어 보이지 않는다.
+    expect(container.textContent).not.toContain('null');
+    expect(container.querySelector('[data-testid="org-cost-ads-cap-reached"]')?.textContent).toBe('상한 도달 1건');
+  });
+
+  it('생성 비용 값은 있는데 통화가 없음(서버 응답 불완전) — 실패 문구로 접는다(KRW 추정 금지, PR#3848 PO 지침②)', async () => {
+    stubFetchOk({
+      ...NO_APPROVED_BOOSTS,
+      generation_cost_spent_minor: 3_000, generation_currency: null,
+    });
+    await act(async () => { root.render(wrap(<OrgCostSummaryCard orgId="org-1" />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="org-cost-generation-failed"]')?.textContent).toBe('생성 비용 정보를 확인하지 못했습니다.');
+    expect(container.querySelector('[data-testid="org-cost-generation-amount"]')).toBeNull();
+  });
+
+  it('en 로케일 — 단일 통화 카드가 영문 메시지로 렌더', async () => {
+    stubFetchOk(SINGLE_CURRENCY);
+    await act(async () => { root.render(wrap(<OrgCostSummaryCard orgId="org-1" />, 'en')); });
+    await flush();
+    expect(container.querySelector('[data-testid="org-cost-ads-amounts"]')?.textContent).toBe('Budget ₩150,000 · Spent ₩12,345 · Remaining ₩137,655');
+  });
+});
