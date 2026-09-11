@@ -1461,9 +1461,17 @@ async def publish_channel_post_draft(
 
             row = existing
             if row is None:
+                # story #3808(Phase3·3-3 PR2, 페드루 PO 決定 2026-09-11 20:09Z) — X는
+                # 스레드 N건 지원 대비 sequence가 1-indexed(헤드=1)다. 이 호출부는
+                # 항상 세그먼트 1개(N=1, publish_x_thread([text]))만 통과시키므로
+                # 지금은 항상 1 — N≥2(진짜 스레드)의 텍스트 출처는 PR5(draft segments
+                # 스키마) 몫, 이 함수는 그 경로를 아직 모른다. 다른 채널은 이 열을
+                # 안 건드려 server_default 0 그대로(회귀 0).
+                sequence = 1 if draft.channel in ("x", "x_sandbox") else 0
                 row = ChannelPublication(
                     id=uuid.uuid4(), org_id=org_id, gate_id=gate.id, version_id=latest.id,
                     connection_id=connection.id, channel=draft.channel, status="container_created",
+                    sequence=sequence,
                 )
                 # story #3395(디디 코드 리뷰 발견, PR#3752) — 같은 (gate_id, version_id)로
                 # 진짜 동시 요청 2건이 들어오면 둘 다 위 existing 조회에서 None을 본 뒤 각자
