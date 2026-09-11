@@ -94,3 +94,28 @@ async def set_campaign_status(
     )
     if resp.status_code != 200:
         raise MetaAdsCampaignError("META_ADS_CAMPAIGN_STATUS_UPDATE_FAILED", resp.text[:500])
+
+
+async def get_campaign_spend_minor(
+    client: httpx.AsyncClient, *, campaign_id: str, access_token: str,
+) -> int:
+    """story #3806(Phase3·3-2 PR4, 페드루 PO 確定 2026-09-11) — 캠페인 누적 지출(그
+    캠페인 전체 lifetime, `date_preset` 미지정 시 Meta 기본값 — ⚠️미확認: Insights
+    API가 기본으로 lifetime을 주는지 별도 date_preset이 필요한지는 공식 문서 fetch로
+    재확認 못함, meta_ads_oauth.py 상단과 동일 딱지). `spend` 필드는 Meta가 통화
+    소수점 문자열("12.34")로 낸다 — 이 레포 관례(minor unit int, gate.sealed_ads_
+    budget_minor와 같은 단위)로 맞추려 100을 곱해 반올림한다(⚠️미확認: 모든 통화가
+    2자리 소수인지는 통화별로 다를 수 있어 재확認 필요 — KRW는 소수점이 없는 통화라
+    이 가정이 깨질 수 있는 자리, 출시 前 재확認)."""
+    resp = await client.get(
+        f"{_GRAPH_BASE}/{campaign_id}/insights", params={"access_token": access_token, "fields": "spend"},
+    )
+    if resp.status_code != 200:
+        raise MetaAdsCampaignError("META_ADS_SPEND_FETCH_FAILED", resp.text[:500])
+    data = resp.json().get("data") or []
+    if not data:
+        return 0  # 아직 노출/지출 이력 0 — "미제공"이 아니라 "0"으로 정직하게 낸다.
+    spend_str = data[0].get("spend")
+    if spend_str is None:
+        raise MetaAdsCampaignError("META_ADS_SPEND_MISSING_FIELD", "spend missing in insights response")
+    return round(float(spend_str) * 100)

@@ -256,6 +256,7 @@ async def _resolve_execution_context(db: AsyncSession, command: PublicationComma
         "gate": gate, "module": module,
         "ad_account_id": conn.account_id, "access_token": decrypt_channel_credential(conn.encrypted_access_token),
         "object_story_id": f"{origin_conn.account_id}_{publication.external_id}",
+        "publication_id": publication.id, "ad_channel": conn.channel,
     }
 
 
@@ -303,6 +304,15 @@ async def process_one_ads_boost_command(db: AsyncSession, command: PublicationCo
                 )
                 run.status = "running"
                 run.started_at = now
+                # story #3806(Phase3·3-2 PR4, 페드루 PO 確定 2026-09-11) — boost_start
+                # 성공 즉시 paid 지출 +1d/+7d 스냅샷 예약(insight_snapshots.py의
+                # publish 성공 시 스케줄링과 동형 시점 — "그 사건이 확정된 순간").
+                from app.services.ads_spend_snapshots import schedule_ads_spend_snapshots
+
+                await schedule_ads_spend_snapshots(
+                    db, org_id=command.org_id, work_item_id=gate.work_item_id,
+                    publication_id=ctx["publication_id"], channel=ctx["ad_channel"], anchor_at=now,
+                )
             elif command.operation == OP_PAUSE:
                 if run.campaign_id is None:
                     raise AdsBoostAdapterUnavailableError(
