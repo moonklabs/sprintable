@@ -362,6 +362,19 @@ def _meta_ads_oauth_module(channel: str):
     return importlib.import_module(_META_ADS_OAUTH_MODULE_PATHS[channel])
 
 
+_X_OAUTH_MODULE_PATHS = {
+    "x": "app.services.x_oauth",
+    "x_sandbox": "app.services.x_sandbox_oauth",
+}
+
+
+def _x_oauth_module(channel: str):
+    """story #3808 — `_meta_ads_oauth_module`과 동형 dispatch(별도 dict — 기존
+    채널군 무변경, 새 채널군은 병렬 등재)."""
+    import importlib
+    return importlib.import_module(_X_OAUTH_MODULE_PATHS[channel])
+
+
 @router.get("/{org_id}/channel-connections", response_model=list[ChannelConnectionResponse])
 async def list_channel_connections_endpoint(
     org_id: uuid.UUID,
@@ -535,6 +548,13 @@ async def authorize_channel_connection(
         # 동형 판단, meta_ads_oauth.py 상단 딱지).
         build_meta_ads_authorize_url = _meta_ads_oauth_module(channel).build_authorize_url
         url = build_meta_ads_authorize_url(redirect_uri=_redirect_uri(org_id, channel), state=state, app_id=app_id)
+    elif channel in ("x", "x_sandbox"):
+        # story #3808 — X는 threads와 달리 PKCE가 선택이 아니라 필수(x_oauth.py 상단
+        # 딱지) — code_challenge를 항상 싣는다(threads_pkce_enabled류 우회 플래그 없음).
+        build_x_authorize_url = _x_oauth_module(channel).build_authorize_url
+        url = build_x_authorize_url(
+            redirect_uri=_redirect_uri(org_id, channel), state=state, code_challenge=code_challenge, app_id=app_id,
+        )
     else:
         raise HTTPException(status_code=404, detail=f"unsupported channel: {channel}")
     return AuthorizeResponse(url=url, state=state)
@@ -582,7 +602,9 @@ async def channel_connection_callback(
     if adapter is None:
         raise HTTPException(status_code=404, detail=f"unsupported channel: {channel}")
 
-    if channel not in ("threads", "instagram", "facebook", "facebook_sandbox", "meta_ads", "ads_sandbox"):
+    if channel not in (
+        "threads", "instagram", "facebook", "facebook_sandbox", "meta_ads", "ads_sandbox", "x", "x_sandbox",
+    ):
         raise HTTPException(status_code=404, detail=f"unsupported channel: {channel}")
 
     # authorize 단계와 별도로 다시 조회 — 콜백은 브라우저 왕복(수초~수분) 뒤라 그 사이 owner가
@@ -612,6 +634,13 @@ async def channel_connection_callback(
             db, org_id=org_id, channel=channel, code=body.code, app_id=app_id, app_secret=app_secret,
             requester_member_id=resolved.id, target_connection_id=oauth_state.connection_id,
             resolved_locale=resolve_locale_from_request(locale, accept_language),
+        )
+
+    if channel in ("x", "x_sandbox"):
+        return await _x_channel_connection_callback(
+            db, org_id=org_id, channel=channel, code=body.code, code_verifier=oauth_state.code_verifier,
+            app_id=app_id, app_secret=app_secret, requester_member_id=resolved.id,
+            target_connection_id=oauth_state.connection_id,
         )
 
     # story #3320 — instagram_oauth.InstagramOAuthError는 ThreadsOAuthError와 같은
@@ -820,6 +849,45 @@ async def _meta_ads_channel_connection_callback(
         candidates=[AdAccountCandidate(**c) for c in candidates],
         expires_at=pending.expires_at.isoformat(),
     )
+
+
+async def _x_channel_connection_callback(
+    db: AsyncSession, *, org_id: uuid.UUID, channel: str, code: str, code_verifier: str, app_id: str,
+    app_secret: str, requester_member_id: uuid.UUID, target_connection_id: uuid.UUID | None = None,
+) -> ChannelConnectionResponse:
+    """story #3808(Phase3·3-3 PR1) — threads(단기→장기 2단 교환)와 달리 X는 **단일
+    hop**(x_oauth.py 상단 딱지) — 페이지/광고계정 선택 갈래(facebook·meta_ads류)도
+    없어 가장 단순한 갈래 하나다. 반환된 refresh_token을 **그대로**(가공 0) `upsert_
+    channel_connection`에 실어 저장 — cron 1회용 회전 갱신(cron.py `_ROTATING_
+    REFRESH_FN_BY_CHANNEL`)이 이 저장값을 읽는다."""
+    from app.services.x_oauth import XOAuthError
+
+    adapter = get_channel_adapter(channel)
+    oauth_module = _x_oauth_module(channel)
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        try:
+            access_token, refresh_token, expires_in = await oauth_module.exchange_code_for_token(
+                client, code=code, redirect_uri=_redirect_uri(org_id, channel), code_verifier=code_verifier,
+                app_id=app_id, app_secret=app_secret,
+            )
+            account = await oauth_module.test_connection(client, access_token=access_token)
+        except XOAuthError as exc:
+            raise HTTPException(status_code=400, detail={"code": exc.code, "message": exc.message}) from exc
+        finally:
+            del app_secret  # ⛔즉시 소비 후 폐기 — 더 들고 있지 않는다(기존 규율과 동형).
+
+    row = await upsert_channel_connection(
+        db, org_id=org_id, channel=channel, account_id=account["id"],
+        account_label=account.get("username"), credential_kind=adapter.credential_kind,
+        access_token=access_token, refresh_token=refresh_token,
+        token_expires_at=datetime.now(timezone.utc) + timedelta(seconds=expires_in),
+        refresh_mode=adapter.refresh_mode, scopes=adapter.scope.split(" "), connected_by=requester_member_id,
+    )
+    mismatch_target_id = (
+        target_connection_id if target_connection_id is not None and target_connection_id != row.id else None
+    )
+    return _to_response(row, reconnect_mismatch_target_id=mismatch_target_id)
 
 
 @router.post("/{org_id}/channel-connections/meta-ads/select", response_model=ChannelConnectionResponse)

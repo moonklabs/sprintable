@@ -1199,12 +1199,16 @@ async def refresh_channel_tokens(
     try:
         import httpx as _httpx
         from app.services.channel_connection import (
-            apply_refresh_failure, apply_refresh_result, decrypt_for_use, list_connections_due_for_refresh,
+            apply_refresh_failure, apply_refresh_result, decrypt_for_use, decrypt_refresh_token_for_use,
+            list_connections_due_for_refresh,
         )
         from app.services.threads_oauth import ThreadsOAuthError, refresh_long_lived_token as refresh_threads_token
         from app.services.instagram_oauth import (
             InstagramOAuthError, refresh_long_lived_token as refresh_instagram_token,
         )
+        from app.services.x_oauth import XOAuthError, refresh_access_token as refresh_x_token
+        from app.services.x_sandbox_oauth import refresh_access_token as refresh_x_sandbox_token
+        from app.services.channel_app_credentials import resolve_app_credentials
 
         # story #3320 — Phase1은 threads만 구현했던 skip-guard(`continue`)를 채널→
         # 갱신함수 명시 dict로 확장(get_publish_client_module의 dispatch dict 근본
@@ -1223,12 +1227,52 @@ async def refresh_channel_tokens(
         # «무효화 감지»(classify_graph_oauth_error·샌드박스 마커 3종이 담당, 발행/댓글
         # 수집 시점에 401/403으로 드러난다 — cron 사전 갱신과는 다른 자리).
         _REFRESH_FN_BY_CHANNEL = {"threads": refresh_threads_token, "instagram": refresh_instagram_token}
-        _OAUTH_ERROR_TYPES = (ThreadsOAuthError, InstagramOAuthError)
+        # story #3808(Phase3·3-3 PR1) — X류(refresh_mode="refresh_token", **1회용
+        # 회전**)는 access_token이 아니라 refresh_token을 provider에 보내고 client_id/
+        # secret confidential-client 인증이 필요해(threads/instagram의 reissue_from_
+        # access_token 그랜트와 다른 그랜트 — 그쪽은 secret 불요) 위 dict와 나란히
+        # 병렬 등재한다(기존 채널 dispatch·시그니처 무변경, 회귀 0). 반환 3튜플
+        # (new_access_token, new_refresh_token, expires_in)의 두 번째 값이 바로 이
+        # PR이 짝으로 얹은 `apply_refresh_result(new_refresh_token=...)` 슬롯으로 간다
+        # — 여기서 안 갈아 끼우면 다음 tick이 이미 provider가 무효화한 옛 refresh_
+        # token으로 또 시도해 항상 실패한다(1회용 회전의 핵심 위험).
+        _ROTATING_REFRESH_FN_BY_CHANNEL = {"x": refresh_x_token, "x_sandbox": refresh_x_sandbox_token}
+        _OAUTH_ERROR_TYPES = (ThreadsOAuthError, InstagramOAuthError, XOAuthError)
 
         rows = await list_connections_due_for_refresh(session, now=datetime.now(timezone.utc))
         refreshed, failed = 0, 0
         async with _httpx.AsyncClient(timeout=15) as client:
             for row in rows:
+                rotating_refresh_fn = _ROTATING_REFRESH_FN_BY_CHANNEL.get(row.channel)
+                if rotating_refresh_fn is not None:
+                    current_refresh_token = decrypt_refresh_token_for_use(row)
+                    if current_refresh_token is None:
+                        await apply_refresh_failure(session, connection=row, error_message="no stored refresh token")
+                        failed += 1
+                        continue
+                    app_credentials = await resolve_app_credentials(session, org_id=row.org_id, channel=row.channel)
+                    if app_credentials is None:
+                        await apply_refresh_failure(session, connection=row, error_message="no app credentials registered")
+                        failed += 1
+                        continue
+                    app_id, app_secret = app_credentials
+                    try:
+                        new_access_token, new_refresh_token, expires_in = await rotating_refresh_fn(
+                            client, refresh_token=current_refresh_token, app_id=app_id, app_secret=app_secret,
+                        )
+                    except _OAUTH_ERROR_TYPES as exc:
+                        await apply_refresh_failure(session, connection=row, error_message=exc.message)
+                        failed += 1
+                        continue
+                    finally:
+                        del current_refresh_token, app_secret
+                    await apply_refresh_result(
+                        session, connection=row, new_access_token=new_access_token, expires_in_seconds=expires_in,
+                        new_refresh_token=new_refresh_token,
+                    )
+                    refreshed += 1
+                    continue
+
                 refresh_fn = _REFRESH_FN_BY_CHANNEL.get(row.channel)
                 if refresh_fn is None:
                     continue  # 미등록 채널(sandbox류 등)은 갱신 대상 아님(토큰 자체가 더미이거나 없음)

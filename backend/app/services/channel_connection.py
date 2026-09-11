@@ -196,8 +196,17 @@ async def list_connections_due_for_refresh(db: AsyncSession, *, now: datetime) -
 
 async def apply_refresh_result(
     db: AsyncSession, *, connection: ChannelConnection, new_access_token: str, expires_in_seconds: int,
+    new_refresh_token: str | None = None,
 ) -> None:
+    """story #3808(Phase3·3-3 PR1) — `new_refresh_token` 신규 파라미터(옵션, 기본
+    None=기존 동작 그대로 무변경). X류 **1회용 회전** refresh_token(매 갱신마다
+    새 refresh_token 발급·이전 값 즉시 무효)은 여기서 갱신하지 않으면 다음 cron
+    tick이 이미 무효화된 옛 refresh_token으로 또 갱신을 시도해 항상 실패한다 —
+    threads/instagram(refresh_mode="reissue_from_access_token", refresh_token
+    자체가 없음)는 이 인자를 안 넘기므로 회귀 0."""
     connection.encrypted_access_token = encrypt_channel_credential(new_access_token)
+    if new_refresh_token is not None:
+        connection.encrypted_refresh_token = encrypt_channel_credential(new_refresh_token)
     connection.token_expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in_seconds)
     connection.last_refreshed_at = datetime.now(timezone.utc)
     # story #3633 — mark_connection_recovered로 status/last_error 3종 통일.
@@ -247,3 +256,14 @@ def decrypt_for_use(connection: ChannelConnection) -> str | None:
     if connection.encrypted_access_token is None:
         return None
     return decrypt_channel_credential(connection.encrypted_access_token)
+
+
+def decrypt_refresh_token_for_use(connection: ChannelConnection) -> str | None:
+    """story #3808(Phase3·3-3 PR1) — `decrypt_for_use`의 refresh_token판. X류
+    refresh_mode="refresh_token" 채널의 cron 재발급은 access_token이 아니라 **이
+    refresh_token**을 provider에 보낸다(decrypt_for_use가 access_token만 다루므로
+    이 채널군에는 그대로 재사용할 수 없음 — 새 함수가 맞는 자리). 같은 ⛔즉시
+    소비 규율."""
+    if connection.encrypted_refresh_token is None:
+        return None
+    return decrypt_channel_credential(connection.encrypted_refresh_token)
