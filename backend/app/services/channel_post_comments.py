@@ -343,11 +343,20 @@ async def collect_comments_for_publication(
 
     now = datetime.now(timezone.utc)
     fetched_external_ids: set[str] = set()
+    # story #3805(Phase3·3-1·PR 4, 페드루 PO 確定 2026-09-11 12:12Z) — 어댑터가
+    # 끌어올린 공용 계약 `parent_external_id`(threads_publish.py 등 3종 동형)를
+    # 모아 두고, 이 배치의 upsert가 전부 끝난 뒤 한 번에 해소한다(부모·답글이
+    # 같은 페이지에 같이 올 수 있어 upsert 루프 안에서 즉시 조회하면 부모가
+    # 아직 안 커밋된 채일 수 있다 — 배치 후처리로 순서 문제를 피한다).
+    parent_external_id_by_child: dict[str, str] = {}
     for raw in raw_comments:
         external_comment_id = str(raw.get("id"))
         if not external_comment_id or external_comment_id == "None":
             continue
         fetched_external_ids.add(external_comment_id)
+        parent_external_id = raw.get("parent_external_id")
+        if parent_external_id:
+            parent_external_id_by_child[external_comment_id] = str(parent_external_id)
         text = str(raw.get("text") or "")
         # sandbox_publish·threads_publish 둘 다 raw.timestamp를 ISO 문자열로 준다
         # (provider 원시 응답 그대로) — asyncpg는 문자열 바인딩을 거부하니(TIMESTAMPTZ
@@ -379,6 +388,33 @@ async def collect_comments_for_publication(
             },
         )
         await db.execute(stmt)
+
+    # story #3805 PR 4 — parent_comment_id 해소. 외부 parent id로 이 publication
+    # 안(부모는 항상 같은 게시물 밑 댓글)의 기존 행을 조회 — 이번 배치에서 막
+    # upsert된 부모(같은 페이지에 부모·답글이 같이 옴)든, 이전 수집에서 이미 들어온
+    # 부모든 둘 다 이 select 하나로 잡는다(upsert가 이미 commit 불요 — 같은
+    # 트랜잭션 안 select는 방금 execute한 INSERT를 본다). 부모를 못 찾으면(아직
+    # 미수집) null로 남긴다 — 외부 parent id 자체는 raw JSONB에 이미 있어 유실 0.
+    if parent_external_id_by_child:
+        parent_rows = (await db.execute(
+            select(ChannelPostComment.id, ChannelPostComment.external_comment_id).where(
+                ChannelPostComment.publication_id == publication_id,
+                ChannelPostComment.external_comment_id.in_(set(parent_external_id_by_child.values())),
+            )
+        )).all()
+        internal_id_by_external_id = {ext: internal for internal, ext in parent_rows}
+        for child_external_id, parent_external_id in parent_external_id_by_child.items():
+            parent_internal_id = internal_id_by_external_id.get(parent_external_id)
+            if parent_internal_id is None:
+                continue
+            await db.execute(
+                update(ChannelPostComment)
+                .where(
+                    ChannelPostComment.publication_id == publication_id,
+                    ChannelPostComment.external_comment_id == child_external_id,
+                )
+                .values(parent_comment_id=parent_internal_id)
+            )
 
     # 리컨실 — 이전엔 살아있다고 기록됐는데 이번 fetch엔 없는 댓글은 소프트 삭제.
     # 페드루 PO REQUIRED(2026-09-05, PR#3865 리뷰) — complete=False(커서 상한에
@@ -1136,13 +1172,17 @@ class EngagementItemInvalidStatusError(Exception):
 
 async def list_engagement_items(
     db: AsyncSession, *, org_id: uuid.UUID, status: str | None = None, channel: str | None = None,
-    cursor: str | None = None, limit: int = 50,
+    kind: str | None = None, cursor: str | None = None, limit: int = 50,
 ) -> dict[str, Any]:
     """그라운딩 ①③④ — org 단위 큐. 정렬=open 우선(0)→그 외(1)→captured_at desc→id
     desc(마이그마다 정렬이 안 깨지게 3키 전부 cursor에 싣는다 — 3713류 「경계 넘는
     이름이 다르면 조용히 버려진다」 재발 방지). priority 자체가 진짜 정렬키라
     encode_metric_cursor(3502 metric 정렬 선례)를 그대로 재사용 — 3번째 커서 포맷
-    발명 금지. 소프트 삭제된 댓글은 큐에서 제외(deleted_at IS NOT NULL)."""
+    발명 금지. 소프트 삭제된 댓글은 큐에서 제외(deleted_at IS NOT NULL).
+
+    story #3805 PR 4 — `kind`(comment|reply)는 저장 컬럼이 아니라 `parent_comment_id`
+    의 有無로 판정한다(라우터의 `_item_response`와 동일 규칙, 새 진실원천 안 만듦).
+    """
     priority_expr = case((ChannelPostComment.triage_status == "open", 0), else_=1)
 
     conditions = [ChannelPostComment.org_id == org_id, ChannelPostComment.deleted_at.is_(None)]
@@ -1150,6 +1190,10 @@ async def list_engagement_items(
         conditions.append(ChannelPostComment.triage_status == status)
     if channel is not None:
         conditions.append(ChannelPostComment.channel == channel)
+    if kind == "comment":
+        conditions.append(ChannelPostComment.parent_comment_id.is_(None))
+    elif kind == "reply":
+        conditions.append(ChannelPostComment.parent_comment_id.isnot(None))
 
     if cursor is not None:
         cur_priority, cur_captured_at, cur_id = decode_metric_cursor(cursor)

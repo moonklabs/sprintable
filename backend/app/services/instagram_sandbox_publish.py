@@ -175,12 +175,17 @@ async def delete_media(client: httpx.AsyncClient, *, access_token: str, media_id
 
 def _deterministic_comment(*, media_id: str, index: int) -> dict:
     seed = int(uuid.uuid5(uuid.NAMESPACE_URL, f"{media_id}:{index}").hex[:8], 16)
-    return {
+    item = {
         "id": f"sandbox-ig-comment-{media_id}-{index}",
         "text": f"샌드박스 IG 댓글 {index}(seed={seed % 1000})",
         "username": f"sandbox_ig_user_{index}",
         "timestamp": "2026-09-05T00:00:00+00:00",
     }
+    # story #3805(Phase3·3-1·PR 4, 페드루 PO 確定 2026-09-11 12:12Z) — sandbox_
+    # publish.py::_deterministic_comment와 동형(댓글 2=댓글 1의 답글).
+    if index == 2:
+        item["parent_external_id"] = f"sandbox-ig-comment-{media_id}-1"
+    return item
 
 
 async def fetch_replies(

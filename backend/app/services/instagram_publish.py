@@ -271,7 +271,10 @@ async def get_permalink(client: httpx.AsyncClient, *, access_token: str, media_i
 # `id,text,timestamp,from{id,username}`, 스코프 instagram_business_basic+
 # instagram_business_manage_comments.
 
-_COMMENTS_FIELDS = "id,text,timestamp,from{id,username}"
+# story #3805(Phase3·3-1·PR 4, 페드루 PO 確定 2026-09-11 12:12Z) — `parent_id`
+# 추가(Meta IG Comment 레퍼런스 문서 확認 — 댓글이 다른 댓글에 달린 경우에만 값
+# 有, 최상위 댓글은 없음/null). 실 응답 채움 여부는 배포 뒤 PO 라이브 확認.
+_COMMENTS_FIELDS = "id,text,timestamp,from{id,username},parent_id"
 _REPLIES_MAX_PAGES = 10  # threads_publish.py::fetch_replies와 동일 상한·동일 사유
 
 
@@ -304,6 +307,10 @@ async def fetch_replies(
             item = dict(raw)
             item["username"] = frm.get("username")
             item["from_id"] = frm.get("id")
+            # story #3805 PR 4 — `parent_id`를 공용 계약 `parent_external_id`로
+            # 끌어올림(threads_publish.py::fetch_replies와 동형).
+            if raw.get("parent_id"):
+                item["parent_external_id"] = raw.get("parent_id")
             items.append(item)
         summary_total = (body.get("summary") or {}).get("total_count")
         if isinstance(summary_total, int):

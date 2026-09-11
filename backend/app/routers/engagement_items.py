@@ -17,7 +17,14 @@ PR 3 정정(페드루 PO 定 2026-09-11 10:36Z) — 「답글 편입」을 처�
 반응"(inbound) 큐에 outbound를 섞은 설계 오류였다(PO 실측 지적). 대신 댓글 행
 옆에 읽기전용 「답변함 · 시각」(`answered_at`)만 보인다(트리아지는 안 건드림).
 kind 판별자도 이 PR에서 뺀다 — 중첩 inbound 답글(parent/in_reply_to류) 자체가
-스키마에 없어(grep 실측) 지금은 가를 게 없다(2차)."""
+스키마에 없어(grep 실측) 지금은 가를 게 없다(2차).
+
+PR 4(페드루 PO 確定 2026-09-11 12:12Z) — 인바운드 중첩 답글 수집. Threads
+(`replied_to`/`root_post`)·Instagram(`parent_id`)·Facebook(`parent`) 셋 다
+Graph API 문서상 부모-댓글 참조 필드가 있다(확定①, 실 응답 채움 여부는 배포 뒤
+PO 라이브 확認). `ChannelPostComment.parent_comment_id`(0365, 수집 서비스가
+외부 parent id→내부 id로 해소)가 생겨 `kind`(comment|reply) 판별자를 되살린다
+— parent_comment_id 有=답글·無=댓글(저장 컬럼 0, 응답 조립 시 판정)."""
 from __future__ import annotations
 
 import uuid
@@ -77,6 +84,8 @@ class EngagementItemResponse(BaseModel):
     # 아직 없음(트리아지 상태와 독립 — 답변함이어도 open일 수 있다, 사람이 직접
     # done으로 옮긴다).
     answered_at: str | None
+    # PR 4 — comment|reply. parent_comment_id 有無로 판정(저장 컬럼 아님).
+    kind: str
 
 
 class EngagementItemListResponse(BaseModel):
@@ -107,6 +116,7 @@ def _item_response(c, answered_at=None) -> EngagementItemResponse:
         author_display_name=c.author_display_name, text=c.text, captured_at=c.captured_at.isoformat(),
         triage_status=c.triage_status, assignee_member_id=c.assignee_member_id, linked_story_id=c.linked_story_id,
         answered_at=answered_at.isoformat() if answered_at else None,
+        kind="reply" if c.parent_comment_id else "comment",
     )
 
 
@@ -115,6 +125,7 @@ async def list_engagement_items_endpoint(
     org_id: uuid.UUID,
     status: str | None = Query(default=None),
     channel: str | None = Query(default=None),
+    kind: str | None = Query(default=None),
     cursor: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
@@ -122,12 +133,13 @@ async def list_engagement_items_endpoint(
     auth: AuthContext = Depends(get_current_user),
 ) -> EngagementItemListResponse:
     """조직 멤버(휴먼·에이전트 모두) 읽기 가능 — 댓글 열람 관례(3516 AC4)와 동형.
-    limit/offset이 아니라 cursor(그라운딩 ① — 3713류 재발 방지)."""
+    limit/offset이 아니라 cursor(그라운딩 ① — 3713류 재발 방지). PR 4 — kind
+    필터(comment|reply, 생략=전체)."""
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
 
     result = await list_engagement_items(
-        db, org_id=org_id, status=status, channel=channel, cursor=cursor, limit=limit,
+        db, org_id=org_id, status=status, channel=channel, kind=kind, cursor=cursor, limit=limit,
     )
     answered_at_by_id = await get_latest_sent_reply_at_by_comment_ids(
         db, comment_ids=[c.id for c in result["items"]],

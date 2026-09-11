@@ -268,12 +268,19 @@ async def delete_media(client: httpx.AsyncClient, *, access_token: str, media_id
 # 로직이라 sandbox뿐 아니라 실 Threads 응답에도 그대로 먹힌다.
 def _deterministic_comment(*, media_id: str, index: int) -> dict:
     seed = int(uuid.uuid5(uuid.NAMESPACE_URL, f"{media_id}:{index}").hex[:8], 16)
-    return {
+    item = {
         "id": f"sandbox-comment-{media_id}-{index}",
         "text": f"샌드박스 댓글 {index}(seed={seed % 1000})",
         "username": f"sandbox_user_{index}",
         "timestamp": "2026-09-05T00:00:00+00:00",
     }
+    # story #3805(Phase3·3-1·PR 4, 페드루 PO 確定 2026-09-11 12:12Z) — 댓글 2를
+    # 댓글 1의 답글로(인바운드·「남이 우리 댓글에 단 답글」) 고정해, PO Test Org에서
+    # kind 열(댓글/답글)이 항상 실측되게 한다(이전엔 고정 2건=댓글·댓글이라 kind가
+    # 한 값으로만 보였다).
+    if index == 2:
+        item["parent_external_id"] = f"sandbox-comment-{media_id}-1"
+    return item
 
 
 _COMMENT2_DELETE_MARKER_RE = re.compile(r"-c2del(\d+)$")

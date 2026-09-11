@@ -1622,6 +1622,11 @@
       "file": "tests/test_3806_ads_boost_spend.py",
       "sec": 6.4,
       "source": "story-3806(Phase3·3-2 PR4, 페드루 PO 追加 確定 2026-09-11 — offset_label 판단 콜② 답으로 organic 목록 필터 테스트 1건 추가) — 재측(로컬, uv run pytest --durations=0 직접 1회 실행, 7건 wall time 약 6.4s — test_3766 등재 선례와 동일 방법론)"
+    },
+    {
+      "file": "tests/test_3805_pr4_reply_collection.py",
+      "sec": 4.2,
+      "source": "story-3805(Phase3·3-1 PR 4, 페드루 PO 確定 2026-09-11 12:12Z — 인바운드 중첩 답글 수집·kind 열 복귀) — 신규 파일 실측(로컬, uv run pytest --durations=0 직접 1회 실행, 8건 call+setup 합산 약 4.2s — test_3766 등재 선례와 동일 방법론)"
     }
   ]
 }
