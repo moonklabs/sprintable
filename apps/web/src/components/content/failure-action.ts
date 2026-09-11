@@ -15,7 +15,14 @@ export type FailureAction =
   | { kind: 'blocked' }
   | { kind: 'needs_check' }
   | { kind: 'auto_retry'; nextRetryAt: string | null }
-  | { kind: 'dead_letter' }
+  // story #3402 갭(유나 실측·PO 채택 ㉡, 2026-09-10) — BE가 needs_check를 즉시
+  // dead_letter로 접어(publication_command.py:695-698) 위 kind:'needs_check' 갈래는
+  // 라이브에서 사실상 도달 불가였다. 층 구분은 유지(command_status=dead_letter가
+  // 버튼 유무·severity를 결정)하되, dead_letter 안에서 failure_kind가 원래
+  // needs_check였는지(needsRecheck)로 문면·체크리스트·CTA만 needs_check 것을 쓴다
+  // — 새 kind를 만들지 않는다(§17-2 두 열 표 그대로: command_status=버튼,
+  // failure_kind=문면).
+  | { kind: 'dead_letter'; needsRecheck: boolean }
   | { kind: 'voided'; reasonCode: string | null }
   // 페드루 PO 정정(2026-09-04 09:49Z, BE #3425/PR#3776) — 이미지 글이 컨테이너 생성→
   // 완료 대기 중일 때. §17-15 "자동으로 이어서 처리 중"(중립·버튼 없음) — transient의
@@ -75,7 +82,10 @@ export interface FailureActionInput {
  */
 export function deriveFailureAction(input: FailureActionInput): FailureAction | undefined {
   if (input.commandStatus === 'voided') return { kind: 'voided', reasonCode: input.reasonCode ?? null };
-  if (input.commandStatus === 'dead_letter') return { kind: 'dead_letter' };
+  // story #3402 갭(2026-09-10) — needsRecheck는 dead_letter로 접히기 直前의 failure_kind가
+  // needs_check였는지만 본다(§17-2 층 구분: command_status가 이미 dead_letter를 확定했으니
+  // 그 안에서 failure_kind는 "무엇을 보여줄지"만 고른다, "보여줄지 말지"는 안 건드린다).
+  if (input.commandStatus === 'dead_letter') return { kind: 'dead_letter', needsRecheck: input.failureKind === 'needs_check' };
   if (input.commandStatus === 'blocked') return { kind: 'blocked' };
   if (input.commandStatus === 'completed' || input.commandStatus === 'cancelled' || !input.commandStatus) return undefined;
   // 페드루 PO 정정(2026-09-04 09:49Z) — pending ∧ processing_kind==='awaiting_container'

@@ -87,13 +87,13 @@ describe('FailureActionBadge — story #3422 ②-c 2/N(doc §17-13 버튼 유무
   });
 
   it('⭐dead_letter — 버튼 있음(수동 재시도, 휴먼 전용은 소비부 게이팅 몫)', async () => {
-    await render({ kind: 'dead_letter' });
+    await render({ kind: 'dead_letter', needsRecheck: false });
     expect(container.querySelector('[data-testid="channel-post-failure-retry-button"]')?.textContent)
       .toBe(koMessages.content.channelPostsFailureRetryCta);
   });
 
   it('⭐B3 — dead_letter 재시도 버튼은 onRetryClick 미배선이면 disabled+사유가 버튼 밖 <p>', async () => {
-    await render({ kind: 'dead_letter' });
+    await render({ kind: 'dead_letter', needsRecheck: false });
     const btn = container.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement;
     expect(btn.disabled).toBe(true);
     expect(btn.title).toBe('');
@@ -103,10 +103,54 @@ describe('FailureActionBadge — story #3422 ②-c 2/N(doc §17-13 버튼 유무
 
   it('⭐N3 — compact=true면 dead_letter 재시도 버튼을 아예 안 그린다(라벨만)', async () => {
     await act(async () => {
-      root.render(wrap(<FailureActionBadge action={{ kind: 'dead_letter' }} displayTimezone="UTC" compact />));
+      root.render(wrap(<FailureActionBadge action={{ kind: 'dead_letter', needsRecheck: false }} displayTimezone="UTC" compact />));
     });
     expect(container.querySelector('[data-testid="channel-post-failure-retry-button"]')).toBeNull();
     expect(container.textContent).toBe(koMessages.content.channelPostsFailureDeadLetter);
+  });
+
+  // story #3402 갭(유나 실측·PO 채택 ㉡, 2026-09-10) — dead_letter ∧ needsRecheck는
+  // BE가 needs_check를 즉시 dead_letter로 접는(publication_command.py:695-698) 실
+  // 라이브 형이다. 문면·CTA 라벨은 needs_check 것을 쓴다(버튼 자체의 존재·활성은
+  // command_status=dead_letter라 그대로 有·활성 — 2단계 게이트는 이 버튼이 여는
+  // ConfirmDialog 안, page.test.tsx 몫). 이 문면은 recheckGate=true인 소비처(실제
+  // 관문이 있는 channel_posts 상세)에서만 뜬다 — recheckGate=false(기본)면 needs_
+  // check 문면을 안 낸다(바로 아래 별도 테스트, 페드루 PO 지적 2026-09-10 ②: "없는
+  // 관문을 약속" 금지). 뮤테이션: needsRecheck 분기를 걷으면(action.needsRecheck &&
+  // recheckGate ? ... : ...) → 이 두 테스트가 RED여야 한다.
+  it('⭐dead_letter ∧ needsRecheck ∧ recheckGate=true — 배지 문면이 needs_check 것(채널 확認 필요)으로 뜬다', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <FailureActionBadge action={{ kind: 'dead_letter', needsRecheck: true }} recheckGate displayTimezone="UTC" />,
+      ));
+    });
+    expect(container.textContent).toContain(koMessages.content.channelPostsFailureNeedsCheck);
+    expect(container.textContent).not.toContain(koMessages.content.channelPostsFailureDeadLetter);
+  });
+
+  it('⭐dead_letter ∧ needsRecheck ∧ recheckGate=true — CTA 라벨이 needs_check 것(「확인했습니다 · 다시 시도」)으로 뜨고 버튼은 有·활성', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <FailureActionBadge action={{ kind: 'dead_letter', needsRecheck: true }} recheckGate onRetryClick={() => {}} displayTimezone="UTC" />,
+      ));
+    });
+    const btn = container.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement | null;
+    expect(btn?.textContent).toBe(koMessages.content.channelPostsFailureCheckedRetryCta);
+    expect(btn?.disabled).toBe(false);
+  });
+
+  // story #3402 갭 후속(페드루 PO 지적, 2026-09-10 ②) — needs_check는 unmapped
+  // error_code의 fail-closed 기본값이라 site_post 외부 발행 명령에도 실제로
+  // 도달한다. 그 화면엔 확認 다이얼로그·체크리스트 관문 자체가 없어, recheckGate를
+  // 안 넘기면(기본 false) needsRecheck가 true여도 일반 dead_letter 문면·CTA
+  // 그대로여야 한다 — 없는 관문을 약속하지 않는다. 뮤테이션: showRecheckWording
+  // 계산에서 recheckGate를 빼고 needsRecheck만 보면 이 테스트가 RED여야 한다.
+  it('⭐dead_letter ∧ needsRecheck인데 recheckGate 미지정(기본 false) — 일반 dead_letter 문면·CTA 그대로(없는 관문을 약속하지 않는다)', async () => {
+    await render({ kind: 'dead_letter', needsRecheck: true });
+    expect(container.textContent).toContain(koMessages.content.channelPostsFailureDeadLetter);
+    expect(container.textContent).not.toContain(koMessages.content.channelPostsFailureNeedsCheck);
+    const btn = container.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement | null;
+    expect(btn?.textContent).toBe(koMessages.content.channelPostsFailureRetryCta);
   });
 
   // N2(페드루 PO 지적, 2026-09-04) — CONTENT_CHANGED는 실측 BE reason_code(channel_posts.py
@@ -141,7 +185,7 @@ describe('FailureActionBadge — story #3422 ②-c 2/N(doc §17-13 버튼 유무
   it('onRetryClick이 dead_letter 재시도 버튼 클릭 시 호출된다', async () => {
     let clicked = false;
     await act(async () => {
-      root.render(wrap(<FailureActionBadge action={{ kind: 'dead_letter' }} onRetryClick={() => { clicked = true; }} displayTimezone="UTC" />));
+      root.render(wrap(<FailureActionBadge action={{ kind: 'dead_letter', needsRecheck: false }} onRetryClick={() => { clicked = true; }} displayTimezone="UTC" />));
     });
     const btn = container.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement;
     await act(async () => {

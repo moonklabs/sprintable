@@ -2216,7 +2216,9 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
         .toBe(koMessages.content.channelPostsRetryConfirmWhatDeadLetter);
       expect(document.body.querySelector('[data-testid="channel-post-retry-confirm-reversible"]')?.textContent)
         .toBe(koMessages.content.channelPostsRetryConfirmReversible);
-      // dead_letter는 체크리스트가 없다(needs_check 전용).
+      // story #3402 갭(2026-09-10) 회귀 — failure_kind가 needs_check가 아닌 dead_letter
+      // (여기는 기본값 null=transient류)는 체크리스트가 없다. needs_check인 dead_letter는
+      // 아래 별도 테스트("dead_letter ∧ needs_check").
       expect(document.body.querySelector('[data-testid="channel-post-retry-confirm-checklist"]')).toBeNull();
 
       // story #3641 — cancelBtn이 undefined면 dispatchEvent가 옵셔널 체이닝으로 조용히
@@ -2312,6 +2314,39 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
       await flush();
       expect(document.body.querySelector('[data-testid="channel-post-retry-confirm-what"]')?.textContent)
         .toBe(koMessages.content.channelPostsRetryConfirmWhatNeedsCheck);
+    });
+
+    // story #3402 갭(유나 실측·PO 채택 ㉡, 2026-09-10) — BE가 needs_check를 즉시
+    // dead_letter로 접어(publication_command.py:695-698) 위 「pending ∧ needs_check」
+    // 조합은 라이브에서 사실상 도달 불가였다. 실제로 오는 형은 이 「dead_letter ∧
+    // failure_kind=needs_check」다 — 이 조합에서도 같은 2단계 관문(배지 문면·CTA
+    // 라벨·체크리스트·다이얼로그 "무엇이" 전부 needs_check 것)이 서야 한다. 뮤테이션
+    // 대상: page.tsx의 isNeedsCheckGate에서 dead_letter+needsRecheck 절을 걷으면
+    // (또는 failure-action.ts의 needsRecheck 계산을 걷으면) 이 테스트가 RED여야 한다.
+    it('⭐AC2-b(3402 갭) — dead_letter ∧ failure_kind=needs_check도 needs_check 2단계 관문이 선다', async () => {
+      stubFetch({ draftDetail: { command_status: 'dead_letter', failure_kind: 'needs_check', command_id: 'cmd-3' } });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+
+      // 배지 문면·CTA 라벨부터 needs_check 것.
+      expect(container.querySelector('[data-testid="channel-post-failure-badge"]')?.textContent)
+        .toContain(koMessages.content.channelPostsFailureNeedsCheck);
+      const retryBtn = container.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement;
+      expect(retryBtn.textContent).toBe(koMessages.content.channelPostsFailureCheckedRetryCta);
+      expect(retryBtn.disabled).toBe(false);
+
+      await act(async () => { retryBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      await flush();
+
+      expect(document.body.querySelector('[data-testid="channel-post-retry-confirm-what"]')?.textContent)
+        .toBe(koMessages.content.channelPostsRetryConfirmWhatNeedsCheck);
+      const checklist = document.body.querySelector('[data-testid="channel-post-retry-confirm-checklist"]') as HTMLInputElement;
+      expect(checklist).not.toBeNull();
+      const confirmBtn = [...document.body.querySelectorAll('button')].filter((b) => b !== retryBtn).find((b) => b.textContent === koMessages.content.channelPostsRetryConfirmAction) as HTMLButtonElement;
+      expect(confirmBtn.disabled).toBe(true);
+
+      await act(async () => { checklist.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      expect(confirmBtn.disabled).toBe(false);
     });
   });
 
