@@ -364,6 +364,12 @@ _ORG_SCOPED_UNMAPPED_SEGMENTS_WITH_REASON: dict[str, str] = {
     "resolve": "MCP 도구/키워드 0건(organizations.py, slug→org 해소·session 유틸류)",
     "(empty/root)": "MCP 도구/키워드 0건(organizations.py, org 목록/생성 자체·admin류)",
     "(root, org_id only)": "MCP 도구/키워드 0건(organizations.py, org 단건 조회/수정·admin류)",
+    # story #3806(Phase3·3-2 PR3, 페드루 PO 確定 2026-09-11 — CI 빨감 정정) —
+    # ads_boost_execution.py의 start/pause/resume. content 매핑표(에이전트 읽기
+    # 전제)가 아니라 이 목록이 맞는 방향 — AC4가 에이전트를 실행/예산 API에서
+    # 명시적으로 배제(제안만)하므로 MCP 도구 자체를 0건으로 유지하는 것이 설계
+    # 의도. engagement(#3805)와 반대 방향.
+    "ads-boosts": "휴먼 전용(3806 AC4: 에이전트는 제안만·실행/예산 API 접근 0)·MCP 도구 0건",
 }
 
 
