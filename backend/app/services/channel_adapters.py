@@ -652,6 +652,11 @@ _PUBLISH_CLIENT_MODULE_PATHS: dict[str, str] = {
     "instagram": "app.services.instagram_publish",
     "facebook": "app.services.facebook_publish",
     "facebook_sandbox": "app.services.facebook_sandbox_publish",
+    # story #3808(Phase3·3-3 PR2) — x_publish.py/x_sandbox_publish.py는 X의 실제
+    # API 모양(컨테이너 개념 0)을 이 5-함수 파사드에 맞춰 스스로 접는다(x_publish.py
+    # 상단 딱지 참고) — channel_posts.py 오케스트레이션 무변경.
+    "x": "app.services.x_publish",
+    "x_sandbox": "app.services.x_sandbox_publish",
 }
 
 

@@ -1317,7 +1317,7 @@ async def publish_site_post_external_command(db: AsyncSession, command: "Publica
     기록(정본 §3 "재사용" — hosted_site는 이 테이블을 안 쓰는 것과 별개, 이 함수는
     connection_id가 있는 draft 전용). 재발행(같은 connection의 기존 external_id가
     있으면 그 글을 갱신)해 WordPress에 중복 글이 안 쌓인다."""
-    from app.models.channel_publication import ChannelPublication
+    from app.models.channel_publication import UQ_GATE_VERSION_SEQUENCE_CONSTRAINT_NAME, ChannelPublication
     from app.models.site_post_version import SitePostVersion
     from app.services.blog_destinations import get_blog_destination_module
     from app.services.channel_connection import decrypt_for_use
@@ -1448,7 +1448,11 @@ async def publish_site_post_external_command(db: AsyncSession, command: "Publica
             constraint = getattr(_orig, "constraint_name", None) or getattr(
                 getattr(_orig, "__cause__", None), "constraint_name", None,
             )
-            if constraint != "uq_channel_publications_gate_version":
+            # story #3808(Phase3·3-3 PR2, 페드루 PO 追加 지적 2026-09-11 21:11Z — channel_
+            # posts.py와 같은 클래스 2번째 재발, site_posts.py도 같은 하드코딩) — 모델
+            # 상수 재사용(channel_posts.py 동형 처방과 같은 근거: 이름이 두 곳에 각자
+            # 있으면 한쪽만 바뀔 때 조용히 어긋난다).
+            if constraint != UQ_GATE_VERSION_SEQUENCE_CONSTRAINT_NAME:
                 raise
             row = (await db.execute(
                 select(ChannelPublication).where(

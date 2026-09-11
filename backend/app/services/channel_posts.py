@@ -32,7 +32,7 @@ from app.models.channel_connection import ChannelConnection
 from app.models.channel_post_draft import ChannelPostDraft
 from app.models.channel_post_image import ChannelPostImage
 from app.models.channel_post_version import ChannelPostVersion
-from app.models.channel_publication import ChannelPublication
+from app.models.channel_publication import UQ_GATE_VERSION_SEQUENCE_CONSTRAINT_NAME, ChannelPublication
 from app.models.gate import Gate, set_gate_status
 from app.models.publication_command import PublicationCommand
 from app.models.site_post_draft import SitePostDraft
@@ -1461,9 +1461,17 @@ async def publish_channel_post_draft(
 
             row = existing
             if row is None:
+                # story #3808(Phase3·3-3 PR2, 페드루 PO 決定 2026-09-11 20:09Z) — X는
+                # 스레드 N건 지원 대비 sequence가 1-indexed(헤드=1)다. 이 호출부는
+                # 항상 세그먼트 1개(N=1, publish_x_thread([text]))만 통과시키므로
+                # 지금은 항상 1 — N≥2(진짜 스레드)의 텍스트 출처는 PR5(draft segments
+                # 스키마) 몫, 이 함수는 그 경로를 아직 모른다. 다른 채널은 이 열을
+                # 안 건드려 server_default 0 그대로(회귀 0).
+                sequence = 1 if draft.channel in ("x", "x_sandbox") else 0
                 row = ChannelPublication(
                     id=uuid.uuid4(), org_id=org_id, gate_id=gate.id, version_id=latest.id,
                     connection_id=connection.id, channel=draft.channel, status="container_created",
+                    sequence=sequence,
                 )
                 # story #3395(디디 코드 리뷰 발견, PR#3752) — 같은 (gate_id, version_id)로
                 # 진짜 동시 요청 2건이 들어오면 둘 다 위 existing 조회에서 None을 본 뒤 각자
@@ -1482,11 +1490,18 @@ async def publish_channel_post_draft(
                     # "IntegrityError면 무조건 경합"으로 삼키면 진짜 다른 원인(예: 미래에
                     # FK가 추가된다면 그 위반)까지 조용히 오판할 수 있다. 이 테이블엔 FK가
                     # 없어(그라운딩 §9) 지금은 이 uq 하나뿐이지만, 방어적으로 이름을 짚는다.
+                    #
+                    # story #3808(카디르 QA 실측 2026-09-11 — #3395/PR#3752 동시발행 500
+                    # 재발 처방) — 제약 이름을 여기 하드코딩하지 않고 모델의 상수를 import
+                    # 한다. 예전엔 이 문자열이 여기와 channel_publication.py 두 곳에 각자
+                    # 박혀 있어, sequence 컬럼 추가로 제약 이름이 바뀌었을 때 이 비교문만
+                    # 옛 이름에 멈춰 판정이 항상 raise로 떨어졌다(threads/instagram/
+                    # facebook 전 채널에서 동시 발행 2건이 다시 500으로 죽는 실 회귀).
                     _orig = getattr(exc, "orig", None)
                     constraint = getattr(_orig, "constraint_name", None) or getattr(
                         getattr(_orig, "__cause__", None), "constraint_name", None,
                     )
-                    if constraint != "uq_channel_publications_gate_version":
+                    if constraint != UQ_GATE_VERSION_SEQUENCE_CONSTRAINT_NAME:
                         raise
                     # 진 쪽 — Threads 실 호출은 이긴 쪽에게 맡긴다(이 자리에서 이어 부르면
                     # 이긴 쪽이 아직 처리 중인 컨테이너를 이중으로 publish할 위험이 있다).
