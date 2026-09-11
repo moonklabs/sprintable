@@ -118,9 +118,10 @@ async def list_insight_snapshots_for_publication(
 
 
 async def resolve_publication_org_id(db: AsyncSession, *, publication_id: uuid.UUID) -> uuid.UUID | None:
-    """story #3796(페드루 PO 確定 2026-09-10, 유나 실측) — 폴리모픽 publication_id의
-    실 소유 org. 라우터가 스냅샷 0건일 때만 부른다(존재+타 org인지 vs 애초에 미존재인지
-    구분하기 위함 — 전자만 404, 후자는 기존 "빈 목록" 계약 그대로 유지). resolve_
+    """story #3796(페드루 PO 確定 2026-09-10, 2차 CHANGES 2026-09-11) — 폴리모픽
+    publication_id의 실 소유 org. 라우터가 스냅샷 0건일 때만 부른다 — 반환값이
+    caller org와 다르면(None 포함, 애초에 미존재도 여기 해당) 404, 같으면(내 org
+    소유+스냅샷만 0건) 빈 목록(가름선=소유, 라우터 docstring 참고). resolve_
     publication_published_at과 같은 두 테이블(ChannelPublication·SitePost)을 보되,
     이쪽은 kind를 모르는 채로 호출되므로(스냅샷 행 자체가 없어 kind를 읽을 자리가
     없다) 순서대로 둘 다 시도 — 어느 쪽도 없으면 None(지어내지 않는다)."""
