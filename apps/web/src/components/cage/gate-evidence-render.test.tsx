@@ -886,4 +886,49 @@ describe('GateActivityHistory — 결재 이력 실 응답 shape 마운트(story
 
     expect(container.textContent).not.toContain(koMessages.cage.gateActivityHistoryTitle);
   });
+
+  // story #3806(Phase3·3-2 PR 12, 페드루 PO 실측 캡처 2026-09-11 18:16Z) — raw 액션
+  // 키가 그대로 노출되던 결함(문구사전 매핑 누락) 재발 방지.
+  it('ads_spend_refresh_requested — raw 키 아니라 정식 문구로 뜬다', async () => {
+    vi.mocked(fetchWithAuth).mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve([
+        {
+          id: 'log-1', action: 'ads_spend_refresh_requested', actor_id: 'm-1', actor_name: '미르코',
+          context: { spend_minor: 12345, cap_reached: false }, created_at: '2026-09-11T18:11:58Z',
+        },
+      ]),
+    } as Response);
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateActivityHistory gateId="gate-1" />)); });
+
+    expect(container.textContent).toContain(koMessages.cage.gateActivityActionAdsSpendRefreshRequested);
+    expect(container.textContent).not.toContain('ads_spend_refresh_requested');
+  });
+
+  // story #3806(Phase3·3-2 PR 12) — 「눌렀는데 아무 일도 없었다」 결함 처방 — 형제
+  // BoostExecutionControl의 뮤테이션이 이 컴포넌트에 반영되는 유일한 경로(refreshKey).
+  it('refreshKey가 바뀌면 재조회한다(형제 컴포넌트 뮤테이션 반영 경로)', async () => {
+    vi.mocked(fetchWithAuth)
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve([]) } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve([
+          { id: 'log-1', action: 'ads_spend_refresh_requested', actor_id: 'm-1', actor_name: '미르코', context: {}, created_at: '2026-09-11T18:11:58Z' },
+        ]),
+      } as Response);
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateActivityHistory gateId="gate-1" refreshKey={0} />)); });
+    expect(container.textContent).toContain(koMessages.cage.gateActivityEmpty);
+
+    await act(async () => { root.render(wrap(<GateActivityHistory gateId="gate-1" refreshKey={1} />)); });
+    expect(fetchWithAuth).toHaveBeenCalledTimes(2);
+    expect(container.textContent).toContain(koMessages.cage.gateActivityActionAdsSpendRefreshRequested);
+  });
 });

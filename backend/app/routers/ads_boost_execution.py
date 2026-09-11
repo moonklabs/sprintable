@@ -29,7 +29,13 @@ from app.services.ads_boost_execution import (
     request_ads_boost_resume,
     request_ads_boost_start,
 )
-from app.services.ads_spend_snapshots import AdsBoostGateNotFoundForSpendError, get_ads_boost_spend_summary
+from app.services.ads_spend_snapshots import (
+    AdsBoostGateNotFoundForSpendError,
+    AdsSpendFetchError,
+    AdsSpendRefreshRateLimitedError,
+    get_ads_boost_spend_summary,
+    refresh_ads_boost_spend_now,
+)
 from app.services.i18n_catalog import t
 from app.services.member_resolver import resolve_member
 
@@ -270,4 +276,64 @@ async def _get_ads_boost_spend_endpoint(
             )
             for s in summary["snapshots"]
         ],
+    )
+
+
+class SpendRefreshResponse(BaseModel):
+    spend_minor: int
+    captured_at: str
+    cap_reached: bool
+    run_status: str
+
+
+@router.post("/{org_id}/ads-boosts/{gate_id}/spend/refresh", response_model=SpendRefreshResponse, status_code=201)
+async def refresh_ads_boost_spend_endpoint(
+    org_id: uuid.UUID, gate_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db), verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+    locale: str | None = None,
+    accept_language: str | None = Header(None, alias="Accept-Language"),
+) -> SpendRefreshResponse:
+    """story #3806(Phase3·3-2 PR 12, 페드루 PO 確定 2026-09-11 17:26Z) — 「광고비
+    다시 수집」. `comments/refresh`와 동형 권한 축(휴먼 전용 — 실행류 액션이라
+    start/pause/resume과 같은 판단, 조회 전용인 /spend GET과 다르다)."""
+    return await _refresh_ads_boost_spend_endpoint(
+        org_id, gate_id, db=db, verified_org_id=verified_org_id, auth=auth,
+        resolved_locale=resolve_locale_from_request(locale, accept_language),
+    )
+
+
+async def _refresh_ads_boost_spend_endpoint(
+    org_id: uuid.UUID, gate_id: uuid.UUID, *, db: AsyncSession, verified_org_id: uuid.UUID,
+    auth: AuthContext, resolved_locale: str,
+) -> SpendRefreshResponse:
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    resolved = await _require_human(db, auth, org_id, resolved_locale)
+    try:
+        result = await refresh_ads_boost_spend_now(
+            db, org_id=org_id, gate_id=gate_id, requester_member_id=resolved.id,
+        )
+    except AdsSpendRefreshRateLimitedError as exc:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "code": "ADS_SPEND_REFRESH_RATE_LIMITED",
+                "message": t("ads_boost.spend_refresh_rate_limited", resolved_locale, seconds=exc.retry_after_seconds),
+            },
+            headers={"Retry-After": str(exc.retry_after_seconds)},
+        ) from exc
+    except (AdsBoostGateNotFoundError, AdsBoostGateNotApprovedError) as exc:
+        _raise_common_error(exc, resolved_locale)
+    except AdsSpendFetchError as exc:
+        # story #3806 PR12 — 아직 provider에 실행 자체가 안 된 상태(campaign_id
+        # 없음)에서 「다시 수집」을 누른 경우. pause-without-start와 같은 뜻(아직
+        # 시작 안 함)이라 그 기존 카탈로그 키를 그대로 재사용(새 문구 0).
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "ADS_BOOST_NOT_STARTED", "message": t("ads_boost.not_started", resolved_locale)},
+        ) from exc
+    return SpendRefreshResponse(
+        spend_minor=result["spend_minor"], captured_at=result["captured_at"].isoformat(),
+        cap_reached=result["cap_reached"], run_status=result["run_status"],
     )

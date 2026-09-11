@@ -1647,6 +1647,11 @@
       "file": "tests/test_3809_org_cost_summary.py",
       "sec": 6.7,
       "source": "story-3809(Phase3·3-7, 페드루 PO 確定 2026-09-11 17:12Z — 고급 보고 첫 출시 조각1: classify_insight_source 드리프트가드+org cost-summary API) — 신규 파일 실측(로컬, uv run pytest --durations=0 직접 1회 실행, 11건 wall time 약 6.7s — test_3766 등재 선례와 동일 방법론)"
+    },
+    {
+      "file": "tests/test_3806_ads_boost_spend_refresh.py",
+      "sec": 5.3,
+      "source": "story-3806(Phase3·3-2 PR 12, 페드루 PO 確定 2026-09-11 17:26Z — 「광고비 다시 수집」 수동 갱신 엔드포인트, comments/refresh 동형) — 신규 파일 실측(로컬, uv run pytest --durations=0 직접 1회 실행, 7건 wall time 약 5.3s — test_3766 등재 선례와 동일 방법론)"
     }
   ]
 }

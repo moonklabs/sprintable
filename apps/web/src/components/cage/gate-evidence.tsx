@@ -476,6 +476,10 @@ const GATE_ACTIVITY_LABEL_KEY: Record<string, string> = {
   gate_resolution_undone: 'gateActivityActionUndone',
   gate_voided: 'gateActivityActionVoided',
   gate_overridden: 'gateActivityActionOverridden',
+  // story #3806(Phase3·3-2 PR 12, 페드루 PO 실측 캡처 2026-09-11 18:16Z) —
+  // refresh_ads_boost_spend_now(ads_spend_snapshots.py)가 남기는 액션. 매핑
+  // 누락 시 raw 키가 그대로 노출되던 걸 실 캡처로 적발.
+  ads_spend_refresh_requested: 'gateActivityActionAdsSpendRefreshRequested',
 };
 
 /**
@@ -485,12 +489,19 @@ const GATE_ACTIVITY_LABEL_KEY: Record<string, string> = {
  * 로드. 실패/빈 응답은 GithubRependingReason과 동형으로 조용히(카드 붕괴 방지) — 단 성공+0건은
  * "이력 없음"을 정직하게 보여준다(신규 gate에서 당연한 상태와, 로드 실패를 구분).
  */
-export function GateActivityHistory({ gateId }: { gateId: string }) {
+export function GateActivityHistory({ gateId, refreshKey }: { gateId: string; refreshKey?: number }) {
   const t = useTranslations('cage');
   const locale = useLocale();
   const displayTimezone = resolveDisplayTimezone().tz;
   const [items, setItems] = useState<GateActivityLogItem[] | null>(null);
 
+  // story #3806(Phase3·3-2 PR 12, 페드루 PO 실측 캡처 2026-09-11 18:16Z) — 「눌렀는데
+  // 아무 일도 없었다」 결함 처방. 이 컴포넌트는 마운트 시 1회만 불러(원래 §2975 AC4
+  // 계약) 형제 컴포넌트(BoostExecutionControl)의 뮤테이션을 반영할 방법이 없었다.
+  // `refreshKey`가 바뀌면(부모가 뮤테이션 성공 뒤 증가) 재조회 — 상세페이지
+  // key-remount 표준(reference-detail-page-key-remount-standard)과 같은 사상,
+  // 여기선 컴포넌트 전체를 remount하는 대신 이 훅 안에서 재요청만 한다(activity
+  // 목록 자체 상태는 유지할 이유가 없어 remount와 결과는 동일).
   useEffect(() => {
     let cancelled = false;
     fetchWithAuth(`/api/gates/${gateId}/activity`)
@@ -504,7 +515,7 @@ export function GateActivityHistory({ gateId }: { gateId: string }) {
         if (!cancelled) setItems(null);
       });
     return () => { cancelled = true; };
-  }, [gateId]);
+  }, [gateId, refreshKey]);
 
   if (items === null) return null;
 

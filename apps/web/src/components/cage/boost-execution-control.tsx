@@ -8,6 +8,7 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { formatMinorCurrency, type GenerationBudgetCurrency } from '@/components/content/generation-budget-indicator';
 import { adsBoostObjectiveLabel } from '@/lib/ads-boost-objective-label';
 import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatRelativeTime } from '@/lib/storage/format';
 
 // story #3806(Phase3·3-2 PR5, 유나 §절 §2 「중지 스위치」) — 실행 중인 홍보의 중지/재개.
 // 자리 = 상세(이 컴포넌트, gates/[id]/page.tsx에서 마운트)·성과 보드 행(조각⑥, 같은
@@ -30,6 +31,11 @@ export interface BoostExecutionControlProps {
   sealedAdsStartsAt: string | null;
   sealedAdsEndsAt: string | null;
   sealedAdsObjective: string | null;
+  // story #3806(Phase3·3-2 PR 12, 페드루 PO 실측 캡처 2026-09-11 18:16Z) — 「눌렀는데
+  // 아무 일도 없었다」 결함 처방. 「광고비 다시 수집」 성공은 이 컴포넌트 밖(형제
+  // GateActivityHistory)에 새 이력 행을 남기는데 그쪽이 스스로 재조회할 방법이
+  // 없었다 — 부모(gates/[id]/page.tsx)가 이 콜백으로 그 형제의 refreshKey를 올린다.
+  onSpendRefreshed?: () => void;
 }
 
 type RunStatus = 'pending' | 'running' | 'paused' | 'failed';
@@ -41,6 +47,7 @@ type InitiatedBy = 'scheduler' | 'human';
 
 export function BoostExecutionControl({
   orgId, gateId, sealedAdsBudgetMinor, sealedAdsCurrency, sealedAdsStartsAt, sealedAdsEndsAt, sealedAdsObjective,
+  onSpendRefreshed,
 }: BoostExecutionControlProps) {
   const t = useTranslations('cage');
   const tContent = useTranslations('content');
@@ -53,6 +60,16 @@ export function BoostExecutionControl({
   const [pauseConfirmOpen, setPauseConfirmOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  // story #3806(Phase3·3-2 PR 12, 페드루 PO 確定 2026-09-11 17:26Z) — 「광고비
+  // 다시 수집」 버튼 전용 상태(start/pause/resume의 submitting/actionError와 분리
+  // — 서로 다른 요청이 같은 로딩/에러 표시를 공유하면 사용자가 어느 버튼이 도는지
+  // 헷갈린다).
+  const [refreshingSpend, setRefreshingSpend] = useState(false);
+  const [spendRefreshError, setSpendRefreshError] = useState<string | null>(null);
+  // story #3806(Phase3·3-2 PR 12, 페드루 PO 실측 캡처 2026-09-11 18:16Z) — 「클릭
+  // 前/後 화면이 바이트 동일」 결함 처방. POST 응답값을 그대로 실어 즉시 렌더(재조회
+  // 왕복 0 — 이미 응답에 다 있다).
+  const [lastRefresh, setLastRefresh] = useState<{ spendMinor: number; capturedAt: string } | null>(null);
 
   const load = () => {
     fetchWithAuth(`/api/organizations/${orgId}/ads-boosts/${gateId}/spend`)
@@ -85,6 +102,39 @@ export function BoostExecutionControl({
       setActionError(t('boostExecutionActionError'));
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const doRefreshSpend = async () => {
+    setRefreshingSpend(true);
+    setSpendRefreshError(null);
+    try {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/ads-boosts/${gateId}/spend/refresh`, { method: 'POST' });
+      if (res.status === 429) {
+        const retryAfter = Number(res.headers.get('Retry-After'));
+        // comments-refresh-button.tsx(story #3517)와 동형 방어 — 초를 못 읽으면
+        // "0초 뒤"처럼 지어낸 숫자를 보이지 않고 "잠시 뒤"로 물러난다.
+        setSpendRefreshError(
+          Number.isFinite(retryAfter) && retryAfter > 0
+            ? t('boostExecutionSpendRefreshRateLimited', { seconds: retryAfter })
+            : t('boostExecutionSpendRefreshRateLimitedUnknown'),
+        );
+        return;
+      }
+      if (!res.ok) {
+        setSpendRefreshError(t('boostExecutionActionError'));
+        return;
+      }
+      const json = (await res.json()) as { data?: { spend_minor: number; captured_at: string } };
+      if (json.data) {
+        setLastRefresh({ spendMinor: json.data.spend_minor, capturedAt: json.data.captured_at });
+      }
+      load();
+      onSpendRefreshed?.();
+    } catch {
+      setSpendRefreshError(t('boostExecutionActionError'));
+    } finally {
+      setRefreshingSpend(false);
     }
   };
 
@@ -197,6 +247,27 @@ export function BoostExecutionControl({
           {submitting ? t('boostExecutionResuming') : t('boostExecutionResume')}
         </Button>
       )}
+      {/* story #3806(PR 12) — 자연 스케줄(+1d/+7d)을 기다리지 않고 즉시 1회
+          캡처. comments/refresh와 동형 손잡이(같은 5분 rate-limit 사상). */}
+      <Button
+        variant="outline" size="sm" disabled={refreshingSpend}
+        onClick={() => void doRefreshSpend()} data-testid="boost-spend-refresh-trigger"
+      >
+        {refreshingSpend ? t('boostExecutionSpendRefreshing') : t('boostExecutionSpendRefresh')}
+      </Button>
+      {spendRefreshError ? (
+        <p className="text-xs text-muted-foreground" data-testid="boost-spend-refresh-error">{spendRefreshError}</p>
+      ) : lastRefresh && sealedAdsCurrency ? (
+        // story #3806(Phase3·3-2 PR 12, 페드루 PO 실측 캡처 2026-09-11 18:16Z) —
+        // 성공 경로가 화면에 아무 변화가 없어 "눌렀는데 아무 일도 없었다"로 읽히던
+        // 결함 처방. 실패(429/error) 문구와 자리를 공유(동시에 둘 다 보일 이유 0).
+        <p className="text-xs text-muted-foreground" data-testid="boost-spend-refresh-success">
+          {t('boostExecutionSpendRefreshedNotice', {
+            amount: formatMinorCurrency(lastRefresh.spendMinor, sealedAdsCurrency as GenerationBudgetCurrency, locale, tContent),
+            time: formatRelativeTime(lastRefresh.capturedAt, locale, displayTimezone),
+          })}
+        </p>
+      ) : null}
 
       {/* story #3806(유나 §절 §2 「비용 명확」) — 확認 다이얼로그 문구는 §절 원문 그대로. */}
       <Dialog open={pauseConfirmOpen} onOpenChange={setPauseConfirmOpen}>
