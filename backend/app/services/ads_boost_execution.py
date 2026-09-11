@@ -44,6 +44,11 @@ OP_BOOST_START = "boost_start"
 OP_PAUSE = "pause"
 OP_RESUME = "resume"
 
+# publication_command.py::BATCH_SIZE·channel_post_comments.py::BATCH_SIZE와 동형 값
+# (신규 상수 발명 0 — 그 둘을 import하면 이 모듈의 gate_type 무관 워커 배치와
+# 우연히 같은 상수를 공유하게 돼 오히려 결합이 생긴다, 여기선 리터럴로 동형만).
+_DUE_STARTS_BATCH_SIZE = 50
+
 
 class AdsBoostGateNotFoundError(Exception):
     """존재 자체 비노출(publication_id 404와 동형 원칙) — 미존재·타 org 소유·
@@ -187,6 +192,73 @@ async def request_ads_boost_resume(
     return await _request_toggle(
         db, org_id=org_id, gate_id=gate_id, requester_member_id=requester_member_id, operation=OP_RESUME,
     )
+
+
+# story #3806(Phase3·3-2 PR 6, 페드루 PO 確定 2026-09-11 13:27Z) — 봉인 starts_at 자동
+# 실행 워커. AC2 "[제품] 상한 내 실행"의 원래 뜻은 승인 뒤 `sealed_ads_starts_at`에
+# 도달하면 제품이 자동으로 `request_ads_boost_start`를 부르는 것인데, PR3엔 그
+# 자동발화 지점이 0건이었다(디디 실측·PO 콜①) — PR5가 사람이 누르는 「홍보 시작」
+# 버튼(`start_ads_boost_endpoint`)으로 루프를 닫은 임시 지름길이었고, 이 워커가
+# "안 눌렀을 때의 안전망"으로 겹쳐 놓는 진짜 자동화다.
+#
+# 멱등: `request_ads_boost_start`→`create_or_get_publication_command`가 이미 그
+# 자체로 (org_id, destination, approved_version, operation="boost_start",
+# toggle_seq=0) 키의 upsert라 두 번 불러도 새 command가 안 생긴다(먼저 된 사람
+# 클릭과 겹쳐도 안전). 아래 SQL 필터(`ads_boost_runs` 행 부재)는 그 위에 얹는 효율
+# 축 — `AdsBoostRun`은 실행 단계(`_process_one_command`의 ads_boost 분기)에서야
+# 지연 생성되므로, 이미 실행까지 끝난 gate를 매 tick 재선택하지 않게 거른다(아직
+# enqueue만 되고 실행 전인 gate는 이 필터를 통과해도 위 멱등 upsert가 안전망).
+#
+# requester_member_id = `gate.resolver_id`(그 게이트를 승인한 휴먼) — 이 코드베이스에
+# "시스템/스케줄러 행위자" sentinel 관례가 없고 `PublicationCommand.requested_by_
+# member_id`가 NOT NULL이라, "승인이 이미 이 실행을 허가했다"는 뜻으로 승인자
+# 귀속이 유일하게 지어내지 않는 선택지다(worker는 승인된 gate만 골라 status=
+# "approved" 조건상 resolver_id가 항상 채워져 있다).
+async def process_due_ads_boost_starts(db: AsyncSession, *, now=None) -> dict[str, int]:
+    """`sealed_ads_starts_at`이 도래한 승인 게이트를 찾아 `request_ads_boost_start`를
+    자동 호출한다. `process_due_publication_commands`류 기존 due-date 워커와 동형
+    패턴(SKIP LOCKED 배치)이나, 클레임 대상이 PublicationCommand가 아니라 Gate라
+    "처리 중" 표시 컬럼이 없다 — 대신 각 건을 개별 트랜잭션(gate별 committed 여부가
+    `request_ads_boost_start`의 자체 upsert로 이미 안전)으로 처리해 겹친 tick이
+    있어도 중복 command가 안 생긴다(멱등이 배치 락 대신 이 축의 안전망)."""
+    from datetime import datetime, timezone
+
+    from app.models.ads_boost_run import AdsBoostRun
+
+    now = now or datetime.now(timezone.utc)
+    rows = (await db.execute(
+        select(Gate.id, Gate.org_id, Gate.resolver_id)
+        .where(
+            Gate.gate_type == _ADS_BOOST_GATE_TYPE,
+            Gate.status == "approved",
+            Gate.sealed_ads_starts_at.isnot(None),
+            Gate.sealed_ads_starts_at <= now,
+            ~select(AdsBoostRun.id).where(AdsBoostRun.gate_id == Gate.id).exists(),
+        )
+        .order_by(Gate.sealed_ads_starts_at.asc())
+        .limit(_DUE_STARTS_BATCH_SIZE)
+    )).all()
+
+    counts = {"started": 0, "error": 0}
+    for gate_id, org_id, resolver_id in rows:
+        if resolver_id is None:
+            # 승인됐는데 resolver_id가 없는 상태는 이론상 불가(approve 경로가 항상
+            # 채운다) — 지어내지 않고 이 건만 건너뛴다(카운트로 드러남, 침묵 금지).
+            counts["error"] += 1
+            continue
+        try:
+            await request_ads_boost_start(
+                db, org_id=org_id, gate_id=gate_id, requester_member_id=resolver_id,
+            )
+            counts["started"] += 1
+        except (AdsBoostGateNotFoundError, AdsBoostGateNotApprovedError):
+            # 이 tick과 다른 tick(또는 사람 클릭)이 경합해 그 사이 상태가 바뀐 경우
+            # (예: 재봉인으로 pending 재오픈) — 그 자체가 이 워커의 실패가 아니다.
+            counts["error"] += 1
+        except Exception:  # noqa: BLE001 — publication_command.py의 배치 격리와 동형.
+            await db.rollback()
+            counts["error"] += 1
+    return counts
 
 
 class AdsBoostAdapterUnavailableError(Exception):
