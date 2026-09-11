@@ -1241,3 +1241,34 @@ async def get_engagement_collection_status(db: AsyncSession, *, org_id: uuid.UUI
         }
         for c in connections
     ]
+
+
+async def get_latest_sent_reply_at_by_comment_ids(
+    db: AsyncSession, *, comment_ids: list[uuid.UUID],
+) -> dict[uuid.UUID, datetime]:
+    """PR 3(답변함 마커, 페드루 PO 定 2026-09-11 10:36Z) — 정정 배경: 「답글 편입」을
+    처음엔 `channel_post_comment_replies`를 큐에 UNION으로 합류시켜 구현했으나,
+    이 테이블은 author 개념이 `created_by_member_id`+`created_by_kind`('human'|
+    'agent') 하나뿐 — 고객이 남긴 값을 담을 자리가 스키마에 없어 **모든 행이
+    100% outbound**(우리가 쓴 답변)다. "받은 반응" 큐(inbound)에 outbound를
+    섞은 설계 오류였다(PO 실측 지적) — 되돌리고, 대신 이 함수로 댓글 행 옆에
+    읽기전용 「답변함 · 시각」만 보인다(트리아지 상태는 안 건드림 — 사람이 직접
+    done으로 옮긴다).
+
+    status="sent"만 잡는다(초안/대기/실패는 「아직 안 보냄」 — 답변함 아님).
+    "시각"은 이 레포에 「발송 성공 시각」 전용 컬럼이 없어(status 전환 시점을
+    별도로 안 남김) `updated_at`(상신 성공 시 sent로 바뀌며 갱신됨)을 근사값으로
+    쓴다 — 정확한 external 타임스탬프가 필요해지면 그때 전용 컬럼을 늘린다(이
+    스토리 범위 밖, 지금은 지어내지 않는 선에서 가장 가까운 값). comment_id 없으면
+    dict에서 빠짐(호출부가 `.get(comment_id)` → None="답변함 아님")."""
+    if not comment_ids:
+        return {}
+    rows = (await db.execute(
+        select(ChannelPostCommentReply.comment_id, func.max(ChannelPostCommentReply.updated_at))
+        .where(
+            ChannelPostCommentReply.comment_id.in_(comment_ids),
+            ChannelPostCommentReply.status == "sent",
+        )
+        .group_by(ChannelPostCommentReply.comment_id)
+    )).all()
+    return {comment_id: updated_at for comment_id, updated_at in rows}

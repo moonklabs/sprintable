@@ -19,10 +19,19 @@ import { CommentConvertToTaskDialog } from '@/components/content/comment-convert
 import type { CommentItem } from '@/components/content/comments-section';
 
 /**
- * story #3805(Phase3·3-1·PR 2[FE], 유나 §절·08:14Z/08:40Z 낱말·범위 정정) — 「반응」
- * (Engagement) 화면. PO 判(08:40Z): PR 1 BE 계약이 댓글 전용이라(그라운딩 불일치 flag
- * 채택) 「종류」 열·칩·필터는 이번 PR에서 아예 그리지 않는다(답글 항목화=같은 카드
- * PR 3). 채널 포스트 화면의 뷰 하나(목록·캘린더 옆) — 새 사이드바 항목 0.
+ * story #3805(Phase3·3-1·PR 2[FE]→PR 3, 유나 §절·08:14Z/08:40Z 낱말·범위 정정) —
+ * 「반응」(Engagement) 화면. 채널 포스트 화면의 뷰 하나(목록·캘린더 옆) — 새
+ * 사이드바 항목 0.
+ *
+ * PR 3 정정(페드루 PO 定 2026-09-11 10:36Z) — 「답글 편입」(종류 열·칩·필터로
+ * channel_post_comment_replies 행을 큐에 합류)을 되돌렸다: 그 테이블은 author
+ * 개념이 우리 조직 멤버뿐이라(고객 값을 담을 자리가 스키마에 없음) 전 행이
+ * 100% outbound — "받은 반응"(inbound) 큐에 outbound를 섞은 설계 오류였다(PO
+ * 실측 지적, 캡처 리뷰 中 발견). 대신 댓글 행 옆에 읽기전용 「답변함 · 시각」
+ * (`answered_at`)만 보인다 — 트리아지 상태는 안 건드린다(사람이 직접 done으로
+ * 옮긴다). 헤더 「미처리 N」 배지 = 필터 무관 항상(별도 dedicated fetch, 현재
+ * 화면 필터와 독립) — PR 2에서 statusFilter==='open'일 때만 보이던 갭(같은
+ * 헤더가 필터에 따라 다른 세계)을 닫는 부분은 그대로 유지.
  *
  * 답변/작업 전환은 comments-section.tsx가 이미 쓰는 CommentReplyDialog/
  * CommentConvertToTaskDialog를 그대로 재사용한다(새 다이얼로그 0). 두 컴포넌트는
@@ -55,13 +64,16 @@ interface EngagementItem {
   id: string;
   publication_id: string;
   channel: string;
-  external_comment_id: string;
+  external_comment_id: string | null;
   author_display_name: string | null;
   text: string;
   captured_at: string;
   triage_status: string;
   assignee_member_id: string | null;
   linked_story_id: string | null;
+  // PR 3 — 읽기전용 「답변함」 마커. null=이 댓글에 발송된 답글이 아직 없음
+  // (트리아지 상태와 독립 — 답변함이어도 open일 수 있다).
+  answered_at: string | null;
 }
 
 interface EngagementListResponse {
@@ -131,6 +143,24 @@ export default function ChannelPostsEngagementPage() {
 
   useEffect(() => { void loadPage(null, true); }, [loadPage]);
 
+  // PR 3(페드루 PO 確定 2026-09-11) — 헤더 배지는 화면의 현재 필터와 독립된 별도
+  // fetch(status=open만, channel 필터 없음)로 「항상」 채운다 — PR 2 갭
+  // (statusFilter==='open'일 때만 보이던, 같은 헤더가 필터에 따라 다른 세계였던
+  // 문제)을 닫는다.
+  const [openCount, setOpenCount] = useState<{ n: number; hasMore: boolean } | null>(null);
+  const loadOpenCount = useCallback(async () => {
+    if (!orgId) return;
+    try {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/engagement/items?status=open&limit=200`);
+      if (!res.ok) return;
+      const data = await readJson<EngagementListResponse>(res);
+      if (data) setOpenCount({ n: data.items.length, hasMore: data.has_more });
+    } catch {
+      // 배지는 보조 정보 — 실패해도 목록 자체는 그대로 보인다.
+    }
+  }, [orgId]);
+  useEffect(() => { void loadOpenCount(); }, [loadOpenCount]);
+
   useEffect(() => {
     if (!orgId) return;
     let cancelled = false;
@@ -188,6 +218,7 @@ export default function ChannelPostsEngagementPage() {
       }
       const updated = await readJson<EngagementItem>(res);
       if (updated) setItems((current) => current.map((it) => (it.id === id ? updated : it)));
+      if (body.triage_status !== undefined) void loadOpenCount();
     } catch {
       setItems(prev);
       setPatchError(t('engagementPatchFailed'));
@@ -224,8 +255,8 @@ export default function ChannelPostsEngagementPage() {
   const replyTarget = items.find((i) => i.id === replyTargetId) ?? null;
   const convertTarget = items.find((i) => i.id === convertTargetId) ?? null;
 
-  const openCountBadge = statusFilter === 'open' && !loading && !loadError
-    ? t(hasMore ? 'engagementOpenCountAtLeast' : 'engagementOpenCountExact', { n: items.length })
+  const openCountBadge = openCount
+    ? t(openCount.hasMore ? 'engagementOpenCountAtLeast' : 'engagementOpenCountExact', { n: openCount.n })
     : null;
 
   const filtersActive = statusFilter !== 'open' || channelFilter !== 'all';
@@ -375,6 +406,11 @@ export default function ChannelPostsEngagementPage() {
                           <option key={s} value={s}>{t(STATUS_LABEL_KEY[s])}</option>
                         ))}
                       </select>
+                      {item.answered_at ? (
+                        <p className="mt-1 text-xs text-muted-foreground" data-testid="engagement-answered-marker">
+                          {t('engagementAnsweredAt', { time: formatRelativeTime(item.answered_at, locale, displayTimezone) })}
+                        </p>
+                      ) : null}
                     </td>
                     <td className="px-3 py-2 align-top">
                       <select

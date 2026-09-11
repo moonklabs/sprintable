@@ -9,7 +9,15 @@ Review scope 미확認이라 2차, 큐 항목 종류 예약값을 코드에 두�
 (`/inbox`는 알림이 이미 점유): FE `/content/channel-posts/engagement` · BE
 `GET/PATCH /{org}/engagement/items` · `GET /{org}/engagement/collection-status`.
 상태 4 enum 중 4번째 값은 `skipped`(ko 「넘김」·en Skipped — `ignored` 대신, 유나
-대안 채택)."""
+대안 채택).
+
+PR 3 정정(페드루 PO 定 2026-09-11 10:36Z) — 「답글 편입」을 처음엔 UNION으로
+구현했다가 되돌렸다: `channel_post_comment_replies`는 author 개념이 우리 조직
+멤버뿐이라(고객 값을 담을 자리가 스키마에 없음) 전 행이 100% outbound — "받은
+반응"(inbound) 큐에 outbound를 섞은 설계 오류였다(PO 실측 지적). 대신 댓글 행
+옆에 읽기전용 「답변함 · 시각」(`answered_at`)만 보인다(트리아지는 안 건드림).
+kind 판별자도 이 PR에서 뺀다 — 중첩 inbound 답글(parent/in_reply_to류) 자체가
+스키마에 없어(grep 실측) 지금은 가를 게 없다(2차)."""
 from __future__ import annotations
 
 import uuid
@@ -28,6 +36,7 @@ from app.services.channel_post_comments import (
     EngagementItemInvalidStatusError,
     EngagementItemNotFoundError,
     get_engagement_collection_status,
+    get_latest_sent_reply_at_by_comment_ids,
     list_engagement_items,
     patch_engagement_item,
 )
@@ -64,6 +73,10 @@ class EngagementItemResponse(BaseModel):
     triage_status: str
     assignee_member_id: uuid.UUID | None
     linked_story_id: uuid.UUID | None
+    # PR 3 — 읽기전용 「답변함」 마커. null=이 댓글에 발송된(status=sent) 답글이
+    # 아직 없음(트리아지 상태와 독립 — 답변함이어도 open일 수 있다, 사람이 직접
+    # done으로 옮긴다).
+    answered_at: str | None
 
 
 class EngagementItemListResponse(BaseModel):
@@ -88,11 +101,12 @@ class EngagementCollectionStatusResponse(BaseModel):
     connections: list[EngagementCollectionStatusItem]
 
 
-def _item_response(c) -> EngagementItemResponse:
+def _item_response(c, answered_at=None) -> EngagementItemResponse:
     return EngagementItemResponse(
         id=c.id, publication_id=c.publication_id, channel=c.channel, external_comment_id=c.external_comment_id,
         author_display_name=c.author_display_name, text=c.text, captured_at=c.captured_at.isoformat(),
         triage_status=c.triage_status, assignee_member_id=c.assignee_member_id, linked_story_id=c.linked_story_id,
+        answered_at=answered_at.isoformat() if answered_at else None,
     )
 
 
@@ -115,9 +129,12 @@ async def list_engagement_items_endpoint(
     result = await list_engagement_items(
         db, org_id=org_id, status=status, channel=channel, cursor=cursor, limit=limit,
     )
+    answered_at_by_id = await get_latest_sent_reply_at_by_comment_ids(
+        db, comment_ids=[c.id for c in result["items"]],
+    )
 
     return EngagementItemListResponse(
-        items=[_item_response(c) for c in result["items"]],
+        items=[_item_response(c, answered_at_by_id.get(c.id)) for c in result["items"]],
         has_more=result["has_more"], next_cursor=result["next_cursor"],
     )
 
@@ -175,7 +192,8 @@ async def patch_engagement_item_endpoint(
             detail=human_error("ENGAGEMENT_ITEM_INVALID_STATUS", str(exc), user_message=message),
         ) from exc
 
-    return _item_response(comment)
+    answered_at = (await get_latest_sent_reply_at_by_comment_ids(db, comment_ids=[comment.id])).get(comment.id)
+    return _item_response(comment, answered_at)
 
 
 @router.get("/{org_id}/engagement/collection-status", response_model=EngagementCollectionStatusResponse)

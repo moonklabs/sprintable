@@ -2520,6 +2520,7 @@
     "engagementColumnCapturedAt": "Collected",
     "engagementColumnStatus": "Status",
     "engagementColumnAssignee": "Assignee",
+    "engagementAnsweredAt": "Answered · {time}",
     "engagementStatusOpen": "Open",
     "engagementStatusInProgress": "In progress",
     "engagementStatusDone": "Done",

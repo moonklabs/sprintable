@@ -2520,6 +2520,7 @@
     "engagementColumnCapturedAt": "수집 시각",
     "engagementColumnStatus": "상태",
     "engagementColumnAssignee": "담당",
+    "engagementAnsweredAt": "답변함 · {time}",
     "engagementStatusOpen": "미처리",
     "engagementStatusInProgress": "처리 중",
     "engagementStatusDone": "완료",
