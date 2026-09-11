@@ -16,11 +16,13 @@ import uuid
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.error_envelope import human_error
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
+from app.models.channel_post_comment import ChannelPostComment
 from app.services.agent_onboarding_config import resolve_locale_from_request
 from app.services.channel_post_comments import (
     EngagementItemInvalidStatusError,
@@ -31,6 +33,7 @@ from app.services.channel_post_comments import (
 )
 from app.services.i18n_catalog import t
 from app.services.member_resolver import resolve_member
+from app.services.project_auth import assert_target_in_caller_org
 
 router = APIRouter(prefix="/api/v2/organizations", tags=["engagement-items"])
 
@@ -132,11 +135,26 @@ async def patch_engagement_item_endpoint(
 ) -> EngagementItemResponse:
     """CI 정정(2026-09-11) — `Header()` DI 마커는 라우트 진입점에서만 받는다(까심 QA
     CI FAILURE 원칙, i18n_catalog.py 모듈 docstring). 이 함수를 직접 호출하는 테스트가
-    없어(전부 HTTP 클라이언트 경유) gates.py류의 `_xxx_endpoint` 내부 분리는 불요."""
+    없어(전부 HTTP 클라이언트 경유) gates.py류의 `_xxx_endpoint` 내부 분리는 불요.
+
+    CI 정정 ②(2026-09-11, 카디르 실측·페드루 전달) — PATH_ID 뮤테이션 축 가드: path
+    `comment_id`를 org 스코프 없이 그대로 받는 PATCH라 정적 스캐너가 미가드로 잡는다.
+    `assert_target_in_caller_org`(project_auth.py, IDOR 방어 공용 지점)로 대상 댓글의
+    실제 org_id를 caller org와 대조 — 존재 비노출 404(assets.py::_scope_filter·
+    channel_posts.py 형제 패턴과 동형, allowlist 등재가 아니라 실 가드로 해소). project
+    access(has_project_access)까지는 이 스토리 범위 밖(댓글 계열 전체가 org 스코프뿐 —
+    별건, 페드루 확認)."""
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
     resolved_locale = resolve_locale_from_request(locale, accept_language)
     await _require_human(db, auth, org_id, resolved_locale)
+
+    target_org_id = (await db.execute(
+        select(ChannelPostComment.org_id).where(ChannelPostComment.id == comment_id)
+    )).scalar_one_or_none()
+    assert_target_in_caller_org(
+        org_id, target_org_id, not_found_detail=t("engagement_items.not_found", resolved_locale),
+    )
 
     fields_set = body.model_fields_set
     try:

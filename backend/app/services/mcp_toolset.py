@@ -327,6 +327,10 @@ _ORG_SCOPED_PATH_GROUP_SEGMENTS: tuple[tuple[str, str], ...] = (
     # story #3769(2026-09-10): sprintable_get_content_rules 신설로 "MCP 도구/키워드 0건"
     # 사유가 더 이상 사실이 아니게 됐다 — 예외 목록(아래)에서 이리로 이관.
     ("content-rules", "content"),
+    # story #3805(BE PR1 CI 정정, 카디르 실측·페드루 전달 2026-09-11) — 「반응」
+    # (Engagement) 화면. channel_post_comments와 같은 원본 테이블·같은 콘텐츠
+    # 파이프라인 자원이라 "comments"와 동형으로 content면 등재.
+    ("engagement", "content"),
 )
 
 # story #3654(정적 가드) — `test_3654_org_scoped_content_rest_group.py`의 가드 테스트가
