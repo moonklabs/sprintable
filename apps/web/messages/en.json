@@ -5222,6 +5222,7 @@
     "insightsBoardBucketUnscheduled": "Not scheduled yet",
     "insightsBoardMetricUnavailable": "Metric not provided",
     "insightsBoardGa4NotConnected": "GA4 not connected",
+    "insightsBoardGa4AggregationPending": "Aggregating",
     "errorInvalidWindow": "Unsupported window.",
     "errorInvalidSort": "Unsupported sort.",
     "errorFollowUpHumanOnly": "Only humans can create follow-ups.",

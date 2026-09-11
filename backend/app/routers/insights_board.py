@@ -92,6 +92,10 @@ class InsightsBoardResponse(BaseModel):
     # 있다(work_item_id 조인, lang은 그 유니크 밖). include_deleted=True(「보관됨 보기」)
     # 뷰에서는 무의미해 null.
     hidden_count: int | None = None
+    # story #3583(2026-09-10) — org당 GA4 연결 1값(ga4_connections unique 제약, 행마다가
+    # 아니다). FE 셀(insights-board-metric-cell.tsx)이 inflow_* 지표 null의 원인을
+    # 이 값으로 가른다 — 「지표 키 이름」만으로 단정하던 결함의 처방.
+    ga4_connection_status: Literal["not_connected", "needs_reauth", "connected"]
 
 
 class MeasuredMetricValue(BaseModel):

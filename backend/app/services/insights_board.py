@@ -38,6 +38,7 @@ from app.core.pagination import decode_cursor, decode_metric_cursor, encode_curs
 from app.models.channel_post_draft import ChannelPostDraft
 from app.models.channel_publication import ChannelPublication
 from app.models.channel_post_version import ChannelPostVersion
+from app.models.ga4_connection import GA4Connection
 from app.models.gate import Gate
 from app.models.insight_snapshot import InsightSnapshot
 from app.models.pm import Story
@@ -53,6 +54,28 @@ from app.services.insight_snapshots import (
 
 _WINDOW_DAYS = {"7d": 7, "30d": 30, "90d": 90}  # story 確定(e) — 3475(7d·30d)에 90d 신규 편입.
 _SNAPSHOT_OFFSET_DAYS = {"d1": 1, "d7": 7}
+
+
+def _derive_board_ga4_connection_status(connection: GA4Connection | None) -> str:
+    """story #3583(Phase2·마케팅운영, 페드루 PO 確定 2026-09-10) — 성과 보드 셀
+    (insights-board-metric-cell.tsx)이 inflow_* 지표 null의 원인을 「지표 키 이름」
+    (GA4_INFLOW_METRICS)만으로 «GA4 미연결»이라 단정하던 결함의 처방. 실제로는
+    _fetch_ga4_inflow_metrics(insight_snapshots.py:~915, `if inflow and …`)가
+    연결이 살아 있어도(GA4 처리 지연으로 rows=[]·그 창 유입 0·일시
+    GA4OAuthError) null을 그대로 둔다 — 「연결 안 됨」과 「연결은 됐는데 아직
+    안 왔다」를 원인축(이 값)으로 갈라야 셀이 문구를 맞게 고른다.
+
+    `GA4Connection.status`(4값: connected·property_pending·disconnected·
+    needs_reauth, ga4_connection.py 계약 보강 3)를 FE가 실제로 구별해야 하는
+    3값으로 접는다 — property_pending(토큰만 있고 속성 미선택)은 fetch 자체가
+    안 되니 "연결 안 됨"과 같은 취급(FE 관점에서 "GA4를 마저 연결하세요"가
+    맞는 안내). disconnected(행이 아예 없을 때와 동형, 실제로는 거의 안 씀)도
+    동일."""
+    if connection is None or connection.status in ("disconnected", "property_pending"):
+        return "not_connected"
+    if connection.status == "needs_reauth":
+        return "needs_reauth"
+    return "connected"
 
 
 class InsightsBoardInvalidWindowError(Exception):
@@ -481,7 +504,17 @@ async def list_insights_board(
         db, org_id=org_id, channel=channel, since=since,
     )
 
-    return {"rows": rows_out, "has_more": has_more, "next_cursor": next_cursor, "hidden_count": hidden_count}
+    # story #3583 — org당 최대 1행(ga4_connection.py unique 제약)이라 행마다가 아니라
+    # 응답 전체에 값 하나.
+    ga4_connection = (await db.execute(
+        select(GA4Connection).where(GA4Connection.org_id == org_id)
+    )).scalar_one_or_none()
+    ga4_connection_status = _derive_board_ga4_connection_status(ga4_connection)
+
+    return {
+        "rows": rows_out, "has_more": has_more, "next_cursor": next_cursor, "hidden_count": hidden_count,
+        "ga4_connection_status": ga4_connection_status,
+    }
 
 
 def _snapshot_view(snap: InsightSnapshot | None) -> dict[str, Any] | None:
