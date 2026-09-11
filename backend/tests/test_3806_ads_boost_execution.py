@@ -141,6 +141,29 @@ async def test_start_creates_boost_start_command():
 
 
 @pytest.mark.anyio
+async def test_start_response_serializes_initiated_by_human():
+    """story #3806(Phase3·3-2 PR 8, 페드루 PO 確定 2026-09-11) — 0367 컬럼은 PR6이
+    이미 DB에 채웠지만(`test_3806_ads_boost_starts_worker.py::
+    test_human_triggered_start_is_marked_initiated_by_human`가 DB 모델 값으로
+    확認) 이 파일의 `CommandResponse`가 그 필드를 직렬화 안 해 API 축만으론 못
+    읽었다(양성대조 실측 중 자체발견 — PO 지적). 뮤테이션 대상: `_to_response`에서
+    `initiated_by=command.initiated_by` kwarg를 걷으면 이 단언이 KeyError/실패로
+    RED."""
+    from app.main import app
+
+    engine, Session, org_id, project_id, owner_id, gate_id = await _setup_approved_gate(await _session_factory())
+    try:
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+        async with _client_for(app) as client:
+            r = await client.post(f"/api/v2/organizations/{org_id}/ads-boosts/{gate_id}/start")
+        assert r.status_code == 201, r.text
+        assert r.json()["initiated_by"] == "human"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_start_resubmit_is_idempotent_same_command():
     from app.main import app
 

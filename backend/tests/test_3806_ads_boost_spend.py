@@ -187,6 +187,52 @@ async def test_spend_endpoint_returns_budget_and_captured_sum():
 
 
 @pytest.mark.anyio
+async def test_spend_endpoint_serializes_initiated_by_scheduler():
+    """story #3806(Phase3·3-2 PR 8, 페드루 PO 確定 2026-09-11) — 「게이트 상세 등
+    명령을 돌려주는 GET 전부」축. scheduler 경로(`process_due_ads_boost_starts`)는
+    `/start`를 절대 안 거치므로(사람 클릭 0) `CommandResponse` 직렬화만으론
+    이 값을 절대 못 본다 — /spend가 이 gate의 유일한 GET 관측 자리(run_status와
+    동형 판단, 이 파일 상단 서비스 docstring). 뮤테이션 대상: `get_ads_boost_
+    spend_summary`가 `initiated_by` 키를 안 넣거나 `_get_ads_boost_spend_endpoint`가
+    그걸 응답에 안 실으면 이 단언이 실패한다."""
+    from app.main import app
+    from app.services.ads_boost_execution import process_due_ads_boost_starts
+    from tests.test_3475_publishing_metrics import _client_for, _setup_org_scoped_app
+    from tests.test_e4fc29fa_site_post_orchestration import _session_factory
+
+    engine, Session, org_id, project_id, owner_id, gate_id = await _setup_approved_gate(await _session_factory())
+    try:
+        # starts_at을 「이미 도래」로 직접 봉인해 스케줄러 픽업 대상으로 만든다
+        # (test_3806_ads_boost_starts_worker.py::_setup_gate와 동형 조작 — 이
+        # 파일은 그 헬퍼를 안 쓰므로 Gate 컬럼을 직접 민다).
+        from datetime import datetime, timedelta, timezone
+
+        from app.models.gate import Gate
+        from sqlalchemy import update
+
+        async with Session() as s:
+            await s.execute(
+                update(Gate).where(Gate.id == gate_id).values(
+                    sealed_ads_starts_at=datetime.now(timezone.utc) - timedelta(hours=1),
+                )
+            )
+            await s.commit()
+
+        async with Session() as s:
+            counts = await process_due_ads_boost_starts(s)
+        assert counts["started"] == 1, counts
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+        async with _client_for(app) as client:
+            r = await client.get(f"/api/v2/organizations/{org_id}/ads-boosts/{gate_id}/spend")
+        assert r.status_code == 200, r.text
+        assert r.json()["initiated_by"] == "scheduler"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_spend_endpoint_run_status_null_before_boost_started():
     """gate는 approved인데 boost_start를 아직 요청 안 한 상태(AdsBoostRun 행 자체가
     없음) — run_status는 "미실행"을 뜻하는 None이지 "pending" 등 지어낸 값이 아니다."""

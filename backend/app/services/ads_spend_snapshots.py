@@ -211,11 +211,27 @@ async def get_ads_boost_spend_summary(db: AsyncSession, *, org_id: uuid.UUID, ga
         select(AdsBoostRun).where(AdsBoostRun.org_id == org_id, AdsBoostRun.gate_id == gate_id)
     )).scalar_one_or_none()
 
+    # story #3806(Phase3·3-2 PR 8, 페드루 PO 確定 2026-09-11) — 「있어도 못 읽으면 안
+    # 닫힌 것」 처방. boost_start는 그 승인주기당 toggle_seq=0 고정 1행(이 파일 상단
+    # 참조 모듈 docstring)이라 gate_id+operation만으로 단건 확정 — run_status와
+    # 동형으로 이 GET에 얹는다(2개 모듈 순환import 회피를 위해 지연 import,
+    # ads_boost_execution.py도 이 파일을 함수 내부에서만 부르는 동형 관례).
+    from app.models.publication_command import PublicationCommand
+    from app.services.ads_boost_execution import OP_BOOST_START
+
+    boost_start_command = (await db.execute(
+        select(PublicationCommand).where(
+            PublicationCommand.org_id == org_id, PublicationCommand.gate_id == gate_id,
+            PublicationCommand.operation == OP_BOOST_START,
+        )
+    )).scalar_one_or_none()
+
     captured_spend_minor = sum(
         (s.normalized or {}).get("spend") or 0 for s in snapshots if s.status == "captured"
     )
     return {
         "gate_id": gate.id,
+        "initiated_by": boost_start_command.initiated_by if boost_start_command is not None else None,
         "sealed_ads_budget_minor": gate.sealed_ads_budget_minor,
         "sealed_ads_currency": gate.sealed_ads_currency,
         "captured_spend_minor": captured_spend_minor,

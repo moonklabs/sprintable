@@ -54,12 +54,18 @@ class CommandResponse(BaseModel):
     operation: str
     toggle_seq: int
     status: str
+    # story #3806(Phase3·3-2 PR 8, 페드루 PO 確定 2026-09-11) — 0367이 만든 컬럼을
+    # 여기 직렬화하지 않아 "있어도 못 읽으면 안 닫힌 것"이었다(PR6 정정 배경).
+    # boost_start의 human 경로(이 파일 `_start_ads_boost_endpoint`)만 채우고
+    # pause/resume 커맨드는 이 축 구분이 없어(scheduler가 안 건드리는 operation)
+    # null 그대로 — 지어내지 않는다.
+    initiated_by: str | None
 
 
 def _to_response(command) -> CommandResponse:
     return CommandResponse(
         command_id=command.id, operation=command.operation, toggle_seq=command.toggle_seq,
-        status=command.status,
+        status=command.status, initiated_by=command.initiated_by,
     )
 
 
@@ -209,6 +215,11 @@ class SpendSummaryResponse(BaseModel):
     # 'running'|'paused'|'failed') 실 관측값. run 행이 아직 없으면 None(gate 승인
     # 직후·실행 요청 前 — "미실행"을 지어낸 상태값으로 가리지 않는다).
     run_status: str | None
+    # story #3806(Phase3·3-2 PR 8, 페드루 PO 確定 2026-09-11) — boost_start 커맨드의
+    # `initiated_by`('scheduler'|'human'). run_status와 동형 판단(디디 3자기점검
+    # 정신 재사용) — 이 GET이 이미 gate_id 단건 조회 자리라 3번째 GET 신설 안 함.
+    # boost_start 커맨드 자체가 없으면(gate 승인 직후·실행 前) None.
+    initiated_by: str | None
     snapshots: list[SpendSnapshotView]
 
 
@@ -245,6 +256,7 @@ async def _get_ads_boost_spend_endpoint(
         gate_id=summary["gate_id"], sealed_ads_budget_minor=summary["sealed_ads_budget_minor"],
         sealed_ads_currency=summary["sealed_ads_currency"], captured_spend_minor=summary["captured_spend_minor"],
         remaining_minor=summary["remaining_minor"], run_status=summary["run_status"],
+        initiated_by=summary["initiated_by"],
         snapshots=[
             SpendSnapshotView(
                 due_at=s["due_at"].isoformat(), captured_at=s["captured_at"].isoformat() if s["captured_at"] else None,
