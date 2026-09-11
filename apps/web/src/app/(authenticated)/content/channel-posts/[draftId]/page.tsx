@@ -21,6 +21,7 @@ import { extractBackendErrorMessage } from '@/lib/api-error-message';
 import { deriveFailureAction, type CommandStatus } from '@/components/content/failure-action';
 import { FailureActionBadge } from '@/components/content/failure-action-badge';
 import { InsightSnapshotBlock, type InsightSnapshot } from '@/components/content/insight-snapshot-block';
+import { BoostRequestDialog } from '@/components/content/boost-request-dialog';
 import { CommentsSection, deriveCommentsFace, type CommentItem, type CommentsFace, type RawCommentsResponse } from '@/components/content/comments-section';
 import type { CommentsRefreshOutcome } from '@/components/content/comments-refresh-button';
 import { CommentConvertToTaskDialog } from '@/components/content/comment-convert-to-task-dialog';
@@ -479,6 +480,11 @@ export default function ChannelPostEditPage() {
   }, [orgId, draft?.publication_id, loadComments, t]);
   // story #3517(BE #3867 조각②, PO 確定 2026-09-05) — 댓글 「작업으로 전환」·「답변」.
   const [convertToTaskComment, setConvertToTaskComment] = useState<CommentItem | null>(null);
+  // story #3806(Phase3·3-2 PR5, 유나 §절 §1) — 「발행물에서 boost 요청 폼」. 트리거
+  // 자리는 draft.publication_id 블록(InsightSnapshotBlock 곁, #3525 재대조 조건
+  // 그대로) — BE는 publication.channel을 제한하지 않는다(그라운딩 확認, ads_boost.py
+  // 미검사) 그대로 채널 무관 노출.
+  const [boostDialogOpen, setBoostDialogOpen] = useState(false);
   const [replyComment, setReplyComment] = useState<CommentItem | null>(null);
 
   const handleConvertToTaskSubmit = useCallback(async (
@@ -2159,6 +2165,21 @@ export default function ChannelPostEditPage() {
             snapshots={insightSnapshots} orgTimezone={displayTimezone} locale={locale}
             publicationId={draft.publication_id}
           />
+          {/* story #3806(Phase3·3-2 PR5, 유나 §절 §1) — 「홍보」 요청 트리거. */}
+          {orgId ? (
+            <div>
+              <Button
+                variant="outline" size="sm" onClick={() => setBoostDialogOpen(true)}
+                data-testid="channel-post-boost-trigger"
+              >
+                {t('boostRequestTrigger')}
+              </Button>
+              <BoostRequestDialog
+                open={boostDialogOpen} onOpenChange={setBoostDialogOpen}
+                orgId={orgId} publicationId={draft.publication_id}
+              />
+            </div>
+          ) : null}
           {/* story #3517(Phase2·FE, 그라운딩 ① 자리 그대로 — InsightSnapshotBlock 곁,
               같은 draft.publication_id 조건) — 댓글 섹션. 조각①-FE 범위(PO 確定
               2026-09-05): 세 얼굴·수집 시각·목록·지워진 댓글(§22-9)만 — 행 액션
