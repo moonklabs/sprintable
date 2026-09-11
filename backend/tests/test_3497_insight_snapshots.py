@@ -872,6 +872,67 @@ async def test_insights_list_endpoint_empty_list_for_unknown_publication():
 
 
 @pytest.mark.anyio
+async def test_insights_list_endpoint_cross_org_site_post_returns_404():
+    """story #3796(페드루 PO 確定 2026-09-10, 유나 실측) — publication_id가 실존하되
+    **타 org 소유**면 빈 목록이 아니라 404(존재 자체 비노출). 위
+    test_insights_list_endpoint_empty_list_for_unknown_publication(애초에 미존재)과는
+    다른 축 — 그쪽은 지금도 그대로 200/[]가 맞다(지어내지 않는다), 이쪽만 404."""
+    from app.main import app
+    from app.models.site_post import SitePost
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id)
+
+            other_org_id, _ = await _seed_org(s)
+            other_post = SitePost(
+                id=uuid.uuid4(), org_id=other_org_id, lang="ko", slug=f"other-org-post-{uuid.uuid4().hex[:8]}",
+                title="제목", summary="요약", tags=[], body_md="본문",
+                published_at=datetime.now(timezone.utc), source_story_id=uuid.uuid4(), gate_id=uuid.uuid4(),
+            )
+            s.add(other_post)
+            await s.commit()
+            other_post_id = other_post.id
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        async with _client_for(app) as client:
+            r = await client.get(f"/api/v2/organizations/{org_id}/publications/{other_post_id}/insights")
+        assert r.status_code == 404, r.text
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_insights_list_endpoint_cross_org_channel_publication_returns_404():
+    """위 site_post 케이스의 짝 — 폴리모픽 publication_id의 다른 쪽(ChannelPublication)도
+    같은 축으로 404여야 한다(resolve_publication_org_id가 두 테이블 다 본다)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id)
+
+            other_org_id, _ = await _seed_org(s)
+            other_conn = await _seed_channel_connection(s, other_org_id, channel="sandbox")
+            other_pub = await _seed_channel_publication(
+                s, org_id=other_org_id, connection_id=other_conn.id, channel="sandbox",
+            )
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        async with _client_for(app) as client:
+            r = await client.get(f"/api/v2/organizations/{org_id}/publications/{other_pub.id}/insights")
+        assert r.status_code == 404, r.text
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_insights_list_endpoint_org_mismatch_403():
     from app.main import app
 

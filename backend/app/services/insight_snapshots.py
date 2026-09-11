@@ -117,6 +117,26 @@ async def list_insight_snapshots_for_publication(
     return list(rows)
 
 
+async def resolve_publication_org_id(db: AsyncSession, *, publication_id: uuid.UUID) -> uuid.UUID | None:
+    """story #3796(페드루 PO 確定 2026-09-10, 유나 실측) — 폴리모픽 publication_id의
+    실 소유 org. 라우터가 스냅샷 0건일 때만 부른다(존재+타 org인지 vs 애초에 미존재인지
+    구분하기 위함 — 전자만 404, 후자는 기존 "빈 목록" 계약 그대로 유지). resolve_
+    publication_published_at과 같은 두 테이블(ChannelPublication·SitePost)을 보되,
+    이쪽은 kind를 모르는 채로 호출되므로(스냅샷 행 자체가 없어 kind를 읽을 자리가
+    없다) 순서대로 둘 다 시도 — 어느 쪽도 없으면 None(지어내지 않는다)."""
+    from app.models.channel_publication import ChannelPublication
+    from app.models.site_post import SitePost
+
+    org_id = (await db.execute(
+        select(ChannelPublication.org_id).where(ChannelPublication.id == publication_id)
+    )).scalar_one_or_none()
+    if org_id is not None:
+        return org_id
+    return (await db.execute(
+        select(SitePost.org_id).where(SitePost.id == publication_id)
+    )).scalar_one_or_none()
+
+
 async def resolve_publication_published_at(
     db: AsyncSession, *, publication_kind: str, publication_id: uuid.UUID,
 ) -> datetime | None:

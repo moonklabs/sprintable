@@ -18,6 +18,7 @@ from app.dependencies.database import get_db
 from app.services.insight_snapshots import (
     label_snapshot_offset,
     list_insight_snapshots_for_publication,
+    resolve_publication_org_id,
     resolve_publication_published_at,
 )
 
@@ -52,13 +53,26 @@ async def list_publication_insights_endpoint(
     _auth=Depends(get_current_user),
 ) -> list[InsightSnapshotView]:
     """AC6 — 스냅샷 목록(raw_payload 제외 — 원본은 디버그 전용, 이 조회 축에 실을
-    필요가 없다). 존재하지 않는 publication_id는 빈 목록으로 응답한다(그 자체가
-    "이 발행엔 아직 스냅샷이 없다"는 정직한 사실 — 404로 지어내지 않는다, org
-    경계는 org_id mismatch일 때만 403)."""
+    필요가 없다). 애초에 존재하지 않는 publication_id는 빈 목록으로 응답한다(그
+    자체가 "이 발행엔 아직 스냅샷이 없다"는 정직한 사실 — 404로 지어내지 않는다).
+
+    story #3796(페드루 PO 確定 2026-09-10, 유나 실측) — 그러나 publication_id가
+    **타 org 소유**로 실존하면 얘기가 다르다. 쿼리 자체는 org_id+publication_id를
+    이미 WHERE에 걸어 데이터를 새기지 않지만(row 0건), 응답은 "애초에 없음"과
+    "있는데 남의 것"을 구분 안 해 똑같이 빈 목록으로 조용히 넘겼다 — MCP 소비부
+    (sprintable_mcp/tools/channel_posts.py::get_publication_insights)가 그 빈 목록을
+    delta_unavailable_reason="스냅샷이 2건 미만…"으로 번역해 "기다리면 된다"로
+    읽히는 거짓 사유가 나갔다(진실은 "네 org 것이 아니다"). 스냅샷 0건일 때만
+    (비용 최소화) 실 소유 org를 추가로 확인해 타 org 소유면 404로 존재 자체를
+    비노출한다."""
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
 
     rows = await list_insight_snapshots_for_publication(db, org_id=org_id, publication_id=publication_id)
+    if not rows:
+        owner_org_id = await resolve_publication_org_id(db, publication_id=publication_id)
+        if owner_org_id is not None and owner_org_id != org_id:
+            raise HTTPException(status_code=404, detail="이 조직에 없는 발행물입니다")
     # story #3651 CHANGES — 이 publication의 «지금» published_at 1회 조회(행마다 반복
     # 조회 0, 어차피 폴리모픽 publication_id 하나당 kind는 하나다 — rows[0]에서 그대로
     # 읽는다). 스냅샷이 없으면 조회 자체를 스킵(빈 목록 반환은 그대로 유지).
