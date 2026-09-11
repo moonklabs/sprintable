@@ -169,6 +169,13 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "이 액션은 org owner 만 가능합니다.",
         "en": "This action requires org owner",
     },
+    # story #3796(페드루 PO 確定 2026-09-10 — 2차 CHANGES 2026-09-11, 3779 가드 발견) —
+    # 애초에 미존재·타 org 소유 둘 다 이 문구로 404(존재 자체 비노출, 응답 완전 동일
+    # — insight_snapshots.py 라우터 docstring 참조).
+    "insight_snapshots.publication_not_found_in_org": {
+        "ko": "이 조직에 없는 발행물입니다",
+        "en": "Publication not found in this organization",
+    },
 }
 
 

@@ -852,7 +852,46 @@ async def test_insights_list_endpoint_returns_captured_snapshot():
 
 
 @pytest.mark.anyio
-async def test_insights_list_endpoint_empty_list_for_unknown_publication():
+async def test_insights_list_endpoint_own_org_publication_zero_snapshots_is_empty_list():
+    """story #3796(페드루 PO 確定 2026-09-10, 2차 CHANGES 2026-09-11) — 계약 변경 뒤
+    빈 목록이 남는 유일한 경우: publication_id가 **내 org 소유가 맞는데** 스냅샷이
+    아직 0건인 것(그 자체가 정직한 사실 — 지어내지 않는다). 애초에 미존재·타 org
+    소유는 이제 둘 다 404(아래 두 테스트)."""
+    from app.main import app
+    from app.models.site_post import SitePost
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id)
+            own_post = SitePost(
+                id=uuid.uuid4(), org_id=org_id, lang="ko", slug=f"own-post-{uuid.uuid4().hex[:8]}",
+                title="제목", summary="요약", tags=[], body_md="본문",
+                published_at=datetime.now(timezone.utc), source_story_id=uuid.uuid4(), gate_id=uuid.uuid4(),
+            )
+            s.add(own_post)
+            await s.commit()
+            own_post_id = own_post.id
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        async with _client_for(app) as client:
+            r = await client.get(f"/api/v2/organizations/{org_id}/publications/{own_post_id}/insights")
+        assert r.status_code == 200, r.text
+        assert r.json() == []
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_insights_list_endpoint_unknown_publication_returns_404():
+    """story #3796 2차 CHANGES(페드루 2026-09-11) — 계약 변경: 애초에 미존재인
+    publication_id는 더 이상 200/[]가 아니라 404다. 옛 계약("미존재=빈 목록")은
+    이 스토리로 폐기됐다 — 존재 여부를 200/404로 노출하면(가름선이 "존재"였을 때)
+    호출자가 org 경계 밖에서 존재를 열거할 수 있어(아래
+    test_unknown_and_cross_org_return_identical_404_no_existence_oracle이 그 축을
+    직접 검증), 이제 가름선은 "소유"뿐이다."""
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -864,8 +903,7 @@ async def test_insights_list_endpoint_empty_list_for_unknown_publication():
         _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
         async with _client_for(app) as client:
             r = await client.get(f"/api/v2/organizations/{org_id}/publications/{uuid.uuid4()}/insights")
-        assert r.status_code == 200, r.text
-        assert r.json() == [], "존재하지 않는 publication_id는 404가 아니라 빈 목록(지어내지 않는다)"
+        assert r.status_code == 404, r.text
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
@@ -874,9 +912,7 @@ async def test_insights_list_endpoint_empty_list_for_unknown_publication():
 @pytest.mark.anyio
 async def test_insights_list_endpoint_cross_org_site_post_returns_404():
     """story #3796(페드루 PO 確定 2026-09-10, 유나 실측) — publication_id가 실존하되
-    **타 org 소유**면 빈 목록이 아니라 404(존재 자체 비노출). 위
-    test_insights_list_endpoint_empty_list_for_unknown_publication(애초에 미존재)과는
-    다른 축 — 그쪽은 지금도 그대로 200/[]가 맞다(지어내지 않는다), 이쪽만 404."""
+    **타 org 소유**면 404(존재 자체 비노출)."""
     from app.main import app
     from app.models.site_post import SitePost
 
@@ -900,6 +936,42 @@ async def test_insights_list_endpoint_cross_org_site_post_returns_404():
         async with _client_for(app) as client:
             r = await client.get(f"/api/v2/organizations/{org_id}/publications/{other_post_id}/insights")
         assert r.status_code == 404, r.text
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_unknown_and_cross_org_return_identical_404_no_existence_oracle():
+    """story #3796 2차 CHANGES(페드루 2026-09-11) — 핵심 요구: "애초에 미존재"와
+    "타 org 실존"이 응답으로 구분 불가능해야 한다(구분되면 그 자체가 존재-열거
+    오라클). status·JSON 바디를 완전히 diff해 동일함을 직접 단언."""
+    from app.main import app
+    from app.models.site_post import SitePost
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id)
+
+            other_org_id, _ = await _seed_org(s)
+            other_post = SitePost(
+                id=uuid.uuid4(), org_id=other_org_id, lang="ko", slug=f"other-org-post-{uuid.uuid4().hex[:8]}",
+                title="제목", summary="요약", tags=[], body_md="본문",
+                published_at=datetime.now(timezone.utc), source_story_id=uuid.uuid4(), gate_id=uuid.uuid4(),
+            )
+            s.add(other_post)
+            await s.commit()
+            other_post_id = other_post.id
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        async with _client_for(app) as client:
+            r_unknown = await client.get(f"/api/v2/organizations/{org_id}/publications/{uuid.uuid4()}/insights")
+            r_cross_org = await client.get(f"/api/v2/organizations/{org_id}/publications/{other_post_id}/insights")
+
+        assert r_unknown.status_code == r_cross_org.status_code == 404
+        assert r_unknown.json() == r_cross_org.json(), "존재-열거 오라클 — 두 응답이 구분되면 안 된다"
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
