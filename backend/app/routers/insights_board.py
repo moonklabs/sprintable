@@ -156,9 +156,14 @@ class OrgAdsCostSummaryView(BaseModel):
     # ads_boost 게이트 집합 기준(org_cost_summary.py::get_org_ads_cost_summary
     # 모듈 docstring 참고, "같은 집합이라야 remaining이 정합"의 근거).
     approved_boost_count: int
-    sealed_budget_minor: int
-    captured_spend_minor: int
-    remaining_minor: int
+    # story #3809(Phase3·3-7 PR 2b, 페드루 PO 確定 2026-09-11 18:46Z) — 통화 안전.
+    # `sealed_ads_currency`는 0건(더할 게 없음)이거나 통화가 섞이면(2개 이상)
+    # null. 세 합계 필드는 **섞였을 때만** null(0건은 정직한 0 — "더할 게 없다"는
+    # 사실이지 "지어낸 숫자"가 아니다, get_org_ads_cost_summary docstring 참고).
+    sealed_ads_currency: str | None
+    sealed_budget_minor: int | None
+    captured_spend_minor: int | None
+    remaining_minor: int | None
     cap_reached_count: int
 
 
@@ -174,6 +179,9 @@ class OrgCostSummaryResponse(BaseModel):
     generation_cost_spent_minor: int | None
     generation_cost_period_start: datetime | None
     generation_cost_period_end: datetime | None
+    # story #3809(Phase3·3-7 PR 2b, 페드루 PO 確定 2026-09-11 18:46Z) — PR#3848
+    # PO 지침②("FE가 'KRW' 추정 절대금지") 준수. 규칙 없으면(위와 동형) null.
+    generation_currency: str | None
     # story #3809 그라운딩②(2026-09-11) — X 비용 원장이 이 시점 코드에 없다(실측
     # 확認). "0"으로 지어내지 않고 미측정 예약(null)만 한다.
     x_cost_spent_minor: int | None

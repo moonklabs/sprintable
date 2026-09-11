@@ -24,7 +24,9 @@ from tests.test_3498_generation_budget_evidence_and_config import (
     _put_generation_budget,
     _seed_generation_cost_evidence,
 )
+from tests.test_3497_insight_snapshots import _seed_channel_connection
 from tests.test_3806_ads_boost_execution import _setup_approved_gate
+from tests.test_3806_ads_boost_gate import _approve_gate, _boost_body, _seed_publication
 from tests.test_3806_ads_boost_spend import _make_spend_snapshots_due, _start_boost
 
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
@@ -88,7 +90,8 @@ async def test_org_ads_cost_summary_zero_when_no_approved_boosts():
         async with Session() as s:
             summary = await get_org_ads_cost_summary(s, org_id=org_id)
         assert summary == {
-            "approved_boost_count": 0, "sealed_budget_minor": 0, "captured_spend_minor": 0,
+            "approved_boost_count": 0, "sealed_ads_currency": None,
+            "sealed_budget_minor": 0, "captured_spend_minor": 0,
             "remaining_minor": 0, "cap_reached_count": 0,
         }
     finally:
@@ -158,6 +161,84 @@ async def test_org_ads_cost_summary_excludes_pending_gate():
         await engine.dispose()
 
 
+async def _add_second_approved_gate(Session, *, org_id, owner_id, budget_minor, currency):
+    """`_setup_approved_gate`는 매번 새 org를 만들어 「같은 org 안에 승인된
+    boost 게이트 2개」를 세팅할 수 없다 — 이미 있는 org에 발행물+ads_sandbox
+    채널연결을 새로 하나 더 심고 PR 2 API로 두 번째 게이트를 만들어 승인까지
+    전이시킨다(PR 2b 통화 혼재 대조군 전용)."""
+    from app.main import app
+
+    async with Session() as s:
+        conn = await _seed_channel_connection(s, org_id, channel="threads")
+        ad_conn = await _seed_channel_connection(s, org_id, channel="ads_sandbox")
+        pub, _ = await _seed_publication(s, org_id=org_id, connection_id=conn.id)
+
+    _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+    async with _client_for(app) as client:
+        r = await client.post(
+            f"/api/v2/organizations/{org_id}/publications/{pub.id}/boosts",
+            json=_boost_body(ad_connection_id=ad_conn.id, budget_minor=budget_minor, currency=currency),
+        )
+    assert r.status_code == 201, r.text
+    gate_id = uuid.UUID(r.json()["gate_id"])
+    app.dependency_overrides.clear()
+
+    async with Session() as s:
+        await _approve_gate(s, gate_id, owner_id)
+
+    return gate_id
+
+
+@pytest.mark.anyio
+async def test_org_ads_cost_summary_sums_when_same_currency():
+    """PO 確定(2026-09-11 18:46Z) 양성대조 1/2 — KRW+KRW 게이트 2개는 통화가
+    하나로 모이니 그대로 합산돼야 한다(None으로 숨기면 그것도 거짓)."""
+    from app.services.org_cost_summary import get_org_ads_cost_summary
+
+    engine, Session, org_id, project_id, owner_id, gate_id = await _setup_approved_gate(
+        await _session_factory(), budget_minor=100_000,
+    )
+    try:
+        await _add_second_approved_gate(Session, org_id=org_id, owner_id=owner_id, budget_minor=50_000, currency="KRW")
+
+        async with Session() as s:
+            summary = await get_org_ads_cost_summary(s, org_id=org_id)
+        assert summary["approved_boost_count"] == 2
+        assert summary["sealed_ads_currency"] == "KRW"
+        assert summary["sealed_budget_minor"] == 150_000
+        assert summary["captured_spend_minor"] == 0
+        assert summary["remaining_minor"] == 150_000
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_org_ads_cost_summary_nulls_sums_when_currencies_mixed():
+    """PO 確定(2026-09-11 18:46Z) 양성대조 2/2 — KRW+USD가 섞이면 통화도
+    합계 3필드도 전부 None(「달러+원을 그냥 더한 숫자」를 지어내지 않는다).
+    뮤테이션: 섞임 판정(`mixed_currencies`)을 걷으면 이 테스트만 RED여야 한다."""
+    from app.services.org_cost_summary import get_org_ads_cost_summary
+
+    engine, Session, org_id, project_id, owner_id, gate_id = await _setup_approved_gate(
+        await _session_factory(), budget_minor=100_000,
+    )
+    try:
+        await _add_second_approved_gate(Session, org_id=org_id, owner_id=owner_id, budget_minor=50_000, currency="USD")
+
+        async with Session() as s:
+            summary = await get_org_ads_cost_summary(s, org_id=org_id)
+        assert summary["approved_boost_count"] == 2
+        assert summary["sealed_ads_currency"] is None
+        assert summary["sealed_budget_minor"] is None
+        assert summary["captured_spend_minor"] is None
+        assert summary["remaining_minor"] is None
+        # 섞였어도 상한도달 카운트는 통화와 무관한 별개 축 — 지어낸 방식으로
+        # 함께 숨기지 않는다.
+        assert summary["cap_reached_count"] == 0
+    finally:
+        await engine.dispose()
+
+
 @pytest.mark.anyio
 async def test_generation_cost_null_when_no_rule():
     from app.services.org_cost_summary import get_org_cost_summary
@@ -196,6 +277,27 @@ async def test_generation_cost_reflects_evidence_sum():
         async with Session() as s:
             summary = await get_org_cost_summary(s, org_id=org_id)
         assert summary["generation_cost_spent_minor"] == 5_000
+        # PR#3848 PO 지침② — FE가 통화를 "KRW"로 추정하지 않도록 실값을 그대로
+        # 통과시켜야 한다(_put_generation_budget 기본 통화 KRW).
+        assert summary["generation_currency"] == "KRW"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_generation_currency_null_when_no_rule():
+    """규칙 자체가 없으면(`compute_generation_budget_status`가 None) 통화도
+    지어내지 않고 None — 지출/기간 필드와 동형."""
+    from app.services.org_cost_summary import get_org_cost_summary
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, _ = await _seed_org(s)
+
+        async with Session() as s:
+            summary = await get_org_cost_summary(s, org_id=org_id)
+        assert summary["generation_currency"] is None
     finally:
         await engine.dispose()
 
@@ -270,11 +372,12 @@ async def test_cost_summary_endpoint_returns_shape():
         body = r.json()
         assert set(body.keys()) == {
             "ads", "generation_cost_spent_minor", "generation_cost_period_start",
-            "generation_cost_period_end", "x_cost_spent_minor", "paid_spend_daily_series",
+            "generation_cost_period_end", "generation_currency", "x_cost_spent_minor",
+            "paid_spend_daily_series",
         }
         assert set(body["ads"].keys()) == {
-            "approved_boost_count", "sealed_budget_minor", "captured_spend_minor",
-            "remaining_minor", "cap_reached_count",
+            "approved_boost_count", "sealed_ads_currency", "sealed_budget_minor",
+            "captured_spend_minor", "remaining_minor", "cap_reached_count",
         }
         assert body["ads"]["approved_boost_count"] == 1
     finally:
