@@ -25,6 +25,11 @@ import { Card } from '@/components/ui/card';
  * CI가 짤 가능성에 대비해 `version`의 `+` 뒤를 sha로 뽑는다 — 그 형식이
  * 아니면(예: 순수 "0.3.1") 빌드 sha 줄은 그냥 안 그린다(지어내지 않는다).
  * ⚠️미확認 — 민 AC2 실 착지 뒤 실제 버전 문자열 형식으로 재확認 필요.
+ *
+ * 페드루 PO 정정 2(2026-09-11 16:13Z 캡처 실측) — 받는 사람이 알아야 할 두
+ * 사실이 빠졌다: ① 대상 플랫폼(현재 매니페스트가 darwin-aarch64뿐 — 다른
+ * 아키텍처를 받을 수 있다고 지어내지 않는다) ② 공증 前 Gatekeeper가 처음
+ * 실행을 막는다는 사실과 그 우회(우클릭→열기) — 민이 spctl로 실측 확認.
  */
 
 interface MacosUpdateManifest {
@@ -88,6 +93,9 @@ export function DesktopDownloadCard() {
   return (
     <Card className="space-y-2 p-4" data-testid="desktop-download-card">
       <p className="text-sm font-medium text-foreground">{t('title')}</p>
+      <p className="text-xs text-muted-foreground" data-testid="desktop-download-target">
+        {t('targetLabel')}
+      </p>
       <p className="text-xs text-muted-foreground">
         <span data-testid="desktop-download-version">{t('versionLabel', { version: manifest.version })}</span>
         {buildSha ? (
@@ -96,6 +104,9 @@ export function DesktopDownloadCard() {
       </p>
       <p className="text-xs text-muted-foreground" data-testid="desktop-download-notarization-notice">
         {t('notarizationNotice')}
+      </p>
+      <p className="text-xs text-muted-foreground" data-testid="desktop-download-gatekeeper-notice">
+        {t('gatekeeperNotice')}
       </p>
       <Button asChild size="sm" data-testid="desktop-download-button">
         <a href={downloadUrl} download>{t('downloadCta')}</a>

@@ -59,7 +59,7 @@ describe('DesktopDownloadCard — story #3807 AC3', () => {
       .toBe(koMessages.desktop.unavailable);
   });
 
-  it('⭐매니페스트 수신 — 버전·공증 문구·다운로드 링크(GCS url)가 정확히 뜬다(빌드 sha 없는 순수 semver)', async () => {
+  it('⭐매니페스트 수신 — 대상·버전·공증 문구·Gatekeeper 안내·다운로드 링크(GCS url)가 정확히 뜬다(빌드 sha 없는 순수 semver)', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({
       version: '0.3.1', pub_date: '2026-09-11T00:00:00Z',
       platforms: { 'darwin-aarch64': { url: 'https://storage.googleapis.com/sprintable-desktop-releases-dev/macos/0.3.1/app.tar.gz', signature: 'sig' } },
@@ -69,6 +69,11 @@ describe('DesktopDownloadCard — story #3807 AC3', () => {
 
     const card = container.querySelector('[data-testid="desktop-download-card"]');
     expect(card).not.toBeNull();
+    // 페드루 PO 정정 2(2026-09-11 16:13Z) — 대상 플랫폼·Gatekeeper 우회 안내.
+    expect(container.querySelector('[data-testid="desktop-download-target"]')?.textContent)
+      .toBe(koMessages.desktop.targetLabel);
+    expect(container.querySelector('[data-testid="desktop-download-gatekeeper-notice"]')?.textContent)
+      .toBe(koMessages.desktop.gatekeeperNotice);
     expect(container.querySelector('[data-testid="desktop-download-version"]')?.textContent).toBe('버전 0.3.1');
     expect(container.querySelector('[data-testid="desktop-download-build-sha"]')).toBeNull();
     expect(container.querySelector('[data-testid="desktop-download-notarization-notice"]')?.textContent)
