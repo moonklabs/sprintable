@@ -344,6 +344,20 @@ class ChannelPostDraftAlreadyPublishedError(Exception):
         super().__init__(f"이미 발행된 초안은 폐기할 수 없습니다(발행 취소를 이용하세요): {draft_id}")
 
 
+class ChannelPostDraftWithdrawnError(Exception):
+    """story #3614 갭(PO 確定 2026-09-11) — 폐기된(withdrawn, 종결) 초안은 다시 상신할
+    수 없다. AC1 「종결·재상신 불가」의 실제 강제 지점 — 409(폐기는 되돌릴 수 없으므로
+    422가 아니라 상태 충돌). 사람이 읽는 문장은 라우터가 `i18n_catalog.t(
+    "channel_posts.draft_withdrawn", resolved_locale)`로 짓는다(3796과 동형 — BE
+    한글 사용자 문장 가드가 신규 문자열을 baseline이 아니라 카탈로그로 보내라고
+    要求 — PO 確定 2026-09-11) — 이 예외 자신의 메시지는 내부/로그 전용이라 한글이
+    아니어도 된다(오히려 가드가 그 구분을 강제한다)."""
+
+    def __init__(self, draft_id: uuid.UUID):
+        self.draft_id = draft_id
+        super().__init__(f"channel post draft is withdrawn, cannot resubmit: {draft_id}")
+
+
 def compute_channel_post_hash(*, text: str, link_url: str | None) -> str:
     """gate_seal.compute_seal_hash 위 얇은 payload 조립부(site_posts.compute_body_sha256과
     동형 역할) — channel은 draft 고정값(배달 경로)이라 해시에 안 섞는다(모델 docstring 참고)."""
@@ -515,11 +529,18 @@ async def create_channel_post_draft_version(
             latest_source_version.id if latest_source_version is not None else None
         )
 
+    # story #3614 갭(PO 確定 2026-09-11) — withdrawn(폐기·종결) 초안은 이 매칭에서
+    # 제외한다. 빼지 않으면 같은 (work_item·connection)으로 재POST가 새 초안이 아니라
+    # 폐기된 그 초안에 새 버전을 얹고, 그 버전을 submit하면(아래 submit_channel_post_
+    # draft가 draft.status로 막지 않던 시절엔) 이미 종결된 게이트가 재개방됐다 —
+    # 「폐기=종결」이 뚫리는 좀비 게이트 결함(라이브 실측). withdrawn 제외 시 매칭이
+    # 안 되므로 아래 `draft is None` 분기가 새 초안을 만든다(옛 withdrawn 초안은
+    # 그대로 종결 상태로 남는다).
     draft = (await db.execute(
         select(ChannelPostDraft)
         .where(
             ChannelPostDraft.org_id == org_id, ChannelPostDraft.work_item_id == work_item_id,
-            ChannelPostDraft.connection_id == connection_id,
+            ChannelPostDraft.connection_id == connection_id, ChannelPostDraft.status != "withdrawn",
         )
         .with_for_update()
     )).scalar_one_or_none()
@@ -1030,6 +1051,11 @@ async def submit_channel_post_draft(
     draft = await get_channel_post_draft(db, org_id=org_id, draft_id=draft_id)
     if draft is None:
         raise ChannelPostDraftNotFoundError(draft_id)
+    # story #3614 갭 처방①(PO 確定 2026-09-11) — withdrawn(종결)은 재상신 대상이
+    # 아니다. 이 검사가 아래 게이트 재개방 경로 전부보다 먼저라 「폐기된 초안의
+    # 게이트가 다시 열린다」는 이 함수 전체가 원천 차단된다(라이브 실측 결함 처방).
+    if draft.status == "withdrawn":
+        raise ChannelPostDraftWithdrawnError(draft_id)
 
     # AC6 — 상신 시점에도 connection이 여전히 active인지 재검증(생성 시점 이후 revoke될 수
     # 있다).
@@ -1147,6 +1173,12 @@ async def submit_channel_post_draft(
     role_id = await _default_role_id(db, org_id)
     if role_id is None:
         raise ChannelPostApproverRoleMissingError(org_id=org_id)
+    # story #3614 갭 처방③(PO 確定 2026-09-11) — 게이트를 실제로 미는(create/pending)
+    # 직전의 방어망 1줄. 위 진입부 검사(처방①)가 이 경로 전체를 이미 막지만, 게이트를
+    # 여는 그 자리에도 같은 사실을 다시 한 번 세운다 — "폐기된 초안의 게이트가 다시
+    # 열린다"가 이 함수의 핵심 결함이었으므로 그 mutation 직전이 두 번째 방어선이다.
+    if draft.status == "withdrawn":
+        raise ChannelPostDraftWithdrawnError(draft_id)
     gate = await create_gate(
         db, org_id, draft.work_item_id, "story", _EXTERNAL_PUBLISH_GATE_TYPE,
         requester_member_id, role_id, neutral_facts=neutral_facts, scope_key=scope_key,

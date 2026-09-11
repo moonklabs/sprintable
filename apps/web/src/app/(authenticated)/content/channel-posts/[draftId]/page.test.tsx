@@ -915,6 +915,21 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
       .toBe(koMessages.content.contentStatusReapprovalNeeded);
   });
 
+  // story #3614 갭(PO 確定 2026-09-11) — withdrawn은 게이트 파생값(view.status)보다
+  // 우선한다. 게이트가 없거나(gate_status:null, "초안"으로 접힘) 폐기 前에 이미
+  // 반려됐거나(rejected류 남은 잔상) 무관하게 항상 「폐기됨」이어야 종결·재상신
+  // 불가라는 사실을 사람이 오독하지 않는다.
+  it('⭐AC4 갭 — draft_status=withdrawn이면 gate_status가 null(=평소 "초안")이어도 「폐기됨」 라벨이 우선한다', async () => {
+    stubFetch({ draftDetail: { draft_status: 'withdrawn', gate_status: null, reapproval_required: null, can_withdraw: false } });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-gate-status"]')?.textContent)
+      .toBe(koMessages.content.channelPostsWithdrawnStatusLabel);
+    expect(container.querySelector('[data-testid="channel-post-gate-status"]')?.textContent)
+      .not.toBe(koMessages.content.contentStatusDraft);
+  });
+
   it('⭐AC8 — tagged_link_preview가 있으면 그대로 보인다', async () => {
     stubFetch({ versions: [{ ...VERSION_1, tagged_link_preview: '본문\n\nhttps://x?utm_source=threads' }] });
     await act(async () => {

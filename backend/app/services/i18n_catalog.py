@@ -188,6 +188,13 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "다음 행동: 할 일 없음 — 발행은 휴먼이 화면에서 합니다.",
         "en": "Next action: nothing to do — a human publishes this from the screen.",
     },
+    # story #3614 갭(BE, 페드루 PO 確定 2026-09-11) — 폐기(withdrawn, 종결)된 초안
+    # submit 거부(409). 새 한글 사용자 문장이라 3796(insight_snapshots.py)과 같은
+    # 형으로 처음부터 카탈로그에 등재(BE 한글 사용자 문장 가드 신규 위반 대응).
+    "channel_posts.draft_withdrawn": {
+        "ko": "폐기된 초안은 다시 상신할 수 없습니다 — 새 초안을 만드세요.",
+        "en": "A discarded draft can't be resubmitted — create a new draft.",
+    },
 }
 
 
