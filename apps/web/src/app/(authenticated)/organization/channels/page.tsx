@@ -23,7 +23,7 @@ import { AppCredentialsCard } from '@/components/channel-connect/app-credentials
 import { PastedSecretConnectCard } from '@/components/channel-connect/pasted-secret-connect-card';
 import { ReplaceCredentialCard } from '@/components/channel-connect/replace-credential-card';
 import { connectErrorLabelKey } from '@/components/channel-connect/connect-error';
-import { FacebookPageSelectCard, type FacebookPageCandidate } from '@/components/channel-connect/facebook-page-select-card';
+import { FacebookPageSelectCard, type SelectCandidate } from '@/components/channel-connect/facebook-page-select-card';
 import type { AppCredentialsStatusResponse, ChannelConnectionResponse, TestConnectionResponse } from '@/components/channel-connect/types';
 import { AgentSetupSection } from '@/components/channel-connect/agent-setup-section';
 
@@ -671,7 +671,7 @@ function ChannelSection({
   t: ReturnType<typeof useTranslations>;
   // story #3549(§13-8②, 3547 계약) — 콜백이 2개 이상 페이지를 찾아 돌려보낸
   // 「선택 대기」. candidates=[]는 §13-8③ 0개 실패(원인 둘을 하나로 안 뭉친다).
-  pendingSelection?: { pendingId: string; candidates: FacebookPageCandidate[] };
+  pendingSelection?: { pendingId: string; candidates: SelectCandidate[] };
   // story #3743(페드루 PO 決, 2026-09-09) — 헤더 「앱 자격 등록」 메뉴에서 이 채널을
   // 고르면 새 흐름을 만들지 않고 이 행으로 스크롤한다(폼은 그 자리에 항상 그대로 —
   // 컴포넌트 정의 1).
@@ -704,6 +704,14 @@ function ChannelSection({
   // `_FACEBOOK_OAUTH_MODULE_PATHS`에 둘 다 등록, select는 어느 쪽이든 리터럴
   // `/facebook/select` 하나로 통한다 — pending.channel로 식별, URL로 안 가른다).
   const isFacebookOauthChannel = channel === 'facebook' || channel === 'facebook_sandbox';
+  // story #3806 PR 7(페드루 PO 確定 2026-09-11) — meta_ads/ads_sandbox도 콜백이 광고
+  // 계정 2개 이상이면 같은 「선택 대기」 갈래를 탄다(channel_connections.py
+  // `_meta_ads_channel_connection_callback`, AdAccountPendingSelectionResponse) —
+  // 이 카드가 isFacebookOauthChannel로만 게이트돼 있어 ads_sandbox 기본 마커(계정
+  // 2개)로 연결을 시도하면 선택 카드가 안 뜨는 채 막혀 있었다(PR1 #4172 착지 뒤
+  // FE가 안 챙긴 갭 — 실 Meta 계정도 보통 계정이 여럿이라 라이브에서도 같은
+  // 결함, 페드루 PO 確定 "적기만 아니라 3806 첫 출시 결함").
+  const isMetaAdsOauthChannel = channel === 'meta_ads' || channel === 'ads_sandbox';
   const channelStatus = connections.length === 0
     ? deriveChannelConnectionStatus({ effectiveSource: credential_kind === 'oauth' ? effectiveSource : 'org' }).status
     : worstChannelConnectionStatus(rowStatuses);
@@ -898,7 +906,7 @@ function ChannelSection({
           발 또는 헤더 메뉴로 골랐을 때만 그 행 아래 인라인(한 번에 한 행 — expanded는
           부모가 소유한 페이지 전역 「펼친 채널」 1개). Facebook 선택 대기 카드는
           예외 — OAuth 콜백 리다이렉트가 이미 만든 상태라 펼침 여부와 무관하게 보인다. */}
-      {credential_kind === 'oauth' && isFacebookOauthChannel && pendingSelection && connections.length === 0 ? (
+      {credential_kind === 'oauth' && (isFacebookOauthChannel || isMetaAdsOauthChannel) && pendingSelection && connections.length === 0 ? (
         <SectionCardBody className="space-y-4 border-t border-border">
           <FacebookPageSelectCard
             channel={channel} orgId={orgId} pendingId={pendingSelection.pendingId}
@@ -1119,7 +1127,7 @@ export default function OrganizationChannelsPage() {
     if (!selectPendingChannel || !selectPendingId) return null;
     try {
       const parsed = JSON.parse(searchParams.get('candidates') ?? '[]') as unknown;
-      return Array.isArray(parsed) ? (parsed as FacebookPageCandidate[]) : [];
+      return Array.isArray(parsed) ? (parsed as SelectCandidate[]) : [];
     } catch {
       return [];
     }

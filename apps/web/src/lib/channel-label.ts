@@ -28,6 +28,12 @@ const CHANNEL_LABEL_KEYS: Record<string, string> = {
   // 새 낱말 0). ⚠️임시 처방 — 진짜 정본(커넥터 등록 자체가 display_name을 가짐)은
   // 다른 저장소(sprintable-agent-plugins의 *.schema.ts)에 있어 별건으로 남는다.
   stibee: 'channelLabelStibee',
+  // story #3806 PR 7(페드루 PO 確定 2026-09-11) — meta_ads/ads_sandbox 행이 이 맵에
+  // 없어 raw "meta_ads"/"ads_sandbox" 원문이 화면(행 제목·연결 버튼·owner-only 사유
+  // 등 channelLabel() 전 소비처)에 그대로 새고 있던 결함 — PR1(#4172) 착지 뒤 FE가
+  // 안 챙긴 것, 이번에 등록.
+  meta_ads: 'channelLabelMetaAds',
+  ads_sandbox: 'channelLabelAdsSandbox',
 };
 
 export function channelLabel(channel: string, t: (key: string) => string): string {
