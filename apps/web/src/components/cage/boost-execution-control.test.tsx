@@ -36,8 +36,11 @@ async function flush() {
   await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
 }
 
-function jsonResponse(body: unknown, status = 200) {
-  return { ok: status >= 200 && status < 300, status, json: () => Promise.resolve(body) } as Response;
+function jsonResponse(body: unknown, status = 200, headers: Record<string, string> = {}) {
+  return {
+    ok: status >= 200 && status < 300, status, json: () => Promise.resolve(body),
+    headers: { get: (name: string) => headers[name] ?? null },
+  } as unknown as Response;
 }
 
 const SEALED = {
@@ -228,5 +231,99 @@ describe('BoostExecutionControl — story #3806(Phase3·3-2 PR5, 유나 §절 §
     await flush();
 
     expect(document.body.querySelector('[data-testid="boost-execution-control"]')).toBeNull();
+  });
+
+  // story #3806(Phase3·3-2 PR 12, 페드루 PO 確定 2026-09-11 17:26Z) — 「광고비 다시
+  // 수집」 버튼. comments/refresh 동형 UX(429 rate-limit 문구).
+  describe('「광고비 다시 수집」(PR 12)', () => {
+    it('⭐run_status="running"이면 버튼이 뜨고, 클릭 → 올바른 엔드포인트 호출+성공 시 재조회', async () => {
+      mockedFetch.mockResolvedValueOnce(jsonResponse({ data: { run_status: 'running' } }));
+      await act(async () => {
+        root.render(wrap(
+          <BoostExecutionControl orgId="org-1" gateId="gate-1" {...SEALED} sealedAdsStartsAt="2026-09-01T00:00:00Z" />,
+        ));
+      });
+      await flush();
+
+      const btn = document.body.querySelector('[data-testid="boost-spend-refresh-trigger"]') as HTMLButtonElement;
+      expect(btn).not.toBeNull();
+      expect(btn.textContent).toBe(koMessages.cage.boostExecutionSpendRefresh);
+
+      mockedFetch.mockResolvedValueOnce(
+        jsonResponse({ data: { spend_minor: 12345, captured_at: '2026-09-11T17:30:00Z', cap_reached: false, run_status: 'running' } }, 201),
+      );
+      mockedFetch.mockResolvedValueOnce(jsonResponse({ data: { run_status: 'running' } }));
+
+      await act(async () => { btn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      await flush();
+
+      expect(mockedFetch.mock.calls[1][0]).toBe('/api/organizations/org-1/ads-boosts/gate-1/spend/refresh');
+      expect(document.body.querySelector('[data-testid="boost-spend-refresh-error"]')).toBeNull();
+    });
+
+    it('429(초 있음) — 버튼 밖에 "{N}초 뒤 다시 시도할 수 있습니다." 문구', async () => {
+      mockedFetch.mockResolvedValueOnce(jsonResponse({ data: { run_status: 'running' } }));
+      await act(async () => {
+        root.render(wrap(
+          <BoostExecutionControl orgId="org-1" gateId="gate-1" {...SEALED} sealedAdsStartsAt="2026-09-01T00:00:00Z" />,
+        ));
+      });
+      await flush();
+
+      mockedFetch.mockResolvedValueOnce(
+        jsonResponse({ error: { code: 'ADS_SPEND_REFRESH_RATE_LIMITED' } }, 429, { 'Retry-After': '240' }),
+      );
+      const btn = document.body.querySelector('[data-testid="boost-spend-refresh-trigger"]') as HTMLButtonElement;
+      await act(async () => { btn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      await flush();
+
+      expect(document.body.querySelector('[data-testid="boost-spend-refresh-error"]')?.textContent).toBe('240초 뒤 다시 시도할 수 있습니다.');
+    });
+
+    it('429(Retry-After 헤더 없음) — 초를 지어내지 않고 "잠시 뒤" 문구로 물러난다', async () => {
+      mockedFetch.mockResolvedValueOnce(jsonResponse({ data: { run_status: 'running' } }));
+      await act(async () => {
+        root.render(wrap(
+          <BoostExecutionControl orgId="org-1" gateId="gate-1" {...SEALED} sealedAdsStartsAt="2026-09-01T00:00:00Z" />,
+        ));
+      });
+      await flush();
+
+      mockedFetch.mockResolvedValueOnce(jsonResponse({ error: { code: 'ADS_SPEND_REFRESH_RATE_LIMITED' } }, 429));
+      const btn = document.body.querySelector('[data-testid="boost-spend-refresh-trigger"]') as HTMLButtonElement;
+      await act(async () => { btn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      await flush();
+
+      expect(document.body.querySelector('[data-testid="boost-spend-refresh-error"]')?.textContent).toBe('잠시 뒤 다시 시도할 수 있습니다.');
+    });
+
+    it('409(ADS_BOOST_NOT_STARTED 등 generic) — 공용 에러 문구', async () => {
+      mockedFetch.mockResolvedValueOnce(jsonResponse({ data: { run_status: 'running' } }));
+      await act(async () => {
+        root.render(wrap(
+          <BoostExecutionControl orgId="org-1" gateId="gate-1" {...SEALED} sealedAdsStartsAt="2026-09-01T00:00:00Z" />,
+        ));
+      });
+      await flush();
+
+      mockedFetch.mockResolvedValueOnce(jsonResponse({ error: { code: 'ADS_BOOST_NOT_STARTED' } }, 409));
+      const btn = document.body.querySelector('[data-testid="boost-spend-refresh-trigger"]') as HTMLButtonElement;
+      await act(async () => { btn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      await flush();
+
+      expect(document.body.querySelector('[data-testid="boost-spend-refresh-error"]')?.textContent).toBe(koMessages.cage.boostExecutionActionError);
+    });
+
+    it('run_status="paused"에서도 버튼이 뜬다(중지 상태에서도 최근 지출은 확인 가능)', async () => {
+      mockedFetch.mockResolvedValueOnce(jsonResponse({ data: { run_status: 'paused' } }));
+      await act(async () => {
+        root.render(wrap(
+          <BoostExecutionControl orgId="org-1" gateId="gate-1" {...SEALED} sealedAdsStartsAt="2026-09-01T00:00:00Z" />,
+        ));
+      });
+      await flush();
+
+      expect(document.body.querySelector('[data-testid="boost-spend-refresh-trigger"]')).not.toBeNull();
+    });
   });
 });

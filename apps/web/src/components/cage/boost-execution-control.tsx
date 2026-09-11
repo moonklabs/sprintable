@@ -53,6 +53,12 @@ export function BoostExecutionControl({
   const [pauseConfirmOpen, setPauseConfirmOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  // story #3806(Phase3·3-2 PR 12, 페드루 PO 確定 2026-09-11 17:26Z) — 「광고비
+  // 다시 수집」 버튼 전용 상태(start/pause/resume의 submitting/actionError와 분리
+  // — 서로 다른 요청이 같은 로딩/에러 표시를 공유하면 사용자가 어느 버튼이 도는지
+  // 헷갈린다).
+  const [refreshingSpend, setRefreshingSpend] = useState(false);
+  const [spendRefreshError, setSpendRefreshError] = useState<string | null>(null);
 
   const load = () => {
     fetchWithAuth(`/api/organizations/${orgId}/ads-boosts/${gateId}/spend`)
@@ -85,6 +91,34 @@ export function BoostExecutionControl({
       setActionError(t('boostExecutionActionError'));
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const doRefreshSpend = async () => {
+    setRefreshingSpend(true);
+    setSpendRefreshError(null);
+    try {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/ads-boosts/${gateId}/spend/refresh`, { method: 'POST' });
+      if (res.status === 429) {
+        const retryAfter = Number(res.headers.get('Retry-After'));
+        // comments-refresh-button.tsx(story #3517)와 동형 방어 — 초를 못 읽으면
+        // "0초 뒤"처럼 지어낸 숫자를 보이지 않고 "잠시 뒤"로 물러난다.
+        setSpendRefreshError(
+          Number.isFinite(retryAfter) && retryAfter > 0
+            ? t('boostExecutionSpendRefreshRateLimited', { seconds: retryAfter })
+            : t('boostExecutionSpendRefreshRateLimitedUnknown'),
+        );
+        return;
+      }
+      if (!res.ok) {
+        setSpendRefreshError(t('boostExecutionActionError'));
+        return;
+      }
+      load();
+    } catch {
+      setSpendRefreshError(t('boostExecutionActionError'));
+    } finally {
+      setRefreshingSpend(false);
     }
   };
 
@@ -197,6 +231,17 @@ export function BoostExecutionControl({
           {submitting ? t('boostExecutionResuming') : t('boostExecutionResume')}
         </Button>
       )}
+      {/* story #3806(PR 12) — 자연 스케줄(+1d/+7d)을 기다리지 않고 즉시 1회
+          캡처. comments/refresh와 동형 손잡이(같은 5분 rate-limit 사상). */}
+      <Button
+        variant="outline" size="sm" disabled={refreshingSpend}
+        onClick={() => void doRefreshSpend()} data-testid="boost-spend-refresh-trigger"
+      >
+        {refreshingSpend ? t('boostExecutionSpendRefreshing') : t('boostExecutionSpendRefresh')}
+      </Button>
+      {spendRefreshError ? (
+        <p className="text-xs text-muted-foreground" data-testid="boost-spend-refresh-error">{spendRefreshError}</p>
+      ) : null}
 
       {/* story #3806(유나 §절 §2 「비용 명확」) — 확認 다이얼로그 문구는 §절 원문 그대로. */}
       <Dialog open={pauseConfirmOpen} onOpenChange={setPauseConfirmOpen}>

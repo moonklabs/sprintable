@@ -35,6 +35,10 @@ _PAID_CHANNELS = ("meta_ads", "ads_sandbox")
 _PAID_SOURCE = "paid"
 _SNAPSHOT_OFFSETS = (timedelta(days=1), timedelta(days=7))
 BATCH_SIZE = 50
+# story #3806(Phase3·3-2 PR 12, 페드루 PO 確定 2026-09-11 17:26Z) — 댓글
+# `comments/refresh`(channel_post_comments.py::_REFRESH_MIN_INTERVAL)와 동형 값·
+# 동형 판정 축("가장 최근 captured_at" 기준, 별도 rate-limit 상태 테이블 0).
+_SPEND_REFRESH_MIN_INTERVAL = timedelta(minutes=5)
 
 
 def organic_snapshots_only(stmt):
@@ -193,6 +197,101 @@ async def _enforce_spend_cap(db: AsyncSession, *, gate: Gate, run, now: datetime
     except Exception:  # noqa: BLE001 — publication_command.py와 동형 2중 방어.
         await db.rollback()
     return True
+
+
+class AdsSpendRefreshRateLimitedError(Exception):
+    """story #3806(Phase3·3-2 PR 12) — `CommentRefreshRateLimitedError`(channel_
+    post_comments.py)와 동형. `retry_after_seconds`를 실어 호출부(라우터)가 429
+    Retry-After 헤더로 그대로 옮긴다."""
+
+    def __init__(self, *, retry_after_seconds: int):
+        self.retry_after_seconds = retry_after_seconds
+        super().__init__(f"{retry_after_seconds}초 뒤 다시 시도하세요")
+
+
+async def refresh_ads_boost_spend_now(
+    db: AsyncSession, *, org_id: uuid.UUID, gate_id: uuid.UUID, requester_member_id: uuid.UUID,
+) -> dict:
+    """story #3806(Phase3·3-2 PR 12, 페드루 PO 確定 2026-09-11 17:26Z) — 사람이
+    「광고비 다시 수집」을 누르면 자연 스케줄(+1d/+7d)을 기다리지 않고 같은 캡처
+    →상한판정→scheduler 자동중지 경로를 즉시 1회 돈다. `comments/refresh`(휴먼
+    수동 재수집)와 동형 설계: 5분 rate-limit(가장 최근 captured_at 기준, 별도
+    상태 테이블 0)·멱등(그 자리서 새 스냅샷 1행을 만들어 바로 처리, 워커 tick의
+    나머지 로직 재구현 0 — `_resolve_spend_context`·`_enforce_spend_cap` 그대로
+    재사용). `initiated_by` 축(PublicationCommand 전용, PR6·PR8)과는 다른 축 —
+    이 함수의 「누가 눌렀나」는 InsightSnapshot에 컬럼을 새로 얹지 않고 기존
+    `ActivityLog`(gate 축, `GET /{gate_id}/activity`가 이미 있는 조회표면)에
+    남긴다(새 컬럼·새 조회표면 0)."""
+    from app.services.ads_boost_execution import _resolve_gate
+    from app.services.activity_log import ActivityLogService
+    from app.services.insight_snapshots import NORMALIZED_KEYS
+    from app.models.channel_connection import ChannelConnection
+    import httpx
+
+    gate = await _resolve_gate(db, org_id=org_id, gate_id=gate_id)
+    if not gate.scope_key:
+        raise AdsSpendFetchError("ADS_SPEND_GATE_MISSING", f"gate has no scope_key: {gate.id}")
+    publication_id = uuid.UUID(gate.scope_key)
+
+    now = datetime.now(timezone.utc)
+    last_captured_at = (await db.execute(
+        select(InsightSnapshot.captured_at).where(
+            InsightSnapshot.org_id == org_id, InsightSnapshot.publication_id == publication_id,
+            InsightSnapshot.source == _PAID_SOURCE, InsightSnapshot.captured_at.isnot(None),
+        ).order_by(InsightSnapshot.captured_at.desc()).limit(1)
+    )).scalar_one_or_none()
+    if last_captured_at is not None and now - last_captured_at < _SPEND_REFRESH_MIN_INTERVAL:
+        retry_after = int((_SPEND_REFRESH_MIN_INTERVAL - (now - last_captured_at)).total_seconds())
+        raise AdsSpendRefreshRateLimitedError(retry_after_seconds=max(retry_after, 1))
+
+    conn = (await db.execute(
+        select(ChannelConnection).where(ChannelConnection.id == gate.sealed_ads_connection_id)
+    )).scalar_one_or_none()
+    if conn is None:
+        raise AdsSpendFetchError("ADS_SPEND_CONNECTION_MISSING", f"ad connection missing: {gate.sealed_ads_connection_id}")
+
+    snapshot = InsightSnapshot(
+        id=uuid.uuid4(), org_id=org_id, work_item_id=gate.work_item_id, publication_id=publication_id,
+        publication_kind="channel_publication", channel=conn.channel, due_at=now, status="pending",
+    )
+    db.add(snapshot)
+    await db.flush()
+
+    try:
+        # 새로 만든 행을 그대로 재조회 — _resolve_spend_context가 gate·run·conn·
+        # module을 스냅샷 하나로부터 다시 도출하는 그 계약을 그대로 탄다(드리프트
+        # 없는 재사용, 위에서 이미 확認한 gate·conn을 또 손으로 안 옮긴다).
+        ctx = await _resolve_spend_context(db, snapshot)
+        async with httpx.AsyncClient(timeout=20) as client:
+            spend_minor = await ctx["module"].get_campaign_spend_minor(
+                client, campaign_id=ctx["campaign_id"], access_token=ctx["access_token"],
+            )
+        snapshot.normalized = {key: (spend_minor if key == "spend" else None) for key in NORMALIZED_KEYS}
+        snapshot.source = _PAID_SOURCE
+        snapshot.captured_at = now
+        snapshot.status = "captured"
+        snapshot.error_code = None
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+
+    capped = await _enforce_spend_cap(db, gate=ctx["gate"], run=ctx["run"], now=now)
+
+    await ActivityLogService(db).record(
+        org_id=org_id, action="ads_spend_refresh_requested", actor_id=requester_member_id, actor_type="human",
+        entity_type="gate", entity_id=gate.id,
+        context={"spend_minor": spend_minor, "cap_reached": capped},
+    )
+    await db.commit()
+
+    # run.status는 여기서 아직 안 바뀐다 — _enforce_spend_cap이 하는 건 pause
+    # "명령 생성"뿐(boost_start와 동형 비동기 2단계: 실행은 process_due_
+    # publication_commands의 다음 tick 몫). 지어내지 않고 지금 이 순간의 실제
+    # 값을 그대로 낸다.
+    return {
+        "spend_minor": spend_minor, "captured_at": now, "cap_reached": capped, "run_status": ctx["run"].status,
+    }
 
 
 async def process_due_ads_spend_snapshots(db: AsyncSession, *, now: datetime | None = None) -> dict[str, int]:
