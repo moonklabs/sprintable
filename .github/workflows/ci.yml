@@ -712,6 +712,22 @@ jobs:
         working-directory: backend
         run: python3 scripts/lint_commit_before_validate.py
 
+  # story #3370 회귀(페드루 PO 지시 2026-09-11) — raw auth.user_id(JWT는 users.id·API키는
+  # team_member.id 그대로)가 영속 멤버-id kwarg(*_member_id·resolver_id·actor_id)에 그대로
+  # 흘러드는 클래스를 원천봉쇄. 스크립트 docstring(scripts/lint_raw_auth_id_into_member_field.py)
+  # 참조 — baseline 없음(도입 시점 사후감사로 발견된 14건 전부 정정 또는 인라인
+  # `# member-id-lint: user-id-field` 예외 처리 완료, app/routers·app/services·ee 전 스윕 후 확認).
+  raw-auth-id-into-member-field-lint:
+    name: raw auth.user_id → member-id kwarg lint (guard, story #3370)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Scan for raw auth.user_id flowing into *_member_id/resolver_id/actor_id kwargs
+        working-directory: backend
+        run: python3 scripts/lint_raw_auth_id_into_member_field.py
+
   # story #2786(2026-08-19, PR#3088 DROP SCHEMA 906건 연쇄·PR#3217 DELETE FROM 26건 연쇄
   # — 같은 클래스 3일 내 2회) — 공유 실PG를 부수는 테스트 SQL 리터럴(WHERE 없는 DELETE FROM·
   # DROP SCHEMA·DROP TABLE·TRUNCATE)을 커밋 시점에 잡는다. 스크립트 docstring(scripts/

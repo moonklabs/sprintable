@@ -22,6 +22,7 @@ from app.models.project import Project
 from app.models.team import TeamMember
 from app.repositories.agent_persona import AgentPersonaRepository
 from app.schemas.recruit import RecruitRequest
+from app.services.member_resolver import resolve_member_db_verified
 from app.schemas.team_member import OrgAgentCreate, TeamMemberResponse
 from app.services.agent_onboarding_config import (
     DEFAULT_RUNTIME,
@@ -412,13 +413,18 @@ async def _recruit_agent_endpoint(
 
     resolved_locale = resolve_locale_from_request(body.locale, accept_language)
     try:
+        # story #3370 회귀 클래스(페드루 PO 지시 2026-09-11) — actor_id는
+        # recruit_agent()를 거쳐 AgentPersona.created_by로 영속된다(휴먼 JWT의
+        # auth.user_id는 users.id, org 멤버 id가 아니다). resolve_member_db_verified()
+        # 의 영속 멤버 id로 정정.
+        resolved = await resolve_member_db_verified(auth, org_id, session)
         result = await recruit_agent(
             session,
             agent_member=member,
             org_id=org_id,
             role_template=role_template,
             runtime=body.runtime,
-            actor_id=uuid.UUID(auth.user_id),
+            actor_id=resolved.id,
             locale=resolved_locale,
         )
     except ValueError as exc:

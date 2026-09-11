@@ -18,6 +18,17 @@ def anyio_backend():
     return "asyncio"
 
 
+@pytest.fixture(autouse=True)
+def _mock_resolve_member_db_verified(monkeypatch):
+    """story #3370 회귀 클래스 정정(페드루 PO 지시 2026-09-11) — _recruit_agent_endpoint가
+    이제 actor_id를 쓰기 前 resolve_member_db_verified()로 영속 멤버 id를 실측한다(진짜 DB
+    조회). 이 파일의 session은 순수 MagicMock/AsyncMock(실 PG 아님)이라 그 조회를 감당
+    못 한다 — 라우터 모듈에 import된 그 심볼만 목으로 갈아 우회."""
+    resolved = MagicMock()
+    resolved.id = uuid.uuid4()
+    monkeypatch.setattr("app.routers.agents.resolve_member_db_verified", AsyncMock(return_value=resolved))
+
+
 def _auth_ctx():
     return SimpleNamespace(user_id=str(uuid.uuid4()))
 

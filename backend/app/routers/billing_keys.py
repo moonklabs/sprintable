@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id_no_project_gate
 from app.dependencies.database import get_db
 from app.models.org_billing_key import OrgBillingKey
+from app.services.member_resolver import resolve_member_db_verified
 from app.services.org_billing_key import ActiveSubscriptionBlocksRevoke, ensure_customer_key, issue_billing_key, revoke_billing_key
 
 router = APIRouter(prefix="/api/v2/org-billing-keys", tags=["billing", "Organization"])
@@ -127,7 +128,13 @@ async def delete_billing_key(
     if not await is_org_owner_or_admin(session, uuid.UUID(auth.user_id), org_id):
         raise HTTPException(status_code=403, detail="org admin/owner role required")
 
-    resolved_actor_id = uuid.UUID(auth.user_id)
+    # story #3370 회귀 클래스(페드루 PO 지시 2026-09-11, prod-live) — revoke_billing_key()
+    # 가 이 값을 그대로 ActivityLogService.record(actor_id=...)로 넘겨 ActivityLog.actor_id
+    # 로 영속한다. 이 컬럼은 activity_logs.py가 이미 「resolve_member().id(영속 멤버 id)
+    # 여야 「본인 actor_id만」 필터 축과 정합한다」고 확定한 바로 그 슬롯이다(app/routers/
+    # activity_logs.py 2026-09-10 주석 참고) — 거기서 읽기축(필터)만 고쳐졌고 이 쓰기축은
+    # 그대로 raw auth.user_id(휴먼 JWT면 users.id, org 멤버 id가 아니다)를 흘리고 있었다.
+    resolved_actor_id = (await resolve_member_db_verified(auth, org_id, session)).id
     try:
         result = await revoke_billing_key(
             session, org_id=org_id, actor_id=resolved_actor_id, actor_type="human",
