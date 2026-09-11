@@ -5370,6 +5370,7 @@
     "versionLabel": "Version {version}",
     "buildLabel": "Build {sha}",
     "notarizationNotice": "For internal use before Apple notarization.",
-    "downloadCta": "Download"
+    "downloadCta": "Download",
+    "unavailable": "Not available right now."
   }
 }

@@ -37,21 +37,26 @@ function jsonResponse(body: unknown, ok = true) {
 
 // story #3807 AC3(페드루 PO 確定 2026-09-11 · 착수 시점 민 AC2 PR 0건) — 민의
 // `/desktop/updates/macos.json`이 아직 없어 fetch가 실패하는 게 지금은 정상. 이
-// 스위트는 그 실패를 조용히 흡수하는 회귀 가드와, 매니페스트가 실제로 오면
+// 스위트는 그 실패가 «막다른 침묵»이 아니라 정직한 안내 문구로 뜨는지 고정하고
+// (페드루 PO 정정, 2026-09-11 16:02Z 캡처 실측), 매니페스트가 실제로 오면
 // 버전·빌드 sha·공증 문구·다운로드 링크가 정확히 뜨는지를 함께 고정한다.
 describe('DesktopDownloadCard — story #3807 AC3', () => {
-  it('⭐매니페스트를 못 읽으면(민 AC2 미착지·404 등) 카드 자체를 안 그린다(지어내지 않는다)', async () => {
+  it('⭐매니페스트를 못 읽으면(민 AC2 미착지·404 등) 지어낸 버전·링크 0·「지금은 받을 수 없습니다」로 정직하게 말한다(완전 침묵 금지, 페드루 PO 정정)', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(null, false)));
     await act(async () => { root.render(wrap(<DesktopDownloadCard />)); });
     await flush();
-    expect(container.querySelector('[data-testid="desktop-download-card"]')).toBeNull();
+    expect(container.querySelector('[data-testid="desktop-download-unavailable"]')?.textContent)
+      .toBe(koMessages.desktop.unavailable);
+    expect(container.querySelector('[data-testid="desktop-download-version"]')).toBeNull();
+    expect(container.querySelector('[data-testid="desktop-download-button"]')).toBeNull();
   });
 
-  it('네트워크 예외(fetch 자체가 throw)도 카드를 안 그린 채 조용히 흡수한다', async () => {
+  it('네트워크 예외(fetch 자체가 throw)도 같은 안내 문구로 조용히 흡수한다', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('network down'); }));
     await act(async () => { root.render(wrap(<DesktopDownloadCard />)); });
     await flush();
-    expect(container.querySelector('[data-testid="desktop-download-card"]')).toBeNull();
+    expect(container.querySelector('[data-testid="desktop-download-unavailable"]')?.textContent)
+      .toBe(koMessages.desktop.unavailable);
   });
 
   it('⭐매니페스트 수신 — 버전·공증 문구·다운로드 링크(GCS url)가 정확히 뜬다(빌드 sha 없는 순수 semver)', async () => {

@@ -5370,6 +5370,7 @@
     "versionLabel": "버전 {version}",
     "buildLabel": "빌드 {sha}",
     "notarizationNotice": "Apple 공증 전 내부용입니다.",
-    "downloadCta": "다운로드"
+    "downloadCta": "다운로드",
+    "unavailable": "지금은 받을 수 없습니다."
   }
 }
