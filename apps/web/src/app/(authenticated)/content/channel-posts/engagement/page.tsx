@@ -17,6 +17,7 @@ import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { CommentReplyDialog, type CommentReplyOutcome } from '@/components/content/comment-reply-dialog';
 import { CommentConvertToTaskDialog } from '@/components/content/comment-convert-to-task-dialog';
 import type { CommentItem } from '@/components/content/comments-section';
+import { shouldShowReplyDetectionUnavailable } from './collection-status';
 
 /**
  * story #3805(Phase3·3-1·PR 2[FE]→PR 3, 유나 §절·08:14Z/08:40Z 낱말·범위 정정) —
@@ -316,7 +317,7 @@ export default function ChannelPostsEngagementPage() {
                     channel: channelLabel(c.channel, t), time: formatRelativeTime(c.last_collected_at, locale, displayTimezone),
                   })
                 : t('engagementCollectionStatusNotCollected', { channel: channelLabel(c.channel, t) })}
-              {c.reply_detection_unavailable ? (
+              {shouldShowReplyDetectionUnavailable(c) ? (
                 <>
                   {' · '}
                   {t('engagementReplyDetectionUnavailable')}
