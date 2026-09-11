@@ -14,13 +14,14 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.error_envelope import human_error
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
+from app.services.agent_onboarding_config import resolve_locale_from_request
 from app.services.channel_post_comments import (
     EngagementItemInvalidStatusError,
     EngagementItemNotFoundError,
@@ -28,22 +29,23 @@ from app.services.channel_post_comments import (
     list_engagement_items,
     patch_engagement_item,
 )
+from app.services.i18n_catalog import t
 from app.services.member_resolver import resolve_member
 
 router = APIRouter(prefix="/api/v2/organizations", tags=["engagement-items"])
 
 
-async def _require_human(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID):
+async def _require_human(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID, resolved_locale: str):
     """PATCH(배정·상태 변경)는 휴먼 전용 — channel_post_comments.py::_require_human과
-    동형(그라운딩 PO 確定: 에이전트 키는 목록·collection-status 읽기만)."""
+    동형(그라운딩 PO 確定: 에이전트 키는 목록·collection-status 읽기만). `resolved_locale`
+    은 호출부(라우트 진입점)가 이미 resolve_locale_from_request()로 푼 plain str(Header()
+    마커가 라우트 경계를 못 넘는다, i18n_catalog.py 모듈 docstring 원칙)."""
     resolved = await resolve_member(auth, org_id, db)
     if resolved.type != "human":
+        message = t("engagement_items.patch_human_only", resolved_locale)
         raise HTTPException(
             status_code=403,
-            detail=human_error(
-                "ENGAGEMENT_ITEM_PATCH_HUMAN_ONLY", "반응 항목의 배정·상태 변경은 휴먼 멤버만 가능합니다.",
-                user_message="반응 항목의 배정·상태 변경은 휴먼 멤버만 가능합니다.",
-            ),
+            detail=human_error("ENGAGEMENT_ITEM_PATCH_HUMAN_ONLY", message, user_message=message),
         )
     return resolved
 
@@ -125,10 +127,16 @@ async def patch_engagement_item_endpoint(
     db: AsyncSession = Depends(get_db),
     verified_org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
+    locale: str | None = None,
+    accept_language: str | None = Header(None, alias="Accept-Language"),
 ) -> EngagementItemResponse:
+    """CI 정정(2026-09-11) — `Header()` DI 마커는 라우트 진입점에서만 받는다(까심 QA
+    CI FAILURE 원칙, i18n_catalog.py 모듈 docstring). 이 함수를 직접 호출하는 테스트가
+    없어(전부 HTTP 클라이언트 경유) gates.py류의 `_xxx_endpoint` 내부 분리는 불요."""
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
-    await _require_human(db, auth, org_id)
+    resolved_locale = resolve_locale_from_request(locale, accept_language)
+    await _require_human(db, auth, org_id, resolved_locale)
 
     fields_set = body.model_fields_set
     try:
@@ -139,14 +147,14 @@ async def patch_engagement_item_endpoint(
             assignee_member_id_set="assignee_member_id" in fields_set,
         )
     except EngagementItemNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=f"반응 항목을 찾을 수 없습니다: {comment_id}") from exc
+        raise HTTPException(
+            status_code=404, detail=t("engagement_items.not_found", resolved_locale),
+        ) from exc
     except EngagementItemInvalidStatusError as exc:
+        message = t("engagement_items.invalid_status", resolved_locale)
         raise HTTPException(
             status_code=422,
-            detail=human_error(
-                "ENGAGEMENT_ITEM_INVALID_STATUS", str(exc),
-                user_message="알 수 없는 처리 상태입니다.",
-            ),
+            detail=human_error("ENGAGEMENT_ITEM_INVALID_STATUS", str(exc), user_message=message),
         ) from exc
 
     return _item_response(comment)

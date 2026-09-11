@@ -1114,15 +1114,24 @@ _TRIAGE_STATUSES = ("open", "in_progress", "done", "skipped")
 
 
 class EngagementItemNotFoundError(Exception):
+    """CI 정정(2026-09-11, 카디르 실측·페드루 전달) — BE 한글 사용자 문장 가드(story
+    #3779) 신규 위반. 서비스 레이어는 `resolved_locale`를 모른다(Header() DI는 라우트
+    경계에서만, i18n_catalog.py 모듈 docstring 원칙) — 실제 사용자 노출 문구는
+    라우터가 `t("engagement_items.not_found", resolved_locale)`로 새로 짓는다(dependencies.
+    not_found와 동형: id를 문구에 안 싣는다). 이 메시지는 개발자 진단용 영문 고정."""
+
     def __init__(self, comment_id: uuid.UUID):
         self.comment_id = comment_id
-        super().__init__(f"반응 항목을 찾을 수 없습니다: {comment_id}")
+        super().__init__(f"engagement item not found: {comment_id}")
 
 
 class EngagementItemInvalidStatusError(Exception):
+    """위와 동형 — 사용자 노출 문구는 라우터가 `t("engagement_items.invalid_status",
+    resolved_locale)`로 새로 짓는다. 이 메시지는 개발자 진단용 영문 고정."""
+
     def __init__(self, *, status: str):
         self.status = status
-        super().__init__(f"알 수 없는 처리 상태입니다: {status}")
+        super().__init__(f"invalid triage_status: {status}")
 
 
 async def list_engagement_items(
