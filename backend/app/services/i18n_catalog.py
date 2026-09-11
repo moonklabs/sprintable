@@ -217,6 +217,21 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "폐기된 초안은 다시 상신할 수 없습니다 — 새 초안을 만드세요.",
         "en": "A discarded draft can't be resubmitted — create a new draft.",
     },
+    # story #3805 CI 정정(2026-09-11, 카디르 실측·페드루 전달) — engagement_items.py
+    # PATCH 3자리(휴먼 전용 403·404·422)의 신규 한글 사용자 문장. 처음부터 카탈로그로
+    # 등재(#3796/#3614·events.py와 같은 형).
+    "engagement_items.patch_human_only": {
+        "ko": "반응 항목의 배정·상태 변경은 휴먼 멤버만 가능합니다.",
+        "en": "Only human members can change engagement item assignment or status",
+    },
+    "engagement_items.not_found": {
+        "ko": "반응 항목을 찾을 수 없습니다",
+        "en": "Engagement item not found",
+    },
+    "engagement_items.invalid_status": {
+        "ko": "알 수 없는 처리 상태입니다.",
+        "en": "Unknown triage status",
+    },
 }
 
 

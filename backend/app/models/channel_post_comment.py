@@ -34,6 +34,16 @@ class ChannelPostComment(Base):
     # story #3516 — 재수집 시 원격에 더는 없는 댓글의 소프트 삭제 표시(하드 삭제 안 함,
     # 이미 답변이 달렸을 수 있어 이력 보존). null=지금 살아있음.
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # story #3805(Phase3·3-1, 페드루 PO 確定 2026-09-11) — 「반응」(Engagement) 화면
+    # 배정·처리 상태. 새 테이블 0(그라운딩 ④) — 이 세 컬럼이 org 단위 큐를 만든다.
+    # FK 없음(파일 머리 관례와 동형 — assignee_member_id/linked_story_id도
+    # channel_connections류처럼 값만 담는 참조).
+    triage_status: Mapped[str] = mapped_column(Text, nullable=False, server_default="open")
+    assignee_member_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # story #3805 — 「작업으로 전환」(create_comment_follow_up)이 만든 story로의
+    # 양방향 링크(그라운딩 ③: 그 전엔 story.description에 comment_id를 텍스트로만
+    # 심어 단방향이었다). null=아직 전환 안 됨.
+    linked_story_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
