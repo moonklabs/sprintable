@@ -139,6 +139,13 @@ async def create_comment_follow_up(
         project_id=story.project_id, title=title, description=body, assignee_id=requested_by_member_id,
     )
 
+    # story #3805(그라운딩 ③) — 단방향(comment_id를 story.description에 텍스트로만
+    # 심는 것)에서 양방향으로: comment 행에 linked_story_id를 채워 「반응」(Engagement)
+    # 화면이 "작업 보기"로 돌아갈 수 있게 한다. story→comment 역방향은 여전히 없음
+    # (위 body 텍스트뿐) — 그 방향은 story 쪽에 새 컬럼을 늘리는 일이라 이 스토리
+    # 범위 밖.
+    comment.linked_story_id = new_story.id
+
     from app.models.evidence import Evidence
 
     db.add(Evidence(

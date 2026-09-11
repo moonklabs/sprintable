@@ -16,10 +16,11 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import and_, case, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.pagination import decode_metric_cursor, encode_metric_cursor
 from app.models.channel_post_comment import ChannelPostComment, ChannelPostCommentReply, CommentCollectionSchedule
 
 BATCH_SIZE = 50
@@ -1099,3 +1100,135 @@ async def get_last_collected_at_by_publication_ids(
         .group_by(CommentCollectionSchedule.publication_id)
     )).all()
     return {pid: captured_at for pid, captured_at in rows}
+
+
+# story #3805(Phase3·3-1, 페드루 PO 確定 2026-09-11·낱말 정정 08:14Z) — 「반응」
+# (Engagement) 화면(채널 포스트 화면의 뷰 하나, 새 사이드바 항목 0)의 org 단위 큐.
+# 그라운딩 ①~⑤ 그대로: 새 테이블 0·새 커서 포맷 0(3502 encode_metric_cursor 재사용)·
+# 새 판정 로직 0(get_last_collected_at_by_publication_ids와 같은 집계식 재사용).
+# 08:14Z 정정 — 원래 `inbox/*`로 이름 붙였던 걸 `engagement/*`로 갈음(`/inbox`는
+# 알림이 이미 점유) + 상태 enum 4번째 값 `ignored`→`skipped`(ko 「넘김」·en Skipped,
+# 유나 대안 채택).
+
+_TRIAGE_STATUSES = ("open", "in_progress", "done", "skipped")
+
+
+class EngagementItemNotFoundError(Exception):
+    def __init__(self, comment_id: uuid.UUID):
+        self.comment_id = comment_id
+        super().__init__(f"반응 항목을 찾을 수 없습니다: {comment_id}")
+
+
+class EngagementItemInvalidStatusError(Exception):
+    def __init__(self, *, status: str):
+        self.status = status
+        super().__init__(f"알 수 없는 처리 상태입니다: {status}")
+
+
+async def list_engagement_items(
+    db: AsyncSession, *, org_id: uuid.UUID, status: str | None = None, channel: str | None = None,
+    cursor: str | None = None, limit: int = 50,
+) -> dict[str, Any]:
+    """그라운딩 ①③④ — org 단위 큐. 정렬=open 우선(0)→그 외(1)→captured_at desc→id
+    desc(마이그마다 정렬이 안 깨지게 3키 전부 cursor에 싣는다 — 3713류 「경계 넘는
+    이름이 다르면 조용히 버려진다」 재발 방지). priority 자체가 진짜 정렬키라
+    encode_metric_cursor(3502 metric 정렬 선례)를 그대로 재사용 — 3번째 커서 포맷
+    발명 금지. 소프트 삭제된 댓글은 큐에서 제외(deleted_at IS NOT NULL)."""
+    priority_expr = case((ChannelPostComment.triage_status == "open", 0), else_=1)
+
+    conditions = [ChannelPostComment.org_id == org_id, ChannelPostComment.deleted_at.is_(None)]
+    if status is not None:
+        conditions.append(ChannelPostComment.triage_status == status)
+    if channel is not None:
+        conditions.append(ChannelPostComment.channel == channel)
+
+    if cursor is not None:
+        cur_priority, cur_captured_at, cur_id = decode_metric_cursor(cursor)
+        conditions.append(or_(
+            priority_expr > cur_priority,
+            and_(priority_expr == cur_priority, ChannelPostComment.captured_at < cur_captured_at),
+            and_(
+                priority_expr == cur_priority, ChannelPostComment.captured_at == cur_captured_at,
+                ChannelPostComment.id < cur_id,
+            ),
+        ))
+
+    rows = (await db.execute(
+        select(ChannelPostComment)
+        .where(*conditions)
+        .order_by(priority_expr.asc(), ChannelPostComment.captured_at.desc(), ChannelPostComment.id.desc())
+        .limit(limit + 1)
+    )).scalars().all()
+
+    has_more = len(rows) > limit
+    page = list(rows[:limit])
+    next_cursor = None
+    if has_more and page:
+        last = page[-1]
+        last_priority = 0 if last.triage_status == "open" else 1
+        next_cursor = encode_metric_cursor(last_priority, last.captured_at, last.id)
+    return {"items": page, "has_more": has_more, "next_cursor": next_cursor}
+
+
+async def patch_engagement_item(
+    db: AsyncSession, *, org_id: uuid.UUID, comment_id: uuid.UUID,
+    triage_status: str | None = None,
+    assignee_member_id: uuid.UUID | None = None, assignee_member_id_set: bool = False,
+) -> ChannelPostComment:
+    """PATCH — model_fields_set 관례(3437 §후속 동형): 생략=유지, 명시 null=해제.
+    `assignee_member_id_set`이 라우터가 넘기는 "이 필드가 요청 본문에 있었나" 플래그
+    (Pydantic exclude_unset)다. triage_status는 4상태 허용목록으로 fail-closed 검증
+    (오타 값이 조용히 저장되지 않는다)."""
+    comment = (await db.execute(
+        select(ChannelPostComment).where(
+            ChannelPostComment.id == comment_id, ChannelPostComment.org_id == org_id,
+        )
+    )).scalar_one_or_none()
+    if comment is None:
+        raise EngagementItemNotFoundError(comment_id)
+
+    if triage_status is not None:
+        if triage_status not in _TRIAGE_STATUSES:
+            raise EngagementItemInvalidStatusError(status=triage_status)
+        comment.triage_status = triage_status
+    if assignee_member_id_set:
+        comment.assignee_member_id = assignee_member_id
+
+    await db.commit()
+    await db.refresh(comment)
+    return comment
+
+
+async def get_engagement_collection_status(db: AsyncSession, *, org_id: uuid.UUID) -> list[dict[str, Any]]:
+    """그라운딩 ⑤ — 연결별 «마지막 수집 시각 / 수집 안 됨». `CommentCollectionSchedule.
+    captured_at`(status="captured" MAX) 집계식은 `get_last_collected_at_by_publication_
+    ids`와 정의가 같다(두 번째 구현 0) — 여기선 발행물이 아니라 연결 단위로 묶는다.
+    null=이 연결로 수집이 한 번도 성공한 적 없음(0건과 다름, null≠0 규약)."""
+    from app.models.channel_connection import ChannelConnection
+    from app.models.channel_publication import ChannelPublication
+
+    connections = (await db.execute(
+        select(ChannelConnection.id, ChannelConnection.channel, ChannelConnection.account_label)
+        .where(ChannelConnection.org_id == org_id)
+    )).all()
+    if not connections:
+        return []
+
+    connection_ids = [c.id for c in connections]
+    rows = (await db.execute(
+        select(ChannelPublication.connection_id, func.max(CommentCollectionSchedule.captured_at))
+        .join(CommentCollectionSchedule, CommentCollectionSchedule.publication_id == ChannelPublication.id)
+        .where(
+            ChannelPublication.connection_id.in_(connection_ids),
+            CommentCollectionSchedule.status == "captured",
+        )
+        .group_by(ChannelPublication.connection_id)
+    )).all()
+    last_by_connection = {cid: captured_at for cid, captured_at in rows}
+    return [
+        {
+            "connection_id": c.id, "channel": c.channel, "account_label": c.account_label,
+            "last_collected_at": last_by_connection.get(c.id),
+        }
+        for c in connections
+    ]
