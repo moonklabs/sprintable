@@ -60,6 +60,17 @@ def paid_snapshots_only(stmt):
     return stmt.where(InsightSnapshot.channel.in_(_PAID_CHANNELS))
 
 
+def classify_insight_source(channel: str) -> str:
+    """story #3809(Phase3·3-7, 페드루 PO 確定 2026-09-11 17:12Z) — 「응답에
+    source: paid|organic 명시」의 유일한 판정 지점. `_PAID_CHANNELS` 재사용
+    (새 판별식 0 — organic_snapshots_only/paid_snapshots_only와 동일 SSOT).
+    기존 `InsightSnapshotView.source`(insight_snapshots.py, organic 전용
+    엔드포인트에서 원채널명을 그대로 실어 `insight-snapshot-block.tsx`가
+    렌더 中)와는 **다른 값·다른 소비처** — 그 필드는 안 건드린다(그라운딩
+    2026-09-11 17:11Z, FE 회귀 위험 발견 후 페드루 確定으로 범위 확정)."""
+    return _PAID_SOURCE if channel in _PAID_CHANNELS else "organic"
+
+
 async def schedule_ads_spend_snapshots(
     db: AsyncSession, *, org_id: uuid.UUID, work_item_id: uuid.UUID, publication_id: uuid.UUID,
     channel: str, anchor_at: datetime,
