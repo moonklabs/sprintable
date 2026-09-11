@@ -259,6 +259,35 @@ describe('BoostExecutionControl — story #3806(Phase3·3-2 PR5, 유나 §절 §
 
       expect(mockedFetch.mock.calls[1][0]).toBe('/api/organizations/org-1/ads-boosts/gate-1/spend/refresh');
       expect(document.body.querySelector('[data-testid="boost-spend-refresh-error"]')).toBeNull();
+      // story #3806(PR 12, 페드루 PO 실측 캡처 2026-09-11 18:16Z) — 「눌렀는데 아무
+      // 일도 없었다」 결함 재발 방지: 성공 응답값이 화면에 그대로 보여야 한다.
+      expect(document.body.querySelector('[data-testid="boost-spend-refresh-success"]')?.textContent)
+        .toContain('12,345');
+    });
+
+    it('성공 시 onSpendRefreshed 콜백을 호출한다(형제 GateActivityHistory 재조회 트리거)', async () => {
+      const onSpendRefreshed = vi.fn();
+      mockedFetch.mockResolvedValueOnce(jsonResponse({ data: { run_status: 'running' } }));
+      await act(async () => {
+        root.render(wrap(
+          <BoostExecutionControl
+            orgId="org-1" gateId="gate-1" {...SEALED} sealedAdsStartsAt="2026-09-01T00:00:00Z"
+            onSpendRefreshed={onSpendRefreshed}
+          />,
+        ));
+      });
+      await flush();
+
+      mockedFetch.mockResolvedValueOnce(
+        jsonResponse({ data: { spend_minor: 12345, captured_at: '2026-09-11T17:30:00Z', cap_reached: false, run_status: 'running' } }, 201),
+      );
+      mockedFetch.mockResolvedValueOnce(jsonResponse({ data: { run_status: 'running' } }));
+
+      const btn = document.body.querySelector('[data-testid="boost-spend-refresh-trigger"]') as HTMLButtonElement;
+      await act(async () => { btn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      await flush();
+
+      expect(onSpendRefreshed).toHaveBeenCalledOnce();
     });
 
     it('429(초 있음) — 버튼 밖에 "{N}초 뒤 다시 시도할 수 있습니다." 문구', async () => {

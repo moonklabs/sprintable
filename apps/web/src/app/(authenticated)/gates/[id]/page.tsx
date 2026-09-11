@@ -247,6 +247,11 @@ export default function GateDetailPage() {
   const [discussDialogOpen, setDiscussDialogOpen] = useState(false);
   const [discussSubmitting, setDiscussSubmitting] = useState(false);
   const [discussError, setDiscussError] = useState<string | null>(null);
+  // story #3806(Phase3·3-2 PR 12, 페드루 PO 실측 캡처 2026-09-11 18:16Z) —
+  // BoostExecutionControl(형제)의 「광고비 다시 수집」 성공을 GateActivityHistory
+  // (형제)가 스스로 알 방법이 없어 이 숫자를 부모가 다리 놓는다 — 증가할 때마다
+  // GateActivityHistory가 재조회(그 컴포넌트의 refreshKey prop 참고).
+  const [activityRefreshKey, setActivityRefreshKey] = useState(0);
   const discuss = useCallback(async (reason: string) => {
     if (!gate) return;
     setDiscussSubmitting(true);
@@ -520,6 +525,7 @@ export default function GateDetailPage() {
                     sealedAdsStartsAt={gate.sealed_ads_starts_at ?? null}
                     sealedAdsEndsAt={gate.sealed_ads_ends_at ?? null}
                     sealedAdsObjective={gate.sealed_ads_objective ?? null}
+                    onSpendRefreshed={() => setActivityRefreshKey((k) => k + 1)}
                   />
                 ) : null}
 
@@ -532,7 +538,7 @@ export default function GateDetailPage() {
                     needsAction/canAct 분기와 무관하게 항상 렌더 — 감사 표면은 액션 가능 여부와
                     별개로 "사람이 보는 쪽"에 항상 서 있어야 실사고 때 쓰인다(PO 요구 ㉯). */}
                 <div className="border-t border-proof-line-soft pt-3">
-                  <GateActivityHistory gateId={gate.id} />
+                  <GateActivityHistory gateId={gate.id} refreshKey={activityRefreshKey} />
                 </div>
               </div>
             }
