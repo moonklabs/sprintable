@@ -40,6 +40,13 @@ _EXEMPT_FILES: dict[str, str] = {
         "InsightSnapshot(...) 생성자로 transient 객체를 만들 뿐(db.add() 0회 — 파라미터 "
         "캐리어, 파일 자체 주석 확認) — DB 조회가 아니라 leak 대상이 아니다."
     ),
+    "app/services/org_cost_summary.py": (
+        "story #3809(Phase3·3-7) — org 비용 원장의 paid 축(광고비 집계·일별 시계열)이 "
+        "의도적으로 paid 채널만 보는 정당한 소비처(ads_spend_snapshots.py와 동형 판단) — "
+        "실제로 `paid_snapshots_only()`(같은 파일의 반대짝 술어)를 그대로 호출한다(손으로 "
+        "채널/소스 필터를 다시 안 적음), organic_snapshots_only()를 자기 자신에게 부를 "
+        "이유가 없다."
+    ),
 }
 
 

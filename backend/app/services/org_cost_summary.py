@@ -28,7 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.ads_boost_run import AdsBoostRun
 from app.models.gate import Gate
 from app.models.insight_snapshot import InsightSnapshot
-from app.services.ads_spend_snapshots import _ADS_BOOST_GATE_TYPE, _PAID_SOURCE
+from app.services.ads_spend_snapshots import _ADS_BOOST_GATE_TYPE, _PAID_SOURCE, paid_snapshots_only
 from app.services.generation_budget import compute_generation_budget_status
 
 
@@ -46,11 +46,15 @@ async def get_org_ads_cost_summary(db: AsyncSession, *, org_id: uuid.UUID) -> di
     publication_ids = [uuid.UUID(g.scope_key) for g in gates if g.scope_key]
     captured_spend_minor_sum = 0
     if publication_ids:
+        # story #3806 가드(test_3806_organic_snapshots_only_guard.py) 처방(페드루
+        # PO 지적 2026-09-11 17:44Z) — 손으로 InsightSnapshot을 직접 필터하지 않고
+        # `paid_snapshots_only()`(채널 기반, 캡처 여부 무관하게 항상 정확)를 그대로
+        # 쓴다. `status=="captured"`를 같이 걸어 "이미 캡처된 것"만 합산.
         snapshots = (await db.execute(
-            select(InsightSnapshot).where(
+            paid_snapshots_only(select(InsightSnapshot).where(
                 InsightSnapshot.org_id == org_id, InsightSnapshot.publication_id.in_(publication_ids),
-                InsightSnapshot.source == _PAID_SOURCE, InsightSnapshot.status == "captured",
-            )
+                InsightSnapshot.status == "captured",
+            ))
         )).scalars().all()
         captured_spend_minor_sum = sum((s.normalized or {}).get("spend") or 0 for s in snapshots)
 
@@ -78,10 +82,10 @@ async def get_org_paid_spend_daily_series(db: AsyncSession, *, org_id: uuid.UUID
     아니라 `captured_at`으로 가른다 — due_at은 +1d/+7d 스케줄링 anchor일 뿐 실제
     수집 시각이 아니다(ads_spend_snapshots.py 모듈 docstring과 동형 구분)."""
     rows = (await db.execute(
-        select(InsightSnapshot.captured_at, InsightSnapshot.normalized).where(
-            InsightSnapshot.org_id == org_id, InsightSnapshot.source == _PAID_SOURCE,
+        paid_snapshots_only(select(InsightSnapshot.captured_at, InsightSnapshot.normalized).where(
+            InsightSnapshot.org_id == org_id,
             InsightSnapshot.status == "captured", InsightSnapshot.captured_at.isnot(None),
-        )
+        ))
     )).all()
 
     by_day: dict[str, int] = defaultdict(int)
