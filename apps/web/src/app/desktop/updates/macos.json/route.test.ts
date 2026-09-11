@@ -13,16 +13,21 @@ vi.mock('@/lib/desktop-updates', async (importOriginal) => {
 import { GET } from './route';
 import { DesktopManifestUnavailableError } from '@/lib/desktop-updates';
 
+// [SID:3807] 카디르 QA #4187 발견 ③ — 압축형 픽스처는 parse→stringify 재조립 뮤테이션이
+// 공허통과한다(우연히 바이트 동일). mobile CI의 실 macos.json 모양(jq 2칸 들여쓰기)을 그대로
+// 써서 재조립이 일어나면 반드시 바이트가 달라지게 한다.
+const FIXTURE_MANIFEST = '{\n  "version": "9.9.9",\n  "platforms": {\n    "darwin-aarch64": {\n      "signature": "abc",\n      "url": "https://example/x"\n    }\n  }\n}\n';
+
 describe('GET /desktop/updates/macos.json', () => {
   it('relays the GCS manifest verbatim with 200 + application/json + no-store, no redirect', async () => {
-    fetchDesktopUpdateManifestMock.mockResolvedValue('{"version":"9.9.9"}');
+    fetchDesktopUpdateManifestMock.mockResolvedValue(FIXTURE_MANIFEST);
     const res = await GET();
     expect(res.status).toBe(200);
     expect(res.headers.get('Content-Type')).toBe('application/json');
     expect(res.headers.get('Cache-Control')).toBe('no-store');
     expect(res.headers.get('Location')).toBeNull();
     const body = await res.text();
-    expect(body).toBe('{"version":"9.9.9"}');
+    expect(body).toBe(FIXTURE_MANIFEST);
   });
 
   it('fails loud (502, not a broken 200) when the GCS manifest is unavailable', async () => {
