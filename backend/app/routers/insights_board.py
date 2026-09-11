@@ -25,6 +25,7 @@ from app.services.insights_board import (
 from app.services.insight_snapshots import InsightFetchError
 from app.services.measured_metrics import compute_measured_metrics
 from app.services.member_resolver import resolve_member
+from app.services.org_cost_summary import get_org_cost_summary
 from app.services.publication_reconciliation import reconcile_publication
 
 router = APIRouter(prefix="/api/v2/organizations", tags=["insights-board"])
@@ -148,6 +149,50 @@ class ReconciliationResponse(BaseModel):
     verdicts: dict[str, str]
     has_mismatch: bool
     created_at: datetime
+
+
+class OrgAdsCostSummaryView(BaseModel):
+    # story #3809(Phase3·3-7, 페드루 PO 確定 2026-09-11 17:12Z) — approved
+    # ads_boost 게이트 집합 기준(org_cost_summary.py::get_org_ads_cost_summary
+    # 모듈 docstring 참고, "같은 집합이라야 remaining이 정합"의 근거).
+    approved_boost_count: int
+    sealed_budget_minor: int
+    captured_spend_minor: int
+    remaining_minor: int
+    cap_reached_count: int
+
+
+class PaidSpendDailyPointView(BaseModel):
+    date: str
+    spend_minor: int
+    source: Literal["paid", "organic"]
+
+
+class OrgCostSummaryResponse(BaseModel):
+    ads: OrgAdsCostSummaryView
+    # story #3498 규칙이 org에 없으면 null("규칙 없음"과 "0 지출"을 안 뭉갠다).
+    generation_cost_spent_minor: int | None
+    generation_cost_period_start: datetime | None
+    generation_cost_period_end: datetime | None
+    # story #3809 그라운딩②(2026-09-11) — X 비용 원장이 이 시점 코드에 없다(실측
+    # 확認). "0"으로 지어내지 않고 미측정 예약(null)만 한다.
+    x_cost_spent_minor: int | None
+    paid_spend_daily_series: list[PaidSpendDailyPointView]
+
+
+@router.get("/{org_id}/insights-board/cost-summary", response_model=OrgCostSummaryResponse)
+async def get_org_cost_summary_endpoint(
+    org_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    _auth: AuthContext = Depends(get_current_user),
+) -> OrgCostSummaryResponse:
+    """story #3809(Phase3·3-7) — 「고급 보고 첫 출시」 조각 1. 조직 단위 비용
+    원장(광고비·생성 비용·X 비용) 첫 API. 읽기 전용 — insights-board 본 엔드포인트와
+    동형 권한 축(휴먼·에이전트 모두)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    return OrgCostSummaryResponse(**await get_org_cost_summary(db, org_id=org_id))
 
 
 @router.get("/{org_id}/insights-board", response_model=InsightsBoardResponse)
