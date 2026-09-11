@@ -168,6 +168,33 @@ class Gate(Base):
     # 자체는 doc이 아니라 그 doc이 근거로 삼는 Story/Task라는 점만 다르다).
     sealed_doc_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     sealed_doc_body_sha256: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #3806(Phase3·3-2 PR2, 페드루 PO 確定 2026-09-11) — `ads_boost` 전용 봉인 축
+    # (위 sealed_doc_*와 같은 공유-nullable 관례 — 그 gate_type이 아니면 항상 null).
+    # external_publish의 sealed_content_*를 재사용하지 않는 이유 — 계약이 다르다(발행물
+    # 자체의 봉인이 아니라 "그 발행물을 얼마·언제까지 홍보할지"의 봉인, PO 明示). 「변경=
+    # 재승인」 판정은 external_publish/concept_approval과 동형(approved 뒤 값이 바뀌면
+    # pending+reapproval_required 재오픈) — 단 예산 «증액»만은 그 재오픈 경로 자체를 안
+    # 타고 422(app/services/ads_boost.py::AdsBudgetExceedsSealError, 자동 증액 불가가
+    # 블루프린트 §7 Phase 3 AC 본문이라 봉인 규칙보다 우선하는 별도 축).
+    sealed_ads_budget_minor: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    sealed_ads_currency: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sealed_ads_starts_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    sealed_ads_ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    sealed_ads_objective: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 페드루 PO 追加 確定(2026-09-11, PR 3 착수 직전 보완) — 광고 계정도 승인 대상의
+    # 일부다("이 예산을 이 계정에"). FK 없음(channel_connections와 동일 관례) — org의
+    # meta_ads/ads_sandbox 연결에 유일성 제약이 없어(PR 1이 복수 계정 전제) 어느
+    # 계정에 태울지를 게이트 자신이 봉인해야 PR 3(실행)가 모호함 없이 destination을
+    # 고를 수 있다. 다른 sealed_ads_* 열과 같은 「변경=재승인」 규칙(증액 예외는
+    # budget_minor에만 해당, 이 열은 값이 바뀌면 그냥 일반 재오픈 대상).
+    sealed_ads_connection_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # 페드루 PO 追加 確定(2026-09-11) — PR 3의 publication_command idempotency 키
+    # (org_id, destination, approved_version, operation)의 approved_version 축.
+    # site_posts.py/channel_posts.py는 실 *Version.id를 그대로 쓰지만(3367 동형
+    # 질문에 대한 페드루 답) ads_boost엔 그런 버전 테이블이 없다 — 매 재봉인
+    # (request_ads_boost 호출: 신규·pending 재봉인·approved 재오픈 전부)마다
+    # app/services/ads_boost.py가 새 UUID를 발급해 여기 채운다.
+    sealed_ads_boost_version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     # 승인 후 수정으로 시스템이 되돌린 pending인지(사람이 처음 상신한 pending과 구분 — S4가
     # "재승인 필요" 배지를 그릴 신호) — 새 명시 submit()이 재봉인하면 False로 복귀한다.
     reapproval_required: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
