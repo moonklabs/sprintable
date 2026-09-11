@@ -430,21 +430,29 @@ export default function ChannelPostsEngagementPage() {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ text }),
             });
-            const data = (await res.json().catch(() => null)) as { data?: unknown; error?: { message?: string; existing_reply_id?: string } } | null;
-            if (res.ok && data?.data) return { ok: true, reply: data.data as CommentReplyOutcome extends { reply: infer R } ? R : never };
-            return {
-              ok: false,
-              errorMessage: data?.error?.message ?? t('engagementPatchFailed'),
-              existingReplyId: data?.error?.existing_reply_id,
-            };
+            if (!res.ok) {
+              const errBody = (await res.json().catch(() => null)) as { error?: { message?: string; existing_reply_id?: string } } | null;
+              return {
+                ok: false,
+                errorMessage: errBody?.error?.message ?? t('engagementPatchFailed'),
+                existingReplyId: errBody?.error?.existing_reply_id,
+              };
+            }
+            const data = (await res.json().catch(() => null)) as { data?: unknown } | null;
+            if (!data?.data) return { ok: false, errorMessage: t('engagementPatchFailed') };
+            return { ok: true, reply: data.data as CommentReplyOutcome extends { reply: infer R } ? R : never };
           }}
           onSubmit={async (replyId): Promise<CommentReplyOutcome> => {
             const res = await fetchWithAuth(`/api/organizations/${orgId}/comments/${replyTarget.id}/replies/${replyId}/submit`, {
               method: 'POST',
             });
-            const data = (await res.json().catch(() => null)) as { data?: unknown; error?: { message?: string } } | null;
-            if (res.ok && data?.data) return { ok: true, reply: data.data as CommentReplyOutcome extends { reply: infer R } ? R : never };
-            return { ok: false, errorMessage: data?.error?.message ?? t('engagementPatchFailed') };
+            if (!res.ok) {
+              const errBody = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
+              return { ok: false, errorMessage: errBody?.error?.message ?? t('engagementPatchFailed') };
+            }
+            const data = (await res.json().catch(() => null)) as { data?: unknown } | null;
+            if (!data?.data) return { ok: false, errorMessage: t('engagementPatchFailed') };
+            return { ok: true, reply: data.data as CommentReplyOutcome extends { reply: infer R } ? R : never };
           }}
         />
       ) : null}
