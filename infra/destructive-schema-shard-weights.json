@@ -1627,6 +1627,16 @@
       "file": "tests/test_3805_pr4_reply_collection.py",
       "sec": 6.5,
       "source": "story-3805(Phase3·3-1 PR 4, 페드루 PO 確定 2026-09-11 12:12Z·12:29Z 후속 — 인바운드 중첩 답글 수집·kind 열 복귀·「조용히 0」 처방 reply_detection_unavailable 3건 추가) — 재측(로컬, uv run pytest --durations=0 직접 1회 실행, 11건 call+setup 합산 약 6.5s — test_3766 등재 선례와 동일 방법론)"
+    },
+    {
+      "file": "tests/test_3806_ads_boost_starts_worker.py",
+      "sec": 5.5,
+      "source": "story-3806(Phase3·3-2 PR 6, 페드루 PO 確定 2026-09-11 13:27Z·13:42Z 정정(initiated_by 테스트 1건 추가) — 봉인 starts_at 자동 실행 워커) — 재측(로컬, uv run pytest --durations=0 직접 1회 실행, 7건 call+setup 합산 약 5.5s — test_3766 등재 선례와 동일 방법론)"
+    },
+    {
+      "file": "tests/test_3806_ads_boost_starts_cron_wiring.py",
+      "sec": 1.8,
+      "source": "story-3806(Phase3·3-2 PR 6, 페드루 PO 確定 2026-09-11 13:27Z — cron 배선 회귀, test_3527_comment_collection_cron_wiring.py 선례와 동형) — 신규 파일 실측(로컬, uv run pytest --durations=0 직접 1회 실행, 2건 call+setup 합산 약 1.8s — test_3766 등재 선례와 동일 방법론)"
     }
   ]
 }

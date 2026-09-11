@@ -52,7 +52,7 @@ async def _start_boost(session_maker, org_id, gate_id, owner_id):
     from app.services.publication_command import process_due_publication_commands
 
     async with session_maker() as s:
-        await request_ads_boost_start(s, org_id=org_id, gate_id=gate_id, requester_member_id=owner_id)
+        await request_ads_boost_start(s, org_id=org_id, gate_id=gate_id, requester_member_id=owner_id, initiated_by="human")
     async with session_maker() as s:
         counts = await process_due_publication_commands(s)
     assert counts["completed"] == 1, counts

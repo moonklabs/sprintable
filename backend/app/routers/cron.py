@@ -1316,6 +1316,15 @@ async def publication_commands_tick(
         except Exception as exc:
             logger.exception("agent-run-tool-calls sweep tick error: %s", exc)
             counts["agent_run_tool_calls_swept"] = {"error": "unhandled"}
+        # story #3806(Phase3·3-2 PR 6, 페드루 PO 確定 2026-09-11 13:27Z) — 봉인
+        # sealed_ads_starts_at 도래 게이트 자동 실행. 위 축들과 같은 피기백 사상
+        # (새 Cloud Scheduler 잡 0) — 독립 try.
+        try:
+            from app.services.ads_boost_execution import process_due_ads_boost_starts
+            counts["ads_boost_starts"] = await process_due_ads_boost_starts(session)
+        except Exception as exc:
+            logger.exception("ads-boost-starts tick error: %s", exc)
+            counts["ads_boost_starts"] = {"error": "unhandled"}
         return _ok(counts)
     except Exception as exc:
         logger.exception("publication-commands cron error: %s", exc)

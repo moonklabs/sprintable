@@ -67,7 +67,7 @@ async def test_boost_start_command_completes_and_creates_run():
     engine, Session, org_id, project_id, owner_id, gate_id = await _setup_approved_gate(await _session_factory())
     try:
         async with Session() as s:
-            await request_ads_boost_start(s, org_id=org_id, gate_id=gate_id, requester_member_id=owner_id)
+            await request_ads_boost_start(s, org_id=org_id, gate_id=gate_id, requester_member_id=owner_id, initiated_by="human")
 
         async with Session() as s:
             counts = await process_due_publication_commands(s)
@@ -94,7 +94,7 @@ async def test_pause_then_resume_updates_run_status():
     engine, Session, org_id, project_id, owner_id, gate_id = await _setup_approved_gate(await _session_factory())
     try:
         async with Session() as s:
-            await request_ads_boost_start(s, org_id=org_id, gate_id=gate_id, requester_member_id=owner_id)
+            await request_ads_boost_start(s, org_id=org_id, gate_id=gate_id, requester_member_id=owner_id, initiated_by="human")
         async with Session() as s:
             counts = await process_due_publication_commands(s)
         assert counts["completed"] == 1, counts
@@ -133,7 +133,7 @@ async def test_pause_delayed_marker_leaves_run_pause_pending():
     )
     try:
         async with Session() as s:
-            await request_ads_boost_start(s, org_id=org_id, gate_id=gate_id, requester_member_id=owner_id)
+            await request_ads_boost_start(s, org_id=org_id, gate_id=gate_id, requester_member_id=owner_id, initiated_by="human")
         async with Session() as s:
             await process_due_publication_commands(s)
 
@@ -162,7 +162,7 @@ async def test_budget_exceeded_marker_fails_without_creating_run_ids():
     )
     try:
         async with Session() as s:
-            await request_ads_boost_start(s, org_id=org_id, gate_id=gate_id, requester_member_id=owner_id)
+            await request_ads_boost_start(s, org_id=org_id, gate_id=gate_id, requester_member_id=owner_id, initiated_by="human")
         async with Session() as s:
             counts = await process_due_publication_commands(s)
         assert counts["completed"] == 0, counts
@@ -240,7 +240,7 @@ async def test_gate_reopened_before_worker_pickup_blocks_execution():
     engine, Session, org_id, project_id, owner_id, gate_id = await _setup_approved_gate(await _session_factory())
     try:
         async with Session() as s:
-            await request_ads_boost_start(s, org_id=org_id, gate_id=gate_id, requester_member_id=owner_id)
+            await request_ads_boost_start(s, org_id=org_id, gate_id=gate_id, requester_member_id=owner_id, initiated_by="human")
 
         async with Session() as s:
             gate = (await s.execute(select(Gate).where(Gate.id == gate_id))).scalar_one()
