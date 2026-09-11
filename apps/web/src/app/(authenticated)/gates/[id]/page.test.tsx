@@ -466,6 +466,58 @@ describe('GateDetailPage — gate_type 사람 낱말(story #3565)', () => {
   });
 });
 
+// story #3806 PR 9(페드루 PO 리뷰 2026-09-11 — 「{member id}님이 처리 — 상태: approved」
+// 처럼 member id·상태 enum 원문이 그대로 뜨던 결함) — mount()는 /api/team-members를
+// 커스터마이즈 못 해(기본 폴백 {data:[]}) 이 describe는 자체 fetch mock을 쓴다.
+describe('GateDetailPage — 해소자·상태 낱말 원문 노출 금지(story #3806 PR 9)', () => {
+  async function mountWithTeamMembers(gateFixture: GateItem, teamMembers: { id: string; name: string }[]) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/gates/gate-1') return { ok: true, status: 200, json: async () => ({ data: gateFixture }) };
+      if (url === '/api/team-members') return { ok: true, json: async () => ({ data: teamMembers }) };
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    const { default: GateDetailPage } = await import('./page');
+    const { TopBarProvider } = await import('@/components/nav/top-bar-context');
+    await act(async () => { root.render(wrap(<GateDetailPage />, TopBarProvider)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    // team-members fetch가 비동기로 한 텀 더 걸린다 — memberNames state 반영까지 대기.
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+  }
+
+  it('⭐resolver_id가 team-members에 있으면 이름·번역된 상태 낱말이 뜨고 원시 id·enum은 0', async () => {
+    await mountWithTeamMembers(
+      gate({ status: 'approved', resolver_id: 'd823926d-aaaa-bbbb-cccc-000000000001', resolved_at: new Date().toISOString() }),
+      [{ id: 'd823926d-aaaa-bbbb-cccc-000000000001', name: '페드루 올리베이라' }],
+    );
+    expect(container.textContent).toContain('페드루 올리베이라님이 처리');
+    expect(container.textContent).toContain(koMessages.cage.gateStatusApproved);
+    expect(container.textContent).not.toContain('approved');
+    expect(container.textContent).not.toContain('d823926d');
+  });
+
+  // 정정 前엔 이 경우 `d823926d`(id 앞 8자)가 화면에 그대로 떴다 — 지금은 이름을
+  // 모르면 「누가」 자체를 말하지 않고 상태만 말한다(raw id 노출 경로 자체 제거).
+  it('⭐resolver_id가 team-members에 없으면(비동기 경합·조직 밖 등) raw id 대신 이름 없는 문장으로 물러난다', async () => {
+    await mountWithTeamMembers(
+      gate({ status: 'approved', resolver_id: 'd823926d-aaaa-bbbb-cccc-000000000001', resolved_at: new Date().toISOString() }),
+      [], // team-members 응답에 이 resolver가 없음
+    );
+    expect(container.textContent).toContain(koMessages.cage.gateDetailResolvedStatus.replace('{status}', koMessages.cage.gateStatusApproved));
+    expect(container.textContent).not.toContain('d823926d');
+    expect(container.textContent).not.toContain('approved');
+  });
+
+  it('status=rejected도 번역된 낱말(반려됨)로 뜬다(승인됨 하나만 대조하면 앞뒤 안 맞음)', async () => {
+    await mountWithTeamMembers(
+      gate({ status: 'rejected', resolver_id: 'm-1', resolved_at: new Date().toISOString() }),
+      [{ id: 'm-1', name: '카디르' }],
+    );
+    expect(container.textContent).toContain('카디르님이 처리');
+    expect(container.textContent).toContain(koMessages.cage.gateStatusRejected);
+    expect(container.textContent).not.toContain('rejected');
+  });
+});
+
 describe('GateDetailPage — 실시간 해소 반영(story #2985 AC2)', () => {
   it('mux가 conversation.gate_resolved(같은 gate_id)를 쏘면 재조회된다', async () => {
     let getCount = 0;

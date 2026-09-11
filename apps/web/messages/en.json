@@ -4780,6 +4780,8 @@
     "boostExecutionStartConfirmTitle": "Start boost",
     "boostExecutionStartConfirmDescription": "This starts the boost under the conditions below. Once started, the sealed budget and schedule run as-is.",
     "boostExecutionStartBeforeSchedule": "Before start date ({date})",
+    "boostExecutionInitiatedByScheduler": "Started: scheduled (automatic) {date}",
+    "boostExecutionInitiatedByHuman": "Started: manual click",
     "commentReplyAlreadySentCount": "{count} replies already sent to this comment",
     "commentReplyTargetLabel": "Target comment",
     "commentReplyTargetTextLabel": "Target comment body",

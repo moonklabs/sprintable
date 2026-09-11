@@ -15,6 +15,7 @@ import { GateUndoButton, isUndoEligible } from '@/components/cage/gate-undo-butt
 import { GateDiscussDialog } from '@/components/cage/gate-discuss-dialog';
 import { deriveRiskLevel, usesSignatureFlow, deriveGateProofState, isDecisionGate, deriveDecisionFacts } from '@/components/cage/gate-risk';
 import { gateTypeLabel } from '@/lib/gate-type-label';
+import { gateStatusLabel } from '@/lib/gate-status-label';
 import { useSyntheticParentTabHistory } from '@/hooks/use-synthetic-parent-tab-history';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import type { GateItem } from '@/components/kanban/types';
@@ -387,9 +388,14 @@ export default function GateDetailPage() {
                           Auto로 단정하던 게 자기모순의 절반이었다). */}
                     <p className="text-[11px] text-muted-foreground">
                       {gate.status !== 'pending'
-                        ? (gate.resolver_id
-                            ? t('gateDetailResolvedByStatus', { name: memberNames[gate.resolver_id] ?? gate.resolver_id.slice(0, 8), status: gate.status })
-                            : t('gateDetailResolvedStatus', { status: gate.status }))
+                        ? (gate.resolver_id && memberNames[gate.resolver_id]
+                            // story #3806 PR 9(페드루 PO 리뷰 2026-09-11 실측) — 이름을 아직
+                            // 모르면(비동기 조회 경합·조직 밖 등) id 스니펫을 날것으로 보여주던
+                            // 자리를 없앴다 — 이름을 확실히 알 때만 「{name}님이 처리」, 모르면
+                            // 그냥 「이미 처리됨」(gateDetailResolvedStatus)으로 조용히 물러난다
+                            // (raw id 노출 경로 자체를 제거 — 타이밍이든 진짜 미스든 둘 다 막힘).
+                            ? t('gateDetailResolvedByStatus', { name: memberNames[gate.resolver_id], status: gateStatusLabel(gate.status, t) })
+                            : t('gateDetailResolvedStatus', { status: gateStatusLabel(gate.status, t) }))
                         : gateDecision(gate) === 'block' ? t('gateReadonlyBlock')
                         : gateDecision(gate) === 'auto_merge' ? t('gateReadonlyAuto')
                         : t('gateReadonlyNoVerdict')}

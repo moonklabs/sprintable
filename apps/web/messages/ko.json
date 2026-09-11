@@ -4780,6 +4780,8 @@
     "boostExecutionStartConfirmTitle": "홍보 시작",
     "boostExecutionStartConfirmDescription": "아래 조건으로 홍보를 시작합니다. 시작 뒤에는 예산·기간이 봉인된 그대로 집행됩니다.",
     "boostExecutionStartBeforeSchedule": "시작일 전입니다({date})",
+    "boostExecutionInitiatedByScheduler": "시작: 예약 실행(자동) {date}",
+    "boostExecutionInitiatedByHuman": "시작: 사람 클릭",
     "commentReplyAlreadySentCount": "이 댓글에 이미 보낸 답변 {count}건",
     "commentReplyTargetLabel": "대상 댓글",
     "commentReplyTargetTextLabel": "대상 댓글 본문",
