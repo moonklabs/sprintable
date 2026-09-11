@@ -135,6 +135,7 @@ async def test_fresh_boost_creates_pending_gate_with_sealed_five():
             gate = (await s.execute(select(Gate).where(Gate.id == uuid.UUID(body["gate_id"])))).scalar_one()
             assert gate.gate_type == "ads_boost"
             assert gate.status == "pending"
+            assert gate.sealed_ads_boost_version_id is not None, "PR 3의 approved_version 축이 비어 있으면 안 된다"
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
@@ -246,6 +247,8 @@ async def test_approver_role_missing_returns_409():
 @pytest.mark.anyio
 async def test_resubmit_while_pending_same_or_lower_budget_reseals_in_place():
     from app.main import app
+    from app.models.gate import Gate
+    from sqlalchemy import select
 
     engine, Session, org_id, project_id, owner_id, pub, _, ad_conn_id = await _setup(await _session_factory())
     try:
@@ -258,6 +261,11 @@ async def test_resubmit_while_pending_same_or_lower_budget_reseals_in_place():
             assert r1.status_code == 201, r1.text
             gate_id = r1.json()["gate_id"]
 
+            async with Session() as s:
+                version_id_1 = (await s.execute(
+                    select(Gate.sealed_ads_boost_version_id).where(Gate.id == uuid.UUID(gate_id))
+                )).scalar_one()
+
             r2 = await client.post(
                 f"/api/v2/organizations/{org_id}/publications/{pub.id}/boosts",
                 json=_boost_body(ad_connection_id=ad_conn_id, budget_minor=80_000, objective="OUTCOME_ENGAGEMENT"),
@@ -269,6 +277,12 @@ async def test_resubmit_while_pending_same_or_lower_budget_reseals_in_place():
         assert body2["reapproval_required"] is False
         assert body2["sealed_ads_budget_minor"] == 80_000
         assert body2["sealed_ads_objective"] == "OUTCOME_ENGAGEMENT"
+
+        async with Session() as s:
+            version_id_2 = (await s.execute(
+                select(Gate.sealed_ads_boost_version_id).where(Gate.id == uuid.UUID(gate_id))
+            )).scalar_one()
+        assert version_id_2 != version_id_1, "재봉인마다 새 approved_version이 발급돼야 PR 3 idempotency 키가 갈린다"
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()

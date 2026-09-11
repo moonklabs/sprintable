@@ -188,6 +188,10 @@ async def request_ads_boost(
     gate.sealed_ads_ends_at = ends_at
     gate.sealed_ads_objective = objective
     gate.sealed_ads_connection_id = ad_connection_id
+    # 페드루 PO 追加 確定(2026-09-11) — «재봉인마다 새 UUID»(신규·pending 재봉인·
+    # approved 재오픈 전부 포함, 이 함수에 도달한 이상 전부 "새로 봉인"이므로 무조건
+    # 갱신). PR 3이 publication_command의 approved_version으로 이 값을 쓴다.
+    gate.sealed_ads_boost_version_id = uuid.uuid4()
 
     await db.flush()
     return gate

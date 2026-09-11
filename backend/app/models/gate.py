@@ -188,6 +188,13 @@ class Gate(Base):
     # 고를 수 있다. 다른 sealed_ads_* 열과 같은 「변경=재승인」 규칙(증액 예외는
     # budget_minor에만 해당, 이 열은 값이 바뀌면 그냥 일반 재오픈 대상).
     sealed_ads_connection_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # 페드루 PO 追加 確定(2026-09-11) — PR 3의 publication_command idempotency 키
+    # (org_id, destination, approved_version, operation)의 approved_version 축.
+    # site_posts.py/channel_posts.py는 실 *Version.id를 그대로 쓰지만(3367 동형
+    # 질문에 대한 페드루 답) ads_boost엔 그런 버전 테이블이 없다 — 매 재봉인
+    # (request_ads_boost 호출: 신규·pending 재봉인·approved 재오픈 전부)마다
+    # app/services/ads_boost.py가 새 UUID를 발급해 여기 채운다.
+    sealed_ads_boost_version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     # 승인 후 수정으로 시스템이 되돌린 pending인지(사람이 처음 상신한 pending과 구분 — S4가
     # "재승인 필요" 배지를 그릴 신호) — 새 명시 submit()이 재봉인하면 False로 복귀한다.
     reapproval_required: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
