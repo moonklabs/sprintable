@@ -24,7 +24,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Text, UniqueConstraint, func
+from sqlalchemy import DateTime, Index, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -34,9 +34,21 @@ from app.models.base import SoftDeleteMixin
 
 class ChannelPostDraft(Base, SoftDeleteMixin):
     __tablename__ = "channel_post_drafts"
+    # story #3614 갭(migration 0360) — (org_id, work_item_id, connection_id) 유니크가
+    # 전체 UniqueConstraint에서 partial unique index로 바뀌었다: withdrawn(폐기·종결)
+    # 행은 몇 개든 같은 자리에 공존하고, 활성(non-withdrawn) 행은 여전히 최대 1개만
+    # 허용한다 — withdraw가 그 (org·work_item·connection) 자리를 영구 봉쇄하지 않고
+    # 재작성(새 초안)을 허용하기 위함. 마이그레이션과 반드시 같은 이름·같은 술어여야
+    # 한다 — 이 realdb 테스트들은 `Base.metadata.create_all`로 스키마를 세우므로
+    # (test_3414_publication_command_core.py::_session_factory, alembic 미경유),
+    # 여기 선언이 없으면 테스트 DB에 제약 자체가 안 생겨 「활성 2개 거부」 계약이
+    # 조용히 안 걸린다(직접 실측 — org_invite.py는 이 선언이 없는데, 그 테이블엔
+    # metadata.create_all 기반 유니크 위반 테스트가 없어 그 갭이 안 드러났을 뿐이다).
     __table_args__ = (
-        UniqueConstraint(
-            "org_id", "work_item_id", "connection_id", name="uq_channel_post_drafts_org_work_item_connection",
+        Index(
+            "uq_channel_post_drafts_org_work_item_connection_active",
+            "org_id", "work_item_id", "connection_id",
+            unique=True, postgresql_where=text("status <> 'withdrawn'"),
         ),
     )
 

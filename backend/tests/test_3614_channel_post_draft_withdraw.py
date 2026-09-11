@@ -501,3 +501,230 @@ async def test_withdraw_cancel_mutation_removing_guard_leaves_command_due():
             assert due is None, "취소됐다면 status='pending' 조건에 더는 안 걸려야 한다(due 배제 SSOT)"
     finally:
         await engine.dispose()
+
+
+# story #3614 갭(PO 라이브 실측·確定, 2026-09-11 03:50Z) — 「폐기 종결」이 재POST+submit
+# 으로 뚫리는 결함. 재현: withdrawn 초안에 같은 (work_item·connection)으로 재POST →
+# 그 초안의 v2가 얹힘(매칭이 withdrawn을 안 뺐다) → submit → 200 pending·옛 게이트
+# 재개방(좀비 게이트: 화면엔 안 보이는데 승인 가능한 게이트가 떠 있다).
+
+
+@pytest.mark.anyio
+async def test_repost_after_withdraw_creates_new_draft_not_new_version_on_withdrawn():
+    """갭 처방②(PO 確定) — withdrawn 초안과 같은 (work_item·connection)으로 재POST하면
+    그 초안에 v2를 얹는 대신 새 초안이 생긴다. 옛 초안은 종결 상태·버전 수 그대로 무변.
+
+    ⭐뮤테이션 표적 — create_channel_post_draft_version의 매칭 쿼리에서
+    `ChannelPostDraft.status != "withdrawn"` 조건을 걷으면 아래 draft_id 불일치·
+    version count 단언이 RED가 된다(재POST가 옛 withdrawn 초안에 v2를 얹는 원래
+    결함으로 되돌아간다)."""
+    from app.main import app
+    from app.services.channel_posts import get_channel_post_draft, list_channel_post_draft_versions
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            story_id = await _seed_story(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id)
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+
+        async with _client_for(app) as client:
+            old_draft_id = await _create_draft(client, org_id=org_id, connection_id=connection_id, story_id=story_id)
+            r_withdraw = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{old_draft_id}/withdraw")
+            assert r_withdraw.status_code == 200, r_withdraw.text
+
+            new_draft_id = await _create_draft(client, org_id=org_id, connection_id=connection_id, story_id=story_id)
+
+        assert new_draft_id != old_draft_id, "재POST가 새 초안 대신 폐기된 초안에 버전을 얹었다"
+
+        async with Session() as s:
+            old_versions = await list_channel_post_draft_versions(s, draft_id=uuid.UUID(old_draft_id))
+            assert len(old_versions) == 1, "폐기된 초안에 새 버전이 얹히면 안 된다(종결 무변)"
+            new_versions = await list_channel_post_draft_versions(s, draft_id=uuid.UUID(new_draft_id))
+            assert len(new_versions) == 1
+
+            old_draft = await get_channel_post_draft(s, org_id=org_id, draft_id=uuid.UUID(old_draft_id))
+            assert old_draft.status == "withdrawn"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_submit_withdrawn_draft_returns_409_and_does_not_reopen_gate():
+    """갭 처방①③(PO 確定) — withdrawn 초안을 submit하면 409 CHANNEL_POST_DRAFT_WITHDRAWN,
+    이미 rejected였던 게이트는 재개방되지 않는다(라이브 실측 좀비 게이트 재현·처방).
+
+    ⭐뮤테이션 표적 — submit_channel_post_draft 진입부의 `draft.status == "withdrawn"`
+    검사를 걷으면 이 테스트가 RED(409 대신 200·게이트가 다시 pending으로 열림)가
+    된다."""
+    from app.main import app
+    from app.models.gate import Gate
+    from app.services.gate_service import transition_gate
+    from sqlalchemy import select
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            human_id = await _seed_human(s, org_id, role="owner")
+            story_id = await _seed_story(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id)
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+
+        async with _client_for(app) as client:
+            draft_id = await _create_draft(client, org_id=org_id, connection_id=connection_id, story_id=story_id)
+            r_submit1 = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/submit", json={})
+            assert r_submit1.status_code == 200, r_submit1.text
+            gate_id = uuid.UUID(r_submit1.json()["gate_id"])
+
+        async with Session() as s:
+            # AC4 라이브 실측과 동형 표본 — 폐기 前에 이미 owner가 반려(rejected)한
+            # 게이트(withdraw_channel_post_draft는 status=="pending"만 되돌리므로
+            # rejected는 그 분기를 안 탄다 — draft만 withdrawn으로 닫힌다).
+            await transition_gate(s, org_id, gate_id, "rejected", human_id, "테스트 반려")
+
+        async with _client_for(app) as client:
+            r_withdraw = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/withdraw")
+            assert r_withdraw.status_code == 200, r_withdraw.text
+
+            r_submit2 = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/submit", json={})
+        assert r_submit2.status_code == 409, r_submit2.text
+        assert r_submit2.json()["error"]["code"] == "CHANNEL_POST_DRAFT_WITHDRAWN"
+
+        async with Session() as s:
+            gate = (await s.execute(select(Gate).where(Gate.id == gate_id))).scalar_one()
+            assert gate.status == "rejected", "폐기된 초안 submit이 rejected 게이트를 재개방하면 안 된다(좀비 게이트 재발 방지)"
+    finally:
+        await engine.dispose()
+
+
+# story #3614 갭 처방②(PO 確定 2026-09-11, migration 0360) — (org_id, work_item_id,
+# connection_id) 유니크가 전체 제약에서 partial unique index(`status <> 'withdrawn'`)로
+# 바뀌었다: withdrawn 행은 몇 개든 같은 자리에 공존하고, 활성(non-withdrawn) 행은
+# 여전히 최대 1개만 허용된다.
+
+
+@pytest.mark.anyio
+async def test_db_allows_withdrawn_plus_one_active_same_triple():
+    """partial unique index 양성대조 — withdrawn 1개 + 활성 1개는 같은
+    (org·work_item·connection)에 공존 가능(재POST가 새 초안을 실제로 커밋할 수
+    있다는 것의 DB 레벨 증명, 앱 경로와 별개로 직접 재확認)."""
+    from app.models.channel_post_draft import ChannelPostDraft
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            story_id = await _seed_story(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id)
+
+            withdrawn = ChannelPostDraft(
+                id=uuid.uuid4(), org_id=org_id, work_item_id=story_id,
+                channel="threads", connection_id=connection_id, status="withdrawn",
+            )
+            active = ChannelPostDraft(
+                id=uuid.uuid4(), org_id=org_id, work_item_id=story_id,
+                channel="threads", connection_id=connection_id, status="draft",
+            )
+            s.add_all([withdrawn, active])
+            await s.commit()  # 여기서 IntegrityError가 나면 이 테스트 자체가 실패
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_db_rejects_two_active_drafts_same_triple():
+    """⭐뮤테이션 표적(반대 방향) — 활성(non-withdrawn) 행 2개는 partial unique index가
+    그대로 막는다. 처방②가 "제약을 없앤 것"이 아니라 "withdrawn만 뺀 것"임을 DB
+    레벨에서 고정 — 이 단언이 없으면 인덱스를 아예 안 걸어도(또는 조건을 반대로
+    걸어도) 위 공존 테스트만으론 못 잡는다."""
+    from app.models.channel_post_draft import ChannelPostDraft
+    from sqlalchemy.exc import IntegrityError
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            story_id = await _seed_story(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id)
+
+            s.add(ChannelPostDraft(
+                id=uuid.uuid4(), org_id=org_id, work_item_id=story_id,
+                channel="threads", connection_id=connection_id, status="draft",
+            ))
+            await s.commit()
+
+            s.add(ChannelPostDraft(
+                id=uuid.uuid4(), org_id=org_id, work_item_id=story_id,
+                channel="threads", connection_id=connection_id, status="draft",
+            ))
+            with pytest.raises(IntegrityError):
+                await s.commit()
+            await s.rollback()
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_resubmit_after_withdraw_seals_new_drafts_version_not_old():
+    """처방②③ 조합 확認(PO 조건③) — withdraw → 재POST(새 초안) → 그 새 초안을
+    submit하면, 같은 work_item 게이트 슬롯(find_gate_slot_with_pr_fallback, 3388
+    기존 경로 무변)이 재사용되되 **새 초안의 버전**을 봉인한다.
+
+    ⭐뮤테이션 표적 — submit_channel_post_draft가 (실수로) 옛 withdrawn 초안의
+    버전이나 본문을 봉인하면 아래 sealed_content_body 단언이 RED다."""
+    from app.main import app
+    from app.models.gate import Gate
+    from app.services.gate_service import transition_gate
+    from sqlalchemy import select
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            human_id = await _seed_human(s, org_id, role="owner")
+            story_id = await _seed_story(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id)
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+
+        async with _client_for(app) as client:
+            old_draft_id = await _create_draft(
+                client, org_id=org_id, connection_id=connection_id, story_id=story_id, text="옛 초안 본문",
+            )
+            r_submit1 = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{old_draft_id}/submit", json={})
+            assert r_submit1.status_code == 200, r_submit1.text
+            gate_id = uuid.UUID(r_submit1.json()["gate_id"])
+
+        async with Session() as s:
+            await transition_gate(s, org_id, gate_id, "rejected", human_id, "테스트 반려")
+
+        async with _client_for(app) as client:
+            r_withdraw = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{old_draft_id}/withdraw")
+            assert r_withdraw.status_code == 200, r_withdraw.text
+
+            new_draft_id = await _create_draft(
+                client, org_id=org_id, connection_id=connection_id, story_id=story_id, text="새 초안 본문",
+            )
+            assert new_draft_id != old_draft_id
+
+            r_submit2 = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{new_draft_id}/submit", json={})
+            assert r_submit2.status_code == 200, r_submit2.text
+            reopened_gate_id = uuid.UUID(r_submit2.json()["gate_id"])
+
+        # 같은 work_item(scope_key=connection_id) 슬롯이라 게이트 id 자체는 재사용된다
+        # (기존 3388 경로 — PO 조건③ 그대로 무변, 새 게이트를 만드는 게 갭 처방이
+        # 아니다).
+        assert reopened_gate_id == gate_id
+
+        async with Session() as s:
+            gate = (await s.execute(select(Gate).where(Gate.id == gate_id))).scalar_one()
+            assert gate.status == "pending"
+            assert gate.sealed_content_body == "새 초안 본문", "재개방된 게이트가 옛 withdrawn 초안의 본문을 봉인하면 안 된다"
+    finally:
+        await engine.dispose()

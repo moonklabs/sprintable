@@ -1968,9 +1968,16 @@ export default function ChannelPostEditPage() {
         <div className="flex items-center justify-between">
           <span className="text-muted-foreground">{t('channelPostsApprovalStatusLabel')}</span>
           <span data-testid="channel-post-gate-status">
-            {/* AC2 — view.status===undefined는 "모른다"(계약 필드 부재 등) — 「—」로
+            {/* story #3614 갭(PO 確定 2026-09-11) — withdrawn(폐기)은 게이트 파생값보다
+                우선한다. 폐기된 초안은 게이트가 없거나(상신 前 폐기) rejected로
+                남아(승인 前 반려 뒤 폐기) view.status가 「초안」/「반려」류로 접히는데,
+                그건 "아직 안 끝났다"는 뜻이라 종결(withdrawn)과 다른 사실이다 — 재상신
+                가능성이 있는 상태와 절대 재상신 불가 상태를 같은 칩으로 보이면 안 된다.
+                AC2 — view.status===undefined는 "모른다"(계약 필드 부재 등) — 「—」로
                 구별해 「상신 전」(진짜 게이트 없음)과 섞이지 않게 한다. */}
-            {view.status === undefined ? t('originAuthorUnknown') : t(contentPostStatusLabelKey(view.status))}
+            {draft.draft_status === 'withdrawn'
+              ? t('channelPostsWithdrawnStatusLabel')
+              : view.status === undefined ? t('originAuthorUnknown') : t(contentPostStatusLabelKey(view.status))}
           </span>
         </div>
         {/* B3(페드루 PO) — 실패 배지는 칩(위 상태 줄) 바로 아래(§17-2 오버레이 규율).

@@ -8,7 +8,7 @@ import re
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,6 +33,7 @@ from app.services.channel_posts import (
     ChannelPostDraftArchiveForbiddenError,
     ChannelPostDraftForbiddenError,
     ChannelPostDraftNotFoundError,
+    ChannelPostDraftWithdrawnError,
     ChannelPostGateAlreadyHeldError,
     ChannelPostGateNotFoundError,
     ConceptApprovalNotApprovedError,
@@ -113,7 +114,9 @@ from app.services.channel_post_videos import (
     create_channel_post_video_upload_url,
     get_channel_post_video_for_version,
 )
+from app.services.agent_onboarding_config import resolve_locale_from_request
 from app.services.generation_budget import GenerationBudgetExceededError
+from app.services.i18n_catalog import t
 from app.services.member_resolver import resolve_member, resolve_member_db_verified
 
 router = APIRouter(prefix="/api/v2/organizations", tags=["channel-posts"])
@@ -1494,6 +1497,27 @@ async def submit_channel_post_draft_endpoint(
     db: AsyncSession = Depends(get_db),
     verified_org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
+    locale: str | None = None,
+    accept_language: str | None = Header(None, alias="Accept-Language"),
+) -> SubmitChannelPostDraftResponse:
+    """story #3614 갭(3796과 동형) — 라우트 진입점, `Header()` DI 마커는 여기서만 받는다
+    (까심 QA CI FAILURE 원칙, i18n_catalog.py 모듈 docstring 참조). 직접-호출(realdb·
+    유닛) 테스트는 `_submit_channel_post_draft_endpoint`를 불러야 한다."""
+    return await _submit_channel_post_draft_endpoint(
+        org_id, draft_id, body, db=db, verified_org_id=verified_org_id, auth=auth,
+        resolved_locale=resolve_locale_from_request(locale, accept_language),
+    )
+
+
+async def _submit_channel_post_draft_endpoint(
+    org_id: uuid.UUID,
+    draft_id: uuid.UUID,
+    body: SubmitChannelPostDraftRequest,
+    *,
+    db: AsyncSession,
+    verified_org_id: uuid.UUID,
+    auth: AuthContext,
+    resolved_locale: str,
 ) -> SubmitChannelPostDraftResponse:
     """AC1·AC3 — 초안 버전을 external_publish 게이트에 상신. body.version_id 생략 시 최신
     버전. **에이전트 키도 호출 가능**(2026-09-03 dev 실측 정정 — site S2와 동일 실동작,
@@ -1523,6 +1547,15 @@ async def submit_channel_post_draft_endpoint(
         ) from exc
     except ChannelPostDraftNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ChannelPostDraftWithdrawnError as exc:
+        # story #3614 갭(PO 確定 2026-09-11) — 폐기(withdrawn)된 초안은 종결 상태다.
+        # 409(상태 충돌) — 재상신은 새 초안을 만드는 것으로만 가능하다. CI 발견(BE
+        # 한글 사용자 문장 재발 가드 RED) — 새 한글 문장은 baseline이 아니라 3796과
+        # 같은 형으로 i18n_catalog 이관(PO 確定 2026-09-11).
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "CHANNEL_POST_DRAFT_WITHDRAWN", "message": t("channel_posts.draft_withdrawn", resolved_locale)},
+        ) from exc
     except ChannelPostVersionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ChannelConnectionNotActiveError as exc:

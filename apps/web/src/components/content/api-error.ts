@@ -78,6 +78,10 @@ export type SitePostApiErrorKind =
   // 아니다(발행 취소는 별도 unpublish 경로). 다른 kind와 안 섞는 이유는 already_
   // published가 permission이 아니라 상태 충돌(409)이라 문구가 달라야 해서.
   | 'draft_already_published'
+  // story #3614 갭(BE, 페드루 PO 確定 2026-09-11) — 폐기(withdrawn, 종결)된 초안은
+  // 다시 상신할 수 없다. draft_already_published와 안 섞는 이유는 같다 — 상태 충돌
+  // (409)의 사유가 다르면 사람이 되돌릴 다음 행동도 다르다(발행 취소 vs 새 초안 생성).
+  | 'draft_withdrawn'
   | 'unknown';
 
 export interface SitePostApiErrorInfo {
@@ -207,6 +211,8 @@ const KNOWN_ERRORS: Record<string, KnownError> = {
   // story #3614(BE, 페드루 PO 確定 2026-09-07) — 초안 폐기(withdraw) 전용 2코드.
   CHANNEL_POST_WITHDRAW_FORBIDDEN: { labelKey: 'errorChannelWithdrawForbidden', kind: 'permission' },
   CHANNEL_POST_DRAFT_ALREADY_PUBLISHED: { labelKey: 'errorChannelDraftAlreadyPublished', kind: 'draft_already_published' },
+  // story #3614 갭(BE, 페드루 PO 確定 2026-09-11) — withdrawn 초안 submit 거부.
+  CHANNEL_POST_DRAFT_WITHDRAWN: { labelKey: 'errorChannelDraftWithdrawn', kind: 'draft_withdrawn' },
   // EXTERNAL_PUBLISH_APPROVAL_REQUIRED·SITE_POST_SEAL_MISSING·SITE_POST_REAPPROVAL_REQUIRED
   // 는 위 site 항목을 그대로 재사용한다(같은 external_publish 게이트 개념 공유, doc §9-4).
   // story #3402·PR#3764 — 채널 포스트 전용 GATE_ALREADY_HELD. site와 kind는 같지만
