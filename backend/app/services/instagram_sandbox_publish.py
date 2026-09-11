@@ -185,6 +185,8 @@ def _deterministic_comment(*, media_id: str, index: int) -> dict:
     # publish.py::_deterministic_comment와 동형(댓글 2=댓글 1의 답글).
     if index == 2:
         item["parent_external_id"] = f"sandbox-ig-comment-{media_id}-1"
+    # story #3805 PR 4 후속 — sandbox_publish.py와 동형(합성 데이터는 항상 안다).
+    item["parent_field_observed"] = True
     return item
 
 

@@ -2546,6 +2546,7 @@
     "engagementOpenCountExact": "미처리 {n}",
     "engagementCollectionStatusCollected": "{channel} · 마지막 수집 {time}",
     "engagementCollectionStatusNotCollected": "{channel} · 수집 안 됨",
+    "engagementReplyDetectionUnavailable": "답글 구분 불가(응답에 부모 정보 없음)",
     "engagementLoadFailed": "반응 목록을 불러오지 못했습니다.",
     "engagementPatchFailed": "이 항목을 바꾸지 못했습니다.",
     "engagementViewTaskCta": "작업 보기",

@@ -328,6 +328,10 @@ async def fetch_replies(
             parent = raw.get("parent") or {}
             if parent.get("id"):
                 item["parent_external_id"] = parent.get("id")
+            # story #3805 PR 4 후속(페드루 PO 確定 2026-09-11 12:29Z, 「조용히 0」
+            # 처방) — threads_publish.py와 동형, `parent` 키 유무 자체를 실어
+            # 보낸다.
+            item["parent_field_observed"] = "parent" in raw
             items.append(item)
         summary_total = (body.get("summary") or {}).get("total_count")
         if isinstance(summary_total, int):

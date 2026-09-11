@@ -273,6 +273,21 @@ async def fetch_replies(
             item = dict(raw)
             if raw.get("is_reply") and raw.get("replied_to"):
                 item["parent_external_id"] = raw.get("replied_to")
+            # story #3805 PR 4 후속(페드루 PO 確定 2026-09-11 12:29Z, 「조용히 0」
+            # 처방) — `replied_to` 키 자체의 유무(null 아님)를 공용 계약
+            # `parent_field_observed`로 실어 보낸다. collect_comments_for_publication
+            # 이 이 신호로 "답글이 진짜 0건"과 "이 API 버전/권한이 그 필드를 아예
+            # 안 준다"를 구분한다. ⚠️ Threads만 예외: is_reply=false(최상위 댓글)는
+            # replied_to가 구조적으로 없는 게 정상(부모가 없으니까)이라 이걸 "구분
+            # 불가"로 잘못 세면 정상 배치 대부분이 오탐(대부분 항목이 최상위 댓글)
+            # — is_reply 키 자체가 없으면(더 구버전) 판정 불가로 관측 실패, is_reply
+            # =true인데 replied_to가 없을 때만 진짜 "구분 불가"다.
+            if "is_reply" not in raw:
+                item["parent_field_observed"] = False
+            elif raw.get("is_reply"):
+                item["parent_field_observed"] = "replied_to" in raw
+            else:
+                item["parent_field_observed"] = True
             items.append(item)
         summary_total = (body.get("summary") or {}).get("total_count")
         if isinstance(summary_total, int):

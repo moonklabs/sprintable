@@ -300,3 +300,114 @@ async def test_sandbox_facebook_mirror_marks_comment_two_as_reply_to_comment_one
     assert complete is True
     assert items[0].get("parent_external_id") is None
     assert items[1]["parent_external_id"] == items[0]["id"]
+
+
+# ─── 「조용히 0」 처방(PO 追加 確定 2026-09-11 12:29Z): reply_detection_unavailable ─
+
+
+def _fake_comment_without_parent_field_marker(comment_id: str, text: str = "댓글") -> dict:
+    """실 어댑터가 parent 필드 키 자체를 못 받은 상황(권한·API 버전 미지원)을
+    흉내 — `parent_field_observed=False`를 명시적으로 싣는다(3종 실 어댑터가
+    threads_publish.py 등에서 이렇게 판정해 보내는 값과 동형)."""
+    return {
+        "id": comment_id, "text": text, "username": "user1",
+        "timestamp": datetime.now(timezone.utc).isoformat(), "parent_field_observed": False,
+    }
+
+
+@pytest.mark.anyio
+async def test_reply_detection_flagged_unavailable_when_parent_field_key_missing(monkeypatch):
+    """뮤테이션 대상: collect_comments_for_publication이 ChannelConnection 갱신을
+    걷으면(또는 조건을 뒤집으면) 이 테스트가 실패한다."""
+    from app.models.channel_connection import ChannelConnection
+    from app.services.channel_post_comments import collect_comments_for_publication
+    import app.services.sandbox_publish as sandbox_publish
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, _ = await _seed_org(s)
+            conn = await _seed_channel_connection(s, org_id, channel="sandbox")
+            pub = await _seed_channel_publication(s, org_id=org_id, connection_id=conn.id, channel="sandbox", external_id="media-1")
+
+            async def _fetch(client, *, access_token, media_id):
+                return [_fake_comment_without_parent_field_marker("c1")], True, None
+
+            monkeypatch.setattr(sandbox_publish, "fetch_replies", _fetch)
+            await collect_comments_for_publication(s, org_id=org_id, publication_id=pub.id, channel="sandbox", external_id="media-1")
+            await s.commit()
+
+            # story #3805 PR 4 후속 — 갱신은 ORM 유닛오브워크가 아니라 Core
+            # `update(ChannelConnection)`로 실행돼(같은 행을 이 세션이 이미 upsert
+            # 로 만들며 identity map에 올려둔 경우도 있어) `session.get()`이 캐시된
+            # 옛 값을 돌려줄 수 있다 — `refresh()`로 DB에서 다시 읽는다.
+            await s.refresh(conn)
+            assert conn.reply_detection_unavailable_at is not None
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_reply_detection_self_heals_when_parent_field_observed_again(monkeypatch):
+    """다음 수집에서 필드가 다시 보이면 null로 되돌아간다(영구 낙인 방지)."""
+    from app.services.channel_post_comments import collect_comments_for_publication
+    import app.services.sandbox_publish as sandbox_publish
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, _ = await _seed_org(s)
+            conn = await _seed_channel_connection(s, org_id, channel="sandbox")
+            pub = await _seed_channel_publication(s, org_id=org_id, connection_id=conn.id, channel="sandbox", external_id="media-1")
+
+            async def _fetch_missing(client, *, access_token, media_id):
+                return [_fake_comment_without_parent_field_marker("c1")], True, None
+
+            monkeypatch.setattr(sandbox_publish, "fetch_replies", _fetch_missing)
+            await collect_comments_for_publication(s, org_id=org_id, publication_id=pub.id, channel="sandbox", external_id="media-1")
+            await s.commit()
+            await s.refresh(conn)
+            assert conn.reply_detection_unavailable_at is not None
+
+            async def _fetch_observed(client, *, access_token, media_id):
+                return [_fake_comment("c1")], True, None
+
+            monkeypatch.setattr(sandbox_publish, "fetch_replies", _fetch_observed)
+            await collect_comments_for_publication(s, org_id=org_id, publication_id=pub.id, channel="sandbox", external_id="media-1")
+            await s.commit()
+            await s.refresh(conn)
+            assert conn.reply_detection_unavailable_at is None
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_collection_status_exposes_reply_detection_unavailable(monkeypatch):
+    from app.main import app
+    from app.services.channel_post_comments import collect_comments_for_publication
+    import app.services.sandbox_publish as sandbox_publish
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, _project_id = await _seed_org(s)
+            owner_id = await _seed_human(s, org_id)
+            conn = await _seed_channel_connection(s, org_id, channel="sandbox")
+            pub = await _seed_channel_publication(s, org_id=org_id, connection_id=conn.id, channel="sandbox", external_id="media-1")
+
+            async def _fetch(client, *, access_token, media_id):
+                return [_fake_comment_without_parent_field_marker("c1")], True, None
+
+            monkeypatch.setattr(sandbox_publish, "fetch_replies", _fetch)
+            await collect_comments_for_publication(s, org_id=org_id, publication_id=pub.id, channel="sandbox", external_id="media-1")
+            await s.commit()
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+        async with _client_for(app) as client:
+            r = await client.get(f"/api/v2/organizations/{org_id}/engagement/collection-status")
+        assert r.status_code == 200, r.text
+        by_connection = {c["connection_id"]: c for c in r.json()["connections"]}
+        assert by_connection[str(conn.id)]["reply_detection_unavailable"] is True
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()

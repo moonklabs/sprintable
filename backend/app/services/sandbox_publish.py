@@ -280,6 +280,10 @@ def _deterministic_comment(*, media_id: str, index: int) -> dict:
     # 한 값으로만 보였다).
     if index == 2:
         item["parent_external_id"] = f"sandbox-comment-{media_id}-1"
+    # story #3805 PR 4 후속 — sandbox는 합성 데이터라 parent 유무를 항상 안다
+    # (권한·API 버전에 좌우되는 실 provider와 달리 "구분 불가"가 원천적으로
+    # 없다).
+    item["parent_field_observed"] = True
     return item
 
 

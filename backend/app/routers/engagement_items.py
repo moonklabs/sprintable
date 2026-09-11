@@ -24,7 +24,14 @@ PR 4(페드루 PO 確定 2026-09-11 12:12Z) — 인바운드 중첩 답글 수�
 Graph API 문서상 부모-댓글 참조 필드가 있다(확定①, 실 응답 채움 여부는 배포 뒤
 PO 라이브 확認). `ChannelPostComment.parent_comment_id`(0365, 수집 서비스가
 외부 parent id→내부 id로 해소)가 생겨 `kind`(comment|reply) 판별자를 되살린다
-— parent_comment_id 有=답글·無=댓글(저장 컬럼 0, 응답 조립 시 판정)."""
+— parent_comment_id 有=답글·無=댓글(저장 컬럼 0, 응답 조립 시 판정).
+
+PR 4 후속(페드루 PO 確定 2026-09-11 12:29Z, 「조용히 0」 클래스 처방) — parent
+필드 키 자체가 응답에 없으면(null 아님 — 권한·API 버전) kind가 조용히 전부
+comment로 떨어져 "답글 0건"과 "구분 불가"가 같은 얼굴이 된다. `collection-status`
+응답에 `reply_detection_unavailable`(0366, `ChannelConnection.reply_detection_
+unavailable_at is not None`)을 실어 FE가 「답글 구분 불가」를 정직하게 보이게
+한다."""
 from __future__ import annotations
 
 import uuid
@@ -104,6 +111,10 @@ class EngagementCollectionStatusItem(BaseModel):
     channel: str
     account_label: str | None
     last_collected_at: str | None
+    # PR 4 후속(페드루 PO 確定 2026-09-11 12:29Z, 「조용히 0」 처방) — 최근 수집
+    # 응답에 parent 필드 키 자체가 없었다(권한·API 버전) — true면 kind 판정을
+    # 신뢰할 수 없다(답글이 진짜 0건인지, 구분을 못 한 것인지 모름).
+    reply_detection_unavailable: bool
 
 
 class EngagementCollectionStatusResponse(BaseModel):
@@ -226,6 +237,7 @@ async def get_engagement_collection_status_endpoint(
             EngagementCollectionStatusItem(
                 connection_id=r["connection_id"], channel=r["channel"], account_label=r["account_label"],
                 last_collected_at=r["last_collected_at"].isoformat() if r["last_collected_at"] else None,
+                reply_detection_unavailable=r["reply_detection_unavailable"],
             )
             for r in rows
         ],

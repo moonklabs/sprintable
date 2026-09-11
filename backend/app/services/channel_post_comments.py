@@ -349,6 +349,10 @@ async def collect_comments_for_publication(
     # 같은 페이지에 같이 올 수 있어 upsert 루프 안에서 즉시 조회하면 부모가
     # 아직 안 커밋된 채일 수 있다 — 배치 후처리로 순서 문제를 피한다).
     parent_external_id_by_child: dict[str, str] = {}
+    # story #3805 PR 4 후속(페드루 PO 確定 2026-09-11 12:29Z, 「조용히 0」 처방) —
+    # 어댑터가 실어 보낸 `parent_field_observed`를 모아 배치 하나라도 부재(False)면
+    # 이 연결의 답글 구분이 불가능했다고 판정한다(아래 reply_detection 갱신).
+    saw_unobserved_parent_field = False
     for raw in raw_comments:
         external_comment_id = str(raw.get("id"))
         if not external_comment_id or external_comment_id == "None":
@@ -357,6 +361,8 @@ async def collect_comments_for_publication(
         parent_external_id = raw.get("parent_external_id")
         if parent_external_id:
             parent_external_id_by_child[external_comment_id] = str(parent_external_id)
+        if not raw.get("parent_field_observed", True):
+            saw_unobserved_parent_field = True
         text = str(raw.get("text") or "")
         # sandbox_publish·threads_publish 둘 다 raw.timestamp를 ISO 문자열로 준다
         # (provider 원시 응답 그대로) — asyncpg는 문자열 바인딩을 거부하니(TIMESTAMPTZ
@@ -414,6 +420,23 @@ async def collect_comments_for_publication(
                     ChannelPostComment.external_comment_id == child_external_id,
                 )
                 .values(parent_comment_id=parent_internal_id)
+            )
+
+    # story #3805 PR 4 후속(페드루 PO 確定 2026-09-11 12:29Z, 「조용히 0」 처방) —
+    # 이 연결의 reply_detection_unavailable_at 갱신. 이번 배치가 빈 응답(raw_
+    # comments=0)이면 아무 증거가 없어(관측 자체를 안 함) 갱신을 건너뛴다 — 기존
+    # 상태를 그대로 둔다. 자가치유: 다음 수집에 필드가 다시 관측되면 null로
+    # 되돌아간다(연결이 영구히 「구분 불가」로 낙인찍히지 않는다).
+    if raw_comments:
+        from app.models.channel_connection import ChannelConnection
+        from app.models.channel_publication import ChannelPublication
+
+        pub_for_conn = await db.get(ChannelPublication, publication_id)
+        if pub_for_conn is not None:
+            await db.execute(
+                update(ChannelConnection)
+                .where(ChannelConnection.id == pub_for_conn.connection_id)
+                .values(reply_detection_unavailable_at=now if saw_unobserved_parent_field else None)
             )
 
     # 리컨실 — 이전엔 살아있다고 기록됐는데 이번 fetch엔 없는 댓글은 소프트 삭제.
@@ -1261,7 +1284,10 @@ async def get_engagement_collection_status(db: AsyncSession, *, org_id: uuid.UUI
     from app.models.channel_publication import ChannelPublication
 
     connections = (await db.execute(
-        select(ChannelConnection.id, ChannelConnection.channel, ChannelConnection.account_label)
+        select(
+            ChannelConnection.id, ChannelConnection.channel, ChannelConnection.account_label,
+            ChannelConnection.reply_detection_unavailable_at,
+        )
         .where(ChannelConnection.org_id == org_id)
     )).all()
     if not connections:
@@ -1282,6 +1308,8 @@ async def get_engagement_collection_status(db: AsyncSession, *, org_id: uuid.UUI
         {
             "connection_id": c.id, "channel": c.channel, "account_label": c.account_label,
             "last_collected_at": last_by_connection.get(c.id),
+            # story #3805 PR 4 후속 — 「조용히 0」 처방.
+            "reply_detection_unavailable": c.reply_detection_unavailable_at is not None,
         }
         for c in connections
     ]

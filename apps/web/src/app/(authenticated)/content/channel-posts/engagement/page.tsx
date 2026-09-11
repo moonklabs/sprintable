@@ -105,6 +105,9 @@ interface CollectionStatusItem {
   channel: string;
   account_label: string | null;
   last_collected_at: string | null;
+  // PR 4 후속(페드루 PO 確定 2026-09-11 12:29Z, 「조용히 0」 처방) — 최근 수집
+  // 응답에 parent 필드 키가 없었다(권한·API 버전) — kind 판정을 신뢰할 수 없다.
+  reply_detection_unavailable: boolean;
 }
 
 interface OrgMemberOption {
@@ -313,6 +316,12 @@ export default function ChannelPostsEngagementPage() {
                     channel: channelLabel(c.channel, t), time: formatRelativeTime(c.last_collected_at, locale, displayTimezone),
                   })
                 : t('engagementCollectionStatusNotCollected', { channel: channelLabel(c.channel, t) })}
+              {c.reply_detection_unavailable ? (
+                <>
+                  {' · '}
+                  {t('engagementReplyDetectionUnavailable')}
+                </>
+              ) : null}
             </span>
           ))}
         </div>

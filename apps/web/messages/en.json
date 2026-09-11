@@ -2546,6 +2546,7 @@
     "engagementOpenCountExact": "Open {n}",
     "engagementCollectionStatusCollected": "{channel} · last collected {time}",
     "engagementCollectionStatusNotCollected": "{channel} · not collected",
+    "engagementReplyDetectionUnavailable": "reply detection unavailable (no parent info in response)",
     "engagementLoadFailed": "Couldn't load engagement items.",
     "engagementPatchFailed": "Couldn't update this item.",
     "engagementViewTaskCta": "View task",
