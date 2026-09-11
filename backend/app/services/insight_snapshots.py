@@ -197,15 +197,55 @@ def _normalize(*, declared_metrics: tuple[str, ...], values: dict[str, int]) -> 
     }
 
 
-def _fetch_sandbox(*, publication_id: uuid.UUID) -> dict[str, Any]:
+# story #3620(페드루 지시 2026-09-10 — AC5 갭 처방, 2차 CHANGES 2026-09-11 반영) —
+# 이 스토리 자기점검이 확認한 갭: _fetch_sandbox가 publication_id만으로 결정되는
+# 순수함수라, 「예약 캡처」(발행 뒤 스케줄된 due_at에 저장되는 스냅샷)와 「reconcile
+# 재조회」(사람이 나중에 누르는 라이브 값)가 항상 같은 값을 내 라이브에서 불일치를
+# 재현할 방법이 없었다(카드 "갭" 절 — sandbox 마커로 "감소" 재현 불가).
+#
+# 1차 처방(발행 후 경과시간 임계값)은 페드루 CHANGES로 기각됐다 — `_SNAPSHOT_OFFSETS`
+# =(1일·7일)이라 예약 캡처 자체가 60초 훨씬 뒤(최소 1일 뒤)에나 돈다. 시간 임계값
+# 기준으로는 캡처 시점에 이미 드리프트가 적용된 값이 stored로 박혀 stored도 live도
+# 똑같이 드리프트된 값 → 영원히 match(라이브가 절대 stored>live를 못 만든다, 손으로
+# 심은 테스트 fixture만 그 상태를 재현할 수 있었다 — "지정 경로만 여는 fix").
+#
+# 2차 처방(호출 갈래로 가름) — 시간이 아니라 **누가 부르는지**로 나눈다. 예약 캡처
+# 워커(`process_due_insight_snapshots`→`_fetch_for_snapshot(db, snapshot)`, live=False
+# 기본값)는 마커가 있어도 항상 원값 그대로 저장 — 실 provider가 "글 나이"에 따라
+# 값이 달라지는 것과 무관하게, 이 스토리의 관심사는 "그 시점의 sandbox 값을 정직하게
+# 남긴다"는 계약(모듈 최상단 docstring)이지 드리프트 시뮬레이션이 아니다. reconcile
+# (`publication_reconciliation.py::reconcile_publication`)만 `live=True`로 불러
+# 마커가 있으면 views를 고정폭 감소 — captured(캡처 시점 원값)>live(재조회 드리프트
+# 값)로 진짜 mismatch가 선다. 라이브 절차: 오늘 마커 포함 발행 → 내일 due_at(+1d)
+# 캡처(원값 그대로 저장) → "원본과 대조" 클릭(live=True, -50) → 불일치 1(AC5 문면에
+# 이 24h 지연을 명시).
+_MARKER_INSIGHT_DRIFT = "[sandbox:insight-drift]"
+_INSIGHT_DRIFT_DELTA = 50
+
+
+async def _fetch_sandbox(db: AsyncSession, *, publication_id: uuid.UUID, live: bool = False) -> dict[str, Any]:
     """story 5b27b32f와 동일 취지 — 실 provider 없이 정규화·evidence 파이프라인
-    전체를 라이브로 실측하기 위한 결정적 합성값(publication_id 기반, 매 호출 동일
-    값 — 진짜 API처럼 "그때그때 값이 바뀌는" 것을 흉내 내지 않는다, 재현성 우선)."""
+    전체를 라이브로 실측하기 위한 결정적 합성값(publication_id 기반, 마커 없거나
+    live=False면 매 호출 동일 값 — 진짜 API처럼 "그때그때 값이 바뀌는" 것을 흉내
+    내지 않는다, 재현성 우선). `[sandbox:insight-drift]` 마커(story #3620)+live=True
+    (reconcile 전용)면 위 예외 — 자세한 설명은 바로 위 모듈 주석."""
     seed = int(publication_id.hex[:8], 16)
     raw = {
         "impressions": seed % 1000, "reach": seed % 700, "views": seed % 500,
         "engagements": seed % 100, "clicks": seed % 50, "spend": 0, "conversions": seed % 5,
     }
+
+    if live and raw["views"] > 0:
+        version_id = (await db.execute(
+            select(ChannelPublication.version_id).where(ChannelPublication.id == publication_id)
+        )).scalar_one_or_none()
+        if version_id is not None:
+            version_text = (await db.execute(
+                select(ChannelPostVersion.text).where(ChannelPostVersion.id == version_id)
+            )).scalar_one_or_none()
+            if version_text is not None and _MARKER_INSIGHT_DRIFT in version_text:
+                raw = {**raw, "views": max(0, raw["views"] - _INSIGHT_DRIFT_DELTA)}
+
     return {"raw": raw, "values": raw}
 
 
@@ -516,12 +556,17 @@ async def _fetch_facebook_via_connection(db: AsyncSession, snapshot: InsightSnap
         return await _fetch_facebook(client, access_token=access_token, media_id=pub.external_id)
 
 
-async def _fetch_for_snapshot(db: AsyncSession, snapshot: InsightSnapshot) -> dict[str, Any]:
+async def _fetch_for_snapshot(db: AsyncSession, snapshot: InsightSnapshot, *, live: bool = False) -> dict[str, Any]:
     """channel별 dispatch. 호출 前 `insight_metrics`가 빈 튜플이 아님을 이미 확인했다는
     전제(호출자 `process_due_insight_snapshots`가 그 판정을 한다 — 여기선 순수 dispatch
-    만, "이 채널을 아는지 모르는지" 판단을 두 곳에 중복 안 둔다)."""
+    만, "이 채널을 아는지 모르는지" 판단을 두 곳에 중복 안 둔다).
+
+    `live`(story #3620 2차 CHANGES) — sandbox 계열 3채널에만 의미 있는 축(그 외
+    채널은 매개변수를 그냥 무시·새 분기 0). 예약 캡처 워커는 기본값(False)을 그대로
+    쓰고, `publication_reconciliation.py::reconcile_publication`만 True로 불러
+    `[sandbox:insight-drift]` 마커의 드리프트를 그 경로에서만 연다."""
     if snapshot.channel == "sandbox":
-        return _fetch_sandbox(publication_id=snapshot.publication_id)
+        return await _fetch_sandbox(db, publication_id=snapshot.publication_id, live=live)
     if snapshot.channel == "hosted_site":
         return await _fetch_hosted_site(db, org_id=snapshot.org_id, publication_id=snapshot.publication_id)
     if snapshot.channel == "threads":
@@ -539,7 +584,7 @@ async def _fetch_for_snapshot(db: AsyncSession, snapshot: InsightSnapshot) -> di
     # 'failed'였다). 두 sandbox 채널 다 여기서 명시 — 어댑터 선언과 dispatch를
     # 짝으로 유지한다(AC3 가드 test_3696가 이 짝을 구조적으로 계속 대조한다).
     if snapshot.channel in ("facebook_sandbox", "instagram_sandbox"):
-        return _fetch_sandbox(publication_id=snapshot.publication_id)
+        return await _fetch_sandbox(db, publication_id=snapshot.publication_id, live=live)
     raise InsightFetchError(
         error_code="INSIGHT_CHANNEL_NOT_IMPLEMENTED",
         message=f"insight_metrics는 선언됐지만 fetch dispatch가 없습니다: {snapshot.channel}",
