@@ -176,6 +176,18 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "이 조직에 없는 발행물입니다",
         "en": "Publication not found in this organization",
     },
+    # story #3369(BE, 페드루 PO 確定 2026-09-11) — events.py::_render_gate_verdict_
+    # message의 external_publish 승인 「다음 행동」 2갈래(site_post 발행 명령 자동 생성
+    # vs 휴먼 화면 발행). BE 한글 사용자 문장 가드 baseline에서 이 2줄을 걷고 카탈로그로
+    # 이관(#3796/#3614와 같은 형).
+    "events.gate_verdict_next_action_publish_command_created": {
+        "ko": "다음 행동: 없음 — 승인으로 발행 명령이 만들어졌고 다음 워커 tick(최대 1분)에 발행됩니다. 결과는 원문 상세 «발행 결과» 줄에서 확認합니다.",
+        "en": "Next action: none — approval created the publish command, and it will publish on the next worker tick (within 1 minute). Check the result in the \"Publish result\" line on the source detail page.",
+    },
+    "events.gate_verdict_next_action_publish_human_only": {
+        "ko": "다음 행동: 할 일 없음 — 발행은 휴먼이 화면에서 합니다.",
+        "en": "Next action: nothing to do — a human publishes this from the screen.",
+    },
 }
 
 

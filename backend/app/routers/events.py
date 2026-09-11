@@ -41,6 +41,8 @@ from app.core import shutdown as _shutdown_module
 from app.dependencies.database import get_db
 from app.dependencies.ownership import _is_org_admin
 from app.models.event import Event
+from app.services.agent_onboarding_config import resolve_locale_from_request
+from app.services.i18n_catalog import t
 from app.services.member_resolver import assert_caller_is_member, resolve_member_identity
 
 router = APIRouter(prefix="/api/v2/events", tags=["events", "Organization"])
@@ -1267,7 +1269,9 @@ async def _tokenize_embedded_entity_refs(db: AsyncSession, *, org_id: uuid.UUID,
     return await _async_regex_sub(_EMBEDDED_HEX8_RE, _replace_prefix, text)
 
 
-async def _render_gate_verdict_message(db: AsyncSession, *, org_id: uuid.UUID, payload: dict) -> str:
+async def _render_gate_verdict_message(
+    db: AsyncSession, *, org_id: uuid.UUID, payload: dict, resolved_locale: str = "ko",
+) -> str:
     """story #3330 — `preset.gate.verdict` 전용 렌더. 승인/반려 대상 work item·게이트
     종류·판정·(반려 시) 사유·대상 산출물 doc 클릭 토큰·다음 행동을 담는다(AC2, #3323이
     stage 알림에 한 것과 같은 규격). `preset.gate.verdict`는 `stage_metadata`가 없는
@@ -1441,13 +1445,9 @@ async def _render_gate_verdict_message(db: AsyncSession, *, org_id: uuid.UUID, p
                     select(PublicationCommand.id).where(PublicationCommand.gate_id == gate_row.id)
                 )).first() is not None
             if is_site_post and site_post_command_exists:
-                lines.append(
-                    "- 다음 행동: 없음 — 승인으로 발행 명령이 만들어졌고 다음 워커 "
-                    "tick(최대 1분)에 발행됩니다. 결과는 원문 상세 «발행 결과» 줄에서 "
-                    "확認합니다."
-                )
+                lines.append(f"- {t('events.gate_verdict_next_action_publish_command_created', resolved_locale)}")
             else:
-                lines.append("- 다음 행동: 할 일 없음 — 발행은 휴먼이 화면에서 합니다.")
+                lines.append(f"- {t('events.gate_verdict_next_action_publish_human_only', resolved_locale)}")
         elif verdict == "rejected":
             # AC3 — 사유에 «폐기/중단» 신호가 있으면 다음 행동 자체를 비운다(침묵도
             # 문구다). 재상신을 권하면 카드가 사람의 결정과 정면으로 반대되는 행동을
@@ -1495,7 +1495,7 @@ async def _render_gate_verdict_message(db: AsyncSession, *, org_id: uuid.UUID, p
 
 
 async def _render_event_message_content(
-    db: AsyncSession, *, org_id: uuid.UUID, definition, payload: dict,
+    db: AsyncSession, *, org_id: uuid.UUID, definition, payload: dict, resolved_locale: str = "ko",
 ) -> str:
     """story #3313(마케팅자동화·온보딩 결함) — `block_template`가 없는 사이클형 정의(stage
     이벤트)의 알림 본문이 "stage/work_item_id뿐"이라 수신 에이전트가 `list_event_definitions`
@@ -1514,7 +1514,7 @@ async def _render_event_message_content(
     ②로 떨어져 여태 제네릭 폴백뿐이었다(반려 사유·산출물 링크·다음 행동이 전혀 안
     실림). 그 키만 전용 렌더(`_render_gate_verdict_message`)로 먼저 갈라낸다."""
     if definition.key == "preset.gate.verdict":
-        return await _render_gate_verdict_message(db, org_id=org_id, payload=payload)
+        return await _render_gate_verdict_message(db, org_id=org_id, payload=payload, resolved_locale=resolved_locale)
     if definition.block_template is not None or not definition.stage_metadata:
         return "\n".join(_generic_event_message_lines(definition.key, payload))
 
@@ -1605,6 +1605,7 @@ async def publish_registry_event(
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
+    locale: str | None = None,
 ) -> dict:
     """POST /api/v2/events/publish — story #2633 AC1~AC3.
 
@@ -1619,11 +1620,21 @@ async def publish_registry_event(
 
     실 로직은 `_publish_registry_event_core`(story #2791 P0 추출) — 서버 자동발행
     (`publish_preset_event`)도 HTTP 요청 컨텍스트 없이 같은 core를 호출해 단일 파이프
-    원칙(#2633 AC2)을 유지한다. 이 엔드포인트는 auth 의존성 해석만 하고 넘긴다."""
+    원칙(#2633 AC2)을 유지한다. 이 엔드포인트는 auth 의존성 해석만 하고 넘긴다.
+
+    story #3369(BE, 페드루 PO 確定 2026-09-11) — `_render_gate_verdict_message`의
+    i18n_catalog 이관분이 쓸 locale. `#3796`/`#3614`와 같은 우선순위(explicit locale
+    → Accept-Language → 기본 "ko")이되, 이 함수는 이미 `request: Request`(plain
+    파라미터, `Header()` DI 마커가 아니다)를 받고 있어 그걸로 헤더를 직접 읽는다 —
+    별도 `Header()` 진입점/직접-호출 분리가 불필요하다(이 레포 realdb 테스트
+    10여 곳이 이 함수를 HTTP 경유 없이 직접 호출하는데, `request`는 이미 실
+    Starlette Request라 `.headers`가 항상 안전하게 동작한다 — `Header()` 마커였다면
+    그 호출부 전부가 깨졌을 것)."""
+    resolved_locale = resolve_locale_from_request(locale, request.headers.get("accept-language"))
     return await _publish_registry_event_core(
         db, org_id, auth, body.definition_key, body.payload, background_tasks,
         request=request, extra_broadcast_member_ids=body.extra_broadcast_member_ids,
-        conversation_id=body.conversation_id,
+        conversation_id=body.conversation_id, resolved_locale=resolved_locale,
     )
 
 
@@ -1638,6 +1649,12 @@ async def _publish_registry_event_core(
     request: Request | None = None,
     extra_broadcast_member_ids: "list[uuid.UUID] | None" = None,
     conversation_id: uuid.UUID | None = None,
+    # story #3369(BE, 페드루 PO 確定 2026-09-11) — `_render_gate_verdict_message`의
+    # i18n_catalog 이관분(#3796/#3614와 같은 형)이 쓸 locale. 서버 자동발행(publish_
+    # preset_event, HTTP 요청 컨텍스트 없음 — 이 함수 docstring 참조)은 이 인자를
+    # 안 넘겨 기본값 "ko"로 떨어진다(회귀 0) — HTTP 진입점(publish_registry_event)만
+    # Header()로 실제 값을 풀어 넘긴다.
+    resolved_locale: str = "ko",
 ) -> dict:
     """`publish_registry_event`(HTTP)·`publish_preset_event`(서버 자동발행, story #2791 P0)의
     공유 core — definition_key+payload를 검증하고 routing(상신선·전파선)을 실 member_id로
@@ -1890,7 +1907,9 @@ async def _publish_registry_event_core(
     # "이벤트 발행분"으로 인지하고 event_key로 event_definitions를 조회해 block_template
     # 렌더러를 태울 근거. 렌더러 자체는 #2637 FE 레인(이 커밋은 스키마 배선만).
     send_body = SendMessageRequest(
-        content=await _render_event_message_content(db, org_id=org_id, definition=definition, payload=payload),
+        content=await _render_event_message_content(
+            db, org_id=org_id, definition=definition, payload=payload, resolved_locale=resolved_locale,
+        ),
         mentioned_ids=list(escalation_ids),
         event_context={"event_key": definition.key, "payload": payload, "refs": refs},
     )
