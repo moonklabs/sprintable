@@ -1,7 +1,10 @@
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
-import { CHANNEL_POST_VOID_REASON_MESSAGE_KEYS, type FailureAction } from '@/components/content/failure-action';
+import {
+  CHANNEL_POST_DEAD_LETTER_REASON_MESSAGE_KEYS, CHANNEL_POST_VOID_REASON_MESSAGE_KEYS, type FailureAction,
+} from '@/components/content/failure-action';
 import { formatScheduledAt } from '@/components/content/schedule-format';
+import { useResetPassed } from '@/components/content/use-reset-passed';
 
 // story #3422 ②-c 2/N(doc §17-13) — 실패 5종 렌더 매핑. 버튼 유무표 그대로:
 //   blocked=버튼 없음(연결 고치기로) · needs_check=2단계(확認→재시도) ·
@@ -36,6 +39,10 @@ export interface FailureActionBadgeProps {
 
 export function FailureActionBadge({ action, onRetryClick, displayTimezone, compact, recheckGate }: FailureActionBadgeProps) {
   const t = useTranslations('content');
+  // story #3815 — dead_letter가 아닌 다른 kind에선 항상 null(훅은 조건 없이 매
+  // 렌더 호출돼야 하므로 이 자리에 둔다 — early return보다 위).
+  const reasonResetAt = action.kind === 'dead_letter' ? action.reasonResetAt : null;
+  const resetPassed = useResetPassed(reasonResetAt);
 
   if (action.kind === 'blocked') {
     return (
@@ -78,27 +85,52 @@ export function FailureActionBadge({ action, onRetryClick, displayTimezone, comp
     );
   }
   if (action.kind === 'dead_letter') {
+    // story #3815(페드루 PO steer②, 2026-09-12 17:34Z) — reason_code→문구는
+    // 표(CHANNEL_POST_DEAD_LETTER_REASON_MESSAGE_KEYS, voided 표와 동형 축)로
+    // 코드-무관하게 찾는다 — YOUTUBE_QUOTA_EXCEEDED 전용 하드코딩 분기였으면
+    // 다음 새 코드(다른 채널 quota·다른 422)가 또 조용히 일반 문구로 뭉개진다.
+    // 표에 없는(모르는) reason_code는 기존 needs_check/dead_letter 제네릭 문장
+    // 그대로(지어내지 않는다, voided의 "맵에 없으면 사유 없이" 규율과 동형).
+    const deadLetterReasonKey = action.reasonCode
+      ? CHANNEL_POST_DEAD_LETTER_REASON_MESSAGE_KEYS[action.reasonCode] : undefined;
+    // reset_at 기반 재시도 비활성(resetPassed, 위 useState/useEffect)도 코드-
+    // 무관 — "언제 풀리는지 아는 사유"라면 그 시각 前엔 눌러도 100% 다시 실패할
+    // 게 확定이라 헛수고를 약속하지 않는다(어떤 reason_code든 reason_reset_at이
+    // 실리기만 하면 동일하게 적용).
     // story #3402 갭(PO 채택 ㉡, 2026-09-10) — needsRecheck ∧ recheckGate면 문면·CTA
-    // 라벨만 needs_check 것(채널 확認 관문)을 쓴다. 버튼 자체의 존재·활성 여부(command_
-    // status=dead_letter)는 안 바뀐다 — 체크 前 확認 게이트는 이 버튼이 여는
-    // ConfirmDialog 안(page.tsx)에서 이뤄진다. recheckGate=false(기본, site_post 외부
-    // 발행 등 실제 관문이 없는 소비처)면 needsRecheck가 true여도 일반 dead_letter
-    // 문면 그대로 — 없는 관문을 약속하지 않는다(페드루 PO 지적, 2026-09-10 ②).
-    const showRecheckWording = action.needsRecheck && recheckGate;
+    // 라벨만 needs_check 것(채널 확認 관문)을 쓴다 — reason_code 표에 매치되는
+    // 사유가 없을 때만(더 구체적인 사유가 있으면 그쪽이 이긴다). recheckGate=false
+    // (기본, site_post 외부 발행 등 실제 관문이 없는 소비처)면 needsRecheck가
+    // true여도 일반 dead_letter 문면 그대로 — 없는 관문을 약속하지 않는다.
+    const showRecheckWording = !deadLetterReasonKey && action.needsRecheck && recheckGate;
+    const canRetryNow = resetPassed && !!onRetryClick;
+    const bodyText = deadLetterReasonKey
+      ? t(deadLetterReasonKey)
+      : (showRecheckWording ? t('channelPostsFailureNeedsCheck') : t('channelPostsFailureDeadLetter'));
+    const ctaText = deadLetterReasonKey
+      ? t('channelPostsFailureRetryCta')
+      : (showRecheckWording ? t('channelPostsFailureCheckedRetryCta') : t('channelPostsFailureRetryCta'));
     return (
       <div className="space-y-1" data-testid="channel-post-failure-badge">
-        <p className="text-xs text-destructive">
-          {showRecheckWording ? t('channelPostsFailureNeedsCheck') : t('channelPostsFailureDeadLetter')}
+        <p
+          className="text-xs text-destructive"
+          data-testid={deadLetterReasonKey ? 'channel-post-failure-reason' : undefined}
+        >
+          {bodyText}
         </p>
         {compact ? null : (
           <>
             <Button
-              variant="outline" size="sm" onClick={onRetryClick} disabled={!onRetryClick}
+              variant="outline" size="sm" onClick={onRetryClick} disabled={!canRetryNow}
               data-testid="channel-post-failure-retry-button"
             >
-              {showRecheckWording ? t('channelPostsFailureCheckedRetryCta') : t('channelPostsFailureRetryCta')}
+              {ctaText}
             </Button>
-            {onRetryClick ? null : (
+            {!resetPassed ? (
+              <p className="text-xs text-muted-foreground" data-testid="channel-post-failure-retry-disabled-reason">
+                {t('channelPostsFailureRetryAfterReset')}
+              </p>
+            ) : onRetryClick ? null : (
               <p className="text-xs text-muted-foreground" data-testid="channel-post-failure-retry-disabled-reason">
                 {t('channelPostsFailureRetryComingSoon')}
               </p>

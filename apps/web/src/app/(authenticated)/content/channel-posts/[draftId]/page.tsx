@@ -22,6 +22,7 @@ import { parseScheduledAtServerError } from '@/components/content/validate-sched
 import { extractBackendErrorMessage } from '@/lib/api-error-message';
 import { deriveFailureAction, type CommandStatus } from '@/components/content/failure-action';
 import { FailureActionBadge } from '@/components/content/failure-action-badge';
+import { useResetPassed } from '@/components/content/use-reset-passed';
 import { InsightSnapshotBlock, type InsightSnapshot } from '@/components/content/insight-snapshot-block';
 import { BoostRequestDialog } from '@/components/content/boost-request-dialog';
 import { CommentsSection, deriveCommentsFace, type CommentItem, type CommentsFace, type RawCommentsResponse } from '@/components/content/comments-section';
@@ -91,6 +92,9 @@ interface ChannelPostDraftDetail {
   // scheduled_at 스냅샷과 다르다 — 재승인 뒤 갱신된다).
   command_status?: string | null;
   command_reason_code?: string | null;
+  // story #3815(배포 82 라이브 회차 실 결함) — command_reason_code==='YOUTUBE_QUOTA_
+  // EXCEEDED'일 때만 채워진다.
+  command_reason_reset_at?: string | null;
   // story f061c1a3(BE 0e960006) — 재시도 BFF가 붙일 대상 command. 목록/단건 응답
   // (ChannelPostDraftListItem)이 이미 낸다 — command 자체가 없으면 null.
   command_id?: string | null;
@@ -497,6 +501,13 @@ export default function ChannelPostEditPage() {
   const locale = useLocale();
 
   const [draft, setDraft] = useState<ChannelPostDraftDetail | null>(null);
+  // story #3815(페드루 PO CHANGES 2, 2026-09-12 17:58Z) — 훅은 아래 `if (loading)
+  // return`보다 반드시 위(훅 규칙 — 조건부 return 뒤엔 훅을 못 둔다). 「이어서
+  // 발행」(partialSuccess CTA)과 실패 배지의 「다시 시도」가 같은 게이트를
+  // 공유한다(failure-action-badge.tsx와 동형 훅 재사용) — reason_reset_at이
+  // 미래면 둘 다 눌러도 100% 다시 실패할 게 확定이라 헛수고를 약속하지 않는다.
+  // reason_code 무관(코드-agnostic, steer②와 동일 축).
+  const reasonResetPassed = useResetPassed(draft?.command_reason_reset_at);
   // story #3499 — draft.publication_id는 BE #3844 조각4 의존(additive, 미착지).
   const [insightSnapshots, setInsightSnapshots] = useState<InsightSnapshot[]>([]);
   useEffect(() => {
@@ -2133,6 +2144,10 @@ export default function ChannelPostEditPage() {
   // (지금 막으면 아예 되살릴 방법이 없어진다).
   const commandInFlightBlocksNewAttempt = new Set(['pending', 'blocked']);
   const blockedByCommandInFlight = !!draft.command_status && commandInFlightBlocksNewAttempt.has(draft.command_status);
+  // story #3815(페드루 PO CHANGES 2, 2026-09-12 17:58Z) — 게이트 자체(훅 호출)는
+  // 위 `if (loading) return` 이전에 있다(훅 규칙 — 조건부 return 뒤에 훅을 못
+  // 둔다). 여기선 그 결과만 derived 상수로 조합한다.
+  const blockedByReasonReset = !!draft.command_reason_reset_at && !reasonResetPassed;
   // 유나 재판정(2026-09-04 13:37Z) — pending·blocked를 한 문장에 묶으면 절반은 틀린
   // 지시가 된다("기다리세요"는 blocked에, "연결을 확인하세요"는 pending에 안 맞는다).
   // command_status로 정확히 갈라 서로 다른 문장을 낸다.
@@ -2147,6 +2162,7 @@ export default function ChannelPostEditPage() {
     failureKind: draft.failure_kind,
     nextRetryAt: draft.next_retry_at,
     reasonCode: draft.command_reason_code,
+    reasonResetAt: draft.command_reason_reset_at,
     processingKind: draft.processing_kind,
   });
   // story #3402 갭(PO 채택 ㉡, 2026-09-10) — BE가 needs_check를 즉시 dead_letter로
@@ -2579,9 +2595,19 @@ export default function ChannelPostEditPage() {
           );
         }
         if (view.partialSuccess) {
+          // story #3815(페드루 PO CHANGES 2, 2026-09-12 17:58Z/18:01Z 낱말 확定) —
+          // reason_reset_at이 미래면 명령형("이어서 발행하세요")이 아니라 사실형
+          // 문장으로 — 실패 배지의 「다시 시도」와 이 배너가 같은 게이트
+          // (blockedByReasonReset)를 공유하는데, 그 게이트가 걸린 동안 명령형
+          // 문구를 유지하면 "재시도는 막혔는데 이어서 발행은 유도"하는 두 세계가
+          // 남는다(배포 82 픽셀 2d6b2e4e).
           return (
             <Alert role="status" data-testid="channel-post-partial-success-notice">
-              <AlertDescription>{t('channelPostsPartialSuccessNotice')}</AlertDescription>
+              <AlertDescription>
+                {blockedByReasonReset
+                  ? t('channelPostsPartialSuccessNoticeBlockedByReset')
+                  : t('channelPostsPartialSuccessNotice')}
+              </AlertDescription>
             </Alert>
           );
         }
@@ -2596,7 +2622,10 @@ export default function ChannelPostEditPage() {
         <div className="flex gap-2">
           <Button
             onClick={() => void handlePublish()}
-            disabled={!canPublish || publishing || blockedByCommandInFlight}
+            disabled={
+              !canPublish || publishing || blockedByCommandInFlight
+              || (view.partialSuccess && blockedByReasonReset)
+            }
             data-testid="channel-post-publish-button"
           >
             {/* story #3402 PR2 ②-c(T9·doc §4-1/§17-4) — 부분 성공(container_created)이면

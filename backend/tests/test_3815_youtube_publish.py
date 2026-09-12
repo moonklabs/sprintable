@@ -127,8 +127,17 @@ def test_youtube_usage_exceeded_wording_matches_actual_utc_day_window_boundary()
     경계와 갈리면 안 된다. 경계를 UTC 자정에서 계산해 KST(UTC+9)로 환산한
     시(hour)가 9가 아니면 이 테스트가 RED — 그 시점이 이 카탈로그 문장도 같이
     고쳐야 한다는 신호다(문장 자체는 계산식과 무관한 리터럴이라 자동 동기화가
-    안 되므로, 이 pin이 유일한 안전망)."""
+    안 되므로, 이 pin이 유일한 안전망).
+
+    story #3815 CHANGES(페드루 PO 지적 2026-09-12 17:53Z) — FE `failure-action-
+    badge.tsx`의 `channelPostsFailureYoutubeQuotaExceeded`(ko/en)가 이 BE 정적
+    문구를 그대로 복제한다(dead_letter 배지용) — 같은 문장이 두 곳에 있으면
+    한쪽만 바뀌는 드리프트가 난다. 이 가드를 FE 두 키까지 넓혀 **byte-exact**
+    일치를 강제한다(경계 상수가 바뀌면 이 테스트가 먼저 잡고, 두 낱말이 갈리면
+    바로 다음 assert가 잡는다)."""
+    import json
     from datetime import timedelta
+    from pathlib import Path
 
     from app.services.i18n_catalog import t
     from app.services.youtube_quota import _utc_day_window
@@ -147,6 +156,22 @@ def test_youtube_usage_exceeded_wording_matches_actual_utc_day_window_boundary()
     en = t("channel_posts.youtube_usage_exceeded", "en")
     assert "오전 9시(한국 시간)" in ko
     assert "00:00 UTC" in en
+
+    repo_root = Path(__file__).resolve().parents[2]
+    fe_ko = json.loads((repo_root / "apps/web/messages/ko.json").read_text())
+    fe_en = json.loads((repo_root / "apps/web/messages/en.json").read_text())
+    fe_ko_quota = fe_ko["content"]["channelPostsFailureYoutubeQuotaExceeded"]
+    fe_en_quota = fe_en["content"]["channelPostsFailureYoutubeQuotaExceeded"]
+    assert fe_ko_quota == ko, (
+        f"apps/web/messages/ko.json의 content.channelPostsFailureYoutubeQuotaExceeded"
+        f"가 BE i18n_catalog 원문과 갈렸다 — 화면 쪽이 바뀌면 이 문구도 같이 바꿀 것"
+        f"\nFE: {fe_ko_quota!r}\nBE: {ko!r}"
+    )
+    assert fe_en_quota == en, (
+        f"apps/web/messages/en.json의 content.channelPostsFailureYoutubeQuotaExceeded"
+        f"가 BE i18n_catalog 원문과 갈렸다 — 화면 쪽이 바뀌면 이 문구도 같이 바꿀 것"
+        f"\nFE: {fe_en_quota!r}\nEN: {en!r}"
+    )
 
 
 @pytest.mark.anyio
@@ -969,6 +994,326 @@ async def test_privacy_locked_false_for_non_youtube_channel():
                 r_list = await client.get(f"/api/v2/organizations/{org_id}/channel-posts/drafts")
             item = next(row for row in r_list.json() if row["draft_id"] == draft_id)
             assert item["privacy_locked"] is False
+        finally:
+            app.dependency_overrides.clear()
+    finally:
+        await engine.dispose()
+
+
+# ─── 배포 82 라이브 회차 실 결함 — dead_letter reason_code/reason_reset_at 노출 ──
+
+
+@pytest.mark.anyio
+async def test_youtube_quota_exceeded_publish_persists_reason_code_and_reset_at_on_command():
+    """⭐실 결함 재현(페드루 PO 지적 2026-09-12, 배포 82 라이브 회차) — publish가
+    422 YOUTUBE_QUOTA_EXCEEDED로 끝나면 command가 dead_letter로 떨어지는데(
+    failure_kind가 _CONNECTION_BLOCKED_CODES/_TRANSIENT_CODES 매핑표 밖이라
+    needs_check→dead_letter fail-closed) `apply_command_failure()`가 이
+    error_code를 `command.reason_code`에 한 번도 안 옮겨, BE는 사유(사용량
+    소진·리셋 시각)를 이미 아는데 목록 응답(`command_reason_code`)은 계속
+    null이었다 — 화면이 "채널에서 확인이 필요합니다"류 일반 문구만 보여줄
+    수밖에 없던 원인. 처방 뒤엔 목록 응답에 정확한 값이 실려야 한다."""
+    from tests.test_620beefc_channel_post_image_upload import (
+        _approve_gate_directly, _client_for, _seed_connection, _seed_human, _seed_org, _seed_story,
+        _session_factory, _setup_org_scoped_app,
+    )
+    from tests.test_3554_instagram_reels import _build_mp4, _upload_and_confirm_video
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id, channel="youtube_sandbox")
+            story_id = await _seed_story(s, org_id, project_id)
+            from app.models.participation import ParticipationRole
+            role = ParticipationRole(id=uuid.uuid4(), org_id=org_id, key="approver", label="Approver", is_default=True)
+            s.add(role)
+            await s.commit()
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+
+        before = datetime.now(timezone.utc)
+        expected_reset_at = before.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+
+        try:
+            async with _client_for(app) as client:
+                r_draft = await client.post(
+                    f"/api/v2/organizations/{org_id}/channel-posts/drafts",
+                    json={
+                        "work_item_id": str(story_id), "connection_id": str(connection_id),
+                        "text": "설명 [sandbox:youtube-quota-exceeded] 끝",
+                        "channel_payload": {"title": "quota 재현"},
+                    },
+                )
+                assert r_draft.status_code == 201, r_draft.text
+                draft_id = r_draft.json()["draft_id"]
+
+                video_raw = _build_mp4(duration_seconds=6.0, width=1920, height=1080)
+                r_video = await _upload_and_confirm_video(client, org_id, draft_id, video_raw)
+                assert r_video.status_code == 201, r_video.text
+
+                r_submit = await client.post(
+                    f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/submit", json={},
+                )
+                assert r_submit.status_code == 200, r_submit.text
+                gate_id = uuid.UUID(r_submit.json()["gate_id"])
+
+            async with Session() as s:
+                await _approve_gate_directly(s, gate_id)
+
+            async with _client_for(app) as client:
+                r_pub = await client.post(
+                    f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
+                )
+                assert r_pub.status_code == 422, r_pub.text
+                pub_body = r_pub.json()
+                assert pub_body["error"]["code"] == "YOUTUBE_QUOTA_EXCEEDED", pub_body
+
+                r_list = await client.get(f"/api/v2/organizations/{org_id}/channel-posts/drafts")
+                assert r_list.status_code == 200, r_list.text
+                item = next(row for row in r_list.json() if row["draft_id"] == draft_id)
+                assert item["command_status"] == "dead_letter", item
+                assert item["command_reason_code"] == "YOUTUBE_QUOTA_EXCEEDED", (
+                    "BE는 사유를 아는데 command 행엔 안 남았다 — 화면이 일반 dead_letter "
+                    f"문구로 떨어지는 원인 그대로(item={item})"
+                )
+                assert item["command_reason_reset_at"] is not None, "reset_at이 행에 안 남았다"
+                actual_reset_at = datetime.fromisoformat(item["command_reason_reset_at"].replace("Z", "+00:00"))
+                assert actual_reset_at == expected_reset_at, (
+                    f"reset_at이 정적 문구가 pin하는 UTC 자정 경계와 다르다: {actual_reset_at} != {expected_reset_at}"
+                )
+        finally:
+            app.dependency_overrides.clear()
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_non_quota_failure_leaves_reason_code_and_reset_at_null_no_regression():
+    """양성대조 — 발행이 성공하면(실패 자체가 없음) command_reason_code/
+    command_reason_reset_at 둘 다 null 그대로(apply_command_failure를 안
+    거치므로 지어낼 값 자체가 없다)."""
+    from tests.test_620beefc_channel_post_image_upload import (
+        _approve_gate_directly, _client_for, _create_draft, _seed_connection, _seed_human, _seed_org,
+        _seed_story, _session_factory, _setup_org_scoped_app,
+    )
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id, channel="threads")
+            story_id = await _seed_story(s, org_id, project_id)
+            from app.models.participation import ParticipationRole
+            role = ParticipationRole(id=uuid.uuid4(), org_id=org_id, key="approver", label="Approver", is_default=True)
+            s.add(role)
+            await s.commit()
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+
+        try:
+            async with _client_for(app) as client:
+                draft_id = await _create_draft(client, org_id=org_id, connection_id=connection_id, story_id=story_id)
+                r_submit = await client.post(
+                    f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/submit", json={},
+                )
+                assert r_submit.status_code == 200, r_submit.text
+                gate_id = uuid.UUID(r_submit.json()["gate_id"])
+
+            async with Session() as s:
+                await _approve_gate_directly(s, gate_id)
+
+            import app.services.threads_publish as tp
+            with (
+                patch.object(tp, "get_publishing_limit", AsyncMock(return_value=(0, 100, 3600))),
+                patch.object(tp, "create_container", AsyncMock(return_value="container-1")),
+                patch.object(tp, "publish_container", AsyncMock(return_value="media-1")),
+                patch.object(tp, "get_permalink", AsyncMock(return_value="https://threads.net/p/1")),
+            ):
+                async with _client_for(app) as client:
+                    r_pub = await client.post(
+                        f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
+                    )
+            assert r_pub.status_code == 200, r_pub.text
+
+            async with _client_for(app) as client:
+                r_list = await client.get(f"/api/v2/organizations/{org_id}/channel-posts/drafts")
+            item = next(row for row in r_list.json() if row["draft_id"] == draft_id)
+            assert item["command_reason_code"] is None
+            assert item["command_reason_reset_at"] is None
+        finally:
+            app.dependency_overrides.clear()
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_apply_command_failure_persists_reason_code_for_arbitrary_mapped_outside_error_code():
+    """⭐페드루 PO steer①(2026-09-12 17:34Z) — "지정 코드만 막으면 클래스가
+    남는다": reason_code는 error_code 그대로 **항상**(YOUTUBE_QUOTA_EXCEEDED
+    전용 분기가 아니라) 옮겨야 다음에 오는 새 코드(다른 채널 quota·다른 422)도
+    화면이 「모른다」로 안 떨어진다. CHANNEL_TEXT_TOO_LONG(발행 시점 UTM 재검사,
+    페드루 PO 確定 2026-09-03 — text_f8f7cb0f 선례와 동형 재현)으로 실측 —
+    이 코드는 YOUTUBE_QUOTA_EXCEEDED와 무관한, 완전히 다른 실패 축이다.
+    뮤테이션 대상: apply_command_failure의 `command.reason_code = error_code`를
+    "YOUTUBE_QUOTA_EXCEEDED 전용 분기"로 되돌리면 이 테스트가 RED여야 한다."""
+    from tests.test_620beefc_channel_post_image_upload import (
+        _approve_gate_directly, _client_for, _seed_connection, _seed_human, _seed_org, _seed_story,
+        _session_factory, _setup_org_scoped_app,
+    )
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id, channel="threads")
+            story_id = await _seed_story(s, org_id, project_id)
+            from app.models.participation import ParticipationRole
+            role = ParticipationRole(id=uuid.uuid4(), org_id=org_id, key="approver", label="Approver", is_default=True)
+            s.add(role)
+            await s.commit()
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+
+        long_text = "가" * 480  # 단독으로는 한도(500) 밑 — draft 저장 시점 검사를 통과한다.
+        long_link = "https://sprintable.ai/ko/blog/" + "x" * 60  # UTM 부착 뒤 발행 시점 재검사에서 넘는다.
+
+        try:
+            async with _client_for(app) as client:
+                r_draft = await client.post(
+                    f"/api/v2/organizations/{org_id}/channel-posts/drafts",
+                    json={
+                        "work_item_id": str(story_id), "connection_id": str(connection_id),
+                        "text": long_text, "link_url": long_link,
+                    },
+                )
+                assert r_draft.status_code == 201, r_draft.text
+                draft_id = r_draft.json()["draft_id"]
+
+                r_submit = await client.post(
+                    f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/submit", json={},
+                )
+                assert r_submit.status_code == 200, r_submit.text
+                gate_id = uuid.UUID(r_submit.json()["gate_id"])
+
+            async with Session() as s:
+                await _approve_gate_directly(s, gate_id)
+
+            async with _client_for(app) as client:
+                r_pub = await client.post(
+                    f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
+                )
+                assert r_pub.status_code == 422, r_pub.text
+                assert r_pub.json()["error"]["code"] == "CHANNEL_TEXT_TOO_LONG"
+
+                r_list = await client.get(f"/api/v2/organizations/{org_id}/channel-posts/drafts")
+                item = next(row for row in r_list.json() if row["draft_id"] == draft_id)
+                assert item["command_status"] == "dead_letter", item
+                assert item["command_reason_code"] == "CHANNEL_TEXT_TOO_LONG", (
+                    f"매핑표 밖 코드가 reason_code에 안 옮겨졌다(item={item})"
+                )
+                # 이 코드는 "언제 풀리는지" 계산 근거가 없다(사람이 본문을 줄여야
+                # 풀리는 종류) — reason_reset_at은 여전히 null이어야 한다.
+                assert item["command_reason_reset_at"] is None
+        finally:
+            app.dependency_overrides.clear()
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_scheduled_youtube_quota_exceeded_via_cron_worker_matches_immediate_publish_router():
+    """⭐페드루 PO steer①(2026-09-12 17:34Z) "두 경로 합류=한 곳에서만" — 예약
+    발행(cron 워커, `_process_one_command`)에서 YOUTUBE_QUOTA_EXCEEDED가 나면
+    예전엔 `STATUS_BLOCKED_UNAPPROVED`("blocked_unapproved")를 독자적으로
+    채웠는데, 이 값은 FE `CommandStatus` 유니온에 아예 없어(자체 발견) 스케줄
+    발행 경로에서만 배지가 안 뜨는 결함이었다. 이제 워커도 `apply_command_
+    failure`를 거쳐 즉시-발행 라우터와 완전히 같은 결과(dead_letter+reason_code
+    +reason_reset_at)를 내야 한다."""
+    from tests.test_620beefc_channel_post_image_upload import (
+        _approve_gate_directly, _client_for, _seed_connection, _seed_human, _seed_org, _seed_story,
+        _session_factory, _setup_org_scoped_app,
+    )
+    from tests.test_3554_instagram_reels import _build_mp4, _upload_and_confirm_video
+    from app.services.publication_command import process_due_publication_commands
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id, channel="youtube_sandbox")
+            story_id = await _seed_story(s, org_id, project_id)
+            from app.models.participation import ParticipationRole
+            role = ParticipationRole(id=uuid.uuid4(), org_id=org_id, key="approver", label="Approver", is_default=True)
+            s.add(role)
+            await s.commit()
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+
+        try:
+            async with _client_for(app) as client:
+                r_draft = await client.post(
+                    f"/api/v2/organizations/{org_id}/channel-posts/drafts",
+                    json={
+                        "work_item_id": str(story_id), "connection_id": str(connection_id),
+                        "text": "설명 [sandbox:youtube-quota-exceeded] 끝",
+                        "channel_payload": {"title": "quota 예약 재현"},
+                    },
+                )
+                assert r_draft.status_code == 201, r_draft.text
+                draft_id = r_draft.json()["draft_id"]
+
+                video_raw = _build_mp4(duration_seconds=6.0, width=1920, height=1080)
+                r_video = await _upload_and_confirm_video(client, org_id, draft_id, video_raw)
+                assert r_video.status_code == 201, r_video.text
+
+                r_submit = await client.post(
+                    f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/submit", json={},
+                )
+                assert r_submit.status_code == 200, r_submit.text
+                gate_id = uuid.UUID(r_submit.json()["gate_id"])
+
+            async with Session() as s:
+                await _approve_gate_directly(s, gate_id)
+
+            # 3414 cron-retry 선례(test_cron_worker_generation_budget_exceeded_still_
+            # sets_generation_reason_code)와 동형 — submit/approve는 command 행을
+            # 스스로 안 만든다(그 행은 /publish 호출이 만든다). 워커만 태우려면
+            # command 행을 직접 구성(approved_version=이 draft의 최신 ChannelPostVersion.id).
+            async with Session() as s:
+                from app.models.publication_command import PublicationCommand
+                from app.models.channel_post_version import ChannelPostVersion
+                from sqlalchemy import select as _select
+                version_id = (await s.execute(
+                    _select(ChannelPostVersion.id)
+                    .where(ChannelPostVersion.draft_id == uuid.UUID(draft_id))
+                    .order_by(ChannelPostVersion.version.desc())
+                    .limit(1)
+                )).scalar_one()
+                cmd = PublicationCommand(
+                    id=uuid.uuid4(), org_id=org_id, gate_id=gate_id, destination=connection_id,
+                    approved_version=version_id, operation="publish",
+                    scheduled_at=datetime.now(timezone.utc) - timedelta(minutes=1), status="pending",
+                    requested_by_member_id=human_id,
+                )
+                s.add(cmd)
+                await s.commit()
+
+            async with Session() as s:
+                await process_due_publication_commands(s)
+
+            async with _client_for(app) as client:
+                r_list = await client.get(f"/api/v2/organizations/{org_id}/channel-posts/drafts")
+            item = next(row for row in r_list.json() if row["draft_id"] == draft_id)
+            assert item["command_status"] == "dead_letter", (
+                f"예약 경로가 즉시-발행 라우터와 다른 terminal 상태를 냈다(item={item})"
+            )
+            assert item["command_reason_code"] == "YOUTUBE_QUOTA_EXCEEDED"
+            assert item["command_reason_reset_at"] is not None
         finally:
             app.dependency_overrides.clear()
     finally:

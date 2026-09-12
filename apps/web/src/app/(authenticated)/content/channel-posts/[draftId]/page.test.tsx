@@ -83,6 +83,9 @@ const DRAFT_DETAIL = {
   command_status: null as string | null,
   // B3(페드루 PO, 2026-09-04 13:14Z) — 실패 배지 mount에 쓰는 나머지 필드.
   command_reason_code: null as string | null,
+  // story #3815(페드루 PO CHANGES 2, 2026-09-12) — command_reason_code===
+  // 'YOUTUBE_QUOTA_EXCEEDED'일 때만 채워진다(그 외는 계속 null).
+  command_reason_reset_at: null as string | null,
   failure_kind: null as string | null,
   next_retry_at: null as string | null,
   processing_kind: null as string | null,
@@ -1078,6 +1081,54 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     // 하면 컨테이너가 하나 더 생겨 같은 글이 두 번 나갈 수 있다).
     expect((container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement).textContent)
       .toBe(koMessages.content.channelPostsPublishContinueCta);
+  });
+
+  // story #3815(페드루 PO CHANGES 2, 2026-09-12 17:58Z/18:01Z) — quota 표본 행은
+  // publication_status='container_created'(partialSuccess)인데 command_status가
+  // dead_letter로 그 위에 실패 배지도 같이 선다(배포 82 픽셀 2d6b2e4e). 실패 배지의
+  // 「다시 시도」와 이 배너·버튼이 같은 게이트(command_reason_reset_at)를 공유해야
+  // "재시도는 막혔는데 이어서 발행은 유도"하는 두 세계가 안 남는다. 뮤테이션 대상:
+  // blockedByReasonReset 게이트를 걷으면 아래 두 테스트가 RED여야 한다.
+  it('⭐CHANGES 2 — partialSuccess ∧ command_reason_reset_at이 미래 — 배너가 사실형(이어서 발행하세요 대신)+버튼 비활성', async () => {
+    const future = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    stubFetch({
+      draftDetail: {
+        gate_status: 'approved', sealed_content_sha256: 'h1', publication_status: 'container_created',
+        command_status: 'dead_letter', command_reason_code: 'YOUTUBE_QUOTA_EXCEEDED',
+        command_reason_reset_at: future,
+      },
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-partial-success-notice"]')?.textContent)
+      .toBe(koMessages.content.channelPostsPartialSuccessNoticeBlockedByReset);
+    expect(container.textContent).not.toContain(koMessages.content.channelPostsPartialSuccessNotice);
+    const publishBtn = container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement;
+    expect(publishBtn.disabled).toBe(true);
+  });
+
+  it('⭐CHANGES 2 양성대조 — partialSuccess ∧ command_reason_reset_at이 이미 지남 — 배너·버튼 둘 다 정상(회귀 0)', async () => {
+    const past = new Date(Date.now() - 1000).toISOString();
+    stubFetch({
+      draftDetail: {
+        gate_status: 'approved', sealed_content_sha256: 'h1', publication_status: 'container_created',
+        command_status: 'dead_letter', command_reason_code: 'YOUTUBE_QUOTA_EXCEEDED',
+        command_reason_reset_at: past,
+      },
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-partial-success-notice"]')?.textContent)
+      .toBe(koMessages.content.channelPostsPartialSuccessNotice);
+    const publishBtn = container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement;
+    expect(publishBtn.disabled).toBe(false);
+    expect(publishBtn.textContent).toBe(koMessages.content.channelPostsPublishContinueCta);
   });
 
   // 페드루 PO 리뷰 nit(2026-09-04) — partialSuccess와 isRepublish가 동시에 참인 경우

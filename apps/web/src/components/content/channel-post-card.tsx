@@ -43,6 +43,7 @@ export function ChannelPostCard({ item, displayTimezone }: ChannelPostCardProps)
     failureKind: item.failure_kind,
     nextRetryAt: item.next_retry_at,
     reasonCode: item.command_reason_code,
+    reasonResetAt: item.command_reason_reset_at,
     processingKind: item.processing_kind,
   });
 

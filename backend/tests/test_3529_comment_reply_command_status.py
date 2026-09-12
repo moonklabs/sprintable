@@ -125,8 +125,12 @@ async def test_before_submit_all_four_fields_null():
 @pytest.mark.anyio
 async def test_transient_failure_exposes_pending_backoff(monkeypatch):
     """CHANNEL_RATE_LIMITED(429) → failure_kind=transient·command는 pending으로
-    남고(MAX_RETRIES=5 미도달) next_attempt_at이 채워진다. reason_code는 voided
-    전용이라 null 유지."""
+    남고(MAX_RETRIES=5 미도달) next_attempt_at이 채워진다.
+
+    story #3815(페드루 PO steer①, 2026-09-12 17:34Z) — reason_code는 이제
+    voided 전용이 아니다(YOUTUBE_QUOTA_EXCEEDED 노출 갭 처방이 apply_command_
+    failure를 code-agnostic으로 바꿔 error_code를 항상 옮긴다) — 이 pin을
+    None→실 코드로 갱신(PR 경계 pin 갱신, 삭제 아님)."""
     from app.main import app
     from app.services.threads_publish import ThreadsPublishError
     import app.services.sandbox_publish as sandbox_publish
@@ -157,7 +161,7 @@ async def test_transient_failure_exposes_pending_backoff(monkeypatch):
                 for payload in (reply_payload, list_payload):
                     _assert_four_fields(
                         payload, command_status="pending", failure_kind="transient",
-                        next_attempt_at_is_none=False, reason_code=None,
+                        next_attempt_at_is_none=False, reason_code="CHANNEL_RATE_LIMITED",
                     )
         finally:
             app.dependency_overrides.clear()
@@ -168,7 +172,11 @@ async def test_transient_failure_exposes_pending_backoff(monkeypatch):
 @pytest.mark.anyio
 async def test_connection_failure_exposes_blocked_status(monkeypatch):
     """CHANNEL_TOKEN_EXPIRED(401) → failure_kind=connection·command는 blocked로
-    멈춘다(재시도 큐 X, 연결 복구 대기)."""
+    멈춘다(재시도 큐 X, 연결 복구 대기).
+
+    story #3815(페드루 PO steer①, 2026-09-12 17:34Z) — reason_code pin을
+    None→실 코드로 갱신(PR 경계 pin 갱신 — apply_command_failure가 이제
+    code-agnostic으로 error_code를 항상 옮긴다)."""
     from app.main import app
     from app.services.threads_publish import ThreadsPublishError
     import app.services.sandbox_publish as sandbox_publish
@@ -199,7 +207,7 @@ async def test_connection_failure_exposes_blocked_status(monkeypatch):
                 for payload in (reply_payload, list_payload):
                     _assert_four_fields(
                         payload, command_status="blocked", failure_kind="connection",
-                        next_attempt_at_is_none=True, reason_code=None,
+                        next_attempt_at_is_none=True, reason_code="CHANNEL_TOKEN_EXPIRED",
                     )
         finally:
             app.dependency_overrides.clear()
@@ -211,6 +219,9 @@ async def test_connection_failure_exposes_blocked_status(monkeypatch):
 async def test_comment_not_found_exposes_dead_letter_status():
     """대상 댓글 행 자체가 사라지면(COMMENT_NOT_FOUND) needs_check로 분류돼 즉시
     dead_letter(재시도해도 다시 실패할 뿐이라 백오프 큐에 안 넣는다).
+
+    story #3815(페드루 PO steer①, 2026-09-12 17:34Z) — reason_code pin을
+    None→"COMMENT_NOT_FOUND"로 갱신(PR 경계 pin 갱신).
 
     HTTP 왕복이 아니라 command 행을 직접 대조한다 — 이 시나리오(댓글 행 하드
     삭제)에선 GET reply 자체가 `get_comment_reply_view`의 `_get_owned_comment`가
@@ -246,7 +257,7 @@ async def test_comment_not_found_exposes_dead_letter_status():
             assert command.status == "dead_letter"
             assert command.failure_kind == "needs_check"
             assert command.next_attempt_at is None
-            assert command.reason_code is None
+            assert command.reason_code == "COMMENT_NOT_FOUND"
     finally:
         await engine.dispose()
 

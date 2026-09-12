@@ -87,13 +87,13 @@ describe('FailureActionBadge — story #3422 ②-c 2/N(doc §17-13 버튼 유무
   });
 
   it('⭐dead_letter — 버튼 있음(수동 재시도, 휴먼 전용은 소비부 게이팅 몫)', async () => {
-    await render({ kind: 'dead_letter', needsRecheck: false });
+    await render({ kind: 'dead_letter', needsRecheck: false, reasonCode: null, reasonResetAt: null });
     expect(container.querySelector('[data-testid="channel-post-failure-retry-button"]')?.textContent)
       .toBe(koMessages.content.channelPostsFailureRetryCta);
   });
 
   it('⭐B3 — dead_letter 재시도 버튼은 onRetryClick 미배선이면 disabled+사유가 버튼 밖 <p>', async () => {
-    await render({ kind: 'dead_letter', needsRecheck: false });
+    await render({ kind: 'dead_letter', needsRecheck: false, reasonCode: null, reasonResetAt: null });
     const btn = container.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement;
     expect(btn.disabled).toBe(true);
     expect(btn.title).toBe('');
@@ -103,7 +103,7 @@ describe('FailureActionBadge — story #3422 ②-c 2/N(doc §17-13 버튼 유무
 
   it('⭐N3 — compact=true면 dead_letter 재시도 버튼을 아예 안 그린다(라벨만)', async () => {
     await act(async () => {
-      root.render(wrap(<FailureActionBadge action={{ kind: 'dead_letter', needsRecheck: false }} displayTimezone="UTC" compact />));
+      root.render(wrap(<FailureActionBadge action={{ kind: 'dead_letter', needsRecheck: false, reasonCode: null, reasonResetAt: null }} displayTimezone="UTC" compact />));
     });
     expect(container.querySelector('[data-testid="channel-post-failure-retry-button"]')).toBeNull();
     expect(container.textContent).toBe(koMessages.content.channelPostsFailureDeadLetter);
@@ -121,7 +121,7 @@ describe('FailureActionBadge — story #3422 ②-c 2/N(doc §17-13 버튼 유무
   it('⭐dead_letter ∧ needsRecheck ∧ recheckGate=true — 배지 문면이 needs_check 것(채널 확認 필요)으로 뜬다', async () => {
     await act(async () => {
       root.render(wrap(
-        <FailureActionBadge action={{ kind: 'dead_letter', needsRecheck: true }} recheckGate displayTimezone="UTC" />,
+        <FailureActionBadge action={{ kind: 'dead_letter', needsRecheck: true, reasonCode: null, reasonResetAt: null }} recheckGate displayTimezone="UTC" />,
       ));
     });
     expect(container.textContent).toContain(koMessages.content.channelPostsFailureNeedsCheck);
@@ -131,7 +131,7 @@ describe('FailureActionBadge — story #3422 ②-c 2/N(doc §17-13 버튼 유무
   it('⭐dead_letter ∧ needsRecheck ∧ recheckGate=true — CTA 라벨이 needs_check 것(「확인했습니다 · 다시 시도」)으로 뜨고 버튼은 有·활성', async () => {
     await act(async () => {
       root.render(wrap(
-        <FailureActionBadge action={{ kind: 'dead_letter', needsRecheck: true }} recheckGate onRetryClick={() => {}} displayTimezone="UTC" />,
+        <FailureActionBadge action={{ kind: 'dead_letter', needsRecheck: true, reasonCode: null, reasonResetAt: null }} recheckGate onRetryClick={() => {}} displayTimezone="UTC" />,
       ));
     });
     const btn = container.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement | null;
@@ -146,11 +146,91 @@ describe('FailureActionBadge — story #3422 ②-c 2/N(doc §17-13 버튼 유무
   // 그대로여야 한다 — 없는 관문을 약속하지 않는다. 뮤테이션: showRecheckWording
   // 계산에서 recheckGate를 빼고 needsRecheck만 보면 이 테스트가 RED여야 한다.
   it('⭐dead_letter ∧ needsRecheck인데 recheckGate 미지정(기본 false) — 일반 dead_letter 문면·CTA 그대로(없는 관문을 약속하지 않는다)', async () => {
-    await render({ kind: 'dead_letter', needsRecheck: true });
+    await render({ kind: 'dead_letter', needsRecheck: true, reasonCode: null, reasonResetAt: null });
     expect(container.textContent).toContain(koMessages.content.channelPostsFailureDeadLetter);
     expect(container.textContent).not.toContain(koMessages.content.channelPostsFailureNeedsCheck);
     const btn = container.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement | null;
     expect(btn?.textContent).toBe(koMessages.content.channelPostsFailureRetryCta);
+  });
+
+  // story #3815(페드루 PO steer②, 2026-09-12 17:34Z) — dead_letter ∧ reasonCode가
+  // CHANNEL_POST_DEAD_LETTER_REASON_MESSAGE_KEYS 표에 있으면(YOUTUBE_QUOTA_
+  // EXCEEDED) needsRecheck/recheckGate보다 먼저 갈라 정적 문구를 낸다(일반
+  // dead_letter/needs_check 문구가 아니다 — BE가 아는 사유를 화면이 못 읽던
+  // 결함 처방). 뮤테이션 대상: 이 표 조회 분기를 걷으면 아래 세 테스트가
+  // RED여야 한다.
+  it('⭐dead_letter ∧ reasonCode=YOUTUBE_QUOTA_EXCEEDED — 일반 dead_letter/needs_check 문구 대신 정적 사용량-초과 문구', async () => {
+    await render({
+      kind: 'dead_letter', needsRecheck: true,
+      reasonCode: 'YOUTUBE_QUOTA_EXCEEDED', reasonResetAt: null,
+    });
+    expect(container.querySelector('[data-testid="channel-post-failure-reason"]')?.textContent)
+      .toBe(koMessages.content.channelPostsFailureYoutubeQuotaExceeded);
+    expect(container.textContent).not.toContain(koMessages.content.channelPostsFailureDeadLetter);
+    expect(container.textContent).not.toContain(koMessages.content.channelPostsFailureNeedsCheck);
+  });
+
+  // story #3815(페드루 PO steer②) — "지정 코드만 막으면 클래스가 남는다": 표에
+  // 없는(모르는) reason_code는 원시값을 그대로 노출하지 않고 기존 제네릭
+  // dead_letter 문구로 폴백한다(voided의 "맵에 없으면 사유 없이" 규율과 동형).
+  it('⭐dead_letter ∧ 표에 없는 reason_code — 원시값 노출 대신 기존 제네릭 dead_letter 문구로 폴백', async () => {
+    await render({
+      kind: 'dead_letter', needsRecheck: false,
+      reasonCode: 'SOME_FUTURE_ERROR_CODE', reasonResetAt: null,
+    });
+    expect(container.textContent).toContain(koMessages.content.channelPostsFailureDeadLetter);
+    expect(container.textContent).not.toContain('SOME_FUTURE_ERROR_CODE');
+    expect(container.querySelector('[data-testid="channel-post-failure-reason"]')).toBeNull();
+  });
+
+  // story #3815(페드루 PO steer②) — reset_at 기반 재시도 비활성은 reason_code
+  // 무관(코드-agnostic) — YOUTUBE_QUOTA_EXCEEDED가 아닌 다른(가상의) reason_code
+  // 라도 reason_reset_at이 미래면 똑같이 비활성돼야 한다.
+  it('⭐dead_letter ∧ 표에 없는 reason_code라도 reasonResetAt이 미래면 재시도 버튼 비활성(코드-무관 gating)', async () => {
+    const future = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    await act(async () => {
+      root.render(wrap(
+        <FailureActionBadge
+          action={{ kind: 'dead_letter', needsRecheck: false, reasonCode: 'SOME_FUTURE_ERROR_CODE', reasonResetAt: future }}
+          onRetryClick={() => {}} displayTimezone="UTC"
+        />,
+      ));
+    });
+    const btn = container.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+    expect(container.querySelector('[data-testid="channel-post-failure-retry-disabled-reason"]')?.textContent)
+      .toBe(koMessages.content.channelPostsFailureRetryAfterReset);
+  });
+
+  it('⭐dead_letter ∧ YOUTUBE_QUOTA_EXCEEDED ∧ reasonResetAt이 미래 — 재시도 버튼 비활성+리셋-후 안내(헛수고를 약속하지 않는다)', async () => {
+    const future = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    await act(async () => {
+      root.render(wrap(
+        <FailureActionBadge
+          action={{ kind: 'dead_letter', needsRecheck: true, reasonCode: 'YOUTUBE_QUOTA_EXCEEDED', reasonResetAt: future }}
+          onRetryClick={() => {}} displayTimezone="UTC"
+        />,
+      ));
+    });
+    const btn = container.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+    expect(container.querySelector('[data-testid="channel-post-failure-retry-disabled-reason"]')?.textContent)
+      .toBe(koMessages.content.channelPostsFailureRetryAfterReset);
+  });
+
+  it('⭐dead_letter ∧ YOUTUBE_QUOTA_EXCEEDED ∧ reasonResetAt이 이미 지남 — 재시도 버튼 정상 활성(회귀 0)', async () => {
+    const past = new Date(Date.now() - 1000).toISOString();
+    await act(async () => {
+      root.render(wrap(
+        <FailureActionBadge
+          action={{ kind: 'dead_letter', needsRecheck: true, reasonCode: 'YOUTUBE_QUOTA_EXCEEDED', reasonResetAt: past }}
+          onRetryClick={() => {}} displayTimezone="UTC"
+        />,
+      ));
+    });
+    const btn = container.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement;
+    expect(btn.disabled).toBe(false);
+    expect(btn.textContent).toBe(koMessages.content.channelPostsFailureRetryCta);
   });
 
   // N2(페드루 PO 지적, 2026-09-04) — CONTENT_CHANGED는 실측 BE reason_code(channel_posts.py
@@ -185,7 +265,7 @@ describe('FailureActionBadge — story #3422 ②-c 2/N(doc §17-13 버튼 유무
   it('onRetryClick이 dead_letter 재시도 버튼 클릭 시 호출된다', async () => {
     let clicked = false;
     await act(async () => {
-      root.render(wrap(<FailureActionBadge action={{ kind: 'dead_letter', needsRecheck: false }} onRetryClick={() => { clicked = true; }} displayTimezone="UTC" />));
+      root.render(wrap(<FailureActionBadge action={{ kind: 'dead_letter', needsRecheck: false, reasonCode: null, reasonResetAt: null }} onRetryClick={() => { clicked = true; }} displayTimezone="UTC" />));
     });
     const btn = container.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement;
     await act(async () => {

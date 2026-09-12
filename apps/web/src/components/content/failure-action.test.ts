@@ -14,7 +14,8 @@ describe('deriveFailureAction', () => {
   });
 
   it('⭐dead_letter — 버튼 유무는 failureKind와 무관하게 dead_letter(자동 재시도 끝남, §17-13 수동 재시도 버튼 대상)', () => {
-    expect(deriveFailureAction({ commandStatus: 'dead_letter', failureKind: 'transient' })).toEqual({ kind: 'dead_letter', needsRecheck: false });
+    expect(deriveFailureAction({ commandStatus: 'dead_letter', failureKind: 'transient' }))
+      .toEqual({ kind: 'dead_letter', needsRecheck: false, reasonCode: null, reasonResetAt: null });
   });
 
   // story #3402 갭(유나 실측·PO 채택 ㉡, 2026-09-10) — BE가 needs_check를 즉시
@@ -23,8 +24,23 @@ describe('deriveFailureAction', () => {
   // 이 테스트가 RED여야 한다.
   it('⭐dead_letter ∧ failureKind=needs_check — needsRecheck:true(§17-2 2단계 관문이 dead_letter 안에서도 선다)', () => {
     expect(deriveFailureAction({ commandStatus: 'dead_letter', failureKind: 'needs_check' }))
-      .toEqual({ kind: 'dead_letter', needsRecheck: true });
+      .toEqual({ kind: 'dead_letter', needsRecheck: true, reasonCode: null, reasonResetAt: null });
   });
+
+  // story #3815(배포 82 라이브 회차 실 결함, 페드루 PO 確定 2026-09-12) — dead_letter도
+  // voided와 동형으로 reasonCode(+reasonResetAt)를 실어 낸다 — YOUTUBE_QUOTA_EXCEEDED가
+  // 이 축으로 온다(needs_check로 fail-closed되지만 reasonCode는 별개로 살아 있어야
+  // 화면이 사유를 구분할 수 있다).
+  it('⭐dead_letter — reasonCode/reasonResetAt을 그대로 실어 낸다(BE가 아는 사유를 화면이 못 읽던 결함 처방)', () => {
+    expect(deriveFailureAction({
+      commandStatus: 'dead_letter', failureKind: 'needs_check',
+      reasonCode: 'YOUTUBE_QUOTA_EXCEEDED', reasonResetAt: '2026-09-13T00:00:00Z',
+    })).toEqual({
+      kind: 'dead_letter', needsRecheck: true,
+      reasonCode: 'YOUTUBE_QUOTA_EXCEEDED', reasonResetAt: '2026-09-13T00:00:00Z',
+    });
+  });
+
 
   it('⭐blocked — failureKind와 무관하게 blocked(연결 문제, §17-13 버튼 없음)', () => {
     expect(deriveFailureAction({ commandStatus: 'blocked', failureKind: 'needs_check' })).toEqual({ kind: 'blocked' });

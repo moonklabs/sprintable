@@ -22,7 +22,13 @@ export type FailureAction =
   // needs_check였는지(needsRecheck)로 문면·체크리스트·CTA만 needs_check 것을 쓴다
   // — 새 kind를 만들지 않는다(§17-2 두 열 표 그대로: command_status=버튼,
   // failure_kind=문면).
-  | { kind: 'dead_letter'; needsRecheck: boolean }
+  // story #3815(배포 82 라이브 회차 실 결함, 페드루 PO 確定 2026-09-12) — reasonCode/
+  // reasonResetAt 추가(voided와 동형 축, 새 kind 0). YOUTUBE_QUOTA_EXCEEDED는
+  // command_status=dead_letter로 떨어지는데(failure_kind가 매핑표 밖이라 needs_
+  // check→dead_letter, 재시도 대상 아님) 그동안 이 갈래는 reasonCode를 아예 안 봐
+  // BE가 아는 사유(사용량 소진·리셋 시각)를 화면이 못 읽고 일반 dead_letter/
+  // needs_check 문구만 보여줬다 — 원인은 아는데 모른다고 말하는 결함.
+  | { kind: 'dead_letter'; needsRecheck: boolean; reasonCode: string | null; reasonResetAt: string | null }
   | { kind: 'voided'; reasonCode: string | null }
   // 페드루 PO 정정(2026-09-04 09:49Z, BE #3425/PR#3776) — 이미지 글이 컨테이너 생성→
   // 완료 대기 중일 때. §17-15 "자동으로 이어서 처리 중"(중립·버튼 없음) — transient의
@@ -65,11 +71,25 @@ export const CHANNEL_POST_VOID_REASON_MESSAGE_KEYS: Record<string, string> = {
   API_USAGE_BUDGET_EXCEEDED: 'channelPostsVoidReasonApiUsageBudgetExceeded',
 };
 
+// story #3815(페드루 PO steer②, 2026-09-12 17:34Z) — voided의 REASON_MESSAGE_KEYS와
+// 동형 축, dead_letter 전용. reason_code→문구 표: 맵에 있으면 그 정적 문구를
+// 즉시 낸다(원인을 아는 채로 일반 dead_letter/needs_check 문구로 뭉개지 않는다),
+// 맵에 없는(모르는) reason_code는 기존 제네릭 문장(needs_check/dead_letter)으로
+// 폴백 — 코드 하나 늘 때마다 이 맵 한 줄만 늘면 된다(하드코딩된 단일 분기 금지,
+// 클래스를 닫는다). failure-action-badge.tsx에서 `t(key)`로 소비 — 새 코드가
+// 추가되면 여기 등재만 하면 된다(죽은 키 스윕 대상 아님, voided 맵과 동형 주의).
+export const CHANNEL_POST_DEAD_LETTER_REASON_MESSAGE_KEYS: Record<string, string> = {
+  YOUTUBE_QUOTA_EXCEEDED: 'channelPostsFailureYoutubeQuotaExceeded',
+};
+
 export interface FailureActionInput {
   commandStatus?: CommandStatus | null;
   failureKind?: FailureKind | string | null;
   nextRetryAt?: string | null;
   reasonCode?: string | null;
+  /** story #3815 — reasonCode==='YOUTUBE_QUOTA_EXCEEDED'일 때만 BE가 채운다(그 외
+   * reasonCode는 계속 null). */
+  reasonResetAt?: string | null;
   /** BE #3425(PR#3776) 서버 파생 — 'awaiting_container'면 이미지 컨테이너 처리 중(§17-15). */
   processingKind?: 'awaiting_container' | string | null;
 }
@@ -88,7 +108,12 @@ export function deriveFailureAction(input: FailureActionInput): FailureAction | 
   // story #3402 갭(2026-09-10) — needsRecheck는 dead_letter로 접히기 直前의 failure_kind가
   // needs_check였는지만 본다(§17-2 층 구분: command_status가 이미 dead_letter를 확定했으니
   // 그 안에서 failure_kind는 "무엇을 보여줄지"만 고른다, "보여줄지 말지"는 안 건드린다).
-  if (input.commandStatus === 'dead_letter') return { kind: 'dead_letter', needsRecheck: input.failureKind === 'needs_check' };
+  if (input.commandStatus === 'dead_letter') {
+    return {
+      kind: 'dead_letter', needsRecheck: input.failureKind === 'needs_check',
+      reasonCode: input.reasonCode ?? null, reasonResetAt: input.reasonResetAt ?? null,
+    };
+  }
   if (input.commandStatus === 'blocked') return { kind: 'blocked' };
   if (input.commandStatus === 'completed' || input.commandStatus === 'cancelled' || !input.commandStatus) return undefined;
   // 페드루 PO 정정(2026-09-04 09:49Z) — pending ∧ processing_kind==='awaiting_container'

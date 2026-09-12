@@ -369,7 +369,7 @@ describe('CommentsSection — 행 액션(story #3517 조각②)', () => {
     const face = loadedFace([
       baseComment({
         id: 'c1', replyStatus: 'failed', sentRepliesCount: 2,
-        replyFailureAction: { kind: 'dead_letter', needsRecheck: false },
+        replyFailureAction: { kind: 'dead_letter', needsRecheck: false, reasonCode: null, reasonResetAt: null },
         replyCommandId: 'cmd-1',
       }),
     ]);
