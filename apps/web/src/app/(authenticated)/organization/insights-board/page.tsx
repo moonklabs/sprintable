@@ -29,6 +29,7 @@ import { ASSET_LABEL_PREFIX_LENGTH, aggregateGroupBucket, groupInsightsBoardRows
 import { DEFAULT_METRIC, METRIC_KEYS, type BoardMetric, type Ga4ConnectionStatus, type InsightsBoardResponse, type InsightsBoardRow, type InsightsBoardWindow } from '@/components/insights-board/types';
 import { PublishingMetricsBand } from '@/components/content/publishing-metrics-band';
 import { OrgCostSummaryCard } from '@/components/insights-board/org-cost-summary-card';
+import { PaidSpendDailySeriesCard } from '@/components/insights-board/paid-spend-daily-series-card';
 import { deriveFailureAction, type CommandStatus } from '@/components/content/failure-action';
 import { FailureActionBadge } from '@/components/content/failure-action-badge';
 
@@ -355,6 +356,9 @@ export default function InsightsBoardPage() {
           필터와 무관한 org 전체 스코프(cost-summary API는 쿼리 파라미터가 없다) —
           아래 표 필터 줄보다 위, 화면의 다른 무엇에도 종속되지 않는 자리. */}
       {orgId ? <OrgCostSummaryCard orgId={orgId} /> : null}
+      {/* story #3809(Phase3·3-7 PR 4b) — 일별 paid 지출 시계열. 요약 카드 바로
+          아래, 같은 org 전체 스코프(쿼리 파라미터 무관)라 필터 줄보다 위. */}
+      {orgId ? <PaidSpendDailySeriesCard orgId={orgId} /> : null}
 
       <div className="flex flex-wrap items-center gap-2">
         <input
