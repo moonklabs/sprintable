@@ -64,10 +64,33 @@ def _register_stibee_sandbox(monkeypatch):
 
     stibee_sandbox_cfg = adapters_mod.ChannelAdapterConfig(
         authorize_url="", token_url="", scope="",
-        refresh_mode="manual", credential_kind="none", display_name="스티비 샌드박스", kind="blog",
+        refresh_mode="manual", credential_kind="none", display_name="스티비 샌드박스", kind="social",
     )
     monkeypatch.setitem(adapters_mod.CHANNEL_ADAPTERS, "stibee_sandbox", stibee_sandbox_cfg)
     yield
+
+
+def test_stibee_kind_is_not_blog_so_channel_post_pipeline_dispatch_stays_open():
+    """story 3-4 PR2 그라운딩 발견(2026-09-12 자가정정) — `get_publish_client_module`
+    (channel_adapters.py:677-678)은 `adapter.kind == "blog"`면 무조건
+    `BlogChannelDispatchNotImplementedError`로 거부한다(story e4fc29fa 리뷰 B2
+    설계). PR2가 뉴스레터 초안을 `ChannelPostDraft`/`ChannelPostVersion`(=이 함수가
+    다루는 그 파이프라인) 파이프라인에 태우기로 確定됐는데, PR1이 처음 kind="blog"로
+    등재했다면 그 시점에 이미 구조적으로 막혀 있었을 것 — kind="social"로 정정한
+    뒤 이 fail-closed 분기를 안 타는지(다른 이유로는 여전히 막힐 수 있다 — 실
+    dispatch 모듈은 PR2가 심는다, 그건 이 테스트의 관심사가 아니다) 회귀로 고정."""
+    from app.services.channel_adapters import (
+        BlogChannelDispatchNotImplementedError,
+        ChannelPublishDispatchNotImplementedError,
+        get_publish_client_module,
+    )
+
+    try:
+        get_publish_client_module("stibee")
+    except BlogChannelDispatchNotImplementedError:
+        pytest.fail("stibee가 kind='blog'로 등재돼 channel_post 파이프라인이 구조적으로 막혀 있다")
+    except ChannelPublishDispatchNotImplementedError:
+        pass  # 기대대로 — PR2가 아직 실 dispatch 모듈을 안 심었을 뿐(정상 현재 상태).
 
 
 @pytest.mark.anyio

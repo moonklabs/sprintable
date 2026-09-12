@@ -447,10 +447,15 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
     # 동형 순서). ESP=스티비(Stibee, customer-zero가 실제 쓰는 서비스·§6 3292 은퇴
     # 플러그인의 원래 대상) — Auth Key 붙여넣기라 wordpress/webhook과 credential_kind
     # 동형(pasted_secret), OAuth 흐름 없음(authorize_url/token_url/scope 비움).
-    # kind="blog"는 정확한 분류가 아니다(뉴스레터는 짧은 글도 사이트 글도 아니다) —
-    # `Literal["social","blog","ads"]`에 4번째 값이 없어 자리 임시배정, FE가 실제로
-    # 이 값을 소비하기 시작하는 PR4 前에 "newsletter" kind 신설 여부 재확認 필요
-    # (⚠️미확認 — PO 확定 대상, PR1 스코프 밖).
+    # story 3-4 PR2(페드루 PO 確定 2026-09-12) — 정정: kind="blog"는 기능적으로
+    # 틀렸었다(실측 확認, PR1 자가 정정) — `get_publish_client_module`(:677-678)이
+    # `adapter.kind == "blog"`면 무조건 `BlogChannelDispatchNotImplementedError`로
+    # 거부한다(story e4fc29fa PO 리뷰 B2, blog는 그쪽 자체 dispatch를 쓴다는 설계
+    # 의도). PR2가 뉴스레터 초안을 `ChannelPostDraft`/`ChannelPostVersion`/
+    # `ChannelPublication`(=get_publish_client_module이 다루는 그 파이프라인)으로
+    # 태우기로 確定돼 kind="social"이 맞는 값 — "뉴스레터가 소셜인가"라는 의미론적
+    # 어색함은 있으나 이 enum의 실제 뜻은 "채널 포스트 파이프라인이냐(social)·사이트
+    # 글 파이프라인이냐(blog)"이지 "SNS냐"가 아니다(threads/instagram과 같은 결).
     "stibee": ChannelAdapterConfig(
         authorize_url="",
         token_url="",
@@ -462,7 +467,7 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         # (webhook의 "고객 웹훅(signed)"은 이 가드 시행 前 baseline 잔존, 새 등재는
         # 처음부터 이 관례를 탄다 — spend_refresh_rate_limited 키 주석과 동형 판단).
         display_name="Stibee",
-        kind="blog",
+        kind="social",
         # unpublish(발송 취소)·insight_metrics(발송/오픈/클릭)는 PR2·PR3 몫 — 이 PR은
         # 연결 행만 다룬다(신규 기전 0, 그 필드들은 기본값 그대로 미선언).
     ),
@@ -642,7 +647,7 @@ if os.environ.get("SANDBOX_CHANNEL_ENABLED", "").strip().lower() == "true":
         refresh_mode="manual",
         credential_kind="none",
         display_name="Stibee Sandbox",  # story #3779 가드 회피 — "stibee" 어댑터와 동형 판단.
-        kind="blog",
+        kind="social",  # story 3-4 PR2 정정 — "stibee" 어댑터와 동형(위 주석 참고).
     )
 
 
