@@ -650,6 +650,12 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         video_codecs=("avc1", "hvc1", "hev1"),
         container_poll_timeout_seconds=86_400,  # 24h — 페드루 PO 지적 2026-09-12 11:34Z.
         keep_container_on_poll_timeout=True,  # CHANGES③ — 페드루 PO 지적 2026-09-12 11:55Z.
+        # story #3815(Phase3·3-5 PR3, 페드루 PO 決定) — views=viewCount·
+        # engagements=likeCount+commentCount(합산, PO 決定 그대로). PR1/PR2
+        # 시점엔 이 열이 미선언이었다(수집 배선이 이 PR 몫이라 §2(d) 관례대로
+        # 미룸) — 이제 dispatch가 생겨 선언(3696 가드 짝 맞춤, 3697
+        # EXPECTED_BACKEND_CHANNELS 주석도 같이 갱신).
+        insight_metrics=("views", "engagements"),
     ),
     "youtube_sandbox": ChannelAdapterConfig(
         authorize_url="https://accounts.google.com/o/oauth2/v2/auth",
@@ -673,6 +679,10 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         video_codecs=("avc1", "hvc1", "hev1"),
         container_poll_timeout_seconds=86_400,  # 24h — 페드루 PO 지적 2026-09-12 11:34Z.
         keep_container_on_poll_timeout=True,  # CHANGES③ — 페드루 PO 지적 2026-09-12 11:55Z.
+        # story #3815(PR3) — x_sandbox와 동형(실 API 호출 0, 위 "youtube" 선언과
+        # 짝 맞춤 — declared_metrics 필터가 제네릭 _fetch_sandbox의 7키 중
+        # 2키만 통과시킨다).
+        insight_metrics=("views", "engagements"),
     ),
 }
 

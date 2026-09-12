@@ -658,6 +658,76 @@ async def _fetch_x(client: "httpx.AsyncClient", *, access_token: str, tweet_id: 
     return {"raw": body, "values": values}
 
 
+_YOUTUBE_ENGAGEMENT_STATISTICS_FIELDS = ("likeCount", "commentCount")
+
+
+async def _fetch_youtube(client: "httpx.AsyncClient", *, access_token: str, video_id: str) -> dict[str, Any]:  # noqa: F821
+    """story #3815(Phase3·3-5 PR3, 페드루 PO 決定) — `_fetch_x`/`_fetch_threads`와
+    동형. `videos.list(part=statistics)` — viewCount→views(threads/x의 views
+    자리와 동형, YouTube는 자체가 "views"라는 이름을 씀)·likeCount+commentCount
+    합산→engagements(PO 決定, 카드 원문 "engagements = likeCount + commentCount"
+    — dislikeCount는 YouTube가 공개 API에서 이미 안 냄, §2(d) 7키류 "개별 반응
+    종류 없음" 관례와 다른 축: 아예 API에 없는 값이라 합산 후보에서 자동 제외).
+    통계값은 Google이 문자열로 준다(예: "1234") — int() 변환 필요."""
+    from app.services.youtube_publish import _VIDEOS_URL, _auth_headers
+
+    resp = await client.get(
+        _VIDEOS_URL, params={"part": "statistics", "id": video_id}, headers=_auth_headers(access_token),
+    )
+    # story #3779 BE 한글 사용자 문장 재발 가드 — 신규 코드는 영문(_fetch_x 선례 그대로).
+    if resp.status_code == 401:
+        raise InsightFetchError(error_code="CHANNEL_TOKEN_EXPIRED", message="YouTube access token expired")
+    if resp.status_code == 429:
+        raise InsightFetchError(error_code="CHANNEL_RATE_LIMITED", message="YouTube insights API rate limit exceeded")
+    if resp.status_code >= 500:
+        raise InsightFetchError(error_code="CHANNEL_PUBLISH_PROVIDER_ERROR", message=f"YouTube server error: {resp.status_code}")
+    if resp.status_code >= 400:
+        raise InsightFetchError(error_code="CHANNEL_PUBLISH_AUTH_REJECTED", message=f"YouTube insights request rejected: {resp.status_code}")
+
+    body = resp.json()
+    items = body.get("items") or []
+    statistics = (items[0].get("statistics") or {}) if items else {}
+    values: dict[str, int] = {}
+    if "viewCount" in statistics:
+        values["views"] = int(statistics["viewCount"])
+    engagement_total = sum(
+        int(statistics[k]) for k in _YOUTUBE_ENGAGEMENT_STATISTICS_FIELDS if k in statistics
+    )
+    if any(k in statistics for k in _YOUTUBE_ENGAGEMENT_STATISTICS_FIELDS):
+        values["engagements"] = engagement_total
+    return {"raw": body, "values": values}
+
+
+async def _fetch_youtube_via_connection(db: AsyncSession, snapshot: InsightSnapshot) -> dict[str, Any]:
+    """`_fetch_x_via_connection`과 동형 — quota evidence(list=1) 기록은 여기가
+    아니라 `process_due_insight_snapshots`(x_sandbox의 read-cost 기록과 같은
+    위치 축, 아래 참고) — fetch 함수 자신은 순수 조회 계층 유지(DB 접근은
+    connection/publication 조회뿐, evidence write 0)."""
+    from app.models.channel_connection import ChannelConnection
+    from app.services.channel_connection import decrypt_for_use
+
+    pub = (await db.execute(
+        select(ChannelPublication).where(ChannelPublication.id == snapshot.publication_id)
+    )).scalar_one_or_none()
+    if pub is None or pub.external_id is None:
+        raise InsightFetchError(
+            error_code="INSIGHT_PUBLICATION_NOT_FOUND", message=f"channel_publication을 찾을 수 없습니다: {snapshot.publication_id}",
+        )
+    connection = await db.get(ChannelConnection, pub.connection_id)
+    if connection is None or connection.status != "active":
+        raise InsightFetchError(
+            error_code="CHANNEL_CONNECTION_NOT_ACTIVE", message=f"연결이 활성 상태가 아닙니다: {pub.connection_id}",
+        )
+    access_token = decrypt_for_use(connection)
+    if access_token is None:
+        raise InsightFetchError(error_code="CHANNEL_CONNECTION_NOT_ACTIVE", message="연결에 자격이 없습니다")
+
+    import httpx
+
+    async with httpx.AsyncClient() as client:
+        return await _fetch_youtube(client, access_token=access_token, video_id=pub.external_id)
+
+
 async def _fetch_x_via_connection(db: AsyncSession, snapshot: InsightSnapshot) -> dict[str, Any]:
     from app.models.channel_connection import ChannelConnection
     from app.models.channel_publication import ChannelPublication
@@ -711,6 +781,14 @@ async def _fetch_for_snapshot(db: AsyncSession, snapshot: InsightSnapshot, *, li
     if snapshot.channel == "x":
         return await _fetch_x_via_connection(db, snapshot)
     if snapshot.channel == "x_sandbox":
+        return await _fetch_sandbox(db, publication_id=snapshot.publication_id, live=live)
+    # story #3815(Phase3·3-5 PR3, 페드루 PO 決定) — youtube_sandbox는 x_sandbox와
+    # 동형으로 제네릭 `_fetch_sandbox()` 재사용(신규 로직 0, insight_metrics
+    # 선언이 declared_metrics 필터를 통해 자동으로 views·engagements 2키만
+    # 통과시킨다 — _normalize 참고).
+    if snapshot.channel == "youtube":
+        return await _fetch_youtube_via_connection(db, snapshot)
+    if snapshot.channel == "youtube_sandbox":
         return await _fetch_sandbox(db, publication_id=snapshot.publication_id, live=live)
     # story #3696(Phase2·BE·funnel 갭, 디디 e2e 그라운딩 발견 2026-09-08) — 이전
     # 주석("instagram_sandbox와 달리 facebook_sandbox는 dispatch가 없으면...")이
@@ -982,6 +1060,19 @@ async def process_due_insight_snapshots(db: AsyncSession, *, now: datetime | Non
                     db, org_id=snapshot.org_id, work_item_id=snapshot.work_item_id,
                     publication_id=snapshot.publication_id, snapshot_kind=snapshot_kind,
                     cost_minor=insights_unit_cost_minor,
+                )
+            if snapshot.channel == "youtube":
+                # story #3815(Phase3·3-5 PR3, 페드루 PO 決定 — quota evidence
+                # insert 1,600·list 1) — X read-cost 기록과 같은 위치 축(성공
+                # fetch 뒤·_finalize_snapshot_write 前). event=snapshot.id로
+                # 좁혀 같은 스냅샷의 워커 재시도만 멱등(1d·7d 두 스냅샷은 서로
+                # 다른 id라 각자 따로 집계 — youtube_sandbox는 실 API 호출이
+                # 없어(제네릭 _fetch_sandbox) 기록 대상 아님).
+                from app.services.youtube_quota import record_youtube_quota_usage_evidence
+
+                await record_youtube_quota_usage_evidence(
+                    db, org_id=snapshot.org_id, work_item_id=snapshot.work_item_id,
+                    publication_id=snapshot.publication_id, event=str(snapshot.id), units=1,
                 )
             if await _finalize_snapshot_write(db, snapshot, new_status="captured"):
                 counts["captured"] += 1
