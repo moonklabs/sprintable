@@ -52,6 +52,53 @@ export function formatMinorCurrency(
   return t(CURRENCY_AMOUNT_KEYS[currency], { amount });
 }
 
+// story #3808(배포 81 라이브 회차 적기·페드루 PO 決定 2026-09-12 15:54Z) — 한도를
+// 이미 쓴 지출보다 낮게 내리면 remaining_minor가 음수로 온다(BE 계산 사실 그대로,
+// 고치지 않는다). 그 음수를 formatMinorCurrency에 그대로 먹이면 "-10,000원"처럼
+// "남은 게 있는데 마이너스"로 읽혀 사실과 반대다 — 실은 "남은 게 없고 그만큼
+// 넘었다." 남음·초과 두 값(둘 다 항상 0 이상)으로 나눠 반환 — 호출부가 자기
+// 문장 모양(접두형 라벨 vs 접미형 "...left")에 맞게 값만 골라 쓴다.
+//
+// CHANGES(유나 pre-steer·페드루 PO 決定 2026-09-12 16:21Z) — 애초엔 이 함수가
+// 완성 문자열("0원 · 한도 초과 10,000원")을 냈는데, compact 변형의 en 템플릿이
+// 접미형("X cost {remaining} left")이라 그 문자열을 그대로 넣으면 "X cost $0 ·
+// $10,000 over limit left"처럼 "left"가 엉뚱한 자리에 매달렸다(ko는 접두형
+// "남음 {remaining}"이라 우연히 무사했을 뿐 — ko만 assert하던 테스트의 사각).
+// 값 구조(remaining/overage/isOverLimit)만 내고 문장 조립은 호출부 책임으로
+// 내린다 — label·full·422 배너(전부 접두형, "남음 {value}")는 formatRemaining
+// WithOverLimit(완성 문자열)을 그대로 쓰고, compact 2곳(접미형)만 전용 키로
+// 직접 조립한다.
+export function computeRemainingOverLimit(
+  remainingMinor: number,
+  currency: GenerationBudgetCurrency,
+  locale: string,
+  t: (key: string, values?: Record<string, string | number>) => string,
+): { isOverLimit: boolean; remaining: string; overage: string } {
+  if (remainingMinor >= 0) {
+    return { isOverLimit: false, remaining: formatMinorCurrency(remainingMinor, currency, locale, t), overage: '' };
+  }
+  return {
+    isOverLimit: true,
+    remaining: formatMinorCurrency(0, currency, locale, t),
+    overage: formatMinorCurrency(-remainingMinor, currency, locale, t),
+  };
+}
+
+// generationBudgetExceededBanner·apiUsageBudgetExceededBanner·label/full 변형
+// 3+곳이 전부 이 함수 하나만 통해서 remaining을 찍는다(§19-1 "한 곳에서만"
+// 규율 재발 방지 정신 그대로) — 전부 접두형("남음 {value}") 자리라 완성
+// 문자열을 그대로 꽂아도 안전하다.
+export function formatRemainingWithOverLimit(
+  remainingMinor: number,
+  currency: GenerationBudgetCurrency,
+  locale: string,
+  t: (key: string, values?: Record<string, string | number>) => string,
+): string {
+  const r = computeRemainingOverLimit(remainingMinor, currency, locale, t);
+  if (!r.isOverLimit) return r.remaining;
+  return t('budgetRemainingOverLimit', { remaining: r.remaining, overage: r.overage });
+}
+
 export type GenerationBudgetState =
   | { status: 'loading' }
   | {
@@ -134,9 +181,15 @@ export function GenerationBudgetIndicator({
 
   if (variant === 'compact') {
     // §19-5 — submit 표면은 "남음"만, 분수 아님.
+    // story #3808 CHANGES(페드루 PO 決定 2026-09-12 16:21Z) — compact 템플릿은
+    // 접미형("{remaining} left")이라 완성 문자열을 그대로 못 꽂는다(en "left"가
+    // "over limit" 뒤에 매달리는 사고) — 전용 over-limit 키로 직접 조립.
+    const r = computeRemainingOverLimit(remainingMinor, currency, locale, t);
     return (
       <span className="text-xs text-muted-foreground" data-testid="generation-budget-remaining-compact">
-        {t('generationBudgetRemainingCompact', { remaining: formatMinorCurrency(remainingMinor, currency, locale, t) })}
+        {r.isOverLimit
+          ? t('generationBudgetRemainingCompactOverLimit', { remaining: r.remaining, overage: r.overage })
+          : t('generationBudgetRemainingCompact', { remaining: r.remaining })}
       </span>
     );
   }
@@ -152,7 +205,7 @@ export function GenerationBudgetIndicator({
         {t('generationBudgetSpentLabel')} <span className="text-foreground">{formatMinorCurrency(state.spentMinor, currency, locale, t)}</span>
       </span>
       <span className="text-muted-foreground">
-        {t('generationBudgetRemainingLabel')} <span className="text-foreground" data-testid="generation-budget-remaining-value">{formatMinorCurrency(remainingMinor, currency, locale, t)}</span>
+        {t('generationBudgetRemainingLabel')} <span className="text-foreground" data-testid="generation-budget-remaining-value">{formatRemainingWithOverLimit(remainingMinor, currency, locale, t)}</span>
       </span>
     </div>
   );
