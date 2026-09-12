@@ -50,6 +50,7 @@ from app.services.channel_posts import (
     ChannelTextTooLongError,
     ChannelTokenExpiredError,
     ChannelUnpublishUnsupportedError,
+    ChannelVideoRequiredError,
     ContentRuleViolationError,
     ExternalPublishGateNotApprovedError,
     PublicationCommandNotCancellableError,
@@ -1690,6 +1691,13 @@ async def _submit_channel_post_draft_endpoint(
                 "code": "CONTENT_RULE_VIOLATION", "rules_version": exc.rules_version,
                 "violations": exc.violations,
             },
+        ) from exc
+    except ChannelVideoRequiredError as exc:
+        # story #3815(Phase3·3-5 PR2, 페드루 PO 確定 2026-09-12) — ChannelImage
+        # RequiredError와 동형 위치·모양(영상판).
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "CHANNEL_VIDEO_REQUIRED", "message": str(exc)},
         ) from exc
     except ChannelImageRequiredError as exc:
         # story #3536(PO 確定 2026-09-06) — 필드 완결성 422(CHANNEL_TEXT_TOO_LONG류와
