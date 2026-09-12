@@ -29,6 +29,7 @@ import os
 import httpx
 
 from app.services.destination_url_safety import DestinationURLUnsafeError, assert_destination_url_safe
+from app.services.markdown_render import render_markdown_html
 
 _POSTS_PATH = "/wp-json/wp/v2/posts"
 
@@ -92,7 +93,14 @@ async def publish(
     응답 JSON의 `id`(정수, 문자열로 캐스팅)·`link`."""
     base = await _validate_https(site_url)
     path = f"{_POSTS_PATH}/{external_id}" if external_id else _POSTS_PATH
-    payload = {"title": title, "content": body_md, "excerpt": summary, "slug": slug, "status": "publish"}
+    # 클래스 정정(story #3816 PR2, markdown_render.py 도입으로 드러남) — WordPress
+    # REST의 `content`도 Ghost와 같은 HTML 계약이라(마크다운 문법을 그대로 넘기면
+    # 글에 문법이 노출된다), raw body_md를 그대로 보내던 것을 같은 공용 변환기로
+    # 바꾼다(신규 판정 로직 0, markdown_render.render_markdown_html 재사용).
+    payload = {
+        "title": title, "content": render_markdown_html(body_md), "excerpt": summary,
+        "slug": slug, "status": "publish",
+    }
     resp = await client.post(
         f"{base}{path}", json=payload, auth=httpx.BasicAuth(username, app_password), timeout=20,
     )

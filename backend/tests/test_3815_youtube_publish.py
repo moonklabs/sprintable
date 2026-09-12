@@ -121,6 +121,34 @@ async def test_check_youtube_quota_or_raise_exceeds_includes_reset_at_utc_midnig
         await engine.dispose()
 
 
+def test_youtube_usage_exceeded_wording_matches_actual_utc_day_window_boundary():
+    """⭐드리프트 가드(story #3815, 페드루 PO 지적 2026-09-12 14:21Z) — i18n_catalog의
+    정적 문장 「매일 오전 9시(한국 시간)」/"00:00 UTC"가 실제 `_utc_day_window`
+    경계와 갈리면 안 된다. 경계를 UTC 자정에서 계산해 KST(UTC+9)로 환산한
+    시(hour)가 9가 아니면 이 테스트가 RED — 그 시점이 이 카탈로그 문장도 같이
+    고쳐야 한다는 신호다(문장 자체는 계산식과 무관한 리터럴이라 자동 동기화가
+    안 되므로, 이 pin이 유일한 안전망)."""
+    from datetime import timedelta
+
+    from app.services.i18n_catalog import t
+    from app.services.youtube_quota import _utc_day_window
+
+    now = datetime(2026, 9, 12, 15, 30, 0, tzinfo=timezone.utc)
+    _, boundary_utc = _utc_day_window(now)
+    assert (boundary_utc.hour, boundary_utc.minute, boundary_utc.second) == (0, 0, 0), (
+        "경계가 UTC 자정이 아니게 바뀌었다 — 아래 카탈로그 문장도 같이 고칠 것"
+    )
+    kst_hour = (boundary_utc + timedelta(hours=9)).hour
+    assert kst_hour == 9, (
+        f"UTC 자정의 KST 환산이 9시가 아님({kst_hour}시) — 「매일 오전 9시(한국 시간)」 문구 갱신 필요"
+    )
+
+    ko = t("channel_posts.youtube_usage_exceeded", "ko")
+    en = t("channel_posts.youtube_usage_exceeded", "en")
+    assert "오전 9시(한국 시간)" in ko
+    assert "00:00 UTC" in en
+
+
 @pytest.mark.anyio
 async def test_platform_wide_quota_sum_ignores_org_id():
     """org_id 필터가 없다는 게 이 함수의 요점 — 서로 다른 두 조직의 evidence가
