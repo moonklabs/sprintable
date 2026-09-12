@@ -230,6 +230,13 @@ const KNOWN_ERRORS: Record<string, KnownError> = {
   // 고쳐야 하는 문제(요금제 업그레이드·발신자 인증)라는 걸 문구가 말한다.
   STIBEE_PLAN_RESTRICTED: { labelKey: 'errorStibeePlanRestricted', kind: 'provider_error' },
   STIBEE_SENDER_NOT_VERIFIED: { labelKey: 'errorStibeeSenderNotVerified', kind: 'provider_error' },
+  // story #3816(Phase3·3-6 PR2, 페드루 PO §낱말 정정 2, 2026-09-12) — Ghost JWT
+  // 401(재서명 1회 재시도까지 실패)은 위 stibee 2종과 반대 세계다 — 키를 다시
+  // 붙여넣으면(재연결) 실제로 풀리는 오류라 kind='token_expired'(재연결 세계).
+  // 문구는 저장 시 GHOST_ADMIN_KEY_INVALID와 같은 낱말을 재사용(전용 키로 새로
+  // 등재 — errorChannelTokenExpired의 일반 "연결이 끊겼습니다" 문구를 쓰면
+  // "무엇을 다시 입력해야 하는지"가 사라진다).
+  GHOST_AUTH_FAILED: { labelKey: 'errorGhostAuthFailed', kind: 'token_expired' },
   // story #3426(BE #3419, PR#3774) — 예약 취소·회수 6종(그라운딩 확認·2026-09-04 07:5x).
   // CANCEL_UNPUBLISH_HUMAN_ONLY/OWNER_OR_ADMIN_ONLY는 site-posts의 UNPUBLISH_* 항목을
   // 그대로 재사용한다(같은 "발행 취소·회수는 이 역할만" 개념 공유, 문구도 동일).

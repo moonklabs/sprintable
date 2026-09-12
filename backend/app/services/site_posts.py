@@ -1144,12 +1144,13 @@ def _blog_destination_exception_classes() -> tuple[tuple[type[Exception], ...], 
     공개 예외 타입을 갖는다(호출자 계약 유지, 모듈 재사용 원칙) — 오케스트레이션
     계층은 둘 다 잡아야 하므로 여기서 한 곳에 모은다(새 모듈이 추가되면 여기 한 줄만
     늘면 된다)."""
+    from app.services.ghost_publish import GhostPublishError, GhostSiteURLInsecureError
     from app.services.webhook_publish import WebhookPublishError, WebhookTargetURLInsecureError
     from app.services.wordpress_publish import WordPressPublishError, WordPressSiteURLInsecureError
 
     return (
-        (WordPressSiteURLInsecureError, WebhookTargetURLInsecureError),
-        (WordPressPublishError, WebhookPublishError),
+        (WordPressSiteURLInsecureError, WebhookTargetURLInsecureError, GhostSiteURLInsecureError),
+        (WordPressPublishError, WebhookPublishError, GhostPublishError),
     )
 
 
@@ -1162,6 +1163,17 @@ def _blog_publish_error_code(exc: Exception) -> str:
     대상: 이 분기를 지우면 401도 CHANNEL_PUBLISH_PROVIDER_ERROR(transient)로 떨어져
     고쳐지지 않는 자격으로 무한 백오프 재시도만 반복한다(webhook 라이브 테스트가
     실제로 이 경로를 잡았다)."""
+    # story #3816(Phase3·3-6 PR2, 페드루 PO §낱말 정정 2, 2026-09-12) — Ghost의
+    # 401은 ghost_publish.py가 이미 재서명 1회 재시도까지 거친 뒤에만 여기 온다
+    # (자격 자체가 틀렸다는 뜻). CHANNEL_PUBLISH_AUTH_REJECTED와 다른 코드를 쓰는
+    # 이유는 저장 시 GHOST_ADMIN_KEY_INVALID와 같은 문구를 재사용해야 해서다 —
+    # 둘 다 결과(연결 「다시 연결 필요」 승격)는 같다(_CONNECTION_BLOCKED_CODES
+    # 등재, publication_command.py). 뮤테이션 대상 — 이 분기를 지우면 Ghost 401도
+    # CHANNEL_PUBLISH_AUTH_REJECTED로 떨어져(틀린 문구는 아니지만) 회귀로 잡는다.
+    from app.services.ghost_publish import GhostPublishError
+
+    if isinstance(exc, GhostPublishError) and exc.status_code == 401:
+        return "GHOST_AUTH_FAILED"
     if getattr(exc, "status_code", None) in (401, 403):
         return "CHANNEL_PUBLISH_AUTH_REJECTED"
     return "CHANNEL_PUBLISH_PROVIDER_ERROR"
@@ -1169,7 +1181,7 @@ def _blog_publish_error_code(exc: Exception) -> str:
 
 async def _call_blog_module_publish(
     module, client, *, channel: str, connection, app_password: str, title: str, body_md: str,
-    summary: str, tags: list, slug: str, external_id: str | None,
+    summary: str, tags: list, slug: str, external_id: str | None, scheduled_at: datetime | None = None,
 ) -> tuple[str, str | None]:
     """story e4fc29fa(조각④) — wordpress/webhook 모듈은 이름(publish)은 같아도
     파라미터 모양이 다르다(BlogDestinationModule Protocol 明示 — 목적지마다 자격
@@ -1186,6 +1198,21 @@ async def _call_blog_module_publish(
             client, target_url=connection.account_id, secret=app_password, title=title, body_md=body_md,
             summary=summary, tags=tags, slug=slug, external_id=external_id,
         )
+    if channel in ("ghost", "ghost_sandbox"):
+        # story #3816(Phase3·3-6 PR2) — ghost_sandbox_publish.py는 ghost_publish.py와
+        # 같은 시그니처라(4호 구현체, CHANGES 1) kwargs 조립을 그대로 공유한다.
+        # scheduled_at은 command.scheduled_at을
+        # 그대로 넘긴다. ⚠️site_post는 아직 scheduled_at 개념이 없어(그라운딩
+        # 확認 — 모든 site_post 커맨드가 scheduled_at=None으로 생성된다, 위
+        # publish_site_post_external_command 호출부 참고) 이 분기는 오늘 코드상
+        # 항상 None(=published)만 실행된다 — API 계약·테스트는 갖췄으나 살아있는
+        # 스케줄 호출 경로는 아직 없다(site_post 스케줄 기능이 생기면 그때 값이
+        # 실린다, 지어내지 않는다).
+        return await module.publish(
+            client, site_url=connection.account_id, admin_api_key=app_password, title=title,
+            body_md=body_md, summary=summary, tags=tags, slug=slug, external_id=external_id,
+            scheduled_at=scheduled_at,
+        )
     raise SitePostExternalPublishError(
         error_code="SITE_POST_DRAFT_NOT_FOUND", message=f"알 수 없는 blog 채널: {channel!r}",
     )
@@ -1200,6 +1227,11 @@ async def _call_blog_module_unpublish(module, client, *, channel: str, connectio
         return
     if channel == "webhook":
         await module.unpublish(client, target_url=connection.account_id, secret=app_password, external_id=external_id)
+        return
+    if channel in ("ghost", "ghost_sandbox"):
+        await module.unpublish(
+            client, site_url=connection.account_id, admin_api_key=app_password, external_id=external_id,
+        )
         return
     raise SitePostExternalPublishError(
         error_code="SITE_POST_DRAFT_NOT_FOUND", message=f"알 수 없는 blog 채널: {channel!r}",
@@ -1417,7 +1449,7 @@ async def publish_site_post_external_command(db: AsyncSession, command: "Publica
             external_id, permalink = await _call_blog_module_publish(
                 module, client, channel=connection.channel, connection=connection, app_password=app_password,
                 title=version.title, body_md=version.body_md, summary=version.summary, tags=version.tags,
-                slug=draft.slug, external_id=prior_external_id,
+                slug=draft.slug, external_id=prior_external_id, scheduled_at=command.scheduled_at,
             )
     except _BLOG_DESTINATION_INSECURE_ERRORS as exc:
         raise SitePostExternalPublishError(error_code="SITE_POST_DESTINATION_INSECURE", message=str(exc)) from exc
