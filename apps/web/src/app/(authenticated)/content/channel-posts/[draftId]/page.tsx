@@ -7,6 +7,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { fetchWithAuth } from '@/lib/db/client';
 import { channelLabel, channelConnectionIdentityLabel } from '@/lib/channel-label';
@@ -2734,7 +2735,7 @@ export default function ChannelPostEditPage() {
           스레드 미지원 — 목록 UI 자체를 안 그린다(채널 이름 하드코딩 금지 축,
           image_max_count와 동형 관례). */}
       {threadMaxSegments > 0 ? (
-        <div className="space-y-2 rounded-md border border-border p-3 text-sm" data-testid="channel-post-thread-editor">
+        <Card className="space-y-2 p-3 text-sm" data-testid="channel-post-thread-editor">
           <div className="flex items-center justify-between">
             <span className="text-muted-foreground">{t('channelPostsThreadEditorLabel')}</span>
             <span className="text-xs text-muted-foreground" data-testid="channel-post-thread-count">
@@ -2749,7 +2750,11 @@ export default function ChannelPostEditPage() {
             const segLength = channelTextLength(seg);
             const segOverLimit = typeof maxTextLength === 'number' && segLength > maxTextLength;
             return (
-              <div key={i} className="space-y-1" data-testid={`channel-post-thread-segment-${i}`}>
+              // story #3785(유나 定, 페드루 PO 지시 2026-09-12 07:43Z) — verify-no-card-
+              // surfaceless-box 가드가 요구하는 표면 프리미티브 그대로: 세그먼트 입력칸
+              // 자체를 Card(surface='subtle', 바깥 Card와 구별되는 중첩 표면)로 감싸고
+              // textarea는 표면 위 투명 입력으로(테두리 없는 상자를 만들지 않는다).
+              <Card key={i} surface="subtle" className="space-y-1 p-2" data-testid={`channel-post-thread-segment-${i}`}>
                 <div className="flex items-start gap-2">
                   <span className="mt-2 shrink-0 text-xs text-muted-foreground">{i + 2}.</span>
                   <textarea
@@ -2760,7 +2765,7 @@ export default function ChannelPostEditPage() {
                       setThreadSegments(next);
                     }}
                     rows={3}
-                    className="w-full rounded-md border border-border p-2 text-sm"
+                    className="w-full bg-transparent text-sm"
                     data-testid={`channel-post-thread-segment-field-${i}`}
                   />
                   <Button
@@ -2781,7 +2786,7 @@ export default function ChannelPostEditPage() {
                 >
                   {typeof maxTextLength === 'number' ? `${segLength} / ${maxTextLength}` : `${segLength}`}
                 </span>
-              </div>
+              </Card>
             );
           })}
           {isThreadOverCap ? (
@@ -2797,7 +2802,7 @@ export default function ChannelPostEditPage() {
           >
             {t('channelPostsThreadSegmentAdd')}
           </Button>
-        </div>
+        </Card>
       ) : null}
 
       {/* story #3556(§17-23①, 유나 確定 2026-09-06) — video_max_bytes>0일 때만

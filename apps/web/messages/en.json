@@ -2429,7 +2429,7 @@
     "channelPostsThreadSegmentRemove": "Remove",
     "channelPostsThreadSegmentRemoveActionLabel": "Remove continuation {position}",
     "channelPostsThreadSegmentAdd": "Add continuation",
-    "channelPostsThreadOverCap": "This channel supports up to {max} thread segments.",
+    "channelPostsThreadOverCap": "Up to {max} continuation segments on this channel.",
     "channelPostsThreadContinuePublishCta": "Continue publishing remaining",
     "channelPostsThreadStatusPartial": "Thread: {published} of {total} published · segment {failedSeq} failed",
     "channelPostsThreadStatusComplete": "Thread: {published} of {total} published",
