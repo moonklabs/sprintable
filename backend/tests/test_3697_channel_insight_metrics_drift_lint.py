@@ -54,7 +54,7 @@ export const CHANNEL_DECLARED_METRICS: Record<string, readonly BoardMetric[]> = 
 """
 
 # BACKEND_PY_MATCHING이 실제로 선언한 채널 4개뿐(threads·hosted_site·wordpress·sandbox) —
-# 합성 fixture 테스트는 실물의 9개 전부를 요구하지 않는다(find_drift의 expected_channels
+# 합성 fixture 테스트는 실물의 19개 전부를 요구하지 않는다(find_drift의 expected_channels
 # 문서 참고). 완전성 백스톱 자체는 아래 별도 테스트가 판다.
 FIXTURE_EXPECTED_CHANNELS = frozenset({"threads", "hosted_site", "wordpress", "sandbox"})
 
@@ -150,7 +150,7 @@ def test_parser_missing_a_channel_fails_loud_not_silently_green():
 
 
 def test_expected_backend_channels_matches_real_channel_adapters_count():
-    """EXPECTED_BACKEND_CHANNELS(9개, 손 유지)가 실물 channel_adapters.py와 지금 실제로
+    """EXPECTED_BACKEND_CHANNELS(19개, 손 유지)가 실물 channel_adapters.py와 지금 실제로
     맞는지 — 실물에 새 채널이 추가/삭제되면 이 테스트가 먼저 깨져 EXPECTED_BACKEND_
     CHANNELS를 갱신하라고 알린다(안 갱신하면 완전성 백스톱 자체가 항상 실패하게 되어
     누구도 못 지나칠 정도로 시끄럽다 — 조용히 stale해지지 않는다)."""

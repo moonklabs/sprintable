@@ -1271,6 +1271,10 @@ class CreatePastedSecretConnectionRequest(BaseModel):
     # 실호출 왕복하지 않는다, PO 明示 "저장 시 프로브는 auth-check 1개만").
     sender_email: str | None = None
     sender_name: str | None = None
+    # story #3816(Phase3·3-6 PR1, 페드루 PO 確定 2026-09-12) — Ghost Admin API 키
+    # (`{id}:{hex secret}` 형). site_url은 위 wordpress 필드를 그대로 재사용한다
+    # (같은 뜻 — 목적지 사이트 주소, 채널마다 새 필드를 만들지 않는다).
+    admin_api_key: str | None = None
 
 
 @router.post("/{org_id}/channel-connections/{channel}", response_model=ChannelConnectionResponse, status_code=201)
@@ -1421,8 +1425,72 @@ async def create_pasted_secret_channel_connection(
         )
         return _to_response(row)
 
-    # story e4fc29fa(조각⑤) — 위 credential_kind 가드가 이미 wordpress/webhook/stibee
-    # 외의 모든 채널을 걸렀다(현재 pasted_secret 채널은 이 셋뿐) — 새 pasted_secret
+    if channel == "ghost":
+        if not body.site_url or not body.admin_api_key:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "GHOST_FIELDS_REQUIRED",
+                    "message": t("channel_connections.ghost_fields_required", resolved_locale),
+                },
+            )
+        from app.services.ghost_client import ghost_stub_enabled
+
+        try:
+            # story #3816(PR1, 페드루 PO 캡처 지시 2026-09-12) — wordpress/webhook과
+            # 동형: allow_loopback은 항상 False가 아니라 dev 스텁 플래그로 게이트
+            # (GHOST_TEST_STUB_ENABLED=true일 때만 http://localhost 허용, prod는
+            # 이 플래그 자체가 없어 여전히 항상 False와 동치).
+            site_url = await assert_destination_url_safe(body.site_url, allow_loopback=ghost_stub_enabled())
+        except DestinationURLUnsafeError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "CHANNEL_CONNECTION_DESTINATION_INSECURE", "message": str(exc)},
+            ) from exc
+        # story #3816(Phase3·3-6 PR1, 페드루 PO 確定 2026-09-12) — 「가짜 키=초록
+        # Connected」 결함을 처음부터 안 만든다(stibee auth-check 동형 관례). site
+        # 검증 1개만 실호출(다른 엔드포인트 프로브 0) — 실패면 연결 행 자체를 저장하지
+        # 않는다(fail-closed). key_rejected 판정(4xx 전체=거절)은 실 사이트 왕복 前
+        # 상태라 stibee의 400 정정 선례를 따르는 보수적 기본값(⚠️미확認).
+        from app.services.ghost_client import GhostSiteVerifyFailed, verify_admin_api_key
+
+        async with httpx.AsyncClient(timeout=10) as ghost_http_client:
+            try:
+                await verify_admin_api_key(ghost_http_client, site_url=site_url, admin_api_key=body.admin_api_key)
+            except GhostSiteVerifyFailed as exc:
+                logger.warning(
+                    "ghost site 검증 실패 — org=%s status=%s key_rejected=%s site_not_found=%s",
+                    org_id, exc.status_code, exc.is_key_rejected, exc.is_site_not_found,
+                )
+                # story #3816 CHANGES 1(페드루 PO 지목 2026-09-12) — site_url은 사용자
+                # 입력이라(stibee의 고정 base URL엔 없던 축) 「주소 틀림」(오타·Ghost
+                # 아닌 사이트 → 흔히 404)이 「키 틀림」(401/403)만큼 온다. 예전처럼
+                # "4xx 전체=키 오류"로 뭉치면 주소 오류를 키 오류로 잘못 안내해 사람이
+                # 키를 다시 붙여넣어도 같은 오류가 재현되는 거짓 진입점이 된다 — 셋으로
+                # 가른다.
+                if exc.is_key_rejected:
+                    code, message_key = "GHOST_ADMIN_KEY_INVALID", "channel_connections.ghost_admin_key_invalid"
+                elif exc.is_site_not_found:
+                    code, message_key = "GHOST_SITE_NOT_FOUND", "channel_connections.ghost_site_not_found"
+                else:
+                    code, message_key = "GHOST_SITE_VERIFY_UNAVAILABLE", "channel_connections.ghost_site_verify_unavailable"
+                raise HTTPException(
+                    status_code=422,
+                    detail={"code": code, "message": t(message_key, resolved_locale)},
+                ) from exc
+        # story #3816 — wordpress와 동형으로 site_url이 (org, channel, account_id)
+        # 멱등 키다(사이트별로 별개 연결 — stibee의 "org당 1개 고정 리터럴"과 다른 축,
+        # Ghost는 고객이 사이트를 여러 개 가질 수 있다). account_label은 미사용(사이트
+        # 자체가 이미 식별자 — webhook의 target_url·account_label=None과 동형).
+        row = await upsert_channel_connection(
+            db, org_id=org_id, channel="ghost", account_id=site_url, account_label=None,
+            credential_kind="pasted_secret", access_token=body.admin_api_key, refresh_token=None,
+            token_expires_at=None, refresh_mode=adapter.refresh_mode, scopes=[], connected_by=resolved.id,
+        )
+        return _to_response(row)
+
+    # story e4fc29fa(조각⑤) — 위 credential_kind 가드가 이미 wordpress/webhook/stibee/ghost
+    # 외의 모든 채널을 걸렀다(현재 pasted_secret 채널은 이 넷뿐) — 새 pasted_secret
     # 채널이 추가되고 여기 분기가 안 늘면 이 자리로 떨어져 fail-closed(조용히
     # threads류로 새지 않는다).
     raise HTTPException(
@@ -1440,6 +1508,10 @@ class ReplaceCredentialsRequest(BaseModel):
     secret: str | None = None
     # story 3-4(PR1) — 스티비 Auth Key 회전.
     api_key: str | None = None
+    # story #3816(Phase3·3-6 PR1) — Ghost Admin API 키 회전. site_url은 여기 없다
+    # ("id·계정 축은 불변, 자격만 바꾼다" 관례 — wordpress의 username?와 달리 Ghost는
+    # site_url이 계정 축 자체라 회전 대상이 아니다).
+    admin_api_key: str | None = None
 
 
 @router.patch(
@@ -1528,10 +1600,44 @@ async def replace_channel_connection_credentials(
                     detail={"code": code, "message": t(message_key, resolved_locale)},
                 ) from exc
         new_secret, account_label = body.api_key, None
+    elif row.channel == "ghost":
+        if not body.admin_api_key:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "GHOST_FIELDS_REQUIRED",
+                    "message": t("channel_connections.ghost_fields_required", resolved_locale),
+                },
+            )
+        # story #3816(Phase3·3-6 PR1) — 회전(rotate)도 저장이다, 생성과 같은 site
+        # 검증 프로브를 거친다(stibee 3-4 PR5-a 선례와 동형 — "저장 시"가 생성만
+        # 뜻하지 않는다). site_url은 새로 입력받지 않고 기존 연결 행의 account_id를
+        # 그대로 쓴다(회전은 자격만 바꾼다, site_url은 계정 축).
+        from app.services.ghost_client import GhostSiteVerifyFailed, verify_admin_api_key
+
+        async with httpx.AsyncClient(timeout=10) as ghost_http_client:
+            try:
+                await verify_admin_api_key(ghost_http_client, site_url=row.account_id, admin_api_key=body.admin_api_key)
+            except GhostSiteVerifyFailed as exc:
+                logger.warning(
+                    "ghost site 검증 실패(회전) — org=%s status=%s key_rejected=%s site_not_found=%s",
+                    org_id, exc.status_code, exc.is_key_rejected, exc.is_site_not_found,
+                )
+                if exc.is_key_rejected:
+                    code, message_key = "GHOST_ADMIN_KEY_INVALID", "channel_connections.ghost_admin_key_invalid"
+                elif exc.is_site_not_found:
+                    code, message_key = "GHOST_SITE_NOT_FOUND", "channel_connections.ghost_site_not_found"
+                else:
+                    code, message_key = "GHOST_SITE_VERIFY_UNAVAILABLE", "channel_connections.ghost_site_verify_unavailable"
+                raise HTTPException(
+                    status_code=422,
+                    detail={"code": code, "message": t(message_key, resolved_locale)},
+                ) from exc
+        new_secret, account_label = body.admin_api_key, None
     else:
         # story e4fc29fa(조각⑤)의 fail-closed 관례 그대로 — 현재 pasted_secret 채널은
-        # wordpress/webhook/stibee 셋뿐. 새 pasted_secret 채널이 추가되고 이 분기가
-        # 안 늘면 조용히 새지 않고 여기로 떨어진다.
+        # wordpress/webhook/stibee/ghost 넷뿐. 새 pasted_secret 채널이 추가되고 이
+        # 분기가 안 늘면 조용히 새지 않고 여기로 떨어진다.
         raise HTTPException(
             status_code=404,
             detail={"code": "CHANNEL_NOT_PASTED_SECRET", "message": f"channel={row.channel!r}는 아직 지원하지 않습니다."},

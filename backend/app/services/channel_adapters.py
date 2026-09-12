@@ -483,6 +483,26 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         # (발송 취소)는 여전히 이 PR 범위 밖.
         insight_metrics=("opens", "delivered", "clicks"),
     ),
+    # story #3816(Phase3·3-6, 페드루 PO 確定 2026-09-12) — Ghost 첫 조각: 연결 행뿐
+    # (글 생성·이미지 업로드는 PR2 몫, wordpress 조각⑤/③b·④ 선례와 동형 순서). Ghost는
+    # 스티비(newsletter)와 달리 실제로 「사이트 글」(site_post)이라 kind="blog"가
+    # 맞다(위 stibee의 kind="blog"→"social" 자가 정정 사유가 여기엔 적용되지 않는다
+    # — Ghost 글은 채널 포스트 파이프라인이 아니라 wordpress와 같은 site 글 파이프라인
+    # 대상, PO ② "wordpress 어댑터 형·hosted_site 발행 경로" 재사용 지시 그대로).
+    "ghost": ChannelAdapterConfig(
+        authorize_url="",
+        token_url="",
+        scope="",
+        refresh_mode="manual",  # Admin API 키는 만료·자동갱신 개념 자체가 없음(wordpress 동형).
+        credential_kind="pasted_secret",
+        display_name="Ghost",  # story #3779 가드 회피(stibee 항목과 동형 판단).
+        kind="blog",
+        # unpublish=ghost_publish.unpublish()(PR2 몫) — 그때까지는 site_posts.py에
+        # 이 채널의 dispatch 분기 자체가 없어 어차피 발행·회수 둘 다 안 된다.
+        supports_unpublish=False,
+        # insight_metrics 미선언(기본 빈 튜플) — Ghost Admin API에 통계 엔드포인트가
+        # 없다(그라운딩 확認, PO ⑥ "미측정"). wordpress·webhook과 동형(둘 다 미선언).
+    ),
     # story #3806(Phase3·3-2 PR1, 페드루 PO 確定 2026-09-11) — Meta Ads boost 첫 출시.
     # 콘텐츠 필드(image_*/video_*/max_text_length 등)는 전부 미선언(0/빈값 기본) —
     # 이 채널은 새 콘텐츠를 만들지 않고 기존 발행물을 참조만 한다(그라운딩① object_
@@ -716,6 +736,21 @@ if os.environ.get("SANDBOX_CHANNEL_ENABLED", "").strip().lower() == "true":
         # RED로 잡는다 — wordpress/webhook이 실 fetch 배선 前엔 insight_metrics를
         # 미선언 상태로 두는 것과 동형 판단.
         insight_metrics=("opens", "delivered", "clicks"),
+    )
+    # story #3816(Phase3·3-6, 페드루 PO 確定 2026-09-12) — Ghost dev 전용 샌드박스.
+    # wordpress/webhook은 실 사이트/서버 없이도 각자 모듈의 dev 스텁 플래그(loopback
+    # 허용)로 로컬 검증이 가능했지만, Ghost는 실 Ghost 인스턴스가 없으면 JWT 서명·
+    # site 검증 왕복 자체를 확認할 길이 없다 — stibee_sandbox와 동형 취지(credential
+    # 자체가 없는 결정적 가짜 provider, `/{org_id}/channel-connections/ghost_sandbox/
+    # sandbox` 범용 엔드포인트가 신규 라우트 0으로 이 등재를 받는다).
+    CHANNEL_ADAPTERS["ghost_sandbox"] = ChannelAdapterConfig(
+        authorize_url="",
+        token_url="",
+        scope="",
+        refresh_mode="manual",
+        credential_kind="none",
+        display_name="Ghost Sandbox",  # story #3779 가드 회피 — "ghost" 어댑터와 동형 판단.
+        kind="blog",  # "ghost"와 동형(위 주석 참고) — stibee의 social 정정 사유는 적용 안 됨.
     )
 
 

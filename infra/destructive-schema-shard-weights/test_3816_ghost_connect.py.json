@@ -1,0 +1,1 @@
+{"file": "tests/test_3816_ghost_connect.py", "sec": 7.9, "source": "story-3816(Phase3·3-6 PR1, 페드루 PO 確定 2026-09-12) — 재측(로컬, uv run pytest -m destructive_schema --durations=0 직접 1회 실행, 13건 wall time 약 7.9s — test_3813_stibee_esp_connection.py 등재 선례와 동일 방법론)"}

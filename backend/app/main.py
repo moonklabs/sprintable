@@ -95,6 +95,8 @@ async def lifespan(app: FastAPI):
     assert_wordpress_stub_not_registered_in_prod()  # story e4fc29fa 조각③c: prod에 WordPress 스텁 등재=기동 실패(fail-closed).
     from app.routers.dev_webhook_stub import assert_webhook_stub_not_registered_in_prod
     assert_webhook_stub_not_registered_in_prod()  # story e4fc29fa 조각④: prod에 webhook 스텁 등재=기동 실패(fail-closed).
+    from app.routers.dev_ghost_stub import assert_ghost_stub_not_registered_in_prod
+    assert_ghost_stub_not_registered_in_prod()  # story #3816 PR1: prod에 Ghost 스텁 등재=기동 실패(fail-closed).
     # story bea25062: cutover 존재-캐시는 의도적으로 startup에서 warm 안 함(자체 발견 —
     # TestClient(app)로 lifespan을 태우는 기존 SSE 테스트들이 라우트 전용으로 짜둔 유한한
     # mock db.execute() 순서-큐를 startup 시점의 이 캐시 조회가 몰래 하나 소비해 실패시켰다).
@@ -527,6 +529,11 @@ from app.routers import dev_webhook_stub as _dev_webhook_stub  # noqa: E402
 
 if _dev_webhook_stub.webhook_stub_enabled():
     app.include_router(_dev_webhook_stub.router)
+# story #3816(PR1) — dev 전용 Ghost Admin API 모의. 위와 같은 이중방어 사상.
+from app.routers import dev_ghost_stub as _dev_ghost_stub  # noqa: E402
+
+if _dev_ghost_stub.ghost_stub_enabled():
+    app.include_router(_dev_ghost_stub.router)
 app.include_router(resolve.router)
 app.include_router(org_invites.router)
 app.include_router(invite_accept.router)

@@ -49,6 +49,20 @@ describe('connectErrorLabelKey (story #3409)', () => {
     expect(connectErrorLabelKey('STIBEE_AUTH_CHECK_UNAVAILABLE', true)).toBe('channelConnectErrorStibeeAuthCheckUnavailable');
   });
 
+  // story #3816(Phase3·3-6 PR1, 페드루 PO 確定 2026-09-12) — Ghost 연결 폼 422
+  // 3종(필드 누락·Admin API 키 검증 실패·site 검증 불가). stibee 3키와 동형.
+  it('⭐GHOST_FIELDS_REQUIRED·GHOST_ADMIN_KEY_INVALID·GHOST_SITE_VERIFY_UNAVAILABLE — 신규 3키', () => {
+    expect(connectErrorLabelKey('GHOST_FIELDS_REQUIRED', true)).toBe('channelConnectErrorGhostFieldsRequired');
+    expect(connectErrorLabelKey('GHOST_ADMIN_KEY_INVALID', true)).toBe('channelConnectErrorGhostAdminKeyInvalid');
+    expect(connectErrorLabelKey('GHOST_SITE_VERIFY_UNAVAILABLE', true)).toBe('channelConnectErrorGhostSiteVerifyUnavailable');
+  });
+
+  // story #3816 CHANGES 1(페드루 PO 지목 2026-09-12) — site_url 오타·Ghost 아닌
+  // 사이트(흔히 404)는 키 오류와 다른 처방(주소를 고쳐야 풀림) — 별도 4번째 키.
+  it('⭐GHOST_SITE_NOT_FOUND — 키 오류와 구분되는 신규 키', () => {
+    expect(connectErrorLabelKey('GHOST_SITE_NOT_FOUND', true)).toBe('channelConnectErrorGhostSiteNotFound');
+  });
+
   // story #3813 PR5-b CHANGES(페드루 PO 지적 2026-09-12) — BE가 sender_email·
   // sender_name까지 4필드 전부 필수로 넓어졌는데(PR5-b) FE 문구가 옛 2필드
   // ("API 키와 주소록 ID") 그대로 남아 있던 결함. 문구 자체를 4필드로 갱신했다 —
