@@ -271,6 +271,65 @@ async def test_connection_response_privacy_locked_false_when_audit_complete(monk
 
 
 @pytest.mark.anyio
+async def test_connection_response_flags_are_adapter_declared_not_video_required_proxy(monkeypatch):
+    """근본 처방 확認(페드루 PO 決定 2026-09-12 16:51Z) — youtube_metadata_required/
+    privacy_locked가 더 이상 video_required의 대리 계산이 아님을 증명한다. 가짜
+    채널을 하나 등록해 video_required=True인데 youtube_metadata_required=False·
+    privacy_lockable=False를 명시 선언 — 대리 계산이었다면(구 코드) 이 조합이
+    youtube_metadata_required=True·privacy_locked=True로 잘못 떴을 것."""
+    from app.core.config import settings
+    from app.main import app
+    from app.services.channel_adapters import CHANNEL_ADAPTERS, ChannelAdapterConfig
+    from app.services.channel_connection import upsert_channel_connection
+
+    monkeypatch.setattr(settings, "youtube_api_audit_incomplete", True)
+    fake_channel = "test_3815_video_only_no_youtube_meta"
+    monkeypatch.setitem(
+        CHANNEL_ADAPTERS, fake_channel,
+        ChannelAdapterConfig(
+            authorize_url="https://example.invalid/oauth/authorize",
+            token_url="https://example.invalid/oauth/token",
+            scope="scope",
+            refresh_mode="refresh_token",
+            display_name="Test Video-Only Channel",
+            kind="social",
+            requires_connection=True,
+            video_required=True,
+            # 명시적으로 비선언 — 대리 계산이 살아있었다면 이 둘이 True로 새어나온다.
+            youtube_metadata_required=False,
+            privacy_lockable=False,
+        ),
+    )
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            owner_id = await _seed_human(s, org_id)
+            await upsert_channel_connection(
+                s, org_id=org_id, channel=fake_channel, account_id="video-only-1",
+                account_label="video_only_user", credential_kind="oauth",
+                access_token="plain-access-token", refresh_token="plain-refresh-token",
+                token_expires_at=datetime.now(timezone.utc), refresh_mode="refresh_token",
+                scopes=[], connected_by=owner_id,
+            )
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+        try:
+            async with _client_for(app) as client:
+                r = await client.get(f"/api/v2/organizations/{org_id}/channel-connections")
+            assert r.status_code == 200, r.text
+            row = r.json()[0]
+            assert row["video_required"] is True
+            assert row["youtube_metadata_required"] is False
+            assert row["privacy_locked"] is False
+        finally:
+            app.dependency_overrides.clear()
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_connection_response_capability_flags_false_for_unsupported_channel():
     """양성대조 — video_required 미선언 채널(threads)은 3플래그 전부 False."""
     from app.main import app

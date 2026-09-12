@@ -176,11 +176,18 @@ class ChannelConnectionResponse(BaseModel):
     # privacyStatus) 4필드를 요구하는가 — 채널 이름 하드코딩 금지 관례
     # (thread_max_segments·image_required와 동형): FE가 "youtube"/"youtube_
     # sandbox" 문자열을 직접 비교하지 않고 이 플래그로 편집기 폼 분기.
+    # story #3815(Phase3·3-5 PR3 근본 처방, 페드루 PO 決定 2026-09-12 16:51Z) —
+    # 한동안 이 값이 `video_required`의 대리 계산이었다(두 번째 video_required
+    # 채널이 오면 거짓이 되는 자리로 지목됨) — 이제 어댑터의 자기 필드
+    # (ChannelAdapterConfig.youtube_metadata_required)를 그대로 읽는다.
     youtube_metadata_required: bool = False
     # API 감사 미완 강제 비공개(`settings.youtube_api_audit_incomplete`, 페드루
     # PO 決定②) — 플랫폼 전체 값이라 모든 youtube/youtube_sandbox 연결이 항상
     # 같은 값을 본다(연결별 상태 아님, ChannelConnection.status 4값과 무관).
-    # video_required=False인 채널은 이 축 자체가 없어 항상 False.
+    # story #3815(Phase3·3-5 PR3 근본 처방, 페드루 PO 決定 2026-09-12 16:51Z) —
+    # 이 축도 `video_required` 대리가 아니라 어댑터의 자기 필드
+    # (ChannelAdapterConfig.privacy_lockable)와 조합한다 — privacy_lockable=
+    # False인 채널은 이 축 자체가 없어 항상 False.
     privacy_locked: bool = False
     # story #3492 — 붙여넣기(pasted_secret) 재방문 표시(§2 규격 3, app_id_suffix와
     # 동형). oauth 채널은 항상 null(secret_hint 자체를 안 씀).
@@ -260,12 +267,12 @@ def _to_response(row, *, reconnect_mismatch_target_id: uuid.UUID | None = None) 
         video_codecs=list(adapter.video_codecs) if adapter is not None else [],
         thread_max_segments=adapter.thread_max_segments if adapter is not None else 0,
         video_required=adapter.video_required if adapter is not None else False,
-        # story #3815(PR3) — 지금은 video_required=True(YouTube)인 채널만 이
-        # 메타 4필드를 요구한다(채널명 하드코딩 대신 이 축으로 판정 — 다음
-        # video_required 채널이 이 메타를 안 쓰게 되면 그때 별도 필드로 승격).
-        youtube_metadata_required=bool(adapter is not None and adapter.video_required),
+        # story #3815(PR3 근본 처방, 페드루 PO 決定 2026-09-12 16:51Z) — 어댑터의
+        # 자기 필드를 그대로 읽는다(video_required 대리 계산 걷음 — 그 계산은
+        # 두 번째 video_required 채널이 오면 거짓이 되는 자리였다).
+        youtube_metadata_required=adapter.youtube_metadata_required if adapter is not None else False,
         privacy_locked=bool(
-            adapter is not None and adapter.video_required and settings.youtube_api_audit_incomplete
+            adapter is not None and adapter.privacy_lockable and settings.youtube_api_audit_incomplete
         ),
         secret_hint=row.secret_hint,
         reconnect_mismatch_target_id=reconnect_mismatch_target_id,
