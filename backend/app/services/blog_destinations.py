@@ -55,4 +55,8 @@ def get_blog_destination_module(
     if channel == "webhook":
         from app.services import webhook_publish
         return webhook_publish
+    # story #3816(Phase3·3-6 PR2, 페드루 PO 確定 2026-09-12) — Ghost 발행 배선.
+    if channel == "ghost":
+        from app.services import ghost_publish
+        return ghost_publish
     raise BlogDestinationNotImplementedError(connection_id=connection_id)

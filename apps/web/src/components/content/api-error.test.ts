@@ -184,6 +184,17 @@ describe('parseSitePostApiError (story #3368, doc phase0-post-manager-screen-des
       },
     );
 
+    // story #3816(Phase3·3-6 PR2, 페드루 PO §낱말 정정 2, 2026-09-12) — Ghost
+    // JWT 401(재서명 1회 재시도까지 실패)도 kind=token_expired(재연결로 풀리는
+    // 세계) — 단 문구는 CHANNEL_TOKEN_EXPIRED의 일반 문구가 아니라 저장 시
+    // GHOST_ADMIN_KEY_INVALID와 같은 전용 문구를 재사용한다(새 labelKey).
+    test('GHOST_AUTH_FAILED — kind=token_expired·전용 문구 재사용(일반 CHANNEL_TOKEN_EXPIRED 문구 아님)', () => {
+      const result = parseSitePostApiError({ error: { code: 'GHOST_AUTH_FAILED', message: 'invalid' } });
+      expect(result.kind).toBe('token_expired');
+      expect(result.humanMessageKey).toBe('errorGhostAuthFailed');
+      expect(result.humanMessageKey).not.toBe('errorChannelTokenExpired');
+    });
+
     test('CHANNEL_CONNECTION_NOT_ACTIVE — kind=connection_not_active', () => {
       const result = parseSitePostApiError({ error: { code: 'CHANNEL_CONNECTION_NOT_ACTIVE', message: '연결 비활성' } });
       expect(result.kind).toBe('connection_not_active');

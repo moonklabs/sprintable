@@ -66,6 +66,13 @@ _CONNECTION_BLOCKED_CODES = frozenset({
     # connection.status가 첫 실패에도 즉시 승격되지 않고 재시도 상한까지 기다리는
     # 결함이었다 — CHANNEL_TOKEN_EXPIRED와 대칭이 안 맞았다).
     "CHANNEL_CONNECTION_REVOKED", "CHANNEL_CONNECTION_AUTH_ERROR",
+    # story #3816(Phase3·3-6 PR2, 페드루 PO §낱말 정정 2, 2026-09-12) — Ghost
+    # JWT 401(재서명 1회 재시도까지 실패)은 CHANNEL_PUBLISH_AUTH_REJECTED와 같은
+    # 축(자격 자체가 틀림·연결 「다시 연결 필요」)이지만 저장 시 GHOST_ADMIN_KEY_
+    # INVALID와 같은 문구를 재사용하려고 별도 코드를 쓴다(site_posts.py::
+    # _blog_publish_error_code) — 승격 로직은 여기 등재 하나로 CHANNEL_PUBLISH_
+    # AUTH_REJECTED와 동일해진다.
+    "GHOST_AUTH_FAILED",
 })
 # story 620beefc(PO 決定, 2026-09-04) — IMAGE 컨테이너가 Threads 쪽에서 ERROR/EXPIRED로
 # 끝났다. 폴링을 몇 번 더 반복해도 같은 결과이므로(결정적) transient 백오프가 아니라

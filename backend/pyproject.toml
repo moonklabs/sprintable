@@ -76,6 +76,12 @@ dependencies = [
     # IANA DB를 담아 OS 설치 없이도 zoneinfo가 그걸 찾게 한다(stdlib가 자동으로 우선
     # 시도) — apt-get 없이 uv 의존성만으로 해소.
     "tzdata>=2025.1",
+    # story #3816(Phase3·3-6 PR2, 페드루 PO 確定 2026-09-12) — Ghost Admin API
+    # `?source=html`은 HTML 계약이라 body_md(마크다운)를 그대로 보내면 마크다운
+    # 문법이 글에 그대로 노출된다. 표준 markdown→HTML 변환용 최소 의존성 1개
+    # 신규 도입(그라운딩 확認 — 이 전까지 코드베이스에 markdown 렌더 라이브러리
+    # 0건, pillow 도입 때와 동형 판단).
+    "markdown>=3.7",
 ]
 
 [dependency-groups]

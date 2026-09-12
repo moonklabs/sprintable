@@ -2402,6 +2402,7 @@
     "errorChannelPublishProviderError": "The channel couldn't process the request — retrying automatically. If it keeps failing, we'll show it on the connection.",
     "errorStibeePlanRestricted": "Plan restriction · The email API requires the Pro plan or higher.",
     "errorStibeeSenderNotVerified": "Your sender email isn't verified with Stibee — please verify it in your Stibee sender settings.",
+    "errorGhostAuthFailed": "Your Admin API key isn't valid — check it in your Ghost settings.",
     "errorUnpublishHumanOnly": "Only human members can unpublish.",
     "errorUnpublishOwnerOrAdminOnly": "Only the organization owner or an admin can unpublish.",
     "errorGateAlreadyHeld": "Another draft («{title}» · {lang}) is already in approval — only one draft per item can be submitted at a time.",

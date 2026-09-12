@@ -840,6 +840,17 @@ def test_get_blog_destination_module_webhook_returns_webhook_publish():
     )
 
 
+def test_get_blog_destination_module_ghost_returns_ghost_publish():
+    """story #3816(Phase3·3-6 PR2) — ghost_publish.py 배선."""
+    from app.services import ghost_publish
+    from app.services.blog_destinations import get_blog_destination_module
+
+    assert (
+        get_blog_destination_module(connection_id=uuid.uuid4(), channel="ghost")
+        is ghost_publish
+    )
+
+
 def test_get_blog_destination_module_unknown_channel_not_implemented_yet():
     """wordpress·webhook 둘 다 아닌(아직 존재하지 않는) 목적지는 여전히 fail-closed —
     뮤테이션 대상: 이 가드를 지우면 존재하지 않는 목적지가 조용히 어떤 모듈로든
