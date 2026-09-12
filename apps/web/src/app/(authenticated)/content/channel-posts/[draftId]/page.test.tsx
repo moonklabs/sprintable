@@ -116,6 +116,9 @@ function stubFetch(opts: {
   limitOk?: { quota_usage: number; quota_total: number } | false;
   // story #3500(BE #3498, 미착지) — 잔량 조회 응답(기본=정책 미설정)·false=502.
   genBudgetOk?: { limit_minor: number | null; spent_minor: number; remaining_minor: number | null; currency: 'KRW' | 'USD' | null; period: 'month' } | false;
+  // story #3808(Phase3·3-3 PR5a) — genBudgetOk와 동형(별도 지갑, x/x_sandbox
+  // 채널 draft에서만 실제로 호출됨).
+  apiUsageBudgetOk?: { limit_minor: number | null; spent_minor: number; remaining_minor: number | null; currency: 'KRW' | 'USD' | null; period: 'month' } | false;
   draftDetail?: Partial<typeof DRAFT_DETAIL>;
   onSave?: (body: unknown) => { status: number; body: unknown };
   onSubmit?: (body: unknown) => { status: number; body: unknown };
@@ -302,6 +305,14 @@ function stubFetch(opts: {
       if (url === `/api/organizations/${ORG_ID}/generation-budget`) {
         if (opts.genBudgetOk === false) return { ok: false, status: 502, json: async () => ({}) };
         const budget = opts.genBudgetOk
+          ?? { limit_minor: null, spent_minor: 0, remaining_minor: null, currency: null, period: 'month' };
+        return { ok: true, status: 200, json: async () => ({ data: budget, error: null, meta: null }) };
+      }
+      // story #3808(Phase3·3-3 PR5a) — X 종량 API 지출 잔량 조회(x/x_sandbox
+      // draft에서만 실제로 호출됨, generation-budget과 동형 기본값).
+      if (url === `/api/organizations/${ORG_ID}/api-usage-budget`) {
+        if (opts.apiUsageBudgetOk === false) return { ok: false, status: 502, json: async () => ({}) };
+        const budget = opts.apiUsageBudgetOk
           ?? { limit_minor: null, spent_minor: 0, remaining_minor: null, currency: null, period: 'month' };
         return { ok: true, status: 200, json: async () => ({ data: budget, error: null, meta: null }) };
       }
@@ -4776,6 +4787,43 @@ describe('ChannelPostEditPage — 생성 비용 한도(story #3500, doc a0da40c9
     await flush();
     expect(container.querySelector('[data-testid="generation-budget-failed"]')).not.toBeNull();
     expect((container.querySelector('[data-testid="channel-post-submit-button"]') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  // story #3808(Phase3·3-3 PR5a, 페드루 PO 確定 2026-09-12) — X 종량 API 지출 잔량 표시.
+  describe('ApiUsageBudgetIndicator(story #3808 PR5a) — x/x_sandbox 채널에서만', () => {
+    it('threads 채널 draft에서는 렌더도 fetch도 안 한다(불필요한 왕복 자체를 안 냄)', async () => {
+      stubFetch({ apiUsageBudgetOk: { limit_minor: 100000, spent_minor: 0, remaining_minor: 100000, currency: 'KRW', period: 'month' } });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+      expect(container.querySelector('[data-testid="api-usage-budget-remaining-compact"]')).toBeNull();
+      const fetchMock = globalThis.fetch as unknown as { mock: { calls: unknown[][] } };
+      expect(fetchMock.mock.calls.some((c) => String(c[0]).includes('/api-usage-budget'))).toBe(false);
+    });
+
+    it('x_sandbox 채널 draft에서는 렌더한다(남음 표시)', async () => {
+      stubFetch({
+        draftDetail: { channel: 'x_sandbox' },
+        apiUsageBudgetOk: { limit_minor: 100000, spent_minor: 20000, remaining_minor: 80000, currency: 'KRW', period: 'month' },
+      });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+      expect(container.querySelector('[data-testid="api-usage-budget-remaining-compact"]')?.textContent).toBe('X API 지출 남음 80,000원');
+    });
+
+    it('정책 미설정(limit_minor=null)이면 아무것도 안 그린다', async () => {
+      stubFetch({ draftDetail: { channel: 'x' }, apiUsageBudgetOk: { limit_minor: null, spent_minor: 0, remaining_minor: null, currency: null, period: 'month' } });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+      expect(container.querySelector('[data-testid="api-usage-budget-remaining-compact"]')).toBeNull();
+    });
+
+    it('조회 실패해도 저장·상신 버튼은 막히지 않는다(genBudget과 동형 규율)', async () => {
+      stubFetch({ draftDetail: { channel: 'x' }, apiUsageBudgetOk: false });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+      expect(container.querySelector('[data-testid="api-usage-budget-failed"]')).not.toBeNull();
+      expect((container.querySelector('[data-testid="channel-post-submit-button"]') as HTMLButtonElement).disabled).toBe(false);
+    });
   });
 });
 

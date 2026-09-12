@@ -119,4 +119,24 @@ describe('AppCredentialsCard(story #3733)', () => {
     expect(heading?.textContent).toBe('Facebook 테스트용 앱 자격');
     expect(heading?.textContent).not.toContain('facebook_sandbox');
   });
+
+  // story #3808(Phase3·3-3 PR5a, 페드루 PO 確定 2026-09-12) — PR5a 그라운딩⑤ 확認
+  // 테스트: 이 컴포넌트는 채널 하드코딩 분기가 0건(channel prop+channelLabel
+  // 레지스트리만으로 동작) — x/x_sandbox도 새 코드 없이 자동 커버된다는 것을
+  // facebook_sandbox 선례와 동형으로 고정.
+  it('x/x_sandbox도 새 코드 없이 자동 커버된다(채널 하드코딩 0건 확認)', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <AppCredentialsCard channel="x" orgId="org-1" isOwner credentials={NONE_CREDENTIALS} onSaved={vi.fn()} />,
+      ));
+    });
+    expect(container.querySelector('h2')?.textContent).toBe('X 앱 자격');
+
+    await act(async () => {
+      root.render(wrap(
+        <AppCredentialsCard channel="x_sandbox" orgId="org-1" isOwner credentials={NONE_CREDENTIALS} onSaved={vi.fn()} />,
+      ));
+    });
+    expect(container.querySelector('h2')?.textContent).toBe('X 테스트용 앱 자격');
+  });
 });

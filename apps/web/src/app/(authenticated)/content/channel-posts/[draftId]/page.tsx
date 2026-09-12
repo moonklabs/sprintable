@@ -29,6 +29,7 @@ import { CommentReplyDialog, type CommentReplyOutcome, type ReplyView } from '@/
 import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { GenerationBudgetIndicator, majorToMinor, type GenerationBudgetCurrency, type GenerationBudgetState } from '@/components/content/generation-budget-indicator';
 import { GenerationBudgetExceededBanner } from '@/components/content/generation-budget-exceeded-banner';
+import { ApiUsageBudgetIndicator, type ApiUsageBudgetState } from '@/components/content/api-usage-budget-indicator';
 import { isSandboxChannelDraft, SandboxTestBadge } from '@/components/content/sandbox-test-badge';
 import { RawDetailsToggle } from '@/components/content/raw-details-toggle';
 import { ImageAttachmentList } from '@/components/content/image-attachment-list';
@@ -675,6 +676,10 @@ export default function ChannelPostEditPage() {
   // 한도 잔량(별도 non-blocking 왕복, limit과 동형 원칙)·상신 시 실을 예상 비용
   // 입력(선택, 문자열 상태 — 빈 문자열=body에 안 실음).
   const [genBudget, setGenBudget] = useState<GenerationBudgetState>({ status: 'loading' });
+  // story #3808(Phase3·3-3 PR5a, 페드루 PO 確定 2026-09-12) — X 종량 API 지출 월
+  // 상한 잔량(별도 왕복, genBudget과 동형 원칙 — 다른 지갑이라 다른 state·다른
+  // fetch). x/x_sandbox 채널 draft에서만 렌더(아래 마운트 지점 조건).
+  const [apiUsageBudget, setApiUsageBudget] = useState<ApiUsageBudgetState>({ status: 'loading' });
   const [estimatedCostInput, setEstimatedCostInput] = useState('');
   // doc a0da40c9 §19-8 — 422 배너는 별도 state(구조화된 4값+통화)로 렌더한다. submitResult
   // (일반 오류 배너)와 다른 자리 — 이 배너는 label+value 두 칸 목록이라 문자열 하나로
@@ -1005,6 +1010,34 @@ export default function ChannelPostEditPage() {
       .catch(() => { if (!cancelled) setGenBudget({ status: 'failed' }); });
     return () => { cancelled = true; };
   }, [orgId]);
+
+  // story #3808(Phase3·3-3 PR5a, 페드루 PO 確定 2026-09-12) — genBudget과 동형
+  // 원칙(별개 왕복, draft/versions 로드를 막지 않는다). x/x_sandbox 채널 draft
+  // 에서만 의미 있으니 그 조건에서만 부른다(다른 채널은 정책 자체가 없어 항상
+  // limit_minor=null로 떨어질 뿐이지만, 불필요한 왕복 자체를 안 낸다).
+  useEffect(() => {
+    if (!orgId || !draft || (draft.channel !== 'x' && draft.channel !== 'x_sandbox')) return;
+    let cancelled = false;
+    fetchWithAuth(`/api/organizations/${orgId}/api-usage-budget`)
+      .then(async (r) => {
+        if (cancelled) return;
+        if (!r.ok) { setApiUsageBudget({ status: 'failed' }); return; }
+        const json = (await r.json().catch(() => null)) as
+          | { data?: { limit_minor: number | null; spent_minor: number | null; remaining_minor: number | null; currency: 'KRW' | 'USD' | null; period: 'month' } }
+          | null;
+        if (!json?.data) { setApiUsageBudget({ status: 'failed' }); return; }
+        setApiUsageBudget({
+          status: 'ok',
+          limitMinor: json.data.limit_minor,
+          spentMinor: json.data.spent_minor,
+          remainingMinor: json.data.remaining_minor,
+          currency: json.data.currency,
+          period: json.data.period,
+        });
+      })
+      .catch(() => { if (!cancelled) setApiUsageBudget({ status: 'failed' }); });
+    return () => { cancelled = true; };
+  }, [orgId, draft]);
 
   const textLength = channelTextLength(text);
   // AC6 — 한도 미선언(null)이면 초과 판정 자체를 안 한다(지어내지 않는다, 상신은 막지 않음).
@@ -2808,6 +2841,14 @@ export default function ChannelPostEditPage() {
           </>
         ) : null}
         <GenerationBudgetIndicator state={genBudget} variant="compact" />
+        {/* story #3808(Phase3·3-3 PR5a, 페드루 PO 確定 2026-09-12) — X 종량 API
+            지출 잔량. generationBudget과 달리 사용자 입력(예상 비용) 칸이 없다 —
+            X 단가는 서버가 세그먼트 수로 자동 계산하는 값이라 "예상"을 사람이
+            적을 자리 자체가 없다(GenerationBudgetIndicator 옆 input과 다른 축).
+            x/x_sandbox 채널 draft에서만 렌더(다른 채널은 정책 자체가 없다). */}
+        {draft.channel === 'x' || draft.channel === 'x_sandbox' ? (
+          <ApiUsageBudgetIndicator state={apiUsageBudget} variant="compact" />
+        ) : null}
       </div>
       <div className="flex gap-2">
         <Button onClick={handleSave} disabled={saving || imageUploadInProgress || videoUploadInProgress} data-testid="channel-post-save-button">
