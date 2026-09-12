@@ -169,7 +169,7 @@ async def get_tweet_permalink(client: httpx.AsyncClient, *, access_token: str, t
 
 async def publish_x_thread(
     client: httpx.AsyncClient, *, access_token: str, texts: list[str], media_id: str | None = None,
-    initial_reply_to_tweet_id: str | None = None,
+    initial_reply_to_tweet_id: str | None = None, is_retry: bool = False,
 ) -> list[dict]:
     """스레드 N세그먼트 프리미티브 — 각 세그먼트를 직전 세그먼트의 reply로 순차
     발행(reply 체인). `media_id`는 **첫 세그먼트(헤드)에만** 첨부(AC2 「텍스트·
@@ -185,7 +185,13 @@ async def publish_x_thread(
     실패 시 이미 발행된 앞 세그먼트는 그대로 남는다(부분 성공 — Threads 컨테이너
     부분성공과 다른 성격이지만 "이미 나간 tweet을 되돌리지 않는다"는 같은 정직성
     원칙, delete_tweet류 자동 롤백은 이 카드 범위 밖). 호출부가 이미 발행된
-    세그먼트 목록(예외의 `.published_segments`)을 볼 수 있게 예외에 실어 던진다."""
+    세그먼트 목록(예외의 `.published_segments`)을 볼 수 있게 예외에 실어 던진다.
+
+    story #3808 PR5d — `is_retry`는 `x_sandbox_publish.py`의 `[sandbox:429-once]`
+    마커 시뮬레이션 전용 축(시그니처 동형 유지, `initial_reply_to_tweet_id`가
+    PR5b-1 때 sandbox 쪽에 무시된 채 얹힌 것의 반대 방향) — 실 X 호출은 provider가
+    실제로 응답하는 대로일 뿐 이 함수 안에서 흉내 낼 재시도-성공 판정이 없어 값
+    자체는 무시한다."""
     results: list[dict] = []
     prev_tweet_id: str | None = initial_reply_to_tweet_id
     for index, text in enumerate(texts):
