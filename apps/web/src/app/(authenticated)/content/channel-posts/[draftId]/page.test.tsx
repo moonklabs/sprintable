@@ -5293,7 +5293,10 @@ describe('ChannelPostEditPage — 스레드 이어쓰기(story #3808 PR5b-2, 페
     await flush();
 
     expect(container.querySelector('[data-testid="channel-post-thread-segment-field-0"]')).not.toBeNull();
-    expect(container.querySelector('[data-testid="channel-post-thread-count"]')?.textContent).toContain('2 / 10');
+    // 발견 즉시 수정(2026-09-12) — thread_max_segments는 헤드 제외 이어쓰기 배열
+    // «자체»의 상한(channel_adapters.py 도크스트링·_validate_thread_segments 그대로)
+    // 이라, 카운터도 이어쓰기 개수 대 상한으로 같은 단위 비교한다(헤드+1 아님).
+    expect(container.querySelector('[data-testid="channel-post-thread-count"]')?.textContent).toContain('1 / 10');
   });
 
   it('⭐세그먼트 입력 후 삭제하면 목록에서 사라지고 총 건수가 다시 준다', async () => {
@@ -5308,7 +5311,7 @@ describe('ChannelPostEditPage — 스레드 이어쓰기(story #3808 PR5b-2, 페
     await flush();
 
     expect(container.querySelector('[data-testid="channel-post-thread-segment-field-0"]')).toBeNull();
-    expect(container.querySelector('[data-testid="channel-post-thread-count"]')?.textContent).toContain('1 / 10');
+    expect(container.querySelector('[data-testid="channel-post-thread-count"]')?.textContent).toContain('0 / 10');
   });
 
   it('⭐이어쓰기 목록이 있으면 저장 요청 body에 channel_payload.thread로 실린다', async () => {
@@ -5338,16 +5341,24 @@ describe('ChannelPostEditPage — 스레드 이어쓰기(story #3808 PR5b-2, 페
     expect(savedBody).toMatchObject({ channel_payload: null });
   });
 
-  it('⭐페드루 PO 確定(b) — 총 N=thread_max_segments 도달 시 「이어쓰기 추가」가 비활성화된다', async () => {
+  it('⭐페드루 PO 確定(b) — 이어쓰기 개수=thread_max_segments 도달 시 「이어쓰기 추가」가 비활성화된다', async () => {
+    // 발견 즉시 수정(2026-09-12) — thread_max_segments는 헤드 제외 이어쓰기 배열
+    // «자체»의 상한이다(channel_adapters.py 도크스트링·BE _validate_thread_segments의
+    // `len(thread) > max_segments` 그대로) — 헤드를 더한 값과 비교하면 실제 상한보다
+    // 하나 먼저 잠그는 off-by-one이 된다(이 테스트가 예전엔 그 결함을 "정상"으로 pin
+    // 하고 있었다 — 페드루 PO가 캡처①에서 실측으로 잡음).
     stubFetch({ threadMaxSegments: 2 });
     await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
     await flush();
-    await act(async () => { (container.querySelector('[data-testid="channel-post-thread-segment-add"]') as HTMLButtonElement).click(); });
+    const addBtn = container.querySelector('[data-testid="channel-post-thread-segment-add"]') as HTMLButtonElement;
+    await act(async () => { addBtn.click(); });
+    await flush();
+    expect(addBtn.disabled).toBe(false); // 이어쓰기 1개 < 상한 2 — 아직 추가 가능해야 한다.
+    await act(async () => { addBtn.click(); });
     await flush();
 
-    // head(1) + 이어쓰기 1 = 총 2 = thread_max_segments. 하나 더 추가하면 3이 되어 상한
-    // 초과이므로 버튼이 비활성화된다(§3808 BE _validate_thread_segments와 같은 상한 축).
-    expect((container.querySelector('[data-testid="channel-post-thread-segment-add"]') as HTMLButtonElement).disabled).toBe(true);
+    expect(container.querySelector('[data-testid="channel-post-thread-count"]')?.textContent).toContain('2 / 2');
+    expect(addBtn.disabled).toBe(true);
   });
 
   it('⭐로드된 버전의 channel_payload.thread가 편집기 목록에 그대로 seed된다(재편집)', async () => {
@@ -5360,7 +5371,7 @@ describe('ChannelPostEditPage — 스레드 이어쓰기(story #3808 PR5b-2, 페
 
     expect((container.querySelector('[data-testid="channel-post-thread-segment-field-0"]') as HTMLTextAreaElement)?.value).toBe('기존 이어쓰기 1');
     expect((container.querySelector('[data-testid="channel-post-thread-segment-field-1"]') as HTMLTextAreaElement)?.value).toBe('기존 이어쓰기 2');
-    expect(container.querySelector('[data-testid="channel-post-thread-count"]')?.textContent).toContain('3 / 10');
+    expect(container.querySelector('[data-testid="channel-post-thread-count"]')?.textContent).toContain('2 / 10');
   });
 
   it('⭐부분 실패(N=3 중 seq2 실패) — 상태 낱말이 배열에서 계산돼 뜨고, 발행 버튼 라벨이 「나머지 이어서 발행」으로 바뀐다', async () => {
@@ -5446,8 +5457,10 @@ describe('ChannelPostEditPage — 스레드 이어쓰기(story #3808 PR5b-2, 페
   });
 
   it('⭐어댑터 상한이 기존 저장분보다 낮아진 경우(예: 하향 조정) — 로드 시점에 이미 초과면 상신 버튼도 비활성화된다', async () => {
+    // thread_max_segments는 헤드 제외 이어쓰기 배열 자체의 상한 — 이어쓰기 2개가
+    // 상한을 넘으려면 상한이 1이어야 한다(2였다면 정확히 상한과 같아 초과가 아님).
     stubFetch({
-      threadMaxSegments: 2,
+      threadMaxSegments: 1,
       versions: [{ ...VERSION_1, channel_payload: { thread: ['세그먼트 2', '세그먼트 3'] } }],
     });
     await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });

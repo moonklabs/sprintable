@@ -1082,7 +1082,13 @@ export default function ChannelPostEditPage() {
   const threadSegmentOverLimitIndexes = threadSegments
     .map((seg, i) => (typeof maxTextLength === 'number' && channelTextLength(seg) > maxTextLength ? i : -1))
     .filter((i) => i >= 0);
-  const isThreadOverCap = threadMaxSegments > 0 && threadSegments.length > threadMaxSegments - 1;
+  // 발견 즉시 수정(2026-09-12) — thread_max_segments는 헤드 제외, channel_payload.
+  // thread 배열 «자체»의 길이 상한이다(channel_adapters.py::ChannelAdapterConfig.
+  // thread_max_segments 도크스트링·_validate_thread_segments의 `len(thread) >
+  // max_segments` 그대로 — 헤드+1을 더해 비교하면 안 된다, 실 상한보다 1 먼저
+  // 잠그는 off-by-one이었다: 캡처①이 9개에서 이미 「추가 비활성」으로 뜬 것도
+  // 이 결함 때문 — BE는 10개까지 허용한다).
+  const isThreadOverCap = threadMaxSegments > 0 && threadSegments.length > threadMaxSegments;
   const hasThreadBlockingIssue = threadSegmentOverLimitIndexes.length > 0 || isThreadOverCap;
   // story #3808(PR5b-2, 페드루 PO 確定 2026-09-12) — 「나머지 이어서 발행」은 새
   // 버튼이 아니라 기존 발행 버튼의 라벨 분기(신규 액션 0, view.partialSuccess와
@@ -2732,7 +2738,11 @@ export default function ChannelPostEditPage() {
           <div className="flex items-center justify-between">
             <span className="text-muted-foreground">{t('channelPostsThreadEditorLabel')}</span>
             <span className="text-xs text-muted-foreground" data-testid="channel-post-thread-count">
-              {t('channelPostsThreadSegmentCount', { count: threadSegments.length + 1, max: threadMaxSegments })}
+              {/* 발견 즉시 수정(2026-09-12) — thread_max_segments는 헤드 제외 이어쓰기
+                  배열 자체의 상한(위 isThreadOverCap과 같은 근거)이라, 여기도 같은
+                  단위(이어쓰기 개수)로 비교해야 한다. 헤드를 더한 값과 비교하면
+                  실제로 상한에 못 미쳤는데 "도달"로 보이는 off-by-one이 난다. */}
+              {t('channelPostsThreadSegmentCount', { count: threadSegments.length, max: threadMaxSegments })}
             </span>
           </div>
           {threadSegments.map((seg, i) => {
@@ -2778,7 +2788,7 @@ export default function ChannelPostEditPage() {
           <Button
             variant="outline"
             onClick={() => setThreadSegments([...threadSegments, ''])}
-            disabled={threadSegments.length + 1 >= threadMaxSegments}
+            disabled={threadSegments.length >= threadMaxSegments}
             data-testid="channel-post-thread-segment-add"
           >
             {t('channelPostsThreadSegmentAdd')}
