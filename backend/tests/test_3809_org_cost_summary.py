@@ -325,6 +325,8 @@ async def test_x_cost_always_null():
 
 @pytest.mark.anyio
 async def test_paid_spend_daily_series_aggregates_by_captured_date():
+    """양성대조① — 단일 통화(이 헬퍼는 게이트 하나뿐이라 두 캡처 다 같은
+    `sealed_ads_currency`(기본 KRW), 날짜별 합산이 통화를 그대로 실어야 한다."""
     from app.models.insight_snapshot import InsightSnapshot
     from app.services.ads_spend_snapshots import process_due_ads_spend_snapshots
     from app.services.org_cost_summary import get_org_paid_spend_daily_series
@@ -358,8 +360,44 @@ async def test_paid_spend_daily_series_aggregates_by_captured_date():
             series = await get_org_paid_spend_daily_series(s, org_id=org_id)
         assert len(series) == 2, series
         assert all(point["spend_minor"] == 12_345 for point in series), series
+        assert all(point["currency"] == "KRW" for point in series), series
         assert all(point["source"] == "paid" for point in series), series
         assert series[0]["date"] < series[1]["date"], "오름차순 정렬이어야 한다"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_paid_spend_daily_series_nulls_amount_when_currencies_mixed_same_day():
+    """양성대조② — PR2b와 동형 규율: 같은 날짜에 서로 다른 통화(KRW·USD)로 캡처된
+    두 게이트가 섞이면 그 날짜 포인트는 `currency`·`spend_minor` 둘 다 null이어야
+    한다(서로 다른 통화를 그냥 더한 지어낸 숫자를 내지 않는다). `_add_second_
+    approved_gate`(PR2b 통화 혼재 대조군 헬퍼) 그대로 재사용."""
+    from app.services.ads_spend_snapshots import process_due_ads_spend_snapshots
+    from app.services.org_cost_summary import get_org_paid_spend_daily_series
+
+    engine, Session, org_id, project_id, owner_id, gate_id_krw = await _setup_approved_gate(await _session_factory())
+    try:
+        gate_id_usd = await _add_second_approved_gate(Session, org_id=org_id, owner_id=owner_id, budget_minor=200_00, currency="USD")
+
+        await _start_boost(Session, org_id, gate_id_krw, owner_id)
+        await _start_boost(Session, org_id, gate_id_usd, owner_id)
+
+        async with Session() as s:
+            await _make_spend_snapshots_due(s, org_id, gate_id_krw)
+        async with Session() as s:
+            await _make_spend_snapshots_due(s, org_id, gate_id_usd)
+        async with Session() as s:
+            counts = await process_due_ads_spend_snapshots(s)
+        assert counts["captured"] == 2, counts
+
+        async with Session() as s:
+            series = await get_org_paid_spend_daily_series(s, org_id=org_id)
+        # 둘 다 같은 tick으로 캡처돼 같은 날짜 하나뿐 — 섞인 통화라 그 날짜는 null.
+        assert len(series) == 1, series
+        assert series[0]["spend_minor"] is None, series
+        assert series[0]["currency"] is None, series
+        assert series[0]["source"] == "paid", series
     finally:
         await engine.dispose()
 
