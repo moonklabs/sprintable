@@ -37,7 +37,14 @@ export interface ChannelPostCalendarItem {
   // story #3813(Phase3·3-4 PR4, 페드루 PO 確定 2026-09-12) — 뉴스레터 채널(stibee·
   // stibee_sandbox)만 채워진다(그 외 채널은 null — BE ChannelPostDraftListItem.
   // newsletter와 동형 discriminator, content_kind류 신규 필드 0).
-  newsletter?: { subject: string | null; segment_name: string | null; send_scheduled_at: string | null } | null;
+  newsletter?: {
+    subject: string | null; segment_name: string | null; send_scheduled_at: string | null;
+    // story #3813(Phase3·3-4 PR4, 자체발견 — 라이브 데모 실측 2026-09-12) — 최상위
+    // scheduled_at은 발송 봉인 뒤 발송 예정만 노출(캠페인 만들기 예정 시각이 그
+    // 응답 밖으로 사라짐). 이 필드가 그 시각의 유일한 원천(newsletter_send 게이트
+    // 존재 여부와 무관하게 항상 실림).
+    campaign_scheduled_at: string | null;
+  } | null;
 }
 
 export interface ChannelPostCalendarData {

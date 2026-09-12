@@ -120,7 +120,7 @@ async def test_draft_list_newsletter_object_present_for_stibee_null_for_others()
         control_item = items[r_control.json()["draft_id"]]
 
         assert stibee_item["newsletter"] == {
-            "subject": "9월 소식지", "segment_name": None, "send_scheduled_at": None,
+            "subject": "9월 소식지", "segment_name": None, "send_scheduled_at": None, "campaign_scheduled_at": None,
         }
         assert control_item["newsletter"] is None
     finally:
@@ -225,6 +225,10 @@ async def test_calendar_schedule_axis_moves_from_publish_window_to_send_window_a
         assert draft_id in {item["draft_id"] for item in r_after_new_window.json()}, "봉인 뒤엔 발송 예정 창에 떠야 한다"
         assert r_detail.json()["scheduled_at"] == send_scheduled_at.isoformat().replace("+00:00", "+00:00")
         assert r_detail.json()["newsletter"]["send_scheduled_at"] is not None
+        # 자체발견(라이브 데모 실측 2026-09-12) — 최상위 scheduled_at이 발송 예정으로
+        # 넘어간 뒤에도 캠페인 만들기 예정 시각(external_publish 게이트 자신의
+        # sealed_scheduled_at)이 이 필드로 계속 남아야 한다(두 시각 동시 노출).
+        assert r_detail.json()["newsletter"]["campaign_scheduled_at"] == publish_scheduled_at.isoformat()
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()

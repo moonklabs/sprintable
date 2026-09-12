@@ -2530,6 +2530,8 @@
     "channelPostsNewsletterBadge": "Newsletter",
     "channelPostsNewsletterSubjectUnknown": "Subject unknown",
     "channelPostsNewsletterSegmentUnknown": "Segment unknown",
+    "channelPostsNewsletterCampaignScheduleLabel": "Campaign scheduled",
+    "channelPostsNewsletterSendScheduleLabel": "Send scheduled",
     "channelPostsOverLimitReason": "Over the limit — you can't submit until the text is shorter.",
     "contentRuleBannedTermBlockedHint": "\"{value}\" isn't allowed.",
     "contentRuleUtmMissingBlockedHint": "Write {value} in the link yourself.",

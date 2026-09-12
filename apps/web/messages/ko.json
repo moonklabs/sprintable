@@ -2530,6 +2530,8 @@
     "channelPostsNewsletterBadge": "뉴스레터",
     "channelPostsNewsletterSubjectUnknown": "제목 미확인",
     "channelPostsNewsletterSegmentUnknown": "세그먼트 미확인",
+    "channelPostsNewsletterCampaignScheduleLabel": "캠페인 만들기 예정",
+    "channelPostsNewsletterSendScheduleLabel": "발송 예정",
     "channelPostsOverLimitReason": "한도를 넘어 상신할 수 없습니다 — 본문을 줄여 주세요.",
     "contentRuleBannedTermBlockedHint": "「{value}」은 쓸 수 없습니다.",
     "contentRuleUtmMissingBlockedHint": "{value} 값을 링크에 직접 적어야 합니다.",

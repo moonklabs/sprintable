@@ -262,6 +262,15 @@ class NewsletterDraftInfo(BaseModel):
     subject: str | None = None
     segment_name: str | None = None
     send_scheduled_at: str | None = None
+    # story #3813(Phase3·3-4 PR4, 자체발견 — 라이브 데모 실측 2026-09-12) — 위
+    # 최상위 `scheduled_at`(COALESCE)이 newsletter_send 게이트 봉인 뒤엔 발송
+    # 예정 시각만 노출해, 「캠페인 만들기 예정」 시각(external_publish 게이트
+    # 자신의 sealed_scheduled_at)이 어떤 응답 필드에도 안 남는 갭이 있었다 —
+    # 캘린더가 두 시각을 동시에 보여줘야 하는데(PO 明示) 그 원천이 사라지는
+    # 결함. 이 필드는 newsletter_send 게이트 존재 여부와 무관하게 항상 그
+    # external_publish 게이트 자신의 값을 싣는다(둘 다 있으면 두 값이 다를 수
+    # 있다 — 그게 정상, 다른 두 사건의 다른 두 시각이다).
+    campaign_scheduled_at: str | None = None
 
 
 class ChannelPostDraftListItem(BaseModel):
@@ -1275,6 +1284,7 @@ def _to_draft_list_item(
                 newsletter_gate.sealed_newsletter_scheduled_at.isoformat()
                 if newsletter_gate and newsletter_gate.sealed_newsletter_scheduled_at else None
             ),
+            campaign_scheduled_at=gate.sealed_scheduled_at.isoformat() if gate and gate.sealed_scheduled_at else None,
         )
     # story #3813(Phase3·3-4 PR4) — 「발행」(캠페인 생성)과 「발송」이 갈리는 뉴스레터는
     # 캘린더가 읽는 단일 scheduled_at도 갈라야 뜻이 맞는다: newsletter_send 게이트가
