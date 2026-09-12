@@ -726,7 +726,13 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
             <span className="text-foreground font-medium">
               {facts.newsletterEstimatedRecipientCount !== null
                 ? t('newsletterEstimatedRecipientCount', {
-                    count: facts.newsletterEstimatedRecipientCount.toLocaleString(locale),
+                    // 페드루 PO CHANGES(2026-09-12, CI 실측) — 숫자에 붙는 로케일
+                    // 메서드는 메서드명만으로 날짜 호출과 구분이 안 돼 verify-no-date-
+                    // tolocalestring 가드(story #3493)에 걸린다(가드는 주석 문자열도
+                    // 그대로 grep한다, 이 주석 자체가 그 예시였다 — 재발 방지로 그
+                    // 메서드명을 여기 다시 안 적는다). formatMinorCurrency와 동일
+                    // 정본(Intl.NumberFormat 직접)으로 정정.
+                    count: new Intl.NumberFormat(locale).format(facts.newsletterEstimatedRecipientCount),
                   })
                 : t('newsletterRecipientUnknown')}
             </span>
