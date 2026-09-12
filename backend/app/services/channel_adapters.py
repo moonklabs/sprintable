@@ -442,6 +442,35 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         # 도 스코프 개념이 없다(공유 비밀 하나가 전권).
         supports_unpublish=True,
     ),
+    # story 3-4(Phase3·마케팅운영, 페드루 PO 確定 2026-09-12, PR1) — 뉴스레터(ESP=전달만)
+    # 첫 조각: 연결 행뿐(발행 배선은 PR2 몫, wordpress/webhook의 조각⑤/③b·④ 선례와
+    # 동형 순서). ESP=스티비(Stibee, customer-zero가 실제 쓰는 서비스·§6 3292 은퇴
+    # 플러그인의 원래 대상) — Auth Key 붙여넣기라 wordpress/webhook과 credential_kind
+    # 동형(pasted_secret), OAuth 흐름 없음(authorize_url/token_url/scope 비움).
+    # story 3-4 PR2(페드루 PO 確定 2026-09-12) — 정정: kind="blog"는 기능적으로
+    # 틀렸었다(실측 확認, PR1 자가 정정) — `get_publish_client_module`(:677-678)이
+    # `adapter.kind == "blog"`면 무조건 `BlogChannelDispatchNotImplementedError`로
+    # 거부한다(story e4fc29fa PO 리뷰 B2, blog는 그쪽 자체 dispatch를 쓴다는 설계
+    # 의도). PR2가 뉴스레터 초안을 `ChannelPostDraft`/`ChannelPostVersion`/
+    # `ChannelPublication`(=get_publish_client_module이 다루는 그 파이프라인)으로
+    # 태우기로 確定돼 kind="social"이 맞는 값 — "뉴스레터가 소셜인가"라는 의미론적
+    # 어색함은 있으나 이 enum의 실제 뜻은 "채널 포스트 파이프라인이냐(social)·사이트
+    # 글 파이프라인이냐(blog)"이지 "SNS냐"가 아니다(threads/instagram과 같은 결).
+    "stibee": ChannelAdapterConfig(
+        authorize_url="",
+        token_url="",
+        scope="",
+        refresh_mode="manual",  # Auth Key는 만료·자동갱신 개념 자체가 없음(wordpress 동형).
+        credential_kind="pasted_secret",
+        # story #3779 가드(BE 한글 사용자 문장) 회피 — 최근 채널(meta_ads/ads_sandbox/
+        # x/x_sandbox)이 이미 display_name을 영문으로 등재해 온 관례를 그대로 따른다
+        # (webhook의 "고객 웹훅(signed)"은 이 가드 시행 前 baseline 잔존, 새 등재는
+        # 처음부터 이 관례를 탄다 — spend_refresh_rate_limited 키 주석과 동형 판단).
+        display_name="Stibee",
+        kind="social",
+        # unpublish(발송 취소)·insight_metrics(발송/오픈/클릭)는 PR2·PR3 몫 — 이 PR은
+        # 연결 행만 다룬다(신규 기전 0, 그 필드들은 기본값 그대로 미선언).
+    ),
     # story #3806(Phase3·3-2 PR1, 페드루 PO 確定 2026-09-11) — Meta Ads boost 첫 출시.
     # 콘텐츠 필드(image_*/video_*/max_text_length 등)는 전부 미선언(0/빈값 기본) —
     # 이 채널은 새 콘텐츠를 만들지 않고 기존 발행물을 참조만 한다(그라운딩① object_
@@ -601,6 +630,24 @@ if os.environ.get("SANDBOX_CHANNEL_ENABLED", "").strip().lower() == "true":
         insight_metrics=("views", "reach", "engagements"),
         # story #3536(PO 確定 2026-09-06) — 위 "instagram"과 동형(이미지 필수).
         image_required=True,
+    )
+    # story 3-4(Phase3·마케팅운영, PR1) — 뉴스레터 dev 전용 샌드박스. wordpress/webhook
+    # 은 pasted_secret이라 「credential_kind=none 진짜 사용가능한지」 테스트 인프라가
+    # 없다 — stibee도 pasted_secret이지만, sandbox 미러는 실 Auth Key 없이 오케스트레이션
+    # 경로(연결→PR2 발송 게이트→PR3 캡처)를 라이브로 밟기 위한 것(sandbox/instagram_
+    # sandbox와 동형 취지, 5b27b32f 문서 그대로) — 그래서 credential_kind="none"으로
+    # 등록한다(진짜 Auth Key OAuth 흐름이 없는 채널이라 facebook_sandbox/ads_sandbox류
+    # "진짜 OAuth 콜백을 태우는 샌드박스" 계열이 아니라 이 "credential 자체가 없는"
+    # 계열에 속한다). `/{org_id}/channel-connections/stibee_sandbox/sandbox`(범용
+    # 엔드포인트, story #3523)가 신규 라우트 0으로 그대로 이 등재를 받는다.
+    CHANNEL_ADAPTERS["stibee_sandbox"] = ChannelAdapterConfig(
+        authorize_url="",
+        token_url="",
+        scope="",
+        refresh_mode="manual",
+        credential_kind="none",
+        display_name="Stibee Sandbox",  # story #3779 가드 회피 — "stibee" 어댑터와 동형 판단.
+        kind="social",  # story 3-4 PR2 정정 — "stibee" 어댑터와 동형(위 주석 참고).
     )
 
 

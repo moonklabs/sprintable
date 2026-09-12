@@ -34,6 +34,13 @@ export const CHANNEL_DECLARED_METRICS: Record<string, readonly BoardMetric[]> = 
   // 빈 튜플). 이 맵에 키 자체를 안 넣는다 — declaredMetricsForChannel()의 "모르는
   // 채널=빈 배열" 폴백이 그대로 옳은 값이다(원문 그대로 폴백, 지어내지 않는다 —
   // channel-label.ts의 관례와 동형).
+  //
+  // story #3813(Phase3·3-4 PR1, 페드루 PO 確定 2026-09-12) — stibee/stibee_sandbox는
+  // 이 시점엔 insight_metrics 미선언(빈 튜플) — 발송 결과(opens/delivered/clicks)
+  // 캡처 배선은 후속 PR3 몫. 드리프트 가드(test_3697)가 신규 BE 채널 등록을 놓치지
+  // 않게 여기서도 빈 배열로 명시 등재해 둔다(PR3가 stibee_sandbox만 실값으로 채움).
+  stibee: [],
+  stibee_sandbox: [],
 };
 
 /** 이 채널이 declare한 지표 목록. 등록되지 않은 채널(모르는 값·wordpress·webhook 등)은

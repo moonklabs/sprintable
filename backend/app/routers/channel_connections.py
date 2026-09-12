@@ -1172,6 +1172,9 @@ class CreatePastedSecretConnectionRequest(BaseModel):
     app_password: str | None = None
     target_url: str | None = None
     secret: str | None = None
+    # story 3-4(PR1) — 스티비(Stibee) Auth Key. wordpress/webhook과 동형으로 이 공용
+    # 모델에 Optional로 얹는다(연결 화면이 channel별 폼을 그린다).
+    api_key: str | None = None
 
 
 @router.post("/{org_id}/channel-connections/{channel}", response_model=ChannelConnectionResponse, status_code=201)
@@ -1182,6 +1185,8 @@ async def create_pasted_secret_channel_connection(
     db: AsyncSession = Depends(get_db),
     verified_org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
+    locale: str | None = None,
+    accept_language: str | None = Header(None, alias="Accept-Language"),
 ) -> ChannelConnectionResponse:
     """story e4fc29fa(조각⑤, 페드루 PO 確定 2026-09-04) — WordPress·webhook 등
     pasted_secret 어댑터의 연결 생성. AC2/AC3("휴먼이 연결 API로 등록") 실 경로 —
@@ -1200,6 +1205,11 @@ async def create_pasted_secret_channel_connection(
 
     `upsert_channel_connection`(story #3373 AC8 기존 함수, 신규 로직 0) 재사용 —
     같은 (org, channel, account_id) 재호출은 새 행이 아니라 기존 행 갱신(멱등)."""
+    from app.services.agent_onboarding_config import resolve_locale_from_request
+    from app.services.i18n_catalog import t
+
+    resolved_locale = resolve_locale_from_request(locale, accept_language)
+
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
     resolved = await _require_owner_or_admin(db, auth, org_id)
@@ -1263,10 +1273,32 @@ async def create_pasted_secret_channel_connection(
         )
         return _to_response(row)
 
-    # story e4fc29fa(조각⑤) — 위 credential_kind 가드가 이미 wordpress/webhook 외의
-    # 모든 채널을 걸렀다(현재 pasted_secret 채널은 이 둘뿐) — 새 pasted_secret 채널이
-    # 추가되고 여기 분기가 안 늘면 이 자리로 떨어져 fail-closed(조용히 threads류로
-    # 새지 않는다).
+    if channel == "stibee":
+        if not body.api_key:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "STIBEE_FIELDS_REQUIRED",
+                    "message": t("channel_connections.stibee_fields_required", resolved_locale),
+                },
+            )
+        # story 3-4(PR1) — 스티비는 wordpress(site_url)·webhook(target_url)과 달리
+        # org당 목적지 URL 개념이 없다(Auth Key 하나가 그 org의 ESP 계정 전체를
+        # 가리킨다). account_id는 upsert_channel_connection의 (org, channel,
+        # account_id) 멱등 키라 반드시 채워야 하는데, 채울 실 식별자가 없어 고정
+        # 리터럴을 쓴다 — org당 stibee 연결은 1개만 가능하다는 가정(⚠️미확認·PO 확定
+        # 대상, 여러 ESP 계정이 실제로 필요해지면 재설계).
+        row = await upsert_channel_connection(
+            db, org_id=org_id, channel="stibee", account_id="default", account_label=None,
+            credential_kind="pasted_secret", access_token=body.api_key, refresh_token=None,
+            token_expires_at=None, refresh_mode=adapter.refresh_mode, scopes=[], connected_by=resolved.id,
+        )
+        return _to_response(row)
+
+    # story e4fc29fa(조각⑤) — 위 credential_kind 가드가 이미 wordpress/webhook/stibee
+    # 외의 모든 채널을 걸렀다(현재 pasted_secret 채널은 이 셋뿐) — 새 pasted_secret
+    # 채널이 추가되고 여기 분기가 안 늘면 이 자리로 떨어져 fail-closed(조용히
+    # threads류로 새지 않는다).
     raise HTTPException(
         status_code=404,
         detail={"code": "CHANNEL_NOT_PASTED_SECRET", "message": f"channel={channel!r}는 아직 지원하지 않습니다."},
@@ -1280,6 +1312,8 @@ class ReplaceCredentialsRequest(BaseModel):
     username: str | None = None
     app_password: str | None = None
     secret: str | None = None
+    # story 3-4(PR1) — 스티비 Auth Key 회전.
+    api_key: str | None = None
 
 
 @router.patch(
@@ -1292,6 +1326,8 @@ async def replace_channel_connection_credentials(
     db: AsyncSession = Depends(get_db),
     verified_org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
+    locale: str | None = None,
+    accept_language: str | None = Header(None, alias="Accept-Language"),
 ) -> ChannelConnectionResponse:
     """story #3492(PO 決定 2026-09-05) — 붙여넣기 자격 「제자리 교체」(id 불변). 지금까지는
     해제→새로 연결뿐이라 자격을 바꿀 때마다(예: WordPress 앱 비밀번호 정기 회전) 새
@@ -1301,6 +1337,11 @@ async def replace_channel_connection_credentials(
     owner/admin(create_pasted_secret_channel_connection과 동형 폭). oauth 채널
     (credential_kind != "pasted_secret")은 애초에 이 경로 대상이 아니다(404) —
     OAuth 자격은 authorize/callback이 갱신하는 축이지 붙여넣기가 아니다."""
+    from app.services.agent_onboarding_config import resolve_locale_from_request
+    from app.services.i18n_catalog import t
+
+    resolved_locale = resolve_locale_from_request(locale, accept_language)
+
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
     resolved = await _require_owner_or_admin(db, auth, org_id)
@@ -1331,10 +1372,20 @@ async def replace_channel_connection_credentials(
                 detail={"code": "WEBHOOK_FIELDS_REQUIRED", "message": "secret이 필요합니다."},
             )
         new_secret, account_label = body.secret, None
+    elif row.channel == "stibee":
+        if not body.api_key:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "STIBEE_FIELDS_REQUIRED",
+                    "message": t("channel_connections.stibee_fields_required", resolved_locale),
+                },
+            )
+        new_secret, account_label = body.api_key, None
     else:
         # story e4fc29fa(조각⑤)의 fail-closed 관례 그대로 — 현재 pasted_secret 채널은
-        # wordpress/webhook 둘뿐. 새 pasted_secret 채널이 추가되고 이 분기가 안 늘면
-        # 조용히 새지 않고 여기로 떨어진다.
+        # wordpress/webhook/stibee 셋뿐. 새 pasted_secret 채널이 추가되고 이 분기가
+        # 안 늘면 조용히 새지 않고 여기로 떨어진다.
         raise HTTPException(
             status_code=404,
             detail={"code": "CHANNEL_NOT_PASTED_SECRET", "message": f"channel={row.channel!r}는 아직 지원하지 않습니다."},

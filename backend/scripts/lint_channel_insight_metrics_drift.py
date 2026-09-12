@@ -67,6 +67,11 @@ EXPECTED_BACKEND_CHANNELS = frozenset({
     # 미선언(빈 튜플 기본값) — 인사이트 수집은 이 스토리의 후속 PR4 몫(카드 조각④,
     # 착수 문서 §2 3-3). meta_ads/ads_sandbox와 동형으로 drift 0(신규 FE 등재 불요).
     "x", "x_sandbox",
+    # story #3813(Phase3·3-4 PR1, 페드루 PO 確定 2026-09-12) — stibee/stibee_sandbox도
+    # 같은 이유로 이 PR 시점엔 insight_metrics 미선언(빈 튜플 기본값) — 발송 결과
+    # (opens/delivered/clicks) 캡처 배선은 후속 PR3 몫. x/x_sandbox와 동형으로 drift
+    # 0(신규 FE 등재 불요, PR3에서 stibee_sandbox만 채움).
+    "stibee", "stibee_sandbox",
 })
 
 
