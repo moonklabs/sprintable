@@ -80,6 +80,9 @@ interface ChannelPostDraftListItem {
   // command_reason_code·failure_kind·next_retry_at·processing_kind, 신규 BE 0).
   command_status?: string | null;
   command_reason_code?: string | null;
+  // story #3815(배포 82 라이브 회차 실 결함) — command_reason_code==='YOUTUBE_QUOTA_
+  // EXCEEDED'일 때만 채워진다.
+  command_reason_reset_at?: string | null;
   failure_kind?: string | null;
   next_retry_at?: string | null;
   processing_kind?: string | null;
@@ -245,6 +248,7 @@ export default function ChannelPostListPage() {
         failureKind: draft.failure_kind,
         nextRetryAt: draft.next_retry_at,
         reasonCode: draft.command_reason_code,
+        reasonResetAt: draft.command_reason_reset_at,
         processingKind: draft.processing_kind,
       });
       return { draft, view, failureAction, tab: toStatusTab(view.status) };

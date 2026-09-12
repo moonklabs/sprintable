@@ -87,6 +87,11 @@ class PublicationCommand(Base):
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     # voided 전이 사유('CONTENT_CHANGED'|'SCHEDULE_CHANGED') — PO 確定3.
     reason_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #3815(배포 82 라이브 회차 실 결함, 페드루 PO 確定 2026-09-12) — reason_code가
+    # 'YOUTUBE_QUOTA_EXCEEDED'일 때만 채워진다("언제 풀리는지"가 확定적으로 알려진
+    # 사유만 — 그 외 reason_code는 계속 null, 지어내지 않는다). apply_command_failure()
+    # 참고.
+    reason_reset_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # 'connection'|'needs_check'|'transient' — 유나 design §11-5.
     failure_kind: Mapped[str | None] = mapped_column(Text, nullable=True)
     dead_letter_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

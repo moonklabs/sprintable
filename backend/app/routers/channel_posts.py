@@ -348,6 +348,11 @@ class ChannelPostDraftListItem(BaseModel):
     # body의 `command_status`와 동일(같은 latest_command 행, 같은 뜻).
     command_status: str | None = None
     command_reason_code: str | None = None
+    # story #3815(배포 82 라이브 회차 실 결함, 페드루 PO 確定 2026-09-12) —
+    # command_reason_code==='YOUTUBE_QUOTA_EXCEEDED'일 때만 채워진다(그 외
+    # reason_code는 "언제 풀리는지" 계산 근거가 없어 계속 null). FE가 이 값으로
+    # 정적 사용량-초과 문구를 고르고, 필요하면 재시도 버튼의 활성 시점을 판단한다.
+    command_reason_reset_at: str | None = None
     # story 0e960006(#3448, 페드루 PO 확定 2026-09-04) — dead_letter 수동 재시도
     # (POST .../publication-commands/{command_id}/retry)를 화면이 부르려면 어느 명령
     # 행인지 알아야 한다 — command_status와 같은 latest_command 행에서 id만 additive로
@@ -1364,6 +1369,10 @@ def _to_draft_list_item(
         newsletter=newsletter,
         command_status=command_status,
         command_reason_code=latest_command.reason_code if latest_command else None,
+        command_reason_reset_at=(
+            latest_command.reason_reset_at.isoformat()
+            if latest_command and latest_command.reason_reset_at else None
+        ),
         command_id=latest_command.id if latest_command else None,
         thumbnail_url=public_url_for_object_path(latest_image.final_object_path) if latest_image else None,
         image_original_width=latest_image.original_width if latest_image else None,
@@ -2056,6 +2065,7 @@ async def publish_channel_post_draft_endpoint(
         await _record_this_attempt(approval_check="ok", adapter_called=False, result_code="YOUTUBE_QUOTA_EXCEEDED")
         await apply_command_failure(
             db, command, error_code="YOUTUBE_QUOTA_EXCEEDED", last_error=str(exc), now=now,
+            reason_reset_at=exc.reset_at,
         )
         await db.commit()
         raise HTTPException(

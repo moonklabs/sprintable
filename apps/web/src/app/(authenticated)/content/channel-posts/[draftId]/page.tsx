@@ -91,6 +91,9 @@ interface ChannelPostDraftDetail {
   // scheduled_at 스냅샷과 다르다 — 재승인 뒤 갱신된다).
   command_status?: string | null;
   command_reason_code?: string | null;
+  // story #3815(배포 82 라이브 회차 실 결함) — command_reason_code==='YOUTUBE_QUOTA_
+  // EXCEEDED'일 때만 채워진다.
+  command_reason_reset_at?: string | null;
   // story f061c1a3(BE 0e960006) — 재시도 BFF가 붙일 대상 command. 목록/단건 응답
   // (ChannelPostDraftListItem)이 이미 낸다 — command 자체가 없으면 null.
   command_id?: string | null;
@@ -2147,6 +2150,7 @@ export default function ChannelPostEditPage() {
     failureKind: draft.failure_kind,
     nextRetryAt: draft.next_retry_at,
     reasonCode: draft.command_reason_code,
+    reasonResetAt: draft.command_reason_reset_at,
     processingKind: draft.processing_kind,
   });
   // story #3402 갭(PO 채택 ㉡, 2026-09-10) — BE가 needs_check를 즉시 dead_letter로

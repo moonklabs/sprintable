@@ -425,16 +425,23 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
         command.last_error = str(exc)[:2000]
         return
     except YouTubeQuotaExceededError as exc:
-        # story #3815(Phase3·3-5 PR2, 페드루 PO 確定 2026-09-12) — 위 GenerationBudget
-        # ExceededError와 동형(adapter 이미 진입했으나 provider 호출 前 재검사가
-        # 막음 — 재시도 대상 아님, 플랫폼 전체 사용량이 하루 안엔 안 줄어든다).
+        # story #3815(배포 82 라이브 회차 실 결함, 페드루 PO 確定 2026-09-12 —
+        # steer① "두 경로 합류=한 곳에서만") — 예전엔 GenerationBudgetExceededError
+        # (위)와 동형으로 STATUS_BLOCKED_UNAPPROVED를 독자적으로 채웠으나, 그
+        # 상태값은 FE `CommandStatus` 유니온에 없어(자체 발견) 스케줄 발행(cron
+        # 워커) 경로에서 이 실패가 나면 배지 자체가 안 떴다 — 즉시-발행 라우터
+        # 경로(`apply_command_failure` 경유, dead_letter로 정상 렌더)와 달랐다.
+        # 이제 같은 공용 함수를 거쳐 두 경로가 완전히 같은 결과(dead_letter+
+        # reason_code+reason_reset_at)를 내게 한다(apply_command_failure()
+        # docstring 참고).
         await record_publication_attempt(
             db, command=command, approval_check="ok", adapter_called=False,
             started_at=attempt_started_at, finished_at=now, result_code="YOUTUBE_QUOTA_EXCEEDED",
         )
-        command.status = STATUS_BLOCKED_UNAPPROVED
-        command.reason_code = "YOUTUBE_QUOTA_EXCEEDED"
-        command.last_error = str(exc)[:2000]
+        await apply_command_failure(
+            db, command, error_code="YOUTUBE_QUOTA_EXCEEDED", last_error=str(exc), now=now,
+            reason_reset_at=exc.reset_at,
+        )
         return
     except ChannelPostSealMissingError as exc:
         error_code, last_error = "SITE_POST_SEAL_MISSING", str(exc)
@@ -706,14 +713,42 @@ class _CommentReplySendFailed(Exception):
 async def apply_command_failure(
     db: AsyncSession, command: PublicationCommand, *,
     error_code: str | None, last_error: str | None, now: datetime, retry_after_seconds: int | None = None,
+    reason_reset_at: datetime | None = None,
 ) -> None:
     """story #3414 — 실패 한 건을 command(+필요하면 connection) 상태에 반영하는 유일한
     지점. 워커(`_process_one_command`)와 즉시-발행 라우터(`publish_channel_post_draft_
     endpoint`) 둘 다 이 함수를 쓴다 — 실패 분류·백오프·connection 승격 로직을 두 곳에
-    각자 짜지 않는다(드리프트 원천 차단, story #3405/#3406과 동일 사상)."""
+    각자 짜지 않는다(드리프트 원천 차단, story #3405/#3406과 동일 사상).
+
+    story #3815(배포 82 라이브 회차 실 결함, 페드루 PO 確定 2026-09-12 — steer
+    재정정) — 이 함수는 예전에 `reason_code`를 전혀 안 채웠다(failure_kind
+    매핑표만 있었다) — YOUTUBE_QUOTA_EXCEEDED가 매핑표 밖(_CONNECTION_BLOCKED_
+    CODES/_TRANSIENT_CODES 어디에도 없음)이라 fail-closed로 needs_check→
+    dead_letter까지 떨어지는데, 화면(FE failure-action-badge.tsx)이 "BE가 아는
+    사유"(사용량 소진·리셋 시각)를 읽을 자리 자체가 없어 일반 dead_letter
+    문구만 보여줬다 — 원인은 BE가 이미 계산해 놓고도 행에 안 남긴 결함.
+
+    최초 처방은 error_code=="YOUTUBE_QUOTA_EXCEEDED" 전용 분기였으나(페드루 PO
+    steer①) — 그러면 "지정 코드만 막고 클래스는 남는다"(다음 새 코드가 이
+    함수를 거치면 또 조용히 reason_code 0으로 떨어진다). 대신 reason_code는
+    error_code 그대로 **항상** 옮긴다(매핑표는 failure_kind만 정하지, reason_code
+    존재 여부와는 무관 — voided 분기의 reason_code 관례와 이제 대칭). reason_reset_at
+    은 호출부가 실은 값(대부분 None — "언제 풀리는지" 아는 예외만 넘긴다)을 그대로
+    옮길 뿐, 여기서 코드별로 추측하지 않는다.
+
+    `_process_one_command`의 `except YouTubeQuotaExceededError` 절(위)도 이제
+    이 함수를 그대로 거친다(페드루 PO steer① "두 경로 합류=한 곳에서만") —
+    예전엔 그 절이 독자적으로 `command.status=STATUS_BLOCKED_UNAPPROVED`+
+    `reason_code`만 채우고 `failure_kind`는 비워 뒀다(FE `CommandStatus` 유니온에
+    'blocked_unapproved'가 아예 없어 스케줄 발행 경로의 이 실패는 배지 자체가
+    안 뜨는 별개 결함이었다 — 자체 발견). 이 함수를 거치면 failure_kind='needs_
+    check'→status='dead_letter'로 라우터 경로와 완전히 같은 결과가 나 FE가
+    이미 아는 dead_letter 배지로 정상 렌더된다."""
     command.last_error = last_error[:2000] if last_error else None
     failure_kind = classify_failure_kind(error_code)
     command.failure_kind = failure_kind
+    command.reason_code = error_code
+    command.reason_reset_at = reason_reset_at
 
     if failure_kind == FAILURE_KIND_CONNECTION:
         # story #3414 PO 정정2 추가② — 재시도 백오프 큐가 아니라 연결 상태를 승격하고
