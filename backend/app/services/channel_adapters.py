@@ -145,6 +145,14 @@ class ChannelAdapterConfig:
     # 같은 영상을 새로 업로드하는 사고(quota 이중 차감 포함)로 이어진다 — 채널별
     # 값으로 뺀다(youtube/youtube_sandbox는 86400=24h로 재정의).
     container_poll_timeout_seconds: int = 300
+    # story #3815(Phase3·3-5 PR2 CHANGES③, 페드루 PO 지적 2026-09-12 11:55Z) —
+    # 상한 초과 분기가 채널 무관하게 `external_container_id=None`으로 지워왔다
+    # (Meta는 옳다 — 죽은 컨테이너는 재활성화 안 되니 다음 시도가 완전히 새
+    # 컨테이너를 만들어야 한다). YouTube는 24h를 넘겨도(극히 드문 경우) 자산
+    # 자체는 이미 존재 — id를 지우면 사람이 AC5 재시도 버튼을 눌러도 새로
+    # 업로드(quota 1,600 재소모)하는 같은 사고가 24h 축에서 한 번 더 난다.
+    # False(기본)=기존 Meta류 그대로(회귀 0), youtube/youtube_sandbox만 True.
+    keep_container_on_poll_timeout: bool = False
 
 
 CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
@@ -621,6 +629,7 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         video_min_seconds=1.0,
         video_codecs=("avc1", "hvc1", "hev1"),
         container_poll_timeout_seconds=86_400,  # 24h — 페드루 PO 지적 2026-09-12 11:34Z.
+        keep_container_on_poll_timeout=True,  # CHANGES③ — 페드루 PO 지적 2026-09-12 11:55Z.
     ),
     "youtube_sandbox": ChannelAdapterConfig(
         authorize_url="https://accounts.google.com/o/oauth2/v2/auth",
@@ -643,6 +652,7 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         video_min_seconds=1.0,
         video_codecs=("avc1", "hvc1", "hev1"),
         container_poll_timeout_seconds=86_400,  # 24h — 페드루 PO 지적 2026-09-12 11:34Z.
+        keep_container_on_poll_timeout=True,  # CHANGES③ — 페드루 PO 지적 2026-09-12 11:55Z.
     ),
 }
 

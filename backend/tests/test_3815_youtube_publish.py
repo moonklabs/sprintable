@@ -520,3 +520,151 @@ async def test_youtube_sandbox_container_beyond_5min_stays_in_progress_no_reuplo
             app.dependency_overrides.clear()
     finally:
         await engine.dispose()
+
+
+def test_youtube_adapters_declare_keep_container_on_poll_timeout():
+    from app.services.channel_adapters import CHANNEL_ADAPTERS
+
+    for channel in ("youtube", "youtube_sandbox"):
+        assert CHANNEL_ADAPTERS[channel].keep_container_on_poll_timeout is True
+
+
+def test_other_channels_keep_default_clear_container_on_poll_timeout():
+    """양성대조 — Meta류는 회귀 0(기본 False 그대로, 죽은 컨테이너는 id를 지워야
+    다음 시도가 완전히 새 컨테이너를 만든다)."""
+    from app.services.channel_adapters import CHANNEL_ADAPTERS
+
+    for channel in ("instagram", "threads", "facebook"):
+        assert CHANNEL_ADAPTERS[channel].keep_container_on_poll_timeout is False
+
+
+@pytest.mark.anyio
+async def test_youtube_sandbox_beyond_24h_timeout_fails_but_preserves_container_id_no_reupload_on_retry():
+    """⭐CHANGES③(페드루 PO 지적 2026-09-12 11:55Z) — 24h(youtube/sandbox 상한)를
+    넘겨도(극히 드문 경우) dead_letter로 떨어지는 건 Meta와 동형이지만,
+    external_container_id는 지우면 안 된다 — 사람이 AC5 재시도를 눌렀을 때
+    새 업로드(quota 1,600 재소모)가 또 나면 CHANGES②가 막은 사고가 24h 축에서
+    반복된다. 재시도(dead_letter→pending)+get_container_status가 마침내
+    FINISHED를 내는 시나리오까지 왕복해 insert(=create_reels_container) 호출이
+    처음 1회에서 안 늘어남을 확認한다."""
+    from tests.test_620beefc_channel_post_image_upload import (
+        _approve_gate_directly, _client_for, _seed_connection, _seed_human, _seed_org, _seed_story,
+        _session_factory, _setup_org_scoped_app,
+    )
+    from tests.test_3554_instagram_reels import _build_mp4, _upload_and_confirm_video
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id, channel="youtube_sandbox")
+            story_id = await _seed_story(s, org_id, project_id)
+            from app.models.participation import ParticipationRole
+            role = ParticipationRole(id=uuid.uuid4(), org_id=org_id, key="approver", label="Approver", is_default=True)
+            s.add(role)
+            await s.commit()
+        from app.main import app
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+
+        try:
+            async with _client_for(app) as client:
+                r_draft = await client.post(
+                    f"/api/v2/organizations/{org_id}/channel-posts/drafts",
+                    json={
+                        "work_item_id": str(story_id), "connection_id": str(connection_id),
+                        "text": "24h 상한 재현용 설명",
+                        "channel_payload": {"title": "24h 상한 재현"},
+                    },
+                )
+                assert r_draft.status_code == 201, r_draft.text
+                draft_id = r_draft.json()["draft_id"]
+
+                video_raw = _build_mp4(duration_seconds=6.0, width=1920, height=1080)
+                r_video = await _upload_and_confirm_video(client, org_id, draft_id, video_raw)
+                assert r_video.status_code == 201, r_video.text
+
+                r_submit = await client.post(
+                    f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/submit", json={},
+                )
+                assert r_submit.status_code == 200, r_submit.text
+                gate_id = uuid.UUID(r_submit.json()["gate_id"])
+
+            async with Session() as s:
+                await _approve_gate_directly(s, gate_id)
+
+            import app.services.youtube_sandbox_publish as ysp
+            create_reels_container_spy = AsyncMock(wraps=ysp.create_reels_container)
+            with patch.object(ysp, "create_reels_container", create_reels_container_spy):
+                async with _client_for(app) as client:
+                    r_pub1 = await client.post(
+                        f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
+                    )
+                assert r_pub1.status_code == 200, r_pub1.text
+            assert create_reels_container_spy.await_count == 1
+
+            from app.models.channel_publication import ChannelPublication
+            from app.models.publication_command import PublicationCommand
+            from sqlalchemy import select as sa_select
+            async with Session() as s:
+                pub = (await s.execute(
+                    sa_select(ChannelPublication).where(ChannelPublication.org_id == org_id)
+                )).scalar_one()
+                original_container_id = pub.external_container_id
+                # 24h+1분 경과 재현.
+                pub.created_at = datetime.now(timezone.utc) - timedelta(hours=24, minutes=1)
+                await s.commit()
+
+            with (
+                patch.object(ysp, "create_reels_container", create_reels_container_spy),
+                patch.object(ysp, "get_container_status", AsyncMock(return_value=("IN_PROGRESS", None))),
+            ):
+                async with _client_for(app) as client:
+                    r_pub2 = await client.post(
+                        f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
+                    )
+                assert r_pub2.status_code == 503, r_pub2.text  # TIMEOUT → dead_letter(Meta와 동형).
+
+            async with Session() as s:
+                pub = (await s.execute(
+                    sa_select(ChannelPublication).where(ChannelPublication.org_id == org_id)
+                )).scalar_one()
+                assert pub.status == "failed"
+                # ⭐핵심 — 24h를 넘겼어도 id는 보존돼야 한다(뒤집으면 여기서 RED).
+                assert pub.external_container_id == original_container_id, (
+                    "24h 초과로 id가 지워지면 재시도가 새 업로드를 만든다 — CHANGES②가 막은 사고의 24h판"
+                )
+                command = (await s.execute(
+                    sa_select(PublicationCommand).where(
+                        PublicationCommand.org_id == org_id, PublicationCommand.destination == connection_id,
+                    )
+                )).scalar_one()
+                assert command.status == "dead_letter"
+
+            # 사람이 AC5 재시도 버튼을 누른 뒤(dead_letter→pending) 트랜스코딩이
+            # 마침내 끝났다고 가정 — insert(create_reels_container) 재호출 없이
+            # 같은 id로 폴링만 재개해 FINISHED로 마무리돼야 한다.
+            async with _client_for(app) as client:
+                r_retry = await client.post(
+                    f"/api/v2/organizations/{org_id}/publication-commands/{command.id}/retry",
+                )
+                assert r_retry.status_code == 200, r_retry.text
+
+            with (
+                patch.object(ysp, "create_reels_container", create_reels_container_spy),
+                patch.object(ysp, "get_container_status", AsyncMock(return_value=("FINISHED", None))),
+            ):
+                async with _client_for(app) as client:
+                    r_pub3 = await client.post(
+                        f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
+                    )
+                assert r_pub3.status_code == 200, r_pub3.text
+                assert r_pub3.json()["processing"] is False
+
+            assert create_reels_container_spy.await_count == 1, (
+                "재시도 뒤에도 insert가 또 불렸다면 quota 이중 차감 — 24h 상한 id-보존이 안 먹힌 것"
+            )
+        finally:
+            app.dependency_overrides.clear()
+    finally:
+        await engine.dispose()

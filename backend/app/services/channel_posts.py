@@ -2064,7 +2064,17 @@ async def publish_channel_post_draft(
                             f"IN_PROGRESS {elapsed.total_seconds():.0f}s > "
                             f"{_poll_timeout_seconds}s per-adapter poll timeout"
                         )
-                        row.external_container_id = None
+                        # story #3815(Phase3·3-5 PR2 CHANGES③, 페드루 PO 지적 2026-09-12
+                        # 11:55Z) — Meta는 여기서 id를 지우는 게 옳다(ERROR/EXPIRED
+                        # 컨테이너처럼 죽어 재활성화 안 됨 — 아래 위 분기 §③ 참고).
+                        # YouTube는 24h를 넘겨도(극히 드문 경우) 자산 자체는 이미
+                        # 존재 — id를 지우면 사람이 AC5 재시도를 눌러도 새로 업로드
+                        # (quota 1,600 재소모)하는 같은 사고가 24h 축에서 한 번 더
+                        # 난다. `keep_container_on_poll_timeout`이 True인 채널만
+                        # id 보존(재시도=`videos.list` 재조회, insert 0) — 그 외
+                        # 채널은 기존 그대로 None(회귀 0).
+                        if _poll_timeout_adapter is None or not _poll_timeout_adapter.keep_container_on_poll_timeout:
+                            row.external_container_id = None
                         await db.commit()
                         raise ChannelImageContainerFailedError(
                             gate_id=gate.id, container_status="TIMEOUT", error_message=row.last_error,
