@@ -46,9 +46,14 @@ const CASES: Array<{ name: string; input: ChannelConnectionStatusInput; expected
     expected: { status: 'connected' },
   },
   {
-    name: '⭐active + 만료 임박(48h 이내) + can_auto_refresh=true → 만료 임박(정보)',
+    // story #3808(페드루 PO 지적 2026-09-12 18:31Z, 배포 82 픽셀 a117f726 실측) —
+    // 연결 상태 칩은 「사람이 고쳐야 풀리는 것」에만 선다는 규율(project_connection_
+    // status_only_for_things_a_human_must_fix) — 자동 갱신 가능한 토큰의 임박 만료는
+    // 사람이 할 일이 아니므로 칩은 여전히 「연결됨」(경고 톤 아님), isAutoRefreshInfo만
+    // 그대로 채워 부제(정보 문장)가 계속 뜨게 한다.
+    name: '⭐active + 만료 임박(48h 이내) + can_auto_refresh=true → 연결됨 유지(부제만 정보)',
     input: { serverStatus: 'active', tokenExpiresAt: iso(6), canAutoRefresh: true, now: NOW },
-    expected: { status: 'expiring_soon', isAutoRefreshInfo: true },
+    expected: { status: 'connected', isAutoRefreshInfo: true },
   },
   {
     name: '⭐active + 만료 임박(48h 이내) + can_auto_refresh=false → 만료 임박(할 일)',
@@ -106,11 +111,13 @@ describe('deriveChannelConnectionStatus (story #3376, doc phase1-channel-connect
   });
 
   test('§3-0-1 핵심 — 만료 임박의 정보/할 일 갈림은 can_auto_refresh 하나로만 결정된다(토큰 컬럼 추측 없음)', () => {
-    // 같은 입력에서 canAutoRefresh만 다르면 결과도 정확히 그만큼만 다르다 — 다른 필드로
-    // 새는 로직이 없다는 것을 고정한다.
+    // story #3808 이후: canAutoRefresh만 다르면 isAutoRefreshInfo뿐 아니라 status 자체도
+    // 갈린다(true=연결됨 유지·false=만료 임박 칩) — 「사람이 고칠 게 있는가」축 그대로,
+    // 다른 필드로 새는 로직이 없다는 것만 고정한다(같은 입력, canAutoRefresh만 다름).
     const withRefresh = deriveChannelConnectionStatus({ serverStatus: 'active', tokenExpiresAt: iso(1), canAutoRefresh: true, now: NOW });
     const withoutRefresh = deriveChannelConnectionStatus({ serverStatus: 'active', tokenExpiresAt: iso(1), canAutoRefresh: false, now: NOW });
-    expect(withRefresh.status).toBe(withoutRefresh.status);
+    expect(withRefresh.status).toBe('connected');
+    expect(withoutRefresh.status).toBe('expiring_soon');
     expect(withRefresh.isAutoRefreshInfo).not.toBe(withoutRefresh.isAutoRefreshInfo);
   });
 });

@@ -56,10 +56,11 @@ export interface ChannelConnectionStatusResult {
    * 하되 칩 옆 한 줄이 셋을 갈라야 한다"(expired=다시 연결하면 풀림·revoked=채널 쪽에서
    * 뺏김·error=이유를 모른다). 세 갈래를 한 문구로 뭉치면 사람이 할 일을 못 고른다. */
   reauthReason?: ChannelConnectionReauthReason;
-  /** status==='expiring_soon'일 때만 의미 있다 — true면 "정보"(자동 갱신됩니다), false면
-   * "할 일"(직접 다시 연결해야 합니다). encrypted_refresh_token 등 컬럼으로 추측하지
-   * 않는다(§3-0-1 — Threads는 refresh token 없이 재발급되는 채널이라 그 추측이 조용히
-   * 틀린다, 서버가 이미 계산해 주는 can_auto_refresh만 신뢰). */
+  /** 만료 임박이 감지됐을 때만 채워진다(status가 'connected'거나 'expiring_soon' 둘 다
+   * 가능 — 아래 §3808 참고) — true면 "정보"(자동 갱신됩니다), false면 "할 일"(직접 다시
+   * 연결해야 합니다). encrypted_refresh_token 등 컬럼으로 추측하지 않는다(§3-0-1 —
+   * Threads는 refresh token 없이 재발급되는 채널이라 그 추측이 조용히 틀린다, 서버가
+   * 이미 계산해 주는 can_auto_refresh만 신뢰). */
   isAutoRefreshInfo?: boolean;
 }
 
@@ -90,9 +91,18 @@ export function deriveChannelConnectionStatus(
     const threshold = input.expiringSoonThresholdMs ?? DEFAULT_EXPIRING_SOON_THRESHOLD_MS;
     const expiresAtMs = new Date(input.tokenExpiresAt).getTime();
     if (expiresAtMs - now.getTime() <= threshold) {
+      // story #3808(페드루 PO 지적 2026-09-12 18:31Z, 배포 82 픽셀 a117f726 실측) — 연결
+      // 상태 칩은 «사람이 고쳐야 풀리는 것»에만 선다(project_connection_status_only_for_
+      // things_a_human_must_fix). 자동 갱신 가능(can_auto_refresh)한 토큰의 임박 만료는
+      // 사람이 할 일이 아니다 — 칩은 그대로 「연결됨」(경고색 아님), 부연 문장만 정보성
+      // ("자동으로 갱신됩니다")으로 남긴다(isAutoRefreshInfo 신호는 그대로 유지 — 아래
+      // page.tsx 소비부가 status가 아니라 이 신호로 부제 렌더 여부를 가른다).
       // 뮤테이션 대상(스토리 본문 명시) — 이 분기(can_auto_refresh 판정)를 제거하면
-      // "재발급형 채널의 만료 임박=정보" 테스트가 반드시 실패해야 한다.
-      return { status: 'expiring_soon', isAutoRefreshInfo: input.canAutoRefresh === true };
+      // "재발급형 채널의 만료 임박=연결됨 유지" 테스트가 반드시 실패해야 한다.
+      if (input.canAutoRefresh === true) {
+        return { status: 'connected', isAutoRefreshInfo: true };
+      }
+      return { status: 'expiring_soon', isAutoRefreshInfo: false };
     }
   }
   return { status: 'connected' };
