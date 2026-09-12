@@ -222,3 +222,17 @@ async def process_one_newsletter_send_command(db: AsyncSession, command: Publica
         actor_type="agent", entity_type="gate", entity_id=gate.id,
         context={"recipient_count": result["recipient_count"], "segment_name": result["segment_name_confirmed"]},
     )
+
+    # story #3813(Phase3·3-4 PR3, 페드루 PO 確定 2026-09-12) — 발송 결과(opens/
+    # delivered) 캡처. channel_posts.py:1770 부근 발행 콜백과 같은 함수를 같은
+    # 모양으로 부르되, 앵커는 «발송 완료 시각»(now) — 이 채널은 그 콜백에서
+    # 의도적으로 제외돼 있다(발행≠발송 시각 구분, 위 채널_posts.py 주석 참고).
+    # 새 예약 기전 0(기존 1d/7d 관례 재사용) — ads_spend_snapshots의 이어예약
+    # 기전은 복제 안 함(뉴스레터는 1회성 이벤트, PO 明示).
+    from app.services.insight_snapshots import schedule_insight_snapshots
+
+    await schedule_insight_snapshots(
+        db, org_id=command.org_id, work_item_id=gate.work_item_id, publication_id=publication.id,
+        publication_kind="channel_publication", channel=conn.channel,
+        external_id=publication.external_id, anchor_at=now,
+    )

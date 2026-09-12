@@ -37,4 +37,12 @@ describe('declaredMetricsForChannel — story #3697(BE channel_adapters.py 미�
       expect(declaredMetricsForChannel(channel)).not.toContain('inflow_users');
     }
   });
+
+  it('stibee_sandbox — opens·delivered·clicks(channel_adapters.py:657, story #3813 PR3)', () => {
+    expect(declaredMetricsForChannel('stibee_sandbox')).toEqual(['opens', 'delivered', 'clicks']);
+  });
+
+  it('실 stibee는 아직 미선언 — 빈 배열(story #3813 PR1, 실 클라이언트 부재)', () => {
+    expect(declaredMetricsForChannel('stibee')).toEqual([]);
+  });
 });

@@ -46,7 +46,11 @@ export const CHANNEL_DECLARED_METRICS: Record<string, readonly BoardMetric[]> = 
   // 캡처 배선은 후속 PR3 몫. 드리프트 가드(test_3697)가 신규 BE 채널 등록을 놓치지
   // 않게 여기서도 빈 배열로 명시 등재해 둔다(PR3가 stibee_sandbox만 실값으로 채움).
   stibee: [],
-  stibee_sandbox: [],
+  // story #3813(Phase3·3-4 PR3, 페드루 PO 確定 2026-09-12) — channel_adapters.py:657
+  // 실 등재값과 동형. opens/delivered는 METRIC_KEYS엔 있으나 선택기(SELECTABLE_
+  // METRIC_KEYS)엔 아직 없다(PR4 몫) — 이 맵은 "선택기 노출"이 아니라 "이 채널이
+  // 이 지표를 declare하는가"의 BE 미러라 선택기 상태와 무관하게 실값 그대로 채운다.
+  stibee_sandbox: ['opens', 'delivered', 'clicks'],
 };
 
 /** 이 채널이 declare한 지표 목록. 등록되지 않은 채널(모르는 값·wordpress·webhook 등)은

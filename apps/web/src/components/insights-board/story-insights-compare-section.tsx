@@ -38,6 +38,11 @@ const METRIC_LABEL_KEYS: Record<BoardMetric, string> = {
   conversions: 'insightMetricConversions',
   inflow_sessions: 'insightMetricInflowSessions',
   inflow_users: 'insightMetricInflowUsers',
+  // story #3813(Phase3·3-4 PR3) — page.tsx METRIC_LABEL_KEYS와 동형(라벨 키만 존재,
+  // 선택기 노출과 무관 — 이 화면은 declaredMetricsForChannel()로 걸러 stibee_sandbox
+  // 발행물에서만 실제로 이 행이 그려진다).
+  opens: 'insightMetricOpens',
+  delivered: 'insightMetricDelivered',
 };
 
 function isBlogRow(row: InsightsBoardRow): boolean {

@@ -49,6 +49,11 @@ export interface InsightNormalizedMetrics {
   // 지표 축에 2개를 더한 것 — DEFAULT_METRIC(views)은 그대로.
   inflow_sessions: number | null;
   inflow_users: number | null;
+  // story #3813(Phase3·3-4 PR3, 페드루 PO 確定 2026-09-12) — 뉴스레터 발송결과
+  // 캡처 축(BE `NORMALIZED_KEYS` 12키 확장과 동형 미러). 선언 안 한 채널(뉴스레터
+  // 외 전부)은 BE가 이미 null로 채워 보낸다(declare-to-populate 관례 그대로).
+  opens: number | null;
+  delivered: number | null;
 }
 
 // NULL(이 값 전체) — 이 버킷 자체가 아직 스케줄되지 않았음/존재하지 않음. bucket.normalized가
@@ -136,12 +141,30 @@ export type InsightsBoardWindow = '7d' | '30d' | '90d';
 // snapshot-block.tsx(story #3499) METRIC_KEYS와 동일(그 파일의 i18n 라벨 재사용).
 // story #3583 — inflow_sessions/inflow_users 2개 추가(유나 §13-9 確定 — 열 추가가
 // 아니라 이 선택기의 지표 축 확장). DEFAULT_METRIC은 그대로 views.
+// story #3813(Phase3·3-4 PR3, 페드루 PO 確定 2026-09-12) — 뉴스레터 발송결과
+// 캡처 축(opens·delivered) 추가. `CHANNEL_DECLARED_METRICS`(BE↔FE 드리프트 가드,
+// test_3697 짝)의 원소 타입이 BoardMetric이라 stibee_sandbox 실값 등재에
+// 필요 — 단 이 두 키는 아직 화면 선택기(아래 SELECTABLE_METRIC_KEYS)엔 안 연다
+// (PR4가 카드/선택기에 실제로 노출할 몫, 지금은 눌러도 항상 빈 화면일 옵션을
+// 미리 보여주지 않는다는 PO 판단).
 export const METRIC_KEYS = [
   'views', 'impressions', 'reach', 'engagements', 'clicks', 'spend', 'conversions',
-  'inflow_sessions', 'inflow_users',
+  'inflow_sessions', 'inflow_users', 'opens', 'delivered',
 ] as const;
 export type BoardMetric = (typeof METRIC_KEYS)[number];
 export const DEFAULT_METRIC: BoardMetric = 'views';
+
+// story #3813(PR3) — 지표 선택기(insights-board/page.tsx 상단 드롭다운)가 실제로
+// 노출하는 부분집합. METRIC_KEYS 전체가 아니라 이 목록만 렌더한다.
+export const SELECTABLE_METRIC_KEYS: readonly BoardMetric[] = [
+  'views', 'impressions', 'reach', 'engagements', 'clicks', 'spend', 'conversions',
+  'inflow_sessions', 'inflow_users',
+];
+// story #3813(PR3) — 선택기에서 "아직" 뺀 키의 명시 목록(묵시 누락과 구분하는
+// 자리 — 새 METRIC_KEYS를 추가했는데 SELECTABLE_METRIC_KEYS에도 여기에도 안
+// 넣으면 아래 완전성 테스트가 RED). PR4가 opens/delivered를 선택기에 열 때
+// 이 배열에서 빼고 SELECTABLE_METRIC_KEYS로 옮긴다.
+export const PENDING_SELECTOR_KEYS: readonly BoardMetric[] = ['opens', 'delivered'];
 
 export type FollowUpKind = 'republish' | 'edit' | 'stop';
 

@@ -36,6 +36,12 @@ _SNAPSHOT_OFFSETS = (timedelta(days=1), timedelta(days=7))
 NORMALIZED_KEYS = (
     "impressions", "reach", "views", "engagements", "clicks", "spend", "conversions",
     "inflow_sessions", "inflow_users", "inflow_conversions",
+    # story #3813(Phase3·3-4 PR3, 페드루 PO 確定 2026-09-12) — 뉴스레터(ESP) 발송
+    # 결과 2키(clicks는 위 7키에 이미 있어 재사용, 새로 안 만듦). image_max_count=0
+    # 관례와 동형 — 미선언 채널(threads/instagram/facebook/x 등)은 이 두 키가
+    # 항상 null(insight_metrics에 안 넣으므로 `_normalize()`가 자동 처리, 코드
+    # 변경 0).
+    "opens", "delivered",
 )
 
 # story #3414 classify_failure_kind()와 같은 error_code 문자열을 재사용한다(새 상태값
@@ -287,6 +293,18 @@ async def _fetch_sandbox(db: AsyncSession, *, publication_id: uuid.UUID, live: b
             if version_text is not None and _MARKER_INSIGHT_DRIFT in version_text:
                 raw = {**raw, "views": max(0, raw["views"] - _INSIGHT_DRIFT_DELTA)}
 
+    return {"raw": raw, "values": raw}
+
+
+# story #3813(Phase3·3-4 PR3, 페드루 PO 確定 2026-09-12) — 뉴스레터 발송 결과
+# dev 전용 샌드박스 지표. 5b27b32f/_fetch_sandbox와 동일 취지(결정적·상태
+# 없음) — 단 PO 明示 "고정값"이라 publication_id로 흔들지 않는다(stibee_
+# sandbox_campaign.py::send_campaign의 recipient_count=4200 고정과 같은 결).
+_STIBEE_SANDBOX_FIXED_VALUES = {"opens": 1_200, "delivered": 4_200, "clicks": 300}
+
+
+async def _fetch_stibee_sandbox(*, publication_id: uuid.UUID) -> dict[str, Any]:
+    raw = dict(_STIBEE_SANDBOX_FIXED_VALUES)
     return {"raw": raw, "values": raw}
 
 
@@ -704,6 +722,8 @@ async def _fetch_for_snapshot(db: AsyncSession, snapshot: InsightSnapshot, *, li
     # 짝으로 유지한다(AC3 가드 test_3696가 이 짝을 구조적으로 계속 대조한다).
     if snapshot.channel in ("facebook_sandbox", "instagram_sandbox"):
         return await _fetch_sandbox(db, publication_id=snapshot.publication_id, live=live)
+    if snapshot.channel == "stibee_sandbox":
+        return await _fetch_stibee_sandbox(publication_id=snapshot.publication_id)
     raise InsightFetchError(
         error_code="INSIGHT_CHANNEL_NOT_IMPLEMENTED",
         message=f"insight_metrics는 선언됐지만 fetch dispatch가 없습니다: {snapshot.channel}",

@@ -44,7 +44,7 @@ describe('InsightsBoardMetricCell — GA4 유입 지표 null 사유 진리표(st
     status: 'captured', captured_at: '2026-09-06T00:00:00Z',
     normalized: {
       impressions: null, reach: null, views: 10, engagements: null, clicks: null, spend: null, conversions: null,
-      inflow_sessions: null, inflow_users: null,
+      inflow_sessions: null, inflow_users: null, opens: null, delivered: null,
     },
   };
 

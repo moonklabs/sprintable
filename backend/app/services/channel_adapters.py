@@ -662,6 +662,13 @@ if os.environ.get("SANDBOX_CHANNEL_ENABLED", "").strip().lower() == "true":
         credential_kind="none",
         display_name="Stibee Sandbox",  # story #3779 가드 회피 — "stibee" 어댑터와 동형 판단.
         kind="social",  # story 3-4 PR2 정정 — "stibee" 어댑터와 동형(위 주석 참고).
+        # story #3813(Phase3·3-4 PR3, 페드루 PO 確定 2026-09-12) — 발송 결과 지표.
+        # 실 "stibee"(위 항목)엔 아직 선언 안 함 — 실 Stibee HTTP 클라이언트가 이
+        # PR 범위 밖(PR2와 동일 제약)이라, 지금 선언하면 `_fetch_for_snapshot`
+        # dispatch가 없어 test_3696 가드(선언↔dispatch 짝 강제)가 정확히 이 갭을
+        # RED로 잡는다 — wordpress/webhook이 실 fetch 배선 前엔 insight_metrics를
+        # 미선언 상태로 두는 것과 동형 판단.
+        insight_metrics=("opens", "delivered", "clicks"),
     )
 
 

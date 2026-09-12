@@ -2388,6 +2388,8 @@
     "insightMetricConversions": "전환",
     "insightMetricInflowSessions": "유입 세션",
     "insightMetricInflowUsers": "유입 사용자",
+    "insightMetricOpens": "오픈",
+    "insightMetricDelivered": "전달",
     "insightMetricUnavailableDash": "—",
     "insightMetricUnavailableReason": "이 채널은 이 지표를 제공하지 않습니다",
     "insightCapturedAtLabel": "수집",

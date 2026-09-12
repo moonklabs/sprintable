@@ -15,11 +15,11 @@ function makeRow(overrides: Partial<InsightsBoardRow> & { publication_id: string
 
 const D1_A = { status: 'captured' as const, captured_at: '2026-09-02T00:00:00Z', normalized: {
   impressions: 100, reach: null, views: null, engagements: null, clicks: null, spend: null, conversions: null,
-  inflow_sessions: null, inflow_users: null,
+  inflow_sessions: null, inflow_users: null, opens: null, delivered: null,
 } };
 const D7_A = { status: 'captured' as const, captured_at: '2026-09-08T00:00:00Z', normalized: {
   impressions: 250, reach: null, views: null, engagements: null, clicks: null, spend: null, conversions: null,
-  inflow_sessions: null, inflow_users: null,
+  inflow_sessions: null, inflow_users: null, opens: null, delivered: null,
 } };
 
 describe('groupInsightsBoardRows — story #3656', () => {
@@ -77,7 +77,7 @@ describe('aggregateGroupBucket — story #3656 페드루 確定 규칙', () => {
     status: 'captured' as const, captured_at: '2026-09-08T00:00:00Z',
     normalized: {
       impressions, reach: null, views, engagements: null, clicks: null, spend: null, conversions: null,
-      inflow_sessions: null, inflow_users: null,
+      inflow_sessions: null, inflow_users: null, opens: null, delivered: null,
     },
   });
 
