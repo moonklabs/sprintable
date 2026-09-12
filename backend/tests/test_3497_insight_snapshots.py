@@ -720,6 +720,101 @@ async def test_declared_channel_still_schedules_two_pending_rows_no_regression(m
 
 
 @pytest.mark.anyio
+async def test_worker_selfheals_stray_pending_row_for_declared_zero_channel_regardless_of_due_at(monkeypatch):
+    """⭐페드루 PO 지적(2026-09-12 18:19Z, #4236 후속 적기만) — #4236이 스케줄
+    단계를 게이트했지만, 그 착지 **前**에 이미 열린 선언 0 채널의 pending 행은
+    자기 due_at(+1d/+7d, 최대 7일)까지 그대로 남아 그 사이 화면이 계속 「스냅샷
+    예정」을 냈다. 이 행을 due_at 이 아직 먼 미래인 채로 직접 심어(#4236 착지
+    前에 이미 있던 옛 행을 흉내) 워커 tick 1회만으로 즉시 unsupported로
+    종결되는지 잰다(due_at 도래를 기다리지 않는다 — "결과가 정적으로 100%
+    확定"이라 기다릴 이유가 없다는 게 이 처방의 요점). 뮤테이션 대상: SELECT의
+    OR(declared_zero_channels) 절을 걷으면 이 테스트가 RED여야 한다(due_at
+    조건만으론 안 잡힌다)."""
+    from app.models.insight_snapshot import InsightSnapshot
+    from app.services.insight_snapshots import process_due_insight_snapshots
+    import app.services.insight_snapshots as insight_module
+    from sqlalchemy import select
+
+    call_log: list[str] = []
+    _original_fetch = insight_module._fetch_for_snapshot
+
+    async def _spy_fetch(db, snapshot):
+        call_log.append(snapshot.channel)
+        return await _original_fetch(db, snapshot)
+
+    monkeypatch.setattr(insight_module, "_fetch_for_snapshot", _spy_fetch)
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, _ = await _seed_org(s)
+            work_item_id = uuid.uuid4()
+            publication_id = uuid.uuid4()
+            # #4236 착지 前에 이미 있던 옛 행을 흉내 — due_at이 아직 6일 남은
+            # 미래(자연 처리로는 6일을 더 기다려야 unsupported가 됐을 행).
+            far_future_due_at = datetime.now(timezone.utc) + timedelta(days=6)
+            s.add(InsightSnapshot(
+                id=uuid.uuid4(), org_id=org_id, work_item_id=work_item_id,
+                publication_id=publication_id, publication_kind="site_post",
+                channel="wordpress", external_id="legacy-pre-4236-post", due_at=far_future_due_at,
+                status="pending",
+            ))
+            await s.commit()
+
+            counts = await process_due_insight_snapshots(s)
+            assert counts["unsupported"] == 1, (
+                f"due_at이 6일 남았는데도 자가회수돼야 한다(counts={counts})"
+            )
+            assert call_log.count("wordpress") == 0, (
+                "미지원 채널인데 adapter fetch가 호출됐다(spy 실측)"
+            )
+
+            row = (await s.execute(
+                select(InsightSnapshot).where(InsightSnapshot.publication_id == publication_id)
+            )).scalar_one()
+            assert row.status == "unsupported"
+            assert row.due_at == far_future_due_at, "due_at 자체는 안 건드린다(판정 근거만 바뀐다)"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_worker_selfheal_does_not_touch_pending_row_for_declared_channel_before_due_at():
+    """양성대조(회귀 0) — 선언 有 채널(sandbox)의 pending 행은 due_at이 아직
+    안 왔으면 자가회수 대상이 아니다(기존 "due_at 도래 시에만" 규율 그대로).
+    자가회수가 declared_zero_channels 축을 벗어나 아무 pending이나 다 잡으면
+    이 테스트가 RED여야 한다."""
+    from app.models.insight_snapshot import InsightSnapshot
+    from app.services.insight_snapshots import process_due_insight_snapshots
+    from sqlalchemy import select
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, _ = await _seed_org(s)
+            work_item_id = uuid.uuid4()
+            publication_id = uuid.uuid4()
+            far_future_due_at = datetime.now(timezone.utc) + timedelta(days=1)
+            s.add(InsightSnapshot(
+                id=uuid.uuid4(), org_id=org_id, work_item_id=work_item_id,
+                publication_id=publication_id, publication_kind="site_post",
+                channel="sandbox", external_id=None, due_at=far_future_due_at,
+                status="pending",
+            ))
+            await s.commit()
+
+            counts = await process_due_insight_snapshots(s)
+            assert counts == {"captured": 0, "unsupported": 0, "failed": 0, "pending_retry": 0, "error": 0, "skipped": 0}
+
+            row = (await s.execute(
+                select(InsightSnapshot).where(InsightSnapshot.publication_id == publication_id)
+            )).scalar_one()
+            assert row.status == "pending", "선언 有 채널의 미도래 pending 행을 자가회수가 잘못 건드렸다"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_stray_legacy_pending_row_for_declared_zero_channel_still_resolves_unsupported(monkeypatch):
     """story #3816 — 이 PR 착지 前에 이미 만들어진 옛 pending 행(선언 0 채널)의
     처분은 이 PR 스코프 밖(적기만)이나, 그런 행이 due_at을 맞으면 워커가 여전히

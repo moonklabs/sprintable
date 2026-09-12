@@ -974,16 +974,33 @@ async def process_due_insight_snapshots(db: AsyncSession, *, now: datetime | Non
     story #3806 페드루 PO 追加 確定(2026-09-11, 정정1) — 이 제외도 `organic_
     snapshots_only()` 같은 술어 하나를 `list_insight_snapshots_for_publication`
     과 공유한다(그 함수 docstring 참고 — 상수 공유만으론 "적용 자체를 잊는"
-    클래스를 못 막는다는 실사고 교훈)."""
+    클래스를 못 막는다는 실사고 교훈).
+
+    story #3816(페드루 PO 지적 2026-09-12 18:19Z, #4236 후속 적기만) — #4236이
+    `schedule_insight_snapshots()`를 스케줄 단계에서 게이트했지만, 그 착지
+    **前**에 이미 열린 선언 0 채널(ghost_sandbox 등)의 pending 행은 그대로
+    남아 자기 due_at(+1d/+7d, 최대 7일)까지는 이 WHERE에 안 걸려 계속 pending
+    으로 화면에 「스냅샷 예정」을 냈다 — 결과가 정적으로 100% 확定(어댑터가
+    선언 0인 건 시간이 지나도 안 바뀐다)인데 옛 행만 기다리는 결함. `due_at`
+    조건을 이 채널들(declared_zero_channels — 스케줄 게이트와 같은 술어
+    `not adapter.insight_metrics`를 재사용, 새 판정 로직 0)에 한해 OR로
+    무시해 즉시 이 루프가 집게 한다 — 워커가 스스로 회수하는 클래스(일회성
+    마이그 대신, story #3633/#3646 mark_connection_recovered류와 동형 사상)."""
     from app.services.ads_spend_snapshots import organic_snapshots_only
     from app.services.channel_adapters import CHANNEL_ADAPTERS
     from app.services.publication_command import classify_failure_kind, FAILURE_KIND_CONNECTION, FAILURE_KIND_TRANSIENT
+    from sqlalchemy import or_
 
     now = now or datetime.now(timezone.utc)
+    declared_zero_channels = [ch for ch, cfg in CHANNEL_ADAPTERS.items() if not cfg.insight_metrics]
     rows = (await db.execute(
         organic_snapshots_only(
             select(InsightSnapshot).where(
-                InsightSnapshot.status == "pending", InsightSnapshot.due_at <= now,
+                InsightSnapshot.status == "pending",
+                or_(
+                    InsightSnapshot.due_at <= now,
+                    InsightSnapshot.channel.in_(declared_zero_channels),
+                ),
             )
         ).order_by(InsightSnapshot.due_at.asc())
         .limit(BATCH_SIZE)
