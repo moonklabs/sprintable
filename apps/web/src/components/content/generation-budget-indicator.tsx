@@ -52,6 +52,27 @@ export function formatMinorCurrency(
   return t(CURRENCY_AMOUNT_KEYS[currency], { amount });
 }
 
+// story #3808(배포 81 라이브 회차 적기·페드루 PO 決定 2026-09-12 15:54Z) — 한도를
+// 이미 쓴 지출보다 낮게 내리면 remaining_minor가 음수로 온다(BE 계산 사실 그대로,
+// 고치지 않는다). 그 음수를 formatMinorCurrency에 그대로 먹이면 "-10,000원"처럼
+// "남은 게 있는데 마이너스"로 읽혀 사실과 반대다 — 실은 "남은 게 없고 그만큼
+// 넘었다." 남음·초과 두 값(둘 다 항상 0 이상)으로 나눠 사람 말로 조립한다.
+// generationBudgetIndicator·generationBudgetExceededBanner·apiUsageBudgetIndicator·
+// apiUsageBudgetExceededBanner 4곳이 전부 이 함수 하나만 통해서 remaining을 찍는다
+// (formatMinorCurrency와 같은 "한 곳에서만" 규율 — §19-1 재발 방지 정신 그대로).
+export function formatRemainingWithOverLimit(
+  remainingMinor: number,
+  currency: GenerationBudgetCurrency,
+  locale: string,
+  t: (key: string, values?: Record<string, string | number>) => string,
+): string {
+  if (remainingMinor >= 0) return formatMinorCurrency(remainingMinor, currency, locale, t);
+  return t('budgetRemainingOverLimit', {
+    remaining: formatMinorCurrency(0, currency, locale, t),
+    overage: formatMinorCurrency(-remainingMinor, currency, locale, t),
+  });
+}
+
 export type GenerationBudgetState =
   | { status: 'loading' }
   | {
@@ -136,7 +157,7 @@ export function GenerationBudgetIndicator({
     // §19-5 — submit 표면은 "남음"만, 분수 아님.
     return (
       <span className="text-xs text-muted-foreground" data-testid="generation-budget-remaining-compact">
-        {t('generationBudgetRemainingCompact', { remaining: formatMinorCurrency(remainingMinor, currency, locale, t) })}
+        {t('generationBudgetRemainingCompact', { remaining: formatRemainingWithOverLimit(remainingMinor, currency, locale, t) })}
       </span>
     );
   }
@@ -152,7 +173,7 @@ export function GenerationBudgetIndicator({
         {t('generationBudgetSpentLabel')} <span className="text-foreground">{formatMinorCurrency(state.spentMinor, currency, locale, t)}</span>
       </span>
       <span className="text-muted-foreground">
-        {t('generationBudgetRemainingLabel')} <span className="text-foreground" data-testid="generation-budget-remaining-value">{formatMinorCurrency(remainingMinor, currency, locale, t)}</span>
+        {t('generationBudgetRemainingLabel')} <span className="text-foreground" data-testid="generation-budget-remaining-value">{formatRemainingWithOverLimit(remainingMinor, currency, locale, t)}</span>
       </span>
     </div>
   );

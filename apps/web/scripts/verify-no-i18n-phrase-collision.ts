@@ -648,6 +648,11 @@ export const EXEMPT_PAIRS = new Set<string>([
   'content.channelPostsCoverSpecTag <-> content.channelPostsVideoSpecTagSize',
   'content.channelPostsImageSpecTag <-> content.channelPostsVideoSpecTagSize',
   'content.channelPostsImageSpecTagWithMin <-> content.channelPostsVideoSpecTagSize',
+  // story #3808(배포 81 라이브 회차 적기, 페드루 PO 決定 2026-09-12 16:13Z) —
+  // 「한도」는 단독 라벨(카드 헤더 "한도 {금액}") vs 복합구("한도 초과 {N}원")로
+  // 문맥이 갈리고, 같은 행에 나란히 서도 «같은 사실 같은 낱말»(둘 다 그 한도를
+  // 가리킨다)이라 충돌이 아니라 정합.
+  'content.budgetRemainingOverLimit <-> content.generationBudgetLimitLabel',
 ]);
 
 // ⛔⭐오르테가군 지적(2026-07-31) — 이 목록에 «새로» 넣는 것은 PO 승인을 거친다. 이유 없이

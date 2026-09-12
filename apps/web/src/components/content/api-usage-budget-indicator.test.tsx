@@ -146,6 +146,29 @@ describe('ApiUsageBudgetIndicator (story #3808 PR5a — X 종량 API 지출 월 
     expect(byTestId('api-usage-budget-suspended')).toBeNull();
   });
 
+  // story #3808(배포 81 라이브 회차 적기·페드루 PO 決定 2026-09-12 15:54Z) — 한도를
+  // 이미 쓴 지출보다 낮게 내리면 remaining_minor가 음수로 온다(BE 계산 사실). 예전엔
+  // "X 비용 남음 -10,000원"으로 "남은 게 있는데 마이너스"처럼 읽혔다 — 사실은
+  // "남은 게 없고 그만큼 넘었다"라 "남음 0원 · 한도 초과 N원"으로 조립한다.
+  it('⭐잔량 음수(한도<지출) — "X 비용 남음 -10,000원" 아니라 "X 비용 남음 0원 · 한도 초과 10,000원"', async () => {
+    await renderIndicator(
+      { status: 'ok', limitMinor: 300, spentMinor: 10300, remainingMinor: -10000, currency: 'KRW', period: 'month' },
+      'compact',
+    );
+    const text = byTestId('api-usage-budget-remaining-compact')?.textContent ?? '';
+    expect(text).toBe('X 비용 남음 0원 · 한도 초과 10,000원');
+    expect(text).not.toContain('-10,000');
+  });
+
+  it('⭐잔량 음수 — full 변형(카드 헤더)도 같은 조립', async () => {
+    await renderIndicator(
+      { status: 'ok', limitMinor: 300, spentMinor: 10300, remainingMinor: -10000, currency: 'KRW', period: 'month' },
+      'full',
+    );
+    const text = byTestId('api-usage-budget-remaining-value')?.textContent ?? '';
+    expect(text).toBe('0원 · 한도 초과 10,000원');
+  });
+
   it('⭐USD 정지 — 한도 표시가 통화 유틸을 그대로 타서 "$0.00"로 뜬다(하드코딩 "0원" 아님)', async () => {
     await renderIndicator({
       status: 'ok', limitMinor: 0, spentMinor: 0, remainingMinor: 0, currency: 'USD', period: 'month',

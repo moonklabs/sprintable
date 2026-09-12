@@ -4816,6 +4816,30 @@ describe('ChannelPostEditPage — 생성 비용 한도(story #3500, doc a0da40c9
     expect(costInput.value).toBe('20000');
   });
 
+  // story #3808(배포 81 라이브 회차 적기·페드루 PO 決定 2026-09-12 15:54Z) — BE가
+  // 음수 remaining_minor를 낼 수 있다(한도를 이미 쓴 지출보다 낮게 내린 경우). 422
+  // 배너도 편집기 지표와 같은 클래스라 "남음 -400원"이 아니라 "남음 0원 · 한도
+  // 초과 400원"으로 조립돼야 한다.
+  it('⭐422 GENERATION_BUDGET_EXCEEDED — remaining_minor 음수 — 배너가 "남음 0원 · 한도 초과 N원"으로 조립', async () => {
+    stubFetch({
+      onSubmit: () => ({
+        status: 422,
+        body: { error: { code: 'GENERATION_BUDGET_EXCEEDED', limit_minor: 300, spent_minor: 10300, estimated_cost_minor: 20000, remaining_minor: -10000 } },
+      }),
+      genBudgetOk: { limit_minor: 300, spent_minor: 10300, remaining_minor: -10000, currency: 'KRW', period: 'month' },
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const submitBtn = container.querySelector('[data-testid="channel-post-submit-button"]') as HTMLButtonElement;
+    await act(async () => { submitBtn.click(); });
+    await flush();
+
+    const remaining = container.querySelector('[data-testid="generation-budget-exceeded-remaining"]')?.textContent;
+    expect(remaining).toBe('0원 · 한도 초과 10,000원');
+    expect(remaining).not.toContain('-10,000');
+  });
+
   it('정책 미설정(limit_minor=null)이면 잔량 표시가 아무것도 안 그린다', async () => {
     stubFetch({ genBudgetOk: { limit_minor: null, spent_minor: 0, remaining_minor: null, currency: null, period: 'month' } });
     await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
@@ -4865,6 +4889,35 @@ describe('ChannelPostEditPage — 생성 비용 한도(story #3500, doc a0da40c9
       await flush();
       expect(container.querySelector('[data-testid="api-usage-budget-failed"]')).not.toBeNull();
       expect((container.querySelector('[data-testid="channel-post-submit-button"]') as HTMLButtonElement).disabled).toBe(false);
+    });
+
+    // story #3808(배포 81 라이브 회차 적기·페드루 PO 決定 2026-09-12 15:54Z) — X 축
+    // 422 배너에도 같은 클래스 결함(remaining_minor 음수 → "X 비용 남음 -N원").
+    // 여태 이 배너의 422 테스트 자체가 없었다(신규 커버). X 단가는 서버가 실제
+    // 발행 순간에 계산해(handlePublish에서만 이 코드를 처리 — 상신handleSubmit
+    // ForApproval엔 이 분기가 없다, 서버 비용 계산 축이 다르다) 발행 버튼으로
+    // 트리거한다(상신 버튼 아님).
+    it('⭐발행 422 API_USAGE_BUDGET_EXCEEDED — remaining_minor 음수 — 배너가 "X 비용 남음 0원 · 한도 초과 N원"으로 조립', async () => {
+      stubFetch({
+        draftDetail: { channel: 'x', gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1' },
+        apiUsageBudgetOk: { limit_minor: 300, spent_minor: 10300, remaining_minor: -10000, currency: 'KRW', period: 'month' },
+        onPublish: () => ({
+          status: 422,
+          body: { error: { code: 'API_USAGE_BUDGET_EXCEEDED', limit_minor: 300, spent_minor: 10300, estimated_cost_minor: 20000, remaining_minor: -10000 } },
+        }),
+      });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+
+      const publishBtn = container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement;
+      await act(async () => { publishBtn.click(); });
+      await flush();
+
+      const banner = container.querySelector('[data-testid="api-usage-budget-exceeded-banner"]');
+      expect(banner).not.toBeNull();
+      const remaining = container.querySelector('[data-testid="api-usage-budget-exceeded-remaining"]')?.textContent;
+      expect(remaining).toBe('0원 · 한도 초과 10,000원');
+      expect(remaining).not.toContain('-10,000');
     });
   });
 });

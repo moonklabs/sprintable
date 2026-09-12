@@ -2698,6 +2698,7 @@
     "apiUsageBudgetExceededAction": "An owner or admin can change the limit on the content rules screen.",
     "generationBudgetAmountKrw": "₩{amount}",
     "generationBudgetAmountUsd": "${amount}",
+    "budgetRemainingOverLimit": "{remaining} · {overage} over limit",
     "channelPostsApprovalLinkPreviewLabel": "Link that will be attached",
     "channelPostsApprovalHookLabel": "Hook",
     "channelPostsExternalIdLabel": "Post ID",

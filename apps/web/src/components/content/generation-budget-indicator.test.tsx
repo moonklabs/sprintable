@@ -196,6 +196,28 @@ describe('GenerationBudgetIndicator (story #3500, doc a0da40c9 §19 — BE #3498
     expect(byTestId('generation-budget-remaining-compact')?.textContent).toBe('남음 0원');
     expect(byTestId('generation-budget-suspended')).toBeNull();
   });
+
+  // story #3808(배포 81 라이브 회차 적기·페드루 PO 決定 2026-09-12 15:54Z) — 한도를
+  // 이미 쓴 지출보다 낮게 내리면 remaining_minor가 음수로 온다. "남음 -10,000원"은
+  // "남은 게 있는데 마이너스"처럼 읽혀 사실과 반대다 — "남음 0원 · 한도 초과 N원"으로.
+  it('⭐잔량 음수(한도<지출) — "남음 -10,000원" 아니라 "남음 0원 · 한도 초과 10,000원"', async () => {
+    await renderIndicator(
+      { status: 'ok', limitMinor: 300, spentMinor: 10300, remainingMinor: -10000, currency: 'KRW', period: 'month' },
+      'compact',
+    );
+    const text = byTestId('generation-budget-remaining-compact')?.textContent ?? '';
+    expect(text).toBe('남음 0원 · 한도 초과 10,000원');
+    expect(text).not.toContain('-10,000');
+  });
+
+  it('⭐잔량 음수 — full 변형(카드 헤더)도 같은 조립', async () => {
+    await renderIndicator(
+      { status: 'ok', limitMinor: 300, spentMinor: 10300, remainingMinor: -10000, currency: 'KRW', period: 'month' },
+      'full',
+    );
+    const text = byTestId('generation-budget-remaining-value')?.textContent ?? '';
+    expect(text).toBe('0원 · 한도 초과 10,000원');
+  });
 });
 
 describe('⭐PO Design 재검①(2026-09-05, PR#3848) — en 로케일 KRW 표기는 실 en.json 값으로', () => {

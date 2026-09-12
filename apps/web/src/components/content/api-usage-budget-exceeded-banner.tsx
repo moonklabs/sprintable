@@ -2,7 +2,7 @@
 
 import { useLocale, useTranslations } from 'next-intl';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { formatMinorCurrency, type GenerationBudgetCurrency } from '@/components/content/generation-budget-indicator';
+import { formatMinorCurrency, formatRemainingWithOverLimit, type GenerationBudgetCurrency } from '@/components/content/generation-budget-indicator';
 
 // story #3808(PR5c, 페드루 PO 確定 2026-09-12 — 라이브 회차 결함 처방) —
 // GenerationBudgetExceededBanner의 형제 컴포넌트(다른 지갑, api-usage-budget-
@@ -39,7 +39,7 @@ export function ApiUsageBudgetExceededBanner({
           <span className="text-muted-foreground">{t('generationBudgetEstimatedLabel')}</span>
           <span data-testid="api-usage-budget-exceeded-estimated">{formatMinorCurrency(estimatedCostMinor, currency, locale, t)}</span>
           <span className="text-muted-foreground">{t('apiUsageBudgetRemainingLabel')}</span>
-          <span data-testid="api-usage-budget-exceeded-remaining">{formatMinorCurrency(remainingMinor, currency, locale, t)}</span>
+          <span data-testid="api-usage-budget-exceeded-remaining">{formatRemainingWithOverLimit(remainingMinor, currency, locale, t)}</span>
         </div>
         <span className="mt-2 block text-xs text-muted-foreground">{t('apiUsageBudgetExceededAction')}</span>
       </AlertDescription>

@@ -2,7 +2,7 @@
 
 import { useLocale, useTranslations } from 'next-intl';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { formatMinorCurrency, type GenerationBudgetCurrency } from '@/components/content/generation-budget-indicator';
+import { formatMinorCurrency, formatRemainingWithOverLimit, type GenerationBudgetCurrency } from '@/components/content/generation-budget-indicator';
 
 // story #3500(BE #3498, PO 確定·doc a0da40c9 §19-8 디자인 유나 確定 2026-09-05 —
 // BE 미착지, 계약만 고정) — GENERATION_BUDGET_EXCEEDED 422 전역 배너. §19-8이
@@ -41,7 +41,7 @@ export function GenerationBudgetExceededBanner({
           <span className="text-muted-foreground">{t('generationBudgetEstimatedLabel')}</span>
           <span data-testid="generation-budget-exceeded-estimated">{formatMinorCurrency(estimatedCostMinor, currency, locale, t)}</span>
           <span className="text-muted-foreground">{t('generationBudgetRemainingLabel')}</span>
-          <span data-testid="generation-budget-exceeded-remaining">{formatMinorCurrency(remainingMinor, currency, locale, t)}</span>
+          <span data-testid="generation-budget-exceeded-remaining">{formatRemainingWithOverLimit(remainingMinor, currency, locale, t)}</span>
         </div>
         <span className="mt-2 block text-xs text-muted-foreground">{t('generationBudgetExceededAction')}</span>
       </AlertDescription>
