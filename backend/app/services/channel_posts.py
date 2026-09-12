@@ -2091,6 +2091,12 @@ async def _publish_x_thread_draft(
             succeeded = await publish_x_thread_fn(
                 client, access_token=access_token, texts=remaining_texts,
                 media_id=image_public_url, initial_reply_to_tweet_id=prev_external_id,
+                # story #3808 PR5d(페드루 PO 確定) — "이번 호출의 texts[0]이 이미
+                # 한 번 실패해 재개하는 자리인가"를 DB 실물(resume_row=그 sequence의
+                # status='failed' 행)로 판정해 넘긴다(process 메모리 0 — 워커
+                # 재기동에도 결정적). x_sandbox_publish.py::[sandbox:429-once]
+                # 전용 신호, 실 x_publish.py는 무시.
+                is_retry=resume_row is not None,
             )
         except ThreadsPublishError as exc:
             succeeded = list(getattr(exc, "published_segments", []) or [])

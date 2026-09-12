@@ -747,3 +747,134 @@ async def test_mutation_publish_time_thread_revalidation_removed_lets_lowered_ca
             await engine.dispose()
     finally:
         channel_posts_module._validate_thread_segments = original_validate
+
+
+# ─── PR5d(페드루 PO 確定 2026-09-12, 배포 80 라이브 회차 갭) — [sandbox:429-once] ──
+# 「같은 버전(같은 세그먼트 텍스트)을 고치지 않고 재시도만으로 성공」 시나리오를
+# sandbox로 증명한다 — 기존 [sandbox:429]는 텍스트에 마커가 남아 있는 한 영원히
+# 실패해 이 경로를 재현할 수 없었다(라이브 회차 "못 잰 것 1").
+
+@pytest.mark.anyio
+async def test_thread_publish_429_once_marker_fails_first_then_succeeds_on_unedited_retry():
+    from sqlalchemy import select
+    from app.models.channel_publication import ChannelPublication
+    from app.models.evidence import Evidence
+    from app.services.channel_posts import ChannelRateLimitedError, publish_channel_post_draft
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, owner_id, draft_id, gate_id, version = await _seed_ready_thread_draft(
+                s, thread=["[sandbox:429-once] 첫 시도만 실패", "세그먼트 3"],
+            )
+
+            with pytest.raises(ChannelRateLimitedError):
+                await publish_channel_post_draft(
+                    s, org_id=org_id, draft_id=draft_id, published_by_member_id=owner_id,
+                )
+
+            rows = list((await s.execute(
+                select(ChannelPublication)
+                .where(ChannelPublication.gate_id == gate_id, ChannelPublication.version_id == version.id)
+                .order_by(ChannelPublication.sequence)
+            )).scalars().all())
+            assert [r.sequence for r in rows] == [1, 2]
+            assert rows[0].status == "published"
+            assert rows[1].status == "failed"
+            head_external_id = rows[0].external_id
+            failed_row_id = rows[1].id
+
+            evidence_after_first_call = len((await s.execute(
+                select(Evidence).where(Evidence.org_id == org_id, Evidence.type == "metric")
+            )).scalars().all())
+            assert evidence_after_first_call == 1, "헤드 1건만 실제로 성공 — 실패분은 evidence 없음"
+
+        # 재시도 — channel_payload를 «전혀 안 건드리고» 같은 함수를 다시 부른다
+        # (기존 [sandbox:429] 테스트와 다른 지점 — 여기가 이 마커의 존재 이유다).
+        async with Session() as s:
+            head_row = await publish_channel_post_draft(
+                s, org_id=org_id, draft_id=draft_id, published_by_member_id=owner_id,
+            )
+            assert head_row.sequence == 1
+            assert head_row.status == "published"
+            assert head_row.external_id == head_external_id, "헤드는 재발행되지 않는다(그대로)"
+
+            rows = list((await s.execute(
+                select(ChannelPublication)
+                .where(ChannelPublication.gate_id == gate_id, ChannelPublication.version_id == version.id)
+                .order_by(ChannelPublication.sequence)
+            )).scalars().all())
+            assert [r.sequence for r in rows] == [1, 2, 3], "3번째까지 완주"
+            assert all(r.status == "published" for r in rows)
+            assert rows[1].id == failed_row_id, "실패했던 2번 행을 재사용(새 행 추가 아님)"
+            assert rows[1].error_code is None
+
+            evidence_after_retry = len((await s.execute(
+                select(Evidence).where(Evidence.org_id == org_id, Evidence.type == "metric")
+            )).scalars().all())
+            assert evidence_after_retry == 3, "1(첫 호출 헤드) + 2(재시도 seq2·seq3) — remaining_count 단위만 청구"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_thread_publish_429_once_marker_still_fails_on_fresh_first_attempt_at_other_sequence():
+    """양성대조 — 재개 자리(index 0)가 아닌 세그먼트에 이 마커가 있으면(첫 시도이므로)
+    그대로 실패한다(무조건 통과가 아니라 "그 자리의 두 번째 시도"만 통과)."""
+    from app.services.channel_posts import ChannelRateLimitedError, publish_channel_post_draft
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, owner_id, draft_id, gate_id, version = await _seed_ready_thread_draft(
+                s, thread=["세그먼트 2", "[sandbox:429-once] 첫 시도"],
+            )
+            with pytest.raises(ChannelRateLimitedError):
+                await publish_channel_post_draft(
+                    s, org_id=org_id, draft_id=draft_id, published_by_member_id=owner_id,
+                )
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_mutation_429_once_retry_pass_removed_makes_unedited_retry_fail_forever():
+    """⭐뮤테이션 셀프체크 — 호출부가 넘기는 `is_retry` 신호를 무력화(항상 False로
+    덮어씀)하면, 마커를 안 지운 재시도가 [sandbox:429] 옛 마커처럼 영원히 실패해야
+    한다(=이 처방이 실제로 그 시나리오를 가른다는 증명)."""
+    # publish_x_thread_fn 호출부 자체를 패치하기보다, 더 정확히 처방 지점만 겨냥한다 —
+    # _publish_x_thread_draft가 넘기는 is_retry 인자를 sandbox 쪽에서 무시하도록
+    # x_sandbox_publish.publish_x_thread를 감싼다(실제 처방 라인은 channel_posts.py의
+    # `is_retry=resume_row is not None`이지만, 함수 내부 지역변수라 몽키패치 대상이
+    # 아니다 — 같은 효과를 내는 소비측 무력화로 검증).
+    import app.services.x_sandbox_publish as x_sandbox_publish_module
+    original_publish_x_thread = x_sandbox_publish_module.publish_x_thread
+
+    async def _mutated_always_first_attempt(*args, **kwargs):
+        kwargs["is_retry"] = False
+        return await original_publish_x_thread(*args, **kwargs)
+
+    x_sandbox_publish_module.publish_x_thread = _mutated_always_first_attempt
+    try:
+        from app.services.channel_posts import ChannelRateLimitedError, publish_channel_post_draft
+
+        engine, Session = await _session_factory()
+        try:
+            async with Session() as s:
+                org_id, owner_id, draft_id, gate_id, version = await _seed_ready_thread_draft(
+                    s, thread=["[sandbox:429-once] 첫 시도만 실패", "세그먼트 3"],
+                )
+                with pytest.raises(ChannelRateLimitedError):
+                    await publish_channel_post_draft(
+                        s, org_id=org_id, draft_id=draft_id, published_by_member_id=owner_id,
+                    )
+
+            async with Session() as s:
+                with pytest.raises(ChannelRateLimitedError):
+                    await publish_channel_post_draft(
+                        s, org_id=org_id, draft_id=draft_id, published_by_member_id=owner_id,
+                    )
+        finally:
+            await engine.dispose()
+    finally:
+        x_sandbox_publish_module.publish_x_thread = original_publish_x_thread
