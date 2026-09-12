@@ -1599,7 +1599,7 @@ export default function ChannelPostEditPage() {
         const body = await res.json().catch(() => null);
         const info = parseSitePostApiError(body);
         // story #3808(PR5c, 페드루 PO 確定 2026-09-12 — 라이브 회차 결함 처방) —
-        // 즉시 발행 버튼도 예산 초과(생성 비용·X API 지출)를 만나면 submit과 같은
+        // 즉시 발행 버튼도 예산 초과(생성 비용·X 비용)를 만나면 submit과 같은
         // 구조화 배너(4값+통화)를 그린다 — 그 전엔 이 버튼 경로가 이 두 코드를
         // 특별취급 안 해 generic "발행에 실패했습니다"만 보여줬다(humanMessageKey가
         // 둘 다 빈 문자열이라). 통화를 모르면(축 GET이 실패/불완전) 배너를 접고
