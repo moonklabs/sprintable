@@ -10,6 +10,7 @@ import {
   flattenMessages,
   GRANDFATHER_BASELINE,
   hasLetterOrNumber,
+  isKeyStemExtension,
   isNumberAdjacent,
   pairKey,
   parseKeyUsages,
@@ -293,9 +294,13 @@ describe('GRANDFATHER_BASELINE — 기존 채무는 통과, 새 충돌만 막는
   });
 
   it('baseline에 없는 새 쌍은 여전히 진짜 충돌로 판정된다(신규 회귀는 여전히 잡힌다)', () => {
+    // story #3808(isKeyStemExtension 도입) — 키 이름을 brandNew.blocked/blockedCount에서
+    // 바꿨다: "blocked"가 "blockedCount"의 접두사라 새 규칙이 확장형으로 분류해 이 픽스처가
+    // «신규 충돌도 여전히 잡힌다»는 원래 취지를 시험 못 하게 됐다(값 축은 무변 — #2352
+    // 모양 자체는 그대로, 키 이름만 접두 관계가 아니게 갈랐다).
     const phrases = new Map([
-      ['brandNew.blocked', { value: '막힘', numberAdjacent: false }],
-      ['brandNew.blockedCount', { value: '막힘 신호 · {n}', numberAdjacent: true }],
+      ['brandNew.gateBlockedLabel', { value: '막힘', numberAdjacent: false }],
+      ['brandNew.queueBlockedSignalCount', { value: '막힘 신호 · {n}', numberAdjacent: true }],
     ]);
     const collisions = findSubstringCollisions(phrases);
     expect(collisions).toHaveLength(1);
@@ -313,9 +318,12 @@ describe('GRANDFATHER_BASELINE — 기존 채무는 통과, 새 충돌만 막는
 // 걸리던 18건(판단 유보 상태였던 것)을 이번에 GRANDFATHER_BASELINE에서 걷어냈다 — 유령
 // 채무를 "아직 판단 안 됨"으로 남겨 두는 것보다, 이미 내려진 결론(numberAdjacent 아님)을
 // Set에도 반영하는 쪽이 다음 사람에게 정확하다.
+// story #3808(isKeyStemExtension 도입, 2026-09-12) — 20→17. 같은 네임스페이스+접두
+// 확장형 3건(chats.agent<->agentCount·goals.spExceeded<->spExceededDetail·
+// storage.delete<->deleteImpact)이 이제 이 스캔 자체에 안 걸린다.
 describe('GRANDFATHER_BASELINE_COUNT_TEST — 41번째부터는 PO 승인, 조용한 증감을 막는다', () => {
-  it('정리 후(#2410 후속) 크기는 정확히 20건이다', () => {
-    expect(GRANDFATHER_BASELINE.size).toBe(20);
+  it('정리 후(#3808 후속) 크기는 정확히 17건이다', () => {
+    expect(GRANDFATHER_BASELINE.size).toBe(17);
   });
 });
 
@@ -325,10 +333,12 @@ describe('GRANDFATHER_BASELINE_COUNT_TEST — 41번째부터는 PO 승인, 조�
 // 걸림 20)가 같아졌다 — 그렇다고 이 테스트가 불필요해지는 건 아니다: GRANDFATHER_BASELINE_
 // COUNT_TEST(선언 수, 조용한 항목 증감 방지)와 이 테스트(실 저장소 스캔 결과, 선언과 실제가
 // 다시 벌어지면 그 자체가 신호)는 서로 다른 것을 지키는 별개의 안전장치라 계속 둔다.
+// story #3808(isKeyStemExtension 도입, 2026-09-12) — 20→17(위 GRANDFATHER_BASELINE_
+// COUNT_TEST와 동형 갱신, 선언=실걸림 계속 일치).
 describe('GRANDFATHER_LIVE_COUNT_TEST — 「선언된 수」와 「지금 실제로 걸리는 수」는 다른 축이다', () => {
-  it('실제 저장소 스캔에서 지금 걸리는 grandfather는 20건이다(정리 후 선언 수와 일치)', () => {
+  it('실제 저장소 스캔에서 지금 걸리는 grandfather는 17건이다(정리 후 선언 수와 일치)', () => {
     const { grandfatherHit } = scanRepository();
-    expect(grandfatherHit.size).toBe(20);
+    expect(grandfatherHit.size).toBe(17);
   });
 
   it('새 FAIL은 없다(#2410 자체가 신규 회귀를 안 냈다는 증거)', () => {
@@ -484,5 +494,101 @@ describe('scanRepository — 글자·숫자 0개 값 사전 제외(story #3582)'
       ],
     ]);
     expect(findSubstringCollisions(phrases)).toHaveLength(1);
+  });
+});
+
+// story #3808(페드루 PO 지적, 2026-09-12 18:18Z) — 4233에서 EXEMPT 6건이 한 PR에 쌓인
+// 근본원인 처방: 「다른 사실을 같은 낱말로」(#2352/#2365)와 「같은 키의 확장형」(예:
+// generationBudgetRemainingCompact <-> …CompactOverLimit)을 가른다.
+describe('isKeyStemExtension — story #3808', () => {
+  it('⭐양성 — 같은 네임스페이스 + 한쪽 로컬 이름이 다른 쪽의 접두사면 확장형(true)', () => {
+    expect(
+      isKeyStemExtension(
+        'content.generationBudgetRemainingCompact',
+        'content.generationBudgetRemainingCompactOverLimit',
+      ),
+    ).toBe(true);
+    // 순서 무관.
+    expect(
+      isKeyStemExtension(
+        'content.generationBudgetRemainingCompactOverLimit',
+        'content.generationBudgetRemainingCompact',
+      ),
+    ).toBe(true);
+  });
+
+  it('음성 — 같은 네임스페이스지만 로컬 이름이 접두 관계가 아니면(다른 stem) false', () => {
+    // 4233 EXEMPT 6건 중 (b) 그룹 — "…CompactOverLimit"와 "…Label"은 공통 접두사
+    // "apiUsageBudgetRemaining"만 있을 뿐, 어느 쪽도 다른 쪽을 통째로 접두로 안 갖는다.
+    expect(
+      isKeyStemExtension(
+        'content.apiUsageBudgetRemainingCompactOverLimit',
+        'content.apiUsageBudgetRemainingLabel',
+      ),
+    ).toBe(false);
+  });
+
+  it('음성 — 네임스페이스가 다르면 로컬 이름이 접두 관계여도 false', () => {
+    expect(isKeyStemExtension('boardA.tasks', 'boardB.tasksCountLabel')).toBe(false);
+  });
+
+  it('음성 — 로컬 이름이 완전히 같으면(사실상 같은 키) false', () => {
+    expect(isKeyStemExtension('content.a', 'content.a')).toBe(false);
+  });
+});
+
+describe('findSubstringCollisions — isKeyStemExtension 배선(양성·음성 대조)', () => {
+  it('양성대조 — 확장형 쌍은 numberAdjacent+값 포함이어도 충돌로 안 잡는다', () => {
+    const phrases = new Map([
+      ['content.fooCompact', { value: '남음 {remaining}', numberAdjacent: true }],
+      ['content.fooCompactOverLimit', { value: '남음 {remaining} · 한도 초과 {overage}', numberAdjacent: true }],
+    ]);
+    expect(findSubstringCollisions(phrases)).toHaveLength(0);
+  });
+
+  it('⭐음성대조(진짜 충돌은 여전히 RED) — 확장형이 아닌 서로 다른 키가 같은 축으로 겹치면 여전히 잡는다', () => {
+    // #2352 모양(blockedLabel<->blockedCount, 이미 AC2에서 검증) 자체는 로컬 이름이
+    // 접두 관계가 아니라 이 새 규칙의 영향 밖 — 여기선 다른 stem의 두 키가 값만
+    // 우연히 겹치는 새 합성 표본으로 "이 규칙이 무관한 충돌까지 삼키지 않는다"를 잰다.
+    const phrases = new Map([
+      ['content.brandNewBlocked', { value: '막힘', numberAdjacent: false }],
+      ['content.otherGateSignal', { value: '게이트·막힘 신호 · {n}', numberAdjacent: true }],
+    ]);
+    expect(findSubstringCollisions(phrases)).toHaveLength(1);
+  });
+});
+
+// story #3808 — 4233 EXEMPT 6건 중 (a) 두 건(같은 compact 슬롯 isOverLimit 확장형)이
+// 이 규칙 도입 뒤 죽은 예외가 됐는지 실 저장소로 재확認한다(나머지 4건 (b)는 다른
+// stem이라 그대로 EXEMPT_PAIRS에 남아야 한다).
+describe('scanRepository — 4233 EXEMPT 6건 중 (a) 확장형 2건만 걷힌다(story #3808)', () => {
+  it('(a) 2건은 이제 EXEMPT_PAIRS에 없다(가드가 스스로 안 겹친다는 걸 안다)', () => {
+    expect(
+      EXEMPT_PAIRS.has(
+        pairKey('content.apiUsageBudgetRemainingCompact', 'content.apiUsageBudgetRemainingCompactOverLimit'),
+      ),
+    ).toBe(false);
+    expect(
+      EXEMPT_PAIRS.has(
+        pairKey('content.generationBudgetRemainingCompact', 'content.generationBudgetRemainingCompactOverLimit'),
+      ),
+    ).toBe(false);
+  });
+
+  it('(b) 4건은 여전히 EXEMPT_PAIRS에 있고 실제로 걸린다(죽은 예외 아님)', () => {
+    const bPairs = [
+      pairKey('content.apiUsageBudgetRemainingCompactOverLimit', 'content.apiUsageBudgetRemainingLabel'),
+      pairKey('content.budgetRemainingOverLimit', 'content.generationBudgetRemainingCompactOverLimit'),
+      pairKey('content.generationBudgetLimitLabel', 'content.generationBudgetRemainingCompactOverLimit'),
+      pairKey('content.generationBudgetRemainingCompactOverLimit', 'content.generationBudgetRemainingLabel'),
+    ];
+    for (const pk of bPairs) expect(EXEMPT_PAIRS.has(pk)).toBe(true);
+    const { exemptHit } = scanRepository();
+    for (const pk of bPairs) expect(exemptHit.has(pk)).toBe(true);
+  });
+
+  it('(a) 2건도 (b) 4건도 새 충돌로 재부상하지 않는다(newFindings 0)', () => {
+    const { newFindings } = scanRepository();
+    expect(newFindings.size).toBe(0);
   });
 });

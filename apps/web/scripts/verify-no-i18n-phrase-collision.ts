@@ -212,6 +212,34 @@ export function hasLetterOrNumber(value: string): boolean {
   return LETTER_OR_NUMBER_RE.test(value);
 }
 
+// story #3808(페드루 PO 지적 2026-09-12 18:18Z) — 4233에서 EXEMPT 6건이 한 PR에 쌓인 근본
+// 원인: 이 가드가 «다른 사실을 같은 낱말로»(#2352·#2365의 진짜 모양)와 «같은 키의 확장형»
+// (예: generationBudgetRemainingCompact <-> …CompactOverLimit — 뒤엣것이 앞엣것 그대로+
+// 접미만 붙인 같은 값의 변형)을 구별 못 했다. 처방=근본: 두 키가 (a) 같은 네임스페이스이고
+// (b) 한쪽 키의 로컬 이름이 다른 쪽 로컬 이름의 «접두사»(=상대가 그 이름에 접미만 덧붙인
+// 확장형)면, 값이 부분문자열로 겹쳐도(원래부터 항상 겹친다 — 확장 값이 원본 값을 그대로
+// 품는 구조) 충돌로 안 잡는다. EXEMPT_PAIRS는 "그 자체로 안 겹치지만 가드가 몰라서 거는"
+// 자리인데, 이 클래스는 애초에 «같은 개념의 표준 확장 관례»라 인스턴스마다 승인받을 이유가
+// 없다(§channel류·§tier류 NON_NUMBER_PLACEHOLDER_NAMES와 같은 결 — 개별 EXEMPT 대신 규칙
+// 자체가 안다).
+//
+// ⛔값 포함 관계만으로는 못 가른다(그건 이 함수를 부르는 자리에서 이미 참으로 확인된
+// 전제다) — 반드시 «키 이름 자체»가 접두-확장 관계인지를 같이 봐야 한다. 값이 우연히
+// 부분문자열로 겹치는데 키 이름은 전혀 무관한 진짜 충돌(#2352 「막힘」<->「막힘 신호 · {n}」
+// 류, 키 이름 blocked<->blockedCount처럼 이것도 실은 접두-확장 모양이지만 «다른 사실»을
+// 가리키는 경우가 실재)까지 이 규칙이 삼키면 과확장이다 — 그래서 GRANDFATHER_LIVE_COUNT_TEST가
+// 이 함수 도입 전후로 «몇 건이 실제로 이 클래스에 걸려 사라지는지»를 숫자로 고정해
+// 조용한 과확장을 못 지나가게 막는다(양성대조: 진짜 충돌 표본은 여전히 RED — 아래 테스트).
+export function isKeyStemExtension(keyA: string, keyB: string): boolean {
+  const nsA = keyA.slice(0, keyA.indexOf('.'));
+  const nsB = keyB.slice(0, keyB.indexOf('.'));
+  if (nsA === '' || nsB === '' || nsA !== nsB) return false;
+  const localA = keyA.slice(nsA.length + 1);
+  const localB = keyB.slice(nsB.length + 1);
+  if (localA === localB) return false;
+  return localA.startsWith(localB) || localB.startsWith(localA);
+}
+
 // ── 충돌 판정 ────────────────────────────────────────────────────────────
 
 /** 서로 다른 키의 값이 부분문자열 관계(포함하거나 포함되는)면서 «최소 한쪽이 수와 함께
@@ -234,6 +262,7 @@ export function findSubstringCollisions(
       const [keyA, a] = entries[i];
       const [keyB, b] = entries[j];
       if (!a.numberAdjacent && !b.numberAdjacent) continue;
+      if (isKeyStemExtension(keyA, keyB)) continue;
       if (a.value.includes(b.value) || b.value.includes(a.value)) {
         collisions.push({ keyA, keyB, valueA: a.value, valueB: b.value });
       }
@@ -430,11 +459,10 @@ export const EXEMPT_PAIRS = new Set<string>([
   // (수동 재시도 버튼)는 §17-13에서 의도적으로 다른 kind로 갈라 둔 서로 다른 개념이다.
   // #2352/#2365가 잡으려는 "같은 화면의 두 «수»가 헷갈리는" 병이 아니다.
   'content.channelPostsFailureAutoRetryAt <-> content.channelPostsFailureRetryCta',
-  // channelPostsFailureVoidedWithReason({reason} 보간) <-> channelPostsFailureVoided
-  // (보간 없음, 사유 자체가 없을 때 폴백). 같은 개념의 "사유 있음/없음" 두 표현이라
-  // 겹치는 게 당연하다(docs.title<->docs.indexDocCount류, "짧은 라벨이 그 라벨을
-  // 포함하는 긴 문구의 폴백/변형"인 정상 패턴).
-  'content.channelPostsFailureVoided <-> content.channelPostsFailureVoidedWithReason',
+  // channelPostsFailureVoided<->channelPostsFailureVoidedWithReason(옛 등재, 위 사유
+  // 그대로 여전히 안전) — story #3808(isKeyStemExtension 도입, 2026-09-12) 이후
+  // 죽은 예외로 걷어냄: 같은 네임스페이스 + "…Voided"가 "…VoidedWithReason"의
+  // 접두사라 이제 이 스캔 자체가 확장형으로 안 잡는다(재등재 불요).
   // story #3500(doc a0da40c9 §19-5, 디자인 유나 確定 2026-09-05) —
   // generationBudgetRemainingLabel("남음", 카드 헤더 3값 중 하나의 라벨) <->
   // generationBudgetRemainingCompact("남음 {remaining}", 상신 표면 전용 한 줄 — §19-5
@@ -482,7 +510,9 @@ export const EXEMPT_PAIRS = new Set<string>([
   // 헷갈리는" 병이 아니라, 세 얼굴에서 같은 개념("댓글")을 일관되게 쓰는 것 자체가
   // §22-②의 의도다(세 얼굴 문구를 서로 다른 낱말로 갈랐으면 그게 오히려 결함).
   'content.commentsDeletedCountLabel <-> content.commentsSectionTitleWithCount',
-  'content.commentsSectionTitle <-> content.commentsSectionTitleWithCount',
+  // commentsSectionTitle<->commentsSectionTitleWithCount(옛 등재, 위 사유 그대로 여전히
+  // 안전) — story #3808(isKeyStemExtension, 2026-09-12) 이후 죽은 예외로 걷어냄: "…Title"이
+  // "…TitleWithCount"의 접두사인 같은 네임스페이스 확장형이라 재등재 불요.
   'content.commentsDeletedCountLabel <-> content.commentsSectionTitle',
   // story #3550(PR#3912, 페드루 PO 승인 2026-09-06) — content.channelPostsImageAttachmentPosition
   // ("{position}번째", 장 위치 라벨) <-> channelPostsImageMoveUpAction/MoveDownAction/
@@ -494,10 +524,10 @@ export const EXEMPT_PAIRS = new Set<string>([
   'content.channelPostsImageAttachmentPosition <-> content.channelPostsImageMoveDownAction',
   'content.channelPostsImageAttachmentPosition <-> content.channelPostsImageMoveUpAction',
   'content.channelPostsImageAttachmentPosition <-> content.channelPostsImageRemoveActionLabel',
-  // channelPostsImageRemoveAction("삭제", 보이는 글자) <-> channelPostsImageRemoveActionLabel
-  // ("{position}번째 이미지 삭제", aria-label) — §17-20⑧ "접근성 이름은 보이는 글자를
-  // 포함해야 한다"는 규율 그 자체가 이 부분문자열 포함을 요구한다(제거 대상 아님).
-  'content.channelPostsImageRemoveAction <-> content.channelPostsImageRemoveActionLabel',
+  // channelPostsImageRemoveAction<->channelPostsImageRemoveActionLabel(옛 등재, §17-20⑧
+  // 사유 그대로 여전히 안전) — story #3808(isKeyStemExtension, 2026-09-12) 이후 죽은
+  // 예외로 걷어냄: "…RemoveAction"이 "…RemoveActionLabel"의 접두사인 같은 네임스페이스
+  // 확장형이라 재등재 불요.
   // story #3556(§17-23③·페드루 PO 승인 2026-09-06) — content.channelPostsImageUploading
   // ("업로드 중…") <-> content.channelPostsVideoUploading("업로드 중… {pct}%") — 영상만
   // {pct}. §17-23③ "퍼센트를 단계 문구 안에·이미지 쪽 문구 형을 그대로 따른다"는
@@ -548,17 +578,11 @@ export const EXEMPT_PAIRS = new Set<string>([
   // 보간도 수가 아니라 상태 문자열({status})이라 AC4㉣ 근사가 성립하지 않는다.
   // 다시 볼 때: 가드가 보간을 숫자형으로 좁히면 이 예외는 저절로 불필요해진다.
   'common.cancel <-> content.channelPostsCommandNotCancellable',
-  // story #3723(2026-09-09, story-detail-panel.tsx 탭 라벨 i18n화) —
-  // board.tasks="태스크"(조회 中·수를 아직 모를 때의 탭 라벨) <-> board.tasksCountLabel
-  // ="태스크 ({count})"(응답 뒤 수가 붙는 같은 탭 라벨). docs.title<->docs.indexDocCount류
-  // 보다도 더 안전한 축이다 — 그쪽은 두 문구가 같은 화면에 "동시에" 보이지만, 이 쌍은
-  // 같은 <TabsTrigger> 한 자리를 두고 tasksLoading(조회 中)/응답 後로 서로 배타적으로
-  // 갈리는 두 상태라 화면에 동시에 걸릴 자리 자체가 없다(#2352/#2365가 잡으려는 "같은
-  // 화면의 두 «수»가 헷갈리는" 병이 성립할 여지 0).
-  'board.tasks <-> board.tasksCountLabel',
-  // board.comments="댓글" <-> board.commentsCountLabel="댓글 ({count})" — 위와 완전히
-  // 동형(같은 컴포넌트의 형제 탭, loadingComments 배타 상태).
-  'board.comments <-> board.commentsCountLabel',
+  // story #3723(2026-09-09, story-detail-panel.tsx 탭 라벨 i18n화) — board.tasks<->
+  // tasksCountLabel·board.comments<->commentsCountLabel(위 사유 그대로 여전히 안전,
+  // TabsTrigger 배타 상태) — story #3808(isKeyStemExtension, 2026-09-12) 이후 둘 다
+  // 죽은 예외로 걷어냄: "tasks"/"comments"가 각각 "tasksCountLabel"/"commentsCountLabel"의
+  // 접두사인 같은 네임스페이스 확장형이라 재등재 불요.
   // story #3789(2026-09-10, settings/page.tsx 신설 키 4건) — 조직 삭제 다이얼로그·탭이
   // 신설되며 그 안의 짧은 일반명사 라벨이 같은 파일의 긴 문장에 우연히 포함됐다. 아래
   // 셋은 onboarding.projectLimitExceededError<->settings.tabProjects(#2485, 위 393행)와
@@ -615,13 +639,10 @@ export const EXEMPT_PAIRS = new Set<string>([
   // publishCta("발행")와는 "저장" 쌍(contentRules.saveAction<->versionConflictField
   // WithName)과 같은 이유로 안 겹친다 — 동사형 버튼 vs 재개 안내 서술문.
   'content.channelPostsThreadContinueHint <-> content.publishCta',
-  // story #3808(PR5b-2, verify-repeated-row-action-names 가드 CI 실패 처방,
-  // 2026-09-12) — channelPostsThreadSegmentRemove("삭제", 보이는 글자) <->
-  // channelPostsThreadSegmentRemoveActionLabel("{position}번째 이어쓰기 삭제",
-  // aria-label) — channelPostsImageRemoveAction<->ImageRemoveActionLabel(§17-20⑧)
-  // 과 정확히 같은 근거: 접근성 이름은 보이는 글자를 포함해야 한다는 규율 자체가
-  // 이 부분문자열 포함을 요구한다(제거 대상 아님).
-  'content.channelPostsThreadSegmentRemove <-> content.channelPostsThreadSegmentRemoveActionLabel',
+  // channelPostsThreadSegmentRemove<->channelPostsThreadSegmentRemoveActionLabel(옛 등재,
+  // §17-20⑧ 사유 그대로 여전히 안전) — story #3808(isKeyStemExtension, 2026-09-12)
+  // 이후 죽은 예외로 걷어냄: "…Remove"가 "…RemoveActionLabel"의 접두사인 같은
+  // 네임스페이스 확장형이라 재등재 불요.
   // story #3815(PR4, 페드루 PO 決定 2026-09-12 14:49Z) — publishSuccess("{time}에
   // 공개됐습니다.", 발행 성공 토스트 서술문)이 channelPostsYoutubePrivacyPublic
   // ("공개", YouTube 공개범위 select의 옵션 라벨)을 부분문자열로 포함한다. 하나는
@@ -659,10 +680,17 @@ export const EXEMPT_PAIRS = new Set<string>([
   //     안 선다, channelPostsThreadStatusComplete/Partial과 같은 근거)
   // (b) 단독 라벨 vs 복합구·같은 사실 같은 낱말(위 budgetRemainingOverLimit <->
   //     generationBudgetLimitLabel 쌍과 같은 근거).
-  'content.apiUsageBudgetRemainingCompact <-> content.apiUsageBudgetRemainingCompactOverLimit', // (a)
+  //
+  // story #3808 후속(페드루 PO 지적 2026-09-12 18:18Z) — 이 6건이 한 PR에 쌓인 게
+  // 가드의 진짜 갭이었다: (a) 두 건은 "…Compact"가 "…CompactOverLimit"의 접두사인
+  // «같은 키의 확장형»(다른 사실이 아니라 같은 상태 슬롯의 값 변형)인데, 그때는
+  // 가드가 이 클래스를 몰라 매번 EXEMPT 승인을 새로 받아야 했다. isKeyStemExtension
+  // 도입 뒤 이 (a) 두 건은 죽은 예외로 걷어냈다(재확認: 도입 전후 재스캔 — 이 2건만
+  // exemptHit에서 빠지고 newFindings는 그대로 0). (b) 네 건은 «단독 라벨 vs 그 라벨을
+  // 포함하는 복합구»(키 이름 자체는 접두 관계가 아님, 다른 stem)라 이 새 규칙 밖 —
+  // 여전히 EXEMPT_PAIRS로 남긴다.
   'content.apiUsageBudgetRemainingCompactOverLimit <-> content.apiUsageBudgetRemainingLabel', // (b)
   'content.budgetRemainingOverLimit <-> content.generationBudgetRemainingCompactOverLimit', // (b)
-  'content.generationBudgetRemainingCompact <-> content.generationBudgetRemainingCompactOverLimit', // (a)
   'content.generationBudgetLimitLabel <-> content.generationBudgetRemainingCompactOverLimit', // (b)
   'content.generationBudgetRemainingCompactOverLimit <-> content.generationBudgetRemainingLabel', // (b)
 ]);
@@ -714,9 +742,17 @@ export const EXEMPT_PAIRS = new Set<string>([
 // 자체(고아 컴포넌트 `SlackIntegrationSettingsSection` 전용 i18n 네임스페이스)가 그 스토리에서
 // 완전히 삭제됐다 — "판정 보류"가 아니라 "그 문자열이 이제 존재하지 않는다"라 Set에서도 뺀다
 // (#2410의 판단 유보 대상과 다름, 소스가 사라진 건 재검토할 것도 없다).
+//
+// story #3808(페드루 PO 지적, 2026-09-12 18:18Z) — isKeyStemExtension 도입 여파로 3건 제거
+// (같은 축인 #2410의 isNumberAdjacent 정밀화 선례 그대로: "판단 보류"가 아니라 "이제 이
+// 클래스가 아니라는 게 밝혀졌다"). 아래 세 쌍 전부 같은 네임스페이스 + 한쪽 키 로컬 이름이
+// 다른 쪽의 «접두사»(확장형)라 이 스캔에 더는 안 걸린다(재확認: isKeyStemExtension 도입
+// 전후로 재스캔 — 이 3건이 grandfatherHit에서 정확히 빠지고 newFindings는 그대로 0):
+//   chats.agent<->chats.agentCount · goals.spExceeded<->goals.spExceededDetail ·
+//   storage.delete<->storage.deleteImpact
+// Set 크기 20→17, GRANDFATHER_LIVE_COUNT_TEST 20→17(둘이 계속 일치).
 export const GRANDFATHER_BASELINE = new Set<string>([
   'cage.pendingSummary <-> cage.trustScorePending',
-  'chats.agent <-> chats.agentCount',
   'chats.agentCount <-> chats.agentSection',
   'chats.agentCount <-> chats.personCount',
   'chats.agentCount <-> chats.you',
@@ -724,7 +760,6 @@ export const GRANDFATHER_BASELINE = new Set<string>([
   'dashboard.ccQueueTruncated <-> dashboard.ccWaitingTitle',
   'docs.searchResultCount <-> docs.title',
   'goals.fieldPriority <-> goals.steerCappedNote',
-  'goals.spExceeded <-> goals.spExceededDetail',
   'goals.spExceededDetail <-> goals.title',
   'goals.steerCappedNote <-> goals.steerCurated',
   'hypotheses.target <-> retro.hTargetLine',
@@ -733,7 +768,6 @@ export const GRANDFATHER_BASELINE = new Set<string>([
   'retro.recConfMid <-> retro.tallyMeasuring',
   'standup.blockersRollupTitle <-> standup.today',
   'storage.capacityUpgrade <-> storage.capacityWarnDesc',
-  'storage.delete <-> storage.deleteImpact',
   'verify.chatProofCount <-> verify.chatProofSectionTitle',
 ]);
 
