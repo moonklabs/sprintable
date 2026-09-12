@@ -2149,19 +2149,24 @@ export default function ChannelPostEditPage() {
   // command_id 노출 뒤) 前까지는 발행 버튼이 dead_letter의 유일한 수동 재시도 경로다
   // (지금 막으면 아예 되살릴 방법이 없어진다).
   //
-  // story #3808(배포 81 라이브 회차 실 결함, 페드루 PO 정정 決定 — 「누가 정한
-  // 시각인가」축) — pending 그 자체는 더 이상 이 집합에 안 넣는다. pending은 두
-  // 다른 사실을 가리킬 수 있다: ①사람이 정한 예약(scheduled_at 미도래, BE도 같은
-  // 축으로 409 PUBLISH_SCHEDULED 거절) — 이건 잠가야 한다. ②시스템이 정한 backoff
-  // (transient 실패 뒤 next_retry_at) — 이건 사람의 즉시 재시도를 잠그면 안 된다
-  // (AC3 「부분 성공 뒤 즉시 재시도」 계약, BE도 이 경우 200 허용).
+  // story #3808(배포 81 라이브 회차 실 결함, 페드루 PO 정정 決定 2026-09-12
+  // 19:28Z — 「누가 정한 시각인가」축) — pending 그 자체는 더 이상 이 집합에
+  // 안 넣는다. pending은 두 다른 사실을 가리킬 수 있다: ①사람이 정한 예약
+  // (scheduled_at 미도래) — 편집기는 이 상태를 정보성으로 잠근다(«예약 게시
+  // 예정»류 사실 표시). BE `POST .../publish`는 이 상태에서도 거절하지
+  // 않는다(멱등 200, 같은 command_id — story cfc1a55a AC4의 기존 계약: 게이트
+  // 승인 순간 이미 command가 자동 생성되므로 "첫 확인"과 "재요청"을 서버가
+  // 구별할 신호도 이유도 없다, PO 판정). FE 잠금(정보 표시)과 BE 200(아무것도
+  // 안 바뀜)은 같은 사실의 두 표현이지 모순이 아니다. ②시스템이 정한 backoff
+  // (transient 실패 뒤 next_retry_at) — 이건 사람의 즉시 재시도를 잠그면 안
+  // 된다(AC3 「부분 성공 뒤 즉시 재시도」 계약).
   //
   // story #3808 CHANGES 2(페드루 PO 지적 2026-09-12 19:05Z) — 존재 여부(!!scheduled_
   // at)만 보면 예약 시각이 «지난 뒤»(워커가 이미 시도해 백오프로 넘어간 뒤)에도
   // scheduled_at 자체는 non-null로 남아(재승인 前까진 안 바뀐다, 명시 재상신만
   // 이 값을 바꾸고 그 순간 옛 pending command를 즉시 void — 그라운딩 확認) FE가
-  // 계속 잠그는데 BE는 그 국면에서 200을 허용 — 같은 재발 클래스. BE와 같은
-  // 「미래」 축(scheduledAtPassed)으로 맞춘다.
+  // 계속 정보성 잠금을 보여 주는 오류가 났었다 — 「미래」 축(scheduledAtPassed)
+  // 으로 정확히 맞춘다.
   const isScheduledPending = draft.command_status === 'pending' && !!draft.scheduled_at && !scheduledAtPassed;
   const blockedByCommandInFlight = draft.command_status === 'blocked' || isScheduledPending;
   // story #3815(페드루 PO CHANGES 2, 2026-09-12 17:58Z) — 게이트 자체(훅 호출)는

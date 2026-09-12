@@ -1961,27 +1961,23 @@ async def publish_channel_post_draft_endpoint(
 
     if gate.sealed_scheduled_at is not None:
         # 예약 — command만 만들고 여기서 끝(워커가 나중에 처리, AC3).
-        command, created = await create_or_get_publication_command(
+        command, _created = await create_or_get_publication_command(
             db, org_id=org_id, gate_id=gate.id, destination=draft.connection_id,
             approved_version=latest.id, requested_by_member_id=resolved.id,
             scheduled_at=gate.sealed_scheduled_at,
         )
         await db.commit()
-        # story #3808(배포 81 라이브 회차 실 결함, 페드루 PO 정정 決定) — 이 지점은
-        # 원래 "재요청은 같은 command를 그대로 다시 반환"(멱등)이라 두 번째 /publish
-        # 호출도 항상 200이었다. 그건 편집기가 이 상태(예약 미도래)를 잠그는 것과
-        # 다른 사실을 API가 말하는 클래스 — 아직 도래 前인 기존 command를 다시
-        # 만나면(created=False) 편집기와 같은 사실로 거절한다. 앞당기려면 기존
-        # 「예약 취소」 경로(AC5)로 이 command를 먼저 정리해야 한다.
-        if not created and command.scheduled_at is not None and command.scheduled_at > datetime.now(timezone.utc):
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "code": "PUBLISH_SCHEDULED",
-                    "message": t("channel_posts.publish_already_scheduled", resolved_locale),
-                    "scheduled_at": command.scheduled_at.isoformat(),
-                },
-            )
+        #
+        # story #3808(배포 81 라이브 회차, 페드루 PO 정정 決定 2026-09-12 19:28Z) —
+        # 초안 처방은 이 재요청(created=False)을 409로 거절했으나, 그건 story
+        # cfc1a55a AC4(2026-09-04 PO 確定)의 기존 계약을 깼다 — 게이트가 approved로
+        # 바뀌는 순간 이미 이 command가 자동 생성되므로(gate_service.py, /publish
+        # 호출과 무관), 사람이 처음이자 유일하게 여기 오는 경우도 라우터 관점에선
+        # 항상 created=False다. 즉 "첫 확인"과 "재요청"을 서버가 구별할 신호 자체가
+        # 없다(구별할 «이유»도 없다 — 같은 상태면 같은 응답). PO 판정: 이 요청은
+        # 그대로 멱등 200(같은 command_id·행 수 불변·scheduled_at 불변)을 낸다 —
+        # FE 잠금(scheduled_at 미래)과 이 200이 "아무것도 안 바뀐다"는 같은 사실의
+        # 두 표현일 뿐, 모순이 아니다.
         return PublishChannelPostResponse(
             version_id=latest.id, scheduled=True, command_id=command.id,
             scheduled_at=gate.sealed_scheduled_at.isoformat(),

@@ -682,12 +682,16 @@ async def test_rate_limited_returns_429_with_reset_at():
 
 
 @pytest.mark.anyio
-async def test_publish_rejects_409_when_command_scheduled_at_is_future():
-    """story #3808(배포 81 라이브 회차 실 결함, 페드루 PO 지적 2026-09-12·PO
-    정정 決定) — 「누가 정한 시각인가」 축 ①: 사람이 정한 예약(gate.sealed_
-    scheduled_at 스냅샷=`command.scheduled_at`)이 아직 미래인데 같은 draft에
-    /publish를 또 부르면(레이스·낡은 탭·앞당기기 시도) 편집기 잠금과 같은
-    사실로 거절해야 한다. 앞당기려면 기존 「예약 취소」 경로(AC5)만 유효."""
+async def test_publish_on_still_future_scheduled_command_is_idempotent_200_no_regression():
+    """story #3808(배포 81 라이브 회차, 페드루 PO 정정 決定 2026-09-12 19:28Z) —
+    초안 처방(409 거절)은 story cfc1a55a AC4(2026-09-04 PO 確定, test_manual_
+    publish_after_auto_created_command_is_idempotent)를 깼다: 게이트가 approved로
+    바뀌는 순간 command가 이미 자동 생성되므로(gate_service.py, /publish 호출과
+    무관) 사람의 «처음이자 유일한» 확인 클릭도 라우터 관점에선 항상 created=
+    False다 — 서버가 "첫 확인"과 "재요청"을 구별할 신호도, 구별할 이유도 없다
+    (같은 상태면 같은 응답). PO 판정: 예약이 아직 미래여도 /publish는 그대로
+    멱등 200 — 같은 command_id·행 수 불변·scheduled_at 불변(AC4와 같은 계약,
+    이 PR 고유 시나리오(submit body로 직접 scheduled_at 세팅)로 한 번 더 pin)."""
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -701,7 +705,6 @@ async def test_publish_rejects_409_when_command_scheduled_at_is_future():
             connection_id = await _seed_connection(s, org_id)
 
         future_scheduled_at = datetime.now(timezone.utc) + timedelta(hours=2)
-        r_draft = None
         _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
         async with _client_for(app) as client, Session() as s:
             r_draft = await client.post(
@@ -727,18 +730,28 @@ async def test_publish_rejects_409_when_command_scheduled_at_is_future():
         assert r_first.status_code == 200, r_first.text
         r_first_body = r_first.json()["data"] if "data" in r_first.json() else r_first.json()
         assert r_first_body["scheduled"] is True
+        first_command_id = r_first_body["command_id"]
+        first_scheduled_at = r_first_body["scheduled_at"]
 
-        # 같은 draft에 또 /publish(레이스·낡은 탭·앞당기기 시도) — 같은
-        # idempotency key라 위와 같은 pending command를 그대로 다시 만나고,
-        # scheduled_at이 아직 미래이므로 거절돼야 한다.
+        # 같은 draft에 또 /publish(레이스·낡은 탭·앞당기기·확인 재클릭 등 무엇이든) —
+        # 같은 idempotency key라 같은 pending command를 그대로 다시 만나고, PO
+        # 정정대로 그대로 200(같은 command_id·scheduled_at)이어야 한다.
         async with _client_for(app) as client:
             r_second = await client.post(
                 f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
             )
-        assert r_second.status_code == 409, r_second.text
-        body = r_second.json()
-        assert body["error"]["code"] == "PUBLISH_SCHEDULED"
-        assert body["error"]["scheduled_at"]
+        assert r_second.status_code == 200, r_second.text
+        r_second_body = r_second.json()["data"] if "data" in r_second.json() else r_second.json()
+        assert r_second_body["command_id"] == first_command_id, "재요청이 다른 command_id를 냈다(supersede 발생)"
+        assert r_second_body["scheduled_at"] == first_scheduled_at, "재요청이 scheduled_at을 바꿨다"
+
+        async with Session() as s:
+            from app.models.publication_command import PublicationCommand
+            from sqlalchemy import select as sa_select
+            rows = (await s.execute(
+                sa_select(PublicationCommand).where(PublicationCommand.gate_id == gate_id)
+            )).scalars().all()
+            assert len(rows) == 1, f"재요청이 새 command 행을 만들었다(행 수 불변 위반): {len(rows)}개"
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
@@ -1291,32 +1304,64 @@ async def test_true_concurrent_publish_requests_no_500_single_provider_call():
         await engine.dispose()
 
 
-def test_publish_scheduled_wording_matches_fe_command_inflight_reason_byte_exact():
-    """story #3808 CHANGES 2(페드루 PO 지적 2026-09-12 19:05Z) — BE `channel_posts.
-    publish_already_scheduled`(409 PUBLISH_SCHEDULED 응답 문구)와 FE `content.
-    channelPostsCommandInFlightReasonScheduled`(편집기 잠금 사유줄)가 같은 문장을
-    각자 짓는다 — #4238 CHANGES 1의 drift 가드와 동형(byte-exact, 한쪽만 바뀌는
-    날을 여기서 잡는다)."""
-    import json
-    from pathlib import Path
+@pytest.mark.anyio
+async def test_publish_response_scheduled_at_exposed_regardless_of_future_or_past_no_time_branch():
+    """story #3808 CHANGES 2(페드루 PO 정정 決定 2026-09-12 19:28Z, 항목 4·5) —
+    BE 409 문구 삭제로 그 drift 가드는 걷는다(대상 문구가 사라졌다). 대신
+    「scheduled_at > now」 축이 BE·FE 양쪽에서 일관되는지 3 케이스로 잠근다:
+    FE는 `scheduledAtPassed`로 미래/null/과거를 갈라 잠금 여부를 정하지만(FE
+    테스트에서 pin), 라우터의 예약 분기 자체는 이 축을 **안 본다** — 미래든
+    과거든 항상 같은 200(scheduled:true+scheduled_at 노출, 항목 5 그라운딩:
+    이미 필드로 낸다)을 낸다는 것이 정확히 이 PR의 요점(시간 분기 없음)이다.
+    이 테스트는 그 "BE는 시간을 안 본다"는 사실 자체를 과거 케이스로 pin한다
+    (미래 케이스는 위 idempotent 200 테스트가 이미 pin)."""
+    from app.main import app
 
-    from app.services.i18n_catalog import t
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            human_id = await _seed_human(s, org_id, role="owner")
+            story_id = await _seed_story(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id)
 
-    ko = t("channel_posts.publish_already_scheduled", "ko")
-    en = t("channel_posts.publish_already_scheduled", "en")
+        # scheduled_at API validation이 과거 시각을 422로 막으므로, 일단 미래로
+        # 상신·승인한 뒤 gate.sealed_scheduled_at을 직접 과거로 되돌려(워커가
+        # 이미 그 시각을 지나쳤다 흉내) 라우터가 그래도 안전히 200을 내는지 잰다.
+        near_future = datetime.now(timezone.utc) + timedelta(minutes=5)
+        past_scheduled_at = datetime.now(timezone.utc) - timedelta(hours=1)
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client, Session() as s:
+            r_draft = await client.post(
+                f"/api/v2/organizations/{org_id}/channel-posts/drafts",
+                json=_draft_body(work_item_id=story_id, connection_id=connection_id),
+            )
+            assert r_draft.status_code == 201, r_draft.text
+            draft_id = r_draft.json()["draft_id"]
+            r_submit = await client.post(
+                f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/submit",
+                json={"scheduled_at": near_future.isoformat()},
+            )
+            assert r_submit.status_code == 200, r_submit.text
+            gate_id = uuid.UUID(r_submit.json()["gate_id"])
+            await _approve_gate_directly(s, gate_id)
 
-    repo_root = Path(__file__).resolve().parents[2]
-    fe_ko = json.loads((repo_root / "apps/web/messages/ko.json").read_text())
-    fe_en = json.loads((repo_root / "apps/web/messages/en.json").read_text())
-    fe_ko_scheduled = fe_ko["content"]["channelPostsCommandInFlightReasonScheduled"]
-    fe_en_scheduled = fe_en["content"]["channelPostsCommandInFlightReasonScheduled"]
-    assert fe_ko_scheduled == ko, (
-        f"apps/web/messages/ko.json의 content.channelPostsCommandInFlightReasonScheduled"
-        f"가 BE i18n_catalog 원문과 갈렸다 — 화면 쪽이 바뀌면 이 문구도 같이 바꿀 것"
-        f"\nFE: {fe_ko_scheduled!r}\nBE: {ko!r}"
-    )
-    assert fe_en_scheduled == en, (
-        f"apps/web/messages/en.json의 content.channelPostsCommandInFlightReasonScheduled"
-        f"가 BE i18n_catalog 원문과 갈렸다 — 화면 쪽이 바뀌면 이 문구도 같이 바꿀 것"
-        f"\nFE: {fe_en_scheduled!r}\nEN: {en!r}"
-    )
+        async with Session() as s:
+            from app.models.gate import Gate
+            from sqlalchemy import select as sa_select
+            gate = (await s.execute(sa_select(Gate).where(Gate.id == gate_id))).scalar_one()
+            gate.sealed_scheduled_at = past_scheduled_at
+            await s.commit()
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        async with _client_for(app) as client:
+            r = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+        assert r.status_code == 200, r.text
+        body = r.json()["data"] if "data" in r.json() else r.json()
+        assert body["scheduled"] is True
+        assert body["scheduled_at"] is not None, "항목 5 — 호출자가 예약 시각을 읽을 수 있어야 한다"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
