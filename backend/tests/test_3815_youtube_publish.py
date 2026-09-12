@@ -696,3 +696,124 @@ async def test_youtube_sandbox_beyond_24h_timeout_fails_but_preserves_container_
             app.dependency_overrides.clear()
     finally:
         await engine.dispose()
+
+
+# ─── ⑥ ChannelYouTubeMetadataError 라우터 매핑(미르코 PR4 그라운딩 발견 실 결함) ──
+
+@pytest.mark.anyio
+async def test_youtube_metadata_invalid_maps_to_422_not_500_at_save_time():
+    """⭐실 결함 재현(페드루 PO 지적 2026-09-12 14:37Z) — `ChannelYouTubeMetadataError`
+    를 라우터가 안 잡아 사용자에게 코드 없는 500이 나가던 것. 저장 시점
+    (create_channel_post_draft_version) checkpoint 재현 — title 누락."""
+    from tests.test_620beefc_channel_post_image_upload import (
+        _client_for, _seed_connection, _seed_human, _seed_org, _seed_story, _session_factory,
+        _setup_org_scoped_app,
+    )
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id, channel="youtube_sandbox")
+            story_id = await _seed_story(s, org_id, project_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+        try:
+            async with _client_for(app) as client:
+                r = await client.post(
+                    f"/api/v2/organizations/{org_id}/channel-posts/drafts",
+                    json={
+                        "work_item_id": str(story_id), "connection_id": str(connection_id),
+                        "text": "설명", "channel_payload": {"tags": ["a"]},  # title 누락.
+                    },
+                )
+            assert r.status_code == 422, r.text
+            body = r.json()["error"]
+            assert body["code"] == "YOUTUBE_METADATA_INVALID"
+            assert body["field"] == "title"
+            assert body["message"]  # i18n_catalog 문구, 빈 문자열 아님.
+        finally:
+            app.dependency_overrides.clear()
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_youtube_metadata_invalid_maps_to_422_not_500_at_publish_time():
+    """발행 시점 checkpoint 재현 — 저장 시점엔 유효했던 channel_payload가(승인
+    뒤 값이 조용히 나빠질 수 있는 시나리오, 예: 어댑터/상수가 그 사이 바뀜)
+    발행 直前 재검사에서 걸려도 500이 아니라 422여야 한다. DB를 직접 헝클어
+    (privacyStatus를 허용값 밖으로) 그 시나리오를 재현한다 — API로는 애초에
+    이 상태를 만들 수 없다는 게 이 재현의 요점(저장 시점 게이트가 이미 막으므로)."""
+    from sqlalchemy import select as sa_select
+    from tests.test_620beefc_channel_post_image_upload import (
+        _approve_gate_directly, _client_for, _seed_connection, _seed_human, _seed_org, _seed_story,
+        _session_factory, _setup_org_scoped_app,
+    )
+    from tests.test_3554_instagram_reels import _build_mp4, _upload_and_confirm_video
+    from app.main import app
+    from app.models.channel_post_version import ChannelPostVersion
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id, channel="youtube_sandbox")
+            story_id = await _seed_story(s, org_id, project_id)
+            from app.models.participation import ParticipationRole
+            role = ParticipationRole(id=uuid.uuid4(), org_id=org_id, key="approver", label="Approver", is_default=True)
+            s.add(role)
+            await s.commit()
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+
+        try:
+            async with _client_for(app) as client:
+                r_draft = await client.post(
+                    f"/api/v2/organizations/{org_id}/channel-posts/drafts",
+                    json={
+                        "work_item_id": str(story_id), "connection_id": str(connection_id),
+                        "text": "설명", "channel_payload": {"title": "정상 제목"},
+                    },
+                )
+                assert r_draft.status_code == 201, r_draft.text
+                draft_id = r_draft.json()["draft_id"]
+
+                video_raw = _build_mp4(duration_seconds=6.0, width=1920, height=1080)
+                r_video = await _upload_and_confirm_video(client, org_id, draft_id, video_raw)
+                assert r_video.status_code == 201, r_video.text
+
+                r_submit = await client.post(
+                    f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/submit", json={},
+                )
+                assert r_submit.status_code == 200, r_submit.text
+                gate_id = uuid.UUID(r_submit.json()["gate_id"])
+
+            async with Session() as s:
+                await _approve_gate_directly(s, gate_id)
+                # API로는 만들 수 없는 상태를 직접 주입 — 승인 뒤 값이 나빠진
+                # 시나리오 재현(위 docstring 참고).
+                latest = (await s.execute(
+                    sa_select(ChannelPostVersion)
+                    .where(ChannelPostVersion.draft_id == uuid.UUID(draft_id))
+                    .order_by(ChannelPostVersion.version.desc())
+                    .limit(1)
+                )).scalar_one()
+                latest.channel_payload = {"title": "정상 제목", "privacyStatus": "not-a-real-value"}
+                await s.commit()
+
+            async with _client_for(app) as client:
+                r_pub = await client.post(
+                    f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
+                )
+            assert r_pub.status_code == 422, r_pub.text
+            body = r_pub.json()["error"]
+            assert body["code"] == "YOUTUBE_METADATA_INVALID"
+            assert body["field"] == "privacyStatus"
+            assert body["message"]
+        finally:
+            app.dependency_overrides.clear()
+    finally:
+        await engine.dispose()
