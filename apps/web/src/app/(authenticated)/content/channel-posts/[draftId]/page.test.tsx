@@ -2514,6 +2514,26 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
         .toBe(koMessages.content.channelPostsCommandInFlightReasonScheduled);
     });
 
+    // story #3808 CHANGES 2(페드루 PO 지적 2026-09-12 19:05Z) — scheduled_at
+    // 존재만 보면 예약 시각이 «지난 뒤»(워커가 이미 시도해 백오프로 넘어간 뒤,
+    // BE 200 허용)에도 FE가 계속 잠그는 재발 클래스. scheduled_at이 과거면
+    // (워커가 언젠가 시도했다가 실패해 백오프로 남은 흉내) 더 이상 잠그지 않는다.
+    it('pending(scheduled_at이 과거) — 예약 시각이 지났으면 잠그지 않는다(#3808 CHANGES 2)', async () => {
+      stubFetch({
+        draftDetail: {
+          gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+          command_status: 'pending', scheduled_at: '2020-01-01T00:00:00Z',
+        },
+      });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+
+      expect((container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement).disabled).toBe(false);
+      expect((container.querySelector('[data-testid="channel-post-schedule-submit-button"]') as HTMLButtonElement).disabled).toBe(false);
+      expect(container.querySelector('[data-testid="channel-post-command-inflight-reason"]')).toBeNull();
+      expect(container.querySelector('[data-testid="channel-post-schedule-submit-command-inflight-reason"]')).toBeNull();
+    });
+
     // 유나 재판정(2026-09-04 13:37Z) — pending·blocked를 한 문장에 묶으면 절반은 틀린
     // 지시가 된다. blocked 전용 문구("연결 문제")가 예약 전용 문구("예약이 서버에...")와
     // 다른 것을 pin한다.

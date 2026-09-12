@@ -1289,3 +1289,34 @@ async def test_true_concurrent_publish_requests_no_500_single_provider_call():
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+def test_publish_scheduled_wording_matches_fe_command_inflight_reason_byte_exact():
+    """story #3808 CHANGES 2(페드루 PO 지적 2026-09-12 19:05Z) — BE `channel_posts.
+    publish_already_scheduled`(409 PUBLISH_SCHEDULED 응답 문구)와 FE `content.
+    channelPostsCommandInFlightReasonScheduled`(편집기 잠금 사유줄)가 같은 문장을
+    각자 짓는다 — #4238 CHANGES 1의 drift 가드와 동형(byte-exact, 한쪽만 바뀌는
+    날을 여기서 잡는다)."""
+    import json
+    from pathlib import Path
+
+    from app.services.i18n_catalog import t
+
+    ko = t("channel_posts.publish_already_scheduled", "ko")
+    en = t("channel_posts.publish_already_scheduled", "en")
+
+    repo_root = Path(__file__).resolve().parents[2]
+    fe_ko = json.loads((repo_root / "apps/web/messages/ko.json").read_text())
+    fe_en = json.loads((repo_root / "apps/web/messages/en.json").read_text())
+    fe_ko_scheduled = fe_ko["content"]["channelPostsCommandInFlightReasonScheduled"]
+    fe_en_scheduled = fe_en["content"]["channelPostsCommandInFlightReasonScheduled"]
+    assert fe_ko_scheduled == ko, (
+        f"apps/web/messages/ko.json의 content.channelPostsCommandInFlightReasonScheduled"
+        f"가 BE i18n_catalog 원문과 갈렸다 — 화면 쪽이 바뀌면 이 문구도 같이 바꿀 것"
+        f"\nFE: {fe_ko_scheduled!r}\nBE: {ko!r}"
+    )
+    assert fe_en_scheduled == en, (
+        f"apps/web/messages/en.json의 content.channelPostsCommandInFlightReasonScheduled"
+        f"가 BE i18n_catalog 원문과 갈렸다 — 화면 쪽이 바뀌면 이 문구도 같이 바꿀 것"
+        f"\nFE: {fe_en_scheduled!r}\nEN: {en!r}"
+    )

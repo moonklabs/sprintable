@@ -508,6 +508,13 @@ export default function ChannelPostEditPage() {
   // 미래면 둘 다 눌러도 100% 다시 실패할 게 확定이라 헛수고를 약속하지 않는다.
   // reason_code 무관(코드-agnostic, steer②와 동일 축).
   const reasonResetPassed = useResetPassed(draft?.command_reason_reset_at);
+  // story #3808(CHANGES 2, 페드루 PO 지적 2026-09-12 19:05Z) — 위와 같은 훅-순수성
+  // 규율(조건부 return 앞)·같은 「지났는가」 게이트를 scheduled_at에도 재사용한다.
+  // 예약 시각이 «지난 뒤»(워커가 이미 시도해 백오프 국면으로 넘어간 뒤)엔 draft.
+  // scheduled_at 자체는 여전히 non-null로 남으므로(재승인 전까진 안 바뀐다) 존재
+  // 여부만 보면 이 국면도 계속 잠근다 — BE의 「scheduled_at이 **미래**」 축과
+  // 어긋나는 재발 클래스. 미래 여부로 정확히 맞춘다.
+  const scheduledAtPassed = useResetPassed(draft?.scheduled_at);
   // story #3499 — draft.publication_id는 BE #3844 조각4 의존(additive, 미착지).
   const [insightSnapshots, setInsightSnapshots] = useState<InsightSnapshot[]>([]);
   useEffect(() => {
@@ -2147,10 +2154,15 @@ export default function ChannelPostEditPage() {
   // 다른 사실을 가리킬 수 있다: ①사람이 정한 예약(scheduled_at 미도래, BE도 같은
   // 축으로 409 PUBLISH_SCHEDULED 거절) — 이건 잠가야 한다. ②시스템이 정한 backoff
   // (transient 실패 뒤 next_retry_at) — 이건 사람의 즉시 재시도를 잠그면 안 된다
-  // (AC3 「부분 성공 뒤 즉시 재시도」 계약, BE도 이 경우 200 허용). scheduled_at
-  // 유무(gate.sealed_scheduled_at, ChannelPostDraftDetail 필드)로 정확히 갈라
-  // BE 판정과 같은 사실을 보게 한다("막는 쪽과 하는 쪽이 다른 것을 본다" 클래스 재발 방지).
-  const isScheduledPending = draft.command_status === 'pending' && !!draft.scheduled_at;
+  // (AC3 「부분 성공 뒤 즉시 재시도」 계약, BE도 이 경우 200 허용).
+  //
+  // story #3808 CHANGES 2(페드루 PO 지적 2026-09-12 19:05Z) — 존재 여부(!!scheduled_
+  // at)만 보면 예약 시각이 «지난 뒤»(워커가 이미 시도해 백오프로 넘어간 뒤)에도
+  // scheduled_at 자체는 non-null로 남아(재승인 前까진 안 바뀐다, 명시 재상신만
+  // 이 값을 바꾸고 그 순간 옛 pending command를 즉시 void — 그라운딩 확認) FE가
+  // 계속 잠그는데 BE는 그 국면에서 200을 허용 — 같은 재발 클래스. BE와 같은
+  // 「미래」 축(scheduledAtPassed)으로 맞춘다.
+  const isScheduledPending = draft.command_status === 'pending' && !!draft.scheduled_at && !scheduledAtPassed;
   const blockedByCommandInFlight = draft.command_status === 'blocked' || isScheduledPending;
   // story #3815(페드루 PO CHANGES 2, 2026-09-12 17:58Z) — 게이트 자체(훅 호출)는
   // 위 `if (loading) return` 이전에 있다(훅 규칙 — 조건부 return 뒤에 훅을 못
