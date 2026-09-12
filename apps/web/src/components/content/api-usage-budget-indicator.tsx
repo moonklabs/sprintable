@@ -59,9 +59,13 @@ export function ApiUsageBudgetIndicator({
   if (state.limitMinor === null) return null;
 
   if (state.limitMinor === 0) {
+    // story #3808(PR5a CHANGES, 유나 04:12Z issuecomment-5643378724 + PO 정지 org
+    // 캡처) — "정지" 두 글자만 홀로 서면 「어느 축이·왜·무엇이 멈추나」 셋 다
+    // 안 보인다(compact 잔량 축-이름-누락과 같은 클래스). 축 이름("X API 지출")·
+    // 0 한도 값·정지 대상(발행)을 한 줄에 함께 싣는다.
     return (
       <span className="text-xs text-muted-foreground" data-testid="api-usage-budget-suspended">
-        {t('apiUsageBudgetSuspended')}
+        {t('apiUsageBudgetSuspended', { limit: formatMinorCurrency(0, state.currency ?? 'KRW', locale, t) })}
       </span>
     );
   }

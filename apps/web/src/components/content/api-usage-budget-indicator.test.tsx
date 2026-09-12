@@ -79,22 +79,22 @@ describe('ApiUsageBudgetIndicator (story #3808 PR5a — X 종량 API 지출 월 
     expect(container.innerHTML).toBe('');
   });
 
-  it('ok + limitMinor=0 — "정지"(중립 톤)', async () => {
+  it('ok + limitMinor=0 — 축 이름·0 한도·정지 대상 셋 다 한 줄에(유나 04:17Z 확定 문구)', async () => {
     await renderIndicator({
       status: 'ok', limitMinor: 0, spentMinor: 0, remainingMinor: 0, currency: 'KRW', period: 'month',
     });
     const el = byTestId('api-usage-budget-suspended');
-    expect(el?.textContent).toBe('정지');
+    expect(el?.textContent).toBe('X API 지출 한도 0원 · 발행 정지');
     expect(el?.className).not.toContain('destructive');
   });
 
-  it('compact — "남음"만(한도는 안 보인다)', async () => {
+  it('compact — 축 이름 접두 「X API 지출 남음」(유나 04:12Z 지적 — 축 없이 서면 상단 생성예산과 헷갈림)', async () => {
     await renderIndicator(
       { status: 'ok', limitMinor: 100000, spentMinor: 20000, remainingMinor: 80000, currency: 'KRW', period: 'month' },
       'compact',
     );
     const text = byTestId('api-usage-budget-remaining-compact')?.textContent ?? '';
-    expect(text).toBe('남음 80,000원');
+    expect(text).toBe('X API 지출 남음 80,000원');
     expect(text).not.toContain('100,000');
   });
 
@@ -137,13 +137,20 @@ describe('ApiUsageBudgetIndicator (story #3808 PR5a — X 종량 API 지출 월 
     expect(byTestId('api-usage-budget-failed')?.textContent).toBe(koMessages.content.apiUsageBudgetCardCheckFailed);
   });
 
-  it('0원 잔량은 "정지"와 다르게 "남음 0원"으로 그대로 그린다', async () => {
+  it('0원 잔량은 "정지"와 다르게 "X API 지출 남음 0원"으로 그대로 그린다', async () => {
     await renderIndicator(
       { status: 'ok', limitMinor: 100000, spentMinor: 100000, remainingMinor: 0, currency: 'KRW', period: 'month' },
       'compact',
     );
-    expect(byTestId('api-usage-budget-remaining-compact')?.textContent).toBe('남음 0원');
+    expect(byTestId('api-usage-budget-remaining-compact')?.textContent).toBe('X API 지출 남음 0원');
     expect(byTestId('api-usage-budget-suspended')).toBeNull();
+  });
+
+  it('⭐USD 정지 — 한도 표시가 통화 유틸을 그대로 타서 "$0.00"로 뜬다(하드코딩 "0원" 아님)', async () => {
+    await renderIndicator({
+      status: 'ok', limitMinor: 0, spentMinor: 0, remainingMinor: 0, currency: 'USD', period: 'month',
+    });
+    expect(byTestId('api-usage-budget-suspended')?.textContent).toBe('X API 지출 한도 $0.00 · 발행 정지');
   });
 });
 
@@ -163,6 +170,13 @@ describe('ApiUsageBudgetIndicator — en 로케일 실 메시지 파일 렌더(�
       { status: 'ok', limitMinor: 50000, spentMinor: 0, remainingMinor: 50000, currency: 'USD', period: 'month' },
       'compact',
     );
-    expect(byTestId('api-usage-budget-remaining-compact')?.textContent).toBe('$500.00 left');
+    expect(byTestId('api-usage-budget-remaining-compact')?.textContent).toBe('X API spend $500.00 left');
+  });
+
+  it('en 정지 문구도 같은 축 이름("X API spend")으로 선다', async () => {
+    await renderIndicatorEn({
+      status: 'ok', limitMinor: 0, spentMinor: 0, remainingMinor: 0, currency: 'KRW', period: 'month',
+    });
+    expect(byTestId('api-usage-budget-suspended')?.textContent).toBe('X API spend limit ₩0 · Publishing paused');
   });
 });
