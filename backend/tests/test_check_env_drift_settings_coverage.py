@@ -253,4 +253,30 @@ def test_settings_field_env_keys_works_without_pydantic_settings_importable(monk
     # cloudbuild.yaml `_BACKEND_URL` substitution으로 직접 배선·manual-env-allowlist.yml
     # 미등재(PUBLIC_SITE_BASE_URL과 동형).
     assert "BACKEND_URL" in keys
-    assert len(keys) == 121
+    # story #3815(Phase3·3-5 PR2, 페드루 PO 確定 2026-09-12): youtube_quota_
+    # daily_limit_units·youtube_quota_cost_insert_units·youtube_quota_cost_
+    # list_units·youtube_api_audit_incomplete 4필드 신설(플랫폼 공유 YouTube
+    # quota 한도/단가+API 감사 미완 강제 비공개 플래그, config.py 상단 딱지
+    # 참고)로 121→125. 밑줄 구분 int 리터럴(10_000·1_600)·bool = True 형·
+    # 같은 줄 뒤 주석 3가지 축 전부 정규식 재현으로 실측 확認(로컬 `python3 -c`
+    # 로 `_SETTINGS_FIELD_RE`만 단독 실행 — 4개 다 정상 매칭, 총 125). 가드가
+    # 신규 필드를 설계대로 잡은 것(파서 결함 아님, 이 assert만 stale이었다).
+    assert "YOUTUBE_QUOTA_DAILY_LIMIT_UNITS" in keys and "YOUTUBE_QUOTA_COST_INSERT_UNITS" in keys
+    assert "YOUTUBE_QUOTA_COST_LIST_UNITS" in keys and "YOUTUBE_API_AUDIT_INCOMPLETE" in keys
+    assert len(keys) == 125
+
+
+def test_settings_field_regex_handles_underscore_int_literal_bool_and_trailing_comment():
+    """⭐양성대조(페드루 PO 지적 2026-09-12 12:37Z, 재검증 결과 파서 결함은 아니었으나
+    — 그 우려 자체는 재발가능성이 있어 pin으로 고정) — `_SETTINGS_FIELD_RE`가 밑줄
+    구분 int 리터럴(`10_000`)·`bool = True`·같은 줄 뒤 주석까지 정확히 다 세는지
+    합성 스니펫으로 직접 확認한다(실 config.py 전체를 다시 읽는 위 테스트와 달리,
+    이 정규식 자체의 계약만 pin — 정규식을 손대면 이 테스트가 바로 반응한다)."""
+    mod = _load_check_env_drift()
+    snippet = (
+        "class Settings(BaseSettings):\n"
+        "    youtube_quota_daily_limit_units: int = 10_000\n"
+        "    youtube_api_audit_incomplete: bool = True  # 밑줄·bool·같은 줄 주석 3축 동시 재현\n"
+    )
+    names = {name.upper() for name in mod._SETTINGS_FIELD_RE.findall(snippet)}
+    assert names == {"YOUTUBE_QUOTA_DAILY_LIMIT_UNITS", "YOUTUBE_API_AUDIT_INCOMPLETE"}
