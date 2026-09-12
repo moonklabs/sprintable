@@ -2270,4 +2270,22 @@ describe('OrganizationChannelsPage — 만료 임박 실값(story #3743)', () =>
     await mount('owner');
     expect(container.textContent).toContain(koMessages.channelConnect.channelExpiringDaysCount.replace('{count}', '1'));
   });
+
+  // story #3808(페드루 PO 지적 2026-09-12 18:31Z, 배포 82 픽셀 a117f726 실측) — x_sandbox/
+  // youtube_sandbox 행이 자동 갱신 가능한 토큰인데도 「만료 임박」(경고) 칩을 냈다. 규율=
+  // 「연결 상태 칩은 사람이 고쳐야 풀리는 것에만」 — can_auto_refresh=true면 칩은 「연결됨」
+  // 그대로, 부연 문장만 정보성으로 남아야 한다(위 두 테스트의 can_auto_refresh=false 갈래와
+  // 대구 — 같은 임박 만료라도 칩 색이 갈린다).
+  it('⭐can_auto_refresh=true면 만료 임박이어도 칩은 「연결됨」 그대로 — 부연 문장만 정보성으로 남는다', async () => {
+    const soon = new Date(Date.now() + 20 * 60 * 60 * 1000).toISOString(); // 20시간 뒤
+    stubFetch({ connections: [{ ...CONNECTION_ACTIVE, status: 'active', token_expires_at: soon, can_auto_refresh: true }] });
+    await mount('owner');
+    // 연결 1개면 행 칩은 숨고 헤더 칩만 그린다(showStatusChip 관례, 위 731행대 선례와 동형).
+    const headerChip = container.querySelector('[data-status-chip]');
+    expect(headerChip?.getAttribute('data-status-chip')).toBe('connected');
+    expect(container.querySelector('[data-status-chip="expiring_soon"]')).toBeNull();
+    // 부연 문장(정보성)은 여전히 뜬다 — channelExpiringInfoNote 축(자동으로 갱신됩니다).
+    expect(container.textContent).toContain(koMessages.channelConnect.channelExpiringToday);
+    expect(container.textContent).toContain('자동으로 갱신됩니다');
+  });
 });

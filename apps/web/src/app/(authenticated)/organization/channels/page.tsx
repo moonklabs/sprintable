@@ -661,7 +661,10 @@ function ConnectionRow({
           />
         ) : null}
       </div>
-      {derived.status === 'expiring_soon' ? <ExpiringSoonNote isAutoRefreshInfo={derived.isAutoRefreshInfo} tokenExpiresAt={conn.token_expires_at} t={t} /> : null}
+      {/* story #3808(페드루 PO 지적 2026-09-12 18:31Z) — 이제 자동 갱신 가능(can_auto_refresh)
+          만료 임박은 status가 'connected'로 남는다(칩=경고 아님) — 부제 렌더 여부는 status가
+          아니라 isAutoRefreshInfo가 채워졌는지(만료 임박 자체는 감지됐다는 신호)로 가른다. */}
+      {derived.isAutoRefreshInfo !== undefined ? <ExpiringSoonNote isAutoRefreshInfo={derived.isAutoRefreshInfo} tokenExpiresAt={conn.token_expires_at} t={t} /> : null}
       {derived.status === 'reauth_required' || derived.status === 'provider_error' ? (
         <ReauthNote reason={derived.reauthReason} t={t} lastErrorCode={conn.last_error_code} />
       ) : null}
@@ -903,7 +906,9 @@ function ChannelSection({
           ? t('channelSandboxReauthUnavailableNote', { channel: channelLabel(channel, t) })
           : reauthSubtitleText(singleDerived.reauthReason, t, single.last_error_code);
       }
-      if (singleDerived.status === 'expiring_soon') {
+      // story #3808 — 위 ConnectionRow 부제와 동형: status가 아니라 isAutoRefreshInfo
+      // 채움 여부로 가른다(자동 갱신 가능 만료 임박은 이제 status가 'connected').
+      if (singleDerived.isAutoRefreshInfo !== undefined) {
         return expiringSoonSubtitleText({ isAutoRefreshInfo: singleDerived.isAutoRefreshInfo, tokenExpiresAt: single.token_expires_at, t });
       }
       return `${channelConnectionIdentityLabel(single, t)} · ${t('channelConnectedBy', { time: formatRelativeTime(single.created_at, locale, displayTimezone) })}`;
