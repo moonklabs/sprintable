@@ -15,6 +15,7 @@ stibee_client.py::verify_api_key 동형 관례) — 글 생성·이미지 업로
   다룬다, `verify_admin_api_key`의 판정 로직 자체엔 영향 없음)."""
 from __future__ import annotations
 
+import os
 import time
 
 import httpx
@@ -22,6 +23,16 @@ from jose import jwt
 
 _ADMIN_AUD = "/admin/"
 _JWT_TTL_SECONDS = 300  # Ghost 강제 상한(exp-iat ≤ 5분)
+
+
+def ghost_stub_enabled() -> bool:
+    """story #3816(PR1, 페드루 PO 캡처 지시 2026-09-12) — wordpress_publish.py::
+    wordpress_stub_enabled()와 동형 env 게이트. 여기(서비스 계층)에 두고
+    `dev_ghost_stub.py`(라우터 계층)가 가져다 쓴다 — 서비스가 라우터를 import하는
+    역방향 계층 위반을 피한다. 이 PR엔 아직 ghost_publish.py가 없어(PR2 몫) 이
+    플래그의 유일한 쓰임은 channel_connections.py의 site_url SSRF 검사 loopback
+    허용뿐(연결 저장 단계의 실왕복 캡처용 — 실 도메인 노출 0)."""
+    return os.environ.get("GHOST_TEST_STUB_ENABLED", "").strip().lower() == "true"
 
 
 class GhostAdminKeyMalformedError(Exception):

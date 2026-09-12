@@ -1434,8 +1434,14 @@ async def create_pasted_secret_channel_connection(
                     "message": t("channel_connections.ghost_fields_required", resolved_locale),
                 },
             )
+        from app.services.ghost_client import ghost_stub_enabled
+
         try:
-            site_url = await assert_destination_url_safe(body.site_url, allow_loopback=False)
+            # story #3816(PR1, 페드루 PO 캡처 지시 2026-09-12) — wordpress/webhook과
+            # 동형: allow_loopback은 항상 False가 아니라 dev 스텁 플래그로 게이트
+            # (GHOST_TEST_STUB_ENABLED=true일 때만 http://localhost 허용, prod는
+            # 이 플래그 자체가 없어 여전히 항상 False와 동치).
+            site_url = await assert_destination_url_safe(body.site_url, allow_loopback=ghost_stub_enabled())
         except DestinationURLUnsafeError as exc:
             raise HTTPException(
                 status_code=422,
