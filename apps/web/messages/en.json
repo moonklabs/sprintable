@@ -2166,7 +2166,7 @@
     "channelStibeePlanRestricted": "Plan restriction · The email API requires the Pro plan or higher.",
     "channelStibeeSenderNotVerified": "Your sender email isn't verified with Stibee — please verify it in your Stibee sender settings.",
     "channelConnectPastedSecretHintStibee": "Create your API key in Stibee under Workspace settings → API keys, and find the address book ID in your Stibee address book's URL. For sender email, use an address you've already verified in your Stibee sender settings.",
-    "channelConnectPastedSecretHintGhost": "Create the Admin API key in Ghost under Settings → Integrations, and enter your Ghost site's URL as-is.",
+    "channelConnectPastedSecretHintGhost": "Create the Admin API key in your Ghost admin under Settings → Integrations → Custom Integration and paste it here. Enter your Ghost site URL as-is.",
     "channelConnectPastedSecretPlanNoteGhost": "Some features may be limited by your Ghost plan.",
     "channelConnectPastedSecretRewriteNote": "You won't be able to see this again after saving — paste a new value to change it.",
     "channelConnectSecretHintLabel": "Current credential ends in {hint}",
