@@ -7,6 +7,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { fetchWithAuth } from '@/lib/db/client';
 import { channelLabel, channelConnectionIdentityLabel } from '@/lib/channel-label';
@@ -143,6 +144,10 @@ interface ChannelPostDraftDetail {
   // 로드 시 부르는 자리)에 규칙 위반 목록을 얹는다 — 저장/상신 응답과 같은 shape,
   // 계약 없으면(BE 미착지) undefined → 화면은 아무것도 지어내지 않는다.
   violations?: ContentRuleViolation[];
+  // story #3808(Phase3·3-3 PR5b-2, 페드루 PO 確定 2026-09-12) — X 스레드(N세그먼트)
+  // 부분 실패 상태. 세그먼트 2개 미만(스레드 아님)이면 null. 있으면 sequence
+  // 오름차순, 시도 안 한 세그먼트(k+1..N)는 배열에 아예 없다(지어내지 않는다).
+  thread_segments?: { sequence: number; status: string; external_id: string | null; permalink: string | null; error_code: string | null }[] | null;
 }
 
 interface ChannelPostVersion {
@@ -159,6 +164,9 @@ interface ChannelPostVersion {
   // (insights-board group-rows와 같은 낱말 「미분류」로 표시 — docs 네임스페이스 재사용,
   // 새 낱말 0).
   hook_key: string | null;
+  // story #3808(Phase3·3-3 PR5b-2, 페드루 PO 確定 2026-09-12) — 이 버전의 스레드
+  // 이어쓰기 목록(있으면 {thread: string[]}). 없으면 null(스레드 아님).
+  channel_payload: { thread?: string[] } | null;
 }
 
 // story #3550(Phase2·풀스택, BE 2/2 #3910 계약, 페드루 PO 確定 2026-09-06) — 캐러셀
@@ -227,6 +235,11 @@ interface ChannelConnectionInfo {
   video_aspect_target: number;
   video_aspect_tolerance: number;
   video_codecs: string[];
+  // story #3808(Phase3·3-3 PR5b-2, 페드루 PO 確定 2026-09-12) — 스레드(연속 게시)
+  // 이어쓰기 세그먼트 상한(image_max_count와 동형 관례, 하드코딩 금지 축). 0=이
+  // 채널은 스레드 이어쓰기 미지원(편집기가 「스레드 이어쓰기」 목록 UI 자체를
+  // 안 그린다).
+  thread_max_segments: number;
 }
 
 // story #3556(Phase2·FE, BE #3554/#3911 계약, 페드루 PO 確定 2026-09-06) — 영상
@@ -772,6 +785,14 @@ export default function ChannelPostEditPage() {
   >({ phase: 'idle' });
   const videoFileInputRef = useRef<HTMLInputElement>(null);
 
+  // story #3808(Phase3·3-3 PR5b-2, 페드루 PO 確定 2026-09-12) — 스레드(연속 게시)
+  // 이어쓰기 상한(image_max_count와 동형 관례). 0="아직 모른다/미지원"(fail-closed
+  // — 「스레드 이어쓰기」 목록 UI 자체를 안 그린다, 채널 이름 하드코딩 금지).
+  const [threadMaxSegments, setThreadMaxSegments] = useState(0);
+  // 이어쓰기 목록(헤드 제외 — 헤드는 기존 text). 저장 시 channel_payload.thread로
+  // 그대로 실린다. 빈 배열=스레드 아님(channel_payload 자체를 null로 보낸다).
+  const [threadSegments, setThreadSegments] = useState<string[]>([]);
+
   const [text, setText] = useState('');
   // story #3517(BE #3867 조각②, PO 정정 2026-09-05) — 댓글 「작업으로 전환」
   // 다이얼로그의 「게시물 제목」 prefill. 채널 포스트엔 정식 제목이 없다 — 1순위는
@@ -902,6 +923,8 @@ export default function ChannelPostEditPage() {
         if (latest) {
           setText(latest.text);
           setLinkUrl(latest.link_url ?? '');
+          // story #3808(PR5b-2) — 스레드 이어쓰기 목록도 최신 버전 기준으로 seed.
+          setThreadSegments(latest.channel_payload?.thread ?? []);
           // story #3550 — N장 목록(현재 버전 기준)도 초기 로드 때 같이 가져온다.
           // 실패해도 페이지 전체를 막지 않는다(첨부 0장으로 보이는 것과 "조회
           // 실패"를 이 자리에서 구별해 봐야 아직 아무 UI도 없다 — 빈 배열 유지).
@@ -954,6 +977,8 @@ export default function ChannelPostEditPage() {
                 aspectTolerance: conn.video_aspect_tolerance, codecs: conn.video_codecs,
               });
             }
+            // story #3808(PR5b-2) — image_max_count와 동형 관례, 하드코딩 금지 축.
+            if (conn) setThreadMaxSegments(conn.thread_max_segments);
           }
 
           // AC7 — 한도 잔량은 별도 왕복(휴먼 전용 엔드포인트, provider 실조회라 느릴 수
@@ -1050,6 +1075,40 @@ export default function ChannelPostEditPage() {
   const textLength = channelTextLength(text);
   // AC6 — 한도 미선언(null)이면 초과 판정 자체를 안 한다(지어내지 않는다, 상신은 막지 않음).
   const isOverLimit = typeof maxTextLength === 'number' && textLength > maxTextLength;
+
+  // story #3808(PR5b-2, 페드루 PO 確定 2026-09-12) — 스레드 이어쓰기 세그먼트별
+  // 검증(각 세그먼트가 maxTextLength 초과 시 상신 차단, thread_max_segments 초과
+  // 시도 마찬가지 — BE _validate_thread_segments와 같은 두 축, FE는 화면에서
+  // 미리 막을 뿐 최종 판정은 여전히 BE).
+  const threadSegmentOverLimitIndexes = threadSegments
+    .map((seg, i) => (typeof maxTextLength === 'number' && channelTextLength(seg) > maxTextLength ? i : -1))
+    .filter((i) => i >= 0);
+  // 발견 즉시 수정(2026-09-12) — thread_max_segments는 헤드 제외, channel_payload.
+  // thread 배열 «자체»의 길이 상한이다(channel_adapters.py::ChannelAdapterConfig.
+  // thread_max_segments 도크스트링·_validate_thread_segments의 `len(thread) >
+  // max_segments` 그대로 — 헤드+1을 더해 비교하면 안 된다, 실 상한보다 1 먼저
+  // 잠그는 off-by-one이었다: 캡처①이 9개에서 이미 「추가 비활성」으로 뜬 것도
+  // 이 결함 때문 — BE는 10개까지 허용한다).
+  const isThreadOverCap = threadMaxSegments > 0 && threadSegments.length > threadMaxSegments;
+  const hasThreadBlockingIssue = threadSegmentOverLimitIndexes.length > 0 || isThreadOverCap;
+  // story #3808(PR5b-2, 페드루 PO 確定 2026-09-12) — 「나머지 이어서 발행」은 새
+  // 버튼이 아니라 기존 발행 버튼의 라벨 분기(신규 액션 0, view.partialSuccess와
+  // 동형 관례 — 이 자리 바로 그 판정식 옆). 배열 마지막 원소가 published가
+  // 아니면(=fail-stop 설계상 그 이후 세그먼트는 배열에 아예 없다) 부분 실패.
+  const isThreadPartialFailure = !!(
+    draft?.thread_segments && draft.thread_segments.length > 0
+    && draft.thread_segments[draft.thread_segments.length - 1].status !== 'published'
+  );
+  // story #3808(PR5b-2 CHANGES, 페드루 PO 지적 2026-09-12 07:08Z) — 부분 실패는
+  // 「이미 발행됐습니다 — 다시 발행할 새 내용이 없습니다」(view.publishable=false,
+  // 헤드 기준 body-unchanged 방어망)의 대상이 아니다: 몸통이 안 바뀐 게 아니라
+  // «아직 못 나간 뒤쪽 세그먼트가 있다»는 완전히 다른 사실이라, 그 방어망을
+  // 그대로 물려받으면 라벨만 바뀐 채 버튼이 잠긴다(실측 사고). 나머지 건수·
+  // 재개 시작 seq는 thread_segments 배열에서 FE가 계산(BE는 값만 낸다).
+  const threadRemainingCount = draft?.thread_segments
+    ? (threadSegments.length + 1) - draft.thread_segments.filter((s) => s.status === 'published').length
+    : 0;
+  const threadResumeFromSeq = draft?.thread_segments?.find((s) => s.status !== 'published')?.sequence;
   // story #3472 2부(§16-7) — "강도는 하나다 — 편집 중에도 「이대로는 상신할 수
   // 없습니다」를 말한다"·"severity가 없는 것은 알고 줄인 것"(첫 슬라이스=기계 검사
   // 둘 다 차단). 지금 계약엔 warn이 없어 위반이 있으면 전부 차단.
@@ -1068,6 +1127,11 @@ export default function ChannelPostEditPage() {
           connection_id: draft.connection_id,
           text,
           link_url: linkUrl.trim() || null,
+          // story #3808(PR5b-2) — 스레드 이어쓰기 0개면 channel_payload 자체를
+          // null로 보낸다(빈 배열을 "스레드다"로 오독하는 BE 판정과 어긋나지
+          // 않게, _validate_thread_segments/list_channel_post_drafts 둘 다
+          // "2개 미만=스레드 아님" 판정과 대칭).
+          channel_payload: threadSegments.length > 0 ? { thread: threadSegments } : null,
         }),
       });
       if (res.ok) {
@@ -1101,7 +1165,7 @@ export default function ChannelPostEditPage() {
   // AC5 — 상신은 휴먼 전용이 아니다(actor_type 가드 없음) — 이 화면 자체는 휴먼만
   // 접근하므로 버튼 노출 자체엔 영향 없다. AC6 — 초과 상태면 버튼을 비활성화한다.
   const handleSubmitForApproval = async (scheduledAt?: string) => {
-    if (!orgId || !draft || isOverLimit || hasBlockingViolations || imageUploadInProgress || videoUploadInProgress || imageRequiredAndMissing) return;
+    if (!orgId || !draft || isOverLimit || hasBlockingViolations || hasThreadBlockingIssue || imageUploadInProgress || videoUploadInProgress || imageRequiredAndMissing) return;
     const latest = versions[versions.length - 1];
     if (!latest) return;
     if (scheduledAt) setScheduleServerError(null);
@@ -1656,6 +1720,12 @@ export default function ChannelPostEditPage() {
       setPublishResult({ type: 'error', text: t('publishFailed'), externalImpact: 'unknown' });
     } finally {
       setPublishing(false);
+      // story #3808(PR5b-2, 페드루 PO 確定 2026-09-12) — 스레드는 성공·부분실패
+      // 둘 다 draft.thread_segments를 다시 읽어야 상태 낱말이 정직해진다(단일
+      // 발행처럼 응답 필드 몇 개만 병합해 흉내내지 않는다 — §4-2 원칙과 동형,
+      // 신규 필드 병합 로직 0). threadMaxSegments>0(어댑터가 스레드 지원)일
+      // 때만 — 나머지 채널은 기존 그대로 왕복 0회 유지.
+      if (threadMaxSegments > 0) void refreshDraftAndVersionsAfterImagesMutation();
     }
   };
 
@@ -1902,7 +1972,11 @@ export default function ChannelPostEditPage() {
   // 없는 행동 — settings/page.tsx·org-members-section.tsx와 같은 role 소스 재사용,
   // 새 조회 안 만듦). 이 화면 자체가 사람 전용(에이전트에게 화면 없음, AC14)이라
   // "휴먼 게이팅"의 실체는 이 owner/admin 세분화다.
-  const canPublish = view.publishable;
+  // story #3808(PR5b-2 CHANGES) — 스레드 부분 실패는 view.publishable(헤드 기준
+  // body-unchanged 방어망)의 판단 범위 밖 사실이라 OR로 덧연다(방어망을 느슨하게
+  // 만드는 게 아니라, 애초에 그 방어망이 답할 질문이 아닌 경우를 별도 축으로 열어
+  // 주는 것 — 비스레드 채널·스레드 완주 상태는 기존 판정 그대로 무변).
+  const canPublish = view.publishable || isThreadPartialFailure;
   const canUnpublish = role === 'owner' || role === 'admin';
 
   // story #3426(BE #3419, doc §17-10/§17-11) — 예약 취소는 command_status가 대기·멈춤
@@ -2081,6 +2155,26 @@ export default function ChannelPostEditPage() {
             recheckGate
             onRetryClick={() => { setRetryChecklistConfirmed(false); setRetryConfirmOpen(true); }}
           />
+        ) : null}
+        {/* story #3808(Phase3·3-3 PR5b-2, 페드루 PO 確定 2026-09-12) — 스레드 부분
+            실패 상태 낱말. thread_segments 배열에서 FE가 직접 계산(BE는 상태
+            낱말을 짓지 않는다 — 배열 값만 낸다, §3402 B3 배지와 같은 원칙).
+            배열 길이+1(head 제외 이어쓰기 목록의 길이가 아니라, 이미 시도된
+            세그먼트 수)로 "N건 중 published개 발행"을, 실패 seq가 있으면
+            "k번째 실패"를 덧붙인다. */}
+        {draft.thread_segments && draft.thread_segments.length > 0 ? (
+          <p className="text-xs text-muted-foreground" data-testid="channel-post-thread-status">
+            {(() => {
+              // 페드루 PO 確定(c) — 총 N=channel_payload.thread 길이+1. threadSegments는
+              // 이 화면이 최신 버전 로드 시 이미 그 값으로 seed해 둔 상태(위 :911 부근).
+              const total = threadSegments.length + 1;
+              const publishedCount = draft.thread_segments!.filter((s) => s.status === 'published').length;
+              const failed = draft.thread_segments!.find((s) => s.status !== 'published');
+              return failed
+                ? t('channelPostsThreadStatusPartial', { total, published: publishedCount, failedSeq: failed.sequence })
+                : t('channelPostsThreadStatusComplete', { total, published: publishedCount });
+            })()}
+          </p>
         ) : null}
         <ConfirmDialog
           open={retryConfirmOpen}
@@ -2349,7 +2443,9 @@ export default function ChannelPostEditPage() {
                 우선순위를 명시해 둔다. */}
             {publishing
               ? (view.isRepublish ? t('publishRepublishingCta') : t('publishPendingCta'))
-              : view.partialSuccess ? t('channelPostsPublishContinueCta') : view.isRepublish ? t('publishRepublishCta') : t('publishCta')}
+              : view.partialSuccess ? t('channelPostsPublishContinueCta')
+                : isThreadPartialFailure ? t('channelPostsThreadContinuePublishCta')
+                  : view.isRepublish ? t('publishRepublishCta') : t('publishCta')}
           </Button>
           {/* story #3426 ①-b/①-c — 예약 취소·회수 버튼. PR2에서 렌더 보류했던 「발행
               취소」 버튼을 BE #3419 착지로 복원한다. 둘 다 되돌리기 번거로운/불가능한
@@ -2392,6 +2488,16 @@ export default function ChannelPostEditPage() {
               : view.status === 'published'
                 ? t('publishDisabledReasonAlreadyPublished')
                 : t('publishDisabledReason')}
+          </p>
+        ) : null}
+        {/* story #3808(PR5b-2 CHANGES, 페드루 PO 지적 2026-09-12 07:08Z) — 부분 실패로
+            버튼이 열린 경우(canPublish=true인데 그 근거가 view.publishable이 아니라
+            isThreadPartialFailure)는 위 "이미 발행됐습니다" 문구가 안 뜨는 대신, 무엇이
+            벌어질지(몇 번째부터 몇 건) 미리 말해야 한다 — "발행" 누르면 뭐가 나가는지
+            모른 채 누르게 두지 않는다(§4-1 partialSuccess의 「이어서 발행」과 같은 원칙). */}
+        {isThreadPartialFailure && threadResumeFromSeq !== undefined ? (
+          <p className="text-xs text-muted-foreground" data-testid="channel-post-thread-continue-hint">
+            {t('channelPostsThreadContinueHint', { fromSeq: threadResumeFromSeq, remaining: threadRemainingCount })}
           </p>
         ) : null}
         {/* B4(페드루 PO) — canPublish는 참인데 command_status가 pending/blocked라 막힌
@@ -2623,6 +2729,81 @@ export default function ChannelPostEditPage() {
           t={t}
         />
       </div>
+
+      {/* story #3808(Phase3·3-3 PR5b-2, 페드루 PO 確定 2026-09-12) — 스레드
+          이어쓰기 목록. thread_max_segments<=0(어댑터 미선언)이면 이 채널은
+          스레드 미지원 — 목록 UI 자체를 안 그린다(채널 이름 하드코딩 금지 축,
+          image_max_count와 동형 관례). */}
+      {threadMaxSegments > 0 ? (
+        <Card className="space-y-2 p-3 text-sm" data-testid="channel-post-thread-editor">
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground">{t('channelPostsThreadEditorLabel')}</span>
+            <span className="text-xs text-muted-foreground" data-testid="channel-post-thread-count">
+              {/* 발견 즉시 수정(2026-09-12) — thread_max_segments는 헤드 제외 이어쓰기
+                  배열 자체의 상한(위 isThreadOverCap과 같은 근거)이라, 여기도 같은
+                  단위(이어쓰기 개수)로 비교해야 한다. 헤드를 더한 값과 비교하면
+                  실제로 상한에 못 미쳤는데 "도달"로 보이는 off-by-one이 난다. */}
+              {t('channelPostsThreadSegmentCount', { count: threadSegments.length, max: threadMaxSegments })}
+            </span>
+          </div>
+          {threadSegments.map((seg, i) => {
+            const segLength = channelTextLength(seg);
+            const segOverLimit = typeof maxTextLength === 'number' && segLength > maxTextLength;
+            return (
+              // story #3785(유나 定, 페드루 PO 지시 2026-09-12 07:43Z) — verify-no-card-
+              // surfaceless-box 가드가 요구하는 표면 프리미티브 그대로: 세그먼트 입력칸
+              // 자체를 Card(surface='subtle', 바깥 Card와 구별되는 중첩 표면)로 감싸고
+              // textarea는 표면 위 투명 입력으로(테두리 없는 상자를 만들지 않는다).
+              <Card key={i} surface="subtle" className="space-y-1 p-2" data-testid={`channel-post-thread-segment-${i}`}>
+                <div className="flex items-start gap-2">
+                  <span className="mt-2 shrink-0 text-xs text-muted-foreground">{i + 2}.</span>
+                  <textarea
+                    value={seg}
+                    onChange={(e) => {
+                      const next = [...threadSegments];
+                      next[i] = e.target.value;
+                      setThreadSegments(next);
+                    }}
+                    rows={3}
+                    className="w-full bg-transparent text-sm"
+                    data-testid={`channel-post-thread-segment-field-${i}`}
+                  />
+                  <Button
+                    variant="ghost"
+                    onClick={() => setThreadSegments(threadSegments.filter((_, j) => j !== i))}
+                    data-testid={`channel-post-thread-segment-remove-${i}`}
+                    // story #3592(유나 §22-18, verify-no-new-repeated-row-action-names 가드) —
+                    // 행마다 반복되는 정적 라벨("삭제") 버튼은 접근성 이름에 순번을 품어야
+                    // 한다(channelPostsImageRemoveActionLabel과 동형 관례).
+                    aria-label={t('channelPostsThreadSegmentRemoveActionLabel', { position: i + 2 })}
+                  >
+                    {t('channelPostsThreadSegmentRemove')}
+                  </Button>
+                </div>
+                <span
+                  className={segOverLimit ? 'rounded-full bg-destructive-tint px-1.5 py-0.5 text-foreground text-xs' : 'text-xs text-muted-foreground'}
+                  data-testid={`channel-post-thread-segment-char-count-${i}`}
+                >
+                  {typeof maxTextLength === 'number' ? `${segLength} / ${maxTextLength}` : `${segLength}`}
+                </span>
+              </Card>
+            );
+          })}
+          {isThreadOverCap ? (
+            <p className="text-xs text-destructive" data-testid="channel-post-thread-over-cap">
+              {t('channelPostsThreadOverCap', { max: threadMaxSegments })}
+            </p>
+          ) : null}
+          <Button
+            variant="outline"
+            onClick={() => setThreadSegments([...threadSegments, ''])}
+            disabled={threadSegments.length >= threadMaxSegments}
+            data-testid="channel-post-thread-segment-add"
+          >
+            {t('channelPostsThreadSegmentAdd')}
+          </Button>
+        </Card>
+      ) : null}
 
       {/* story #3556(§17-23①, 유나 確定 2026-09-06) — video_max_bytes>0일 때만
           슬롯을 그린다(어댑터가 영상을 선언하지 않으면 슬롯 자체가 없다). 자리는
@@ -2898,7 +3079,7 @@ export default function ChannelPostEditPage() {
         </Button>
         <Button
           onClick={() => void handleSubmitForApproval()}
-          disabled={submitting || isOverLimit || hasBlockingViolations || imageUploadInProgress || videoUploadInProgress || imageRequiredAndMissing}
+          disabled={submitting || isOverLimit || hasBlockingViolations || hasThreadBlockingIssue || imageUploadInProgress || videoUploadInProgress || imageRequiredAndMissing}
           data-testid="channel-post-submit-button"
         >
           {submitting ? t('submitPendingCta') : t('submitCta')}
@@ -2910,7 +3091,7 @@ export default function ChannelPostEditPage() {
         <Button
           variant="outline"
           onClick={() => setScheduleDialogOpen(true)}
-          disabled={submitting || isOverLimit || hasBlockingViolations || blockedByCommandInFlight || imageUploadInProgress || videoUploadInProgress || imageRequiredAndMissing}
+          disabled={submitting || isOverLimit || hasBlockingViolations || hasThreadBlockingIssue || blockedByCommandInFlight || imageUploadInProgress || videoUploadInProgress || imageRequiredAndMissing}
           data-testid="channel-post-schedule-submit-button"
         >
           {t('channelPostsScheduleSubmitCta')}

@@ -230,6 +230,14 @@ function stubFetch(opts: {
   videoCodecs?: string[];
   onVideoUploadUrl?: (body: unknown) => { status: number; body: unknown };
   onVideoConfirm?: (body: unknown) => { status: number; body: unknown };
+  // story #3808(Phase3·3-3 PR5b-2, 페드루 PO 確定 2026-09-12) — 스레드 이어쓰기
+  // 상한(image_max_count와 동형 관례). 기본값 0=미지원(기존 시나리오 전부 회귀
+  // 0 — 목록 UI 자체가 안 뜬다).
+  threadMaxSegments?: number;
+  // 발행 POST 성공(또는 실패) 「직후」 재조회(refreshDraftAndVersionsAfterImagesMutation
+  // 재사용, threadMaxSegments>0일 때만 발동)가 반영할 서버 값 — draftAfterRetry와
+  // 동형 관례. thread_segments 배열의 실측 갱신을 재현하는 용도.
+  draftAfterPublish?: Record<string, unknown>;
 }) {
   const versions = opts.versions ?? [VERSION_1];
   const draftDetail: Record<string, unknown> = { ...DRAFT_DETAIL, ...opts.draftDetail };
@@ -290,6 +298,7 @@ function stubFetch(opts: {
               video_aspect_target: opts.videoAspectTarget ?? 0,
               video_aspect_tolerance: opts.videoAspectTolerance ?? 0,
               video_codecs: opts.videoCodecs ?? [],
+              thread_max_segments: opts.threadMaxSegments ?? 0,
             }],
             error: null, meta: null,
           }),
@@ -446,6 +455,7 @@ function stubFetch(opts: {
           status: 200, body: { permalink: 'https://threads.net/@x/1', external_id: 'media-1', published_at: '2026-09-04T00:00:00Z', version_id: 'v1', publication_id: 'pub-1' },
         };
         const ok = result.status < 400;
+        if (opts.draftAfterPublish) currentDraftDetail = { ...currentDraftDetail, ...opts.draftAfterPublish };
         return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
       }
       if (url === `/api/organizations/${ORG_ID}/channel-posts/drafts/${DRAFT_ID}/cancel-scheduled` && init?.method === 'POST') {
@@ -5260,5 +5270,219 @@ describe('ChannelPostEditPage — 릴스 영상 슬롯(story #3556)', () => {
     await flush();
     expect(container.querySelector('[data-testid="channel-post-approval-video"]')).toBeNull();
     expect(container.querySelector('[data-testid="channel-post-approval-thumbnail"]')).not.toBeNull();
+  });
+});
+
+describe('ChannelPostEditPage — 스레드 이어쓰기(story #3808 PR5b-2, 페드루 PO 確定 2026-09-12)', () => {
+  it('⭐image_max_count와 동형 — thread_max_segments=0(미지원)이면 목록 UI 자체를 안 그린다', async () => {
+    stubFetch({ threadMaxSegments: 0 });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-thread-editor"]')).toBeNull();
+  });
+
+  it('⭐thread_max_segments>0이면 목록 UI가 뜨고, 「이어쓰기 추가」로 세그먼트를 늘릴 수 있다', async () => {
+    stubFetch({ threadMaxSegments: 10 });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-thread-editor"]')).not.toBeNull();
+    const addBtn = container.querySelector('[data-testid="channel-post-thread-segment-add"]') as HTMLButtonElement;
+    await act(async () => { addBtn.click(); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-thread-segment-field-0"]')).not.toBeNull();
+    // 발견 즉시 수정(2026-09-12) — thread_max_segments는 헤드 제외 이어쓰기 배열
+    // «자체»의 상한(channel_adapters.py 도크스트링·_validate_thread_segments 그대로)
+    // 이라, 카운터도 이어쓰기 개수 대 상한으로 같은 단위 비교한다(헤드+1 아님).
+    expect(container.querySelector('[data-testid="channel-post-thread-count"]')?.textContent).toContain('1 / 10');
+  });
+
+  it('⭐세그먼트 입력 후 삭제하면 목록에서 사라지고 총 건수가 다시 준다', async () => {
+    stubFetch({ threadMaxSegments: 10 });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    await act(async () => { (container.querySelector('[data-testid="channel-post-thread-segment-add"]') as HTMLButtonElement).click(); });
+    await flush();
+
+    const removeBtn = container.querySelector('[data-testid="channel-post-thread-segment-remove-0"]') as HTMLButtonElement;
+    await act(async () => { removeBtn.click(); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-thread-segment-field-0"]')).toBeNull();
+    expect(container.querySelector('[data-testid="channel-post-thread-count"]')?.textContent).toContain('0 / 10');
+  });
+
+  it('⭐이어쓰기 목록이 있으면 저장 요청 body에 channel_payload.thread로 실린다', async () => {
+    let savedBody: unknown;
+    stubFetch({ threadMaxSegments: 10, onSave: (body) => { savedBody = body; return { status: 201, body: { draft_id: DRAFT_ID, version_id: 'v2', version: 2 } }; } });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    await act(async () => { (container.querySelector('[data-testid="channel-post-thread-segment-add"]') as HTMLButtonElement).click(); });
+    await flush();
+    const seg = container.querySelector('[data-testid="channel-post-thread-segment-field-0"]') as HTMLTextAreaElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+    await act(async () => { setter.call(seg, '두 번째 세그먼트'); seg.dispatchEvent(new Event('input', { bubbles: true })); seg.dispatchEvent(new Event('change', { bubbles: true })); });
+    await act(async () => { (container.querySelector('[data-testid="channel-post-save-button"]') as HTMLButtonElement).click(); });
+    await flush();
+
+    expect(savedBody).toMatchObject({ channel_payload: { thread: ['두 번째 세그먼트'] } });
+  });
+
+  it('⭐이어쓰기 목록이 비어 있으면(스레드 아님) 저장 요청 channel_payload는 null(빈 배열 아님)', async () => {
+    let savedBody: unknown;
+    stubFetch({ threadMaxSegments: 10, onSave: (body) => { savedBody = body; return { status: 201, body: { draft_id: DRAFT_ID, version_id: 'v2', version: 2 } }; } });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    await act(async () => { (container.querySelector('[data-testid="channel-post-save-button"]') as HTMLButtonElement).click(); });
+    await flush();
+
+    expect(savedBody).toMatchObject({ channel_payload: null });
+  });
+
+  it('⭐페드루 PO 確定(b) — 이어쓰기 개수=thread_max_segments 도달 시 「이어쓰기 추가」가 비활성화된다', async () => {
+    // 발견 즉시 수정(2026-09-12) — thread_max_segments는 헤드 제외 이어쓰기 배열
+    // «자체»의 상한이다(channel_adapters.py 도크스트링·BE _validate_thread_segments의
+    // `len(thread) > max_segments` 그대로) — 헤드를 더한 값과 비교하면 실제 상한보다
+    // 하나 먼저 잠그는 off-by-one이 된다(이 테스트가 예전엔 그 결함을 "정상"으로 pin
+    // 하고 있었다 — 페드루 PO가 캡처①에서 실측으로 잡음).
+    stubFetch({ threadMaxSegments: 2 });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const addBtn = container.querySelector('[data-testid="channel-post-thread-segment-add"]') as HTMLButtonElement;
+    await act(async () => { addBtn.click(); });
+    await flush();
+    expect(addBtn.disabled).toBe(false); // 이어쓰기 1개 < 상한 2 — 아직 추가 가능해야 한다.
+    await act(async () => { addBtn.click(); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-thread-count"]')?.textContent).toContain('2 / 2');
+    expect(addBtn.disabled).toBe(true);
+  });
+
+  it('⭐로드된 버전의 channel_payload.thread가 편집기 목록에 그대로 seed된다(재편집)', async () => {
+    stubFetch({
+      threadMaxSegments: 10,
+      versions: [{ ...VERSION_1, channel_payload: { thread: ['기존 이어쓰기 1', '기존 이어쓰기 2'] } }],
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    expect((container.querySelector('[data-testid="channel-post-thread-segment-field-0"]') as HTMLTextAreaElement)?.value).toBe('기존 이어쓰기 1');
+    expect((container.querySelector('[data-testid="channel-post-thread-segment-field-1"]') as HTMLTextAreaElement)?.value).toBe('기존 이어쓰기 2');
+    expect(container.querySelector('[data-testid="channel-post-thread-count"]')?.textContent).toContain('2 / 10');
+  });
+
+  it('⭐부분 실패(N=3 중 seq2 실패) — 상태 낱말이 배열에서 계산돼 뜨고, 발행 버튼 라벨이 「나머지 이어서 발행」으로 바뀐다', async () => {
+    stubFetch({
+      threadMaxSegments: 10,
+      versions: [{ ...VERSION_1, channel_payload: { thread: ['세그먼트 2', '세그먼트 3'] } }],
+      // 페드루 PO 실측 지적(2026-09-12 07:08Z) — publication_status/published_at은
+      // «헤드»(seq=1) 기준(list_channel_post_drafts 배치③, setdefault=최저 sequence)
+      // 이라 부분 실패에서도 'published'다. 이 픽스처가 예전엔 'failed'로 잘못
+      // 적혀 있어(실 BE 응답과 안 맞음) 아래 「이미 발행됐습니다」 잠금 결함을
+      // 이 테스트가 못 잡았다 — 원인 그대로 pin.
+      draftDetail: {
+        publication_id: 'pub-1', publication_status: 'published',
+        permalink: 'https://x.com/1', published_at: '2026-09-12T00:00:00Z',
+        thread_segments: [
+          { sequence: 1, status: 'published', external_id: 'tw-1', permalink: 'https://x.com/1', error_code: null },
+          { sequence: 2, status: 'failed', external_id: null, permalink: null, error_code: 'CHANNEL_RATE_LIMITED' },
+        ],
+      } as never,
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const statusText = container.querySelector('[data-testid="channel-post-thread-status"]')?.textContent ?? '';
+    expect(statusText).toContain('3');
+    expect(statusText).toContain('1');
+    expect(statusText).toContain('2');
+    const publishBtn = container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement;
+    expect(publishBtn?.textContent).toBe(koMessages.content.channelPostsThreadContinuePublishCta);
+    // 페드루 PO CHANGES(2026-09-12 07:08Z) — 「이미 발행됐습니다」 방어망은 헤드
+    // body-unchanged 축이지 «나머지 세그먼트 미완주»를 답하는 질문이 아니다. 버튼은
+    // 반드시 활성이어야 하고, 대신 재개 안내(몇 번째부터 몇 건)가 그 문구를 대신한다.
+    expect(publishBtn?.disabled).toBe(false);
+    expect(container.querySelector('[data-testid="channel-post-publish-disabled-reason"]')).toBeNull();
+    const hint = container.querySelector('[data-testid="channel-post-thread-continue-hint"]')?.textContent ?? '';
+    expect(hint).toContain('2');
+  });
+
+  it('⭐전부 발행 완료(N=3)면 상태 낱말이 완료형으로 뜨고 발행 버튼은 기존 라벨 그대로', async () => {
+    stubFetch({
+      threadMaxSegments: 10,
+      versions: [{ ...VERSION_1, channel_payload: { thread: ['세그먼트 2', '세그먼트 3'] } }],
+      draftDetail: {
+        publication_id: 'pub-1', publication_status: 'published',
+        permalink: 'https://x.com/1', published_at: '2026-09-12T00:00:00Z',
+        thread_segments: [
+          { sequence: 1, status: 'published', external_id: 'tw-1', permalink: 'https://x.com/1', error_code: null },
+          { sequence: 2, status: 'published', external_id: 'tw-2', permalink: 'https://x.com/2', error_code: null },
+          { sequence: 3, status: 'published', external_id: 'tw-3', permalink: 'https://x.com/3', error_code: null },
+        ],
+      } as never,
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const statusText = container.querySelector('[data-testid="channel-post-thread-status"]')?.textContent ?? '';
+    expect(statusText).toContain('3');
+    expect(statusText).not.toContain('실패');
+  });
+
+  it('⭐thread_segments가 없으면(스레드 아닌 일반 채널) 상태 낱말 블록 자체가 안 뜬다(회귀 0)', async () => {
+    stubFetch({ threadMaxSegments: 0 });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-thread-status"]')).toBeNull();
+  });
+
+  it('⭐이어쓰기 세그먼트 하나가 한도를 넘으면 상신 버튼이 비활성화된다(BE _validate_thread_segments와 같은 축을 FE가 선차단)', async () => {
+    // 헤드 텍스트 자체가 이미 한도를 넘으면 isOverLimit이 먼저 잠가 이 테스트가
+    // «세그먼트» 축을 실측하는지 안 하는지 구별이 안 된다 — 헤드는 한도 안으로.
+    stubFetch({ threadMaxSegments: 10, maxTextLength: 5, versions: [{ ...VERSION_1, text: '헤드5자' }] });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    await act(async () => { (container.querySelector('[data-testid="channel-post-thread-segment-add"]') as HTMLButtonElement).click(); });
+    await flush();
+    const seg = container.querySelector('[data-testid="channel-post-thread-segment-field-0"]') as HTMLTextAreaElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+    await act(async () => { setter.call(seg, '123456'); seg.dispatchEvent(new Event('input', { bubbles: true })); seg.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-submit-button"]')?.hasAttribute('disabled')).toBe(true);
+  });
+
+  it('⭐어댑터 상한이 기존 저장분보다 낮아진 경우(예: 하향 조정) — 로드 시점에 이미 초과면 상신 버튼도 비활성화된다', async () => {
+    // thread_max_segments는 헤드 제외 이어쓰기 배열 자체의 상한 — 이어쓰기 2개가
+    // 상한을 넘으려면 상한이 1이어야 한다(2였다면 정확히 상한과 같아 초과가 아님).
+    stubFetch({
+      threadMaxSegments: 1,
+      versions: [{ ...VERSION_1, channel_payload: { thread: ['세그먼트 2', '세그먼트 3'] } }],
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-thread-over-cap"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="channel-post-submit-button"]')?.hasAttribute('disabled')).toBe(true);
+  });
+
+  it('양성대조 — 한도 안(5자 이하)이면 이어쓰기가 있어도 상신 버튼은 그대로 활성', async () => {
+    // 헤드 텍스트 자체가 이미 5자를 넘으면(고정 픽스처 VERSION_1) isOverLimit이
+    // 먼저 잠가 이 테스트가 뭘 실측하는지 흐려진다 — 헤드도 한도 안으로 줄인다.
+    stubFetch({ threadMaxSegments: 10, maxTextLength: 5, versions: [{ ...VERSION_1, text: '헤드5자' }] });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    await act(async () => { (container.querySelector('[data-testid="channel-post-thread-segment-add"]') as HTMLButtonElement).click(); });
+    await flush();
+    const seg = container.querySelector('[data-testid="channel-post-thread-segment-field-0"]') as HTMLTextAreaElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+    await act(async () => { setter.call(seg, '12345'); seg.dispatchEvent(new Event('input', { bubbles: true })); seg.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-submit-button"]')?.hasAttribute('disabled')).toBe(false);
   });
 });

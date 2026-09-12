@@ -443,6 +443,11 @@ class ChannelPostVersionHistoryItem(BaseModel):
     # story #3679(3656 후속, 페드루 PO 確定 2026-09-07) — 이 버전 자체의 hook_key(값은
     # 버전별, ChannelPostDraftListItem.hook_key=최신 버전과 동일 소스).
     hook_key: str | None = None
+    # story #3808(Phase3·3-3 PR5b-2, 페드루 PO 確定 2026-09-12) — 편집기가 새로
+    # 불러올 때 스레드 이어쓰기 목록(channel_payload.thread)을 다시 채워야 하므로
+    # 이 버전 자체의 channel_payload를 그대로 낸다(3813 subject 등 다른 채널의
+    # 페이로드와 같은 축, 새 필드 발명 0).
+    channel_payload: dict | None = None
 
 
 class CreateChannelPostImageUploadUrlRequest(BaseModel):
@@ -1573,6 +1578,7 @@ async def list_channel_post_draft_version_history(
                 if v.link_url else None
             ),
             hook_key=v.hook_key,
+            channel_payload=v.channel_payload,
         )
         for v in versions
     ]
