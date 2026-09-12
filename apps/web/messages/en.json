@@ -2432,6 +2432,7 @@
     "channelPostsThreadContinuePublishCta": "Continue publishing remaining",
     "channelPostsThreadStatusPartial": "Thread: {published} of {total} published · segment {failedSeq} failed",
     "channelPostsThreadStatusComplete": "Thread: {published} of {total} published",
+    "channelPostsThreadContinueHint": "Continuing from segment {fromSeq} — {remaining} remaining will be published.",
     "channelThreads": "Threads",
     "channelLabelHostedSite": "Sprintable blog",
     "channelLabelWordpress": "WordPress",

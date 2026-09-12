@@ -5367,8 +5367,14 @@ describe('ChannelPostEditPage — 스레드 이어쓰기(story #3808 PR5b-2, 페
     stubFetch({
       threadMaxSegments: 10,
       versions: [{ ...VERSION_1, channel_payload: { thread: ['세그먼트 2', '세그먼트 3'] } }],
+      // 페드루 PO 실측 지적(2026-09-12 07:08Z) — publication_status/published_at은
+      // «헤드»(seq=1) 기준(list_channel_post_drafts 배치③, setdefault=최저 sequence)
+      // 이라 부분 실패에서도 'published'다. 이 픽스처가 예전엔 'failed'로 잘못
+      // 적혀 있어(실 BE 응답과 안 맞음) 아래 「이미 발행됐습니다」 잠금 결함을
+      // 이 테스트가 못 잡았다 — 원인 그대로 pin.
       draftDetail: {
-        publication_id: 'pub-1', publication_status: 'failed',
+        publication_id: 'pub-1', publication_status: 'published',
+        permalink: 'https://x.com/1', published_at: '2026-09-12T00:00:00Z',
         thread_segments: [
           { sequence: 1, status: 'published', external_id: 'tw-1', permalink: 'https://x.com/1', error_code: null },
           { sequence: 2, status: 'failed', external_id: null, permalink: null, error_code: 'CHANNEL_RATE_LIMITED' },
@@ -5382,8 +5388,15 @@ describe('ChannelPostEditPage — 스레드 이어쓰기(story #3808 PR5b-2, 페
     expect(statusText).toContain('3');
     expect(statusText).toContain('1');
     expect(statusText).toContain('2');
-    const publishBtn = container.querySelector('[data-testid="channel-post-publish-button"]');
+    const publishBtn = container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement;
     expect(publishBtn?.textContent).toBe(koMessages.content.channelPostsThreadContinuePublishCta);
+    // 페드루 PO CHANGES(2026-09-12 07:08Z) — 「이미 발행됐습니다」 방어망은 헤드
+    // body-unchanged 축이지 «나머지 세그먼트 미완주»를 답하는 질문이 아니다. 버튼은
+    // 반드시 활성이어야 하고, 대신 재개 안내(몇 번째부터 몇 건)가 그 문구를 대신한다.
+    expect(publishBtn?.disabled).toBe(false);
+    expect(container.querySelector('[data-testid="channel-post-publish-disabled-reason"]')).toBeNull();
+    const hint = container.querySelector('[data-testid="channel-post-thread-continue-hint"]')?.textContent ?? '';
+    expect(hint).toContain('2');
   });
 
   it('⭐전부 발행 완료(N=3)면 상태 낱말이 완료형으로 뜨고 발행 버튼은 기존 라벨 그대로', async () => {

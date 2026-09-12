@@ -1092,6 +1092,16 @@ export default function ChannelPostEditPage() {
     draft?.thread_segments && draft.thread_segments.length > 0
     && draft.thread_segments[draft.thread_segments.length - 1].status !== 'published'
   );
+  // story #3808(PR5b-2 CHANGES, 페드루 PO 지적 2026-09-12 07:08Z) — 부분 실패는
+  // 「이미 발행됐습니다 — 다시 발행할 새 내용이 없습니다」(view.publishable=false,
+  // 헤드 기준 body-unchanged 방어망)의 대상이 아니다: 몸통이 안 바뀐 게 아니라
+  // «아직 못 나간 뒤쪽 세그먼트가 있다»는 완전히 다른 사실이라, 그 방어망을
+  // 그대로 물려받으면 라벨만 바뀐 채 버튼이 잠긴다(실측 사고). 나머지 건수·
+  // 재개 시작 seq는 thread_segments 배열에서 FE가 계산(BE는 값만 낸다).
+  const threadRemainingCount = draft?.thread_segments
+    ? (threadSegments.length + 1) - draft.thread_segments.filter((s) => s.status === 'published').length
+    : 0;
+  const threadResumeFromSeq = draft?.thread_segments?.find((s) => s.status !== 'published')?.sequence;
   // story #3472 2부(§16-7) — "강도는 하나다 — 편집 중에도 「이대로는 상신할 수
   // 없습니다」를 말한다"·"severity가 없는 것은 알고 줄인 것"(첫 슬라이스=기계 검사
   // 둘 다 차단). 지금 계약엔 warn이 없어 위반이 있으면 전부 차단.
@@ -1955,7 +1965,11 @@ export default function ChannelPostEditPage() {
   // 없는 행동 — settings/page.tsx·org-members-section.tsx와 같은 role 소스 재사용,
   // 새 조회 안 만듦). 이 화면 자체가 사람 전용(에이전트에게 화면 없음, AC14)이라
   // "휴먼 게이팅"의 실체는 이 owner/admin 세분화다.
-  const canPublish = view.publishable;
+  // story #3808(PR5b-2 CHANGES) — 스레드 부분 실패는 view.publishable(헤드 기준
+  // body-unchanged 방어망)의 판단 범위 밖 사실이라 OR로 덧연다(방어망을 느슨하게
+  // 만드는 게 아니라, 애초에 그 방어망이 답할 질문이 아닌 경우를 별도 축으로 열어
+  // 주는 것 — 비스레드 채널·스레드 완주 상태는 기존 판정 그대로 무변).
+  const canPublish = view.publishable || isThreadPartialFailure;
   const canUnpublish = role === 'owner' || role === 'admin';
 
   // story #3426(BE #3419, doc §17-10/§17-11) — 예약 취소는 command_status가 대기·멈춤
@@ -2467,6 +2481,16 @@ export default function ChannelPostEditPage() {
               : view.status === 'published'
                 ? t('publishDisabledReasonAlreadyPublished')
                 : t('publishDisabledReason')}
+          </p>
+        ) : null}
+        {/* story #3808(PR5b-2 CHANGES, 페드루 PO 지적 2026-09-12 07:08Z) — 부분 실패로
+            버튼이 열린 경우(canPublish=true인데 그 근거가 view.publishable이 아니라
+            isThreadPartialFailure)는 위 "이미 발행됐습니다" 문구가 안 뜨는 대신, 무엇이
+            벌어질지(몇 번째부터 몇 건) 미리 말해야 한다 — "발행" 누르면 뭐가 나가는지
+            모른 채 누르게 두지 않는다(§4-1 partialSuccess의 「이어서 발행」과 같은 원칙). */}
+        {isThreadPartialFailure && threadResumeFromSeq !== undefined ? (
+          <p className="text-xs text-muted-foreground" data-testid="channel-post-thread-continue-hint">
+            {t('channelPostsThreadContinueHint', { fromSeq: threadResumeFromSeq, remaining: threadRemainingCount })}
           </p>
         ) : null}
         {/* B4(페드루 PO) — canPublish는 참인데 command_status가 pending/blocked라 막힌

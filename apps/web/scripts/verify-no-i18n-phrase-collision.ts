@@ -604,6 +604,17 @@ export const EXEMPT_PAIRS = new Set<string>([
   // 근거로 헷갈릴 자리가 아니다.
   'content.channelPostsThreadStatusComplete <-> content.publishCta',
   'content.channelPostsThreadStatusPartial <-> content.publishCta',
+  // story #3808(PR5b-2 CHANGES, 2026-09-12 07:08Z) — channelPostsThreadContinueHint
+  // ("{fromSeq}번째부터 나머지 {remaining}건을 이어서 발행합니다.", 스레드 부분 실패
+  // 재개 안내)가 channelPostsPublishContinueCta("이어서 발행", Threads 컨테이너
+  // partialSuccess 전용 버튼 라벨)를 부분문자열로 포함한다. 두 문구는 서로 다른
+  // 채널 클래스의 서로 다른 축(partialSuccess=publicationStatus==='container_created'
+  // vs isThreadPartialFailure=X 스레드 thread_segments 미완주)이라 같은 draft에서
+  // 동시에 서지 않는다 — apiUsageBudgetLimitLabel<->Suspended와 같은 상호배타 근거.
+  'content.channelPostsPublishContinueCta <-> content.channelPostsThreadContinueHint',
+  // publishCta("발행")와는 "저장" 쌍(contentRules.saveAction<->versionConflictField
+  // WithName)과 같은 이유로 안 겹친다 — 동사형 버튼 vs 재개 안내 서술문.
+  'content.channelPostsThreadContinueHint <-> content.publishCta',
 ]);
 
 // ⛔⭐오르테가군 지적(2026-07-31) — 이 목록에 «새로» 넣는 것은 PO 승인을 거친다. 이유 없이

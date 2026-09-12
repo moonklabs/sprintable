@@ -2432,6 +2432,7 @@
     "channelPostsThreadContinuePublishCta": "나머지 이어서 발행",
     "channelPostsThreadStatusPartial": "스레드 {total}건 중 {published}건 발행 · {failedSeq}번째 실패",
     "channelPostsThreadStatusComplete": "스레드 {total}건 중 {published}건 발행",
+    "channelPostsThreadContinueHint": "{fromSeq}번째부터 나머지 {remaining}건을 이어서 발행합니다.",
     "channelThreads": "Threads",
     "channelLabelHostedSite": "Sprintable 블로그",
     "channelLabelWordpress": "WordPress",
