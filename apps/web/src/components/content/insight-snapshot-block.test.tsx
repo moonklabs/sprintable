@@ -28,9 +28,9 @@ function wrap(node: React.ReactNode) {
   return <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="UTC">{node}</NextIntlClientProvider>;
 }
 
-async function render(snapshots: InsightSnapshot[], publicationId?: string | null) {
+async function render(snapshots: InsightSnapshot[], publicationId?: string | null, channel?: string | null) {
   await act(async () => {
-    root.render(wrap(<InsightSnapshotBlock snapshots={snapshots} orgTimezone="UTC" locale="ko" publicationId={publicationId} />));
+    root.render(wrap(<InsightSnapshotBlock snapshots={snapshots} orgTimezone="UTC" locale="ko" publicationId={publicationId} channel={channel} />));
   });
 }
 
@@ -52,9 +52,38 @@ function capturedSnapshot(overrides: Partial<InsightSnapshot> = {}): InsightSnap
 const METRIC_KEYS = ['impressions', 'reach', 'views', 'engagements', 'clicks', 'spend', 'conversions'] as const;
 
 describe('InsightSnapshotBlock — story #3499(게시물 성과 표면 1차)', () => {
-  it('빈 배열 — 아무것도 안 그린다', async () => {
+  it('빈 배열(channel 부재) — 아무것도 안 그린다', async () => {
     await render([]);
     expect(container.textContent).toBe('');
+  });
+
+  // story #3816(페드루 PO 지적 2026-09-12, 배포 81 유나 적기만 ①) — BE가 이제
+  // 선언 0 채널(ghost·ghost_sandbox·wordpress·webhook)엔 애초에 pending 행을 안
+  // 만든다(schedule 단계 가드) — 빈 배열이 "아직 모른다"가 아니라 "이 채널은
+  // 수집 대상이 아니다"라는 확定 사실이 됐다. 최대 7일 「스냅샷 예정」 거짓 약속
+  // 대신 즉시 정직한 문장을 낸다(unsupported 행과 같은 문장, 새 낱말 0).
+  describe('빈 배열 + channel — story #3816 정직한 문장 분기', () => {
+    it('선언 0 채널(ghost_sandbox) — 「이 채널은 성과를 제공하지 않습니다」를 즉시 낸다', async () => {
+      await render([], 'pub-1', 'ghost_sandbox');
+      expect(container.querySelector('[data-testid="insight-snapshot-not-a-target"]')?.textContent)
+        .toBe(koMessages.content.insightSnapshotUnsupported);
+    });
+
+    it('선언 0 채널(wordpress) — 동일 문장(ghost류와 새 낱말 0, 같은 축)', async () => {
+      await render([], 'pub-2', 'wordpress');
+      expect(container.querySelector('[data-testid="insight-snapshot-not-a-target"]')?.textContent)
+        .toBe(koMessages.content.insightSnapshotUnsupported);
+    });
+
+    it('⭐양성대조 — 선언 有 채널(threads)은 빈 배열이면 그대로 아무것도 안 그린다(회귀 0)', async () => {
+      await render([], 'pub-3', 'threads');
+      expect(container.textContent).toBe('');
+    });
+
+    it('⭐양성대조 — 모르는 channel 값은 지어내지 않고 아무것도 안 그린다(기존 그대로)', async () => {
+      await render([], 'pub-4', 'some_future_channel');
+      expect(container.textContent).toBe('');
+    });
   });
 
   // 3497의 척추 — null(미제공) vs 0(실측 0)을 절대 같은 얼굴로 그리지 않는다.

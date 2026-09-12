@@ -652,13 +652,81 @@ async def test_hosted_site_clicks_sums_utm_daily_by_path_ignoring_dimension_valu
 
 
 @pytest.mark.anyio
-async def test_unsupported_channel_marks_immediately_with_zero_adapter_calls(monkeypatch):
-    """카디르 QA③ — `raw_payload is None`만으로는 "안 불렀다"를 증명 못 한다(정규화
-    실패로 raw만 남고 normalized가 비었을 경우도 같은 모양이 된다). `_fetch_for_snapshot`
-    자체를 spy로 감싸 실제 호출 횟수를 잰다 — 양성대조(sandbox=1회 호출)를 같은
-    tick 안에 같이 둬서 "이 spy가 원래 호출을 관측할 수는 있다"는 것도 함께 증명한다."""
+async def test_declared_zero_channel_schedules_no_pending_rows_at_all(monkeypatch):
+    """story #3816(페드루 PO 지적 2026-09-12, 배포 81 유나 적기만 ①) — 예전엔 여기서
+    pending 2행을 무조건 열어 due_at(+1d/+7d) 도래 前까지 화면이 「스냅샷 예정」이라는
+    거짓 약속을 최대 7일 냈다(어댑터가 정적으로 선언 0이라 결과가 애초에 100% 확定
+    — 기다릴 이유가 없다). 처방: `schedule_insight_snapshots` 자체가 이런 채널은
+    행을 아예 안 만든다 — due_at이 아직 미래(worker tick 자체가 안 도는 시점)인
+    anchor로 확인해야 "예정 창"이 통째로 사라졌음을 증명한다(옛 테스트는 anchor를
+    8일 전으로 당겨 worker가 즉시 처리하는 경로만 쟀다 — 그 경로는 스케줄 단계
+    자체를 검증 못 한다)."""
     from app.models.insight_snapshot import InsightSnapshot
-    from app.services.insight_snapshots import process_due_insight_snapshots, schedule_insight_snapshots
+    from app.services.insight_snapshots import schedule_insight_snapshots
+    from sqlalchemy import select
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, _project_id = await _seed_org(s)
+            work_item_id = uuid.uuid4()
+            publication_id = uuid.uuid4()
+            anchor = datetime.now(timezone.utc)  # 방금 발행 — due_at은 미래(+1d/+7d).
+
+            await schedule_insight_snapshots(
+                s, org_id=org_id, work_item_id=work_item_id, publication_id=publication_id,
+                publication_kind="channel_publication", channel="wordpress", external_id="post-9",
+                anchor_at=anchor,
+            )
+            await s.commit()
+
+            rows = (await s.execute(
+                select(InsightSnapshot).where(InsightSnapshot.publication_id == publication_id)
+            )).scalars().all()
+            assert rows == [], f"선언 0 채널(wordpress)인데 pending 행이 {len(rows)}개 생겼다 — 예정 창 재발"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_declared_channel_still_schedules_two_pending_rows_no_regression(monkeypatch):
+    """위 가드가 선언 有 채널(sandbox)까지 걸러버리면 안 된다(회귀 0 양성대조,
+    schedule 단계에서 직접 잰다 — 옛 테스트의 sandbox 대조 역할 계승)."""
+    from app.models.insight_snapshot import InsightSnapshot
+    from app.services.insight_snapshots import schedule_insight_snapshots
+    from sqlalchemy import select
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, _ = await _seed_org(s)
+            work_item_id = uuid.uuid4()
+            publication_id = uuid.uuid4()
+            anchor = datetime.now(timezone.utc)
+
+            await schedule_insight_snapshots(
+                s, org_id=org_id, work_item_id=work_item_id, publication_id=publication_id,
+                publication_kind="site_post", channel="sandbox", external_id=None, anchor_at=anchor,
+            )
+            await s.commit()
+
+            rows = (await s.execute(
+                select(InsightSnapshot).where(InsightSnapshot.publication_id == publication_id)
+            )).scalars().all()
+            assert len(rows) == 2, f"선언 有 채널(sandbox)인데 pending 행이 {len(rows)}개(2 기대) — 회귀"
+            assert all(r.status == "pending" for r in rows)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_stray_legacy_pending_row_for_declared_zero_channel_still_resolves_unsupported(monkeypatch):
+    """story #3816 — 이 PR 착지 前에 이미 만들어진 옛 pending 행(선언 0 채널)의
+    처분은 이 PR 스코프 밖(적기만)이나, 그런 행이 due_at을 맞으면 워커가 여전히
+    안전하게(adapter 호출 0회) 'unsupported'로 종결시켜야 한다 — 스케줄 단계
+    가드가 워커 단계의 기존 방어를 지우지 않았음을 확認(카디르 QA③ spy 계승)."""
+    from app.models.insight_snapshot import InsightSnapshot
+    from app.services.insight_snapshots import process_due_insight_snapshots
     import app.services.insight_snapshots as insight_module
     from sqlalchemy import select
 
@@ -674,34 +742,30 @@ async def test_unsupported_channel_marks_immediately_with_zero_adapter_calls(mon
     engine, Session = await _session_factory()
     try:
         async with Session() as s:
-            org_id, project_id = await _seed_org(s)
+            org_id, _ = await _seed_org(s)
             work_item_id = uuid.uuid4()
-            unsupported_publication_id = uuid.uuid4()
-            supported_publication_id = uuid.uuid4()
-            anchor = datetime.now(timezone.utc) - timedelta(days=8)
+            publication_id = uuid.uuid4()
+            due_at = datetime.now(timezone.utc) - timedelta(days=1)
 
-            await schedule_insight_snapshots(
-                s, org_id=org_id, work_item_id=work_item_id, publication_id=unsupported_publication_id,
-                publication_kind="channel_publication", channel="wordpress", external_id="post-9",
-                anchor_at=anchor,
-            )
-            await schedule_insight_snapshots(
-                s, org_id=org_id, work_item_id=work_item_id, publication_id=supported_publication_id,
-                publication_kind="site_post", channel="sandbox", external_id=None, anchor_at=anchor,
-            )
+            # schedule_insight_snapshots를 거치지 않고 직접 삽입 — "이 PR 착지 前에
+            # 이미 있던 옛 행"을 흉내(그 함수는 이제 이 채널에 대해 행을 안 만드므로).
+            s.add(InsightSnapshot(
+                id=uuid.uuid4(), org_id=org_id, work_item_id=work_item_id,
+                publication_id=publication_id, publication_kind="channel_publication",
+                channel="wordpress", external_id="legacy-post-1", due_at=due_at,
+                status="pending",
+            ))
             await s.commit()
 
             counts = await process_due_insight_snapshots(s)
-            assert counts["unsupported"] == 2, counts  # +1d·+7d 둘 다 이미 도래.
-            assert counts["captured"] == 2
+            assert counts["unsupported"] == 1, counts
 
             assert call_log.count("wordpress") == 0, (
                 f"미지원 채널인데 adapter fetch가 {call_log.count('wordpress')}회 호출됐다(spy 실측)"
             )
-            assert call_log.count("sandbox") == 2, "양성대조(sandbox)가 spy에 안 잡혔다 — spy 배선 자체가 무효"
 
             rows = (await s.execute(
-                select(InsightSnapshot).where(InsightSnapshot.publication_id == unsupported_publication_id)
+                select(InsightSnapshot).where(InsightSnapshot.publication_id == publication_id)
             )).scalars().all()
             assert all(r.status == "unsupported" for r in rows)
             assert all(r.raw_payload is None for r in rows), "미지원인데 adapter가 호출된 흔적(raw_payload)이 남았다"

@@ -1352,7 +1352,10 @@ export default function ContentPostEditPage() {
           #3844 조각4 의존) 그린다. hosted_site·외부 어느 목적지든 같은 컴포넌트(값
           조립·판정은 InsightSnapshotBlock 하나에만 있다 — 두 벌 안 만든다, PO 確定). */}
       {insightPublicationId ? (
-        <InsightSnapshotBlock snapshots={insightSnapshots} orgTimezone={displayTimezone} locale={locale} />
+        <InsightSnapshotBlock
+          snapshots={insightSnapshots} orgTimezone={displayTimezone} locale={locale}
+          channel={publication?.destination}
+        />
       ) : null}
 
       {/* story 15e481ce(#3453 AC1) — 「Threads 변형 만들기」. 활성 연결이 0건이면 이

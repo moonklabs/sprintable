@@ -2496,7 +2496,7 @@ export default function ChannelPostEditPage() {
           {/* story #3499(Phase2·FE) — publication_id 있을 때만(BE #3844 조각4 의존). */}
           <InsightSnapshotBlock
             snapshots={insightSnapshots} orgTimezone={displayTimezone} locale={locale}
-            publicationId={draft.publication_id}
+            publicationId={draft.publication_id} channel={draft.channel}
           />
           {/* story #3806(Phase3·3-2 PR5, 유나 §절 §1) — 「홍보」 요청 트리거. */}
           {orgId ? (

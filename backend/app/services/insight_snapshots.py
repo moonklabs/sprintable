@@ -86,7 +86,30 @@ async def schedule_insight_snapshots(
     아닌 사이클)에 걸린 pending/in_progress 행을 superseded로 회수한다 — captured/
     failed/unsupported는 이력이라 손대지 않는다(#3651 MCP superseded_snapshots가 그
     구분을 이미 전제한다). 같은 anchor 재처리(due_at이 이번 anchor와 일치)는 이
-    UPDATE의 WHERE에 안 걸려 무변(2행 그대로 — 페드루 決定① 회귀 보존)."""
+    UPDATE의 WHERE에 안 걸려 무변(2행 그대로 — 페드루 決定① 회귀 보존).
+
+    story #3816(Phase3·3-6, 페드루 PO 지적 2026-09-12 — 배포 81 라이브 회차 유나
+    적기만 ①) — 채널이 `insight_metrics`를 선언 안 했으면(빈 튜플: ghost·
+    ghost_sandbox·wordpress·webhook — 그라운딩 실측 확認) 예약 자체를 만들지
+    않는다. 예전엔 여기서 무조건 pending 2행을 열어(+1d/+7d) `process_due_
+    insight_snapshots`가 due_at 도래 시에야 'unsupported'로 종결했다 — 그 사이
+    최대 7일간 화면(InsightSnapshotBlock)이 「스냅샷 예정 · {날짜}」를 보여
+    "언젠가 값이 찬다"는 거짓 약속을 했다(4227의 "선언 안 한 지표는 행 자체를
+    안 그린다" 정신과 정면 배치). 결과가 애초에 100% 확定(어댑터가 정적으로
+    선언한 사실이라 시간이 지나도 안 바뀐다)이므로 기다릴 이유가 없다 —
+    스케줄 단계에서 막는다(워커 단계 처리는 그대로 두어 이미 떠 있는 옛 pending
+    행은 기존 로직대로 자연 종결되게 둔다, 처분은 이 PR 스코프 밖 — 적기만).
+    부수 효과(추가 코드 0) — meta_ads/ads_sandbox도 같은 이유(빈 선언)로 이
+    함수가 만드는 organic pending 행이 걸러진다. 이 두 채널은 `ads_spend_
+    snapshots.py`가 완전히 별도 스케줄(자체 INSERT)로 캡처를 관리해(그 파일
+    docstring 확認) 여기서 만든 행이 애초에 죽은 행이었다 — 회귀가 아니라
+    같은 클래스의 부수적 정리."""
+    from app.services.channel_adapters import get_channel_adapter
+
+    adapter = get_channel_adapter(channel)
+    if adapter is None or not adapter.insight_metrics:
+        return
+
     new_due_ats = [anchor_at + offset for offset in _SNAPSHOT_OFFSETS]
     for due_at in new_due_ats:
         stmt = pg_insert(InsightSnapshot).values(
