@@ -69,6 +69,20 @@ export function ChannelPostCard({ item, displayTimezone }: ChannelPostCardProps)
           <Button>을 그대로 두면 인터랙티브 요소가 중첩된다(a>button). compact로 라벨만
           받는다 — 재시도는 카드를 눌러 상세로 들어간 다음에 한다. */}
       {failureAction ? <FailureActionBadge action={failureAction} displayTimezone={displayTimezone} compact /> : null}
+      {/* story #3813(Phase3·3-4 PR4, 페드루 PO 確定 2026-09-12) — 뉴스레터 채널만 이
+          객체를 받는다(discriminator=BE의 channel 판별, content_kind류 신규 필드 0).
+          subject 우선(제목이 사람이 알아보는 값), 세그먼트는 미확定이면 기존 어휘
+          「미확인」(channelPostsCharLimitUnknown과 동형 낱말) 그대로 — 지어내지 않는다. */}
+      {item.newsletter ? (
+        <p className="truncate text-muted-foreground" data-testid="channel-post-calendar-card-newsletter">
+          <span className="mr-1 rounded bg-muted px-1 py-0.5 text-[10px] font-medium text-foreground">
+            {t('channelPostsNewsletterBadge')}
+          </span>
+          {item.newsletter.subject ?? t('channelPostsNewsletterSubjectUnknown')}
+          {' · '}
+          {item.newsletter.segment_name ?? t('channelPostsNewsletterSegmentUnknown')}
+        </p>
+      ) : null}
       {item.text_preview ? (
         <p className="truncate text-foreground" data-testid="channel-post-calendar-card-preview">{item.text_preview}</p>
       ) : null}

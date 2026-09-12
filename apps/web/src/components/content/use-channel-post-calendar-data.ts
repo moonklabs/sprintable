@@ -34,6 +34,10 @@ export interface ChannelPostCalendarItem {
   // 같은 어휘. source_content_item_id 없으면(정상값) 카드가 이 줄 자체를 안 그린다.
   source_content_item_id?: string | null;
   source_title?: string | null;
+  // story #3813(Phase3·3-4 PR4, 페드루 PO 確定 2026-09-12) — 뉴스레터 채널(stibee·
+  // stibee_sandbox)만 채워진다(그 외 채널은 null — BE ChannelPostDraftListItem.
+  // newsletter와 동형 discriminator, content_kind류 신규 필드 0).
+  newsletter?: { subject: string | null; segment_name: string | null; send_scheduled_at: string | null } | null;
 }
 
 export interface ChannelPostCalendarData {

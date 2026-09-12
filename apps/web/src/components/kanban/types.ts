@@ -155,6 +155,13 @@ export interface GateItem {
   sealed_ads_ends_at?: string | null;
   sealed_ads_objective?: string | null;
   sealed_ads_connection_id?: string | null;
+  // story #3813(Phase3·3-4 PR4, 페드루 PO 確定 2026-09-12) — newsletter_send 전용
+  // sealing. sealed_ads_*와 동일 선례(다른 gate_type은 전부 undefined/null).
+  sealed_newsletter_segment_name?: string | null;
+  sealed_newsletter_scheduled_at?: string | null;
+  // Gate ORM 컬럼 아님 — get_gate_endpoint가 newsletter_send 게이트 상세에서만
+  // 어댑터 수준 조회(describe_segment)로 채운다. 실 stibee·조회 실패는 null.
+  estimated_recipient_count?: number | null;
 }
 
 // story #2054: 결재함 통합 인박스에서 HitlRequest(gate_approval park) 항목 최소 스키마(BE

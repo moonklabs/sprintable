@@ -152,6 +152,17 @@ export default function GateDetailPage() {
   // 이건 BE(neutral_facts에 config diff 임베드) 또는 신규 FE 뷰어가 필요한 더 큰 스코프 —
   // 페드루군에 사이징 보고.
   const isLoopDecisionGate = gate?.gate_type === 'loop_decision';
+  // story #3813(Phase3·3-4 PR4, 페드루 PO 確定 2026-09-12) — 「발행」(ESP 캠페인 생성)과
+  // 「발송」이 같은 승인 버튼을 공유하면 두 서로 다른 행위가 같은 낱말("승인")로 뭉개진다.
+  // newsletter_send 게이트=「발송 승인」, 뉴스레터 채널의 external_publish 게이트=「캠페인
+  // 만들기」(sealed_destination_channel로 판별 — 게이트 자체엔 채널 필드가 없다), 그 외는
+  // 기존 그대로 「승인」.
+  const approveButtonLabelKey =
+    gate?.gate_type === 'newsletter_send' ? 'gateApproveNewsletterSend'
+    : gate?.gate_type === 'external_publish' &&
+      (gate?.sealed_destination_channel === 'stibee' || gate?.sealed_destination_channel === 'stibee_sandbox')
+      ? 'gateApproveCampaign'
+    : 'gateApprove';
   const targetLink = isDocGate && gate?.work_item_summary?.slug
     ? { href: `/docs/${gate.work_item_summary.slug}`, labelKey: 'gateDetailViewTargetDoc' as const }
     : isCanonicalizeGate && gate?.work_item_id
@@ -488,7 +499,7 @@ export default function GateDetailPage() {
                         onClick={() => void transition('approved', requiresOptionChoice ? t('decisionSelectedNote', { option: selectedOption ?? '' }) : undefined)}
                       >
                         <CheckCircle className="size-4" />
-                        {resolving ? '...' : t('gateApprove')}
+                        {resolving ? '...' : t(approveButtonLabelKey)}
                       </Button>
                     </div>
                     {requiresOptionChoice && !selectedOption ? (

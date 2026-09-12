@@ -158,6 +158,30 @@ describe('GateDetailPage — can_approve 게이팅 (story #2091)', () => {
   });
 });
 
+// story #3813(Phase3·3-4 PR4, 페드루 PO 確定 2026-09-12) — 「발행」(ESP 캠페인 생성)과
+// 「발송」이 같은 승인 버튼을 공유하면 두 다른 행위가 같은 낱말("승인")로 뭉개진다.
+describe('GateDetailPage — 뉴스레터 승인 버튼 낱말 분리 (story #3813 PR4)', () => {
+  it('gate_type=newsletter_send이면 「발송 승인」으로 뜬다(기본 「승인」 아님)', async () => {
+    await mount(gate({ can_approve: true, gate_type: 'newsletter_send' }));
+    const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.gateApproveNewsletterSend))).toBe(true);
+    expect(buttons.some((t) => t === koMessages.cage.gateApprove)).toBe(false);
+  });
+
+  it('gate_type=external_publish + sealed_destination_channel=stibee_sandbox면 「캠페인 만들기」로 뜬다', async () => {
+    await mount(gate({ can_approve: true, gate_type: 'external_publish', sealed_destination_channel: 'stibee_sandbox' }));
+    const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.gateApproveCampaign))).toBe(true);
+  });
+
+  it('gate_type=external_publish + sealed_destination_channel=threads(뉴스레터 아님)면 기존 「승인」 그대로', async () => {
+    await mount(gate({ can_approve: true, gate_type: 'external_publish', sealed_destination_channel: 'threads' }));
+    const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(true);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.gateApproveCampaign))).toBe(false);
+  });
+});
+
 // story #2500 — `body.detail`은 실 envelope({data,error,meta})에 없는 필드라 이 분기는
 // 항상 죽어있었다(그라운딩 확認) — #2027의 "고위험 승인 사유 필수" 서버 거부 문구가 한 번도
 // 실제로 화면에 뜬 적 없이 항상 "HTTP 422"만 보였다. error.message로 교정.

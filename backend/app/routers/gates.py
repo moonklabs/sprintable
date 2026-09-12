@@ -266,6 +266,19 @@ class GateResponse(BaseModel):
     sealed_ads_ends_at: datetime | None = None
     sealed_ads_objective: str | None = None
     sealed_ads_connection_id: uuid.UUID | None = None
+    # story #3813(Phase3·3-4 PR4, 3자기점검 — PR2가 Gate ORM 컬럼(models/gate.py:204-205)만
+    # 추가하고 이 응답 스키마 등재를 빠뜨려 API가 항상 None을 냈다, sealed_ads_* PR2 재발
+    # 클래스와 동형) — newsletter_send 전용 sealing. Gate ORM 컬럼명과 일치라
+    # from_attributes로 자동 채워짐(다른 gate_type은 전부 None).
+    sealed_newsletter_segment_name: str | None = None
+    sealed_newsletter_scheduled_at: datetime | None = None
+    # story #3813(Phase3·3-4 PR4, 페드루 PO 確定 2026-09-12) — 승인 카드 전용 계산값
+    # (Gate ORM 컬럼 아님·봉인 안 함, 수신자는 ESP 소유라 우리가 얼리면 드리프트).
+    # get_gate_endpoint가 gate_type=="newsletter_send"일 때만 어댑터 수준 조회
+    # (describe_segment)로 채운다 — 실 stibee는 미구현이라 None(「미확인」), sandbox는
+    # 고정 4,200. 조회 실패는 카드 전체를 죽이지 않고 이 필드만 None(fail-closed,
+    # warning 로그 — get_gate_endpoint 본문 참고).
+    estimated_recipient_count: int | None = None
     reapproval_required: bool = False
     created_at: datetime
     updated_at: datetime
@@ -1401,6 +1414,29 @@ async def get_gate_endpoint(
                 _SealedDoc.id == gate.sealed_doc_id, _SealedDoc.org_id == org_id, _SealedDoc.deleted_at.is_(None),
             )
         )).scalar_one_or_none()
+    # story #3813(Phase3·3-4 PR4, 페드루 PO 確定 2026-09-12) — newsletter_send 게이트
+    # 승인 카드 전용 「예상 수신수」. 사람이 「이 세그먼트 N명에게 발송」을 보고 승인하는
+    # 것이 이 카드의 존재 이유라 발송 前(승인 시점) 값이 필요 — 조회 실패가 카드 전체를
+    # 죽이면 안 되니 개별 try/except로 격리(fail-closed, None만 두고 계속).
+    if gate.gate_type == "newsletter_send":
+        try:
+            from app.models.channel_connection import ChannelConnection
+            from app.models.channel_publication import ChannelPublication
+
+            publication = (await session.execute(
+                select(ChannelPublication).where(ChannelPublication.id == uuid.UUID(gate.scope_key))
+            )).scalar_one_or_none()
+            conn = (await session.execute(
+                select(ChannelConnection).where(ChannelConnection.id == publication.connection_id)
+            )).scalar_one_or_none() if publication is not None else None
+            if conn is not None and conn.channel == "stibee_sandbox":
+                from app.services.stibee_sandbox_campaign import describe_segment
+                resp.estimated_recipient_count = await describe_segment(
+                    segment_name=gate.sealed_newsletter_segment_name or "",
+                )
+            # 실 "stibee"(미구현)·연결/발행물 소실 등은 조용히 None 그대로(위 필드 docstring).
+        except Exception:  # noqa: BLE001 — 카드 조회 자체를 이 계산값 실패로 죽이지 않는다.
+            logger.warning("newsletter_send estimated_recipient_count 조회 실패(비중단) org=%s gate=%s", org_id, id, exc_info=True)
     # story #2815(§5-④): merge 게이트만 의미 있음(다른 gate_type은 PR/repo 개념 자체가 없음).
     if gate.gate_type == MERGE_GATE_TYPE:
         _link = await resolve_pr_link(session, org_id, gate.work_item_id)
