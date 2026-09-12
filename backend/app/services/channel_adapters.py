@@ -567,6 +567,39 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         max_text_length=280,
         thread_max_segments=10,
     ),
+    # story #3815(Phase3·3-5 PR1, 페드루 PO 確定 2026-09-12) — YouTube 첫 출시.
+    # PR1은 OAuth 연결만 연다(발행·업로드는 PR2, 인사이트는 후속 — insight_metrics
+    # 미선언 기본값 그대로, story #3696 가드가 요구하는 "선언=dispatch 존재" 계약을
+    # 어길 자리 자체가 없다). refresh_mode="refresh_token" 재사용은 youtube_oauth.py
+    # 상단 딱지 참고(Google은 회전하지 않지만 기존 3튜플 dispatch 계약을 그대로
+    # 만족시킨다 — 새 refresh_mode 값 발명 0). image_*/video_*/max_text_length 등
+    # 콘텐츠 필드는 PR2가 resumable 업로드를 열 때 채운다(ads_sandbox PR1과 동형
+    # 판단 — 아직 없는 능력을 미리 선언하지 않는다).
+    "youtube": ChannelAdapterConfig(
+        authorize_url="https://accounts.google.com/o/oauth2/v2/auth",
+        token_url="https://oauth2.googleapis.com/token",
+        # ⚠️미확認 — 정확한 스코프 문자열은 실 GCP 프로젝트 등록 시 재확認 대상
+        # (지식 컷오프 기준 안정적으로 공개된 두 스코프 이름 그대로).
+        scope="https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly",
+        refresh_mode="refresh_token",
+        credential_kind="oauth",
+        display_name="YouTube",
+        kind="social",
+        requires_connection=True,
+    ),
+    "youtube_sandbox": ChannelAdapterConfig(
+        authorize_url="https://accounts.google.com/o/oauth2/v2/auth",
+        token_url="https://oauth2.googleapis.com/token",
+        scope="https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly",
+        refresh_mode="refresh_token",
+        # x_sandbox와 동형 이유 — 결정적 가짜 토큰을 문자열로 나르므로
+        # credential_kind="none"이 아니라 진짜 authorize→callback 라우터를 태운다
+        # (youtube_sandbox_oauth.py가 Google 호출부만 페이크로 스왑).
+        credential_kind="oauth",
+        display_name="YouTube Sandbox",
+        kind="social",
+        requires_connection=True,
+    ),
 }
 
 # story 5b27b32f(Phase1·BE·테스트 인프라, 페드루 PO 확定 2026-09-04) — dev 전용 샌드박스

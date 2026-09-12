@@ -27,7 +27,7 @@ loud로 여겼으나 실은 **fails-silent 구멍**이었다: `find_drift`가 `b
 채널의 선언 형태를 못 읽는 형태로 바뀜) 그 채널이 backend dict에 아예 없어 **비교 자체를
 건너뛰고 조용히 green**이 났다 — 그 채널이 실제로 드리프트해도 파서가 못 보는 한 영원히
 못 잡는다. `_assert_extraction_complete`가 이 구멍을 막는다: 파서가 뽑은 채널 집합이
-`EXPECTED_BACKEND_CHANNELS`(9개, 아래) 전부를 커버하는지 매 호출마다 확認하고, 하나라도
+`EXPECTED_BACKEND_CHANNELS`(17개, 아래) 전부를 커버하는지 매 호출마다 확認하고, 하나라도
 빠지면 "채널 N개 중 M개만 봄=파싱 실패"로 즉시 예외(fail-loud) — fails-silent를
 fails-closed로 바꾼다.
 """
@@ -51,8 +51,9 @@ _CHANNEL_BLOCK_START_RE = re.compile(
 )
 
 
-# channel_adapters.py에 실제로 등록된 채널 9개(2026-09-08 실측 — grep으로 재확認 가능:
-# `grep -c 'ChannelAdapterConfig(' backend/app/services/channel_adapters.py`). 이 집합
+# channel_adapters.py에 실제로 등록된 채널 17개(2026-09-12 실측, story #3815 PR1
+# 갱신 — grep으로 재확認 가능: `grep -c 'ChannelAdapterConfig(' backend/app/services/
+# channel_adapters.py`). 이 집합
 # 자체가 바뀌면(새 채널 추가·기존 채널 삭제) 여기도 같이 고쳐야 한다 — 그 자체가
 # "채널 목록이 바뀌었다"는 사실을 코드로 드러내는 지점이다(조용히 안 넘어간다).
 EXPECTED_BACKEND_CHANNELS = frozenset({
@@ -72,6 +73,11 @@ EXPECTED_BACKEND_CHANNELS = frozenset({
     # (opens/delivered/clicks) 캡처 배선은 후속 PR3 몫. x/x_sandbox와 동형으로 drift
     # 0(신규 FE 등재 불요, PR3에서 stibee_sandbox만 채움).
     "stibee", "stibee_sandbox",
+    # story #3815(Phase3·3-5 PR1, 페드루 PO 確定 2026-09-12) — youtube/youtube_
+    # sandbox도 같은 이유로 이 PR 시점엔 insight_metrics 미선언(빈 튜플 기본값)
+    # — 통계 수집(views/likeCount+commentCount→engagements) 배선은 후속 PR
+    # 몫. x/stibee와 동형으로 drift 0(신규 FE 등재 불요).
+    "youtube", "youtube_sandbox",
 })
 
 
@@ -138,9 +144,9 @@ def find_drift(
     순회한다(BE가 정본이라 BE에 새 채널이 생기면 FE가 그걸 안 따라온 것도 이 순회가
     자동으로 잡는다). 비교 前 _assert_extraction_complete가 파서 자체의 완전성부터
     확認한다(fails-silent 백스톱, 카디르 QA) — expected_channels는 실물 호출(main())
-    에선 EXPECTED_BACKEND_CHANNELS(9개) 기본값을 쓰고, 합성 fixture 테스트는 그 fixture가
-    실제로 선언한 채널 집합을 넘겨 좁힌다(9개 전부를 요구하면 모든 합성 테스트가 매번
-    9채널을 다 적어야 해 테스트 자체가 무거워진다)."""
+    에선 EXPECTED_BACKEND_CHANNELS(17개) 기본값을 쓰고, 합성 fixture 테스트는 그 fixture가
+    실제로 선언한 채널 집합을 넘겨 좁힌다(17개 전부를 요구하면 모든 합성 테스트가 매번
+    17채널을 다 적어야 해 테스트 자체가 무거워진다)."""
     backend = extract_backend_declared_metrics(backend_text)
     _assert_extraction_complete(backend, expected_channels)
     frontend = extract_frontend_declared_metrics(frontend_text)
