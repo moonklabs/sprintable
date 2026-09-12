@@ -88,6 +88,12 @@ export type SitePostApiErrorKind =
   // 다시 상신할 수 없다. draft_already_published와 안 섞는 이유는 같다 — 상태 충돌
   // (409)의 사유가 다르면 사람이 되돌릴 다음 행동도 다르다(발행 취소 vs 새 초안 생성).
   | 'draft_withdrawn'
+  // story #3815 PR4 후속(페드루 PO 決定 2026-09-12 14:37Z) — BE 미포착 예외
+  // (YouTube 메타데이터 필드 검증 실패)를 디디 소 PR이 라우터 422
+  // `YOUTUBE_METADATA_INVALID`(`{field, reason}`, i18n 완성 문구)로 닫는다.
+  // FE가 문장을 다시 짓지 않는다(YOUTUBE_QUOTA_EXCEEDED와 동형 — BE 완성 문구
+  // 그대로, labelKey 비움).
+  | 'validation'
   | 'unknown';
 
 export interface SitePostApiErrorInfo {
@@ -214,6 +220,11 @@ const KNOWN_ERRORS: Record<string, KnownError> = {
   // 문장을 짓지 않고 서버 message를 그대로 보인다). kind는 CHANNEL_RATE_LIMITED
   // 와 같은 축(일시적·재연결 0)을 재사용 — 그 kind가 이미 "잠시 뒤" 의미를 안다.
   YOUTUBE_QUOTA_EXCEEDED: { labelKey: '', kind: 'rate_limited' },
+  // story #3815 PR4 후속(페드루 PO 決定 2026-09-12 14:37Z) — 디디 소 PR이 라우터
+  // 422로 YouTube 메타데이터 필드 검증 실패를 이 코드로 닫는다(`{field, reason}`
+  // 부가·i18n 완성 문구). YOUTUBE_QUOTA_EXCEEDED와 동형 — labelKey 비움(서버
+  // message 그대로, FE가 문장을 다시 짓지 않는다).
+  YOUTUBE_METADATA_INVALID: { labelKey: '', kind: 'validation' },
   // story #3575(BE #3574, 페드루 PO 確定 2026-09-06) — 영상이 있는 초안에 커버를
   // 2장째 올리려 할 때의 서버 방어선(화면 상한 1이 정상 경로를 이미 막지만, 레이스
   // 등으로 도달 시 회귀 0). labelKey 빈칸 — 서버 message 그대로(3471 동형).
