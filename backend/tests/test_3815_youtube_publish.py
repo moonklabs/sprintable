@@ -127,8 +127,17 @@ def test_youtube_usage_exceeded_wording_matches_actual_utc_day_window_boundary()
     경계와 갈리면 안 된다. 경계를 UTC 자정에서 계산해 KST(UTC+9)로 환산한
     시(hour)가 9가 아니면 이 테스트가 RED — 그 시점이 이 카탈로그 문장도 같이
     고쳐야 한다는 신호다(문장 자체는 계산식과 무관한 리터럴이라 자동 동기화가
-    안 되므로, 이 pin이 유일한 안전망)."""
+    안 되므로, 이 pin이 유일한 안전망).
+
+    story #3815 CHANGES(페드루 PO 지적 2026-09-12 17:53Z) — FE `failure-action-
+    badge.tsx`의 `channelPostsFailureYoutubeQuotaExceeded`(ko/en)가 이 BE 정적
+    문구를 그대로 복제한다(dead_letter 배지용) — 같은 문장이 두 곳에 있으면
+    한쪽만 바뀌는 드리프트가 난다. 이 가드를 FE 두 키까지 넓혀 **byte-exact**
+    일치를 강제한다(경계 상수가 바뀌면 이 테스트가 먼저 잡고, 두 낱말이 갈리면
+    바로 다음 assert가 잡는다)."""
+    import json
     from datetime import timedelta
+    from pathlib import Path
 
     from app.services.i18n_catalog import t
     from app.services.youtube_quota import _utc_day_window
@@ -147,6 +156,22 @@ def test_youtube_usage_exceeded_wording_matches_actual_utc_day_window_boundary()
     en = t("channel_posts.youtube_usage_exceeded", "en")
     assert "오전 9시(한국 시간)" in ko
     assert "00:00 UTC" in en
+
+    repo_root = Path(__file__).resolve().parents[2]
+    fe_ko = json.loads((repo_root / "apps/web/messages/ko.json").read_text())
+    fe_en = json.loads((repo_root / "apps/web/messages/en.json").read_text())
+    fe_ko_quota = fe_ko["content"]["channelPostsFailureYoutubeQuotaExceeded"]
+    fe_en_quota = fe_en["content"]["channelPostsFailureYoutubeQuotaExceeded"]
+    assert fe_ko_quota == ko, (
+        f"apps/web/messages/ko.json의 content.channelPostsFailureYoutubeQuotaExceeded"
+        f"가 BE i18n_catalog 원문과 갈렸다 — 화면 쪽이 바뀌면 이 문구도 같이 바꿀 것"
+        f"\nFE: {fe_ko_quota!r}\nBE: {ko!r}"
+    )
+    assert fe_en_quota == en, (
+        f"apps/web/messages/en.json의 content.channelPostsFailureYoutubeQuotaExceeded"
+        f"가 BE i18n_catalog 원문과 갈렸다 — 화면 쪽이 바뀌면 이 문구도 같이 바꿀 것"
+        f"\nFE: {fe_en_quota!r}\nEN: {en!r}"
+    )
 
 
 @pytest.mark.anyio

@@ -4,6 +4,7 @@ import {
   CHANNEL_POST_DEAD_LETTER_REASON_MESSAGE_KEYS, CHANNEL_POST_VOID_REASON_MESSAGE_KEYS, type FailureAction,
 } from '@/components/content/failure-action';
 import { formatScheduledAt } from '@/components/content/schedule-format';
+import { useResetPassed } from '@/components/content/use-reset-passed';
 
 // story #3422 ②-c 2/N(doc §17-13) — 실패 5종 렌더 매핑. 버튼 유무표 그대로:
 //   blocked=버튼 없음(연결 고치기로) · needs_check=2단계(확認→재시도) ·
@@ -38,6 +39,10 @@ export interface FailureActionBadgeProps {
 
 export function FailureActionBadge({ action, onRetryClick, displayTimezone, compact, recheckGate }: FailureActionBadgeProps) {
   const t = useTranslations('content');
+  // story #3815 — dead_letter가 아닌 다른 kind에선 항상 null(훅은 조건 없이 매
+  // 렌더 호출돼야 하므로 이 자리에 둔다 — early return보다 위).
+  const reasonResetAt = action.kind === 'dead_letter' ? action.reasonResetAt : null;
+  const resetPassed = useResetPassed(reasonResetAt);
 
   if (action.kind === 'blocked') {
     return (
@@ -88,10 +93,10 @@ export function FailureActionBadge({ action, onRetryClick, displayTimezone, comp
     // 그대로(지어내지 않는다, voided의 "맵에 없으면 사유 없이" 규율과 동형).
     const deadLetterReasonKey = action.reasonCode
       ? CHANNEL_POST_DEAD_LETTER_REASON_MESSAGE_KEYS[action.reasonCode] : undefined;
-    // reset_at 기반 재시도 비활성도 코드-무관 — "언제 풀리는지 아는 사유"라면
-    // 그 시각 前엔 눌러도 100% 다시 실패할 게 확定이라 헛수고를 약속하지 않는다
-    // (어떤 reason_code든 reason_reset_at이 실리기만 하면 동일하게 적용).
-    const resetPassed = !action.reasonResetAt || Date.now() >= new Date(action.reasonResetAt).getTime();
+    // reset_at 기반 재시도 비활성(resetPassed, 위 useState/useEffect)도 코드-
+    // 무관 — "언제 풀리는지 아는 사유"라면 그 시각 前엔 눌러도 100% 다시 실패할
+    // 게 확定이라 헛수고를 약속하지 않는다(어떤 reason_code든 reason_reset_at이
+    // 실리기만 하면 동일하게 적용).
     // story #3402 갭(PO 채택 ㉡, 2026-09-10) — needsRecheck ∧ recheckGate면 문면·CTA
     // 라벨만 needs_check 것(채널 확認 관문)을 쓴다 — reason_code 표에 매치되는
     // 사유가 없을 때만(더 구체적인 사유가 있으면 그쪽이 이긴다). recheckGate=false
