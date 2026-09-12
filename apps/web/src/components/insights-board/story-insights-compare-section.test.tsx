@@ -59,7 +59,7 @@ const capturedBucket = (overrides: Partial<InsightSnapshotBucketView['normalized
   captured_at: '2026-09-08T00:00:00Z',
   normalized: {
     impressions: null, reach: null, views: 100, engagements: null, clicks: null, spend: null, conversions: null,
-    inflow_sessions: null, inflow_users: null,
+    inflow_sessions: null, inflow_users: null, opens: null, delivered: null,
     ...overrides,
   },
 });

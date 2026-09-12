@@ -2392,6 +2392,8 @@
     "insightMetricConversions": "Conversions",
     "insightMetricInflowSessions": "Traffic sessions",
     "insightMetricInflowUsers": "Traffic users",
+    "insightMetricOpens": "Opens",
+    "insightMetricDelivered": "Delivered",
     "insightMetricUnavailableDash": "—",
     "insightMetricUnavailableReason": "This channel doesn't provide this metric",
     "insightCapturedAtLabel": "Captured",

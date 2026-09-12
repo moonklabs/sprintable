@@ -1785,13 +1785,22 @@ async def publish_channel_post_draft(
     # story #3497 — 발행 성공 콜백. 즉시 발행·예약 발행(publication_command.py 워커)
     # 둘 다 이 함수 하나를 거치므로(그라운딩④, 3중 재검증 재구현 금지와 같은 이유로
     # 이미 공용) 여기 한 곳이 두 경로 모두를 커버한다.
-    from app.services.insight_snapshots import schedule_insight_snapshots
+    #
+    # story #3813(Phase3·3-4 PR3, 페드루 PO 確定 2026-09-12) — stibee/stibee_sandbox는
+    # 여기서 예약 안 함(자체 발견 — 이 지점은 「발행」=ESP 캠페인 생성 시각이지 「발송」
+    # 시각이 아니다, PO가 확定한 두 낱말 구분 그대로). 발행과 발송 사이에 시간차가
+    # 있으면(승인 대기·예약 발송 등) 이 앵커로 1d/7d를 예약해 발송 前에 opens/delivered
+    # 를 재려는 조용한 오차가 생긴다 — newsletter_send_execution.py가 발송 완료
+    # 시점에 같은 함수를 같은 모양으로 별도 호출한다(이 채널만 앵커를 옮긴 것,
+    # 새 예약 기전 발명 0).
+    if connection.channel not in ("stibee", "stibee_sandbox"):
+        from app.services.insight_snapshots import schedule_insight_snapshots
 
-    await schedule_insight_snapshots(
-        db, org_id=org_id, work_item_id=draft.work_item_id, publication_id=row.id,
-        publication_kind="channel_publication", channel=connection.channel,
-        external_id=row.external_id, anchor_at=row.published_at,
-    )
+        await schedule_insight_snapshots(
+            db, org_id=org_id, work_item_id=draft.work_item_id, publication_id=row.id,
+            publication_kind="channel_publication", channel=connection.channel,
+            external_id=row.external_id, anchor_at=row.published_at,
+        )
     # story #3516 — 댓글 수집 잡 등록(channel_publications 축만, hosted_site는 이
     # 스토리 범위 밖). 어댑터가 supports_fetch_replies를 안 선언했으면 워커가 즉시
     # unsupported로 끝낸다(insight_snapshots.py의 "빈 insight_metrics" 관례 그대로,

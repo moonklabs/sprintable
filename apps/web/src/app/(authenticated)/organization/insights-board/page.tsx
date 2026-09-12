@@ -26,7 +26,7 @@ import { FollowUpDialog } from '@/components/insights-board/follow-up-dialog';
 import { ReconcileResultLine } from '@/components/insights-board/reconcile-result-line';
 import { parseInsightsBoardApiError } from '@/components/insights-board/insights-board-error';
 import { ASSET_LABEL_PREFIX_LENGTH, aggregateGroupBucket, groupInsightsBoardRows, type InsightsBoardGroupBy } from '@/components/insights-board/group-rows';
-import { DEFAULT_METRIC, METRIC_KEYS, type BoardMetric, type Ga4ConnectionStatus, type InsightsBoardResponse, type InsightsBoardRow, type InsightsBoardWindow } from '@/components/insights-board/types';
+import { DEFAULT_METRIC, SELECTABLE_METRIC_KEYS, type BoardMetric, type Ga4ConnectionStatus, type InsightsBoardResponse, type InsightsBoardRow, type InsightsBoardWindow } from '@/components/insights-board/types';
 import { PublishingMetricsBand } from '@/components/content/publishing-metrics-band';
 import { OrgCostSummaryCard } from '@/components/insights-board/org-cost-summary-card';
 import { PaidSpendDailySeriesCard } from '@/components/insights-board/paid-spend-daily-series-card';
@@ -86,6 +86,13 @@ const METRIC_LABEL_KEYS: Record<BoardMetric, string> = {
   // 없던 개념이라 재사용원이 없다).
   inflow_sessions: 'insightMetricInflowSessions',
   inflow_users: 'insightMetricInflowUsers',
+  // story #3813(Phase3·3-4 PR3, 페드루 PO 確定 2026-09-12) — 라벨 키만 존재(카탈로그
+  // 값도 신설). 선택기 드롭다운은 SELECTABLE_METRIC_KEYS만 렌더해 이 두 키는 지금
+  // 화면에 노출되지 않는다(PR4가 선택기/카드에 실제로 열 몫) — 이 맵은
+  // `Record<BoardMetric, string>`(총합)이라 BoardMetric에 추가된 이상 여기도
+  // 채워야 tsc가 통과한다.
+  opens: 'insightMetricOpens',
+  delivered: 'insightMetricDelivered',
 };
 
 // insight-snapshot-block.tsx(story #3499)의 STATUS_LABEL_KEYS와 동일 관례 — content
@@ -134,7 +141,7 @@ export default function InsightsBoardPage() {
   const sortRoleParam = (searchParams.get('sort') as SortRole | null) ?? DEFAULT_SORT_ROLE;
   const sortDirParam = (searchParams.get('sort_dir') as SortDir | null) ?? DEFAULT_SORT_DIR;
   const rawMetricParam = searchParams.get('metric') as BoardMetric | null;
-  const metricParam: BoardMetric = rawMetricParam && METRIC_KEYS.includes(rawMetricParam) ? rawMetricParam : DEFAULT_METRIC;
+  const metricParam: BoardMetric = rawMetricParam && SELECTABLE_METRIC_KEYS.includes(rawMetricParam) ? rawMetricParam : DEFAULT_METRIC;
   // story #3617(유나 3600 AC2 기준선) — 채널 포스트 화면 「성과 보기」 링크가 이 발행의
   // publication_id를 실어 온다. 있는 강조/스크롤 메커니즘이 이 화면엔 없어서(그라운딩
   // 확認) 새로 짠다 — row가 이미 publication_id로 키가 나 있어(346행) 비용이 작다.
@@ -404,7 +411,7 @@ export default function InsightsBoardPage() {
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start">
             <DropdownMenuGroup>
-              {METRIC_KEYS.map((option) => (
+              {SELECTABLE_METRIC_KEYS.map((option) => (
                 <DropdownMenuItem
                   key={option}
                   onClick={() => updateQuery({ metric: option === DEFAULT_METRIC ? null : option })}
