@@ -1198,8 +1198,10 @@ async def _call_blog_module_publish(
             client, target_url=connection.account_id, secret=app_password, title=title, body_md=body_md,
             summary=summary, tags=tags, slug=slug, external_id=external_id,
         )
-    if channel == "ghost":
-        # story #3816(Phase3·3-6 PR2) — scheduled_at은 command.scheduled_at을
+    if channel in ("ghost", "ghost_sandbox"):
+        # story #3816(Phase3·3-6 PR2) — ghost_sandbox_publish.py는 ghost_publish.py와
+        # 같은 시그니처라(4호 구현체, CHANGES 1) kwargs 조립을 그대로 공유한다.
+        # scheduled_at은 command.scheduled_at을
         # 그대로 넘긴다. ⚠️site_post는 아직 scheduled_at 개념이 없어(그라운딩
         # 확認 — 모든 site_post 커맨드가 scheduled_at=None으로 생성된다, 위
         # publish_site_post_external_command 호출부 참고) 이 분기는 오늘 코드상
@@ -1226,7 +1228,7 @@ async def _call_blog_module_unpublish(module, client, *, channel: str, connectio
     if channel == "webhook":
         await module.unpublish(client, target_url=connection.account_id, secret=app_password, external_id=external_id)
         return
-    if channel == "ghost":
+    if channel in ("ghost", "ghost_sandbox"):
         await module.unpublish(
             client, site_url=connection.account_id, admin_api_key=app_password, external_id=external_id,
         )

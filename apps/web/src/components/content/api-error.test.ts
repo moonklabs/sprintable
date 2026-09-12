@@ -1,4 +1,6 @@
 import { describe, test, expect } from 'vitest';
+import koMessages from '../../../messages/ko.json';
+import enMessages from '../../../messages/en.json';
 import { parseSitePostApiError } from './api-error';
 
 describe('parseSitePostApiError (story #3368, doc phase0-post-manager-screen-design §4-1)', () => {
@@ -193,6 +195,18 @@ describe('parseSitePostApiError (story #3368, doc phase0-post-manager-screen-des
       expect(result.kind).toBe('token_expired');
       expect(result.humanMessageKey).toBe('errorGhostAuthFailed');
       expect(result.humanMessageKey).not.toBe('errorChannelTokenExpired');
+    });
+
+    // story #3816 PR2 CHANGES 1(유나 관찰·PO 지목 2026-09-12) — `content.
+    // errorGhostAuthFailed`와 `channelConnect.channelConnectErrorGhostAdminKeyInvalid`
+    // 는 의도적으로 같은 값(값이 같은 두 키 — 저장 시 키 오류와 발행 시 인증
+    // 실패가 같은 문장을 말한다는 §낱말 정본). 공유 키로 합치는 대신 드리프트
+    // 가드로 싸게 고정한다 — 한쪽만 고치면 이 테스트가 RED여야 한다.
+    test('⭐errorGhostAuthFailed === channelConnectErrorGhostAdminKeyInvalid(ko·en 둘 다, 의도된 문구 중복 고정)', () => {
+      const ko = koMessages as { content: Record<string, string>; channelConnect: Record<string, string> };
+      const en = enMessages as { content: Record<string, string>; channelConnect: Record<string, string> };
+      expect(ko.content.errorGhostAuthFailed).toBe(ko.channelConnect.channelConnectErrorGhostAdminKeyInvalid);
+      expect(en.content.errorGhostAuthFailed).toBe(en.channelConnect.channelConnectErrorGhostAdminKeyInvalid);
     });
 
     test('CHANNEL_CONNECTION_NOT_ACTIVE — kind=connection_not_active', () => {
