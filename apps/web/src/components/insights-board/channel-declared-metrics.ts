@@ -51,6 +51,13 @@ export const CHANNEL_DECLARED_METRICS: Record<string, readonly BoardMetric[]> = 
   // METRIC_KEYS)엔 아직 없다(PR4 몫) — 이 맵은 "선택기 노출"이 아니라 "이 채널이
   // 이 지표를 declare하는가"의 BE 미러라 선택기 상태와 무관하게 실값 그대로 채운다.
   stibee_sandbox: ['opens', 'delivered', 'clicks'],
+  // story #3815(Phase3·3-5 PR3, 페드루 PO 決定) — views=viewCount·engagements=
+  // likeCount+commentCount(합산). PR1/PR2 시점엔 BE 미선언이라 이 맵에 없었다
+  // (그때는 그게 옳은 값 — 위 wordpress/webhook 주석과 동형 원칙), PR3이
+  // dispatch+선언을 같은 커밋에 추가하며 여기도 짝을 맞춘다.
+  youtube: ['views', 'engagements'],
+  // channel_adapters.py — youtube와 동형(x_sandbox 선례 그대로).
+  youtube_sandbox: ['views', 'engagements'],
 };
 
 /** 이 채널이 declare한 지표 목록. 등록되지 않은 채널(모르는 값·wordpress·webhook 등)은

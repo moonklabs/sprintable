@@ -74,9 +74,9 @@ EXPECTED_BACKEND_CHANNELS = frozenset({
     # 0(신규 FE 등재 불요, PR3에서 stibee_sandbox만 채움).
     "stibee", "stibee_sandbox",
     # story #3815(Phase3·3-5 PR1, 페드루 PO 確定 2026-09-12) — youtube/youtube_
-    # sandbox도 같은 이유로 이 PR 시점엔 insight_metrics 미선언(빈 튜플 기본값)
-    # — 통계 수집(views/likeCount+commentCount→engagements) 배선은 후속 PR
-    # 몫. x/stibee와 동형으로 drift 0(신규 FE 등재 불요).
+    # sandbox 등재(PR1 시점엔 insight_metrics 미선언이었으나 PR3(views·
+    # engagements=likeCount+commentCount 합산)이 채움 — FE 미러(channel-
+    # declared-metrics.ts)도 PR3에서 같이 등재해 drift 0).
     "youtube", "youtube_sandbox",
     # story #3816(Phase3·3-6 PR1, 페드루 PO 確定 2026-09-12) — ghost/ghost_sandbox도
     # 같은 이유로 insight_metrics 미선언(빈 튜플 기본값 — Ghost Admin API에 통계
