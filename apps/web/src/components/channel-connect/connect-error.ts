@@ -27,6 +27,9 @@ const KNOWN_CONNECT_ERROR_KEYS: Record<string, string> = {
   // 으로 뭉개지던 결함(wordpress/webhook 형제는 이미 전용 키가 있었다)도 같은 PR에서 처방.
   STIBEE_FIELDS_REQUIRED: 'channelConnectErrorStibeeFieldsRequired',
   STIBEE_API_KEY_INVALID: 'channelConnectErrorStibeeApiKeyInvalid',
+  // story #3813 PR5-a CHANGES(페드루 PO 確定 2026-09-12) — 스티비가 안 닿는 것
+  // (네트워크·타임아웃·5xx)과 키가 틀린 것은 사람이 할 일이 다르다.
+  STIBEE_AUTH_CHECK_UNAVAILABLE: 'channelConnectErrorStibeeAuthCheckUnavailable',
   // 3653a18c §3-0 "사람 말을 위에, 원문은 접어" — SSRF 목적지 거부는 provider 원문
   // (DestinationURLUnsafeError 메시지, 영문·기술 용어)을 그대로 안 보여준다.
   CHANNEL_CONNECTION_DESTINATION_INSECURE: 'channelConnectErrorDestinationInsecure',

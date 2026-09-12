@@ -209,6 +209,40 @@ async def test_stibee_auth_check_failure_rejects_and_saves_nothing(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_stibee_auth_check_unavailable_uses_distinct_code(monkeypatch):
+    """story #3813 PR5-a CHANGES(페드루 PO 確定 2026-09-12) — 스티비가 안 닿는 것
+    (여기선 5xx로 시뮬레이션)과 키가 틀린 것(401)은 사람이 할 일이 다르다 — 별도
+    코드 STIBEE_AUTH_CHECK_UNAVAILABLE. 이것도 fail-closed(연결 미저장)는 동일."""
+    _patch_auth_check_fails(monkeypatch, status_code=503)
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id, role="owner")
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+        async with _client_for(app) as client:
+            r = await client.post(
+                f"/api/v2/organizations/{org_id}/channel-connections/stibee",
+                json={"api_key": "any-key", "list_id": "12345"},
+            )
+        assert r.status_code == 422, r.text
+        error = r.json().get("error") or r.json()
+        assert error["code"] == "STIBEE_AUTH_CHECK_UNAVAILABLE"
+
+        from app.services.channel_connection import list_channel_connections
+
+        async with Session() as s:
+            saved = await list_channel_connections(s, org_id=org_id)
+        assert not any(c.channel == "stibee" for c in saved)
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_stibee_missing_api_key_rejected():
     from app.main import app
 

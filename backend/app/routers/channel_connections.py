@@ -1297,8 +1297,12 @@ async def create_pasted_secret_channel_connection(
             )
         # story #3813(Phase3·3-4 PR5-a, 페드루 PO 確定 2026-09-12) — 「가짜 키=초록
         # Connected」 결함 처방. 저장 전에 auth-check 1개만 실호출(다른 엔드포인트
-        # 프로브 0) — 실패(401/403/네트워크)면 연결 행 자체를 저장하지 않는다
-        # (fail-closed, 성공 배지는 실제로 인증된 키에만 붙는다).
+        # 프로브 0) — 실패면 연결 행 자체를 저장하지 않는다(fail-closed, 성공
+        # 배지는 실제로 인증된 키에만 붙는다).
+        # CHANGES(PO 確定) — 스티비가 안 닿는 것(네트워크·타임아웃·5xx)과 키가
+        # 틀린 것(스티비가 응답해서 거절)은 사람이 할 일이 다르다 — 별도 코드·문구
+        # (StibeeAuthCheckFailed.is_key_rejected 판정, 그라운딩 정정: 실물은
+        # 401/403이 아니라 400이라 stibee_client.py 참고).
         from app.services.stibee_client import StibeeAuthCheckFailed, verify_api_key
 
         async with httpx.AsyncClient(timeout=10) as stibee_client:
@@ -1306,14 +1310,16 @@ async def create_pasted_secret_channel_connection(
                 await verify_api_key(stibee_client, api_key=body.api_key)
             except StibeeAuthCheckFailed as exc:
                 logger.warning(
-                    "stibee auth-check 실패 — org=%s status=%s", org_id, exc.status_code,
+                    "stibee auth-check 실패 — org=%s status=%s key_rejected=%s",
+                    org_id, exc.status_code, exc.is_key_rejected,
                 )
+                if exc.is_key_rejected:
+                    code, message_key = "STIBEE_API_KEY_INVALID", "channel_connections.stibee_api_key_invalid"
+                else:
+                    code, message_key = "STIBEE_AUTH_CHECK_UNAVAILABLE", "channel_connections.stibee_auth_check_unavailable"
                 raise HTTPException(
                     status_code=422,
-                    detail={
-                        "code": "STIBEE_API_KEY_INVALID",
-                        "message": t("channel_connections.stibee_api_key_invalid", resolved_locale),
-                    },
+                    detail={"code": code, "message": t(message_key, resolved_locale)},
                 ) from exc
         # story 3-4(PR1) — 스티비는 wordpress(site_url)·webhook(target_url)과 달리
         # org당 목적지 URL 개념이 없다(Auth Key 하나가 그 org의 ESP 계정 전체를
@@ -1426,14 +1432,16 @@ async def replace_channel_connection_credentials(
                 await verify_api_key(stibee_client, api_key=body.api_key)
             except StibeeAuthCheckFailed as exc:
                 logger.warning(
-                    "stibee auth-check 실패(회전) — org=%s status=%s", org_id, exc.status_code,
+                    "stibee auth-check 실패(회전) — org=%s status=%s key_rejected=%s",
+                    org_id, exc.status_code, exc.is_key_rejected,
                 )
+                if exc.is_key_rejected:
+                    code, message_key = "STIBEE_API_KEY_INVALID", "channel_connections.stibee_api_key_invalid"
+                else:
+                    code, message_key = "STIBEE_AUTH_CHECK_UNAVAILABLE", "channel_connections.stibee_auth_check_unavailable"
                 raise HTTPException(
                     status_code=422,
-                    detail={
-                        "code": "STIBEE_API_KEY_INVALID",
-                        "message": t("channel_connections.stibee_api_key_invalid", resolved_locale),
-                    },
+                    detail={"code": code, "message": t(message_key, resolved_locale)},
                 ) from exc
         new_secret, account_label = body.api_key, None
     else:

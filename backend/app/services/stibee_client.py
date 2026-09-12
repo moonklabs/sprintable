@@ -17,15 +17,30 @@ _AUTH_CHECK_URL = "https://api.stibee.com/v2/auth-check"
 
 
 class StibeeAuthCheckFailed(Exception):
-    """auth-check가 200이 아니거나(대개 401/403 — 요금제 게이팅으로 인한 다른 코드도
-    이 자리로 떨어진다) 네트워크 자체가 실패했을 때. `.status_code`는 provider가 준
-    HTTP status(네트워크 실패 시 None) — 호출부가 이 둘을 구분해 로그 상세를 고른다,
-    사람에게 보이는 문구는 항상 하나("API 키가 유효하지 않습니다")로 통일한다(PO
-    明示 — 원인 세분화는 사람이 할 일이 없어 화면에 안 싣는다)."""
+    """auth-check가 200이 아니거나 네트워크 자체가 실패했을 때. `.status_code`는
+    provider가 준 HTTP status(네트워크 실패·타임아웃 시 None).
+
+    story #3813 PR5-a CHANGES(페드루 PO 確定 2026-09-12) — 「스티비가 안 닿는 것」
+    (네트워크·타임아웃·5xx)과 「키가 틀린 것」(스티비가 실제로 응답해서 거절)은
+    사람이 할 일이 다르다(전자=잠시 뒤 재시도, 후자=키 재발급) — 호출부가
+    `.is_key_rejected`로 갈라 서로 다른 문구를 고른다.
+
+    ⚠️그라운딩 정정(2026-09-12, 실 호출 확認) — PO가 처음 가정한 "401/403"은
+    실물과 다르다: 실제 `GET /auth-check`에 존재하지 않는 키를 실으면 **400**
+    (`{"code":"Errors.Authorization.NoToken","message":"존재하지 않는 토큰 입니다."}`)
+    이 온다. 그래서 판정축을 "401/403이냐"가 아니라 "스티비가 응답했느냐(4xx 전체=
+    거절)"로 잡는다 — 5xx(스티비 쪽 장애)·None(네트워크 자체가 안 닿음)만 「일시
+    불가」, 나머지 4xx는 전부 「키 거절」."""
 
     def __init__(self, message: str, *, status_code: int | None):
         self.status_code = status_code
         super().__init__(message)
+
+    @property
+    def is_key_rejected(self) -> bool:
+        """스티비가 실제로 응답해서 거절(4xx)했으면 True — 「키 재발급」이 처방.
+        응답 자체가 없거나(None) 스티비 쪽 장애(5xx)면 False — 「잠시 뒤 재시도」."""
+        return self.status_code is not None and 400 <= self.status_code < 500
 
 
 async def verify_api_key(client: httpx.AsyncClient, *, api_key: str) -> None:

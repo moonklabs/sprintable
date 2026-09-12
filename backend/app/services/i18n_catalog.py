@@ -322,6 +322,13 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "API 키가 유효하지 않습니다 · 스티비 설정에서 다시 발급해 주세요.",
         "en": "Your API key isn't valid — reissue it from your Stibee settings.",
     },
+    # story #3813(Phase3·3-4 PR5-a CHANGES, 페드루 PO 確定 2026-09-12) — 스티비가
+    # 안 닿는 것(네트워크·타임아웃·5xx)과 키가 틀린 것(스티비가 응답해서 거절)은
+    # 사람이 할 일이 다르다(전자=잠시 뒤 재시도, 후자=키 재발급) — 별도 문구.
+    "channel_connections.stibee_auth_check_unavailable": {
+        "ko": "스티비에 연결할 수 없습니다 · 잠시 뒤 다시 시도해 주세요.",
+        "en": "Couldn't reach Stibee — please try again in a moment.",
+    },
     # story #3813(Phase3·3-4 PR2, 페드루 PO 確定 2026-09-12) — 뉴스레터 발송
     # 요청 API 사용자 문구(ads_boost.* 형제와 동형 어조, newsletter_send.py 라우터).
     "newsletter_send.create_human_only": {
