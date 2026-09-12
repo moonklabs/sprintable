@@ -634,6 +634,20 @@ export const EXEMPT_PAIRS = new Set<string>([
   // 하나는 사용량 수치 줄, 하나는 만료 상태 칩이라 같은 연결 행에 동시에 서도
   // (testid 서로 다름) "오늘"이 가리키는 대상이 헷갈릴 자리가 아니다.
   'channelConnect.channelExpiringToday <-> channelConnect.channelYoutubeUsageLine',
+  // story #3815(PR4 CHANGES 3, 페드루 PO 決定 2026-09-12 15:38Z) — 「{n}초」는
+  // 문구가 아니라 단위 서식 프리미티브라 같은 낱말이 다른 축에서 서는 게 정상.
+  // 축 다름: channelPostsVideoSpecDurationSeconds=제약 상한(60초 밑 채널만
+  // 닿는 폴백, 지금 화면 표본엔 실제로 안 뜬다 — 테스트로만 잠근다) vs
+  // channelPostsVideoMetaDuration=업로드된 실제 영상 길이.
+  'content.channelPostsVideoMetaDuration <-> content.channelPostsVideoSpecDurationSeconds',
+  // story #3815(PR4 CHANGES 3, 페드루 PO 決定 2026-09-12 15:38Z) — 「최대
+  // {maxBytes}」도 단위 서식 프리미티브(수와 함께 서는 흔한 조사형). 영상
+  // 규격 줄과 이미지(커버) 규격 줄이 실제로 같은 화면에 나란히 서지만
+  // GB/MB 단위·전체 문맥이 갈라 혼동 여지 없음(이미지 3종끼리도 이미 이
+  // 낱말을 공유 中 — 새 축 아님).
+  'content.channelPostsCoverSpecTag <-> content.channelPostsVideoSpecTagSize',
+  'content.channelPostsImageSpecTag <-> content.channelPostsVideoSpecTagSize',
+  'content.channelPostsImageSpecTagWithMin <-> content.channelPostsVideoSpecTagSize',
 ]);
 
 // ⛔⭐오르테가군 지적(2026-07-31) — 이 목록에 «새로» 넣는 것은 PO 승인을 거친다. 이유 없이

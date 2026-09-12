@@ -4953,7 +4953,53 @@ describe('ChannelPostEditPage — 릴스 영상 슬롯(story #3556)', () => {
     await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
     await flush();
     const tag = container.querySelector('[data-testid="channel-post-video-spec-tag"]')?.textContent;
-    expect(tag).toBe('최대 2 GB · 1~43200초 · H.264');
+    expect(tag).toBe('최대 2 GB · 최대 12시간 · H.264');
+  });
+
+  // story #3815 PR4 CHANGES 3(페드루 PO 決定 2026-09-12 15:29Z) — 하한이 실
+  // 제약 아니면(≤1초) 원시 초 대신 사람 단위. 경계 3599/3600 뮤테이션 대상.
+  it('⭐길이 하한 없음(1초)·상한 60~3599초대 — 「분」 단위로 사람이 읽는 값', async () => {
+    stubFetch({
+      videoMaxBytes: 100 * 1024 * 1024, videoMaxSeconds: 90, videoMinSeconds: 1,
+      videoAspectTarget: 0.5625, videoCodecs: ['avc1'],
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const tag = container.querySelector('[data-testid="channel-post-video-spec-tag"]')?.textContent;
+    expect(tag).toBe('최대 100.0 MB · 최대 1.5분 · 9:16 · H.264');
+  });
+
+  it('⭐경계 3599초 — 아직 「분」(시간 아님)', async () => {
+    stubFetch({
+      videoMaxBytes: 100 * 1024 * 1024, videoMaxSeconds: 3599, videoMinSeconds: 1,
+      videoAspectTarget: 0, videoCodecs: ['avc1'],
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const tag = container.querySelector('[data-testid="channel-post-video-spec-tag"]')?.textContent;
+    expect(tag).toBe('최대 100.0 MB · 최대 60분 · H.264');
+  });
+
+  it('⭐경계 3600초 — 「시간」으로 넘어간다', async () => {
+    stubFetch({
+      videoMaxBytes: 100 * 1024 * 1024, videoMaxSeconds: 3600, videoMinSeconds: 1,
+      videoAspectTarget: 0, videoCodecs: ['avc1'],
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const tag = container.querySelector('[data-testid="channel-post-video-spec-tag"]')?.textContent;
+    expect(tag).toBe('최대 100.0 MB · 최대 1시간 · H.264');
+  });
+
+  it('⭐길이 하한이 실 제약(3초)이면 사람 단위로 안 바꾸고 원시 초 범위 그대로(회귀 0)', async () => {
+    stubFetch({
+      videoMaxBytes: 100 * 1024 * 1024, videoMaxSeconds: 90, videoMinSeconds: 3,
+      videoAspectTarget: 0.5625, videoCodecs: ['avc1'],
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const tag = container.querySelector('[data-testid="channel-post-video-spec-tag"]')?.textContent;
+    expect(tag).toBe('최대 100.0 MB · 3~90초 · 9:16 · H.264');
   });
 
   it('⭐첨부 전 트리거 라벨은 「영상 선택」, 이미지 구역 라벨은 「이미지 첨부」(영상 없음)', async () => {
@@ -5617,6 +5663,18 @@ describe('ChannelPostEditPage — YouTube 메타데이터(story #3815 PR4)', () 
     expect((container.querySelector('[data-testid="channel-post-schedule-submit-button"]') as HTMLButtonElement).disabled).toBe(true);
     // 저장은 이미지/영상 필수 축과 무관(본문만 먼저 쓰는 길을 막지 않는다) — 같은 원칙.
     expect((container.querySelector('[data-testid="channel-post-save-button"]') as HTMLButtonElement).disabled).toBe(false);
+    // story #3815 PR4 CHANGES 4(페드루 PO 決定 2026-09-12 15:29Z) — 카운터·차단·
+    // 필드가 한 세계(카운터만 빨강이고 테두리는 포커스 초록이면 어긋난 신호).
+    expect(tagsInput.getAttribute('aria-invalid')).toBe('true');
+  });
+
+  it('태그 합계가 500자 이하 — 필드는 aria-invalid 없음(정상 상태)', async () => {
+    stubFetch({ youtubeMetadataRequired: true });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const tagsInput = container.querySelector('[data-testid="channel-post-youtube-tags-field"]') as HTMLInputElement;
+    expect(tagsInput.getAttribute('aria-invalid')).toBe('false');
   });
 
   it('태그 합계가 500자 이하로 돌아오면 사유가 사라지고 상신이 풀린다', async () => {

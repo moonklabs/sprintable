@@ -379,6 +379,24 @@ function formatVideoMaxBytesSpec(bytes: number): string {
   if (bytes < 1024 * 1024 * 1024) return formatFileSize(bytes);
   return `${trimTrailingZeroOneDecimal(bytes / (1024 * 1024 * 1024))} GB`;
 }
+
+// story #3815 PR4 CHANGES 3(페드루 PO 決定 2026-09-12 15:29Z) — 「1~43200초」
+// 원시 초는 사람이 안 읽는다. minSeconds<=1(실 하한 없음 — YouTube 등)이면
+// 범위 대신 「최대 {사람 단위}」 하나로: ≥3600초=시간·60~3599초=분·그 밑=초.
+// minSeconds가 실 제약(threads 3초 등)이면 범위 그대로 원시 초(회귀 0 —
+// 「3~90초」가 90을 "1.5분"으로 바꾸지 않는다, 하한이 실 제약인 채널은 범위
+// 자체가 사람에게 이미 익숙한 짧은 초 단위라 굳이 안 바꾼다는 PO 明示).
+function formatVideoDurationBound(seconds: number, t: (key: string, values?: Record<string, string | number>) => string): string {
+  if (seconds >= 3600) return t('channelPostsVideoSpecDurationHours', { n: trimTrailingZeroOneDecimal(seconds / 3600) });
+  if (seconds >= 60) return t('channelPostsVideoSpecDurationMinutes', { n: trimTrailingZeroOneDecimal(seconds / 60) });
+  return t('channelPostsVideoSpecDurationSeconds', { n: seconds });
+}
+function formatVideoDurationSpec(
+  minSeconds: number, maxSeconds: number, t: (key: string, values?: Record<string, string | number>) => string,
+): string {
+  if (minSeconds <= 1) return t('channelPostsVideoSpecDurationMax', { duration: formatVideoDurationBound(maxSeconds, t) });
+  return t('channelPostsVideoSpecDurationRange', { minSeconds, maxSeconds });
+}
 function formatVideoMetaLine(
   v: { durationSeconds?: number; width?: number; height?: number; codec?: string; originalBytes?: number },
   t: (key: string, values?: Record<string, string | number>) => string,
@@ -2990,6 +3008,12 @@ export default function ChannelPostEditPage() {
               value={youtubeTagsRaw}
               onChange={(e) => setYoutubeTagsRaw(e.target.value)}
               placeholder={t('channelPostsYoutubeTagsPlaceholder')}
+              // story #3815 PR4 CHANGES 4(페드루 PO 決定 2026-09-12 15:29Z) —
+              // 카운터·차단·필드가 한 세계여야 한다(카운터만 빨강이고 테두리는
+              // 포커스 초록이면 어긋난 신호). aria-invalid는 <Input> 프리미티브가
+              // 이미 aria-invalid:border-destructive 변형을 내장하고 있어(디자인
+              // 시스템 계약 그대로 재사용, 새 스타일 발명 0) 이 값만 얹으면 된다.
+              aria-invalid={youtubeTagsTooLong}
               data-testid="channel-post-youtube-tags-field"
             />
             {/* story #3815 — 합 500자(쉼표·공백 제외 각 태그 길이 합, BE
@@ -2998,11 +3022,7 @@ export default function ChannelPostEditPage() {
                 맨 500이 뜬다(§youtubeTagsTooLong). 그래서 카운터만이 아니라
                 상신 자체를 막는 실제 게이트다. */}
             <span
-              className={
-                youtubeTagsRaw.split(',').map((tag) => tag.trim()).filter(Boolean).join('').length > 500
-                  ? 'text-xs text-destructive'
-                  : 'text-xs text-muted-foreground'
-              }
+              className={youtubeTagsTooLong ? 'text-xs text-destructive' : 'text-xs text-muted-foreground'}
               data-testid="channel-post-youtube-tags-char-count"
             >
               {`${youtubeTagsRaw.split(',').map((tag) => tag.trim()).filter(Boolean).join('').length} / 500`}
@@ -3063,16 +3083,16 @@ export default function ChannelPostEditPage() {
             <span className="text-muted-foreground">{t('channelPostsVideoAttachLabel')}</span>
           </div>
           <p className="text-xs text-muted-foreground" data-testid="channel-post-video-spec-tag">
-            {/* story #3815 PR4 CHANGES(페드루 PO 決定 2026-09-12 15:17Z) — 비율
-                제약이 없으면(aspectTarget<=0, YouTube 등) 그 구간을 아예 생략한다
-                («없는 것을 수로 그리는» 것 방지 — 예전엔 1/0=Infinity가 그대로
-                "1:Infinity"로 떴다). 용량은 GB대에서 끝수 0을 뗀다(formatVideoMaxBytesSpec). */}
+            {/* story #3815 PR4 CHANGES(페드루 PO 決定 2026-09-12 15:17Z·15:29Z) —
+                비율 제약이 없으면(aspectTarget<=0, YouTube 등) 그 구간을 아예
+                생략한다(«없는 것을 수로 그리는» 것 방지 — 예전엔 1/0=Infinity가
+                그대로 "1:Infinity"로 떴다). 용량은 GB대에서 끝수 0을 뗀다
+                (formatVideoMaxBytesSpec). 길이 하한이 실 제약 아니면(≤1초)
+                사람 단위 「최대 …」로, 실 제약이면 원시 초 범위 그대로(회귀 0,
+                formatVideoDurationSpec). */}
             {[
-              t('channelPostsVideoSpecTagSizeAndDuration', {
-                maxBytes: formatVideoMaxBytesSpec(videoSpec.maxBytes),
-                minSeconds: videoSpec.minSeconds,
-                maxSeconds: videoSpec.maxSeconds,
-              }),
+              t('channelPostsVideoSpecTagSize', { maxBytes: formatVideoMaxBytesSpec(videoSpec.maxBytes) }),
+              formatVideoDurationSpec(videoSpec.minSeconds, videoSpec.maxSeconds, t),
               videoSpec.aspectTarget > 0 ? formatVideoAspectRatio(videoSpec.aspectTarget) : null,
               formatVideoCodecs(videoSpec.codecs),
             ].filter(Boolean).join(' · ')}
