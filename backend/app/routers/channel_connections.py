@@ -16,6 +16,7 @@ import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
 
+from app.core.config import settings
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.services.channel_adapters import can_auto_refresh, get_channel_adapter
@@ -167,6 +168,20 @@ class ChannelConnectionResponse(BaseModel):
     # 스레드 이어쓰기 미지원", FE가 이 값으로 편집기의 「스레드 이어쓰기」 목록 UI
     # 노출 여부를 판단한다, 채널 이름 하드코딩 목록 금지).
     thread_max_segments: int = 0
+    # story #3815(Phase3·3-5 PR3, 미르코 PR4 그라운딩 갭 → 페드루 PO 계약 확定
+    # 2026-09-12) — image_required와 동형 관례(영상판, 이미 어댑터엔 있었으나
+    # 이 응답엔 안 실렸던 갭). 미선언 채널(어댑터 None 포함)은 False.
+    video_required: bool = False
+    # 이 채널의 발행 편집기가 channel_payload(title/tags/categoryId/
+    # privacyStatus) 4필드를 요구하는가 — 채널 이름 하드코딩 금지 관례
+    # (thread_max_segments·image_required와 동형): FE가 "youtube"/"youtube_
+    # sandbox" 문자열을 직접 비교하지 않고 이 플래그로 편집기 폼 분기.
+    youtube_metadata_required: bool = False
+    # API 감사 미완 강제 비공개(`settings.youtube_api_audit_incomplete`, 페드루
+    # PO 決定②) — 플랫폼 전체 값이라 모든 youtube/youtube_sandbox 연결이 항상
+    # 같은 값을 본다(연결별 상태 아님, ChannelConnection.status 4값과 무관).
+    # video_required=False인 채널은 이 축 자체가 없어 항상 False.
+    privacy_locked: bool = False
     # story #3492 — 붙여넣기(pasted_secret) 재방문 표시(§2 규격 3, app_id_suffix와
     # 동형). oauth 채널은 항상 null(secret_hint 자체를 안 씀).
     secret_hint: str | None = None
@@ -244,6 +259,14 @@ def _to_response(row, *, reconnect_mismatch_target_id: uuid.UUID | None = None) 
         video_aspect_tolerance=adapter.video_aspect_tolerance if adapter is not None else 0.0,
         video_codecs=list(adapter.video_codecs) if adapter is not None else [],
         thread_max_segments=adapter.thread_max_segments if adapter is not None else 0,
+        video_required=adapter.video_required if adapter is not None else False,
+        # story #3815(PR3) — 지금은 video_required=True(YouTube)인 채널만 이
+        # 메타 4필드를 요구한다(채널명 하드코딩 대신 이 축으로 판정 — 다음
+        # video_required 채널이 이 메타를 안 쓰게 되면 그때 별도 필드로 승격).
+        youtube_metadata_required=bool(adapter is not None and adapter.video_required),
+        privacy_locked=bool(
+            adapter is not None and adapter.video_required and settings.youtube_api_audit_incomplete
+        ),
         secret_hint=row.secret_hint,
         reconnect_mismatch_target_id=reconnect_mismatch_target_id,
         sender_email=(row.provider_config or {}).get("sender_email"),
@@ -317,6 +340,20 @@ class TestConnectionResponse(BaseModel):
     ok: bool
     account: dict | None = None
     error: str | None = None
+
+
+class YouTubeUsageResponse(BaseModel):
+    """story #3815(Phase3·3-5 PR3, 미르코 PR4 FE 그라운딩 갭 → 페드루 PO 계약 확定
+    2026-09-12) — 연결 카드 「오늘 사용량 {used}/{limit} · 플랫폼 공유」 줄의 BE 계약.
+    `scope="platform"`이 이 값의 성격을 명시한다 — connection_id는 인가(그 채널에
+    접근 권한이 있는지)에만 쓰이고, 값 자체는 org 무관(플랫폼 전체 공유 카운터,
+    `youtube_quota.py`가 이미 그렇게 계산). evidence를 새로 쓰지 않는 순수 읽기
+    (youtube_quota.py::get_platform_youtube_quota_spent_units 재사용)."""
+    used_units: int
+    limit_units: int
+    remaining_units: int
+    reset_at: str
+    scope: Literal["platform"] = "platform"
 
 
 class AppCredentialsRequest(BaseModel):
@@ -1709,6 +1746,43 @@ async def test_channel_connection(
             return TestConnectionResponse(ok=False, error=exc.message)
     del access_token  # ⛔즉시 소비 후 폐기 — 더 들고 있지 않는다.
     return TestConnectionResponse(ok=True, account=account)
+
+
+@router.get(
+    "/{org_id}/channel-connections/{connection_id}/youtube-usage", response_model=YouTubeUsageResponse,
+)
+async def get_youtube_usage(
+    org_id: uuid.UUID,
+    connection_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> YouTubeUsageResponse:
+    """story #3815(Phase3·3-5 PR3, 미르코 PR4 그라운딩 갭 → 페드루 PO 계약 확定
+    2026-09-12) — 연결 카드 사용량 줄. `/test`와 동형 인가(member 이상, owner
+    제한 없음 — 조회뿐). connection_id는 "이 채널을 볼 권한이 있는가"만 확인하고,
+    반환값 자체는 org 무관 플랫폼 전체 카운터(`YouTubeUsageResponse.scope`
+    딱지 참고) — evidence를 새로 쓰지 않는 순수 읽기."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    await _require_human(db, auth, org_id)
+
+    row = await get_channel_connection(db, org_id=org_id, connection_id=connection_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="channel connection not found")
+    if row.channel not in ("youtube", "youtube_sandbox"):
+        raise HTTPException(status_code=422, detail=f"youtube-usage unsupported for channel: {row.channel}")
+
+    from app.services.youtube_quota import _utc_day_window, get_platform_youtube_quota_spent_units
+
+    now = datetime.now(timezone.utc)
+    limit_units = settings.youtube_quota_daily_limit_units
+    spent_units = await get_platform_youtube_quota_spent_units(db, now=now)
+    _, reset_at = _utc_day_window(now)
+    return YouTubeUsageResponse(
+        used_units=spent_units, limit_units=limit_units,
+        remaining_units=max(0, limit_units - spent_units), reset_at=reset_at.isoformat(),
+    )
 
 
 @router.put("/{org_id}/channel-connections/{channel}/app-credentials", response_model=AppCredentialsPutResponse)

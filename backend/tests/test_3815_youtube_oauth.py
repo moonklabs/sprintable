@@ -258,9 +258,12 @@ def test_youtube_and_youtube_sandbox_adapters_registered_with_reused_refresh_mod
         assert cfg.kind == "social"
         assert "youtube.upload" in cfg.scope
         assert "youtube.readonly" in cfg.scope
-        # PR1은 OAuth만 — 발행/인사이트 능력은 아직 선언하지 않는다(§3696 가드가
-        # 요구하는 "선언=dispatch 존재" 계약을 어길 자리 자체를 안 만든다).
-        assert cfg.insight_metrics == ()
+        # ⭐PR 경계 pin — PR1(이 파일 최초 작성) 시점엔 OAuth만이라 insight_metrics
+        # 미선언(빈 튜플)이었다. PR3(story #3815, views·engagements=likeCount+
+        # commentCount 합산)이 선언+dispatch를 같은 커밋에 추가하며 뒤집혔다(youtube_
+        # publish dispatch pin이 PR2에서 뒤집힌 것과 동형 — 옛 pin은 stale이라 갱신,
+        # 삭제 아님).
+        assert cfg.insight_metrics == ("views", "engagements")
     assert can_auto_refresh("refresh_token") is True
 
 
