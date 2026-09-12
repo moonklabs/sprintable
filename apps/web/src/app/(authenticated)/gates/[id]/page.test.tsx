@@ -180,6 +180,39 @@ describe('GateDetailPage — 뉴스레터 승인 버튼 낱말 분리 (story #38
     expect(buttons.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(true);
     expect(buttons.some((t) => t?.includes(koMessages.cage.gateApproveCampaign))).toBe(false);
   });
+
+  // story #3813(Phase3·3-4 PR4, 페드루 PO CHANGES 2026-09-12, 라이브 캡처 실측) — 실
+  // newsletter_send 게이트는 risk_grade="high"라 사람이 실제로 누르는 건 이 서명
+  // 플로우 버튼(GateSignatureApproval)이다 — 위 3건은 risk_grade='low' 고정 픽스처라
+  // 그 경로를 안 밟는다(처음 처방이 이 자리를 놓친 정확한 이유).
+  it('⭐risk_grade=high(고위험, 실 뉴스레터 게이트 실측값)면 서명 플로우 버튼도 「발송 승인하고 서명」으로 뜬다', async () => {
+    await mount(gate({ can_approve: true, gate_type: 'newsletter_send', risk_grade: 'high' }));
+    const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.sigApproveAndSignNewsletterSend))).toBe(true);
+    expect(buttons.some((t) => t === koMessages.cage.sigApproveAndSign)).toBe(false);
+  });
+
+  it('⭐risk_grade=high + 뉴스레터 캠페인(external_publish·stibee_sandbox)이면 서명 버튼이 「캠페인 승인하고 서명」으로 뜬다', async () => {
+    await mount(gate({
+      can_approve: true, gate_type: 'external_publish', sealed_destination_channel: 'stibee_sandbox', risk_grade: 'high',
+    }));
+    const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.sigApproveAndSignCampaign))).toBe(true);
+  });
+});
+
+// story #3813(Phase3·3-4 PR4, 페드루 PO CHANGES 2026-09-12, 라이브 캡처 실측) — 이
+// 상세 페이지엔 reapproval_required=true를 알리는 표시가 어디에도 없었다.
+describe('GateDetailPage — 재승인 칩 (story #3813 PR4)', () => {
+  it('⭐reapproval_required=true면 「변경됨 · 재승인 필요」 칩이 뜬다', async () => {
+    await mount(gate({ can_approve: true, reapproval_required: true }));
+    expect(container.textContent).toContain(koMessages.cage.gateReapprovalRequiredChip);
+  });
+
+  it('reapproval_required=false(기본)면 그 칩이 안 뜬다', async () => {
+    await mount(gate({ can_approve: true }));
+    expect(container.textContent).not.toContain(koMessages.cage.gateReapprovalRequiredChip);
+  });
 });
 
 // story #2500 — `body.detail`은 실 envelope({data,error,meta})에 없는 필드라 이 분기는

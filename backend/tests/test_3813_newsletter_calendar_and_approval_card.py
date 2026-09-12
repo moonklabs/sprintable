@@ -290,6 +290,18 @@ async def test_approval_card_estimated_recipient_count_sandbox_fixed_value():
                 s, org_id=org_id, work_item_id=work_item_id, publication_id=pub.id,
                 status="approved", segment_name="VIP 세그먼트", resolver_id=human_id,
             )
+            # 페드루 PO CHANGES(2026-09-12, 라이브 캡처 실측) — 승인 카드에 subject가
+            # 없어 사람이 「무엇을」 보내는지 못 보고 승인하던 결함. subject는 봉인 축이
+            # 아니라 publication.version_id가 가리키는 ChannelPostVersion.channel_payload
+            # 에서 「지금」 값을 읽는다 — 여기서 직접 채운다.
+            from app.models.channel_post_version import ChannelPostVersion
+            from sqlalchemy import update
+
+            await s.execute(
+                update(ChannelPostVersion).where(ChannelPostVersion.id == pub.version_id)
+                .values(channel_payload={"subject": "9월 소식지"})
+            )
+            await s.commit()
 
         _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
         async with _client_for(app) as client:
@@ -298,6 +310,7 @@ async def test_approval_card_estimated_recipient_count_sandbox_fixed_value():
         body = r.json()
         assert body["estimated_recipient_count"] == 4_200
         assert body["sealed_newsletter_segment_name"] == "VIP 세그먼트"
+        assert body["newsletter_subject"] == "9월 소식지"
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
@@ -327,6 +340,8 @@ async def test_approval_card_estimated_recipient_count_null_for_real_stibee():
             r = await client.get(f"/api/v2/gates/{gate.id}")
         assert r.status_code == 200, r.text
         assert r.json()["estimated_recipient_count"] is None
+        # subject를 안 심었으면(channel_payload 미설정) 지어내지 않고 null.
+        assert r.json()["newsletter_subject"] is None
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()

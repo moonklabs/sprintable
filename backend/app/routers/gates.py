@@ -279,6 +279,12 @@ class GateResponse(BaseModel):
     # 고정 4,200. 조회 실패는 카드 전체를 죽이지 않고 이 필드만 None(fail-closed,
     # warning 로그 — get_gate_endpoint 본문 참고).
     estimated_recipient_count: int | None = None
+    # story #3813(Phase3·3-4 PR4, 페드루 PO CHANGES 2026-09-12, 라이브 캡처 실측) —
+    # 승인 카드가 「무엇을」 보내는지(subject)를 안 보여줘 세그먼트·시각·수신수만 보고
+    # 승인하던 결함. Gate ORM 컬럼 아님(봉인 축이 아니다, PR2 설계 그대로 유지) —
+    # publication.version_id가 가리키는 ChannelPostVersion.channel_payload에서
+    # 「지금」 값을 읽는다(estimated_recipient_count와 동일 계산값 선례).
+    newsletter_subject: str | None = None
     reapproval_required: bool = False
     created_at: datetime
     updated_at: datetime
@@ -1421,6 +1427,7 @@ async def get_gate_endpoint(
     if gate.gate_type == "newsletter_send":
         try:
             from app.models.channel_connection import ChannelConnection
+            from app.models.channel_post_version import ChannelPostVersion
             from app.models.channel_publication import ChannelPublication
 
             publication = (await session.execute(
@@ -1435,8 +1442,20 @@ async def get_gate_endpoint(
                     segment_name=gate.sealed_newsletter_segment_name or "",
                 )
             # 실 "stibee"(미구현)·연결/발행물 소실 등은 조용히 None 그대로(위 필드 docstring).
+            # 페드루 PO CHANGES(2026-09-12, 라이브 캡처 실측) — 승인 카드에 「무엇을」
+            # 보내는지(subject)가 아예 없어 사람이 세그먼트·시각·수신수만 보고 승인하던
+            # 결함. subject는 봉인 축이 아니라(PR2 설계 그대로) publication.version_id가
+            # 가리키는 ChannelPostVersion.channel_payload에서 「지금」 값을 읽는다
+            # (sealed_content_body류와 다른 결 — 뉴스레터 subject는 애초에 gate가
+            # 봉인하는 축이 아니었다, channel_posts.py의 draft-list newsletter.subject와
+            # 동일 출처).
+            if publication is not None:
+                version = (await session.execute(
+                    select(ChannelPostVersion).where(ChannelPostVersion.id == publication.version_id)
+                )).scalar_one_or_none()
+                resp.newsletter_subject = (version.channel_payload or {}).get("subject") if version else None
         except Exception:  # noqa: BLE001 — 카드 조회 자체를 이 계산값 실패로 죽이지 않는다.
-            logger.warning("newsletter_send estimated_recipient_count 조회 실패(비중단) org=%s gate=%s", org_id, id, exc_info=True)
+            logger.warning("newsletter_send estimated_recipient_count/subject 조회 실패(비중단) org=%s gate=%s", org_id, id, exc_info=True)
     # story #2815(§5-④): merge 게이트만 의미 있음(다른 gate_type은 PR/repo 개념 자체가 없음).
     if gate.gate_type == MERGE_GATE_TYPE:
         _link = await resolve_pr_link(session, org_id, gate.work_item_id)

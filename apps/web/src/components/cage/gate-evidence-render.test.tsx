@@ -487,7 +487,7 @@ describe('GateEvidence — 레시피 approve 게이트 승인 대상 실물 렌�
 
   // story #3813(Phase3·3-4 PR4, 페드루 PO 確定 2026-09-12) — newsletter_send 봉인값
   // (세그먼트·발송 예정)+어댑터 조회값(예상 수신) 렌더 — ads_boost 블록과 동형 검증.
-  it('⭐newsletter_send 게이트의 세그먼트·발송 예정·예상 수신이 실제로 DOM에 나타난다', async () => {
+  it('⭐newsletter_send 게이트의 제목·세그먼트·발송 예정·예상 수신이 실제로 DOM에 나타난다', async () => {
     const gate = recipeApprovalGate(
       {},
       {
@@ -495,6 +495,7 @@ describe('GateEvidence — 레시피 approve 게이트 승인 대상 실물 렌�
         sealed_newsletter_segment_name: 'VIP 세그먼트',
         sealed_newsletter_scheduled_at: '2026-09-19T00:00:00Z',
         estimated_recipient_count: 4_200,
+        newsletter_subject: '9월 소식지',
       },
     );
     container = document.createElement('div');
@@ -502,6 +503,10 @@ describe('GateEvidence — 레시피 approve 게이트 승인 대상 실물 렌�
     root = createRoot(container);
     await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
 
+    // 페드루 PO CHANGES(2026-09-12, 라이브 캡처 실측) — 제목이 세그먼트·시각·수신수보다
+    // 먼저 서야 「무엇을」 보내는지부터 본다.
+    expect(container.textContent).toContain(koMessages.cage.newsletterSubjectLabel);
+    expect(container.textContent).toContain('9월 소식지');
     expect(container.textContent).toContain(koMessages.cage.newsletterSegmentLabel);
     expect(container.textContent).toContain('VIP 세그먼트');
     expect(container.textContent).toContain(koMessages.cage.newsletterSendScheduleLabel);
@@ -509,6 +514,24 @@ describe('GateEvidence — 레시피 approve 게이트 승인 대상 실물 렌�
     // 페드루 PO 스티어(2026-09-12) — 원시 숫자가 아니라 천단위 구분+단위("4,200명").
     expect(container.textContent).toContain('4,200명');
     expect(container.textContent).not.toContain('4200');
+  });
+
+  it('newsletter_subject가 null이면(조회 실패 등) 「제목 미확인」으로 뜬다(지어내지 않음)', async () => {
+    const gate = recipeApprovalGate(
+      {},
+      {
+        gate_type: 'newsletter_send', sealed_newsletter_segment_name: '전체 구독자',
+        sealed_newsletter_scheduled_at: '2026-09-19T00:00:00Z', estimated_recipient_count: 4_200,
+        newsletter_subject: null,
+      },
+    );
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(container.textContent).toContain(koMessages.cage.newsletterSubjectLabel);
+    expect(container.textContent).toContain(koMessages.cage.newsletterSubjectUnknown);
   });
 
   it('예상 수신 조회가 실패해 estimated_recipient_count가 null이면(실 stibee·조회실패) 「미확인」으로 뜬다(지어내지 않음)', async () => {

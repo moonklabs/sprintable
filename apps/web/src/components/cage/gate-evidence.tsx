@@ -223,6 +223,10 @@ interface RecipeApprovalFacts {
   newsletterSegmentName: string | null;
   newsletterSendScheduledAt: string | null;
   newsletterEstimatedRecipientCount: number | null;
+  // story #3813(Phase3·3-4 PR4, 페드루 PO CHANGES 2026-09-12, 라이브 캡처 실측) —
+  // 「무엇을」 보내는지 없이 승인하던 결함. estimatedRecipientCount와 동형(봉인값
+  // 아님, 어댑터/버전 조회).
+  newsletterSubject: string | null;
 }
 
 function recipeApprovalFacts(gate: GateItem): RecipeApprovalFacts | null {
@@ -276,12 +280,13 @@ function recipeApprovalFacts(gate: GateItem): RecipeApprovalFacts | null {
     newsletterSendScheduledAt: realString(gate.sealed_newsletter_scheduled_at),
     newsletterEstimatedRecipientCount:
       typeof gate.estimated_recipient_count === 'number' ? gate.estimated_recipient_count : null,
+    newsletterSubject: realString(gate.newsletter_subject),
   };
   const hasAny = isCommentReply ||
     facts.workItemRef || facts.draftDocRef || facts.draftDocSummary || facts.channel || facts.stage ||
     facts.contentBody || facts.contentVersion !== null || facts.contentSha256 ||
     facts.sealedDocRef || facts.sealedDocBodySha256 || facts.adsBudgetMinor !== null ||
-    facts.newsletterSegmentName !== null || facts.newsletterSendScheduledAt !== null;
+    facts.newsletterSegmentName !== null || facts.newsletterSendScheduledAt !== null || facts.newsletterSubject !== null;
   return hasAny ? facts : null;
 }
 
@@ -694,8 +699,16 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
           sealing. ads_boost 블록과 동일 선례 — 이 gate_type이 아니면 두 필드 다 null이라
           블록 자체가 안 그려진다. 「예상 수신」은 봉인값이 아니라 어댑터 조회(위 facts
           타입 주석) — null이면 지어내지 않고 「미확인」. */}
-      {facts.newsletterSegmentName !== null || facts.newsletterSendScheduledAt !== null ? (
+      {facts.newsletterSegmentName !== null || facts.newsletterSendScheduledAt !== null || facts.newsletterSubject !== null ? (
         <div className="space-y-0.5">
+          {/* 페드루 PO CHANGES(2026-09-12, 라이브 캡처 실측) — 「무엇을」 보내는지가
+              세그먼트·시각·수신수보다 먼저 서야 사람이 승인 전에 그것부터 본다. */}
+          <p>
+            <span className="text-muted-foreground">{t('newsletterSubjectLabel')} · </span>
+            <span className="text-foreground font-medium">
+              {facts.newsletterSubject ?? t('newsletterSubjectUnknown')}
+            </span>
+          </p>
           {facts.newsletterSegmentName ? (
             <p>
               <span className="text-muted-foreground">{t('newsletterSegmentLabel')} · </span>
