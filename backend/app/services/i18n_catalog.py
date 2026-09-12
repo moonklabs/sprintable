@@ -315,6 +315,28 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "스티비 API 키를 입력해 주세요.",
         "en": "Enter your Stibee API key.",
     },
+    # story #3813(Phase3·3-4 PR2, 페드루 PO 確定 2026-09-12) — 뉴스레터 발송
+    # 요청 API 사용자 문구(ads_boost.* 형제와 동형 어조, newsletter_send.py 라우터).
+    "newsletter_send.create_human_only": {
+        "ko": "뉴스레터 발송 요청은 휴먼 멤버만 가능합니다(에이전트는 초안 작성만).",
+        "en": "Only human members can request a newsletter send (agents may only draft).",
+    },
+    "newsletter_send.publication_not_found": {
+        "ko": "이 조직에 없는 발행물입니다.",
+        "en": "Publication not found in this organization.",
+    },
+    "newsletter_send.invalid_channel": {
+        "ko": "이 발행물은 뉴스레터 채널이 아닙니다.",
+        "en": "This publication is not on a newsletter channel.",
+    },
+    "newsletter_send.not_published": {
+        "ko": "아직 발행(캠페인 생성)이 끝나지 않은 발행물입니다.",
+        "en": "This publication hasn't finished being created as a campaign yet.",
+    },
+    "newsletter_send.approver_role_missing": {
+        "ko": "승인할 사람이 지정되지 않았습니다 — 승인자 역할을 먼저 두어주세요.",
+        "en": "No one is set up to approve this — please set an approver role first.",
+    },
 }
 
 

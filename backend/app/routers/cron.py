@@ -1380,6 +1380,15 @@ async def publication_commands_tick(
         except Exception as exc:
             logger.exception("ads-spend-snapshots tick error: %s", exc)
             counts["ads_spend_snapshots"] = {"error": "unhandled"}
+        # story #3813(Phase3·3-4 PR2, 페드루 PO 確定 2026-09-12) — 봉인
+        # sealed_newsletter_scheduled_at 도래 게이트 자동 실행(ads_boost_starts와
+        # 동형 피기백, 새 Cloud Scheduler 잡 0)·독립 try.
+        try:
+            from app.services.newsletter_send_execution import process_due_newsletter_sends
+            counts["newsletter_sends"] = await process_due_newsletter_sends(session)
+        except Exception as exc:
+            logger.exception("newsletter-sends tick error: %s", exc)
+            counts["newsletter_sends"] = {"error": "unhandled"}
         return _ok(counts)
     except Exception as exc:
         logger.exception("publication-commands cron error: %s", exc)

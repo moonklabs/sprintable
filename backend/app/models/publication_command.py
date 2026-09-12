@@ -49,7 +49,7 @@ class PublicationCommand(Base):
         # 정본, 이건 그 정본의 미러 — 이름을 반드시 같게 유지할 것(`ck_publication_
         # commands_content_kind`), 새 값을 추가할 땐 이 두 곳을 항상 같이 고칠 것.
         CheckConstraint(
-            "content_kind IN ('channel_post', 'site_post', 'comment_reply', 'ads_boost')",
+            "content_kind IN ('channel_post', 'site_post', 'comment_reply', 'ads_boost', 'newsletter_send')",
             name="ck_publication_commands_content_kind",
         ),
         # story #3806(Phase3·3-2 PR 6 정정, 페드루 PO 定 2026-09-11 13:42Z) — 0367

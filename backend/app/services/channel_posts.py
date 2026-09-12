@@ -480,6 +480,7 @@ async def create_channel_post_draft_version(
     image_sha256: str | None = _IMAGE_SHA256_CARRY_FORWARD,  # type: ignore[assignment]
     source_content_item_id: uuid.UUID | None = None,
     hook_key: str | None = None,
+    channel_payload: dict | None = None,
 ) -> tuple[ChannelPostVersion, str, list[dict]]:
     """초안을 (org, work_item, connection_id)로 upsert하고 새 불변 버전을 추가한다 —
     site_posts.create_site_post_draft_version과 1:1 대응(AC1).
@@ -506,7 +507,12 @@ async def create_channel_post_draft_version(
     동형(캐리포워드 없음, 매 호출이 현재 값을 명시) — image_sha256과 달리 「빈손
     발행」류 결함 소지가 없는 순수 분석 라벨이라 캐리포워드 sentinel을 얹는 복잡도가
     안 남는다. 형식 검사(≤64자·`[A-Za-z0-9_-]`)는 라우터 요청 모델(422)에서 이미
-    끝낸 값만 여기로 들어온다."""
+    끝낸 값만 여기로 들어온다.
+
+    story #3813(Phase3·3-4 PR2, 페드루 PO 確定 2026-09-12) — `channel_payload`는
+    hook_key와 동형(캐리포워드 없음, 매 호출이 현재 값을 명시) — 대부분의 채널은
+    이 값을 안 보내 항상 null(image_sha256류 캐리포워드 sentinel 복잡도는 이
+    슬롯이 아직 요구하지 않는다, 필요해지면 그때 승격)."""
     connection = await _get_active_connection(db, org_id=org_id, connection_id=connection_id)
     _validate_text_length(channel=connection.channel, text=text)
 
@@ -576,6 +582,7 @@ async def create_channel_post_draft_version(
         body_sha256=compute_channel_post_hash(text=text, link_url=link_url),
         image_sha256=resolved_image_sha256, hook_key=hook_key,
         author_member_id=author_member_id, author_kind=author_kind,
+        channel_payload=channel_payload,
     )
     db.add(version)
     await db.flush()
@@ -1609,9 +1616,18 @@ async def publish_channel_post_draft(
                             text=text_to_post, image_urls=image_public_urls,
                         )
                     else:
+                        # story #3813(Phase3·3-4 PR2, 페드루 PO 確定 2026-09-12) — channel_payload
+                        # 공유 슬롯(gate.py 모델 주석과 동형 판단 — 컬럼 이름에 채널
+                        # 이름 안 붙임)에서 subject를 뽑아 stibee류에만 넘긴다. 다른
+                        # 채널(threads/facebook 등)의 create_container 시그니처는
+                        # channel_payload 개념 자체가 없어 무변경(kwarg를 아예 안 보냄
+                        # — 신호 없음=미지원 관례, image_max_count=0과 동형).
+                        _extra_kwargs = {}
+                        if draft.channel in ("stibee", "stibee_sandbox"):
+                            _extra_kwargs["subject"] = (latest.channel_payload or {}).get("subject")
                         container_id = await create_container(
                             client, access_token=access_token, threads_user_id=connection.account_id,
-                            text=text_to_post, image_url=image_public_url,
+                            text=text_to_post, image_url=image_public_url, **_extra_kwargs,
                         )
                 except ThreadsPublishError as exc:
                     error_code, mapped_exc = _classify_threads_error(exc, connection_id=connection.id)

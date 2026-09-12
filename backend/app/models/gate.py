@@ -195,6 +195,18 @@ class Gate(Base):
     # (request_ads_boost 호출: 신규·pending 재봉인·approved 재오픈 전부)마다
     # app/services/ads_boost.py가 새 UUID를 발급해 여기 채운다.
     sealed_ads_boost_version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # story #3813(Phase3·3-4 PR2, 페드루 PO 確定 2026-09-12) — 뉴스레터 발송
+    # (`newsletter_send` gate_type) 봉인 3축. ads_boost의 sealed_ads_*와 완전히 같은
+    # 「변경=재승인」 기전(sealed_ads_boost_version_id 재사용 안 함 — 서로 다른
+    # gate_type이 같은 열을 공유하면 그 열의 뜻이 "이 gate_type의 재봉인 세대"에서
+    # "여러 gate_type이 뒤섞인 카운터"로 흐려진다, ads_boost가 external_publish의
+    # sealed_content_*를 재사용 안 한 것과 같은 판단).
+    sealed_newsletter_segment_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sealed_newsletter_scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # publication_commands 멱등키(org_id, destination, approved_version, operation)의
+    # approved_version 축 — sealed_ads_boost_version_id와 동형(매 재봉인마다 새 UUID,
+    # app/services/newsletter_send.py가 발급).
+    sealed_newsletter_version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     # 승인 후 수정으로 시스템이 되돌린 pending인지(사람이 처음 상신한 pending과 구분 — S4가
     # "재승인 필요" 배지를 그릴 신호) — 새 명시 submit()이 재봉인하면 False로 복귀한다.
     reapproval_required: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
