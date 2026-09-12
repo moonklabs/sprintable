@@ -91,6 +91,9 @@ const DRAFT_DETAIL = {
   // story #3499(PO 確定 2026-09-05) — 최신 ChannelPublication.id. BE #3844 조각4
   // (미착지) 의존, 기본값 null(대부분 테스트가 이 스토리와 무관).
   publication_id: null as string | null,
+  // story #3815 PR4(페드루 PO 決定 2026-09-12 14:59Z) — BE 갭(디디 소 PR 착지 전
+  // 항상 undefined 취급, 기본값 null로 대부분 테스트가 회귀 0).
+  publication_privacy_locked: null as boolean | null,
   // story 15e481ce(#3453 AC2) — 이 채널 변형이 파생된 원문.
   source_content_item_id: null as string | null,
   // story #3457 후속(BE #3817 착지분) — 원문 제목 + staleness 판정용 버전 id 2종.
@@ -5675,5 +5678,46 @@ describe('ChannelPostEditPage — YouTube 메타데이터(story #3815 PR4)', () 
     expect((container.querySelector('[data-testid="channel-post-youtube-tags-field"]') as HTMLInputElement).value).toBe('a, b');
     expect((container.querySelector('[data-testid="channel-post-youtube-category-field"]') as HTMLSelectElement).value).toBe('20');
     expect((container.querySelector('[data-testid="channel-post-youtube-privacy-field"]') as HTMLSelectElement).value).toBe('public');
+  });
+
+  // story #3815 PR4(페드루 PO 決定 2026-09-12 14:59Z) — 「게시됨(비공개)」 배지는
+  // draft.publication_privacy_locked(BE 갭이라 디디 소 PR 착지 전엔 항상 undefined)가
+  // 있으면 그 값을 우선하고, 없을 때만 연결 레벨 현재 privacy_locked로 대리한다.
+  describe('게시됨(비공개) 배지 — 발행물 필드 우선·연결 레벨 대리(임시)', () => {
+    const PUBLISHED_DRAFT_DETAIL = {
+      gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+      publication_status: 'published' as const, permalink: 'https://youtube-sandbox.invalid/watch?v=x',
+      external_id: 'sandbox-youtube-1', published_at: '2026-09-12T00:00:00Z', publication_id: 'pub-yt-1',
+    };
+
+    it('BE 필드 미노출(undefined) — 연결 레벨 privacy_locked=true로 대리해 배지가 뜬다', async () => {
+      stubFetch({ youtubeMetadataRequired: true, privacyLocked: true, draftDetail: PUBLISHED_DRAFT_DETAIL });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+
+      expect(container.querySelector('[data-testid="channel-post-youtube-published-private-badge"]')).not.toBeNull();
+    });
+
+    it('BE 필드가 false로 옴 — 연결이 지금 잠겨 있어도 그 발행물은 안 잠겼던 역사적 사실을 우선한다(배지 없음)', async () => {
+      stubFetch({
+        youtubeMetadataRequired: true, privacyLocked: true,
+        draftDetail: { ...PUBLISHED_DRAFT_DETAIL, publication_privacy_locked: false },
+      });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+
+      expect(container.querySelector('[data-testid="channel-post-youtube-published-private-badge"]')).toBeNull();
+    });
+
+    it('BE 필드가 true로 옴 — 연결이 지금 안 잠겨 있어도 그 발행물이 잠겼던 역사적 사실을 우선한다(배지 뜸)', async () => {
+      stubFetch({
+        youtubeMetadataRequired: true, privacyLocked: false,
+        draftDetail: { ...PUBLISHED_DRAFT_DETAIL, publication_privacy_locked: true },
+      });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+
+      expect(container.querySelector('[data-testid="channel-post-youtube-published-private-badge"]')).not.toBeNull();
+    });
   });
 });

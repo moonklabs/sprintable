@@ -9,6 +9,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { Input } from '@/components/ui/input';
 import { fetchWithAuth } from '@/lib/db/client';
 import { channelLabel, channelConnectionIdentityLabel } from '@/lib/channel-label';
 import { channelTextLength } from '@/components/content/channel-text-length';
@@ -97,6 +98,12 @@ interface ChannelPostDraftDetail {
   // 이 PR 작성 시점 미착지 — additive, 없으면 undefined). command_id(PublicationCommand
   // 축)와 다른 테이블이라 혼동 금지.
   publication_id?: string | null;
+  // story #3815(PR4, 페드루 PO 決定 2026-09-12 14:59Z) — BE 갭(channel_publications.
+  // privacy_locked이 어느 draft 응답에도 노출 안 됨, 그라운딩 중 발견) — 디디 소 PR이
+  // 이 필드를 draft 목록/단건 응답에 노출하면 그 이름을 여기로 맞춘다(임시 이름,
+  // 필드가 생기면 즉시 전환). 지금은 항상 undefined — 아래 배지 판정은 이 필드가
+  // 있으면 우선(발행물 단위 역사적 사실), 없으면 연결 레벨 현재값으로 대리한다.
+  publication_privacy_locked?: boolean | null;
   scheduled_at?: string | null;
   // story #3428(BE 620beefc·PR#3776, §17-14/§17-15) — 최신 버전에 이미지가 붙어 있으면
   // 그 「나가는 파생본」 공개 URL(카드 썸네일)과 원본/최종 width·bytes(배지 문구 조립
@@ -2417,9 +2424,14 @@ export default function ChannelPostEditPage() {
             </p>
           ) : null}
           {/* story #3815(Phase3·3-5 PR4, PO 決定②) — 플랫폼 감사 미완으로 실제로
-              비공개 게시된 사실을 그대로 배지로(youtubePrivacyLocked=연결 무관
-              앱 전체 축, 이 발행물이 실제로 비공개였다는 기록). 선례 없음(신규 UI). */}
-          {youtubeMetadataEnabled && youtubePrivacyLocked ? (
+              비공개 게시된 사실을 그대로 배지로. 선례 없음(신규 UI).
+              PO 決定(2026-09-12 14:59Z) — 판정은 이 발행물 자체의 역사적 사실
+              (draft.publication_privacy_locked, BE 갭이라 지금은 항상 undefined)이
+              있으면 그 값을 우선한다 — 없을 때만 연결 레벨 현재 privacy_locked로
+              대리(임시, 나중에 감사가 풀려도 "그때 잠겼던" 과거 발행물이 안 잠긴
+              것처럼 보이는 사각의 원인 — 디디 소 PR이 필드를 노출하면 대리가 저절로
+              걷힌다, `??` 우선순위 그대로 유지). */}
+          {youtubeMetadataEnabled && (draft.publication_privacy_locked ?? youtubePrivacyLocked) ? (
             <span
               className="inline-flex w-fit items-center rounded-full border border-border px-1.5 py-0.5 text-xs text-muted-foreground"
               data-testid="channel-post-youtube-published-private-badge"
@@ -2940,12 +2952,11 @@ export default function ChannelPostEditPage() {
             <label className="text-xs font-medium text-muted-foreground" htmlFor="channel-post-youtube-title">
               {t('channelPostsYoutubeTitleLabel')}
             </label>
-            <input
+            <Input
               id="channel-post-youtube-title"
               value={youtubeTitle}
               onChange={(e) => setYoutubeTitle(e.target.value.slice(0, 100))}
               maxLength={100}
-              className="w-full rounded-md border border-border p-2 text-sm"
               data-testid="channel-post-youtube-title-field"
             />
             <span className="text-xs text-muted-foreground" data-testid="channel-post-youtube-title-char-count">
@@ -2956,12 +2967,11 @@ export default function ChannelPostEditPage() {
             <label className="text-xs font-medium text-muted-foreground" htmlFor="channel-post-youtube-tags">
               {t('channelPostsYoutubeTagsLabel')}
             </label>
-            <input
+            <Input
               id="channel-post-youtube-tags"
               value={youtubeTagsRaw}
               onChange={(e) => setYoutubeTagsRaw(e.target.value)}
               placeholder={t('channelPostsYoutubeTagsPlaceholder')}
-              className="w-full rounded-md border border-border p-2 text-sm"
               data-testid="channel-post-youtube-tags-field"
             />
             {/* story #3815 — 합 500자(쉼표·공백 제외 각 태그 길이 합, BE
@@ -2988,7 +2998,7 @@ export default function ChannelPostEditPage() {
               id="channel-post-youtube-category"
               value={youtubeCategoryId}
               onChange={(e) => setYoutubeCategoryId(e.target.value)}
-              className="w-full rounded-md border border-border p-2 text-sm"
+              className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
               data-testid="channel-post-youtube-category-field"
             >
               <option value="">{t('channelPostsYoutubeCategoryNone')}</option>
@@ -3006,7 +3016,7 @@ export default function ChannelPostEditPage() {
               value={youtubePrivacyLocked ? 'private' : youtubePrivacyStatus}
               onChange={(e) => setYoutubePrivacyStatus(e.target.value as 'public' | 'unlisted' | 'private')}
               disabled={youtubePrivacyLocked}
-              className="w-full rounded-md border border-border p-2 text-sm"
+              className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
               data-testid="channel-post-youtube-privacy-field"
             >
               <option value="public">{t('channelPostsYoutubePrivacyPublic')}</option>
