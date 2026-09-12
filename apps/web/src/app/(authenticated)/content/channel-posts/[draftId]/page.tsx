@@ -9,6 +9,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { Input } from '@/components/ui/input';
 import { fetchWithAuth } from '@/lib/db/client';
 import { channelLabel, channelConnectionIdentityLabel } from '@/lib/channel-label';
 import { channelTextLength } from '@/components/content/channel-text-length';
@@ -97,6 +98,12 @@ interface ChannelPostDraftDetail {
   // 이 PR 작성 시점 미착지 — additive, 없으면 undefined). command_id(PublicationCommand
   // 축)와 다른 테이블이라 혼동 금지.
   publication_id?: string | null;
+  // story #3815(PR4, 페드루 PO 決定 2026-09-12 14:59Z) — BE 갭(channel_publications.
+  // privacy_locked이 어느 draft 응답에도 노출 안 됨, 그라운딩 중 발견) — 디디 소 PR이
+  // 이 필드를 draft 목록/단건 응답에 노출하면 그 이름을 여기로 맞춘다(임시 이름,
+  // 필드가 생기면 즉시 전환). 지금은 항상 undefined — 아래 배지 판정은 이 필드가
+  // 있으면 우선(발행물 단위 역사적 사실), 없으면 연결 레벨 현재값으로 대리한다.
+  publication_privacy_locked?: boolean | null;
   scheduled_at?: string | null;
   // story #3428(BE 620beefc·PR#3776, §17-14/§17-15) — 최신 버전에 이미지가 붙어 있으면
   // 그 「나가는 파생본」 공개 URL(카드 썸네일)과 원본/최종 width·bytes(배지 문구 조립
@@ -166,7 +173,19 @@ interface ChannelPostVersion {
   hook_key: string | null;
   // story #3808(Phase3·3-3 PR5b-2, 페드루 PO 確定 2026-09-12) — 이 버전의 스레드
   // 이어쓰기 목록(있으면 {thread: string[]}). 없으면 null(스레드 아님).
-  channel_payload: { thread?: string[] } | null;
+  // story #3815(Phase3·3-5 PR4, 페드루 PO 正정 2026-09-12 13:26Z) — YouTube 구조화
+  // 메타데이터는 channel_payload «최상위»에 thread와 같은 층으로 얹는다(중첩 객체
+  // 아님) — BE 4225 `_validate_youtube_metadata`/`resolve_youtube_privacy_lock`이
+  // 최상위 키를 그대로 읽는다. 키 이름도 camelCase(BE가 이 계약만 그렇게 받는다 —
+  // 다른 곳의 snake_case 관례와 다른 예외). description(본문 챕터 등)은 기존 text
+  // 필드를 그대로 쓴다 — 여기 안 실린다.
+  channel_payload: {
+    thread?: string[];
+    title?: string;
+    tags?: string[];
+    categoryId?: string | null;
+    privacyStatus?: 'public' | 'unlisted' | 'private';
+  } | null;
 }
 
 // story #3550(Phase2·풀스택, BE 2/2 #3910 계약, 페드루 PO 確定 2026-09-06) — 캐러셀
@@ -240,7 +259,40 @@ interface ChannelConnectionInfo {
   // 채널은 스레드 이어쓰기 미지원(편집기가 「스레드 이어쓰기」 목록 UI 자체를
   // 안 그린다).
   thread_max_segments: number;
+  // story #3815(Phase3·3-5 PR4, 페드루 PO 確定 2026-09-12) — image_required와
+  // 동형 관례(영상 필수 채널=YouTube, 하드코딩 금지 축 그대로).
+  video_required: boolean;
+  // story #3815(Phase3·3-5 PR4, 페드루 PO 確定 2026-09-12) — 이 채널이 제목·태그·
+  // 카테고리·공개범위 같은 구조화 메타데이터를 받는지(어댑터 성질, thread_max_
+  // segments와 동형 — 0/false=이 채널은 이 필드 블록 자체가 없다).
+  youtube_metadata_required: boolean;
+  // story #3815(Phase3·3-5 PR4, 페드루 PO 決定②) — 플랫폼(Sprintable 자체 OAuth 앱)의
+  // YouTube API 감사가 아직 안 끝나 모든 업로드가 강제로 비공개인 상태(고객·연결
+  // 무관 — 앱 전체 축). true면 공개범위 select가 비활성 + 안내 문구.
+  privacy_locked: boolean;
 }
+
+// story #3815(Phase3·3-5 PR4, 페드루 PO 確定 2026-09-12) — YouTube Data API 주요
+// videoCategory ID(그라운딩 — 「지역별 차이 미확認」, 값 자체는 YouTube 공개
+// videoCategories 나열에서 흔히 보이는 주요 15개 — 지어내지 않되 전수는 아니다).
+// labelKey는 i18n 카탈로그로 뽑는다(하드코딩 한글 0).
+const YOUTUBE_CATEGORY_IDS: { id: string; labelKey: string }[] = [
+  { id: '1', labelKey: 'channelPostsYoutubeCategoryFilmAnimation' },
+  { id: '2', labelKey: 'channelPostsYoutubeCategoryAutos' },
+  { id: '10', labelKey: 'channelPostsYoutubeCategoryMusic' },
+  { id: '15', labelKey: 'channelPostsYoutubeCategoryPets' },
+  { id: '17', labelKey: 'channelPostsYoutubeCategorySports' },
+  { id: '19', labelKey: 'channelPostsYoutubeCategoryTravel' },
+  { id: '20', labelKey: 'channelPostsYoutubeCategoryGaming' },
+  { id: '22', labelKey: 'channelPostsYoutubeCategoryPeopleBlogs' },
+  { id: '23', labelKey: 'channelPostsYoutubeCategoryComedy' },
+  { id: '24', labelKey: 'channelPostsYoutubeCategoryEntertainment' },
+  { id: '25', labelKey: 'channelPostsYoutubeCategoryNewsPolitics' },
+  { id: '26', labelKey: 'channelPostsYoutubeCategoryHowtoStyle' },
+  { id: '27', labelKey: 'channelPostsYoutubeCategoryEducation' },
+  { id: '28', labelKey: 'channelPostsYoutubeCategoryScienceTech' },
+  { id: '29', labelKey: 'channelPostsYoutubeCategoryNonprofits' },
+];
 
 // story #3556(Phase2·FE, BE #3554/#3911 계약, 페드루 PO 確定 2026-09-06) — 영상
 // confirm 응답(channel_posts.py::ChannelPostVideoResponse). 규격 검증에 실제로 쓰인
@@ -316,6 +368,34 @@ function formatVideoAspectRatio(target: number): string {
 // 없으면 줄 자체를 안 그린다(호출부가 null 판정).
 function trimTrailingZeroOneDecimal(n: number): string {
   return n.toFixed(1).replace(/\.0$/, '');
+}
+
+// story #3815 PR4 CHANGES(페드루 PO 決定 2026-09-12 15:17Z) — video_max_bytes가
+// GB대(YouTube 2GB 등)에 닿으면 formatFileSize(MB 상한, "파일 크기 포맷 재구현
+// 금지" 규율의 재사용 대상)가 "2048.0 MB"로 어색하게 뜬다. GB 경계를 넘을 때만
+// GB로 전환+끝수 0 제거("2.0 GB"가 아니라 "2 GB") — MB 이하 기존 표기는 그대로
+// (formatFileSize 그대로 재사용, 회귀 0).
+function formatVideoMaxBytesSpec(bytes: number): string {
+  if (bytes < 1024 * 1024 * 1024) return formatFileSize(bytes);
+  return `${trimTrailingZeroOneDecimal(bytes / (1024 * 1024 * 1024))} GB`;
+}
+
+// story #3815 PR4 CHANGES 3(페드루 PO 決定 2026-09-12 15:29Z) — 「1~43200초」
+// 원시 초는 사람이 안 읽는다. minSeconds<=1(실 하한 없음 — YouTube 등)이면
+// 범위 대신 「최대 {사람 단위}」 하나로: ≥3600초=시간·60~3599초=분·그 밑=초.
+// minSeconds가 실 제약(threads 3초 등)이면 범위 그대로 원시 초(회귀 0 —
+// 「3~90초」가 90을 "1.5분"으로 바꾸지 않는다, 하한이 실 제약인 채널은 범위
+// 자체가 사람에게 이미 익숙한 짧은 초 단위라 굳이 안 바꾼다는 PO 明示).
+function formatVideoDurationBound(seconds: number, t: (key: string, values?: Record<string, string | number>) => string): string {
+  if (seconds >= 3600) return t('channelPostsVideoSpecDurationHours', { n: trimTrailingZeroOneDecimal(seconds / 3600) });
+  if (seconds >= 60) return t('channelPostsVideoSpecDurationMinutes', { n: trimTrailingZeroOneDecimal(seconds / 60) });
+  return t('channelPostsVideoSpecDurationSeconds', { n: seconds });
+}
+function formatVideoDurationSpec(
+  minSeconds: number, maxSeconds: number, t: (key: string, values?: Record<string, string | number>) => string,
+): string {
+  if (minSeconds <= 1) return t('channelPostsVideoSpecDurationMax', { duration: formatVideoDurationBound(maxSeconds, t) });
+  return t('channelPostsVideoSpecDurationRange', { minSeconds, maxSeconds });
 }
 function formatVideoMetaLine(
   v: { durationSeconds?: number; width?: number; height?: number; codec?: string; originalBytes?: number },
@@ -793,6 +873,23 @@ export default function ChannelPostEditPage() {
   // 그대로 실린다. 빈 배열=스레드 아님(channel_payload 자체를 null로 보낸다).
   const [threadSegments, setThreadSegments] = useState<string[]>([]);
 
+  // story #3815(Phase3·3-5 PR4, 페드루 PO 確定 2026-09-12) — image_required와
+  // 동형(어댑터 성질, 하드코딩 금지 축). false="아직 모른다/미지원".
+  const [videoRequired, setVideoRequired] = useState(false);
+  // thread_max_segments와 동형(0/false="이 채널은 이 필드 블록 자체가 없다") —
+  // 「제목·태그·카테고리·공개범위」 카드 렌더 여부를 이 값 하나로 가른다.
+  const [youtubeMetadataEnabled, setYoutubeMetadataEnabled] = useState(false);
+  // 플랫폼(Sprintable 자체 OAuth 앱) 감사 미완 — 고객·연결 무관 앱 전체 축(PO 決定②).
+  const [youtubePrivacyLocked, setYoutubePrivacyLocked] = useState(false);
+  // channel_payload.youtube 그대로(저장 시 재조립). title 필수(youtubeMetadataEnabled
+  // 일 때만 상신을 막는 사유가 된다 — imageRequiredAndMissing과 동형 관례).
+  const [youtubeTitle, setYoutubeTitle] = useState('');
+  // 쉼표 구분 원문 그대로 편집(저장 시에만 분리·trim). 배열 state로 바로 들고
+  // 있으면 "쉼표 입력 중" 사용자 타이핑 흐름이 매 keypress마다 끊긴다.
+  const [youtubeTagsRaw, setYoutubeTagsRaw] = useState('');
+  const [youtubeCategoryId, setYoutubeCategoryId] = useState<string>('');
+  const [youtubePrivacyStatus, setYoutubePrivacyStatus] = useState<'public' | 'unlisted' | 'private'>('private');
+
   const [text, setText] = useState('');
   // story #3517(BE #3867 조각②, PO 정정 2026-09-05) — 댓글 「작업으로 전환」
   // 다이얼로그의 「게시물 제목」 prefill. 채널 포스트엔 정식 제목이 없다 — 1순위는
@@ -925,6 +1022,13 @@ export default function ChannelPostEditPage() {
           setLinkUrl(latest.link_url ?? '');
           // story #3808(PR5b-2) — 스레드 이어쓰기 목록도 최신 버전 기준으로 seed.
           setThreadSegments(latest.channel_payload?.thread ?? []);
+          // story #3815(PR4, PO 正정) — YouTube 메타데이터도 최신 버전 기준으로
+          // seed(thread와 동형 관례, channel_payload 최상위 camelCase). 없으면
+          // 빈 값으로(지어내지 않는다 — 새 초안은 항상 이 상태).
+          setYoutubeTitle(latest.channel_payload?.title ?? '');
+          setYoutubeTagsRaw(latest.channel_payload?.tags?.join(', ') ?? '');
+          setYoutubeCategoryId(latest.channel_payload?.categoryId ?? '');
+          setYoutubePrivacyStatus(latest.channel_payload?.privacyStatus ?? 'private');
           // story #3550 — N장 목록(현재 버전 기준)도 초기 로드 때 같이 가져온다.
           // 실패해도 페이지 전체를 막지 않는다(첨부 0장으로 보이는 것과 "조회
           // 실패"를 이 자리에서 구별해 봐야 아직 아무 UI도 없다 — 빈 배열 유지).
@@ -979,6 +1083,14 @@ export default function ChannelPostEditPage() {
             }
             // story #3808(PR5b-2) — image_max_count와 동형 관례, 하드코딩 금지 축.
             if (conn) setThreadMaxSegments(conn.thread_max_segments);
+            // story #3815(PR4) — video_required·youtube_metadata_required·privacy_locked
+            // 그대로 읽는다(image_required·thread_max_segments와 동형 관례,
+            // 하드코딩 금지 축).
+            if (conn) {
+              setVideoRequired(conn.video_required);
+              setYoutubeMetadataEnabled(conn.youtube_metadata_required);
+              setYoutubePrivacyLocked(conn.privacy_locked);
+            }
           }
 
           // AC7 — 한도 잔량은 별도 왕복(휴먼 전용 엔드포인트, provider 실조회라 느릴 수
@@ -1119,6 +1231,22 @@ export default function ChannelPostEditPage() {
     setSaving(true);
     setSaveMessage(null);
     try {
+      // story #3808(PR5b-2)·#3815(PR4, PO 正정 2026-09-12 13:26Z) — 스레드·YouTube
+      // 메타데이터가 같은 슬롯을 공유한다(신규 컬럼 0). YouTube 필드는 channel_payload
+      // «최상위»에 camelCase로(중첩 객체 아님 — BE 4225 `_validate_youtube_metadata`가
+      // 최상위 키를 그대로 읽는다). 둘 다 비면 channel_payload 자체를 null로(§ 대칭
+      // 그대로 — 빈 값을 "채널 성질이 있다"로 오독하지 않는다).
+      const channelPayload: {
+        thread?: string[]; title?: string; tags?: string[]; categoryId?: string | null;
+        privacyStatus?: 'public' | 'unlisted' | 'private';
+      } = {};
+      if (threadSegments.length > 0) channelPayload.thread = threadSegments;
+      if (youtubeMetadataEnabled) {
+        channelPayload.title = youtubeTitle.trim();
+        channelPayload.tags = youtubeTagsRaw.split(',').map((tag) => tag.trim()).filter(Boolean);
+        channelPayload.categoryId = youtubeCategoryId || null;
+        channelPayload.privacyStatus = youtubePrivacyStatus;
+      }
       const res = await fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1127,11 +1255,7 @@ export default function ChannelPostEditPage() {
           connection_id: draft.connection_id,
           text,
           link_url: linkUrl.trim() || null,
-          // story #3808(PR5b-2) — 스레드 이어쓰기 0개면 channel_payload 자체를
-          // null로 보낸다(빈 배열을 "스레드다"로 오독하는 BE 판정과 어긋나지
-          // 않게, _validate_thread_segments/list_channel_post_drafts 둘 다
-          // "2개 미만=스레드 아님" 판정과 대칭).
-          channel_payload: threadSegments.length > 0 ? { thread: threadSegments } : null,
+          channel_payload: Object.keys(channelPayload).length > 0 ? channelPayload : null,
         }),
       });
       if (res.ok) {
@@ -1165,7 +1289,7 @@ export default function ChannelPostEditPage() {
   // AC5 — 상신은 휴먼 전용이 아니다(actor_type 가드 없음) — 이 화면 자체는 휴먼만
   // 접근하므로 버튼 노출 자체엔 영향 없다. AC6 — 초과 상태면 버튼을 비활성화한다.
   const handleSubmitForApproval = async (scheduledAt?: string) => {
-    if (!orgId || !draft || isOverLimit || hasBlockingViolations || hasThreadBlockingIssue || imageUploadInProgress || videoUploadInProgress || imageRequiredAndMissing) return;
+    if (!orgId || !draft || isOverLimit || hasBlockingViolations || hasThreadBlockingIssue || imageUploadInProgress || videoUploadInProgress || imageRequiredAndMissing || videoRequiredAndMissing || youtubeTitleMissing || youtubeTagsTooLong) return;
     const latest = versions[versions.length - 1];
     if (!latest) return;
     if (scheduledAt) setScheduleServerError(null);
@@ -2070,6 +2194,22 @@ export default function ChannelPostEditPage() {
   // 이제 이 배열의 길이로 정확히 난다.
   const imageRequiredAndMissing = Boolean(imageSpec?.imageRequired) && images.length === 0 && !imageUploadInProgress;
 
+  // story #3815(Phase3·3-5 PR4, 페드루 PO 確定 2026-09-12) — video_required와
+  // 동형(imageRequiredAndMissing 관례 그대로) — 영상 업로드 진행 中엔 이 사유를
+  // 안 보인다(업로드가 끝나면 풀리는 조건이라 그동안은 "업로드가 끝나면 된다"가
+  // 맞는 말).
+  const videoRequiredAndMissing = videoRequired && !video && !videoUploadInProgress;
+  // youtube_metadata_required 채널은 제목이 필수(YouTube API 자체 요구 — 빈 제목
+  // 업로드는 provider가 거부한다). 공백만 있는 제목도 미입력과 동형 취급.
+  const youtubeTitleMissing = youtubeMetadataEnabled && youtubeTitle.trim().length === 0;
+  // story #3815 PR4 그라운딩(2026-09-12, BE 4225 실측) — 발견 즉시 수정: BE
+  // `_validate_youtube_metadata`의 tags 합 500자 초과 예외는 라우터 어디서도
+  // catch되지 않아(grep 확認) 그대로 통과하면 사용자에게 맨 500(코드 없는 봉투)이
+  // 뜬다. 경고만으로 두면 이 사각을 그대로 방치하는 것 — title 필수와 같은 강도로
+  // 상신 자체를 막는다(경고 문구는 그대로 두되 이제 진짜 게이트가 된다).
+  const youtubeTagsTooLong = youtubeMetadataEnabled
+    && youtubeTagsRaw.split(',').map((tag) => tag.trim()).filter(Boolean).join('').length > 500;
+
   return (
     <div className="mx-auto w-full max-w-2xl space-y-6 p-6">
       <div className="space-y-1">
@@ -2225,17 +2365,25 @@ export default function ChannelPostEditPage() {
           <span data-testid="channel-post-account-label">{accountLabel ?? t('originAuthorUnknown')}</span>
         </div>
         {/* AC7 — 한도 잔량은 조회값이고 조회 실패도 상태다. 발행 버튼은 이 화면에 없으므로
-            (PR2 몫) 여기서는 표시만 — 어떤 상태든 편집·상신을 막지 않는다. */}
-        <div className="flex items-center justify-between">
-          <span className="text-muted-foreground">{t('channelPostsApprovalLimitLabel')}</span>
-          <span data-testid="channel-post-limit">
-            {limit.status === 'loading'
-              ? t('originAuthorUnknown')
-              : limit.status === 'failed'
-                ? t('channelPostsLimitCheckFailed')
-                : `${limit.quotaTotal - limit.quotaUsage} / ${limit.quotaTotal}`}
-          </span>
-        </div>
+            (PR2 몫) 여기서는 표시만 — 어떤 상태든 편집·상신을 막지 않는다.
+            story #3815 PR4 CHANGES(페드루 PO 決定 2026-09-12 15:17Z) — youtube/
+            youtube_sandbox는 이 줄을 숨긴다. 이 「남은 게시」는 연결별 발행 횟수
+            축(publishing-limit, BE get_publishing_limit=관대값 자리표)인데
+            YouTube엔 그 개념 자체가 없고, 같은 화면의 연결 카드가 이미 「오늘
+            사용량」(플랫폼 공유 units 축)을 보여준다 — 같은 사실을 다른 낱말·
+            다른 단위로 두 번 말하면 헷갈린다(정본은 사용량 줄 하나). */}
+        {draft.channel !== 'youtube' && draft.channel !== 'youtube_sandbox' ? (
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground">{t('channelPostsApprovalLimitLabel')}</span>
+            <span data-testid="channel-post-limit">
+              {limit.status === 'loading'
+                ? t('originAuthorUnknown')
+                : limit.status === 'failed'
+                  ? t('channelPostsLimitCheckFailed')
+                  : `${limit.quotaTotal - limit.quotaUsage} / ${limit.quotaTotal}`}
+            </span>
+          </div>
+        ) : null}
         {/* AC8 — UTM은 화면이 붙이지 않고 붙은 것을 보인다. link_url이 없으면 그 줄
             자체를 그리지 않는다. */}
         {versions[versions.length - 1]?.tagged_link_preview ? (
@@ -2310,6 +2458,22 @@ export default function ChannelPostEditPage() {
             <p className="text-xs text-muted-foreground" data-testid="channel-post-published-info-last-published-notice">
               {t('channelPostsPublishedInfoLastPublishedNotice')}
             </p>
+          ) : null}
+          {/* story #3815(Phase3·3-5 PR4, PO 決定②) — 플랫폼 감사 미완으로 실제로
+              비공개 게시된 사실을 그대로 배지로. 선례 없음(신규 UI).
+              PO 決定(2026-09-12 14:59Z) — 판정은 이 발행물 자체의 역사적 사실
+              (draft.publication_privacy_locked, BE 갭이라 지금은 항상 undefined)이
+              있으면 그 값을 우선한다 — 없을 때만 연결 레벨 현재 privacy_locked로
+              대리(임시, 나중에 감사가 풀려도 "그때 잠겼던" 과거 발행물이 안 잠긴
+              것처럼 보이는 사각의 원인 — 디디 소 PR이 필드를 노출하면 대리가 저절로
+              걷힌다, `??` 우선순위 그대로 유지). */}
+          {youtubeMetadataEnabled && (draft.publication_privacy_locked ?? youtubePrivacyLocked) ? (
+            <span
+              className="inline-flex w-fit items-center rounded-full border border-border px-1.5 py-0.5 text-xs text-muted-foreground"
+              data-testid="channel-post-youtube-published-private-badge"
+            >
+              {t('channelPostsYoutubePublishedPrivateBadge')}
+            </span>
           ) : null}
           {draft.permalink ? (
             <div className="flex items-center justify-between">
@@ -2707,6 +2871,15 @@ export default function ChannelPostEditPage() {
                 : `${textLength}`}
           </span>
         </div>
+        {/* story #3815(Phase3·3-5 PR4, 페드루 PO 確定 2026-09-12) — 챕터 도움
+            문구(youtube_metadata_required 채널 전용, 신규 필드 0 — 기존 text가
+            그대로 YouTube의 "설명"란으로 나간다). Ghost의 PASTED_SECRET_PLAN_
+            NOTE_KEY와 동형 원칙 — 이 축이 없는 채널은 그냥 안 그린다. */}
+        {youtubeMetadataEnabled ? (
+          <p className="text-xs text-muted-foreground" data-testid="channel-post-youtube-chapters-hint">
+            {t('channelPostsYoutubeChaptersHint')}
+          </p>
+        ) : null}
         {/* story #3472 2부(유나 §16-7) — "그 필드 아래" 그 필드 것만 목록. 경고색
             없음(아직 아무것도 실패하지 않았다·사람이 고치는 중). FailureActionBadge
             동형 아님(하우스 폼 검증 관례=필드 아래 한 줄, channel-post-text-field-
@@ -2805,6 +2978,100 @@ export default function ChannelPostEditPage() {
         </Card>
       ) : null}
 
+      {/* story #3815(Phase3·3-5 PR4, 페드루 PO 確定 2026-09-12) — YouTube 구조화
+          메타데이터(제목·태그·카테고리·공개범위). youtube_metadata_required<=0/false
+          (어댑터 미선언)이면 이 카드 자체를 안 그린다(thread_max_segments·
+          image_required와 동형 관례 — 채널 이름 하드코딩 금지). */}
+      {youtubeMetadataEnabled ? (
+        <Card className="space-y-3 p-3 text-sm" data-testid="channel-post-youtube-metadata-editor">
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground" htmlFor="channel-post-youtube-title">
+              {t('channelPostsYoutubeTitleLabel')}
+            </label>
+            <Input
+              id="channel-post-youtube-title"
+              value={youtubeTitle}
+              onChange={(e) => setYoutubeTitle(e.target.value.slice(0, 100))}
+              maxLength={100}
+              data-testid="channel-post-youtube-title-field"
+            />
+            <span className="text-xs text-muted-foreground" data-testid="channel-post-youtube-title-char-count">
+              {`${youtubeTitle.length} / 100`}
+            </span>
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground" htmlFor="channel-post-youtube-tags">
+              {t('channelPostsYoutubeTagsLabel')}
+            </label>
+            <Input
+              id="channel-post-youtube-tags"
+              value={youtubeTagsRaw}
+              onChange={(e) => setYoutubeTagsRaw(e.target.value)}
+              placeholder={t('channelPostsYoutubeTagsPlaceholder')}
+              // story #3815 PR4 CHANGES 4(페드루 PO 決定 2026-09-12 15:29Z) —
+              // 카운터·차단·필드가 한 세계여야 한다(카운터만 빨강이고 테두리는
+              // 포커스 초록이면 어긋난 신호). aria-invalid는 <Input> 프리미티브가
+              // 이미 aria-invalid:border-destructive 변형을 내장하고 있어(디자인
+              // 시스템 계약 그대로 재사용, 새 스타일 발명 0) 이 값만 얹으면 된다.
+              aria-invalid={youtubeTagsTooLong}
+              data-testid="channel-post-youtube-tags-field"
+            />
+            {/* story #3815 — 합 500자(쉼표·공백 제외 각 태그 길이 합, BE
+                `_validate_youtube_metadata` 실측 상한). 그라운딩 재확認(2026-09-12,
+                4225 실 소스) — 이 위반은 라우터 어디서도 catch되지 않아 넘기면
+                맨 500이 뜬다(§youtubeTagsTooLong). 그래서 카운터만이 아니라
+                상신 자체를 막는 실제 게이트다. */}
+            <span
+              className={youtubeTagsTooLong ? 'text-xs text-destructive' : 'text-xs text-muted-foreground'}
+              data-testid="channel-post-youtube-tags-char-count"
+            >
+              {`${youtubeTagsRaw.split(',').map((tag) => tag.trim()).filter(Boolean).join('').length} / 500`}
+            </span>
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground" htmlFor="channel-post-youtube-category">
+              {t('channelPostsYoutubeCategoryLabel')}
+            </label>
+            <select
+              id="channel-post-youtube-category"
+              value={youtubeCategoryId}
+              onChange={(e) => setYoutubeCategoryId(e.target.value)}
+              className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+              data-testid="channel-post-youtube-category-field"
+            >
+              <option value="">{t('channelPostsYoutubeCategoryNone')}</option>
+              {YOUTUBE_CATEGORY_IDS.map((c) => (
+                <option key={c.id} value={c.id}>{t(c.labelKey)}</option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground" htmlFor="channel-post-youtube-privacy">
+              {t('channelPostsYoutubePrivacyLabel')}
+            </label>
+            <select
+              id="channel-post-youtube-privacy"
+              value={youtubePrivacyLocked ? 'private' : youtubePrivacyStatus}
+              onChange={(e) => setYoutubePrivacyStatus(e.target.value as 'public' | 'unlisted' | 'private')}
+              disabled={youtubePrivacyLocked}
+              className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+              data-testid="channel-post-youtube-privacy-field"
+            >
+              <option value="public">{t('channelPostsYoutubePrivacyPublic')}</option>
+              <option value="unlisted">{t('channelPostsYoutubePrivacyUnlisted')}</option>
+              <option value="private">{t('channelPostsYoutubePrivacyPrivate')}</option>
+            </select>
+            {/* story #3815(PO 決定②) — 플랫폼 감사 미완 사실 고지(연결·고객 무관
+                앱 전체 축 — "확인 못했다"류 0, 실제로 잠겨 있다는 사실 그대로). */}
+            {youtubePrivacyLocked ? (
+              <p className="text-xs text-muted-foreground" data-testid="channel-post-youtube-privacy-locked-note">
+                {t('channelPostsYoutubePrivacyLockedNote')}
+              </p>
+            ) : null}
+          </div>
+        </Card>
+      ) : null}
+
       {/* story #3556(§17-23①, 유나 確定 2026-09-06) — video_max_bytes>0일 때만
           슬롯을 그린다(어댑터가 영상을 선언하지 않으면 슬롯 자체가 없다). 자리는
           이미지(커버) 구역 «위»(커버는 영상에 딸린 것이므로 영상이 먼저 온다).
@@ -2816,13 +3083,19 @@ export default function ChannelPostEditPage() {
             <span className="text-muted-foreground">{t('channelPostsVideoAttachLabel')}</span>
           </div>
           <p className="text-xs text-muted-foreground" data-testid="channel-post-video-spec-tag">
-            {t('channelPostsVideoSpecTag', {
-              maxBytes: formatFileSize(videoSpec.maxBytes),
-              minSeconds: videoSpec.minSeconds,
-              maxSeconds: videoSpec.maxSeconds,
-              aspect: formatVideoAspectRatio(videoSpec.aspectTarget),
-              codecs: formatVideoCodecs(videoSpec.codecs),
-            })}
+            {/* story #3815 PR4 CHANGES(페드루 PO 決定 2026-09-12 15:17Z·15:29Z) —
+                비율 제약이 없으면(aspectTarget<=0, YouTube 등) 그 구간을 아예
+                생략한다(«없는 것을 수로 그리는» 것 방지 — 예전엔 1/0=Infinity가
+                그대로 "1:Infinity"로 떴다). 용량은 GB대에서 끝수 0을 뗀다
+                (formatVideoMaxBytesSpec). 길이 하한이 실 제약 아니면(≤1초)
+                사람 단위 「최대 …」로, 실 제약이면 원시 초 범위 그대로(회귀 0,
+                formatVideoDurationSpec). */}
+            {[
+              t('channelPostsVideoSpecTagSize', { maxBytes: formatVideoMaxBytesSpec(videoSpec.maxBytes) }),
+              formatVideoDurationSpec(videoSpec.minSeconds, videoSpec.maxSeconds, t),
+              videoSpec.aspectTarget > 0 ? formatVideoAspectRatio(videoSpec.aspectTarget) : null,
+              formatVideoCodecs(videoSpec.codecs),
+            ].filter(Boolean).join(' · ')}
           </p>
           {video ? (
             <div className="space-y-1">
@@ -3079,7 +3352,7 @@ export default function ChannelPostEditPage() {
         </Button>
         <Button
           onClick={() => void handleSubmitForApproval()}
-          disabled={submitting || isOverLimit || hasBlockingViolations || hasThreadBlockingIssue || imageUploadInProgress || videoUploadInProgress || imageRequiredAndMissing}
+          disabled={submitting || isOverLimit || hasBlockingViolations || hasThreadBlockingIssue || imageUploadInProgress || videoUploadInProgress || imageRequiredAndMissing || videoRequiredAndMissing || youtubeTitleMissing || youtubeTagsTooLong}
           data-testid="channel-post-submit-button"
         >
           {submitting ? t('submitPendingCta') : t('submitCta')}
@@ -3091,7 +3364,7 @@ export default function ChannelPostEditPage() {
         <Button
           variant="outline"
           onClick={() => setScheduleDialogOpen(true)}
-          disabled={submitting || isOverLimit || hasBlockingViolations || hasThreadBlockingIssue || blockedByCommandInFlight || imageUploadInProgress || videoUploadInProgress || imageRequiredAndMissing}
+          disabled={submitting || isOverLimit || hasBlockingViolations || hasThreadBlockingIssue || blockedByCommandInFlight || imageUploadInProgress || videoUploadInProgress || imageRequiredAndMissing || videoRequiredAndMissing || youtubeTitleMissing || youtubeTagsTooLong}
           data-testid="channel-post-schedule-submit-button"
         >
           {t('channelPostsScheduleSubmitCta')}
@@ -3163,6 +3436,27 @@ export default function ChannelPostEditPage() {
       {!isOverLimit && !hasBlockingViolations && imageRequiredAndMissing ? (
         <p className="text-xs text-muted-foreground" data-testid="channel-post-image-required-reason">
           {t('channelPostsImageRequiredReason')}
+        </p>
+      ) : null}
+      {/* story #3815(PR4) — image_required 배너와 동형 자리·관례(영상 필수 채널,
+          업로드 中엔 이 사유를 안 보인다 — videoRequiredAndMissing 자체가
+          !videoUploadInProgress를 조건에 넣어 위 진행-中 배너와 동시 노출을 막는다). */}
+      {!isOverLimit && !hasBlockingViolations && videoRequiredAndMissing ? (
+        <p className="text-xs text-muted-foreground" data-testid="channel-post-video-required-reason">
+          {t('channelPostsVideoRequiredReason')}
+        </p>
+      ) : null}
+      {/* story #3815(PR4) — YouTube 제목 필수(youtube_metadata_required 채널만). */}
+      {!isOverLimit && !hasBlockingViolations && youtubeTitleMissing ? (
+        <p className="text-xs text-muted-foreground" data-testid="channel-post-youtube-title-required-reason">
+          {t('channelPostsYoutubeTitleRequiredReason')}
+        </p>
+      ) : null}
+      {/* story #3815 PR4 그라운딩(2026-09-12, BE 4225 실측) — 태그 합 500자 초과는
+          BE가 어디서도 catch 안 하는 예외라(맨 500 사각) 상신 자체를 막는다. */}
+      {!isOverLimit && !hasBlockingViolations && youtubeTagsTooLong ? (
+        <p className="text-xs text-muted-foreground" data-testid="channel-post-youtube-tags-too-long-reason">
+          {t('channelPostsYoutubeTagsTooLongReason')}
         </p>
       ) : null}
       {!isOverLimit && !hasBlockingViolations && blockedByCommandInFlight ? (

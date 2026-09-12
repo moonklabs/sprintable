@@ -91,6 +91,9 @@ const DRAFT_DETAIL = {
   // story #3499(PO 確定 2026-09-05) — 최신 ChannelPublication.id. BE #3844 조각4
   // (미착지) 의존, 기본값 null(대부분 테스트가 이 스토리와 무관).
   publication_id: null as string | null,
+  // story #3815 PR4(페드루 PO 決定 2026-09-12 14:59Z) — BE 갭(디디 소 PR 착지 전
+  // 항상 undefined 취급, 기본값 null로 대부분 테스트가 회귀 0).
+  publication_privacy_locked: null as boolean | null,
   // story 15e481ce(#3453 AC2) — 이 채널 변형이 파생된 원문.
   source_content_item_id: null as string | null,
   // story #3457 후속(BE #3817 착지분) — 원문 제목 + staleness 판정용 버전 id 2종.
@@ -238,6 +241,12 @@ function stubFetch(opts: {
   // 재사용, threadMaxSegments>0일 때만 발동)가 반영할 서버 값 — draftAfterRetry와
   // 동형 관례. thread_segments 배열의 실측 갱신을 재현하는 용도.
   draftAfterPublish?: Record<string, unknown>;
+  // story #3815(Phase3·3-5 PR4, 페드루 PO 確定 2026-09-12) — YouTube 능력 플래그 3종
+  // (thread_max_segments와 동형 관례, 기본값은 기존 시나리오 전부 회귀 0이 되도록
+  // false/미지원).
+  videoRequired?: boolean;
+  youtubeMetadataRequired?: boolean;
+  privacyLocked?: boolean;
 }) {
   const versions = opts.versions ?? [VERSION_1];
   const draftDetail: Record<string, unknown> = { ...DRAFT_DETAIL, ...opts.draftDetail };
@@ -299,6 +308,9 @@ function stubFetch(opts: {
               video_aspect_tolerance: opts.videoAspectTolerance ?? 0,
               video_codecs: opts.videoCodecs ?? [],
               thread_max_segments: opts.threadMaxSegments ?? 0,
+              video_required: opts.videoRequired ?? false,
+              youtube_metadata_required: opts.youtubeMetadataRequired ?? false,
+              privacy_locked: opts.privacyLocked ?? false,
             }],
             error: null, meta: null,
           }),
@@ -898,6 +910,26 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
 
     expect(container.querySelector('[data-testid="channel-post-limit"]')?.textContent)
       .toBe(koMessages.content.channelPostsLimitCheckFailed);
+  });
+
+  // story #3815 PR4 CHANGES(페드루 PO 決定 2026-09-12 15:17Z, 캡처 中 실측) —
+  // YouTube엔 연결별 발행 횟수 한도 개념이 없고(BE get_publishing_limit=관대값
+  // 자리표), 연결 카드가 이미 「오늘 사용량」(플랫폼 공유 units 축)을 보인다 —
+  // 같은 사실을 다른 낱말·단위로 두 번 말하는 자리(「남은 게시」)를 숨긴다.
+  it.each(['youtube', 'youtube_sandbox'])('%s 채널 — 「남은 게시」 줄 자체가 안 뜬다', async (channel) => {
+    stubFetch({ limitOk: { quota_usage: 3, quota_total: 250 }, draftDetail: { channel } });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-limit"]')).toBeNull();
+  });
+
+  it('threads 등 다른 채널은 「남은 게시」 줄이 그대로 뜬다(회귀 0)', async () => {
+    stubFetch({ limitOk: { quota_usage: 3, quota_total: 250 }, draftDetail: { channel: 'threads' } });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-limit"]')?.textContent).toBe('247 / 250');
   });
 
   // 카디르 QA(2026-09-04)·유나 정밀화 — 승인 카드의 게이트 상태는 이제 목록과 같은
@@ -4895,6 +4927,81 @@ describe('ChannelPostEditPage — 릴스 영상 슬롯(story #3556)', () => {
     expect(tag).toContain('1.5:1');
   });
 
+  // story #3815 PR4 CHANGES(페드루 PO 決定 2026-09-12 15:17Z, 캡처 中 실측) — 비율
+  // 제약 자체가 없으면(YouTube 등 aspectTarget=0) 예전엔 1/0=Infinity가 그대로
+  // "1:Infinity"로 떴다(없는 것을 수로 그리는 결함) — 그 구간을 아예 생략한다.
+  it('⭐비율 제약 없음(aspectTarget=0) — 「1:Infinity」 대신 그 구간 자체가 생략된다', async () => {
+    stubFetch({
+      videoMaxBytes: 100 * 1024 * 1024, videoMaxSeconds: 90, videoMinSeconds: 3,
+      videoAspectTarget: 0, videoCodecs: ['avc1', 'hvc1'],
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const tag = container.querySelector('[data-testid="channel-post-video-spec-tag"]')?.textContent;
+    expect(tag).not.toContain('Infinity');
+    expect(tag).toBe('최대 100.0 MB · 3~90초 · H.264/HEVC');
+  });
+
+  // story #3815 PR4 CHANGES(페드루 PO 決定 2026-09-12 15:17Z) — GB대 용량은
+  // "2048.0 MB"가 아니라 "2 GB"(끝수 0 제거)로. MB 이하 표기는 회귀 0(위 테스트들
+  // 그대로 "100.0 MB" 유지 확認됨).
+  it('⭐GB대 용량(2GB) — "2048.0 MB" 아니라 "2 GB"(끝수 0 제거)', async () => {
+    stubFetch({
+      videoMaxBytes: 2 * 1024 * 1024 * 1024, videoMaxSeconds: 43200, videoMinSeconds: 1,
+      videoAspectTarget: 0, videoCodecs: ['avc1'],
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const tag = container.querySelector('[data-testid="channel-post-video-spec-tag"]')?.textContent;
+    expect(tag).toBe('최대 2 GB · 최대 12시간 · H.264');
+  });
+
+  // story #3815 PR4 CHANGES 3(페드루 PO 決定 2026-09-12 15:29Z) — 하한이 실
+  // 제약 아니면(≤1초) 원시 초 대신 사람 단위. 경계 3599/3600 뮤테이션 대상.
+  it('⭐길이 하한 없음(1초)·상한 60~3599초대 — 「분」 단위로 사람이 읽는 값', async () => {
+    stubFetch({
+      videoMaxBytes: 100 * 1024 * 1024, videoMaxSeconds: 90, videoMinSeconds: 1,
+      videoAspectTarget: 0.5625, videoCodecs: ['avc1'],
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const tag = container.querySelector('[data-testid="channel-post-video-spec-tag"]')?.textContent;
+    expect(tag).toBe('최대 100.0 MB · 최대 1.5분 · 9:16 · H.264');
+  });
+
+  it('⭐경계 3599초 — 아직 「분」(시간 아님)', async () => {
+    stubFetch({
+      videoMaxBytes: 100 * 1024 * 1024, videoMaxSeconds: 3599, videoMinSeconds: 1,
+      videoAspectTarget: 0, videoCodecs: ['avc1'],
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const tag = container.querySelector('[data-testid="channel-post-video-spec-tag"]')?.textContent;
+    expect(tag).toBe('최대 100.0 MB · 최대 60분 · H.264');
+  });
+
+  it('⭐경계 3600초 — 「시간」으로 넘어간다', async () => {
+    stubFetch({
+      videoMaxBytes: 100 * 1024 * 1024, videoMaxSeconds: 3600, videoMinSeconds: 1,
+      videoAspectTarget: 0, videoCodecs: ['avc1'],
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const tag = container.querySelector('[data-testid="channel-post-video-spec-tag"]')?.textContent;
+    expect(tag).toBe('최대 100.0 MB · 최대 1시간 · H.264');
+  });
+
+  it('⭐길이 하한이 실 제약(3초)이면 사람 단위로 안 바꾸고 원시 초 범위 그대로(회귀 0)', async () => {
+    stubFetch({
+      videoMaxBytes: 100 * 1024 * 1024, videoMaxSeconds: 90, videoMinSeconds: 3,
+      videoAspectTarget: 0.5625, videoCodecs: ['avc1'],
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const tag = container.querySelector('[data-testid="channel-post-video-spec-tag"]')?.textContent;
+    expect(tag).toBe('최대 100.0 MB · 3~90초 · 9:16 · H.264');
+  });
+
   it('⭐첨부 전 트리거 라벨은 「영상 선택」, 이미지 구역 라벨은 「이미지 첨부」(영상 없음)', async () => {
     stubFetch({ videoMaxBytes: 100 * 1024 * 1024, imageMaxCount: 1 });
     await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
@@ -5484,5 +5591,240 @@ describe('ChannelPostEditPage — 스레드 이어쓰기(story #3808 PR5b-2, 페
     await flush();
 
     expect(container.querySelector('[data-testid="channel-post-submit-button"]')?.hasAttribute('disabled')).toBe(false);
+  });
+});
+
+// story #3815(Phase3·3-5 PR4, 페드루 PO 確定 2026-09-12) — YouTube 구조화 메타데이터
+// (제목·태그·카테고리·공개범위)+영상 필수+감사 미완 공개범위 잠금.
+describe('ChannelPostEditPage — YouTube 메타데이터(story #3815 PR4)', () => {
+  it('youtube_metadata_required=false(다른 채널)이면 카드 자체를 안 그린다', async () => {
+    stubFetch({ youtubeMetadataRequired: false });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-youtube-metadata-editor"]')).toBeNull();
+  });
+
+  it('youtube_metadata_required=true — 카드가 뜨고 제목·태그·카테고리·공개범위 필드가 모두 있다', async () => {
+    stubFetch({ youtubeMetadataRequired: true });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-youtube-metadata-editor"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="channel-post-youtube-title-field"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="channel-post-youtube-tags-field"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="channel-post-youtube-category-field"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="channel-post-youtube-privacy-field"]')).not.toBeNull();
+    // 챕터 도움 문구도 이 게이트 밑(youtube만).
+    expect(container.querySelector('[data-testid="channel-post-youtube-chapters-hint"]')).not.toBeNull();
+  });
+
+  it('제목이 비어 있으면 사유가 뜨고 상신·예약 상신이 막히지만 저장은 그대로 활성', async () => {
+    stubFetch({ youtubeMetadataRequired: true });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-youtube-title-required-reason"]')).not.toBeNull();
+    expect((container.querySelector('[data-testid="channel-post-submit-button"]') as HTMLButtonElement).disabled).toBe(true);
+    expect((container.querySelector('[data-testid="channel-post-schedule-submit-button"]') as HTMLButtonElement).disabled).toBe(true);
+    expect((container.querySelector('[data-testid="channel-post-save-button"]') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('제목을 채우면 사유가 사라지고 상신이 풀린다', async () => {
+    stubFetch({ youtubeMetadataRequired: true });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const titleInput = container.querySelector('[data-testid="channel-post-youtube-title-field"]') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => { setter.call(titleInput, '제목'); titleInput.dispatchEvent(new Event('input', { bubbles: true })); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-youtube-title-required-reason"]')).toBeNull();
+    expect((container.querySelector('[data-testid="channel-post-submit-button"]') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  // story #3815 PR4 그라운딩(2026-09-12, BE 4225 실측) — 발견 즉시 수정: 태그 합
+  // 500자 초과는 BE가 어디서도 catch 안 하는 예외라(맨 500 사각) 상신 자체를 막는다.
+  it('태그 합계가 500자 초과 — 사유가 뜨고 상신이 막힌다(BE 미포착 예외 방지)', async () => {
+    stubFetch({ youtubeMetadataRequired: true });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const titleInput = container.querySelector('[data-testid="channel-post-youtube-title-field"]') as HTMLInputElement;
+    const inputSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => { inputSetter.call(titleInput, '제목'); titleInput.dispatchEvent(new Event('input', { bubbles: true })); });
+    const tagsInput = container.querySelector('[data-testid="channel-post-youtube-tags-field"]') as HTMLInputElement;
+    await act(async () => { inputSetter.call(tagsInput, 'a'.repeat(501)); tagsInput.dispatchEvent(new Event('input', { bubbles: true })); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-youtube-tags-too-long-reason"]')).not.toBeNull();
+    expect((container.querySelector('[data-testid="channel-post-submit-button"]') as HTMLButtonElement).disabled).toBe(true);
+    expect((container.querySelector('[data-testid="channel-post-schedule-submit-button"]') as HTMLButtonElement).disabled).toBe(true);
+    // 저장은 이미지/영상 필수 축과 무관(본문만 먼저 쓰는 길을 막지 않는다) — 같은 원칙.
+    expect((container.querySelector('[data-testid="channel-post-save-button"]') as HTMLButtonElement).disabled).toBe(false);
+    // story #3815 PR4 CHANGES 4(페드루 PO 決定 2026-09-12 15:29Z) — 카운터·차단·
+    // 필드가 한 세계(카운터만 빨강이고 테두리는 포커스 초록이면 어긋난 신호).
+    expect(tagsInput.getAttribute('aria-invalid')).toBe('true');
+  });
+
+  it('태그 합계가 500자 이하 — 필드는 aria-invalid 없음(정상 상태)', async () => {
+    stubFetch({ youtubeMetadataRequired: true });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const tagsInput = container.querySelector('[data-testid="channel-post-youtube-tags-field"]') as HTMLInputElement;
+    expect(tagsInput.getAttribute('aria-invalid')).toBe('false');
+  });
+
+  it('태그 합계가 500자 이하로 돌아오면 사유가 사라지고 상신이 풀린다', async () => {
+    stubFetch({ youtubeMetadataRequired: true });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const titleInput = container.querySelector('[data-testid="channel-post-youtube-title-field"]') as HTMLInputElement;
+    const inputSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => { inputSetter.call(titleInput, '제목'); titleInput.dispatchEvent(new Event('input', { bubbles: true })); });
+    const tagsInput = container.querySelector('[data-testid="channel-post-youtube-tags-field"]') as HTMLInputElement;
+    await act(async () => { inputSetter.call(tagsInput, 'a'.repeat(501)); tagsInput.dispatchEvent(new Event('input', { bubbles: true })); });
+    await flush();
+    await act(async () => { inputSetter.call(tagsInput, '짧은태그'); tagsInput.dispatchEvent(new Event('input', { bubbles: true })); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-youtube-tags-too-long-reason"]')).toBeNull();
+    expect((container.querySelector('[data-testid="channel-post-submit-button"]') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('video_required=true·영상 0개 — 사유가 뜨고 상신이 막힌다(image_required 동형)', async () => {
+    stubFetch({ videoRequired: true });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-video-required-reason"]')).not.toBeNull();
+    expect((container.querySelector('[data-testid="channel-post-submit-button"]') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('video_required=false(다른 채널)이면 영상 0개여도 사유가 안 뜬다', async () => {
+    stubFetch({ videoRequired: false });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-video-required-reason"]')).toBeNull();
+  });
+
+  it('privacy_locked=true — 공개범위 select가 비활성이고 잠금 안내 문구가 뜬다', async () => {
+    stubFetch({ youtubeMetadataRequired: true, privacyLocked: true });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const select = container.querySelector('[data-testid="channel-post-youtube-privacy-field"]') as HTMLSelectElement;
+    expect(select.disabled).toBe(true);
+    expect(select.value).toBe('private');
+    expect(container.querySelector('[data-testid="channel-post-youtube-privacy-locked-note"]')).not.toBeNull();
+  });
+
+  it('privacy_locked=false — 공개범위 select가 활성이고 잠금 안내 문구가 없다', async () => {
+    stubFetch({ youtubeMetadataRequired: true, privacyLocked: false });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const select = container.querySelector('[data-testid="channel-post-youtube-privacy-field"]') as HTMLSelectElement;
+    expect(select.disabled).toBe(false);
+    expect(container.querySelector('[data-testid="channel-post-youtube-privacy-locked-note"]')).toBeNull();
+  });
+
+  it('저장 시 title·tags·categoryId·privacyStatus가 channel_payload 최상위에 camelCase로 실린다(PO 正정 2026-09-12 13:26Z — BE 4225가 최상위 키를 읽는다)', async () => {
+    let savedBody: unknown;
+    stubFetch({
+      youtubeMetadataRequired: true,
+      onSave: (body) => { savedBody = body; return { status: 201, body: { draft_id: DRAFT_ID, version_id: 'v2', version: 2 } }; },
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const titleInput = container.querySelector('[data-testid="channel-post-youtube-title-field"]') as HTMLInputElement;
+    const inputSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => { inputSetter.call(titleInput, '제목'); titleInput.dispatchEvent(new Event('input', { bubbles: true })); });
+    const tagsInput = container.querySelector('[data-testid="channel-post-youtube-tags-field"]') as HTMLInputElement;
+    await act(async () => { inputSetter.call(tagsInput, '태그1, 태그2'); tagsInput.dispatchEvent(new Event('input', { bubbles: true })); });
+    const categorySelect = container.querySelector('[data-testid="channel-post-youtube-category-field"]') as HTMLSelectElement;
+    const selectSetter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')!.set!;
+    await act(async () => { selectSetter.call(categorySelect, '10'); categorySelect.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+    await act(async () => { (container.querySelector('[data-testid="channel-post-save-button"]') as HTMLButtonElement).click(); });
+    await flush();
+
+    expect(savedBody).toMatchObject({
+      channel_payload: { title: '제목', tags: ['태그1', '태그2'], categoryId: '10', privacyStatus: 'private' },
+    });
+  });
+
+  it('youtube_metadata_required=false면 저장 body의 channel_payload는 null(youtube 필드 자체가 없다)', async () => {
+    let savedBody: unknown;
+    stubFetch({
+      youtubeMetadataRequired: false,
+      onSave: (body) => { savedBody = body; return { status: 201, body: { draft_id: DRAFT_ID, version_id: 'v2', version: 2 } }; },
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    await act(async () => { (container.querySelector('[data-testid="channel-post-save-button"]') as HTMLButtonElement).click(); });
+    await flush();
+
+    expect(savedBody).toMatchObject({ channel_payload: null });
+  });
+
+  it('로드된 버전의 channel_payload(최상위 camelCase)가 편집기 필드에 그대로 seed된다(재편집)', async () => {
+    stubFetch({
+      youtubeMetadataRequired: true,
+      versions: [{ ...VERSION_1, channel_payload: { title: '기존 제목', tags: ['a', 'b'], categoryId: '20', privacyStatus: 'public' } }],
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    expect((container.querySelector('[data-testid="channel-post-youtube-title-field"]') as HTMLInputElement).value).toBe('기존 제목');
+    expect((container.querySelector('[data-testid="channel-post-youtube-tags-field"]') as HTMLInputElement).value).toBe('a, b');
+    expect((container.querySelector('[data-testid="channel-post-youtube-category-field"]') as HTMLSelectElement).value).toBe('20');
+    expect((container.querySelector('[data-testid="channel-post-youtube-privacy-field"]') as HTMLSelectElement).value).toBe('public');
+  });
+
+  // story #3815 PR4(페드루 PO 決定 2026-09-12 14:59Z) — 「게시됨(비공개)」 배지는
+  // draft.publication_privacy_locked(BE 갭이라 디디 소 PR 착지 전엔 항상 undefined)가
+  // 있으면 그 값을 우선하고, 없을 때만 연결 레벨 현재 privacy_locked로 대리한다.
+  describe('게시됨(비공개) 배지 — 발행물 필드 우선·연결 레벨 대리(임시)', () => {
+    const PUBLISHED_DRAFT_DETAIL = {
+      gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+      publication_status: 'published' as const, permalink: 'https://youtube-sandbox.invalid/watch?v=x',
+      external_id: 'sandbox-youtube-1', published_at: '2026-09-12T00:00:00Z', publication_id: 'pub-yt-1',
+    };
+
+    it('BE 필드 미노출(undefined) — 연결 레벨 privacy_locked=true로 대리해 배지가 뜬다', async () => {
+      stubFetch({ youtubeMetadataRequired: true, privacyLocked: true, draftDetail: PUBLISHED_DRAFT_DETAIL });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+
+      expect(container.querySelector('[data-testid="channel-post-youtube-published-private-badge"]')).not.toBeNull();
+    });
+
+    it('BE 필드가 false로 옴 — 연결이 지금 잠겨 있어도 그 발행물은 안 잠겼던 역사적 사실을 우선한다(배지 없음)', async () => {
+      stubFetch({
+        youtubeMetadataRequired: true, privacyLocked: true,
+        draftDetail: { ...PUBLISHED_DRAFT_DETAIL, publication_privacy_locked: false },
+      });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+
+      expect(container.querySelector('[data-testid="channel-post-youtube-published-private-badge"]')).toBeNull();
+    });
+
+    it('BE 필드가 true로 옴 — 연결이 지금 안 잠겨 있어도 그 발행물이 잠겼던 역사적 사실을 우선한다(배지 뜸)', async () => {
+      stubFetch({
+        youtubeMetadataRequired: true, privacyLocked: false,
+        draftDetail: { ...PUBLISHED_DRAFT_DETAIL, publication_privacy_locked: true },
+      });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+
+      expect(container.querySelector('[data-testid="channel-post-youtube-published-private-badge"]')).not.toBeNull();
+    });
   });
 });

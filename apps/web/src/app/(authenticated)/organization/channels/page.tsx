@@ -487,6 +487,42 @@ function ReauthNote({
   return <p className="text-xs text-muted-foreground">{reauthSubtitleText(reason, t, lastErrorCode)}</p>;
 }
 
+interface YoutubeUsageResponse {
+  used_units: number;
+  limit_units: number;
+  remaining_units: number;
+  reset_at: string;
+  scope: 'platform';
+}
+
+// story #3815(Phase3·3-5 PR4) — 「오늘 사용량 {used}/{limit} · 플랫폼 공유」.
+// 조회 前·실패 둘 다 «미측정»(0으로 보이면 "오늘 하나도 안 썼다"는 거짓 사실이 된다).
+function YoutubeUsageLine({
+  orgId, connectionId, t,
+}: { orgId: string; connectionId: string; t: ReturnType<typeof useTranslations> }) {
+  const [usage, setUsage] = useState<YoutubeUsageResponse | null>(null);
+  const load = useCallback(async () => {
+    try {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/channel-connections/${connectionId}/youtube-usage`);
+      if (!res.ok) return;
+      const json = (await res.json().catch(() => null)) as { data?: YoutubeUsageResponse } | null;
+      if (json?.data) setUsage(json.data);
+    } catch {
+      // story #3815 — 실패도 «미측정»(usage=null 그대로)으로 수렴, 별도 에러 상태 불요.
+    }
+  }, [orgId, connectionId]);
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- 위 load()/loadMeasurement()와 같은 관례
+  useEffect(() => { void load(); }, [load]);
+
+  return (
+    <p className="text-xs text-muted-foreground" data-testid="channel-connect-youtube-usage-line">
+      {usage
+        ? t('channelYoutubeUsageLine', { used: usage.used_units, limit: usage.limit_units })
+        : t('channelYoutubeUsageLineUnmeasured')}
+    </p>
+  );
+}
+
 function ConnectionRow({
   conn, index, isOwnerStrict, isOwnerOrAdmin, orgId, onDisconnected, t, showStatusChip = true,
 }: {
@@ -605,6 +641,13 @@ function ConnectionRow({
           ) : null}
           <p className="mt-1 font-mono">{conn.last_error}</p>
         </details>
+      ) : null}
+      {/* story #3815(Phase3·3-5 PR4, 페드루 PO 決定①) — 「오늘 사용량」은 연결별이
+          아니라 플랫폼(Sprintable 전체 Google Cloud 프로젝트) 공유 축이라, publishing-
+          limit(연결/조직별 발행 횟수 한도)과 다른 계약·다른 GET을 쓴다. 로드 前/실패는
+          «미측정»(0이 아니다 — "쓴 게 없다"와 "몰라서 못 보여준다"를 안 섞는다). */}
+      {conn.channel === 'youtube' || conn.channel === 'youtube_sandbox' ? (
+        <YoutubeUsageLine orgId={orgId} connectionId={conn.id} t={t} />
       ) : null}
       {testResult ? (
         // 유나 design verdict(f9cab0c23) — 소형 텍스트에 계열색 직접은 라이트 대비 미달

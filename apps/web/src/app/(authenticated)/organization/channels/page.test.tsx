@@ -109,6 +109,9 @@ function stubFetch(opts: {
   ga4PropertiesFails?: boolean;
   onGa4Select?: (body: unknown) => { status: number; body?: unknown; nextMeasurementConnections?: unknown[] };
   onGa4Disconnect?: () => { status: number; nextMeasurementConnections?: unknown[] };
+  // story #3815(PR4) — 「오늘 사용량」 GET. 미지정=200 고정값(대부분 테스트가 신경
+  // 안 써도 되게), status>=400=BE 갭/실패 재현용.
+  youtubeUsage?: { status: number; body?: unknown };
 }) {
   let connections = opts.connections ?? [];
   const credentials = opts.credentials ?? { configured: false, app_id_suffix: null, effective_source: 'platform' };
@@ -151,6 +154,14 @@ function stubFetch(opts: {
     // available-channels가 '/channel-connections'의 부분문자열이라 그 체크보다 먼저 봐야 한다.
     if (url.includes('/channel-connections/available-channels')) {
       return { ok: true, status: 200, json: async () => ({ data: availableChannels }) } as Response;
+    }
+    if (url.includes('/youtube-usage')) {
+      const result = opts.youtubeUsage ?? {
+        status: 200,
+        body: { used_units: 120, limit_units: 10000, remaining_units: 9880, reset_at: '2026-09-13T00:00:00Z', scope: 'platform' },
+      };
+      const ok = result.status < 400;
+      return { ok, status: result.status, json: async () => (ok ? { data: result.body } : { data: null, error: { code: 'INTERNAL' } }) } as Response;
     }
     if (url.includes('/disconnect') && init?.method === 'POST') {
       const status = opts.disconnectStatus ?? 200;
@@ -1192,6 +1203,56 @@ describe('OrganizationChannelsPage — 연결 시각 상대시각 정본(story #
     // "MM-DD HH:mm TZ" 꼴(마침표 구분자 없음).
     expect(container.textContent).toMatch(/09-01 \d{2}:\d{2}/);
     expect(container.textContent).not.toMatch(/\d{4}\. \d{1,2}\. \d{1,2}\./);
+  });
+});
+
+// story #3815(Phase3·3-5 PR4, 페드루 PO 決定①) — 「오늘 사용량」은 youtube/
+// youtube_sandbox 연결에서만 뜨고(다른 채널은 이 줄 자체가 없다), 로드 前/실패는
+// «미측정»(0 아님).
+describe('OrganizationChannelsPage — YouTube 오늘 사용량(story #3815 PR4)', () => {
+  it('youtube 연결이 아니면 사용량 줄 자체가 없다', async () => {
+    stubFetch({ connections: [CONNECTION_ACTIVE] });
+    await mount('owner');
+    await expandChannelRow();
+    expect(container.querySelector('[data-testid="channel-connect-youtube-usage-line"]')).toBeNull();
+  });
+
+  it('youtube 연결 — GET 성공 시 「오늘 사용량 {used}/{limit} · 플랫폼 공유」', async () => {
+    stubFetch({
+      connections: [{ ...CONNECTION_ACTIVE, channel: 'youtube' }],
+      availableChannels: [{ channel: 'youtube', display_name: 'YouTube', credential_kind: 'oauth', kind: 'social' }],
+      youtubeUsage: { status: 200, body: { used_units: 250, limit_units: 10000, remaining_units: 9750, reset_at: '2026-09-13T00:00:00Z', scope: 'platform' } },
+    });
+    await mount('owner');
+    await expandChannelRow();
+    await flush();
+    const line = container.querySelector('[data-testid="channel-connect-youtube-usage-line"]');
+    expect(line?.textContent).toBe(koMessages.channelConnect.channelYoutubeUsageLine.replace('{used}', '250').replace('{limit}', '10000'));
+  });
+
+  it('youtube_sandbox 연결도 같은 줄이 뜬다(샌드박스도 축 공유)', async () => {
+    stubFetch({
+      connections: [{ ...CONNECTION_ACTIVE, channel: 'youtube_sandbox', credential_kind: 'none' }],
+      availableChannels: [{ channel: 'youtube_sandbox', display_name: 'YouTube(Sandbox)', credential_kind: 'none', kind: 'social' }],
+    });
+    await mount('owner');
+    await expandChannelRow();
+    await flush();
+    expect(container.querySelector('[data-testid="channel-connect-youtube-usage-line"]')).not.toBeNull();
+  });
+
+  it('GET 실패 — «미측정»(0으로 안 보인다)', async () => {
+    stubFetch({
+      connections: [{ ...CONNECTION_ACTIVE, channel: 'youtube' }],
+      availableChannels: [{ channel: 'youtube', display_name: 'YouTube', credential_kind: 'oauth', kind: 'social' }],
+      youtubeUsage: { status: 500 },
+    });
+    await mount('owner');
+    await expandChannelRow();
+    await flush();
+    const line = container.querySelector('[data-testid="channel-connect-youtube-usage-line"]');
+    expect(line?.textContent).toBe(koMessages.channelConnect.channelYoutubeUsageLineUnmeasured);
+    expect(line?.textContent).not.toContain('0/');
   });
 });
 

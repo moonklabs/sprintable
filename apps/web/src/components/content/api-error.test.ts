@@ -209,6 +209,35 @@ describe('parseSitePostApiError (story #3368, doc phase0-post-manager-screen-des
       expect(en.content.errorGhostAuthFailed).toBe(en.channelConnect.channelConnectErrorGhostAdminKeyInvalid);
     });
 
+    // story #3815(Phase3·3-5 PR4, 페드루 PO 確定 2026-09-12) — image_required 동형.
+    test('CHANNEL_VIDEO_REQUIRED — kind=video_required', () => {
+      const result = parseSitePostApiError({ error: { code: 'CHANNEL_VIDEO_REQUIRED', message: '영상 필요' } });
+      expect(result.kind).toBe('video_required');
+      expect(result.humanMessageKey).toBe('channelPostsVideoRequiredReason');
+    });
+
+    // story #3815(Phase3·3-5 PR4, 페드루 PO 明示) — labelKey 비움(BE 정적 문구
+    // 그대로) — humanMessageKey는 undefined, humanMessageFallback이 서버 message.
+    test('YOUTUBE_QUOTA_EXCEEDED — kind=rate_limited·labelKey 비움(서버 message 그대로)', () => {
+      const result = parseSitePostApiError({
+        error: { code: 'YOUTUBE_QUOTA_EXCEEDED', message: 'YouTube API 일일 한도를 초과했습니다.' },
+      });
+      expect(result.kind).toBe('rate_limited');
+      expect(result.humanMessageKey).toBeUndefined();
+      expect(result.humanMessageFallback).toBe('YouTube API 일일 한도를 초과했습니다.');
+    });
+
+    // story #3815 PR4 후속(페드루 PO 決定 2026-09-12 14:37Z) — YOUTUBE_QUOTA_EXCEEDED
+    // 동형(BE 완성 문구 그대로, labelKey 비움). 디디 소 PR이 라우터 422로 닫는다.
+    test('YOUTUBE_METADATA_INVALID — kind=validation·labelKey 비움(서버 message 그대로)', () => {
+      const result = parseSitePostApiError({
+        error: { code: 'YOUTUBE_METADATA_INVALID', message: 'title exceeds 100 characters' },
+      });
+      expect(result.kind).toBe('validation');
+      expect(result.humanMessageKey).toBeUndefined();
+      expect(result.humanMessageFallback).toBe('title exceeds 100 characters');
+    });
+
     test('CHANNEL_CONNECTION_NOT_ACTIVE — kind=connection_not_active', () => {
       const result = parseSitePostApiError({ error: { code: 'CHANNEL_CONNECTION_NOT_ACTIVE', message: '연결 비활성' } });
       expect(result.kind).toBe('connection_not_active');
