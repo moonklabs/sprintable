@@ -32,7 +32,10 @@ interface PastedSecretField {
   type: 'text' | 'password';
 }
 
-const PASTED_SECRET_FIELDS: Record<string, PastedSecretField[]> = {
+// story #3813 PR5-a CHANGES(페드루 PO 確定 2026-09-12) — export: verify-pasted-
+// secret-bff-route-registered.ts가 이 표를 유일한 채널 목록 출처로 삼는다(중복
+// 선언 0 — 새 채널이 여기 늘면 그 가드가 자동으로 대상에 포함한다).
+export const PASTED_SECRET_FIELDS: Record<string, PastedSecretField[]> = {
   wordpress: [
     { name: 'site_url', labelKey: 'channelConnectFieldSiteUrl', type: 'text' },
     { name: 'username', labelKey: 'channelConnectFieldUsername', type: 'text' },
