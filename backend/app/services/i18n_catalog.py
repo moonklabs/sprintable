@@ -305,6 +305,15 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "{seconds}초 뒤 다시 시도하세요.",
         "en": "Please try again in {seconds} seconds.",
     },
+    # story #3813(Phase3·3-4 PR1, 페드루 PO 確定 2026-09-12) — 스티비(Stibee) 연결
+    # 생성/자격교체 공용 422 문구. wordpress/webhook 형제(WORDPRESS_FIELDS_REQUIRED·
+    # WEBHOOK_FIELDS_REQUIRED)는 이 가드(#3779) 시행 前 baseline 잔존 raw 문자열이라
+    # 안 옮기지만, 새 등재는 처음부터 이 카탈로그를 거친다(spend_refresh_rate_limited
+    # 키 주석과 동형 판단).
+    "channel_connections.stibee_fields_required": {
+        "ko": "api_key가 필요합니다.",
+        "en": "api_key is required.",
+    },
 }
 
 
