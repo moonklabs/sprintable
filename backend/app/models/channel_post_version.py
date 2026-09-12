@@ -18,7 +18,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, Text, UniqueConstraint, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -48,6 +48,15 @@ class ChannelPostVersion(Base):
     hook_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     author_member_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     author_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    # story #3813(Phase3·3-4 PR2, 페드루 PO 確定 2026-09-12) — 채널별 변형
+    # payload 공유 슬롯. 컬럼 이름에 채널 이름을 안 붙인다(의도) — 스티비의 subject
+    # 뿐 아니라 story #3808 PR5(X 스레드 변형)도 이 슬롯을 재사용할 예정(PO가 디디
+    # 팀에 통지). 스키마는 그 채널의 어댑터가 선언(여기선 강제 안 함) — 대부분의
+    # 채널(threads/instagram/facebook 등)은 이 값이 항상 null(그 채널 어댑터가
+    # channel_payload 개념 자체를 안 씀 — image_max_count=0처럼 "선언 안 함=미지원"
+    # 관례와 동형). **봉인 축에 안 넣는다**(body_sha256에 안 섞음 — hook_key와 같은
+    # 이유 판단, PO가 명시로 봉인 포함을 요구하면 그때 정정).
+    channel_payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

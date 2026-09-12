@@ -193,6 +193,11 @@ class CreateChannelPostDraftVersionRequest(BaseModel):
     # 라벨 없음.
     hook_key: str | None = None
 
+    # story #3813(Phase3·3-4 PR2, 페드루 PO 確定 2026-09-12) — 채널별 변형
+    # payload 공유 슬롯(스티비 subject 등, 컬럼 이름에 채널 이름 안 붙임 — gate.py/
+    # channel_post_version.py 모델 주석 참고). hook_key와 동형(캐리포워드 없음).
+    channel_payload: dict | None = None
+
     @field_validator("hook_key")
     @classmethod
     def _hook_key_format(cls, v: str | None) -> str | None:
@@ -558,6 +563,7 @@ async def post_channel_post_draft_version(
             db, org_id=org_id, work_item_id=body.work_item_id, connection_id=body.connection_id,
             text=body.text, link_url=body.link_url, author_member_id=member_id, author_kind=actor_type,
             source_content_item_id=body.source_content_item_id, hook_key=body.hook_key,
+            channel_payload=body.channel_payload,
         )
     except ChannelPostSourceContentItemNotFoundError as exc:
         raise HTTPException(

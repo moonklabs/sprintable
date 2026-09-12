@@ -704,6 +704,10 @@ _PUBLISH_CLIENT_MODULE_PATHS: dict[str, str] = {
     # 상단 딱지 참고) — channel_posts.py 오케스트레이션 무변경.
     "x": "app.services.x_publish",
     "x_sandbox": "app.services.x_sandbox_publish",
+    # story #3813(Phase3·3-4 PR2) — 실 "stibee"(진짜 Stibee HTTP 클라이언트)는 이 PR 범위 밖(PO
+    # 明示 "실 스티비 API 호출 0") — sandbox만 배선한다. wordpress/webhook의 조각⑤
+    # (연결)→③b/④(발행 배선) 선례와 같은 순서(연결·게이트가 먼저, 실 provider는 후속).
+    "stibee_sandbox": "app.services.stibee_sandbox_publish",
 }
 
 

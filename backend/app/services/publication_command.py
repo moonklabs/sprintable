@@ -293,6 +293,16 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
         await process_one_ads_boost_command(db, command, now=now)
         return
 
+    # story #3813(Phase3·3-4 PR2, 페드루 PO 確定 2026-09-12) — 뉴스레터 발송
+    # (ads_boost 분기와 동형 이유: content_kind="newsletter_send"는 approved_version이
+    # gate.sealed_newsletter_version_id를 가리켜 아래 channel_post 전용 기본 분기의
+    # ChannelPostVersion 조회가 안 맞는다).
+    if command.content_kind == "newsletter_send":
+        from app.services.newsletter_send_execution import process_one_newsletter_send_command
+
+        await process_one_newsletter_send_command(db, command, now=now)
+        return
+
     from app.models.channel_post_version import ChannelPostVersion
     from app.services.channel_posts import (
         ChannelConnectionAuthError,
