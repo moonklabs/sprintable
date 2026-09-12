@@ -9,11 +9,12 @@ CI 매트릭스 샤드로 나눈다.
 #3383은 ci.yml의 템플릿 DB 스텝으로 create_all() 반복 자체를 없애 오버헤드 크기 자체를
 줄인다 — 이 파일의 배분 로직과는 직교하는 별개 처방, 둘 다 필요).
 
-`infra/destructive-schema-shard-weights.jsonl`(2026-07-28 스냅샷, 파일별 pytest 실행초)을
-greedy LPT(Longest Processing Time first)로 읽어 균형 배분한다. 스냅샷에 없는 새 파일은
-평균 가중치를 받는다 — ⛔discover(`pytest --collect-only`)가 항상 SSOT다. 스냅샷은 가중치
-힌트일 뿐이라 새 파일이 스냅샷에 없다는 이유로 빠지는 일은 없다(파일 목록은 매번 실제
-컬렉션에서 뽑고, 가중치만 스냅샷+평균값으로 보강한다).
+`infra/destructive-schema-shard-weights/`(디렉터리, 파일마다 정확히 하나의 `<test_file>.json`
+— 2026-07-28 스냅샷, 파일별 pytest 실행초)을 greedy LPT(Longest Processing Time first)로
+읽어 균형 배분한다. 스냅샷에 없는 새 파일은 평균 가중치를 받는다 — ⛔discover(`pytest
+--collect-only`)가 항상 SSOT다. 스냅샷은 가중치 힌트일 뿐이라 새 파일이 스냅샷에 없다는
+이유로 빠지는 일은 없다(파일 목록은 매번 실제 컬렉션에서 뽑고, 가중치만 스냅샷+평균값으로
+보강한다).
 
 story #3392(CI 후속, 2026-09-03) — PR #3742가 unweighted 신규 파일(평균 가중치로만
 배정된) 하나 때문에 shard가 20분 timeout에 걸려 cancel됐는데, 그때까지 아무 로그도
@@ -46,80 +47,67 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BACKEND_DIR = REPO_ROOT / "backend"
-# story #3812(CI, 페드루 PO 確定 2026-09-11) — JSON 배열 「끝에 항목 추가」는 항목별
-# 필드로 쪼개도(#3465) git 3-way merge 관점에선 여전히 "같은 닫는 `]`/이전 마지막
-# 줄" 주변을 양쪽이 건드리는 것이라 인접 충돌이 구조적으로 남는다(2026-09-11 하루
-# rebase 충돌 6회 실측 — #4192×2·#4197·#4199·#4201×3, 실제 의미 충돌은 0건, 전부
-# 「둘 다 유지」로 끝남 — «파일 구조»가 만든 가짜 충돌). 처방: 항목을 JSON 배열이
-# 아니라 **JSON Lines**(파일당 정확히 1줄)로 저장 + `.gitattributes`의 `merge=union`
-# 드라이버 — union은 라인 단위로 "양쪽이 추가한 줄을 전부 포함"하므로 서로 다른
-# 파일에 대한 두 PR의 추가는 구조적으로 절대 충돌하지 않는다(실증: 두 브랜치가 각각
-# 1줄을 추가한 뒤 merge/rebase 둘 다 충돌 0, 카드 97d15c85 AC1). 자주 안 바뀌는
-# 메타(`_snapshot_policy`·`_drift_remeasure_procedure`·`measured_at`)는 append-hot-
-# path에서 빼 별도 `.meta.json`에 둔다(그 파일은 드물게 손으로만 바뀌므로 union이
-# 아니라도 충돌 위험이 낮다).
-WEIGHTS_PATH = REPO_ROOT / "infra" / "destructive-schema-shard-weights.jsonl"
+# story #3812 CHANGES(재설계, 페드루 PO 근본처방 2026-09-12) — JSONL+`.gitattributes
+# merge=union`(1차 처방)은 로컬 rebase/merge 충돌은 0으로 만들었으나(카드 97d15c85 AC1
+# 실증), **GitHub의 서버측 merge(Squash and merge/Merge 버튼)는 커스텀 merge 드라이버를
+# 안 따른다**는 것을 놓쳤다 — #4206이 develop에 착지한 뒤 #4209가 같은 파일에서
+# CONFLICTING으로 남아 AC3 재판정이 FAIL(실사고, 2026-09-12). 「파일마다 정확히 한
+# 줄」을 「파일마다 정확히 한 파일」로 한 단계 더 내리면 GitHub 서버측 merge에도 통한다
+# — 서로 다른 새 파일 추가는 ADD/ADD 충돌 자체가 애초에 존재하지 않는 git의 구조적
+# 성질이다(merge 드라이버 설정과 완전히 무관 — 이번 재설계의 핵심). 자주 안 바뀌는
+# 메타(`_snapshot_policy`·`_drift_remeasure_procedure`·`measured_at`)는 여전히 이
+# 디렉터리 밖 별도 `.meta.json`에 둔다(드물게 손으로만 바뀌므로 충돌 위험이 낮다).
+WEIGHTS_DIR = REPO_ROOT / "infra" / "destructive-schema-shard-weights"
 WEIGHTS_META_PATH = REPO_ROOT / "infra" / "destructive-schema-shard-weights.meta.json"
 
 _FILE_RE = re.compile(r"^tests/[a-zA-Z0-9_]+\.py")
 
 
 class DuplicateShardWeightEntryError(Exception):
-    """story #3812 — union 병합의 유일한 맹점(자인, 카드 재현 실측): 두 PR이 «같은»
-    파일에 각자 다른 항목을 추가하면 union은 충돌 없이 둘 다 조용히 남긴다(진짜 의미
-    충돌인데 git이 못 잡는 유일한 경우 — 실무에선 극히 드물다: 신규 destructive 파일에
-    같은 날 같은 이름으로 두 PR이 동시에 등재를 시도하는 경우뿐). fail-loud로 잡는다."""
+    """story #3812 — 디렉터리 방식(파일마다 정확히 하나의 물리 json 파일)에서도 논리
+    맹점은 남는다: 서로 다른 두 물리 파일이 «같은» `file` 키 값을 등재하면(예: 복붙
+    실수로 파일명을 다르게 지었는데 내용의 `file` 필드는 같은 값) git은 이걸 ADD/ADD
+    충돌로 못 잡는다(파일명 자체는 다르니까) — fail-loud로 로드 시점에 잡는다."""
 
 
-class MissingTrailingNewlineError(Exception):
-    """story #3812(페드루 PO 追加 지적 2026-09-11 22:08Z) — union merge 고전 함정:
-    파일이 개행으로 안 끝나면 그 다음 append가 «같은 물리 줄»에 이어붙어 두 JSON
-    객체가 구분자 없이 뭉개질 수 있다(예: `...1.0}{"file":"new"...}` — json.loads가
-    "Extra data"로 결국 죽긴 하지만 원인이 뭔지 한눈에 안 보인다). 이 가드는 그
-    사후 증상이 아니라 **원인**(파일이 개행으로 안 끝남)을 append 시도 훨씬 전인
-    로드 시점에 먼저, 더 읽기 쉬운 메시지로 잡는다 — «한 줄=JSON 객체 정확히 1개»
-    불변식을 파일 자체 형태로 강제."""
+def _load_full_data(weights_dir: Path = WEIGHTS_DIR, meta_path: Path | None = None) -> dict:
+    """디렉터리(파일마다 정확히 하나의 `<test_file>.json`) + meta.json(드물게 바뀌는
+    메타)을 옛 단일 JSON과 같은 `{"_snapshot_policy":..., "measured_at":...,
+    "files": [...]}` 모양으로 합쳐 돌려준다 — 기존 소비처(load_weights/
+    load_raw_entries/check_staleness) 셋 다 이 모양에 의존하므로 그 계약을 그대로
+    지키면 호출부 변경이 0에 가깝다.
 
-
-def _load_full_data(weights_path: Path = WEIGHTS_PATH, meta_path: Path | None = None) -> dict:
-    """jsonl(파일당 1줄) + meta.json(드물게 바뀌는 메타)을 옛 단일 JSON과 같은
-    `{"_snapshot_policy":..., "measured_at":..., "files": [...]}` 모양으로 합쳐
-    돌려준다 — 기존 소비처(load_weights/load_raw_entries/check_staleness) 셋 다
-    이 모양에 의존하므로 그 계약을 그대로 지키면 호출부 변경이 0에 가깝다.
-
-    `meta_path` 생략 시 `weights_path`의 형제 파일(`<stem>.meta.json`)로 유도한다
+    `meta_path` 생략 시 `weights_dir`의 형제 파일(`<dirname>.meta.json`)로 유도한다
     (실 경로에선 정확히 WEIGHTS_META_PATH와 같은 이름이 나옴 — 우연이 아니라 테스트가
-    tmp_path에 가짜 weights_path를 쓸 때 실 레포의 meta.json을 실수로 안 집어먹게
-    하는 의도적 설계, story #3812)."""
+    tmp_path에 가짜 weights_dir을 쓸 때 실 레포의 meta.json을 실수로 안 집어먹게
+    하는 의도적 설계, story #3812).
+
+    디렉터리 안 각 `*.json` 파일은 정확히 하나의 JSON 객체(항목)를 담아야 한다 —
+    파싱 실패(비JSON)는 그 파일명을 실어 fail-loud로 알린다(어느 파일이 깨졌는지
+    바로 알 수 있게, 사후 JSONDecodeError보다 읽기 쉬운 메시지)."""
     if meta_path is None:
-        meta_path = weights_path.with_suffix(".meta.json")
+        meta_path = weights_dir.parent / f"{weights_dir.name}.meta.json"
     meta: dict = {}
     if meta_path.exists():
         meta = json.loads(meta_path.read_text())
     files: list[dict] = []
-    seen: dict[str, dict] = {}
-    if weights_path.exists():
-        raw = weights_path.read_text()
-        if raw and not raw.endswith("\n"):
-            raise MissingTrailingNewlineError(
-                f"{weights_path.name}이 개행으로 끝나지 않는다(story #3812) — union merge "
-                "고전 함정: 다음 append가 마지막 줄에 그대로 이어붙어 JSON 객체 2개가 구분자 "
-                "없이 뭉개질 수 있다. 파일 끝에 개행 1개를 추가할 것."
-            )
-        for line_no, line in enumerate(raw.splitlines(), start=1):
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            entry = json.loads(line)
+    seen: dict[str, tuple[str, dict]] = {}
+    if weights_dir.exists():
+        for entry_path in sorted(weights_dir.glob("*.json")):
+            try:
+                entry = json.loads(entry_path.read_text())
+            except json.JSONDecodeError as exc:
+                raise ValueError(
+                    f"{entry_path.name}이 올바른 JSON이 아니다(story #3812): {exc}"
+                ) from exc
             prior = seen.get(entry["file"])
-            if prior is not None and prior != entry:
+            if prior is not None and prior[1] != entry:
                 raise DuplicateShardWeightEntryError(
-                    f"{weights_path.name}:{line_no} — 파일 {entry['file']!r}이 서로 다른 "
-                    f"항목으로 두 번 등재됐다(union 병합 맹점, story #3812) — 값 하나로 합칠 것: "
-                    f"{prior} vs {entry}"
+                    f"{prior[0]}·{entry_path.name} — 파일 {entry['file']!r}이 서로 다른 물리 "
+                    f"json 파일 두 곳에 다른 항목으로 등재됐다(story #3812): {prior[1]} vs {entry}"
                 )
             if prior is None:
-                seen[entry["file"]] = entry
+                seen[entry["file"]] = (entry_path.name, entry)
                 files.append(entry)
     return {**meta, "files": files}
 
@@ -139,17 +127,17 @@ def discover_files(backend_dir: Path = BACKEND_DIR) -> list[str]:
     return files
 
 
-def load_weights(weights_path: Path = WEIGHTS_PATH) -> dict[str, float]:
-    data = _load_full_data(weights_path)
+def load_weights(weights_dir: Path = WEIGHTS_DIR) -> dict[str, float]:
+    data = _load_full_data(weights_dir)
     return {e["file"]: float(e["sec"]) for e in data.get("files", [])}
 
 
-def load_raw_entries(weights_path: Path = WEIGHTS_PATH) -> list[dict]:
+def load_raw_entries(weights_dir: Path = WEIGHTS_DIR) -> list[dict]:
     """story #3465 — files[] 항목 원본(그대로, `source` 필드 포함) 반환. `load_weights()`는
     이미 `{file: sec}`로 평탄화해 `source`를 버리므로, 그 필드를 검증하려는 호출자는 이
     함수를 쓴다(load_weights()의 계약은 그대로 유지 — partition() 등 기존 소비처가 이
     변경으로 안 흔들린다)."""
-    return _load_full_data(weights_path).get("files", [])
+    return _load_full_data(weights_dir).get("files", [])
 
 
 def entries_missing_source(entries: list[dict]) -> list[str]:
@@ -163,11 +151,11 @@ def entries_missing_source(entries: list[dict]) -> list[str]:
 
 
 def check_staleness(
-    discovered_count: int, weights_path: Path = WEIGHTS_PATH, *, unweighted_count: int = 0,
+    discovered_count: int, weights_dir: Path = WEIGHTS_DIR, *, unweighted_count: int = 0,
 ) -> str | None:
     """story #2293 후속(파울로군 지적, 2026-07-28) — 이 스냅샷은 실시간 측정이 아니다.
     스위트가 자라면 조용히 낡는다. 재측정 기준(a)만 여기서 자동 확인한다(파일 수 +20% —
-    weights_path의 `_snapshot_policy`에 (b)(c) 수동 기준도 적혀 있다: 샤드 간 벽시계가
+    weights_dir의 `_snapshot_policy`에 (b)(c) 수동 기준도 적혀 있다: 샤드 간 벽시계가
     1.5배 이상 벌어지거나 25분 천장 대비 여유가 다시 좁아지면 재측정).
 
     story #3392 — `unweighted_count`(discover된 파일 중 스냅샷에 없는 것) 신호를
@@ -185,9 +173,9 @@ def check_staleness(
     바뀜"으로 보고 매 PR 병합마다 충돌을 냈다(#3742·#3752 실사고, #3752는 하루에 2회).
     `files` 배열에 새 항목을 append만 하는 건 서로 다른 줄이라 자동 병합되므로, 파생
     가능한 합계 자체를 저장하지 않으면 이 충돌 소지가 원천 봉쇄된다."""
-    if not weights_path.exists():
+    if not weights_dir.exists():
         return None
-    data = _load_full_data(weights_path)
+    data = _load_full_data(weights_dir)
     snapshot_total = len(data.get("files", []))
     if not snapshot_total:
         return None
@@ -200,7 +188,7 @@ def check_staleness(
     if not reasons:
         return None
     return (
-        f"가중치 스냅샷({weights_path.name}, {data.get('measured_at', '?')} · "
+        f"가중치 스냅샷({weights_dir.name}, {data.get('measured_at', '?')} · "
         f"{snapshot_total}개) 대비 " + " · ".join(reasons) +
         " — 재측정 권장(무거운 새 파일이 '평균 가중치'로만 잡혀 한 샤드에 쏠릴 수 있다)."
     )
@@ -498,7 +486,7 @@ def _audit_durations_mode(
                     f"::warning::weights drift(story #3642): {f} — 등재값이 {DRIFT_STREAK_THRESHOLD}"
                     f"run 연속 실측의 {RATIO_WARN_HIGH_MULTIPLIER:.0f}배 이상 벗어났다(러너가 느린 "
                     "하루가 아니라 등재값 자체가 낡았다는 신호) — infra/destructive-schema-shard-"
-                    "weights.json 재측정 필요."
+                    "weights/ 재측정 필요."
                 )
                 streaks[f] = 0  # story #3642 AC3 — 1회 경고 뒤 리셋(매 run 반복 스팸 방지).
         _save_drift_state(drift_state_path, run_id=run_id, streaks=streaks)
@@ -510,7 +498,7 @@ def _audit_durations_mode(
             direction = "과소 등재" if o["ratio"] >= RATIO_WARN_HIGH_MULTIPLIER else "과대 등재"
             print(
                 f"::warning::등재값 {direction}(story #3558): {o['file']} — 실측 {o['measured_sec']:.1f}s vs "
-                f"등재 {o['weight_sec']:.1f}s(×{o['ratio']:.2f}) — infra/destructive-schema-shard-weights.jsonl 재측정 검토."
+                f"등재 {o['weight_sec']:.1f}s(×{o['ratio']:.2f}) — infra/destructive-schema-shard-weights/ 재측정 검토."
             )
         print(f"경고 {len(outliers)}건(산출물 {len(measured)}건 중) — 실패 아님, story #3558 AC2", file=sys.stderr)
 
@@ -663,7 +651,7 @@ def main() -> int:
     ap.add_argument(
         "--audit-durations", type=Path, default=None, metavar="ARTIFACT_DIR",
         help="story #3558 AC2 — ARTIFACT_DIR 아래 shard-durations-*.json 전부를 병합해 "
-             "weights.json과 2배/0.5배 대조 경고를 낸다(항상 exit 0, 실패 없음).",
+             "shard-weights/와 2배/0.5배 대조 경고를 낸다(항상 exit 0, 실패 없음).",
     )
     ap.add_argument(
         "--drift-state", type=Path, default=None, metavar="STATE_JSON",

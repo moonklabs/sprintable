@@ -1,0 +1,1 @@
+{"file": "tests/test_3806_ads_boost_spend_cron_wiring.py", "sec": 3.1, "source": "story-3806(Phase3·3-2 PR 11, 페드루 PO 確定 2026-09-11 16:20Z — process_due_ads_spend_snapshots cron 미배선 갭 처방, test_3806_ads_boost_starts_cron_wiring.py 선례와 동형) — 신규 파일 실측(로컬, uv run pytest --durations=0 직접 1회 실행, 2건 wall time 약 3.1s — test_3766 등재 선례와 동일 방법론)"}

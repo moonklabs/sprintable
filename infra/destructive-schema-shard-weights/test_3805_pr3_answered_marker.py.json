@@ -1,0 +1,1 @@
+{"file": "tests/test_3805_pr3_answered_marker.py", "sec": 2.9, "source": "story-3805(Phase3·3-1 PR 3, 페드루 PO 定 2026-09-11 10:36Z 정정 — 답글 편입 되돌리고 읽기전용 answered_at 마커로 교체) — 신규 파일 실측(로컬, uv run pytest --durations=0 직접 1회 실행, 3건 개별 call 합산 2.23+0.33+0.33≈2.9s — test_3766 등재 선례와 동일 방법론)"}

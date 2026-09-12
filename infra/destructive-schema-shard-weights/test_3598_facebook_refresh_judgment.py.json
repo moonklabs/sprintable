@@ -1,0 +1,1 @@
+{"file": "tests/test_3598_facebook_refresh_judgment.py", "sec": 13.9, "source": "story-3598-graph-api-oauth-reason(PR#3954 CI 실측 — lint_destructive_schema_weights_registered.py 미등재 가드가 잡은 평균 가중치 13.9s를 그대로 등재, run https://github.com/moonklabs/sprintable/actions/runs/34074109882/job/101597402205 · 실측치로 재측정 필요 — scripts/measure_destructive_durations_local.py 참고)"}

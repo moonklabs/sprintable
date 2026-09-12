@@ -16,14 +16,19 @@ import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SCRIPT_PATH = _REPO_ROOT / "backend" / "scripts" / "shard_destructive_tests.py"
-_WEIGHTS_PATH = _REPO_ROOT / "infra" / "destructive-schema-shard-weights.jsonl"
+_WEIGHTS_DIR = _REPO_ROOT / "infra" / "destructive-schema-shard-weights"
 
 
-def _write_fake_weights_jsonl(path: Path, *, measured_at: str, files: list[dict]) -> None:
-    """story #3812 — 새 jsonl+meta.json 포맷으로 합성 스냅샷을 쓴다(옛 단일 JSON
-    blob write_text 관례를 대체, 형식 자체가 바뀐 것이 이유 — 회귀가 아니다)."""
-    path.write_text("\n".join(json.dumps(e, ensure_ascii=False) for e in files) + "\n")
-    path.with_suffix(".meta.json").write_text(json.dumps({"measured_at": measured_at}))
+def _write_fake_weights_dir(dir_path: Path, *, measured_at: str, files: list[dict]) -> None:
+    """story #3812 CHANGES(재설계) — 디렉터리(파일마다 정확히 하나의 `<test_file>.json`)
+    + 형제 meta.json으로 합성 스냅샷을 쓴다(옛 jsonl 단일-파일 append 관례를 대체 —
+    GitHub 서버측 merge가 `.gitattributes merge=union`을 안 따라 그 1차 처방이
+    무효였던 실사고 뒤 재설계, 회귀가 아니다)."""
+    dir_path.mkdir(parents=True, exist_ok=True)
+    for e in files:
+        entry_name = Path(e["file"]).name + ".json"
+        (dir_path / entry_name).write_text(json.dumps(e, ensure_ascii=False) + "\n")
+    dir_path.parent.joinpath(f"{dir_path.name}.meta.json").write_text(json.dumps({"measured_at": measured_at}))
 
 
 def _load():
@@ -77,81 +82,71 @@ def test_partition_balances_heavy_files_across_shards():
 
 def test_load_weights_missing_file_returns_empty(tmp_path):
     mod = _load()
-    missing = tmp_path / "nope.json"
+    missing = tmp_path / "nope"
     assert mod.load_weights(missing) == {}
 
 
 def test_load_weights_reads_repo_snapshot_shape():
     mod = _load()
-    weights = mod.load_weights(_WEIGHTS_PATH)
+    weights = mod.load_weights(_WEIGHTS_DIR)
     assert len(weights) > 0
     assert all(isinstance(v, float) for v in weights.values())
 
 
-def test_load_weights_ignores_blank_and_comment_lines(tmp_path):
-    """story #3812 — jsonl 파서가 빈 줄·`#` 주석 줄을 조용히 건너뛰는지(메타 이관 뒤
-    사람이 손으로 구획 주석을 남길 수 있게 하는 자리, 신규 파싱 로직 자체의 계약)."""
+def test_load_weights_ignores_non_json_extension_files(tmp_path):
+    """story #3812 CHANGES — 디렉터리 안 `*.json`만 훑는다(사람이 옆에 README나
+    `.gitkeep` 같은 비-json 보조 파일을 둬도 무해해야 한다는 계약)."""
     mod = _load()
-    weights_path = tmp_path / "weights.jsonl"
-    weights_path.write_text(
-        "# 손 주석 — 이 줄은 무시된다\n"
-        "\n"
-        '{"file": "tests/test_a.py", "sec": 1.0}\n'
-    )
-    assert mod.load_weights(weights_path) == {"tests/test_a.py": 1.0}
+    weights_dir = tmp_path / "weights"
+    weights_dir.mkdir()
+    (weights_dir / "test_a.py.json").write_text('{"file": "tests/test_a.py", "sec": 1.0}\n')
+    (weights_dir / "README.md").write_text("사람용 메모 — json 아님, 무시돼야 한다")
+    assert mod.load_weights(weights_dir) == {"tests/test_a.py": 1.0}
 
 
-def test_load_weights_duplicate_file_with_different_entry_raises():
-    """⭐story #3812 union 병합의 유일한 맹점(자인) — 두 PR이 같은 파일에 서로 다른
-    항목을 추가하면 git union이 충돌 없이 둘 다 남긴다(카드 재현 실측). 로더가 이를
-    fail-loud로 잡아야 한다 — 조용히 마지막 값만 취하면 한쪽 등재가 소리 없이
-    사라진다."""
+def test_load_weights_malformed_json_file_raises_with_filename(tmp_path):
+    """⭐story #3812 CHANGES — 디렉터리 안 한 물리 파일이 깨진 JSON이면(사람 손 실수)
+    어느 파일인지 이름을 실어 fail-loud로 알려야 한다(사후 JSONDecodeError만으로는
+    어느 파일이 문제인지 바로 안 보인다)."""
+    mod = _load()
+    weights_dir = tmp_path / "weights"
+    weights_dir.mkdir()
+    (weights_dir / "test_broken.py.json").write_text("{이건 JSON이 아니다")
+    with pytest.raises(ValueError, match="test_broken.py.json"):
+        mod.load_weights(weights_dir)
+
+
+def test_load_weights_duplicate_file_field_across_two_physical_files_raises():
+    """⭐story #3812 CHANGES — 디렉터리 방식에서도 남는 유일한 논리 맹점: 서로 다른
+    두 물리 json 파일이 «같은» `file` 키 값을 등재하면(파일명 자체는 다르니 git은
+    이걸 ADD/ADD 충돌로 못 잡는다) 로더가 fail-loud로 잡아야 한다."""
     mod = _load()
     import tempfile
     with tempfile.TemporaryDirectory() as d:
-        weights_path = Path(d) / "weights.jsonl"
-        weights_path.write_text(
+        weights_dir = Path(d)
+        (weights_dir / "test_dup.py.json").write_text(
             '{"file": "tests/test_dup.py", "sec": 1.0, "source": "a"}\n'
+        )
+        (weights_dir / "test_dup_renamed.py.json").write_text(
             '{"file": "tests/test_dup.py", "sec": 2.0, "source": "b"}\n'
         )
         with pytest.raises(mod.DuplicateShardWeightEntryError):
-            mod.load_weights(weights_path)
+            mod.load_weights(weights_dir)
 
 
-def test_load_weights_missing_trailing_newline_raises(tmp_path):
-    """⭐story #3812(페드루 PO 追加 지적 2026-09-11 22:08Z) — union merge 고전 함정.
-    파일이 개행 없이 끝나면 다음 append가 마지막 줄에 이어붙어 JSON 객체 2개가
-    구분자 없이 뭉갤 수 있다 — 원인(개행 부재)을 append 훨씬 전, 로드 시점에
-    미리 fail-loud로 잡는다(사후 JSONDecodeError보다 읽기 쉬운 메시지)."""
+def test_load_weights_duplicate_file_field_with_identical_entry_is_fine(tmp_path):
+    """양성대조 — 두 물리 파일이 «완전히 동일한» 항목을 등재한 경우(예: cherry-pick
+    중복)는 실 충돌이 아니므로 통과해야 한다(위 테스트와 대비되는 경계)."""
     mod = _load()
-    weights_path = tmp_path / "weights.jsonl"
-    weights_path.write_bytes(b'{"file": "tests/test_a.py", "sec": 1.0}')  # 개행 없음(의도)
-    with pytest.raises(mod.MissingTrailingNewlineError):
-        mod.load_weights(weights_path)
+    weights_dir = tmp_path / "weights"
+    weights_dir.mkdir()
+    (weights_dir / "a.json").write_text('{"file": "tests/test_a.py", "sec": 1.0, "source": "x"}\n')
+    (weights_dir / "b.json").write_text('{"file": "tests/test_a.py", "sec": 1.0, "source": "x"}\n')
+    assert mod.load_weights(weights_dir) == {"tests/test_a.py": 1.0}
 
 
-def test_load_weights_with_trailing_newline_is_fine(tmp_path):
-    """양성대조 — 정상적으로 개행으로 끝나면 통과해야 한다(위 테스트와 대비되는 경계)."""
-    mod = _load()
-    weights_path = tmp_path / "weights.jsonl"
-    weights_path.write_bytes(b'{"file": "tests/test_a.py", "sec": 1.0}\n')
-    assert mod.load_weights(weights_path) == {"tests/test_a.py": 1.0}
-
-
-def test_load_weights_duplicate_file_with_identical_entry_is_fine(tmp_path):
-    """양성대조 — 같은 파일에 «완전히 동일한» 항목이 두 번(예: cherry-pick 중복) 있는
-    건 실 충돌이 아니므로 통과해야 한다(위 테스트와 대비되는 경계)."""
-    mod = _load()
-    weights_path = tmp_path / "weights.jsonl"
-    weights_path.write_text(
-        '{"file": "tests/test_a.py", "sec": 1.0, "source": "x"}\n'
-        '{"file": "tests/test_a.py", "sec": 1.0, "source": "x"}\n'
-    )
-    assert mod.load_weights(weights_path) == {"tests/test_a.py": 1.0}
-
-
-def test_repo_weights_file_is_wellformed():
-    """저장소에 실제로 커밋된 스냅샷(infra/destructive-schema-shard-weights.jsonl+
+def test_repo_weights_dir_is_wellformed():
+    """저장소에 실제로 커밋된 스냅샷(infra/destructive-schema-shard-weights/+
     .meta.json)이 형식을 지키는지 — 중복 파일 항목이 없는지.
 
     story #3397 — total_files/total_sec는 files 배열에서 파생 가능한 값이라 이제 JSON에
@@ -159,13 +154,14 @@ def test_repo_weights_file_is_wellformed():
     #3742·#3752 실사고). 이 필드들이 «없어야 함»을 여기서 고정해 둔다 — 누가 다시
     넣으면 이 테스트가 그 회귀를 잡는다.
 
-    story #3812 — 포맷이 단일 JSON blob에서 jsonl(+meta.json)로 바뀜(파일마다 1줄 —
-    git union merge로 항목 추가가 구조적으로 충돌 안 나게). 중복 파일 항목 검사는
+    story #3812 CHANGES(재설계) — 포맷이 jsonl(+meta.json)에서 디렉터리(파일마다
+    정확히 하나의 json 파일, +meta.json)로 바뀜(GitHub 서버측 merge가 `.gitattributes
+    merge=union`을 안 따라 1차 처방이 무효였던 실사고 뒤). 중복 파일 항목 검사는
     이제 `_load_full_data()` 자신이 `DuplicateShardWeightEntryError`로 fail-loud
-    하므로(union 병합의 유일한 맹점 방어), 이 테스트는 그 예외가 안 뜨는 것 자체로
-    "중복 없음"을 증명한다(로드가 성공하면 이미 중복 0건이 보장됨)."""
+    하므로, 이 테스트는 그 예외가 안 뜨는 것 자체로 "중복 없음"을 증명한다(로드가
+    성공하면 이미 중복 0건이 보장됨)."""
     mod = _load()
-    data = mod._load_full_data(_WEIGHTS_PATH)
+    data = mod._load_full_data(_WEIGHTS_DIR)
     assert "total_files" not in data, "total_files는 len(files)에서 파생한다 — 다시 기록하지 않는다(story #3397)"
     assert "total_sec" not in data, "total_sec는 sum(files[].sec)에서 파생한다 — 다시 기록하지 않는다(story #3397)"
     assert len(data["files"]) == len({e["file"] for e in data["files"]}), "중복 파일 항목 없어야 함"
@@ -186,8 +182,8 @@ def _fake_weight_entries(n: int) -> list[dict]:
 
 def test_check_staleness_flags_20pct_file_growth(tmp_path):
     mod = _load()
-    weights_path = tmp_path / "weights.jsonl"
-    _write_fake_weights_jsonl(weights_path, measured_at="2026-01-01", files=_fake_weight_entries(100))
+    weights_path = tmp_path / "weights"
+    _write_fake_weights_dir(weights_path, measured_at="2026-01-01", files=_fake_weight_entries(100))
     assert mod.check_staleness(119, weights_path) is None, "19% 증가는 아직 경고 아님"
     warning = mod.check_staleness(120, weights_path)
     assert warning is not None and "+20%" in warning
@@ -195,15 +191,15 @@ def test_check_staleness_flags_20pct_file_growth(tmp_path):
 
 def test_check_staleness_silent_when_stable(tmp_path):
     mod = _load()
-    weights_path = tmp_path / "weights.jsonl"
-    _write_fake_weights_jsonl(weights_path, measured_at="2026-01-01", files=_fake_weight_entries(94))
+    weights_path = tmp_path / "weights"
+    _write_fake_weights_dir(weights_path, measured_at="2026-01-01", files=_fake_weight_entries(94))
     assert mod.check_staleness(94, weights_path) is None
     assert mod.check_staleness(80, weights_path) is None, "줄어든 것은 경고 대상 아님"
 
 
 def test_check_staleness_missing_file_is_silent(tmp_path):
     mod = _load()
-    assert mod.check_staleness(94, tmp_path / "nope.json") is None
+    assert mod.check_staleness(94, tmp_path / "nope") is None
 
 
 # ── story #3392(CI 후속) — unweighted 파일 가드 ─────────────────────────────
@@ -212,8 +208,8 @@ def test_check_staleness_flags_unweighted_file_even_without_20pct_growth(tmp_pat
     """PR #3742 실사고 — 파일 수는 20% 안 늘었는데 unweighted 파일 1개가 shard를
     timeout으로 끌고 갔다. «비율»이 아니라 «존재 자체»가 신호여야 한다."""
     mod = _load()
-    weights_path = tmp_path / "weights.jsonl"
-    _write_fake_weights_jsonl(weights_path, measured_at="2026-01-01", files=_fake_weight_entries(200))
+    weights_path = tmp_path / "weights"
+    _write_fake_weights_dir(weights_path, measured_at="2026-01-01", files=_fake_weight_entries(200))
     assert mod.check_staleness(200, weights_path, unweighted_count=0) is None
     warning = mod.check_staleness(200, weights_path, unweighted_count=1)
     assert warning is not None and "unweighted 파일 1개" in warning
@@ -221,8 +217,8 @@ def test_check_staleness_flags_unweighted_file_even_without_20pct_growth(tmp_pat
 
 def test_check_staleness_combines_both_reasons(tmp_path):
     mod = _load()
-    weights_path = tmp_path / "weights.jsonl"
-    _write_fake_weights_jsonl(weights_path, measured_at="2026-01-01", files=_fake_weight_entries(100))
+    weights_path = tmp_path / "weights"
+    _write_fake_weights_dir(weights_path, measured_at="2026-01-01", files=_fake_weight_entries(100))
     warning = mod.check_staleness(130, weights_path, unweighted_count=2)
     assert "+30%" in warning
     assert "unweighted 파일 2개" in warning

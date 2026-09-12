@@ -934,7 +934,7 @@ jobs:
   # 스텝이 스키마를 샤드당 한 번만 만들어 템플릿으로 굳히고, 이후 매 파일은 그 템플릿을
   # `createdb -T`로 복제(파일시스템 레벨, 초 단위)한다 — 자세한 이유는 그 스텝의 주석·
   # `scripts/build_destructive_schema_template.py` docstring. **가중치 재측정 규칙**(AC2)
-  # — `infra/destructive-schema-shard-weights.jsonl`은 실시간 측정이 아니다:
+  # — `infra/destructive-schema-shard-weights/`(디렉터리)는 실시간 측정이 아니다:
   #   (a) discover 파일 수가 스냅샷 대비 +20% 이상 늘면(`shard_destructive_tests.py`의
   #       `check_staleness()`가 매 실행 stderr에 경고를 찍는다 — CI를 막지는 않는다),
   #   (b) 어느 샤드의 CI 벽시계가 다른 샤드 대비 1.5배 이상 벌어지면,
@@ -1132,7 +1132,7 @@ jobs:
             for uw in "${unweighted_files[@]+"${unweighted_files[@]}"}"; do
               if [ "$uw" = "$f" ] && [ "$_elapsed" -gt "$overage_threshold" ]; then
                 overage_files+=("$f (${_elapsed}s > ${overage_threshold}s)")
-                echo "::error::unweighted 파일이 평균의 ${overage_multiplier}배를 넘었다(story #3392 AC1): $f (${_elapsed}s > ${overage_threshold}s) — infra/destructive-schema-shard-weights.jsonl에 이 값을 추가하라."
+                echo "::error::unweighted 파일이 평균의 ${overage_multiplier}배를 넘었다(story #3392 AC1): $f (${_elapsed}s > ${overage_threshold}s) — infra/destructive-schema-shard-weights/에 이 파일의 json을 추가하라."
               fi
             done
             echo "::endgroup::"

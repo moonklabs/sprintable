@@ -1,0 +1,1 @@
+{"file": "tests/test_3370_requester_member_id_human_resolve.py", "sec": 3.7, "source": "story-3370(휴먼 requester/author member-id 회귀, 2026-09-10, 페드루 2차 리뷰 site_posts.py 11번째 자리 추가) — 신규 파일 실측(로컬, uv run pytest --durations=0 직접 1회 실행, 5건 합계 3.71s — test_3766 등재 선례와 동일 방법론)"}
