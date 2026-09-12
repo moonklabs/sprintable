@@ -325,6 +325,15 @@ class ChannelPostDraftListItem(BaseModel):
     permalink: str | None = None
     external_id: str | None = None
     error_code: str | None = None
+    # story #3815(Phase3·3-5, 미르코 시드 中 발견 → 페드루 PO 지적 2026-09-13) —
+    # migration 0372가 신설했지만 어느 응답에도 안 실려 온 실 결함. FE가 이
+    # 값을 못 읽으면 연결 레벨의 "지금" 감사-미완 플래그(ChannelConnectionResponse.
+    # privacy_locked)로 대리 판정할 수밖에 없는데, 그건 감사가 끝나 플래그가
+    # 꺼지면 "그때 잠겼던 과거 발행물"이 안 잠겼던 것처럼 보이는 — 정확히 0372가
+    # 막으려던 사고. `published_pub`(이 행 자체, "가장 최근 published" 기준)의
+    # 값을 그대로 노출 — publication_status와 같은 소스(다른 채널은 항상 False,
+    # server_default 그대로).
+    privacy_locked: bool = False
     # story #3415(#3414 범위 절단 후속) — publication_commands(story #3414)의 예약·재시도
     # 상태를 목록/단건에 노출. 필드명은 유나 §17-2·§11-5(공통 어휘 정본) 그대로:
     # `next_retry_at`은 DB 컬럼명(`PublicationCommand.next_attempt_at`)과 다르다 — 화면
@@ -1341,6 +1350,7 @@ def _to_draft_list_item(
         permalink=published_pub.permalink if published_pub else None,
         external_id=published_pub.external_id if published_pub else None,
         error_code=latest_pub.error_code if latest_pub else None,
+        privacy_locked=bool(published_pub.privacy_locked) if published_pub else False,
         failure_kind=latest_command.failure_kind if latest_command else None,
         next_retry_at=(
             latest_command.next_attempt_at.isoformat()
@@ -1877,6 +1887,9 @@ class PublishChannelPostResponse(BaseModel):
     # processing=True(컨테이너 비동기 대기)면 아직 최종 published 행이 없어 그 세
     # 필드처럼 null 그대로.
     publication_id: uuid.UUID | None = None
+    # story #3815(Phase3·3-5, 페드루 PO 지적 2026-09-13) — ChannelPostDraftListItem
+    # 과 동형 이유·같은 소스(row.privacy_locked, "지금 이 발행 그 순간"의 사실).
+    privacy_locked: bool = False
 
 
 @router.post(
@@ -2252,6 +2265,7 @@ async def publish_channel_post_draft_endpoint(
         permalink=row.permalink, external_id=row.external_id,
         published_at=row.published_at.isoformat(), version_id=row.version_id,
         scheduled=False, command_id=command.id, publication_id=row.id,
+        privacy_locked=bool(row.privacy_locked),
     )
 
 

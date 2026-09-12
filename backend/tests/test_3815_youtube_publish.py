@@ -817,3 +817,146 @@ async def test_youtube_metadata_invalid_maps_to_422_not_500_at_publish_time():
             app.dependency_overrides.clear()
     finally:
         await engine.dispose()
+
+
+# ─── ⑦ privacy_locked 노출(미르코 시드 中 발견 실 결함) ────────────────────────
+
+@pytest.mark.anyio
+async def test_privacy_locked_exposed_true_on_publish_response_and_draft_list(monkeypatch):
+    """⭐실 결함 재현(페드루 PO 지적 2026-09-13) — migration 0372가 신설한
+    `channel_publications.privacy_locked`가 어느 응답에도 안 실려 왔다. FE가
+    이 값을 못 읽으면 연결 레벨의 "지금" 감사-미완 플래그로 대리 판정할
+    수밖에 없는데, 감사가 끝나 그 플래그가 꺼지면 "그때 잠겼던 과거
+    발행물"이 안 잠겼던 것처럼 보인다 — 정확히 0372가 막으려던 사고."""
+    from app.core.config import settings
+    from tests.test_620beefc_channel_post_image_upload import (
+        _approve_gate_directly, _client_for, _seed_connection, _seed_human, _seed_org, _seed_story,
+        _session_factory, _setup_org_scoped_app,
+    )
+    from tests.test_3554_instagram_reels import _build_mp4, _upload_and_confirm_video
+    from app.main import app
+
+    monkeypatch.setattr(settings, "youtube_api_audit_incomplete", True)
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id, channel="youtube_sandbox")
+            story_id = await _seed_story(s, org_id, project_id)
+            from app.models.participation import ParticipationRole
+            role = ParticipationRole(id=uuid.uuid4(), org_id=org_id, key="approver", label="Approver", is_default=True)
+            s.add(role)
+            await s.commit()
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+
+        try:
+            async with _client_for(app) as client:
+                r_draft = await client.post(
+                    f"/api/v2/organizations/{org_id}/channel-posts/drafts",
+                    json={
+                        "work_item_id": str(story_id), "connection_id": str(connection_id),
+                        "text": "잠금 노출 재현", "channel_payload": {"title": "잠금 노출 재현"},
+                    },
+                )
+                assert r_draft.status_code == 201, r_draft.text
+                draft_id = r_draft.json()["draft_id"]
+
+                video_raw = _build_mp4(duration_seconds=6.0, width=1920, height=1080)
+                r_video = await _upload_and_confirm_video(client, org_id, draft_id, video_raw)
+                assert r_video.status_code == 201, r_video.text
+
+                r_submit = await client.post(
+                    f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/submit", json={},
+                )
+                assert r_submit.status_code == 200, r_submit.text
+                gate_id = uuid.UUID(r_submit.json()["gate_id"])
+
+            async with Session() as s:
+                await _approve_gate_directly(s, gate_id)
+
+            async with _client_for(app) as client:
+                # 첫 호출은 컨테이너 생성만(비동기 관례 — 막 만든 컨테이너를 곧바로
+                # poll하지 않는다, processing=true) — 두 번째 호출이 실제 "published"
+                # 로 마무리한다(sandbox는 결정적으로 즉시 FINISHED).
+                r_pub1 = await client.post(
+                    f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
+                )
+                assert r_pub1.status_code == 200, r_pub1.text
+                assert r_pub1.json()["processing"] is True
+
+                r_pub2 = await client.post(
+                    f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
+                )
+                assert r_pub2.status_code == 200, r_pub2.text
+                assert r_pub2.json()["processing"] is False
+                assert r_pub2.json()["privacy_locked"] is True, "publish 완료 응답에 privacy_locked이 안 실림"
+
+                r_list = await client.get(f"/api/v2/organizations/{org_id}/channel-posts/drafts")
+                assert r_list.status_code == 200, r_list.text
+                item = next(row for row in r_list.json() if row["draft_id"] == draft_id)
+                assert item["privacy_locked"] is True, "목록/단건 응답에 privacy_locked이 안 실림"
+        finally:
+            app.dependency_overrides.clear()
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_privacy_locked_false_for_non_youtube_channel():
+    """양성대조 — youtube/youtube_sandbox 축이 없는 채널(threads)은 privacy_locked
+    이 항상 False(server_default 그대로, 새 열이 기존 채널 회귀 0)."""
+    from tests.test_620beefc_channel_post_image_upload import (
+        _approve_gate_directly, _client_for, _create_draft, _seed_connection, _seed_human, _seed_org,
+        _seed_story, _session_factory, _setup_org_scoped_app,
+    )
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id, channel="threads")
+            story_id = await _seed_story(s, org_id, project_id)
+            from app.models.participation import ParticipationRole
+            role = ParticipationRole(id=uuid.uuid4(), org_id=org_id, key="approver", label="Approver", is_default=True)
+            s.add(role)
+            await s.commit()
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+
+        try:
+            async with _client_for(app) as client:
+                draft_id = await _create_draft(client, org_id=org_id, connection_id=connection_id, story_id=story_id)
+                r_submit = await client.post(
+                    f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/submit", json={},
+                )
+                assert r_submit.status_code == 200, r_submit.text
+                gate_id = uuid.UUID(r_submit.json()["gate_id"])
+
+            async with Session() as s:
+                await _approve_gate_directly(s, gate_id)
+
+            import app.services.threads_publish as tp
+            with (
+                patch.object(tp, "get_publishing_limit", AsyncMock(return_value=(0, 100, 3600))),
+                patch.object(tp, "create_container", AsyncMock(return_value="container-1")),
+                patch.object(tp, "publish_container", AsyncMock(return_value="media-1")),
+                patch.object(tp, "get_permalink", AsyncMock(return_value="https://threads.net/p/1")),
+            ):
+                async with _client_for(app) as client:
+                    r_pub = await client.post(
+                        f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
+                    )
+            assert r_pub.status_code == 200, r_pub.text
+            assert r_pub.json()["privacy_locked"] is False
+
+            async with _client_for(app) as client:
+                r_list = await client.get(f"/api/v2/organizations/{org_id}/channel-posts/drafts")
+            item = next(row for row in r_list.json() if row["draft_id"] == draft_id)
+            assert item["privacy_locked"] is False
+        finally:
+            app.dependency_overrides.clear()
+    finally:
+        await engine.dispose()
