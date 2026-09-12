@@ -111,6 +111,24 @@ async def _put_video_bytes(
     raise last_exc
 
 
+async def create_container(
+    client: httpx.AsyncClient, *, access_token: str, threads_user_id: str, text: str,
+    image_url: str | None = None,
+) -> str:
+    """발견 즉시 수정(PR2 CHANGES② 대응 중 자체 발견) — `channel_posts.py:1711`이
+    `_publish_client.create_container`를 has_video 값과 무관하게 무조건
+    속성-접근한다(video_required=True 전용 채널을 처음 만나며 드러난 기존
+    가정 — Reels 등 기존 영상-지원 채널은 전부 이미지도 같이 지원해 이
+    함수가 항상 존재했다). YouTube는 이미지 컨테이너 개념 자체가 없어 호출
+    되면 안 되는 경로 — fail-closed로 명시 실패(조용한 500 대신)."""
+    raise ThreadsPublishError(
+        "YOUTUBE_IMAGE_CONTAINER_UNSUPPORTED",
+        "YouTube publish-client has no image container concept (video_required=True channel) — "
+        "create_container should never be called; has_video detection may be broken.",
+        status_code=500,
+    )
+
+
 async def create_reels_container(
     client: httpx.AsyncClient, *, access_token: str, threads_user_id: str, text: str,
     video_url: str, cover_url: str | None = None, channel_payload: dict | None = None,

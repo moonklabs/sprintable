@@ -1,1 +1,1 @@
-{"file": "tests/test_3815_youtube_publish.py", "sec": 2.7, "source": "실측(로컬 pytest 단독 실행, 2026-09-12, 디디)"}
+{"file": "tests/test_3815_youtube_publish.py", "sec": 4.8, "source": "실측(로컬 pytest 단독 실행, 2026-09-12, 디디, CHANGES② 테스트 추가 재측)"}

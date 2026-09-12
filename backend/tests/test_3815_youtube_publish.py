@@ -7,12 +7,16 @@ AC 담당 4단(x_publish_budget.py 4단 구조 동형):
 ③ `_validate_youtube_metadata` 단위 — title 필수·tags 합산 상한·categoryId
   숫자 문자열·privacyStatus 허용값. 비-youtube 채널은 관할 밖.
 ④ sandbox 마커 3종 — quota-exceeded(결정적 422 재현)·privacy-locked·
-  provider-error(기존 어휘 재사용)."""
+  provider-error(기존 어휘 재사용).
+⑤ CHANGES②(페드루 PO 지적 2026-09-12 11:34Z) — 컨테이너 IN_PROGRESS 폴링
+  상한이 채널 고정 5분이 아니라 어댑터 값이어야 함(YouTube 트랜스코딩이
+  5분을 예사로 넘겨도 「거짓 실패+중복 업로드」가 나면 안 된다)."""
 from __future__ import annotations
 
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
@@ -37,6 +41,44 @@ async def _dispose_global_engine_after_test():
     yield
     from app.core.database import engine as _global_engine
     await _global_engine.dispose()
+
+
+@pytest.fixture(autouse=True)
+def _configure_secrets(monkeypatch):
+    import importlib
+    from cryptography.fernet import Fernet
+
+    import app.core.config as config_module
+    monkeypatch.setattr(config_module.settings, "channel_credential_encryption_key", Fernet.generate_key().decode())
+
+    import app.services.channel_credential_crypto as crypto_module
+    importlib.reload(crypto_module)
+    yield
+    importlib.reload(crypto_module)
+
+
+_CHANNEL_MEDIA_BUCKET = "test-channel-media-3815"
+
+
+@pytest.fixture(autouse=True)
+def _local_channel_media_storage(monkeypatch, tmp_path):
+    """test_3554_instagram_reels.py와 동형 픽스처(다른 버킷명으로 격리) — ⑤의
+    영상 업로드 왕복 재현에만 실제로 쓰임."""
+    import app.services.channel_post_images as cpi_module
+
+    monkeypatch.setenv("STORAGE_PROVIDER", "local")
+    monkeypatch.setenv("STORAGE_LOCAL_ROOT", str(tmp_path / ".storage"))
+    monkeypatch.setattr(cpi_module, "CHANNEL_MEDIA_BUCKET", _CHANNEL_MEDIA_BUCKET)
+    monkeypatch.setattr(cpi_module, "_PUBLIC_BASE", f"https://storage.googleapis.com/{_CHANNEL_MEDIA_BUCKET}/")
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _local_channel_media_storage_object_path_fix(monkeypatch):
+    import tests.test_620beefc_channel_post_image_upload as base_test_module
+
+    monkeypatch.setattr(base_test_module, "_CHANNEL_MEDIA_BUCKET", _CHANNEL_MEDIA_BUCKET)
+    yield
 
 
 # ─── ① youtube_quota.py 단위 ───────────────────────────────────────────────
@@ -334,3 +376,147 @@ async def test_youtube_sandbox_get_container_status_always_finished():
 
     status, err = await get_container_status(httpx.AsyncClient(), access_token="at", creation_id="x")
     assert (status, err) == ("FINISHED", None)
+
+
+@pytest.mark.anyio
+async def test_youtube_sandbox_processing_long_marker_stays_in_progress():
+    """CHANGES②용 결정적 재현 자리 — 마커가 있으면 매 호출 IN_PROGRESS(5분·6분
+    지나도 FINISHED로 안 바뀜, id 문자열 자체가 상태라 process 메모리 불요)."""
+    from app.services.youtube_sandbox_publish import create_reels_container, get_container_status
+
+    container_id = await create_reels_container(
+        httpx.AsyncClient(), access_token="at", threads_user_id="u",
+        text="설명 [sandbox:youtube-processing-long] 끝", video_url="https://example.com/v.mp4",
+    )
+    assert "processing-long" in container_id
+    status, err = await get_container_status(httpx.AsyncClient(), access_token="at", creation_id=container_id)
+    assert (status, err) == ("IN_PROGRESS", None)
+
+
+# ─── ⑤ CHANGES② — 어댑터별 컨테이너 폴링 상한 ─────────────────────────────────
+
+def test_youtube_adapters_declare_24h_container_poll_timeout_not_5min_default():
+    from app.services.channel_adapters import CHANNEL_ADAPTERS
+
+    for channel in ("youtube", "youtube_sandbox"):
+        assert CHANNEL_ADAPTERS[channel].container_poll_timeout_seconds == 86_400, (
+            f"{channel}이 기본 300초(5분)를 그대로 쓰면 트랜스코딩 中에 거짓 실패+중복 업로드가 난다"
+        )
+
+
+def test_other_channels_keep_default_5min_container_poll_timeout():
+    """양성대조 — 기존 채널(Meta류)은 이 PR로 회귀가 없어야 한다(기본값 300 그대로)."""
+    from app.services.channel_adapters import CHANNEL_ADAPTERS
+
+    for channel in ("instagram", "threads", "facebook"):
+        assert CHANNEL_ADAPTERS[channel].container_poll_timeout_seconds == 300
+
+
+@pytest.mark.anyio
+async def test_youtube_sandbox_container_beyond_5min_stays_in_progress_no_reupload():
+    """⭐CHANGES②(페드루 PO 지적 2026-09-12 11:34Z) 핵심 재현 — YouTube는 5분을
+    넘겨도(Meta 상한 자리) 거짓 실패로 떨어지면 안 된다: 행이 살아있고(status
+    실패 아님)·external_container_id 보존(재시도가 새 업로드를 안 만든다)·
+    create_reels_container(=insert, quota 소비처) 재호출 0."""
+    from tests.test_620beefc_channel_post_image_upload import (
+        _approve_gate_directly, _client_for, _seed_connection, _seed_human, _seed_org, _seed_story,
+        _session_factory, _setup_org_scoped_app,
+    )
+    from tests.test_3554_instagram_reels import _build_mp4, _upload_and_confirm_video
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id, channel="youtube_sandbox")
+            story_id = await _seed_story(s, org_id, project_id)
+            from app.models.participation import ParticipationRole
+            role = ParticipationRole(id=uuid.uuid4(), org_id=org_id, key="approver", label="Approver", is_default=True)
+            s.add(role)
+            await s.commit()
+        from app.main import app
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+
+        try:
+            async with _client_for(app) as client:
+                r_draft = await client.post(
+                    f"/api/v2/organizations/{org_id}/channel-posts/drafts",
+                    json={
+                        "work_item_id": str(story_id), "connection_id": str(connection_id),
+                        "text": "6분 상한 재현용 설명",
+                        "channel_payload": {"title": "6분 상한 재현"},
+                    },
+                )
+                assert r_draft.status_code == 201, r_draft.text
+                draft_id = r_draft.json()["draft_id"]
+
+                video_raw = _build_mp4(duration_seconds=6.0, width=1920, height=1080)
+                r_video = await _upload_and_confirm_video(client, org_id, draft_id, video_raw)
+                assert r_video.status_code == 201, r_video.text
+
+                r_submit = await client.post(
+                    f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/submit", json={},
+                )
+                assert r_submit.status_code == 200, r_submit.text
+                gate_id = uuid.UUID(r_submit.json()["gate_id"])
+
+            async with Session() as s:
+                await _approve_gate_directly(s, gate_id)
+
+            import app.services.youtube_sandbox_publish as ysp
+            create_reels_container_spy = AsyncMock(wraps=ysp.create_reels_container)
+            with patch.object(ysp, "create_reels_container", create_reels_container_spy):
+                async with _client_for(app) as client:
+                    r_pub1 = await client.post(
+                        f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
+                    )
+                assert r_pub1.status_code == 200, r_pub1.text
+                assert r_pub1.json()["processing"] is True
+            assert create_reels_container_spy.await_count == 1
+
+            from app.models.channel_publication import ChannelPublication
+            from sqlalchemy import select as sa_select
+            async with Session() as s:
+                pub = (await s.execute(
+                    sa_select(ChannelPublication).where(ChannelPublication.org_id == org_id)
+                )).scalar_one()
+                original_container_id = pub.external_container_id
+                assert "processing-long" not in original_container_id  # 정상 업로드 — 마커 없음.
+                # 6분 경과 재현(row.created_at 되돌리기, 기존 620beefc 패턴과 동형).
+                pub.created_at = datetime.now(timezone.utc) - timedelta(minutes=6)
+                await s.commit()
+
+            # sandbox의 get_container_status는 마커 없는 id면 즉시 FINISHED를 내
+            # "6분 지나도 여전히 처리 中"을 재현할 수 없다 — get_container_status만
+            # IN_PROGRESS로 패치해 그 상황을 시뮬레이션(YouTube 실물에선 트랜스코딩이
+            # 그만큼 오래 걸리는 경우에 해당).
+            with (
+                patch.object(ysp, "create_reels_container", create_reels_container_spy),
+                patch.object(ysp, "get_container_status", AsyncMock(return_value=("IN_PROGRESS", None))),
+            ):
+                async with _client_for(app) as client:
+                    r_pub2 = await client.post(
+                        f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
+                    )
+                assert r_pub2.status_code == 200, (
+                    f"6분 경과에도 거짓 실패로 떨어지면 안 된다(YouTube 트랜스코딩 예사): {r_pub2.text}"
+                )
+                assert r_pub2.json()["processing"] is True
+
+            assert create_reels_container_spy.await_count == 1, (
+                "재시도가 새 업로드(insert)를 또 만들면 quota 이중 차감 — 5분 상한 채널과 같은 버그 재현"
+            )
+
+            async with Session() as s:
+                pub = (await s.execute(
+                    sa_select(ChannelPublication).where(ChannelPublication.org_id == org_id)
+                )).scalar_one()
+                assert pub.status != "failed", "6분 경과만으로 실패 처리되면 안 된다(24h 상한 미달)"
+                assert pub.external_container_id == original_container_id, (
+                    "id가 지워지면 다음 재시도가 새 업로드를 만든다 — 여기서 이미 사고"
+                )
+        finally:
+            app.dependency_overrides.clear()
+    finally:
+        await engine.dispose()

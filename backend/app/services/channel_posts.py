@@ -2036,17 +2036,40 @@ async def publish_channel_post_draft(
                     # 분기(pending, +30초)로만 계속 재큐잉돼 진짜 무한루프가 된다(워커가
                     # 절대 dead_letter로 못 빠짐). row.created_at은 이 행이 재사용될 뿐
                     # 재생성 안 되므로 "최초 컨테이너 생성 시각"의 신뢰할 수 있는 근사치.
+                    #
+                    # story #3815(Phase3·3-5 PR2 CHANGES②, 페드루 PO 지적 2026-09-12
+                    # 11:34Z) — 상한을 채널 고정 5분에서 어댑터 값(`container_poll_
+                    # timeout_seconds`)으로 뺀다. YouTube 트랜스코딩은 5분을 예사로
+                    # 넘겨(자산은 이미 업로드 完·처리 중일 뿐) 고정 5분을 그대로 쓰면
+                    # "거짓 실패"로 external_container_id를 지워 재시도가 같은 영상을
+                    # 새로 업로드하는 사고(quota 이중 차감 포함)로 이어진다 — 어댑터가
+                    # youtube/youtube_sandbox엔 86400(24h)을 선언, 그 외 채널은 기존
+                    # 기본값 300(5분) 그대로라 회귀 0.
+                    _poll_timeout_adapter = get_channel_adapter(draft.channel)
+                    _poll_timeout_seconds = (
+                        _poll_timeout_adapter.container_poll_timeout_seconds if _poll_timeout_adapter else 300
+                    )
                     elapsed = datetime.now(timezone.utc) - row.created_at
-                    if elapsed > timedelta(minutes=5):
+                    if elapsed > timedelta(seconds=_poll_timeout_seconds):
                         row.status = "failed"
+                        # ⚠️적기만(페드루 明示, 이 PR 범위 밖 후속) — 이 에러 코드가
+                        # "IMAGE"라 영상(YouTube 등)에도 재사용되는 건 이름-사실 불일치.
+                        # 지금 당장 이름을 바꾸면 기존 FE/테스트가 이 문자열을 상수로
+                        # 참조하는 소비처 전수 grep이 이 PR 범위를 넘어가 후속으로 미룬다.
                         row.error_code = "CHANNEL_IMAGE_CONTAINER_FAILED"
-                        row.last_error = f"IN_PROGRESS {elapsed.total_seconds():.0f}s > 5분 상한(그라운딩 §②)"
+                        # story #3779 한글가드 ratchet — 새 문구는 영어로(story #3815
+                        # CHANGES② 대응, 옛 5분-고정 한글 문구는 grandfather돼 있었지만
+                        # 이 값 자체가 이제 어댑터별로 달라져 새로 쓰는 문구라 재사용 불가).
+                        row.last_error = (
+                            f"IN_PROGRESS {elapsed.total_seconds():.0f}s > "
+                            f"{_poll_timeout_seconds}s per-adapter poll timeout"
+                        )
                         row.external_container_id = None
                         await db.commit()
                         raise ChannelImageContainerFailedError(
                             gate_id=gate.id, container_status="TIMEOUT", error_message=row.last_error,
                         )
-                    return row  # 아직 처리 中(5분 이내) — 다음 tick이 다시 폴링.
+                    return row  # 아직 처리 中(상한 이내) — 다음 tick이 다시 폴링.
                 if container_status in ("ERROR", "EXPIRED"):
                     row.status = "failed"
                     row.error_code = "CHANNEL_IMAGE_CONTAINER_FAILED"

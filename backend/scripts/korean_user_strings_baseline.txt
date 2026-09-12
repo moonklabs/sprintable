@@ -640,7 +640,6 @@ app/services/channel_posts.py::) — 재인증이 필요합니다
 app/services/channel_posts.py::) — 조직 설정에서 기본 역할을 지정한 뒤 다시 상신하세요
 app/services/channel_posts.py::draft를 찾을 수 없습니다:
 app/services/channel_posts.py::published 행에 external_id가 없습니다
-app/services/channel_posts.py::s > 5분 상한(그라운딩 §②)
 app/services/channel_posts.py::같은 발행이 다른 요청에서 처리 중입니다(gate_id=
 app/services/channel_posts.py::발행 provider 호출 실패(
 app/services/channel_posts.py::발행 한도를 초과했습니다 —
