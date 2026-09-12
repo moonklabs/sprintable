@@ -238,6 +238,12 @@ function stubFetch(opts: {
   // 재사용, threadMaxSegments>0일 때만 발동)가 반영할 서버 값 — draftAfterRetry와
   // 동형 관례. thread_segments 배열의 실측 갱신을 재현하는 용도.
   draftAfterPublish?: Record<string, unknown>;
+  // story #3815(Phase3·3-5 PR4, 페드루 PO 確定 2026-09-12) — YouTube 능력 플래그 3종
+  // (thread_max_segments와 동형 관례, 기본값은 기존 시나리오 전부 회귀 0이 되도록
+  // false/미지원).
+  videoRequired?: boolean;
+  youtubeMetadataRequired?: boolean;
+  privacyLocked?: boolean;
 }) {
   const versions = opts.versions ?? [VERSION_1];
   const draftDetail: Record<string, unknown> = { ...DRAFT_DETAIL, ...opts.draftDetail };
@@ -299,6 +305,9 @@ function stubFetch(opts: {
               video_aspect_tolerance: opts.videoAspectTolerance ?? 0,
               video_codecs: opts.videoCodecs ?? [],
               thread_max_segments: opts.threadMaxSegments ?? 0,
+              video_required: opts.videoRequired ?? false,
+              youtube_metadata_required: opts.youtubeMetadataRequired ?? false,
+              privacy_locked: opts.privacyLocked ?? false,
             }],
             error: null, meta: null,
           }),
@@ -5484,5 +5493,150 @@ describe('ChannelPostEditPage — 스레드 이어쓰기(story #3808 PR5b-2, 페
     await flush();
 
     expect(container.querySelector('[data-testid="channel-post-submit-button"]')?.hasAttribute('disabled')).toBe(false);
+  });
+});
+
+// story #3815(Phase3·3-5 PR4, 페드루 PO 確定 2026-09-12) — YouTube 구조화 메타데이터
+// (제목·태그·카테고리·공개범위)+영상 필수+감사 미완 공개범위 잠금.
+describe('ChannelPostEditPage — YouTube 메타데이터(story #3815 PR4)', () => {
+  it('youtube_metadata_required=false(다른 채널)이면 카드 자체를 안 그린다', async () => {
+    stubFetch({ youtubeMetadataRequired: false });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-youtube-metadata-editor"]')).toBeNull();
+  });
+
+  it('youtube_metadata_required=true — 카드가 뜨고 제목·태그·카테고리·공개범위 필드가 모두 있다', async () => {
+    stubFetch({ youtubeMetadataRequired: true });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-youtube-metadata-editor"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="channel-post-youtube-title-field"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="channel-post-youtube-tags-field"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="channel-post-youtube-category-field"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="channel-post-youtube-privacy-field"]')).not.toBeNull();
+    // 챕터 도움 문구도 이 게이트 밑(youtube만).
+    expect(container.querySelector('[data-testid="channel-post-youtube-chapters-hint"]')).not.toBeNull();
+  });
+
+  it('제목이 비어 있으면 사유가 뜨고 상신·예약 상신이 막히지만 저장은 그대로 활성', async () => {
+    stubFetch({ youtubeMetadataRequired: true });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-youtube-title-required-reason"]')).not.toBeNull();
+    expect((container.querySelector('[data-testid="channel-post-submit-button"]') as HTMLButtonElement).disabled).toBe(true);
+    expect((container.querySelector('[data-testid="channel-post-schedule-submit-button"]') as HTMLButtonElement).disabled).toBe(true);
+    expect((container.querySelector('[data-testid="channel-post-save-button"]') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('제목을 채우면 사유가 사라지고 상신이 풀린다', async () => {
+    stubFetch({ youtubeMetadataRequired: true });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const titleInput = container.querySelector('[data-testid="channel-post-youtube-title-field"]') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => { setter.call(titleInput, '제목'); titleInput.dispatchEvent(new Event('input', { bubbles: true })); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-youtube-title-required-reason"]')).toBeNull();
+    expect((container.querySelector('[data-testid="channel-post-submit-button"]') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('video_required=true·영상 0개 — 사유가 뜨고 상신이 막힌다(image_required 동형)', async () => {
+    stubFetch({ videoRequired: true });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-video-required-reason"]')).not.toBeNull();
+    expect((container.querySelector('[data-testid="channel-post-submit-button"]') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('video_required=false(다른 채널)이면 영상 0개여도 사유가 안 뜬다', async () => {
+    stubFetch({ videoRequired: false });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-video-required-reason"]')).toBeNull();
+  });
+
+  it('privacy_locked=true — 공개범위 select가 비활성이고 잠금 안내 문구가 뜬다', async () => {
+    stubFetch({ youtubeMetadataRequired: true, privacyLocked: true });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const select = container.querySelector('[data-testid="channel-post-youtube-privacy-field"]') as HTMLSelectElement;
+    expect(select.disabled).toBe(true);
+    expect(select.value).toBe('private');
+    expect(container.querySelector('[data-testid="channel-post-youtube-privacy-locked-note"]')).not.toBeNull();
+  });
+
+  it('privacy_locked=false — 공개범위 select가 활성이고 잠금 안내 문구가 없다', async () => {
+    stubFetch({ youtubeMetadataRequired: true, privacyLocked: false });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const select = container.querySelector('[data-testid="channel-post-youtube-privacy-field"]') as HTMLSelectElement;
+    expect(select.disabled).toBe(false);
+    expect(container.querySelector('[data-testid="channel-post-youtube-privacy-locked-note"]')).toBeNull();
+  });
+
+  it('저장 시 title·tags·category_id·privacy_status가 channel_payload.youtube로 실린다', async () => {
+    let savedBody: unknown;
+    stubFetch({
+      youtubeMetadataRequired: true,
+      onSave: (body) => { savedBody = body; return { status: 201, body: { draft_id: DRAFT_ID, version_id: 'v2', version: 2 } }; },
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const titleInput = container.querySelector('[data-testid="channel-post-youtube-title-field"]') as HTMLInputElement;
+    const inputSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => { inputSetter.call(titleInput, '제목'); titleInput.dispatchEvent(new Event('input', { bubbles: true })); });
+    const tagsInput = container.querySelector('[data-testid="channel-post-youtube-tags-field"]') as HTMLInputElement;
+    await act(async () => { inputSetter.call(tagsInput, '태그1, 태그2'); tagsInput.dispatchEvent(new Event('input', { bubbles: true })); });
+    const categorySelect = container.querySelector('[data-testid="channel-post-youtube-category-field"]') as HTMLSelectElement;
+    const selectSetter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')!.set!;
+    await act(async () => { selectSetter.call(categorySelect, '10'); categorySelect.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+    await act(async () => { (container.querySelector('[data-testid="channel-post-save-button"]') as HTMLButtonElement).click(); });
+    await flush();
+
+    expect(savedBody).toMatchObject({
+      channel_payload: {
+        youtube: { title: '제목', tags: ['태그1', '태그2'], category_id: '10', privacy_status: 'private' },
+      },
+    });
+  });
+
+  it('youtube_metadata_required=false면 저장 body의 channel_payload는 null(youtube 슬롯 자체가 없다)', async () => {
+    let savedBody: unknown;
+    stubFetch({
+      youtubeMetadataRequired: false,
+      onSave: (body) => { savedBody = body; return { status: 201, body: { draft_id: DRAFT_ID, version_id: 'v2', version: 2 } }; },
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    await act(async () => { (container.querySelector('[data-testid="channel-post-save-button"]') as HTMLButtonElement).click(); });
+    await flush();
+
+    expect(savedBody).toMatchObject({ channel_payload: null });
+  });
+
+  it('로드된 버전의 channel_payload.youtube가 편집기 필드에 그대로 seed된다(재편집)', async () => {
+    stubFetch({
+      youtubeMetadataRequired: true,
+      versions: [{ ...VERSION_1, channel_payload: { youtube: { title: '기존 제목', tags: ['a', 'b'], category_id: '20', privacy_status: 'public' } } }],
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    expect((container.querySelector('[data-testid="channel-post-youtube-title-field"]') as HTMLInputElement).value).toBe('기존 제목');
+    expect((container.querySelector('[data-testid="channel-post-youtube-tags-field"]') as HTMLInputElement).value).toBe('a, b');
+    expect((container.querySelector('[data-testid="channel-post-youtube-category-field"]') as HTMLSelectElement).value).toBe('20');
+    expect((container.querySelector('[data-testid="channel-post-youtube-privacy-field"]') as HTMLSelectElement).value).toBe('public');
   });
 });

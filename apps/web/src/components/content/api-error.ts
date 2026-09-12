@@ -60,6 +60,9 @@ export type SitePostApiErrorKind =
   // 상신 시도. 특별 분기 불요(labelKey만으로 t()가 문장을 조립 — text_too_long류와
   // 달리 보간값이 없다) — kind는 다른 image_* 항목과 이름 관례만 맞춘다.
   | 'image_required'
+  // story #3815(Phase3·3-5 PR4, 페드루 PO 確定 2026-09-12) — 영상 필수 채널
+  // (YouTube)에 영상 없이 상신 시도. image_required와 동형 관례(보간값 없음).
+  | 'video_required'
   // story #3500(BE #3498, 아직 미착지 — PO 確定 계약) — 생성 비용 한도(크레딧 게이트)
   // 초과. site_post·channel_post 상신 둘 다 같은 코드·같은 4값 shape를 공유(광고
   // budget_gate와 같은 계약, 블루프린트 §2). labelKey는 비워 두고(text_too_long과
@@ -203,6 +206,14 @@ const KNOWN_ERRORS: Record<string, KnownError> = {
   // story #3538(BE #3886, 유나 §17-16⑤ PO 確定) — 선알림(사유 사슬)과 같은 i18n 키.
   // 서버 message를 그대로 뿌리지 않는다(코드→화면 문구 선택, §22-15 규율).
   CHANNEL_IMAGE_REQUIRED: { labelKey: 'channelPostsImageRequiredReason', kind: 'image_required' },
+  // story #3815(Phase3·3-5 PR4, 페드루 PO 確定 2026-09-12) — image_required 동형.
+  CHANNEL_VIDEO_REQUIRED: { labelKey: 'channelPostsVideoRequiredReason', kind: 'video_required' },
+  // story #3815(Phase3·3-5 PR4, 페드루 PO 確定 2026-09-12) — YouTube Data API
+  // 일일 단위 한도 소진(플랫폼 공유 축, 연결별이 아니다). PO 明示 — "BE 정적
+  // 문구 그대로"(labelKey 비움, CHANNEL_TEXT_TOO_LONG류와 동형 — page.tsx가
+  // 문장을 짓지 않고 서버 message를 그대로 보인다). kind는 CHANNEL_RATE_LIMITED
+  // 와 같은 축(일시적·재연결 0)을 재사용 — 그 kind가 이미 "잠시 뒤" 의미를 안다.
+  YOUTUBE_QUOTA_EXCEEDED: { labelKey: '', kind: 'rate_limited' },
   // story #3575(BE #3574, 페드루 PO 確定 2026-09-06) — 영상이 있는 초안에 커버를
   // 2장째 올리려 할 때의 서버 방어선(화면 상한 1이 정상 경로를 이미 막지만, 레이스
   // 등으로 도달 시 회귀 0). labelKey 빈칸 — 서버 message 그대로(3471 동형).
