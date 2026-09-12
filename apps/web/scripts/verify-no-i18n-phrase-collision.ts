@@ -590,6 +590,20 @@ export const EXEMPT_PAIRS = new Set<string>([
   // 발송된 답글의 발송 시각을 보여주는 정적 라벨(수가 아니라 상대시각 문자열)이라
   // «두 수를 헷갈릴» 여지 자체가 없다(테이블 컬럼도 다르다 — 상태 열 vs 액션 열).
   'content.commentsReplyCta <-> content.engagementAnsweredAt',
+  // story #3808(Phase3·3-3 PR5b-2, 페드루 PO 確定 2026-09-12) — 스레드 상태 낱말 두
+  // 문구가 "스레드 {total}건 중 {published}건 발행"이라는 같은 골격을 공유하고
+  // (Complete가 Partial의 접두 그대로), 상세 화면 하나가 배열 마지막 세그먼트의
+  // status로 딱 한 쪽만 렌더한다(§3402 B3 배지와 같은 상호배타 렌더 축 — 실패
+  // 세그먼트 있으면 Partial, 전부 published면 Complete, 동시에 서지 않는다) —
+  // apiUsageBudgetLimitLabel<->Suspended 항목과 동형("같은 화면의 두 «수»가
+  // 헷갈리는" #2352/#2365 병이 성립할 자리 자체가 없다).
+  'content.channelPostsThreadStatusComplete <-> content.channelPostsThreadStatusPartial',
+  // 둘 다 publishCta("발행", 발행 버튼의 보이는 글자)와 "발행"이라는 낱말만 겹친다 —
+  // 하나는 누르는 동사형 버튼, 하나는 이미 벌어진 발행 결과를 세는 서술문이라
+  // contentRules.saveAction<->versionConflictFieldWithName(§20 "저장" 쌍)과 같은
+  // 근거로 헷갈릴 자리가 아니다.
+  'content.channelPostsThreadStatusComplete <-> content.publishCta',
+  'content.channelPostsThreadStatusPartial <-> content.publishCta',
 ]);
 
 // ⛔⭐오르테가군 지적(2026-07-31) — 이 목록에 «새로» 넣는 것은 PO 승인을 거친다. 이유 없이
