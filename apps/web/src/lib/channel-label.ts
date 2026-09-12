@@ -2,7 +2,11 @@
 // BE 코드값/adapter display_name)가 사람이 읽는 문구에 그대로 새던 여러 자리(sandbox가
 // "sandbox · Sandbox"로 겹쳐 보이던 것 등)를 한 맵으로 수렴. #3805
 // CAMPAIGN_STATUS_LABEL_KEYS와 같은 형 — 모르는 값은 지어내지 않고 원문 그대로 폴백.
-const CHANNEL_LABEL_KEYS: Record<string, string> = {
+// story #3815(Phase3·3-5, 페드루 PO 지적 2026-09-12) — export는 completeness
+// 가드 테스트(channel-label.test.ts)가 3697 FE 채널 목록(19) 전부를 이 맵과
+// 직접 대조하기 위함(채널 하나가 통째로 빠지면 raw 낱말 유출 클래스가 재발 —
+// meta_ads·x·ghost·이번 youtube/stibee_sandbox까지 3회 반복된 실 결함).
+export const CHANNEL_LABEL_KEYS: Record<string, string> = {
   threads: 'channelThreads',
   hosted_site: 'channelLabelHostedSite',
   wordpress: 'channelLabelWordpress',
@@ -45,6 +49,16 @@ const CHANNEL_LABEL_KEYS: Record<string, string> = {
   // 결함 클래스(meta_ads/x 선례와 동형) — 등록 자리에서 미리 챙긴다.
   ghost: 'channelLabelGhost',
   ghost_sandbox: 'channelLabelGhostSandbox',
+  // story #3815(Phase3·3-5, 페드루 PO 지적 2026-09-12 — 4232 시드 캡처 中 발견) —
+  // meta_ads/x/ghost와 같은 클래스 3회째: youtube/youtube_sandbox 행이 이 맵에
+  // 없어 raw "youtube"/"youtube_sandbox" 원문이 화면(행 제목 등)에 그대로 새고
+  // 있었다. stibee_sandbox도 같은 자리에서 함께 발견(stibee만 등록돼 있고 짝인
+  // sandbox는 빠져 있던 것 — stibee_sandbox 등록 시점에 이 맵을 안 챙긴 결과).
+  // channel-label.test.ts의 완전성 가드 테스트가 이 클래스를 계속 놓치지 않게
+  // 3697 FE 채널 목록(19) 전부를 이 맵과 대조한다.
+  youtube: 'channelLabelYoutube',
+  youtube_sandbox: 'channelLabelYoutubeSandbox',
+  stibee_sandbox: 'channelLabelStibeeSandbox',
 };
 
 export function channelLabel(channel: string, t: (key: string) => string): string {
