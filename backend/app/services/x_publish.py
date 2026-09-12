@@ -29,10 +29,11 @@ posts.py` 무변경 — 이 파일이 그 구조에 맞춰 스스로를 접는�
 
 ## `publish_x_thread` — 스레드 N세그먼트 프리미티브(카드 PR2 조각, 페드루 PO 決定
 2026-09-11 20:09Z)
-`create_container`(단일 세그먼트, image_url 유무 무관)가 이 함수를 texts=[text]
-하나로 호출해 **오늘부터 N=1이 실 서비스**. N≥2(진짜 스레드)는 이 함수의 계약
-테스트로만 고정돼 있고 실 호출부는 없다(그 텍스트들의 출처=PR5, draft segments
-스키마 설계 몫 — 카드 본문에 명시). 반환 `[{sequence, external_id, permalink}, ...]`
+`create_container`(단일 세그먼트, image_url 유무 무관)는 이 함수를 texts=[text]
+하나로 호출한다(N=1, 기존 단일-발행 경로). N≥2(진짜 스레드)는 story #3808
+PR5b-1(`channel_posts.py::_publish_x_thread_draft`)부터 실 호출부가 생겼다 —
+`channel_post_versions.channel_payload.thread`(story #3813 공유 슬롯)가 텍스트
+출처. 반환 `[{sequence, external_id, permalink}, ...]`
 (1-indexed, 헤드=1) — 두 번째부터 `in_reply_to_tweet_id`로 직전 세그먼트를 참조해
 실제 reply 체인을 만든다(X 스레드의 진짜 메커니즘 — 전용 "스레드" API는 없다).
 
@@ -168,18 +169,25 @@ async def get_tweet_permalink(client: httpx.AsyncClient, *, access_token: str, t
 
 async def publish_x_thread(
     client: httpx.AsyncClient, *, access_token: str, texts: list[str], media_id: str | None = None,
+    initial_reply_to_tweet_id: str | None = None,
 ) -> list[dict]:
     """스레드 N세그먼트 프리미티브 — 각 세그먼트를 직전 세그먼트의 reply로 순차
     발행(reply 체인). `media_id`는 **첫 세그먼트(헤드)에만** 첨부(AC2 「텍스트·
     이미지 1건」·「스레드 3건」이 별개 항목인 것과 정합 — 스레드 각 세그먼트마다
     이미지를 붙이는 경로는 이 카드 범위 밖).
 
+    story #3808(PR5b-1, 페드루 PO 確定 2026-09-12) — `initial_reply_to_tweet_id`는
+    부분 실패 재시도용(AC4③④). k번째에서 실패하면 1..k-1은 이미 발행됐고, 재시도는
+    이 함수를 「남은 세그먼트만」으로 다시 부른다 — 그 첫 세그먼트가 "새 스레드의
+    헤드"가 아니라 "이미 발행된 k-1번째의 reply"여야 하므로, 시작 값을 None(항상
+    새 스레드) 대신 이 인자로 넘겨받는다(생략 시 기존 동작 그대로 — 회귀 0).
+
     실패 시 이미 발행된 앞 세그먼트는 그대로 남는다(부분 성공 — Threads 컨테이너
     부분성공과 다른 성격이지만 "이미 나간 tweet을 되돌리지 않는다"는 같은 정직성
     원칙, delete_tweet류 자동 롤백은 이 카드 범위 밖). 호출부가 이미 발행된
     세그먼트 목록(예외의 `.published_segments`)을 볼 수 있게 예외에 실어 던진다."""
     results: list[dict] = []
-    prev_tweet_id: str | None = None
+    prev_tweet_id: str | None = initial_reply_to_tweet_id
     for index, text in enumerate(texts):
         sequence = index + 1
         try:

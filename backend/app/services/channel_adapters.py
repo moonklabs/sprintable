@@ -125,6 +125,13 @@ class ChannelAdapterConfig:
     video_aspect_target: float = 0.0
     video_aspect_tolerance: float = 0.0
     video_codecs: tuple[str, ...] = ()
+    # story #3808(Phase3·3-3 PR5b-1, 페드루 PO 確定 2026-09-12) — 스레드(연속 게시)
+    # 이어쓰기 세그먼트 상한(헤드=`text` 제외, `channel_payload["thread"]` 배열
+    # 길이 자체의 상한). image_max_count=0과 동형 관례 — 0(기본)=이 채널은 스레드
+    # 이어쓰기 미지원(channel_payload.thread가 있어도 무시가 아니라 422로 거부,
+    # ChannelThreadUnsupportedError). X/X Sandbox만 10(⚠️미확認 — 실 X API 자체
+    # 상한 문서 재확認 대상, 지금은 제품 판단값).
+    thread_max_segments: int = 0
 
 
 CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
@@ -534,6 +541,7 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         # user-context 토큰만 쓰므로(그라운딩상) 저촉 없을 것으로 추정 — 실 앱 왕복
         # 재확認 대상.
         insight_metrics=("impressions", "engagements"),
+        thread_max_segments=10,
     ),
     "x_sandbox": ChannelAdapterConfig(
         authorize_url="https://x.com/i/oauth2/authorize",
@@ -552,6 +560,7 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         insight_metrics=("impressions", "engagements"),
         requires_connection=True,
         max_text_length=280,
+        thread_max_segments=10,
     ),
 }
 

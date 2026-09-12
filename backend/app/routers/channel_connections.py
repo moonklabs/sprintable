@@ -162,6 +162,11 @@ class ChannelConnectionResponse(BaseModel):
     video_aspect_target: float = 0.0
     video_aspect_tolerance: float = 0.0
     video_codecs: list[str] = []
+    # story #3808(Phase3·3-3 PR5b-2, 페드루 PO 確定 2026-09-12) — 스레드(연속 게시)
+    # 이어쓰기 세그먼트 상한(image_max_count와 동형 관례 — 미선언 채널은 0="이 채널은
+    # 스레드 이어쓰기 미지원", FE가 이 값으로 편집기의 「스레드 이어쓰기」 목록 UI
+    # 노출 여부를 판단한다, 채널 이름 하드코딩 목록 금지).
+    thread_max_segments: int = 0
     # story #3492 — 붙여넣기(pasted_secret) 재방문 표시(§2 규격 3, app_id_suffix와
     # 동형). oauth 채널은 항상 null(secret_hint 자체를 안 씀).
     secret_hint: str | None = None
@@ -232,6 +237,7 @@ def _to_response(row, *, reconnect_mismatch_target_id: uuid.UUID | None = None) 
         video_aspect_target=adapter.video_aspect_target if adapter is not None else 0.0,
         video_aspect_tolerance=adapter.video_aspect_tolerance if adapter is not None else 0.0,
         video_codecs=list(adapter.video_codecs) if adapter is not None else [],
+        thread_max_segments=adapter.thread_max_segments if adapter is not None else 0,
         secret_hint=row.secret_hint,
         reconnect_mismatch_target_id=reconnect_mismatch_target_id,
     )

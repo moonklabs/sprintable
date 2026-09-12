@@ -34,6 +34,7 @@ from app.models.channel_post_image import ChannelPostImage
 from app.models.channel_post_version import ChannelPostVersion
 from app.models.channel_publication import UQ_GATE_VERSION_SEQUENCE_CONSTRAINT_NAME, ChannelPublication
 from app.models.gate import Gate, set_gate_status
+from app.models.org_content_rule import OrgContentRule
 from app.models.publication_command import PublicationCommand
 from app.models.site_post_draft import SitePostDraft
 from app.models.site_post_version import SitePostVersion
@@ -93,6 +94,48 @@ class ChannelTextTooLongError(ValueError):
         self.max_length = max_length
         self.current_length = current_length
         super().__init__(f"본문이 한도를 넘었습니다(한도 {max_length}자, 현재 {current_length}자)")
+
+
+class ChannelThreadUnsupportedError(ValueError):
+    """story #3808(PR5b-1, 페드루 PO 確定 2026-09-12) — `channel_payload.thread`가
+    있는데 그 채널의 `thread_max_segments`가 0(미선언=미지원, image_max_count=0과
+    동형 관례). 422 — 입력 형태 오류 축(ChannelTextTooLongError와 동열)."""
+
+    def __init__(self, *, channel: str) -> None:
+        self.channel = channel
+        # story #3779 한글 사용자 문장 재발 가드(ratchet — baseline만 축소 가능) —
+        # 신규 코드는 영문으로(PR3/PR4/PR5a의 동일 상황 정정 전례 그대로).
+        super().__init__(f"The {channel} channel does not support thread continuations.")
+
+
+class ChannelThreadSegmentLimitExceededError(ValueError):
+    """story #3808(PR5b-1) — 이어쓰기 세그먼트 수가 어댑터 선언 `thread_max_segments`를
+    넘음(헤드=`text` 제외, `channel_payload.thread` 배열 길이만 잰다)."""
+
+    def __init__(self, *, max_segments: int, current_count: int) -> None:
+        self.max_segments = max_segments
+        self.current_count = current_count
+        # story #3779 한글 사용자 문장 재발 가드 — 신규 코드는 영문으로.
+        super().__init__(
+            f"Thread continuation supports at most {max_segments} segments (got {current_count})."
+        )
+
+
+class ChannelThreadSegmentTooLongError(ValueError):
+    """story #3808(PR5b-1) — 이어쓰기 세그먼트 하나가 어댑터 선언 max_text_length를
+    넘음. `segment_number`는 헤드=1부터 세는 전체 스레드 순번(사람이 에디터에서 보는
+    "몇 번째"와 일치시키기 위해 — thread 배열 자체는 0-indexed·헤드 제외이지만
+    이 필드는 +2부터 시작, ChannelTextTooLongError와 나란한 필드 완결성 검사)."""
+
+    def __init__(self, *, segment_number: int, max_length: int, current_length: int) -> None:
+        self.segment_number = segment_number
+        self.max_length = max_length
+        self.current_length = current_length
+        # story #3779 한글 사용자 문장 재발 가드 — 신규 코드는 영문으로.
+        super().__init__(
+            f"Thread segment {segment_number} exceeds the limit "
+            f"(limit {max_length} chars, current {current_length} chars)."
+        )
 
 
 class ChannelImageRequiredError(ValueError):
@@ -467,6 +510,28 @@ def _validate_text_length(*, channel: str, text: str) -> None:
         raise ChannelTextTooLongError(max_length=adapter.max_text_length, current_length=current_length)
 
 
+def _validate_thread_segments(*, channel: str, thread: list[str]) -> None:
+    """story #3808(PR5b-1, 페드루 PO 確定 2026-09-12) — `channel_payload.thread`
+    검증. 저장 시점(create_channel_post_draft_version)·발행 시점(publish_channel_
+    post_draft) 둘 다에서 호출한다(②, ChannelTextTooLongError의 헤드 검증과 같은
+    두 호출부 패턴 — 승인 뒤 어댑터 선언이 안 바뀌지만 방어적으로 재검사)."""
+    if not thread:
+        return
+    adapter = get_channel_adapter(channel)
+    max_segments = adapter.thread_max_segments if adapter is not None else 0
+    if max_segments <= 0:
+        raise ChannelThreadUnsupportedError(channel=channel)
+    if len(thread) > max_segments:
+        raise ChannelThreadSegmentLimitExceededError(max_segments=max_segments, current_count=len(thread))
+    for index, segment in enumerate(thread):
+        current_length = text_char_count(segment)
+        if current_length > adapter.max_text_length:
+            raise ChannelThreadSegmentTooLongError(
+                segment_number=index + 2,  # 헤드=1, thread[0]=2번째 세그먼트
+                max_length=adapter.max_text_length, current_length=current_length,
+            )
+
+
 async def create_channel_post_draft_version(
     db: AsyncSession,
     *,
@@ -515,6 +580,8 @@ async def create_channel_post_draft_version(
     슬롯이 아직 요구하지 않는다, 필요해지면 그때 승격)."""
     connection = await _get_active_connection(db, org_id=org_id, connection_id=connection_id)
     _validate_text_length(channel=connection.channel, text=text)
+    if channel_payload:
+        _validate_thread_segments(channel=connection.channel, thread=channel_payload.get("thread") or [])
 
     resolved_source_site_post_version_id: uuid.UUID | None = None
     if source_content_item_id is not None:
@@ -779,7 +846,7 @@ async def list_channel_post_drafts(
     tuple[
         ChannelPostDraft, ChannelPostVersion, ChannelPostVersion,
         Gate | None, ChannelPublication | None, ChannelPublication | None, str | None,
-        PublicationCommand | None, ChannelPostImage | None,
+        PublicationCommand | None, ChannelPostImage | None, list[ChannelPublication],
     ]
 ]:
     """site_posts.list_site_post_drafts와 동형(latest+origin 버전 조인, "최신"은 최신
@@ -816,11 +883,23 @@ async def list_channel_post_drafts(
       "이 게이트의 아무 행이나≠이 게이트의 최신 행").
 
     반환: (draft, latest_version, origin_version, gate, published_publication,
-    latest_version_publication, published_body_sha256, latest_command, latest_image) —
+    latest_version_publication, published_body_sha256, latest_command, latest_image,
+    latest_version_thread_publications) —
     gate·publication·command·image 계열은 없으면 None(지어내지 않는다, "모른다≠다르다").
     `latest_image`(9번째 원소, story 620beefc)는 **최신 버전**에 붙은 `ChannelPostImage`
     (없으면 None) — 썸네일·§17-14 배지(원본/파생본 width·bytes) 출처, latest_command와
     같은 "최신 버전/게이트 기준" 원칙.
+
+    `latest_version_thread_publications`(10번째 원소, story #3808 PR5b-2, 페드루 PO
+    確定 2026-09-12) — **최신 버전**의 publication 행 **전부**(sequence 오름차순,
+    배치③이 이미 gate_id로 전 행을 긁어 오므로 신규 쿼리 0 — `latest_version_pub_by_gate`
+    가 "그중 하나"만 남기는 것과 달리 이건 그룹 전체를 보존한다). X 스레드(N≥2)의
+    부분 실패(1..k-1 published·k failed·k+1..N은 행 자체가 없음)를 화면이 그리려면
+    단일값(`latest_version_pub_by_gate`)로는 "몇 번째에서 멈췄나"를 못 담는다 — 기존
+    단일값 4필드(publication_status·error_code·published_at·permalink·external_id)는
+    무변(하위호환, 헤드=sequence 1 값을 그대로 씀). 세그먼트가 1개 이하(스레드 아님)면
+    라우터가 이 배열을 null로 접는다(신호 축소 — "스레드"라는 사실 자체가 없으면
+    빈 배열보다 null이 더 정직하다).
 
     story #3734 — `include_deleted=False`(기본)면 보관된(`deleted_at` not null) 초안을
     결과에서 뺀다. `status`(draft|withdrawn)와 독립 축 — withdrawn이면서 보관 안 됐거나,
@@ -944,16 +1023,26 @@ async def list_channel_post_drafts(
     }
 
     latest_version_pub_by_gate: dict[uuid.UUID, ChannelPublication] = {}
+    latest_version_thread_pubs_by_gate: dict[uuid.UUID, list[ChannelPublication]] = {}
     published_pub_by_gate: dict[uuid.UUID, ChannelPublication] = {}
     published_version_ids: set[uuid.UUID] = set()
     if gate_ids:
-        # 배치 ③: 최신 버전의 publication 행(publication_status·error_code 축).
+        # 배치 ③: 최신 버전의 publication 행 — sequence 오름차순으로 받아 그룹 전체를
+        # 보존한다(story #3808 PR5b-2 — 예전엔 "아무 행이나 마지막에 덮어쓴 것"이
+        # 단일값 축이었는데, 그 순서가 sequence 오름차순이 아니면 스레드에서 헤드가
+        # 아닌 임의 세그먼트 값이 대표로 새는 잠재 결함이었다 — 이번에 명시 정렬로
+        # 고정). 첫 원소(가장 작은 sequence — 비스레드는 항상 0, 스레드는 헤드=1)가
+        # 기존 단일값 4필드의 출처(하위호환, 헤드 값 그대로) — setdefault로 그 첫
+        # 원소만 latest_version_pub_by_gate에 남긴다.
         pub_rows = (await db.execute(
-            select(ChannelPublication).where(ChannelPublication.gate_id.in_(gate_ids))
+            select(ChannelPublication)
+            .where(ChannelPublication.gate_id.in_(gate_ids))
+            .order_by(ChannelPublication.sequence.asc())
         )).scalars().all()
         for p in pub_rows:
             if latest_version_id_by_gate.get(p.gate_id) == p.version_id:
-                latest_version_pub_by_gate[p.gate_id] = p
+                latest_version_pub_by_gate.setdefault(p.gate_id, p)
+                latest_version_thread_pubs_by_gate.setdefault(p.gate_id, []).append(p)
 
         # 배치 ④: 가장 최근 published 상태(published_at·permalink·external_id 축) —
         # published_at desc로 이미 정렬돼 오므로 setdefault로 최신만 남는다.
@@ -1011,9 +1100,10 @@ async def list_channel_post_drafts(
         )
         latest_command = latest_command_by_gate.get(gate.id) if gate else None
         latest_image = image_by_version.get(latest_v.id)
+        latest_thread_pubs = latest_version_thread_pubs_by_gate.get(gate.id, []) if gate else []
         result.append((
             draft, latest_v, origin_v, gate, published_pub, latest_pub, published_body_sha256,
-            latest_command, latest_image,
+            latest_command, latest_image, latest_thread_pubs,
         ))
     return result
 
@@ -1371,17 +1461,33 @@ async def publish_channel_post_draft(
     # story #3808(Phase3·3-3 PR3, 페드루 PO 確定 2026-09-11) — X 종량 API 지출 월
     # 상한. 위 3498 체크(생성비, 무변경)와 병렬 — 다른 지갑(kind="api_usage_cost")
     # 이라 서로 안 갉아먹는다. x/x_sandbox만 대상(다른 채널은 API 종량 개념 자체가
-    # 없음). estimated_cost_minor = 단가 × 세그먼트 수 — PR2는 실 호출부를 항상
-    # N=1로 통과시키므로 지금은 항상 단가 그 자체(스레드 N≥2는 PR5 몫). 이 블록에서
-    # 구한 `x_unit_cost_minor`는 아래 함수 끝(발행 성공 뒤 evidence 기록)에서도
-    # 재사용한다(같은 요청 안 재조회 0).
+    # 없음). estimated_cost_minor = 단가 × 세그먼트 수 — 스레드(N≥2)는 PR5b-1부터
+    # `_publish_x_thread_draft()`가 자체 재계산(이번 호출에서 실제로 시도할 세그먼트
+    # 수, 재시도 시 남은 수만) 하므로 여기 단일-호출부는 N=1(스레드 아닌 단일 발행)
+    # 경우에만 단가 그 자체를 쓴다. 이 블록에서 구한 `x_unit_cost_minor`는 아래
+    # 단일-발행 경로 끝(발행 성공 뒤 evidence 기록)·스레드 경로 둘 다에서 재사용한다
+    # (같은 요청 안 재조회 0).
     x_unit_cost_minor: int | None = None
+    content_rules_row = None
+    thread_segments = list((latest.channel_payload or {}).get("thread") or []) if draft.channel in ("x", "x_sandbox") else []
     if draft.channel in ("x", "x_sandbox"):
         from app.services.x_publish_budget import check_api_usage_budget_or_raise, get_api_usage_unit_cost_minor
 
         content_rules_row = await get_org_content_rules(db, org_id=org_id)
         x_unit_cost_minor = get_api_usage_unit_cost_minor(content_rules_row.rules if content_rules_row else None)
-        await check_api_usage_budget_or_raise(db, org_id=org_id, estimated_cost_minor=x_unit_cost_minor)
+        # story #3808(PR5b-1, 페드루 PO 確定 2026-09-12) — 스레드(thread_segments 有)는
+        # 예산 재검사를 여기서 하지 않는다 — `_publish_x_thread_draft()`가 「이번 호출에서
+        # 실제로 시도할 세그먼트 수」(재시도 시 전체 N이 아니라 남은 수만)로 자체 재검사한다.
+        # 여기서 먼저 단가 1건으로 검사해 버리면 스레드에 대해 과소평가(단가 1건만 있으면
+        # 통과)된 뒤 실제로는 N건을 시도하는 안전하지 않은 순서가 된다.
+        if not thread_segments:
+            await check_api_usage_budget_or_raise(db, org_id=org_id, estimated_cost_minor=x_unit_cost_minor)
+
+    if thread_segments:
+        return await _publish_x_thread_draft(
+            db, org_id=org_id, draft=draft, gate=gate, latest=latest, thread_segments=thread_segments,
+            x_unit_cost_minor=x_unit_cost_minor, content_rules_row=content_rules_row,
+        )
 
     # 멱등 — 이미 완료된 발행이면 새 POST 없이 그대로 반환(뮤테이션 대상: 이 UNIQUE
     # 조회를 제거하면 같은 버전 재요청이 Threads에 두 번 POST된다).
@@ -1825,6 +1931,184 @@ async def publish_channel_post_draft(
         )
 
     return row
+
+
+async def _publish_x_thread_draft(
+    db: AsyncSession, *, org_id: uuid.UUID, draft: ChannelPostDraft, gate: Gate, latest: ChannelPostVersion,
+    thread_segments: list[str], x_unit_cost_minor: int | None, content_rules_row: OrgContentRule | None,
+) -> ChannelPublication:
+    """story #3808(Phase3·3-3 PR5b-1, 페드루 PO 確定 2026-09-12) — X 스레드(N세그먼트)
+    발행 오케스트레이터. `publish_channel_post_draft()`의 기존 단일-발행물 흐름(이미지/
+    캐러셀/릴스 비동기 컨테이너)과 완전히 분리된 전용 경로다 — X 텍스트 스레드는
+    이미지(있어도 헤드 1장뿐, 기존 image_max_count=1 제약 그대로)+동기 1회 API 왕복
+    (`publish_x_thread`)이라 그 비동기 폴링 기계 전체가 필요 없다.
+
+    ChannelPublication 1행=세그먼트 1개(sequence 1..N, 헤드=1) — 기존 (gate_id,
+    version_id) 단일 조회 전제가 이 세그먼트별 다중 행과 안 맞아 여기서 별도 조회를
+    한다(UQ 제약은 여전히 (gate_id, version_id, sequence)라 세그먼트당 유니크는
+    그대로 보장).
+
+    부분 실패(k번째)는 롤백하지 않는다(PO 決定④ — 이미 나간 tweet은 그대로 둔다,
+    delete_tweet류 자동 회수는 범위 밖) — 1..k-1행 published·k행 failed·k+1..N행은
+    아예 안 만든다. 재시도(같은 함수 재호출, 라우터·워커 둘 다 공용)는 이미 published
+    된 마지막 sequence 다음부터 이어 발행 — k행이 failed로 남아 있으면 그 자리를
+    갱신(새 행 추가 아님, 재시도 히스토리를 행 개수로 부풀리지 않는다)."""
+    from app.services.channel_adapters import get_publish_client_module
+    from app.services.channel_connection import apply_connection_failure, apply_refresh_failure
+    from app.services.insight_snapshots import schedule_insight_snapshots
+    from app.services.threads_publish import ThreadsPublishError
+    from app.services.x_publish_budget import check_api_usage_budget_or_raise, record_api_usage_cost_evidence
+
+    # 발행 직전 재검증(②) — 저장 시점 검증과 같은 함수, 승인 뒤 어댑터 선언이 바뀌었을
+    # 가능성에 대한 방어(ChannelTextTooLongError 헤드 재검증과 동형 위치).
+    _validate_thread_segments(channel=draft.channel, thread=thread_segments)
+
+    utm_rules = (content_rules_row.rules or {}).get("utm_rules") if content_rules_row else None
+    tagged_link = (
+        build_tagged_link(channel=draft.channel, link_url=latest.link_url, draft_id=draft.id, utm_rules=utm_rules)
+        if latest.link_url else None
+    )
+    head_text = f"{latest.text}\n\n{tagged_link}" if tagged_link else latest.text
+    _validate_text_length(channel=draft.channel, text=head_text)
+    all_texts = [head_text, *thread_segments]
+    total_n = len(all_texts)
+
+    connection = await _get_active_connection(db, org_id=org_id, connection_id=draft.connection_id)
+    access_token = decrypt_for_use(connection)
+    if access_token is None:
+        raise ChannelConnectionNotActiveError(connection_id=connection.id)
+
+    existing_rows = list((await db.execute(
+        select(ChannelPublication)
+        .where(ChannelPublication.gate_id == gate.id, ChannelPublication.version_id == latest.id)
+        .order_by(ChannelPublication.sequence)
+    )).scalars().all())
+    head_row = next((r for r in existing_rows if r.sequence == 1), None)
+
+    # 멱등 — N개 전부 이미 published면 새 API 호출 없이 헤드 행 그대로 반환.
+    if len(existing_rows) == total_n and all(r.status == "published" for r in existing_rows):
+        return head_row  # type: ignore[return-value]
+
+    published_seqs = sorted(r.sequence for r in existing_rows if r.status == "published")
+    last_published_seq = published_seqs[-1] if published_seqs else 0
+    # 재시도 대상(같은 sequence 자리를 갱신) — 직전 시도에서 failed로 남은 행.
+    resume_row = next((r for r in existing_rows if r.sequence == last_published_seq + 1 and r.status == "failed"), None)
+
+    remaining_texts = all_texts[last_published_seq:]
+    remaining_count = len(remaining_texts)
+
+    # story #3808(PR5b-1) — 예산 재검사는 "이번 호출에서 실제로 시도할 세그먼트 수"만큼
+    # (재시도 시 전체 N이 아니라 남은 수만 — 안 그러면 이미 지출된 세그먼트분까지 다시
+    # 청구하는 꼴이 되어 정당한 재시도를 잔량 부족으로 잘못 거부할 수 있다).
+    if x_unit_cost_minor is not None:
+        await check_api_usage_budget_or_raise(
+            db, org_id=org_id, estimated_cost_minor=x_unit_cost_minor * remaining_count,
+        )
+
+    # 이미지는 헤드에만(기존 단일-발행 경로와 동형 판단) — last_published_seq>0(재시도로
+    # 헤드가 이미 나간 뒤)이면 이미지 재첨부 불필요(헤드는 이미 완결).
+    image_public_url: str | None = None
+    if last_published_seq == 0 and latest.image_sha256 is not None:
+        from app.services.channel_post_images import list_channel_post_images_for_version, public_url_for_object_path
+
+        image_rows = await list_channel_post_images_for_version(db, version_id=latest.id)
+        urls = [
+            url for row in image_rows if (url := public_url_for_object_path(row.final_object_path)) is not None
+        ]
+        image_public_url = urls[0] if urls else None
+
+    prev_external_id: str | None = None
+    if last_published_seq > 0:
+        prev_row = next(r for r in existing_rows if r.sequence == last_published_seq)
+        prev_external_id = prev_row.external_id
+
+    _publish_client = get_publish_client_module(draft.channel)
+    publish_x_thread_fn = _publish_client.publish_x_thread
+
+    import httpx
+
+    succeeded: list[dict] = []
+    failure_exc: ThreadsPublishError | None = None
+    async with httpx.AsyncClient(timeout=20) as client:
+        try:
+            succeeded = await publish_x_thread_fn(
+                client, access_token=access_token, texts=remaining_texts,
+                media_id=image_public_url, initial_reply_to_tweet_id=prev_external_id,
+            )
+        except ThreadsPublishError as exc:
+            succeeded = list(getattr(exc, "published_segments", []) or [])
+            failure_exc = exc
+
+    now = datetime.now(timezone.utc)
+    for index, item in enumerate(succeeded):
+        seq = last_published_seq + 1 + index
+        row = resume_row if (resume_row is not None and seq == resume_row.sequence) else ChannelPublication(
+            id=uuid.uuid4(), org_id=org_id, gate_id=gate.id, version_id=latest.id,
+            connection_id=connection.id, channel=draft.channel, sequence=seq,
+        )
+        row.status = "published"
+        row.external_id = item["external_id"]
+        row.permalink = item.get("permalink")
+        row.published_at = now
+        row.error_code = None
+        row.last_error = None
+        db.add(row)
+        await db.flush()
+        if x_unit_cost_minor is not None:
+            await record_api_usage_cost_evidence(
+                db, org_id=org_id, work_item_id=draft.work_item_id, publication_id=row.id,
+                sequence=seq, cost_minor=x_unit_cost_minor,
+            )
+        if seq == 1:
+            head_row = row
+
+    if failure_exc is not None:
+        fail_seq = last_published_seq + 1 + len(succeeded)
+        error_code, mapped_exc = _classify_threads_error(failure_exc, connection_id=connection.id)
+        row = resume_row if (resume_row is not None and fail_seq == resume_row.sequence) else ChannelPublication(
+            id=uuid.uuid4(), org_id=org_id, gate_id=gate.id, version_id=latest.id,
+            connection_id=connection.id, channel=draft.channel, sequence=fail_seq,
+        )
+        row.status = "failed"
+        row.error_code = error_code
+        row.last_error = failure_exc.message
+        db.add(row)
+        await db.commit()
+        if error_code == "CHANNEL_TOKEN_EXPIRED":
+            await apply_refresh_failure(db, connection=connection, error_message=failure_exc.message)
+        elif error_code == "CHANNEL_CONNECTION_REVOKED":
+            await apply_connection_failure(db, connection=connection, status="revoked", error_message=failure_exc.message)
+        raise mapped_exc
+
+    await db.commit()
+    await db.refresh(head_row)  # type: ignore[arg-type]
+
+    # 인사이트 = seq=1(헤드) 행에만 스케줄(⑤, PR4 스펙이 애초에 "헤드 트윗만" — 이번
+    # 호출에서 헤드가 막 새로 발행됐을 때만 1회, 재시도로 seq≥2만 발행되는 호출에서는
+    # 중복 스케줄 0).
+    if last_published_seq == 0:
+        await schedule_insight_snapshots(
+            db, org_id=org_id, work_item_id=draft.work_item_id, publication_id=head_row.id,
+            publication_kind="channel_publication", channel=connection.channel,
+            external_id=head_row.external_id, anchor_at=head_row.published_at,
+        )
+
+    from app.services.activity_log import ActivityLogService
+
+    await ActivityLogService(db).record(
+        org_id=org_id, action="channel_post_published", actor_type="platform", actor_id=None,
+        entity_type="channel_publication", entity_id=head_row.id,
+        context={
+            "gate_id": str(gate.id), "version_id": str(latest.id),
+            "thread_total_segments": total_n, "thread_published_segments": last_published_seq + len(succeeded),
+        },
+    )
+    # schedule_insight_snapshots()·ActivityLogService.record() 둘 다 flush만 하고
+    # commit은 호출자 몫(각자 독스트링 명시) — 이 함수의 나머지 커밋 지점(evidence
+    # 내부 커밋)이 이미 다 끝난 뒤라 여기서 명시적으로 마무리한다(암묵적으로 "다음
+    # 호출이 우연히 커밋해 주길" 기대하지 않는다).
+    await db.commit()
+    return head_row
 
 
 # ─── story #3419(Phase1·마케팅운영) — 발행 취소(예약 명령 취소·발행분 회수) ─────────────────

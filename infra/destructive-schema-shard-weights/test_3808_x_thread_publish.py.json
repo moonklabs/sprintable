@@ -1,0 +1,1 @@
+{"file": "tests/test_3808_x_thread_publish.py", "sec": 3.9, "source": "story-3808(Phase3·3-3 PR5b-1, 페드루 PO 確定 2026-09-12) — X 스레드(N세그먼트) 발행 오케스트레이터(publish_channel_post_draft의 실 호출부가 N≥2 통과) 신규 파일 실측(로컬, uv run pytest --durations=0 직접 1회 실행, 7건 wall time 약 3.9s — test_3808_x_insights.py 선례와 동일 방법론, 실 CI 샤드 로그로 재확認 필요)"}

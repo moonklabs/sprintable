@@ -94,11 +94,14 @@ async def get_publishing_limit(
 
 async def publish_x_thread(
     client: httpx.AsyncClient, *, access_token: str, texts: list[str], media_id: str | None = None,
+    initial_reply_to_tweet_id: str | None = None,
 ) -> list[dict]:
     """`x_publish.py::publish_x_thread`와 동형 계약(N세그먼트 reply 체인) — 결정적
     시뮬레이션. 세그먼트 중 하나라도 마커가 있으면 그 세그먼트에서 멈추고(이전
     세그먼트는 이미 "발행"됐다는 사실을 예외의 `.published_segments`로 실어 던진다
-    — x_publish.py 부분성공 계약과 동형)."""
+    — x_publish.py 부분성공 계약과 동형). `initial_reply_to_tweet_id`는 시그니처
+    동형 유지용(story #3808 PR5b-1) — 샌드박스는 실 reply 체인이 없어 값 자체는
+    무시(결정적 tweet_id 생성에 영향 없음)."""
     results: list[dict] = []
     for index, text in enumerate(texts):
         try:
