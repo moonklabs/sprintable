@@ -475,8 +475,13 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         # 처음부터 이 관례를 탄다 — spend_refresh_rate_limited 키 주석과 동형 판단).
         display_name="Stibee",
         kind="social",
-        # unpublish(발송 취소)·insight_metrics(발송/오픈/클릭)는 PR2·PR3 몫 — 이 PR은
-        # 연결 행만 다룬다(신규 기전 0, 그 필드들은 기본값 그대로 미선언).
+        # story #3813(Phase3·3-4 PR5-b, 페드루 PO 確定 2026-09-12) — `stibee_sandbox`
+        # 와 같은 3키 선언(신호 일관성, FE가 채널 종류로 컬럼 유무를 판단). 실제로
+        # 값이 차는 건 delivered뿐(actionName "DELIVERED" 확定) — opens·clicks는
+        # 실 actionName 문자열이 아직 미확認이라 fetch가 항상 null을 낸다(_normalize
+        # "선언은 했지만 이번 fetch가 값을 못 줌" 그대로, 지어내지 않는다). unpublish
+        # (발송 취소)는 여전히 이 PR 범위 밖.
+        insight_metrics=("opens", "delivered", "clicks"),
     ),
     # story #3806(Phase3·3-2 PR1, 페드루 PO 確定 2026-09-11) — Meta Ads boost 첫 출시.
     # 콘텐츠 필드(image_*/video_*/max_text_length 등)는 전부 미선언(0/빈값 기본) —
@@ -734,10 +739,12 @@ _PUBLISH_CLIENT_MODULE_PATHS: dict[str, str] = {
     # 상단 딱지 참고) — channel_posts.py 오케스트레이션 무변경.
     "x": "app.services.x_publish",
     "x_sandbox": "app.services.x_sandbox_publish",
-    # story #3813(Phase3·3-4 PR2) — 실 "stibee"(진짜 Stibee HTTP 클라이언트)는 이 PR 범위 밖(PO
-    # 明示 "실 스티비 API 호출 0") — sandbox만 배선한다. wordpress/webhook의 조각⑤
-    # (연결)→③b/④(발행 배선) 선례와 같은 순서(연결·게이트가 먼저, 실 provider는 후속).
+    # story #3813(Phase3·3-4 PR2) — sandbox는 처음부터 배선.
     "stibee_sandbox": "app.services.stibee_sandbox_publish",
+    # story #3813(Phase3·3-4 PR5-b, 페드루 PO 確定 2026-09-12) — 실 stibee 발행
+    # 클라이언트 착지(PR2가 "이 PR 범위 밖"이라 미뤘던 자리 — wordpress/webhook의
+    # 조각⑤(연결)→③b/④(발행 배선) 선례와 같은 순서, 연결·게이트가 먼저였다).
+    "stibee": "app.services.stibee_publish",
 }
 
 

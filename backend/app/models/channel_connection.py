@@ -71,3 +71,8 @@ class ChannelConnection(Base, TimestampMixin, OrgScopedMixin):
     # 매 수집마다 이 연결의 raw 응답을 보고 갱신(자가치유: 다음 수집에 키가 다시
     # 나타나면 null로 되돌림).
     reply_detection_unavailable_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # story #3813(Phase3·3-4 PR5-b, 페드루 PO 確定 2026-09-12) — account_id/account_
+    # label 둘로 부족한 채널(stibee: senderEmail·senderName)의 범용 여분 슬롯.
+    # channel_post_versions.channel_payload(0370)와 동형 설계(컬럼 이름에 채널
+    # 이름 안 붙임) — stibee만 채운다, 다른 채널은 NULL 그대로.
+    provider_config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)

@@ -41,11 +41,11 @@ export const CHANNEL_DECLARED_METRICS: Record<string, readonly BoardMetric[]> = 
   // 채널=빈 배열" 폴백이 그대로 옳은 값이다(원문 그대로 폴백, 지어내지 않는다 —
   // channel-label.ts의 관례와 동형).
   //
-  // story #3813(Phase3·3-4 PR1, 페드루 PO 確定 2026-09-12) — stibee/stibee_sandbox는
-  // 이 시점엔 insight_metrics 미선언(빈 튜플) — 발송 결과(opens/delivered/clicks)
-  // 캡처 배선은 후속 PR3 몫. 드리프트 가드(test_3697)가 신규 BE 채널 등록을 놓치지
-  // 않게 여기서도 빈 배열로 명시 등재해 둔다(PR3가 stibee_sandbox만 실값으로 채움).
-  stibee: [],
+  // story #3813(Phase3·3-4 PR5-b, 페드루 PO 確定 2026-09-12) — channel_adapters.py의
+  // 실 "stibee"(sandbox 아님) 선언과 동형(3키). 실제로 값이 차는 건 delivered뿐
+  // (opens/clicks는 실 actionName 미확認이라 fetch가 항상 null — PR1 당시 빈
+  // 배열이던 게 여기서 stibee_sandbox와 같은 모양으로 승격).
+  stibee: ['opens', 'delivered', 'clicks'],
   // story #3813(Phase3·3-4 PR3, 페드루 PO 確定 2026-09-12) — channel_adapters.py:657
   // 실 등재값과 동형. opens/delivered는 METRIC_KEYS엔 있으나 선택기(SELECTABLE_
   // METRIC_KEYS)엔 아직 없다(PR4 몫) — 이 맵은 "선택기 노출"이 아니라 "이 채널이

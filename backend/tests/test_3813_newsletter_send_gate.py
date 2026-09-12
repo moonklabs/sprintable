@@ -324,38 +324,108 @@ async def test_execution_succeeds_on_sandbox_channel_and_records_activity():
 
 
 @pytest.mark.anyio
-async def test_execution_fails_on_real_stibee_channel_no_real_send():
-    """PO 明示(2026-09-12) — 실 스티비 API 호출 0. channel="stibee"(sandbox 아님)로
-    온 send 명령은 조용히 completed로 새지 않고 명시 실패해야 한다."""
+async def _prep_real_stibee_send_command(monkeypatch, *, reserve_email_impl):
+    """story #3813 PR5-b — 실 stibee 발송 공용 세팅(발행 요청→승인→PublicationCommand
+    생성→`stibee_client.reserve_email`만 monkeypatch, 실 네트워크 0). 반환된 command_id
+    로 `process_one_newsletter_send_command`를 부르면 된다."""
     from app.models.gate import Gate
     from app.models.publication_command import PublicationCommand
     from app.main import app
     from sqlalchemy import select
 
-    engine, Session, org_id, project_id, owner_id, pub, _, _conn_id = await _setup(
+    import app.services.stibee_client as stibee_client_module
+
+    monkeypatch.setattr(stibee_client_module, "reserve_email", reserve_email_impl)
+
+    engine, Session, org_id, project_id, owner_id, pub, _, conn_id = await _setup(
         await _session_factory(), channel="stibee",
     )
+    # story #3813 PR5-b — 실 reserve는 email_id를 int()로 캐스팅한다(스티비 email
+    # id는 정수) — 공용 헬퍼 기본값 "media-1"(다른 채널 형태)은 여기 안 맞는다.
+    async with Session() as s:
+        pub_row = (await s.execute(select(pub.__class__).where(pub.__class__.id == pub.id))).scalar_one()
+        pub_row.external_id = "9999"
+        await s.commit()
+
+    _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+    async with _client_for(app) as client:
+        r = await client.post(
+            f"/api/v2/organizations/{org_id}/publications/{pub.id}/newsletter-sends",
+            json=_send_body(),
+        )
+    gate_id = uuid.UUID(r.json()["gate_id"])
+
+    async with Session() as s:
+        await _approve_gate(s, gate_id, owner_id)
+        gate = (await s.execute(select(Gate).where(Gate.id == gate_id))).scalar_one()
+        command = PublicationCommand(
+            id=uuid.uuid4(), org_id=org_id, gate_id=gate_id, destination=conn_id,
+            approved_version=gate.sealed_newsletter_version_id, requested_by_member_id=owner_id,
+            operation="send", content_kind="newsletter_send", status="pending",
+        )
+        s.add(command)
+        await s.commit()
+        command_id = command.id
+
+    return engine, Session, command_id, conn_id
+
+
+@pytest.mark.anyio
+async def test_execution_succeeds_on_real_stibee_channel_calls_reserve_email(monkeypatch):
+    """story #3813 PR5-b(페드루 PO 確定 2026-09-12) — 실 stibee 발송 착지. 실호출 0
+    (reserve_email monkeypatch)이지만 채널 오케스트레이션(연결 조회·decrypt·완료
+    처리·스냅샷 예약)이 실제로 그 함수까지 도달하는지 확認."""
+    from app.models.publication_command import PublicationCommand
+    from sqlalchemy import select
+
+    captured = {}
+
+    async def _fake_reserve_email(client, *, api_key, email_id, scheduled_at_utc):
+        captured["api_key"] = api_key
+        captured["email_id"] = email_id
+
+    engine, Session, command_id, _conn_id = await _prep_real_stibee_send_command(
+        monkeypatch, reserve_email_impl=_fake_reserve_email,
+    )
     try:
-        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
-        async with _client_for(app) as client:
-            r = await client.post(
-                f"/api/v2/organizations/{org_id}/publications/{pub.id}/newsletter-sends",
-                json=_send_body(),
-            )
-        gate_id = uuid.UUID(r.json()["gate_id"])
+        from app.services.newsletter_send_execution import process_one_newsletter_send_command
 
         async with Session() as s:
-            await _approve_gate(s, gate_id, owner_id)
-            gate = (await s.execute(select(Gate).where(Gate.id == gate_id))).scalar_one()
-            command = PublicationCommand(
-                id=uuid.uuid4(), org_id=org_id, gate_id=gate_id, destination=_conn_id,
-                approved_version=gate.sealed_newsletter_version_id, requested_by_member_id=owner_id,
-                operation="send", content_kind="newsletter_send", status="pending",
-            )
-            s.add(command)
+            command = (await s.execute(select(PublicationCommand).where(PublicationCommand.id == command_id))).scalar_one()
+            await process_one_newsletter_send_command(s, command, now=datetime.now(timezone.utc))
             await s.commit()
-            command_id = command.id
 
+        assert captured["api_key"] == "plain-token"
+        assert captured["email_id"] == 9999
+
+        async with Session() as s:
+            command = (await s.execute(select(PublicationCommand).where(PublicationCommand.id == command_id))).scalar_one()
+            assert command.status == "completed"
+    finally:
+        from app.main import app
+
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_execution_plan_restricted_promotes_connection_last_error_code(monkeypatch):
+    """story #3813 PR5-b CHANGES(페드루 PO 確定 2026-09-12) — 요금제 부족(reserve
+    에도 동일 400+NeedProPlan)이면 명령은 실패하고, 연결 행에 last_error_code=
+    STIBEE_PLAN_RESTRICTED가 남는다(화면이 「요금제 제한」 전용 문구를 고르는 실
+    이행처)."""
+    from app.models.channel_connection import ChannelConnection
+    from app.models.publication_command import PublicationCommand
+    from app.services.stibee_client import StibeeApiError
+    from sqlalchemy import select
+
+    async def _fake_reserve_email_plan_restricted(client, *, api_key, email_id, scheduled_at_utc):
+        raise StibeeApiError("plan too low", status_code=400, provider_code="Errors.Service.NeedProPlan")
+
+    engine, Session, command_id, conn_id = await _prep_real_stibee_send_command(
+        monkeypatch, reserve_email_impl=_fake_reserve_email_plan_restricted,
+    )
+    try:
         from app.services.newsletter_send_execution import process_one_newsletter_send_command
 
         async with Session() as s:
@@ -365,9 +435,12 @@ async def test_execution_fails_on_real_stibee_channel_no_real_send():
 
         async with Session() as s:
             command = (await s.execute(select(PublicationCommand).where(PublicationCommand.id == command_id))).scalar_one()
-            assert command.status != "completed", "실 stibee 채널은 이 PR 범위 밖 — completed로 새면 안 된다"
-            assert command.failure_kind is not None or command.status == "failed"
+            assert command.status != "completed"
+            conn = (await s.execute(select(ChannelConnection).where(ChannelConnection.id == conn_id))).scalar_one()
+            assert conn.last_error_code == "STIBEE_PLAN_RESTRICTED"
     finally:
+        from app.main import app
+
         app.dependency_overrides.clear()
         await engine.dispose()
 

@@ -42,7 +42,7 @@ describe('declaredMetricsForChannel — story #3697(BE channel_adapters.py 미�
     expect(declaredMetricsForChannel('stibee_sandbox')).toEqual(['opens', 'delivered', 'clicks']);
   });
 
-  it('실 stibee는 아직 미선언 — 빈 배열(story #3813 PR1, 실 클라이언트 부재)', () => {
-    expect(declaredMetricsForChannel('stibee')).toEqual([]);
+  it('실 stibee도 stibee_sandbox와 동형 3키 선언(story #3813 PR5-b, 실 클라이언트 착지)', () => {
+    expect(declaredMetricsForChannel('stibee')).toEqual(['opens', 'delivered', 'clicks']);
   });
 });

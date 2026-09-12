@@ -442,7 +442,15 @@ function expiringSoonSubtitleText({
     : t(key, { days: days < 1 ? t('channelExpiringToday') : t('channelExpiringDaysCount', { count: days }) });
 }
 
-function reauthSubtitleText(reason: 'expired' | 'revoked' | 'error' | undefined, t: ReturnType<typeof useTranslations>): string {
+// story #3813 PR5-b(페드루 PO 確定 2026-09-12) — 요금제 제한은 재인증·자격교체로
+// 안 풀린다(사람이 할 일=스티비 요금제 업그레이드). last_error_code가 이 값이면
+// status(error) 공용 문구보다 먼저 이 전용 문구를 고른다(같은 원칙: connect-
+// error.ts의 code→label 매핑, 새 status enum 값 0으로 처리).
+function reauthSubtitleText(
+  reason: 'expired' | 'revoked' | 'error' | undefined, t: ReturnType<typeof useTranslations>,
+  lastErrorCode?: string | null,
+): string {
+  if (lastErrorCode === 'STIBEE_PLAN_RESTRICTED') return t('channelStibeePlanRestricted');
   const key = reason === 'revoked' ? 'channelReauthRevoked' : reason === 'error' ? 'channelReauthError' : 'channelReauthExpired';
   return t(key);
 }
@@ -457,8 +465,10 @@ function ExpiringSoonNote({
   return <p className="text-xs text-muted-foreground">{expiringSoonSubtitleText({ isAutoRefreshInfo, tokenExpiresAt, t })}</p>;
 }
 
-function ReauthNote({ reason, t }: { reason?: 'expired' | 'revoked' | 'error'; t: ReturnType<typeof useTranslations> }) {
-  return <p className="text-xs text-muted-foreground">{reauthSubtitleText(reason, t)}</p>;
+function ReauthNote({
+  reason, t, lastErrorCode,
+}: { reason?: 'expired' | 'revoked' | 'error'; t: ReturnType<typeof useTranslations>; lastErrorCode?: string | null }) {
+  return <p className="text-xs text-muted-foreground">{reauthSubtitleText(reason, t, lastErrorCode)}</p>;
 }
 
 function ConnectionRow({
@@ -555,7 +565,9 @@ function ConnectionRow({
         {showStatusChip ? <ChannelStatusChip status={derived.status} /> : null}
       </div>
       {derived.status === 'expiring_soon' ? <ExpiringSoonNote isAutoRefreshInfo={derived.isAutoRefreshInfo} tokenExpiresAt={conn.token_expires_at} t={t} /> : null}
-      {derived.status === 'reauth_required' ? <ReauthNote reason={derived.reauthReason} t={t} /> : null}
+      {derived.status === 'reauth_required' ? (
+        <ReauthNote reason={derived.reauthReason} t={t} lastErrorCode={conn.last_error_code} />
+      ) : null}
       {conn.last_error ? (
         <details className="text-xs text-muted-foreground">
           <summary className="cursor-pointer">{t('channelLastErrorToggle')}</summary>
@@ -783,7 +795,7 @@ function ChannelSection({
       if (singleDerived.status === 'reauth_required') {
         return single.credential_kind === 'none'
           ? t('channelSandboxReauthUnavailableNote', { channel: channelLabel(channel, t) })
-          : reauthSubtitleText(singleDerived.reauthReason, t);
+          : reauthSubtitleText(singleDerived.reauthReason, t, single.last_error_code);
       }
       if (singleDerived.status === 'expiring_soon') {
         return expiringSoonSubtitleText({ isAutoRefreshInfo: singleDerived.isAutoRefreshInfo, tokenExpiresAt: single.token_expires_at, t });

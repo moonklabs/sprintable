@@ -158,6 +158,12 @@ def classify_graph_error_code(
 CONNECTION_ERROR_CODE_TO_STATUS: dict[str, str] = {
     "CHANNEL_CONNECTION_REVOKED": "revoked",
     "CHANNEL_CONNECTION_AUTH_ERROR": "error",
+    # story #3813(Phase3·3-4 PR5-b, 페드루 PO 確定 2026-09-12) — 요금제 부족은
+    # "만료"가 아니다(키는 멀쩡하다, 사람이 할 일=스티비 요금제 업그레이드).
+    # 기존 "error"를 재사용(신규 status enum 값 0) — FE가 last_error_code로
+    # 「요금제 제한」 전용 문구를 고른다(status 자체는 CHANNEL_CONNECTION_AUTH_
+    # ERROR와 같은 축이라도 문구는 다르다는 게 이 스토리의 요지).
+    "STIBEE_PLAN_RESTRICTED": "error",
 }
 
 

@@ -312,8 +312,8 @@ _CATALOG: dict[str, dict[str, str]] = {
     # 키 주석과 동형 판단). 페드루 PO CHANGES(2026-09-12 00:29Z) — 필드명(api_key)이
     # 사람 대상 폼 문구에 그대로 새는 클래스, 자연어 문장으로 정정(합니다체·한자 0).
     "channel_connections.stibee_fields_required": {
-        "ko": "스티비 API 키와 주소록 ID를 모두 입력해 주세요.",
-        "en": "Enter both your Stibee API key and address book ID.",
+        "ko": "스티비 API 키·주소록 ID·발신자 이메일·발신자 이름을 모두 입력해 주세요.",
+        "en": "Enter your Stibee API key, address book ID, sender email, and sender name.",
     },
     # story #3813(Phase3·3-4 PR5-a, 페드루 PO 確定 2026-09-12) — 저장 시 auth-check
     # 실호출이 실패(401/403/네트워크)했을 때의 fail-closed 문구. 연결 행 자체를

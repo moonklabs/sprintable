@@ -1417,7 +1417,17 @@ def _classify_threads_error(
     로 옮겼다 — 댓글 수집(channel_post_comments.py)도 같은 함수를 쓴다(3605에서
     통합, 그 전엔 자기만의 401/403 휴리스틱을 따로 갖고 있어 발행 경로만 정밀
     판정을 받는 드리프트였다). 이 함수는 이제 그 문자열에 맞는 예외 인스턴스만
-    조립한다(connection_id가 필요한 이 도메인 전용 사정)."""
+    조립한다(connection_id가 필요한 이 도메인 전용 사정).
+
+    story #3813 PR5-b(페드루 PO 確定 2026-09-12) — `stibee_publish.py`가 이미
+    `.code`에 STIBEE_PLAN_RESTRICTED·STIBEE_SENDER_NOT_VERIFIED를 정확히 실어
+    보낸다(둘 다 스티비 응답 400이라 Graph용 `classify_graph_error_code`의
+    상태코드 휴리스틱을 태우면 CHANNEL_PUBLISH_PROVIDER_ERROR로 뭉개진다) —
+    Graph 분류기 밖에서 먼저 그대로 통과시킨다(새 판정 로직 0, 이미 정해진
+    코드를 그대로 쓸 뿐)."""
+    if exc.code in ("STIBEE_PLAN_RESTRICTED", "STIBEE_SENDER_NOT_VERIFIED"):
+        return exc.code, ChannelPublishProviderError(provider_code=exc.code, provider_message=exc.message)
+
     from app.services.graph_api_errors import classify_graph_error_code
 
     error_code = classify_graph_error_code(
@@ -1788,6 +1798,16 @@ async def publish_channel_post_draft(
                         _extra_kwargs = {}
                         if draft.channel in ("stibee", "stibee_sandbox"):
                             _extra_kwargs["subject"] = (latest.channel_payload or {}).get("subject")
+                        # story #3813(Phase3·3-4 PR5-b, 페드루 PO 確定 2026-09-12) — 실
+                        # "stibee"(sandbox 아님)의 `POST /emails`가 요구하는 3필드(대상
+                        # 주소록·발신자 이메일·발신자 이름)는 connection에 저장돼 있다
+                        # (PR5-a account_label=list_id·provider_config={sender_email,
+                        # sender_name}). sandbox는 이 값 자체가 없어(연결 폼이 다르다)
+                        # kwarg를 아예 안 보낸다 — 그 시그니처가 이 인자들을 모른다.
+                        if draft.channel == "stibee":
+                            _extra_kwargs["list_id"] = connection.account_label
+                            _extra_kwargs["sender_email"] = (connection.provider_config or {}).get("sender_email")
+                            _extra_kwargs["sender_name"] = (connection.provider_config or {}).get("sender_name")
                         container_id = await create_container(
                             client, access_token=access_token, threads_user_id=connection.account_id,
                             text=text_to_post, image_url=image_public_url, **_extra_kwargs,
@@ -1812,6 +1832,16 @@ async def publish_channel_post_draft(
                         # py::apply_command_failure의 동형 가드 참고).
                         await apply_connection_failure(
                             db, connection=connection, status="error", error_message=exc.message,
+                        )
+                    elif error_code == "STIBEE_PLAN_RESTRICTED":
+                        # story #3813 PR5-b(페드루 PO 確定 2026-09-12) — 요금제
+                        # 제한은 last_error_code로 남겨 화면이 「요금제 제한 ·
+                        # 이메일 API는 Pro 요금제부터」 전용 문구를 고르게 한다
+                        # (재인증/자격교체로는 안 풀리는 문제라 일반 error 문구와
+                        # 갈라야 한다).
+                        await apply_connection_failure(
+                            db, connection=connection, status="error", error_message=exc.message,
+                            error_code="STIBEE_PLAN_RESTRICTED",
                         )
                     raise mapped_exc from exc
                 row.external_container_id = container_id

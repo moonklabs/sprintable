@@ -341,3 +341,61 @@ async def test_captured_stibee_sandbox_snapshot_has_fixed_opens_delivered_clicks
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_real_stibee_fetch_populates_delivered_leaves_opens_null(monkeypatch):
+    """story #3813 PR5-b(페드루 PO 確定 2026-09-12) — 실 stibee(sandbox 아님) 발송
+    결과 캡처. `stibee_client.fetch_send_result`를 monkeypatch(실 네트워크 0)해
+    `_fetch_for_snapshot` 디스패치가 실제로 도달하는지·정규화가 delivered만
+    채우고 opens는 null로 남기는지(actionName 미확認, 지어내지 않는다) 확認."""
+    from app.models.channel_connection import ChannelConnection
+    from app.models.channel_publication import ChannelPublication
+    from app.models.insight_snapshot import InsightSnapshot
+    from app.services.insight_snapshots import _fetch_for_snapshot
+    from app.services.channel_credential_crypto import encrypt_channel_credential
+
+    captured_call = {}
+
+    async def _fake_fetch_send_result(client, *, api_key, email_id):
+        captured_call["api_key"] = api_key
+        captured_call["email_id"] = email_id
+        return {"counts": {"DELIVERED": 4200, "SOME_UNKNOWN_ACTION": 800}, "delivered": 4200, "opens": None, "truncated": False}
+
+    import app.services.stibee_client as stibee_client_module
+    monkeypatch.setattr(stibee_client_module, "fetch_send_result", _fake_fetch_send_result)
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            conn = ChannelConnection(
+                id=uuid.uuid4(), org_id=org_id, channel="stibee", account_id="default",
+                account_label="777", credential_kind="pasted_secret", status="active",
+                refresh_mode="manual", encrypted_access_token=encrypt_channel_credential("real-key"),
+            )
+            s.add(conn)
+            await s.commit()
+            pub = ChannelPublication(
+                id=uuid.uuid4(), org_id=org_id, gate_id=uuid.uuid4(), version_id=uuid.uuid4(),
+                connection_id=conn.id, channel="stibee", status="published", external_id="9999",
+                published_at=datetime.now(timezone.utc),
+            )
+            s.add(pub)
+            await s.commit()
+            snapshot = InsightSnapshot(
+                id=uuid.uuid4(), org_id=org_id, publication_id=pub.id, publication_kind="channel_publication",
+                work_item_id=uuid.uuid4(), channel="stibee", due_at=datetime.now(timezone.utc), status="pending",
+            )
+            s.add(snapshot)
+            await s.commit()
+
+            result = await _fetch_for_snapshot(s, snapshot)
+
+        assert captured_call["api_key"] == "real-key"
+        assert captured_call["email_id"] == 9999
+        assert result["values"] == {"delivered": 4200}
+        assert "opens" not in result["values"], "opens는 미확認이라 values에 아예 없어야 한다(_normalize가 null로 처리)"
+        assert result["raw"]["counts"] == {"DELIVERED": 4200, "SOME_UNKNOWN_ACTION": 800}
+    finally:
+        await engine.dispose()

@@ -99,20 +99,17 @@ def test_stibee_kind_is_not_blog_so_channel_post_pipeline_dispatch_stays_open():
     설계). PR2가 뉴스레터 초안을 `ChannelPostDraft`/`ChannelPostVersion`(=이 함수가
     다루는 그 파이프라인) 파이프라인에 태우기로 確定됐는데, PR1이 처음 kind="blog"로
     등재했다면 그 시점에 이미 구조적으로 막혀 있었을 것 — kind="social"로 정정한
-    뒤 이 fail-closed 분기를 안 타는지(다른 이유로는 여전히 막힐 수 있다 — 실
-    dispatch 모듈은 PR2가 심는다, 그건 이 테스트의 관심사가 아니다) 회귀로 고정."""
-    from app.services.channel_adapters import (
-        BlogChannelDispatchNotImplementedError,
-        ChannelPublishDispatchNotImplementedError,
-        get_publish_client_module,
-    )
+    뒤 이 fail-closed 분기를 안 타는지 회귀로 고정.
+
+    story #3813 PR5-b(페드루 PO 確定 2026-09-12) — 실 dispatch 모듈(stibee_publish.py)
+    착지로 이 함수가 이제 정상 반환한다(PR2 당시 "아직 안 심었을 뿐"이던 상태 종료)."""
+    from app.services.channel_adapters import BlogChannelDispatchNotImplementedError, get_publish_client_module
 
     try:
-        get_publish_client_module("stibee")
+        module = get_publish_client_module("stibee")
     except BlogChannelDispatchNotImplementedError:
         pytest.fail("stibee가 kind='blog'로 등재돼 channel_post 파이프라인이 구조적으로 막혀 있다")
-    except ChannelPublishDispatchNotImplementedError:
-        pass  # 기대대로 — PR2가 아직 실 dispatch 모듈을 안 심었을 뿐(정상 현재 상태).
+    assert module.__name__ == "app.services.stibee_publish"
 
 
 @pytest.mark.anyio
@@ -130,7 +127,7 @@ async def test_owner_creates_stibee_connection(monkeypatch):
         async with _client_for(app) as client:
             r = await client.post(
                 f"/api/v2/organizations/{org_id}/channel-connections/stibee",
-                json={"api_key": "stibee-auth-key-abcdef", "list_id": "12345"},
+                json={"api_key": "stibee-auth-key-abcdef", "list_id": "12345", "sender_email": "sender@example.com", "sender_name": "발신자"},
             )
         assert r.status_code == 201, r.text
         body = r.json()
@@ -140,6 +137,9 @@ async def test_owner_creates_stibee_connection(monkeypatch):
         assert body["status"] == "active"
         # story #3813 PR5-a — 사람이 입력한 주소록 ID가 account_label에 그대로 저장.
         assert body["account_label"] == "12345"
+        # story #3813 PR5-b — 발신자 정보는 비밀값이 아니라 원문 그대로 응답에 실린다.
+        assert body["sender_email"] == "sender@example.com"
+        assert body["sender_name"] == "발신자"
         # story #3373 AC6과 동형 — 응답에 자격 자체(api_key)가 어떤 필드로도 안 실린다.
         assert "api_key" not in body and "encrypted_access_token" not in body
     finally:
@@ -175,6 +175,33 @@ async def test_stibee_missing_list_id_rejected(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_stibee_missing_sender_fields_rejected(monkeypatch):
+    """story #3813 PR5-b — api_key·list_id는 있어도 sender_email/sender_name 중
+    하나라도 없으면 422(같은 STIBEE_FIELDS_REQUIRED — 4필드 전부 필수로 넓어졌다)."""
+    _patch_auth_check_ok(monkeypatch)
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id, role="owner")
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+        async with _client_for(app) as client:
+            r = await client.post(
+                f"/api/v2/organizations/{org_id}/channel-connections/stibee",
+                json={"api_key": "stibee-auth-key-abcdef", "list_id": "12345", "sender_name": "발신자"},
+            )
+        assert r.status_code == 422, r.text
+        error = r.json().get("error") or r.json()
+        assert error["code"] == "STIBEE_FIELDS_REQUIRED"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_stibee_auth_check_failure_rejects_and_saves_nothing(monkeypatch):
     """story #3813 PR5-a — 「가짜 키=초록 Connected」 결함 처방의 핵심 회귀. auth-check가
     401을 내면 422 STIBEE_API_KEY_INVALID로 거절되고, 연결 행 자체가 저장되지 않는다
@@ -192,7 +219,7 @@ async def test_stibee_auth_check_failure_rejects_and_saves_nothing(monkeypatch):
         async with _client_for(app) as client:
             r = await client.post(
                 f"/api/v2/organizations/{org_id}/channel-connections/stibee",
-                json={"api_key": "fake-not-a-real-key", "list_id": "12345"},
+                json={"api_key": "fake-not-a-real-key", "list_id": "12345", "sender_email": "sender@example.com", "sender_name": "발신자"},
             )
         assert r.status_code == 422, r.text
         error = r.json().get("error") or r.json()
@@ -226,7 +253,7 @@ async def test_stibee_auth_check_unavailable_uses_distinct_code(monkeypatch):
         async with _client_for(app) as client:
             r = await client.post(
                 f"/api/v2/organizations/{org_id}/channel-connections/stibee",
-                json={"api_key": "any-key", "list_id": "12345"},
+                json={"api_key": "any-key", "list_id": "12345", "sender_email": "sender@example.com", "sender_name": "발신자"},
             )
         assert r.status_code == 422, r.text
         error = r.json().get("error") or r.json()
@@ -308,11 +335,11 @@ async def test_reconnect_stibee_is_idempotent_upsert(monkeypatch):
         async with _client_for(app) as client:
             r1 = await client.post(
                 f"/api/v2/organizations/{org_id}/channel-connections/stibee",
-                json={"api_key": "old-key", "list_id": "12345"},
+                json={"api_key": "old-key", "list_id": "12345", "sender_email": "sender@example.com", "sender_name": "발신자"},
             )
             r2 = await client.post(
                 f"/api/v2/organizations/{org_id}/channel-connections/stibee",
-                json={"api_key": "new-key", "list_id": "12345"},
+                json={"api_key": "new-key", "list_id": "12345", "sender_email": "sender@example.com", "sender_name": "발신자"},
             )
         assert r1.status_code == 201, r1.text
         assert r2.status_code == 201, r2.text
@@ -339,7 +366,7 @@ async def test_replace_stibee_credential_in_place(monkeypatch):
         async with _client_for(app) as client:
             created = await client.post(
                 f"/api/v2/organizations/{org_id}/channel-connections/stibee",
-                json={"api_key": "old-key", "list_id": "12345"},
+                json={"api_key": "old-key", "list_id": "12345", "sender_email": "sender@example.com", "sender_name": "발신자"},
             )
             connection_id = created.json()["id"]
             replaced = await client.patch(
@@ -371,7 +398,7 @@ async def test_replace_stibee_credential_auth_check_failure_rejects(monkeypatch)
         async with _client_for(app) as client:
             created = await client.post(
                 f"/api/v2/organizations/{org_id}/channel-connections/stibee",
-                json={"api_key": "old-key", "list_id": "12345"},
+                json={"api_key": "old-key", "list_id": "12345", "sender_email": "sender@example.com", "sender_name": "발신자"},
             )
             connection_id = created.json()["id"]
 
@@ -403,7 +430,7 @@ async def test_replace_stibee_credential_missing_field_rejected(monkeypatch):
         async with _client_for(app) as client:
             created = await client.post(
                 f"/api/v2/organizations/{org_id}/channel-connections/stibee",
-                json={"api_key": "old-key", "list_id": "12345"},
+                json={"api_key": "old-key", "list_id": "12345", "sender_email": "sender@example.com", "sender_name": "발신자"},
             )
             connection_id = created.json()["id"]
             replaced = await client.patch(

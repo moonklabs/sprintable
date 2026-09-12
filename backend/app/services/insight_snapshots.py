@@ -724,6 +724,8 @@ async def _fetch_for_snapshot(db: AsyncSession, snapshot: InsightSnapshot, *, li
         return await _fetch_sandbox(db, publication_id=snapshot.publication_id, live=live)
     if snapshot.channel == "stibee_sandbox":
         return await _fetch_stibee_sandbox(publication_id=snapshot.publication_id)
+    if snapshot.channel == "stibee":
+        return await _fetch_stibee_via_connection(db, snapshot)
     raise InsightFetchError(
         error_code="INSIGHT_CHANNEL_NOT_IMPLEMENTED",
         message=f"insight_metrics는 선언됐지만 fetch dispatch가 없습니다: {snapshot.channel}",
@@ -755,6 +757,59 @@ async def _fetch_threads_via_connection(db: AsyncSession, snapshot: InsightSnaps
 
     async with httpx.AsyncClient() as client:
         return await _fetch_threads(client, access_token=access_token, media_id=pub.external_id)
+
+
+async def _fetch_stibee_via_connection(db: AsyncSession, snapshot: InsightSnapshot) -> dict[str, Any]:
+    """story #3813 PR5-b(페드루 PO 確定 2026-09-12) — 실 stibee 발송 결과.
+    `stibee_client.fetch_send_result`(GET /emails/{id}/logs 전량 페이지네이션+
+    actionName 집계)를 감싸는 얇은 연결-조회 층 — `_fetch_threads_via_connection`
+    과 동형 패턴. `delivered`만 `values`에 실어 정규화(`_normalize`가 그 키가
+    없으면 자동으로 null 처리) — `opens`는 실 actionName 미확認이라(그라운딩
+    정정, 2026-09-12) `values`에 아예 안 넣는다(지어내지 않는다, `raw`에는
+    전체 actionName 카운트를 그대로 보존해 나중에 한 줄만 고치면 되게)."""
+    from app.models.channel_connection import ChannelConnection
+    from app.models.channel_publication import ChannelPublication
+    from app.services.channel_connection import decrypt_for_use
+    from app.services.stibee_client import StibeeApiError, fetch_send_result
+
+    pub = (await db.execute(
+        select(ChannelPublication).where(ChannelPublication.id == snapshot.publication_id)
+    )).scalar_one_or_none()
+    if pub is None or pub.external_id is None:
+        raise InsightFetchError(
+            error_code="INSIGHT_PUBLICATION_NOT_FOUND", message=f"channel_publication을 찾을 수 없습니다: {snapshot.publication_id}",
+        )
+    connection = await db.get(ChannelConnection, pub.connection_id)
+    if connection is None or connection.status != "active":
+        raise InsightFetchError(
+            error_code="CHANNEL_CONNECTION_NOT_ACTIVE", message=f"연결이 활성 상태가 아닙니다: {pub.connection_id}",
+        )
+    access_token = decrypt_for_use(connection)
+    if access_token is None:
+        raise InsightFetchError(error_code="CHANNEL_CONNECTION_NOT_ACTIVE", message="연결에 자격이 없습니다")
+
+    import httpx
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        try:
+            result = await fetch_send_result(client, api_key=access_token, email_id=int(pub.external_id))
+        except StibeeApiError as exc:
+            # story #3813 PR5-b — threads/instagram/facebook 3자매와 같은 상태코드
+            # 버킷팅(CHANNEL_TOKEN_EXPIRED·CHANNEL_RATE_LIMITED·CHANNEL_PUBLISH_
+            # PROVIDER_ERROR·CHANNEL_PUBLISH_AUTH_REJECTED, graph_api_errors.py
+            # 밖의 stibee 자체 판정 — Graph 전용 파서를 여기 억지로 안 끌어온다).
+            if exc.status_code in (401, 403):
+                error_code = "CHANNEL_TOKEN_EXPIRED"
+            elif exc.status_code == 429:
+                error_code = "CHANNEL_RATE_LIMITED"
+            elif exc.status_code is None or exc.status_code >= 500:
+                error_code = "CHANNEL_PUBLISH_PROVIDER_ERROR"
+            else:
+                error_code = "CHANNEL_PUBLISH_AUTH_REJECTED"
+            raise InsightFetchError(error_code=error_code, message=str(exc)) from exc
+
+    values: dict[str, int] = {"delivered": result["delivered"]}
+    return {"raw": result, "values": values}
 
 
 # story #3660 CHANGES①(페드루 PO, 2026-09-07, PR #4015) — 클레임(pending→in_progress
