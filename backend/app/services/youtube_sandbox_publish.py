@@ -96,7 +96,12 @@ async def publish_container(
 
 
 async def get_permalink(client: httpx.AsyncClient, *, access_token: str, media_id: str) -> str | None:
-    return f"https://www.youtube.com/watch?v={media_id}"
+    # 발견 즉시 수정(페드루 PO 라이브 실측, 배포 82 회차 2026-09-12 17:12Z) —
+    # sandbox 발행이 실 도메인(youtube.com)을 공개 URL로 냈다. sandbox 규율은
+    # `.invalid`(RFC 2606) 관례 그대로(x_sandbox `https://sandbox.invalid/x/…`·
+    # ghost_sandbox `https://ghost-sandbox.invalid/p/…`와 동형) — 실 youtube_
+    # publish.py(진짜 YouTube API 경유)는 무변.
+    return f"https://youtube-sandbox.invalid/watch?v={media_id}"
 
 
 async def get_publishing_limit(

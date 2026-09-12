@@ -129,6 +129,20 @@ class ChannelAdapterConfig:
     # 동형 축(영상판) — YouTube는 영상 0개면 업로드 자체가 무의미하다(Reels류
     # "영상 지원"과 다른 축: "필수"). 기본 False=기존 채널 회귀 0.
     video_required: bool = False
+    # story #3815(Phase3·3-5 PR3 근본 처방, 페드루 PO 決定 2026-09-12 16:51Z) —
+    # channel_connections.py::_to_response가 한동안 이 값을 `video_required`의
+    # «대리»로 계산해 왔다(두 번째 video_required 채널이 오면 거짓이 되는 자리로
+    # 지목됨). 이 채널의 편집기가 channel_payload(title/tags/categoryId/
+    # privacyStatus) 4필드를 요구하는지는 video_required와 별개 사실이라 자기
+    # 필드로 명시 선언한다 — 기본 False(기존 채널 회귀 0), youtube/youtube_
+    # sandbox만 True.
+    youtube_metadata_required: bool = False
+    # story #3815(Phase3·3-5 PR3 근본 처방, 페드루 PO 決定 2026-09-12 16:51Z) —
+    # 이 채널이 `settings.youtube_api_audit_incomplete`(플랫폼 전체 감사 플래그)
+    # 축의 영향을 받는 채널인가(= 감사 미완이면 항상 강제 비공개). video_required
+    # 대리가 아니라 채널 정체성으로 선언 — 기본 False, youtube/youtube_sandbox만
+    # True(다른 video_required 채널이 와도 이 축과 무관하면 자동으로 False).
+    privacy_lockable: bool = False
     # story #3808(Phase3·3-3 PR5b-1, 페드루 PO 確定 2026-09-12) — 스레드(연속 게시)
     # 이어쓰기 세그먼트 상한(헤드=`text` 제외, `channel_payload["thread"]` 배열
     # 길이 자체의 상한). image_max_count=0과 동형 관례 — 0(기본)=이 채널은 스레드
@@ -637,6 +651,8 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         requires_connection=True,
         max_text_length=5000,
         video_required=True,
+        youtube_metadata_required=True,
+        privacy_lockable=True,
         video_max_bytes=2 * 1024 * 1024 * 1024,  # 2GiB — ⚠️미확認, 위 딱지 참고.
         # 발견 즉시 수정(PR2 CHANGES 대응 중 자체 발견) — video_max_seconds
         # 기본값(0.0)을 그대로 두면 channel_post_videos.py의 검증이 "재생시간
@@ -671,6 +687,8 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         requires_connection=True,
         max_text_length=5000,
         video_required=True,
+        youtube_metadata_required=True,
+        privacy_lockable=True,
         video_max_bytes=2 * 1024 * 1024 * 1024,
         # 발견 즉시 수정 — 위 "youtube" 항목과 동형 이유(video_max_seconds
         # 기본값 0.0 방치 시 모든 영상 업로드 거부).

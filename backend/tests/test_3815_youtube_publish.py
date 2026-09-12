@@ -407,6 +407,19 @@ async def test_youtube_sandbox_get_container_status_always_finished():
 
 
 @pytest.mark.anyio
+async def test_youtube_sandbox_permalink_uses_invalid_domain_not_real_youtube():
+    """발견 즉시 수정(페드루 PO 라이브 실측, 배포 82 회차 2026-09-12 17:12Z) —
+    sandbox 발행이 실 도메인(youtube.com)을 공개 URL로 냈다. sandbox 규율은
+    `.invalid`(RFC 2606, x_sandbox·ghost_sandbox와 동형)."""
+    from app.services.youtube_sandbox_publish import get_permalink
+
+    permalink = await get_permalink(httpx.AsyncClient(), access_token="at", media_id="media-1")
+    assert permalink is not None
+    assert permalink.startswith("https://youtube-sandbox.invalid/")
+    assert "youtube.com" not in permalink
+
+
+@pytest.mark.anyio
 async def test_youtube_sandbox_processing_long_marker_stays_in_progress():
     """CHANGES②용 결정적 재현 자리 — 마커가 있으면 매 호출 IN_PROGRESS(5분·6분
     지나도 FINISHED로 안 바뀜, id 문자열 자체가 상태라 process 메모리 불요)."""
