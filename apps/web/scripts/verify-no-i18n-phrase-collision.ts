@@ -442,6 +442,12 @@ export const EXEMPT_PAIRS = new Set<string>([
   // 정상 패턴(docs.title<->docs.indexDocCount류) — 같은 개념("남음")을 두 표면에서
   // 일관되게 쓰라는 게 디자인 지시 그 자체다.
   'content.generationBudgetRemainingCompact <-> content.generationBudgetRemainingLabel',
+  // story #3808(PR5a, 2026-09-12) — apiUsageBudgetRemainingLabel("남음", 카드 헤더
+  // 라벨) <-> apiUsageBudgetRemainingCompact("남음 {remaining}", 상신 표면 전용 한
+  // 줄). generationBudgetRemainingCompact<->Label 바로 위 항목과 동형(다른 지갑의
+  // 같은 §19-5 패턴 재사용) — 짧은 라벨이 그 라벨을 포함하는 긴 문구에 들어간 정상
+  // 패턴, "남음"을 두 표면에서 일관되게 쓰라는 같은 디자인 지시.
+  'content.apiUsageBudgetRemainingCompact <-> content.apiUsageBudgetRemainingLabel',
   // story #3747(ⓐ 겹침 기반 충돌 배너, 2026-09-09, 3501 §20 재구조화 뒤 등재 갱신) —
   // contentRules.versionConflictFieldWithName("{name}님이 「{field}」을(를) 먼저
   // 저장했습니다", 행 단위 충돌 배너) <-> contentRules.saveAction("저장", 버튼 라벨)·
