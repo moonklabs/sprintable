@@ -407,6 +407,15 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "오늘 YouTube 사용량을 다 썼습니다 — 사용량은 매일 오전 9시(한국 시간)에 초기화됩니다(플랫폼 공유 한도).",
         "en": "Today's YouTube usage limit has been reached — it resets daily at 00:00 UTC (shared platform-wide limit).",
     },
+    # story #3808(배포 81 라이브 회차 실 결함, 페드루 PO 지적 2026-09-12·PO 정정
+    # 決定 — 예약(사람이 정한 시각)만 거절, 백오프(시스템이 정한 시각)는 AC3
+    # 즉시 재시도 계약을 지켜 허용) — 이 문장은 apps/web/messages/{ko,en}.json의
+    # `content.channelPostsCommandInFlightReasonScheduled`와 byte-exact(같은
+    # 사실을 두 곳이 각자 짓지 않는다, drift 가드 테스트로 고정).
+    "channel_posts.publish_already_scheduled": {
+        "ko": "예약이 서버에 걸려 있습니다 — 기다리거나 예약을 취소한 뒤 다시 시도하세요.",
+        "en": "A schedule is already queued on the server — wait, or cancel the schedule and try again.",
+    },
     # story #3815(Phase3·3-5, 미르코 PR4 그라운딩 발견 → 페드루 PO 지적 2026-09-12
     # 14:37Z) — `_validate_youtube_metadata`가 던지는 `ChannelYouTubeMetadataError`
     # 를 라우터 어디서도 안 잡아 사용자에게 코드 없는 500이 나가던 실 결함. 이

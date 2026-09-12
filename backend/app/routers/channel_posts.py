@@ -1961,12 +1961,27 @@ async def publish_channel_post_draft_endpoint(
 
     if gate.sealed_scheduled_at is not None:
         # 예약 — command만 만들고 여기서 끝(워커가 나중에 처리, AC3).
-        command, _ = await create_or_get_publication_command(
+        command, created = await create_or_get_publication_command(
             db, org_id=org_id, gate_id=gate.id, destination=draft.connection_id,
             approved_version=latest.id, requested_by_member_id=resolved.id,
             scheduled_at=gate.sealed_scheduled_at,
         )
         await db.commit()
+        # story #3808(배포 81 라이브 회차 실 결함, 페드루 PO 정정 決定) — 이 지점은
+        # 원래 "재요청은 같은 command를 그대로 다시 반환"(멱등)이라 두 번째 /publish
+        # 호출도 항상 200이었다. 그건 편집기가 이 상태(예약 미도래)를 잠그는 것과
+        # 다른 사실을 API가 말하는 클래스 — 아직 도래 前인 기존 command를 다시
+        # 만나면(created=False) 편집기와 같은 사실로 거절한다. 앞당기려면 기존
+        # 「예약 취소」 경로(AC5)로 이 command를 먼저 정리해야 한다.
+        if not created and command.scheduled_at is not None and command.scheduled_at > datetime.now(timezone.utc):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "PUBLISH_SCHEDULED",
+                    "message": t("channel_posts.publish_already_scheduled", resolved_locale),
+                    "scheduled_at": command.scheduled_at.isoformat(),
+                },
+            )
         return PublishChannelPostResponse(
             version_id=latest.id, scheduled=True, command_id=command.id,
             scheduled_at=gate.sealed_scheduled_at.isoformat(),
@@ -1979,6 +1994,18 @@ async def publish_channel_post_draft_endpoint(
     )
     await db.commit()
     now = datetime.now(timezone.utc)
+
+    # story #3808(배포 81 라이브 회차 실 결함, 페드루 PO 정정 決定) — 이 upsert는
+    # 항상 scheduled_at=None으로 호출하므로 반환된 기존 행도 scheduled_at=None
+    # 고정(스케줄 변경은 재승인→새 approved_version→다른 idempotency key라 이
+    # 즉시 분기가 예약 command와 충돌할 일이 없다, 위 예약 분기의 409가 그 축
+    # 전담). 이 기존 행이 가질 수 있는 건 시스템이 정한 `next_attempt_at`
+    # (transient 실패 뒤 백오프)뿐 — 이건 사람의 즉시 재시도를 막지 않는다(AC3
+    # 「부분 성공 뒤 즉시 재시도」 계약 그대로, 여기서 깨면 안 된다는 것이 PO
+    # 정정의 요점). 이중 시도는 이미 안전 — 아래 성공/실패 분기가 이 같은 행을
+    # 동기 트랜잭션 안에서 즉시 completed/dead_letter/pending(새
+    # next_attempt_at)로 갱신하므로 워커가 옛 상태를 다시 집을 여지가 없다
+    # (별도 supersede 로직 불요, pin 테스트로 증명).
     attempt_started_at = now
 
     async def _record_this_attempt(*, approval_check: str, adapter_called: bool, result_code: str | None) -> None:

@@ -2512,7 +2512,7 @@
     "channelPostsVoidReasonApiUsageBudgetExceeded": "X 비용 한도를 넘습니다. 한도는 콘텐츠 규칙 화면에서 owner·admin이 바꿉니다.",
     "channelPostsFailureProcessing": "자동으로 이어서 처리 중입니다.",
     "channelPostsFailureRetryComingSoon": "재시도는 곧 열립니다",
-    "channelPostsCommandInFlightReasonPending": "예약이나 자동 재시도가 서버에 걸려 있습니다 — 기다리거나 예약을 취소한 뒤 다시 시도하세요.",
+    "channelPostsCommandInFlightReasonScheduled": "예약이 서버에 걸려 있습니다 — 기다리거나 예약을 취소한 뒤 다시 시도하세요.",
     "channelPostsCommandInFlightReasonBlocked": "연결 문제로 멈춰 있습니다 — <link>연결 화면</link>에서 확인한 뒤 다시 시도하세요.",
     "channelPostsUnpublishConnectionNotActive": "지금은 이 연결로 회수할 수 없습니다 — <link>연결 화면</link>에서 연결 상태를 확인해 주세요.",
     "channelPostsSandboxTestBadge": "테스트",

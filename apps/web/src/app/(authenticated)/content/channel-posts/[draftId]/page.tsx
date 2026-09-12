@@ -2136,23 +2136,32 @@ export default function ChannelPostEditPage() {
   const canUnpublishNow = canUnpublish && unpublishGate?.canUnpublish === true && unpublishGate?.connectionStatus === 'active';
 
   // story #3422 B4(페드루 PO, 2026-09-04 13:26Z, code-review "auto_retry 아래 발행
-  // 버튼 활성"과 같은 자리) — command_status가 pending(자동 재시도 큐에 있음, awaiting_
-  // container 포함)·blocked(연결 문제)면 새 발행/예약 상신을 막는다 — 이미 진행 중이거나
-  // 고쳐야 할 것이 따로 있는데 사람이 또 시도하면 서버와 경합하거나 헛수고다.
+  // 버튼 활성"과 같은 자리) — command_status가 blocked(연결 문제)면 새 발행/예약 상신을
+  // 막는다 — 고쳐야 할 것이 따로 있는데 사람이 또 시도하면 서버와 경합하거나 헛수고다.
   // dead_letter는 이 집합에 일부러 안 넣는다 — 재시도 «클릭» 배선(story f061c1a3, BE
   // command_id 노출 뒤) 前까지는 발행 버튼이 dead_letter의 유일한 수동 재시도 경로다
   // (지금 막으면 아예 되살릴 방법이 없어진다).
-  const commandInFlightBlocksNewAttempt = new Set(['pending', 'blocked']);
-  const blockedByCommandInFlight = !!draft.command_status && commandInFlightBlocksNewAttempt.has(draft.command_status);
+  //
+  // story #3808(배포 81 라이브 회차 실 결함, 페드루 PO 정정 決定 — 「누가 정한
+  // 시각인가」축) — pending 그 자체는 더 이상 이 집합에 안 넣는다. pending은 두
+  // 다른 사실을 가리킬 수 있다: ①사람이 정한 예약(scheduled_at 미도래, BE도 같은
+  // 축으로 409 PUBLISH_SCHEDULED 거절) — 이건 잠가야 한다. ②시스템이 정한 backoff
+  // (transient 실패 뒤 next_retry_at) — 이건 사람의 즉시 재시도를 잠그면 안 된다
+  // (AC3 「부분 성공 뒤 즉시 재시도」 계약, BE도 이 경우 200 허용). scheduled_at
+  // 유무(gate.sealed_scheduled_at, ChannelPostDraftDetail 필드)로 정확히 갈라
+  // BE 판정과 같은 사실을 보게 한다("막는 쪽과 하는 쪽이 다른 것을 본다" 클래스 재발 방지).
+  const isScheduledPending = draft.command_status === 'pending' && !!draft.scheduled_at;
+  const blockedByCommandInFlight = draft.command_status === 'blocked' || isScheduledPending;
   // story #3815(페드루 PO CHANGES 2, 2026-09-12 17:58Z) — 게이트 자체(훅 호출)는
   // 위 `if (loading) return` 이전에 있다(훅 규칙 — 조건부 return 뒤에 훅을 못
   // 둔다). 여기선 그 결과만 derived 상수로 조합한다.
   const blockedByReasonReset = !!draft.command_reason_reset_at && !reasonResetPassed;
-  // 유나 재판정(2026-09-04 13:37Z) — pending·blocked를 한 문장에 묶으면 절반은 틀린
-  // 지시가 된다("기다리세요"는 blocked에, "연결을 확인하세요"는 pending에 안 맞는다).
-  // command_status로 정확히 갈라 서로 다른 문장을 낸다.
+  // 유나 재판정(2026-09-04 13:37Z, #3808 정정으로 축 갱신) — blocked·예약-pending을
+  // 한 문장에 묶으면 절반은 틀린 지시가 된다. command_status만이 아니라 위 축으로
+  // 정확히 갈라 서로 다른 문장을 낸다(backoff-pending은 이 잠금 문구 대상이 아니다 —
+  // FailureActionBadge의 「{시각}에 자동으로 다시 시도합니다」가 그 상태의 안내를 전담).
   const commandInFlightReasonKey = draft.command_status === 'blocked'
-    ? 'channelPostsCommandInFlightReasonBlocked' : 'channelPostsCommandInFlightReasonPending';
+    ? 'channelPostsCommandInFlightReasonBlocked' : 'channelPostsCommandInFlightReasonScheduled';
 
   // story #3422 B3(페드루 PO, 2026-09-04 13:14Z) — FailureActionBadge가 정의만 있고
   // 이 화면엔 mount 안 돼 있던 갭(#3422 AC3). deriveFailureAction 입력은 목록/캘린더와
@@ -2622,8 +2631,14 @@ export default function ChannelPostEditPage() {
         <div className="flex gap-2">
           <Button
             onClick={() => void handlePublish()}
+            // story #3539 — awaiting_container(IMAGE 컨테이너가 비동기로 이어서 처리
+            // 中)는 예약도 backoff도 아닌 세 번째 축(지금 이 순간 실제로 진행 中) —
+            // #3808 정정으로 blockedByCommandInFlight가 backoff를 더 이상 안 잠그게
+            // 됐지만, 이 축은 그와 무관하게 항상 잠가야 한다(안 그러면 재클릭이
+            // CHANNEL_PUBLISH_IN_PROGRESS로 꼬인다).
             disabled={
               !canPublish || publishing || blockedByCommandInFlight
+              || draft.processing_kind === 'awaiting_container'
               || (view.partialSuccess && blockedByReasonReset)
             }
             data-testid="channel-post-publish-button"
