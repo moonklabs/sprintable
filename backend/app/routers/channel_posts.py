@@ -1994,8 +1994,8 @@ async def publish_channel_post_draft_endpoint(
     # story #3808(배포 81 라이브 회차 실 결함, 페드루 PO 정정 決定) — 이 upsert는
     # 항상 scheduled_at=None으로 호출하므로 반환된 기존 행도 scheduled_at=None
     # 고정(스케줄 변경은 재승인→새 approved_version→다른 idempotency key라 이
-    # 즉시 분기가 예약 command와 충돌할 일이 없다, 위 예약 분기의 409가 그 축
-    # 전담). 이 기존 행이 가질 수 있는 건 시스템이 정한 `next_attempt_at`
+    # 즉시 분기가 예약 command와 충돌할 일이 없다). 이 기존 행이 가질 수 있는
+    # 건 시스템이 정한 `next_attempt_at`
     # (transient 실패 뒤 백오프)뿐 — 이건 사람의 즉시 재시도를 막지 않는다(AC3
     # 「부분 성공 뒤 즉시 재시도」 계약 그대로, 여기서 깨면 안 된다는 것이 PO
     # 정정의 요점). 이중 시도는 이미 안전 — 아래 성공/실패 분기가 이 같은 행을
