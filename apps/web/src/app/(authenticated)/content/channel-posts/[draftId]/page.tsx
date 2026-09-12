@@ -166,12 +166,18 @@ interface ChannelPostVersion {
   hook_key: string | null;
   // story #3808(Phase3·3-3 PR5b-2, 페드루 PO 確定 2026-09-12) — 이 버전의 스레드
   // 이어쓰기 목록(있으면 {thread: string[]}). 없으면 null(스레드 아님).
-  // story #3815(Phase3·3-5 PR4, 페드루 PO 確定 2026-09-12) — YouTube 구조화
-  // 메타데이터(같은 슬롯 재사용, 신규 컬럼 0 — thread와 동형 원칙). description
-  // (본문 챕터 등)은 기존 text 필드를 그대로 쓴다 — 여기 안 실린다.
+  // story #3815(Phase3·3-5 PR4, 페드루 PO 正정 2026-09-12 13:26Z) — YouTube 구조화
+  // 메타데이터는 channel_payload «최상위»에 thread와 같은 층으로 얹는다(중첩 객체
+  // 아님) — BE 4225 `_validate_youtube_metadata`/`resolve_youtube_privacy_lock`이
+  // 최상위 키를 그대로 읽는다. 키 이름도 camelCase(BE가 이 계약만 그렇게 받는다 —
+  // 다른 곳의 snake_case 관례와 다른 예외). description(본문 챕터 등)은 기존 text
+  // 필드를 그대로 쓴다 — 여기 안 실린다.
   channel_payload: {
     thread?: string[];
-    youtube?: { title: string; tags: string[]; category_id: string | null; privacy_status: 'public' | 'unlisted' | 'private' };
+    title?: string;
+    tags?: string[];
+    categoryId?: string | null;
+    privacyStatus?: 'public' | 'unlisted' | 'private';
   } | null;
 }
 
@@ -981,13 +987,13 @@ export default function ChannelPostEditPage() {
           setLinkUrl(latest.link_url ?? '');
           // story #3808(PR5b-2) — 스레드 이어쓰기 목록도 최신 버전 기준으로 seed.
           setThreadSegments(latest.channel_payload?.thread ?? []);
-          // story #3815(PR4) — YouTube 메타데이터도 최신 버전 기준으로 seed(thread와
-          // 동형 관례). 없으면 빈 값으로(지어내지 않는다 — 새 초안은 항상 이 상태).
-          const yt = latest.channel_payload?.youtube;
-          setYoutubeTitle(yt?.title ?? '');
-          setYoutubeTagsRaw(yt?.tags?.join(', ') ?? '');
-          setYoutubeCategoryId(yt?.category_id ?? '');
-          setYoutubePrivacyStatus(yt?.privacy_status ?? 'private');
+          // story #3815(PR4, PO 正정) — YouTube 메타데이터도 최신 버전 기준으로
+          // seed(thread와 동형 관례, channel_payload 최상위 camelCase). 없으면
+          // 빈 값으로(지어내지 않는다 — 새 초안은 항상 이 상태).
+          setYoutubeTitle(latest.channel_payload?.title ?? '');
+          setYoutubeTagsRaw(latest.channel_payload?.tags?.join(', ') ?? '');
+          setYoutubeCategoryId(latest.channel_payload?.categoryId ?? '');
+          setYoutubePrivacyStatus(latest.channel_payload?.privacyStatus ?? 'private');
           // story #3550 — N장 목록(현재 버전 기준)도 초기 로드 때 같이 가져온다.
           // 실패해도 페이지 전체를 막지 않는다(첨부 0장으로 보이는 것과 "조회
           // 실패"를 이 자리에서 구별해 봐야 아직 아무 UI도 없다 — 빈 배열 유지).
@@ -1190,20 +1196,22 @@ export default function ChannelPostEditPage() {
     setSaving(true);
     setSaveMessage(null);
     try {
-      // story #3808(PR5b-2)·#3815(PR4) — 스레드·YouTube 메타데이터가 같은 슬롯을
-      // 공유한다(신규 컬럼 0). 둘 다 비면 channel_payload 자체를 null로(§ 대칭
+      // story #3808(PR5b-2)·#3815(PR4, PO 正정 2026-09-12 13:26Z) — 스레드·YouTube
+      // 메타데이터가 같은 슬롯을 공유한다(신규 컬럼 0). YouTube 필드는 channel_payload
+      // «최상위»에 camelCase로(중첩 객체 아님 — BE 4225 `_validate_youtube_metadata`가
+      // 최상위 키를 그대로 읽는다). 둘 다 비면 channel_payload 자체를 null로(§ 대칭
       // 그대로 — 빈 값을 "채널 성질이 있다"로 오독하지 않는다).
-      const youtubeMetadataForSave = youtubeMetadataEnabled
-        ? {
-            title: youtubeTitle.trim(),
-            tags: youtubeTagsRaw.split(',').map((tag) => tag.trim()).filter(Boolean),
-            category_id: youtubeCategoryId || null,
-            privacy_status: youtubePrivacyStatus,
-          }
-        : undefined;
-      const channelPayload: { thread?: string[]; youtube?: typeof youtubeMetadataForSave } = {};
+      const channelPayload: {
+        thread?: string[]; title?: string; tags?: string[]; categoryId?: string | null;
+        privacyStatus?: 'public' | 'unlisted' | 'private';
+      } = {};
       if (threadSegments.length > 0) channelPayload.thread = threadSegments;
-      if (youtubeMetadataForSave) channelPayload.youtube = youtubeMetadataForSave;
+      if (youtubeMetadataEnabled) {
+        channelPayload.title = youtubeTitle.trim();
+        channelPayload.tags = youtubeTagsRaw.split(',').map((tag) => tag.trim()).filter(Boolean);
+        channelPayload.categoryId = youtubeCategoryId || null;
+        channelPayload.privacyStatus = youtubePrivacyStatus;
+      }
       const res = await fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

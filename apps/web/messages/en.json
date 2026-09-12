@@ -2752,7 +2752,7 @@
     "channelPostsYoutubePrivacyPublic": "Public",
     "channelPostsYoutubePrivacyUnlisted": "Unlisted",
     "channelPostsYoutubePrivacyPrivate": "Private",
-    "channelPostsYoutubePrivacyLockedNote": "Uploads are published as private for now — the privacy setting is locked to private until the YouTube API audit is complete.",
+    "channelPostsYoutubePrivacyLockedNote": "Uploads are published as private for now — until YouTube's API audit completes, visibility is limited to private.",
     "channelPostsYoutubeChaptersHint": "Add chapters in the description as `0:00 Title`, one per line — YouTube detects them automatically (first line 0:00, at least 3, each 10 seconds or longer).",
     "channelPostsYoutubePublishedPrivateBadge": "Published (Private)",
     "channelPostsImageMaxCountReachedReason": "You can attach up to {max} images.",

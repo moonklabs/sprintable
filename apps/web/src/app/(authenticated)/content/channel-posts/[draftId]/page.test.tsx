@@ -5584,7 +5584,7 @@ describe('ChannelPostEditPage — YouTube 메타데이터(story #3815 PR4)', () 
     expect(container.querySelector('[data-testid="channel-post-youtube-privacy-locked-note"]')).toBeNull();
   });
 
-  it('저장 시 title·tags·category_id·privacy_status가 channel_payload.youtube로 실린다', async () => {
+  it('저장 시 title·tags·categoryId·privacyStatus가 channel_payload 최상위에 camelCase로 실린다(PO 正정 2026-09-12 13:26Z — BE 4225가 최상위 키를 읽는다)', async () => {
     let savedBody: unknown;
     stubFetch({
       youtubeMetadataRequired: true,
@@ -5606,13 +5606,11 @@ describe('ChannelPostEditPage — YouTube 메타데이터(story #3815 PR4)', () 
     await flush();
 
     expect(savedBody).toMatchObject({
-      channel_payload: {
-        youtube: { title: '제목', tags: ['태그1', '태그2'], category_id: '10', privacy_status: 'private' },
-      },
+      channel_payload: { title: '제목', tags: ['태그1', '태그2'], categoryId: '10', privacyStatus: 'private' },
     });
   });
 
-  it('youtube_metadata_required=false면 저장 body의 channel_payload는 null(youtube 슬롯 자체가 없다)', async () => {
+  it('youtube_metadata_required=false면 저장 body의 channel_payload는 null(youtube 필드 자체가 없다)', async () => {
     let savedBody: unknown;
     stubFetch({
       youtubeMetadataRequired: false,
@@ -5626,10 +5624,10 @@ describe('ChannelPostEditPage — YouTube 메타데이터(story #3815 PR4)', () 
     expect(savedBody).toMatchObject({ channel_payload: null });
   });
 
-  it('로드된 버전의 channel_payload.youtube가 편집기 필드에 그대로 seed된다(재편집)', async () => {
+  it('로드된 버전의 channel_payload(최상위 camelCase)가 편집기 필드에 그대로 seed된다(재편집)', async () => {
     stubFetch({
       youtubeMetadataRequired: true,
-      versions: [{ ...VERSION_1, channel_payload: { youtube: { title: '기존 제목', tags: ['a', 'b'], category_id: '20', privacy_status: 'public' } } }],
+      versions: [{ ...VERSION_1, channel_payload: { title: '기존 제목', tags: ['a', 'b'], categoryId: '20', privacyStatus: 'public' } }],
     });
     await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
     await flush();
