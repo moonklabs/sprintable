@@ -4,6 +4,8 @@ import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { formatScheduledAt } from '@/components/content/schedule-format';
+import { declaredMetricsForChannel } from '@/components/insights-board/channel-declared-metrics';
+import { CHANNEL_LABEL_KEYS } from '@/lib/channel-label';
 // story #3746(유나 design gate CHANGES, 2026-09-09) — 이 유니온을 여기서 다시
 // 정의하면 `components/insights-board/types.ts`의 같은 이름 정의와 «두 정본»이
 // 된다 — 값이 지금은 여섯으로 일치해도, 한쪽만 고치면 다른 쪽 `Record` 가드가
@@ -42,6 +44,14 @@ export interface InsightSnapshotBlockProps {
   // snapshots.length===0이면 이미 안 그려지지만, publicationId 부재를 별도로도
   // 명시 방어한다 — "모른다≠다르다").
   publicationId?: string | null;
+  // story #3816(Phase3·3-6, 페드루 PO 지적 2026-09-12) — snapshots가 빈 배열일 때
+  // "아직 발행 前"과 "이 채널은 애초에 성과를 수집 안 함"(ghost·ghost_sandbox·
+  // wordpress·webhook — declaredMetricsForChannel() 빈 배열)을 갈라야 한다. 이
+  // 컴포넌트는 publicationId가 있을 때만 호출되므로(두 호출부 공통 관례) channel이
+  // 있고 그 채널이 지표를 하나도 선언 안 했으면 후자 — 「이 채널은 성과를 제공하지
+  // 않습니다」(기존 unsupported 행과 같은 문장, 새 낱말 0)를 정직하게 낸다. channel
+  // 부재/모르는 채널은 지어내지 않고 기존 그대로(null 반환).
+  channel?: string | null;
 }
 
 const METRIC_KEYS = ['impressions', 'reach', 'views', 'engagements', 'clicks', 'spend', 'conversions'] as const;
@@ -116,11 +126,32 @@ function MetricValue({ value, dashLabel, reasonLabel }: { value: number | null; 
   return <span data-testid="insight-metric-value">{value}</span>;
 }
 
-export function InsightSnapshotBlock({ snapshots, orgTimezone, locale, publicationId }: InsightSnapshotBlockProps) {
+export function InsightSnapshotBlock({ snapshots, orgTimezone, locale, publicationId, channel }: InsightSnapshotBlockProps) {
   const t = useTranslations('content');
   const tNav = useTranslations('nav');
 
-  if (snapshots.length === 0) return null;
+  if (snapshots.length === 0) {
+    // story #3816(페드루 PO 지적 2026-09-12) — "발행 前(아직 모른다)"과 "이 채널은
+    // 애초에 성과를 수집 안 함(known, declared 0)"을 가른다. BE(schedule_insight_
+    // snapshots)가 이제 declared-0 채널은 행 자체를 안 만들므로, 이 컴포넌트가
+    // publicationId 있는 자리에서만 불린다는 전제(두 호출부 공통 관례) 아래 이
+    // 조건이 곧 "발행은 됐는데 이 채널은 수집 대상이 아니다"를 뜻한다. channel이
+    // CHANNEL_LABEL_KEYS에 없는(모르는) 값이면 지어내지 않고 기존 그대로 null.
+    if (channel && channel in CHANNEL_LABEL_KEYS && declaredMetricsForChannel(channel).length === 0) {
+      return (
+        <div
+          data-testid="content-insight-info"
+          className="space-y-1 rounded-md border border-border bg-muted/30 p-3 text-sm"
+        >
+          <p className="text-xs font-medium text-muted-foreground">{t('insightSectionLabel')}</p>
+          <p className="text-xs text-muted-foreground" data-testid="insight-snapshot-not-a-target">
+            {t('insightSnapshotUnsupported')}
+          </p>
+        </div>
+      );
+    }
+    return null;
+  }
 
   const latest = findLatestCaptured(snapshots);
 
