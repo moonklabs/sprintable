@@ -622,6 +622,18 @@ export const EXEMPT_PAIRS = new Set<string>([
   // 과 정확히 같은 근거: 접근성 이름은 보이는 글자를 포함해야 한다는 규율 자체가
   // 이 부분문자열 포함을 요구한다(제거 대상 아님).
   'content.channelPostsThreadSegmentRemove <-> content.channelPostsThreadSegmentRemoveActionLabel',
+  // story #3815(PR4, 페드루 PO 決定 2026-09-12 14:49Z) — publishSuccess("{time}에
+  // 공개됐습니다.", 발행 성공 토스트 서술문)이 channelPostsYoutubePrivacyPublic
+  // ("공개", YouTube 공개범위 select의 옵션 라벨)을 부분문자열로 포함한다. 하나는
+  // 이미 벌어진 발행 결과를 알리는 토스트, 하나는 편집 중인 select의 옵션 값이라
+  // 화면·시점·요소가 전부 달라(testid로 각각 pin) 헷갈릴 자리가 아니다.
+  'content.channelPostsYoutubePrivacyPublic <-> content.publishSuccess',
+  // story #3815(PR4, 페드루 PO 決定 2026-09-12 14:49Z) — channelYoutubeUsageLine
+  // ("오늘 사용량 {used}/{limit} · 플랫폼 공유", 연결 카드 사용량 줄)이
+  // channelExpiringToday("오늘", 만료 임박 칩 낱말)를 부분문자열로 포함한다.
+  // 하나는 사용량 수치 줄, 하나는 만료 상태 칩이라 같은 연결 행에 동시에 서도
+  // (testid 서로 다름) "오늘"이 가리키는 대상이 헷갈릴 자리가 아니다.
+  'channelConnect.channelExpiringToday <-> channelConnect.channelYoutubeUsageLine',
 ]);
 
 // ⛔⭐오르테가군 지적(2026-07-31) — 이 목록에 «새로» 넣는 것은 PO 승인을 거친다. 이유 없이
