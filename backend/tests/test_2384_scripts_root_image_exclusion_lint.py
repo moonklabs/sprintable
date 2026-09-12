@@ -69,6 +69,10 @@ _CI_OR_LOCAL_ONLY_ALLOWLIST = frozenset({
                                                    # 산출 도구(model_db_drift_audit.py와 동일
                                                    # 범주, CI 미등재). 운영 DB 무접속, app/ 정적
                                                    # AST 스캔만.
+    "lint_no_hardcoded_iso_timestamp.py",         # story #3528(재발 가드) — CI lint 게이트
+                                                   # (backend/app/** AST 정적 스캔, 운영 DB
+                                                   # 무접속 — lint_business_info_email_footer_
+                                                   # drift.py와 동형 관례).
 })
 
 
