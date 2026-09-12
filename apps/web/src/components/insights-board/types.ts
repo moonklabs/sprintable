@@ -20,13 +20,21 @@
 // 정의가 둘이면 한쪽만 고쳤을 때 다른 쪽 `Record<InsightSnapshotStatus, …>` 가드가
 // 조용히 안 걸린다(이 스토리가 닫으려던 결함 그대로 재발). 그 파일은 이제 여기서
 // import만 한다 — 새 소비처를 추가할 때도 재정의 대신 이 export를 쓸 것.
+//
+// story #3808(Phase3·3-3 PR4, 페드루 PO CHANGES 2026-09-12) — 'skipped' 추가
+// (backend/app/models/insight_snapshot.py는 여전히 Text·CHECK 없음 — 마이그
+// 0건, BE `insight_snapshots.py::process_due_insight_snapshots`가 X 종량 read
+// 상한 도달 시 쓰는 새 값). 이 유니온 하나만 고치면 아래 모든 `Record<
+// InsightSnapshotStatus, …>` 소비처가 tsc에서 즉시 막힌다(값 하나 빠짐=컴파일
+// 에러) — #4049류 "같은 화면 두 세계" 드리프트를 구조적으로 막는 자리.
 export type InsightSnapshotStatus =
   | 'pending'
   | 'in_progress'
   | 'captured'
   | 'unsupported'
   | 'failed'
-  | 'superseded';
+  | 'superseded'
+  | 'skipped';
 
 export interface InsightNormalizedMetrics {
   impressions: number | null;

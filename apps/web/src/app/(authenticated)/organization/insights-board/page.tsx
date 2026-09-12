@@ -59,7 +59,13 @@ const SORT_ROLE_OPTIONS: SortRole[] = ['published_at', 'd1', 'd7'];
 // `in_progress`도 같이 묶인다, 서버가 그 값을 안다 — 아래 statusFilterLabel 참조)·
 // `captured`·`unsupported`·`failed`. `superseded`는 옵션이 아니라 BE 기본 배제
 // (insights_board.py 참조, "화면 넷이 같은 목록을 부르는데 화면마다 거르면 갈린다").
-const STATUS_FILTER_OPTIONS = ['pending', 'captured', 'unsupported', 'failed'] as const;
+//
+// story #3808(Phase3·3-3 PR4, 페드루 PO CHANGES 2026-09-12) — 다섯째 `skipped`
+// 추가(insight_snapshots.py::process_due_insight_snapshots, X 종량 read 상한
+// 도달 시). BE 상태 어휘와 FE 옵션 집합이 갈리면(#4049류 "같은 화면 두 세계"
+// 드리프트) 화면이 빈 라벨/알 수 없는 상태로 그린다 — insight-snapshot-metrics-
+// status-drift.test.tsx가 이 짝을 완전성(양방향)으로 계속 대조한다.
+const STATUS_FILTER_OPTIONS = ['pending', 'captured', 'unsupported', 'failed', 'skipped'] as const;
 // story #3656(Phase2·FE+BE, 페드루 PO 確定 2026-09-07) — 소재/훅 묶음 토글. 다른
 // 필터와 달리 이 축은 서버가 모른다(client-side groupBy, group-rows.ts) — BE 쿼리
 // 파라미터로 안 보낸다(buildQuery 불변).
@@ -94,6 +100,7 @@ const STATUS_FILTER_LABEL_KEYS: Record<Exclude<(typeof STATUS_FILTER_OPTIONS)[nu
   captured: 'insightStatusCaptured',
   unsupported: 'insightStatusUnsupported',
   failed: 'insightStatusFailed',
+  skipped: 'insightStatusSkipped',
 };
 
 const DEFAULT_WINDOW: InsightsBoardWindow = '7d';

@@ -74,17 +74,22 @@ const STATUS_LABEL_KEYS: Record<InsightSnapshotStatus, string> = {
   in_progress: 'insightStatusPending',
   captured: 'insightStatusCaptured',
   failed: 'insightStatusFailed',
-  // 이 둘은 이 맵 자리엔 실제로 안 온다(unsupported는 렌더 분기가 먼저 잡고,
-  // superseded는 BE가 기본 배제한다) — Record를 비-Partial로 유지하려면 빠짐없이
-  // 채워야 하니 방어적으로 채운다(지어낸 값이 아니라 정직한 라벨).
+  // 이 셋은 이 맵 자리엔 실제로 안 온다(unsupported·skipped는 렌더 분기가 먼저
+  // 잡고, superseded는 BE가 기본 배제한다) — Record를 비-Partial로 유지하려면
+  // 빠짐없이 채워야 하니 방어적으로 채운다(지어낸 값이 아니라 정직한 라벨).
   unsupported: 'insightStatusUnsupported',
   superseded: 'insightStatusSuperseded',
+  // story #3808(Phase3·3-3 PR4, 페드루 PO CHANGES 2026-09-12) — X 종량 read
+  // 상한 도달 시 BE가 쓰는 값. 렌더 분기(아래)가 문장(insightSnapshotSkipped)으로
+  // 먼저 잡으므로 이 명사구 라벨은 방어적 자리(unsupported/superseded와 동형).
+  skipped: 'insightStatusSkipped',
 };
 
 // §17-18(doc a0da40c9) 톤 축 — "나쁜 소식인가"만 색을 가른다. failed만 destructive
 // (FailureActionBadge와 동일 관례, failure-action-badge.tsx 참조) — 나머지(pending·
-// in_progress·captured·unsupported·superseded)는 중립(유나: "unsupported는 실패가
-// 아니라 성질, 경고색을 쓰면 고칠 것이 없는데 고치러 가게 된다").
+// in_progress·captured·unsupported·superseded·skipped)는 중립(유나: "unsupported는
+// 실패가 아니라 성질, 경고색을 쓰면 고칠 것이 없는데 고치러 가게 된다" — skipped도
+// 같은 이유: 우리 쪽 상한 설정의 결과지 그 발행물의 문제가 아니다).
 const DESTRUCTIVE_STATUSES: ReadonlySet<InsightSnapshotStatus> = new Set(['failed']);
 
 function findLatestCaptured(snapshots: InsightSnapshot[]): InsightSnapshot | null {
@@ -178,6 +183,13 @@ export function InsightSnapshotBlock({ snapshots, orgTimezone, locale, publicati
               ) : snap.status === 'unsupported' ? (
                 <span className={toneClass} data-testid="insight-snapshot-unsupported">
                   {t('insightSnapshotUnsupported')}
+                </span>
+              ) : snap.status === 'skipped' ? (
+                // story #3808(Phase3·3-3 PR4, 페드루 PO CHANGES 2026-09-12) — X 종량
+                // read 상한 도달. unsupported와 동형 문장 분기(중립 톤, 0으로 안 그린다
+                // — 3-1 «수집 안 됨≠0» 규율 그대로).
+                <span className={toneClass} data-testid="insight-snapshot-skipped">
+                  {t('insightSnapshotSkipped')}
                 </span>
               ) : snap.status === 'failed' ? (
                 <span className={toneClass} data-testid="insight-snapshot-failure">

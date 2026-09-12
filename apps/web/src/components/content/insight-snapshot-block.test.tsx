@@ -136,6 +136,18 @@ describe('InsightSnapshotBlock — story #3499(게시물 성과 표면 1차)', (
     expect(container.querySelector('[data-testid="insight-metric-value"]')).toBeNull();
   });
 
+  it('skipped(story #3808 PR4) — 전용 문장(insightSnapshotSkipped)·중립 톤·값 시도 없음', async () => {
+    const snap: InsightSnapshot = {
+      normalized: { ...ALL_NULL }, captured_at: null, status: 'skipped', due_at: null, source: 'x_sandbox',
+    };
+    await render([snap]);
+    const el = container.querySelector('[data-testid="insight-snapshot-skipped"]');
+    expect(el?.textContent).toBe(koMessages.content.insightSnapshotSkipped);
+    // 우리 상한 설정의 결과지 그 발행물의 실패가 아니다 — unsupported와 동형 중립 톤.
+    expect(el?.className).not.toContain('text-destructive');
+    expect(container.querySelector('[data-testid="insight-metric-value"]')).toBeNull();
+  });
+
   it('failed — 전용 문장(insightSnapshotFailed)·destructive 톤·「다시 시도」 없음', async () => {
     // story #3499 후속(페드루 지시·유나 3426 실픽셀, 2026-09-10) — §17-10 공유 라벨
     // (insightStatusFailed, "실패" 한 낱말)은 insights-board-metric-cell.tsx의 표 셀

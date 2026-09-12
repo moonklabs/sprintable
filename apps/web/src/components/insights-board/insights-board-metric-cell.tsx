@@ -47,6 +47,10 @@ const STATUS_LABEL_KEYS: Record<InsightSnapshotBucketView['status'], string> = {
   // 안 온다. 그래도 맵을 비-Partial로 하려면 빠짐없이 채워야 하니 방어적으로 정직한
   // 라벨을 둔다(지어낸 값이 아니라 "왜 안 온다" 그 자체를 말".
   superseded: 'insightStatusSuperseded',
+  // story #3808(Phase3·3-3 PR4, 페드루 PO CHANGES 2026-09-12) — X 종량 read 상한
+  // 도달. unsupported와 동형(명사구, §21-2 좁은 칸 규율) — 기존 insightStatusSkipped
+  // 재사용(신규 낱말 0).
+  skipped: 'insightStatusSkipped',
 };
 
 const DESTRUCTIVE_STATUSES: ReadonlySet<InsightSnapshotBucketView['status']> = new Set(['failed']);

@@ -283,11 +283,12 @@ describe('InsightsBoardPage — 쿼리 파라미터(story #3503)', () => {
     expect(lastUrl).toContain('status=failed');
   });
 
-  // story #3746(유나 v5) — 출처는 InsightSnapshot.status(BE)다, FE가 지어내는 옵션이
-  // 아니다. 통 넷: 수집 대기(pending+in_progress)·수집됨·채널 미제공·실패.
-  // superseded는 옵션이 아니고(BE 기본 배제), dead_letter도 옵션이 아니다(유령,
-  // BE 서비스 전수 0건).
-  describe('InsightsBoardPage — 수집 상태 필터 통 넷(story #3746)', () => {
+  // story #3746(유나 v5)·#3808(Phase3·3-3 PR4, 페드루 PO CHANGES 2026-09-12) —
+  // 출처는 InsightSnapshot.status(BE)다, FE가 지어내는 옵션이 아니다. 통 다섯:
+  // 수집 대기(pending+in_progress)·수집됨·채널 미제공·실패·건너뜀(#3808, X 종량
+  // read 상한 도달). superseded는 옵션이 아니고(BE 기본 배제), dead_letter도
+  // 옵션이 아니다(유령, BE 서비스 전수 0건).
+  describe('InsightsBoardPage — 수집 상태 필터 통 다섯(story #3746·#3808)', () => {
     it('⭐뮤테이션 표적 — dead_letter는 필터 옵션 목록에 없다(전체 상태 메뉴 항목 전수)', async () => {
       stubFetch({});
       await mount();
@@ -298,8 +299,8 @@ describe('InsightsBoardPage — 쿼리 파라미터(story #3503)', () => {
         trigger.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       });
       const items = [...document.querySelectorAll('[role="menuitem"]')].map((el) => el.textContent);
-      // 「전체 상태」+통 넷 = 정확히 5개(다섯 번째가 몰래 늘면(예: dead_letter 부활) 이 길이 자체가 어긋난다).
-      expect(items).toHaveLength(5);
+      // 「전체 상태」+통 다섯 = 정확히 6개(여섯 번째가 몰래 늘면(예: dead_letter 부활) 이 길이 자체가 어긋난다).
+      expect(items).toHaveLength(6);
       expect(items).not.toContain('자동 재시도 멈춤');
       // PO CHANGES②(2026-09-09) — 드롭다운은 선택지 자리(명사구)라 상세 블록 전용
       // 문장(insightSnapshotUnsupported)이 아니라 셀과 같은 명사구(insightStatusUnsupported)
@@ -310,6 +311,7 @@ describe('InsightsBoardPage — 쿼리 파라미터(story #3503)', () => {
         koMessages.content.insightStatusCaptured,
         koMessages.content.insightStatusUnsupported,
         koMessages.content.insightStatusFailed,
+        koMessages.content.insightStatusSkipped,
       ]);
     });
 
