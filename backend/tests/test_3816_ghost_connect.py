@@ -204,6 +204,42 @@ async def test_ghost_site_verify_failure_rejects_and_saves_nothing(monkeypatch, 
 
 
 @pytest.mark.anyio
+async def test_ghost_site_not_found_uses_distinct_code_from_key_invalid(monkeypatch, dns_stub):
+    """story #3816 CHANGES 1(페드루 PO 지목 2026-09-12) — site_url이 사용자 입력이라
+    (stibee엔 없던 축) 주소 자체가 틀림(오타·Ghost 아닌 사이트)도 흔히 404로 온다.
+    이걸 GHOST_ADMIN_KEY_INVALID로 뭉치면 키를 다시 붙여넣어도 같은 오류가
+    재현되는 거짓 진입점이 된다 — 별도 코드 GHOST_SITE_NOT_FOUND로 갈리고,
+    이것도 fail-closed(연결 미저장)는 동일."""
+    _patch_site_verify_fails(monkeypatch, status_code=404)
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id, role="owner")
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+        async with _client_for(app) as client:
+            r = await client.post(
+                f"/api/v2/organizations/{org_id}/channel-connections/ghost",
+                json={"site_url": "https://not-a-ghost-site.example.com", "admin_api_key": _FAKE_ADMIN_KEY},
+            )
+        assert r.status_code == 422, r.text
+        error = r.json().get("error") or r.json()
+        assert error["code"] == "GHOST_SITE_NOT_FOUND"
+
+        from app.services.channel_connection import list_channel_connections
+
+        async with Session() as s:
+            saved = await list_channel_connections(s, org_id=org_id)
+        assert not any(c.channel == "ghost" for c in saved), "site 미발견에도 연결 행이 저장됐다(fail-closed 위반)"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_ghost_site_verify_unavailable_uses_distinct_code(monkeypatch, dns_stub):
     """story #3816 — Ghost 사이트가 안 닿는 것(5xx로 시뮬레이션)과 키가 틀린 것(401)은
     사람이 할 일이 다르다 — 별도 코드 GHOST_SITE_VERIFY_UNAVAILABLE."""

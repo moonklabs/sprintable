@@ -1453,11 +1453,19 @@ async def create_pasted_secret_channel_connection(
                 await verify_admin_api_key(ghost_http_client, site_url=site_url, admin_api_key=body.admin_api_key)
             except GhostSiteVerifyFailed as exc:
                 logger.warning(
-                    "ghost site 검증 실패 — org=%s status=%s key_rejected=%s",
-                    org_id, exc.status_code, exc.is_key_rejected,
+                    "ghost site 검증 실패 — org=%s status=%s key_rejected=%s site_not_found=%s",
+                    org_id, exc.status_code, exc.is_key_rejected, exc.is_site_not_found,
                 )
+                # story #3816 CHANGES 1(페드루 PO 지목 2026-09-12) — site_url은 사용자
+                # 입력이라(stibee의 고정 base URL엔 없던 축) 「주소 틀림」(오타·Ghost
+                # 아닌 사이트 → 흔히 404)이 「키 틀림」(401/403)만큼 온다. 예전처럼
+                # "4xx 전체=키 오류"로 뭉치면 주소 오류를 키 오류로 잘못 안내해 사람이
+                # 키를 다시 붙여넣어도 같은 오류가 재현되는 거짓 진입점이 된다 — 셋으로
+                # 가른다.
                 if exc.is_key_rejected:
                     code, message_key = "GHOST_ADMIN_KEY_INVALID", "channel_connections.ghost_admin_key_invalid"
+                elif exc.is_site_not_found:
+                    code, message_key = "GHOST_SITE_NOT_FOUND", "channel_connections.ghost_site_not_found"
                 else:
                     code, message_key = "GHOST_SITE_VERIFY_UNAVAILABLE", "channel_connections.ghost_site_verify_unavailable"
                 raise HTTPException(
@@ -1606,11 +1614,13 @@ async def replace_channel_connection_credentials(
                 await verify_admin_api_key(ghost_http_client, site_url=row.account_id, admin_api_key=body.admin_api_key)
             except GhostSiteVerifyFailed as exc:
                 logger.warning(
-                    "ghost site 검증 실패(회전) — org=%s status=%s key_rejected=%s",
-                    org_id, exc.status_code, exc.is_key_rejected,
+                    "ghost site 검증 실패(회전) — org=%s status=%s key_rejected=%s site_not_found=%s",
+                    org_id, exc.status_code, exc.is_key_rejected, exc.is_site_not_found,
                 )
                 if exc.is_key_rejected:
                     code, message_key = "GHOST_ADMIN_KEY_INVALID", "channel_connections.ghost_admin_key_invalid"
+                elif exc.is_site_not_found:
+                    code, message_key = "GHOST_SITE_NOT_FOUND", "channel_connections.ghost_site_not_found"
                 else:
                     code, message_key = "GHOST_SITE_VERIFY_UNAVAILABLE", "channel_connections.ghost_site_verify_unavailable"
                 raise HTTPException(

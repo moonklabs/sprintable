@@ -343,7 +343,14 @@ _CATALOG: dict[str, dict[str, str]] = {
     # 다른 어조, 지어내지 않고 PO 지정 그대로).
     "channel_connections.ghost_admin_key_invalid": {
         "ko": "Admin API 키가 유효하지 않습니다 · Ghost 설정에서 다시 확인해 주세요.",
-        "en": "Your Admin API key isn't valid — please double-check it in your Ghost settings.",
+        "en": "Your Admin API key isn't valid — check it in your Ghost settings.",
+    },
+    # story #3816 CHANGES 1(페드루 PO 지목 2026-09-12) — site_url 자체가 틀림
+    # (오타·Ghost가 아닌 사이트, 흔히 404)은 키 오류와 다른 처방(주소를 고쳐야
+    # 풀림)이라 별도 코드·문구.
+    "channel_connections.ghost_site_not_found": {
+        "ko": "Ghost 사이트를 찾을 수 없습니다 · 사이트 주소를 확인해 주세요.",
+        "en": "Couldn't find a Ghost site at that address — check the site URL.",
     },
     # story #3816(Phase3·3-6 PR1) — Ghost 사이트가 안 닿는 것(네트워크·타임아웃·5xx)과
     # 키가 틀린 것은 사람이 할 일이 다르다 — stibee_auth_check_unavailable 동형.

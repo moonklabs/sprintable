@@ -34,6 +34,9 @@ const KNOWN_CONNECT_ERROR_KEYS: Record<string, string> = {
   // 응답 2종(필드 누락·site 검증 실패)+별도 코드(네트워크/5xx). stibee 3종과 동형.
   GHOST_FIELDS_REQUIRED: 'channelConnectErrorGhostFieldsRequired',
   GHOST_ADMIN_KEY_INVALID: 'channelConnectErrorGhostAdminKeyInvalid',
+  // story #3816 CHANGES 1(페드루 PO 지목 2026-09-12) — site_url 오타·Ghost 아닌
+  // 사이트(흔히 404)는 키 오류와 다른 처방(주소를 고쳐야 풀림).
+  GHOST_SITE_NOT_FOUND: 'channelConnectErrorGhostSiteNotFound',
   GHOST_SITE_VERIFY_UNAVAILABLE: 'channelConnectErrorGhostSiteVerifyUnavailable',
   // 3653a18c §3-0 "사람 말을 위에, 원문은 접어" — SSRF 목적지 거부는 provider 원문
   // (DestinationURLUnsafeError 메시지, 영문·기술 용어)을 그대로 안 보여준다.

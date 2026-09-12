@@ -102,6 +102,39 @@ async def test_verify_admin_api_key_raises_on_401():
 
     assert exc_info.value.status_code == 401
     assert exc_info.value.is_key_rejected is True
+    assert exc_info.value.is_site_not_found is False
+
+
+@pytest.mark.anyio
+async def test_verify_admin_api_key_raises_on_403():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, text="Forbidden")
+
+    async with httpx.AsyncClient(transport=_transport(handler)) as client:
+        with pytest.raises(GhostSiteVerifyFailed) as exc_info:
+            await verify_admin_api_key(client, site_url="https://blog.example.com", admin_api_key=_FAKE_ADMIN_KEY)
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.is_key_rejected is True
+    assert exc_info.value.is_site_not_found is False
+
+
+@pytest.mark.anyio
+async def test_verify_admin_api_key_raises_on_404_is_site_not_found_not_key_rejected():
+    """story #3816 CHANGES 1(페드루 PO 지목 2026-09-12) — site_url은 사용자 입력이라
+    주소 자체가 틀림(오타·Ghost 아닌 사이트)도 흔히 404로 온다. 이걸 키 오류로
+    뭉치면 사람이 키를 다시 붙여넣어도 같은 오류가 재현되는 거짓 진입점이 된다
+    (뮤테이션 대상 — (401, 403) 판정에서 403을 빼면 그 위 테스트가 RED여야 한다)."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, text="Not Found")
+
+    async with httpx.AsyncClient(transport=_transport(handler)) as client:
+        with pytest.raises(GhostSiteVerifyFailed) as exc_info:
+            await verify_admin_api_key(client, site_url="https://not-a-ghost-site.example.com", admin_api_key=_FAKE_ADMIN_KEY)
+
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.is_key_rejected is False
+    assert exc_info.value.is_site_not_found is True
 
 
 @pytest.mark.anyio
@@ -115,6 +148,7 @@ async def test_verify_admin_api_key_raises_on_network_error():
 
     assert exc_info.value.status_code is None
     assert exc_info.value.is_key_rejected is False
+    assert exc_info.value.is_site_not_found is False
 
 
 @pytest.mark.anyio
@@ -135,3 +169,4 @@ async def test_verify_admin_api_key_malformed_key_is_key_rejected_without_networ
     assert called is False
     assert exc_info.value.status_code is None
     assert exc_info.value.is_key_rejected is True
+    assert exc_info.value.is_site_not_found is False

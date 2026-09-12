@@ -79,6 +79,14 @@ const PASTED_SECRET_HINT_KEY: Record<string, string> = {
   ghost: 'channelConnectPastedSecretHintGhost',
 };
 
+// story #3816(Phase3·3-6 PR1, 유나 §낱말 한 벌·PO 정정 1, 2026-09-12) — 요금제
+// 도움 문구는 "어디서 오나" 힌트와 다른 자리(별개 개념 — 채널 성질이지 자격 출처가
+// 아니다)다. 다른 채널엔 이 축 자체가 없어 표에 항목이 없으면 그냥 안 그린다.
+// PO 明示 — "확인 못했다"류 0(제품이 플랜을 확인하려 든 적 없다), 상태 낱말 신설 0.
+const PASTED_SECRET_PLAN_NOTE_KEY: Record<string, string> = {
+  ghost: 'channelConnectPastedSecretPlanNoteGhost',
+};
+
 export function PastedSecretConnectCard({
   channel, orgId, isOwner, connectionCount, onConnected, t,
 }: {
@@ -163,6 +171,11 @@ export function PastedSecretConnectCard({
           <p className="text-xs text-muted-foreground" data-testid={`channel-connect-pasted-secret-hint-${channel}`}>
             {t(PASTED_SECRET_HINT_KEY[channel])}
           </p>
+          {PASTED_SECRET_PLAN_NOTE_KEY[channel] ? (
+            <p className="text-xs text-muted-foreground" data-testid={`channel-connect-pasted-secret-plan-note-${channel}`}>
+              {t(PASTED_SECRET_PLAN_NOTE_KEY[channel]!)}
+            </p>
+          ) : null}
           {fields.map((f) => (
             <div key={f.name} className="space-y-1">
               <label className="text-xs font-medium text-muted-foreground" htmlFor={`${channel}-${f.name}`}>

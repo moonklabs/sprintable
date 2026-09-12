@@ -49,15 +49,22 @@ def sign_admin_jwt(admin_api_key: str) -> str:
 class GhostSiteVerifyFailed(Exception):
     """site 검증(`GET /ghost/api/admin/site/`)이 200이 아니거나 네트워크 자체가
     실패했을 때. `.status_code`는 provider가 준 HTTP status(네트워크 실패·타임아웃
-    시 None). stibee_client.StibeeAuthCheckFailed와 같은 판정축(「provider가 응답해서
-    거절」=4xx 전체를 「키 재발급」 처방으로, 응답 자체가 없거나 5xx는 「잠시 뒤
-    재시도」로) — 실 사이트 왕복 前까지는 이 보수적 기본값을 그대로 따른다(⚠️미확認).
+    시 None).
 
     `key_malformed=True`는 admin_api_key가 애초에 `{id}:{hex}` 형이 아니어서 네트워크를
     타지도 못한 경우 — status_code가 None(응답 없음)과 같은 값이라도 이건 명백히
     「키 형식이 틀렸다」(재발급/재확認 처방)이지 「provider가 일시 불가」가 아니라서
     `.is_key_rejected`를 강제로 True로 얹는다(status_code 하나로 두 다른 사유를
-    뭉치지 않는다)."""
+    뭉치지 않는다).
+
+    story #3816 CHANGES 1(페드루 PO 지목 2026-09-12) — stibee_client.StibeeAuthCheckFailed
+    는 「4xx 전체=키 거절」을 썼지만(base URL이 고정이라 도달 자체는 항상 성공) Ghost는
+    site_url이 사용자 입력이라 다른 축이 하나 더 있다: 주소 자체가 틀림(오타·Ghost가
+    아닌 사이트)도 흔히 404(401/403 아닌 4xx)로 온다. 이 셋을 가른다 —
+    `.is_key_rejected`(401/403·형식오류=키를 다시 넣어야 풀림)·`.is_site_not_found`
+    (그 외 4xx=주소를 고쳐야 풀림)·둘 다 아니면(5xx·네트워크 실패) 일시 불가(잠시 뒤
+    재시도) — 하나로 뭉치면 사람이 고칠 게 아닌 걸 고치라고 안내하는 거짓 진입점이
+    된다."""
 
     def __init__(self, message: str, *, status_code: int | None, key_malformed: bool = False):
         self.status_code = status_code
@@ -66,7 +73,16 @@ class GhostSiteVerifyFailed(Exception):
 
     @property
     def is_key_rejected(self) -> bool:
-        return self.key_malformed or (self.status_code is not None and 400 <= self.status_code < 500)
+        return self.key_malformed or self.status_code in (401, 403)
+
+    @property
+    def is_site_not_found(self) -> bool:
+        return (
+            not self.key_malformed
+            and self.status_code is not None
+            and 400 <= self.status_code < 500
+            and self.status_code not in (401, 403)
+        )
 
 
 async def verify_admin_api_key(client: httpx.AsyncClient, *, site_url: str, admin_api_key: str) -> None:

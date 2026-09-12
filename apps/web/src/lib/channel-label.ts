@@ -40,6 +40,11 @@ const CHANNEL_LABEL_KEYS: Record<string, string> = {
   // 안 챙긴 것, 이번에 등록.
   x: 'channelLabelX',
   x_sandbox: 'channelLabelXSandbox',
+  // story #3816(Phase3·3-6 PR1, 페드루 PO 確定 2026-09-12) — ghost/ghost_sandbox
+  // 행이 이 맵에 없으면 raw "ghost"/"ghost_sandbox" 원문이 화면에 그대로 새는
+  // 결함 클래스(meta_ads/x 선례와 동형) — 등록 자리에서 미리 챙긴다.
+  ghost: 'channelLabelGhost',
+  ghost_sandbox: 'channelLabelGhostSandbox',
 };
 
 export function channelLabel(channel: string, t: (key: string) => string): string {
@@ -65,6 +70,9 @@ const CHANNEL_MARK_COLORS: Record<string, string> = {
   // 사실). x_sandbox는 facebook_sandbox와 동형으로 중립색(실 채널과 시각 구분).
   x: '#000000',
   x_sandbox: '#5B6470',
+  // story #3816 — Ghost 공식 브랜드색(다크 네이비블랙, 공개 브랜드 가이드 값).
+  ghost: '#15171A',
+  ghost_sandbox: '#5B6470',
 };
 const CHANNEL_MARK_NEUTRAL = '#5B6470';
 
