@@ -1,0 +1,1 @@
+{"file": "tests/test_3806_ads_boost_gate.py", "sec": 7.9, "source": "story-3806(Phase3·3-2 PR2, 페드루 PO 追加 確定 2026-09-11 — sealed_ads_connection_id 보완으로 4테스트 추가) — 재측(로컬, uv run pytest --durations=0 직접 1회 실행, 14건 wall time 약 7.9s — test_3766 등재 선례와 동일 방법론)"}

@@ -1,0 +1,1 @@
+{"file": "tests/test_3589_image_upload_cleanup_on_reject.py", "sec": 26.0, "source": "story-3589-upload-cleanup-on-reject(2-way 분할 — 이미지 5건 로컬 4.26s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 26s 잠정값, 실 CI 샤드 로그로 재확認 필요)"}

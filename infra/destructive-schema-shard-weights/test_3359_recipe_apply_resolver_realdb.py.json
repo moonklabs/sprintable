@@ -1,0 +1,1 @@
+{"file": "tests/test_3359_recipe_apply_resolver_realdb.py", "sec": 6.0, "source": "story-3359-channel-connector-resolver(2026-09-08, 로컬 raw pytest 3건 0.9s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 6s 잠정값, 실 CI 샤드 로그로 재확認 필요)"}

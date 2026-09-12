@@ -1,0 +1,1 @@
+{"file": "tests/test_3516_channel_post_comments.py", "sec": 55.0, "source": "story-3642-drift-remeasure(2026-09-07, PO 실사고 재실측 — 정규화값 평균: run 34103152060 attempt1 job 101682050718(68s÷median×1.71≈39.8s)·run 34112978612 attempt1 job 101713259910(142s÷median×2.00≈71.0s) 평균 55s. 두 run 편차가 커(39.8~71.0s) 다음 3 run 실측으로 재확認 필요(AC1) — run 34112876593(154s, cancel로 median 미확定)도 참고."}

@@ -1,0 +1,1 @@
+{"file": "tests/test_3808_site_post_concurrent_publish.py", "sec": 2.7, "source": "story-3808(Phase3·3-3 PR2, 카디르 QA 실측 2026-09-11 21:11Z — site_posts.py 동시발행 500 재발 격리 재현) — 신규 파일 실측(로컬, uv run pytest --durations=0 직접 1회 실행, 1건 wall time 약 2.7s — test_3808_x_publish.py 선례와 동일 방법론, 실 CI 샤드 로그로 재확認 필요)"}

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """story 23bf1913(CI 후속, 페드루 PO 착수 2026-09-04) — 신규 destructive_schema 테스트
-파일이 `infra/destructive-schema-shard-weights.jsonl`에 미등재면 샤드 분배 **前** 별도
-정적 체크에서 즉시 실패한다.
+파일이 `infra/destructive-schema-shard-weights/`(디렉터리, story #3812 재설계)에
+미등재면 샤드 분배 **前** 별도 정적 체크에서 즉시 실패한다.
 
 오늘(2026-09-04) 4건 PR(#3769·#3773·#3774·#3775) 전부 같은 사고를 반복했다 — 새
-destructive 파일을 weights.json에 안 넣은 채 PR을 열면, story #3392의 unweighted 초과
+destructive 파일을 shard-weights/에 안 넣은 채 PR을 열면, story #3392의 unweighted 초과
 가드(AC1, `shard_destructive_tests.py`)가 그 사실을 알려 주긴 하는데 **그 샤드가 파일을
 전부 완주한 뒤에야**(~20분) 로그에 나타난다. 4 PR × 재커밋 1회 × 완주 대기 = 4×20분 낭비 —
 전부 기능 결함 0건, 등재 누락뿐이었다.
@@ -30,11 +30,11 @@ unweighted 축과 동형 관례).
 스크립트들의 관례 그대로):
   · 이미 등재는 됐지만 실측치가 크게 틀린(낡은) 파일 — 그건 story #3392의 unweighted
     초과 가드(AC1, shard 완주 후 실측 대조)와 `check_staleness()`(파일 수 +20%) 몫이다.
-    이 가드는 **존재 자체**만 본다("이 파일이 weights.json에 한 줄이라도 있나") — 그
-    줄의 값이 맞는지는 검증하지 않는다.
-  · weights.json에 등재된 파일이 나중에 destructive_schema 마커를 잃거나 파일명이
+    이 가드는 **존재 자체**만 본다("이 파일의 json이 shard-weights/에 있나") — 그
+    값이 맞는지는 검증하지 않는다.
+  · shard-weights/에 등재된 파일이 나중에 destructive_schema 마커를 잃거나 파일명이
     바뀌는 경우 — `discover()`가 SSOT라 그 파일은 애초에 "신규 미등재" 목록에 안 잡히고,
-    반대로 weights.json에 남은 죽은 항목은 이 가드가 지적하지 않는다(무해 —
+    반대로 shard-weights/에 남은 죽은 항목은 이 가드가 지적하지 않는다(무해 —
     `partition()`이 그 항목을 그냥 안 쓸 뿐, story #3397이 이미 이 경로를 정리했다).
 
 사용법: `python3 scripts/lint_destructive_schema_weights_registered.py`(backend/ cwd)."""
@@ -61,7 +61,7 @@ def main() -> int:
     weights = load_weights()
     missing = unweighted_files_in(files, weights)
 
-    print(f"discover: destructive_schema 파일 {len(files)}개 · weights.jsonl 등재 {len(weights)}개")
+    print(f"discover: destructive_schema 파일 {len(files)}개 · shard-weights/ 등재 {len(weights)}개")
 
     # story #3465 — 단일 source_run 문자열 폐기 뒤 files[] 항목마다 source가 필수다.
     # unweighted 판정(위)보다 먼저 볼 이유는 없지만(둘 다 존재-가드, 순서 무관) 나란히
@@ -81,23 +81,25 @@ def main() -> int:
         return 1
 
     avg = average_weight(weights)
-    print(f"FAIL: shard-weights.jsonl에 없는 destructive_schema 파일 {len(missing)}개(story 23bf1913)")
+    print(f"FAIL: infra/destructive-schema-shard-weights/에 없는 destructive_schema 파일 {len(missing)}개(story 23bf1913)")
     print(
         "이대로 두면 샤드가 이 파일을 「평균 가중치」로만 배정하고, 실측이 평균의 3배를 "
         "넘으면(story #3392 AC1) 샤드 완주 뒤(~20분)에야 CI가 빨강이 됩니다."
     )
     print()
     print(
-        "아래 줄을 infra/destructive-schema-shard-weights.jsonl에 한 줄씩 추가하세요"
-        f"(sec 값은 평균 가중치 {avg:.1f}s로 채웠습니다 — 실측치로 바꾸는 편이 낫습니다, "
-        "scripts/measure_destructive_durations_local.py 참고). story #3812부터 파일당 "
-        "정확히 1줄(jsonl) — 어디에 넣든 상관없다(git union merge가 순서 무관 병합, "
-        "끝에 붙이는 게 그래도 관례):"
+        "아래 각 파일을 infra/destructive-schema-shard-weights/<test_file>.json으로 새로 "
+        f"만드세요(sec 값은 평균 가중치 {avg:.1f}s로 채웠습니다 — 실측치로 바꾸는 편이 낫습니다, "
+        "scripts/measure_destructive_durations_local.py 참고). story #3812(재설계)부터 파일당 "
+        "정확히 하나의 물리 json 파일 — 서로 다른 새 파일 추가는 git ADD/ADD 충돌 자체가 "
+        "구조적으로 없다(GitHub 서버측 merge에도 통함):"
     )
     print()
     for f in missing:
+        entry_name = Path(f).name + ".json"
+        print(f"infra/destructive-schema-shard-weights/{entry_name}:")
         print(json.dumps({"file": f, "sec": round(avg, 1), "source": "⚠️source 채울 것"}, ensure_ascii=False))
-        print(f"::error::destructive_schema 파일이 shard-weights.jsonl에 없습니다(story 23bf1913): {f}")
+        print(f"::error::destructive_schema 파일이 shard-weights/에 없습니다(story 23bf1913): {f}")
     return 1
 
 

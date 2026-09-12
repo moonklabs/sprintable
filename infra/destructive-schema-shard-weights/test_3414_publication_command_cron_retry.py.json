@@ -1,0 +1,1 @@
+{"file": "tests/test_3414_publication_command_cron_retry.py", "sec": 33.0, "source": "story-3642-drift-remeasure(2026-09-07 — 3396 W×2 초과 파일 전수 스윕 중 발견, 2 run 연속 초과: run 34103152060 attempt1(46s÷median×1.71≈26.9s)·run 34112978612 attempt1(79s÷median×2.00≈39.5s) 평균 33s. 기존 13.0s는 story-3562 분할 시 «테스트 개수 비중» 배분값이라 실측이 아니었다(잠정값 딱지 그대로였던 자리)."}

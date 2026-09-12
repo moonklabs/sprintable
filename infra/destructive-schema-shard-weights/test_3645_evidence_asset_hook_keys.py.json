@@ -1,0 +1,1 @@
+{"file": "tests/test_3645_evidence_asset_hook_keys.py", "sec": 41.0, "source": "story-3645-evidence-asset-hook-keys(PR #4002 CI 가드 발견 — 로컬 raw pytest 11건 6.81s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 41s 잠정값, 실 CI 샤드 로그로 재확認 필요)"}

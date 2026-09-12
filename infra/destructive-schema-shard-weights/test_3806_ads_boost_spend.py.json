@@ -1,0 +1,1 @@
+{"file": "tests/test_3806_ads_boost_spend.py", "sec": 10.0, "source": "story-3809(Phase3·3-7 PR 4a 정정, 카디르 QA 실측 2026-09-11 21:47Z — resume이 소진된 스냅샷 체인을 재예약하지 않던 결함 처방+테스트 1건 추가) — 재측(로컬, uv run pytest --durations=0 직접 1회 실행, 16건 wall time 약 10.0s — test_3766 등재 선례와 동일 방법론)"}

@@ -1,0 +1,1 @@
+{"file": "tests/test_3806_ads_boost_starts_cron_wiring.py", "sec": 1.8, "source": "story-3806(Phase3·3-2 PR 6, 페드루 PO 確定 2026-09-11 13:27Z — cron 배선 회귀, test_3527_comment_collection_cron_wiring.py 선례와 동형) — 신규 파일 실측(로컬, uv run pytest --durations=0 직접 1회 실행, 2건 call+setup 합산 약 1.8s — test_3766 등재 선례와 동일 방법론)"}

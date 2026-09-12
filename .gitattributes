@@ -1,8 +1,0 @@
-# story #3812(CI, 페드루 PO 確定 2026-09-11) — infra/destructive-schema-shard-
-# weights.jsonl(파일당 정확히 1줄)은 union 병합 드라이버로 관리한다: 서로 다른 PR이
-# 각자 새 파일을 append해도 git이 두 줄 다 그대로 포함해 3-way merge 충돌이 구조적으로
-# 0이 된다(실증: 두 브랜치가 각각 1줄을 추가한 뒤 merge/rebase 둘 다 충돌 0). 유일한
-# 맹점(같은 파일에 서로 다른 항목이 등재되는 경우)은 코드(shard_destructive_tests.py::
-# _load_full_data의 DuplicateShardWeightEntryError)가 로드 시점에 fail-loud로 잡는다
-# — git 레벨에서는 못 막는다는 것을 알고 짠 이중 방어.
-infra/destructive-schema-shard-weights.jsonl merge=union

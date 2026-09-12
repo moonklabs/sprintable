@@ -1,0 +1,1 @@
+{"file": "tests/test_3373_channel_connections_auth.py", "sec": 16.0, "source": "story-3579-split-3373-channel-connections(2026-09-06, 원본 test_3373_channel_connections.py 31건·등재 39.0s를 3-way 분할 후 테스트 개수 비중(auth 13/31 ≈ 42%)으로 배분한 잠정값 — 원본이 러너 정규화 60초 가드 경계대역(36~77s 관측)이었던 것을 각 파일 ≤25s 목표로 분리, 실 CI 샤드 로그로 재확認 필요)"}

@@ -1,0 +1,1 @@
+{"file": "tests/test_3809_org_cost_summary.py", "sec": 10.0, "source": "story-3809(Phase3·3-7 PR 4b, 페드루 PO 確定 2026-09-11 23:08Z — daily series 통화 안전 처방에 양성대조 테스트 1건 추가) — 재측(로컬, uv run pytest --durations=0 직접 1회 실행, 15건 wall time 약 10.0s — test_3766 등재 선례와 동일 방법론)"}

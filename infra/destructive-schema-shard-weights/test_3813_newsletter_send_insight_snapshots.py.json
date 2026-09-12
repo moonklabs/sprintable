@@ -1,0 +1,1 @@
+{"file": "tests/test_3813_newsletter_send_insight_snapshots.py", "sec": 4.6, "source": "story-3813(Phase3·3-4 PR3, 페드루 PO 確定 2026-09-12) — 발송 결과(opens/delivered) 캡처 신규 파일 실측(로컬, uv run pytest --durations=0 직접 1회 실행, 4건 wall time 약 4.6s — test_3766 등재 선례와 동일 방법론)"}

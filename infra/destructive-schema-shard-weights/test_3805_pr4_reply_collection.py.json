@@ -1,0 +1,1 @@
+{"file": "tests/test_3805_pr4_reply_collection.py", "sec": 6.5, "source": "story-3805(Phase3·3-1 PR 4, 페드루 PO 確定 2026-09-11 12:12Z·12:29Z 후속 — 인바운드 중첩 답글 수집·kind 열 복귀·「조용히 0」 처방 reply_detection_unavailable 3건 추가) — 재측(로컬, uv run pytest --durations=0 직접 1회 실행, 11건 call+setup 합산 약 6.5s — test_3766 등재 선례와 동일 방법론)"}

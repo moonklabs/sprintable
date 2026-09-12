@@ -1,0 +1,1 @@
+{"file": "tests/test_3806_ads_boost_execution.py", "sec": 7.7, "source": "story-3806(Phase3·3-2 PR3, 페드루 PO 確定 2026-09-11) — 신규 파일 실측(로컬, uv run pytest --durations=0 직접 1회 실행, 12건 wall time 약 7.7s — test_3766 등재 선례와 동일 방법론)"}
