@@ -742,6 +742,39 @@ describe('OrganizationChannelsPage — 헤더 rollup 칩 임계값(story dd29e6d
   });
 });
 
+// story #3816(Phase3·3-6, 페드루 PO 지적 2026-09-12·배포 81 라이브 회차 유나 판정
+// CHANGES 1) — sandbox(credential_kind==='none') 연결의 expired는 재연결 경로가
+// 구조적으로 없다(ReauthNote 옆 분기가 버튼 대신 「테스트용 연결은 다시 연결할
+// 수 없습니다」 문장을 낸다) — 그런데 칩은 여전히 공용 「다시 연결 필요」를 내
+// 같은 행 안에서 칩·문장이 반대 뜻을 말했다(4222 축 재현).
+describe('OrganizationChannelsPage — sandbox expired 칩 낱말(story #3816)', () => {
+  const AVAILABLE_WITH_SANDBOX = [
+    { channel: 'threads', display_name: 'Threads', credential_kind: 'oauth', kind: 'social' },
+    { channel: 'sandbox', display_name: 'Sandbox', credential_kind: 'none', kind: 'social' },
+  ];
+
+  it('⭐sandbox(credential_kind=none) expired — 칩이 「만료됨」(재연결 경로 없음, 「다시 연결 필요」는 거짓 약속)', async () => {
+    stubFetch({
+      connections: [{ ...CONNECTION_ACTIVE, id: 'conn-sandbox-1', channel: 'sandbox', credential_kind: 'none', status: 'expired' }],
+      availableChannels: AVAILABLE_WITH_SANDBOX,
+    });
+    await mount('owner');
+    await expandChannelRow({ viaMenuLabel: koMessages.channelConnect.channelManageConnectionsAction, rowChannel: koMessages.channelConnect.channelLabelSandbox });
+    const chip = container.querySelector('[data-testid="channel-section"] [data-status-chip="reauth_required"]');
+    expect(chip?.textContent).toBe(koMessages.channelConnect.channelStatusExpiredSandbox);
+    expect(chip?.textContent).not.toBe(koMessages.channelConnect.channelStatusReauthRequired);
+    // 같은 행 안의 문장(버튼 대신)과 뜻이 어긋나면 안 된다 — 둘 다 "재연결 불가" 쪽.
+    expect(container.textContent).toContain('다시 연결할 수 없습니다');
+  });
+
+  it('⭐양성대조 — oauth(재연결 가능) expired는 그대로 「다시 연결 필요」(회귀 0)', async () => {
+    stubFetch({ connections: [{ ...CONNECTION_ACTIVE, status: 'expired' }] });
+    await mount('owner');
+    const chip = container.querySelector('[data-status-chip="reauth_required"]');
+    expect(chip?.textContent).toBe(koMessages.channelConnect.channelStatusReauthRequired);
+  });
+});
+
 describe('OrganizationChannelsPage — 앱 자격(AC2, story #3376)', () => {
   // story #3743 CHANGES — AppCredentialsCard는 이제 펼친 상세 안에만 있다. connections=[]
   // +effectiveSource!=='none'이면 다음 발은 「연결하기」라 카드는 ⋯의 「{channel} 앱 자격」

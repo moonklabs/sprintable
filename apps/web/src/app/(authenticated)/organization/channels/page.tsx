@@ -471,6 +471,21 @@ function providerErrorChipLabel(lastErrorCode: string | null | undefined, t: Ret
   return undefined;
 }
 
+// story #3816(Phase3·3-6, 페드루 PO 지적 2026-09-12·배포 81 라이브 회차 유나 판정
+// CHANGES 1) — sandbox(credential_kind==='none')는 재연결 경로가 구조적으로 없다
+// (위 ReauthNote 옆 분기 참고 — 버튼 대신 「테스트용 연결은 다시 연결할 수
+// 없습니다」 문장). 그런데 칩은 여전히 공용 라벨 channelStatusReauthRequired
+// (「다시 연결 필요」)를 냈다 — 같은 행 안에서 칩(필요)·문장(불가)이 반대 뜻을
+// 말하는 모순(4222 축 재현: 칩은 실 행동/상태를 따라야 한다). 판별축은 status
+// 문자열이 아니라 "재연결 액션이 그려지는가"와 같은 조건(credential_kind===
+// 'none') — 재연결 가능한 연결(oauth·pasted_secret)은 회귀 0(undefined 반환 →
+// 기존 공용 라벨 그대로).
+function reauthChipLabel(
+  reason: 'expired' | 'revoked' | 'error' | undefined, credentialKind: string, t: ReturnType<typeof useTranslations>,
+): string | undefined {
+  return reason === 'expired' && credentialKind === 'none' ? t('channelStatusExpiredSandbox') : undefined;
+}
+
 function ExpiringSoonNote({
   isAutoRefreshInfo, tokenExpiresAt, t,
 }: {
@@ -581,7 +596,11 @@ function ConnectionRow({
         {showStatusChip ? (
           <ChannelStatusChip
             status={derived.status}
-            label={derived.status === 'provider_error' ? providerErrorChipLabel(conn.last_error_code, t) : undefined}
+            label={
+              derived.status === 'provider_error' ? providerErrorChipLabel(conn.last_error_code, t)
+                : derived.status === 'reauth_required' ? reauthChipLabel(derived.reauthReason, conn.credential_kind, t)
+                : undefined
+            }
           />
         ) : null}
       </div>
@@ -918,7 +937,11 @@ function ChannelSection({
               // 문구를 낸다(2개 이상이면 어느 계정 얘기인지 한 낱말로 못 줄인다 —
               // subtitle의 "지어내지 않는다" 원칙과 동형, ChannelStatusChip 제네릭
               // 폴백에 맡긴다).
-              label={channelStatus === 'provider_error' && single ? providerErrorChipLabel(single.last_error_code, t) : undefined}
+              label={
+                channelStatus === 'provider_error' && single ? providerErrorChipLabel(single.last_error_code, t)
+                  : channelStatus === 'reauth_required' && single ? reauthChipLabel(singleDerived?.reauthReason, single.credential_kind, t)
+                  : undefined
+              }
             />
           )}
           // story #3743 CHANGES Ⓓ(페드루 PO, 2026-09-09 12:41Z) — 채운 파랑은 헤더
