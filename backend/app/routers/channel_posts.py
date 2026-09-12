@@ -50,6 +50,7 @@ from app.services.channel_posts import (
     ChannelTextTooLongError,
     ChannelTokenExpiredError,
     ChannelUnpublishUnsupportedError,
+    ChannelVideoRequiredError,
     ContentRuleViolationError,
     ExternalPublishGateNotApprovedError,
     PublicationCommandNotCancellableError,
@@ -118,6 +119,7 @@ from app.services.channel_post_videos import (
 from app.services.agent_onboarding_config import resolve_locale_from_request
 from app.services.generation_budget import GenerationBudgetExceededError
 from app.services.x_publish_budget import API_USAGE_BUDGET_RULE_KEY
+from app.services.youtube_quota import YouTubeQuotaExceededError
 from app.services.i18n_catalog import t
 from app.services.member_resolver import resolve_member, resolve_member_db_verified
 
@@ -1690,6 +1692,13 @@ async def _submit_channel_post_draft_endpoint(
                 "violations": exc.violations,
             },
         ) from exc
+    except ChannelVideoRequiredError as exc:
+        # story #3815(Phase3·3-5 PR2, 페드루 PO 確定 2026-09-12) — ChannelImage
+        # RequiredError와 동형 위치·모양(영상판).
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "CHANNEL_VIDEO_REQUIRED", "message": str(exc)},
+        ) from exc
     except ChannelImageRequiredError as exc:
         # story #3536(PO 確定 2026-09-06) — 필드 완결성 422(CHANNEL_TEXT_TOO_LONG류와
         # 동형). 승인 게이트 낭비를 상신 단계에서 미리 막는다.
@@ -1859,6 +1868,11 @@ async def publish_channel_post_draft_endpoint(
     db: AsyncSession = Depends(get_db),
     verified_org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
+    # story #3815(Phase3·3-5 PR2) — YOUTUBE_QUOTA_EXCEEDED 사용자 문장을
+    # i18n_catalog로 조립하기 위한 최소 추가(다른 채널 분기는 안 씀 — meta_ads
+    # select 엔드포인트의 Header DI 관례 그대로, 라우트 경계에서만 해석).
+    locale: str | None = None,
+    accept_language: str | None = Header(None, alias="Accept-Language"),
 ) -> PublishChannelPostResponse:
     """story #f8f7cb0f·#3414 — 휴먼 전용(AC1). 발행/예약 요청 둘 다 이 엔드포인트 하나
     (블루프린트 §3 "즉시 발행=scheduled_at 없음인 같은 명령", PO 確定). 게이트가 승인한
@@ -1880,6 +1894,7 @@ async def publish_channel_post_draft_endpoint(
     없음), 일시적(transient/quota)이면 백오프 재시도, connection이면 blocked로
     넘어간다 — 사람이 모르게 방치되지 않도록 실패 응답 body에 `command_status`·
     `next_attempt_at`을 함께 낸다(화면 문구는 후속)."""
+    resolved_locale = resolve_locale_from_request(locale, accept_language)
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
 
@@ -1997,6 +2012,27 @@ async def publish_channel_post_draft_endpoint(
                 "code": budget_exceeded_code,
                 "limit_minor": exc.limit_minor, "spent_minor": exc.spent_minor,
                 "estimated_cost_minor": exc.estimated_cost_minor, "remaining_minor": exc.remaining_minor,
+            }),
+        ) from exc
+    except YouTubeQuotaExceededError as exc:
+        # story #3815(Phase3·3-5 PR2, 페드루 PO 確定 2026-09-12) — 위 GenerationBudget
+        # ExceededError와 동형 처리(사전 재검사가 provider 호출 直前에 막는다 —
+        # adapter_called=False, row는 이미 failed로 남겨진 상태 — 오케스트레이션
+        # 안에서 처리, 여기선 command 원장만 마저 채운다). 사용자 문장은
+        # i18n_catalog 경유(페드루 낱말 확定 — "quota" 낱말 배제).
+        await _record_this_attempt(approval_check="ok", adapter_called=False, result_code="YOUTUBE_QUOTA_EXCEEDED")
+        await apply_command_failure(
+            db, command, error_code="YOUTUBE_QUOTA_EXCEEDED", last_error=str(exc), now=now,
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=422,
+            detail=_with_command_state({
+                "code": "YOUTUBE_QUOTA_EXCEEDED",
+                "message": t("channel_posts.youtube_usage_exceeded", resolved_locale),
+                "limit_units": exc.limit_units, "spent_units": exc.spent_units,
+                "estimated_units": exc.estimated_units, "remaining_units": exc.remaining_units,
+                "reset_at": exc.reset_at.isoformat(),
             }),
         ) from exc
     except ChannelTextTooLongError as exc:

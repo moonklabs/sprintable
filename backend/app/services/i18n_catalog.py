@@ -395,6 +395,18 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "stibee 발행에 필요한 제목·주소록 ID·발신자 정보가 없습니다.",
         "en": "Missing subject, address book ID, or sender info required to publish to Stibee.",
     },
+    # story #3815(Phase3·3-5 PR2, 페드루 PO 낱말 확定 2026-09-12 10:46Z, CHANGES①
+    # 2026-09-12 11:34Z 정정) — 코드(YOUTUBE_QUOTA_EXCEEDED)·마커(sandbox:youtube-
+    # quota-exceeded)는 그대로. 최초엔 "내일 다시"(상대 표현)로 확定했으나, 리셋
+    # 경계가 UTC 00:00 «시각»이라 KST 사용자(UTC+9)에겐 "내일"이 실제로는 그날
+    # 09:00부터라 거짓("오늘 09시 이후"인데 "내일"이라 하면 이르게 읽힌다) — 정적
+    # 절대 시각 문장으로 교체(요청마다 계산되는 reset_at 보간 없음, 경계 자체가
+    # 고정값이라 정적 문자열로 충분·`reset_at` 필드는 여전히 응답에 실어 FE가
+    # 필요하면 참고).
+    "channel_posts.youtube_usage_exceeded": {
+        "ko": "오늘 YouTube 사용량을 다 썼습니다 — 사용량은 매일 오전 9시(한국 시간)에 초기화됩니다(플랫폼 공유 한도).",
+        "en": "Today's YouTube usage limit has been reached — it resets daily at 00:00 UTC (shared platform-wide limit).",
+    },
 }
 
 

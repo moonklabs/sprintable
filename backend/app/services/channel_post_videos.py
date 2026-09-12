@@ -420,6 +420,15 @@ async def confirm_channel_post_video_upload(
         db, org_id=org_id, work_item_id=draft.work_item_id, connection_id=draft.connection_id,
         text=latest.text, link_url=latest.link_url,
         author_member_id=member_id, author_kind=member_kind, image_sha256=composite_sha256,
+        # 발견 즉시 수정(story #3815 PR2, CHANGES② 대응 中 자체 발견) — 이 호출이
+        # text/link_url은 carry-forward하면서 channel_payload는 안 넘겨(기본 None)
+        # 새 버전마다 지워왔다. YouTube는 channel_payload(title 등)가 video_
+        # required=True와 맞물려 이 경로(영상 confirm=새 버전)를 반드시 거치므로
+        # 이 갭이 처음으로 기능을 깼다 — 다른 채널(X 스레드 channel_payload.thread·
+        # stibee subject)도 이론상 같은 결함(영상/이미지 첨부 뒤 조용히 소실)을
+        # 안고 있었을 자리(페드루 보고 — 이 PR 범위는 이 호출부 1곳만, 나머지는
+        # channel_post_images.py 3곳에 동형 패턴 존재·별도 판단 요청).
+        channel_payload=latest.channel_payload,
     )
 
     if existing_cover is not None:

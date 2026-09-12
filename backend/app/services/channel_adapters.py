@@ -125,6 +125,10 @@ class ChannelAdapterConfig:
     video_aspect_target: float = 0.0
     video_aspect_tolerance: float = 0.0
     video_codecs: tuple[str, ...] = ()
+    # story #3815(Phase3·3-5 PR2, 페드루 PO 確定 2026-09-12) — image_required와
+    # 동형 축(영상판) — YouTube는 영상 0개면 업로드 자체가 무의미하다(Reels류
+    # "영상 지원"과 다른 축: "필수"). 기본 False=기존 채널 회귀 0.
+    video_required: bool = False
     # story #3808(Phase3·3-3 PR5b-1, 페드루 PO 確定 2026-09-12) — 스레드(연속 게시)
     # 이어쓰기 세그먼트 상한(헤드=`text` 제외, `channel_payload["thread"]` 배열
     # 길이 자체의 상한). image_max_count=0과 동형 관례 — 0(기본)=이 채널은 스레드
@@ -132,6 +136,23 @@ class ChannelAdapterConfig:
     # ChannelThreadUnsupportedError). X/X Sandbox만 10(⚠️미확認 — 실 X API 자체
     # 상한 문서 재확認 대상, 지금은 제품 판단값).
     thread_max_segments: int = 0
+    # story #3815(Phase3·3-5 PR2 CHANGES②, 페드루 PO 지적 2026-09-12 11:34Z) —
+    # 컨테이너 IN_PROGRESS 폴링 상한(`channel_posts.py` 재진입 폴링, story
+    # 620beefc B3 origin). 기본 300초(5분)=기존 Meta류 그대로(회귀 0) — Meta
+    # 문서 권장 "평균 30초 대기" 기준 5분이면 충분히 죽은 컨테이너 판정. YouTube는
+    # 트랜스코딩이 5분을 예사로 넘겨(자산은 이미 업로드 완료·처리 중일 뿐) 이
+    # 상한을 그대로 쓰면 "거짓 실패"로 `external_container_id`를 지워 재시도가
+    # 같은 영상을 새로 업로드하는 사고(quota 이중 차감 포함)로 이어진다 — 채널별
+    # 값으로 뺀다(youtube/youtube_sandbox는 86400=24h로 재정의).
+    container_poll_timeout_seconds: int = 300
+    # story #3815(Phase3·3-5 PR2 CHANGES③, 페드루 PO 지적 2026-09-12 11:55Z) —
+    # 상한 초과 분기가 채널 무관하게 `external_container_id=None`으로 지워왔다
+    # (Meta는 옳다 — 죽은 컨테이너는 재활성화 안 되니 다음 시도가 완전히 새
+    # 컨테이너를 만들어야 한다). YouTube는 24h를 넘겨도(극히 드문 경우) 자산
+    # 자체는 이미 존재 — id를 지우면 사람이 AC5 재시도 버튼을 눌러도 새로
+    # 업로드(quota 1,600 재소모)하는 같은 사고가 24h 축에서 한 번 더 난다.
+    # False(기본)=기존 Meta류 그대로(회귀 0), youtube/youtube_sandbox만 True.
+    keep_container_on_poll_timeout: bool = False
 
 
 CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
@@ -588,13 +609,21 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         thread_max_segments=10,
     ),
     # story #3815(Phase3·3-5 PR1, 페드루 PO 確定 2026-09-12) — YouTube 첫 출시.
-    # PR1은 OAuth 연결만 연다(발행·업로드는 PR2, 인사이트는 후속 — insight_metrics
-    # 미선언 기본값 그대로, story #3696 가드가 요구하는 "선언=dispatch 존재" 계약을
-    # 어길 자리 자체가 없다). refresh_mode="refresh_token" 재사용은 youtube_oauth.py
-    # 상단 딱지 참고(Google은 회전하지 않지만 기존 3튜플 dispatch 계약을 그대로
-    # 만족시킨다 — 새 refresh_mode 값 발명 0). image_*/video_*/max_text_length 등
-    # 콘텐츠 필드는 PR2가 resumable 업로드를 열 때 채운다(ads_sandbox PR1과 동형
-    # 판단 — 아직 없는 능력을 미리 선언하지 않는다).
+    # refresh_mode="refresh_token" 재사용은 youtube_oauth.py 상단 딱지 참고
+    # (Google은 회전하지 않지만 기존 3튜플 dispatch 계약을 그대로 만족시킨다 —
+    # 새 refresh_mode 값 발명 0).
+    #
+    # story #3815 PR2(페드루 PO 確定 2026-09-12) — 콘텐츠 필드. `text`(기존 범용
+    # 필드)=영상 설명(description)으로 매핑(X의 head-text 관례와 동형 — FE가
+    # 이미 가진 본문 입력칸을 그대로 재사용, 새 입력칸 발명 0). title/tags/
+    # categoryId/privacyStatus 4개는 `channel_payload`(X thread·stibee subject와
+    # 같은 슬롯)로 얹는다 — description까지 channel_payload에 넣으면 기존 text
+    # 입력 경로가 무용해져 정합이 두 곳으로 갈라진다(재그라운딩 정정 — 카드 원문은
+    # "channel_payload(title·description·...)"였으나 X 선례와 어긋나 description만
+    # text로 옮김, PR 본문에 근거 명시). video_required=True(image_required와 동형
+    # 축 — 영상 0개면 업로드 자체가 무의미). max_text_length·video_max_*는
+    # ⚠️미확認(YouTube 공개 문서 재확認 대상, 지금은 보수적 제품 판단값 — 브라우저
+    # 단일 PUT 업로드 UX 한계를 감안해 대용량 영화급은 배제).
     "youtube": ChannelAdapterConfig(
         authorize_url="https://accounts.google.com/o/oauth2/v2/auth",
         token_url="https://oauth2.googleapis.com/token",
@@ -606,6 +635,21 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         display_name="YouTube",
         kind="social",
         requires_connection=True,
+        max_text_length=5000,
+        video_required=True,
+        video_max_bytes=2 * 1024 * 1024 * 1024,  # 2GiB — ⚠️미확認, 위 딱지 참고.
+        # 발견 즉시 수정(PR2 CHANGES 대응 중 자체 발견) — video_max_seconds
+        # 기본값(0.0)을 그대로 두면 channel_post_videos.py의 검증이 "재생시간
+        # > 0.0" 조건에 항상 걸려 **모든** youtube 영상 업로드가 무조건
+        # 거부됐을 것(회귀 테스트가 이 값을 실제로 요구하는 자리를 안 태워
+        # 지금까지 못 잡힘). YouTube는 12시간까지 허용(⚠️미확認 — 공개 문서
+        # 재확認 대상, 실무상 여유 있게 잡음)·아스펙트 비율은 target=0(검사
+        # 생략, YouTube는 가로/세로/정사각 전부 허용).
+        video_max_seconds=12 * 3600,
+        video_min_seconds=1.0,
+        video_codecs=("avc1", "hvc1", "hev1"),
+        container_poll_timeout_seconds=86_400,  # 24h — 페드루 PO 지적 2026-09-12 11:34Z.
+        keep_container_on_poll_timeout=True,  # CHANGES③ — 페드루 PO 지적 2026-09-12 11:55Z.
     ),
     "youtube_sandbox": ChannelAdapterConfig(
         authorize_url="https://accounts.google.com/o/oauth2/v2/auth",
@@ -619,6 +663,16 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         display_name="YouTube Sandbox",
         kind="social",
         requires_connection=True,
+        max_text_length=5000,
+        video_required=True,
+        video_max_bytes=2 * 1024 * 1024 * 1024,
+        # 발견 즉시 수정 — 위 "youtube" 항목과 동형 이유(video_max_seconds
+        # 기본값 0.0 방치 시 모든 영상 업로드 거부).
+        video_max_seconds=12 * 3600,
+        video_min_seconds=1.0,
+        video_codecs=("avc1", "hvc1", "hev1"),
+        container_poll_timeout_seconds=86_400,  # 24h — 페드루 PO 지적 2026-09-12 11:34Z.
+        keep_container_on_poll_timeout=True,  # CHANGES③ — 페드루 PO 지적 2026-09-12 11:55Z.
     ),
 }
 
@@ -813,6 +867,10 @@ _PUBLISH_CLIENT_MODULE_PATHS: dict[str, str] = {
     # 클라이언트 착지(PR2가 "이 PR 범위 밖"이라 미뤘던 자리 — wordpress/webhook의
     # 조각⑤(연결)→③b/④(발행 배선) 선례와 같은 순서, 연결·게이트가 먼저였다).
     "stibee": "app.services.stibee_publish",
+    # story #3815(Phase3·3-5 PR2, 페드루 PO 確定 2026-09-12) — PR1이 미룬 등재
+    # (git log 재확認 — X도 x_publish 등재는 PR2였다, PR1 본문 참고).
+    "youtube": "app.services.youtube_publish",
+    "youtube_sandbox": "app.services.youtube_sandbox_publish",
 }
 
 

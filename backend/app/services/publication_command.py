@@ -333,6 +333,7 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
     )
     from app.services.generation_budget import GenerationBudgetExceededError
     from app.services.x_publish_budget import API_USAGE_BUDGET_RULE_KEY
+    from app.services.youtube_quota import YouTubeQuotaExceededError
 
     error_code: str | None = None
     last_error: str | None = None
@@ -421,6 +422,18 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
             "API_USAGE_BUDGET_EXCEEDED" if exc.rule_key == API_USAGE_BUDGET_RULE_KEY
             else "GENERATION_BUDGET_EXCEEDED"
         )
+        command.last_error = str(exc)[:2000]
+        return
+    except YouTubeQuotaExceededError as exc:
+        # story #3815(Phase3·3-5 PR2, 페드루 PO 確定 2026-09-12) — 위 GenerationBudget
+        # ExceededError와 동형(adapter 이미 진입했으나 provider 호출 前 재검사가
+        # 막음 — 재시도 대상 아님, 플랫폼 전체 사용량이 하루 안엔 안 줄어든다).
+        await record_publication_attempt(
+            db, command=command, approval_check="ok", adapter_called=False,
+            started_at=attempt_started_at, finished_at=now, result_code="YOUTUBE_QUOTA_EXCEEDED",
+        )
+        command.status = STATUS_BLOCKED_UNAPPROVED
+        command.reason_code = "YOUTUBE_QUOTA_EXCEEDED"
         command.last_error = str(exc)[:2000]
         return
     except ChannelPostSealMissingError as exc:

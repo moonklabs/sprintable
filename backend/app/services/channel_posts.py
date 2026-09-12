@@ -142,6 +142,72 @@ class ChannelThreadSegmentTooLongError(ValueError):
         )
 
 
+class ChannelVideoRequiredError(ValueError):
+    """story #3815(Phase3·3-5 PR2, 페드루 PO 確定 2026-09-12) — `ChannelImageRequiredError`
+    와 동형 축(영상판). 어댑터가 video_required=True(YouTube)인데 상신하려는
+    버전에 영상이 없음 — 상신 시점에 막아 승인 게이트를 낭비하지 않는다. 새
+    사용자 문장은 영어로(story #3779 한글가드 ratchet — 신규 위반 0 원칙,
+    ChannelImageRequiredError의 한글 문구는 이 가드 도입 前 grandfather돼
+    재사용 불가)."""
+
+    def __init__(self) -> None:
+        super().__init__("This channel requires a video attachment.")
+
+
+class ChannelYouTubeMetadataError(ValueError):
+    """story #3815(Phase3·3-5 PR2) — `channel_payload`(title/tags/categoryId/
+    privacyStatus) 검증 실패. `ChannelThreadSegmentTooLongError`류와 동형 —
+    필드명+사유를 실어 어느 값이 왜 거부됐는지 사람이 바로 알 수 있게 한다."""
+
+    def __init__(self, *, field: str, reason: str) -> None:
+        self.field = field
+        self.reason = reason
+        super().__init__(f"Invalid YouTube metadata field '{field}': {reason}")
+
+
+_YOUTUBE_TITLE_MAX_LENGTH = 100  # ⚠️미확認 — YouTube 공개 문서 재확認 대상.
+_YOUTUBE_DESCRIPTION_MAX_LENGTH = 5000  # ⚠️미확認.
+_YOUTUBE_TAGS_MAX_TOTAL_LENGTH = 500  # ⚠️미확認 — 전체 태그 문자열 합산 상한(콤마 포함, 공개 문서 관례).
+_YOUTUBE_VALID_PRIVACY_STATUSES = frozenset({"private", "unlisted", "public"})
+
+
+def _validate_youtube_metadata(*, channel: str, channel_payload: dict) -> None:
+    """story #3815(Phase3·3-5 PR2, 페드루 PO 確定 2026-09-12) — `channel_payload`
+    (title 필수·tags·categoryId·privacyStatus) 검증. `_validate_thread_segments`
+    와 동형 두 호출부 패턴(저장 시점·발행 시점) — X처럼 이 함수도 채널이
+    youtube/youtube_sandbox가 아니면(다른 채널의 channel_payload는 이 함수의
+    관할 밖) 즉시 통과한다.
+
+    description은 `channel_payload`가 아니라 `text`(기존 범용 필드, X의 head-text
+    관례와 동형)로 매핑돼 있어 여기서 검증하지 않는다 — `_validate_text_length`가
+    이미 그 축을 담당(카드 재그라운딩 정정, PR 본문 참고)."""
+    if channel not in ("youtube", "youtube_sandbox"):
+        return
+    title = channel_payload.get("title")
+    if not title or not isinstance(title, str):
+        raise ChannelYouTubeMetadataError(field="title", reason="title is required and must be a non-empty string")
+    if text_char_count(title) > _YOUTUBE_TITLE_MAX_LENGTH:
+        raise ChannelYouTubeMetadataError(
+            field="title", reason=f"exceeds {_YOUTUBE_TITLE_MAX_LENGTH} characters",
+        )
+    tags = channel_payload.get("tags") or []
+    if not isinstance(tags, list) or not all(isinstance(t, str) for t in tags):
+        raise ChannelYouTubeMetadataError(field="tags", reason="must be a list of strings")
+    if sum(text_char_count(t) for t in tags) > _YOUTUBE_TAGS_MAX_TOTAL_LENGTH:
+        raise ChannelYouTubeMetadataError(
+            field="tags", reason=f"combined length exceeds {_YOUTUBE_TAGS_MAX_TOTAL_LENGTH} characters",
+        )
+    category_id = channel_payload.get("categoryId")
+    if category_id is not None and not (isinstance(category_id, str) and category_id.isdigit()):
+        raise ChannelYouTubeMetadataError(field="categoryId", reason="must be a numeric string when provided")
+    privacy_status = channel_payload.get("privacyStatus")
+    if privacy_status is not None and privacy_status not in _YOUTUBE_VALID_PRIVACY_STATUSES:
+        raise ChannelYouTubeMetadataError(
+            field="privacyStatus",
+            reason=f"must be one of {sorted(_YOUTUBE_VALID_PRIVACY_STATUSES)} when provided",
+        )
+
+
 class ChannelImageRequiredError(ValueError):
     """story #3536(PO 確定 2026-09-06) — 어댑터가 image_required=True(예: Instagram)인데
     상신하려는 버전에 이미지가 없음. 상신(submit) 시점에 막아 승인 게이트를 낭비하지
@@ -586,6 +652,10 @@ async def create_channel_post_draft_version(
     _validate_text_length(channel=connection.channel, text=text)
     if channel_payload:
         _validate_thread_segments(channel=connection.channel, thread=channel_payload.get("thread") or [])
+        # story #3815(Phase3·3-5 PR2) — youtube/youtube_sandbox가 아니면 즉시
+        # 통과(함수 자신의 채널 가드), 다른 채널의 channel_payload에 어쩌다
+        # title 등의 키가 있어도 이 함수 관할 밖.
+        _validate_youtube_metadata(channel=connection.channel, channel_payload=channel_payload)
 
     resolved_source_site_post_version_id: uuid.UUID | None = None
     if source_content_item_id is not None:
@@ -1230,6 +1300,16 @@ async def submit_channel_post_draft(
     adapter = get_channel_adapter(draft.channel)
     if adapter is not None and adapter.image_required and not target.image_sha256:
         raise ChannelImageRequiredError()
+    # story #3815(Phase3·3-5 PR2, 페드루 PO 確定 2026-09-12) — image_required와
+    # 동형(영상판). ChannelPostVersion엔 image_sha256과 달리 video_sha256 컬럼
+    # 자체가 없어(그라운딩 확認) `get_channel_post_video_for_version` 조회로
+    # 판단한다(channel_posts.py 오케스트레이션의 has_video 판정과 같은 축).
+    if adapter is not None and adapter.video_required:
+        from app.services.channel_post_videos import get_channel_post_video_for_version
+
+        video_row = await get_channel_post_video_for_version(db, version_id=target.id)
+        if video_row is None:
+            raise ChannelVideoRequiredError()
 
     # story #3471(페드루 PO 確定 2026-09-05) — submit(상신) 시점에 재검사·위반 1건
     # 이상이면 422(금지 AC=서버 거부). create/update의 lint_result 스냅샷을 다시
@@ -1574,21 +1654,33 @@ async def publish_channel_post_draft(
     image_public_urls: list[str] = []
     video_row = None
     video_public_url: str | None = None
+    from app.services.channel_post_images import public_url_for_object_path
+
     if latest.image_sha256 is not None:
-        from app.services.channel_post_images import list_channel_post_images_for_version, public_url_for_object_path
-        from app.services.channel_post_videos import get_channel_post_video_for_version
+        from app.services.channel_post_images import list_channel_post_images_for_version
 
         image_rows = await list_channel_post_images_for_version(db, version_id=latest.id)
         image_public_urls = [
             url for row in image_rows if (url := public_url_for_object_path(row.final_object_path)) is not None
         ]
-        # story #3554(Phase2, 페드루 PO 確定 2026-09-06④) — 릴스(영상). 영상 마스터
-        # 존재 여부로 REELS 경로를 가른다 — 커버는 `channel_post_images` position=0
-        # 재사용이라 위 `image_public_urls`에 커버 1장이 섞여 들어올 수 있지만, 그
-        # 경우도 "영상 있음"이 우선이라 REELS로만 나간다(아래 dispatch 참고).
-        video_row = await get_channel_post_video_for_version(db, version_id=latest.id)
-        if video_row is not None:
-            video_public_url = public_url_for_object_path(video_row.original_object_path)
+    # story #3554(Phase2, 페드루 PO 確定 2026-09-06④) — 릴스(영상). 영상 마스터
+    # 존재 여부로 REELS 경로를 가른다 — 커버는 `channel_post_images` position=0
+    # 재사용이라 위 `image_public_urls`에 커버 1장이 섞여 들어올 수 있지만, 그
+    # 경우도 "영상 있음"이 우선이라 REELS로만 나간다(아래 dispatch 참고).
+    #
+    # story #3815(Phase3·3-5 PR2, 발견 즉시 수정) — 이 조회가 원래 위
+    # `image_sha256 is not None` 블록 «안»에 있어, 커버 이미지 없이 영상만 있는
+    # 버전(YouTube — video_required=True·image_required=False, Reels류와 달리
+    # 커버가 필수가 아니다)에서는 영상 마스터가 있어도 이 조회 자체가 안 돌아
+    # `has_video`가 조용히 False로 떨어지는 잠재 결함이었다(지금까지 실제
+    # 사고가 없었던 이유는 Reels가 항상 커버=image_sha256을 동반해 이 조합이
+    # 한 번도 안 나왔을 뿐). 영상 존재 여부는 이미지 유무와 독립적으로 항상
+    # 확認한다(인덱스 조회 1건 추가 — 기존 채널은 결과가 그대로 None, 회귀 0).
+    from app.services.channel_post_videos import get_channel_post_video_for_version
+
+    video_row = await get_channel_post_video_for_version(db, version_id=latest.id)
+    if video_row is not None:
+        video_public_url = public_url_for_object_path(video_row.original_object_path)
     has_image = len(image_public_urls) > 0
     has_video = video_row is not None
     # 기존 단일-이미지 호출부(threads/facebook/sandbox 등 — 전부 image_max_count<=1이라
@@ -1639,6 +1731,9 @@ async def publish_channel_post_draft(
     # 실제 전송 문자열을 재검사해 Threads 호출(한도 조회 포함) 0건으로 fail-closed —
     # 기존 ChannelTextTooLongError를 그대로 재사용한다(max·current 둘 다 실림).
     _validate_text_length(channel=draft.channel, text=text_to_post)
+    # story #3815(Phase3·3-5 PR2) — 승인 뒤 어댑터 선언이 바뀌었을 가능성에 대한
+    # 방어(②, _validate_thread_segments와 동형 위치 — 발행 직전 재검사).
+    _validate_youtube_metadata(channel=draft.channel, channel_payload=latest.channel_payload or {})
 
     try:
         async with httpx.AsyncClient(timeout=20) as client:
@@ -1765,10 +1860,56 @@ async def publish_channel_post_draft(
                                 f"{draft.channel} 채널은 릴스(영상) 발행을 지원하지 않습니다",
                                 status_code=422,
                             )
+                        # story #3815(Phase3·3-5 PR2, 페드루 PO 確定 2026-09-12) —
+                        # stibee subject(위 else 분기)와 동형 축: channel_payload
+                        # 공유 슬롯에서 YouTube 전용 메타(title/tags/categoryId/
+                        # privacyStatus)를 뽑아 youtube/youtube_sandbox에만 넘긴다
+                        # (다른 릴스 채널의 create_reels_container 시그니처는
+                        # channel_payload 개념 자체가 없어 무변경 — kwarg를 아예
+                        # 안 보냄, image_max_count=0과 동형 "신호 없음=미지원").
+                        # quota 체크·evidence 기록은 이 파사드 함수(순수 httpx 클라
+                        # 이언트, x_publish.py와 동형 계약 — DB 접근 0) 안이 아니라
+                        # 여기 오케스트레이션에서 한다(X의 api_usage_budget 재검사가
+                        # `_publish_x_thread_draft`에 있는 것과 같은 위치 축).
+                        _reels_extra_kwargs = {}
+                        if draft.channel in ("youtube", "youtube_sandbox"):
+                            _reels_extra_kwargs["channel_payload"] = latest.channel_payload or {}
+                            from app.core.config import settings as _settings
+                            from app.services.youtube_quota import (
+                                YouTubeQuotaExceededError, check_youtube_quota_or_raise,
+                            )
+                            try:
+                                await check_youtube_quota_or_raise(
+                                    db, estimated_units=_settings.youtube_quota_cost_insert_units,
+                                )
+                            except YouTubeQuotaExceededError as exc:
+                                row.status = "failed"
+                                row.error_code = "YOUTUBE_QUOTA_EXCEEDED"
+                                row.last_error = str(exc)
+                                await db.commit()
+                                raise
                         container_id = await create_reels_container(
                             client, access_token=access_token, threads_user_id=connection.account_id,
                             text=text_to_post, video_url=video_public_url, cover_url=image_public_url,
+                            **_reels_extra_kwargs,
                         )
+                        if draft.channel in ("youtube", "youtube_sandbox"):
+                            from app.core.config import settings as _settings
+                            from app.services.youtube_quota import record_youtube_quota_usage_evidence
+                            await record_youtube_quota_usage_evidence(
+                                db, org_id=org_id, work_item_id=draft.work_item_id, publication_id=row.id,
+                                event="insert", units=_settings.youtube_quota_cost_insert_units,
+                            )
+                            # story #3815(PR2, 페드루 PO 決定②) — youtube_publish.py/
+                            # youtube_sandbox_publish.py의 videos.insert 호출과 같은
+                            # 판정을 여기서 다시 계산(단일 정본 youtube_privacy.py
+                            # 재사용 — publish-client가 실제로 실은 값과 이 행에
+                            # 못박는 값이 절대 갈라지지 않는다).
+                            from app.services.youtube_privacy import resolve_youtube_privacy_lock
+                            _, row.privacy_locked = resolve_youtube_privacy_lock(
+                                requested_privacy_status=(latest.channel_payload or {}).get("privacyStatus"),
+                                text=text_to_post,
+                            )
                     elif len(image_public_urls) > 1:
                         # story #3550(Phase2, PO 確定 ④) — 캐러셀(2장 이상)은 별도
                         # 함수(instagram_publish.py::create_carousel_container류) —
@@ -1895,17 +2036,50 @@ async def publish_channel_post_draft(
                     # 분기(pending, +30초)로만 계속 재큐잉돼 진짜 무한루프가 된다(워커가
                     # 절대 dead_letter로 못 빠짐). row.created_at은 이 행이 재사용될 뿐
                     # 재생성 안 되므로 "최초 컨테이너 생성 시각"의 신뢰할 수 있는 근사치.
+                    #
+                    # story #3815(Phase3·3-5 PR2 CHANGES②, 페드루 PO 지적 2026-09-12
+                    # 11:34Z) — 상한을 채널 고정 5분에서 어댑터 값(`container_poll_
+                    # timeout_seconds`)으로 뺀다. YouTube 트랜스코딩은 5분을 예사로
+                    # 넘겨(자산은 이미 업로드 完·처리 중일 뿐) 고정 5분을 그대로 쓰면
+                    # "거짓 실패"로 external_container_id를 지워 재시도가 같은 영상을
+                    # 새로 업로드하는 사고(quota 이중 차감 포함)로 이어진다 — 어댑터가
+                    # youtube/youtube_sandbox엔 86400(24h)을 선언, 그 외 채널은 기존
+                    # 기본값 300(5분) 그대로라 회귀 0.
+                    _poll_timeout_adapter = get_channel_adapter(draft.channel)
+                    _poll_timeout_seconds = (
+                        _poll_timeout_adapter.container_poll_timeout_seconds if _poll_timeout_adapter else 300
+                    )
                     elapsed = datetime.now(timezone.utc) - row.created_at
-                    if elapsed > timedelta(minutes=5):
+                    if elapsed > timedelta(seconds=_poll_timeout_seconds):
                         row.status = "failed"
+                        # ⚠️적기만(페드루 明示, 이 PR 범위 밖 후속) — 이 에러 코드가
+                        # "IMAGE"라 영상(YouTube 등)에도 재사용되는 건 이름-사실 불일치.
+                        # 지금 당장 이름을 바꾸면 기존 FE/테스트가 이 문자열을 상수로
+                        # 참조하는 소비처 전수 grep이 이 PR 범위를 넘어가 후속으로 미룬다.
                         row.error_code = "CHANNEL_IMAGE_CONTAINER_FAILED"
-                        row.last_error = f"IN_PROGRESS {elapsed.total_seconds():.0f}s > 5분 상한(그라운딩 §②)"
-                        row.external_container_id = None
+                        # story #3779 한글가드 ratchet — 새 문구는 영어로(story #3815
+                        # CHANGES② 대응, 옛 5분-고정 한글 문구는 grandfather돼 있었지만
+                        # 이 값 자체가 이제 어댑터별로 달라져 새로 쓰는 문구라 재사용 불가).
+                        row.last_error = (
+                            f"IN_PROGRESS {elapsed.total_seconds():.0f}s > "
+                            f"{_poll_timeout_seconds}s per-adapter poll timeout"
+                        )
+                        # story #3815(Phase3·3-5 PR2 CHANGES③, 페드루 PO 지적 2026-09-12
+                        # 11:55Z) — Meta는 여기서 id를 지우는 게 옳다(ERROR/EXPIRED
+                        # 컨테이너처럼 죽어 재활성화 안 됨 — 아래 위 분기 §③ 참고).
+                        # YouTube는 24h를 넘겨도(극히 드문 경우) 자산 자체는 이미
+                        # 존재 — id를 지우면 사람이 AC5 재시도를 눌러도 새로 업로드
+                        # (quota 1,600 재소모)하는 같은 사고가 24h 축에서 한 번 더
+                        # 난다. `keep_container_on_poll_timeout`이 True인 채널만
+                        # id 보존(재시도=`videos.list` 재조회, insert 0) — 그 외
+                        # 채널은 기존 그대로 None(회귀 0).
+                        if _poll_timeout_adapter is None or not _poll_timeout_adapter.keep_container_on_poll_timeout:
+                            row.external_container_id = None
                         await db.commit()
                         raise ChannelImageContainerFailedError(
                             gate_id=gate.id, container_status="TIMEOUT", error_message=row.last_error,
                         )
-                    return row  # 아직 처리 中(5분 이내) — 다음 tick이 다시 폴링.
+                    return row  # 아직 처리 中(상한 이내) — 다음 tick이 다시 폴링.
                 if container_status in ("ERROR", "EXPIRED"):
                     row.status = "failed"
                     row.error_code = "CHANNEL_IMAGE_CONTAINER_FAILED"

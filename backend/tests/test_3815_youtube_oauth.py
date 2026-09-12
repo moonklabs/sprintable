@@ -329,16 +329,18 @@ async def test_youtube_sandbox_authorize_url_is_navigable_back_into_the_real_cal
         await engine.dispose()
 
 
-def test_youtube_publish_dispatch_not_registered_yet_fails_closed():
-    """⭐PR 경계 pin — stibee_sandbox_publish 선례(channel_adapters.py, 3813 PR2)와
-    동형: 실 발행 클라이언트가 아직 없는 채널은 `_PUBLISH_CLIENT_MODULE_PATHS`에
-    아예 등재하지 않는다(더미 모듈·dangling import path 0) — 기존
-    ChannelPublishDispatchNotImplementedError가 그대로 fail-closed한다."""
-    from app.services.channel_adapters import ChannelPublishDispatchNotImplementedError, get_publish_client_module
+def test_youtube_publish_dispatch_registered_in_pr2():
+    """⭐PR 경계 pin — 이 테스트는 PR1(이 파일 최초 작성) 시점엔 `_PUBLISH_CLIENT_
+    MODULE_PATHS`에 youtube/youtube_sandbox가 아예 없어(x/stibee PR1·PR2 경계
+    선례와 동형, 그때의 이 테스트는 ChannelPublishDispatchNotImplementedError를
+    기대했었다) 통과했지만, PR2(story #3815, 이 카드)가 실 발행 파사드(youtube_
+    publish.py/youtube_sandbox_publish.py)를 만들며 등재했으므로 뒤집혔다(옛
+    fail-closed pin은 이제 stale — 새 pin으로 교체, 삭제하지 않고 갱신해 "이
+    시점 이후 등재가 빠지면" 회귀를 잡는다)."""
+    from app.services.channel_adapters import get_publish_client_module
 
-    for channel in ("youtube", "youtube_sandbox"):
-        with pytest.raises(ChannelPublishDispatchNotImplementedError):
-            get_publish_client_module(channel)
+    assert get_publish_client_module("youtube") is not None
+    assert get_publish_client_module("youtube_sandbox") is not None
 
 
 # ─── ④ 실DB 통합 — cron 배선이 비회전 refresh도 그대로 태우는지 ────────────────
