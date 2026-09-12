@@ -472,3 +472,178 @@ async def test_thread_publish_retry_budget_check_uses_remaining_count_not_full_n
         await engine.dispose()
 
 
+
+
+# ─── PR5b-2 그라운딩 — thread_max_segments 연결 응답 노출 ──────────────────────
+
+@pytest.mark.anyio
+async def test_channel_connection_response_exposes_thread_max_segments_for_x():
+    """story #3808(PR5b-2, 페드루 PO 確定 2026-09-12) — image_max_count와 동형
+    관례로 어댑터 선언이 코드 변경 0으로 연결 응답에 자동 노출돼야 한다(FE가
+    「스레드 이어쓰기」 목록 UI 노출 여부를 이 값으로 판단, 채널 이름 하드코딩
+    금지)."""
+    from tests.test_3471_org_content_rules_lint import _client_for, _setup_org_scoped_app
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            owner_id = await _seed_human(s, org_id)
+            from app.services.channel_connection import upsert_channel_connection
+            await upsert_channel_connection(
+                s, org_id=org_id, channel="x_sandbox", account_id="x-sandbox-thread-cap-1",
+                account_label="cap_user", credential_kind="oauth",
+                access_token="sandbox-x-access:app-1", refresh_token="sandbox-x-refresh:app-1:g0",
+                token_expires_at=datetime.now(timezone.utc), refresh_mode="refresh_token",
+                scopes=["tweet.read", "tweet.write", "offline.access"], connected_by=owner_id,
+            )
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+        try:
+            async with _client_for(app) as client:
+                r = await client.get(f"/api/v2/organizations/{org_id}/channel-connections")
+            assert r.status_code == 200, r.text
+            row = r.json()[0]
+            assert row["thread_max_segments"] == 10
+        finally:
+            app.dependency_overrides.clear()
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_channel_connection_response_thread_max_segments_zero_for_unsupported_channel():
+    """양성대조 — 스레드 이어쓰기 미선언 채널(threads)은 0(미지원, image_max_count=0과
+    동형 관례 — null이 아니다)."""
+    from tests.test_3471_org_content_rules_lint import _client_for, _setup_org_scoped_app
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            owner_id = await _seed_human(s, org_id)
+            from app.services.channel_connection import upsert_channel_connection
+            await upsert_channel_connection(
+                s, org_id=org_id, channel="threads", account_id="threads-1",
+                account_label="threads_user", credential_kind="oauth",
+                access_token="plain-access-token", refresh_token=None, token_expires_at=None,
+                refresh_mode="reissue_from_access_token", scopes=[], connected_by=owner_id,
+            )
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+        try:
+            async with _client_for(app) as client:
+                r = await client.get(f"/api/v2/organizations/{org_id}/channel-connections")
+            assert r.status_code == 200, r.text
+            row = r.json()[0]
+            assert row["thread_max_segments"] == 0
+        finally:
+            app.dependency_overrides.clear()
+    finally:
+        await engine.dispose()
+
+
+# ─── PR5b-2 — thread_segments 배열 노출(부분 실패 상태) ────────────────────────
+
+@pytest.mark.anyio
+async def test_draft_detail_exposes_thread_segments_array_for_n3_all_published():
+    """story #3808(PR5b-2, 페드루 PO 確定 2026-09-12) — N=3 전부 발행 성공하면
+    thread_segments 배열이 sequence 1..3 전부(published)를 담고, 기존 단일값
+    4필드(publication_status 등)는 헤드(seq=1) 값 그대로(하위호환)."""
+    from tests.test_3471_org_content_rules_lint import _client_for, _setup_org_scoped_app
+    from app.main import app
+    from app.services.channel_posts import publish_channel_post_draft
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, owner_id, draft_id, gate_id, version = await _seed_ready_thread_draft(
+                s, thread=["세그먼트 2", "세그먼트 3"],
+            )
+            head_row = await publish_channel_post_draft(
+                s, org_id=org_id, draft_id=draft_id, published_by_member_id=owner_id,
+            )
+            assert head_row.status == "published"
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+        try:
+            async with _client_for(app) as client:
+                r = await client.get(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}")
+            assert r.status_code == 200, r.text
+            body = r.json()
+            segments = body["thread_segments"]
+            assert segments is not None
+            assert [seg["sequence"] for seg in segments] == [1, 2, 3]
+            assert all(seg["status"] == "published" for seg in segments)
+            assert body["publication_status"] == "published", "기존 단일값은 헤드 그대로(하위호환)"
+        finally:
+            app.dependency_overrides.clear()
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_draft_detail_exposes_thread_segments_array_for_partial_failure():
+    """k=2에서 실패하면 thread_segments가 [seq1=published, seq2=failed]만 담고
+    3번째(시도 자체를 안 함)는 배열에 없다(지어내지 않는다)."""
+    from tests.test_3471_org_content_rules_lint import _client_for, _setup_org_scoped_app
+    from app.main import app
+    from app.services.channel_posts import ChannelRateLimitedError, publish_channel_post_draft
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, owner_id, draft_id, gate_id, version = await _seed_ready_thread_draft(
+                s, thread=["[sandbox:429] 실패 유발", "세그먼트 3"],
+            )
+            with pytest.raises(ChannelRateLimitedError):
+                await publish_channel_post_draft(
+                    s, org_id=org_id, draft_id=draft_id, published_by_member_id=owner_id,
+                )
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+        try:
+            async with _client_for(app) as client:
+                r = await client.get(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}")
+            assert r.status_code == 200, r.text
+            body = r.json()
+            segments = body["thread_segments"]
+            assert [seg["sequence"] for seg in segments] == [1, 2]
+            assert segments[0]["status"] == "published"
+            assert segments[1]["status"] == "failed"
+            assert segments[1]["error_code"] == "CHANNEL_RATE_LIMITED"
+        finally:
+            app.dependency_overrides.clear()
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_draft_detail_thread_segments_null_for_non_thread_draft():
+    """양성대조 — 스레드가 아닌(channel_payload.thread 없는) 단일 발행은
+    thread_segments가 null(빈 배열 아님)."""
+    from tests.test_3471_org_content_rules_lint import _client_for, _setup_org_scoped_app
+    from app.main import app
+    from app.services.channel_posts import publish_channel_post_draft
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, owner_id, draft_id, gate_id, version = await _seed_ready_thread_draft(s, thread=[])
+            row = await publish_channel_post_draft(
+                s, org_id=org_id, draft_id=draft_id, published_by_member_id=owner_id,
+            )
+            assert row.status == "published"
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+        try:
+            async with _client_for(app) as client:
+                r = await client.get(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}")
+            assert r.status_code == 200, r.text
+            assert r.json()["thread_segments"] is None
+        finally:
+            app.dependency_overrides.clear()
+    finally:
+        await engine.dispose()

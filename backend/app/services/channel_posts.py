@@ -846,7 +846,7 @@ async def list_channel_post_drafts(
     tuple[
         ChannelPostDraft, ChannelPostVersion, ChannelPostVersion,
         Gate | None, ChannelPublication | None, ChannelPublication | None, str | None,
-        PublicationCommand | None, ChannelPostImage | None,
+        PublicationCommand | None, ChannelPostImage | None, list[ChannelPublication],
     ]
 ]:
     """site_posts.list_site_post_drafts와 동형(latest+origin 버전 조인, "최신"은 최신
@@ -883,11 +883,23 @@ async def list_channel_post_drafts(
       "이 게이트의 아무 행이나≠이 게이트의 최신 행").
 
     반환: (draft, latest_version, origin_version, gate, published_publication,
-    latest_version_publication, published_body_sha256, latest_command, latest_image) —
+    latest_version_publication, published_body_sha256, latest_command, latest_image,
+    latest_version_thread_publications) —
     gate·publication·command·image 계열은 없으면 None(지어내지 않는다, "모른다≠다르다").
     `latest_image`(9번째 원소, story 620beefc)는 **최신 버전**에 붙은 `ChannelPostImage`
     (없으면 None) — 썸네일·§17-14 배지(원본/파생본 width·bytes) 출처, latest_command와
     같은 "최신 버전/게이트 기준" 원칙.
+
+    `latest_version_thread_publications`(10번째 원소, story #3808 PR5b-2, 페드루 PO
+    確定 2026-09-12) — **최신 버전**의 publication 행 **전부**(sequence 오름차순,
+    배치③이 이미 gate_id로 전 행을 긁어 오므로 신규 쿼리 0 — `latest_version_pub_by_gate`
+    가 "그중 하나"만 남기는 것과 달리 이건 그룹 전체를 보존한다). X 스레드(N≥2)의
+    부분 실패(1..k-1 published·k failed·k+1..N은 행 자체가 없음)를 화면이 그리려면
+    단일값(`latest_version_pub_by_gate`)로는 "몇 번째에서 멈췄나"를 못 담는다 — 기존
+    단일값 4필드(publication_status·error_code·published_at·permalink·external_id)는
+    무변(하위호환, 헤드=sequence 1 값을 그대로 씀). 세그먼트가 1개 이하(스레드 아님)면
+    라우터가 이 배열을 null로 접는다(신호 축소 — "스레드"라는 사실 자체가 없으면
+    빈 배열보다 null이 더 정직하다).
 
     story #3734 — `include_deleted=False`(기본)면 보관된(`deleted_at` not null) 초안을
     결과에서 뺀다. `status`(draft|withdrawn)와 독립 축 — withdrawn이면서 보관 안 됐거나,
@@ -1011,16 +1023,26 @@ async def list_channel_post_drafts(
     }
 
     latest_version_pub_by_gate: dict[uuid.UUID, ChannelPublication] = {}
+    latest_version_thread_pubs_by_gate: dict[uuid.UUID, list[ChannelPublication]] = {}
     published_pub_by_gate: dict[uuid.UUID, ChannelPublication] = {}
     published_version_ids: set[uuid.UUID] = set()
     if gate_ids:
-        # 배치 ③: 최신 버전의 publication 행(publication_status·error_code 축).
+        # 배치 ③: 최신 버전의 publication 행 — sequence 오름차순으로 받아 그룹 전체를
+        # 보존한다(story #3808 PR5b-2 — 예전엔 "아무 행이나 마지막에 덮어쓴 것"이
+        # 단일값 축이었는데, 그 순서가 sequence 오름차순이 아니면 스레드에서 헤드가
+        # 아닌 임의 세그먼트 값이 대표로 새는 잠재 결함이었다 — 이번에 명시 정렬로
+        # 고정). 첫 원소(가장 작은 sequence — 비스레드는 항상 0, 스레드는 헤드=1)가
+        # 기존 단일값 4필드의 출처(하위호환, 헤드 값 그대로) — setdefault로 그 첫
+        # 원소만 latest_version_pub_by_gate에 남긴다.
         pub_rows = (await db.execute(
-            select(ChannelPublication).where(ChannelPublication.gate_id.in_(gate_ids))
+            select(ChannelPublication)
+            .where(ChannelPublication.gate_id.in_(gate_ids))
+            .order_by(ChannelPublication.sequence.asc())
         )).scalars().all()
         for p in pub_rows:
             if latest_version_id_by_gate.get(p.gate_id) == p.version_id:
-                latest_version_pub_by_gate[p.gate_id] = p
+                latest_version_pub_by_gate.setdefault(p.gate_id, p)
+                latest_version_thread_pubs_by_gate.setdefault(p.gate_id, []).append(p)
 
         # 배치 ④: 가장 최근 published 상태(published_at·permalink·external_id 축) —
         # published_at desc로 이미 정렬돼 오므로 setdefault로 최신만 남는다.
@@ -1078,9 +1100,10 @@ async def list_channel_post_drafts(
         )
         latest_command = latest_command_by_gate.get(gate.id) if gate else None
         latest_image = image_by_version.get(latest_v.id)
+        latest_thread_pubs = latest_version_thread_pubs_by_gate.get(gate.id, []) if gate else []
         result.append((
             draft, latest_v, origin_v, gate, published_pub, latest_pub, published_body_sha256,
-            latest_command, latest_image,
+            latest_command, latest_image, latest_thread_pubs,
         ))
     return result
 

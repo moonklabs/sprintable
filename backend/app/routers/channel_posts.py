@@ -238,6 +238,18 @@ class ChannelPostVideoMeta(BaseModel):
     original_bytes: int
 
 
+class ThreadSegmentStatusView(BaseModel):
+    """story #3808(Phase3·3-3 PR5b-2, 페드루 PO 確定 2026-09-12) — X 스레드
+    (N세그먼트) 개별 행 상태. sequence=1이 헤드(기존 단일값 4필드의 출처와 동일
+    행) — k+1..N(아직 시도 안 한 세그먼트)은 배열에 아예 없다(지어내지 않는다)."""
+
+    sequence: int
+    status: str
+    external_id: str | None = None
+    permalink: str | None = None
+    error_code: str | None = None
+
+
 class ChannelPostDraftListItem(BaseModel):
     draft_id: uuid.UUID
     work_item_id: uuid.UUID
@@ -344,6 +356,12 @@ class ChannelPostDraftListItem(BaseModel):
     # 뒤집는다). true=둘 다 non-null이고 서로 다름(원문이 파생 이후 개정됨) · false=둘 다
     # non-null이고 같음 · None=하나라도 null("모른다" — 레거시 파생분).
     source_changed: bool | None = None
+    # story #3808(Phase3·3-3 PR5b-2, 페드루 PO 確定 2026-09-12) — X 스레드(N세그먼트)
+    # 부분 실패 상태. 세그먼트 2개 미만(스레드 아님)이면 null(빈 배열 아님 — "스레드"
+    # 라는 사실 자체가 없다는 신호). 있으면 sequence 오름차순, 시도 안 한 세그먼트
+    # (k+1..N)는 배열에 아예 없다. 기존 publication_status/permalink/external_id/
+    # error_code 4필드는 하위호환으로 무변(헤드=sequence 1 값 그대로).
+    thread_segments: list[ThreadSegmentStatusView] | None = None
     # story #3497 조각4(페드루 PO 決定 — 미르코 #3499 그라운딩 갭)·**story #3525 재정의
     # (2026-09-06, 페드루 PO 確定, 유나 §22-12)** — 3497 조회 API(`/publications/
     # {publication_id}/insights`)·3516 댓글 API(`/publications/{publication_id}/
@@ -1172,7 +1190,7 @@ def _to_draft_list_item(
     False(안전 쪽으로 fail, "모른다=버튼 안 보임")."""
     (
         draft, latest, origin, gate, published_pub, latest_pub, published_body_sha256,
-        latest_command, latest_image,
+        latest_command, latest_image, latest_thread_pubs,
     ) = row
     source_title: str | None = None
     source_current_site_post_version_id: uuid.UUID | None = None
@@ -1200,6 +1218,19 @@ def _to_draft_list_item(
     # 순수 가시성 축, 발행된 draft도 보관 가능 — #3291 정합).
     can_archive = requester_member_id is not None and (
         is_org_admin or str(origin.author_member_id) == str(requester_member_id)
+    )
+    # story #3808(PR5b-2, 페드루 PO 確定 2026-09-12) — 세그먼트가 2개 미만이면
+    # "스레드"라는 사실 자체가 없다 — 빈 배열이 아니라 null(신호 축소, 단일-발행
+    # 채널의 기존 화면은 이 필드를 아예 안 봐도 되게).
+    thread_segments = (
+        [
+            ThreadSegmentStatusView(
+                sequence=p.sequence, status=p.status, external_id=p.external_id,
+                permalink=p.permalink, error_code=p.error_code,
+            )
+            for p in latest_thread_pubs
+        ]
+        if len(latest_thread_pubs) >= 2 else None
     )
     command_status = latest_command.status if latest_command else None
     # story #3525 — publication_status/error_code는 의도적으로 latest_pub(현재
@@ -1260,6 +1291,7 @@ def _to_draft_list_item(
         source_site_post_version_id=draft.source_site_post_version_id,
         source_current_site_post_version_id=source_current_site_post_version_id,
         source_changed=source_changed,
+        thread_segments=thread_segments,
     )
 
 
