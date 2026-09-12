@@ -407,6 +407,16 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "오늘 YouTube 사용량을 다 썼습니다 — 사용량은 매일 오전 9시(한국 시간)에 초기화됩니다(플랫폼 공유 한도).",
         "en": "Today's YouTube usage limit has been reached — it resets daily at 00:00 UTC (shared platform-wide limit).",
     },
+    # story #3815(Phase3·3-5, 미르코 PR4 그라운딩 발견 → 페드루 PO 지적 2026-09-12
+    # 14:37Z) — `_validate_youtube_metadata`가 던지는 `ChannelYouTubeMetadataError`
+    # 를 라우터 어디서도 안 잡아 사용자에게 코드 없는 500이 나가던 실 결함. 이
+    # 문장은 4필드(title/tags/categoryId/privacyStatus) 중 어느 게 틀렸는지
+    # 구체적으로 말하지 않는다(field/reason은 detail의 별도 키로 실림, 문장 자체는
+    # 그 4필드 전체를 가리키는 안내).
+    "channel_posts.youtube_metadata_invalid": {
+        "ko": "YouTube 제목·태그·카테고리·공개 범위 값을 확인해 주세요.",
+        "en": "Check the YouTube title, tags, category, and privacy values.",
+    },
 }
 
 

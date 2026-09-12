@@ -51,6 +51,7 @@ from app.services.channel_posts import (
     ChannelTokenExpiredError,
     ChannelUnpublishUnsupportedError,
     ChannelVideoRequiredError,
+    ChannelYouTubeMetadataError,
     ContentRuleViolationError,
     ExternalPublishGateNotApprovedError,
     PublicationCommandNotCancellableError,
@@ -590,10 +591,16 @@ async def post_channel_post_draft_version(
     db: AsyncSession = Depends(get_db),
     verified_org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
+    # story #3815(Phase3·3-5, 미르코 PR4 그라운딩 발견 2026-09-12) —
+    # YOUTUBE_METADATA_INVALID 사용자 문장을 i18n_catalog로 조립하기 위한
+    # 최소 추가(publish 엔드포인트의 locale DI 관례 그대로).
+    locale: str | None = None,
+    accept_language: str | None = Header(None, alias="Accept-Language"),
 ) -> ChannelPostDraftVersionResponse:
     """AC1 — 고객 에이전트·휴먼 공용 초안 제출/수정 API. `channel`은 요청 본문에 없다 —
     `connection_id`에서 서버가 조회해 derive한다(클라이언트가 실제와 다른 channel을 주장할
     표면 자체를 없앤다, PO 정정: channel은 connection_id의 파생값이지 독립 축이 아니다)."""
+    resolved_locale = resolve_locale_from_request(locale, accept_language)
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
 
@@ -636,6 +643,19 @@ async def post_channel_post_draft_version(
             detail={
                 "code": "CHANNEL_TEXT_TOO_LONG", "message": str(exc),
                 "max_length": exc.max_length, "current_length": exc.current_length,
+            },
+        ) from exc
+    except ChannelYouTubeMetadataError as exc:
+        # story #3815(Phase3·3-5, 미르코 PR4 그라운딩 발견 → 페드루 PO 지적 2026-09-12
+        # 14:37Z) — 실 결함 처방: 이 예외가 라우터 어디서도 안 잡혀 사용자에게
+        # 코드 없는 500이 나갔다(4225 리뷰 miss). ChannelTextTooLongError와 동형
+        # 위치·모양(field/reason 추가) — 저장 시점 checkpoint.
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "YOUTUBE_METADATA_INVALID",
+                "message": t("channel_posts.youtube_metadata_invalid", resolved_locale),
+                "field": exc.field, "reason": exc.reason,
             },
         ) from exc
 
@@ -2051,6 +2071,26 @@ async def publish_channel_post_draft_endpoint(
             detail=_with_command_state({
                 "code": "CHANNEL_TEXT_TOO_LONG", "message": str(exc),
                 "max_length": exc.max_length, "current_length": exc.current_length,
+            }),
+        ) from exc
+    except ChannelYouTubeMetadataError as exc:
+        # story #3815(Phase3·3-5, 미르코 PR4 그라운딩 발견 → 페드루 PO 지적 2026-09-12
+        # 14:37Z) — 실 결함 처방(발행 시점 checkpoint, 저장 시점 checkpoint는 위
+        # post_channel_post_draft_version에 동형으로 배선). `_validate_youtube_
+        # metadata`는 channel_posts.py:1643 부근 `_validate_text_length` 直後
+        # 호출(Threads에 아무 HTTP도 안 나간 시점) — ChannelTextTooLongError와
+        # 같은 adapter_called=False 축.
+        await _record_this_attempt(approval_check="ok", adapter_called=False, result_code="YOUTUBE_METADATA_INVALID")
+        await apply_command_failure(
+            db, command, error_code="YOUTUBE_METADATA_INVALID", last_error=str(exc), now=now,
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=422,
+            detail=_with_command_state({
+                "code": "YOUTUBE_METADATA_INVALID",
+                "message": t("channel_posts.youtube_metadata_invalid", resolved_locale),
+                "field": exc.field, "reason": exc.reason,
             }),
         ) from exc
     except ChannelPostSealMissingError as exc:
