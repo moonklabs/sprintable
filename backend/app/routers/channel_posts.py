@@ -23,6 +23,7 @@ from app.services.content_rules import get_org_content_rules, lint_content
 from app.services.image_integrity import ImageIntegrityError, validate_image_bytes
 from app.services.project_auth import require_project_access
 from app.services.channel_posts import (
+    _NEWSLETTER_CHANNELS,
     ChannelConnectionAuthError,
     ChannelConnectionNotActiveError,
     ChannelConnectionRevokedError,
@@ -251,6 +252,27 @@ class ThreadSegmentStatusView(BaseModel):
     error_code: str | None = None
 
 
+class NewsletterDraftInfo(BaseModel):
+    """story #3813(Phase3·3-4 PR4, 페드루 PO 確定 2026-09-12) — 뉴스레터 채널(stibee·
+    stibee_sandbox) draft에서만 채워지는 하위 객체(그 외 채널은 이 필드 자체가
+    null — FE가 channel∈{stibee,stibee_sandbox}로 직접 분기하지 않고 «객체 있음/
+    없음»만 본다, insight_metrics의 declare-to-populate와 같은 결). segment_name/
+    send_scheduled_at은 아직 발송 요청 前이면 null(지어내지 않는다)."""
+
+    subject: str | None = None
+    segment_name: str | None = None
+    send_scheduled_at: str | None = None
+    # story #3813(Phase3·3-4 PR4, 자체발견 — 라이브 데모 실측 2026-09-12) — 위
+    # 최상위 `scheduled_at`(COALESCE)이 newsletter_send 게이트 봉인 뒤엔 발송
+    # 예정 시각만 노출해, 「캠페인 만들기 예정」 시각(external_publish 게이트
+    # 자신의 sealed_scheduled_at)이 어떤 응답 필드에도 안 남는 갭이 있었다 —
+    # 캘린더가 두 시각을 동시에 보여줘야 하는데(PO 明示) 그 원천이 사라지는
+    # 결함. 이 필드는 newsletter_send 게이트 존재 여부와 무관하게 항상 그
+    # external_publish 게이트 자신의 값을 싣는다(둘 다 있으면 두 값이 다를 수
+    # 있다 — 그게 정상, 다른 두 사건의 다른 두 시각이다).
+    campaign_scheduled_at: str | None = None
+
+
 class ChannelPostDraftListItem(BaseModel):
     draft_id: uuid.UUID
     work_item_id: uuid.UUID
@@ -401,6 +423,10 @@ class ChannelPostDraftListItem(BaseModel):
     # 관례(단건 전용·N+1 방지, 같은 video_row 재사용·추가 쿼리 0). 재진입 시 메타
     # 줄(길이·해상도·코덱·용량)이 사라지던 결함의 BE 몫 — video_row 없으면 null.
     video_meta: ChannelPostVideoMeta | None = None
+    # story #3813(Phase3·3-4 PR4, 페드루 PO 確定 2026-09-12) — 뉴스레터 채널이 아니면
+    # null(content_kind 유사 discriminator를 새로 안 만든다 — 이미 있는 `channel`
+    # 필드로 BE가 판별해 이 객체 존재 자체로 FE에 신호를 보낸다).
+    newsletter: NewsletterDraftInfo | None = None
 
 
 class ChannelPostVersionHistoryItem(BaseModel):
@@ -1191,7 +1217,7 @@ def _to_draft_list_item(
     False(안전 쪽으로 fail, "모른다=버튼 안 보임")."""
     (
         draft, latest, origin, gate, published_pub, latest_pub, published_body_sha256,
-        latest_command, latest_image, latest_thread_pubs,
+        latest_command, latest_image, latest_thread_pubs, newsletter_gate,
     ) = row
     source_title: str | None = None
     source_current_site_post_version_id: uuid.UUID | None = None
@@ -1245,6 +1271,31 @@ def _to_draft_list_item(
         if command_status == "pending" and publication_status == "container_created"
         else None
     )
+    # story #3813(Phase3·3-4 PR4, 페드루 PO 確定 2026-09-12) — 뉴스레터 채널만 이 객체를
+    # 낸다(discriminator=이미 있는 channel, content_kind류 신규 필드 0). subject는
+    # 최신 버전의 channel_payload(PR2 신설 공유 슬롯)에서, segment_name/send_scheduled_at은
+    # newsletter_send 게이트(아직 발송 요청 前이면 게이트 자체가 없어 둘 다 null)에서.
+    newsletter = None
+    if draft.channel in _NEWSLETTER_CHANNELS:
+        newsletter = NewsletterDraftInfo(
+            subject=(latest.channel_payload or {}).get("subject"),
+            segment_name=newsletter_gate.sealed_newsletter_segment_name if newsletter_gate else None,
+            send_scheduled_at=(
+                newsletter_gate.sealed_newsletter_scheduled_at.isoformat()
+                if newsletter_gate and newsletter_gate.sealed_newsletter_scheduled_at else None
+            ),
+            campaign_scheduled_at=gate.sealed_scheduled_at.isoformat() if gate and gate.sealed_scheduled_at else None,
+        )
+    # story #3813(Phase3·3-4 PR4) — 「발행」(캠페인 생성)과 「발송」이 갈리는 뉴스레터는
+    # 캘린더가 읽는 단일 scheduled_at도 갈라야 뜻이 맞는다: newsletter_send 게이트가
+    # 봉인되기 前엔 캠페인 만들기 예정(external_publish gate.sealed_scheduled_at)이
+    # 화면의 뜻이고, 봉인된 뒤엔 발송 예정(newsletter_gate.sealed_newsletter_scheduled_at)
+    # 이 그 자리를 대신한다 — 서비스층 필터 쿼리의 effective_scheduled_at(COALESCE)와
+    # 정확히 같은 우선순위(list_channel_post_drafts 그 블록 주석 참고).
+    _effective_scheduled_at = (
+        (newsletter_gate.sealed_newsletter_scheduled_at if newsletter_gate else None)
+        or (gate.sealed_scheduled_at if gate else None)
+    )
     return ChannelPostDraftListItem(
         draft_id=draft.id, work_item_id=draft.work_item_id, channel=draft.channel,
         connection_id=draft.connection_id, draft_status=draft.status, can_withdraw=can_withdraw,
@@ -1272,7 +1323,8 @@ def _to_draft_list_item(
             latest_command.dead_letter_at.isoformat()
             if latest_command and latest_command.dead_letter_at else None
         ),
-        scheduled_at=gate.sealed_scheduled_at.isoformat() if gate and gate.sealed_scheduled_at else None,
+        scheduled_at=_effective_scheduled_at.isoformat() if _effective_scheduled_at else None,
+        newsletter=newsletter,
         command_status=command_status,
         command_reason_code=latest_command.reason_code if latest_command else None,
         command_id=latest_command.id if latest_command else None,

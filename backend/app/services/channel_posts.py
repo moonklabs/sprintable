@@ -24,7 +24,8 @@ import unicodedata
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import cast, func, select
+from sqlalchemy import String as SAString
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -55,6 +56,9 @@ from app.services.site_posts import (  # noqa: F401 (재-export 편의 — 채�
 from app.services.utm import attach_utm, resolve_utm_campaign
 
 _EXTERNAL_PUBLISH_GATE_TYPE = "external_publish"
+# story #3813(Phase3·3-4 PR4, 페드루 PO 確定 2026-09-12) — 뉴스레터 발송 예정시각 축.
+_NEWSLETTER_SEND_GATE_TYPE = "newsletter_send"
+_NEWSLETTER_CHANNELS = ("stibee", "stibee_sandbox")
 
 # story 620beefc — create_channel_post_draft_version()의 image_sha256 파라미터 기본값
 # 센티널. text/link_url은 편집 때마다 클라이언트가 매번 다시 보내야 하는 필드지만(그대로
@@ -847,6 +851,7 @@ async def list_channel_post_drafts(
         ChannelPostDraft, ChannelPostVersion, ChannelPostVersion,
         Gate | None, ChannelPublication | None, ChannelPublication | None, str | None,
         PublicationCommand | None, ChannelPostImage | None, list[ChannelPublication],
+        Gate | None,
     ]
 ]:
     """site_posts.list_site_post_drafts와 동형(latest+origin 버전 조인, "최신"은 최신
@@ -884,11 +889,14 @@ async def list_channel_post_drafts(
 
     반환: (draft, latest_version, origin_version, gate, published_publication,
     latest_version_publication, published_body_sha256, latest_command, latest_image,
-    latest_version_thread_publications) —
-    gate·publication·command·image 계열은 없으면 None(지어내지 않는다, "모른다≠다르다").
-    `latest_image`(9번째 원소, story 620beefc)는 **최신 버전**에 붙은 `ChannelPostImage`
-    (없으면 None) — 썸네일·§17-14 배지(원본/파생본 width·bytes) 출처, latest_command와
-    같은 "최신 버전/게이트 기준" 원칙.
+    latest_version_thread_publications, newsletter_gate) —
+    gate·publication·command·image·newsletter_gate 계열은 없으면 None(지어내지 않는다,
+    "모른다≠다르다"). `latest_image`(9번째 원소, story 620beefc)는 **최신 버전**에 붙은
+    `ChannelPostImage`(없으면 None) — 썸네일·§17-14 배지(원본/파생본 width·bytes) 출처,
+    latest_command와 같은 "최신 버전/게이트 기준" 원칙.
+    `newsletter_gate`(11번째 원소, story #3813 PR4)는 published_publication.id를
+    scope_key로 갖는 `newsletter_send` 게이트(없으면 None — 뉴스레터가 아니거나 아직
+    발송 요청 前) — 「발송」 축(subject·segment_name·send_scheduled_at) 응답의 출처.
 
     `latest_version_thread_publications`(10번째 원소, story #3808 PR5b-2, 페드루 PO
     確定 2026-09-12) — **최신 버전**의 publication 행 **전부**(sequence 오름차순,
@@ -976,16 +984,44 @@ async def list_channel_post_drafts(
             & (filter_gate.gate_type == _EXTERNAL_PUBLISH_GATE_TYPE)
             & (filter_gate.org_id == org_id),
         )
+        # story #3813(Phase3·3-4 PR4, 페드루 PO 確定 2026-09-12) — 「발행」(캠페인 생성)과
+        # 「발송」이 갈리는 뉴스레터는 필터 축도 갈라야 한다: 봉인 前엔 캠페인 만들기 예정
+        # (filter_gate.sealed_scheduled_at)이 캘린더 뜻이지만, newsletter_send 게이트가
+        # 봉인된 뒤엔 그 발송 예정시각(sealed_newsletter_scheduled_at)이 진짜 뜻이다 —
+        # 같은 사실은 같은 낱말(scheduled_at)로 묶는다(FE가 channel로 분기해 다른 컬럼을
+        # 읽지 않는다). filter_gate가 가리키는 «가장 최근 published» publication을
+        # DISTINCT ON으로 1건만 골라(배치④ "가장 최근 published" 정의와 동형) 그
+        # publication.id(scope_key)로 newsletter_send 게이트를 아우터조인한다.
+        latest_published_pub_for_filter = (
+            select(ChannelPublication.id, ChannelPublication.gate_id)
+            .where(ChannelPublication.status == "published")
+            .distinct(ChannelPublication.gate_id)
+            .order_by(ChannelPublication.gate_id, ChannelPublication.published_at.desc())
+            .subquery()
+        )
+        newsletter_filter_gate = aliased(Gate)
+        stmt = stmt.outerjoin(
+            latest_published_pub_for_filter,
+            latest_published_pub_for_filter.c.gate_id == filter_gate.id,
+        ).outerjoin(
+            newsletter_filter_gate,
+            (newsletter_filter_gate.scope_key == cast(latest_published_pub_for_filter.c.id, SAString))
+            & (newsletter_filter_gate.gate_type == _NEWSLETTER_SEND_GATE_TYPE)
+            & (newsletter_filter_gate.org_id == org_id),
+        )
+        effective_scheduled_at = func.coalesce(
+            newsletter_filter_gate.sealed_newsletter_scheduled_at, filter_gate.sealed_scheduled_at,
+        )
         if unscheduled:
-            stmt = stmt.where(filter_gate.sealed_scheduled_at.is_(None))
+            stmt = stmt.where(effective_scheduled_at.is_(None))
         else:
             if scheduled_from is not None:
-                stmt = stmt.where(filter_gate.sealed_scheduled_at >= scheduled_from)
+                stmt = stmt.where(effective_scheduled_at >= scheduled_from)
             if scheduled_to is not None:
-                stmt = stmt.where(filter_gate.sealed_scheduled_at <= scheduled_to)
+                stmt = stmt.where(effective_scheduled_at <= scheduled_to)
         # AC2 — 필터가 활성일 때만 정렬을 예약 시각 기준으로 바꾼다(미정은 NULLS LAST
         # 뒤 created_at으로 2차 정렬). 필터 없는 기본 목록의 정렬(최근 편집순)은 안 건드린다.
-        stmt = stmt.order_by(filter_gate.sealed_scheduled_at.asc().nulls_last(), latest.created_at.desc())
+        stmt = stmt.order_by(effective_scheduled_at.asc().nulls_last(), latest.created_at.desc())
     else:
         stmt = stmt.order_by(latest.created_at.desc())
 
@@ -1078,6 +1114,24 @@ async def list_channel_post_drafts(
         for c in command_rows:
             latest_command_by_gate.setdefault(c.gate_id, c)
 
+    # 배치 ⑧(story #3813 PR4) — published_pub_by_gate가 가리키는 발행물(publication)당
+    # newsletter_send 게이트(scope_key=str(publication.id)). ④와 동일 "gate_id 목록에서
+    # 파생" 패턴 — 새 페이지 쿼리 1건 추가일 뿐(draft 수 무관, N+1 아님). 뉴스레터가 아닌
+    # 채널의 draft는 published_pub_by_gate 자체에 newsletter_send 게이트가 없어 항상 None.
+    newsletter_gate_by_publication_id: dict[uuid.UUID, Gate] = {}
+    if published_pub_by_gate:
+        publication_ids = [p.id for p in published_pub_by_gate.values()]
+        newsletter_gate_rows = (await db.execute(
+            select(Gate)
+            .where(
+                Gate.org_id == org_id, Gate.gate_type == _NEWSLETTER_SEND_GATE_TYPE,
+                Gate.scope_key.in_([str(pid) for pid in publication_ids]),
+            )
+            .order_by(Gate.created_at.desc())
+        )).scalars().all()
+        for ng in newsletter_gate_rows:
+            newsletter_gate_by_publication_id.setdefault(uuid.UUID(ng.scope_key), ng)
+
     # 배치 ⑦(story 620beefc, AC6) — 최신 버전당 첨부 이미지(있으면). version_id UNIQUE
     # (Phase1 1건/버전)라 setdefault 불요 — 단순 dict 매핑. 썸네일 URL·§17-14 배지
     # 재료(원본/최종 width·bytes)의 출처.
@@ -1101,9 +1155,12 @@ async def list_channel_post_drafts(
         latest_command = latest_command_by_gate.get(gate.id) if gate else None
         latest_image = image_by_version.get(latest_v.id)
         latest_thread_pubs = latest_version_thread_pubs_by_gate.get(gate.id, []) if gate else []
+        newsletter_gate = (
+            newsletter_gate_by_publication_id.get(published_pub.id) if published_pub else None
+        )
         result.append((
             draft, latest_v, origin_v, gate, published_pub, latest_pub, published_body_sha256,
-            latest_command, latest_image, latest_thread_pubs,
+            latest_command, latest_image, latest_thread_pubs, newsletter_gate,
         ))
     return result
 

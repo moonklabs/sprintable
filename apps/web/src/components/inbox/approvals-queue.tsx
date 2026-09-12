@@ -14,6 +14,7 @@ import { GateUndoButton, UNDO_WINDOW_MS } from '@/components/cage/gate-undo-butt
 import { GateDiscussDialog } from '@/components/cage/gate-discuss-dialog';
 import { GateSignatureApproval } from '@/components/cage/gate-signature-approval';
 import { gateTypeLabel } from '@/lib/gate-type-label';
+import { gateApproveLabelKey, sigApproveAndSignLabelKey } from '@/lib/newsletter-gate-approve-label';
 import { adsBoostObjectiveLabel } from '@/lib/ads-boost-objective-label';
 import { formatMinorCurrency, type GenerationBudgetCurrency } from '@/components/content/generation-budget-indicator';
 import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
@@ -697,7 +698,10 @@ export function ApprovalsQueue() {
         // 둘 다 비활성.
         const isResubmitWaiting = gate.reapproval_required === true;
         const disabled = resolvingIds.has(gate.id) || isResubmitWaiting;
-        const primaryLabel = isSigFlow ? t('sigApproveAndSign') : t('gateApprove');
+        // story #3813(Phase3·3-4 PR4, 페드루 PO CHANGES 2026-09-12) — 같은 판별을
+        // gates/[id]/page.tsx·gate-signature-approval.tsx와 공유(newsletter-gate-
+        // approve-label.ts 한 곳).
+        const primaryLabel = isSigFlow ? t(sigApproveAndSignLabelKey(gate)) : t(gateApproveLabelKey(gate));
         const primaryOnClick = () => {
           if (isSigFlow) setSignatureTargetId(gate.id);
           // story #3113(AC3) — 선택안을 note에 실어 resolution_note로 영구 기록한다(BE 신규

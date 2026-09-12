@@ -485,6 +485,86 @@ describe('GateEvidence — 레시피 approve 게이트 승인 대상 실물 렌�
     expect(container.textContent).not.toContain(koMessages.cage.adsBoostObjectiveLabel);
   });
 
+  // story #3813(Phase3·3-4 PR4, 페드루 PO 確定 2026-09-12) — newsletter_send 봉인값
+  // (세그먼트·발송 예정)+어댑터 조회값(예상 수신) 렌더 — ads_boost 블록과 동형 검증.
+  it('⭐newsletter_send 게이트의 제목·세그먼트·발송 예정·예상 수신이 실제로 DOM에 나타난다', async () => {
+    const gate = recipeApprovalGate(
+      {},
+      {
+        gate_type: 'newsletter_send',
+        sealed_newsletter_segment_name: 'VIP 세그먼트',
+        sealed_newsletter_scheduled_at: '2026-09-19T00:00:00Z',
+        estimated_recipient_count: 4_200,
+        newsletter_subject: '9월 소식지',
+      },
+    );
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    // 페드루 PO CHANGES(2026-09-12, 라이브 캡처 실측) — 제목이 세그먼트·시각·수신수보다
+    // 먼저 서야 「무엇을」 보내는지부터 본다.
+    expect(container.textContent).toContain(koMessages.cage.newsletterSubjectLabel);
+    expect(container.textContent).toContain('9월 소식지');
+    expect(container.textContent).toContain(koMessages.cage.newsletterSegmentLabel);
+    expect(container.textContent).toContain('VIP 세그먼트');
+    expect(container.textContent).toContain(koMessages.cage.newsletterSendScheduleLabel);
+    expect(container.textContent).toContain(koMessages.cage.newsletterEstimatedRecipientLabel);
+    // 페드루 PO 스티어(2026-09-12) — 원시 숫자가 아니라 천단위 구분+단위("4,200명").
+    expect(container.textContent).toContain('4,200명');
+    expect(container.textContent).not.toContain('4200');
+  });
+
+  it('newsletter_subject가 null이면(조회 실패 등) 「제목 미확인」으로 뜬다(지어내지 않음)', async () => {
+    const gate = recipeApprovalGate(
+      {},
+      {
+        gate_type: 'newsletter_send', sealed_newsletter_segment_name: '전체 구독자',
+        sealed_newsletter_scheduled_at: '2026-09-19T00:00:00Z', estimated_recipient_count: 4_200,
+        newsletter_subject: null,
+      },
+    );
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(container.textContent).toContain(koMessages.cage.newsletterSubjectLabel);
+    expect(container.textContent).toContain(koMessages.cage.newsletterSubjectUnknown);
+  });
+
+  it('예상 수신 조회가 실패해 estimated_recipient_count가 null이면(실 stibee·조회실패) 「미확인」으로 뜬다(지어내지 않음)', async () => {
+    const gate = recipeApprovalGate(
+      {},
+      {
+        gate_type: 'newsletter_send',
+        sealed_newsletter_segment_name: '전체 구독자',
+        sealed_newsletter_scheduled_at: null,
+        estimated_recipient_count: null,
+      },
+    );
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(container.textContent).toContain(koMessages.cage.newsletterEstimatedRecipientLabel);
+    expect(container.textContent).toContain(koMessages.cage.newsletterRecipientUnknown);
+    expect(container.textContent).not.toContain(koMessages.cage.newsletterSendScheduleLabel);
+  });
+
+  it('newsletter_send가 아닌 gate_type은 세그먼트·발송 예정 라벨 자체를 그리지 않는다(지어내지 않음)', async () => {
+    const gate = recipeApprovalGate({ channel: 'threads', stage: 'approve' });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(container.textContent).not.toContain(koMessages.cage.newsletterSegmentLabel);
+    expect(container.textContent).not.toContain(koMessages.cage.newsletterSendScheduleLabel);
+  });
+
   // story #3367(3자기점검, 페드루 지적 2026-09-10) — AC7("마지막 수정 주체·목적지").
   describe('마지막 수정 주체·목적지(story #3367 AC7)', () => {
     it('⭐destination=null(hosted_site)·latest_author_kind=human — 「마지막 수정 주체 · 휴먼」·「목적지 · 호스팅 블로그」가 뜬다', async () => {

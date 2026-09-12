@@ -6,6 +6,7 @@ import { CheckCircle, Pencil } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { GateEvidence } from '@/components/cage/gate-evidence';
 import type { GateItem } from '@/components/kanban/types';
+import { sigApproveAndSignLabelKey } from '@/lib/newsletter-gate-approve-label';
 
 /**
  * story #1954(P1a-S4) — 고위험 게이트 서명 플로우. AC: "근거 열람+사유 없인 [승인하고 서명] 비활성".
@@ -42,6 +43,11 @@ export function GateSignatureApproval({
   compact?: boolean;
 }) {
   const t = useTranslations('cage');
+  // story #3813(Phase3·3-4 PR4, 페드루 PO CHANGES 2026-09-12, 라이브 캡처 실측) — 이
+  // 버튼이 사람이 실제로 누르는 primary(고위험 게이트는 이 서명 플로우가 뜬다,
+  // gates/[id]/page.tsx의 평문 버튼은 저위험 전용) — 처음 처방이 평문 버튼에만
+  // 붙어 정작 여기엔 「승인하고 서명」이 그대로 남아 있었다.
+  const approveAndSignLabelKey = sigApproveAndSignLabelKey(gate);
   const [evidenceViewed, setEvidenceViewed] = useState(false);
   const [reason, setReason] = useState('');
   const canSign = evidenceViewed && reason.trim().length > 0 && !resolving;
@@ -111,7 +117,7 @@ export function GateSignatureApproval({
             onClick={() => onApprove(reason)}
           >
             <CheckCircle className="size-4" />
-            {resolving ? '...' : t('sigApproveAndSign')}
+            {resolving ? '...' : t(approveAndSignLabelKey)}
           </Button>
         </div>
         {onDiscuss ? (

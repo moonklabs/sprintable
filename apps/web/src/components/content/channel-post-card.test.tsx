@@ -189,4 +189,79 @@ describe('ChannelPostCard — story #3422, 격자·레인 공용 렌더 단위',
     expect(el?.textContent).toContain('9월 실험 회고');
     expect(el?.querySelector('a')).toBeNull();
   });
+
+  // story #3813(Phase3·3-4 PR4, 페드루 PO 確定 2026-09-12) — 뉴스레터 채널만 이 줄을
+  // 받는다(discriminator=BE의 newsletter 객체 존재 자체, content_kind류 신규 필드 0).
+  it('⭐newsletter 객체가 있으면 「뉴스레터」 배지+subject+세그먼트명이 보인다', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ChannelPostCard
+          item={{ ...BASE_ITEM, channel: 'stibee_sandbox', newsletter: { subject: '9월 소식지', segment_name: 'VIP', send_scheduled_at: null, campaign_scheduled_at: null } }}
+          displayTimezone="Asia/Seoul"
+        />,
+      ));
+    });
+    const el = container.querySelector('[data-testid="channel-post-calendar-card-newsletter"]');
+    expect(el?.textContent).toContain(koMessages.content.channelPostsNewsletterBadge);
+    expect(el?.textContent).toContain('9월 소식지');
+    expect(el?.textContent).toContain('VIP');
+  });
+
+  it('subject·segment_name이 아직 null이면(발송 요청 前) 「미확인」 기존 낱말로 폴백한다', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ChannelPostCard
+          item={{ ...BASE_ITEM, channel: 'stibee_sandbox', newsletter: { subject: null, segment_name: null, send_scheduled_at: null, campaign_scheduled_at: null } }}
+          displayTimezone="Asia/Seoul"
+        />,
+      ));
+    });
+    const el = container.querySelector('[data-testid="channel-post-calendar-card-newsletter"]');
+    expect(el?.textContent).toContain(koMessages.content.channelPostsNewsletterSubjectUnknown);
+    expect(el?.textContent).toContain(koMessages.content.channelPostsNewsletterSegmentUnknown);
+  });
+
+  it('newsletter가 null(뉴스레터 채널 아님)이면 그 줄 자체가 안 그려진다', async () => {
+    await act(async () => {
+      root.render(wrap(<ChannelPostCard item={{ ...BASE_ITEM, channel: 'threads', newsletter: null }} displayTimezone="Asia/Seoul" />));
+    });
+    expect(container.querySelector('[data-testid="channel-post-calendar-card-newsletter"]')).toBeNull();
+  });
+
+  // story #3813(Phase3·3-4 PR4, 자체발견 — 라이브 데모 실측 2026-09-12) — 발송 봉인 뒤엔
+  // 카드 상단 시각이 발송 예정으로 바뀌어 캠페인 만들기 예정이 안 보이던 결함 처방.
+  it('⭐campaign_scheduled_at·send_scheduled_at 둘 다 있으면 두 시각 라벨이 갈려 보인다', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ChannelPostCard
+          item={{
+            ...BASE_ITEM, channel: 'stibee_sandbox',
+            newsletter: {
+              subject: '9월 소식지', segment_name: '전체 구독자',
+              campaign_scheduled_at: '2026-09-13T00:00:00Z', send_scheduled_at: '2026-09-19T00:00:00Z',
+            },
+          }}
+          displayTimezone="Asia/Seoul"
+        />,
+      ));
+    });
+    const el = container.querySelector('[data-testid="channel-post-calendar-card-newsletter-schedules"]');
+    expect(el?.textContent).toContain(koMessages.content.channelPostsNewsletterCampaignScheduleLabel);
+    expect(el?.textContent).toContain(koMessages.content.channelPostsNewsletterSendScheduleLabel);
+  });
+
+  it('send_scheduled_at이 아직 없으면(발송 요청 前) 두 시각 라벨 줄 자체가 안 그려진다(단일 시각으로 충분)', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ChannelPostCard
+          item={{
+            ...BASE_ITEM, channel: 'stibee_sandbox',
+            newsletter: { subject: '9월 소식지', segment_name: null, campaign_scheduled_at: '2026-09-13T00:00:00Z', send_scheduled_at: null },
+          }}
+          displayTimezone="Asia/Seoul"
+        />,
+      ));
+    });
+    expect(container.querySelector('[data-testid="channel-post-calendar-card-newsletter-schedules"]')).toBeNull();
+  });
 });

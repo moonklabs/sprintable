@@ -23,6 +23,7 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { EntityBacklinksSection } from '@/components/shared/entity-backlinks-section';
 import { ProofCapsule } from '@/components/proof-capsule/proof-capsule';
 import { useSseMultiplexerContext } from '@/components/realtime-provider';
+import { gateApproveLabelKey } from '@/lib/newsletter-gate-approve-label';
 
 // story #1954(P1a-S4) — Gate 3종(게이트·문서결재·머지게이트) canonical 상세. P1a·P2 공용 유일
 // per-gate 라우트(중복 빌드 봉쇄) — decision(inbox_items)은 별도 표면(오르테가군 PO 판단+
@@ -152,6 +153,11 @@ export default function GateDetailPage() {
   // 이건 BE(neutral_facts에 config diff 임베드) 또는 신규 FE 뷰어가 필요한 더 큰 스코프 —
   // 페드루군에 사이징 보고.
   const isLoopDecisionGate = gate?.gate_type === 'loop_decision';
+  // story #3813(Phase3·3-4 PR4, 페드루 PO 確定+CHANGES 2026-09-12) — 판별 로직은
+  // newsletter-gate-approve-label.ts 한 곳에만(gate-signature-approval.tsx·
+  // approvals-queue.tsx도 같은 헬퍼를 쓴다 — 처음엔 이 평문 버튼에만 붙여 정작
+  // 고위험 게이트가 타는 서명 버튼엔 안 붙는 결함이 났다, CHANGES 실측).
+  const approveButtonLabelKey = gateApproveLabelKey(gate);
   const targetLink = isDocGate && gate?.work_item_summary?.slug
     ? { href: `/docs/${gate.work_item_summary.slug}`, labelKey: 'gateDetailViewTargetDoc' as const }
     : isCanonicalizeGate && gate?.work_item_id
@@ -318,6 +324,14 @@ export default function GateDetailPage() {
                   {/* story #3565(유나 §17-24 전수, 페드루 PO 確定 2026-09-06) — 원시값
                       대신 사람 낱말(미등재는 일반 「게이트」). */}
                   <Badge variant="chip">{gateTypeLabel(tDashboard, gate.gate_type)}</Badge>
+                  {/* story #3813(Phase3·3-4 PR4, 페드루 PO CHANGES 2026-09-12, 라이브
+                      캡처 실측) — 이 상세 페이지엔 reapproval_required=true를 알리는
+                      표시가 어디에도 없었다(ads_boost 선례도 실측 결과 이 페이지엔
+                      없음 — inbox 카드(approvals-queue.tsx)에만 있었다, 실측으로
+                      정정). 게이트 종류 무관 공용 칩 하나로 처방. */}
+                  {gate.reapproval_required ? (
+                    <Badge variant="warning">{t('gateReapprovalRequiredChip')}</Badge>
+                  ) : null}
                 </div>
                 {decisionFacts ? (
                   <p className="text-xs text-muted-foreground">#{gate.work_item_id.slice(0, 8)}</p>
@@ -488,7 +502,7 @@ export default function GateDetailPage() {
                         onClick={() => void transition('approved', requiresOptionChoice ? t('decisionSelectedNote', { option: selectedOption ?? '' }) : undefined)}
                       >
                         <CheckCircle className="size-4" />
-                        {resolving ? '...' : t('gateApprove')}
+                        {resolving ? '...' : t(approveButtonLabelKey)}
                       </Button>
                     </div>
                     {requiresOptionChoice && !selectedOption ? (

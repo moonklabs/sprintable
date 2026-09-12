@@ -19,6 +19,17 @@ class StibeeSandboxSendError(Exception):
 _FIXED_RECIPIENT_COUNT = 4_200
 
 
+async def describe_segment(*, segment_name: str) -> int:
+    """story #3813(Phase3·3-4 PR4, 페드루 PO 確定 2026-09-12) — 승인 카드가 「이
+    세그먼트 N명에게 발송」을 보여주려면 발송 前(=승인 시점)에도 예상 수신수가
+    있어야 한다. `send_campaign`의 실 수신수(발송 뒤 결과값)와는 다른 축·다른
+    낱말(「예상 수신」 vs 「전달」) — 같은 상수를 재사용하지만 호출 위치·뜻이
+    다르므로 값을 공유 상수로만 묶고 함수는 분리한다(호출자가 뒤섞어 부르는
+    실수를 이름으로 막는다). segment_name은 자유 문자열(세그먼트 크기가 실제로
+    그 이름에 좌우되지 않는 sandbox 특성 그대로, send_campaign과 동형)."""
+    return _FIXED_RECIPIENT_COUNT
+
+
 async def send_campaign(*, campaign_id: str, segment_name: str) -> dict:
     """마커 캐리어 — 세그먼트명(자유 문자열, 사람이 입력)에 마커가 있으면 발송
     실패를 흉내낸다(ads_sandbox_campaign.py의 objective 마커 캐리어와 동형 결정 —

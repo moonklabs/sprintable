@@ -216,6 +216,17 @@ interface RecipeApprovalFacts {
   adsStartsAt: string | null;
   adsEndsAt: string | null;
   adsObjective: string | null;
+  // story #3813(Phase3·3-4 PR4, 페드루 PO 確定 2026-09-12) — newsletter_send 전용
+  // sealing(adsBudgetMinor 등과 동일 선례, 다른 gate_type은 전부 null).
+  // estimatedRecipientCount는 봉인값이 아니다(어댑터 조회, 위 GateItem 주석 참고) —
+  // 그래도 승인 카드가 「이 세그먼트 N명에게 발송」을 보여줄 유일한 자리라 여기 싣는다.
+  newsletterSegmentName: string | null;
+  newsletterSendScheduledAt: string | null;
+  newsletterEstimatedRecipientCount: number | null;
+  // story #3813(Phase3·3-4 PR4, 페드루 PO CHANGES 2026-09-12, 라이브 캡처 실측) —
+  // 「무엇을」 보내는지 없이 승인하던 결함. estimatedRecipientCount와 동형(봉인값
+  // 아님, 어댑터/버전 조회).
+  newsletterSubject: string | null;
 }
 
 function recipeApprovalFacts(gate: GateItem): RecipeApprovalFacts | null {
@@ -265,11 +276,17 @@ function recipeApprovalFacts(gate: GateItem): RecipeApprovalFacts | null {
     adsStartsAt: realString(gate.sealed_ads_starts_at),
     adsEndsAt: realString(gate.sealed_ads_ends_at),
     adsObjective: realString(gate.sealed_ads_objective),
+    newsletterSegmentName: realString(gate.sealed_newsletter_segment_name),
+    newsletterSendScheduledAt: realString(gate.sealed_newsletter_scheduled_at),
+    newsletterEstimatedRecipientCount:
+      typeof gate.estimated_recipient_count === 'number' ? gate.estimated_recipient_count : null,
+    newsletterSubject: realString(gate.newsletter_subject),
   };
   const hasAny = isCommentReply ||
     facts.workItemRef || facts.draftDocRef || facts.draftDocSummary || facts.channel || facts.stage ||
     facts.contentBody || facts.contentVersion !== null || facts.contentSha256 ||
-    facts.sealedDocRef || facts.sealedDocBodySha256 || facts.adsBudgetMinor !== null;
+    facts.sealedDocRef || facts.sealedDocBodySha256 || facts.adsBudgetMinor !== null ||
+    facts.newsletterSegmentName !== null || facts.newsletterSendScheduledAt !== null || facts.newsletterSubject !== null;
   return hasAny ? facts : null;
 }
 
@@ -676,6 +693,50 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
               <span className="text-foreground">{adsBoostObjectiveLabel(facts.adsObjective, tContent)}</span>
             </p>
           ) : null}
+        </div>
+      ) : null}
+      {/* story #3813(Phase3·3-4 PR4, 페드루 PO 確定 2026-09-12) — newsletter_send 전용
+          sealing. ads_boost 블록과 동일 선례 — 이 gate_type이 아니면 두 필드 다 null이라
+          블록 자체가 안 그려진다. 「예상 수신」은 봉인값이 아니라 어댑터 조회(위 facts
+          타입 주석) — null이면 지어내지 않고 「미확인」. */}
+      {facts.newsletterSegmentName !== null || facts.newsletterSendScheduledAt !== null || facts.newsletterSubject !== null ? (
+        <div className="space-y-0.5">
+          {/* 페드루 PO CHANGES(2026-09-12, 라이브 캡처 실측) — 「무엇을」 보내는지가
+              세그먼트·시각·수신수보다 먼저 서야 사람이 승인 전에 그것부터 본다. */}
+          <p>
+            <span className="text-muted-foreground">{t('newsletterSubjectLabel')} · </span>
+            <span className="text-foreground font-medium">
+              {facts.newsletterSubject ?? t('newsletterSubjectUnknown')}
+            </span>
+          </p>
+          {facts.newsletterSegmentName ? (
+            <p>
+              <span className="text-muted-foreground">{t('newsletterSegmentLabel')} · </span>
+              <span className="text-foreground font-medium">{facts.newsletterSegmentName}</span>
+            </p>
+          ) : null}
+          {facts.newsletterSendScheduledAt ? (
+            <p>
+              <span className="text-muted-foreground">{t('newsletterSendScheduleLabel')} · </span>
+              <span className="text-foreground">{formatScheduledAt(facts.newsletterSendScheduledAt, displayTimezone).display}</span>
+            </p>
+          ) : null}
+          <p>
+            <span className="text-muted-foreground">{t('newsletterEstimatedRecipientLabel')} · </span>
+            <span className="text-foreground font-medium">
+              {facts.newsletterEstimatedRecipientCount !== null
+                ? t('newsletterEstimatedRecipientCount', {
+                    // 페드루 PO CHANGES(2026-09-12, CI 실측) — 숫자에 붙는 로케일
+                    // 메서드는 메서드명만으로 날짜 호출과 구분이 안 돼 verify-no-date-
+                    // tolocalestring 가드(story #3493)에 걸린다(가드는 주석 문자열도
+                    // 그대로 grep한다, 이 주석 자체가 그 예시였다 — 재발 방지로 그
+                    // 메서드명을 여기 다시 안 적는다). formatMinorCurrency와 동일
+                    // 정본(Intl.NumberFormat 직접)으로 정정.
+                    count: new Intl.NumberFormat(locale).format(facts.newsletterEstimatedRecipientCount),
+                  })
+                : t('newsletterRecipientUnknown')}
+            </span>
+          </p>
         </div>
       ) : null}
       {facts.stage ? (
