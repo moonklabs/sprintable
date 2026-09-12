@@ -2131,7 +2131,7 @@
     "appCredentialsSaveFailed": "Couldn't save. Please try again in a moment.",
     "channelConnectErrorWordpressFieldsRequired": "Please fill in all required fields (site URL, username, app password).",
     "channelConnectErrorWebhookFieldsRequired": "Please fill in all required fields (target URL, secret).",
-    "channelConnectErrorStibeeFieldsRequired": "Enter both your Stibee API key and address book ID.",
+    "channelConnectErrorStibeeFieldsRequired": "Enter your Stibee API key, address book ID, sender email, and sender name.",
     "channelConnectErrorStibeeApiKeyInvalid": "Your API key isn't valid — reissue it from your Stibee settings.",
     "channelConnectErrorStibeeAuthCheckUnavailable": "Couldn't reach Stibee — please try again in a moment.",
     "channelConnectErrorDestinationInsecure": "This address isn't safe to connect to — please use a different address.",
