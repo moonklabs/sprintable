@@ -68,6 +68,11 @@ class ChannelPublication(Base):
     # 벗긴 media_id로 재조회해 200을 받는다(sandbox 어댑터 자체는 결정적·상태 없음 그대로,
     # 상태는 이 발행물 행에만 산다).
     sandbox_expired_once: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    # story #3815(Phase3·3-5 PR2, 페드루 PO 確定 2026-09-12) — youtube/youtube_
+    # sandbox 감사 미완 강제 비공개(PO 決定②). status는 "published" 그대로,
+    # 이 열이 그 밖의 별개 사실(FE "게시됨(비공개)" 라벨 조합용). 다른 채널은
+    # 절대 안 건드려 server_default false 그대로.
+    privacy_locked: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

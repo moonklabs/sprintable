@@ -404,6 +404,23 @@ class Settings(BaseSettings):
     # S-COMM-07: 에이전트 inbox webhook HMAC 검증 시크릿
     agent_inbox_webhook_secret: str = ""
 
+    # story #3815(Phase3·3-5 PR2, 페드루 PO 確定 2026-09-12) — YouTube 종량 quota는
+    # 조직별이 아니라 **플랫폼 전체**(우리 GCP 프로젝트가 Google에 공유하는 단일
+    # 일일 예산) 축이라 org_content_rules(조직별 규칙) 재사용 대상이 아니다. 정식
+    # 정착지는 platform_settings(어드민 관리, 하드코딩·env 금지 원칙)이지만 그
+    # 테이블은 sprintable-admin(별도 레포)의 write UI가 있어야 실제로 조정 가능—
+    # 이 PR은 백엔드 단독이라 페드루 PO 明示("env/규칙 조정 가능")대로 env로 연다.
+    # ⚠️미확認 — 실제 YouTube Data API v3 quota 비용표(지식 컷오프 2026-01 기준
+    # 최선 추정: 일일 10,000 unit·videos.insert=1,600·videos.list=1)는 재확認 대상.
+    youtube_quota_daily_limit_units: int = 10_000
+    youtube_quota_cost_insert_units: int = 1_600
+    youtube_quota_cost_list_units: int = 1
+    # API 규정 감사 미완=업로드 강제 비공개(페드루 PO 決定②) — 우리 앱의 등급
+    # 자체(고객 자격 아님)라 이 값도 플랫폼 축. True(기본, fail-closed)=감사 미완
+    # 가정 — 실 감사 통과 뒤 이 env를 False로 바꾼다(재배포 필요, platform_settings
+    # 이관 전까지의 임시 조치임을 명시).
+    youtube_api_audit_incomplete: bool = True
+
     # Rate limiting (E-OA1:S5)
     rate_limit_backend: str = "memory"  # "memory" | "redis"
     # ⚠️ story #2078 핫픽스(2026-07-21, Memorystore 배선 직전 PO가 발견): 이 필드가 원래 여기

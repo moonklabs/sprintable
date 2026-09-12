@@ -366,6 +366,16 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "stibee 발행에 필요한 제목·주소록 ID·발신자 정보가 없습니다.",
         "en": "Missing subject, address book ID, or sender info required to publish to Stibee.",
     },
+    # story #3815(Phase3·3-5 PR2, 페드루 PO 낱말 확定 2026-09-12 10:46Z) — 코드
+    # (YOUTUBE_QUOTA_EXCEEDED)·마커(sandbox:youtube-quota-exceeded)는 그대로 두되
+    # 사용자 문자열엔 "quota" 낱말을 안 쓴다("사용량"으로). 리셋 경계가 정확한 UTC
+    # 자정 시각이라 응답에 `reset_at`을 함께 실어 FE가 필요하면 그 값으로 문구를
+    # 재조립할 수 있게 하지만, 이 문장 자체는 "내일"로 고정(페드루 明示 — 시각이
+    # 있어도 문장은 상대 표현 유지, reset_at은 부가 필드).
+    "channel_posts.youtube_usage_exceeded": {
+        "ko": "오늘 YouTube 사용량을 다 썼습니다 — 내일 다시 시도해 주세요(플랫폼 공유 한도).",
+        "en": "Today's YouTube usage limit has been reached — please try again tomorrow (shared platform-wide limit).",
+    },
 }
 
 
