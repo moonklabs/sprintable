@@ -73,6 +73,11 @@ _CI_OR_LOCAL_ONLY_ALLOWLIST = frozenset({
                                                    # (backend/app/** AST 정적 스캔, 운영 DB
                                                    # 무접속 — lint_business_info_email_footer_
                                                    # drift.py와 동형 관례).
+    "lint_insight_snapshot_status_drift.py",      # story #3808(Phase3·3-3 PR4) — CI lint
+                                                   # 게이트(insight_snapshots.py↔types.ts
+                                                   # AST/정규식 정적 대조, 운영 DB 무접속 —
+                                                   # lint_channel_insight_metrics_drift.py와
+                                                   # 동형 관례).
 })
 
 

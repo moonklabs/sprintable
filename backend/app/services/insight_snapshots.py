@@ -597,6 +597,76 @@ async def _fetch_facebook_via_connection(db: AsyncSession, snapshot: InsightSnap
         return await _fetch_facebook(client, access_token=access_token, media_id=pub.external_id)
 
 
+# story #3808(Phase3·3-3 PR4, 페드루 PO 確定 2026-09-11) — 호스트/경로 상수는
+# x_publish.py 것을 그대로 import(story #3320의 "_GRAPH_BASE 재사용" 관례를 X에도
+# 동형 적용 — 호스트를 바꿀 일이 생기면 한 곳만 고치면 되게).
+_X_ENGAGEMENT_METRIC_FIELDS = ("like_count", "retweet_count", "reply_count", "quote_count")
+
+
+async def _fetch_x(client: "httpx.AsyncClient", *, access_token: str, tweet_id: str) -> dict[str, Any]:  # noqa: F821
+    """`_fetch_threads`/`_fetch_facebook`과 동형 — X는 Meta Graph 오류 taxonomy가
+    아니라 순수 HTTP status라 Graph envelope 파싱 없이 status_code 휴리스틱만
+    (x_publish.py 모듈 docstring의 "provider_error_* 3필드 항상 None" 원칙과 동일
+    사상). `public_metrics.impression_count`→impressions, like+retweet+reply+
+    quote 합산→engagements(§2(d) 7키엔 개별 반응 종류가 없어 뭉친다 — threads/
+    facebook과 같은 관례)."""
+    from app.services.x_publish import _TWEET_DETAIL_URL_TMPL, _auth_headers
+
+    resp = await client.get(
+        _TWEET_DETAIL_URL_TMPL.format(tweet_id=tweet_id),
+        params={"tweet.fields": "public_metrics"},
+        headers=_auth_headers(access_token),
+    )
+    # story #3779 BE 한글 사용자 문장 재발 가드 — 신규 코드는 영문(이 세션 PR1/PR2/PR3
+    # 선례 그대로), threads/facebook의 기존 한글 메시지는 ratchet 도입 前 grandfather
+    # 라 재사용 불가.
+    if resp.status_code == 401:
+        raise InsightFetchError(error_code="CHANNEL_TOKEN_EXPIRED", message="X access token expired")
+    if resp.status_code == 429:
+        raise InsightFetchError(error_code="CHANNEL_RATE_LIMITED", message="X insights API rate limit exceeded")
+    if resp.status_code >= 500:
+        raise InsightFetchError(error_code="CHANNEL_PUBLISH_PROVIDER_ERROR", message=f"X server error: {resp.status_code}")
+    if resp.status_code >= 400:
+        raise InsightFetchError(error_code="CHANNEL_PUBLISH_AUTH_REJECTED", message=f"X insights request rejected: {resp.status_code}")
+
+    body = resp.json()
+    metrics = ((body.get("data") or {}).get("public_metrics")) or {}
+    values: dict[str, int] = {}
+    if "impression_count" in metrics:
+        values["impressions"] = int(metrics["impression_count"] or 0)
+    engagement_total = sum(int(metrics[k]) for k in _X_ENGAGEMENT_METRIC_FIELDS if k in metrics)
+    if any(k in metrics for k in _X_ENGAGEMENT_METRIC_FIELDS):
+        values["engagements"] = engagement_total
+    return {"raw": body, "values": values}
+
+
+async def _fetch_x_via_connection(db: AsyncSession, snapshot: InsightSnapshot) -> dict[str, Any]:
+    from app.models.channel_connection import ChannelConnection
+    from app.models.channel_publication import ChannelPublication
+    from app.services.channel_connection import decrypt_for_use
+
+    pub = (await db.execute(
+        select(ChannelPublication).where(ChannelPublication.id == snapshot.publication_id)
+    )).scalar_one_or_none()
+    if pub is None or pub.external_id is None:
+        raise InsightFetchError(
+            error_code="INSIGHT_PUBLICATION_NOT_FOUND", message=f"channel_publication을 찾을 수 없습니다: {snapshot.publication_id}",
+        )
+    connection = await db.get(ChannelConnection, pub.connection_id)
+    if connection is None or connection.status != "active":
+        raise InsightFetchError(
+            error_code="CHANNEL_CONNECTION_NOT_ACTIVE", message=f"연결이 활성 상태가 아닙니다: {pub.connection_id}",
+        )
+    access_token = decrypt_for_use(connection)
+    if access_token is None:
+        raise InsightFetchError(error_code="CHANNEL_CONNECTION_NOT_ACTIVE", message="연결에 자격이 없습니다")
+
+    import httpx
+
+    async with httpx.AsyncClient() as client:
+        return await _fetch_x(client, access_token=access_token, tweet_id=pub.external_id)
+
+
 async def _fetch_for_snapshot(db: AsyncSession, snapshot: InsightSnapshot, *, live: bool = False) -> dict[str, Any]:
     """channel별 dispatch. 호출 前 `insight_metrics`가 빈 튜플이 아님을 이미 확인했다는
     전제(호출자 `process_due_insight_snapshots`가 그 판정을 한다 — 여기선 순수 dispatch
@@ -616,6 +686,14 @@ async def _fetch_for_snapshot(db: AsyncSession, snapshot: InsightSnapshot, *, li
         return await _fetch_instagram_via_connection(db, snapshot)
     if snapshot.channel == "facebook":
         return await _fetch_facebook_via_connection(db, snapshot)
+    # story #3808(Phase3·3-3 PR4, 페드루 PO 確定 2026-09-11) — 어댑터 선언(channel_
+    # adapters.py::insight_metrics)과 dispatch를 짝으로 유지(#3696 교훈 그대로 —
+    # 같은 커밋에서 둘 다 추가). x_sandbox는 다른 sandbox 2채널과 동형으로 제네릭
+    # `_fetch_sandbox()` 재사용(신규 로직 0).
+    if snapshot.channel == "x":
+        return await _fetch_x_via_connection(db, snapshot)
+    if snapshot.channel == "x_sandbox":
+        return await _fetch_sandbox(db, publication_id=snapshot.publication_id, live=live)
     # story #3696(Phase2·BE·funnel 갭, 디디 e2e 그라운딩 발견 2026-09-08) — 이전
     # 주석("instagram_sandbox와 달리 facebook_sandbox는 dispatch가 없으면...")이
     # instagram_sandbox는 이미 분기가 있다는 전제로 쓰여 있었으나 실제로는 없었다
@@ -740,7 +818,7 @@ async def process_due_insight_snapshots(db: AsyncSession, *, now: datetime | Non
         snapshot.status = "in_progress"
     await db.commit()
 
-    counts = {"captured": 0, "unsupported": 0, "failed": 0, "pending_retry": 0, "error": 0}
+    counts = {"captured": 0, "unsupported": 0, "failed": 0, "pending_retry": 0, "error": 0, "skipped": 0}
     for snapshot in rows:
         try:
             adapter = CHANNEL_ADAPTERS.get(snapshot.channel)
@@ -750,6 +828,36 @@ async def process_due_insight_snapshots(db: AsyncSession, *, now: datetime | Non
                 if await _finalize_snapshot_write(db, snapshot, new_status="unsupported"):
                     counts["unsupported"] += 1
                 continue
+
+            # story #3808(Phase3·3-3 PR4, 페드루 PO 追加 決定 2026-09-11) — X 헤드
+            # 트윗 인사이트 read 호출도 종량(⚠️미확認이나 보수적으로 과금 설계, 미확認
+            # 해소되면 관리자가 규칙값 0으로 끈다). fetch **前** 검사 — publish 흐름
+            # (channel_posts.py)의 "발행 直前 재검사"와 같은 위치 축. 초과 시 이 due
+            # 스냅샷은 "captured 값 0"이 아니라 status="skipped"로 정직하게 남는다
+            # (engagement_items.py의 «수집 안 됨≠0» 관례 동형 — 다음 due_at까지
+            # 자동 재시도 없음, "unsupported"와 같은 종결 취급이나 사유가 다르므로
+            # 별도 상태값).
+            insights_unit_cost_minor: int | None = None
+            if snapshot.channel in ("x", "x_sandbox"):
+                from app.services.content_rules import get_org_content_rules
+                from app.services.generation_budget import GenerationBudgetExceededError
+                from app.services.x_publish_budget import (
+                    check_api_usage_budget_or_raise, get_x_insights_read_unit_cost_minor,
+                )
+
+                content_rules_row = await get_org_content_rules(db, org_id=snapshot.org_id)
+                insights_unit_cost_minor = get_x_insights_read_unit_cost_minor(
+                    content_rules_row.rules if content_rules_row is not None else None
+                )
+                try:
+                    await check_api_usage_budget_or_raise(
+                        db, org_id=snapshot.org_id, estimated_cost_minor=insights_unit_cost_minor,
+                    )
+                except GenerationBudgetExceededError:
+                    snapshot.error_code = "API_USAGE_BUDGET_EXCEEDED"
+                    if await _finalize_snapshot_write(db, snapshot, new_status="skipped"):
+                        counts["skipped"] += 1
+                    continue
 
             try:
                 result = await _fetch_for_snapshot(db, snapshot)
@@ -783,6 +891,23 @@ async def process_due_insight_snapshots(db: AsyncSession, *, now: datetime | Non
             snapshot.source = snapshot.channel
             await _maybe_enrich_with_ga4_inflow(db, snapshot)
             await _record_insight_evidence(db, snapshot)
+            if snapshot.channel in ("x", "x_sandbox") and insights_unit_cost_minor is not None:
+                from app.services.x_publish_budget import record_x_insights_read_cost_evidence
+
+                pub_published_at = (await db.execute(
+                    select(ChannelPublication.published_at).where(
+                        ChannelPublication.id == snapshot.publication_id,
+                    )
+                )).scalar_one_or_none()
+                snapshot_kind = (
+                    label_snapshot_offset(due_at=snapshot.due_at, published_at=pub_published_at)
+                    if pub_published_at is not None else None
+                ) or "unknown"
+                await record_x_insights_read_cost_evidence(
+                    db, org_id=snapshot.org_id, work_item_id=snapshot.work_item_id,
+                    publication_id=snapshot.publication_id, snapshot_kind=snapshot_kind,
+                    cost_minor=insights_unit_cost_minor,
+                )
             if await _finalize_snapshot_write(db, snapshot, new_status="captured"):
                 counts["captured"] += 1
         except Exception:  # noqa: BLE001 — publication_command.py와 동형 2중 방어.

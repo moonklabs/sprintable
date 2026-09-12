@@ -31,6 +31,15 @@ API_USAGE_BUDGET_RULE_KEY = "api_usage_budget"
 # 이 상수는 전혀 안 쓰인다(설정값이 항상 우선).
 _DEFAULT_UNIT_COST_MINOR = 20
 
+# story #3808 PR4(페드루 PO 追加 決定, 2026-09-11) — 헤드 트윗 1d/7d 인사이트 read
+# 호출 단가. ⚠️미확認(X가 read를 실제로 종량 과금하는지 자체가 지식 컷오프 기준
+# 불확실) — 설계는 "과금한다"는 보수적 가정으로 짜되(스캔 안 하면 실비 초과 위험이
+# 더 크다), publish 단가보다 가볍게(읽기<쓰기) 보수적으로 잡는다. 확認되면 관리자가
+# `insights_read_unit_cost_minor`를 0으로 설정해 이 축만 끌 수 있다(월 한도·kind는
+# 그대로 — 같은 지갑의 다른 발생원일 뿐).
+_DEFAULT_INSIGHTS_READ_UNIT_COST_MINOR = 5
+_X_INSIGHTS_READ_EVENT = "x_insights_read"
+
 
 def get_api_usage_unit_cost_minor(rules: dict | None) -> int:
     """`org_content_rules.rules.api_usage_budget.unit_cost_minor` 우선, 없으면 코드
@@ -41,6 +50,17 @@ def get_api_usage_unit_cost_minor(rules: dict | None) -> int:
     unit_cost = budget.get("unit_cost_minor")
     if unit_cost is None:
         return _DEFAULT_UNIT_COST_MINOR
+    return int(unit_cost)
+
+
+def get_x_insights_read_unit_cost_minor(rules: dict | None) -> int:
+    """`api_usage_budget.insights_read_unit_cost_minor` 우선, 없으면 코드 기본값
+    (위 ⚠️미확認 상수). `get_api_usage_unit_cost_minor()`와 동형 폴백 규칙 — 같은
+    지갑(`api_usage_budget`) 안의 다른 필드일 뿐 별도 규칙 네임스페이스가 아니다."""
+    budget = (rules or {}).get(API_USAGE_BUDGET_RULE_KEY) or {}
+    unit_cost = budget.get("insights_read_unit_cost_minor")
+    if unit_cost is None:
+        return _DEFAULT_INSIGHTS_READ_UNIT_COST_MINOR
     return int(unit_cost)
 
 
@@ -94,7 +114,44 @@ async def record_api_usage_cost_evidence(
     await db.commit()
 
 
+async def record_x_insights_read_cost_evidence(
+    db: AsyncSession, *, org_id: uuid.UUID, work_item_id: uuid.UUID, publication_id: uuid.UUID,
+    snapshot_kind: str, cost_minor: int,
+) -> None:
+    """story #3808 PR4 — 헤드 트윗 1d/7d 인사이트 read 호출도 같은 월 지갑(`api_usage_
+    cost`/`api_usage_budget`)에 합산한다. **publication_id+snapshot_kind("1d"|"7d")로
+    멱등**(PR3의 publication_id+sequence와 동형 축 — sequence 대신 이 축을 쓰는 이유는
+    한 publication당 read가 정확히 2번(1d·7d) 예정돼 있고 그 각각이 한 번씩만 과금
+    돼야 하기 때문).
+
+    `record_api_usage_cost_evidence`(발행용)와 달리 **여기서 commit하지 않는다** —
+    호출자(`insight_snapshots.py::process_due_insight_snapshots`)의 `_finalize_
+    snapshot_write`가 스냅샷의 status="captured" 전이와 같은 트랜잭션으로 묶어
+    커밋한다(원자성 — evidence만 쓰이고 스냅샷 상태 전이가 실패로 롤백되는 불일치
+    방지). `insight_snapshots.py::_record_insight_evidence`와 동일한 커밋 관례."""
+    existing = (await db.execute(
+        select(Evidence.id).where(
+            Evidence.org_id == org_id, Evidence.type == "metric",
+            Evidence.payload["kind"].astext == API_USAGE_COST_KIND,
+            Evidence.payload["event"].astext == _X_INSIGHTS_READ_EVENT,
+            Evidence.payload["publication_id"].astext == str(publication_id),
+            Evidence.payload["snapshot_kind"].astext == snapshot_kind,
+        )
+    )).scalar_one_or_none()
+    if existing is not None:
+        return
+    db.add(Evidence(
+        id=uuid.uuid4(), org_id=org_id, work_item_id=work_item_id, work_item_type="story",
+        type="metric", ref=str(publication_id), source="platform",
+        payload={
+            "kind": API_USAGE_COST_KIND, "cost_minor": cost_minor, "event": _X_INSIGHTS_READ_EVENT,
+            "publication_id": str(publication_id), "snapshot_kind": snapshot_kind,
+        },
+    ))
+
+
 __all__ = [
     "API_USAGE_COST_KIND", "API_USAGE_BUDGET_RULE_KEY", "GenerationBudgetExceededError",
     "get_api_usage_unit_cost_minor", "check_api_usage_budget_or_raise", "record_api_usage_cost_evidence",
+    "get_x_insights_read_unit_cost_minor", "record_x_insights_read_cost_evidence",
 ]

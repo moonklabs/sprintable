@@ -493,7 +493,9 @@ async def test_organic_loop_skips_paid_channel_snapshots():
 
         async with Session() as s:
             counts = await process_due_insight_snapshots(s)
-        assert counts == {"captured": 0, "unsupported": 0, "failed": 0, "pending_retry": 0, "error": 0}, counts
+        assert counts == {
+            "captured": 0, "unsupported": 0, "failed": 0, "pending_retry": 0, "error": 0, "skipped": 0,
+        }, counts
 
         async with Session() as s:
             rows = await _get_spend_snapshots(s, org_id, gate_id)
