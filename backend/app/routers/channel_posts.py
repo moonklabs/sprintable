@@ -116,6 +116,7 @@ from app.services.channel_post_videos import (
 )
 from app.services.agent_onboarding_config import resolve_locale_from_request
 from app.services.generation_budget import GenerationBudgetExceededError
+from app.services.x_publish_budget import API_USAGE_BUDGET_RULE_KEY
 from app.services.i18n_catalog import t
 from app.services.member_resolver import resolve_member, resolve_member_db_verified
 
@@ -1884,15 +1885,26 @@ async def publish_channel_post_draft_endpoint(
     except GenerationBudgetExceededError as exc:
         # story #3498(AC4) — 위 EXTERNAL_PUBLISH_APPROVAL_REQUIRED와 동형 처리(adapter
         # 미호출, 원장 기록만 추가·재시도/종결 정책 변경 없음).
+        #
+        # story #3808(PR5c, 페드루 PO 確定 2026-09-12 — 라이브 회차 결함 처방) — 이
+        # 예외는 3498 생성 비용 축과 X api_usage_budget 축 둘 다에서 올라온다(같은
+        # 계산 프리미티브 재사용, `rule_key`로만 구분 — generation_budget.py 참고).
+        # 코드를 항상 "GENERATION_BUDGET_EXCEEDED"로 뭉개면 X 상한 초과인데 화면이
+        # "생성 비용 한도를 넘습니다"를 보여주는 축 오라벨 결함이 난다(실측, 배포79
+        # 라이브 회차). rule_key로 갈라 별도 코드를 낸다.
+        budget_exceeded_code = (
+            "API_USAGE_BUDGET_EXCEEDED" if exc.rule_key == API_USAGE_BUDGET_RULE_KEY
+            else "GENERATION_BUDGET_EXCEEDED"
+        )
         await _record_this_attempt(approval_check="budget_exceeded", adapter_called=False, result_code=None)
         await apply_command_failure(
-            db, command, error_code="GENERATION_BUDGET_EXCEEDED", last_error=str(exc), now=now,
+            db, command, error_code=budget_exceeded_code, last_error=str(exc), now=now,
         )
         await db.commit()
         raise HTTPException(
             status_code=422,
             detail=_with_command_state({
-                "code": "GENERATION_BUDGET_EXCEEDED",
+                "code": budget_exceeded_code,
                 "limit_minor": exc.limit_minor, "spent_minor": exc.spent_minor,
                 "estimated_cost_minor": exc.estimated_cost_minor, "remaining_minor": exc.remaining_minor,
             }),

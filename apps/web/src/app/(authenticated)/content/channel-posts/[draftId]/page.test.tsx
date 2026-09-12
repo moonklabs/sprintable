@@ -4807,7 +4807,7 @@ describe('ChannelPostEditPage — 생성 비용 한도(story #3500, doc a0da40c9
       });
       await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
       await flush();
-      expect(container.querySelector('[data-testid="api-usage-budget-remaining-compact"]')?.textContent).toBe('X API 지출 남음 80,000원');
+      expect(container.querySelector('[data-testid="api-usage-budget-remaining-compact"]')?.textContent).toBe('X 비용 남음 80,000원');
     });
 
     it('정책 미설정(limit_minor=null)이면 아무것도 안 그린다', async () => {

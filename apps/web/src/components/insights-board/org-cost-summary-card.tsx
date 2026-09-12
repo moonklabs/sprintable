@@ -43,6 +43,9 @@ interface OrgCostSummary {
   generation_cost_period_end: string | null;
   generation_currency: string | null;
   x_cost_spent_minor: number | null;
+  x_cost_period_start: string | null;
+  x_cost_period_end: string | null;
+  x_currency: string | null;
 }
 
 type LoadState =
@@ -97,7 +100,7 @@ export function OrgCostSummaryCard({ orgId }: { orgId: string }) {
     );
   }
 
-  const { ads, generation_cost_spent_minor, generation_currency, x_cost_spent_minor } = state.summary;
+  const { ads, generation_cost_spent_minor, generation_currency, x_cost_spent_minor, x_currency } = state.summary;
   const adsCurrency = ads.sealed_ads_currency as GenerationBudgetCurrency | null;
   // ①0건과 ③섞임은 둘 다 sealed_ads_currency===null이지만 뜻이 다르다 —
   // approved_boost_count로 갈라야 「0건」을 「섞였다」로 잘못 읽지 않는다.
@@ -174,11 +177,26 @@ export function OrgCostSummaryCard({ orgId }: { orgId: string }) {
           )}
         </div>
 
+        {/* story #3808(PR5c, 페드루 PO 確定 2026-09-12 — 라이브 회차 결함 처방) —
+            x_cost_spent_minor가 항상 null이던 시절엔 이 자리가 "미측정" 한 갈래뿐
+            이었다. BE가 api_usage_budget 지갑에서 실값을 채우기 시작하면서 generation
+            섹션과 동형 3분기(미측정/통화 실패/실값)가 필요해졌다 — 그 전엔 non-null
+            분기 자체가 없어 실 지출이 있어도 화면에 아무것도 안 그려졌다(침묵 결함). */}
         {x_cost_spent_minor === null ? (
           <span className="text-muted-foreground" data-testid="org-cost-x-cost-unmeasured">
             {t('orgCostXCostUnmeasured')}
           </span>
-        ) : null}
+        ) : x_currency === null ? (
+          <span className="text-muted-foreground" data-testid="org-cost-x-cost-failed">
+            {t('orgCostXCostCheckFailed')}
+          </span>
+        ) : (
+          <span data-testid="org-cost-x-cost-amount">
+            {t('orgCostXCostSpent', {
+              amount: formatMinorCurrency(x_cost_spent_minor, x_currency as GenerationBudgetCurrency, locale, tContent),
+            })}
+          </span>
+        )}
       </div>
     </Card>
   );

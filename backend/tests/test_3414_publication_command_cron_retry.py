@@ -1257,3 +1257,141 @@ async def test_retry_endpoint_accepts_blocked_command_then_next_cron_tick_reproc
         await engine.dispose()
 
 
+
+
+@pytest.mark.anyio
+async def test_cron_worker_x_api_usage_budget_exceeded_sets_reason_code_api_usage_not_generation():
+    """⭐story #3808(PR5c, 카디르 QA 실측 갭 처방 2026-09-12) — 워커 축
+    (`_process_one_command`의 reason_code 삼항)이 테스트 0건 커버였다(삼항을
+    GENERATION_BUDGET_EXCEEDED 고정으로 무력화해도 관련 44건 전부 GREEN이었다는
+    실측). 워커가 pickup한 예약 발행이 X `api_usage_budget` 초과로 막히면
+    reason_code가 "API_USAGE_BUDGET_EXCEEDED"여야 한다(exc.rule_key로 갈라야
+    하는 자리 — 라우터의 즉시 발행 경로와 별개 코드 경로).
+
+    양성대조 — 같은 워커 함수가 3498 generation_budget 초과에는 여전히
+    "GENERATION_BUDGET_EXCEEDED"를 낸다(기존값 유지 대조, 회귀 0)."""
+    from app.services.publication_command import process_due_publication_commands
+    from tests.test_3808_x_publish_budget import _put_rules
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id, channel="x_sandbox")
+            # 한도(10)가 기본 단가(20)보다 작아 항상 거부되게(test_3808_x_publish_budget.py
+            # 선례와 동일 값).
+            await _put_rules(s, org_id=org_id, rules={
+                "api_usage_budget": {"limit_minor": 10, "currency": "KRW", "period": "month"},
+            })
+
+        from app.main import app
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client, Session() as s:
+            story_id = await _seed_story(s, org_id, project_id)
+            draft_id, gate_id = await _create_draft_submit_approve(
+                client, s, org_id=org_id, connection_id=connection_id, story_id=story_id,
+                scheduled_at=datetime.now(timezone.utc) + timedelta(minutes=1),
+            )
+
+        now = datetime.now(timezone.utc)
+        async with Session() as s:
+            from app.models.publication_command import PublicationCommand
+            from app.models.channel_post_version import ChannelPostVersion
+            from sqlalchemy import select
+
+            version_id = (await s.execute(
+                select(ChannelPostVersion.id).where(ChannelPostVersion.draft_id == uuid.UUID(draft_id))
+            )).scalar_one()
+            cmd = PublicationCommand(
+                id=uuid.uuid4(), org_id=org_id, gate_id=gate_id, destination=connection_id,
+                approved_version=version_id, operation="publish",
+                scheduled_at=now - timedelta(minutes=1), status="pending", requested_by_member_id=agent_id,
+            )
+            s.add(cmd)
+            await s.commit()
+            cmd_id = cmd.id
+
+        async with Session() as s:
+            await process_due_publication_commands(s, now=now)
+
+        async with Session() as s:
+            from app.models.publication_command import PublicationCommand
+            from sqlalchemy import select
+            cmd_row = (await s.execute(select(PublicationCommand).where(PublicationCommand.id == cmd_id))).scalar_one()
+            assert cmd_row.status == "blocked_unapproved"
+            assert cmd_row.reason_code == "API_USAGE_BUDGET_EXCEEDED", (
+                f"X 상한 초과 워커 축인데 reason_code가 {cmd_row.reason_code!r} — 축 오라벨 결함 재발"
+            )
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_cron_worker_generation_budget_exceeded_still_sets_generation_reason_code():
+    """양성대조 — 위 테스트와 대비: 3498 generation_budget 초과는 워커 축에서도
+    여전히 "GENERATION_BUDGET_EXCEEDED"(기존값 유지, 회귀 0)."""
+    from app.services.publication_command import process_due_publication_commands
+    from tests.test_3498_generation_budget_evidence_and_config import _put_generation_budget
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id)
+            await _put_generation_budget(s, org_id=org_id, limit_minor=0)
+
+        from app.main import app
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client, Session() as s:
+            story_id = await _seed_story(s, org_id, project_id)
+            draft_id, gate_id = await _create_draft_submit_approve(
+                client, s, org_id=org_id, connection_id=connection_id, story_id=story_id,
+                scheduled_at=datetime.now(timezone.utc) + timedelta(minutes=1),
+            )
+
+        # limit_minor=0인데 sealed_estimated_cost_minor가 None이면 check_generation_
+        # budget_or_raise 자신의 "미설정이면 통과" 계약(AC2)에 걸려 검사 자체가 안
+        # 일어난다 — 실제로 초과를 재현하려면 값을 실어야 한다(봉인 이후 값이라
+        # gate 행에 직접 설정).
+        async with Session() as s:
+            from app.models.gate import Gate
+            from sqlalchemy import select as _select
+            gate_row = (await s.execute(_select(Gate).where(Gate.id == gate_id))).scalar_one()
+            gate_row.sealed_estimated_cost_minor = 500
+            await s.commit()
+
+        now = datetime.now(timezone.utc)
+        async with Session() as s:
+            from app.models.publication_command import PublicationCommand
+            from app.models.channel_post_version import ChannelPostVersion
+            from sqlalchemy import select
+
+            version_id = (await s.execute(
+                select(ChannelPostVersion.id).where(ChannelPostVersion.draft_id == uuid.UUID(draft_id))
+            )).scalar_one()
+            cmd = PublicationCommand(
+                id=uuid.uuid4(), org_id=org_id, gate_id=gate_id, destination=connection_id,
+                approved_version=version_id, operation="publish",
+                scheduled_at=now - timedelta(minutes=1), status="pending", requested_by_member_id=agent_id,
+            )
+            s.add(cmd)
+            await s.commit()
+            cmd_id = cmd.id
+
+        async with Session() as s:
+            await process_due_publication_commands(s, now=now)
+
+        async with Session() as s:
+            from app.models.publication_command import PublicationCommand
+            from sqlalchemy import select
+            cmd_row = (await s.execute(select(PublicationCommand).where(PublicationCommand.id == cmd_id))).scalar_one()
+            assert cmd_row.status == "blocked_unapproved"
+            assert cmd_row.reason_code == "GENERATION_BUDGET_EXCEEDED"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()

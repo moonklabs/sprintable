@@ -60,6 +60,9 @@ export const CHANNEL_POST_VOID_REASON_MESSAGE_KEYS: Record<string, string> = {
   // command_status/reason_code로 실어 보내는지는 미착지라 미확認 — 이 매핑은
   // "reason_code가 이 값이면"이라는 계약을 가정한 스켈레톤이다(PR 본문 명시).
   GENERATION_BUDGET_EXCEEDED: 'channelPostsVoidReasonGenerationBudgetExceeded',
+  // story #3808(PR5c, 페드루 PO 確定 2026-09-12) — 위와 같은 BE 예외(rule_key만
+  // 다름, X api_usage_budget 축)가 별도 코드로 온다 — 문구도 X 축으로.
+  API_USAGE_BUDGET_EXCEEDED: 'channelPostsVoidReasonApiUsageBudgetExceeded',
 };
 
 export interface FailureActionInput {
