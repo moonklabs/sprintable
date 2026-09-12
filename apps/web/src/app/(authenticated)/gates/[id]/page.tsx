@@ -155,8 +155,12 @@ export default function GateDetailPage() {
   // story #3813(Phase3·3-4 PR4, 페드루 PO 確定 2026-09-12) — 「발행」(ESP 캠페인 생성)과
   // 「발송」이 같은 승인 버튼을 공유하면 두 서로 다른 행위가 같은 낱말("승인")로 뭉개진다.
   // newsletter_send 게이트=「발송 승인」, 뉴스레터 채널의 external_publish 게이트=「캠페인
-  // 만들기」(sealed_destination_channel로 판별 — 게이트 자체엔 채널 필드가 없다), 그 외는
+  // 승인」(sealed_destination_channel로 판별 — 게이트 자체엔 채널 필드가 없다), 그 외는
   // 기존 그대로 「승인」.
+  // ⚠️페드루 PO CHANGES(2026-09-12) — 이 버튼 클릭=게이트 승인일 뿐(캠페인 실제 생성은
+  // 별도 「발행하기」 버튼이 한다, 승인 뒤 사람이 따로 누름). "캠페인 만들기"는 버튼이
+  // 하지 않는 행위를 말해 오해를 부른다 — "캠페인 승인"으로 정정(만들기 낱말은 발행
+  // 버튼·활동 로그 자리에만 남는다).
   const approveButtonLabelKey =
     gate?.gate_type === 'newsletter_send' ? 'gateApproveNewsletterSend'
     : gate?.gate_type === 'external_publish' &&
