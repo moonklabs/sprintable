@@ -2511,7 +2511,7 @@
     "channelPostsVoidReasonApiUsageBudgetExceeded": "This exceeds the X cost budget. An owner or admin can change the limit on the content rules screen.",
     "channelPostsFailureProcessing": "Continuing automatically.",
     "channelPostsFailureRetryComingSoon": "Retry is coming soon",
-    "channelPostsCommandInFlightReasonPending": "A schedule or automatic retry is already queued on the server — wait, or cancel the schedule and try again.",
+    "channelPostsCommandInFlightReasonScheduled": "A schedule is already queued on the server — wait, or cancel the schedule and try again.",
     "channelPostsCommandInFlightReasonBlocked": "Blocked by a connection problem — check the <link>connection screen</link>, then try again.",
     "channelPostsUnpublishConnectionNotActive": "This connection isn't active, so it can't be unpublished right now — check it on the <link>connection screen</link>.",
     "channelPostsSandboxTestBadge": "Test",

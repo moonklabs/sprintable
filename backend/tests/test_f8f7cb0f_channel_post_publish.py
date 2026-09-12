@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -682,6 +682,207 @@ async def test_rate_limited_returns_429_with_reset_at():
 
 
 @pytest.mark.anyio
+async def test_publish_on_still_future_scheduled_command_is_idempotent_200_no_regression():
+    """story #3808(배포 81 라이브 회차, 페드루 PO 정정 決定 2026-09-12 19:28Z) —
+    초안 처방(409 거절)은 story cfc1a55a AC4(2026-09-04 PO 確定, test_manual_
+    publish_after_auto_created_command_is_idempotent)를 깼다: 게이트가 approved로
+    바뀌는 순간 command가 이미 자동 생성되므로(gate_service.py, /publish 호출과
+    무관) 사람의 «처음이자 유일한» 확인 클릭도 라우터 관점에선 항상 created=
+    False다 — 서버가 "첫 확인"과 "재요청"을 구별할 신호도, 구별할 이유도 없다
+    (같은 상태면 같은 응답). PO 판정: 예약이 아직 미래여도 /publish는 그대로
+    멱등 200 — 같은 command_id·행 수 불변·scheduled_at 불변(AC4와 같은 계약,
+    이 PR 고유 시나리오(submit body로 직접 scheduled_at 세팅)로 한 번 더 pin)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            human_id = await _seed_human(s, org_id, role="owner")
+            story_id = await _seed_story(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id)
+
+        future_scheduled_at = datetime.now(timezone.utc) + timedelta(hours=2)
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client, Session() as s:
+            r_draft = await client.post(
+                f"/api/v2/organizations/{org_id}/channel-posts/drafts",
+                json=_draft_body(work_item_id=story_id, connection_id=connection_id),
+            )
+            assert r_draft.status_code == 201, r_draft.text
+            draft_id = r_draft.json()["draft_id"]
+            r_submit = await client.post(
+                f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/submit",
+                json={"scheduled_at": future_scheduled_at.isoformat()},
+            )
+            assert r_submit.status_code == 200, r_submit.text
+            gate_id = uuid.UUID(r_submit.json()["gate_id"])
+            await _approve_gate_directly(s, gate_id)
+
+        # 첫 /publish — 예약 승인이라 command만 만들고 끝(AC1).
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        async with _client_for(app) as client:
+            r_first = await client.post(
+                f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
+            )
+        assert r_first.status_code == 200, r_first.text
+        r_first_body = r_first.json()["data"] if "data" in r_first.json() else r_first.json()
+        assert r_first_body["scheduled"] is True
+        first_command_id = r_first_body["command_id"]
+        first_scheduled_at = r_first_body["scheduled_at"]
+
+        # 같은 draft에 또 /publish(레이스·낡은 탭·앞당기기·확인 재클릭 등 무엇이든) —
+        # 같은 idempotency key라 같은 pending command를 그대로 다시 만나고, PO
+        # 정정대로 그대로 200(같은 command_id·scheduled_at)이어야 한다.
+        async with _client_for(app) as client:
+            r_second = await client.post(
+                f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
+            )
+        assert r_second.status_code == 200, r_second.text
+        r_second_body = r_second.json()["data"] if "data" in r_second.json() else r_second.json()
+        assert r_second_body["command_id"] == first_command_id, "재요청이 다른 command_id를 냈다(supersede 발생)"
+        assert r_second_body["scheduled_at"] == first_scheduled_at, "재요청이 scheduled_at을 바꿨다"
+
+        async with Session() as s:
+            from app.models.publication_command import PublicationCommand
+            from sqlalchemy import select as sa_select
+            rows = (await s.execute(
+                sa_select(PublicationCommand).where(PublicationCommand.gate_id == gate_id)
+            )).scalars().all()
+            assert len(rows) == 1, f"재요청이 새 command 행을 만들었다(행 수 불변 위반): {len(rows)}개"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_publish_allows_immediate_retry_while_backoff_next_attempt_at_is_future_ac3_preserved():
+    """「누가 정한 시각인가」 축 ②(양성대조, 회귀 0) — 시스템이 정한 backoff
+    (`next_attempt_at`, transient 실패 뒤)는 예약과 다르다: AC3(부분 성공 뒤
+    즉시 사람 재시도)를 이 PR이 깨면 안 된다는 것이 PO 정정의 요점 — 한도
+    초과(429, transient)로 next_attempt_at이 미래에 걸린 바로 뒤에도 같은
+    draft 재-publish는 (scheduled_at이 null이므로) 즉시 통과해야 한다."""
+    from unittest.mock import AsyncMock, patch
+    import app.services.threads_publish as tp
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            human_id = await _seed_human(s, org_id, role="owner")
+            story_id = await _seed_story(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client, Session() as s:
+            draft_id, gate_id = await _seed_and_submit_and_approve(
+                client, s, org_id=org_id, connection_id=connection_id, story_id=story_id,
+            )
+
+        with patch.object(tp, "get_publishing_limit", AsyncMock(return_value=(250, 250, 86400))):
+            _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+            async with _client_for(app) as client:
+                r_first = await client.post(
+                    f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
+                )
+        assert r_first.status_code == 429, r_first.text
+        assert r_first.json()["error"]["command_status"] == "pending"
+        assert r_first.json()["error"]["next_attempt_at"]
+
+        # scheduled_at이 애초에 null(즉시 요청)이라 next_attempt_at이 미래여도
+        # 거절하면 안 된다 — mock을 다시 안 씌우고 곧장 재호출.
+        with (
+            patch.object(tp, "create_container", AsyncMock(return_value="creation-recovered")),
+            patch.object(tp, "publish_container", AsyncMock(return_value="media-recovered")),
+            patch.object(tp, "get_publishing_limit", AsyncMock(return_value=(10, 250, 86400))),
+            patch.object(
+                tp, "get_permalink", AsyncMock(return_value="https://www.threads.net/@demo/post/media-recovered"),
+            ),
+        ):
+            _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+            async with _client_for(app) as client:
+                r_second = await client.post(
+                    f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
+                )
+        assert r_second.status_code == 200, r_second.text
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_publish_immediate_retry_leaves_no_stray_pending_row_for_worker_to_repick():
+    """PO 정정 決定 ②의 pin — 사람의 즉시 재시도가 같은 command 행을 동기
+    트랜잭션 안에서 곧장 completed로 갱신하므로, 그 직후 워커 tick을 돌려도
+    이 draft의 command를 다시 집어 처리(재시도 카운트 증가·adapter 재호출)하지
+    않는다(이중 시도 0 — 별도 supersede 로직 없이 이미 안전하다는 그라운딩의
+    증거)."""
+    from unittest.mock import AsyncMock, patch
+    import app.services.threads_publish as tp
+    from app.main import app
+    from app.services.publication_command import process_due_publication_commands
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            human_id = await _seed_human(s, org_id, role="owner")
+            story_id = await _seed_story(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client, Session() as s:
+            draft_id, gate_id = await _seed_and_submit_and_approve(
+                client, s, org_id=org_id, connection_id=connection_id, story_id=story_id,
+            )
+
+        with patch.object(tp, "get_publishing_limit", AsyncMock(return_value=(250, 250, 86400))):
+            _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+            async with _client_for(app) as client:
+                await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+
+        create_mock = AsyncMock(return_value="creation-recovered")
+        with (
+            patch.object(tp, "create_container", create_mock),
+            patch.object(tp, "publish_container", AsyncMock(return_value="media-recovered")),
+            patch.object(tp, "get_publishing_limit", AsyncMock(return_value=(10, 250, 86400))),
+            patch.object(
+                tp, "get_permalink", AsyncMock(return_value="https://www.threads.net/@demo/post/media-recovered"),
+            ),
+        ):
+            _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+            async with _client_for(app) as client:
+                r_second = await client.post(
+                    f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
+                )
+        assert r_second.status_code == 200, r_second.text
+
+        async with Session() as s:
+            from app.models.publication_command import PublicationCommand
+            from sqlalchemy import select as sa_select
+            cmd = (await s.execute(
+                sa_select(PublicationCommand).where(PublicationCommand.gate_id == gate_id)
+            )).scalar_one()
+            assert cmd.status == "completed"
+
+            counts = await process_due_publication_commands(s)
+            assert all(v == 0 for v in counts.values()), (
+                f"completed 행을 워커가 다시 집었다(0건 기대): {counts}"
+            )
+        assert create_mock.call_count == 1, "워커가 같은 command로 컨테이너를 또 만들면 이중 시도다"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_token_expired_returns_409_and_marks_connection_expired():
     from unittest.mock import AsyncMock, patch
     import app.services.threads_publish as tp
@@ -1098,6 +1299,69 @@ async def test_true_concurrent_publish_requests_no_500_single_provider_call():
             )).scalars().all()
         assert len(rows) == 1, f"UNIQUE(gate_id, version_id) 위반이 두 행을 만들었다: {len(rows)}개"
         assert r1.json()["external_id"] == r2.json()["external_id"] == "media-race"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_publish_response_scheduled_at_exposed_regardless_of_future_or_past_no_time_branch():
+    """story #3808 CHANGES 2(페드루 PO 정정 決定 2026-09-12 19:28Z, 항목 4·5) —
+    BE 409 문구 삭제로 그 drift 가드는 걷는다(대상 문구가 사라졌다). 대신
+    「scheduled_at > now」 축이 BE·FE 양쪽에서 일관되는지 3 케이스로 잠근다:
+    FE는 `scheduledAtPassed`로 미래/null/과거를 갈라 잠금 여부를 정하지만(FE
+    테스트에서 pin), 라우터의 예약 분기 자체는 이 축을 **안 본다** — 미래든
+    과거든 항상 같은 200(scheduled:true+scheduled_at 노출, 항목 5 그라운딩:
+    이미 필드로 낸다)을 낸다는 것이 정확히 이 PR의 요점(시간 분기 없음)이다.
+    이 테스트는 그 "BE는 시간을 안 본다"는 사실 자체를 과거 케이스로 pin한다
+    (미래 케이스는 위 idempotent 200 테스트가 이미 pin)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            human_id = await _seed_human(s, org_id, role="owner")
+            story_id = await _seed_story(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id)
+
+        # scheduled_at API validation이 과거 시각을 422로 막으므로, 일단 미래로
+        # 상신·승인한 뒤 gate.sealed_scheduled_at을 직접 과거로 되돌려(워커가
+        # 이미 그 시각을 지나쳤다 흉내) 라우터가 그래도 안전히 200을 내는지 잰다.
+        near_future = datetime.now(timezone.utc) + timedelta(minutes=5)
+        past_scheduled_at = datetime.now(timezone.utc) - timedelta(hours=1)
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client, Session() as s:
+            r_draft = await client.post(
+                f"/api/v2/organizations/{org_id}/channel-posts/drafts",
+                json=_draft_body(work_item_id=story_id, connection_id=connection_id),
+            )
+            assert r_draft.status_code == 201, r_draft.text
+            draft_id = r_draft.json()["draft_id"]
+            r_submit = await client.post(
+                f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/submit",
+                json={"scheduled_at": near_future.isoformat()},
+            )
+            assert r_submit.status_code == 200, r_submit.text
+            gate_id = uuid.UUID(r_submit.json()["gate_id"])
+            await _approve_gate_directly(s, gate_id)
+
+        async with Session() as s:
+            from app.models.gate import Gate
+            from sqlalchemy import select as sa_select
+            gate = (await s.execute(sa_select(Gate).where(Gate.id == gate_id))).scalar_one()
+            gate.sealed_scheduled_at = past_scheduled_at
+            await s.commit()
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        async with _client_for(app) as client:
+            r = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+        assert r.status_code == 200, r.text
+        body = r.json()["data"] if "data" in r.json() else r.json()
+        assert body["scheduled"] is True
+        assert body["scheduled_at"] is not None, "항목 5 — 호출자가 예약 시각을 읽을 수 있어야 한다"
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()

@@ -81,6 +81,10 @@ const DRAFT_DETAIL = {
   published_at: null as string | null,
   published_body_sha256: null as string | null,
   command_status: null as string | null,
+  // story #3426 — gate.sealed_scheduled_at(승인된 예약 시각). story #3808 정정
+  // 決定으로 blockedByCommandInFlight의 「예약 vs backoff」 판별축이 됨(기본값
+  // null=대부분 테스트가 예약과 무관, backoff-pending 취급).
+  scheduled_at: null as string | null,
   // B3(페드루 PO, 2026-09-04 13:14Z) — 실패 배지 mount에 쓰는 나머지 필드.
   command_reason_code: null as string | null,
   // story #3815(페드루 PO CHANGES 2, 2026-09-12) — command_reason_code===
@@ -2473,23 +2477,67 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
   // 상신을 막는다(이미 진행 중이거나 고쳐야 할 게 따로 있음). dead_letter는 예외
   // (f061c1a3 前까지 발행이 유일한 수동 재시도 경로) — 아래에서 활성 그대로임을 pin한다.
   describe('⭐B4 — command_status가 pending/blocked면 발행·예약 상신을 막는다(dead_letter는 예외)', () => {
-    it('pending — 발행·예약 상신 버튼이 비활성화되고 pending 전용 사유가 버튼 밖에 보인다', async () => {
-      stubFetch({ draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1', command_status: 'pending' } });
+    // story #3808(배포 81 라이브 회차 실 결함, 페드루 PO 정정 決定 — 「누가 정한
+    // 시각인가」 축) — pending 하나로는 예약(사람이 정한 시각)인지 backoff(시스템이
+    // 정한 시각)인지 구별이 안 된다. scheduled_at 유무로 갈라 각각 pin한다.
+    it('pending(backoff, scheduled_at 없음) — AC3 계약대로 발행·예약 상신을 잠그지 않는다(#3808)', async () => {
+      stubFetch({
+        draftDetail: {
+          gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+          command_status: 'pending', scheduled_at: null,
+        },
+      });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+
+      expect((container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement).disabled).toBe(false);
+      expect((container.querySelector('[data-testid="channel-post-schedule-submit-button"]') as HTMLButtonElement).disabled).toBe(false);
+      expect(container.querySelector('[data-testid="channel-post-command-inflight-reason"]')).toBeNull();
+      expect(container.querySelector('[data-testid="channel-post-schedule-submit-command-inflight-reason"]')).toBeNull();
+    });
+
+    it('pending(예약, scheduled_at 있음) — 발행·예약 상신 버튼이 비활성화되고 예약 전용 사유가 버튼 밖에 보인다(#3808)', async () => {
+      stubFetch({
+        draftDetail: {
+          gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+          command_status: 'pending', scheduled_at: '2026-09-20T00:00:00Z',
+        },
+      });
       await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
       await flush();
 
       expect((container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement).disabled).toBe(true);
       expect((container.querySelector('[data-testid="channel-post-schedule-submit-button"]') as HTMLButtonElement).disabled).toBe(true);
       expect(container.querySelector('[data-testid="channel-post-command-inflight-reason"]')?.textContent)
-        .toBe(koMessages.content.channelPostsCommandInFlightReasonPending);
+        .toBe(koMessages.content.channelPostsCommandInFlightReasonScheduled);
       expect(container.querySelector('[data-testid="channel-post-schedule-submit-command-inflight-reason"]')?.textContent)
-        .toBe(koMessages.content.channelPostsCommandInFlightReasonPending);
+        .toBe(koMessages.content.channelPostsCommandInFlightReasonScheduled);
+    });
+
+    // story #3808 CHANGES 2(페드루 PO 지적 2026-09-12 19:05Z) — scheduled_at
+    // 존재만 보면 예약 시각이 «지난 뒤»(워커가 이미 시도해 백오프로 넘어간 뒤,
+    // BE 200 허용)에도 FE가 계속 잠그는 재발 클래스. scheduled_at이 과거면
+    // (워커가 언젠가 시도했다가 실패해 백오프로 남은 흉내) 더 이상 잠그지 않는다.
+    it('pending(scheduled_at이 과거) — 예약 시각이 지났으면 잠그지 않는다(#3808 CHANGES 2)', async () => {
+      stubFetch({
+        draftDetail: {
+          gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+          command_status: 'pending', scheduled_at: '2020-01-01T00:00:00Z',
+        },
+      });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+
+      expect((container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement).disabled).toBe(false);
+      expect((container.querySelector('[data-testid="channel-post-schedule-submit-button"]') as HTMLButtonElement).disabled).toBe(false);
+      expect(container.querySelector('[data-testid="channel-post-command-inflight-reason"]')).toBeNull();
+      expect(container.querySelector('[data-testid="channel-post-schedule-submit-command-inflight-reason"]')).toBeNull();
     });
 
     // 유나 재판정(2026-09-04 13:37Z) — pending·blocked를 한 문장에 묶으면 절반은 틀린
-    // 지시가 된다. blocked 전용 문구("연결 문제")가 pending 전용 문구("예약/재시도")와
+    // 지시가 된다. blocked 전용 문구("연결 문제")가 예약 전용 문구("예약이 서버에...")와
     // 다른 것을 pin한다.
-    it('blocked — 발행·예약 상신 버튼이 비활성화되고 blocked 전용 사유가 pending과 다르다', async () => {
+    it('blocked — 발행·예약 상신 버튼이 비활성화되고 blocked 전용 사유가 예약 전용과 다르다', async () => {
       stubFetch({ draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1', command_status: 'blocked' } });
       await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
       await flush();
@@ -2501,7 +2549,7 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
       expect(container.querySelector('[data-testid="channel-post-command-inflight-reason"]')?.textContent)
         .toBe(koMessages.content.channelPostsCommandInFlightReasonBlocked.replace(/<\/?link>/g, ''));
       expect(container.querySelector('[data-testid="channel-post-command-inflight-reason"]')?.textContent)
-        .not.toBe(koMessages.content.channelPostsCommandInFlightReasonPending);
+        .not.toBe(koMessages.content.channelPostsCommandInFlightReasonScheduled);
       const link = container.querySelector('[data-testid="channel-post-command-inflight-reason"] a');
       expect(link?.getAttribute('href')).toBe('/organization/channels');
     });
