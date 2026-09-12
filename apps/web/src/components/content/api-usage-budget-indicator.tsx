@@ -1,7 +1,7 @@
 'use client';
 
 import { useLocale, useTranslations } from 'next-intl';
-import { formatMinorCurrency, formatRemainingWithOverLimit, type GenerationBudgetCurrency } from './generation-budget-indicator';
+import { computeRemainingOverLimit, formatMinorCurrency, formatRemainingWithOverLimit, type GenerationBudgetCurrency } from './generation-budget-indicator';
 
 // story #3808(Phase3·3-3 PR5a, 페드루 PO 確定 2026-09-12) — X 종량 API 지출 월 상한
 // 잔량 표시. `generation-budget-indicator.tsx::GenerationBudgetIndicator`의 형제
@@ -81,9 +81,14 @@ export function ApiUsageBudgetIndicator({
   const remainingMinor = state.remainingMinor;
 
   if (variant === 'compact') {
+    // story #3808 CHANGES(페드루 PO 決定 2026-09-12 16:21Z) — generation-budget-
+    // indicator.tsx의 compact 분기와 동형 처방(접미형 en 템플릿 "left" 오배치 방지).
+    const r = computeRemainingOverLimit(remainingMinor, currency, locale, t);
     return (
       <span className="text-xs text-muted-foreground" data-testid="api-usage-budget-remaining-compact">
-        {t('apiUsageBudgetRemainingCompact', { remaining: formatRemainingWithOverLimit(remainingMinor, currency, locale, t) })}
+        {r.isOverLimit
+          ? t('apiUsageBudgetRemainingCompactOverLimit', { remaining: r.remaining, overage: r.overage })
+          : t('apiUsageBudgetRemainingCompact', { remaining: r.remaining })}
       </span>
     );
   }

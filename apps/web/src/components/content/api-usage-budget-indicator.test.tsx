@@ -202,4 +202,17 @@ describe('ApiUsageBudgetIndicator — en 로케일 실 메시지 파일 렌더(�
     });
     expect(byTestId('api-usage-budget-suspended')?.textContent).toBe('X cost limit ₩0 · Publishing paused');
   });
+
+  // story #3808 CHANGES(유나 pre-steer·페드루 PO 決定 2026-09-12 16:21Z) —
+  // generation-budget-indicator.test.tsx의 동형 테스트와 같은 사각 처방
+  // (en 접미형 "left"가 "over limit" 뒤로 안 밀리는지).
+  it('⭐잔량 음수 — en compact "X cost {remaining} left · {overage} over limit" 어순', async () => {
+    await renderIndicatorEn(
+      { status: 'ok', limitMinor: 300, spentMinor: 10300, remainingMinor: -10000, currency: 'USD', period: 'month' },
+      'compact',
+    );
+    const text = byTestId('api-usage-budget-remaining-compact')?.textContent ?? '';
+    expect(text).toBe('X cost $0.00 left · $100.00 over limit');
+    expect(text).not.toMatch(/over limit left/);
+  });
 });

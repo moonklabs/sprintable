@@ -241,4 +241,18 @@ describe('⭐PO Design 재검①(2026-09-05, PR#3848) — en 로케일 KRW 표�
     );
     expect(byTestId('generation-budget-remaining-compact')?.textContent).toBe('$500.00 left');
   });
+
+  // story #3808 CHANGES(유나 pre-steer·페드루 PO 決定 2026-09-12 16:21Z) — en
+  // compact는 접미형("{remaining} left")이라 완성 문자열("$0 · $100.00 over
+  // limit")을 그대로 꽂으면 "left"가 "over limit" 뒤에 매달린다(ko만 assert하던
+  // 기존 테스트의 사각 — ko는 접두형이라 우연히 무사했다). 전용 키로 어순이 옳게.
+  it('⭐잔량 음수 — en compact는 "left"가 안 밀리고 "{remaining} left · {overage} over limit" 어순', async () => {
+    await renderIndicatorEn(
+      { status: 'ok', limitMinor: 300, spentMinor: 10300, remainingMinor: -10000, currency: 'USD', period: 'month' },
+      'compact',
+    );
+    const text = byTestId('generation-budget-remaining-compact')?.textContent ?? '';
+    expect(text).toBe('$0.00 left · $100.00 over limit');
+    expect(text).not.toMatch(/over limit left/);
+  });
 });
