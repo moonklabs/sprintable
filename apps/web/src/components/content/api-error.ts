@@ -65,6 +65,9 @@ export type SitePostApiErrorKind =
   // budget_gate와 같은 계약, 블루프린트 §2). labelKey는 비워 두고(text_too_long과
   // 동형 관례) page.tsx가 limit/spent/estimated/remaining 4값을 보간해 문장을 짓는다.
   | 'generation_budget_exceeded'
+  // story #3808(PR5c, 페드루 PO 確定 2026-09-12) — 위와 같은 4값 shape·같은 BE
+  // 예외(rule_key만 다름, X api_usage_budget 축) — 별도 kind로 화면 오라벨 방지.
+  | 'api_usage_budget_exceeded'
   // story #3560(concept_approval, 페드루 PO 確定 2026-09-06 · 유나 리뷰 정정
   // PR#3927 CHANGES) — 미승인 컨셉 게이트로 submit 자체가 막힘. 서버가 이 코드에
   // message를 안 보내 화면이 직접 문장을 짓는다(labelKey 등재).
@@ -259,6 +262,9 @@ const KNOWN_ERRORS: Record<string, KnownError> = {
   // EXTERNAL_PUBLISH_APPROVAL_REQUIRED류와 동형). labelKey는 비워 page.tsx가
   // limitMinor/spentMinor/estimatedCostMinor/remainingMinor 4값을 보간한다.
   GENERATION_BUDGET_EXCEEDED: { labelKey: '', kind: 'generation_budget_exceeded' },
+  // story #3808(PR5c, 페드루 PO 確定 2026-09-12 — 라이브 회차 결함 처방) — 위와
+  // 같은 BE 예외(rule_key만 다름)가 이제 별도 코드로 온다(축 오라벨 결함 정정).
+  API_USAGE_BUDGET_EXCEEDED: { labelKey: '', kind: 'api_usage_budget_exceeded' },
 };
 
 function extractCodeAndMessage(detail: unknown): {

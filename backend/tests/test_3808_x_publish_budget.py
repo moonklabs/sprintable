@@ -282,6 +282,53 @@ async def test_publish_blocked_when_api_usage_budget_exceeded():
 
 
 @pytest.mark.anyio
+async def test_publish_endpoint_returns_api_usage_budget_exceeded_code_not_generation():
+    """⭐story #3808(PR5c, 페드루 PO 確定 2026-09-12 — 라이브 회차 결함 처방) — X
+    api_usage_budget 초과가 발행 HTTP 엔드포인트에서 "GENERATION_BUDGET_EXCEEDED"
+    (실측, 배포79 라이브 회차 — 축 오라벨 결함)가 아니라 별도 코드로 와야 한다.
+    실 라우터(publish_channel_post_draft_endpoint)까지 왕복해 detail.code를 직접
+    확認한다(서비스 레이어 단위 테스트만으론 라우터의 하드코딩 문자열 매핑을 못
+    잡는다)."""
+    from app.main import app
+    from app.services.channel_connection import upsert_channel_connection
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            human_id = await _seed_human(s, org_id)
+            connection = await upsert_channel_connection(
+                s, org_id=org_id, channel="x_sandbox", account_id="x-sandbox-budget-code-1",
+                account_label="sandbox_x_user", credential_kind="oauth",
+                access_token="sandbox-x-access:app-1", refresh_token="sandbox-x-refresh:app-1:g0",
+                token_expires_at=datetime.now(timezone.utc), refresh_mode="refresh_token",
+                scopes=["tweet.read", "tweet.write", "offline.access"], connected_by=human_id,
+            )
+            await _put_rules(s, org_id=org_id, rules={
+                "api_usage_budget": {"limit_minor": 10, "currency": "KRW", "period": "month"},
+            })
+            draft_id = await _seed_and_approve_x_draft(
+                s, org_id=org_id, project_id=project_id, human_id=human_id, connection_id=connection.id,
+            )
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        try:
+            async with _client_for(app) as client:
+                r = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+            assert r.status_code == 422, r.text
+            error = r.json()["error"]
+            assert error["code"] == "API_USAGE_BUDGET_EXCEEDED", (
+                f"X 상한 초과인데 코드가 {error.get('code')!r} — 축 오라벨 결함 재발"
+            )
+            assert error["limit_minor"] == 10
+        finally:
+            app.dependency_overrides.clear()
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_publish_succeeds_and_records_api_usage_cost_evidence():
     from sqlalchemy import select
     from app.models.evidence import Evidence

@@ -29,6 +29,7 @@ import { CommentReplyDialog, type CommentReplyOutcome, type ReplyView } from '@/
 import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { GenerationBudgetIndicator, majorToMinor, type GenerationBudgetCurrency, type GenerationBudgetState } from '@/components/content/generation-budget-indicator';
 import { GenerationBudgetExceededBanner } from '@/components/content/generation-budget-exceeded-banner';
+import { ApiUsageBudgetExceededBanner } from '@/components/content/api-usage-budget-exceeded-banner';
 import { ApiUsageBudgetIndicator, type ApiUsageBudgetState } from '@/components/content/api-usage-budget-indicator';
 import { isSandboxChannelDraft, SandboxTestBadge } from '@/components/content/sandbox-test-badge';
 import { RawDetailsToggle } from '@/components/content/raw-details-toggle';
@@ -694,6 +695,13 @@ export default function ChannelPostEditPage() {
     && genBudget.remainingMinor !== null && genBudget.spentMinor !== null;
   const generationBudgetCurrency: GenerationBudgetCurrency | null =
     genBudget.status === 'ok' ? genBudget.currency : null;
+  // story #3808(PR5c, 페드루 PO 確定 2026-09-12) — apiUsageBudget과 동형(다른
+  // 지갑이라 다른 state, generationBudgetCurrency와 같은 파생 방식).
+  const apiUsageBudgetCurrency: GenerationBudgetCurrency | null =
+    apiUsageBudget.status === 'ok' ? apiUsageBudget.currency : null;
+  const [apiUsageBudgetExceeded, setApiUsageBudgetExceeded] = useState<
+    { limitMinor: number; spentMinor: number; estimatedCostMinor: number; remainingMinor: number; currency: GenerationBudgetCurrency } | null
+  >(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   // story #3662(campaigns/[campaignId]/page.tsx:76 선례, 유나 確定) — notFound/loadError
@@ -1547,6 +1555,8 @@ export default function ChannelPostEditPage() {
     if (!orgId || !draft || !canPublish || blockedByCommandInFlight) return;
     setPublishing(true);
     setPublishResult(null);
+    setGenBudgetExceeded(null);
+    setApiUsageBudgetExceeded(null);
     try {
       const res = await fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${draftId}/publish`, { method: 'POST' });
       if (res.ok) {
@@ -1588,6 +1598,38 @@ export default function ChannelPostEditPage() {
       } else {
         const body = await res.json().catch(() => null);
         const info = parseSitePostApiError(body);
+        // story #3808(PR5c, 페드루 PO 確定 2026-09-12 — 라이브 회차 결함 처방) —
+        // 즉시 발행 버튼도 예산 초과(생성 비용·X API 지출)를 만나면 submit과 같은
+        // 구조화 배너(4값+통화)를 그린다 — 그 전엔 이 버튼 경로가 이 두 코드를
+        // 특별취급 안 해 generic "발행에 실패했습니다"만 보여줬다(humanMessageKey가
+        // 둘 다 빈 문자열이라). 통화를 모르면(축 GET이 실패/불완전) 배너를 접고
+        // generic 문구로 폴백(submit과 동형 규율, 'KRW' 추정 금지).
+        if (
+          info.kind === 'generation_budget_exceeded'
+          && typeof info.limitMinor === 'number' && typeof info.spentMinor === 'number'
+          && typeof info.estimatedCostMinor === 'number' && typeof info.remainingMinor === 'number'
+          && generationBudgetCurrency !== null
+        ) {
+          setGenBudgetExceeded({
+            limitMinor: info.limitMinor, spentMinor: info.spentMinor,
+            estimatedCostMinor: info.estimatedCostMinor, remainingMinor: info.remainingMinor,
+            currency: generationBudgetCurrency,
+          });
+          return;
+        }
+        if (
+          info.kind === 'api_usage_budget_exceeded'
+          && typeof info.limitMinor === 'number' && typeof info.spentMinor === 'number'
+          && typeof info.estimatedCostMinor === 'number' && typeof info.remainingMinor === 'number'
+          && apiUsageBudgetCurrency !== null
+        ) {
+          setApiUsageBudgetExceeded({
+            limitMinor: info.limitMinor, spentMinor: info.spentMinor,
+            estimatedCostMinor: info.estimatedCostMinor, remainingMinor: info.remainingMinor,
+            currency: apiUsageBudgetCurrency,
+          });
+          return;
+        }
         // story #3402 PR2 ②-c(AC10) — CHANNEL_TEXT_TOO_LONG·CHANNEL_RATE_LIMITED는
         // api-error.ts가 max_length/current_length·reset_at을 실어만 오고 문구 조립은
         // 소비부 몫으로 남겨 둔 코드다(doc §5 표 — 「500자 한도인데 517자입니다」·
@@ -2957,6 +2999,16 @@ export default function ChannelPostEditPage() {
           estimatedCostMinor={genBudgetExceeded.estimatedCostMinor}
           remainingMinor={genBudgetExceeded.remainingMinor}
           currency={genBudgetExceeded.currency}
+        />
+      ) : null}
+
+      {apiUsageBudgetExceeded ? (
+        <ApiUsageBudgetExceededBanner
+          limitMinor={apiUsageBudgetExceeded.limitMinor}
+          spentMinor={apiUsageBudgetExceeded.spentMinor}
+          estimatedCostMinor={apiUsageBudgetExceeded.estimatedCostMinor}
+          remainingMinor={apiUsageBudgetExceeded.remainingMinor}
+          currency={apiUsageBudgetExceeded.currency}
         />
       ) : null}
 

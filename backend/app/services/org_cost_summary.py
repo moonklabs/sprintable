@@ -30,6 +30,7 @@ from app.models.gate import Gate
 from app.models.insight_snapshot import InsightSnapshot
 from app.services.ads_spend_snapshots import _ADS_BOOST_GATE_TYPE, _PAID_SOURCE, paid_snapshots_only
 from app.services.generation_budget import compute_generation_budget_status
+from app.services.x_publish_budget import API_USAGE_BUDGET_RULE_KEY, API_USAGE_COST_KIND
 
 
 async def get_org_ads_cost_summary(db: AsyncSession, *, org_id: uuid.UUID) -> dict:
@@ -157,6 +158,15 @@ async def get_org_cost_summary(db: AsyncSession, *, org_id: uuid.UUID, now: date
     now = now or datetime.now(timezone.utc)
     ads = await get_org_ads_cost_summary(db, org_id=org_id)
     generation = await compute_generation_budget_status(db, org_id=org_id, now=now)
+    # story #3808(PR5c, 페드루 PO 確定 2026-09-12 — 라이브 회차 결함 처방) — X 비용
+    # 원장은 story #3808 PR3부터 이미 있다(api_usage_budget 지갑, evidence.payload.
+    # kind="api_usage_cost"). 이 함수가 그 사실을 반영 안 해 "X 비용은 아직 측정되지
+    # 않습니다"를 실 지출(evidence 300건)이 있어도 그대로 찍었다(편집기의 GET
+    # .../api-usage-budget과 같은 계산 함수를 안 써서 생긴 두 세계 — 같은 함수
+    # 재사용으로 정정, 신규 계산 로직 0).
+    x_budget = await compute_generation_budget_status(
+        db, org_id=org_id, now=now, kind=API_USAGE_COST_KIND, rule_key=API_USAGE_BUDGET_RULE_KEY,
+    )
     daily_series = await get_org_paid_spend_daily_series(db, org_id=org_id)
 
     return {
@@ -172,8 +182,11 @@ async def get_org_cost_summary(db: AsyncSession, *, org_id: uuid.UUID, now: date
         # 조용히 버려(그라운딩 中 자체발견) 카드가 통화기호를 못 낼 뻔했다 — 그대로
         # 통과만.
         "generation_currency": generation["currency"] if generation is not None else None,
-        # story #3809 그라운딩②(2026-09-11) — X 비용 원장 자체가 이 시점 코드에
-        # 없다(실측 확認). "0"으로 지어내지 않고 미측정을 null로 예약만 한다.
-        "x_cost_spent_minor": None,
+        # story #3808(PR5c) — api_usage_budget 규칙이 org에 없으면 None(위 generation과
+        # 동형 "규칙 없음"≠"0 지출" 계약). 있으면 evidence 합산 실값(0 포함).
+        "x_cost_spent_minor": x_budget["spent_minor"] if x_budget is not None else None,
+        "x_cost_period_start": x_budget["period_start"] if x_budget is not None else None,
+        "x_cost_period_end": x_budget["period_end"] if x_budget is not None else None,
+        "x_currency": x_budget["currency"] if x_budget is not None else None,
         "paid_spend_daily_series": daily_series,
     }

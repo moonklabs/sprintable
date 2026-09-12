@@ -24,6 +24,7 @@ from tests.test_3498_generation_budget_evidence_and_config import (
     _put_generation_budget,
     _seed_generation_cost_evidence,
 )
+from tests.test_3808_x_publish_budget import _put_rules, _seed_cost_evidence
 from tests.test_3497_insight_snapshots import _seed_channel_connection
 from tests.test_3806_ads_boost_execution import _setup_approved_gate
 from tests.test_3806_ads_boost_gate import _approve_gate, _boost_body, _seed_publication
@@ -305,10 +306,12 @@ async def test_generation_currency_null_when_no_rule():
 
 
 @pytest.mark.anyio
-async def test_x_cost_always_null():
-    """story #3809 그라운딩②(2026-09-11) — X 비용 원장 자체가 이 시점 코드에
-    없다(실측 확認). 다른 조건과 무관하게 항상 null이어야 한다(0으로 지어내지
-    않는다)."""
+async def test_x_cost_null_when_no_rule():
+    """story #3808(PR5c, 페드루 PO 確定 2026-09-12 — 라이브 회차 결함 처방) — X
+    api_usage_budget 규칙 자체가 없으면(generation_cost와 동형 「규칙 없음」 계약)
+    null. 옛 「항상 null」 전제(그라운딩②)는 이 PR로 정정됨 — PR3부터 X 비용
+    원장이 실제로 있다(evidence.payload.kind=api_usage_cost), 이 함수가 그 사실을
+    반영 안 해 실 지출이 있어도 하드코딩 None을 찍던 것이 결함이었다."""
     from app.services.org_cost_summary import get_org_cost_summary
 
     engine, Session = await _session_factory()
@@ -319,8 +322,65 @@ async def test_x_cost_always_null():
         async with Session() as s:
             summary = await get_org_cost_summary(s, org_id=org_id)
         assert summary["x_cost_spent_minor"] is None
+        assert summary["x_cost_period_start"] is None
+        assert summary["x_cost_period_end"] is None
+        assert summary["x_currency"] is None
     finally:
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_x_cost_reflects_evidence_sum():
+    """⭐결함 재현·처방 확認 — 라이브 회차 실측 그대로(evidence 300원치, 편집기
+    GET .../api-usage-budget과 이 함수가 같은 값을 봐야 한다)."""
+    from app.services.org_cost_summary import get_org_cost_summary
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, _ = await _seed_org(s)
+            await _put_rules(s, org_id=org_id, rules={
+                "api_usage_budget": {"limit_minor": 100_000, "currency": "KRW", "period": "month"},
+            })
+            await _seed_cost_evidence(s, org_id=org_id, work_item_id=uuid.uuid4(), kind="api_usage_cost", cost_minor=300)
+
+        async with Session() as s:
+            summary = await get_org_cost_summary(s, org_id=org_id)
+        assert summary["x_cost_spent_minor"] == 300
+        assert summary["x_currency"] == "KRW"
+        assert summary["x_cost_period_start"] is not None
+        assert summary["x_cost_period_end"] is not None
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_generation_and_x_cost_are_isolated_in_the_same_summary():
+    """양성대조 — 두 축(생성 비용·X 비용)이 같은 요약 응답 안에서도 서로 안
+    갉아먹는다(PR3의 「다른 지갑」 격리를 이 조회 함수 레벨에서도 재확認)."""
+    from app.services.org_cost_summary import get_org_cost_summary
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, _ = await _seed_org(s)
+            await _put_rules(s, org_id=org_id, rules={
+                "generation_budget": {"limit_minor": 100_000, "currency": "KRW", "period": "month"},
+                "api_usage_budget": {"limit_minor": 50_000, "currency": "KRW", "period": "month"},
+            })
+            await _seed_generation_cost_evidence(
+                s, org_id=org_id, work_item_id=uuid.uuid4(), cost_minor=1_000, created_by=uuid.uuid4(),
+            )
+            await _seed_cost_evidence(s, org_id=org_id, work_item_id=uuid.uuid4(), kind="api_usage_cost", cost_minor=300)
+
+        async with Session() as s:
+            summary = await get_org_cost_summary(s, org_id=org_id)
+        assert summary["generation_cost_spent_minor"] == 1_000
+        assert summary["x_cost_spent_minor"] == 300
+    finally:
+        await engine.dispose()
+
+
 
 
 @pytest.mark.anyio
@@ -416,6 +476,7 @@ async def test_cost_summary_endpoint_returns_shape():
         assert set(body.keys()) == {
             "ads", "generation_cost_spent_minor", "generation_cost_period_start",
             "generation_cost_period_end", "generation_currency", "x_cost_spent_minor",
+            "x_cost_period_start", "x_cost_period_end", "x_currency",
             "paid_spend_daily_series",
         }
         assert set(body["ads"].keys()) == {

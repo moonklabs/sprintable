@@ -94,6 +94,9 @@ _GATE_REVERIFY_ERROR_CODES = frozenset({
     # story #3498(AC4) — 예산 재검사도 이 워커 재검증 묶음에 낀다(adapter 호출 0
     # 방어선이 이 자리 하나라, 새 방어선을 안 늘리고 기존 방어선을 확장한다).
     "GENERATION_BUDGET_EXCEEDED",
+    # story #3808(PR5c, 페드루 PO 確定 2026-09-12) — X api_usage_budget 축(같은
+    # GenerationBudgetExceededError 예외, rule_key만 다름)도 같은 이유로 이 묶음에.
+    "API_USAGE_BUDGET_EXCEEDED",
 })
 
 
@@ -322,6 +325,7 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
         publish_channel_post_draft,
     )
     from app.services.generation_budget import GenerationBudgetExceededError
+    from app.services.x_publish_budget import API_USAGE_BUDGET_RULE_KEY
 
     error_code: str | None = None
     last_error: str | None = None
@@ -397,12 +401,19 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
     except GenerationBudgetExceededError as exc:
         # story #3498(AC4) — site_post 쪽의 GENERATION_BUDGET_EXCEEDED 처리와 동형
         # (adapter 호출 0, 재시도 대상 아님).
+        #
+        # story #3808(PR5c, 페드루 PO 確定 2026-09-12) — X api_usage_budget 축도
+        # 같은 예외를 낸다(rule_key만 다름) — 위 라우터 핸들러와 동형으로 갈라
+        # 코드를 오라벨하지 않는다(실측, 배포79 라이브 회차).
         await record_publication_attempt(
             db, command=command, approval_check="budget_exceeded", adapter_called=False,
             started_at=attempt_started_at, finished_at=now, result_code=None,
         )
         command.status = STATUS_BLOCKED_UNAPPROVED
-        command.reason_code = "GENERATION_BUDGET_EXCEEDED"
+        command.reason_code = (
+            "API_USAGE_BUDGET_EXCEEDED" if exc.rule_key == API_USAGE_BUDGET_RULE_KEY
+            else "GENERATION_BUDGET_EXCEEDED"
+        )
         command.last_error = str(exc)[:2000]
         return
     except ChannelPostSealMissingError as exc:

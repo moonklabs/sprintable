@@ -61,7 +61,7 @@ const NO_APPROVED_BOOSTS = {
   },
   generation_cost_spent_minor: null, generation_cost_period_start: null,
   generation_cost_period_end: null, generation_currency: null,
-  x_cost_spent_minor: null,
+  x_cost_spent_minor: null, x_cost_period_start: null, x_cost_period_end: null, x_currency: null,
 };
 
 const SINGLE_CURRENCY = {
@@ -71,7 +71,7 @@ const SINGLE_CURRENCY = {
   },
   generation_cost_spent_minor: 5_000, generation_cost_period_start: '2026-09-01T00:00:00Z',
   generation_cost_period_end: '2026-09-30T23:59:59Z', generation_currency: 'KRW',
-  x_cost_spent_minor: null,
+  x_cost_spent_minor: null, x_cost_period_start: null, x_cost_period_end: null, x_currency: null,
 };
 
 const MIXED_CURRENCY = {
@@ -81,7 +81,7 @@ const MIXED_CURRENCY = {
   },
   generation_cost_spent_minor: null, generation_cost_period_start: null,
   generation_cost_period_end: null, generation_currency: null,
-  x_cost_spent_minor: null,
+  x_cost_spent_minor: null, x_cost_period_start: null, x_cost_period_end: null, x_currency: null,
 };
 
 describe('OrgCostSummaryCard(story #3809, PR3)', () => {
@@ -163,5 +163,57 @@ describe('OrgCostSummaryCard(story #3809, PR3)', () => {
     await act(async () => { root.render(wrap(<OrgCostSummaryCard orgId="org-1" />, 'en')); });
     await flush();
     expect(container.querySelector('[data-testid="org-cost-ads-amounts"]')?.textContent).toBe('Budget ₩150,000 · Spent ₩12,345 · Remaining ₩137,655');
+  });
+
+  // story #3808(PR5c, 페드루 PO 確定 2026-09-12 — 라이브 회차 결함 처방) — 아래
+  // 3건은 generation 축 테스트(116·150줄)와 정확히 동형(같은 3분기: 미측정/실값/
+  // 통화실패). x_cost_spent_minor가 BE 하드코딩 None이던 시절엔 이 3건이 전부
+  // 존재할 수 없었다(항상 위 「미측정」한 갈래뿐) — non-null 분기 자체가 신설.
+
+  it('⭐X 비용 정책은 있고 지출 0 — 특별 문장 없이 그냥 「X 비용 0원」(generation 0원 동형)', async () => {
+    stubFetchOk({
+      ...NO_APPROVED_BOOSTS,
+      x_cost_spent_minor: 0, x_currency: 'KRW',
+      x_cost_period_start: '2026-09-01T00:00:00Z', x_cost_period_end: '2026-09-30T23:59:59Z',
+    });
+    await act(async () => { root.render(wrap(<OrgCostSummaryCard orgId="org-1" />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="org-cost-x-cost-amount"]')?.textContent).toBe('X 비용 0원');
+    expect(container.querySelector('[data-testid="org-cost-x-cost-unmeasured"]')).toBeNull();
+  });
+
+  it('⭐X 비용 실측값(양수) — formatMinorCurrency로 실제 지출을 그린다', async () => {
+    stubFetchOk({
+      ...NO_APPROVED_BOOSTS,
+      x_cost_spent_minor: 300, x_currency: 'KRW',
+      x_cost_period_start: '2026-09-01T00:00:00Z', x_cost_period_end: '2026-09-30T23:59:59Z',
+    });
+    await act(async () => { root.render(wrap(<OrgCostSummaryCard orgId="org-1" />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="org-cost-x-cost-amount"]')?.textContent).toBe('X 비용 300원');
+    expect(container.querySelector('[data-testid="org-cost-x-cost-unmeasured"]')).toBeNull();
+    expect(container.querySelector('[data-testid="org-cost-x-cost-failed"]')).toBeNull();
+  });
+
+  it('X 비용 값은 있는데 통화가 없음(서버 응답 불완전) — 실패 문구로 접는다(KRW 추정 금지)', async () => {
+    stubFetchOk({
+      ...NO_APPROVED_BOOSTS,
+      x_cost_spent_minor: 300, x_currency: null,
+    });
+    await act(async () => { root.render(wrap(<OrgCostSummaryCard orgId="org-1" />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="org-cost-x-cost-failed"]')?.textContent).toBe('X 비용 정보를 확인하지 못했습니다.');
+    expect(container.querySelector('[data-testid="org-cost-x-cost-amount"]')).toBeNull();
+  });
+
+  it('en 로케일 — X 비용 실측값이 영문 메시지로 렌더', async () => {
+    stubFetchOk({
+      ...NO_APPROVED_BOOSTS,
+      x_cost_spent_minor: 300, x_currency: 'KRW',
+      x_cost_period_start: '2026-09-01T00:00:00Z', x_cost_period_end: '2026-09-30T23:59:59Z',
+    });
+    await act(async () => { root.render(wrap(<OrgCostSummaryCard orgId="org-1" />, 'en')); });
+    await flush();
+    expect(container.querySelector('[data-testid="org-cost-x-cost-amount"]')?.textContent).toBe('X cost ₩300');
   });
 });

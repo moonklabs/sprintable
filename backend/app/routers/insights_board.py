@@ -185,9 +185,14 @@ class OrgCostSummaryResponse(BaseModel):
     # story #3809(Phase3·3-7 PR 2b, 페드루 PO 確定 2026-09-11 18:46Z) — PR#3848
     # PO 지침②("FE가 'KRW' 추정 절대금지") 준수. 규칙 없으면(위와 동형) null.
     generation_currency: str | None
-    # story #3809 그라운딩②(2026-09-11) — X 비용 원장이 이 시점 코드에 없다(실측
-    # 확認). "0"으로 지어내지 않고 미측정 예약(null)만 한다.
+    # story #3808(PR5c, 페드루 PO 確定 2026-09-12 — 라이브 회차 결함 처방) — X 비용
+    # 원장은 story #3808 PR3부터 이미 있다(api_usage_budget 지갑). 이 필드가 그동안
+    # 하드코딩 None이라 실 지출이 있어도 "아직 측정되지 않습니다"를 계속 찍었다 —
+    # generation_cost_*와 동형 계약(규칙 없으면 null, 있으면 실값 — 0 포함).
     x_cost_spent_minor: int | None
+    x_cost_period_start: datetime | None
+    x_cost_period_end: datetime | None
+    x_currency: str | None
     paid_spend_daily_series: list[PaidSpendDailyPointView]
 
 
