@@ -31,6 +31,12 @@ const REPLACE_FIELDS: Record<string, ReplaceField[]> = {
   webhook: [
     { name: 'secret', labelKey: 'channelConnectFieldSecret', type: 'password', required: true },
   ],
+  // story #3813(Phase3·3-4 PR5-a, 페드루 PO 確定 2026-09-12) — 스티비 Auth Key 회전.
+  // 주소록 ID는 「id·계정 축은 불변」 원칙대로 이 폼 대상이 아니다(wordpress의
+  // site_url이 여기 없는 것과 동형 — 자격만 바꾼다).
+  stibee: [
+    { name: 'api_key', labelKey: 'channelConnectFieldApiKey', type: 'password', required: true },
+  ],
 };
 
 // 유나 정본(3653a18c §2 "이 다섯은 pasted_secret 연결 폼에도 그대로 걸린다" ④ —
@@ -41,6 +47,7 @@ const REPLACE_FIELDS: Record<string, ReplaceField[]> = {
 const REPLACE_SECRET_HINT_KEY: Record<string, string> = {
   wordpress: 'channelConnectPastedSecretHintWordpress',
   webhook: 'channelConnectPastedSecretHintWebhook',
+  stibee: 'channelConnectPastedSecretHintStibee',
 };
 
 export function ReplaceCredentialCard({

@@ -1731,6 +1731,14 @@ jobs:
       - name: "Verify no raw role JSX text (story #3770 regression guard)"
         run: pnpm --filter web verify:no-raw-role-jsx-text
 
+      # story #3813(Phase3·3-4 PR5-a CHANGES, 페드루 PO 確定 2026-09-12) — pasted_secret
+      # 채널(wordpress·webhook·stibee…) 생성 BFF는 `[channel]` 동적 세그먼트가 아니라
+      # 채널마다 리터럴 route.ts라, PASTED_SECRET_FIELDS에 채널을 등재해도 대응
+      # route.ts를 안 만들면 폼 제출이 항상 404다(2026-09-12 stibee 실사고로 3번째
+      # 재발 — wordpress·webhook도 각자 별도 사고였다). 선언 목록 전수 대조 가드.
+      - name: "Verify pasted_secret BFF route registered (story #3813 regression guard)"
+        run: pnpm --filter web verify:pasted-secret-bff-route-registered
+
       # story #3739(2026-09-09) 메타 가드 — package.json에 등재된 verify:* 스크립트
       # 집합이 이 ci.yml에서 실제로 부르는 집합의 부분집합이 아니면(새 verify:* 스크립트를
       # 만들고 여기 안 물리면) FAIL. story #3736 ⑪·이 스토리 자신(no-direct-backend-v2-call·

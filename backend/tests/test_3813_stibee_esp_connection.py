@@ -55,6 +55,28 @@ def _configure_secrets(monkeypatch):
     importlib.reload(crypto_module)
 
 
+def _patch_auth_check_ok(monkeypatch):
+    """story #3813 PR5-a — 저장 시 auth-check 실호출을 컨트롤(성공 200)로 대체.
+    실 네트워크 0(CI가 api.stibee.com에 진짜로 못 나간다는 전제 자체를 없앤다)."""
+    import app.services.stibee_client as stibee_client_module
+
+    async def _fake_verify_ok(client, *, api_key):
+        return None
+
+    monkeypatch.setattr(stibee_client_module, "verify_api_key", _fake_verify_ok)
+
+
+def _patch_auth_check_fails(monkeypatch, *, status_code: int = 401):
+    """story #3813 PR5-a — auth-check 실패(401/403류) 컨트롤."""
+    import app.services.stibee_client as stibee_client_module
+    from app.services.stibee_client import StibeeAuthCheckFailed
+
+    async def _fake_verify_fails(client, *, api_key):
+        raise StibeeAuthCheckFailed("unauthorized", status_code=status_code)
+
+    monkeypatch.setattr(stibee_client_module, "verify_api_key", _fake_verify_fails)
+
+
 @pytest.fixture(autouse=True)
 def _register_stibee_sandbox(monkeypatch):
     """`stibee_sandbox`는 CHANNEL_ADAPTERS의 SANDBOX_CHANNEL_ENABLED 조건부 블록
@@ -94,7 +116,42 @@ def test_stibee_kind_is_not_blog_so_channel_post_pipeline_dispatch_stays_open():
 
 
 @pytest.mark.anyio
-async def test_owner_creates_stibee_connection():
+async def test_owner_creates_stibee_connection(monkeypatch):
+    _patch_auth_check_ok(monkeypatch)
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id, role="owner")
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+        async with _client_for(app) as client:
+            r = await client.post(
+                f"/api/v2/organizations/{org_id}/channel-connections/stibee",
+                json={"api_key": "stibee-auth-key-abcdef", "list_id": "12345"},
+            )
+        assert r.status_code == 201, r.text
+        body = r.json()
+        assert body["channel"] == "stibee"
+        assert body["account_id"] == "default"
+        assert body["credential_kind"] == "pasted_secret"
+        assert body["status"] == "active"
+        # story #3813 PR5-a — 사람이 입력한 주소록 ID가 account_label에 그대로 저장.
+        assert body["account_label"] == "12345"
+        # story #3373 AC6과 동형 — 응답에 자격 자체(api_key)가 어떤 필드로도 안 실린다.
+        assert "api_key" not in body and "encrypted_access_token" not in body
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_stibee_missing_list_id_rejected(monkeypatch):
+    """story #3813 PR5-a — api_key만 있고 list_id가 없으면 422(형제 STIBEE_FIELDS_
+    REQUIRED와 동일 코드 — 이 코드가 이제 둘 중 하나라도 없으면이라는 뜻으로 넓어졌다)."""
+    _patch_auth_check_ok(monkeypatch)
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -109,14 +166,77 @@ async def test_owner_creates_stibee_connection():
                 f"/api/v2/organizations/{org_id}/channel-connections/stibee",
                 json={"api_key": "stibee-auth-key-abcdef"},
             )
-        assert r.status_code == 201, r.text
-        body = r.json()
-        assert body["channel"] == "stibee"
-        assert body["account_id"] == "default"
-        assert body["credential_kind"] == "pasted_secret"
-        assert body["status"] == "active"
-        # story #3373 AC6과 동형 — 응답에 자격 자체(api_key)가 어떤 필드로도 안 실린다.
-        assert "api_key" not in body and "encrypted_access_token" not in body
+        assert r.status_code == 422, r.text
+        error = r.json().get("error") or r.json()
+        assert error["code"] == "STIBEE_FIELDS_REQUIRED"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_stibee_auth_check_failure_rejects_and_saves_nothing(monkeypatch):
+    """story #3813 PR5-a — 「가짜 키=초록 Connected」 결함 처방의 핵심 회귀. auth-check가
+    401을 내면 422 STIBEE_API_KEY_INVALID로 거절되고, 연결 행 자체가 저장되지 않는다
+    (fail-closed — 재조회해도 0건)."""
+    _patch_auth_check_fails(monkeypatch, status_code=401)
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id, role="owner")
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+        async with _client_for(app) as client:
+            r = await client.post(
+                f"/api/v2/organizations/{org_id}/channel-connections/stibee",
+                json={"api_key": "fake-not-a-real-key", "list_id": "12345"},
+            )
+        assert r.status_code == 422, r.text
+        error = r.json().get("error") or r.json()
+        assert error["code"] == "STIBEE_API_KEY_INVALID"
+
+        from app.services.channel_connection import list_channel_connections
+
+        async with Session() as s:
+            saved = await list_channel_connections(s, org_id=org_id)
+        assert not any(c.channel == "stibee" for c in saved), "auth-check 실패에도 연결 행이 저장됐다(fail-closed 위반)"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_stibee_auth_check_unavailable_uses_distinct_code(monkeypatch):
+    """story #3813 PR5-a CHANGES(페드루 PO 確定 2026-09-12) — 스티비가 안 닿는 것
+    (여기선 5xx로 시뮬레이션)과 키가 틀린 것(401)은 사람이 할 일이 다르다 — 별도
+    코드 STIBEE_AUTH_CHECK_UNAVAILABLE. 이것도 fail-closed(연결 미저장)는 동일."""
+    _patch_auth_check_fails(monkeypatch, status_code=503)
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id, role="owner")
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+        async with _client_for(app) as client:
+            r = await client.post(
+                f"/api/v2/organizations/{org_id}/channel-connections/stibee",
+                json={"api_key": "any-key", "list_id": "12345"},
+            )
+        assert r.status_code == 422, r.text
+        error = r.json().get("error") or r.json()
+        assert error["code"] == "STIBEE_AUTH_CHECK_UNAVAILABLE"
+
+        from app.services.channel_connection import list_channel_connections
+
+        async with Session() as s:
+            saved = await list_channel_connections(s, org_id=org_id)
+        assert not any(c.channel == "stibee" for c in saved)
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
@@ -172,9 +292,10 @@ async def test_stibee_agent_forbidden():
 
 
 @pytest.mark.anyio
-async def test_reconnect_stibee_is_idempotent_upsert():
+async def test_reconnect_stibee_is_idempotent_upsert(monkeypatch):
     """story #3373 AC8 재사용 — 같은 (org, stibee, "default") 재호출은 새 행이 아니라
     기존 행 갱신(id 불변, Auth Key 교체)."""
+    _patch_auth_check_ok(monkeypatch)
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -187,11 +308,11 @@ async def test_reconnect_stibee_is_idempotent_upsert():
         async with _client_for(app) as client:
             r1 = await client.post(
                 f"/api/v2/organizations/{org_id}/channel-connections/stibee",
-                json={"api_key": "old-key"},
+                json={"api_key": "old-key", "list_id": "12345"},
             )
             r2 = await client.post(
                 f"/api/v2/organizations/{org_id}/channel-connections/stibee",
-                json={"api_key": "new-key"},
+                json={"api_key": "new-key", "list_id": "12345"},
             )
         assert r1.status_code == 201, r1.text
         assert r2.status_code == 201, r2.text
@@ -202,9 +323,10 @@ async def test_reconnect_stibee_is_idempotent_upsert():
 
 
 @pytest.mark.anyio
-async def test_replace_stibee_credential_in_place():
+async def test_replace_stibee_credential_in_place(monkeypatch):
     """story #3492 동형 — 제자리 교체(id 불변). PATCH .../credentials가 create와
     별개 경로임을 확認(create를 두 번 부르지 않고도 회전 가능)."""
+    _patch_auth_check_ok(monkeypatch)
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -217,7 +339,7 @@ async def test_replace_stibee_credential_in_place():
         async with _client_for(app) as client:
             created = await client.post(
                 f"/api/v2/organizations/{org_id}/channel-connections/stibee",
-                json={"api_key": "old-key"},
+                json={"api_key": "old-key", "list_id": "12345"},
             )
             connection_id = created.json()["id"]
             replaced = await client.patch(
@@ -232,7 +354,11 @@ async def test_replace_stibee_credential_in_place():
 
 
 @pytest.mark.anyio
-async def test_replace_stibee_credential_missing_field_rejected():
+async def test_replace_stibee_credential_auth_check_failure_rejects(monkeypatch):
+    """story #3813 PR5-a — 회전(rotate)도 저장이라 auth-check를 탄다. 실패하면 422로
+    거절되고(create와 같은 코드), 기존 자격은 그대로 남는다(제자리 교체 실패=원본
+    보존, PATCH 자체가 원자적이라 별도 롤백 로직 불요)."""
+    _patch_auth_check_ok(monkeypatch)
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -245,7 +371,39 @@ async def test_replace_stibee_credential_missing_field_rejected():
         async with _client_for(app) as client:
             created = await client.post(
                 f"/api/v2/organizations/{org_id}/channel-connections/stibee",
-                json={"api_key": "old-key"},
+                json={"api_key": "old-key", "list_id": "12345"},
+            )
+            connection_id = created.json()["id"]
+
+            _patch_auth_check_fails(monkeypatch, status_code=401)
+            replaced = await client.patch(
+                f"/api/v2/organizations/{org_id}/channel-connections/{connection_id}/credentials",
+                json={"api_key": "fake-not-a-real-key"},
+            )
+        assert replaced.status_code == 422, replaced.text
+        error = replaced.json().get("error") or replaced.json()
+        assert error["code"] == "STIBEE_API_KEY_INVALID"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_replace_stibee_credential_missing_field_rejected(monkeypatch):
+    _patch_auth_check_ok(monkeypatch)
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id, role="owner")
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+        async with _client_for(app) as client:
+            created = await client.post(
+                f"/api/v2/organizations/{org_id}/channel-connections/stibee",
+                json={"api_key": "old-key", "list_id": "12345"},
             )
             connection_id = created.json()["id"]
             replaced = await client.patch(

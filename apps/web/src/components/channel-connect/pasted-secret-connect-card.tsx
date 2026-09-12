@@ -32,7 +32,10 @@ interface PastedSecretField {
   type: 'text' | 'password';
 }
 
-const PASTED_SECRET_FIELDS: Record<string, PastedSecretField[]> = {
+// story #3813 PR5-a CHANGES(페드루 PO 確定 2026-09-12) — export: verify-pasted-
+// secret-bff-route-registered.ts가 이 표를 유일한 채널 목록 출처로 삼는다(중복
+// 선언 0 — 새 채널이 여기 늘면 그 가드가 자동으로 대상에 포함한다).
+export const PASTED_SECRET_FIELDS: Record<string, PastedSecretField[]> = {
   wordpress: [
     { name: 'site_url', labelKey: 'channelConnectFieldSiteUrl', type: 'text' },
     { name: 'username', labelKey: 'channelConnectFieldUsername', type: 'text' },
@@ -42,6 +45,15 @@ const PASTED_SECRET_FIELDS: Record<string, PastedSecretField[]> = {
     { name: 'target_url', labelKey: 'channelConnectFieldTargetUrl', type: 'text' },
     { name: 'secret', labelKey: 'channelConnectFieldSecret', type: 'password' },
   ],
+  // story #3813(Phase3·3-4 PR5-a, 페드루 PO 確定 2026-09-12) — 실 stibee 연결 폼
+  // 그라운딩 결함 처방(이 표에 항목 자체가 없어 「Connect Stibee」를 눌러도 빈
+  // 패널만 펼쳐지던 결함). 주소록 ID는 세그먼트 열거 API가 Enterprise 요금제
+  // 전용이라 사람이 스티비 화면에서 직접 읽어 입력하는 값(카드 원문 "사람이 입력
+  // 하는 「주소록 ID」 필드").
+  stibee: [
+    { name: 'api_key', labelKey: 'channelConnectFieldApiKey', type: 'password' },
+    { name: 'list_id', labelKey: 'channelConnectFieldListId', type: 'text' },
+  ],
 };
 
 // 유나 판정(PO 전언 2026-09-04 23:20Z) — "어디서 오나"는 채널마다 다른 문구라 표로 뺀다
@@ -49,6 +61,7 @@ const PASTED_SECRET_FIELDS: Record<string, PastedSecretField[]> = {
 const PASTED_SECRET_HINT_KEY: Record<string, string> = {
   wordpress: 'channelConnectPastedSecretHintWordpress',
   webhook: 'channelConnectPastedSecretHintWebhook',
+  stibee: 'channelConnectPastedSecretHintStibee',
 };
 
 export function PastedSecretConnectCard({

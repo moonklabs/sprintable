@@ -1181,6 +1181,13 @@ class CreatePastedSecretConnectionRequest(BaseModel):
     # story 3-4(PR1) — 스티비(Stibee) Auth Key. wordpress/webhook과 동형으로 이 공용
     # 모델에 Optional로 얹는다(연결 화면이 channel별 폼을 그린다).
     api_key: str | None = None
+    # story #3813(Phase3·3-4 PR5-a, 페드루 PO 確定 2026-09-12) — 스티비 세그먼트
+    # 열거 API가 Enterprise 요금제 전용이라(그라운딩 확認) 사람이 스티비 화면에서
+    # 직접 읽어 입력하는 「주소록 ID」(스티비 주소록 URL의 listId). 이름은 사람이
+    # 적은 세그먼트명 그대로 쓴다(gate 봉인 시점, 이 필드가 아니다) — 이 필드는
+    # POST /emails 발송 대상(listId)·수신자 수 조회(/lists/{id}/subscribers/count)
+    # 두 곳의 실 이행처(PR5-b).
+    list_id: str | None = None
 
 
 @router.post("/{org_id}/channel-connections/{channel}", response_model=ChannelConnectionResponse, status_code=201)
@@ -1280,7 +1287,7 @@ async def create_pasted_secret_channel_connection(
         return _to_response(row)
 
     if channel == "stibee":
-        if not body.api_key:
+        if not body.api_key or not body.list_id:
             raise HTTPException(
                 status_code=422,
                 detail={
@@ -1288,14 +1295,43 @@ async def create_pasted_secret_channel_connection(
                     "message": t("channel_connections.stibee_fields_required", resolved_locale),
                 },
             )
+        # story #3813(Phase3·3-4 PR5-a, 페드루 PO 確定 2026-09-12) — 「가짜 키=초록
+        # Connected」 결함 처방. 저장 전에 auth-check 1개만 실호출(다른 엔드포인트
+        # 프로브 0) — 실패면 연결 행 자체를 저장하지 않는다(fail-closed, 성공
+        # 배지는 실제로 인증된 키에만 붙는다).
+        # CHANGES(PO 確定) — 스티비가 안 닿는 것(네트워크·타임아웃·5xx)과 키가
+        # 틀린 것(스티비가 응답해서 거절)은 사람이 할 일이 다르다 — 별도 코드·문구
+        # (StibeeAuthCheckFailed.is_key_rejected 판정, 그라운딩 정정: 실물은
+        # 401/403이 아니라 400이라 stibee_client.py 참고).
+        from app.services.stibee_client import StibeeAuthCheckFailed, verify_api_key
+
+        async with httpx.AsyncClient(timeout=10) as stibee_client:
+            try:
+                await verify_api_key(stibee_client, api_key=body.api_key)
+            except StibeeAuthCheckFailed as exc:
+                logger.warning(
+                    "stibee auth-check 실패 — org=%s status=%s key_rejected=%s",
+                    org_id, exc.status_code, exc.is_key_rejected,
+                )
+                if exc.is_key_rejected:
+                    code, message_key = "STIBEE_API_KEY_INVALID", "channel_connections.stibee_api_key_invalid"
+                else:
+                    code, message_key = "STIBEE_AUTH_CHECK_UNAVAILABLE", "channel_connections.stibee_auth_check_unavailable"
+                raise HTTPException(
+                    status_code=422,
+                    detail={"code": code, "message": t(message_key, resolved_locale)},
+                ) from exc
         # story 3-4(PR1) — 스티비는 wordpress(site_url)·webhook(target_url)과 달리
         # org당 목적지 URL 개념이 없다(Auth Key 하나가 그 org의 ESP 계정 전체를
         # 가리킨다). account_id는 upsert_channel_connection의 (org, channel,
         # account_id) 멱등 키라 반드시 채워야 하는데, 채울 실 식별자가 없어 고정
         # 리터럴을 쓴다 — org당 stibee 연결은 1개만 가능하다는 가정(⚠️미확認·PO 확定
         # 대상, 여러 ESP 계정이 실제로 필요해지면 재설계).
+        # story #3813(Phase3·3-4 PR5-a) — `account_label`에 사람이 입력한 주소록
+        # ID를 그대로 저장(세그먼트 열거 API가 Enterprise 전용이라 사람이 적은 값이
+        # 유일한 실 이행처 — PR5-b가 이 값으로 POST /emails·구독자 수 조회를 건다).
         row = await upsert_channel_connection(
-            db, org_id=org_id, channel="stibee", account_id="default", account_label=None,
+            db, org_id=org_id, channel="stibee", account_id="default", account_label=body.list_id,
             credential_kind="pasted_secret", access_token=body.api_key, refresh_token=None,
             token_expires_at=None, refresh_mode=adapter.refresh_mode, scopes=[], connected_by=resolved.id,
         )
@@ -1387,6 +1423,26 @@ async def replace_channel_connection_credentials(
                     "message": t("channel_connections.stibee_fields_required", resolved_locale),
                 },
             )
+        # story #3813(Phase3·3-4 PR5-a) — 회전(rotate)도 저장이다, 생성과 같은
+        # auth-check 프로브를 거친다(PO "저장 시"가 생성만 뜻하지 않는다).
+        from app.services.stibee_client import StibeeAuthCheckFailed, verify_api_key
+
+        async with httpx.AsyncClient(timeout=10) as stibee_client:
+            try:
+                await verify_api_key(stibee_client, api_key=body.api_key)
+            except StibeeAuthCheckFailed as exc:
+                logger.warning(
+                    "stibee auth-check 실패(회전) — org=%s status=%s key_rejected=%s",
+                    org_id, exc.status_code, exc.is_key_rejected,
+                )
+                if exc.is_key_rejected:
+                    code, message_key = "STIBEE_API_KEY_INVALID", "channel_connections.stibee_api_key_invalid"
+                else:
+                    code, message_key = "STIBEE_AUTH_CHECK_UNAVAILABLE", "channel_connections.stibee_auth_check_unavailable"
+                raise HTTPException(
+                    status_code=422,
+                    detail={"code": code, "message": t(message_key, resolved_locale)},
+                ) from exc
         new_secret, account_label = body.api_key, None
     else:
         # story e4fc29fa(조각⑤)의 fail-closed 관례 그대로 — 현재 pasted_secret 채널은

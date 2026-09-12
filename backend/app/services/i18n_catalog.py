@@ -312,8 +312,22 @@ _CATALOG: dict[str, dict[str, str]] = {
     # 키 주석과 동형 판단). 페드루 PO CHANGES(2026-09-12 00:29Z) — 필드명(api_key)이
     # 사람 대상 폼 문구에 그대로 새는 클래스, 자연어 문장으로 정정(합니다체·한자 0).
     "channel_connections.stibee_fields_required": {
-        "ko": "스티비 API 키를 입력해 주세요.",
-        "en": "Enter your Stibee API key.",
+        "ko": "스티비 API 키와 주소록 ID를 모두 입력해 주세요.",
+        "en": "Enter both your Stibee API key and address book ID.",
+    },
+    # story #3813(Phase3·3-4 PR5-a, 페드루 PO 確定 2026-09-12) — 저장 시 auth-check
+    # 실호출이 실패(401/403/네트워크)했을 때의 fail-closed 문구. 연결 행 자체를
+    # 저장하지 않는다(「가짜 키=초록 Connected」 결함의 처방).
+    "channel_connections.stibee_api_key_invalid": {
+        "ko": "API 키가 유효하지 않습니다 · 스티비 설정에서 다시 발급해 주세요.",
+        "en": "Your API key isn't valid — reissue it from your Stibee settings.",
+    },
+    # story #3813(Phase3·3-4 PR5-a CHANGES, 페드루 PO 確定 2026-09-12) — 스티비가
+    # 안 닿는 것(네트워크·타임아웃·5xx)과 키가 틀린 것(스티비가 응답해서 거절)은
+    # 사람이 할 일이 다르다(전자=잠시 뒤 재시도, 후자=키 재발급) — 별도 문구.
+    "channel_connections.stibee_auth_check_unavailable": {
+        "ko": "스티비에 연결할 수 없습니다 · 잠시 뒤 다시 시도해 주세요.",
+        "en": "Couldn't reach Stibee — please try again in a moment.",
     },
     # story #3813(Phase3·3-4 PR2, 페드루 PO 確定 2026-09-12) — 뉴스레터 발송
     # 요청 API 사용자 문구(ads_boost.* 형제와 동형 어조, newsletter_send.py 라우터).

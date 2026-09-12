@@ -261,3 +261,43 @@ describe('PastedSecretConnectCard — 연결 수별 버튼 낱말 매트릭스(s
     );
   });
 });
+
+// story #3813 PR5-a(그라운딩 2026-09-12, 페드루 PO 確定) — 실 stibee 폼 그라운딩
+// 결함 처방(PASTED_SECRET_FIELDS에 항목 자체가 없어 빈 패널만 펼쳐지던 결함).
+describe('PastedSecretConnectCard — stibee 필드(story #3813 PR5-a)', () => {
+  it('⭐api_key·주소록 ID 두 필드가 렌더되고 둘 다 채워야 제출 가능, 둘 다 body에 실린다', async () => {
+    fetchWithAuthMock.mockResolvedValue(jsonResponse(201, { data: { id: 'c1', channel: 'stibee' } }));
+    const onConnected = vi.fn();
+    await act(async () => { root.render(wrap(<TestHarness channel="stibee" isOwner onConnected={onConnected} />)); });
+    const openBtn = container.querySelector('[data-testid="channel-connect-pasted-secret-button-stibee"]') as HTMLButtonElement;
+    await act(async () => { openBtn.click(); });
+    await flush();
+
+    const apiKeyInput = container.querySelector('#stibee-api_key') as HTMLInputElement;
+    const listIdInput = container.querySelector('#stibee-list_id') as HTMLInputElement;
+    expect(apiKeyInput.type).toBe('password');
+    expect(listIdInput.type).toBe('text');
+    const submitBtn = container.querySelector('[data-testid="channel-connect-pasted-secret-submit-stibee"]') as HTMLButtonElement;
+    expect(submitBtn.disabled).toBe(true);
+
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setter.call(apiKeyInput, 'my-real-key'); apiKeyInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await flush();
+    expect(submitBtn.disabled).toBe(true); // 주소록 ID가 아직 비어 있다 — 하나만으론 안 풀린다.
+
+    await act(async () => {
+      setter.call(listIdInput, '54321'); listIdInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await flush();
+    expect(submitBtn.disabled).toBe(false);
+
+    await act(async () => { submitBtn.click(); });
+    await flush();
+
+    expect(onConnected).toHaveBeenCalledOnce();
+    const [, options] = fetchWithAuthMock.mock.calls[0]!;
+    expect(JSON.parse(options.body as string)).toEqual({ api_key: 'my-real-key', list_id: '54321' });
+  });
+});
