@@ -84,6 +84,67 @@ async def _seed_due_schedule_row(session, *, org_id, publication_id, channel="sa
     return row.id
 
 
+# ─── story #3528 재발 가드(2026-09-12, 페드루 PO 근본처방) — sandbox 댓글 timestamp가
+# 벽시계 고정 절대값이 아니라 published_at 기준임을 실 fetch 경로(단위 함수가 아니라
+# process_due_comment_collections 전 구간)로 증명. 이 축이 실사고의 정확한 원인이었다
+# (_is_publication_active 자체는 늘 옳았다 — 그 입력(last_comment_at)을 sandbox가
+# 잘못 공급한 것이 문제) ─────────────────────────────────────────────────────
+
+
+@pytest.mark.anyio
+async def test_sandbox_comment_timestamp_tracks_published_at_not_wall_clock():
+    """⭐양성대조 — 발행일+8일을 now로 주입하면 «지금이 언제든» 정확히 비활성으로
+    떨어져야 한다(발행물이 오늘 막 생겼어도, 벽시계가 어느 날짜를 지났든 상관없이).
+    이 테스트가 실사고 재현 그 자체 — 정정 前에는 sandbox 댓글의 external_created_at이
+    "2026-09-05T00:00:00+00:00" 고정이라 이 발행물이 **언제 발행됐든** 벽시계가 그
+    날짜+7일을 지나는 순간 이 assert가 (거짓으로) False가 아니라 계속 False로
+    «고정»됐다 — 아래는 그 반대: published_at 기준 8일 뒤엔 비활성이 맞고, 3일
+    뒤엔 여전히 활성이어야 한다(발행물 나이와 같이 움직인다는 것 자체를 증명)."""
+    from app.services.channel_post_comments import _is_publication_active, process_due_comment_collections
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, _ = await _seed_org(s)
+            conn = await _seed_channel_connection(s, org_id, channel="sandbox")
+            pub = await _seed_channel_publication(s, org_id=org_id, connection_id=conn.id, channel="sandbox", external_id="media-1")
+            await _seed_due_schedule_row(s, org_id=org_id, publication_id=pub.id, external_id="media-1")
+
+        # 실 fetch 경로로 댓글을 실제로 수집 — sandbox_publish.py가 이제 published_at
+        # 기준 timestamp를 준다(정정 대상 그 자체).
+        async with Session() as s:
+            counts = await process_due_comment_collections(s, now=datetime.now(timezone.utc))
+            assert counts["captured"] == 1, counts
+
+        async with Session() as s:
+            pub_row = await s.get(type(pub), pub.id)
+            published_at = pub_row.published_at
+            # 발행 3일 뒤 — 여전히 활성(7일 창 안).
+            assert await _is_publication_active(
+                s, publication_id=pub.id, now=published_at + timedelta(days=3),
+            ) is True
+            # 발행 8일 뒤 — 마지막 댓글(=published_at+1·2분)로부터도 8일 가까이 지나
+            # 7일 창을 벗어난다 — 정확히 비활성이어야 한다(버그 재현 시나리오의 반대편).
+            assert await _is_publication_active(
+                s, publication_id=pub.id, now=published_at + timedelta(days=8),
+            ) is False
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_sandbox_comment_timestamp_deterministic_same_inputs_same_value():
+    """결정성 회귀 — 같은 media_id·index·published_at이면 항상 같은 timestamp(호출
+    2회 비교). 벽시계(datetime.now()) 등 비결정 소스로 되돌아가는 재발을 막는다."""
+    import app.services.sandbox_publish as sandbox_publish
+
+    published_at = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    first = sandbox_publish._deterministic_comment(media_id="m-1", index=1, published_at=published_at)
+    second = sandbox_publish._deterministic_comment(media_id="m-1", index=1, published_at=published_at)
+    assert first["timestamp"] == second["timestamp"]
+    assert first["timestamp"] == (published_at + timedelta(minutes=1)).isoformat()
+
+
 # ─── 활성 판정 자체(_is_publication_active) ──────────────────────────────────
 
 
@@ -273,7 +334,7 @@ async def test_transient_failure_sets_next_attempt_at_backoff_and_tick_respects_
     from app.services.channel_post_comments import CommentFetchError, process_due_comment_collections
     from app.models.channel_post_comment import CommentCollectionSchedule
 
-    async def _rate_limited(client, *, access_token, media_id):
+    async def _rate_limited(client, *, access_token, media_id, **kwargs):
         raise CommentFetchError(error_code="CHANNEL_RATE_LIMITED", message="429 시뮬레이션")
 
     monkeypatch.setattr(sandbox_publish, "fetch_replies", _rate_limited)
@@ -318,7 +379,7 @@ async def test_transient_failure_exceeds_5_attempts_marks_failed(monkeypatch):
     from app.services.channel_post_comments import CommentFetchError, process_due_comment_collections
     from app.models.channel_post_comment import CommentCollectionSchedule
 
-    async def _rate_limited(client, *, access_token, media_id):
+    async def _rate_limited(client, *, access_token, media_id, **kwargs):
         raise CommentFetchError(error_code="CHANNEL_RATE_LIMITED", message="429 시뮬레이션")
 
     monkeypatch.setattr(sandbox_publish, "fetch_replies", _rate_limited)
@@ -353,7 +414,7 @@ async def test_backoff_mutation_check_removing_next_attempt_at_lets_immediate_re
     import app.services.sandbox_publish as sandbox_publish
     from app.models.channel_post_comment import CommentCollectionSchedule
 
-    async def _rate_limited(client, *, access_token, media_id):
+    async def _rate_limited(client, *, access_token, media_id, **kwargs):
         raise comments_module.CommentFetchError(error_code="CHANNEL_RATE_LIMITED", message="429 시뮬레이션")
 
     monkeypatch.setattr(sandbox_publish, "fetch_replies", _rate_limited)

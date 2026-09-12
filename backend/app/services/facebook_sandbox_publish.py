@@ -9,6 +9,7 @@ reply, instagram_sandbox_publish.py와 동형 결정적 표본 — 실 provider 
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timedelta
 
 import httpx
 
@@ -145,13 +146,16 @@ async def delete_media(client: httpx.AsyncClient, *, access_token: str, media_id
 # (instagram_sandbox_publish.py와 동형 계약) ──────────────────────────────────
 
 
-def _deterministic_comment(*, media_id: str, index: int) -> dict:
+def _deterministic_comment(*, media_id: str, index: int, published_at: datetime) -> dict:
+    """story #3528(2026-09-12 근본처방, sandbox_publish.py::_deterministic_comment와
+    동형) — `timestamp`는 벽시계 고정값이 아니라 이 발행물의 published_at 기준
+    (+index분)."""
     seed = int(uuid.uuid5(uuid.NAMESPACE_URL, f"{media_id}:{index}").hex[:8], 16)
     item = {
         "id": f"sandbox-fb-comment-{media_id}-{index}",
         "text": f"샌드박스 FB 댓글 {index}(seed={seed % 1000})",
         "username": f"sandbox_fb_user_{index}",
-        "timestamp": "2026-09-06T00:00:00+00:00",
+        "timestamp": (published_at + timedelta(minutes=index)).isoformat(),
     }
     # story #3805(Phase3·3-1·PR 4, 페드루 PO 確定 2026-09-11 12:12Z) — sandbox_
     # publish.py::_deterministic_comment와 동형(댓글 2=댓글 1의 답글).
@@ -163,20 +167,22 @@ def _deterministic_comment(*, media_id: str, index: int) -> dict:
 
 
 async def fetch_replies(
-    client: httpx.AsyncClient, *, access_token: str, media_id: str,
+    client: httpx.AsyncClient, *, access_token: str, media_id: str, published_at: datetime,
 ) -> tuple[list[dict], bool, int | None]:
     """instagram_sandbox_publish.py::fetch_replies와 동형 — media_id 하나엔 항상
     같은 2건(순서 고정), complete=True 고정(페이지네이션 개념 없음). 세 번째 값
     (채널이 말하는 전체 개수, story #3618)도 동형 — 항상 `len(items)`.
 
     story #3597 — media_id가 `_EXPIRE_AFTER_PUBLISH_SUFFIX`를 달고 있으면 401을
-    던진다(instagram_sandbox_publish.py::fetch_replies와 동형)."""
+    던진다(instagram_sandbox_publish.py::fetch_replies와 동형).
+
+    story #3528(2026-09-12 근본처방) — `published_at` 필수(기본값 없음, 동형 원칙)."""
     if media_id.endswith(_EXPIRE_AFTER_PUBLISH_SUFFIX):
         raise ThreadsPublishError(
             "SANDBOX_FACEBOOK_TOKEN_EXPIRED",
             "sandbox: [sandbox:expire-after-publish] 마커 시뮬레이션(발행 후 토큰 만료)", status_code=401,
         )
-    items = [_deterministic_comment(media_id=media_id, index=i) for i in (1, 2)]
+    items = [_deterministic_comment(media_id=media_id, index=i, published_at=published_at) for i in (1, 2)]
     return items, True, len(items)
 
 

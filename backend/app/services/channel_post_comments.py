@@ -197,32 +197,40 @@ async def _fetch_replies_raw(
     if channel in ("sandbox", "instagram_sandbox"):
         if external_id is None:
             raise CommentFetchError(error_code="COMMENT_EXTERNAL_ID_MISSING", message="external_id가 없습니다")
+        from app.models.channel_publication import ChannelPublication
+
+        # story #3528(2026-09-12 근본처방) — sandbox 댓글의 결정적 timestamp는
+        # 이 발행물의 실 published_at을 필요로 한다(sandbox_publish.py::
+        # _deterministic_comment 참고, 벽시계 고정값이 「마지막 댓글로부터 7일」
+        # 활성 창을 영구 False로 고정시키던 실사고 재발 방지) — 이전엔 instagram_
+        # sandbox의 만료 마커 분기에서만 조건부로 pub을 조회했으나, 이제 두 sandbox
+        # 채널 다 published_at이 항상 필요해 무조건 조회로 승격한다(옛 "새 DB 왕복
+        # 0" 최적화 전제가 이 근본처방으로 무효가 됨).
+        pub = await db.get(ChannelPublication, publication_id)
+        if pub is None or pub.published_at is None:
+            raise CommentFetchError(
+                error_code="COMMENT_PUBLICATION_NOT_FOUND",
+                message=f"channel_publication을 찾을 수 없습니다: {publication_id}",
+            )
         # story #3640 — instagram_sandbox의 [sandbox:expire-after-publish] 마커가
         # media_id에 새긴 영구 접미사를 fetch_replies가 볼 때마다 401을 던지던
         # 「영구 지뢰」를 닫는다: 이 발행물이 이미 한 번 그 401을 관측했으면
         # (sandbox_expired_once) 접미사를 벗긴 media_id로 불러 200을 받는다.
-        # sandbox_publish.py(channel="sandbox")엔 이 마커가 없어(그라운딩 확認)
-        # pub 조회 자체를 skip — 새 DB 왕복 0.
-        pub = None
         effective_external_id = external_id
         if channel == "instagram_sandbox":
             from app.services.instagram_sandbox_publish import (
                 _EXPIRE_AFTER_PUBLISH_SUFFIX as _IG_EXPIRE_SUFFIX,
             )
 
-            if external_id.endswith(_IG_EXPIRE_SUFFIX):
-                from app.models.channel_publication import ChannelPublication
-
-                pub = await db.get(ChannelPublication, publication_id)
-                if pub is not None and pub.sandbox_expired_once:
-                    effective_external_id = external_id[: -len(_IG_EXPIRE_SUFFIX)]
+            if external_id.endswith(_IG_EXPIRE_SUFFIX) and pub.sandbox_expired_once:
+                effective_external_id = external_id[: -len(_IG_EXPIRE_SUFFIX)]
         _publish_client = get_publish_client_module(channel)
         from app.services.threads_publish import ThreadsPublishError
         import httpx
         try:
             async with httpx.AsyncClient() as client:
                 return await _publish_client.fetch_replies(
-                    client, access_token="sandbox", media_id=effective_external_id,
+                    client, access_token="sandbox", media_id=effective_external_id, published_at=pub.published_at,
                 )
         except ThreadsPublishError as exc:
             # story #3640 — 위에서 접미사를 못 벗겼다(=이번이 첫 401)면 여기서
@@ -297,11 +305,17 @@ async def _fetch_replies_raw(
         if pub.external_id.endswith(_FB_EXPIRE_SUFFIX) and pub.sandbox_expired_once:
             effective_external_id = pub.external_id[: -len(_FB_EXPIRE_SUFFIX)]
 
+    # story #3528(2026-09-12 근본처방) — facebook_sandbox만 published_at을 받는다
+    # (sandbox_publish.py/instagram_sandbox_publish.py와 동형 이유, 위 §참고). 실
+    # threads/instagram/facebook의 fetch_replies는 이 인자 자체가 없다(실 provider
+    # 응답이 진짜 시각을 주므로 불필요) — 시그니처가 갈리는 유일한 자리라 kwargs를
+    # 조건부로 조립한다(새 판정 로직 0, 위 effective_external_id 분기와 동형 축).
+    extra_kwargs = {"published_at": pub.published_at} if channel == "facebook_sandbox" else {}
     import httpx
     try:
         async with httpx.AsyncClient() as client:
             return await _publish_client.fetch_replies(
-                client, access_token=access_token, media_id=effective_external_id,
+                client, access_token=access_token, media_id=effective_external_id, **extra_kwargs,
             )
     except Exception as exc:  # noqa: BLE001 — ThreadsPublishError는 상태코드로 분류(threads/instagram/facebook 공용)
         if isinstance(exc, ThreadsPublishError):

@@ -255,12 +255,20 @@ async def test_facebook_reply_failure_raises():
 async def test_facebook_sandbox_fetch_replies_deterministic_two_comments():
     from app.services.facebook_sandbox_publish import fetch_replies
 
-    items, complete, _reported = await fetch_replies(None, access_token="x", media_id="post-1")
+    # story #3528(2026-09-12) — published_at 필수화(재발 방지 근본처방) 후에도
+    # "결정적"의 원래 취지(같은 입력→같은 값)를 지키려면 두 호출에 같은 고정값을
+    # 줘야 한다(instagram_sandbox 동형 테스트 참고).
+    published_at = datetime.now(timezone.utc)
+    items, complete, _reported = await fetch_replies(
+        None, access_token="x", media_id="post-1", published_at=published_at,
+    )
     assert complete is True
     assert [i["id"] for i in items] == ["sandbox-fb-comment-post-1-1", "sandbox-fb-comment-post-1-2"]
 
-    items2, _, _reported2 = await fetch_replies(None, access_token="x", media_id="post-1")
-    assert items == items2, "결정적이어야 함(같은 media_id는 매번 같은 값)"
+    items2, _, _reported2 = await fetch_replies(
+        None, access_token="x", media_id="post-1", published_at=published_at,
+    )
+    assert items == items2, "결정적이어야 함(같은 media_id·published_at은 매번 같은 값)"
 
 
 @pytest.mark.anyio

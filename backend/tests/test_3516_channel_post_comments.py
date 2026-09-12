@@ -136,7 +136,7 @@ async def test_collect_upserts_two_comments_then_reconciles_one_as_deleted(monke
             conn = await _seed_channel_connection(s, org_id, channel="sandbox")
             pub = await _seed_channel_publication(s, org_id=org_id, connection_id=conn.id, channel="sandbox", external_id="media-1")
 
-            async def _first_fetch(client, *, access_token, media_id):
+            async def _first_fetch(client, *, access_token, media_id, **kwargs):
                 return [_fake_comment("c1", "안녕"), _fake_comment("c2", "반가워요")], True, None
 
             monkeypatch.setattr(sandbox_publish, "fetch_replies", _first_fetch)
@@ -151,7 +151,7 @@ async def test_collect_upserts_two_comments_then_reconciles_one_as_deleted(monke
             assert all(r.deleted_at is None for r in rows)
 
             # 두 번째 수집 — c2가 사라짐(외부에서 삭제됨을 시뮬레이션).
-            async def _second_fetch(client, *, access_token, media_id):
+            async def _second_fetch(client, *, access_token, media_id, **kwargs):
                 return [_fake_comment("c1", "안녕")], True, None
 
             monkeypatch.setattr(sandbox_publish, "fetch_replies", _second_fetch)
@@ -188,10 +188,10 @@ async def test_collect_reappearing_comment_undeletes():
             conn = await _seed_channel_connection(s, org_id, channel="sandbox")
             pub = await _seed_channel_publication(s, org_id=org_id, connection_id=conn.id, channel="sandbox", external_id="media-1")
 
-            async def _only_c1(client, *, access_token, media_id):
+            async def _only_c1(client, *, access_token, media_id, **kwargs):
                 return [_fake_comment("c1")], True, None
 
-            async def _both(client, *, access_token, media_id):
+            async def _both(client, *, access_token, media_id, **kwargs):
                 return [_fake_comment("c1"), _fake_comment("c2")], True, None
 
             monkeypatch.setattr(sandbox_publish, "fetch_replies", _both)
@@ -255,14 +255,14 @@ async def test_collect_incomplete_page_skips_deletion_reconciliation(monkeypatch
             conn = await _seed_channel_connection(s, org_id, channel="sandbox")
             pub = await _seed_channel_publication(s, org_id=org_id, connection_id=conn.id, channel="sandbox", external_id="media-1")
 
-            async def _both_complete(client, *, access_token, media_id):
+            async def _both_complete(client, *, access_token, media_id, **kwargs):
                 return [_fake_comment("c1"), _fake_comment("c2")], True, None
 
             monkeypatch.setattr(sandbox_publish, "fetch_replies", _both_complete)
             await collect_comments_for_publication(s, org_id=org_id, publication_id=pub.id, channel="sandbox", external_id="media-1")
             await s.commit()
 
-            async def _only_c1_incomplete(client, *, access_token, media_id):
+            async def _only_c1_incomplete(client, *, access_token, media_id, **kwargs):
                 return [_fake_comment("c1")], False, None
 
             monkeypatch.setattr(sandbox_publish, "fetch_replies", _only_c1_incomplete)
@@ -296,14 +296,14 @@ async def test_collect_complete_page_still_reconciles_deletion(monkeypatch):
             conn = await _seed_channel_connection(s, org_id, channel="sandbox")
             pub = await _seed_channel_publication(s, org_id=org_id, connection_id=conn.id, channel="sandbox", external_id="media-1")
 
-            async def _both_complete(client, *, access_token, media_id):
+            async def _both_complete(client, *, access_token, media_id, **kwargs):
                 return [_fake_comment("c1"), _fake_comment("c2")], True, None
 
             monkeypatch.setattr(sandbox_publish, "fetch_replies", _both_complete)
             await collect_comments_for_publication(s, org_id=org_id, publication_id=pub.id, channel="sandbox", external_id="media-1")
             await s.commit()
 
-            async def _only_c1_complete(client, *, access_token, media_id):
+            async def _only_c1_complete(client, *, access_token, media_id, **kwargs):
                 return [_fake_comment("c1")], True, None
 
             monkeypatch.setattr(sandbox_publish, "fetch_replies", _only_c1_complete)
@@ -346,7 +346,7 @@ async def test_process_due_marks_incomplete_page_error_code_without_failing():
             )
             await s.commit()
 
-            async def _incomplete(client, *, access_token, media_id):
+            async def _incomplete(client, *, access_token, media_id, **kwargs):
                 return [_fake_comment("c1")], False, None
 
             monkeypatch.setattr(sandbox_publish, "fetch_replies", _incomplete)
@@ -387,7 +387,7 @@ async def test_process_due_marks_captured_and_ignores_not_yet_due(monkeypatch):
             )
             await s.commit()
 
-            async def _fetch(client, *, access_token, media_id):
+            async def _fetch(client, *, access_token, media_id, **kwargs):
                 return [_fake_comment("c1")], True, None
 
             monkeypatch.setattr(sandbox_publish, "fetch_replies", _fetch)
@@ -419,7 +419,7 @@ async def test_refresh_now_rate_limited_within_five_minutes(monkeypatch):
             conn = await _seed_channel_connection(s, org_id, channel="sandbox")
             pub = await _seed_channel_publication(s, org_id=org_id, connection_id=conn.id, channel="sandbox", external_id="media-1")
 
-            async def _fetch(client, *, access_token, media_id):
+            async def _fetch(client, *, access_token, media_id, **kwargs):
                 return [_fake_comment("c1")], True, None
 
             monkeypatch.setattr(sandbox_publish, "fetch_replies", _fetch)
@@ -445,7 +445,7 @@ async def test_refresh_now_allowed_again_after_five_minutes(monkeypatch):
             conn = await _seed_channel_connection(s, org_id, channel="sandbox")
             pub = await _seed_channel_publication(s, org_id=org_id, connection_id=conn.id, channel="sandbox", external_id="media-1")
 
-            async def _fetch(client, *, access_token, media_id):
+            async def _fetch(client, *, access_token, media_id, **kwargs):
                 return [_fake_comment("c1")], True, None
 
             monkeypatch.setattr(sandbox_publish, "fetch_replies", _fetch)
@@ -487,7 +487,7 @@ async def test_list_comments_null_before_collection_then_zero_after_empty_collec
             assert before["last_collected_at"] is None, "한 번도 수집 안 됐으면 null(미수집)이어야 한다"
             assert before["comments"] == []
 
-            async def _empty_fetch(client, *, access_token, media_id):
+            async def _empty_fetch(client, *, access_token, media_id, **kwargs):
                 return [], True, None
 
             monkeypatch.setattr(sandbox_publish, "fetch_replies", _empty_fetch)
@@ -520,7 +520,7 @@ async def test_list_comments_active_and_deleted_count_match_board_definition(mon
 
             # 비대칭 수(active 2·deleted 1) — active_count↔deleted_count 정의가
             # 뒤바뀌어도(뮤테이션) 우연히 같은 값이 나와 안 잡히는 일이 없게 한다.
-            async def _three(client, *, access_token, media_id):
+            async def _three(client, *, access_token, media_id, **kwargs):
                 return [
                     _fake_comment("c1", "살아있음1"), _fake_comment("c2", "살아있음2"), _fake_comment("c3", "곧 지워짐"),
                 ], True, None
@@ -529,7 +529,7 @@ async def test_list_comments_active_and_deleted_count_match_board_definition(mon
             await collect_comments_for_publication(s, org_id=org_id, publication_id=pub.id, channel="sandbox", external_id="media-1")
             await s.commit()
 
-            async def _two(client, *, access_token, media_id):
+            async def _two(client, *, access_token, media_id, **kwargs):
                 return [_fake_comment("c1", "살아있음1"), _fake_comment("c2", "살아있음2")], True, None
 
             monkeypatch.setattr(sandbox_publish, "fetch_replies", _two)
@@ -583,14 +583,14 @@ async def test_count_comments_by_publication_ids_excludes_deleted(monkeypatch):
             conn = await _seed_channel_connection(s, org_id, channel="sandbox")
             pub = await _seed_channel_publication(s, org_id=org_id, connection_id=conn.id, channel="sandbox", external_id="media-1")
 
-            async def _two(client, *, access_token, media_id):
+            async def _two(client, *, access_token, media_id, **kwargs):
                 return [_fake_comment("c1"), _fake_comment("c2")], True, None
 
             monkeypatch.setattr(sandbox_publish, "fetch_replies", _two)
             await collect_comments_for_publication(s, org_id=org_id, publication_id=pub.id, channel="sandbox", external_id="media-1")
             await s.commit()
 
-            async def _one(client, *, access_token, media_id):
+            async def _one(client, *, access_token, media_id, **kwargs):
                 return [_fake_comment("c1")], True, None
 
             monkeypatch.setattr(sandbox_publish, "fetch_replies", _one)
@@ -633,7 +633,7 @@ async def test_api_list_comments_allows_agent_caller(monkeypatch):
             conn = await _seed_channel_connection(s, org_id, channel="sandbox")
             pub = await _seed_channel_publication(s, org_id=org_id, connection_id=conn.id, channel="sandbox", external_id="media-1")
 
-            async def _fetch(client, *, access_token, media_id):
+            async def _fetch(client, *, access_token, media_id, **kwargs):
                 return [_fake_comment("c1")], True, None
 
             monkeypatch.setattr(sandbox_publish, "fetch_replies", _fetch)
@@ -697,7 +697,7 @@ async def test_api_refresh_allows_human_and_returns_counts(monkeypatch):
             pub = await _seed_channel_publication(s, org_id=org_id, connection_id=conn.id, channel="sandbox", external_id="media-1")
             human_id = await _seed_human(s, org_id)
 
-        async def _fetch(client, *, access_token, media_id):
+        async def _fetch(client, *, access_token, media_id, **kwargs):
             return [_fake_comment("c1"), _fake_comment("c2")], True, None
 
         monkeypatch.setattr(sandbox_publish, "fetch_replies", _fetch)
@@ -776,7 +776,7 @@ async def test_api_refresh_provider_error_returns_503_not_502(monkeypatch):
             pub = await _seed_channel_publication(s, org_id=org_id, connection_id=conn.id, channel="sandbox", external_id="media-1")
             human_id = await _seed_human(s, org_id)
 
-        async def _fetch_fails(client, *, access_token, media_id):
+        async def _fetch_fails(client, *, access_token, media_id, **kwargs):
             raise ThreadsPublishError("PROVIDER_DOWN", "provider down", status_code=500)
 
         monkeypatch.setattr(sandbox_publish, "fetch_replies", _fetch_fails)
@@ -822,7 +822,7 @@ async def test_insights_board_row_carries_comments_count_for_channel_publication
                 s, org_id=org_id, gate_id=gate.id, channel="sandbox", published_at=datetime.now(timezone.utc),
             )
 
-            async def _fetch(client, *, access_token, media_id):
+            async def _fetch(client, *, access_token, media_id, **kwargs):
                 return [_fake_comment("c1")], True, None
 
             monkeypatch.setattr(sandbox_publish, "fetch_replies", _fetch)
