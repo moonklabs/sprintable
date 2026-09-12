@@ -644,10 +644,23 @@ async def create_channel_post_draft_version(
     안 남는다. 형식 검사(≤64자·`[A-Za-z0-9_-]`)는 라우터 요청 모델(422)에서 이미
     끝낸 값만 여기로 들어온다.
 
-    story #3813(Phase3·3-4 PR2, 페드루 PO 確定 2026-09-12) — `channel_payload`는
-    hook_key와 동형(캐리포워드 없음, 매 호출이 현재 값을 명시) — 대부분의 채널은
-    이 값을 안 보내 항상 null(image_sha256류 캐리포워드 sentinel 복잡도는 이
-    슬롯이 아직 요구하지 않는다, 필요해지면 그때 승격)."""
+    story #3815(이미지 carry-forward 통합, 페드루 PO 確定 2026-09-12) — `channel_payload`도
+    image_sha256과 동형으로 승격했다. 계기: `channel_post_images.py`의 이미지 첨부·삭제·
+    재배열 3곳이 이 함수를 호출하며 channel_payload를 안 넘겨(당시 "hook_key와 동형,
+    캐리포워드 없음"이 기본값이었다) 매번 None으로 지워버렸다 — YouTube 메타·X 스레드
+    세그먼트·stibee subject가 이미지 조작 한 번에 조용히 소실되는 실 데이터 손실이었다.
+    이제 **생략(기본값 None)이면 직전 버전의 channel_payload를 그대로 캐리포워드**한다
+    (image_sha256과 다르게 별도 sentinel 객체가 필요 없다 — `dict | None`엔 이미
+    "명시적으로 비움"을 표현할 자기 자신의 값이 있다: `{}`. None=캐리포워드,
+    {}=명시적 비움 — 둘을 같은 falsy로 뭉개지 않는다). 호출부:
+    - 라우터(`post_channel_post_draft_version`)는 매 저장마다 `body.channel_payload`를
+      그대로 명시 전달한다(사용자가 그 저장 시점에 실제로 보낸 값 — 필드 자체를 안 보내
+      null이 오면 이제는 캐리포워드가 되어 오히려 "채널 메타를 안 건드린 저장"도 안전해짐,
+      명시적으로 비우려면 클라이언트가 `{}`를 보내야 한다).
+    - `channel_post_images.py`의 이미지 첨부/삭제/재배열 3곳, `channel_post_videos.py`의
+      영상 confirm 1곳은 channel_payload를 아예 안 넘긴다(생략) — 이 기본값 하나로 4곳
+      전부와 미래 호출부까지 안전해진다(호출부마다 개별로 `latest.channel_payload`를
+      명시 전달하던 방식은 다음 호출부가 또 빠뜨리는 재발 소지가 있어 폐기)."""
     connection = await _get_active_connection(db, org_id=org_id, connection_id=connection_id)
     _validate_text_length(channel=connection.channel, text=text)
     if channel_payload:
@@ -716,6 +729,11 @@ async def create_channel_post_draft_version(
     resolved_image_sha256 = (
         carried_image_sha256 if image_sha256 is _IMAGE_SHA256_CARRY_FORWARD else image_sha256
     )
+    # story #3815 — channel_payload 생략(None)이면 직전 버전 값을 캐리포워드한다(§docstring).
+    resolved_channel_payload = (
+        (prior_latest.channel_payload if prior_latest is not None else None)
+        if channel_payload is None else channel_payload
+    )
 
     version = ChannelPostVersion(
         id=uuid.uuid4(), draft_id=draft.id, version=next_version,
@@ -723,7 +741,7 @@ async def create_channel_post_draft_version(
         body_sha256=compute_channel_post_hash(text=text, link_url=link_url),
         image_sha256=resolved_image_sha256, hook_key=hook_key,
         author_member_id=author_member_id, author_kind=author_kind,
-        channel_payload=channel_payload,
+        channel_payload=resolved_channel_payload,
     )
     db.add(version)
     await db.flush()
@@ -741,27 +759,16 @@ async def create_channel_post_draft_version(
         # story #3550(Phase2, PO 確定 ②) — 캐러셀(N장)로 확장: 직전 버전에 이미지가
         # 여러 장이면(position 0..N-1) 전부 복제한다. Phase1(N=1)엔 이 루프가 정확히
         # 1회 도는 것과 동형(회귀 0).
-        from app.services.channel_post_images import list_channel_post_images_for_version
+        # story #3815(이미지 carry-forward 통합, 페드루 PO 確定 2026-09-12) — 행 필드
+        # 나열을 여기서 직접 들고 있지 않는다(channel_post_images.py의 attach/delete/
+        # reorder 세 곳과 계보 필드가 드리프트할 소지) — 그 셋이 공유하는 유일한 복제
+        # 지점 `_copy_image_row`를 여기도 그대로 쓴다(§docstring, `_copy_video_row`와
+        # 동형으로 로컬 import — channel_posts.py↔channel_post_images.py 순환참조 회피).
+        from app.services.channel_post_images import _copy_image_row, list_channel_post_images_for_version
 
         prior_images = await list_channel_post_images_for_version(db, version_id=prior_latest.id)
         for prior_image in prior_images:
-            db.add(ChannelPostImage(
-                id=uuid.uuid4(), org_id=prior_image.org_id, draft_id=prior_image.draft_id,
-                version_id=version.id, position=prior_image.position,
-                original_object_path=prior_image.original_object_path,
-                original_sha256=prior_image.original_sha256,
-                original_content_type=prior_image.original_content_type,
-                original_bytes=prior_image.original_bytes,
-                original_width=prior_image.original_width,
-                original_height=prior_image.original_height,
-                derived_object_path=prior_image.derived_object_path,
-                derived_sha256=prior_image.derived_sha256,
-                derived_content_type=prior_image.derived_content_type,
-                derived_bytes=prior_image.derived_bytes,
-                derived_width=prior_image.derived_width,
-                derived_height=prior_image.derived_height,
-                created_by=prior_image.created_by,
-            ))
+            db.add(_copy_image_row(prior_image, new_version_id=version.id, new_position=prior_image.position))
         if prior_images:
             await db.flush()
 

@@ -200,7 +200,11 @@ class CreateChannelPostDraftVersionRequest(BaseModel):
 
     # story #3813(Phase3·3-4 PR2, 페드루 PO 確定 2026-09-12) — 채널별 변형
     # payload 공유 슬롯(스티비 subject 등, 컬럼 이름에 채널 이름 안 붙임 — gate.py/
-    # channel_post_version.py 모델 주석 참고). hook_key와 동형(캐리포워드 없음).
+    # channel_post_version.py 모델 주석 참고).
+    # story #3815(이미지 carry-forward 통합, 페드루 PO 確定 2026-09-12) — 이 필드를
+    # 요청에서 생략(null)하면 이제 create_channel_post_draft_version()의 기본값이
+    # 직전 버전 값을 그대로 캐리포워드한다(services/channel_posts.py §docstring).
+    # 명시적으로 비우려면(예: YouTube 메타를 전부 지운 저장) `{}`를 보낸다.
     channel_payload: dict | None = None
 
     @field_validator("hook_key")
