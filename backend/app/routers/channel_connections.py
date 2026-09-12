@@ -179,6 +179,12 @@ class ChannelConnectionResponse(BaseModel):
     # 계정을 골랐다는 뜻 — 갱신 자체은 사실대로 진행, 화면이 어느 행이 실제로
     # 갱신됐는지 침묵하지 않게 하는 신호일 뿐). 일치·state 없음(신규 연결)이면 null.
     reconnect_mismatch_target_id: uuid.UUID | None = None
+    # story #3813(Phase3·3-4 PR5-b, 페드루 PO 確定 2026-09-12) — 실 stibee 발행
+    # (`POST /emails`)이 요구하는 발신자 정보. 비밀값이 아니라(공개 발신 주소·표시명)
+    # secret_hint류 마스킹 대상이 아니다 — 원문 그대로 노출. stibee 외 채널은 항상
+    # null(provider_config 자체를 안 씀).
+    sender_email: str | None = None
+    sender_name: str | None = None
 
 
 def _to_response(row, *, reconnect_mismatch_target_id: uuid.UUID | None = None) -> ChannelConnectionResponse:
@@ -240,6 +246,8 @@ def _to_response(row, *, reconnect_mismatch_target_id: uuid.UUID | None = None) 
         thread_max_segments=adapter.thread_max_segments if adapter is not None else 0,
         secret_hint=row.secret_hint,
         reconnect_mismatch_target_id=reconnect_mismatch_target_id,
+        sender_email=(row.provider_config or {}).get("sender_email"),
+        sender_name=(row.provider_config or {}).get("sender_name"),
     )
 
 
@@ -1188,6 +1196,13 @@ class CreatePastedSecretConnectionRequest(BaseModel):
     # POST /emails 발송 대상(listId)·수신자 수 조회(/lists/{id}/subscribers/count)
     # 두 곳의 실 이행처(PR5-b).
     list_id: str | None = None
+    # story #3813(Phase3·3-4 PR5-b, 페드루 PO 確定 2026-09-12) — 실 발행(POST /emails)
+    # 이 요구하는 발신자 정보. 스티비 발신자 인증 화면에서 이미 인증한 주소여야
+    # 발행이 통과한다(Errors.Authorization.PermissionDenied 대상) — 여기선 형식만
+    # 검사, 인증 여부는 발행 시점에야 확認된다(연결 저장 단계에서 auth-check처럼
+    # 실호출 왕복하지 않는다, PO 明示 "저장 시 프로브는 auth-check 1개만").
+    sender_email: str | None = None
+    sender_name: str | None = None
 
 
 @router.post("/{org_id}/channel-connections/{channel}", response_model=ChannelConnectionResponse, status_code=201)
@@ -1287,7 +1302,7 @@ async def create_pasted_secret_channel_connection(
         return _to_response(row)
 
     if channel == "stibee":
-        if not body.api_key or not body.list_id:
+        if not body.api_key or not body.list_id or not body.sender_email or not body.sender_name:
             raise HTTPException(
                 status_code=422,
                 detail={
@@ -1334,6 +1349,7 @@ async def create_pasted_secret_channel_connection(
             db, org_id=org_id, channel="stibee", account_id="default", account_label=body.list_id,
             credential_kind="pasted_secret", access_token=body.api_key, refresh_token=None,
             token_expires_at=None, refresh_mode=adapter.refresh_mode, scopes=[], connected_by=resolved.id,
+            provider_config={"sender_email": body.sender_email, "sender_name": body.sender_name},
         )
         return _to_response(row)
 

@@ -224,6 +224,12 @@ const KNOWN_ERRORS: Record<string, KnownError> = {
   // heldByConnectionId로 폴백 문구를 조립한다.
   CHANNEL_POST_GATE_ALREADY_HELD: { labelKey: '', kind: 'gate_already_held' },
   CHANNEL_PUBLISH_PROVIDER_ERROR: { labelKey: 'errorChannelPublishProviderError', kind: 'provider_error' },
+  // story #3813 PR5-b(페드루 PO 確定 2026-09-12) — 실 stibee 발행 실패 2종. 둘 다
+  // 스티비가 400으로 응답해서 거절한 것(연결 자체는 살아있다 — CHANNEL_TOKEN_
+  // EXPIRED류와 다른 축)이라 「다시 연결」이 아니라 사람이 스티비 쪽에서 직접
+  // 고쳐야 하는 문제(요금제 업그레이드·발신자 인증)라는 걸 문구가 말한다.
+  STIBEE_PLAN_RESTRICTED: { labelKey: 'errorStibeePlanRestricted', kind: 'provider_error' },
+  STIBEE_SENDER_NOT_VERIFIED: { labelKey: 'errorStibeeSenderNotVerified', kind: 'provider_error' },
   // story #3426(BE #3419, PR#3774) — 예약 취소·회수 6종(그라운딩 확認·2026-09-04 07:5x).
   // CANCEL_UNPUBLISH_HUMAN_ONLY/OWNER_OR_ADMIN_ONLY는 site-posts의 UNPUBLISH_* 항목을
   // 그대로 재사용한다(같은 "발행 취소·회수는 이 역할만" 개념 공유, 문구도 동일).

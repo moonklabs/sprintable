@@ -312,8 +312,8 @@ _CATALOG: dict[str, dict[str, str]] = {
     # 키 주석과 동형 판단). 페드루 PO CHANGES(2026-09-12 00:29Z) — 필드명(api_key)이
     # 사람 대상 폼 문구에 그대로 새는 클래스, 자연어 문장으로 정정(합니다체·한자 0).
     "channel_connections.stibee_fields_required": {
-        "ko": "스티비 API 키와 주소록 ID를 모두 입력해 주세요.",
-        "en": "Enter both your Stibee API key and address book ID.",
+        "ko": "스티비 API 키·주소록 ID·발신자 이메일·발신자 이름을 모두 입력해 주세요.",
+        "en": "Enter your Stibee API key, address book ID, sender email, and sender name.",
     },
     # story #3813(Phase3·3-4 PR5-a, 페드루 PO 確定 2026-09-12) — 저장 시 auth-check
     # 실호출이 실패(401/403/네트워크)했을 때의 fail-closed 문구. 연결 행 자체를
@@ -350,6 +350,21 @@ _CATALOG: dict[str, dict[str, str]] = {
     "newsletter_send.approver_role_missing": {
         "ko": "승인할 사람이 지정되지 않았습니다 — 승인자 역할을 먼저 두어주세요.",
         "en": "No one is set up to approve this — please set an approver role first.",
+    },
+    # story #3813(Phase3·3-4 PR5-b CHANGES, 카디르 실측 2026-09-12 — 가드 #3779
+    # FAIL 3건) — command.last_error/예외 메시지가 사람에게 닿는 자리인데 하드코딩
+    # 한글 문자열이었다. 코드는 키+파라미터만 넘긴다.
+    "newsletter_send.channel_unsupported": {
+        "ko": "newsletter_send에 배선되지 않은 채널입니다(channel={channel}).",
+        "en": "This channel isn't wired for newsletter_send (channel={channel}).",
+    },
+    "newsletter_send.connection_unavailable": {
+        "ko": "연결·봉인 시각·캠페인 id 중 하나가 없습니다.",
+        "en": "One of connection, sealed schedule time, or campaign id is missing.",
+    },
+    "stibee_publish.connection_incomplete": {
+        "ko": "stibee 발행에 필요한 제목·주소록 ID·발신자 정보가 없습니다.",
+        "en": "Missing subject, address book ID, or sender info required to publish to Stibee.",
     },
 }
 

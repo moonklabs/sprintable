@@ -50,9 +50,16 @@ export const PASTED_SECRET_FIELDS: Record<string, PastedSecretField[]> = {
   // 패널만 펼쳐지던 결함). 주소록 ID는 세그먼트 열거 API가 Enterprise 요금제
   // 전용이라 사람이 스티비 화면에서 직접 읽어 입력하는 값(카드 원문 "사람이 입력
   // 하는 「주소록 ID」 필드").
+  // story #3813(Phase3·3-4 PR5-b, 페드루 PO 確定 2026-09-12) — 발신자 이메일·
+  // 이름 2필드 추가(실 발행 `POST /emails`가 요구, 그라운딩 확認). senderEmail은
+  // 스티비 발신자 인증 화면에서 이미 인증한 주소여야 발행이 통과한다 — 여기선
+  // 형식만 검사, 인증 여부는 발행 시점에야 확認된다(연결 저장 단계에서 auth-check
+  // 처럼 실호출 왕복하지 않는다).
   stibee: [
     { name: 'api_key', labelKey: 'channelConnectFieldApiKey', type: 'password' },
     { name: 'list_id', labelKey: 'channelConnectFieldListId', type: 'text' },
+    { name: 'sender_email', labelKey: 'channelConnectFieldSenderEmail', type: 'text' },
+    { name: 'sender_name', labelKey: 'channelConnectFieldSenderName', type: 'text' },
   ],
 };
 

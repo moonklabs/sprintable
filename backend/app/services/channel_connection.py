@@ -57,6 +57,7 @@ async def upsert_channel_connection(
     refresh_mode: str,
     scopes: list,
     connected_by: uuid.UUID,
+    provider_config: dict | None = None,
 ) -> ChannelConnection:
     """AC8 — 같은 (org, channel, account_id) 재연결은 새 행이 아니라 기존 행 upsert·
     status='active' 복귀(예: revoked 상태에서 재연결해도 다시 active로 돌아온다)."""
@@ -82,6 +83,7 @@ async def upsert_channel_connection(
             encrypted_access_token=encrypted_access_token, encrypted_refresh_token=encrypted_refresh_token,
             token_expires_at=token_expires_at, refresh_mode=refresh_mode, scopes=scopes,
             status="active", connected_by=connected_by, secret_hint=secret_hint,
+            provider_config=provider_config,
         )
         db.add(row)
     else:
@@ -92,6 +94,7 @@ async def upsert_channel_connection(
         existing.token_expires_at = token_expires_at
         existing.refresh_mode = refresh_mode
         existing.scopes = scopes
+        existing.provider_config = provider_config
         # story #3633 — status/last_error 3종(last_error_code·last_error_at 포함)
         # 클리어를 mark_connection_recovered 하나로(graph_api_errors.py, 3605
         # sticky_connection_status와 같은 모듈).
@@ -220,6 +223,7 @@ async def apply_refresh_result(
 
 async def apply_connection_failure(
     db: AsyncSession, *, connection: ChannelConnection, status: str, error_message: str,
+    error_code: str | None = None,
 ) -> None:
     """story #3598 — `apply_refresh_failure`(status="expired" 고정)의 status 일반화판.
     `_classify_threads_error`가 code==190/OAuthException을 expired|revoked로 세분화한
@@ -234,11 +238,21 @@ async def apply_connection_failure(
     덮는 완전 sticky)과 «같은 사실»을 다르게 말하고 있어 하나는 거짓이었다.
     이제 `graph_api_errors.sticky_connection_status`(공유 단일 지점) 하나로
     통일한다. last_error는 그래도 최신 원문으로 갱신한다(status가 안 바뀌어도
-    "최근에도 계속 실패 中"이라는 사실 자체는 갱신할 가치가 있다)."""
+    "최근에도 계속 실패 中"이라는 사실 자체는 갱신할 가치가 있다).
+
+    story #3813 PR5-b(페드루 PO 確定 2026-09-12) — `error_code`(추가, additive
+    기본 None=회귀 0)는 이 함수의 기존 3개 호출부(channel_posts.py의 create/
+    status/publish 3단계)가 여태 last_error_code·last_error_at을 안 채우던 갭을
+    메운다(mark_connection_recovered/mark_connection_failed가 이미 마련해 둔
+    두 컬럼을 그대로 재사용 — 새 컬럼 0). 스티비 요금제 제한처럼 "왜 실패했는지"
+    화면이 last_error_code로 갈라야 하는 자리가 생기며 드러난 기존 갭."""
     from app.services.graph_api_errors import sticky_connection_status
 
     connection.last_error = error_message[:2000]
     connection.status = sticky_connection_status(connection.status, status)
+    if error_code is not None:
+        connection.last_error_code = error_code
+        connection.last_error_at = datetime.now(timezone.utc)
     await db.commit()
 
 

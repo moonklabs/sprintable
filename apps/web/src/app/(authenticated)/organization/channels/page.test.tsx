@@ -535,6 +535,35 @@ describe('OrganizationChannelsPage — 목록·상태(story #3376)', () => {
     expect(container.querySelector('[data-testid="channel-connect-replace-credential-button-conn-wp-revoked"]')).not.toBeNull();
   });
 
+  // story #3813 PR5-b CHANGES(유나 Design REQUESTED 2026-09-12) — STIBEE_PLAN_
+  // RESTRICTED/STIBEE_SENDER_NOT_VERIFIED는 재연결로 안 풀리는 오류(kind:
+  // 'provider_error', api-error.ts)라 「다시 연결」이 거짓 진입점이었다. 칩은
+  // 코드별 구체 문구, 주 액션엔 「다시 연결」이 없어야 한다(뮤테이션 대상 — 이
+  // 분기를 지우면 이 테스트가 반드시 RED여야 한다).
+  it.each([
+    ['STIBEE_PLAN_RESTRICTED', '요금제 제한'],
+    ['STIBEE_SENDER_NOT_VERIFIED', '발신자 미인증'],
+  ])('provider_error(%s) 연결은 칩이 「%s」이고 「다시 연결」 버튼이 없다', async (errorCode, chipLabel) => {
+    stubFetch({
+      availableChannels: [
+        { channel: 'stibee', display_name: 'Stibee', credential_kind: 'pasted_secret', kind: 'social' },
+      ],
+      connections: [{
+        id: 'conn-stibee-provider-error', channel: 'stibee', account_id: 'stibee', account_label: 'list-1',
+        credential_kind: 'pasted_secret', status: 'error', token_expires_at: null, last_refreshed_at: null,
+        last_error: 'Stibee 400', last_error_code: errorCode, last_error_at: '2026-09-12T09:00:00Z',
+        can_auto_refresh: false, connected_by: 'member-1',
+        created_at: '2026-09-01T00:00:00Z', updated_at: '2026-09-01T00:00:00Z', secret_hint: '1234',
+      }],
+    });
+    await mount('owner');
+    const headerChip = container.querySelector('[data-status-chip]');
+    expect(headerChip?.getAttribute('data-status-chip')).toBe('provider_error');
+    expect(headerChip?.textContent).toContain(chipLabel);
+    const reauthBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '다시 연결');
+    expect(reauthBtn).toBeUndefined();
+  });
+
   // story #3650 — dev 실측 재현: 재연결 대상과 콜백이 실제로 갱신한 행이 다르면
   // ?connected=&mismatch=&updated= 세 쿼리가 함께 온다. 화면이 두 id를 이미 불러온
   // connections에서 라벨로 바꿔 한 문장으로 보인다(침묵 0).

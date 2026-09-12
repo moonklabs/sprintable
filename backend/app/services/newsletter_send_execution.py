@@ -152,10 +152,12 @@ _ACTIVITY_ACTION_SEND_FAILED = "newsletter_send_failed"
 
 async def process_one_newsletter_send_command(db: AsyncSession, command: PublicationCommand, *, now: datetime) -> None:
     """`publication_command.py::_process_one_command`의 content_kind==
-    "newsletter_send" 분기가 이 함수로 위임(ads_boost 동형 패턴). 실 스티비 API
-    호출 0(PO 明示 2026-09-12) — connection.channel이 `stibee_sandbox`가 아니면
-    (=진짜 "stibee") 이 시점에서 명시 실패(조용히 아무 일도 안 하고 completed로
-    새지 않는다, fail-closed)."""
+    "newsletter_send" 분기가 이 함수로 위임(ads_boost 동형 패턴).
+
+    story #3813 PR5-b(페드루 PO 確定 2026-09-12) — 실 stibee 발송(`stibee_client.
+    reserve_email`) 착지(PR2가 "이 PR 범위 밖"이라 미뤘던 자리). `stibee_sandbox`
+    는 기존 고정 미러 그대로(회귀 0), 그 둘 외의 채널은 여전히 fail-closed
+    (newsletter_send gate 자체가 stibee류에만 나므로 실전 도달 0, 방어선만 유지)."""
     from app.services.activity_log import ActivityLogService
     from app.services.publication_command import (
         STATUS_BLOCKED_UNAPPROVED,
@@ -178,20 +180,31 @@ async def process_one_newsletter_send_command(db: AsyncSession, command: Publica
 
     gate, publication, conn = ctx["gate"], ctx["publication"], ctx["connection"]
 
-    if conn.channel != _SANDBOX_CHANNEL:
-        # PO 明示(2026-09-12) — 실 스티비 발송은 이 PR 범위 밖. sandbox 아닌 채널로
-        # 온 send 명령은 (기존 채널 오분기 사고 클래스와 동형으로) 조용히 완료 처리
-        # 하지 않고 명시 실패시킨다 — 다음 PR이 real 모듈을 심을 때까지.
-        await record_publication_attempt(
-            db, command=command, approval_check="ok", adapter_called=False,
-            started_at=attempt_started_at, finished_at=now, result_code="NEWSLETTER_SEND_CHANNEL_UNSUPPORTED",
-        )
-        await apply_command_failure(
-            db, command, error_code="NEWSLETTER_SEND_CHANNEL_UNSUPPORTED",
-            last_error=f"real stibee send not implemented yet (channel={conn.channel!r})", now=now,
-        )
+    if conn.channel == _SANDBOX_CHANNEL:
+        await _process_sandbox_send(db, command, gate=gate, publication=publication, now=now)
+        return
+    if conn.channel == "stibee":
+        await _process_real_send(db, command, gate=gate, publication=publication, connection=conn, now=now)
         return
 
+    # story #3813 — newsletter_send 게이트는 stibee/stibee_sandbox에만 나는데(다른
+    # 채널로 이 명령이 온다는 건 어딘가 오배선), 조용히 완료 처리하지 않고 명시
+    # 실패시킨다(기존 채널 오분기 사고 클래스와 동형 fail-closed).
+    await record_publication_attempt(
+        db, command=command, approval_check="ok", adapter_called=False,
+        started_at=attempt_started_at, finished_at=now, result_code="NEWSLETTER_SEND_CHANNEL_UNSUPPORTED",
+    )
+    from app.services.i18n_catalog import t
+
+    await apply_command_failure(
+        db, command, error_code="NEWSLETTER_SEND_CHANNEL_UNSUPPORTED",
+        last_error=t("newsletter_send.channel_unsupported", "ko", channel=repr(conn.channel)), now=now,
+    )
+
+
+async def _process_sandbox_send(db: AsyncSession, command: PublicationCommand, *, gate: Gate, publication: ChannelPublication, now: datetime) -> None:
+    from app.services.activity_log import ActivityLogService
+    from app.services.publication_command import apply_command_failure, record_publication_attempt
     from app.services.stibee_sandbox_campaign import StibeeSandboxSendError, send_campaign
 
     try:
@@ -201,7 +214,7 @@ async def process_one_newsletter_send_command(db: AsyncSession, command: Publica
     except StibeeSandboxSendError as exc:
         await record_publication_attempt(
             db, command=command, approval_check="ok", adapter_called=True,
-            started_at=attempt_started_at, finished_at=now, result_code="NEWSLETTER_SEND_PROVIDER_ERROR",
+            started_at=now, finished_at=now, result_code="NEWSLETTER_SEND_PROVIDER_ERROR",
         )
         await apply_command_failure(
             db, command, error_code="NEWSLETTER_SEND_PROVIDER_ERROR", last_error=exc.message, now=now,
@@ -214,7 +227,7 @@ async def process_one_newsletter_send_command(db: AsyncSession, command: Publica
 
     await record_publication_attempt(
         db, command=command, approval_check="ok", adapter_called=True,
-        started_at=attempt_started_at, finished_at=now, result_code="ok",
+        started_at=now, finished_at=now, result_code="ok",
     )
     command.status = "completed"
     await ActivityLogService(db).record(
@@ -222,7 +235,82 @@ async def process_one_newsletter_send_command(db: AsyncSession, command: Publica
         actor_type="agent", entity_type="gate", entity_id=gate.id,
         context={"recipient_count": result["recipient_count"], "segment_name": result["segment_name_confirmed"]},
     )
+    await _schedule_snapshots(db, command=command, gate=gate, publication=publication, channel="stibee_sandbox", now=now)
 
+
+async def _process_real_send(
+    db: AsyncSession, command: PublicationCommand, *, gate: Gate, publication: ChannelPublication,
+    connection: ChannelConnection, now: datetime,
+) -> None:
+    """story #3813 PR5-b — 봉인 시각이 항상 있으므로 `reserve_email`만 부른다
+    (`send_now`류 즉시발송은 안 쓴다, PO 明示). 요금제 부족·발신자 미인증은
+    create_container와 같은 축(둘 다 400+바디 code로 구분, 그라운딩 확認: "요금제
+    부족은 reserve에도 동일하게 걸린다") — `StibeeApiError`의 `.is_plan_restricted`
+    로 연결 상태도 같이 승격한다(사람이 스티비 요금제를 올려야 풀린다는 신호)."""
+    from app.services.activity_log import ActivityLogService
+    from app.services.channel_connection import apply_connection_failure, decrypt_for_use
+    from app.services.i18n_catalog import t
+    from app.services.publication_command import apply_command_failure, record_publication_attempt
+    from app.services.stibee_client import StibeeApiError, reserve_email
+
+    access_token = decrypt_for_use(connection)
+    if access_token is None or gate.sealed_newsletter_scheduled_at is None or not publication.external_id:
+        await record_publication_attempt(
+            db, command=command, approval_check="ok", adapter_called=False,
+            started_at=now, finished_at=now, result_code="NEWSLETTER_SEND_CONNECTION_UNAVAILABLE",
+        )
+        await apply_command_failure(
+            db, command, error_code="NEWSLETTER_SEND_CONNECTION_UNAVAILABLE",
+            last_error=t("newsletter_send.connection_unavailable", "ko"), now=now,
+        )
+        return
+
+    try:
+        import httpx
+
+        async with httpx.AsyncClient(timeout=20) as client:
+            await reserve_email(
+                client, api_key=access_token, email_id=int(publication.external_id),
+                scheduled_at_utc=gate.sealed_newsletter_scheduled_at,
+            )
+    except StibeeApiError as exc:
+        error_code = "STIBEE_PLAN_RESTRICTED" if exc.is_plan_restricted else "NEWSLETTER_SEND_PROVIDER_ERROR"
+        await record_publication_attempt(
+            db, command=command, approval_check="ok", adapter_called=True,
+            started_at=now, finished_at=now, result_code=error_code,
+        )
+        await apply_command_failure(db, command, error_code=error_code, last_error=str(exc)[:2000], now=now)
+        if exc.is_plan_restricted:
+            await apply_connection_failure(
+                db, connection=connection, status="error", error_message=str(exc)[:2000],
+                error_code="STIBEE_PLAN_RESTRICTED",
+            )
+        await ActivityLogService(db).record(
+            org_id=command.org_id, action=_ACTIVITY_ACTION_SEND_FAILED, actor_id=command.requested_by_member_id,
+            actor_type="agent", entity_type="gate", entity_id=gate.id, context={"error": str(exc)[:2000]},
+        )
+        return
+
+    await record_publication_attempt(
+        db, command=command, approval_check="ok", adapter_called=True,
+        started_at=now, finished_at=now, result_code="ok",
+    )
+    command.status = "completed"
+    await ActivityLogService(db).record(
+        org_id=command.org_id, action=_ACTIVITY_ACTION_SEND_SUCCEEDED, actor_id=command.requested_by_member_id,
+        actor_type="agent", entity_type="gate", entity_id=gate.id,
+        # story #3813 PR5-b — 실 reserve는 sandbox의 send_campaign과 달리 수신자 수를
+        # 동기 반환하지 않는다(예약만 걸 뿐, 실 발송은 스티비 쪽에서 나중에 일어난다)
+        # — recipient_count를 지어내지 않고 None(키는 유지해 sandbox와 같은 스키마).
+        context={"recipient_count": None, "segment_name": gate.sealed_newsletter_segment_name},
+    )
+    await _schedule_snapshots(db, command=command, gate=gate, publication=publication, channel="stibee", now=now)
+
+
+async def _schedule_snapshots(
+    db: AsyncSession, *, command: PublicationCommand, gate: Gate, publication: ChannelPublication,
+    channel: str, now: datetime,
+) -> None:
     # story #3813(Phase3·3-4 PR3, 페드루 PO 確定 2026-09-12) — 발송 결과(opens/
     # delivered) 캡처. channel_posts.py:1770 부근 발행 콜백과 같은 함수를 같은
     # 모양으로 부르되, 앵커는 «발송 완료 시각»(now) — 이 채널은 그 콜백에서
@@ -233,6 +321,6 @@ async def process_one_newsletter_send_command(db: AsyncSession, command: Publica
 
     await schedule_insight_snapshots(
         db, org_id=command.org_id, work_item_id=gate.work_item_id, publication_id=publication.id,
-        publication_kind="channel_publication", channel=conn.channel,
+        publication_kind="channel_publication", channel=channel,
         external_id=publication.external_id, anchor_at=now,
     )

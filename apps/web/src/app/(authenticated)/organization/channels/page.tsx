@@ -442,9 +442,33 @@ function expiringSoonSubtitleText({
     : t(key, { days: days < 1 ? t('channelExpiringToday') : t('channelExpiringDaysCount', { count: days }) });
 }
 
-function reauthSubtitleText(reason: 'expired' | 'revoked' | 'error' | undefined, t: ReturnType<typeof useTranslations>): string {
+// story #3813 PR5-b(페드루 PO 確定 2026-09-12) — 요금제 제한은 재인증·자격교체로
+// 안 풀린다(사람이 할 일=스티비 요금제 업그레이드). last_error_code가 이 값이면
+// status(error) 공용 문구보다 먼저 이 전용 문구를 고른다(같은 원칙: connect-
+// error.ts의 code→label 매핑, 새 status enum 값 0으로 처리).
+function reauthSubtitleText(
+  reason: 'expired' | 'revoked' | 'error' | undefined, t: ReturnType<typeof useTranslations>,
+  lastErrorCode?: string | null,
+): string {
+  if (lastErrorCode === 'STIBEE_PLAN_RESTRICTED') return t('channelStibeePlanRestricted');
+  // story #3813 PR5-b CHANGES — 발신자 미인증도 요금제 제한과 같은 축(provider_error,
+  // 재연결로 안 풀림). status가 이제 'reauth_required'가 아니라 'provider_error'라
+  // reason이 undefined로 들어온다(위 요금제 제한과 같은 자리) — 아래 reason 분기로
+  // 빠지면 "다시 연결하면 풀립니다"라는 거짓 문구가 나간다.
+  if (lastErrorCode === 'STIBEE_SENDER_NOT_VERIFIED') return t('channelStibeeSenderNotVerified');
   const key = reason === 'revoked' ? 'channelReauthRevoked' : reason === 'error' ? 'channelReauthError' : 'channelReauthExpired';
   return t(key);
+}
+
+// story #3813 PR5-b CHANGES(유나 Design REQUESTED 2026-09-12) — 칩 문구는 상태
+// 칸으로 안 뭉친다("provider_error"라는 한 낱말로는 사람이 무얼 고쳐야 하는지
+// 안 보인다) — 코드별 짧은 명사구. 미지 provider_error 코드는 undefined를 내
+// ChannelStatusChip이 제네릭 폴백(channelStatusProviderError)으로 떨어지게
+// 한다(지어내지 않는다).
+function providerErrorChipLabel(lastErrorCode: string | null | undefined, t: ReturnType<typeof useTranslations>): string | undefined {
+  if (lastErrorCode === 'STIBEE_PLAN_RESTRICTED') return t('channelStatusStibeePlanRestricted');
+  if (lastErrorCode === 'STIBEE_SENDER_NOT_VERIFIED') return t('channelStatusStibeeSenderNotVerified');
+  return undefined;
 }
 
 function ExpiringSoonNote({
@@ -457,8 +481,10 @@ function ExpiringSoonNote({
   return <p className="text-xs text-muted-foreground">{expiringSoonSubtitleText({ isAutoRefreshInfo, tokenExpiresAt, t })}</p>;
 }
 
-function ReauthNote({ reason, t }: { reason?: 'expired' | 'revoked' | 'error'; t: ReturnType<typeof useTranslations> }) {
-  return <p className="text-xs text-muted-foreground">{reauthSubtitleText(reason, t)}</p>;
+function ReauthNote({
+  reason, t, lastErrorCode,
+}: { reason?: 'expired' | 'revoked' | 'error'; t: ReturnType<typeof useTranslations>; lastErrorCode?: string | null }) {
+  return <p className="text-xs text-muted-foreground">{reauthSubtitleText(reason, t, lastErrorCode)}</p>;
 }
 
 function ConnectionRow({
@@ -479,7 +505,7 @@ function ConnectionRow({
 }) {
   const derived = deriveChannelConnectionStatus({
     serverStatus: conn.status, tokenExpiresAt: conn.token_expires_at,
-    canAutoRefresh: conn.can_auto_refresh, lastError: conn.last_error,
+    canAutoRefresh: conn.can_auto_refresh, lastError: conn.last_error, lastErrorCode: conn.last_error_code,
   });
   // story #3486(유나 10회차, 3436 묶음 8 정본 재사용) — 「연결 시각」은 약속이 아니라
   // 기록이라 상대시각이 맞다(묶음 8 판정 그대로). 새 포맷 함수를 신설하지 않는다.
@@ -552,10 +578,17 @@ function ConnectionRow({
             {t('channelConnectedBy', { time: formatRelativeTime(conn.created_at, locale, displayTimezone) })}
           </p>
         </div>
-        {showStatusChip ? <ChannelStatusChip status={derived.status} /> : null}
+        {showStatusChip ? (
+          <ChannelStatusChip
+            status={derived.status}
+            label={derived.status === 'provider_error' ? providerErrorChipLabel(conn.last_error_code, t) : undefined}
+          />
+        ) : null}
       </div>
       {derived.status === 'expiring_soon' ? <ExpiringSoonNote isAutoRefreshInfo={derived.isAutoRefreshInfo} tokenExpiresAt={conn.token_expires_at} t={t} /> : null}
-      {derived.status === 'reauth_required' ? <ReauthNote reason={derived.reauthReason} t={t} /> : null}
+      {derived.status === 'reauth_required' || derived.status === 'provider_error' ? (
+        <ReauthNote reason={derived.reauthReason} t={t} lastErrorCode={conn.last_error_code} />
+      ) : null}
       {conn.last_error ? (
         <details className="text-xs text-muted-foreground">
           <summary className="cursor-pointer">{t('channelLastErrorToggle')}</summary>
@@ -699,6 +732,7 @@ function ChannelSection({
   const rowStatuses = connections.map((c) =>
     deriveChannelConnectionStatus({
       serverStatus: c.status, tokenExpiresAt: c.token_expires_at, canAutoRefresh: c.can_auto_refresh,
+      lastErrorCode: c.last_error_code,
     }).status,
   );
   const effectiveSource = credentials?.effective_source ?? 'none';
@@ -768,6 +802,7 @@ function ChannelSection({
     ? deriveChannelConnectionStatus({
         serverStatus: single.status, tokenExpiresAt: single.token_expires_at,
         canAutoRefresh: single.can_auto_refresh, lastError: single.last_error,
+        lastErrorCode: single.last_error_code,
       })
     : null;
 
@@ -780,10 +815,10 @@ function ChannelSection({
       return credential_kind === 'oauth' && effectiveSource === 'none' ? t('channelConfigIncompleteReason') : undefined;
     }
     if (single && singleDerived) {
-      if (singleDerived.status === 'reauth_required') {
+      if (singleDerived.status === 'reauth_required' || singleDerived.status === 'provider_error') {
         return single.credential_kind === 'none'
           ? t('channelSandboxReauthUnavailableNote', { channel: channelLabel(channel, t) })
-          : reauthSubtitleText(singleDerived.reauthReason, t);
+          : reauthSubtitleText(singleDerived.reauthReason, t, single.last_error_code);
       }
       if (singleDerived.status === 'expiring_soon') {
         return expiringSoonSubtitleText({ isAutoRefreshInfo: singleDerived.isAutoRefreshInfo, tokenExpiresAt: single.token_expires_at, t });
@@ -841,6 +876,12 @@ function ChannelSection({
     ) {
       return isOwnerOrAdmin ? { label: t('channelReauthAction'), onClick: onExpand, testId: 'channel-row-primary-reauth' } : null;
     }
+    // story #3813 PR5-b CHANGES(유나 Design REQUESTED 2026-09-12) — singleDerived.
+    // status === 'provider_error'는 위 두 분기 어느 쪽에도 안 걸려 의도적으로 여기까지
+    // 떨어진다(「다시 연결」 제거가 목적) — 연결이 1개면 아래 connections.length > 1도
+    // 거짓이라 결국 null(주 액션 없음). 「자격 바꾸기」는 사라지지 않는다 — ⋯ 메뉴의
+    // 「연결 관리」(menuItems, connections.length >= 1이면 항상 있다)가 행을 펼쳐
+    // ReplaceCredentialCard를 그대로 보여준다.
     if (connections.length > 1) {
       return { label: t('channelManageConnectionsAction'), onClick: onExpand, testId: 'channel-row-primary-manage' };
     }
@@ -870,7 +911,16 @@ function ChannelSection({
           mark={<ListRowMark label={channelMarkInitials(channel)} color={channelMarkColor(channel)} />}
           title={channelLabel(channel, t)}
           subtitle={subtitle}
-          status={<ChannelStatusChip status={channelStatus} />}
+          status={(
+            <ChannelStatusChip
+              status={channelStatus}
+              // story #3813 PR5-b CHANGES — 계정이 정확히 1개일 때만 코드별 구체
+              // 문구를 낸다(2개 이상이면 어느 계정 얘기인지 한 낱말로 못 줄인다 —
+              // subtitle의 "지어내지 않는다" 원칙과 동형, ChannelStatusChip 제네릭
+              // 폴백에 맡긴다).
+              label={channelStatus === 'provider_error' && single ? providerErrorChipLabel(single.last_error_code, t) : undefined}
+            />
+          )}
           // story #3743 CHANGES Ⓓ(페드루 PO, 2026-09-09 12:41Z) — 채운 파랑은 헤더
           // 하나만(#4088과 같은 형). 행 다음 발은 전부 outline.
           action={primaryAction ? (
