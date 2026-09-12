@@ -74,12 +74,20 @@ def _enable_sandbox_adapter(monkeypatch):
 
 async def _seed_terminal_schedule_row(session, *, org_id, publication_id, channel="sandbox", external_id="media-1", status="captured", due_at=None):
     """due 3창이 이미 전부 소진된 상태 재현 — captured/failed 등 terminal 상태로만
-    남고 pending/in_progress는 0(배포 前 시나리오)."""
+    남고 pending/in_progress는 0(배포 前 시나리오).
+
+    카디르 QA 재현(2026-09-12) — `due_at` 기본값이 매 호출마다 `datetime.now()`를
+    새로 재던 자리라, 같은 테스트 안에서 이 헬퍼를 짧은 시간에 여러 번 부르면(3회
+    루프류) 시스템 시계 해상도에 따라 같은 마이크로초가 나와 `uq_comment_
+    collection_schedule_publication_due_at` UNIQUE 위반이 났다 — `uuid.uuid4()`
+    시드 마이크로초 지터로 같은 publication_id 안에서도 사실상 항상 서로 다른
+    `due_at`을 보장한다(값 자체의 의미는 무관 — "이미 지난 due"라는 사실만 필요)."""
     from app.models.channel_post_comment import CommentCollectionSchedule
 
     row = CommentCollectionSchedule(
         id=uuid.uuid4(), org_id=org_id, publication_id=publication_id, channel=channel,
-        external_id=external_id, due_at=due_at or (datetime.now(timezone.utc) - timedelta(days=7)),
+        external_id=external_id,
+        due_at=due_at or (datetime.now(timezone.utc) - timedelta(days=7, microseconds=uuid.uuid4().int % 1_000_000)),
         status=status, captured_at=datetime.now(timezone.utc) - timedelta(days=7),
     )
     session.add(row)

@@ -106,7 +106,7 @@ async def test_collect_resolves_parent_when_parent_arrives_in_same_batch(monkeyp
             conn = await _seed_channel_connection(s, org_id, channel="sandbox")
             pub = await _seed_channel_publication(s, org_id=org_id, connection_id=conn.id, channel="sandbox", external_id="media-1")
 
-            async def _fetch(client, *, access_token, media_id):
+            async def _fetch(client, *, access_token, media_id, **kwargs):
                 return [_fake_comment("c1"), _fake_comment("c2", parent_external_id="c1")], True, None
 
             monkeypatch.setattr(sandbox_publish, "fetch_replies", _fetch)
@@ -139,14 +139,14 @@ async def test_collect_resolves_parent_when_parent_already_collected_earlier(mon
             conn = await _seed_channel_connection(s, org_id, channel="sandbox")
             pub = await _seed_channel_publication(s, org_id=org_id, connection_id=conn.id, channel="sandbox", external_id="media-1")
 
-            async def _first_fetch(client, *, access_token, media_id):
+            async def _first_fetch(client, *, access_token, media_id, **kwargs):
                 return [_fake_comment("c1")], True, None
 
             monkeypatch.setattr(sandbox_publish, "fetch_replies", _first_fetch)
             await collect_comments_for_publication(s, org_id=org_id, publication_id=pub.id, channel="sandbox", external_id="media-1")
             await s.commit()
 
-            async def _second_fetch(client, *, access_token, media_id):
+            async def _second_fetch(client, *, access_token, media_id, **kwargs):
                 return [_fake_comment("c1"), _fake_comment("c2", parent_external_id="c1")], True, None
 
             monkeypatch.setattr(sandbox_publish, "fetch_replies", _second_fetch)
@@ -180,7 +180,7 @@ async def test_collect_leaves_parent_null_when_parent_not_collected(monkeypatch)
             conn = await _seed_channel_connection(s, org_id, channel="sandbox")
             pub = await _seed_channel_publication(s, org_id=org_id, connection_id=conn.id, channel="sandbox", external_id="media-1")
 
-            async def _fetch(client, *, access_token, media_id):
+            async def _fetch(client, *, access_token, media_id, **kwargs):
                 return [_fake_comment("c2", parent_external_id="ghost-never-collected")], True, None
 
             monkeypatch.setattr(sandbox_publish, "fetch_replies", _fetch)
@@ -276,7 +276,9 @@ async def test_kind_filter_narrows_to_comment_or_reply():
 async def test_sandbox_threads_mirror_marks_comment_two_as_reply_to_comment_one():
     import app.services.sandbox_publish as sandbox_publish
 
-    items, complete, _total = await sandbox_publish.fetch_replies(None, access_token="sandbox", media_id="media-x")
+    items, complete, _total = await sandbox_publish.fetch_replies(
+        None, access_token="sandbox", media_id="media-x", published_at=datetime.now(timezone.utc),
+    )
     assert complete is True
     assert items[0].get("parent_external_id") is None
     assert items[1]["parent_external_id"] == items[0]["id"]
@@ -286,7 +288,9 @@ async def test_sandbox_threads_mirror_marks_comment_two_as_reply_to_comment_one(
 async def test_sandbox_instagram_mirror_marks_comment_two_as_reply_to_comment_one():
     import app.services.instagram_sandbox_publish as instagram_sandbox_publish
 
-    items, complete, _total = await instagram_sandbox_publish.fetch_replies(None, access_token="sandbox", media_id="media-x")
+    items, complete, _total = await instagram_sandbox_publish.fetch_replies(
+        None, access_token="sandbox", media_id="media-x", published_at=datetime.now(timezone.utc),
+    )
     assert complete is True
     assert items[0].get("parent_external_id") is None
     assert items[1]["parent_external_id"] == items[0]["id"]
@@ -296,7 +300,9 @@ async def test_sandbox_instagram_mirror_marks_comment_two_as_reply_to_comment_on
 async def test_sandbox_facebook_mirror_marks_comment_two_as_reply_to_comment_one():
     import app.services.facebook_sandbox_publish as facebook_sandbox_publish
 
-    items, complete, _total = await facebook_sandbox_publish.fetch_replies(None, access_token="sandbox", media_id="media-x")
+    items, complete, _total = await facebook_sandbox_publish.fetch_replies(
+        None, access_token="sandbox", media_id="media-x", published_at=datetime.now(timezone.utc),
+    )
     assert complete is True
     assert items[0].get("parent_external_id") is None
     assert items[1]["parent_external_id"] == items[0]["id"]
@@ -330,7 +336,7 @@ async def test_reply_detection_flagged_unavailable_when_parent_field_key_missing
             conn = await _seed_channel_connection(s, org_id, channel="sandbox")
             pub = await _seed_channel_publication(s, org_id=org_id, connection_id=conn.id, channel="sandbox", external_id="media-1")
 
-            async def _fetch(client, *, access_token, media_id):
+            async def _fetch(client, *, access_token, media_id, **kwargs):
                 return [_fake_comment_without_parent_field_marker("c1")], True, None
 
             monkeypatch.setattr(sandbox_publish, "fetch_replies", _fetch)
@@ -360,7 +366,7 @@ async def test_reply_detection_self_heals_when_parent_field_observed_again(monke
             conn = await _seed_channel_connection(s, org_id, channel="sandbox")
             pub = await _seed_channel_publication(s, org_id=org_id, connection_id=conn.id, channel="sandbox", external_id="media-1")
 
-            async def _fetch_missing(client, *, access_token, media_id):
+            async def _fetch_missing(client, *, access_token, media_id, **kwargs):
                 return [_fake_comment_without_parent_field_marker("c1")], True, None
 
             monkeypatch.setattr(sandbox_publish, "fetch_replies", _fetch_missing)
@@ -369,7 +375,7 @@ async def test_reply_detection_self_heals_when_parent_field_observed_again(monke
             await s.refresh(conn)
             assert conn.reply_detection_unavailable_at is not None
 
-            async def _fetch_observed(client, *, access_token, media_id):
+            async def _fetch_observed(client, *, access_token, media_id, **kwargs):
                 return [_fake_comment("c1")], True, None
 
             monkeypatch.setattr(sandbox_publish, "fetch_replies", _fetch_observed)
@@ -395,7 +401,7 @@ async def test_collection_status_exposes_reply_detection_unavailable(monkeypatch
             conn = await _seed_channel_connection(s, org_id, channel="sandbox")
             pub = await _seed_channel_publication(s, org_id=org_id, connection_id=conn.id, channel="sandbox", external_id="media-1")
 
-            async def _fetch(client, *, access_token, media_id):
+            async def _fetch(client, *, access_token, media_id, **kwargs):
                 return [_fake_comment_without_parent_field_marker("c1")], True, None
 
             monkeypatch.setattr(sandbox_publish, "fetch_replies", _fetch)

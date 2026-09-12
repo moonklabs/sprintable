@@ -815,6 +815,22 @@ jobs:
         working-directory: backend
         run: python3 scripts/lint_business_info_email_footer_drift.py
 
+  # story #3528(재발 가드, 페드루 PO 근본처방 2026-09-12) — sandbox_publish.py류가
+  # 댓글 timestamp를 벽시계 고정 절대일시로 박아 뒀다가, 그 날짜를 벽시계가 지나는
+  # 순간부터 _is_publication_active의 「마지막 댓글 7일」 창이 영구 False가 돼 자가
+  # 회수 재생성 전체가 죽은 실사고(develop 2026-09-12 00:00Z 전수 RED). PG 불요
+  # 정적 AST 스캔이라 독립 job으로 배선.
+  no-hardcoded-iso-timestamp-lint:
+    name: backend/app ISO 절대 일시 하드코딩 lint (guard, story #3528)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Scan backend/app for hardcoded ISO absolute timestamps
+        working-directory: backend
+        run: python3 scripts/lint_no_hardcoded_iso_timestamp.py
+
   # story #3219(카디르 3라운드, 2026-08-30) — 이 검증은 run-migrations.test.sh 시나리오
   # [9]로 먼저 만들어졌지만 그 .test.sh는 CI 어디에도 안 걸려 있어(convention 자체가
   # manual-only) 매 PR에 실제로 도는 자리가 없었다("만들어졌는데 도는 자리 없음" 결함).

@@ -103,6 +103,7 @@ from __future__ import annotations
 import re
 import time
 import uuid
+from datetime import datetime, timedelta
 
 import httpx
 
@@ -266,13 +267,22 @@ async def delete_media(client: httpx.AsyncClient, *, access_token: str, media_id
 # 이번 fetch엔 없다"를 diff로 판정해 soft-delete한다(테스트는 두 번째 호출을
 # monkeypatch로 comment 하나 뺀 리스트로 바꿔 이 경로를 재현한다) — 일반적인 리컨실
 # 로직이라 sandbox뿐 아니라 실 Threads 응답에도 그대로 먹힌다.
-def _deterministic_comment(*, media_id: str, index: int) -> dict:
+def _deterministic_comment(*, media_id: str, index: int, published_at: datetime) -> dict:
+    """story #3528(카디르 QA 실사고 2026-09-12, 페드루 PO 근본처방) —
+    `timestamp`는 **벽시계 고정 절대일시가 아니라 그 발행물 자신의 published_at**
+    기준(+index분 결정적 오프셋)이어야 한다. 예전엔 "2026-09-05T00:00:00+00:00"
+    고정값이었는데, `channel_post_comments.py::_is_publication_active`의 「마지막
+    댓글로부터 7일 이내」 창이 벽시계가 그 날짜를 지나는 순간부터 **영구** False가
+    돼(발행물이 몇 분 전에 새로 생겨도 상관없이) 자가회수 재생성 전체가 죽었다
+    (develop 2026-09-12 00:00Z 이후 CI 전수 RED의 원인). published_at 기준이면
+    "발행 후 7일 지나 비활성"이라는 원래 설계 그대로 발행물 나이와 같이 움직인다
+    (같은 입력→같은 값 결정성은 유지)."""
     seed = int(uuid.uuid5(uuid.NAMESPACE_URL, f"{media_id}:{index}").hex[:8], 16)
     item = {
         "id": f"sandbox-comment-{media_id}-{index}",
         "text": f"샌드박스 댓글 {index}(seed={seed % 1000})",
         "username": f"sandbox_user_{index}",
-        "timestamp": "2026-09-05T00:00:00+00:00",
+        "timestamp": (published_at + timedelta(minutes=index)).isoformat(),
     }
     # story #3805(Phase3·3-1·PR 4, 페드루 PO 確定 2026-09-11 12:12Z) — 댓글 2를
     # 댓글 1의 답글로(인바운드·「남이 우리 댓글에 단 답글」) 고정해, PO Test Org에서
@@ -291,7 +301,7 @@ _COMMENT2_DELETE_MARKER_RE = re.compile(r"-c2del(\d+)$")
 
 
 async def fetch_replies(
-    client: httpx.AsyncClient, *, access_token: str, media_id: str,
+    client: httpx.AsyncClient, *, access_token: str, media_id: str, published_at: datetime,
 ) -> tuple[list[dict], bool, int | None]:
     """AC(조각①) "기본 2건" — media_id 하나엔 항상 같은 2건(순서도 고정, 테스트가
     인덱스로 단언 가능). 페드루 PO REQUIRED(2026-09-05, PR#3865 리뷰) — threads가
@@ -307,12 +317,16 @@ async def fetch_replies(
     story #3516 AC8 — media_id가 `-c2del{epoch}` 접미사를 달고 있고(퍼블리시 시점에
     [sandbox:comment-2-deleted] 마커를 봤을 때만) 지금이 그 epoch를 지났으면 댓글
     2는 이제 없다(1건만 반환) — «처음 refresh=2건, 5분 rate-limit 뒤 재수집=1건»을
-    라이브에서 재현하는 유일한 신호(서버 메모리 0, media_id 문자열 자체가 시계)."""
+    라이브에서 재현하는 유일한 신호(서버 메모리 0, media_id 문자열 자체가 시계).
+
+    story #3528(2026-09-12 근본처방) — `published_at`은 필수(기본값 없음) —
+    벽시계 고정값으로 조용히 되돌아갈 여지를 원천 차단한다(호출자가 반드시 이
+    발행물의 실 published_at을 들고 오게 강제, _deterministic_comment 참고)."""
     match = _COMMENT2_DELETE_MARKER_RE.search(media_id)
     if match is not None and time.time() >= int(match.group(1)):
-        items = [_deterministic_comment(media_id=media_id, index=1)]
+        items = [_deterministic_comment(media_id=media_id, index=1, published_at=published_at)]
         return items, True, len(items)
-    items = [_deterministic_comment(media_id=media_id, index=i) for i in (1, 2)]
+    items = [_deterministic_comment(media_id=media_id, index=i, published_at=published_at) for i in (1, 2)]
     return items, True, len(items)
 
 

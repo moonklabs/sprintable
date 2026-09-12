@@ -281,14 +281,23 @@ async def test_instagram_reply_failure_raises():
 async def test_instagram_sandbox_fetch_replies_deterministic_two_comments():
     from app.services.instagram_sandbox_publish import fetch_replies
 
-    items, complete, _reported = await fetch_replies(None, access_token="x", media_id="media-1")
+    # story #3528(2026-09-12) — published_at은 이제 필수 입력이라(재발 방지 근본처방)
+    # 같은 고정값으로 두 번 불러야 "결정적"의 원래 취지(같은 입력→같은 값)가 그대로
+    # 성립한다(datetime.now()를 매번 새로 재면 그 자체가 비결정 소스가 돼 이 assert가
+    # 무의미해진다).
+    published_at = datetime.now(timezone.utc)
+    items, complete, _reported = await fetch_replies(
+        None, access_token="x", media_id="media-1", published_at=published_at,
+    )
     assert complete is True
     assert [i["id"] for i in items] == [
         "sandbox-ig-comment-media-1-1", "sandbox-ig-comment-media-1-2",
     ]
 
-    items2, _, _reported2 = await fetch_replies(None, access_token="x", media_id="media-1")
-    assert items == items2, "결정적이어야 함(같은 media_id는 매번 같은 값)"
+    items2, _, _reported2 = await fetch_replies(
+        None, access_token="x", media_id="media-1", published_at=published_at,
+    )
+    assert items == items2, "결정적이어야 함(같은 media_id·published_at은 매번 같은 값)"
 
 
 @pytest.mark.anyio
@@ -349,9 +358,18 @@ async def test_collect_comments_for_publication_dispatches_instagram_sandbox():
     try:
         async with Session() as s:
             org_id, _ = await _seed_org(s)
+            # story #3528(2026-09-12 근본처방) — sandbox 댓글의 timestamp가 이제
+            # 이 발행물의 실 published_at을 필요로 해(벽시계 고정값 재발 방지),
+            # 예전처럼 임의 uuid(실물 없는 publication_id)로는 더는 안 통과한다 —
+            # 실 ChannelPublication 행이 필요해졌다(옛 "DB 왕복 0" 전제 무효화,
+            # channel_post_comments.py 정정 docstring 참고).
+            conn = await _seed_channel_connection(s, org_id, channel="instagram_sandbox")
+            pub = await _seed_channel_publication(
+                s, org_id=org_id, connection_id=conn.id, channel="instagram_sandbox", external_id="ig-sandbox-media-1",
+            )
 
             await collect_comments_for_publication(
-                s, org_id=org_id, publication_id=uuid.uuid4(), channel="instagram_sandbox",
+                s, org_id=org_id, publication_id=pub.id, channel="instagram_sandbox",
                 external_id="ig-sandbox-media-1",
             )
             await s.commit()
