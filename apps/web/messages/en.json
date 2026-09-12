@@ -2729,6 +2729,7 @@
     "channelPostsVideoRequiredReason": "You can't submit without a video — this channel requires a video.",
     "channelPostsYoutubeTitleLabel": "Title",
     "channelPostsYoutubeTitleRequiredReason": "You can't submit without a title — YouTube requires a title.",
+    "channelPostsYoutubeTagsTooLongReason": "You can't submit — the combined tag length is over 500 characters. Please shorten your tags.",
     "channelPostsYoutubeTagsLabel": "Tags",
     "channelPostsYoutubeTagsPlaceholder": "Comma-separated",
     "channelPostsYoutubeCategoryLabel": "Category",

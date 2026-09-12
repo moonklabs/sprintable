@@ -2729,6 +2729,7 @@
     "channelPostsVideoRequiredReason": "영상 없이 상신할 수 없습니다 — 이 채널은 영상이 필요합니다.",
     "channelPostsYoutubeTitleLabel": "제목",
     "channelPostsYoutubeTitleRequiredReason": "제목 없이 상신할 수 없습니다 — YouTube는 제목이 필요합니다.",
+    "channelPostsYoutubeTagsTooLongReason": "태그 합계가 500자를 넘어 상신할 수 없습니다 — 태그를 줄여 주세요.",
     "channelPostsYoutubeTagsLabel": "태그",
     "channelPostsYoutubeTagsPlaceholder": "쉼표로 구분해서 입력",
     "channelPostsYoutubeCategoryLabel": "카테고리",

@@ -5546,6 +5546,45 @@ describe('ChannelPostEditPage — YouTube 메타데이터(story #3815 PR4)', () 
     expect((container.querySelector('[data-testid="channel-post-submit-button"]') as HTMLButtonElement).disabled).toBe(false);
   });
 
+  // story #3815 PR4 그라운딩(2026-09-12, BE 4225 실측) — 발견 즉시 수정: 태그 합
+  // 500자 초과는 BE가 어디서도 catch 안 하는 예외라(맨 500 사각) 상신 자체를 막는다.
+  it('태그 합계가 500자 초과 — 사유가 뜨고 상신이 막힌다(BE 미포착 예외 방지)', async () => {
+    stubFetch({ youtubeMetadataRequired: true });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const titleInput = container.querySelector('[data-testid="channel-post-youtube-title-field"]') as HTMLInputElement;
+    const inputSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => { inputSetter.call(titleInput, '제목'); titleInput.dispatchEvent(new Event('input', { bubbles: true })); });
+    const tagsInput = container.querySelector('[data-testid="channel-post-youtube-tags-field"]') as HTMLInputElement;
+    await act(async () => { inputSetter.call(tagsInput, 'a'.repeat(501)); tagsInput.dispatchEvent(new Event('input', { bubbles: true })); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-youtube-tags-too-long-reason"]')).not.toBeNull();
+    expect((container.querySelector('[data-testid="channel-post-submit-button"]') as HTMLButtonElement).disabled).toBe(true);
+    expect((container.querySelector('[data-testid="channel-post-schedule-submit-button"]') as HTMLButtonElement).disabled).toBe(true);
+    // 저장은 이미지/영상 필수 축과 무관(본문만 먼저 쓰는 길을 막지 않는다) — 같은 원칙.
+    expect((container.querySelector('[data-testid="channel-post-save-button"]') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('태그 합계가 500자 이하로 돌아오면 사유가 사라지고 상신이 풀린다', async () => {
+    stubFetch({ youtubeMetadataRequired: true });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    const titleInput = container.querySelector('[data-testid="channel-post-youtube-title-field"]') as HTMLInputElement;
+    const inputSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => { inputSetter.call(titleInput, '제목'); titleInput.dispatchEvent(new Event('input', { bubbles: true })); });
+    const tagsInput = container.querySelector('[data-testid="channel-post-youtube-tags-field"]') as HTMLInputElement;
+    await act(async () => { inputSetter.call(tagsInput, 'a'.repeat(501)); tagsInput.dispatchEvent(new Event('input', { bubbles: true })); });
+    await flush();
+    await act(async () => { inputSetter.call(tagsInput, '짧은태그'); tagsInput.dispatchEvent(new Event('input', { bubbles: true })); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-youtube-tags-too-long-reason"]')).toBeNull();
+    expect((container.querySelector('[data-testid="channel-post-submit-button"]') as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it('video_required=true·영상 0개 — 사유가 뜨고 상신이 막힌다(image_required 동형)', async () => {
     stubFetch({ videoRequired: true });
     await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });

@@ -1254,7 +1254,7 @@ export default function ChannelPostEditPage() {
   // AC5 — 상신은 휴먼 전용이 아니다(actor_type 가드 없음) — 이 화면 자체는 휴먼만
   // 접근하므로 버튼 노출 자체엔 영향 없다. AC6 — 초과 상태면 버튼을 비활성화한다.
   const handleSubmitForApproval = async (scheduledAt?: string) => {
-    if (!orgId || !draft || isOverLimit || hasBlockingViolations || hasThreadBlockingIssue || imageUploadInProgress || videoUploadInProgress || imageRequiredAndMissing || videoRequiredAndMissing || youtubeTitleMissing) return;
+    if (!orgId || !draft || isOverLimit || hasBlockingViolations || hasThreadBlockingIssue || imageUploadInProgress || videoUploadInProgress || imageRequiredAndMissing || videoRequiredAndMissing || youtubeTitleMissing || youtubeTagsTooLong) return;
     const latest = versions[versions.length - 1];
     if (!latest) return;
     if (scheduledAt) setScheduleServerError(null);
@@ -2167,6 +2167,13 @@ export default function ChannelPostEditPage() {
   // youtube_metadata_required 채널은 제목이 필수(YouTube API 자체 요구 — 빈 제목
   // 업로드는 provider가 거부한다). 공백만 있는 제목도 미입력과 동형 취급.
   const youtubeTitleMissing = youtubeMetadataEnabled && youtubeTitle.trim().length === 0;
+  // story #3815 PR4 그라운딩(2026-09-12, BE 4225 실측) — 발견 즉시 수정: BE
+  // `_validate_youtube_metadata`의 tags 합 500자 초과 예외는 라우터 어디서도
+  // catch되지 않아(grep 확認) 그대로 통과하면 사용자에게 맨 500(코드 없는 봉투)이
+  // 뜬다. 경고만으로 두면 이 사각을 그대로 방치하는 것 — title 필수와 같은 강도로
+  // 상신 자체를 막는다(경고 문구는 그대로 두되 이제 진짜 게이트가 된다).
+  const youtubeTagsTooLong = youtubeMetadataEnabled
+    && youtubeTagsRaw.split(',').map((tag) => tag.trim()).filter(Boolean).join('').length > 500;
 
   return (
     <div className="mx-auto w-full max-w-2xl space-y-6 p-6">
@@ -2957,10 +2964,11 @@ export default function ChannelPostEditPage() {
               className="w-full rounded-md border border-border p-2 text-sm"
               data-testid="channel-post-youtube-tags-field"
             />
-            {/* story #3815 — 합 500자(쉼표·공백 제외 각 태그 길이 합, YouTube 계약
-                그대로). 지어낸 상한이 아니라 그라운딩 값 — 초과해도 상신을 막지
-                않는다(경고만, provider가 최종 판정 — image_required류의 "필수"
-                축과 다른 성격). */}
+            {/* story #3815 — 합 500자(쉼표·공백 제외 각 태그 길이 합, BE
+                `_validate_youtube_metadata` 실측 상한). 그라운딩 재확認(2026-09-12,
+                4225 실 소스) — 이 위반은 라우터 어디서도 catch되지 않아 넘기면
+                맨 500이 뜬다(§youtubeTagsTooLong). 그래서 카운터만이 아니라
+                상신 자체를 막는 실제 게이트다. */}
             <span
               className={
                 youtubeTagsRaw.split(',').map((tag) => tag.trim()).filter(Boolean).join('').length > 500
@@ -3290,7 +3298,7 @@ export default function ChannelPostEditPage() {
         </Button>
         <Button
           onClick={() => void handleSubmitForApproval()}
-          disabled={submitting || isOverLimit || hasBlockingViolations || hasThreadBlockingIssue || imageUploadInProgress || videoUploadInProgress || imageRequiredAndMissing || videoRequiredAndMissing || youtubeTitleMissing}
+          disabled={submitting || isOverLimit || hasBlockingViolations || hasThreadBlockingIssue || imageUploadInProgress || videoUploadInProgress || imageRequiredAndMissing || videoRequiredAndMissing || youtubeTitleMissing || youtubeTagsTooLong}
           data-testid="channel-post-submit-button"
         >
           {submitting ? t('submitPendingCta') : t('submitCta')}
@@ -3302,7 +3310,7 @@ export default function ChannelPostEditPage() {
         <Button
           variant="outline"
           onClick={() => setScheduleDialogOpen(true)}
-          disabled={submitting || isOverLimit || hasBlockingViolations || hasThreadBlockingIssue || blockedByCommandInFlight || imageUploadInProgress || videoUploadInProgress || imageRequiredAndMissing || videoRequiredAndMissing || youtubeTitleMissing}
+          disabled={submitting || isOverLimit || hasBlockingViolations || hasThreadBlockingIssue || blockedByCommandInFlight || imageUploadInProgress || videoUploadInProgress || imageRequiredAndMissing || videoRequiredAndMissing || youtubeTitleMissing || youtubeTagsTooLong}
           data-testid="channel-post-schedule-submit-button"
         >
           {t('channelPostsScheduleSubmitCta')}
@@ -3388,6 +3396,13 @@ export default function ChannelPostEditPage() {
       {!isOverLimit && !hasBlockingViolations && youtubeTitleMissing ? (
         <p className="text-xs text-muted-foreground" data-testid="channel-post-youtube-title-required-reason">
           {t('channelPostsYoutubeTitleRequiredReason')}
+        </p>
+      ) : null}
+      {/* story #3815 PR4 그라운딩(2026-09-12, BE 4225 실측) — 태그 합 500자 초과는
+          BE가 어디서도 catch 안 하는 예외라(맨 500 사각) 상신 자체를 막는다. */}
+      {!isOverLimit && !hasBlockingViolations && youtubeTagsTooLong ? (
+        <p className="text-xs text-muted-foreground" data-testid="channel-post-youtube-tags-too-long-reason">
+          {t('channelPostsYoutubeTagsTooLongReason')}
         </p>
       ) : null}
       {!isOverLimit && !hasBlockingViolations && blockedByCommandInFlight ? (
