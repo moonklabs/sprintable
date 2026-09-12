@@ -10,12 +10,25 @@
 // 이 신호는 **연결 행이 아예 없을 때만** 최종 상태에 영향을 준다 — 이미 연결된 행이
 // 있다는 것 자체가 그 연결을 만든 시점엔 자격이 있었다는 뜻이라(연결 뒤 자격을 지워도
 // 기존 연결은 안 끊긴다, PR#3736 스코프) 재판정하지 않는다.
+// story #3813 PR5-b CHANGES(유나 Design REQUESTED, PO 확定 2026-09-12) — 「다시
+// 연결」칩·버튼은 재연결로 실제로 풀리는 오류(expired·revoked·이유 불명 error)
+// 전용이었다. STIBEE_PLAN_RESTRICTED/STIBEE_SENDER_NOT_VERIFIED는 코드 자신이
+// 이미 `kind:'provider_error'`(api-error.ts)로 아는, 재연결로 안 풀리는 별개
+// 축(사람이 스티비 쪽에서 직접 고쳐야 한다) — 같은 reauth_required로 뭉치면
+// 「다시 연결」이 거짓 진입점이 된다. 별도 상태로 갈라 칩·버튼이 그 앎을
+// 자동으로 따라오게 한다(page.tsx마다 흩어진 분기 대신 파생 한 곳).
 export type ChannelConnectionStatus =
   | 'not_connected'
   | 'config_incomplete'
   | 'connected'
   | 'expiring_soon'
-  | 'reauth_required';
+  | 'reauth_required'
+  | 'provider_error';
+
+// 오늘 알려진 provider_error 코드 둘 다 stibee(요금제 제한·발신자 미인증) — 새
+// 코드가 늘면 여기 추가(지어내지 않는다, api-error.ts KNOWN_ERRORS의 kind:
+// 'provider_error'와 같은 코드 값이어야 한다).
+const PROVIDER_ERROR_CODES = new Set(['STIBEE_PLAN_RESTRICTED', 'STIBEE_SENDER_NOT_VERIFIED']);
 
 export type ChannelConnectionReauthReason = 'expired' | 'revoked' | 'error';
 
@@ -25,6 +38,9 @@ export interface ChannelConnectionStatusInput {
   tokenExpiresAt?: string | null;
   canAutoRefresh?: boolean;
   lastError?: string | null;
+  /** story #3813 PR5-b CHANGES — provider_error 판정 전용(PROVIDER_ERROR_CODES
+   * 대조). lastError(원문 메시지)와 다른 필드 — last_error_code(구조화 코드). */
+  lastErrorCode?: string | null;
   /** 만료 임박 판정 임계값(ms) — 테스트가 시각을 주입할 수 있게 now도 분리. */
   now?: Date;
   expiringSoonThresholdMs?: number;
@@ -63,6 +79,9 @@ export function deriveChannelConnectionStatus(
     return { status: 'reauth_required', reauthReason: 'revoked' };
   }
   if (input.serverStatus === 'error') {
+    if (input.lastErrorCode && PROVIDER_ERROR_CODES.has(input.lastErrorCode)) {
+      return { status: 'provider_error' };
+    }
     return { status: 'reauth_required', reauthReason: 'error' };
   }
   // 여기부터 serverStatus === 'active'.
@@ -92,6 +111,9 @@ export const CHANNEL_CONNECTION_STATUS_TONE: Record<
   connected: { bg: 'bg-success-tint', dot: 'bg-success', text: 'text-foreground' },
   expiring_soon: { bg: 'bg-warning-tint', dot: 'bg-warning', text: 'text-foreground' },
   reauth_required: { bg: 'bg-destructive-tint', dot: 'bg-destructive', text: 'text-foreground' },
+  // provider_error도 지금 발행이 안 되는 건 reauth_required와 같다(destructive) —
+  // 다른 건 "무엇을 해야 하는가"(사람이 스티비 쪽에서 고친다)뿐, 급함은 같다.
+  provider_error: { bg: 'bg-destructive-tint', dot: 'bg-destructive', text: 'text-foreground' },
 };
 
 export function channelConnectionStatusLabelKey(status: ChannelConnectionStatus): string {
@@ -101,6 +123,9 @@ export function channelConnectionStatusLabelKey(status: ChannelConnectionStatus)
     case 'connected': return 'channelStatusConnected';
     case 'expiring_soon': return 'channelStatusExpiringSoon';
     case 'reauth_required': return 'channelStatusReauthRequired';
+    // 제네릭 폴백(오늘은 항상 page.tsx가 stibee 코드별 구체 문구로 덮어쓴다 —
+    // ChannelStatusChip의 label prop 참고, 미지 provider_error 코드 대비 안전망).
+    case 'provider_error': return 'channelStatusProviderError';
   }
 }
 
@@ -108,7 +133,7 @@ export function channelConnectionStatusLabelKey(status: ChannelConnectionStatus)
 // 상태는 계정 중 최악으로 승격한다. 순서는 "얼마나 급한 할 일인가": 재인증 필요(이미 못
 // 함) > 만료 임박(곧 못 함) > 설정 미완 > 연결됨 > 미연결(정보 없음이 가장 안 급하다).
 const SEVERITY_ORDER: ChannelConnectionStatus[] = [
-  'reauth_required', 'expiring_soon', 'config_incomplete', 'connected', 'not_connected',
+  'reauth_required', 'provider_error', 'expiring_soon', 'config_incomplete', 'connected', 'not_connected',
 ];
 
 export function worstChannelConnectionStatus(statuses: ChannelConnectionStatus[]): ChannelConnectionStatus {

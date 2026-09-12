@@ -351,6 +351,21 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "승인할 사람이 지정되지 않았습니다 — 승인자 역할을 먼저 두어주세요.",
         "en": "No one is set up to approve this — please set an approver role first.",
     },
+    # story #3813(Phase3·3-4 PR5-b CHANGES, 카디르 실측 2026-09-12 — 가드 #3779
+    # FAIL 3건) — command.last_error/예외 메시지가 사람에게 닿는 자리인데 하드코딩
+    # 한글 문자열이었다. 코드는 키+파라미터만 넘긴다.
+    "newsletter_send.channel_unsupported": {
+        "ko": "newsletter_send에 배선되지 않은 채널입니다(channel={channel}).",
+        "en": "This channel isn't wired for newsletter_send (channel={channel}).",
+    },
+    "newsletter_send.connection_unavailable": {
+        "ko": "연결·봉인 시각·캠페인 id 중 하나가 없습니다.",
+        "en": "One of connection, sealed schedule time, or campaign id is missing.",
+    },
+    "stibee_publish.connection_incomplete": {
+        "ko": "stibee 발행에 필요한 제목·주소록 ID·발신자 정보가 없습니다.",
+        "en": "Missing subject, address book ID, or sender info required to publish to Stibee.",
+    },
 }
 
 

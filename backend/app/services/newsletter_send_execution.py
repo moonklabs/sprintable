@@ -194,9 +194,11 @@ async def process_one_newsletter_send_command(db: AsyncSession, command: Publica
         db, command=command, approval_check="ok", adapter_called=False,
         started_at=attempt_started_at, finished_at=now, result_code="NEWSLETTER_SEND_CHANNEL_UNSUPPORTED",
     )
+    from app.services.i18n_catalog import t
+
     await apply_command_failure(
         db, command, error_code="NEWSLETTER_SEND_CHANNEL_UNSUPPORTED",
-        last_error=f"newsletter_send에 배선되지 않은 채널입니다(channel={conn.channel!r})", now=now,
+        last_error=t("newsletter_send.channel_unsupported", "ko", channel=repr(conn.channel)), now=now,
     )
 
 
@@ -247,6 +249,7 @@ async def _process_real_send(
     로 연결 상태도 같이 승격한다(사람이 스티비 요금제를 올려야 풀린다는 신호)."""
     from app.services.activity_log import ActivityLogService
     from app.services.channel_connection import apply_connection_failure, decrypt_for_use
+    from app.services.i18n_catalog import t
     from app.services.publication_command import apply_command_failure, record_publication_attempt
     from app.services.stibee_client import StibeeApiError, reserve_email
 
@@ -258,7 +261,7 @@ async def _process_real_send(
         )
         await apply_command_failure(
             db, command, error_code="NEWSLETTER_SEND_CONNECTION_UNAVAILABLE",
-            last_error="연결·봉인 시각·캠페인 id 중 하나가 없습니다", now=now,
+            last_error=t("newsletter_send.connection_unavailable", "ko"), now=now,
         )
         return
 

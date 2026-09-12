@@ -70,6 +70,25 @@ const CASES: Array<{ name: string; input: ChannelConnectionStatusInput; expected
     input: { serverStatus: 'error', lastError: 'Meta API 500', now: NOW },
     expected: { status: 'reauth_required', reauthReason: 'error' },
   },
+  // story #3813 PR5-b CHANGES(유나 Design REQUESTED 2026-09-12) — provider_error
+  // 코드(STIBEE_PLAN_RESTRICTED·STIBEE_SENDER_NOT_VERIFIED)는 재연결로 안 풀리는
+  // 별개 축이라 reauth_required로 안 뭉친다(뮤테이션 대상 — 이 분기를 지우면
+  // 이 두 케이스가 반드시 RED여야 한다).
+  {
+    name: '⭐error + lastErrorCode=STIBEE_PLAN_RESTRICTED → provider_error(재연결로 안 풀림)',
+    input: { serverStatus: 'error', lastErrorCode: 'STIBEE_PLAN_RESTRICTED', now: NOW },
+    expected: { status: 'provider_error' },
+  },
+  {
+    name: '⭐error + lastErrorCode=STIBEE_SENDER_NOT_VERIFIED → provider_error',
+    input: { serverStatus: 'error', lastErrorCode: 'STIBEE_SENDER_NOT_VERIFIED', now: NOW },
+    expected: { status: 'provider_error' },
+  },
+  {
+    name: 'error + 미지 lastErrorCode → 기존 reauth_required 그대로(회귀 0)',
+    input: { serverStatus: 'error', lastErrorCode: 'SOME_OTHER_CODE', now: NOW },
+    expected: { status: 'reauth_required', reauthReason: 'error' },
+  },
 ];
 
 describe('deriveChannelConnectionStatus (story #3376, doc phase1-channel-connect-screen-design §3-0 — 진리표)', () => {
@@ -108,12 +127,19 @@ describe('worstChannelConnectionStatus (doc §8-1 — 채널 행은 계정 중 �
   test('연결됨과 미연결이 섞이면 연결됨이 이긴다(정보 없음보다 급하다)', () => {
     expect(worstChannelConnectionStatus(['not_connected', 'connected'])).toBe('connected');
   });
+
+  // story #3813 PR5-b CHANGES — provider_error도 reauth_required 다음으로 급하다
+  // (그 둘을 뺀 나머지보다 우선). SEVERITY_ORDER에서 빠지면 이 값이 섞인 채널이
+  // 조용히 'not_connected'로 떨어진다(뮤테이션 대상).
+  test('⭐provider_error가 섞이면 connected·expiring_soon보다 이긴다', () => {
+    expect(worstChannelConnectionStatus(['connected', 'expiring_soon', 'provider_error'])).toBe('provider_error');
+  });
 });
 
-describe('CHANNEL_CONNECTION_STATUS_TONE / channelConnectionStatusLabelKey — 다섯 상태 전부 정의', () => {
-  test('다섯 상태 모두 tone·labelKey가 존재한다', () => {
+describe('CHANNEL_CONNECTION_STATUS_TONE / channelConnectionStatusLabelKey — 여섯 상태 전부 정의', () => {
+  test('여섯 상태 모두 tone·labelKey가 존재한다', () => {
     const statuses: Array<ChannelConnectionStatusResult['status']> = [
-      'not_connected', 'config_incomplete', 'connected', 'expiring_soon', 'reauth_required',
+      'not_connected', 'config_incomplete', 'connected', 'expiring_soon', 'reauth_required', 'provider_error',
     ];
     for (const status of statuses) {
       expect(CHANNEL_CONNECTION_STATUS_TONE[status]).toBeDefined();

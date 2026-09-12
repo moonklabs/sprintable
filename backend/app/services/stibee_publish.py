@@ -44,9 +44,11 @@ async def create_container(
     은 channel_posts.py 오케스트레이터가 stibee 전용 분기에서만 채우는 kwarg
     (subject의 기존 관례와 동형 — 다른 채널 시그니처 무변경)."""
     if not subject or not list_id or not sender_email or not sender_name:
+        from app.services.i18n_catalog import t
+
         raise ThreadsPublishError(
             "STIBEE_CONNECTION_INCOMPLETE",
-            "stibee 발행에 필요한 제목·주소록 ID·발신자 정보가 없습니다",
+            t("stibee_publish.connection_incomplete", "ko"),
             status_code=422,
         )
     try:
