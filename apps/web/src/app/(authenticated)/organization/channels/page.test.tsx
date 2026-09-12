@@ -743,17 +743,24 @@ describe('OrganizationChannelsPage — 헤더 rollup 칩 임계값(story dd29e6d
 });
 
 // story #3816(Phase3·3-6, 페드루 PO 지적 2026-09-12·배포 81 라이브 회차 유나 판정
-// CHANGES 1) — sandbox(credential_kind==='none') 연결의 expired는 재연결 경로가
-// 구조적으로 없다(ReauthNote 옆 분기가 버튼 대신 「테스트용 연결은 다시 연결할
-// 수 없습니다」 문장을 낸다) — 그런데 칩은 여전히 공용 「다시 연결 필요」를 내
-// 같은 행 안에서 칩·문장이 반대 뜻을 말했다(4222 축 재현).
-describe('OrganizationChannelsPage — sandbox expired 칩 낱말(story #3816)', () => {
+// CHANGES 1) — sandbox(credential_kind==='none') 연결은 재연결 경로가 구조적으로
+// 없다(ReauthNote 옆 분기가 버튼 대신 「테스트용 연결은 다시 연결할 수 없습니다」
+// 문장을 낸다) — 그런데 칩은 여전히 공용 「다시 연결 필요」를 내 같은 행 안에서
+// 칩·문장이 반대 뜻을 말했다(4222 축 재현).
+//
+// CHANGES(페드루 PO 확認 1, 2026-09-12 15:48Z) — reason 분기 없음(reason 무관
+// «재연결 불가 세계» 라벨). BE grep 실측: sandbox 연결도 `/disconnect`가
+// credential_kind 무관·owner 전용이라(FE 「해제」 버튼도 동일 무조건) reason=
+// 'revoked' 도달 가능(사람이 그 버튼을 누르면 즉시) — 아래 두 번째 테스트가
+// 그 경로를 pin한다. reason='error'는 오늘 자동 경로 0(주석 참고, page.tsx의
+// reauthChipLabel 옆)이지만 라벨은 reason 무관이라 그 경로가 생겨도 안전.
+describe('OrganizationChannelsPage — sandbox 재연결 불가 칩 낱말(story #3816)', () => {
   const AVAILABLE_WITH_SANDBOX = [
     { channel: 'threads', display_name: 'Threads', credential_kind: 'oauth', kind: 'social' },
     { channel: 'sandbox', display_name: 'Sandbox', credential_kind: 'none', kind: 'social' },
   ];
 
-  it('⭐sandbox(credential_kind=none) expired — 칩이 「만료됨」(재연결 경로 없음, 「다시 연결 필요」는 거짓 약속)', async () => {
+  it('⭐sandbox(credential_kind=none) expired — 칩이 「다시 연결 불가」(재연결 경로 없음, 「다시 연결 필요」는 거짓 약속)', async () => {
     stubFetch({
       connections: [{ ...CONNECTION_ACTIVE, id: 'conn-sandbox-1', channel: 'sandbox', credential_kind: 'none', status: 'expired' }],
       availableChannels: AVAILABLE_WITH_SANDBOX,
@@ -761,14 +768,36 @@ describe('OrganizationChannelsPage — sandbox expired 칩 낱말(story #3816)',
     await mount('owner');
     await expandChannelRow({ viaMenuLabel: koMessages.channelConnect.channelManageConnectionsAction, rowChannel: koMessages.channelConnect.channelLabelSandbox });
     const chip = container.querySelector('[data-testid="channel-section"] [data-status-chip="reauth_required"]');
-    expect(chip?.textContent).toBe(koMessages.channelConnect.channelStatusExpiredSandbox);
+    expect(chip?.textContent).toBe(koMessages.channelConnect.channelStatusReconnectUnavailable);
     expect(chip?.textContent).not.toBe(koMessages.channelConnect.channelStatusReauthRequired);
     // 같은 행 안의 문장(버튼 대신)과 뜻이 어긋나면 안 된다 — 둘 다 "재연결 불가" 쪽.
     expect(container.textContent).toContain('다시 연결할 수 없습니다');
   });
 
+  // story #3816 CHANGES(페드루 PO 확認 1) — sandbox 연결도 「해제」(disconnect)를
+  // 누르면 status='revoked'가 된다(BE `/disconnect`가 credential_kind 무관).
+  // 「만료됨」처럼 reason별 낱말을 썼다면 이 행엔 "시간이 지나 저절로"라는 새
+  // 거짓이 붙었을 것 — reason 무관 라벨이라 여기서도 정확하다.
+  it('⭐sandbox(credential_kind=none) revoked(해제 뒤) — 칩이 그대로 「다시 연결 불가」(reason 무관, 「만료됨」류 시간-기반 낱말 아님)', async () => {
+    stubFetch({
+      connections: [{ ...CONNECTION_ACTIVE, id: 'conn-sandbox-1', channel: 'sandbox', credential_kind: 'none', status: 'revoked' }],
+      availableChannels: AVAILABLE_WITH_SANDBOX,
+    });
+    await mount('owner');
+    await expandChannelRow({ viaMenuLabel: koMessages.channelConnect.channelManageConnectionsAction, rowChannel: koMessages.channelConnect.channelLabelSandbox });
+    const chip = container.querySelector('[data-testid="channel-section"] [data-status-chip="reauth_required"]');
+    expect(chip?.textContent).toBe(koMessages.channelConnect.channelStatusReconnectUnavailable);
+  });
+
   it('⭐양성대조 — oauth(재연결 가능) expired는 그대로 「다시 연결 필요」(회귀 0)', async () => {
     stubFetch({ connections: [{ ...CONNECTION_ACTIVE, status: 'expired' }] });
+    await mount('owner');
+    const chip = container.querySelector('[data-status-chip="reauth_required"]');
+    expect(chip?.textContent).toBe(koMessages.channelConnect.channelStatusReauthRequired);
+  });
+
+  it('⭐양성대조 — oauth(재연결 가능) revoked도 그대로 「다시 연결 필요」(회귀 0, reason 무관 라벨이 credential_kind 축을 안 넘는다)', async () => {
+    stubFetch({ connections: [{ ...CONNECTION_ACTIVE, status: 'revoked' }] });
     await mount('owner');
     const chip = container.querySelector('[data-status-chip="reauth_required"]');
     expect(chip?.textContent).toBe(koMessages.channelConnect.channelStatusReauthRequired);
