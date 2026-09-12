@@ -2427,6 +2427,7 @@
     "channelPostsThreadEditorLabel": "Thread continuation",
     "channelPostsThreadSegmentCount": "{count} / {max} posts",
     "channelPostsThreadSegmentRemove": "Remove",
+    "channelPostsThreadSegmentRemoveActionLabel": "Remove continuation {position}",
     "channelPostsThreadSegmentAdd": "Add continuation",
     "channelPostsThreadOverCap": "This channel supports up to {max} thread segments.",
     "channelPostsThreadContinuePublishCta": "Continue publishing remaining",

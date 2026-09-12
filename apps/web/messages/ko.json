@@ -2427,6 +2427,7 @@
     "channelPostsThreadEditorLabel": "스레드 이어쓰기",
     "channelPostsThreadSegmentCount": "{count} / {max}건",
     "channelPostsThreadSegmentRemove": "삭제",
+    "channelPostsThreadSegmentRemoveActionLabel": "{position}번째 이어쓰기 삭제",
     "channelPostsThreadSegmentAdd": "이어쓰기 추가",
     "channelPostsThreadOverCap": "이 채널은 스레드를 최대 {max}건까지 지원합니다.",
     "channelPostsThreadContinuePublishCta": "나머지 이어서 발행",

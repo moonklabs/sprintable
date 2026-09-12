@@ -615,6 +615,13 @@ export const EXEMPT_PAIRS = new Set<string>([
   // publishCta("발행")와는 "저장" 쌍(contentRules.saveAction<->versionConflictField
   // WithName)과 같은 이유로 안 겹친다 — 동사형 버튼 vs 재개 안내 서술문.
   'content.channelPostsThreadContinueHint <-> content.publishCta',
+  // story #3808(PR5b-2, verify-repeated-row-action-names 가드 CI 실패 처방,
+  // 2026-09-12) — channelPostsThreadSegmentRemove("삭제", 보이는 글자) <->
+  // channelPostsThreadSegmentRemoveActionLabel("{position}번째 이어쓰기 삭제",
+  // aria-label) — channelPostsImageRemoveAction<->ImageRemoveActionLabel(§17-20⑧)
+  // 과 정확히 같은 근거: 접근성 이름은 보이는 글자를 포함해야 한다는 규율 자체가
+  // 이 부분문자열 포함을 요구한다(제거 대상 아님).
+  'content.channelPostsThreadSegmentRemove <-> content.channelPostsThreadSegmentRemoveActionLabel',
 ]);
 
 // ⛔⭐오르테가군 지적(2026-07-31) — 이 목록에 «새로» 넣는 것은 PO 승인을 거친다. 이유 없이

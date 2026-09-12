@@ -2767,6 +2767,10 @@ export default function ChannelPostEditPage() {
                     variant="ghost"
                     onClick={() => setThreadSegments(threadSegments.filter((_, j) => j !== i))}
                     data-testid={`channel-post-thread-segment-remove-${i}`}
+                    // story #3592(유나 §22-18, verify-no-new-repeated-row-action-names 가드) —
+                    // 행마다 반복되는 정적 라벨("삭제") 버튼은 접근성 이름에 순번을 품어야
+                    // 한다(channelPostsImageRemoveActionLabel과 동형 관례).
+                    aria-label={t('channelPostsThreadSegmentRemoveActionLabel', { position: i + 2 })}
                   >
                     {t('channelPostsThreadSegmentRemove')}
                   </Button>
