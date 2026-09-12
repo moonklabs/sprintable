@@ -471,6 +471,42 @@ function providerErrorChipLabel(lastErrorCode: string | null | undefined, t: Ret
   return undefined;
 }
 
+// story #3816(Phase3·3-6, 페드루 PO 지적 2026-09-12·배포 81 라이브 회차 유나 판정
+// CHANGES 1) — sandbox(credential_kind==='none')는 재연결 경로가 구조적으로 없다
+// (위 ReauthNote 옆 분기 참고 — 버튼 대신 「테스트용 연결은 다시 연결할 수
+// 없습니다」 문장). 그런데 칩은 여전히 공용 라벨 channelStatusReauthRequired
+// (「다시 연결 필요」)를 냈다 — 같은 행 안에서 칩(필요)·문장(불가)이 반대 뜻을
+// 말하는 모순(4222 축 재현: 칩은 실 행동/상태를 따라야 한다). 판별축은 status
+// 문자열이 아니라 "재연결 액션이 그려지는가"와 같은 조건(credential_kind===
+// 'none') — 재연결 가능한 연결(oauth·pasted_secret)은 회귀 0(undefined 반환 →
+// 기존 공용 라벨 그대로).
+//
+// CHANGES(페드루 PO 확認 1 요청, 2026-09-12 15:48Z) — reason 분기는 없앤다(reason
+// 무관 «재연결 불가 세계» 라벨). 근거(BE grep 실측): sandbox(credential_kind=
+// 'none') 연결도 `/disconnect`(revoke_channel_connection)가 credential_kind
+// 무관·owner 전용으로 걸려 있어(FE 「해제」 버튼도 동일 무조건) reason='revoked'
+// 도달 가능(사람이 그 버튼을 누르면 즉시) — reason='expired'만 막으면 그 행은
+// 칩·문장 모순이 그대로 남는다. reason='error'는 오늘 어떤 sandbox 마커도
+// (threads/ig/fb/x류는 401만 시뮬레이트→classify_graph_error_code가 provider_
+// error_code 없으면 항상 CHANNEL_TOKEN_EXPIRED로만 떨어짐·stibee_sandbox 마커
+// 둘 다 CONNECTION_ERROR_CODE_TO_STATUS 밖·ghost_sandbox의 GHOST_AUTH_FAILED는
+// publication_command.py 표시축(FAILURE_KIND_CONNECTION)만 건드리고 ChannelConnection.
+// status는 안 건드림) 자동으로는 못 내지만, 시드/직접 세팅(오늘 관측된 expired도
+// 같은 축)으로는 항상 가능 — reason 분기를 남겨두면 그 경로가 열리는 순간 같은
+// 모순이 재발한다. reason 무관 오버라이드로 미리 닫는다.
+//
+// 낱말은 「만료됨」이 아니라 「다시 연결 불가」로 골랐다 — reason='revoked'(사람이
+// 방금 「해제」를 눌러 만든 상태)에 「만료됨」을 붙이면 "시간이 지나 저절로
+// 그렇게 됐다"는 새 거짓을 만든다(이번에 고치려는 것과 같은 클래스의 오류).
+// 「다시 연결 불가」는 reason 무관하게 항상 참(sandbox엔 애초에 재연결 개념이
+// 없다) — 옆 문장(channelSandboxReauthUnavailableNote, 같은 "다시 연결" 낱말)과
+// 뜻이 정확히 겹친다.
+function reauthChipLabel(
+  _reason: 'expired' | 'revoked' | 'error' | undefined, credentialKind: string, t: ReturnType<typeof useTranslations>,
+): string | undefined {
+  return credentialKind === 'none' ? t('channelStatusReconnectUnavailable') : undefined;
+}
+
 function ExpiringSoonNote({
   isAutoRefreshInfo, tokenExpiresAt, t,
 }: {
@@ -617,7 +653,11 @@ function ConnectionRow({
         {showStatusChip ? (
           <ChannelStatusChip
             status={derived.status}
-            label={derived.status === 'provider_error' ? providerErrorChipLabel(conn.last_error_code, t) : undefined}
+            label={
+              derived.status === 'provider_error' ? providerErrorChipLabel(conn.last_error_code, t)
+                : derived.status === 'reauth_required' ? reauthChipLabel(derived.reauthReason, conn.credential_kind, t)
+                : undefined
+            }
           />
         ) : null}
       </div>
@@ -961,7 +1001,11 @@ function ChannelSection({
               // 문구를 낸다(2개 이상이면 어느 계정 얘기인지 한 낱말로 못 줄인다 —
               // subtitle의 "지어내지 않는다" 원칙과 동형, ChannelStatusChip 제네릭
               // 폴백에 맡긴다).
-              label={channelStatus === 'provider_error' && single ? providerErrorChipLabel(single.last_error_code, t) : undefined}
+              label={
+                channelStatus === 'provider_error' && single ? providerErrorChipLabel(single.last_error_code, t)
+                  : channelStatus === 'reauth_required' && single ? reauthChipLabel(singleDerived?.reauthReason, single.credential_kind, t)
+                  : undefined
+              }
             />
           )}
           // story #3743 CHANGES Ⓓ(페드루 PO, 2026-09-09 12:41Z) — 채운 파랑은 헤더

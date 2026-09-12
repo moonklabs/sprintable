@@ -2041,6 +2041,7 @@
     "channelStatusConnected": "Connected",
     "channelStatusExpiringSoon": "Expiring soon",
     "channelStatusReauthRequired": "Reconnect needed",
+    "channelStatusReconnectUnavailable": "Reconnect unavailable",
     "channelStatusProviderError": "Provider error",
     "channelStatusStibeePlanRestricted": "Plan restricted",
     "channelStatusStibeeSenderNotVerified": "Sender not verified",

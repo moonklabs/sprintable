@@ -2041,6 +2041,7 @@
     "channelStatusConnected": "연결됨",
     "channelStatusExpiringSoon": "만료 임박",
     "channelStatusReauthRequired": "다시 연결 필요",
+    "channelStatusReconnectUnavailable": "다시 연결 불가",
     "channelStatusProviderError": "제공자 오류",
     "channelStatusStibeePlanRestricted": "요금제 제한",
     "channelStatusStibeeSenderNotVerified": "발신자 미인증",
