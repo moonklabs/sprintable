@@ -912,6 +912,26 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
       .toBe(koMessages.content.channelPostsLimitCheckFailed);
   });
 
+  // story #3815 PR4 CHANGES(페드루 PO 決定 2026-09-12 15:17Z, 캡처 中 실측) —
+  // YouTube엔 연결별 발행 횟수 한도 개념이 없고(BE get_publishing_limit=관대값
+  // 자리표), 연결 카드가 이미 「오늘 사용량」(플랫폼 공유 units 축)을 보인다 —
+  // 같은 사실을 다른 낱말·단위로 두 번 말하는 자리(「남은 게시」)를 숨긴다.
+  it.each(['youtube', 'youtube_sandbox'])('%s 채널 — 「남은 게시」 줄 자체가 안 뜬다', async (channel) => {
+    stubFetch({ limitOk: { quota_usage: 3, quota_total: 250 }, draftDetail: { channel } });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-limit"]')).toBeNull();
+  });
+
+  it('threads 등 다른 채널은 「남은 게시」 줄이 그대로 뜬다(회귀 0)', async () => {
+    stubFetch({ limitOk: { quota_usage: 3, quota_total: 250 }, draftDetail: { channel: 'threads' } });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="channel-post-limit"]')?.textContent).toBe('247 / 250');
+  });
+
   // 카디르 QA(2026-09-04)·유나 정밀화 — 승인 카드의 게이트 상태는 이제 목록과 같은
   // deriveChannelPostView(post-status.ts 5상태 파생 재사용)를 통과한다 — 라벨도
   // post-status.ts::contentPostStatusLabelKey(StatusChip과 동일 출처)를 그대로 쓴다.
@@ -4905,6 +4925,35 @@ describe('ChannelPostEditPage — 릴스 영상 슬롯(story #3556)', () => {
     await flush();
     const tag = container.querySelector('[data-testid="channel-post-video-spec-tag"]')?.textContent;
     expect(tag).toContain('1.5:1');
+  });
+
+  // story #3815 PR4 CHANGES(페드루 PO 決定 2026-09-12 15:17Z, 캡처 中 실측) — 비율
+  // 제약 자체가 없으면(YouTube 등 aspectTarget=0) 예전엔 1/0=Infinity가 그대로
+  // "1:Infinity"로 떴다(없는 것을 수로 그리는 결함) — 그 구간을 아예 생략한다.
+  it('⭐비율 제약 없음(aspectTarget=0) — 「1:Infinity」 대신 그 구간 자체가 생략된다', async () => {
+    stubFetch({
+      videoMaxBytes: 100 * 1024 * 1024, videoMaxSeconds: 90, videoMinSeconds: 3,
+      videoAspectTarget: 0, videoCodecs: ['avc1', 'hvc1'],
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const tag = container.querySelector('[data-testid="channel-post-video-spec-tag"]')?.textContent;
+    expect(tag).not.toContain('Infinity');
+    expect(tag).toBe('최대 100.0 MB · 3~90초 · H.264/HEVC');
+  });
+
+  // story #3815 PR4 CHANGES(페드루 PO 決定 2026-09-12 15:17Z) — GB대 용량은
+  // "2048.0 MB"가 아니라 "2 GB"(끝수 0 제거)로. MB 이하 표기는 회귀 0(위 테스트들
+  // 그대로 "100.0 MB" 유지 확認됨).
+  it('⭐GB대 용량(2GB) — "2048.0 MB" 아니라 "2 GB"(끝수 0 제거)', async () => {
+    stubFetch({
+      videoMaxBytes: 2 * 1024 * 1024 * 1024, videoMaxSeconds: 43200, videoMinSeconds: 1,
+      videoAspectTarget: 0, videoCodecs: ['avc1'],
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const tag = container.querySelector('[data-testid="channel-post-video-spec-tag"]')?.textContent;
+    expect(tag).toBe('최대 2 GB · 1~43200초 · H.264');
   });
 
   it('⭐첨부 전 트리거 라벨은 「영상 선택」, 이미지 구역 라벨은 「이미지 첨부」(영상 없음)', async () => {

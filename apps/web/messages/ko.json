@@ -2721,7 +2721,7 @@
     "channelPostsVideoUploading": "업로드 중… {pct}%",
     "channelPostsVideoUploadInProgressReason": "영상 업로드가 끝날 때까지 저장·상신을 할 수 없습니다.",
     "channelPostsVideoBlockedByImagesReason": "이미지가 2장 이상이면 영상을 붙일 수 없습니다. 이미지를 한 장만 남기면 그 한 장이 커버가 됩니다.",
-    "channelPostsVideoSpecTag": "최대 {maxBytes} · {minSeconds}~{maxSeconds}초 · {aspect} · {codecs}",
+    "channelPostsVideoSpecTagSizeAndDuration": "최대 {maxBytes} · {minSeconds}~{maxSeconds}초",
     "channelPostsVideoMetaDuration": "{n}초",
     "errorChannelVideoUploadFailedWithStatus": "영상을 올리지 못했습니다 — 서버가 {status}로 응답했습니다.",
     "errorChannelVideoUploadFailedNoResponse": "영상을 올리지 못했습니다 — 서버에 닿지 못했습니다. 연결을 확인한 뒤 다시 시도해 주세요.",

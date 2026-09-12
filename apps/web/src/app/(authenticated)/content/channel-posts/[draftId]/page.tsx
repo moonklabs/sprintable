@@ -369,6 +369,16 @@ function formatVideoAspectRatio(target: number): string {
 function trimTrailingZeroOneDecimal(n: number): string {
   return n.toFixed(1).replace(/\.0$/, '');
 }
+
+// story #3815 PR4 CHANGES(페드루 PO 決定 2026-09-12 15:17Z) — video_max_bytes가
+// GB대(YouTube 2GB 등)에 닿으면 formatFileSize(MB 상한, "파일 크기 포맷 재구현
+// 금지" 규율의 재사용 대상)가 "2048.0 MB"로 어색하게 뜬다. GB 경계를 넘을 때만
+// GB로 전환+끝수 0 제거("2.0 GB"가 아니라 "2 GB") — MB 이하 기존 표기는 그대로
+// (formatFileSize 그대로 재사용, 회귀 0).
+function formatVideoMaxBytesSpec(bytes: number): string {
+  if (bytes < 1024 * 1024 * 1024) return formatFileSize(bytes);
+  return `${trimTrailingZeroOneDecimal(bytes / (1024 * 1024 * 1024))} GB`;
+}
 function formatVideoMetaLine(
   v: { durationSeconds?: number; width?: number; height?: number; codec?: string; originalBytes?: number },
   t: (key: string, values?: Record<string, string | number>) => string,
@@ -2337,17 +2347,25 @@ export default function ChannelPostEditPage() {
           <span data-testid="channel-post-account-label">{accountLabel ?? t('originAuthorUnknown')}</span>
         </div>
         {/* AC7 — 한도 잔량은 조회값이고 조회 실패도 상태다. 발행 버튼은 이 화면에 없으므로
-            (PR2 몫) 여기서는 표시만 — 어떤 상태든 편집·상신을 막지 않는다. */}
-        <div className="flex items-center justify-between">
-          <span className="text-muted-foreground">{t('channelPostsApprovalLimitLabel')}</span>
-          <span data-testid="channel-post-limit">
-            {limit.status === 'loading'
-              ? t('originAuthorUnknown')
-              : limit.status === 'failed'
-                ? t('channelPostsLimitCheckFailed')
-                : `${limit.quotaTotal - limit.quotaUsage} / ${limit.quotaTotal}`}
-          </span>
-        </div>
+            (PR2 몫) 여기서는 표시만 — 어떤 상태든 편집·상신을 막지 않는다.
+            story #3815 PR4 CHANGES(페드루 PO 決定 2026-09-12 15:17Z) — youtube/
+            youtube_sandbox는 이 줄을 숨긴다. 이 「남은 게시」는 연결별 발행 횟수
+            축(publishing-limit, BE get_publishing_limit=관대값 자리표)인데
+            YouTube엔 그 개념 자체가 없고, 같은 화면의 연결 카드가 이미 「오늘
+            사용량」(플랫폼 공유 units 축)을 보여준다 — 같은 사실을 다른 낱말·
+            다른 단위로 두 번 말하면 헷갈린다(정본은 사용량 줄 하나). */}
+        {draft.channel !== 'youtube' && draft.channel !== 'youtube_sandbox' ? (
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground">{t('channelPostsApprovalLimitLabel')}</span>
+            <span data-testid="channel-post-limit">
+              {limit.status === 'loading'
+                ? t('originAuthorUnknown')
+                : limit.status === 'failed'
+                  ? t('channelPostsLimitCheckFailed')
+                  : `${limit.quotaTotal - limit.quotaUsage} / ${limit.quotaTotal}`}
+            </span>
+          </div>
+        ) : null}
         {/* AC8 — UTM은 화면이 붙이지 않고 붙은 것을 보인다. link_url이 없으면 그 줄
             자체를 그리지 않는다. */}
         {versions[versions.length - 1]?.tagged_link_preview ? (
@@ -3045,13 +3063,19 @@ export default function ChannelPostEditPage() {
             <span className="text-muted-foreground">{t('channelPostsVideoAttachLabel')}</span>
           </div>
           <p className="text-xs text-muted-foreground" data-testid="channel-post-video-spec-tag">
-            {t('channelPostsVideoSpecTag', {
-              maxBytes: formatFileSize(videoSpec.maxBytes),
-              minSeconds: videoSpec.minSeconds,
-              maxSeconds: videoSpec.maxSeconds,
-              aspect: formatVideoAspectRatio(videoSpec.aspectTarget),
-              codecs: formatVideoCodecs(videoSpec.codecs),
-            })}
+            {/* story #3815 PR4 CHANGES(페드루 PO 決定 2026-09-12 15:17Z) — 비율
+                제약이 없으면(aspectTarget<=0, YouTube 등) 그 구간을 아예 생략한다
+                («없는 것을 수로 그리는» 것 방지 — 예전엔 1/0=Infinity가 그대로
+                "1:Infinity"로 떴다). 용량은 GB대에서 끝수 0을 뗀다(formatVideoMaxBytesSpec). */}
+            {[
+              t('channelPostsVideoSpecTagSizeAndDuration', {
+                maxBytes: formatVideoMaxBytesSpec(videoSpec.maxBytes),
+                minSeconds: videoSpec.minSeconds,
+                maxSeconds: videoSpec.maxSeconds,
+              }),
+              videoSpec.aspectTarget > 0 ? formatVideoAspectRatio(videoSpec.aspectTarget) : null,
+              formatVideoCodecs(videoSpec.codecs),
+            ].filter(Boolean).join(' · ')}
           </p>
           {video ? (
             <div className="space-y-1">
