@@ -55,7 +55,9 @@ async def test_publish_creates_post_returns_external_id_and_permalink(dns_stub):
     assert captured["url"] == "https://customer-blog.example.com/wp-json/wp/v2/posts"
     assert captured["auth_header"] is not None and captured["auth_header"].startswith("Basic ")
     assert captured["body"] == {
-        "title": "제목", "content": "# 본문", "excerpt": "요약", "slug": "my-slug", "status": "publish",
+        # 클래스 정정(story #3816, 2026-09-12) — content는 이제 HTML(markdown_
+        # render.render_markdown_html 경유), raw body_md 그대로가 아니다.
+        "title": "제목", "content": "<h1>본문</h1>", "excerpt": "요약", "slug": "my-slug", "status": "publish",
     }
 
 
@@ -76,6 +78,32 @@ async def test_publish_with_external_id_updates_existing_post(dns_stub):
 
     assert external_id == "42"
     assert captured["url"] == "https://customer-blog.example.com/wp-json/wp/v2/posts/42"
+
+
+@pytest.mark.anyio
+async def test_publish_renders_markdown_to_html_headings_lists_and_links(dns_stub):
+    """⭐클래스 정정(story #3816, 페드루 PO 지적 2026-09-12 14:21Z) — Ghost PR2가
+    도입한 markdown_render.render_markdown_html을 wordpress_publish.py도
+    재사용해야 한다(WordPress REST의 content도 같은 HTML 계약, raw body_md
+    그대로 보내면 마크다운 문법이 글에 그대로 노출된다). h2·ul·a 3태그 실측
+    — 변환기를 걷으면(raw body_md 그대로 보내면) 이 assert가 RED가 난다."""
+    captured = {}
+    body_md = "## 제목\n\n- 첫째\n- 둘째\n\n[링크](https://example.com)\n"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(201, json={"id": 1, "link": "https://customer-blog.example.com/2026/09/x/"})
+
+    async with httpx.AsyncClient(transport=_transport(handler)) as client:
+        await publish(
+            client, site_url="https://customer-blog.example.com", username="editor",
+            app_password="app-pw", title="제목", body_md=body_md, summary="요약", slug="x",
+        )
+
+    content = captured["body"]["content"]
+    assert "<h2>제목</h2>" in content
+    assert "<ul>" in content and "<li>첫째</li>" in content and "<li>둘째</li>" in content
+    assert '<a href="https://example.com">링크</a>' in content
 
 
 @pytest.mark.anyio
