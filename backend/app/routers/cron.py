@@ -1208,6 +1208,8 @@ async def refresh_channel_tokens(
         )
         from app.services.x_oauth import XOAuthError, refresh_access_token as refresh_x_token
         from app.services.x_sandbox_oauth import refresh_access_token as refresh_x_sandbox_token
+        from app.services.youtube_oauth import YouTubeOAuthError, refresh_access_token as refresh_youtube_token
+        from app.services.youtube_sandbox_oauth import refresh_access_token as refresh_youtube_sandbox_token
         from app.services.channel_app_credentials import resolve_app_credentials
 
         # story #3320 — Phase1은 threads만 구현했던 skip-guard(`continue`)를 채널→
@@ -1236,8 +1238,13 @@ async def refresh_channel_tokens(
         # PR이 짝으로 얹은 `apply_refresh_result(new_refresh_token=...)` 슬롯으로 간다
         # — 여기서 안 갈아 끼우면 다음 tick이 이미 provider가 무효화한 옛 refresh_
         # token으로 또 시도해 항상 실패한다(1회용 회전의 핵심 위험).
-        _ROTATING_REFRESH_FN_BY_CHANNEL = {"x": refresh_x_token, "x_sandbox": refresh_x_sandbox_token}
-        _OAUTH_ERROR_TYPES = (ThreadsOAuthError, InstagramOAuthError, XOAuthError)
+        _ROTATING_REFRESH_FN_BY_CHANNEL = {
+            "x": refresh_x_token, "x_sandbox": refresh_x_sandbox_token,
+            # story #3815(Phase3·3-5 PR1) — youtube_oauth.py 상단 딱지: Google은
+            # 회전하지 않지만 이 dispatch 계약(3튜플 반환)을 그대로 재사용한다.
+            "youtube": refresh_youtube_token, "youtube_sandbox": refresh_youtube_sandbox_token,
+        }
+        _OAUTH_ERROR_TYPES = (ThreadsOAuthError, InstagramOAuthError, XOAuthError, YouTubeOAuthError)
 
         rows = await list_connections_due_for_refresh(session, now=datetime.now(timezone.utc))
         refreshed, failed = 0, 0

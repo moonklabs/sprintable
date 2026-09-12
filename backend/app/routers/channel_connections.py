@@ -381,6 +381,19 @@ def _x_oauth_module(channel: str):
     return importlib.import_module(_X_OAUTH_MODULE_PATHS[channel])
 
 
+_YOUTUBE_OAUTH_MODULE_PATHS = {
+    "youtube": "app.services.youtube_oauth",
+    "youtube_sandbox": "app.services.youtube_sandbox_oauth",
+}
+
+
+def _youtube_oauth_module(channel: str):
+    """story #3815 — `_x_oauth_module`과 동형 dispatch(별도 dict — 기존 채널군
+    무변경, 새 채널군은 병렬 등재)."""
+    import importlib
+    return importlib.import_module(_YOUTUBE_OAUTH_MODULE_PATHS[channel])
+
+
 @router.get("/{org_id}/channel-connections", response_model=list[ChannelConnectionResponse])
 async def list_channel_connections_endpoint(
     org_id: uuid.UUID,
@@ -561,6 +574,13 @@ async def authorize_channel_connection(
         url = build_x_authorize_url(
             redirect_uri=_redirect_uri(org_id, channel), state=state, code_challenge=code_challenge, app_id=app_id,
         )
+    elif channel in ("youtube", "youtube_sandbox"):
+        # story #3815 — Google은 PKCE를 지원(필수도 거부도 아님, youtube_oauth.py
+        # 상단 딱지) — X와 동형으로 항상 싣는다.
+        build_youtube_authorize_url = _youtube_oauth_module(channel).build_authorize_url
+        url = build_youtube_authorize_url(
+            redirect_uri=_redirect_uri(org_id, channel), state=state, code_challenge=code_challenge, app_id=app_id,
+        )
     else:
         raise HTTPException(status_code=404, detail=f"unsupported channel: {channel}")
     return AuthorizeResponse(url=url, state=state)
@@ -610,6 +630,7 @@ async def channel_connection_callback(
 
     if channel not in (
         "threads", "instagram", "facebook", "facebook_sandbox", "meta_ads", "ads_sandbox", "x", "x_sandbox",
+        "youtube", "youtube_sandbox",
     ):
         raise HTTPException(status_code=404, detail=f"unsupported channel: {channel}")
 
@@ -644,6 +665,13 @@ async def channel_connection_callback(
 
     if channel in ("x", "x_sandbox"):
         return await _x_channel_connection_callback(
+            db, org_id=org_id, channel=channel, code=body.code, code_verifier=oauth_state.code_verifier,
+            app_id=app_id, app_secret=app_secret, requester_member_id=resolved.id,
+            target_connection_id=oauth_state.connection_id,
+        )
+
+    if channel in ("youtube", "youtube_sandbox"):
+        return await _youtube_channel_connection_callback(
             db, org_id=org_id, channel=channel, code=body.code, code_verifier=oauth_state.code_verifier,
             app_id=app_id, app_secret=app_secret, requester_member_id=resolved.id,
             target_connection_id=oauth_state.connection_id,
@@ -886,6 +914,46 @@ async def _x_channel_connection_callback(
     row = await upsert_channel_connection(
         db, org_id=org_id, channel=channel, account_id=account["id"],
         account_label=account.get("username"), credential_kind=adapter.credential_kind,
+        access_token=access_token, refresh_token=refresh_token,
+        token_expires_at=datetime.now(timezone.utc) + timedelta(seconds=expires_in),
+        refresh_mode=adapter.refresh_mode, scopes=adapter.scope.split(" "), connected_by=requester_member_id,
+    )
+    mismatch_target_id = (
+        target_connection_id if target_connection_id is not None and target_connection_id != row.id else None
+    )
+    return _to_response(row, reconnect_mismatch_target_id=mismatch_target_id)
+
+
+async def _youtube_channel_connection_callback(
+    db: AsyncSession, *, org_id: uuid.UUID, channel: str, code: str, code_verifier: str, app_id: str,
+    app_secret: str, requester_member_id: uuid.UUID, target_connection_id: uuid.UUID | None = None,
+) -> ChannelConnectionResponse:
+    """story #3815(Phase3·3-5 PR1) — `_x_channel_connection_callback`과 동형(단일
+    hop, 페이지/광고계정류 선택 갈래 없음 — 가장 단순한 갈래 하나). 반환된
+    refresh_token을 **그대로**(가공 0) `upsert_channel_connection`에 저장 — cron
+    회전 갱신(cron.py `_ROTATING_REFRESH_FN_BY_CHANNEL`, youtube_oauth.py 상단
+    딱지 — Google은 회전하지 않지만 같은 dispatch 계약을 재사용한다)이 이 저장값을
+    읽는다."""
+    from app.services.youtube_oauth import YouTubeOAuthError
+
+    adapter = get_channel_adapter(channel)
+    oauth_module = _youtube_oauth_module(channel)
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        try:
+            access_token, refresh_token, expires_in = await oauth_module.exchange_code_for_token(
+                client, code=code, redirect_uri=_redirect_uri(org_id, channel), code_verifier=code_verifier,
+                app_id=app_id, app_secret=app_secret,
+            )
+            account = await oauth_module.test_connection(client, access_token=access_token)
+        except YouTubeOAuthError as exc:
+            raise HTTPException(status_code=400, detail={"code": exc.code, "message": exc.message}) from exc
+        finally:
+            del app_secret  # ⛔즉시 소비 후 폐기 — 더 들고 있지 않는다(기존 규율과 동형).
+
+    row = await upsert_channel_connection(
+        db, org_id=org_id, channel=channel, account_id=account["id"],
+        account_label=account.get("title"), credential_kind=adapter.credential_kind,
         access_token=access_token, refresh_token=refresh_token,
         token_expires_at=datetime.now(timezone.utc) + timedelta(seconds=expires_in),
         refresh_mode=adapter.refresh_mode, scopes=adapter.scope.split(" "), connected_by=requester_member_id,
