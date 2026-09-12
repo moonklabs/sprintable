@@ -354,6 +354,13 @@ _ORG_SCOPED_UNMAPPED_SEGMENTS_WITH_REASON: dict[str, str] = {
     # 별도 필요성이 생기면 그때 매핑).
     "generation-budget": "MCP 도구/키워드 있음(sprintable_get_content_rules가 간접 소비, 3769) — "
                           "REST 1:1 전용 도구는 여전히 0건, 세그먼트 직접 매핑은 범위 밖으로 보류",
+    # story #3808(Phase3·3-3 PR3, 2026-09-11) — GET .../api-usage-budget. "generation-
+    # budget"과 동형 축 그대로: rules.api_usage_budget이 content-rules 스키마
+    # (ContentRulesFields)에 얹혀 sprintable_get_content_rules가 간접 소비하지만,
+    # 이 REST 세그먼트 자체를 1:1로 부르는 MCP 도구는 여전히 0건. 영문 사유(story #3779
+    # BE 한글 사용자 문장 재발 가드 — 신규 문자열은 grandfather 대신 영문으로).
+    "api-usage-budget": "MCP tool/keyword exists (indirectly consumed via sprintable_get_content_rules, "
+                         "story 3808) — no dedicated REST 1:1 tool yet, direct segment mapping deferred",
     "domain-labels": "MCP 도구/키워드 0건(domain_labels.py, 사이트 도메인 설정·admin류)",
     "gate-config": "MCP 도구/키워드 0건(gate_config.py, 승인 게이트 거버넌스 설정·admin류)",
     "measurement-connections": "MCP 도구/키워드 0건(measurement_connections.py, GA4 연결 설정)",

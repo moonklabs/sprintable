@@ -22,6 +22,7 @@ from app.services.content_rules import (
     ContentRulesVersionConflictError, get_org_content_rules, put_org_content_rules,
 )
 from app.services.generation_budget import compute_generation_budget_status
+from app.services.x_publish_budget import API_USAGE_BUDGET_RULE_KEY, API_USAGE_COST_KIND
 from app.services.member_resolver import resolve_member, resolve_member_display_name
 from app.services.project_auth import assert_target_in_caller_org
 
@@ -75,6 +76,21 @@ class GenerationBudgetRule(BaseModel):
     period: Literal["month"] = "month"
 
 
+class ApiUsageBudgetRule(BaseModel):
+    """story #3808(Phase3·3-3 PR3, 페드루 PO 確定 2026-09-11) — X 종량 API 지출 월
+    상한(3498 GenerationBudgetRule과 동형 계약, 별도 지갑). `unit_cost_minor`(세그먼트/
+    게시물 1건당 단가) 필드가 3498 대비 유일한 추가 — 실 X 요금이 티어에 따라 바뀌는
+    값이라 관리자가 여기서 덮어쓸 수 있어야 한다(미설정이면 x_publish_budget.py의
+    코드 기본값으로 폴백)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    limit_minor: int = Field(ge=0)
+    currency: Literal["KRW", "USD"] = "KRW"
+    period: Literal["month"] = "month"
+    unit_cost_minor: int | None = Field(default=None, ge=0)
+
+
 class UtmRules(BaseModel):
     """story #3506(페드루 PO 確定 2026-09-05) — UTM 자동 부착 정책값. source/medium은
     «어댑터 하드코딩 위에 조직 override»(미설정이면 channel_adapters.py의 어댑터별
@@ -110,6 +126,7 @@ class ContentRulesFields(BaseModel):
     channel_priority: list[str] = []
     brand_kit: dict | None = None
     generation_budget: GenerationBudgetRule | None = None
+    api_usage_budget: ApiUsageBudgetRule | None = None
     utm_rules: UtmRules | None = None
     # story #3359 CHANGES(카디르 발견, 페드루 PO 리뷰 2026-09-08) — 리졸버
     # (channel_connector_map.py::resolve_connector_key_for_channel)의 org override
@@ -250,6 +267,34 @@ async def get_generation_budget_endpoint(
         raise HTTPException(status_code=403, detail="org_id mismatch")
 
     status = await compute_generation_budget_status(db, org_id=org_id)
+    if status is None:
+        return GenerationBudgetStatusResponse(
+            limit_minor=None, currency=None, period=None, period_start=None, period_end=None,
+            spent_minor=None, remaining_minor=None,
+        )
+    return GenerationBudgetStatusResponse(
+        limit_minor=status["limit_minor"], currency=status["currency"], period=status["period"],
+        period_start=status["period_start"].isoformat(), period_end=status["period_end"].isoformat(),
+        spent_minor=status["spent_minor"], remaining_minor=status["remaining_minor"],
+    )
+
+
+@router.get("/{org_id}/api-usage-budget", response_model=GenerationBudgetStatusResponse)
+async def get_api_usage_budget_endpoint(
+    org_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> GenerationBudgetStatusResponse:
+    """story #3808(Phase3·3-3 PR3) — get_generation_budget_endpoint와 동형(같은
+    권한 축·같은 응답 모양) — kind/rule_key만 X 종량 축으로 넘긴다. 화면이 보는
+    값과 발행 직전 실제 거부 판정에 쓰는 값이 항상 같다는 보장도 동형으로 유지."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+
+    status = await compute_generation_budget_status(
+        db, org_id=org_id, kind=API_USAGE_COST_KIND, rule_key=API_USAGE_BUDGET_RULE_KEY,
+    )
     if status is None:
         return GenerationBudgetStatusResponse(
             limit_minor=None, currency=None, period=None, period_start=None, period_end=None,
