@@ -13,6 +13,8 @@ function t(key: string): string {
     channelLabelWordpress: 'WordPress',
     channelLabelSandbox: '테스트용',
     channelLabelWebhook: '웹훅',
+    channelLabelX: 'X',
+    channelLabelXSandbox: 'X 테스트용',
   };
   return table[key] ?? key;
 }
@@ -23,6 +25,10 @@ describe('channelLabel — 어휘 정본(story 3436 묶음 6)', () => {
     ['hosted_site', 'Sprintable 블로그'],
     ['wordpress', 'WordPress'],
     ['sandbox', '테스트용'],
+    // story #3808(Phase3·3-3 PR5a) — meta_ads/ads_sandbox 선례와 동형(raw "x"/
+    // "x_sandbox" 원문이 화면에 새는 결함 재발 방지).
+    ['x', 'X'],
+    ['x_sandbox', 'X 테스트용'],
   ])('%s → %s', (channel, expected) => {
     expect(channelLabel(channel, t)).toBe(expected);
   });
@@ -40,6 +46,8 @@ describe('channelMarkColor/channelMarkInitials — story #3743 행 목록 표식
   it('알려진 채널은 고정 브랜드색을 준다', () => {
     expect(channelMarkColor('threads')).toBe('#121310');
     expect(channelMarkColor('facebook')).toBe('#1877F2');
+    expect(channelMarkColor('x')).toBe('#000000');
+    expect(channelMarkColor('x_sandbox')).toBe('#5B6470');
   });
 
   it('모르는 채널은 중립색으로 폴백한다(지어내지 않는다)', () => {
@@ -51,5 +59,9 @@ describe('channelMarkColor/channelMarkInitials — story #3743 행 목록 표식
     expect(channelMarkInitials('facebook')).toBe('Fa');
     expect(channelMarkInitials('facebook_sandbox')).toBe('Fa');
     expect(channelMarkInitials('instagram_sandbox')).toBe('In');
+    // story #3808(Phase3·3-3 PR5a) — 1글자 채널명 엣지케이스(slice(0,2)가 1글자만
+    // 줘도 안 깨짐).
+    expect(channelMarkInitials('x')).toBe('X');
+    expect(channelMarkInitials('x_sandbox')).toBe('X');
   });
 });

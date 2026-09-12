@@ -34,6 +34,12 @@ const CHANNEL_LABEL_KEYS: Record<string, string> = {
   // 안 챙긴 것, 이번에 등록.
   meta_ads: 'channelLabelMetaAds',
   ads_sandbox: 'channelLabelAdsSandbox',
+  // story #3808(Phase3·3-3 PR5a, 페드루 PO 確定 2026-09-12) — x/x_sandbox 행이
+  // 이 맵에 없으면 raw "x"/"x_sandbox" 원문이 화면(행 제목·연결 버튼 등)에 그대로
+  // 새는 결함 클래스(meta_ads/ads_sandbox 선례와 동형) — PR1(#4192) 착지 뒤 FE가
+  // 안 챙긴 것, 이번에 등록.
+  x: 'channelLabelX',
+  x_sandbox: 'channelLabelXSandbox',
 };
 
 export function channelLabel(channel: string, t: (key: string) => string): string {
@@ -55,6 +61,10 @@ const CHANNEL_MARK_COLORS: Record<string, string> = {
   webhook: '#5B6470',
   hosted_site: '#3157FF',
   sandbox: '#5B6470',
+  // story #3808(Phase3·3-3 PR5a) — X 브랜드색(2023 리브랜드 이후 검정, 공개 안정
+  // 사실). x_sandbox는 facebook_sandbox와 동형으로 중립색(실 채널과 시각 구분).
+  x: '#000000',
+  x_sandbox: '#5B6470',
 };
 const CHANNEL_MARK_NEUTRAL = '#5B6470';
 
