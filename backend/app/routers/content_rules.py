@@ -81,7 +81,16 @@ class ApiUsageBudgetRule(BaseModel):
     상한(3498 GenerationBudgetRule과 동형 계약, 별도 지갑). `unit_cost_minor`(세그먼트/
     게시물 1건당 단가) 필드가 3498 대비 유일한 추가 — 실 X 요금이 티어에 따라 바뀌는
     값이라 관리자가 여기서 덮어쓸 수 있어야 한다(미설정이면 x_publish_budget.py의
-    코드 기본값으로 폴백)."""
+    코드 기본값으로 폴백).
+
+    story #3808 PR4(페드루 PO 追加 決定 2026-09-11) — `insights_read_unit_cost_minor`
+    (헤드 트윗 1d/7d 인사이트 read 호출 단가). X가 read 호출을 실제로 종량 과금하는지는
+    ⚠️미확認(지식 컷오프 기준)이라 설계는 "과금한다"는 보수적 가정으로 짜되, 이 값을
+    관리자가 0으로 설정하면 그 즉시 이 축의 과금이 꺼진다(같은 월 지갑 api_usage_
+    budget 안의 별도 단가 축일 뿐 — 별도 한도·별도 kind 아님, PR3의 "같은 kind로
+    섞으면 두 예산이 갉아먹는다" 정정은 서로 다른 *지갑*(generation vs api_usage)
+    사이의 얘기지, 같은 지갑 안의 두 비용 *발생원*(발행 vs 인사이트 read)까지
+    가르라는 뜻이 아니다 — 이 스토리의 AC3 "월 API 지출 상한"은 하나의 통합 한도)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -89,6 +98,7 @@ class ApiUsageBudgetRule(BaseModel):
     currency: Literal["KRW", "USD"] = "KRW"
     period: Literal["month"] = "month"
     unit_cost_minor: int | None = Field(default=None, ge=0)
+    insights_read_unit_cost_minor: int | None = Field(default=None, ge=0)
 
 
 class UtmRules(BaseModel):

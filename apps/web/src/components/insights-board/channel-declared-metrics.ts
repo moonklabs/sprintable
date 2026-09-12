@@ -30,6 +30,12 @@ export const CHANNEL_DECLARED_METRICS: Record<string, readonly BoardMetric[]> = 
   instagram_sandbox: ['views', 'reach', 'engagements'],
   // channel_adapters.py:486~488 — dev 전용 테스트 채널, 7키 전부 결정적 합성값.
   sandbox: ['impressions', 'reach', 'views', 'engagements', 'clicks', 'spend', 'conversions'],
+  // channel_adapters.py:507(story #3808 PR4) — X public_metrics(impression_count·
+  // like/retweet/reply/quote_count 합산)만 declare. reach/views/clicks/spend/
+  // conversions는 X가 안 준다(null 유지).
+  x: ['impressions', 'engagements'],
+  // channel_adapters.py:523(x와 동형)
+  x_sandbox: ['impressions', 'engagements'],
   // channel_adapters.py — wordpress·webhook은 insight_metrics 미선언(dataclass 기본값
   // 빈 튜플). 이 맵에 키 자체를 안 넣는다 — declaredMetricsForChannel()의 "모르는
   // 채널=빈 배열" 폴백이 그대로 옳은 값이다(원문 그대로 폴백, 지어내지 않는다 —

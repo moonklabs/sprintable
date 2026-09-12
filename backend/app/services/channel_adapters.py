@@ -524,6 +524,16 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         kind="social",
         requires_connection=True,
         max_text_length=280,  # X 기본 티어 게시물 상한(공개 안정 사실, Premium 확장 상한은 범위 밖).
+        # story #3808(Phase3·3-3 PR4, 페드루 PO 確定 2026-09-11) — `GET /2/tweets/:id?
+        # tweet.fields=public_metrics` 응답의 impression_count→impressions,
+        # (like+retweet+reply+quote)_count 합산→engagements(threads/facebook의
+        # "개별 반응 종류는 §2(d) 7키에 없어 뭉친다" 관례 그대로). reach/views/clicks/
+        # spend/conversions는 X public_metrics에 없어 미선언(null 유지, insight_
+        # snapshots.py::_normalize의 null≠0 원칙). ⚠️미확認 — impression_count는 X
+        # 문서상 OAuth 2.0 User Context 필요(App-only 불가)인데 이 어댑터는 이미
+        # user-context 토큰만 쓰므로(그라운딩상) 저촉 없을 것으로 추정 — 실 앱 왕복
+        # 재확認 대상.
+        insight_metrics=("impressions", "engagements"),
     ),
     "x_sandbox": ChannelAdapterConfig(
         authorize_url="https://x.com/i/oauth2/authorize",
@@ -536,6 +546,10 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         credential_kind="oauth",
         display_name="X Sandbox",
         kind="social",
+        # story #3808 PR4 — 실 "x"와 동일 선언(제네릭 _fetch_sandbox()가 7키를 전부
+        # 갖고 있고 이 선언이 그중 2개만 통과시킨다 — facebook_sandbox/instagram_
+        # sandbox와 동형 축, insight_snapshots.py::_fetch_for_snapshot 참고).
+        insight_metrics=("impressions", "engagements"),
         requires_connection=True,
         max_text_length=280,
     ),
