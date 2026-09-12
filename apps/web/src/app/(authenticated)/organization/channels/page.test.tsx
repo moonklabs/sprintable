@@ -502,6 +502,39 @@ describe('OrganizationChannelsPage — 목록·상태(story #3376)', () => {
     expect(container.textContent).toContain('테스트용 연결은 다시 연결할 수 없습니다');
   });
 
+  // story #3813 PR5-a(그라운딩 2026-09-12, 페드루 PO 確定) — pasted_secret(wordpress·
+  // webhook·stibee)이 재인증 필요 상태가 되면 옛 코드는 credential_kind='none'만
+  // 걸러 OAuth authorize href를 그대로 붙였다(실측: stibee 재인증 클릭시 깨진 링크
+  // — OAuth 흐름 자체가 없는 채널). 「다시 연결」 낱말은 유지하되 메커니즘은 행을
+  // 펼쳐 ReplaceCredentialCard(자격 제자리 교체)로 보내야 한다.
+  it('pasted_secret 연결이 재인증 필요면 「다시 연결」이 OAuth href가 아니라 행을 펼치는 버튼이다', async () => {
+    stubFetch({
+      availableChannels: [
+        { channel: 'wordpress', display_name: 'WordPress', credential_kind: 'pasted_secret', kind: 'blog' },
+      ],
+      connections: [{
+        id: 'conn-wp-revoked', channel: 'wordpress', account_id: 'https://blog.example.com', account_label: 'admin',
+        credential_kind: 'pasted_secret', status: 'revoked', token_expires_at: null, last_refreshed_at: null,
+        last_error: null, can_auto_refresh: false, connected_by: 'member-1',
+        created_at: '2026-09-01T00:00:00Z', updated_at: '2026-09-01T00:00:00Z', secret_hint: '1234',
+      }],
+    });
+    await mount('owner');
+    // 깨진 OAuth 링크가 어디에도 없다 — <a> 태그로도, href로도.
+    const oauthLinks = [...container.querySelectorAll('a')].filter(
+      (a) => a.getAttribute('href')?.includes('/api/oauth-channel/authorize'),
+    );
+    expect(oauthLinks).toHaveLength(0);
+    // 「다시 연결」은 <button>으로 존재(누르면 onExpand — href 없음).
+    const reauthBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '다시 연결');
+    expect(reauthBtn).not.toBeUndefined();
+    expect(reauthBtn?.tagName).toBe('BUTTON');
+    await act(async () => { reauthBtn!.click(); });
+    await flush();
+    // 펼치면 실제 재입력 경로(ReplaceCredentialCard)가 보인다.
+    expect(container.querySelector('[data-testid="channel-connect-replace-credential-button-conn-wp-revoked"]')).not.toBeNull();
+  });
+
   // story #3650 — dev 실측 재현: 재연결 대상과 콜백이 실제로 갱신한 행이 다르면
   // ?connected=&mismatch=&updated= 세 쿼리가 함께 온다. 화면이 두 id를 이미 불러온
   // connections에서 라벨로 바꿔 한 문장으로 보인다(침묵 0).

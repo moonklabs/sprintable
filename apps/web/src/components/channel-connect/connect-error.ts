@@ -22,6 +22,11 @@ const KNOWN_CONNECT_ERROR_KEYS: Record<string, string> = {
   // 폼(POST .../channel-connections/{wordpress|webhook})의 422/403 응답.
   WORDPRESS_FIELDS_REQUIRED: 'channelConnectErrorWordpressFieldsRequired',
   WEBHOOK_FIELDS_REQUIRED: 'channelConnectErrorWebhookFieldsRequired',
+  // story #3813(Phase3·3-4 PR5-a, 페드루 PO 確定 2026-09-12) — 실 stibee 연결 폼
+  // 422 응답 2종(필드 누락·auth-check 실패). 이 표에 없어 둘 다 channelConnectErrorGeneric
+  // 으로 뭉개지던 결함(wordpress/webhook 형제는 이미 전용 키가 있었다)도 같은 PR에서 처방.
+  STIBEE_FIELDS_REQUIRED: 'channelConnectErrorStibeeFieldsRequired',
+  STIBEE_API_KEY_INVALID: 'channelConnectErrorStibeeApiKeyInvalid',
   // 3653a18c §3-0 "사람 말을 위에, 원문은 접어" — SSRF 목적지 거부는 provider 원문
   // (DestinationURLUnsafeError 메시지, 영문·기술 용어)을 그대로 안 보여준다.
   CHANNEL_CONNECTION_DESTINATION_INSECURE: 'channelConnectErrorDestinationInsecure',

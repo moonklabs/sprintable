@@ -605,23 +605,31 @@ function ConnectionRow({
             지원 안 해(app 자격도 등록될 수 없음) 「다시 연결」이 구조적 막다른
             길이다("테스트용 연결" 배지와 같은 판별축 — sandboxConnectionBadge
             참고). 버튼 대신 문장, 처방은 「새로 만들기」. */}
+        {/* story #3813 PR5-a(그라운딩 2026-09-12, 페드루 PO 確定) — 이 블록이 옛
+            `credential_kind==='none' ? 안내 : href=OAuth authorize` 이지선다였다.
+            pasted_secret(wordpress·webhook·stibee)은 OAuth 흐름 자체가 없어 그
+            href가 항상 존재하지 않는 경로를 가리켰다(실측: stibee 재인증 클릭시
+            깨진 링크) — pasted_secret은 이 자리에 아무것도 안 그린다(위 ReauthNote가
+            이미 사유를 말했고, 아래 ReplaceCredentialCard가 실제 재입력 경로다). */}
         {derived.status === 'reauth_required' ? (
           conn.credential_kind === 'none' ? (
             <p className="text-xs text-muted-foreground" data-testid="channel-sandbox-reauth-unavailable">
               {t('channelSandboxReauthUnavailableNote', { channel: channelLabel(conn.channel, t) })}
             </p>
-          ) : isOwnerStrict ? (
-            <Button asChild size="sm" variant="outline">
-              <a
-                href={`/api/oauth-channel/authorize?org=${orgId}&channel=${conn.channel}&connection_id=${conn.id}`}
-                aria-label={t('channelRowActionAriaLabel', { n: index + 1, label: t('channelReauthAction') })}
-              >
-                {t('channelReauthAction')}
-              </a>
-            </Button>
-          ) : (
-            <span className="text-xs text-muted-foreground">{t('channelOwnerOnlyReason')}</span>
-          )
+          ) : conn.credential_kind === 'oauth' ? (
+            isOwnerStrict ? (
+              <Button asChild size="sm" variant="outline">
+                <a
+                  href={`/api/oauth-channel/authorize?org=${orgId}&channel=${conn.channel}&connection_id=${conn.id}`}
+                  aria-label={t('channelRowActionAriaLabel', { n: index + 1, label: t('channelReauthAction') })}
+                >
+                  {t('channelReauthAction')}
+                </a>
+              </Button>
+            ) : (
+              <span className="text-xs text-muted-foreground">{t('channelOwnerOnlyReason')}</span>
+            )
+          ) : null
         ) : null}
         {isOwnerStrict ? (
           <Button
@@ -817,10 +825,21 @@ function ChannelSection({
     // 사람이 할 일이 없어(부제가 이미 "자동으로 갱신됩니다"를 말한다) 버튼 없음.
     if (
       single
-      && single.credential_kind !== 'none'
+      && single.credential_kind === 'oauth'
       && (singleDerived?.status === 'reauth_required' || (singleDerived?.status === 'expiring_soon' && !singleDerived.isAutoRefreshInfo))
     ) {
       return isOwnerStrict ? { label: t('channelReauthAction'), href: reauthHref, testId: 'channel-row-primary-reauth' } : null;
+    }
+    // story #3813 PR5-a(그라운딩 2026-09-12) — pasted_secret(wordpress·webhook·
+    // stibee)의 다음 발은 위 oauth 분기와 같은 낱말("다시 연결")이지만 메커니즘이
+    // 다르다: href=OAuth authorize(존재하지 않는 경로) 대신 onExpand로 행을 펼쳐
+    // 아래 ReplaceCredentialCard(자격 제자리 교체)로 보낸다.
+    if (
+      single
+      && single.credential_kind === 'pasted_secret'
+      && (singleDerived?.status === 'reauth_required' || (singleDerived?.status === 'expiring_soon' && !singleDerived.isAutoRefreshInfo))
+    ) {
+      return isOwnerOrAdmin ? { label: t('channelReauthAction'), onClick: onExpand, testId: 'channel-row-primary-reauth' } : null;
     }
     if (connections.length > 1) {
       return { label: t('channelManageConnectionsAction'), onClick: onExpand, testId: 'channel-row-primary-manage' };
