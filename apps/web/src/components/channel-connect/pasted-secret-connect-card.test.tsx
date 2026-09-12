@@ -313,3 +313,45 @@ describe('PastedSecretConnectCard — stibee 필드(story #3813 PR5-a·PR5-b)', 
     });
   });
 });
+
+// story #3816(Phase3·3-6 PR1, 페드루 PO 確定 2026-09-12) — Ghost 연결 폼(2필드:
+// site_url·admin_api_key). stibee 4필드 테스트와 동형 관례(신규 시나리오 발명 0).
+describe('PastedSecretConnectCard — ghost 필드(story #3816 PR1)', () => {
+  it('⭐2필드(사이트 주소·Admin API 키)가 렌더되고 전부 채워야 제출 가능, 전부 body에 실린다', async () => {
+    fetchWithAuthMock.mockResolvedValue(jsonResponse(201, { data: { id: 'c1', channel: 'ghost' } }));
+    const onConnected = vi.fn();
+    await act(async () => { root.render(wrap(<TestHarness channel="ghost" isOwner onConnected={onConnected} />)); });
+    const openBtn = container.querySelector('[data-testid="channel-connect-pasted-secret-button-ghost"]') as HTMLButtonElement;
+    await act(async () => { openBtn.click(); });
+    await flush();
+
+    const siteUrlInput = container.querySelector('#ghost-site_url') as HTMLInputElement;
+    const adminApiKeyInput = container.querySelector('#ghost-admin_api_key') as HTMLInputElement;
+    expect(siteUrlInput.type).toBe('text');
+    expect(adminApiKeyInput.type).toBe('password');
+    const submitBtn = container.querySelector('[data-testid="channel-connect-pasted-secret-submit-ghost"]') as HTMLButtonElement;
+    expect(submitBtn.disabled).toBe(true);
+
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    const fill = async (input: HTMLInputElement, value: string) => {
+      await act(async () => { setter.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })); });
+    };
+
+    await fill(siteUrlInput, 'https://blog.example.com');
+    await flush();
+    expect(submitBtn.disabled).toBe(true); // admin_api_key가 아직 비어 있다.
+
+    await fill(adminApiKeyInput, 'id:secret');
+    await flush();
+    expect(submitBtn.disabled).toBe(false);
+
+    await act(async () => { submitBtn.click(); });
+    await flush();
+
+    expect(onConnected).toHaveBeenCalledOnce();
+    const [, options] = fetchWithAuthMock.mock.calls[0]!;
+    expect(JSON.parse(options.body as string)).toEqual({
+      site_url: 'https://blog.example.com', admin_api_key: 'id:secret',
+    });
+  });
+});

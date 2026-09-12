@@ -329,6 +329,28 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "스티비에 연결할 수 없습니다 · 잠시 뒤 다시 시도해 주세요.",
         "en": "Couldn't reach Stibee — please try again in a moment.",
     },
+    # story #3816(Phase3·3-6 PR1, 페드루 PO 確定 2026-09-12) — Ghost 연결 생성/자격
+    # 교체 공용 422 문구. stibee_fields_required와 동형 관례(처음부터 이 카탈로그를
+    # 거친다).
+    "channel_connections.ghost_fields_required": {
+        "ko": "사이트 주소와 Admin API 키를 모두 입력해 주세요.",
+        "en": "Enter your site URL and Admin API key.",
+    },
+    # story #3816(Phase3·3-6 PR1, 페드루 PO §낱말 확定 2026-09-12 10:46Z) — 저장 시
+    # site 검증(GET /ghost/api/admin/site/) 실호출이 실패(4xx·형식 오류)했을 때의
+    # fail-closed 문구. PO 明示 — 이 문구는 PR2의 발행 시점 GHOST_AUTH_FAILED(JWT
+    # 401→재서명 1회→401)와도 같은 낱말을 쓴다("다시 확인" — stibee의 "다시 발급"과
+    # 다른 어조, 지어내지 않고 PO 지정 그대로).
+    "channel_connections.ghost_admin_key_invalid": {
+        "ko": "Admin API 키가 유효하지 않습니다 · Ghost 설정에서 다시 확인해 주세요.",
+        "en": "Your Admin API key isn't valid — please double-check it in your Ghost settings.",
+    },
+    # story #3816(Phase3·3-6 PR1) — Ghost 사이트가 안 닿는 것(네트워크·타임아웃·5xx)과
+    # 키가 틀린 것은 사람이 할 일이 다르다 — stibee_auth_check_unavailable 동형.
+    "channel_connections.ghost_site_verify_unavailable": {
+        "ko": "Ghost 사이트에 연결할 수 없습니다 · 잠시 뒤 다시 시도해 주세요.",
+        "en": "Couldn't reach your Ghost site — please try again in a moment.",
+    },
     # story #3813(Phase3·3-4 PR2, 페드루 PO 確定 2026-09-12) — 뉴스레터 발송
     # 요청 API 사용자 문구(ads_boost.* 형제와 동형 어조, newsletter_send.py 라우터).
     "newsletter_send.create_human_only": {

@@ -37,6 +37,12 @@ const REPLACE_FIELDS: Record<string, ReplaceField[]> = {
   stibee: [
     { name: 'api_key', labelKey: 'channelConnectFieldApiKey', type: 'password', required: true },
   ],
+  // story #3816(Phase3·3-6 PR1) — Ghost Admin API 키 회전. site_url은 「id·계정
+  // 축은 불변」 원칙대로 이 폼 대상이 아니다(wordpress의 site_url이 여기 없는
+  // 것과 동형 — 자격만 바꾼다).
+  ghost: [
+    { name: 'admin_api_key', labelKey: 'channelConnectFieldAdminApiKey', type: 'password', required: true },
+  ],
 };
 
 // 유나 정본(3653a18c §2 "이 다섯은 pasted_secret 연결 폼에도 그대로 걸린다" ④ —
@@ -48,6 +54,7 @@ const REPLACE_SECRET_HINT_KEY: Record<string, string> = {
   wordpress: 'channelConnectPastedSecretHintWordpress',
   webhook: 'channelConnectPastedSecretHintWebhook',
   stibee: 'channelConnectPastedSecretHintStibee',
+  ghost: 'channelConnectPastedSecretHintGhost',
 };
 
 export function ReplaceCredentialCard({

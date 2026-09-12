@@ -61,6 +61,13 @@ export const PASTED_SECRET_FIELDS: Record<string, PastedSecretField[]> = {
     { name: 'sender_email', labelKey: 'channelConnectFieldSenderEmail', type: 'text' },
     { name: 'sender_name', labelKey: 'channelConnectFieldSenderName', type: 'text' },
   ],
+  // story #3816(Phase3·3-6 PR1, 페드루 PO 確定 2026-09-12) — Ghost Admin API 키
+  // 연결 폼. site_url은 wordpress 필드 라벨을 그대로 재사용(같은 뜻 — 목적지 사이트
+  // 주소, 채널마다 새 라벨을 만들지 않는다).
+  ghost: [
+    { name: 'site_url', labelKey: 'channelConnectFieldSiteUrl', type: 'text' },
+    { name: 'admin_api_key', labelKey: 'channelConnectFieldAdminApiKey', type: 'password' },
+  ],
 };
 
 // 유나 판정(PO 전언 2026-09-04 23:20Z) — "어디서 오나"는 채널마다 다른 문구라 표로 뺀다
@@ -69,6 +76,7 @@ const PASTED_SECRET_HINT_KEY: Record<string, string> = {
   wordpress: 'channelConnectPastedSecretHintWordpress',
   webhook: 'channelConnectPastedSecretHintWebhook',
   stibee: 'channelConnectPastedSecretHintStibee',
+  ghost: 'channelConnectPastedSecretHintGhost',
 };
 
 export function PastedSecretConnectCard({
