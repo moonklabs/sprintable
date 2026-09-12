@@ -70,6 +70,14 @@ class DuplicateShardWeightEntryError(Exception):
     충돌로 못 잡는다(파일명 자체는 다르니까) — fail-loud로 로드 시점에 잡는다."""
 
 
+class ShardWeightFilenameMismatchError(Exception):
+    """story #3812(카디르 QA 계약값 확認, 페드루 PO 2026-09-12) — 물리 파일명이 그
+    내용의 `file` 필드와 어긋나면(예: `test_a.py.json`인데 내용은
+    `{"file": "tests/test_b.py", ...}`) 사람이 손으로 보기 전엔 절대 안 드러난다 —
+    복붙 실수·리네임 누락이 조용히 엉뚱한 파일의 가중치를 덮어쓰게 둘 수 있다.
+    파일명=`Path(entry['file']).name + '.json'` 불변식을 로드 시점에 강제한다."""
+
+
 def _load_full_data(weights_dir: Path = WEIGHTS_DIR, meta_path: Path | None = None) -> dict:
     """디렉터리(파일마다 정확히 하나의 `<test_file>.json`) + meta.json(드물게 바뀌는
     메타)을 옛 단일 JSON과 같은 `{"_snapshot_policy":..., "measured_at":...,
@@ -100,6 +108,14 @@ def _load_full_data(weights_dir: Path = WEIGHTS_DIR, meta_path: Path | None = No
                 raise ValueError(
                     f"{entry_path.name}이 올바른 JSON이 아니다(story #3812): {exc}"
                 ) from exc
+            # story #3812 — 중복 검사를 파일명 검사보다 먼저 한다: 어긋난 이름의
+            # 파일이 «실은 다른 항목의 중복»이면 그게 더 구체적이고 실행 가능한
+            # 진단이다(이름 검사는 그 file 값을 처음 보는 항목에만 의미가 있다 —
+            # 어차피 한 file 값에 유효한 이름은 하나뿐이라, 강제되고 나면 이 중복
+            # 시나리오는 한 디렉터리 안에서 물리적으로 재현 불가능해지지만, 방어
+            # 계층으로 남긴다: 완전 동일한 내용의 «무해한» 중복(cherry-pick 등)은
+            # 두 번째 물리 파일의 이름을 검증하지 않는다 — 실 사고에서 그 두 번째
+            # 사본은 임의 이름을 가질 수 있다).
             prior = seen.get(entry["file"])
             if prior is not None and prior[1] != entry:
                 raise DuplicateShardWeightEntryError(
@@ -107,6 +123,12 @@ def _load_full_data(weights_dir: Path = WEIGHTS_DIR, meta_path: Path | None = No
                     f"json 파일 두 곳에 다른 항목으로 등재됐다(story #3812): {prior[1]} vs {entry}"
                 )
             if prior is None:
+                expected_name = Path(entry["file"]).name + ".json"
+                if entry_path.name != expected_name:
+                    raise ShardWeightFilenameMismatchError(
+                        f"{entry_path.name} — 파일명이 내용의 file 필드({entry['file']!r})와 "
+                        f"어긋난다(story #3812): {expected_name}으로 이름 지을 것."
+                    )
                 seen[entry["file"]] = (entry_path.name, entry)
                 files.append(entry)
     return {**meta, "files": files}

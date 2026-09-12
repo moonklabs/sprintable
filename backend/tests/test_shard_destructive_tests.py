@@ -116,6 +116,20 @@ def test_load_weights_malformed_json_file_raises_with_filename(tmp_path):
         mod.load_weights(weights_dir)
 
 
+def test_load_weights_filename_mismatch_with_file_field_raises(tmp_path):
+    """⭐story #3812(카디르 QA 계약값 ①) — 물리 파일명이 내용의 `file` 필드와 어긋나면
+    (복붙 실수·리네임 누락) 조용히 엉뚱한 파일의 가중치로 읽힐 수 있다 — fail-loud로
+    잡아야 한다."""
+    mod = _load()
+    weights_dir = tmp_path / "weights"
+    weights_dir.mkdir()
+    (weights_dir / "test_wrong_name.py.json").write_text(
+        '{"file": "tests/test_actual.py", "sec": 1.0, "source": "x"}\n'
+    )
+    with pytest.raises(mod.ShardWeightFilenameMismatchError, match="test_wrong_name.py.json"):
+        mod.load_weights(weights_dir)
+
+
 def test_load_weights_duplicate_file_field_across_two_physical_files_raises():
     """⭐story #3812 CHANGES — 디렉터리 방식에서도 남는 유일한 논리 맹점: 서로 다른
     두 물리 json 파일이 «같은» `file` 키 값을 등재하면(파일명 자체는 다르니 git은
@@ -136,12 +150,16 @@ def test_load_weights_duplicate_file_field_across_two_physical_files_raises():
 
 def test_load_weights_duplicate_file_field_with_identical_entry_is_fine(tmp_path):
     """양성대조 — 두 물리 파일이 «완전히 동일한» 항목을 등재한 경우(예: cherry-pick
-    중복)는 실 충돌이 아니므로 통과해야 한다(위 테스트와 대비되는 경계)."""
+    중복)는 실 충돌이 아니므로 통과해야 한다(위 테스트와 대비되는 경계). 두 번째
+    사본은 이름 검사 대상이 아니다(cherry-pick 산출물이 임의 이름을 가질 수 있음,
+    story #3812) — 그래서 일부러 파일명 규칙과 안 맞는 이름을 썼다."""
     mod = _load()
     weights_dir = tmp_path / "weights"
     weights_dir.mkdir()
-    (weights_dir / "a.json").write_text('{"file": "tests/test_a.py", "sec": 1.0, "source": "x"}\n')
-    (weights_dir / "b.json").write_text('{"file": "tests/test_a.py", "sec": 1.0, "source": "x"}\n')
+    (weights_dir / "test_a.py.json").write_text('{"file": "tests/test_a.py", "sec": 1.0, "source": "x"}\n')
+    # 정렬 순서상 두 번째로 처리되도록 알파벳상 뒤에 오는 이름을 쓴다(story #3812 —
+    # 이름 검사는 그 file 값을 «처음» 보는 항목에만 적용된다).
+    (weights_dir / "zzz_copy_of_test_a.py.json").write_text('{"file": "tests/test_a.py", "sec": 1.0, "source": "x"}\n')
     assert mod.load_weights(weights_dir) == {"tests/test_a.py": 1.0}
 
 
