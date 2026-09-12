@@ -647,3 +647,103 @@ async def test_draft_detail_thread_segments_null_for_non_thread_draft():
             app.dependency_overrides.clear()
     finally:
         await engine.dispose()
+
+
+# ─── PR5b-2 이월(카디르 QA①, #4218 계약①) — 발행 직전 재검증(②) 자체 테스트 ──
+
+@pytest.mark.anyio
+async def test_thread_publish_rejects_when_adapter_cap_lowered_after_save():
+    """story #3808(PR5b-1, 페드루 PO 確定 2026-09-12 — ②) — `_validate_thread_segments`
+    는 저장 시점·발행 시점 둘 다에서 호출된다("승인 뒤 어댑터 선언이 바뀌었을 가능성에
+    대한 방어", ChannelTextTooLongError 헤드 재검증과 동형). 저장 시점엔 그 테스트가
+    있었지만(test_thread_segment_count_over_cap_rejected_at_save_time) 발행 시점(두
+    번째 호출)은 카디르 QA 실측까지 테스트 0건이었다 — 여기서 처음 pin한다.
+
+    저장 시점엔 상한 10으로 valid(이어쓰기 2개)했던 draft를, 승인 뒤·발행 前 어댑터
+    선언이 1로 낮아진 상태에서 발행 시도 — 재검증이 잡아 422(ChannelThreadSegmentLimit
+    ExceededError)를 내야 하고, publish_x_thread(실 provider 호출) 자체가 0건이어야
+    한다(예산 부족 테스트와 같은 "재검사 실패 시 provider 왕복 자체가 없다" 계약)."""
+    import dataclasses
+    import app.services.channel_adapters as adapters_mod
+    from app.services.channel_posts import ChannelThreadSegmentLimitExceededError, publish_channel_post_draft
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, owner_id, draft_id, gate_id, version = await _seed_ready_thread_draft(
+                s, thread=["세그먼트 2", "세그먼트 3"],
+            )
+
+        original_x_sandbox = adapters_mod.CHANNEL_ADAPTERS["x_sandbox"]
+        lowered = dataclasses.replace(original_x_sandbox, thread_max_segments=1)
+        adapters_mod.CHANNEL_ADAPTERS["x_sandbox"] = lowered
+        try:
+            publish_calls: list[object] = []
+            import app.services.x_sandbox_publish as x_sandbox_publish_module
+            original_publish_x_thread = x_sandbox_publish_module.publish_x_thread
+
+            async def _counting_publish_x_thread(*args, **kwargs):
+                publish_calls.append((args, kwargs))
+                return await original_publish_x_thread(*args, **kwargs)
+
+            x_sandbox_publish_module.publish_x_thread = _counting_publish_x_thread
+            try:
+                async with Session() as s:
+                    with pytest.raises(ChannelThreadSegmentLimitExceededError) as exc_info:
+                        await publish_channel_post_draft(
+                            s, org_id=org_id, draft_id=draft_id, published_by_member_id=owner_id,
+                        )
+                    assert exc_info.value.max_segments == 1
+                    assert exc_info.value.current_count == 2
+            finally:
+                x_sandbox_publish_module.publish_x_thread = original_publish_x_thread
+            assert publish_calls == [], "재검증에 걸리면 provider 호출 자체가 없어야 한다(예산 부족 축과 동형 계약)"
+        finally:
+            adapters_mod.CHANNEL_ADAPTERS["x_sandbox"] = original_x_sandbox
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_mutation_publish_time_thread_revalidation_removed_lets_lowered_cap_through():
+    """⭐뮤테이션 셀프체크 — `_publish_x_thread_draft`의 발행 직전 `_validate_thread_
+    segments` 호출을 제거하면(승인 뒤 어댑터가 낮아진 상태에서도) 발행이 그대로
+    통과해야(=이 재검증이 실제로 그 시나리오를 잡는다는 증명)."""
+    import dataclasses
+    import app.services.channel_adapters as adapters_mod
+    import app.services.channel_posts as channel_posts_module
+
+    original_validate = channel_posts_module._validate_thread_segments
+    call_count = {"n": 0}
+
+    def _mutated_skip_second_call(*, channel, thread):
+        call_count["n"] += 1
+        if call_count["n"] >= 2:
+            return  # 발행 시점(두 번째 호출)만 무력화 — 저장 시점(①) 가드는 그대로.
+        return original_validate(channel=channel, thread=thread)
+
+    channel_posts_module._validate_thread_segments = _mutated_skip_second_call
+    try:
+        from app.services.channel_posts import publish_channel_post_draft
+
+        engine, Session = await _session_factory()
+        try:
+            async with Session() as s:
+                org_id, owner_id, draft_id, gate_id, version = await _seed_ready_thread_draft(
+                    s, thread=["세그먼트 2", "세그먼트 3"],
+                )
+
+            original_x_sandbox = adapters_mod.CHANNEL_ADAPTERS["x_sandbox"]
+            adapters_mod.CHANNEL_ADAPTERS["x_sandbox"] = dataclasses.replace(original_x_sandbox, thread_max_segments=1)
+            try:
+                async with Session() as s:
+                    row = await publish_channel_post_draft(
+                        s, org_id=org_id, draft_id=draft_id, published_by_member_id=owner_id,
+                    )
+                    assert row.status == "published", "가드 무력화 시 상한 위반이 그대로 통과(RED 재현)"
+            finally:
+                adapters_mod.CHANNEL_ADAPTERS["x_sandbox"] = original_x_sandbox
+        finally:
+            await engine.dispose()
+    finally:
+        channel_posts_module._validate_thread_segments = original_validate
