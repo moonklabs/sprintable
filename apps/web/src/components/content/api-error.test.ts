@@ -1,6 +1,4 @@
 import { describe, test, expect } from 'vitest';
-import koMessages from '../../../messages/ko.json';
-import enMessages from '../../../messages/en.json';
 import { parseSitePostApiError } from './api-error';
 
 describe('parseSitePostApiError (story #3368, doc phase0-post-manager-screen-design §4-1)', () => {
@@ -186,28 +184,13 @@ describe('parseSitePostApiError (story #3368, doc phase0-post-manager-screen-des
       },
     );
 
-    // story #3816(Phase3·3-6 PR2, 페드루 PO §낱말 정정 2, 2026-09-12) — Ghost
-    // JWT 401(재서명 1회 재시도까지 실패)도 kind=token_expired(재연결로 풀리는
-    // 세계) — 단 문구는 CHANNEL_TOKEN_EXPIRED의 일반 문구가 아니라 저장 시
-    // GHOST_ADMIN_KEY_INVALID와 같은 전용 문구를 재사용한다(새 labelKey).
-    test('GHOST_AUTH_FAILED — kind=token_expired·전용 문구 재사용(일반 CHANNEL_TOKEN_EXPIRED 문구 아님)', () => {
-      const result = parseSitePostApiError({ error: { code: 'GHOST_AUTH_FAILED', message: 'invalid' } });
-      expect(result.kind).toBe('token_expired');
-      expect(result.humanMessageKey).toBe('errorGhostAuthFailed');
-      expect(result.humanMessageKey).not.toBe('errorChannelTokenExpired');
-    });
-
-    // story #3816 PR2 CHANGES 1(유나 관찰·PO 지목 2026-09-12) — `content.
-    // errorGhostAuthFailed`와 `channelConnect.channelConnectErrorGhostAdminKeyInvalid`
-    // 는 의도적으로 같은 값(값이 같은 두 키 — 저장 시 키 오류와 발행 시 인증
-    // 실패가 같은 문장을 말한다는 §낱말 정본). 공유 키로 합치는 대신 드리프트
-    // 가드로 싸게 고정한다 — 한쪽만 고치면 이 테스트가 RED여야 한다.
-    test('⭐errorGhostAuthFailed === channelConnectErrorGhostAdminKeyInvalid(ko·en 둘 다, 의도된 문구 중복 고정)', () => {
-      const ko = koMessages as { content: Record<string, string>; channelConnect: Record<string, string> };
-      const en = enMessages as { content: Record<string, string>; channelConnect: Record<string, string> };
-      expect(ko.content.errorGhostAuthFailed).toBe(ko.channelConnect.channelConnectErrorGhostAdminKeyInvalid);
-      expect(en.content.errorGhostAuthFailed).toBe(en.channelConnect.channelConnectErrorGhostAdminKeyInvalid);
-    });
+    // story #3816(적기만 확認 1, 페드루 PO 지적 2026-09-12) — GHOST_AUTH_FAILED
+    // 매핑·전용 테스트 2건을 걷었다(dead key 제거) — 발행/회수 요청 엔드포인트는
+    // site_posts.py 자기 docstring이 明示하듯 동기 완결이 아니라 항상 command_id+
+    // status='pending'만 응답한다. GHOST_AUTH_FAILED는 워커 전용 함수(publish_
+    // site_post_external_command/unpublish_site_post_external_command)만 던져
+    // parseSitePostApiError(이 동기 응답 파서)엔 절대 안 온다 — 실 사유는 이미
+    // connection 레벨(재연결 UI)에서 표면된다(api-error.ts 참고).
 
     // story #3815(Phase3·3-5 PR4, 페드루 PO 確定 2026-09-12) — image_required 동형.
     test('CHANNEL_VIDEO_REQUIRED — kind=video_required', () => {
