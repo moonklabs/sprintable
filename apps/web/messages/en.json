@@ -4790,6 +4790,7 @@
     "newsletterSegmentLabel": "Segment",
     "newsletterSendScheduleLabel": "Send scheduled",
     "newsletterEstimatedRecipientLabel": "Estimated recipients",
+    "newsletterEstimatedRecipientCount": "{count} recipients",
     "newsletterRecipientUnknown": "Unknown",
     "gateApproveCampaign": "Approve campaign",
     "gateApproveNewsletterSend": "Approve send",

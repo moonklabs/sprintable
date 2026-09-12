@@ -506,7 +506,9 @@ describe('GateEvidence — 레시피 approve 게이트 승인 대상 실물 렌�
     expect(container.textContent).toContain('VIP 세그먼트');
     expect(container.textContent).toContain(koMessages.cage.newsletterSendScheduleLabel);
     expect(container.textContent).toContain(koMessages.cage.newsletterEstimatedRecipientLabel);
-    expect(container.textContent).toContain('4200');
+    // 페드루 PO 스티어(2026-09-12) — 원시 숫자가 아니라 천단위 구분+단위("4,200명").
+    expect(container.textContent).toContain('4,200명');
+    expect(container.textContent).not.toContain('4200');
   });
 
   it('예상 수신 조회가 실패해 estimated_recipient_count가 null이면(실 stibee·조회실패) 「미확인」으로 뜬다(지어내지 않음)', async () => {

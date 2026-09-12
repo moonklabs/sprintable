@@ -712,7 +712,9 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
             <span className="text-muted-foreground">{t('newsletterEstimatedRecipientLabel')} · </span>
             <span className="text-foreground font-medium">
               {facts.newsletterEstimatedRecipientCount !== null
-                ? facts.newsletterEstimatedRecipientCount
+                ? t('newsletterEstimatedRecipientCount', {
+                    count: facts.newsletterEstimatedRecipientCount.toLocaleString(locale),
+                  })
                 : t('newsletterRecipientUnknown')}
             </span>
           </p>

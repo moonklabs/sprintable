@@ -4790,6 +4790,7 @@
     "newsletterSegmentLabel": "세그먼트",
     "newsletterSendScheduleLabel": "발송 예정",
     "newsletterEstimatedRecipientLabel": "예상 수신",
+    "newsletterEstimatedRecipientCount": "{count}명",
     "newsletterRecipientUnknown": "미확인",
     "gateApproveCampaign": "캠페인 승인",
     "gateApproveNewsletterSend": "발송 승인",
