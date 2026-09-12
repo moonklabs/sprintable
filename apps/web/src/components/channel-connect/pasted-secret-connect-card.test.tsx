@@ -15,7 +15,7 @@ import koMessages from '../../../messages/ko.json';
 const { fetchWithAuthMock } = vi.hoisted(() => ({ fetchWithAuthMock: vi.fn() }));
 vi.mock('@/lib/db/client', () => ({ fetchWithAuth: fetchWithAuthMock }));
 
-import { PastedSecretConnectCard } from './pasted-secret-connect-card';
+import { focusFieldNameForError, PASTED_SECRET_FIELDS, PastedSecretConnectCard } from './pasted-secret-connect-card';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -161,6 +161,23 @@ describe('PastedSecretConnectCard(story #3450 FE 후속)', () => {
     await flush();
     const passwordInputAfterFail = container.querySelector('#wordpress-app_password') as HTMLInputElement;
     expect(passwordInputAfterFail.value).toBe('');
+  });
+
+  // story #3816 CHANGES 3(유나 판정 issuecomment-5645662831·PO 確定 2026-09-12) —
+  // blanket 리셋 폐기 회귀: 주소 오류 배너("사이트 주소를 확인해 주세요")인데 그
+  // 칸 자체가 지워지는 두 세계였다. 시크릿만 비우고 비-시크릿(site_url·username)은
+  // 유지해야 한다(뮤테이션 대상 — clearSecretFieldsOnly를 blanket setValues({})로
+  // 되돌리면 이 테스트가 RED여야 한다).
+  it('⭐(f) 오류 뒤 비-시크릿 필드(site_url·username)는 값이 유지된다(시크릿만 비움)', async () => {
+    fetchWithAuthMock.mockResolvedValue(jsonResponse(422, { error: { code: 'WORDPRESS_FIELDS_REQUIRED' } }));
+    await act(async () => { root.render(wrap(<TestHarness channel="wordpress" isOwner onConnected={vi.fn()} />)); });
+    await flush();
+    const { passwordInput } = await fillAndSubmitWordpress();
+    const siteUrlInput = container.querySelector('#wordpress-site_url') as HTMLInputElement;
+    const usernameInput = container.querySelector('#wordpress-username') as HTMLInputElement;
+    expect(siteUrlInput.value).toBe('https://blog.example.com');
+    expect(usernameInput.value).toBe('admin');
+    expect(passwordInput.value).toBe('');
   });
 
   it('⭐(b) 422 WORDPRESS_FIELDS_REQUIRED — 인라인 문구', async () => {
@@ -353,5 +370,85 @@ describe('PastedSecretConnectCard — ghost 필드(story #3816 PR1)', () => {
     expect(JSON.parse(options.body as string)).toEqual({
       site_url: 'https://blog.example.com', admin_api_key: 'id:secret',
     });
+  });
+
+  // story #3816 CHANGES 3(유나 판정·PO 確定 2026-09-12) — GHOST_SITE_NOT_FOUND는
+  // "사이트 주소를 확인해 주세요"라고 말하면서 그 칸을 지우면 두 세계다. 값 유지 +
+  // 그 칸으로 포커스.
+  it('⭐GHOST_SITE_NOT_FOUND — site_url 값은 유지·admin_api_key만 비움·포커스는 site_url로', async () => {
+    fetchWithAuthMock.mockResolvedValue(jsonResponse(422, { error: { code: 'GHOST_SITE_NOT_FOUND' } }));
+    await act(async () => { root.render(wrap(<TestHarness channel="ghost" isOwner onConnected={vi.fn()} />)); });
+    const openBtn = container.querySelector('[data-testid="channel-connect-pasted-secret-button-ghost"]') as HTMLButtonElement;
+    await act(async () => { openBtn.click(); });
+    await flush();
+
+    const siteUrlInput = container.querySelector('#ghost-site_url') as HTMLInputElement;
+    const adminApiKeyInput = container.querySelector('#ghost-admin_api_key') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    const fill = async (input: HTMLInputElement, value: string) => {
+      await act(async () => { setter.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })); });
+    };
+    await fill(siteUrlInput, 'https://not-a-ghost-site.example.com');
+    await fill(adminApiKeyInput, 'id:secret');
+
+    const submitBtn = container.querySelector('[data-testid="channel-connect-pasted-secret-submit-ghost"]') as HTMLButtonElement;
+    await act(async () => { submitBtn.click(); });
+    await flush();
+
+    expect(siteUrlInput.value).toBe('https://not-a-ghost-site.example.com');
+    expect(adminApiKeyInput.value).toBe('');
+    expect(document.activeElement).toBe(siteUrlInput);
+  });
+
+  it('⭐GHOST_ADMIN_KEY_INVALID — site_url 값은 유지·포커스는 admin_api_key로', async () => {
+    fetchWithAuthMock.mockResolvedValue(jsonResponse(422, { error: { code: 'GHOST_ADMIN_KEY_INVALID' } }));
+    await act(async () => { root.render(wrap(<TestHarness channel="ghost" isOwner onConnected={vi.fn()} />)); });
+    const openBtn = container.querySelector('[data-testid="channel-connect-pasted-secret-button-ghost"]') as HTMLButtonElement;
+    await act(async () => { openBtn.click(); });
+    await flush();
+
+    const siteUrlInput = container.querySelector('#ghost-site_url') as HTMLInputElement;
+    const adminApiKeyInput = container.querySelector('#ghost-admin_api_key') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    const fill = async (input: HTMLInputElement, value: string) => {
+      await act(async () => { setter.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })); });
+    };
+    await fill(siteUrlInput, 'https://blog.example.com');
+    await fill(adminApiKeyInput, 'fake-not-a-real-key');
+
+    const submitBtn = container.querySelector('[data-testid="channel-connect-pasted-secret-submit-ghost"]') as HTMLButtonElement;
+    await act(async () => { submitBtn.click(); });
+    await flush();
+
+    expect(siteUrlInput.value).toBe('https://blog.example.com');
+    expect(adminApiKeyInput.value).toBe('');
+    expect(document.activeElement).toBe(adminApiKeyInput);
+  });
+
+});
+
+// story #3816 CHANGES 3 — `focusFieldNameForError` 순수함수 단위 테스트(폼 레이스
+// 케이스라 실제 클릭스루로 FIELDS_REQUIRED를 만들기 어렵다 — allFilled 가드가
+// 이미 막는 상태를 서버가 뒤늦게 거절하는 경합만 이 코드에 닿는다).
+describe('focusFieldNameForError(story #3816 CHANGES 3)', () => {
+  const ghostFields = PASTED_SECRET_FIELDS['ghost']!;
+
+  it('⭐*_FIELDS_REQUIRED — 첫 빈 필드로', () => {
+    expect(focusFieldNameForError('GHOST_FIELDS_REQUIRED', ghostFields, { site_url: '' })).toBe('site_url');
+    expect(focusFieldNameForError('GHOST_FIELDS_REQUIRED', ghostFields, { site_url: 'x', admin_api_key: '' })).toBe('admin_api_key');
+  });
+
+  it('⭐키 오류(GHOST_ADMIN_KEY_INVALID·STIBEE_API_KEY_INVALID) — password 필드로', () => {
+    expect(focusFieldNameForError('GHOST_ADMIN_KEY_INVALID', ghostFields, {})).toBe('admin_api_key');
+    expect(focusFieldNameForError('STIBEE_API_KEY_INVALID', PASTED_SECRET_FIELDS['stibee']!, {})).toBe('api_key');
+  });
+
+  it('⭐GHOST_SITE_NOT_FOUND — site_url로(명시 표)', () => {
+    expect(focusFieldNameForError('GHOST_SITE_NOT_FOUND', ghostFields, {})).toBe('site_url');
+  });
+
+  it('모르는 코드·undefined — null(포커스 이동 안 함, 지어내지 않는다)', () => {
+    expect(focusFieldNameForError('SOME_UNKNOWN_CODE', ghostFields, {})).toBeNull();
+    expect(focusFieldNameForError(undefined, ghostFields, {})).toBeNull();
   });
 });

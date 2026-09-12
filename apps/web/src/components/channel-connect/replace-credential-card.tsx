@@ -57,6 +57,36 @@ const REPLACE_SECRET_HINT_KEY: Record<string, string> = {
   ghost: 'channelConnectPastedSecretHintGhost',
 };
 
+// story #3816 CHANGES 3(유나 판정 issuecomment-5645662831·PO 確定 2026-09-12) —
+// pasted-secret-connect-card.tsx와 동형 처방(blanket 리셋 폐기) — 이 폼도 오류
+// 응답 뒤 비-시크릿(wordpress의 username)은 유지·시크릿만 비움 + 오류가 지목하는
+// 필드로 포커스. site_url류 목적지 필드는 이 폼 자체에 없어(자격만 바꾼다)
+// GHOST_SITE_NOT_FOUND에 대응할 필드가 없다 — 그 경우 포커스는 안 옮긴다(지어내지
+// 않는다).
+const KEY_INVALID_ERROR_CODES = new Set(['GHOST_ADMIN_KEY_INVALID', 'STIBEE_API_KEY_INVALID']);
+
+export function focusFieldNameForError(
+  code: string | undefined, fields: ReplaceField[], values: Record<string, string>,
+): string | null {
+  if (!code) return null;
+  if (code.endsWith('FIELDS_REQUIRED')) {
+    const firstEmpty = fields.find((f) => f.required && !(values[f.name] ?? '').trim());
+    return firstEmpty?.name ?? null;
+  }
+  if (KEY_INVALID_ERROR_CODES.has(code)) {
+    return fields.find((f) => f.type === 'password')?.name ?? null;
+  }
+  return null;
+}
+
+function clearSecretFieldsOnly(values: Record<string, string>, fields: ReplaceField[]): Record<string, string> {
+  const next = { ...values };
+  for (const f of fields) {
+    if (f.type === 'password') next[f.name] = '';
+  }
+  return next;
+}
+
 export function ReplaceCredentialCard({
   channel, connectionId, secretHint, isOwner, orgId, onReplaced, t,
 }: {
@@ -94,18 +124,25 @@ export function ReplaceCredentialCard({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(values),
       });
-      // §2 "다시 못 봄" — 성공/실패 무관하게 여기서 비운다.
-      setValues({});
       if (res.ok) {
+        // §2 "다시 못 봄" — 성공 시엔 전부 비운다(회귀 0, 기존 관례 그대로).
+        setValues({});
         setEditing(false);
         onReplaced();
-      } else {
-        const body = (await res.json().catch(() => null)) as { error?: { code?: string } } | null;
-        const code = body?.error?.code;
-        setError(t(code ? connectErrorLabelKey(code, isOwner) : 'channelConnectErrorGeneric'));
+        return;
+      }
+      const body = (await res.json().catch(() => null)) as { error?: { code?: string } } | null;
+      const code = body?.error?.code;
+      setError(t(code ? connectErrorLabelKey(code, isOwner) : 'channelConnectErrorGeneric'));
+      // story #3816 CHANGES 3 — blanket 리셋 폐기(유나 판정). 시크릿만 비우고
+      // 비-시크릿 입력은 유지 + 오류가 지목하는 필드로 포커스.
+      setValues((v) => clearSecretFieldsOnly(v, fields));
+      const focusField = focusFieldNameForError(code, fields, values);
+      if (focusField) {
+        document.getElementById(`${connectionId}-${focusField}`)?.focus();
       }
     } catch {
-      setValues({});
+      setValues((v) => clearSecretFieldsOnly(v, fields));
       setError(t('channelConnectErrorGeneric'));
     } finally {
       setSaving(false);

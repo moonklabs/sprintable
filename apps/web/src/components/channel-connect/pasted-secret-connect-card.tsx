@@ -87,6 +87,53 @@ const PASTED_SECRET_PLAN_NOTE_KEY: Record<string, string> = {
   ghost: 'channelConnectPastedSecretPlanNoteGhost',
 };
 
+// story #3816 CHANGES 3(유나 판정 issuecomment-5645662831·PO 確定 2026-09-12) —
+// 오류 뒤 blanket 리셋(전 필드 비움) 폐기 발견: 주소 오류 배너("사이트 주소를
+// 확인해 주세요")인데 그 칸 자체가 지워져 있는 두 세계였다(유나 재실측 —
+// stibee "주소록 ID"도 같은 클래스). 새 불변식: 오류 응답 뒤 비-시크릿 입력은
+// 유지·시크릿(type=password)만 비움 + 오류가 지목하는 필드로 포커스.
+//
+// 「키 오류」류(재발급/재확認하면 풀림 — 이미 채운 값이 틀렸다는 뜻이라 비우고
+// 다시 입력받는 게 맞다)만 명시 등재한다(지어내지 않는다 — 모르는 코드는 포커스
+// 이동 자체를 안 한다). wordpress/webhook은 아직 저장 시 실호출 검증이 없어
+// 이 축의 코드 자체가 없다.
+const KEY_INVALID_ERROR_CODES = new Set(['GHOST_ADMIN_KEY_INVALID', 'STIBEE_API_KEY_INVALID']);
+
+// 「주소/목적지 오류」류 — 코드마다 지목하는 필드가 달라 명시 표로 둔다(생성 규칙이
+// 없다, 채널별 실제 계약 그대로).
+const ERROR_CODE_FOCUS_FIELD: Record<string, string> = {
+  GHOST_SITE_NOT_FOUND: 'site_url',
+};
+
+export function focusFieldNameForError(
+  code: string | undefined, fields: PastedSecretField[], values: Record<string, string>,
+): string | null {
+  if (!code) return null;
+  // *_FIELDS_REQUIRED(채널마다 접두만 다르고 접미는 공용, 4채널 전부 동형) — 아직
+  // 안 채운 첫 필드로(어느 칸이 비었는지 사람이 스스로 찾게 만들지 않는다).
+  if (code.endsWith('FIELDS_REQUIRED')) {
+    const firstEmpty = fields.find((f) => !(values[f.name] ?? '').trim());
+    return firstEmpty?.name ?? null;
+  }
+  if (KEY_INVALID_ERROR_CODES.has(code)) {
+    return fields.find((f) => f.type === 'password')?.name ?? null;
+  }
+  return ERROR_CODE_FOCUS_FIELD[code] ?? null;
+}
+
+// story #3816 CHANGES 3 — 시크릿(type=password) 필드만 비운 새 값을 만든다(비-
+// 시크릿은 그대로 보존). 성공 시(§2 "다시 못 봄")는 이 함수를 안 쓰고 여전히
+// 전부 비운다 — 실패 응답 전용 규칙.
+function clearSecretFieldsOnly(
+  values: Record<string, string>, fields: PastedSecretField[],
+): Record<string, string> {
+  const next = { ...values };
+  for (const f of fields) {
+    if (f.type === 'password') next[f.name] = '';
+  }
+  return next;
+}
+
 export function PastedSecretConnectCard({
   channel, orgId, isOwner, connectionCount, onConnected, t,
 }: {
@@ -131,19 +178,25 @@ export function PastedSecretConnectCard({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(values),
       });
-      // §2 "다시 못 봄" — 성공/실패 무관하게 여기서 비운다(app-credentials-card.tsx와
-      // 동일 이유 — 로그·상태에 secret을 남기지 않는다).
-      setValues({});
       if (res.ok) {
+        // §2 "다시 못 봄" — 성공 시엔 전부 비운다(회귀 0, 기존 관례 그대로).
+        setValues({});
         setEditing(false);
         onConnected();
-      } else {
-        const body = (await res.json().catch(() => null)) as { error?: { code?: string } } | null;
-        const code = body?.error?.code;
-        setError(t(code ? connectErrorLabelKey(code, isOwner) : 'channelConnectErrorGeneric'));
+        return;
+      }
+      const body = (await res.json().catch(() => null)) as { error?: { code?: string } } | null;
+      const code = body?.error?.code;
+      setError(t(code ? connectErrorLabelKey(code, isOwner) : 'channelConnectErrorGeneric'));
+      // story #3816 CHANGES 3 — blanket 리셋 폐기(유나 판정). 시크릿만 비우고
+      // 비-시크릿 입력은 유지 + 오류가 지목하는 필드로 포커스.
+      setValues((v) => clearSecretFieldsOnly(v, fields));
+      const focusField = focusFieldNameForError(code, fields, values);
+      if (focusField) {
+        document.getElementById(`${channel}-${focusField}`)?.focus();
       }
     } catch {
-      setValues({});
+      setValues((v) => clearSecretFieldsOnly(v, fields));
       setError(t('channelConnectErrorGeneric'));
     } finally {
       setSaving(false);
