@@ -1,0 +1,104 @@
+"""story #3823(UX-v3·오늘·BE 1, 페드루 PO 確定 2026-09-13) — ``GET /api/v2/today``.
+
+UI/UX v3 첫 화면 「오늘」(시안 #3817 v3-1b·낱말 표 doc ux-v3-vocabulary-and-desktop-
+axes)의 4구역(needs_me·agent_progress·published_today·usage)을 호출 1로. 응답에
+사용자 문자열 0 — enum 코드·이름·제목만(낱말은 FE가 [UX-v3] 낱말 표로 매핑).
+집계 로직 본체는 ``app.services.today_service`` — 이 라우터는 얇은 스키마+위임뿐
+(gates.py/command_center.py의 기존 read 함수를 재사용, 이 카드는 그 두 파일을
+손대지 않는다)."""
+from __future__ import annotations
+
+import uuid
+from datetime import datetime
+from typing import Literal
+
+from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
+from app.dependencies.database import get_db
+from app.services import today_service
+
+router = APIRouter(prefix="/api/v2/today", tags=["today", "Work"])
+
+
+class TodayWorkItem(BaseModel):
+    type: str
+    id: uuid.UUID
+    title: str
+
+
+class TodayActor(BaseModel):
+    id: uuid.UUID
+    name: str
+
+
+class NeedsMeItem(BaseModel):
+    kind: Literal["approval", "signature", "answer"]
+    risk: Literal["low", "high"]
+    source: Literal["gate", "hitl", "workflow_step"]
+    source_id: str
+    work_item: TodayWorkItem
+    requested_by: TodayActor | None = None
+    reason: str | None = None
+    created_at: datetime
+    actions: list[str]
+
+
+class AgentProgressItem(BaseModel):
+    run_id: uuid.UUID
+    agent: TodayActor
+    work_item: TodayWorkItem | None = None
+    status: str
+    current_step: str | None = None
+    last_action_at: datetime
+
+
+class PublishedByChannel(BaseModel):
+    channel_kind: str
+    count: int
+
+
+class PublishedToday(BaseModel):
+    count: int
+    by_channel: list[PublishedByChannel]
+    since: datetime
+
+
+class PlatformUsageItem(BaseModel):
+    connection_id: uuid.UUID
+    channel_kind: str
+    used: int
+    limit: int
+    reset_at: datetime
+
+
+class AdSpendUsage(BaseModel):
+    # story #3498 계열 합류 前까지는 항상 measured=False(0으로 채우지 않는다 —
+    # 「미측정」과 「측정했더니 0」을 구분하는 [UX-v3] 낱말 표 규칙의 BE측 반영).
+    measured: bool = False
+
+
+class UsageSection(BaseModel):
+    platform: list[PlatformUsageItem]
+    ad_spend: AdSpendUsage
+
+
+class TodayResponse(BaseModel):
+    needs_me: list[NeedsMeItem]
+    needs_me_count: int
+    agent_progress: list[AgentProgressItem]
+    published_today: PublishedToday
+    usage: UsageSection
+
+
+@router.get("", response_model=TodayResponse)
+async def get_today(
+    tz: str = Query(default="UTC", description="IANA timezone name for the published_today boundary."),
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> TodayResponse:
+    snapshot = await today_service.build_today_snapshot(session, org_id=org_id, auth=auth, tz=tz)
+    return TodayResponse.model_validate(snapshot)
