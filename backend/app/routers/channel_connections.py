@@ -1780,12 +1780,15 @@ async def get_youtube_usage(
     if row.channel not in ("youtube", "youtube_sandbox"):
         raise HTTPException(status_code=422, detail=f"youtube-usage unsupported for channel: {row.channel}")
 
-    from app.services.youtube_quota import _utc_day_window, get_platform_youtube_quota_spent_units
+    from app.services.channel_adapters import get_channel_adapter
+    from app.services.youtube_quota import _platform_quota_day_window, get_platform_youtube_quota_spent_units
 
     now = datetime.now(timezone.utc)
     limit_units = settings.youtube_quota_daily_limit_units
-    spent_units = await get_platform_youtube_quota_spent_units(db, now=now)
-    _, reset_at = _utc_day_window(now)
+    spent_units = await get_platform_youtube_quota_spent_units(db, channel=row.channel, now=now)
+    adapter = get_channel_adapter(row.channel)
+    tz_name = adapter.quota_reset_timezone if adapter is not None else "UTC"
+    _, reset_at = _platform_quota_day_window(now, tz_name)
     return YouTubeUsageResponse(
         used_units=spent_units, limit_units=limit_units,
         remaining_units=max(0, limit_units - spent_units), reset_at=reset_at.isoformat(),

@@ -90,15 +90,19 @@ async def test_check_youtube_quota_or_raise_under_limit_passes():
     engine, Session = await _session_factory()
     try:
         async with Session() as s:
-            await check_youtube_quota_or_raise(s, estimated_units=1_600)
+            await check_youtube_quota_or_raise(s, channel="youtube", estimated_units=1_600)
     finally:
         await engine.dispose()
 
 
 @pytest.mark.anyio
-async def test_check_youtube_quota_or_raise_exceeds_includes_reset_at_utc_midnight():
-    """페드루 PO 낱말 확定(2026-09-12 10:46Z) — reset_at은 정확한 UTC 자정
-    시각(날짜뿐 아님)."""
+async def test_check_youtube_quota_or_raise_exceeds_includes_reset_at_pacific_midnight():
+    """story #3815(배포 83 픽셀 결함, 페드루 PO 지적 2026-09-12 23:50Z) — 이전엔
+    UTC 자정으로 pin했으나(실 YouTube quota는 태평양 시간 자정 리셋, ⚠️미확認 —
+    channel_adapters.py quota_reset_timezone 주석 참고) 어댑터 선언(youtube=
+    America/Los_Angeles)으로 정정. 2026-09-12는 PDT(UTC-7, DST 기간) 구간이라
+    그날 UTC 15:30(태평양 로컬 08:30, 아직 그날 안)의 「오늘」 경계는 태평양
+    자정=UTC 07:00 다음날."""
     from app.core.config import settings
     from app.services.youtube_quota import YouTubeQuotaExceededError, check_youtube_quota_or_raise
 
@@ -108,54 +112,80 @@ async def test_check_youtube_quota_or_raise_exceeds_includes_reset_at_utc_midnig
         async with Session() as s:
             with pytest.raises(YouTubeQuotaExceededError) as exc_info:
                 await check_youtube_quota_or_raise(
-                    s, estimated_units=settings.youtube_quota_daily_limit_units + 1, now=now,
+                    s, channel="youtube",
+                    estimated_units=settings.youtube_quota_daily_limit_units + 1, now=now,
                 )
         exc = exc_info.value
         assert exc.limit_units == settings.youtube_quota_daily_limit_units
         assert exc.spent_units == 0
         assert exc.remaining_units == settings.youtube_quota_daily_limit_units
-        assert exc.reset_at == datetime(2026, 9, 13, 0, 0, 0, tzinfo=timezone.utc), (
-            "reset_at은 «내일 날짜»가 아니라 정확한 UTC 자정 시각이어야 한다"
+        assert exc.reset_timezone == "America/Los_Angeles"
+        assert exc.reset_at == datetime(2026, 9, 13, 7, 0, 0, tzinfo=timezone.utc), (
+            "reset_at은 «내일 날짜»가 아니라 태평양 시간(PDT, UTC-7) 자정의 정확한 UTC 시각이어야 한다"
         )
     finally:
         await engine.dispose()
 
 
-def test_youtube_usage_exceeded_wording_matches_actual_utc_day_window_boundary():
-    """⭐드리프트 가드(story #3815, 페드루 PO 지적 2026-09-12 14:21Z) — i18n_catalog의
-    정적 문장 「매일 오전 9시(한국 시간)」/"00:00 UTC"가 실제 `_utc_day_window`
-    경계와 갈리면 안 된다. 경계를 UTC 자정에서 계산해 KST(UTC+9)로 환산한
-    시(hour)가 9가 아니면 이 테스트가 RED — 그 시점이 이 카탈로그 문장도 같이
-    고쳐야 한다는 신호다(문장 자체는 계산식과 무관한 리터럴이라 자동 동기화가
-    안 되므로, 이 pin이 유일한 안전망).
+@pytest.mark.anyio
+async def test_check_youtube_quota_or_raise_reset_at_crosses_dst_boundary_pst():
+    """양성대조 — PST(표준시, UTC-8) 구간(1월)에서도 같은 어댑터 선언이 올바른
+    오프셋을 낸다(DST가 하드코딩 상수가 아니라 ZoneInfo가 실제로 반영한다는
+    증거 — PDT 케이스만 pin하면 서머타임 전환 버그를 못 잡는다)."""
+    from app.core.config import settings
+    from app.services.youtube_quota import YouTubeQuotaExceededError, check_youtube_quota_or_raise
 
-    story #3815 CHANGES(페드루 PO 지적 2026-09-12 17:53Z) — FE `failure-action-
-    badge.tsx`의 `channelPostsFailureYoutubeQuotaExceeded`(ko/en)가 이 BE 정적
-    문구를 그대로 복제한다(dead_letter 배지용) — 같은 문장이 두 곳에 있으면
-    한쪽만 바뀌는 드리프트가 난다. 이 가드를 FE 두 키까지 넓혀 **byte-exact**
-    일치를 강제한다(경계 상수가 바뀌면 이 테스트가 먼저 잡고, 두 낱말이 갈리면
-    바로 다음 assert가 잡는다)."""
+    engine, Session = await _session_factory()
+    try:
+        now = datetime(2026, 1, 12, 15, 30, 0, tzinfo=timezone.utc)
+        async with Session() as s:
+            with pytest.raises(YouTubeQuotaExceededError) as exc_info:
+                await check_youtube_quota_or_raise(
+                    s, channel="youtube",
+                    estimated_units=settings.youtube_quota_daily_limit_units + 1, now=now,
+                )
+        exc = exc_info.value
+        assert exc.reset_at == datetime(2026, 1, 13, 8, 0, 0, tzinfo=timezone.utc), (
+            "PST(UTC-8) 구간의 리셋 경계가 틀렸다 — DST 전환이 반영 안 됐을 가능성"
+        )
+    finally:
+        await engine.dispose()
+
+
+def test_youtube_usage_exceeded_wording_derives_from_declared_timezone_and_matches_fe():
+    """⭐드리프트 가드(story #3815, 배포 83 픽셀 결함, 페드루 PO 지적 2026-09-12
+    23:50Z 정정) — 옛 pin은 "UTC 자정→KST 9시"를 계산해 정적 문구와 대조했으나,
+    실 리셋 시간대가 America/Los_Angeles(DST 有)로 바뀌어 "9시" 같은 고정
+    시각으로는 더 이상 못 박을 수 없다(PDT/PST 전환에 따라 실제로 흔들린다).
+    이제 문구는 `{tz_display}` 자리에 `youtube` 채널이 선언한 `quota_reset_
+    timezone`(=`America/Los_Angeles`)을 `TIMEZONE_DISPLAY_NAMES`로 조회한 값을
+    끼워 넣는다 — reset_at 계산(위 두 테스트)과 문구 조립이 같은 선언값 하나에서
+    파생됨을 이 테스트가 고정한다(어댑터 선언을 다른 tz로 바꾸면 이 테스트가
+    아니라 TIMEZONE_DISPLAY_NAMES KeyError로 먼저 죽는다 — fail-closed).
+
+    FE `failure-action-badge.tsx`의 `channelPostsFailureYoutubeQuotaExceeded`
+    (ko/en)가 이 BE 문구를 그대로 복제한다(dead_letter 배지용, #4238 CHANGES 1과
+    동형) — byte-exact 유지."""
     import json
-    from datetime import timedelta
     from pathlib import Path
 
-    from app.services.i18n_catalog import t
-    from app.services.youtube_quota import _utc_day_window
+    from app.services.channel_adapters import get_channel_adapter
+    from app.services.i18n_catalog import TIMEZONE_DISPLAY_NAMES, t
 
-    now = datetime(2026, 9, 12, 15, 30, 0, tzinfo=timezone.utc)
-    _, boundary_utc = _utc_day_window(now)
-    assert (boundary_utc.hour, boundary_utc.minute, boundary_utc.second) == (0, 0, 0), (
-        "경계가 UTC 자정이 아니게 바뀌었다 — 아래 카탈로그 문장도 같이 고칠 것"
+    youtube_tz = get_channel_adapter("youtube").quota_reset_timezone
+    assert youtube_tz == "America/Los_Angeles", (
+        "어댑터 선언이 바뀌었다 — 아래 카탈로그 문장·TIMEZONE_DISPLAY_NAMES도 같이 재확認할 것"
     )
-    kst_hour = (boundary_utc + timedelta(hours=9)).hour
-    assert kst_hour == 9, (
-        f"UTC 자정의 KST 환산이 9시가 아님({kst_hour}시) — 「매일 오전 9시(한국 시간)」 문구 갱신 필요"
+    assert youtube_tz in TIMEZONE_DISPLAY_NAMES, (
+        f"{youtube_tz!r}가 TIMEZONE_DISPLAY_NAMES에 없다 — 라우터가 KeyError로 죽는다"
     )
 
-    ko = t("channel_posts.youtube_usage_exceeded", "ko")
-    en = t("channel_posts.youtube_usage_exceeded", "en")
-    assert "오전 9시(한국 시간)" in ko
-    assert "00:00 UTC" in en
+    ko = t("channel_posts.youtube_usage_exceeded", "ko", tz_display=TIMEZONE_DISPLAY_NAMES[youtube_tz]["ko"])
+    en = t("channel_posts.youtube_usage_exceeded", "en", tz_display=TIMEZONE_DISPLAY_NAMES[youtube_tz]["en"])
+    assert "태평양 시간" in ko
+    assert "Pacific Time" in en
+    assert "오전 9시" not in ko, "옛 UTC 고정 가정 문구가 남아 있다"
+    assert "00:00 UTC" not in en, "옛 UTC 고정 가정 문구가 남아 있다"
 
     repo_root = Path(__file__).resolve().parents[2]
     fe_ko = json.loads((repo_root / "apps/web/messages/ko.json").read_text())
@@ -205,7 +235,7 @@ async def test_platform_wide_quota_sum_ignores_org_id():
         # limit 근처라 조금만 더 요청해도 넘는다.
         async with Session() as s:
             with pytest.raises(YouTubeQuotaExceededError) as exc_info:
-                await check_youtube_quota_or_raise(s, estimated_units=1_000)
+                await check_youtube_quota_or_raise(s, channel="youtube", estimated_units=1_000)
         assert exc_info.value.spent_units == half * 2
     finally:
         await engine.dispose()
@@ -1033,8 +1063,9 @@ async def test_youtube_quota_exceeded_publish_persists_reason_code_and_reset_at_
             await s.commit()
         _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
 
+        from app.services.youtube_quota import _platform_quota_day_window
         before = datetime.now(timezone.utc)
-        expected_reset_at = before.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        _, expected_reset_at = _platform_quota_day_window(before, "America/Los_Angeles")
 
         try:
             async with _client_for(app) as client:
@@ -1081,7 +1112,7 @@ async def test_youtube_quota_exceeded_publish_persists_reason_code_and_reset_at_
                 assert item["command_reason_reset_at"] is not None, "reset_at이 행에 안 남았다"
                 actual_reset_at = datetime.fromisoformat(item["command_reason_reset_at"].replace("Z", "+00:00"))
                 assert actual_reset_at == expected_reset_at, (
-                    f"reset_at이 정적 문구가 pin하는 UTC 자정 경계와 다르다: {actual_reset_at} != {expected_reset_at}"
+                    f"reset_at이 태평양 시간 자정 경계와 다르다: {actual_reset_at} != {expected_reset_at}"
                 )
         finally:
             app.dependency_overrides.clear()

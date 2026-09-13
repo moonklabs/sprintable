@@ -25,11 +25,26 @@ from __future__ import annotations
 
 from app.services.agent_onboarding_config import SUPPORTED_LOCALES, resolve_locale
 
-__all__ = ["MessageCatalog", "UnknownMessageKeyError", "t"]
+__all__ = ["MessageCatalog", "TIMEZONE_DISPLAY_NAMES", "UnknownMessageKeyError", "t"]
 
 
 class UnknownMessageKeyError(KeyError):
     """카탈로그에 없는 key로 t()를 호출했다 — 가드 2. 조용한 폴백 대신 즉시 예외."""
+
+
+# story #3815(배포 83 픽셀 결함, 페드루 PO 지적 2026-09-12 23:50Z) — 채널 어댑터
+# `quota_reset_timezone`(youtube/youtube_sandbox 선언값)의 IANA 이름 → 로케일별
+# 사람이 읽는 표기. `youtube_quota.py`가 아니라 이 파일에 두는 이유: 이 스캐너
+# (verify_no_new_korean_user_strings.py)가 이 파일 하나만 EXEMPT_FILES로 등록돼
+# 있다(story #3786 페드루 PO 明示 2026-09-10) — 사용자 문장 리터럴은 전부 여기
+# 한 곳에 모여야 그 예외가 성립한다. `channel_posts.youtube_usage_exceeded`가
+# `{tz_display}` 자리에 이 값을 그대로 받는다(reset_at 계산과 같은 선언값에서
+# 파생 — 두 곳이 각자 짓지 않는다). 선언되지 않은 IANA 이름이 오면 즉시
+# KeyError(fail-closed — 지어낸 표기를 내느니 죽는 편이 낫다, insight_metrics류
+# "지어내지 않는다" 원칙과 동형).
+TIMEZONE_DISPLAY_NAMES: dict[str, dict[str, str]] = {
+    "America/Los_Angeles": {"ko": "태평양 시간", "en": "Pacific Time"},
+}
 
 
 # key → {locale: template}. `.format(**params)`로 렌더 — 지금 슬라이스 1의 모든 문자열은
@@ -398,14 +413,25 @@ _CATALOG: dict[str, dict[str, str]] = {
     # story #3815(Phase3·3-5 PR2, 페드루 PO 낱말 확定 2026-09-12 10:46Z, CHANGES①
     # 2026-09-12 11:34Z 정정) — 코드(YOUTUBE_QUOTA_EXCEEDED)·마커(sandbox:youtube-
     # quota-exceeded)는 그대로. 최초엔 "내일 다시"(상대 표현)로 확定했으나, 리셋
-    # 경계가 UTC 00:00 «시각»이라 KST 사용자(UTC+9)에겐 "내일"이 실제로는 그날
-    # 09:00부터라 거짓("오늘 09시 이후"인데 "내일"이라 하면 이르게 읽힌다) — 정적
-    # 절대 시각 문장으로 교체(요청마다 계산되는 reset_at 보간 없음, 경계 자체가
-    # 고정값이라 정적 문자열로 충분·`reset_at` 필드는 여전히 응답에 실어 FE가
-    # 필요하면 참고).
+    # 경계가 자정 «시각»이라 다른 시간대 사용자에겐 "내일"이 실제로는 그날 오후
+    # 부터라 거짓 — 정적 절대 시각 문장으로 교체(경계 자체가 고정값이라 정적
+    # 문자열로 충분·`reset_at` 필드는 여전히 응답에 실어 FE가 필요하면 참고).
+    #
+    # story #3815(배포 83 픽셀 결함, 페드루 PO 지적 2026-09-12 23:50Z) — 이전엔
+    # "매일 오전 9시(한국 시간)"/"00:00 UTC"가 UTC 자정을 전제로 한 문장이었으나
+    # 실 YouTube quota는 태평양 시간(America/Los_Angeles, DST 관례 有) 자정에
+    # 리셋된다(공개 문서 지식, ⚠️미확認 — channel_adapters.py quota_reset_timezone
+    # 필드 주석 참고) — UTC 고정 가정이던 "오전 9시"류 절대 시각 표기는 PDT/PST
+    # 전환에 따라 실제로 8시/9시를 오간다는 뜻이라 애초에 정적 절대 시각으로
+    # 못 박을 수 없다(그때그때 달라지는 KST 환산 시각을 문구에 하드코딩하면
+    # 그 자체가 거짓말이 된다). `{tz_display}`로 시간대 명칭만 표기하고 정확한
+    # 순간은 `reset_at` 필드(FE가 필요하면 로컬 시각으로 환산)에 맡긴다 —
+    # `{tz_display}`는 라우터가 `youtube_quota.TIMEZONE_DISPLAY_NAMES`에서
+    # `reset_timezone`(=채널 어댑터의 `quota_reset_timezone` 선언값, `reset_at`과
+    # 같은 소스)으로 조회해 넘긴다(두 곳이 각자 짓지 않는다).
     "channel_posts.youtube_usage_exceeded": {
-        "ko": "오늘 YouTube 사용량을 다 썼습니다 — 사용량은 매일 오전 9시(한국 시간)에 초기화됩니다(플랫폼 공유 한도).",
-        "en": "Today's YouTube usage limit has been reached — it resets daily at 00:00 UTC (shared platform-wide limit).",
+        "ko": "오늘 YouTube 사용량을 다 썼습니다 — 사용량은 매일 {tz_display} 자정에 초기화됩니다(플랫폼 공유 한도).",
+        "en": "Today's YouTube usage limit has been reached — it resets daily at midnight {tz_display} (shared platform-wide limit).",
     },
     # story #3815(Phase3·3-5, 미르코 PR4 그라운딩 발견 → 페드루 PO 지적 2026-09-12
     # 14:37Z) — `_validate_youtube_metadata`가 던지는 `ChannelYouTubeMetadataError`

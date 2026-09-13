@@ -2498,7 +2498,7 @@
     "channelPostsFailureAutoRetryAt": "This will retry automatically at {time}.",
     "channelPostsFailureAutoRetryUnknown": "This will retry automatically shortly.",
     "channelPostsFailureDeadLetter": "Automatic retries have stopped.",
-    "channelPostsFailureYoutubeQuotaExceeded": "Today's YouTube usage limit has been reached — it resets daily at 00:00 UTC (shared platform-wide limit).",
+    "channelPostsFailureYoutubeQuotaExceeded": "Today's YouTube usage limit has been reached — it resets daily at midnight Pacific Time (shared platform-wide limit).",
     "channelPostsFailureRetryAfterReset": "You can retry after the usage resets.",
     "channelPostsFailureRetryCta": "Retry",
     "channelPostsFailureVoided": "Voided",
