@@ -177,3 +177,12 @@ class TestConnectionStatusForErrorCode:
         """error(사유불명) → revoked(더 구체적)는 업그레이드라 허용된다 — "error"만
         다운그레이드 방지 대상이지 revoked/expired는 새 정보로 계속 갱신된다."""
         assert connection_status_for_error_code("CHANNEL_CONNECTION_REVOKED", current_status="error") == "revoked"
+
+    def test_ghost_auth_failed_maps_to_error_status(self):
+        """story #3816(적기만, 페드루 PO 지적 2026-09-12 23:50Z) — Ghost Admin API
+        키는 OAuth 토큰처럼 자연 만료되지 않는다(사람이 재발급해야 풀린다) —
+        CHANNEL_CONNECTION_AUTH_ERROR와 같은 결로 "error"가 정확하다. 뮤테이션
+        대상 — 이 항목을 CONNECTION_ERROR_CODE_TO_STATUS에서 걷으면 "expired"로
+        떨어져 이 assert가 RED(파이프라인 전체 양성대조는 test_3816_ghost_auth_
+        failed_connection_status.py)."""
+        assert connection_status_for_error_code("GHOST_AUTH_FAILED", current_status="active") == "error"

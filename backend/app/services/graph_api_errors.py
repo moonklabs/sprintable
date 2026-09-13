@@ -164,6 +164,14 @@ CONNECTION_ERROR_CODE_TO_STATUS: dict[str, str] = {
     # 「요금제 제한」 전용 문구를 고른다(status 자체는 CHANNEL_CONNECTION_AUTH_
     # ERROR와 같은 축이라도 문구는 다르다는 게 이 스토리의 요지).
     "STIBEE_PLAN_RESTRICTED": "error",
+    # story #3816(적기만, 페드루 PO 지적 2026-09-12 23:50Z) — Ghost 401(재서명
+    # 1회 재시도까지 실패, site_posts.py::_blog_publish_error_code가 승격)은
+    # _CONNECTION_BLOCKED_CODES에 이미 등재돼 FAILURE_KIND_CONNECTION까지는
+    # 닿았지만, 이 표에 없어 매핑 밖 기본값 "expired"로 떨어졌다 — Ghost Admin
+    # API 키는 OAuth 토큰처럼 자연 만료되는 개념이 없다(사람이 재발급해야
+    # 풀리는 것이지 "시간이 지나 저절로 그렇게 된" 게 아니다). CHANNEL_
+    # CONNECTION_AUTH_ERROR와 같은 결(사유 불명 인증 실패) — "error" 재사용.
+    "GHOST_AUTH_FAILED": "error",
 }
 
 
