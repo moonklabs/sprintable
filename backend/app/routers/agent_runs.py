@@ -203,6 +203,39 @@ async def _agent_name_map(session: AsyncSession, agent_ids: set[uuid.UUID]) -> d
     return {row[0]: row[1] for row in result.all()}
 
 
+async def _validate_conversation_link(
+    session: AsyncSession, *, org_id: uuid.UUID,
+    conversation_id: uuid.UUID | None, triggering_message_id: uuid.UUID | None,
+) -> None:
+    """story #3828 — conversation_id/triggering_message_id는 org 소속 실존 레코드만
+    허용(존재 비노출 관례 그대로 — 없거나 타org=404, project_id 검증과 동형 폭).
+    triggering_message_id가 있으면 그 메시지의 실제 conversation_id가(conversation_id도
+    같이 왔다면) 서로 같은지 확인 — 다른 대화의 메시지를 엉뚱한 conversation_id와
+    묶어 잇는 것을 막는다."""
+    from app.models.conversation import Conversation, ConversationMessage
+
+    if conversation_id is not None:
+        row = await session.execute(
+            select(Conversation.id).where(Conversation.id == conversation_id, Conversation.org_id == org_id)
+        )
+        if row.scalar_one_or_none() is None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+
+    if triggering_message_id is not None:
+        msg_row = await session.execute(
+            select(ConversationMessage.conversation_id)
+            .join(Conversation, Conversation.id == ConversationMessage.conversation_id)
+            .where(ConversationMessage.id == triggering_message_id, Conversation.org_id == org_id)
+        )
+        msg_conv_id = msg_row.scalar_one_or_none()
+        if msg_conv_id is None:
+            raise HTTPException(status_code=404, detail="Message not found")
+        if conversation_id is not None and msg_conv_id != conversation_id:
+            raise HTTPException(
+                status_code=422, detail="triggering_message_id does not belong to conversation_id",
+            )
+
+
 @router.post("", response_model=AgentRunResponse, status_code=201)
 async def create_agent_run(
     body: CreateAgentRun,
@@ -241,6 +274,11 @@ async def create_agent_run(
     if member_r.scalar_one_or_none() is None:
         raise HTTPException(status_code=400, detail="agent_id not found or not an agent")
 
+    await _validate_conversation_link(
+        session, org_id=org_id,
+        conversation_id=body.conversation_id, triggering_message_id=body.triggering_message_id,
+    )
+
     # story #2161: "시작할 때 이미 끝날 시각을 갖고 태어나게" — deadline_at은 클라 미제공(항상
     # 서버 계산, A2ATask.deadline_at 선례와 동형·클라가 자기 기한을 임의 연장 못 하게).
     #
@@ -255,6 +293,8 @@ async def create_agent_run(
         model=body.model,
         story_id=body.story_id,
         memo_id=body.memo_id,
+        conversation_id=body.conversation_id,
+        triggering_message_id=body.triggering_message_id,
         status=body.status,
         result_summary=body.result_summary,
         error_message=body.error_message,
@@ -306,6 +346,11 @@ async def update_agent_run(
     # 비우기) 여전히 지워진다 — "생략"과 "명시적 null"을 이제 구분한다(repo.update()의 예외
     # 특례는 그 구분을 못 해 항상 지웠다 — 아래에서 제거).
     _explicit_fields = body.model_dump(exclude_unset=True, exclude={"status", "finished_at"})
+    await _validate_conversation_link(
+        repo.session, org_id=org_id,
+        conversation_id=_explicit_fields.get("conversation_id"),
+        triggering_message_id=_explicit_fields.get("triggering_message_id"),
+    )
     # story #2346 AC3(범위: 기록만, AC7 차단 없음 — 위 모듈 상단 코멘트 참조): existing이 이미
     # access-check용으로 조회돼 있어(stories.py처럼 조건부 재조회 불필요) old 길이를 지금 스칼라로
     # 떠 둔다.

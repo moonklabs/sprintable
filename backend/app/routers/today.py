@@ -44,6 +44,9 @@ class NeedsMeItem(BaseModel):
     reason: str | None = None
     created_at: datetime
     actions: list[str]
+    # story #3828(UX-v3·대화·BE 1) — 이 work_item을 태그한 가장 최근 대화(있으면).
+    # 없으면 null(그 일을 얘기한 대화가 아직 없다는 정직한 사실 — 지어내지 않는다).
+    conversation_id: uuid.UUID | None = None
 
 
 class AgentProgressItem(BaseModel):
@@ -53,6 +56,8 @@ class AgentProgressItem(BaseModel):
     status: str
     current_step: str | None = None
     started_at: datetime
+    # story #3828 — 이 실행을 촉발한 대화(agent_runs.conversation_id). 없으면 null.
+    conversation_id: uuid.UUID | None = None
 
 
 class PublishedByChannel(BaseModel):
