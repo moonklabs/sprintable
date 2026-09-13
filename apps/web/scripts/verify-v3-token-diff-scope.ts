@@ -33,8 +33,16 @@ const BASE_REF = process.env.V3_TOKEN_DIFF_BASE || 'origin/develop';
 // 정말 globals.css 1개만 남는다.
 const INFRA_ALLOWLIST = new Set([
   'apps/web/scripts/verify-v3-token-diff-scope.ts',
+  'apps/web/scripts/verify-v3-token-table-match.test.ts',
   'apps/web/package.json',
   '.github/workflows/ci.yml',
+  // 아래 3개는 "tsx diff 0"의 정신(컴포넌트·렌더 로직 무변경)을 벗어나지 않는다 —
+  // --proof-* 실측값을 그대로 하드코딩해 pin한 기존 회귀 테스트(story #2575/#2917류)
+  // 라, 그 값이 바뀌는 원인(이 PR)과 결과(그 pin 갱신)가 분리 불가능한 같은 변경의
+  // 두 절반이다. 로직 변경 0 — 숫자 리터럴 갱신 + 주석만(PR diff에서 직접 확인 가능).
+  'apps/web/scripts/verify-tint-foreground-contrast.test.ts',
+  'apps/web/scripts/verify-muted-foreground-contrast.test.ts',
+  'apps/web/src/app/globals-scrollbar.test.ts',
 ]);
 
 // alias(--color-*)나 다른 선언이 아니라 --proof-* 원시 토큰 값 줄만 허용.

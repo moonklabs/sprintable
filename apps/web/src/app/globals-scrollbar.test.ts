@@ -138,7 +138,9 @@ describe('실제 스크롤 요소(shiki가 만드는 <pre> 자신)에도 scrollb
 // story #2917 후속(2026-08-22, 유나 홀름 design:changes 재실측) — --background가
 // var(--proof-bg)로 별칭되며 배경이 Bone(#F4F2EC)/Carbon(#0B0C0D)으로 바뀌어 반투명 썸의
 // 합성색도 함께 이동했다. 45%/65% 알파는 그대로, 배경만 새 값으로 재합성한 결과.
-const LIGHT_BG = [244, 242, 236] as const; // --background(light) = var(--proof-bg) = Bone #F4F2EC
+// story #3826(2026-09-13, doc 3dc24888) — v3 조정으로 #F4F2EC → #F7F6F3(Bone, 거의 동일
+// 명도라 아래 명암비 판정에 실질 영향 없음).
+const LIGHT_BG = [247, 246, 243] as const; // --background(light) = var(--proof-bg) = Bone #F7F6F3
 const LIGHT_THUMB_OLD = [229, 229, 229] as const; // oklch(0 0 0 / 10%) — 원 결함(구 배경 기준)
 const LIGHT_THUMB = [134, 133, 130] as const; // black 45% on Bone
 const DARK_BG = [11, 12, 13] as const; // --background(dark) = var(--proof-bg) = Carbon #0B0C0D
@@ -174,7 +176,7 @@ describe('스크롤바 썸/배경 대비 (#2601 — «스크롤바 미표시» �
     expect(darkBlock).toContain('--background: var(--proof-bg);');
     // --proof-bg 리터럴도 같은 방식으로 테마별 독립 대조(라이트=Bone·다크=Carbon, 값 자체가
     // 다르므로 이쪽은 문자열이 애초에 안 겹친다 — 대칭성을 위해 블록 스코프로 통일).
-    expect(rootBlock).toContain('--proof-bg: #F4F2EC;');
+    expect(rootBlock).toContain('--proof-bg: #F7F6F3;'); // story #3826(v3) — 이전 #F4F2EC.
     expect(darkBlock).toContain('--proof-bg: #0B0C0D;');
   });
 });
