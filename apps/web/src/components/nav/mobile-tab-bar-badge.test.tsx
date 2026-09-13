@@ -87,7 +87,7 @@ describe('MobileTabBar — 결재/채팅 카운트 배지(story #3431 CornerCoun
 
 // story #3518(유나 사전 스티어, 2026-09-05) — 배지는 aria-hidden이라 그 수를 보조
 // 기술에 전하는 책임은 탭 링크에 있다. aria-label(접근성 이름 통째 교체)은 안 쓴다 —
-// 이 탭은 보이는 텍스트 라벨("채팅"·"결재")이 있어서 aria-label로 갈아치우면 WCAG
+// 이 탭은 보이는 텍스트 라벨("대화"·"결재")이 있어서 aria-label로 갈아치우면 WCAG
 // 2.5.3(Label in Name) 위반이다. 대신 보이는 라벨 뒤에 sr-only 텍스트를 "덧붙인다" —
 // 접근성 이름은 여전히 라벨+children 텍스트 전체(배지의 aria-hidden 텍스트는 accname
 // 계산에서 제외)로 계산된다. jsdom엔 실 accname 알고리즘이 없어 아래 헬퍼로 근사한다
@@ -106,8 +106,8 @@ function collectVisibleText(el: Element): string {
   return out;
 }
 
-// 재귀 도중엔(하위 호출마다) 다듬지 않는다 — 각 레벨에서 trim하면 "채팅"+" 읽지…"의
-// 경계 공백이 하위 호출 안에서 먼저 잘려 "채팅읽지…"처럼 붙어버린다(실제 겪은 버그).
+// 재귀 도중엔(하위 호출마다) 다듬지 않는다 — 각 레벨에서 trim하면 "대화"+" 읽지…"의
+// 경계 공백이 하위 호출 안에서 먼저 잘려 "대화읽지…"처럼 붙어버린다(실제 겪은 버그).
 // 정규화는 최종 문자열에서 한 번만.
 function approxAccessibleName(el: Element): string {
   return collectVisibleText(el).replace(/\s+/g, ' ').trim();
@@ -117,7 +117,8 @@ describe('MobileTabBar — 탭 접근성 이름에 카운트 포함(story #3518)
   it('배지 0건 — sr-only 텍스트가 안 붙는다(접근성 이름=보이는 라벨 그대로)', async () => {
     await mount(0, 0);
     const chatLink = [...container.querySelectorAll('a')].find((a) => a.getAttribute('href') === '/chats')!;
-    expect(approxAccessibleName(chatLink)).toBe('채팅');
+    // story #3824 CHANGES② — chat 탭 라벨이 nav.chats 공유로 "채팅"→"대화"(허브·바텀탭 통일).
+    expect(approxAccessibleName(chatLink)).toBe('대화');
     expect(chatLink.getAttribute('aria-label')).toBeNull(); // 접근성 이름을 통째로 안 갈아치운다(WCAG 2.5.3).
   });
 
@@ -130,7 +131,7 @@ describe('MobileTabBar — 탭 접근성 이름에 카운트 포함(story #3518)
   it('채팅 unread 3건 — 접근성 이름이 «보이는 라벨+수»', async () => {
     await mount(0, 3);
     const chatLink = [...container.querySelectorAll('a')].find((a) => a.getAttribute('href') === '/chats')!;
-    expect(approxAccessibleName(chatLink)).toBe('채팅 안읽음 3건');
+    expect(approxAccessibleName(chatLink)).toBe('대화 안읽음 3건');
   });
 
   it('결재 대기 12건(시각 9+ 표기) — 접근성 이름엔 "9건 이상"(캡을 말로 반영, 시각 캡과 같은 뜻)', async () => {
@@ -144,7 +145,7 @@ describe('MobileTabBar — 탭 접근성 이름에 카운트 포함(story #3518)
   it('채팅 unread 150건(시각 99+ 표기) — 접근성 이름엔 "99건 이상"', async () => {
     await mount(0, 150);
     const chatLink = [...container.querySelectorAll('a')].find((a) => a.getAttribute('href') === '/chats')!;
-    expect(approxAccessibleName(chatLink)).toBe('채팅 안읽음 99건 이상');
+    expect(approxAccessibleName(chatLink)).toBe('대화 안읽음 99건 이상');
     const badge = container.querySelector('span[aria-hidden]');
     expect(badge?.textContent).toBe('99+');
   });
@@ -167,6 +168,7 @@ describe('MobileTabBar — 탭 접근성 이름에 카운트 포함(story #3518)
   it('[en] 채팅 unread 1건 — "1 unread"(형태 안 갈림, count=1 경계값 확인)', async () => {
     await mount(0, 1, 'en');
     const chatLink = [...container.querySelectorAll('a')].find((a) => a.getAttribute('href') === '/chats')!;
-    expect(approxAccessibleName(chatLink)).toBe('Chat 1 unread');
+    // story #3824 CHANGES② — chat 탭 라벨이 nav.chats 공유로 "Chat"→"Chats".
+    expect(approxAccessibleName(chatLink)).toBe('Chats 1 unread');
   });
 });

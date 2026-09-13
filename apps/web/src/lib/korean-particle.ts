@@ -34,3 +34,15 @@ export function pickEuroJosa(word: string): '으로' | '로' {
   if (jongseong === 0 || jongseong === RIEUL_JONGSEONG_INDEX) return '로';
   return '으로';
 }
+
+// story #3824(UX-v3·FE 1, 2026-09-13) — more/page.tsx의 moreTabHint가 "{chats}은"으로
+// 조사를 문자열에 고정해 두었다가 nav.chats 값이 "채팅"(받침 있음)→"대화"(받침 없음)로
+// 바뀌며 "대화은"이라는 비문이 됐다(카드 테스트 실측으로 발견) — pickEuroJosa와 동일한
+// 근거(완성형 한글 종성 유무는 예외 없는 기계적 규칙)로 「은/는」도 결정적 함수로 푼다.
+export function pickEunNeunJosa(word: string): '은' | '는' {
+  const ch = lastHangulChar(word);
+  if (ch === null) return '는';
+  const offset = ch.codePointAt(0)! - HANGUL_BASE;
+  const jongseong = offset % JONGSEONG_COUNT;
+  return jongseong === 0 ? '는' : '은';
+}

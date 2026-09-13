@@ -24,18 +24,24 @@ import { fetchWithAuth } from '@/lib/db/client';
 // 목적지를 직접 가리킨다(한 홉 절약 + 이름-목적지 일치, #2224 §④ "사람이 누르는 진입점"
 // 표면). `/flow`는 아직 모바일 전용 화면(#2225)이 없어 데스크톱과 같은 레이아웃을 그대로
 // 받는다 — 이번 판에서는 "폰에서 깨지지 않게"까지만 손대고, 본격 모바일 재설계는 #2225.
+// story #3824 CHANGES②(페드루 PO 確定, 2026-09-13 09:01Z) — "같은 사실=같은 낱말": 이
+// 탭 바의 「지금」·「채팅」과 데스크톱 사이드바/모바일 허브의 「오늘」·「대화」는 같은 두
+// 화면을 가리키는데 각자 다른 i18n 키(mobileTabBar.now/chat vs nav.zoneNow/chats)를 써서
+// 문구가 갈라져 있었다 — 값이 아니라 **labelKey 자체**를 공유해 한쪽이 바뀌면 다른 쪽도
+// 자동으로 같이 바뀌게 한다(재발 방지, 문구만 맞춰두면 다음 개명 때 또 갈라진다). 「결재」는
+// 모바일 IA 통합이 후속 카드 스코프라 자기 키(mobileTabBar.approvals) 그대로 둔다.
 export const TABS = [
-  { key: 'now', href: '/flow', icon: CircleDot, labelKey: 'now' as const },
+  { key: 'now', href: '/flow', icon: CircleDot, labelKey: 'zoneNow' as const, namespace: 'nav' as const },
   // story #2279(PO 판정, 2026-07-29): 라벨("결재")·배지(게이트 대기 수)와 착지가 어긋나
   // 있던 것 — 이름=가는 곳=세는 것 셋을 한 줄로 맞춘다. #2164가 세운 "진입점 라벨은 착지
   // 탭과 일치" 규칙은 그대로 두고 착지 쪽을 게이트 탭으로 옮긴다(라벨을 규칙에 맞춘다).
   // "알림" 탭은 안 없어진다 — /inbox 페이지 내부 탭 스위처로 한 번 더 탭하면 그대로 있다.
-  { key: 'approvals', href: '/inbox?tab=gates', icon: Inbox, labelKey: 'approvals' as const },
-  { key: 'chat', href: '/chats', icon: MessageSquare, labelKey: 'chat' as const },
+  { key: 'approvals', href: '/inbox?tab=gates', icon: Inbox, labelKey: 'approvals' as const, namespace: 'mobileTabBar' as const },
+  { key: 'chat', href: '/chats', icon: MessageSquare, labelKey: 'chats' as const, namespace: 'nav' as const },
   // "전체"는 시안상 정식 목록화 대상(S9/#1965) — 기존 모바일 GNB Sheet(햄버거) 재사용은
   // blueprint §3.2 "모바일 사이드바 폐기" 방향과 충돌해 하지 않는다(오르테가군 확定). 이 스토리
   // 에서는 최소 스텁 라우트로만 연결 — S9가 정식 목록으로 교체.
-  { key: 'more', href: '/more', icon: Grid2x2, labelKey: 'more' as const },
+  { key: 'more', href: '/more', icon: Grid2x2, labelKey: 'more' as const, namespace: 'mobileTabBar' as const },
 ] as const;
 
 // story #1991(navigate 불안정 1차 근원 B, 유나 UX 감사): 기존 isTabActive는 4탭 href 자체와
@@ -75,6 +81,9 @@ export function getActiveTabKey(pathname: string): (typeof TABS)[number]['key'] 
 
 export function MobileTabBar({ chatUnreadTotal }: { chatUnreadTotal: number }) {
   const t = useTranslations('mobileTabBar');
+  // story #3824 CHANGES②(페드루 PO 確定) — "now"·"chat" 탭은 nav 네임스페이스의 zoneNow·
+  // chats 키를 그대로 공유(같은 labelKey — 위 TABS 주석 참고).
+  const tNav = useTranslations('nav');
   const pathname = usePathname();
   // story #1977(트랙B): GNB ③ 채팅 unread 총합(유나 시안 768e89b5 v2) — 데스크톱 사이드바
   // 채팅 항목(app-sidebar.tsx)과 동일 소스. story #2007(perf·서버부하): 여기서 직접
@@ -138,7 +147,7 @@ export function MobileTabBar({ chatUnreadTotal }: { chatUnreadTotal: number }) {
       // 이 값을 바꾸려면 globals.css 그 한 줄만 고치면 우하단 fixed 요소들의 인셋도 함께 맞다).
       className="flex h-[var(--mobile-tab-bar-h)] shrink-0 border-t border-border bg-card lg:hidden"
     >
-      {TABS.map(({ key, href, icon: Icon, labelKey }) => {
+      {TABS.map(({ key, href, icon: Icon, labelKey, namespace }) => {
         const active = key === activeKey;
         // story #1977: "채팅" 탭 배지 = GNB unread 총합(결재함 배지와 동일 brand, 구분은
         // 색이 아니라 아이콘+탭 순서 — 유나 시안 768e89b5 v2 디자인 노트).
@@ -184,7 +193,7 @@ export function MobileTabBar({ chatUnreadTotal }: { chatUnreadTotal: number }) {
                 />
               ) : null}
             </span>
-            {t(labelKey)}
+            {namespace === 'nav' ? tNav(labelKey) : t(labelKey)}
             {/* story #3518 — 보이는 라벨 뒤에 이어 붙인다(라벨을 갈아치우지 않는다,
                 WCAG 2.5.3). aria-live는 안 붙인다(탭 전환 때마다 안내를 반복하지
                 않는다 — 이 링크에 포커스/진입할 때만 한 번 읽힌다). */}

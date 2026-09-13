@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { NAV_GROUPS } from './nav-config';
+import { LEGACY_NAV_ITEMS, NAV_GROUPS } from './nav-config';
 import koMessages from '../../messages/ko.json';
 import enMessages from '../../messages/en.json';
 
@@ -17,14 +17,20 @@ import enMessages from '../../messages/en.json';
 // 존재하고 소비가 변수 인자로만 일어나는 자리)는 전 화면 가드의 사각지대라 국소 테스트가
 // 여전히 맞는 자리 — 두 가드는 같은 것을 두 번 보는 게 아니라 서로 다른 축(리터럴 호출
 // vs 데이터 카탈로그)을 나눠 본다. 그래서 이 실존 대조를 되살린다.
+// story #3824(UX-v3·FE 1, 2026-09-13) — 5항목 축소 뒤에도 more/page.tsx(모바일 허브)가
+// LEGACY_NAV_ITEMS 17개를 「그 밖의 화면」 카드로 그대로 `t(item.descriptionKey)`
+// 소비한다 — 이 가드가 메우려던 사각(변수 인자 t() 호출이라 전 화면 AST 가드가 못 보는
+// 축)은 자리 이동과 무관하게 그대로 유효하므로 NAV_GROUPS만이 아니라 LEGACY_NAV_ITEMS도
+// 합쳐서 본다(23개 총량 자체는 변함없음 — 이동만 있었지 항목 증감은 없었다).
 function allNavGroupItems() {
-  return NAV_GROUPS.flatMap((g) => g.items);
+  return [...NAV_GROUPS.flatMap((g) => g.items), ...LEGACY_NAV_ITEMS];
 }
 
 describe('NAV_GROUPS descriptionKey 완전성 — story #fddd0e6b AC2', () => {
-  // ⭐되돌리면 RED — NAV_GROUPS에 새 항목을 추가하며 descriptionKey를 빠뜨리면(또는 23개가
-  // 아니게 늘거나 줄면) 이 수부터 어긋난다(첫 절 그라운딩이 23으로 확認한 값).
-  it('항목이 정확히 23개다(첫 절 그라운딩 값 — now 2·dev 5·marketing 5·trust 2·knowledge 4·organization 4·settings 1)', () => {
+  // ⭐되돌리면 RED — 항목을 추가하며 descriptionKey를 빠뜨리면(또는 23개가 아니게 늘거나
+  // 줄면) 이 수부터 어긋난다(첫 절 그라운딩이 23으로 확認한 값 — story #3824로 5(NAV_
+  // GROUPS)+18(LEGACY_NAV_ITEMS)로 재분배됐을 뿐 총량은 그대로).
+  it('항목이 정확히 23개다(NAV_GROUPS 5 + LEGACY_NAV_ITEMS 18, story #3824 재분배 후 총량 불변)', () => {
     expect(allNavGroupItems()).toHaveLength(23);
   });
 

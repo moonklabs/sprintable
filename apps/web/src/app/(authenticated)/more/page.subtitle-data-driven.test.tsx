@@ -35,6 +35,11 @@ vi.mock('@/lib/nav-config', () => ({
   ],
   MOBILE_HUB_GROUP_ORDER: ['fake-a', 'fake-b'],
   MOBILE_HUB_EXCLUDE_IDS: new Set<string>(),
+  // story #3824 — more/page.tsx가 legacyGroup(「그 밖의 화면」)을 만들 때 이제
+  // LEGACY_NAV_ITEMS를 참조한다. 이 파일의 목적은 어디까지나 "SSOT를 바꾸면 부제가
+  // 따라 움직인다"는 축 단독검증이라 legacy 쪽은 빈 배열로 둬 3구역째가 안 생기게 한다
+  // (2구역·3항목 가짜 카탈로그 전제를 그대로 보존).
+  LEGACY_NAV_ITEMS: [],
 }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
