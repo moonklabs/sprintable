@@ -16,6 +16,10 @@ class CreateAgentRun(BaseModel):
     model: str | None = None
     story_id: uuid.UUID | None = None
     memo_id: uuid.UUID | None = None
+    # story #3828 — 이 실행을 촉발한 대화/메시지(둘 다 선택, 라우터가 org 소속·존재를
+    # 각각 검증).
+    conversation_id: uuid.UUID | None = None
+    triggering_message_id: uuid.UUID | None = None
     status: str = "running"
     result_summary: str | None = None
     # story #3707 — 모델(agent_run.py)엔 error_message 컬럼이 실재하고 리퍼(agent_run_lifecycle.py
@@ -61,6 +65,10 @@ class UpdateAgentRun(BaseModel):
     # 생략 시 라우터가 status가 종단 상태(completed/failed/abandoned)면 now()로 채운다(server-
     # authority, 클라 미제공을 신뢰하지 않는 기존 관례 — S7 attachments와 동형).
     finished_at: datetime | None = None
+    # story #3828 — CreateAgentRun과 동형(생성 시점에 아직 conversation이 안 정해졌다가
+    # 나중에 붙는 경로 대비). exclude_unset=True 계약 그대로(생략=무변, 명시 null=비움).
+    conversation_id: uuid.UUID | None = None
+    triggering_message_id: uuid.UUID | None = None
 
 
 class AgentRunResponse(BaseModel):
@@ -81,6 +89,9 @@ class AgentRunResponse(BaseModel):
     deployment_id: uuid.UUID | None = None
     story_id: uuid.UUID | None = None
     memo_id: uuid.UUID | None = None
+    # story #3828 — additive(from_attributes로 ORM 컬럼 그대로, 값 없으면 null).
+    conversation_id: uuid.UUID | None = None
+    triggering_message_id: uuid.UUID | None = None
     trigger: str
     model: str | None = None
     status: str

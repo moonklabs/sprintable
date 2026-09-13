@@ -33,6 +33,16 @@ class AgentRun(Base):
     memo_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True
     )
+    # story #3828(마이그 0374, UX-v3·대화·BE 1) — 「지시 한 줄 → 실행 → 결과가 같은
+    # 스레드로 돌아온다」의 연결 자리. conversation이 지워져도 run 이력 자체는 남아야
+    # 해서 SET NULL(agent_run_tool_calls.run_id의 CASCADE와 반대 방향 — 그쪽은
+    # "부모 없는 자식 기록 무의미", 이쪽은 "run은 독립적으로 유효한 이력").
+    conversation_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    triggering_message_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("conversation_messages.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     trigger: Mapped[str] = mapped_column(Text, nullable=False, default="manual")
     model: Mapped[str | None] = mapped_column(Text, nullable=True)
     input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)

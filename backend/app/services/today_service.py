@@ -202,6 +202,48 @@ async def _resolve_needs_me(
     }
     requesters = await lookup_members_by_ids(requester_ids, session) if requester_ids else {}
 
+    # story #3828(UX-v3·대화·BE 1) — needs_me 행에 "관련 대화"(work_item을 태그한
+    # 가장 최근 메시지의 conversation, 있으면 최근 1) 링크. work_item당 개별 쿼리
+    # 대신 IN 절 배치 하나로 N+1 없이 구한다(conversations.py::list_conversations_
+    # by_work_item과 같은 태그 조회 축 재사용, 그 route를 다시 호출하지는 않는다 —
+    # 이미 열린 session 안에서 같은 쿼리 모양을 직접 재현).
+    #
+    # 페드루 PO 리뷰 CHANGES(PR #4253) — 캐폴러가 참여하지 않은 대화(특히 DM)의
+    # id를 "오늘" 행 링크로 내보내면 클릭 시 403 죽은 링크이자 그 DM의 존재
+    # 자체를 캐폴러에게 노출한다 — ConversationParticipant.member_id == 캐폴러
+    # 조건을 반드시 같이 건다(conversations.py::list_conversations_by_work_item
+    # 과 동일 원칙).
+    work_item_pairs = {(it["work_item_type"], it["work_item_id"]) for it in items}
+    conversation_by_work_item: dict[tuple[str, uuid.UUID], uuid.UUID] = {}
+    if work_item_pairs:
+        from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
+
+        wi_types = {t for t, _ in work_item_pairs}
+        wi_ids = {str(i) for _, i in work_item_pairs}
+        tag_rows = (await session.execute(
+            select(
+                ConversationMessage.msg_metadata["work_item"]["type"].astext,
+                ConversationMessage.msg_metadata["work_item"]["id"].astext,
+                ConversationMessage.conversation_id,
+            )
+            .join(Conversation, Conversation.id == ConversationMessage.conversation_id)
+            .join(
+                ConversationParticipant,
+                ConversationParticipant.conversation_id == ConversationMessage.conversation_id,
+            )
+            .where(
+                Conversation.org_id == org_id,
+                ConversationParticipant.member_id == member.id,
+                ConversationMessage.msg_metadata["work_item"]["type"].astext.in_(wi_types),
+                ConversationMessage.msg_metadata["work_item"]["id"].astext.in_(wi_ids),
+            )
+            .order_by(ConversationMessage.created_at.desc())
+        )).all()
+        for wi_type, wi_id, conv_id in tag_rows:
+            key = (wi_type, uuid.UUID(wi_id))
+            # DESC 순으로 도착하므로 setdefault의 첫 값이 곧 최신(가장 최근 태그).
+            conversation_by_work_item.setdefault(key, conv_id)
+
     for it in items:
         if it["title"] is None:
             it["title"] = story_titles.get(it["work_item_id"], "")
@@ -211,6 +253,7 @@ async def _resolve_needs_me(
             it["requested_by"] = {"id": rb_id, "name": rm.name} if rm and rm.name else None
         else:
             it.setdefault("requested_by", None)
+        it["conversation_id"] = conversation_by_work_item.get((it["work_item_type"], it["work_item_id"]))
         # TodayResponse 계약(story #3823 카드) — work_item은 중첩 객체다. 내부적으로는
         # 평평한 키(work_item_type/id/gate_type/title)로 dedupe·enrich하는 편이
         # 간단해 여기서만 마지막에 조립한다.
@@ -244,6 +287,22 @@ async def _resolve_agent_progress(
     agent_ids = {run.agent_id for run, _sid, _stitle in rows}
     agents = await lookup_members_by_ids(agent_ids, session) if agent_ids else {}
 
+    # 페드루 PO 리뷰 CHANGES(PR #4253) — run.conversation_id를 캐폴러 참여 검증
+    # 없이 그대로 내보내면 클릭 시 403 죽은 링크이자 그 대화(DM 포함)의 존재
+    # 자체를 노출한다. 캐폴러가 실제 참여자인 conversation_id만 배치로 골라낸다
+    # (list_conversations_by_work_item·needs_me 배치와 동일 원칙).
+    from app.models.conversation import ConversationParticipant
+
+    conv_ids = {run.conversation_id for run, _sid, _stitle in rows if run.conversation_id is not None}
+    participant_conv_ids: set[uuid.UUID] = set()
+    if conv_ids:
+        participant_conv_ids = set((await session.execute(
+            select(ConversationParticipant.conversation_id).where(
+                ConversationParticipant.conversation_id.in_(conv_ids),
+                ConversationParticipant.member_id == member.id,
+            )
+        )).scalars().all())
+
     items: list[dict[str, Any]] = []
     for run, story_id, story_title in rows:
         agent = agents.get(run.agent_id)
@@ -258,6 +317,10 @@ async def _resolve_agent_progress(
             # 된다(AgentRun엔 "마지막 행동 시각" 개념 자체가 없다 — updated_at도
             # 없음). 필드명을 값의 실제 뜻(시작 시각)에 맞춘다.
             "started_at": run.started_at,
+            # story #3828 — 이 실행을 촉발한 대화(agent_runs.conversation_id, 마이그
+            # 0374). 캐폴러가 그 대화의 실제 참여자일 때만 노출(위 참여 검증) —
+            # 연결 자체가 없거나 캐폴러가 참여자가 아니면 null(지어내지 않는다).
+            "conversation_id": run.conversation_id if run.conversation_id in participant_conv_ids else None,
         })
     return items
 

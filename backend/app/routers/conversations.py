@@ -657,10 +657,23 @@ def _event_meta(req: "SendMessageRequest") -> dict | None:
     return {"event": req.event_context} if isinstance(req.event_context, dict) else None
 
 
+def _work_item_meta(req: "SendMessageRequest") -> dict | None:
+    """story #3828(UX-v3·대화·BE 1) — req.work_item({type, id}) → msg_metadata['work_item'].
+    approval_target(approval_delivery.py)과 같은 namespace 패턴이지만 그쪽은 send_message()를
+    우회해 ConversationMessage를 직접 구성하는 별도 경로(#2604 승인 카드 전용)라 이 함수와
+    실제로 만날 일이 없다 — 여긴 event_context와 동형으로 이 함수의 기존 확장 메커니즘을
+    그대로 따른다. GET /conversations?work_item_type=&work_item_id= 조회(story #3828)가
+    이 키를 읽는다. 없으면 None(완전 additive)."""
+    return (
+        {"work_item": {"type": req.work_item.type, "id": str(req.work_item.id)}}
+        if req.work_item is not None else None
+    )
+
+
 def _combined_msg_metadata(req: "SendMessageRequest") -> dict | None:
-    """_activation_meta/_event_meta 둘 다 독립 namespace라 병합 — 한쪽만 있어도, 둘 다
-    없어도(None), 이론상 둘 다 있어도 안전하게 합친다(현재 호출부는 상호배타적으로 쓰지만
-    강제하지 않음 — 필드 자체가 각자 optional이라 자연히 배타적이 된다)."""
+    """_activation_meta/_event_meta/_work_item_meta 전부 독립 namespace라 병합 — 한쪽만
+    있어도, 전부 없어도(None), 이론상 여럿 있어도 안전하게 합친다(각 필드가 optional이라
+    자연히 배타적이 되는 경우가 대부분이나 강제하지 않음)."""
     merged: dict = {}
     act = _activation_meta(req)
     if act:
@@ -668,6 +681,9 @@ def _combined_msg_metadata(req: "SendMessageRequest") -> dict | None:
     ev = _event_meta(req)
     if ev:
         merged.update(ev)
+    wi = _work_item_meta(req)
+    if wi:
+        merged.update(wi)
     return merged or None
 
 
@@ -1248,6 +1264,14 @@ def _is_mcp_upload_object_path(url: str) -> bool:
     return mcp_attachment_upload.is_mcp_upload_object_path(url, kind="chat")
 
 
+class MessageWorkItemTag(BaseModel):
+    """story #3828(UX-v3·대화·BE 1) — SendMessageRequest.work_item 형식. type은 자유
+    문자열(gate.work_item_type/GateResponse.work_item_type과 동형 관례 — story/doc/
+    task 등, 새 값 추가에 스키마 변경 불요)."""
+    type: str
+    id: uuid.UUID
+
+
 class MessageAttachment(BaseModel):
     url: str           # FE-proxy 업로드 객체 url(https GCS 또는 canonical bare path·provider 추상)
     name: str          # 원본 파일명
@@ -1306,6 +1330,10 @@ class SendMessageRequest(BaseModel):
     # 전달 계통 금지)를 지키면서 publish_registry_event가 이 필드로 "이 메시지가 이벤트
     # 발행분임"을 msg_metadata에 실을 수 있게 한다. 공개 REST 문서에는 안 실을 내부 필드.
     event_context: dict | None = None
+    # story #3828(UX-v3·대화·BE 1) — 이 메시지가 어느 work_item(story·doc 등) 얘기인지
+    # 선택 태그. Pydantic 하위모델 자체가 형식 검증(type 누락·id가 UUID 아님 → 422) —
+    # 없으면 완전 무변(approval_target과는 별도 namespace, _work_item_meta 참고).
+    work_item: MessageWorkItemTag | None = None
 
     @field_validator("attachments")
     @classmethod
@@ -1547,6 +1575,80 @@ async def list_conversations(
         })
 
     return {"data": result, "total": total, "limit": limit, "offset": offset}
+
+
+class ConversationByWorkItemItem(BaseModel):
+    """story #3828(UX-v3·대화·BE 1) — list_conversations_by_work_item 응답 1행. 목록
+    화면(list_conversations)의 무거운 참여자/읽음/미리보기 계산은 스코프 밖 — 「이 일
+    얘기하는 대화가 있나·있으면 어디」만 답한다."""
+    id: uuid.UUID
+    type: str
+    title: str | None
+    last_tagged_at: datetime
+
+
+@router.get("/by-work-item", response_model=list[ConversationByWorkItemItem])
+async def list_conversations_by_work_item(
+    work_item_type: str = Query(...),
+    work_item_id: uuid.UUID = Query(...),
+    limit: int = Query(default=20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> list[ConversationByWorkItemItem]:
+    """story #3828(UX-v3·대화·BE 1, 페드루 PO 確定 2026-09-13) — 「이 work_item(story·
+    doc 등)을 얘기하는 conversation」 조회. `send_message()`의 `work_item` 태그
+    (msg_metadata['work_item'], approval_target과 동형 JSONB 패턴 — story #3821의
+    (work_item_type, work_item_id) 축 재사용)를 단 메시지가 있는 conversation을
+    최근순(그 work_item을 가리킨 가장 최근 메시지 시각)으로 반환한다. 태그된
+    메시지가 0건이면 빈 배열(지어내지 않는다).
+
+    페드루 PO 리뷰 CHANGES(PR #4253) — 최초 구현은 org 경계까지만 보고 캐폴러의
+    참여 여부를 안 봤다. 이 route의 소비처(「오늘」 행의 "관련 대화" 링크)는
+    «클릭하면 여는 대화»라 참여 안 한 대화(특히 DM)가 새면 403 죽은 링크이자
+    "이 DM이 존재한다"는 사실 자체의 노출이다 — `list_conversations`와 같은
+    참여 술어(`ConversationParticipant.member_id == 캐폴러`)로 좁힌다. org
+    전체 태그 존재 조회(참여 무관)는 다른 질문이라 이 route의 축이 아니다(필요해
+    지면 별도 이름의 route로, 이 자리에서 슬쩍 겸하지 않는다)."""
+    caller = await _resolve_member(auth, org_id, db)
+    subq = (
+        select(
+            ConversationMessage.conversation_id,
+            func.max(ConversationMessage.created_at).label("last_tagged_at"),
+        )
+        .join(Conversation, Conversation.id == ConversationMessage.conversation_id)
+        .join(
+            ConversationParticipant,
+            ConversationParticipant.conversation_id == ConversationMessage.conversation_id,
+        )
+        .where(
+            Conversation.org_id == org_id,
+            ConversationParticipant.member_id == caller.id,
+            ConversationMessage.msg_metadata["work_item"]["type"].astext == work_item_type,
+            ConversationMessage.msg_metadata["work_item"]["id"].astext == str(work_item_id),
+        )
+        .group_by(ConversationMessage.conversation_id)
+        .order_by(func.max(ConversationMessage.created_at).desc())
+        .limit(limit)
+    )
+    tagged = (await db.execute(subq)).all()
+    if not tagged:
+        return []
+
+    last_tagged_by_conv = {row.conversation_id: row.last_tagged_at for row in tagged}
+    conv_rows = (await db.execute(
+        select(Conversation).where(Conversation.id.in_(last_tagged_by_conv.keys()))
+    )).scalars().all()
+    conv_by_id = {c.id: c for c in conv_rows}
+
+    return [
+        ConversationByWorkItemItem(
+            id=conv_id, type=conv_by_id[conv_id].type, title=conv_by_id[conv_id].title,
+            last_tagged_at=last_tagged_by_conv[conv_id],
+        )
+        for conv_id, _ in sorted(last_tagged_by_conv.items(), key=lambda kv: kv[1], reverse=True)
+        if conv_id in conv_by_id
+    ]
 
 
 @router.get("/unread-count")

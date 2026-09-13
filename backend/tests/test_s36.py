@@ -45,6 +45,11 @@ def _mock_run(status: str = "running") -> MagicMock:
     r.llm_call_count = 0
     r.run_metadata = {}
     r.created_at = datetime(2026, 4, 30, tzinfo=timezone.utc)
+    # story #3828 — AgentRunResponse에 conversation_id/triggering_message_id 추가.
+    # MagicMock은 명시 안 하면 자동으로 MagicMock을 만들어내(UUID|None 위반 →
+    # ValidationError) agent_name과 동형으로 세팅.
+    r.conversation_id = None
+    r.triggering_message_id = None
     return r
 
 
