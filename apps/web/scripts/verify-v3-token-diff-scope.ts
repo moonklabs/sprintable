@@ -43,6 +43,12 @@ const INFRA_ALLOWLIST = new Set([
   'apps/web/scripts/verify-tint-foreground-contrast.test.ts',
   'apps/web/scripts/verify-muted-foreground-contrast.test.ts',
   'apps/web/src/app/globals-scrollbar.test.ts',
+  // 3826-pre(#4255) 후속 — 카디르 QA 지적으로 verify-no-new-alpha-text-foreground.ts의
+  // 비교 로직을 순수 함수(compareToBaseline)로 뽑아내고 .test.ts 3표본을 추가(페드루 PO
+  // 지시, 4254 rebase에 동봉). 토큰값 자체는 무변 — 이 가드의 코드 품질 보강일 뿐이라
+  // "tsx diff 0" 정신(컴포넌트·렌더 로직 무변경) 밖이 아니다.
+  'apps/web/scripts/verify-no-new-alpha-text-foreground.ts',
+  'apps/web/scripts/verify-no-new-alpha-text-foreground.test.ts',
 ]);
 
 // alias(--color-*)나 다른 선언이 아니라 --proof-* 원시 토큰 값 줄만 허용.
