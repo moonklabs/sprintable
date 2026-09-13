@@ -487,14 +487,15 @@ function providerErrorChipLabel(lastErrorCode: string | null | undefined, t: Ret
 // 'none') 연결도 `/disconnect`(revoke_channel_connection)가 credential_kind
 // 무관·owner 전용으로 걸려 있어(FE 「해제」 버튼도 동일 무조건) reason='revoked'
 // 도달 가능(사람이 그 버튼을 누르면 즉시) — reason='expired'만 막으면 그 행은
-// 칩·문장 모순이 그대로 남는다. reason='error'는 오늘 어떤 sandbox 마커도
+// 칩·문장 모순이 그대로 남는다. reason='error'는 그 시점 어떤 sandbox 마커도
 // (threads/ig/fb/x류는 401만 시뮬레이트→classify_graph_error_code가 provider_
 // error_code 없으면 항상 CHANNEL_TOKEN_EXPIRED로만 떨어짐·stibee_sandbox 마커
-// 둘 다 CONNECTION_ERROR_CODE_TO_STATUS 밖·ghost_sandbox의 GHOST_AUTH_FAILED는
-// publication_command.py 표시축(FAILURE_KIND_CONNECTION)만 건드리고 ChannelConnection.
-// status는 안 건드림) 자동으로는 못 내지만, 시드/직접 세팅(오늘 관측된 expired도
-// 같은 축)으로는 항상 가능 — reason 분기를 남겨두면 그 경로가 열리는 순간 같은
-// 모순이 재발한다. reason 무관 오버라이드로 미리 닫는다.
+// 둘 다 CONNECTION_ERROR_CODE_TO_STATUS 밖) 자동으로는 못 냈지만(story #3816
+// 적기만 정정 2026-09-12 23:50Z — ghost_sandbox의 GHOST_AUTH_FAILED는 이제
+// CONNECTION_ERROR_CODE_TO_STATUS에 등재돼 connection.status="error"까지
+// 자동 도달한다), 시드/직접 세팅(오늘 관측된 expired도 같은 축)으로는 항상
+// 가능 — reason 분기를 남겨두면 그 경로가 열리는 순간 같은 모순이 재발한다.
+// reason 무관 오버라이드로 미리 닫는다.
 //
 // 낱말은 「만료됨」이 아니라 「다시 연결 불가」로 골랐다 — reason='revoked'(사람이
 // 방금 「해제」를 눌러 만든 상태)에 「만료됨」을 붙이면 "시간이 지나 저절로
