@@ -90,7 +90,7 @@ async def test_youtube_usage_endpoint_returns_platform_scope_contract():
             assert body["scope"] == "platform"
             assert body["limit_units"] > 0
             assert body["remaining_units"] == body["limit_units"] - body["used_units"]
-            assert body["reset_at"]  # ISO 문자열, UTC 자정 경계.
+            assert body["reset_at"]  # ISO 문자열, 채널 선언 시간대(태평양) 자정 경계 — story #3815.
         finally:
             app.dependency_overrides.clear()
     finally:

@@ -13,7 +13,8 @@ status`(조직별 `org_content_rules` 조회+조직 필터 합산)를 그대로 
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,38 +32,65 @@ class YouTubeQuotaExceededError(Exception):
     클래스로 연다 — 통화 예산과 섞으면 다음 사람이 단위를 헷갈린다).
 
     story #3815(페드루 PO 낱말 확定 2026-09-12 10:46Z) — 리셋 경계가 "오늘/내일"
-    (날짜뿐)이 아니라 정확한 UTC 자정 **시각**이라(플랫폼 전체 하루 카운터,
-    `_utc_day_window`의 `end`) `reset_at`을 싣는다 — FE가 "{reset_at}부터 다시"로
+    (날짜뿐)이 아니라 정확한 **시각**이라(플랫폼 전체 하루 카운터, `_platform_
+    quota_day_window`의 `end`) `reset_at`을 싣는다 — FE가 "{reset_at}부터 다시"로
     쓸 수 있게(ChannelRateLimitedError.reset_at과 동형 관례). 사용자 문자열엔
     "quota" 낱말을 안 쓴다(→"사용량") — 이 예외 자신의 `str()`은 로그용 영문
-    기술 문구일 뿐, 사람에게 보이는 최종 문장은 라우터가 i18n_catalog로 조립."""
+    기술 문구일 뿐, 사람에게 보이는 최종 문장은 라우터가 i18n_catalog로 조립.
+
+    story #3815(배포 83 픽셀 결함, 페드루 PO 지적 2026-09-12 23:50Z) —
+    `reset_timezone`(IANA 이름, 예: "America/Los_Angeles")을 함께 실어 라우터가
+    `TIMEZONE_DISPLAY_NAMES`로 사람이 읽을 문구를 조립할 수 있게 한다 — `reset_at`
+    (정확한 UTC 시각)과 이 값이 항상 같은 채널 어댑터 선언(`quota_reset_timezone`)
+    에서 나온다(두 곳이 각자 짓지 않는다)."""
 
     def __init__(
-        self, *, limit_units: int, spent_units: int, estimated_units: int, remaining_units: int, reset_at: datetime,
+        self, *, limit_units: int, spent_units: int, estimated_units: int, remaining_units: int,
+        reset_at: datetime, reset_timezone: str,
     ):
         self.limit_units = limit_units
         self.spent_units = spent_units
         self.estimated_units = estimated_units
         self.remaining_units = remaining_units
         self.reset_at = reset_at
+        self.reset_timezone = reset_timezone
         super().__init__(
             f"youtube platform-wide daily quota exceeded: limit={limit_units} spent={spent_units} "
-            f"estimated={estimated_units} remaining={remaining_units} reset_at={reset_at.isoformat()}"
+            f"estimated={estimated_units} remaining={remaining_units} reset_at={reset_at.isoformat()} "
+            f"reset_timezone={reset_timezone}"
         )
 
 
-def _utc_day_window(now: datetime) -> tuple[datetime, datetime]:
-    """"오늘"(UTC 00:00~다음날 00:00) — generation_budget.py::_period_window의
-    "month"와 동형 사상, 다른 기간 단위."""
-    start = now.astimezone(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-    return start, start + timedelta(days=1)
+def _platform_quota_day_window(now: datetime, tz_name: str) -> tuple[datetime, datetime]:
+    """"오늘"을 `tz_name`(IANA, 채널 어댑터의 `quota_reset_timezone` 선언값) 기준
+    자정~다음날 자정으로 — generation_budget.py::_period_window의 "month"와 동형
+    사상, 다른 기간 단위. org_time.py::org_midnight_utc와 같은 계산 원리(naive
+    date + ZoneInfo tzinfo = 그 tz 기준 자정, DST 자동 반영)이지만 이 함수는
+    `now`를 인자로 받는다(호출부가 이미 그 관례 — 테스트가 임의 시각을 주입해
+    경계를 결정적으로 검증할 수 있어야 한다, org_time.py는 "지금"만 다뤄 이
+    요구가 없었다). 다음날 경계도 date끼리 더한 뒤 새 datetime을 만든다(aware
+    datetime에 timedelta를 더하는 것과 달리, tzinfo 재계산 모호성이 없다)."""
+    tz = ZoneInfo(tz_name)
+    local_date = now.astimezone(tz).date()
+    next_date = local_date + timedelta(days=1)
+    start = datetime(local_date.year, local_date.month, local_date.day, tzinfo=tz).astimezone(timezone.utc)
+    end = datetime(next_date.year, next_date.month, next_date.day, tzinfo=tz).astimezone(timezone.utc)
+    return start, end
 
 
-async def get_platform_youtube_quota_spent_units(db: AsyncSession, *, now: datetime | None = None) -> int:
-    """오늘(UTC) 플랫폼 전체(모든 조직 합산) youtube quota 소비량. org_id 필터가
-    없는 게 이 함수의 요점 — x_publish_budget류와 다른 자리."""
+async def get_platform_youtube_quota_spent_units(
+    db: AsyncSession, *, channel: str, now: datetime | None = None,
+) -> int:
+    """오늘(채널 어댑터가 선언한 시간대 기준) 플랫폼 전체(모든 조직 합산) youtube
+    quota 소비량. org_id 필터가 없는 게 이 함수의 요점 — x_publish_budget류와
+    다른 자리. `channel`은 리셋 시간대를 결정할 뿐 evidence 필터 축이 아니다
+    (youtube/youtube_sandbox 둘 다 같은 플랫폼 카운터를 흉내)."""
+    from app.services.channel_adapters import get_channel_adapter
+
     now = now or datetime.now(timezone.utc)
-    start, end = _utc_day_window(now)
+    adapter = get_channel_adapter(channel)
+    tz_name = adapter.quota_reset_timezone if adapter is not None else "UTC"
+    start, end = _platform_quota_day_window(now, tz_name)
     rows = (await db.execute(
         select(Evidence.payload).where(
             Evidence.type == "metric",
@@ -74,19 +102,26 @@ async def get_platform_youtube_quota_spent_units(db: AsyncSession, *, now: datet
 
 
 async def check_youtube_quota_or_raise(
-    db: AsyncSession, *, estimated_units: int, now: datetime | None = None,
+    db: AsyncSession, *, channel: str, estimated_units: int, now: datetime | None = None,
 ) -> None:
     """`_publish_x_thread_draft`류의 발행 직전 재검사와 같은 위치 축 — YouTube
-    발행 provider 호출(resumable upload session 생성) 直前에 부른다."""
+    발행 provider 호출(resumable upload session 생성) 直前에 부른다. `channel`은
+    리셋 시간대 선언을 읽는 축(youtube/youtube_sandbox 호출부가 자기 channel
+    문자열을 그대로 넘긴다)."""
+    from app.services.channel_adapters import get_channel_adapter
+
     now = now or datetime.now(timezone.utc)
+    adapter = get_channel_adapter(channel)
+    tz_name = adapter.quota_reset_timezone if adapter is not None else "UTC"
     limit_units = settings.youtube_quota_daily_limit_units
-    spent_units = await get_platform_youtube_quota_spent_units(db, now=now)
+    spent_units = await get_platform_youtube_quota_spent_units(db, channel=channel, now=now)
     remaining_units = limit_units - spent_units
     if estimated_units > remaining_units:
-        _, reset_at = _utc_day_window(now)
+        _, reset_at = _platform_quota_day_window(now, tz_name)
         raise YouTubeQuotaExceededError(
             limit_units=limit_units, spent_units=spent_units,
-            estimated_units=estimated_units, remaining_units=remaining_units, reset_at=reset_at,
+            estimated_units=estimated_units, remaining_units=remaining_units,
+            reset_at=reset_at, reset_timezone=tz_name,
         )
 
 

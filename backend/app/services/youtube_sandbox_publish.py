@@ -31,12 +31,12 @@ YouTube는 거짓 실패가 아니어야 함을 증명하는 자리. state 없�
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import httpx
 
 from app.services.threads_publish import ThreadsPublishError
-from app.services.youtube_quota import YouTubeQuotaExceededError
+from app.services.youtube_quota import YouTubeQuotaExceededError, _platform_quota_day_window
 
 _MARKER_QUOTA_EXCEEDED = "[sandbox:youtube-quota-exceeded]"
 _MARKER_PROVIDER_ERROR = "[sandbox:provider-error]"
@@ -46,10 +46,17 @@ _PROCESSING_LONG_ID_TAG = "processing-long"
 
 def _raise_if_marked(text: str) -> None:
     if _MARKER_QUOTA_EXCEEDED in text:
-        now = datetime.now(timezone.utc)
-        reset_at = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        # story #3815(배포 83 픽셀 결함, 페드루 PO 지적 2026-09-12 23:50Z) — 이
+        # 결정적 마커도 오케스트레이션과 같은 계산 함수(`_platform_quota_day_
+        # window`)·같은 선언(youtube_sandbox 어댑터의 quota_reset_timezone)을
+        # 재사용한다(예전엔 여기 UTC 자정을 따로 하드코딩 — 두 곳이 각자 지으면
+        # 이 스토리가 잡은 드리프트 클래스 그대로 재발).
+        from app.services.channel_adapters import get_channel_adapter
+        tz_name = get_channel_adapter("youtube_sandbox").quota_reset_timezone
+        _, reset_at = _platform_quota_day_window(datetime.now(timezone.utc), tz_name)
         raise YouTubeQuotaExceededError(
-            limit_units=10_000, spent_units=10_000, estimated_units=1_600, remaining_units=0, reset_at=reset_at,
+            limit_units=10_000, spent_units=10_000, estimated_units=1_600, remaining_units=0,
+            reset_at=reset_at, reset_timezone=tz_name,
         )
     if _MARKER_PROVIDER_ERROR in text:
         raise ThreadsPublishError(

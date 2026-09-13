@@ -2498,7 +2498,7 @@
     "channelPostsFailureAutoRetryAt": "{time}에 자동으로 다시 시도합니다.",
     "channelPostsFailureAutoRetryUnknown": "곧 자동으로 다시 시도합니다.",
     "channelPostsFailureDeadLetter": "자동 재시도를 멈췄습니다.",
-    "channelPostsFailureYoutubeQuotaExceeded": "오늘 YouTube 사용량을 다 썼습니다 — 사용량은 매일 오전 9시(한국 시간)에 초기화됩니다(플랫폼 공유 한도).",
+    "channelPostsFailureYoutubeQuotaExceeded": "오늘 YouTube 사용량을 다 썼습니다 — 사용량은 매일 태평양 시간 자정에 초기화됩니다(플랫폼 공유 한도).",
     "channelPostsFailureRetryAfterReset": "사용량 초기화 후 다시 시도할 수 있습니다.",
     "channelPostsFailureRetryCta": "다시 시도",
     "channelPostsFailureVoided": "무효가 됨",

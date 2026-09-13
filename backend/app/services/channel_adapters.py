@@ -143,6 +143,18 @@ class ChannelAdapterConfig:
     # 대리가 아니라 채널 정체성으로 선언 — 기본 False, youtube/youtube_sandbox만
     # True(다른 video_required 채널이 와도 이 축과 무관하면 자동으로 False).
     privacy_lockable: bool = False
+    # story #3815(배포 83 픽셀 회차 결함, 페드루 PO 지적 2026-09-12 23:50Z) — 이
+    # 채널이 «플랫폼 전체 공유 일일 quota» 개념을 갖는다면 그 카운터가 리셋되는
+    # 시간대(IANA 이름). insight_metrics·privacy_lockable과 동형 관례 — 채널의
+    # 성질을 여기 한 곳에 선언하고, 리셋 경계 계산(youtube_quota.py)과 사용자
+    # 문구(i18n_catalog.py, TIMEZONE_DISPLAY_NAMES 매핑) 둘 다 이 값 하나에서
+    # 파생한다(두 곳이 각자 하드코딩하면 드리프트가 난다 — #3815 CHANGES 재발
+    # 클래스). 기본값 "UTC"=이런 개념이 없는 채널(대다수)의 무해한 기본값 —
+    # youtube_quota.py는 이 필드를 declared 채널(youtube/youtube_sandbox)에서만
+    # 읽는다. ⚠️미확認 — 실 YouTube Data API 문서(공개 지식)는 quota가 태평양
+    # 시간(America/Los_Angeles, PST/PDT DST 자동 반영) 자정에 리셋된다고 명시
+    # (재확認 대상: 실 Google Cloud Console quota 대시보드 왕복).
+    quota_reset_timezone: str = "UTC"
     # story #3808(Phase3·3-3 PR5b-1, 페드루 PO 確定 2026-09-12) — 스레드(연속 게시)
     # 이어쓰기 세그먼트 상한(헤드=`text` 제외, `channel_payload["thread"]` 배열
     # 길이 자체의 상한). image_max_count=0과 동형 관례 — 0(기본)=이 채널은 스레드
@@ -672,6 +684,10 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         # 미룸) — 이제 dispatch가 생겨 선언(3696 가드 짝 맞춤, 3697
         # EXPECTED_BACKEND_CHANNELS 주석도 같이 갱신).
         insight_metrics=("views", "engagements"),
+        # story #3815(배포 83 픽셀 결함, 페드루 PO 지적 2026-09-12 23:50Z) —
+        # 이전엔 youtube_quota.py가 UTC 자정으로 하드코딩했으나(실 YouTube는
+        # 태평양 시간 자정 리셋, 위 quota_reset_timezone 필드 주석 참고).
+        quota_reset_timezone="America/Los_Angeles",
     ),
     "youtube_sandbox": ChannelAdapterConfig(
         authorize_url="https://accounts.google.com/o/oauth2/v2/auth",
@@ -701,6 +717,9 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         # 짝 맞춤 — declared_metrics 필터가 제네릭 _fetch_sandbox의 7키 중
         # 2키만 통과시킨다).
         insight_metrics=("views", "engagements"),
+        # story #3815 — "youtube"와 같은 플랫폼 공유 카운터를 흉내(sandbox도
+        # 결정적 quota-exceeded 마커 재현에 같은 리셋 경계를 쓴다).
+        quota_reset_timezone="America/Los_Angeles",
     ),
 }
 

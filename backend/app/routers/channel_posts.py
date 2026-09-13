@@ -2088,7 +2088,14 @@ async def publish_channel_post_draft_endpoint(
         # ExceededError와 동형 처리(사전 재검사가 provider 호출 直前에 막는다 —
         # adapter_called=False, row는 이미 failed로 남겨진 상태 — 오케스트레이션
         # 안에서 처리, 여기선 command 원장만 마저 채운다). 사용자 문장은
-        # i18n_catalog 경유(페드루 낱말 확定 — "quota" 낱말 배제).
+        # i18n_catalog 경유(페드루 낱말 確定 — "quota" 낱말 배제).
+        #
+        # story #3815(배포 83 픽셀 결함, 페드루 PO 지적 2026-09-12 23:50Z) — 문구의
+        # 시간대 표기를 `exc.reset_timezone`(채널 어댑터 선언값, `reset_at` 계산과
+        # 같은 소스)에서 파생 — TIMEZONE_DISPLAY_NAMES에 없는 값이면 KeyError로
+        # 죽는다(지어낸 표기 0, fail-closed).
+        from app.services.i18n_catalog import TIMEZONE_DISPLAY_NAMES
+        tz_display = TIMEZONE_DISPLAY_NAMES[exc.reset_timezone][resolved_locale]
         await _record_this_attempt(approval_check="ok", adapter_called=False, result_code="YOUTUBE_QUOTA_EXCEEDED")
         await apply_command_failure(
             db, command, error_code="YOUTUBE_QUOTA_EXCEEDED", last_error=str(exc), now=now,
@@ -2099,7 +2106,7 @@ async def publish_channel_post_draft_endpoint(
             status_code=422,
             detail=_with_command_state({
                 "code": "YOUTUBE_QUOTA_EXCEEDED",
-                "message": t("channel_posts.youtube_usage_exceeded", resolved_locale),
+                "message": t("channel_posts.youtube_usage_exceeded", resolved_locale, tz_display=tz_display),
                 "limit_units": exc.limit_units, "spent_units": exc.spent_units,
                 "estimated_units": exc.estimated_units, "remaining_units": exc.remaining_units,
                 "reset_at": exc.reset_at.isoformat(),

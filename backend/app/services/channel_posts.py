@@ -1887,7 +1887,8 @@ async def publish_channel_post_draft(
                             )
                             try:
                                 await check_youtube_quota_or_raise(
-                                    db, estimated_units=_settings.youtube_quota_cost_insert_units,
+                                    db, channel=draft.channel,
+                                    estimated_units=_settings.youtube_quota_cost_insert_units,
                                 )
                             except YouTubeQuotaExceededError as exc:
                                 row.status = "failed"
