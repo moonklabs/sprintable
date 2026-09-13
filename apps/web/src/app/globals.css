@@ -426,40 +426,59 @@
   --tiptap-callout-border: oklch(0.55 0.16 145);
   --tiptap-callout-bg: oklch(0.55 0.16 145 / 8%);
 
-  /* E-UI-DAEGBYEON P0: Proof Capsule (Light · Bone) — proof-capsule-mockup-render 정확값 */
-  --proof-bg: #F4F2EC;
+  /* E-UI-DAEGBYEON P0: Proof Capsule (Light · Bone) — proof-capsule-mockup-render 정확값.
+     story #3826(UX-v3·FE 2, 유나 「[UX-v3] 토큰 표」 doc 3dc24888 정본) — 아래 라이트 값은
+     그 doc의 «v3 값(정본)»으로 전량 교체(원시 토큰만·의미 토큰 alias·컴포넌트는 무변).
+     AA 미달 4색(ink-3·amber·green·slate)은 시안 실값을 그대로 안 쓰고 doc이 AA 통과로
+     조정한 값 — 조정 근거·대비 수치는 doc §⑥ 참고(여기서 재복사하지 않는다, SSOT는 doc).
+     다크(.dark 블록, 아래)는 v3 시안이 라이트 전용이라 미정 — 이 PR에서 무변경(doc §④). */
+  --proof-bg: #F7F6F3;
   --proof-panel: #FFFFFF;
-  --proof-sunk: #ECEAE2;
-  --proof-line: #E0DDD3;
-  --proof-line-soft: #EAE8E0;
+  --proof-sunk: #F1EFEA;
+  --proof-line: #E7E4DE;
+  --proof-line-soft: #EEEBE5;
   /* story #2969 §1.2(PR-4, doc proofline-system-layer-2969) — 오버레이 전용 강조 hairline.
      "오버레이는 항상 --elev-overlay + 1px hairline(--proof-line-strong) 동반 — 그림자만으론
      엣지가 흐리다"(§1.2). PR-T에서 이연했던 토큰 — 값은 기존 --proof-line을 --proof-ink
      (그 테마의 최고-대비 텍스트색) 쪽으로 50% 블렌드해 유도(값-SSOT 재사용, 신규 hex 없음).
-     유나 확定(2026-08-23) — 이 공식 그대로(라이트/다크 둘 다 동일 공식이라 자동 대칭).*/
+     유나 확定(2026-08-23) — 이 공식 그대로(라이트/다크 둘 다 동일 공식이라 자동 대칭·
+     story #3826은 이 공식을 안 건드림 — --proof-line/--proof-ink 값만 바뀌어 파생값이
+     자동으로 따라간다). */
   --proof-line-strong: color-mix(in oklch, var(--proof-line) 50%, var(--proof-ink) 50%);
-  --proof-ink: #121310;
-  --proof-ink-2: #3B3D37;
-  /* story #2917 — 유나양 확定(2026-08-22): 원값 #6D6F67은 --muted(proof-sunk) 위에서 4.23:1로
-     AA 미달(매핑표 §5가 bg/panel만 재고 sunk를 누락했던 사각). #63655D로 조정 — sunk 4.91·
-     bg 5.28·panel 5.92(전부 여유)·vs ink-2 1.86(보조<강조 위계 유지). 다크는 무변경(#8D9088,
-     이미 AA 여유). */
-  --proof-ink-3: #63655D;
+  --proof-ink: #1D1C1A;
+  --proof-ink-2: #5F5C57;
+  /* story #2917(2026-08-22)이 원값 #6D6F67을 sunk 위 AA 미달로 #63655D 조정 — story
+     #3826(2026-09-13, doc 3dc24888)이 v3 룩앤필로 다시 조정: #6E6C67(sunk #F1EFEA 위
+     4.56:1, doc §⑥). 다크는 무변(#8D9088, 라이트만 교체 — doc §④). */
+  --proof-ink-3: #6E6C67;
   --proof-faint: #9C9E93;
-  --proof-blue: #3157FF;
-  --proof-blue-soft: #EAEEFF;
+  --proof-blue: #3B5BA5;
+  --proof-blue-soft: #E7EDF7;
   /* story #2983 — 라이트 전용 재조정값(다크 #C7F85A와 hue/sat 동일, L만 하향, 유나 확定
      2026-08-24). vs proof-panel(white) 4.22:1 · vs proof-sunk(#ECEAE2) 3.50:1 — 비텍스트
      3:1 최소 위 여유 margin. 텍스트(작은 배지 라벨 등)로는 4.5:1 미달이라 그 축은 값을
      더 내리지 않고 text-accent-claim 소비처를 text-foreground로 전환해 해소(색값을 텍스트급
-     까지 내리면 링/dot이 과채도가 되는 트레이드오프 회피 — 유나 판단). */
+     까지 내리면 링/dot이 과채도가 되는 트레이드오프 회피 — 유나 판단). story #3826(v3)은
+     시안 미사용 토큰이라 현행 유지(doc 3dc24888 표① "빠짐 0" 원칙 — 추정값 0). */
   --proof-citron: #5F8706;
-  --proof-green: #1F9D57;
-  --proof-green-soft: #E7F6EE;
-  --proof-amber: #B7791F;
-  --proof-amber-soft: #FBF1DE;
+  /* story #3826(2026-09-13, doc 3dc24888) — v3 조정값. 시안 실값 #3E7D5A는 green-soft
+     위 4.26:1로 AA 미달이라 #3B7856으로 조정(4.56:1, doc §⑥). */
+  --proof-green: #3B7856;
+  --proof-green-soft: #E9F1EC;
+  /* story #3826(2026-09-13, doc 3dc24888) — v3 조정값. 시안 실값 #B07A1E는 amber-soft
+     위 3.37:1로 AA 미달이라 #946719로 조정(4.51:1, doc §⑥). */
+  --proof-amber: #946719;
+  --proof-amber-soft: #FBF3E2;
+  /* story #3826(v3) — v3는 「사람 손 필요」에 amber 1색만 쓰고 red는 시안 미사용이라
+     현행 유지(doc 3dc24888 표① "빠짐 0" 원칙 — 추정값 0). */
   --proof-red: #C33B3B;
   --proof-red-soft: #FBEAEA;
+  /* story #3826(신규, 2026-09-13, doc 3dc24888 §①-1) — v3 「에이전트 진행」(calm) 전용
+     축. 기존 --proof-blue(주 버튼)와 뜻이 섞이면 "누른 버튼"과 "진행 중" 표시가 같은
+     색으로 헷갈려 신규 토큰으로 연다(doc의 FE 결정 1 — blue 흡수 대신 신설 채택).
+     시안 실값 #6E7B8B는 slate-soft 위 3.80:1로 AA 미달이라 #636F7D로 조정(4.52:1, §⑥). */
+  --proof-slate: #636F7D;
+  --proof-slate-soft: #EEF1F4;
 
   /* story #2969 §1.2(PR-T, 유나 확定 2026-08-23) — 오버레이(dialog/dropdown-menu/sheet/toast/
      tooltip/popover 등 «떠 있는» 표면) 전용 그림자. 인라인 표면(card/badge/button 등, 문서
@@ -484,8 +503,9 @@
 
   /* story #7d7634ee(P0·선생님 직접 지시, 감確認 doc ea94dac4 §③~⑤) — 컷코너(clip-path 사선)
      전면 폐지. "빼기"(헤어라인+옅은 그림자)가 질감으로 안 읽힌다는 질책 → "더하기"(그레인·
-     방향 깊이·엠보스)로 정정. 소프트 라운드 13px가 사선 클립을 대체한다. */
-  --proof-radius-soft: 13px;
+     방향 깊이·엠보스)로 정정. 소프트 라운드가 사선 클립을 대체한다.
+     story #3826(2026-09-13, doc 3dc24888 §②) — v3 값 12px로 조정(원래 13px). */
+  --proof-radius-soft: 12px;
 
   /* §⑤ 정본 — SVG fractalNoise baseFrequency 0.62. RGB는 0으로 죽이고 alpha만 노이즈값을
      실어 순수 그레인 텍스처로 쓴다(색조는 오버레이하는 쪽의 opacity/mix-blend-mode가 결정 —
