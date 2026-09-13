@@ -17,6 +17,7 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { channelConnectionIdentityLabel, channelLabel, channelMarkColor, channelMarkInitials } from '@/lib/channel-label';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatCount } from '@/components/content/generation-budget-indicator';
 import { ChannelStatusChip } from '@/components/channel-connect/channel-status-chip';
 import { deriveChannelConnectionStatus, worstChannelConnectionStatus } from '@/components/channel-connect/connection-status';
 import { AppCredentialsCard } from '@/components/channel-connect/app-credentials-card';
@@ -536,6 +537,11 @@ interface YoutubeUsageResponse {
 function YoutubeUsageLine({
   orgId, connectionId, t,
 }: { orgId: string; connectionId: string; t: ReturnType<typeof useTranslations> }) {
+  // story #3808(페드루 PO 지적 2026-09-12 23:50Z) — used/limit가 콤마 없이 나가던
+  // 결함(같은 화면의 금액은 formatMinorCurrency로 이미 콤마가 있어 두 표기가 어긋났다)
+  // — formatCount(생성-비용 카드의 formatMinorCurrency 자매 함수, Intl.NumberFormat
+  // 한 곳만 거침)로 처방.
+  const locale = useLocale();
   const [usage, setUsage] = useState<YoutubeUsageResponse | null>(null);
   const load = useCallback(async () => {
     try {
@@ -553,7 +559,7 @@ function YoutubeUsageLine({
   return (
     <p className="text-xs text-muted-foreground" data-testid="channel-connect-youtube-usage-line">
       {usage
-        ? t('channelYoutubeUsageLine', { used: usage.used_units, limit: usage.limit_units })
+        ? t('channelYoutubeUsageLine', { used: formatCount(usage.used_units, locale), limit: formatCount(usage.limit_units, locale) })
         : t('channelYoutubeUsageLineUnmeasured')}
     </p>
   );

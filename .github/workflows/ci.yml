@@ -1562,6 +1562,14 @@ jobs:
       - name: "Verify no date toLocaleString across apps/web/src (story #3493 regression guard)"
         run: pnpm --filter web verify:no-date-tolocalestring
 
+      # story #3808(페드루 PO 지적 2026-09-12 23:50Z) — 채널 사용량 줄(used_units/limit_units/
+      # remaining_units, BFF 계약 {used_units, limit_units, remaining_units, reset_at, scope})
+      # 이 콤마 없이 나가던 결함(같은 화면 금액은 이미 formatMinorCurrency로 콤마가 있어 두
+      # 표기가 어긋났다). formatCount()(formatMinorCurrency의 카운트 자매 함수) 미경유 자리를
+      # 필드명 자체로 정적 검거 — 새 채널이 같은 계약 모양을 재사용해도 자동으로 걸린다.
+      - name: "Verify no unformatted usage count across apps/web/src (story #3808 regression guard)"
+        run: pnpm --filter web verify:no-unformatted-usage-count
+
       # story #2420 AC3 회귀가드: globals.css의 `--<family>-tint` 배경 위에서 --foreground가
       # AA(4.5)를 넘는지 «정의 시점»에 계산한다(oklch→sRGB 변환은 Yuna의 실 Chromium canvas
       # 캡처값과 대조 검증된 순수함수 — 브라우저 불요, 빠르고 결정적). 새 계열(예: --info-tint)이

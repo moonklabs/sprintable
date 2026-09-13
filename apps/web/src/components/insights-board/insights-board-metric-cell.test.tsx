@@ -94,4 +94,16 @@ describe('InsightsBoardMetricCell — GA4 유입 지표 null 사유 진리표(st
     expect(html).not.toContain(koMessages.insightsBoard.insightsBoardGa4NotConnected);
     expect(html).not.toContain(koMessages.insightsBoard.insightsBoardGa4AggregationPending);
   });
+
+  // story #3808(페드루 PO 지적 2026-09-12 23:50Z) — 채널 사용량 줄과 같은 축의 결함
+  // (콤마 없는 값)이 이 셀에도 있었다. formatCount(Intl.NumberFormat)로 처방.
+  it('⭐4자리 이상 값은 콤마로 묶여 렌더된다(story #3808 — 사용량 줄과 같은 축)', () => {
+    const bucket: InsightSnapshotBucketView = {
+      ...capturedBucket,
+      normalized: { ...capturedBucket.normalized!, views: 12345 },
+    };
+    const html = renderCell(bucket, 'views', 'not_connected');
+    expect(html).toContain('12,345');
+    expect(html).not.toContain('>12345<');
+  });
 });

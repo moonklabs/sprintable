@@ -1,6 +1,8 @@
 'use client';
 
+import { useLocale } from 'next-intl';
 import type { useTranslations } from 'next-intl';
+import { formatCount } from '@/components/content/generation-budget-indicator';
 import type { Ga4ConnectionStatus, InsightSnapshotBucketView } from './types';
 
 // story #3503 — insight-snapshot-block.tsx(story #3499)의 패턴을 「표 셀 하나」 크기로
@@ -82,6 +84,11 @@ export interface InsightsBoardMetricCellProps {
 }
 
 export function InsightsBoardMetricCell({ bucket, metric, tContent, tBoard, tChannelConnect, ga4ConnectionStatus }: InsightsBoardMetricCellProps) {
+  // story #3808(페드루 PO 지적 2026-09-12 23:50Z, 채널 사용량 줄과 같은 축의 결함 —
+  // 이 셀도 값을 콤마 없이 그대로 찍는다) — spend는 ads-spend-cell.tsx가 이미 별도
+  // formatMinorCurrency로 처리(이 컴포넌트는 통째로 재사용 안 됨, 위 주석 §21-2 참고)
+  // 하므로, 여기 남는 지표는 전부 «맨 정수 카운트»뿐이라 formatCount 하나로 충분하다.
+  const locale = useLocale();
   // (i) 버킷 자체가 없음 — 아직 스케줄되지 않음/존재하지 않음.
   if (bucket === null) {
     return (
@@ -122,5 +129,5 @@ export function InsightsBoardMetricCell({ bucket, metric, tContent, tBoard, tCha
       </span>
     );
   }
-  return <span data-testid="insights-board-cell-value">{value}</span>;
+  return <span data-testid="insights-board-cell-value">{formatCount(value, locale)}</span>;
 }
