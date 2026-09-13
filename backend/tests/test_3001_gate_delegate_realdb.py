@@ -142,7 +142,7 @@ async def _seed_scenario(session, *, designated_role="member", new_approver_role
     from app.services.approval_delivery import dispatch_approval_request_cards
     await dispatch_approval_request_cards(
         session, org_id=org.id, work_item_type="doc", work_item_id=doc.id,
-        project_id=project.id, title=doc.title, gate_id=gate.id,
+        project_id=project.id, title=doc.title, gate_id=gate.id, gate_type="doc_approval",
         requester_id=requester_member_id, approver_ids=[designated_member_id],
         designated_approver_id=designated_member_id,
     )

@@ -16,7 +16,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import event as sa_event
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -105,9 +105,11 @@ async def dispatch_approval_request_cards(
     project_id: uuid.UUID | None,
     title: str,
     gate_id: uuid.UUID,
+    gate_type: str,
     requester_id: uuid.UUID,
     approver_ids: list[uuid.UUID],
     designated_approver_id: uuid.UUID | None = None,
+    reopen_reason: str | None = None,
 ) -> None:
     """승인자별 DM에 message_kind="request" 카드 메시지 게시 + SSE 이벤트(AC1/AC2).
 
@@ -134,7 +136,19 @@ async def dispatch_approval_request_cards(
     project_id 없는 work_item(비정상 상태 또는 project-무관 work_item_type)은 배달 스킵
     (무대상, 조용히 반환) — project 없이는 `_get_or_create_approval_dm`의 DM project_id를
     채울 수 없다.
-    """
+
+    story #3821(customer-zero 실측, 페드루 PO 확定 2026-09-13, PR B) — 같은 (work_item_
+    id, work_item_type, gate_type) 조합으로 이 승인자 conversation에 이미 최상위 결재
+    요청 메시지가 있으면(예: 같은 스토리에 소 PR이 여러 개 열려 merge gate가 매번 새로
+    생기는 경우) 새 최상위 메시지를 또 안 만든다 — 그 메시지의 스레드 답글로 「다시
+    결재가 필요합니다」(+`reopen_reason`이 있으면 그 사유 한 줄)를 달고, 최상위 메시지의
+    `approval_target.gate_id`를 이번 gate_id로 갱신한다(사람이 최상위 카드에서 승인/거부를
+    눌러도 항상 최신 게이트가 열리게 — 스테일 gate_id 클릭 방지). `gate_type`은 이 신규
+    조회의 키에 쓰일 뿐 아니라 approval_target에도 저장한다(재조회 가능하게, 이전엔 없던
+    필드 — additive, 기존 소비처는 무시).
+
+    스키마 신규 0 — `ConversationMessage.thread_id`(기존 컬럼, conversations.py의 사람
+    스레드 답글 엔드포인트와 같은 필드)·`msg_metadata`(JSONB) 조회만으로 충분하다."""
     if not project_id or not approver_ids:
         return
 
@@ -201,30 +215,103 @@ async def dispatch_approval_request_cards(
                 )
                 if approver_id == designated_approver_id:
                     _primary_conv_id_for_designated = conv.id
-                msg = ConversationMessage(
-                    conversation_id=conv.id,
-                    sender_id=requester_id,
-                    content=f"'{title}' 결재 요청",
-                    mentioned_ids=[approver_id],
-                    msg_metadata={
-                        "activation": {
-                            "audience": [str(approver_id)],
-                            "kind": "request",
-                            "expects_response": True,
+
+                # story #3821(PR B) — 같은 조합의 최상위 결재 요청이 이 conversation에
+                # 이미 있는지 먼저 본다(스레드 붕괴 축). `thread_id IS NULL`로 최상위만
+                # 대상(conversations.py 2614행 "reply에는 reply 금지" 단일계층 규율과
+                # 같은 전제 — 최상위 후보만 찾으면 되고 답글은 애초에 후보가 아니다).
+                existing_root = (await db.execute(
+                    select(ConversationMessage)
+                    .where(
+                        ConversationMessage.conversation_id == conv.id,
+                        ConversationMessage.thread_id.is_(None),
+                        ConversationMessage.msg_metadata["approval_target"]["work_item_type"].astext
+                        == work_item_type,
+                        ConversationMessage.msg_metadata["approval_target"]["work_item_id"].astext
+                        == str(work_item_id),
+                        ConversationMessage.msg_metadata["approval_target"]["gate_type"].astext == gate_type,
+                    )
+                    .order_by(ConversationMessage.created_at.desc())
+                    .limit(1)
+                )).scalar_one_or_none()
+
+                if existing_root is not None:
+                    from app.services.i18n_catalog import t
+                    reply_content = t("approval_delivery.reopen_reply", "ko")
+                    if reopen_reason:
+                        reply_content = f"{reply_content} — {reopen_reason}"
+                    msg = ConversationMessage(
+                        conversation_id=conv.id,
+                        sender_id=requester_id,
+                        content=reply_content,
+                        mentioned_ids=[approver_id],
+                        thread_id=existing_root.id,
+                        msg_metadata={
+                            "activation": {
+                                "audience": [str(approver_id)],
+                                "kind": "request",
+                                "expects_response": True,
+                            },
+                            "approval_target": {
+                                "work_item_type": work_item_type,
+                                "work_item_id": str(work_item_id),
+                                "gate_id": str(gate_id),
+                                "gate_type": gate_type,
+                                "actions": ["approve", "reject"],
+                                "designated": True,
+                                "designated_approver_name": designated_approver_name,
+                            },
                         },
+                    )
+                    db.add(msg)
+                    # story #3821 — 최상위 카드의 approval_target.gate_id를 최신으로
+                    # 갱신(JSONB in-place 변경 미감지 — 재할당, #2832 교훈과 동형)해
+                    # 사람이 최상위에서 승인/거부를 눌러도 최신 게이트가 열리게 한다.
+                    # reply_count/last_reply_at도 conversations.py 2614행의 원자 UPDATE
+                    # 관례 그대로(ORM 속성 재대입 대신 execute — 동시 답글 레이스 안전).
+                    existing_root.msg_metadata = {
+                        **existing_root.msg_metadata,
                         "approval_target": {
-                            "work_item_type": work_item_type,
-                            "work_item_id": str(work_item_id),
+                            **existing_root.msg_metadata["approval_target"],
                             "gate_id": str(gate_id),
-                            "actions": ["approve", "reject"],
-                            "designated": True,
-                            "designated_approver_name": designated_approver_name,
                         },
-                    },
-                )
-                db.add(msg)
-                await db.flush()
-                await _dispatch_conversation_event(db, conv, msg, org_id, requester)
+                    }
+                    await db.execute(
+                        update(ConversationMessage)
+                        .where(ConversationMessage.id == existing_root.id)
+                        .values(
+                            reply_count=ConversationMessage.reply_count + 1,
+                            last_reply_at=datetime.now(timezone.utc),
+                        )
+                    )
+                    await db.flush()
+                    await _dispatch_conversation_event(db, conv, msg, org_id, requester)
+                else:
+                    msg = ConversationMessage(
+                        conversation_id=conv.id,
+                        sender_id=requester_id,
+                        content=f"'{title}' 결재 요청",
+                        mentioned_ids=[approver_id],
+                        msg_metadata={
+                            "activation": {
+                                "audience": [str(approver_id)],
+                                "kind": "request",
+                                "expects_response": True,
+                            },
+                            "approval_target": {
+                                "work_item_type": work_item_type,
+                                "work_item_id": str(work_item_id),
+                                "gate_id": str(gate_id),
+                                "gate_type": gate_type,
+                                "actions": ["approve", "reject"],
+                                "designated": True,
+                                "designated_approver_name": designated_approver_name,
+                            },
+                        },
+                    )
+                    db.add(msg)
+                    await db.flush()
+                    await _dispatch_conversation_event(db, conv, msg, org_id, requester)
             delivered_count += 1
         except Exception:  # noqa: BLE001 — best-effort, 개별 승인자 실패가 상신을 막지 않음.
             logger.warning(

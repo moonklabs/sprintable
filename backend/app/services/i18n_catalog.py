@@ -443,6 +443,18 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "YouTube 제목·태그·카테고리·공개 범위 값을 확인해 주세요.",
         "en": "Check the YouTube title, tags, category, and privacy values.",
     },
+    # story #3821(customer-zero 실측, 페드루 PO 확定 2026-09-13, PR B) —
+    # approval_delivery.py::dispatch_approval_request_cards의 스레드 답글 문구.
+    # 그 파일 자신은 EXEMPT_FILES 대상이 아니라(verify_no_new_korean_user_
+    # strings.py) 새 한글 리터럴을 직접 못 심는다 — 이 신규 문구만 이 카탈로그를
+    # 경유한다(그 파일의 기존 문구들, 예: "'{title}' 결재 요청"은 그 가드 도입
+    # 前부터 있던 grandfather 항목이라 무변경). 이 소비처는 locale 협상이 없는
+    # 내부 시스템 챗 메시지라 항상 "ko"로만 호출한다 — en 값은 가드 1(ko/en 키
+    # 짝 무결성) 충족용.
+    "approval_delivery.reopen_reply": {
+        "ko": "다시 결재가 필요합니다",
+        "en": "Re-approval is needed",
+    },
 }
 
 

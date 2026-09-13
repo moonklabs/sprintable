@@ -326,7 +326,7 @@ async def maybe_create_stage_gate(
         await dispatch_approval_request_cards(
             db, org_id=org_id, work_item_type=work_item_type, work_item_id=work_item_id,
             project_id=project_id, title=neutral_facts["work_item_title"], gate_id=gate.id,
-            requester_id=requester_member_id, approver_ids=[approver_id],
+            gate_type=gate_type, requester_id=requester_member_id, approver_ids=[approver_id],
             designated_approver_id=approver_id,
         )
     except Exception:

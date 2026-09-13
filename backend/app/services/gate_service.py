@@ -1864,7 +1864,7 @@ async def dispatch_gate_delegation(
         # 기존 commit(이 함수의 원래 유일한 커밋)에서 같이 발화된다(별도 커밋 불요).
         await dispatch_approval_request_cards(
             session, org_id=gate.org_id, work_item_type=gate.work_item_type, work_item_id=gate.work_item_id,
-            project_id=project_id, title=title, gate_id=gate.id,
+            project_id=project_id, title=title, gate_id=gate.id, gate_type=gate.gate_type,
             requester_id=requester_id, approver_ids=[new_approver_id],
             designated_approver_id=new_approver_id,
         )

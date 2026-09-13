@@ -126,7 +126,7 @@ async def _notify_doc_approval_requested(
         from app.services.approval_delivery import dispatch_approval_request_cards
         await dispatch_approval_request_cards(
             session, org_id=org_id, work_item_type=DOC_GATE_WORK_ITEM_TYPE, work_item_id=doc.id,
-            project_id=doc.project_id, title=doc.title, gate_id=gate_id,
+            project_id=doc.project_id, title=doc.title, gate_id=gate_id, gate_type=DOC_GATE_TYPE,
             requester_id=requester_id, approver_ids=approver_ids,
             designated_approver_id=designated_approver_id,
         )
