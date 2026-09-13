@@ -1507,6 +1507,12 @@ jobs:
       - name: "Verify no hanja in i18n message values (story #3432 regression guard)"
         run: pnpm --filter web verify:no-hanja-in-i18n
 
+      # story #3824 AC1 회귀가드: ko.json 값에 작업 대화·구어체 말투(붙임·붙이(다)·딸깍)가
+      # 정본 문구로 새는 새 자리를 막는다. 그라운딩 시점 기존 8건은 AGENT_TONE_EXCEPTIONS로
+      # 그랜드파더(이관은 이 카드 범위 밖) — 새로 느는 자리만 실패시킨다(can-only-shrink).
+      - name: "Verify no agent-tone Korean UI text in i18n message values (story #3824 regression guard)"
+        run: pnpm --filter web verify:no-agent-tone-korean-ui-text
+
       # story #5ead8723 회귀가드: 코드가 참조하는 i18n 키(useTranslations/getTranslations
       # 바인딩별 리터럴 호출 — .rich/.raw/.has 포함)가 ko.json·en.json 둘 다에 말단 값으로
       # 실존해야 한다 — next-intl은 못 찾은 키를 화면에 그대로 그린다(코드 낱말 노출).
