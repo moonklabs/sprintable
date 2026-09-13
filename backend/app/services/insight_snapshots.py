@@ -166,6 +166,36 @@ async def list_insight_snapshots_for_publication(
     return list(rows)
 
 
+async def resolve_head_publication_id(db: AsyncSession, *, publication_id: uuid.UUID) -> uuid.UUID:
+    """story #3829(customer-zero 실측, 페드루 PO 確定 2026-09-13) — X 스레드(N≥2
+    세그먼트)는 ChannelPublication 1행=세그먼트 1개(gate_id+version_id 공유,
+    sequence로 구분)인데, insight 스냅샷은 항상 헤드(seq=1) 행에만 예약된다
+    (channel_posts.py::_publish_x_thread_draft "헤드 트윗만" 스펙) — 반면 draft
+    응답의 `publication_id`는 "마지막 발행"(가장 최근 published_at, 보통 마지막
+    세그먼트) 축이라 서로 다른 행을 가리킨다(channel_posts.py L1150-1163). 이
+    함수가 그 갭을 read 경로에서 메운다 — 어느 세그먼트 id로 물어도 같은
+    (gate_id, version_id) 그룹의 최소 sequence(헤드) 행 id로 해석한다. hosted_site
+    (SitePost, sequence 개념 자체가 없음)나 존재하지 않는 id는 원본 그대로 반환
+    (이 함수는 순수 해석만 — 존재/org 검증은 호출부 몫, resolve_publication_org_id
+    와 동일 분업)."""
+    from app.models.channel_publication import ChannelPublication
+
+    row = (await db.execute(
+        select(ChannelPublication.gate_id, ChannelPublication.version_id)
+        .where(ChannelPublication.id == publication_id)
+    )).first()
+    if row is None:
+        return publication_id
+    gate_id, version_id = row
+    head_id = (await db.execute(
+        select(ChannelPublication.id)
+        .where(ChannelPublication.gate_id == gate_id, ChannelPublication.version_id == version_id)
+        .order_by(ChannelPublication.sequence.asc())
+        .limit(1)
+    )).scalar_one_or_none()
+    return head_id if head_id is not None else publication_id
+
+
 async def resolve_publication_org_id(db: AsyncSession, *, publication_id: uuid.UUID) -> uuid.UUID | None:
     """story #3796(페드루 PO 確定 2026-09-10, 2차 CHANGES 2026-09-11) — 폴리모픽
     publication_id의 실 소유 org. 라우터가 스냅샷 0건일 때만 부른다 — 반환값이

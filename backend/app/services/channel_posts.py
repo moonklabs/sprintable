@@ -1139,6 +1139,7 @@ async def list_channel_post_drafts(
     latest_version_thread_pubs_by_gate: dict[uuid.UUID, list[ChannelPublication]] = {}
     published_pub_by_gate: dict[uuid.UUID, ChannelPublication] = {}
     published_version_ids: set[uuid.UUID] = set()
+    head_pub_id_by_gate_version: dict[tuple[uuid.UUID, uuid.UUID], uuid.UUID] = {}
     if gate_ids:
         # 배치 ③: 최신 버전의 publication 행 — sequence 오름차순으로 받아 그룹 전체를
         # 보존한다(story #3808 PR5b-2 — 예전엔 "아무 행이나 마지막에 덮어쓴 것"이
@@ -1152,7 +1153,12 @@ async def list_channel_post_drafts(
             .where(ChannelPublication.gate_id.in_(gate_ids))
             .order_by(ChannelPublication.sequence.asc())
         )).scalars().all()
+        # story #3829(customer-zero) — (gate_id, version_id) 그룹의 헤드(최소 sequence)
+        # 행 id. pub_rows가 이미 sequence 오름차순이라 setdefault로 그 첫 원소만 남는다
+        # (추가 쿼리 0 — insight_snapshots.py::resolve_head_publication_id와 같은 계산을
+        # 이 배치 목록 경로에서도 N+1 없이 재현).
         for p in pub_rows:
+            head_pub_id_by_gate_version.setdefault((p.gate_id, p.version_id), p.id)
             if latest_version_id_by_gate.get(p.gate_id) == p.version_id:
                 latest_version_pub_by_gate.setdefault(p.gate_id, p)
                 latest_version_thread_pubs_by_gate.setdefault(p.gate_id, []).append(p)
@@ -1235,9 +1241,14 @@ async def list_channel_post_drafts(
         newsletter_gate = (
             newsletter_gate_by_publication_id.get(published_pub.id) if published_pub else None
         )
+        # story #3829 — published_pub과 같은 (gate_id, version_id) 그룹의 헤드 id.
+        head_pub_id = (
+            head_pub_id_by_gate_version.get((published_pub.gate_id, published_pub.version_id))
+            if published_pub else None
+        )
         result.append((
             draft, latest_v, origin_v, gate, published_pub, latest_pub, published_body_sha256,
-            latest_command, latest_image, latest_thread_pubs, newsletter_gate,
+            latest_command, latest_image, latest_thread_pubs, newsletter_gate, head_pub_id,
         ))
     return result
 

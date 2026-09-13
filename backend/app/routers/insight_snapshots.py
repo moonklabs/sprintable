@@ -20,6 +20,7 @@ from app.services.i18n_catalog import t
 from app.services.insight_snapshots import (
     label_snapshot_offset,
     list_insight_snapshots_for_publication,
+    resolve_head_publication_id,
     resolve_publication_org_id,
     resolve_publication_published_at,
 )
@@ -91,6 +92,10 @@ async def _list_publication_insights_endpoint(
     같이 고쳤다)."""
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
+
+    # story #3829 — 어느 세그먼트 id로 물어도 그 스레드의 헤드(seq 1) 행으로 해석
+    # (스레드가 아니면 무변 — 자기 자신이 이미 헤드).
+    publication_id = await resolve_head_publication_id(db, publication_id=publication_id)
 
     rows = await list_insight_snapshots_for_publication(db, org_id=org_id, publication_id=publication_id)
     if not rows:
