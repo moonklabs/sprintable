@@ -71,25 +71,38 @@ function hasMergeBase(baseRef: string): boolean {
 
 // CI 첫 배선 시 실사고(2026-09-13, PR #4254): `git rev-parse --verify origin/develop`는
 // 얕은 체크아웃에서도 그 ref 자체가 (얕게) 존재하면 성공해버려 fetch를 건너뛰는데,
-// 그 얕은 ref가 HEAD와 공통 조상을 공유 못 할 만큼 얕으면(actions/checkout의 기본
-// fetch-depth) `git diff origin/develop...HEAD`가 "no merge base"로 죽는다 — ref
-// 존재가 아니라 **merge-base 존재**를 확인해야 한다. 못 찾으면 depth를 점점 넓혀
-// 재시도하고, 그래도 안 되면 마지막으로 unshallow.
+// 그 얕은 ref가 HEAD와 공통 조상을 공유 못 할 만큼 얕으면(actions/checkout 기본
+// fetch-depth=1) `git diff origin/develop...HEAD`가 "no merge base"로 죽는다 — ref
+// 존재가 아니라 **merge-base 존재**를 확인해야 한다.
+//
+// 로컬 재현(2026-09-13, `git clone --depth 1`)으로 확인한 두 가지:
+//  ① HEAD 자신도 얕으면(부모 커밋 자체가 없음) develop 쪽만 깊게 fetch해도 공통 조상을
+//     못 찾는다 — depth를 develop 쪽만 늘리는 건 부질없다(HEAD가 얕은 게 진짜 원인).
+//  ② `git fetch --unshallow <remote>`는 그 REPO를 만든 바로 그 remote로 해야 먹는다
+//     (다른 remote는 shallow 협상 기준이 안 맞아 무반응) — 원 shallow 체크아웃의 remote
+//     이름을 그대로 쓰면(실 CI에선 항상 origin) 전체 히스토리가 복구되고 merge-base가
+//     바로 풀린다(로컬 실측 2.4s, 이 repo 크기 기준 CI 부담 허용 범위).
+// 그래서: unshallow를 1차 시도(HEAD 쪽 얕음까지 함께 해결) → 그래도 안 되면(이미
+// unshallow인데 ref 자체가 없는 경우 등) 명시 목적지로 fetch해 ref를 확실히 만든다.
 function ensureBaseRefAvailable(baseRef: string): void {
   if (hasMergeBase(baseRef)) return;
   const [remote, branch] = baseRef.includes('/') ? baseRef.split(/\/(.+)/).slice(0, 2) : ['origin', baseRef];
-  for (const depth of [50, 200, 1000]) {
-    try {
-      execSync(`git fetch --depth=${depth} ${remote} ${branch}`, { cwd: REPO_ROOT, stdio: 'pipe' });
-    } catch {
-      // 네트워크/권한 문제일 수 있다 — 다음 depth 또는 unshallow로 계속 시도.
-    }
-    if (hasMergeBase(baseRef)) return;
-  }
   try {
     execSync(`git fetch --unshallow ${remote}`, { cwd: REPO_ROOT, stdio: 'pipe' });
   } catch {
-    // 이미 unshallow거나 fetch 실패 — 아래 최종 판정에서 걸러진다.
+    // 이미 unshallow(이 경우 정상 — shallow가 아니었다는 뜻)이거나 fetch 실패.
+  }
+  if (hasMergeBase(baseRef)) return;
+  // unshallow가 안 먹혔거나(이미 unshallow인데 그 ref 자체가 로컬에 없던 경우) 여전히
+  // 부족하면, 그 ref를 명시 목적지로 강제 생성/갱신(remote의 제한된 fetch refspec —
+  // 얕은 단일-브랜치 체크아웃 — 때문에 이름만으로 fetch해도 추적 ref가 안 생길 수 있다).
+  try {
+    execSync(`git fetch --depth=1000 ${remote} ${branch}:refs/remotes/${remote}/${branch}`, {
+      cwd: REPO_ROOT,
+      stdio: 'pipe',
+    });
+  } catch {
+    // 아래 최종 판정에서 걸러진다.
   }
   if (!hasMergeBase(baseRef)) {
     throw new Error(
