@@ -45,6 +45,25 @@ def anyio_backend():
 
 
 @pytest.fixture(autouse=True)
+def _enable_ghost_sandbox_adapter(monkeypatch):
+    """test_5b27b32f_sandbox_channel.py::_enable_sandbox_adapter·test_3523_generic_
+    channel_sandbox.py와 동형 관례 — CI destructive-schema job은 SANDBOX_CHANNEL_
+    ENABLED를 이 자리에 안 준다(로컬에서 셸 env로 줘도 CI 프로세스 시작 前 env와는
+    별개 — 실측으로 발견, shard(7) AttributeError('NoneType' object has no
+    attribute 'display_name')). env 파싱 자체는 그 두 파일의 subprocess 테스트가
+    이미 독립 검증하므로, 여기는 dict 직접 주입으로 우회(실 channel_adapters.py의
+    "ghost_sandbox" 선언값 그대로 복제 — 이 파일이 검증하는 건 라우팅/판정이지
+    어댑터 필드 값 자체가 아니다)."""
+    import app.services.channel_adapters as adapters_mod
+
+    ghost_sandbox_config = adapters_mod.ChannelAdapterConfig(
+        authorize_url="", token_url="", scope="", refresh_mode="manual",
+        credential_kind="none", display_name="Ghost Sandbox", kind="blog",
+    )
+    monkeypatch.setitem(adapters_mod.CHANNEL_ADAPTERS, "ghost_sandbox", ghost_sandbox_config)
+
+
+@pytest.fixture(autouse=True)
 async def _dispose_global_engine_after_test():
     yield
     from app.core.database import engine as _global_engine
