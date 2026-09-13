@@ -587,13 +587,45 @@ async def evaluate_merge_gate(
         gate.neutral_facts = {**(gate.neutral_facts or {}), **facts}
         await session.flush()
 
+    # 4. 정책 + 증거(CI/PR) + outcome trust 합성 decision.
+    decision, reason = _decide(
+        ci=ci,
+        pr=pr,
+        gate_status=gate.status,
+        outcome=outcome,
+        threshold=trust_threshold,
+        min_sample=MIN_OUTCOME_SAMPLE,
+        self_report_only=self_report_only,
+    )
+    # H1-FIX-1: decision 메타(S3 evidence 컬럼)를 gate row에 write-back — 모든 호출자(S4 report-done·
+    # S5 board preflight)가 영속화한다. 재평가 시 동일 키로 멱등 갱신. (이전엔 MergeGateDecision 리턴엔
+    # 있으나 gate row 영속화 0 → FE S8이 null을 읽어 GateInbox 액션 미노출 = dogfood 적발 버그.)
+    gate.requires_human = decision != AUTO_MERGE
+    set_gate_evidence_status(gate, _evidence_status(decision), now=datetime.now(timezone.utc))
+    gate.decision_basis = reason
+    gate.auto_decision_reason = decision
+
     # story #2118(E-DG-REAL ②) — doc.py의 dispatch_approval_request_cards(#2604) 패턴을 merge
-    # gate까지 확장: 이 호출에서 gate가 «방금» pending이 된 경우만(_prior_status와 비교, 위 주석
-    # 참조) 승인자별 1:1 DM에 카드를 배달한다. 승인 자격자 = project owner/admin(project_id
-    # 해소 실패 시 org owner/admin — project_auth.list_gate_approver_ids, gates.py
-    # _non_doc_gate_approvable과 동일 규칙). 카드 배달 자체는 best-effort(project_auth 조회
-    # 실패가 게이트 생성/decision을 막지 않음) — doc.py와 동일 관례.
-    if gate.status == "pending" and _prior_status != "pending":
+    # gate까지 확장: 승인자별 1:1 DM에 카드를 배달한다. 승인 자격자 = project owner/admin
+    # (project_id 해소 실패 시 org owner/admin — project_auth.list_gate_approver_ids,
+    # gates.py _non_doc_gate_approvable과 동일 규칙). 카드 배달 자체는 best-effort(project_
+    # auth 조회 실패가 게이트 생성/decision을 막지 않음) — doc.py와 동일 관례.
+    #
+    # story #3821(customer-zero 실측, 페드루 PO 확定 2026-09-13) — 이 블록은 원래 `_decide()`
+    # 호출(§4) *前*에 있었다: `gate.status`(create_gate 시점 정책 disposition 스냅샷 —
+    # auto_passed|pending|rejected)만 보고 즉시 배달을 실행했는데, 그 直後(§4) `_decide()`가
+    # **CI/trust 등 실시간 증거로 별도로** decision(auto_merge|ask_human|block)을 산출한다(두
+    # 축이 다르다는 것은 카디르 QA PR#2902②·#2156이 이미 고정한 구분 — 위 anchor 주석 참고).
+    # 즉 정책 스냅샷은 "일단 사람에게 물어봐"(pending)였는데, 방금 들어온 CI 증거로 `_decide()`
+    # 가 AUTO_MERGE를 내는 경우에도 그 판정이 나오기 前에 이미 카드가 나갔다 — "물어볼 필요가
+    # 없다"고 곧 판정 날 결정에도 사람이 먼저 pinging되는 실 결함(customer-zero: 선생님 채널
+    # 하루 11건 소음의 일부, story #3821). 처방: `_decide()` 뒤로 옮기고 판단 축 자체를
+    # `gate.status`(정책 스냅샷)에서 `decision`(실 증거 판정)으로 바꾼다 — ASK_HUMAN일 때만
+    # 배달(AUTO_MERGE·BLOCK은 카드 0, 후자는 "이미 결론 난 거부"라 승인 액션 자체가 무의미).
+    # `_prior_status != "pending"` 중복방지 축은 그대로 유지(같은 슬롯 반복 평가 재배달 금지 —
+    # 이 축은 "정책이 방금 pending으로 전이했나"가 아니라 "이 gate 슬롯이 이미 열려 있었나"를
+    # 재는 것이라 판단 축 교체와 무관하게 유효).
+    if decision == ASK_HUMAN and _prior_status != "pending":
         try:
             from app.models.pm import Story
             from app.services.approval_delivery import dispatch_approval_request_cards
@@ -614,24 +646,6 @@ async def evaluate_merge_gate(
             logger.warning(
                 "merge gate 승인요청 카드 배달 실패 story=%s gate=%s", story_id, gate.id, exc_info=True,
             )
-
-    # 4. 정책 + 증거(CI/PR) + outcome trust 합성 decision.
-    decision, reason = _decide(
-        ci=ci,
-        pr=pr,
-        gate_status=gate.status,
-        outcome=outcome,
-        threshold=trust_threshold,
-        min_sample=MIN_OUTCOME_SAMPLE,
-        self_report_only=self_report_only,
-    )
-    # H1-FIX-1: decision 메타(S3 evidence 컬럼)를 gate row에 write-back — 모든 호출자(S4 report-done·
-    # S5 board preflight)가 영속화한다. 재평가 시 동일 키로 멱등 갱신. (이전엔 MergeGateDecision 리턴엔
-    # 있으나 gate row 영속화 0 → FE S8이 null을 읽어 GateInbox 액션 미노출 = dogfood 적발 버그.)
-    gate.requires_human = decision != AUTO_MERGE
-    set_gate_evidence_status(gate, _evidence_status(decision), now=datetime.now(timezone.utc))
-    gate.decision_basis = reason
-    gate.auto_decision_reason = decision
 
     # story #2813(카디르 R3 HIGH) — anchor는 **실 판정이 AUTO_MERGE일 때만** 확定한다.
     # ⛔최초 fix는 `gate.status == "auto_passed"`(정책 disposition 축) 시점에 찍었는데, 그건
