@@ -79,3 +79,29 @@ describe('TABS — story #2279 회귀가드', () => {
     }
   });
 });
+
+// story #3824 CHANGES②(페드루 PO 確定 2026-09-13 09:01Z, 카디르 QA 실측 09:49Z 후속) —
+// 렌더 텍스트 대조(mobile-tab-bar-badge.test.tsx)만으론 "labelKey 자체를 공유한다"는
+// 재발방지 취지를 구조적으로 못 잠근다(카디르 뮤테이션: namespace/labelKey를 옛
+// mobileTabBar.now/chat로 되돌려도 그 파일의 27개 테스트가 그대로 GREEN이었다 — 렌더
+// 텍스트 대조가 실은 이 축을 안 지나가는 경로로도 통과할 여지가 있었다는 뜻). 이 스위트는
+// TABS 데이터 자체의 namespace·labelKey 필드를 직접 잠가 "같은 키를 쓴다"를 구조로 고정한다.
+describe('TABS — story #3824 CHANGES② labelKey 공유 회귀가드(재발 방지, 카디르 QA 후속)', () => {
+  it('⭐now·chat 탭은 nav 네임스페이스의 zoneNow·chats를 그대로 공유한다(문구 값이 아니라 labelKey 자체)', () => {
+    const nowTab = TABS.find((t) => t.key === 'now');
+    const chatTab = TABS.find((t) => t.key === 'chat');
+    expect(nowTab?.namespace).toBe('nav');
+    expect(nowTab?.labelKey).toBe('zoneNow');
+    expect(chatTab?.namespace).toBe('nav');
+    expect(chatTab?.labelKey).toBe('chats');
+  });
+
+  it('approvals·more 탭은 그대로 mobileTabBar 자기 네임스페이스다(「결재」는 모바일 IA 통합 후속 카드 스코프)', () => {
+    const approvalsTab = TABS.find((t) => t.key === 'approvals');
+    const moreTab = TABS.find((t) => t.key === 'more');
+    expect(approvalsTab?.namespace).toBe('mobileTabBar');
+    expect(approvalsTab?.labelKey).toBe('approvals');
+    expect(moreTab?.namespace).toBe('mobileTabBar');
+    expect(moreTab?.labelKey).toBe('more');
+  });
+});
