@@ -25,7 +25,9 @@ export function BusinessInfoDisclosure() {
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         aria-controls={panelId}
-        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sidebar-foreground/60 transition hover:bg-sidebar-accent hover:text-sidebar-foreground"
+        // 3826-pre — text-sidebar-foreground/60(알파 합성) → solid text-muted-foreground.
+        // v3 ink 재조정 후 실 대비 미달 실측(#777776/#ffffff=4.49:1, 순백 사이드바 배경).
+        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-muted-foreground transition hover:bg-sidebar-accent hover:text-sidebar-foreground"
       >
         <Building2 className="size-4 shrink-0" />
         <span className="flex-1 truncate text-xs">{t('businessInfoHeading')}</span>
@@ -35,8 +37,8 @@ export function BusinessInfoDisclosure() {
         <div id={panelId} className="max-h-[45vh] overflow-y-auto px-2 py-2">
           <BusinessInfoList />
           <div className="mt-2 border-t border-sidebar-border/60 pt-2">
-            <p className="mb-1 text-[10px] font-medium text-sidebar-foreground/60">{t('policiesHeading')}</p>
-            <LegalLinks className="text-xs text-sidebar-foreground/60" />
+            <p className="mb-1 text-[10px] font-medium text-muted-foreground">{t('policiesHeading')}</p>
+            <LegalLinks className="text-xs text-muted-foreground" />
           </div>
         </div>
       )}

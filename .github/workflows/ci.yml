@@ -1626,6 +1626,11 @@ jobs:
       - name: "Verify no closed-family subtle alpha bg re-entry (story #2420 AC4/AC6 — destructive)"
         run: pnpm --filter web verify:no-subtle-alpha-bg
 
+      # story #3826-pre 회귀가드 — text-*foreground/N(알파 합성 텍스트) 재유입 0(신규만,
+      # 기존 26개 파일은 GRANDFATHER_BASELINE). 3826이 --proof-ink 재조정으로 이 패턴이
+      # 실 브라우저 axe color-contrast를 깬 것을 발견(tabs.tsx·사이드바 컴포넌트 6곳 수정).
+      - name: "Verify no new alpha-composited text-*foreground (story #3826-pre)"
+        run: pnpm --filter web verify:no-new-alpha-text-foreground
 
       # story #2371 회귀가드: `scripts/check-i18n-keys.js`(code→messages missing-key 축)를
       # 처음으로 CI에 건다 — 이전엔 CI/husky/package.json 어디에도 안 걸려 있었고 손으로

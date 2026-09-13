@@ -78,7 +78,8 @@ export function ProfileMenu({ name, avatarUrl, triggerClassName }: ProfileMenuPr
       <DropdownMenuTrigger className={triggerClassName ?? 'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition hover:bg-sidebar-accent'}>
         <Avatar url={triggerAvatar} label={triggerName} className="size-7" />
         <span className={cn('min-w-0 flex-1 truncate text-sm font-medium', triggerClassName ? 'text-foreground' : 'text-sidebar-foreground')}>{triggerName}</span>
-        <ChevronsUpDown className={cn('size-3.5 shrink-0', triggerClassName ? 'text-muted-foreground' : 'text-sidebar-foreground/60')} />
+        {/* 3826-pre — 알파 합성(text-sidebar-foreground/60) → solid text-muted-foreground. */}
+        <ChevronsUpDown className={cn('size-3.5 shrink-0', 'text-muted-foreground')} />
       </DropdownMenuTrigger>
       <DropdownMenuContent side="top" align="start" className="w-64">
         <DropdownMenuGroup>
