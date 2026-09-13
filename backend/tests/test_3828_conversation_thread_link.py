@@ -450,6 +450,146 @@ async def test_list_conversations_by_work_item_org_isolation_realdb():
         await engine.dispose()
 
 
+async def test_list_conversations_by_work_item_excludes_conversation_caller_not_in_realdb():
+    """페드루 PO 리뷰 CHANGES(PR #4253) — 같은 org 소속이어도 캐폴러가 참여자가
+    아닌 대화(태그된 DM 등)는 새면 안 된다(403 죽은 링크·DM 존재 노출 방지)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_member(s, org.id, project.id)
+            other_id, _ = await _make_member(s, org.id, project.id, name="other")
+            # 캐폴러는 참여하지 않는 같은 org 내 다른 DM.
+            other_conv = await _make_conversation(s, org.id, project.id, member_ids=[other_id])
+            work_item_id = uuid.uuid4()
+            await _make_conversation_message(
+                s, other_conv.id, other_id,
+                msg_metadata={"work_item": {"type": "story", "id": str(work_item_id)}},
+            )
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            resp = await client.get(
+                "/api/v2/conversations/by-work-item",
+                params={"work_item_type": "story", "work_item_id": str(work_item_id)},
+            )
+            assert resp.status_code == 200, resp.text
+            assert resp.json() == [], "캐폴러가 참여 안 한 같은 org의 대화가 새면 안 된다"
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+async def test_today_needs_me_conversation_id_null_when_caller_not_participant_realdb():
+    """페드루 PO 리뷰 CHANGES(PR #4253) — needs_me 행도 같은 원칙: 태그된 conversation에
+    캐폴러가 참여자가 아니면 conversation_id는 null(존재 노출 금지)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id, )
+            caller_id, caller_user_id = await _make_member(s, org.id, project.id, org_role="owner")
+            other_id, _ = await _make_member(s, org.id, project.id, name="other")
+
+            from app.models.pm import Story
+            from app.models.workflow_line import WorkflowLineStepRun, WorkflowLineStepApproval
+
+            story = Story(id=uuid.uuid4(), org_id=org.id, project_id=project.id, title="승인 대상2", status="in-progress")
+            s.add(story)
+            await s.commit()
+            run_row = WorkflowLineStepRun(
+                id=uuid.uuid4(), org_id=org.id, project_id=project.id,
+                entity_type="story", entity_id=story.id,
+                from_status="in-review", to_status="done", status="pending", mode="enforcing",
+                effective_gate_type="qa", correlation_id=uuid.uuid4(), transition_id=uuid.uuid4().hex,
+            )
+            s.add(run_row)
+            await s.commit()
+            approval = WorkflowLineStepApproval(
+                id=uuid.uuid4(), org_id=org.id, project_id=project.id,
+                step_run_id=run_row.id, approval_group_id=uuid.uuid4(),
+                approver_member_id=caller_id, approver_member_type="human",
+                kind="approver", blocking=True, status="pending",
+            )
+            s.add(approval)
+            await s.commit()
+
+            # 캐폴러가 참여하지 않는 대화에 같은 story를 태그(예: 제3자 DM에서 언급).
+            other_conv = await _make_conversation(s, org.id, project.id, member_ids=[other_id])
+            await _make_conversation_message(
+                s, other_conv.id, other_id,
+                msg_metadata={"work_item": {"type": "story", "id": str(story.id)}},
+            )
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            resp = await client.get("/api/v2/today")
+            assert resp.status_code == 200, resp.text
+            items = resp.json()["needs_me"]
+            item = next(i for i in items if i["work_item"]["id"] == str(story.id))
+            assert item["conversation_id"] is None, "캐폴러가 참여 안 한 대화 id가 새면 안 된다"
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+async def test_today_agent_progress_conversation_id_null_when_caller_not_participant_realdb():
+    """페드루 PO 리뷰 CHANGES(PR #4253) — agent_progress 행도 같은 원칙."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_member(s, org.id, project.id)
+            agent_id, _ = await _make_member(s, org.id, project.id, type_="agent", name="에이전트")
+            other_id, _ = await _make_member(s, org.id, project.id, name="other")
+            # run의 conversation은 캐폴러 없이 다른 사람만 참여.
+            other_conv = await _make_conversation(s, org.id, project.id, member_ids=[other_id, agent_id])
+
+            from app.models.pm import Story
+            from app.models.agent_run import AgentRun
+
+            story = Story(
+                id=uuid.uuid4(), org_id=org.id, project_id=project.id, title="위임된 일2",
+                status="in-progress", assignee_id=caller_id,
+            )
+            s.add(story)
+            await s.commit()
+            run = AgentRun(
+                id=uuid.uuid4(), org_id=org.id, project_id=project.id, agent_id=agent_id,
+                story_id=story.id, status="running", conversation_id=other_conv.id,
+            )
+            s.add(run)
+            await s.commit()
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            resp = await client.get("/api/v2/today")
+            assert resp.status_code == 200, resp.text
+            progress = resp.json()["agent_progress"]
+            assert len(progress) == 1
+            assert progress[0]["conversation_id"] is None, "캐폴러가 참여 안 한 대화 id가 새면 안 된다"
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
 async def test_list_conversations_by_work_item_returns_most_recent_first_realdb():
     """AC4 — 여러 conversation이 같은 work_item을 태그했으면 가장 최근 태그 순."""
     from app.main import app

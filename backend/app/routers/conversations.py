@@ -1594,27 +1594,36 @@ async def list_conversations_by_work_item(
     limit: int = Query(default=20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
-    _auth: AuthContext = Depends(get_current_user),
+    auth: AuthContext = Depends(get_current_user),
 ) -> list[ConversationByWorkItemItem]:
     """story #3828(UX-v3·대화·BE 1, 페드루 PO 確定 2026-09-13) — 「이 work_item(story·
     doc 등)을 얘기하는 conversation」 조회. `send_message()`의 `work_item` 태그
     (msg_metadata['work_item'], approval_target과 동형 JSONB 패턴 — story #3821의
     (work_item_type, work_item_id) 축 재사용)를 단 메시지가 있는 conversation을
-    org 격리(다른 org의 태그는 안 보임)·최근순(그 work_item을 가리킨 가장 최근
-    메시지 시각)으로 반환한다. 태그된 메시지가 0건이면 빈 배열(지어내지 않는다).
+    최근순(그 work_item을 가리킨 가장 최근 메시지 시각)으로 반환한다. 태그된
+    메시지가 0건이면 빈 배열(지어내지 않는다).
 
-    ⚠️캐폴러의 참여 여부는 안 본다(list_conversations의 참여자 스코프와는 다른
-    축) — 이 route는 "그 일이 어느 방에서 논의됐나"를 answer하는 순수 조회고,
-    캐폴러 access는 org 경계까지만(같은 org 멤버는 서로의 conversation 존재를
-    이 축에서는 볼 수 있다 — 메시지 본문은 안 실림, id/title/type만)."""
+    페드루 PO 리뷰 CHANGES(PR #4253) — 최초 구현은 org 경계까지만 보고 캐폴러의
+    참여 여부를 안 봤다. 이 route의 소비처(「오늘」 행의 "관련 대화" 링크)는
+    «클릭하면 여는 대화»라 참여 안 한 대화(특히 DM)가 새면 403 죽은 링크이자
+    "이 DM이 존재한다"는 사실 자체의 노출이다 — `list_conversations`와 같은
+    참여 술어(`ConversationParticipant.member_id == 캐폴러`)로 좁힌다. org
+    전체 태그 존재 조회(참여 무관)는 다른 질문이라 이 route의 축이 아니다(필요해
+    지면 별도 이름의 route로, 이 자리에서 슬쩍 겸하지 않는다)."""
+    caller = await _resolve_member(auth, org_id, db)
     subq = (
         select(
             ConversationMessage.conversation_id,
             func.max(ConversationMessage.created_at).label("last_tagged_at"),
         )
         .join(Conversation, Conversation.id == ConversationMessage.conversation_id)
+        .join(
+            ConversationParticipant,
+            ConversationParticipant.conversation_id == ConversationMessage.conversation_id,
+        )
         .where(
             Conversation.org_id == org_id,
+            ConversationParticipant.member_id == caller.id,
             ConversationMessage.msg_metadata["work_item"]["type"].astext == work_item_type,
             ConversationMessage.msg_metadata["work_item"]["id"].astext == str(work_item_id),
         )
