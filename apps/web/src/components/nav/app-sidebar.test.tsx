@@ -146,6 +146,25 @@ describe('AppSidebar — story #3824 5항목 축소 렌더 회귀가드(UX-v3·F
     });
   });
 
+  // story #3824 CHANGES①(페드루 PO 確定, 2026-09-13 09:01Z, PR#4251 캡처 리뷰) — 정본
+  // 순서는 오늘→대화→일감→결과→연결·규칙(「오늘」=첫 화면). 「대화」(챗 center)는
+  // NAV_GROUPS 밖 1급이라 위 그룹 순서 대조(sidebar-group 축)엔 안 잡힌다 — DOM 내
+  // 링크 등장 순서로 직접 잰다. 처음엔 챗 center가 SidebarHeader 바로 뒤(오늘보다
+  // 먼저) 렌더돼 이 순서를 어겼다(실측·PO 지적으로 발견).
+  it('「대화」가 「오늘」보다 뒤·「일감」보다 앞에 온다(DOM 등장 순서, CHANGES① 회귀가드)', async () => {
+    expandAllGroups();
+    await mount();
+    const links = [...container.querySelectorAll('a')];
+    const todayIndex = links.findIndex((a) => a.textContent?.includes('오늘'));
+    const chatsIndex = links.findIndex((a) => a.textContent?.includes('대화'));
+    const workIndex = links.findIndex((a) => a.textContent?.includes('일감'));
+    expect(todayIndex).toBeGreaterThanOrEqual(0);
+    expect(chatsIndex).toBeGreaterThanOrEqual(0);
+    expect(workIndex).toBeGreaterThanOrEqual(0);
+    expect(todayIndex).toBeLessThan(chatsIndex);
+    expect(chatsIndex).toBeLessThan(workIndex);
+  });
+
   it('정적 항목(연결·규칙 그룹)의 href가 무변화다(path 전부 불변)', async () => {
     expandAllGroups();
     await mount();

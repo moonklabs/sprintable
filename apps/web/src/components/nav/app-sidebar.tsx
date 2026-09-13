@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
@@ -305,6 +305,41 @@ export function AppSidebar({
     return () => { for (const unsub of unsubs) unsub(); };
   }, [mux]);
 
+  // story #2930(P0-G) I2, doc ia-4zone-redesign-2930 — 챗 「center(중심 꽃)」. 4구역
+  // «밖» 1급으로 승격(선생님 확定) — NAV_GROUPS 순회에 안 실린다(구역에 묻으면 강등이라는
+  // 게 이 승격의 요점). 시안 아티팩트(6242dffb .chatc) 그대로: 상시 blue-soft 카드,
+  // active/inactive로 톤이 안 바뀐다(항상 눈에 띄어야 하는 1급 자리라 일반 nav 항목의
+  // "현재 페이지만 강조" 관례를 안 따름 — 시안에도 active 변형이 없다).
+  // story #3824 CHANGES①(페드루 PO 確定, 2026-09-13 09:01Z) — 정본 순서는 오늘→대화→
+  // 일감→결과→연결·규칙(「오늘」=첫 화면). NAV_GROUPS는 계속 "구역 밖 1급"이라 순회
+  // 대상은 아니지만(승격 자체는 무변경), 렌더 위치만 옮겨 NAV_GROUPS[0](오늘) 바로
+  // 뒤·NAV_GROUPS[1](일감) 앞에 서게 한다 — 이 변수를 아래 SidebarContent map 안,
+  // 첫 그룹 뒤에 삽입한다.
+  const chatCenterCard = (
+    <div className="mx-2.5 mt-2">
+      <Link
+        href={CHAT_CENTER_ITEM.path}
+        // story #3054(2984-S6) — GATE_BUTTON_TONE.primary(proof-capsule.tsx)와 동형으로
+        // 헤어라인+elev 채택, bg-proof-blue-soft 채움 폐지. hover는 이제 solid 전환 대신
+        // bg-sidebar-accent(기존 다른 nav 항목의 hover 관례와 정합) — AA 대비 이슈였던
+        // hover:text-white/sidebar-primary-foreground 분기 자체가 불필요해졌다.
+        className="flex items-center gap-2 rounded-[9px] border border-proof-blue bg-transparent px-2.5 py-2 text-proof-blue shadow-[var(--elev-card)] transition hover:bg-sidebar-accent"
+      >
+        <MessageSquare className="size-[18px] shrink-0" />
+        <span className="flex-1 truncate text-[13px] font-bold">{t(CHAT_CENTER_ITEM.labelKey)}</span>
+        {/* text-white 대신 sidebar-primary-foreground(다크에서 근흑색 — 수동 대비 확認,
+            4.61 라이트·4.81 다크는 카드 톤이고 이 자리는 solid pill이라 별도 확認 필요했다:
+            bg-proof-blue+text-white는 다크에서 3.21로 AA 미달. sidebar-primary-foreground는
+            sidebar-primary(=proof-blue)와 짝으로 설계된 토큰이라 이 자리에 맞다). */}
+        {chatUnreadTotal > 0 ? (
+          <span className="shrink-0 rounded-full bg-sidebar-primary px-1.5 py-0.5 text-[9px] font-bold text-sidebar-primary-foreground">
+            {chatUnreadTotal > 99 ? '99+' : chatUnreadTotal}
+          </span>
+        ) : null}
+      </Link>
+    </div>
+  );
+
   return (
     <Sidebar variant="inset" collapsible="offcanvas">
       <SidebarHeader className="py-3">
@@ -329,34 +364,6 @@ export function AppSidebar({
         </button>
       </SidebarHeader>
 
-      {/* story #2930(P0-G) I2, doc ia-4zone-redesign-2930 — 챗 「center(중심 꽃)」. 4구역
-          «밖» 1급으로 승격(선생님 확定) — NAV_GROUPS 순회에 안 실린다(구역에 묻으면 강등이라는
-          게 이 승격의 요점). 시안 아티팩트(6242dffb .chatc) 그대로: 상시 blue-soft 카드,
-          active/inactive로 톤이 안 바뀐다(항상 눈에 띄어야 하는 1급 자리라 일반 nav 항목의
-          "현재 페이지만 강조" 관례를 안 따름 — 시안에도 active 변형이 없다). */}
-      <div className="mx-2.5 mt-2">
-        <Link
-          href={CHAT_CENTER_ITEM.path}
-          // story #3054(2984-S6) — GATE_BUTTON_TONE.primary(proof-capsule.tsx)와 동형으로
-          // 헤어라인+elev 채택, bg-proof-blue-soft 채움 폐지. hover는 이제 solid 전환 대신
-          // bg-sidebar-accent(기존 다른 nav 항목의 hover 관례와 정합) — AA 대비 이슈였던
-          // hover:text-white/sidebar-primary-foreground 분기 자체가 불필요해졌다.
-          className="flex items-center gap-2 rounded-[9px] border border-proof-blue bg-transparent px-2.5 py-2 text-proof-blue shadow-[var(--elev-card)] transition hover:bg-sidebar-accent"
-        >
-          <MessageSquare className="size-[18px] shrink-0" />
-          <span className="flex-1 truncate text-[13px] font-bold">{t(CHAT_CENTER_ITEM.labelKey)}</span>
-          {/* text-white 대신 sidebar-primary-foreground(다크에서 근흑색 — 수동 대비 확認,
-              4.61 라이트·4.81 다크는 카드 톤이고 이 자리는 solid pill이라 별도 확認 필요했다:
-              bg-proof-blue+text-white는 다크에서 3.21로 AA 미달. sidebar-primary-foreground는
-              sidebar-primary(=proof-blue)와 짝으로 설계된 토큰이라 이 자리에 맞다). */}
-          {chatUnreadTotal > 0 ? (
-            <span className="shrink-0 rounded-full bg-sidebar-primary px-1.5 py-0.5 text-[9px] font-bold text-sidebar-primary-foreground">
-              {chatUnreadTotal > 99 ? '99+' : chatUnreadTotal}
-            </span>
-          ) : null}
-        </Link>
-      </div>
-
       <SidebarContent className="scrollbar-visible">
         {/* story #2681 — 데스크톱 GNB와 모바일 /more 허브(S2)가 한 정의(NAV_GROUPS)에서
             파생된다(doc mobile-ia-full-completion-2678 §2.5-3). 그룹·항목 목록 자체는
@@ -368,7 +375,7 @@ export function AppSidebar({
             전역 스크롤바 숨김(#2165)까지 겹쳐 신뢰 아래 구역이 스크롤 가능한데도 "없다"로
             보였다(그라운딩: org/role 무관 재현 — CSS overflow affordance 결함, 컨텍스트
             문제 아님). .scrollbar-visible은 story #2528과 동일한 기존 옵트인 패턴. */}
-        {NAV_GROUPS.map((group) => {
+        {NAV_GROUPS.map((group, groupIndex) => {
           // story #d986fd6c(IA·S4) — 라벨 없는 유틸 그룹(설정)은 접기 대상이 아니다(항목
           // 1개뿐이라 접어 봤자 얻는 게 없고, ia-4zone 확定이 이미 "라벨 없는 유틸 그룹"
           // 으로 못박아 뒀다 — 헤더 자체가 없으니 토글할 자리도 없다).
@@ -383,7 +390,8 @@ export function AppSidebar({
             ? t('groupExpand', { group: groupLabel })
             : t('groupCollapse', { group: groupLabel });
           return (
-          <SidebarGroup key={group.id}>
+          <Fragment key={group.id}>
+          <SidebarGroup>
             {group.labelKey ? (
               <SidebarGroupLabel
                 render={
@@ -439,6 +447,11 @@ export function AppSidebar({
             </SidebarGroupContent>
             ) : null}
           </SidebarGroup>
+          {/* story #3824 CHANGES①(페드루 PO 確定) — 「대화」 챗 center를 「오늘」(항상
+              groupIndex 0) 바로 뒤·「일감」 앞에 삽입. 구역 밖 1급 승격 자체는 무변경 —
+              렌더 «위치»만 옮긴다. */}
+          {groupIndex === 0 ? chatCenterCard : null}
+          </Fragment>
           );
         })}
       </SidebarContent>

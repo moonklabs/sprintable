@@ -71,9 +71,7 @@
   },
   "mobileTabBar": {
     "navLabel": "모바일 탭 내비게이션",
-    "now": "지금",
     "approvals": "결재",
-    "chat": "채팅",
     "more": "전체",
     "approvalsPendingSr": "대기 {count}건",
     "approvalsPendingSrCapped": "대기 9건 이상",

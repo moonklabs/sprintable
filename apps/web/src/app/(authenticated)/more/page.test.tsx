@@ -147,11 +147,11 @@ describe('MorePage — story #fddd0e6b(IA ⑦ 전체 메뉴)', () => {
     expect(membersLink?.textContent).toContain('사람과 에이전트 명단');
   });
 
-  it('⭐탭 문장은 useIsMobile() true일 때만 서고, 나올 땐 nav 이름 셋+탭 이름 셋을 조립한다(AC1②) — story #3824 nav.chats 개명(채팅→대화)에 맞춰 조사도 은→는', async () => {
+  it('⭐탭 문장은 useIsMobile() true일 때만 서고, 나올 땐 nav 이름 셋+탭 이름 셋을 조립한다(AC1②) — story #3824 CHANGES②: 탭 이름 中 「오늘」·「대화」는 nav.zoneNow·nav.chats와 같은 labelKey 공유(「결재」만 mobileTabBar 자기 키)', async () => {
     isMobileMock = true;
     await mount();
     const hint = container.querySelector('[data-testid="more-tab-hint"]');
-    expect(hint?.textContent).toBe('보드·알림·대화는 아래 「지금」·「결재」·「채팅」 탭에 있어 여기엔 없습니다');
+    expect(hint?.textContent).toBe('보드·알림·대화는 아래 「오늘」·「결재」·「대화」 탭에 있어 여기엔 없습니다');
   });
 
   it('⭐데스크톱 폭(useIsMobile() false)에선 탭 문장이 아예 없다(탭 바 자체가 없어 거짓이 되므로)', async () => {

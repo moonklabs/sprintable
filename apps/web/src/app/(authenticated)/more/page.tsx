@@ -95,7 +95,12 @@ export default function MorePage() {
               board: t('board'), inbox: t('inbox'), chats: t('chats'),
               // story #3824 — nav.chats 값이 바뀌어도(받침 유무 무관) 항상 맞는 조사.
               particle: pickEunNeunJosa(t('chats')),
-              now: tMore('now'), approvals: tMore('approvals'), chat: tMore('chat'),
+              // story #3824 CHANGES②(페드루 PO 確定, 2026-09-13 09:01Z) — "같은 사실=같은
+              // 낱말": 바텀 탭 「지금」·「채팅」과 허브 「오늘」·「대화」는 같은 두 화면을
+              // 가리키므로 문구 값이 아니라 labelKey 자체를 공유한다(nav.zoneNow·nav.chats
+              // — mobile-tab-bar.tsx의 TABS도 이제 이 두 키를 그대로 쓴다). 「결재」 탭은
+              // 모바일 IA 통합 후속 카드 스코프라 tMore('approvals') 그대로.
+              now: t('zoneNow'), approvals: tMore('approvals'), chat: t('chats'),
             })}
           </p>
         ) : null}

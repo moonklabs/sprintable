@@ -71,9 +71,7 @@
   },
   "mobileTabBar": {
     "navLabel": "Mobile tab navigation",
-    "now": "Now",
     "approvals": "Approvals",
-    "chat": "Chat",
     "more": "More",
     "approvalsPendingSr": "{count, plural, one {# pending approval} other {# pending approvals}}",
     "approvalsPendingSrCapped": "9 or more pending approvals",
