@@ -168,7 +168,8 @@ async def test_draft_response_exposes_head_publication_id_realdb():
                 .where(ChannelPublication.gate_id == gate_id, ChannelPublication.version_id == version.id)
                 .order_by(ChannelPublication.sequence)
             )).scalars().all())
-            head_id, last_id = rows[0].id, rows[2].id
+            head_id = rows[0].id
+            all_row_ids = {str(r.id) for r in rows}
 
         async def _db():
             async with Session() as s2:
@@ -189,13 +190,14 @@ async def test_draft_response_exposes_head_publication_id_realdb():
             resp = await client.get(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}")
             assert resp.status_code == 200, resp.text
             body = resp.json()
-            # story #3525 축(publication_id="마지막 발행")은 이 PR의 관심사가 아니다 —
-            # 한 호출 안에서 세그먼트 전부가 같은 published_at을 공유하면(이 픽스처처럼
-            # 시간차 없는 클린 3/3 발행) "마지막" 판정 자체가 동률이라 어느 행이 뽑히든
-            # 기존 계약 그대로다(무변 확인은 "3행 중 하나"까지만, 그 이상은 story #3525의
-            # 몫). 이 PR이 실제로 새로 보장하는 것은 head_publication_id뿐.
-            all_ids = {str(head_id), str(last_id)}
-            assert body["publication_id"] in all_ids or body["publication_id"] is not None
+            # 페드루 PO 리뷰 CHANGES(PR #4252) — story #3525 축(publication_id="마지막
+            # 발행")은 이 PR의 관심사가 아니다. 한 호출 안에서 세그먼트 전부가 같은
+            # published_at을 공유하면(이 픽스처처럼 시간차 없는 클린 3/3 발행) "마지막"
+            # 판정 자체가 동률이라 어느 행이 뽑히든 기존 계약 그대로다 — 무변 확인은
+            # "이 스레드의 3행 중 하나"로 좁힌다(항상 참인 `or ... is not None` 제거,
+            # 그 이상은 story #3525의 몫). 이 PR이 실제로 새로 보장하는 것은
+            # head_publication_id뿐(아래).
+            assert body["publication_id"] in all_row_ids
             assert body["head_publication_id"] == str(head_id), (
                 "head_publication_id는 published_at 동률과 무관하게 항상 seq=1이어야 한다"
             )
