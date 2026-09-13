@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { MessageSquare, Users } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -320,6 +320,13 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   // story #3783 — "불러오는 중…", common ns의 기존 loading 키 재사용.
   const tc = useTranslations('common');
   const router = useRouter();
+  // story #3831(UX-v3·FE 3·오늘, 페드루 PO 確定(c) 2026-09-13 14:04Z) — 「오늘」 화면 하단
+  // "지시 한 줄"이 보내면 여기(`/chats?compose=<text>`)로 옮겨 온다. 새 수신자 규칙은
+  // 지어내지 않는다(전송 대상 규칙은 후속 카드) — 대신 기존 두 경로만 재사용: 대화가
+  // 있으면 가장 최근 대화의 기존 프리필 기전(chat-input.tsx의 prefillCommand, #92f00dc4
+  // 그대로)에 실어 보내고, 0건이면 기존 "새 대화" 모달을 그 값을 들고 연다(새 API 0).
+  const composeParam = useSearchParams().get('compose');
+  const consumedComposeRef = useRef(false);
   // perf(17960f86): role 은 DashboardContext(서버 /api/v2/me 투영)에서 — 채팅 진입마다 `/api/me`
   // 재호출하던 round-trip 제거. /me checkRole 과 동일한 effective role 이라 게이트 의미 보존.
   const { role } = useDashboardContext();
@@ -485,6 +492,21 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     void fetchConversations(0, false);
   }, [fetchConversations]);
 
+  // story #3831 — compose 값은 목록이 로드된 뒤 딱 한 번만 소비한다(consumedComposeRef) —
+  // 안 그러면 목록이 갱신될 때마다(새 메시지 SSE 등) 다시 리다이렉트/모달을 트리거한다.
+  // 대화가 있으면 updated_at 최신 1건(가장 최근 대화)으로 보낸다 — API 응답 배열 순서에
+  // 기대지 않고 값으로 직접 고른다.
+  useEffect(() => {
+    if (!composeParam || loading || consumedComposeRef.current) return;
+    consumedComposeRef.current = true;
+    if (conversations.length > 0) {
+      const mostRecent = conversations.reduce((a, b) => (a.updated_at > b.updated_at ? a : b));
+      router.replace(`/chats/${mostRecent.id}?compose=${encodeURIComponent(composeParam)}`);
+    } else {
+      setShowModal(true);
+    }
+  }, [composeParam, loading, conversations, router, setShowModal]);
+
   // perf(17960f86): agent 탭("전체/에이전트", include_agent_conversations=true)은 비기본 탭이라
   // mount 시 eager fetch(측정 ~663ms 낭비) 하지 않고, 사용자가 탭을 처음 열 때 1회만 lazy 로드.
   const loadAgentConversationsOnce = useCallback(() => {
@@ -592,7 +614,11 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   // 그대로(발명 0, handleReconnect/새 메시지 수신 시와 동일 재조회).
   const handleCreated = (conversationId: string) => {
     setShowModal(false);
-    router.push(`/chats/${conversationId}`);
+    // story #3831 — 「오늘」에서 넘어온 지시 한 줄이 있으면(0건 대화라 새 대화 모달을
+    // 거친 경우) 그 새 대화의 컴포저에도 같은 기전으로 싣는다.
+    router.push(
+      composeParam ? `/chats/${conversationId}?compose=${encodeURIComponent(composeParam)}` : `/chats/${conversationId}`,
+    );
     void fetchConversations(0, false);
   };
 

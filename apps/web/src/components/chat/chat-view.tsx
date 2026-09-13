@@ -62,6 +62,10 @@ interface ChatViewProps {
   // get_verified_map()과 같은 정의(#2751 설계②가 워크포스 "연결 안 됨" 배지에 쓰는 그 판별자,
   // 발명 0) — false=stdio verify 미완주. undefined/null/human이면 미연결 배너 미표시.
   participants?: { member_id: string; name: string | null; type?: string; verified?: boolean | null }[];
+  // story #3831(UX-v3·FE 3·오늘) — 「오늘」의 지시 한 줄이 여기까지 오면 이 값으로 컴포저를
+  // 채운다. 새 프리필 기전을 짓지 않는다 — #92f00dc4 prefillCommand(모호 명령 후보 클릭)와
+  // 동일 경로를 그대로 재사용(마운트 시 1회 시드).
+  initialComposeText?: string;
 }
 
 interface MessageGroup {
@@ -125,7 +129,7 @@ export function filterUnconnectedAgentParticipants(
   );
 }
 
-export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix = '/api/chats', backHref = '/chats', commandTargets, presenceById, scrollToMessageId, initialLastReadAt, participants }: ChatViewProps) {
+export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix = '/api/chats', backHref = '/chats', commandTargets, presenceById, scrollToMessageId, initialLastReadAt, participants, initialComposeText }: ChatViewProps) {
   const router = useRouter();
   const pathname = usePathname();
   const t = useTranslations('chats');
@@ -155,7 +159,12 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   // story #92f00dc4(doc exec-command-final-spec-92f00dc4 §🎯) — 서버 집행 커맨드 결과 카드의
   // 「모호」 후보 클릭 = 입력창을 해소된 명령으로 채움(즉시 집행 아님). nonce는 같은 텍스트를
   // 두 번 연속 눌러도 ChatInput의 effect가 반응하도록 매 클릭마다 증가시키는 카운터.
-  const [prefillCommand, setPrefillCommand] = useState<{ text: string; nonce: number } | null>(null);
+  // story #3831 — initialComposeText가 있으면 마운트 시 그 값으로 시드(nonce 0). threadId가
+  // 바뀌어도(다른 대화로 재마운트) 이 초기값 계산은 최초 렌더 1회뿐이라 재프리필되지 않는다
+  // (useState 초기화자 관례 그대로 — 의도적으로 effect가 아니라 이 자리에 둔다).
+  const [prefillCommand, setPrefillCommand] = useState<{ text: string; nonce: number } | null>(
+    () => (initialComposeText ? { text: initialComposeText, nonce: 0 } : null),
+  );
   const handleFillComposer = useCallback((text: string) => {
     setPrefillCommand((prev) => ({ text, nonce: (prev?.nonce ?? 0) + 1 }));
   }, []);
