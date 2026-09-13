@@ -279,6 +279,43 @@ async def test_needs_me_unions_three_sources_and_collapses_duplicate_realdb():
         await engine.dispose()
 
 
+async def test_needs_me_dedupe_keeps_gate_and_hitl_of_same_story_separate_by_kind_realdb():
+    """정정 1(페드루 PO 리뷰, PR #4250) — 같은 story에 merge gate(kind=approval)와
+    merge 단계 HITL 질문(kind=answer)이 함께 있으면 dedupe 키가 gate_type만
+    보던 시절엔 (story, id, "merge") 한 키로 접혀 하나가 사라졌다. kind를 키에
+    더해 승인/답변 축을 분리 — needs_me 2건(approval 1·answer 1) 모두 남아야
+    한다."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_member(s, org.id, project.id, org_role="owner")
+
+            story = await _make_story(s, org.id, project.id, title="같은 스토리·다른 손")
+            await _make_gate(s, org.id, work_item_type="story", work_item_id=story.id, gate_type="merge")
+            await _make_hitl_request(s, org.id, project.id, story_id=story.id, work_type="merge")
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            resp = await client.get("/api/v2/today")
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            same_story_items = [i for i in body["needs_me"] if i["work_item"]["id"] == str(story.id)]
+            kinds = sorted(i["kind"] for i in same_story_items)
+            assert kinds == ["answer", "approval"], (
+                f"gate_type만으로 dedupe하면 kind가 달라도 접혀 하나가 사라진다: {kinds}"
+            )
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
 async def test_needs_me_kind_and_risk_mapping_four_paths_realdb():
     """AC3 — external_publish→signature/high, 그 외 gate→approval/low, hitl→answer/low,
     workflow_step(고위험 표시)→approval/high 4경로."""

@@ -51,8 +51,14 @@ _AGENT_RUN_IN_PROGRESS_STATUSES = frozenset({"queued", "held", "running", "hitl_
 _PUBLISHED_STATUS = "completed"
 
 
-def _dedupe_key(work_item_type: str, work_item_id: uuid.UUID, gate_type: str | None) -> tuple:
-    return (work_item_type, work_item_id, gate_type)
+def _dedupe_key(work_item_type: str, work_item_id: uuid.UUID, gate_type: str | None, kind: str) -> tuple:
+    """페드루 PO 리뷰 정정 1(PR #4250) — HitlRequest의 work_type("merge"|"done")을
+    gate_type 축으로 흡수하다 보니, 같은 story에 merge gate(kind=approval)와
+    merge 단계 HITL 질문(kind=answer)이 함께 있으면 (work_item_type, id, "merge")
+    한 키로 접혀 둘 중 하나가 사라졌다 — 승인과 답은 다른 사람 손이라 한 행이
+    아니다. story #3821의 dedupe 규칙("같은 게이트 종류의 재게시=1행")은 **같은
+    kind끼리**에만 적용돼야 한다 — kind를 키에 더해 승인/답변 축을 분리한다."""
+    return (work_item_type, work_item_id, gate_type, kind)
 
 
 async def _needs_me_from_gate_inbox(
@@ -168,7 +174,7 @@ async def _resolve_needs_me(
     # 짧게 보이는 거짓 신호가 된다.
     collapsed: dict[tuple, dict[str, Any]] = {}
     for it in raw:
-        key = _dedupe_key(it["work_item_type"], it["work_item_id"], it["gate_type"])
+        key = _dedupe_key(it["work_item_type"], it["work_item_id"], it["gate_type"], it["kind"])
         existing = collapsed.get(key)
         if existing is None or it["created_at"] < existing["created_at"]:
             collapsed[key] = it
@@ -247,9 +253,11 @@ async def _resolve_agent_progress(
             "work_item": {"type": "story", "id": story_id, "title": story_title or ""} if story_id else None,
             "status": run.status,
             "current_step": None,  # AgentRun엔 "현재 단계" 개념이 없다(지어내지 않음).
-            # AgentRun엔 updated_at이 없다(started_at/finished_at뿐) — 진행 中(finished_at
-            # 아직 null) 필터라 started_at이 "마지막으로 확인된 행동 시각"의 유일한 근거.
-            "last_action_at": run.started_at,
+            # 페드루 PO 리뷰 정정 2(PR #4250) — "last_action_at"이라는 이름으로
+            # started_at 값을 실으면 오래 도는 run이 "방금 행동했다"는 거짓 신호가
+            # 된다(AgentRun엔 "마지막 행동 시각" 개념 자체가 없다 — updated_at도
+            # 없음). 필드명을 값의 실제 뜻(시작 시각)에 맞춘다.
+            "started_at": run.started_at,
         })
     return items
 

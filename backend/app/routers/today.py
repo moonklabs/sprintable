@@ -52,7 +52,7 @@ class AgentProgressItem(BaseModel):
     work_item: TodayWorkItem | None = None
     status: str
     current_step: str | None = None
-    last_action_at: datetime
+    started_at: datetime
 
 
 class PublishedByChannel(BaseModel):
