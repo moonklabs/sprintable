@@ -450,7 +450,7 @@ async def _notify_decision_request_card(
         await dispatch_approval_request_cards(
             session, org_id=org_id, work_item_type="agent_decision", work_item_id=gate.id,
             project_id=project_id, title=gate.neutral_facts.get("question", "결정 요청") if gate.neutral_facts else "결정 요청",
-            gate_id=gate.id, requester_id=requester_id, approver_ids=approver_ids,
+            gate_id=gate.id, gate_type=gate.gate_type, requester_id=requester_id, approver_ids=approver_ids,
             designated_approver_id=designated_approver_id,
         )
     except Exception:  # noqa: BLE001 — 카드 배달 실패는 상신 비중단(Gate inbox 폴백 항상 존재).

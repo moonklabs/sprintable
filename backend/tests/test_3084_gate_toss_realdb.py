@@ -137,6 +137,7 @@ async def _seed_scenario(session):
     await dispatch_approval_request_cards(
         session, org_id=org.id, work_item_type="doc", work_item_id=doc.id,
         project_id=project.id, title=doc.title, gate_id=gate.id,
+        gate_type="doc_approval",
         requester_id=requester_member_id, approver_ids=[designated_member_id],
         designated_approver_id=designated_member_id,
     )
@@ -483,6 +484,7 @@ async def test_layer2_auto_seeds_designated_preexisting_conversation():
             await dispatch_approval_request_cards(
                 s, org_id=org.id, work_item_type="doc", work_item_id=doc.id,
                 project_id=project.id, title=doc.title, gate_id=gate.id,
+                gate_type="doc_approval",
                 requester_id=requester_member_id, approver_ids=[designated_member_id],
                 designated_approver_id=designated_member_id,
             )

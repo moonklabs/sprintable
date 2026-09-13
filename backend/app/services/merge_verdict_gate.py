@@ -639,8 +639,14 @@ async def evaluate_merge_gate(
             )
             await dispatch_approval_request_cards(
                 session, org_id=org_id, work_item_type="story", work_item_id=story_id,
-                project_id=project_id, title=story_title, gate_id=gate.id,
+                project_id=project_id, title=story_title, gate_id=gate.id, gate_type=MERGE_GATE_TYPE,
                 requester_id=member_id, approver_ids=approver_ids,
+                # story #3821(PR B) — 같은 스토리에 여러 소 PR이 열려 이 gate가 매번
+                # 새로 생겨도(PR마다 다른 gate_id), 최상위 카드가 이미 있으면 「다시
+                # 결재가 필요합니다 — PR #{n}」 스레드 답글로 붕괴시킨다. db_pr_number
+                # 가 None인 board-preflight/report-done 경로(PR 컨텍스트 자체가 없음)
+                # 는 사유 없이 기본 문구만.
+                reopen_reason=f"PR #{db_pr_number}" if db_pr_number else None,
             )
         except Exception:  # noqa: BLE001 — 카드 배달 실패는 게이트 생성/decision을 막지 않음.
             logger.warning(

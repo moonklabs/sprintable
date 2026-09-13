@@ -209,7 +209,7 @@ async def receive_escalation_event(
         await dispatch_approval_request_cards(
             session, org_id=org.id, work_item_type="support_escalation", work_item_id=gate.id,
             project_id=project.id, title=f"고객 문의 에스컬레이션 — {customer_org_name}",
-            gate_id=gate.id, requester_id=requester_id, approver_ids=[approver_id],
+            gate_id=gate.id, gate_type=gate.gate_type, requester_id=requester_id, approver_ids=[approver_id],
             designated_approver_id=approver_id,
         )
     except Exception:  # noqa: BLE001 — 카드 배달 실패는 게이트 생성 자체를 되돌리지 않는다
