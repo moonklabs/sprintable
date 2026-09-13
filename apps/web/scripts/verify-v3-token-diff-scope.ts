@@ -60,18 +60,41 @@ function sh(cmd: string): string {
   return execSync(cmd, { cwd: REPO_ROOT, encoding: 'utf-8' }).trim();
 }
 
-function ensureBaseRefAvailable(baseRef: string): void {
+function hasMergeBase(baseRef: string): boolean {
   try {
-    sh(`git rev-parse --verify ${baseRef}`);
-    return;
+    sh(`git merge-base ${baseRef} HEAD`);
+    return true;
   } catch {
-    // 얕은 체크아웃이라 origin/develop이 로컬에 없을 수 있다 — 필요한 만큼만 얕게 fetch.
+    return false;
   }
+}
+
+// CI 첫 배선 시 실사고(2026-09-13, PR #4254): `git rev-parse --verify origin/develop`는
+// 얕은 체크아웃에서도 그 ref 자체가 (얕게) 존재하면 성공해버려 fetch를 건너뛰는데,
+// 그 얕은 ref가 HEAD와 공통 조상을 공유 못 할 만큼 얕으면(actions/checkout의 기본
+// fetch-depth) `git diff origin/develop...HEAD`가 "no merge base"로 죽는다 — ref
+// 존재가 아니라 **merge-base 존재**를 확인해야 한다. 못 찾으면 depth를 점점 넓혀
+// 재시도하고, 그래도 안 되면 마지막으로 unshallow.
+function ensureBaseRefAvailable(baseRef: string): void {
+  if (hasMergeBase(baseRef)) return;
   const [remote, branch] = baseRef.includes('/') ? baseRef.split(/\/(.+)/).slice(0, 2) : ['origin', baseRef];
+  for (const depth of [50, 200, 1000]) {
+    try {
+      execSync(`git fetch --depth=${depth} ${remote} ${branch}`, { cwd: REPO_ROOT, stdio: 'pipe' });
+    } catch {
+      // 네트워크/권한 문제일 수 있다 — 다음 depth 또는 unshallow로 계속 시도.
+    }
+    if (hasMergeBase(baseRef)) return;
+  }
   try {
-    execSync(`git fetch --depth=50 ${remote} ${branch}`, { cwd: REPO_ROOT, stdio: 'pipe' });
-  } catch (e) {
-    throw new Error(`FAIL: base ref(${baseRef}) fetch 실패 — ${(e as Error).message}`);
+    execSync(`git fetch --unshallow ${remote}`, { cwd: REPO_ROOT, stdio: 'pipe' });
+  } catch {
+    // 이미 unshallow거나 fetch 실패 — 아래 최종 판정에서 걸러진다.
+  }
+  if (!hasMergeBase(baseRef)) {
+    throw new Error(
+      `FAIL: base ref(${baseRef})와 HEAD의 merge-base를 못 찾음(얕은 clone 한계) — CI checkout 설정 확인 필요.`,
+    );
   }
 }
 
