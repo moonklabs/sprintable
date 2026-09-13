@@ -429,6 +429,21 @@ class ChannelPostDraftListItem(BaseModel):
             "publication_status/error_code가 별도로 담당(다른 축)."
         ),
     )
+    # story #3829(customer-zero 실측, 페드루 PO 確定 2026-09-13) — X 스레드는
+    # ChannelPublication 1행=세그먼트 1개라 위 publication_id(마지막 발행 축)와
+    # 인사이트가 실제로 붙는 행(항상 헤드=seq 1)이 N≥2 세그먼트일 때 다를 수
+    # 있다(비스레드는 두 값이 항상 같다). `/publications/{id}/insights`·
+    # `/comments`는 이제 어느 세그먼트 id로 물어도 헤드로 해석해 답하므로 이
+    # 필드 없이 기존 publication_id를 그대로 써도 되지만, FE가 "어차피 헤드"임을
+    # 명시적으로 알고 싶을 때 이 값을 쓸 수 있게 additive로 얹는다. 발행 이력이
+    # 아예 없으면(publication_id도 null) 이 값도 null.
+    head_publication_id: uuid.UUID | None = Field(
+        default=None,
+        description=(
+            "Head (sequence 1) row id of the same (gate_id, version_id) group as "
+            "publication_id — equals publication_id for non-thread posts."
+        ),
+    )
     # story #3514(Phase1·BE+FE·소형, 페드루 PO 確定 2026-09-05) — 단건 조회(lint-on-read)
     # 전용. 목록 응답에선 항상 None(행마다 lint하면 비용 N배, PO 明示 "단건만"). None=
     # "이 응답에선 안 쟀다"·[]="쟀는데 위반 0"(null≠0 원칙 그대로, site_posts.py::
@@ -1262,7 +1277,7 @@ def _to_draft_list_item(
     False(안전 쪽으로 fail, "모른다=버튼 안 보임")."""
     (
         draft, latest, origin, gate, published_pub, latest_pub, published_body_sha256,
-        latest_command, latest_image, latest_thread_pubs, newsletter_gate,
+        latest_command, latest_image, latest_thread_pubs, newsletter_gate, head_pub_id,
     ) = row
     source_title: str | None = None
     source_current_site_post_version_id: uuid.UUID | None = None
@@ -1389,6 +1404,7 @@ def _to_draft_list_item(
         # permalink/external_id와 정확히 같은 객체라 이 셋과 publication_id가
         # 절대 어긋날 수 없다(§22-12 계약이 구조적으로 성립).
         publication_id=published_pub.id if published_pub else None,
+        head_publication_id=head_pub_id,
         source_content_item_id=draft.source_content_item_id,
         source_title=source_title,
         source_site_post_version_id=draft.source_site_post_version_id,

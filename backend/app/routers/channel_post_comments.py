@@ -176,6 +176,12 @@ async def list_publication_comments_endpoint(
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
 
+    # story #3829 — /insights와 동일 해석: 어느 세그먼트 id로 물어도 그 스레드의
+    # 헤드(seq 1) 행으로(스레드가 아니면 무변).
+    from app.services.insight_snapshots import resolve_head_publication_id
+
+    publication_id = await resolve_head_publication_id(db, publication_id=publication_id)
+
     try:
         result = await list_comments_for_publication(
             db, org_id=org_id, publication_id=publication_id, limit=limit, offset=offset,
