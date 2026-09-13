@@ -6,7 +6,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import enMessages from '../../../messages/en.json';
 import {
-  GenerationBudgetIndicator, formatMinorCurrency, majorToMinor, minorToMajor,
+  GenerationBudgetIndicator, formatCount, formatMinorCurrency, majorToMinor, minorToMajor,
   type GenerationBudgetState,
 } from './generation-budget-indicator';
 
@@ -88,6 +88,25 @@ describe('formatMinorCurrency / majorToMinor / minorToMajor (§19-1 — 통화 �
     expect(minorToMajor(500, 'KRW')).toBe(500);
     expect(majorToMinor(500, 'USD')).toBe(50000);
     expect(minorToMajor(50000, 'USD')).toBe(500);
+  });
+});
+
+// story #3808(페드루 PO 지적 2026-09-12 23:50Z) — formatMinorCurrency의 카운트
+// 자매 함수. 채널 사용량 줄("오늘 사용량 3200/10000")이 콤마 없이 나가던 결함의
+// 처방 — 같은 Intl.NumberFormat(locale) 한 곳만 거친다(통화·소수자릿수 없음).
+describe('formatCount (story #3808 — 사용량 카운트 천 단위 구분)', () => {
+  it('⭐ko — 4자리 이상이면 콤마로 묶인다', () => {
+    expect(formatCount(10000, 'ko')).toBe('10,000');
+    expect(formatCount(3200, 'ko')).toBe('3,200');
+  });
+
+  it('en도 같은 그룹핑(,)을 쓴다 — ko/en 모두 Intl.NumberFormat 그대로', () => {
+    expect(formatCount(10000, 'en')).toBe('10,000');
+  });
+
+  it('3자리 이하는 콤마가 없다(그룹핑 자체가 성립할 자리가 없다)', () => {
+    expect(formatCount(250, 'ko')).toBe('250');
+    expect(formatCount(0, 'ko')).toBe('0');
   });
 });
 

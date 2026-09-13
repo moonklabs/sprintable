@@ -1289,7 +1289,23 @@ describe('OrganizationChannelsPage — YouTube 오늘 사용량(story #3815 PR4)
     await expandChannelRow();
     await flush();
     const line = container.querySelector('[data-testid="channel-connect-youtube-usage-line"]');
-    expect(line?.textContent).toBe(koMessages.channelConnect.channelYoutubeUsageLine.replace('{used}', '250').replace('{limit}', '10000'));
+    // story #3808(페드루 PO 지적 2026-09-12 23:50Z) — limit_units=10000은 천 단위
+    // 구분(콤마)이 있어야 한다("10000"이 옛 결함 그대로였다 — 같은 화면 금액은 이미
+    // 콤마가 있어 표기가 어긋났었다). formatCount(Intl.NumberFormat) 경유로 처방.
+    expect(line?.textContent).toBe(koMessages.channelConnect.channelYoutubeUsageLine.replace('{used}', '250').replace('{limit}', '10,000'));
+  });
+
+  it('⭐used_units가 4자리 이상이어도 콤마가 붙는다(양쪽 다 그룹핑 확認)', async () => {
+    stubFetch({
+      connections: [{ ...CONNECTION_ACTIVE, channel: 'youtube' }],
+      availableChannels: [{ channel: 'youtube', display_name: 'YouTube', credential_kind: 'oauth', kind: 'social' }],
+      youtubeUsage: { status: 200, body: { used_units: 3200, limit_units: 10000, remaining_units: 6800, reset_at: '2026-09-13T00:00:00Z', scope: 'platform' } },
+    });
+    await mount('owner');
+    await expandChannelRow();
+    await flush();
+    const line = container.querySelector('[data-testid="channel-connect-youtube-usage-line"]');
+    expect(line?.textContent).toBe(koMessages.channelConnect.channelYoutubeUsageLine.replace('{used}', '3,200').replace('{limit}', '10,000'));
   });
 
   it('youtube_sandbox 연결도 같은 줄이 뜬다(샌드박스도 축 공유)', async () => {

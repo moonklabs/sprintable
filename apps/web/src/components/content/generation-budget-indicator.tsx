@@ -52,6 +52,17 @@ export function formatMinorCurrency(
   return t(CURRENCY_AMOUNT_KEYS[currency], { amount });
 }
 
+// story #3808(페드루 PO 지적 2026-09-12 23:50Z, 배포 82 픽셀 실측 — 연결 카드 사용량 줄
+// 「3200/10000」류가 천 단위 구분 없이 나가는데, 같은 화면의 금액("1,300원")은 이미
+// formatMinorCurrency로 구분돼 두 표기가 어긋났다) — formatMinorCurrency와 같은 축의
+// «맨 정수 카운트» 자매 함수. 통화·소수자릿수 개념이 없는 순수 개수(사용량 used/limit
+// units·성과 지표 views/impressions 등)는 이 함수로, 금액은 여전히 formatMinorCurrency로
+// — 둘 다 `Intl.NumberFormat(locale)` 한 곳만 거친다(§ 위 formatMinorCurrency 주석의
+// "손 구현 콤마 금지" 규율을 카운트 축까지 넓힌 것, 새 축을 새로 만들지 않는다).
+export function formatCount(n: number, locale: string): string {
+  return new Intl.NumberFormat(locale).format(n);
+}
+
 // story #3808(배포 81 라이브 회차 적기·페드루 PO 決定 2026-09-12 15:54Z) — 한도를
 // 이미 쓴 지출보다 낮게 내리면 remaining_minor가 음수로 온다(BE 계산 사실 그대로,
 // 고치지 않는다). 그 음수를 formatMinorCurrency에 그대로 먹이면 "-10,000원"처럼
