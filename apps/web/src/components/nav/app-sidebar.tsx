@@ -88,7 +88,10 @@ function mergeStoredCollapsedOverrides(
 
 function KbdHint({ children }: { children: React.ReactNode }) {
   return (
-    <kbd className="hidden rounded border border-sidebar-border/60 bg-sidebar-accent/40 px-1.5 py-0 font-mono text-[10px] font-medium text-sidebar-foreground/60 group-data-[active=true]/menu-button:text-sidebar-foreground/80 sm:inline-flex">
+    // 3826-pre — text-sidebar-foreground/60(알파 합성)이 v3 ink 재조정 후 실 브라우저
+    // 대비 미달(#767573/#fbfaf9 = 4.43:1)로 바뀌었다. solid text-muted-foreground(=
+    // --proof-ink-3, AA 조정 済)로 교체 — active 상태는 알파 대신 solid 전체 강조.
+    <kbd className="hidden rounded border border-sidebar-border/60 bg-sidebar-accent/40 px-1.5 py-0 font-mono text-[10px] font-medium text-muted-foreground group-data-[active=true]/menu-button:text-sidebar-foreground sm:inline-flex">
       {children}
     </kbd>
   );
@@ -106,7 +109,8 @@ function KbdHint({ children }: { children: React.ReactNode }) {
 // "project임을 말한다"만 하지 "무표식=org"를 말하지 않는다.
 function ScopeMark({ children }: { children: React.ReactNode }) {
   return (
-    <span className="text-[10px] font-medium text-sidebar-foreground/60 group-data-[active=true]/menu-button:text-sidebar-foreground/80">
+    // 3826-pre — KbdHint와 동일 사유(알파 합성 → solid muted 교체).
+    <span className="text-[10px] font-medium text-muted-foreground group-data-[active=true]/menu-button:text-sidebar-foreground">
       {children}
     </span>
   );
@@ -350,15 +354,18 @@ export function AppSidebar({
           currentProjectId={projectId}
           className="w-full"
         />
+        {/* 3826-pre — text-sidebar-foreground/60(알파 합성) → solid text-muted-foreground.
+            v3 ink 재조정 후 실 대비 미달 실측(#767573/#fbfaf9=4.43:1·⌘K kbd
+            #747371/#f7f6f3=4.37:1). */}
         <button
           type="button"
           onClick={openPalette}
-          className="mt-2 flex w-full items-center gap-2 rounded-md border border-sidebar-border/60 bg-sidebar-accent/30 px-2.5 py-1.5 text-left text-sm text-sidebar-foreground/60 transition hover:border-sidebar-border hover:bg-sidebar-accent/60 hover:text-sidebar-foreground"
+          className="mt-2 flex w-full items-center gap-2 rounded-md border border-sidebar-border/60 bg-sidebar-accent/30 px-2.5 py-1.5 text-left text-sm text-muted-foreground transition hover:border-sidebar-border hover:bg-sidebar-accent/60 hover:text-sidebar-foreground"
           aria-label={t('search')}
         >
           <Search className="size-4" />
           <span className="flex-1 truncate">{t('search')}</span>
-          <kbd className="hidden rounded border border-sidebar-border/60 bg-sidebar-accent/40 px-1.5 py-0 font-mono text-[10px] font-medium text-sidebar-foreground/60 sm:inline-flex">
+          <kbd className="hidden rounded border border-sidebar-border/60 bg-sidebar-accent/40 px-1.5 py-0 font-mono text-[10px] font-medium text-muted-foreground sm:inline-flex">
             ⌘K
           </kbd>
         </button>

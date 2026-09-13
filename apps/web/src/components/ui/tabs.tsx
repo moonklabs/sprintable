@@ -61,7 +61,11 @@ function TabsTrigger({ className, ...props }: TabsPrimitive.Tab.Props) {
         // story #2969 §2 PR-3(doc proofline-system-layer-2969) — default variant 활성
         // shadow-sm 제거(§1.2, 인라인 표면은 그림자 대신 라인/색 — data-active:bg-background
         // 대비 자체가 이미 그 축을 맡는다).
-        "relative inline-flex h-[calc(100%-1px)] flex-1 items-center justify-center gap-1.5 rounded-md border border-transparent px-1.5 py-0.5 text-sm font-medium whitespace-nowrap text-foreground/60 transition-all group-data-vertical/tabs:w-full group-data-vertical/tabs:justify-start hover:text-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring focus-visible:outline-1 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50 has-data-[icon=inline-end]:pr-1 has-data-[icon=inline-start]:pl-1 aria-disabled:pointer-events-none aria-disabled:opacity-50 dark:text-muted-foreground dark:hover:text-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        // 3826-pre — text-foreground/60(알파 합성)이 v3 ink 재조정 후 실 브라우저 대비
+        // 미달로 바뀌었다(#72706d/#f1efea = 4.28:1). 이미 값-SSOT로 AA 조정된 solid
+        // text-muted-foreground(=--proof-ink-3)로 교체 — dark: 오버라이드도 이제 base와
+        // 같은 클래스라 중복이라 제거.
+        "relative inline-flex h-[calc(100%-1px)] flex-1 items-center justify-center gap-1.5 rounded-md border border-transparent px-1.5 py-0.5 text-sm font-medium whitespace-nowrap text-muted-foreground transition-all group-data-vertical/tabs:w-full group-data-vertical/tabs:justify-start hover:text-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring focus-visible:outline-1 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50 has-data-[icon=inline-end]:pr-1 has-data-[icon=inline-start]:pl-1 aria-disabled:pointer-events-none aria-disabled:opacity-50 dark:hover:text-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
         "group-data-[variant=line]/tabs-list:bg-transparent group-data-[variant=line]/tabs-list:data-active:bg-transparent dark:group-data-[variant=line]/tabs-list:data-active:border-transparent dark:group-data-[variant=line]/tabs-list:data-active:bg-transparent",
         "data-active:bg-background data-active:text-foreground dark:data-active:border-input dark:data-active:bg-input/30 dark:data-active:text-foreground",
         // story #2969 §2 PR-3 — "활성=시트론 언더라인"(doc). line variant의 기존 언더라인

@@ -81,7 +81,8 @@ export function BusinessInfoList({ className = '' }: { className?: string }) {
     <div className={`space-y-0.5 ${className}`}>
       {rows.map((row, i) => (
         <div key={i} className="text-xs leading-relaxed">
-          {row.label && <span className="text-sidebar-foreground/60">{row.label} </span>}
+          {/* 3826-pre — 알파 합성(text-sidebar-foreground/60) → solid text-muted-foreground. */}
+          {row.label && <span className="text-muted-foreground">{row.label} </span>}
           <span className="text-sidebar-foreground">{row.value}</span>
         </div>
       ))}
