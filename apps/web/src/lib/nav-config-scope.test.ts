@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { NAV_GROUPS } from './nav-config';
+import { LEGACY_NAV_ITEMS, NAV_GROUPS } from './nav-config';
 
 // story #9c5e82dc(IA·S3, PO 確定 2026-09-08) — 새 자: 「프로젝트 전환 시 내용이 바뀌는
 // 항목」 대 「화면이 그렇다고 말하는 항목」 8:0→8:8(3600 문서 원안)이었으나, activity가
@@ -21,8 +21,14 @@ const PROJECT_SCOPED_IDS = ['board', 'goals', 'loops', 'standup', 'retro', 'docs
 //   manage(기본)·access는 project 무관 — 탭에 따라 갈리는 혼합 화면
 const AMBIGUOUS_IDS = ['inbox', 'settings', 'org-briefing', 'org-workforce'];
 
+// story #3824(UX-v3·FE 1, 2026-09-13) — 5항목 축소는 사이드바 "1급 노출" 재편일 뿐,
+// scope 분류(project/org/애매) 자체는 화면의 실제 데이터 필터 성격을 서술하는 값이라
+// 어느 진입점(NAV_GROUPS 1급이냐 LEGACY_NAV_ITEMS 커맨드 팔레트냐)에 있든 안 바뀐다 —
+// 그래서 이 감사 축은 NAV_GROUPS만이 아니라 LEGACY_NAV_ITEMS까지 합쳐 23개 전부를 본다
+// (item.scope는 app-sidebar.tsx의 ScopeMark 배지 렌더에만 쓰이지만, 분류 정확성 자체의
+// 회귀가드로서 자리 이동과 무관하게 유효).
 function allItems() {
-  return NAV_GROUPS.flatMap((g) => g.items);
+  return [...NAV_GROUPS.flatMap((g) => g.items), ...LEGACY_NAV_ITEMS];
 }
 
 describe('NAV_GROUPS scope — story #9c5e82dc(IA·S3 AC1)', () => {

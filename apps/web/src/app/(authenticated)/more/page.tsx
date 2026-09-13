@@ -8,7 +8,8 @@ import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Card, CardHeader } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { MOBILE_HUB_EXCLUDE_IDS, MOBILE_HUB_GROUP_ORDER, NAV_GROUPS } from '@/lib/nav-config';
+import { LEGACY_NAV_ITEMS, MOBILE_HUB_EXCLUDE_IDS, MOBILE_HUB_GROUP_ORDER, NAV_GROUPS } from '@/lib/nav-config';
+import { pickEunNeunJosa } from '@/lib/korean-particle';
 
 // story #2682(모바일 IA S2, doc mobile-ia-full-completion-2678 §2.3) — 임시 평면 stub(#1958·
 // #1965)을 데스크톱 GNB(app-sidebar.tsx) 5 zones를 그대로 미러하는 그룹형 허브로 재건한다.
@@ -27,14 +28,31 @@ export default function MorePage() {
   const isMobile = useIsMobile();
   const [query, setQuery] = useState('');
 
+  // story #3824(UX-v3·FE 1, 페드루 PO 確定 2026-09-13) — 데스크톱 사이드바(NAV_GROUPS)가
+  // 5항목으로 줄어도 모바일 `/more` 허브는 회귀 0(PO 조건②) — 5항목 카드 뒤에 LEGACY_
+  // NAV_ITEMS(사이드바에서 빠진 17개, command-palette.tsx와 같은 배열을 그대로 소비 —
+  // PO 조건① "한 자리에서만 정의") 묶음 카드를 하나 더 얹는다. 라벨은 새 키
+  // `moreOtherScreens`("그 밖의 화면") — 기존 zone 이름들과 겹치지 않는 새 개념(5항목
+  // 밖 전부)이라 재사용할 기존 키가 없다.
+  const legacyGroup = useMemo(
+    () => ({
+      id: 'legacy',
+      labelKey: 'moreOtherScreens',
+      items: LEGACY_NAV_ITEMS.filter((item) => !MOBILE_HUB_EXCLUDE_IDS.has(item.id)),
+    }),
+    [],
+  );
+
   const hubGroups = useMemo(
     () =>
-      MOBILE_HUB_GROUP_ORDER
-        .map((groupId) => NAV_GROUPS.find((g) => g.id === groupId))
-        .filter((g): g is NonNullable<typeof g> => !!g)
-        .map((g) => ({ ...g, items: g.items.filter((item) => !MOBILE_HUB_EXCLUDE_IDS.has(item.id)) }))
-        .filter((g) => g.items.length > 0),
-    [],
+      [
+        ...MOBILE_HUB_GROUP_ORDER
+          .map((groupId) => NAV_GROUPS.find((g) => g.id === groupId))
+          .filter((g): g is NonNullable<typeof g> => !!g)
+          .map((g) => ({ ...g, items: g.items.filter((item) => !MOBILE_HUB_EXCLUDE_IDS.has(item.id)) })),
+        legacyGroup,
+      ].filter((g) => g.items.length > 0),
+    [legacyGroup],
   );
 
   const totalScreenCount = useMemo(() => hubGroups.reduce((sum, g) => sum + g.items.length, 0), [hubGroups]);
@@ -75,6 +93,8 @@ export default function MorePage() {
           <p className="text-xs text-muted-foreground" data-testid="more-tab-hint">
             {t('moreTabHint', {
               board: t('board'), inbox: t('inbox'), chats: t('chats'),
+              // story #3824 — nav.chats 값이 바뀌어도(받침 유무 무관) 항상 맞는 조사.
+              particle: pickEunNeunJosa(t('chats')),
               now: tMore('now'), approvals: tMore('approvals'), chat: tMore('chat'),
             })}
           </p>
@@ -101,8 +121,13 @@ export default function MorePage() {
           {filteredGroups.map((group) => (
             <Card key={group.id} className="overflow-hidden">
               <CardHeader>
+                {/* story #3824(UX-v3·FE 1) — 헤더리스 1항목 그룹(now·dev·results, app-
+                    sidebar.tsx와 동형 관례)은 카드에서도 제목이 있어야 하니 그 유일한
+                    항목 자신의 라벨을 쓴다(그 그룹의 정체성이 곧 그 항목이라 desktop과
+                    같은 낱말이 뜬다) — 예전 'settings' 전용 특례를 이 일반 규칙으로
+                    대체(옛 특례는 settings가 이제 legacy 그룹 소속 항목이라 무의미). */}
                 <h2 className="text-sm font-semibold text-foreground">
-                  {group.id === 'settings' ? t('settings') : t(group.labelKey!)}
+                  {group.labelKey ? t(group.labelKey) : t(group.items[0]!.labelKey)}
                 </h2>
               </CardHeader>
               <div className="divide-y divide-border">

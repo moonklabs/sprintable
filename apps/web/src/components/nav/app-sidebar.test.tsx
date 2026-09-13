@@ -60,7 +60,7 @@ function stubLocalStorage() {
 // 읽기에 낫다고 판단해 그대로 둔다(오버라이드가 기본값과 같은 값을 다시 심을 뿐 — 무해).
 function expandAllGroups() {
   localStorage.setItem('sidebar_group_collapsed', JSON.stringify({
-    now: false, dev: false, marketing: false, trust: false, knowledge: false, organization: false,
+    'connect-rules': false,
   }));
 }
 
@@ -98,89 +98,45 @@ async function mount(userName?: string) {
   await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 }
 
-// story #2930(P0-G) I1·I2·I3 처방(doc ia-4zone-redesign-2930) — 「리팩터 전 하드코딩 JSX 정본」
-// 전제는 이제 지난 얘기다. 12+메뉴→오늘/워크스페이스/신뢰/지식 4구역+관리(조직·설정) 프레임
-// 재편(라우트 전부 불변)+챗을 zone에서 빼 사이드바 챗 center로 승격(I2)+work 존 흐름·스프린트를
-// 「보드」 단일 항목으로 접음(I3, PO 스코프 확定 ①=ⓒ 2026-08-22). 스탠드업·회고는 애초 I3에서
-// 1차 메뉴 제거를 시도했으나 CI orphan 가드(story #2376)가 막았다 — command-palette에 대체
-// entry가 없어 nav서 빼면 진짜 orphan이 됐다(sprints와 달리). 「자동 리듬 표면」(doc B2, 구현
-// PO)이 아직 없어 생긴 커플링이라 표면이 설 때까지 nav에 남긴다(②=ⓐ→되돌림, 유나 QA 처방).
-// story #a2b004f9(IA·S1, 2026-09-08) — 'work'(zoneWork)가 'dev'(zoneDev)로 개명되고
-// content·channel-posts가 신규 'marketing'(zoneMarketing) 구역으로 이관(org-channels·
-// org-content-rules·org-insights-board도 조직에서 마케팅(現 「콘텐츠·채널」, story #f81657f8
-// 후속 개명)으로 합류) — 그룹 소속만 이동,
-// 항목 24·모든 라벨·href는 무변(EXPECTED_HREF_BY_LABEL 그대로).
+// story #3824(UX-v3·FE 1, 페드루 PO 確定 2026-09-13, doc a699be00 §② 흡수 지도) — 앱 셸
+// 5항목(오늘·대화·일감·결과·연결·규칙)으로 축소. 「오늘」은 목적지는 여전히 org-briefing
+// (path 무변)이지만 라벨이 「조직 브리핑」→「오늘」로, 「일감」은 board(path=/flow 무변)가
+// 「보드」→「일감」으로, 「결과」는 org-insights-board(path 무변)가 「성과 보드」→「결과」로
+// 리라벨된다(라벨키만 갈림, navResults 신설 — orgInsightsBoard 재사용 시 insight-snapshot-
+// block.tsx의 다른 문맥 CTA까지 같이 바뀌는 걸 피함). 「연결·규칙」만 진짜 라벨 그룹(하위
+// 채널 연결/콘텐츠 규칙 2항목, 라벨·path 둘 다 무변) — 나머지 3(오늘·일감·결과)은 항목
+// 하나뿐인 헤더리스 그룹(옛 'settings' 그룹과 동형 관례, 접기 토글 없음). 「대화」는 이
+// 배열 밖 CHAT_CENTER_ITEM 그대로(라벨만 "채팅"→"대화"). 나머지 17항목(goals·loops·
+// standup·retro·docs·artifacts·storage·activity·org-trust·org-memory·content·channel-
+// posts·org-members·org-workforce·org-roles·org-events·inbox·settings)은 사이드바에서
+// 빠지고 LEGACY_NAV_ITEMS로 이관(커맨드 팔레트·모바일 /more 「그 밖의 화면」이 1급
+// 진입점, 별도 스위트에서 검증) — path는 전부 불변(북마크·딥링크 무손상).
 const EXPECTED_GROUPS: Array<{ labelKey: string | null; labels: string[] }> = [
-  { labelKey: 'zoneNow', labels: ['조직 브리핑', '알림'] },
-  // story #f81657f8(IA·S4/S1 후속, 유나 § 2026-09-09) — 구역 「이름」만 팀 축→대상 축으로
-  // 개명(id·labelKey 불변) — 아래 라벨 문자열도 그 새 값을 그대로 딴다.
-  { labelKey: 'zoneDev', labels: ['보드', '목표', '실험실', '스탠드업', '회고'] },
-  { labelKey: 'zoneMarketing', labels: ['블로그 포스트', '채널 포스트', '채널 연결', '콘텐츠 규칙', '성과 보드'] },
-  { labelKey: 'zoneTrust', labels: ['활동 로그', '신뢰 센터'] },
-  { labelKey: 'zoneKnowledge', labels: ['문서', '산출물', '스토리지', '기억'] },
-  // story #3743(UI 재설계 ③, 페드루 PO 決) — '커넥터'가 '채널 연결'로 흡수·리다이렉트돼
-  // nav 항목 자체가 걷혔다(⑦ IA 25→24 실물).
-  { labelKey: 'zoneOrganization', labels: ['구성원', '에이전트', '권한', '이벤트'] },
-  { labelKey: null, labels: ['설정'] },
+  { labelKey: null, labels: ['오늘'] },
+  { labelKey: null, labels: ['일감'] },
+  { labelKey: null, labels: ['결과'] },
+  { labelKey: 'zoneConnectRules', labels: ['채널 연결', '콘텐츠 규칙'] },
 ];
 
 // 카디르 QA(PR#3100) 지적 — 라벨은 맞는데 href가 다른 항목과 뒤바뀐 뮤테이션은 그룹별 라벨
-// 순서 대조(위 EXPECTED_GROUPS)만으론 못 잡는다(라벨 목록 자체는 안 바뀌므로). 20항목(챗
-// center 제외 19 + 챗 center 1, 아래 별도 스위트) 전부의 라벨→href 쌍을 개별 대조해 그
-// 구멍을 닫는다 — org/project slug 없는 테스트 환경이라 resource 항목은 bare `/${resource}`로
-// 폴백한 값(기존 resourceLink()와 동일 규칙). story #2930 — '신뢰'→'신뢰 센터'로 키 갱신
-// (org-trust 라벨 개명, href 자체는 불변). I3 — '흐름'+'스프린트'가 '보드'(href는 옛 흐름의
-// '/flow' 그대로) 하나로 접혔다. 스탠드업/회고는 CI orphan 가드가 막아 nav에 그대로 남았다
-// (위 EXPECTED_GROUPS 주석 참고). story #3179(S3c) — '대시보드'(/dashboard) 항목 자체가
-// nav에서 빠져(chat으로 이사·중복 목적지 제거) 챗 제외 19→18항목. story 4180f67f — 조직
-// 그룹에 '커넥터'(/organization/connectors) 추가돼 챗 제외 18→19항목. story #3368 — 워크
-// 그룹에 '콘텐츠'(/content) 추가돼 챗 제외 19→20항목. story #3376 — 조직 그룹에 '채널'
-// (/organization/channels) 추가돼 챗 제외 20→21항목. story #3402 — 워크 그룹에 '채널
-// 포스트'(/content/channel-posts) 추가돼 챗 제외 21→22항목. story #3472(페드루 PO
-// 확定 2026-09-05) — 조직 그룹에 '콘텐츠 규칙'(/organization/content-rules) 추가돼
-// 챗 제외 22→23항목. story #3503 — 조직 그룹에 '성과 보드'(/organization/insights-board)
-// 추가돼 챗 제외 23→24항목. story #3743(UI 재설계 ③, 페드루 PO 決) — 조직 그룹의
-// '커넥터'(/organization/connectors)가 '채널 연결'로 흡수·리다이렉트돼 nav 항목 자체가
-// 빠져(4180f67f가 열었던 자리를 여기서 닫는다) 챗 제외 24→23항목.
-//
-// story #ee78b047(IA·S2, 2026-09-08, PO 確定) — 예전엔 '채널 포스트'가 텍스트상 '채널'로
-// 시작해 아래 매칭 로직의 startsWith 폴백이 '채널'을 찾을 때 '채널 포스트' 링크를 먼저
-// 집을 위험이 있었다(페드루 PO 실측, PR#3768 CI red — exact-match-first로 그때 해소).
-// S2가 '채널'을 '채널 연결'로 개명해 그 접두 관계 자체가 이제 없다 — exact-match-first
-// 자체는 일반 규율로 그대로 둔다(kbd힌트 항목은 텍스트에 공백 없이 붙어 startsWith가
-// 여전히 필요 — '보드'+'B'='보드B', exact 매치가 없어 정상적으로 startsWith로 폴백한다).
+// 순서 대조(위 EXPECTED_GROUPS)만으론 못 잡는다. 5항목(챗 center 제외 4 + 챗 center 1,
+// 아래 별도 스위트) 전부의 라벨→href 쌍을 개별 대조해 그 구멍을 닫는다.
 const EXPECTED_HREF_BY_LABEL: Record<string, string> = {
-  '채널 포스트': '/content/channel-posts',
-  '구성원': '/organization/members',
-  '에이전트': '/organization/workforce',
-  '권한': '/organization/roles',
-  '신뢰 센터': '/organization/trust',
-  '기억': '/organization/memory',
-  '이벤트': '/organization/events',
+  '오늘': '/org-briefing',
+  '일감': '/flow',
+  '결과': '/organization/insights-board',
   '채널 연결': '/organization/channels',
   '콘텐츠 규칙': '/organization/content-rules',
-  '성과 보드': '/organization/insights-board',
-  '조직 브리핑': '/org-briefing',
-  '알림': '/inbox',
-  '보드': '/flow',
-  '목표': '/goals',
-  '실험실': '/loops',
-  '스탠드업': '/standup',
-  '회고': '/retro',
-  '블로그 포스트': '/content',
-  '활동 로그': '/activity',
-  '문서': '/docs',
-  '산출물': '/artifacts',
-  '스토리지': '/storage',
-  '설정': '/settings',
 };
 
-describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story #2930 I1 4구역 재편', () => {
-  it('그룹 순서·라벨·항목 순서·라벨이 IA·S1 확定대로다(오늘→일감→콘텐츠·채널→신뢰→지식→조직→설정)', async () => {
+describe('AppSidebar — story #3824 5항목 축소 렌더 회귀가드(UX-v3·FE 1)', () => {
+  it('그룹 순서·라벨·항목 순서·라벨이 확定대로다(오늘→일감→결과→연결·규칙)', async () => {
     expandAllGroups();
     await mount();
+    // 헤더리스 그룹(오늘·일감·결과)은 sidebar-group-label 자체가 없다 — 라벨 그룹은
+    // 「연결·규칙」 하나뿐.
     const groupLabels = [...container.querySelectorAll('[data-slot="sidebar-group-label"]')].map((el) => el.textContent);
-    expect(groupLabels).toEqual(['오늘', '일감', '콘텐츠·채널', '신뢰', '지식', '조직']);
+    expect(groupLabels).toEqual(['연결·규칙']);
 
     const groups = [...container.querySelectorAll('[data-slot="sidebar-group"]')];
     expect(groups.length).toBe(EXPECTED_GROUPS.length);
@@ -190,68 +146,59 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story
     });
   });
 
-  it('정적 항목(조직 그룹)의 href가 무변화다(path 전부 불변, 2930 I1 핵심 제약)', async () => {
+  it('정적 항목(연결·규칙 그룹)의 href가 무변화다(path 전부 불변)', async () => {
     expandAllGroups();
     await mount();
-    const membersLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.includes('구성원'));
-    expect(membersLink?.getAttribute('href')).toBe('/organization/members');
-    const eventsLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.includes('이벤트'));
-    expect(eventsLink?.getAttribute('href')).toBe('/organization/events');
+    const channelsLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.includes('채널 연결'));
+    expect(channelsLink?.getAttribute('href')).toBe('/organization/channels');
+    const rulesLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.includes('콘텐츠 규칙'));
+    expect(rulesLink?.getAttribute('href')).toBe('/organization/content-rules');
   });
 
-  it('리소스 항목(일감 그룹, org/project slug 없음)이 bare href로 폴백한다(기존 resourceLink 동작)', async () => {
+  it('리소스 항목(일감, org/project slug 없음)이 bare href로 폴백한다(기존 resourceLink 동작)', async () => {
     expandAllGroups();
     await mount();
     // startsWith 유지 — kbd 힌트 접미사가 붙는 항목이 있어 정확한 === 매칭은 못 쓴다.
-    const boardLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('보드'));
-    expect(boardLink?.getAttribute('href')).toBe('/flow');
+    const workLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('일감'));
+    expect(workLink?.getAttribute('href')).toBe('/flow');
   });
 
-  it('kbd 힌트(보드=B·스탠드업=S)가 항목별로 정확히 붙는다', async () => {
+  it('kbd 힌트(일감=B)가 정확히 붙는다', async () => {
     expandAllGroups();
     await mount();
-    const boardBtn = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('보드'));
-    expect(boardBtn?.textContent).toContain('B');
-    const standupBtn = [...container.querySelectorAll('a')].find((a) => a.textContent?.includes('스탠드업'));
-    expect(standupBtn?.textContent).toContain('S');
+    const workBtn = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('일감'));
+    expect(workBtn?.textContent).toContain('B');
   });
 
   // story #9c5e82dc(IA·S3, 유나 § 確定 2026-09-08) — 「프로젝트」 표식은 scope:'project'
-  // 9항목에만 붙고, org 11·애매 4(inbox·settings·org-briefing·org-workforce, 카디르 QA
-  // 재감사로 2→4 정정)엔 안 붙는다(무표식=org를 뜻하지 않는다 — 이 테스트는 org 대표
-  // 표본 하나를 확認한다).
-  it('scope:project 항목(보드)엔 「프로젝트」 표식이 붙는다', async () => {
+  // 항목에만 붙는다(오늘·일감의 사이드바 잔존 항목 중 「일감」이 유일한 project 표본).
+  it('scope:project 항목(일감)엔 「프로젝트」 표식이 붙는다', async () => {
     expandAllGroups();
     await mount();
-    const boardBtn = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('보드'));
-    expect(boardBtn?.textContent).toContain('프로젝트');
+    const workBtn = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('일감'));
+    expect(workBtn?.textContent).toContain('프로젝트');
   });
 
-  it('org 항목(구성원)엔 「프로젝트」 표식이 안 붙는다', async () => {
-    // story #d986fd6c(IA·S4) — 구성원(org-members)이 속한 조직 그룹은 budget=12 기본
-    // 접힘 대상이라, 이 테스트(scope 표식 유무 확認, 접힘과 무관)가 항목을 보려면 펼쳐야
-    // 한다.
+  it('org 항목(채널 연결)엔 「프로젝트」 표식이 안 붙는다', async () => {
     expandAllGroups();
     await mount();
-    const membersBtn = [...container.querySelectorAll('a')].find((a) => a.textContent?.includes('구성원'));
-    expect(membersBtn?.textContent).not.toContain('프로젝트');
+    const channelsBtn = [...container.querySelectorAll('a')].find((a) => a.textContent?.includes('채널 연결'));
+    expect(channelsBtn?.textContent).not.toContain('프로젝트');
   });
 
-  it('애매 항목(알림·설정)엔 「프로젝트」 표식이 안 붙는다', async () => {
+  it('애매 항목(오늘)엔 「프로젝트」 표식이 안 붙는다', async () => {
     expandAllGroups();
     await mount();
-    const inboxBtn = [...container.querySelectorAll('a')].find((a) => a.textContent?.includes('알림'));
-    expect(inboxBtn?.textContent).not.toContain('프로젝트');
-    const settingsBtn = [...container.querySelectorAll('a')].find((a) => a.textContent === '설정');
-    expect(settingsBtn?.textContent).not.toContain('프로젝트');
+    const todayBtn = [...container.querySelectorAll('a')].find((a) => a.textContent === '오늘');
+    expect(todayBtn?.textContent).not.toContain('프로젝트');
   });
 
-  it('순서는 라벨→표식→kbd다(보드: "보드" 다음 "프로젝트" 다음 "B")', async () => {
+  it('순서는 라벨→표식→kbd다(일감: "일감" 다음 "프로젝트" 다음 "B")', async () => {
     expandAllGroups();
     await mount();
-    const boardBtn = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('보드'));
-    const text = boardBtn?.textContent ?? '';
-    const labelIdx = text.indexOf('보드');
+    const workBtn = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('일감'));
+    const text = workBtn?.textContent ?? '';
+    const labelIdx = text.indexOf('일감');
     const scopeIdx = text.indexOf('프로젝트');
     const kbdIdx = text.lastIndexOf('B');
     expect(labelIdx).toBeGreaterThanOrEqual(0);
@@ -262,71 +209,55 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story
   it('표식은 칩/배지 모양(테두리·배경)을 안 쓴다(유나 § — 성질이지 행위가 아니다)', async () => {
     expandAllGroups();
     await mount();
-    const boardBtn = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('보드'));
-    const scopeEl = [...(boardBtn?.querySelectorAll('span') ?? [])].find((s) => s.textContent === '프로젝트');
+    const workBtn = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('일감'));
+    const scopeEl = [...(workBtn?.querySelectorAll('span') ?? [])].find((s) => s.textContent === '프로젝트');
     expect(scopeEl).toBeDefined();
     expect(scopeEl?.className).not.toMatch(/border|bg-/);
   });
 
   it('현재 경로와 일치하는 정적 항목이 active로 표시된다(isActive 판정 보존)', async () => {
-    pathnameRef.current = '/organization/events';
+    pathnameRef.current = '/organization/channels';
     expandAllGroups();
     await mount();
-    const eventsBtn = [...container.querySelectorAll('[data-slot="sidebar-menu-button"]')].find((b) => b.textContent?.includes('이벤트'));
-    expect(eventsBtn?.hasAttribute('data-active')).toBe(true);
-    const membersBtn = [...container.querySelectorAll('[data-slot="sidebar-menu-button"]')].find((b) => b.textContent?.includes('구성원'));
-    expect(membersBtn?.hasAttribute('data-active')).toBe(false);
+    const channelsBtn = [...container.querySelectorAll('[data-slot="sidebar-menu-button"]')].find((b) => b.textContent?.includes('채널 연결'));
+    expect(channelsBtn?.hasAttribute('data-active')).toBe(true);
+    const rulesBtn = [...container.querySelectorAll('[data-slot="sidebar-menu-button"]')].find((b) => b.textContent?.includes('콘텐츠 규칙'));
+    expect(rulesBtn?.hasAttribute('data-active')).toBe(false);
   });
 
-  // story #1981 — 배지 소스가 "안 읽은 알림 수"에서 "내 결재 대기 수"로 바뀌었다.
-  // story #3084(2026-08-25 층1, PO 확定) — 그 소스가 다시 /api/gates?status=pending&
-  // assigned_to_me=true(원시 배열)에서 /api/gates/designated-pending-count({count})로
-  // 교체됐다 — designated_approver_id=me AND status=pending만 세는 room-무관 SSOT
-  // (BE gates.py::get_designated_pending_count 문서 — "AC1이 이 층에서 닫히는 근거").
-  it('결재 대기 배지(inbox)가 카운트>0일 때만 렌더된다', async () => {
+  // story #1981/#3084 배지 축 — 사이드바에서 'inbox' 항목 자체가 빠졌으므로(LEGACY_NAV_
+  // ITEMS 이관, #3823 「오늘」 배지 카드가 재연결 예정) 이제 어떤 사이드바 버튼도 이
+  // 배지를 안 그린다 — 폴링 로직(app-sidebar.tsx)은 그대로 살아있다는 것만 확認한다
+  // (다음 카드가 그 값을 그대로 재사용할 수 있게).
+  it('결재 대기 카운트가 있어도(inbox 항목 자체가 사이드바에서 빠짐) 어떤 사이드바 버튼도 배지를 안 그린다', async () => {
     expandAllGroups();
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ count: 3 }), {
       status: 200, headers: { 'content-type': 'application/json' },
     })));
     await mount();
-    const inboxBtn = [...container.querySelectorAll('[data-slot="sidebar-menu-button"]')].find((b) => b.textContent?.includes('알림'));
-    expect(inboxBtn?.textContent).toContain('3');
+    const badges = [...container.querySelectorAll('[data-slot="sidebar-menu-badge"]')];
+    expect(badges).toHaveLength(0);
   });
 
-  it('결재 대기 0건이면 배지가 안 뜬다', async () => {
-    expandAllGroups();
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ count: 0 }), {
-      status: 200, headers: { 'content-type': 'application/json' },
-    })));
+  it('헤더리스 그룹(오늘·일감·결과)엔 접기 토글이 없다(옛 설정 그룹과 동형 관례)', async () => {
     await mount();
-    const inboxBtn = [...container.querySelectorAll('[data-slot="sidebar-menu-button"]')].find((b) => b.textContent?.includes('알림'));
-    expect(inboxBtn?.querySelector('[data-slot="sidebar-menu-badge"]')).toBeNull();
-  });
-
-  it('설정 그룹은 라벨 없는 유틸 그룹으로 유지된다(ia-4zone 확定)', async () => {
-    await mount();
-    const settingsLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.includes('설정') && a.getAttribute('href') === '/settings');
-    expect(settingsLink).toBeDefined();
+    const todayLink = [...container.querySelectorAll('a')].find((a) => a.textContent === '오늘');
+    expect(todayLink).toBeDefined();
+    const toggles = [...container.querySelectorAll('button[aria-expanded]')];
+    expect(toggles.some((b) => b.textContent?.includes('오늘'))).toBe(false);
+    expect(toggles.some((b) => b.textContent?.includes('일감'))).toBe(false);
+    expect(toggles.some((b) => b.textContent?.includes('결과'))).toBe(false);
   });
 
   // 카디르 QA(PR#3100) 지적 — 라벨은 그대로인 채 href만 다른 항목과 뒤바뀌는 뮤테이션은 앞
-  // 테스트들(그룹별 라벨 순서 대조 + 4항목만 개별 href 대조)로는 못 잡는다. NAV_GROUPS 20항목
-  // (챗 center 자체 href는 별도 스위트에서 대조 — I2로 21→20, I3로 flow+sprints가 board로
-  // 접혀 20→19, 스탠드업/회고는 CI orphan 가드로 되돌려 그대로 잔존, story #3179(S3c)로
-  // '대시보드' 제거돼 19→18, story 4180f67f로 조직 그룹에 '커넥터' 추가돼 18→19, story #3368로
-  // 워크 그룹에 '콘텐츠' 추가돼 19→20) 전부를 라벨→href 쌍으로 개별 대조해 "라벨은 맞는데
-  // 목적지가 틀림"을 확실히 막는다.
-  it('전 22항목(챗 center 제외)의 라벨→href 쌍이 정확하다(뒤바뀐 목적지 방지, 카디르 QA 지적 반영)', async () => {
+  // 테스트들로는 못 잡는다. 5항목(챗 center 제외) 전부를 라벨→href 쌍으로 개별 대조.
+  it('전 5항목(챗 center 제외)의 라벨→href 쌍이 정확하다(뒤바뀐 목적지 방지, 카디르 QA 지적 반영)', async () => {
     expandAllGroups();
     await mount();
     const links = [...container.querySelectorAll('a')];
     for (const [label, expectedHref] of Object.entries(EXPECTED_HREF_BY_LABEL)) {
-      // story #3402(페드루 PO 실측, PR#3768 CI red) — exact match를 먼저 찾고, 없을
-      // 때만 startsWith로 폴백한다. kbd 힌트 항목은 텍스트에 공백 없이 붙어("보드"+"B"
-      // ="보드B") exact가 안 걸려 여전히 startsWith로 정상 폴백한다. story #ee78b047
-      // (IA·S2) 이전엔 '채널 포스트'가 다른 라벨('채널')의 접두어라 exact 우선이 결정적
-      // 정확성의 유일한 버팀목이었다 — S2가 '채널'을 '채널 연결'로 개명해 그 접두 관계는
-      // 사라졌지만, exact-match-first 자체는 일반 규율로 유지한다.
+      // story #3402(페드루 PO 실측, PR#3768 CI red) — exact match 우선, 없으면 startsWith
+      // 폴백(kbd 힌트 접미사 항목 대비).
       const link = links.find((a) => a.textContent === label) ?? links.find((a) => a.textContent?.startsWith(label));
       expect(link, `링크 "${label}"를 찾지 못함`).toBeDefined();
       expect(link!.getAttribute('href'), `"${label}"의 href`).toBe(expectedHref);
@@ -362,10 +293,10 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story
   it('기억 없는 새 브라우저 — 활성 구역이 없어도(경로=/dashboard) 전 구역이 펼쳐진다(옛 규칙이면 전부 접혔어야 함)', async () => {
     stubViewportHeight(700);
     await mount();
-    const orgBriefingLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('조직 브리핑'));
-    expect(orgBriefingLink).toBeDefined();
-    const boardLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('보드'));
-    expect(boardLink).toBeDefined();
+    const todayLink = [...container.querySelectorAll('a')].find((a) => a.textContent === '오늘');
+    expect(todayLink).toBeDefined();
+    const workLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('일감'));
+    expect(workLink).toBeDefined();
     // 구역 토글 버튼만 좁혀서 잰다 — 컨테이너 전체 button[aria-expanded]는 다른 컴포넌트
     // (드롭다운·스위처 등)의 닫힌 트리거도 걸려 오탐한다.
     const toggles = [...container.querySelectorAll('[data-slot="sidebar-group-label"]')];
@@ -373,12 +304,12 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story
     expect(toggles.every((b) => b.getAttribute('aria-expanded') === 'true')).toBe(true);
   });
 
-  it('활성 구역이 있어도(경로=조직/이벤트) 비활성 구역(일감)까지 펼쳐진다(옛 규칙이면 접혔어야 함)', async () => {
-    pathnameRef.current = '/organization/events';
+  it('활성 구역이 있어도(경로=연결/채널) 비활성 구역(일감)까지 펼쳐진다(옛 규칙이면 접혔어야 함)', async () => {
+    pathnameRef.current = '/organization/channels';
     stubViewportHeight(700);
     await mount();
-    const boardLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('보드'));
-    expect(boardLink).toBeDefined();
+    const workLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('일감'));
+    expect(workLink).toBeDefined();
   });
 
   it('뷰포트 높이 800과 1080 둘 다 기본값이 전부 펼침(접힘 0)이다 — 높이 의존 0', async () => {
@@ -397,59 +328,51 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story
 
   it('구역 헤더를 클릭하면 접히고(항목 DOM에서 사라짐) 다시 클릭하면 펴진다', async () => {
     await mount();
-    const devHeader = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('일감'));
-    expect(devHeader).toBeDefined();
-    expect(devHeader?.getAttribute('aria-expanded')).toBe('true');
+    const crHeader = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('연결·규칙'));
+    expect(crHeader).toBeDefined();
+    expect(crHeader?.getAttribute('aria-expanded')).toBe('true');
 
-    await act(async () => { devHeader!.click(); });
-    expect([...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('보드'))).toBeUndefined();
-    const devHeaderAfter = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('일감'));
-    expect(devHeaderAfter?.getAttribute('aria-expanded')).toBe('false');
+    await act(async () => { crHeader!.click(); });
+    expect([...container.querySelectorAll('a')].find((a) => a.textContent?.includes('채널 연결'))).toBeUndefined();
+    const crHeaderAfter = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('연결·규칙'));
+    expect(crHeaderAfter?.getAttribute('aria-expanded')).toBe('false');
 
-    await act(async () => { devHeaderAfter!.click(); });
-    expect([...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('보드'))).toBeDefined();
+    await act(async () => { crHeaderAfter!.click(); });
+    expect([...container.querySelectorAll('a')].find((a) => a.textContent?.includes('채널 연결'))).toBeDefined();
   });
 
   // 카디르 QA(a11y, §22-18 가드) — render prop 버튼이 SidebarGroupLabel의 children(그룹명
   // 텍스트+쉐브론)을 감싸긴 하지만, 접근성 트리에서 버튼 자체의 이름은 aria-label로
-  // 명시해야 스크린리더가 7구역 토글을 구별한다(textContent만으론 landmark 목록 등에서
+  // 명시해야 스크린리더가 구역 토글을 구별한다(textContent만으론 landmark 목록 등에서
   // 이름이 안 실리는 경우가 있다) — aria-label에 그룹명+접힘상태를 담는다.
   it('구역 토글 버튼의 aria-label이 그룹명+접힘상태를 담는다(카디르 QA a11y 처방)', async () => {
     expandAllGroups();
     await mount();
-    const devHeader = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('일감'));
-    expect(devHeader?.getAttribute('aria-label')).toBe('일감 접기');
+    const crHeader = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('연결·규칙'));
+    expect(crHeader?.getAttribute('aria-label')).toBe('연결·규칙 접기');
 
-    await act(async () => { devHeader!.click(); });
-    const devHeaderAfter = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('일감'));
-    expect(devHeaderAfter?.getAttribute('aria-label')).toBe('일감 펼치기');
+    await act(async () => { crHeader!.click(); });
+    const crHeaderAfter = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('연결·규칙'));
+    expect(crHeaderAfter?.getAttribute('aria-label')).toBe('연결·규칙 펼치기');
   });
 
   it('접힘 상태가 localStorage에 사람별로 기억된다(AC3)', async () => {
     expandAllGroups();
     await mount();
-    const devHeader = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('일감'));
-    await act(async () => { devHeader!.click(); });
+    const crHeader = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('연결·규칙'));
+    await act(async () => { crHeader!.click(); });
 
     const stored = JSON.parse(localStorage.getItem('sidebar_group_collapsed') ?? '{}');
-    expect(stored.dev).toBe(true);
+    expect(stored['connect-rules']).toBe(true);
   });
 
   it('기억된 접힘 상태가 마운트 시 그대로 재현된다(기억 있으면 그 값, AC3)', async () => {
-    localStorage.setItem('sidebar_group_collapsed', JSON.stringify({ dev: true }));
+    localStorage.setItem('sidebar_group_collapsed', JSON.stringify({ 'connect-rules': true }));
     await mount();
-    const boardLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('보드'));
-    expect(boardLink).toBeUndefined();
-    const devHeader = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('일감'));
-    expect(devHeader?.getAttribute('aria-expanded')).toBe('false');
-  });
-
-  it('라벨 없는 설정 그룹엔 접기 토글이 없다(헤더 자체가 없음)', async () => {
-    await mount();
-    const settingsLink = [...container.querySelectorAll('a')].find((a) => a.textContent === '설정');
-    expect(settingsLink).toBeDefined();
-    const toggles = [...container.querySelectorAll('button[aria-expanded]')];
-    expect(toggles.some((b) => b.textContent?.includes('설정'))).toBe(false);
+    const channelsLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.includes('채널 연결'));
+    expect(channelsLink).toBeUndefined();
+    const crHeader = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('연결·규칙'));
+    expect(crHeader?.getAttribute('aria-expanded')).toBe('false');
   });
 
   // story #3762(그라운딩·유나 §定) — 4구역+관리 프레임 전체 높이가 흔한 뷰포트(≤900px)를
@@ -470,7 +393,7 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story
   it('활성 항목이 있으면 scrollIntoView({block:"nearest"})가 불린다(딥링크 진입 시 활성 항목 자동 노출)', async () => {
     const scrollIntoViewMock = vi.fn();
     Element.prototype.scrollIntoView = scrollIntoViewMock;
-    pathnameRef.current = '/organization/events';
+    pathnameRef.current = '/organization/channels';
     expandAllGroups();
     await mount();
     expect(scrollIntoViewMock).toHaveBeenCalledWith({ block: 'nearest' });

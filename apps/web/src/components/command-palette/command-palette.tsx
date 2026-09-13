@@ -18,7 +18,7 @@ import { cn } from '@/lib/utils';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { buildActionCommands, type ActionCommand } from './command-palette-actions';
 import { fetchWithAuth } from '@/lib/db/client';
-import { NAV_GROUPS, CHAT_CENTER_ITEM } from '@/lib/nav-config';
+import { NAV_GROUPS, CHAT_CENTER_ITEM, LEGACY_NAV_ITEMS } from '@/lib/nav-config';
 import { pickEuroJosa } from '@/lib/korean-particle';
 
 interface CommandItem {
@@ -110,8 +110,12 @@ export function CommandPalette({ open, onOpenChange, projectId, contextStoryId }
   // ITEM)에서 파생한다(하드코딩 7→전수 25). 라벨·경로는 nav-config.ts 단일 정본 재사용
   // (사본 0) — 사이드바에 있는 목적지는 전부 ⌘K로도 도달한다(S4 AC2 실충족). go-sprints·
   // go-epics만 위 GUARD_ANCHOR_ITEMS로 별도 유지(가드 앵커, 파생 대상 아님).
+  //
+  // story #3824(UX-v3·FE 1, 2026-09-13) — LEGACY_NAV_ITEMS(사이드바 5항목 축소로 빠진
+  // 17개)도 같은 파생 파이프라인에 얹는다 — 사이드바엔 없어도 ⌘K가 이들의 1급 진입점이라는
+  // 카드 AC2를 이 한 줄로 충족한다(전용 하드코딩 목록을 새로 만들지 않는다).
   const ITEMS = useMemo<CommandItem[]>(() => {
-    const navItems = [...NAV_GROUPS.flatMap((group) => group.items), CHAT_CENTER_ITEM];
+    const navItems = [...NAV_GROUPS.flatMap((group) => group.items), ...LEGACY_NAV_ITEMS, CHAT_CENTER_ITEM];
     const derived: CommandItem[] = navItems.map((navItem) => {
       let href = navItem.kind === 'resource' ? resourceHref(navItem.path) : navItem.path;
       if (navItem.id === 'board') href = boardHref;

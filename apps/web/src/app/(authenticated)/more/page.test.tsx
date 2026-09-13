@@ -50,22 +50,27 @@ async function mount() {
 }
 
 describe('MorePage — story #2682 GNB 미러 그룹형 허브(AC1·AC3)', () => {
-  // story #a2b004f9(IA·S1, 2026-09-08) — 'work'(zoneWork·「워크스페이스」)가 'dev'
-  // (zoneDev)로 개명되고 신규 'marketing'(zoneMarketing)이 그 뒤에 등재
-  // (MOBILE_HUB_GROUP_ORDER 갱신, app-sidebar.test.tsx도 동일 순서로 갱신). story #f81657f8
-  // 후속(유나 § 2026-09-09) — 라벨 값만 「일감」·「콘텐츠·채널」로 개명(id·순서 불변).
-  it('섹션 순서가 IA·S1 확定대로다(오늘/일감/콘텐츠·채널/신뢰/지식/조직/설정)', async () => {
+  // story #3824(UX-v3·FE 1, 페드루 PO 確定 2026-09-13 조건②) — 데스크톱 사이드바가
+  // 5항목으로 줄어도 모바일 `/more`는 회귀 0(PO 조건) — 5항목 순서 뒤에 LEGACY_NAV_ITEMS
+  // 묶음 「그 밖의 화면」이 따라붙는다. 「일감」 섹션은 그 유일한 항목(board)이
+  // MOBILE_HUB_EXCLUDE_IDS에 있어(바텀 탭이 이미 depth 1로 커버, 개편 前부터 있던 배제
+  // 규칙) 필터 뒤 빈 그룹이 되어 자연히 안 뜬다(개편 前엔 goals·loops·standup·retro가
+  // 같이 있어 안 비었었다 — 그 4개가 이제 「그 밖의 화면」으로 옮겨간 것일 뿐, 목적지
+  // 손실 0).
+  it('섹션 순서가 확定대로다(오늘/결과/연결·규칙/그 밖의 화면 — 일감은 유일 항목이 바텀탭 배제 대상이라 빈 채 안 뜬다)', async () => {
     await mount();
     const sectionLabels = [...container.querySelectorAll('h2')].map((el) => el.textContent);
-    expect(sectionLabels).toEqual(['오늘', '일감', '콘텐츠·채널', '신뢰', '지식', '조직', '설정']);
+    expect(sectionLabels).toEqual(['오늘', '결과', '연결·규칙', '그 밖의 화면']);
   });
 
-  it('조직 그룹(이벤트 포함)과 조직브리핑이 포함된다(AC1 — 기존 stub의 핵심 결함 수복)', async () => {
+  it('「그 밖의 화면」 묶음(이벤트·구성원·에이전트)과 오늘(=옛 조직브리핑)이 포함된다(AC1 — 기존 stub의 핵심 결함 수복)', async () => {
     await mount();
     expect(container.textContent).toContain('이벤트');
     expect(container.textContent).toContain('구성원');
     expect(container.textContent).toContain('에이전트');
-    expect(container.textContent).toContain('조직 브리핑');
+    const todayLink = [...container.querySelectorAll('a')].find((a) => a.getAttribute('href') === '/org-briefing');
+    expect(todayLink).toBeDefined();
+    expect(todayLink?.textContent).toContain('오늘');
   });
 
   it('flow·inbox·chats는 안 뜬다(바텀 탭이 이미 depth 1로 커버 — 중복 진입점 방지)', async () => {
@@ -102,16 +107,17 @@ describe('MorePage — story #2682 GNB 미러 그룹형 허브(AC1·AC3)', () =>
     expect(goalsLink?.getAttribute('href')).toBe('/goals');
   });
 
-  it('doc a0da40c9 §21-1(2026-09-05) — 조직 그룹에 새로 추가된 「성과 보드」가 이 모바일 허브에도 뜬다(하나만 서면 모바일 진입점이 아예 없다는 규율의 회귀가드)', async () => {
+  it('doc a0da40c9 §21-1(2026-09-05) — 조직 그룹에 새로 추가됐던 성과 보드 항목(현 라벨 「결과」, story #3824 navResults 개명)이 이 모바일 허브에도 뜬다(하나만 서면 모바일 진입점이 아예 없다는 규율의 회귀가드)', async () => {
     await mount();
-    const insightsBoardLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.includes('성과 보드'));
-    expect(insightsBoardLink?.getAttribute('href')).toBe('/organization/insights-board');
+    const insightsBoardLink = [...container.querySelectorAll('a')].find((a) => a.getAttribute('href') === '/organization/insights-board');
+    expect(insightsBoardLink?.textContent).toContain('결과');
   });
 
-  it('설정 섹션이 그룹 라벨로 뜬다(desktop 무라벨 footer와 달리 허브에선 명시 섹션)', async () => {
+  it('설정 링크는 「그 밖의 화면」 묶음 안에 남아 있다(story #3824 — 전용 섹션 특례는 폐기, 항목으로 흡수)', async () => {
     await mount();
-    const settingsSection = [...container.querySelectorAll('h2')].find((h) => h.textContent === '설정');
-    expect(settingsSection).toBeDefined();
+    // 설정은 이제 독자 h2 섹션이 아니라 「그 밖의 화면」 카드 안의 한 항목이다.
+    const legacySection = [...container.querySelectorAll('h2')].find((h) => h.textContent === '설정');
+    expect(legacySection).toBeUndefined();
     const settingsLink = [...container.querySelectorAll('a')].find((a) => a.getAttribute('href') === '/settings');
     expect(settingsLink).toBeDefined();
   });
@@ -141,11 +147,11 @@ describe('MorePage — story #fddd0e6b(IA ⑦ 전체 메뉴)', () => {
     expect(membersLink?.textContent).toContain('사람과 에이전트 명단');
   });
 
-  it('⭐탭 문장은 useIsMobile() true일 때만 서고, 나올 땐 nav 이름 셋+탭 이름 셋을 조립한다(AC1②)', async () => {
+  it('⭐탭 문장은 useIsMobile() true일 때만 서고, 나올 땐 nav 이름 셋+탭 이름 셋을 조립한다(AC1②) — story #3824 nav.chats 개명(채팅→대화)에 맞춰 조사도 은→는', async () => {
     isMobileMock = true;
     await mount();
     const hint = container.querySelector('[data-testid="more-tab-hint"]');
-    expect(hint?.textContent).toBe('보드·알림·채팅은 아래 「지금」·「결재」·「채팅」 탭에 있어 여기엔 없습니다');
+    expect(hint?.textContent).toBe('보드·알림·대화는 아래 「지금」·「결재」·「채팅」 탭에 있어 여기엔 없습니다');
   });
 
   it('⭐데스크톱 폭(useIsMobile() false)에선 탭 문장이 아예 없다(탭 바 자체가 없어 거짓이 되므로)', async () => {
@@ -178,7 +184,7 @@ describe('MorePage — story #fddd0e6b(IA ⑦ 전체 메뉴)', () => {
     expect(container.querySelectorAll('a')).toHaveLength(0);
   });
 
-  it('⭐찾기 — 지우면 전량(21개 링크) 복귀한다', async () => {
+  it('⭐찾기 — 지우면 전량 복귀한다(story #3824로 총 링크 수 변동, 리터럴 수 대신 >1로 검증)', async () => {
     await mount();
     await typeQuery('회고');
     expect(container.querySelectorAll('a')).toHaveLength(1);
