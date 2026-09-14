@@ -34,6 +34,21 @@ _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATAB
 # realdb 섹션이 Base.metadata.create_all을 호출한다 — conftest.py AST 가드(story 8236bbc3) 대응.
 pytestmark = pytest.mark.destructive_schema
 
+
+def _async_url() -> str:
+    """CI(ci.yml destructive-schema shard)는 PARITY_TEST_DATABASE_URL을 동기 드라이버
+    (`postgresql+psycopg2://`)로 준다 — Alembic 등 동기 소비처와 공유하는 env var라서다.
+    create_async_engine은 async 드라이버가 필수(`InvalidRequestError`)라 이 접두어를
+    `+asyncpg`로 정규화해야 한다(페드루 PO 2026-09-14 13:47Z 실측·CI shard 6 RED — 이 헬퍼
+    누락이 원인. test_3868_today_kind_risk_derive_ssot_realdb.py의 동형 헬퍼를 그대로
+    가져온다 — 새 로직 발명 0)."""
+    url = _REAL_DB_URL
+    for prefix in ("postgresql+psycopg2://", "postgresql+asyncpg://", "postgresql://"):
+        if url.startswith(prefix):
+            return "postgresql+asyncpg://" + url[len(prefix):]
+    return url
+
+
 _APP_ROOT = Path(__file__).resolve().parents[1] / "app"
 _GATES_PY_PATH = _APP_ROOT / "routers" / "gates.py"
 _STORIES_PY_PATH = _APP_ROOT / "routers" / "stories.py"
@@ -161,7 +176,7 @@ async def test_to_gate_response_matches_derive_risk_grade_realdb():
     from app.routers.gates import to_gate_response
     from app.services.gate_service import derive_risk_grade
 
-    engine = create_async_engine(_REAL_DB_URL)
+    engine = create_async_engine(_async_url())
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     SessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
@@ -224,7 +239,7 @@ async def test_transition_endpoint_returns_non_null_risk_grade_matching_derive_r
     from app.services.gate_service import derive_risk_grade
     from tests.conftest import override_db_and_read
 
-    engine = create_async_engine(_REAL_DB_URL)
+    engine = create_async_engine(_async_url())
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     Session = async_sessionmaker(engine, expire_on_commit=False)
