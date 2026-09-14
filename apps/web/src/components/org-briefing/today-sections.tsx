@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { FileText, HelpCircle, PenLine } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { formatCount } from '@/components/content/generation-budget-indicator';
 import { channelLabel } from '@/lib/channel-label';
@@ -43,7 +44,11 @@ function NeedsMeRow({ item }: { item: TodayNeedsMeItem }) {
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="min-w-0 truncate text-[13.5px] font-medium text-foreground">{item.workItemTitle}</span>
-          <Badge variant="info" className="shrink-0">{t(meta.pillKey)}</Badge>
+          {/* story #3853(customer-zero·오늘·토큰, 페드루 PO 確定 2026-09-14) — §③ 토큰 표
+              「사람 손 필요=경고 amber」. variant="info"(파랑)로 렌더되던 결함을 badge.tsx의
+              기존 warning 변형(border-warning-border·bg-warning-tint·text-foreground,
+              #2420 v3 규칙으로 이미 AA 검증됨)으로 정정 — 새 토큰 발명 0. */}
+          <Badge variant="warning" className="shrink-0">{t(meta.pillKey)}</Badge>
         </div>
         {item.reason ? (
           <p className="mt-0.5 truncate text-xs text-muted-foreground">{item.reason}</p>
@@ -56,12 +61,13 @@ function NeedsMeRow({ item }: { item: TodayNeedsMeItem }) {
         ) : null}
       </div>
       <div className="flex shrink-0 flex-col items-end gap-1">
-        <Link
-          href={href}
-          className="rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
-        >
-          {t(meta.actionKey)}
-        </Link>
+        {/* story #3853(§②-1 정정 「버튼은 화면 불문 주 색」) — outline 흰색 링크 스타일을
+            캐노니컬 Button(variant 기본값="default"=주 색 filled)으로 교체. asChild로
+            Link를 그대로 감싸 네비게이션은 무변(content/page.tsx 등 기존 Button asChild
+            선례와 동형). */}
+        <Button asChild size="sm">
+          <Link href={href}>{t(meta.actionKey)}</Link>
+        </Button>
         {/* story #3831 AC4 — conversation_id 있는 행만 「대화 열기」(3828 develop 착지,
             라이브 dev-app은 배포 86 뒤 반영). 있으면 짓지 않고 실 id로만 연다. */}
         {item.conversationId ? (
