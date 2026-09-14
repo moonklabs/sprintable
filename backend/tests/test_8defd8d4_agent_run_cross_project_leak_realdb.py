@@ -158,7 +158,11 @@ async def test_mutation_reverting_to_membership_scoping_leaks_run_b():
         agent_ids = [r[0] for r in agent_ids_r.all()]
         q = select(AgentRun).where(AgentRun.agent_id.in_(agent_ids)).order_by(AgentRun.created_at.desc())
         result = await self.session.execute(q)
-        return list(result.scalars().all())
+        # story #3851 — 라우터가 (list, total) 튜플을 unpack한다(repo.list()가 이제 X-Total-
+        # Count용 count도 같이 반환). 이 스텁은 옛 취약 스코핑 로직 재현이 목적이라 count
+        # 자체의 정확성은 이 테스트의 관심사가 아니다 — len()으로 충분.
+        runs = list(result.scalars().all())
+        return runs, len(runs)
 
     repo_mod.AgentRunRepository.list = _old_membership_scoped_list
     engine, Session = await _session_factory()
