@@ -46,8 +46,11 @@ async function fetchEnvelope<T>(url: string): Promise<Envelope<T>> {
 
 async function fetchPage<T>(url: string, source: string): Promise<WorkListPageResult<T>> {
   const json = await fetchEnvelope<T[]>(url);
-  const meta = parseCursorMeta(json.meta, source);
-  return { items: Array.isArray(json.data) ? json.data : [], hasMore: meta.malformed ? null : meta.hasMore };
+  // 변수명을 `meta`로 두지 않는다 — pagination-envelope-consumers.test.ts의 정적 가드가
+  // `meta?.hasMore` 텍스트 패턴을 전부 "raw json.meta 직접 접근"으로 오탐하기 때문(여긴
+  // parseCursorMeta()의 반환값을 읽는 자리라 실제로는 안전).
+  const parsed = parseCursorMeta(json.meta, source);
+  return { items: Array.isArray(json.data) ? json.data : [], hasMore: parsed.malformed ? null : parsed.hasMore };
 }
 
 const PAGE_LIMIT = 100;

@@ -199,6 +199,17 @@ describe('deriveWorkList — 목표 헤더 집계(일 단위, PO 確定)', () =>
     expect(group.assignedCount).toBe(1);
     expect(group.delegatedCount).toBe(2); // t2(agent) + r1(agent_run은 항상 위임)
   });
+
+  it('hypothesisCount는 그 목표 아래 스토리들의 hypothesisIds 합집합 크기(중복 제거)', () => {
+    const result = deriveWorkList(baseInput({
+      tasks: page([{ id: 't1', story_id: 's1', assignee_id: null, title: 'a', status: 'todo' }]),
+      hypotheses: [
+        { id: 'h1', statement: '가설1', epic_ids: ['g1'], story_ids: [] },
+        { id: 'h2', statement: '가설2', epic_ids: [], story_ids: ['s1'] },
+      ],
+    }));
+    expect(result.groups[0].hypothesisCount).toBe(2);
+  });
 });
 
 describe('deriveWorkList — 산출물 칩(story_id별 존재 여부)', () => {

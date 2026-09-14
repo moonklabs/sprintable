@@ -129,6 +129,10 @@ export interface WorkListGoalGroup {
   totalCount: number;
   assignedCount: number;
   delegatedCount: number;
+  /** 시안 3840 v2(artifact 06d2d61c) 목표 헤더 "사람 배정 N · 에이전트 위임 M · 가설 K" —
+   * 이 목표 아래 스토리들의 hypothesisIds 합집합 크기(story.hypothesisIds와 동일 직접+상속
+   * 규칙, 중복 제거). */
+  hypothesisCount: number;
   stories: WorkListStoryGroup[];
 }
 
@@ -285,6 +289,8 @@ export function deriveWorkList(input: WorkListInput): WorkList {
     }
     if (stories.length === 0) continue; // 일이 하나도 없는 목표는 이 화면에서 안 그린다(빈 목표는 목표 화면 몫).
     const totals = goalTotals.get(goal.id) ?? { done: 0, total: 0, assigned: 0, delegated: 0 };
+    const hypothesisIds = new Set<string>();
+    for (const s of stories) for (const id of s.hypothesisIds) hypothesisIds.add(id);
     groups.push({
       goalId: goal.id,
       title: goal.title,
@@ -292,6 +298,7 @@ export function deriveWorkList(input: WorkListInput): WorkList {
       totalCount: totals.total,
       assignedCount: totals.assigned,
       delegatedCount: totals.delegated,
+      hypothesisCount: hypothesisIds.size,
       stories,
     });
   }

@@ -128,14 +128,17 @@ export function WorkListShell({ projectId }: { projectId: string }) {
             ) : (
               <div className="space-y-4">
                 {filtered.groups.map((group) => (
-                  <div key={group.goalId} className="space-y-2">
-                    <div className="flex items-center gap-2 px-1">
+                  <div key={group.goalId} className="space-y-1">
+                    <div className="flex items-center justify-between gap-2 px-1">
                       <h2 className="text-sm font-semibold text-foreground">{group.title}</h2>
                       <span className="text-xs text-muted-foreground">
                         {t('goalProgressLabel', { done: group.doneCount, total: group.totalCount })}
                       </span>
                     </div>
-                    <div className="space-y-3">
+                    <div className="px-1 text-xs text-muted-foreground">
+                      {t('goalSummaryLabel', { assigned: group.assignedCount, delegated: group.delegatedCount, hypotheses: group.hypothesisCount })}
+                    </div>
+                    <div className="space-y-3 pt-1">
                       {group.stories.map((story) => (
                         <Card key={story.storyId} className="overflow-hidden">
                           <div className="border-b border-border bg-muted/30 px-3 py-2 text-xs font-medium text-muted-foreground">

@@ -15,13 +15,13 @@ function baseWorkList(): WorkList {
     partial: false,
     groups: [
       {
-        goalId: 'g1', title: '목표1', doneCount: 0, totalCount: 2, assignedCount: 1, delegatedCount: 1,
+        goalId: 'g1', title: '목표1', doneCount: 0, totalCount: 2, assignedCount: 1, delegatedCount: 1, hypothesisCount: 1,
         stories: [
           { storyId: 's1', title: '스토리1', hypothesisIds: ['h1'], rows: [baseRow({ id: 't1', isDelegated: false }), baseRow({ id: 't2', isDelegated: true })] },
         ],
       },
       {
-        goalId: 'g2', title: '목표2', doneCount: 0, totalCount: 1, assignedCount: 1, delegatedCount: 0,
+        goalId: 'g2', title: '목표2', doneCount: 0, totalCount: 1, assignedCount: 1, delegatedCount: 0, hypothesisCount: 0,
         stories: [
           { storyId: 's2', title: '스토리2', hypothesisIds: [], rows: [baseRow({ id: 't3', isDelegated: false })] },
         ],
