@@ -47,6 +47,7 @@ def _get_repo(session: AsyncSession = Depends(get_db)) -> AgentRunRepository:
 
 @router.get("", response_model=list[AgentRunResponse])
 async def list_agent_runs(
+    response: Response,
     project_id: uuid.UUID = Query(...),
     agent_id: uuid.UUID | None = Query(default=None),
     story_id: uuid.UUID | None = Query(default=None),
@@ -77,7 +78,13 @@ async def list_agent_runs(
     무시) `?status=failed`가 200으로 completed 행을 그대로 돌려주는 "오타로 써도 통과하나"
     클래스였다. `status`는 `agent_runs_status_check`(alembic 0207) DB CHECK가 이미 갖고
     있는 7값 그대로 `Literal`로 못박아 — 유효값 밖은 FastAPI가 자동 422(신규 코드 0).
-    `from`/`to`는 ISO 8601(cursor와 동형 파싱·400)·`from>to`는 422(입력 자체가 모순)."""
+    `from`/`to`는 ISO 8601(cursor와 동형 파싱·400)·`from>to`는 422(입력 자체가 모순).
+
+    story #3851(BE·목록 상한) — X-Total-Count·X-Next-Cursor(story #3841/goals.py·
+    retros.py와 동일 헤더 계약, /{id}/tool-calls의 X-Total-Count 선례를 이 목록
+    라우트에도 이식). total은 cursor 適用 後 남은 개수(base.py 관례 그대로 — cursor
+    前 grand total이 아니다). 바디는 그대로 bare list(봉투 변경 0) — 기존 소비처
+    (FE·MCP)가 무변경으로 첫 페이지를 받는다."""
     from app.services.project_auth import has_project_access
 
     proj_r = await session.execute(select(Project.id).where(Project.id == project_id, Project.org_id == org_id))
@@ -112,10 +119,13 @@ async def list_agent_runs(
             to_dt = to_dt.replace(tzinfo=timezone.utc)
     if from_dt is not None and to_dt is not None and from_dt > to_dt:
         raise HTTPException(status_code=422, detail="from must not be after to")
-    runs = await repo.list(
+    runs, total = await repo.list(
         project_id=project_id, agent_id=agent_id, story_id=story_id, status=status,
         from_dt=from_dt, to_dt=to_dt, limit=limit, cursor=cursor_dt,
     )
+    response.headers["X-Total-Count"] = str(total)
+    if runs:
+        response.headers["X-Next-Cursor"] = runs[-1].created_at.isoformat()
     name_map = await _agent_name_map(session, {r.agent_id for r in runs})
     return [
         AgentRunResponse.model_validate(r).model_copy(update={"agent_name": name_map.get(r.agent_id)})

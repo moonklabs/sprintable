@@ -96,7 +96,8 @@ async def test_list_agent_runs_200():
         exec_result.all.return_value = []
         session.execute = AsyncMock(return_value=exec_result)
         with patch("app.repositories.agent_run.AgentRunRepository.list", new_callable=AsyncMock) as mock_list:
-            mock_list.return_value = [_mock_run()]
+            # story #3851 — repo.list()가 이제 (list, total) 튜플을 반환한다(X-Total-Count 계산용).
+            mock_list.return_value = ([_mock_run()], 1)
 
             async with client as c:
                 resp = await c.get(f"/api/v2/agent-runs?project_id={PROJECT_ID}")
@@ -113,7 +114,8 @@ async def test_list_agent_runs_empty_200():
     client, session, app = await _client()
     try:
         with patch("app.repositories.agent_run.AgentRunRepository.list", new_callable=AsyncMock) as mock_list:
-            mock_list.return_value = []
+            # story #3851 — repo.list()가 이제 (list, total) 튜플을 반환한다.
+            mock_list.return_value = ([], 0)
 
             async with client as c:
                 resp = await c.get(f"/api/v2/agent-runs?project_id={PROJECT_ID}")
