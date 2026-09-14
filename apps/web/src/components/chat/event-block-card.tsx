@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
@@ -9,6 +9,20 @@ import { renderBlockTemplate, type BlockTemplate, type BlockTemplateBlock } from
 import { extractBackendErrorMessage } from '@/lib/api-error-message';
 import { EntityChip, getEntityHref } from '@/components/chat/embed-card';
 import { parseEntityRef, unescapeReferenceLabel } from '@/components/chat/entity-ref';
+import { useOrgDomainLabels } from '@/hooks/use-org-domain-labels';
+import { gateStatusLabel } from '@/lib/gate-status-label';
+
+// story #3881(customer-zero) — story status_changed preset의 {{label.from_status}}/
+// {{label.to_status}} 해소용. story-detail-panel.tsx:846의 statusKeyMap과 동형(그 파일은
+// export 안 해 재사용 불가 — 이 저장소 기존 관례가 이미 소비처마다 로컬 복제, kanban-
+// list-view.tsx/story-card.tsx 등도 각자 갖고 있다. 새 공유 모듈 신설은 이 스토리 범위 밖).
+const STORY_STATUS_KEY_MAP: Record<string, string> = {
+  backlog: 'backlog',
+  'ready-for-dev': 'readyForDev',
+  'in-progress': 'inProgress',
+  'in-review': 'inReview',
+  done: 'done',
+};
 
 interface EventBlockCardProps {
   /** story #2637 AC2/PO 리뷰(head 80319636c ①) — 파싱은 chat-bubble.tsx가 미리 끝낸다. 이
@@ -33,7 +47,11 @@ interface EventBlockCardProps {
 // 자체는 순수 문자열 계약 그대로 유지 — 세그먼트 구조로 바꾸지 않는다).
 // story #3332 — {{ref.X}}도 같은 "미해소=명시 마커" 원칙이라 시각적으로 동일하게 구분돼야
 // 한다(payload.와 ref. 두 네임스페이스를 하나의 alternation으로).
-const MISSING_MARKER_RE = /(⟨missing: (?:payload|ref)\.[a-zA-Z0-9_]+⟩)/g;
+// story #3881 — {{label.X}}(block-template.ts 3번째 네임스페이스) 신설 시 이 alternation에
+// 추가를 누락하면 ⟨missing: label.x⟩가 마커 스타일(경고색+이탤릭) 없이 평문으로 새는
+// 자리가 생긴다 — 실측으로 발견해 처방(뮤테이션 셀프체크: 추가 前엔 라벨 미싱 케이스가
+// 스타일 없이 렌더돼 회귀).
+const MISSING_MARKER_RE = /(⟨missing: (?:payload|ref|label)\.[a-zA-Z0-9_]+⟩)/g;
 // AC0-b 스펙 의도(굵게 `**…**`·코드 `` `…` ``)만 지원하는 최소 인라인 마크다운 — 그 밖의
 // 마크다운 문법(링크·이탤릭 등)은 AC0-b 예시에 없어 v1 범위 밖으로 다루지 않는다.
 const INLINE_MD_RE = /(\*\*[^*]+\*\*|`[^`]+`)/g;
@@ -133,9 +151,34 @@ function renderTextWithMissingMarkers(text: string): React.ReactNode {
  */
 export function EventBlockCard({ template, payload, refs }: EventBlockCardProps) {
   const t = useTranslations('chats');
-  const { currentMemberType, role } = useDashboardContext();
+  const tBoard = useTranslations('board');
+  const tCage = useTranslations('cage');
+  const locale = useLocale();
+  const { currentMemberType, role, orgId } = useDashboardContext();
+  // story #3287(도메인탈고정) — org 커스텀 status 라벨 오버라이드. statusLabel()이 undefined면
+  // (오버라이드 미설정) 아래에서 canonical i18n(STORY_STATUS_KEY_MAP→tBoard)으로 폴백한다 —
+  // kanban-board.tsx 등 기존 소비처와 동일 3단 폴백(org 커스텀 → canonical i18n → 원시 slug).
+  const domainLabels = useOrgDomainLabels(orgId, locale);
 
-  const blocks = renderBlockTemplate(template, payload, refs);
+  // story #3881(customer-zero, PO 確定 2026-09-14) — preset.work.status_changed/
+  // preset.gate.verdict가 원시 slug(from_status/to_status/verdict)를 payload로 실어 보내면
+  // 그 값은 발행 시점에 고정돼(en 사용자·org 커스텀 라벨과 안 맞음) 렌더 시점에 해석해야
+  // 한다 — block-template.ts는 순수 함수라 t()를 못 쓰므로, 이 호출부가 미리 계산해
+  // `{{label.X}}` 네임스페이스로 넘긴다(ref와 동형 패턴). payload에 해당 키가 없으면(다른
+  // preset이라 무관) labels에도 안 실어 — 그 템플릿에 `{{label.X}}` 자체가 없으니 무해.
+  const labels: Record<string, string> = {};
+  for (const key of ['from_status', 'to_status'] as const) {
+    const slug = payload[key];
+    if (typeof slug !== 'string') continue;
+    const statusKey = STORY_STATUS_KEY_MAP[slug];
+    labels[key] = domainLabels.statusLabel(slug) ?? (statusKey ? tBoard(statusKey) : slug);
+  }
+  const verdict = payload['verdict'];
+  if (typeof verdict === 'string') {
+    labels['verdict'] = gateStatusLabel(verdict, tCage);
+  }
+
+  const blocks = renderBlockTemplate(template, payload, refs, labels);
 
   return (
     <div className="min-w-0 max-w-full space-y-3 rounded-xl rounded-tl-sm border border-border bg-card px-3.5 py-3">

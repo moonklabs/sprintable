@@ -143,4 +143,34 @@ describe('useOrgDomainLabels — 라벨 API 인덱싱+로케일 선택(#3287 AC4
     const el = container.querySelector('[data-testid="dump"]') as HTMLElement;
     expect(el.dataset.statusBacklog).toBe('');
   });
+
+  // story #3881(customer-zero) 실측 — ok:true인데 body가 배열이 아닌 모양이면(다른 엔드포인트용
+  // mock에 우연히 걸리는 등, organization/events/page.test.tsx에서 EventBlockCard가 이 훅을
+  // 새로 쓰기 시작하며 실제로 재현) 예전 코드는 `as DomainLabelEntry[]` 단언만 믿고 그 값을
+  // 그대로 setEntries에 실어, 다음 렌더의 `for (const e of entries)`가 TypeError로 터졌다.
+  // 네트워크 실패·!ok와 동일하게 빈 배열로 방어해야 한다(양성대조 — 이 테스트가 수정 前엔
+  // 컴포넌트 자체가 throw로 죽어 RED였다).
+  it('응답이 ok인데 배열이 아닌 모양(BE 계약 드리프트·엉뚱한 mock)이면 던지지 않고 빈 목록으로 방어한다', async () => {
+    fetchWithAuthMock.mockResolvedValue({ ok: true, json: async () => ({ unexpected: 'shape' }) });
+
+    await act(async () => {
+      root.render(<Harness orgId="org-1" locale="ko" />);
+    });
+    await flush();
+
+    const el = container.querySelector('[data-testid="dump"]') as HTMLElement;
+    expect(el.dataset.statusBacklog).toBe('');
+  });
+
+  it('응답이 ok인데 body가 null이면(빈 JSON body 등) 던지지 않고 빈 목록으로 방어한다', async () => {
+    fetchWithAuthMock.mockResolvedValue({ ok: true, json: async () => null });
+
+    await act(async () => {
+      root.render(<Harness orgId="org-1" locale="ko" />);
+    });
+    await flush();
+
+    const el = container.querySelector('[data-testid="dump"]') as HTMLElement;
+    expect(el.dataset.statusBacklog).toBe('');
+  });
 });

@@ -1113,6 +1113,85 @@ describe('ChatBubble — story #2637 event_definitions block_template 카드', (
     expect(container.textContent).toContain('⟨missing: payload.note⟩');
   });
 
+  describe('story #3881(customer-zero) — {{label.X}} 네임스페이스 + optional 필드 줄 생략(0375 마이그 실물)', () => {
+    // migration 0375_status_changed_verdict_optional_fields.py의 preset.work.status_changed
+    // 실물 그대로.
+    const LABEL_TEMPLATE = {
+      blocks: [
+        { type: 'header', text: '작업 상태 변경' },
+        { type: 'text', text: '**{{payload.work_item_type}}** `{{label.from_status}}` → `{{label.to_status}}`' },
+        {
+          type: 'fields',
+          fields: [
+            { label: '대상', value: '{{payload.work_item_id}}' },
+            { label: '메모', value: '{{payload.note}}', optional: true },
+          ],
+        },
+      ],
+    };
+    const LABEL_MESSAGE: ChatMessage = {
+      ...baseMessage,
+      content: '[이벤트] preset.work.status_changed',
+      sender_type: 'agent',
+      event: {
+        event_key: 'preset.work.status_changed',
+        // 실 publisher(story_status_events.py:330-335)와 동형 — from_status/to_status는
+        // 원시 slug, note는 키 자체가 없다(AC1 그라운딩 실측 그대로).
+        payload: { work_item_type: 'story', from_status: 'ready-for-dev', to_status: 'in-progress', work_item_id: 'S-42' },
+      },
+    };
+    const catalog = { 'preset.work.status_changed': { key: 'preset.work.status_changed', org_id: null, payload_schema: {}, routing: {}, block_template: LABEL_TEMPLATE, enabled: true, version: 2 } };
+
+    it('AC2 — from_status/to_status가 원시 slug가 아니라 사람 라벨(개발 대기/진행 중)로 뜬다', async () => {
+      await act(async () => {
+        root.render(wrap(<ChatBubble message={LABEL_MESSAGE} isMine={false} eventDefinitionsByKey={catalog} />));
+      });
+      expect(container.textContent).toContain('개발 대기');
+      expect(container.textContent).toContain('진행 중');
+      // 원시 slug는 화면에 없어야 한다(사용자 대면 텍스트 축 — work_item_type="story" 값
+      // 자체는 {{payload.work_item_type}}으로 그대로 남으므로 slug 부재 검증은 status 값만).
+      expect(container.textContent).not.toContain('ready-for-dev');
+      expect(container.textContent).not.toContain('`in-progress`');
+    });
+
+    it('AC3 — note가 payload에 없으면(실 publisher와 동형) ⟨missing⟩ 플레이스홀더가 아예 안 뜬다(줄 생략)', async () => {
+      await act(async () => {
+        root.render(wrap(<ChatBubble message={LABEL_MESSAGE} isMine={false} eventDefinitionsByKey={catalog} />));
+      });
+      expect(container.textContent).not.toContain('⟨missing: payload.note⟩');
+      expect(container.textContent).not.toContain('메모');
+    });
+
+    it('⟨missing: label.X⟩도 payload/ref와 동일 마커 스타일(text-warning-strong·이탤릭)로 렌더된다(MISSING_MARKER_RE alternation 누락 회귀가드)', async () => {
+      // to_status가 payload에 아예 없으면(work_item_type만 온 방어적 케이스) EventBlockCard의
+      // labels 계산 자체가 그 키를 안 채운다(labels[key] 할당은 payload에 값이 있을 때만
+      // 실행 — typeof slug !== 'string'이면 continue) — {{label.to_status}}가 진짜 미해소로
+      // 남는 유일한 실제 경로.
+      const message: ChatMessage = {
+        ...LABEL_MESSAGE,
+        event: { ...LABEL_MESSAGE.event!, payload: { work_item_type: 'story', from_status: 'ready-for-dev', work_item_id: 'S-42' } },
+      };
+      await act(async () => {
+        root.render(wrap(<ChatBubble message={message} isMine={false} eventDefinitionsByKey={catalog} />));
+      });
+      const markerEl = Array.from(container.querySelectorAll('em')).find((e) => e.textContent === '⟨missing: label.to_status⟩');
+      expect(markerEl).not.toBeUndefined();
+      expect(markerEl!.className).toContain('text-warning-strong');
+    });
+
+    it('AC3 양성대조 — note에 실 값이 있으면 그 줄이 보인다(과잉 생략 아님)', async () => {
+      const withNote: ChatMessage = {
+        ...LABEL_MESSAGE,
+        event: { ...LABEL_MESSAGE.event!, payload: { ...LABEL_MESSAGE.event!.payload, note: '재작업 필요' } },
+      };
+      await act(async () => {
+        root.render(wrap(<ChatBubble message={withNote} isMine={false} eventDefinitionsByKey={catalog} />));
+      });
+      expect(container.textContent).toContain('메모');
+      expect(container.textContent).toContain('재작업 필요');
+    });
+  });
+
   describe('story #3332 — {{ref.X}} 네임스페이스(event.refs, publish_registry_event이 계산해 준 참조 토큰)', () => {
     const REF_TEMPLATE = {
       blocks: [

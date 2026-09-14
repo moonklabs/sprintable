@@ -68,8 +68,16 @@ export function useOrgDomainLabels(orgId: string | undefined, locale: string): O
           if (!cancelled) setEntries([]);
           return;
         }
-        const data = (await res.json()) as DomainLabelEntry[];
-        if (!cancelled) setEntries(data);
+        const data = (await res.json()) as unknown;
+        // story #3881(customer-zero) 실측 — 이 `as` 단언은 런타임 검증이 아니라 컴파일 타임
+        // 힌트일 뿐이었다. 응답 body가 배열이 아닌 모양(예: 다른 엔드포인트 mock에 걸린
+        // 테스트·BE 계약 드리프트·프록시 중간 오류 페이지)이면 `setEntries(data)`가 비배열
+        // 값을 그대로 state에 싣고, 다음 렌더의 `for (const e of entries)`가 즉시 TypeError로
+        // 터진다(EventBlockCard가 이 훅을 새로 쓰기 시작하면서 실측 발견 — organization/
+        // events/page.test.tsx의 범용 fetch mock이 이 엔드포인트를 못 알아보는 모양을
+        // 돌려줌). 네트워크 실패와 동일하게(위 catch) 빈 배열로 방어한다 — "무설정=기본값"
+        // 원칙 그대로, 응답 모양이 이상해도 이 장식 계층이 화면 전체를 깨면 안 된다.
+        if (!cancelled) setEntries(Array.isArray(data) ? data : []);
       } catch {
         // 네트워크 실패 등 — 조용히 폴백(라벨 오버라이드는 장식 계층, 실패가 보드 자체를
         // 막으면 안 된다·설계 doc의 "무설정=기본값" 원칙과 동일 정신).
