@@ -477,7 +477,7 @@ describe('ChatInput — STEER 모드(story #2942)', () => {
 
     // BE 원문 메시지가 아니라 doc §4가 요구하는 명시 카피로 교체돼야 한다.
     expect(container.textContent).not.toContain('internal BE msg');
-    expect(container.textContent).toContain('이 스레드에 없는 사람에게는 여기서 방향 전환 지시를 보낼 수 없습니다');
+    expect(container.textContent).toContain('이 스레드에 없는 사람에게는 여기서 방향 전환 지시를 보낼 수 없어요');
     // 패널은 열린 채 유지(재시도 가능 — 대상 재선택 등).
     expect(container.textContent).toContain('방향 전환 지시');
   });
@@ -516,7 +516,7 @@ describe('ChatInput — STEER 모드(story #2942)', () => {
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 
     expect(container.textContent).not.toContain('internal BE msg');
-    expect(container.textContent).toContain('이 스레드에 없는 사람에게는 여기서 방향 전환 지시를 보낼 수 없습니다');
+    expect(container.textContent).toContain('이 스레드에 없는 사람에게는 여기서 방향 전환 지시를 보낼 수 없어요');
   });
 
   // story #3203(카디르 QA 블로킹·2026-08-29) — BE가 orphan participant.name을 이제 null로

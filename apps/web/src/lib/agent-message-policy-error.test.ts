@@ -46,9 +46,9 @@ describe('buildPolicyDeniedMessage', () => {
   const members = [{ id: 'a-1', name: '점검봇' }, { id: 'm-1', name: '유나' }];
   const t = (key: string, values?: Record<string, string>) => {
     const templates: Record<string, string> = {
-      policyDeniedAllowlistMiss: '{member}님은 {agent}의 발신 허용 목록에 없습니다.',
-      policyDeniedCreatedByNone: '{agent}에게 생성자가 설정돼 있지 않아 대화를 시작할 수 없습니다.',
-      policyDeniedCreatorNotParticipant: '{agent}의 생성자가 이 대화에 참여하고 있지 않아 메시지를 보낼 수 없습니다.',
+      policyDeniedAllowlistMiss: '{member}님은 {agent}의 발신 허용 목록에 없어요.',
+      policyDeniedCreatedByNone: '{agent}에게 생성자가 설정돼 있지 않아 대화를 시작할 수 없어요.',
+      policyDeniedCreatorNotParticipant: '{agent}의 생성자가 이 대화에 참여하고 있지 않아 메시지를 보낼 수 없어요.',
       policyDeniedUnknownAgent: '이 에이전트',
       policyDeniedUnknownMember: '이 멤버',
     };
@@ -59,21 +59,21 @@ describe('buildPolicyDeniedMessage', () => {
 
   it('allowlist_miss — 에이전트·멤버 둘 다 이름으로 치환된다(AC2 핵심)', () => {
     const msg = buildPolicyDeniedMessage({ agent_id: 'a-1', member_id: 'm-1', reason: 'allowlist_miss' }, members, t);
-    expect(msg).toBe('유나님은 점검봇의 발신 허용 목록에 없습니다.');
+    expect(msg).toBe('유나님은 점검봇의 발신 허용 목록에 없어요.');
   });
 
   it('created_by_none — 에이전트 이름만 필요, member_id 없어도 안 깨진다', () => {
     const msg = buildPolicyDeniedMessage({ agent_id: 'a-1', reason: 'created_by_none' }, members, t);
-    expect(msg).toBe('점검봇에게 생성자가 설정돼 있지 않아 대화를 시작할 수 없습니다.');
+    expect(msg).toBe('점검봇에게 생성자가 설정돼 있지 않아 대화를 시작할 수 없어요.');
   });
 
   it('creator_not_participant — 에이전트 이름 치환', () => {
     const msg = buildPolicyDeniedMessage({ agent_id: 'a-1', reason: 'creator_not_participant' }, members, t);
-    expect(msg).toBe('점검봇의 생성자가 이 대화에 참여하고 있지 않아 메시지를 보낼 수 없습니다.');
+    expect(msg).toBe('점검봇의 생성자가 이 대화에 참여하고 있지 않아 메시지를 보낼 수 없어요.');
   });
 
   it('members 목록에 없는 id(경합·페이지네이션 누락)는 정직한 폴백 문구로 떨어진다(침묵 오렌더 금지)', () => {
     const msg = buildPolicyDeniedMessage({ agent_id: 'unknown-agent', member_id: 'unknown-member', reason: 'allowlist_miss' }, members, t);
-    expect(msg).toBe('이 멤버님은 이 에이전트의 발신 허용 목록에 없습니다.');
+    expect(msg).toBe('이 멤버님은 이 에이전트의 발신 허용 목록에 없어요.');
   });
 });
