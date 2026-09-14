@@ -182,6 +182,37 @@ export function resolveEffectiveScopedKeys(ko: Record<string, unknown>): string[
   return [...new Set([...SCOPED_KEYS, ...namespaceKeys])];
 }
 
+export interface NamespaceLeafCountViolation {
+  namespace: string;
+  actualCount: number;
+  minExpected: number;
+}
+
+// story #3885 CHANGES①(PO PR 코멘트, 2026-09-14 18:02Z) — `flattenNamespaceLeafKeys`는
+// 네임스페이스가 ko.json에서 사라지거나 개명되면 조용히 []를 돌려준다 — 그러면
+// `resolveEffectiveScopedKeys`가 소리 없이 SCOPED_KEYS만으로 좁아져(namespace 전량
+// 승격이 아무것도 안 더하는 상태) 이 가드가 chats 신규 위반을 하나도 못 잡게 된다.
+// 네임스페이스별 leaf 최소 개수(실측값에서 여유를 둔 하한 — 리팩터로 인한 자연 증감은
+// 통과하되, 네임스페이스 자체가 사라지면 반드시 fail-loud)로 이 사각을 막는다.
+const SCOPED_NAMESPACE_MIN_LEAF_COUNT: Readonly<Record<(typeof SCOPED_NAMESPACES)[number], number>> = {
+  chats: 200, // 실측 239개(2026-09-14, story #3885 그라운딩) — 여유 하한
+};
+
+/** SCOPED_NAMESPACES 각각의 실제 leaf 개수가 하한을 밑도는지 검사하는 순수 함수 —
+ * 위반을 반환한다(main()이 이 반환값을 보고 exit 1을 결정, 이 함수 자체는 throw/exit
+ * 안 함 — 다른 판정 함수들과 같은 결). */
+export function checkScopedNamespaceMinimums(ko: Record<string, unknown>): NamespaceLeafCountViolation[] {
+  const violations: NamespaceLeafCountViolation[] = [];
+  for (const ns of SCOPED_NAMESPACES) {
+    const actualCount = flattenNamespaceLeafKeys(ko, ns).length;
+    const minExpected = SCOPED_NAMESPACE_MIN_LEAF_COUNT[ns];
+    if (actualCount < minExpected) {
+      violations.push({ namespace: ns, actualCount, minExpected });
+    }
+  }
+  return violations;
+}
+
 // 「습니다」·「십시오」는 완성형(NFC) 원문에 그대로 리터럴로 존재한다(자음어간 종결 — 예:
 // 「없습니다」는 습·니·다 3음절이 그대로 붙어 있다). 「ㅂ니다」(모음어간+ㅂ니다, 예: 「합니다」
 // ·「됩니다」)는 다르다 — 그 ㅂ은 앞 음절의 **받침**으로 합쳐진 한 글자(합/됩/갑)라, NFC
@@ -253,6 +284,20 @@ export function findHonorificToneInScopedKeys(
 function main(): void {
   const text = readFileSync(path.join(MESSAGES_DIR, KO_FILE), 'utf8');
   const ko = JSON.parse(text) as Record<string, unknown>;
+
+  const namespaceViolations = checkScopedNamespaceMinimums(ko);
+  if (namespaceViolations.length > 0) {
+    for (const v of namespaceViolations) {
+      console.error(
+        `FAIL: SCOPED_NAMESPACES의 "${v.namespace}" 네임스페이스 leaf가 ${v.actualCount}개뿐` +
+          `(최소 ${v.minExpected}개 기대) — ko.json에서 "${v.namespace}" 네임스페이스가 사라졌거나` +
+          ' 개명됐을 수 있다. 이대로면 가드가 헛돌고 있다(namespace 전량 승격이 조용히' +
+          ' SCOPED_KEYS만으로 좁아진다).',
+      );
+    }
+    process.exit(1);
+  }
+
   const effectiveKeys = resolveEffectiveScopedKeys(ko);
   const findings = findHonorificToneInScopedKeys(ko, effectiveKeys);
 

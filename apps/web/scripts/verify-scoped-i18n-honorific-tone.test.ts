@@ -6,6 +6,7 @@ import {
   HONORIFIC_TONE_EXCEPTIONS,
   SCOPED_KEYS,
   SCOPED_NAMESPACES,
+  checkScopedNamespaceMinimums,
   findHonorificToneInScopedKeys,
   resolveEffectiveScopedKeys,
 } from './verify-scoped-i18n-honorific-tone';
@@ -219,5 +220,39 @@ describe('실 ko.json — chats 네임스페이스 전량(story #3885 AC2)', () 
     const effectiveKeys = resolveEffectiveScopedKeys(ko);
     expect(effectiveKeys).not.toContain('cage.gateDetailNotFound');
     expect(findHonorificToneInScopedKeys(ko, effectiveKeys)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// story #3885 CHANGES①(PO PR 코멘트, 2026-09-14 18:02Z) — 네임스페이스 부재/개명
+// fail-loud(flattenNamespaceLeafKeys가 []를 조용히 돌려줘 승격이 소리 없이 좁아지는
+// 사각 봉쇄).
+// ---------------------------------------------------------------------------
+
+describe('checkScopedNamespaceMinimums — 순수 함수', () => {
+  it('⭐네임스페이스가 ko.json에 아예 없으면(개명·삭제 시뮬레이션) 위반을 낸다', () => {
+    const violations = checkScopedNamespaceMinimums({ board: { x: 'y' } }); // chats 자체가 없음
+    expect(violations).toEqual([{ namespace: 'chats', actualCount: 0, minExpected: 200 }]);
+  });
+
+  it('⭐네임스페이스가 있지만 leaf가 하한 밑이면(부분 삭제·오염) 위반을 낸다', () => {
+    const violations = checkScopedNamespaceMinimums({ chats: { a: 'x', b: 'y' } }); // 2개뿐
+    expect(violations).toEqual([{ namespace: 'chats', actualCount: 2, minExpected: 200 }]);
+  });
+
+  it('음성대조 — 실 ko.json은 하한을 넉넉히 넘어 위반 0건', () => {
+    const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
+    const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
+    expect(checkScopedNamespaceMinimums(ko)).toEqual([]);
+  });
+});
+
+describe('SCOPED_NAMESPACE_MIN_LEAF_COUNT — 하한이 실측치보다 낮게 그라운딩됐다', () => {
+  it('실 ko.json의 chats leaf 개수가 하한(200) 이상이다(실측 239)', () => {
+    const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
+    const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    const chatsLeafCount = effectiveKeys.filter((k) => k.startsWith('chats.')).length;
+    expect(chatsLeafCount).toBeGreaterThanOrEqual(200);
   });
 });
