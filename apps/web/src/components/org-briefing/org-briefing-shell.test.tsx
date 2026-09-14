@@ -141,6 +141,57 @@ describe('OrgBriefingShell — story #3831 AC1(3구역, 3823 route 단일 소비
     expect(link?.getAttribute('href')).toBe('/gates/g1');
   });
 
+  // story #3853(customer-zero·오늘·토큰, 페드루 PO 確定 2026-09-14) — §③ 토큰 표 「사람 손
+  // 필요=경고 amber」. 3831 착지분이 variant="info"(파랑)를 썼던 결함의 회귀가드 — 상태
+  // pill이 badge.tsx의 warning 변형(border-warning-border·bg-warning-tint) 클래스를 쓰는지
+  // 직접 대조한다(info/기본 클래스가 안 섞여 있어야 함).
+  it('사람 손 필요 행 상태 pill은 amber(warning) 변형이다(info 아님)', async () => {
+    stubToday({
+      ...EMPTY_TODAY,
+      needs_me: [{
+        kind: 'signature', risk: 'high', source: 'gate', source_id: 'g1',
+        work_item: { type: 'story', id: 's1', title: 'Threads에 글 발행' },
+        requested_by: null, reason: null, created_at: '2026-09-13T05:00:00Z', actions: ['approve'],
+      }],
+      needs_me_count: 1,
+    });
+    await mount();
+    const pill = [...container.querySelectorAll('span')].find((s) => s.textContent === '서명 대기');
+    expect(pill).toBeTruthy();
+    expect(pill!.className).toContain('bg-warning-tint');
+    expect(pill!.className).not.toContain('bg-info-tint');
+  });
+
+  // 같은 스토리 §②-1 — 행 주 액션(승인/승인하고 서명/답하기)은 캐노니컬 Button(기본
+  // variant="default"=주 색 filled)이어야 한다. 3831 착지분은 outline 흰색 링크 스타일
+  // (border border-border)이었다 — bg-primary 존재+border-border 부재로 대조한다.
+  it('행 주 액션 버튼은 Button 기본 variant(주 색 filled)다(outline 아님)', async () => {
+    stubToday({
+      ...EMPTY_TODAY,
+      needs_me: [{
+        kind: 'signature', risk: 'high', source: 'gate', source_id: 'g1',
+        work_item: { type: 'story', id: 's1', title: 'Threads에 글 발행' },
+        requested_by: null, reason: null, created_at: '2026-09-13T05:00:00Z', actions: ['approve'],
+      }],
+      needs_me_count: 1,
+    });
+    await mount();
+    const link = [...container.querySelectorAll('a')].find((a) => a.textContent === '승인하고 서명');
+    expect(link).toBeTruthy();
+    expect(link!.className).toContain('bg-primary');
+    expect(link!.className).not.toContain('border-border');
+  });
+
+  // 헤더 배지도 같은 §③ 축 — 3831 착지분은 bg-primary/10(파랑 알파) 하드코딩이었다.
+  it('헤더 「사람 손이 필요한 일 N」 배지도 amber(warning) 변형이다(파랑 하드코딩 아님)', async () => {
+    stubToday({ ...EMPTY_TODAY, needs_me_count: 2 });
+    await mount();
+    const badge = container.querySelector('[data-testid="needs-me-header-badge"]');
+    expect(badge).toBeTruthy();
+    expect(badge!.className).toContain('bg-warning-tint');
+    expect(badge!.className).not.toContain('bg-primary/10');
+  });
+
   it('오늘 내 결정이 0건이면 「모두 확인했어요」', async () => {
     stubToday(EMPTY_TODAY);
     await mount();

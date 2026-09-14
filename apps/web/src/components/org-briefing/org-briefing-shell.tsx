@@ -5,6 +5,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -124,12 +125,12 @@ export function OrgBriefingShell() {
           <p className="mt-1 text-sm text-muted-foreground">{dateLabel}</p>
         </div>
         {data && snapshot.needsMeCount > 0 ? (
-          <span
-            data-testid="needs-me-header-badge"
-            className="shrink-0 rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-semibold text-primary"
-          >
+          // story #3853(§③ 토큰 표 「사람 손 필요=경고 amber」) — 하드코딩 bg-primary/10
+          // (파랑)을 캐노니컬 Badge variant="warning"으로 교체(badge.tsx 기존 변형, 새
+          // 토큰 발명 0). data-testid는 org-briefing-shell.test.tsx가 그대로 쓴다.
+          <Badge variant="warning" data-testid="needs-me-header-badge" className="shrink-0">
             {t('needsMeBadge', { count: snapshot.needsMeCount })}
-          </span>
+          </Badge>
         ) : null}
       </div>
 
