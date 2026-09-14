@@ -16,6 +16,7 @@ import { cn } from '@/lib/utils';
 import {
   NAV_GROUPS,
   CHAT_CENTER_ITEM,
+  VISIBLE_LEGACY_NAV_ITEMS,
 } from '@/lib/nav-config';
 import { useSseMultiplexerContext } from '@/components/realtime-provider';
 import {
@@ -60,6 +61,13 @@ interface AppSidebarProps {
 // 없는 그룹은 위 동적 기본값을 따른다(AC3 "기억이 없을 때도 기본값으로 온전히 선다").
 const SIDEBAR_GROUP_COLLAPSED_STORAGE_KEY = 'sidebar_group_collapsed';
 
+// story #3836(UX-v3·셸 후속, 선생님 지적 2026-09-14) — NAV_GROUPS 밖의 새 접힘 절(「더보기」,
+// LEGACY_NAV_ITEMS 17개). id는 모바일 /more의 legacyGroup.id('legacy')와 맞춰(같은 개념,
+// 두 화면에서 같은 이름) collapsedOverrides가 이 그룹도 NAV_GROUPS와 동일한 «사람별 기억»
+// 경로를 그대로 탄다(아래 mergeStoredCollapsedOverrides가 group id 목록을 인자로 받도록
+// 넓혀 NAV_GROUPS 밖 이 id도 포함시킨다 — 전용 코드 경로 0).
+const LEGACY_GROUP_ID = 'legacy';
+
 function readStoredCollapsedOverrides(): Record<string, boolean> {
   if (typeof window === 'undefined') return {};
   try {
@@ -75,13 +83,14 @@ function readStoredCollapsedOverrides(): Record<string, boolean> {
 function mergeStoredCollapsedOverrides(
   defaults: Set<string>,
   overrides: Record<string, boolean>,
+  collapsibleGroupIds: string[],
 ): Set<string> {
   const next = new Set(defaults);
-  for (const group of NAV_GROUPS) {
-    const stored = overrides[group.id];
+  for (const groupId of collapsibleGroupIds) {
+    const stored = overrides[groupId];
     if (stored === undefined) continue;
-    if (stored) next.add(group.id);
-    else next.delete(group.id);
+    if (stored) next.add(groupId);
+    else next.delete(groupId);
   }
   return next;
 }
@@ -190,7 +199,11 @@ export function AppSidebar({
   // 만들던 계산(activeGroupId·viewportHeight)도 이제 이 자리에선 쓸모가 없다 — 기본값은
   // 뷰포트/활성 구역과 무관한 빈 Set(전부 펼침). 아래 collapsedOverrides(사람별 기억)가
   // 유일한 접힘 경로다.
-  const defaultCollapsedGroupIds = useMemo(() => new Set<string>(), []);
+  // story #3836 — 위 f81657f8 규칙(NAV_GROUPS는 기본 전부 펼침)은 그대로 두되, 「더보기」
+  // (LEGACY_GROUP_ID)만 이 카드의 명시 AC1대로 기본 접힘이다 — 서로 다른 두 그룹 «종류»의
+  // 기본값이 다른 것이지 f81657f8 결정을 뒤집는 게 아니다(그 결정은 NAV_GROUPS 대상으로
+  // 그대로 유효).
+  const defaultCollapsedGroupIds = useMemo(() => new Set<string>([LEGACY_GROUP_ID]), []);
 
   // story #d986fd6c(IA·S4) — 그룹별 접힘 «기억». 서버 렌더는 항상 빈 overrides({})로
   // 시작해(하이드레이션 불일치 방지, sidebar_width의 SIDEBAR_WIDTH_STORAGE_KEY 마운트-후
@@ -218,9 +231,13 @@ export function AppSidebar({
       setCollapsedOverrides(overrides);
     }
   }, []);
+  const collapsibleGroupIds = useMemo(
+    () => [...NAV_GROUPS.map((g) => g.id), LEGACY_GROUP_ID],
+    [],
+  );
   const collapsedGroupIds = useMemo(
-    () => mergeStoredCollapsedOverrides(defaultCollapsedGroupIds, collapsedOverrides),
-    [defaultCollapsedGroupIds, collapsedOverrides],
+    () => mergeStoredCollapsedOverrides(defaultCollapsedGroupIds, collapsedOverrides, collapsibleGroupIds),
+    [defaultCollapsedGroupIds, collapsedOverrides, collapsibleGroupIds],
   );
 
   const toggleGroupCollapsed = useCallback((groupId: string) => {
@@ -461,6 +478,78 @@ export function AppSidebar({
           </Fragment>
           );
         })}
+        {/* story #3836(UX-v3·셸 후속, 선생님 지적 2026-09-14) — 3824가 5항목으로 줄이며
+            사이드바에서 빠진 LEGACY_NAV_ITEMS 17개(⌘K 팔레트·모바일 /more가 이미 그 1급
+            진입점)를 이 접힘 절로 되돌린다. 항목 자체는 VISIBLE_LEGACY_NAV_ITEMS(nav-
+            config.ts SSOT, 모바일 /more와 정확히 같은 정의) 그대로 순회 — 이 파일이
+            자기만의 목록을 다시 짓지 않는다(AC2/AC3). 기본 접힘(AC1) — 위 f81657f8은
+            NAV_GROUPS(전부 펼침)만의 결정이라 이 새 그룹엔 안 걸린다. */}
+        {(() => {
+          // story #3836(AC1) — 「더보기」 안 항목 링크(NAV_GROUPS 렌더 루프와 동일한
+          // static/resource 링크 계산, 새 축 0). 한 항목이라도 활성이면 접힘 상태와
+          // 무관하게 펼쳐야 활성 하이라이트가 실제로 보인다(legacyIsCollapsed 계산).
+          const legacyLinks = VISIBLE_LEGACY_NAV_ITEMS.map((item) => ({
+            item,
+            link: item.kind === 'static' ? { href: item.path, isActive: isActive(item.path) } : resourceLink(item.path),
+          }));
+          const legacyHasActiveItem = legacyLinks.some(({ link }) => link.isActive);
+          const legacyIsCollapsed = collapsedGroupIds.has(LEGACY_GROUP_ID) && !legacyHasActiveItem;
+          const legacyGroupLabel = t('navMore');
+          const legacyToggleAriaLabel = legacyIsCollapsed
+            ? t('groupExpand', { group: legacyGroupLabel })
+            : t('groupCollapse', { group: legacyGroupLabel });
+          return (
+            <SidebarGroup>
+              <SidebarGroupLabel
+                render={
+                  <button
+                    type="button"
+                    onClick={() => toggleGroupCollapsed(LEGACY_GROUP_ID)}
+                    aria-expanded={!legacyIsCollapsed}
+                    aria-label={legacyToggleAriaLabel}
+                  />
+                }
+                className="w-full cursor-pointer justify-between hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+              >
+                <span>{legacyGroupLabel}</span>
+                <ChevronDown className={cn('size-3.5 shrink-0 transition-transform duration-150', legacyIsCollapsed && '-rotate-90')} />
+              </SidebarGroupLabel>
+              {!legacyIsCollapsed ? (
+                <SidebarGroupContent>
+                  <SidebarMenu>
+                    {legacyLinks.map(({ item, link }) => {
+                      const Icon = item.icon;
+                      const label = t(item.labelKey);
+                      return (
+                        <SidebarMenuItem key={item.id}>
+                          <SidebarMenuButton
+                            render={
+                              <Link
+                                href={link.href}
+                                ref={link.isActive ? activeMenuItemRef : undefined}
+                                data-legacy-nav-id={item.id}
+                              />
+                            }
+                            isActive={link.isActive}
+                            tooltip={label}
+                          >
+                            <Icon />
+                            <span data-nav-label>{label}</span>
+                            {item.scope === 'project' ? (
+                              <span className="ml-auto flex shrink-0 items-center gap-1.5">
+                                <ScopeMark>{t('scopeProject')}</ScopeMark>
+                              </span>
+                            ) : null}
+                          </SidebarMenuButton>
+                        </SidebarMenuItem>
+                      );
+                    })}
+                  </SidebarMenu>
+                </SidebarGroupContent>
+              ) : null}
+            </SidebarGroup>
+          );
+        })()}
       </SidebarContent>
 
       <SidebarFooter className="space-y-2 p-2">

@@ -8,7 +8,7 @@ import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Card, CardHeader } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { LEGACY_NAV_ITEMS, MOBILE_HUB_EXCLUDE_IDS, MOBILE_HUB_GROUP_ORDER, NAV_GROUPS } from '@/lib/nav-config';
+import { VISIBLE_LEGACY_NAV_ITEMS, MOBILE_HUB_EXCLUDE_IDS, MOBILE_HUB_GROUP_ORDER, NAV_GROUPS } from '@/lib/nav-config';
 import { pickEunNeunJosa } from '@/lib/korean-particle';
 
 // story #2682(모바일 IA S2, doc mobile-ia-full-completion-2678 §2.3) — 임시 평면 stub(#1958·
@@ -34,11 +34,14 @@ export default function MorePage() {
   // PO 조건① "한 자리에서만 정의") 묶음 카드를 하나 더 얹는다. 라벨은 새 키
   // `moreOtherScreens`("그 밖의 화면") — 기존 zone 이름들과 겹치지 않는 새 개념(5항목
   // 밖 전부)이라 재사용할 기존 키가 없다.
+  // story #3836 — 항목 자체는 nav-config.ts::VISIBLE_LEGACY_NAV_ITEMS(LEGACY_NAV_ITEMS
+  // - MOBILE_HUB_EXCLUDE_IDS, 사이드바 「더보기」와 같은 정의)를 그대로 쓴다(이 파일
+  // 자체의 `.filter()` 재구현 제거 — SSOT 1곳).
   const legacyGroup = useMemo(
     () => ({
       id: 'legacy',
       labelKey: 'moreOtherScreens',
-      items: LEGACY_NAV_ITEMS.filter((item) => !MOBILE_HUB_EXCLUDE_IDS.has(item.id)),
+      items: VISIBLE_LEGACY_NAV_ITEMS,
     }),
     [],
   );
