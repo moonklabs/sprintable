@@ -706,6 +706,14 @@ export const EXEMPT_PAIRS = new Set<string>([
   // 본문 링크)와 부분문자열로 겹친다 — 위와 동형 근거(다른 구획·다른 위계, eyebrow vs
   // 본문 링크). evidenceTitle은 기존 proofCapsule.evidence.label의 "근거" 낱말 재사용.
   'workcell.conversationChatProofCount <-> workcell.evidenceTitle',
+  // story #3880 CHANGES②③(PO 화면 리뷰, 2026-09-14 17:00Z 유나 §⑤ 3880-d 확定) —
+  // confidenceCaption="단계 {done}/{total}"(workcell.tsx:227, 파이프라인 진행바 옆 작은
+  // 모노스페이스 캡션·전역 신뢰도 미터)과 runStage="단계"(workcell.tsx:430, Run 패널
+  // 본문 안 "단계 구현→검증" 필드 라벨)가 부분문자열로 겹친다 — 승인대기(append만, PO
+  // 確定 전): 다른 구획(파이프라인 헤더 vs Run 패널 body)·다른 위계(캡션 vs 필드 라벨)로
+  // 이미 구분됨(위 conversationChatProofCount류와 동형). 낱말 자체는 Yuna §⑤ 3880-d
+  // 확定분 그대로(재선택 없음) — PO 승인 대기 中, 이의 있으면 이 줄 제거하고 낱말 재요청.
+  'workcell.confidenceCaption <-> workcell.runStage',
 ]);
 
 // ⛔⭐오르테가군 지적(2026-07-31) — 이 목록에 «새로» 넣는 것은 PO 승인을 거친다. 이유 없이

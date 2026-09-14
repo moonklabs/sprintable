@@ -533,16 +533,16 @@ describe('Workcell — story #5b3aea5e Brief 콘텐츠 층(마크다운 스트�
     expect(markup).not.toContain('더 보기 →');
   });
 
-  it('dod=null이면 "완료 조건 미기재 · 본문 AC 보기"를 정직 표시한다(onDodMore 제공 시)', () => {
+  it('dod=null이면 "완료 조건 미기재 · 본문 완료 기준 보기"를 정직 표시한다(onDodMore 제공 시)', () => {
     const markup = renderKo(<Workcell {...BASE} brief={{ ...BASE.brief, dod: null, onDodMore: () => {} }} />);
     expect(markup).toContain('완료 조건 미기재');
-    expect(markup).toContain('본문 AC 보기');
+    expect(markup).toContain('본문 완료 기준 보기');
   });
 
-  it('dod=null·onDodMore 없으면 "본문 AC 보기" 링크 없이 "완료 조건 미기재"만 뜬다', () => {
+  it('dod=null·onDodMore 없으면 "본문 완료 기준 보기" 링크 없이 "완료 조건 미기재"만 뜬다', () => {
     const markup = renderKo(<Workcell {...BASE} brief={{ ...BASE.brief, dod: null }} />);
     expect(markup).toContain('완료 조건 미기재');
-    expect(markup).not.toContain('본문 AC 보기');
+    expect(markup).not.toContain('본문 완료 기준 보기');
   });
 
   it('dod가 있으면 goal과 동형으로 스트립+리드+클램프 처리된다(마크다운 노출 0)', () => {
