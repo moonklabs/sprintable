@@ -1,11 +1,27 @@
+// story #3826 후속(2026-09-14, 페드루 PO 지시) — PR#4259는 head가 PR#4258과 같은 sha라
+// 게이트 슬롯 매처가 voided 행을 existing으로 재사용해 새 게이트가 안 생겼다(links 훅
+// 200에도 sprintable/gate 0건). 이 줄(코드 무변, 주석만)이 head sha를 옮겨 새 게이트
+// 슬롯을 트는 no-op 커밋이다.
 /**
  * story #3826(UX-v3·FE 2, 페드루 PO 確定 2026-09-13) AC1 diff 가드 — 이 스토리의 diff는
  * `globals.css`의 원시 토큰(`--proof-*`) 값·`--proof-radius-soft` 값에만 있어야 한다.
  * 의미 토큰 alias(`--color-proof-*: var(--proof-*)` 매핑·Tailwind `@theme` 참조)·
  * `.dark` 블록·그 외 어떤 tsx/파일도 diff에 있으면 FAIL(카드 4계약값 ① AC1).
  *
- * 3축 검사:
- *  ① `git diff --name-only <base>...HEAD` = 정확히 `apps/web/src/app/globals.css` 1개.
+ * ⛔핫픽스(2026-09-14, PR#4256/#4257 CI 차단·페드루 PO 確定): 이 가드가 ci.yml에
+ * **모든 PR**에서 무조건 돌면서(스텝에 `if:` 없음) globals.css 외 파일이 changedFiles에
+ * 있으면 그 PR이 토큰 교체 PR인지조차 안 묻고 FAIL했다 — 3826 자기 PR에서만 잰 계약값
+ * (다른 PR에서 이 가드가 어떻게 판정하나는 안 잼)이 놓친 스코프. 처방은 조건 추가가
+ * 아니라 **적용 범위 자체**: 이 가드는 「PR diff가 globals.css의 `--proof-*` 값 줄을
+ * 바꿀 때」만 살아 있다.
+ *  ⓪-a globals.css가 changedFiles에 없으면 OK(no-op — 이 가드가 볼 일이 아닌 PR).
+ *  ⓪-b globals.css는 있어도 그 diff(주석 제외)에 `--proof-*` 값 줄 변경이 0건이면
+ *      OK(globals.css를 다른 이유로 건드린 PR — 토큰 교체가 아니다).
+ *  그 외(=globals.css에 `--proof-*` 값 줄 변경이 실제로 있음, "토큰 PR")에만 아래
+ *  3축이 켜진다:
+ *
+ *  ① `git diff --name-only <base>...HEAD` = 정확히 `apps/web/src/app/globals.css` 1개
+ *     (+ INFRA_ALLOWLIST).
  *  ② 그 diff의 변경 줄(주석 제외) 전부가 `--proof-*: <값>;` 형태(alias·다른 선언 0).
  *  ③ 변경된 줄 중 `.dark { ... }` 블록 라인 범위에 걸치는 것 0건(라이트 전용 교체
  *     — doc 3dc24888 §④, 다크는 이 PR에서 무변경).
@@ -155,6 +171,44 @@ function rangesOverlap(a: [number, number], b: [number, number]): boolean {
   return a[0] <= b[1] && b[0] <= a[1];
 }
 
+export type DiffScopeVerdict =
+  | { kind: 'not_applicable'; reason: string }
+  | { kind: 'out_of_scope'; reason: string }
+  | { kind: 'in_scope' }
+  | { kind: 'fail'; reason: string };
+
+/** 순수 함수(changedFiles·globals.css의 --proof-* 값줄 변경 개수 → verdict) — 핫픽스
+ * 본체. IO(git 호출) 0, main()이 이 함수 앞뒤로 실 git 데이터를 넣고 분기만 옮긴다. */
+export function classifyDiffScope(
+  changedFiles: string[],
+  proofTokenLineChangeCount: number,
+): DiffScopeVerdict {
+  if (!changedFiles.includes(TARGET_FILE)) {
+    return {
+      kind: 'not_applicable',
+      reason: `OK: ${TARGET_FILE}가 diff에 없음(no-op) — 이 가드는 그 파일의 --proof-* 값 줄을 바꾸는 PR에만 적용된다.`,
+    };
+  }
+  if (proofTokenLineChangeCount === 0) {
+    return {
+      kind: 'out_of_scope',
+      reason: `OK: ${TARGET_FILE} 변경은 있으나 --proof-* 값 줄 변경 0(토큰 교체 PR이 아니다) — 이 가드 대상 밖.`,
+    };
+  }
+  const unexpected = changedFiles.filter((f) => f !== TARGET_FILE && !INFRA_ALLOWLIST.has(f));
+  if (unexpected.length > 0) {
+    return {
+      kind: 'fail',
+      reason: `FAIL: ${TARGET_FILE} 외 파일이 diff에 있다(AC1 위반): ${unexpected.join(', ')}`,
+    };
+  }
+  return { kind: 'in_scope' };
+}
+
+export function countProofTokenLineChanges(contentLines: string[]): number {
+  return contentLines.filter((l) => RAW_TOKEN_LINE_RE.test(l)).length;
+}
+
 function main(): number {
   ensureBaseRefAvailable(BASE_REF);
 
@@ -163,17 +217,18 @@ function main(): number {
     console.log(`OK: ${BASE_REF}...HEAD 사이 diff 0건(브랜치가 base와 같음 — 통과).`);
     return 0;
   }
-  const unexpected = changedFiles.filter((f) => f !== TARGET_FILE && !INFRA_ALLOWLIST.has(f));
-  if (unexpected.length > 0) {
-    console.error(`FAIL: ${TARGET_FILE} 외 파일이 diff에 있다(AC1 위반):`);
-    for (const f of unexpected) console.error(`  ${f}`);
-    return 1;
+
+  if (!changedFiles.includes(TARGET_FILE)) {
+    const verdict = classifyDiffScope(changedFiles, 0);
+    // changedFiles에 TARGET_FILE이 없으므로 항상 'not_applicable' — 명시 내로잉(위
+    // union 중 이 분기만 `reason` 접근, tsc가 in_scope에는 reason이 없다고 정확히 잡는다).
+    if (verdict.kind === 'not_applicable') console.log(verdict.reason);
+    return 0;
   }
 
-  const patch = sh(`git diff -U0 ${BASE_REF}...HEAD -- ${TARGET_FILE}`);
-
-  // 주석 제거본끼리 별도로 diff — 주석만 바뀐 줄은 여기서 애초에 사라진다(위 stripCssComments
-  // 참고). 두 버전 다 실 git 커밋일 필요는 없어 `git diff --no-index`로 임시 파일 비교.
+  // globals.css가 changedFiles에 있다 — 실 값(--proof-* 줄 변경 개수)을 재서 이 PR이
+  // "토큰 PR"인지 먼저 가른다(핫픽스 ⓪-b). 주석 제거본끼리 별도로 diff — 주석만
+  // 바뀐 줄은 여기서 애초에 사라진다(위 stripCssComments 참고).
   const oldRaw = sh(`git show ${BASE_REF}:${TARGET_FILE}`);
   const newRaw = readFileSync(path.join(REPO_ROOT, TARGET_FILE), 'utf8');
   const oldStripped = stripCssComments(oldRaw);
@@ -191,6 +246,23 @@ function main(): number {
     strippedPatch = (e as { stdout?: string }).stdout ?? '';
   }
   const contentLines = parseChangedContentLines(strippedPatch);
+  const proofTokenLineChangeCount = countProofTokenLineChanges(contentLines);
+
+  const scope = classifyDiffScope(changedFiles, proofTokenLineChangeCount);
+  if (scope.kind === 'out_of_scope') {
+    console.log(scope.reason);
+    return 0;
+  }
+  if (scope.kind === 'fail') {
+    console.error(scope.reason);
+    return 1;
+  }
+  // scope.kind === 'in_scope' — 토큰 PR 확정, 아래 기존 3축(②③) 그대로.
+
+  const patch = sh(`git diff -U0 ${BASE_REF}...HEAD -- ${TARGET_FILE}`);
+
+  // contentLines는 위(핫픽스 ⓪-b 판정)에서 이미 같은 stripped diff로 구했다 — 재계산
+  // 0(같은 git 호출을 두 번 하지 않는다).
   // 주석 제거가 줄 수를 바꿔 `{`/`}`/공백만 있는 줄이 diff 잡음으로 밀릴 수 있다 —
   // 구조 문자뿐인 줄은 "내용 변경"이 아니라 통과(실 값 변경 검사는 RAW_TOKEN_LINE_RE 몫).
   const STRUCTURAL_ONLY_RE = /^[{}\s]*$/;
