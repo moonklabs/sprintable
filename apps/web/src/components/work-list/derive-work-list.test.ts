@@ -80,22 +80,22 @@ describe('deriveWorkList — 행 상태: gates/inbox 우선, task.status 폴백'
     expect(row.lowRisk).toBe(false);
   });
 
-  it('gate_type=external_publish면 risk=low여도 awaiting_signature(PO 매핑 확定 — signature ∨ risk=high)', () => {
+  it('gate_type=external_publish여도 risk=low면 awaiting_approval(카디르 계약값 ⑥, 페드루 판정 2026-09-14 10:55Z — gate_type은 더 이상 안 본다, deriveGateState는 risk_grade만의 함수)', () => {
     const result = deriveWorkList(baseInput({
       tasks: page([{ id: 't1', story_id: 's1', assignee_id: null, title: '할일1', status: 'todo' }]),
       inbox: [{ source: 'gate', id: 'gate1', work_item_id: 't1', work_item_type: 'task', status: 'pending', gate_type: 'external_publish', risk_grade: 'low' }],
     }));
     const row = result.groups[0].stories[0].rows[0];
-    expect(row.state).toBe('awaiting_signature');
-    expect(row.lowRisk).toBe(true); // risk_grade 자체는 low라 저위험 칩은 별개 축으로 true 유지
+    expect(row.state).toBe('awaiting_approval');
+    expect(row.lowRisk).toBe(true);
   });
 
-  it('gate(risk=null)가 걸린 task → awaiting_approval(high가 아니면 승인 대기 쪽으로 접는다)', () => {
+  it('gate(risk=null)가 걸린 task → awaiting_signature(카디르 계약값 ⑥ — null=unknown=고위험 취급, work-list-detail-panel.tsx의 primaryActionLabelKey와 같은 SSOT로 정정)', () => {
     const result = deriveWorkList(baseInput({
       tasks: page([{ id: 't1', story_id: 's1', assignee_id: null, title: '할일1', status: 'todo' }]),
       inbox: [{ source: 'gate', id: 'gate1', work_item_id: 't1', work_item_type: 'task', status: 'pending', gate_type: 'merge', risk_grade: null }],
     }));
-    expect(result.groups[0].stories[0].rows[0].state).toBe('awaiting_approval');
+    expect(result.groups[0].stories[0].rows[0].state).toBe('awaiting_signature');
   });
 
   it('hitl 항목(work_item_id=부모 story, BE 근거상 항상 story)이 걸린 task → awaiting_answer(task.status 무관)', () => {
