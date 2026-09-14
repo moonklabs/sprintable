@@ -270,7 +270,9 @@ describe('analyzeTreeForTintCompleteness — 전 트리 양성대조(PO 보강)'
     expect(unexplainedSites).toEqual([{ file: 'components/foo/bar.tsx', raw: 1, explained: 0 }]);
   });
 
-  it('② UNANALYZED_TINT_SITES 목록 밖 객체맵 tint(예: status→className 조회) — RED', () => {
+  // story #3850(AC1 축 a) 착지 뒤 이 정확한 패턴(객체 맵 프로퍼티 조회)은 이제 explained —
+  // #3839 당시 "가드가 구조적으로 못 보는 사각"이었던 자리가 #3850의 존재 이유대로 닫혔다.
+  it('② 객체 맵 tint(status→className 조회)는 이제 explained(story #3850 AC1 축 a로 해소) — GREEN', () => {
     const files = [
       {
         file: 'components/foo/status-map.tsx',
@@ -285,11 +287,32 @@ describe('analyzeTreeForTintCompleteness — 전 트리 양성대조(PO 보강)'
       },
     ];
     const { unexplainedSites } = analyzeTreeForTintCompleteness(files, () => false);
-    expect(unexplainedSites).toEqual([{ file: 'components/foo/status-map.tsx', raw: 1, explained: 0 }]);
-    // main()과 동형 계약 — 빈 baseline과 대조하면 신규(increased)로 잡힌다.
-    const actual = new Map(unexplainedSites.map((s) => [s.file, s.raw] as const));
-    const { increased } = compareToBaseline(actual, new Map());
-    expect(increased).toEqual([{ key: 'components/foo/status-map.tsx', expected: 0, got: 1 }]);
+    expect(unexplainedSites).toEqual([]);
+  });
+
+  // story #3850 — 이 축 2개(객체 맵·삼항/템플릿)로도 여전히 못 보는 진짜 새 사각(switch문
+  // 분기별 literal return)이 계속 RED로 잡히는지 확인한다 — completeness 게이트가 "뭐든 다
+  // explained로 뭉개는" 퇴화를 하지 않았다는 음성대조(가드 신뢰성 확보, 이 스토리가 스스로
+  // "축 2개만 닫는다"고 선언한 스코프를 지켰는지의 자체 증거).
+  it('③ switch문 분기별 tint 리터럴은 여전히 unanalyzed(이 스토리가 다루는 축 밖) — RED', () => {
+    const files = [
+      {
+        file: 'components/foo/switch-map.tsx',
+        content: `
+          function tintFor(status) {
+            switch (status) {
+              case 'approved': return 'bg-success-tint text-success';
+              default: return 'bg-muted';
+            }
+          }
+          function Status({ status }) {
+            return <span className={tintFor(status)} />;
+          }
+        `,
+      },
+    ];
+    const { unexplainedSites } = analyzeTreeForTintCompleteness(files, () => false);
+    expect(unexplainedSites).toEqual([{ file: 'components/foo/switch-map.tsx', raw: 1, explained: 0 }]);
   });
 
   it('ui/ 안 리터럴 className tint는 정상 처리됨(대조군 — 0건이어야 함)', () => {
@@ -303,5 +326,79 @@ describe('scanTreeForTintCompleteness — 실 src 트리(UNANALYZED_TINT_SITES�
   it('실 SRC_ROOT 스캔이 ambiguousReasons 0(모호한 cva 없음)', () => {
     const { ambiguousReasons } = scanTreeForTintCompleteness(SRC_ROOT, UI_DIR);
     expect(ambiguousReasons).toEqual([]);
+  });
+});
+
+// story #3850 AC3 — 신설 분석기 2축(객체 맵·삼항/템플릿 리터럴)이 실제로 JSX 조상 추적에
+// 연결됐는지, activation-checklist-banner.tsx(story #3839 AC2)와 동형으로 **실 파일**
+// 문자열 치환 뮤테이션으로 확인한다(합성 표본은 위 describe들에서 이미 보조로 다룸).
+describe('scanContent — 실 파일 뮤테이션(story #3850 AC3, 신설 분석기 2축)', () => {
+  const { map: componentMap, incompleteReasons } = buildComponentTintMap(UI_DIR);
+
+  it('전제: componentMap 추출이 완전함(incompleteReasons 0)', () => {
+    expect(incompleteReasons).toEqual([]);
+  });
+
+  // 축 (a) 객체 맵 — doc-gate-section.tsx의 AUDIT_META(status→{dot,Icon,labelKey}) 프로퍼티
+  // 조회가 className에 들어가는 실 자리(429행 `${am.dot}` span). 그 span의 유일한 자식
+  // (AIcon)을 건드리지 않고 muted 텍스트를 하나 더 끼워 넣는다 — 원래 있던 AIcon 아이콘은
+  // 그대로 두고 "실수로 muted 텍스트를 추가했다"를 재현.
+  describe('축 (a) 객체 맵 — doc-gate-section.tsx (AUDIT_META)', () => {
+    const REL_FILE = 'components/docs/doc-gate-section.tsx';
+    const ABS_FILE = path.join(SRC_ROOT, REL_FILE);
+    const original = readFileSync(ABS_FILE, 'utf8');
+
+    // 전제 확인 — 원본 자체가 이미 429행(AUDIT_META.dot 소비 span)에서 위반 1건을 낸다:
+    // am.dot 바인딩이 AUDIT_META 4개 항목의 class 후보 문자열을 전부 모아 한 문자열로
+    // 합치는데(조상 전파용 보수적 합집합), 그중 "resubmitted" 항목 자체가 안전한
+    // bg-muted+text-muted-foreground 짝을 갖고 있어(가드의 «bg-muted 자체는 대상 밖» 원칙과
+    // 같은 값) 그 안전한 텍스트가 다른(불안전한) 후보의 tint와 같은 합친 문자열 안에서
+    // 우연히 공존한다. GRANDFATHER_BASELINE에 이미 등재된 자리(story #3850 §GRANDFATHER_BASELINE
+    // 주석 참고) — 뮤테이션은 이와 별개로 "새" 위반을 하나 더 만든다는 것만 아래에서 확인한다.
+    it('전제: 원본이 이미 429행(info)을 포함해 2건(기존 GRANDFATHER_BASELINE 등재분: 399행 destructive·429행 info)', () => {
+      const violations = scanContent(original, REL_FILE, componentMap);
+      expect(violations).toHaveLength(2);
+      expect(violations.find((v) => v.line === 429)?.family).toBe('info');
+      expect(violations.find((v) => v.line === 399)?.family).toBe('destructive');
+    });
+
+    it('AIcon 옆에 muted 텍스트를 끼워 넣으면(객체 맵으로 조회된 tint가 조상으로 인식돼) 위반이 +1 된다', () => {
+      const target = '<AIcon className="size-2.5" />';
+      expect(original.includes(target)).toBe(true);
+      const mutated = original.replace(target, `${target}<b className="text-muted-foreground">x</b>`);
+      expect(mutated).not.toBe(original);
+
+      const before = scanContent(original, REL_FILE, componentMap);
+      const after = scanContent(mutated, REL_FILE, componentMap);
+      expect(after.length).toBe(before.length + 1);
+      const newViolation = after.find((v) => !before.some((b) => b.line === v.line && b.family === v.family));
+      expect(newViolation).toBeDefined();
+      // AUDIT_META 선언 순(request가 첫 항목, bg-info-tint) — 첫 매치 family가 채택된다.
+      expect(newViolation!.family).toBe('info');
+    });
+  });
+
+  // 축 (b) 삼항/템플릿 리터럴 — doc-status-rail.tsx의 최상위 div가 템플릿 치환 «안» 중첩
+  // 삼항(confirmed→success/denied→destructive/그 외→warning)으로 tint 배경을 고른다(161-163행).
+  // 그 div의 직계 자식(172행 상태 라벨) 바로 뒤에 muted 텍스트를 하나 더 끼워 넣는다.
+  describe('축 (b) 템플릿 리터럴 안 삼항 — doc-status-rail.tsx', () => {
+    const REL_FILE = 'components/docs/doc-status-rail.tsx';
+    const ABS_FILE = path.join(SRC_ROOT, REL_FILE);
+    const original = readFileSync(ABS_FILE, 'utf8');
+
+    it('상태 라벨 옆에 muted 텍스트를 끼워 넣으면(템플릿 치환 안 삼항 tint가 조상으로 인식돼) RED', () => {
+      const target = '<div className="text-[15px] font-bold text-foreground">{t(STATE_LABEL_KEY[state])}</div>';
+      expect(original.includes(target)).toBe(true);
+      const mutated = original.replace(target, `${target}<div className="text-muted-foreground">x</div>`);
+      expect(mutated).not.toBe(original);
+
+      const before = scanContent(original, REL_FILE, componentMap);
+      const after = scanContent(mutated, REL_FILE, componentMap);
+      expect(after.length).toBe(before.length + 1);
+      const newViolation = after.find((v) => !before.some((b) => b.line === v.line && b.family === v.family));
+      expect(newViolation).toBeDefined();
+      // 삼항 첫 분기(state === 'confirmed' → bg-success-tint)가 첫 매치 family로 채택된다.
+      expect(newViolation!.family).toBe('success');
+    });
   });
 });
