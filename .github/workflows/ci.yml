@@ -1774,6 +1774,13 @@ jobs:
       - name: "Verify pasted_secret BFF route registered (story #3813 regression guard)"
         run: pnpm --filter web verify:pasted-secret-bff-route-registered
 
+      # story #3857(2026-09-14) 회귀가드 — BE 라우터가 X-Total-Count·X-Next-Cursor를 목록
+      # 페이지네이션 신호로 내는데 FE 프록시가 body만 취해 조용히 버리면(agent-runs·standup·
+      # sprints·retro-sessions가 그랬다) "한 페이지=전체"로 단정하는 결함 클래스(#4049/#4052/
+      # #4054와 동형)가 재발한다. baseline sync(stale fail-closed)+FE 소비 대조 1개로 닫는다.
+      - name: "Verify BE→FE proxy header passthrough (story #3857 regression guard)"
+        run: pnpm --filter web verify:be-proxy-header-passthrough
+
       # story #3739(2026-09-09) 메타 가드 — package.json에 등재된 verify:* 스크립트
       # 집합이 이 ci.yml에서 실제로 부르는 집합의 부분집합이 아니면(새 verify:* 스크립트를
       # 만들고 여기 안 물리면) FAIL. story #3736 ⑪·이 스토리 자신(no-direct-backend-v2-call·
