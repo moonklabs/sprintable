@@ -85,7 +85,7 @@ describe('CommandPalette — existing navigate/search behavior (regression guard
 // 바로 아래 별도 테스트로.
 describe('CommandPalette — navigate 목적지 = NAV_GROUPS 파생(story #3698 AC1·AC3)', () => {
   // story #3845 §④ — go-retro 신규(retro가 LEGACY_NAV_ITEMS에서 빠지며 이 앵커로 이관).
-  const GUARD_ANCHOR_IDS = new Set(['go-sprints', 'go-epics', 'go-retro']);
+  const GUARD_ANCHOR_IDS = new Set(['go-sprints', 'go-epics', 'go-retro', 'go-work-list']);
 
   it('팔레트 navigate id 집합이 정확히 NAV_GROUPS+LEGACY_NAV_ITEMS 전 항목 + CHAT_CENTER_ITEM과 같다(앵커 2개는 문서화된 예외로 제외)', async () => {
     await mount();

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { ListFilter } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { WorkspaceFrameTabs } from '@/components/workspace/workspace-frame-tabs';
@@ -38,16 +39,18 @@ function FilterDropdown({
       <DropdownMenuTrigger
         aria-label={ariaLabel}
         render={
-          <button
+          <Button
             type="button"
+            variant="outline"
+            size="sm"
             className={cn(
-              'flex h-8 items-center gap-1.5 rounded-md border px-3 text-xs font-medium transition',
-              isSelected ? 'border-primary bg-primary/10 text-foreground' : 'border-border text-muted-foreground hover:text-foreground',
+              'h-8 gap-1.5 font-medium',
+              isSelected && 'border-primary bg-primary/10 text-foreground',
             )}
           >
             {icon}
             <span className="truncate">{selectedLabel ?? placeholder}</span>
-          </button>
+          </Button>
         }
       />
       <DropdownMenuContent align="start">
@@ -167,22 +170,26 @@ export function WorkListShell({ projectId }: { projectId: string }) {
                   onSelect={(id) => setFilters({ hypothesisId: id })}
                 />
               ) : null}
-              <button
+              <Button
                 type="button"
+                variant="outline"
+                size="sm"
                 aria-pressed={filters.mineOnly}
                 onClick={() => setFilters({ mineOnly: !filters.mineOnly, delegatedOnly: false })}
-                className={`h-8 rounded-md border px-3 text-xs font-medium transition ${filters.mineOnly ? 'border-primary bg-primary/10 text-foreground' : 'border-border text-muted-foreground hover:text-foreground'}`}
+                className={cn('h-8 font-medium', filters.mineOnly && 'border-primary bg-primary/10 text-foreground')}
               >
                 {t('filterMine')}
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
+                variant="outline"
+                size="sm"
                 aria-pressed={filters.delegatedOnly}
                 onClick={() => setFilters({ delegatedOnly: !filters.delegatedOnly, mineOnly: false })}
-                className={`h-8 rounded-md border px-3 text-xs font-medium transition ${filters.delegatedOnly ? 'border-primary bg-primary/10 text-foreground' : 'border-border text-muted-foreground hover:text-foreground'}`}
+                className={cn('h-8 font-medium', filters.delegatedOnly && 'border-primary bg-primary/10 text-foreground')}
               >
                 {t('filterDelegated')}
-              </button>
+              </Button>
             </div>
 
             {data.partial ? (
@@ -194,7 +201,7 @@ export function WorkListShell({ projectId }: { projectId: string }) {
             ) : (
               <div className="space-y-4">
                 {filtered.groups.map((group) => (
-                  <div key={group.goalId} className="space-y-1">
+                  <Card key={group.goalId} className="space-y-1 p-3">
                     <div className="flex items-center justify-between gap-2 px-1">
                       <h2 className="text-sm font-semibold text-foreground">{group.title}</h2>
                       <span className="text-xs text-muted-foreground">
@@ -208,17 +215,20 @@ export function WorkListShell({ projectId }: { projectId: string }) {
                     <div className="px-1 text-xs text-muted-foreground">
                       {t('goalSummaryLabel', { assigned: group.assignedCount, delegated: group.delegatedCount, hypotheses: group.hypothesisCount })}
                     </div>
-                    <div className="space-y-3 pt-1">
+                    {/* PO 지적(2026-09-14 08:12Z, 유나 픽셀 판정 — 시안 06d2d61c 재대조) —
+                        스토리 절 머리는 회색 띠(bg-muted/30)가 아니라 굵은 제목 + 왼쪽 accent
+                        border로: 목표→스토리→일 3단 위계가 회색 띠에서 눌렸다. per-story Card를
+                        걷고 목표 Card 하나 안에서 세로 선(border-l-2 border-primary)으로 스토리
+                        구간을 나눈다(새 토큰 0 — 기존 primary 재사용). */}
+                    <div className="space-y-4 pt-1">
                       {group.stories.map((story) => (
-                        <Card key={story.storyId} className="overflow-hidden">
-                          <div className="border-b border-border bg-muted/30 px-3 py-2 text-xs font-medium text-muted-foreground">
-                            {story.title}
-                          </div>
+                        <div key={story.storyId} className="border-l-2 border-primary pl-3">
+                          <div className="pb-1 text-sm font-semibold text-foreground">{story.title}</div>
                           {story.rows.map((row) => <WorkListRowView key={row.id} row={row} />)}
-                        </Card>
+                        </div>
                       ))}
                     </div>
-                  </div>
+                  </Card>
                 ))}
               </div>
             )}
@@ -226,9 +236,9 @@ export function WorkListShell({ projectId }: { projectId: string }) {
         ) : loadError ? (
           <Card className="p-6 text-center text-sm text-muted-foreground">
             {t('loadErrorTitle')}
-            <button type="button" className="ml-2 text-primary hover:underline" onClick={() => setReloadNonce((n) => n + 1)}>
+            <Button type="button" variant="link" className="ml-2 h-auto p-0" onClick={() => setReloadNonce((n) => n + 1)}>
               ↻
-            </button>
+            </Button>
           </Card>
         ) : (
           <div className="p-4 text-sm text-muted-foreground">…</div>
