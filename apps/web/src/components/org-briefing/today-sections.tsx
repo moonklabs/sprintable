@@ -61,8 +61,8 @@ function NeedsMeRow({ item }: { item: TodayNeedsMeItem }) {
         >
           {t(meta.actionKey)}
         </Link>
-        {/* story #3831 AC4 — conversation_id 있는 행만 「대화 열기」(3828 미착지라 지금은
-            전 행이 null → 링크 0). 있으면 짓지 않고 실 id로만 연다. */}
+        {/* story #3831 AC4 — conversation_id 있는 행만 「대화 열기」(3828 develop 착지,
+            라이브 dev-app은 배포 86 뒤 반영). 있으면 짓지 않고 실 id로만 연다. */}
         {item.conversationId ? (
           <Link href={`/chats/${item.conversationId}`} className="text-[11px] text-primary hover:underline">
             {t('conversationOpenLink')}

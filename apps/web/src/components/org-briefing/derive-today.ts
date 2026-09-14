@@ -2,9 +2,10 @@
  * story #3831(UX-v3·FE 3·오늘) — 「오늘」 화면 본문. BE 계약 SSOT = story #3823
  * `GET /api/v2/today`(backend/app/services/today_service.py 직접 실측, 자체 집계 0).
  *
- * conversation_id는 이 응답에 아직 없다(story #3828/PR#4253 미착지) — 파싱 단계에서 항상
- * null로 둔다. 그 카드가 착지해 필드가 추가되면 이 파서만 그 값을 실으면 되고, 소비부
- * (오늘 화면)는 이미 "있으면 링크·없으면 0" 분기를 갖췄으므로 무변경으로 자동 반영된다.
+ * conversation_id는 story #3828(PR#4253, develop 착지)로 today_service.py가 채우기
+ * 시작했다 — 캐폴러가 실참여자인 실행만 노출(비참여 conversation_id는 null). 파싱은
+ * 응답 값을 그대로 옮길 뿐(지어내지 않음), 소비부(오늘 화면)는 "있으면 링크·없으면 0"
+ * 분기라 무변경으로 실데이터를 받는다.
  */
 
 export type NeedsMeState = 'approval' | 'signature' | 'answer';
@@ -122,7 +123,7 @@ function parseNeedsMeItem(raw: unknown): TodayNeedsMeItem | null {
     requestedByName: requestedBy ? str(requestedBy['name']) : null,
     reason: str(raw['reason']),
     createdAt,
-    // story #3828(PR #4253) 미착지 — 필드 자체가 아직 응답에 없다(지어내지 않음).
+    // story #3828(PR #4253) develop 착지 — 응답 값 그대로(비참여 실행은 BE가 이미 null).
     conversationId: str(raw['conversation_id']),
   };
 }
