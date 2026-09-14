@@ -27,6 +27,15 @@ vi.mock('@/components/workspace/workspace-frame-tabs', () => ({
   WorkspaceFrameTabs: () => null,
 }));
 
+// story #3845(§① 2026-09-14) — StandupPage(구 /standup 독립 라우트)가 이 페이지 안 「하루
+// 체크인」 절로 임베드됐다. 이 스위트는 sprint list/detail 로직만 관심사이고 StandupPage
+// 자신의 fetch 표면(/api/standup·/api/team-members 등, 이 파일이 안 모킹)까지 끌고 오면
+// 무관한 실패가 섞인다 — WorkspaceFrameTabs와 동형으로 스텁(StandupPage 자체 회귀는
+// standup-client.test.tsx가 전담).
+vi.mock('../standup/standup-client', () => ({
+  default: () => null,
+}));
+
 // story #2104 — HumanOnlyAction(스프린트 삭제 트리거를 감싼다)이 useDashboardContext를 읽는다.
 // 기본은 human(기존 first-touch 스위트는 게이팅과 무관). agent 케이스만 개별 override.
 const { useDashboardContextMock } = vi.hoisted(() => ({ useDashboardContextMock: vi.fn() }));

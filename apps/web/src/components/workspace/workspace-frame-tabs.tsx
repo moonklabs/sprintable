@@ -9,6 +9,11 @@ const TABS = [
   { key: 'board', path: 'flow' },
   { key: 'sprints', path: 'sprints' },
   { key: 'epic', path: 'epics' },
+  // story #3845(UX-v3·FE 5·일감 2, 페드루 PO 確定 §③ⓑ 2026-09-14) — 「일감」 흡수 지도
+  // (doc a699be00 §②)의 「회고」 탭. board/sprints/epic과 동형(실 라우트 /retro 보존,
+  // 이 프레임은 그 위에 얹힌 얕은 nav일 뿐 — WorkspaceFrameTabs 파일 상단 주석 참고).
+  // labelKey 'retro'는 nav-config.ts::LEGACY_NAV_ITEMS가 이미 쓰던 값 재사용(사본 0).
+  { key: 'retro', path: 'retro' },
 ] as const;
 
 type WorkspaceFrameTabKey = (typeof TABS)[number]['key'];

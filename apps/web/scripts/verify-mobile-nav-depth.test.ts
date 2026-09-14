@@ -65,9 +65,11 @@ describe('실 NAV_GROUPS ∪ LEGACY_NAV_ITEMS — story #2684 AC3 판별자, sto
   // test.ts의 "정확히 23개다" 판정과 동일 총량 — 재분배만 있었지 증감 없음을 이 축에서도
   // 재확認). 챗 center(CHAT_CENTER_ITEM)는 여전히 이 스캔 대상 밖(story #2930 I2, 상단
   // ㉥ 참고 — nav-config.ts 어느 배열에도 없어 원래도 시야 밖).
-  it('전 23항목(챗 center 제외)이 depth ≤2다(회귀 0 — 도달불가 0건 포함)', () => {
+  // story #3845(§①④, 2026-09-14) — retro·standup이 「일감」 탭으로 흡수되며 LEGACY_NAV_
+  // ITEMS 18→16, 총량 23→21(nav-config-descriptions.test.ts와 동일 축, 동일 사유).
+  it('전 21항목(챗 center 제외)이 depth ≤2다(회귀 0 — 도달불가 0건 포함)', () => {
     const entries = computeMobileDepths(groups, MOBILE_HUB_EXCLUDE_IDS, hubGroupIds);
-    expect(entries).toHaveLength(23);
+    expect(entries).toHaveLength(21);
     expect(findDepthViolations(entries, MAX_MOBILE_DEPTH)).toEqual([]);
   });
 

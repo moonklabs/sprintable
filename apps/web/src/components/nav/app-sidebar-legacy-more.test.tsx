@@ -124,14 +124,17 @@ describe('AppSidebar — 「더보기」 접힘 절(story #3836 AC1)', () => {
     expect(renderedIds).toEqual(VISIBLE_LEGACY_NAV_ITEMS.map((i) => i.id));
   });
 
-  it('inbox는 17개 집합에서 빠진다(MOBILE_HUB_EXCLUDE_IDS 필터 — AC1 "동일 필터")', async () => {
+  // story #3845(§④, 2026-09-14) — retro가 LEGACY_NAV_ITEMS에서 빠지며 17→16(nav-config.ts
+  // 참고). 리터럴 대신 VISIBLE_LEGACY_NAV_ITEMS.length로 대조해 다음 흡수(standup)에도
+  // 이 자리를 또 안 고치게 한다.
+  it('inbox는 VISIBLE_LEGACY_NAV_ITEMS 집합에서 빠진다(MOBILE_HUB_EXCLUDE_IDS 필터 — AC1 "동일 필터")', async () => {
     storage.set('sidebar_group_collapsed', JSON.stringify({ legacy: false }));
     await mount();
     const renderedIds = new Set(
       [...container.querySelectorAll('a[data-legacy-nav-id]')].map((a) => a.getAttribute('data-legacy-nav-id')),
     );
     expect(renderedIds.has('inbox')).toBe(false);
-    expect(renderedIds.size).toBe(17);
+    expect(renderedIds.size).toBe(VISIBLE_LEGACY_NAV_ITEMS.length);
   });
 
   it('기억이 접힘(legacy:true)이어도 현재 경로가 「더보기」 안 항목이면 자동으로 펼쳐진다(활성 하이라이트, AC1)', async () => {

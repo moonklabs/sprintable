@@ -8,6 +8,7 @@ import {
   BookOpen,
   CalendarRange,
   FolderKanban,
+  Gauge,
   GitPullRequest,
   Search,
   UserPlus,
@@ -60,9 +61,15 @@ const NAV_ITEM_SHORTCUTS: Record<string, string[]> = {
 // routes(story #2376) 정적 스캔(㉠resourceLink류·㉡리터럴 href) 시야 밖이다. 이 두 리터럴이
 // 그 가드의 유일하게 «보이는» 앵커다 — story #3698 그라운딩(PO 確定)으로 NAV_GROUPS 파생
 // 대상이 «아니다»로 확定됐다. 지우지 말 것(지우면 그 가드가 조용히 눈먼다).
+// story #3845(UX-v3·FE 5·일감 2, 페드루 PO 確定 §③ⓑ 2026-09-14) — 「회고」가 LEGACY_
+// NAV_ITEMS(nav-config.ts)에서 빠지고 WorkspaceFrameTabs 전용 진입점(router.push 템플릿
+// 리터럴)으로만 남으면 verify-no-orphan-resource-routes.ts의 ㉠조합 시야 밖이라(같은
+// 파일 상단 주석 "지우지 말 것" 경고 그대로 — go-sprints 선례와 동형) go-retro 앵커가
+// 없으면 조용한 orphan이 된다. 지우면 그 가드가 못 잡는다.
 const GUARD_ANCHOR_ITEMS: Array<{ id: string; icon: LucideIcon; labelKey: string; href: string }> = [
   { id: 'go-sprints', icon: CalendarRange, labelKey: 'goSprints', href: '/sprints' },
   { id: 'go-epics', icon: FolderKanban, labelKey: 'goEpics', href: '/epics' },
+  { id: 'go-retro', icon: Gauge, labelKey: 'goRetro', href: '/retro' },
 ];
 
 // 명령(action)당 아이콘 — command-palette-actions.ts는 순수 데이터만 다뤄 lucide 컴포넌트를
