@@ -44,6 +44,10 @@ vi.mock('@/lib/nav-config', () => ({
   // MOBILE_HUB_EXCLUDE_IDS를 뺀 값)를 직접 참조한다 — 이 모킹도 같이 빈 배열로 둔다
   // (위와 동일 이유, 3구역째 방지).
   VISIBLE_LEGACY_NAV_ITEMS: [],
+  // story #3855 — more/page.tsx가 이제 legacyGroup(구) 대신 groupVisibleLegacyByTarget()
+  // 여러 개를 참조한다. 빈 함수로 두면 이 파일의 "2구역·3항목" 전제(legacy 쪽 0)가 그대로
+  // 보존된다.
+  groupVisibleLegacyByTarget: () => [],
 }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

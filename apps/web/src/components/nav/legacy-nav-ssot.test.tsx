@@ -25,17 +25,32 @@ vi.mock('next/navigation', () => ({
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const STABLE_ITEM = { id: 'fake-stable', labelKey: 'goals', descriptionKey: 'descGoals', icon: FAKE_ICON, kind: 'static' as const, path: '/fake-stable' };
-const MUTABLE_ITEM = { id: 'fake-mutable', labelKey: 'loops', descriptionKey: 'descLoops', icon: FAKE_ICON, kind: 'static' as const, path: '/fake-mutable' };
+const STABLE_ITEM = { id: 'fake-stable', labelKey: 'goals', descriptionKey: 'descGoals', icon: FAKE_ICON, kind: 'static' as const, path: '/fake-stable', absorbTarget: 'work' as const };
+const MUTABLE_ITEM = { id: 'fake-mutable', labelKey: 'loops', descriptionKey: 'descLoops', icon: FAKE_ICON, kind: 'static' as const, path: '/fake-mutable', absorbTarget: 'work' as const };
 
-function fakeNavConfigModule(includeMutable: boolean) {
-  const items = includeMutable ? [STABLE_ITEM, MUTABLE_ITEM] : [STABLE_ITEM];
+// story #3855 — groupVisibleLegacyByTarget도 이 3-way 대조 대상이다(app-sidebar.tsx·
+// more/page.tsx 둘 다 이제 이 함수로 항목을 얻는다, LEGACY_NAV_ITEMS/VISIBLE_LEGACY_
+// NAV_ITEMS 직접 참조가 아니라). 실제 nav-config.ts와 같은 5-target 순서·라벨키 매핑을
+// 그대로 미러(로직 복제가 아니라 이 페이크 모듈 자체가 실물을 대신하는 자리).
+const ABSORB_TARGET_ORDER = ['work', 'connect', 'knowledge', 'history', 'settings'] as const;
+const ABSORB_TARGET_LABEL_KEYS: Record<string, string> = {
+  work: 'zoneDev', connect: 'zoneConnectRules', knowledge: 'zoneKnowledge', history: 'zoneHistory', settings: 'settings',
+};
+
+function fakeNavConfigModule(includeMutable: boolean, mutableTarget: string = 'work') {
+  const items = includeMutable ? [STABLE_ITEM, { ...MUTABLE_ITEM, absorbTarget: mutableTarget }] : [STABLE_ITEM];
   return {
     NAV_GROUPS: [],
     MOBILE_HUB_GROUP_ORDER: [],
     MOBILE_HUB_EXCLUDE_IDS: new Set<string>(),
     LEGACY_NAV_ITEMS: items,
     VISIBLE_LEGACY_NAV_ITEMS: items,
+    groupVisibleLegacyByTarget: () => ABSORB_TARGET_ORDER
+      .map((target) => ({
+        target, labelKey: ABSORB_TARGET_LABEL_KEYS[target],
+        items: items.filter((i) => i.absorbTarget === target),
+      }))
+      .filter((g) => g.items.length > 0),
     CHAT_CENTER_ITEM: { id: 'chats', labelKey: 'chats', descriptionKey: 'descChats', icon: FAKE_ICON, kind: 'static' as const, path: '/chats' },
   };
 }
@@ -87,9 +102,9 @@ afterEach(async () => {
   vi.resetModules();
 });
 
-async function renderAll(includeMutable: boolean) {
+async function renderAll(includeMutable: boolean, mutableTarget: string = 'work') {
   vi.resetModules();
-  vi.doMock('@/lib/nav-config', () => fakeNavConfigModule(includeMutable));
+  vi.doMock('@/lib/nav-config', () => fakeNavConfigModule(includeMutable, mutableTarget));
 
   const { AppSidebar } = await import('./app-sidebar');
   const { SidebarProvider } = await import('@/components/ui/sidebar');
@@ -133,8 +148,18 @@ async function renderAll(includeMutable: boolean) {
   const paletteIds = new Set(
     [...document.querySelectorAll('[data-command-id]')].map((el) => el.getAttribute('data-command-id')),
   );
+  // story #3855 AC3 — 데스크톱·모바일 둘 다 이제 머리말(target) 단위로 묶인다. 어느
+  // target이 "떴는가"의 집합을 두 소비처에서 각각 뽑아 대조한다(sidebar는
+  // data-legacy-group, more/page는 Card의 data-legacy-group — 둘 다 이 스토리에서
+  // 새로 단 test hook).
+  const sidebarGroupTargets = new Set(
+    [...sidebar.el.querySelectorAll('[data-legacy-group]')].map((el) => el.getAttribute('data-legacy-group')),
+  );
+  const moreGroupTargets = new Set(
+    [...more.el.querySelectorAll('[data-legacy-group]')].map((el) => el.getAttribute('data-legacy-group')),
+  );
 
-  return { sidebarIds, moreIds, paletteIds };
+  return { sidebarIds, moreIds, paletteIds, sidebarGroupTargets, moreGroupTargets };
 }
 
 describe('LEGACY_NAV_ITEMS SSOT — 사이드바 「더보기」·⌘K 팔레트·모바일 /more 3-way 대조(story #3836 AC2/AC3)', () => {
@@ -155,5 +180,28 @@ describe('LEGACY_NAV_ITEMS SSOT — 사이드바 「더보기」·⌘K 팔레트
     expect(sidebarIds.has('fake-stable')).toBe(true);
     expect(moreIds.has('/fake-stable')).toBe(true);
     expect(paletteIds.has('fake-stable')).toBe(true);
+  });
+});
+
+// story #3855(customer-zero·셸) AC3 — 머리말(target) 묶음 자체가 데스크톱·모바일에서
+// 같은지(집합 대조)·뮤테이션(한 항목의 absorbTarget을 바꾸면 두 곳에서 «동시에» 이동)을
+// 이 3-way 골격 위에 얹는다. ⌘K 팔레트는 무필터 평면 유지(AC 명시, 이 축 대상 아님).
+describe('groupVisibleLegacyByTarget 3-way 대조 — 데스크톱·모바일 머리말 동일(story #3855 AC3)', () => {
+  it('양성대조 — 두 항목 다 work 소속이면 데스크톱·모바일 둘 다 work 머리말 하나만 뜬다(집합 일치)', async () => {
+    const { sidebarGroupTargets, moreGroupTargets } = await renderAll(true, 'work');
+    expect(sidebarGroupTargets).toEqual(new Set(['work']));
+    expect(moreGroupTargets).toEqual(new Set(['work']));
+  });
+
+  it('⭐뮤테이션 — mutable 항목을 connect로 옮기면 데스크톱·모바일 둘 다 work+connect 두 머리말로 «동시에» 늘어난다(한 곳만 옮겨지면 이 대조가 RED)', async () => {
+    const { sidebarGroupTargets, moreGroupTargets } = await renderAll(true, 'connect');
+    expect(sidebarGroupTargets).toEqual(new Set(['work', 'connect']));
+    expect(moreGroupTargets).toEqual(new Set(['work', 'connect']));
+  });
+
+  it('⭐빈 묶음 렌더 0(AC4) — mutable 항목이 아예 빠지면(work엔 stable만 남음) work 머리말은 그대로, connect 머리말은 애초에 없다 — 두 소비처 다 동형', async () => {
+    const { sidebarGroupTargets, moreGroupTargets } = await renderAll(false);
+    expect(sidebarGroupTargets).toEqual(new Set(['work']));
+    expect(moreGroupTargets).toEqual(new Set(['work']));
   });
 });

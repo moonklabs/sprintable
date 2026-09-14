@@ -17,7 +17,7 @@ import { cn } from '@/lib/utils';
 import {
   NAV_GROUPS,
   CHAT_CENTER_ITEM,
-  VISIBLE_LEGACY_NAV_ITEMS,
+  groupVisibleLegacyByTarget,
 } from '@/lib/nav-config';
 import { useSseMultiplexerContext } from '@/components/realtime-provider';
 import {
@@ -486,14 +486,18 @@ export function AppSidebar({
             자기만의 목록을 다시 짓지 않는다(AC2/AC3). 기본 접힘(AC1) — 위 f81657f8은
             NAV_GROUPS(전부 펼침)만의 결정이라 이 새 그룹엔 안 걸린다. */}
         {(() => {
-          // story #3836(AC1) — 「더보기」 안 항목 링크(NAV_GROUPS 렌더 루프와 동일한
-          // static/resource 링크 계산, 새 축 0). 한 항목이라도 활성이면 접힘 상태와
-          // 무관하게 펼쳐야 활성 하이라이트가 실제로 보인다(legacyIsCollapsed 계산).
-          const legacyLinks = VISIBLE_LEGACY_NAV_ITEMS.map((item) => ({
-            item,
-            link: item.kind === 'static' ? { href: item.path, isActive: isActive(item.path) } : resourceLink(item.path),
-          }));
-          const legacyHasActiveItem = legacyLinks.some(({ link }) => link.isActive);
+          // story #3855(customer-zero·셸) — 「더보기」 안 항목을 §② 흡수 지도 머리말별로
+          // 묶는다(groupVisibleLegacyByTarget, nav-config.ts SSOT — more/page.tsx와 같은
+          // 함수 재사용). 링크 계산 자체는 3836과 동일(static/resource 링크, 새 축 0) —
+          // 그룹마다 반복하지 않고 전 항목을 한 번에 링크로 만든 뒤 그룹별로 다시 읽는다.
+          const legacyGroups = groupVisibleLegacyByTarget();
+          const legacyLinkByItemId = new Map(
+            legacyGroups.flatMap((group) => group.items).map((item) => [
+              item.id,
+              item.kind === 'static' ? { href: item.path, isActive: isActive(item.path) } : resourceLink(item.path),
+            ]),
+          );
+          const legacyHasActiveItem = [...legacyLinkByItemId.values()].some((link) => link.isActive);
           const legacyIsCollapsed = collapsedGroupIds.has(LEGACY_GROUP_ID) && !legacyHasActiveItem;
           const legacyGroupLabel = t('navMore');
           const legacyToggleAriaLabel = legacyIsCollapsed
@@ -534,35 +538,58 @@ export function AppSidebar({
               </SidebarGroupLabel>
               {!legacyIsCollapsed ? (
                 <SidebarGroupContent>
-                  <SidebarMenu>
-                    {legacyLinks.map(({ item, link }) => {
-                      const Icon = item.icon;
-                      const label = t(item.labelKey);
-                      return (
-                        <SidebarMenuItem key={item.id}>
-                          <SidebarMenuButton
-                            render={
-                              <Link
-                                href={link.href}
-                                ref={link.isActive ? activeMenuItemRef : undefined}
-                                data-legacy-nav-id={item.id}
-                              />
-                            }
-                            isActive={link.isActive}
-                            tooltip={label}
-                          >
-                            <Icon />
-                            <span data-nav-label>{label}</span>
-                            {item.scope === 'project' ? (
-                              <span className="ml-auto flex shrink-0 items-center gap-1.5">
-                                <ScopeMark>{t('scopeProject')}</ScopeMark>
-                              </span>
-                            ) : null}
-                          </SidebarMenuButton>
-                        </SidebarMenuItem>
-                      );
-                    })}
-                  </SidebarMenu>
+                  {/* story #3855 AC2 — 캡션 1줄(§⑤ 해요체·「이사 안내판」 취지). 링크·머리말
+                      둘 다 아닌 순수 안내문이라 SidebarMenu 밖, 첫 그룹 위에 한 번만. */}
+                  <p className="px-[9px] pt-px pb-1 text-[11.5px] text-muted-foreground" data-testid="legacy-moving-caption">
+                    {t('moreLegacyMovingCaption')}
+                  </p>
+                  {legacyGroups.map((group, groupIndex) => (
+                    <div key={group.target} className="space-y-0.5" data-legacy-group={group.target}>
+                      {/* 픽셀 커밋(페드루 PO 판정 2026-09-14 07:34Z, 유나 시안 77731332
+                          getComputedStyle 대조) — 묶음 사이 구분선(border 토큰) 1px·margin
+                          5px 8px 4px, 첫 그룹 앞엔 없음. */}
+                      {groupIndex > 0 ? <div className="mx-2 mt-[5px] mb-1 h-px bg-border" /> : null}
+                      {/* AC2 — 머리말은 링크·버튼이 아니다(순수 텍스트, 클릭 불가). 시안이
+                          지정한 안내 문구(머리말 옆 회색 note, 예: 「만드는 곳(일)…」)는 PO가
+                          §⑤ 내부 낱말·사이드바 폭 이유로 명시 제외했다 — 이름+개수 pill만. */}
+                      <p className="flex items-baseline gap-1.5 px-2 pt-0.5 pb-px text-[11px] font-bold tracking-[.03em] text-muted-foreground">
+                        <span>{t(group.labelKey)}</span>
+                        <span className="rounded-full bg-muted px-1.5 text-[10px] font-bold leading-[15px] text-muted-foreground">
+                          {group.items.length}
+                        </span>
+                      </p>
+                      <SidebarMenu>
+                        {group.items.map((item) => {
+                          const link = legacyLinkByItemId.get(item.id)!;
+                          const Icon = item.icon;
+                          const label = t(item.labelKey);
+                          return (
+                            <SidebarMenuItem key={item.id}>
+                              <SidebarMenuButton
+                                render={
+                                  <Link
+                                    href={link.href}
+                                    ref={link.isActive ? activeMenuItemRef : undefined}
+                                    data-legacy-nav-id={item.id}
+                                  />
+                                }
+                                isActive={link.isActive}
+                                tooltip={label}
+                              >
+                                <Icon />
+                                <span data-nav-label>{label}</span>
+                                {item.scope === 'project' ? (
+                                  <span className="ml-auto flex shrink-0 items-center gap-1.5">
+                                    <ScopeMark>{t('scopeProject')}</ScopeMark>
+                                  </span>
+                                ) : null}
+                              </SidebarMenuButton>
+                            </SidebarMenuItem>
+                          );
+                        })}
+                      </SidebarMenu>
+                    </div>
+                  ))}
                 </SidebarGroupContent>
               ) : null}
             </SidebarGroup>
