@@ -168,12 +168,15 @@ export interface WorkListGoalGroup {
 
 export interface WorkList {
   groups: WorkListGoalGroup[];
-  /** goals/stories/tasks 커서 hasMore 중 하나라도 true거나 null(모름)이면 true(story #3844
-   * AC1 — 「없다」 단정 금지, 안전 쪽으로 접는다). agent_runs·gates/inbox·team-members·
-   * hypotheses는 BE 계약상 페이지네이션 자체가 없는 소스라 partial 판정에 안 들어간다
-   * (team-members는 라이브 실측 2026-09-14 — list_team_members에 limit/cursor 파라미터가
-   * 아예 없다, 처음엔 규약 A 페이지 소스로 잘못 모델링해 실 데이터 0건인데도 "전부 불러오지
-   * 못했어요" 배너가 항상 뜨는 결함을 라이브 검증에서 발견·수정). */
+  /** goals/stories/tasks·agent_runs 커서 hasMore 중 하나라도 true거나 null(모름)이면
+   * true(story #3844 AC1 — 「없다」 단정 금지, 안전 쪽으로 접는다). agent_runs는 story
+   * #3857(FE 프록시 4곳 X-Total-Count/X-Next-Cursor 통과)부터 이 축에 합류 — 그 전엔
+   * FE 프록시가 그 헤더를 못 읽어 fetch-work-list.ts의 별도 길이===limit 휴리스틱으로
+   * 임시 처리했다(#3844 PO 確定, 이 스토리가 정식 축으로 흡수·휴리스틱은 삭제). gates/
+   * inbox·team-members·hypotheses는 여전히 BE 계약상 페이지네이션 자체가 없는 소스라
+   * partial 판정에 안 들어간다(team-members는 라이브 실측 2026-09-14 — list_team_members에
+   * limit/cursor 파라미터가 아예 없다, 처음엔 규약 A 페이지 소스로 잘못 모델링해 실 데이터
+   * 0건인데도 "전부 불러오지 못했어요" 배너가 항상 뜨는 결함을 라이브 검증에서 발견·수정). */
   partial: boolean;
 }
 
@@ -188,7 +191,7 @@ export interface WorkListInput {
   goals: WorkListPageResult<WorkListGoalInput>;
   stories: WorkListPageResult<WorkListStoryInput>;
   tasks: WorkListPageResult<WorkListTaskInput>;
-  agentRuns: WorkListAgentRunInput[];
+  agentRuns: WorkListPageResult<WorkListAgentRunInput>;
   /** GET /api/gates/inbox?status=pending 전체(페이지네이션 없는 org 스코프 소스). */
   inbox: WorkListInboxItem[];
   /** GET /api/team-members 전체(페이지네이션 없는 소스, list_team_members에 limit/cursor
@@ -291,7 +294,7 @@ export function deriveWorkList(input: WorkListInput): WorkList {
     bumpGoalTotals(story.epic_id, row);
   }
 
-  for (const run of input.agentRuns) {
+  for (const run of input.agentRuns.items) {
     if (!run.story_id) continue;
     const story = storyById.get(run.story_id);
     if (!story) continue;
@@ -342,6 +345,6 @@ export function deriveWorkList(input: WorkListInput): WorkList {
 
   return {
     groups,
-    partial: isPartial(input.goals, input.stories, input.tasks),
+    partial: isPartial(input.goals, input.stories, input.tasks, input.agentRuns),
   };
 }

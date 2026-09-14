@@ -10,7 +10,7 @@ function baseInput(overrides: Partial<WorkListInput> = {}): WorkListInput {
     goals: page([{ id: 'g1', title: '목표1', status: 'active' }]),
     stories: page([{ id: 's1', title: '스토리1', epic_id: 'g1' }]),
     tasks: page([]),
-    agentRuns: [],
+    agentRuns: page([]),
     inbox: [],
     teamMembers: [{ id: 'm-human', type: 'human', name: '사람' }, { id: 'm-agent', type: 'agent', name: '미르코' }],
     artifactCountByStoryId: new Map<string, number>(),
@@ -39,7 +39,7 @@ describe('deriveWorkList — 목표/스토리 그룹핑', () => {
   it('부모 스토리를 못 찾는 task/agent_run은 조용히 생략(짓지 않는다)', () => {
     const result = deriveWorkList(baseInput({
       tasks: page([{ id: 't1', story_id: 's-unknown', assignee_id: null, title: '할일1', status: 'todo' }]),
-      agentRuns: [{ id: 'r1', story_id: 's-unknown', agent_id: 'a1', agent_name: '미르코', status: 'running' }],
+      agentRuns: page([{ id: 'r1', story_id: 's-unknown', agent_id: 'a1', agent_name: '미르코', status: 'running' }]),
     }));
     expect(result.groups).toHaveLength(0);
   });
@@ -133,7 +133,7 @@ describe('deriveWorkList — 행 상태: gates/inbox 우선, task.status 폴백'
 describe('deriveWorkList — agent_run 행', () => {
   it('agent_run 행 제목은 부모 story.title 재사용(today_service.py 선례)', () => {
     const result = deriveWorkList(baseInput({
-      agentRuns: [{ id: 'r1', story_id: 's1', agent_id: 'a1', agent_name: '미르코', status: 'running' }],
+      agentRuns: page([{ id: 'r1', story_id: 's1', agent_id: 'a1', agent_name: '미르코', status: 'running' }]),
     }));
     const row = result.groups[0].stories[0].rows[0];
     expect(row.kind).toBe('agent_run');
@@ -149,7 +149,7 @@ describe('deriveWorkList — agent_run 행', () => {
     ];
     for (const [status, expected] of statuses) {
       const result = deriveWorkList(baseInput({
-        agentRuns: [{ id: `r-${status}`, story_id: 's1', agent_id: 'a1', agent_name: null, status }],
+        agentRuns: page([{ id: `r-${status}`, story_id: 's1', agent_id: 'a1', agent_name: null, status }]),
       }));
       expect(result.groups[0].stories[0].rows[0].state).toBe(expected);
     }
@@ -157,7 +157,7 @@ describe('deriveWorkList — agent_run 행', () => {
 
   it('story에 걸린 pending inbox 항목이 agent_run.status보다 우선한다', () => {
     const result = deriveWorkList(baseInput({
-      agentRuns: [{ id: 'r1', story_id: 's1', agent_id: 'a1', agent_name: '미르코', status: 'running' }],
+      agentRuns: page([{ id: 'r1', story_id: 's1', agent_id: 'a1', agent_name: '미르코', status: 'running' }]),
       inbox: [{ source: 'hitl', id: 'h1', work_item_id: 's1', status: 'pending', title: '질문', prompt: '?' }],
     }));
     expect(result.groups[0].stories[0].rows[0].state).toBe('awaiting_answer');
@@ -212,7 +212,7 @@ describe('deriveWorkList — 목표 헤더 집계(일 단위, PO 確定)', () =>
         { id: 't1', story_id: 's1', assignee_id: 'm-human', title: 'a', status: 'done' },
         { id: 't2', story_id: 's1', assignee_id: 'm-agent', title: 'b', status: 'todo' },
       ]),
-      agentRuns: [{ id: 'r1', story_id: 's1', agent_id: 'a1', agent_name: null, status: 'completed' }],
+      agentRuns: page([{ id: 'r1', story_id: 's1', agent_id: 'a1', agent_name: null, status: 'completed' }]),
     }));
     const group = result.groups[0];
     expect(group.totalCount).toBe(3);
@@ -280,9 +280,23 @@ describe('deriveWorkList — partial(더 있음, 「없다」 단정 금지)', (
     expect(result.partial).toBe(true);
   });
 
-  it('agent_run/inbox는 페이지네이션 없는 계약이라 partial 판정에 안 들어간다', () => {
+  // story #3857 — agent-runs는 FE 프록시(api/agent-runs/route.ts)가 이제 BE X-Total-Count/
+  // X-Next-Cursor를 meta로 재발행해(AC1) goals/stories/tasks와 동형 hasMore 축이 됐다.
+  // #3844 당시 썼던 "응답 길이===limit" 보수 휴리스틱(AGENT_RUNS_LIMIT)은 은퇴.
+  it('agentRuns.hasMore=true면 partial=true(story #3857부터 이 축 합류)', () => {
     const result = deriveWorkList(baseInput({
-      agentRuns: [{ id: 'r1', story_id: 's1', agent_id: 'a1', agent_name: null, status: 'running' }],
+      agentRuns: page([{ id: 'r1', story_id: 's1', agent_id: 'a1', agent_name: null, status: 'running' }], true),
+    }));
+    expect(result.partial).toBe(true);
+  });
+
+  it('agentRuns.hasMore=null(모름)이면 partial=true(모르면 단정 안 함)', () => {
+    const result = deriveWorkList(baseInput({ agentRuns: page([], null) }));
+    expect(result.partial).toBe(true);
+  });
+
+  it('inbox는 여전히 페이지네이션 없는 계약이라 partial 판정에 안 들어간다', () => {
+    const result = deriveWorkList(baseInput({
       inbox: [{ source: 'gate', id: 'gate1', work_item_id: 's1', work_item_type: 'story', status: 'pending', gate_type: 'merge', risk_grade: 'low' }],
     }));
     expect(result.partial).toBe(false);

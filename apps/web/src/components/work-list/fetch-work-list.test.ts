@@ -3,9 +3,12 @@
 // story #3844(카디르 QA 발견, PR#4268) — fetch-work-list.ts는 실사고 ②(team-members가
 // 무-페이지네이션 소스인데 규약 A로 잘못 모델링해 데이터 0건에도 "전부 불러오지
 // 못했어요" 배너가 항상 뜨던 결함)를 이 파일에서 고쳤는데 이 파일 자체엔 테스트가
-// 0이었다 — 회귀를 아무도 못 잡는 상태. story #3857(FE 프록시 헤더 통과)이 곧 이
-// 파일의 agent-runs 호출부를 fetchPage로 바꿀 예정이라 그 전에 team-members가
-// 여전히 fetchEnvelope(순수 배열, 페이지네이션 무관) 경로를 타는지 잠가 둔다.
+// 0이었다 — 회귀를 아무도 못 잡는 상태.
+// story #3857(AC2) — agent-runs는 FE 프록시(api/agent-runs/route.ts)가 BE X-Total-Count/
+// X-Next-Cursor를 meta로 재발행하게 되어(AC1) team-members와 반대로 규약 A(fetchPage)
+// 경로로 옮겨졌다 — #3844 당시의 "응답 길이===limit" 보수 휴리스틱(AGENT_RUNS_LIMIT)은
+// 은퇴. 이 파일 목(mock)도 agent-runs를 regulationAEnvelope로 갱신하고, agent-runs
+// hasMore가 partial에 실제로 반영되는지 잠그는 describe 블록을 추가한다.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { fetchWithAuthMock } = vi.hoisted(() => ({ fetchWithAuthMock: vi.fn() }));
@@ -17,24 +20,24 @@ function jsonResponse(body: unknown): { ok: true; json: () => Promise<unknown> }
   return { ok: true, json: async () => body };
 }
 
-// 규약 A 소스(goals/stories/tasks) — camelCase meta 필수. hasMore:false로 고정해 이 헬퍼
-// 자체가 partial에 기여하지 않게 한다(테스트 대상은 team-members 단독 경로).
-function regulationAEnvelope(items: unknown[]) {
-  return jsonResponse({ data: items, meta: { limit: 100, hasMore: false, nextCursor: null } });
+// 규약 A 소스(goals/stories/tasks/agent-runs) — camelCase meta 필수. hasMore는 기본
+// false로 고정해 이 헬퍼 자체가 partial에 기여하지 않게 한다(개별 테스트가 필요시 override).
+function regulationAEnvelope(items: unknown[], hasMore = false) {
+  return jsonResponse({ data: items, meta: { limit: 100, hasMore, nextCursor: hasMore ? 'cursor-1' : null } });
 }
 
-// 무-페이지네이션 소스(agent-runs/gates-inbox/team-members/visual-artifacts/hypotheses) —
-// FE 프록시가 순수 배열만 돌려주고 meta는 항상 null(apiSuccess(data) 관례).
+// 무-페이지네이션 소스(gates-inbox/team-members/visual-artifacts/hypotheses) — FE 프록시가
+// 순수 배열만 돌려주고 meta는 항상 null(apiSuccess(data) 관례).
 function plainArrayEnvelope(items: unknown[]) {
   return jsonResponse({ data: items, meta: null });
 }
 
-function mockFetchWorkListSources(overrides: { teamMembers?: unknown[] } = {}) {
+function mockFetchWorkListSources(overrides: { teamMembers?: unknown[]; agentRunsHasMore?: boolean } = {}) {
   fetchWithAuthMock.mockImplementation(async (url: string) => {
     if (url.includes('/api/goals')) return regulationAEnvelope([]);
     if (url.includes('/api/stories')) return regulationAEnvelope([]);
     if (url.includes('/api/tasks')) return regulationAEnvelope([]);
-    if (url.includes('/api/agent-runs')) return plainArrayEnvelope([]);
+    if (url.includes('/api/agent-runs')) return regulationAEnvelope([], overrides.agentRunsHasMore ?? false);
     if (url.includes('/api/gates/inbox')) return plainArrayEnvelope([]);
     if (url.includes('/api/team-members')) return plainArrayEnvelope(overrides.teamMembers ?? []);
     if (url.includes('/api/visual-artifacts')) return plainArrayEnvelope([]);
@@ -76,6 +79,20 @@ describe('fetchWorkList — team-members는 무-페이지네이션 소스라 par
   // 잡히는 자리라는 게 이 테스트의 요점(다음 사람이 fetchPage로 오인해 바꾸는 재발 방지).
   it('team-members 응답에 meta가 없다는 사실 자체가 partial 오탐의 재발 지점이다', async () => {
     mockFetchWorkListSources({ teamMembers: [{ id: 'm1', type: 'human', name: '사람' }] });
+    const { workList } = await fetchWorkList('proj-1');
+    expect(workList.partial).toBe(false);
+  });
+});
+
+describe('fetchWorkList — agent-runs hasMore가 partial에 반영된다(story #3857 AC2)', () => {
+  it('agent-runs.meta.hasMore=true면 partial=true(다른 소스는 전부 hasMore:false)', async () => {
+    mockFetchWorkListSources({ agentRunsHasMore: true });
+    const { workList } = await fetchWorkList('proj-1');
+    expect(workList.partial).toBe(true);
+  });
+
+  it('agent-runs.meta.hasMore=false·다른 소스도 전부 false면 partial=false', async () => {
+    mockFetchWorkListSources({ agentRunsHasMore: false });
     const { workList } = await fetchWorkList('proj-1');
     expect(workList.partial).toBe(false);
   });
