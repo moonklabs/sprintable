@@ -30,11 +30,6 @@ from app.models.workflow_line import WorkflowLineStepApproval, WorkflowLineStepR
 from app.services.member_resolver import lookup_members_by_ids, resolve_member
 from app.services.org_time import org_midnight_utc
 
-# story #3821(PR B) 규칙 재사용 — 같은 (work_item_type, work_item_id, gate_type)는
-# 3계 어디서 왔든 1행으로 접는다. gate_type이 없는 소스(HitlRequest의 work_type)도
-# 이 축에 흡수한다(아래 _dedupe_key 참고).
-_EXTERNAL_PUBLISH_GATE_TYPE = "external_publish"
-
 # story #3815류와 동일 선례 — 오늘은 youtube/youtube_sandbox만 「사용량」 개념이
 # 있다(channel_adapters.py의 quota_reset_timezone 선언 채널). 다른 채널(wordpress·
 # ghost·threads 등)은 이 개념 자체가 BE에 없다(디디 그라운딩 2026-09-13, story
@@ -77,22 +72,34 @@ async def _needs_me_from_gate_inbox(
     = SLA overdue 우선·age(created_at) 오래된 순(그 파일 §1973 로직 그대로) —
     이 서비스가 최종적으로 재-정렬(전체 3계 병합 뒤 created_at asc)하므로 여기
     정렬은 「pending 것 우선」 신호로만 쓰인다.
+
+    story #3868(PO 確定 2026-09-14 11:41Z) — kind(signature/approval) 판정을
+    ``gate_type == "external_publish"`` 리터럴 비교(예전 방식)가 아니라 gates.py의
+    고위험 집행과 같은 SSOT 함수 ``derive_risk_grade(posture, gate_type)``로 낸다.
+    external_publish 특례를 삭제한 이유: doc_approval도 _HIGH_RISK_GATE_TYPES
+    2차축 멤버라 external_publish와 똑같이 high인데 리터럴 비교는 doc_approval을
+    놓쳤고(「오늘」=approval인데 게이트 페이지=signature 갈림의 원인), org posture가
+    permissive면 1차축이 이겨 external_publish도 low로 내려가는데 리터럴 비교는
+    그 경우도 못 봤다(양방향 오차, AC0 그라운딩 ③). posture는 org당 1쿼리(N+1 0,
+    list_gates·gate 승인 집행과 동일 패턴).
     """
     from app.routers.gates import list_gate_inbox  # 순환 최소화 위해 지역 import(established 관례).
+    from app.services.gate_service import derive_risk_grade, get_org_posture
 
     rows = await list_gate_inbox(
         status="pending", sort="urgency", assigned_to_me=True,
         session=session, org_id=org_id, auth=auth,
     )
+    _posture = await get_org_posture(session, org_id)
     items: list[dict[str, Any]] = []
     for r in rows:
         if r.source == "gate":
             gate_type = r.gate_type
-            is_signature = gate_type == _EXTERNAL_PUBLISH_GATE_TYPE
+            risk = derive_risk_grade(_posture, gate_type)
             title = r.work_item_summary.title if r.work_item_summary is not None else None
             items.append({
-                "kind": "signature" if is_signature else "approval",
-                "risk": "high" if is_signature else "low",
+                "kind": "signature" if risk == "high" else "approval",
+                "risk": risk,
                 "source": "gate",
                 "source_id": str(r.id),
                 "work_item_type": r.work_item_type,
