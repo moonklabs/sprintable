@@ -751,7 +751,7 @@ describe('ChatBubble — story #2604 P2 결재 요청(approval_target) 카드', 
     // 링크 위임 UX는 선생님 실사용 판정으로 폐기됐다(gate 34af76dc) — 더 이상 없어야 한다.
     expect(container.querySelector(`a[href="/gates/${GATE_ID}"]`)).toBeNull();
     // GateSignatureApproval이 그대로(사본 아님) 얹힌다 — 근거 확인 체크박스+사유 textarea.
-    expect(container.textContent).toContain('위 근거를 확인했습니다');
+    expect(container.textContent).toContain('위 근거를 확인했어요');
     const signBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('승인하고 서명'))!;
     expect(signBtn).not.toBeUndefined();
     // 카디르 QA(320/375px 실측) 재발방지 — compact=true가 실제로 전달돼 버튼이 세로 스택

@@ -56,7 +56,7 @@ describe('HypothesisDeclarationCard(epics) — L1 선례 조회 실패(story #36
     await act(async () => { textarea.dispatchEvent(new FocusEvent('focusout', { bubbles: true })); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 
-    expect(container.textContent).toContain('비슷한 가설을 불러오지 못했습니다');
+    expect(container.textContent).toContain('비슷한 가설을 불러오지 못했어요');
     expect(container.textContent).not.toContain('비슷한 가설의 과거 결과');
   });
 
@@ -71,6 +71,6 @@ describe('HypothesisDeclarationCard(epics) — L1 선례 조회 실패(story #36
     await act(async () => { textarea.dispatchEvent(new FocusEvent('focusout', { bubbles: true })); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 
-    expect(container.textContent).not.toContain('비슷한 가설을 불러오지 못했습니다');
+    expect(container.textContent).not.toContain('비슷한 가설을 불러오지 못했어요');
   });
 });

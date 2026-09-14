@@ -364,7 +364,7 @@ describe('DocsClientLayout — story #3784 loading/loadError 컨텍스트 실 �
     await mountWithIndex();
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
     expect(container.textContent).not.toContain('아직 쌓인 문서가 없어요');
-    expect(container.textContent).toContain('불러오지 못했습니다');
+    expect(container.textContent).toContain('불러오지 못했어요');
   });
 
   // story #3784(카디르 QA·페드루 재현, 10:02Z) — 실패 뒤 「다시 시도」를 누른 순간부터 그
@@ -380,7 +380,7 @@ describe('DocsClientLayout — story #3784 loading/loadError 컨텍스트 실 �
     vi.stubGlobal('fetch', fetchMock);
     await mountWithIndex();
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
-    expect(container.textContent).toContain('불러오지 못했습니다');
+    expect(container.textContent).toContain('불러오지 못했어요');
 
     const retryButton = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('다시 시도'));
     expect(retryButton).toBeTruthy();
@@ -388,7 +388,7 @@ describe('DocsClientLayout — story #3784 loading/loadError 컨텍스트 실 �
 
     // 재시도 fetch가 아직 안 풀린 시점(pending) — 양쪽 다 "없어요" 단정 0, 로딩 문구는 有.
     expect(container.textContent).not.toContain('아직 쌓인 문서가 없어요');
-    expect(container.textContent).not.toContain('불러오지 못했습니다');
+    expect(container.textContent).not.toContain('불러오지 못했어요');
     expect(container.textContent).toContain('불러오는 중');
 
     await act(async () => {
@@ -405,7 +405,7 @@ describe('DocsClientLayout — story #3784 loading/loadError 컨텍스트 실 �
     vi.stubGlobal('fetch', fetchMock);
     await mount();
     expect(container.textContent).not.toContain('문서를 선택하세요');
-    expect(container.textContent).toContain('불러오지 못했습니다');
+    expect(container.textContent).toContain('불러오지 못했어요');
     const callsBefore = fetchMock.mock.calls.length;
     const retryButton = [...container.querySelectorAll('button')].find((b) => b.textContent === '다시 시도');
     expect(retryButton).toBeTruthy();

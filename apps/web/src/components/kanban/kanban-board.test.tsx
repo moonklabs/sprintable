@@ -205,8 +205,8 @@ describe('KanbanBoard — 보드 first-touch 절제된 배너', () => {
     expect(html).toContain('아직 움직이는 일이 없어요');
     expect(html).toContain('보드는 사람과 AI가 맡은 일이 지금 흐르는 곳이에요');
     expect(html).toContain('첫 스토리 만들기');
-    // 컬럼 그리드가 대체가 아니라 유지된다 — 기존 per-column "스토리가 없습니다" 플레이스홀더도 여전히 존재.
-    expect(html).toContain('스토리가 없습니다');
+    // 컬럼 그리드가 대체가 아니라 유지된다 — 기존 per-column "스토리가 없어요" 플레이스홀더도 여전히 존재.
+    expect(html).toContain('스토리가 없어요');
   });
 
   it('배너 CTA 클릭 시 트러스트 뷰 queued 컬럼의 인라인 컴포저(제목 입력 필드)가 열린다 — 축 전환 없음', async () => {
@@ -351,7 +351,7 @@ describe('KanbanBoard — 스토리 생성 실패 접근성(story #2105 2차)', 
     });
     const alertEl = await waitForAlert();
     expect(alertEl).not.toBeNull();
-    expect(alertEl?.textContent).toContain('스토리 추가에 실패했습니다');
+    expect(alertEl?.textContent).toContain('스토리 추가에 실패했어요');
     expect(alertEl?.getAttribute('aria-live')).toBe('assertive');
     // story 3466 후속(무효 유틸 4곳) — 이 배너가 no-op text-destructive-foreground
     // 대신 실 렌더 색을 갖는지.
@@ -432,7 +432,7 @@ describe('KanbanBoard — 실시간(SSE) 반영', () => {
       });
       await Promise.resolve();
     });
-    expect(container.textContent).toContain('댄님이 S1 상태를 변경했습니다');
+    expect(container.textContent).toContain('댄님이 S1 상태를 변경했어요');
   });
 
   it('내 액션의 echo(actor_id===currentTeamMemberId)는 토스트를 안 띄운다(중복 방지)', async () => {
@@ -445,7 +445,7 @@ describe('KanbanBoard — 실시간(SSE) 반영', () => {
       });
       await Promise.resolve();
     });
-    expect(container.textContent).not.toContain('상태를 변경했습니다');
+    expect(container.textContent).not.toContain('상태를 변경했어요');
   });
 
   it('다른 project_id의 이벤트는 무시한다(org-wide 브로드캐스트 클라이언트 필터)', async () => {
@@ -458,7 +458,7 @@ describe('KanbanBoard — 실시간(SSE) 반영', () => {
       });
       await Promise.resolve();
     });
-    expect(container.textContent).not.toContain('상태를 변경했습니다');
+    expect(container.textContent).not.toContain('상태를 변경했어요');
   });
 
   it('아직 로드되지 않은 스토리 id의 이벤트는 조용히 무시한다(크래시 없음)', async () => {
@@ -471,7 +471,7 @@ describe('KanbanBoard — 실시간(SSE) 반영', () => {
       });
       await Promise.resolve();
     });
-    expect(container.textContent).not.toContain('상태를 변경했습니다');
+    expect(container.textContent).not.toContain('상태를 변경했어요');
   });
 
   it('담당자 변경 이벤트도 토스트로 드러난다', async () => {
@@ -484,7 +484,7 @@ describe('KanbanBoard — 실시간(SSE) 반영', () => {
       });
       await Promise.resolve();
     });
-    expect(container.textContent).toContain('까심님이 S1 담당자를 변경했습니다');
+    expect(container.textContent).toContain('까심님이 S1 담당자를 변경했어요');
   });
 
   // story #2130 — 토스트만 뜨고 카드 화면(아바타)은 안 바뀌던 결함의 회귀가드. StoryCard는
@@ -528,7 +528,7 @@ describe('KanbanBoard — 실시간(SSE) 반영', () => {
     });
     // 토스트는 여전히 뜬다(핸들러가 실행됐다는 관측 가능한 신호) — 카드 시각 확認은 memberMap
     // 의존이라 이 테스트 범위 밖(멤버 목록 자체가 별건).
-    expect(container.textContent).toContain('오르테가님이 S1 담당자를 변경했습니다');
+    expect(container.textContent).toContain('오르테가님이 S1 담당자를 변경했어요');
   });
 
   // story #2172 AC5 — BE(#2476)는 이미 story.position_changed를 발행하고 있었으나 FE 구독이
@@ -545,7 +545,7 @@ describe('KanbanBoard — 실시간(SSE) 반영', () => {
       });
       await Promise.resolve();
     });
-    expect(container.textContent).toContain('유나님이 S1 순서를 변경했습니다');
+    expect(container.textContent).toContain('유나님이 S1 순서를 변경했어요');
   });
 
   it('순서 변경 시 카드가 같은 컬럼 안에서 실제로 재배치된다(#2172 AC5②)', async () => {
@@ -585,7 +585,7 @@ describe('KanbanBoard — 실시간(SSE) 반영', () => {
       });
       await Promise.resolve();
     });
-    expect(container.textContent).not.toContain('순서를 변경했습니다');
+    expect(container.textContent).not.toContain('순서를 변경했어요');
   });
 
   it('내 액션의 echo(actor_id===currentTeamMemberId)는 순서 변경 토스트도 안 띄운다', async () => {
@@ -598,7 +598,7 @@ describe('KanbanBoard — 실시간(SSE) 반영', () => {
       });
       await Promise.resolve();
     });
-    expect(container.textContent).not.toContain('순서를 변경했습니다');
+    expect(container.textContent).not.toContain('순서를 변경했어요');
   });
 });
 
@@ -900,7 +900,7 @@ describe('KanbanBoard — handleStoryClick storyTasks 리셋·취소 가드(stor
 
   // story #3709(FE 완전성-정직, 3704 후속) — 응답 前(조회 中)엔 tasks=[]·totalCount=null인데
   // 로딩 신호가 없으면 StoryDetailPanel이 이걸 "정말 0개"로 오단정했다.
-  it('응답 前(조회 中)엔 "태스크가 없습니다" 대신 "불러오는 중"이 뜬다', async () => {
+  it('응답 前(조회 中)엔 "태스크가 없어요" 대신 "불러오는 중"이 뜬다', async () => {
     const aResponse = deferredTaskResponse();
     stubFetchWithTasks(
       [{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium' }],
@@ -1253,7 +1253,7 @@ describe('KanbanBoard — 6단계 신뢰축 뷰(story #2933 H4)', () => {
         await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
       });
 
-      expect(container.textContent).toContain('스토리 이동에 실패했습니다');
+      expect(container.textContent).toContain('스토리 이동에 실패했어요');
     });
   });
 });
@@ -1282,7 +1282,7 @@ describe('KanbanBoard — 5-status 클래식 드래그, FORBIDDEN 아닌 실패�
     // 기본 stubFetch는 /api/stories/bulk를 명시 처리 안 해 그레이스풀 { ok: false }로
     // 떨어진다(주석 그대로) — 이 스위트의 다른 테스트들에는 무해했지만(드래그를 직접
     // 발화한 테스트가 이제껏 0건), 이 테스트에선 그 자체가 "실 실패" 재현이다.
-    expect(container.textContent).toContain('스토리 이동에 실패했습니다');
+    expect(container.textContent).toContain('스토리 이동에 실패했어요');
   });
 });
 
@@ -1292,9 +1292,9 @@ describe('KanbanBoard — story #3043 <lg 기본값=list(칸반 다열은 opt-in
     stubFetch([{ id: 's-mobile', title: '모바일카드', status: 'backlog', priority: 'medium' }]);
     await mount();
 
-    // board 뷰 전용 placeholder("스토리가 없습니다", 빈 컬럼마다 반복)는 list 뷰엔 없다 —
+    // board 뷰 전용 placeholder("스토리가 없어요", 빈 컬럼마다 반복)는 list 뷰엔 없다 —
     // list 뷰는 상태별 그룹 헤더(카운트 배지)로만 존재를 표현한다.
-    expect(container.textContent).not.toContain('스토리가 없습니다');
+    expect(container.textContent).not.toContain('스토리가 없어요');
     expect(container.textContent).toContain('모바일카드');
   });
 
@@ -1303,7 +1303,7 @@ describe('KanbanBoard — story #3043 <lg 기본값=list(칸반 다열은 opt-in
     stubFetch([{ id: 's-desktop', title: '데스크톱카드', status: 'backlog', priority: 'medium' }]);
     await mount();
 
-    expect(container.textContent).toContain('스토리가 없습니다');
+    expect(container.textContent).toContain('스토리가 없어요');
   });
 
   it('모바일이라도 다열(board) 토글을 직접 누르면 그 선택이 뷰포트와 무관하게 유지된다(칸반 opt-in)', async () => {
@@ -1315,7 +1315,7 @@ describe('KanbanBoard — story #3043 <lg 기본값=list(칸반 다열은 opt-in
     expect(boardToggle).not.toBeNull();
     await act(async () => { boardToggle!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
-    expect(container.textContent).toContain('스토리가 없습니다');
+    expect(container.textContent).toContain('스토리가 없어요');
   });
 
   it('list 뷰의 행은 board 뷰와 동일한 StoryCard atom(SID 3018)을 재사용한다 — full-width(max-w-none)로', async () => {

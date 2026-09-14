@@ -955,7 +955,7 @@ describe('StoryDetailPanel — 제목/설명/완료기준 저장 실패 시 문�
     const saveBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '저장');
     await act(async () => { saveBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); await Promise.resolve(); });
 
-    expect(container.textContent).toContain('제목 저장에 실패했습니다.');
+    expect(container.textContent).toContain('제목 저장에 실패했어요.');
   });
 });
 
@@ -1010,23 +1010,23 @@ describe('StoryDetailPanel — tasksTotalCount(story #3703, 완전성-정직)', 
   });
 
   // story #3703 CHANGES(카디르 QA blocker①, 2026-09-08) — tasks.length===0인데
-  // tasksTotalCount>0(첫 페이지가 마침 빈 배열인 대표 시나리오)이면 「태스크가 없습니다」로
+  // tasksTotalCount>0(첫 페이지가 마침 빈 배열인 대표 시나리오)이면 「태스크가 없어요」로
   // 단정하지 않고 정직 문구가 떠야 한다 — 이 PR이 막으려던 바로 그 오단정이 재발했었다.
-  it('로드분 0건이어도 tasksTotalCount>0이면 "태스크가 없습니다"가 아니라 정직 문구가 뜬다', async () => {
+  it('로드분 0건이어도 tasksTotalCount>0이면 "태스크가 없어요"가 아니라 정직 문구가 뜬다', async () => {
     await act(async () => {
       root.render(wrap(
         <StoryDetailPanel story={makeStory()} tasks={[]} tasksTotalCount={57} onClose={() => {}} />,
       ));
     });
-    expect(container.textContent).not.toContain('태스크가 없습니다');
+    expect(container.textContent).not.toContain('태스크가 없어요');
     expect(container.textContent).toContain('57개 중 0개 표시 중');
   });
 
-  it('로드분 0건이고 tasksTotalCount도 0(또는 미제공)이면 "태스크가 없습니다"가 정당하게 뜬다(무회귀)', async () => {
+  it('로드분 0건이고 tasksTotalCount도 0(또는 미제공)이면 "태스크가 없어요"가 정당하게 뜬다(무회귀)', async () => {
     await act(async () => {
       root.render(wrap(<StoryDetailPanel story={makeStory()} tasks={[]} tasksTotalCount={0} onClose={() => {}} />));
     });
-    expect(container.textContent).toContain('태스크가 없습니다');
+    expect(container.textContent).toContain('태스크가 없어요');
 
     await act(async () => { root.unmount(); });
     container = document.createElement('div');
@@ -1035,7 +1035,7 @@ describe('StoryDetailPanel — tasksTotalCount(story #3703, 완전성-정직)', 
     await act(async () => {
       root.render(wrap(<StoryDetailPanel story={makeStory()} tasks={[]} onClose={() => {}} />)); // tasksTotalCount 미제공
     });
-    expect(container.textContent).toContain('태스크가 없습니다');
+    expect(container.textContent).toContain('태스크가 없어요');
   });
 });
 
@@ -1047,7 +1047,7 @@ describe('StoryDetailPanel — tasksLoading(story #3709, 완전성-정직)', () 
     return { id, title: `task-${id}`, status: 'todo' };
   }
 
-  it('tasksLoading=true면 tasks=[]·tasksTotalCount=null이어도 "태스크가 없습니다" 대신 "불러오는 중"이 뜬다', async () => {
+  it('tasksLoading=true면 tasks=[]·tasksTotalCount=null이어도 "태스크가 없어요" 대신 "불러오는 중"이 뜬다', async () => {
     await act(async () => {
       root.render(wrap(
         <StoryDetailPanel story={makeStory()} tasks={[]} tasksTotalCount={null} tasksLoading onClose={() => {}} />,

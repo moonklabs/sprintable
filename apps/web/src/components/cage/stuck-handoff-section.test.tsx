@@ -91,7 +91,7 @@ describe('StuckHandoffSection — withdraw(story #2272)', () => {
     await act(async () => { btn!.click(); });
 
     expect(withdrawSpy).not.toHaveBeenCalled();
-    expect(container.textContent).toContain('철회하면 되돌릴 수 없습니다');
+    expect(container.textContent).toContain('철회하면 되돌릴 수 없어요');
   });
 
   it('취소를 누르면 confirm이 닫히고 fetch(withdraw)는 끝내 안 불린다', async () => {
@@ -129,7 +129,7 @@ describe('StuckHandoffSection — withdraw(story #2272)', () => {
     await act(async () => { findButtonByText('요청 철회')!.click(); });
     await act(async () => { findButtonByText('철회 확인')!.click(); await Promise.resolve(); await Promise.resolve(); });
 
-    expect(container.textContent).toContain('철회에 실패했습니다');
+    expect(container.textContent).toContain('철회에 실패했어요');
     expect(findButtonByText('요청 철회')).toBeDefined();
   });
 

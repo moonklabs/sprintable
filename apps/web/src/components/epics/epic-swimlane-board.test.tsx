@@ -712,7 +712,7 @@ describe('EpicSwimlaneBoard — 드래그(story #2931)', () => {
     // story #3637(유나 silent-failure-sweep-3632) — 카드가 조용히 제자리로 돌아가던 자리,
     // 이제 storyMoveFailed 토스트가 뜬다(새 규격 0, board 네임스페이스의 createStoryFailed
     // 형과 동형).
-    expect(container.textContent).toContain('스토리 이동에 실패했습니다');
+    expect(container.textContent).toContain('스토리 이동에 실패했어요');
   });
 
   // 같은 클래스 — bulk(컬럼) PATCH 축도 동일 가드가 걸리는지 대칭 확認.
@@ -738,7 +738,7 @@ describe('EpicSwimlaneBoard — 드래그(story #2931)', () => {
 
     expect(storiesGetCount).toBe(2);
     // story #3637 — 열 이동도 동일 처방.
-    expect(container.textContent).toContain('스토리 이동에 실패했습니다');
+    expect(container.textContent).toContain('스토리 이동에 실패했어요');
   });
 
   // TRUST_COLUMNS 고정 순서(queued=0,running=1,needs_input=2,claimed_done=3,verified=4,
@@ -832,7 +832,7 @@ describe('EpicSwimlaneBoard — 드래그(story #2931)', () => {
     expect(nthLaneCellStatusAxis(0, 0)?.textContent).toContain('차단카드');
     expect(nthLaneCellStatusAxis(0, 2)?.textContent ?? '').not.toContain('차단카드');
     // 경고 토스트(형제 kanban-board와 동형 문구).
-    expect(container.textContent).toContain('단계를 건너뛴 전이입니다');
+    expect(container.textContent).toContain('단계를 건너뛴 전이예요');
   });
 });
 
@@ -902,7 +902,7 @@ describe('EpicSwimlaneBoard — StoryDetailPanel 배선(story #2931, QA changes 
   // story #3709(FE 완전성-정직, 3704 후속) — 응답 前(조회 中)엔 tasks=[]·totalCount=null인데
   // 로딩 신호가 없으면 StoryDetailPanel이 이걸 "정말 0개"로 오단정했다(kanban-board.tsx와
   // 동형 갭 — 형제 호출부).
-  it('응답 前(조회 中)엔 "태스크가 없습니다" 대신 "불러오는 중"이 뜬다', async () => {
+  it('응답 前(조회 中)엔 "태스크가 없어요" 대신 "불러오는 중"이 뜬다', async () => {
     await mount({
       epics: [{ id: 'e1', title: '에픽', status: 'active', position: 1 }],
       stories: [{ id: 's1', title: '로딩카드', status: 'backlog', priority: 'medium', epic_id: 'e1' }],

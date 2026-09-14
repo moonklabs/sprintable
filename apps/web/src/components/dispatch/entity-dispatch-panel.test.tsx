@@ -77,8 +77,8 @@ describe('EntityDispatchPanel — 까심군 QA 회귀 (envelope unwrap)', () => 
       await Promise.resolve();
     });
 
-    expect(document.body.textContent).not.toContain('담당자가 지정되지 않았습니다');
-    expect(document.body.textContent).toContain('전달했습니다');
+    expect(document.body.textContent).not.toContain('담당자가 지정되지 않았어요');
+    expect(document.body.textContent).toContain('전달했어요');
   });
 
   it('/api/dispatch가 {data:{dispatched:false}}면(진짜 담당자 미지정) 안내 토스트가 뜬다', async () => {
@@ -105,7 +105,7 @@ describe('EntityDispatchPanel — 까심군 QA 회귀 (envelope unwrap)', () => 
       await Promise.resolve();
     });
 
-    expect(document.body.textContent).toContain('담당자가 지정되지 않았습니다');
+    expect(document.body.textContent).toContain('담당자가 지정되지 않았어요');
   });
 });
 
