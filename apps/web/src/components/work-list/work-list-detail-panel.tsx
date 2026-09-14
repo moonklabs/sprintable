@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import { getEntityHref } from '@/components/chat/embed-card';
+import { Card } from '@/components/ui/card';
 import { fetchWithAuth } from '@/lib/db/client';
 import { EvidenceSection } from '@/components/verify/evidence-section';
 import { ArtifactSection } from '@/components/canvas/artifact-section';
@@ -229,13 +230,18 @@ export function WorkListDetailPanel({
           ) : null}
         </div>
 
+        {/* CHANGES 6(페드루 PO 판정 2026-09-14 10:09Z, CI「no-card-surfaceless-box」가드
+            RED) — story #3785 규율: border+rounded만 있고 자기 배경(surface)이 없는
+            div는 금지, Card(surface 기본 solid=border-border/80 bg-card)로. 시안 구조·
+            레이아웃(flex·gap·padding)은 무변 — Card가 border/bg/radius를 제공하고
+            나머지 유틸은 className으로 그대로. */}
         {gate && riskBadge ? (
-          <div className="flex items-center gap-2 rounded-md border border-border p-2" data-testid="panel-risk">
+          <Card className="flex items-center gap-2 p-2" data-testid="panel-risk">
             <Badge variant={riskBadge}>{t(gate.risk_grade === 'high' ? 'riskBadgeHigh' : 'chipLowRisk')}</Badge>
             {/* 픽셀 커밋 CHANGES 3(b, 페드루 PO 판정 09:40Z) — 저위험은 문장 0(pill과
                 같은 사실 반복 금지). 고위험만 riskKey가 채워진다. */}
             {riskKey ? <p className="text-xs text-muted-foreground">{t(riskKey)}</p> : null}
-          </div>
+          </Card>
         ) : null}
 
         {canShowPrimaryAction ? (
