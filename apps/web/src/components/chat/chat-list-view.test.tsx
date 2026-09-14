@@ -289,6 +289,75 @@ describe('ChatListView — 리스트 아바타 실사진(story #2968)', () => {
   });
 });
 
+// story #3888(§⑤·Chat, PO 확定 2026-09-14 18:19Z) — 이벤트 메시지 미리보기가 raw
+// content(발행 시점에 구운 「[이벤트] preset.gate.verdict」류 slug)를 그대로 보여주던
+// 것을 막는다. composeEventPreviewLine 자체 단위테스트는 event-block-card.test.tsx —
+// 여기는 latest_message.event가 실제로 이 자리(리스트 행)까지 배선되는지의 최종 증거.
+describe('ChatListView — story #3888 이벤트 메시지 미리보기(raw slug 봉쇄)', () => {
+  it('⭐latest_message.event가 있으면 raw content 대신 헤더+요약 한 줄을 렌더한다', async () => {
+    stubFetchWithConversations([{
+      id: 'conv-event-1', type: 'dm', title: '결재봇',
+      latest_message: {
+        content: '[이벤트] preset.gate.verdict\n- gate_type: external_publish\n- verdict: approved',
+        created_at: '2026-09-14T18:00:00Z',
+        event: { event_key: 'preset.gate.verdict', payload: { gate_type: 'external_publish', verdict: 'approved' } },
+      },
+      updated_at: '2026-09-14T18:00:00Z', unread_count: 0,
+    }]);
+    await mount();
+    expect(container.textContent).toContain('게이트 판정 · 외부 발행 — 승인됨');
+    expect(container.textContent).not.toContain('[이벤트]');
+    expect(container.textContent).not.toContain('preset.gate.verdict');
+  });
+
+  it('work.status_changed 이벤트도 헤더+종류+전이 화살표로 렌더한다', async () => {
+    stubFetchWithConversations([{
+      id: 'conv-event-2', type: 'dm', title: '스토리 봇',
+      latest_message: {
+        content: '[이벤트] preset.work.status_changed',
+        created_at: '2026-09-14T18:00:00Z',
+        event: {
+          event_key: 'preset.work.status_changed',
+          payload: { work_item_type: 'story', from_status: 'ready-for-dev', to_status: 'in-progress' },
+        },
+      },
+      updated_at: '2026-09-14T18:00:00Z', unread_count: 0,
+    }]);
+    await mount();
+    expect(container.textContent).toContain('작업 상태 변경 · 스토리 개발 대기 → 진행 중');
+    expect(container.textContent).not.toContain('preset.work.status_changed');
+  });
+
+  // 무관 PR no-op — event 필드가 없는(구버전 캐시·일반 메시지) 대화는 회귀 없이 기존
+  // content 그대로 렌더한다(이 카드가 안 건드리는 자리).
+  it('음성대조 — latest_message.event가 없으면 기존 content를 그대로 쓴다(일반 메시지, 회귀 0)', async () => {
+    stubFetchWithConversations([{
+      id: 'conv-plain-1', type: 'dm', title: '평범한 대화',
+      latest_message: { content: '내일 회의 몇 시예요?', created_at: '2026-09-14T18:00:00Z', event: null },
+      updated_at: '2026-09-14T18:00:00Z', unread_count: 0,
+    }]);
+    await mount();
+    expect(container.textContent).toContain('내일 회의 몇 시예요?');
+  });
+
+  // 양성대조 — event_key가 이 카드가 처리하는 2개 preset 밖(예: 미래 확장 preset)이면
+  // composeEventPreviewLine이 null을 돌려주고 기존 content 폴백으로 조용히 떨어진다
+  // (과잉 일반화 금지 계약 확認).
+  it('양성대조 — 미지원 event_key는 raw content 폴백으로 떨어진다(과잉 일반화 금지)', async () => {
+    stubFetchWithConversations([{
+      id: 'conv-event-unsupported', type: 'dm', title: '기타 이벤트',
+      latest_message: {
+        content: '[이벤트] preset.some.other',
+        created_at: '2026-09-14T18:00:00Z',
+        event: { event_key: 'preset.some.other', payload: {} },
+      },
+      updated_at: '2026-09-14T18:00:00Z', unread_count: 0,
+    }]);
+    await mount();
+    expect(container.textContent).toContain('[이벤트] preset.some.other');
+  });
+});
+
 // story #3106(#3092 후속) — DM 상대(oneOnOneParticipant)의 runtime_type이 BE에서 이미
 // 내려와도 이 컴포넌트가 Avatar에 안 넘기면 여전히 "Agent" 폴백에 머문다.
 describe('ChatListView — story #3106 참가자 runtime_type → Avatar 배선', () => {

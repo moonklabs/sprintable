@@ -8,8 +8,6 @@
     "app/(authenticated)/organization/workforce/[id]/page.tsx::placeholder::role",
     "app/forgot-password/page.tsx::placeholder::Email",
     "app/internal-dogfood/page.tsx::placeholder::internal access secret",
-    "components/chat/embed-card.tsx::label::High risk",
-    "components/chat/embed-card.tsx::label::Risk unknown",
     "components/docs/extensions/page-embed-node.tsx::placeholder::Enter document slug or ID…",
     "components/organization/event-definer-form.tsx::label::payload",
     "components/organization/event-definer-form.tsx::label::routing",

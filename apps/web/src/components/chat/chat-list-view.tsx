@@ -21,6 +21,8 @@ import { useChatRailOptional } from '@/app/(authenticated)/chats/chat-rail-conte
 
 import { fetchWithAuth } from '@/lib/db/client';
 import { participantDisplayLabel } from '@/lib/member-display';
+import { composeEventPreviewLine } from './event-block-card';
+import { useOrgDomainLabels } from '@/hooks/use-org-domain-labels';
 
 interface Participant {
   member_id: string;
@@ -41,7 +43,11 @@ interface ConversationItem {
   id: string;
   type: 'dm' | 'group';
   title: string | null;
-  latest_message: { content: string; created_at: string } | null;
+  // story #3888(§⑤·Chat) — event(event_key+payload)는 BE list_conversations가 새로
+  // 실어주는 additive 필드(msg_metadata['event'], _event_payload()와 동형 — conversations.py
+  // GET /conversations 참고). 이벤트 메시지면 미리보기를 헤더+요약으로 조립하는 데 쓴다.
+  // 없으면(구버전 캐시·일반 메시지 등) 기존 content 그대로 쓴다.
+  latest_message: { content: string; created_at: string; event?: { event_key: string; payload: Record<string, unknown> } | null } | null;
   updated_at: string;
   unread_count?: number;
   participants?: Participant[];
@@ -116,7 +122,13 @@ function ConversationRow({
 }) {
   const t = useTranslations('chats');
   const tc = useTranslations('common');
+  const tBoard = useTranslations('board');
+  const tCage = useTranslations('cage');
+  const tDashboard = useTranslations('dashboard');
+  const tEventCard = useTranslations('eventCard');
   const locale = useLocale();
+  const { orgId } = useDashboardContext();
+  const domainLabels = useOrgDomainLabels(orgId, locale);
   const displayTimezone = resolveDisplayTimezone().tz;
 
   const displayName = conv.title ??
@@ -124,7 +136,16 @@ function ConversationRow({
       ? formatParticipantNames(conv.participants, currentMemberId, conv.type, t, tc)
       : conv.type === 'dm' ? t('dmWith') : t('groupSection'));
 
-  const preview = conv.latest_message?.content ?? t('noMessages');
+  // story #3888(§⑤·Chat, PO 확定 2026-09-14 18:19Z) — 이벤트 메시지면 raw content(발행
+  // 시점에 구운 slug) 대신 「{헤더} · {요약}」로 렌더 시점 조립(composeEventPreviewLine,
+  // event-block-card.tsx — 같은 재료 재사용). 조립 실패(미지원 event_key·payload 결손)는
+  // null이라 기존 content 폴백으로 조용히 떨어진다.
+  const eventPreview = composeEventPreviewLine(
+    conv.latest_message?.event?.event_key,
+    conv.latest_message?.event?.payload,
+    { tBoard, tCage, tDashboard, tEventCard, tEntity: t, domainLabels },
+  );
+  const preview = eventPreview ?? conv.latest_message?.content ?? t('noMessages');
   const time = conv.latest_message?.created_at ?? conv.updated_at;
   const unread = conv.unread_count ?? 0;
 

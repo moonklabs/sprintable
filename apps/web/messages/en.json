@@ -518,6 +518,7 @@
     "panelAssigneeNone": "Unassigned",
     "panelState": "Status",
     "riskBadgeHigh": "High risk",
+    "riskBadgeUnknown": "Risk unknown",
     "riskSentenceHigh": "This can't be undone once it goes out",
     "panelEmptyHypotheses": "No hypotheses linked yet",
     "panelEmptyArtifacts": "No artifacts linked",

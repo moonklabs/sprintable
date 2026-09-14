@@ -2012,7 +2012,7 @@ describe('ChatBubble — 로드맵 PR-B L5(Bot 배지 배경 proof-blue-soft)', 
     });
     const badge = container.querySelector('.border-proof-line');
     expect(badge).toBeTruthy();
-    expect(badge?.textContent).toBe('Bot');
+    expect(badge?.textContent).toBe('에이전트');
     expect(badge?.className).not.toContain('bg-proof-blue-soft');
     expect(badge?.className).not.toContain('accent-claim');
     expect(badge?.querySelector('.bg-proof-blue')).toBeTruthy();
@@ -2169,14 +2169,14 @@ describe('ChatBubble — story #3106 sender_runtime_type → Avatar 배선', () 
     expect(disk?.querySelector('img')?.getAttribute('src')).toBe('/connector-icons/claude-code.jpg');
   });
 
-  it('agent sender_runtime_type이 null(구서버·미배선)이면 여전히 "Agent" 텍스트 폴백이다(회귀 없음)', async () => {
+  it('agent sender_runtime_type이 null(구서버·미배선)이면 여전히 "에이전트" 텍스트 폴백이다(회귀 없음)', async () => {
     await act(async () => {
       root.render(wrap(
         <ChatBubble message={{ ...baseMessage, sender_runtime_type: null }} isMine={false} />,
       ));
     });
     expect(container.querySelector('.rounded-full.ring-2.ring-background')).toBeNull();
-    expect(container.textContent).toContain('Agent');
+    expect(container.textContent).toContain('에이전트');
   });
 });
 

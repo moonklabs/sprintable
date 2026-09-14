@@ -62,7 +62,31 @@ describe('EntityPreviewModal gate 분기 — story #2889/S2d', () => {
     await flush();
     expect(container.textContent).toContain('PR#42 병합 게이트');
     expect(container.textContent).toContain('merge');
-    expect(container.textContent).toContain('High risk');
+    expect(container.textContent).toContain('고위험');
+  });
+
+  // story #3888(§⑤·Chat) — risk_grade='unknown' 배지(workList.riskBadgeUnknown, 신규 키)
+  // 회귀가드. "High risk"와 마찬가지로 이전엔 "Risk unknown" 리터럴이었다.
+  it('risk_grade=unknown이면 "위험도 모름" 배지를 렌더한다', async () => {
+    stubFetchWithAuth(async () => ({
+      ok: true,
+      json: async () => ({
+        data: {
+          id: 'g-3', status: 'pending', gate_type: 'merge', risk_grade: 'unknown',
+          work_item_summary: { title: '위험도 미산정 게이트', slug: null }, work_item_id: 'wi-3',
+        },
+      }),
+    }));
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <EntityPreviewModal entityType="gate" entityId="g-3" title={null} status={null} href={null} onClose={() => {}} embedded />
+        </NextIntlClientProvider>,
+      );
+    });
+    await flush();
+    expect(container.textContent).toContain('위험도 모름');
+    expect(container.textContent).not.toContain('고위험');
   });
 
   it('전체 보기 링크가 /gates/{id}로 향한다(own-href, parity getEntityHref 무관)', async () => {

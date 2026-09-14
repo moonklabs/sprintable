@@ -518,6 +518,7 @@
     "panelAssigneeNone": "배정 없음",
     "panelState": "지금 상태",
     "riskBadgeHigh": "고위험",
+    "riskBadgeUnknown": "위험도 모름",
     "riskSentenceHigh": "밖으로 나가면 되돌릴 수 없어요",
     "panelEmptyHypotheses": "아직 연결된 가설이 없어요",
     "panelEmptyArtifacts": "연결된 산출물이 없어요",

@@ -1570,6 +1570,11 @@ async def list_conversations(
             "latest_message": {
                 "content": latest_msg.content,
                 "created_at": latest_msg.created_at.isoformat(),
+                # story #3888(§⑤·Chat, PO 확定 2026-09-14 18:19Z) — FE가 이벤트 메시지를
+                # raw content(발행 시점 slug) 대신 렌더 시점 「헤더 · 요약」으로 조립하려면
+                # event_key/payload가 필요하다. _event_payload()(기존 함수, 전체 메시지
+                # 목록이 이미 씀·additive)를 그대로 재사용 — 새 스키마·새 조회 0.
+                **_event_payload(latest_msg),
             } if latest_msg else None,
             "updated_at": conv.updated_at.isoformat(),
         })

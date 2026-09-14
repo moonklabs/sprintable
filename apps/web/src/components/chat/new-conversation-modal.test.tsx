@@ -149,7 +149,7 @@ describe('NewConversationModal — story #3049(AgentIdentity 헤어라인+신호
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
     const badge = document.body.querySelector('.border-proof-line');
     expect(badge).toBeTruthy();
-    expect(badge?.textContent).toBe('Bot');
+    expect(badge?.textContent).toBe('에이전트');
     expect(badge?.className).not.toContain('bg-proof-blue-soft');
     expect(document.body.querySelector('.bg-accent-claim\\/15')).toBeNull();
   });

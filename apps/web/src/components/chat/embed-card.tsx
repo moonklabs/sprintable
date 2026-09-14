@@ -343,7 +343,15 @@ function renderEntityDetail(entityType: string, entityId: string, detail: Record
 // 요약만(제목·상태·risk 배지) — 근거확인/서명/승인 액션은 여기 안 붙인다(approval-request-
 // card.tsx가 이미 챗 카드에서 그 몫을 완결하고 있다, 사본 분화 금지 — 이건 "칩 클릭시 훑어보는
 // 요약"이지 결재 액션 표면이 아니다).
-function renderGateSummary(detail: Record<string, unknown>): React.ReactNode | null {
+// story #3888(§⑤·Chat, PO 확定 2026-09-14 18:19Z) — risk 배지 2개가 로케일 무관 리터럴
+// "High risk"/"Risk unknown"이었다(raw-ascii-jsx-attr baseline 등재분). workList.
+// riskBadgeHigh(기존 키, panel-work-list.tsx 등과 재사용)·workList.riskBadgeUnknown
+// (신규 1) — 순수 함수라 호출부(EntityPreviewModal)의 useTranslations('workList')를
+// 파라미터로 받는다(renderEntityDetail의 tc 스레딩과 동형, 새 기전 0).
+function renderGateSummary(
+  detail: Record<string, unknown>,
+  tWorkList: (key: string) => string,
+): React.ReactNode | null {
   const d = detail as {
     gate_type?: string; status?: string; risk_grade?: 'low' | 'high' | 'unknown' | null;
     work_item_summary?: { title: string; slug: string | null } | null; work_item_id?: string;
@@ -357,8 +365,8 @@ function renderGateSummary(detail: Record<string, unknown>): React.ReactNode | n
       <div className="flex flex-wrap items-center gap-1.5">
         {d.gate_type && <MdBadge label={d.gate_type} />}
         {statusLabel && <MdBadge label={statusLabel} />}
-        {d.risk_grade === 'high' && <MdBadge label="High risk" />}
-        {d.risk_grade === 'unknown' && <MdBadge label="Risk unknown" />}
+        {d.risk_grade === 'high' && <MdBadge label={tWorkList('riskBadgeHigh')} />}
+        {d.risk_grade === 'unknown' && <MdBadge label={tWorkList('riskBadgeUnknown')} />}
       </div>
     </div>
   );
@@ -400,6 +408,8 @@ export function EntityPreviewModal({
   // 유일한 소비 지점.
   // story #3776(1층B) — "닫기" aria-label, common ns의 기존 close 키 재사용.
   const tc = useTranslations('common');
+  // story #3888 — renderGateSummary의 risk 배지 라벨(workList.riskBadgeHigh/riskBadgeUnknown).
+  const tWorkList = useTranslations('workList');
   const hasFetchStrategy = entityType === 'doc' || entityType === 'gate' || Boolean(ENTITY_API[entityType]);
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(hasFetchStrategy);
@@ -676,7 +686,7 @@ export function EntityPreviewModal({
   // 문구를 하나로 통일한다 — 한 번만 계산해 조건과 렌더 양쪽에 쓴다(이중 호출 금지).
   const richContent = detail && RICH_PREVIEW_TYPES.has(entityType) ? renderEntityDetail(entityType, entityId, detail, tc) : null;
   // gate는 RICH_PREVIEW_TYPES 밖(parity 계약) — richContent와 별개 축으로 계산해 병합.
-  const gateSummary = detail && entityType === 'gate' ? renderGateSummary(detail) : null;
+  const gateSummary = detail && entityType === 'gate' ? renderGateSummary(detail, tWorkList) : null;
 
   const body = (
     <div className="flex-1 overflow-y-auto px-6 py-4">
