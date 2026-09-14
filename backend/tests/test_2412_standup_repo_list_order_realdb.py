@@ -193,7 +193,15 @@ async def test_list_standups_router_uses_ordered_repo_list_realdb():
                 user_id=str(VIEWER_USER), email=None,
                 claims={"app_metadata": {"org_id": str(ORG)}}, org_id=str(ORG),
             )
-            entries = await list_standups(project_id=PROJ, author_id=None, sprint_id=None, date_filter=None, repo=repo, auth=auth)
+            # story #3841 — list_standups에 limit/cursor(Query 센티널 함정 lint 대상)가
+            # 신설됐다. FastAPI 경유 없이 직접 호출하는 자리라 반드시 명시값을 넘긴다
+            # (parse_standup_cursor의 동일 경고 참조 — 생략하면 Query(...) 센티널 그 자체가
+            # 들어와 크래시하거나 조용히 오동작한다).
+            from fastapi import Response
+            entries = await list_standups(
+                response=Response(), project_id=PROJ, author_id=None, sprint_id=None,
+                date_filter=None, limit=1000, cursor=None, repo=repo, auth=auth,
+            )
 
         assert [e.id for e in entries] == list(reversed(oldest_first_ids)), (
             "화면 데이터 경로(list_standups)도 최신 date가 맨 앞이어야 한다(AC1 본체)."
