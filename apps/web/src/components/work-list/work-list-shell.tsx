@@ -215,14 +215,15 @@ export function WorkListShell({ projectId }: { projectId: string }) {
                     <div className="px-1 text-xs text-muted-foreground">
                       {t('goalSummaryLabel', { assigned: group.assignedCount, delegated: group.delegatedCount, hypotheses: group.hypothesisCount })}
                     </div>
-                    {/* PO 지적(2026-09-14 08:12Z, 유나 픽셀 판정 — 시안 06d2d61c 재대조) —
+                    {/* PO 지적(2026-09-14 08:12Z→08:28Z, 유나 픽셀 판정 — 시안 06d2d61c 재대조) —
                         스토리 절 머리는 회색 띠(bg-muted/30)가 아니라 굵은 제목 + 왼쪽 accent
                         border로: 목표→스토리→일 3단 위계가 회색 띠에서 눌렸다. per-story Card를
-                        걷고 목표 Card 하나 안에서 세로 선(border-l-2 border-primary)으로 스토리
-                        구간을 나눈다(새 토큰 0 — 기존 primary 재사용). */}
+                        걷고 목표 Card 하나 안에서 세로 선으로 스토리 구간을 나눈다(새 토큰 0).
+                        08:28Z 정정: 세로 선은 primary(파랑)가 아니라 중립 border-border — 파랑은
+                        「사람 손 필요/주 액션」 전용 자리라 순수 구조선엔 안 쓴다. */}
                     <div className="space-y-4 pt-1">
                       {group.stories.map((story) => (
-                        <div key={story.storyId} className="border-l-2 border-primary pl-3">
+                        <div key={story.storyId} className="border-l-2 border-border pl-3">
                           <div className="pb-1 text-sm font-semibold text-foreground">{story.title}</div>
                           {story.rows.map((row) => <WorkListRowView key={row.id} row={row} />)}
                         </div>
