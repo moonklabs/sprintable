@@ -1632,6 +1632,15 @@ jobs:
       - name: "Verify no new alpha-composited text-*foreground (story #3826-pre)"
         run: pnpm --filter web verify:no-new-alpha-text-foreground
 
+      # story #3839(critical·2pt) 회귀가드 — tint 배경(destructive/info/success/warning
+      # -tint·-bg) 서브트리 안 text-muted-foreground 재유입 0(신규만, 기존 21곳은
+      # GRANDFATHER_BASELINE). --muted-foreground(ink-3)는 --muted(sunk) 배경 기준으로만
+      # AA 조정된 값이라 더 옅은 family tint 위에선 4.5 밑으로 떨어진다 — 카디르 QA(4259
+      # Contrast guard axe)가 activation-checklist-banner.tsx 3곳을 실사고로 적발(같은
+      # PR에 동봉 수정), 이 스텝이 그 클래스를 닫는다.
+      - name: "Verify no muted-foreground on tint background (story #3839)"
+        run: pnpm --filter web verify:no-muted-on-tint
+
       # story #3826(UX-v3·FE 2) AC1 diff 가드 — globals.css 원시 토큰(--proof-*) 값 교체
       # PR의 diff가 그 파일의 --proof-* 값·radius 값에만 있는지(alias·.dark·tsx diff 0).
       - name: "Verify v3 raw-token PR diff scope (story #3826 AC1)"
