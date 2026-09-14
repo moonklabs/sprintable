@@ -27,13 +27,12 @@ function allNavGroupItems() {
 }
 
 describe('NAV_GROUPS descriptionKey 완전성 — story #fddd0e6b AC2', () => {
-  // ⭐되돌리면 RED — 항목을 추가하며 descriptionKey를 빠뜨리면(또는 22개가 아니게 늘거나
-  // 줄면) 이 수부터 어긋난다. story #3845(§④, 2026-09-14) — retro가 「일감」 탭으로
-  // 흡수되며 LEGACY_NAV_ITEMS 18→17, 총량 23→22(항목이 사라진 것 — 자리 이동이 아니라
-  // 진짜 감소, story #3824의 "이동만 있었지 증감 없었다"와는 다른 클래스). standup은
-  // §① 착지 뒤 21로 한 번 더 줄 예정.
-  it('항목이 정확히 22개다(NAV_GROUPS 5 + LEGACY_NAV_ITEMS 17, story #3845 retro 흡수로 18→17)', () => {
-    expect(allNavGroupItems()).toHaveLength(22);
+  // ⭐되돌리면 RED — 항목을 추가하며 descriptionKey를 빠뜨리면(또는 21개가 아니게 늘거나
+  // 줄면) 이 수부터 어긋난다. story #3845(§①④, 2026-09-14) — retro·standup이 「일감」
+  // 탭으로 흡수되며 LEGACY_NAV_ITEMS 18→16, 총량 23→21(항목이 사라진 것 — 자리 이동이
+  // 아니라 진짜 감소, story #3824의 "이동만 있었지 증감 없었다"와는 다른 클래스).
+  it('항목이 정확히 21개다(NAV_GROUPS 5 + LEGACY_NAV_ITEMS 16, story #3845 retro·standup 흡수로 18→16)', () => {
+    expect(allNavGroupItems()).toHaveLength(21);
   });
 
   it('⭐23개 전부가 descriptionKey를 갖는다(빈 문자열 아님) — board·inbox도 예약값을 가진다', () => {

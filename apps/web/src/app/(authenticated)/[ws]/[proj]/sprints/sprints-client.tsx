@@ -10,6 +10,11 @@ import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { EmptyState } from '@/components/ui/empty-state';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { WorkspaceFrameTabs } from '@/components/workspace/workspace-frame-tabs';
+// story #3845(§① 2026-09-14) — 「하루 체크인」 절. 독립 /standup 라우트가 은퇴(legacy-
+// resource-tables.ts RENAMED_RESOURCES 참고)하며 이 컴포넌트의 유일한 마운트 지점이
+// 됐다 — 경로는 그대로 두고(비route 파일로 남김, 파일 이동에 따른 import 처짐 회피)
+// embedded=true로만 소비한다.
+import StandupPage from '../standup/standup-client';
 
 // story 5e229540(doc resource-view-firsttouch-identity-pattern §4 "스프린트" 행 — 정체성=
 // 한 번의 집중 사이클·시작 시 가설 선언·끝에 배움 종합·visual=선택 기간bar): 실험실(원형
@@ -725,7 +730,14 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
       <div className="px-6 pt-3">
         <WorkspaceFrameTabs active="sprints" />
       </div>
-      <div className="flex min-h-0 flex-1 overflow-hidden">
+      {/* story #3845(§① 2026-09-14) — 「하루 체크인」 절을 이 페이지에 추가하며 리스트/상세
+          split(원래 flex-1로 남은 세로 공간 전부를 차지·각 컬럼이 자체 overflow-y-auto로
+          내부 스크롤)이 더 이상 페이지의 유일한 콘텐츠가 아니게 됐다 — 바깥을 세로 스크롤
+          컬럼으로 바꾸고(retro/page.tsx·docs 등 다른 [ws]/[proj] 페이지가 이미 쓰는
+          flex-1 overflow-y-auto 관례), split 자체는 고정 최소높이(shrink-0)로 내부
+          스크롤을 유지한 채 그 안 콘텐츠 조각이 된다. */}
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+      <div className="flex min-h-[420px] shrink-0 overflow-hidden border-b border-border">
       {/* Sprint list */}
       <div className={`flex flex-col gap-3 overflow-y-auto p-6 transition-all duration-300 ${selected ? 'hidden w-1/2 lg:flex' : 'w-full'}`}>
         {sprints.length === 0 ? (
@@ -1050,6 +1062,14 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
       ) : null}
     </div>
   ) : null}
+      </div>
+
+      {/* story #3845(§① 2026-09-14) — 「하루 체크인」 절. StandupPage는 embedded=true일 때
+          자체 TopBarSlot을 생략하고 이 페이지의 TopBarSlot(제목 "스프린트")과 충돌하지
+          않는다(standup-client.tsx embedded prop 주석 참고). */}
+      <div className="shrink-0">
+        <StandupPage projectId={projectId} embedded />
+      </div>
     </div>
 
       {showCreate ? (

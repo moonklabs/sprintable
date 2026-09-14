@@ -26,6 +26,12 @@ vi.mock('@/components/nav/top-bar-slot', () => ({
 vi.mock('@/components/workspace/workspace-frame-tabs', () => ({
   WorkspaceFrameTabs: () => null,
 }));
+// story #3845(§① 2026-09-14) — StandupPage(구 /standup 독립 라우트)가 이 페이지 안 「하루
+// 체크인」 절로 임베드됐다. 「더 보기」 커서 로직만 관심사인 이 스위트라 무관한 fetch
+// 표면(StandupPage 자체)은 WorkspaceFrameTabs와 동형으로 스텁.
+vi.mock('../standup/standup-client', () => ({
+  default: () => null,
+}));
 
 const { useDashboardContextMock } = vi.hoisted(() => ({ useDashboardContextMock: vi.fn() }));
 vi.mock('@/app/dashboard/dashboard-shell', () => ({

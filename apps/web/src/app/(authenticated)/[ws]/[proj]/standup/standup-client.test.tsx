@@ -41,10 +41,10 @@ afterEach(async () => {
   vi.resetModules();
 });
 
-function stubFetch(opts: { missingReject?: boolean } = {}) {
+function stubFetch(opts: { missingReject?: boolean; entries?: unknown[] } = {}) {
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
     if (typeof url !== 'string') return { ok: false, json: async () => null };
-    if (url.includes('/api/standup?date=')) return { ok: true, json: async () => ({ data: [] }) };
+    if (url.includes('/api/standup?date=')) return { ok: true, json: async () => ({ data: opts.entries ?? [] }) };
     if (url.includes('/api/team-members')) return { ok: true, json: async () => ({ data: [] }) };
     if (url.includes('/api/sprints?project_id=')) {
       return { ok: true, json: async () => ({ data: [{ id: 'sp1', title: '진행중 스프린트', status: 'active', start_date: null, end_date: null }] }) };
@@ -61,9 +61,9 @@ function stubFetch(opts: { missingReject?: boolean } = {}) {
   }));
 }
 
-async function mount() {
+async function mount(props: { embedded?: boolean } = {}) {
   const { default: StandupPage } = await import('./standup-client');
-  await act(async () => { root.render(wrap(<StandupPage projectId="proj-1" />)); });
+  await act(async () => { root.render(wrap(<StandupPage projectId="proj-1" {...props} />)); });
   await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 }
 
@@ -73,5 +73,34 @@ describe('StandupClient — missing 격리(story #3519)', () => {
     await mount();
     expect(container.textContent).toContain('진행중 스프린트');
     expect(container.textContent).not.toContain(koMessages.standup.loadFailed);
+  });
+});
+
+describe('StandupClient — embedded prop(story #3845 §①, TopBarSlot 싱글톤 충돌 회피)', () => {
+  // TopBarSlot 자체는 이 파일 상단에서 () => null로 스텁돼 있어(다른 스위트와 동형) 그
+  // 안으로 넘어가는 title prop은 DOM에 안 남는다 — 이 두 테스트가 실제로 보는 것은 전혀
+  // 다른 자리(TopBarSlot 호출 밖, 컴포넌트 자신의 return에 직접 있는 절 헤딩 <h2>)다.
+  it('embedded=true면 TopBarSlot 대신 절 헤딩("하루 체크인")이 DOM에 직접 뜬다', async () => {
+    stubFetch();
+    await mount({ embedded: true });
+    expect(container.textContent).toContain(koMessages.standup.embeddedHeading);
+  });
+
+  it('embedded 미지정(기본 false)이면 절 헤딩이 안 뜬다(TopBarSlot 경로로만 감, DOM엔 없음)', async () => {
+    stubFetch();
+    await mount();
+    expect(container.textContent).not.toContain(koMessages.standup.embeddedHeading);
+  });
+
+  it('embedded=true·오늘 entries 0건이면 「오늘 체크인이 아직 없어요」가 뜬다(§⑤ 빈 상태, 사람 카드 그리드는 안 가림)', async () => {
+    stubFetch({ entries: [] });
+    await mount({ embedded: true });
+    expect(container.textContent).toContain(koMessages.standup.noCheckinsToday);
+  });
+
+  it('음성대조 — entries가 1건 이상이면 그 빈 상태 문구가 안 뜬다', async () => {
+    stubFetch({ entries: [{ id: 'e1', author_id: 'me-1', date: '2026-09-14', done: '', plan: '', blockers: null, plan_story_ids: [] }] });
+    await mount({ embedded: true });
+    expect(container.textContent).not.toContain(koMessages.standup.noCheckinsToday);
   });
 });

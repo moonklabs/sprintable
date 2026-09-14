@@ -75,6 +75,14 @@ export const RENAMED_RESOURCES: Record<string, string> = {
   // 2026-08-01 지적: prod 승격 #2373에서 board 라우트만 지우고 이 줄을 빠뜨려 외부 딥링크
   // ~14곳이 404를 만날 뻔했다 — board/page.tsx:12-13 자체가 이 위험을 이미 적어 두고 있었다).
   board: 'flow',
+  // story #3845(UX-v3·FE 5·일감 2, 페드루 PO 確定 §① 2026-09-14) — 스탠드업(하루 체크인)이
+  // 「스프린트」 탭 안 절로 흡수되며 /standup 독립 페이지(page.tsx·loading.tsx)가 삭제된다.
+  // board→flow와 동형(id 없는 목록형 페이지라 RETIRED_RESOURCES의 "id 공간이 갈린다" 우려도
+  // 없음 — RENAMED로 충분, 3번째 세그먼트 순수 치환). verify-no-orphan-resource-routes.ts는
+  // routeDirs를 page.tsx 실존으로 파생(listRouteDirs)하므로 이 삭제 자체로 standup이 그
+  // 스캔에서 빠진다 — retro(§②)와 달리 palette GUARD_ANCHOR_ITEMS 등재 불요(라우트 자체가
+  // 없어져 orphan 개념이 성립 안 함, board 선례와 동형).
+  standup: 'sprints',
 };
 
 /**

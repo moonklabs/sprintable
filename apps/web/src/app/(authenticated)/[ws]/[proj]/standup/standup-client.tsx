@@ -108,11 +108,19 @@ function shiftDate(dateStr: string, days: number): string {
 
 interface StandupClientProps {
   projectId: string;
+  /** story #3845(§① 2026-09-14) — 「스프린트」 탭 안 「하루 체크인」 절로 마운트될 때 true.
+   * 독립 /standup 라우트가 은퇴(legacy-resource-tables.ts RENAMED_RESOURCES로 /sprints
+   * 301 흡수)돼 이제 이 값은 사실상 항상 true지만, TopBarSlot은 싱글톤 컨텍스트 슬롯이라
+   * (top-bar-slot.tsx) sprints-client.tsx 자신의 TopBarSlot과 이 컴포넌트의 TopBarSlot이
+   * 동시에 마운트되면 나중 커밋 effect가 먼저 것을 조용히 덮어써 제목이 뒤바뀐다 — 그
+   * 충돌을 코드로 명시(prop 하나)해 둔다. false(비지정)면 옛 독립 라우트 동작(자체
+   * TopBarSlot 제목 "스탠드업") 그대로 — 테스트 회귀 없이 점진 전환. */
+  embedded?: boolean;
 }
 
 // story a539c649 S3a: projectId 는 이제 서버 layout(headers() 경유 resolve 결과)이 prop 으로
 // 내려준다 — useDashboardContext()(전역 "현재 프로젝트")가 아니라 URL 이 가리키는 project.
-export default function StandupPage({ projectId }: StandupClientProps) {
+export default function StandupPage({ projectId, embedded = false }: StandupClientProps) {
   const t = useTranslations('standup');
   const tc = useTranslations('common');
   const { currentTeamMemberId, projectMemberships } = useDashboardContext();
@@ -448,18 +456,35 @@ export default function StandupPage({ projectId }: StandupClientProps) {
 
   return (
     <>
-      <TopBarSlot
-        title={<h1 className="text-sm font-medium">{t('title')}</h1>}
-        actions={
-          <div className="hidden flex-wrap items-center gap-1.5 lg:flex">{dateNavControls}</div>
-        }
-        showContextChip
-      />
+      {embedded ? (
+        // story #3845(§①⑤) — sprints-client.tsx가 자기 TopBarSlot(제목 "스프린트")을 이미
+        // 소유하므로 여기서 또 TopBarSlot을 마운트하면 싱글톤 컨텍스트를 뺏어 제목이
+        // 뒤바뀐다(top-bar-slot.tsx 싱글톤 주석 참고) — 절 헤딩+날짜 네비 한 줄로 대체.
+        <div className="space-y-1 border-b border-border/80 px-6 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold text-foreground">{t('embeddedHeading')}</h2>
+            <div className="flex flex-wrap items-center gap-1.5">{dateNavControls}</div>
+          </div>
+          {!loading && entries.length === 0 ? (
+            <p className="text-xs text-muted-foreground">{t('noCheckinsToday')}</p>
+          ) : null}
+        </div>
+      ) : (
+        <>
+          <TopBarSlot
+            title={<h1 className="text-sm font-medium">{t('title')}</h1>}
+            actions={
+              <div className="hidden flex-wrap items-center gap-1.5 lg:flex">{dateNavControls}</div>
+            }
+            showContextChip
+          />
 
-      {/* S4: mobile date nav as its own full-width row (keeps the header title readable). */}
-      <div className="flex flex-wrap items-center gap-1.5 border-b border-border/80 px-4 py-2 lg:hidden">
-        {dateNavControls}
-      </div>
+          {/* S4: mobile date nav as its own full-width row (keeps the header title readable). */}
+          <div className="flex flex-wrap items-center gap-1.5 border-b border-border/80 px-4 py-2 lg:hidden">
+            {dateNavControls}
+          </div>
+        </>
+      )}
 
       <div className="focus-inset flex min-h-0 flex-1 flex-col overflow-y-auto">
         {headerBadges.length > 0 ? (

@@ -160,15 +160,16 @@ describe('MorePage — story #fddd0e6b(IA ⑦ 전체 메뉴)', () => {
     expect(container.querySelector('[data-testid="more-tab-hint"]')).toBeNull();
   });
 
-  // story #3845(§④, 2026-09-14) — retro가 LEGACY_NAV_ITEMS에서 빠지며(「일감」 탭으로
-  // 흡수) '회고' 질의가 0건이 된다. 단독매치 검증 취지는 그대로 두고 검색어만 아직
-  // 남아있는 고유명 'standup'으로 바꾼다(다른 항목 이름/설명과 안 겹침).
+  // story #3845(§①④, 2026-09-14) — retro·standup이 LEGACY_NAV_ITEMS에서 빠지며(각각
+  // 「일감」 탭으로 흡수) '회고'·'스탠드업' 질의가 0건이 된다. 단독매치 검증 취지는
+  // 그대로 두고 검색어만 흡수 대상이 아닌 고유명 'loops'로 바꾼다(다른 항목 이름/
+  // 설명과 안 겹침).
   it('⭐찾기 — 입력값이 이름에 매치하면 그 행만 남고 나머지 구역은 숨는다', async () => {
     await mount();
-    await typeQuery('스탠드업');
+    await typeQuery('실험실');
     const links = [...container.querySelectorAll('a')];
     expect(links).toHaveLength(1);
-    expect(links[0]?.textContent).toContain('스탠드업');
+    expect(links[0]?.textContent).toContain('실험실');
   });
 
   it('⭐찾기 — 입력값이 설명에만 매치해도 걸린다(이름+설명 둘 다 부분일치)', async () => {
@@ -189,7 +190,7 @@ describe('MorePage — story #fddd0e6b(IA ⑦ 전체 메뉴)', () => {
 
   it('⭐찾기 — 지우면 전량 복귀한다(story #3824로 총 링크 수 변동, 리터럴 수 대신 >1로 검증)', async () => {
     await mount();
-    await typeQuery('스탠드업');
+    await typeQuery('실험실');
     expect(container.querySelectorAll('a')).toHaveLength(1);
     await typeQuery('');
     expect(container.querySelectorAll('a').length).toBeGreaterThan(1);

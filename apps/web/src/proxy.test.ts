@@ -1003,6 +1003,20 @@ describe('proxy — 경로 리터럴 rename 301(story 8fc51517): [ws]/[proj]/boa
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
+  // story #3845(§① 2026-09-14) — 스탠드업(하루 체크인)이 「스프린트」 탭 안 절로 흡수되며
+  // 독립 /standup 라우트(page.tsx·loading.tsx)가 삭제됐다. board→flow와 동형 회귀가드 —
+  // 옛 북마크/딥링크가 404 대신 그 기능의 새 거처로 301.
+  it('story #3845: /{ws}/{proj}/standup → 301 /{ws}/{proj}/sprints(standup도 RENAMED_RESOURCES 대상 — 독립 라우트 은퇴 회귀가드)', async () => {
+    const token = await makeAccessToken({ orgId: 'org-1' });
+    const response = await middleware(makeRequest('/moonklabs/sprintable/standup', {
+      sp_at: token, sprintable_current_project_id: 'proj-1',
+    }));
+    expect(response.status).toBe(301);
+    expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/sprints');
+    // 3번째 세그먼트만 교체하는 순수 문자열 치환이라 org/project fetch가 전혀 없어야 한다.
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
   it('이미 신 경로(/goals)로 들어온 요청은 재리다이렉트 없이 그대로 통과(무한루프 방지 확인)', async () => {
     const token = await makeAccessToken({ orgId: 'org-1' });
     mockFetch.mockResolvedValue({

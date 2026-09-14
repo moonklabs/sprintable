@@ -17,7 +17,6 @@ import {
   Share2,
   Shield,
   TrendingUp,
-  Users,
   Users2,
   Workflow,
   Zap,
@@ -146,28 +145,27 @@ export const NAV_GROUPS: NavGroupConfig[] = [
 // story #3824 — 5항목 축소로 사이드바에서 빠지는 17개 목적지. 라우트는 전부 그대로
 // 살아있다(북마크·딥링크 무손상, path 불변) — 이 배열이 이제 이들의 1급 진입점
 // (커맨드 팔레트 ⌘K, command-palette.tsx가 NAV_GROUPS와 나란히 소비)이다.
-// kind:'resource' 7개(goals·loops·standup·retro·docs·artifacts·storage)는 이
-// 배열 자체의 `kind: 'resource', path: '...'` 리터럴이 verify-no-orphan-resource-
-// routes(story #2376)의 조합 진입점 축(extractNavConfigResourceTargets, 파일
-// 전체 스캔이라 소속 배열 무관)이라 이 배열에 남아 있는 한 그 가드가 계속
-// 그린이다 — 지우면 그 7개가 routeWithoutEntry로 즉시 RED(가드 완화 금지, 카드
-// AC2 명시). 라벨·설명·아이콘은 전부 기존 값 그대로 재사용(뜻 무변, 자리만 이동).
+// kind:'resource' 항목(현재 6개)은 이 배열 자체의 `kind: 'resource', path: '...'`
+// 리터럴이 verify-no-orphan-resource-routes(story #2376)의 조합 진입점 축
+// (extractNavConfigResourceTargets, 파일 전체 스캔이라 소속 배열 무관)이라 이
+// 배열에 남아 있는 한 그 가드가 계속 그린이다 — 지우면 그 항목들이 routeWithoutEntry로
+// 즉시 RED(가드 완화 금지, 카드 AC2 명시). 라벨·설명·아이콘은 전부 기존 값 그대로
+// 재사용(뜻 무변, 자리만 이동).
 // story #3845(UX-v3·FE 5·일감 2, 페드루 PO 確定 §④ 2026-09-14) — standup·retro는 「일감」
-// 흡수 지도(doc a699be00 §②-1, 흡수 4단 중 1단) 1단계로 이 배열에서 빠진다. 이 배열이
-// 사이드바 「더보기」·⌘K 팔레트(무필터)·모바일 /more 3곳의 유일한 공통 정의라(nav-config.ts
-// VISIBLE_LEGACY_NAV_ITEMS·app-sidebar.tsx·more/page.tsx 참고, story #3836 SSOT) retro
-// 한 줄을 빼는 것만으로 3곳에서 동시에 사라진다(legacy-nav-ssot.test.tsx가 그 동시성을
-// 실렌더로 고정) — 각 소비처를 따로 안 고친다. retro는 WorkspaceFrameTabs 전용 탭으로
-// 흡수(go-retro 팔레트 앵커는 command-palette.tsx GUARD_ANCHOR_ITEMS로 이관 — orphan-
-// route 가드 시야 유지). ⚠️standup은 여기 아직 남겨둔다 — 「스프린트」 탭 안 하루체크인
-// 절 착지(story #3845 ①, StandupPage 임베딩) 前까지 이 항목을 빼면 그 기능 자체가
-// 사이드바·팔레트·모바일 어디에서도 도달 불가한 진짜 회귀가 된다(retro와 달리 대체
-// 진입점이 아직 없다) — ①이 착지하는 커밋에서 이 항목과 legacy-resource-tables.ts의
-// redirect를 같이 뺀다(디디, 다음 세션).
+// 흡수 지도(doc a699be00 §②-1)로 이 배열에서 빠진다. 이 배열이 사이드바 「더보기」·⌘K
+// 팔레트(무필터)·모바일 /more 3곳의 유일한 공통 정의라(nav-config.ts VISIBLE_LEGACY_
+// NAV_ITEMS·app-sidebar.tsx·more/page.tsx 참고, story #3836 SSOT) 이 줄들을 빼는 것만으로
+// 3곳에서 동시에 사라진다(legacy-nav-ssot.test.tsx가 그 동시성을 실렌더로 고정) — 각
+// 소비처를 따로 안 고친다. retro는 WorkspaceFrameTabs 전용 탭으로 흡수(go-retro 팔레트
+// 앵커는 command-palette.tsx GUARD_ANCHOR_ITEMS로 이관 — orphan-route 가드 시야 유지).
+// standup(§①)은 「스프린트」 탭 안 「하루 체크인」 절(StandupPage embedded=true 마운트,
+// standup-client.tsx)로 흡수 — 독립 /standup 라우트(page.tsx·loading.tsx) 자체를
+// 삭제하고 legacy-resource-tables.ts RENAMED_RESOURCES에 'standup':'sprints' 301을
+// 등록했다(board→flow 선례와 동형) — 라우트가 없어져 orphan-route 가드 시야에서 standup이
+// 아예 빠지므로(listRouteDirs가 page.tsx 실존으로 파생) retro와 달리 팔레트 앵커도 불요.
 export const LEGACY_NAV_ITEMS: NavItemConfig[] = [
   { id: 'goals', labelKey: 'goals', descriptionKey: 'descGoals', icon: Layers, kind: 'resource', path: 'goals', scope: 'project' },
   { id: 'loops', labelKey: 'loops', descriptionKey: 'descLoops', icon: FlaskConical, kind: 'resource', path: 'loops', scope: 'project' },
-  { id: 'standup', labelKey: 'standup', descriptionKey: 'descStandup', icon: Users, kind: 'resource', path: 'standup', scope: 'project' },
   { id: 'docs', labelKey: 'docs', descriptionKey: 'descDocs', icon: BookOpen, kind: 'resource', path: 'docs', scope: 'project' },
   { id: 'artifacts', labelKey: 'artifacts', descriptionKey: 'descArtifacts', icon: GalleryVerticalEnd, kind: 'resource', path: 'artifacts', scope: 'project' },
   { id: 'storage', labelKey: 'storage', descriptionKey: 'descStorage', icon: HardDrive, kind: 'resource', path: 'storage', scope: 'project' },
