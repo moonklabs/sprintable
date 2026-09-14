@@ -59,6 +59,19 @@ export interface NavItemConfig {
   scope?: NavItemScope;
 }
 
+// story #3855(customer-zero·셸, 선생님 07:07Z 지적 → PO 確定) — 「더보기」/모바일 /more가
+// LEGACY_NAV_ITEMS 15개를 순서·묶음 없이 한 줄로 쏟던 결함(«서랍에 쓸어 담은 그림»)의
+// 처방 — §② 흡수 지도의 «갈 곳» 5축. 이 5값 자체가 doc a699be00 §②의 최종 목적지
+// 이름과 1:1(신규 개념 발명 0) — 흡수 화면이 착지해 항목이 LEGACY_NAV_ITEMS에서 빠지면
+// 그 항목이 속했던 머리말도 자동으로 사라진다(groupVisibleLegacyByTarget의 빈 그룹 제외).
+export type AbsorbTarget = 'work' | 'connect' | 'knowledge' | 'history' | 'settings';
+
+export interface LegacyNavItemConfig extends NavItemConfig {
+  // AC1 — 값 없으면 tsc가 LEGACY_NAV_ITEMS 배열 리터럴에서 바로 잡는다(타입 강제,
+  // 런타임 완전성 테스트와 별개 축 — 하나는 컴파일 타임, 하나는 카드 표 1:1 대조).
+  absorbTarget: AbsorbTarget;
+}
+
 export interface NavGroupConfig {
   id: string;
   // undefined = 라벨 없는 유틸 그룹(설정 footer — ia-4zone 확定: zone 라벨 없음).
@@ -163,26 +176,29 @@ export const NAV_GROUPS: NavGroupConfig[] = [
 // 삭제하고 legacy-resource-tables.ts RENAMED_RESOURCES에 'standup':'sprints' 301을
 // 등록했다(board→flow 선례와 동형) — 라우트가 없어져 orphan-route 가드 시야에서 standup이
 // 아예 빠지므로(listRouteDirs가 page.tsx 실존으로 파생) retro와 달리 팔레트 앵커도 불요.
-export const LEGACY_NAV_ITEMS: NavItemConfig[] = [
-  { id: 'goals', labelKey: 'goals', descriptionKey: 'descGoals', icon: Layers, kind: 'resource', path: 'goals', scope: 'project' },
-  { id: 'loops', labelKey: 'loops', descriptionKey: 'descLoops', icon: FlaskConical, kind: 'resource', path: 'loops', scope: 'project' },
-  { id: 'docs', labelKey: 'docs', descriptionKey: 'descDocs', icon: BookOpen, kind: 'resource', path: 'docs', scope: 'project' },
-  { id: 'artifacts', labelKey: 'artifacts', descriptionKey: 'descArtifacts', icon: GalleryVerticalEnd, kind: 'resource', path: 'artifacts', scope: 'project' },
-  { id: 'storage', labelKey: 'storage', descriptionKey: 'descStorage', icon: HardDrive, kind: 'resource', path: 'storage', scope: 'project' },
-  { id: 'activity', labelKey: 'activity', descriptionKey: 'descActivity', icon: ClipboardList, kind: 'static', path: '/activity', scope: 'project' },
-  { id: 'org-trust', labelKey: 'orgTrust', descriptionKey: 'descOrgTrust', icon: Award, kind: 'static', path: '/organization/trust', scope: 'org' },
-  { id: 'org-memory', labelKey: 'orgMemory', descriptionKey: 'descOrgMemory', icon: Brain, kind: 'static', path: '/organization/memory', scope: 'org' },
-  { id: 'content', labelKey: 'content', descriptionKey: 'descContent', icon: FileText, kind: 'static', path: '/content', scope: 'org' },
-  { id: 'channel-posts', labelKey: 'channelPosts', descriptionKey: 'descChannelPosts', icon: Share2, kind: 'static', path: '/content/channel-posts', scope: 'org' },
-  { id: 'org-members', labelKey: 'orgMembers', descriptionKey: 'descOrgMembers', icon: Users2, kind: 'static', path: '/organization/members', scope: 'org' },
-  { id: 'org-workforce', labelKey: 'workforce', descriptionKey: 'descWorkforce', icon: Bot, kind: 'static', path: '/organization/workforce' },
-  { id: 'org-roles', labelKey: 'orgRoles', descriptionKey: 'descOrgRoles', icon: Shield, kind: 'static', path: '/organization/roles', scope: 'org' },
-  { id: 'org-events', labelKey: 'orgEvents', descriptionKey: 'descOrgEvents', icon: Zap, kind: 'static', path: '/organization/events', scope: 'org' },
+export const LEGACY_NAV_ITEMS: LegacyNavItemConfig[] = [
+  { id: 'goals', labelKey: 'goals', descriptionKey: 'descGoals', icon: Layers, kind: 'resource', path: 'goals', scope: 'project', absorbTarget: 'work' },
+  { id: 'loops', labelKey: 'loops', descriptionKey: 'descLoops', icon: FlaskConical, kind: 'resource', path: 'loops', scope: 'project', absorbTarget: 'work' },
+  { id: 'docs', labelKey: 'docs', descriptionKey: 'descDocs', icon: BookOpen, kind: 'resource', path: 'docs', scope: 'project', absorbTarget: 'work' },
+  { id: 'artifacts', labelKey: 'artifacts', descriptionKey: 'descArtifacts', icon: GalleryVerticalEnd, kind: 'resource', path: 'artifacts', scope: 'project', absorbTarget: 'work' },
+  { id: 'storage', labelKey: 'storage', descriptionKey: 'descStorage', icon: HardDrive, kind: 'resource', path: 'storage', scope: 'project', absorbTarget: 'knowledge' },
+  { id: 'activity', labelKey: 'activity', descriptionKey: 'descActivity', icon: ClipboardList, kind: 'static', path: '/activity', scope: 'project', absorbTarget: 'history' },
+  { id: 'org-trust', labelKey: 'orgTrust', descriptionKey: 'descOrgTrust', icon: Award, kind: 'static', path: '/organization/trust', scope: 'org', absorbTarget: 'connect' },
+  { id: 'org-memory', labelKey: 'orgMemory', descriptionKey: 'descOrgMemory', icon: Brain, kind: 'static', path: '/organization/memory', scope: 'org', absorbTarget: 'knowledge' },
+  { id: 'content', labelKey: 'content', descriptionKey: 'descContent', icon: FileText, kind: 'static', path: '/content', scope: 'org', absorbTarget: 'work' },
+  { id: 'channel-posts', labelKey: 'channelPosts', descriptionKey: 'descChannelPosts', icon: Share2, kind: 'static', path: '/content/channel-posts', scope: 'org', absorbTarget: 'work' },
+  { id: 'org-members', labelKey: 'orgMembers', descriptionKey: 'descOrgMembers', icon: Users2, kind: 'static', path: '/organization/members', scope: 'org', absorbTarget: 'connect' },
+  { id: 'org-workforce', labelKey: 'workforce', descriptionKey: 'descWorkforce', icon: Bot, kind: 'static', path: '/organization/workforce', absorbTarget: 'connect' },
+  { id: 'org-roles', labelKey: 'orgRoles', descriptionKey: 'descOrgRoles', icon: Shield, kind: 'static', path: '/organization/roles', scope: 'org', absorbTarget: 'connect' },
+  { id: 'org-events', labelKey: 'orgEvents', descriptionKey: 'descOrgEvents', icon: Zap, kind: 'static', path: '/organization/events', scope: 'org', absorbTarget: 'connect' },
   // story #1981 배지 축(inboxPendingCount)은 app-sidebar.tsx에 그대로 남는다(다음
   // 카드 #3823 「오늘」 배지가 재사용) — 이 항목 자체가 사이드바에서 빠져도 그
   // 폴링·SSE 재조회 로직은 안 건든다(다음 카드가 그 값을 소비할 자리를 다시 연결).
-  { id: 'inbox', labelKey: 'inbox', descriptionKey: 'descInbox', icon: Inbox, kind: 'static', path: '/inbox', badgeKey: 'inbox' },
-  { id: 'settings', labelKey: 'settings', descriptionKey: 'descSettings', icon: Settings, kind: 'static', path: '/settings' },
+  // absorbTarget='settings'는 임의값 — inbox는 MOBILE_HUB_EXCLUDE_IDS로 VISIBLE_
+  // LEGACY_NAV_ITEMS에서 이미 걸러져 groupVisibleLegacyByTarget이 절대 안 본다
+  // (타입만 채우는 자리, 렌더 영향 0).
+  { id: 'inbox', labelKey: 'inbox', descriptionKey: 'descInbox', icon: Inbox, kind: 'static', path: '/inbox', badgeKey: 'inbox', absorbTarget: 'settings' },
+  { id: 'settings', labelKey: 'settings', descriptionKey: 'descSettings', icon: Settings, kind: 'static', path: '/settings', absorbTarget: 'settings' },
 ];
 
 // story #2682(S2)에서 more/page.tsx 로컬 상수였던 것을 story #2684(S4)에서 이리 옮긴다 —
@@ -220,9 +236,47 @@ export const MOBILE_HUB_EXCLUDE_IDS = new Set(['board', 'inbox', 'chats']);
 // 이 제외를 적용하지 않는다 — LEGACY_NAV_ITEMS 전부를 그대로 쓴다(그 결정은 story
 // #3824 조건①에서 이미 確定, command-palette.test.tsx의 3-way 대조가 그 비대칭을
 // 문서화한다).
-export const VISIBLE_LEGACY_NAV_ITEMS: NavItemConfig[] = LEGACY_NAV_ITEMS.filter(
+export const VISIBLE_LEGACY_NAV_ITEMS: LegacyNavItemConfig[] = LEGACY_NAV_ITEMS.filter(
   (item) => !MOBILE_HUB_EXCLUDE_IDS.has(item.id),
 );
+
+// story #3855(customer-zero·셸) — 「더보기」/모바일 /more가 이 함수 하나로 묶음을
+// 얻는다(app-sidebar.tsx·more/page.tsx 둘 다 소비, 3836 SSOT 관례 그대로 확장). 머리말
+// 순서는 카드 AC1이 못박은 고정 순서 — 알파벳/등록 순이 아니라 §② 흡수 지도의 서술
+// 순서(일감→연결·규칙→지식→이력→설정) 그대로다.
+const ABSORB_TARGET_ORDER: AbsorbTarget[] = ['work', 'connect', 'knowledge', 'history', 'settings'];
+
+// 머리말 낱말은 전부 기존 키 재사용(§② 낱말 그대로, 신규 낱말 0) — zoneDev="일감"·
+// zoneConnectRules="연결·규칙"은 NAV_GROUPS가 이미 쓰는 값(같은 화면 같은 낱말),
+// zoneKnowledge="지식"은 doc a699be00 §② 초안에서 쓰였다가 소비처 없이 남아있던
+// 고아 키를 이 카드가 첫 실소비로 되살린다(그랩 확認 — 이 카드 前엔 0 콜사이트).
+// settings="설정"도 NAV_GROUPS 기존 항목 라벨과 동일 낱말 재사용. zoneHistory만
+// 대응하는 기존 키가 없어 이 카드에서 신규 1건(ko/en 한 벌, §⑤ 해요체 축 밖 — 명사
+// 머리말이라 어미 자체가 없음).
+const ABSORB_TARGET_LABEL_KEYS: Record<AbsorbTarget, string> = {
+  work: 'zoneDev',
+  connect: 'zoneConnectRules',
+  knowledge: 'zoneKnowledge',
+  history: 'zoneHistory',
+  settings: 'settings',
+};
+
+export interface LegacyNavGroup {
+  target: AbsorbTarget;
+  labelKey: string;
+  items: LegacyNavItemConfig[];
+}
+
+// AC1 — VISIBLE_LEGACY_NAV_ITEMS를 머리말별로 묶고 빈 묶음은 배열에서 아예 뺀다(길이
+// 0인 그룹을 렌더 쪽이 `.filter`로 또 거르게 하지 않는다 — «묶음째 사라짐»의 근본
+// 위치가 이 함수 하나여야 데스크톱·모바일이 매번 그 규칙을 재발명 안 한다, AC4).
+export function groupVisibleLegacyByTarget(): LegacyNavGroup[] {
+  return ABSORB_TARGET_ORDER.map((target) => ({
+    target,
+    labelKey: ABSORB_TARGET_LABEL_KEYS[target],
+    items: VISIBLE_LEGACY_NAV_ITEMS.filter((item) => item.absorbTarget === target),
+  })).filter((group) => group.items.length > 0);
+}
 
 // story #2930(P0-G) I2 — 챗은 4구역 밖 1급 「center」(중심 꽃, 선생님 확定). NAV_GROUPS
 // 배열엔 없다(구역에 묻지 않는다는 게 이 승격의 요점) — 데스크톱 사이드바 상단 고정 카드

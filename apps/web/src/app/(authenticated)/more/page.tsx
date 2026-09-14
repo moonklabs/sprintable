@@ -8,7 +8,7 @@ import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Card, CardHeader } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { VISIBLE_LEGACY_NAV_ITEMS, MOBILE_HUB_EXCLUDE_IDS, MOBILE_HUB_GROUP_ORDER, NAV_GROUPS } from '@/lib/nav-config';
+import { groupVisibleLegacyByTarget, MOBILE_HUB_EXCLUDE_IDS, MOBILE_HUB_GROUP_ORDER, NAV_GROUPS } from '@/lib/nav-config';
 import { pickEunNeunJosa } from '@/lib/korean-particle';
 
 // story #2682(모바일 IA S2, doc mobile-ia-full-completion-2678 §2.3) — 임시 평면 stub(#1958·
@@ -28,23 +28,17 @@ export default function MorePage() {
   const isMobile = useIsMobile();
   const [query, setQuery] = useState('');
 
-  // story #3824(UX-v3·FE 1, 페드루 PO 確定 2026-09-13) — 데스크톱 사이드바(NAV_GROUPS)가
-  // 5항목으로 줄어도 모바일 `/more` 허브는 회귀 0(PO 조건②) — 5항목 카드 뒤에 LEGACY_
-  // NAV_ITEMS(사이드바에서 빠진 17개, command-palette.tsx와 같은 배열을 그대로 소비 —
-  // PO 조건① "한 자리에서만 정의") 묶음 카드를 하나 더 얹는다. 라벨은 새 키
-  // `moreOtherScreens`("그 밖의 화면") — 기존 zone 이름들과 겹치지 않는 새 개념(5항목
-  // 밖 전부)이라 재사용할 기존 키가 없다.
-  // story #3836 — 항목 자체는 nav-config.ts::VISIBLE_LEGACY_NAV_ITEMS(LEGACY_NAV_ITEMS
-  // - MOBILE_HUB_EXCLUDE_IDS, 사이드바 「더보기」와 같은 정의)를 그대로 쓴다(이 파일
-  // 자체의 `.filter()` 재구현 제거 — SSOT 1곳).
-  const legacyGroup = useMemo(
-    () => ({
-      id: 'legacy',
-      labelKey: 'moreOtherScreens',
-      items: VISIBLE_LEGACY_NAV_ITEMS,
-    }),
+  // story #3855(customer-zero·셸, 선생님 07:07Z 지적) — 「그 밖의 화면」 단일 카드(구
+  // moreOtherScreens, 15항목 한 줄)를 걷고 §② 흡수 지도 머리말별 카드로 쪼갠다 —
+  // groupVisibleLegacyByTarget()이 데스크톱 「더보기」와 같은 묶음·같은 머리말을
+  // 낸다(nav-config.ts SSOT, AC3). 흡수 화면이 착지해 어느 머리말의 항목이 0이 되면
+  // 그 카드 자체가 안 뜬다(빈 묶음 렌더 0, AC4 — groupVisibleLegacyByTarget이 이미
+  // 빈 그룹을 걸러 낸다).
+  const legacyGroups = useMemo(
+    () => groupVisibleLegacyByTarget().map((g) => ({ id: g.target, labelKey: g.labelKey, items: g.items })),
     [],
   );
+  const legacyGroupIds = useMemo(() => new Set<string>(legacyGroups.map((g) => g.id)), [legacyGroups]);
 
   const hubGroups = useMemo(
     () =>
@@ -53,9 +47,9 @@ export default function MorePage() {
           .map((groupId) => NAV_GROUPS.find((g) => g.id === groupId))
           .filter((g): g is NonNullable<typeof g> => !!g)
           .map((g) => ({ ...g, items: g.items.filter((item) => !MOBILE_HUB_EXCLUDE_IDS.has(item.id)) })),
-        legacyGroup,
+        ...legacyGroups,
       ].filter((g) => g.items.length > 0),
-    [legacyGroup],
+    [legacyGroups],
   );
 
   const totalScreenCount = useMemo(() => hubGroups.reduce((sum, g) => sum + g.items.length, 0), [hubGroups]);
@@ -125,44 +119,76 @@ export default function MorePage() {
           {t('moreSearchEmpty', { q: query.trim() })}
         </p>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {filteredGroups.map((group) => (
-            <Card key={group.id} className="overflow-hidden">
-              <CardHeader>
-                {/* story #3824(UX-v3·FE 1) — 헤더리스 1항목 그룹(now·dev·results, app-
-                    sidebar.tsx와 동형 관례)은 카드에서도 제목이 있어야 하니 그 유일한
-                    항목 자신의 라벨을 쓴다(그 그룹의 정체성이 곧 그 항목이라 desktop과
-                    같은 낱말이 뜬다) — 예전 'settings' 전용 특례를 이 일반 규칙으로
-                    대체(옛 특례는 settings가 이제 legacy 그룹 소속 항목이라 무의미). */}
-                <h2 className="text-sm font-semibold text-foreground">
-                  {group.labelKey ? t(group.labelKey) : t(group.items[0]!.labelKey)}
-                </h2>
-              </CardHeader>
-              <div className="divide-y divide-border">
-                {group.items.map((item) => {
-                  const href = item.kind === 'static' ? item.path : `/${item.path}`;
-                  const Icon = item.icon;
-                  return (
-                    <Link
-                      key={item.id}
-                      href={href}
-                      className="flex min-h-12 items-start gap-3 px-5 py-3 text-sm text-foreground hover:bg-muted sm:px-6"
-                    >
-                      <Icon className="mt-0.5 size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.8} />
-                      <span className="min-w-0">
-                        <span className="block truncate text-sm">{t(item.labelKey)}</span>
-                        {/* 페드루 PO CHANGES①(2026-09-09, 캡처 리뷰) — 설명은 잘리면 정보가
-                            조용히 버려진다(EN 긴 문안이 390px·sm 2열에서 「…」로 죽음). 제목
-                            줄만 truncate, 설명은 줄바꿈 허용. */}
-                        <span className="block text-xs text-muted-foreground">{t(item.descriptionKey)}</span>
-                      </span>
-                    </Link>
-                  );
-                })}
-              </div>
-            </Card>
-          ))}
-        </div>
+        <>
+          {(() => {
+            const navGroups = filteredGroups.filter((g) => !legacyGroupIds.has(g.id));
+            const legacyGroupsFiltered = filteredGroups.filter((g) => legacyGroupIds.has(g.id));
+            const renderCard = (group: (typeof filteredGroups)[number]) => (
+              <Card
+                key={group.id}
+                className="overflow-hidden"
+                data-legacy-group={legacyGroupIds.has(group.id) ? group.id : undefined}
+              >
+                <CardHeader>
+                  {/* story #3824(UX-v3·FE 1) — 헤더리스 1항목 그룹(now·dev·results, app-
+                      sidebar.tsx와 동형 관례)은 카드에서도 제목이 있어야 하니 그 유일한
+                      항목 자신의 라벨을 쓴다(그 그룹의 정체성이 곧 그 항목이라 desktop과
+                      같은 낱말이 뜬다). story #3855 — legacy 그룹은 항상 labelKey를
+                      갖는다(groupVisibleLegacyByTarget이 매긴 머리말, 헤더리스 케이스
+                      자체가 없음).
+                  */}
+                  <h2 className="text-sm font-semibold text-foreground">
+                    {group.labelKey ? t(group.labelKey) : t(group.items[0]!.labelKey)}
+                  </h2>
+                </CardHeader>
+                <div className="divide-y divide-border">
+                  {group.items.map((item) => {
+                    const href = item.kind === 'static' ? item.path : `/${item.path}`;
+                    const Icon = item.icon;
+                    return (
+                      <Link
+                        key={item.id}
+                        href={href}
+                        className="flex min-h-12 items-start gap-3 px-5 py-3 text-sm text-foreground hover:bg-muted sm:px-6"
+                      >
+                        <Icon className="mt-0.5 size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.8} />
+                        <span className="min-w-0">
+                          <span className="block truncate text-sm">{t(item.labelKey)}</span>
+                          {/* 페드루 PO CHANGES①(2026-09-09, 캡처 리뷰) — 설명은 잘리면 정보가
+                              조용히 버려진다(EN 긴 문안이 390px·sm 2열에서 「…」로 죽음). 제목
+                              줄만 truncate, 설명은 줄바꿈 허용. */}
+                          <span className="block text-xs text-muted-foreground">{t(item.descriptionKey)}</span>
+                        </span>
+                      </Link>
+                    );
+                  })}
+                </div>
+              </Card>
+            );
+            return (
+              <>
+                {navGroups.length > 0 ? (
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    {navGroups.map(renderCard)}
+                  </div>
+                ) : null}
+                {legacyGroupsFiltered.length > 0 ? (
+                  <div className={navGroups.length > 0 ? 'mt-6' : undefined}>
+                    {/* story #3855 AC3 — 데스크톱 「더보기」와 같은 캡션(§⑤ 해요체). 검색으로
+                        legacy 카드가 전부 걸러지면(legacyGroupsFiltered.length===0) 이 줄도
+                        같이 사라진다 — «묶음째 사라짐»의 검색 축 회귀 0. */}
+                    <p className="mb-2 px-1 text-xs text-muted-foreground" data-testid="legacy-moving-caption">
+                      {t('moreLegacyMovingCaption')}
+                    </p>
+                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                      {legacyGroupsFiltered.map(renderCard)}
+                    </div>
+                  </div>
+                ) : null}
+              </>
+            );
+          })()}
+        </>
       )}
     </div>
   );

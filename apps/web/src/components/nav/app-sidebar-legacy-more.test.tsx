@@ -8,7 +8,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
-import { VISIBLE_LEGACY_NAV_ITEMS } from '@/lib/nav-config';
+import { VISIBLE_LEGACY_NAV_ITEMS, groupVisibleLegacyByTarget } from '@/lib/nav-config';
 
 const { pathnameRef } = vi.hoisted(() => ({ pathnameRef: { current: '/dashboard' } }));
 
@@ -116,12 +116,20 @@ describe('AppSidebar — 「더보기」 접힘 절(story #3836 AC1)', () => {
     expect(moreToggle()!.getAttribute('aria-expanded')).toBe('true');
   });
 
-  it('펼쳤을 때 항목=VISIBLE_LEGACY_NAV_ITEMS와 정확히 같은 id·순서(nav-config SSOT)', async () => {
+  // story #3855 — 렌더 순서는 이제 VISIBLE_LEGACY_NAV_ITEMS의 원 배열 순서가 아니라
+  // groupVisibleLegacyByTarget()의 머리말별 묶음 순서다(일감→연결·규칙→지식→이력→설정,
+  // 각 묶음 안에서는 기존 배열 순서 유지) — «갈 곳별로»가 이 카드의 핵심이라 그 자체가
+  // 기대값이 된다(SSOT는 여전히 nav-config.ts 하나뿐, 이 테스트 파일이 손으로 다시 안 짬).
+  it('펼쳤을 때 항목=groupVisibleLegacyByTarget()과 정확히 같은 id·순서(nav-config SSOT)', async () => {
     storage.set('sidebar_group_collapsed', JSON.stringify({ legacy: false }));
     await mount();
     const renderedIds = [...container.querySelectorAll('a[data-legacy-nav-id]')]
       .map((a) => a.getAttribute('data-legacy-nav-id'));
-    expect(renderedIds).toEqual(VISIBLE_LEGACY_NAV_ITEMS.map((i) => i.id));
+    const expectedIds = groupVisibleLegacyByTarget().flatMap((g) => g.items.map((i) => i.id));
+    expect(renderedIds).toEqual(expectedIds);
+    // 양성대조 — 그룹화 전 원 배열 순서와는 실제로 달라야 한다(테스트가 우연히
+    // 통과하는 게 아님을 스스로 증명).
+    expect(renderedIds).not.toEqual(VISIBLE_LEGACY_NAV_ITEMS.map((i) => i.id));
   });
 
   // story #3845(§④, 2026-09-14) — retro가 LEGACY_NAV_ITEMS에서 빠지며 17→16(nav-config.ts

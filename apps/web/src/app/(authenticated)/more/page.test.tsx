@@ -51,16 +51,19 @@ async function mount() {
 
 describe('MorePage — story #2682 GNB 미러 그룹형 허브(AC1·AC3)', () => {
   // story #3824(UX-v3·FE 1, 페드루 PO 確定 2026-09-13 조건②) — 데스크톱 사이드바가
-  // 5항목으로 줄어도 모바일 `/more`는 회귀 0(PO 조건) — 5항목 순서 뒤에 LEGACY_NAV_ITEMS
-  // 묶음 「그 밖의 화면」이 따라붙는다. 「일감」 섹션은 그 유일한 항목(board)이
-  // MOBILE_HUB_EXCLUDE_IDS에 있어(바텀 탭이 이미 depth 1로 커버, 개편 前부터 있던 배제
-  // 규칙) 필터 뒤 빈 그룹이 되어 자연히 안 뜬다(개편 前엔 goals·loops·standup·retro가
-  // 같이 있어 안 비었었다 — 그 4개가 이제 「그 밖의 화면」으로 옮겨간 것일 뿐, 목적지
-  // 손실 0).
-  it('섹션 순서가 확定대로다(오늘/결과/연결·규칙/그 밖의 화면 — 일감은 유일 항목이 바텀탭 배제 대상이라 빈 채 안 뜬다)', async () => {
+  // 5항목으로 줄어도 모바일 `/more`는 회귀 0(PO 조건) — NAV_GROUPS 미러 섹션 뒤에
+  // LEGACY_NAV_ITEMS가 따라붙는다. 데스크톱 「보드」 자신의 「일감」(zoneDev) 섹션은
+  // 그 유일한 항목(board)이 MOBILE_HUB_EXCLUDE_IDS에 있어 빈 채 안 뜬다(무변, 3824
+  // 당시 그대로).
+  // story #3855(customer-zero·셸) — 단일 「그 밖의 화면」 카드가 §② 흡수 지도 머리말별
+  // 카드(일감·연결·규칙·지식·이력·설정)로 쪼개졌다. 「연결·규칙」이 두 번 나오는 것은
+  // 우연이 아니다 — NAV_GROUPS 자신의 connect-rules 섹션(org-channels·org-content-rules)
+  // 과 legacy 흡수 카드(org-trust·org-members·org-workforce·org-roles·org-events)가
+  // 같은 §② 낱말을 공유하도록 카드가 明示했다(머리말 그대로 재사용 원칙).
+  it('섹션 순서가 확定대로다(오늘/결과/연결·규칙[NAV_GROUPS]/일감·연결·규칙·지식·이력·설정[legacy 흡수 지도 머리말] — 일감[NAV_GROUPS]은 유일 항목이 바텀탭 배제 대상이라 빈 채 안 뜬다)', async () => {
     await mount();
     const sectionLabels = [...container.querySelectorAll('h2')].map((el) => el.textContent);
-    expect(sectionLabels).toEqual(['오늘', '결과', '연결·규칙', '그 밖의 화면']);
+    expect(sectionLabels).toEqual(['오늘', '결과', '연결·규칙', '일감', '연결·규칙', '지식', '이력', '설정']);
   });
 
   it('「그 밖의 화면」 묶음(이벤트·구성원·에이전트)과 오늘(=옛 조직브리핑)이 포함된다(AC1 — 기존 stub의 핵심 결함 수복)', async () => {
@@ -113,11 +116,13 @@ describe('MorePage — story #2682 GNB 미러 그룹형 허브(AC1·AC3)', () =>
     expect(insightsBoardLink?.textContent).toContain('결과');
   });
 
-  it('설정 링크는 「그 밖의 화면」 묶음 안에 남아 있다(story #3824 — 전용 섹션 특례는 폐기, 항목으로 흡수)', async () => {
+  // story #3855(customer-zero·셸) — AC1 갈 곳 표가 settings를 "묶음 없이 맨 아래 단독
+  // (머리말 「설정」)"으로 못박았다 — 3824가 폐기했던 전용 섹션이 이번엔 다시 생기지만
+  // 이유가 다르다(예전=특례, 지금=§② 흡수 지도 5축 중 하나가 우연히 항목 1개).
+  it('설정은 자기 머리말 카드를 갖는다(story #3855 §② 흡수 지도 — settings 전용 축)', async () => {
     await mount();
-    // 설정은 이제 독자 h2 섹션이 아니라 「그 밖의 화면」 카드 안의 한 항목이다.
-    const legacySection = [...container.querySelectorAll('h2')].find((h) => h.textContent === '설정');
-    expect(legacySection).toBeUndefined();
+    const settingsSection = [...container.querySelectorAll('h2')].find((h) => h.textContent === '설정');
+    expect(settingsSection).toBeDefined();
     const settingsLink = [...container.querySelectorAll('a')].find((a) => a.getAttribute('href') === '/settings');
     expect(settingsLink).toBeDefined();
   });
