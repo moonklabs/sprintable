@@ -60,6 +60,17 @@ class AgentProgressItem(BaseModel):
     conversation_id: uuid.UUID | None = None
 
 
+class CompletedTodayItem(BaseModel):
+    """story #3833 — 오늘 끝난 위임 1건."""
+    run_id: uuid.UUID
+    agent: TodayActor
+    work_item: TodayWorkItem | None = None
+    status: str
+    result_summary: str | None = None
+    finished_at: datetime
+    conversation_id: uuid.UUID | None = None
+
+
 class PublishedByChannel(BaseModel):
     channel_kind: str
     count: int
@@ -94,6 +105,7 @@ class TodayResponse(BaseModel):
     needs_me: list[NeedsMeItem]
     needs_me_count: int
     agent_progress: list[AgentProgressItem]
+    completed_today: list[CompletedTodayItem]
     published_today: PublishedToday
     usage: UsageSection
 
