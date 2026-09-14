@@ -521,7 +521,13 @@ export function AppSidebar({
                     aria-label={legacyToggleAriaLabel}
                   />
                 }
-                className="w-full cursor-pointer justify-between rounded-md border-0 bg-transparent aria-expanded:bg-transparent hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:border-transparent"
+                // 유나 QA 코드리뷰 지적(2026-09-14, 페드루 전달) — mergeProps(Base UI, 일반
+                // React prop 병합)는 이 저장소 cn()의 tailwind-merge와 다른 함수라 Button
+                // size="default"의 `min-h-11`(44px)이 `h-8`(32px, min-height가 아닌 height라
+                // twMerge 충돌군이 애초에 다름)과 절대 충돌하지 않고 살아남는다 — min-height가
+                // 선언된 height보다 크면 렌더 높이는 min-height를 따른다(CSS 규격). `min-h-8`
+                // 명시로 그 최소치를 형제 라벨과 맞춘다(min-w-11도 동형 이유로 함께 되돌림).
+                className="w-full min-h-8 min-w-0 cursor-pointer justify-between rounded-md border-0 bg-transparent aria-expanded:bg-transparent hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:border-transparent"
               >
                 <span>{legacyGroupLabel}</span>
                 <ChevronDown className={cn('size-3.5 shrink-0 transition-transform duration-150', legacyIsCollapsed && '-rotate-90')} />
