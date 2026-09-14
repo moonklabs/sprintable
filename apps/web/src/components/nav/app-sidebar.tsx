@@ -540,14 +540,23 @@ export function AppSidebar({
                 <SidebarGroupContent>
                   {/* story #3855 AC2 — 캡션 1줄(§⑤ 해요체·「이사 안내판」 취지). 링크·머리말
                       둘 다 아닌 순수 안내문이라 SidebarMenu 밖, 첫 그룹 위에 한 번만. */}
-                  <p className="px-2 pb-1.5 text-xs text-muted-foreground" data-testid="legacy-moving-caption">
+                  <p className="px-[9px] pt-px pb-1 text-[11.5px] text-muted-foreground" data-testid="legacy-moving-caption">
                     {t('moreLegacyMovingCaption')}
                   </p>
-                  {legacyGroups.map((group) => (
+                  {legacyGroups.map((group, groupIndex) => (
                     <div key={group.target} className="space-y-0.5" data-legacy-group={group.target}>
-                      {/* AC2 — 머리말은 링크·버튼이 아니다(순수 텍스트, 클릭 불가). */}
-                      <p className="px-2 pt-1.5 text-[11px] font-medium tracking-wide text-muted-foreground">
-                        {t(group.labelKey)}
+                      {/* 픽셀 커밋(페드루 PO 판정 2026-09-14 07:34Z, 유나 시안 77731332
+                          getComputedStyle 대조) — 묶음 사이 구분선(border 토큰) 1px·margin
+                          5px 8px 4px, 첫 그룹 앞엔 없음. */}
+                      {groupIndex > 0 ? <div className="mx-2 mt-[5px] mb-1 h-px bg-border" /> : null}
+                      {/* AC2 — 머리말은 링크·버튼이 아니다(순수 텍스트, 클릭 불가). 시안이
+                          지정한 안내 문구(머리말 옆 회색 note, 예: 「만드는 곳(일)…」)는 PO가
+                          §⑤ 내부 낱말·사이드바 폭 이유로 명시 제외했다 — 이름+개수 pill만. */}
+                      <p className="flex items-baseline gap-1.5 px-2 pt-0.5 pb-px text-[11px] font-bold tracking-[.03em] text-muted-foreground">
+                        <span>{t(group.labelKey)}</span>
+                        <span className="rounded-full bg-muted px-1.5 text-[10px] font-bold leading-[15px] text-muted-foreground">
+                          {group.items.length}
+                        </span>
                       </p>
                       <SidebarMenu>
                         {group.items.map((item) => {

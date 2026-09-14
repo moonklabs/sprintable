@@ -28,17 +28,16 @@ export default function MorePage() {
   const isMobile = useIsMobile();
   const [query, setQuery] = useState('');
 
-  // story #3855(customer-zero·셸, 선생님 07:07Z 지적) — 「그 밖의 화면」 단일 카드(구
-  // moreOtherScreens, 15항목 한 줄)를 걷고 §② 흡수 지도 머리말별 카드로 쪼갠다 —
-  // groupVisibleLegacyByTarget()이 데스크톱 「더보기」와 같은 묶음·같은 머리말을
-  // 낸다(nav-config.ts SSOT, AC3). 흡수 화면이 착지해 어느 머리말의 항목이 0이 되면
-  // 그 카드 자체가 안 뜬다(빈 묶음 렌더 0, AC4 — groupVisibleLegacyByTarget이 이미
-  // 빈 그룹을 걸러 낸다).
-  const legacyGroups = useMemo(
-    () => groupVisibleLegacyByTarget().map((g) => ({ id: g.target, labelKey: g.labelKey, items: g.items })),
-    [],
-  );
-  const legacyGroupIds = useMemo(() => new Set<string>(legacyGroups.map((g) => g.id)), [legacyGroups]);
+  // story #3855(customer-zero·셸, 선생님 07:07Z 지적 → 페드루 PO 판정 2026-09-14 07:34Z,
+  // 유나 시안 77731332) — 「그 밖의 화면」은 단일 카드로 유지하되(카드 자체를 쪼개지
+  // 않는다), 카드 안을 §② 흡수 지도 머리말별 소묶음(sub-heading+개수 pill+구분선)으로
+  // 나눈다 — groupVisibleLegacyByTarget()이 데스크톱 「더보기」와 같은 묶음·같은
+  // 머리말을 낸다(nav-config.ts SSOT, AC3). 흡수 화면이 착지해 어느 머리말의 항목이
+  // 0이 되면 그 소묶음만 안 뜬다(빈 묶음 렌더 0, AC4 — groupVisibleLegacyByTarget이
+  // 이미 빈 그룹을 걸러 낸다). 카드 자체가 비면(전 소묶음 0) 카드도 안 뜬다.
+  const LEGACY_CARD_ID = 'legacy-other-screens';
+  const legacySubgroups = useMemo(() => groupVisibleLegacyByTarget(), []);
+  const legacyItems = useMemo(() => legacySubgroups.flatMap((g) => g.items), [legacySubgroups]);
 
   const hubGroups = useMemo(
     () =>
@@ -46,10 +45,15 @@ export default function MorePage() {
         ...MOBILE_HUB_GROUP_ORDER
           .map((groupId) => NAV_GROUPS.find((g) => g.id === groupId))
           .filter((g): g is NonNullable<typeof g> => !!g)
-          .map((g) => ({ ...g, items: g.items.filter((item) => !MOBILE_HUB_EXCLUDE_IDS.has(item.id)) })),
-        ...legacyGroups,
+          .map((g) => ({
+            id: g.id,
+            labelKey: g.labelKey,
+            items: g.items.filter((item) => !MOBILE_HUB_EXCLUDE_IDS.has(item.id)),
+            subgroups: undefined as typeof legacySubgroups | undefined,
+          })),
+        { id: LEGACY_CARD_ID, labelKey: 'moreOtherScreens', items: legacyItems, subgroups: legacySubgroups },
       ].filter((g) => g.items.length > 0),
-    [legacyGroups],
+    [legacyItems, legacySubgroups],
   );
 
   const totalScreenCount = useMemo(() => hubGroups.reduce((sum, g) => sum + g.items.length, 0), [hubGroups]);
@@ -60,14 +64,18 @@ export default function MorePage() {
   // 호출 0·상태는 로컬(이미 만든 hubGroups를 그 자리서 거를 뿐 — 원천 하나).
   const filteredGroups = useMemo(() => {
     if (!normalizedQuery) return hubGroups;
+    const matches = (item: (typeof hubGroups)[number]['items'][number]) => {
+      const label = t(item.labelKey).toLowerCase();
+      const description = t(item.descriptionKey).toLowerCase();
+      return label.includes(normalizedQuery) || description.includes(normalizedQuery);
+    };
     return hubGroups
       .map((g) => ({
         ...g,
-        items: g.items.filter((item) => {
-          const label = t(item.labelKey).toLowerCase();
-          const description = t(item.descriptionKey).toLowerCase();
-          return label.includes(normalizedQuery) || description.includes(normalizedQuery);
-        }),
+        items: g.items.filter(matches),
+        subgroups: g.subgroups
+          ?.map((sg) => ({ ...sg, items: sg.items.filter(matches) }))
+          .filter((sg) => sg.items.length > 0),
       }))
       .filter((g) => g.items.length > 0);
   }, [hubGroups, normalizedQuery, t]);
@@ -119,76 +127,74 @@ export default function MorePage() {
           {t('moreSearchEmpty', { q: query.trim() })}
         </p>
       ) : (
-        <>
-          {(() => {
-            const navGroups = filteredGroups.filter((g) => !legacyGroupIds.has(g.id));
-            const legacyGroupsFiltered = filteredGroups.filter((g) => legacyGroupIds.has(g.id));
-            const renderCard = (group: (typeof filteredGroups)[number]) => (
-              <Card
-                key={group.id}
-                className="overflow-hidden"
-                data-legacy-group={legacyGroupIds.has(group.id) ? group.id : undefined}
-              >
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {filteredGroups.map((group) => {
+            const isLegacy = group.id === LEGACY_CARD_ID;
+            const renderItemRow = (item: (typeof group.items)[number]) => {
+              const href = item.kind === 'static' ? item.path : `/${item.path}`;
+              const Icon = item.icon;
+              return (
+                <Link
+                  key={item.id}
+                  href={href}
+                  className="flex min-h-12 items-start gap-3 px-5 py-3 text-sm text-foreground hover:bg-muted sm:px-6"
+                >
+                  <Icon className="mt-0.5 size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.8} />
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm">{t(item.labelKey)}</span>
+                    {/* 페드루 PO CHANGES①(2026-09-09, 캡처 리뷰) — 설명은 잘리면 정보가
+                        조용히 버려진다(EN 긴 문안이 390px·sm 2열에서 「…」로 죽음). 제목
+                        줄만 truncate, 설명은 줄바꿈 허용. */}
+                    <span className="block text-xs text-muted-foreground">{t(item.descriptionKey)}</span>
+                  </span>
+                </Link>
+              );
+            };
+            return (
+              <Card key={group.id} className="overflow-hidden">
                 <CardHeader>
                   {/* story #3824(UX-v3·FE 1) — 헤더리스 1항목 그룹(now·dev·results, app-
                       sidebar.tsx와 동형 관례)은 카드에서도 제목이 있어야 하니 그 유일한
                       항목 자신의 라벨을 쓴다(그 그룹의 정체성이 곧 그 항목이라 desktop과
-                      같은 낱말이 뜬다). story #3855 — legacy 그룹은 항상 labelKey를
-                      갖는다(groupVisibleLegacyByTarget이 매긴 머리말, 헤더리스 케이스
-                      자체가 없음).
+                      같은 낱말이 뜬다).
                   */}
-                  <h2 className="text-sm font-semibold text-foreground">
-                    {group.labelKey ? t(group.labelKey) : t(group.items[0]!.labelKey)}
+                  <h2 className="flex items-baseline gap-2 text-sm font-semibold text-foreground">
+                    <span>{group.labelKey ? t(group.labelKey) : t(group.items[0]!.labelKey)}</span>
+                    {/* story #3855(픽셀 커밋, 페드루 PO 판정 2026-09-14 07:34Z ⑥) — 카드
+                        헤더 옆 작은 캡션(§⑤ 해요체) — 데스크톱 「더보기」 캡션과 같은
+                        낱말, 여기선 카드 헤더에 붙는다(별도 페이지 줄이 아님). */}
+                    {isLegacy ? (
+                      <span
+                        className="text-[10.5px] font-medium text-muted-foreground"
+                        data-testid="legacy-moving-caption"
+                      >
+                        {t('moreLegacyMovingCaptionInline')}
+                      </span>
+                    ) : null}
                   </h2>
                 </CardHeader>
-                <div className="divide-y divide-border">
-                  {group.items.map((item) => {
-                    const href = item.kind === 'static' ? item.path : `/${item.path}`;
-                    const Icon = item.icon;
-                    return (
-                      <Link
-                        key={item.id}
-                        href={href}
-                        className="flex min-h-12 items-start gap-3 px-5 py-3 text-sm text-foreground hover:bg-muted sm:px-6"
-                      >
-                        <Icon className="mt-0.5 size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.8} />
-                        <span className="min-w-0">
-                          <span className="block truncate text-sm">{t(item.labelKey)}</span>
-                          {/* 페드루 PO CHANGES①(2026-09-09, 캡처 리뷰) — 설명은 잘리면 정보가
-                              조용히 버려진다(EN 긴 문안이 390px·sm 2열에서 「…」로 죽음). 제목
-                              줄만 truncate, 설명은 줄바꿈 허용. */}
-                          <span className="block text-xs text-muted-foreground">{t(item.descriptionKey)}</span>
-                        </span>
-                      </Link>
-                    );
-                  })}
-                </div>
+                {isLegacy && group.subgroups ? (
+                  <div>
+                    {group.subgroups.map((sg, i) => (
+                      <div key={sg.target} data-legacy-group={sg.target}>
+                        {i > 0 ? <div className="mx-5 my-1.5 h-px bg-border sm:mx-6" /> : null}
+                        <p className="flex items-baseline gap-1.5 px-5 pt-1 pb-0.5 sm:px-6">
+                          <span className="text-[11px] font-bold text-muted-foreground">{t(sg.labelKey)}</span>
+                          <span className="rounded-full bg-muted px-1.5 text-[10px] font-bold leading-[15px] text-muted-foreground">
+                            {sg.items.length}
+                          </span>
+                        </p>
+                        <div className="divide-y divide-border">{sg.items.map(renderItemRow)}</div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="divide-y divide-border">{group.items.map(renderItemRow)}</div>
+                )}
               </Card>
             );
-            return (
-              <>
-                {navGroups.length > 0 ? (
-                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                    {navGroups.map(renderCard)}
-                  </div>
-                ) : null}
-                {legacyGroupsFiltered.length > 0 ? (
-                  <div className={navGroups.length > 0 ? 'mt-6' : undefined}>
-                    {/* story #3855 AC3 — 데스크톱 「더보기」와 같은 캡션(§⑤ 해요체). 검색으로
-                        legacy 카드가 전부 걸러지면(legacyGroupsFiltered.length===0) 이 줄도
-                        같이 사라진다 — «묶음째 사라짐»의 검색 축 회귀 0. */}
-                    <p className="mb-2 px-1 text-xs text-muted-foreground" data-testid="legacy-moving-caption">
-                      {t('moreLegacyMovingCaption')}
-                    </p>
-                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                      {legacyGroupsFiltered.map(renderCard)}
-                    </div>
-                  </div>
-                ) : null}
-              </>
-            );
-          })()}
-        </>
+          })}
+        </div>
       )}
     </div>
   );

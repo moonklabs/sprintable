@@ -55,15 +55,20 @@ describe('MorePage — story #2682 GNB 미러 그룹형 허브(AC1·AC3)', () =>
   // LEGACY_NAV_ITEMS가 따라붙는다. 데스크톱 「보드」 자신의 「일감」(zoneDev) 섹션은
   // 그 유일한 항목(board)이 MOBILE_HUB_EXCLUDE_IDS에 있어 빈 채 안 뜬다(무변, 3824
   // 당시 그대로).
-  // story #3855(customer-zero·셸) — 단일 「그 밖의 화면」 카드가 §② 흡수 지도 머리말별
-  // 카드(일감·연결·규칙·지식·이력·설정)로 쪼개졌다. 「연결·규칙」이 두 번 나오는 것은
-  // 우연이 아니다 — NAV_GROUPS 자신의 connect-rules 섹션(org-channels·org-content-rules)
-  // 과 legacy 흡수 카드(org-trust·org-members·org-workforce·org-roles·org-events)가
-  // 같은 §② 낱말을 공유하도록 카드가 明示했다(머리말 그대로 재사용 원칙).
-  it('섹션 순서가 확定대로다(오늘/결과/연결·규칙[NAV_GROUPS]/일감·연결·규칙·지식·이력·설정[legacy 흡수 지도 머리말] — 일감[NAV_GROUPS]은 유일 항목이 바텀탭 배제 대상이라 빈 채 안 뜬다)', async () => {
+  // story #3855(customer-zero·셸, 페드루 PO 판정 2026-09-14 07:34Z 픽셀 커밋) — 「그 밖의
+  // 화면」은 다시 단일 카드다(구 stub과 동형 카드 수, 내용만 다름) — §② 흡수 지도 머리말
+  // (일감·연결·규칙·지식·이력·설정)은 그 카드 «안»의 소묶음(sub-heading, h2 아님)으로
+  // 산다. h2 레벨엔 데스크톱 미러 3개(오늘·결과·연결·규칙) + legacy 카드 1개(그 밖의
+  // 화면)뿐 — 소묶음 자체는 nav-config-legacy-grouping.test.ts·legacy-nav-ssot.test.tsx가
+  // 전담(별도 축, 이 파일 관심사 아님).
+  it('섹션(h2) 순서가 확定대로다(오늘/결과/연결·규칙[NAV_GROUPS]/그 밖의 화면[legacy 단일 카드] — 일감[NAV_GROUPS]은 유일 항목이 바텀탭 배제 대상이라 빈 채 안 뜬다)', async () => {
     await mount();
-    const sectionLabels = [...container.querySelectorAll('h2')].map((el) => el.textContent);
-    expect(sectionLabels).toEqual(['오늘', '결과', '연결·규칙', '일감', '연결·규칙', '지식', '이력', '설정']);
+    const sectionLabels = [...container.querySelectorAll('h2')].map((el) => el.textContent?.trim());
+    expect(sectionLabels).toEqual(['오늘', '결과', '연결·규칙', '그 밖의 화면새 자리로 옮기는 중이에요']);
+    // h2 안 캡션은 "그 밖의 화면" 라벨과 별도 span(§⑤ 해요체 인라인 캡션, moreLegacyMovingCaptionInline)
+    // — 위 concat 문자열이 그 둘의 합임을 명시로도 확認(텍스트 원문이 바뀌면 이 assert가 RED).
+    const legacyH2 = [...container.querySelectorAll('h2')].find((h) => h.textContent?.startsWith('그 밖의 화면'));
+    expect(legacyH2?.querySelector('[data-testid="legacy-moving-caption"]')?.textContent).toBe('새 자리로 옮기는 중이에요');
   });
 
   it('「그 밖의 화면」 묶음(이벤트·구성원·에이전트)과 오늘(=옛 조직브리핑)이 포함된다(AC1 — 기존 stub의 핵심 결함 수복)', async () => {
@@ -116,13 +121,16 @@ describe('MorePage — story #2682 GNB 미러 그룹형 허브(AC1·AC3)', () =>
     expect(insightsBoardLink?.textContent).toContain('결과');
   });
 
-  // story #3855(customer-zero·셸) — AC1 갈 곳 표가 settings를 "묶음 없이 맨 아래 단독
-  // (머리말 「설정」)"으로 못박았다 — 3824가 폐기했던 전용 섹션이 이번엔 다시 생기지만
-  // 이유가 다르다(예전=특례, 지금=§② 흡수 지도 5축 중 하나가 우연히 항목 1개).
-  it('설정은 자기 머리말 카드를 갖는다(story #3855 §② 흡수 지도 — settings 전용 축)', async () => {
+  // story #3855(customer-zero·셸, 페드루 PO 판정 2026-09-14 07:34Z 픽셀 커밋) — AC1 갈 곳
+  // 표가 settings를 "묶음 없이 맨 아래 단독(머리말 「설정」)"으로 못박았지만, 픽셀 커밋이
+  // legacy를 단일 카드로 되돌리며 그 머리말은 이제 h2(카드 헤더)가 아니라 카드 «안»의
+  // 소묶음(data-legacy-group="settings")이다 — 데스크톱 사이드바와 동형(app-sidebar.tsx도
+  // 소묶음, h2 아님).
+  it('설정은 legacy 카드 안 자기 소묶음(머리말+개수 pill)을 갖는다(story #3855 §② 흡수 지도 — settings 전용 축)', async () => {
     await mount();
-    const settingsSection = [...container.querySelectorAll('h2')].find((h) => h.textContent === '설정');
-    expect(settingsSection).toBeDefined();
+    const settingsGroup = container.querySelector('[data-legacy-group="settings"]');
+    expect(settingsGroup).toBeDefined();
+    expect(settingsGroup?.textContent).toContain('설정');
     const settingsLink = [...container.querySelectorAll('a')].find((a) => a.getAttribute('href') === '/settings');
     expect(settingsLink).toBeDefined();
   });
@@ -156,7 +164,7 @@ describe('MorePage — story #fddd0e6b(IA ⑦ 전체 메뉴)', () => {
     isMobileMock = true;
     await mount();
     const hint = container.querySelector('[data-testid="more-tab-hint"]');
-    expect(hint?.textContent).toBe('보드·알림·대화는 아래 「오늘」·「결재」·「대화」 탭에 있어 여기엔 없습니다');
+    expect(hint?.textContent).toBe('보드·알림·대화는 아래 「오늘」·「결재」·「대화」 탭에 있어 여기엔 없어요');
   });
 
   it('⭐데스크톱 폭(useIsMobile() false)에선 탭 문장이 아예 없다(탭 바 자체가 없어 거짓이 되므로)', async () => {
