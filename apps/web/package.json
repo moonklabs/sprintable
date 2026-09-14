@@ -31,6 +31,7 @@
     "verify:cross-element-tint-text": "tsx scripts/verify-cross-element-tint-text.ts",
     "verify:no-subtle-alpha-bg": "tsx scripts/verify-no-subtle-alpha-bg.ts",
     "verify:no-new-alpha-text-foreground": "tsx scripts/verify-no-new-alpha-text-foreground.ts",
+    "verify:no-muted-on-tint": "tsx scripts/verify-no-muted-on-tint.ts",
     "verify:v3-token-diff-scope": "tsx scripts/verify-v3-token-diff-scope.ts",
     "verify:muted-foreground-contrast": "tsx scripts/verify-muted-foreground-contrast.ts",
     "verify:no-muted-foreground-alpha": "tsx scripts/verify-no-muted-foreground-alpha.ts",
