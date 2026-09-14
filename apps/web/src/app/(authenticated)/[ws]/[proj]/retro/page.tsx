@@ -10,6 +10,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { OperatorSelect } from '@/components/ui/operator-control';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
+import { WorkspaceFrameTabs } from '@/components/workspace/workspace-frame-tabs';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useRetroRoute } from './retro-context';
 import { RETRO_PHASE_TO_STAGE, RETRO_STAGE_VARIANTS, type RetroSessionPhase } from '@/services/retro-session';
@@ -136,6 +137,10 @@ export default function RetroPage() {
     return (
       <>
         <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} showContextChip />
+        {/* story #3845 §③ⓑ — sprints-client.tsx와 동형(board/sprints 프레임 관례 재사용). */}
+        <div className="px-6 pt-3">
+          <WorkspaceFrameTabs active="retro" />
+        </div>
         <div className="flex h-64 items-center justify-center p-6">
           <EmptyState title={shellT('projectSelectPrompt')} description={shellT('projectSelectDescription')} />
         </div>
@@ -158,6 +163,10 @@ export default function RetroPage() {
         }
         showContextChip
       />
+      {/* story #3845 §③ⓑ — sprints-client.tsx와 동형(board/sprints 프레임 관례 재사용). */}
+      <div className="px-6 pt-3">
+        <WorkspaceFrameTabs active="retro" />
+      </div>
 
       <div className="focus-inset flex min-h-0 flex-1 flex-col gap-0 overflow-y-auto">
         {/* Create new session — toggle via TopBar button */}

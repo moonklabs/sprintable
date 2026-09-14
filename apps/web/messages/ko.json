@@ -287,6 +287,7 @@
     "documents": "문서",
     "goSprints": "스프린트로 이동",
     "goEpics": "에픽으로 이동",
+    "goRetro": "회고로 이동",
     "actionDelegateStory": "{title} 위임하기",
     "actionDelegateStoryImpact": "{title}을 담당자에게 위임합니다. 스토리 화면으로 이동합니다.",
     "actionGateDecision": "게이트 결재하기",

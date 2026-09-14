@@ -11,7 +11,10 @@ import { LEGACY_NAV_ITEMS, NAV_GROUPS } from './nav-config';
 // 분류됐었으나 화면 «일부» 패널만 project(나머지는 org)인 혼합 화면이었다. PO 원칙 —
 // 표식은 "화면 전체에 대한 약속"이라 혼합/부수적 project_id 사용은 project로도 org로도
 // 정직할 수 없어 애매(무표식)로 간다. 이 재감사로 애매가 2→4로 늘었다(9/11/4).
-const PROJECT_SCOPED_IDS = ['board', 'goals', 'loops', 'standup', 'retro', 'docs', 'artifacts', 'storage', 'activity'];
+// story #3845(UX-v3·FE 5·일감 2, 페드루 PO 確定 §④ 2026-09-14) — retro가 LEGACY_NAV_ITEMS
+// 에서 빠지며(「일감」 탭으로 흡수, nav-config.ts 주석 참고) 9→8. standup은 「스프린트」
+// 탭 임베딩(§①) 착지 前까지 아직 남아 있다(nav-config.ts 해당 주석 참고).
+const PROJECT_SCOPED_IDS = ['board', 'goals', 'loops', 'standup', 'docs', 'artifacts', 'storage', 'activity'];
 // 애매(표식 없음) — scope 필드를 아예 안 쓴다.
 // - inbox: 순수 개인 알림(project/org 필터 0)
 // - settings: 계정 설정인데 팀원 탭 하나만 project라 섞인 화면
@@ -34,11 +37,12 @@ function allItems() {
 describe('NAV_GROUPS scope — story #9c5e82dc(IA·S3 AC1)', () => {
   // story #3743(UI 재설계 ③, 페드루 PO 決) — org-connectors 항목이 organization/channels로
   // 흡수·리다이렉트되며 nav에서 걷혔다(⑦ IA 25→24 실물, 이 파일 축으로는 24→23).
-  it('항목 23개 전부가 scope 분류 대상이다(회귀 시 이 수부터 어긋난다)', () => {
-    expect(allItems()).toHaveLength(23);
+  // story #3845 §④ — retro가 「일감」 탭으로 흡수되며 23→22(standup은 §① 착지 뒤 21로).
+  it('항목 22개 전부가 scope 분류 대상이다(회귀 시 이 수부터 어긋난다)', () => {
+    expect(allItems()).toHaveLength(22);
   });
 
-  it('project 스코프 9항목이 정확히 이 집합이다(8→9, activity 포함)', () => {
+  it('project 스코프 8항목이 정확히 이 집합이다(story #3845로 9→8, retro 제외)', () => {
     const projectIds = allItems().filter((i) => i.scope === 'project').map((i) => i.id).sort();
     expect(projectIds).toEqual([...PROJECT_SCOPED_IDS].sort());
   });
@@ -61,9 +65,9 @@ describe('NAV_GROUPS scope — story #9c5e82dc(IA·S3 AC1)', () => {
     }
   });
 
-  it('kind:"resource" 항목(8개)은 전부 project 스코프다(라우트 자체가 /{ws}/{proj}/... 파생)', () => {
+  it('kind:"resource" 항목(7개, story #3845로 8→7)은 전부 project 스코프다(라우트 자체가 /{ws}/{proj}/... 파생)', () => {
     const resourceItems = allItems().filter((i) => i.kind === 'resource');
-    expect(resourceItems).toHaveLength(8);
+    expect(resourceItems).toHaveLength(7);
     for (const item of resourceItems) {
       expect(item.scope, `${item.id}.scope`).toBe('project');
     }

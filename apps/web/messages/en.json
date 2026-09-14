@@ -287,6 +287,7 @@
     "documents": "Documents",
     "goSprints": "Go to Sprints",
     "goEpics": "Go to Epics",
+    "goRetro": "Go to Retro",
     "actionDelegateStory": "Delegate {title}",
     "actionDelegateStoryImpact": "Delegates {title} to a teammate. Takes you to the story.",
     "actionGateDecision": "Review a gate decision",
