@@ -130,8 +130,12 @@ def _client_for(app):
 
 
 async def _setup_app_human(app, Session, user_id, org_id):
+    """카디르 CI 전수 스캔 지적(2026-09-14, story #2451 「dependency_overrides get_read_db
+    lint」 가드) — get_db 하나만 걸면 get_read_db 를 놓치는 회귀 클래스가 두 번 재발했다
+    (A1·A2). `override_db_and_read()`(conftest.py) 를 통해서만 걸어 구조적으로 두 key 를
+    함께 건다(어느 path/alias 로 들어오든 놓칠 수 없다)."""
     from app.dependencies.auth import AuthContext, get_current_user
-    from app.dependencies.database import get_db
+    from tests.conftest import override_db_and_read
 
     async def _db():
         async with Session() as s:
@@ -148,7 +152,7 @@ async def _setup_app_human(app, Session, user_id, org_id):
             claims={"app_metadata": {"org_id": str(org_id)}},
         )
 
-    app.dependency_overrides[get_db] = _db
+    override_db_and_read(app, _db)
     app.dependency_overrides[get_current_user] = _auth
 
 
