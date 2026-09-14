@@ -23,6 +23,14 @@ const TABS = [
 
 type WorkspaceFrameTabKey = (typeof TABS)[number]['key'];
 
+// story #3844(PO 지적 2026-09-14 07:53Z, 캡처 3 라이브 눈확認로 발견) — app-sidebar.tsx의
+// 「일감」 1차 메뉴(id 'board')가 resourceLink('flow') 단일 경로만 활성 판정해 /work-list·
+// /sprints·/epics·/retro(이 프레임이 얹힌 나머지 탭)에선 사이드바가 비활성으로 떨어졌다.
+// 이 배열이 SSOT — 탭을 하나 늘리면 사이드바 활성 판정도 하드코딩 없이 자동으로 늘어난다
+// (app-sidebar.tsx가 TABS를 직접 import하지 않는 건 'use client' 순환 없이 얇은 경로
+// 목록만 필요해서 — 경로 문자열만 뽑아 재수출한다).
+export const WORKSPACE_FRAME_TAB_PATHS: readonly string[] = TABS.map((tab) => tab.path);
+
 /**
  * story #2930(P0-G) I3(doc ia-4zone-redesign-2930, PO 스코프 확定 ①=ⓒ 2026-08-22) — nav에서
  * flow+sprints가 「보드」 단일 1차 메뉴로 접히면서(nav-config.ts work 존) 사라진 sprints
