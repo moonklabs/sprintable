@@ -68,8 +68,10 @@ export interface WorkListTaskInput {
   story_id: string;
   assignee_id: string | null;
   title: string;
-  /** BE Task 자유 문자열(기본값 "todo") — done/in_progress 외 값은 진행 중으로도 완료로도
-   * 안 보고 상태 낱말을 생략한다(지어내지 않음). */
+  /** BE tasks 테이블 CHECK 제약(실측, 로컬 DB `tasks_status_check`) — 'todo'|'in-progress'|
+   * 'done' 3값만 허용(하이픈, 언더스코어 아님 — 처음엔 in_progress로 잘못 가정했다가 실
+   * INSERT 22P02 위반으로 발견). 그 외 값은 진행 중으로도 완료로도 안 보고 상태 낱말을
+   * 생략한다(지어내지 않음). */
   status: string;
 }
 
@@ -138,10 +140,12 @@ export interface WorkListGoalGroup {
 
 export interface WorkList {
   groups: WorkListGoalGroup[];
-  /** goals/stories/tasks/team-members 커서 hasMore 중 하나라도 true거나 null(모름)이면
-   * true(story #3844 AC1 — 「없다」 단정 금지, 안전 쪽으로 접는다). agent_runs·gates/inbox는
-   * BE 계약상 페이지네이션이 없는 org 스코프 소스라 partial 판정에 안 들어간다("기존
-   * GET /gates 관례 유지: 페이지네이션 없음" — gates.py list_gate_inbox 명시 계약). */
+  /** goals/stories/tasks 커서 hasMore 중 하나라도 true거나 null(모름)이면 true(story #3844
+   * AC1 — 「없다」 단정 금지, 안전 쪽으로 접는다). agent_runs·gates/inbox·team-members·
+   * hypotheses는 BE 계약상 페이지네이션 자체가 없는 소스라 partial 판정에 안 들어간다
+   * (team-members는 라이브 실측 2026-09-14 — list_team_members에 limit/cursor 파라미터가
+   * 아예 없다, 처음엔 규약 A 페이지 소스로 잘못 모델링해 실 데이터 0건인데도 "전부 불러오지
+   * 못했어요" 배너가 항상 뜨는 결함을 라이브 검증에서 발견·수정). */
   partial: boolean;
 }
 
@@ -159,7 +163,9 @@ export interface WorkListInput {
   agentRuns: WorkListAgentRunInput[];
   /** GET /api/gates/inbox?status=pending 전체(페이지네이션 없는 org 스코프 소스). */
   inbox: WorkListInboxItem[];
-  teamMembers: WorkListPageResult<WorkListTeamMemberInput>;
+  /** GET /api/team-members 전체(페이지네이션 없는 소스, list_team_members에 limit/cursor
+   * 파라미터 자체가 없음 — 라이브 실측). */
+  teamMembers: WorkListTeamMemberInput[];
   /** /api/visual-artifacts?story_id= 존재 확인 결과 — 있는 story_id만(칩은 "있을 때만"). */
   storyIdsWithArtifacts: ReadonlySet<string>;
   /** GET /api/hypotheses?project_id= 전체(페이지네이션 없는 project 스코프 소스). */
@@ -194,7 +200,7 @@ function lowRiskFromInboxItem(item: WorkListInboxItem | null): boolean {
 function deriveTaskState(task: WorkListTaskInput, inboxItem: WorkListInboxItem | null): WorkListRowState {
   if (inboxItem) return stateFromInboxItem(inboxItem);
   if (task.status === 'done') return 'done';
-  if (task.status === 'in_progress') return 'in_progress';
+  if (task.status === 'in-progress') return 'in_progress'; // DB 값은 하이픈, 파생 상태값은 기존 관례대로 언더스코어 유지
   return null;
 }
 
@@ -206,7 +212,7 @@ function deriveAgentRunState(run: WorkListAgentRunInput): WorkListRowState {
 
 export function deriveWorkList(input: WorkListInput): WorkList {
   const storyById = new Map(input.stories.items.map((s) => [s.id, s]));
-  const memberTypeById = new Map(input.teamMembers.items.map((m) => [m.id, m.type]));
+  const memberTypeById = new Map(input.teamMembers.map((m) => [m.id, m.type]));
 
   const storyGroups = new Map<string, WorkListStoryGroup>();
   const goalTotals = new Map<string, { done: number; total: number; assigned: number; delegated: number }>();
@@ -305,6 +311,6 @@ export function deriveWorkList(input: WorkListInput): WorkList {
 
   return {
     groups,
-    partial: isPartial(input.goals, input.stories, input.tasks, input.teamMembers),
+    partial: isPartial(input.goals, input.stories, input.tasks),
   };
 }

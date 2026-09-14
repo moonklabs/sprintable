@@ -12,7 +12,7 @@ function baseInput(overrides: Partial<WorkListInput> = {}): WorkListInput {
     tasks: page([]),
     agentRuns: [],
     inbox: [],
-    teamMembers: page([{ id: 'm-human', type: 'human', name: '사람' }, { id: 'm-agent', type: 'agent', name: '미르코' }]),
+    teamMembers: [{ id: 'm-human', type: 'human', name: '사람' }, { id: 'm-agent', type: 'agent', name: '미르코' }],
     storyIdsWithArtifacts: new Set<string>(),
     hypotheses: [],
     ...overrides,
@@ -50,7 +50,7 @@ describe('deriveWorkList — 행 상태: gates/inbox 우선, task.status 폴백'
     const result = deriveWorkList(baseInput({
       tasks: page([
         { id: 't-todo', story_id: 's1', assignee_id: null, title: 'todo', status: 'todo' },
-        { id: 't-doing', story_id: 's1', assignee_id: null, title: 'doing', status: 'in_progress' },
+        { id: 't-doing', story_id: 's1', assignee_id: null, title: 'doing', status: 'in-progress' },
         { id: 't-done', story_id: 's1', assignee_id: null, title: 'done', status: 'done' },
       ]),
     }));
@@ -108,10 +108,17 @@ describe('deriveWorkList — 행 상태: gates/inbox 우선, task.status 폴백'
 
   it('resolved(status!=pending) inbox 항목은 무시하고 task.status로 폴백', () => {
     const result = deriveWorkList(baseInput({
-      tasks: page([{ id: 't1', story_id: 's1', assignee_id: null, title: '할일1', status: 'in_progress' }]),
+      tasks: page([{ id: 't1', story_id: 's1', assignee_id: null, title: '할일1', status: 'in-progress' }]),
       inbox: [{ source: 'gate', id: 'gate1', work_item_id: 't1', work_item_type: 'task', status: 'approved', gate_type: 'merge', risk_grade: 'high' }],
     }));
     expect(result.groups[0].stories[0].rows[0].state).toBe('in_progress');
+  });
+
+  it('⭐DB CHECK 제약 실측 — task.status는 하이픈 in-progress(언더스코어 아님), 틀린 철자는 진행 중으로 안 잡는다', () => {
+    const result = deriveWorkList(baseInput({
+      tasks: page([{ id: 't1', story_id: 's1', assignee_id: null, title: '할일1', status: 'in_progress' }]),
+    }));
+    expect(result.groups[0].stories[0].rows[0].state).toBeNull();
   });
 
   it('task 자체엔 gate가 없지만 부모 story에 걸려있으면 그걸 따른다', () => {

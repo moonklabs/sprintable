@@ -94,4 +94,12 @@ describe('WorkListRowView', () => {
     await act(async () => { root.render(wrap(<WorkListRowView row={baseRow({ isDelegated: true, state: 'awaiting_approval' })} />)); });
     expect(container.querySelector('.bg-primary, .bg-success')).toBeNull();
   });
+
+  it('⭐라이브 렌더 실사고 재발방지 — 미위임(isDelegated=false) 행은 진행 중/완료여도 점을 안 찍는다', async () => {
+    await act(async () => { root.render(wrap(<WorkListRowView row={baseRow({ isDelegated: false, state: 'in_progress' })} />)); });
+    expect(container.querySelector('.bg-primary, .bg-success')).toBeNull();
+
+    await act(async () => { root.render(wrap(<WorkListRowView row={baseRow({ isDelegated: false, state: 'done' })} />)); });
+    expect(container.querySelector('.bg-primary, .bg-success')).toBeNull();
+  });
 });

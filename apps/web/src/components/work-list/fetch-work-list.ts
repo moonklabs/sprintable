@@ -16,8 +16,10 @@ import {
 /**
  * story #3844 — 7개 기존 route를 병렬로 모아 deriveWorkList에 먹인다(새 API 0).
  *
- * - goals/stories/tasks/team-members: 규약 A(camelCase meta) — parseCursorMeta로 읽는다.
- * - agent-runs: 페이지네이션 없음(실측, 2026-09-14) — 응답 배열 그대로.
+ * - goals/stories/tasks: 규약 A(camelCase meta) — parseCursorMeta로 읽는다.
+ * - agent-runs·team-members: 페이지네이션 없음(실측, 2026-09-14 — team-members는 처음
+ *   규약 A 소스로 잘못 모델링해 데이터 0건에도 partial 배너가 항상 뜨는 결함을 라이브
+ *   검증에서 발견·수정, derive-work-list.ts WorkList.partial 주석 참고) — 응답 배열 그대로.
  * - gates/inbox: 페이지네이션 없음(BE 명시 계약, gates.py list_gate_inbox 문서화) —
  *   status=pending만 서버에 필터 요청(행 상태 판정엔 pending만 의미 있음).
  * - visual-artifacts: story_id 미지정 호출 시 BE가 호출자 project로 자동 스코프해 project
@@ -56,13 +58,13 @@ async function fetchPage<T>(url: string, source: string): Promise<WorkListPageRe
 const PAGE_LIMIT = 100;
 
 export async function fetchWorkList(projectId: string): Promise<WorkList> {
-  const [goals, stories, tasks, agentRunsJson, inboxJson, teamMembers, artifactsJson, hypothesesJson] = await Promise.all([
+  const [goals, stories, tasks, agentRunsJson, inboxJson, teamMembersJson, artifactsJson, hypothesesJson] = await Promise.all([
     fetchPage<WorkListGoalInput>(`/api/goals?project_id=${projectId}&limit=${PAGE_LIMIT}`, '/api/goals'),
     fetchPage<WorkListStoryInput>(`/api/stories?project_id=${projectId}&limit=${PAGE_LIMIT}`, '/api/stories'),
     fetchPage<WorkListTaskInput>(`/api/tasks?project_id=${projectId}&limit=${PAGE_LIMIT}`, '/api/tasks'),
     fetchEnvelope<WorkListAgentRunInput[]>(`/api/agent-runs?project_id=${projectId}&limit=200`),
     fetchEnvelope<WorkListInboxItem[]>('/api/gates/inbox?status=pending'),
-    fetchPage<WorkListTeamMemberInput>('/api/team-members', '/api/team-members'),
+    fetchEnvelope<WorkListTeamMemberInput[]>('/api/team-members'),
     fetchEnvelope<Array<{ story_id: string | null }>>('/api/visual-artifacts'),
     fetchEnvelope<WorkListHypothesisInput[]>(`/api/hypotheses?project_id=${projectId}`),
   ]);
@@ -79,7 +81,7 @@ export async function fetchWorkList(projectId: string): Promise<WorkList> {
     tasks,
     agentRuns: Array.isArray(agentRunsJson.data) ? agentRunsJson.data : [],
     inbox: Array.isArray(inboxJson.data) ? inboxJson.data : [],
-    teamMembers,
+    teamMembers: Array.isArray(teamMembersJson.data) ? teamMembersJson.data : [],
     storyIdsWithArtifacts,
     hypotheses: Array.isArray(hypothesesJson.data) ? hypothesesJson.data : [],
   });
