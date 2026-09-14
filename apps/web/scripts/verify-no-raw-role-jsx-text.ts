@@ -23,6 +23,19 @@
  * `{member.role ? <span>...` 같은 조건부 렌더의 가드 조건 자체는 top-level 자식이 role
  * PropertyAccessExpression이 아니라 ConditionalExpression이라 마찬가지로 대상 밖(role이
  * 실제로 "그려지는" 안쪽 JsxExpression만 별도로 걸린다).
+ *
+ * story #3875(§⑤ 낱말 드리프트 감사, PO 확定 2026-09-14) — `status`·`activity_type` 축
+ * 추가. 실 사고: `story-detail-panel.tsx::formatActivityMessage`(활동 탭)가
+ * status_changed 케이스에서 `old_value`/`new_value`(canonical status slug)를 `t()` 없이
+ * 그대로 그려 「in-progress → in-review」가 라이브에 노출(선생님 경로: 스토리 패널 활동
+ * 탭) + default 케이스가 `activity_type`(내부 enum: created·status_changed 등)을 그대로
+ * 노출 — role 축과 같은 병(원시 내부 키가 t() 없이 사용자 표면에 샘).
+ *
+ * ⚠️`status`·`activity_type`은 `role`보다 훨씬 흔한 식별자 이름이라(HTTP status 코드,
+ * React.ReactNode 프롭 이름, 내부 fetch state 등) 순수 이름 매칭만으로는 오탐이 실제로
+ * 난다 — story #3875 실측(apps/web/src 전수)으로 17건을 찾아 각각 실 위반(스코프 밖 별
+ * 카드 후보)/구조적 오탐/범위 밖(설정 등 §⑤ 미감사 화면)으로 분류해 ALLOWLIST에 근거와
+ * 함께 등재했다(아래 ALLOWLIST 참고).
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
@@ -32,12 +45,16 @@ import ts from 'typescript';
 export interface RawRoleJsxRef {
   file: string;
   line: number;
+  /** story #3875 — 어느 축(role/status/activity_type)에 걸렸는지. */
+  field: string;
 }
 
-function isRawRoleExpression(expr: ts.Expression): boolean {
-  if (ts.isIdentifier(expr)) return expr.text === 'role';
-  if (ts.isPropertyAccessExpression(expr)) return expr.name.text === 'role';
-  return false;
+const WATCHED_FIELD_NAMES: ReadonlySet<string> = new Set(['role', 'status', 'activity_type']);
+
+function watchedRawFieldName(expr: ts.Expression): string | null {
+  if (ts.isIdentifier(expr)) return WATCHED_FIELD_NAMES.has(expr.text) ? expr.text : null;
+  if (ts.isPropertyAccessExpression(expr)) return WATCHED_FIELD_NAMES.has(expr.name.text) ? expr.name.text : null;
+  return null;
 }
 
 export function scanJsxFileContent(content: string, file: string): RawRoleJsxRef[] {
@@ -58,9 +75,10 @@ export function scanJsxFileContent(content: string, file: string): RawRoleJsxRef
   function checkChildren(children: ts.NodeArray<ts.JsxChild>): void {
     for (const child of children) {
       if (!ts.isJsxExpression(child) || !child.expression) continue;
-      if (isRawRoleExpression(child.expression)) {
+      const field = watchedRawFieldName(child.expression);
+      if (field !== null) {
         const line = sf.getLineAndCharacterOfPosition(child.getStart(sf)).line + 1;
-        refs.push({ file, line });
+        refs.push({ file, line, field });
       }
     }
   }
@@ -95,7 +113,46 @@ function walkTsxFiles(dir: string, out: string[]): void {
 // stage_metadata[stage].role` 워크플로 단계 담당자 라벨)은 story #3773이 `stageRoleLabel()`
 // 정본을 신설해 닫았다 — 이 가드가 스스로 RED로 잡아 알려준 대로 걷는다(죽은 ALLOWLIST
 // 항목 자가검출, 유나 확認).
-const ALLOWLIST: ReadonlySet<string> = new Set([]);
+//
+// story #3875 — status/activity_type 축 신설 뒤 apps/web/src 전수 실측(17건). 근거 3갈래:
+// (a) 구조적 오탐(진짜 원시 status 값이 아님) (b) §⑤ 미감사 화면(설정 등 오늘/일감/우패널/
+// 문서/스토리 패널 밖) (c) 실 위반이나 이 카드(story-detail-panel 활동 탭) 스코프 밖 — PO
+// 보고 후 후속 카드로 분리 예정, 이 PR 색 변경 0.
+const ALLOWLIST: ReadonlySet<string> = new Set([
+  // (a) 구조적 오탐 — ListRow의 status는 React.ReactNode 슬롯(호출부가 이미 렌더된 요소를
+  // 넘긴다), 원시 status 슬러그가 아니다. 이름만 같을 뿐 이 축이 잡으려는 클래스가 아니다.
+  'components/ui/list-row.tsx:44',
+  // (a) 구조적 오탐 — HTTP status 코드(숫자, file-viewer 에러 배너)다. 도메인 status enum이
+  // 아니라 번역 대상 자체가 아니다(§⑤ 낱말 표는 사용자 도메인 낱말만 다룬다).
+  'components/chat/file-viewer.tsx:203',
+  // (b) §⑤ 미감사 화면 — 설정/워크플로 실행 이력(기술 로그 표면, 오늘·일감·우패널·문서·
+  // 스토리 패널 밖). event_type도 같은 행에서 <code>로 원시 노출 중이라 이 표 전체가
+  // 개발자용 기술 로그 성격 — 별도 판단 필요, 이 카드 범위 밖.
+  'components/settings/workflow-execution-history-section.tsx:121',
+  // (b) §⑤ 미감사 화면 — 설정/워크플로 라인 에디터 버전 이력(기술 관리 화면), 상동.
+  'components/settings/workflow-line-editor-section.tsx:272',
+  // (c) 실 위반·스코프 밖 — story-detail-panel.tsx의 dependency 행(Blocked by/Blocking/
+  // Depends on/Depended by) mono 배지. 같은 행의 영문 ASCII 라벨과 짝인 자리라 story #3876
+  // (순 ASCII 라벨 9곳)이 다루는 게 자연스럽다 — 이 카드(#3875, 활동 탭)는 손대지 않는다.
+  'components/kanban/story-detail-panel.tsx:2008',
+  'components/kanban/story-detail-panel.tsx:2029',
+  'components/kanban/story-detail-panel.tsx:2050',
+  'components/kanban/story-detail-panel.tsx:2071',
+  // (c) 실 위반·스코프 밖 — 목표/스프린트/회고/하루체크인 화면(§⑤ 감사 대상 "일감" 5탭
+  // 자체이나, 이 카드의 AC는 스토리 패널 활동 탭 하나로 한정) 각 화면의 story.status 원시
+  // 렌더. PO에게 별도 카드 후보로 보고(이 PR 색 변경 0).
+  'app/(authenticated)/[ws]/[proj]/goals/goals-client.tsx:883',
+  'app/(authenticated)/[ws]/[proj]/sprints/sprints-client.tsx:772',
+  'app/(authenticated)/[ws]/[proj]/sprints/sprints-client.tsx:812',
+  'app/(authenticated)/[ws]/[proj]/standup/standup-client.tsx:553',
+  'app/(authenticated)/[ws]/[proj]/standup/standup-client.tsx:773',
+  'components/standup/standup-feedback-dialog.tsx:234',
+  // (c) 실 위반·스코프 밖 — 가설(hypothesis) 카드의 연결 미리보기 status. 「일감(맥락 패널)」
+  // 흡수 축이지 스토리 패널 활동 탭이 아니다 — 별도 카드 후보로 보고.
+  'components/epics/hypothesis-declaration-card.tsx:334',
+  'components/sprints/hypothesis-declaration-card.tsx:335',
+  'components/loops/loop-create-dialog.tsx:524',
+]);
 
 export interface ScanRepoResult {
   refs: RawRoleJsxRef[];
@@ -140,7 +197,7 @@ function main(): number {
   const { refs, fileCount, allowlistHit } = scanRepo(SRC_ROOT);
 
   console.log(
-    `[가드] 「원시 role JSX 텍스트」 스캔 — .tsx ${fileCount}개 · 위반 ${refs.length}건(면제 ${allowlistHit.size}/${ALLOWLIST.size}).`,
+    `[가드] 「원시 role/status/activity_type JSX 텍스트」 스캔 — .tsx ${fileCount}개 · 위반 ${refs.length}건(면제 ${allowlistHit.size}/${ALLOWLIST.size}).`,
   );
 
   const dead = [...ALLOWLIST].filter((k) => !allowlistHit.has(k));
@@ -151,17 +208,20 @@ function main(): number {
   }
 
   if (refs.length > 0) {
-    console.error('\nFAIL: 원시 role 값이 t() 없이 JSX 텍스트에 그려짐:');
-    for (const r of refs) console.error(`  ${r.file}:${r.line}`);
+    console.error('\nFAIL: 원시 role/status/activity_type 값이 t() 없이 JSX 텍스트에 그려짐:');
+    for (const r of refs) console.error(`  ${r.file}:${r.line} (${r.field})`);
     console.error(
       '\n→ org 역할(owner/admin/member)은 `orgRoleLabel()`(@/lib/org-member-role), ' +
         'participation/trust 역할(implementation 등)은 `resolveRoleLabel()`' +
-        '(@/app/(authenticated)/organization/trust/trust-utils)로 감쌀 것(story #3770).',
+        '(@/app/(authenticated)/organization/trust/trust-utils)로 감쌀 것(story #3770). ' +
+        'status는 `getStatusLabel()` prop 또는 `statusKeyMap`→`t()` 폴백(story #3875, ' +
+        'story-detail-panel.tsx의 statusLabel 계산 관례 재사용), activity_type 등 내부 enum은 ' +
+        '중립 라벨 1개로 감쌀 것 — 원시 enum 값을 그대로 그리지 말 것.',
     );
     return 1;
   }
 
-  console.log('\nOK: 원시 role JSX 텍스트 0건(ALLOWLIST 근거 있는 예외 제외).');
+  console.log('\nOK: 원시 role/status/activity_type JSX 텍스트 0건(ALLOWLIST 근거 있는 예외 제외).');
   return 0;
 }
 
