@@ -223,7 +223,7 @@ export default function ConversationPage() {
     );
   }
 
-  // story #3776(1층B) — "채팅"(폴백 제목), chats ns의 기존 title 키 재사용.
+  // story #3776(1층B) — "대화"(폴백 제목), chats ns의 기존 title 키 재사용.
   const headerTitle = meta
     ? formatHeaderTitle(meta, currentTeamMemberId, t, tc)
     : (meta === null ? t('title') : '로딩 중…');
@@ -268,7 +268,7 @@ export default function ConversationPage() {
               className="flex flex-shrink-0 items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
             >
               <ChevronLeft className="h-4 w-4" />
-              {/* story #3776(1층B) — "채팅", chats ns의 기존 title 키 재사용(위 225행과 동형). */}
+              {/* story #3776(1층B) — "대화", chats ns의 기존 title 키 재사용(위 225행과 동형). */}
               <span className="lg:hidden">{t('title')}</span>
             </button>
             {headerAvatarParticipant && (

@@ -83,7 +83,7 @@ describe('ChatsPage — story #3788(B-③) 세 갈래', () => {
     expect(container.textContent).not.toContain(koMessages.chats.noConversations);
   });
 
-  it('구역 이름("채팅")을 EmptyState 제목에 재사용하지 않는다(TopBarSlot은 별도 슬롯 — 이 트리엔 렌더 안 됨)', async () => {
+  it('구역 이름("대화")을 EmptyState 제목에 재사용하지 않는다(TopBarSlot은 별도 슬롯 — 이 트리엔 렌더 안 됨)', async () => {
     await act(async () => { root.render(renderPage(false, 3)); });
     const emptyStateTitle = container.querySelector('h3');
     expect(emptyStateTitle?.textContent).not.toBe(koMessages.chats.title);

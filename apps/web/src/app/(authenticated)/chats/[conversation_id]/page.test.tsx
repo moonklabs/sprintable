@@ -100,7 +100,7 @@ describe('ConversationPage — 뒤로가기 복귀 (story #2168 PR-② AC④)', 
     }));
     await mount();
 
-    const backBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('채팅'));
+    const backBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('대화'));
     await act(async () => { backBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
     expect(replaceMock).toHaveBeenCalledWith(`/chats?p=${FROM_PROJECT_UUID}`);
@@ -111,7 +111,7 @@ describe('ConversationPage — 뒤로가기 복귀 (story #2168 PR-② AC④)', 
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ title: null, type: 'dm', participants: [] }) })));
     await mount();
 
-    const backBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('채팅'));
+    const backBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('대화'));
     await act(async () => { backBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
     expect(replaceMock).toHaveBeenCalledWith('/chats');
@@ -121,7 +121,7 @@ describe('ConversationPage — 뒤로가기 복귀 (story #2168 PR-② AC④)', 
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ title: null, type: 'dm', participants: [] }) })));
     await mount();
 
-    const backBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('채팅'));
+    const backBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('대화'));
     await act(async () => { backBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
     expect(replaceMock).toHaveBeenCalledWith('/chats');
@@ -218,7 +218,7 @@ describe('ConversationPage — 헤더 아바타(story #2968)', () => {
     }));
     await mount();
 
-    const backBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('채팅'));
+    const backBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('대화'));
     const titleRoot = backBtn?.parentElement;
     expect(titleRoot?.className).toContain('py-1');
   });
