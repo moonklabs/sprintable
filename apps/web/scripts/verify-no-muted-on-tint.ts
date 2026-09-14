@@ -61,6 +61,16 @@ const TINT_FAMILY_BG_RE = new RegExp(
 const TINT_FAMILY_BG_RE_G = new RegExp(TINT_FAMILY_BG_RE.source, 'g');
 const MUTED_TEXT_RE = /(?<![\w-])text-muted-foreground(?![\w-])/;
 
+// story #3865(AC1) — kanban-column.tsx 실측(globals.css 그라운딩): 이 5개 배경 토큰은 알파
+// 0(완전 불투명) 솔리드 색이다 — `--card: var(--proof-panel)`·`--popover: var(--proof-panel)`·
+// `--sidebar: var(--proof-panel)`·`--background: var(--proof-bg)`·`--proof-panel` 자체가
+// 라이트/다크 둘 다 `#RRGGBB` 리터럴(알파 채널 없음). 이런 불투명 배경을 가진 요소는 그
+// 위에 실제로 렌더되는 것이 그 배경색이지, 조상에서 물려받은 tint가 아니다(비쳐 보이지
+// 않는다) — 조상 tint 전파를 이 요소에서 끊는다. `/숫자` 알파 접미사가 붙으면(`bg-card/50`류)
+// 더 이상 완전 불투명이 아니므로 매치 대상에서 제외(음성 lookahead에 `/` 포함).
+const OPAQUE_BG_CLASSES = ['card', 'popover', 'sidebar', 'background', 'proof-panel'] as const;
+const OPAQUE_BG_RE = new RegExp(`(?<![\\w:-])bg-(?:${OPAQUE_BG_CLASSES.join('|')})(?![\\w/-])`);
+
 /** varName → 그 변수가 가질 수 있는 class 후보 문자열 목록(story #3850 — 객체 맵/삼항/
  * 템플릿 리터럴을 거쳐 JSX에 닿는 tint를 추적하기 위한 이름 해석 표). 빈 표가 기본값 —
  * 기존 호출부(바인딩 모르는 자리)는 동작 무변. */
@@ -125,6 +135,107 @@ function classNameStringsOf(opening: ts.JsxOpeningLikeElement, bindings: ClassBi
     }
   }
   return [];
+}
+
+/** story #3865(AC1, PO 조건②·2026-09-14 11:04Z) — 「같은 삼항/바인딩의 두 분기끼리만
+ * 상호배타, 서로 다른(독립) 축끼리는 곱집합(동시 적용 가능·fail-closed)」을 표현하는
+ * 구조. `always`는 무조건 적용되는 정적 조각들(템플릿 head/literal 등). `groups`는 서로
+ * 독립인 "선택 축" 목록 — 같은 배열(같은 그룹) 안 후보들은 정확히 하나만 런타임에
+ * 선택되지만(삼항 한 개·바인딩 조회 한 개가 곧 그룹 하나), 서로 다른 그룹은 각자
+ * 독립적으로 결정되므로 동시에 같이 적용될 수 있다(예: `cn(condA?'a-tint':'x',
+ * condB?'muted':'y')` — condA·condB가 둘 다 참이면 두 그룹의 후보가 동시에 붙는다). */
+interface ClassGroups { always: string[]; groups: string[][] }
+
+function classGroupsFromExpr(e: ts.Expression, bindings: ClassBindings): ClassGroups {
+  if (ts.isStringLiteral(e) || ts.isNoSubstitutionTemplateLiteral(e)) return { always: [e.text], groups: [] };
+  if (ts.isParenthesizedExpression(e)) return classGroupsFromExpr(e.expression, bindings);
+  if (ts.isTemplateExpression(e)) {
+    const always: string[] = [e.head.text];
+    const groups: string[][] = [];
+    for (const sp of e.templateSpans) {
+      always.push(sp.literal.text);
+      // 각 치환식 «전체»가 독립 축 하나 — 내부가 삼항/바인딩으로 아무리 복잡해도 그
+      // 전체가 최종적으로 문자열 하나로 귀결되므로, classStringsFromExpr(기존 flat
+      // 재귀)로 그 축의 후보 전부를 모아 그룹 하나에 싣는다. 서로 다른 치환식(축)끼리는
+      // 이 함수가 별도 그룹으로 쌓으므로 곱집합으로 취급된다(PO 조건②).
+      const candidates = classStringsFromExpr(sp.expression, bindings);
+      if (candidates.length > 0) groups.push(candidates);
+    }
+    return { always, groups };
+  }
+  if (ts.isCallExpression(e) && /(?:^|\.)cn$/.test(e.expression.getText())) {
+    // cn()의 인자들은 서로 독립이다(PO 조건②) — 인자 하나가 그 자체로 삼항/바인딩이면
+    // classGroupsFromExpr 재귀가 그 축을 그룹 하나로 돌려주고, 여러 인자에 걸쳐 그 그룹들을
+    // 그대로 이어 붙인다(인자 간 상호배타 가정 0 — 각자 독립 조건일 수 있으므로).
+    const always: string[] = [];
+    const groups: string[][] = [];
+    for (const a of e.arguments) {
+      if (!ts.isExpression(a)) continue;
+      const sub = classGroupsFromExpr(a, bindings);
+      always.push(...sub.always);
+      groups.push(...sub.groups);
+    }
+    return { always, groups };
+  }
+  if (ts.isConditionalExpression(e)) {
+    // 삼항 전체(중첩 포함)=하나의 배타적 선택 축 — 양 분기의 후보 전부(내부가 아무리
+    // 깊어도 최종 문자열은 하나)를 그룹 하나에 모은다.
+    const candidates = [...classStringsFromExpr(e.whenTrue, bindings), ...classStringsFromExpr(e.whenFalse, bindings)];
+    return { always: [], groups: candidates.length > 0 ? [candidates] : [] };
+  }
+  if (
+    ts.isBinaryExpression(e) &&
+    (e.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken || e.operatorToken.kind === ts.SyntaxKind.BarBarToken)
+  ) {
+    const candidates = [...classStringsFromExpr(e.left, bindings), ...classStringsFromExpr(e.right, bindings)];
+    return { always: [], groups: candidates.length > 0 ? [candidates] : [] };
+  }
+  if (ts.isIdentifier(e) || ts.isPropertyAccessExpression(e) || ts.isElementAccessExpression(e)) {
+    // 바인딩(객체 맵 등) 조회 전체 = 하나의 배타적 선택 축(그 변수는 런타임에 값 하나로
+    // 확정) — 기존 flat 해석기를 재사용해 그 축의 후보 전부를 그룹 하나에 싣는다.
+    const candidates = classStringsFromExpr(e, bindings);
+    return { always: [], groups: candidates.length > 0 ? [candidates] : [] };
+  }
+  return { always: [], groups: [] };
+}
+
+function classNameGroupsOf(opening: ts.JsxOpeningLikeElement, bindings: ClassBindings = NO_BINDINGS): ClassGroups {
+  for (const a of opening.attributes.properties) {
+    if (ts.isJsxAttribute(a) && a.name.getText() === 'className' && a.initializer) {
+      if (ts.isStringLiteral(a.initializer)) return { always: [a.initializer.text], groups: [] };
+      if (ts.isJsxExpression(a.initializer) && a.initializer.expression) {
+        return classGroupsFromExpr(a.initializer.expression, bindings);
+      }
+    }
+  }
+  return { always: [], groups: [] };
+}
+
+/** story #3865(AC1) — 같은 요소가 스스로 tint를 선언한 경우(ownFamily), muted와의 공존을
+ * "합친 문자열 전체"가 아니라 이 그룹 구조로 정밀 판정한다: 같은 그룹(같은 삼항/바인딩)의
+ * 같은 후보 문자열 안에 tint+muted가 함께 있으면 위반(실제로 같이 렌더될 수 있는 조합).
+ * 서로 다른 두 그룹(독립 축)이 각각 tint·muted를 가지면 — 한쪽만이 아니라 둘 다 참일 수
+ * 있으므로(fail-closed) — 이것도 위반으로 본다(PO 조건②, 2026-09-14 11:04Z). always(무조건
+ * 적용되는 정적 부분)에 있는 tint/muted는 모든 그룹과 무조건 동시 적용되므로 즉시 위반. */
+function sameElementCoOccurs(g: ClassGroups): boolean {
+  const alwaysHasTint = g.always.some((s) => TINT_FAMILY_BG_RE.test(s));
+  const alwaysHasMuted = g.always.some((s) => MUTED_TEXT_RE.test(s));
+  if (alwaysHasTint && alwaysHasMuted) return true;
+
+  const groupHasTint = g.groups.map((grp) => grp.some((s) => TINT_FAMILY_BG_RE.test(s)));
+  const groupHasMuted = g.groups.map((grp) => grp.some((s) => MUTED_TEXT_RE.test(s)));
+  const groupHasBoth = g.groups.map((grp) => grp.some((s) => TINT_FAMILY_BG_RE.test(s) && MUTED_TEXT_RE.test(s)));
+
+  if (groupHasBoth.some(Boolean)) return true; // 같은 그룹의 같은 후보 문자열 안 공존
+  if (alwaysHasTint && groupHasMuted.some(Boolean)) return true;
+  if (alwaysHasMuted && groupHasTint.some(Boolean)) return true;
+
+  for (let i = 0; i < g.groups.length; i++) {
+    for (let j = 0; j < g.groups.length; j++) {
+      if (i !== j && groupHasTint[i] && groupHasMuted[j]) return true; // 서로 다른 독립 축의 곱집합
+    }
+  }
+  return false;
 }
 
 /** 한 JSX 요소의 (props 이름 → 리터럴 문자열 값) — variant="info" 같은 것만(동적 값은
@@ -534,6 +645,91 @@ export function scanTreeForTintCompleteness(srcRoot: string, uiDir: string): Tre
   return analyzeTreeForTintCompleteness(files, (file) => file.startsWith(`${uiDirRel}/`));
 }
 
+/** story #3865(AC1) — 한 파일 안에서 "최상위 함수/화살표 컴포넌트의 반환 JSX 서브트리
+ * «어딘가»가 완전 불투명 배경(OPAQUE_BG_RE, 리터럴 className) 또는 이미 opaque로 알려진
+ * 컴포넌트 태그(priorOpaque — 다른 파일에서 먼저 발견된 것, 고정점 반복의 이전 라운드
+ * 결과)를 만난다"를 찾아 컴포넌트 이름 집합으로 돌려준다.
+ *
+ * kanban-column.tsx가 렌더하는 `<StoryCard>`는 자기 자신의 루트 className에 불투명 배경이
+ * 없다(`<div className="group relative cursor-pointer transition">`) — 실제 불투명 배경은
+ * 그 안에서 렌더하는 `<ProofCapsule>`(다른 파일)의 루트에 있다. 그래서 "루트 하나만" 보지
+ * 않고 반환 서브트리 전체를 훑되, priorOpaque로 이미 알려진 이름을 만나면 그 전체 컴포넌트
+ * (StoryCard)도 opaque로 표시한다 — buildOpaqueComponentSet이 이 함수를 빈 집합→고정점까지
+ * 반복 호출해 ProofCapsule(1라운드)→StoryCard(2라운드)처럼 여러 단 합성을 따라간다.
+ *
+ * ⚠️정밀도 한계(의도적, 안전 쪽 과근사) — 반환 서브트리 "어딘가"에 불투명 지점이 있으면
+ * 컴포넌트 전체를 opaque로 본다. 한 컴포넌트가 불투명 영역과 비-불투명 영역을 형제로 함께
+ * 갖는 드문 경우 그 비-불투명 쪽의 실 위반을 놓칠 수 있다 — 이 가드의 다른 축(예: `&&` 가드
+ * 완전성 스킵)과 같은 결의 트레이드오프, kanban-column.tsx 실사례(StoryCard=ProofCapsule
+ * 단일 컨텐츠)에서는 해당 안 됨. forwardRef/일반 함수 선언·화살표 함수(블록·단일 표현식
+ * 바디) 전부 커버. */
+export function findOpaqueRootComponents(content: string, file: string, priorOpaque: ReadonlySet<string> = new Set()): Set<string> {
+  const sf = ts.createSourceFile(file, content, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const names = new Set<string>();
+
+  function subtreeIsOpaque(body: ts.Node): boolean {
+    let found = false;
+    function visit(n: ts.Node): void {
+      if (found) return;
+      let opening: ts.JsxOpeningLikeElement | null = null;
+      if (ts.isJsxElement(n)) opening = n.openingElement;
+      else if (ts.isJsxSelfClosingElement(n)) opening = n;
+      if (opening) {
+        const cls = classNameStringsOf(opening, NO_BINDINGS).join(' ');
+        if (OPAQUE_BG_RE.test(cls) || priorOpaque.has(opening.tagName.getText())) { found = true; return; }
+      }
+      n.forEachChild(visit);
+    }
+    visit(body);
+    return found;
+  }
+
+  function walk(node: ts.Node): void {
+    if (ts.isFunctionDeclaration(node) && node.name && /^[A-Z]/.test(node.name.text) && node.body) {
+      if (subtreeIsOpaque(node.body)) names.add(node.name.text);
+    }
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && /^[A-Z]/.test(node.name.text) && node.initializer) {
+      let init: ts.Expression = node.initializer;
+      // forwardRef((props, ref) => ...)류 — 마지막 인자가 컴포넌트 본체인 관용구 1단만 벗긴다.
+      if (ts.isCallExpression(init) && init.arguments.length > 0) {
+        const last = init.arguments[init.arguments.length - 1];
+        if (last && (ts.isArrowFunction(last) || ts.isFunctionExpression(last))) init = last;
+      }
+      if ((ts.isArrowFunction(init) || ts.isFunctionExpression(init)) && subtreeIsOpaque(init.body)) {
+        names.add(node.name.text);
+      }
+    }
+    node.forEachChild(walk);
+  }
+  walk(sf);
+  return names;
+}
+
+/** findOpaqueRootComponents를 트리 전체(components/ 한정 없이 srcRoot 전체 — StoryCard는
+ * components/kanban/, ProofCapsule은 components/proof-capsule/처럼 어디에나 있을 수 있다)로
+ * 확장하고, StoryCard→ProofCapsule 같은 다단 합성을 따라가도록 고정점까지 반복한다(집합이
+ * 더 안 늘면 종료 — 상한 8라운드로 fail-safe, 실전 합성 깊이는 통상 2~3단). */
+export function buildOpaqueComponentSet(srcRoot: string): Set<string> {
+  const files: string[] = [];
+  walkDir(srcRoot, files);
+  const fileContents = files.map((abs) => ({
+    rel: path.relative(srcRoot, abs).split(path.sep).join('/'),
+    content: readFileSync(abs, 'utf8'),
+  }));
+
+  let names = new Set<string>();
+  const MAX_ROUNDS = 8;
+  for (let round = 0; round < MAX_ROUNDS; round++) {
+    const next = new Set(names);
+    for (const { rel, content } of fileContents) {
+      for (const n of findOpaqueRootComponents(content, rel, names)) next.add(n);
+    }
+    if (next.size === names.size) break; // 고정점 도달(더 안 늘어남)
+    names = next;
+  }
+  return names;
+}
+
 // ── JSX 스캔(조상 pale-bg 추적) ──────────────────────────────────────────────────
 
 export interface Violation { file: string; line: number; family: TintFamily; className: string; }
@@ -546,8 +742,17 @@ export function violationKey(v: Pick<Violation, 'file' | 'family'>): string {
  * variant로만 tint가 나오는 컴포넌트 경계도 리터럴 `bg-info-tint` 조상과 동일하게 본다.
  * story #3850(AC1) — 같은 파일 안 객체 맵/로컬 삼항·`??`/`||` 바인딩(extractLocalTintBindings)도
  * className 해석에 함께 쓴다(`${colClass}`·`statusColor.dot`처럼 리터럴이 아닌 참조가 실제로
- * tint 배경을 끌어오는 자리를 조상으로 인식) — kanban-column.tsx류 실 소비 사례. */
-export function scanContent(content: string, file: string, componentMap?: ComponentTintMap): Violation[] {
+ * tint 배경을 끌어오는 자리를 조상으로 인식) — kanban-column.tsx류 실 소비 사례.
+ * story #3865(AC1) — opaqueComponents가 주어지면(buildOpaqueComponentSet), `<StoryCard>`처럼
+ * 그 자신은 불투명 배경 className이 없어도 내부(다른 파일)에서 완전 불투명 배경을 입는
+ * 것으로 알려진 컴포넌트 경계에서 조상 tint 전파를 끊는다(불투명 배경 위엔 tint가 비쳐
+ * 보이지 않는다). */
+export function scanContent(
+  content: string,
+  file: string,
+  componentMap?: ComponentTintMap,
+  opaqueComponents?: ReadonlySet<string>,
+): Violation[] {
   const sf = ts.createSourceFile(file, content, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const { bindings } = extractLocalTintBindings(sf);
   const violations: Violation[] = [];
@@ -565,6 +770,12 @@ export function scanContent(content: string, file: string, componentMap?: Compon
     return null;
   }
 
+  function isOpaqueComponentBoundary(opening: ts.JsxOpeningLikeElement): boolean {
+    if (!opaqueComponents) return false;
+    const tag = opening.tagName.getText();
+    return opaqueComponents.has(tag);
+  }
+
   function walk(node: ts.Node, ancestorFamily: TintFamily | null): void {
     let opening: ts.JsxOpeningLikeElement | null = null;
     let children: ts.NodeArray<ts.JsxChild> | null = null;
@@ -572,15 +783,36 @@ export function scanContent(content: string, file: string, componentMap?: Compon
     else if (ts.isJsxSelfClosingElement(node)) { opening = node; }
 
     if (opening) {
-      const cls = classNameStringsOf(opening, bindings).join(' ');
+      const parts = classNameStringsOf(opening, bindings);
+      const cls = parts.join(' ');
       const bgMatch = cls.match(TINT_FAMILY_BG_RE);
       // 같은 요소가 새 tint를 도입하면(같은 요소·직계/深 자식 둘 다 커버) 그 순간부터
       // «유효 조상»을 그 family로 갱신 — 같은 요소 안 bg+text 공존(같은 요소 케이스)도
       // 아래 elementFamily 판정으로 함께 잡힌다. 리터럴 클래스가 없으면 컴포넌트 지도
       // (예: <Alert variant="info">)를 본다 — 카디르 보강(2026-09-14).
-      const elementFamily: TintFamily | null =
-        (bgMatch?.[1] as TintFamily | undefined) ?? familyFromComponent(opening) ?? ancestorFamily;
-      if (elementFamily && MUTED_TEXT_RE.test(cls)) {
+      const ownFamily = (bgMatch?.[1] as TintFamily | undefined) ?? familyFromComponent(opening);
+      // story #3865(AC1) — 이 요소 자신이 tint를 도입하지 않았는데 완전 불투명 배경
+      // (OPAQUE_BG_RE, 리터럴 className) 또는 불투명 배경을 입는 것으로 알려진 컴포넌트
+      // 경계(opaqueComponents, 다른 파일의 컴포넌트 루트)를 만나면, 그 위에 실제로 보이는
+      // 것은 이 불투명색이지 조상에서 물려받은 tint가 아니다(비쳐 보이지 않음) — 물려받은
+      // ancestorFamily를 여기서 끊는다(kanban-column.tsx의 StoryCard→ProofCapsule
+      // bg-proof-panel류 실사례).
+      const breaksOpaque = OPAQUE_BG_RE.test(cls) || isOpaqueComponentBoundary(opening);
+      const elementFamily: TintFamily | null = ownFamily ?? (breaksOpaque ? null : ancestorFamily);
+      // story #3865(AC1, doc-gate-section.tsx AUDIT_META 실사례·PO 조건②) — ownFamily가
+      // "이 요소 자신의" 선언(리터럴 또는 바인딩 해석)에서 나온 경우, muted 공존은
+      // sameElementCoOccurs(그룹 구조 — 같은 삼항/바인딩끼리만 상호배타, 서로 다른 독립
+      // 축은 곱집합)로 정밀 판정한다. 바인딩(예: am.dot)이 서로 배타적인 여러 후보를 가질
+      // 때(런타임엔 한 후보만 선택됨), 안전한 후보(bg-muted+text-muted-foreground)의
+      // 텍스트가 다른 후보의 tint와 «같은 그룹 안»에서 우연히 공존 판정되는 것은 막되,
+      // 서로 다른 두 개의 독립 조건(예: cn(condA?tint:x, condB?muted:y))은 여전히 위반으로
+      // 잡는다(fail-closed). ancestorFamily에서 물려받은 경우(ownFamily 없음)는 이 요소
+      // 자신엔 tint가 없고 조상에만 있으므로(다른 DOM 노드) 기존처럼 어디든 muted가 있으면
+      // 위반 — co-location 요구가 의미 없다(비교 대상 tint 자체가 이 요소의 cls 안에 없다).
+      const sameElementMuted = ownFamily
+        ? sameElementCoOccurs(classNameGroupsOf(opening, bindings))
+        : MUTED_TEXT_RE.test(cls);
+      if (elementFamily && sameElementMuted) {
         const line = sf.getLineAndCharacterOfPosition(opening.getStart(sf)).line + 1;
         violations.push({ file, line, family: elementFamily, className: cls });
       }
@@ -607,10 +839,13 @@ export function scanRepo(srcRoot: string, componentMap: ComponentTintMap): Viola
   if (files.length < MIN_EXPECTED_FILES) {
     throw new Error(`FAIL: 검사 대상 .tsx가 ${files.length}개뿐(srcRoot=${srcRoot}) — 가드가 헛돈다.`);
   }
+  // story #3865(AC1) — 불투명-루트 컴포넌트 지도도 한 번만 만들어 전 파일 스캔에 공유(cva
+  // 컴포넌트 지도와 동형 관례).
+  const opaqueComponents = buildOpaqueComponentSet(srcRoot);
   const violations: Violation[] = [];
   for (const abs of files) {
     const rel = path.relative(srcRoot, abs).split(path.sep).join('/');
-    violations.push(...scanContent(readFileSync(abs, 'utf8'), rel, componentMap));
+    violations.push(...scanContent(readFileSync(abs, 'utf8'), rel, componentMap, opaqueComponents));
   }
   return violations;
 }
@@ -632,20 +867,33 @@ export function countViolations(violations: Violation[]): Map<string, number> {
 export const GRANDFATHER_BASELINE = new Map<string, number>([
   ['app/(authenticated)/[ws]/[proj]/sprints/sprints-client.tsx::muted-on-info-tint', 1],
   ['app/(authenticated)/[ws]/[proj]/standup/standup-client.tsx::muted-on-destructive-tint', 1],
-  ['app/(authenticated)/content/channel-posts/[draftId]/page.tsx::muted-on-destructive-tint', 2],
-  ['app/(authenticated)/organization/workforce/recruiter/recruiter-client.tsx::muted-on-info-tint', 1],
+  // story #3865(AC1·조건①②, PO 확定 2026-09-14 11:04Z) — 같은 요소 tint+muted 공존 판정을
+  // "합친 문자열 전체"에서 "그룹 단위"(같은 삼항/바인딩의 분기끼리만 상호배타, 독립 축은
+  // 곱집합 유지)로 정밀화한 뒤 develop HEAD 재스캔에서 stale로 드러난 8곳 — 전부 실 파일
+  // 대조로 "삼항/바인딩 두 분기가 각각 tint·muted를 갖지만 런타임엔 한쪽만 선택돼 실제
+  // 공존 0"인 동일 클래스로 확인(아래 각 줄 근거, PR 본문에 표로도 정리). recruiter-
+  // client.tsx muted-on-info-tint 1건은 별도로 불투명 배경 규칙(OPAQUE_BG_RE·
+  // buildOpaqueComponentSet) 신설로도 걷혔다(그 자리는 opaque 컴포넌트 경계 안).
+  //
+  // channel-posts/[draftId]/page.tsx — 실측: destructive-tint(에러 배너류)와 muted-
+  // foreground(기본 상태 캡션류)가 같은 조건 분기의 서로 다른 값이라 동시 렌더 0.
+  // 제거만·색 변경 0(이 스토리 스코프 밖 화면, 코드 무접촉).
   ['app/(authenticated)/organization/workforce/recruiter/recruiter-client.tsx::muted-on-success-tint', 1],
   ['app/(authenticated)/organization/workforce/recruiter/recruiter-client.tsx::muted-on-warning-tint', 2],
-  ['components/agents/access-matrix-tab.tsx::muted-on-success-tint', 1],
+  // access-matrix-tab.tsx(232행) — `granted ? 'border-success/40 bg-success-tint text-success…'
+  // : 'border-border text-muted-foreground…'`(cn() 삼항 한 개) — granted가 참/거짓 중
+  // 정확히 하나만 골라 tint·muted가 같은 시점에 같이 안 붙는다(실 파일 대조, PR 본문 근거
+  // 줄). 제거만·색 변경 0(스코프 밖, 코드 무접촉).
   ['components/ai/ai-generation-loading.tsx::muted-on-info-tint', 4],
   // 카디르 QA 보강(2026-09-14 05:30Z, cva variant 컴포넌트 경계 대응) 뒤 새로 보이게 된 자리 —
   // <Alert variant="destructive">(리터럴 클래스 아닌 cva 경계) 안 text-muted-foreground 5곳씩.
   ['components/content/api-usage-budget-exceeded-banner.tsx::muted-on-destructive-tint', 5],
   ['components/content/generation-budget-exceeded-banner.tsx::muted-on-destructive-tint', 5],
-  // story #3850 착지(객체 맵/삼항 축 신설) 뒤 2건으로 증가 — 기존 1건(리터럴 138행)은 그대로,
-  // 새로 잡힌 1건은 객체 맵 축(btn = {...}[fallback], 102행 notifying.cls가 조상으로 인식된
-  // 서브트리 안 muted 텍스트). AC2 "새로 드러나는 실 위반은 목록째 카드에·오탐 처리 금지".
-  ['components/cage/stuck-handoff-section.tsx::muted-on-destructive-tint', 2],
+  // story #3865(AC1 정밀화 뒤 2→1) — 걷힌 1건(102행 notifying.cls 객체맵 축)은 doc-gate-
+  // section류와 동형 오탐(그룹 정밀화로 해소). 남은 1건(138-141행) — bg-destructive-tint
+  // literal div(withdraw==='confirming') 안 Cancel 버튼이 text-muted-foreground — 실 위반
+  // 확인(조상 상속 케이스, 그룹 무관). 별 카드 기재 예정·이 PR 색 변경 0.
+  ['components/cage/stuck-handoff-section.tsx::muted-on-destructive-tint', 1],
   ['components/chat/command-hint-notice.tsx::muted-on-info-tint', 1],
   ['components/chat/hitl-approval-card.tsx::muted-on-warning-tint', 3],
   ['components/chat/reference-drop-notice.tsx::muted-on-warning-tint', 2],
@@ -655,38 +903,41 @@ export const GRANDFATHER_BASELINE = new Map<string, number>([
   ['components/hypotheses/hypothesis-verdict-card.tsx::muted-on-success-tint', 5],
   ['components/loops/context-pack-panel.tsx::muted-on-info-tint', 1],
   ['components/retro/sprint-close-cockpit.tsx::muted-on-info-tint', 3],
-  ['components/settings/agent-project-access-section.tsx::muted-on-success-tint', 1],
+  // agent-project-access-section.tsx — 삼항/바인딩 두 분기가 각각 tint·muted를 가져 런타임
+  // 공존 0(실 파일 대조). 제거만·색 변경 0(스코프 밖, 코드 무접촉).
   ['components/sprints/hypothesis-declaration-card.tsx::muted-on-info-tint', 1],
   ['components/sprints/hypothesis-declaration-section.tsx::muted-on-info-tint', 1],
 
   // story #3850(AC2, 2026-09-14) — 객체 맵/삼항·`??`/`||` 로컬 바인딩 축(kanban-column.tsx
   // STATUS_COLOR·colClass류)을 조상 추적에 연결한 뒤 develop HEAD 재스캔에서 새로 드러난
-  // 자리(이전엔 raw 정규식이 식별자·프로퍼티 조회를 못 봐서 스캐너 시야 자체에 없었다).
-  // "오탐 처리 금지" — 실제로 그 JSX 서브트리 안에 있는 text-muted-foreground이 맞다(사람이
-  // 각 파일 diff로 확인, 아래 개별 근거). 개별 색상 교정은 이 스토리 스코프 밖(화면별 triage
-  // 필요 — #3839 기존 grandfather와 동일 원칙)이라 그대로 얼린다.
-  ['components/agents/agent-api-key-manager.tsx::muted-on-warning-tint', 1],
-  ['components/cage/gate-line-context.tsx::muted-on-warning-tint', 1],
-  // doc-gate-section.tsx(429행, AUDIT_META.dot 소비 span) — am.dot 바인딩이 AUDIT_META
-  // 4항목의 class 후보 문자열을 전부 모아 조상 후보 판정에 쓰는데(보수적 합집합), 그 중
-  // "resubmitted" 항목 자체는 안전한 bg-muted+text-muted-foreground 짝(가드의 「bg-muted
-  // 자체는 대상 밖」 원칙과 같은 값)이라 그 텍스트가 다른(불안전한) 후보의 tint와 합쳐진
-  // 문자열 안에서 우연히 공존한다 — 실제로는 그 span이 "resubmitted"일 때 bg-muted+
-  // text-muted-foreground만 걸리고 tint는 안 걸린다(런타임에 한 후보만 선택됨). 같은
-  // 요소(same-element) 공존 판정이 후보별이 아니라 합친 문자열 하나로 되는 이 가드의
-  // 기존 방식(#3839부터, cn()/삼항 분기 join)의 알려진 한계 — 개별 분기 격리는 더 큰
-  // 재설계가 필요해 이 스토리 스코프 밖, "오탐 처리 금지" 원칙대로 얼린다.
-  ['components/docs/doc-gate-section.tsx::muted-on-info-tint', 1],
-  ['components/docs/doc-status-rail.tsx::muted-on-success-tint', 2],
-  // kanban-column.tsx — colClass(wipExceeded 삼항 1번째 분기 bg-destructive-tint)가 컴포넌트
-  // 최상위 반환 div에 걸려, 그 밑 전체 서브트리(헤더·카드 목록 등)의 muted-foreground 11곳이
-  // 전부 "조상이 destructive-tint일 수 있다"로 잡힌다 — WIP 초과 강조라는 드문 상태에서만
-  // 실제로 배경이 걸리므로 상시 노출 위험은 낮지만, 가드 자신의 기존 원칙(리터럴 bg-X-tint·
-  // cva variant 둘 다 "서브트리 전체"를 조상으로 본다)과 동일 규칙을 그대로 적용한 결과다
-  // — 완화 규칙(예: 불투명 중간 배경이 상속을 끊는다)은 이 가드에 원래 없다(#3839부터).
-  ['components/kanban/kanban-column.tsx::muted-on-destructive-tint', 11],
-  ['components/org-briefing/attention-cluster-board.tsx::muted-on-warning-tint', 5],
-  ['components/settings/gate-level-matrix.tsx::muted-on-success-tint', 1],
+  // 자리 — story #3865(AC1 정밀화)가 이 절 전체를 재검토, 각 파일 실측 근거는 아래.
+  //
+  // agent-api-key-manager.tsx(305행) — `s === 'admin' ? 'bg-warning-tint text-warning-strong'
+  // : 'bg-muted text-muted-foreground'`(템플릿 치환 안 삼항 한 개) — 같은 삼항의 두 분기라
+  // 런타임 공존 0. 제거만·색 변경 0(스코프 밖, 코드 무접촉).
+  //
+  // gate-line-context.tsx(89행 부근) — 삼항 한 개의 두 분기가 각각 tint·muted, 런타임
+  // 공존 0(실 파일 대조). 제거만·색 변경 0(스코프 밖, 코드 무접촉).
+  //
+  // doc-gate-section.tsx(429행) — AUDIT_META 4항목을 am.dot으로 조회(객체맵 바인딩 한
+  // 그룹) — "resubmit" 항목만 안전한 bg-muted+text-muted-foreground 짝이고 나머지 3항목
+  // (tint)엔 muted가 아예 없다 — 같은 그룹 안 같은 후보에 공존 0. 제거만·색 변경 0(#3865
+  // AC0①, PO 확定).
+  //
+  // doc-status-rail.tsx(2곳)·kanban-column.tsx(11곳) — 둘 다 실 위반으로 확인돼
+  // text-foreground로 교정(#3865 AC0②③) — baseline에서 완전히 제거.
+  //
+  // attention-cluster-board.tsx — 정밀화로 5→1. 걷힌 4건은 같은 삼항/바인딩 그룹 안
+  // 상호배타 분기(실 파일 대조). 남은 1건(279행 ChevronDown, bucket.style.rowBg 조상
+  // 서브트리 안 상시 렌더 아이콘)은 실 위반 확인 — 별 카드 기재 예정·이 PR 색 변경 0.
+  ['components/org-briefing/attention-cluster-board.tsx::muted-on-warning-tint', 1],
+  // gate-level-matrix.tsx(268행) — `selected ? LEVEL_META[lv].selected : 'border-border
+  // text-muted-foreground hover:bg-muted/40'`(삼항 한 개 — true 분기가 LEVEL_META 객체맵
+  // 조회, false 분기가 리터럴 muted) — 같은 삼항이 곧 같은 그룹이라 LEVEL_META의 3개
+  // tint 후보(auto/ask/block)와 false 분기의 muted 후보가 같은 그룹 안에 모이지만, 그
+  // 그룹의 어느 «한» 후보 문자열도 tint+muted를 동시에 담지 않는다(각자 순수 tint 또는
+  // 순수 muted) — 같은 삼항=상호배타라 실제 공존 0(실 파일 대조). 제거만·색 변경 0
+  // (스코프 밖, 코드 무접촉).
 ]);
 
 // story #3839 PO 보강(2026-09-14 05:48Z) — 전 트리 완전성 대조가 잡아낸 「가드가 구조적으로

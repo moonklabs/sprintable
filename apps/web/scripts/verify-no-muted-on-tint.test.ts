@@ -348,17 +348,16 @@ describe('scanContent — 실 파일 뮤테이션(story #3850 AC3, 신설 분석
     const ABS_FILE = path.join(SRC_ROOT, REL_FILE);
     const original = readFileSync(ABS_FILE, 'utf8');
 
-    // 전제 확인 — 원본 자체가 이미 429행(AUDIT_META.dot 소비 span)에서 위반 1건을 낸다:
-    // am.dot 바인딩이 AUDIT_META 4개 항목의 class 후보 문자열을 전부 모아 한 문자열로
-    // 합치는데(조상 전파용 보수적 합집합), 그중 "resubmitted" 항목 자체가 안전한
-    // bg-muted+text-muted-foreground 짝을 갖고 있어(가드의 «bg-muted 자체는 대상 밖» 원칙과
-    // 같은 값) 그 안전한 텍스트가 다른(불안전한) 후보의 tint와 같은 합친 문자열 안에서
-    // 우연히 공존한다. GRANDFATHER_BASELINE에 이미 등재된 자리(story #3850 §GRANDFATHER_BASELINE
-    // 주석 참고) — 뮤테이션은 이와 별개로 "새" 위반을 하나 더 만든다는 것만 아래에서 확인한다.
-    it('전제: 원본이 이미 429행(info)을 포함해 2건(기존 GRANDFATHER_BASELINE 등재분: 399행 destructive·429행 info)', () => {
+    // 전제 확인 — story #3865(AC1 정밀화, PO 조건①②) 뒤로는 429행이 더 이상 위반이 아니다.
+    // am.dot 바인딩이 AUDIT_META 4개 항목의 class 후보를 하나의 그룹으로 모으는데, 그 그룹의
+    // 어느 «한» 후보 문자열도 tint+muted를 동시에 담지 않는다(resubmit 항목은 순수
+    // bg-muted+text-muted-foreground, 나머지 3항목은 순수 tint) — 같은 그룹=상호배타라
+    // 실제 공존 0(sameElementCoOccurs, story #3865). 남은 위반은 399행(기존 #3839
+    // GRANDFATHER_BASELINE 등재분)뿐이다.
+    it('전제: 원본은 399행(destructive)만 위반 — 429행은 #3865 정밀화로 더 이상 위반 아님', () => {
       const violations = scanContent(original, REL_FILE, componentMap);
-      expect(violations).toHaveLength(2);
-      expect(violations.find((v) => v.line === 429)?.family).toBe('info');
+      expect(violations).toHaveLength(1);
+      expect(violations.find((v) => v.line === 429)).toBeUndefined();
       expect(violations.find((v) => v.line === 399)?.family).toBe('destructive');
     });
 
@@ -400,5 +399,96 @@ describe('scanContent — 실 파일 뮤테이션(story #3850 AC3, 신설 분석
       // 삼항 첫 분기(state === 'confirmed' → bg-success-tint)가 첫 매치 family로 채택된다.
       expect(newViolation!.family).toBe('success');
     });
+  });
+});
+
+// story #3865(AC1, PO 조건②③·2026-09-14 11:04Z) — 같은 요소 tint+muted 공존 판정을
+// "합친 문자열 전체"에서 "그룹 단위"(같은 삼항/바인딩 안 분기끼리만 상호배타, 서로 다른
+// 독립 축은 곱집합·fail-closed)로 정밀화한 것의 양성/음성대조.
+describe('scanContent — 같은 요소 tint/muted 공존 판정의 그룹 정밀화(story #3865)', () => {
+  // 조건② 양성대조 — 서로 다른(독립) 두 조건이 각각 tint·muted를 낸다면, 그 둘이 동시에
+  // 참일 수 있으므로(곱집합) 위반으로 잡아야 한다(fail-closed) — doc-gate-section.tsx류
+  // (같은 삼항/바인딩의 두 분기)와 겉보기엔 비슷하지만 독립 조건이라는 점이 다르다.
+  it('서로 다른 독립 조건 2개(cn() 인자 2개, 각각 tint·muted) → RED(곱집합 fail-closed)', () => {
+    const content = `
+      <div className={cn(condA ? 'bg-info-tint' : 'x', condB ? 'text-muted-foreground' : 'y')} />
+    `;
+    const violations = scanContent(content, 'sample.tsx');
+    expect(violations).toHaveLength(1);
+    expect(violations[0]!.family).toBe('info');
+  });
+
+  // 조건② 음성대조 — 같은 삼항(같은 조건)의 두 분기는 상호배타이므로 위반이 아니다
+  // (doc-gate-section.tsx 실사례와 동형 — 합성 표본으로 규칙 자체를 직접 확인).
+  it('같은 삼항의 두 분기(하나는 tint, 하나는 muted) → 위반 아님(같은 조건=상호배타)', () => {
+    const content = `
+      <div className={cond ? 'bg-info-tint text-info' : 'bg-muted text-muted-foreground'} />
+    `;
+    expect(scanContent(content, 'sample.tsx')).toEqual([]);
+  });
+
+  // 조건③ 실 파일 양성대조 — access-matrix-tab.tsx(232행)의 `granted ? 'border-success/40
+  // bg-success-tint text-success…' : 'border-border text-muted-foreground…'`(같은 삼항의
+  // 두 분기)를 "한 분기 안에 tint+muted 공존"으로 되돌리면(granted 분기 자체에 muted를
+  // 끼워 넣으면) RED가 되어야 한다 — 그룹 정밀화가 진짜 공존은 여전히 잡는다는 확인.
+  describe('실 파일 뮤테이션 — access-matrix-tab.tsx(232행, 같은 삼항 안 공존 재현)', () => {
+    const REL_FILE = 'components/agents/access-matrix-tab.tsx';
+    const ABS_FILE = path.join(SRC_ROOT, REL_FILE);
+    const original = readFileSync(ABS_FILE, 'utf8');
+
+    it('전제: 원본은 이 자리에서 위반 0(같은 삼항 두 분기가 상호배타)', () => {
+      const violations = scanContent(original, REL_FILE);
+      expect(violations.some((v) => v.className.includes('bg-success-tint'))).toBe(false);
+    });
+
+    it('granted 분기(tint) 안에 muted를 끼워 넣으면(같은 후보 문자열 공존) RED', () => {
+      const target = "'border-success/40 bg-success-tint text-success hover:bg-success/15'";
+      expect(original.includes(target)).toBe(true);
+      const mutated = original.replace(
+        target,
+        "'border-success/40 bg-success-tint text-success hover:bg-success/15 text-muted-foreground'",
+      );
+      expect(mutated).not.toBe(original);
+
+      const before = scanContent(original, REL_FILE);
+      const after = scanContent(mutated, REL_FILE);
+      expect(after.length).toBe(before.length + 1);
+      const newViolation = after.find((v) => !before.some((b) => b.line === v.line));
+      expect(newViolation).toBeDefined();
+      expect(newViolation!.family).toBe('success');
+    });
+  });
+});
+
+// story #3865(AC1, 조건①·2026-09-14 11:04Z) — 불투명 배경 규칙(OPAQUE_BG_RE)이 recruiter-
+// client.tsx의 기존 #3839 grandfather 1건(muted-on-info-tint)도 실제로 걷어냈다(3865 스코프
+// 밖 파일이지만 baseline 정확 일치 계약상 이 PR에 같이 실린다) — 실 파일 양성대조.
+describe('scanContent — 실 파일 양성대조(recruiter-client.tsx, 불투명 배경 규칙)', () => {
+  const REL_FILE = 'app/(authenticated)/organization/workforce/recruiter/recruiter-client.tsx';
+  const ABS_FILE = path.join(SRC_ROOT, REL_FILE);
+  const original = readFileSync(ABS_FILE, 'utf8');
+
+  // 1110행 input — info-tint 조상(신규 에이전트 생성 섹션) 서브트리 안에 있지만 자기 자신이
+  // bg-card(완전 불투명)를 입고 있어 그 조상 tint가 안 비쳐 보인다 — input 자신의
+  // placeholder:text-muted-foreground는 실제로 불투명 카드 배경 위에서만 렌더된다.
+  it('전제: 원본은 이 input 자리에서 위반 0(bg-card가 조상 info-tint를 끊음)', () => {
+    const violations = scanContent(original, REL_FILE);
+    expect(violations.some((v) => v.className.includes('placeholder:text-muted-foreground'))).toBe(false);
+  });
+
+  it('bg-card를 걷으면(불투명 경계 소실) 조상 info-tint가 다시 비쳐 RED', () => {
+    // value={newAgentName}로 시작하는 입력은 파일에 하나뿐(1112행) — 그 className까지
+    // 통째로 타깃 삼아 결정적으로 그 입력 하나만 고른다(다른 bg-card 입력과 안 섞임).
+    const target = "value={newAgentName}\n                      onChange={(e) => setNewAgentName(e.target.value)}\n                      placeholder={suggestedAgentName || t('agentNamePlaceholder')}\n                      className=\"w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary\"";
+    expect(original.includes(target)).toBe(true);
+    const mutated = original.replace(target, target.replace('bg-card ', ''));
+    expect(mutated).not.toBe(original);
+
+    const before = scanContent(original, REL_FILE);
+    const after = scanContent(mutated, REL_FILE);
+    expect(after.length).toBeGreaterThan(before.length);
+    const newViolation = after.find((v) => !before.some((b) => b.line === v.line));
+    expect(newViolation).toBeDefined();
+    expect(newViolation!.family).toBe('info');
   });
 });
