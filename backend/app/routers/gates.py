@@ -346,7 +346,7 @@ async def to_gate_response(
     """story #3874 — GateResponse 직렬화 단일 통로. model_validate + risk_grade enrich
     (story #1972 SSOT — gate_service.derive_risk_grade)를 한 자리로 묶는다.
 
-    이 헬퍼 도입 前엔 model_validate 직접 호출 17곳 中 3곳(list_gates·get_gate_endpoint·
+    이 헬퍼 도입 前엔 model_validate 직접 호출 15곳 中 3곳(list_gates·get_gate_endpoint·
     create_decision_request)만 risk_grade를 채웠고 나머지 12곳(transition 포함 — 고위험
     note 필수 검증 때문에 risk_grade를 이미 계산해 놓고도 응답엔 안 실었다)은 늘 None을
     냈다(story #3868 AC0 실측). FE는 지금 이 필드를 transition 등 그 12곳 응답에서 직접
@@ -354,7 +354,7 @@ async def to_gate_response(
     API 계약 자체가 거짓이라 새 소비처(FE는 물론 MCP 에이전트 포함)가 그 바디를 그대로
     믿으면 즉시 오판한다 — 그래서 개별 12곳 패치가 아니라 통로를 하나로 좁힌다(gates.py에
     `GateResponse.model_validate(` 직접 호출이 이 함수 밖에 남아있으면 안 된다 — 그 불변식은
-    scripts/verify-gate-response-single-serializer.py가 정적 스캔으로 고정한다).
+    tests/test_3874_gate_response_serialization_guard.py의 AST 정적 스캔이 고정한다).
 
     posture 미지정(기본, `_POSTURE_UNSET`)이면 이 호출이 org posture를 1쿼리로 직접 조회
     한다(단건 엔드포인트 전부 이 경로 — get/create/transition/void 등, 매 호출 1쿼리는
