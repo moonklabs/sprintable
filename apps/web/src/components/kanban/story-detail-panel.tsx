@@ -1299,23 +1299,37 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
   const epicName = (id: string | null) => (id ? (epicMap[id] ?? '—') : '—');
   const sprintName = (id: string | null) => (id ? (sprintMap[id] ?? '—') : '—');
 
+  // story #3875(§⑤ 낱말 드리프트, PO 확定 2026-09-14) — status_changed의 old/new는
+  // canonical slug("in-progress" 등)라 그대로 그리면 영문 원시 값이 새므로, 헤더의
+  // statusLabel 계산(846행 부근)과 같은 정본 경로(getStatusLabel prop 우선 → statusKeyMap
+  // 경유 t() → 최후 폴백만 원 slug)로 임의 slug 하나를 해석하는 헬퍼를 둔다.
+  const resolveStatusLabel = (slug: string): string => {
+    const key = statusKeyMap[slug];
+    return getStatusLabel?.(slug) ?? (key ? t(key) : slug);
+  };
+
   const formatActivityMessage = (activity: Activity, expand: boolean): React.ReactNode => {
     const { activity_type, old_value, new_value } = activity;
     switch (activity_type) {
       case 'created':
-        return <span className="text-foreground">Created{new_value ? <>: <span className="font-medium">{expand ? new_value : truncate(new_value)}</span></> : null}</span>;
+        return <span className="text-foreground">{t('activityCreatedLabel')}{new_value ? <>: <span className="font-medium">{expand ? new_value : truncate(new_value)}</span></> : null}</span>;
       case 'status_changed':
-        return <span className="text-foreground">Status {renderChange(old_value, new_value ?? '—', expand)}</span>;
+        return <span className="text-foreground">{t('status')} {renderChange(old_value ? resolveStatusLabel(old_value) : null, new_value ? resolveStatusLabel(new_value) : '—', expand)}</span>;
       case 'assignee_changed':
-        return <span className="text-foreground">Assignee {renderChange(old_value ? memberName(old_value) : null, memberName(new_value), expand)}</span>;
+        // story #3875 — §⑤-1 낱말 표(doc a699be00)가 이 자리를 「담당」으로 확定(기존
+        // board.assignee="담당자"와 다른 낱말·다른 키, 재사용 아님).
+        return <span className="text-foreground">{t('activityAssigneeLabel')} {renderChange(old_value ? memberName(old_value) : null, memberName(new_value), expand)}</span>;
       case 'title_changed':
-        return <span className="text-foreground">Title {renderChange(old_value, new_value ?? '—', expand)}</span>;
+        return <span className="text-foreground">{t('activityTitleLabel')} {renderChange(old_value, new_value ?? '—', expand)}</span>;
       case 'epic_changed':
-        return <span className="text-foreground">Epic {renderChange(old_value ? epicName(old_value) : null, epicName(new_value), expand)}</span>;
+        return <span className="text-foreground">{t('activityEpicLabel')} {renderChange(old_value ? epicName(old_value) : null, epicName(new_value), expand)}</span>;
       case 'sprint_changed':
-        return <span className="text-foreground">Sprint {renderChange(old_value ? sprintName(old_value) : null, sprintName(new_value), expand)}</span>;
+        return <span className="text-foreground">{t('activitySprintLabel')} {renderChange(old_value ? sprintName(old_value) : null, sprintName(new_value), expand)}</span>;
       default:
-        return <span className="text-foreground">{activity_type}</span>;
+        // story #3875(AC1) — 미분류 activity_type(내부 enum)을 그대로 그리지 않는다 — 중립
+        // 라벨 1개로 감싼다(어떤 유형이 오든 t() 경유, 원시 enum 노출 0). §⑤-1(doc
+        // a699be00)이 「알 수 없음」(오류처럼 읽힘)이 아니라 「그 밖의 변경」으로 확定.
+        return <span className="text-foreground">{t('activityOtherChangeLabel')}</span>;
     }
   };
 
