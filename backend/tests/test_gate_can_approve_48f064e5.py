@@ -62,10 +62,14 @@ async def _call(resolved, *, execute_results, has_access=None, status="approved"
     # authz)와 무관.
     transition = AsyncMock(return_value=make_gate(gate_type="merge_approval", neutral_facts=None))
     auth = SimpleNamespace(user_id=str(uuid.uuid4()))
+    # story #3874 — 직렬화 단일 통로(to_gate_response) 도입 뒤 model_validate만 patch하면
+    # risk_grade enrich가 문자열에 속성을 못 얹어 AttributeError로 깨진다(risk_grade는 이
+    # 파일의 관심사가 아니므로 그 통로 자체를 patch — test_gate_transition_human_only.py와
+    # 동일 처방).
     patches = [
         patch.object(gates_mod, "resolve_member", AsyncMock(return_value=resolved)),
         patch.object(gates_mod, "transition_gate", transition),
-        patch.object(gates_mod.GateResponse, "model_validate", lambda g: "OK"),
+        patch.object(gates_mod, "to_gate_response", AsyncMock(return_value="OK")),
     ]
     if has_access is not None:
         patches.append(patch.object(gates_mod, "has_project_access", AsyncMock(return_value=has_access)))

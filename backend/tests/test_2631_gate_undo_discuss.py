@@ -403,7 +403,7 @@ async def test_undo_endpoint_forces_actor_from_auth_no_admin_gate():
     undofn = AsyncMock(return_value=SimpleNamespace())
     with patch.object(gates_mod, "resolve_member", AsyncMock(return_value=caller)), \
          patch.object(gates_mod, "undo_gate_resolution", undofn), \
-         patch.object(gates_mod.GateResponse, "model_validate", lambda g: "OK"):
+         patch.object(gates_mod, "to_gate_response", AsyncMock(return_value="OK")):
         await undo_gate_resolution_endpoint(id=uuid.uuid4(), session=AsyncMock(), org_id=uuid.uuid4(),
                                             auth=SimpleNamespace(user_id=str(uuid.uuid4())))
     # undo_gate_resolution(session, org_id, gate_id, actor_id) — actor=caller.id
@@ -501,7 +501,7 @@ async def test_discuss_endpoint_forces_actor_from_auth():
     discussfn = AsyncMock(return_value=SimpleNamespace())
     with patch.object(gates_mod, "resolve_member", AsyncMock(return_value=caller)), \
          patch.object(gates_mod, "request_gate_discussion", discussfn), \
-         patch.object(gates_mod.GateResponse, "model_validate", lambda g: "OK"):
+         patch.object(gates_mod, "to_gate_response", AsyncMock(return_value="OK")):
         session = AsyncMock()
         session.execute = AsyncMock(return_value=result)
         await _request_gate_discussion_endpoint(

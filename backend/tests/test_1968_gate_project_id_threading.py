@@ -132,7 +132,7 @@ async def test_generic_gate_endpoint_threads_resolved_project_id():
                        AsyncMock(return_value=project_id)) as resolve_spy, \
          patch("app.services.project_auth.has_project_access", AsyncMock(return_value=True)), \
          patch.object(gates_mod, "create_gate", AsyncMock(return_value=gate)) as create_spy, \
-         patch.object(gates_mod.GateResponse, "model_validate", lambda g: "OK"):
+         patch.object(gates_mod, "to_gate_response", AsyncMock(return_value="OK")):
         await _create_gate_endpoint(
                 resolved_locale="ko",body=body, session=session, org_id=org_id, _auth=auth)
 
@@ -159,7 +159,7 @@ async def test_generic_gate_endpoint_known_agnostic_type_passes_none():
     with patch.object(gates_mod, "resolve_work_item_project_id",
                        AsyncMock(return_value=None)), \
          patch.object(gates_mod, "create_gate", AsyncMock(return_value=gate)) as create_spy, \
-         patch.object(gates_mod.GateResponse, "model_validate", lambda g: "OK"):
+         patch.object(gates_mod, "to_gate_response", AsyncMock(return_value="OK")):
         await _create_gate_endpoint(
                 resolved_locale="ko",body=body, session=session, org_id=org_id, _auth=SimpleNamespace())
 
