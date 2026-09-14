@@ -134,7 +134,13 @@ export function ActivationChecklistBanner() {
                   disabled={navigatingToInstruction || !projectId}
                   className={cn(
                     'h-auto w-full min-w-0 justify-start gap-1.5 rounded px-1 py-0.5 text-left text-sm font-normal hover:underline disabled:no-underline',
-                    met ? 'text-foreground' : 'text-muted-foreground',
+                    // story #3839(critical·2pt, 카디르 QA 2026-09-14 01:18Z) — text-muted-
+                    // foreground(ink-3 v3값 #6E6C67)가 이 Alert variant="info"의 blue-soft
+                    // (#E7EDF7) 배경 위에서 대비 미달(4.3:1<4.5, axe color-contrast 신규
+                    // 위반) — #2420 규율(tint 위 계열색·저대비 글자는 text-foreground) 그대로
+                    // 적용. met/unmet 구별은 아이콘 모양(CircleCheck/Circle)이 전달하므로
+                    // 색 통일에 따른 의미 손실 0(바로 위 text-success 제거 선례와 동형).
+                    'text-foreground',
                   )}
                 >
                   {navigatingToInstruction ? <Loader2 className="size-3.5 shrink-0 animate-spin" /> : icon}
@@ -160,7 +166,8 @@ export function ActivationChecklistBanner() {
                   href="/organization/workforce"
                   className={cn(
                     'flex h-auto w-full min-w-0 items-center gap-1.5 rounded px-1 py-0.5 text-left text-sm font-normal hover:underline',
-                    met ? 'text-foreground' : 'text-muted-foreground',
+                    // story #3839 — 위 first_roundtrip 분기와 동일 처방(색 통일, 아이콘이 met 전달).
+                    'text-foreground',
                   )}
                 >
                   {icon}
@@ -170,7 +177,8 @@ export function ActivationChecklistBanner() {
             );
           }
           return (
-            <li key={key} className={cn('flex items-center gap-1.5 text-sm', met ? 'text-foreground' : 'text-muted-foreground')}>
+            // story #3839 — 위 두 분기와 동일 처방(색 통일, 아이콘이 met 전달).
+            <li key={key} className={cn('flex items-center gap-1.5 text-sm', 'text-foreground')}>
               {icon}
               <span>{label}</span>
             </li>
