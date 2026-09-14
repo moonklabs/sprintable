@@ -1632,6 +1632,13 @@ jobs:
       - name: "Verify no new alpha-composited text-*foreground (story #3826-pre)"
         run: pnpm --filter web verify:no-new-alpha-text-foreground
 
+      # story #3826(UX-v3·FE 2) AC1 diff 가드 — globals.css 원시 토큰(--proof-*) 값 교체
+      # PR의 diff가 그 파일의 --proof-* 값·radius 값에만 있는지(alias·.dark·tsx diff 0).
+      - name: "Verify v3 raw-token PR diff scope (story #3826 AC1)"
+        run: pnpm --filter web verify:v3-token-diff-scope
+        env:
+          V3_TOKEN_DIFF_BASE: origin/${{ github.base_ref || 'develop' }}
+
       # story #2371 회귀가드: `scripts/check-i18n-keys.js`(code→messages missing-key 축)를
       # 처음으로 CI에 건다 — 이전엔 CI/husky/package.json 어디에도 안 걸려 있었고 손으로
       # 돌리면 344 issues·exit 1이 나왔는데(2026-07-31 실측) 344건 전부 도구 결함(워드바운더리

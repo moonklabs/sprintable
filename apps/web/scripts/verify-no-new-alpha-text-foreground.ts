@@ -106,6 +106,33 @@ export const GRANDFATHER_BASELINE = new Map<string, number>([
   ['ee/components/billing/billing-tab.tsx::text-foreground/80', 1],
 ]);
 
+export interface BaselineDrift {
+  key: string;
+  expected: number;
+  got: number;
+}
+
+export interface BaselineComparison {
+  increased: BaselineDrift[];
+  stale: BaselineDrift[];
+}
+
+/** 순수 함수(카디르 QA 지적, PR #4255 후속) — 실측 개수 맵과 baseline 맵을 비교해
+ * 「초과(신규/증가)」·「미달(stale)」을 가른다. main()의 파일시스템 스캔과 분리해
+ * 표본 3(초과 FAIL·미달 FAIL·일치 GREEN)을 스캔 없이 직접 단위 테스트할 수 있다. */
+export function compareToBaseline(actual: Map<string, number>, baseline: Map<string, number>): BaselineComparison {
+  const allKeys = new Set<string>([...actual.keys(), ...baseline.keys()]);
+  const increased: BaselineDrift[] = [];
+  const stale: BaselineDrift[] = [];
+  for (const key of allKeys) {
+    const expected = baseline.get(key) ?? 0;
+    const got = actual.get(key) ?? 0;
+    if (got > expected) increased.push({ key, expected, got });
+    else if (got < expected) stale.push({ key, expected, got });
+  }
+  return { increased, stale };
+}
+
 function main(): number {
   const files: string[] = [];
   walk(SRC_ROOT, files);
@@ -119,15 +146,7 @@ function main(): number {
     }
   }
 
-  const allKeys = new Set<string>([...actual.keys(), ...GRANDFATHER_BASELINE.keys()]);
-  const increased: Array<{ key: string; expected: number; got: number }> = [];
-  const stale: Array<{ key: string; expected: number; got: number }> = [];
-  for (const key of allKeys) {
-    const expected = GRANDFATHER_BASELINE.get(key) ?? 0;
-    const got = actual.get(key) ?? 0;
-    if (got > expected) increased.push({ key, expected, got });
-    else if (got < expected) stale.push({ key, expected, got });
-  }
+  const { increased, stale } = compareToBaseline(actual, GRANDFATHER_BASELINE);
 
   const totalActualOccurrences = [...actual.values()].reduce((a, b) => a + b, 0);
   console.log(
