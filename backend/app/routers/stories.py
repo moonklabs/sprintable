@@ -3,6 +3,7 @@ import logging
 import time
 import uuid
 from datetime import datetime, timezone
+from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, field_validator
@@ -1055,6 +1056,13 @@ async def get_story_backlinks(
     id: uuid.UUID,
     limit: int = Query(default=30, ge=1, le=200),
     before: str | None = Query(default=None),
+    # story #3852(customer-zero·BE·연결 읽기, 페드루 PO 확定 2026-09-14 07:51Z) — 「스토리에
+    # 붙은 문서」(3844 행 칩·3845 문서 탭)의 데이터 소스. 새 route를 만들지 않고 이 기존
+    # backlinks route에 옵션 필터 1개만 더한다(docs.story_id FK가 없다 — entity_references
+    # 표가 유일한 연결 모델, 그라운딩 확定). Literal이라 잘못된 값은 이 함수에 도달하기
+    # «전에» FastAPI/Pydantic이 422로 거절한다(list_entity_backlinks의 방어적 두 번째
+    # 검증은 UnsupportedBacklinkSourceTypeError 참조 — target_type 형제와 동형 이유).
+    source_type: Literal["doc", "chat_message", "meeting", "story"] | None = Query(default=None),
     repo: StoryRepository = Depends(_get_repo),
     auth: AuthContext = Depends(get_current_user),
 ) -> dict:
@@ -1062,7 +1070,10 @@ async def get_story_backlinks(
     C-8 "역방향"). docs.py의 get_doc_backlinks와 동일 convention(cursor pagination, 응답
     shape) — 실제 쿼리는 `list_entity_backlinks`가 target_type만 다르게 받아 처리하는 **같은
     코드**다(중복 구현 아님). 존재하지 않는 story는 404, 있지만 project 접근 없으면 403
-    (`_assert_story_project_access` — get_story와 동일 계약, existence oracle 없음)."""
+    (`_assert_story_project_access` — get_story와 동일 계약, existence oracle 없음).
+
+    `?source_type=doc`(story #3852) — 지정 시 그 source_type의 행만(응답 item shape·cursor
+    계약 무변, 기존 소비처 회귀 0 — 파라미터 생략 시 현행 전량 그대로)."""
     story = await repo.get(id)
     if story is None:
         raise HTTPException(status_code=404, detail="Story not found")
@@ -1071,7 +1082,7 @@ async def get_story_backlinks(
     from app.services.backlinks import list_entity_backlinks
     return await list_entity_backlinks(
         repo.session, org_id=repo.org_id, target_type="story", target_id=id,
-        auth=auth, limit=limit, cursor=before,
+        auth=auth, limit=limit, cursor=before, source_type=source_type,
     )
 
 

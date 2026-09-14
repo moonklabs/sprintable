@@ -285,6 +285,12 @@ BACKLINKS_ALLOWED_TARGET_TYPES = frozenset({"doc", "story", "artifact", "gate", 
 # gates.py::get_gate_backlinks(resolve_work_item_project_id 재사용)·github_integration.py::
 # get_pr_link_backlinks(delete_link과 동일 게이트) 신규.
 
+# story #3852(customer-zero·BE·연결 읽기, 2026-09-14) — SOURCE 축 선택 필터 허용목록. 위
+# WHERE 절의 4-way OR 분기(doc·chat_message·meeting·story)가 실제로 authz를 아는 유일한
+# source_type 4종이라 이 집합과 정확히 동형이다 — 다른 값을 허용하면 필터가 "0건"을 "이 타입
+# 없음"으로 거짓 보고한다(그 타입 자체가 애초에 쿼리에서 안 만들어지니까).
+BACKLINKS_ALLOWED_SOURCE_TYPES = frozenset({"doc", "chat_message", "meeting", "story"})
+
 
 class UnsupportedBacklinkTargetTypeError(ValueError):
     """target_type이 BACKLINKS_ALLOWED_TARGET_TYPES 밖 — 호출 라우터가 400으로 번역한다.
@@ -297,6 +303,17 @@ class UnsupportedBacklinkTargetTypeError(ValueError):
     `test_list_entity_backlinks_rejects_unsupported_target_type`이 이 분기를 직접 타서
     커버리지에 살아 있고, 허용목록을 게이트 없이 늘리면 그 테스트가 걸린다(RED로 잡는다는
     뜻이 아니라 — 허용목록에 추가한 사람이 이 클래스의 존재를 코드에서 보게 된다는 뜻)."""
+
+
+class UnsupportedBacklinkSourceTypeError(ValueError):
+    """source_type이 BACKLINKS_ALLOWED_SOURCE_TYPES 밖 — 호출 라우터가 422로 번역한다(story
+    #3852, target_type과 달리 이 값은 client 입력이 실제로 도달한다).
+
+    stories.py의 `get_story_backlinks`가 `source_type: Literal[...] | None = Query(...)`로
+    라우터 경계에서 이미 검증하므로(FastAPI/Pydantic이 잘못된 값을 이 함수 호출 전에 422로
+    거절) 이 분기도 지금은 target_type 형제와 같은 이유로 HTTP 경로로 «도달 불가»하다 —
+    똑같이 지우지 않는다: 이 함수를 호출하는 다른 라우터가 미래에 생기면(위 target_type
+    class 주석과 동형 논리) SOURCE 게이트 누락을 막는 방어선이 된다."""
 
 
 # ⛔story #2277(E-CONNECT) target_type → model — count_zero_referenced_entities 전용.
@@ -368,6 +385,7 @@ async def list_entity_backlinks(
     auth: AuthContext,
     limit: int,
     cursor: str | None,
+    source_type: str | None = None,
 ) -> dict:
     """GET /api/v2/{docs,stories}/{id}/backlinks 코어(#2266 — target_type 일반화). 호출부
     (docs.py/stories.py)가 target 접근을 이미 검증했다는 전제(§8① target read access는 별도·
@@ -410,9 +428,21 @@ async def list_entity_backlinks(
         target 삭제는 이 응답에 반영 안 됨, 기존 backlinks 전체의 기존 계약과 동일).
 
     `next_cursor`는 opaque composite base64 토큰(B3) — `before` query param에 그대로 되돌려준다.
+
+    story #3852(customer-zero·BE·연결 읽기, 페드루 PO 확定 2026-09-14 07:51Z) — `source_type`
+    (선택, `BACKLINKS_ALLOWED_SOURCE_TYPES`): 지정하면 그 source_type의 행만 반환한다(응답
+    item shape·cursor 계약 무변 — 필터는 기존 WHERE에 AND 조건 1개만 더한다, 위 4-way
+    authz OR 분기는 손대지 않는다: 각 분기가 이미 자기 source_type을 스스로 게이트하므로
+    바깥에서 source_type을 더 좁혀도 그 분기들의 authz 판정 자체는 무변). `GET /api/v2/
+    stories/{id}/backlinks?source_type=doc`가 이 스토리의 실 소비 형태 — 「스토리에 붙은
+    문서」(3844 행 칩·3845 문서 탭)는 새 route가 아니라 이 필터 1개로 나온다(docs.story_id
+    FK가 없다 — reconcile_doc_mentions가 쓰는 entity_references(Reference) 표가 유일한
+    연결 모델, PO 그라운딩 확定 반영).
     """
     if target_type not in BACKLINKS_ALLOWED_TARGET_TYPES:
         raise UnsupportedBacklinkTargetTypeError(target_type)
+    if source_type is not None and source_type not in BACKLINKS_ALLOWED_SOURCE_TYPES:
+        raise UnsupportedBacklinkSourceTypeError(source_type)
 
     cursor_key: tuple[datetime, uuid.UUID] | None = None
     if cursor:
@@ -590,6 +620,12 @@ async def list_entity_backlinks(
             ),
         )
     )
+    if source_type is not None:
+        # story #3852 — 4-way authz OR 분기 «바깥»에 AND로 더한다(분기 안으로 안 들어간다):
+        # 그래야 이 필터가 authz 판정 자체를 바꾸지 않고(각 분기는 자기 source_type을 이미
+        # 스스로 게이트) 결과 집합만 좁힌다 — "타입을 좁히니 새로 보이는 행이 생긴다" 류
+        # 회귀가 구조적으로 성립하지 않는다.
+        stmt = stmt.where(Reference.source_type == source_type)
     if cursor_key is not None:
         cursor_created_at, cursor_id = cursor_key
         stmt = stmt.where(tuple_(Reference.created_at, Reference.id) < tuple_(cursor_created_at, cursor_id))
