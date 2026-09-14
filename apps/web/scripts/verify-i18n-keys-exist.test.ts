@@ -566,7 +566,9 @@ describe('scanRepo — 양성대조(실 develop 소스)', () => {
       'components/command-palette/command-palette-actions.ts',
       'components/org-briefing/derive-workforce-face.ts',
       'components/org-briefing/derive-now-face.ts',
-      'components/org-briefing/derive-loop-face.ts',
+      // story #3831 착지(옛 org-briefing derive-loop-face.ts 삭제 — 「오늘」 화면이 그
+      // 컴포넌트를 대체) — 같은 성격(번역자 파라미터 호출)의 실 파일로 교체, 개수 10 유지.
+      'components/loop-queue/derive-loop-queue.ts',
       'components/org-briefing/derive-attention-clusters.ts',
     ];
     for (const rel of files) {

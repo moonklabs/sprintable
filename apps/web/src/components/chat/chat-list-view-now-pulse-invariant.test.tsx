@@ -18,7 +18,12 @@ const { useDashboardContextMock, fetchWithAuthMock } = vi.hoisted(() => ({
 }));
 
 vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => useDashboardContextMock() }));
-vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn() }) }));
+// story #3831 — ChatListView가 ?compose= 프리필을 위해 useSearchParams를 새로 쓴다
+// (compose 없음 = 빈 URLSearchParams, get('compose')는 null).
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(),
+}));
 // story #3621 — connected/polling을 반환하는 실제 훅 shape과 맞춘다.
 vi.mock('@/hooks/use-chat-sse', () => ({ useChatSse: () => ({ connected: true, polling: false }) }));
 vi.mock('@/hooks/use-auto-refresh', () => ({ useAutoRefresh: () => {} }));

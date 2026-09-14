@@ -17,17 +17,21 @@ import { ChatRailProvider, useChatRailOptional } from '@/app/(authenticated)/cha
 // 실 provider로 끌고 오지 않는다(useChatSse와 동일 관례 — 교차관심사 훅은 no-op mock).
 vi.mock('@/hooks/use-auto-refresh', () => ({ useAutoRefresh: () => {} }));
 
-const { useDashboardContextMock, pushMock } = vi.hoisted(() => ({
+const { useDashboardContextMock, pushMock, replaceMock, searchParamsValueRef } = vi.hoisted(() => ({
   useDashboardContextMock: vi.fn(),
   pushMock: vi.fn(),
+  replaceMock: vi.fn(),
+  searchParamsValueRef: { current: '' as string },
 }));
 
 vi.mock('@/app/dashboard/dashboard-shell', () => ({
   useDashboardContext: () => useDashboardContextMock(),
 }));
 
+// story #3831 — 「오늘」의 지시 한 줄이 `?compose=`로 도착(chat-list-view.tsx가 직접 읽는다).
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: pushMock, replace: vi.fn() }),
+  useRouter: () => ({ push: pushMock, replace: replaceMock }),
+  useSearchParams: () => new URLSearchParams(searchParamsValueRef.current),
 }));
 
 // use-chat-sse는 EventSource(jsdom 미구현)를 쓰므로 no-op으로 목 — 단, story #1978은 정확히
@@ -62,6 +66,8 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
   pushMock.mockClear();
+  replaceMock.mockClear();
+  searchParamsValueRef.current = '';
   useChatSseMock.mockClear();
   useDashboardContextMock.mockReturnValue({ role: 'member' });
 });
@@ -959,5 +965,51 @@ describe('ChatListView — my 탭 finally의 stale-drop(story #3790 후속 2, �
     await act(async () => { resolveB!(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
     expect(readRailCapture(container).loading).toBe('false');
     expect(readRailCapture(container).count).toBe('0');
+  });
+});
+
+// story #3831(UX-v3·FE 3·오늘, 페드루 PO 確定(c) 2026-09-13 14:04Z) — 「오늘」의 지시
+// 한 줄이 `/chats?compose=<text>`로 도착했을 때, 이 컴포넌트(유일한 리스트 마운트 지점)가
+// 기존 두 경로로만 위임한다(새 API 0·수신자 발명 0): 대화가 있으면 가장 최근 대화로
+// compose를 그대로 실어 보내고(router.replace), 0건이면 기존 "새 대화" 모달을 연다.
+describe('ChatListView — story #3831 지시 한 줄 compose 경유(새 API 0·수신자 발명 0)', () => {
+  it('대화가 있으면 updated_at 최신 1건으로 compose를 실어 보낸다', async () => {
+    searchParamsValueRef.current = 'compose=' + encodeURIComponent('유튜브 챕터 3개로 나눠줘');
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/conversations/recent-outside-project')) return { ok: true, json: async () => ({ data: [] }) };
+      if (url.includes('/api/conversations?')) {
+        return {
+          ok: true,
+          json: async () => ({
+            data: [
+              { id: 'conv-old', type: 'dm', title: null, latest_message: null, updated_at: '2026-09-01T00:00:00Z', unread_count: 0 },
+              { id: 'conv-recent', type: 'dm', title: null, latest_message: null, updated_at: '2026-09-13T00:00:00Z', unread_count: 0 },
+            ],
+            total: 2,
+          }),
+        };
+      }
+      return { ok: false, status: 404, json: async () => null };
+    }));
+    await mount();
+    expect(replaceMock).toHaveBeenCalledWith('/chats/conv-recent?compose=' + encodeURIComponent('유튜브 챕터 3개로 나눠줘'));
+  });
+
+  it('compose 없이 마운트되면 리다이렉트가 전혀 안 일어난다(회귀 0)', async () => {
+    stubFetch([]);
+    await mount();
+    expect(replaceMock).not.toHaveBeenCalled();
+  });
+
+  it('대화가 0건이면 리다이렉트 대신 새 대화 모달을 연다(onOpenChange 호출)', async () => {
+    searchParamsValueRef.current = 'compose=' + encodeURIComponent('유튜브 챕터 3개로 나눠줘');
+    stubFetch([]);
+    const onOpenChange = vi.fn();
+    await act(async () => {
+      root.render(wrap(<ChatListView projectId="proj-current" currentTeamMemberId="me-1" open={false} onOpenChange={onOpenChange} />));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(onOpenChange).toHaveBeenCalledWith(true);
+    expect(replaceMock).not.toHaveBeenCalled();
   });
 });

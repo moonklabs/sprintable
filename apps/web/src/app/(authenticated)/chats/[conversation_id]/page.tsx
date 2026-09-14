@@ -84,6 +84,9 @@ export default function ConversationPage() {
   // ChatView has key={conversation_id} so this is read fresh per conversation.
   const searchParams = useSearchParams();
   const scrollToMessageId = searchParams.get('messageId') ?? undefined;
+  // story #3831 — 「오늘」 지시 한 줄이 chat-list-view.tsx의 기존 리다이렉트/새 대화 경로를
+  // 거쳐 `?compose=`로 도착하면 ChatView의 기존 prefillCommand 기전에 그대로 싣는다.
+  const composeText = searchParams.get('compose');
   const t = useTranslations('chats');
   const tc = useTranslations('common');
   const { currentTeamMemberId, projectId } = useDashboardContext();
@@ -377,6 +380,7 @@ export default function ConversationPage() {
             scrollToMessageId={scrollToMessageId}
             initialLastReadAt={meta ? meta.lastReadAt : undefined}
             participants={(meta?.participants ?? []).map((p) => ({ ...p, verified: verifiedById[p.member_id] }))}
+            initialComposeText={composeText ?? undefined}
           />
         )}
       </div>
