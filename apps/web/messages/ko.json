@@ -528,7 +528,9 @@
     "tabEvidence": "근거",
     "tabDocs": "문서",
     "tabArtifacts": "산출물",
-    "panelEmptyDocs": "연결된 문서가 없어요"
+    "panelEmptyDocs": "연결된 문서가 없어요",
+    "panelHiddenByFilter": "지금 필터에서는 목록에 안 보이는 일이에요",
+    "panelClearFilters": "필터 지우기"
   },
   "organization": {
     "rolesTitle": "권한",

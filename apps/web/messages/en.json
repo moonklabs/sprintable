@@ -528,7 +528,9 @@
     "tabEvidence": "Evidence",
     "tabDocs": "Docs",
     "tabArtifacts": "Artifacts",
-    "panelEmptyDocs": "No linked docs"
+    "panelEmptyDocs": "No linked docs",
+    "panelHiddenByFilter": "This item isn't shown in the current filter",
+    "panelClearFilters": "Clear filters"
   },
   "organization": {
     "rolesTitle": "Permissions",

@@ -20,6 +20,7 @@ import { filterWorkList, type WorkListFilters } from './filter-work-list';
 import { WorkListRowView } from './work-list-row';
 import { useWorkListSelection } from './use-work-list-selection';
 import { WorkListDetailPanel } from './work-list-detail-panel';
+import { findSelectedRowContext, isRowVisibleInFiltered } from './work-list-detail-actions';
 import { Sheet, SheetContent } from '@/components/ui/sheet';
 import { useIsMobile } from '@/hooks/use-mobile';
 
@@ -140,19 +141,15 @@ export function WorkListShell({ projectId }: { projectId: string }) {
 
   const filtered = data ? filterWorkList(data, filters) : null;
 
-  // story #3845(우패널) — 선택된 rowId로 그 row·부모 story·부모 goal을 한 번에 찾는다
-  // (filtered 기준 — 필터로 걸러진 행은 화면에 없으니 패널도 열지 않는다, "안 보이는데
-  // 패널만 뜨는" 불일치 방지).
-  const selectedContext = (() => {
-    if (!selectedRowId || !filtered) return null;
-    for (const group of filtered.groups) {
-      for (const story of group.stories) {
-        const row = story.rows.find((r) => r.id === selectedRowId);
-        if (row) return { row, goalTitle: group.title, storyId: story.storyId, storyTitle: story.title };
-      }
-    }
-    return null;
-  })();
+  // story #3845(우패널) 픽셀 커밋 ①(페드루 PO 판정 2026-09-14 09:11Z) — "URL이 SSOT":
+  // 선택된 rowId는 data(필터 前 전체 트리)에서 찾는다 — filtered(화면에 보이는 목록)만
+  // 보면 필터로 걸러진 행을 ?row= 딥링크로 열었을 때 패널이 아예 안 뜨는 결함이 난다
+  // (「목록에 안 보이면 패널도 없다」는 URL은 선택했는데 화면은 무를 못 쓰는 모순 — PO가
+  // 명시로 뒤집었다). isHiddenByFilter는 별도 축 — 패널이 뜨느냐(data 기준)와 화면에도
+  // 보이느냐(filtered 기준)는 다른 질문이라 findSelectedRowContext/isRowVisibleInFiltered
+  // 둘로 나눴다(work-list-detail-actions.ts, 순수함수라 테스트도 따로).
+  const selectedContext = findSelectedRowContext(data, selectedRowId);
+  const isHiddenByFilter = !!selectedContext && !isRowVisibleInFiltered(filtered, selectedContext.row.id);
 
   const detailPanel = selectedContext ? (
     <WorkListDetailPanel
@@ -161,6 +158,8 @@ export function WorkListShell({ projectId }: { projectId: string }) {
       storyTitle={selectedContext.storyTitle}
       goalTitle={selectedContext.goalTitle}
       onClose={() => setSelectedRowId(null)}
+      isHiddenByFilter={isHiddenByFilter}
+      onClearFilters={() => setFilters({ goalId: null, hypothesisId: null, mineOnly: false, delegatedOnly: false })}
     />
   ) : null;
 

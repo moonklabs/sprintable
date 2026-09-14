@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { FileText, Layers, X } from 'lucide-react';
+import Link from 'next/link';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -11,6 +12,8 @@ import { getEntityHref } from '@/components/chat/embed-card';
 import { EvidenceSection } from '@/components/verify/evidence-section';
 import { ArtifactSection } from '@/components/canvas/artifact-section';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { deriveRiskLevel, usesSignatureFlow } from '@/components/cage/gate-risk';
+import { GateSignatureApproval } from '@/components/cage/gate-signature-approval';
 import { STATE_TEXT } from './work-list-row';
 import type { WorkListRow } from './derive-work-list';
 import {
@@ -71,9 +74,18 @@ export interface WorkListDetailPanelProps {
   goalTitle: string;
   onClose: () => void;
   className?: string;
+  /** 픽셀 커밋 ①(페드루 PO 판정 2026-09-14 09:11Z) — 지금 필터 화면에는 이 행이 안 보이는지.
+   * true면 안내 배너+필터 지우기 버튼을 띄운다("URL이 SSOT" — 필터로 가려져도 ?row= 딥링크는
+   * 유효해야 한다). 미전달(undefined)이면 배너를 안 그린다(work-list-shell.tsx가 항상 넘기지만,
+   * 다른 호출부가 생겨도 안전한 기본값). */
+  isHiddenByFilter?: boolean;
+  /** ①의 「필터 지우기」 버튼 핸들러 — isHiddenByFilter가 true일 때만 실제로 쓰인다. */
+  onClearFilters?: () => void;
 }
 
-export function WorkListDetailPanel({ row, storyId, storyTitle, goalTitle, onClose, className }: WorkListDetailPanelProps) {
+export function WorkListDetailPanel({
+  row, storyId, storyTitle, goalTitle, onClose, className, isHiddenByFilter = false, onClearFilters,
+}: WorkListDetailPanelProps) {
   const t = useTranslations('workList');
   const { currentMemberType } = useDashboardContext();
 
@@ -111,12 +123,17 @@ export function WorkListDetailPanel({ row, storyId, storyTitle, goalTitle, onClo
   const riskVariant = gate ? riskBadgeVariant(gate) : null;
   const labelKey = gate ? primaryActionLabelKey(gate) : null;
   const conversationId = gate ? gateConversationId(gate) : null;
+  // 픽셀 커밋 ②(페드루 PO 판정 2026-09-14 09:11Z) — gates/[id]/page.tsx의 isSigFlowGate와
+  // 정확히 같은 판정(usesSignatureFlow(deriveRiskLevel(gate))). primaryActionLabelKey가
+  // 라벨을, 이 값이 «어느 UI를 그릴지»를 정한다 — 같은 SSOT에서 파생되므로 라벨과 실제
+  // 렌더가 항상 짝을 이룬다(따로 계산하면 드리프트 위험).
+  const isSigFlowGate = !!gate && usesSignatureFlow(deriveRiskLevel(gate));
 
   // story #3845 — 에이전트 뷰어는 버튼 자체를 안 보인다(403-회피, approvals-queue.tsx의
   // `currentMemberType === 'human'` 게이팅과 동일 SSOT — DashboardContext #2103).
   const canShowPrimaryAction = currentMemberType === 'human' && !!gate && !approved;
 
-  const handleApprove = useCallback(async () => {
+  const submitTransition = useCallback(async (status: 'approved' | 'rejected', evidenceViewed: boolean, note?: string) => {
     if (!gate) return;
     setTransitioning(true);
     setTransitionError(null);
@@ -124,15 +141,19 @@ export function WorkListDetailPanel({ row, storyId, storyTitle, goalTitle, onClo
       const res = await fetch(`/api/gates/${gate.id}/transition`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        // story #3845 — evidence_viewed=true: 이 패널이 열려 있으면 근거 탭이 항상 함께
-        // 보이므로(같은 화면·같은 클릭 흐름) "봤다"는 최소 사실을 서버가 요구하는 그대로
-        // 보낸다. 고위험 게이트는 서버가 이 값 없이는 거절한다(gates.py GateTransitionRequest
-        // 주석 — «봤다»는 서버가 관측할 수 없는 값이라 UI 경유를 강제하는 최소 방어선).
-        body: JSON.stringify({ status: 'approved', evidence_viewed: true }),
+        // 픽셀 커밋 ②(페드루 PO 판정 2026-09-14 09:11Z, 정정) — evidence_viewed를 여기서
+        // 하드코딩하지 않는다. 저위험(평문 버튼) 경로는 evidenceViewed=false로 호출되고,
+        // 고위험(GateSignatureApproval) 경로는 그 컴포넌트의 onApprove가 호출될 때만
+        // true로 호출된다 — 그 콜백 자체가 canSign=evidenceViewed&&reason(내부 체크박스+
+        // 사유 textarea)로 게이팅돼 있어(gate-signature-approval.tsx), true를 여기서
+        // 다시 검증할 필요 없이 "그 콜백이 불렸다"는 사실 자체가 "사람이 실제로 체크박스를
+        // 봤다"는 증거다(gates/[id]/page.tsx의 동일 계약 그대로 재사용 — 새 근거열람
+        // 추적을 이 패널이 독자로 만들지 않는다).
+        body: JSON.stringify({ status, evidence_viewed: evidenceViewed, note: note ?? null }),
       });
       if (res.status === 403) { setTransitionError('forbidden'); return; }
       if (!res.ok) { setTransitionError('other'); return; }
-      setApproved(true);
+      if (status === 'approved') setApproved(true);
       await loadGate();
     } catch {
       setTransitionError('other');
@@ -140,6 +161,16 @@ export function WorkListDetailPanel({ row, storyId, storyTitle, goalTitle, onClo
       setTransitioning(false);
     }
   }, [gate, loadGate]);
+
+  // 저위험(평문) 경로 — evidence_viewed 없이(=false) 호출.
+  const handlePlainApprove = useCallback(() => { void submitTransition('approved', false); }, [submitTransition]);
+  // 고위험(서명) 경로 — GateSignatureApproval의 onApprove만 이 경로를 부른다.
+  const handleSignedApprove = useCallback((reason: string) => { void submitTransition('approved', true, reason); }, [submitTransition]);
+  // GateSignatureApproval은 onReject를 필수로 요구한다(그 컴포넌트의 「변경 요청」 버튼이
+  // 항상 그려지므로) — 이 패널이 반려 흐름을 새로 설계하지 않되, 눌러도 아무 일도 안
+  // 일어나는 죽은 버튼을 남기지 않도록 gates/[id]/page.tsx와 동일한 실 transition으로
+  // 잇는다(evidence_viewed는 반려엔 의미 없어 false 고정).
+  const handleReject = useCallback((reason: string) => { void submitTransition('rejected', false, reason); }, [submitTransition]);
 
   return (
     <div className={cn('flex h-full min-h-0 flex-col', className)} data-testid="work-list-detail-panel">
@@ -154,6 +185,20 @@ export function WorkListDetailPanel({ row, storyId, storyTitle, goalTitle, onClo
           <X className="size-4" aria-hidden="true" />
         </Button>
       </div>
+
+      {/* 픽셀 커밋 ①(페드루 PO 판정 2026-09-14 09:11Z) — "URL이 SSOT": 필터로 안 보이는
+          행이라도 ?row= 딥링크는 유효해야 한다("목록에 안 보이면 패널도 없다"는 같은
+          화면 두 문장이 다른 세계가 되는 것 — URL은 선택했는데 화면은 무를 못 쓴다).
+          data(필터 前 트리)에서 이 행을 찾아 패널은 항상 뜨고, filtered(화면에 보이는
+          목록)에 없을 때만 이 배너로 그 사실을 알린다. */}
+      {isHiddenByFilter ? (
+        <div className="flex items-center justify-between gap-2 border-b border-border bg-muted/50 px-4 py-2" data-testid="panel-hidden-by-filter-notice">
+          <p className="text-xs text-muted-foreground">{t('panelHiddenByFilter')}</p>
+          <Button type="button" variant="outline" size="sm" className="h-7 shrink-0" onClick={onClearFilters} data-testid="panel-clear-filters">
+            {t('panelClearFilters')}
+          </Button>
+        </div>
+      ) : null}
 
       <div className="overflow-y-auto focus-inset flex-1 space-y-3 p-4">
         <div className="space-y-1 text-xs">
@@ -175,27 +220,46 @@ export function WorkListDetailPanel({ row, storyId, storyTitle, goalTitle, onClo
         ) : null}
 
         {canShowPrimaryAction ? (
-          <div className="space-y-2">
-            <Button
-              type="button"
-              variant="default"
-              size="sm"
-              disabled={transitioning}
-              onClick={() => void handleApprove()}
-              data-testid="panel-primary-action"
-            >
-              {t(labelKey!)}
-            </Button>
+          <div className="space-y-2" data-testid="panel-primary-action-section">
+            {/* 픽셀 커밋 ②(페드루 PO 판정 2026-09-14 09:11Z) — isSigFlowGate 분기는
+                gates/[id]/page.tsx와 동형: 고위험은 GateSignatureApproval을 그대로
+                재사용(근거열람 체크박스+사유 textarea를 이 패널이 재구현하지 않는다),
+                저위험만 평문 버튼. */}
+            {isSigFlowGate ? (
+              <div data-testid="panel-signature-flow">
+                <GateSignatureApproval
+                  gate={gate!}
+                  resolving={transitioning}
+                  error={transitionError ? (transitionError === 'forbidden' ? t('transitionForbidden') : t('transitionError')) : null}
+                  onApprove={handleSignedApprove}
+                  onReject={handleReject}
+                  compact
+                />
+              </div>
+            ) : (
+              <>
+                <Button
+                  type="button"
+                  variant="default"
+                  size="sm"
+                  disabled={transitioning}
+                  onClick={handlePlainApprove}
+                  data-testid="panel-primary-action"
+                >
+                  {t(labelKey!)}
+                </Button>
+                {transitionError === 'forbidden' ? (
+                  <p className="text-xs text-destructive" data-testid="panel-transition-error">{t('transitionForbidden')}</p>
+                ) : null}
+                {transitionError === 'other' ? (
+                  <p className="text-xs text-destructive" data-testid="panel-transition-error">{t('transitionError')}</p>
+                ) : null}
+              </>
+            )}
             {conversationId ? (
-              <Button type="button" variant="outline" size="sm" data-testid="panel-reply-action">
-                {t('actionReply')}
+              <Button asChild variant="outline" size="sm">
+                <Link href={`/chats/${conversationId}`} data-testid="panel-reply-action">{t('actionReply')}</Link>
               </Button>
-            ) : null}
-            {transitionError === 'forbidden' ? (
-              <p className="text-xs text-destructive" data-testid="panel-transition-error">{t('transitionForbidden')}</p>
-            ) : null}
-            {transitionError === 'other' ? (
-              <p className="text-xs text-destructive" data-testid="panel-transition-error">{t('transitionError')}</p>
             ) : null}
           </div>
         ) : null}

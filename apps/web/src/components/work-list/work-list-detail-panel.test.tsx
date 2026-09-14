@@ -104,10 +104,14 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-async function mountPanel(row: WorkListRow = baseRow(), storyId = 'story-1') {
+async function mountPanel(
+  row: WorkListRow = baseRow(),
+  storyId = 'story-1',
+  extra: { isHiddenByFilter?: boolean; onClearFilters?: () => void } = {},
+) {
   await act(async () => {
     root.render(wrap(
-      <WorkListDetailPanel row={row} storyId={storyId} storyTitle="스토리 제목" goalTitle="목표 제목" onClose={() => {}} />,
+      <WorkListDetailPanel row={row} storyId={storyId} storyTitle="스토리 제목" goalTitle="목표 제목" onClose={() => {}} {...extra} />,
     ));
   });
   // 4개 fetch(async 체인)가 정착할 때까지 마이크로태스크 몇 바퀴 더 돈다.
@@ -129,6 +133,33 @@ describe('WorkListDetailPanel — 헤더', () => {
     mockFetchRoutes({});
     await mountPanel(baseRow({ ownerName: null }));
     expect(container.querySelector('[data-testid="panel-assignee"]')?.textContent).toContain(koMessages.workList.panelAssigneeNone);
+  });
+});
+
+describe('WorkListDetailPanel — 픽셀 커밋 ①(필터 가려진 행 ?row= 딥링크, 페드루 PO 판정 2026-09-14 09:11Z)', () => {
+  it('⭐isHiddenByFilter=false(기본)면 안내 배너가 안 뜬다', async () => {
+    mockFetchRoutes({});
+    await mountPanel();
+    expect(container.querySelector('[data-testid="panel-hidden-by-filter-notice"]')).toBeNull();
+  });
+
+  it('⭐isHiddenByFilter=true면 패널은 여전히 뜨고(row 자체는 정상 렌더) 안내 배너+필터 지우기 버튼이 함께 뜬다', async () => {
+    mockFetchRoutes({});
+    await mountPanel(baseRow({ title: '가려진 행' }), 'story-1', { isHiddenByFilter: true });
+    expect(container.querySelector('[data-testid="work-list-detail-panel"]')).not.toBeNull();
+    expect(container.textContent).toContain('가려진 행');
+    const notice = container.querySelector('[data-testid="panel-hidden-by-filter-notice"]');
+    expect(notice?.textContent).toContain(koMessages.workList.panelHiddenByFilter);
+    expect(container.querySelector('[data-testid="panel-clear-filters"]')?.textContent).toBe(koMessages.workList.panelClearFilters);
+  });
+
+  it('⭐필터 지우기 클릭 — onClearFilters가 정확히 1회 호출된다', async () => {
+    mockFetchRoutes({});
+    const onClearFilters = vi.fn();
+    await mountPanel(baseRow(), 'story-1', { isHiddenByFilter: true, onClearFilters });
+    const btn = container.querySelector('[data-testid="panel-clear-filters"]') as HTMLButtonElement;
+    await act(async () => { btn.click(); });
+    expect(onClearFilters).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -190,39 +221,111 @@ describe('WorkListDetailPanel — 위험 pill(gate_type/risk에서만)', () => {
   });
 });
 
-describe('WorkListDetailPanel — 주 액션 라벨 매핑', () => {
-  it('gate_type=doc_approval·risk=null → 「승인」', async () => {
-    mockFetchRoutes({ gates: [{ id: 'g1', gate_type: 'doc_approval', risk_grade: null, status: 'pending', work_item_id: 'task-1', work_item_type: 'task' }] });
+describe('WorkListDetailPanel — 주 액션 라벨 매핑(gate-risk.ts::usesSignatureFlow SSOT)', () => {
+  // 저위험(risk_grade='low')만 평문 버튼+「승인」 라벨 — 그 밖은 전부 GateSignatureApproval로
+  // 갈린다(픽셀 커밋 ②, 아래 별도 describe가 그 경로를 전담 검증).
+  it('risk_grade=low → 평문 버튼·「승인」', async () => {
+    mockFetchRoutes({ gates: [{ id: 'g1', gate_type: 'doc_approval', risk_grade: 'low', status: 'pending', work_item_id: 'task-1', work_item_type: 'task' }] });
     await mountPanel();
     expect(container.querySelector('[data-testid="panel-primary-action"]')?.textContent).toBe(koMessages.workList.actionApprove);
+    expect(container.querySelector('[data-testid="panel-signature-flow"]')).toBeNull();
   });
 
-  it('gate_type=external_publish → 「승인하고 서명」', async () => {
-    mockFetchRoutes({ gates: [{ id: 'g1', gate_type: 'external_publish', risk_grade: null, status: 'pending', work_item_id: 'task-1', work_item_type: 'task' }] });
+  it('⭐risk_grade=null(미분류) → 평문 버튼이 아니라 서명 플로우(gate-risk.ts가 null을 보수적 고위험 취급 — 이 카드가 고친 그 버그의 회귀가드)', async () => {
+    mockFetchRoutes({ gates: [{ id: 'g1', gate_type: 'doc_approval', risk_grade: null, status: 'pending', work_item_id: 'task-1', work_item_type: 'task' }] });
     await mountPanel();
-    expect(container.querySelector('[data-testid="panel-primary-action"]')?.textContent).toBe(koMessages.workList.actionApproveAndSign);
+    expect(container.querySelector('[data-testid="panel-primary-action"]')).toBeNull();
+    expect(container.querySelector('[data-testid="panel-signature-flow"]')).not.toBeNull();
   });
 
-  it('risk_grade=high → 「승인하고 서명」(gate_type 무관)', async () => {
-    mockFetchRoutes({ gates: [{ id: 'g1', gate_type: 'doc_approval', risk_grade: 'high', status: 'pending', work_item_id: 'task-1', work_item_type: 'task' }] });
+  it('gate_type=external_publish·risk=high → 서명 플로우', async () => {
+    mockFetchRoutes({ gates: [{ id: 'g1', gate_type: 'external_publish', risk_grade: 'high', status: 'pending', work_item_id: 'task-1', work_item_type: 'task' }] });
     await mountPanel();
-    expect(container.querySelector('[data-testid="panel-primary-action"]')?.textContent).toBe(koMessages.workList.actionApproveAndSign);
+    expect(container.querySelector('[data-testid="panel-signature-flow"]')).not.toBeNull();
+  });
+});
+
+describe('WorkListDetailPanel — 서명 플로우(고위험, 픽셀 커밋 ②: GateSignatureApproval 재사용·evidence_viewed 하드코딩 0)', () => {
+  function sigGate() {
+    return { id: 'g1', gate_type: 'doc_approval', risk_grade: 'high', status: 'pending', work_item_id: 'task-1', work_item_type: 'task' };
+  }
+
+  it('⭐근거열람 체크+사유 입력 전엔 승인 버튼이 비활성(GateSignatureApproval 자기 게이팅 그대로)', async () => {
+    mockFetchRoutes({ gates: [sigGate()] });
+    await mountPanel();
+    const flow = container.querySelector('[data-testid="panel-signature-flow"]') as HTMLElement;
+    // GateSignatureApproval의 DOM 순서는 [반려, 승인] 고정(gate-signature-approval.tsx) —
+    // 승인 버튼은 항상 마지막.
+    const btn = [...flow.querySelectorAll('button')].at(-1) as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+  });
+
+  it('⭐승인 — 체크박스+사유 입력 뒤 클릭하면 evidence_viewed:true로 POST(하드코딩 0, canSign 게이팅 통과가 그 증거)', async () => {
+    mockFetchRoutes({ gates: [sigGate()], transitionStatus: 200 });
+    await mountPanel();
+    const flow = container.querySelector('[data-testid="panel-signature-flow"]') as HTMLElement;
+    const checkbox = flow.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    const textarea = flow.querySelector('textarea') as HTMLTextAreaElement;
+    await act(async () => {
+      checkbox.click();
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+      setter.call(textarea, '근거 확인함');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    // GateSignatureApproval의 DOM 순서는 [반려, 승인] 고정(gate-signature-approval.tsx) —
+    // 체크박스+사유 입력 뒤엔 반려 버튼도 함께 풀리므로(canReject=reason만 필요) !disabled로
+    // 찾으면 안 되고 마지막 버튼(승인)을 명시로 집는다.
+    const approveBtn = [...flow.querySelectorAll('button')].at(-1) as HTMLButtonElement;
+    expect(approveBtn.disabled).toBe(false);
+    await act(async () => { approveBtn.click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    const transitionCall = fetchMock.mock.calls.find((call: unknown[]) => {
+      const [url, init] = call as [string, RequestInit?];
+      return init?.method === 'POST' && url.includes('/transition');
+    });
+    expect(transitionCall).toBeDefined();
+    const body = JSON.parse((transitionCall![1] as RequestInit).body as string);
+    expect(body).toMatchObject({ status: 'approved', evidence_viewed: true, note: '근거 확인함' });
+    expect(container.querySelector('[data-testid="panel-approved-notice"]')?.textContent).toBe(koMessages.workList.actionApproved);
+  });
+
+  it('⭐뮤테이션 표적 — 평문 경로는 evidence_viewed:false로 POST(고위험 경로와 혼동 0)', async () => {
+    mockFetchRoutes({ gates: [{ id: 'g1', gate_type: 'doc_approval', risk_grade: 'low', status: 'pending', work_item_id: 'task-1', work_item_type: 'task' }], transitionStatus: 200 });
+    await mountPanel();
+    const btn = container.querySelector('[data-testid="panel-primary-action"]') as HTMLButtonElement;
+    await act(async () => { btn.click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    const transitionCall = fetchMock.mock.calls.find((call: unknown[]) => {
+      const [url, init] = call as [string, RequestInit?];
+      return init?.method === 'POST' && url.includes('/transition');
+    });
+    const body = JSON.parse((transitionCall![1] as RequestInit).body as string);
+    expect(body).toMatchObject({ status: 'approved', evidence_viewed: false });
   });
 });
 
 describe('WorkListDetailPanel — 에이전트 뷰어 403 회피', () => {
-  it('⭐currentMemberType=agent면 pending gate가 있어도 주 액션 버튼 자체가 없다', async () => {
+  it('⭐currentMemberType=agent면 pending gate가 있어도 주 액션 버튼 자체가 없다(평문 경로)', async () => {
     dashboardContextRef.current = { currentMemberType: 'agent' };
-    mockFetchRoutes({ gates: [{ id: 'g1', gate_type: 'doc_approval', risk_grade: null, status: 'pending', work_item_id: 'task-1', work_item_type: 'task' }] });
+    mockFetchRoutes({ gates: [{ id: 'g1', gate_type: 'doc_approval', risk_grade: 'low', status: 'pending', work_item_id: 'task-1', work_item_type: 'task' }] });
     await mountPanel();
+    expect(container.querySelector('[data-testid="panel-primary-action-section"]')).toBeNull();
     expect(container.querySelector('[data-testid="panel-primary-action"]')).toBeNull();
+  });
+
+  it('⭐currentMemberType=agent면 서명 플로우 경로도 통째로 안 뜬다(canShowPrimaryAction이 두 분기 공통 게이트)', async () => {
+    dashboardContextRef.current = { currentMemberType: 'agent' };
+    mockFetchRoutes({ gates: [{ id: 'g1', gate_type: 'doc_approval', risk_grade: 'high', status: 'pending', work_item_id: 'task-1', work_item_type: 'task' }] });
+    await mountPanel();
+    expect(container.querySelector('[data-testid="panel-primary-action-section"]')).toBeNull();
+    expect(container.querySelector('[data-testid="panel-signature-flow"]')).toBeNull();
   });
 });
 
-describe('WorkListDetailPanel — transition 성공/403', () => {
+describe('WorkListDetailPanel — transition 성공/403(평문 경로, risk_grade=low로 고정 — 서명 경로는 위 describe가 전담)', () => {
   it('⭐성공 — 클릭하면 승인 완료 문구가 뜨고 버튼이 사라진다', async () => {
     mockFetchRoutes({
-      gates: [{ id: 'g1', gate_type: 'doc_approval', risk_grade: null, status: 'pending', work_item_id: 'task-1', work_item_type: 'task' }],
+      gates: [{ id: 'g1', gate_type: 'doc_approval', risk_grade: 'low', status: 'pending', work_item_id: 'task-1', work_item_type: 'task' }],
       transitionStatus: 200,
     });
     await mountPanel();
@@ -236,7 +339,7 @@ describe('WorkListDetailPanel — transition 성공/403', () => {
 
   it('⭐403 — 크래시 없이 「에이전트 계정은 승인할 수 없어요」로 우아하게 처리(깨진 화면 0)', async () => {
     mockFetchRoutes({
-      gates: [{ id: 'g1', gate_type: 'doc_approval', risk_grade: null, status: 'pending', work_item_id: 'task-1', work_item_type: 'task' }],
+      gates: [{ id: 'g1', gate_type: 'doc_approval', risk_grade: 'low', status: 'pending', work_item_id: 'task-1', work_item_type: 'task' }],
       transitionStatus: 403,
     });
     await mountPanel();
@@ -249,9 +352,24 @@ describe('WorkListDetailPanel — transition 성공/403', () => {
   });
 });
 
-describe('WorkListDetailPanel — 답하기(conversation_id 갭)', () => {
-  it('conversation_id 소스가 없어 항상 비노출(지어내지 않는다 — 실측 갭)', async () => {
-    mockFetchRoutes({ gates: [{ id: 'g1', gate_type: 'doc_approval', risk_grade: null, status: 'pending', work_item_id: 'task-1', work_item_type: 'task' }] });
+describe('WorkListDetailPanel — 답하기(3860 AC2, BE #4273 착지 前 구조적 읽기 shim)', () => {
+  it('gate 응답에 conversation_id가 없으면 비노출(지어내지 않는다)', async () => {
+    mockFetchRoutes({ gates: [{ id: 'g1', gate_type: 'doc_approval', risk_grade: 'low', status: 'pending', work_item_id: 'task-1', work_item_type: 'task' }] });
+    await mountPanel();
+    expect(container.querySelector('[data-testid="panel-reply-action"]')).toBeNull();
+  });
+
+  it('⭐gate 응답에 conversation_id가 있으면 노출되고 /chats/<id>로 링크한다', async () => {
+    mockFetchRoutes({ gates: [{ id: 'g1', gate_type: 'doc_approval', risk_grade: 'low', status: 'pending', work_item_id: 'task-1', work_item_type: 'task', conversation_id: 'conv-42' }] });
+    await mountPanel();
+    const replyLink = container.querySelector('[data-testid="panel-reply-action"]');
+    expect(replyLink).not.toBeNull();
+    expect(replyLink?.textContent).toBe(koMessages.workList.actionReply);
+    expect(replyLink?.getAttribute('href')).toBe('/chats/conv-42');
+  });
+
+  it('⭐뮤테이션 표적 — conversation_id가 null이면(값이 있는 필드지만 null) 여전히 비노출', async () => {
+    mockFetchRoutes({ gates: [{ id: 'g1', gate_type: 'doc_approval', risk_grade: 'low', status: 'pending', work_item_id: 'task-1', work_item_type: 'task', conversation_id: null }] });
     await mountPanel();
     expect(container.querySelector('[data-testid="panel-reply-action"]')).toBeNull();
   });
