@@ -18,6 +18,16 @@
  *      아무 FE 프록시도 안 쓴다는 것이 그라운딩 결론이라 PROXY_MAP에 `null`로 명시(「버림」이
  *      아니라 「프록시 자체 없음」) — 그 전제가 깨지면(누군가 나중에 그 엔드포인트를 FE에서
  *      호출하기 시작하면) `findUnexpectedEventsProxy`가 그 자리에서 잡는다.
+ *   ③ BE 기본 limit ↔ FE 기본값 상수 동기화(PO CHANGES②, 2026-09-14 09:01Z) — direct-proxy
+ *      4곳(agent-runs·standup·sprints·retro-sessions route.ts)의 `Number(...) || N` 폴백
+ *      상수 N은 그 BE 라우터의 `Query(default=N)`을 그대로 복제한 값이다(BE가 limit을
+ *      안 받았을 때 실제로 적용하는 기본값과 FE가 "꽉 찬 페이지" 판정에 쓰는 requestedLimit이
+ *      어긋나면 안 됨). BE 기본값이 바뀌는데 FE 상수가 안 따라가면 조용히 다시 「한 페이지=
+ *      전체」로 돌아간다 — LIMIT_DEFAULT_RESOURCES 4개를 실측 대조(stale fail-closed).
+ *      BE `Query(default=None)`(sprints·retros — 리터럴 기본값이 라우터 시그니처에 없다)은
+ *      숫자 대조 대상이 아니라고 명시(스킵이 아니라 「None임을 확인」까지 검사 — extractBe
+ *      LimitDefault가 `undefined`(패턴을 못 찾음, 가드 stale)와 `null`(찾았는데 값이 None)을
+ *      구분한다).
  *
  * ── 스코프 밖(이 가드가 못 잡는 것) ─────────────────────────────────────────
  *   ㉠ 시그널 검사(②)는 "파일이 그 문자열을 담고 있는가"라는 존재 검사다 — 실제로 그
@@ -30,9 +40,12 @@
  *      못 속인다(TypeScript면 `no-unreachable`/dead-code 린트가 별도로 잡을 자리 — 이
  *      가드의 책임 밖). 실제 revert(코드를 지우는 정상적인 회귀)는 문자열 자체가 사라지므로
  *      정상 탐지된다 — 위 예시는 이 가드를 우회하려는 의도적 시도에만 뚫리는 인위적 경로다.
- *   ㉡ BE 라우터 파일이 여러 GET 엔드포인트를 가질 때(예: agent_runs.py의 list_agent_runs +
+ *   ㉢ BE 라우터 파일이 여러 GET 엔드포인트를 가질 때(예: agent_runs.py의 list_agent_runs +
  *      tool-calls) 파일 단위로만 대조한다 — PROXY_MAP 값은 그 파일이 내는 "어떤" 헤더든
  *      하나 이상 실제로 읽는 FE 프록시 목록이면 통과, 엔드포인트별 1:1 정합은 안 본다.
+ *   ㉣ ③(limit 기본값 대조)은 `Number(searchParams.get('limit')) || N` 리터럴 형만 인식한다
+ *      (정규식 기반) — 이 표현을 다른 형태로 리팩터하면 추출 자체가 실패해 "패턴을 못 찾음"
+ *      violation으로 FAIL한다(값이 몰래 틀려지는 것보다 안전한 실패 — stale fail-closed).
  */
 import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
@@ -104,6 +117,75 @@ export function findMissingMetaSignal(apiDir: string, proxyMap: Record<string, s
   return violations;
 }
 
+// PO CHANGES②(2026-09-14 09:01Z) — direct-proxy 4곳의 BE 라우터 파일 ↔ FE 프록시 파일 매핑.
+// PROXY_MAP과 별개 표인 이유: PROXY_MAP은 "헤더를 읽는가"(존재 검사, 여러 파일 허용)를 보고,
+// 이 표는 "기본 limit 숫자가 일치하는가"(정확한 값 대조, 단일 파일)를 본다 — direct-proxy
+// 패턴(Number(...) || N)을 쓰지 않는 나머지 6개 자원(parseCursorPageInput류 다른 메커니즘)은
+// 대상이 아니다.
+export const LIMIT_DEFAULT_RESOURCES: Record<string, { beFile: string; feFile: string }> = {
+  agent_runs: { beFile: 'agent_runs.py', feFile: 'agent-runs/route.ts' },
+  standups: { beFile: 'standups.py', feFile: 'standup/route.ts' },
+  sprints: { beFile: 'sprints.py', feFile: 'sprints/route.ts' },
+  retros: { beFile: 'retros.py', feFile: 'retro-sessions/route.ts' },
+};
+
+const BE_LIMIT_DEFAULT_RE = /limit:\s*int(?:\s*\|\s*None)?\s*=\s*Query\(\s*default=(None|\d+)/;
+const FE_LIMIT_DEFAULT_RE = /requestedLimit\s*=\s*Number\(searchParams\.get\('limit'\)\)\s*\|\|\s*(\d+)/;
+
+/** BE Query(default=N|None)를 추출. undefined = 패턴 자체를 못 찾음(가드 stale, 값 문제 아님). */
+export function extractBeLimitDefault(routerContent: string): number | null | undefined {
+  const m = routerContent.match(BE_LIMIT_DEFAULT_RE);
+  if (!m) return undefined;
+  return m[1] === 'None' ? null : Number(m[1]);
+}
+
+/** FE `|| N` 폴백값을 추출. undefined = 패턴 자체를 못 찾음(가드 stale). */
+export function extractFeLimitDefault(routeContent: string): number | undefined {
+  const m = routeContent.match(FE_LIMIT_DEFAULT_RE);
+  return m ? Number(m[1]) : undefined;
+}
+
+export function findLimitDefaultMismatches(
+  routersDir: string,
+  apiDir: string,
+  resources: Record<string, { beFile: string; feFile: string }>,
+): string[] {
+  const violations: string[] = [];
+  for (const [resource, { beFile, feFile }] of Object.entries(resources)) {
+    let beContent: string;
+    try {
+      beContent = readFileSync(path.join(routersDir, beFile), 'utf8');
+    } catch {
+      violations.push(`${resource}: BE 라우터 파일을 못 찾음 — ${beFile}`);
+      continue;
+    }
+    const beDefault = extractBeLimitDefault(beContent);
+    if (beDefault === undefined) {
+      violations.push(`${resource}: BE limit Query(default=…) 패턴을 못 찾음(${beFile}) — 시그니처가 바뀐 것으로 보임, 가드 정규식 갱신 필요`);
+      continue;
+    }
+
+    let feContent: string;
+    try {
+      feContent = readFileSync(path.join(apiDir, feFile), 'utf8');
+    } catch {
+      violations.push(`${resource}: FE 프록시 파일을 못 찾음 — ${feFile}`);
+      continue;
+    }
+    const feDefault = extractFeLimitDefault(feContent);
+    if (feDefault === undefined) {
+      violations.push(`${resource}: FE requestedLimit 기본값 패턴을 못 찾음(${feFile}) — 코드가 바뀐 것으로 보임, 가드 정규식 갱신 필요`);
+      continue;
+    }
+
+    if (beDefault === null) continue; // BE Query(default=None) — 숫자 대조 대상 아님(명시적 스킵)
+    if (beDefault !== feDefault) {
+      violations.push(`${resource}: BE Query(default=${beDefault})(${beFile}) ≠ FE 기본값 ${feDefault}(${feFile}) — BE 기본값이 바뀌었는데 FE가 안 따라간 것으로 보임`);
+    }
+  }
+  return violations;
+}
+
 export function findUnexpectedEventsProxy(apiDir: string): string[] {
   const hits: string[] = [];
   const walk = (dir: string) => {
@@ -151,6 +233,15 @@ function main(): number {
     return 1;
   }
   console.log(`OK: ${EVENTS_PENDING_UPSTREAM}를 쓰는 FE 프록시 없음(전제 유지).`);
+
+  console.log(`\n[PO CHANGES②] BE 기본 limit ↔ FE 기본값 상수 대조(${Object.keys(LIMIT_DEFAULT_RESOURCES).length}개)`);
+  const limitMismatches = findLimitDefaultMismatches(ROUTERS_DIR, API_DIR, LIMIT_DEFAULT_RESOURCES);
+  if (limitMismatches.length > 0) {
+    console.error('\n❌ BE limit 기본값과 FE 하드코딩 기본값이 어긋났다(story #3857 PO CHANGES②):');
+    for (const v of limitMismatches) console.error(`  - ${v}`);
+    return 1;
+  }
+  console.log('OK: BE Query(default=…)와 FE 폴백 상수 일치(또는 BE default=None으로 숫자 대조 대상 아님).');
 
   return 0;
 }

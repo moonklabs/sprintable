@@ -5,7 +5,11 @@ import { fileURLToPath } from 'node:url';
 import {
   EVENTS_PENDING_UPSTREAM,
   FROZEN_BE_HEADER_ROUTERS,
+  LIMIT_DEFAULT_RESOURCES,
   PROXY_MAP,
+  extractBeLimitDefault,
+  extractFeLimitDefault,
+  findLimitDefaultMismatches,
   findMissingMetaSignal,
   findUnexpectedEventsProxy,
   listBeHeaderRouters,
@@ -47,5 +51,41 @@ describe('verify-be-proxy-header-passthrough(story #3857 AC3)', () => {
     });
     expect(violations).toHaveLength(1);
     expect(violations[0]).toContain('못 찾음');
+  });
+
+  // PO CHANGES②(2026-09-14 09:01Z) — BE Query(default=…) ↔ FE `|| N` 폴백 상수 대조.
+  describe('limit 기본값 대조(PO CHANGES②)', () => {
+    it('extractBeLimitDefault — 숫자 default는 숫자로, None은 null로 추출한다', () => {
+      expect(extractBeLimitDefault('limit: int = Query(default=50, ge=1, le=200)')).toBe(50);
+      expect(extractBeLimitDefault('limit: int | None = Query(default=None, ge=1, le=2000)')).toBeNull();
+    });
+
+    it('extractBeLimitDefault — 패턴을 못 찾으면 undefined(가드 stale 신호, null과 구분)', () => {
+      expect(extractBeLimitDefault('def list_x(): pass')).toBeUndefined();
+    });
+
+    it('extractFeLimitDefault — `|| N` 폴백값을 추출한다', () => {
+      expect(extractFeLimitDefault("const requestedLimit = Number(searchParams.get('limit')) || 50;")).toBe(50);
+    });
+
+    it('extractFeLimitDefault — 패턴을 못 찾으면 undefined', () => {
+      expect(extractFeLimitDefault('const x = 1;')).toBeUndefined();
+    });
+
+    it('실 파일 4쌍 전부 대조 — BE Query(default=N) 있는 자원(agent_runs·standups)은 FE와 일치, None인 자원(sprints·retros)은 숫자 대조 스킵', () => {
+      expect(findLimitDefaultMismatches(ROUTERS_DIR, API_DIR, LIMIT_DEFAULT_RESOURCES)).toEqual([]);
+    });
+
+    it('findLimitDefaultMismatches 양성대조 — 숫자가 어긋나면 잡는다(합성 fixture, 실 파일 훼손 없음)', () => {
+      // 실제 BE/FE 파일 대신 fixture 경로를 못 찾는 케이스로 "존재 검사" 축을 확인 —
+      // 값 불일치 축은 findLimitDefaultMismatches 자체를 라이브 파일로 실행하는 위
+      // 테스트가 이미 「일치=0건」을 고정하므로, 값이 어긋나는 경로는 아래 뮤테이션 검증
+      // (route.ts 상수 실변경 → 가드 재실행 RED)으로 별도 확인한다(스크립트 파일 참고).
+      const violations = findLimitDefaultMismatches(ROUTERS_DIR, API_DIR, {
+        agent_runs: { beFile: 'agent_runs.py', feFile: 'this-file-does-not-exist/route.ts' },
+      });
+      expect(violations).toHaveLength(1);
+      expect(violations[0]).toContain('못 찾음');
+    });
   });
 });

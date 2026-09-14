@@ -102,6 +102,49 @@ export function buildCursorPageMeta<T extends object, K extends keyof T & string
   };
 }
 
+export interface HeaderCursorPageMeta {
+  limit: number;
+  hasMore: boolean;
+  nextCursor: string | null;
+  totalCount: number | null;
+  [key: string]: unknown;
+}
+
+/**
+ * story #3857(PO CHANGES①, 2026-09-14 09:01Z) — BE 목록 라우터(agent_runs·standups·
+ * sprints·retros)가 X-Next-Cursor를 «페이지가 비어 있지 않으면 항상» 낸다(예:
+ * agent_runs.py:127 `if runs:`) — 그래서 nextCursor 존재 자체는 「더 있음」의 증거가
+ * 아니다. 반면 X-Total-Count는 cursor 適用 後 남은 건수라 **cursor 미지정 첫 페이지**
+ * 에서는 정확한 전체 판정을 준다(`data.length < totalCount`). cursor가 있는(두 번째
+ * 이후) 페이지는 그 total이 "이 페이지 기준" 값이 아니라 여전히 «cursor 適用 後 총
+ * 남은 건수»이므로 같은 식이 원칙적으로 계속 맞지만, 이 함수는 첫 페이지만 정확 분기로
+ * 좁힌다(PO CHANGES①의 명시 범위 — cursor 페이지는 기존 보수 규칙 유지, 정확 분기
+ * 확장은 별도 검증 필요).
+ *
+ * cursor 페이지(또는 totalCount를 못 받은 경우)는 기존 보수 규칙(정확히 limit개를
+ * 받았고 + BE가 다음 커서를 실었을 때만 「더 있을 수 있음」)을 그대로 쓴다 — over-fetch
+ * 없이 BE가 정확히 limit개만 주는 계약이므로 유효한 하한선.
+ */
+export function buildHeaderCursorPageMeta(input: {
+  dataLength: number;
+  requestedLimit: number;
+  hasCursorParam: boolean;
+  nextCursorHeader: string | null;
+  totalCountHeader: number | null;
+}): HeaderCursorPageMeta {
+  const { dataLength, requestedLimit, hasCursorParam, nextCursorHeader, totalCountHeader } = input;
+  const hasMore = !hasCursorParam && totalCountHeader !== null
+    ? dataLength < totalCountHeader
+    : dataLength === requestedLimit && nextCursorHeader !== null;
+
+  return {
+    limit: requestedLimit,
+    hasMore,
+    nextCursor: hasMore ? nextCursorHeader : null,
+    totalCount: totalCountHeader,
+  };
+}
+
 /**
  * 백엔드가 cursor/limit를 지원하지 않고 전체 목록을 정렬 없이 반환하는 경우(에픽 GET /api/v2/epics)
  * 라우트에서 결정적으로 정렬한 뒤 cursor를 적용해 한 페이지를 잘라낸다.
