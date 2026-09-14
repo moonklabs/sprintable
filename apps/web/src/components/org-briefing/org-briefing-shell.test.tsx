@@ -86,16 +86,20 @@ describe('OrgBriefingShell — story #3831 헤더(옛 조직 브리핑 낱말 0)
     expect(container.textContent).not.toContain('오늘 조직의 지금');
   });
 
-  it('사람 손이 필요한 일이 있으면 배지가 뜬다', async () => {
+  it('사람 손이 필요한 일이 있으면 헤더 배지가 뜬다', async () => {
     stubToday({ ...EMPTY_TODAY, needs_me_count: 3 });
     await mount();
-    expect(container.textContent).toContain('사람 손이 필요한 일 3');
+    const badge = container.querySelector('[data-testid="needs-me-header-badge"]');
+    expect(badge?.textContent).toBe('사람 손이 필요한 일 3');
   });
 
-  it('사람 손이 필요한 일이 0이면 배지가 안 뜬다', async () => {
+  // 페드루 PO CHANGES(2026-09-14 00:32Z, PR #4256) — 헤더 배지와 구역 제목이 같은 낱말로
+  // 통일됐다(옛 "오늘 내 결정" 제거) — 구역 제목은 count=0에도 항상 뜨므로 여기선 헤더
+  // 배지(data-testid)만 부재를 확인한다(전체 textContent엔 구역 제목이 남아있는 게 정상).
+  it('사람 손이 필요한 일이 0이면 헤더 배지가 안 뜬다', async () => {
     stubToday(EMPTY_TODAY);
     await mount();
-    expect(container.textContent).not.toContain('사람 손이 필요한 일');
+    expect(container.querySelector('[data-testid="needs-me-header-badge"]')).toBeNull();
   });
 });
 
@@ -143,6 +147,30 @@ describe('OrgBriefingShell — story #3831 AC1(3구역, 3823 route 단일 소비
     expect(container.textContent).toContain('모두 확인했어요');
   });
 
+  // 페드루 PO CHANGES(2026-09-14 00:32Z, PR #4256) — needs_me_count(서버 집계) > 파싱된
+  // 행 수(핵심 식별자 없어 뺀 뒤)면 그 차를 「모두 확인했어요」로 삼키지 않고 낱말로 드러낸다.
+  it('needs_me_count가 파싱된 행 수보다 크면 숨겨진 건수를 알린다(0으로 위장 금지)', async () => {
+    stubToday({
+      ...EMPTY_TODAY,
+      needs_me: [{
+        kind: 'approval', risk: 'low', source: 'gate', source_id: 'g1',
+        work_item: { type: 'story', id: 's1', title: '블로그 글 발행' },
+        requested_by: null, reason: null, created_at: '2026-09-13T05:00:00Z', actions: ['approve'],
+      }],
+      needs_me_count: 3, // 응답엔 3건이라는데 파싱 가능한 행은 1개뿐(나머지 2건은 식별자 결손).
+    });
+    await mount();
+    expect(container.textContent).toContain('2건은 정보가 부족해 표시하지 못했어요');
+    expect(container.textContent).not.toContain('모두 확인했어요');
+  });
+
+  it('needs_me_count는 3인데 파싱 가능한 행이 0개면(전부 식별자 결손) 「모두 확인했어요」로 위장하지 않는다', async () => {
+    stubToday({ ...EMPTY_TODAY, needs_me: [], needs_me_count: 3 });
+    await mount();
+    expect(container.textContent).toContain('3건은 정보가 부족해 표시하지 못했어요');
+    expect(container.textContent).not.toContain('모두 확인했어요');
+  });
+
   it('에이전트 진행 항목이 있으면 이름·상태가 뜬다', async () => {
     stubToday({
       ...EMPTY_TODAY,
@@ -162,6 +190,24 @@ describe('OrgBriefingShell — story #3831 AC1(3구역, 3823 route 단일 소비
     stubToday(EMPTY_TODAY);
     await mount();
     expect(container.textContent).toContain('진행 중인 위임이 없어요');
+  });
+
+  // 페드루 PO CHANGES(2026-09-14 00:32Z, PR #4256) — AGENT_STATUS_KEY 표에 없는 status를
+  // 「진행 중」으로 단정하면 지어내는 것(no-fiction). 상태 낱말 자체가 없어야 한다.
+  it('agent_progress.status가 표에 없는 값이면 상태 낱말을 지어내지 않는다(에이전트 이름만)', async () => {
+    stubToday({
+      ...EMPTY_TODAY,
+      agent_progress: [{
+        run_id: 'r1', agent: { id: 'a1', name: '미르코' },
+        work_item: { type: 'story', id: 's1', title: 'YouTube 영상 올리기' },
+        status: 'unknown_future_status', current_step: null, started_at: '2026-09-13T03:00:00Z',
+      }],
+    });
+    await mount();
+    // 섹션 헤더 배지("진행 중 1")는 건수 낱말이라 무관 — 행 자신의 부제(agentName·status)만
+    // 검사한다: status 인식 실패면 그 줄이 에이전트 이름 하나로 끝나야 한다("· 진행 중" 0).
+    const nameSpan = [...container.querySelectorAll('span')].find((s) => s.textContent === '미르코');
+    expect(nameSpan).toBeTruthy();
   });
 
   it('오늘 나간 것이 있으면 채널별 수가 뜬다', async () => {

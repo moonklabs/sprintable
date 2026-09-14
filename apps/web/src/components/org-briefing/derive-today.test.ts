@@ -79,7 +79,7 @@ describe('parseToday — story #3823 실 응답 모양 파싱(no-fiction)', () =
     expect(snapshot.usage).toEqual({ platform: [{ connectionId: 'c1', channelKind: 'youtube', used: 100, limit: 10000, resetAt: '2026-09-14T00:00:00Z' }], adSpendMeasured: false });
   });
 
-  it('conversation_id가 없으면(3828 미착지 현재 형상) null로 파싱한다 — 링크 0 경로', () => {
+  it('conversation_id가 없으면(BE가 비참여 실행에 null 반환하는 경우) null로 파싱한다 — 링크 0 경로', () => {
     const raw = {
       needs_me: [{
         kind: 'approval', risk: 'low', source: 'gate', source_id: 'g1',
@@ -91,7 +91,7 @@ describe('parseToday — story #3823 실 응답 모양 파싱(no-fiction)', () =
     expect(parseToday({ data: raw }).needsMe[0]!.conversationId).toBeNull();
   });
 
-  it('conversation_id가 있으면(3828 착지 後 형상) 그대로 잡는다', () => {
+  it('conversation_id가 있으면(story #3828, 캐폴러가 실참여자인 실행) 그대로 잡는다', () => {
     const raw = {
       needs_me: [{
         kind: 'approval', risk: 'low', source: 'gate', source_id: 'g1',

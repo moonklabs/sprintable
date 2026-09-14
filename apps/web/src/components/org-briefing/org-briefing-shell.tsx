@@ -124,7 +124,10 @@ export function OrgBriefingShell() {
           <p className="mt-1 text-sm text-muted-foreground">{dateLabel}</p>
         </div>
         {data && snapshot.needsMeCount > 0 ? (
-          <span className="shrink-0 rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-semibold text-primary">
+          <span
+            data-testid="needs-me-header-badge"
+            className="shrink-0 rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-semibold text-primary"
+          >
             {t('needsMeBadge', { count: snapshot.needsMeCount })}
           </span>
         ) : null}

@@ -75,18 +75,32 @@ function NeedsMeRow({ item }: { item: TodayNeedsMeItem }) {
 
 export function NeedsMeSection({ items, count }: { items: TodayNeedsMeItem[]; count: number }) {
   const t = useTranslations('orgBriefing');
+  // 페드루 PO CHANGES(2026-09-14 00:32Z, PR #4256) — count(서버 집계)가 items.length(파서가
+  // 핵심 식별자 없어 뺀 뒤의 실제 행)보다 클 수 있다. 그 차를 「모두 확인했어요」로 삼키면
+  // (items.length===0인데 count>0인 경우가 최악) 지어내는 셈이라, 차이가 있으면 낱말로
+  // 드러낸다 — 0으로 위장 금지 원칙의 사촌.
+  const hiddenCount = count - items.length;
   return (
     <section aria-label={t('needsMeSectionTitle', { count })}>
       <div className="mb-2.5 flex items-baseline gap-2.5">
         <h2 className="text-sm font-semibold text-foreground">{t('needsMeSectionTitle', { count })}</h2>
         {items.length > 0 ? <span className="text-[11px] text-muted-foreground">{t('needsMeHint')}</span> : null}
       </div>
-      {items.length === 0 ? (
+      {items.length === 0 && hiddenCount <= 0 ? (
         <Card className="flex flex-col items-center gap-1.5 px-5 py-10 text-center">
           <p className="text-sm font-medium text-foreground">{t('needsMeEmptyTitle')}</p>
         </Card>
+      ) : items.length === 0 ? (
+        <Card className="flex flex-col items-center gap-1.5 px-5 py-10 text-center">
+          <p className="text-sm text-muted-foreground">{t('needsMeHiddenCountNotice', { count: hiddenCount })}</p>
+        </Card>
       ) : (
-        <Card>{items.map((item) => <NeedsMeRow key={item.id} item={item} />)}</Card>
+        <>
+          <Card>{items.map((item) => <NeedsMeRow key={item.id} item={item} />)}</Card>
+          {hiddenCount > 0 ? (
+            <p className="mt-1.5 text-[11px] text-muted-foreground">{t('needsMeHiddenCountNotice', { count: hiddenCount })}</p>
+          ) : null}
+        </>
       )}
     </section>
   );
@@ -94,7 +108,9 @@ export function NeedsMeSection({ items, count }: { items: TodayNeedsMeItem[]; co
 
 function AgentProgressRow({ item }: { item: TodayAgentProgressItem }) {
   const t = useTranslations('orgBriefing');
-  const statusKey = AGENT_STATUS_KEY[item.status] ?? 'agentStatusRunning';
+  // 페드루 PO CHANGES(2026-09-14 00:32Z, PR #4256) — 모르는 status를 「진행 중」으로
+  // 단정하면 지어내는 것이다(no-fiction). 표에 없는 status면 상태 낱말 자체를 생략한다.
+  const statusKey = AGENT_STATUS_KEY[item.status];
   return (
     <div className="flex items-center gap-3 border-t border-border px-3 py-3 first:border-t-0">
       <span className="size-2 shrink-0 rounded-full bg-info" aria-hidden="true" />
@@ -103,7 +119,7 @@ function AgentProgressRow({ item }: { item: TodayAgentProgressItem }) {
           {item.workItemTitle ?? item.agentName}
         </span>
         <span className="block truncate text-xs text-muted-foreground">
-          {item.agentName} · {t(statusKey)}
+          {statusKey ? `${item.agentName} · ${t(statusKey)}` : item.agentName}
         </span>
       </div>
     </div>
