@@ -61,31 +61,66 @@ const TINT_FAMILY_BG_RE = new RegExp(
 const TINT_FAMILY_BG_RE_G = new RegExp(TINT_FAMILY_BG_RE.source, 'g');
 const MUTED_TEXT_RE = /(?<![\w-])text-muted-foreground(?![\w-])/;
 
-function classStringsFromExpr(e: ts.Expression): string[] {
+/** varName → 그 변수가 가질 수 있는 class 후보 문자열 목록(story #3850 — 객체 맵/삼항/
+ * 템플릿 리터럴을 거쳐 JSX에 닿는 tint를 추적하기 위한 이름 해석 표). 빈 표가 기본값 —
+ * 기존 호출부(바인딩 모르는 자리)는 동작 무변. */
+type ClassBindings = ReadonlyMap<string, readonly string[]>;
+const NO_BINDINGS: ClassBindings = new Map();
+
+function classStringsFromExpr(e: ts.Expression, bindings: ClassBindings = NO_BINDINGS): string[] {
   if (ts.isStringLiteral(e) || ts.isNoSubstitutionTemplateLiteral(e)) return [e.text];
   if (ts.isTemplateExpression(e)) {
-    return [[e.head.text, ...e.templateSpans.map((sp) => sp.literal.text)].join(' ')];
+    // story #3850 — 정적 부분만 보고 `${...}` 치환식 안(삼항·바인딩 참조 등)은 통째로
+    // 무시하던 것을 고친다(invite-accept-client.tsx류 — 삼항이 템플릿 치환 «안»에 있어
+    // 이전엔 조상 추적·완전성 대조 둘 다 못 봤다). 치환식도 재귀 추출해 합친다.
+    const staticJoin = [e.head.text, ...e.templateSpans.map((sp) => sp.literal.text)].join(' ');
+    const dynamic = e.templateSpans.flatMap((sp) => classStringsFromExpr(sp.expression, bindings));
+    return [staticJoin, ...dynamic];
   }
+  if (ts.isParenthesizedExpression(e)) return classStringsFromExpr(e.expression, bindings);
   if (ts.isCallExpression(e) && /(?:^|\.)cn$/.test(e.expression.getText())) {
     // #2590 A(verify-cross-element-tint-text.ts)와 달리 재귀 처리한다 — 실사고
     // (activation-checklist-banner.tsx)가 정확히 `cn('...', met ? 'a' : 'b')` 형태라,
     // cn() 인자가 문자열 리터럴일 때만 보면 그 삼항이 통째로 빠져 정작 막으려던 자리를
     // 못 잡는다(뮤테이션 테스트가 이 구멍을 실측으로 잡아냈다). 인자별로 재귀해 삼항의
     // 두 branch 모두 수집 — && 등 그 외 조건부는 classStringsFromExpr가 여전히 []로 제외.
-    return e.arguments.flatMap((a) => classStringsFromExpr(a));
+    return e.arguments.flatMap((a) => classStringsFromExpr(a, bindings));
   }
   if (ts.isConditionalExpression(e)) {
-    return [...classStringsFromExpr(e.whenTrue), ...classStringsFromExpr(e.whenFalse)];
+    return [...classStringsFromExpr(e.whenTrue, bindings), ...classStringsFromExpr(e.whenFalse, bindings)];
+  }
+  // story #3850(AC1 축 b, 국소) — `X ?? Y`/`X || Y`는 &&와 달리 「둘 중 하나가 항상
+  // 결과가 된다」는 보장이 있는 폴백 관용구(예: `STATUS_COLOR[id] ?? STATUS_COLOR['backlog']`)
+  // — 두 피연산자를 조상 후보로 함께 수집한다(#2590 A의 && 배제 정밀성은 그대로 유지 —
+  // &&는 "적용 안 됨"이 결과일 수 있어 이 식과 성격이 다르다).
+  if (
+    ts.isBinaryExpression(e) &&
+    (e.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken || e.operatorToken.kind === ts.SyntaxKind.BarBarToken)
+  ) {
+    return [...classStringsFromExpr(e.left, bindings), ...classStringsFromExpr(e.right, bindings)];
+  }
+  if (ts.isIdentifier(e)) return [...(bindings.get(e.text) ?? [])];
+  if (ts.isPropertyAccessExpression(e) || ts.isElementAccessExpression(e)) {
+    // story #3850(AC1 축 a) — `STATUS_COLOR[id].tint`·`statusColor.dot`처럼 객체 맵을
+    // 프로퍼티/첨자로 조회하는 자리. 어느 키가 실제로 오는지는 정적으로 모르므로(변수
+    // 조회) 보수적으로 그 루트가 가진 후보 문자열 전부를 반환한다(어느 프로퍼티가 오든
+    // — .dot이든 .tint든 — 그 객체 전체에서 나온 tint를 조상 후보로 취급). 루트가
+    // 이름 있는 식별자가 아니라 `{ idle: {...}, ... }[fallback]`처럼 인라인 객체
+    // 리터럴 자체일 수도 있다(stuck-handoff-section.tsx류) — 그 경우 즉석에서 값을 뽑는다.
+    let root: ts.Expression = e;
+    while (ts.isPropertyAccessExpression(root) || ts.isElementAccessExpression(root)) root = root.expression;
+    if (ts.isObjectLiteralExpression(root)) return collectObjectLiteralClassStrings(root, bindings);
+    return ts.isIdentifier(root) ? [...(bindings.get(root.text) ?? [])] : [];
   }
   return []; // BinaryExpression(x && 'y') 등 조건부 = 항상적용 보장 안 됨 → 제외(정밀, #2590 A 관례 그대로).
 }
 
-function classNameStringsOf(opening: ts.JsxOpeningLikeElement): string[] {
+function classNameStringsOf(opening: ts.JsxOpeningLikeElement, bindings: ClassBindings = NO_BINDINGS): string[] {
   for (const a of opening.attributes.properties) {
     if (ts.isJsxAttribute(a) && a.name.getText() === 'className' && a.initializer) {
       if (ts.isStringLiteral(a.initializer)) return [a.initializer.text];
       if (ts.isJsxExpression(a.initializer) && a.initializer.expression) {
-        return classStringsFromExpr(a.initializer.expression);
+        return classStringsFromExpr(a.initializer.expression, bindings);
       }
     }
   }
@@ -324,6 +359,111 @@ function countLiteralClassNameTintMatches(content: string, file: string): number
   return count;
 }
 
+function collectObjectLiteralClassStrings(obj: ts.ObjectLiteralExpression, bindings: ClassBindings): string[] {
+  const out: string[] = [];
+  for (const prop of obj.properties) {
+    if (!ts.isPropertyAssignment(prop)) continue; // shorthand/spread/계산된 키는 미지원 — 아래 완전성 fail-closed가 raw>explained로 대신 잡는다.
+    if (ts.isObjectLiteralExpression(prop.initializer)) {
+      out.push(...collectObjectLiteralClassStrings(prop.initializer, bindings)); // 중첩 객체(예: STATUS_COLOR 값이 {dot,tint})
+    } else {
+      out.push(...classStringsFromExpr(prop.initializer as ts.Expression, bindings));
+    }
+  }
+  return out;
+}
+
+export interface LocalTintBindingsResult {
+  /** varName → 그 변수의 초기값에서 뽑아낸 class 후보 문자열 전부(어느 키/분기가 실제로
+   * 선택되는지는 정적으로 모르므로 전부 보수적으로 보관 — scanContent가 JSX 소비 지점에서
+   * 조상 후보로 재사용한다). */
+  bindings: Map<string, string[]>;
+  /** bindings에 실린 문자열들 안에서 찾은 tint 매치 총수 — 이 값들의 원문 텍스트가 바로
+   * "raw" 정규식이 이미 그 자리(변수 선언문 자체)에서 센 것과 같은 자리이므로, 완전성
+   * 대조의 explained 항에 더하면 그 선언 자리의 raw를 정확히 상쇄한다(중복 계산 없음 —
+   * JSX 소비 지점은 그 텍스트를 다시 갖고 있지 않다, identifier/property-access일 뿐). */
+  accountedMatches: number;
+}
+
+/** story #3850(AC1) — 객체 맵(`const STATUS_COLOR = { key: { tint: 'bg-...-tint' } }`류)과
+ * 로컬 삼항/`??`/`||` 바인딩(`const colClass = cond ? 'bg-...-tint ...' : '...'`류)을 한
+ * 파일 전체에서 찾아 {변수명 → class 후보 문자열들} 표로 만든다. classStringsFromExpr가
+ * 이 표를 받아 JSX className 안 Identifier/PropertyAccess/ElementAccess를 해석하므로,
+ * scanContent(조상 추적)·완전성 대조(explained 합산) 양쪽이 이 표 하나를 공유해 쓴다.
+ * 순방향 1-pass다(뒤에 선언된 바인딩을 참조하는 앞 선언은 못 푼다) — 실사용 16개 파일
+ * 전수에서 그런 앞→뒤 순환 참조가 없음을 실행 결과로 확인(스코프 밖 명시, 아래 참고). */
+export function extractLocalTintBindings(sf: ts.SourceFile): LocalTintBindingsResult {
+  const bindings = new Map<string, string[]>();
+
+  function walk(node: ts.Node): void {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
+      const strings = ts.isObjectLiteralExpression(node.initializer)
+        ? collectObjectLiteralClassStrings(node.initializer, bindings)
+        : classStringsFromExpr(node.initializer, bindings);
+      if (strings.length > 0) bindings.set(node.name.text, strings);
+    }
+    node.forEachChild(walk);
+  }
+  walk(sf);
+
+  let accountedMatches = 0;
+  for (const strings of bindings.values()) {
+    for (const s of strings) {
+      const m = s.match(TINT_FAMILY_BG_RE_G);
+      if (m) accountedMatches += m.length;
+    }
+  }
+  return { bindings, accountedMatches };
+}
+
+/** story #3850(AC1 축 b, doc-content-renderer.tsx류) — React JSX가 아니라 명령형 DOM
+ * 코드(`el.innerHTML = ...`·`el.className = ...`)로 tint 클래스를 심는 자리. JSX 트리가
+ * 없어 scanContent의 조상 추적 대상이 될 수 없다(그 문자열 자체 안에 배경·글자색이 함께
+ * 박혀 있어 별도 muted 중첩 위험도 구조적으로 없다) — 완전성 explained 항에만 반영한다. */
+function countAssignmentSinkTintMatches(sf: ts.SourceFile, bindings: ClassBindings): number {
+  let count = 0;
+  function walk(node: ts.Node): void {
+    if (
+      ts.isBinaryExpression(node) &&
+      node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+      ts.isPropertyAccessExpression(node.left) &&
+      (node.left.name.text === 'innerHTML' || node.left.name.text === 'className')
+    ) {
+      for (const s of classStringsFromExpr(node.right, bindings)) {
+        const m = s.match(TINT_FAMILY_BG_RE_G);
+        if (m) count += m.length;
+      }
+    }
+    node.forEachChild(walk);
+  }
+  walk(sf);
+  return count;
+}
+
+/** story #3850(완전성 보강, `&&` 가드 — stuck-handoff-section.tsx 실 파일 재측정 뒤 드러남) —
+ * `cond && 'bg-...-tint ...'`(clsx/cn 관용구)는 #2590 A 정밀성 그대로 조상 후보에서 뺀다
+ * (조건이 거짓이면 그 클래스가 아예 안 붙어 "항상 있는 배경"으로 단정하면 위험 쪽으로
+ * 틀린다 — classStringsFromExpr가 BinaryExpression을 조상 추적용으로 안 도는 이유 그대로).
+ * 하지만 완전성 대조는 "가드가 이 raw 자리를 보고도 의식적으로 조상 후보에서 뺐다"와
+ * "가드가 아예 못 봤다(진짜 사각)"를 구분해야 한다 — 전자를 explained로 인정해야
+ * UNANALYZED_TINT_SITES가 진짜 사각(사람이 아직 안 본 새 패턴)만 남긴다. 그래서 이 축은
+ * explained에만 더하고 scanContent의 실제 조상 추적(bindings)에는 절대 안 흘린다
+ * (classStringsFromExpr를 bindings 없이 호출 — literal/template/ternary만, 그 자체가 이미
+ * &&의 우변을 스스로 판단하지 않는다는 뜻).*/
+function countAndGuardedTintMatches(sf: ts.SourceFile): number {
+  let count = 0;
+  function walk(node: ts.Node): void {
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken) {
+      for (const s of classStringsFromExpr(node.right)) {
+        const m = s.match(TINT_FAMILY_BG_RE_G);
+        if (m) count += m.length;
+      }
+    }
+    node.forEachChild(walk);
+  }
+  walk(sf);
+  return count;
+}
+
 export interface UnexplainedTintSite { file: string; raw: number; explained: number; }
 
 export interface TreeCompletenessResult {
@@ -331,10 +471,10 @@ export interface TreeCompletenessResult {
   /** cva variant→컴포넌트 매핑이 모호한 경우(0개/2개+) — baseline 대상 아님, 항상 하드 FAIL
    * (그 cva 정의 자체가 잘못됐다는 뜻이라 "얼려서 넘길" 채무가 아니다). */
   ambiguousReasons: string[];
-  /** 파일별 원시 tint 매치 > 처리(리터럴 className + ui/ cva) 매치 — object맵·템플릿 삼항
-   * 등 이 가드가 구조적으로 못 보는 소비처(story #3839 PO 보강, 2026-09-14 05:48Z). main()이
-   * UNANALYZED_TINT_SITES baseline과 비교해 늘어도·줄어도(stale) FAIL한다(신규 사각 금지,
-   * 해소는 story #3850). */
+  /** 파일별 원시 tint 매치 > 처리(리터럴 className + ui/ cva + 객체맵/삼항·`??`/`||` 바인딩 +
+   * innerHTML/className 대입) 매치 — 이 가드가 그래도 구조적으로 못 보는 소비처(story #3839
+   * PO 보강, 2026-09-14 05:48Z · 축 2개는 story #3850이 닫음). main()이 UNANALYZED_TINT_SITES
+   * baseline과 비교해 늘어도·줄어도(stale) FAIL한다(신규 사각 금지). */
   unexplainedSites: UnexplainedTintSite[];
 }
 
@@ -342,7 +482,12 @@ export interface TreeCompletenessResult {
  * 안에서만 도는 게 아니라 스캔 트리 «전체»로 넓힌다. 같은 메커니즘(cva나 그에 준하는
  * 클래스맵)이 ui/ 밖에 생기면 실제 조상-추적 지도(componentMap)에는 절대 안 실리므로
  * (그 지도는 ui/만 본다), 그 파일의 tint 매치는 "처리됨"으로 치지 않는다 — literal JSX
- * className만, 그리고 ui/ 파일의 cva만 "처리됨"으로 인정한다. */
+ * className만, 그리고 ui/ 파일의 cva만 "처리됨"으로 인정한다.
+ *
+ * story #3850(AC1) — 추가로 두 축을 explained에 합류시킨다: 객체 맵/로컬 삼항·`??`/`||`
+ * 바인딩(extractLocalTintBindings — 그 바인딩을 JSX가 소비하는 지점은 classStringsFromExpr에
+ * 같은 표를 넘겨 조상 후보로도 재사용, scanContent 쪽)과 innerHTML/className 명령형 대입
+ * (countAssignmentSinkTintMatches). */
 export function analyzeTreeForTintCompleteness(
   files: Array<{ file: string; content: string }>,
   isUiFile: (file: string) => boolean,
@@ -359,10 +504,16 @@ export function analyzeTreeForTintCompleteness(
       ambiguousReasons.push(...cvaResult.incompleteReasons);
     }
 
+    const sf = ts.createSourceFile(file, content, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+    const { bindings, accountedMatches: localAccounted } = extractLocalTintBindings(sf);
+    const assignmentSinkMatches = countAssignmentSinkTintMatches(sf, bindings);
+    const andGuardedMatches = countAndGuardedTintMatches(sf);
+
     const literalMatches = countLiteralClassNameTintMatches(content, file);
     const stripped = content.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
     const raw = (stripped.match(TINT_FAMILY_BG_RE_G) ?? []).length;
-    const explained = literalMatches + (isUi ? cvaResult.accountedMatches : 0);
+    const explained =
+      literalMatches + (isUi ? cvaResult.accountedMatches : 0) + localAccounted + assignmentSinkMatches + andGuardedMatches;
     if (raw > explained) {
       unexplainedSites.push({ file, raw, explained });
     }
@@ -392,9 +543,13 @@ export function violationKey(v: Pick<Violation, 'file' | 'family'>): string {
 }
 
 /** componentMap이 주어지면(story #3839 카디르 보강) `<Alert variant="info">`처럼 cva
- * variant로만 tint가 나오는 컴포넌트 경계도 리터럴 `bg-info-tint` 조상과 동일하게 본다. */
+ * variant로만 tint가 나오는 컴포넌트 경계도 리터럴 `bg-info-tint` 조상과 동일하게 본다.
+ * story #3850(AC1) — 같은 파일 안 객체 맵/로컬 삼항·`??`/`||` 바인딩(extractLocalTintBindings)도
+ * className 해석에 함께 쓴다(`${colClass}`·`statusColor.dot`처럼 리터럴이 아닌 참조가 실제로
+ * tint 배경을 끌어오는 자리를 조상으로 인식) — kanban-column.tsx류 실 소비 사례. */
 export function scanContent(content: string, file: string, componentMap?: ComponentTintMap): Violation[] {
   const sf = ts.createSourceFile(file, content, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const { bindings } = extractLocalTintBindings(sf);
   const violations: Violation[] = [];
 
   function familyFromComponent(opening: ts.JsxOpeningLikeElement): TintFamily | null {
@@ -417,7 +572,7 @@ export function scanContent(content: string, file: string, componentMap?: Compon
     else if (ts.isJsxSelfClosingElement(node)) { opening = node; }
 
     if (opening) {
-      const cls = classNameStringsOf(opening).join(' ');
+      const cls = classNameStringsOf(opening, bindings).join(' ');
       const bgMatch = cls.match(TINT_FAMILY_BG_RE);
       // 같은 요소가 새 tint를 도입하면(같은 요소·직계/深 자식 둘 다 커버) 그 순간부터
       // «유효 조상»을 그 family로 갱신 — 같은 요소 안 bg+text 공존(같은 요소 케이스)도
@@ -487,7 +642,10 @@ export const GRANDFATHER_BASELINE = new Map<string, number>([
   // <Alert variant="destructive">(리터럴 클래스 아닌 cva 경계) 안 text-muted-foreground 5곳씩.
   ['components/content/api-usage-budget-exceeded-banner.tsx::muted-on-destructive-tint', 5],
   ['components/content/generation-budget-exceeded-banner.tsx::muted-on-destructive-tint', 5],
-  ['components/cage/stuck-handoff-section.tsx::muted-on-destructive-tint', 1],
+  // story #3850 착지(객체 맵/삼항 축 신설) 뒤 2건으로 증가 — 기존 1건(리터럴 138행)은 그대로,
+  // 새로 잡힌 1건은 객체 맵 축(btn = {...}[fallback], 102행 notifying.cls가 조상으로 인식된
+  // 서브트리 안 muted 텍스트). AC2 "새로 드러나는 실 위반은 목록째 카드에·오탐 처리 금지".
+  ['components/cage/stuck-handoff-section.tsx::muted-on-destructive-tint', 2],
   ['components/chat/command-hint-notice.tsx::muted-on-info-tint', 1],
   ['components/chat/hitl-approval-card.tsx::muted-on-warning-tint', 3],
   ['components/chat/reference-drop-notice.tsx::muted-on-warning-tint', 2],
@@ -500,41 +658,58 @@ export const GRANDFATHER_BASELINE = new Map<string, number>([
   ['components/settings/agent-project-access-section.tsx::muted-on-success-tint', 1],
   ['components/sprints/hypothesis-declaration-card.tsx::muted-on-info-tint', 1],
   ['components/sprints/hypothesis-declaration-section.tsx::muted-on-info-tint', 1],
+
+  // story #3850(AC2, 2026-09-14) — 객체 맵/삼항·`??`/`||` 로컬 바인딩 축(kanban-column.tsx
+  // STATUS_COLOR·colClass류)을 조상 추적에 연결한 뒤 develop HEAD 재스캔에서 새로 드러난
+  // 자리(이전엔 raw 정규식이 식별자·프로퍼티 조회를 못 봐서 스캐너 시야 자체에 없었다).
+  // "오탐 처리 금지" — 실제로 그 JSX 서브트리 안에 있는 text-muted-foreground이 맞다(사람이
+  // 각 파일 diff로 확인, 아래 개별 근거). 개별 색상 교정은 이 스토리 스코프 밖(화면별 triage
+  // 필요 — #3839 기존 grandfather와 동일 원칙)이라 그대로 얼린다.
+  ['components/agents/agent-api-key-manager.tsx::muted-on-warning-tint', 1],
+  ['components/cage/gate-line-context.tsx::muted-on-warning-tint', 1],
+  // doc-gate-section.tsx(429행, AUDIT_META.dot 소비 span) — am.dot 바인딩이 AUDIT_META
+  // 4항목의 class 후보 문자열을 전부 모아 조상 후보 판정에 쓰는데(보수적 합집합), 그 중
+  // "resubmitted" 항목 자체는 안전한 bg-muted+text-muted-foreground 짝(가드의 「bg-muted
+  // 자체는 대상 밖」 원칙과 같은 값)이라 그 텍스트가 다른(불안전한) 후보의 tint와 합쳐진
+  // 문자열 안에서 우연히 공존한다 — 실제로는 그 span이 "resubmitted"일 때 bg-muted+
+  // text-muted-foreground만 걸리고 tint는 안 걸린다(런타임에 한 후보만 선택됨). 같은
+  // 요소(same-element) 공존 판정이 후보별이 아니라 합친 문자열 하나로 되는 이 가드의
+  // 기존 방식(#3839부터, cn()/삼항 분기 join)의 알려진 한계 — 개별 분기 격리는 더 큰
+  // 재설계가 필요해 이 스토리 스코프 밖, "오탐 처리 금지" 원칙대로 얼린다.
+  ['components/docs/doc-gate-section.tsx::muted-on-info-tint', 1],
+  ['components/docs/doc-status-rail.tsx::muted-on-success-tint', 2],
+  // kanban-column.tsx — colClass(wipExceeded 삼항 1번째 분기 bg-destructive-tint)가 컴포넌트
+  // 최상위 반환 div에 걸려, 그 밑 전체 서브트리(헤더·카드 목록 등)의 muted-foreground 11곳이
+  // 전부 "조상이 destructive-tint일 수 있다"로 잡힌다 — WIP 초과 강조라는 드문 상태에서만
+  // 실제로 배경이 걸리므로 상시 노출 위험은 낮지만, 가드 자신의 기존 원칙(리터럴 bg-X-tint·
+  // cva variant 둘 다 "서브트리 전체"를 조상으로 본다)과 동일 규칙을 그대로 적용한 결과다
+  // — 완화 규칙(예: 불투명 중간 배경이 상속을 끊는다)은 이 가드에 원래 없다(#3839부터).
+  ['components/kanban/kanban-column.tsx::muted-on-destructive-tint', 11],
+  ['components/org-briefing/attention-cluster-board.tsx::muted-on-warning-tint', 5],
+  ['components/settings/gate-level-matrix.tsx::muted-on-success-tint', 1],
 ]);
 
 // story #3839 PO 보강(2026-09-14 05:48Z) — 전 트리 완전성 대조가 잡아낸 「가드가 구조적으로
-// 못 보는 tint 소비처」16곳(파일 → 원시 tint 매치 수). 전부 object맵(status→className 조회,
-// 예: kanban-column.tsx·gate-level-matrix.tsx·doc-gate-section.tsx의 AUDIT_META) 또는
-// 템플릿 리터럴 안 삼항(예: invite-accept-client.tsx)이라 cva 파싱과 다른 두 축의 분석기가
-// 필요 — story #3850(별 카드)이 그 분석기를 만들어 이 목록을 16→0으로 줄인다.
+// 못 보는 tint 소비처」16곳(파일 → 원시 tint 매치 수)을 story #3850이 분석기 3축으로 닫았다:
+// (a) 객체 맵 프로퍼티/첨자 조회(named const든 `{...}[key]` 인라인이든, 중첩 object도 재귀 —
+//     kanban-column.tsx STATUS_COLOR·doc-gate-section.tsx AUDIT_META·gate-level-matrix.tsx·
+//     attention-cluster-board.tsx·stuck-handoff-section.tsx류) (b) 삼항/템플릿 리터럴 치환식
+//     안 tint·로컬 변수에 담긴 삼항/`??`/`||`(kanban-column.tsx colClass·doc-status-rail.tsx·
+//     image-node.tsx·wiki-link.tsx·invite-accept-client.tsx·agent-api-key-manager.tsx·
+//     channel-connect/agent-setup-section.tsx류) (c) `cond && 'bg-...-tint'` 가드·innerHTML/
+//     className 명령형 대입 — 조상 후보로는 여전히 안 쓰지만(#2590 A 정밀성 유지, 조건이
+//     거짓이면 안 붙을 수 있어 위험 쪽으로 단정 못 함) 가드가 "의식적으로 봤다"는 사실은
+//     explained에 반영(ai-generation-loading.tsx·outcome-result-card.tsx·sprint-close-
+//     cockpit.tsx·doc-content-renderer.tsx류).
 //
-// 사람 눈 1회 검토(2026-09-14, 미르코·가드가 잰 것 아님·지름길 명시) — 16곳 전부 "그 tint
-// 값을 실제로 소비하는 JSX 자리"에 text-muted-foreground가 구조적으로 중첩되는지 직접
-// 대조: 전부 형제 요소이거나 별도 표시줄이라 실 muted-on-tint 중첩 버그 0건. (doc-gate-
-// section.tsx는 예외 — 그 파일의 리터럴 bg-destructive-tint div(396행) 안 text-muted-
-// foreground(399행)는 이미 GRANDFATHER_BASELINE에 잡혀있는 별개의 실 위반이고, object맵
-// AUDIT_META.dot 소비처(429행 span)는 그 위반과 무관한 형제 요소 — 이 목록의 "3건 미처리"는
-// AUDIT_META의 dot 값 자체가 아직 지도 밖이라는 뜻일 뿐.)
+// 사람 눈 1회 검토(2026-09-14, 미르코·가드가 잰 것 아님·지름길 명시, story #3839 원 착지 당시)
+// 는 16곳 전부 "그 tint 값을 실제로 소비하는 JSX 자리"에 text-muted-foreground가 구조적으로
+// 중첩되는지 이미 확인해 실 버그 0건이었다 — 이번(#3850) scanRepo 재실행(GRANDFATHER_BASELINE
+// 대조)도 신규 증가 0건으로 일치, 그 결론을 가드 스스로 재확인했다.
 //
-// 늘어도·줄어도(stale) FAIL — 정확히 일치해야 GREEN(GRANDFATHER_BASELINE과 동형 계약).
-export const UNANALYZED_TINT_SITES = new Map<string, number>([
-  ['app/invite/accept/invite-accept-client.tsx', 2],
-  ['components/agents/agent-api-key-manager.tsx', 1],
-  ['components/ai/ai-generation-loading.tsx', 2],
-  ['components/cage/gate-line-context.tsx', 2],
-  ['components/cage/stuck-handoff-section.tsx', 2],
-  ['components/channel-connect/agent-setup-section.tsx', 2],
-  ['components/docs/doc-content-renderer.tsx', 3],
-  ['components/docs/doc-gate-section.tsx', 4],
-  ['components/docs/doc-status-rail.tsx', 3],
-  ['components/docs/extensions/image-node.tsx', 1],
-  ['components/docs/extensions/wiki-link.tsx', 1],
-  ['components/kanban/kanban-column.tsx', 5],
-  ['components/org-briefing/attention-cluster-board.tsx', 5],
-  ['components/outcome/outcome-result-card.tsx', 1],
-  ['components/retro/sprint-close-cockpit.tsx', 4],
-  ['components/settings/gate-level-matrix.tsx', 3],
-]);
+// 목록은 비웠지만 남겨 둔다(신규 사각이 생기면 다시 채워지고 이 가드가 즉시 FAIL — stale
+// fail-closed 계약은 그대로, GRANDFATHER_BASELINE과 동형).
+export const UNANALYZED_TINT_SITES = new Map<string, number>([]);
 
 export interface BaselineDrift { key: string; expected: number; got: number; }
 export interface BaselineComparison { increased: BaselineDrift[]; stale: BaselineDrift[]; }
