@@ -180,6 +180,13 @@ class GateResponse(BaseModel):
     # 타 엔드포인트(create/transition/void/hold/unhold/override)는 Gate ORM 객체에 이 속성이 없어
     # from_attributes 기본값 None으로 조용히 통과). list_gates·get_gate_endpoint 둘 다에서 채운다.
     risk_grade: "RiskGrade | None" = None
+    # story #3860(customer-zero·BE·게이트 답하기) — 「일감」 우패널 주 액션 「답하기」의
+    # 데이터 소스. Gate ORM엔 이 컬럼이 없다(work_item_summary/can_approve와 동일
+    # 선례 — from_attributes 기본값 None으로 조용히 통과, list_gates·get_gate_endpoint
+    # 둘 다 배치로 채운다). **per-caller**(같은 gate라도 caller가 그 work_item을 태그한
+    # 대화의 참여자가 아니면 None — 대화 존재 자체를 비참여자에게 노출하지 않는다, PR
+    # #4253 원칙과 동형). additive·하위호환(신규 필드, 기존 소비처 무변).
+    conversation_id: uuid.UUID | None = None
     gate_type: str
     status: str
     resolver_id: uuid.UUID | None = None
@@ -1072,6 +1079,20 @@ async def list_gates(
     for resp, g in non_doc_gates:
         resp.can_approve = g.id in eligible_ids and is_valid_transition(g.status, "approved")
 
+    # story #3860(customer-zero·BE·게이트 답하기) — 「답하기」 주 액션의 데이터 소스.
+    # today_service.py의 needs_me 배치와 동일 SSOT 함수(work_item_conversation.py) —
+    # caller가 그 work_item을 태그한 대화의 참여자일 때만 conversation_id 노출(PR #4253
+    # 원칙 그대로 — 여기서 재발명 0). resolved가 None이면(caller resolve 실패) 전부 None.
+    if resolved is not None and responses:
+        from app.services.work_item_conversation import derive_conversation_ids_for_tagged_work_items
+
+        conv_by_work_item = await derive_conversation_ids_for_tagged_work_items(
+            session, org_id=org_id, member_id=resolved.id,
+            work_item_pairs={(g.work_item_type, g.work_item_id) for g in gates},
+        )
+        for resp, g in zip(responses, gates):
+            resp.conversation_id = conv_by_work_item.get((g.work_item_type, g.work_item_id))
+
     if gate_ids is not None:
         # story #5ace2e84 — ids 배치는 work_item_id 필터가 물던 project 접근권 검사(#2042)를
         # 안 거친다(work_item_id가 None이라 위 그 블록 자체가 스킵) — 단건 GET /{id}
@@ -1488,6 +1509,16 @@ async def get_gate_endpoint(
                 designated_approver_id=gate.designated_approver_id, caller_member_id=resolved.id,
             )
             resp.can_approve = _approvable and is_valid_transition(gate.status, "approved")
+    # story #3860 — list_gates와 동일 SSOT(work_item_conversation.py)·동일 caller-scope
+    # 원칙(참여자 아니면 None). resolved는 위 can_approve enrich와 1회 공유(재resolve 0).
+    if resolved is not None:
+        from app.services.work_item_conversation import derive_conversation_ids_for_tagged_work_items
+
+        conv_by_work_item = await derive_conversation_ids_for_tagged_work_items(
+            session, org_id=org_id, member_id=resolved.id,
+            work_item_pairs={(gate.work_item_type, gate.work_item_id)},
+        )
+        resp.conversation_id = conv_by_work_item.get((gate.work_item_type, gate.work_item_id))
     return resp
 
 

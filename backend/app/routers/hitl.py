@@ -102,6 +102,37 @@ async def list_hitl_requests(
     if not org_id:
         return _err("FORBIDDEN", "org_id required", 403)
     requests = await repo.list_requests(org_id=org_id, project_id=project_id, status=status)
+
+    # story #3860(customer-zero·BE·게이트 답하기) — 「답하기」 주 액션의 데이터 소스.
+    # today_service.py `_resolve_agent_progress`와 동일 SSOT(work_item_conversation.py)·
+    # 동일 caller-scope 원칙(PR #4253) — run.conversation_id를 참여 검증 없이 그대로
+    # 내보내면 비참여 대화(DM 포함)의 존재를 노출한다. caller resolve 실패는 목록
+    # 조회 자체를 막지 않는다(fail-closed — 전부 None, list_gates·get_gate_endpoint와
+    # 동형 try/except).
+    try:
+        resolved = await resolve_member(auth, org_id, repo.session, project_id=project_id)
+    except Exception:  # noqa: BLE001
+        resolved = None
+    if resolved is not None and requests:
+        from app.models.agent_run import AgentRun
+        from app.services.work_item_conversation import filter_participant_conversation_ids
+
+        run_ids = {r.run_id for r in requests if r.run_id is not None}
+        run_conversation: dict[uuid.UUID, uuid.UUID] = {}
+        if run_ids:
+            run_rows = (await repo.session.execute(
+                select(AgentRun.id, AgentRun.conversation_id).where(
+                    AgentRun.id.in_(run_ids), AgentRun.conversation_id.isnot(None),
+                )
+            )).all()
+            run_conversation = {rid: cid for rid, cid in run_rows}
+        participant_conv_ids = await filter_participant_conversation_ids(
+            repo.session, member_id=resolved.id, conversation_ids=set(run_conversation.values()),
+        )
+        for r in requests:
+            conv_id = run_conversation.get(r.run_id) if r.run_id is not None else None
+            r.conversation_id = conv_id if conv_id in participant_conv_ids else None
+
     # _ok 는 raw JSONResponse(json.dumps) — model_dump() 는 UUID/datetime 객체를 그대로 둬 직렬화
     # 불가(500). mode="json" 으로 UUID→str·datetime→ISO 직렬화(resolve 엔드포인트의 str() 우회와 정합).
     return _ok([r.model_dump(mode="json") for r in requests])
