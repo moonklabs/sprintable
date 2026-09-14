@@ -294,7 +294,7 @@ describe('ChatBubble — story #2319 tombstone(메시지 삭제) 렌더', () => 
     await act(async () => {
       root.render(wrap(<ChatBubble message={deletedMsg} isMine={true} />));
     });
-    expect(container.textContent).toContain('삭제된 메시지입니다');
+    expect(container.textContent).toContain('삭제된 메시지예요');
     expect(container.textContent).not.toContain('제안서.md');
   });
 
@@ -302,7 +302,7 @@ describe('ChatBubble — story #2319 tombstone(메시지 삭제) 렌더', () => 
     await act(async () => {
       root.render(wrap(<ChatBubble message={{ ...baseMessage, deleted_at: null }} isMine={true} />));
     });
-    expect(container.textContent).not.toContain('삭제된 메시지입니다');
+    expect(container.textContent).not.toContain('삭제된 메시지예요');
   });
 
   it('본인 메시지도 이미 삭제됐으면 컨텍스트 메뉴에 「삭제」를 다시 제시하지 않는다', async () => {
@@ -446,7 +446,7 @@ describe('ChatBubble — story #2349 사용자 차단 마스킹', () => {
       root.render(wrap(<ChatBubble message={msg} isMine={false} />));
     });
     expect(container.textContent).toContain('일반 텍스트');
-    expect(container.textContent).not.toContain('차단한 사용자의 메시지입니다');
+    expect(container.textContent).not.toContain('차단한 사용자의 메시지예요');
   });
 
   it('is_blocked_sender=true면 본문 대신 마스킹 placeholder + "보기"가 뜬다', async () => {
@@ -454,7 +454,7 @@ describe('ChatBubble — story #2349 사용자 차단 마스킹', () => {
     await act(async () => {
       root.render(wrap(<ChatBubble message={msg} isMine={false} />));
     });
-    expect(container.textContent).toContain('차단한 사용자의 메시지입니다');
+    expect(container.textContent).toContain('차단한 사용자의 메시지예요');
     expect(container.textContent).toContain('보기');
     expect(container.textContent).not.toContain('숨겨야 할 내용');
   });
@@ -468,7 +468,7 @@ describe('ChatBubble — story #2349 사용자 차단 마스킹', () => {
     expect(revealBtn).not.toBeUndefined();
     await act(async () => { revealBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(container.textContent).toContain('숨겨야 할 내용');
-    expect(container.textContent).not.toContain('차단한 사용자의 메시지입니다');
+    expect(container.textContent).not.toContain('차단한 사용자의 메시지예요');
   });
 
   // 유나 design:changes(2026-08-03) — "보기"가 한 방향이면 누르는 문턱이 생긴다(되돌릴 수
@@ -485,7 +485,7 @@ describe('ChatBubble — story #2349 사용자 차단 마스킹', () => {
     const hideBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '숨기기');
     expect(hideBtn).not.toBeUndefined();
     await act(async () => { hideBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    expect(container.textContent).toContain('차단한 사용자의 메시지입니다');
+    expect(container.textContent).toContain('차단한 사용자의 메시지예요');
     expect(container.textContent).toContain('보기');
     expect(container.textContent).not.toContain('숨겨야 할 내용');
   });
@@ -504,8 +504,8 @@ describe('ChatBubble — story #2349 사용자 차단 마스킹', () => {
     await act(async () => {
       root.render(wrap(<ChatBubble message={msg} isMine={false} />));
     });
-    expect(container.textContent).toContain('삭제된 메시지입니다');
-    expect(container.textContent).not.toContain('차단한 사용자의 메시지입니다');
+    expect(container.textContent).toContain('삭제된 메시지예요');
+    expect(container.textContent).not.toContain('차단한 사용자의 메시지예요');
   });
 
   it('onBlockUser를 안 주면(기존 호출부) 우클릭 메뉴에 「사용자 차단」이 안 뜬다(회귀 0)', async () => {
@@ -835,7 +835,7 @@ describe('ChatBubble — story #2604 P2 결재 요청(approval_target) 카드', 
     await act(async () => {
       root.render(wrap(<ChatBubble message={approvalMessage} isMine={false} />));
     });
-    expect(container.textContent).toContain('찾을 수 없습니다');
+    expect(container.textContent).toContain('찾을 수 없어요');
   });
 
   it('story #2627 — 카드 제목 클릭 시 doc 본문이 챗 안 모달로 열린다(기존 EntityPreviewModal 재사용)', async () => {
@@ -1469,7 +1469,7 @@ describe('ChatBubble — story #2637 event_definitions block_template 카드', (
     const btn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('확認'));
     expect(btn).not.toBeUndefined();
     expect(btn!.hasAttribute('disabled')).toBe(true);
-    expect(container.textContent).toContain('권한이 없습니다');
+    expect(container.textContent).toContain('권한이 없어요');
   });
 
   it('발행 버튼 클릭 시 POST /api/events/publish가 definition_key+payload로 호출되고 완료 표시로 바뀐다', async () => {
@@ -1493,7 +1493,7 @@ describe('ChatBubble — story #2637 event_definitions block_template 카드', (
       definition_key: 'preset.work.escalate',
       payload: { work_item_type: 'story', from_status: 'in-progress', to_status: 'in-review', work_item_id: 'S-42' },
     });
-    expect(container.textContent).toContain('완료했습니다');
+    expect(container.textContent).toContain('완료했어요');
   });
 });
 
@@ -1816,7 +1816,7 @@ describe('ChatBubble — story #2671 EmbedCard 단독 참조 문단 카드 렌�
     expect(container.querySelector('button[aria-label="미리보기"]')).toBeNull();
     expect(container.querySelector('.rounded-md')).not.toBeNull();
     // AssetEmbedCard의 실 렌더 마커(자산 조회 실패 폴백 문구) — EmbedCard로 샜다면 절대 안 뜬다.
-    expect(container.textContent).toContain('자산을 찾을 수 없습니다');
+    expect(container.textContent).toContain('자산을 찾을 수 없어요');
   });
 
   it('같은 문단에 참조 외 텍스트가 섞여 있으면(단독 아님) 카드가 아니라 인라인 칩이다(회귀 0)', async () => {

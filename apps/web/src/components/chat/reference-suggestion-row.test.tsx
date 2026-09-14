@@ -79,7 +79,7 @@ describe('ReferenceSuggestionRow — story #2283', () => {
     await render({ messageId: 'm1', content: '#2249 확認 부탁', isMine: true });
     const confirmBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '예');
     await act(async () => { confirmBtn!.click(); });
-    expect(container.textContent).toContain('연결이 저장되지 않았습니다');
+    expect(container.textContent).toContain('연결이 저장되지 않았어요');
     expect(container.textContent).toContain('다시 시도');
   });
 
@@ -120,7 +120,7 @@ describe('ReferenceSuggestionRow — story #2283', () => {
     await act(async () => { confirmBtn!.click(); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 
-    expect(container.textContent).toContain('연결이 저장되지 않았습니다');
+    expect(container.textContent).toContain('연결이 저장되지 않았어요');
     expect(fetchMock).not.toHaveBeenCalledWith('/api/references', expect.anything());
   });
 
@@ -141,7 +141,7 @@ describe('ReferenceSuggestionRow — story #2283', () => {
     await act(async () => { confirmBtn!.click(); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 
-    expect(container.textContent).toContain('연결이 저장되지 않았습니다');
+    expect(container.textContent).toContain('연결이 저장되지 않았어요');
   });
 
   it('연결 취소(undo)를 누르면 DELETE 호출 후 원래 확인 프롬프트로 되돌아간다', async () => {

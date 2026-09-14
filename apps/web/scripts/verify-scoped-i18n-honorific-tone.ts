@@ -21,6 +21,16 @@
  * 정확히 이 뜻이다. 다음 카드가 스코프를 넓히면 SCOPED_KEYS에 새 키를 추가한다(namespace
  * 째 추가 아님).
  *
+ * story #3885 AC2 — 위 원칙의 예외 하나: `chats` 네임스페이스는 그 예외가 성립하지
+ * «않는» 경우다. #3877 AC1 표가 cage/goals/standup처럼 일부러 남겨둔 스코프 밖 잔존
+ * 합니다체가 chats에는 없다 — 이 스토리가 PO 재측 규칙(습니다/ㅂ니다/십시오 리터럴+NFD)
+ * 으로 chats leaf 값 전수(239개)를 스캔해 걸린 66키(중복 문자열 2개 제외 고유 값 64건)
+ * «전부»를 해요체로 이관했다(잔존 0). 그래서 chats만은 SCOPED_NAMESPACES(namespace
+ * prefix 통째 스캔)로 승격해도 안전 — 앞으로 chats에 새로 추가되는 어떤 키든(기존 104
+ * SCOPED_KEYS 목록에 미리 적어두지 않아도) 합니다체가 섞이면 자동으로 잡힌다. 다른
+ * 네임스페이스(cage 등)는 여전히 잔존 채무가 있어 이 승격을 하면 안 된다 — namespace를
+ * SCOPED_NAMESPACES에 추가하는 건 "이 네임스페이스는 이제 0건이 확定됐다"는 선언이다.
+ *
  * 판정 축은 값(value)만이다 — 키 이름·주석은 대상이 아니다(한자 가드·agent-tone 가드와
  * 동일 원칙).
  */
@@ -142,6 +152,67 @@ export const SCOPED_KEYS = [
   'standup.noFeedback',
 ] as const;
 
+// story #3885 AC2 — chats는 잔존 채무 0으로 확定된 네임스페이스라 prefix 통째 스캔으로
+// 승격(위 헤더 §3885 AC2 단락 참고). 새 네임스페이스를 추가하려면 그 네임스페이스의
+// 합니다체 잔존이 정말 0인지(이 카드처럼) 먼저 전수 실측해야 한다 — 추측 금지.
+export const SCOPED_NAMESPACES = ['chats'] as const;
+
+function flattenNamespaceLeafKeys(root: Record<string, unknown>, namespace: string): string[] {
+  const nsRoot = root[namespace];
+  if (nsRoot === null || typeof nsRoot !== 'object' || Array.isArray(nsRoot)) return [];
+  const keys: string[] = [];
+  function walk(obj: Record<string, unknown>, prefix: string): void {
+    for (const [k, v] of Object.entries(obj)) {
+      const qualifiedKey = `${prefix}.${k}`;
+      if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
+        walk(v as Record<string, unknown>, qualifiedKey);
+      } else if (typeof v === 'string') {
+        keys.push(qualifiedKey);
+      }
+    }
+  }
+  walk(nsRoot as Record<string, unknown>, namespace);
+  return keys;
+}
+
+/** SCOPED_KEYS(개별 지정)와 SCOPED_NAMESPACES(전량 승격) 둘을 합친 실제 판정 대상 키
+ * 목록 — ko.json 실 트리를 봐야 네임스페이스 leaf를 펼칠 수 있어 ko를 인자로 받는다. */
+export function resolveEffectiveScopedKeys(ko: Record<string, unknown>): string[] {
+  const namespaceKeys = SCOPED_NAMESPACES.flatMap((ns) => flattenNamespaceLeafKeys(ko, ns));
+  return [...new Set([...SCOPED_KEYS, ...namespaceKeys])];
+}
+
+export interface NamespaceLeafCountViolation {
+  namespace: string;
+  actualCount: number;
+  minExpected: number;
+}
+
+// story #3885 CHANGES①(PO PR 코멘트, 2026-09-14 18:02Z) — `flattenNamespaceLeafKeys`는
+// 네임스페이스가 ko.json에서 사라지거나 개명되면 조용히 []를 돌려준다 — 그러면
+// `resolveEffectiveScopedKeys`가 소리 없이 SCOPED_KEYS만으로 좁아져(namespace 전량
+// 승격이 아무것도 안 더하는 상태) 이 가드가 chats 신규 위반을 하나도 못 잡게 된다.
+// 네임스페이스별 leaf 최소 개수(실측값에서 여유를 둔 하한 — 리팩터로 인한 자연 증감은
+// 통과하되, 네임스페이스 자체가 사라지면 반드시 fail-loud)로 이 사각을 막는다.
+const SCOPED_NAMESPACE_MIN_LEAF_COUNT: Readonly<Record<(typeof SCOPED_NAMESPACES)[number], number>> = {
+  chats: 200, // 실측 239개(2026-09-14, story #3885 그라운딩) — 여유 하한
+};
+
+/** SCOPED_NAMESPACES 각각의 실제 leaf 개수가 하한을 밑도는지 검사하는 순수 함수 —
+ * 위반을 반환한다(main()이 이 반환값을 보고 exit 1을 결정, 이 함수 자체는 throw/exit
+ * 안 함 — 다른 판정 함수들과 같은 결). */
+export function checkScopedNamespaceMinimums(ko: Record<string, unknown>): NamespaceLeafCountViolation[] {
+  const violations: NamespaceLeafCountViolation[] = [];
+  for (const ns of SCOPED_NAMESPACES) {
+    const actualCount = flattenNamespaceLeafKeys(ko, ns).length;
+    const minExpected = SCOPED_NAMESPACE_MIN_LEAF_COUNT[ns];
+    if (actualCount < minExpected) {
+      violations.push({ namespace: ns, actualCount, minExpected });
+    }
+  }
+  return violations;
+}
+
 // 「습니다」·「십시오」는 완성형(NFC) 원문에 그대로 리터럴로 존재한다(자음어간 종결 — 예:
 // 「없습니다」는 습·니·다 3음절이 그대로 붙어 있다). 「ㅂ니다」(모음어간+ㅂ니다, 예: 「합니다」
 // ·「됩니다」)는 다르다 — 그 ㅂ은 앞 음절의 **받침**으로 합쳐진 한 글자(합/됩/갑)라, NFC
@@ -213,10 +284,25 @@ export function findHonorificToneInScopedKeys(
 function main(): void {
   const text = readFileSync(path.join(MESSAGES_DIR, KO_FILE), 'utf8');
   const ko = JSON.parse(text) as Record<string, unknown>;
-  const findings = findHonorificToneInScopedKeys(ko);
+
+  const namespaceViolations = checkScopedNamespaceMinimums(ko);
+  if (namespaceViolations.length > 0) {
+    for (const v of namespaceViolations) {
+      console.error(
+        `FAIL: SCOPED_NAMESPACES의 "${v.namespace}" 네임스페이스 leaf가 ${v.actualCount}개뿐` +
+          `(최소 ${v.minExpected}개 기대) — ko.json에서 "${v.namespace}" 네임스페이스가 사라졌거나` +
+          ' 개명됐을 수 있다. 이대로면 가드가 헛돌고 있다(namespace 전량 승격이 조용히' +
+          ' SCOPED_KEYS만으로 좁아진다).',
+      );
+    }
+    process.exit(1);
+  }
+
+  const effectiveKeys = resolveEffectiveScopedKeys(ko);
+  const findings = findHonorificToneInScopedKeys(ko, effectiveKeys);
 
   if (findings.length > 0) {
-    console.log(`❌ 스코프 키(${SCOPED_KEYS.length}개)의 ko.json 값에 합니다체 ${findings.length}건 발견:`);
+    console.log(`❌ 스코프 키(${effectiveKeys.length}개 — SCOPED_KEYS ${SCOPED_KEYS.length}+SCOPED_NAMESPACES[${SCOPED_NAMESPACES.join(',')}])의 ko.json 값에 합니다체 ${findings.length}건 발견:`);
     for (const f of findings) {
       console.log(`  - ${f.key} [${f.matches.join(', ')}] → ${JSON.stringify(f.value)}`);
     }
@@ -228,7 +314,7 @@ function main(): void {
     process.exit(1);
   }
 
-  console.log(`OK: 스코프 키(${SCOPED_KEYS.length}개)의 ko.json 값에 합니다체 0건`);
+  console.log(`OK: 스코프 키(${effectiveKeys.length}개 — SCOPED_KEYS ${SCOPED_KEYS.length}+SCOPED_NAMESPACES[${SCOPED_NAMESPACES.join(',')}])의 ko.json 값에 합니다체 0건`);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

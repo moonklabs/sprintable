@@ -135,7 +135,7 @@ describe('ConversationPage — 실패 자리 (story #2168 PR-②, 능동 클릭 
     await mount();
 
     expect(container.querySelector('[data-testid="chat-view-stub"]')).toBeNull();
-    expect(container.textContent).toContain('이 대화를 열 수 없습니다');
+    expect(container.textContent).toContain('이 대화를 열 수 없어요');
     expect(container.textContent).toContain('sprintable-content');
     expect(container.textContent).toContain('관리자에게 요청하세요');
   });
@@ -144,7 +144,7 @@ describe('ConversationPage — 실패 자리 (story #2168 PR-②, 능동 클릭 
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 403, json: async () => null })));
     await mount();
 
-    expect(container.textContent).toContain('해당 프로젝트에 접근 권한이 없습니다');
+    expect(container.textContent).toContain('해당 프로젝트에 접근 권한이 없어요');
   });
 });
 

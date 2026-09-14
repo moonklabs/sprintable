@@ -120,7 +120,7 @@ describe('AttachmentMedia — story #2051', () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(container.textContent).toContain('접근 권한이 없습니다');
+    expect(container.textContent).toContain('접근 권한이 없어요');
   });
 
   it('재생 자체가 실패(onError, 코덱 미지원)하면 형식 안내 + 다운로드 링크로 폴백한다(AC4)', async () => {

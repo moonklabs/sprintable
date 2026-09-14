@@ -51,7 +51,7 @@ describe('DeliveryContractModal — story #2621 v1', () => {
       ));
     });
     await act(async () => {});
-    expect(document.body.textContent).toContain('설정한 값이 없어 기본값을 따릅니다');
+    expect(document.body.textContent).toContain('설정한 값이 없어 기본값을 따라요');
     const allBtn = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent === '전체')!;
     expect(allBtn.getAttribute('aria-pressed')).toBe('true');
   });
@@ -81,7 +81,7 @@ describe('DeliveryContractModal — story #2621 v1', () => {
       ));
     });
     await act(async () => {});
-    expect(document.body.textContent).toContain('이 대화에 별도로 설정한 값입니다');
+    expect(document.body.textContent).toContain('이 대화에 별도로 설정한 값이에요');
     const mentionsBtn = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent === '멘션만')!;
     expect(mentionsBtn.getAttribute('aria-pressed')).toBe('true');
   });
@@ -131,7 +131,7 @@ describe('DeliveryContractModal — story #2621 v1', () => {
     await act(async () => { muteBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
     expect(document.body.textContent).toContain('Agent cannot mute assigned conversation or thread');
-    expect(document.body.textContent).not.toContain('저장에 실패했습니다');
+    expect(document.body.textContent).not.toContain('저장에 실패했어요');
     expect(document.body.textContent).not.toContain('다시 시도');
     // 실패했으니 낙관 갱신을 되돌린다 — 버튼 선택 상태가 원래 값(전체)으로 복귀.
     const allBtn = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent === '전체')!;
@@ -158,7 +158,7 @@ describe('DeliveryContractModal — story #2621 v1', () => {
     const muteBtn = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent === '끄기')!;
     await act(async () => { muteBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
-    expect(document.body.textContent).toContain('저장에 실패했습니다');
+    expect(document.body.textContent).toContain('저장에 실패했어요');
     expect(document.body.textContent).not.toContain('Internal Server Error');
   });
 
@@ -180,7 +180,7 @@ describe('DeliveryContractModal — story #2621 v1', () => {
     const muteBtn = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent === '끄기')!;
     await act(async () => { muteBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
-    expect(document.body.textContent).toContain('저장에 실패했습니다');
+    expect(document.body.textContent).toContain('저장에 실패했어요');
   });
 
   it('dm 대화에서는 free_response 토글 자체가 안 보인다(항상 default=all이라 의미 없음)', async () => {
@@ -292,7 +292,7 @@ describe('DeliveryContractModal — story #2623 pre-work(targetMemberId 대리 �
     });
     await act(async () => {});
     expect(document.body.textContent).toContain('"레이서 에이전트"님을 대신해 편집 중');
-    expect(document.body.textContent).toContain('저장 시 그 멤버의 수신 설정이 바뀝니다');
+    expect(document.body.textContent).toContain('저장 시 그 멤버의 수신 설정이 바뀌어요');
   });
 
   it('targetMemberId가 있으면 group 대화여도 free_response 토글이 안 보인다(대리 편집 스코프 밖 — 대화 전역 축)', async () => {
