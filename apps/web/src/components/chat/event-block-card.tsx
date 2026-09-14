@@ -219,8 +219,12 @@ export function EventBlockCard({ template, payload, refs }: EventBlockCardProps)
     if (workItemRef.found && typeof workItemRef.token === 'string') {
       labels['work_item_target'] = workItemRef.token;
     } else if (!workItemRef.found && typeof workItemRef.type === 'string') {
+      // 유나 §⑤ 표(doc a699be00, 3884 절) — en targetMissing만 소문자로(entityTypeLabel en
+      // 값은 "Story"류 대문자라, 이 문장 중간 자리에선 소문자가 맞다 — "(deleted Story)"
+      // 아니라 "(deleted story)"). ko는 대소문자 구분이 없어 toLowerCase()가 no-op이라
+      // 로케일 분기 없이 안전하게 항상 적용한다.
       labels['work_item_target'] = tEventCard('targetMissing', {
-        type: entityTypeLabel(workItemRef.type, t),
+        type: entityTypeLabel(workItemRef.type, t).toLowerCase(),
       });
     }
   }

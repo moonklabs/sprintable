@@ -14,6 +14,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import { ChatBubble } from './chat-bubble';
 import type { ChatMessage } from '@/hooks/use-chat-sse';
 import koMessages from '../../../messages/ko.json';
+import enMessages from '../../../messages/en.json';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -51,6 +52,16 @@ let root: Root;
 function wrap(node: React.ReactNode) {
   return (
     <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+      {node}
+    </NextIntlClientProvider>
+  );
+}
+
+// story #3884 — en 로케일 렌더 전용(targetMissing의 {type} 소문자 처방 등 en 전용 회귀).
+// 기존 wrap()은 ko 고정이라 건드리지 않는다(다른 100+ 테스트 회귀 위험 — 새 함수로 병렬).
+function wrapEn(node: React.ReactNode) {
+  return (
+    <NextIntlClientProvider locale="en" messages={enMessages} timeZone="America/Los_Angeles">
       {node}
     </NextIntlClientProvider>
   );
@@ -1287,6 +1298,27 @@ describe('ChatBubble — story #2637 event_definitions block_template 카드', (
       expect(container.textContent).toContain('(삭제된 스토리)');
       expect(container.textContent).not.toContain('⟨missing');
       expect(container.textContent).not.toContain(DOC_ID);
+    });
+
+    it('AC1(d) targetMissing en 로케일 — {type}이 소문자로 뜬다(entityTypeLabel en="Doc" 대문자를 이 자리만 lower — AC5 캡처 리뷰 中 실측 발견)', async () => {
+      const message: ChatMessage = {
+        ...baseMessage,
+        content: '[이벤트] preset.work.status_changed',
+        sender_type: 'agent',
+        event: {
+          event_key: 'preset.work.status_changed',
+          payload: { work_item_type: 'doc', from_status: 'ready-for-dev', to_status: 'in-progress', work_item_id: DOC_ID },
+          refs: { work_item: { found: false, type: 'doc' } },
+        },
+      };
+      await act(async () => {
+        root.render(wrapEn(<ChatBubble message={message} isMine={false} eventDefinitionsByKey={catalog} />));
+      });
+      // eventCard.targetMissing(en) = "(deleted {type})", entityTypeLabel('doc', t)="Doc"
+      // (대문자) — 이 자리에서만 소문자로 낮춰야 "(deleted doc)"이 된다.
+      expect(container.textContent).toContain('(deleted doc)');
+      expect(container.textContent).not.toContain('(deleted Doc)');
+      expect(container.textContent).not.toContain('⟨missing');
     });
 
     it('AC1(d) 리졸버 자체가 없음 — refs.work_item 키 자체가 없으면(agent_decision류) 대상 행이 통째로 줄 생략된다', async () => {
