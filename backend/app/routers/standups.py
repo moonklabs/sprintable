@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import exists, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -9,7 +9,12 @@ from app.dependencies.auth import AuthContext, get_current_user, get_verified_or
 from app.dependencies.database import get_db, get_read_db
 from app.models.pm import Sprint, Story
 from app.models.standup import StandupEntry, StandupEntryProject, StandupFeedback
-from app.repositories.standup import StandupEntryRepository, StandupFeedbackRepository
+from app.repositories.standup import (
+    StandupEntryRepository,
+    StandupFeedbackRepository,
+    encode_standup_cursor,
+    parse_standup_cursor,
+)
 from app.services.org_time import get_org_timezone, org_today
 from app.schemas.standup import (
     FeedbackCreate,
@@ -148,10 +153,20 @@ def _get_repo_read(
 
 @router.get("", response_model=list[StandupEntryResponse])
 async def list_standups(
+    response: Response,
     project_id: uuid.UUID | None = Query(default=None),
     author_id: uuid.UUID | None = Query(default=None),
     sprint_id: uuid.UUID | None = Query(default=None),
     date_filter: date | None = Query(default=None, alias="date"),
+    # story #3841 — limit 기본값 1000은 옛 `.list()` 하드코딩 cap과 동일(기존 실사용
+    # 최대치 그대로 — AC1 "기본 limit ≥ 현 실사용 최대치"). 상한 2000은 goals.py/
+    # retros.py list_paginated 관례와 동일 값(새 상한 발명 0).
+    limit: int = Query(default=1000, ge=1, le=2000),
+    cursor: str | None = Query(
+        default=None,
+        description='Cursor: "date|created_at|id"(직전 페이지 X-Next-Cursor 값 그대로) — '
+        "date DESC, created_at DESC, id DESC 순서에서 이 위치보다 뒤(더 오래된) 행만.",
+    ),
     repo: StandupEntryRepository = Depends(_get_repo_read),
     auth: AuthContext = Depends(get_current_user),
 ) -> list[StandupEntryResponse]:
@@ -188,7 +203,15 @@ async def list_standups(
         filters["sprint_id"] = sprint_id
     if date_filter:
         filters["date"] = date_filter
-    entries = await repo.list(**filters)
+
+    cursor_parsed = parse_standup_cursor(cursor)
+    entries, total = await repo.list_paginated(limit=limit, cursor=cursor_parsed, **filters)
+    # story #3841 AC1 — goals.py/retros.py와 동일 헤더 계약(X-Total-Count·X-Next-Cursor).
+    # 응답 바디는 그대로 bare list — 기존 소비처(웹·모바일·MCP)가 무변경으로 첫 페이지를
+    # 그대로 받는다(바디 봉투로 바꾸면 전부 깨진다 — docs.py류 {data,meta} 봉투는 여기 미적용).
+    response.headers["X-Total-Count"] = str(total)
+    if entries:
+        response.headers["X-Next-Cursor"] = encode_standup_cursor(entries[-1])
     return await _entries_with_plan_stories(entries, repo.session, repo.org_id, uuid.UUID(auth.user_id))
 
 
