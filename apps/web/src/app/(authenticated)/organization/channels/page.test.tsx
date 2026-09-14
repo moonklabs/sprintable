@@ -324,7 +324,7 @@ describe('OrganizationChannelsPage — 목록·상태(story #3376)', () => {
     await expandChannelRow({ viaMenuLabel: koMessages.channelConnect.channelManageConnectionsAction });
     const disconnectBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '해제');
     expect(disconnectBtn).toBeUndefined();
-    expect(container.textContent).toContain('이 작업은 소유자만 할 수 있습니다');
+    expect(container.textContent).toContain('이 작업은 소유자만 할 수 있어요');
   });
 
   it('story #3504 — admin도 해제·재인증 버튼이 안 보이고(owner 전용) owner만 문구를 본다', async () => {
@@ -335,7 +335,7 @@ describe('OrganizationChannelsPage — 목록·상태(story #3376)', () => {
     expect(disconnectBtn).toBeUndefined();
     const reauthBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '다시 연결');
     expect(reauthBtn).toBeUndefined();
-    expect(container.textContent).toContain('이 작업은 소유자만 할 수 있습니다');
+    expect(container.textContent).toContain('이 작업은 소유자만 할 수 있어요');
   });
 
   it('story #3504 — 해제 실패(403 CHANNEL_CONNECTION_OWNER_ONLY)는 카드 안 문구로 표면화된다', async () => {
@@ -345,7 +345,7 @@ describe('OrganizationChannelsPage — 목록·상태(story #3376)', () => {
     const disconnectBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '해제') as HTMLButtonElement;
     await act(async () => { disconnectBtn.click(); });
     await flush();
-    expect(container.textContent).toContain('이 작업은 소유자만 할 수 있습니다');
+    expect(container.textContent).toContain('이 작업은 소유자만 할 수 있어요');
   });
 
   it('story #3504 — 해제 실패(그 외 오류)는 일반 실패 문구로 표면화된다', async () => {
@@ -355,7 +355,7 @@ describe('OrganizationChannelsPage — 목록·상태(story #3376)', () => {
     const disconnectBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '해제') as HTMLButtonElement;
     await act(async () => { disconnectBtn.click(); });
     await flush();
-    expect(container.textContent).toContain('연결 해제에 실패했습니다');
+    expect(container.textContent).toContain('연결 해제에 실패했어요');
   });
 
   it('member도 연결 시험은 할 수 있다', async () => {
@@ -406,7 +406,7 @@ describe('OrganizationChannelsPage — 목록·상태(story #3376)', () => {
     stubFetch({ connections: [] });
     await mount('owner');
     // story 3436(묶음 6) — channelLabel()이 raw 쿼리값을 사람이 읽는 이름으로 정규화한다.
-    expect(container.textContent).toContain('Threads 연결이 완료됐습니다');
+    expect(container.textContent).toContain('Threads 연결이 완료됐어요');
   });
 
   it('?connect_error=로 알려진 코드는 사람 말로, 모르는 코드는 일반 실패 문구로 뜬다', async () => {
@@ -510,7 +510,7 @@ describe('OrganizationChannelsPage — 목록·상태(story #3376)', () => {
     expect(reauthLink).toBeUndefined();
     // story #3743 CHANGES — 이 문장은 이제 행의 부제 자리(ListRow subtitle)에 선다
     // (testid는 펼친 상세 안 ConnectionRow 몫으로 남아 여기선 textContent로 확인).
-    expect(container.textContent).toContain('테스트용 연결은 다시 연결할 수 없습니다');
+    expect(container.textContent).toContain('테스트용 연결은 다시 연결할 수 없어요');
   });
 
   // story #3813 PR5-a(그라운딩 2026-09-12, 페드루 PO 確定) — pasted_secret(wordpress·
@@ -755,7 +755,7 @@ describe('OrganizationChannelsPage — 헤더 rollup 칩 임계값(story dd29e6d
 
 // story #3816(Phase3·3-6, 페드루 PO 지적 2026-09-12·배포 81 라이브 회차 유나 판정
 // CHANGES 1) — sandbox(credential_kind==='none') 연결은 재연결 경로가 구조적으로
-// 없다(ReauthNote 옆 분기가 버튼 대신 「테스트용 연결은 다시 연결할 수 없습니다」
+// 없다(ReauthNote 옆 분기가 버튼 대신 「테스트용 연결은 다시 연결할 수 없어요」
 // 문장을 낸다) — 그런데 칩은 여전히 공용 「다시 연결 필요」를 내 같은 행 안에서
 // 칩·문장이 반대 뜻을 말했다(4222 축 재현).
 //
@@ -782,7 +782,7 @@ describe('OrganizationChannelsPage — sandbox 재연결 불가 칩 낱말(story
     expect(chip?.textContent).toBe(koMessages.channelConnect.channelStatusReconnectUnavailable);
     expect(chip?.textContent).not.toBe(koMessages.channelConnect.channelStatusReauthRequired);
     // 같은 행 안의 문장(버튼 대신)과 뜻이 어긋나면 안 된다 — 둘 다 "재연결 불가" 쪽.
-    expect(container.textContent).toContain('다시 연결할 수 없습니다');
+    expect(container.textContent).toContain('다시 연결할 수 없어요');
   });
 
   // story #3816 CHANGES(페드루 PO 확認 1) — sandbox 연결도 「해제」(disconnect)를
@@ -827,14 +827,14 @@ describe('OrganizationChannelsPage — 앱 자격(AC2, story #3376)', () => {
     await expandChannelRow({ viaMenuLabel: appCredMenuLabel });
     expect(container.textContent).toContain('끝 4자리');
     expect(container.textContent).toContain('ab12');
-    expect(container.textContent).not.toContain('공용 앱으로 연결합니다');
+    expect(container.textContent).not.toContain('공용 앱으로 연결해요');
   });
 
   it('platform 기본이면 「공용 앱」 문구가 뜨고 secret 값은 어디에도 없다', async () => {
     stubFetch({ connections: [], credentials: { configured: false, app_id_suffix: null, effective_source: 'platform' } });
     await mount('owner');
     await expandChannelRow({ viaMenuLabel: appCredMenuLabel });
-    expect(container.textContent).toContain('공용 앱으로 연결합니다');
+    expect(container.textContent).toContain('공용 앱으로 연결해요');
   });
 
   it('owner가 등록 버튼을 누르면 App Secret 입력란이 password 타입으로 뜬다', async () => {
@@ -919,7 +919,7 @@ describe('OrganizationChannelsPage — available-channels 목록 기반 렌더(s
     stubFetch({ connections: [], availableChannels: AVAILABLE_WITH_SANDBOX });
     await mount('member');
     expect(container.querySelector('[data-testid="channel-connect-sandbox-button"]')).toBeNull();
-    expect(container.textContent).toContain('이 작업은 소유자·관리자만 할 수 있습니다');
+    expect(container.textContent).toContain('이 작업은 소유자·관리자만 할 수 있어요');
   });
 
   it('story #3504 — admin에게도 sandbox 「연결 만들기」 버튼이 보인다(owner|admin 폭)', async () => {
@@ -962,7 +962,7 @@ describe('OrganizationChannelsPage — available-channels 목록 기반 렌더(s
     });
     await mount('member');
     expect(container.querySelector('[data-testid="channel-connect-sandbox-button"]')).toBeNull();
-    expect(container.textContent).not.toContain('이 작업은 소유자·관리자만 할 수 있습니다');
+    expect(container.textContent).not.toContain('이 작업은 소유자·관리자만 할 수 있어요');
   });
 
   it('⭐#3537 — 다른 채널(threads)에만 연결이 있으면 sandbox 「연결 만들기」 버튼은 그대로 뜬다(channel 하드코딩 0, 일치로만 판정)', async () => {
@@ -1543,7 +1543,7 @@ describe('OrganizationChannelsPage — GA4 연결(story #3583)', () => {
 
   // story #3598(유나 §AC9 문구 確定 2026-09-06 15:44Z) — channelReauthError 교체 2 —
   // 「갱신에 실패했습니다」(reason=error가 갱신 문제라고 잘못 단정하던 옛 문구)를
-  // 「이 연결로 지금 발행할 수 없습니다 — 다시 연결해 주세요.」로(재연결로 풀린다고
+  // 「이 연결로 지금 발행할 수 없어요 — 다시 연결해 주세요.」로(재연결로 풀린다고
   // 약속하지 않는다).
   it('⭐#3598 — needs_reauth reason=error면 새 문구(발행 불가·재연결 유도)가 뜬다', async () => {
     stubFetch({
@@ -1552,7 +1552,7 @@ describe('OrganizationChannelsPage — GA4 연결(story #3583)', () => {
       ],
     });
     await mount('owner');
-    expect(container.textContent).toContain('이 연결로 지금 발행할 수 없습니다 — 다시 연결해 주세요.');
+    expect(container.textContent).toContain('이 연결로 지금 발행할 수 없어요 — 다시 연결해 주세요.');
     expect(container.textContent).not.toContain('갱신에 실패했습니다');
     expect(container.textContent).not.toContain('서버 응답');
   });
@@ -2300,8 +2300,8 @@ describe('OrganizationChannelsPage — 만료 임박 실값(story #3743)', () =>
     const headerChip = container.querySelector('[data-status-chip]');
     expect(headerChip?.getAttribute('data-status-chip')).toBe('connected');
     expect(container.querySelector('[data-status-chip="expiring_soon"]')).toBeNull();
-    // 부연 문장(정보성)은 여전히 뜬다 — channelExpiringInfoNote 축(자동으로 갱신됩니다).
+    // 부연 문장(정보성)은 여전히 뜬다 — channelExpiringInfoNote 축(자동으로 갱신돼요).
     expect(container.textContent).toContain(koMessages.channelConnect.channelExpiringToday);
-    expect(container.textContent).toContain('자동으로 갱신됩니다');
+    expect(container.textContent).toContain('자동으로 갱신돼요');
   });
 });

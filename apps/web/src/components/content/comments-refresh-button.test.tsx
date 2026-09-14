@@ -51,7 +51,7 @@ describe('CommentsRefreshButton', () => {
     const btn = container.querySelector('[data-testid="comments-refresh-button"]') as HTMLButtonElement;
     await act(async () => { btn.click(); });
     expect(btn.disabled).toBe(true);
-    expect(container.querySelector('[data-testid="comments-refresh-rate-limited"]')?.textContent).toBe('45초 뒤에 다시 시도할 수 있습니다.');
+    expect(container.querySelector('[data-testid="comments-refresh-rate-limited"]')?.textContent).toBe('45초 뒤에 다시 시도할 수 있어요.');
   });
 
   // story #3517 조각②-b(유나 16회차 보강, PO 確定 2026-09-06) — 429도 로드 시점
@@ -62,7 +62,7 @@ describe('CommentsRefreshButton', () => {
     await mount(<CommentsRefreshButton onRefresh={onRefresh} />);
     const btn = container.querySelector('[data-testid="comments-refresh-button"]') as HTMLButtonElement;
     await act(async () => { btn.click(); });
-    expect(container.querySelector('[data-testid="comments-refresh-rate-limited"]')?.textContent).toBe('2분 뒤에 다시 시도할 수 있습니다.');
+    expect(container.querySelector('[data-testid="comments-refresh-rate-limited"]')?.textContent).toBe('2분 뒤에 다시 시도할 수 있어요.');
   });
 
   it('429 rate_limited(초 모름, Retry-After 헤더 없음) — "잠시 뒤"(초를 지어내지 않는다)', async () => {
@@ -71,7 +71,7 @@ describe('CommentsRefreshButton', () => {
     const btn = container.querySelector('[data-testid="comments-refresh-button"]') as HTMLButtonElement;
     await act(async () => { btn.click(); });
     expect(btn.disabled).toBe(true);
-    expect(container.querySelector('[data-testid="comments-refresh-rate-limited"]')?.textContent).toBe('잠시 뒤에 다시 시도할 수 있습니다.');
+    expect(container.querySelector('[data-testid="comments-refresh-rate-limited"]')?.textContent).toBe('잠시 뒤에 다시 시도할 수 있어요.');
   });
 
   it('422 unsupported — 버튼 자체가 사라지고 지원 안 함 문구만 남는다(네 번째 얼굴)', async () => {
@@ -80,7 +80,7 @@ describe('CommentsRefreshButton', () => {
     const btn = container.querySelector('[data-testid="comments-refresh-button"]') as HTMLButtonElement;
     await act(async () => { btn.click(); });
     expect(container.querySelector('[data-testid="comments-refresh-button"]')).toBeNull();
-    expect(container.querySelector('[data-testid="comments-refresh-unsupported"]')?.textContent).toBe('이 채널은 댓글을 지원하지 않습니다.');
+    expect(container.querySelector('[data-testid="comments-refresh-unsupported"]')?.textContent).toBe('이 채널은 댓글을 지원하지 않아요.');
   });
 
   it('403 COMMENT_REFRESH_HUMAN_ONLY(generic) — 서버 문구를 그대로 보인다', async () => {
@@ -95,13 +95,13 @@ describe('CommentsRefreshButton', () => {
   // 폴백 체인) — 이 자리의 결함은 접근성 마킹 부재였다. insights-board 등과 동형인
   // role=alert 배너로 승격(화면 관례 일치).
   it('generic 오류는 role=alert 배너(Alert variant=destructive)로 선다', async () => {
-    const onRefresh = vi.fn<() => Promise<CommentsRefreshOutcome>>().mockResolvedValue({ ok: false, kind: 'generic', message: '다시 수집하지 못했습니다.' });
+    const onRefresh = vi.fn<() => Promise<CommentsRefreshOutcome>>().mockResolvedValue({ ok: false, kind: 'generic', message: '다시 수집하지 못했어요.' });
     await mount(<CommentsRefreshButton onRefresh={onRefresh} />);
     const btn = container.querySelector('[data-testid="comments-refresh-button"]') as HTMLButtonElement;
     await act(async () => { btn.click(); });
     const errorEl = container.querySelector('[data-testid="comments-refresh-error"]');
     expect(errorEl?.getAttribute('role')).toBe('alert');
-    expect(errorEl?.textContent).toBe('다시 수집하지 못했습니다.');
+    expect(errorEl?.textContent).toBe('다시 수집하지 못했어요.');
   });
 
   // story #3517 조각②-b(BE #3876, 유나 16회차 보강, PO 確定 2026-09-06) — 로드
@@ -116,7 +116,7 @@ describe('CommentsRefreshButton', () => {
     expect(btn.disabled).toBe(true);
     expect(onRefresh).not.toHaveBeenCalled();
     const blocked = container.querySelector('[data-testid="comments-refresh-load-time-blocked"]');
-    expect(blocked?.textContent).toBe('5분 뒤에 다시 시도할 수 있습니다.');
+    expect(blocked?.textContent).toBe('5분 뒤에 다시 시도할 수 있어요.');
   });
 
   it('nextAllowedAt이 30초 뒤(60초 미만)면 초 단위로 뜬다(분으로 뭉개지 않는다)', async () => {
@@ -124,7 +124,7 @@ describe('CommentsRefreshButton', () => {
     const onRefresh = vi.fn<() => Promise<CommentsRefreshOutcome>>();
     await mount(<CommentsRefreshButton onRefresh={onRefresh} nextAllowedAt={future} />);
     const blocked = container.querySelector('[data-testid="comments-refresh-load-time-blocked"]');
-    expect(blocked?.textContent).toContain('초 뒤에 다시 시도할 수 있습니다.');
+    expect(blocked?.textContent).toContain('초 뒤에 다시 시도할 수 있어요.');
     expect(blocked?.textContent).not.toContain('분 뒤');
   });
 
@@ -160,7 +160,7 @@ describe('CommentsRefreshButton', () => {
 
     btn = container.querySelector('[data-testid="comments-refresh-button"]') as HTMLButtonElement;
     expect(btn.disabled).toBe(true);
-    expect(container.querySelector('[data-testid="comments-refresh-load-time-blocked"]')?.textContent).toBe('5분 뒤에 다시 시도할 수 있습니다.');
+    expect(container.querySelector('[data-testid="comments-refresh-load-time-blocked"]')?.textContent).toBe('5분 뒤에 다시 시도할 수 있어요.');
   });
 
   // story #3517 조각②-b REQUIRED 1(유나 Design 변경요청, PO 자기정정 2026-09-06) —

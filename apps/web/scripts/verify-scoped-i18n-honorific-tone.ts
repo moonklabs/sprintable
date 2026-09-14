@@ -155,7 +155,11 @@ export const SCOPED_KEYS = [
 // story #3885 AC2 — chats는 잔존 채무 0으로 확定된 네임스페이스라 prefix 통째 스캔으로
 // 승격(위 헤더 §3885 AC2 단락 참고). 새 네임스페이스를 추가하려면 그 네임스페이스의
 // 합니다체 잔존이 정말 0인지(이 카드처럼) 먼저 전수 실측해야 한다 — 추측 금지.
-export const SCOPED_NAMESPACES = ['chats'] as const;
+// story #3889 — content(마케팅 축 콘텐츠·블로그/채널 포스트)·channelConnect(채널 연결)도
+// 전량 해요체 이관 완료(잔존 0, PO 재측 271건 = findHonorificToneInScopedKeys 실 함수로
+// 그라운딩 — 코드 0 규율, 직접 손으로 친 needle 재현은 NFC/NFD 함정 재발이라 실 함수만
+// 신뢰) — chats와 동형 전량 승격.
+export const SCOPED_NAMESPACES = ['chats', 'content', 'channelConnect'] as const;
 
 function flattenNamespaceLeafKeys(root: Record<string, unknown>, namespace: string): string[] {
   const nsRoot = root[namespace];
@@ -196,6 +200,8 @@ export interface NamespaceLeafCountViolation {
 // 통과하되, 네임스페이스 자체가 사라지면 반드시 fail-loud)로 이 사각을 막는다.
 const SCOPED_NAMESPACE_MIN_LEAF_COUNT: Readonly<Record<(typeof SCOPED_NAMESPACES)[number], number>> = {
   chats: 200, // 실측 239개(2026-09-14, story #3885 그라운딩) — 여유 하한
+  content: 500, // 실측 584개(2026-09-14, story #3889 그라운딩) — 여유 하한
+  channelConnect: 150, // 실측 174개(2026-09-14, story #3889 그라운딩) — 여유 하한
 };
 
 /** SCOPED_NAMESPACES 각각의 실제 leaf 개수가 하한을 밑도는지 검사하는 순수 함수 —

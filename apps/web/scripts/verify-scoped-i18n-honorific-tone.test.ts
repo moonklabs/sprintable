@@ -157,9 +157,9 @@ describe('실 ko.json — 스코프 키 count-lock(baseline 0, 새 자리 0)', (
 // story #3885 AC2 — SCOPED_NAMESPACES(chats 전량 승격) + resolveEffectiveScopedKeys.
 // ---------------------------------------------------------------------------
 
-describe('SCOPED_NAMESPACES — story #3885 AC2', () => {
-  it('chats 하나만 등재됐다(다른 네임스페이스는 아직 잔존 채무가 있어 승격 대상 아님)', () => {
-    expect(SCOPED_NAMESPACES).toEqual(['chats']);
+describe('SCOPED_NAMESPACES — story #3885/#3889 AC2', () => {
+  it('chats·content·channelConnect 3개가 등재됐다(잔존 채무 0으로 확定된 네임스페이스만)', () => {
+    expect(SCOPED_NAMESPACES).toEqual(['chats', 'content', 'channelConnect']);
   });
 });
 
@@ -230,14 +230,22 @@ describe('실 ko.json — chats 네임스페이스 전량(story #3885 AC2)', () 
 // ---------------------------------------------------------------------------
 
 describe('checkScopedNamespaceMinimums — 순수 함수', () => {
-  it('⭐네임스페이스가 ko.json에 아예 없으면(개명·삭제 시뮬레이션) 위반을 낸다', () => {
-    const violations = checkScopedNamespaceMinimums({ board: { x: 'y' } }); // chats 자체가 없음
-    expect(violations).toEqual([{ namespace: 'chats', actualCount: 0, minExpected: 200 }]);
+  it('⭐네임스페이스 3개가 ko.json에 아예 없으면(개명·삭제 시뮬레이션) 3건 위반을 낸다', () => {
+    const violations = checkScopedNamespaceMinimums({ board: { x: 'y' } }); // 3개 다 없음
+    expect(violations).toEqual([
+      { namespace: 'chats', actualCount: 0, minExpected: 200 },
+      { namespace: 'content', actualCount: 0, minExpected: 500 },
+      { namespace: 'channelConnect', actualCount: 0, minExpected: 150 },
+    ]);
   });
 
   it('⭐네임스페이스가 있지만 leaf가 하한 밑이면(부분 삭제·오염) 위반을 낸다', () => {
-    const violations = checkScopedNamespaceMinimums({ chats: { a: 'x', b: 'y' } }); // 2개뿐
-    expect(violations).toEqual([{ namespace: 'chats', actualCount: 2, minExpected: 200 }]);
+    const violations = checkScopedNamespaceMinimums({ chats: { a: 'x', b: 'y' } }); // 2개뿐, content/channelConnect는 아예 없음
+    expect(violations).toEqual([
+      { namespace: 'chats', actualCount: 2, minExpected: 200 },
+      { namespace: 'content', actualCount: 0, minExpected: 500 },
+      { namespace: 'channelConnect', actualCount: 0, minExpected: 150 },
+    ]);
   });
 
   it('음성대조 — 실 ko.json은 하한을 넉넉히 넘어 위반 0건', () => {
@@ -254,5 +262,116 @@ describe('SCOPED_NAMESPACE_MIN_LEAF_COUNT — 하한이 실측치보다 낮게 �
     const effectiveKeys = resolveEffectiveScopedKeys(ko);
     const chatsLeafCount = effectiveKeys.filter((k) => k.startsWith('chats.')).length;
     expect(chatsLeafCount).toBeGreaterThanOrEqual(200);
+  });
+
+  it('실 ko.json의 content leaf 개수가 하한(500) 이상이다(실측 584)', () => {
+    const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
+    const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    const contentLeafCount = effectiveKeys.filter((k) => k.startsWith('content.')).length;
+    expect(contentLeafCount).toBeGreaterThanOrEqual(500);
+  });
+
+  it('실 ko.json의 channelConnect leaf 개수가 하한(150) 이상이다(실측 174)', () => {
+    const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
+    const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    const channelConnectLeafCount = effectiveKeys.filter((k) => k.startsWith('channelConnect.')).length;
+    expect(channelConnectLeafCount).toBeGreaterThanOrEqual(150);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// story #3889 — content·channelConnect 네임스페이스 전량(SCOPED_NAMESPACES 승격).
+// chats(#3885)와 정확히 같은 3형 검증(0건·양성대조·무관 PR no-op).
+// ---------------------------------------------------------------------------
+
+describe('실 ko.json — content·channelConnect 네임스페이스 전량(story #3889 AC1/AC2)', () => {
+  const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
+  const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
+
+  it('SCOPED_KEYS+chats+content+channelConnect 전량(effective)의 ko.json 값에 합니다체 0건(story #3889 AC1 271키 전량 이관 확認)', () => {
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    expect(effectiveKeys.length).toBeGreaterThan(SCOPED_KEYS.length);
+    expect(findHonorificToneInScopedKeys(ko, effectiveKeys)).toEqual([]);
+  });
+
+  // 페드루 PO 지시(2026-09-14, AC2) — "양성대조=content.emptyTitle 되돌림 RED".
+  it('양성대조 — content.emptyTitle을 원래 합니다체로 되돌리면 RED가 된다(namespace 전량 승격 증명)', () => {
+    expect(SCOPED_KEYS as readonly string[]).not.toContain('content.emptyTitle');
+    const mutated = JSON.parse(JSON.stringify(ko)) as Record<string, unknown>;
+    (mutated.content as Record<string, unknown>).emptyTitle = '아직 초안이 없습니다';
+    const effectiveKeys = resolveEffectiveScopedKeys(mutated);
+    const findings = findHonorificToneInScopedKeys(mutated, effectiveKeys);
+    expect(findings).toContainEqual({ key: 'content.emptyTitle', matches: ['습니다'], value: '아직 초안이 없습니다' });
+  });
+
+  it('양성대조 — channelConnect.channelNoConnections를 원래 합니다체로 되돌리면 RED가 된다(namespace 전량 승격 증명)', () => {
+    expect(SCOPED_KEYS as readonly string[]).not.toContain('channelConnect.channelNoConnections');
+    const mutated = JSON.parse(JSON.stringify(ko)) as Record<string, unknown>;
+    (mutated.channelConnect as Record<string, unknown>).channelNoConnections = '연결된 계정이 없습니다.';
+    const effectiveKeys = resolveEffectiveScopedKeys(mutated);
+    const findings = findHonorificToneInScopedKeys(mutated, effectiveKeys);
+    expect(findings).toContainEqual({ key: 'channelConnect.channelNoConnections', matches: ['습니다'], value: '연결된 계정이 없습니다.' });
+  });
+
+  it('무관 PR no-op — content·channelConnect 밖·SCOPED_KEYS 밖의 실 합니다체 키는 namespace 전량 승격 뒤에도 안 본다', () => {
+    const outOfScopeValue = (ko.cage as Record<string, unknown> | undefined)?.gateDetailNotFound;
+    expect(typeof outOfScopeValue).toBe('string');
+    expect(outOfScopeValue as string).toMatch(/습니다|ㅂ니다|십시오/);
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    expect(effectiveKeys).not.toContain('cage.gateDetailNotFound');
+    expect(findHonorificToneInScopedKeys(ko, effectiveKeys)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// story #3889 CHANGES 1(PO PR 코멘트, 2026-09-14 19:19Z) — 플레이스홀더 «값» 바로 뒤에
+// 계사(예요/이에요)를 붙이면 런타임 값의 받침 유무에 따라 절반은 문법이 어긋난다(「입니다」
+// 는 받침 무관이라 문제가 없었지만, 해요체 전환의 「예요/이에요」는 앞 음절 받침으로
+// 갈린다 — 정적으로 알 수 없는 런타임 숫자/문자열 뒤엔 아예 계사를 안 붙이는 형으로
+// 재작성해야 한다). content.channelPostsImageTooLarge 등 4키를 이 형으로 고쳤다 — 이
+// 가드가 재발을 막는다.
+// ---------------------------------------------------------------------------
+
+describe('story #3889 CHANGES 1 — 플레이스홀더 값 뒤 계사(예요/이에요) 0', () => {
+  const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
+  const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
+
+  function collectLeafValues(obj: Record<string, unknown> | undefined, prefix: string): [string, string][] {
+    if (!obj) return [];
+    const out: [string, string][] = [];
+    for (const [k, v] of Object.entries(obj)) {
+      const full = `${prefix}.${k}`;
+      if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
+        out.push(...collectLeafValues(v as Record<string, unknown>, full));
+      } else if (typeof v === 'string') {
+        out.push([full, v]);
+      }
+    }
+    return out;
+  }
+
+  const PLACEHOLDER_COPULA_RE = /\}(예요|이에요)/;
+
+  it('content·channelConnect 전 leaf에 "}예요"·"}이에요"(placeholder 바로 뒤 계사) 0건', () => {
+    const values = [
+      ...collectLeafValues(ko.content as Record<string, unknown>, 'content'),
+      ...collectLeafValues(ko.channelConnect as Record<string, unknown>, 'channelConnect'),
+    ];
+    const violations = values.filter(([, v]) => PLACEHOLDER_COPULA_RE.test(v));
+    expect(violations).toEqual([]);
+  });
+
+  it('양성대조 — channelPostsImageTooLarge를 원래(계사 형)로 되돌리면 RED가 된다', () => {
+    const mutated = JSON.parse(JSON.stringify(ko)) as Record<string, unknown>;
+    (mutated.content as Record<string, unknown>).channelPostsImageTooLarge =
+      '{maxBytes} 이하만 첨부할 수 있는데 {sizeBytes}예요';
+    const values = collectLeafValues(mutated.content as Record<string, unknown>, 'content');
+    const violations = values.filter(([, v]) => PLACEHOLDER_COPULA_RE.test(v));
+    expect(violations).toContainEqual([
+      'content.channelPostsImageTooLarge',
+      '{maxBytes} 이하만 첨부할 수 있는데 {sizeBytes}예요',
+    ]);
   });
 });

@@ -142,7 +142,7 @@ describe('CommentReplyDialog', () => {
     await act(async () => { setValue(document.querySelector('#comments-reply-text') as HTMLTextAreaElement, 'x'); });
     await act(async () => { (document.querySelector('[data-testid="comments-reply-draft-button"]') as HTMLButtonElement).dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); });
     await act(async () => { (document.querySelector('[data-testid="comments-reply-submit-button"]') as HTMLButtonElement).dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); });
-    expect(document.querySelector('[data-testid="comments-reply-target-changed"]')?.textContent).toBe('대상 댓글 본문이 상신 이후 바뀌었습니다. 승인은 가능합니다.');
+    expect(document.querySelector('[data-testid="comments-reply-target-changed"]')?.textContent).toBe('대상 댓글 본문이 상신 이후 바뀌었어요. 승인은 가능해요.');
   });
 
   it('상신 실패(409 대상 삭제) — 에러 문구가 뜬다', async () => {
@@ -228,7 +228,7 @@ describe('CommentReplyDialog', () => {
     });
     await act(async () => { setValue(document.querySelector('#comments-reply-text') as HTMLTextAreaElement, '내가 막 쓰던 것'); });
     await act(async () => { (document.querySelector('[data-testid="comments-reply-draft-button"]') as HTMLButtonElement).dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); });
-    expect(document.querySelector('[data-testid="comments-reply-draft-prefill-fetch-failed"]')?.textContent).toBe('작성한 답변을 불러오지 못했습니다 — 저장된 내용 그대로 상신됩니다.');
+    expect(document.querySelector('[data-testid="comments-reply-draft-prefill-fetch-failed"]')?.textContent).toBe('작성한 답변을 불러오지 못했어요 — 저장된 내용 그대로 상신돼요.');
     // story #3596(유나 Design CHANGES② 2026-09-07) — 읽기 전용 자리라 빈 상자를
     // 그리면 「초안이 비었다」로 읽힌다 — 실패 시 상자 자체를 안 그린다.
     expect(document.querySelector('[data-testid="comments-reply-draft-text-box"]')).toBeNull();

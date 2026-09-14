@@ -66,7 +66,7 @@ describe('CommentsSection — 세 얼굴(story #3517 §22-②)', () => {
     const face: CommentsFace = { kind: 'uncollected' };
     const { container, root } = mount();
     await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} onResubmitReply={() => {}} />)); });
-    expect(container.querySelector('[data-testid="comments-face-uncollected"]')?.textContent).toBe('아직 수집 전입니다.');
+    expect(container.querySelector('[data-testid="comments-face-uncollected"]')?.textContent).toBe('아직 수집 전이에요.');
     expect(container.querySelector('[data-testid="comments-captured-at"]')).toBeNull();
     expect(container.querySelector('[data-testid="comments-item"]')).toBeNull();
   });
@@ -75,14 +75,14 @@ describe('CommentsSection — 세 얼굴(story #3517 §22-②)', () => {
     const face: CommentsFace = { kind: 'error' };
     const { container, root } = mount();
     await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} onResubmitReply={() => {}} />)); });
-    expect(container.querySelector('[data-testid="comments-face-error"]')?.textContent).toBe('댓글을 불러오지 못했습니다.');
+    expect(container.querySelector('[data-testid="comments-face-error"]')?.textContent).toBe('댓글을 불러오지 못했어요.');
   });
 
   it('empty([]) — "댓글이 없습니다"+수집시각+제목에 0건(uncollected/error와 다른 문구·표시)', async () => {
     const face: CommentsFace = { kind: 'empty', capturedAt: '2026-09-05T10:00:00Z', comments: [], activeCount: 0, deletedCount: 0, nextAllowedAt: null };
     const { container, root } = mount();
     await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} onResubmitReply={() => {}} />)); });
-    expect(container.querySelector('[data-testid="comments-face-empty"]')?.textContent).toBe('댓글이 없습니다.');
+    expect(container.querySelector('[data-testid="comments-face-empty"]')?.textContent).toBe('댓글이 없어요.');
     expect(container.querySelector('[data-testid="comments-captured-at"]')?.textContent).toContain('09-05');
     expect(container.querySelector('h3')?.textContent).toBe('댓글 0');
   });
@@ -144,7 +144,7 @@ describe('CommentsSection — 지워진 댓글(story #3517 §22-9)', () => {
     const { container, root } = mount();
     await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} onResubmitReply={() => {}} />)); });
     expect(container.querySelectorAll('[data-testid="comments-item"]').length).toBe(1);
-    expect(container.querySelector('[data-testid="comments-item-deleted-note"]')?.textContent).toBe('원본이 지워졌습니다.');
+    expect(container.querySelector('[data-testid="comments-item-deleted-note"]')?.textContent).toBe('원본이 지워졌어요.');
   });
 
   // story #3517(PO 지정 순서, 2026-09-05) — §22-9 문장 순서: 사유가 위, 본문이 아래.
@@ -175,7 +175,7 @@ describe('CommentsSection — 지워진 댓글(story #3517 §22-9)', () => {
     ]);
     const { container, root } = mount();
     await act(async () => { root.render(wrap(<CommentsSection face={face} displayTimezone={TZ} onRefresh={async () => ({ ok: true })} onConvertToTask={() => {}} onReply={() => {}} onRetryReply={async () => ({ ok: true })} onResubmitReply={() => {}} />)); });
-    expect(container.querySelector('[data-testid="comments-face-empty"]')?.textContent).toBe('댓글이 없습니다.');
+    expect(container.querySelector('[data-testid="comments-face-empty"]')?.textContent).toBe('댓글이 없어요.');
     expect(container.querySelectorAll('[data-testid="comments-item"]').length).toBe(2);
     expect(container.querySelectorAll('[data-testid="comments-item-deleted-note"]').length).toBe(2);
   });
@@ -587,49 +587,49 @@ describe('CommentsSection — 답변 실패 얼굴(story #3544, 유나 §22-15)'
     {
       name: '① pending+transient(+next_attempt_at) — 재시도 대기, 액션 없음',
       reply: { ...FAILED_BASE, command_id: 'cmd-1', command_status: 'pending', failure_kind: 'transient', next_attempt_at: '2026-09-06T09:05:00Z', reason_code: null },
-      expectedText: '보내지 못해 다시 시도합니다',
+      expectedText: '보내지 못해 다시 시도해요',
       hasAction: false,
     },
     {
       name: '① pending+transient, next_attempt_at 없음 — "곧" 문구로 접힌다',
       reply: { ...FAILED_BASE, command_id: 'cmd-1', command_status: 'pending', failure_kind: 'transient', next_attempt_at: null, reason_code: null },
-      expectedText: '보내지 못해 곧 다시 시도합니다',
+      expectedText: '보내지 못해 곧 다시 시도해요',
       hasAction: false,
     },
     {
       name: '② blocked+connection — 연결 복구 대기, 링크 액션(문장 안에 내장)',
       reply: { ...FAILED_BASE, command_id: 'cmd-1', command_status: 'blocked', failure_kind: 'connection', next_attempt_at: null, reason_code: null },
-      expectedText: '채널 연결이 끊겨 멈췄습니다',
+      expectedText: '채널 연결이 끊겨 멈췄어요',
       hasAction: false, // 링크는 별도 버튼이 아니라 문장 안(t.rich)이라 아래 별도 검증
     },
     {
       name: '③ dead_letter(needs_check, fail-closed) — 사람 판단, 다시 상신 버튼',
       reply: { ...FAILED_BASE, command_id: 'cmd-1', command_status: 'dead_letter', failure_kind: 'needs_check', next_attempt_at: null, reason_code: null },
-      expectedText: '보내지 못했습니다',
+      expectedText: '보내지 못했어요',
       hasAction: true,
     },
     {
       name: '③ dead_letter(transient, MAX_RETRIES 소진) — needs_check와 같은 얼굴',
       reply: { ...FAILED_BASE, command_id: 'cmd-1', command_status: 'dead_letter', failure_kind: 'transient', next_attempt_at: null, reason_code: null },
-      expectedText: '보내지 못했습니다',
+      expectedText: '보내지 못했어요',
       hasAction: true,
     },
     {
       name: '④ voided+GATE_NOT_APPROVED_OR_RESEALED — 봉인 불일치, 다시 상신 버튼',
       reply: { ...FAILED_BASE, command_id: 'cmd-1', command_status: 'voided', failure_kind: null, next_attempt_at: null, reason_code: 'GATE_NOT_APPROVED_OR_RESEALED' },
-      expectedText: '승인한 답변과 지금 답변이 달라 보내지 않았습니다',
+      expectedText: '승인한 답변과 지금 답변이 달라 보내지 않았어요',
       hasAction: true,
     },
     {
       name: '⑤ voided+TARGET_COMMENT_DELETED — 대상 삭제, 액션 없음(되돌아올 수 없다)',
       reply: { ...FAILED_BASE, command_id: 'cmd-1', command_status: 'voided', failure_kind: null, next_attempt_at: null, reason_code: 'TARGET_COMMENT_DELETED' },
-      expectedText: '원 댓글이 지워져 보내지 못했습니다',
+      expectedText: '원 댓글이 지워져 보내지 못했어요',
       hasAction: false,
     },
     {
       name: '⑥ voided+모르는 사유(예: CONTENT_CHANGED, 다른 경로가 공유 컬럼에 남길 수 있는 값) — 일반 문구, 액션 없음(아는 척 안 함)',
       reply: { ...FAILED_BASE, command_id: 'cmd-1', command_status: 'voided', failure_kind: null, next_attempt_at: null, reason_code: 'CONTENT_CHANGED' },
-      expectedText: '보내지 못했습니다',
+      expectedText: '보내지 못했어요',
       hasAction: false,
     },
   ])('$name', async ({ reply, expectedText, hasAction }) => {
