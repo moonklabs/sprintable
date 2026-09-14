@@ -113,8 +113,11 @@ describe('extractRawFetchApiCalls — 주석·문자열 안 fetch 오탐 봉쇄(
 // story #2691 — 선언된 baseline 크기를 고정해 조용한 증감(리뷰 없는 추가/삭제)을 막는다
 // (verify-no-i18n-phrase-collision.ts의 GRANDFATHER_BASELINE_COUNT_TEST와 동일 관례).
 describe('GRANDFATHER_BASELINE_COUNT_TEST — 41번째부터는 review 없이 조용히 못 늘어난다(관례 재사용)', () => {
-  it('story #2487·#3780 후속(같은 파일 겹침, 2026-09-10) — ai-settings.tsx(#2487)·agent-run-detail.tsx(#3780)의 raw fetch가 각자 독립적으로 걷혀 grandfather 항목 2건 줄어 156건', () => {
-    expect(GRANDFATHER_BASELINE.size).toBe(156);
+  // story #3876(docs-shell-client.tsx 은퇴 잔재 제거, PO 확定 2026-09-14) — 소비처 0
+  // 확認(docs/page.tsx→DocsIndex만 렌더·자기 파일·자기 테스트뿐) 後 파일째 삭제, 그
+  // 파일의 grandfather 항목 2건도 같이 걷혀 156→154건.
+  it('story #2487·#3780·#3876 후속(파일 겹침/삭제, 2026-09-10·2026-09-14) — ai-settings.tsx(#2487)·agent-run-detail.tsx(#3780) raw fetch 정리 -2 + docs-shell-client.tsx(#3876) 삭제 -2 = 154건', () => {
+    expect(GRANDFATHER_BASELINE.size).toBe(154);
   });
 
   it('EXEMPT_FILES는 10개 파일(pre-auth·공개 라우트·primitive 구현) 그대로다(story #ab2a503f — app/set-password/confirm/page.tsx 추가, 카디르 QA 처방)', () => {
