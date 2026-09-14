@@ -14,6 +14,7 @@ function baseInput(overrides: Partial<WorkListInput> = {}): WorkListInput {
     inbox: [],
     teamMembers: page([{ id: 'm-human', type: 'human', name: '사람' }, { id: 'm-agent', type: 'agent', name: '미르코' }]),
     storyIdsWithArtifacts: new Set<string>(),
+    hypotheses: [],
     ...overrides,
   };
 }
@@ -239,5 +240,30 @@ describe('deriveWorkList — partial(더 있음, 「없다」 단정 금지)', (
       inbox: [{ source: 'gate', id: 'gate1', work_item_id: 's1', work_item_type: 'story', status: 'pending', gate_type: 'merge', risk_grade: 'low' }],
     }));
     expect(result.partial).toBe(false);
+  });
+});
+
+describe('deriveWorkList — 가설 연결(hypothesisIds, 필터 재료)', () => {
+  it('story_ids에 직접 있으면 매치', () => {
+    const result = deriveWorkList(baseInput({
+      tasks: page([{ id: 't1', story_id: 's1', assignee_id: null, title: '할일1', status: 'todo' }]),
+      hypotheses: [{ id: 'h1', statement: '가설1', epic_ids: [], story_ids: ['s1'] }],
+    }));
+    expect(result.groups[0].stories[0].hypothesisIds).toEqual(['h1']);
+  });
+
+  it('부모 goal의 epic_ids에 있으면 상속으로 매치', () => {
+    const result = deriveWorkList(baseInput({
+      tasks: page([{ id: 't1', story_id: 's1', assignee_id: null, title: '할일1', status: 'todo' }]),
+      hypotheses: [{ id: 'h1', statement: '가설1', epic_ids: ['g1'], story_ids: [] }],
+    }));
+    expect(result.groups[0].stories[0].hypothesisIds).toEqual(['h1']);
+  });
+
+  it('연결 없으면 빈 배열', () => {
+    const result = deriveWorkList(baseInput({
+      tasks: page([{ id: 't1', story_id: 's1', assignee_id: null, title: '할일1', status: 'todo' }]),
+    }));
+    expect(result.groups[0].stories[0].hypothesisIds).toEqual([]);
   });
 });

@@ -30,6 +30,11 @@
  * - 문서(docs) 칩은 이번 카드에서 뺐다(BE 갭 — /api/docs에 story_id 필터 0·story 응답에 문서
  *   연결 카운트 필드 0, PO 確定). 산출물(artifact) 칩은 story_id별 존재 여부만(/api/
  *   visual-artifacts?story_id=).
+ * - 「가설: <가설>」 필터: HypothesisResponse.epic_ids/story_ids(N:M) 실측 근거로, 스토리가
+ *   그 가설의 story_ids에 직접 있거나 그 스토리의 부모 goal이 epic_ids에 있으면 매치(가설이
+ *   goal에 걸려 있으면 그 아래 모든 스토리가 관련 — 직접 연결과 상속 연결을 다 인정하는
+ *   쪽으로 판단, PO 사후보고 예정). hasMore 없는 소스(agent-runs/inbox와 동형, /api/
+ *   hypotheses는 project_id만으로 project 전체를 페이지네이션 없이 준다).
  */
 
 export type WorkListRowKind = 'task' | 'agent_run';
@@ -88,6 +93,14 @@ export interface WorkListTeamMemberInput {
   name: string | null;
 }
 
+/** GET /api/hypotheses?project_id= 원소 부분집합. */
+export interface WorkListHypothesisInput {
+  id: string;
+  statement: string;
+  epic_ids: string[];
+  story_ids: string[];
+}
+
 export interface WorkListRow {
   id: string;
   kind: WorkListRowKind;
@@ -105,6 +118,8 @@ export interface WorkListStoryGroup {
   storyId: string;
   title: string;
   rows: WorkListRow[];
+  /** 이 스토리에 직접·상속(부모 goal 경유) 둘 다로 연결된 가설 id들(필터용). */
+  hypothesisIds: string[];
 }
 
 export interface WorkListGoalGroup {
@@ -143,6 +158,8 @@ export interface WorkListInput {
   teamMembers: WorkListPageResult<WorkListTeamMemberInput>;
   /** /api/visual-artifacts?story_id= 존재 확인 결과 — 있는 story_id만(칩은 "있을 때만"). */
   storyIdsWithArtifacts: ReadonlySet<string>;
+  /** GET /api/hypotheses?project_id= 전체(페이지네이션 없는 project 스코프 소스). */
+  hypotheses: WorkListHypothesisInput[];
 }
 
 function isPartial(...results: Array<WorkListPageResult<unknown>>): boolean {
@@ -190,9 +207,15 @@ export function deriveWorkList(input: WorkListInput): WorkList {
   const storyGroups = new Map<string, WorkListStoryGroup>();
   const goalTotals = new Map<string, { done: number; total: number; assigned: number; delegated: number }>();
 
+  function hypothesisIdsForStory(story: WorkListStoryInput): string[] {
+    return input.hypotheses
+      .filter((h) => h.story_ids.includes(story.id) || (story.epic_id !== null && h.epic_ids.includes(story.epic_id)))
+      .map((h) => h.id);
+  }
+
   function ensureStoryGroup(story: WorkListStoryInput): WorkListStoryGroup {
     let g = storyGroups.get(story.id);
-    if (!g) { g = { storyId: story.id, title: story.title, rows: [] }; storyGroups.set(story.id, g); }
+    if (!g) { g = { storyId: story.id, title: story.title, rows: [], hypothesisIds: hypothesisIdsForStory(story) }; storyGroups.set(story.id, g); }
     return g;
   }
 
