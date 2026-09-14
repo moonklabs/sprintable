@@ -18,6 +18,10 @@ import {
 import { fetchWorkList, type FetchedWorkList } from './fetch-work-list';
 import { filterWorkList, type WorkListFilters } from './filter-work-list';
 import { WorkListRowView } from './work-list-row';
+import { useWorkListSelection } from './use-work-list-selection';
+import { WorkListDetailPanel } from './work-list-detail-panel';
+import { Sheet, SheetContent } from '@/components/ui/sheet';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 /** PO 확定(2026-09-14) — 시안 3840 v2 필터 칩 3종 커스터마이즈: 펀넬 아이콘·선택 표시
  * 파란(primary) 테두리·가설 점 마커. OperatorDropdownSelect(components/ui)가 쓰는 것과
@@ -101,6 +105,9 @@ export function WorkListShell({ projectId }: { projectId: string }) {
   const [loadError, setLoadError] = useState(false);
   const [reloadNonce, setReloadNonce] = useState(0);
   const [filters, setFilters] = useWorkListFilters();
+  // story #3845(우패널) — 행 선택은 URL이 SSOT(useWorkListFilters와 동일 원칙).
+  const [selectedRowId, setSelectedRowId] = useWorkListSelection();
+  const isMobile = useIsMobile();
 
   useEffect(() => {
     let cancelled = false;
@@ -133,6 +140,30 @@ export function WorkListShell({ projectId }: { projectId: string }) {
 
   const filtered = data ? filterWorkList(data, filters) : null;
 
+  // story #3845(우패널) — 선택된 rowId로 그 row·부모 story·부모 goal을 한 번에 찾는다
+  // (filtered 기준 — 필터로 걸러진 행은 화면에 없으니 패널도 열지 않는다, "안 보이는데
+  // 패널만 뜨는" 불일치 방지).
+  const selectedContext = (() => {
+    if (!selectedRowId || !filtered) return null;
+    for (const group of filtered.groups) {
+      for (const story of group.stories) {
+        const row = story.rows.find((r) => r.id === selectedRowId);
+        if (row) return { row, goalTitle: group.title, storyId: story.storyId, storyTitle: story.title };
+      }
+    }
+    return null;
+  })();
+
+  const detailPanel = selectedContext ? (
+    <WorkListDetailPanel
+      row={selectedContext.row}
+      storyId={selectedContext.storyId}
+      storyTitle={selectedContext.storyTitle}
+      goalTitle={selectedContext.goalTitle}
+      onClose={() => setSelectedRowId(null)}
+    />
+  ) : null;
+
   return (
     <>
       <TopBarSlot
@@ -146,8 +177,12 @@ export function WorkListShell({ projectId }: { projectId: string }) {
         }
         showContextChip
       />
-      <div className="space-y-3 p-4">
-        <WorkspaceFrameTabs active="workList" />
+      {/* story #3845(우패널) — 데스크톱: 목록 옆 고정폭 aside(선택 有일 때만 렌더·
+          overflow-y-auto+focus-inset은 패널 자신이 짐). 모바일: Sheet(side="right",
+          기존 use-mobile.ts 768 문턱 재사용 — 새 breakpoint 0). */}
+      <div className="flex min-h-0 flex-1">
+        <div className="min-w-0 flex-1 space-y-3 p-4">
+          <WorkspaceFrameTabs active="workList" />
 
         {data && filtered ? (
           <>
@@ -225,7 +260,14 @@ export function WorkListShell({ projectId }: { projectId: string }) {
                       {group.stories.map((story) => (
                         <div key={story.storyId} className="border-l-2 border-border pl-3">
                           <div className="pb-1 text-sm font-semibold text-foreground">{story.title}</div>
-                          {story.rows.map((row) => <WorkListRowView key={row.id} row={row} />)}
+                          {story.rows.map((row) => (
+                            <WorkListRowView
+                              key={row.id}
+                              row={row}
+                              isSelected={selectedRowId === row.id}
+                              onSelect={(rowId) => setSelectedRowId(selectedRowId === rowId ? null : rowId)}
+                            />
+                          ))}
                         </div>
                       ))}
                     </div>
@@ -244,7 +286,20 @@ export function WorkListShell({ projectId }: { projectId: string }) {
         ) : (
           <div className="p-4 text-sm text-muted-foreground">…</div>
         )}
+        </div>
+        {/* 데스크톱 aside — use-mobile.ts 기존 lg(1024) 문턱 재사용(새 breakpoint 0). */}
+        {detailPanel && !isMobile ? (
+          <aside className="w-[360px] shrink-0 border-l border-border">
+            {detailPanel}
+          </aside>
+        ) : null}
       </div>
+      {/* 모바일 Sheet — detailPanel이 있을 때만 open. */}
+      <Sheet open={!!detailPanel && isMobile} onOpenChange={(open) => { if (!open) setSelectedRowId(null); }}>
+        <SheetContent side="right" className="w-full p-0 sm:max-w-sm">
+          {detailPanel}
+        </SheetContent>
+      </Sheet>
     </>
   );
 }

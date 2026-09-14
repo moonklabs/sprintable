@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
@@ -141,5 +141,32 @@ describe('WorkListRowView', () => {
 
     await act(async () => { root.render(wrap(<WorkListRowView row={baseRow({ isDelegated: false, state: 'done' })} />)); });
     expect(container.querySelector('.bg-primary, .bg-success')).toBeNull();
+  });
+
+  // story #3845(우패널) — onSelect 없이는 기존 소비처(위 모든 테스트)가 그대로 무변(클릭
+  // 불가·role 없음) — onSelect가 있을 때만 새 행동이 켜진다(양성대조).
+  it('onSelect 없이 렌더하면 클릭 핸들러·role이 없다(기존 소비처 회귀 0)', async () => {
+    await act(async () => { root.render(wrap(<WorkListRowView row={baseRow()} />)); });
+    const rowEl = container.firstElementChild as HTMLElement;
+    expect(rowEl.getAttribute('role')).toBeNull();
+  });
+
+  it('⭐onSelect가 있으면 클릭 시 row.id로 불린다', async () => {
+    const onSelect = vi.fn();
+    await act(async () => { root.render(wrap(<WorkListRowView row={baseRow({ id: 'row-42' })} onSelect={onSelect} />)); });
+    const rowEl = container.firstElementChild as HTMLElement;
+    expect(rowEl.getAttribute('role')).toBe('button');
+    await act(async () => { rowEl.click(); });
+    expect(onSelect).toHaveBeenCalledWith('row-42');
+  });
+
+  it('isSelected=true면 선택 하이라이트(bg-muted 토큰 — hover:bg-muted와는 다른 자리)가 붙는다', async () => {
+    await act(async () => { root.render(wrap(<WorkListRowView row={baseRow()} onSelect={() => {}} isSelected />)); });
+    const rowEl = container.firstElementChild as HTMLElement;
+    expect(rowEl.classList.contains('bg-muted')).toBe(true);
+
+    await act(async () => { root.render(wrap(<WorkListRowView row={baseRow()} onSelect={() => {}} isSelected={false} />)); });
+    const rowEl2 = container.firstElementChild as HTMLElement;
+    expect(rowEl2.classList.contains('bg-muted')).toBe(false);
   });
 });
