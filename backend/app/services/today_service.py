@@ -46,6 +46,14 @@ _QUOTA_CHANNELS = frozenset({"youtube", "youtube_sandbox"})
 # 부분집합 = 아직 끝나지 않은 전부(completed/failed/abandoned만 종결).
 _AGENT_RUN_IN_PROGRESS_STATUSES = frozenset({"queued", "held", "running", "hitl_pending"})
 
+# story #3833 — agent_runs.py::_TERMINAL_STATUSES와 같은 값(SSOT는 그 파일).
+# "오늘 끝난 위임"의 「끝남」 = 이 세 상태로의 전이(그 라우터가 finished_at을
+# 서버가 채우는 것도 보장하는 바로 그 집합).
+_TERMINAL_STATUSES = frozenset({"completed", "failed", "abandoned"})
+
+# story #3833 — completed_today 최신순 상한(카드 규격 그대로).
+_COMPLETED_TODAY_LIMIT = 20
+
 # story #3821 그라운딩 — PublicationCommand.status='completed'만 "나갔다"로 센다
 # (pending/in_progress/failed/dead_letter/voided/blocked는 아직 안 나갔거나 실패).
 _PUBLISHED_STATUS = "completed"
@@ -303,6 +311,23 @@ async def _resolve_agent_progress(
             )
         )).scalars().all())
 
+    # story #3833 AC1 — 그 run의 "마지막 도구 호출 이름"(agent_run_tool_calls 최신
+    # 1건). DISTINCT ON (run_id)로 run 개수와 무관하게 쿼리 1(N+1 0). tool 컬럼은
+    # PR2(X-Sprintable-Tool 헤더 배선) 착지 전까진 항상 null이라(그라운딩 참고)
+    # 지금은 값이 있어도 null로 보인다 — 그게 정직한 현재 상태다(지어내지 않음).
+    from app.models.agent_run_tool_call import AgentRunToolCall
+
+    run_ids = {run.id for run, _sid, _stitle in rows}
+    current_steps: dict[uuid.UUID, str | None] = {}
+    if run_ids:
+        last_call_rows = (await session.execute(
+            select(AgentRunToolCall.run_id, AgentRunToolCall.tool)
+            .distinct(AgentRunToolCall.run_id)
+            .where(AgentRunToolCall.run_id.in_(run_ids))
+            .order_by(AgentRunToolCall.run_id, AgentRunToolCall.started_at.desc())
+        )).all()
+        current_steps = {rid: tool for rid, tool in last_call_rows}
+
     items: list[dict[str, Any]] = []
     for run, story_id, story_title in rows:
         agent = agents.get(run.agent_id)
@@ -311,7 +336,7 @@ async def _resolve_agent_progress(
             "agent": {"id": run.agent_id, "name": agent.name if agent and agent.name else ""},
             "work_item": {"type": "story", "id": story_id, "title": story_title or ""} if story_id else None,
             "status": run.status,
-            "current_step": None,  # AgentRun엔 "현재 단계" 개념이 없다(지어내지 않음).
+            "current_step": current_steps.get(run.id),
             # 페드루 PO 리뷰 정정 2(PR #4250) — "last_action_at"이라는 이름으로
             # started_at 값을 실으면 오래 도는 run이 "방금 행동했다"는 거짓 신호가
             # 된다(AgentRun엔 "마지막 행동 시각" 개념 자체가 없다 — updated_at도
@@ -320,6 +345,62 @@ async def _resolve_agent_progress(
             # story #3828 — 이 실행을 촉발한 대화(agent_runs.conversation_id, 마이그
             # 0374). 캐폴러가 그 대화의 실제 참여자일 때만 노출(위 참여 검증) —
             # 연결 자체가 없거나 캐폴러가 참여자가 아니면 null(지어내지 않는다).
+            "conversation_id": run.conversation_id if run.conversation_id in participant_conv_ids else None,
+        })
+    return items
+
+
+async def _resolve_completed_today(
+    session: AsyncSession, org_id: uuid.UUID, auth: AuthContext, tz: str,
+) -> list[dict[str, Any]]:
+    """story #3833 AC2/AC3 — 오늘(tz 자정 이후) 종료된 run 중 호출자가 위임/참여한
+    것(_resolve_agent_progress와 **같은** 참여 술어 — Story.assignee_id 또는
+    Story.human_owner_member_id == caller, PO 判定 2026-09-13 그대로 재사용,
+    새 축 0). conversation_id도 그 함수와 동일하게 캐폴러 참여 검증을 거친다
+    (죽은 링크·DM 존재 노출 방지 원칙 동일 적용). 최신순(finished_at DESC)·상한
+    20."""
+    from app.models.agent_run import AgentRun
+    from app.models.conversation import ConversationParticipant
+
+    member = await resolve_member(auth, org_id, session)
+    since = org_midnight_utc(tz)
+    rows = (await session.execute(
+        select(AgentRun, Story.id, Story.title)
+        .join(Story, Story.id == AgentRun.story_id, isouter=True)
+        .where(
+            AgentRun.org_id == org_id,
+            AgentRun.status.in_(_TERMINAL_STATUSES),
+            AgentRun.finished_at.isnot(None),
+            AgentRun.finished_at >= since,
+            (Story.assignee_id == member.id) | (Story.human_owner_member_id == member.id),
+        )
+        .order_by(AgentRun.finished_at.desc())
+        .limit(_COMPLETED_TODAY_LIMIT)
+    )).all()
+
+    agent_ids = {run.agent_id for run, _sid, _stitle in rows}
+    agents = await lookup_members_by_ids(agent_ids, session) if agent_ids else {}
+
+    conv_ids = {run.conversation_id for run, _sid, _stitle in rows if run.conversation_id is not None}
+    participant_conv_ids: set[uuid.UUID] = set()
+    if conv_ids:
+        participant_conv_ids = set((await session.execute(
+            select(ConversationParticipant.conversation_id).where(
+                ConversationParticipant.conversation_id.in_(conv_ids),
+                ConversationParticipant.member_id == member.id,
+            )
+        )).scalars().all())
+
+    items: list[dict[str, Any]] = []
+    for run, story_id, story_title in rows:
+        agent = agents.get(run.agent_id)
+        items.append({
+            "run_id": run.id,
+            "agent": {"id": run.agent_id, "name": agent.name if agent and agent.name else ""},
+            "work_item": {"type": "story", "id": story_id, "title": story_title or ""} if story_id else None,
+            "status": run.status,
+            "result_summary": run.result_summary,
+            "finished_at": run.finished_at,
             "conversation_id": run.conversation_id if run.conversation_id in participant_conv_ids else None,
         })
     return items
@@ -389,12 +470,14 @@ async def build_today_snapshot(
 ) -> dict[str, Any]:
     needs_me, needs_me_count = await _resolve_needs_me(session, org_id, auth)
     agent_progress = await _resolve_agent_progress(session, org_id, auth)
+    completed_today = await _resolve_completed_today(session, org_id, auth, tz)
     published_today = await _resolve_published_today(session, org_id, tz)
     usage = await _resolve_usage(session, org_id)
     return {
         "needs_me": needs_me,
         "needs_me_count": needs_me_count,
         "agent_progress": agent_progress,
+        "completed_today": completed_today,
         "published_today": published_today,
         "usage": usage,
     }
