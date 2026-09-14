@@ -5324,6 +5324,7 @@
     "previousNotesListDesc": "Previous release notes"
   },
   "workcell": {
+    "briefTitle": "Brief",
     "briefQuestion": "What · Why (the promise)",
     "briefGoal": "Goal",
     "briefDod": "DoD",
@@ -5335,6 +5336,7 @@
     "briefAgent": "Agent",
     "ownerUnassigned": "No owner assigned",
     "outOfPipeline": "Done — outside trust pipeline scope",
+    "runTitle": "Run",
     "runQuestion": "How far · What's needed (current activity, not a progress bar)",
     "runNow": "Now",
     "runStage": "Stage",
@@ -5343,8 +5345,10 @@
     "runBlocked": "Blocked",
     "none": "None",
     "runNextNeed": "Next need",
+    "evidenceTitle": "Evidence",
     "evidenceQuestion": "Proof (reuses Proof Capsule · done = evidence, not a label)",
     "evidenceEmpty": "No evidence yet",
+    "conversationTitle": "Conversation",
     "conversationQuestion": "Work-scoped thread (not global chat)",
     "viewRun": "Run",
     "viewEvidence": "Evidence",

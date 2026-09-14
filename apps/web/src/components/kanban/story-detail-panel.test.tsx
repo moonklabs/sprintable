@@ -311,12 +311,12 @@ describe('StoryDetailPanel — Workcell pipelineStage = story.trust_stage 직결
 
   it('trust_stage="verified" → Verified(gate fetch 응답과 무관 — BE 판정값 그대로)', async () => {
     await mountWithTrustStage('verified');
-    expect(currentStageLabel()).toBe('Verified');
+    expect(currentStageLabel()).toBe('검증됨');
   });
 
   it('trust_stage="needs_input" → Needs input', async () => {
     await mountWithTrustStage('needs_input');
-    expect(currentStageLabel()).toBe('Needs input');
+    expect(currentStageLabel()).toBe('입력 필요');
   });
 
   it('trust_stage=null(done/미지 status 또는 필드 미채움) → 스테퍼 자체가 안 뜬다(no-fiction, 지어낸 단계 0)', async () => {
@@ -465,7 +465,10 @@ describe('StoryDetailPanel — trustChip도 story.trust_stage로 수렴(story #2
       ));
     });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
-    expect(container.textContent).toContain('입력 필요'); // 전이 前 — 기존 칩 정상 표시.
+    // story #3880(§⑤ 낱말 드리프트) — workcell pipeline 스테퍼도 같은 낱말("입력 필요")을
+    // 쓰게 돼(board.trustChipNeedsInput과 동형 재사용) 순수 텍스트 서치로는 칩과 스테퍼를
+    // 못 가른다 — data-testid로 칩 자체를 특정해서 본다.
+    expect(container.querySelector('[data-testid="story-detail-trust-chip"]')).toBeTruthy(); // 전이 前 — 기존 칩 정상 표시.
 
     const statusTrigger = document.body.querySelector('button[aria-label="Status"], button[aria-label="상태"]') as HTMLButtonElement | null;
     expect(statusTrigger).toBeTruthy();
@@ -477,14 +480,13 @@ describe('StoryDetailPanel — trustChip도 story.trust_stage로 수렴(story #2
 
     // 낙관 전이 직후 — story.trust_stage(=pipelineStage)는 여전히 'needs_input'이지만
     // localStatus는 이미 'done'. 칩이 남아있으면 회귀.
-    expect(container.textContent).not.toContain('입력 필요');
-    expect(container.textContent).not.toContain('병합 대기');
+    expect(container.querySelector('[data-testid="story-detail-trust-chip"]')).toBeFalsy();
 
     await act(async () => {
       resolveStatusPatch!({ ok: true, json: async () => ({ data: { violation: null } }) });
       await Promise.resolve(); await Promise.resolve();
     });
-    expect(container.textContent).not.toContain('입력 필요'); // PATCH 완료 後에도 계속 미표시.
+    expect(container.querySelector('[data-testid="story-detail-trust-chip"]')).toBeFalsy(); // PATCH 완료 後에도 계속 미표시.
   });
 });
 
@@ -530,13 +532,13 @@ describe('StoryDetailPanel — Workcell pipelineStage SSE 라이브 갱신(story
       root.render(wrap(<StoryDetailPanel story={story} tasks={[]} onClose={() => {}} memberMap={memberMap} />));
     });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
-    expect(currentStageLabel()).toBe('Running');
+    expect(currentStageLabel()).toBe('진행 중');
 
     expect(capturedOnExtraEvent).toBeDefined();
     await act(async () => { capturedOnExtraEvent!('story.trust_stage_changed', { story_id: 's-live', new_stage: 'needs_input' }); });
     await act(async () => { vi.advanceTimersByTime(500); await Promise.resolve(); await Promise.resolve(); });
 
-    expect(currentStageLabel()).toBe('Needs input');
+    expect(currentStageLabel()).toBe('입력 필요');
   });
 
   it('다른 story_id의 이벤트는 무시한다(이 패널이 보는 story 밖 전이)', async () => {
@@ -559,7 +561,7 @@ describe('StoryDetailPanel — Workcell pipelineStage SSE 라이브 갱신(story
     await act(async () => { vi.advanceTimersByTime(500); await Promise.resolve(); });
 
     expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining('/api/stories/s-live'), expect.anything());
-    expect(currentStageLabel()).toBe('Running');
+    expect(currentStageLabel()).toBe('진행 중');
   });
 
   // PO 리뷰 MEDIUM(PR#3363, 2026-08-22) — story.id 변경 시 「대기 중 타이머」는 지워져도
@@ -590,7 +592,7 @@ describe('StoryDetailPanel — Workcell pipelineStage SSE 라이브 갱신(story
       root.render(wrap(<StoryDetailPanel story={storyA} tasks={[]} onClose={() => {}} memberMap={memberMap} />));
     });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
-    expect(currentStageLabel()).toBe('Running');
+    expect(currentStageLabel()).toBe('진행 중');
 
     // story-a SSE 발화 → 디바운스 500ms 소진 → fetch 발사(아직 안 끝남, deferred).
     await act(async () => { capturedOnExtraEvent!('story.trust_stage_changed', { story_id: 'story-a', new_stage: 'merge_ready' }); });
@@ -601,7 +603,7 @@ describe('StoryDetailPanel — Workcell pipelineStage SSE 라이브 갱신(story
       root.render(wrap(<StoryDetailPanel story={storyB} tasks={[]} onClose={() => {}} memberMap={memberMap} />));
     });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
-    expect(currentStageLabel()).toBe('Claimed done');
+    expect(currentStageLabel()).toBe('완료 주장');
 
     // 이제야 story-a의 응답이 늦게 도착 — story-b 패널에 새면 안 된다.
     await act(async () => {
@@ -609,7 +611,7 @@ describe('StoryDetailPanel — Workcell pipelineStage SSE 라이브 갱신(story
       await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
     });
 
-    expect(currentStageLabel()).toBe('Claimed done');
+    expect(currentStageLabel()).toBe('완료 주장');
   });
 
   // PO 리뷰 확장(PR#3363 codex 교차모델, 2026-08-22) — 위 두 테스트가 덮는 "다른 story로
@@ -659,7 +661,7 @@ describe('StoryDetailPanel — Workcell pipelineStage SSE 라이브 갱신(story
       root.render(wrap(<StoryDetailPanel story={story} tasks={[]} onClose={() => {}} memberMap={memberMap} />));
     });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
-    expect(currentStageLabel()).toBe('Running');
+    expect(currentStageLabel()).toBe('진행 중');
 
     // E1 — 디바운스 소진 → fetchA 발사(deferred, 아직 안 끝남).
     await act(async () => { capturedOnExtraEvent!('story.trust_stage_changed', { story_id: 'story-x', new_stage: 'needs_input' }); });
@@ -680,7 +682,7 @@ describe('StoryDetailPanel — Workcell pipelineStage SSE 라이브 갱신(story
       resolveSecondCall!({ ok: true, json: async () => ({ data: { ...story, trust_stage: 'verified' } }) });
       await Promise.resolve(); await Promise.resolve();
     });
-    expect(currentStageLabel()).toBe('Verified');
+    expect(currentStageLabel()).toBe('검증됨');
 
     // ③fetchA(먼저 쏜 옛 fetch)를 성공 응답으로 resolve — 진짜 역순 «성공» 도착 재현(수동
     // reject 없음). 진짜 abort됐다면(firstSignal.aborted===true, 위에서 이미 확認) 이
@@ -690,7 +692,7 @@ describe('StoryDetailPanel — Workcell pipelineStage SSE 라이브 갱신(story
       await Promise.resolve(); await Promise.resolve();
     });
     // ②늦은 «성공» 응답이 부당 반영되지 않았는지 — Verified 유지.
-    expect(currentStageLabel()).toBe('Verified');
+    expect(currentStageLabel()).toBe('검증됨');
   });
 });
 

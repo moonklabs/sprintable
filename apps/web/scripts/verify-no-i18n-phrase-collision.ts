@@ -693,6 +693,19 @@ export const EXEMPT_PAIRS = new Set<string>([
   'content.budgetRemainingOverLimit <-> content.generationBudgetRemainingCompactOverLimit', // (b)
   'content.generationBudgetLimitLabel <-> content.generationBudgetRemainingCompactOverLimit', // (b)
   'content.generationBudgetRemainingCompactOverLimit <-> content.generationBudgetRemainingLabel', // (b)
+  // story #3880(§⑤ 낱말 드리프트, 2026-09-14) — conversationTitle="대화"(LayerLabel 4층
+  // 구획 eyebrow, uppercase 헤딩 스타일)와 conversationChatProofCount="대화 근거 {count}건
+  // 보기"(그 구획 밑 body 텍스트 링크)는 workcell.tsx의 같은 Conversation 패널 안에서
+  // 같이 서지만, 위 commentsSectionTitle류(섹션 제목 vs 그 섹션의 행 문구)와 동형 —
+  // "대화"는 짧은 섹션 헤딩, "대화 근거 N건 보기"는 그 섹션 본문의 별개 링크 문구라
+  // 시각적 위계(작은 eyebrow vs 본문 링크)로 이미 구분된다. conversationTitle은
+  // §②(채팅→대화) 기존 낱말 재사용이라 새 낱말 발명도 아님.
+  'workcell.conversationChatProofCount <-> workcell.conversationTitle',
+  // story #3880 — evidenceTitle="근거"(Evidence LayerLabel eyebrow, 서로 다른 구획)도
+  // 같은 파일의 conversationChatProofCount="대화 근거 {count}건 보기"(Conversation 구획
+  // 본문 링크)와 부분문자열로 겹친다 — 위와 동형 근거(다른 구획·다른 위계, eyebrow vs
+  // 본문 링크). evidenceTitle은 기존 proofCapsule.evidence.label의 "근거" 낱말 재사용.
+  'workcell.conversationChatProofCount <-> workcell.evidenceTitle',
 ]);
 
 // ⛔⭐오르테가군 지적(2026-07-31) — 이 목록에 «새로» 넣는 것은 PO 승인을 거친다. 이유 없이

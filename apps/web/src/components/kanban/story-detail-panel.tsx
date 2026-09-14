@@ -1432,7 +1432,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                   색 신호 그대로 KEEP(merge_ready=green·기타=amber) — 계열색 텍스트만 헤어라인 위에서
                   라이트 AA 미달이라 text-foreground로 이전(대비표 정본). */}
               {trustChip && trustChipLabel ? (
-                <span className="inline-flex items-center gap-1.5 rounded-[7px] border border-proof-line px-2 py-0.5 text-[11px] font-semibold text-foreground">
+                <span data-testid="story-detail-trust-chip" className="inline-flex items-center gap-1.5 rounded-[7px] border border-proof-line px-2 py-0.5 text-[11px] font-semibold text-foreground">
                   <span className={`size-1.5 rounded-full ${trustChip === 'merge_ready' ? 'bg-proof-green' : 'bg-proof-amber'}`} aria-hidden="true" />
                   {trustChipLabel}
                 </span>

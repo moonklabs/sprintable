@@ -302,7 +302,8 @@ describe('DocsClientLayout — 레일 v2 신규 요소(§3 proof 상태 도트·
   it('마스트헤드(kicker+H1+citron rule)가 렌더된다', async () => {
     stubFetch();
     await mount();
-    expect(container.textContent).toContain('INDEX');
+    // story #3880(§⑤ 낱말 드리프트, 유나 확定) — railKicker ko 값 안 영단어 baked-in 정본화.
+    expect(container.textContent).toContain('색인');
     expect(container.querySelectorAll('h1, div').length).toBeGreaterThan(0);
   });
 
