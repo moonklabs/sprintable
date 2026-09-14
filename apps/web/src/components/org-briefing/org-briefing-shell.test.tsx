@@ -210,15 +210,32 @@ describe('OrgBriefingShell — story #3831 AC1(3구역, 3823 route 단일 소비
     expect(nameSpan).toBeTruthy();
   });
 
-  it('오늘 나간 것이 있으면 채널별 수가 뜬다', async () => {
+  it('오늘 나간 것이 있으면 채널별 수가 뜬다(표시명, raw channel_kind 아님)', async () => {
     stubToday({
       ...EMPTY_TODAY,
-      published_today: { count: 3, by_channel: [{ channel_kind: 'blog', count: 2 }, { channel_kind: 'newsletter', count: 1 }] },
+      published_today: { count: 3, by_channel: [{ channel_kind: 'hosted_site', count: 2 }, { channel_kind: 'stibee', count: 1 }] },
     });
     await mount();
     expect(container.textContent).toContain('나간 것');
     expect(container.textContent).toContain('3');
-    expect(container.textContent).toContain('blog 2 · newsletter 1');
+    // 페드루 PO CHANGES(2026-09-14 00:58Z) — channelLabel() 재사용 확인. raw 코드값
+    // ("hosted_site"·"stibee")이 그대로 새면 안 된다.
+    expect(container.textContent).toContain('Sprintable 블로그 2 · 스티비 1');
+    expect(container.textContent).not.toContain('hosted_site');
+    expect(container.textContent).not.toContain('stibee');
+  });
+
+  it('사용량 카드의 채널명도 표시명으로 뜬다(raw "youtube" 아님)', async () => {
+    stubToday({
+      ...EMPTY_TODAY,
+      usage: {
+        platform: [{ connection_id: 'c1', channel_kind: 'youtube', used: 100, limit: 10000, reset_at: '2026-09-14T00:00:00Z' }],
+        ad_spend: { measured: false },
+      },
+    });
+    await mount();
+    const label = [...container.querySelectorAll('p')].find((p) => p.textContent === 'YouTube' || p.textContent === 'youtube');
+    expect(label?.textContent).toBe('YouTube');
   });
 
   it('오늘 나간 것도 사용량도 0건이면 「오늘 나간 게 아직 없어요」', async () => {

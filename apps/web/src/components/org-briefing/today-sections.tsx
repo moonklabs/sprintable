@@ -6,6 +6,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { formatCount } from '@/components/content/generation-budget-indicator';
+import { channelLabel } from '@/lib/channel-label';
 import {
   hrefForNeedsMeItem,
   type NeedsMeState,
@@ -149,6 +150,10 @@ export function AgentProgressSection({ items }: { items: TodayAgentProgressItem[
 
 export function PublishedSection({ published, usage }: { published: TodayPublished; usage: TodayUsage }) {
   const t = useTranslations('orgBriefing');
+  // 페드루 PO CHANGES(2026-09-14 00:58Z, PR #4256) — channel_kind가 BE 코드값 그대로
+  // (youtube·hosted_site 등) 새던 결함, 채널 연결/콘텐츠 화면이 이미 쓰는 표시명 맵
+  // (channel-label.ts, 'content' 네임스페이스에도 등재돼 있음)을 재사용 — 새 낱말 0.
+  const tContent = useTranslations('content');
   const locale = useLocale();
   const isEmpty = published.count === 0 && usage.platform.length === 0;
   return (
@@ -169,14 +174,16 @@ export function PublishedSection({ published, usage }: { published: TodayPublish
               <p className="mt-1 text-lg font-semibold text-foreground">{formatCount(published.count, locale)}</p>
               {published.byChannel.length > 0 ? (
                 <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
-                  {published.byChannel.map((c) => `${c.channelKind} ${formatCount(c.count, locale)}`).join(' · ')}
+                  {published.byChannel
+                    .map((c) => `${channelLabel(c.channelKind, tContent)} ${formatCount(c.count, locale)}`)
+                    .join(' · ')}
                 </p>
               ) : null}
             </Card>
           ) : null}
           {usage.platform.map((p) => (
             <Card key={p.connectionId} className="p-3.5">
-              <p className="text-[11px] text-muted-foreground">{p.channelKind}</p>
+              <p className="text-[11px] text-muted-foreground">{channelLabel(p.channelKind, tContent)}</p>
               <p className="mt-1 text-lg font-semibold text-foreground">
                 {formatCount(p.used, locale)}/{formatCount(p.limit, locale)}
               </p>
