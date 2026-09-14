@@ -460,6 +460,80 @@ describe('scanContent — 같은 요소 tint/muted 공존 판정의 그룹 정�
   });
 });
 
+// story #3865(AC1, PO CHANGES 2026-09-14 11:40Z «같은 조건식=같은 세계») — 조상의 tint
+// 조건식과 자손의 muted 조건식이 완전히 같은 소스 텍스트면(예: 둘 다 `wipExceeded`), 그
+// 두 분기가 실제로 엇갈리는지(tint 뜨는 분기 ≠ muted 뜨는 분기)까지 확인한다. kanban-
+// column.tsx PR 리뷰에서 평시(wipExceeded=false) 컬럼까지 ink로 무거워진 회귀(캡처 「개발
+// 대기 0」 증거)가 이 규칙 부재로 생겼다 — 자식 클래스를 조건부(`wipExceeded ? ink : muted`)로
+// 고친 뒤에도 가드가 계속 "조상 destructive-tint 위 muted 있음"으로 오탐하면 원복 압력이
+// 생기므로, 이 규칙 없이는 처방①(조건부 ink)이 가드와 충돌한다.
+describe('scanContent — 조상-자손 간 같은 조건식 정밀화(story #3865, PO CHANGES 조건②)', () => {
+  // 조건② 음성대조 — 조상 tint를 켜는 조건(`flag`)과 자손 muted를 켜는 조건이 완전히
+  // 같은 소스 텍스트이고 분기가 엇갈리면(조상=true일 때 tint, 자손=true일 때 ink·false일
+  // 때만 muted) 실제 공존이 0이라 위반이 아니다 — kanban-column.tsx colClass/자식 className
+  // 패턴과 동형.
+  it('조상·자손이 같은 조건식을 쓰고 분기가 엇갈리면(tint↔ink 동시) 위반 아님', () => {
+    const content = `
+      function Col({ flag }) {
+        const colClass = flag ? 'bg-destructive-tint' : 'bg-transparent';
+        return (
+          <div className={\`wrapper \${colClass}\`}>
+            <span className={flag ? 'text-foreground' : 'text-muted-foreground'}>count</span>
+          </div>
+        );
+      }
+    `;
+    expect(scanContent(content, 'sample.tsx')).toEqual([]);
+  });
+
+  // 조건② 양성대조(PO 명시 요청 — "자식 조건식을 다른 변수로 바꾸면 RED") — 조상은
+  // `flag`로 tint를 켜는데 자손은 **다른** 독립 변수(`otherFlag`)로 muted를 켜면, 두 조건이
+  // 독립이라 동시에 참일 수 있다(곱집합) — 기존 보수적 판정(어디든 muted 있으면 위반)으로
+  // 폴백해야 한다(fail-closed 유지).
+  it('조상·자손이 서로 다른(독립) 조건식을 쓰면 여전히 위반(곱집합 fail-closed)', () => {
+    const content = `
+      function Col({ flag, otherFlag }) {
+        const colClass = flag ? 'bg-destructive-tint' : 'bg-transparent';
+        return (
+          <div className={\`wrapper \${colClass}\`}>
+            <span className={otherFlag ? 'text-foreground' : 'text-muted-foreground'}>count</span>
+          </div>
+        );
+      }
+    `;
+    const violations = scanContent(content, 'sample.tsx');
+    expect(violations).toHaveLength(1);
+    expect(violations[0]!.family).toBe('destructive');
+  });
+
+  // 실 파일 — kanban-column.tsx: colClass(wipExceeded)와 11곳 자식 className(wipExceeded
+  // 삼항)이 실제로 이 규칙 덕에 GREEN인지, 그리고 자식 조건식을 다른 변수로 바꾸면(PO 명시
+  // 양성대조) RED로 돌아오는지 확인한다.
+  describe('실 파일 뮤테이션 — kanban-column.tsx(같은 조건식 wipExceeded)', () => {
+    const REL_FILE = 'components/kanban/kanban-column.tsx';
+    const ABS_FILE = path.join(SRC_ROOT, REL_FILE);
+    const original = readFileSync(ABS_FILE, 'utf8');
+
+    it('전제: 원본은 이 파일에서 위반 0(colClass·자식 className 모두 wipExceeded, 분기가 엇갈림)', () => {
+      expect(scanContent(original, REL_FILE)).toEqual([]);
+    });
+
+    it('빈 상태 문구의 조건식을 다른(독립) 변수로 바꾸면 RED로 돌아온다', () => {
+      const target = "<p className={`text-xs ${wipExceeded ? 'text-foreground' : 'text-muted-foreground'}`}>{t('noStories')}</p>";
+      expect(original.includes(target)).toBe(true);
+      const mutated = original.replace(
+        target,
+        "<p className={`text-xs ${collapsed ? 'text-foreground' : 'text-muted-foreground'}`}>{t('noStories')}</p>",
+      );
+      expect(mutated).not.toBe(original);
+
+      const after = scanContent(mutated, REL_FILE);
+      expect(after.length).toBeGreaterThan(0);
+      expect(after.some((v) => v.family === 'destructive')).toBe(true);
+    });
+  });
+});
+
 // story #3865(AC1, 조건①·2026-09-14 11:04Z) — 불투명 배경 규칙(OPAQUE_BG_RE)이 recruiter-
 // client.tsx의 기존 #3839 grandfather 1건(muted-on-info-tint)도 실제로 걷어냈다(3865 스코프
 // 밖 파일이지만 baseline 정확 일치 계약상 이 PR에 같이 실린다) — 실 파일 양성대조.

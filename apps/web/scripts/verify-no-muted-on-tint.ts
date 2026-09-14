@@ -137,6 +137,63 @@ function classNameStringsOf(opening: ts.JsxOpeningLikeElement, bindings: ClassBi
   return [];
 }
 
+/** story #3865(AC1, PO CHANGES 2026-09-14 11:40Z «같은 조건식=같은 세계») — className
+ * 속성의 원본 표현식(AST) 그 자체를 돌려준다(classNameStringsOf처럼 문자열로 납작하게
+ * 만들지 않음) — 같은 조건식 여부 비교엔 원본 조건 노드가 필요하다. 리터럴 문자열
+ * className(조건 자체가 없음)이면 null. */
+function classNameExprOf(opening: ts.JsxOpeningLikeElement): ts.Expression | null {
+  for (const a of opening.attributes.properties) {
+    if (ts.isJsxAttribute(a) && a.name.getText() === 'className' && a.initializer) {
+      if (ts.isJsxExpression(a.initializer) && a.initializer.expression) return a.initializer.expression;
+    }
+  }
+  return null;
+}
+
+/** story #3865(AC1, PO CHANGES 2026-09-14 11:40Z) — 조건식 하나가 tint(조상)를 켜는 것과
+ * 같은 조건식이 muted(자손)를 켜는 것이 실제로는 같은 축(같은 변수)일 수 있다
+ * (kanban-column.tsx colClass·자식 클래스가 둘 다 `wipExceeded`). 이 경우 그룹 정밀화
+ * (classGroupsFromExpr)만으로는 못 잡는다 — 그룹 정밀화는 "같은 요소" 공존만 다루고,
+ * 이건 "조상-자손 간" 조건 일치다. `predicate`를 만족하는 분기와 그 분기를 고르는
+ * 조건의 소스 텍스트를 찾아 돌려준다(condition이 단순 Identifier/PropertyAccess일 때만
+ * — 복잡한 식은 비교 신뢰 불가라 null, 기존 보수적 동작으로 폴백). 중첩 삼항 체인
+ * (colClass류 — 첫 조건 거짓 분기가 또 삼항)은 거짓 분기를 계속 타고 내려가며 찾는다
+ * (참 분기 재귀는 안 함 — #2590 A 정밀성과 동형, 첫 매치 조건만 신뢰). */
+interface ConditionMatch { conditionText: string; matchesWhenTrue: boolean }
+
+function findConditionForClasses(
+  e: ts.Expression,
+  initializers: ReadonlyMap<string, ts.Expression>,
+  bindings: ClassBindings,
+  sf: ts.SourceFile,
+  predicate: (classes: string[]) => boolean,
+): ConditionMatch | null {
+  if (ts.isParenthesizedExpression(e)) return findConditionForClasses(e.expression, initializers, bindings, sf, predicate);
+  if (ts.isIdentifier(e)) {
+    const init = initializers.get(e.text);
+    return init ? findConditionForClasses(init, initializers, bindings, sf, predicate) : null;
+  }
+  if (ts.isTemplateExpression(e)) {
+    for (const sp of e.templateSpans) {
+      const found = findConditionForClasses(sp.expression, initializers, bindings, sf, predicate);
+      if (found) return found;
+    }
+    return null;
+  }
+  if (ts.isConditionalExpression(e)) {
+    const cond = e.condition;
+    const simple = ts.isIdentifier(cond) || ts.isPropertyAccessExpression(cond);
+    if (simple && predicate(classStringsFromExpr(e.whenTrue, bindings))) {
+      return { conditionText: cond.getText(sf), matchesWhenTrue: true };
+    }
+    if (simple && predicate(classStringsFromExpr(e.whenFalse, bindings))) {
+      return { conditionText: cond.getText(sf), matchesWhenTrue: false };
+    }
+    return findConditionForClasses(e.whenFalse, initializers, bindings, sf, predicate);
+  }
+  return null;
+}
+
 /** story #3865(AC1, PO 조건②·2026-09-14 11:04Z) — 「같은 삼항/바인딩의 두 분기끼리만
  * 상호배타, 서로 다른(독립) 축끼리는 곱집합(동시 적용 가능·fail-closed)」을 표현하는
  * 구조. `always`는 무조건 적용되는 정적 조각들(템플릿 head/literal 등). `groups`는 서로
@@ -493,6 +550,10 @@ export interface LocalTintBindingsResult {
    * 대조의 explained 항에 더하면 그 선언 자리의 raw를 정확히 상쇄한다(중복 계산 없음 —
    * JSX 소비 지점은 그 텍스트를 다시 갖고 있지 않다, identifier/property-access일 뿐). */
   accountedMatches: number;
+  /** story #3865(AC1, PO CHANGES 2026-09-14 11:40Z) — varName → 그 변수의 초기화 표현식
+   * 원본 AST(문자열로 납작하게 만들지 않음). findConditionForClasses가 「같은 조건식」
+   * 비교를 위해 조건 노드 자체를 재귀 추적할 때 쓴다(bindings의 흐름 그대로, 별도 표). */
+  initializers: Map<string, ts.Expression>;
 }
 
 /** story #3850(AC1) — 객체 맵(`const STATUS_COLOR = { key: { tint: 'bg-...-tint' } }`류)과
@@ -504,13 +565,17 @@ export interface LocalTintBindingsResult {
  * 전수에서 그런 앞→뒤 순환 참조가 없음을 실행 결과로 확인(스코프 밖 명시, 아래 참고). */
 export function extractLocalTintBindings(sf: ts.SourceFile): LocalTintBindingsResult {
   const bindings = new Map<string, string[]>();
+  const initializers = new Map<string, ts.Expression>();
 
   function walk(node: ts.Node): void {
     if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
       const strings = ts.isObjectLiteralExpression(node.initializer)
         ? collectObjectLiteralClassStrings(node.initializer, bindings)
         : classStringsFromExpr(node.initializer, bindings);
-      if (strings.length > 0) bindings.set(node.name.text, strings);
+      if (strings.length > 0) {
+        bindings.set(node.name.text, strings);
+        initializers.set(node.name.text, node.initializer);
+      }
     }
     node.forEachChild(walk);
   }
@@ -523,7 +588,7 @@ export function extractLocalTintBindings(sf: ts.SourceFile): LocalTintBindingsRe
       if (m) accountedMatches += m.length;
     }
   }
-  return { bindings, accountedMatches };
+  return { bindings, accountedMatches, initializers };
 }
 
 /** story #3850(AC1 축 b, doc-content-renderer.tsx류) — React JSX가 아니라 명령형 DOM
@@ -754,8 +819,10 @@ export function scanContent(
   opaqueComponents?: ReadonlySet<string>,
 ): Violation[] {
   const sf = ts.createSourceFile(file, content, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-  const { bindings } = extractLocalTintBindings(sf);
+  const { bindings, initializers } = extractLocalTintBindings(sf);
   const violations: Violation[] = [];
+  const isTintMatch = (classes: string[]) => classes.some((c) => TINT_FAMILY_BG_RE.test(c));
+  const isMutedMatch = (classes: string[]) => classes.some((c) => MUTED_TEXT_RE.test(c));
 
   function familyFromComponent(opening: ts.JsxOpeningLikeElement): TintFamily | null {
     if (!componentMap) return null;
@@ -776,7 +843,17 @@ export function scanContent(
     return opaqueComponents.has(tag);
   }
 
-  function walk(node: ts.Node, ancestorFamily: TintFamily | null): void {
+  // story #3865(AC1, PO CHANGES 2026-09-14 11:40Z «같은 조건식=같은 세계») — 조상이
+  // 어떤 조건식으로 tint를 켰는지(conditionText)까지 함께 나른다. kanban-column.tsx의
+  // colClass(`wipExceeded ? destructive-tint : ...`)와 자식의 자기 className
+  // (`wipExceeded ? text-foreground : text-muted-foreground`)이 **같은 조건식**을 쓰면,
+  // tint가 뜰 때(wipExceeded=true)는 자식도 정확히 그 순간 ink 분기를 고르므로 실제
+  // 공존은 0 — 조건식이 다르거나(독립 축) 단순 식이 아니면 기존 보수적 판정(어디든
+  // muted가 있으면 위반, fail-closed)으로 폴백한다.
+  // conditionText가 있을 때만 유효(null이면 matchesWhenTrue는 의미 없음 — 항상 false로 둔다).
+  interface Ancestor { family: TintFamily; conditionText: string | null; matchesWhenTrue: boolean }
+
+  function walk(node: ts.Node, ancestor: Ancestor | null): void {
     let opening: ts.JsxOpeningLikeElement | null = null;
     let children: ts.NodeArray<ts.JsxChild> | null = null;
     if (ts.isJsxElement(node)) { opening = node.openingElement; children = node.children; }
@@ -795,10 +872,22 @@ export function scanContent(
       // (OPAQUE_BG_RE, 리터럴 className) 또는 불투명 배경을 입는 것으로 알려진 컴포넌트
       // 경계(opaqueComponents, 다른 파일의 컴포넌트 루트)를 만나면, 그 위에 실제로 보이는
       // 것은 이 불투명색이지 조상에서 물려받은 tint가 아니다(비쳐 보이지 않음) — 물려받은
-      // ancestorFamily를 여기서 끊는다(kanban-column.tsx의 StoryCard→ProofCapsule
+      // ancestor를 여기서 끊는다(kanban-column.tsx의 StoryCard→ProofCapsule
       // bg-proof-panel류 실사례).
       const breaksOpaque = OPAQUE_BG_RE.test(cls) || isOpaqueComponentBoundary(opening);
-      const elementFamily: TintFamily | null = ownFamily ?? (breaksOpaque ? null : ancestorFamily);
+      const elementFamily: TintFamily | null = ownFamily ?? (breaksOpaque ? null : ancestor?.family ?? null);
+      // 이 요소 자신이 새로 tint를 도입했으면(리터럴 className일 수도 있어 classNameExprOf가
+      // null일 수 있다 — 그럴 땐 조건식이 없으므로 비교 불가=null) 그 tint를 켜는 조건식을
+      // 찾는다(colClass류 — 단순 Identifier/PropertyAccess 조건일 때만 신뢰).
+      const ownExpr = classNameExprOf(opening);
+      const ownTintCondition = ownFamily && ownExpr
+        ? findConditionForClasses(ownExpr, initializers, bindings, sf, isTintMatch)
+        : null;
+      const elementAncestorForChildren: Ancestor | null = elementFamily
+        ? ownFamily
+          ? { family: elementFamily, conditionText: ownTintCondition?.conditionText ?? null, matchesWhenTrue: ownTintCondition?.matchesWhenTrue ?? true }
+          : (breaksOpaque ? null : ancestor) // ancestor 그대로 승계(조건식 정보도 함께)
+        : null;
       // story #3865(AC1, doc-gate-section.tsx AUDIT_META 실사례·PO 조건②) — ownFamily가
       // "이 요소 자신의" 선언(리터럴 또는 바인딩 해석)에서 나온 경우, muted 공존은
       // sameElementCoOccurs(그룹 구조 — 같은 삼항/바인딩끼리만 상호배타, 서로 다른 독립
@@ -806,20 +895,32 @@ export function scanContent(
       // 때(런타임엔 한 후보만 선택됨), 안전한 후보(bg-muted+text-muted-foreground)의
       // 텍스트가 다른 후보의 tint와 «같은 그룹 안»에서 우연히 공존 판정되는 것은 막되,
       // 서로 다른 두 개의 독립 조건(예: cn(condA?tint:x, condB?muted:y))은 여전히 위반으로
-      // 잡는다(fail-closed). ancestorFamily에서 물려받은 경우(ownFamily 없음)는 이 요소
-      // 자신엔 tint가 없고 조상에만 있으므로(다른 DOM 노드) 기존처럼 어디든 muted가 있으면
-      // 위반 — co-location 요구가 의미 없다(비교 대상 tint 자체가 이 요소의 cls 안에 없다).
-      const sameElementMuted = ownFamily
-        ? sameElementCoOccurs(classNameGroupsOf(opening, bindings))
-        : MUTED_TEXT_RE.test(cls);
+      // 잡는다(fail-closed). ancestor에서 물려받은 경우(ownFamily 없음)는 이 요소 자신엔
+      // tint가 없고 조상에만 있으므로(다른 DOM 노드) 기존처럼 어디든 muted가 있으면 위반
+      // — 단, 조상의 tint 조건식과 이 요소 자신의 className 조건식이 **같은 소스 텍스트**면
+      // (조건②, PO CHANGES 2026-09-14 11:40Z — kanban-column.tsx wipExceeded 실사례) 그 둘이
+      // 진짜 같은 축인지 분기 대응까지 확인한다: tint를 켜는 분기(matchesWhenTrue)와 이
+      // 요소가 muted를 켜는 분기가 다르면(엇갈리면) tint 뜨는 순간엔 muted가 없다=안전.
+      let sameElementMuted: boolean;
+      if (ownFamily) {
+        sameElementMuted = sameElementCoOccurs(classNameGroupsOf(opening, bindings));
+      } else if (ancestor?.conditionText && ownExpr) {
+        const descendantMatch = findConditionForClasses(ownExpr, initializers, bindings, sf, isMutedMatch);
+        sameElementMuted =
+          descendantMatch && descendantMatch.conditionText === ancestor.conditionText
+            ? descendantMatch.matchesWhenTrue === ancestor.matchesWhenTrue
+            : MUTED_TEXT_RE.test(cls);
+      } else {
+        sameElementMuted = MUTED_TEXT_RE.test(cls);
+      }
       if (elementFamily && sameElementMuted) {
         const line = sf.getLineAndCharacterOfPosition(opening.getStart(sf)).line + 1;
         violations.push({ file, line, family: elementFamily, className: cls });
       }
-      if (children) for (const c of children) walk(c, elementFamily);
+      if (children) for (const c of children) walk(c, elementAncestorForChildren);
       return;
     }
-    node.forEachChild((c) => walk(c, ancestorFamily));
+    node.forEachChild((c) => walk(c, ancestor));
   }
   walk(sf, null);
   return violations;
