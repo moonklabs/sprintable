@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { scanJsxFileContent, scanRepo } from './verify-no-raw-role-jsx-text';
+import { ALLOWLIST, compareToBaseline, scanJsxFileContent, scanRepo } from './verify-no-raw-role-jsx-text';
 
 const SRC_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src');
 
@@ -59,18 +59,34 @@ describe('scanJsxFileContent — story #3770 셀프테스트', () => {
 });
 
 describe('scanJsxFileContent — story #3875(status/activity_type 축 신설)', () => {
-  it('⭐bare identifier {status} → RED(field=status)', () => {
+  it('⭐bare identifier {status} → RED(field=status, exprText=status)', () => {
     const src = `function C() { return <span>{status}</span>; }`;
     const refs = scanJsxFileContent(src, 'fake.tsx');
     expect(refs).toHaveLength(1);
     expect(refs[0]!.field).toBe('status');
+    expect(refs[0]!.exprText).toBe('status');
   });
 
-  it('⭐property access {activity.activity_type} → RED(field=activity_type)', () => {
+  it('⭐property access {activity.activity_type} → RED(field=activity_type, exprText=activity.activity_type)', () => {
     const src = `function C() { return <span>{activity.activity_type}</span>; }`;
     const refs = scanJsxFileContent(src, 'fake.tsx');
     expect(refs).toHaveLength(1);
     expect(refs[0]!.field).toBe('activity_type');
+    expect(refs[0]!.exprText).toBe('activity.activity_type');
+  });
+
+  // 양성대조(PO CHANGES 2026-09-14 13:36Z 정정) — 무관한 위 줄 삽입(다른 PR이 같은 파일
+  // 윗줄에 한 줄 끼운 상황 재현)으로 줄 번호가 밀려도, 키가 exprText 기반이라 같은
+  // (field, exprText) 조합은 여전히 같은 자리로 식별된다(line은 바뀌지만 field/exprText는
+  // 불변 — 예전 file:line 키였다면 이 표본이 dead+신규 동시 발생으로 RED였을 것).
+  it('줄 밀림 양성대조 — 위에 무관한 줄을 끼워도 field/exprText는 안 바뀐다(line만 바뀜)', () => {
+    const before = `function C() { return <span>{status}</span>; }`;
+    const after = `// 무관한 한 줄\nfunction C() { return <span>{status}</span>; }`;
+    const refsBefore = scanJsxFileContent(before, 'fake.tsx');
+    const refsAfter = scanJsxFileContent(after, 'fake.tsx');
+    expect(refsBefore[0]!.line).not.toBe(refsAfter[0]!.line);
+    expect(refsBefore[0]!.field).toBe(refsAfter[0]!.field);
+    expect(refsBefore[0]!.exprText).toBe(refsAfter[0]!.exprText);
   });
 
   it('뮤테이션 대조 — t(statusKey)로 감싼 형은 GREEN(CallExpression이라 대상 밖)', () => {
@@ -122,11 +138,15 @@ describe('scanRepo — story #3770(실 트리 실행)', () => {
   // 걷었다). story #3875 — status/activity_type 축 신설로 실측 17건이 새 ALLOWLIST에
   // 등재됐다(구조적 오탐 2·§⑤ 미감사 화면 2·실 위반이나 스코프 밖 13 — 근거는 ALLOWLIST
   // 주석 참고, story-detail-panel.tsx의 activity_type 자리는 이 카드에서 t() 경유로 고쳐
-  // ALLOWLIST에 없다).
-  it('실 트리(apps/web/src) — 위반 0건, ALLOWLIST 17건(story #3875 신규 축)', () => {
-    const { refs, fileCount, allowlistHit } = scanRepo(SRC_ROOT);
+  // ALLOWLIST에 없다). CHANGES(PO 2026-09-14 13:36Z) — 키를 file:line에서
+  // file::field::표현식 텍스트(+개수)로 교체(muted-on-tint GRANDFATHER_BASELINE 동형,
+  // compareToBaseline으로 정확 일치 판정).
+  it('실 트리(apps/web/src) — ALLOWLIST와 정확히 일치(신규 0·stale 0)', () => {
+    const { allRefs, fileCount, actualCounts } = scanRepo(SRC_ROOT);
     expect(fileCount).toBeGreaterThan(400);
-    expect(refs).toEqual([]);
-    expect(allowlistHit.size).toBe(17);
+    expect(allRefs.length).toBeGreaterThan(0);
+    const { increased, stale } = compareToBaseline(actualCounts, ALLOWLIST);
+    expect(increased).toEqual([]);
+    expect(stale).toEqual([]);
   });
 });
