@@ -340,9 +340,12 @@ export function Workcell({ title, pipelineStage, brief, run, evidence, conversat
 }
 
 function LayerLabel({ title, question, className }: { title: string; question: string; className?: string }) {
+  // PO CHANGES(2026-09-14 16:54Z, PR#4289 workcell 캡처 리뷰) — "실행"이 "실/행"으로
+  // 글자 사이 줄바꿈(설명 span이 길어 title 텍스트 노드까지 같이 꺾임). title을 전용
+  // span으로 감싸 shrink-0+whitespace-nowrap 고정 — 줄바꿈/압축 대상에서 제외.
   return (
     <div className={cn('flex items-center gap-1.5 text-[8.5px] font-bold uppercase tracking-[0.12em] text-proof-faint', className)}>
-      {title}
+      <span className="shrink-0 whitespace-nowrap">{title}</span>
       <span className="text-[9.5px] font-semibold normal-case tracking-normal text-proof-ink-3">— {question}</span>
     </div>
   );
