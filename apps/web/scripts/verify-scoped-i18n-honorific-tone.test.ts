@@ -157,9 +157,9 @@ describe('실 ko.json — 스코프 키 count-lock(baseline 0, 새 자리 0)', (
 // story #3885 AC2 — SCOPED_NAMESPACES(chats 전량 승격) + resolveEffectiveScopedKeys.
 // ---------------------------------------------------------------------------
 
-describe('SCOPED_NAMESPACES — story #3885/#3889 AC2', () => {
-  it('chats·content·channelConnect 3개가 등재됐다(잔존 채무 0으로 확定된 네임스페이스만)', () => {
-    expect(SCOPED_NAMESPACES).toEqual(['chats', 'content', 'channelConnect']);
+describe('SCOPED_NAMESPACES — story #3885/#3889/#3892 AC2', () => {
+  it('chats·content·channelConnect·settings 4개가 등재됐다(잔존 채무 0으로 확定된 네임스페이스만)', () => {
+    expect(SCOPED_NAMESPACES).toEqual(['chats', 'content', 'channelConnect', 'settings']);
   });
 });
 
@@ -230,21 +230,23 @@ describe('실 ko.json — chats 네임스페이스 전량(story #3885 AC2)', () 
 // ---------------------------------------------------------------------------
 
 describe('checkScopedNamespaceMinimums — 순수 함수', () => {
-  it('⭐네임스페이스 3개가 ko.json에 아예 없으면(개명·삭제 시뮬레이션) 3건 위반을 낸다', () => {
-    const violations = checkScopedNamespaceMinimums({ board: { x: 'y' } }); // 3개 다 없음
+  it('⭐네임스페이스 4개가 ko.json에 아예 없으면(개명·삭제 시뮬레이션) 4건 위반을 낸다', () => {
+    const violations = checkScopedNamespaceMinimums({ board: { x: 'y' } }); // 4개 다 없음
     expect(violations).toEqual([
       { namespace: 'chats', actualCount: 0, minExpected: 200 },
       { namespace: 'content', actualCount: 0, minExpected: 500 },
       { namespace: 'channelConnect', actualCount: 0, minExpected: 150 },
+      { namespace: 'settings', actualCount: 0, minExpected: 450 },
     ]);
   });
 
   it('⭐네임스페이스가 있지만 leaf가 하한 밑이면(부분 삭제·오염) 위반을 낸다', () => {
-    const violations = checkScopedNamespaceMinimums({ chats: { a: 'x', b: 'y' } }); // 2개뿐, content/channelConnect는 아예 없음
+    const violations = checkScopedNamespaceMinimums({ chats: { a: 'x', b: 'y' } }); // 2개뿐, 나머지는 아예 없음
     expect(violations).toEqual([
       { namespace: 'chats', actualCount: 2, minExpected: 200 },
       { namespace: 'content', actualCount: 0, minExpected: 500 },
       { namespace: 'channelConnect', actualCount: 0, minExpected: 150 },
+      { namespace: 'settings', actualCount: 0, minExpected: 450 },
     ]);
   });
 
@@ -278,6 +280,48 @@ describe('SCOPED_NAMESPACE_MIN_LEAF_COUNT — 하한이 실측치보다 낮게 �
     const effectiveKeys = resolveEffectiveScopedKeys(ko);
     const channelConnectLeafCount = effectiveKeys.filter((k) => k.startsWith('channelConnect.')).length;
     expect(channelConnectLeafCount).toBeGreaterThanOrEqual(150);
+  });
+
+  it('실 ko.json의 settings leaf 개수가 하한(450) 이상이다(실측 538)', () => {
+    const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
+    const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    const settingsLeafCount = effectiveKeys.filter((k) => k.startsWith('settings.')).length;
+    expect(settingsLeafCount).toBeGreaterThanOrEqual(450);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// story #3892 — settings 네임스페이스 전량(SCOPED_NAMESPACES 승격). chats(#3885)·
+// content/channelConnect(#3889)와 정확히 같은 3형 검증(0건·양성대조·무관 PR no-op).
+// ---------------------------------------------------------------------------
+
+describe('실 ko.json — settings 네임스페이스 전량(story #3892 AC1/AC2)', () => {
+  const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
+  const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
+
+  it('SCOPED_KEYS+chats+content+channelConnect+settings 전량(effective)의 ko.json 값에 합니다체 0건(story #3892 AC1 170키 전량 이관 확認)', () => {
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    expect(effectiveKeys.length).toBeGreaterThan(SCOPED_KEYS.length);
+    expect(findHonorificToneInScopedKeys(ko, effectiveKeys)).toEqual([]);
+  });
+
+  it('양성대조 — settings.linkedAccountsOnlyMethodTitle을 원래 합니다체로 되돌리면 RED가 된다(namespace 전량 승격 증명)', () => {
+    expect(SCOPED_KEYS as readonly string[]).not.toContain('settings.linkedAccountsOnlyMethodTitle');
+    const mutated = JSON.parse(JSON.stringify(ko)) as Record<string, unknown>;
+    (mutated.settings as Record<string, unknown>).linkedAccountsOnlyMethodTitle = '현재 유일한 로그인 수단입니다';
+    const effectiveKeys = resolveEffectiveScopedKeys(mutated);
+    const findings = findHonorificToneInScopedKeys(mutated, effectiveKeys);
+    expect(findings).toContainEqual({ key: 'settings.linkedAccountsOnlyMethodTitle', matches: ['ㅂ니다'], value: '현재 유일한 로그인 수단입니다' });
+  });
+
+  it('무관 PR no-op — settings 밖·SCOPED_KEYS 밖의 실 합니다체 키는 namespace 전량 승격 뒤에도 안 본다', () => {
+    const outOfScopeValue = (ko.cage as Record<string, unknown> | undefined)?.gateDetailNotFound;
+    expect(typeof outOfScopeValue).toBe('string');
+    expect(outOfScopeValue as string).toMatch(/습니다|ㅂ니다|십시오/);
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    expect(effectiveKeys).not.toContain('cage.gateDetailNotFound');
+    expect(findHonorificToneInScopedKeys(ko, effectiveKeys)).toEqual([]);
   });
 });
 
@@ -354,10 +398,12 @@ describe('story #3889 CHANGES 1 — 플레이스홀더 값 뒤 계사(예요/이
 
   const PLACEHOLDER_COPULA_RE = /\}(예요|이에요)/;
 
-  it('content·channelConnect 전 leaf에 "}예요"·"}이에요"(placeholder 바로 뒤 계사) 0건', () => {
+  it('content·channelConnect·settings 전 leaf에 "}예요"·"}이에요"(placeholder 바로 뒤 계사) 0건', () => {
+    // story #3892 — 스캔 범위에 settings 추가(AC2 명시, 3889와 같은 자).
     const values = [
       ...collectLeafValues(ko.content as Record<string, unknown>, 'content'),
       ...collectLeafValues(ko.channelConnect as Record<string, unknown>, 'channelConnect'),
+      ...collectLeafValues(ko.settings as Record<string, unknown>, 'settings'),
     ];
     const violations = values.filter(([, v]) => PLACEHOLDER_COPULA_RE.test(v));
     expect(violations).toEqual([]);

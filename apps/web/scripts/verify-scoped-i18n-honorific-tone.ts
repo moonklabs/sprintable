@@ -159,7 +159,9 @@ export const SCOPED_KEYS = [
 // 전량 해요체 이관 완료(잔존 0, PO 재측 271건 = findHonorificToneInScopedKeys 실 함수로
 // 그라운딩 — 코드 0 규율, 직접 손으로 친 needle 재현은 NFC/NFD 함정 재발이라 실 함수만
 // 신뢰) — chats와 동형 전량 승격.
-export const SCOPED_NAMESPACES = ['chats', 'content', 'channelConnect'] as const;
+// story #3892 — settings(조직·프로젝트·알림·결제 설정)도 전량 해요체 이관 완료(잔존 0,
+// 실 함수로 head 재측 170건 = PO 실측과 일치 — 3889 교훈 그대로 코드 0 재확認).
+export const SCOPED_NAMESPACES = ['chats', 'content', 'channelConnect', 'settings'] as const;
 
 function flattenNamespaceLeafKeys(root: Record<string, unknown>, namespace: string): string[] {
   const nsRoot = root[namespace];
@@ -202,6 +204,7 @@ const SCOPED_NAMESPACE_MIN_LEAF_COUNT: Readonly<Record<(typeof SCOPED_NAMESPACES
   chats: 200, // 실측 239개(2026-09-14, story #3885 그라운딩) — 여유 하한
   content: 500, // 실측 584개(2026-09-14, story #3889 그라운딩) — 여유 하한
   channelConnect: 150, // 실측 174개(2026-09-14, story #3889 그라운딩) — 여유 하한
+  settings: 450, // 실측 538개(2026-09-14, story #3892 그라운딩) — 여유 하한
 };
 
 /** SCOPED_NAMESPACES 각각의 실제 leaf 개수가 하한을 밑도는지 검사하는 순수 함수 —
