@@ -990,11 +990,10 @@ export const GRANDFATHER_BASELINE = new Map<string, number>([
   // <Alert variant="destructive">(리터럴 클래스 아닌 cva 경계) 안 text-muted-foreground 5곳씩.
   ['components/content/api-usage-budget-exceeded-banner.tsx::muted-on-destructive-tint', 5],
   ['components/content/generation-budget-exceeded-banner.tsx::muted-on-destructive-tint', 5],
-  // story #3865(AC1 정밀화 뒤 2→1) — 걷힌 1건(102행 notifying.cls 객체맵 축)은 doc-gate-
-  // section류와 동형 오탐(그룹 정밀화로 해소). 남은 1건(138-141행) — bg-destructive-tint
-  // literal div(withdraw==='confirming') 안 Cancel 버튼이 text-muted-foreground — 실 위반
-  // 확인(조상 상속 케이스, 그룹 무관). 별 카드 기재 예정·이 PR 색 변경 0.
-  ['components/cage/stuck-handoff-section.tsx::muted-on-destructive-tint', 1],
+  // story #3865(AC1 정밀화 뒤 2→1)에서 걷힌 1건(102행 notifying.cls 객체맵 축)은 doc-gate-
+  // section류와 동형 오탐(그룹 정밀화로 해소). story #3869 — 남았던 1건(138-141행,
+  // bg-destructive-tint literal div(withdraw==='confirming') 안 Cancel 버튼)을
+  // text-foreground로 교정, baseline에서 완전히 제거(양성대조=원복 시 RED, 뮤테이션 확인 済).
   ['components/chat/command-hint-notice.tsx::muted-on-info-tint', 1],
   ['components/chat/hitl-approval-card.tsx::muted-on-warning-tint', 3],
   ['components/chat/reference-drop-notice.tsx::muted-on-warning-tint', 2],
@@ -1028,10 +1027,14 @@ export const GRANDFATHER_BASELINE = new Map<string, number>([
   // doc-status-rail.tsx(2곳)·kanban-column.tsx(11곳) — 둘 다 실 위반으로 확인돼
   // text-foreground로 교정(#3865 AC0②③) — baseline에서 완전히 제거.
   //
-  // attention-cluster-board.tsx — 정밀화로 5→1. 걷힌 4건은 같은 삼항/바인딩 그룹 안
-  // 상호배타 분기(실 파일 대조). 남은 1건(279행 ChevronDown, bucket.style.rowBg 조상
-  // 서브트리 안 상시 렌더 아이콘)은 실 위반 확인 — 별 카드 기재 예정·이 PR 색 변경 0.
-  ['components/org-briefing/attention-cluster-board.tsx::muted-on-warning-tint', 1],
+  // attention-cluster-board.tsx — story #3865 정밀화로 5→1(걷힌 4건은 같은 삼항/바인딩
+  // 그룹 안 상호배타 분기, 실 파일 대조). story #3870(PO 확定 2026-09-14 12:32Z) — 남았던
+  // 1건(279행 ChevronDown)을 색으로 고치는 대신, 그 파일이 렌더하던 `AttentionClusterBoard`
+  // 자체가 은퇴 잔재임을 그라운딩(SID:3831·e7359201ca가 「오늘」로 흡수하며 유일한 소비처
+  // now-face.tsx를 삭제 — 그때 이 파일은 loop-queue가 쓰는 CrossProjectTag가 같이 있어
+  // 안 지워졌을 뿐, AttentionClusterBoard 자체의 소비처는 그 이후로 0). CrossProjectTag만
+  // cross-project-tag.tsx로 옮기고 이 파일(+전용 테스트)을 삭제 — baseline 항목은 파일
+  // 삭제로 자연 소멸(코드에 색을 칠하는 대신 죽은 표면을 걷어냄).
   // gate-level-matrix.tsx(268행) — `selected ? LEVEL_META[lv].selected : 'border-border
   // text-muted-foreground hover:bg-muted/40'`(삼항 한 개 — true 분기가 LEVEL_META 객체맵
   // 조회, false 분기가 리터럴 muted) — 같은 삼항이 곧 같은 그룹이라 LEVEL_META의 3개

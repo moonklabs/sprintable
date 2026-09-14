@@ -138,7 +138,10 @@ export function StuckHandoffSection({ storyId, memberMap = {} }: StuckHandoffSec
           <div className="space-y-1.5 rounded-md border border-destructive/40 bg-destructive-tint p-2">
             <p className="text-[11px] text-foreground">{t('withdrawIrreversibleWarning')}</p>
             <div className="flex gap-1.5">
-              <Button variant="ghost" size="sm" className="flex-1 text-muted-foreground" onClick={() => setWithdraw('idle')}>
+              {/* story #3869(AC1) — 이 버튼은 withdraw==='confirming'에서만 렌더되고, 그
+                  조상 div가 상시 bg-destructive-tint(리터럴, 132행)라 text-muted-foreground는
+                  AA 미달(#3839류) — text-foreground로 교체(§③ ink 규칙, 새 토큰 0). */}
+              <Button variant="ghost" size="sm" className="flex-1 text-foreground" onClick={() => setWithdraw('idle')}>
                 {t('withdrawCancel')}
               </Button>
               <Button variant="ghost" size="sm" className="flex-1 gap-1 text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60" onClick={() => void handleWithdraw()}>
