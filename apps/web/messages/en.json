@@ -491,7 +491,7 @@
     "title": "Work",
     "loadErrorTitle": "Couldn't load",
     "emptyStateTitle": "Nothing to show",
-    "partialNotice": "Couldn't load everything — there's more",
+    "partialNotice": "Couldn't load everything. There's more.",
     "goalProgressLabel": "{done}/{total} done",
     "goalSummaryLabel": "Assigned {assigned} · Delegated {delegated} · Hypotheses {hypotheses}",
     "stateAwaitingApproval": "Awaiting approval",

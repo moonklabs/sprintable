@@ -62,6 +62,18 @@ describe('WorkListRowView', () => {
     }
   });
 
+  it('사람 손 필요 3어(승인·서명·답 대기)는 warning(amber) 배지 — 「오늘」과 같은 사실 같은 색(story #3853 정렬, PO 지적)', async () => {
+    for (const state of ['awaiting_approval', 'awaiting_signature', 'awaiting_answer'] as const) {
+      await act(async () => { root.render(wrap(<WorkListRowView row={baseRow({ state })} />)); });
+      expect(container.querySelector('.bg-warning-tint')).not.toBeNull();
+      expect(container.querySelector('.bg-info-tint')).toBeNull();
+    }
+    for (const state of ['in_progress', 'done'] as const) {
+      await act(async () => { root.render(wrap(<WorkListRowView row={baseRow({ state })} />)); });
+      expect(container.querySelector('.bg-warning-tint')).toBeNull();
+    }
+  });
+
   it('lowRisk=true일 때만 저위험 칩', async () => {
     await act(async () => { root.render(wrap(<WorkListRowView row={baseRow({ lowRisk: true })} />)); });
     expect(container.textContent).toContain(koMessages.workList.chipLowRisk);

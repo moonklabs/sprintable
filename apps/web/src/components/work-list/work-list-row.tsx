@@ -15,12 +15,14 @@ function DelegatedDot({ isDelegated, state }: { isDelegated: boolean; state: Wor
   return <span className={cn('mt-1.5 size-1.5 shrink-0 rounded-full', state === 'done' ? 'bg-success' : 'bg-primary')} aria-hidden="true" />;
 }
 
-// today-sections.tsx STATE_META와 동형 매핑 — pending 3상태는 badge variant="info" 통일(색은
-// 위임/완료 dot이, pending 3어는 라벨 자체가 구분한다).
-const STATE_BADGE: Partial<Record<NonNullable<WorkListRowState>, { key: string; variant: 'info' | 'secondary' | 'success' }>> = {
-  awaiting_approval: { key: 'stateAwaitingApproval', variant: 'info' },
-  awaiting_signature: { key: 'stateAwaitingSignature', variant: 'info' },
-  awaiting_answer: { key: 'stateAwaitingAnswer', variant: 'info' },
+// today-sections.tsx STATE_META와 동형 매핑(story #3853 착지분 — §③ "사람 손 필요=경고
+// amber" 정렬) — pending 3상태는 badge variant="warning" 통일(색은 위임/완료 dot이,
+// pending 3어는 라벨 자체가 구분한다). PO 지적(2026-09-14) — 처음엔 info(파랑)로 지어
+// 「오늘」과 같은 사실(사람 손 필요)을 다른 색으로 말했다.
+const STATE_BADGE: Partial<Record<NonNullable<WorkListRowState>, { key: string; variant: 'warning' | 'secondary' | 'success' }>> = {
+  awaiting_approval: { key: 'stateAwaitingApproval', variant: 'warning' },
+  awaiting_signature: { key: 'stateAwaitingSignature', variant: 'warning' },
+  awaiting_answer: { key: 'stateAwaitingAnswer', variant: 'warning' },
   in_progress: { key: 'stateInProgress', variant: 'secondary' },
   done: { key: 'stateDone', variant: 'success' },
 };

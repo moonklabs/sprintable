@@ -491,7 +491,7 @@
     "title": "일감",
     "loadErrorTitle": "불러오지 못했어요",
     "emptyStateTitle": "표시할 일이 없어요",
-    "partialNotice": "전부 불러오지 못했어요 — 더 있어요",
+    "partialNotice": "전부 불러오지 못했어요. 더 있어요",
     "goalProgressLabel": "{done}/{total} 완료",
     "goalSummaryLabel": "사람 배정 {assigned} · 에이전트 위임 {delegated} · 가설 {hypotheses}",
     "stateAwaitingApproval": "승인 대기",
