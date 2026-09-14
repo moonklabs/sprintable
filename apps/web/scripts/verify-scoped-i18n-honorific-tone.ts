@@ -7,9 +7,12 @@
  * develop HEAD 재실측·0건 diff 확認)이 이 스코프의 합니다체 94키(140개 소비처, namespace
  * 정밀 대조 — leaf 키 이름이 같아도 실제 소비 t() 변수의 useTranslations() 선언까지
  * 추적해 스코프 밖 화면은 걸렀다)를 실측했고, 이 스토리가 그 전부와 orgBriefing 9키
- * (AC4)를 해요체로 전량 이관했다 — 총 103키.
+ * (AC4)를 해요체로 전량 이관했다(94+9=103키). AC5 실 캡처 검증 中 이 표에 없던 위반을
+ * 하나 더 발견(`docs.emptyDescription` — 바로 옆 `emptyTitle`은 이미 해요체인데 같은
+ * 빈-상태 카드 안에서 register가 섞여 있었다) — 그 자리에서 즉시 해요체로 고치고
+ * SCOPED_KEYS에 추가해 총 104키.
  *
- * ⚠️scope는 **namespace 전체가 아니라 정확히 이 103키**다(SCOPED_KEYS). namespace
+ * ⚠️scope는 **namespace 전체가 아니라 정확히 이 104키**다(SCOPED_KEYS). namespace
  * 통째로 스캔하면(예: `cage`·`goals`·`standup`) Mirko 감사가 의도적으로 거른 스코프 밖
  * 화면의 기존 합니다체 값(예: `cage.gateDetailNotFound`·`goals.createError`·
  * `standup.loadFailed` 등 78건 실측)까지 baseline 0을 요구하게 돼 이 스토리가 안 건드린
@@ -29,8 +32,9 @@ const MESSAGES_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 
 const KO_FILE = 'ko.json';
 
 // story #3877 AC1 표(doc 5590a4c5 §4①, develop f35a59d46c에서 재실측·0건 diff) 94키 +
-// AC4가 소비처 有로 확認해 편입한 orgBriefing 9키 = 103키. "namespace.leafKey" 형식.
-// 확장 시 이 배열에 새 키를 추가한다(namespace를 통째로 추가하지 않는다 — 위 헤더 참고).
+// AC4가 소비처 有로 확認해 편입한 orgBriefing 9키 + AC5 캡처 中 발견한 1키
+// (docs.emptyDescription) = 104키. "namespace.leafKey" 형식. 확장 시 이 배열에 새 키를
+// 추가한다(namespace를 통째로 추가하지 않는다 — 위 헤더 참고).
 export const SCOPED_KEYS = [
   'board.acSaveFailed',
   'board.assigneeNotSetTitle',
@@ -76,6 +80,7 @@ export const SCOPED_KEYS = [
   'docs.docGateApproverPickerDuplicateWarning',
   'docs.docGateTransitionErrorGeneric',
   'docs.docTreeDeleteBody',
+  'docs.emptyDescription',
   'docs.indexLoadError',
   'docs.indexNoResults',
   'docs.moveCircularError',
@@ -165,7 +170,7 @@ export interface HonorificToneException {
   addedBy: string;
 }
 
-// story #3877 baseline — 0건(이 스토리가 SCOPED_KEYS 103개 전부를 해요체로 이관). 새로
+// story #3877 baseline — 0건(이 스토리가 SCOPED_KEYS 104개 전부를 해요체로 이관). 새로
 // 느는 자리만 이 가드가 막는다(can-only-shrink, 이 저장소 baseline 가드 공통 계약). 정말
 // 필요하면 key·match·reason·addedBy를 모두 채워야 등록된다(한자 가드 관례 그대로).
 export const HONORIFIC_TONE_EXCEPTIONS: HonorificToneException[] = [];

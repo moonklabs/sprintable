@@ -95,8 +95,8 @@ describe('AC — 가드는 고의 합니다체 주입을 잡아낸다(양성대�
 });
 
 describe('SCOPED_KEYS — story #3877 AC1 표 count-lock', () => {
-  it('정확히 103개(AC1 표 94 + AC4 orgBriefing 9)', () => {
-    expect(SCOPED_KEYS).toHaveLength(103);
+  it('정확히 104개(AC1 표 94 + AC4 orgBriefing 9 + 캡처 中 발견 1 — docs.emptyDescription)', () => {
+    expect(SCOPED_KEYS).toHaveLength(104);
   });
 
   it('중복 키가 없다', () => {
@@ -108,7 +108,7 @@ describe('실 ko.json — 스코프 키 count-lock(baseline 0, 새 자리 0)', (
   const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
   const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
 
-  it('SCOPED_KEYS 103개 전부의 ko.json 값에 합니다체 0건(story #3877 AC2 전량 이관 확認)', () => {
+  it('SCOPED_KEYS 104개 전부의 ko.json 값에 합니다체 0건(story #3877 AC2 전량 이관 확認)', () => {
     expect(findHonorificToneInScopedKeys(ko)).toEqual([]);
   });
 
