@@ -187,7 +187,7 @@ async def test_void_endpoint_forces_voider_from_auth():
     with patch.object(gates_mod, "resolve_member", AsyncMock(return_value=caller)), \
          patch.object(gates_mod, "is_org_owner_or_admin", AsyncMock(return_value=True)), \
          patch.object(gates_mod, "void_gate", voidfn), \
-         patch.object(gates_mod.GateResponse, "model_validate", lambda g: "OK"):
+         patch.object(gates_mod, "to_gate_response", AsyncMock(return_value="OK")):
         await _void_gate_endpoint(
                 resolved_locale="ko",
             id=uuid.uuid4(), body=GateVoidRequest(reason="오발행"), session=AsyncMock(),

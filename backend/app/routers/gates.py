@@ -176,9 +176,10 @@ class GateResponse(BaseModel):
     # OrgGatePolicy.posture + Gate.gate_type을 순수 파생(gate_service.derive_risk_grade)한 UX
     # 힌트일 뿐(doc `gate-risk-ux-classification-criteria` §2 SSOT). "risk_level" 이름은 의도적으로
     # 피했다 — 플랫폼이 위험도를 판정한다는 오인을 부르기 때문(models/hitl_config.py:3 철학과
-    # 정면충돌). additive·nullable(project_id/work_item_summary와 동일 선례 — 이 필드를 채우지 않는
-    # 타 엔드포인트(create/transition/void/hold/unhold/override)는 Gate ORM 객체에 이 속성이 없어
-    # from_attributes 기본값 None으로 조용히 통과). list_gates·get_gate_endpoint 둘 다에서 채운다.
+    # 정면충돌). nullable(선언 자체는 유지 — Gate ORM에 이 컬럼이 없다). **정정(story #3874)**:
+    # 한때 list_gates·get_gate_endpoint·create_decision_request 3곳만 채우고 나머지 14곳은
+    # None으로 새던(같은 API가 호출 경로에 따라 거짓말하는 계약 결함) 자리였다 — 이제
+    # GateResponse를 만드는 모든 자리가 `to_gate_response()` 하나를 거쳐 예외 0으로 채운다.
     risk_grade: "RiskGrade | None" = None
     # story #3860(customer-zero·BE·게이트 답하기) — 「일감」 우패널 주 액션 「답하기」의
     # 데이터 소스. Gate ORM엔 이 컬럼이 없다(work_item_summary/can_approve와 동일
@@ -336,6 +337,37 @@ async def can_approve_doc_gate_reason(
     return None
 
 
+_POSTURE_UNSET: Any = object()
+
+
+async def to_gate_response(
+    session: AsyncSession, org_id: uuid.UUID, gate: Gate, *, posture: Any = _POSTURE_UNSET,
+) -> GateResponse:
+    """story #3874 — GateResponse 직렬화 단일 통로. model_validate + risk_grade enrich
+    (story #1972 SSOT — gate_service.derive_risk_grade)를 한 자리로 묶는다.
+
+    이 헬퍼 도입 前엔 model_validate 직접 호출 15곳 中 3곳(list_gates·get_gate_endpoint·
+    create_decision_request)만 risk_grade를 채웠고 나머지 12곳(transition 포함 — 고위험
+    note 필수 검증 때문에 risk_grade를 이미 계산해 놓고도 응답엔 안 실었다)은 늘 None을
+    냈다(story #3868 AC0 실측). FE는 지금 이 필드를 transition 등 그 12곳 응답에서 직접
+    읽지 않아(3곳 다 재조회하거나 바디 자체를 안 읽음) 렌더 버그로 드러나진 않았지만,
+    API 계약 자체가 거짓이라 새 소비처(FE는 물론 MCP 에이전트 포함)가 그 바디를 그대로
+    믿으면 즉시 오판한다 — 그래서 개별 12곳 패치가 아니라 통로를 하나로 좁힌다(gates.py에
+    `GateResponse.model_validate(` 직접 호출이 이 함수 밖에 남아있으면 안 된다 — 그 불변식은
+    tests/test_3874_gate_response_serialization_guard.py의 AST 정적 스캔이 고정한다).
+
+    posture 미지정(기본, `_POSTURE_UNSET`)이면 이 호출이 org posture를 1쿼리로 직접 조회
+    한다(단건 엔드포인트 전부 이 경로 — get/create/transition/void 등, 매 호출 1쿼리는
+    기존 get_gate_endpoint/create_decision_request와 동일 비용, 새 비용 0). list_gates처럼
+    다건을 한 번에 낼 때는 호출부가 posture를 미리 1회 조회해 이 인자로 넘겨(story #1972
+    N+1 회피 선례 그대로 유지) 매 gate마다 재조회하지 않는다."""
+    resp = GateResponse.model_validate(gate)
+    if posture is _POSTURE_UNSET:
+        posture = await get_org_posture(session, org_id)
+    resp.risk_grade = derive_risk_grade(posture, gate.gate_type)
+    return resp
+
+
 @router.post("", response_model=GateResponse, status_code=201)
 async def create_gate_endpoint(
     body: GateCreateRequest,
@@ -404,7 +436,7 @@ async def _create_gate_endpoint(
     # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh —
     # 트리거 미확定인 MissingGreenlet 클래스(unloaded attr sync 직렬화) 전체를 이 자리서 차단.
     await session.refresh(gate)
-    return GateResponse.model_validate(gate)
+    return await to_gate_response(session, org_id, gate)
 
 
 class DecisionRequestCreate(BaseModel):
@@ -551,7 +583,7 @@ async def create_decision_request(
     )
     await session.commit()
     await session.refresh(gate)
-    resp = GateResponse.model_validate(gate)
+    resp = await to_gate_response(session, org_id, gate)
     resp.project_id = project_id
     # story #d9c09f4b(2026-08-27) — 카드 배달(_notify_decision_request_card, best-effort)
     # 성패와 완전히 독립된 별도 조회. 카드가 조용히 성공(엉뚱한 대상)하든 실패하든 이
@@ -573,11 +605,8 @@ async def create_decision_request(
             gate.id, body.approver_member_id, exc_info=True,
         )
         resp.designated_approver_name = None
-    # story #1972 SSOT 재사용(제네릭 create_gate_endpoint가 이 필드를 아예 안 채우는 기존
-    # 갭을 여기서까지 상속하면 FE deriveRiskLevel이 null→'unknown'으로 읽어 low 등재의
-    # 목적(원탭 승인)이 생성 응답 자체에서는 무효화된다 — 자체 신규 테스트로 발견·직접 수정).
-    _posture = await get_org_posture(session, org_id)
-    resp.risk_grade = derive_risk_grade(_posture, gate.gate_type)
+    # story #1972 SSOT — risk_grade는 위 to_gate_response()가 이미 채웠다(story #3874 정리
+    # 前엔 여기서 직접 재조회+재파생했었다 — 이제 단일 통로 재사용, 중복 0).
     return resp
 
 
@@ -826,16 +855,12 @@ async def list_gates(
             q = q.offset(offset)
     result = await session.execute(q)
     gates = list(result.scalars().all())
-    responses = [GateResponse.model_validate(g) for g in gates]
 
     # story #1972(P1a-S4): 위험도 UX 등급 enrich — org posture는 org_id 단일값(gate당 축 없음)이라
-    # 목록 전체에 **1회**만 조회(N+1 0). gate_type은 gate별 값이라 derive_risk_grade는 gate마다 호출.
-    # ⚠️resp.gate_type이 아닌 원본 gate.gate_type을 쓴다(zip) — can_approve enrich와 동일하게 원본
-    # ORM 객체에서 읽어 GateResponse.model_validate를 대체하는 테스트 더블과도 무관하게 동작.
-    if gates:
-        _posture = await get_org_posture(session, org_id)
-        for resp, g in zip(responses, gates):
-            resp.risk_grade = derive_risk_grade(_posture, g.gate_type)
+    # 목록 전체에 **1회**만 조회(N+1 0). gate_type은 gate별 값이라 to_gate_response(story #3874
+    # 단일 통로)는 gate마다 호출하되 posture는 여기서 미리 조회해 주입(재조회 0).
+    _posture = await get_org_posture(session, org_id) if gates else None
+    responses = [await to_gate_response(session, org_id, g, posture=_posture) for g in gates]
 
     # story #3569(Phase2·BE·소형, 페드루 PO 確定 2026-09-06) — concept_approval 게이트의
     # sealed_doc_id가 가리키는 doc의 **지금** 제목(봉인 시점 값이 아니다 — 제목은 봉인
@@ -1423,15 +1448,11 @@ async def get_gate_endpoint(
     elif not is_known_project_agnostic_work_item_type(gate.work_item_type):
         raise HTTPException(status_code=404, detail="Gate not found")
 
-    resp = GateResponse.model_validate(gate)
+    resp = await to_gate_response(session, org_id, gate)
     resp.project_id = project_id
     resp.work_item_summary = await _resolve_work_item_summary(
         session, org_id, gate.work_item_type, gate.work_item_id,
     )
-    # story #1972(P1a-S4): 위험도 UX 등급 — org posture(org_id 단일 쿼리·resolve_disposition()
-    # 미경유) + 이 gate의 gate_type을 derive_risk_grade()로 파생(doc §2 SSOT).
-    _posture = await get_org_posture(session, org_id)
-    resp.risk_grade = derive_risk_grade(_posture, gate.gate_type)
     # story #3569 — list_gates와 동일 축(sealed_doc_id, work_item_id 아님)·동일 규칙
     # (지금 제목·삭제/미존재 doc은 None).
     if gate.sealed_doc_id is not None:
@@ -1785,9 +1806,12 @@ async def _transition_gate_endpoint(
     # 있고 서버는 무검증이라 POST /transition 직접 호출 시 사유 없이 통과했다. 저위험은 기존대로
     # note 없이 통과(과도 강제 금지 — PO AC). risk_grade 는 list_gates/get_gate 와 동일 파생 경로
     # (derive_risk_grade+get_org_posture) 재사용(DRY·N+1 0 — org당 posture 1쿼리).
+    # story #3874 — 이 값을 함수 끝 to_gate_response()가 재사용한다(posture=_transition_posture
+    # 로 주입, approved 경로에서 get_org_posture 재조회 0 — sentinel 기본값이면 그쪽이 직접 1쿼리).
+    _transition_posture: Any = _POSTURE_UNSET
     if body.status == "approved" and _gate is not None:
-        _posture = await get_org_posture(session, org_id)
-        if derive_risk_grade(_posture, _gate.gate_type) == "high":
+        _transition_posture = await get_org_posture(session, org_id)
+        if derive_risk_grade(_transition_posture, _gate.gate_type) == "high":
             if not (body.note or "").strip():
                 raise HTTPException(
                     status_code=422,
@@ -1901,7 +1925,12 @@ async def _transition_gate_endpoint(
             publish_gate_check, org_id, gate.id,
             repo_full_name=_nf.get("repo"), pr_number=_nf.get("pr_number"),
         )
-        return GateResponse.model_validate(gate)
+        # story #3874(원인: 이 응답이 늘 risk_grade=None이었다·story #3868 AC0 실측) — 위
+        # 고위험 note 검증이 이미 get_org_posture를 한 번 부르지만(_transition_posture) 그
+        # 결과를 응답에 안 실었었다. approved 경로면 그 값을 그대로 재사용(재조회 0, story
+        # #2027 원래 "N+1 0" 의도 그대로)하고, 그 외 상태(rejected 등, 검증 블록 자체를
+        # 안 태움)만 to_gate_response가 자체적으로 1쿼리 한다(AC1이 명시 허용하는 비용).
+        return await to_gate_response(session, org_id, gate, posture=_transition_posture)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
@@ -2026,7 +2055,7 @@ async def _reevaluate_gate_endpoint(
         publish_gate_check, org_id, gate.id,
         repo_full_name=repo, pr_number=pr_number, head_sha=head_sha,
     )
-    return GateResponse.model_validate(gate)
+    return await to_gate_response(session, org_id, gate)
 
 
 class GateVoidRequest(BaseModel):
@@ -2111,7 +2140,7 @@ async def withdraw_gate_endpoint(
     await session.commit()
     # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.
     await session.refresh(gate)
-    return GateResponse.model_validate(gate)
+    return await to_gate_response(session, org_id, gate)
 
 
 @router.post("/{id}/void", response_model=GateResponse)
@@ -2154,7 +2183,7 @@ async def _void_gate_endpoint(
         await session.commit()
         # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.
         await session.refresh(gate)
-        return GateResponse.model_validate(gate)
+        return await to_gate_response(session, org_id, gate)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
@@ -2210,7 +2239,7 @@ async def _hold_gate_endpoint(
         await session.commit()
         # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.
         await session.refresh(gate)
-        return GateResponse.model_validate(gate)
+        return await to_gate_response(session, org_id, gate)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
@@ -2247,7 +2276,7 @@ async def _unhold_gate_endpoint(
         await session.commit()
         # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.
         await session.refresh(gate)
-        return GateResponse.model_validate(gate)
+        return await to_gate_response(session, org_id, gate)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
@@ -2270,7 +2299,7 @@ async def undo_gate_resolution_endpoint(
         await session.commit()
         # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.
         await session.refresh(gate)
-        return GateResponse.model_validate(gate)
+        return await to_gate_response(session, org_id, gate)
     except GateUndoNotSelfError as e:
         raise HTTPException(status_code=403, detail=str(e))
     except GateUndoWindowExpiredError as e:
@@ -2325,7 +2354,7 @@ async def _request_gate_discussion_endpoint(
         await session.commit()
         # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.
         await session.refresh(gate)
-        return GateResponse.model_validate(gate)
+        return await to_gate_response(session, org_id, gate)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
@@ -2428,7 +2457,7 @@ async def _delegate_gate_endpoint(
         session, _gate, old_approver_id=old_approver_id, new_approver_id=body.new_approver_member_id,
     )
 
-    return GateResponse.model_validate(_gate)
+    return await to_gate_response(session, org_id, _gate)
 
 
 class GateTossRequest(BaseModel):
@@ -2559,7 +2588,7 @@ async def _toss_gate_endpoint(
             session, _gate, target_conversation_id=body.target_conversation_id, tossed_by_id=resolved.id,
         )
 
-    return GateTossResponse(**GateResponse.model_validate(_gate).model_dump(), inserted=inserted)
+    return GateTossResponse(**(await to_gate_response(session, org_id, _gate)).model_dump(), inserted=inserted)
 
 
 class GateReassignRequest(BaseModel):
@@ -2745,6 +2774,6 @@ async def _override_gate_endpoint(
         await session.refresh(gate)
         # ccbcd9da(A-1): override 도 transition_gate 재사용 경로라 동일하게 doc/epic wake 대상.
         _schedule_pending_deliveries(background_tasks, _pending_deliveries)
-        return GateResponse.model_validate(gate)
+        return await to_gate_response(session, org_id, gate)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))

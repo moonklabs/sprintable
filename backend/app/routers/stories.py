@@ -20,7 +20,7 @@ from app.models.team import TeamMember
 from app.repositories.story import StoryRepository
 from app.repositories.story_assignee import StoryAssigneeRepository
 from app.routers.agent_gateway import wake_agent
-from app.routers.gates import GateResponse
+from app.routers.gates import GateResponse, to_gate_response
 from app.services import mcp_attachment_upload
 from app.services.asset_registry import DEFAULT_CONTAINER, sync_attachment_assets
 from app.schemas.story import (
@@ -2981,7 +2981,9 @@ async def request_verification(
     await db.commit()
     # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.
     await db.refresh(gate)
-    return GateResponse.model_validate(gate)
+    # story #3874 CHANGES ④(페드루 실측) — 직접 model_validate는 risk_grade를 늘 null로
+    # 냈다(gates.py 밖에서도 같은 결함 클래스). 단일 통로(to_gate_response) 재사용.
+    return await to_gate_response(db, repo.org_id, gate)
 
 
 # ─── Activities ───────────────────────────────────────────────────────────────

@@ -213,7 +213,7 @@ async def test_hold_endpoint_forces_holder_from_auth():
     with patch.object(gates_mod, "resolve_member", AsyncMock(return_value=caller)), \
          patch.object(gates_mod, "is_org_owner_or_admin", AsyncMock(return_value=True)), \
          patch.object(gates_mod, "hold_gate", holdfn), \
-         patch.object(gates_mod.GateResponse, "model_validate", lambda g: "OK"):
+         patch.object(gates_mod, "to_gate_response", AsyncMock(return_value="OK")):
         await _hold_gate_endpoint(
                 resolved_locale="ko",id=uuid.uuid4(), body=GateHoldRequest(reason="대기"), session=AsyncMock(),
                                  org_id=uuid.uuid4(), auth=SimpleNamespace(user_id=str(uuid.uuid4())))
