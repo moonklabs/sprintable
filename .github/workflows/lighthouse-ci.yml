@@ -45,6 +45,15 @@ jobs:
           APP_BASE_URL: http://localhost:3108
           NEXT_PUBLIC_APP_URL: http://localhost:3108
 
+      # story #3864(customer-zero·CI 인프라, 2026-09-14) — AC0 소비처 그라운딩: 이 잡을
+      # 읽는 워크플로/문서 0건, PR 코멘트도 "workflow artifacts"를 가리키기만 할 뿐 직링크가
+      # 없어 실제로는 아무도 GH Actions artifact를 열어보지 않는다(수동 zip 다운로드 필요).
+      # 진짜 사람이 쓰는 경로는 temporaryPublicStorage(아래, 이미 활성)가 주는 즉시-열람
+      # 링크 — 그래서 uploadArtifacts는 껐다(story #3785류 "중복 저장소 0" 원칙과 동형).
+      # lighthouserc.json의 assertion이 전부 "warn"(에러 아님)이라 이 잡은 사실상 항상
+      # 성공하므로 `if: failure()`로는 이 GH artifact가 의미 있게 남지 않았을 것(사실상
+      # uploadArtifacts:false와 결과가 같다) — PO 판정(2026-09-14 10:23Z)에 따라 소비처
+      # 0으로 확定, uploadArtifacts:false로.
       - name: Run Lighthouse CI
         uses: treosh/lighthouse-ci-action@v11
         with:
@@ -56,7 +65,7 @@ jobs:
             http://localhost:3108/standup
             http://localhost:3108/docs
           configPath: ./lighthouserc.json
-          uploadArtifacts: true
+          uploadArtifacts: false
           temporaryPublicStorage: true
           runs: 3
 
@@ -68,7 +77,8 @@ jobs:
           script: |
             const comment = `## ⚡ Lighthouse CI Results
 
-            Performance metrics have been collected. View full report in the workflow artifacts.
+            Performance metrics have been collected (story #3864 — GH artifact 저장 중단,
+            전체 리포트는 이 워크플로 run 로그의 temporaryPublicStorage 링크로 확인).
 
             📊 Measured surfaces:
             - /memos (Memos List)
