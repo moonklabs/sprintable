@@ -105,8 +105,6 @@ export const GRANDFATHER_BASELINE = new Set<string>([
   'app/(authenticated)/[ws]/[proj]/docs/[slug]/page.tsx::/api/docs/',
   'app/(authenticated)/[ws]/[proj]/docs/docs-client-layout.tsx::/api/docs',
   'app/(authenticated)/[ws]/[proj]/docs/docs-client-layout.tsx::/api/docs/',
-  'app/(authenticated)/[ws]/[proj]/docs/docs-shell-client.tsx::/api/docs',
-  'app/(authenticated)/[ws]/[proj]/docs/docs-shell-client.tsx::/api/docs/',
   'app/(authenticated)/[ws]/[proj]/goals/[id]/page.tsx::/api/goals/',
   'app/(authenticated)/[ws]/[proj]/goals/goals-client.tsx::/api/goals',
   'app/(authenticated)/[ws]/[proj]/goals/goals-client.tsx::/api/goals/',

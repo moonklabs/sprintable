@@ -155,14 +155,10 @@ export const ALLOWLIST: ReadonlyMap<string, number> = new Map([
   [allowlistKey('components/settings/workflow-execution-history-section.tsx', 'status', 'log.status'), 1],
   // (b) §⑤ 미감사 화면 — 설정/워크플로 라인 에디터 버전 이력(기술 관리 화면), 상동.
   [allowlistKey('components/settings/workflow-line-editor-section.tsx', 'status', 'v.status'), 1],
-  // (c) 실 위반·스코프 밖 — story-detail-panel.tsx의 dependency 행(Blocked by/Blocking/
-  // Depends on/Depended by) mono 배지. 같은 행의 영문 ASCII 라벨과 짝인 자리라 story #3876
-  // (순 ASCII 라벨 9곳)이 다루는 게 자연스럽다 — 이 카드(#3875, 활동 탭)는 손대지 않는다.
-  // 변수명이 4곳 다 달라(blocker/blocked/target/source) 표현식 텍스트도 4개 별도 키.
-  [allowlistKey('components/kanban/story-detail-panel.tsx', 'status', 'blocker.status'), 1],
-  [allowlistKey('components/kanban/story-detail-panel.tsx', 'status', 'blocked.status'), 1],
-  [allowlistKey('components/kanban/story-detail-panel.tsx', 'status', 'target.status'), 1],
-  [allowlistKey('components/kanban/story-detail-panel.tsx', 'status', 'source.status'), 1],
+  // story #3876(§⑤ 낱말 드리프트) — story-detail-panel.tsx의 dependency 행(Blocked by/
+  // Blocking/Depends on/Depended by) mono 배지 4곳(blocker/blocked/target/source.status)은
+  // resolveStatusLabel()(#3875가 status_changed 활동에 쓴 것과 같은 정본 경로)로 정본화
+  // 완료 — ALLOWLIST에서 제거(정문 처리, 더 이상 원시 slug 노출 아님).
   // (c) 실 위반·스코프 밖 — 목표/스프린트/회고/하루체크인 화면(§⑤ 감사 대상 "일감" 5탭
   // 자체이나, 이 카드의 AC는 스토리 패널 활동 탭 하나로 한정) 각 화면의 story.status 원시
   // 렌더. PO에게 별도 카드 후보로 보고 済(story #3878). standup-client.tsx는 같은 표현식

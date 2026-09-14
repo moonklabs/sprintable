@@ -23,7 +23,6 @@
     "app/(authenticated)/[ws]/[proj]/docs/[slug]/page.tsx": 2,
     "app/(authenticated)/[ws]/[proj]/docs/docs-client-layout.tsx": 9,
     "app/(authenticated)/[ws]/[proj]/docs/docs-index.tsx": 9,
-    "app/(authenticated)/[ws]/[proj]/docs/docs-shell-client.tsx": 8,
     "app/(authenticated)/[ws]/[proj]/goals/[id]/page.tsx": 3,
     "app/(authenticated)/[ws]/[proj]/goals/goals-client.tsx": 7,
     "app/(authenticated)/[ws]/[proj]/goals/steer-dispatch-modal.tsx": 1,

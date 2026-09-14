@@ -19,8 +19,6 @@
   "keys": [
     "app/(authenticated)/[ws]/[proj]/docs/docs-client-layout.tsx::mx-2 mt-1.5 space-y-1.5 rounded-lg border border-border bg-card p-2",
     "app/(authenticated)/[ws]/[proj]/docs/docs-index.tsx::flex flex-col items-start gap-2 rounded-lg border border-border bg-card p-4 text-left transition hover:border-foreground/30",
-    "app/(authenticated)/[ws]/[proj]/docs/docs-shell-client.tsx::w-full min-h-[220px] rounded-xl border border-border bg-muted/30 px-4 py-3 text-sm text-foreground resize-none placeholder:text-muted-foreground",
-    "app/(authenticated)/[ws]/[proj]/docs/docs-shell-client.tsx::w-full rounded-lg border border-border/60 bg-muted/30 py-1.5 pl-8 pr-7 text-xs outline-none placeholder:text-muted-foreground focus:border-brand/40 focus:bg-muted/50",
     "app/(authenticated)/[ws]/[proj]/goals/[id]/page.tsx::flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium hover:bg-muted transition-colors",
     "app/(authenticated)/[ws]/[proj]/goals/[id]/page.tsx::rounded-xl border border-border bg-muted/20 p-4",
     "app/(authenticated)/[ws]/[proj]/goals/[id]/page.tsx::rounded-xl border border-border bg-muted/30 p-4",

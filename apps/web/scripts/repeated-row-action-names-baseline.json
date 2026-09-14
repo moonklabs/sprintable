@@ -8,7 +8,6 @@
   "counts": {
     "app/(authenticated)/[ws]/[proj]/docs/docs-client-layout.tsx": 3,
     "app/(authenticated)/[ws]/[proj]/docs/docs-index.tsx": 1,
-    "app/(authenticated)/[ws]/[proj]/docs/docs-shell-client.tsx": 1,
     "app/(authenticated)/[ws]/[proj]/goals/[id]/page.tsx": 1,
     "app/(authenticated)/[ws]/[proj]/goals/goals-client.tsx": 1,
     "app/(authenticated)/[ws]/[proj]/loops/loops-client.tsx": 1,

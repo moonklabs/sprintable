@@ -43,7 +43,8 @@
     "upgradePlan": "요금제 업그레이드",
     "close": "닫기",
     "add": "추가",
-    "confirm": "확인"
+    "confirm": "확인",
+    "acceptanceCriteria": "완료 기준"
   },
   "activation": {
     "bannerTitle": "가입을 마무리해 볼까요?",
@@ -1119,6 +1120,8 @@
     "allLabels": "모든 라벨",
     "labelsActive": "{count}개 라벨",
     "searchLabels": "라벨 검색...",
+    "labelsSectionTitle": "라벨",
+    "dependenciesSectionTitle": "의존 관계",
     "dep": {
       "duplicateConnection": "이미 연결된 의존성",
       "cycleDetected": "사이클이 발생하는 의존성",
@@ -1132,7 +1135,11 @@
       "searchPlaceholder": "스토리 제목으로 검색...",
       "incompletePreds": "미완료 선행 {count}건 — 시작 전 확인 권장",
       "candidatesHeader": "이 스토리 본문에 나온 것",
-      "candidateMentionHint": "이 스토리 본문에 나옵니다"
+      "candidateMentionHint": "이 스토리 본문에 나옵니다",
+      "blockedByLabel": "이 일을 막는 일",
+      "blockingLabel": "이 일이 막는 일",
+      "dependsOnLabel": "이 일이 기다리는 일",
+      "dependedByLabel": "이 일을 기다리는 일"
     }
   },
   "session": {

@@ -104,13 +104,10 @@ OperatorShell이 제공하는 Main Content Area 안에서 동작하는 페이지
 
 **현재 위반**: `bg-white`, `border-gray-200`, `text-gray-*` 하드코딩 다수 (→ Appendix A 참조).
 
-### 4-2. DocsShellClient
+### 4-2. (결번 — DocsShellClient, story #3876)
 
-**파일**: `src/app/(authenticated)/docs/docs-shell-client.tsx`
-
-좌측 트리 사이드바 + 우측 에디터/뷰어 분할 레이아웃.
-
-**현재 위반**: `bg-gray-900`, `border-gray-800`, `px-6` 초과 패딩 사용 (→ Appendix A 참조).
+`DocsShellClient`(`docs-shell-client.tsx`)는 소비처 0(코드 검색·`docs/page.tsx`→`DocsIndex` 실측)으로
+story #3876에서 삭제됐다. 현재 라이브 문서 레이아웃은 `docs-client-layout.tsx`.
 
 ### 4-3. SettingsSidebar
 
@@ -177,7 +174,6 @@ Page Shell 내부:        px-2  = 8px × 2  (최대 px-3)
 | `components/memos/memo-sidebar.tsx` | `border-gray-200`, `bg-gray-50`, `bg-white`, `text-gray-*` | 203, 208, 215, 228, 236, 242 |
 | `components/memos/memo-feed.tsx` | `divide-gray-800`, `bg-gray-800`, `text-gray-100/400/500` | 29, 57~58, 65, 69, 81 |
 | `components/memos/memo-thread.tsx` | `border-gray-800`, `bg-gray-800`, `text-gray-*` | 59, 121, 176, 184 |
-| `app/(authenticated)/docs/docs-shell-client.tsx` | `bg-gray-900`, `border-gray-800`, `text-gray-*` | 392, 393, 424, 430, 474 |
 | `app/(authenticated)/memos/memos-feed-client.tsx` | `border-gray-800`, `bg-gray-900`, `text-gray-400` | 191, 192, 213 |
 | `components/ui/route-error-state.tsx` | `bg-gray-50`, `text-gray-*`, `border-gray-300` | 27, 30, 33, 47 |
 | `components/ui/upgrade-modal.tsx` | `text-gray-900`, `border-gray-300`, `text-gray-700` | 18, 19, 24 |
@@ -188,13 +184,10 @@ Page Shell 내부:        px-2  = 8px × 2  (최대 px-3)
 
 ### A-2. 패딩 초과 위반처
 
-| 파일 | 위반 내용 | 라인 |
-|------|----------|------|
-| `app/(authenticated)/docs/docs-shell-client.tsx` | `px-6 py-4`, `px-6 py-6` (데스크톱 상세 패널) | 439, 450, 494, 517 |
+현재 등재분 없음(유일 위반처였던 `docs-shell-client.tsx`는 story #3876에서 삭제).
 
 ### A-3. Page Shell 배경색 미준수
 
 | 파일 | 현재 배경 | 권장 |
 |------|----------|------|
 | `components/memos/memo-sidebar.tsx` | `bg-white` (하드코딩) | `GlassPanel` 또는 `var(--operator-surface)` |
-| `app/(authenticated)/docs/docs-shell-client.tsx` | `bg-gray-900` (하드코딩) | `var(--operator-surface)` |

@@ -1591,7 +1591,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
             {/* E-BOARD S1: Dispatch — assignee 인접(킥오프=assignee 선택 후 액션). EntityDispatchPanel 마운트만(신규 디자인 0). */}
             {projectId && (
               <div className="rounded-lg border border-border bg-muted/20 p-3">
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Dispatch</p>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('dispatch')}</p>
                 <EntityDispatchPanel
                   entityType="story"
                   entityId={story.id}
@@ -1845,7 +1845,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
               <div className="mb-2 flex items-center justify-between">
                 <div className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
                   <Tag className="size-3" />
-                  <span>Labels</span>
+                  <span>{t('labelsSectionTitle')}</span>
                 </div>
                 <Button
                   type="button"
@@ -1950,7 +1950,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
               <div className="mb-2 flex items-center justify-between">
                 <div className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
                   <GitFork className="size-3" />
-                  <span>Dependencies</span>
+                  <span>{t('dependenciesSectionTitle')}</span>
                 </div>
                 <Button
                   type="button"
@@ -2003,9 +2003,9 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                       <div key={d.id} className="group flex w-full items-center gap-2 rounded-md border border-warning-border bg-warning-tint px-2.5 py-1.5 text-xs text-foreground">
                         <Button type="button" variant="ghost" onClick={() => onNavigate?.(d.from_id)} className="h-auto min-h-0 min-w-0 flex flex-1 items-center justify-start gap-2 p-0 text-left font-normal" disabled={!onNavigate}>
                           <AlertTriangle className="size-3 shrink-0" />
-                          <span className="font-medium shrink-0">Blocked by</span>
+                          <span className="font-medium shrink-0">{t('dep.blockedByLabel')}</span>
                           <span className="min-w-0 truncate">{blocker?.title ?? `#${d.from_id.slice(0, 6)}`}</span>
-                          {blocker?.status ? <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">{blocker.status}</span> : null}
+                          {blocker?.status ? <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">{resolveStatusLabel(blocker.status)}</span> : null}
                         </Button>
                         <Button type="button" variant="ghost" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className="h-auto min-h-0 min-w-0 hidden shrink-0 rounded p-0.5 hover:bg-warning/20 group-hover:block" aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
                           <ArrowLeftRight className="size-3" />
@@ -2024,9 +2024,9 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                       <div key={d.id} className="group flex w-full items-center gap-2 rounded-md border border-border bg-muted/40 px-2.5 py-1.5 text-xs text-muted-foreground">
                         <Button type="button" variant="ghost" onClick={() => onNavigate?.(d.to_id)} className="h-auto min-h-0 min-w-0 flex flex-1 items-center justify-start gap-2 p-0 text-left font-normal" disabled={!onNavigate}>
                           <GitFork className="size-3 shrink-0" />
-                          <span className="font-medium shrink-0">Blocking</span>
+                          <span className="font-medium shrink-0">{t('dep.blockingLabel')}</span>
                           <span className="min-w-0 truncate">{blocked?.title ?? `#${d.to_id.slice(0, 6)}`}</span>
-                          {blocked?.status ? <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">{blocked.status}</span> : null}
+                          {blocked?.status ? <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">{resolveStatusLabel(blocked.status)}</span> : null}
                         </Button>
                         <Button type="button" variant="ghost" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className="h-auto min-h-0 min-w-0 hidden shrink-0 rounded p-0.5 hover:bg-muted group-hover:block" aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
                           <ArrowLeftRight className="size-3" />
@@ -2045,9 +2045,9 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                       <div key={d.id} className="group flex w-full items-center gap-2 rounded-md border border-border bg-muted/20 px-2.5 py-1.5 text-xs text-muted-foreground">
                         <Button type="button" variant="ghost" onClick={() => onNavigate?.(d.to_id)} className="h-auto min-h-0 min-w-0 flex flex-1 items-center justify-start gap-2 p-0 text-left font-normal" disabled={!onNavigate}>
                           <GitFork className="size-3 shrink-0 rotate-90" />
-                          <span className="font-medium shrink-0">Depends on</span>
+                          <span className="font-medium shrink-0">{t('dep.dependsOnLabel')}</span>
                           <span className="min-w-0 truncate">{target?.title ?? `#${d.to_id.slice(0, 6)}`}</span>
-                          {target?.status ? <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">{target.status}</span> : null}
+                          {target?.status ? <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">{resolveStatusLabel(target.status)}</span> : null}
                         </Button>
                         <Button type="button" variant="ghost" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className="h-auto min-h-0 min-w-0 hidden shrink-0 rounded p-0.5 hover:bg-muted group-hover:block" aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
                           <ArrowLeftRight className="size-3" />
@@ -2066,9 +2066,9 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                       <div key={d.id} className="group flex w-full items-center gap-2 rounded-md border border-border bg-muted/20 px-2.5 py-1.5 text-xs text-muted-foreground">
                         <Button type="button" variant="ghost" onClick={() => onNavigate?.(d.from_id)} className="h-auto min-h-0 min-w-0 flex flex-1 items-center justify-start gap-2 p-0 text-left font-normal" disabled={!onNavigate}>
                           <GitFork className="size-3 shrink-0 -rotate-90" />
-                          <span className="font-medium shrink-0">Depended by</span>
+                          <span className="font-medium shrink-0">{t('dep.dependedByLabel')}</span>
                           <span className="min-w-0 truncate">{source?.title ?? `#${d.from_id.slice(0, 6)}`}</span>
-                          {source?.status ? <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">{source.status}</span> : null}
+                          {source?.status ? <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">{resolveStatusLabel(source.status)}</span> : null}
                         </Button>
                         <Button type="button" variant="ghost" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className="h-auto min-h-0 min-w-0 hidden shrink-0 rounded p-0.5 hover:bg-muted group-hover:block" aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
                           <ArrowLeftRight className="size-3" />
