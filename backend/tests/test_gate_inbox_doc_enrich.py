@@ -41,8 +41,12 @@ async def test_doc_gate_enriched_with_title_slug():
     # 89484c8c: 배치가 project_id 도 조회(4-tuple) — can_approve enrich 재사용.
     docs_res = MagicMock()
     docs_res.all.return_value = [(doc_id, "설계 문서", "design-doc", pid)]
+    # story #3860 — resolve_member가 patch돼 non-None을 반환하므로(아래) list_gates가
+    # 3번째 쿼리(work_item→conversation 태그 배치)를 던진다 — 빈 결과로 고정.
+    conv_res = MagicMock()
+    conv_res.all.return_value = []
     session = AsyncMock()
-    session.execute = AsyncMock(side_effect=[gates_res, docs_res])
+    session.execute = AsyncMock(side_effect=[gates_res, docs_res, conv_res])
     auth = SimpleNamespace(user_id=str(uuid.uuid4()))
     resolved = ResolvedMember(
         id=uuid.uuid4(), user_id=uuid.uuid4(), name="h", type="human", role="member", org_id=org

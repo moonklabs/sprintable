@@ -161,8 +161,14 @@ async def _list_gates(gate, *, has_access, resolved=None, resolve_raises=False):
     gates_result.scalars.return_value.all.return_value = [gate]
     doc_batch = MagicMock()
     doc_batch.all.return_value = [(gate.work_item_id, "T", "slug", pid)]
+    # story #3860 — list_gates가 이제 세 번째 쿼리(work_item→conversation 태그 배치,
+    # work_item_conversation.py)를 던진다. 이 파일의 관심사(can_approve)와 무관하므로
+    # 빈 결과(대화 태그 없음)로 고정 — 그 3번째 execute()에 프로그램된 응답이 없으면
+    # AsyncMock side_effect가 소진돼 StopAsyncIteration으로 터진다.
+    conv_batch = MagicMock()
+    conv_batch.all.return_value = []
     session = AsyncMock()
-    session.execute = AsyncMock(side_effect=[gates_result, doc_batch])
+    session.execute = AsyncMock(side_effect=[gates_result, doc_batch, conv_batch])
     auth = SimpleNamespace(user_id=str(uuid.uuid4()))
     rm = (
         AsyncMock(side_effect=Exception("boom")) if resolve_raises
@@ -215,8 +221,11 @@ async def _run_non_doc_can_approve(project_role):
     gates_result.scalars.return_value.all.return_value = [merge]
     story_batch = MagicMock()
     story_batch.all.return_value = [(merge.work_item_id, uuid.uuid4(), "T")]
+    # story #3860 — 3번째 쿼리(work_item→conversation 태그 배치) 자리, 빈 결과로 고정.
+    conv_batch = MagicMock()
+    conv_batch.all.return_value = []
     session = AsyncMock()
-    session.execute = AsyncMock(side_effect=[gates_result, story_batch])
+    session.execute = AsyncMock(side_effect=[gates_result, story_batch, conv_batch])
     auth = SimpleNamespace(user_id=str(uuid.uuid4()))
     rm = AsyncMock(return_value=_human(uuid.uuid4()))
     with patch.object(gates_mod.GateResponse, "model_validate", _resp), \
@@ -273,8 +282,11 @@ async def test_list_gates_can_approve_uses_doc_approval_predicate_not_work_item_
     gates_result.scalars.return_value.all.return_value = [g]
     doc_batch = MagicMock()
     doc_batch.all.return_value = [(doc_id, "T", "slug", pid)]  # approval predicate 로 조회돼야 채워짐
+    # story #3860 — 3번째 쿼리(work_item→conversation 태그 배치) 자리, 빈 결과로 고정.
+    conv_batch = MagicMock()
+    conv_batch.all.return_value = []
     session = AsyncMock()
-    session.execute = AsyncMock(side_effect=[gates_result, doc_batch])
+    session.execute = AsyncMock(side_effect=[gates_result, doc_batch, conv_batch])
     auth = SimpleNamespace(user_id=str(uuid.uuid4()))
     with patch.object(gates_mod.GateResponse, "model_validate", _resp), \
          patch.object(gates_mod, "resolve_member", AsyncMock(return_value=_human(uuid.uuid4()))), \
