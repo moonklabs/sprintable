@@ -57,7 +57,7 @@ describe('WorkspaceFrameTabs — story #2930 I3', () => {
     const { WorkspaceFrameTabs } = await import('./workspace-frame-tabs');
     await act(async () => { root.render(wrap(<WorkspaceFrameTabs active="board" />)); });
     const tabs = [...container.querySelectorAll('[role="tab"]')];
-    expect(tabs.map((t) => t.textContent)).toEqual(['보드', '스프린트', '에픽', '회고', '목록']);
+    expect(tabs.map((t) => t.textContent)).toEqual(['목록', '보드', '스프린트', '에픽', '회고']);
   });
 
   it('active="board"면 보드 탭에 aria-selected=true가 붙는다', async () => {
@@ -97,7 +97,7 @@ describe('WorkspaceFrameTabs — story #2930 I3', () => {
     const { WorkspaceFrameTabs } = await import('./workspace-frame-tabs');
     await act(async () => { root.render(wrap(<WorkspaceFrameTabs active="board" />, enMessages)); });
     const tabs = [...container.querySelectorAll('[role="tab"]')];
-    expect(tabs.map((t) => t.textContent)).toEqual(['Board', 'Sprints', 'Epic', 'Retro', 'List']);
+    expect(tabs.map((t) => t.textContent)).toEqual(['List', 'Board', 'Sprints', 'Epic', 'Retro']);
   });
 
   it('story #3845 — 회고 탭 클릭 시 /{ws}/{proj}/retro로 이동하고 active="retro"면 선택 표시된다', async () => {

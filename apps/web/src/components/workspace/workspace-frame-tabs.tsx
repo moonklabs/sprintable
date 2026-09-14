@@ -6,6 +6,11 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { cn } from '@/lib/utils';
 
 const TABS = [
+  // story #3844(UX-v3·FE 4·일감 1, PO 지적 2026-09-14 07:32Z — 시안 06d2d61c 재대조: 탭
+  // 순서는 「목록·보드·타임라인·스프린트·회고」, 목록이 첫 탭·기본 보기). 「타임라인」은 이
+  // 카드 스코프 밖(별 라우트·데이터 0 — 지어내지 않는다, 별 카드 필요). 처음엔 06:28Z
+  // 지시대로 배열 끝에 얹었다가 이 재대조로 앞으로 옮겼다.
+  { key: 'workList', path: 'work-list' },
   { key: 'board', path: 'flow' },
   { key: 'sprints', path: 'sprints' },
   { key: 'epic', path: 'epics' },
@@ -14,11 +19,6 @@ const TABS = [
   // 이 프레임은 그 위에 얹힌 얕은 nav일 뿐 — WorkspaceFrameTabs 파일 상단 주석 참고).
   // labelKey 'retro'는 nav-config.ts::LEGACY_NAV_ITEMS가 이미 쓰던 값 재사용(사본 0).
   { key: 'retro', path: 'retro' },
-  // story #3844(UX-v3·FE 4·일감 1, PO 지시 2026-09-14 06:28Z) — 디디군 #4264(회고 탭)와
-  // 같은 배열에 나란히 얹는다(실 렌더로 짓고 캡처하기 위해 착지 대기 없이 직접 추가).
-  // #4264가 먼저 develop에 착지해 이 rebase에서 1줄만 합치면 되는 낮은 충돌 비용으로
-  // PO가 직접 승인한 순서.
-  { key: 'workList', path: 'work-list' },
 ] as const;
 
 type WorkspaceFrameTabKey = (typeof TABS)[number]['key'];

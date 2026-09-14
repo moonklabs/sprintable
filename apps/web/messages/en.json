@@ -489,6 +489,7 @@
   },
   "workList": {
     "title": "Work",
+    "subtitle": "Goals lead to stories, stories to tasks. Work you take on and work you delegate are kept apart.",
     "loadErrorTitle": "Couldn't load",
     "emptyStateTitle": "Nothing to show",
     "partialNotice": "Couldn't load everything. There's more.",
@@ -500,8 +501,9 @@
     "stateInProgress": "In progress",
     "stateDone": "Done",
     "chipLowRisk": "Low risk",
-    "chipHasArtifacts": "Artifacts",
+    "chipArtifacts": "{count} artifacts",
     "chipDelegated": "Delegated",
+    "chipAssigned": "Assigned",
     "filterGoalAriaLabel": "Filter by goal",
     "filterHypothesisAriaLabel": "Filter by hypothesis",
     "filterAllGoals": "All goals",

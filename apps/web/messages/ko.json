@@ -489,6 +489,7 @@
   },
   "workList": {
     "title": "일감",
+    "subtitle": "목표에서 스토리로, 스토리에서 일로 이어져요. 사람이 맡은 일과 에이전트에 위임한 일이 갈려요.",
     "loadErrorTitle": "불러오지 못했어요",
     "emptyStateTitle": "표시할 일이 없어요",
     "partialNotice": "전부 불러오지 못했어요. 더 있어요",
@@ -500,8 +501,9 @@
     "stateInProgress": "진행 중",
     "stateDone": "완료",
     "chipLowRisk": "저위험",
-    "chipHasArtifacts": "산출물",
+    "chipArtifacts": "산출물 {count}",
     "chipDelegated": "위임",
+    "chipAssigned": "배정",
     "filterGoalAriaLabel": "목표로 거르기",
     "filterHypothesisAriaLabel": "가설로 거르기",
     "filterAllGoals": "모든 목표",

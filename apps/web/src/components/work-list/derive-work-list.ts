@@ -28,8 +28,14 @@
  * - 배정/위임은 Task.assignee_id → team_members[].type('human'|'agent') 교차대조(Task 응답
  *   자체엔 타입 필드가 없다).
  * - 문서(docs) 칩은 이번 카드에서 뺐다(BE 갭 — /api/docs에 story_id 필터 0·story 응답에 문서
- *   연결 카운트 필드 0, PO 確定). 산출물(artifact) 칩은 story_id별 존재 여부만(/api/
- *   visual-artifacts?story_id=).
+ *   연결 카운트 필드 0, PO 確定). 산출물(artifact) 칩은 story_id별 실 개수("산출물 N", PO
+ *   지적 2026-09-14 — 있음/없음이 아니라 개수) — /api/visual-artifacts(project 전체, story_id
+ *   미지정)를 한 번 받아 story_id로 집계, N+1 없음.
+ * - 담당 이름(ownerName)은 위임 행뿐 아니라 사람 배정 행도 team_members 이름으로 채운다(PO
+ *   지적 2026-09-14 — 처음엔 위임 행에만 채우고 사람 배정 행은 null로 뒀다).
+ * - 목표 헤더 「진행 중」 낱말은 GoalStatus==='active'일 때만(PO 지적 — 시안 06d2d61c
+ *   재대조, 데이터 없으면 지어내지 않는다). 기간 pill(예: 「이번 주」)은 target_date 기반
+ *   설계가 이 카드 스코프 밖이라 생략(PO 승인 — 데이터 없으면 생략이 원칙).
  * - 「가설: <가설>」 필터: HypothesisResponse.epic_ids/story_ids(N:M) 실측 근거로, 스토리가
  *   그 가설의 story_ids에 직접 있거나 그 스토리의 부모 goal이 epic_ids에 있으면 매치(가설이
  *   goal에 걸려 있으면 그 아래 모든 스토리가 관련 — 직접 연결과 상속 연결을 다 인정하는
@@ -49,6 +55,9 @@ export const TASK_STATUS_IN_PROGRESS = 'in-progress';
 export const TASK_STATUS_DONE = 'done';
 export const TASK_STATUS_VALUES = [TASK_STATUS_TODO, TASK_STATUS_IN_PROGRESS, TASK_STATUS_DONE] as const;
 
+// 정본 소스: backend/sprintable_mcp/schemas.py::GoalStatus(Enum) — draft|active|done|archived.
+export const GOAL_STATUS_ACTIVE = 'active';
+
 // today_service.py::_AGENT_RUN_IN_PROGRESS_STATUSES와 동일 SSOT(agent_runs.py
 // _AGENT_RUN_STATUS_VALUES: queued|held|running|hitl_pending|completed|failed|abandoned 중
 // completed만 종결로 세고, failed/abandoned는 §①에 대응 낱말이 없어 null로 둔다 — 지어내지 않음).
@@ -63,6 +72,10 @@ const EXTERNAL_PUBLISH_GATE_TYPE = 'external_publish';
 export interface WorkListGoalInput {
   id: string;
   title: string;
+  /** 정본 소스: backend/sprintable_mcp/schemas.py::GoalStatus(Enum) — draft|active|done|
+   * archived. 「진행 중」 낱말은 status==='active'일 때만(PO 지적 2026-09-14, 시안 06d2d61c
+   * 재대조 — 데이터 없으면 지어내지 않는다). */
+  status: string;
 }
 
 export interface WorkListStoryInput {
@@ -118,10 +131,14 @@ export interface WorkListRow {
   workItemType: 'task' | 'story';
   workItemId: string;
   title: string;
+  /** 담당자 표시명(있을 때만·PO 지적 2026-09-14 — 위임 행뿐 아니라 사람 배정 행도 이름을
+   * 보인다). team_members 조회로 못 채우면(이름 없는 멤버 등) null — 지어내지 않는다. */
   ownerName: string | null;
   isDelegated: boolean;
   lowRisk: boolean;
-  hasArtifacts: boolean;
+  /** 이 행의 부모 스토리에 연결된 산출물 개수(0=칩 안 그림). PO 지적 — 있음/없음이 아니라
+   * 실 개수("산출물 N")를 보인다. */
+  artifactCount: number;
   state: WorkListRowState;
 }
 
@@ -136,6 +153,8 @@ export interface WorkListStoryGroup {
 export interface WorkListGoalGroup {
   goalId: string;
   title: string;
+  /** GoalStatus==='active'인지(「진행 중」 낱말용 — PO 지적, 데이터 없으면 지어내지 않는다). */
+  isActive: boolean;
   doneCount: number;
   totalCount: number;
   assignedCount: number;
@@ -175,8 +194,9 @@ export interface WorkListInput {
   /** GET /api/team-members 전체(페이지네이션 없는 소스, list_team_members에 limit/cursor
    * 파라미터 자체가 없음 — 라이브 실측). */
   teamMembers: WorkListTeamMemberInput[];
-  /** /api/visual-artifacts?story_id= 존재 확인 결과 — 있는 story_id만(칩은 "있을 때만"). */
-  storyIdsWithArtifacts: ReadonlySet<string>;
+  /** /api/visual-artifacts(project 전체) story_id별 개수 — 0이면 칩 안 그림, 있으면 실 개수
+   * 표시("산출물 N", PO 지적 2026-09-14). */
+  artifactCountByStoryId: ReadonlyMap<string, number>;
   /** GET /api/hypotheses?project_id= 전체(페이지네이션 없는 project 스코프 소스). */
   hypotheses: WorkListHypothesisInput[];
 }
@@ -222,6 +242,7 @@ function deriveAgentRunState(run: WorkListAgentRunInput): WorkListRowState {
 export function deriveWorkList(input: WorkListInput): WorkList {
   const storyById = new Map(input.stories.items.map((s) => [s.id, s]));
   const memberTypeById = new Map(input.teamMembers.map((m) => [m.id, m.type]));
+  const memberNameById = new Map(input.teamMembers.map((m) => [m.id, m.name]));
 
   const storyGroups = new Map<string, WorkListStoryGroup>();
   const goalTotals = new Map<string, { done: number; total: number; assigned: number; delegated: number }>();
@@ -260,10 +281,10 @@ export function deriveWorkList(input: WorkListInput): WorkList {
       workItemType: 'task',
       workItemId: task.id,
       title: task.title,
-      ownerName: null, // 이름 해석은 team_members 조회 확장 시 채움(story #3844 스코프 — id만으로 배정/위임 판정에 충분, 표시명은 소비 컴포넌트가 별도 멤버 조회로 채울 수 있음).
+      ownerName: task.assignee_id ? (memberNameById.get(task.assignee_id) ?? null) : null,
       isDelegated,
       lowRisk: lowRiskFromInboxItem(inboxItem),
-      hasArtifacts: input.storyIdsWithArtifacts.has(story.id),
+      artifactCount: input.artifactCountByStoryId.get(story.id) ?? 0,
       state: deriveTaskState(task, inboxItem),
     };
     group.rows.push(row);
@@ -287,7 +308,7 @@ export function deriveWorkList(input: WorkListInput): WorkList {
       ownerName: run.agent_name,
       isDelegated: true,
       lowRisk: lowRiskFromInboxItem(inboxItem),
-      hasArtifacts: input.storyIdsWithArtifacts.has(story.id),
+      artifactCount: input.artifactCountByStoryId.get(story.id) ?? 0,
       state: inboxItem ? stateFromInboxItem(inboxItem) : deriveAgentRunState(run),
     };
     group.rows.push(row);
@@ -309,6 +330,7 @@ export function deriveWorkList(input: WorkListInput): WorkList {
     groups.push({
       goalId: goal.id,
       title: goal.title,
+      isActive: goal.status === GOAL_STATUS_ACTIVE,
       doneCount: totals.done,
       totalCount: totals.total,
       assignedCount: totals.assigned,

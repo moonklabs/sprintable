@@ -18,7 +18,7 @@ function wrap(node: React.ReactNode) {
 function baseRow(overrides: Partial<WorkListRow> = {}): WorkListRow {
   return {
     id: 't1', kind: 'task', workItemType: 'task', workItemId: 't1',
-    title: '할일 제목', ownerName: null, isDelegated: false, lowRisk: false, hasArtifacts: false, state: null,
+    title: '할일 제목', ownerName: null, isDelegated: false, lowRisk: false, artifactCount: 0, state: null,
     ...overrides,
   };
 }
@@ -62,16 +62,22 @@ describe('WorkListRowView', () => {
     }
   });
 
-  it('사람 손 필요 3어(승인·서명·답 대기)는 warning(amber) 배지 — 「오늘」과 같은 사실 같은 색(story #3853 정렬, PO 지적)', async () => {
+  it('사람 손 필요 3어(승인·서명·답 대기)는 색 글자 text-warning-strong — pill/Badge 아님(시안 06d2d61c 재대조, PO 지적)', async () => {
     for (const state of ['awaiting_approval', 'awaiting_signature', 'awaiting_answer'] as const) {
       await act(async () => { root.render(wrap(<WorkListRowView row={baseRow({ state })} />)); });
-      expect(container.querySelector('.bg-warning-tint')).not.toBeNull();
-      expect(container.querySelector('.bg-info-tint')).toBeNull();
+      expect(container.querySelector('.text-warning-strong')).not.toBeNull();
+      // 색 글자로 바뀌었으니 배지 tint 배경(bg-warning-tint 등)은 이 상태 자리에 없어야 한다.
+      expect(container.querySelector('.bg-warning-tint, .bg-info-tint')).toBeNull();
     }
-    for (const state of ['in_progress', 'done'] as const) {
-      await act(async () => { root.render(wrap(<WorkListRowView row={baseRow({ state })} />)); });
-      expect(container.querySelector('.bg-warning-tint')).toBeNull();
-    }
+  });
+
+  it('진행 중=muted 글자·완료=success 글자(색 pill 아님)', async () => {
+    await act(async () => { root.render(wrap(<WorkListRowView row={baseRow({ state: 'in_progress' })} />)); });
+    expect(container.querySelector('.text-muted-foreground')).not.toBeNull();
+
+    await act(async () => { root.render(wrap(<WorkListRowView row={baseRow({ state: 'done' })} />)); });
+    const doneText = [...container.querySelectorAll('.text-success')].find((el) => el.textContent === koMessages.workList.stateDone);
+    expect(doneText).not.toBeUndefined();
   });
 
   it('lowRisk=true일 때만 저위험 칩', async () => {
@@ -82,18 +88,40 @@ describe('WorkListRowView', () => {
     expect(container.textContent).not.toContain(koMessages.workList.chipLowRisk);
   });
 
-  it('hasArtifacts=true일 때만 산출물 칩', async () => {
-    await act(async () => { root.render(wrap(<WorkListRowView row={baseRow({ hasArtifacts: true })} />)); });
-    expect(container.textContent).toContain(koMessages.workList.chipHasArtifacts);
+  it('artifactCount>0일 때만 산출물 칩(실 개수 표시, PO 지적 — 있음/없음 아님)', async () => {
+    await act(async () => { root.render(wrap(<WorkListRowView row={baseRow({ artifactCount: 3 })} />)); });
+    expect(container.textContent).toContain('산출물 3');
+
+    await act(async () => { root.render(wrap(<WorkListRowView row={baseRow({ artifactCount: 0 })} />)); });
+    expect(container.textContent).not.toContain('산출물');
   });
 
-  it('isDelegated=true일 때만 위임 칩(ownerName 있으면 이름도 함께)', async () => {
+  it('isDelegated=true면 위임 칩(이름은 칩이 아니라 행 부제로 — PO 지적)', async () => {
     await act(async () => { root.render(wrap(<WorkListRowView row={baseRow({ isDelegated: true, ownerName: '미르코' })} />)); });
     expect(container.textContent).toContain(koMessages.workList.chipDelegated);
     expect(container.textContent).toContain('미르코');
+    expect(container.textContent).not.toContain(koMessages.workList.chipAssigned);
+  });
 
-    await act(async () => { root.render(wrap(<WorkListRowView row={baseRow({ isDelegated: false })} />)); });
+  it('isDelegated=false·ownerName 있으면 배정 칩(사람 배정 행, PO 지적 — 신설)', async () => {
+    await act(async () => { root.render(wrap(<WorkListRowView row={baseRow({ isDelegated: false, ownerName: '사람' })} />)); });
+    expect(container.textContent).toContain(koMessages.workList.chipAssigned);
+    expect(container.textContent).toContain('사람');
     expect(container.textContent).not.toContain(koMessages.workList.chipDelegated);
+  });
+
+  it('ownerName=null이면 배정/위임 칩 둘 다 없다(지어내지 않는다)', async () => {
+    await act(async () => { root.render(wrap(<WorkListRowView row={baseRow({ isDelegated: false, ownerName: null })} />)); });
+    expect(container.textContent).not.toContain(koMessages.workList.chipDelegated);
+    expect(container.textContent).not.toContain(koMessages.workList.chipAssigned);
+  });
+
+  it('행 부제=ownerName(있을 때만)', async () => {
+    await act(async () => { root.render(wrap(<WorkListRowView row={baseRow({ ownerName: '디디' })} />)); });
+    expect(container.textContent).toContain('디디');
+
+    await act(async () => { root.render(wrap(<WorkListRowView row={baseRow({ ownerName: null })} />)); });
+    expect(container.textContent).not.toContain('디디');
   });
 
   it('위임+진행 중/완료 행만 채운 점 표식을 그린다(승인 대기 등은 표식 없음)', async () => {

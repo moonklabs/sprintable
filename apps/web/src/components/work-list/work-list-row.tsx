@@ -15,31 +15,40 @@ function DelegatedDot({ isDelegated, state }: { isDelegated: boolean; state: Wor
   return <span className={cn('mt-1.5 size-1.5 shrink-0 rounded-full', state === 'done' ? 'bg-success' : 'bg-primary')} aria-hidden="true" />;
 }
 
-// today-sections.tsx STATE_META와 동형 매핑(story #3853 착지분 — §③ "사람 손 필요=경고
-// amber" 정렬) — pending 3상태는 badge variant="warning" 통일(색은 위임/완료 dot이,
-// pending 3어는 라벨 자체가 구분한다). PO 지적(2026-09-14) — 처음엔 info(파랑)로 지어
-// 「오늘」과 같은 사실(사람 손 필요)을 다른 색으로 말했다.
-const STATE_BADGE: Partial<Record<NonNullable<WorkListRowState>, { key: string; variant: 'warning' | 'secondary' | 'success' }>> = {
-  awaiting_approval: { key: 'stateAwaitingApproval', variant: 'warning' },
-  awaiting_signature: { key: 'stateAwaitingSignature', variant: 'warning' },
-  awaiting_answer: { key: 'stateAwaitingAnswer', variant: 'warning' },
-  in_progress: { key: 'stateInProgress', variant: 'secondary' },
-  done: { key: 'stateDone', variant: 'success' },
+// PO 지적(2026-09-14, 시안 06d2d61c 재대조) — 상태 낱말은 pill/Badge가 아니라 «색 글자».
+// 승인·서명·답 대기=text-warning-strong(§2594 선례 — 평문 text-warning은 흰 배경 AA
+// 미달이라 -strong 변형이 텍스트 전용 안전값)·진행 중=muted(차분)·완료=success. 07:30Z에
+// 지시했던 "Badge variant=warning"은 이 처방으로 대체(PO 본인 정정).
+const STATE_TEXT: Partial<Record<NonNullable<WorkListRowState>, { key: string; className: string }>> = {
+  awaiting_approval: { key: 'stateAwaitingApproval', className: 'text-warning-strong' },
+  awaiting_signature: { key: 'stateAwaitingSignature', className: 'text-warning-strong' },
+  awaiting_answer: { key: 'stateAwaitingAnswer', className: 'text-warning-strong' },
+  in_progress: { key: 'stateInProgress', className: 'text-muted-foreground' },
+  done: { key: 'stateDone', className: 'text-success' },
 };
 
 export function WorkListRowView({ row }: { row: WorkListRow }) {
   const t = useTranslations('workList');
-  const badge = row.state ? STATE_BADGE[row.state] : undefined;
+  const stateText = row.state ? STATE_TEXT[row.state] : undefined;
 
   return (
     <div className="flex items-start gap-2 border-t border-border px-3 py-2.5 first:border-t-0">
       <DelegatedDot isDelegated={row.isDelegated} state={row.state} />
-      <span className="min-w-0 flex-1 truncate text-[13.5px] text-foreground">{row.title}</span>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-[13.5px] text-foreground">{row.title}</div>
+        {/* 행 부제=담당 이름(있을 때만·PO 지적 — 위임/배정 둘 다). 검토 축은 실 데이터가
+            없어 생략(지어내지 않음, 시안의 "작성·검토" 서술문은 이 카드 데이터로 못 채움). */}
+        {row.ownerName ? <div className="truncate text-xs text-muted-foreground">{row.ownerName}</div> : null}
+      </div>
       <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
-        {row.hasArtifacts ? <Badge variant="chip">{t('chipHasArtifacts')}</Badge> : null}
+        {row.artifactCount > 0 ? <Badge variant="chip">{t('chipArtifacts', { count: row.artifactCount })}</Badge> : null}
         {row.lowRisk ? <Badge variant="chip">{t('chipLowRisk')}</Badge> : null}
-        {row.isDelegated ? <Badge variant="chip">{row.ownerName ? `${t('chipDelegated')} · ${row.ownerName}` : t('chipDelegated')}</Badge> : null}
-        {badge ? <Badge variant={badge.variant}>{t(badge.key)}</Badge> : null}
+        {row.isDelegated ? (
+          <Badge variant="chip">{t('chipDelegated')}</Badge>
+        ) : row.ownerName ? (
+          <Badge variant="chip">{t('chipAssigned')}</Badge>
+        ) : null}
+        {stateText ? <span className={cn('text-xs font-medium', stateText.className)}>{t(stateText.key)}</span> : null}
       </div>
     </div>
   );

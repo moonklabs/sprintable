@@ -24,7 +24,8 @@ import {
  *   status=pending만 서버에 필터 요청(행 상태 판정엔 pending만 의미 있음).
  * - visual-artifacts: story_id 미지정 호출 시 BE가 호출자 project로 자동 스코프해 project
  *   전체 artifact를 limit=500까지 준다(list_artifacts, story #2428 PR④ 계약) — 그 안에서
- *   story_id를 뽑아 존재 Set만 만든다. ⚠️known gap: FE 프록시(api/visual-artifacts/route.ts)가
+ *   story_id별 실 개수를 집계한다(PO 지적 — 있음/없음이 아니라 「산출물 N」). ⚠️known gap:
+ *   FE 프록시(api/visual-artifacts/route.ts)가
  *   BE의 has_more/next_cursor meta를 벗겨서 안 돌려준다(json.data만 재포장) — 그래서 이
  *   소스는 partial 판정에 못 들어간다(칩은 "있을 때만" 그리는 보조 신호라 500건 초과
  *   project에서 일부 story의 칩이 빠질 수 있음, best-effort로 수용 — 지어내지 않되 단정도
@@ -76,11 +77,11 @@ export async function fetchWorkList(projectId: string): Promise<FetchedWorkList>
     fetchEnvelope<WorkListHypothesisInput[]>(`/api/hypotheses?project_id=${projectId}`),
   ]);
 
-  const storyIdsWithArtifacts = new Set(
-    (Array.isArray(artifactsJson.data) ? artifactsJson.data : [])
-      .map((a) => a.story_id)
-      .filter((id): id is string => Boolean(id)),
-  );
+  const artifactCountByStoryId = new Map<string, number>();
+  for (const a of Array.isArray(artifactsJson.data) ? artifactsJson.data : []) {
+    if (!a.story_id) continue;
+    artifactCountByStoryId.set(a.story_id, (artifactCountByStoryId.get(a.story_id) ?? 0) + 1);
+  }
 
   const hypotheses = Array.isArray(hypothesesJson.data) ? hypothesesJson.data : [];
 
@@ -91,7 +92,7 @@ export async function fetchWorkList(projectId: string): Promise<FetchedWorkList>
     agentRuns: Array.isArray(agentRunsJson.data) ? agentRunsJson.data : [],
     inbox: Array.isArray(inboxJson.data) ? inboxJson.data : [],
     teamMembers: Array.isArray(teamMembersJson.data) ? teamMembersJson.data : [],
-    storyIdsWithArtifacts,
+    artifactCountByStoryId,
     hypotheses,
   });
 

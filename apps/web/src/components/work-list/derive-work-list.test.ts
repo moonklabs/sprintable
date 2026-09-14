@@ -7,13 +7,13 @@ function page<T>(items: T[], hasMore: boolean | null = false) {
 
 function baseInput(overrides: Partial<WorkListInput> = {}): WorkListInput {
   return {
-    goals: page([{ id: 'g1', title: '목표1' }]),
+    goals: page([{ id: 'g1', title: '목표1', status: 'active' }]),
     stories: page([{ id: 's1', title: '스토리1', epic_id: 'g1' }]),
     tasks: page([]),
     agentRuns: [],
     inbox: [],
     teamMembers: [{ id: 'm-human', type: 'human', name: '사람' }, { id: 'm-agent', type: 'agent', name: '미르코' }],
-    storyIdsWithArtifacts: new Set<string>(),
+    artifactCountByStoryId: new Map<string, number>(),
     hypotheses: [],
     ...overrides,
   };
@@ -189,6 +189,20 @@ describe('deriveWorkList — 배정/위임(team_members 교차대조)', () => {
     const rows = result.groups[0].stories[0].rows;
     expect(rows.every((r) => r.isDelegated === false)).toBe(true);
   });
+
+  it('ownerName은 위임 행뿐 아니라 사람 배정 행도 team_members 이름으로 채운다(PO 지적)', () => {
+    const result = deriveWorkList(baseInput({
+      tasks: page([{ id: 't1', story_id: 's1', assignee_id: 'm-human', title: '할일1', status: 'todo' }]),
+    }));
+    expect(result.groups[0].stories[0].rows[0].ownerName).toBe('사람');
+  });
+
+  it('assignee_id가 없거나 이름 없는 멤버면 ownerName=null(지어내지 않는다)', () => {
+    const result = deriveWorkList(baseInput({
+      tasks: page([{ id: 't1', story_id: 's1', assignee_id: null, title: '할일1', status: 'todo' }]),
+    }));
+    expect(result.groups[0].stories[0].rows[0].ownerName).toBeNull();
+  });
 });
 
 describe('deriveWorkList — 목표 헤더 집계(일 단위, PO 確定)', () => {
@@ -217,22 +231,36 @@ describe('deriveWorkList — 목표 헤더 집계(일 단위, PO 確定)', () =>
     }));
     expect(result.groups[0].hypothesisCount).toBe(2);
   });
+
+  it('isActive는 GoalStatus===\'active\'일 때만 true(PO 지적 — 「진행 중」 낱말은 데이터 없으면 지어내지 않는다)', () => {
+    const active = deriveWorkList(baseInput({
+      goals: page([{ id: 'g1', title: '목표1', status: 'active' }]),
+      tasks: page([{ id: 't1', story_id: 's1', assignee_id: null, title: 'a', status: 'todo' }]),
+    }));
+    expect(active.groups[0].isActive).toBe(true);
+
+    const done = deriveWorkList(baseInput({
+      goals: page([{ id: 'g1', title: '목표1', status: 'done' }]),
+      tasks: page([{ id: 't1', story_id: 's1', assignee_id: null, title: 'a', status: 'todo' }]),
+    }));
+    expect(done.groups[0].isActive).toBe(false);
+  });
 });
 
-describe('deriveWorkList — 산출물 칩(story_id별 존재 여부)', () => {
-  it('storyIdsWithArtifacts에 있는 story의 행만 hasArtifacts=true', () => {
+describe('deriveWorkList — 산출물 칩(story_id별 실 개수, PO 지적 — 있음/없음 아니라 개수)', () => {
+  it('artifactCountByStoryId에 있는 story의 행은 그 개수를 그대로 옮긴다', () => {
     const result = deriveWorkList(baseInput({
       tasks: page([{ id: 't1', story_id: 's1', assignee_id: null, title: '할일1', status: 'todo' }]),
-      storyIdsWithArtifacts: new Set(['s1']),
+      artifactCountByStoryId: new Map([['s1', 3]]),
     }));
-    expect(result.groups[0].stories[0].rows[0].hasArtifacts).toBe(true);
+    expect(result.groups[0].stories[0].rows[0].artifactCount).toBe(3);
   });
 
-  it('없으면 hasArtifacts=false', () => {
+  it('없으면 artifactCount=0', () => {
     const result = deriveWorkList(baseInput({
       tasks: page([{ id: 't1', story_id: 's1', assignee_id: null, title: '할일1', status: 'todo' }]),
     }));
-    expect(result.groups[0].stories[0].rows[0].hasArtifacts).toBe(false);
+    expect(result.groups[0].stories[0].rows[0].artifactCount).toBe(0);
   });
 });
 
@@ -243,7 +271,7 @@ describe('deriveWorkList — partial(더 있음, 「없다」 단정 금지)', (
   });
 
   it('goals.hasMore=true면 partial=true', () => {
-    const result = deriveWorkList(baseInput({ goals: page([{ id: 'g1', title: '목표1' }], true) }));
+    const result = deriveWorkList(baseInput({ goals: page([{ id: 'g1', title: '목표1', status: 'active' }], true) }));
     expect(result.partial).toBe(true);
   });
 

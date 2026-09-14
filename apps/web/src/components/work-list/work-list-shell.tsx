@@ -132,7 +132,17 @@ export function WorkListShell({ projectId }: { projectId: string }) {
 
   return (
     <>
-      <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} showContextChip />
+      <TopBarSlot
+        title={
+          <div>
+            <h1 className="text-sm font-medium">{t('title')}</h1>
+            {/* AC4·doc a699be00 §⑤ 「일감 설명」 행 그대로(PO 지적 2026-09-14 — 시안 06d2d61c
+                재대조로 누락 발견). */}
+            <p className="mt-0.5 text-xs text-muted-foreground">{t('subtitle')}</p>
+          </div>
+        }
+        showContextChip
+      />
       <div className="space-y-3 p-4">
         <WorkspaceFrameTabs active="workList" />
 
@@ -188,6 +198,10 @@ export function WorkListShell({ projectId }: { projectId: string }) {
                     <div className="flex items-center justify-between gap-2 px-1">
                       <h2 className="text-sm font-semibold text-foreground">{group.title}</h2>
                       <span className="text-xs text-muted-foreground">
+                        {/* PO 지적(2026-09-14, 시안 재대조) — 「진행 중」 낱말은 GoalStatus==='active'
+                            일 때만(데이터 없으면 지어내지 않는다). 기간 pill(예: 「이번 주」)은
+                            target_date 기반 설계가 스코프 밖이라 PO 승인으로 생략. */}
+                        {group.isActive ? `${t('stateInProgress')} · ` : ''}
                         {t('goalProgressLabel', { done: group.doneCount, total: group.totalCount })}
                       </span>
                     </div>
