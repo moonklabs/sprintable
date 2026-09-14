@@ -29,6 +29,27 @@ describe('entityTypeLabel — ㉠ 종류를 글자로, ㉢ 모르는 종류도 �
     expect(entityTypeLabel('hypothesis')).toBe('hypothesis');
     expect(entityTypeLabel('')).toBe('');
   });
+
+  // story #3884(AC2) — t 인자로 로케일 대응(entityTypeLabel의 ko 고정 상수가 en 사용자
+  // 에게도 새 나가던 결함 처방). t 생략(위 두 테스트)은 기존 ko-only 폴백 그대로(회귀 0).
+  it('t 인자를 주면 그 t()로 해석한다(값은 ko 고정 상수와 동일 — §②-1 정합, 새 낱말 0)', () => {
+    const t = (key: string) => ({ entityTypeStory: '스토리', entityTypeDoc: '문서', entityTypeEpic: '에픽', entityTypeTask: '작업' })[key] ?? `⟨missing:${key}⟩`;
+    expect(entityTypeLabel('story', t)).toBe('스토리');
+    expect(entityTypeLabel('doc', t)).toBe('문서');
+    expect(entityTypeLabel('epic', t)).toBe('에픽');
+    expect(entityTypeLabel('task', t)).toBe('작업');
+  });
+
+  it('t 인자를 en t()로 주면 Title Case 영단어를 낸다(§②-1 관례)', () => {
+    const tEn = (key: string) => ({ entityTypeStory: 'Story', entityTypeDoc: 'Doc', entityTypeEpic: 'Epic', entityTypeTask: 'Task' })[key] ?? `⟨missing:${key}⟩`;
+    expect(entityTypeLabel('story', tEn)).toBe('Story');
+    expect(entityTypeLabel('story')).toBe('스토리'); // t 생략 시 여전히 ko-only(회귀 0).
+  });
+
+  it('t 인자를 줘도 모르는 종류(t 키 매핑이 없는 종류)는 ko-only 폴백으로 떨어진다(지어내지 않음)', () => {
+    const t = (key: string) => `⟨missing:${key}⟩`;
+    expect(entityTypeLabel('sprint', t)).toBe('sprint');
+  });
 });
 
 describe('groupEntitiesByType — ㉡ 종류로 묶되 열은 안 나눈다(단일 순서 배열)', () => {

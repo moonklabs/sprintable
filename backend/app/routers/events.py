@@ -1068,27 +1068,88 @@ def _generic_event_message_lines(definition_key: str, payload: dict) -> list[str
 
 async def _render_event_notification_work_item_ref(
     db: AsyncSession, *, org_id: uuid.UUID, work_item_type: str, work_item_id: uuid.UUID,
-) -> str | None:
-    """work_item을 클릭되는 참조 토큰으로(story #3313 AC2) — 지원 타입만, 못 찾으면 None
-    (지어내지 않음, 호출부가 raw id 폴백으로 이어받는다)."""
+) -> dict | None:
+    """work_item을 클릭되는 참조 토큰으로(story #3313 AC2·story #3884 AC1로 확장).
+
+    두 판별을 **구조로** 갈라 반환한다(story #3884 AC1(d), PO 확定 2026-09-14 15:51Z —
+    "구조적 부재"와 "실패"가 같은 모양으로 나오면 FAIL):
+    - 리졸버가 있는 타입(story/task/doc/visual_artifact)인데 그 id가 없음(삭제·조직 밖 등):
+      `{"found": False, "type": work_item_type}` — **텍스트를 굽지 않는다**, 호출부(FE
+      event-block-card.tsx)가 렌더 시점에 `t('eventCard.targetMissing', {type})`로 그린다
+      (문구가 읽는 사람 로케일에 달렸기 때문 — story #3881과 같은 원칙).
+    - 리졸버 자체가 없는 타입(agent_decision·support_escalation — 참조할 «엔티티» 개념이
+      구조적으로 없음, gate 자체도 TARGET_ONLY #2889 그대로): `None` — 호출부가 refs 키를
+      아예 안 심어 FE가 `optional: true` 필드 생략으로 처리한다.
+    - 찾음: `{"found": True, "token": "[제목](entity:type:id)"}`.
+
+    `work_item_type`("visual_artifact")과 참조 토큰 entity_type("artifact")이 갈리는 자리는
+    `toEntityType()`(FE approval-request-card.tsx의 기존 매핑과 동형 — Gate.work_item_type
+    어휘 vs embed-card entity_type 어휘가 다른, 2118에서 이미 확認된 차이)."""
     from app.services.reference_token import build_reference_token
 
     title: str | None = None
+    entity_type = work_item_type
     if work_item_type == "story":
         from app.models.pm import Story
 
         title = (await db.execute(
-            select(Story.title).where(Story.id == work_item_id, Story.org_id == org_id)
+            select(Story.title).where(
+                Story.id == work_item_id, Story.org_id == org_id, Story.deleted_at.is_(None),
+            )
         )).scalar_one_or_none()
     elif work_item_type == "task":
         from app.models.pm import Task
 
         title = (await db.execute(
-            select(Task.title).where(Task.id == work_item_id, Task.org_id == org_id)
+            select(Task.title).where(
+                Task.id == work_item_id, Task.org_id == org_id, Task.deleted_at.is_(None),
+            )
         )).scalar_one_or_none()
-    if not title:
+    elif work_item_type == "doc":
+        from app.models.doc import Doc
+
+        title = (await db.execute(
+            select(Doc.title).where(
+                Doc.id == work_item_id, Doc.org_id == org_id, Doc.deleted_at.is_(None),
+            )
+        )).scalar_one_or_none()
+    elif work_item_type == "visual_artifact":
+        from app.models.visual_artifact import VisualArtifact
+
+        entity_type = "artifact"
+        title = (await db.execute(
+            select(VisualArtifact.title).where(
+                VisualArtifact.id == work_item_id, VisualArtifact.org_id == org_id,
+                VisualArtifact.deleted_at.is_(None),
+            )
+        )).scalar_one_or_none()
+    else:
+        # agent_decision·support_escalation — 참조할 «엔티티» 개념이 구조적으로 없음
+        # (gate.work_item_type 실사용 5종 中 2종, story #3884 AC1 그라운딩 실측).
         return None
-    return build_reference_token(work_item_type, work_item_id, title)
+
+    if not title:
+        return {"found": False, "type": work_item_type}
+    token = build_reference_token(entity_type, work_item_id, title)
+    if not token:
+        return {"found": False, "type": work_item_type}
+    return {"found": True, "token": token}
+
+
+async def _work_item_ref_token(
+    db: AsyncSession, *, org_id: uuid.UUID, work_item_type: str, work_item_id: uuid.UUID,
+) -> str | None:
+    """평문 알림 줄(SSE·웹훅 등 구계통)용 얇은 어댑터 — story #3884가 확장한
+    `_render_event_notification_work_item_ref`의 dict 반환에서 "찾음" 토큰만 뽑는다.
+    found:False(삭제 등)·None(리졸버 없음) 둘 다 여기선 동일하게 폴백(raw id 표시, 호출부
+    기존 동작 그대로)으로 합류한다 — 구계통은 대화 카드처럼 두 모양을 구분해 보여줄 표면이
+    없다(평문 1줄, 회귀 0 유지가 목적)."""
+    result = await _render_event_notification_work_item_ref(
+        db, org_id=org_id, work_item_type=work_item_type, work_item_id=work_item_id,
+    )
+    if result and result.get("found"):
+        return result.get("token")
+    return None
 
 
 async def _render_event_notification_doc_ref(
@@ -1302,7 +1363,7 @@ async def _render_gate_verdict_message(
 
     work_item_ref: str | None = None
     if work_item_type and work_item_id is not None:
-        work_item_ref = await _render_event_notification_work_item_ref(
+        work_item_ref = await _work_item_ref_token(
             db, org_id=org_id, work_item_type=work_item_type, work_item_id=work_item_id,
         )
     if work_item_ref:
@@ -1571,7 +1632,7 @@ async def _render_event_message_content(
         except (ValueError, AttributeError, TypeError):
             work_item_id = None
         if work_item_id is not None:
-            work_item_ref = await _render_event_notification_work_item_ref(
+            work_item_ref = await _work_item_ref_token(
                 db, org_id=org_id, work_item_type=work_item_type, work_item_id=work_item_id,
             )
     if work_item_ref:
@@ -1890,7 +1951,12 @@ async def _publish_registry_event_core(
     # 지금은 work_item 1종만(payload에 work_item_type/work_item_id 둘 다 있을 때만 계산,
     # 기존 함수 재사용 — 새 로직 0). BLOCK_TEMPLATE_REF_VOCAB(event_definition_registry.py)
     # 과 짝인 어휘라 새 종류를 추가하려면 둘 다 넓혀야 한다.
-    refs: dict[str, str | None] = {}
+    #
+    # story #3884 AC1(d) — refs["work_item"] 값은 세 모양(FE event-block-card.tsx가 그대로
+    # 소비): 찾음(dict found:True+token)·리졸버 있는데 못 찾음(dict found:False+type, FE가
+    # 렌더 시점 로케일로 targetMissing 텍스트를 짓는다)·리졸버 자체가 없음(키 자체 부재,
+    # FE optional 필드 생략). 텍스트를 여기서 굽지 않는다(3881과 동일 원칙).
+    refs: dict[str, str | dict | None] = {}
     _refs_work_item_type = payload.get("work_item_type")
     _refs_work_item_id_raw = payload.get("work_item_id")
     if _refs_work_item_type and _refs_work_item_id_raw:
@@ -1899,9 +1965,11 @@ async def _publish_registry_event_core(
         except (ValueError, AttributeError, TypeError):
             _refs_work_item_id = None
         if _refs_work_item_id is not None:
-            refs["work_item"] = await _render_event_notification_work_item_ref(
+            _work_item_ref_result = await _render_event_notification_work_item_ref(
                 db, org_id=org_id, work_item_type=_refs_work_item_type, work_item_id=_refs_work_item_id,
             )
+            if _work_item_ref_result is not None:
+                refs["work_item"] = _work_item_ref_result
 
     # story #2637 AC 0-a: event_context → msg_metadata['event'](additive) — FE가 이 메시지를
     # "이벤트 발행분"으로 인지하고 event_key로 event_definitions를 조회해 block_template

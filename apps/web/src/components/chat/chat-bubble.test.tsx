@@ -947,17 +947,18 @@ describe('ChatBubble — story #2604 P2 결재 요청(approval_target) 카드', 
   });
 
   describe('story #2637 AC4(PO 08-14 확定) — resolved 분기 preset.gate.verdict block_template 부분 소비', () => {
-    // 0301 마이그(story #3332, develop 상륙) 실물 그대로 — 대상 필드 value가 {{ref.work_item}}
-    // (클릭 토큰)로 정정된 것. 0251의 {{payload.work_item_title}}은 payload_schema엔 있었으나
-    // 어떤 발행처도 채운 적이 없어 항상 ⟨missing⟩이었다(PR#3711 리뷰 실측) — approval-request-
-    // card.tsx가 이제 title로 직접 참조 토큰을 합성해 refs로 넘긴다.
+    // 0376 마이그(story #3884, develop 상륙) 실물 그대로 — 대상 필드 value가
+    // {{label.work_item_target}}(참조 토큰, approval-request-card.tsx가 twin pathway로
+    // 합성해 labels로 넘긴다)로, 본문 접속어가 {{label.gate_connective_line}}(gate_type도
+    // 라벨화 — 원시 slug "doc_approval" 노출 금지) 단일 토큰으로, 필드 라벨이
+    // {{t.X}}(eventCard 낱말)로 바뀐 것.
     const GATE_VERDICT_TEMPLATE = {
       blocks: [
-        { type: 'header', text: '게이트 판정' },
-        { type: 'text', text: '**{{payload.gate_type}}** 게이트 — **{{payload.verdict}}**' },
+        { type: 'header', text: '{{t.gateVerdictHeader}}' },
+        { type: 'text', text: '{{label.gate_connective_line}}' },
         { type: 'fields', fields: [
-          { label: '대상', value: '{{ref.work_item}}' },
-          { label: '사유', value: '{{payload.resolution_note}}' },
+          { label: '{{t.targetLabel}}', value: '{{label.work_item_target}}', optional: true },
+          { label: '{{t.reasonLabel}}', value: '{{payload.resolution_note}}', optional: true },
         ] },
       ],
     };
@@ -974,7 +975,10 @@ describe('ChatBubble — story #2604 P2 결재 요청(approval_target) 카드', 
       // 유지, 표현 수단만 shape+stateLabel로 옮겨갔다.
       expect(container.textContent).not.toContain('게이트 판정'); // header는 부분소비 제외.
       expect(container.textContent).not.toContain(DOC_ID); // Q2 — UUID 노출 금지.
-      expect(container.textContent).toContain('doc_approval');
+      // story #3884 — gate_type도 라벨화됐다(원시 slug "doc_approval" 노출 금지, 3881과
+      // 동일 클래스). gateTypeLabel(dashboard.ccGateTypeDocApproval) 재사용값.
+      expect(container.textContent).not.toContain('doc_approval');
+      expect(container.textContent).toContain('문서 결재');
       expect(container.textContent).toContain('승인됨'); // verdict 합성값 = 현행 한글 라벨.
       expect(container.textContent).toContain('근거가 충분합니다');
       // '제안서.md'는 카드 상단 제목(기존)과 fields 대상 값(신규) 둘 다에 나타난다 — 중복 등장 자체가
@@ -1227,6 +1231,81 @@ describe('ChatBubble — story #2637 event_definitions block_template 카드', (
       expect(container.textContent).not.toContain('**approved**');
       // resolution_note가 payload에 없다 — 「사유」 줄 자체가 안 뜬다.
       expect(container.textContent).not.toContain('사유');
+    });
+  });
+
+  describe('story #3884(customer-zero) — 대상 원시 UUID→참조 토큰(AC1) + {{t.X}} 고정 UI 카피(AC2, 0376 마이그 실물)', () => {
+    const STATUS_CHANGED_T_TEMPLATE = {
+      blocks: [
+        { type: 'header', text: '{{t.statusChangedHeader}}' },
+        { type: 'text', text: '**{{label.work_item_type}}** `{{label.from_status}}` → `{{label.to_status}}`' },
+        { type: 'fields', fields: [
+          { label: '{{t.targetLabel}}', value: '{{label.work_item_target}}', optional: true },
+          { label: '{{t.noteLabel}}', value: '{{payload.note}}', optional: true },
+        ] },
+      ],
+    };
+    const catalog = { 'preset.work.status_changed': { key: 'preset.work.status_changed', org_id: null, payload_schema: {}, routing: {}, block_template: STATUS_CHANGED_T_TEMPLATE, enabled: true, version: 3 } };
+
+    it('AC1 찾음 — refs.work_item={found:true,token}이면 대상이 클릭 참조 토큰(EntityChip)으로 렌더된다, 원시 UUID 0', async () => {
+      const message: ChatMessage = {
+        ...baseMessage,
+        content: '[이벤트] preset.work.status_changed',
+        sender_type: 'agent',
+        event: {
+          event_key: 'preset.work.status_changed',
+          payload: { work_item_type: 'story', from_status: 'ready-for-dev', to_status: 'in-progress', work_item_id: DOC_ID },
+          refs: { work_item: { found: true, token: `[결제 흐름 재설계](entity:story:${DOC_ID})` } },
+        },
+      };
+      await act(async () => {
+        root.render(wrap(<ChatBubble message={message} isMine={false} eventDefinitionsByKey={catalog} />));
+      });
+      expect(container.textContent).not.toContain(DOC_ID);
+      const chipButtons = Array.from(container.querySelectorAll('button')).filter((b) => b.textContent?.includes('결제 흐름 재설계'));
+      expect(chipButtons.length).toBeGreaterThan(0);
+      expect(container.textContent).toContain('작업 상태 변경'); // {{t.statusChangedHeader}} 해소.
+      expect(container.textContent).toContain('대상'); // {{t.targetLabel}} 해소.
+      expect(container.textContent).not.toContain('⟨missing');
+    });
+
+    it('AC1(d) 리졸버 있는데 못 찾음 — refs.work_item={found:false,type}이면 은은한 targetMissing 문구가 뜬다(fail-loud 마커 0)', async () => {
+      const message: ChatMessage = {
+        ...baseMessage,
+        content: '[이벤트] preset.work.status_changed',
+        sender_type: 'agent',
+        event: {
+          event_key: 'preset.work.status_changed',
+          payload: { work_item_type: 'story', from_status: 'ready-for-dev', to_status: 'in-progress', work_item_id: DOC_ID },
+          refs: { work_item: { found: false, type: 'story' } },
+        },
+      };
+      await act(async () => {
+        root.render(wrap(<ChatBubble message={message} isMine={false} eventDefinitionsByKey={catalog} />));
+      });
+      // eventCard.targetMissing = "(삭제된 {type})", {type}=entityTypeLabel('story', t)="스토리".
+      expect(container.textContent).toContain('(삭제된 스토리)');
+      expect(container.textContent).not.toContain('⟨missing');
+      expect(container.textContent).not.toContain(DOC_ID);
+    });
+
+    it('AC1(d) 리졸버 자체가 없음 — refs.work_item 키 자체가 없으면(agent_decision류) 대상 행이 통째로 줄 생략된다', async () => {
+      const message: ChatMessage = {
+        ...baseMessage,
+        content: '[이벤트] preset.work.status_changed',
+        sender_type: 'agent',
+        event: {
+          event_key: 'preset.work.status_changed',
+          payload: { work_item_type: 'agent_decision', from_status: 'ready-for-dev', to_status: 'in-progress', work_item_id: DOC_ID },
+          refs: {}, // 리졸버 없는 타입 — BE가 애초에 이 키를 안 심는다.
+        },
+      };
+      await act(async () => {
+        root.render(wrap(<ChatBubble message={message} isMine={false} eventDefinitionsByKey={catalog} />));
+      });
+      expect(container.textContent).not.toContain('대상'); // {{t.targetLabel}} 행 자체가 없다.
+      expect(container.textContent).not.toContain('⟨missing');
+      expect(container.textContent).not.toContain(DOC_ID);
     });
   });
 

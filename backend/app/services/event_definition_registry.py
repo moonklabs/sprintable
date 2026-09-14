@@ -289,9 +289,10 @@ BLOCK_TEMPLATE_REF_VOCAB = frozenset({"work_item"})
 def _iter_block_template_texts(template: dict):
     """block_template.blocks 안에서 머스태시 치환 대상인 문자열만 순서대로 낸다 — FE
     substituteMustache/renderBlockTemplate이 실제로 치환하는 자리와 정확히 같은 범위
-    (header/text의 text, fields[].value). actions는 라벨/definition_key가 정적 텍스트라
-    치환 대상이 아니다(block-template.ts 주석과 동형 — 여기서 검사 범위를 넓히면 FE가
-    실제로 안 보는 자리까지 검증해 거짓양성을 낸다)."""
+    (header/text의 text, fields[].label·fields[].value — story #3884부터 field.label도
+    치환 대상이라 여기 포함, 이전엔 정적 텍스트였다). actions는 라벨/definition_key가
+    정적 텍스트라 치환 대상이 아니다(block-template.ts 주석과 동형 — 여기서 검사 범위를
+    넓히면 FE가 실제로 안 보는 자리까지 검증해 거짓양성을 낸다)."""
     for block in template.get("blocks") or []:
         if not isinstance(block, dict):
             continue
@@ -302,7 +303,11 @@ def _iter_block_template_texts(template: dict):
                 yield text
         elif block_type == "fields":
             for f in block.get("fields") or []:
-                if isinstance(f, dict) and isinstance(f.get("value"), str):
+                if not isinstance(f, dict):
+                    continue
+                if isinstance(f.get("label"), str):
+                    yield f["label"]
+                if isinstance(f.get("value"), str):
                     yield f["value"]
 
 

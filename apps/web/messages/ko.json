@@ -4375,6 +4375,10 @@
     "authFailureTooltipInvalid": "API 키 인식 불가 · 최근 5분 {n}회"
   },
   "chats": {
+    "entityTypeStory": "스토리",
+    "entityTypeDoc": "문서",
+    "entityTypeEpic": "에픽",
+    "entityTypeTask": "작업",
     "nowStripLabel": "지금",
     "nowStripCount": "· {count}건",
     "nowStripCollapse": "접기",
@@ -4614,6 +4618,15 @@
     "agent": "에이전트",
     "personCount": "{count}명",
     "agentCount": "나 + {count}명의 에이전트"
+  },
+  "eventCard": {
+    "statusChangedHeader": "작업 상태 변경",
+    "gateVerdictHeader": "게이트 판정",
+    "targetLabel": "대상",
+    "noteLabel": "메모",
+    "reasonLabel": "사유",
+    "gateConnective": "**{gateType}** — **{verdict}**",
+    "targetMissing": "(삭제된 {type})"
   },
   "activityLog": {
     "title": "활동 로그",

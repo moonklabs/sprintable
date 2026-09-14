@@ -368,3 +368,130 @@ describe('renderBlockTemplate — story #2637 AC0-b', () => {
     expect(renderBlockTemplate(template, payload)).toEqual(renderBlockTemplate(template, payload, {}));
   });
 });
+
+describe('story #3884 — {{t.X}} 네임스페이스(4번째 mustache, payload와 무관한 고정 UI 카피)', () => {
+  it('substituteMustache가 {{t.field}}를 translations 인자 값으로 치환한다', () => {
+    const rendered = substituteMustache('{{t.targetLabel}}', {}, {}, {}, { targetLabel: '대상' });
+    expect(rendered).toBe('대상');
+  });
+
+  it('translations에 없는 t 키는 명시 플레이스홀더로 드러난다(⟨missing: t.field⟩, 지어내지 않음)', () => {
+    const rendered = substituteMustache('{{t.unknownKey}}', {}, {}, {}, {});
+    expect(rendered).toBe('⟨missing: t.unknownKey⟩');
+  });
+
+  it('field.label도 이제 치환 대상이다(story #3884 이전엔 정적 텍스트였다)', () => {
+    const template = parseBlockTemplate({
+      blocks: [
+        { type: 'fields', fields: [{ label: '{{t.targetLabel}}', value: '{{payload.id}}' }] },
+      ],
+    })!;
+    const rendered = renderBlockTemplate(template, { id: 'S-1' }, {}, {}, { targetLabel: '대상' });
+    expect(rendered[0]).toEqual({ type: 'fields', fields: [{ label: '대상', value: 'S-1' }] });
+  });
+
+  it('translations 인자를 생략해도(구버전 호출부) t 네임스페이스가 없는 템플릿은 그대로 회귀 0', () => {
+    const template = parseBlockTemplate(AC0B_EXAMPLE)!;
+    const payload = { work_item_type: 'story', from_status: 'in-progress', to_status: 'in-review', work_item_id: 'S-123' };
+    expect(renderBlockTemplate(template, payload, {}, {})).toEqual(renderBlockTemplate(template, payload, {}, {}, {}));
+  });
+});
+
+describe('story #3884 0376 마이그 실 예시 — 대상 참조 토큰화(label.work_item_target) + t 네임스페이스', () => {
+  it('preset.work.status_changed — work_item_target이 찾음 토큰이면 대상 행에 클릭 참조가 뜬다', () => {
+    // migration 0376_event_card_target_ref_and_ui_copy_t_namespace.py의 실물 그대로.
+    const template = parseBlockTemplate({
+      blocks: [
+        { type: 'header', text: '{{t.statusChangedHeader}}' },
+        { type: 'text', text: '**{{label.work_item_type}}** `{{label.from_status}}` → `{{label.to_status}}`' },
+        {
+          type: 'fields',
+          fields: [
+            { label: '{{t.targetLabel}}', value: '{{label.work_item_target}}', optional: true },
+            { label: '{{t.noteLabel}}', value: '{{payload.note}}', optional: true },
+          ],
+        },
+      ],
+    })!;
+    const payload = { work_item_type: 'story', from_status: 'ready-for-dev', to_status: 'in-progress', work_item_id: 'S-42' };
+    const labels = {
+      work_item_type: '스토리', from_status: '개발 대기', to_status: '진행 중',
+      work_item_target: '[결제 흐름 재설계](entity:story:S-42)',
+    };
+    const translations = { statusChangedHeader: '작업 상태 변경', targetLabel: '대상', noteLabel: '메모' };
+    const rendered = renderBlockTemplate(template, payload, {}, labels, translations);
+
+    expect(rendered[0]).toEqual({ type: 'header', text: '작업 상태 변경' });
+    expect(rendered[2]).toEqual({
+      type: 'fields',
+      fields: [{ label: '대상', value: '[결제 흐름 재설계](entity:story:S-42)' }],
+    }); // 「메모」는 payload에 note가 없어 줄 생략(AC3 elision).
+  });
+
+  it('AC1(d) — 리졸버가 있는데 못 찾음(삭제)이면 대상 행이 elide되지 않고 은은한 targetMissing 문구가 뜬다', () => {
+    const template = parseBlockTemplate({
+      blocks: [
+        { type: 'fields', fields: [{ label: '{{t.targetLabel}}', value: '{{label.work_item_target}}', optional: true }] },
+      ],
+    })!;
+    // EventBlockCard가 refs.work_item={found:false,type:'story'}일 때 이렇게 채운다
+    // (targetMissing은 event-block-card.tsx가 t()로 미리 조립 — 여기선 그 결과 문자열만).
+    const labels = { work_item_target: '(삭제된 스토리)' };
+    const translations = { targetLabel: '대상' };
+    const rendered = renderBlockTemplate(template, {}, {}, labels, translations);
+
+    expect(rendered[0]).toEqual({ type: 'fields', fields: [{ label: '대상', value: '(삭제된 스토리)' }] });
+  });
+
+  it('AC1(d) — 리졸버 자체가 없는 타입(agent_decision 등)이면 labels.work_item_target을 아예 안 채워 대상 행이 줄 생략된다', () => {
+    const template = parseBlockTemplate({
+      blocks: [
+        { type: 'fields', fields: [
+          { label: '{{t.targetLabel}}', value: '{{label.work_item_target}}', optional: true },
+          { label: '고정 행', value: '항상 보임' },
+        ] },
+      ],
+    })!;
+    // EventBlockCard가 refs.work_item 키 자체가 없을 때(리졸버 없음) labels에도 안 채운다.
+    const labels: Record<string, string> = {};
+    const translations = { targetLabel: '대상' };
+    const rendered = renderBlockTemplate(template, {}, {}, labels, translations);
+
+    expect(rendered[0]).toEqual({ type: 'fields', fields: [{ label: '고정 행', value: '항상 보임' }] });
+  });
+
+  it('뮤테이션 셀프체크 — optional 필드를 항상 fail-loud로 되돌리면 위 elision 테스트들이 RED로 돌아간다', () => {
+    // renderBlockTemplate의 elision 필터를 우회(원본 block.fields를 그대로 씀)한 경우와
+    // 비교 — optional:true인데 걸러지지 않으면 ⟨missing: label.work_item_target⟩이
+    // 그대로 남는다는 걸 직접 확認(회귀 조건 실측, 프로덕션 코드는 건드리지 않는다).
+    const template = parseBlockTemplate({
+      blocks: [
+        { type: 'fields', fields: [{ label: '대상', value: '{{label.work_item_target}}', optional: true }] },
+      ],
+    })!;
+    const labels: Record<string, string> = {};
+    const rendered = renderBlockTemplate(template, {}, {}, labels, {});
+    // 정상 경로(elision 작동) — 필드 자체가 사라진다.
+    expect(rendered[0]).toEqual({ type: 'fields', fields: [] });
+    // elision이 없었다면 이 값이 나왔을 것(대조군 — 실제로 그 모양임을 직접 확認).
+    const withoutElision = substituteMustache('{{label.work_item_target}}', {}, {}, labels, {});
+    expect(withoutElision).toBe('⟨missing: label.work_item_target⟩');
+  });
+
+  it('preset.gate.verdict — gate_connective_line이 리터럴 「게이트」 없이 gateType/verdict 두 라벨만 담는다', () => {
+    // 0376의 구조 정정(PO) — 미등재 gate_type이 ccGateGeneric 「게이트」 폴백일 때
+    // "게이트 게이트 — …" 이중 인쇄를 막는다(gateVerdictHeader가 맥락을 이미 운반).
+    const template = parseBlockTemplate({
+      blocks: [
+        { type: 'header', text: '{{t.gateVerdictHeader}}' },
+        { type: 'text', text: '{{label.gate_connective_line}}' },
+      ],
+    })!;
+    const labels = { gate_connective_line: '**외부 발행** — **승인됨**' };
+    const translations = { gateVerdictHeader: '게이트 판정' };
+    const rendered = renderBlockTemplate(template, {}, {}, labels, translations);
+
+    expect(rendered[1]).toEqual({ type: 'text', text: '**외부 발행** — **승인됨**' });
+    expect((rendered[1] as { text: string }).text).not.toContain('게이트 —');
+  });
+});

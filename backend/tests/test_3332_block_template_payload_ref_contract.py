@@ -444,7 +444,12 @@ async def test_publish_computes_work_item_ref_when_payload_has_work_item_pair():
                 select(ConversationMessage).where(ConversationMessage.id == uuid.UUID(resp["message_id"]))
             )).scalar_one()
             refs = (msg.msg_metadata or {}).get("event", {}).get("refs") or {}
-            assert refs.get("work_item") == f"[Threads 포스트 초안](entity:story:{story_id})"
+            # story #3884 AC1(d) — 반환 모양이 dict로 확장됐다(찾음: found:True+token — 이
+            # 테스트가 pin해 온 원래 값은 그 token 필드로 이동, 텍스트 모양 자체는 무변).
+            assert refs.get("work_item") == {
+                "found": True,
+                "token": f"[Threads 포스트 초안](entity:story:{story_id})",
+            }
     finally:
         await engine.dispose()
 

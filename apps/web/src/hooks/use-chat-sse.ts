@@ -88,8 +88,12 @@ export interface ChatMessage {
     event_key: string;
     payload: Record<string, unknown>;
     /** story #3332 — 서버가 발행 시점에 계산한 참조 토큰(block_template의 {{ref.X}}용).
-     * 구서버는 이 키 자체가 없다 — EventBlockCard가 undefined를 {}로 폴백한다(비회귀). */
-    refs?: Record<string, string | null>;
+     * 구서버는 이 키 자체가 없다 — EventBlockCard가 undefined를 {}로 폴백한다(비회귀).
+     * story #3884 — `work_item` 값이 dict로 넓어졌다(events.py `_render_event_
+     * notification_work_item_ref`): 찾음(`{found:true, token}`)·리졸버는 있는데 못
+     * 찾음(`{found:false, type}`)·리졸버 자체가 없음(키 자체 부재). 구계약(순 문자열)도
+     * 방어적으로 허용(EventBlockCard가 둘 다 받는다). */
+    refs?: Record<string, string | null | { found: boolean; token?: string; type?: string }>;
   } | null;
   /** story #2985 — 'request'(액션 카드)/'result'(회신 카드) 판별(BE msg_metadata.activation.kind
    * → _activation_payload가 top-level로 노출). story #3001부터 'request_info'는 BE가 더

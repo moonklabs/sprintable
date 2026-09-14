@@ -715,6 +715,19 @@ export const EXEMPT_PAIRS = new Set<string>([
   // 낱말이었다면 그게 결함이었을 것 — 위 conversationChatProofCount류(다른 구획·다른
   // 개념이라 exempt)와는 반대 근거로 exempt.
   'workcell.confidenceCaption <-> workcell.runStage',
+  // story #3884(대화 이벤트 카드 「대상」 참조 토큰화 + preset 고정 문구 ko/en 한 벌) —
+  // eventCard.reasonLabel="사유"(block_template 「사유」 필드 라벨, fields 행의 짧은
+  // 표제어·값은 별도 셀)가 approval-request-card.tsx에서 같은 preset.gate.verdict
+  // 템플릿을 twin 소비하며 같은 파일에 놓인 chats.approvalRequestEscalationReason=
+  // "사유: {reason}"/chats.approvalRequestResolutionNote="사유: {note}"(별개 렌더
+  // 자리 — 카드 상단 요약 줄에 쓰는 완결 문장, fields 행이 아니다)의 부분 문자열이라
+  // 걸린다. 화면에서 겹쳐 보이는 두 자리가 아니다: 전자는 fields 테이블의 한
+  // 행("사유" 표제어 | 값 셀), 후자는 그 위/아래 요약 줄에 오는 완결 문장 — 같은
+  // 개념(사유)을 두 다른 표현 형태(표제어 vs 문장)로 쓰는 정상 패턴(§②-1
+  // 스토리/문서/에픽/작업류와 동형 "같은 사실=같은 낱말" 원칙의 자연스런 결과이지,
+  // 실수로 낳은 근접 중복이 아니다).
+  'chats.approvalRequestEscalationReason <-> eventCard.reasonLabel',
+  'chats.approvalRequestResolutionNote <-> eventCard.reasonLabel',
 ]);
 
 // ⛔⭐오르테가군 지적(2026-07-31) — 이 목록에 «새로» 넣는 것은 PO 승인을 거친다. 이유 없이

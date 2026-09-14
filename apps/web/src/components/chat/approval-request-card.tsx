@@ -20,6 +20,7 @@ import { ProofCapsule } from '@/components/proof-capsule/proof-capsule';
 import { useSseMultiplexerContext } from '@/components/realtime-provider';
 
 import { escapeMarkdownLinkText } from '@/components/chat/chat-input-entity-tokens';
+import { gateTypeLabel } from '@/lib/gate-type-label';
 import { fetchWithAuth } from '@/lib/db/client';
 import { buildApproverPickerOptions } from '@/lib/approver-picker-options';
 import { useToast } from '@/components/ui/toast';
@@ -406,6 +407,8 @@ function ApprovalRequestBody({
   // gates/[id]/page.tsx와 같은 문구를 쓴다(동일 개념=동일 어휘, DS 원칙) — 그 키들은 'cage'
   // 네임스페이스에 있다('chats'엔 없음, 그라운딩 중 확認).
   const tCage = useTranslations('cage');
+  const tDashboard = useTranslations('dashboard');
+  const tEventCard = useTranslations('eventCard');
   const { currentTeamMemberId, projectId } = useDashboardContext();
   const title = gate.work_item_summary?.title ?? `#${gate.work_item_id.slice(0, 8)}`;
 
@@ -482,31 +485,48 @@ function ApprovalRequestBody({
     if (!parsed) return null;
     const verdictLabel = RESOLVED_STATUS_LABEL_KEYS[gate.status] ? t(RESOLVED_STATUS_LABEL_KEYS[gate.status]!) : gate.status;
     const payload: Record<string, unknown> = {
-      gate_type: gate.gate_type,
-      verdict: verdictLabel,
       resolution_note: gate.resolution_note ?? null,
     };
-    // story #3332 — 0301 마이그가 preset.gate.verdict의 "대상" 필드를 {{payload.
-    // work_item_title}}(생 텍스트, payload_schema엔 있었으나 아무 발행처도 채운 적 없어
-    // 항상 ⟨missing⟩이었다)에서 {{ref.work_item}}(클릭 토큰)로 바꿨다. 이 카드는 서버가
-    // 계산해 주는 refs를 못 받으므로(자체 fetchGate() 데이터로 합성하는 카드) 여기서
-    // 직접 만든다 — title은 이 컴포넌트가 이미 쓰는 값(work_item_summary?.title 폴백
-    // 포함) 그대로, escapeMarkdownLinkText는 BE build_reference_token과 동일 escape
-    // 규칙(reference_token.py)의 FE 미러(chat-input-entity-tokens.ts) 재사용.
-    const refs: Record<string, string | null> = {
-      work_item: `[${escapeMarkdownLinkText(title)}](entity:${toEntityType(gate.work_item_type)}:${gate.work_item_id})`,
+    // story #3884(twin-pathway 동기화) — 0376 마이그가 preset.gate.verdict의 text/필드
+    // 라벨 자리를 {{label.X}}/{{t.X}}로 옮겼다(원 계약이었던 {{payload.gate_type}}/
+    // {{payload.verdict}}·정적 한국어 라벨은 더 이상 없음). 이 카드는 EventBlockCard와
+    // 별개로 자체 fetchGate() 데이터를 "합성"해 같은 템플릿을 부분 소비하는 twin
+    // 소비처라(story #2637 AC4) — EventBlockCard가 렌더 시점에 계산하는 값과 정확히
+    // 같은 값을 여기서도 만들어 labels/translations로 넘겨야 한다(둘이 갈리면 한쪽만
+    // 고쳐진 "쌍둥이 체계 약한 쪽" 결함 — 실측: 이 손 안 대면 gate_type/verdict가
+    // ⟨missing: label.gate_type⟩ 그대로 새는 걸 node repro로 확認).
+    const gateTypeLabelValue = gateTypeLabel(tDashboard, gate.gate_type);
+    // story #3332 — 0301 마이그가 preset.gate.verdict의 "대상" 필드를 참조 토큰으로
+    // 바꿨다(지금은 0376의 {{label.work_item_target}} 경유). 이 카드는 서버가 계산해
+    // 주는 refs를 못 받으므로(자체 fetchGate() 데이터로 합성하는 카드) 여기서 직접
+    // 만든다 — title은 이 컴포넌트가 이미 쓰는 값(work_item_summary?.title 폴백 포함)
+    // 그대로, escapeMarkdownLinkText는 BE build_reference_token과 동일 escape 규칙
+    // (reference_token.py)의 FE 미러(chat-input-entity-tokens.ts) 재사용. 이 카드가
+    // 다루는 게이트는 항상 fetchGate()로 실 조회된 row라 "리졸버는 있는데 못 찾음"
+    // 분기(targetMissing) 자체가 이 pathway엔 없다 — 찾음 모양 하나로 충분.
+    const labels: Record<string, string> = {
+      gate_type: gateTypeLabelValue,
+      verdict: verdictLabel,
+      work_item_target: `[${escapeMarkdownLinkText(title)}](entity:${toEntityType(gate.work_item_type)}:${gate.work_item_id})`,
+      gate_connective_line: tEventCard('gateConnective', { gateType: gateTypeLabelValue, verdict: verdictLabel }),
+    };
+    const translations: Record<string, string> = {
+      targetLabel: tEventCard('targetLabel'),
+      reasonLabel: tEventCard('reasonLabel'),
     };
     // PO 리뷰(head 81f7e4a7e) — resolution_note 없음은 템플릿 저자 실수(⟨missing⟩ 마커
     // 대상)가 아니라 정상적인 「선택값 부재」다(기존 카드도 사유 없으면 그 줄 자체를 안
-    // 그렸다 — story #2624). fields 블록에서 payload.resolution_note를 참조하는 항목을
-    // 렌더 *전에* 통째로 걸러내 ⟨missing⟩ 마커가 아예 뜨지 않게 한다(사유가 있을 땐 그대로
-    // 통과 — filter는 no-op).
+    // 그렸다 — story #2624). 0375부터 그 필드 자체가 `optional: true`라(block-
+    // template.ts의 elision이 payload.resolution_note===null을 자동으로 줄 생략시킨다)
+    // 이 파일 자체의 수동 필터는 더 이상 필요 없지만, 명시적 방어로 남겨 둔다(제거는
+    // 이 스토리 범위 밖 — 회귀 0 우선, 중복은 no-op이라 무해).
     const blocksToRender = gate.resolution_note
       ? parsed.blocks
       : parsed.blocks.map((b) => (
         b.type === 'fields' ? { ...b, fields: b.fields.filter((f) => f.value !== '{{payload.resolution_note}}') } : b
       ));
-    return renderBlockTemplate({ blocks: blocksToRender }, payload, refs).filter((b) => b.type === 'text' || b.type === 'fields');
+    return renderBlockTemplate({ blocks: blocksToRender }, payload, {}, labels, translations)
+      .filter((b) => b.type === 'text' || b.type === 'fields');
   })() : null;
   const riskLevel = deriveRiskLevel(gate);
   const needsFullFlow = usesSignatureFlow(riskLevel);
