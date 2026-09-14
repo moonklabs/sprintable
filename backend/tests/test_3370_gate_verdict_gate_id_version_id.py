@@ -31,13 +31,20 @@ def anyio_backend():
 def _stub_work_item_ref(monkeypatch):
     """pytest autouse fixture는 정의된 모듈에서만 자동 적용된다 — test_3387의 것을
     import만 해선 안 걸려서(TypeError: 확인됨) 여기서도 등록한다. 로직은 그 파일의
-    사본 그대로(재발명 아님, fixture 배선의 필연적 반복)."""
+    사본 그대로(재발명 아님, fixture 배선의 필연적 반복).
+
+    story #3884 — 패치 대상을 `_work_item_ref_token`(평문 알림 줄 전용 얇은 어댑터)으로
+    재조준. `_render_event_notification_work_item_ref` 자체가 이제 dict를 반환해(AC1(d)
+    found/missing 구조 분리) 이 테스트가 검증하는 평문 렌더 경로(`_render_gate_verdict_
+    message` 등)가 실제로 호출하는 건 그 dict를 "찾음" 토큰 문자열로 얇게 벗겨내는
+    어댑터 쪽이다 — 이 파일들은 그 판별 로직 자체가 아니라 "토큰 문자열이 줄에 그대로
+    박힌다"만 검증하므로 어댑터 레벨에서 고정하는 게 정확한 seam이다."""
     from app.routers import events as events_module
 
     async def _fake_ref(*_args, **_kwargs):
         return "[제목](entity:story:11111111-1111-1111-1111-111111111111)"
 
-    monkeypatch.setattr(events_module, "_render_event_notification_work_item_ref", _fake_ref)
+    monkeypatch.setattr(events_module, "_work_item_ref_token", _fake_ref)
 
 
 async def test_gate_id_line_is_the_actual_gate_id_from_payload():

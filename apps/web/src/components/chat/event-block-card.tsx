@@ -35,8 +35,16 @@ interface EventBlockCardProps {
   template: BlockTemplate;
   payload: Record<string, unknown>;
   /** story #3332 — 서버가 발행 시점에 계산한 참조 토큰({{ref.X}} 해소용). 생략(구버전 캐시
-   * 등)은 undefined→{} 폴백(block-template.ts renderBlockTemplate 기본값)과 동형. */
-  refs?: Record<string, string | null>;
+   * 등)은 undefined→{} 폴백(block-template.ts renderBlockTemplate 기본값)과 동형.
+   *
+   * story #3884(AC1) — `work_item` 값이 세 모양으로 넓어졌다(events.py
+   * `_render_event_notification_work_item_ref`): 찾음(`{found:true, token}`)·리졸버는
+   * 있는데 못 찾음(`{found:false, type}` — 삭제·조직 밖, 텍스트는 이 컴포넌트가 렌더
+   * 시점에 짓는다)·리졸버 자체가 없음(키 자체 부재, agent_decision·support_escalation
+   * — 구조적 부재). 예전 계약(순 문자열)도 방어적으로 남겨둔다(구버전 캐시/직접 호출부
+   * 호환) — 현재 실 프리셋은 더 이상 `{{ref.X}}`를 직접 참조하지 않는다(전부
+   * `labels.work_item_target` 경유, 아래). */
+  refs?: Record<string, string | null | { found: boolean; token?: string; type?: string }>;
 }
 
 // story #2637 — 유나 design 스티어 2차(08-14, 재작업 방식까지 PR 前 확定).
@@ -53,7 +61,8 @@ interface EventBlockCardProps {
 // 추가를 누락하면 ⟨missing: label.x⟩가 마커 스타일(경고색+이탤릭) 없이 평문으로 새는
 // 자리가 생긴다 — 실측으로 발견해 처방(뮤테이션 셀프체크: 추가 前엔 라벨 미싱 케이스가
 // 스타일 없이 렌더돼 회귀).
-const MISSING_MARKER_RE = /(⟨missing: (?:payload|ref|label)\.[a-zA-Z0-9_]+⟩)/g;
+// story #3884 — {{t.X}}(4번째 네임스페이스) 신설 시 같은 누락 위험 — alternation에 추가.
+const MISSING_MARKER_RE = /(⟨missing: (?:payload|ref|label|t)\.[a-zA-Z0-9_]+⟩)/g;
 // AC0-b 스펙 의도(굵게 `**…**`·코드 `` `…` ``)만 지원하는 최소 인라인 마크다운 — 그 밖의
 // 마크다운 문법(링크·이탤릭 등)은 AC0-b 예시에 없어 v1 범위 밖으로 다루지 않는다.
 const INLINE_MD_RE = /(\*\*[^*]+\*\*|`[^`]+`)/g;
@@ -156,6 +165,7 @@ export function EventBlockCard({ template, payload, refs }: EventBlockCardProps)
   const tBoard = useTranslations('board');
   const tCage = useTranslations('cage');
   const tDashboard = useTranslations('dashboard');
+  const tEventCard = useTranslations('eventCard');
   const locale = useLocale();
   const { currentMemberType, role, orgId } = useDashboardContext();
   // story #3287(도메인탈고정) — org 커스텀 status 라벨 오버라이드. statusLabel()이 undefined면
@@ -187,14 +197,78 @@ export function EventBlockCard({ template, payload, refs }: EventBlockCardProps)
   // §②-1 낱말 표와 정합)·gateTypeLabel()(lib/gate-type-label.ts, dashboard 네임스페이스).
   const workItemType = payload['work_item_type'];
   if (typeof workItemType === 'string') {
-    labels['work_item_type'] = entityTypeLabel(workItemType);
+    labels['work_item_type'] = entityTypeLabel(workItemType, t);
   }
   const gateType = payload['gate_type'];
   if (typeof gateType === 'string') {
     labels['gate_type'] = gateTypeLabel(tDashboard, gateType);
   }
 
-  const blocks = renderBlockTemplate(template, payload, refs, labels);
+  // story #3884 AC1 — refs.work_item(events.py의 세 모양)을 labels.work_item_target으로
+  // 미리 해석한다. 찾음=토큰 문자열 그대로(EntityChip 렌더는 renderTextWithEntityTokens가
+  // 최종 문자열만 보고 판별하므로 namespace 무관 — 새 렌더 기전 0) / 리졸버는 있는데 못
+  // 찾음=은은한 targetMissing 문구(fail-loud ⟨missing:…⟩ 마커와 다른 층 — PO 확定,
+  // «리졸버가 돌았고 엔티티가 삭제됨»은 알려진 상태라 조용히) / 리졸버 자체가 없음(refs.
+  // work_item 키 자체 부재)=labels 키를 안 채워 block-template.ts의 기존 optional elision
+  // 이 그 field entry를 줄 생략시킨다(새 메커니즘 0).
+  const workItemRef = refs?.['work_item'];
+  if (typeof workItemRef === 'string') {
+    // 구계약(순 문자열) 방어적 호환 — 현재 실 publisher는 이 모양을 안 낸다.
+    labels['work_item_target'] = workItemRef;
+  } else if (workItemRef && typeof workItemRef === 'object') {
+    if (workItemRef.found && typeof workItemRef.token === 'string') {
+      labels['work_item_target'] = workItemRef.token;
+    } else if (!workItemRef.found && typeof workItemRef.type === 'string') {
+      // 유나 §⑤ 표(doc a699be00, 3884 절) — en targetMissing만 소문자로(entityTypeLabel en
+      // 값은 "Story"류 대문자라, 이 문장 중간 자리에선 소문자가 맞다 — "(deleted Story)"
+      // 아니라 "(deleted story)"). ko는 대소문자 구분이 없어 toLowerCase()가 no-op이라
+      // 로케일 분기 없이 안전하게 항상 적용한다.
+      labels['work_item_target'] = tEventCard('targetMissing', {
+        type: entityTypeLabel(workItemRef.type, t).toLowerCase(),
+      });
+    }
+  }
+
+  // story #3884 AC2 — preset.gate.verdict 본문 접속어. PO 구조 결정: 리터럴 「게이트」를
+  // 없애고(미등재 gate_type이 ccGateGeneric 「게이트」 폴백일 때 헤더 "게이트 판정"과
+  // 겹쳐 "게이트 게이트 — …"로 이중 인쇄되는 잠재 결함 해소) gateType/verdict 두 라벨만
+  // 남긴다. next-intl ICU 단일 중괄호 보간(tEventCard 호출 자체)과 이 파일의 이중 중괄호
+  // {{label.X}} mustache는 서로 다른 계층 — 여기서 완성 문자열로 미리 조립해 labels에
+  // 싣는다(block-template.ts는 여전히 순수 함수).
+  if (typeof labels['gate_type'] === 'string' && typeof labels['verdict'] === 'string') {
+    labels['gate_connective_line'] = tEventCard('gateConnective', {
+      gateType: labels['gate_type'],
+      verdict: labels['verdict'],
+    });
+  }
+
+  // story #3884 AC2 — 헤더·필드 라벨(예: {{t.targetLabel}})은 payload와 무관한 고정 UI
+  // 카피라 `label`과 다른 네임스페이스(`t`)로 렌더 시점에 해석한다(eventCard 낱말 표,
+  // 유나 확定 2026-09-14 16:02Z·doc a699be00). 현재 프리셋이 실제로 참조하는 키만
+  // 나열(신규 키 추가 시 여기도 같이 넓혀야 렌더에 반영된다).
+  const translations: Record<string, string> = {
+    statusChangedHeader: tEventCard('statusChangedHeader'),
+    gateVerdictHeader: tEventCard('gateVerdictHeader'),
+    targetLabel: tEventCard('targetLabel'),
+    noteLabel: tEventCard('noteLabel'),
+    reasonLabel: tEventCard('reasonLabel'),
+  };
+
+  // story #3884 — 현재 실 프리셋(status_changed·gate.verdict)은 더 이상 `{{ref.X}}`를
+  // 템플릿에서 직접 참조하지 않는다(work_item이 유일 종류였고 label 경유로 옮겨갔다, 위
+  // workItemRef 처리). 하지만 `{{ref.X}}` 자체(story #3332 일반 메커니즘)는 여전히
+  // 살아 있어야 한다 — 구버전 캐시·org 커스텀 오버라이드가 아직 예전 계약(`{{ref.
+  // work_item}}` 직접 참조, 순 문자열 값)을 쓸 수 있다. 그래서 refs를 그대로 버리지
+  // 않고, 순 문자열(구계약)만 골라 renderBlockTemplate의 refs 인자로 넘긴다 — 새 dict
+  // 모양(found/type)은 'ref' 네임스페이스가 기대하는 값이 아니므로(labels.
+  // work_item_target으로 이미 소비했다) 여기선 제외한다.
+  const refsForTemplate: Record<string, string | null> = {};
+  if (refs) {
+    for (const [key, value] of Object.entries(refs)) {
+      if (typeof value === 'string' || value === null) refsForTemplate[key] = value;
+    }
+  }
+  const blocks = renderBlockTemplate(template, payload, refsForTemplate, labels, translations);
 
   return (
     <div className="min-w-0 max-w-full space-y-3 rounded-xl rounded-tl-sm border border-border bg-card px-3.5 py-3">

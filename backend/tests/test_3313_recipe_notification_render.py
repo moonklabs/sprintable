@@ -236,22 +236,24 @@ async def test_last_stage_has_no_next_stage_line():
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 @pytest.mark.anyio
 async def test_unresolvable_work_item_falls_back_to_raw_id():
-    """work item title을 못 찾으면(작업 자체는 실존하지만 work_item_type이 이 렌더러가
-    지원하는 story/task가 아님 — 예: doc) 참조 토큰 대신 원시 work_item_type/work_item_id를
-    그대로 남긴다(정보 손실 없음, 지어내지 않음). 실존하지 않는 id 대신 실 Doc을 써서 "project
-    해소 실패"(별개 관심사, #2674)와 "title lookup 미지원 타입"을 섞지 않는다."""
-    from app.models.doc import Doc
+    """work item title을 못 찾으면(work_item_type이 이 렌더러가 지원하는 타입 — story·task·
+    doc·visual_artifact, story #3884가 doc/visual_artifact를 추가로 확장 — 자체가 아님)
+    참조 토큰 대신 원시 work_item_type/work_item_id를 그대로 남긴다(정보 손실 없음, 지어내지
+    않음). story #3884 이전엔 doc이 이 미지원 예시였으나 doc 리졸버 추가로 더는 유효하지
+    않다(doc은 이제 실제로 해소된다) — epic(Goal 실체)으로 교체: PROJECT_SCOPED_WORK_ITEM_
+    TYPES(gate_service.py)엔 있어 발행 자체(project 해소)는 성공하면서도, 이 함수(제목
+    lookup)의 4종엔 없어 "미지원 타입" 취지가 그대로 유효하다(agent_decision·
+    support_escalation은 project-무관 self-referencing anchor라 발행 자체가 400으로
+    막혀 이 시나리오에 못 쓴다 — 별개 관심사와 섞임 방지, 3884 실측으로 발견)."""
+    from app.models.pm import Goal
 
     engine, Session = await _realdb_session()
     try:
         async with Session() as s:
             org_id, project_id = await _seed_org_project(s, slug="e3313c")
             publisher_id = await _seed_agent(s, org_id, project_id)
-            doc = Doc(
-                id=uuid.uuid4(), org_id=org_id, project_id=project_id, title="어떤 문서",
-                slug=f"doc-{uuid.uuid4().hex[:8]}",
-            )
-            s.add(doc)
+            epic = Goal(id=uuid.uuid4(), org_id=org_id, project_id=project_id, title="어떤 에픽")
+            s.add(epic)
             await s.commit()
 
             schema = {
@@ -270,12 +272,58 @@ async def test_unresolvable_work_item_falls_back_to_raw_id():
             )
             content, _resp = await _publish_and_get_content(
                 s, definition_key=definition_key,
+                payload={"stage": "monitor", "work_item_type": "epic", "work_item_id": str(epic.id)},
+                publisher_id=publisher_id, org_id=org_id,
+            )
+            assert "- work_item_type: epic" in content
+            assert f"- work_item_id: {epic.id}" in content
+            assert "entity:epic:" not in content
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_doc_work_item_now_resolves_to_reference_token():
+    """story #3884(AC1(b)) — doc은 더 이상 「미지원 타입」이 아니다(위 테스트가 agent_decision
+    으로 교체된 이유). 실 Doc을 참조하면 참조 토큰(클릭 가능한 [제목](entity:doc:id))으로
+    해소되고 원시 raw work_item_id 줄은 남지 않는다(3313 원 계약이 확장됐다는 걸 직접 고정)."""
+    from app.models.doc import Doc
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s, slug="e3313e")
+            publisher_id = await _seed_agent(s, org_id, project_id)
+            doc = Doc(
+                id=uuid.uuid4(), org_id=org_id, project_id=project_id, title="어떤 문서",
+                slug=f"doc-{uuid.uuid4().hex[:8]}",
+            )
+            s.add(doc)
+            await s.commit()
+
+            schema = {
+                "type": "object", "additionalProperties": False,
+                "required": ["stage", "work_item_type", "work_item_id"],
+                "properties": {
+                    "stage": {"type": "string", "enum": ["monitor"]},
+                    "work_item_type": {"type": "string"},
+                    "work_item_id": {"type": "string", "format": "uuid"},
+                },
+            }
+            definition_key = await _seed_definition(
+                s, org_id, slug="e3313e",
+                stage_metadata={"monitor": {"role": "Scout", "action": "감지"}},
+                payload_schema=schema,
+            )
+            content, _resp = await _publish_and_get_content(
+                s, definition_key=definition_key,
                 payload={"stage": "monitor", "work_item_type": "doc", "work_item_id": str(doc.id)},
                 publisher_id=publisher_id, org_id=org_id,
             )
-            assert "- work_item_type: doc" in content
-            assert f"- work_item_id: {doc.id}" in content
-            assert "entity:doc:" not in content
+            assert f"entity:doc:{doc.id}" in content
+            assert "어떤 문서" in content
+            assert "- work_item_type: doc" not in content
     finally:
         await engine.dispose()
 

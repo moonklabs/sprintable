@@ -4375,6 +4375,10 @@
     "authFailureTooltipInvalid": "API key not recognized · {n} failures in last 5 min"
   },
   "chats": {
+    "entityTypeStory": "Story",
+    "entityTypeDoc": "Doc",
+    "entityTypeEpic": "Epic",
+    "entityTypeTask": "Task",
     "nowStripLabel": "Now",
     "nowStripCount": "· {count}",
     "nowStripCollapse": "Collapse",
@@ -4614,6 +4618,15 @@
     "agent": "Agent",
     "personCount": "{count} people",
     "agentCount": "You + {count} agents"
+  },
+  "eventCard": {
+    "statusChangedHeader": "Status changed",
+    "gateVerdictHeader": "Gate verdict",
+    "targetLabel": "Target",
+    "noteLabel": "Note",
+    "reasonLabel": "Reason",
+    "gateConnective": "**{gateType}** — **{verdict}**",
+    "targetMissing": "(deleted {type})"
   },
   "activityLog": {
     "title": "Activity Log",

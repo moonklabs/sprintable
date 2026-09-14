@@ -91,12 +91,15 @@ def _payload(
 
 @pytest.fixture(autouse=True)
 def _stub_work_item_ref(monkeypatch):
+    """story #3884 — `_work_item_ref_token`(평문 알림 줄 전용 어댑터)을 패치한다.
+    `_render_event_notification_work_item_ref` 자체는 이제 dict 반환(AC1(d) found/missing
+    구조 분리)이라, 이 테스트가 보는 평문 렌더 경로는 그 dict를 벗겨내는 어댑터를 거친다."""
     from app.routers import events as events_module
 
     async def _fake_ref(*_args, **_kwargs):
         return "[제목](entity:story:11111111-1111-1111-1111-111111111111)"
 
-    monkeypatch.setattr(events_module, "_render_event_notification_work_item_ref", _fake_ref)
+    monkeypatch.setattr(events_module, "_work_item_ref_token", _fake_ref)
 
 
 async def _render(
