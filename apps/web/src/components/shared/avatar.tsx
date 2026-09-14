@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { Bot, User } from 'lucide-react';
+import { useTranslations } from 'next-intl';
 import { PresenceDot, AGENT_LIVE_RING_CLASS, type PresenceStatus } from '@/components/chat/presence-dot';
 import { AGENT_MARK_FILL_CLASS } from '@/components/ui/agent-identity';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
@@ -56,6 +57,10 @@ export interface AvatarProps {
 export function Avatar({
   name, label, avatarUrl, actorType, size = 32, presenceStatus, isWorking = false, runtimeType = null, className,
 }: AvatarProps) {
+  // story #3888(§⑤·Chat, PO 확定 2026-09-14 18:19Z) — "Agent" 코너 배지·툴팁이 로케일
+  // 무관 리터럴이었다 — agent-identity.tsx의 "Bot" 칩과 같은 자리에서 다른 낱말을 쓰던
+  // 것을 `chats.agent`(기존 키, 신규 0)로 단일화.
+  const t = useTranslations('chats');
   // story #3791(유나 定 12:00Z·카디르 QA 정정 12:52Z) — 접근성 이름은 label 우선, 없으면
   // name 그대로(빈 문자열 대신 attribute 자체를 생략 — 아래 undefined). `??`는 null/
   // undefined만 잡고 빈 문자열은 통과시켜 호출부가 `name ?? fallback`류로 label을 지어
@@ -89,7 +94,13 @@ export function Avatar({
   const showInitialsBadge =
     badgeDef?.kind === 'initials' ||
     (badgeDef?.kind === 'icon' && !showIconBadge && !!badgeDef.initials && size >= 28);
-  const showTextBadge = !showIconBadge && !showInitialsBadge;
+  // story #3888 CHANGES②(PO PR 코멘트, 2026-09-14 19:05Z·유나 §⑤ 확定 19:06Z) — 4배
+  // 확대 캡처 실측: 코너 텍스트 배지("에이전트"/"Agent")가 헤더(32px)에선 컨테이너
+  // 상단에 절반 잘리고 목록(40px)에선 7px 한글이 번져 안 읽혔다 + 같은 행의
+  // AgentIdentity 칩이 이미 같은 낱말이라 AC2 "겹침 0"도 미충족. 유나 확定: ≤40px(헤더·
+  // 목록·버블)는 코너 텍스트 배지 자체를 미렌더(dot 대체 아님 — ring+AgentIdentity 칩+
+  // 아바타 툴팁이 이미 신호를 나른다), >40px(프로필류)만 유지.
+  const showTextBadge = !showIconBadge && !showInitialsBadge && size > 40;
   // 디스크 지름 = clamp(16, 아바타×0.40, 30) · 마크 = 디스크×0.68(규격 §1~2).
   const diskSize = Math.min(30, Math.max(16, Math.round(size * 0.4)));
   const markSize = Math.round(diskSize * 0.68);
@@ -196,7 +207,7 @@ export function Avatar({
           className={cn('absolute -right-1.5 -top-1.5 rounded border border-proof-blue/40 font-bold', AGENT_MARK_FILL_CLASS)}
           style={{ fontSize: Math.max(7, Math.round(textBadgeSize * 0.55)), lineHeight: 1, padding: '2px 3px' }}
         >
-          Agent
+          {t('agent')}
         </span>
       )}
       {isAgent && presenceStatus ? (
@@ -222,7 +233,7 @@ export function Avatar({
               반전 배경에서 그대로 쓰면 대비가 깨져(라이트/다크 실측 재계산: 8.49/7.11로
               AA는 통과하지만 톤 자체가 안 맞음) text-background/70(반전 배경용 동형 dim)로
               옮겨 적용 — 의도(2번째 줄=보조 정보)는 그대로, 토큰만 반전 표면에 맞게 보정. */}
-          <span className="text-[11px] text-background/70">{runtimeLbl ? `Agent · ${runtimeLbl}` : 'Agent'}</span>
+          <span className="text-[11px] text-background/70">{runtimeLbl ? `${t('agent')} · ${runtimeLbl}` : t('agent')}</span>
         </div>
       </TooltipContent>
     </Tooltip>

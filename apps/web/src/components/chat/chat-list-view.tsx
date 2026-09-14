@@ -21,6 +21,8 @@ import { useChatRailOptional } from '@/app/(authenticated)/chats/chat-rail-conte
 
 import { fetchWithAuth } from '@/lib/db/client';
 import { participantDisplayLabel } from '@/lib/member-display';
+import { composeEventPreviewLine } from './event-block-card';
+import { useOrgDomainLabels, type OrgDomainLabels } from '@/hooks/use-org-domain-labels';
 
 interface Participant {
   member_id: string;
@@ -41,7 +43,11 @@ interface ConversationItem {
   id: string;
   type: 'dm' | 'group';
   title: string | null;
-  latest_message: { content: string; created_at: string } | null;
+  // story #3888(§⑤·Chat) — event(event_key+payload)는 BE list_conversations가 새로
+  // 실어주는 additive 필드(msg_metadata['event'], _event_payload()와 동형 — conversations.py
+  // GET /conversations 참고). 이벤트 메시지면 미리보기를 헤더+요약으로 조립하는 데 쓴다.
+  // 없으면(구버전 캐시·일반 메시지 등) 기존 content 그대로 쓴다.
+  latest_message: { content: string; created_at: string; event?: { event_key: string; payload: Record<string, unknown> } | null } | null;
   updated_at: string;
   unread_count?: number;
   participants?: Participant[];
@@ -107,15 +113,25 @@ function ConversationRow({
   conv,
   currentMemberId,
   isAgentConv,
+  domainLabels,
   onClick,
 }: {
   conv: ConversationItem;
   currentMemberId: string;
   isAgentConv?: boolean;
+  // story #3888 CHANGES①(PO PR 코멘트, 2026-09-14 18:53Z) — 부모(ChatListView)가 1회만
+  // 호출한 useOrgDomainLabels 결과를 prop으로 받는다(행마다 재호출 금지 — 요청 중복 방지).
+  domainLabels: OrgDomainLabels;
   onClick: () => void;
 }) {
   const t = useTranslations('chats');
   const tc = useTranslations('common');
+  const tBoard = useTranslations('board');
+  const tCage = useTranslations('cage');
+  const tDashboard = useTranslations('dashboard');
+  const tEventCard = useTranslations('eventCard');
+  // useLocale()은 순수 Context 읽기(HTTP 요청 0)라 행마다 불러도 되는 것 — CHANGES①이
+  // 지적한 것은 useOrgDomainLabels(HTTP fetch를 매 마운트 발사)뿐이다.
   const locale = useLocale();
   const displayTimezone = resolveDisplayTimezone().tz;
 
@@ -124,7 +140,16 @@ function ConversationRow({
       ? formatParticipantNames(conv.participants, currentMemberId, conv.type, t, tc)
       : conv.type === 'dm' ? t('dmWith') : t('groupSection'));
 
-  const preview = conv.latest_message?.content ?? t('noMessages');
+  // story #3888(§⑤·Chat, PO 확定 2026-09-14 18:19Z) — 이벤트 메시지면 raw content(발행
+  // 시점에 구운 slug) 대신 「{헤더} · {요약}」로 렌더 시점 조립(composeEventPreviewLine,
+  // event-block-card.tsx — 같은 재료 재사용). 조립 실패(미지원 event_key·payload 결손)는
+  // null이라 기존 content 폴백으로 조용히 떨어진다.
+  const eventPreview = composeEventPreviewLine(
+    conv.latest_message?.event?.event_key,
+    conv.latest_message?.event?.payload,
+    { tBoard, tCage, tDashboard, tEventCard, tEntity: t, domainLabels },
+  );
+  const preview = eventPreview ?? conv.latest_message?.content ?? t('noMessages');
   const time = conv.latest_message?.created_at ?? conv.updated_at;
   const unread = conv.unread_count ?? 0;
 
@@ -329,8 +354,15 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   const consumedComposeRef = useRef(false);
   // perf(17960f86): role 은 DashboardContext(서버 /api/v2/me 투영)에서 — 채팅 진입마다 `/api/me`
   // 재호출하던 round-trip 제거. /me checkRole 과 동일한 effective role 이라 게이트 의미 보존.
-  const { role } = useDashboardContext();
+  const { role, orgId } = useDashboardContext();
   const isAdminOrOwner = role === 'admin' || role === 'owner';
+  // story #3888 CHANGES①(PO PR 코멘트, 2026-09-14 18:53Z) — useOrgDomainLabels를
+  // ConversationRow(행 컴포넌트) 안에서 부르면 목록 1회 마운트에 대화 수만큼(최대 30+
+  // 에이전트 대화) 같은 domain-labels 요청이 중복 발사된다(훅 자체엔 캐시·dedupe가 없다).
+  // 이 부모(ChatListView)에서 1회만 호출해 domainLabels를 prop으로 내린다 — 행이 몇
+  // 개든 요청은 항상 1건.
+  const locale = useLocale();
+  const domainLabels = useOrgDomainLabels(orgId, locale);
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
   const [allConversations, setAllConversations] = useState<ConversationItem[]>([]);
   // agent 탭(allConversations·include_agent_conversations) 첫 활성화 1회만 fetch 하기 위한 가드.
@@ -709,7 +741,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
             {t('dmSection')}
           </p>
           {dmConvs.map((conv) => (
-            <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} onClick={() => router.push(`/chats/${conv.id}`)} />
+            <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} domainLabels={domainLabels} onClick={() => router.push(`/chats/${conv.id}`)} />
           ))}
         </div>
       )}
@@ -719,7 +751,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
             {t('groupSection')}
           </p>
           {groupConvs.map((conv) => (
-            <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} onClick={() => router.push(`/chats/${conv.id}`)} />
+            <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} domainLabels={domainLabels} onClick={() => router.push(`/chats/${conv.id}`)} />
           ))}
         </div>
       )}
@@ -786,7 +818,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
         {t('agentSection')}
       </p>
       {agentOnlyConvs.map((conv) => (
-        <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} isAgentConv onClick={() => router.push(`/chats/${conv.id}`)} />
+        <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} isAgentConv domainLabels={domainLabels} onClick={() => router.push(`/chats/${conv.id}`)} />
       ))}
       {allConversations.length < agentTotal && (
         <Button

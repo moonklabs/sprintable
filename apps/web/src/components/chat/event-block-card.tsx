@@ -436,3 +436,64 @@ function EventPublishActionButton({
     </div>
   );
 }
+
+export interface EventPreviewHelpers {
+  tBoard: (key: string) => string;
+  tCage: (key: string) => string;
+  tDashboard: (key: string) => string;
+  tEventCard: (key: string) => string;
+  tEntity: (key: string) => string;
+  domainLabels: { statusLabel: (slug: string) => string | undefined };
+}
+
+/**
+ * story #3888(§⑤·Chat, PO 확定 2026-09-14 18:19Z) — 대화 목록 미리보기(chat-list-view.tsx)
+ * 가 이벤트 메시지의 raw content(발행 시점에 구운 「[이벤트] preset.gate.verdict」류
+ * slug — backend/app/routers/events.py의 `_render_gate_verdict_message` 등)를 그대로
+ * 보여주던 것을 막는다. 이 파일의 헤더/필드 라벨 해석 재료(gateTypeLabel·gateStatusLabel·
+ * entityTypeLabel·STORY_STATUS_KEY_MAP·domainLabels)로 "{헤더} · {요약}" 한 줄만
+ * 조립한다(PO 예: "게이트 판정 · 외부 발행 — 승인됨"·"작업 상태 변경 · 스토리 개발 대기
+ * → 진행 중") — EventBlockCard 전체(다중 블록) 렌더 재사용이 아니라 그 안의 "헤더+한 줄
+ * 요약" 재료만 재사용(새 낱말 0, 새 라벨 해석 로직 0). gateConnective i18n 키는 여기서
+ * 안 쓴다 — 그 값이 ChatMarkdown용 `**bold**` 마크다운을 품고 있어(block-template 렌더
+ * 전용) 순수 텍스트 리스트 행에 쓰면 별표(`**`)가 그대로 샌다.
+ *
+ * 현재 이 두 preset만 처리(PO가 실측한 사고 자리 정확히 그만큼) — 다른 event_key·필수
+ * payload 필드 부재는 null을 돌려줘 호출부가 기존 content 폴백으로 떨어진다(과잉
+ * 일반화 금지, 발명 0).
+ */
+export function composeEventPreviewLine(
+  eventKey: string | undefined,
+  payload: Record<string, unknown> | undefined,
+  helpers: EventPreviewHelpers,
+): string | null {
+  if (!eventKey || !payload) return null;
+  const { tBoard, tCage, tDashboard, tEventCard, tEntity, domainLabels } = helpers;
+
+  if (eventKey === 'preset.gate.verdict') {
+    const gateType = payload['gate_type'];
+    const verdict = payload['verdict'];
+    if (typeof gateType !== 'string' || typeof verdict !== 'string') return null;
+    const gateTypeLbl = gateTypeLabel(tDashboard, gateType);
+    const verdictLbl = gateStatusLabel(verdict, tCage);
+    return `${tEventCard('gateVerdictHeader')} · ${gateTypeLbl} — ${verdictLbl}`;
+  }
+
+  if (eventKey === 'preset.work.status_changed') {
+    const fromStatus = payload['from_status'];
+    const toStatus = payload['to_status'];
+    if (typeof fromStatus !== 'string' || typeof toStatus !== 'string') return null;
+    const resolveStatusLabel = (slug: string) => {
+      const statusKey = STORY_STATUS_KEY_MAP[slug];
+      return domainLabels.statusLabel(slug) ?? (statusKey ? tBoard(statusKey) : slug);
+    };
+    const fromLabel = resolveStatusLabel(fromStatus);
+    const toLabel = resolveStatusLabel(toStatus);
+    const workItemType = payload['work_item_type'];
+    const typeLabel = typeof workItemType === 'string' ? entityTypeLabel(workItemType, tEntity) : null;
+    const summary = typeLabel ? `${typeLabel} ${fromLabel} → ${toLabel}` : `${fromLabel} → ${toLabel}`;
+    return `${tEventCard('statusChangedHeader')} · ${summary}`;
+  }
+
+  return null;
+}
