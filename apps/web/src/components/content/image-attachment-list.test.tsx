@@ -64,7 +64,7 @@ describe('ImageAttachmentList(story #3550)', () => {
     const items = container.querySelectorAll('[data-testid="channel-post-image-attachment-item"]');
     expect(items[0]!.querySelector('[data-testid="channel-post-image-attachment-converted-badge"]')).toBeNull();
     expect(items[1]!.querySelector('[data-testid="channel-post-image-attachment-converted-badge"]')?.textContent)
-      .toBe(`이 채널 규격에 맞춰 자동 변환됐습니다: 너비 4000px → 1440px · 용량 ${formatFileSize(5_000_000)} → ${formatFileSize(900_000)}`);
+      .toBe(`이 채널 규격에 맞춰 자동 변환됐어요: 너비 4000px → 1440px · 용량 ${formatFileSize(5_000_000)} → ${formatFileSize(900_000)}`);
     expect(items[2]!.querySelector('[data-testid="channel-post-image-attachment-converted-badge"]')).toBeNull();
   });
 
@@ -77,7 +77,7 @@ describe('ImageAttachmentList(story #3550)', () => {
     };
     await act(async () => { root.render(wrap(<ImageAttachmentList images={[img]} maxCount={10} onReorder={() => {}} onDelete={() => {}} />)); });
     const badge = container.querySelector('[data-testid="channel-post-image-attachment-converted-badge"]')?.textContent;
-    expect(badge).toBe('이 채널 규격에 맞춰 자동 변환됐습니다: 너비 1440px → 1080px');
+    expect(badge).toBe('이 채널 규격에 맞춰 자동 변환됐어요: 너비 1440px → 1080px');
   });
 
   it('⭐용량만 바뀌면 너비 조각 없이 용량 조각만(⛔「1080px → 1080px」 안 나온다·음성 대조)', async () => {
@@ -87,7 +87,7 @@ describe('ImageAttachmentList(story #3550)', () => {
     };
     await act(async () => { root.render(wrap(<ImageAttachmentList images={[img]} maxCount={10} onReorder={() => {}} onDelete={() => {}} />)); });
     const badge = container.querySelector('[data-testid="channel-post-image-attachment-converted-badge"]')?.textContent;
-    expect(badge).toBe(`이 채널 규격에 맞춰 자동 변환됐습니다: 용량 ${formatFileSize(30_000)} → ${formatFileSize(29_500)}`);
+    expect(badge).toBe(`이 채널 규격에 맞춰 자동 변환됐어요: 용량 ${formatFileSize(30_000)} → ${formatFileSize(29_500)}`);
     expect(badge).not.toContain('1080px → 1080px');
   });
 
@@ -98,7 +98,7 @@ describe('ImageAttachmentList(story #3550)', () => {
     };
     await act(async () => { root.render(wrap(<ImageAttachmentList images={[img]} maxCount={10} onReorder={() => {}} onDelete={() => {}} />)); });
     const badge = container.querySelector('[data-testid="channel-post-image-attachment-converted-badge"]')?.textContent;
-    expect(badge).toBe(`이 채널 규격에 맞춰 자동 변환됐습니다: 너비 4000px → 1440px · 용량 ${formatFileSize(5_000_000)} → ${formatFileSize(900_000)}`);
+    expect(badge).toBe(`이 채널 규격에 맞춰 자동 변환됐어요: 너비 4000px → 1440px · 용량 ${formatFileSize(5_000_000)} → ${formatFileSize(900_000)}`);
   });
 
   it('⭐둘 다 그대로면 축 조각 없이 기본 문장만(마침표로 끝)', async () => {
@@ -108,7 +108,7 @@ describe('ImageAttachmentList(story #3550)', () => {
     };
     await act(async () => { root.render(wrap(<ImageAttachmentList images={[img]} maxCount={10} onReorder={() => {}} onDelete={() => {}} />)); });
     const badge = container.querySelector('[data-testid="channel-post-image-attachment-converted-badge"]')?.textContent;
-    expect(badge).toBe('이 채널 규격에 맞춰 자동 변환됐습니다.');
+    expect(badge).toBe('이 채널 규격에 맞춰 자동 변환됐어요.');
   });
 
   // 유나 Design 조건 1(2026-09-06, #3919 리뷰) — 판정을 원시 바이트로 하면
@@ -121,7 +121,7 @@ describe('ImageAttachmentList(story #3550)', () => {
     };
     await act(async () => { root.render(wrap(<ImageAttachmentList images={[img]} maxCount={10} onReorder={() => {}} onDelete={() => {}} />)); });
     const badge = container.querySelector('[data-testid="channel-post-image-attachment-converted-badge"]')?.textContent;
-    expect(badge).toBe('이 채널 규격에 맞춰 자동 변환됐습니다.');
+    expect(badge).toBe('이 채널 규격에 맞춰 자동 변환됐어요.');
     expect(badge).not.toContain('10.1 KB → 10.1 KB');
   });
 

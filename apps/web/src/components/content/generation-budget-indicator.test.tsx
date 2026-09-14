@@ -183,7 +183,7 @@ describe('GenerationBudgetIndicator (story #3500, doc a0da40c9 §19 — BE #3498
       'compact',
     );
     expect(byTestId('generation-budget-remaining-compact')).toBeNull();
-    expect(byTestId('generation-budget-failed')?.textContent).toBe('생성 비용 잔량을 확인하지 못했습니다');
+    expect(byTestId('generation-budget-failed')?.textContent).toBe('생성 비용 잔량을 확인하지 못했어요');
   });
 
   it('⭐PO REQUIRED②(2026-09-05) — currency가 null이면(limitMinor는 있음) \'KRW\'로 추정하지 않고 failed와 동형으로 접는다', async () => {
@@ -192,7 +192,7 @@ describe('GenerationBudgetIndicator (story #3500, doc a0da40c9 §19 — BE #3498
       'full',
     );
     expect(byTestId('generation-budget-remaining-full')).toBeNull();
-    expect(byTestId('generation-budget-failed')?.textContent).toBe('잔량을 확인하지 못했습니다');
+    expect(byTestId('generation-budget-failed')?.textContent).toBe('잔량을 확인하지 못했어요');
   });
 
   it('⭐BE #3498/PR#3847 실계약 확認(2026-09-05) — spentMinor가 null이면(limitMinor는 있음) failed와 동형으로 접는다', async () => {
@@ -204,7 +204,7 @@ describe('GenerationBudgetIndicator (story #3500, doc a0da40c9 §19 — BE #3498
       'full',
     );
     expect(byTestId('generation-budget-remaining-full')).toBeNull();
-    expect(byTestId('generation-budget-failed')?.textContent).toBe('잔량을 확인하지 못했습니다');
+    expect(byTestId('generation-budget-failed')?.textContent).toBe('잔량을 확인하지 못했어요');
   });
 
   it('0원 잔량(양수 한도 전부 소진)은 "정지"와 다르게, "남음 0원"으로 그대로 그린다(§19-3)', async () => {

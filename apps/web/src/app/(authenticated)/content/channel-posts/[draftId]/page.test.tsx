@@ -1066,7 +1066,7 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     await flush();
 
     const reason = container.querySelector('[data-testid="channel-post-publish-disabled-reason"]')?.textContent;
-    expect(reason).toBe('이미 발행됐습니다 — 다시 발행할 새 내용이 없습니다.');
+    expect(reason).toBe('이미 발행됐어요 — 다시 발행할 새 내용이 없어요.');
     expect(reason).not.toContain('승인된 최신 버전');
   });
 
@@ -1702,7 +1702,7 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     });
     await flush();
 
-    expect(container.textContent).toContain('이미 in_progress 상태라 취소할 수 없습니다');
+    expect(container.textContent).toContain('이미 in_progress 상태라 취소할 수 없어요');
     expect(container.querySelector('[data-testid="channel-post-cancel-scheduled-button"]')).not.toBeNull();
   });
 
@@ -1932,7 +1932,7 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
 
   // story #3402 PR2 ②-c(AC10) — CHANNEL_TEXT_TOO_LONG은 api-error.ts가 humanMessageKey를
   // 일부러 비워 두고 max_length/current_length만 실어 오는 코드다 — page.tsx가 doc §5
-  // 표 그대로("500자 한도인데 517자입니다") 값을 실제로 보간해 조립하는지 pin한다.
+  // 표 그대로("500자 한도인데 517자예요") 값을 실제로 보간해 조립하는지 pin한다.
   it('⭐발행 실패(CHANNEL_TEXT_TOO_LONG) — max_length/current_length가 실제 값으로 보간된 문구가 보인다', async () => {
     stubFetch({
       draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1' },
@@ -1949,7 +1949,7 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     });
     await flush();
 
-    expect(container.textContent).toContain('500자 한도인데 517자입니다');
+    expect(container.textContent).toContain('500자 한도인데 517자예요');
   });
 
   it('⭐발행 실패(CHANNEL_RATE_LIMITED) — reset_at이 실제 시각으로 보간된 문구가 보인다', async () => {
@@ -1990,7 +1990,7 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     await flush();
 
     expect(container.textContent).toContain(
-      '채널이 요청을 처리하지 못했습니다 — 자동으로 다시 시도하고 있습니다. 계속 실패하면 연결 상태에 표시됩니다.',
+      '채널이 요청을 처리하지 못했어요 — 자동으로 다시 시도하고 있어요. 계속 실패하면 연결 상태에 표시돼요.',
     );
     expect(container.textContent).not.toContain('채널이 요청을 받지 못했습니다.');
   });
@@ -3280,14 +3280,14 @@ describe('ChannelPostEditPage — 캐러셀 가득 참 트리거 비활성(story
     expect(container.querySelector('[data-testid="channel-post-image-max-count-reached-reason"]')).toBeNull();
   });
 
-  it('⭐10/10장 — 트리거 비활성 + 「최대 10장까지 첨부할 수 있습니다.」', async () => {
+  it('⭐10/10장 — 트리거 비활성 + 「최대 10장까지 첨부할 수 있어요.」', async () => {
     stubFetch({ imageMaxCount: 10, initialImages: makeImages(10) });
     await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
     await flush();
 
     expect((container.querySelector('[data-testid="channel-post-image-attach-trigger"]') as HTMLButtonElement).disabled).toBe(true);
     expect(container.querySelector('[data-testid="channel-post-image-max-count-reached-reason"]')?.textContent)
-      .toBe('최대 10장까지 첨부할 수 있습니다.');
+      .toBe('최대 10장까지 첨부할 수 있어요.');
   });
 
   it('⭐10장에서 한 장 삭제 — 같은 마운트에서 트리거가 재활성된다', async () => {
@@ -3339,7 +3339,7 @@ describe('ChannelPostEditPage — 영상↔이미지 상호배타 + 커버 상�
 
     expect((container.querySelector('[data-testid="channel-post-video-attach-trigger"]') as HTMLButtonElement).disabled).toBe(true);
     expect(container.querySelector('[data-testid="channel-post-video-blocked-by-images-reason"]')?.textContent)
-      .toBe('이미지가 2장 이상이면 영상을 붙일 수 없습니다. 이미지를 한 장만 남기면 그 한 장이 커버가 됩니다.');
+      .toBe('이미지가 2장 이상이면 영상을 붙일 수 없어요. 이미지를 한 장만 남기면 그 한 장이 커버가 돼요.');
   });
 
   it('⭐이미지 2장에서 1장 삭제 — 같은 마운트에서 영상 트리거 재활성(3564 해제 경로 동형)', async () => {
@@ -3491,7 +3491,7 @@ describe('ChannelPostEditPage — 이미지 필수 채널 선알림(story #3538)
     await flush();
 
     const alertText = container.querySelector('[role="alert"]')?.textContent ?? '';
-    expect(alertText).toContain('이미지 없이 상신할 수 없습니다 — 이 채널은 이미지가 필요합니다.');
+    expect(alertText).toContain('이미지 없이 상신할 수 없어요 — 이 채널은 이미지가 필요해요.');
   });
 });
 
@@ -3562,7 +3562,7 @@ describe('ChannelPostEditPage — 승인 카드 썸네일·배지(T5-M, story #3
 
     const badge = container.querySelector('[data-testid="channel-post-image-converted-badge"]')?.textContent ?? '';
     expect(badge).not.toContain('1080px → 1080px');
-    expect(badge).toBe('이 채널 규격에 맞춰 자동 변환됐습니다: 용량 29.3 KB → 28.8 KB');
+    expect(badge).toBe('이 채널 규격에 맞춰 자동 변환됐어요: 용량 29.3 KB → 28.8 KB');
   });
 });
 
@@ -3587,7 +3587,7 @@ describe('ChannelPostEditPage — §17-15 processing_kind 오버레이 우선순
 
   // story #3402 갭(페드루 지시, 2026-09-10) — 실데이터는 processing_kind='awaiting_
   // container'에 항상 command_status='pending'이 딸려 온다(위 주석 — BE 620beefc
-  // 판정식). 그 조합에서 FailureActionBadge(「자동으로 이어서 처리 중입니다.」)가
+  // 판정식). 그 조합에서 FailureActionBadge(「자동으로 이어서 처리 중이에요.」)가
   // 알림(그 문장을 글자 그대로 포함)과 겹쳐 서던 걸 배지 쪽만 억제한다. 뮤테이션
   // 대상: page.tsx의 `failureAction.kind !== 'processing'` 가드를 걷으면 이 테스트가
   // RED(문장이 정확히 1회가 아니라 2회 나옴)여야 한다.
@@ -3809,7 +3809,7 @@ describe('ChannelPostEditPage — 서버 원문 접기(RawDetailsToggle, story #
     await flush();
 
     const alert = container.querySelector('[role="alert"]');
-    expect(alert?.textContent).toContain('컨셉 결재를 아직 받지 못해 상신할 수 없습니다. 결재가 끝난 뒤 다시 상신해 주세요.');
+    expect(alert?.textContent).toContain('컨셉 결재를 아직 받지 못해 상신할 수 없어요. 결재가 끝난 뒤 다시 상신해 주세요.');
   });
 
   it('이미지 업로드 실패 — raw 토글이 뜬다', async () => {
@@ -4667,7 +4667,7 @@ describe('ChannelPostEditPage — 댓글 섹션(story #3517)', () => {
     expect(retryBtn).not.toBeNull();
     await act(async () => { retryBtn.click(); });
     await flush();
-    expect(document.body.textContent).toContain('요청을 처리하지 못했습니다.');
+    expect(document.body.textContent).toContain('요청을 처리하지 못했어요.');
     expect(document.body.textContent).not.toContain('재시도 대상이 아닙니다');
   });
 
@@ -4707,7 +4707,7 @@ describe('ChannelPostEditPage — 댓글 섹션(story #3517)', () => {
     await flush();
     expect(btn.disabled).toBe(true);
     // story #3517 조각②-b(유나 16회차 보강) — 60초 이상은 분 단위로 올림 표시.
-    expect(container.querySelector('[data-testid="comments-refresh-rate-limited"]')?.textContent).toBe('1분 뒤에 다시 시도할 수 있습니다.');
+    expect(container.querySelector('[data-testid="comments-refresh-rate-limited"]')?.textContent).toBe('1분 뒤에 다시 시도할 수 있어요.');
   });
 
   it('재수집 429, Retry-After 헤더 없음 — 초를 지어내지 않고 "잠시 뒤"', async () => {
@@ -4721,7 +4721,7 @@ describe('ChannelPostEditPage — 댓글 섹션(story #3517)', () => {
     const btn = container.querySelector('[data-testid="comments-refresh-button"]') as HTMLButtonElement;
     await act(async () => { btn.click(); });
     await flush();
-    expect(container.querySelector('[data-testid="comments-refresh-rate-limited"]')?.textContent).toBe('잠시 뒤에 다시 시도할 수 있습니다.');
+    expect(container.querySelector('[data-testid="comments-refresh-rate-limited"]')?.textContent).toBe('잠시 뒤에 다시 시도할 수 있어요.');
   });
 
   // story #3517(유나 §22-10③) — 422 unsupported는 버튼 자체가 사라진다(네 번째 얼굴).
@@ -4737,7 +4737,7 @@ describe('ChannelPostEditPage — 댓글 섹션(story #3517)', () => {
     await act(async () => { btn.click(); });
     await flush();
     expect(container.querySelector('[data-testid="comments-refresh-button"]')).toBeNull();
-    expect(container.querySelector('[data-testid="comments-refresh-unsupported"]')?.textContent).toBe('이 채널은 댓글을 지원하지 않습니다.');
+    expect(container.querySelector('[data-testid="comments-refresh-unsupported"]')?.textContent).toBe('이 채널은 댓글을 지원하지 않아요.');
   });
 
   it('재수집 403 COMMENT_REFRESH_HUMAN_ONLY — 서버 문구를 그대로 보인다', async () => {
@@ -4797,7 +4797,7 @@ describe('ChannelPostEditPage — 댓글 섹션(story #3517)', () => {
     await act(async () => { btn.click(); });
     await flush();
     expect(container.querySelector('[data-testid="comments-refresh-button"]')).toBeNull();
-    expect(container.querySelector('[data-testid="comments-refresh-unsupported"]')?.textContent).toBe('이 채널은 댓글을 지원하지 않습니다.');
+    expect(container.querySelector('[data-testid="comments-refresh-unsupported"]')?.textContent).toBe('이 채널은 댓글을 지원하지 않아요.');
   });
 
   it('재수집 403 — 실 봉투({error:{message}})로도 서버 문구가 그대로 보인다', async () => {
@@ -5403,7 +5403,7 @@ describe('ChannelPostEditPage — 릴스 영상 슬롯(story #3556)', () => {
     await flush();
 
     const errorText = container.querySelector('[data-testid="channel-post-video-upload-error"] p')?.textContent ?? '';
-    expect(errorText).toBe('영상을 올리지 못했습니다 — 서버가 403로 응답했습니다.');
+    expect(errorText).toBe('영상을 올리지 못했어요 — 서버가 403로 응답했어요.');
     expect(errorText).not.toContain('다시 시도');
     expect(
       [...container.querySelectorAll('details')].find((d) => d.querySelector('summary')?.textContent === koMessages.content.errorRawDetailsToggle),
@@ -5425,7 +5425,7 @@ describe('ChannelPostEditPage — 릴스 영상 슬롯(story #3556)', () => {
     await flush();
 
     const errorText = container.querySelector('[data-testid="channel-post-video-upload-error"] p')?.textContent ?? '';
-    expect(errorText).toBe('영상을 올리지 못했습니다 — 서버에 닿지 못했습니다. 연결을 확인한 뒤 다시 시도해 주세요.');
+    expect(errorText).toBe('영상을 올리지 못했어요 — 서버에 닿지 못했어요. 연결을 확인한 뒤 다시 시도해 주세요.');
     expect(
       [...container.querySelectorAll('details')].find((d) => d.querySelector('summary')?.textContent === koMessages.content.errorRawDetailsToggle),
     ).toBeUndefined();
@@ -5473,7 +5473,7 @@ describe('ChannelPostEditPage — 릴스 영상 슬롯(story #3556)', () => {
     await flush();
 
     const errorText = container.querySelector('[data-testid="channel-post-video-upload-error"] p')?.textContent ?? '';
-    expect(errorText).toBe('영상을 올리지 못했습니다 — 서버가 200로 응답했습니다.');
+    expect(errorText).toBe('영상을 올리지 못했어요 — 서버가 200로 응답했어요.');
     expect(
       [...container.querySelectorAll('details')].find((d) => d.querySelector('summary')?.textContent === koMessages.content.errorRawDetailsToggle),
     ).not.toBeUndefined();
@@ -5498,7 +5498,7 @@ describe('ChannelPostEditPage — 릴스 영상 슬롯(story #3556)', () => {
     await flush();
 
     const errorText = container.querySelector('[data-testid="channel-post-video-upload-error"] p')?.textContent ?? '';
-    expect(errorText).toBe('영상을 올리지 못했습니다 — 서버에 닿지 못했습니다. 연결을 확인한 뒤 다시 시도해 주세요.');
+    expect(errorText).toBe('영상을 올리지 못했어요 — 서버에 닿지 못했어요. 연결을 확인한 뒤 다시 시도해 주세요.');
     expect(
       [...container.querySelectorAll('details')].find((d) => d.querySelector('summary')?.textContent === koMessages.content.errorRawDetailsToggle),
     ).toBeUndefined();
