@@ -154,10 +154,14 @@ export function KanbanColumn({
                 type="button"
                 aria-label={t('expandDoneColumn')}
                 onClick={onToggleCollapse}
-                className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground transition hover:text-foreground"
+                className={`flex h-5 w-5 items-center justify-center rounded transition ${wipExceeded ? 'text-foreground' : 'text-muted-foreground'}`}
               >
                 <ChevronDown className="h-3.5 w-3.5" />
               </button>
+              {/* story #3865(AC1, PO CHANGES 2026-09-14 11:40Z 정정) — 이 컬럼 wrapper는
+                  wipExceeded일 때만 bg-destructive-tint를 입는다(colClass) — 평시(미초과)엔
+                  tint 자체가 없어 muted-foreground가 원래 대비 그대로 안전하다. wipExceeded일
+                  때만 ink로 올리는 조건부 교체(평시 시안 변경 0, PO CHANGES 처방①). */}
               <span className={`text-[11px] tabular-nums ${wipExceeded ? 'text-destructive' : 'text-muted-foreground'}`}>
                 {totalCount !== undefined ? (hasMore ? `${totalCount}+` : totalCount) : stories.length}
               </span>
@@ -183,11 +187,13 @@ export function KanbanColumn({
                 )}
                 {/* AC1: WIP limit 배지 (설정된 경우) */}
                 {wipLimit !== null && wipLimit !== undefined && !wipExceeded && (
-                  <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                  <Badge variant="outline" className={`text-[10px] ${wipExceeded ? 'text-foreground' : 'text-muted-foreground'}`}>
                     {t('wipLimitLabel')}: {wipLimit}
                   </Badge>
                 )}
-                {/* 카드 수 — pill/shadow/mono 제거·tabular(정렬 유지·결 정갈) */}
+                {/* 카드 수 — pill/shadow/mono 제거·tabular(정렬 유지·결 정갈). story #3865(AC1,
+                    PO CHANGES 2026-09-14 11:40Z 정정) — wipExceeded일 때만 ink, 평시엔
+                    muted-foreground 유지(평시 시안 변경 0). */}
                 <span className={`text-xs tabular-nums ${wipExceeded ? 'text-destructive' : 'text-muted-foreground'}`}>
                   {totalCount !== undefined ? (hasMore ? `${totalCount}+` : totalCount) : stories.length}
                 </span>
@@ -197,7 +203,7 @@ export function KanbanColumn({
                   aria-label={t('wipLimitSet')}
                   title={t('wipLimitSet')}
                   onClick={onWipLimitEdit}
-                  className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground transition hover:text-foreground"
+                  className={`flex h-5 w-5 items-center justify-center rounded transition ${wipExceeded ? 'text-foreground' : 'text-muted-foreground'}`}
                 >
                   <svg width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
                     <path d="M11.013 1.427a1.75 1.75 0 012.474 2.474L4.92 12.47l-3.265.905.905-3.265 8.453-8.683z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
@@ -209,7 +215,7 @@ export function KanbanColumn({
                     type="button"
                     aria-label={t('collapseDoneColumn')}
                     onClick={onToggleCollapse}
-                    className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground transition hover:text-foreground"
+                    className={`flex h-5 w-5 items-center justify-center rounded transition ${wipExceeded ? 'text-foreground' : 'text-muted-foreground'}`}
                   >
                     <ChevronUp className="h-3.5 w-3.5" />
                   </button>
@@ -220,7 +226,7 @@ export function KanbanColumn({
                     aria-label={t('addStory')}
                     title={t('addStory')}
                     onClick={startCompose}
-                    className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                    className={`flex h-5 w-5 items-center justify-center rounded transition hover:bg-muted ${wipExceeded ? 'text-foreground' : 'text-muted-foreground'}`}
                   >
                     <Plus className="h-3.5 w-3.5" />
                   </button>
@@ -250,7 +256,7 @@ export function KanbanColumn({
             <Button size="sm" variant="default" className="h-7 px-2 text-xs" onClick={onWipLimitSave}>
               {t('wipLimitSave')}
             </Button>
-            <Button size="sm" variant="ghost" className="h-7 px-2 text-xs text-muted-foreground" onClick={onWipLimitRemove}>
+            <Button size="sm" variant="ghost" className={`h-7 px-2 text-xs ${wipExceeded ? 'text-foreground' : 'text-muted-foreground'}`} onClick={onWipLimitRemove}>
               {t('wipLimitRemove')}
             </Button>
           </div>
@@ -287,7 +293,7 @@ export function KanbanColumn({
             <Button
               size="sm"
               variant="ghost"
-              className="h-7 px-2 text-xs text-muted-foreground"
+              className={`h-7 px-2 text-xs ${wipExceeded ? 'text-foreground' : 'text-muted-foreground'}`}
               onClick={cancelCompose}
             >
               {t('addStoryCancel')}
@@ -306,7 +312,7 @@ export function KanbanColumn({
             <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-y-auto p-1.5 [&>*]:shrink-0">
               {stories.length === 0 && !composing ? (
                 <div className="flex min-h-[100px] items-center justify-center px-4 text-center">
-                  <p className="text-xs text-muted-foreground">{t('noStories')}</p>
+                  <p className={`text-xs ${wipExceeded ? 'text-foreground' : 'text-muted-foreground'}`}>{t('noStories')}</p>
                 </div>
               ) : null}
               {stories.map((story) => (
@@ -342,7 +348,7 @@ export function KanbanColumn({
                 type="button"
                 onClick={onLoadMore}
                 disabled={loadingMore}
-                className="w-full rounded-md px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted/50 disabled:opacity-50"
+                className={`w-full rounded-md px-3 py-1.5 text-xs hover:bg-muted/50 disabled:opacity-50 ${wipExceeded ? 'text-foreground' : 'text-muted-foreground'}`}
               >
                 {/* story #3776(1층B) — "불러오는 중..."/"더 보기", board ns의 기존 loading/loadMore 키 재사용. */}
                 {loadingMore ? t('loading') : t('loadMore')}

@@ -171,8 +171,13 @@ export function DocStatusHeader({ docId, status, editHref, onTransitioned }: { d
       <div className="min-w-0 flex-1">
         <div className="text-[15px] font-bold text-foreground">{t(STATE_LABEL_KEY[state])}</div>
         {/* story #2967 — resolveName은 한글 사람 이름이라 mono 걷음(동일 결함 클래스). */}
+        {/* story #3865(AC1) — 이 div의 조상(부모 wrapper)이 state==='confirmed'일 때
+            bg-success-tint를 입는다(위 return 블록 상단 삼항) — text-muted-foreground는
+            그 tint 배경 위에서 AA 미달(story #3839류). 항상 confirmed 상태에서만 렌더되므로
+            드문 상태가 아니라 상시 노출 — text-foreground로 교체(범위 축소 불요, #3865
+            AC0 PO 확定). */}
         {state === 'confirmed' && gate ? (
-          <div className="text-xs text-muted-foreground">{resolveName(gate.resolver_id)} · {fmtDate(gate.resolved_at)}</div>
+          <div className="text-xs text-foreground">{resolveName(gate.resolver_id)} · {fmtDate(gate.resolved_at)}</div>
         ) : state === 'denied' ? (
           <div className="mt-1 text-xs text-foreground">
             <span className="font-medium">{t('docGateDeniedReason')}:</span> {gate?.resolution_note?.trim() || t('docGateNoReason')}
@@ -207,7 +212,11 @@ export function DocStatusHeader({ docId, status, editHref, onTransitioned }: { d
           </Button>
         </div>
       ) : state === 'pending' ? (
-        <span className="shrink-0 text-xs text-muted-foreground">{t('docGateAwaitingGeneric')}</span>
+        // story #3865(AC1) — 이 자리의 조상 wrapper는 state==='pending'일 때 위 return 블록
+        // 상단 삼항의 else 분기(bg-warning-tint)를 입는다 — text-muted-foreground는 그 tint
+        // 배경 위에서 AA 미달. 항상 pending 상태에서만 렌더되므로 상시 노출 — text-foreground로
+        // 교체(#3865 AC0 PO 확定).
+        <span className="shrink-0 text-xs text-foreground">{t('docGateAwaitingGeneric')}</span>
       ) : state === 'denied' ? (
         <Button size="sm" variant="ghost" disabled={busy} className="shrink-0 gap-1" onClick={() => void docTransition('draft', onTransitioned)}>
           <RotateCcw className="size-3.5" />{t('docGateEdit')}
