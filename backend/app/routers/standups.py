@@ -162,10 +162,12 @@ async def list_standups(
     # 최대치 그대로 — AC1 "기본 limit ≥ 현 실사용 최대치"). 상한 2000은 goals.py/
     # retros.py list_paginated 관례와 동일 값(새 상한 발명 0).
     limit: int = Query(default=1000, ge=1, le=2000),
+    # story #3841 — description은 OpenAPI에 노출되는 사용자 문장이라 영문만(BE 한글
+    # 사용자 문장 가드). 형식 설명(date|created_at|id 3-tuple, 구분자가 "|"인 이유)은
+    # encode_standup_cursor/parse_standup_cursor의 한글 코드 주석 쪽에 이미 있다.
     cursor: str | None = Query(
         default=None,
-        description='Cursor: "date|created_at|id"(직전 페이지 X-Next-Cursor 값 그대로) — '
-        "date DESC, created_at DESC, id DESC 순서에서 이 위치보다 뒤(더 오래된) 행만.",
+        description="Cursor: previous page's X-Next-Cursor value, verbatim.",
     ),
     repo: StandupEntryRepository = Depends(_get_repo_read),
     auth: AuthContext = Depends(get_current_user),
