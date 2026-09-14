@@ -740,6 +740,10 @@ interface GoalDetailPanelProps {
 
 function GoalDetailPanel({ epic, onUpdate, onClose }: GoalDetailPanelProps) {
   const t = useTranslations('goals');
+  // story #3878(§⑤ 낱말 드리프트) — 스토리 목록 배지의 story.status(canonical slug)를
+  // t() 없이 그대로 그리던 자리 정본화. story-detail-panel.tsx의 statusKeyMap→t() 관례
+  // 그대로 재사용(§②-1 기존 상태 낱말, 새 키 0).
+  const tBoard = useTranslations('board');
   const displayTimezone = resolveDisplayTimezone().tz;
   const router = useRouter();
   const { wsSlug, projSlug } = useGoalsRoute();
@@ -755,6 +759,18 @@ function GoalDetailPanel({ epic, onUpdate, onClose }: GoalDetailPanelProps) {
     active: t('statusActive'),
     done: t('statusDone'),
     archived: t('statusArchived'),
+  };
+
+  const storyStatusKeyMap: Record<string, 'backlog' | 'readyForDev' | 'inProgress' | 'inReview' | 'done'> = {
+    backlog: 'backlog',
+    'ready-for-dev': 'readyForDev',
+    'in-progress': 'inProgress',
+    'in-review': 'inReview',
+    done: 'done',
+  };
+  const storyStatusLabel = (slug: string): string => {
+    const key = storyStatusKeyMap[slug];
+    return key ? tBoard(key) : slug;
   };
 
   const priorityLabel: Record<GoalPriority, string> = {
@@ -880,7 +896,7 @@ function GoalDetailPanel({ epic, onUpdate, onClose }: GoalDetailPanelProps) {
                           <span className="text-xs text-muted-foreground">{story.story_points} SP</span>
                         ) : null}
                         <Badge variant={story.status === 'done' ? 'success' : 'secondary'} className="text-[10px]">
-                          {story.status}
+                          {storyStatusLabel(story.status)}
                         </Badge>
                       </div>
                     </button>

@@ -95,6 +95,14 @@ export function LoopCreateDialog({
   // 집, 유나 定 — 워크플로 단계 role 어휘를 org/trust 역할 어휘 옆에 둔다).
   const to = useTranslations('organization');
 
+  // story #3878(§⑤ 낱말 드리프트) — linkedHypothesis.status(HypothesisStatus canonical
+  // slug)를 t() 없이 그대로 그리던 자리 정본화. hypothesis-status-badge.tsx의 키 조립
+  // 관례 그대로 재사용(§②-1 기존 hypotheses.status* 낱말, 새 키 0).
+  const hypothesisStatusLabel = (slug: string): string => {
+    const labelKey = `status${slug.charAt(0).toUpperCase()}${slug.slice(1)}` as 'statusProposed';
+    return th(labelKey);
+  };
+
   const [title, setTitle] = useState('');
   const [mode, setMode] = useState<Mode>('new');
   const [statement, setStatement] = useState('');
@@ -521,7 +529,7 @@ export function LoopCreateDialog({
                   <div className="rounded-lg border border-primary/30 bg-primary/5 p-2 text-[11px] text-foreground">
                     <p className="font-medium">{linkedHypothesis.statement}</p>
                     <p className="mt-0.5 text-muted-foreground">
-                      {linkedHypothesis.metric_definition.metric} · {linkedHypothesis.status}
+                      {linkedHypothesis.metric_definition.metric} · {hypothesisStatusLabel(linkedHypothesis.status)}
                     </p>
                   </div>
                 ) : null}

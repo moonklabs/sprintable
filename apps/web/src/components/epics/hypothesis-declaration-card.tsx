@@ -51,6 +51,14 @@ export function HypothesisDeclarationCard({
   // 없음으로 오독). precedents는 null(모름) 유지, 실패는 이 플래그로만.
   const [precedentsFailed, setPrecedentsFailed] = useState(false);
 
+  // story #3878(§⑤ 낱말 드리프트) — linkedPreview.status(HypothesisStatus canonical slug)를
+  // t() 없이 그대로 그리던 자리 정본화. hypothesis-status-badge.tsx의 키 조립 관례
+  // 그대로 재사용(§②-1 기존 hypotheses.status* 낱말, 새 키 0).
+  const hypothesisStatusLabel = (slug: string): string => {
+    const labelKey = `status${slug.charAt(0).toUpperCase()}${slug.slice(1)}` as 'statusProposed';
+    return th(labelKey);
+  };
+
   const metric = value.metricDefinition;
   const isGa4 = metric?.source === 'ga4';
   const setMetricPatch = (patch: Partial<NonNullable<HypothesisDeclarationValue['metricDefinition']>>) => {
@@ -331,7 +339,7 @@ export function HypothesisDeclarationCard({
           {value.linkedPreview ? (
             <div className="flex items-center justify-between gap-2 rounded-lg border border-primary/30 bg-primary/5 p-2 text-[11px]">
               <span className="min-w-0 flex-1 truncate text-foreground">{value.linkedPreview.statement}</span>
-              <Badge variant="chip">{value.linkedPreview.status}</Badge>
+              <Badge variant="chip">{hypothesisStatusLabel(value.linkedPreview.status)}</Badge>
             </div>
           ) : null}
         </div>
