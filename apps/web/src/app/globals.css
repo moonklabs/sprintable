@@ -898,6 +898,11 @@
 .tiptap-content .tiptap .is-editor-empty.is-empty::before { content: attr(data-placeholder); color: var(--tiptap-placeholder); pointer-events: none; float: left; height: 0; }
 .tiptap-content .tiptap .ProseMirror-selectednode { outline: 2px solid var(--tiptap-selection); border-radius: 4px; }
 .tiptap-content .tiptap a { color: var(--tiptap-link); text-decoration: underline; }
+/* story #3866 — entity: 링크(story-mention.tsx EntityLinkExtension)는 위 규칙보다 선택자
+   특이도가 높아야 이긴다(위는 `.tiptap-content .tiptap a`, Tailwind 유틸 클래스 하나로는
+   특이도가 못 미쳐 색·밑줄이 안 먹혔다 — 실측 확認). 배경(bg-muted)·flex는 유틸이 그대로
+   먹으니 색·밑줄만 여기서 되돌린다. */
+.tiptap-content .tiptap a[href^="entity:"] { color: var(--foreground); text-decoration: none; }
 .tiptap-content .tiptap div[data-callout] { border-left: 3px solid var(--tiptap-callout-border); background: var(--tiptap-callout-bg); padding: 12px 16px; border-radius: 0 6px 6px 0; margin: 8px 0; }
 .tiptap-content .tiptap ul[data-type="taskList"] { list-style: none; padding-left: 0; }
 .tiptap-content .tiptap ul[data-type="taskList"] li[data-type="taskItem"] { display: flex; align-items: flex-start; gap: 8px; margin: 2px 0; }
