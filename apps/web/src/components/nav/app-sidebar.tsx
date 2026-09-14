@@ -11,6 +11,7 @@ import { CommandPalette } from '@/components/command-palette/command-palette';
 import { ProfileMenu } from '@/components/nav/profile-menu';
 import { BusinessInfoDisclosure } from '@/components/nav/business-info-disclosure';
 import { UnifiedSwitcher, type OrgSwitcherItem } from '@/components/nav/unified-switcher';
+import { Button } from '@/components/ui/button';
 import { fetchWithAuth } from '@/lib/db/client';
 import { cn } from '@/lib/utils';
 import {
@@ -502,14 +503,25 @@ export function AppSidebar({
             <SidebarGroup>
               <SidebarGroupLabel
                 render={
-                  <button
+                  // story #3164(DS 게이트 키스톤) 가드 — raw-button-baseline.json이 이
+                  // 파일에 고정한 2건(기존 NAV_GROUPS 토글·⌘K 검색)은 grandfather라
+                  // 그대로 두지만, 이 신규 토글은 소문자 버튼 태그를 새로 추가하는
+                  // 자리라 baseline 초과로 걸린다(2026-09-14 CI 실측 — verify-no-new-
+                  // raw-button.ts는 소스 텍스트를 문자 그대로 스캔해 주석 속 예시
+                  // 표기까지 태그로 오인하므로 이 코멘트에도 그 표기를 쓰지 않는다).
+                  // 캐노니컬 Button(@/components/ui/button)으로 — variant="ghost"의
+                  // 부가 스타일(aria-expanded 틴트·citron 포커스 링)은 아래 className
+                  // 에서 명시로 되돌려 기존 그룹 토글과 시각 동일(실 브라우저 재캡처로
+                  // 확認, AC5 캡처 2 갱신).
+                  <Button
                     type="button"
+                    variant="ghost"
                     onClick={() => toggleGroupCollapsed(LEGACY_GROUP_ID)}
                     aria-expanded={!legacyIsCollapsed}
                     aria-label={legacyToggleAriaLabel}
                   />
                 }
-                className="w-full cursor-pointer justify-between hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                className="w-full cursor-pointer justify-between rounded-md border-0 bg-transparent aria-expanded:bg-transparent hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:border-transparent"
               >
                 <span>{legacyGroupLabel}</span>
                 <ChevronDown className={cn('size-3.5 shrink-0 transition-transform duration-150', legacyIsCollapsed && '-rotate-90')} />
