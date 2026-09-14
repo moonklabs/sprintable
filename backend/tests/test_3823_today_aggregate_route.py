@@ -280,11 +280,11 @@ async def test_needs_me_unions_three_sources_and_collapses_duplicate_realdb():
 
 
 async def test_needs_me_dedupe_keeps_gate_and_hitl_of_same_story_separate_by_kind_realdb():
-    """정정 1(페드루 PO 리뷰, PR #4250) — 같은 story에 merge gate(kind=approval)와
-    merge 단계 HITL 질문(kind=answer)이 함께 있으면 dedupe 키가 gate_type만
-    보던 시절엔 (story, id, "merge") 한 키로 접혀 하나가 사라졌다. kind를 키에
-    더해 승인/답변 축을 분리 — needs_me 2건(approval 1·answer 1) 모두 남아야
-    한다."""
+    """정정 1(페드루 PO 리뷰, PR #4250) — 같은 story에 merge gate(kind=signature, story
+    #3868 정정 뒤 — merge는 _HIGH_RISK_GATE_TYPES 멤버라 risk=high)와 merge 단계 HITL
+    질문(kind=answer)이 함께 있으면 dedupe 키가 gate_type만 보던 시절엔 (story, id,
+    "merge") 한 키로 접혀 하나가 사라졌다. kind를 키에 더해 승인/답변 축을 분리 —
+    needs_me 2건(signature 1·answer 1) 모두 남아야 한다."""
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -306,7 +306,7 @@ async def test_needs_me_dedupe_keeps_gate_and_hitl_of_same_story_separate_by_kin
             body = resp.json()
             same_story_items = [i for i in body["needs_me"] if i["work_item"]["id"] == str(story.id)]
             kinds = sorted(i["kind"] for i in same_story_items)
-            assert kinds == ["answer", "approval"], (
+            assert kinds == ["answer", "signature"], (
                 f"gate_type만으로 dedupe하면 kind가 달라도 접혀 하나가 사라진다: {kinds}"
             )
         finally:
@@ -317,8 +317,16 @@ async def test_needs_me_dedupe_keeps_gate_and_hitl_of_same_story_separate_by_kin
 
 
 async def test_needs_me_kind_and_risk_mapping_four_paths_realdb():
-    """AC3 — external_publish→signature/high, 그 외 gate→approval/low, hitl→answer/low,
-    workflow_step(고위험 표시)→approval/high 4경로."""
+    """AC3(story #3868 정정, 2026-09-14) — external_publish→signature/high, 저위험
+    gate(pr_review)→approval/low, hitl→answer/low, workflow_step(고위험 표시)→
+    approval/high 4경로. 예전엔 이 자리에 gate_type="merge"(저위험 예시로 오인)를
+    썼는데, merge는 gate_service.py::_HIGH_RISK_GATE_TYPES 2차축 멤버라 실제로는
+    항상 high다(test_edg_s23_hypothesis_overlay.py의 같은 근거 주석 참고) — 예전
+    today_service가 gate_type=="external_publish" 리터럴 비교만 써서 merge를
+    잘못 approval/low로 매핑하던 바로 그 버그(#3868)를 이 테스트가 보이지 않게
+    고정시키고 있었다. 저위험 경로 표본을 실제 저위험 gate_type(pr_review)으로
+    교체 — merge→signature/high 전환 자체는 아래 posture-축 테스트(AC2)가 명시
+    확인한다."""
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -331,8 +339,8 @@ async def test_needs_me_kind_and_risk_mapping_four_paths_realdb():
             ext_story = await _make_story(s, org.id, project.id, title="외부발행")
             await _make_gate(s, org.id, work_item_type="story", work_item_id=ext_story.id, gate_type="external_publish")
 
-            merge_story = await _make_story(s, org.id, project.id, title="머지")
-            await _make_gate(s, org.id, work_item_type="story", work_item_id=merge_story.id, gate_type="merge")
+            low_story = await _make_story(s, org.id, project.id, title="저위험승인")
+            await _make_gate(s, org.id, work_item_type="story", work_item_id=low_story.id, gate_type="pr_review")
 
             hitl_story = await _make_story(s, org.id, project.id, title="답변대상")
             await _make_hitl_request(s, org.id, project.id, story_id=hitl_story.id)
@@ -355,8 +363,8 @@ async def test_needs_me_kind_and_risk_mapping_four_paths_realdb():
             ext = by_work_item[str(ext_story.id)]
             assert ext["kind"] == "signature" and ext["risk"] == "high"
 
-            merge = by_work_item[str(merge_story.id)]
-            assert merge["kind"] == "approval" and merge["risk"] == "low"
+            low = by_work_item[str(low_story.id)]
+            assert low["kind"] == "approval" and low["risk"] == "low"
 
             hitl = by_work_item[str(hitl_story.id)]
             assert hitl["kind"] == "answer" and hitl["risk"] == "low"
