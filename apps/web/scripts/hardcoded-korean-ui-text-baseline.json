@@ -15,9 +15,6 @@
   ],
   "keys": [
     "app/(authenticated)/[ws]/[proj]/docs/docs-client-layout.tsx::문서 트리 열기",
-    "app/(authenticated)/[ws]/[proj]/docs/docs-shell-client.tsx::검색 결과 없음",
-    "app/(authenticated)/[ws]/[proj]/docs/docs-shell-client.tsx::검색 중...",
-    "app/(authenticated)/[ws]/[proj]/docs/docs-shell-client.tsx::문서 트리 열기",
     "app/(authenticated)/[ws]/[proj]/goals/goals-client.tsx::목표 삭제에 실패했습니다.",
     "app/(authenticated)/[ws]/[proj]/sprints/sprints-client.tsx::명",
     "app/(authenticated)/chats/[conversation_id]/page.tsx::로딩 중…",

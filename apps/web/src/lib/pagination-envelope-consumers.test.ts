@@ -57,8 +57,6 @@ const ALLOWLIST = new Map<string, string>([
     '/api/stories(buildCursorPageMeta)·/api/stories/backlog(수동 camelCase 구성) 둘 다 camelCase — 정합'],
   ['app/(authenticated)/[ws]/[proj]/standup/standup-client.tsx',
     '/api/stories(buildCursorPageMeta) 소비 — camelCase 정합'],
-  ['app/(authenticated)/[ws]/[proj]/docs/docs-shell-client.tsx',
-    '/api/docs(buildCursorPageMeta) 소비 — camelCase 정합'],
   ['app/(authenticated)/[ws]/[proj]/docs/docs-client-layout.tsx',
     '/api/docs(buildCursorPageMeta) 소비 — camelCase 정합'],
   ['app/api/stories/backlog/route.ts',
