@@ -122,10 +122,60 @@ describe('story #3886(가드) — preset 블록 템플릿 소비처 완전성(AC
 
 // ============================================================================
 // AC1 — 실 preset(0376 실물) × 실 소비처 렌더에서 ⟨missing: …⟩ 0.
-// SSOT: backend/alembic/versions/0376_event_card_target_ref_and_ui_copy_t_namespace.py
-// `_TEMPLATES`(2026-09-14 바이트 동일 확認) — 드리프트 시 이 상수도 같이 갱신 필요
-// (자동 동기화 없음, 이 파일 자체가 "미갱신"을 잡지는 못한다 — 별도 리스크로 명시).
-// ============================================================================
+// SSOT: backend/alembic/versions/0376_event_card_target_ref_and_ui_copy_t_namespace.py의
+// `_TEMPLATES`. 페드루 CHANGES(2026-09-14 18:27Z) — "TS 상수가 사본이고 drift 자 0"이면
+// 0377이 이 두 preset을 또 바꿀 때 이 가드가 옛 템플릿으로 계속 GREEN인(헛도는) 결함이
+// 있었다. 처방: 아래에서 실제로 그 .py 파일을 읽어 `_TEMPLATES` 딕셔너리 리터럴을
+// 추출·파싱(Python True/False/None→JSON, trailing comma 제거, 문자열 리터럴 안의 `{`/`}`
+// (mustache 토큰 "{{...}}")는 상태기계로 건너뛴다)하고, 아래 TS 상수와 `toEqual`로 직접
+// 비교한다 — 이 파일이 stale해지면(마이그가 바뀌었는데 TS 상수를 안 고치면) 이 비교
+// 자체가 RED가 된다(더 이상 "주석이 자인"이 아니라 코드가 자인).
+const BACKEND_ALEMBIC_VERSIONS_DIR = path.resolve(__dirname, '../../../backend/alembic/versions');
+const TARGET_MIGRATION_FILE = '0376_event_card_target_ref_and_ui_copy_t_namespace.py';
+const PRESET_KEYS = ['preset.work.status_changed', 'preset.gate.verdict'] as const;
+
+/** 중괄호 짝을 찾되, 큰따옴표 문자열 리터럴(백슬래시 이스케이프 포함) 안의 `{`/`}`는
+ * 세지 않는다 — 이 딕셔너리의 값 자체가 `"{{t.statusChangedHeader}}"`처럼 mustache
+ * 토큰을 담고 있어 순진한 카운팅은 문자열 안 중괄호에 오판한다. */
+function findMatchingBrace(src: string, openIdx: number): number {
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  for (let i = openIdx; i < src.length; i++) {
+    const ch = src[i];
+    if (inString) {
+      if (escape) escape = false;
+      else if (ch === '\\') escape = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') { inString = true; continue; }
+    if (ch === '{') depth++;
+    else if (ch === '}') { depth--; if (depth === 0) return i; }
+  }
+  throw new Error('findMatchingBrace: 짝이 맞는 중괄호를 못 찾음');
+}
+
+function pythonDictLiteralToJson(pySrc: string): string {
+  return pySrc
+    .replace(/\bTrue\b/g, 'true')
+    .replace(/\bFalse\b/g, 'false')
+    .replace(/\bNone\b/g, 'null')
+    .replace(/,(\s*[}\]])/g, '$1'); // Python이 허용하는 trailing comma는 JSON.parse가 거부.
+}
+
+function extractTemplatesDict(filePath: string): Record<string, unknown> {
+  const src = readFileSync(filePath, 'utf8');
+  const marker = '_TEMPLATES: dict[str, dict] = {';
+  const markerIdx = src.indexOf(marker);
+  if (markerIdx === -1) throw new Error(`${filePath}에서 _TEMPLATES 선언을 못 찾음(마이그 형식이 바뀌었을 수 있음)`);
+  const openBraceIdx = markerIdx + marker.length - 1;
+  const closeBraceIdx = findMatchingBrace(src, openBraceIdx);
+  const jsonText = pythonDictLiteralToJson(src.slice(openBraceIdx, closeBraceIdx + 1));
+  return JSON.parse(jsonText) as Record<string, unknown>;
+}
+
+const MIGRATED_TEMPLATES = extractTemplatesDict(path.join(BACKEND_ALEMBIC_VERSIONS_DIR, TARGET_MIGRATION_FILE));
 
 const STATUS_CHANGED_0376 = {
   blocks: [
@@ -147,6 +197,26 @@ const GATE_VERDICT_0376 = {
     ] },
   ],
 };
+
+describe('story #3886(가드) — CHANGES(페드루 2026-09-14 18:27Z) TS 미러 drift 자', () => {
+  it('TS 상수가 0376 마이그 파일의 _TEMPLATES와 바이트(구조) 동일하다 — 드리프트 시 RED', () => {
+    expect(MIGRATED_TEMPLATES['preset.work.status_changed']).toEqual(STATUS_CHANGED_0376);
+    expect(MIGRATED_TEMPLATES['preset.gate.verdict']).toEqual(GATE_VERDICT_0376);
+  });
+
+  it('0376이 이 두 preset 키를 마지막으로 건드린 마이그레이션이다(더 최신 파일이 같은 키를 또 바꾸면 RED)', () => {
+    const files = readdirSync(BACKEND_ALEMBIC_VERSIONS_DIR).filter((f) => /^\d{4}_.*\.py$/.test(f));
+    let latest: { file: string; revision: number } | null = null;
+    for (const f of files) {
+      const revision = Number(f.slice(0, 4));
+      const content = readFileSync(path.join(BACKEND_ALEMBIC_VERSIONS_DIR, f), 'utf8');
+      const touchesAny = PRESET_KEYS.some((k) => content.includes(`"${k}"`));
+      if (!touchesAny) continue;
+      if (!latest || revision > latest.revision) latest = { file: f, revision };
+    }
+    expect(latest?.file).toBe(TARGET_MIGRATION_FILE);
+  });
+});
 
 function catalogOf(entries: Record<string, unknown>): Record<string, EventDefinitionSummary> {
   const out: Record<string, EventDefinitionSummary> = {};
