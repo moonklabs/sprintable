@@ -12,6 +12,22 @@
  *
  * bg-muted 자체는 대상 밖이다(그건 이미 calibrated된 원래 짝 — 위 근거).
  *
+ * ⚠️카디르 QA 지적(2026-09-14 05:30Z, PO 재검) — 최초판은 「같은 요소·JSX 리터럴
+ * className」만 봐서, activation-checklist-banner.tsx의 실제 조상(`<Alert variant=
+ * "info">`)처럼 tint 배경이 **cva variant 정의 안**(alert.tsx의 `alertVariants`)에서
+ * 나오는 컴포넌트 경계를 못 넘었다 — 실 파일에서 고친 3곳 중 1곳을 되돌려도(met ?
+ * text-foreground : text-muted-foreground) 「신규 위반 0」으로 통과하는 거짓 OK가
+ * 재현됐다. AC2가 막으려던 바로 그 패턴이라 한계 수용이 아니라 보강이 맞다.
+ *
+ * 처방: `buildComponentTintMap()`이 스캔 시점에 `src/components/ui/*.tsx`의 cva()
+ * 정의를 AST로 읽어 «컴포넌트·variant축·값 → tint 계열» 지도를 만든다(하드코딩 0 —
+ * 컴포넌트 이름·계열 어느 것도 손으로 나열하지 않는다). JSX 워커는 `<Alert
+ * variant="info">`처럼 그 지도에 있는 조합을 리터럴 `bg-info-tint` 조상과 동일하게
+ * 취급한다. **완전성 fail-closed**: 그 파일들의 원시 정규식 매치 수(주석 제외)가
+ * 구조화 추출이 처리한(entries+incomplete) 수보다 많으면(추출이 못 옮긴 tint 자리가
+ * 있다는 뜻) 또는 어떤 tint 변형이 컴포넌트 이름을 0개/2개+로 모호하게 찾으면 가드
+ * 자체가 즉시 FAIL한다(조용히 건너뛰지 않는다).
+ *
  * 자매 가드 verify-cross-element-tint-text.ts(story #2590 A)와 같은 원리(JSX 트리
  * 파싱 + 조상 pale-bg 추적)를 쓰되 대상 클래스가 다르다(계열색 아닌 muted-foreground
  * 정확매치라 size/icon 예외가 불요) — 그 파일은 그대로 두고 별도 스크립트로 낸다
@@ -28,6 +44,7 @@ import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 
 const SRC_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src');
+const UI_DIR = path.join(SRC_ROOT, 'components/ui');
 const EXT_RE = /\.tsx$/;
 const TEST_RE = /\.test\.tsx$/;
 const MIN_EXPECTED_FILES = 300;
@@ -35,9 +52,13 @@ const MIN_EXPECTED_FILES = 300;
 const TINT_FAMILIES = ['destructive', 'info', 'success', 'warning'] as const;
 export type TintFamily = (typeof TINT_FAMILIES)[number];
 
+// (?<![\w:-]) — 앞이 글자/숫자/-/: 가 아니어야 매치(카디르 지적 반영: `hover:`·`data-[...]:focus:`
+// 같은 상태 한정자 뒤에 붙은 tint는 "항상 적용"이 아니라 정적 가드 밖 — dropdown-menu.tsx의
+// `data-[variant=destructive]:focus:bg-destructive-tint`가 실 반례).
 const TINT_FAMILY_BG_RE = new RegExp(
-  `(?<![\\w-])bg-(${TINT_FAMILIES.join('|')})-(?:tint|bg)(?:/\\d+)?(?![\\w-])`,
+  `(?<![\\w:-])bg-(${TINT_FAMILIES.join('|')})-(?:tint|bg)(?:/\\d+)?(?![\\w-])`,
 );
+const TINT_FAMILY_BG_RE_G = new RegExp(TINT_FAMILY_BG_RE.source, 'g');
 const MUTED_TEXT_RE = /(?<![\w-])text-muted-foreground(?![\w-])/;
 
 function classStringsFromExpr(e: ts.Expression): string[] {
@@ -71,15 +92,239 @@ function classNameStringsOf(opening: ts.JsxOpeningLikeElement): string[] {
   return [];
 }
 
+/** 한 JSX 요소의 (props 이름 → 리터럴 문자열 값) — variant="info" 같은 것만(동적 값은
+ * "항상 적용 보장 안 됨"이라 #2590 A와 같은 정밀성으로 제외). */
+function literalPropsOf(opening: ts.JsxOpeningLikeElement): Map<string, string> {
+  const props = new Map<string, string>();
+  for (const a of opening.attributes.properties) {
+    if (ts.isJsxAttribute(a) && a.initializer) {
+      const name = a.name.getText();
+      if (ts.isStringLiteral(a.initializer)) {
+        props.set(name, a.initializer.text);
+      } else if (
+        ts.isJsxExpression(a.initializer) &&
+        a.initializer.expression &&
+        ts.isStringLiteral(a.initializer.expression)
+      ) {
+        props.set(name, a.initializer.expression.text);
+      }
+    }
+  }
+  return props;
+}
+
+// ── cva variant → tint 계열 지도 추출(카디르 QA 보강, 2026-09-14) ──────────────────
+
+/** componentTag → axisPropName → axisValue → family */
+export type ComponentTintMap = Map<string, Map<string, Map<string, TintFamily>>>;
+
+export interface CvaExtractionResult {
+  map: ComponentTintMap;
+  /** 완전성 fail-closed 사유 — 비어있지 않으면 main()이 FAIL해야 한다. */
+  incompleteReasons: string[];
+}
+
+/** 한 ui 컴포넌트 파일에서 cva() 정의를 읽어 {cva 변수명 → axis → value → class문자열}을
+ * 뽑고, 그 cva 변수를 호출하는 대문자 시작 컴포넌트 이름을 찾아 지도를 만든다. 컴포넌트를
+ * 못 찾거나(0개) 여러 개로 모호하면(2개+) 그 축·값은 incompleteReasons에 실린다(하드코딩
+ * 없이 "손 못 댄 자리"를 스스로 신고 — 조용히 건너뛰지 않는다). */
+export function extractCvaTintVariants(content: string, file: string): CvaExtractionResult {
+  const sf = ts.createSourceFile(file, content, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+
+  interface CvaDef { varName: string; axisValues: Map<string, Map<string, string>>; }
+  const cvaDefs: CvaDef[] = [];
+
+  function stringFromExpr(e: ts.Expression): string | null {
+    if (ts.isStringLiteral(e) || ts.isNoSubstitutionTemplateLiteral(e)) return e.text;
+    if (ts.isTemplateExpression(e)) return [e.head.text, ...e.templateSpans.map((sp) => sp.literal.text)].join(' ');
+    return null;
+  }
+
+  function propKeyName(name: ts.PropertyName): string {
+    const text = name.getText();
+    return text.replace(/^['"]|['"]$/g, '');
+  }
+
+  function collectCvaDefs(node: ts.Node): void {
+    if (
+      ts.isVariableDeclaration(node) &&
+      node.initializer &&
+      ts.isCallExpression(node.initializer) &&
+      ts.isIdentifier(node.initializer.expression) &&
+      node.initializer.expression.text === 'cva' &&
+      ts.isIdentifier(node.name)
+    ) {
+      const varName = node.name.text;
+      const optsArg = node.initializer.arguments[1];
+      const axisValues = new Map<string, Map<string, string>>();
+      if (optsArg && ts.isObjectLiteralExpression(optsArg)) {
+        for (const prop of optsArg.properties) {
+          if (
+            ts.isPropertyAssignment(prop) &&
+            propKeyName(prop.name) === 'variants' &&
+            ts.isObjectLiteralExpression(prop.initializer)
+          ) {
+            for (const axisProp of prop.initializer.properties) {
+              if (ts.isPropertyAssignment(axisProp) && ts.isObjectLiteralExpression(axisProp.initializer)) {
+                const axisName = propKeyName(axisProp.name);
+                const valueMap = new Map<string, string>();
+                for (const valProp of axisProp.initializer.properties) {
+                  if (ts.isPropertyAssignment(valProp)) {
+                    const cls = stringFromExpr(valProp.initializer);
+                    if (cls !== null) valueMap.set(propKeyName(valProp.name), cls);
+                  }
+                }
+                axisValues.set(axisName, valueMap);
+              }
+            }
+          }
+        }
+      }
+      cvaDefs.push({ varName, axisValues });
+    }
+    node.forEachChild(collectCvaDefs);
+  }
+  collectCvaDefs(sf);
+
+  // cva 변수를 호출하는(예: alertVariants({ variant })) 가장 가까운 대문자 컴포넌트를 찾는다
+  // — forwardRef((...) => ...)에 할당된 const나 function 선언, 둘 다 커버.
+  function findEnclosingComponentName(node: ts.Node): string | null {
+    let cur: ts.Node | undefined = node;
+    while (cur) {
+      if (ts.isVariableDeclaration(cur) && ts.isIdentifier(cur.name) && /^[A-Z]/.test(cur.name.text)) {
+        return cur.name.text;
+      }
+      if (ts.isFunctionDeclaration(cur) && cur.name && /^[A-Z]/.test(cur.name.text)) {
+        return cur.name.text;
+      }
+      cur = cur.parent;
+    }
+    return null;
+  }
+
+  const cvaVarNames = new Set(cvaDefs.map((d) => d.varName));
+  const cvaVarToComponents = new Map<string, Set<string>>();
+  function collectUsages(node: ts.Node): void {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && cvaVarNames.has(node.expression.text)) {
+      const varName = node.expression.text;
+      const comp = findEnclosingComponentName(node);
+      if (comp) {
+        if (!cvaVarToComponents.has(varName)) cvaVarToComponents.set(varName, new Set());
+        cvaVarToComponents.get(varName)!.add(comp);
+      }
+    }
+    node.forEachChild(collectUsages);
+  }
+  collectUsages(sf);
+
+  const map: ComponentTintMap = new Map();
+  const incompleteReasons: string[] = [];
+  let accountedMatches = 0;
+
+  for (const def of cvaDefs) {
+    const comps = cvaVarToComponents.get(def.varName);
+    for (const [axis, valueMap] of def.axisValues) {
+      for (const [value, cls] of valueMap) {
+        const matches = cls.match(TINT_FAMILY_BG_RE_G);
+        if (!matches || matches.length === 0) continue;
+        accountedMatches += matches.length;
+        const family = matches[0]!.match(TINT_FAMILY_BG_RE)![1] as TintFamily;
+        if (!comps || comps.size === 0) {
+          incompleteReasons.push(
+            `${file}::${def.varName}.${axis}.${value} — tint(${family}) 클래스가 있지만 이 cva를 쓰는 컴포넌트를 못 찾음`,
+          );
+          continue;
+        }
+        if (comps.size > 1) {
+          incompleteReasons.push(
+            `${file}::${def.varName}.${axis}.${value} — tint(${family}) 클래스인데 이 cva를 쓰는 컴포넌트가 ${comps.size}개로 모호함(${[...comps].join(', ')})`,
+          );
+          continue;
+        }
+        const comp = [...comps][0]!;
+        if (!map.has(comp)) map.set(comp, new Map());
+        if (!map.get(comp)!.has(axis)) map.get(comp)!.set(axis, new Map());
+        map.get(comp)!.get(axis)!.set(value, family);
+      }
+    }
+  }
+
+  // 완전성 크로스체크 — 이 파일 전체(주석 제외)의 원시 tint 매치 수가 cva 구조화 추출이
+  // 처리한(=map에 실렸거나 incomplete로 신고한) 수보다 많으면, cva variants 밖(또는 내가
+  // 못 파싱한 형태) 어딘가에 tint 클래스가 있다는 뜻 — 조용히 건너뛰지 않고 FAIL한다.
+  const stripped = content.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+  const rawMatches = stripped.match(TINT_FAMILY_BG_RE_G) ?? [];
+  if (rawMatches.length > accountedMatches) {
+    incompleteReasons.push(
+      `${file} — 파일 전체 tint 클래스 원시 매치 ${rawMatches.length}건 > cva 구조화 추출이 처리한 ${accountedMatches}건(추출 완전성 fail-closed)`,
+    );
+  }
+
+  return { map, incompleteReasons };
+}
+
+function mergeComponentTintMaps(a: ComponentTintMap, b: ComponentTintMap): void {
+  for (const [comp, axisMap] of b) {
+    if (!a.has(comp)) a.set(comp, new Map());
+    for (const [axis, valueMap] of axisMap) {
+      if (!a.get(comp)!.has(axis)) a.get(comp)!.set(axis, new Map());
+      for (const [value, family] of valueMap) {
+        a.get(comp)!.get(axis)!.set(value, family);
+      }
+    }
+  }
+}
+
+/** `src/components/ui/*.tsx`(비재귀 — 카디르 지시 그대로)를 스캔해 컴포넌트 지도를 만든다.
+ * 하드코딩 0 — 컴포넌트 이름·계열 어느 것도 이 함수 밖에 나열하지 않는다. */
+export function buildComponentTintMap(uiDir: string): CvaExtractionResult {
+  const map: ComponentTintMap = new Map();
+  const incompleteReasons: string[] = [];
+  let entries: string[];
+  try {
+    entries = readdirSync(uiDir).filter((e) => EXT_RE.test(e) && !TEST_RE.test(e));
+  } catch {
+    incompleteReasons.push(`${uiDir} — 디렉터리를 못 읽음(가드가 헛돈다)`);
+    return { map, incompleteReasons };
+  }
+  for (const entry of entries) {
+    const abs = path.join(uiDir, entry);
+    if (statSync(abs).isDirectory()) continue;
+    const content = readFileSync(abs, 'utf8');
+    const rel = `components/ui/${entry}`;
+    const result = extractCvaTintVariants(content, rel);
+    mergeComponentTintMaps(map, result.map);
+    incompleteReasons.push(...result.incompleteReasons);
+  }
+  return { map, incompleteReasons };
+}
+
+// ── JSX 스캔(조상 pale-bg 추적) ──────────────────────────────────────────────────
+
 export interface Violation { file: string; line: number; family: TintFamily; className: string; }
 
 export function violationKey(v: Pick<Violation, 'file' | 'family'>): string {
   return `${v.file}::muted-on-${v.family}-tint`;
 }
 
-export function scanContent(content: string, file: string): Violation[] {
+/** componentMap이 주어지면(story #3839 카디르 보강) `<Alert variant="info">`처럼 cva
+ * variant로만 tint가 나오는 컴포넌트 경계도 리터럴 `bg-info-tint` 조상과 동일하게 본다. */
+export function scanContent(content: string, file: string, componentMap?: ComponentTintMap): Violation[] {
   const sf = ts.createSourceFile(file, content, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const violations: Violation[] = [];
+
+  function familyFromComponent(opening: ts.JsxOpeningLikeElement): TintFamily | null {
+    if (!componentMap) return null;
+    const tag = ts.isJsxSelfClosingElement(opening) ? opening.tagName.getText() : opening.tagName.getText();
+    const axisMap = componentMap.get(tag);
+    if (!axisMap) return null;
+    const props = literalPropsOf(opening);
+    for (const [axis, valueMap] of axisMap) {
+      const value = props.get(axis);
+      if (value !== undefined && valueMap.has(value)) return valueMap.get(value)!;
+    }
+    return null;
+  }
 
   function walk(node: ts.Node, ancestorFamily: TintFamily | null): void {
     let opening: ts.JsxOpeningLikeElement | null = null;
@@ -92,8 +337,10 @@ export function scanContent(content: string, file: string): Violation[] {
       const bgMatch = cls.match(TINT_FAMILY_BG_RE);
       // 같은 요소가 새 tint를 도입하면(같은 요소·직계/深 자식 둘 다 커버) 그 순간부터
       // «유효 조상»을 그 family로 갱신 — 같은 요소 안 bg+text 공존(같은 요소 케이스)도
-      // 아래 elementFamily 판정으로 함께 잡힌다.
-      const elementFamily: TintFamily | null = (bgMatch?.[1] as TintFamily | undefined) ?? ancestorFamily;
+      // 아래 elementFamily 판정으로 함께 잡힌다. 리터럴 클래스가 없으면 컴포넌트 지도
+      // (예: <Alert variant="info">)를 본다 — 카디르 보강(2026-09-14).
+      const elementFamily: TintFamily | null =
+        (bgMatch?.[1] as TintFamily | undefined) ?? familyFromComponent(opening) ?? ancestorFamily;
       if (elementFamily && MUTED_TEXT_RE.test(cls)) {
         const line = sf.getLineAndCharacterOfPosition(opening.getStart(sf)).line + 1;
         violations.push({ file, line, family: elementFamily, className: cls });
@@ -115,7 +362,7 @@ function walkDir(dir: string, out: string[]): void {
   }
 }
 
-export function scanRepo(srcRoot: string): Violation[] {
+export function scanRepo(srcRoot: string, componentMap: ComponentTintMap): Violation[] {
   const files: string[] = [];
   walkDir(srcRoot, files);
   if (files.length < MIN_EXPECTED_FILES) {
@@ -124,7 +371,7 @@ export function scanRepo(srcRoot: string): Violation[] {
   const violations: Violation[] = [];
   for (const abs of files) {
     const rel = path.relative(srcRoot, abs).split(path.sep).join('/');
-    violations.push(...scanContent(readFileSync(abs, 'utf8'), rel));
+    violations.push(...scanContent(readFileSync(abs, 'utf8'), rel, componentMap));
   }
   return violations;
 }
@@ -138,11 +385,11 @@ export function countViolations(violations: Violation[]): Map<string, number> {
   return counts;
 }
 
-// story #3839 착수 시점(2026-09-14, PR #4259에 이미 반영된 activation-checklist-banner.tsx
-// 3곳은 fix 후라 이 목록에 없다) 레포 전수 스캔(21곳·35건) — 나머지는 이 스토리 스코프 밖
-// (화면이 다르고 개별 triage 필요) 기존 채무를 그대로 얼린다. 신규 재유입·증가만 막고,
-// 늘어도 줄어도(stale) FAIL — PO 승인 없이 조용히 못 움직인다(no-new-alpha-text-foreground.ts와
-// 동형 관례).
+// story #3839 재측정(2026-09-14 05:30Z, 카디르 컴포넌트-경계 보강 뒤 develop HEAD 재스캔,
+// 23곳·45건) —
+// PR #4259에 이미 반영된 activation-checklist-banner.tsx 3곳은 fix 후라 이 목록에 없다.
+// 나머지는 이 스토리 스코프 밖(화면이 다르고 개별 triage 필요) 기존 채무를 그대로 얼린다.
+// 신규 재유입·증가만 막고, 늘어도 줄어도(stale) FAIL — PO 승인 없이 조용히 못 움직인다.
 export const GRANDFATHER_BASELINE = new Map<string, number>([
   ['app/(authenticated)/[ws]/[proj]/sprints/sprints-client.tsx::muted-on-info-tint', 1],
   ['app/(authenticated)/[ws]/[proj]/standup/standup-client.tsx::muted-on-destructive-tint', 1],
@@ -152,6 +399,10 @@ export const GRANDFATHER_BASELINE = new Map<string, number>([
   ['app/(authenticated)/organization/workforce/recruiter/recruiter-client.tsx::muted-on-warning-tint', 2],
   ['components/agents/access-matrix-tab.tsx::muted-on-success-tint', 1],
   ['components/ai/ai-generation-loading.tsx::muted-on-info-tint', 4],
+  // 카디르 QA 보강(2026-09-14 05:30Z, cva variant 컴포넌트 경계 대응) 뒤 새로 보이게 된 자리 —
+  // <Alert variant="destructive">(리터럴 클래스 아닌 cva 경계) 안 text-muted-foreground 5곳씩.
+  ['components/content/api-usage-budget-exceeded-banner.tsx::muted-on-destructive-tint', 5],
+  ['components/content/generation-budget-exceeded-banner.tsx::muted-on-destructive-tint', 5],
   ['components/cage/stuck-handoff-section.tsx::muted-on-destructive-tint', 1],
   ['components/chat/command-hint-notice.tsx::muted-on-info-tint', 1],
   ['components/chat/hitl-approval-card.tsx::muted-on-warning-tint', 3],
@@ -187,7 +438,22 @@ export function compareToBaseline(actual: Map<string, number>, baseline: Map<str
 }
 
 function main(): number {
-  const violations = scanRepo(SRC_ROOT);
+  const { map: componentMap, incompleteReasons } = buildComponentTintMap(UI_DIR);
+  if (incompleteReasons.length > 0) {
+    console.error('❌ FAIL: cva variant → tint 지도 추출 불완전(카디르 QA 보강, AC2 완전성 fail-closed):');
+    for (const r of incompleteReasons) console.error(`  - ${r}`);
+    console.error(
+      '\n이 가드는 손으로 나열한 컴포넌트 목록이 아니라 components/ui/*.tsx의 cva() 정의를 그때그때' +
+        ' 읽어 지도를 만든다 — 위 자리들은 그 지도로 못 옮겨졌다(조용히 건너뛰지 않는다). 원인을 고치거나' +
+        ' extractCvaTintVariants()의 파싱 범위를 넓힐 것.',
+    );
+    return 1;
+  }
+  console.log(
+    `[3839] cva variant → tint 지도: 컴포넌트 ${componentMap.size}개(${[...componentMap.keys()].join(', ')})`,
+  );
+
+  const violations = scanRepo(SRC_ROOT, componentMap);
   const actual = countViolations(violations);
   const { increased, stale } = compareToBaseline(actual, GRANDFATHER_BASELINE);
 
@@ -215,10 +481,10 @@ function main(): number {
     }
   }
   console.error(
-    '\ntint 배경(destructive/info/success/warning -tint·-bg) 위 text-muted-foreground는' +
-      ' AA 미달(ink-3는 --muted 배경 기준으로만 조정된 값) — text-foreground를 쓴다(#2420' +
-      ' 규율과 같은 축). GRANDFATHER_BASELINE의 개수는 항상 실측과 정확히 일치해야 한다' +
-      '(늘어도·줄어도 FAIL — PO 승인 없이 조용히 못 움직인다).',
+    '\ntint 배경(destructive/info/success/warning -tint·-bg — 리터럴 className 또는 cva variant' +
+      ' 경계 둘 다) 위 text-muted-foreground는 AA 미달(ink-3는 --muted 배경 기준으로만 조정된 값) —' +
+      ' text-foreground를 쓴다(#2420 규율과 같은 축). GRANDFATHER_BASELINE의 개수는 항상 실측과' +
+      ' 정확히 일치해야 한다(늘어도·줄어도 FAIL — PO 승인 없이 조용히 못 움직인다).',
   );
   return 1;
 }
