@@ -43,7 +43,8 @@
     "upgradePlan": "Upgrade Plan",
     "close": "Close",
     "add": "Add",
-    "confirm": "Confirm"
+    "confirm": "Confirm",
+    "acceptanceCriteria": "Acceptance Criteria"
   },
   "activation": {
     "bannerTitle": "Finish setting up your account",
@@ -1119,6 +1120,8 @@
     "allLabels": "All Labels",
     "labelsActive": "{count} label(s)",
     "searchLabels": "Search labels...",
+    "labelsSectionTitle": "Labels",
+    "dependenciesSectionTitle": "Dependencies",
     "dep": {
       "duplicateConnection": "Dependency already linked",
       "cycleDetected": "Dependency creates a cycle",
@@ -1132,7 +1135,11 @@
       "searchPlaceholder": "Search by story title...",
       "incompletePreds": "{count} incomplete predecessor(s) — check before starting",
       "candidatesHeader": "Found in this story's body",
-      "candidateMentionHint": "Mentioned in this story's body"
+      "candidateMentionHint": "Mentioned in this story's body",
+      "blockedByLabel": "Blocked by",
+      "blockingLabel": "Blocking",
+      "dependsOnLabel": "Depends on",
+      "dependedByLabel": "Depended by"
     }
   },
   "session": {
