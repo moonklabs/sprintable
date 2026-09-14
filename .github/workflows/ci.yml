@@ -1766,6 +1766,12 @@ jobs:
       - name: "Verify no raw role JSX text (story #3770 regression guard)"
         run: pnpm --filter web verify:no-raw-role-jsx-text
 
+      # story #3876(§⑤ 낱말 드리프트, PO 확定 2026-09-14) — JSX 텍스트 자식에 순 ASCII
+      # 영단어/구가 t() 없이 그대로 박히는 클래스 회귀가드(스토리 패널 Dispatch/Labels/
+      # Dependencies/Blocked by 등 8곳이 ko 로케일에서도 영문 그대로 노출된 재발 방지).
+      - name: "Verify no raw ASCII JSX text (story #3876 regression guard)"
+        run: pnpm --filter web verify:no-raw-ascii-jsx-text
+
       # story #3813(Phase3·3-4 PR5-a CHANGES, 페드루 PO 確定 2026-09-12) — pasted_secret
       # 채널(wordpress·webhook·stibee…) 생성 BFF는 `[channel]` 동적 세그먼트가 아니라
       # 채널마다 리터럴 route.ts라, PASTED_SECRET_FIELDS에 채널을 등재해도 대응
