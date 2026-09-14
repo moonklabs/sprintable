@@ -116,6 +116,10 @@ const EXPECTED_GROUPS: Array<{ labelKey: string | null; labels: string[] }> = [
   { labelKey: null, labels: ['일감'] },
   { labelKey: null, labels: ['결과'] },
   { labelKey: 'zoneConnectRules', labels: ['채널 연결', '콘텐츠 규칙'] },
+  // story #3836(UX-v3·셸 후속) — 「더보기」(LEGACY_GROUP_ID)는 기본 접힘(AC1)이라 이
+  // 테스트(expandAllGroups가 'connect-rules'만 편다)에선 항목이 DOM에 없다 — 그룹
+  // 자체(라벨+토글)는 렌더된다는 사실만 여기서 잠그고, 내용물은 전용 스위트에서.
+  { labelKey: 'navMore', labels: [] },
 ];
 
 // 카디르 QA(PR#3100) 지적 — 라벨은 맞는데 href가 다른 항목과 뒤바뀐 뮤테이션은 그룹별 라벨
@@ -136,7 +140,7 @@ describe('AppSidebar — story #3824 5항목 축소 렌더 회귀가드(UX-v3·F
     // 헤더리스 그룹(오늘·일감·결과)은 sidebar-group-label 자체가 없다 — 라벨 그룹은
     // 「연결·규칙」 하나뿐.
     const groupLabels = [...container.querySelectorAll('[data-slot="sidebar-group-label"]')].map((el) => el.textContent);
-    expect(groupLabels).toEqual(['연결·규칙']);
+    expect(groupLabels).toEqual(['연결·규칙', '더보기']);
 
     const groups = [...container.querySelectorAll('[data-slot="sidebar-group"]')];
     expect(groups.length).toBe(EXPECTED_GROUPS.length);
@@ -317,8 +321,11 @@ describe('AppSidebar — story #3824 5항목 축소 렌더 회귀가드(UX-v3·F
     const workLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('일감'));
     expect(workLink).toBeDefined();
     // 구역 토글 버튼만 좁혀서 잰다 — 컨테이너 전체 button[aria-expanded]는 다른 컴포넌트
-    // (드롭다운·스위처 등)의 닫힌 트리거도 걸려 오탐한다.
-    const toggles = [...container.querySelectorAll('[data-slot="sidebar-group-label"]')];
+    // (드롭다운·스위처 등)의 닫힌 트리거도 걸려 오탐한다. story #3836 — 「더보기」는
+    // 이 f81657f8 규칙 밖의 별도 기본값(기본 접힘, AC1)이라 이 대조에서 뺀다(전용
+    // 스위트가 그 기본값을 따로 잠근다).
+    const toggles = [...container.querySelectorAll('[data-slot="sidebar-group-label"]')]
+      .filter((b) => b.textContent !== '더보기');
     expect(toggles.length).toBeGreaterThan(0);
     expect(toggles.every((b) => b.getAttribute('aria-expanded') === 'true')).toBe(true);
   });
@@ -335,7 +342,9 @@ describe('AppSidebar — story #3824 5항목 축소 렌더 회귀가드(UX-v3·F
     for (const height of [800, 1080]) {
       stubViewportHeight(height);
       await mount();
-      const toggles = [...container.querySelectorAll('[data-slot="sidebar-group-label"]')];
+      // story #3836 — 「더보기」는 이 회귀가드 밖(별도 기본값, AC1), 위 테스트와 동일 이유로 제외.
+      const toggles = [...container.querySelectorAll('[data-slot="sidebar-group-label"]')]
+        .filter((b) => b.textContent !== '더보기');
       expect(toggles.every((b) => b.getAttribute('aria-expanded') === 'true')).toBe(true);
       await act(async () => { root.unmount(); });
       container.remove();

@@ -11,11 +11,13 @@ import { CommandPalette } from '@/components/command-palette/command-palette';
 import { ProfileMenu } from '@/components/nav/profile-menu';
 import { BusinessInfoDisclosure } from '@/components/nav/business-info-disclosure';
 import { UnifiedSwitcher, type OrgSwitcherItem } from '@/components/nav/unified-switcher';
+import { Button } from '@/components/ui/button';
 import { fetchWithAuth } from '@/lib/db/client';
 import { cn } from '@/lib/utils';
 import {
   NAV_GROUPS,
   CHAT_CENTER_ITEM,
+  VISIBLE_LEGACY_NAV_ITEMS,
 } from '@/lib/nav-config';
 import { useSseMultiplexerContext } from '@/components/realtime-provider';
 import {
@@ -60,6 +62,13 @@ interface AppSidebarProps {
 // 없는 그룹은 위 동적 기본값을 따른다(AC3 "기억이 없을 때도 기본값으로 온전히 선다").
 const SIDEBAR_GROUP_COLLAPSED_STORAGE_KEY = 'sidebar_group_collapsed';
 
+// story #3836(UX-v3·셸 후속, 선생님 지적 2026-09-14) — NAV_GROUPS 밖의 새 접힘 절(「더보기」,
+// LEGACY_NAV_ITEMS 17개). id는 모바일 /more의 legacyGroup.id('legacy')와 맞춰(같은 개념,
+// 두 화면에서 같은 이름) collapsedOverrides가 이 그룹도 NAV_GROUPS와 동일한 «사람별 기억»
+// 경로를 그대로 탄다(아래 mergeStoredCollapsedOverrides가 group id 목록을 인자로 받도록
+// 넓혀 NAV_GROUPS 밖 이 id도 포함시킨다 — 전용 코드 경로 0).
+const LEGACY_GROUP_ID = 'legacy';
+
 function readStoredCollapsedOverrides(): Record<string, boolean> {
   if (typeof window === 'undefined') return {};
   try {
@@ -75,13 +84,14 @@ function readStoredCollapsedOverrides(): Record<string, boolean> {
 function mergeStoredCollapsedOverrides(
   defaults: Set<string>,
   overrides: Record<string, boolean>,
+  collapsibleGroupIds: string[],
 ): Set<string> {
   const next = new Set(defaults);
-  for (const group of NAV_GROUPS) {
-    const stored = overrides[group.id];
+  for (const groupId of collapsibleGroupIds) {
+    const stored = overrides[groupId];
     if (stored === undefined) continue;
-    if (stored) next.add(group.id);
-    else next.delete(group.id);
+    if (stored) next.add(groupId);
+    else next.delete(groupId);
   }
   return next;
 }
@@ -190,7 +200,11 @@ export function AppSidebar({
   // 만들던 계산(activeGroupId·viewportHeight)도 이제 이 자리에선 쓸모가 없다 — 기본값은
   // 뷰포트/활성 구역과 무관한 빈 Set(전부 펼침). 아래 collapsedOverrides(사람별 기억)가
   // 유일한 접힘 경로다.
-  const defaultCollapsedGroupIds = useMemo(() => new Set<string>(), []);
+  // story #3836 — 위 f81657f8 규칙(NAV_GROUPS는 기본 전부 펼침)은 그대로 두되, 「더보기」
+  // (LEGACY_GROUP_ID)만 이 카드의 명시 AC1대로 기본 접힘이다 — 서로 다른 두 그룹 «종류»의
+  // 기본값이 다른 것이지 f81657f8 결정을 뒤집는 게 아니다(그 결정은 NAV_GROUPS 대상으로
+  // 그대로 유효).
+  const defaultCollapsedGroupIds = useMemo(() => new Set<string>([LEGACY_GROUP_ID]), []);
 
   // story #d986fd6c(IA·S4) — 그룹별 접힘 «기억». 서버 렌더는 항상 빈 overrides({})로
   // 시작해(하이드레이션 불일치 방지, sidebar_width의 SIDEBAR_WIDTH_STORAGE_KEY 마운트-후
@@ -218,9 +232,13 @@ export function AppSidebar({
       setCollapsedOverrides(overrides);
     }
   }, []);
+  const collapsibleGroupIds = useMemo(
+    () => [...NAV_GROUPS.map((g) => g.id), LEGACY_GROUP_ID],
+    [],
+  );
   const collapsedGroupIds = useMemo(
-    () => mergeStoredCollapsedOverrides(defaultCollapsedGroupIds, collapsedOverrides),
-    [defaultCollapsedGroupIds, collapsedOverrides],
+    () => mergeStoredCollapsedOverrides(defaultCollapsedGroupIds, collapsedOverrides, collapsibleGroupIds),
+    [defaultCollapsedGroupIds, collapsedOverrides, collapsibleGroupIds],
   );
 
   const toggleGroupCollapsed = useCallback((groupId: string) => {
@@ -461,6 +479,95 @@ export function AppSidebar({
           </Fragment>
           );
         })}
+        {/* story #3836(UX-v3·셸 후속, 선생님 지적 2026-09-14) — 3824가 5항목으로 줄이며
+            사이드바에서 빠진 LEGACY_NAV_ITEMS 17개(⌘K 팔레트·모바일 /more가 이미 그 1급
+            진입점)를 이 접힘 절로 되돌린다. 항목 자체는 VISIBLE_LEGACY_NAV_ITEMS(nav-
+            config.ts SSOT, 모바일 /more와 정확히 같은 정의) 그대로 순회 — 이 파일이
+            자기만의 목록을 다시 짓지 않는다(AC2/AC3). 기본 접힘(AC1) — 위 f81657f8은
+            NAV_GROUPS(전부 펼침)만의 결정이라 이 새 그룹엔 안 걸린다. */}
+        {(() => {
+          // story #3836(AC1) — 「더보기」 안 항목 링크(NAV_GROUPS 렌더 루프와 동일한
+          // static/resource 링크 계산, 새 축 0). 한 항목이라도 활성이면 접힘 상태와
+          // 무관하게 펼쳐야 활성 하이라이트가 실제로 보인다(legacyIsCollapsed 계산).
+          const legacyLinks = VISIBLE_LEGACY_NAV_ITEMS.map((item) => ({
+            item,
+            link: item.kind === 'static' ? { href: item.path, isActive: isActive(item.path) } : resourceLink(item.path),
+          }));
+          const legacyHasActiveItem = legacyLinks.some(({ link }) => link.isActive);
+          const legacyIsCollapsed = collapsedGroupIds.has(LEGACY_GROUP_ID) && !legacyHasActiveItem;
+          const legacyGroupLabel = t('navMore');
+          const legacyToggleAriaLabel = legacyIsCollapsed
+            ? t('groupExpand', { group: legacyGroupLabel })
+            : t('groupCollapse', { group: legacyGroupLabel });
+          return (
+            <SidebarGroup>
+              <SidebarGroupLabel
+                render={
+                  // story #3164(DS 게이트 키스톤) 가드 — raw-button-baseline.json이 이
+                  // 파일에 고정한 2건(기존 NAV_GROUPS 토글·⌘K 검색)은 grandfather라
+                  // 그대로 두지만, 이 신규 토글은 소문자 버튼 태그를 새로 추가하는
+                  // 자리라 baseline 초과로 걸린다(2026-09-14 CI 실측 — verify-no-new-
+                  // raw-button.ts는 소스 텍스트를 문자 그대로 스캔해 주석 속 예시
+                  // 표기까지 태그로 오인하므로 이 코멘트에도 그 표기를 쓰지 않는다).
+                  // 캐노니컬 Button(@/components/ui/button)으로 — variant="ghost"의
+                  // 부가 스타일(aria-expanded 틴트·citron 포커스 링)은 아래 className
+                  // 에서 명시로 되돌려 기존 그룹 토글과 시각 동일(실 브라우저 재캡처로
+                  // 확認, AC5 캡처 2 갱신).
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => toggleGroupCollapsed(LEGACY_GROUP_ID)}
+                    aria-expanded={!legacyIsCollapsed}
+                    aria-label={legacyToggleAriaLabel}
+                  />
+                }
+                // 유나 QA 코드리뷰 지적(2026-09-14, 페드루 전달) — mergeProps(Base UI, 일반
+                // React prop 병합)는 이 저장소 cn()의 tailwind-merge와 다른 함수라 Button
+                // size="default"의 `min-h-11`(44px)이 `h-8`(32px, min-height가 아닌 height라
+                // twMerge 충돌군이 애초에 다름)과 절대 충돌하지 않고 살아남는다 — min-height가
+                // 선언된 height보다 크면 렌더 높이는 min-height를 따른다(CSS 규격). `min-h-8`
+                // 명시로 그 최소치를 형제 라벨과 맞춘다(min-w-11도 동형 이유로 함께 되돌림).
+                className="w-full min-h-8 min-w-0 cursor-pointer justify-between rounded-md border-0 bg-transparent aria-expanded:bg-transparent hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:border-transparent"
+              >
+                <span>{legacyGroupLabel}</span>
+                <ChevronDown className={cn('size-3.5 shrink-0 transition-transform duration-150', legacyIsCollapsed && '-rotate-90')} />
+              </SidebarGroupLabel>
+              {!legacyIsCollapsed ? (
+                <SidebarGroupContent>
+                  <SidebarMenu>
+                    {legacyLinks.map(({ item, link }) => {
+                      const Icon = item.icon;
+                      const label = t(item.labelKey);
+                      return (
+                        <SidebarMenuItem key={item.id}>
+                          <SidebarMenuButton
+                            render={
+                              <Link
+                                href={link.href}
+                                ref={link.isActive ? activeMenuItemRef : undefined}
+                                data-legacy-nav-id={item.id}
+                              />
+                            }
+                            isActive={link.isActive}
+                            tooltip={label}
+                          >
+                            <Icon />
+                            <span data-nav-label>{label}</span>
+                            {item.scope === 'project' ? (
+                              <span className="ml-auto flex shrink-0 items-center gap-1.5">
+                                <ScopeMark>{t('scopeProject')}</ScopeMark>
+                              </span>
+                            ) : null}
+                          </SidebarMenuButton>
+                        </SidebarMenuItem>
+                      );
+                    })}
+                  </SidebarMenu>
+                </SidebarGroupContent>
+              ) : null}
+            </SidebarGroup>
+          );
+        })()}
       </SidebarContent>
 
       <SidebarFooter className="space-y-2 p-2">

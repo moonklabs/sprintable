@@ -204,6 +204,18 @@ export const MOBILE_HUB_GROUP_ORDER = ['now', 'dev', 'results', 'connect-rules']
 // 의도는 그대로(빠른 접근 대상)라 exclude id도 같이 개명.
 export const MOBILE_HUB_EXCLUDE_IDS = new Set(['board', 'inbox', 'chats']);
 
+// story #3836(UX-v3·셸 후속, 선생님 지적 2026-09-14 00:47Z·PO 確定 00:49Z) — 데스크톱
+// 사이드바 「더보기」 접힘 절과 모바일 /more 「그 밖의 화면」 카드 둘 다 LEGACY_NAV_ITEMS
+// 에서 MOBILE_HUB_EXCLUDE_IDS(바텀 탭이 이미 depth 1로 커버하는 항목)를 뺀 같은
+// 부분집합을 쓴다 — 한 곳에서 필터링해 두 소비처가 각자 같은 식을 다시 쓰다 하나만
+// 갱신되는 drift를 막는다(AC2/AC3). ⌘K 팔레트(command-palette.tsx)는 폭 제약이 없어
+// 이 제외를 적용하지 않는다 — LEGACY_NAV_ITEMS 전부를 그대로 쓴다(그 결정은 story
+// #3824 조건①에서 이미 確定, command-palette.test.tsx의 3-way 대조가 그 비대칭을
+// 문서화한다).
+export const VISIBLE_LEGACY_NAV_ITEMS: NavItemConfig[] = LEGACY_NAV_ITEMS.filter(
+  (item) => !MOBILE_HUB_EXCLUDE_IDS.has(item.id),
+);
+
 // story #2930(P0-G) I2 — 챗은 4구역 밖 1급 「center」(중심 꽃, 선생님 확定). NAV_GROUPS
 // 배열엔 없다(구역에 묻지 않는다는 게 이 승격의 요점) — 데스크톱 사이드바 상단 고정 카드
 // (app-sidebar.tsx)와 모바일 FAB(I4가 배선)가 이 한 항목을 직접 소비한다. path/badgeKey는
