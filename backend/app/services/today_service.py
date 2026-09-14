@@ -221,36 +221,15 @@ async def _resolve_needs_me(
     # 자체를 캐폴러에게 노출한다 — ConversationParticipant.member_id == 캐폴러
     # 조건을 반드시 같이 건다(conversations.py::list_conversations_by_work_item
     # 과 동일 원칙).
+    #
+    # story #3860 — 이 배치 파생은 이제 work_item_conversation.py의 SSOT 함수다
+    # (gates.py/hitl.py의 conversation_id enrich도 같은 함수를 쓴다 — 로직 복제 0).
     work_item_pairs = {(it["work_item_type"], it["work_item_id"]) for it in items}
-    conversation_by_work_item: dict[tuple[str, uuid.UUID], uuid.UUID] = {}
-    if work_item_pairs:
-        from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
+    from app.services.work_item_conversation import derive_conversation_ids_for_tagged_work_items
 
-        wi_types = {t for t, _ in work_item_pairs}
-        wi_ids = {str(i) for _, i in work_item_pairs}
-        tag_rows = (await session.execute(
-            select(
-                ConversationMessage.msg_metadata["work_item"]["type"].astext,
-                ConversationMessage.msg_metadata["work_item"]["id"].astext,
-                ConversationMessage.conversation_id,
-            )
-            .join(Conversation, Conversation.id == ConversationMessage.conversation_id)
-            .join(
-                ConversationParticipant,
-                ConversationParticipant.conversation_id == ConversationMessage.conversation_id,
-            )
-            .where(
-                Conversation.org_id == org_id,
-                ConversationParticipant.member_id == member.id,
-                ConversationMessage.msg_metadata["work_item"]["type"].astext.in_(wi_types),
-                ConversationMessage.msg_metadata["work_item"]["id"].astext.in_(wi_ids),
-            )
-            .order_by(ConversationMessage.created_at.desc())
-        )).all()
-        for wi_type, wi_id, conv_id in tag_rows:
-            key = (wi_type, uuid.UUID(wi_id))
-            # DESC 순으로 도착하므로 setdefault의 첫 값이 곧 최신(가장 최근 태그).
-            conversation_by_work_item.setdefault(key, conv_id)
+    conversation_by_work_item = await derive_conversation_ids_for_tagged_work_items(
+        session, org_id=org_id, member_id=member.id, work_item_pairs=work_item_pairs,
+    )
 
     for it in items:
         if it["title"] is None:
@@ -299,17 +278,15 @@ async def _resolve_agent_progress(
     # 없이 그대로 내보내면 클릭 시 403 죽은 링크이자 그 대화(DM 포함)의 존재
     # 자체를 노출한다. 캐폴러가 실제 참여자인 conversation_id만 배치로 골라낸다
     # (list_conversations_by_work_item·needs_me 배치와 동일 원칙).
-    from app.models.conversation import ConversationParticipant
+    #
+    # story #3860 — work_item_conversation.py의 SSOT 필터 함수(hitl.py의
+    # conversation_id enrich도 같은 함수를 쓴다).
+    from app.services.work_item_conversation import filter_participant_conversation_ids
 
     conv_ids = {run.conversation_id for run, _sid, _stitle in rows if run.conversation_id is not None}
-    participant_conv_ids: set[uuid.UUID] = set()
-    if conv_ids:
-        participant_conv_ids = set((await session.execute(
-            select(ConversationParticipant.conversation_id).where(
-                ConversationParticipant.conversation_id.in_(conv_ids),
-                ConversationParticipant.member_id == member.id,
-            )
-        )).scalars().all())
+    participant_conv_ids = await filter_participant_conversation_ids(
+        session, member_id=member.id, conversation_ids=conv_ids,
+    )
 
     # story #3833 AC1 — 그 run의 "마지막 도구 호출 이름"(agent_run_tool_calls 최신
     # 1건). DISTINCT ON (run_id)로 run 개수와 무관하게 쿼리 1(N+1 0). tool 컬럼은

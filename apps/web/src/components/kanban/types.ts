@@ -85,6 +85,10 @@ export interface GateItem {
   // 가 OrgGatePolicy.posture+gate_type에서 순수 파생해 list/단건 조회 둘 다 동봉(additive). null/undefined는
   // BE가 아직 못 보낸 구버전 응답 대비 방어적 폴백일 뿐 — 정상 응답은 항상 "low"|"high" 둘 중 하나.
   risk_grade?: 'low' | 'high' | null;
+  // story #3860 — work_item↔conversation 파생(캐폴러-scoped, work_item_conversation.py
+  // SSOT). 「답하기」 배선(gateConversationId(), 3845 ③ PR)의 데이터 소스 — 타입 필드만
+  // 여기 추가(소비 0, 페드루 PO 판정 08:50Z). undefined = 구버전 응답(안전 폴백=비노출).
+  conversation_id?: string | null;
   // story #2893(설계안 §2 A1, 0271) — merge-type만 실제 값을 갖는다(PR 컨텍스트 없는 평가·
   // PR 개념이 없는 타 gate_type은 null). 한 스토리에 merge 게이트가 여러 개(PR마다 1개)일
   // 수 있게 된 뒤로, FE가 "이 gates 배열 중 어느 게 지금 관심 있는 PR의 것인지" 고르는 축.
