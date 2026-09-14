@@ -65,6 +65,21 @@ export function StandupFeedbackDialog({
 }: StandupFeedbackDialogProps) {
   const t = useTranslations('standup');
   const tc = useTranslations('common');
+  // story #3878(§⑤ 낱말 드리프트) — story.status(canonical slug)를 t() 없이 그대로
+  // 그리던 자리 정본화. story-detail-panel.tsx의 statusKeyMap→t() 관례 그대로 재사용
+  // (§②-1 기존 상태 낱말, 새 키 0).
+  const tBoard = useTranslations('board');
+  const storyStatusKeyMap: Record<string, 'backlog' | 'readyForDev' | 'inProgress' | 'inReview' | 'done'> = {
+    backlog: 'backlog',
+    'ready-for-dev': 'readyForDev',
+    'in-progress': 'inProgress',
+    'in-review': 'inReview',
+    done: 'done',
+  };
+  const storyStatusLabel = (slug: string): string => {
+    const key = storyStatusKeyMap[slug];
+    return key ? tBoard(key) : slug;
+  };
   const [showFeedbackForm, setShowFeedbackForm] = useState(false);
   const [feedbackText, setFeedbackText] = useState('');
   const [reviewType, setReviewType] = useState<StandupReviewType>('comment');
@@ -231,7 +246,7 @@ export function StandupFeedbackDialog({
                   <div key={story.id} className="rounded-md border border-border bg-background p-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <p className="text-sm font-medium text-foreground">{story.title}</p>
-                      <Badge variant="outline">{story.status}</Badge>
+                      <Badge variant="outline">{storyStatusLabel(story.status)}</Badge>
                     </div>
                     {/* a9e67531: rich(scoped)만 assignee/task 진척·cross-board 요약은 title/status만 */}
                     {story.task_count != null ? (

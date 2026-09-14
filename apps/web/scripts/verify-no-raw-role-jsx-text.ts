@@ -159,20 +159,10 @@ export const ALLOWLIST: ReadonlyMap<string, number> = new Map([
   // Blocking/Depends on/Depended by) mono 배지 4곳(blocker/blocked/target/source.status)은
   // resolveStatusLabel()(#3875가 status_changed 활동에 쓴 것과 같은 정본 경로)로 정본화
   // 완료 — ALLOWLIST에서 제거(정문 처리, 더 이상 원시 slug 노출 아님).
-  // (c) 실 위반·스코프 밖 — 목표/스프린트/회고/하루체크인 화면(§⑤ 감사 대상 "일감" 5탭
-  // 자체이나, 이 카드의 AC는 스토리 패널 활동 탭 하나로 한정) 각 화면의 story.status 원시
-  // 렌더. PO에게 별도 카드 후보로 보고 済(story #3878). standup-client.tsx는 같은 표현식
-  // (story.status)이 2곳(553·773행)이라 한 키에 개수 2로 합쳐 센다.
-  [allowlistKey('app/(authenticated)/[ws]/[proj]/goals/goals-client.tsx', 'status', 'story.status'), 1],
-  [allowlistKey('app/(authenticated)/[ws]/[proj]/sprints/sprints-client.tsx', 'status', 'sprint.status'), 1],
-  [allowlistKey('app/(authenticated)/[ws]/[proj]/sprints/sprints-client.tsx', 'status', 'selected.status'), 1],
-  [allowlistKey('app/(authenticated)/[ws]/[proj]/standup/standup-client.tsx', 'status', 'story.status'), 2],
-  [allowlistKey('components/standup/standup-feedback-dialog.tsx', 'status', 'story.status'), 1],
-  // (c) 실 위반·스코프 밖 — 가설(hypothesis) 카드의 연결 미리보기 status. 「일감(맥락 패널)」
-  // 흡수 축이지 스토리 패널 활동 탭이 아니다 — 별도 카드 후보로 보고 済(story #3878).
-  [allowlistKey('components/epics/hypothesis-declaration-card.tsx', 'status', 'value.linkedPreview.status'), 1],
-  [allowlistKey('components/sprints/hypothesis-declaration-card.tsx', 'status', 'value.linkedPreview.status'), 1],
-  [allowlistKey('components/loops/loop-create-dialog.tsx', 'status', 'linkedHypothesis.status'), 1],
+  // story #3878(§⑤ 낱말 드리프트) — 목표/하루체크인/가설카드/루프생성/스프린트 9곳
+  // 전부 정본화 완료(board.backlog/readyForDev/inProgress/inReview/done·hypotheses.status*
+  // ·sprints.statusPlanning/statusActive/statusClosed 재사용 — 스프린트 생애주기 상태는
+  // 유나 §⑤ 표 확定 2026-09-14, 신규 낱말 3개) — ALLOWLIST에서 전부 제거.
 ]);
 
 export interface ScanRepoResult {

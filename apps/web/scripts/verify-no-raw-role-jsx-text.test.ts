@@ -150,3 +150,37 @@ describe('scanRepo — story #3770(실 트리 실행)', () => {
     expect(stale).toEqual([]);
   });
 });
+
+// story #3878(§⑤ 낱말 드리프트) — 실 파일 뮤테이션(합성 표본 아님, AC2 명시): 7곳 中 대표
+// 1곳(goals-client.tsx)을 원시 slug로 되돌려 RED가 되는지 직접 확인한다.
+describe('실 파일 뮤테이션 — goals-client.tsx(story #3878, story.status 정본화)', () => {
+  const REL_FILE = 'app/(authenticated)/[ws]/[proj]/goals/goals-client.tsx';
+  const ABS_FILE = path.join(SRC_ROOT, REL_FILE);
+  const original = readFileSync(ABS_FILE, 'utf8');
+
+  it('전제: 원본은 이 파일에서 status 원시 위반 0(storyStatusLabel(story.status)로 감싸짐)', () => {
+    const refs = scanJsxFileContent(original, REL_FILE);
+    expect(refs.filter((r) => r.field === 'status')).toEqual([]);
+  });
+
+  it('story.status 배지를 원시 렌더로 되돌리면 RED', () => {
+    const target = '{storyStatusLabel(story.status)}';
+    expect(original.includes(target)).toBe(true);
+    const mutated = original.replace(target, '{story.status}');
+    expect(mutated).not.toBe(original);
+
+    const refs = scanJsxFileContent(mutated, REL_FILE);
+    const statusRefs = refs.filter((r) => r.field === 'status');
+    expect(statusRefs.length).toBeGreaterThan(0);
+
+    // 이 뮤테이션이 ALLOWLIST 밖 자리를 되살리는지까지 확인(단순 refs 존재가 아니라
+    // 실제로 가드가 FAIL로 잡는지 — compareToBaseline 경로까지 재확인).
+    const actualCounts = new Map<string, number>();
+    for (const r of refs) {
+      const key = `${r.file}::${r.field}::${r.exprText}`;
+      actualCounts.set(key, (actualCounts.get(key) ?? 0) + 1);
+    }
+    const { increased } = compareToBaseline(actualCounts, ALLOWLIST);
+    expect(increased.length).toBeGreaterThan(0);
+  });
+});

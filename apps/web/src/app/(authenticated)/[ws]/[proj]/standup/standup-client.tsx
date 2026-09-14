@@ -123,6 +123,21 @@ interface StandupClientProps {
 export default function StandupPage({ projectId, embedded = false }: StandupClientProps) {
   const t = useTranslations('standup');
   const tc = useTranslations('common');
+  // story #3878(§⑤ 낱말 드리프트) — story.status(canonical slug)를 t() 없이 그대로
+  // 그리던 자리 정본화. story-detail-panel.tsx의 statusKeyMap→t() 관례 그대로 재사용
+  // (§②-1 기존 상태 낱말, 새 키 0).
+  const tBoard = useTranslations('board');
+  const storyStatusKeyMap: Record<string, 'backlog' | 'readyForDev' | 'inProgress' | 'inReview' | 'done'> = {
+    backlog: 'backlog',
+    'ready-for-dev': 'readyForDev',
+    'in-progress': 'inProgress',
+    'in-review': 'inReview',
+    done: 'done',
+  };
+  const storyStatusLabel = (slug: string): string => {
+    const key = storyStatusKeyMap[slug];
+    return key ? tBoard(key) : slug;
+  };
   const { currentTeamMemberId, projectMemberships } = useDashboardContext();
 
   const [date, setDate] = useState(() => formatSeoulDate());
@@ -550,7 +565,7 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
                               <div key={story.id} className="rounded-xl border border-border/70 bg-background p-4 shadow-[var(--elev-card)]">
                                 <div className="flex flex-wrap items-center justify-between gap-2">
                                   <p className="text-sm font-medium text-foreground">{story.title}</p>
-                                  <Badge variant="outline">{story.status}</Badge>
+                                  <Badge variant="outline">{storyStatusLabel(story.status)}</Badge>
                                 </div>
                                 <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                                   <Badge variant="chip">{story.assignee_name ?? t('unknown')}</Badge>
@@ -770,7 +785,7 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
                                         <div className="min-w-0 flex-1 space-y-0.5">
                                           <div className="flex flex-wrap items-center justify-between gap-2">
                                             <p className="text-sm font-medium text-foreground">{story.title}</p>
-                                            <Badge variant="outline">{story.status}</Badge>
+                                            <Badge variant="outline">{storyStatusLabel(story.status)}</Badge>
                                           </div>
                                           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                                             <Badge variant="chip">{story.assignee_name ?? t('unknown')}</Badge>

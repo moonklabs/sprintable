@@ -393,6 +393,18 @@ function DeleteConfirmDialog({ sprintTitle, deleting, error, onConfirm, onClose 
 export function SprintsClient({ projectId }: SprintsClientProps) {
   const t = useTranslations('sprints');
   const tc = useTranslations('common');
+  // story #3878(§⑤ 낱말 드리프트, 유나 §⑤ 표 확定 2026-09-14) — 스프린트 생애주기
+  // status(planning/active/closed)를 t() 없이 그대로 그리던 자리 정본화. 신규 낱말
+  // (계획 중/진행 중/종료됨) sprints 네임스페이스에 등재.
+  const sprintStatusKeyMap: Record<string, 'statusPlanning' | 'statusActive' | 'statusClosed'> = {
+    planning: 'statusPlanning',
+    active: 'statusActive',
+    closed: 'statusClosed',
+  };
+  const sprintStatusLabel = (slug: string): string => {
+    const key = sprintStatusKeyMap[slug];
+    return key ? t(key) : slug;
+  };
   const searchParams = useSearchParams();
   // story #2413 — 마운트 시점 1회 고정(실시간 tick 불필요, "페이지를 연 시점 기준 지났는가").
   const now = useMemo(() => new Date(), []);
@@ -769,7 +781,7 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
                 <div className="flex items-center justify-between">
                   <span className="font-medium text-foreground">{sprint.title}</span>
                   <div className="flex items-center gap-2">
-                  <Badge variant={statusVariant(sprint.status)}>{sprint.status}</Badge>
+                  <Badge variant={statusVariant(sprint.status)}>{sprintStatusLabel(sprint.status)}</Badge>
                   {isSprintOverdue(sprint, now) ? (
                     // 유나 규격(2026-08-02, #2791 design:changes) — Badge variant="warning"의
                     // 계열색 텍스트(text-warning)는 light에서 2.06(AA 4.5의 절반 이하). 명도를
@@ -809,7 +821,7 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
         <div>
           <h2 className="text-lg font-semibold text-foreground">{selected.title}</h2>
           <div className="mt-1 flex items-center gap-2">
-            <Badge variant={statusVariant(selected.status)}>{selected.status}</Badge>
+            <Badge variant={statusVariant(selected.status)}>{sprintStatusLabel(selected.status)}</Badge>
             {isSprintOverdue(selected, now) ? (
               // 유나 규격(2026-08-02, #2791) — warning tint 위 text-foreground. 위 목록 배지와
               // 동일 근거(text-warning은 light에서 AA 미달, 문제는 배경이 아니라 글자).
