@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+# story #3864(customer-zero·CI 인프라, 2026-09-14) — GitHub Actions artifact 저장 한도
+# 초과(org 단위, 사고 실측: 「Artifact storage quota has been hit」로 mobile 레포의 진단
+# artifact 업로드가 막힘 — sprintable 레포 한 곳의 습관이 다른 레포의 진단을 죽이는 클래스).
+#
+# 원인은 워크플로 쪽에서 이미 닫았다(ci.yml — playwright-report 업로드를 `if: always()`
+# 에서 `if: failure()`로·retention 7일→3일 / lighthouse-ci.yml — AC0 실측 결과 bytes
+# 기준 전체의 78%를 차지한 lighthouse-results가 소비처 0으로 확認돼 uploadArtifacts를
+# false로). 이 스크립트는 «이미 쌓인» 만료 前 playwright-report·lighthouse-results
+# artifact 중 오래된 것만 일회성으로 정리한다(AC2 — 반복 실행되는 cron이 아니다,
+# "지금 이 부채"를 갚는 용도).
+#
+# ⛔이 스크립트가 «절대 하지 않는» 것(안전 경계, reclaim-merged-worktrees.sh와 동형 원칙):
+#   - name이 CLEANUP_ARTIFACT_NAMES 목록(기본: playwright-report, lighthouse-results)에
+#     정확히 없는 artifact는 절대 건드리지 않는다(dmg·apk·shard-durations-* 등 — PO 규율
+#     명시 "손 0"). 필터는 정확 일치(startswith 아님) — "playwright-report-foo" 같은
+#     미래의 다른 이름이 실수로 걸리지 않게.
+#   - 이미 만료(expired=true)된 artifact는 건드리지 않는다(GitHub가 곧 자동 정리 — 중복
+#     작업 불요, API 응답에 이미 안 잡히거나 상태만 다를 수 있어 명시로 한 번 더 거른다).
+#   - CUTOFF_DAYS(기본 7일) 이내에 만들어진 artifact는 절대 안 지운다(최근 실패 run의
+#     디버깅 창을 이 스크립트가 먼저 뺏지 않는다 — "일회성 부채 정리"이지 "즉시 0으로"가
+#     아니다).
+#   - 기본은 dry-run(무엇을 지울지만 보고) — --apply 없이는 실 DELETE 요청을 단 하나도
+#     보내지 않는다.
+#
+# 사용법:
+#   scripts/cleanup-ci-artifacts.sh                    # dry-run(기본) — 무엇을 지울지만 보고
+#   scripts/cleanup-ci-artifacts.sh --apply             # 실제 삭제
+#   scripts/cleanup-ci-artifacts.sh --apply --json      # 기계가 읽을 전후 요약(JSON 한 줄)도 출력
+#
+# 환경변수:
+#   CLEANUP_REPO           기본 moonklabs/sprintable — 대상 레포(owner/repo).
+#   CLEANUP_ARTIFACT_NAMES  기본 "playwright-report lighthouse-results" — 공백구분 정확
+#                           일치 필터 목록(대소문자 구분). 이 목록에 없는 name은 절대 대상 0.
+#   CLEANUP_CUTOFF_DAYS    기본 7 — 이 값(일)보다 오래된 것만 삭제 대상.
+
+set -euo pipefail
+
+APPLY=false
+JSON_OUT=false
+for arg in "$@"; do
+  case "$arg" in
+    --apply) APPLY=true ;;
+    --json) JSON_OUT=true ;;
+    *) echo "unknown arg: $arg" >&2; exit 64 ;;
+  esac
+done
+
+REPO="${CLEANUP_REPO:-moonklabs/sprintable}"
+ARTIFACT_NAMES="${CLEANUP_ARTIFACT_NAMES:-playwright-report lighthouse-results}"
+CUTOFF_DAYS="${CLEANUP_CUTOFF_DAYS:-7}"
+
+# 공백구분 이름 목록 → jq IN() 연산용 JSON 배열.
+names_json=$(printf '%s\n' $ARTIFACT_NAMES | jq -R . | jq -s .)
+
+if ! command -v gh >/dev/null 2>&1; then
+  echo "gh CLI가 필요합니다" >&2
+  exit 1
+fi
+if ! command -v jq >/dev/null 2>&1; then
+  echo "jq가 필요합니다" >&2
+  exit 1
+fi
+
+# macOS(BSD date)·Linux(GNU date) 양쪽에서 "N일 전" epoch seconds를 구한다.
+if date -v-1d >/dev/null 2>&1; then
+  cutoff_epoch=$(date -v-"${CUTOFF_DAYS}"d +%s)
+else
+  cutoff_epoch=$(date -d "-${CUTOFF_DAYS} days" +%s)
+fi
+
+echo "대상 레포: ${REPO} · artifact name(정확 일치 목록): ${ARTIFACT_NAMES} · cutoff: ${CUTOFF_DAYS}일 초과" >&2
+
+# 전체 artifact 목록(페이지네이션) — name IN(목록) + expired=false + created_at < cutoff만
+# 남긴다. jq -s로 페이지들을 합쳐 «한 번에» 집계(reclaim-merged-worktrees.sh와 동일 원칙 —
+# 페이지별 부분합을 셸에서 다시 더하지 않는다, 부분합 누락/중복 클래스 원천 차단).
+targets_json=$(gh api --paginate "/repos/${REPO}/actions/artifacts" \
+  -q '.artifacts[]' 2>/dev/null | jq -s \
+  --argjson names "$names_json" \
+  --argjson cutoff "$cutoff_epoch" \
+  '[.[] | select((.name as $n | $names | index($n)) != null and .expired == false and (.created_at | fromdateiso8601) < $cutoff)]')
+
+target_count=$(echo "$targets_json" | jq 'length')
+target_bytes=$(echo "$targets_json" | jq '[.[].size_in_bytes] | add // 0')
+
+# 이름별 count/bytes(AC2 「전후 count/bytes 이름별」 요구) — 삭제 대상만.
+targets_by_name=$(echo "$targets_json" | jq -r 'group_by(.name) | map({name: .[0].name, count: length, bytes: ([.[].size_in_bytes] | add)}) | .[] | "  \(.name): \(.count)건 · \(.bytes) bytes"')
+
+# 전체 만료 前 artifact(필터 무관) 전후 비교용 — AC2 "전후 count/bytes 목록째" 요구.
+all_before_json=$(gh api --paginate "/repos/${REPO}/actions/artifacts" \
+  -q '.artifacts[]' 2>/dev/null | jq -s '[.[] | select(.expired == false)]')
+all_before_count=$(echo "$all_before_json" | jq 'length')
+all_before_bytes=$(echo "$all_before_json" | jq '[.[].size_in_bytes] | add // 0')
+
+echo "" >&2
+echo "삭제 대상(이름별): " >&2
+echo "$targets_by_name" >&2
+echo "삭제 대상 합계: ${target_count}건 · ${target_bytes} bytes" >&2
+echo "삭제 前 전체(만료 前, 이름 무관): ${all_before_count}건 · ${all_before_bytes} bytes" >&2
+echo "" >&2
+
+if [ "$target_count" -eq 0 ]; then
+  echo "삭제할 대상이 없습니다." >&2
+  if [ "$JSON_OUT" = true ]; then
+    jq -n --argjson before_count "$all_before_count" --argjson before_bytes "$all_before_bytes" \
+      '{applied: false, deleted_count: 0, deleted_bytes: 0, before_count: $before_count, before_bytes: $before_bytes, after_count: $before_count, after_bytes: $before_bytes}'
+  fi
+  exit 0
+fi
+
+echo "$targets_json" | jq -r '.[] | "  - id=\(.id) created_at=\(.created_at) size_in_bytes=\(.size_in_bytes)"' >&2
+
+if [ "$APPLY" = false ]; then
+  echo "" >&2
+  echo "dry-run — 실제로는 지우지 않았습니다. --apply로 재실행하면 위 ${target_count}건을 삭제합니다." >&2
+  if [ "$JSON_OUT" = true ]; then
+    jq -n --argjson target_count "$target_count" --argjson target_bytes "$target_bytes" \
+      --argjson before_count "$all_before_count" --argjson before_bytes "$all_before_bytes" \
+      '{applied: false, would_delete_count: $target_count, would_delete_bytes: $target_bytes, before_count: $before_count, before_bytes: $before_bytes}'
+  fi
+  exit 0
+fi
+
+deleted=0
+echo "$targets_json" | jq -r '.[].id' | while IFS= read -r id; do
+  if gh api -X DELETE "/repos/${REPO}/actions/artifacts/${id}" >/dev/null 2>&1; then
+    deleted=$((deleted + 1))
+  else
+    echo "  ⚠️ 삭제 실패: id=${id}" >&2
+  fi
+done
+
+# 삭제 뒤 전체 재집계(before와 동일 쿼리 — 전후 대조가 같은 기준이어야 한다).
+all_after_json=$(gh api --paginate "/repos/${REPO}/actions/artifacts" \
+  -q '.artifacts[]' 2>/dev/null | jq -s '[.[] | select(.expired == false)]')
+all_after_count=$(echo "$all_after_json" | jq 'length')
+all_after_bytes=$(echo "$all_after_json" | jq '[.[].size_in_bytes] | add // 0')
+
+echo "" >&2
+echo "삭제 완료. 삭제 後 전체(만료 前, 이름 무관): ${all_after_count}건 · ${all_after_bytes} bytes" >&2
+echo "감소: $((all_before_count - all_after_count))건 · $((all_before_bytes - all_after_bytes)) bytes" >&2
+
+if [ "$JSON_OUT" = true ]; then
+  jq -n \
+    --argjson target_count "$target_count" \
+    --argjson before_count "$all_before_count" --argjson before_bytes "$all_before_bytes" \
+    --argjson after_count "$all_after_count" --argjson after_bytes "$all_after_bytes" \
+    '{applied: true, deleted_count: $target_count, before_count: $before_count, before_bytes: $before_bytes, after_count: $after_count, after_bytes: $after_bytes}'
+fi

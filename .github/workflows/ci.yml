@@ -1982,11 +1982,17 @@ jobs:
         if: failure()
         run: cat /tmp/backend.log || true
 
+      # story #3864(customer-zero·CI 인프라, 2026-09-14) — `if: always()`가 성공 run에도
+      # 매번 업로드해 org 단위 artifact 저장 한도(무관 레포 mobile의 진단 업로드까지 막는
+      # "한 레포의 습관이 다른 레포를 죽이는" 클래스)를 채운 원인 그 자체였다(실측: 만료
+      # 前 7,996개·1,719MB, 첫 100건 전부 playwright-report). 실패 run만 리포트가 필요하다
+      # (성공했으면 볼 이유가 없다) — `if: failure()`로. retention도 7일→3일(디버깅 창은
+      # 며칠이면 충분·누적 속도 자체를 줄인다).
       - name: Upload Playwright report
-        if: always()
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report
           path: apps/web/playwright-report/
-          retention-days: 7
+          retention-days: 3
           if-no-files-found: ignore
