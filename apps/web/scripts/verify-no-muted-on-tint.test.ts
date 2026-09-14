@@ -10,10 +10,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
+  analyzeTreeForTintCompleteness,
   buildComponentTintMap,
   compareToBaseline,
   extractCvaTintVariants,
   scanContent,
+  scanTreeForTintCompleteness,
   type ComponentTintMap,
 } from './verify-no-muted-on-tint';
 
@@ -236,5 +238,70 @@ describe('scanContent — 실 파일 뮤테이션(activation-checklist-banner.ts
     const violations = scanContent(mutated, REL_FILE, componentMap);
     expect(violations).toHaveLength(1);
     expect(violations[0]!.family).toBe('info');
+  });
+});
+
+// story #3839 PO 보강(2026-09-14 05:43·05:48Z) — 완전성 fail-closed를 components/ui/ 안이
+// 아니라 스캔 트리 전체로 넓힌 뒤의 양성대조 2건: ① ui/ 밖 cva tint ② UNANALYZED_TINT_SITES
+// 목록 밖 객체맵 tint. 둘 다 RED(=unexplainedSites에 잡힘)여야 한다 — "같은 메커니즘이
+// ui/ 밖·하위 폴더에 생기면 가드가 조용히 못 보는" 구멍이 실제로 막혔는지 실측.
+describe('analyzeTreeForTintCompleteness — 전 트리 양성대조(PO 보강)', () => {
+  it('① ui/ 밖 파일의 cva tint는 "처리됨"으로 안 침(ui/ cva만 인정) — RED', () => {
+    const files = [
+      {
+        file: 'components/foo/bar.tsx',
+        content: `
+          const barVariants = cva('base', {
+            variants: { variant: { info: 'bg-info-tint text-foreground' } },
+          });
+          function Bar({ variant }) {
+            return <div className={barVariants({ variant })} />;
+          }
+        `,
+      },
+    ];
+    const { unexplainedSites, ambiguousReasons } = analyzeTreeForTintCompleteness(
+      files,
+      (file) => file.startsWith('components/ui/'),
+    );
+    // extractCvaTintVariants 자체는 Bar를 정확히 찾아 모호하지 않다(ambiguous 아님) —
+    // 그런데도 ui/ 밖이라 explained에 안 실려야 한다(그게 이 보강의 핵심).
+    expect(ambiguousReasons).toEqual([]);
+    expect(unexplainedSites).toEqual([{ file: 'components/foo/bar.tsx', raw: 1, explained: 0 }]);
+  });
+
+  it('② UNANALYZED_TINT_SITES 목록 밖 객체맵 tint(예: status→className 조회) — RED', () => {
+    const files = [
+      {
+        file: 'components/foo/status-map.tsx',
+        content: `
+          const STATUS_META = {
+            approved: { dot: 'bg-success-tint text-success' },
+          };
+          function Status({ status }) {
+            return <span className={STATUS_META[status].dot} />;
+          }
+        `,
+      },
+    ];
+    const { unexplainedSites } = analyzeTreeForTintCompleteness(files, () => false);
+    expect(unexplainedSites).toEqual([{ file: 'components/foo/status-map.tsx', raw: 1, explained: 0 }]);
+    // main()과 동형 계약 — 빈 baseline과 대조하면 신규(increased)로 잡힌다.
+    const actual = new Map(unexplainedSites.map((s) => [s.file, s.raw] as const));
+    const { increased } = compareToBaseline(actual, new Map());
+    expect(increased).toEqual([{ key: 'components/foo/status-map.tsx', expected: 0, got: 1 }]);
+  });
+
+  it('ui/ 안 리터럴 className tint는 정상 처리됨(대조군 — 0건이어야 함)', () => {
+    const files = [{ file: 'components/ui/box.tsx', content: `function Box() { return <div className="bg-info-tint" />; }` }];
+    const { unexplainedSites } = analyzeTreeForTintCompleteness(files, (file) => file.startsWith('components/ui/'));
+    expect(unexplainedSites).toEqual([]);
+  });
+});
+
+describe('scanTreeForTintCompleteness — 실 src 트리(UNANALYZED_TINT_SITES와 일치)', () => {
+  it('실 SRC_ROOT 스캔이 ambiguousReasons 0(모호한 cva 없음)', () => {
+    const { ambiguousReasons } = scanTreeForTintCompleteness(SRC_ROOT, UI_DIR);
+    expect(ambiguousReasons).toEqual([]);
   });
 });

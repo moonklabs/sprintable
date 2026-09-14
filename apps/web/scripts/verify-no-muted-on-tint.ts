@@ -122,6 +122,9 @@ export interface CvaExtractionResult {
   map: ComponentTintMap;
   /** 완전성 fail-closed 사유 — 비어있지 않으면 main()이 FAIL해야 한다. */
   incompleteReasons: string[];
+  /** 이 파일의 cva variants 안에서 tint로 인식된 매치 총수(map에 실렸든 incomplete로
+   * 신고됐든 전부 포함) — 전 트리 완전성 대조(analyzeTreeForTintCompleteness)가 쓴다. */
+  accountedMatches: number;
 }
 
 /** 한 ui 컴포넌트 파일에서 cva() 정의를 읽어 {cva 변수명 → axis → value → class문자열}을
@@ -260,7 +263,7 @@ export function extractCvaTintVariants(content: string, file: string): CvaExtrac
     );
   }
 
-  return { map, incompleteReasons };
+  return { map, incompleteReasons, accountedMatches };
 }
 
 function mergeComponentTintMaps(a: ComponentTintMap, b: ComponentTintMap): void {
@@ -280,12 +283,13 @@ function mergeComponentTintMaps(a: ComponentTintMap, b: ComponentTintMap): void 
 export function buildComponentTintMap(uiDir: string): CvaExtractionResult {
   const map: ComponentTintMap = new Map();
   const incompleteReasons: string[] = [];
+  let accountedMatches = 0;
   let entries: string[];
   try {
     entries = readdirSync(uiDir).filter((e) => EXT_RE.test(e) && !TEST_RE.test(e));
   } catch {
     incompleteReasons.push(`${uiDir} — 디렉터리를 못 읽음(가드가 헛돈다)`);
-    return { map, incompleteReasons };
+    return { map, incompleteReasons, accountedMatches };
   }
   for (const entry of entries) {
     const abs = path.join(uiDir, entry);
@@ -295,8 +299,88 @@ export function buildComponentTintMap(uiDir: string): CvaExtractionResult {
     const result = extractCvaTintVariants(content, rel);
     mergeComponentTintMaps(map, result.map);
     incompleteReasons.push(...result.incompleteReasons);
+    accountedMatches += result.accountedMatches;
   }
-  return { map, incompleteReasons };
+  return { map, incompleteReasons, accountedMatches };
+}
+
+/** 리터럴 JSX className 안 tint 매치 총수(조상 추적 없이 존재만 센다) — 전 트리 완전성
+ * 대조(analyzeTreeForTintCompleteness)가 "리터럴 className으로 처리된 것"을 세는 축. */
+function countLiteralClassNameTintMatches(content: string, file: string): number {
+  const sf = ts.createSourceFile(file, content, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  let count = 0;
+  function walk(node: ts.Node): void {
+    let opening: ts.JsxOpeningLikeElement | null = null;
+    if (ts.isJsxElement(node)) opening = node.openingElement;
+    else if (ts.isJsxSelfClosingElement(node)) opening = node;
+    if (opening) {
+      const cls = classNameStringsOf(opening).join(' ');
+      const matches = cls.match(TINT_FAMILY_BG_RE_G);
+      if (matches) count += matches.length;
+    }
+    node.forEachChild(walk);
+  }
+  walk(sf);
+  return count;
+}
+
+export interface UnexplainedTintSite { file: string; raw: number; explained: number; }
+
+export interface TreeCompletenessResult {
+  componentMap: ComponentTintMap;
+  /** cva variant→컴포넌트 매핑이 모호한 경우(0개/2개+) — baseline 대상 아님, 항상 하드 FAIL
+   * (그 cva 정의 자체가 잘못됐다는 뜻이라 "얼려서 넘길" 채무가 아니다). */
+  ambiguousReasons: string[];
+  /** 파일별 원시 tint 매치 > 처리(리터럴 className + ui/ cva) 매치 — object맵·템플릿 삼항
+   * 등 이 가드가 구조적으로 못 보는 소비처(story #3839 PO 보강, 2026-09-14 05:48Z). main()이
+   * UNANALYZED_TINT_SITES baseline과 비교해 늘어도·줄어도(stale) FAIL한다(신규 사각 금지,
+   * 해소는 story #3850). */
+  unexplainedSites: UnexplainedTintSite[];
+}
+
+/** story #3839 PO 보강(2026-09-14 05:43·05:48Z) — 완전성 fail-closed를 components/ui/
+ * 안에서만 도는 게 아니라 스캔 트리 «전체»로 넓힌다. 같은 메커니즘(cva나 그에 준하는
+ * 클래스맵)이 ui/ 밖에 생기면 실제 조상-추적 지도(componentMap)에는 절대 안 실리므로
+ * (그 지도는 ui/만 본다), 그 파일의 tint 매치는 "처리됨"으로 치지 않는다 — literal JSX
+ * className만, 그리고 ui/ 파일의 cva만 "처리됨"으로 인정한다. */
+export function analyzeTreeForTintCompleteness(
+  files: Array<{ file: string; content: string }>,
+  isUiFile: (file: string) => boolean,
+): TreeCompletenessResult {
+  const componentMap: ComponentTintMap = new Map();
+  const ambiguousReasons: string[] = [];
+  const unexplainedSites: UnexplainedTintSite[] = [];
+
+  for (const { file, content } of files) {
+    const isUi = isUiFile(file);
+    const cvaResult = extractCvaTintVariants(content, file);
+    if (isUi) {
+      mergeComponentTintMaps(componentMap, cvaResult.map);
+      ambiguousReasons.push(...cvaResult.incompleteReasons);
+    }
+
+    const literalMatches = countLiteralClassNameTintMatches(content, file);
+    const stripped = content.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+    const raw = (stripped.match(TINT_FAMILY_BG_RE_G) ?? []).length;
+    const explained = literalMatches + (isUi ? cvaResult.accountedMatches : 0);
+    if (raw > explained) {
+      unexplainedSites.push({ file, raw, explained });
+    }
+  }
+  return { componentMap, ambiguousReasons, unexplainedSites };
+}
+
+/** src 전체를 읽어 analyzeTreeForTintCompleteness에 넘긴다(uiDir 상대경로가 srcRoot 기준
+ * "components/ui/"로 시작하는 파일만 ui/ 소속으로 판정). */
+export function scanTreeForTintCompleteness(srcRoot: string, uiDir: string): TreeCompletenessResult {
+  const absFiles: string[] = [];
+  walkDir(srcRoot, absFiles);
+  const uiDirRel = path.relative(srcRoot, uiDir).split(path.sep).join('/');
+  const files = absFiles.map((abs) => ({
+    file: path.relative(srcRoot, abs).split(path.sep).join('/'),
+    content: readFileSync(abs, 'utf8'),
+  }));
+  return analyzeTreeForTintCompleteness(files, (file) => file.startsWith(`${uiDirRel}/`));
 }
 
 // ── JSX 스캔(조상 pale-bg 추적) ──────────────────────────────────────────────────
@@ -418,6 +502,40 @@ export const GRANDFATHER_BASELINE = new Map<string, number>([
   ['components/sprints/hypothesis-declaration-section.tsx::muted-on-info-tint', 1],
 ]);
 
+// story #3839 PO 보강(2026-09-14 05:48Z) — 전 트리 완전성 대조가 잡아낸 「가드가 구조적으로
+// 못 보는 tint 소비처」16곳(파일 → 원시 tint 매치 수). 전부 object맵(status→className 조회,
+// 예: kanban-column.tsx·gate-level-matrix.tsx·doc-gate-section.tsx의 AUDIT_META) 또는
+// 템플릿 리터럴 안 삼항(예: invite-accept-client.tsx)이라 cva 파싱과 다른 두 축의 분석기가
+// 필요 — story #3850(별 카드)이 그 분석기를 만들어 이 목록을 16→0으로 줄인다.
+//
+// 사람 눈 1회 검토(2026-09-14, 미르코·가드가 잰 것 아님·지름길 명시) — 16곳 전부 "그 tint
+// 값을 실제로 소비하는 JSX 자리"에 text-muted-foreground가 구조적으로 중첩되는지 직접
+// 대조: 전부 형제 요소이거나 별도 표시줄이라 실 muted-on-tint 중첩 버그 0건. (doc-gate-
+// section.tsx는 예외 — 그 파일의 리터럴 bg-destructive-tint div(396행) 안 text-muted-
+// foreground(399행)는 이미 GRANDFATHER_BASELINE에 잡혀있는 별개의 실 위반이고, object맵
+// AUDIT_META.dot 소비처(429행 span)는 그 위반과 무관한 형제 요소 — 이 목록의 "3건 미처리"는
+// AUDIT_META의 dot 값 자체가 아직 지도 밖이라는 뜻일 뿐.)
+//
+// 늘어도·줄어도(stale) FAIL — 정확히 일치해야 GREEN(GRANDFATHER_BASELINE과 동형 계약).
+export const UNANALYZED_TINT_SITES = new Map<string, number>([
+  ['app/invite/accept/invite-accept-client.tsx', 2],
+  ['components/agents/agent-api-key-manager.tsx', 1],
+  ['components/ai/ai-generation-loading.tsx', 2],
+  ['components/cage/gate-line-context.tsx', 2],
+  ['components/cage/stuck-handoff-section.tsx', 2],
+  ['components/channel-connect/agent-setup-section.tsx', 2],
+  ['components/docs/doc-content-renderer.tsx', 3],
+  ['components/docs/doc-gate-section.tsx', 4],
+  ['components/docs/doc-status-rail.tsx', 3],
+  ['components/docs/extensions/image-node.tsx', 1],
+  ['components/docs/extensions/wiki-link.tsx', 1],
+  ['components/kanban/kanban-column.tsx', 5],
+  ['components/org-briefing/attention-cluster-board.tsx', 5],
+  ['components/outcome/outcome-result-card.tsx', 1],
+  ['components/retro/sprint-close-cockpit.tsx', 4],
+  ['components/settings/gate-level-matrix.tsx', 3],
+]);
+
 export interface BaselineDrift { key: string; expected: number; got: number; }
 export interface BaselineComparison { increased: BaselineDrift[]; stale: BaselineDrift[]; }
 
@@ -438,19 +556,40 @@ export function compareToBaseline(actual: Map<string, number>, baseline: Map<str
 }
 
 function main(): number {
-  const { map: componentMap, incompleteReasons } = buildComponentTintMap(UI_DIR);
-  if (incompleteReasons.length > 0) {
-    console.error('❌ FAIL: cva variant → tint 지도 추출 불완전(카디르 QA 보강, AC2 완전성 fail-closed):');
-    for (const r of incompleteReasons) console.error(`  - ${r}`);
+  // story #3839 PO 보강(2026-09-14 05:43·05:48Z) — 완전성 fail-closed를 components/ui/
+  // 안에서만 도는 게 아니라 스캔 트리 전체로 넓힌다(analyzeTreeForTintCompleteness 문서
+  // 참조). 모호한 cva→컴포넌트 매핑은 항상 하드 FAIL. 구조적으로 못 보는 소비처(object맵·
+  // 템플릿 삼항 등)는 UNANALYZED_TINT_SITES baseline과 대조 — 신규만 막는다(해소는 #3850).
+  const { componentMap, ambiguousReasons, unexplainedSites } = scanTreeForTintCompleteness(SRC_ROOT, UI_DIR);
+  if (ambiguousReasons.length > 0) {
+    console.error('❌ FAIL: cva variant → 컴포넌트 매핑이 모호함(AC2 완전성 fail-closed):');
+    for (const r of ambiguousReasons) console.error(`  - ${r}`);
     console.error(
       '\n이 가드는 손으로 나열한 컴포넌트 목록이 아니라 components/ui/*.tsx의 cva() 정의를 그때그때' +
-        ' 읽어 지도를 만든다 — 위 자리들은 그 지도로 못 옮겨졌다(조용히 건너뛰지 않는다). 원인을 고치거나' +
-        ' extractCvaTintVariants()의 파싱 범위를 넓힐 것.',
+        ' 읽어 지도를 만든다 — 위 cva는 그 변수를 쓰는 컴포넌트를 0개 또는 2개+로 모호하게 찾았다' +
+        '(조용히 건너뛰지 않는다). cva 정의 자체를 정리할 것.',
     );
     return 1;
   }
+
+  const actualUnanalyzed = new Map(unexplainedSites.map((s) => [s.file, s.raw] as const));
+  const { increased: uIncreased, stale: uStale } = compareToBaseline(actualUnanalyzed, UNANALYZED_TINT_SITES);
+  if (uIncreased.length > 0 || uStale.length > 0) {
+    console.error('❌ FAIL: 「가드가 구조적으로 못 보는 tint 소비처」 목록이 baseline과 다름(AC2 완전성 fail-closed — 전 트리):');
+    for (const h of uIncreased.sort((a, b) => a.key.localeCompare(b.key))) {
+      console.error(
+        `  - [신규/증가] ${h.key} (UNANALYZED_TINT_SITES ${h.expected}건 → 실측 ${h.got}건) — ` +
+          '처방: tint 클래스를 리터럴 className/ui/의 cva로 옮기거나, PO 승인 받아 UNANALYZED_TINT_SITES에 추가할 것.',
+      );
+    }
+    for (const h of uStale.sort((a, b) => a.key.localeCompare(b.key))) {
+      console.error(`  - [stale] ${h.key} (UNANALYZED_TINT_SITES ${h.expected}건 → 실측 ${h.got}건) — 해소됐다면 목록에서 빼거나 개수를 맞출 것.`);
+    }
+    return 1;
+  }
   console.log(
-    `[3839] cva variant → tint 지도: 컴포넌트 ${componentMap.size}개(${[...componentMap.keys()].join(', ')})`,
+    `[3839] cva variant → tint 지도: 컴포넌트 ${componentMap.size}개(${[...componentMap.keys()].join(', ')}) · ` +
+      `unanalyzed tint sites ${UNANALYZED_TINT_SITES.size}곳(정확 일치)`,
   );
 
   const violations = scanRepo(SRC_ROOT, componentMap);
