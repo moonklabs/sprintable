@@ -138,26 +138,37 @@ function hoverViolationKeys(page: string, theme: string, violations: AxeViolatio
 // run마다 갈려(有=위반 잡힘·無=거짓 success) 가드 자체가 비결정적이었다. 실 신호(marker)를
 // 기다리는 것으로 그 경합을 없앤다 — reload가 호출되기 *전에* waiter를 걸어야 한다
 // (reload 뒤에 걸면 이미 지나간 응답을 놓친다).
-async function waitForPageMarker(page: Page, marker: PageWaitMarker): Promise<void> {
-  if (marker.kind === 'networkidle') {
-    await page.reload({ waitUntil: 'domcontentloaded' });
-    await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
-  } else {
-    const waiter = page
-      .waitForResponse((r) => r.url().includes(marker.urlIncludes), { timeout: 5000 })
-      .catch(() => null);
-    await page.reload({ waitUntil: 'domcontentloaded' });
-    await waiter;
+// 카디르 QA 발견(PR#4265, 2026-09-14) — 두 분기 다 타임아웃을 .catch로 삼켜 150ms 뒤
+// 그냥 스캔으로 넘어갔다. 이건 경합 창을 1200ms→5000ms로 넓힌 것일 뿐 닫은 게 아니다 —
+// 신호가 5초 안에도 안 오면 여전히 배너 그리기 전에 스캔해 거짓 success가 재발할 수
+// 있었다(#3839 AC3이 규명한 바로 그 결함 클래스). 처방: 타임아웃이면 삼키지 않고
+// throw — 대비 위반과 구별되는 precondition 메시지로 실패시킨다(신호 자체가 안 왔다는
+// 사실을 "새 대비 위반 없음" 초록과 혼동하지 않게).
+const PAGE_MARKER_TIMEOUT_MS = 5000; // 근거: #3839 AC3 실측 CI 네트워크 지연 최대 ~2s의 2.5배 여유
+
+async function waitForPageMarker(page: Page, marker: PageWaitMarker, pagePath: string): Promise<void> {
+  try {
+    if (marker.kind === 'networkidle') {
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await page.waitForLoadState('networkidle', { timeout: PAGE_MARKER_TIMEOUT_MS });
+    } else {
+      const waiter = page.waitForResponse((r) => r.url().includes(marker.urlIncludes), { timeout: PAGE_MARKER_TIMEOUT_MS });
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await waiter;
+    }
+  } catch {
+    const markerDesc = marker.kind === 'networkidle' ? 'kind:networkidle' : `kind:urlIncludes(${marker.urlIncludes})`;
+    throw new Error(`contrast-guard precondition: page marker not seen — ${pagePath} ${markerDesc} within ${PAGE_MARKER_TIMEOUT_MS}ms`);
   }
   // marker 응답/networkidle 도달 뒤 React가 그 데이터를 실제로 commit·페인트할 때까지의
-  // 짧은 간극(응답 자체는 렌더 완료를 보장 안 함) — 원래 1200ms에 비하면 훨씬 짧고, 이
-  // 간극은 네트워크 지연이 아니라 한 프레임 렌더 비용이라 CI 환경 편차에 덜 민감하다.
+  // 짧은 간극(응답 자체는 렌더 완료를 보장 안 함) — 신호가 안 오면(위에서 throw) 이 스캔
+  // 자체를 실패시킨다, 거짓 success로 새지 않는다.
   await page.waitForTimeout(150);
 }
 
-async function setTheme(page: Page, theme: string, marker: PageWaitMarker): Promise<void> {
+async function setTheme(page: Page, theme: string, marker: PageWaitMarker, pagePath: string): Promise<void> {
   await page.addInitScript((t) => window.localStorage.setItem('theme', t), theme);
-  await waitForPageMarker(page, marker);
+  await waitForPageMarker(page, marker, pagePath);
 }
 
 async function scanContrast(page: Page): Promise<AxeViolation[]> {
@@ -169,7 +180,7 @@ for (const { path: pagePath, label, wait } of PAGES) {
   for (const theme of THEMES) {
     test(`대비(rest) ${label} [${theme}]`, async ({ page }) => {
       await page.goto(pagePath, { waitUntil: 'domcontentloaded' });
-      await setTheme(page, theme, wait);
+      await setTheme(page, theme, wait, pagePath);
       const violations = await scanContrast(page);
       const fresh = violationKeys(pagePath, theme, violations).filter((k) => !BASELINE.has(k));
       expect(fresh, `새 대비 위반 ${pagePath}[${theme}] — tint 위 계열색 글자는 text-foreground(#2420). 오탐이면 (A)에 tint-guard-ok, 여기선 baseline 시드.`).toEqual([]);
@@ -218,7 +229,7 @@ for (const target of HOVER_TARGETS) {
   for (const theme of THEMES) {
     test(`대비(hover) ${target.label} [${target.page}::${theme}]`, async ({ page }) => {
       await page.goto(target.page, { waitUntil: 'domcontentloaded' });
-      await setTheme(page, theme, target.wait);
+      await setTheme(page, theme, target.wait, target.page);
 
       const locator = target.locate(page);
       const count = await locator.count();
