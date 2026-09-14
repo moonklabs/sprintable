@@ -28,6 +28,39 @@ describe('scanContent — story #3880 AC2(a) 셀프테스트', () => {
     expect(scanContent(src, 'fake.tsx')).toEqual([]);
   });
 
+  // story #3880 CHANGES①(PO PR 코멘트, 2026-09-14 16:13Z) — JsxExpression으로 감싼
+  // 리터럴(`title={'Brief'}`)도 잡는지 직접 확인. 최초 버전은 StringLiteral만 봐서
+  // 이 형을 놓쳤다.
+  it('⭐CHANGES① — JsxExpression으로 감싼 문자열 리터럴(title={\'Brief\'}) → RED', () => {
+    const src = `function C() { return <LayerLabel title={'Brief'} />; }`;
+    const refs = scanContent(src, 'fake.tsx');
+    expect(refs).toHaveLength(1);
+    expect(refs[0]!.text).toBe('Brief');
+  });
+
+  it('⭐CHANGES① — JsxExpression으로 감싼 템플릿 리터럴(title={`Brief`}) → RED', () => {
+    const src = 'function C() { return <LayerLabel title={`Brief`} />; }';
+    const refs = scanContent(src, 'fake.tsx');
+    expect(refs).toHaveLength(1);
+    expect(refs[0]!.text).toBe('Brief');
+  });
+
+  // 음성대조 — JsxExpression 안이 CallExpression(t('key'))이면 여전히 GREEN(문자열
+  // 리터럴이 아니라 함수 호출 — extractLiteralText가 undefined 반환).
+  it('음성대조 — JsxExpression 안이 CallExpression(t(\'key\'))이면 GREEN', () => {
+    const src = `function C() { return <LayerLabel title={t('briefTitle')} />; }`;
+    expect(scanContent(src, 'fake.tsx')).toEqual([]);
+  });
+
+  // 양성대조 — 구두점(…·—) 섞인 값도 공유 술어(isUntranslatedCopy)로 잡힌다(3876
+  // 가드와 동형 — page-embed-node.tsx의 실 사고 재현).
+  it('⭐양성대조 — 구두점 섞인 값("Enter document slug or ID…")도 공유 술어로 RED', () => {
+    const src = `function C() { return <input placeholder="Enter document slug or ID…" />; }`;
+    const refs = scanContent(src, 'fake.tsx');
+    expect(refs).toHaveLength(1);
+    expect(refs[0]!.text).toBe('Enter document slug or ID…');
+  });
+
   // 음성대조 — watched 목록 밖 프롭(className 등)은 안 걸린다.
   it('음성대조 — 목록 밖 프롭(className="Foo")은 GREEN', () => {
     const src = `function C() { return <div className="Foo" />; }`;
@@ -88,6 +121,30 @@ describe('실 파일 뮤테이션 — workcell.tsx(title 되돌리기)', () => {
     const refs = scanContent(mutated, REL_FILE);
     const newViolations = computeNewViolations(refs, ALLOWLIST, baseline);
     expect(newViolations.some((r) => r.text === 'Brief')).toBe(true);
+  });
+});
+
+// story #3880 CHANGES①(PO PR 코멘트, 2026-09-14 16:13Z) — 실 파일 실측 양성대조:
+// page-embed-node.tsx의 placeholder="Enter document slug or ID…"가 baseline에
+// 있어야만 GREEN이라는 것(baseline에서 빼면 RED)을 직접 확인 — CHANGES① 전에는
+// JsxExpression 감쌈이 아니라 직접 속성값이라 원래도 잡혔어야 하나, 구두점(…) 때문에
+// 옛 ASCII_WORD_RE는 놓쳤을 자리(3876 가드와 동형 사고).
+describe('실 파일 실측 양성대조 — page-embed-node.tsx(placeholder, 구두점 섞인 자리)', () => {
+  const REL_FILE = 'components/docs/extensions/page-embed-node.tsx';
+  const ABS_FILE = path.join(SRC_ROOT, REL_FILE);
+  const original = readFileSync(ABS_FILE, 'utf8');
+  const baseline = loadBaseline(BASELINE_PATH);
+
+  it('원본 실측 — placeholder="Enter document slug or ID…"가 이 가드에 걸린다', () => {
+    const refs = scanContent(original, REL_FILE);
+    expect(refs.some((r) => r.text === 'Enter document slug or ID…')).toBe(true);
+  });
+
+  it('baseline에서 빼면(un-baseline) RED — 술어가 실제로 판정에 반영된다', () => {
+    const refs = scanContent(original, REL_FILE);
+    const baselineWithoutThis = new Set([...baseline].filter((k) => k !== `${REL_FILE}::placeholder::Enter document slug or ID…`));
+    const newViolations = computeNewViolations(refs, ALLOWLIST, baselineWithoutThis);
+    expect(newViolations.some((r) => r.text === 'Enter document slug or ID…')).toBe(true);
   });
 });
 

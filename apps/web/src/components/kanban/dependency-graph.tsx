@@ -20,6 +20,9 @@ function nodeColor(status: string | undefined, isCurrent: boolean) {
 
 export function DependencyGraph({ storyId, deps, storyMap, onNavigate }: DependencyGraphProps) {
   const t = useTranslations('board');
+  // story #3880(§⑤ 낱말 드리프트, 유나 §⑤ 3880-c 확定) — "+{N} more" 원시 영문 정본화.
+  // docs.groupMore 기존 키 재사용(SVG "+" 접두는 그대로 둠).
+  const tDocs = useTranslations('docs');
   const blockers = deps.filter((d) => d.dep_type === 'blocks' && d.to_id === storyId);
   const blockeds = deps.filter((d) => d.dep_type === 'blocks' && d.from_id === storyId);
   const dependsOn = deps.filter((d) => d.dep_type === 'depends_on' && d.from_id === storyId);
@@ -82,7 +85,7 @@ export function DependencyGraph({ storyId, deps, storyMap, onNavigate }: Depende
       {leftExtra > 0 && (
         <g>
           <rect x={0} y={sideY(leftVisible.length, leftCount)} width={nodeW} height={nodeH} rx={6} fill="var(--color-muted, #f3f4f6)" stroke="var(--color-border, #e5e7eb)" strokeWidth={1.5} />
-          <text x={nodeW / 2} y={sideY(leftVisible.length, leftCount) + nodeH / 2 + 4} textAnchor="middle" fontSize={10} fill="var(--color-muted-foreground, #6b7280)">+{leftExtra} more</text>
+          <text x={nodeW / 2} y={sideY(leftVisible.length, leftCount) + nodeH / 2 + 4} textAnchor="middle" fontSize={10} fill="var(--color-muted-foreground, #6b7280)">+{tDocs('groupMore', { count: leftExtra })}</text>
         </g>
       )}
 
@@ -117,7 +120,7 @@ export function DependencyGraph({ storyId, deps, storyMap, onNavigate }: Depende
       {rightExtra > 0 && (
         <g>
           <rect x={svgW - nodeW} y={sideY(rightVisible.length, rightCount)} width={nodeW} height={nodeH} rx={6} fill="var(--color-muted, #f3f4f6)" stroke="var(--color-border, #e5e7eb)" strokeWidth={1.5} />
-          <text x={svgW - nodeW / 2} y={sideY(rightVisible.length, rightCount) + nodeH / 2 + 4} textAnchor="middle" fontSize={10} fill="var(--color-muted-foreground, #6b7280)">+{rightExtra} more</text>
+          <text x={svgW - nodeW / 2} y={sideY(rightVisible.length, rightCount) + nodeH / 2 + 4} textAnchor="middle" fontSize={10} fill="var(--color-muted-foreground, #6b7280)">+{tDocs('groupMore', { count: rightExtra })}</text>
         </g>
       )}
 

@@ -3068,6 +3068,7 @@
     "groupOlder": "이전",
     "groupUnknownDate": "날짜 없음",
     "groupMore": "{count}개 더",
+    "pageEmbedChangeAction": "바꾸기",
     "tagFilter": "태그",
     "clearFilter": "필터 지우기",
     "advancedOptions": "고급 옵션",

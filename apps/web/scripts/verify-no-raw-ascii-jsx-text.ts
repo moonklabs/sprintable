@@ -12,9 +12,11 @@
  * **children** 자리였고, 속성값까지 넓히면 스코프가 이 카드 밖으로 크게 발산한다. 필요해
  * 지면 별도 스토리/축).
  *
- * ASCII_WORD_RE: 공백 트림 후 알파벳으로 시작, 알파벳/숫자/공백/하이픈/어퍼스트로피만으로
- * 구성된 문자열(2자 이상) — "Dispatch"·"Blocked by"·"Acceptance Criteria"류를 잡고,
- * 「·」·「—」·「/」·숫자 단독·빈 문자열은 첫 글자가 알파벳이 아니라 구조적으로 제외된다.
+ * story #3880 CHANGES ④(PO PR 코멘트, 2026-09-14 16:13Z) — 자체 ASCII_WORD_RE(공백/
+ * 하이픈/어퍼스트로피만 허용)가 구두점(…·—) 섞인 자리를 놓쳐(page-embed-node.tsx
+ * "Loading document…"류) `scripts/lib/is-untranslated-copy.ts` 공유 술어로 교체
+ * (한글·CJK 0 AND 영문 단어 1개+ AND 나머지 공백/숫자/허용 구두점만 — #3880(a)·(b)
+ * whole-value 축과 판정 기전 통일, 새 기전 발명 금지).
  *
  * ## baseline-freeze(story #3741/#3776 관례 그대로) + ALLOWLIST 이원화
  * ① ALLOWLIST — **영구** 예외(브랜드명·단위 약어처럼 번역 대상 자체가 아닌 것). 사유
@@ -28,17 +30,13 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
+import { isUntranslatedCopy } from './lib/is-untranslated-copy';
 
 export interface AsciiJsxTextRef {
   file: string;
   line: number;
   text: string;
 }
-
-// 알파벳 시작 + 알파벳/숫자/공백/하이픈/어퍼스트로피 반복, 2자 이상. 「SP」·「OK」류 2자
-// 약어도 잡힌다 — ALLOWLIST에서 사유와 함께 개별 처리(임의 길이 하한으로 선제 배제하지
-// 않는다, fail-closed 방향).
-const ASCII_WORD_RE = /^[A-Za-z][A-Za-z0-9]*(?:[ '-][A-Za-z0-9]+)*$/;
 
 export function scanContent(content: string, file: string): AsciiJsxTextRef[] {
   const sf = ts.createSourceFile(file, content, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
@@ -57,7 +55,7 @@ export function scanContent(content: string, file: string): AsciiJsxTextRef[] {
   function walk(node: ts.Node): void {
     if (ts.isJsxText(node)) {
       const trimmed = node.getText(sf).trim();
-      if (trimmed.length >= 2 && ASCII_WORD_RE.test(trimmed)) {
+      if (isUntranslatedCopy(trimmed)) {
         const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
         refs.push({ file, line, text: trimmed });
       }

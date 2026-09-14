@@ -8,14 +8,23 @@
  *
  * ## 기전 — AST(verify-no-raw-ascii-jsx-text.ts와 동형, 새 기전 발명 금지)
  * `apps/web/src` 전수(.tsx)를 walk, `JsxAttribute`의 이름이 WATCHED_PROP_NAMES에 있고
- * 값이 `StringLiteral`(표현식 아님 — `title={t('key')}`는 자동 제외)이며 ASCII_WORD_RE에
- * 매칭하면 위반. WATCHED_PROP_NAMES는 story #3880 AC2(a)가 명시한 것만(임의 확장 금지):
- * title·label·placeholder·description·aria-label·alt.
+ * 값이 (a) 직접 `StringLiteral`이거나 (b) `JsxExpression`으로 감쌌지만 그 안이 여전히
+ * `StringLiteral`/`NoSubstitutionTemplateLiteral`인 리터럴(표현식 호출이 아님 —
+ * `title={t('key')}`는 CallExpression이라 여전히 자동 제외)이며, 공유 술어
+ * `isUntranslatedCopy()`에 매칭하면 위반. WATCHED_PROP_NAMES는 story #3880 AC2(a)가
+ * 명시한 것만(임의 확장 금지): title·label·placeholder·description·aria-label·alt.
+ *
+ * story #3880 CHANGES①(PO PR 코멘트, 2026-09-14 16:13Z) — 최초 버전이 직접
+ * `StringLiteral`만 봐서 `title={'Brief'}`·`` title={`Brief`} ``(JsxExpression으로
+ * 감싼 리터럴)를 놓치는 사각을 PO가 지적 — (b) 분기를 추가해 봉쇄. 동시에 로컬
+ * ASCII_WORD_RE를 걷어내고 3876 가드와 같은 공유 술어(scripts/lib/is-untranslated-copy.ts)
+ * 로 교체 — 구두점(…·—) 섞인 값도 같은 기준으로 잡는다.
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
+import { isUntranslatedCopy } from './lib/is-untranslated-copy';
 
 export interface AsciiJsxAttrRef {
   file: string;
@@ -28,9 +37,19 @@ export interface AsciiJsxAttrRef {
 // 접근성 트리(aria-label)에 실제로 텍스트를 그리는 프롭만. 임의 확장 금지(AC 문구 그대로).
 const WATCHED_PROP_NAMES: ReadonlySet<string> = new Set(['title', 'label', 'placeholder', 'description', 'aria-label', 'alt']);
 
-// story #3876의 ASCII_WORD_RE와 동일 — 알파벳 시작 + 알파벳/숫자/공백/하이픈/어퍼스트로피,
-// 2자 이상.
-const ASCII_WORD_RE = /^[A-Za-z][A-Za-z0-9]*(?:[ '-][A-Za-z0-9]+)*$/;
+// story #3880 CHANGES① — 속성 초기화식에서 순수 리터럴 텍스트를 뽑는다. 직접
+// StringLiteral이거나, JsxExpression으로 감쌌지만 그 안이 여전히 StringLiteral/
+// NoSubstitutionTemplateLiteral인 경우(`title={'Brief'}`·`` title={`Brief`} ``)만 —
+// CallExpression(`t('key')`) 등 다른 표현식은 여기서 걸러진다(undefined 반환).
+function extractLiteralText(initializer: ts.JsxAttribute['initializer']): string | undefined {
+  if (!initializer) return undefined;
+  if (ts.isStringLiteral(initializer)) return initializer.text;
+  if (ts.isJsxExpression(initializer) && initializer.expression) {
+    const expr = initializer.expression;
+    if (ts.isStringLiteral(expr) || ts.isNoSubstitutionTemplateLiteral(expr)) return expr.text;
+  }
+  return undefined;
+}
 
 export function scanContent(content: string, file: string): AsciiJsxAttrRef[] {
   const sf = ts.createSourceFile(file, content, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
@@ -47,11 +66,14 @@ export function scanContent(content: string, file: string): AsciiJsxAttrRef[] {
 
   const refs: AsciiJsxAttrRef[] = [];
   function walk(node: ts.Node): void {
-    if (ts.isJsxAttribute(node) && WATCHED_PROP_NAMES.has(node.name.getText(sf)) && node.initializer && ts.isStringLiteral(node.initializer)) {
-      const trimmed = node.initializer.text.trim();
-      if (trimmed.length >= 2 && ASCII_WORD_RE.test(trimmed)) {
-        const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
-        refs.push({ file, line, prop: node.name.getText(sf), text: trimmed });
+    if (ts.isJsxAttribute(node) && WATCHED_PROP_NAMES.has(node.name.getText(sf))) {
+      const literalText = extractLiteralText(node.initializer);
+      if (literalText !== undefined) {
+        const trimmed = literalText.trim();
+        if (isUntranslatedCopy(trimmed)) {
+          const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
+          refs.push({ file, line, prop: node.name.getText(sf), text: trimmed });
+        }
       }
     }
     node.forEachChild(walk);
@@ -143,7 +165,7 @@ function main(): number {
 
   const fileCount = new Set(refs.map((r) => r.file)).size;
   console.log(
-    `[story #3880 AC2(a)] 텍스트 프롭 순 ASCII 리터럴 스캔(title/label/placeholder/description/aria-label/alt) — ` +
+    `[story #3880 AC2(a)] 텍스트 프롭 순 ASCII 리터럴 스캔(title/label/placeholder/description/aria-label/alt, JsxExpression 감쌈 포함) — ` +
       `검출 ${refs.length}건/${fileCount}파일 · ALLOWLIST ${ALLOWLIST.size}건 · baseline(grandfather) ${baseline.size}건 · ` +
       `신규 ${newViolations.length}건 · stale ${staleBaseline.length}건`,
   );

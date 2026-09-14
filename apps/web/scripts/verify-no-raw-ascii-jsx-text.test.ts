@@ -106,6 +106,30 @@ describe('실 파일 뮤테이션 — story-detail-panel.tsx(Labels 헤딩)', ()
   });
 });
 
+// story #3880 CHANGES ④(PO PR 코멘트, 2026-09-14 16:13Z) — 실 파일 뮤테이션 대신 실 파일
+// «실측»(이미 baseline에 있는 실 사고 자리) 양성대조: isUntranslatedCopy 공유 술어로
+// 교체한 게 실제로 이 자리를 잡는지(baseline에서 빼면 RED) 직접 확인한다. "Loading
+// document…"는 아직 낱말 미확定이라 baseline에 남아있다 — 고쳐진 게 아니라 "이 술어가
+// 이 자리를 볼 수 있다"는 것만 증명.
+describe('실 파일 실측 양성대조 — page-embed-node.tsx("Loading document…", 구두점 섞인 자리)', () => {
+  const REL_FILE = 'components/docs/extensions/page-embed-node.tsx';
+  const ABS_FILE = path.join(SRC_ROOT, REL_FILE);
+  const original = readFileSync(ABS_FILE, 'utf8');
+  const baseline = loadBaseline(BASELINE_PATH);
+
+  it('원본 실측 — "Loading document…"가 이 가드에 걸린다(옛 ASCII_WORD_RE는 …때문에 놓쳤을 자리)', () => {
+    const refs = scanContent(original, REL_FILE);
+    expect(refs.some((r) => r.text === 'Loading document…')).toBe(true);
+  });
+
+  it('baseline에서 빼면(un-baseline) RED — 술어가 실제로 판정에 반영된다', () => {
+    const refs = scanContent(original, REL_FILE);
+    const baselineWithoutThis = new Set([...baseline].filter((k) => k !== `${REL_FILE}::Loading document…`));
+    const newViolations = computeNewViolations(refs, ALLOWLIST, baselineWithoutThis);
+    expect(newViolations.some((r) => r.text === 'Loading document…')).toBe(true);
+  });
+});
+
 describe('scanRepo — story #3876(실 트리 실행)', () => {
   it('실 트리(apps/web/src) — ALLOWLIST+baseline과 정확히 일치(신규 0·stale 0)', () => {
     const refs = scanRepo(SRC_ROOT);

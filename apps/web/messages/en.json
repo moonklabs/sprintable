@@ -3068,6 +3068,7 @@
     "groupOlder": "Older",
     "groupUnknownDate": "No date",
     "groupMore": "{count} more",
+    "pageEmbedChangeAction": "Change",
     "tagFilter": "Tags",
     "clearFilter": "Clear filters",
     "advancedOptions": "Advanced options",
