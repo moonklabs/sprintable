@@ -5,7 +5,6 @@
     "마이그레이션 대상 아님 — 이 게이트는 \"더 늘지 않는다\"만 보장한다(freeze, 전량 정리는 후속 별건)."
   ],
   "keys": [
-    "app/(authenticated)/[ws]/[proj]/goals/[id]/page.tsx::Dispatch",
     "app/(authenticated)/docs/design-tokens/page.tsx::Border Radius",
     "app/(authenticated)/docs/design-tokens/page.tsx::Brand swatches resolved inside a scoped",
     "app/(authenticated)/docs/design-tokens/page.tsx::Colors",

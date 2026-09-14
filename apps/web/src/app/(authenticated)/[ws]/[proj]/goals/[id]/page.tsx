@@ -476,7 +476,7 @@ export default function EpicDetailPage() {
         {/* Dispatch */}
         {epic.project_id && (
           <div className="rounded-xl border border-border bg-muted/20 p-4">
-            <p className="mb-2 text-xs font-medium text-muted-foreground">Dispatch</p>
+            <p className="mb-2 text-xs font-medium text-muted-foreground">{tBoard('dispatch')}</p>
             <EntityDispatchPanel
               entityType="epic"
               entityId={epic.id}

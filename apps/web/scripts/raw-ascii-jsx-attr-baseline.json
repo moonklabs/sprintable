@@ -1,0 +1,18 @@
+{
+  "_comment": [
+    "story #3880(§⑤ 낱말 드리프트) grandfather baseline — 이 가드 첫 도입 시점(workcell",
+    "LayerLabel 4곳 fix 後) develop의 기존 텍스트 프롭 순 ASCII 리터럴 잔존분(이 카드",
+    "스코프 밖 화면). 마이그레이션 대상 아님 — \"더 늘지 않는다\"만 보장(freeze, 전량 정리는 후속 별건)."
+  ],
+  "keys": [
+    "app/(authenticated)/organization/workforce/[id]/page.tsx::placeholder::role",
+    "app/forgot-password/page.tsx::placeholder::Email",
+    "app/internal-dogfood/page.tsx::placeholder::internal access secret",
+    "components/chat/embed-card.tsx::label::High risk",
+    "components/chat/embed-card.tsx::label::Risk unknown",
+    "components/organization/event-definer-form.tsx::label::payload",
+    "components/organization/event-definer-form.tsx::label::routing",
+    "components/settings/workflow-policy-simulator-section.tsx::placeholder::merged",
+    "components/settings/workflow-policy-simulator-section.tsx::placeholder::uuid"
+  ]
+}
