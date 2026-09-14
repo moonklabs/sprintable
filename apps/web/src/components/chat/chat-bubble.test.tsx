@@ -1115,11 +1115,12 @@ describe('ChatBubble — story #2637 event_definitions block_template 카드', (
 
   describe('story #3881(customer-zero) — {{label.X}} 네임스페이스 + optional 필드 줄 생략(0375 마이그 실물)', () => {
     // migration 0375_status_changed_verdict_optional_fields.py의 preset.work.status_changed
-    // 실물 그대로.
+    // 실물 그대로. 페드루 CHANGES(2026-09-14 15:26Z, AC5 캡처 리뷰 中 실측 적출) —
+    // work_item_type도 원시 slug("story")였다(같은 클래스, 최초 그라운딩이 놓침) → label로.
     const LABEL_TEMPLATE = {
       blocks: [
         { type: 'header', text: '작업 상태 변경' },
-        { type: 'text', text: '**{{payload.work_item_type}}** `{{label.from_status}}` → `{{label.to_status}}`' },
+        { type: 'text', text: '**{{label.work_item_type}}** `{{label.from_status}}` → `{{label.to_status}}`' },
         {
           type: 'fields',
           fields: [
@@ -1135,23 +1136,24 @@ describe('ChatBubble — story #2637 event_definitions block_template 카드', (
       sender_type: 'agent',
       event: {
         event_key: 'preset.work.status_changed',
-        // 실 publisher(story_status_events.py:330-335)와 동형 — from_status/to_status는
-        // 원시 slug, note는 키 자체가 없다(AC1 그라운딩 실측 그대로).
+        // 실 publisher(story_status_events.py:330-335)와 동형 — work_item_type/from_status/
+        // to_status는 원시 slug, note는 키 자체가 없다(AC1 그라운딩 실측 그대로).
         payload: { work_item_type: 'story', from_status: 'ready-for-dev', to_status: 'in-progress', work_item_id: 'S-42' },
       },
     };
     const catalog = { 'preset.work.status_changed': { key: 'preset.work.status_changed', org_id: null, payload_schema: {}, routing: {}, block_template: LABEL_TEMPLATE, enabled: true, version: 2 } };
 
-    it('AC2 — from_status/to_status가 원시 slug가 아니라 사람 라벨(개발 대기/진행 중)로 뜬다', async () => {
+    it('AC2 — work_item_type/from_status/to_status가 원시 slug가 아니라 사람 라벨(스토리·개발 대기·진행 중)로 뜬다', async () => {
       await act(async () => {
         root.render(wrap(<ChatBubble message={LABEL_MESSAGE} isMine={false} eventDefinitionsByKey={catalog} />));
       });
+      expect(container.textContent).toContain('스토리');
       expect(container.textContent).toContain('개발 대기');
       expect(container.textContent).toContain('진행 중');
-      // 원시 slug는 화면에 없어야 한다(사용자 대면 텍스트 축 — work_item_type="story" 값
-      // 자체는 {{payload.work_item_type}}으로 그대로 남으므로 slug 부재 검증은 status 값만).
+      // 원시 slug는 화면에 전혀 없어야 한다.
       expect(container.textContent).not.toContain('ready-for-dev');
       expect(container.textContent).not.toContain('`in-progress`');
+      expect(container.textContent).not.toContain('**story**');
     });
 
     it('AC3 — note가 payload에 없으면(실 publisher와 동형) ⟨missing⟩ 플레이스홀더가 아예 안 뜬다(줄 생략)', async () => {
@@ -1189,6 +1191,42 @@ describe('ChatBubble — story #2637 event_definitions block_template 카드', (
       });
       expect(container.textContent).toContain('메모');
       expect(container.textContent).toContain('재작업 필요');
+    });
+
+    // 페드루 CHANGES(2026-09-14 15:26Z) — gate.verdict의 {{payload.gate_type}}도 같은
+    // 클래스(원시 slug)였다. 0375 마이그 실물(gate.verdict) 그대로 재현.
+    it('AC2(gate.verdict) — gate_type도 원시 slug가 아니라 사람 낱말(외부 발행)로 뜬다', async () => {
+      const gateVerdictTemplate = {
+        blocks: [
+          { type: 'header', text: '게이트 판정' },
+          { type: 'text', text: '**{{label.gate_type}}** 게이트 — **{{label.verdict}}**' },
+          { type: 'fields', fields: [
+            { label: '대상', value: '{{payload.work_item_id}}' },
+            { label: '사유', value: '{{payload.resolution_note}}', optional: true },
+          ] },
+        ],
+      };
+      const message: ChatMessage = {
+        ...baseMessage,
+        content: '[이벤트] preset.gate.verdict',
+        sender_type: 'agent',
+        event: {
+          event_key: 'preset.gate.verdict',
+          // gate_service.py:2169-2174 유일 publisher와 동형 — gate_type/verdict는 원시,
+          // resolution_note는 키 자체가 없다.
+          payload: { gate_type: 'external_publish', verdict: 'approved', work_item_id: 'S-1' },
+        },
+      };
+      const gateCatalog = { 'preset.gate.verdict': { key: 'preset.gate.verdict', org_id: null, payload_schema: {}, routing: {}, block_template: gateVerdictTemplate, enabled: true, version: 2 } };
+      await act(async () => {
+        root.render(wrap(<ChatBubble message={message} isMine={false} eventDefinitionsByKey={gateCatalog} />));
+      });
+      expect(container.textContent).toContain('외부 발행');
+      expect(container.textContent).toContain('승인됨');
+      expect(container.textContent).not.toContain('external_publish');
+      expect(container.textContent).not.toContain('**approved**');
+      // resolution_note가 payload에 없다 — 「사유」 줄 자체가 안 뜬다.
+      expect(container.textContent).not.toContain('사유');
     });
   });
 

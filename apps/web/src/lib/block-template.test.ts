@@ -114,11 +114,13 @@ describe('substituteMustache — story #3881 {{label.X}} 네임스페이스', ()
 
 describe('renderBlockTemplate — story #3881 AC2/AC3 (label 치환 + optional 필드 생략)', () => {
   // story #3881 실 사고 재현: 0249가 심은 실제 preset.work.status_changed 문구(migration
-  // 025X 적용 後 형태 — {{payload.X}}→{{label.X}}, note는 optional: true).
+  // 0375 적용 後 형태 — {{payload.X}}→{{label.X}}, note는 optional: true). 페드루
+  // CHANGES(2026-09-14 15:26Z, AC5 캡처 리뷰 中 실측 적출) — work_item_type도 원시
+  // slug("story")였다(AC2 "slug 0"과 동일 클래스, 최초 그라운딩이 놓침) → label 네임스페이스로.
   const STATUS_CHANGED_TEMPLATE = {
     blocks: [
       { type: 'header', text: '작업 상태 변경' },
-      { type: 'text', text: '**{{payload.work_item_type}}** `{{label.from_status}}` → `{{label.to_status}}`' },
+      { type: 'text', text: '**{{label.work_item_type}}** `{{label.from_status}}` → `{{label.to_status}}`' },
       {
         type: 'fields',
         fields: [
@@ -129,18 +131,19 @@ describe('renderBlockTemplate — story #3881 AC2/AC3 (label 치환 + optional �
     ],
   };
 
-  it('AC2 — from_status/to_status가 라벨로 치환된다(원시 slug 0)', () => {
+  it('AC2 — work_item_type/from_status/to_status가 전부 라벨로 치환된다(원시 slug 0)', () => {
     const template = parseBlockTemplate(STATUS_CHANGED_TEMPLATE)!;
     const payload = { work_item_type: 'story', work_item_id: 'S-123' };
-    const labels = { from_status: '개발 대기', to_status: '진행 중' };
+    const labels = { work_item_type: '스토리', from_status: '개발 대기', to_status: '진행 중' };
     const rendered = renderBlockTemplate(template, payload, {}, labels);
-    expect(rendered[1]).toEqual({ type: 'text', text: '**story** `개발 대기` → `진행 중`' });
+    expect(rendered[1]).toEqual({ type: 'text', text: '**스토리** `개발 대기` → `진행 중`' });
   });
 
   it('AC3 — note가 payload에 없고 optional:true면 그 field entry 자체가 배열에서 빠진다(⟨missing⟩ 노출 0)', () => {
     const template = parseBlockTemplate(STATUS_CHANGED_TEMPLATE)!;
     const payload = { work_item_type: 'story', work_item_id: 'S-123' };
-    const rendered = renderBlockTemplate(template, payload, {}, { from_status: '개발 대기', to_status: '진행 중' });
+    const labels = { work_item_type: '스토리', from_status: '개발 대기', to_status: '진행 중' };
+    const rendered = renderBlockTemplate(template, payload, {}, labels);
     expect(rendered[2]).toEqual({
       type: 'fields',
       fields: [{ label: '대상', value: 'S-123' }], // 「메모」 entry 자체가 없다 — placeholder 아님.
@@ -150,7 +153,8 @@ describe('renderBlockTemplate — story #3881 AC2/AC3 (label 치환 + optional �
   it('AC3 양성대조 — note에 실 값이 있으면 optional:true여도 그대로 렌더된다(과잉 생략 아님)', () => {
     const template = parseBlockTemplate(STATUS_CHANGED_TEMPLATE)!;
     const payload = { work_item_type: 'story', work_item_id: 'S-123', note: '재작업 필요' };
-    const rendered = renderBlockTemplate(template, payload, {}, { from_status: '개발 대기', to_status: '진행 중' });
+    const labels = { work_item_type: '스토리', from_status: '개발 대기', to_status: '진행 중' };
+    const rendered = renderBlockTemplate(template, payload, {}, labels);
     expect(rendered[2]).toEqual({
       type: 'fields',
       fields: [
@@ -175,13 +179,14 @@ describe('renderBlockTemplate — story #3881 AC2/AC3 (label 치환 + optional �
     });
   });
 
-  it('story #3881 0375 마이그 실 예시(preset.gate.verdict) — verdict 라벨 치환 + resolution_note 줄 생략', () => {
+  it('story #3881 0375 마이그 실 예시(preset.gate.verdict) — gate_type/verdict 라벨 치환 + resolution_note 줄 생략', () => {
     // migration 0375_status_changed_verdict_optional_fields.py의 실물 JSON 그대로(SSOT,
-    // 서술 재구성 금지 확認 완료).
+    // 서술 재구성 금지 확認 완료). 페드루 CHANGES(2026-09-14 15:26Z) — gate_type도
+    // work_item_type과 같은 클래스라 label 네임스페이스로.
     const template = parseBlockTemplate({
       blocks: [
         { type: 'header', text: '게이트 판정' },
-        { type: 'text', text: '**{{payload.gate_type}}** 게이트 — **{{label.verdict}}**' },
+        { type: 'text', text: '**{{label.gate_type}}** 게이트 — **{{label.verdict}}**' },
         {
           type: 'fields',
           fields: [
@@ -193,10 +198,11 @@ describe('renderBlockTemplate — story #3881 AC2/AC3 (label 치환 + optional �
     })!;
     // gate_service.py:2169-2174가 유일 publisher — resolution_note를 payload에 아예 안 싣는다.
     const payload = { gate_type: 'external_publish', work_item_id: 'S-1' };
-    const labels = { verdict: '승인됨' }; // gateStatusLabel(cage.gateStatusApproved) 재사용
+    // gateTypeLabel(dashboard.ccGateTypeExternalPublish)·gateStatusLabel(cage.gateStatusApproved) 재사용.
+    const labels = { gate_type: '외부 발행', verdict: '승인됨' };
     const rendered = renderBlockTemplate(template, payload, {}, labels);
 
-    expect(rendered[1]).toEqual({ type: 'text', text: '**external_publish** 게이트 — **승인됨**' });
+    expect(rendered[1]).toEqual({ type: 'text', text: '**외부 발행** 게이트 — **승인됨**' });
     expect(rendered[2]).toEqual({ type: 'fields', fields: [{ label: '대상', value: 'S-1' }] }); // 「사유」 없음
   });
 

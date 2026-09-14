@@ -11,6 +11,8 @@ import { EntityChip, getEntityHref } from '@/components/chat/embed-card';
 import { parseEntityRef, unescapeReferenceLabel } from '@/components/chat/entity-ref';
 import { useOrgDomainLabels } from '@/hooks/use-org-domain-labels';
 import { gateStatusLabel } from '@/lib/gate-status-label';
+import { gateTypeLabel } from '@/lib/gate-type-label';
+import { entityTypeLabel } from '@/components/chat/chat-input-entity-tokens';
 
 // story #3881(customer-zero) — story status_changed preset의 {{label.from_status}}/
 // {{label.to_status}} 해소용. story-detail-panel.tsx:846의 statusKeyMap과 동형(그 파일은
@@ -153,6 +155,7 @@ export function EventBlockCard({ template, payload, refs }: EventBlockCardProps)
   const t = useTranslations('chats');
   const tBoard = useTranslations('board');
   const tCage = useTranslations('cage');
+  const tDashboard = useTranslations('dashboard');
   const locale = useLocale();
   const { currentMemberType, role, orgId } = useDashboardContext();
   // story #3287(도메인탈고정) — org 커스텀 status 라벨 오버라이드. statusLabel()이 undefined면
@@ -161,11 +164,12 @@ export function EventBlockCard({ template, payload, refs }: EventBlockCardProps)
   const domainLabels = useOrgDomainLabels(orgId, locale);
 
   // story #3881(customer-zero, PO 確定 2026-09-14) — preset.work.status_changed/
-  // preset.gate.verdict가 원시 slug(from_status/to_status/verdict)를 payload로 실어 보내면
-  // 그 값은 발행 시점에 고정돼(en 사용자·org 커스텀 라벨과 안 맞음) 렌더 시점에 해석해야
-  // 한다 — block-template.ts는 순수 함수라 t()를 못 쓰므로, 이 호출부가 미리 계산해
-  // `{{label.X}}` 네임스페이스로 넘긴다(ref와 동형 패턴). payload에 해당 키가 없으면(다른
-  // preset이라 무관) labels에도 안 실어 — 그 템플릿에 `{{label.X}}` 자체가 없으니 무해.
+  // preset.gate.verdict가 원시 slug(from_status/to_status/verdict/work_item_type/
+  // gate_type)를 payload로 실어 보내면 그 값은 발행 시점에 고정돼(en 사용자·org 커스텀
+  // 라벨과 안 맞음) 렌더 시점에 해석해야 한다 — block-template.ts는 순수 함수라 t()를
+  // 못 쓰므로, 이 호출부가 미리 계산해 `{{label.X}}` 네임스페이스로 넘긴다(ref와 동형
+  // 패턴). payload에 해당 키가 없으면(다른 preset이라 무관) labels에도 안 실어 — 그
+  // 템플릿에 `{{label.X}}` 자체가 없으니 무해.
   const labels: Record<string, string> = {};
   for (const key of ['from_status', 'to_status'] as const) {
     const slug = payload[key];
@@ -176,6 +180,18 @@ export function EventBlockCard({ template, payload, refs }: EventBlockCardProps)
   const verdict = payload['verdict'];
   if (typeof verdict === 'string') {
     labels['verdict'] = gateStatusLabel(verdict, tCage);
+  }
+  // 페드루 CHANGES(2026-09-14 15:26Z) — 캡처 리뷰로 실측 적출: work_item_type("story")·
+  // gate_type("external_publish" 등)도 같은 클래스의 원시 slug였다(AC2 "slug 0"과 동일
+  // 원칙). 기존 SSOT 재사용(새 매핑 0) — entityTypeLabel()(chat-input-entity-tokens.ts,
+  // §②-1 낱말 표와 정합)·gateTypeLabel()(lib/gate-type-label.ts, dashboard 네임스페이스).
+  const workItemType = payload['work_item_type'];
+  if (typeof workItemType === 'string') {
+    labels['work_item_type'] = entityTypeLabel(workItemType);
+  }
+  const gateType = payload['gate_type'];
+  if (typeof gateType === 'string') {
+    labels['gate_type'] = gateTypeLabel(tDashboard, gateType);
   }
 
   const blocks = renderBlockTemplate(template, payload, refs, labels);

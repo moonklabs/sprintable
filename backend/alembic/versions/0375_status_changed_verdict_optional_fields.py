@@ -27,6 +27,14 @@ fail-loud 플레이스홀더가 사용자에게 그대로 노출됐다 — 두 �
 해 같은 처방을 받게 한다(text 블록은 metric_value만 남김, 사실 무변경 — 단위 없는 수치도
 여전히 유효한 측정치라 텍스트가 어색해지지 않는다).
 
+CHANGES(페드루 PO 2026-09-14 15:26Z, AC5 캡처 리뷰 中 실측 적출) — 위와 같은 자리에
+`{{payload.work_item_type}}`(status_changed, 값 예 "story")·`{{payload.gate_type}}`
+(gate.verdict, 값 예 "external_publish")도 원시 slug였다(AC2 "slug 0"과 동일 클래스,
+그라운딩 1차 축이 status/verdict만 보고 놓쳤다). 같은 `{{label.X}}` 경로로 옮기고,
+호출부(event-block-card.tsx)는 기존 SSOT를 그대로 재사용한다(새 매핑 0) —
+`entityTypeLabel()`(chat-input-entity-tokens.ts, §②-1 낱말 표와 정합)·`gateTypeLabel()`
+(lib/gate-type-label.ts, dashboard 네임스페이스).
+
 AC1 실측(코드 grep, 2026-09-14): org별 block_template 복제/자동 생성 메커니즘 0건
 (organizations.py에 event_definition 관련 코드 없음 — create_organization이 이 테이블을
 건드리지 않는다). 오버라이드는 PATCH(POST/PUT /api/v2/events/definitions)로 사용자가 직접
@@ -56,7 +64,7 @@ _TEMPLATES: dict[str, dict] = {
     "preset.work.status_changed": {
         "blocks": [
             {"type": "header", "text": "작업 상태 변경"},
-            {"type": "text", "text": "**{{payload.work_item_type}}** `{{label.from_status}}` → `{{label.to_status}}`"},
+            {"type": "text", "text": "**{{label.work_item_type}}** `{{label.from_status}}` → `{{label.to_status}}`"},
             {"type": "fields", "fields": [
                 {"label": "대상", "value": "{{payload.work_item_id}}"},
                 {"label": "메모", "value": "{{payload.note}}", "optional": True},
@@ -66,7 +74,7 @@ _TEMPLATES: dict[str, dict] = {
     "preset.gate.verdict": {
         "blocks": [
             {"type": "header", "text": "게이트 판정"},
-            {"type": "text", "text": "**{{payload.gate_type}}** 게이트 — **{{label.verdict}}**"},
+            {"type": "text", "text": "**{{label.gate_type}}** 게이트 — **{{label.verdict}}**"},
             {"type": "fields", "fields": [
                 {"label": "대상", "value": "{{payload.work_item_id}}"},
                 {"label": "사유", "value": "{{payload.resolution_note}}", "optional": True},
