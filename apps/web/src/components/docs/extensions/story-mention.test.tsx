@@ -8,22 +8,19 @@ import Paragraph from '@tiptap/extension-paragraph';
 import Text from '@tiptap/extension-text';
 import LinkExt from '@tiptap/extension-link';
 import {
-  createStoryMentionSuggestion, sanitizeLinkText, StoryMentionMenu, type StoryResult,
+  createStoryMentionSuggestion, StoryMentionMenu, type StoryResult,
 } from './story-mention';
 
 // story #3866 AC2 — 검색(items)·삽입(command)·빈 상태·키보드 접근. wiki-link.tsx엔 전용
 // 테스트가 없어(그라운딩 확認) reclaim-merged-worktrees.test.sh류 "합성 데이터로 실행 결과
 // 고정" 원칙을 그대로 이 TipTap 확장에 적용한다 — attachment-upload.roundtrip.test.ts와
 // 동일하게 global.fetch를 스텁해 실 네트워크 0.
-
-describe('sanitizeLinkText — 이 팀 스토리 제목 관례([SID:NNNN] 등)가 markdownToHtml의 홈그로운 정규식을 안 깨게', () => {
-  it('대괄호를 짝 맞는 괄호로 치환한다', () => {
-    expect(sanitizeLinkText('[SID:3864] CI 인프라')).toBe('(SID:3864) CI 인프라');
-  });
-  it('대괄호가 없으면 그대로', () => {
-    expect(sanitizeLinkText('가입 폼 단순화')).toBe('가입 폼 단순화');
-  });
-});
+//
+// title 새니타이즈(대괄호→괄호 치환)는 폐기됐다(페드루 판정 2026-09-14 11:45Z — 칩에
+// 보이는 낱말이 스토리 실제 제목과 달라지는 게 "같은 사실 같은 낱말" 위반). 근본 처방은
+// content-converter.ts의 markdownToHtml 쪽(균형 대괄호 허용)으로 옮겼다 — 그 라운드트립
+// 검증은 content-converter.test.ts/roundtrip.test.ts와 이 파일의 story-mention.roundtrip.
+// test.ts가 진다.
 
 describe('createStoryMentionSuggestion — items(검색)', () => {
   beforeEach(() => {
@@ -128,14 +125,13 @@ describe('createStoryMentionSuggestion — command(삽입)', () => {
     editor.destroy();
   });
 
-  it('제목의 대괄호는 sanitizeLinkText를 거쳐 삽입된다([SID:NNNN]류 안전)', () => {
+  it('대괄호로 시작하는 제목([SID:NNNN]류)도 원문 그대로(치환 0) 삽입된다 — 같은 사실은 같은 낱말로', () => {
     const editor = makeEditor();
     const suggestion = createStoryMentionSuggestion('proj-1', '없어요');
     const item: StoryResult = { id: STORY_ID, title: '[SID:3864] CI 인프라' };
     suggestion.command!({ editor, range: START_RANGE, props: item } as never);
     const html = editor.getHTML();
-    expect(html).toContain('(SID:3864) CI 인프라');
-    expect(html).not.toContain('[SID:3864]');
+    expect(html).toContain('[SID:3864] CI 인프라');
     editor.destroy();
   });
 });

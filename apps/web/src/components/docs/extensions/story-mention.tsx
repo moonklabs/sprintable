@@ -6,11 +6,18 @@ import LinkExtension from '@tiptap/extension-link';
 import Suggestion, { type SuggestionOptions } from '@tiptap/suggestion';
 import { PluginKey } from '@tiptap/pm/state';
 import { createRoot, type Root } from 'react-dom/client';
-import { FileText } from 'lucide-react';
+import { resolveEntityIcon, EntityGlyph } from '@/components/chat/entity-registry';
 import { fetchWithAuth } from '@/lib/db/client';
 import { parseEntitySearchResults } from '@/hooks/use-entity-picker';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+
+// story #3866(페드루 판정 2026-09-14 11:45Z) — 채팅 EntityChip과 같은 아이콘 SSOT
+// (entity-registry.ts::ENTITY_ICONS.story) 재사용 — 직접 lucide-react에서 고르지 않는다
+// (그 표가 바뀌면 이 드롭다운도 같이 바뀌어야 드리프트가 없다). 모듈 스코프에서 미리
+// resolve(react-hooks/static-components 규율 — 렌더 스코프 안에서 lookup한 컴포넌트를
+// 바로 JSX로 못 쓴다, entity-registry.ts 자체 주석과 동형).
+const STORY_ICON = resolveEntityIcon('story');
 
 // 3858 파서(mention_parser.py `_DOC_ENTITY_HREF_RE`)가 읽는 정확한 형식만 — 임의 entity:*
 // 문자열이 앵커로 굳는 것을 막는다(스킴만 여는 것보다 엄격).
@@ -57,20 +64,16 @@ export const EntityLinkExtension = LinkExtension.extend({
 // `_DOC_ENTITY_HREF_RE`)는 **`<a href="entity:type:uuid">` 앵커만** 인식하고, wikiLink의
 // span 경로는 doc 전용 별도 분기라 story엔 안 먹는다(AC0 실측). 대신 에디터에 이미 있는
 // `Link` mark(@tiptap/extension-link)로 진짜 앵커를 삽입 — Turndown 기본 규칙이 앵커를
-// `[text](href)`로 그대로 직렬화하니 BE·Turndown 변경 0.
+// `[text](href)`로 그대로 직렬화하니 BE·Turndown 변경 0(단, content-converter.ts의 읽기
+// 쪽 markdownToHtml 정규식은 손댔다 — 균형 대괄호 제목 지원, 아래 sanitize 관련 주석 참고).
 //
-// ⚠️title 새니타이즈(발견 즉시 수정, PO 사전 확定 밖의 구현 세부사항) — content-converter.ts
-// 의 markdownToHtml은 CommonMark가 아니라 홈그로운 정규식(`\[([^\]]+)\]\(([^)]+)\)`)이고
-// turndown.escape가 통째로 no-op으로 꺼져 있어(같은 파일 38행) 이스케이프 메커니즘이 전혀
-// 없다 — title에 `]`가 있으면(이 팀 스토리 제목 관례 자체가 "[SID:NNNN]"·"[UX-v3·...]"처럼
-// 대괄호로 시작하는 경우가 흔하다) 그 정규식이 앵커 경계를 못 찾아 저장 시 링크가 통째로
-// 평문으로 빠지는 무언(無言) 데이터 손실이 된다(직접 정규식 트레이스로 확인). 백슬래시
-// 이스케이프는 이 정규식엔 무의미(백슬래시를 특별 취급 안 함) — 유일한 안전 처방은 `]`를
-// 애초에 안 넣는 것. `[`는 이 정규식에서 위험하지 않으므로(문자 클래스가 `]`만 배제) 안
-// 건드리지만, 시각적 균형을 위해 `[`도 짝을 맞춰 괄호로 치환한다.
-export function sanitizeLinkText(title: string): string {
-  return title.replace(/\[/g, '(').replace(/\]/g, ')');
-}
+// story #3866(페드루 판정 2026-09-14 11:45Z, PO CHANGES) — title은 원문 그대로 삽입한다.
+// 초안은 title의 `]`가 content-converter.ts의 홈그로운 markdownToHtml 정규식(균형 대괄호를
+// 못 견딤)에 걸려 저장 시 링크가 평문으로 깨지는 걸 피하려고 대괄호를 괄호로 치환했지만,
+// 이건 "칩에 보이는 낱말≠스토리 실제 제목" 위반이다(같은 사실은 같은 낱말로). 근본 처방은
+// 텍스트 쪽이 아니라 파서 쪽 — content-converter.ts의 정규식이 1단 균형 대괄호(그리고
+// sprintable reference_token이 쓰는 백슬래시 이스케이프 형식)를 링크 텍스트로 허용하도록
+// 고쳤다(그 파일 460행 부근). title 변형은 이제 필요 0.
 
 export interface StoryResult {
   id: string;
@@ -129,7 +132,7 @@ export function StoryMentionMenu({
               : 'text-foreground'
           }`}
         >
-          <FileText className="size-3.5 flex-shrink-0 text-muted-foreground" />
+          <EntityGlyph Icon={STORY_ICON} label={item.title} className="size-3.5 flex-shrink-0 text-muted-foreground" />
           <span className="truncate text-xs">{item.title}</span>
         </Button>
       ))}
@@ -221,7 +224,6 @@ export function createStoryMentionSuggestion(
 
     command({ editor, range, props }) {
       const item = props as StoryResult;
-      const label = sanitizeLinkText(item.title);
       editor
         .chain()
         .focus()
@@ -230,7 +232,7 @@ export function createStoryMentionSuggestion(
           {
             type: 'text',
             marks: [{ type: 'link', attrs: { href: `entity:story:${item.id}` } }],
-            text: label,
+            text: item.title,
           },
           // 마크 밖 공백 — 삽입 직후 이어 타이핑하는 글자가 링크 mark를 안 물려받게(마크는
           // 이 공백 노드에 안 걸려 있으므로 커서가 여길 지나면 마크가 자연히 끊긴다).
