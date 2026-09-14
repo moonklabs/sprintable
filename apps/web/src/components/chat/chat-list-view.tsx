@@ -22,7 +22,7 @@ import { useChatRailOptional } from '@/app/(authenticated)/chats/chat-rail-conte
 import { fetchWithAuth } from '@/lib/db/client';
 import { participantDisplayLabel } from '@/lib/member-display';
 import { composeEventPreviewLine } from './event-block-card';
-import { useOrgDomainLabels } from '@/hooks/use-org-domain-labels';
+import { useOrgDomainLabels, type OrgDomainLabels } from '@/hooks/use-org-domain-labels';
 
 interface Participant {
   member_id: string;
@@ -113,11 +113,15 @@ function ConversationRow({
   conv,
   currentMemberId,
   isAgentConv,
+  domainLabels,
   onClick,
 }: {
   conv: ConversationItem;
   currentMemberId: string;
   isAgentConv?: boolean;
+  // story #3888 CHANGES①(PO PR 코멘트, 2026-09-14 18:53Z) — 부모(ChatListView)가 1회만
+  // 호출한 useOrgDomainLabels 결과를 prop으로 받는다(행마다 재호출 금지 — 요청 중복 방지).
+  domainLabels: OrgDomainLabels;
   onClick: () => void;
 }) {
   const t = useTranslations('chats');
@@ -126,9 +130,9 @@ function ConversationRow({
   const tCage = useTranslations('cage');
   const tDashboard = useTranslations('dashboard');
   const tEventCard = useTranslations('eventCard');
+  // useLocale()은 순수 Context 읽기(HTTP 요청 0)라 행마다 불러도 되는 것 — CHANGES①이
+  // 지적한 것은 useOrgDomainLabels(HTTP fetch를 매 마운트 발사)뿐이다.
   const locale = useLocale();
-  const { orgId } = useDashboardContext();
-  const domainLabels = useOrgDomainLabels(orgId, locale);
   const displayTimezone = resolveDisplayTimezone().tz;
 
   const displayName = conv.title ??
@@ -350,8 +354,15 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   const consumedComposeRef = useRef(false);
   // perf(17960f86): role 은 DashboardContext(서버 /api/v2/me 투영)에서 — 채팅 진입마다 `/api/me`
   // 재호출하던 round-trip 제거. /me checkRole 과 동일한 effective role 이라 게이트 의미 보존.
-  const { role } = useDashboardContext();
+  const { role, orgId } = useDashboardContext();
   const isAdminOrOwner = role === 'admin' || role === 'owner';
+  // story #3888 CHANGES①(PO PR 코멘트, 2026-09-14 18:53Z) — useOrgDomainLabels를
+  // ConversationRow(행 컴포넌트) 안에서 부르면 목록 1회 마운트에 대화 수만큼(최대 30+
+  // 에이전트 대화) 같은 domain-labels 요청이 중복 발사된다(훅 자체엔 캐시·dedupe가 없다).
+  // 이 부모(ChatListView)에서 1회만 호출해 domainLabels를 prop으로 내린다 — 행이 몇
+  // 개든 요청은 항상 1건.
+  const locale = useLocale();
+  const domainLabels = useOrgDomainLabels(orgId, locale);
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
   const [allConversations, setAllConversations] = useState<ConversationItem[]>([]);
   // agent 탭(allConversations·include_agent_conversations) 첫 활성화 1회만 fetch 하기 위한 가드.
@@ -730,7 +741,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
             {t('dmSection')}
           </p>
           {dmConvs.map((conv) => (
-            <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} onClick={() => router.push(`/chats/${conv.id}`)} />
+            <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} domainLabels={domainLabels} onClick={() => router.push(`/chats/${conv.id}`)} />
           ))}
         </div>
       )}
@@ -740,7 +751,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
             {t('groupSection')}
           </p>
           {groupConvs.map((conv) => (
-            <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} onClick={() => router.push(`/chats/${conv.id}`)} />
+            <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} domainLabels={domainLabels} onClick={() => router.push(`/chats/${conv.id}`)} />
           ))}
         </div>
       )}
@@ -807,7 +818,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
         {t('agentSection')}
       </p>
       {agentOnlyConvs.map((conv) => (
-        <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} isAgentConv onClick={() => router.push(`/chats/${conv.id}`)} />
+        <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} isAgentConv domainLabels={domainLabels} onClick={() => router.push(`/chats/${conv.id}`)} />
       ))}
       {allConversations.length < agentTotal && (
         <Button

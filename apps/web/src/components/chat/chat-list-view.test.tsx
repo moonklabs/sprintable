@@ -358,6 +358,46 @@ describe('ChatListView — story #3888 이벤트 메시지 미리보기(raw slug
   });
 });
 
+// story #3888 CHANGES①(PO PR 코멘트, 2026-09-14 18:53Z) — useOrgDomainLabels를
+// ConversationRow(행) 안에서 부르면 행 개수만큼 같은 domain-labels 요청이 중복 발사된다
+// (훅 자체엔 캐시·dedupe가 없다, use-org-domain-labels.ts 그라운딩). ChatListView가 1회만
+// 부르고 domainLabels를 prop으로 내리는 처방 — N=3 행에서 요청이 정확히 1회만 나가는지
+// 직접 고정한다(합성 카운터, 실 데이터 아님 — 이 테스트의 목적 자체가 "몇 번 불렸나").
+describe('ChatListView — story #3888 CHANGES① domain-labels 요청 중복 제거', () => {
+  it('⭐대화 3건(행 3개)이어도 domain-labels 요청은 정확히 1회만 나간다', async () => {
+    useDashboardContextMock.mockReturnValue({ role: 'member', orgId: 'org-1' });
+    let domainLabelsCallCount = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/domain-labels')) {
+        domainLabelsCallCount += 1;
+        return { ok: true, json: async () => [] };
+      }
+      if (url.includes('/api/conversations/recent-outside-project')) {
+        return { ok: true, json: async () => ({ data: [] }) };
+      }
+      if (url.includes('/api/conversations?')) {
+        return {
+          ok: true,
+          json: async () => ({
+            data: [
+              { id: 'conv-1', type: 'dm', title: '대화 1', latest_message: null, updated_at: '2026-09-14T18:00:00Z', unread_count: 0 },
+              { id: 'conv-2', type: 'dm', title: '대화 2', latest_message: null, updated_at: '2026-09-14T18:00:00Z', unread_count: 0 },
+              { id: 'conv-3', type: 'dm', title: '대화 3', latest_message: null, updated_at: '2026-09-14T18:00:00Z', unread_count: 0 },
+            ],
+            total: 3,
+          }),
+        };
+      }
+      return { ok: false, status: 404, json: async () => null };
+    }));
+    await mount();
+    expect(container.textContent).toContain('대화 1');
+    expect(container.textContent).toContain('대화 2');
+    expect(container.textContent).toContain('대화 3');
+    expect(domainLabelsCallCount).toBe(1);
+  });
+});
+
 // story #3106(#3092 후속) — DM 상대(oneOnOneParticipant)의 runtime_type이 BE에서 이미
 // 내려와도 이 컴포넌트가 Avatar에 안 넘기면 여전히 "Agent" 폴백에 머문다.
 describe('ChatListView — story #3106 참가자 runtime_type → Avatar 배선', () => {
