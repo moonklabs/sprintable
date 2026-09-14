@@ -16,6 +16,9 @@ PLACEHOLDERS = {
     "JWT_SECRET=change-me-in-production-min-32-chars": lambda: f"JWT_SECRET={secrets.token_hex(32)}",
     "SECRET_KEY=change-me-in-production-min-32-chars": lambda: f"SECRET_KEY={secrets.token_hex(32)}",
     "POSTGRES_PASSWORD=change-me-in-production": lambda: f"POSTGRES_PASSWORD={secrets.token_hex(16)}",
+    # BYOM 자격증명 암호화 마스터 키(frontend 전용). 누락 시 LocalKmsAdapter 생성자가
+    # throw 해 BYOM 저장이 실패한다 — apps/web/src/lib/kms/provider.ts.
+    "LOCAL_KMS_MASTER_KEY=generate-with-openssl-rand-hex-32": lambda: f"LOCAL_KMS_MASTER_KEY={secrets.token_hex(32)}",
 }
 
 force = "--force" in sys.argv
@@ -33,5 +36,5 @@ for placeholder, generator in PLACEHOLDERS.items():
 with open(ENV_FILE, "w") as f:
     f.write(content)
 
-print("[init-env] .env created with auto-generated JWT_SECRET, SECRET_KEY, POSTGRES_PASSWORD")
+print("[init-env] .env created with auto-generated JWT_SECRET, SECRET_KEY, POSTGRES_PASSWORD, LOCAL_KMS_MASTER_KEY")
 print("[init-env] Next: docker compose up -d")

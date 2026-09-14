@@ -88,5 +88,17 @@ services:
       NEXT_PUBLIC_APP_URL: ${APP_BASE_URL:-http://localhost:3108}
       NEXT_PUBLIC_FASTAPI_URL: http://backend:8000
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production-min-32-chars}
+      # BYOM 자격증명 암호화(KMS_PROVIDER=local 기본). 모델 호출을 fetch 하는 주체가
+      # apps/web/src/lib/llm/client.ts 라서 이 키는 frontend 쪽에 있어야 한다 —
+      # backend(Python)는 BYOM 암호문을 복호화하지 않는다. 누락 시 BYOM 저장이 throw.
+      # scripts/init-env.py 가 .env 생성 시 자동 발급한다.
+      LOCAL_KMS_MASTER_KEY: ${LOCAL_KMS_MASTER_KEY:-}
+      KMS_PROVIDER: ${KMS_PROVIDER:-local}
+    # 컨테이너에서 호스트의 로컬 LLM(Ollama/LM Studio)에 접근하기 위한 배선.
+    # Docker Desktop(mac/win)은 암묵 제공하지만 Linux 는 명시해야 한다 — 없으면
+    # http://host.docker.internal:11434/v1 같은 baseUrl 이 해석되지 않는다.
+    # (경로에 /v1 이 없으면 validateCustomEndpoint 가 OPENAI_BASE_URL_MUST_INCLUDE_V1 로 거절)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "${PORT:-3108}:3108"

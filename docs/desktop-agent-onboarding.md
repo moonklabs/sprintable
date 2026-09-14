@@ -239,26 +239,49 @@ Hermes Desktop / Buzz와의 차이: 그쪽은 **로컬 우선**(서버가 선택
 - backend healthcheck로 기동 순서 보장
 - `APP_BASE_URL` 기본값이 이미 `http://localhost:3108`
 
-> ⚠️ 위는 compose/문서를 읽은 결과다. 실제 `docker compose up` 실행 검증은 미실시.
+> ⚠️ 위는 compose/문서를 읽은 결과다. 실제 `docker compose up` 실행 검증은 미실시 —
+> **작업 머신에 Docker Desktop 이 설치돼 있지 않다**(2026-09-14 실측: `docker` CLI 부재,
+> `/Applications/Docker.app` 없음). 코드 갭이 아니라 환경 제약이므로, Docker 가 있는
+> 머신에서 `make up` 으로 닫아야 한다.
+>
+> 대신 스크립트 계층은 격리 검증했다: `init-env.py` 를 임시 디렉터리에서 실행해
+> 4개 시크릿(JWT/SECRET/POSTGRES/KMS) 전부 32자 이상 생성 + 플레이스홀더 잔존 0 +
+> 키 구조 불변(`diff` 로 확인), `validate-env.sh` 3케이스(키 있음→통과 / 키 없음→경고
+> 후 exit 0 / `NEXT_PUBLIC_APP_URL` 없음→차단 exit 1) 전부 의도대로.
 
-### 6.2 갭 3개
+### 6.2 갭 3개 — **①·② 해소 완료 (2026-09-14)**
 
-**① `LOCAL_KMS_MASTER_KEY` 미배선 — day-one 블로커**
+**① `LOCAL_KMS_MASTER_KEY` 미배선 — 해소**
 
 ```
 KMS_PROVIDER 미설정 → 기본 'local'
 LocalKmsAdapter 생성자 → if (!secret) throw 'LOCAL_KMS_MASTER_KEY is required'
 ```
 
-`apps/web/src/lib/kms/provider.ts:43`. `.env.example`(키 10개)과 compose 어디에도 없다.
+`apps/web/src/lib/kms/provider.ts:43`. `.env.example`(키 10개)과 compose 어디에도 없었다.
 현재는 `resolveLLMConfig` 에 프로덕션 호출자가 없어 안 터지지만, **이 프로젝트가 그 호출자를
-만드는 일**이므로 day-one 블로커가 된다. `.env.example` + compose + 셋업 스크립트에
-`openssl rand -hex 32` 생성으로 추가해야 한다.
+만드는 일**이므로 day-one 블로커가 된다.
 
-**② `extra_hosts` 누락 — Linux에서 로컬 LLM 연결 불가**
+**조치:**
+- `.env.example` 에 `LOCAL_KMS_MASTER_KEY=generate-with-openssl-rand-hex-32` 추가.
+  `init-env.py` 의 플레이스홀더 치환은 **문자열 일치**이므로 기존 `change-me-*` 와 충돌하지
+  않는 고유 문자열을 썼다.
+- `scripts/init-env.py` PLACEHOLDERS 에 생성기 등록(`secrets.token_hex(32)`).
+  실측: 4개 키(JWT/SECRET/POSTGRES/KMS) 전부 32자 이상으로 치환되고 키 구조는 불변.
+- `docker-compose.yml` frontend 에 `LOCAL_KMS_MASTER_KEY` + `KMS_PROVIDER` 배선.
+- `scripts/validate-env.sh` 에 경고 추가 — **차단하지 않는다.** BYOM 을 아직 안 쓰는 설치는
+  정상 기동해야 하므로, 첫 BYOM 저장 시점에 실패하는 편이 낫다.
+- 검증: `token_hex(32)` 와 `openssl rand -hex 32` 모두 64자 hex → `normalizeMasterKey` 의
+  1순위 분기(`/^[A-Fa-f0-9]{64}$/`)에서 **32바이트 키**로 수용됨(AES-256 요구 충족).
+
+**키 위치는 frontend 다.** `lib/llm/client.ts` 가 `fetch` 로 모델을 호출하는 주체이고 그 파일이
+`apps/web` 에 있기 때문. backend(Python)는 BYOM 암호문을 복호화하지 않는다 — 채널 자격증명은
+`channel_credential_crypto.py` 로 완전히 별개 경로다.
+
+**② `extra_hosts` 누락 — 해소**
 
 Ollama/LM Studio는 호스트, 서버는 컨테이너. Docker Desktop은 암묵 제공하나
-**Linux는 명시 필요**:
+**Linux는 명시 필요**. frontend 에 배선했다:
 
 ```yaml
     extra_hosts:
@@ -267,11 +290,13 @@ Ollama/LM Studio는 호스트, 서버는 컨테이너. Docker Desktop은 암묵 
 
 baseUrl은 `http://host.docker.internal:11434/v1` — `validateCustomEndpoint` 의 `/v1` 요구를 통과.
 
-**③ 모델 키 주입 경로가 컨테이너 환경변수뿐**
+**③ 모델 키 주입 경로가 컨테이너 환경변수뿐 — 잔존**
 
 `resolveLLMConfig` 의 폴백은 컨테이너 **내부** `process.env.*` 를 읽는다. 이는 키를
 `.env` 평문 + 컨테이너 환경에 남긴다는 뜻이다. 로컬 BYOM의 정당한 경로는 환경변수가 아니라
-**DB의 암호화 시크릿(①의 `local` KMS 경로)** 이어야 하며, ①을 고치면 ③도 해소된다.
+**DB의 암호화 시크릿(①의 `local` KMS 경로)** 이어야 한다.
+①은 이제 키를 **제공**하지만, BYOM **저장 경로 자체가 아직 없다**(§2.1 — 프로덕션 호출자 0).
+따라서 ③은 저장 경로를 만드는 시점에 함께 해소된다.
 
 ### 6.3 로컬 인스턴스에서 파생되는 제약
 
@@ -287,8 +312,8 @@ baseUrl은 `http://host.docker.internal:11434/v1` — `validateCustomEndpoint` �
 
 | 순서 | 작업 | 레포 |
 |---|---|---|
-| 1 | `LOCAL_KMS_MASTER_KEY` 배선 + 셋업 스크립트 | 이 레포 |
-| 2 | `extra_hosts` + 로컬 LLM 문서 | 이 레포 |
+| ~~1~~ | ~~`LOCAL_KMS_MASTER_KEY` 배선 + 셋업 스크립트~~ | ✅ 완료 (§6.2 ①) |
+| ~~2~~ | ~~`extra_hosts` + 로컬 LLM 문서~~ | ✅ 완료 (§6.2 ②) |
 | 3 | `agent_device_credentials` + `_resolve_api_key` 분기 | 이 레포 (백엔드) |
 | 4 | `self-issue` (멤버 셀프발급, 상한 1) | 이 레포 (백엔드) |
 | 5 | conversation ↔ 로컬 세션 매핑 모델 (1:N) | 이 레포 (백엔드) |
@@ -299,6 +324,8 @@ baseUrl은 `http://host.docker.internal:11434/v1` — `validateCustomEndpoint` �
 
 **1~6번이 이 레포 안, 백엔드다.** 데스크톱(7~8) 없이도 `docker compose up` 으로 검증 가능하다.
 9번이 가장 불확실하다.
+
+**1·2번 완료(2026-09-14).** 다음 착수 지점은 3번(`agent_device_credentials` + 인증 분기)이다.
 
 ---
 
