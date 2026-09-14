@@ -231,6 +231,22 @@ function EpicEditInline({ epic, onSaved, onCancel }: { epic: Epic; onSaved: (e: 
 export default function EpicDetailPage() {
   const t = useTranslations('goals');
   const tc = useTranslations('common');
+  // story #3878(§⑤ 낱말 드리프트, PO 재실측 2026-09-14 — 이 페이지가 실 클릭 플로우의
+  // 유일 도달점, AC5 "모든 디바이스에서 /epics/[id] 딥링크로 이동") — 스토리 그룹 헤딩의
+  // status(canonical slug)를 t() 없이 그대로 그리던 자리 정본화. story-detail-panel.tsx의
+  // statusKeyMap→t() 관례 그대로 재사용(§②-1 기존 상태 낱말, 새 키 0).
+  const tBoard = useTranslations('board');
+  const storyStatusKeyMap: Record<string, 'backlog' | 'readyForDev' | 'inProgress' | 'inReview' | 'done'> = {
+    backlog: 'backlog',
+    'ready-for-dev': 'readyForDev',
+    'in-progress': 'inProgress',
+    'in-review': 'inReview',
+    done: 'done',
+  };
+  const storyStatusLabel = (slug: string): string => {
+    const key = storyStatusKeyMap[slug];
+    return key ? tBoard(key) : slug;
+  };
   const displayTimezone = resolveDisplayTimezone().tz;
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -546,7 +562,7 @@ export default function EpicDetailPage() {
                 <div key={groupStatus}>
                   <div className="mb-1.5 flex items-center gap-2">
                     <Badge variant={storyStatusVariant(groupStatus)} className="text-[10px]">
-                      {groupStatus}
+                      {storyStatusLabel(groupStatus)}
                     </Badge>
                     <span className="text-xs text-muted-foreground">{t('itemCount', { count: items.length })}</span>
                   </div>
