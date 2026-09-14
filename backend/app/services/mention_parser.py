@@ -14,6 +14,10 @@ design-org-knowledge-mentions-backlinks §2.
     `data-doc-id` attribute 를 추출한다. **정규식이 아닌 `html.parser.HTMLParser` 사용** —
     attribute 순서가 보장되지 않는다는 게 설계 doc 의 근거(mergeAttributes 가 만드는 순서는
     tiptap 내부 구현에 의존하므로 위치 기반 정규식은 취약).
+  · `extract_doc_entity_ref_targets`(story #3858) — 같은 doc content(HTML)에서
+    `<a href="entity:<type>:<uuid>">` 앵커(story #2639가 렌더하는 그 형식·chat의
+    `[title](entity:<type>:<uuid>)`가 markdownToHtml을 거친 모양)를 (target_type, target_id)
+    쌍으로 추출한다 — wikiLink/pageEmbed와 달리 target_type을 "doc"으로 고정하지 않는다.
 
 추출 함수는 malformed 토큰(파싱 실패·잘못된 UUID)을 **조용히 스킵**한다 — 멘션 파싱 실패로
 본 메시지/문서 저장 전체가 실패하면 안 된다는 원칙(AC와 별개로, 파서 자체의 malformed-tolerance).
@@ -298,6 +302,9 @@ def extract_chat_doc_mention_ids(content: str) -> list[uuid.UUID]:
     return [eid for etype, eid in extract_chat_entity_mentions(content) if etype == "doc"]
 
 
+_DOC_ENTITY_HREF_RE = re.compile(r"^entity:(?P<type>[a-z_]+):(?P<id>" + _UUID_RE + r")$")
+
+
 class _DocMentionHTMLParser(HTMLParser):
     """wikiLink(`span[data-type=wikiLink]`)·pageEmbed(`div[data-page-embed]`) 의 data-doc-id
     attribute 를 순서 무관하게 추출. 정규식 대신 HTMLParser 를 쓰는 이유(설계 doc §2 근거):
@@ -308,11 +315,26 @@ class _DocMentionHTMLParser(HTMLParser):
     story #2284: 어느 태그였는지(wikiLink=인라인 멘션 / pageEmbed=카드 임베드)를 **버리지
     않고** (doc_id, form) 쌍으로 남긴다 — 파싱 시점엔 이미 있던 구분이 예전엔 저장 시점에
     뭉개졌다(#2259 이후 form이 리터럴 "mention"으로 하드코딩됐던 자리).
+
+    story #3858(customer-zero·BE·연결 쓰기, 페드루 AC0 확定 2026-09-14 08:10Z) — `entity:
+    <type>:<uuid>` 마크다운 링크(story #2639가 이미 렌더하는, doc-content-renderer.tsx의
+    EntityChip과 같은 형식·chat_message의 `extract_chat_entity_mentions`(_CHAT_TOKEN_RE)와
+    같은 토큰 문법)는 doc 저장 시 markdownToHtml을 거쳐 **`<a href="entity:type:uuid">`
+    앵커**로 실존한다(doc.content는 항상 HTML — content_format 무관, docs.py `html_content=
+    doc.content` 확認). ⛔이 파서는 wikiLink/pageEmbed와 달리 target_type을 「doc」으로
+    고정하지 않는다 — href의 type 그룹을 그대로 살려(entity_refs) reconcile_doc_mentions가
+    돌려준다. AC0가 확定한 스코프는 「링크 1종」뿐(bare #NNNN·story 전용 임베드 노드는 에디터
+    삽입 UI 자체가 없어 이 카드 밖) — 그래도 파서 자체를 "story만" 하드코딩하지 않는 이유는
+    #2260이 이미 세운 원칙과 동일(추출은 있는 그대로 전부, "무엇을 쓸지"는 write-path의
+    target_types 필터가 결정 — reconcile_entity_references가 이미 그렇게 짜여 있다, 아래
+    reconcile_doc_mentions 참조). 파서에 story 하드코딩을 추가하는 게 오히려 #2260이 막은
+    "타입별 분기 재도입"이 된다.
     """
 
     def __init__(self) -> None:
         super().__init__()
         self.doc_refs: list[tuple[str, str]] = []  # (raw_doc_id, form)
+        self.entity_refs: list[tuple[str, str]] = []  # (target_type, raw_target_id)
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attr_map = dict(attrs)
@@ -324,6 +346,11 @@ class _DocMentionHTMLParser(HTMLParser):
             doc_id = attr_map.get("data-doc-id")
             if doc_id:
                 self.doc_refs.append((doc_id, "embed"))
+        elif tag == "a":
+            href = attr_map.get("href")
+            m = _DOC_ENTITY_HREF_RE.match(href) if href else None
+            if m:
+                self.entity_refs.append((m.group("type"), m.group("id")))
 
 
 def extract_doc_mention_targets(html_content: str) -> list[tuple[uuid.UUID, str]]:
@@ -353,6 +380,38 @@ def extract_doc_mention_targets(html_content: str) -> list[tuple[uuid.UUID, str]
         except ValueError:
             continue
         key = (doc_id, form)
+        if key not in seen:
+            seen.add(key)
+            result.append(key)
+    return result
+
+
+def extract_doc_entity_ref_targets(html_content: str) -> list[tuple[str, uuid.UUID]]:
+    """story #3858 — doc content(HTML)에서 `<a href="entity:<type>:<uuid>">` 앵커를 순서
+    보존 + 중복 제거로 추출한다. 반환: `[(target_type, target_id), ...]` — extract_doc_
+    mention_targets(wikiLink/pageEmbed, target_type이 항상 "doc")와 달리 target_type이
+    href 그대로다(파서 자신이 타입을 정하지 않는다 — story #2260/#2273 원칙, 위 파서
+    docstring 참조). `reconcile_doc_mentions`가 이 결과를 target_types 필터(레지스트리
+    기본값)와 함께 넘겨 실제로 어떤 타입까지 쓸지는 그쪽이 결정한다.
+
+    malformed href(패턴 불일치)·malformed UUID는 조용히 스킵(파서 예외로 전체 doc 저장이
+    실패하면 안 된다는 기존 malformed-tolerance 원칙 그대로)."""
+    if not html_content:
+        return []
+    parser = _DocMentionHTMLParser()
+    try:
+        parser.feed(html_content)
+        parser.close()
+    except Exception:
+        pass
+    seen: set[tuple[str, uuid.UUID]] = set()
+    result: list[tuple[str, uuid.UUID]] = []
+    for target_type, raw_id in parser.entity_refs:
+        try:
+            target_id = uuid.UUID(raw_id)
+        except ValueError:
+            continue
+        key = (target_type, target_id)
         if key not in seen:
             seen.add(key)
             result.append(key)
@@ -747,9 +806,16 @@ async def reconcile_doc_mentions(
     필터가 조용히 막는 벽이 된다. no-op인 지금 없애 두면 파서가 늘 때 이 함수를 안 고쳐도
     자동으로 따라온다."""
     # story #2679: doc은 wikiLink/pageEmbed 브라켓 문법뿐(맨 #숫자 자동감지 없음) — 항상 explicit.
+    # story #3858(2026-09-14) — `entity:<type>:<uuid>` 링크(예: story)도 이제 여기 합류한다.
+    # 위 docstring이 예고한 그대로: target_types를 명시 안 해 뒀기 때문에(코어 기본값=registry
+    # 전체) 이 함수 자체는 한 글자도 안 고쳐도 됐다 — 새로 추가한 건 extracted_refs 리스트
+    # 조립에 항 하나 더한 것뿐(파서가 늘 때 이 함수를 안 고쳐도 자동으로 따라온다던 그 예언).
     extracted_refs = [
         ("doc", target_id, form, "explicit")
         for target_id, form in extract_doc_mention_targets(html_content)
+    ] + [
+        (target_type, target_id, "mention", "explicit")
+        for target_type, target_id in extract_doc_entity_ref_targets(html_content)
     ]
     await reconcile_entity_references(
         db, org_id=org_id, source_type="doc", source_field="body", source_id=doc_id,
