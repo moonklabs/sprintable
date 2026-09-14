@@ -14,6 +14,11 @@ const TABS = [
   // 이 프레임은 그 위에 얹힌 얕은 nav일 뿐 — WorkspaceFrameTabs 파일 상단 주석 참고).
   // labelKey 'retro'는 nav-config.ts::LEGACY_NAV_ITEMS가 이미 쓰던 값 재사용(사본 0).
   { key: 'retro', path: 'retro' },
+  // story #3844(UX-v3·FE 4·일감 1, PO 지시 2026-09-14 06:28Z) — 디디군 #4264(회고 탭)와
+  // 같은 배열에 나란히 얹는다(실 렌더로 짓고 캡처하기 위해 착지 대기 없이 직접 추가).
+  // #4264가 먼저 develop에 착지해 이 rebase에서 1줄만 합치면 되는 낮은 충돌 비용으로
+  // PO가 직접 승인한 순서.
+  { key: 'workList', path: 'work-list' },
 ] as const;
 
 type WorkspaceFrameTabKey = (typeof TABS)[number]['key'];
