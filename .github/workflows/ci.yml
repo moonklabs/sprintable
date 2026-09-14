@@ -1779,6 +1779,20 @@ jobs:
       - name: "Verify no raw ASCII JSX text (story #3876 regression guard)"
         run: pnpm --filter web verify:no-raw-ascii-jsx-text
 
+      # story #3880(§⑤ 낱말 드리프트, PO 확定 2026-09-14) — #3876 가드의 자매 축(a): JSX
+      # 텍스트 자식이 아니라 title/label/placeholder/description/aria-label/alt 같은
+      # 텍스트 프롭 속성값에 순 ASCII 리터럴이 그대로 박히는 클래스(workcell.tsx
+      # `<LayerLabel title="Brief">`가 실 사고 — 속성값이라 #3876 가드의 JsxText walk가
+      # 구조적으로 못 봄).
+      - name: "Verify no raw ASCII JSX attribute text (story #3880 AC2(a) regression guard)"
+        run: pnpm --filter web verify:no-raw-ascii-jsx-attr
+
+      # story #3880 AC2(b) — 자매 축(b): JSX 구조가 아니라 messages/ko.json **값 콘텐츠**
+      # 안에 영단어가 baked-in되는 클래스(`docs.indexKicker`="지식 · KNOWLEDGE BASE" —
+      # t() 경유는 정상이라 어떤 JSX 구조 가드도 원리상 못 잡음, 값 자체를 봐야 함).
+      - name: "Verify no ASCII token in ko.json value (story #3880 AC2(b) regression guard)"
+        run: pnpm --filter web verify:no-ascii-token-in-ko-value
+
       # story #3813(Phase3·3-4 PR5-a CHANGES, 페드루 PO 確定 2026-09-12) — pasted_secret
       # 채널(wordpress·webhook·stibee…) 생성 BFF는 `[channel]` 동적 세그먼트가 아니라
       # 채널마다 리터럴 route.ts라, PASTED_SECRET_FIELDS에 채널을 등재해도 대응

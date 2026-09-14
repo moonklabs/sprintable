@@ -114,7 +114,8 @@ describe('DocsIndex — 문서 있음(§2 마스트헤드+목록)', () => {
     useDocsLayoutMock.mockReturnValue({ ...BASE_CTX, tree });
     await mount();
     expect(container.textContent).not.toContain('문서를 선택하세요');
-    expect(container.textContent).toContain('지식 · KNOWLEDGE BASE');
+    // story #3880(§⑤ 낱말 드리프트, 유나 확定) — kicker ko 값 안 영단어 baked-in 정본화.
+    expect(container.textContent).toContain('지식 · 문서고');
   });
 
   // story #2974 §1/§3(PR-D0) — Display 헤딩(마스트헤드 h1·리드 카드 h2)이 font-display

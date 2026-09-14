@@ -39,16 +39,19 @@ const BASE: WorkcellProps = {
 describe('Workcell (4층 — Brief/Run/Evidence/Conversation)', () => {
   it('renders all four layer labels', () => {
     const markup = renderKo(<Workcell {...BASE} />);
-    expect(markup).toContain('Brief');
-    expect(markup).toContain('Run');
-    expect(markup).toContain('Evidence');
-    expect(markup).toContain('Conversation');
+    // story #3880(§⑤ 낱말 드리프트, 유나 확定) — 4층 LayerLabel 전부 ko 낱말로 정본화
+    // (브리프/실행/근거/대화 — 실행만 신규, 나머지는 기존 낱말 재사용).
+    expect(markup).toContain('브리프');
+    expect(markup).toContain('실행');
+    expect(markup).toContain('근거');
+    expect(markup).toContain('대화');
   });
 
   it('renders the header title and the current pipeline stage label together (색만으로 의미 전달 금지)', () => {
     const markup = renderKo(<Workcell {...BASE} />);
     expect(markup).toContain(BASE.title);
-    expect(markup).toContain('Running');
+    // story #3880 — pipeline 스테이지 라벨 ko 값 정본화(Running → 진행 중).
+    expect(markup).toContain('진행 중');
   });
 
   it('renders Brief goal/dod + header owner/agent(story #2922 W4 — 헤더로 승격)', () => {
@@ -193,7 +196,8 @@ describe('Workcell — story #2922 W6 스테퍼 트러스트-시맨틱 컬러(�
 
   it('라벨 텍스트는 상태와 무관하게 항상 중립(text-proof-ink) — 색 신호는 텍스트가 아니라 dot이 싣는다(AA 미달 방지)', () => {
     const markup = renderKo(<Workcell {...BASE} pipelineStage="merge_ready" bentoLayout={false} />);
-    for (const label of ['Running', 'Needs input', 'Claimed done', 'Verified', 'Merge-ready']) {
+    // story #3880 — pipeline 스테이지 라벨 ko 값 정본화.
+    for (const label of ['진행 중', '입력 필요', '완료 주장', '검증됨', '머지 준비']) {
       const cls = stageWrapperClass(markup, label).split(/\s+/);
       expect(cls).toContain('text-proof-ink');
       expect(cls).not.toEqual(expect.arrayContaining(['text-proof-blue', 'text-proof-amber', 'text-proof-green']));
@@ -202,22 +206,22 @@ describe('Workcell — story #2922 W6 스테퍼 트러스트-시맨틱 컬러(�
 
   it('merge_ready가 current일 때, 이미 지나온 Running 단계는 강제로 green이 되지 않고 자기 고유색(blue) 유지 — dot 기준', () => {
     const markup = renderKo(<Workcell {...BASE} pipelineStage="merge_ready" bentoLayout={false} />);
-    const runningDotClass = stageDotClass(markup, 'Running');
+    const runningDotClass = stageDotClass(markup, '진행 중');
     expect(runningDotClass.split(/\s+/)).toContain('border-proof-blue');
     expect(runningDotClass.split(/\s+/)).not.toContain('bg-proof-green');
   });
 
   it('verified가 current일 때 그 자신은 green(자기 색이 진짜 green이므로) — dot 기준', () => {
     const markup = renderKo(<Workcell {...BASE} pipelineStage="verified" bentoLayout={false} />);
-    const verifiedDotClass = stageDotClass(markup, 'Verified');
+    const verifiedDotClass = stageDotClass(markup, '검증됨');
     expect(verifiedDotClass.split(/\s+/)).toContain('bg-proof-green');
-    const verifiedWrapperClass = stageWrapperClass(markup, 'Verified');
+    const verifiedWrapperClass = stageWrapperClass(markup, '검증됨');
     expect(verifiedWrapperClass.split(/\s+/)).toContain('font-bold');
   });
 
   it('claimed_done이 current일 때 그 자신은 blue(주장·미검증 — 아직 green 아님) — dot 기준', () => {
     const markup = renderKo(<Workcell {...BASE} pipelineStage="claimed_done" bentoLayout={false} />);
-    const claimedDotClass = stageDotClass(markup, 'Claimed done');
+    const claimedDotClass = stageDotClass(markup, '완료 주장');
     expect(claimedDotClass.split(/\s+/)).toContain('bg-proof-blue');
   });
 });
@@ -225,12 +229,12 @@ describe('Workcell — story #2922 W6 스테퍼 트러스트-시맨틱 컬러(�
 describe('Workcell — story #2922 W1 신뢰 파이프라인 헤더 스테퍼(6상태) + 2×2 구획 (bentoLayout=false 폴백)', () => {
   it('renders all six pipeline stage labels regardless of current stage', () => {
     const markup = renderKo(<Workcell {...BASE} pipelineStage="queued" bentoLayout={false} />);
-    expect(markup).toContain('Queued');
-    expect(markup).toContain('Running');
-    expect(markup).toContain('Needs input');
-    expect(markup).toContain('Claimed done');
-    expect(markup).toContain('Verified');
-    expect(markup).toContain('Merge-ready');
+    expect(markup).toContain('대기 중');
+    expect(markup).toContain('진행 중');
+    expect(markup).toContain('입력 필요');
+    expect(markup).toContain('완료 주장');
+    expect(markup).toContain('검증됨');
+    expect(markup).toContain('머지 준비');
   });
 
   it('marks the current stage with aria-current="step" (색만 금지 — 스크린리더도 현재단계를 안다)', () => {
@@ -472,10 +476,10 @@ describe('Workcell — story #2993 pipelineStage/owner null 정직 빈 상태(�
 
   it('pipelineStage=null이어도 나머지 구획(Brief/Run/Evidence/Conversation)은 그대로 렌더된다', () => {
     const markup = renderKo(<Workcell {...BASE} pipelineStage={null} />);
-    expect(markup).toContain('Brief');
-    expect(markup).toContain('Run');
-    expect(markup).toContain('Evidence');
-    expect(markup).toContain('Conversation');
+    expect(markup).toContain('브리프');
+    expect(markup).toContain('실행');
+    expect(markup).toContain('근거');
+    expect(markup).toContain('대화');
   });
 
   it('brief.owner=null이면 "책임자 미지정" 정직 표시(허구 human 이름 없음)', () => {
@@ -529,16 +533,16 @@ describe('Workcell — story #5b3aea5e Brief 콘텐츠 층(마크다운 스트�
     expect(markup).not.toContain('더 보기 →');
   });
 
-  it('dod=null이면 "완료 조건 미기재 · 본문 AC 보기"를 정직 표시한다(onDodMore 제공 시)', () => {
+  it('dod=null이면 "완료 조건 미기재 · 본문 완료 기준 보기"를 정직 표시한다(onDodMore 제공 시)', () => {
     const markup = renderKo(<Workcell {...BASE} brief={{ ...BASE.brief, dod: null, onDodMore: () => {} }} />);
     expect(markup).toContain('완료 조건 미기재');
-    expect(markup).toContain('본문 AC 보기');
+    expect(markup).toContain('본문 완료 기준 보기');
   });
 
-  it('dod=null·onDodMore 없으면 "본문 AC 보기" 링크 없이 "완료 조건 미기재"만 뜬다', () => {
+  it('dod=null·onDodMore 없으면 "본문 완료 기준 보기" 링크 없이 "완료 조건 미기재"만 뜬다', () => {
     const markup = renderKo(<Workcell {...BASE} brief={{ ...BASE.brief, dod: null }} />);
     expect(markup).toContain('완료 조건 미기재');
-    expect(markup).not.toContain('본문 AC 보기');
+    expect(markup).not.toContain('본문 완료 기준 보기');
   });
 
   it('dod가 있으면 goal과 동형으로 스트립+리드+클램프 처리된다(마크다운 노출 0)', () => {

@@ -55,6 +55,8 @@
     "verify:no-hardcoded-korean-ui-text": "tsx scripts/verify-no-hardcoded-korean-ui-text.ts",
     "verify:no-raw-role-jsx-text": "tsx scripts/verify-no-raw-role-jsx-text.ts",
     "verify:no-raw-ascii-jsx-text": "tsx scripts/verify-no-raw-ascii-jsx-text.ts",
+    "verify:no-raw-ascii-jsx-attr": "tsx scripts/verify-no-raw-ascii-jsx-attr.ts",
+    "verify:no-ascii-token-in-ko-value": "tsx scripts/verify-no-ascii-token-in-ko-value.ts",
     "verify:pasted-secret-bff-route-registered": "tsx scripts/verify-pasted-secret-bff-route-registered.ts",
     "verify:be-proxy-header-passthrough": "tsx scripts/verify-be-proxy-header-passthrough.ts",
     "e2e": "playwright test",
