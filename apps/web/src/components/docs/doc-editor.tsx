@@ -5,7 +5,6 @@ import React, { type RefObject } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import { BubbleMenu } from '@tiptap/react/menus';
 import StarterKit from '@tiptap/starter-kit';
-import Link from '@tiptap/extension-link';
 import { CustomImageNode } from './extensions/image-node';
 import { ImageUploadExtension, registerDocIdProvider } from './extensions/image-upload';
 import Highlight from '@tiptap/extension-highlight';
@@ -28,6 +27,7 @@ import { EmbedBlock } from './extensions/embed-node';
 import { MathBlockNode, MathInlineNode } from './extensions/math-node';
 import { ColumnsBlock, ColumnBlock } from './extensions/column-layout';
 import { WikiLinkNode, createWikiLinkSuggestion } from './extensions/wiki-link';
+import { StoryMentionExtension, EntityLinkExtension } from './extensions/story-mention';
 import { DocToc } from './doc-toc';
 import { type DocHeading, slugifyHeading } from './doc-heading-utils';
 import { markdownToHtml, htmlToMarkdown } from './lib/content-converter';
@@ -113,6 +113,10 @@ export function DocEditor({
   };
 }) {
   const tEditor = useTranslations('docs');
+  // story #3866 — 빈 검색결과 문구는 canvas ns의 기존 storyPickerEmpty 키 재사용(같은 문장을
+  // 새 키로 중복시키지 않는다). i18n-key-coverage 규율(위 119행 주석)과 동형으로 이 useTranslations
+  // 호출과 t() 호출이 "같은 파일"이어야 하므로 여기서 미리 resolve해 넘긴다.
+  const tCanvas = useTranslations('canvas');
   // story ab2fd813(#2028) — 슬래시 팝업은 React 트리 밖(body append via createRoot)에
   // 렌더돼 slash-command.tsx 안에서 useTranslations를 직접 못 쓴다. 여기서 문자열을 미리
   // resolve해 createSlashCommandExtension에 주입한다. i18n-key-coverage.test.ts는
@@ -180,7 +184,9 @@ export function DocEditor({
     extensions: [
       StarterKit.configure({ codeBlock: false }),
       CodeBlockWithCopy,
-      Link.configure({ openOnClick: false }),
+      // story #3866 — entity:story: 프로토콜 허용+isAllowedUri 검증+칩 스타일까지 포함한
+      // Link 확장(상세는 story-mention.tsx 주석). 재구현 0 — 그 파일 하나에 설정을 모은다.
+      EntityLinkExtension,
       CustomImageNode,
       ImageUploadExtension,
       Highlight,
@@ -209,6 +215,12 @@ export function DocEditor({
         projectId,
         onNavigate,
         suggestion: createWikiLinkSuggestion(projectId, tEditor('notFound')),
+      }),
+      // story #3866 — 문서에 스토리를 "붙이는" `#` 트리거(wikiLink의 `[[`와 동형 패턴).
+      // 새 Node가 아니라 위 Link mark로 진짜 앵커를 삽입(3858 파서 요구 형식).
+      StoryMentionExtension.configure({
+        projectId,
+        emptyLabel: tCanvas('storyPickerEmpty'),
       }),
       createSlashCommandExtension(slashMenuStrings),
       PageEmbedExtension.configure({ currentDocId, onNavigate }),

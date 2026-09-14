@@ -361,6 +361,12 @@ export default function DocSlugPage() {
           contentFormat={contentFormat}
           editable={selectedDoc.doc_type !== 'sprint_report'}
           currentDocId={selectedDoc.id}
+          // story #3866(발견 즉시 수정) — projectId가 DocEditor 최상위 prop으로 한 번도 안
+          // 넘어오고 있었다(dispatchSlot 안 DocAssigneeControl에만 있었음). 기존 wikiLink
+          // `[[` 검색(WikiLinkNode.configure({projectId})) 도 이 페이지에서 이미 항상
+          // projectId=undefined로 죽어 있던 잠복 결함 — 신규 `#` 스토리 검색과 같은
+          // 원인이라 같이 고친다(별 카드 0, "발견 즉시 수정" 규율).
+          projectId={projectId}
           onNavigate={handleNavigate}
           onChange={setContent}
           onContentFormatChange={setContentFormat}

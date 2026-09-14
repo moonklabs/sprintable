@@ -456,8 +456,19 @@ export function markdownToHtml(rawMd: string): string {
   // Images (before links — both use []() syntax)
   html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1">');
 
-  // Links — sanitize javascript: hrefs
-  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, text, href) => {
+  // Links — sanitize javascript: hrefs.
+  //
+  // story #3866(페드루 판정 2026-09-14 11:45Z, PO CHANGES) — 링크 텍스트 안 `]`를 못 견디던
+  // 결함(같은 사실 같은 낱말 위반 — story 제목 "[SID:NNNN] ..."류가 링크로 못 살아남고
+  // 저장 시 평문으로 깨짐). CommonMark처럼 무한 재귀 중첩까지는 안 가되(이 정규식 엔진은
+  // 재귀를 못 한다), 1단 균형 대괄호는 링크 텍스트로 허용한다 — 반복 그룹 안에서 세 형태를
+  // 인식: ① `\[`/`\]`(백슬래시 이스케이프 — sprintable reference_token이 이 형식으로 제목
+  // 대괄호를 이스케이프해 내보낸다, 그 형식이 붙여넣기로 문서에 들어와도 파서가 깨지면 안
+  // 된다) ② `[...]`(대괄호 아닌 문자만 담은 raw 1단 중첩 — 스토리 제목이 실제로 삽입하는
+  // 형태, Turndown escape가 이 레포에서 꺼져 있어(위 33행) 백슬래시 없이 그대로 저장된다)
+  // ③ 그 외 대괄호가 아닌 낱글자. 진짜 닫는 `]`(그 뒤 바로 `(`가 와야 하는 자리)는 세 형태
+  // 어디에도 안 걸려 반복이 거기서 자연히 멈춘다(과소비 0 — 트레이스로 확認).
+  html = html.replace(/\[((?:\\[[\]]|\[[^[\]]*\]|[^[\]])*)\]\(([^)]+)\)/g, (_m, text, href) => {
     const safeHref = /^javascript:/i.test(href.trim()) ? '#' : href;
     return `<a href="${safeHref}">${text}</a>`;
   });
