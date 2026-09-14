@@ -68,24 +68,39 @@ function loadBaseline(): Set<string> {
 }
 const BASELINE = loadBaseline();
 
+// story #3842(3839 AC3 후속) — 「스캔 前 대기」를 페이지마다 명시 등록한다(신규 페이지를
+// 추가하면서 wait를 빠뜨리면 TS가 컴파일에서 막는다 — 표 갱신 강제, AC1). 두 형만 허용:
+//  ① response  — 그 페이지가 반드시 거치는 비동기 위젯의 fetch 응답을 기다린다(예:
+//     DashboardShell이 모든 (authenticated) 페이지에 렌더하는 ActivationChecklistBanner
+//     → useActivationStatus()의 /api/activation/checklist. 모듈 스코프 in-flight 캐시가
+//     있지만 reload는 JS 모듈을 다시 초기화하므로 매 reload마다 새 요청이 실제로 나간다).
+//  ② networkidle — DashboardShell 밖이라 그 위젯이 없는 페이지(예: /onboarding, 독자
+//     레이아웃 — SSE 연결이 없어 이 앱의 다른 곳과 달리 networkidle이 실제로 선다).
+type PageWaitMarker = { kind: 'response'; urlIncludes: string } | { kind: 'networkidle' };
+
+const ACTIVATION_CHECKLIST_MARKER: PageWaitMarker = { kind: 'response', urlIncludes: '/api/activation/checklist' };
+
 // v1 데이터-경량 표면. 각 항목은 그 화면이 렌더하는 tint 표면을 노린다(감사 SSOT 75f15ba7 참조).
-const PAGES: Array<{ path: string; label: string }> = [
-  { path: '/settings', label: 'settings(danger-zone·gate-matrix·access-tint)' },
-  { path: '/onboarding', label: 'onboarding(connect-step info-tint)' },
-  { path: '/dashboard', label: 'dashboard(status/tint 위젯)' },
-  { path: '/inbox', label: 'inbox(decisions-waiting warning·approvals-queue tint)' },
+const PAGES: Array<{ path: string; label: string; wait: PageWaitMarker }> = [
+  { path: '/settings', label: 'settings(danger-zone·gate-matrix·access-tint)', wait: ACTIVATION_CHECKLIST_MARKER },
+  // /onboarding은 (authenticated) 레이아웃 밖(독자 루트 레이아웃) — DashboardShell이
+  // 없어 ActivationChecklistBanner도 없다. 이 앱의 다른 페이지와 달리 SSE 연결이 없어
+  // networkidle이 실제로 선다(주석 근거는 위 PageWaitMarker 타입 정의부).
+  { path: '/onboarding', label: 'onboarding(connect-step info-tint)', wait: { kind: 'networkidle' } },
+  { path: '/dashboard', label: 'dashboard(status/tint 위젯)', wait: ACTIVATION_CHECKLIST_MARKER },
+  { path: '/inbox', label: 'inbox(decisions-waiting warning·approvals-queue tint)', wait: ACTIVATION_CHECKLIST_MARKER },
   // story #3368(Phase0·마케팅운영 S4, doc phase0-post-manager-screen-design §8-3②) —
   // 유나 지시: 등록은 회귀 감시용, 상태 칩의 비텍스트 3:1(dot)은 axe color-contrast가
   // 안 보므로 content-post-manager-states.spec.ts::measureChip이 그 자리 판정을 진다.
   // CI e2e owner는 빈 org라(§ 상단 ⚠️ 참조) 칩 자체가 안 뜰 수 있다 — 그래도 항상
   // 렌더되는 목록 셸(빈 상태·헤더)의 회귀는 이 등록으로 잡힌다.
-  { path: '/content', label: 'content(글 관리 — 목록 셸·EmptyState)' },
+  { path: '/content', label: 'content(글 관리 — 목록 셸·EmptyState)', wait: ACTIVATION_CHECKLIST_MARKER },
   // story #3402(Phase1·마케팅운영, AC15·카디르 QA 2026-09-04) — 채널 포스트 목록·편집
   // 화면. 위 /content와 동일 근거(v1은 항상 렌더되는 셸의 회귀 감시용, 상태 칩 비텍스트
   // 3:1은 measureChip 몫) — CI e2e owner가 빈 org라 목록은 EmptyState, 상세는 draft_id
   // 미존재로 오류 알림(editLoadFailed) 셸만 뜨지만 그 표면도 대비 회귀 감시 대상이다.
-  { path: '/content/channel-posts', label: 'channel-posts(목록 셸·EmptyState)' },
-  { path: '/content/channel-posts/nonexistent-draft-id', label: 'channel-posts detail(오류 알림 셸 — draft 미존재)' },
+  { path: '/content/channel-posts', label: 'channel-posts(목록 셸·EmptyState)', wait: ACTIVATION_CHECKLIST_MARKER },
+  { path: '/content/channel-posts/nonexistent-draft-id', label: 'channel-posts detail(오류 알림 셸 — draft 미존재)', wait: ACTIVATION_CHECKLIST_MARKER },
 ];
 const THEMES = ['light', 'dark'] as const;
 
@@ -116,11 +131,44 @@ function hoverViolationKeys(page: string, theme: string, violations: AxeViolatio
   return extractColorPairs(violations).map((colorPair) => `${page}::${theme}::hover::${colorPair}`);
 }
 
-async function setTheme(page: Page, theme: string): Promise<void> {
+// story #3842 AC1 — 고정 sleep(1200ms) 제거. 같은 sha에서도 run마다 성패가 갈리던 원인은
+// (3839 AC3 규명) 스캔 시점 경합: ActivationChecklistBanner가 useActivationStatus()의
+// 비동기 fetch(/api/activation/checklist)가 끝나야 렌더되는데, 고정 대기는 그 fetch가
+// CI 네트워크 지연에 따라 끝났는지 여부를 무시하고 스캔했다 — 그래서 배너 렌더 有無가
+// run마다 갈려(有=위반 잡힘·無=거짓 success) 가드 자체가 비결정적이었다. 실 신호(marker)를
+// 기다리는 것으로 그 경합을 없앤다 — reload가 호출되기 *전에* waiter를 걸어야 한다
+// (reload 뒤에 걸면 이미 지나간 응답을 놓친다).
+// 카디르 QA 발견(PR#4265, 2026-09-14) — 두 분기 다 타임아웃을 .catch로 삼켜 150ms 뒤
+// 그냥 스캔으로 넘어갔다. 이건 경합 창을 1200ms→5000ms로 넓힌 것일 뿐 닫은 게 아니다 —
+// 신호가 5초 안에도 안 오면 여전히 배너 그리기 전에 스캔해 거짓 success가 재발할 수
+// 있었다(#3839 AC3이 규명한 바로 그 결함 클래스). 처방: 타임아웃이면 삼키지 않고
+// throw — 대비 위반과 구별되는 precondition 메시지로 실패시킨다(신호 자체가 안 왔다는
+// 사실을 "새 대비 위반 없음" 초록과 혼동하지 않게).
+const PAGE_MARKER_TIMEOUT_MS = 5000; // 근거: #3839 AC3 실측 CI 네트워크 지연 최대 ~2s의 2.5배 여유
+
+async function waitForPageMarker(page: Page, marker: PageWaitMarker, pagePath: string): Promise<void> {
+  try {
+    if (marker.kind === 'networkidle') {
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await page.waitForLoadState('networkidle', { timeout: PAGE_MARKER_TIMEOUT_MS });
+    } else {
+      const waiter = page.waitForResponse((r) => r.url().includes(marker.urlIncludes), { timeout: PAGE_MARKER_TIMEOUT_MS });
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await waiter;
+    }
+  } catch {
+    const markerDesc = marker.kind === 'networkidle' ? 'kind:networkidle' : `kind:urlIncludes(${marker.urlIncludes})`;
+    throw new Error(`contrast-guard precondition: page marker not seen — ${pagePath} ${markerDesc} within ${PAGE_MARKER_TIMEOUT_MS}ms`);
+  }
+  // marker 응답/networkidle 도달 뒤 React가 그 데이터를 실제로 commit·페인트할 때까지의
+  // 짧은 간극(응답 자체는 렌더 완료를 보장 안 함) — 신호가 안 오면(위에서 throw) 이 스캔
+  // 자체를 실패시킨다, 거짓 success로 새지 않는다.
+  await page.waitForTimeout(150);
+}
+
+async function setTheme(page: Page, theme: string, marker: PageWaitMarker, pagePath: string): Promise<void> {
   await page.addInitScript((t) => window.localStorage.setItem('theme', t), theme);
-  await page.reload({ waitUntil: 'domcontentloaded' });
-  // SSE 앱이라 networkidle이 안 서므로 domcontentloaded + 짧은 정착 대기(#dev-pixel 교훈).
-  await page.waitForTimeout(1200);
+  await waitForPageMarker(page, marker, pagePath);
 }
 
 async function scanContrast(page: Page): Promise<AxeViolation[]> {
@@ -128,11 +176,11 @@ async function scanContrast(page: Page): Promise<AxeViolation[]> {
   return results.violations as unknown as AxeViolation[];
 }
 
-for (const { path: pagePath, label } of PAGES) {
+for (const { path: pagePath, label, wait } of PAGES) {
   for (const theme of THEMES) {
     test(`대비(rest) ${label} [${theme}]`, async ({ page }) => {
       await page.goto(pagePath, { waitUntil: 'domcontentloaded' });
-      await setTheme(page, theme);
+      await setTheme(page, theme, wait, pagePath);
       const violations = await scanContrast(page);
       const fresh = violationKeys(pagePath, theme, violations).filter((k) => !BASELINE.has(k));
       expect(fresh, `새 대비 위반 ${pagePath}[${theme}] — tint 위 계열색 글자는 text-foreground(#2420). 오탐이면 (A)에 tint-guard-ok, 여기선 baseline 시드.`).toEqual([]);
@@ -147,6 +195,7 @@ for (const { path: pagePath, label } of PAGES) {
 interface HoverTarget {
   page: string;
   label: string;
+  wait: PageWaitMarker;
   /** role/aria-label 기반 — class 셀렉터는 v1이 겪은 클래스-순서 비결정성과 같은 취약점이라 피함. */
   locate: (page: Page) => ReturnType<Page['getByRole']>;
 }
@@ -155,16 +204,17 @@ interface HoverTarget {
 // 축이라 최우선 등록). 페이지별 고유 표면(승인대기 카드·활성 에픽 링크 등)은 seed가 빈 org라
 // 이 CI 환경에서 렌더 안 됨 — 등록해도 스킵될 걸 알면서 넣는 대신, 데이터가 실제로 쌓이는 순간
 // 자연히 커버되도록 다음 사람이 채워 넣을 자리로 AC4에 남긴다(추측으로 채우지 않음).
-function sidebarHelpTarget(page: string): HoverTarget {
+function sidebarHelpTarget(page: string, wait: PageWaitMarker): HoverTarget {
   return {
     page,
     label: 'sidebar help link (앱 셸 · 항상 렌더)',
+    wait,
     // app-sidebar.tsx: <Link aria-label={t('help')} ...> — <a>라 role은 button이 아니라 link.
     locate: (p) => p.getByRole('link', { name: /도움말|help/i }),
   };
 }
 
-const HOVER_TARGETS: HoverTarget[] = PAGES.map(({ path: pagePath }) => sidebarHelpTarget(pagePath));
+const HOVER_TARGETS: HoverTarget[] = PAGES.map(({ path: pagePath, wait }) => sidebarHelpTarget(pagePath, wait));
 
 /** 트랜지션을 죽여 hover 최종 계산 스타일을 즉시 적용시킨다(story #2607 결정 — 헤더 docblock
  * 참조). 실 hover(page.locator(...).hover())는 그대로 쓴다 — 강제 클래스로 흉내내지 않는 이유는
@@ -179,7 +229,7 @@ for (const target of HOVER_TARGETS) {
   for (const theme of THEMES) {
     test(`대비(hover) ${target.label} [${target.page}::${theme}]`, async ({ page }) => {
       await page.goto(target.page, { waitUntil: 'domcontentloaded' });
-      await setTheme(page, theme);
+      await setTheme(page, theme, target.wait, target.page);
 
       const locator = target.locate(page);
       const count = await locator.count();
