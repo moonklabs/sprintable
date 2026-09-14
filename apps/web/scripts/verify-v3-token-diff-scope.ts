@@ -1,3 +1,7 @@
+// story #3826 후속(2026-09-14, 페드루 PO 지시) — PR#4259는 head가 PR#4258과 같은 sha라
+// 게이트 슬롯 매처가 voided 행을 existing으로 재사용해 새 게이트가 안 생겼다(links 훅
+// 200에도 sprintable/gate 0건). 이 줄(코드 무변, 주석만)이 head sha를 옮겨 새 게이트
+// 슬롯을 트는 no-op 커밋이다.
 /**
  * story #3826(UX-v3·FE 2, 페드루 PO 確定 2026-09-13) AC1 diff 가드 — 이 스토리의 diff는
  * `globals.css`의 원시 토큰(`--proof-*`) 값·`--proof-radius-soft` 값에만 있어야 한다.
