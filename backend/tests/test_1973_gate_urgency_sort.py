@@ -498,9 +498,15 @@ async def test_realdb_urgency_sort_query_count_fixed_regardless_of_gate_count():
             #      묶여 이 파일의 모든 픽스처가 같은 project 를 쓰므로 게이트 8건이어도 1회
             # can_approve 를 non-doc 게이트에도 계산하는 것 자체가 #2198 의 목적(전엔 이 필드가
             # 계산조차 안 돼 자격자에게 버튼이 안 뜨던 결함) — 이 4개는 그 목적을 이루는 데 드는
-            # 필수 비용이지 회귀가 아니다. 6 초과(게이트당 증가)가 나오면 그건 진짜 N+1 이니 이
-            # 상한을 다시 낮추지 말고 원인을 고칠 것.
-            assert len(select_stmts_6) <= 6, select_stmts_6
+            # 필수 비용이지 회귀가 아니다.
+            #   ⑤ conversation_id 배치 SELECT(story #3860) — work_item_conversation.py의
+            #      태그 기반 파생(「답하기」 데이터 소스). 위 ③과 동형 배치 패턴 — 게이트가
+            #      늘어도 이 파일의 픽스처는 항상 같은 caller 1명이라 SELECT 문 자체는 1개로
+            #      유지된다(IN절 인자 수만 늘 뿐). 6→7로 상한을 올린 것 — 느슨하게 만든 게
+            #      아니라 늘어난 이유가 정확히 이 1개임을 실측(before_cursor_execute)으로
+            #      확認한 뒤 반영한 것(위 방법론 그대로 재적용). 7 초과(게이트당 증가)가 나오면
+            #      그건 진짜 N+1 이니 이 상한을 다시 낮추지 말고 원인을 고칠 것.
+            assert len(select_stmts_6) <= 7, select_stmts_6
         finally:
             await client.aclose()
     finally:
