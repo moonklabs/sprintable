@@ -31,17 +31,22 @@ export function primaryActionLabelKey(gate: GateItem): PrimaryActionLabelKey {
 }
 
 /** 위험 pill+문장은 risk_grade가 실제로 있을 때만(gate_type/risk에서만 — PO 明示, 없으면
- * 렌더 0이지 placeholder가 아니다). */
-export function riskSentenceKey(gate: Pick<GateItem, 'risk_grade'>): 'riskSentenceHigh' | 'riskSentenceLow' | null {
-  if (gate.risk_grade === 'high') return 'riskSentenceHigh';
-  if (gate.risk_grade === 'low') return 'riskSentenceLow';
-  return null;
+ * 렌더 0이지 placeholder가 아니다).
+ *
+ * 픽셀 커밋 CHANGES 3(페드루 PO 판정 2026-09-14 09:40Z) — 저위험은 문장 0(pill이 이미
+ * 「저위험」이라 말하는 사실을 문장으로 두 번 말하지 않는다·pill+문장 중복 제거). 고위험
+ * 문장은 "근거를 확認해 주세요"류 지시문이 아니라 «되돌릴 수 없음»(비가역성) 사실 진술로 —
+ * pill 옆에서 "이건 왜 조심해야 하나"를 한 줄로 답한다. */
+export function riskSentenceKey(gate: Pick<GateItem, 'risk_grade'>): 'riskSentenceHigh' | null {
+  return gate.risk_grade === 'high' ? 'riskSentenceHigh' : null;
 }
 
-export function riskBadgeVariant(gate: Pick<GateItem, 'risk_grade'>): 'destructive' | 'warning' | null {
-  if (gate.risk_grade === 'high') return 'destructive';
-  if (gate.risk_grade === 'low') return 'warning';
-  return null;
+/** 픽셀 커밋 CHANGES 3(c) — high→destructive(빨강)는 §③ 토큰 표에 없는 색(이 프로젝트의
+ * 위험/경고 축은 amber 하나뿐, red는 파괴적 액션 전용 — risk badge가 그 축을 잘못
+ * 빌려 썼던 것). high·low 둘 다 warning(amber) 하나로 — 「저위험/고위험」 구분은 pill의
+ * 낱말 자체(chipLowRisk/riskBadgeHigh)가 이미 하므로 색까지 나눌 필요가 없다. */
+export function riskBadgeVariant(gate: Pick<GateItem, 'risk_grade'>): 'warning' | null {
+  return gate.risk_grade === 'high' || gate.risk_grade === 'low' ? 'warning' : null;
 }
 
 /** story #3845·3860 AC2 — 「답하기」는 conversation_id가 있을 때만(없으면 비노출).

@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import { getEntityHref } from '@/components/chat/embed-card';
+import { fetchWithAuth } from '@/lib/db/client';
 import { EvidenceSection } from '@/components/verify/evidence-section';
 import { ArtifactSection } from '@/components/canvas/artifact-section';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
@@ -40,9 +41,13 @@ interface DocBacklinkItem {
   still_exists: boolean;
 }
 
+// 픽셀 커밋 CHANGES 5(페드루 PO 판정 09:45Z, CI run 34828958082 RED) — story #2691/#2689
+// 회귀가드(verify-no-new-raw-fetch-api.ts)가 콜드마운트 GET의 raw fetch(`/api/...`)를
+// 막는다(401 재시도 없이 삼키는 결함 클래스). fetchWithAuth(@/lib/db/client)로 교체 —
+// 그 가드가 명시하는 정본 처방 그대로, 재구현 0.
 async function fetchJsonData<T>(url: string): Promise<T | null> {
   try {
-    const res = await fetch(url);
+    const res = await fetchWithAuth(url);
     if (!res.ok) return null;
     const json = (await res.json()) as { data?: T };
     return json.data ?? null;
@@ -87,11 +92,21 @@ export function WorkListDetailPanel({
   row, storyId, storyTitle, goalTitle, onClose, className, isHiddenByFilter = false, onClearFilters,
 }: WorkListDetailPanelProps) {
   const t = useTranslations('workList');
+  const tCommon = useTranslations('common');
   const { currentMemberType } = useDashboardContext();
 
   const [story, setStory] = useState<StoryDetail | null>(null);
-  const [hypotheses, setHypotheses] = useState<HypothesisSummary[]>([]);
-  const [docs, setDocs] = useState<DocBacklinkItem[]>([]);
+  // 픽셀 커밋 CHANGES 2(페드루 PO 판정 09:40Z) — 3탭 다 "로딩 중"과 "진짜 0건"을 구분해야
+  // 각자 빈 상태 문구를 정확한 시점에만 보여준다(로딩 중에 미리 "없어요"라고 말하면 거짓).
+  // null=로딩 중·빈 배열=로딩 끝났는데 0건(이 구분이 목적이라 length===0 하나로 뭉개지
+  // 않는다).
+  const [hypotheses, setHypotheses] = useState<HypothesisSummary[] | null>(null);
+  const [docs, setDocs] = useState<DocBacklinkItem[] | null>(null);
+  // 픽셀 커밋 CHANGES 2(페드루 PO 판정 09:40Z) — ArtifactSection 자체의 빈 상태는 「그리기/
+  // 가져오기」 CTA가 있는 무거운 카드(전체 캔버스용 설계)라 이 360px 우패널엔 안 맞는다.
+  // artifactCount만 가볍게 별도 조회해 0이면 이 패널 자기만의 1줄 muted 문구로 대체하고,
+  // 1건 이상일 때만 ArtifactSection을 그대로 쓴다(그 컴포넌트 자체는 안 건드림).
+  const [artifactCount, setArtifactCount] = useState<number | null>(null); // null=로딩 중
   const [gate, setGate] = useState<WorkListGate | null | undefined>(undefined); // undefined=로딩 중
   const [transitioning, setTransitioning] = useState(false);
   const [transitionError, setTransitionError] = useState<'forbidden' | 'other' | null>(null);
@@ -104,8 +119,9 @@ export function WorkListDetailPanel({
   useEffect(() => {
     let cancelled = false;
     setStory(null);
-    setHypotheses([]);
-    setDocs([]);
+    setHypotheses(null);
+    setDocs(null);
+    setArtifactCount(null);
     setGate(undefined);
     setTransitionError(null);
     setApproved(false);
@@ -113,6 +129,7 @@ export function WorkListDetailPanel({
     void fetchJsonData<StoryDetail>(`/api/stories/${storyId}`).then((v) => { if (!cancelled) setStory(v); });
     void fetchJsonData<HypothesisSummary[]>(`/api/hypotheses?story_id=${storyId}`).then((v) => { if (!cancelled) setHypotheses(v ?? []); });
     void fetchJsonData<DocBacklinkItem[]>(`/api/stories/${storyId}/backlinks?source_type=doc`).then((v) => { if (!cancelled) setDocs(v ?? []); });
+    void fetchJsonData<unknown[]>(`/api/visual-artifacts?story_id=${storyId}`).then((v) => { if (!cancelled) setArtifactCount((v ?? []).length); });
     fetchPendingGate(row, storyId).then((v) => { if (!cancelled) setGate(v); }).catch(() => { if (!cancelled) setGate(null); });
 
     return () => { cancelled = true; };
@@ -120,7 +137,7 @@ export function WorkListDetailPanel({
 
   const stateText = row.state ? STATE_TEXT[row.state] : undefined;
   const riskKey = gate ? riskSentenceKey(gate) : null;
-  const riskVariant = gate ? riskBadgeVariant(gate) : null;
+  const riskBadge = gate ? riskBadgeVariant(gate) : null;
   const labelKey = gate ? primaryActionLabelKey(gate) : null;
   const conversationId = gate ? gateConversationId(gate) : null;
   // 픽셀 커밋 ②(페드루 PO 판정 2026-09-14 09:11Z) — gates/[id]/page.tsx의 isSigFlowGate와
@@ -138,7 +155,7 @@ export function WorkListDetailPanel({
     setTransitioning(true);
     setTransitionError(null);
     try {
-      const res = await fetch(`/api/gates/${gate.id}/transition`, {
+      const res = await fetchWithAuth(`/api/gates/${gate.id}/transition`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         // 픽셀 커밋 ②(페드루 PO 판정 2026-09-14 09:11Z, 정정) — evidence_viewed를 여기서
@@ -212,10 +229,12 @@ export function WorkListDetailPanel({
           ) : null}
         </div>
 
-        {riskKey && riskVariant ? (
+        {gate && riskBadge ? (
           <div className="flex items-center gap-2 rounded-md border border-border p-2" data-testid="panel-risk">
-            <Badge variant={riskVariant}>{t(riskKey === 'riskSentenceHigh' ? 'riskBadgeHigh' : 'chipLowRisk')}</Badge>
-            <p className="text-xs text-muted-foreground">{t(riskKey)}</p>
+            <Badge variant={riskBadge}>{t(gate.risk_grade === 'high' ? 'riskBadgeHigh' : 'chipLowRisk')}</Badge>
+            {/* 픽셀 커밋 CHANGES 3(b, 페드루 PO 판정 09:40Z) — 저위험은 문장 0(pill과
+                같은 사실 반복 금지). 고위험만 riskKey가 채워진다. */}
+            {riskKey ? <p className="text-xs text-muted-foreground">{t(riskKey)}</p> : null}
           </div>
         ) : null}
 
@@ -267,15 +286,26 @@ export function WorkListDetailPanel({
           <p className="text-xs text-success" data-testid="panel-approved-notice">{t('actionApproved')}</p>
         ) : null}
 
+        {/* 픽셀 커밋 CHANGES 1(페드루 PO 판정 09:40Z) — 「분절 상자」(shadcn 기본 pill 배경)
+            대신 밑줄 탭: variant="line"이 배경/pill을 이미 지운다(tabs.tsx 기존 메커니즘
+            재사용 — 새 CSS 0). 활성 인디케이터 색만 시트론(citron, 이 컴포넌트의 기존
+            기본값)에서 이 화면의 주 색(primary)으로 덮어쓴다 — after:bg-* 유틸은 같은
+            충돌군이라 각 TabsTrigger의 className(cn() 마지막 인자)이 그대로 이긴다. 활성
+            text-foreground·비활성 text-muted-foreground는 이미 기존 컴포넌트 기본값
+            그대로(별도 지정 불요). */}
         <Tabs defaultValue="evidence" className="w-full">
-          <TabsList className="w-full">
-            <TabsTrigger value="evidence" className="flex-1" data-testid="panel-tab-evidence">{t('tabEvidence')}</TabsTrigger>
-            <TabsTrigger value="docs" className="flex-1" data-testid="panel-tab-docs">{t('tabDocs')}</TabsTrigger>
-            <TabsTrigger value="artifacts" className="flex-1" data-testid="panel-tab-artifacts">{t('tabArtifacts')}</TabsTrigger>
+          <TabsList variant="line" className="w-full border-b border-border">
+            <TabsTrigger value="evidence" className="flex-1 after:bg-primary" data-testid="panel-tab-evidence">{t('tabEvidence')}</TabsTrigger>
+            <TabsTrigger value="docs" className="flex-1 after:bg-primary" data-testid="panel-tab-docs">{t('tabDocs')}</TabsTrigger>
+            <TabsTrigger value="artifacts" className="flex-1 after:bg-primary" data-testid="panel-tab-artifacts">{t('tabArtifacts')}</TabsTrigger>
           </TabsList>
 
           <TabsContent value="evidence" className="mt-4 space-y-3">
-            {hypotheses.length > 0 ? (
+            {hypotheses === null ? (
+              <p className="text-xs text-muted-foreground" data-testid="panel-hypotheses-loading">{tCommon('loading')}</p>
+            ) : hypotheses.length === 0 ? (
+              <p className="text-xs text-muted-foreground" data-testid="panel-hypotheses-empty">{t('panelEmptyHypotheses')}</p>
+            ) : (
               <ul className="space-y-1.5" data-testid="panel-hypotheses-list">
                 {hypotheses.map((h) => (
                   <li key={h.id} className="flex items-start gap-2 text-xs">
@@ -284,7 +314,7 @@ export function WorkListDetailPanel({
                   </li>
                 ))}
               </ul>
-            ) : null}
+            )}
             <EvidenceSection
               workItemId={storyId}
               workItemType="story"
@@ -296,7 +326,9 @@ export function WorkListDetailPanel({
           </TabsContent>
 
           <TabsContent value="docs" className="mt-4">
-            {docs.length === 0 ? (
+            {docs === null ? (
+              <p className="text-xs text-muted-foreground" data-testid="panel-docs-loading">{tCommon('loading')}</p>
+            ) : docs.length === 0 ? (
               <p className="text-xs text-muted-foreground" data-testid="panel-docs-empty">{t('panelEmptyDocs')}</p>
             ) : (
               <ul className="space-y-1.5" data-testid="panel-docs-list">
@@ -318,7 +350,13 @@ export function WorkListDetailPanel({
           </TabsContent>
 
           <TabsContent value="artifacts" className="mt-4">
-            <ArtifactSection storyId={storyId} />
+            {artifactCount === null ? (
+              <p className="text-xs text-muted-foreground" data-testid="panel-artifacts-loading">{tCommon('loading')}</p>
+            ) : artifactCount === 0 ? (
+              <p className="text-xs text-muted-foreground" data-testid="panel-artifacts-empty">{t('panelEmptyArtifacts')}</p>
+            ) : (
+              <ArtifactSection storyId={storyId} />
+            )}
           </TabsContent>
         </Tabs>
       </div>

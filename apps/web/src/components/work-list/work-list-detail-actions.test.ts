@@ -50,13 +50,13 @@ describe('riskSentenceKey/riskBadgeVariant — gate_type/risk에서만(PO 明示
     expect(riskBadgeVariant(gate({ risk_grade: null }))).toBeNull();
   });
 
-  it('risk_grade=high → destructive 뱃지+고위험 문장', () => {
+  it('risk_grade=high → warning 뱃지(§③ 빨강 토큰 0)+비가역성 문장', () => {
     expect(riskSentenceKey(gate({ risk_grade: 'high' }))).toBe('riskSentenceHigh');
-    expect(riskBadgeVariant(gate({ risk_grade: 'high' }))).toBe('destructive');
+    expect(riskBadgeVariant(gate({ risk_grade: 'high' }))).toBe('warning');
   });
 
-  it('risk_grade=low → warning 뱃지+저위험 문장', () => {
-    expect(riskSentenceKey(gate({ risk_grade: 'low' }))).toBe('riskSentenceLow');
+  it('⭐risk_grade=low → warning 뱃지지만 문장은 0(pill과 같은 사실 두 번 말하지 않는다, CHANGES 3b)', () => {
+    expect(riskSentenceKey(gate({ risk_grade: 'low' }))).toBeNull();
     expect(riskBadgeVariant(gate({ risk_grade: 'low' }))).toBe('warning');
   });
 });

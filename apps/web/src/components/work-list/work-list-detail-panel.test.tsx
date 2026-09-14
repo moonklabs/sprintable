@@ -65,6 +65,7 @@ function mockFetchRoutes(routes: {
   hypotheses?: unknown[];
   docs?: unknown[];
   gates?: unknown[];
+  artifacts?: unknown[];
   transitionStatus?: number;
 }) {
   fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
@@ -79,6 +80,9 @@ function mockFetchRoutes(routes: {
     }
     if (url.startsWith('/api/hypotheses')) {
       return jsonResponse(routes.hypotheses ?? []);
+    }
+    if (url.startsWith('/api/visual-artifacts')) {
+      return jsonResponse(routes.artifacts ?? []);
     }
     if (url.startsWith('/api/gates')) {
       return jsonResponse(routes.gates ?? []);
@@ -199,11 +203,43 @@ describe('WorkListDetailPanel — 탭→데이터 매핑', () => {
     expect(container.querySelector('[data-testid="panel-docs-empty"]')?.textContent).toBe(koMessages.workList.panelEmptyDocs);
   });
 
-  it('⭐산출물 탭 — ArtifactSection에 정확히 이 storyId가 실린다', async () => {
-    mockFetchRoutes({});
+  it('⭐산출물 탭 — ArtifactSection에 정확히 이 storyId가 실린다(1건 이상일 때만 렌더)', async () => {
+    mockFetchRoutes({ artifacts: [{ id: 'a1' }] });
     await mountPanel(baseRow(), 'story-99');
     await act(async () => { (container.querySelector('[data-testid="panel-tab-artifacts"]') as HTMLElement).click(); });
     expect(container.querySelector('[data-testid="stub-artifact-section"]')?.getAttribute('data-story-id')).toBe('story-99');
+  });
+
+  // 픽셀 커밋 CHANGES 2(페드루 PO 판정 09:40Z) — 3탭 다 "아직 로딩 중"과 "진짜 0건"을
+  // 구분한 빈 상태 1줄(muted) — ArtifactSection 자체의 무거운 CTA empty-state는 이
+  // 360px 패널엔 안 맞아(전체 캔버스 전용 설계) 이 패널이 artifactCount로 직접 가른다.
+  it('근거 탭 — 가설 0건이면 「아직 연결된 가설이 없어요」', async () => {
+    mockFetchRoutes({ hypotheses: [] });
+    await mountPanel();
+    expect(container.querySelector('[data-testid="panel-hypotheses-empty"]')?.textContent).toBe(koMessages.workList.panelEmptyHypotheses);
+  });
+
+  it('산출물 탭 — 0건이면 「연결된 산출물이 없어요」(ArtifactSection 자체 CTA 미노출)', async () => {
+    mockFetchRoutes({ artifacts: [] });
+    await mountPanel();
+    await act(async () => { (container.querySelector('[data-testid="panel-tab-artifacts"]') as HTMLElement).click(); });
+    expect(container.querySelector('[data-testid="panel-artifacts-empty"]')?.textContent).toBe(koMessages.workList.panelEmptyArtifacts);
+    expect(container.querySelector('[data-testid="stub-artifact-section"]')).toBeNull();
+  });
+
+  it('⭐산출물 탭 로딩 중 — fetch가 아직 안 끝났으면 「없어요」도 ArtifactSection도 안 뜬다(로딩=다른 상태)', async () => {
+    let resolveArtifacts: (v: Response) => void = () => {};
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.startsWith('/api/visual-artifacts')) {
+        return new Promise<Response>((resolve) => { resolveArtifacts = resolve; });
+      }
+      return jsonResponse(url.startsWith('/api/gates') ? [] : null);
+    });
+    await mountPanel(baseRow(), 'story-1');
+    await act(async () => { (container.querySelector('[data-testid="panel-tab-artifacts"]') as HTMLElement).click(); });
+    expect(container.querySelector('[data-testid="panel-artifacts-loading"]')?.textContent).toBe(koMessages.common.loading);
+    expect(container.querySelector('[data-testid="panel-artifacts-empty"]')).toBeNull();
+    await act(async () => { resolveArtifacts(jsonResponse([]) as unknown as Response); });
   });
 });
 
