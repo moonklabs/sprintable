@@ -10,6 +10,7 @@ import {
   FolderKanban,
   Gauge,
   GitPullRequest,
+  List,
   Search,
   UserPlus,
   Users,
@@ -70,6 +71,10 @@ const GUARD_ANCHOR_ITEMS: Array<{ id: string; icon: LucideIcon; labelKey: string
   { id: 'go-sprints', icon: CalendarRange, labelKey: 'goSprints', href: '/sprints' },
   { id: 'go-epics', icon: FolderKanban, labelKey: 'goEpics', href: '/epics' },
   { id: 'go-retro', icon: Gauge, labelKey: 'goRetro', href: '/retro' },
+  // story #3844(PO 지적 2026-09-14 08:09Z, CI 「Verify no orphan resource routes(#2376)」
+  // RED) — WorkspaceFrameTabs가 얹은 탭 경로는 이 가드가 진입점으로 안 센다(4264가 retro를
+  // 여기 앵커한 선례 그대로) — work-list도 동형으로 앵커.
+  { id: 'go-work-list', icon: List, labelKey: 'goWorkList', href: '/work-list' },
 ];
 
 // 명령(action)당 아이콘 — command-palette-actions.ts는 순수 데이터만 다뤄 lucide 컴포넌트를

@@ -20,6 +20,7 @@ import {
   groupVisibleLegacyByTarget,
 } from '@/lib/nav-config';
 import { useSseMultiplexerContext } from '@/components/realtime-provider';
+import { WORKSPACE_FRAME_TAB_PATHS } from '@/components/workspace/workspace-frame-tabs';
 import {
   Sidebar,
   SidebarContent,
@@ -140,10 +141,16 @@ export function AppSidebar({
   // story a539c649(S2 최초·S3 리소스 확장) — 실 ws/proj slug 있으면 직접 path(리다이렉트 홉
   // 절약) — 없으면 bare `/{resource}`(미들웨어의 bare→쿠키 default 해소 301 안전망이 받는다).
   const orgSlug = orgMemberships.find((o) => o.orgId === orgId)?.orgSlug;
-  function resourceLink(resource: string): { href: string; isActive: boolean } {
+  // story #3844(PO 지적 2026-09-14 07:53Z, 캡처 3 라이브 눈확認로 발견) — 「일감」(id
+  // 'board') 항목이 resource='flow' 단일 경로만 알아 WorkspaceFrameTabs가 그 위에 얹은
+  // 나머지 탭(work-list·sprints·epics·retro)에선 사이드바가 비활성으로 떨어졌다.
+  // extraActivePaths로 WORKSPACE_FRAME_TAB_PATHS(SSOT, 하드코딩 0)를 함께 검사 — 탭을
+  // 하나 늘리면 이 판정도 자동으로 늘어난다. href는 여전히 resource(주 진입점) 기준.
+  function resourceLink(resource: string, extraActivePaths: readonly string[] = []): { href: string; isActive: boolean } {
     const href = orgSlug && currentProjectSlug ? `/${orgSlug}/${currentProjectSlug}/${resource}` : `/${resource}`;
-    const isActive = pathname === `/${resource}` || pathname.startsWith(`/${resource}/`)
-      || Boolean(orgSlug && currentProjectSlug && pathname.startsWith(`/${orgSlug}/${currentProjectSlug}/${resource}`));
+    const isActivePath = (p: string) => pathname === `/${p}` || pathname.startsWith(`/${p}/`)
+      || Boolean(orgSlug && currentProjectSlug && pathname.startsWith(`/${orgSlug}/${currentProjectSlug}/${p}`));
+    const isActive = [resource, ...extraActivePaths].some(isActivePath);
     return { href, isActive };
   }
   // story #2224(IA v2.2 §7-3, AC12) — 기본 진입은 /flow, 사이드바가 통합뷰를 가리킨다.
@@ -439,7 +446,7 @@ export function AppSidebar({
                 {group.items.map((item) => {
                   const link = item.kind === 'static'
                     ? { href: item.path, isActive: isActive(item.path) }
-                    : resourceLink(item.path);
+                    : resourceLink(item.path, item.id === 'board' ? WORKSPACE_FRAME_TAB_PATHS : []);
                   const Icon = item.icon;
                   const badgeCount = item.badgeKey === 'inbox' ? inboxPendingCount : 0;
                   const badgeCap = item.badgeKey === 'inbox' ? 9 : 99;

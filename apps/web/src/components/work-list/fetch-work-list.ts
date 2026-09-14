@@ -1,0 +1,111 @@
+import { fetchWithAuth } from '@/lib/db/client';
+import { parseCursorMeta } from '@/lib/pagination';
+import {
+  deriveWorkList,
+  type WorkList,
+  type WorkListAgentRunInput,
+  type WorkListGoalInput,
+  type WorkListHypothesisInput,
+  type WorkListInboxItem,
+  type WorkListPageResult,
+  type WorkListStoryInput,
+  type WorkListTaskInput,
+  type WorkListTeamMemberInput,
+} from './derive-work-list';
+
+/**
+ * story #3844 — 7개 기존 route를 병렬로 모아 deriveWorkList에 먹인다(새 API 0).
+ *
+ * - goals/stories/tasks: 규약 A(camelCase meta) — parseCursorMeta로 읽는다.
+ * - agent-runs: FE 프록시(api/agent-runs/route.ts)가 순수 passthrough라 meta가 없다(story
+ *   #3851이 BE에 X-Total-Count/X-Next-Cursor 헤더 계약을 막 추가했지만 — 2026-09-14 rebase로
+ *   확認 — 이 FE 프록시는 아직 그 헤더를 안 읽는다, 별도 FE 스토리 몫). PO 確定(2026-09-14)
+ *   임시 처방: 응답 길이===요청 limit이면 보수적으로 partial=true(더 있을 수도 있다는 뜻,
+ *   「없다」 단정 금지).
+ * - team-members: 페이지네이션 없음(실측, 2026-09-14 — 처음 규약 A 소스로 잘못 모델링해
+ *   데이터 0건에도 partial 배너가 항상 뜨는 결함을 라이브 검증에서 발견·수정,
+ *   derive-work-list.ts WorkList.partial 주석 참고) — 응답 배열 그대로.
+ * - gates/inbox: 페이지네이션 없음(BE 명시 계약, gates.py list_gate_inbox 문서화) —
+ *   status=pending만 서버에 필터 요청(행 상태 판정엔 pending만 의미 있음).
+ * - visual-artifacts: story_id 미지정 호출 시 BE가 호출자 project로 자동 스코프해 project
+ *   전체 artifact를 limit=500까지 준다(list_artifacts, story #2428 PR④ 계약) — 그 안에서
+ *   story_id별 실 개수를 집계한다(PO 지적 — 있음/없음이 아니라 「산출물 N」). ⚠️known gap:
+ *   FE 프록시(api/visual-artifacts/route.ts)가
+ *   BE의 has_more/next_cursor meta를 벗겨서 안 돌려준다(json.data만 재포장) — 그래서 이
+ *   소스는 partial 판정에 못 들어간다(칩은 "있을 때만" 그리는 보조 신호라 500건 초과
+ *   project에서 일부 story의 칩이 빠질 수 있음, best-effort로 수용 — 지어내지 않되 단정도
+ *   안 함. 프록시 자체를 고치는 건 이 카드 스코프 밖).
+ * - hypotheses: project_id만으로 project 전체(페이지네이션 없음, 실측 — service.list가
+ *   raw 배열만 반환) — 가설 필터 드롭다운 재료 + 스토리별 hypothesisIds 매칭 재료.
+ */
+
+interface Envelope<T> {
+  data: T;
+  meta: unknown;
+}
+
+// org-briefing-shell.tsx::useTodayData 선례와 동형 — fetchWithAuth는 Response를 주지 json을
+// 안 준다, 여기서 명시적으로 .json()까지 내린다.
+async function fetchEnvelope<T>(url: string): Promise<Envelope<T>> {
+  const res = await fetchWithAuth(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status} ${url}`);
+  return (await res.json()) as Envelope<T>;
+}
+
+async function fetchPage<T>(url: string, source: string): Promise<WorkListPageResult<T>> {
+  const json = await fetchEnvelope<T[]>(url);
+  // 변수명을 `meta`로 두지 않는다 — pagination-envelope-consumers.test.ts의 정적 가드가
+  // `meta?.hasMore` 텍스트 패턴을 전부 "raw json.meta 직접 접근"으로 오탐하기 때문(여긴
+  // parseCursorMeta()의 반환값을 읽는 자리라 실제로는 안전).
+  const parsed = parseCursorMeta(json.meta, source);
+  return { items: Array.isArray(json.data) ? json.data : [], hasMore: parsed.malformed ? null : parsed.hasMore };
+}
+
+const PAGE_LIMIT = 100;
+const AGENT_RUNS_LIMIT = 200;
+
+export interface FetchedWorkList {
+  workList: WorkList;
+  /** 원본 가설 목록(id→statement 등) — 가설 필터 드롭다운 라벨용(WorkList 자체는 story별
+   * hypothesisIds만 들고 있어 문구가 없다). */
+  hypotheses: WorkListHypothesisInput[];
+}
+
+export async function fetchWorkList(projectId: string): Promise<FetchedWorkList> {
+  const [goals, stories, tasks, agentRunsJson, inboxJson, teamMembersJson, artifactsJson, hypothesesJson] = await Promise.all([
+    fetchPage<WorkListGoalInput>(`/api/goals?project_id=${projectId}&limit=${PAGE_LIMIT}`, '/api/goals'),
+    fetchPage<WorkListStoryInput>(`/api/stories?project_id=${projectId}&limit=${PAGE_LIMIT}`, '/api/stories'),
+    fetchPage<WorkListTaskInput>(`/api/tasks?project_id=${projectId}&limit=${PAGE_LIMIT}`, '/api/tasks'),
+    fetchEnvelope<WorkListAgentRunInput[]>(`/api/agent-runs?project_id=${projectId}&limit=${AGENT_RUNS_LIMIT}`),
+    fetchEnvelope<WorkListInboxItem[]>('/api/gates/inbox?status=pending'),
+    fetchEnvelope<WorkListTeamMemberInput[]>('/api/team-members'),
+    fetchEnvelope<Array<{ story_id: string | null }>>('/api/visual-artifacts'),
+    fetchEnvelope<WorkListHypothesisInput[]>(`/api/hypotheses?project_id=${projectId}`),
+  ]);
+
+  const artifactCountByStoryId = new Map<string, number>();
+  for (const a of Array.isArray(artifactsJson.data) ? artifactsJson.data : []) {
+    if (!a.story_id) continue;
+    artifactCountByStoryId.set(a.story_id, (artifactCountByStoryId.get(a.story_id) ?? 0) + 1);
+  }
+
+  const hypotheses = Array.isArray(hypothesesJson.data) ? hypothesesJson.data : [];
+  const agentRuns = Array.isArray(agentRunsJson.data) ? agentRunsJson.data : [];
+  // PO 確定(2026-09-14) — agent-runs는 meta가 없어(위 docblock) 응답 길이===요청 limit을
+  // "더 있을 수도 있다"는 보수적 partial 신호로 접는다(story #3851의 BE 헤더 계약을 FE
+  // 프록시가 아직 안 읽는 동안의 임시 처방).
+  const agentRunsMayHaveMore = agentRuns.length >= AGENT_RUNS_LIMIT;
+
+  const workList = deriveWorkList({
+    goals,
+    stories,
+    tasks,
+    agentRuns,
+    inbox: Array.isArray(inboxJson.data) ? inboxJson.data : [],
+    teamMembers: Array.isArray(teamMembersJson.data) ? teamMembersJson.data : [],
+    artifactCountByStoryId,
+    hypotheses,
+  });
+
+  return { workList: { ...workList, partial: workList.partial || agentRunsMayHaveMore }, hypotheses };
+}

@@ -178,9 +178,10 @@ describe('scanRepo — story #3760 AC1/AC4(실 트리 실행)', () => {
   // 신설로 101→102(named export 위반 0건은 그대로 — default export만).
   // story #3845(§① 2026-09-14) — 독립 /standup 라우트 은퇴(page.tsx·loading.tsx 삭제,
   // legacy-resource-tables.ts RENAMED_RESOURCES 301로 흡수)로 102→100.
-  it('실 트리(apps/web/src/app) — 라우트 파일 100개·위반 0건', () => {
+  // story #3844(2026-09-14) — work-list/page.tsx 신설로 100→101.
+  it('실 트리(apps/web/src/app) — 라우트 파일 101개·위반 0건', () => {
     const { violations, fileCount } = scanRepo(APP_ROOT);
-    expect(fileCount).toBe(100);
+    expect(fileCount).toBe(101);
     expect(violations).toEqual([]);
   });
 });

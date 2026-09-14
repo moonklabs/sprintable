@@ -53,11 +53,11 @@ afterEach(async () => {
 });
 
 describe('WorkspaceFrameTabs — story #2930 I3', () => {
-  it('보드·스프린트·에픽·회고 4탭이 렌더한다(story #2931 에픽 합류 + story #3845 회고 합류)', async () => {
+  it('보드·스프린트·에픽·회고·목록 5탭이 렌더한다(story #2931 에픽·#3845 회고·#3844 목록 합류)', async () => {
     const { WorkspaceFrameTabs } = await import('./workspace-frame-tabs');
     await act(async () => { root.render(wrap(<WorkspaceFrameTabs active="board" />)); });
     const tabs = [...container.querySelectorAll('[role="tab"]')];
-    expect(tabs.map((t) => t.textContent)).toEqual(['보드', '스프린트', '에픽', '회고']);
+    expect(tabs.map((t) => t.textContent)).toEqual(['목록', '보드', '스프린트', '에픽', '회고']);
   });
 
   it('active="board"면 보드 탭에 aria-selected=true가 붙는다', async () => {
@@ -97,7 +97,7 @@ describe('WorkspaceFrameTabs — story #2930 I3', () => {
     const { WorkspaceFrameTabs } = await import('./workspace-frame-tabs');
     await act(async () => { root.render(wrap(<WorkspaceFrameTabs active="board" />, enMessages)); });
     const tabs = [...container.querySelectorAll('[role="tab"]')];
-    expect(tabs.map((t) => t.textContent)).toEqual(['Board', 'Sprints', 'Epic', 'Retro']);
+    expect(tabs.map((t) => t.textContent)).toEqual(['List', 'Board', 'Sprints', 'Epic', 'Retro']);
   });
 
   it('story #3845 — 회고 탭 클릭 시 /{ws}/{proj}/retro로 이동하고 active="retro"면 선택 표시된다', async () => {
@@ -110,6 +110,18 @@ describe('WorkspaceFrameTabs — story #2930 I3', () => {
     await act(async () => { root.render(wrap(<WorkspaceFrameTabs active="retro" />)); });
     const activeRetroTab = [...container.querySelectorAll('[role="tab"]')].find((t) => t.textContent === '회고');
     expect(activeRetroTab?.getAttribute('aria-selected')).toBe('true');
+  });
+
+  it('story #3844 — 목록 탭 클릭 시 /{ws}/{proj}/work-list로 이동하고 active="workList"면 선택 표시된다', async () => {
+    const { WorkspaceFrameTabs } = await import('./workspace-frame-tabs');
+    await act(async () => { root.render(wrap(<WorkspaceFrameTabs active="board" />)); });
+    const listTab = [...container.querySelectorAll('[role="tab"]')].find((t) => t.textContent === '목록');
+    await act(async () => { listTab!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(pushMock).toHaveBeenCalledWith('/my-ws/my-proj/work-list');
+
+    await act(async () => { root.render(wrap(<WorkspaceFrameTabs active="workList" />)); });
+    const activeListTab = [...container.querySelectorAll('[role="tab"]')].find((t) => t.textContent === '목록');
+    expect(activeListTab?.getAttribute('aria-selected')).toBe('true');
   });
 
   // story #3043(PO+유나 IA 확定 ⓐ, 2026-08-25) — "「지금」 탭을 열 때 여기가 보드인 것이
