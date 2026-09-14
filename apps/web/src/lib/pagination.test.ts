@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildCursorPageMeta, paginateInMemory, parseCursorMeta, parseCursorPageInput } from './pagination';
+import { buildCursorPageMeta, buildHeaderCursorPageMeta, paginateInMemory, parseCursorMeta, parseCursorPageInput } from './pagination';
 
 describe('parseCursorMeta (#2231 AC4 — 규약 A 하나만 전제, 규약 밖이면 조용히 삼키지 않는다)', () => {
   let errorSpy: ReturnType<typeof vi.spyOn>;
@@ -110,5 +110,61 @@ describe('paginateInMemory (epics: 백엔드 정렬/cursor 미지원)', () => {
     const { meta } = paginateInMemory(rows.slice(0, 2), 5, 'created_at');
     expect(meta.hasMore).toBe(false);
     expect(meta.nextCursor).toBeNull();
+  });
+});
+
+// story #3857(PO CHANGES①, 2026-09-14 09:01Z) — BE 4곳(agent_runs·standups·sprints·
+// retros)이 X-Next-Cursor를 페이지가 비어 있지 않으면 항상 낸다(존재=「더 있음」의
+// 증거가 아님). 첫 페이지(cursor 미지정)는 X-Total-Count가 정확해 exact 비교가
+// 가능하고, cursor 페이지(또는 total 미수신)는 기존 보수 규칙(꽉 찬 페이지+커서)으로
+// 남는다 — 두 분기가 실제로 다른 값을 낼 때만 이 판정이 의미 있다(테스트 2).
+describe('buildHeaderCursorPageMeta(story #3857 PO CHANGES①)', () => {
+  it('첫 페이지(cursor 無)·totalCount 초과분 있음 → hasMore=true', () => {
+    const meta = buildHeaderCursorPageMeta({
+      dataLength: 50,
+      requestedLimit: 50,
+      hasCursorParam: false,
+      nextCursorHeader: '2026-09-14T08:00:00Z',
+      totalCountHeader: 312,
+    });
+    expect(meta.hasMore).toBe(true);
+    expect(meta.nextCursor).toBe('2026-09-14T08:00:00Z');
+  });
+
+  it('첫 페이지(cursor 無)·꽉 찬 페이지가 곧 totalCount 전체 → hasMore=false(구 length===limit 규칙이면 오탐 true였을 자리)', () => {
+    // BE는 이 경우에도 페이지가 비어 있지 않으므로 X-Next-Cursor를 싣는다(agent_runs.py:127류) —
+    // 옛 conservative 규칙(length===limit && nextCursor!==null)이면 이 케이스가 hasMore=true로
+    // 잘못 떨어진다. exact-total 분기가 이 오탐을 막는다.
+    const meta = buildHeaderCursorPageMeta({
+      dataLength: 50,
+      requestedLimit: 50,
+      hasCursorParam: false,
+      nextCursorHeader: '2026-09-14T08:00:00Z', // BE가 비어있지 않아 여전히 실어 보냄
+      totalCountHeader: 50, // 그런데 전체가 정확히 50 — 더 없음
+    });
+    expect(meta.hasMore).toBe(false);
+    expect(meta.nextCursor).toBeNull(); // 더 없다고 판정했으니 커서를 실어 보내지 않는다
+  });
+
+  it('cursor 페이지(2쪽 이후)는 totalCount가 있어도 exact 비교를 쓰지 않고 보수 규칙(꽉 참+커서)을 쓴다', () => {
+    const meta = buildHeaderCursorPageMeta({
+      dataLength: 50,
+      requestedLimit: 50,
+      hasCursorParam: true, // PO CHANGES①의 명시 범위 — exact 분기는 첫 페이지만
+      nextCursorHeader: '2026-09-14T09:00:00Z',
+      totalCountHeader: 50, // 첫 페이지 케이스와 동일 total이지만 cursor가 있어 분기가 다르다
+    });
+    expect(meta.hasMore).toBe(true); // 보수 규칙 — 꽉 찼고 커서가 있으니 「더 있을 수 있음」
+  });
+
+  it('totalCount 미수신(null)이면 cursor 유무와 무관하게 보수 규칙으로 낙하한다', () => {
+    const meta = buildHeaderCursorPageMeta({
+      dataLength: 50,
+      requestedLimit: 50,
+      hasCursorParam: false,
+      nextCursorHeader: '2026-09-14T08:00:00Z',
+      totalCountHeader: null,
+    });
+    expect(meta.hasMore).toBe(true); // exact 비교 불가 → 보수 규칙(꽉 참+커서)
   });
 });
