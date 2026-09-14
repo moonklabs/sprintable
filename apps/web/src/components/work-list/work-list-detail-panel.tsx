@@ -14,12 +14,11 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { EvidenceSection } from '@/components/verify/evidence-section';
 import { ArtifactSection } from '@/components/canvas/artifact-section';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
-import { deriveRiskLevel, usesSignatureFlow } from '@/components/cage/gate-risk';
 import { GateSignatureApproval } from '@/components/cage/gate-signature-approval';
 import { STATE_TEXT } from './work-list-row';
 import type { WorkListRow } from './derive-work-list';
 import {
-  gateConversationId, primaryActionLabelKey, riskBadgeVariant, riskSentenceKey,
+  deriveGateState, gateConversationId, primaryActionLabelKey, riskBadgeVariant, riskSentenceKey,
   type WorkListGate,
 } from './work-list-detail-actions';
 
@@ -136,16 +135,34 @@ export function WorkListDetailPanel({
     return () => { cancelled = true; };
   }, [row, storyId]);
 
-  const stateText = row.state ? STATE_TEXT[row.state] : undefined;
+  // 카디르 계약값 ⑥(페드루 판정 2026-09-14 10:55Z) — 「같은 화면 두 소스」결함 처방. row.state는
+  // 목록 로드 시점의 inbox 스냅샷이고 주 액션 버튼은 이 패널이 연 시점의 fresh gate(gate state,
+  // fetchPendingGate)에서 파생된다 — 목록 로드 뒤 게이트가 새로 생기면 상태 줄은 비고 버튼만
+  // 그려지는 모순이 생겼다(정합 테스트 0이었음). 불변식: 패널 안 상태 문장과 주 액션은 항상
+  // 같은 fetch 결과(gate)에서 파생돼야 한다.
+  // ① gate===undefined(로딩 中) — 상태 줄도 주 액션 버튼(canShowPrimaryAction, 아래)도 그리지
+  //   않는다(둘 다 !!gate 게이팅이라 자연히 같이 비게 된다).
+  // ② gate가 있으면(fresh, 방금 이 패널이 열며 받은 값) 그 gate에서 재계산 — deriveGateState
+  //   (derive-work-list.ts의 stateFromInboxItem과 같은 함수, SSOT 통일).
+  // ③ fresh 결과가 없으면(gate===null) 게이트 유래 스냅샷 낱말(awaiting_approval/
+  //   awaiting_signature)은 그리지 않는다 — row.state가 그 둘이 아닌 경우(awaiting_answer·
+  //   in_progress·done)만 그대로 쓴다(게이트 밖 상태는 이 모순 축과 무관하므로 안전).
+  const gateDerivedState =
+    gate === undefined ? undefined
+    : gate ? deriveGateState(gate)
+    : row.state === 'awaiting_approval' || row.state === 'awaiting_signature' ? undefined
+    : (row.state ?? undefined);
+  const stateText = gateDerivedState ? STATE_TEXT[gateDerivedState] : undefined;
   const riskKey = gate ? riskSentenceKey(gate) : null;
   const riskBadge = gate ? riskBadgeVariant(gate) : null;
   const labelKey = gate ? primaryActionLabelKey(gate) : null;
   const conversationId = gate ? gateConversationId(gate) : null;
   // 픽셀 커밋 ②(페드루 PO 판정 2026-09-14 09:11Z) — gates/[id]/page.tsx의 isSigFlowGate와
-  // 정확히 같은 판정(usesSignatureFlow(deriveRiskLevel(gate))). primaryActionLabelKey가
-  // 라벨을, 이 값이 «어느 UI를 그릴지»를 정한다 — 같은 SSOT에서 파생되므로 라벨과 실제
-  // 렌더가 항상 짝을 이룬다(따로 계산하면 드리프트 위험).
-  const isSigFlowGate = !!gate && usesSignatureFlow(deriveRiskLevel(gate));
+  // 정확히 같은 판정. primaryActionLabelKey가 라벨을, 이 값이 «어느 UI를 그릴지»를 정한다 —
+  // 같은 SSOT에서 파생되므로 라벨과 실제 렌더가 항상 짝을 이룬다(따로 계산하면 드리프트
+  // 위험). 카디르 계약값 ⑥(10:55Z) — deriveGateState로 통일(이 파일 안에서만도 세 번째
+  // 독립 계산이었다: primaryActionLabelKey·상태 줄 위 gateDerivedState·이 줄).
+  const isSigFlowGate = !!gate && deriveGateState(gate) === 'awaiting_signature';
 
   // story #3845 — 에이전트 뷰어는 버튼 자체를 안 보인다(403-회피, approvals-queue.tsx의
   // `currentMemberType === 'human'` 게이팅과 동일 SSOT — DashboardContext #2103).

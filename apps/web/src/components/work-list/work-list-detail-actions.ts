@@ -12,7 +12,7 @@
  * 판정을 그 SSOT의 얇은 함수로 되돌린다 — 독자 재구현 0.
  */
 import type { GateItem } from '@/components/kanban/types';
-import { deriveRiskLevel, usesSignatureFlow } from '@/components/cage/gate-risk';
+import { usesSignatureFlow } from '@/components/cage/gate-risk';
 import type { WorkList, WorkListRow } from './derive-work-list';
 
 /** GET /api/v2/gates 응답(GateResponse)을 그대로 GateItem으로 쓴다(하위집합 재정의 0 —
@@ -27,7 +27,23 @@ export type PrimaryActionLabelKey = 'actionApprove' | 'actionApproveAndSign';
  * 상태(gates/[id]/page.tsx의 isSigFlowGate)와 이 라벨이 다른 조건이면 그 자체가 사용자
  * 에게 거짓말이 된다. */
 export function primaryActionLabelKey(gate: GateItem): PrimaryActionLabelKey {
-  return usesSignatureFlow(deriveRiskLevel(gate)) ? 'actionApproveAndSign' : 'actionApprove';
+  return deriveGateState(gate) === 'awaiting_signature' ? 'actionApproveAndSign' : 'actionApprove';
+}
+
+export type DerivedGateState = 'awaiting_approval' | 'awaiting_signature';
+
+/** 카디르 계약값 ⑥(페드루 판정 2026-09-14 10:55Z) — 「같은 화면 두 소스」결함 처방. 패널의
+ * 상태 문장(이 함수)과 derive-work-list.ts의 stateFromInboxItem이 각자 독립적으로 "서명
+ * 필요?"를 판정하다 갈라졌었다(stateFromInboxItem은 `gate_type==='external_publish'||
+ * risk_grade==='high'` OR-재구현, 이 파일의 primaryActionLabelKey는 이미 SSOT 재사용 —
+ * 쌍둥이 불일치, feedback_twin_system_weaker_wins 클래스). 이 함수 하나로 합쳐 두 자리가
+ * 부른다. `usesSignatureFlow(deriveRiskLevel(...))`(null=unknown=고위험 취급 정책)와
+ * 정확히 같은 값이되, 파라미터는 `risk_grade`만 요구한다(GateItem 전체 타입을 요구하면
+ * derive-work-list.ts의 WorkListInboxItem 게이트 변형—GateItem의 부분집합—을 못 넘긴다.
+ * deriveRiskLevel 자체가 `gate.risk_grade ?? 'unknown'` 한 줄이라 그 매핑만 인라인하고,
+ * 실제 정책 함수 usesSignatureFlow는 그대로 gate-risk.ts에서 가져와 부른다). */
+export function deriveGateState(gate: { risk_grade?: 'low' | 'high' | null }): DerivedGateState {
+  return usesSignatureFlow(gate.risk_grade ?? 'unknown') ? 'awaiting_signature' : 'awaiting_approval';
 }
 
 /** 위험 pill+문장은 risk_grade가 실제로 있을 때만(gate_type/risk에서만 — PO 明示, 없으면

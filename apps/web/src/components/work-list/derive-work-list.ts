@@ -43,6 +43,8 @@
  *   hypotheses는 project_id만으로 project 전체를 페이지네이션 없이 준다).
  */
 
+import { deriveGateState } from './work-list-detail-actions';
+
 export type WorkListRowKind = 'task' | 'agent_run';
 export type WorkListRowState = 'awaiting_approval' | 'awaiting_signature' | 'awaiting_answer' | 'in_progress' | 'done' | null;
 
@@ -62,10 +64,6 @@ export const GOAL_STATUS_ACTIVE = 'active';
 // _AGENT_RUN_STATUS_VALUES: queued|held|running|hitl_pending|completed|failed|abandoned 중
 // completed만 종결로 세고, failed/abandoned는 §①에 대응 낱말이 없어 null로 둔다 — 지어내지 않음).
 const AGENT_RUN_IN_PROGRESS_STATUSES = new Set(['queued', 'held', 'running', 'hitl_pending']);
-
-// today_service.py::_EXTERNAL_PUBLISH_GATE_TYPE과 동일 SSOT — 이 gate_type만 kind=signature
-// 취급(PO 매핑 확定, 3831 판정과 동형: signature ∨ risk=high → 서명 대기).
-const EXTERNAL_PUBLISH_GATE_TYPE = 'external_publish';
 
 // ── 입력(각 route 실 응답 형 그대로 — 자체 가공 0) ──────────────────────────────
 
@@ -218,8 +216,11 @@ function findPendingInbox(inbox: WorkListInboxItem[], workItemType: 'task' | 'st
 
 function stateFromInboxItem(item: WorkListInboxItem): WorkListRowState {
   if (item.source === 'hitl') return 'awaiting_answer';
-  const isSignature = item.gate_type === EXTERNAL_PUBLISH_GATE_TYPE || item.risk_grade === 'high';
-  return isSignature ? 'awaiting_signature' : 'awaiting_approval';
+  // 카디르 계약값 ⑥(페드루 판정 2026-09-14 10:55Z) — 옛 OR-조건(gate_type===external_publish
+  // ||risk_grade==='high')이 work-list-detail-panel.tsx의 primaryActionLabelKey와 독립적으로
+  // "서명 필요?"를 판정하다 갈라졌던 자리. work-list-detail-actions.ts::deriveGateState 하나로
+  // 합쳐 두 자리가 같은 함수를 부른다(risk_grade===null→'unknown'→고위험 취급 정책도 이제 일치).
+  return deriveGateState(item);
 }
 
 function lowRiskFromInboxItem(item: WorkListInboxItem | null): boolean {

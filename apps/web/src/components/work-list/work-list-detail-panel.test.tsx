@@ -124,13 +124,31 @@ async function mountPanel(
 
 describe('WorkListDetailPanel — 헤더', () => {
   it('제목·「어디에 속하나」·담당·상태를 그대로 그린다', async () => {
-    mockFetchRoutes({});
+    // 카디르 계약값 ⑥(페드루 판정 2026-09-14 10:55Z) — 상태 줄은 이제 row.state 스냅샷이
+    // 아니라 fresh gate에서 재계산된다(같은 fetch 소스로 주 액션 버튼과 통일). 이 fixture가
+    // gates:[] 그대로였다면 row.state='awaiting_approval'(baseRow 기본값)이 fresh gate 부재로
+    // 억제돼(AC③) 렌더 0이 되므로, 실제로 그 상태가 맞다고 fresh gate로도 확認해 준다.
+    mockFetchRoutes({ gates: [{ id: 'g1', gate_type: 'doc_approval', risk_grade: 'low', status: 'pending', work_item_id: 'task-1', work_item_type: 'task' }] });
     await mountPanel(baseRow({ title: '문서 초안 작성', ownerName: '유나' }));
     expect(container.textContent).toContain('문서 초안 작성');
     expect(container.querySelector('[data-testid="panel-belongs-to"]')?.textContent).toContain('목표 제목');
     expect(container.querySelector('[data-testid="panel-belongs-to"]')?.textContent).toContain('스토리 제목');
     expect(container.querySelector('[data-testid="panel-assignee"]')?.textContent).toContain('유나');
     expect(container.querySelector('[data-testid="panel-state"]')?.textContent).toContain(koMessages.workList.stateAwaitingApproval);
+  });
+
+  it('카디르 계약값 ⑥(a): row.state=null(목록 로드 시점엔 게이트 없었음) + fresh gate pending → 헤더 상태 줄+주 액션 버튼 둘 다 뜬다(같은 fresh gate에서 파생)', async () => {
+    mockFetchRoutes({ gates: [{ id: 'g1', gate_type: 'doc_approval', risk_grade: 'low', status: 'pending', work_item_id: 'task-1', work_item_type: 'task' }] });
+    await mountPanel(baseRow({ state: null }));
+    expect(container.querySelector('[data-testid="panel-state"]')?.textContent).toContain(koMessages.workList.stateAwaitingApproval);
+    expect(container.querySelector('[data-testid="panel-primary-action"]')).not.toBeNull();
+  });
+
+  it('카디르 계약값 ⑥(b): row.state=awaiting_approval(스냅샷) + fresh 결과 없음(승인/거절돼 사라짐) → 상태 줄·버튼 둘 다 안 뜬다(스냅샷 낱말을 그대로 안 믿는다)', async () => {
+    mockFetchRoutes({ gates: [] });
+    await mountPanel(baseRow({ state: 'awaiting_approval' }));
+    expect(container.querySelector('[data-testid="panel-state"]')).toBeNull();
+    expect(container.querySelector('[data-testid="panel-primary-action"]')).toBeNull();
   });
 
   it('담당 없음(ownerName=null)이면 「배정 없음」(지어내지 않는다)', async () => {
