@@ -736,7 +736,7 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
           컬럼으로 바꾸고(retro/page.tsx·docs 등 다른 [ws]/[proj] 페이지가 이미 쓰는
           flex-1 overflow-y-auto 관례), split 자체는 고정 최소높이(shrink-0)로 내부
           스크롤을 유지한 채 그 안 콘텐츠 조각이 된다. */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+      <div className="focus-inset flex min-h-0 flex-1 flex-col overflow-y-auto">
       <div className="flex min-h-[420px] shrink-0 overflow-hidden border-b border-border">
       {/* Sprint list */}
       <div className={`flex flex-col gap-3 overflow-y-auto p-6 transition-all duration-300 ${selected ? 'hidden w-1/2 lg:flex' : 'w-full'}`}>
