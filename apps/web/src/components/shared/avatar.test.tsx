@@ -57,9 +57,13 @@ describe('Avatar — story #2887 S2g', () => {
     expect(container.querySelector('[role="img"]')).toBeNull();
   });
 
-  it('에이전트는 이미지가 있어도 에이전트 배지가 유지된다', async () => {
+  // story #3888 CHANGES②(PO PR 코멘트, 2026-09-14 19:05Z·유나 §⑤ 확定 19:06Z) — 코너
+  // 텍스트 배지는 이제 size>40(프로필류)에서만 렌더된다(≤40은 잘리거나 번져 안 읽힘 +
+  // AgentIdentity 칩과 같은 낱말이 겹침). 이 테스트의 원 의도("이미지가 있어도 배지가
+  // 유지된다")를 지키려면 배지가 실제로 뜨는 크기(48)로 명시해야 한다.
+  it('에이전트는 이미지가 있어도 에이전트 배지가 유지된다(size>40)', async () => {
     await act(async () => {
-      root.render(wrap(<Avatar name="유나" avatarUrl="https://example.com/a.png" actorType="agent" presenceStatus="online" />));
+      root.render(wrap(<Avatar name="유나" avatarUrl="https://example.com/a.png" actorType="agent" presenceStatus="online" size={48} />));
     });
     expect(container.querySelector('img')).not.toBeNull();
     expect(container.textContent).toContain('에이전트');
@@ -70,9 +74,10 @@ describe('Avatar — story #2887 S2g', () => {
   // soft-fill은 폐지(AGENT_MARK_FILL_CLASS=투명, 헤어라인만 남김).
   // story #3092(선생님 전달 제안 1단계) — 배지 텍스트 "AI"→"Agent"로 교체.
   // story #3888(§⑤·Chat) — 배지 텍스트 "Agent"(en 무관 리터럴)→"에이전트"(ko)/"Agent"(en, chats.agent 재사용)로 로케일화.
-  it('에이전트 코너배지가 border-proof-blue를 쓰고 soft-fill/citron은 안 쓴다', async () => {
+  // story #3888 CHANGES②(19:06Z) — size>40에서만 렌더(위와 동일 이유).
+  it('에이전트 코너배지가 border-proof-blue를 쓰고 soft-fill/citron은 안 쓴다(size>40)', async () => {
     await act(async () => {
-      root.render(wrap(<Avatar name="유나" avatarUrl={null} actorType="agent" />));
+      root.render(wrap(<Avatar name="유나" avatarUrl={null} actorType="agent" size={48} />));
     });
     const badge = [...container.querySelectorAll('span')].find((s) => s.textContent === '에이전트');
     expect(badge).toBeTruthy();
@@ -341,11 +346,14 @@ describe('Avatar — story #3092 3단계 커넥터 아이콘 배지', () => {
     expect(img?.className).toContain('object-cover');
   });
 
-  it('아바타<28(마크<11px 존)이면 아이콘 승인 커넥터도 "에이전트" 텍스트로 강등된다(구 사각 배지)', async () => {
+  // story #3888 CHANGES②(19:06Z) — size=24는 ≤40이라 이제 코너 텍스트 배지 자체가
+  // 미렌더(구 "텍스트로 강등" 동작 폐기 — 잘리거나 번져 안 읽히던 자리라 유나가 아예
+  // 없앴다). 아이콘 없음만 확認, 텍스트 배지 부재도 같이 고정.
+  it('아바타<28(마크<11px 존)이면 아이콘 승인 커넥터도 아이콘이 안 뜨고, 코너 텍스트 배지도 안 뜬다(size≤40 미렌더)', async () => {
     await act(async () => {
       root.render(wrap(<Avatar name="유나" actorType="agent" size={24} runtimeType="cursor" />));
     });
-    expect(container.textContent).toContain('에이전트');
+    expect(container.textContent).not.toContain('에이전트');
     expect(container.querySelector('img[src="/connector-icons/cursor.jpg"]')).toBeNull();
   });
 
@@ -367,11 +375,13 @@ describe('Avatar — story #3092 3단계 커넥터 아이콘 배지', () => {
     expect(img?.getAttribute('src')).toBe('/connector-icons/claude-code.jpg');
     expect(img?.className).toContain('object-cover');
 
+    // story #3888 CHANGES②(19:06Z) — size=24는 ≤40이라 코너 텍스트 배지 미렌더(구 "Agent
+    // 텍스트로 강등" 동작 폐기).
     await act(async () => {
       root.render(wrap(<Avatar name="유나" actorType="agent" size={24} runtimeType="claude-code" />));
     });
     expect(container.querySelector('.rounded-full.ring-2.ring-background')).toBeNull();
-    expect(container.textContent).toContain('에이전트');
+    expect(container.textContent).not.toContain('에이전트');
   });
 
   it('gemini도 아이콘 승인 커넥터로 스왑됐다(아바타≥28→아이콘, tokscale 멀티컬러 png=colorMode mono/bg-white)', async () => {
@@ -417,11 +427,12 @@ describe('Avatar — story #3092 3단계 커넥터 아이콘 배지', () => {
     expect(disk.textContent).toBe('He');
     expect(disk.className).toContain('bg-card');
 
+    // story #3888 CHANGES②(19:06Z) — size=24는 ≤40이라 코너 텍스트 배지 미렌더.
     await act(async () => {
       root.render(wrap(<Avatar name="유나" actorType="agent" size={24} runtimeType="hermes" />));
     });
     expect(container.querySelector('.rounded-full.ring-2.ring-background')).toBeNull();
-    expect(container.textContent).toContain('에이전트');
+    expect(container.textContent).not.toContain('에이전트');
   });
 
   it('hermes 라벨층(hover 툴팁)은 크기 사다리와 무관하게 그대로 "에이전트 · Hermes"', async () => {
@@ -444,9 +455,20 @@ describe('Avatar — story #3092 3단계 커넥터 아이콘 배지', () => {
     expect(disk.querySelector('img')?.getAttribute('src')).toBe('/connector-icons/cursor.jpg');
   });
 
-  it('runtime_type null이면 아이콘/이니셜 디스크 자체가 안 뜨고 옛 "에이전트" 텍스트 배지만 뜬다(회귀 없음)', async () => {
+  // story #3888 CHANGES②(19:06Z) — size=32(헤더 규격)는 ≤40이라 코너 텍스트 배지가
+  // 이제 아예 안 뜬다(ring+AgentIdentity 칩+툴팁이 신호를 나른다). size=48(>40)에서는
+  // 여전히 뜨는지 양성대조로 같이 고정.
+  it('runtime_type null이면 아이콘/이니셜 디스크 자체가 안 뜨고, size≤40은 코너 텍스트 배지도 안 뜬다(CHANGES②)', async () => {
     await act(async () => {
       root.render(wrap(<Avatar name="유나" actorType="agent" size={32} runtimeType={null} />));
+    });
+    expect(container.querySelector('.rounded-full.ring-2.ring-background')).toBeNull();
+    expect(container.textContent).not.toContain('에이전트');
+  });
+
+  it('⭐양성대조 — runtime_type null·size=48(>40)이면 코너 텍스트 배지가 뜬다', async () => {
+    await act(async () => {
+      root.render(wrap(<Avatar name="유나" actorType="agent" size={48} runtimeType={null} />));
     });
     expect(container.querySelector('.rounded-full.ring-2.ring-background')).toBeNull();
     expect(container.textContent).toContain('에이전트');
@@ -474,5 +496,43 @@ describe('Avatar — story #3092 3단계 커넥터 아이콘 배지', () => {
       await new Promise((r) => setTimeout(r, 900));
     });
     expect(document.body.querySelector('[data-slot="tooltip-content"]')?.textContent).toBe('시스템 발행에이전트 · Sprintable');
+  });
+});
+
+// story #3888 CHANGES②(PO PR 코멘트, 2026-09-14 19:05Z·유나 §⑤ 확定 19:06Z) — 4배 확대
+// 캡처 실측(코너 텍스트 배지가 헤더 32px·목록 40px에서 잘리거나 번져 안 읽힘 + 같은 행
+// AgentIdentity 칩과 낱말 겹침, AC2 "겹침 0" 미충족) → 코너 텍스트 배지는 size>40에서만.
+// dot 대체 아님(ring+AgentIdentity 칩+툴팁이 이미 신호를 나른다) — 이 경계값 자체를
+// 전용 describe로 고정한다(PO 지시 "size 32/40 미렌더+size 64 렌더(양성대조)" 그대로).
+describe('Avatar — story #3888 CHANGES② 코너 텍스트 배지 size>40 경계', () => {
+  it('size=32(헤더 규격)는 코너 텍스트 배지 미렌더', async () => {
+    await act(async () => {
+      root.render(wrap(<Avatar name="유나" actorType="agent" size={32} runtimeType={null} />));
+    });
+    expect(container.textContent).not.toContain('에이전트');
+  });
+
+  it('size=40(목록 규격, 경계값 그 자체)도 코너 텍스트 배지 미렌더', async () => {
+    await act(async () => {
+      root.render(wrap(<Avatar name="유나" actorType="agent" size={40} runtimeType={null} />));
+    });
+    expect(container.textContent).not.toContain('에이전트');
+  });
+
+  it('⭐양성대조 — size=64(프로필류, >40)는 코너 텍스트 배지가 렌더된다', async () => {
+    await act(async () => {
+      root.render(wrap(<Avatar name="유나" actorType="agent" size={64} runtimeType={null} />));
+    });
+    const badge = [...container.querySelectorAll('span')].find((s) => s.textContent === '에이전트');
+    expect(badge).toBeTruthy();
+  });
+
+  // 음성대조 — ≤40에서도 ring(존재 신호)은 그대로 남는다(배지만 없앤 것, 에이전트
+  // 식별 자체를 지운 게 아니다).
+  it('음성대조 — size=32에서도 proof-blue ring은 그대로 남는다(신호 자체는 보존)', async () => {
+    await act(async () => {
+      root.render(wrap(<Avatar name="유나" actorType="agent" size={32} runtimeType={null} />));
+    });
+    expect(container.querySelector('.ring-proof-blue')).not.toBeNull();
   });
 });

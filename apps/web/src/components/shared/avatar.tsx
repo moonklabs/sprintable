@@ -94,7 +94,13 @@ export function Avatar({
   const showInitialsBadge =
     badgeDef?.kind === 'initials' ||
     (badgeDef?.kind === 'icon' && !showIconBadge && !!badgeDef.initials && size >= 28);
-  const showTextBadge = !showIconBadge && !showInitialsBadge;
+  // story #3888 CHANGES②(PO PR 코멘트, 2026-09-14 19:05Z·유나 §⑤ 확定 19:06Z) — 4배
+  // 확대 캡처 실측: 코너 텍스트 배지("에이전트"/"Agent")가 헤더(32px)에선 컨테이너
+  // 상단에 절반 잘리고 목록(40px)에선 7px 한글이 번져 안 읽혔다 + 같은 행의
+  // AgentIdentity 칩이 이미 같은 낱말이라 AC2 "겹침 0"도 미충족. 유나 확定: ≤40px(헤더·
+  // 목록·버블)는 코너 텍스트 배지 자체를 미렌더(dot 대체 아님 — ring+AgentIdentity 칩+
+  // 아바타 툴팁이 이미 신호를 나른다), >40px(프로필류)만 유지.
+  const showTextBadge = !showIconBadge && !showInitialsBadge && size > 40;
   // 디스크 지름 = clamp(16, 아바타×0.40, 30) · 마크 = 디스크×0.68(규격 §1~2).
   const diskSize = Math.min(30, Math.max(16, Math.round(size * 0.4)));
   const markSize = Math.round(diskSize * 0.68);
