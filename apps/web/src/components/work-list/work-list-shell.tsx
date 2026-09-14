@@ -1,15 +1,64 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
+import { ListFilter } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { WorkspaceFrameTabs } from '@/components/workspace/workspace-frame-tabs';
-import { fetchWorkList } from './fetch-work-list';
+import { cn } from '@/lib/utils';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { fetchWorkList, type FetchedWorkList } from './fetch-work-list';
 import { filterWorkList, type WorkListFilters } from './filter-work-list';
 import { WorkListRowView } from './work-list-row';
-import type { WorkList } from './derive-work-list';
+
+/** PO 확定(2026-09-14) — 시안 3840 v2 필터 칩 3종 커스터마이즈: 펀넬 아이콘·선택 표시
+ * 파란(primary) 테두리·가설 점 마커. OperatorDropdownSelect(components/ui)가 쓰는 것과
+ * 동일한 DropdownMenu 프리미티브를 그대로 재사용 — 트리거 안에 아이콘을 넣어야 해서
+ * 그 컴포넌트를 감싸는 대신 같은 프리미티브로 얇게 직접 구성한다(새 프리미티브 0). */
+function FilterDropdown({
+  icon, ariaLabel, selectedLabel, placeholder, options, onSelect,
+}: {
+  icon: ReactNode;
+  ariaLabel: string;
+  selectedLabel: string | null;
+  placeholder: string;
+  options: Array<{ id: string; label: string }>;
+  onSelect: (id: string | null) => void;
+}) {
+  const isSelected = selectedLabel !== null;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        aria-label={ariaLabel}
+        render={
+          <button
+            type="button"
+            className={cn(
+              'flex h-8 items-center gap-1.5 rounded-md border px-3 text-xs font-medium transition',
+              isSelected ? 'border-primary bg-primary/10 text-foreground' : 'border-border text-muted-foreground hover:text-foreground',
+            )}
+          >
+            {icon}
+            <span className="truncate">{selectedLabel ?? placeholder}</span>
+          </button>
+        }
+      />
+      <DropdownMenuContent align="start">
+        <DropdownMenuItem onClick={() => onSelect(null)}>{placeholder}</DropdownMenuItem>
+        {options.map((o) => (
+          <DropdownMenuItem key={o.id} onClick={() => onSelect(o.id)}>{o.label}</DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
 
 /**
  * story #3844(UX-v3·FE 4·일감 1) — 「일감」 목록 탭 쉘. fetch(fetch-work-list.ts) →
@@ -45,7 +94,7 @@ function useWorkListFilters(): [WorkListFilters, (next: Partial<WorkListFilters>
 
 export function WorkListShell({ projectId }: { projectId: string }) {
   const t = useTranslations('workList');
-  const [data, setData] = useState<WorkList | null>(null);
+  const [fetched, setFetched] = useState<FetchedWorkList | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [reloadNonce, setReloadNonce] = useState(0);
   const [filters, setFilters] = useWorkListFilters();
@@ -56,19 +105,28 @@ export function WorkListShell({ projectId }: { projectId: string }) {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoadError(false);
     fetchWorkList(projectId)
-      .then((wl) => { if (!cancelled) setData(wl); })
+      .then((wl) => { if (!cancelled) setFetched(wl); })
       .catch(() => { if (!cancelled) setLoadError(true); });
     return () => { cancelled = true; };
   }, [projectId, reloadNonce]);
 
-  // 필터 후보(목표/가설 셀렉트 옵션)는 필터링 «전» 전체 목록에서 뽑는다 — 필터를 걸수록
-  // 자기 자신을 고를 옵션이 사라지는 lock-out을 막는다.
-  const goalOptions = useMemo(() => data?.groups.map((g) => ({ id: g.goalId, title: g.title })) ?? [], [data]);
-  const hypothesisOptions = useMemo(() => {
-    const seen = new Map<string, true>();
-    for (const g of data?.groups ?? []) for (const s of g.stories) for (const id of s.hypothesisIds) seen.set(id, true);
-    return [...seen.keys()];
+  const data = fetched?.workList ?? null;
+
+  // 필터 후보(목표/가설 옵션)는 필터링 «전» 전체 목록에서 뽑는다 — 필터를 걸수록 자기
+  // 자신을 고를 옵션이 사라지는 lock-out을 막는다.
+  const goalOptions = useMemo(() => data?.groups.map((g) => ({ id: g.goalId, label: g.title })) ?? [], [data]);
+  const hypothesisIdsInView = useMemo(() => {
+    const seen = new Set<string>();
+    for (const g of data?.groups ?? []) for (const s of g.stories) for (const id of s.hypothesisIds) seen.add(id);
+    return seen;
   }, [data]);
+  const hypothesisById = useMemo(() => new Map((fetched?.hypotheses ?? []).map((h) => [h.id, h.statement])), [fetched]);
+  const hypothesisOptions = useMemo(
+    () => [...hypothesisIdsInView].map((id) => ({ id, label: hypothesisById.get(id) ?? id })),
+    [hypothesisIdsInView, hypothesisById],
+  );
+  const selectedGoalLabel = filters.goalId ? (goalOptions.find((g) => g.id === filters.goalId)?.label ?? null) : null;
+  const selectedHypothesisLabel = filters.hypothesisId ? (hypothesisById.get(filters.hypothesisId) ?? filters.hypothesisId) : null;
 
   const filtered = data ? filterWorkList(data, filters) : null;
 
@@ -81,25 +139,23 @@ export function WorkListShell({ projectId }: { projectId: string }) {
         {data && filtered ? (
           <>
             <div className="flex flex-wrap items-center gap-2">
-              <select
-                aria-label={t('filterGoalAriaLabel')}
-                className="h-8 rounded-md border border-border bg-background px-2 text-xs text-foreground"
-                value={filters.goalId ?? ''}
-                onChange={(e) => setFilters({ goalId: e.target.value || null })}
-              >
-                <option value="">{t('filterAllGoals')}</option>
-                {goalOptions.map((g) => <option key={g.id} value={g.id}>{g.title}</option>)}
-              </select>
+              <FilterDropdown
+                icon={<ListFilter className="size-3.5 shrink-0" aria-hidden="true" />}
+                ariaLabel={t('filterGoalAriaLabel')}
+                selectedLabel={selectedGoalLabel}
+                placeholder={t('filterAllGoals')}
+                options={goalOptions}
+                onSelect={(id) => setFilters({ goalId: id })}
+              />
               {hypothesisOptions.length > 0 ? (
-                <select
-                  aria-label={t('filterHypothesisAriaLabel')}
-                  className="h-8 rounded-md border border-border bg-background px-2 text-xs text-foreground"
-                  value={filters.hypothesisId ?? ''}
-                  onChange={(e) => setFilters({ hypothesisId: e.target.value || null })}
-                >
-                  <option value="">{t('filterAllHypotheses')}</option>
-                  {hypothesisOptions.map((id) => <option key={id} value={id}>{id}</option>)}
-                </select>
+                <FilterDropdown
+                  icon={<span className="size-1.5 shrink-0 rounded-full bg-primary" aria-hidden="true" />}
+                  ariaLabel={t('filterHypothesisAriaLabel')}
+                  selectedLabel={selectedHypothesisLabel}
+                  placeholder={t('filterAllHypotheses')}
+                  options={hypothesisOptions}
+                  onSelect={(id) => setFilters({ hypothesisId: id })}
+                />
               ) : null}
               <button
                 type="button"

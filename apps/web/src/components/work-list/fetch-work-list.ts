@@ -57,7 +57,14 @@ async function fetchPage<T>(url: string, source: string): Promise<WorkListPageRe
 
 const PAGE_LIMIT = 100;
 
-export async function fetchWorkList(projectId: string): Promise<WorkList> {
+export interface FetchedWorkList {
+  workList: WorkList;
+  /** 원본 가설 목록(id→statement 등) — 가설 필터 드롭다운 라벨용(WorkList 자체는 story별
+   * hypothesisIds만 들고 있어 문구가 없다). */
+  hypotheses: WorkListHypothesisInput[];
+}
+
+export async function fetchWorkList(projectId: string): Promise<FetchedWorkList> {
   const [goals, stories, tasks, agentRunsJson, inboxJson, teamMembersJson, artifactsJson, hypothesesJson] = await Promise.all([
     fetchPage<WorkListGoalInput>(`/api/goals?project_id=${projectId}&limit=${PAGE_LIMIT}`, '/api/goals'),
     fetchPage<WorkListStoryInput>(`/api/stories?project_id=${projectId}&limit=${PAGE_LIMIT}`, '/api/stories'),
@@ -75,7 +82,9 @@ export async function fetchWorkList(projectId: string): Promise<WorkList> {
       .filter((id): id is string => Boolean(id)),
   );
 
-  return deriveWorkList({
+  const hypotheses = Array.isArray(hypothesesJson.data) ? hypothesesJson.data : [];
+
+  const workList = deriveWorkList({
     goals,
     stories,
     tasks,
@@ -83,6 +92,8 @@ export async function fetchWorkList(projectId: string): Promise<WorkList> {
     inbox: Array.isArray(inboxJson.data) ? inboxJson.data : [],
     teamMembers: Array.isArray(teamMembersJson.data) ? teamMembersJson.data : [],
     storyIdsWithArtifacts,
-    hypotheses: Array.isArray(hypothesesJson.data) ? hypothesesJson.data : [],
+    hypotheses,
   });
+
+  return { workList, hypotheses };
 }

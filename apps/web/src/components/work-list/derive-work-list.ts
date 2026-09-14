@@ -40,6 +40,15 @@
 export type WorkListRowKind = 'task' | 'agent_run';
 export type WorkListRowState = 'awaiting_approval' | 'awaiting_signature' | 'awaiting_answer' | 'in_progress' | 'done' | null;
 
+// 정본 소스: backend/sprintable_mcp/schemas.py::TaskStatus(Enum) — DB tasks_status_check와
+// 동형(라이브 실측 2026-09-14). scripts/verify-task-status-be-parity.test.ts가 이 배열과 BE
+// enum을 소스 대조해 전수 grep 0 불일치를 강제한다(카디르 계약값) — 손으로 친 리터럴이
+// 다시 표류할 수 없게, 이 상수들을 거치지 않은 비교는 만들지 않는다.
+export const TASK_STATUS_TODO = 'todo';
+export const TASK_STATUS_IN_PROGRESS = 'in-progress';
+export const TASK_STATUS_DONE = 'done';
+export const TASK_STATUS_VALUES = [TASK_STATUS_TODO, TASK_STATUS_IN_PROGRESS, TASK_STATUS_DONE] as const;
+
 // today_service.py::_AGENT_RUN_IN_PROGRESS_STATUSES와 동일 SSOT(agent_runs.py
 // _AGENT_RUN_STATUS_VALUES: queued|held|running|hitl_pending|completed|failed|abandoned 중
 // completed만 종결로 세고, failed/abandoned는 §①에 대응 낱말이 없어 null로 둔다 — 지어내지 않음).
@@ -199,8 +208,8 @@ function lowRiskFromInboxItem(item: WorkListInboxItem | null): boolean {
 
 function deriveTaskState(task: WorkListTaskInput, inboxItem: WorkListInboxItem | null): WorkListRowState {
   if (inboxItem) return stateFromInboxItem(inboxItem);
-  if (task.status === 'done') return 'done';
-  if (task.status === 'in-progress') return 'in_progress'; // DB 값은 하이픈, 파생 상태값은 기존 관례대로 언더스코어 유지
+  if (task.status === TASK_STATUS_DONE) return 'done';
+  if (task.status === TASK_STATUS_IN_PROGRESS) return 'in_progress'; // BE 값은 하이픈, 파생 상태값은 기존 관례대로 언더스코어 유지
   return null;
 }
 
