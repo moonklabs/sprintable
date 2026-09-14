@@ -42,7 +42,7 @@ describe('SprintCloseCockpit (E-SPRINT-LOOP 1b9f4ecb)', () => {
     const markup = renderToStaticMarkup(wrap(
       <SprintCloseCockpit hypotheses={[]} synthesis={null} nextHypotheses={[]} onGenerateSynthesis={noop} onAdoptRecommendation={noop} />,
     ));
-    expect(markup).toContain('이번 스프린트에 연결된 가설이 없습니다');
+    expect(markup).toContain('이번 스프린트에 연결된 가설이 없어요');
     expect(markup).not.toContain('hcard');
   });
 

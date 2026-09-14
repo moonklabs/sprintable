@@ -39,6 +39,7 @@
     "verify:no-duplicate-i18n-keys": "tsx scripts/verify-no-duplicate-i18n-keys.ts",
     "verify:no-hanja-in-i18n": "tsx scripts/verify-no-hanja-in-i18n.ts",
     "verify:no-agent-tone-korean-ui-text": "tsx scripts/verify-no-agent-tone-korean-ui-text.ts",
+    "verify:scoped-i18n-honorific-tone": "tsx scripts/verify-scoped-i18n-honorific-tone.ts",
     "verify:i18n-keys-exist": "tsx scripts/verify-i18n-keys-exist.ts",
     "verify:i18n-namespace-referenced": "tsx scripts/verify-i18n-namespace-referenced.ts",
     "verify:no-count-in-title-string": "tsx scripts/verify-no-count-in-title-string.ts",

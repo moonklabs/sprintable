@@ -1513,6 +1513,13 @@ jobs:
       - name: "Verify no agent-tone Korean UI text in i18n message values (story #3824 regression guard)"
         run: pnpm --filter web verify:no-agent-tone-korean-ui-text
 
+      # story #3877 AC3 회귀가드: 선생님 경로(오늘·일감 5탭·우패널·문서·스토리 패널+임베드)
+      # i18n 스코프 키(SCOPED_KEYS 103개 — AC1 표 94 + AC4 orgBriefing 9) 값에 합니다체
+      # (습니다·ㅂ니다·십시오)가 새로 섞여 드는 자리를 막는다. 이 스토리가 스코프 전수를
+      # 해요체로 이관해 baseline 0에서 시작 — 새로 느는 자리만 막는다(can-only-shrink).
+      - name: "Verify scoped i18n honorific tone (story #3877 regression guard)"
+        run: pnpm --filter web verify:scoped-i18n-honorific-tone
+
       # story #5ead8723 회귀가드: 코드가 참조하는 i18n 키(useTranslations/getTranslations
       # 바인딩별 리터럴 호출 — .rich/.raw/.has 포함)가 ko.json·en.json 둘 다에 말단 값으로
       # 실존해야 한다 — next-intl은 못 찾은 키를 화면에 그대로 그린다(코드 낱말 노출).

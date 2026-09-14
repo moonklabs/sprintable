@@ -69,13 +69,13 @@ describe('StoryOriginSection', () => {
     expect(container.textContent).not.toContain('그냥 멘션');
   });
 
-  it('출처 대상이 사라졌어도(still_exists=false) 「대상이 없습니다」로 사실만 보인다(비난 없음)', async () => {
+  it('출처 대상이 사라졌어도(still_exists=false) 「대상이 없어요」로 사실만 보인다(비난 없음)', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
       data: [{ id: 'r1', source_type: 'meeting', source_id: 'm1', created_by: null, created_at: '2026-07-28T00:00:00Z', relation: 'created_from', still_exists: false, doc: null, message: null, meeting: { id: 'm1', title: '킥오프 회의' }, story: null }],
     }))));
     await render('s1');
     expect(container.textContent).toContain('킥오프 회의');
-    expect(container.textContent).toContain('대상이 없습니다');
+    expect(container.textContent).toContain('대상이 없어요');
     expect(container.innerHTML).not.toContain('text-destructive');
   });
 

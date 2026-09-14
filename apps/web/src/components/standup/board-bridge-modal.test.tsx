@@ -90,7 +90,7 @@ describe('BoardBridgeModal — 검색(story #3703, 40건 상한 도달성)', () 
     expect(calledUrl).toContain('limit=40'); // 유나 明示 — 상한은 그대로, 검색이 도달을 보장.
   });
 
-  it('질의 있는데 결과 0건 — "검색 결과가 없습니다"(질의 분기)', async () => {
+  it('질의 있는데 결과 0건 — "검색 결과가 없어요"(질의 분기)', async () => {
     stubStories([story('s1', '기존 스토리')]);
     await act(async () => {
       root.render(wrap(
@@ -108,7 +108,7 @@ describe('BoardBridgeModal — 검색(story #3703, 40건 상한 도달성)', () 
     expect(document.body.textContent).not.toContain(koMessages.standup.bridgeNoStories);
   });
 
-  it('질의 없는데 결과 0건 — 기존 "이 보드에는 스토리가 없습니다"(무회귀)', async () => {
+  it('질의 없는데 결과 0건 — 기존 "이 보드에는 스토리가 없어요"(무회귀)', async () => {
     stubStories([]);
     await act(async () => {
       root.render(wrap(

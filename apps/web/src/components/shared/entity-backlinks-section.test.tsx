@@ -62,13 +62,13 @@ describe('EntityBacklinksSection', () => {
     expect(container.textContent).toContain('살아있는 문서');
   });
 
-  it('②사실로만 보인다 — 경고 문구("삭제됨"·"깨짐") 없이 ③비난없는 「대상이 없습니다」', async () => {
+  it('②사실로만 보인다 — 경고 문구("삭제됨"·"깨짐") 없이 ③비난없는 「대상이 없어요」', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
       data: [{ id: 'r1', source_type: 'doc', source_id: 'd1', created_by: null, created_at: '2026-07-28T00:00:00Z', still_exists: false, doc: { id: 'd1', title: '문서' }, message: null }],
       meta: { next_cursor: null, has_more: false, collection_scope: { source_types: ['chat_message', 'doc'], forms: 'all', excludes: [] } },
     }))));
     await render('story', 's1');
-    expect(container.textContent).toContain('대상이 없습니다');
+    expect(container.textContent).toContain('대상이 없어요');
     expect(container.textContent).not.toContain('삭제됨');
     expect(container.textContent).not.toContain('깨짐');
     expect(container.textContent).not.toContain('미기록');
@@ -95,7 +95,7 @@ describe('EntityBacklinksSection', () => {
       meta: { next_cursor: null, has_more: false, collection_scope: { source_types: ['chat_message', 'doc'], forms: 'all', excludes: [] } },
     }))));
     await render('story', 's1');
-    const matches = container.textContent?.match(/대상이 없습니다/g) ?? [];
+    const matches = container.textContent?.match(/대상이 없어요/g) ?? [];
     expect(matches.length).toBe(2); // 두 항목 모두 같은 문구 한 벌
   });
 
@@ -114,14 +114,14 @@ describe('EntityBacklinksSection', () => {
     expect(container.textContent).toContain('증거');
   });
 
-  it('빈 목록에 살아있는 항목만 있으면 「대상이 없습니다」가 안 뜬다(정상 케이스 오탐 방지)', async () => {
+  it('빈 목록에 살아있는 항목만 있으면 「대상이 없어요」가 안 뜬다(정상 케이스 오탐 방지)', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
       data: [{ id: 'r1', source_type: 'doc', source_id: 'd1', created_by: null, created_at: '2026-07-28T00:00:00Z', still_exists: true, doc: { id: 'd1', title: '살아있는 문서' }, message: null }],
       meta: { next_cursor: null, has_more: false, collection_scope: { source_types: ['chat_message', 'doc'], forms: 'all', excludes: [] } },
     }))));
     await render('story', 's1');
     expect(container.textContent).toContain('살아있는 문서');
-    expect(container.textContent).not.toContain('대상이 없습니다');
+    expect(container.textContent).not.toContain('대상이 없어요');
   });
 
   it('fetch 실패 시 조용히 아무것도 안 그린다(노이즈 0, 다른 애드온 섹션과 동형)', async () => {

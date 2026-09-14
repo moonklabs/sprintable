@@ -136,7 +136,7 @@ describe('SprintsClient — 백로그/스프린트 스토리 「더 보기」(st
     const loadMoreBtn = findLoadMoreButtons().find((b) => !b.disabled)!;
     await act(async () => { loadMoreBtn.click(); await Promise.resolve(); await Promise.resolve(); });
 
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain('더 불러오지 못했습니다');
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('더 불러오지 못했어요');
   });
 
   it('cursor에 "+00:00"이 있어도 실제 요청 URL에 인코딩되지 않은 "+"가 남지 않는다(sprint stories)', async () => {

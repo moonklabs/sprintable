@@ -66,9 +66,9 @@ describe('ArtifactSection — 빈 상태 1급화 (story 9449da0e)', () => {
   it('renders a first-class empty state instead of returning null when there are 0 artifacts (ko)', async () => {
     await mount('ko');
     expect(container.textContent).toContain('산출물'); // 섹션 라벨 상시 노출
-    expect(container.textContent).toContain('아직 산출물이 없습니다');
+    expect(container.textContent).toContain('아직 산출물이 없어요');
     // story 64010b05 — 임포트 co-located 이후 카피 갱신(doc SSOT).
-    expect(container.textContent).toContain('직접 그리거나, 이미지·HTML을 임포트해 시작할 수 있습니다');
+    expect(container.textContent).toContain('직접 그리거나, 이미지·HTML을 임포트해 시작할 수 있어요');
     const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
     expect(buttons).toEqual(['산출물 그리기', '임포트']);
   });
@@ -88,7 +88,7 @@ describe('ArtifactSection — 빈 상태 1급화 (story 9449da0e)', () => {
     expect(cta).not.toBeNull();
     await act(async () => { cta!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     // 빈 상태는 사라지고 편집기(CommitBar의 "버전으로 저장" 액션)가 뜬다 — mock 0, 실 컴포넌트.
-    expect(container.textContent).not.toContain('아직 산출물이 없습니다');
+    expect(container.textContent).not.toContain('아직 산출물이 없어요');
     expect(container.textContent).toContain('버전으로 저장');
   });
 
@@ -130,7 +130,7 @@ describe('ArtifactSection — 생성 커밋 실패 시 토스트(story #3644)', 
     await act(async () => { commitButton.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 
-    expect(container.textContent).toContain('만들지 못했습니다');
+    expect(container.textContent).toContain('만들지 못했어요');
     // 편집 모드는 유지된다(재시도 가능 — 원 규율 그대로).
     expect(container.textContent).toContain('버전으로 저장');
   });
