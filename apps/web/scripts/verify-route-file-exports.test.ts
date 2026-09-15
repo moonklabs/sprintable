@@ -181,9 +181,13 @@ describe('scanRepo — story #3760 AC1/AC4(실 트리 실행)', () => {
   // story #3844(2026-09-14) — work-list/page.tsx 신설로 100→101.
   // story #3902 — 부하 시 vitest 기본 5000ms를 넘길 수 있는 실 전수 스캔(측정: 동시부하
   // 재현 5회 = 273·259·238·187·307ms 중 최댓값 307ms → ×3 ≈ 921ms → 1000ms로 반올림).
-  it('실 트리(apps/web/src/app) — 라우트 파일 101개·위반 0건', () => {
+  // story #3915(2026-09-15) — workforce/recruiter·workforce/hitl·settings/members/
+  // agents/[id] 세 page.tsx 삭제(React 오류 코드 310 근본원인 — loading.tsx 스트리밍
+  // 경계 아래 redirect() 호출을 next.config.ts redirects()로 이관, page.tsx 자체가
+  // 불요해짐. hitl·[id] 디렉토리도 dangling 없이 통째 제거)로 101→98.
+  it('실 트리(apps/web/src/app) — 라우트 파일 98개·위반 0건', () => {
     const { violations, fileCount } = scanRepo(APP_ROOT);
-    expect(fileCount).toBe(101);
+    expect(fileCount).toBe(98);
     expect(violations).toEqual([]);
   }, 1000);
 });
