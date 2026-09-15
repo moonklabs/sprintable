@@ -36,6 +36,11 @@ async function getCurrentProjectIdCookie() {
   return cookieStore.get(CURRENT_PROJECT_COOKIE)?.value ?? null;
 }
 
+// story #3926 — getMyProjectMemberships·getMyMembershipContext·getMyTeamMember은 실
+// 소비처 0(grep 확認 — team-members/route.ts는 getServerSession을 직접 쓰고, 이 함수들을
+// 안 부른다. route.test.ts의 getMyTeamMember 목은 route.ts가 실제로 안 부르는 죽은
+// 픽스처). 그래서 project_name 폴백은 실 렌더 경로가 없어 next-intl 배선(no-fiction —
+// 없는 렌더 경로에 검증 못 할 t() 배선을 새로 짓지 않음) 대신 한국어 리터럴로만 고친다.
 export const getMyProjectMemberships = cache(async (// eslint-disable-next-line @typescript-eslint/no-explicit-any -- @supabase/supabase-js not in web package.json
   db: any, user: User): Promise<ProjectMembership[]> => {
   const { data, error } = await db
@@ -58,7 +63,7 @@ export const getMyProjectMemberships = cache(async (// eslint-disable-next-line 
         id: membership.id as string,
         org_id: membership.org_id as string,
         project_id: membership.project_id as string,
-        project_name: (project as { id: string; name: string } | null)?.name ?? 'Untitled Project',
+        project_name: (project as { id: string; name: string } | null)?.name ?? '이름 없는 프로젝트',
       };
     })
     .filter((membership) => Boolean(membership.project_id));

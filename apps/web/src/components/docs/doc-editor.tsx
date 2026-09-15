@@ -432,7 +432,7 @@ export function DocEditor({
               onTitleChange?.(e.target.value);
               autoResizeTitle(e.target);
             }}
-            placeholder={titlePlaceholder ?? 'Untitled'}
+            placeholder={titlePlaceholder ?? tEditor('titlePlaceholder')}
             autoFocus={titleAutoFocus}
             rows={1}
             className="min-w-[7rem] flex-1 resize-none overflow-hidden whitespace-nowrap bg-transparent text-lg font-bold leading-snug outline-none placeholder:text-muted-foreground"
