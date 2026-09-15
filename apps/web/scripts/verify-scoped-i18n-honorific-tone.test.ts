@@ -7,7 +7,9 @@ import {
   SCOPED_KEYS,
   SCOPED_NAMESPACES,
   checkScopedNamespaceMinimums,
+  findHardcodedParticleAfterPlaceholder,
   findHonorificToneInScopedKeys,
+  findPersonaAdnominalTerminal,
   resolveEffectiveScopedKeys,
 } from './verify-scoped-i18n-honorific-tone';
 
@@ -662,5 +664,132 @@ describe('story #3889 CHANGES 1 — 플레이스홀더 값 뒤 계사(예요/이
       'content.channelPostsImageTooLarge',
       '{maxBytes} 이하만 첨부할 수 있는데 {sizeBytes}예요',
     ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// story #3900 axis ① — 의문형 합니다체(습니까 / ㅂ니까). matchesFormalRegister를 확장해
+// 서술형(습니다·십시오·ㅂ니다)뿐 아니라 의문형까지 잡는지 확認한다(선생님 경로 톤).
+// ---------------------------------------------------------------------------
+describe('story #3900 axis ① — 의문형 합니다체(습니까·ㅂ니까)', () => {
+  it('습니까(자음어간 의문)를 잡는다', () => {
+    const findings = findHonorificToneInScopedKeys(
+      { s: { deleteConfirm: '정말 삭제하시겠습니까?' } },
+      ['s.deleteConfirm'],
+    );
+    expect(findings).toEqual([
+      { key: 's.deleteConfirm', matches: ['습니까'], value: '정말 삭제하시겠습니까?' },
+    ]);
+  });
+
+  it('ㅂ니까(모음어간 의문·「입니까」류)를 NFD 정규화로 잡는다', () => {
+    const findings = findHonorificToneInScopedKeys(
+      { s: { relationQuestion: '어떤 관계입니까?' } },
+      ['s.relationQuestion'],
+    );
+    expect(findings).toEqual([
+      { key: 's.relationQuestion', matches: ['ㅂ니까'], value: '어떤 관계입니까?' },
+    ]);
+  });
+
+  it('해요체 의문(삭제할까요?·관계예요?)은 통과한다(과잉살상 아님)', () => {
+    const findings = findHonorificToneInScopedKeys(
+      { s: { a: '정말 삭제할까요?', b: '어떤 관계예요?' } },
+      ['s.a', 's.b'],
+    );
+    expect(findings).toEqual([]);
+  });
+
+  // 양성대조(실 데이터) — settings.deleteConfirmTitle은 이미 해요체(「계정을 삭제할까요?」)로
+  // 이관됐다. 원래(develop) 합니다체 의문형으로 되돌린 deep-clone에서 실 effectiveKeys 경로가
+  // 정확히 이 자리에서 RED가 되는지, 그리고 손대지 않은 실 ko.json은 0건인지 확認한다.
+  const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
+  const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
+
+  it('양성대조 — settings.deleteConfirmTitle을 원래 합니다체 의문형으로 되돌리면 RED가 된다', () => {
+    const mutated = JSON.parse(JSON.stringify(ko)) as Record<string, unknown>;
+    (mutated.settings as Record<string, unknown>).deleteConfirmTitle = '정말 계정을 삭제하시겠습니까?';
+    const effectiveKeys = resolveEffectiveScopedKeys(mutated);
+    const findings = findHonorificToneInScopedKeys(mutated, effectiveKeys);
+    expect(findings).toContainEqual({
+      key: 'settings.deleteConfirmTitle', matches: ['습니까'], value: '정말 계정을 삭제하시겠습니까?',
+    });
+  });
+
+  it('실 ko.json(무손상)은 effectiveKeys에 의문형 합니다체 0건', () => {
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    const findings = findHonorificToneInScopedKeys(ko, effectiveKeys)
+      .filter((f) => f.matches.some((m) => m === '습니까' || m === 'ㅂ니까'));
+    expect(findings).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// story #3900 axis ② — findPersonaAdnominalTerminal(완결 어미 없는 관형형 '는'/'인'+마침표).
+// ---------------------------------------------------------------------------
+describe('findPersonaAdnominalTerminal — 순수 판정 함수(axis ②)', () => {
+  it("'…되돌리는.'·'…엣지인.'(관형형+마침표 종결)를 잡는다", () => {
+    const findings = findPersonaAdnominalTerminal(
+      { p: { a: '연결을 되돌리는.', b: '이건 엣지인.' } },
+      ['p.a', 'p.b'],
+    );
+    expect(findings).toEqual([
+      { key: 'p.a', value: '연결을 되돌리는.' },
+      { key: 'p.b', value: '이건 엣지인.' },
+    ]);
+  });
+
+  it("'만드는 것을 확인해요.'(관형형+의존명사)는 안 잡는다(정당한 관형형)", () => {
+    const findings = findPersonaAdnominalTerminal(
+      { p: { c: '만드는 것을 확인해요.' } },
+      ['p.c'],
+    );
+    expect(findings).toEqual([]);
+  });
+
+  it("정상 '…해요.' 완결 문장은 안 잡는다", () => {
+    const findings = findPersonaAdnominalTerminal(
+      { p: { d: '바로 저장했어요.' } },
+      ['p.d'],
+    );
+    expect(findings).toEqual([]);
+  });
+
+  // 양성대조(실 데이터) — agents 네임스페이스는 완결 문장으로 이관됐다(잔존 0). effectiveKeys
+  // 전량, 그리고 agents.* 하위 전량이 관형형 종결 0건인지 실 ko.json으로 확認한다.
+  const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
+  const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
+
+  it('실 ko.json — agents 키(effectiveKeys 스캔)에 관형형 종결 0건', () => {
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    const agentsKeys = effectiveKeys.filter((k) => k.startsWith('agents.'));
+    expect(agentsKeys.length).toBeGreaterThan(0);
+    expect(findPersonaAdnominalTerminal(ko, agentsKeys)).toEqual([]);
+  });
+
+  it('실 ko.json — effectiveKeys 전량에 관형형 종결 0건', () => {
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    expect(findPersonaAdnominalTerminal(ko, effectiveKeys)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// story #3900 axis ③ — findHardcodedParticleAfterPlaceholder(플레이스홀더 뒤 고정 조사·전역).
+// ---------------------------------------------------------------------------
+describe('findHardcodedParticleAfterPlaceholder — 순수 판정 함수(axis ③·전역)', () => {
+  it('중첩 leaf의 「{name}이 …」(플레이스홀더 뒤 고정 조사)를 dotted 경로로 잡는다', () => {
+    const findings = findHardcodedParticleAfterPlaceholder({ a: { b: '{name}이 왔어요' } });
+    expect(findings).toEqual([{ key: 'a.b', value: '{name}이 왔어요' }]);
+  });
+
+  it('이중형 「{name}이(가) …」은 안 잡는다(조사 뒤가 「(」라 허용)', () => {
+    const findings = findHardcodedParticleAfterPlaceholder({ a: { b: '{name}이(가) 왔어요' } });
+    expect(findings).toEqual([]);
+  });
+
+  it('실 ko.json 전체 leaf에 플레이스홀더 뒤 고정 조사 0건(19+6키 이관·{josa} 배선 확認)', () => {
+    const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
+    const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
+    expect(findHardcodedParticleAfterPlaceholder(ko)).toEqual([]);
   });
 });

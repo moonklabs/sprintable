@@ -96,9 +96,9 @@ describe('FlowRelationReviewQueue — 진행 표시 및 되읽기 문장(§㉥)'
     stubFetch(calls);
     await renderQueue();
 
-    expect(document.body.textContent).toContain('#1에서 #101로 이어요');
+    expect(document.body.textContent).toContain(koMessages.flow.relationReviewPairSentence.replace('{fromNumber}', '1').replace('{toNumber}', '101'));
     expect(document.body.textContent).toContain('1 / 2');
-    expect(document.body.textContent).toContain('이 둘은 어떤 관계입니까?');
+    expect(document.body.textContent).toContain(koMessages.flow.relationReviewQuestion);
     // 일괄 확定 버튼 금지 — "전부" 류 문구가 어디에도 없어야 한다.
     expect(document.body.textContent).not.toContain('전부');
   });
@@ -129,7 +129,7 @@ describe('FlowRelationReviewQueue — 답하면 다음 후보가 같은 자리�
     expect(JSON.parse(declareCall!.init!.body as string)).toEqual({ relation_kind: 'spawned' });
     expect(onCandidateResolved).toHaveBeenCalledTimes(1);
     // 다음 후보(#102)로 자동 전진 — 다시 열지 않았다(왕복 1).
-    expect(document.body.textContent).toContain('#1에서 #102로 이어요');
+    expect(document.body.textContent).toContain(koMessages.flow.relationReviewPairSentence.replace('{fromNumber}', '1').replace('{toNumber}', '102'));
     expect(document.body.textContent).toContain('2 / 2');
   });
 
@@ -179,7 +179,7 @@ describe('FlowRelationReviewQueue — 답하면 다음 후보가 같은 자리�
 
     // 로드 이후로 새 네트워크 호출이 하나도 없어야 한다("서버에 아무것도 안 남는다").
     expect(calls.length).toBe(callsBeforeSkip);
-    expect(document.body.textContent).toContain('#1에서 #102로 이어요');
+    expect(document.body.textContent).toContain(koMessages.flow.relationReviewPairSentence.replace('{fromNumber}', '1').replace('{toNumber}', '102'));
   });
 });
 
@@ -270,13 +270,13 @@ describe('FlowRelationReviewQueue — 묶음 상한·정렬(AC11·12, 2026-08-07
     // 상한이 걸렸으므로 진행 표시는 "N / 2"다(전체 3건이 아니라).
     expect(document.body.textContent).toContain('1 / 2');
     // 같은 갈래(epic-1)의 두 후보(#101·#102)가 먼저 오고, 다른 갈래(#999)는 이번 묶음에서 빠진다.
-    expect(document.body.textContent).toContain('#1에서 #101로 이어요');
+    expect(document.body.textContent).toContain(koMessages.flow.relationReviewPairSentence.replace('{fromNumber}', '1').replace('{toNumber}', '101'));
 
     await act(async () => {
       Array.from(document.querySelectorAll('button')).find((b) => b.textContent === '나중에')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       await new Promise((r) => setTimeout(r, 0));
     });
-    expect(document.body.textContent).toContain('#1에서 #102로 이어요');
+    expect(document.body.textContent).toContain(koMessages.flow.relationReviewPairSentence.replace('{fromNumber}', '1').replace('{toNumber}', '102'));
     expect(document.body.textContent).not.toContain('#999');
   });
 

@@ -5,6 +5,8 @@
  * 인벤토리에 넣지 않는다(dead-path 금지, 후속 스토리로 분리).
  */
 
+import { pickEulReulJosa } from '@/lib/korean-particle';
+
 export interface ActionCommandTranslator {
   (key: string, values?: Record<string, string | number>): string;
 }
@@ -45,7 +47,7 @@ export function buildActionCommands(t: ActionCommandTranslator, context?: StoryC
       labelKey: 'actionDelegateStory',
       label: t('actionDelegateStory', { title: context.storyTitle }),
       targetRoute: `${context.boardHref}&story=${context.storyId}`,
-      impact: t('actionDelegateStoryImpact', { title: context.storyTitle }),
+      impact: t('actionDelegateStoryImpact', { title: context.storyTitle, josa: pickEulReulJosa(context.storyTitle) }),
       danger: false,
     });
   }

@@ -14,6 +14,7 @@ import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui
 import { Skeleton } from '@/components/ui/skeleton';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { cn } from '@/lib/utils';
+import { pickEulReulJosa } from '@/lib/korean-particle';
 import { VerifyRail, useVerificationRail } from '@/app/onboarding/verify-rail';
 import { emitOnboardingEvent, beaconOnboardingEvent } from '@/app/onboarding/onboarding-telemetry';
 import type { RoleTemplateSummary, RecruitResponse, McpConfigBundle, RuntimeCapabilityItem } from '@/services/recruit';
@@ -1458,7 +1459,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                 <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
                 {t(
                   resolveVerifyGuideKey(Boolean(recruitResult.mcp_config), recruitResult.default_transport),
-                  { runtime: currentRuntimeDisplayName },
+                  { runtime: currentRuntimeDisplayName, josa: pickEulReulJosa(currentRuntimeDisplayName) },
                 )}
               </p>
 
