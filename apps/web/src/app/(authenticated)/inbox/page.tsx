@@ -32,7 +32,7 @@ function NotifIcon({ type, fallback: Fallback, className }: { type: string; fall
 
 /**
  * story #3903 AC2 — 알림의 title/body를 렌더 시점에 조합한다(발행 시점 BE 고정 문구
- * 대신). `notification.event`(migration 0377)가 있을 때만 조합, 없으면(옛 행·다른 발행
+ * 대신). `notification.event`(migration 0378)가 있을 때만 조합, 없으면(옛 행·다른 발행
  * 경로) 기존 title/body 그대로 — 과잉 일반화 금지(3888 composeEventPreviewLine의 기존
  * 계약과 동형).
  * - title: conversation.mention/conversation.message는 `event.sender_name`+`type`으로
@@ -85,7 +85,7 @@ interface Notification {
   reference_type: string | null;
   reference_id: string | null;
   href?: string | null;
-  // story #3903(migration 0377, additive) — conversation.mention/conversation.message만
+  // story #3903(migration 0378, additive) — conversation.mention/conversation.message만
   // 채움(sender_name + 이벤트 발행 메시지면 event_key/payload/refs). 렌더 시점에
   // 3888 eventCard 조합·제목 조합 재료로 쓴다. 없으면(옛 행·다른 발행 경로) title/body 폴백.
   event?: {

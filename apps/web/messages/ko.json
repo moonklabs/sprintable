@@ -3283,7 +3283,7 @@
     "revoke_failed": "접근 권한 취소에 실패했어요.",
     "cancel": "취소",
     "noNotifications": "알림이 없어요",
-    "mentionTitle": "{name}님이 회원님을 멘션했어요",
+    "mentionTitle": "{name}님이 나를 멘션했어요",
     "messageTitle": "{name}님의 새 메시지",
     "backToList": "알림",
     "reasonAssigned": "나에게 배정됨",

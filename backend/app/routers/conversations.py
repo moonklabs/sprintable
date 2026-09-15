@@ -3063,7 +3063,7 @@ async def send_message(
                             body=(msg.content or "")[:200],
                             reference_type="conversation", reference_id=conversation_id,
                             source_project_id=conv.project_id,
-                            # story #3903(migration 0377) — sender_name(제목 렌더시 조합용)
+                            # story #3903(migration 0378) — sender_name(제목 렌더시 조합용)
                             # + 이 메시지가 이벤트 발행 메시지면 event_key/payload/refs(#2637
                             # 구조 그대로, _event_payload 재사용)까지 같이 싣는다. FE가 event
                             # 있으면 eventCard 조합(신규 낱말 0)으로 제목·요약을 짓고, 없으면
@@ -3113,7 +3113,7 @@ async def send_message(
                         body=(msg.content or "")[:200],
                         reference_type="conversation", reference_id=conversation_id,
                         source_project_id=conv.project_id,
-                        # story #3903(migration 0377) — 위 mention 블록과 동형.
+                        # story #3903(migration 0378) — 위 mention 블록과 동형.
                         event={
                             "sender_name": sender.name or UNNAMED_MEMBER_LABEL,
                             **(_event_payload(msg).get("event") or {}),

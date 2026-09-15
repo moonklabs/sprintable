@@ -252,7 +252,7 @@ async def dispatch_notification(
 ) -> None:
     """notification_settings 필터 후 enabled member에게 알림 발송.
 
-    ``event``: story #3903(migration 0377, additive·nullable) — human Notification 행에
+    ``event``: story #3903(migration 0378, additive·nullable) — human Notification 행에
     그대로 실린다(옵셔널, 기본 None — 이 파라미터를 안 넘기는 기존 ~40개 호출부는 무회귀).
     `context`(개인 webhook 전용, 행에 영속 안 됨)와 다른 파라미터다: `event`는 FE가 렌더
     시점에 3888 eventCard 조합(「{헤더} · {요약}」)·제목 조합을 짓는 재료로 쓴다 — 지금은
