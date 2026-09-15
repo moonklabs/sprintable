@@ -191,7 +191,7 @@ describe('NotificationBell — sync_status 배너(story #2201)', () => {
 
     await emitSyncStatus({ complete: false, reason: 'cursor_stale', returned: 5 });
 
-    expect(container.textContent).toContain('일부 지난 알림은 표시되지 않았습니다');
+    expect(container.textContent).toContain('일부 지난 알림은 표시되지 않았어요');
   });
 
   it('강등(cursor_not_found)이면 배너가 뜬다', async () => {
@@ -202,7 +202,7 @@ describe('NotificationBell — sync_status 배너(story #2201)', () => {
 
     await emitSyncStatus({ complete: false, reason: 'cursor_not_found', returned: 50 });
 
-    expect(container.textContent).toContain('일부 지난 알림은 표시되지 않았습니다');
+    expect(container.textContent).toContain('일부 지난 알림은 표시되지 않았어요');
   });
 
   it('음성대조 — no_cursor(최초 연결)는 배너가 안 뜬다(오르테가군 확定: 강등이 아니라 정상 최초상태)', async () => {
@@ -213,7 +213,7 @@ describe('NotificationBell — sync_status 배너(story #2201)', () => {
 
     await emitSyncStatus({ complete: false, reason: 'no_cursor', returned: 0 });
 
-    expect(container.textContent).not.toContain('일부 지난 알림은 표시되지 않았습니다');
+    expect(container.textContent).not.toContain('일부 지난 알림은 표시되지 않았어요');
   });
 
   it('음성대조 — complete:true(정상 완결)면 배너가 안 뜬다', async () => {
@@ -224,7 +224,7 @@ describe('NotificationBell — sync_status 배너(story #2201)', () => {
 
     await emitSyncStatus({ complete: true, reason: null, returned: 12 });
 
-    expect(container.textContent).not.toContain('일부 지난 알림은 표시되지 않았습니다');
+    expect(container.textContent).not.toContain('일부 지난 알림은 표시되지 않았어요');
   });
 
   it('강등 배너가 뜬 뒤 재연결로 정상 sync_status가 오면 자동으로 걷힌다(별도 dismiss 없음, 스펙 그대로)', async () => {
@@ -234,10 +234,10 @@ describe('NotificationBell — sync_status 배너(story #2201)', () => {
     await openBell();
 
     await emitSyncStatus({ complete: false, reason: 'cursor_stale', returned: 5 });
-    expect(container.textContent).toContain('일부 지난 알림은 표시되지 않았습니다');
+    expect(container.textContent).toContain('일부 지난 알림은 표시되지 않았어요');
 
     await emitSyncStatus({ complete: true, reason: null, returned: 8 });
-    expect(container.textContent).not.toContain('일부 지난 알림은 표시되지 않았습니다');
+    expect(container.textContent).not.toContain('일부 지난 알림은 표시되지 않았어요');
   });
 });
 

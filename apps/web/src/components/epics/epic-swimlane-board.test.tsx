@@ -441,7 +441,7 @@ describe('EpicSwimlaneBoard — 로드 실패(story #2931, QA changes 8R HIGH②
       root.render(withIntl(<EpicSwimlaneBoard projectId="p1" />));
     });
     await waitForCondition(
-      () => container.textContent?.includes('불러오지 못했습니다') ?? false,
+      () => container.textContent?.includes('불러오지 못했어요') ?? false,
       '로드 실패 에러 상태',
     );
     expect(container.textContent).not.toContain('부분로드에픽'); // 부분 성공(에픽만 로드됨)을 완전한 것처럼 보이지 않는다.
@@ -458,7 +458,7 @@ describe('EpicSwimlaneBoard — 로드 실패(story #2931, QA changes 8R HIGH②
       root.render(withIntl(<EpicSwimlaneBoard projectId="p1" />));
     });
     await waitForCondition(
-      () => container.textContent?.includes('불러오지 못했습니다') ?? false,
+      () => container.textContent?.includes('불러오지 못했어요') ?? false,
       '안전판 소진 에러 상태',
     );
     expect(container.textContent).toContain('다시 시도');
@@ -486,7 +486,7 @@ describe('EpicSwimlaneBoard — 로드 실패(story #2931, QA changes 8R HIGH②
       root.render(withIntl(<EpicSwimlaneBoard projectId="p1" />));
     });
     await waitForCondition(
-      () => container.textContent?.includes('불러오지 못했습니다') ?? false,
+      () => container.textContent?.includes('불러오지 못했어요') ?? false,
       'malformed meta 에러 상태',
     );
     expect(container.textContent).toContain('다시 시도');
@@ -511,7 +511,7 @@ describe('EpicSwimlaneBoard — 로드 실패(story #2931, QA changes 8R HIGH②
       root.render(withIntl(<EpicSwimlaneBoard projectId="p1" />));
     });
     await waitForCondition(
-      () => container.textContent?.includes('불러오지 못했습니다') ?? false,
+      () => container.textContent?.includes('불러오지 못했어요') ?? false,
       'hasMore/nextCursor 모순 에러 상태',
     );
     expect(container.textContent).toContain('다시 시도');
@@ -1013,7 +1013,7 @@ describe('EpicSwimlaneBoard — 스코프 축소(story #3019)', () => {
       });
       await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
 
-      expect(container.textContent).toContain('불러오는 데 시간이 너무 오래 걸려 중단했습니다');
+      expect(container.textContent).toContain('불러오는 데 시간이 너무 오래 걸려 중단했어요');
     } finally {
       vi.useRealTimers();
     }
