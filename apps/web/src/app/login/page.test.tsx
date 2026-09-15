@@ -87,7 +87,9 @@ describe('LoginPage — 실패 사유 접근성 (story #2105 1차)', () => {
     await submit();
     const alertEl = container.querySelector('[role="alert"]');
     expect(alertEl).not.toBeNull();
-    expect(alertEl?.textContent).toBe('이메일 또는 비밀번호가 올바르지 않습니다.');
+    // story #3901 — 렌더된 문구는 t('loginInvalidCredentials')이지 mock의 message 필드가
+    // 아니다(컴포넌트가 code로 분기·raw message 미사용) — 리터럴 재-pin 대신 ko.json 값 대조.
+    expect(alertEl?.textContent).toBe(koMessages.login.loginInvalidCredentials);
     expect(alertEl?.getAttribute('aria-live')).toBe('assertive');
   });
 

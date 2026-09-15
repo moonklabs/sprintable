@@ -161,8 +161,8 @@ describe('실 ko.json — 스코프 키 count-lock(baseline 0, 새 자리 0)', (
 // story #3885 AC2 — SCOPED_NAMESPACES(chats 전량 승격) + resolveEffectiveScopedKeys.
 // ---------------------------------------------------------------------------
 
-describe('SCOPED_NAMESPACES — story #3885/#3889/#3892/#3895/#3898/#3899 AC2', () => {
-  it('chats·content·channelConnect·settings·agents·flow·gateConfig·recruiter·loops·cage·organization·pricingPlans·contentRules 13개가 등재됐다(잔존 채무 0으로 확定된 네임스페이스만)', () => {
+describe('SCOPED_NAMESPACES — story #3885/#3889/#3892/#3895/#3898/#3899/#3901 AC2', () => {
+  it('chats·content·channelConnect·settings·agents·flow·gateConfig·recruiter·loops·cage·organization·pricingPlans·contentRules·onboarding·login·storage·insightsBoard 17개가 등재됐다(잔존 채무 0으로 확定된 네임스페이스만)', () => {
     expect(SCOPED_NAMESPACES).toEqual([
       'chats',
       'content',
@@ -177,6 +177,10 @@ describe('SCOPED_NAMESPACES — story #3885/#3889/#3892/#3895/#3898/#3899 AC2', 
       'organization',
       'pricingPlans',
       'contentRules',
+      'onboarding',
+      'login',
+      'storage',
+      'insightsBoard',
     ]);
   });
 });
@@ -248,8 +252,8 @@ describe('실 ko.json — chats 네임스페이스 전량(story #3885 AC2)', () 
 // ---------------------------------------------------------------------------
 
 describe('checkScopedNamespaceMinimums — 순수 함수', () => {
-  it('⭐네임스페이스 10개가 ko.json에 아예 없으면(개명·삭제 시뮬레이션) 10건 위반을 낸다', () => {
-    const violations = checkScopedNamespaceMinimums({ board: { x: 'y' } }); // 10개 다 없음
+  it('⭐네임스페이스 14개가 ko.json에 아예 없으면(개명·삭제 시뮬레이션) 14건 위반을 낸다', () => {
+    const violations = checkScopedNamespaceMinimums({ board: { x: 'y' } }); // 14개 다 없음
     expect(violations).toEqual([
       { namespace: 'chats', actualCount: 0, minExpected: 200 },
       { namespace: 'content', actualCount: 0, minExpected: 500 },
@@ -264,6 +268,10 @@ describe('checkScopedNamespaceMinimums — 순수 함수', () => {
       { namespace: 'organization', actualCount: 0, minExpected: 190 },
       { namespace: 'pricingPlans', actualCount: 0, minExpected: 125 },
       { namespace: 'contentRules', actualCount: 0, minExpected: 70 },
+      { namespace: 'onboarding', actualCount: 0, minExpected: 75 },
+      { namespace: 'login', actualCount: 0, minExpected: 30 },
+      { namespace: 'storage', actualCount: 0, minExpected: 70 },
+      { namespace: 'insightsBoard', actualCount: 0, minExpected: 90 },
     ]);
   });
 
@@ -283,6 +291,10 @@ describe('checkScopedNamespaceMinimums — 순수 함수', () => {
       { namespace: 'organization', actualCount: 0, minExpected: 190 },
       { namespace: 'pricingPlans', actualCount: 0, minExpected: 125 },
       { namespace: 'contentRules', actualCount: 0, minExpected: 70 },
+      { namespace: 'onboarding', actualCount: 0, minExpected: 75 },
+      { namespace: 'login', actualCount: 0, minExpected: 30 },
+      { namespace: 'storage', actualCount: 0, minExpected: 70 },
+      { namespace: 'insightsBoard', actualCount: 0, minExpected: 90 },
     ]);
   });
 
@@ -372,6 +384,112 @@ describe('SCOPED_NAMESPACE_MIN_LEAF_COUNT — 하한이 실측치보다 낮게 �
     const effectiveKeys = resolveEffectiveScopedKeys(ko);
     const cageLeafCount = effectiveKeys.filter((k) => k.startsWith('cage.')).length;
     expect(cageLeafCount).toBeGreaterThanOrEqual(230);
+  });
+
+  it('실 ko.json의 onboarding leaf 개수가 하한(75) 이상이다(실측 88, story #3901)', () => {
+    const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
+    const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    const onboardingLeafCount = effectiveKeys.filter((k) => k.startsWith('onboarding.')).length;
+    expect(onboardingLeafCount).toBeGreaterThanOrEqual(75);
+  });
+
+  it('실 ko.json의 login leaf 개수가 하한(30) 이상이다(실측 35, story #3901)', () => {
+    const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
+    const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    const loginLeafCount = effectiveKeys.filter((k) => k.startsWith('login.')).length;
+    expect(loginLeafCount).toBeGreaterThanOrEqual(30);
+  });
+
+  it('실 ko.json의 storage leaf 개수가 하한(70) 이상이다(실측 82, story #3901)', () => {
+    const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
+    const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    const storageLeafCount = effectiveKeys.filter((k) => k.startsWith('storage.')).length;
+    expect(storageLeafCount).toBeGreaterThanOrEqual(70);
+  });
+
+  it('실 ko.json의 insightsBoard leaf 개수가 하한(90) 이상이다(실측 103, story #3901)', () => {
+    const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
+    const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    const insightsBoardLeafCount = effectiveKeys.filter((k) => k.startsWith('insightsBoard.')).length;
+    expect(insightsBoardLeafCount).toBeGreaterThanOrEqual(90);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// story #3901 — onboarding·login·storage·insightsBoard 네임스페이스 전량
+// (SCOPED_NAMESPACES 승격). chats(#3885)·content/channelConnect(#3889)·settings(#3892)·
+// agents/flow/gateConfig(#3895)·recruiter/loops/cage(#3899)와 정확히 같은 3형 검증
+// (0건·양성대조·무관 PR no-op).
+// ---------------------------------------------------------------------------
+
+describe('실 ko.json — onboarding·login·storage·insightsBoard 네임스페이스 전량(story #3901 AC1/AC2)', () => {
+  const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
+  const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
+
+  it('SCOPED_KEYS+전 네임스페이스 전량(effective)의 ko.json 값에 합니다체 0건(story #3901 AC1 onboarding 27·login 17·storage 26·insightsBoard 25=95키 전량 이관 확認)', () => {
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    expect(effectiveKeys.length).toBeGreaterThan(SCOPED_KEYS.length);
+    expect(findHonorificToneInScopedKeys(ko, effectiveKeys)).toEqual([]);
+  });
+
+  it('양성대조 — onboarding.createProjectFailed를 원래 합니다체로 되돌리면 RED가 된다(namespace 전량 승격 증명)', () => {
+    expect(SCOPED_KEYS as readonly string[]).not.toContain('onboarding.createProjectFailed');
+    const mutated = JSON.parse(JSON.stringify(ko)) as Record<string, unknown>;
+    (mutated.onboarding as Record<string, unknown>).createProjectFailed = '프로젝트 생성에 실패했습니다';
+    const effectiveKeys = resolveEffectiveScopedKeys(mutated);
+    const findings = findHonorificToneInScopedKeys(mutated, effectiveKeys);
+    expect(findings).toContainEqual({ key: 'onboarding.createProjectFailed', matches: ['습니다'], value: '프로젝트 생성에 실패했습니다' });
+  });
+
+  it('양성대조 — login.loginInvalidCredentials를 원래 합니다체로 되돌리면 RED가 된다(namespace 전량 승격 증명)', () => {
+    expect(SCOPED_KEYS as readonly string[]).not.toContain('login.loginInvalidCredentials');
+    const mutated = JSON.parse(JSON.stringify(ko)) as Record<string, unknown>;
+    (mutated.login as Record<string, unknown>).loginInvalidCredentials = '이메일 또는 비밀번호가 올바르지 않습니다.';
+    const effectiveKeys = resolveEffectiveScopedKeys(mutated);
+    const findings = findHonorificToneInScopedKeys(mutated, effectiveKeys);
+    expect(findings).toContainEqual({ key: 'login.loginInvalidCredentials', matches: ['습니다'], value: '이메일 또는 비밀번호가 올바르지 않습니다.' });
+  });
+
+  it('양성대조 — storage.emptyTitle을 원래 합니다체로 되돌리면 RED가 된다(namespace 전량 승격 증명)', () => {
+    expect(SCOPED_KEYS as readonly string[]).not.toContain('storage.emptyTitle');
+    const mutated = JSON.parse(JSON.stringify(ko)) as Record<string, unknown>;
+    (mutated.storage as Record<string, unknown>).emptyTitle = '아직 자산이 없습니다';
+    const effectiveKeys = resolveEffectiveScopedKeys(mutated);
+    const findings = findHonorificToneInScopedKeys(mutated, effectiveKeys);
+    expect(findings).toContainEqual({ key: 'storage.emptyTitle', matches: ['습니다'], value: '아직 자산이 없습니다' });
+  });
+
+  it('양성대조 — insightsBoard.loadError를 원래 합니다체로 되돌리면 RED가 된다', () => {
+    expect(SCOPED_KEYS as readonly string[]).not.toContain('insightsBoard.loadError');
+    const mutated = JSON.parse(JSON.stringify(ko)) as Record<string, unknown>;
+    (mutated.insightsBoard as Record<string, unknown>).loadError = '성과 보드를 불러오지 못했습니다.';
+    const effectiveKeys = resolveEffectiveScopedKeys(mutated);
+    const findings = findHonorificToneInScopedKeys(mutated, effectiveKeys);
+    expect(findings).toContainEqual({ key: 'insightsBoard.loadError', matches: ['습니다'], value: '성과 보드를 불러오지 못했습니다.' });
+  });
+
+  // 양성대조(ㅂ니다 계열) — login.termsPrefix("동의하게 됩니다")로 NFD 처방이 이 네
+  // 네임스페이스 승격에서도 실제로 작동하는지 확認(습니다 리터럴이 아닌 자리).
+  it('양성대조 — login.termsPrefix(ㅂ니다 계열)를 원래 합니다체로 되돌리면 RED가 된다', () => {
+    expect(SCOPED_KEYS as readonly string[]).not.toContain('login.termsPrefix');
+    const mutated = JSON.parse(JSON.stringify(ko)) as Record<string, unknown>;
+    (mutated.login as Record<string, unknown>).termsPrefix = '계속하면 다음에 동의하게 됩니다:';
+    const effectiveKeys = resolveEffectiveScopedKeys(mutated);
+    const findings = findHonorificToneInScopedKeys(mutated, effectiveKeys);
+    expect(findings).toContainEqual({ key: 'login.termsPrefix', matches: ['ㅂ니다'], value: '계속하면 다음에 동의하게 됩니다:' });
+  });
+
+  it('무관 PR no-op — onboarding·login·storage·insightsBoard 밖·SCOPED_KEYS 밖의 실 합니다체 키는 namespace 전량 승격 뒤에도 안 본다', () => {
+    const outOfScopeValue = (ko.board as Record<string, unknown> | undefined)?.epicSwimlaneLoadError;
+    expect(typeof outOfScopeValue).toBe('string');
+    expect(outOfScopeValue as string).toMatch(/습니다|ㅂ니다|십시오/);
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    expect(effectiveKeys).not.toContain('board.epicSwimlaneLoadError');
+    expect(findHonorificToneInScopedKeys(ko, effectiveKeys)).toEqual([]);
   });
 });
 
@@ -632,11 +750,12 @@ describe('story #3889 CHANGES 1 — 플레이스홀더 값 뒤 계사(예요/이
 
   const PLACEHOLDER_COPULA_RE = /\}(예요|이에요)/;
 
-  it('content·channelConnect·settings·agents·flow·gateConfig·recruiter·loops·cage 전 leaf에 "}예요"·"}이에요"(placeholder 바로 뒤 계사) 0건', () => {
+  it('content·channelConnect·settings·agents·flow·gateConfig·recruiter·loops·cage·onboarding·login·storage·insightsBoard 전 leaf에 "}예요"·"}이에요"(placeholder 바로 뒤 계사) 0건', () => {
     // story #3892 — 스캔 범위에 settings 추가. story #3895 — agents·flow·gateConfig 추가
     // (착수 전 사전 스캔 0건 확認·전환 뒤 재확認 — 3889 교훈 그대로 재적용).
     // story #3899 — 스캔 범위에 recruiter·loops·cage 추가(전환 전 사전 스캔에서도 0건
     // 확認했고, 이 가드로 재발도 막는다).
+    // story #3901 — 스캔 범위에 onboarding·login·storage·insightsBoard 추가(같은 자).
     const values = [
       ...collectLeafValues(ko.content as Record<string, unknown>, 'content'),
       ...collectLeafValues(ko.channelConnect as Record<string, unknown>, 'channelConnect'),
@@ -647,6 +766,10 @@ describe('story #3889 CHANGES 1 — 플레이스홀더 값 뒤 계사(예요/이
       ...collectLeafValues(ko.recruiter as Record<string, unknown>, 'recruiter'),
       ...collectLeafValues(ko.loops as Record<string, unknown>, 'loops'),
       ...collectLeafValues(ko.cage as Record<string, unknown>, 'cage'),
+      ...collectLeafValues(ko.onboarding as Record<string, unknown>, 'onboarding'),
+      ...collectLeafValues(ko.login as Record<string, unknown>, 'login'),
+      ...collectLeafValues(ko.storage as Record<string, unknown>, 'storage'),
+      ...collectLeafValues(ko.insightsBoard as Record<string, unknown>, 'insightsBoard'),
     ];
     const violations = values.filter(([, v]) => PLACEHOLDER_COPULA_RE.test(v));
     expect(violations).toEqual([]);

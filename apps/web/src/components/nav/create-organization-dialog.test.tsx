@@ -88,7 +88,7 @@ describe('CreateOrganizationDialog — PLAN_LIMIT_EXCEEDED envelope (story #2470
 
     expect(document.body.textContent).not.toContain('Free plan org limit (1) reached');
     expect(document.body.textContent).toContain('업그레이드가 필요합니다');
-    expect(document.body.textContent).toContain('무료 플랜은 조직을 1개까지 만들 수 있습니다');
+    expect(document.body.textContent).toContain(koMessages.onboarding.orgLimitExceededError.replace('{limit}', '1'));
     expect(document.body.querySelector('a[href="/settings?tab=billing"]')).not.toBeNull();
   });
 
@@ -103,7 +103,7 @@ describe('CreateOrganizationDialog — PLAN_LIMIT_EXCEEDED envelope (story #2470
     await fillAndSubmit();
 
     expect(document.body.textContent).toContain('업그레이드가 필요합니다');
-    expect(document.body.textContent).toContain('무료 플랜은 조직을 1개까지 만들 수 있습니다');
+    expect(document.body.textContent).toContain(koMessages.onboarding.orgLimitExceededError.replace('{limit}', '1'));
   });
 
   it('다른 에러는 기존 일반 배너로 간다(회귀 없음)', async () => {

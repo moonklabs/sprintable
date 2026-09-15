@@ -168,6 +168,11 @@ export const SCOPED_KEYS = [
 // 3889/3892 교훈 그대로 코드 0 재확認. 전환 전 플레이스홀더-계사 인접(`}입니다`류) 세
 // 네임스페이스 내 0건도 사전 스캔으로 확認).
 // story #3898 — organization·pricingPlans·contentRules도 전량 해요체 이관(100키) 완료.
+// story #3901 — onboarding(온보딩)·login(로그인)·storage(스토리지)·insightsBoard(인사이트
+// 보드)도 전량 해요체 이관 완료(잔존 0, 실 함수로 head 재측 onboarding 27·login 17·
+// storage 26·insightsBoard 25=95건 — PO 임시 needle 하한 74건보다 많음, ㅂ니다 계열까지
+// NFD로 잡은 실 함수 재측이 항상 상한 자다. 전환 전 플레이스홀더-계사 인접 0건 사전 스캔
+// 확認).
 export const SCOPED_NAMESPACES = [
   'chats',
   'content',
@@ -182,6 +187,10 @@ export const SCOPED_NAMESPACES = [
   'organization',
   'pricingPlans',
   'contentRules',
+  'onboarding',
+  'login',
+  'storage',
+  'insightsBoard',
 ] as const;
 
 function flattenNamespaceLeafKeys(root: Record<string, unknown>, namespace: string): string[] {
@@ -235,6 +244,10 @@ const SCOPED_NAMESPACE_MIN_LEAF_COUNT: Readonly<Record<(typeof SCOPED_NAMESPACES
   organization: 190, // 실측 212개(2026-09-14, story #3898 그라운딩) — 여유 하한
   pricingPlans: 125, // 실측 141개(2026-09-14, story #3898 그라운딩) — 여유 하한
   contentRules: 70, // 실측 81개(2026-09-14, story #3898 그라운딩) — 여유 하한
+  onboarding: 75, // 실측 88개(2026-09-15, story #3901 그라운딩) — 여유 하한
+  login: 30, // 실측 35개(2026-09-15, story #3901 그라운딩) — 여유 하한
+  storage: 70, // 실측 82개(2026-09-15, story #3901 그라운딩) — 여유 하한
+  insightsBoard: 90, // 실측 103개(2026-09-15, story #3901 그라운딩) — 여유 하한
 };
 
 /** SCOPED_NAMESPACES 각각의 실제 leaf 개수가 하한을 밑도는지 검사하는 순수 함수 —
