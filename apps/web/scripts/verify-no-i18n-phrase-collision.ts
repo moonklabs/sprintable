@@ -791,13 +791,17 @@ export const EXEMPT_PAIRS = new Set<string>([
 //   chats.agent<->chats.agentCount · goals.spExceeded<->goals.spExceededDetail ·
 //   storage.delete<->storage.deleteImpact
 // Set 크기 20→17, GRANDFATHER_LIVE_COUNT_TEST 20→17(둘이 계속 일치).
+//
+// story #3918(2026-09-15) — 17→16. dashboard.ccQueueTruncated/dashboard.ccWaitingTitle
+// 둘 다 삭제(ActionZone(command-center) 은퇴 코드 정리 — /dashboard는 이미 /chats로
+// 리다이렉트돼 실 소비처 0, story #3179). "판단 보류"가 아니라 그 쌍 자체가 없어진 것 —
+// 재확認: 삭제 前후 재스캔, 이 1건이 grandfatherHit에서 정확히 빠지고 newFindings는 그대로 0.
 export const GRANDFATHER_BASELINE = new Set<string>([
   'cage.pendingSummary <-> cage.trustScorePending',
   'chats.agentCount <-> chats.agentSection',
   'chats.agentCount <-> chats.personCount',
   'chats.agentCount <-> chats.you',
   'chats.participantsOthers <-> chats.personCount',
-  'dashboard.ccQueueTruncated <-> dashboard.ccWaitingTitle',
   'docs.searchResultCount <-> docs.title',
   'goals.fieldPriority <-> goals.steerCappedNote',
   'goals.spExceededDetail <-> goals.title',
