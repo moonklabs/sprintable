@@ -7,9 +7,13 @@ conversation.message 알림 발행 시점에 발신자 이름(제목 렌더시 �
 낱말 0)으로 제목·요약을 짓는다. 옛 행(이 컬럼 도입 前 발행분)은 event가 NULL이라 FE가
 기존 body/title 그대로 폴백 — 백필 0.
 
-Revision ID: 0377
-Revises: 0376
+Revision ID: 0378
+Revises: 0377
 Create Date: 2026-09-15
+
+⛔fix(2026-09-15, rebase) — 원래 "0377"로 만들었으나 #3893(work.assigned·goal.measured
+t-namespace)가 같은 번호를 먼저 develop에 착지시켜 리비전 충돌 — "0378"/down_revision
+"0377"로 리넘버.
 
 PO 확定(2026-09-15 03:11Z) — dispatch_notification()의 ~42개 호출부 中 이 컬럼을 채우는
 건 conversation.mention/conversation.message 2곳뿐(호출부 시그니처는 `event: dict | None
@@ -22,8 +26,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision = "0377"
-down_revision = "0376"
+revision = "0378"
+down_revision = "0377"
 branch_labels = None
 depends_on = None
 
