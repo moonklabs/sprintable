@@ -138,18 +138,22 @@ describe('실 ko.json — 스코프 키 count-lock(baseline 0, 새 자리 0)', (
     });
   });
 
-  // 페드루 PO 지시 — "무관 PR no-op(exit 0) 표본 1". SCOPED_KEYS 밖의 실 키(cage 네임스페이스
-  // 안에 있지만 스코프 목록엔 없는 cage.gateDetailNotFound)는 실제로 develop에 합니다체 값
-  // ("게이트를 찾을 수 없습니다.")을 그대로 가진 채 남아 있다 — 이 가드가 그 값을 건드리지
-  // 않는다는 것을 합성이 아니라 실 데이터로 고정한다(SCOPED_KEYS 밖 키만 건드리는 PR은 이
-  // 가드에서 no-op이어야 한다 — 같은 namespace(cage) 안에서도 키 단위로만 판정하는 것이 이
-  // 가드의 핵심 설계 계약이다).
+  // 페드루 PO 지시 — "무관 PR no-op(exit 0) 표본 1". SCOPED_KEYS 밖의 실 키(board 네임스페이스
+  // 안에 있지만 스코프 목록엔 없는 board.epicSwimlaneLoadError)는 실제로 develop에 합니다체 값
+  // ("불러오지 못했습니다. 잠시 후 다시 시도해 주세요.")을 그대로 가진 채 남아 있다 — 이
+  // 가드가 그 값을 건드리지 않는다는 것을 합성이 아니라 실 데이터로 고정한다(SCOPED_KEYS
+  // 밖 키만 건드리는 PR은 이 가드에서 no-op이어야 한다 — 같은 namespace(board) 안에서도
+  // 키 단위로만 판정하는 것이 이 가드의 핵심 설계 계약이다).
+  // story #3899 — 이전엔 cage.gateDetailNotFound를 이 자리(고정 fixture)로 썼으나, 3899가
+  // cage를 SCOPED_NAMESPACES로 승격하며 그 값도 해요체로 이관(잔존 0)돼 더 이상 "스코프
+  // 밖" 표본이 못 된다 — board.epicSwimlaneLoadError(board는 SCOPED_KEYS에 여러 키가
+  // 개별 등재돼 있지만 이 leaf는 그 목록 밖)로 교체, 같은 구조의 표본 유지.
   it('무관 PR no-op — SCOPED_KEYS 밖의 실 합니다체 키(같은 namespace 안이어도)는 이 가드가 안 본다', () => {
-    const outOfScopeValue = (ko.cage as Record<string, unknown> | undefined)?.gateDetailNotFound;
+    const outOfScopeValue = (ko.board as Record<string, unknown> | undefined)?.epicSwimlaneLoadError;
     expect(typeof outOfScopeValue).toBe('string');
     expect(outOfScopeValue as string).toMatch(/습니다|ㅂ니다|십시오/);
-    expect(SCOPED_KEYS as readonly string[]).not.toContain('cage.gateDetailNotFound');
-    expect(findHonorificToneInScopedKeys(ko)).toEqual([]); // cage.gateDetailNotFound가 합니다체여도 여전히 0건
+    expect(SCOPED_KEYS as readonly string[]).not.toContain('board.epicSwimlaneLoadError');
+    expect(findHonorificToneInScopedKeys(ko)).toEqual([]); // board.epicSwimlaneLoadError가 합니다체여도 여전히 0건
   });
 });
 
@@ -157,10 +161,10 @@ describe('실 ko.json — 스코프 키 count-lock(baseline 0, 새 자리 0)', (
 // story #3885 AC2 — SCOPED_NAMESPACES(chats 전량 승격) + resolveEffectiveScopedKeys.
 // ---------------------------------------------------------------------------
 
-describe('SCOPED_NAMESPACES — story #3885/#3889/#3892/#3895 AC2', () => {
-  it('chats·content·channelConnect·settings·agents·flow·gateConfig 7개가 등재됐다(잔존 채무 0으로 확定된 네임스페이스만)', () => {
+describe('SCOPED_NAMESPACES — story #3885/#3889/#3892/#3895/#3899 AC2', () => {
+  it('chats·content·channelConnect·settings·agents·flow·gateConfig·recruiter·loops·cage 10개가 등재됐다(잔존 채무 0으로 확定된 네임스페이스만)', () => {
     expect(SCOPED_NAMESPACES).toEqual([
-      'chats', 'content', 'channelConnect', 'settings', 'agents', 'flow', 'gateConfig',
+      'chats', 'content', 'channelConnect', 'settings', 'agents', 'flow', 'gateConfig', 'recruiter', 'loops', 'cage',
     ]);
   });
 });
@@ -212,15 +216,15 @@ describe('실 ko.json — chats 네임스페이스 전량(story #3885 AC2)', () 
     expect(findings).toContainEqual({ key: 'chats.noConversations', matches: ['습니다'], value: '대화가 없습니다' });
   });
 
-  // 무관 PR no-op — chats도 아니고 SCOPED_KEYS에도 없는 실 키(cage.gateDetailNotFound)는
-  // namespace 전량 승격 뒤에도 여전히 안 잡힌다(승격은 chats 하나만이지 전체 카탈로그가
-  // 아니다).
+  // 무관 PR no-op — chats도 아니고 SCOPED_KEYS에도 없는 실 키(board.epicSwimlaneLoadError,
+  // story #3899 이후 cage 대신 쓰는 표본 — 위 SCOPED_KEYS describe 블록 참고)는 namespace
+  // 전량 승격 뒤에도 여전히 안 잡힌다(승격은 chats 하나만이지 전체 카탈로그가 아니다).
   it('무관 PR no-op — chats 밖·SCOPED_KEYS 밖의 실 합니다체 키는 namespace 전량 승격 뒤에도 안 본다', () => {
-    const outOfScopeValue = (ko.cage as Record<string, unknown> | undefined)?.gateDetailNotFound;
+    const outOfScopeValue = (ko.board as Record<string, unknown> | undefined)?.epicSwimlaneLoadError;
     expect(typeof outOfScopeValue).toBe('string');
     expect(outOfScopeValue as string).toMatch(/습니다|ㅂ니다|십시오/);
     const effectiveKeys = resolveEffectiveScopedKeys(ko);
-    expect(effectiveKeys).not.toContain('cage.gateDetailNotFound');
+    expect(effectiveKeys).not.toContain('board.epicSwimlaneLoadError');
     expect(findHonorificToneInScopedKeys(ko, effectiveKeys)).toEqual([]);
   });
 });
@@ -232,8 +236,8 @@ describe('실 ko.json — chats 네임스페이스 전량(story #3885 AC2)', () 
 // ---------------------------------------------------------------------------
 
 describe('checkScopedNamespaceMinimums — 순수 함수', () => {
-  it('⭐네임스페이스 7개가 ko.json에 아예 없으면(개명·삭제 시뮬레이션) 7건 위반을 낸다', () => {
-    const violations = checkScopedNamespaceMinimums({ board: { x: 'y' } }); // 7개 다 없음
+  it('⭐네임스페이스 10개가 ko.json에 아예 없으면(개명·삭제 시뮬레이션) 10건 위반을 낸다', () => {
+    const violations = checkScopedNamespaceMinimums({ board: { x: 'y' } }); // 10개 다 없음
     expect(violations).toEqual([
       { namespace: 'chats', actualCount: 0, minExpected: 200 },
       { namespace: 'content', actualCount: 0, minExpected: 500 },
@@ -242,6 +246,9 @@ describe('checkScopedNamespaceMinimums — 순수 함수', () => {
       { namespace: 'agents', actualCount: 0, minExpected: 150 },
       { namespace: 'flow', actualCount: 0, minExpected: 160 },
       { namespace: 'gateConfig', actualCount: 0, minExpected: 15 },
+      { namespace: 'recruiter', actualCount: 0, minExpected: 100 },
+      { namespace: 'loops', actualCount: 0, minExpected: 105 },
+      { namespace: 'cage', actualCount: 0, minExpected: 230 },
     ]);
   });
 
@@ -255,6 +262,9 @@ describe('checkScopedNamespaceMinimums — 순수 함수', () => {
       { namespace: 'agents', actualCount: 0, minExpected: 150 },
       { namespace: 'flow', actualCount: 0, minExpected: 160 },
       { namespace: 'gateConfig', actualCount: 0, minExpected: 15 },
+      { namespace: 'recruiter', actualCount: 0, minExpected: 100 },
+      { namespace: 'loops', actualCount: 0, minExpected: 105 },
+      { namespace: 'cage', actualCount: 0, minExpected: 230 },
     ]);
   });
 
@@ -321,6 +331,94 @@ describe('SCOPED_NAMESPACE_MIN_LEAF_COUNT — 하한이 실측치보다 낮게 �
     const gateConfigLeafCount = effectiveKeys.filter((k) => k.startsWith('gateConfig.')).length;
     expect(gateConfigLeafCount).toBeGreaterThanOrEqual(15);
   });
+
+  it('실 ko.json의 recruiter leaf 개수가 하한(100) 이상이다(실측 114)', () => {
+    const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
+    const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    const recruiterLeafCount = effectiveKeys.filter((k) => k.startsWith('recruiter.')).length;
+    expect(recruiterLeafCount).toBeGreaterThanOrEqual(100);
+  });
+
+  it('실 ko.json의 loops leaf 개수가 하한(105) 이상이다(실측 119)', () => {
+    const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
+    const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    const loopsLeafCount = effectiveKeys.filter((k) => k.startsWith('loops.')).length;
+    expect(loopsLeafCount).toBeGreaterThanOrEqual(105);
+  });
+
+  it('실 ko.json의 cage leaf 개수가 하한(230) 이상이다(실측 259)', () => {
+    const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
+    const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    const cageLeafCount = effectiveKeys.filter((k) => k.startsWith('cage.')).length;
+    expect(cageLeafCount).toBeGreaterThanOrEqual(230);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// story #3899 — recruiter·loops·cage 네임스페이스 전량(SCOPED_NAMESPACES 승격).
+// chats(#3885)·content/channelConnect(#3889)·settings(#3892)와 정확히 같은 3형 검증
+// (0건·양성대조·무관 PR no-op).
+// ---------------------------------------------------------------------------
+
+describe('실 ko.json — recruiter·loops·cage 네임스페이스 전량(story #3899 AC1/AC2)', () => {
+  const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
+  const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
+
+  it('SCOPED_KEYS+전 네임스페이스 전량(effective)의 ko.json 값에 합니다체 0건(story #3899 AC1 recruiter 36·loops 34·cage 29=99키 전량 이관 확認)', () => {
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    expect(effectiveKeys.length).toBeGreaterThan(SCOPED_KEYS.length);
+    expect(findHonorificToneInScopedKeys(ko, effectiveKeys)).toEqual([]);
+  });
+
+  it('양성대조 — recruiter.roleSearchEmpty를 원래 합니다체로 되돌리면 RED가 된다(namespace 전량 승격 증명)', () => {
+    expect(SCOPED_KEYS as readonly string[]).not.toContain('recruiter.roleSearchEmpty');
+    const mutated = JSON.parse(JSON.stringify(ko)) as Record<string, unknown>;
+    (mutated.recruiter as Record<string, unknown>).roleSearchEmpty = '검색 결과가 없습니다.';
+    const effectiveKeys = resolveEffectiveScopedKeys(mutated);
+    const findings = findHonorificToneInScopedKeys(mutated, effectiveKeys);
+    expect(findings).toContainEqual({ key: 'recruiter.roleSearchEmpty', matches: ['습니다'], value: '검색 결과가 없습니다.' });
+  });
+
+  it('양성대조 — loops.decisionSuccess(ㅂ니다 없는 순수 습니다 계열)를 원래 합니다체로 되돌리면 RED가 된다(namespace 전량 승격 증명)', () => {
+    expect(SCOPED_KEYS as readonly string[]).not.toContain('loops.decisionSuccess');
+    const mutated = JSON.parse(JSON.stringify(ko)) as Record<string, unknown>;
+    (mutated.loops as Record<string, unknown>).decisionSuccess = '슬롯을 확정했습니다.';
+    const effectiveKeys = resolveEffectiveScopedKeys(mutated);
+    const findings = findHonorificToneInScopedKeys(mutated, effectiveKeys);
+    expect(findings).toContainEqual({ key: 'loops.decisionSuccess', matches: ['습니다'], value: '슬롯을 확정했습니다.' });
+  });
+
+  it('양성대조 — cage.gateInboxLoadError(ㅂ니다 계열 아님·순수 습니다)를 원래 합니다체로 되돌리면 RED가 된다(namespace 전량 승격 증명)', () => {
+    expect(SCOPED_KEYS as readonly string[]).not.toContain('cage.gateInboxLoadError');
+    const mutated = JSON.parse(JSON.stringify(ko)) as Record<string, unknown>;
+    (mutated.cage as Record<string, unknown>).gateInboxLoadError = '결재 대기를 불러오지 못했습니다';
+    const effectiveKeys = resolveEffectiveScopedKeys(mutated);
+    const findings = findHonorificToneInScopedKeys(mutated, effectiveKeys);
+    expect(findings).toContainEqual({ key: 'cage.gateInboxLoadError', matches: ['습니다'], value: '결재 대기를 불러오지 못했습니다' });
+  });
+
+  // 양성대조 — recruiter.equipKeyOnceLabel(ㅂ니다 계열: 표시됩니다)로 NFD 처방이 이
+  // 세 네임스페이스 승격에서도 실제로 작동하는지 확認(습니다 리터럴이 아닌 자리).
+  it('양성대조 — recruiter.equipKeyOnceLabel(ㅂ니다 계열)를 원래 합니다체로 되돌리면 RED가 된다', () => {
+    expect(SCOPED_KEYS as readonly string[]).not.toContain('recruiter.equipKeyOnceLabel');
+    const mutated = JSON.parse(JSON.stringify(ko)) as Record<string, unknown>;
+    (mutated.recruiter as Record<string, unknown>).equipKeyOnceLabel = 'API Key — 지금만 표시됩니다.';
+    const effectiveKeys = resolveEffectiveScopedKeys(mutated);
+    const findings = findHonorificToneInScopedKeys(mutated, effectiveKeys);
+    expect(findings).toContainEqual({ key: 'recruiter.equipKeyOnceLabel', matches: ['ㅂ니다'], value: 'API Key — 지금만 표시됩니다.' });
+  });
+
+  it('무관 PR no-op — recruiter·loops·cage 밖·SCOPED_KEYS 밖의 실 합니다체 키는 namespace 전량 승격 뒤에도 안 본다', () => {
+    const outOfScopeValue = (ko.board as Record<string, unknown> | undefined)?.epicSwimlaneLoadError;
+    expect(typeof outOfScopeValue).toBe('string');
+    expect(outOfScopeValue as string).toMatch(/습니다|ㅂ니다|십시오/);
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    expect(effectiveKeys).not.toContain('board.epicSwimlaneLoadError');
+    expect(findHonorificToneInScopedKeys(ko, effectiveKeys)).toEqual([]);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -348,11 +446,11 @@ describe('실 ko.json — settings 네임스페이스 전량(story #3892 AC1/AC2
   });
 
   it('무관 PR no-op — settings 밖·SCOPED_KEYS 밖의 실 합니다체 키는 namespace 전량 승격 뒤에도 안 본다', () => {
-    const outOfScopeValue = (ko.cage as Record<string, unknown> | undefined)?.gateDetailNotFound;
+    const outOfScopeValue = (ko.board as Record<string, unknown> | undefined)?.epicSwimlaneLoadError;
     expect(typeof outOfScopeValue).toBe('string');
     expect(outOfScopeValue as string).toMatch(/습니다|ㅂ니다|십시오/);
     const effectiveKeys = resolveEffectiveScopedKeys(ko);
-    expect(effectiveKeys).not.toContain('cage.gateDetailNotFound');
+    expect(effectiveKeys).not.toContain('board.epicSwimlaneLoadError');
     expect(findHonorificToneInScopedKeys(ko, effectiveKeys)).toEqual([]);
   });
 });
@@ -392,11 +490,11 @@ describe('실 ko.json — content·channelConnect 네임스페이스 전량(stor
   });
 
   it('무관 PR no-op — content·channelConnect 밖·SCOPED_KEYS 밖의 실 합니다체 키는 namespace 전량 승격 뒤에도 안 본다', () => {
-    const outOfScopeValue = (ko.cage as Record<string, unknown> | undefined)?.gateDetailNotFound;
+    const outOfScopeValue = (ko.board as Record<string, unknown> | undefined)?.epicSwimlaneLoadError;
     expect(typeof outOfScopeValue).toBe('string');
     expect(outOfScopeValue as string).toMatch(/습니다|ㅂ니다|십시오/);
     const effectiveKeys = resolveEffectiveScopedKeys(ko);
-    expect(effectiveKeys).not.toContain('cage.gateDetailNotFound');
+    expect(effectiveKeys).not.toContain('board.epicSwimlaneLoadError');
     expect(findHonorificToneInScopedKeys(ko, effectiveKeys)).toEqual([]);
   });
 });
@@ -488,9 +586,11 @@ describe('story #3889 CHANGES 1 — 플레이스홀더 값 뒤 계사(예요/이
 
   const PLACEHOLDER_COPULA_RE = /\}(예요|이에요)/;
 
-  it('content·channelConnect·settings·agents·flow·gateConfig 전 leaf에 "}예요"·"}이에요"(placeholder 바로 뒤 계사) 0건', () => {
+  it('content·channelConnect·settings·agents·flow·gateConfig·recruiter·loops·cage 전 leaf에 "}예요"·"}이에요"(placeholder 바로 뒤 계사) 0건', () => {
     // story #3892 — 스캔 범위에 settings 추가. story #3895 — agents·flow·gateConfig 추가
     // (착수 전 사전 스캔 0건 확認·전환 뒤 재확認 — 3889 교훈 그대로 재적용).
+    // story #3899 — 스캔 범위에 recruiter·loops·cage 추가(전환 전 사전 스캔에서도 0건
+    // 확認했고, 이 가드로 재발도 막는다).
     const values = [
       ...collectLeafValues(ko.content as Record<string, unknown>, 'content'),
       ...collectLeafValues(ko.channelConnect as Record<string, unknown>, 'channelConnect'),
@@ -498,6 +598,9 @@ describe('story #3889 CHANGES 1 — 플레이스홀더 값 뒤 계사(예요/이
       ...collectLeafValues(ko.agents as Record<string, unknown>, 'agents'),
       ...collectLeafValues(ko.flow as Record<string, unknown>, 'flow'),
       ...collectLeafValues(ko.gateConfig as Record<string, unknown>, 'gateConfig'),
+      ...collectLeafValues(ko.recruiter as Record<string, unknown>, 'recruiter'),
+      ...collectLeafValues(ko.loops as Record<string, unknown>, 'loops'),
+      ...collectLeafValues(ko.cage as Record<string, unknown>, 'cage'),
     ];
     const violations = values.filter(([, v]) => PLACEHOLDER_COPULA_RE.test(v));
     expect(violations).toEqual([]);
