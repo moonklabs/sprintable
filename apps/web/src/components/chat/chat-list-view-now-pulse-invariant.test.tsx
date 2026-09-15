@@ -105,7 +105,7 @@ describe('ChatListView — S3a 스트립 + S3b pulse 카드 합산 불변식(최
     const headers = Array.from(container.querySelectorAll('button[aria-expanded]'));
     expect(headers).toHaveLength(2); // 스트립 헤더 + pulse 헤더.
     const stripHeader = headers.find((h) => h.textContent?.includes('지금'))!;
-    const pulseHeader = headers.find((h) => h.textContent?.includes('프로젝트 맥박'))!;
+    const pulseHeader = headers.find((h) => h.textContent?.includes('프로젝트 현황'))!;
     await act(async () => { stripHeader.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(stripHeader.getAttribute('aria-expanded')).toBe('true');
     expect(pulseHeader.getAttribute('aria-expanded')).toBe('false');
@@ -116,7 +116,7 @@ describe('ChatListView — S3a 스트립 + S3b pulse 카드 합산 불변식(최
     await flush();
     const headers = Array.from(container.querySelectorAll('button[aria-expanded]'));
     const stripHeader = headers.find((h) => h.textContent?.includes('지금'))!;
-    const pulseHeader = headers.find((h) => h.textContent?.includes('프로젝트 맥박'))!;
+    const pulseHeader = headers.find((h) => h.textContent?.includes('프로젝트 현황'))!;
 
     await act(async () => { stripHeader.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(stripHeader.getAttribute('aria-expanded')).toBe('true');

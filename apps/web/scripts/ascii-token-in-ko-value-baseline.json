@@ -1,44 +1,9 @@
 {
   "_comment": [
-    "story #3880(§⑤ 낱말 드리프트) CHANGES③ 재구성(2026-09-14) — 영구 기술 식별자는",
-    "TOKEN_ALLOWLIST로 분리됐다(verify-no-ascii-token-in-ko-value.ts 본문 주석 참조).",
-    "여기 남은 건 \"개별 판단 필요·§⑤ 확定 전\" 잔존 드리프트뿐(SP·QA·PO·WIP·AU 등) —",
-    "전량 정리는 후속 별건. \"더 늘지 않는다\"만 보장."
+    "story #3922(§⑤ 낱말 드리프트 전량 정리, 2026-09-15) — 위 34건 전량 처리 완료:",
+    "역할 약어(QA·PO·PM·AU)는 TOKEN_ALLOWLIST로, 화면 문구(SP·WIP·ALL CLEAR·CORE·",
+    "STEER·PRD)는 한국어 전환, 죽은 키(DASHBOARD·STATUS·OPERATOR·USAGE)는 삭제.",
+    "0건 — fail-closed: 새 드리프트는 이 baseline 없이 즉시 RED."
   ],
-  "keys": [
-    "agents.statusEyebrow::DASHBOARD",
-    "agents.statusEyebrow::STATUS",
-    "attentionQueue.allClear::ALL",
-    "attentionQueue.allClear::CLEAR",
-    "billing.auPausedDesc::AU",
-    "billing.auUsage::AU",
-    "billing.auWarn90Desc::AU",
-    "billing.auWarnDesc::AU",
-    "board.excludedCountTitle::QA",
-    "board.storyPointsBadge::SP",
-    "board.wipLimitExceeded::WIP",
-    "board.wipLimitLabel::WIP",
-    "board.wipLimitSet::WIP",
-    "board.workcellNextNeedInReview::QA",
-    "cage.gateAlreadyResolvedError::PO",
-    "canvas.descriptionPaneHeading::PRD",
-    "chats.steerToggleLabel::STEER",
-    "dashboard.ccGateTypeQa::QA",
-    "goals.doneSp::SP",
-    "goals.fieldTargetSp::SP",
-    "goals.spExceeded::SP",
-    "goals.spExceededDetail::SP",
-    "goals.spProgress::SP",
-    "goals.targetSp::SP",
-    "goals.totalSp::SP",
-    "onboarding.rolePm::PM",
-    "onboarding.roleQa::QA",
-    "organization.stageRoleLabelPo::PO",
-    "organization.stageRoleLabelQa::QA",
-    "organization.trustRoleLabelPo::PO",
-    "organization.trustRoleLabelQa::QA",
-    "recruiter.scopeCore::CORE",
-    "usage.eyebrow::OPERATOR",
-    "usage.eyebrow::USAGE"
-  ]
+  "keys": []
 }

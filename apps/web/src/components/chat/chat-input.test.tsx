@@ -330,7 +330,7 @@ describe('ChatInput — STEER 모드(story #2942)', () => {
   ];
 
   function toggleBtn(): HTMLButtonElement | null {
-    return [...container.querySelectorAll('button')].find((b) => b.getAttribute('aria-label') === '방향 전환(STEER)') as HTMLButtonElement | undefined ?? null;
+    return [...container.querySelectorAll('button')].find((b) => b.getAttribute('aria-label') === '방향 전환') as HTMLButtonElement | undefined ?? null;
   }
 
   function setValue(el: HTMLTextAreaElement | HTMLInputElement | HTMLSelectElement, value: string) {

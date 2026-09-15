@@ -94,18 +94,28 @@ export const ALLOWLIST: ReadonlySet<string> = new Set<string>([
 //    프로젝트 자체 PR 제목 관례([SID:XXX], CLAUDE.md에 명문화)를 설명하는 플레이스홀더
 //    표기 — 번역 대상 낱말이 아니라 구문 표기.
 //
-// 分類 밖(baseline에 잔존 — PO가 명시한 SP·PO·WIP·AU와 같은 급, 개별 판단 필요):
-//  - SP·QA·PO·WIP·AU — QA·PO는 조직 role-badge 패밀리(trustRoleLabelQa/Po 등)로
-//    PO 자신(PO 토큰)을 드리프트로 명시했으므로 같은 패밀리인 QA도 동일 취급(자리마다
-//    §⑤ 낱말 확定 필요할 수 있음 — 추측 금지).
-//  - DASHBOARD·STATUS·ALL·CLEAR·OPERATOR·USAGE — 이니셜리즘 아닌 평범한 영단어(대문자
-//    스탬프 문구), 축2(전체값)에도 이미 걸리는 자리 — §⑤ 확定 대상.
-//  - PM·CORE·STEER·PRD — 브랜드/디자인 의도 애매(예: STEER는 "방향 전환(STEER)"처럼
-//    §⑤ 허용 액센트 패턴과 유사해 보이나 PO/유나 확定 없이 단정 금지).
+// story #3922(§⑤ 낱말 드리프트 전량 정리) — 위 34건 잔존분을 PO 判定으로 전량 종결:
+//  - QA·PO·PM(·DevOps, 축2 전용) — 조직 role-badge 패밀리(trustRoleLabelQa/Po·
+//    stageRoleLabelQa/Po·onboarding.roleQa/Pm/Devops 등). PO 判定(2026-09-15):
+//    "Sprintable 자체 역할 식별자·한국어 역할 낱말 체계 없음" — 번역 대상 아니라
+//    토큰 단위 허용으로 이관.
+//  - AU — "자동화" 병기 中(billing.auPausedDesc/auWarn90Desc/auWarnDesc 3곳 모두
+//    "자동화(AU)"·"자동화 사용량(AU)" 형태로 이미 병기) — PO 判定(AU는 자동화 병기
+//    中이면 허용)에 따라 허용. billing.auUsage(압축 게이지 라벨, 같은 섹션의 병기
+//    재사용)도 동일 취급.
+//  - DASHBOARD·STATUS·ALL·CLEAR·OPERATOR·USAGE — 전부 §⑤ 확定 뒤 처리 완료:
+//    agents.statusEyebrow(STATUS DASHBOARD)·usage.eyebrow(OPERATOR USAGE)는 실
+//    소비처 0(grep 확認) — 삭제. attentionQueue.allClear(ALL CLEAR)는 "안전"으로
+//    한국어 전환 — 이 4토큰은 값 자체가 사라져 baseline/ALLOWLIST 어디에도 안 남음.
+//  - PM·CORE·STEER·PRD — PM은 역할 패밀리(위)로 허용. CORE(recruiter.scopeCore→
+//    "핵심")·STEER(chats.steerToggleLabel의 중복 "(STEER)" 접미사 제거 — "방향
+//    전환"만 남김)·PRD(canvas.descriptionPaneHeading→"문서")는 §⑤ 확定대로 한국어
+//    전환 — 값이 사라져 이 축엔 안 남음.
 export const TOKEN_ALLOWLIST: ReadonlySet<string> = new Set<string>([
   'API', 'AI', 'URL', 'MCP', 'ID', 'SSE', 'UTM', 'HTML', 'JSON', 'LLM', 'CI', 'SHA', 'DM',
   'BYOA', 'STT', 'CSV', 'SLA', 'PDF', 'HTTP', 'AC', 'SDK', 'HTTPS', 'POST', 'BYOM', 'PC',
   'UI', 'SID', 'XXX', 'PNG', 'OS', 'CTA', 'SNS', 'GB', 'SSO', 'BYO', 'TOTP', 'QR', 'MB', 'PR',
+  'QA', 'PO', 'PM', 'AU',
 ]);
 
 // ---------------------------------------------------------------------------
@@ -135,9 +145,62 @@ export function wholeValueRefKey(r: Pick<WholeValueAsciiRef, 'key'>): string {
   return r.key;
 }
 
-// 축 2 전용 ALLOWLIST — 브랜드/식별자 사유(§⑤ 허용 액센트와 별개, story #3880 스코프
-// 안에서 확認된 것만). 현재 비어있음 — 신규 항목은 PO 승인 후 사유 1줄과 함께 등재.
-export const WHOLE_VALUE_ALLOWLIST: ReadonlySet<string> = new Set<string>([]);
+// 축 2 전용 ALLOWLIST — 키 단위(값이 아니라 키, wholeValueRefKey 참조 — 같은 값이
+// 여러 키에 반복돼도 키마다 등재 필요). story #3922(§⑤ 낱말 드리프트 전량 정리)가
+// baseline 69건을 분류해 이관 — 각 그룹 사유는 PO 判定(2026-09-15) 그대로.
+export const WHOLE_VALUE_ALLOWLIST: ReadonlySet<string> = new Set<string>([
+  // 채널 브랜드명(제3자 서비스 고유명사, 번역 대상 아님) — channelConnect·content·
+  // organization 3개 네임스페이스에 동일 브랜드 라벨이 반복(각 표면이 독립 소비처).
+  'channelConnect.channelLabelFacebook', 'channelConnect.channelLabelGhost',
+  'channelConnect.channelLabelGhostSandbox', 'channelConnect.channelLabelInstagram',
+  'channelConnect.channelLabelWordpress', 'channelConnect.channelLabelYoutube',
+  'channelConnect.channelThreads',
+  'content.channelLabelFacebook', 'content.channelLabelGhost',
+  'content.channelLabelGhostSandbox', 'content.channelLabelInstagram',
+  'content.channelLabelWordpress', 'content.channelLabelYoutube', 'content.channelThreads',
+  'organization.channelLabelFacebook', 'organization.channelLabelGhost',
+  'organization.channelLabelGhostSandbox', 'organization.channelLabelInstagram',
+  'organization.channelLabelWordpress', 'organization.channelLabelYoutube',
+  'organization.channelThreads',
+
+  // 제품/플랫폼 고정 식별자(PO 명시 카테고리 (b) — MCP Config·GitHub App·Webhook URL·
+  // CI) 및 그 동류(App ID·App Secret·HTML 파일형식) — 번역하면 실제 설정 화면·API
+  // 필드명과 어긋난다.
+  'channelConnect.appCredentialsAppIdLabel', 'channelConnect.appCredentialsAppSecretLabel',
+  'onboarding.mcpConfigTitle', 'recruiter.equipMcpConfigLabel', 'settings.agentMcpTitle',
+  'settings.agentWebhookTitle', 'settings.ghAppTitle', 'docs.formatHtml',
+
+  // 이니셜리즘(축1 TOKEN_ALLOWLIST와 동일 근거 — 프로토콜/표준/외부 도구 고유명, 자리별
+  // 판단 불필요) — 축2(전체값)는 별도 baseline이라 키마다 재등재 필요.
+  'cage.ciLabel', 'cage.githubCheckLabel', 'chats.dmSection', 'chats.dmWith',
+  'hypotheses.sourceGa4', 'verify.evidenceTypePr',
+
+  // 이 제품 자체의 고유명(로그인 화면 타이틀 "Sprintable"·AI 부속 라벨 "Sprintable AI") —
+  // 브랜드명과 동형, ko/en 항상 동일 유지.
+  'login.title', 'loops.aiAttributionLabel',
+
+  // UTM 파라미터명(PO 카테고리 (c) — content/medium/source, 프로토콜 자체의 소문자
+  // 고정 파라미터, 번역하면 실제 URL 쿼리스트링과 어긋난다).
+  'contentRules.utmRulesStatusContent', 'contentRules.utmRulesStatusMedium',
+  'contentRules.utmRulesStatusSource',
+
+  // 요금제 티어명(PO 카테고리 (e) — Free/Starter/Team/Business, 결제 시스템 실제
+  // plan_id와 동형인 고유 플랜명, 번역 대상 아님).
+  'pricingPlans.tierName_business', 'pricingPlans.tierName_free',
+  'pricingPlans.tierName_starter', 'pricingPlans.tierName_team',
+
+  // 조직 role-badge 패밀리(PO 判定 — "Sprintable 자체 역할 식별자·한국어 역할 낱말
+  // 체계 없음") — 축1 TOKEN_ALLOWLIST의 QA/PO/PM과 축2 전용 DevOps(대문자 2자+
+  // 아니라 축1에 안 걸림, 같은 패밀리).
+  'dashboard.ccGateTypeQa', 'onboarding.roleDevops', 'onboarding.rolePm',
+  'onboarding.roleQa', 'organization.stageRoleLabelPo', 'organization.stageRoleLabelQa',
+  'organization.trustRoleLabelDevops', 'organization.trustRoleLabelPo',
+  'organization.trustRoleLabelQa',
+
+  // 이 제품 자체의 고유 기능명(coined term, 축1의 BYOA/BYOM/BYO와 동일 패밀리) —
+  // agentRuns.billingMode_managed(대응짝)는 일반 영단어라 "관리형"으로 한국어 전환.
+  'agentRuns.billingMode_byom',
+]);
 
 const WHOLE_VALUE_BASELINE_PATH = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
