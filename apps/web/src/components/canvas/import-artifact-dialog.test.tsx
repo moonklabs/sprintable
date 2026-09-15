@@ -86,7 +86,7 @@ describe('ImportArtifactDialog — 이미지 탭(story 64010b05 §3)', () => {
       await Promise.resolve(); await Promise.resolve();
     });
 
-    expect(document.body.textContent).toContain('가져오지 못했습니다');
+    expect(document.body.textContent).toContain('가져오지 못했어요');
     const confirmButton = [...document.body.querySelectorAll('button')].find((b) => b.textContent === '임포트')!;
     expect(confirmButton.hasAttribute('disabled')).toBe(true); // URL 없으니 여전히 비활성
   });
