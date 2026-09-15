@@ -24,6 +24,48 @@ import {
   resolveEffectiveScopedKeys,
 } from './verify-scoped-i18n-honorific-tone';
 
+// story #3903(PO 처방 2026-09-15) — "무관 PR no-op" 표본을 실 ko.json 키(예:
+// board.epicSwimlaneLoadError)에 의존시키면, 그 네임스페이스가 나중에 승격되거나(3903이
+// board를 승격) 원본 문구가 정리될 때마다(story #3920, 유나 16ns 착지 뒤엔 "스코프 밖
+// 합니다체 실 키" 자체가 ko.json에 0이 될 전망) 이 표본이 반복적으로 깨진다(#3899→
+// cage.gateDetailNotFound, #3903→board.epicSwimlaneLoadError로 이미 2회 재발). 실 키
+// 대신 깊은 복사한 ko에 합성 네임스페이스를 주입해 검증한다 — 어떤 실 네임스페이스의
+// 승격·톤 전환과도 무관하게 항상 성립.
+// story #3927(민, 전역 가드 승격) 착지 뒤에는 이 헬퍼의 단언 방향이 뒤집힐 예정이다 —
+// "예외 목록에 없는 네임스페이스는 전부 잡힌다"가 새 기본이 되면 합성 ns도 걸려야
+// 맞는 쪽으로 바뀐다. 그때 이 헬퍼도 같이 갱신한다(지금은 그 반대: 미등재 네임스페이스는
+// 무시되는 것이 계약).
+const OUT_OF_SCOPE_FIXTURE_NAMESPACE = '__outOfScopeFixture3903';
+const OUT_OF_SCOPE_FIXTURE_KEY = `${OUT_OF_SCOPE_FIXTURE_NAMESPACE}.sample`;
+// "습니다"를 리터럴로 포함(NFC 그대로) — "입니다"류는 실 스캐너가 NFD 정규화 뒤에야
+// ㅂ니다로 잡는데, 이 자기검증 assert는 순수 정규식이라 NFD를 안 거친다(직접 리터럴만).
+const OUT_OF_SCOPE_FIXTURE_VALUE = '이것은 스코프 밖 합성 문장이라고 알렸습니다.';
+
+function withOutOfScopeFixture(ko: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...(JSON.parse(JSON.stringify(ko)) as Record<string, unknown>),
+    [OUT_OF_SCOPE_FIXTURE_NAMESPACE]: { sample: OUT_OF_SCOPE_FIXTURE_VALUE },
+  };
+}
+
+/** SCOPED_NAMESPACES 승격 뒤에도(resolveEffectiveScopedKeys 경유) 등재 밖 네임스페이스는
+ * 여전히 무시됨을 합성 fixture로 증명한다 — 대부분의 "무관 PR no-op" 블록이 쓴다. */
+function assertOutOfScopeFixtureIgnoredByEffectiveKeys(ko: Record<string, unknown>): void {
+  const mutated = withOutOfScopeFixture(ko);
+  expect(OUT_OF_SCOPE_FIXTURE_VALUE).toMatch(/습니다|ㅂ니다|십시오/);
+  const effectiveKeys = resolveEffectiveScopedKeys(mutated);
+  expect(effectiveKeys).not.toContain(OUT_OF_SCOPE_FIXTURE_KEY);
+  expect(findHonorificToneInScopedKeys(mutated, effectiveKeys)).toEqual([]);
+}
+
+/** SCOPED_KEYS(고정 리스트) 밖 키는 namespace 승격과 무관하게 애초에 안 본다는 것을
+ * 증명한다 — story #3877 원 블록 전용(effectiveKeys를 안 쓰는 유일한 자리). */
+function assertOutOfScopeFixtureIgnoredBySopedKeysAlone(ko: Record<string, unknown>): void {
+  const mutated = withOutOfScopeFixture(ko);
+  expect(SCOPED_KEYS as readonly string[]).not.toContain(OUT_OF_SCOPE_FIXTURE_KEY);
+  expect(findHonorificToneInScopedKeys(mutated)).toEqual([]);
+}
+
 describe('findHonorificToneInScopedKeys — 순수 판정 함수', () => {
   it('습니다로 끝나는 스코프 키 값을 잡는다', () => {
     const findings = findHonorificToneInScopedKeys(
@@ -151,22 +193,12 @@ describe('실 ko.json — 스코프 키 count-lock(baseline 0, 새 자리 0)', (
     });
   });
 
-  // 페드루 PO 지시 — "무관 PR no-op(exit 0) 표본 1". SCOPED_KEYS 밖의 실 키(board 네임스페이스
-  // 안에 있지만 스코프 목록엔 없는 board.epicSwimlaneLoadError)는 실제로 develop에 합니다체 값
-  // ("불러오지 못했습니다. 잠시 후 다시 시도해 주세요.")을 그대로 가진 채 남아 있다 — 이
-  // 가드가 그 값을 건드리지 않는다는 것을 합성이 아니라 실 데이터로 고정한다(SCOPED_KEYS
-  // 밖 키만 건드리는 PR은 이 가드에서 no-op이어야 한다 — 같은 namespace(board) 안에서도
-  // 키 단위로만 판정하는 것이 이 가드의 핵심 설계 계약이다).
-  // story #3899 — 이전엔 cage.gateDetailNotFound를 이 자리(고정 fixture)로 썼으나, 3899가
-  // cage를 SCOPED_NAMESPACES로 승격하며 그 값도 해요체로 이관(잔존 0)돼 더 이상 "스코프
-  // 밖" 표본이 못 된다 — board.epicSwimlaneLoadError(board는 SCOPED_KEYS에 여러 키가
-  // 개별 등재돼 있지만 이 leaf는 그 목록 밖)로 교체, 같은 구조의 표본 유지.
+  // 페드루 PO 지시 — "무관 PR no-op(exit 0) 표본 1". SCOPED_KEYS 밖 키는 이 가드가 안
+  // 본다는 것을 합성 fixture로 고정한다(story #3903, 2026-09-15 — 실 키 fixture는
+  // cage.gateDetailNotFound→board.epicSwimlaneLoadError로 2회 재발해 합성으로 전환, 파일
+  // 상단 assertOutOfScopeFixtureIgnoredBySopedKeysAlone 참고).
   it('무관 PR no-op — SCOPED_KEYS 밖의 실 합니다체 키(같은 namespace 안이어도)는 이 가드가 안 본다', () => {
-    const outOfScopeValue = (ko.board as Record<string, unknown> | undefined)?.epicSwimlaneLoadError;
-    expect(typeof outOfScopeValue).toBe('string');
-    expect(outOfScopeValue as string).toMatch(/습니다|ㅂ니다|십시오/);
-    expect(SCOPED_KEYS as readonly string[]).not.toContain('board.epicSwimlaneLoadError');
-    expect(findHonorificToneInScopedKeys(ko)).toEqual([]); // board.epicSwimlaneLoadError가 합니다체여도 여전히 0건
+    assertOutOfScopeFixtureIgnoredBySopedKeysAlone(ko);
   });
 });
 
@@ -313,16 +345,10 @@ describe('실 ko.json — chats 네임스페이스 전량(story #3885 AC2)', () 
     expect(findings).toContainEqual({ key: 'chats.noConversations', matches: ['습니다'], value: '대화가 없습니다' });
   });
 
-  // 무관 PR no-op — chats도 아니고 SCOPED_KEYS에도 없는 실 키(board.epicSwimlaneLoadError,
-  // story #3899 이후 cage 대신 쓰는 표본 — 위 SCOPED_KEYS describe 블록 참고)는 namespace
-  // 전량 승격 뒤에도 여전히 안 잡힌다(승격은 chats 하나만이지 전체 카탈로그가 아니다).
+  // 무관 PR no-op — 합성 fixture(파일 상단 참고, story #3903)는 namespace 전량 승격
+  // 뒤에도 여전히 안 잡힌다(승격은 chats 하나만이지 전체 카탈로그가 아니다).
   it('무관 PR no-op — chats 밖·SCOPED_KEYS 밖의 실 합니다체 키는 namespace 전량 승격 뒤에도 안 본다', () => {
-    const outOfScopeValue = (ko.board as Record<string, unknown> | undefined)?.epicSwimlaneLoadError;
-    expect(typeof outOfScopeValue).toBe('string');
-    expect(outOfScopeValue as string).toMatch(/습니다|ㅂ니다|십시오/);
-    const effectiveKeys = resolveEffectiveScopedKeys(ko);
-    expect(effectiveKeys).not.toContain('board.epicSwimlaneLoadError');
-    expect(findHonorificToneInScopedKeys(ko, effectiveKeys)).toEqual([]);
+    assertOutOfScopeFixtureIgnoredByEffectiveKeys(ko);
   });
 });
 
@@ -338,7 +364,11 @@ describe('checkScopedNamespaceMinimums — 순수 함수', () => {
   // (loadHonorificScopeDir)에서 기대값을 유도해 파일 하나만 추가해도 이 테스트는 안
   // 건드리게 바꾼다.
   it('⭐등록된 모든 네임스페이스가 ko.json에 아예 없으면(개명·삭제 시뮬레이션) 등록 개수만큼 위반을 낸다', () => {
-    const violations = checkScopedNamespaceMinimums({ board: { x: 'y' } }); // 등록된 네임스페이스 전부 없음
+    // story #3903 — 필러 키를 'board'로 뒀었는데 board가 SCOPED_NAMESPACES에 승격되며
+    // 우연히 실제 등록 네임스페이스와 이름이 겹쳐 그 자리 actualCount가 0이 아니게 됨
+    // (테스트 취지="등록된 네임스페이스 전부 없음"과 충돌) — 등록될 일이 없는 네임스페이스
+    // 모양 문자열로 교체.
+    const violations = checkScopedNamespaceMinimums({ __unregisteredNamespaceFixture: { x: 'y' } }); // 등록된 네임스페이스 전부 없음
     const expected = loadHonorificScopeDir()
       .map((e) => ({ namespace: e.namespace, actualCount: 0, minExpected: e.minLeaf }))
       .sort((a, b) => a.namespace.localeCompare(b.namespace));
@@ -681,12 +711,7 @@ describe('실 ko.json — presence·commandPalette·accountSwitcher·common·act
   });
 
   it('무관 PR no-op — 8 네임스페이스 밖·SCOPED_KEYS 밖의 실 합니다체 키는 namespace 전량 승격 뒤에도 안 본다', () => {
-    const outOfScopeValue = (ko.board as Record<string, unknown> | undefined)?.epicSwimlaneLoadError;
-    expect(typeof outOfScopeValue).toBe('string');
-    expect(outOfScopeValue as string).toMatch(/습니다|ㅂ니다|십시오/);
-    const effectiveKeys = resolveEffectiveScopedKeys(ko);
-    expect(effectiveKeys).not.toContain('board.epicSwimlaneLoadError');
-    expect(findHonorificToneInScopedKeys(ko, effectiveKeys)).toEqual([]);
+    assertOutOfScopeFixtureIgnoredByEffectiveKeys(ko);
   });
 
   // story #3919 — presence.panelTitle·fabLabelWorking의 영문 「presence」 낱말 제거 확認
@@ -745,12 +770,7 @@ describe('실 ko.json — canvas·docs 네임스페이스 전량(story #3909 AC1
   });
 
   it('무관 PR no-op — canvas·docs 밖·SCOPED_KEYS 밖의 실 합니다체 키는 namespace 전량 승격 뒤에도 안 본다', () => {
-    const outOfScopeValue = (ko.board as Record<string, unknown> | undefined)?.epicSwimlaneLoadError;
-    expect(typeof outOfScopeValue).toBe('string');
-    expect(outOfScopeValue as string).toMatch(/습니다|ㅂ니다|십시오/);
-    const effectiveKeys = resolveEffectiveScopedKeys(ko);
-    expect(effectiveKeys).not.toContain('board.epicSwimlaneLoadError');
-    expect(findHonorificToneInScopedKeys(ko, effectiveKeys)).toEqual([]);
+    assertOutOfScopeFixtureIgnoredByEffectiveKeys(ko);
   });
 });
 
@@ -809,12 +829,7 @@ describe('실 ko.json — agentRuns·nav·dashboard 네임스페이스 전량(st
   });
 
   it('무관 PR no-op — agentRuns·nav·dashboard 밖·SCOPED_KEYS 밖의 실 합니다체 키는 namespace 전량 승격 뒤에도 안 본다', () => {
-    const outOfScopeValue = (ko.board as Record<string, unknown> | undefined)?.epicSwimlaneLoadError;
-    expect(typeof outOfScopeValue).toBe('string');
-    expect(outOfScopeValue as string).toMatch(/습니다|ㅂ니다|십시오/);
-    const effectiveKeys = resolveEffectiveScopedKeys(ko);
-    expect(effectiveKeys).not.toContain('board.epicSwimlaneLoadError');
-    expect(findHonorificToneInScopedKeys(ko, effectiveKeys)).toEqual([]);
+    assertOutOfScopeFixtureIgnoredByEffectiveKeys(ko);
   });
 });
 
@@ -887,12 +902,7 @@ describe('실 ko.json — onboarding·login·storage·insightsBoard 네임스페
   });
 
   it('무관 PR no-op — onboarding·login·storage·insightsBoard 밖·SCOPED_KEYS 밖의 실 합니다체 키는 namespace 전량 승격 뒤에도 안 본다', () => {
-    const outOfScopeValue = (ko.board as Record<string, unknown> | undefined)?.epicSwimlaneLoadError;
-    expect(typeof outOfScopeValue).toBe('string');
-    expect(outOfScopeValue as string).toMatch(/습니다|ㅂ니다|십시오/);
-    const effectiveKeys = resolveEffectiveScopedKeys(ko);
-    expect(effectiveKeys).not.toContain('board.epicSwimlaneLoadError');
-    expect(findHonorificToneInScopedKeys(ko, effectiveKeys)).toEqual([]);
+    assertOutOfScopeFixtureIgnoredByEffectiveKeys(ko);
   });
 });
 
@@ -961,12 +971,7 @@ describe('실 ko.json — usage·invite·meeting·supportWidget 네임스페이�
   });
 
   it('무관 PR no-op — usage·invite·meeting·supportWidget 밖·SCOPED_KEYS 밖의 실 합니다체 키는 namespace 전량 승격 뒤에도 안 본다', () => {
-    const outOfScopeValue = (ko.board as Record<string, unknown> | undefined)?.epicSwimlaneLoadError;
-    expect(typeof outOfScopeValue).toBe('string');
-    expect(outOfScopeValue as string).toMatch(/습니다|ㅂ니다|십시오/);
-    const effectiveKeys = resolveEffectiveScopedKeys(ko);
-    expect(effectiveKeys).not.toContain('board.epicSwimlaneLoadError');
-    expect(findHonorificToneInScopedKeys(ko, effectiveKeys)).toEqual([]);
+    assertOutOfScopeFixtureIgnoredByEffectiveKeys(ko);
   });
 });
 
@@ -1011,12 +1016,7 @@ describe('실 ko.json — canvas·docs 네임스페이스 전량(story #3909 AC1
   });
 
   it('무관 PR no-op — canvas·docs 밖·SCOPED_KEYS 밖의 실 합니다체 키는 namespace 전량 승격 뒤에도 안 본다', () => {
-    const outOfScopeValue = (ko.board as Record<string, unknown> | undefined)?.epicSwimlaneLoadError;
-    expect(typeof outOfScopeValue).toBe('string');
-    expect(outOfScopeValue as string).toMatch(/습니다|ㅂ니다|십시오/);
-    const effectiveKeys = resolveEffectiveScopedKeys(ko);
-    expect(effectiveKeys).not.toContain('board.epicSwimlaneLoadError');
-    expect(findHonorificToneInScopedKeys(ko, effectiveKeys)).toEqual([]);
+    assertOutOfScopeFixtureIgnoredByEffectiveKeys(ko);
   });
 });
 
@@ -1075,12 +1075,7 @@ describe('실 ko.json — recruiter·loops·cage 네임스페이스 전량(story
   });
 
   it('무관 PR no-op — recruiter·loops·cage 밖·SCOPED_KEYS 밖의 실 합니다체 키는 namespace 전량 승격 뒤에도 안 본다', () => {
-    const outOfScopeValue = (ko.board as Record<string, unknown> | undefined)?.epicSwimlaneLoadError;
-    expect(typeof outOfScopeValue).toBe('string');
-    expect(outOfScopeValue as string).toMatch(/습니다|ㅂ니다|십시오/);
-    const effectiveKeys = resolveEffectiveScopedKeys(ko);
-    expect(effectiveKeys).not.toContain('board.epicSwimlaneLoadError');
-    expect(findHonorificToneInScopedKeys(ko, effectiveKeys)).toEqual([]);
+    assertOutOfScopeFixtureIgnoredByEffectiveKeys(ko);
   });
 
   it('실 ko.json의 organization leaf 개수가 하한(190) 이상이다(실측 212)', () => {
@@ -1133,12 +1128,7 @@ describe('실 ko.json — settings 네임스페이스 전량(story #3892 AC1/AC2
   });
 
   it('무관 PR no-op — settings 밖·SCOPED_KEYS 밖의 실 합니다체 키는 namespace 전량 승격 뒤에도 안 본다', () => {
-    const outOfScopeValue = (ko.board as Record<string, unknown> | undefined)?.epicSwimlaneLoadError;
-    expect(typeof outOfScopeValue).toBe('string');
-    expect(outOfScopeValue as string).toMatch(/습니다|ㅂ니다|십시오/);
-    const effectiveKeys = resolveEffectiveScopedKeys(ko);
-    expect(effectiveKeys).not.toContain('board.epicSwimlaneLoadError');
-    expect(findHonorificToneInScopedKeys(ko, effectiveKeys)).toEqual([]);
+    assertOutOfScopeFixtureIgnoredByEffectiveKeys(ko);
   });
 });
 
@@ -1177,12 +1167,7 @@ describe('실 ko.json — content·channelConnect 네임스페이스 전량(stor
   });
 
   it('무관 PR no-op — content·channelConnect 밖·SCOPED_KEYS 밖의 실 합니다체 키는 namespace 전량 승격 뒤에도 안 본다', () => {
-    const outOfScopeValue = (ko.board as Record<string, unknown> | undefined)?.epicSwimlaneLoadError;
-    expect(typeof outOfScopeValue).toBe('string');
-    expect(outOfScopeValue as string).toMatch(/습니다|ㅂ니다|십시오/);
-    const effectiveKeys = resolveEffectiveScopedKeys(ko);
-    expect(effectiveKeys).not.toContain('board.epicSwimlaneLoadError');
-    expect(findHonorificToneInScopedKeys(ko, effectiveKeys)).toEqual([]);
+    assertOutOfScopeFixtureIgnoredByEffectiveKeys(ko);
   });
 });
 
@@ -1239,12 +1224,7 @@ describe('실 ko.json — agents·flow·gateConfig 네임스페이스 전량(sto
   // 더 이상 "스코프 밖" 표본이 못 된다 — 위 SCOPED_KEYS describe 블록과 같은 자리
   // (board.epicSwimlaneLoadError)로 교체, 같은 구조의 표본 유지.
   it('무관 PR no-op — agents·flow·gateConfig 밖·SCOPED_KEYS 밖의 실 합니다체 키는 namespace 전량 승격 뒤에도 안 본다', () => {
-    const outOfScopeValue = (ko.board as Record<string, unknown> | undefined)?.epicSwimlaneLoadError;
-    expect(typeof outOfScopeValue).toBe('string');
-    expect(outOfScopeValue as string).toMatch(/습니다|ㅂ니다|십시오/);
-    const effectiveKeys = resolveEffectiveScopedKeys(ko);
-    expect(effectiveKeys).not.toContain('board.epicSwimlaneLoadError');
-    expect(findHonorificToneInScopedKeys(ko, effectiveKeys)).toEqual([]);
+    assertOutOfScopeFixtureIgnoredByEffectiveKeys(ko);
   });
 });
 
