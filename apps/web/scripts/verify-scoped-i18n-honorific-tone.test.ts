@@ -23,48 +23,13 @@ import {
   loadHonorificScopeDir,
   resolveEffectiveScopedKeys,
 } from './verify-scoped-i18n-honorific-tone';
-
-// story #3903(PO 처방 2026-09-15) — "무관 PR no-op" 표본을 실 ko.json 키(예:
-// board.epicSwimlaneLoadError)에 의존시키면, 그 네임스페이스가 나중에 승격되거나(3903이
-// board를 승격) 원본 문구가 정리될 때마다(story #3920, 유나 16ns 착지 뒤엔 "스코프 밖
-// 합니다체 실 키" 자체가 ko.json에 0이 될 전망) 이 표본이 반복적으로 깨진다(#3899→
-// cage.gateDetailNotFound, #3903→board.epicSwimlaneLoadError로 이미 2회 재발). 실 키
-// 대신 깊은 복사한 ko에 합성 네임스페이스를 주입해 검증한다 — 어떤 실 네임스페이스의
-// 승격·톤 전환과도 무관하게 항상 성립.
-// story #3927(민, 전역 가드 승격) 착지 뒤에는 이 헬퍼의 단언 방향이 뒤집힐 예정이다 —
-// "예외 목록에 없는 네임스페이스는 전부 잡힌다"가 새 기본이 되면 합성 ns도 걸려야
-// 맞는 쪽으로 바뀐다. 그때 이 헬퍼도 같이 갱신한다(지금은 그 반대: 미등재 네임스페이스는
-// 무시되는 것이 계약).
-const OUT_OF_SCOPE_FIXTURE_NAMESPACE = '__outOfScopeFixture3903';
-const OUT_OF_SCOPE_FIXTURE_KEY = `${OUT_OF_SCOPE_FIXTURE_NAMESPACE}.sample`;
-// "습니다"를 리터럴로 포함(NFC 그대로) — "입니다"류는 실 스캐너가 NFD 정규화 뒤에야
-// ㅂ니다로 잡는데, 이 자기검증 assert는 순수 정규식이라 NFD를 안 거친다(직접 리터럴만).
-const OUT_OF_SCOPE_FIXTURE_VALUE = '이것은 스코프 밖 합성 문장이라고 알렸습니다.';
-
-function withOutOfScopeFixture(ko: Record<string, unknown>): Record<string, unknown> {
-  return {
-    ...(JSON.parse(JSON.stringify(ko)) as Record<string, unknown>),
-    [OUT_OF_SCOPE_FIXTURE_NAMESPACE]: { sample: OUT_OF_SCOPE_FIXTURE_VALUE },
-  };
-}
-
-/** SCOPED_NAMESPACES 승격 뒤에도(resolveEffectiveScopedKeys 경유) 등재 밖 네임스페이스는
- * 여전히 무시됨을 합성 fixture로 증명한다 — 대부분의 "무관 PR no-op" 블록이 쓴다. */
-function assertOutOfScopeFixtureIgnoredByEffectiveKeys(ko: Record<string, unknown>): void {
-  const mutated = withOutOfScopeFixture(ko);
-  expect(OUT_OF_SCOPE_FIXTURE_VALUE).toMatch(/습니다|ㅂ니다|십시오/);
-  const effectiveKeys = resolveEffectiveScopedKeys(mutated);
-  expect(effectiveKeys).not.toContain(OUT_OF_SCOPE_FIXTURE_KEY);
-  expect(findHonorificToneInScopedKeys(mutated, effectiveKeys)).toEqual([]);
-}
-
-/** SCOPED_KEYS(고정 리스트) 밖 키는 namespace 승격과 무관하게 애초에 안 본다는 것을
- * 증명한다 — story #3877 원 블록 전용(effectiveKeys를 안 쓰는 유일한 자리). */
-function assertOutOfScopeFixtureIgnoredBySopedKeysAlone(ko: Record<string, unknown>): void {
-  const mutated = withOutOfScopeFixture(ko);
-  expect(SCOPED_KEYS as readonly string[]).not.toContain(OUT_OF_SCOPE_FIXTURE_KEY);
-  expect(findHonorificToneInScopedKeys(mutated)).toEqual([]);
-}
+// story #3903(PO 처방 2026-09-15, 3차 정정) — "무관 PR no-op" 표본이 실 키(cage→board→
+// #3921/#3923 재발)로 반복 재발해, 합성 fixture 헬퍼를 별도 모듈로 빼 모든 per-story
+// 전용 테스트 파일이 공유한다(honorific-tone-out-of-scope-fixture.ts 자체 문서 참고).
+import {
+  assertOutOfScopeFixtureIgnoredByEffectiveKeys,
+  assertOutOfScopeFixtureIgnoredBySopedKeysAlone,
+} from './honorific-tone-out-of-scope-fixture';
 
 describe('findHonorificToneInScopedKeys — 순수 판정 함수', () => {
   it('습니다로 끝나는 스코프 키 값을 잡는다', () => {

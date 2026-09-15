@@ -15,6 +15,7 @@ import {
   findHonorificToneInScopedKeys,
   resolveEffectiveScopedKeys,
 } from './verify-scoped-i18n-honorific-tone';
+import { assertOutOfScopeFixtureIgnoredByEffectiveKeys } from './honorific-tone-out-of-scope-fixture';
 
 describe('실 ko.json — inbox·board 네임스페이스 전량(story #3903 AC1/AC2)', () => {
   const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
@@ -45,20 +46,12 @@ describe('실 ko.json — inbox·board 네임스페이스 전량(story #3903 AC1
     expect(findings).toContainEqual({ key: 'board.invalidTransition', matches: ['ㅂ니다'], value: '유효하지 않은 상태 전이입니다' });
   });
 
-  // 무관 PR no-op — 실 ko.json 키에 의존하면(canvas.*·docs.*·retro.sessionNotFound 순으로
-  // 이미 3회 재발 — 그 네임스페이스가 승격되거나 문구가 정리될 때마다 깨짐, story #3920
-  // 착지 뒤엔 "스코프 밖 합니다체 실 키" 자체가 0이 될 전망) 합성 fixture로 대체한다(PO
-  // 처방, 공유 verify-scoped-i18n-honorific-tone.test.ts와 동일 패턴 — 이 파일은 자기완결
-  // 목적상 로컬로 재정의).
+  // 무관 PR no-op — 실 ko.json 키에 의존하면(canvas.*·docs.*·retro.sessionNotFound·
+  // board.epicSwimlaneLoadError(#3921·#3923가 재도입) 순으로 이미 4회 재발) 계속
+  // 깨진다 — 공유 헬퍼(honorific-tone-out-of-scope-fixture.ts, PO 3차 처방
+  // 2026-09-15)로 통일해 이 클래스를 구조적으로 종식.
   it('무관 PR no-op — inbox·board 밖·SCOPED_KEYS 밖의 실 합니다체 키는 namespace 전량 승격 뒤에도 안 본다', () => {
-    const OUT_OF_SCOPE_NAMESPACE = '__outOfScopeFixture3903b';
-    const OUT_OF_SCOPE_KEY = `${OUT_OF_SCOPE_NAMESPACE}.sample`;
-    const OUT_OF_SCOPE_VALUE = '이것은 스코프 밖 합성 문장이라고 알렸습니다.';
-    expect(OUT_OF_SCOPE_VALUE).toMatch(/습니다|ㅂ니다|십시오/);
-    const mutated = { ...(JSON.parse(JSON.stringify(ko)) as Record<string, unknown>), [OUT_OF_SCOPE_NAMESPACE]: { sample: OUT_OF_SCOPE_VALUE } };
-    const effectiveKeys = resolveEffectiveScopedKeys(mutated);
-    expect(effectiveKeys).not.toContain(OUT_OF_SCOPE_KEY);
-    expect(findHonorificToneInScopedKeys(mutated, effectiveKeys)).toEqual([]);
+    assertOutOfScopeFixtureIgnoredByEffectiveKeys(ko);
   });
 
   it('실 ko.json의 inbox leaf 개수가 하한(70) 이상이다(실측 88, honorific-scope/inbox.json)', () => {
