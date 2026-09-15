@@ -33,9 +33,11 @@ list_stories(...)`처럼 **직접 호출**하는 테스트가 흔한데(HTTP 왕
 시점에 거치는 자리라, 여기 적어야 «다음 사람도» 읽는다.
 """
 import ast
+import functools
 import inspect
 import os
 import re
+import sys
 import uuid
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -173,10 +175,15 @@ def _reset_schema_for_destructive_tests(request):
 # 회귀를 잡는다 — 다른 테이블에서 같은 클래스가 재발하면 이 감시 대상을 넓히면 된다,
 # story #3175 usage_meter 선례와 같은 "발견되면 넓힌다" 원칙).
 #
-# destructive_schema 마커가 붙은 모듈은 스코프 밖(no-op) — 그 파일들은 파일별 프로세스
+# destructive_schema로 등록된 모듈은 스코프 밖(no-op) — 그 파일들은 파일별 프로세스
 # 격리 + 자체 스키마 리셋(위 `_reset_schema_for_destructive_tests`)을 전제로 스스로
-# 스키마를 바꾸는 게 정상 동작이지 버그가 아니다. `pytestmark`가 리스트든 단일 마커든
-# 둘 다 커버(이 코드베이스의 기존 두 관례 모두 실측).
+# 스키마를 바꾸는 게 정상 동작이지 버그가 아니다. PO PR#4304 리뷰(2026-09-15)로 실사고
+# 발견: `request.module.pytestmark` 기반 판정은 **모듈 레벨** 마커만 보여
+# `test_f6d1bbaa_stamp_integrity_guard.py`처럼 destructive_schema를 **함수별**
+# `@pytest.mark.destructive_schema`로만 붙이는 파일을 놓쳐 destructive 샤드에서도
+# 오탐 FAIL을 냈다 — `_is_registered_destructive_file()`로 교체, 마커 도출이 아니라
+# `infra/destructive-schema-shard-weights/`(story 23bf1913 가드가 보는 단일 정본 등록
+# 집합)에 파일 상대경로가 등재돼 있는지로 판정한다(마커 부여 방식과 무관).
 _SCHEMA_DRIFT_WATCH_TABLES = ("users",)
 
 
@@ -200,15 +207,49 @@ def _snapshot_columns(url: str, table: str) -> tuple[tuple[str, str | None, str,
     return tuple(sorted((r[0], r[1], r[2], r[3]) for r in rows))
 
 
+def _is_registered_destructive_file(module) -> bool:
+    """story #3896 CHANGES(PO PR#4304 리뷰 2026-09-15) — 실사고로 발견: module-scope
+    fixture 시점의 `request.module.pytestmark`(또는 `request.node.get_closest_marker`)는
+    **모듈 레벨** 마커만 본다. `test_f6d1bbaa_stamp_integrity_guard.py`처럼 destructive_
+    schema를 **함수별** `@pytest.mark.destructive_schema` 데코레이터로만 붙이는 파일(이
+    저장소의 두 번째 관례, `pytestmark = pytest.mark.skipif(...)`가 모듈 레벨을 이미 차지한
+    경우 흔함)은 그 방식으로 못 걸러져 destructive 샤드(파일별 격리 fresh DB·스키마 변이가
+    정상 동작)에서도 이 감시 fixture가 돌아 오탐 FAIL을 냈다.
+
+    처방: 마커 재도출을 그만두고, `infra/destructive-schema-shard-weights/`(story
+    23bf1913 가드가 보는 그 SSOT — destructive_schema 파일은 전부 여기 등재돼야 한다)를
+    직접 읽어 "이 모듈이 destructive로 등록된 파일인가"를 판정한다 — 마커 부여 방식(모듈
+    전체 vs 함수별)과 완전히 무관해진다."""
+    module_file = getattr(module, "__file__", None)
+    if not module_file:
+        return False
+    try:
+        rel_path = Path(module_file).resolve().relative_to(_BACKEND_DIR_FOR_WEIGHTS).as_posix()
+    except ValueError:
+        return False
+    return rel_path in _registered_destructive_files()
+
+
+@functools.lru_cache(maxsize=1)
+def _registered_destructive_files() -> frozenset[str]:
+    """`infra/destructive-schema-shard-weights/*.json`의 `file` 필드 전수(story 23bf1913
+    SSOT) — 세션당 1회만 디스크 읽기(다수 모듈이 매번 재계산할 필요 없음, 파일 목록은
+    같은 pytest 프로세스 안에서 안 바뀐다)."""
+    sys.path.insert(0, str(_BACKEND_DIR_FOR_WEIGHTS / "scripts"))
+    from shard_destructive_tests import load_weights  # noqa: PLC0415
+
+    return frozenset(load_weights().keys())
+
+
+_BACKEND_DIR_FOR_WEIGHTS = Path(__file__).resolve().parent.parent
+
+
 @pytest.fixture(autouse=True, scope="module")
 def _detect_schema_drift_in_non_destructive_module(request):
     """모듈(파일) 단위 전/후 스냅샷 대조 — 로우 데이터가 아니라 컬럼 메타데이터만 보므로
     (create_all/drop_all/ALTER 등으로만 바뀌는 것) 정상적인 매 테스트 데이터 변경엔
     false-positive 0. realdb URL(PARITY/ALEMBIC) 미설정 시(=순수 mock 세션) no-op."""
-    module_pytestmark = getattr(request.module, "pytestmark", [])
-    if not isinstance(module_pytestmark, list):
-        module_pytestmark = [module_pytestmark]
-    if any(getattr(m, "name", None) == _MARKER_NAME for m in module_pytestmark):
+    if _is_registered_destructive_file(request.module):
         yield
         return
 
