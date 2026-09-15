@@ -9,7 +9,6 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
-  SCOPED_NAMESPACES,
   findHonorificToneInScopedKeys,
   resolveEffectiveScopedKeys,
 } from './verify-scoped-i18n-honorific-tone';
@@ -38,9 +37,12 @@ function getByPath(root: Record<string, unknown>, dotted: string): unknown {
 }
 
 describe('story #3920 — 잔여 16 네임스페이스 등록 + 해요체 0', () => {
-  it('16 네임스페이스가 모두 어조 가드 스코프(honorific-scope/*.json 유도)에 등재됐다', () => {
+  // story #3927(전역 스캔 승격) — "어조 가드 스코프에 등재"라는 절차 자체가 없어졌다(항상
+  // ko.json 전체가 스코프). 이 자리는 "그 네임스페이스가 실제로 ko.json에 존재한다"는
+  // 훨씬 약한(하지만 여전히 유효한) 전제로 좁혔다 — 등록 여부가 아니라 실재 여부.
+  it('16 네임스페이스가 모두 ko.json에 실재한다(story #3927부터 등록 절차 자체가 없음 — 실재하면 항상 스코프)', () => {
     for (const ns of NAMESPACES_3920) {
-      expect(SCOPED_NAMESPACES).toContain(ns);
+      expect(Object.keys(koMessages)).toContain(ns);
     }
   });
 
@@ -54,7 +56,7 @@ describe('story #3920 — 잔여 16 네임스페이스 등록 + 해요체 0', ()
 
   it('등록-전용 8 네임스페이스(이미 합니다체 0)도 스코프에 편입돼 합니다체 잔존 0', () => {
     for (const ns of NAMESPACES_3920_REGISTER_ONLY) {
-      expect(SCOPED_NAMESPACES).toContain(ns);
+      expect(Object.keys(koMessages)).toContain(ns);
     }
     const effectiveKeys = resolveEffectiveScopedKeys(koMessages).filter((k) =>
       NAMESPACES_3920_REGISTER_ONLY.includes(k.split('.')[0]),
