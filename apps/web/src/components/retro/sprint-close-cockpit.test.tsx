@@ -50,7 +50,7 @@ describe('SprintCloseCockpit (E-SPRINT-LOOP 1b9f4ecb)', () => {
     const markup = renderToStaticMarkup(wrap(
       <SprintCloseCockpit hypotheses={[MEASURING]} synthesis={null} nextHypotheses={[]} onGenerateSynthesis={noop} onAdoptRecommendation={noop} />,
     ));
-    expect(markup).toContain('아직 측정 중입니다');
+    expect(markup).toContain('아직 측정 중이에요');
   });
 
   it('SOUL-LOCK: falsified renders neutral (info), never destructive/red in any form', () => {
