@@ -18,9 +18,16 @@ const koMessages = JSON.parse(
   readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages/ko.json'), 'utf8'),
 ) as Record<string, unknown>;
 
+// 16 네임스페이스 — 이 카드가 합니다체 → 해요체로 «이관»한 자리.
 const NAMESPACES_3920 = [
   'register', 'share', 'pricing', 'glance', 'orgGatePolicy', 'notFound', 'channel', 'orgBriefing',
   'session', 'activityTimeline', 'desktop', 'activation', 'proofCapsule', 'shell', 'attentionQueue', 'loopQueue',
+];
+
+// 8 네임스페이스 — 이미 합니다체 0이지만 어조 가드 스코프 «밖»이던 자리. 이 카드가 등록만
+// 더해 「스코프 = ko.json 전체 ns」 등식에 가까워진다(잔여 board·inbox는 story #3903/4316).
+const NAMESPACES_3920_REGISTER_ONLY = [
+  'eventCard', 'legal', 'mobileTabBar', 'outcomeLoop', 'releaseNotes', 'rewards', 'workcell', 'workList',
 ];
 
 function getByPath(root: Record<string, unknown>, dotted: string): unknown {
@@ -40,6 +47,17 @@ describe('story #3920 — 잔여 16 네임스페이스 등록 + 해요체 0', ()
   it('16 네임스페이스의 실 ko.json 값에 합니다체 잔존 0(스코프 스캔·전량 이관 확認)', () => {
     const effectiveKeys = resolveEffectiveScopedKeys(koMessages).filter((k) =>
       NAMESPACES_3920.includes(k.split('.')[0]),
+    );
+    expect(effectiveKeys.length).toBeGreaterThan(0);
+    expect(findHonorificToneInScopedKeys(koMessages, effectiveKeys)).toEqual([]);
+  });
+
+  it('등록-전용 8 네임스페이스(이미 합니다체 0)도 스코프에 편입돼 합니다체 잔존 0', () => {
+    for (const ns of NAMESPACES_3920_REGISTER_ONLY) {
+      expect(SCOPED_NAMESPACES).toContain(ns);
+    }
+    const effectiveKeys = resolveEffectiveScopedKeys(koMessages).filter((k) =>
+      NAMESPACES_3920_REGISTER_ONLY.includes(k.split('.')[0]),
     );
     expect(effectiveKeys.length).toBeGreaterThan(0);
     expect(findHonorificToneInScopedKeys(koMessages, effectiveKeys)).toEqual([]);
