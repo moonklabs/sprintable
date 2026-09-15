@@ -15,6 +15,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 from verify_no_new_korean_user_strings import (  # noqa: E402
     EXEMPT_FILES,
+    check_baseline_growth,
     evaluate,
     scan_repo,
     scan_source,
@@ -211,6 +212,71 @@ def test_mutation_removing_exemption_would_flag_catalog_ko_values():
     source = catalog_path.read_text(encoding="utf-8")
     violations = scan_source(source, "app/services/i18n_catalog.py")
     assert len(violations) > 0, "i18n_catalog.py에 ko 문자열이 없다 — fixture 전제가 깨짐(카탈로그가 비었는지 확認)"
+
+
+# ─── check_baseline_growth(story #3924, 페드루 PO 處方 2026-09-15) ──────────────────────
+# CI "Verify baseline can only shrink" 스텝의 구 구현(순수 집합 diff, comm -13과 동형)이
+# 기존 grandfather 항목의 «문구만 바뀐» rename을 신규 추가로 오판한 실 사고(PR#4316,
+# app/routers/conversations.py:3062 — 3903 AC1 습니다체→해요체 + PO 후속 「회원님을」→
+# 「나를」)를 재현·고정한다. 판정 자체가 파일 단위 항목 수 비증가+전역 비증가로 바뀌어
+# rename은 통과하고 진짜 순증만 잡는다.
+
+
+def test_growth_guard_flags_a_brand_new_file():
+    """⭐양성대조 ① — base에 없던 파일이 head에 항목을 가지면(그 파일 카운트 0→N>0) RED."""
+    base = {"app/routers/existing.py::기존 문구"}
+    head = {"app/routers/existing.py::기존 문구", "app/routers/new_file.py::새로 생긴 한글 문장"}
+    violations = check_baseline_growth(base, head)
+    assert any("new_file.py" in v for v in violations)
+
+
+def test_growth_guard_allows_a_pure_text_rename_in_the_same_file():
+    """⭐양성대조 ② — 같은 파일에서 기존 항목 1건이 삭제되고 문구가 바뀐 1건이 추가되면
+    (그 파일 카운트 불변) GREEN — 이게 구 구현(comm -13)이 오판하던 정확한 그 케이스."""
+    base = {"app/routers/conversations.py::님이 회원님을 멘션했습니다"}
+    head = {"app/routers/conversations.py::님이 나를 멘션했어요"}
+    assert check_baseline_growth(base, head) == []
+
+
+def test_growth_guard_allows_removal():
+    """⭐양성대조 ③ — 항목이 그냥 삭제되면(코드가 실제로 고쳐짐) GREEN(환영할 감소)."""
+    base = {"app/routers/x.py::지워질 문구", "app/routers/x.py::남을 문구"}
+    head = {"app/routers/x.py::남을 문구"}
+    assert check_baseline_growth(base, head) == []
+
+
+def test_growth_guard_still_flags_a_real_net_increase_in_the_same_file():
+    """음성대조 — rename처럼 보이지만 실제로 그 파일에서 항목이 «늘면»(2건 남기고 1건만
+    지움 = 순증 1) 여전히 RED — rename 관용이 "그 파일은 뭘 해도 통과"가 아님을 고정."""
+    base = {"app/routers/x.py::기존 A"}
+    head = {"app/routers/x.py::기존 A(그대로)", "app/routers/x.py::신규 B"}
+    violations = check_baseline_growth(base, head)
+    assert any("app/routers/x.py" in v for v in violations)
+
+
+def test_growth_guard_real_incident_regression_red_to_green():
+    """실 사고(PR#4316 head d2a79022, story #3924 처방 前) 재현 — 구 판정(순수 집합 diff)
+    이라면 이 케이스는 RED였다(new_lines에 새 텍스트가 걸림). 이 함수(파일 단위+전역
+    비증가)로는 GREEN이어야 한다 — 처방 자체의 존재 이유를 고정하는 회귀가드."""
+    base_baseline = {
+        "app/routers/conversations.py::님이 회원님을 멘션했습니다",
+        "app/routers/conversations.py::서킷브레이커 해제는 org owner/admin만 가능합니다.",
+    }
+    head_baseline = {
+        "app/routers/conversations.py::님이 나를 멘션했어요",
+        "app/routers/conversations.py::서킷브레이커 해제는 org owner/admin만 가능합니다.",
+    }
+    # 구 구현이었다면 이 assert가 실패했을 것(새 텍스트가 base에 없어 new_lines에 걸림).
+    old_impl_new_lines = head_baseline - base_baseline
+    assert old_impl_new_lines, "fixture 전제 확認 — 구 구현이 오판하려면 실제로 새 줄이 있어야 한다"
+
+    assert check_baseline_growth(base_baseline, head_baseline) == []
+
+
+def test_growth_guard_empty_base_means_every_head_entry_counts_but_nothing_is_new():
+    """경계 — base·head가 완전히 동일하면(아무것도 안 바뀜) 당연히 GREEN."""
+    same = {"app/routers/a.py::a", "app/routers/b.py::b"}
+    assert check_baseline_growth(same, set(same)) == []
 
 
 if __name__ == "__main__":

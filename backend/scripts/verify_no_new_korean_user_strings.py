@@ -217,6 +217,86 @@ def evaluate(violations: list[Violation], baseline: set[str]) -> tuple[list[Viol
     return new_violations, stale
 
 
+def _key_file(key: str) -> str:
+    """violation_key의 파일 부분(첫 '::' 앞) — story #3924."""
+    return key.split("::", 1)[0]
+
+
+def check_baseline_growth(base_keys: set[str], head_keys: set[str]) -> list[str]:
+    """story #3924(페드루 PO 處方, 2026-09-15) — CI의 "baseline can only shrink" 판정을
+    develop 대비 순수 집합 diff(구 구현, `comm -13`과 동형)가 아니라 «파일 단위 항목 수
+    비증가 + 전역 총수 비증가»로 한다.
+
+    구 구현의 결함(실 사고, PR#4316 head d2a79022) — 기존 grandfather 항목의 **문구만**
+    바뀌면(그 자리 코드가 톤 전환 등으로 실제로 고쳐져 baseline도 같이 갱신된 경우) 옛
+    줄 삭제+새 줄 추가로 보여, 새 줄 쪽만 보는 집합 diff가 이걸 "신규 위반"으로 오판한다
+    — 3779 카드의 취지("더 늘지만 않으면 된다")를 못 담는 구현 갭이었다. 이 함수는 파일별
+    항목 개수만 비교해 "그 파일에서 늘었는가"만 본다 — 같은 파일 안에서 1건 지우고 1건
+    바뀐 문구로 다시 추가되면(rename) 개수가 그대로라 통과. 정말로 새 파일이 생기거나
+    (base 0건 → head N건, N>0이면 자동으로 위반) 어떤 파일이든 개수가 순증하면 위반.
+
+    전역 총수 체크는 파일별 체크가 모든 파일에 대해 성립하면 수학적으로 항상 같이
+    성립하지만(부분합이 전부 비증가면 전체합도 비증가), 카드 AC가 "파일 단위+전역" 둘을
+    명시해 방어적으로 별도 라인으로도 낸다.
+
+    반환: 위반 설명 문자열 목록(빈 리스트면 통과, 순서는 파일명 정렬 후 전역 항목이 마지막).
+    """
+    base_counts: dict[str, int] = {}
+    for k in base_keys:
+        f = _key_file(k)
+        base_counts[f] = base_counts.get(f, 0) + 1
+    head_counts: dict[str, int] = {}
+    for k in head_keys:
+        f = _key_file(k)
+        head_counts[f] = head_counts.get(f, 0) + 1
+
+    violations: list[str] = []
+    for file in sorted(set(head_counts) | set(base_counts)):
+        b = base_counts.get(file, 0)
+        h = head_counts.get(file, 0)
+        if h > b:
+            violations.append(f"{file}: {b}건 → {h}건(+{h - b}, 파일 단위 순증)")
+
+    if len(head_keys) > len(base_keys):
+        violations.append(
+            f"전역 총수: {len(base_keys)}건 → {len(head_keys)}건(+{len(head_keys) - len(base_keys)})"
+        )
+
+    return violations
+
+
+def main_check_growth(base_path: Path, head_path: Path) -> int:
+    """story #3924 — CI "Verify baseline can only shrink" 스텝이 부르는 CLI 진입점.
+    base_path가 없으면(비교 기준 없음 — 새 브랜치 최초 push류) skip으로 exit 0.
+    """
+    if not base_path.exists():
+        print(
+            f"baseline growth check skipped: no comparison base ({base_path} 없음 — 이 PR이 "
+            "그 파일을 «처음 도입»하는 중이면 정상이다. 다음 PR부터는 develop에 파일이 있어 "
+            "실제 비교가 돈다)"
+        )
+        return 0
+
+    base_keys = load_baseline(base_path)
+    head_keys = load_baseline(head_path)
+    violations = check_baseline_growth(base_keys, head_keys)
+
+    print(f"baseline entries: base={len(base_keys)} head={len(head_keys)}")
+
+    if violations:
+        print(
+            "\nFAIL: baseline이 파일 단위로 늘었다 — 이 파일은 «순증»만 막는다(story #3779"
+            " 취지, story #3924가 rename 오판을 정정). 새 위반은 여기 grandfather로 넣지"
+            " 말고 실제로 고치는(낱말표/코드정본으로 옮기는) 것이 맞다:"
+        )
+        for v in violations:
+            print(f"  - {v}")
+        return 1
+
+    print("OK: baseline은 파일 단위로도 전역으로도 늘지 않았다(문구만 바뀐 rename은 허용)")
+    return 0
+
+
 def main() -> int:
     backend_root = Path(__file__).resolve().parent.parent
     try:
@@ -278,5 +358,12 @@ if __name__ == "__main__":
         _keys = {violation_key(v) for v in _violations}
         write_baseline(_backend_root / BASELINE_FILE, _keys)
         print(f"wrote {len(_keys)} keys to {BASELINE_FILE}")
+    elif "--check-growth" in sys.argv:
+        # story #3924 — CI "Verify baseline can only shrink" 스텝 진입점.
+        # 사용법: verify_no_new_korean_user_strings.py --check-growth <base_baseline> <head_baseline>
+        _idx = sys.argv.index("--check-growth")
+        _base_path = Path(sys.argv[_idx + 1])
+        _head_path = Path(sys.argv[_idx + 2])
+        sys.exit(main_check_growth(_base_path, _head_path))
     else:
         sys.exit(main())
