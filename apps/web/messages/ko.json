@@ -4627,7 +4627,17 @@
     "noteLabel": "메모",
     "reasonLabel": "사유",
     "gateConnective": "**{gateType}** — **{verdict}**",
-    "targetMissing": "(삭제된 {type})"
+    "targetMissing": "(삭제된 {type})",
+    "workAssignedHeader": "작업 배정",
+    "goalMeasuredHeader": "목표 측정",
+    "assigneeLabel": "담당자",
+    "assigneeMissing": "(탈퇴한 담당자)",
+    "assignedByLabel": "배정자",
+    "goalLabel": "목표",
+    "unitLabel": "단위",
+    "sourceLabel": "출처",
+    "metricValueLabel": "측정치",
+    "measuredAtLabel": "측정 시각"
   },
   "activityLog": {
     "title": "활동 로그",

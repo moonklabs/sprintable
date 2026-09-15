@@ -43,8 +43,18 @@ interface EventBlockCardProps {
    * 시점에 짓는다)·리졸버 자체가 없음(키 자체 부재, agent_decision·support_escalation
    * — 구조적 부재). 예전 계약(순 문자열)도 방어적으로 남겨둔다(구버전 캐시/직접 호출부
    * 호환) — 현재 실 프리셋은 더 이상 `{{ref.X}}`를 직접 참조하지 않는다(전부
-   * `labels.work_item_target` 경유, 아래). */
-  refs?: Record<string, string | null | { found: boolean; token?: string; type?: string }>;
+   * `labels.work_item_target` 경유, 아래).
+   *
+   * story #3893 — `assignee`/`assigned_by` 값은 `work_item`과 다른 두 모양(member는
+   * 항상 단일 리졸버라 "리졸버 자체가 없음" 갈래가 없다, events.py
+   * `_render_event_notification_member_ref`): 찾음(`{found:true, name}`)·못 찾음
+   * (`{found:false}` — 텍스트는 이 컴포넌트가 렌더 시점에 짓는다). */
+  refs?: Record<
+    string,
+    | string
+    | null
+    | { found: boolean; token?: string; type?: string; name?: string }
+  >;
 }
 
 // story #2637 — 유나 design 스티어 2차(08-14, 재작업 방식까지 PR 前 확定).
@@ -229,6 +239,27 @@ export function EventBlockCard({ template, payload, refs }: EventBlockCardProps)
     }
   }
 
+  // story #3893(PO 確定 2026-09-14) — refs.assignee/refs.assigned_by(events.py
+  // `_render_event_notification_member_ref`의 두 모양)를 labels.assignee_name/
+  // assigned_by_name으로 미리 해석한다. work_item_target과 동형 원칙이되 member는
+  // "리졸버 자체가 없음" 갈래가 없다(항상 단일 리졸버) — 찾음=이름 그대로 / 못 찾음=
+  // 은은한 assigneeMissing 문구(fail-loud ⟨missing:…⟩ 마커와 다른 층, targetMissing과
+  // 동일 원칙) / refs 키 자체 부재(해당 preset이 아님)=labels 키 미설정→optional
+  // elision.
+  for (const [refsKey, labelKey] of [
+    ['assignee', 'assignee_name'],
+    ['assigned_by', 'assigned_by_name'],
+  ] as const) {
+    const memberRef = refs?.[refsKey];
+    if (memberRef && typeof memberRef === 'object') {
+      if (memberRef.found && typeof memberRef.name === 'string') {
+        labels[labelKey] = memberRef.name;
+      } else if (!memberRef.found) {
+        labels[labelKey] = tEventCard('assigneeMissing');
+      }
+    }
+  }
+
   // story #3884 AC2 — preset.gate.verdict 본문 접속어. PO 구조 결정: 리터럴 「게이트」를
   // 없애고(미등재 gate_type이 ccGateGeneric 「게이트」 폴백일 때 헤더 "게이트 판정"과
   // 겹쳐 "게이트 게이트 — …"로 이중 인쇄되는 잠재 결함 해소) gateType/verdict 두 라벨만
@@ -252,6 +283,16 @@ export function EventBlockCard({ template, payload, refs }: EventBlockCardProps)
     targetLabel: tEventCard('targetLabel'),
     noteLabel: tEventCard('noteLabel'),
     reasonLabel: tEventCard('reasonLabel'),
+    // story #3893
+    workAssignedHeader: tEventCard('workAssignedHeader'),
+    goalMeasuredHeader: tEventCard('goalMeasuredHeader'),
+    assigneeLabel: tEventCard('assigneeLabel'),
+    assignedByLabel: tEventCard('assignedByLabel'),
+    goalLabel: tEventCard('goalLabel'),
+    unitLabel: tEventCard('unitLabel'),
+    sourceLabel: tEventCard('sourceLabel'),
+    metricValueLabel: tEventCard('metricValueLabel'),
+    measuredAtLabel: tEventCard('measuredAtLabel'),
   };
 
   // story #3884 — 현재 실 프리셋(status_changed·gate.verdict)은 더 이상 `{{ref.X}}`를
@@ -458,14 +499,23 @@ export interface EventPreviewHelpers {
  * 안 쓴다 — 그 값이 ChatMarkdown용 `**bold**` 마크다운을 품고 있어(block-template 렌더
  * 전용) 순수 텍스트 리스트 행에 쓰면 별표(`**`)가 그대로 샌다.
  *
- * 현재 이 두 preset만 처리(PO가 실측한 사고 자리 정확히 그만큼) — 다른 event_key·필수
- * payload 필드 부재는 null을 돌려줘 호출부가 기존 content 폴백으로 떨어진다(과잉
- * 일반화 금지, 발명 0).
+ * 현재 이 4 preset만 처리(gate.verdict·work.status_changed — PO가 실측한 사고 자리,
+ * story #3893으로 work.assigned·goal.measured 추가) — 다른 event_key·필수 payload
+ * 필드 부재(work.assigned는 refs.assignee 미해소 포함)는 null을 돌려줘 호출부가 기존
+ * content 폴백으로 떨어진다(과잉 일반화 금지, 발명 0).
  */
 export function composeEventPreviewLine(
   eventKey: string | undefined,
   payload: Record<string, unknown> | undefined,
   helpers: EventPreviewHelpers,
+  // story #3893(PO 確定 2026-09-14) — preset.work.assigned 미리보기가 담당자 이름을
+  // 실으려면 BE가 발행 시점에 계산한 refs(assignee)가 필요하다(work_item_target과
+  // 동형 원칙 — FE가 매 행마다 멤버 조회 API를 새로 부르면 CHANGES①(useOrgDomainLabels
+  // 행별 중복요청 제거)이 막은 것과 같은 N+1 클래스가 된다). msg_metadata['event']에
+  // 이미 실려 있다(_event_payload()가 additive로 그대로 투영, BE 스키마 변경 0 —
+  // 그라운딩 확認: _publish_registry_event_core가 event_context 전체를 msg_metadata에
+  // 저장하고 그 dict가 이미 refs를 포함).
+  refs?: Record<string, string | null | { found: boolean; token?: string; type?: string; name?: string }>,
 ): string | null {
   if (!eventKey || !payload) return null;
   const { tBoard, tCage, tDashboard, tEventCard, tEntity, domainLabels } = helpers;
@@ -493,6 +543,33 @@ export function composeEventPreviewLine(
     const typeLabel = typeof workItemType === 'string' ? entityTypeLabel(workItemType, tEntity) : null;
     const summary = typeLabel ? `${typeLabel} ${fromLabel} → ${toLabel}` : `${fromLabel} → ${toLabel}`;
     return `${tEventCard('statusChangedHeader')} · ${summary}`;
+  }
+
+  // story #3893(유나 §⑤ 확定 2026-09-14 19:47Z) — "작업 배정 · {work_item_type 라벨} →
+  // {담당자 이름}"(예 "작업 배정 · 스토리 → 미르코"). 담당자 미해소(refs.assignee 없음/
+  // found:false)는 다른 필수 필드 부재와 동일하게 null(과잉 일반화 금지 — 이 preset은
+  // 담당자 없이는 문장이 성립하지 않는다, work_item_type/verdict 부재 시 null과 동형).
+  if (eventKey === 'preset.work.assigned') {
+    const workItemType = payload['work_item_type'];
+    const typeLabel = typeof workItemType === 'string' ? entityTypeLabel(workItemType, tEntity) : null;
+    const assigneeRef = refs?.['assignee'];
+    const assigneeName =
+      assigneeRef && typeof assigneeRef === 'object' && assigneeRef.found && typeof assigneeRef.name === 'string'
+        ? assigneeRef.name
+        : null;
+    if (!typeLabel || !assigneeName) return null;
+    return `${tEventCard('workAssignedHeader')} · ${typeLabel} → ${assigneeName}`;
+  }
+
+  // story #3893(유나 §⑤ 확定) — "목표 측정 · {metric_value}{metric_unit}"(예 "목표 측정 ·
+  // 12%"). metric_unit은 접미사 접합(공백 0) — 원 필드가 "%"류 기호라 공백을 넣으면
+  // "12 %"로 어색해진다(유나 예시 문자열 그대로 재현).
+  if (eventKey === 'preset.goal.measured') {
+    const metricValue = payload['metric_value'];
+    if (metricValue === undefined || metricValue === null || metricValue === '') return null;
+    const metricUnit = payload['metric_unit'];
+    const unitStr = typeof metricUnit === 'string' ? metricUnit : '';
+    return `${tEventCard('goalMeasuredHeader')} · ${metricValue}${unitStr}`;
   }
 
   return null;

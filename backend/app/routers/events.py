@@ -1152,6 +1152,31 @@ async def _work_item_ref_token(
     return None
 
 
+async def _render_event_notification_member_ref(
+    db: AsyncSession, *, org_id: uuid.UUID, member_id: uuid.UUID,
+) -> dict | None:
+    """story #3893(PO 確定 2026-09-14 20:0x) — payload의 raw member UUID(예:
+    `assignee_member_id`)를 표시 이름으로. `_render_event_notification_work_item_ref`와
+    동형 계약(dict found-판별, 텍스트를 여기서 굽지 않는다)이되, member는 항상 단일
+    리졸버(TeamMember/OrgMember, `resolve_member_display_name` 기존 SSOT 재사용 — 새
+    조회 로직 0)라 "리졸버 자체가 없는 타입" 갈래가 없다(work_item의 3모양 中 2모양만
+    성립):
+    - 찾음: `{"found": True, "name": "표시 이름"}`
+    - 못 찾음(탈퇴·삭제 등, 이름을 지어내지 않는다 원칙): `{"found": False}` — 호출부
+      (event-block-card.tsx)가 렌더 시점 로케일로 문구를 짓는다(targetMissing과 동일
+      원칙, 새 fail 텍스트를 여기서 굽지 않는다).
+
+    참조 토큰(`[제목](entity:type:id)`)이 아니라 순 이름 문자열만 돌려준다 — member는
+    work_item처럼 클릭 딥링크 대상이 아니다(PO 確定 — 「담당자=이름 해석」만, 토큰화
+    요구 0)."""
+    from app.services.member_resolver import resolve_member_display_name
+
+    name = await resolve_member_display_name(member_id, org_id, db)
+    if not name:
+        return {"found": False}
+    return {"found": True, "name": name}
+
+
 async def _render_event_notification_doc_ref(
     db: AsyncSession, *, org_id: uuid.UUID, doc_id_raw: str,
 ) -> str | None:
@@ -1970,6 +1995,26 @@ async def _publish_registry_event_core(
             )
             if _work_item_ref_result is not None:
                 refs["work_item"] = _work_item_ref_result
+
+    # story #3893(PO 確定 2026-09-14) — assignee_member_id/assigned_by_member_id(raw
+    # UUID, 지금은 preset.work.assigned 1곳)도 위 work_item과 동일 원칙(key 존재
+    # 여부만으로 트리거, definition_key 무관 — 신규 발행 갈래 0, #2633 AC2 단일 파이프
+    # 유지)으로 발행 시점에 이름 해석한다. 두 필드 다 같은 리졸버(member_ref) 재사용 —
+    # payload 키 이름만 다르다(담당자 vs 배정자, 유나 확定 2026-09-14 20:16Z).
+    for _refs_member_payload_key, _refs_member_refs_key in (
+        ("assignee_member_id", "assignee"),
+        ("assigned_by_member_id", "assigned_by"),
+    ):
+        _refs_member_id_raw = payload.get(_refs_member_payload_key)
+        if not _refs_member_id_raw:
+            continue
+        try:
+            _refs_member_id = uuid.UUID(str(_refs_member_id_raw))
+        except (ValueError, AttributeError, TypeError):
+            continue
+        refs[_refs_member_refs_key] = await _render_event_notification_member_ref(
+            db, org_id=org_id, member_id=_refs_member_id,
+        )
 
     # story #2637 AC 0-a: event_context → msg_metadata['event'](additive) — FE가 이 메시지를
     # "이벤트 발행분"으로 인지하고 event_key로 event_definitions를 조회해 block_template

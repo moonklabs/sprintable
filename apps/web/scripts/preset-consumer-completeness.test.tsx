@@ -133,6 +133,11 @@ describe('story #3886(가드) — preset 블록 템플릿 소비처 완전성(AC
 const BACKEND_ALEMBIC_VERSIONS_DIR = path.resolve(__dirname, '../../../backend/alembic/versions');
 const TARGET_MIGRATION_FILE = '0376_event_card_target_ref_and_ui_copy_t_namespace.py';
 const PRESET_KEYS = ['preset.work.status_changed', 'preset.gate.verdict'] as const;
+// story #3893 — 나머지 2 preset(work.assigned·goal.measured)의 최신 SSOT는 0377(별도
+// 파일 — 0376이 다룬 키와 서로소라 두 자가 독립적으로 공존한다, 이 파일이 하나를 고치며
+// 다른 하나를 헛돌게 만들지 않는다).
+const TARGET_MIGRATION_FILE_0377 = '0377_work_assigned_goal_measured_t_namespace.py';
+const PRESET_KEYS_0377 = ['preset.work.assigned', 'preset.goal.measured'] as const;
 
 /** 중괄호 짝을 찾되, 큰따옴표 문자열 리터럴(백슬래시 이스케이프 포함) 안의 `{`/`}`는
  * 세지 않는다 — 이 딕셔너리의 값 자체가 `"{{t.statusChangedHeader}}"`처럼 mustache
@@ -176,6 +181,7 @@ function extractTemplatesDict(filePath: string): Record<string, unknown> {
 }
 
 const MIGRATED_TEMPLATES = extractTemplatesDict(path.join(BACKEND_ALEMBIC_VERSIONS_DIR, TARGET_MIGRATION_FILE));
+const MIGRATED_TEMPLATES_0377 = extractTemplatesDict(path.join(BACKEND_ALEMBIC_VERSIONS_DIR, TARGET_MIGRATION_FILE_0377));
 
 const STATUS_CHANGED_0376 = {
   blocks: [
@@ -218,6 +224,52 @@ describe('story #3886(가드) — CHANGES(페드루 2026-09-14 18:27Z) TS 미러
   });
 });
 
+// story #3893 — work.assigned/goal.measured의 SSOT(0377) 미러+최신성 자. 0376 자와 완전
+// 병렬(대상 키 집합만 다름, 서로 간섭 0).
+const WORK_ASSIGNED_0377 = {
+  blocks: [
+    { type: 'header', text: '{{t.workAssignedHeader}}' },
+    { type: 'text', text: '**{{label.work_item_type}}** → **{{label.assignee_name}}**' },
+    { type: 'fields', fields: [
+      { label: '{{t.targetLabel}}', value: '{{label.work_item_target}}', optional: true },
+      { label: '{{t.assigneeLabel}}', value: '{{label.assignee_name}}', optional: true },
+      { label: '{{t.assignedByLabel}}', value: '{{label.assigned_by_name}}', optional: true },
+    ] },
+  ],
+};
+const GOAL_MEASURED_0377 = {
+  blocks: [
+    { type: 'header', text: '{{t.goalMeasuredHeader}}' },
+    { type: 'text', text: '{{t.metricValueLabel}} **{{payload.metric_value}}**' },
+    { type: 'fields', fields: [
+      { label: '{{t.goalLabel}}', value: '{{payload.goal_id}}' },
+      { label: '{{t.unitLabel}}', value: '{{payload.metric_unit}}', optional: true },
+      { label: '{{t.sourceLabel}}', value: '{{payload.source}}' },
+      { label: '{{t.measuredAtLabel}}', value: '{{payload.measured_at}}', optional: true },
+    ] },
+  ],
+};
+
+describe('story #3893(가드) — 0377 TS 미러 drift 자', () => {
+  it('TS 상수가 0377 마이그 파일의 _TEMPLATES와 바이트(구조) 동일하다 — 드리프트 시 RED', () => {
+    expect(MIGRATED_TEMPLATES_0377['preset.work.assigned']).toEqual(WORK_ASSIGNED_0377);
+    expect(MIGRATED_TEMPLATES_0377['preset.goal.measured']).toEqual(GOAL_MEASURED_0377);
+  });
+
+  it('0377이 이 두 preset 키를 마지막으로 건드린 마이그레이션이다(더 최신 파일이 같은 키를 또 바꾸면 RED)', () => {
+    const files = readdirSync(BACKEND_ALEMBIC_VERSIONS_DIR).filter((f) => /^\d{4}_.*\.py$/.test(f));
+    let latest: { file: string; revision: number } | null = null;
+    for (const f of files) {
+      const revision = Number(f.slice(0, 4));
+      const content = readFileSync(path.join(BACKEND_ALEMBIC_VERSIONS_DIR, f), 'utf8');
+      const touchesAny = PRESET_KEYS_0377.some((k) => content.includes(`"${k}"`));
+      if (!touchesAny) continue;
+      if (!latest || revision > latest.revision) latest = { file: f, revision };
+    }
+    expect(latest?.file).toBe(TARGET_MIGRATION_FILE_0377);
+  });
+});
+
 function catalogOf(entries: Record<string, unknown>): Record<string, EventDefinitionSummary> {
   const out: Record<string, EventDefinitionSummary> = {};
   for (const [key, block_template] of Object.entries(entries)) {
@@ -229,6 +281,8 @@ function catalogOf(entries: Record<string, unknown>): Record<string, EventDefini
 const EVENT_CATALOG = catalogOf({
   'preset.work.status_changed': STATUS_CHANGED_0376,
   'preset.gate.verdict': GATE_VERDICT_0376,
+  'preset.work.assigned': WORK_ASSIGNED_0377,
+  'preset.goal.measured': GOAL_MEASURED_0377,
 });
 
 function expectNoMissingMarkers(text: string) {
@@ -311,6 +365,67 @@ describe('story #3886(가드) — EventBlockCard 실 소비 렌더(AC1)', () => 
       },
     };
     await act(async () => { root.render(wrap(<ChatBubble message={message} isMine={false} eventDefinitionsByKey={EVENT_CATALOG} />)); });
+    expectNoMissingMarkers(container.textContent ?? '');
+  });
+
+  // story #3893 — work.assigned/goal.measured(0377). member ref는 work_item과 다른
+  // 2모양(found/found:false, 리졸버 자체가 없는 갈래는 없음 — 항상 단일 리졸버).
+  it('work.assigned — 담당자·배정자 둘 다 찾음(found:true) ⟨missing⟩ 0', async () => {
+    const message: ChatMessage = {
+      ...baseMessage, content: '[이벤트] preset.work.assigned', sender_type: 'agent',
+      event: {
+        event_key: 'preset.work.assigned',
+        payload: { work_item_type: 'story', work_item_id: 'S-3', assignee_member_id: 'M-1', assigned_by_member_id: 'M-2' },
+        refs: {
+          work_item: { found: true, token: '[결제 흐름 재설계](entity:story:S-3)' },
+          assignee: { found: true, name: '미르코' },
+          assigned_by: { found: true, name: '페드루' },
+        },
+      },
+    };
+    await act(async () => { root.render(wrap(<ChatBubble message={message} isMine={false} eventDefinitionsByKey={EVENT_CATALOG} />)); });
+    expectNoMissingMarkers(container.textContent ?? '');
+  });
+
+  it('work.assigned — 담당자 못 찾음(found:false)·배정자 필드 부재(optional 생략) ⟨missing⟩ 0, en 로케일', async () => {
+    const message: ChatMessage = {
+      ...baseMessage, content: '[이벤트] preset.work.assigned', sender_type: 'agent',
+      event: {
+        event_key: 'preset.work.assigned',
+        payload: { work_item_type: 'task', work_item_id: 'T-1', assignee_member_id: 'M-9' },
+        refs: {
+          work_item: { found: false, type: 'task' },
+          assignee: { found: false },
+        },
+      },
+    };
+    await act(async () => { root.render(wrapEn(<ChatBubble message={message} isMine={false} eventDefinitionsByKey={EVENT_CATALOG} />)); });
+    expectNoMissingMarkers(container.textContent ?? '');
+  });
+
+  it('goal.measured — 단위·측정시각 있음 ⟨missing⟩ 0', async () => {
+    const message: ChatMessage = {
+      ...baseMessage, content: '[이벤트] preset.goal.measured', sender_type: 'agent',
+      event: {
+        event_key: 'preset.goal.measured',
+        payload: { goal_id: 'G-1', metric_value: 12, metric_unit: '%', source: 'internal_ops', measured_at: '2026-09-14T00:00:00.000Z' },
+        refs: {},
+      },
+    };
+    await act(async () => { root.render(wrap(<ChatBubble message={message} isMine={false} eventDefinitionsByKey={EVENT_CATALOG} />)); });
+    expectNoMissingMarkers(container.textContent ?? '');
+  });
+
+  it('goal.measured — 단위·측정시각 부재(optional 생략) ⟨missing⟩ 0, en 로케일', async () => {
+    const message: ChatMessage = {
+      ...baseMessage, content: '[이벤트] preset.goal.measured', sender_type: 'agent',
+      event: {
+        event_key: 'preset.goal.measured',
+        payload: { goal_id: 'G-2', metric_value: 8, source: 'internal_ops' },
+        refs: {},
+      },
+    };
+    await act(async () => { root.render(wrapEn(<ChatBubble message={message} isMine={false} eventDefinitionsByKey={EVENT_CATALOG} />)); });
     expectNoMissingMarkers(container.textContent ?? '');
   });
 });

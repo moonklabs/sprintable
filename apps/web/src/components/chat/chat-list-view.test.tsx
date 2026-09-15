@@ -340,7 +340,69 @@ describe('ChatListView — story #3888 이벤트 메시지 미리보기(raw slug
     expect(container.textContent).toContain('내일 회의 몇 시예요?');
   });
 
-  // 양성대조 — event_key가 이 카드가 처리하는 2개 preset 밖(예: 미래 확장 preset)이면
+  // story #3893(유나 §⑤ 확定 2026-09-14 19:47Z) — 2 preset 추가. refs.assignee는
+  // BE _event_payload()가 msg_metadata['event']를 additive로 그대로 투영해오는 값
+  // (그라운딩 확認 — 새 BE 스키마 0, latest_message.event.refs 타입만 이 스토리가
+  // 넓혔다).
+  it('work.assigned 이벤트는 헤더+종류→담당자로 렌더한다(refs.assignee 경유)', async () => {
+    stubFetchWithConversations([{
+      id: 'conv-event-3', type: 'dm', title: '배정봇',
+      latest_message: {
+        content: '[이벤트] preset.work.assigned',
+        created_at: '2026-09-14T18:00:00Z',
+        event: {
+          event_key: 'preset.work.assigned',
+          payload: { work_item_type: 'story', work_item_id: 'S-1', assignee_member_id: 'M-1' },
+          refs: { assignee: { found: true, name: '미르코' } },
+        },
+      },
+      updated_at: '2026-09-14T18:00:00Z', unread_count: 0,
+    }]);
+    await mount();
+    expect(container.textContent).toContain('작업 배정 · 스토리 → 미르코');
+    expect(container.textContent).not.toContain('[이벤트]');
+    expect(container.textContent).not.toContain('preset.work.assigned');
+  });
+
+  it('goal.measured 이벤트는 헤더+값+단위로 렌더한다', async () => {
+    stubFetchWithConversations([{
+      id: 'conv-event-4', type: 'dm', title: '측정봇',
+      latest_message: {
+        content: '[이벤트] preset.goal.measured',
+        created_at: '2026-09-14T18:00:00Z',
+        event: {
+          event_key: 'preset.goal.measured',
+          payload: { goal_id: 'G-1', metric_value: 12, metric_unit: '%', source: 'internal_ops' },
+        },
+      },
+      updated_at: '2026-09-14T18:00:00Z', unread_count: 0,
+    }]);
+    await mount();
+    expect(container.textContent).toContain('목표 측정 · 12%');
+    expect(container.textContent).not.toContain('preset.goal.measured');
+  });
+
+  // 음성대조 — refs.assignee가 없으면(구버전 캐시 등) 반쪽 요약 금지 원칙에 따라 raw
+  // content로 폴백한다(과잉 일반화 금지 계약 확認, work.status_changed와 동일 패턴).
+  it('음성대조 — work.assigned인데 refs.assignee가 없으면 raw content 폴백', async () => {
+    stubFetchWithConversations([{
+      id: 'conv-event-5', type: 'dm', title: '배정봇(구버전)',
+      latest_message: {
+        content: '[이벤트] preset.work.assigned',
+        created_at: '2026-09-14T18:00:00Z',
+        event: {
+          event_key: 'preset.work.assigned',
+          payload: { work_item_type: 'story', work_item_id: 'S-1', assignee_member_id: 'M-1' },
+        },
+      },
+      updated_at: '2026-09-14T18:00:00Z', unread_count: 0,
+    }]);
+    await mount();
+    expect(container.textContent).toContain('[이벤트] preset.work.assigned');
+  });
+
+  // 양성대조 — event_key가 이 카드가 처리하는 4개 preset(story #3893으로 2개 추가) 밖
+  // (예: 미래 확장 preset)이면
   // composeEventPreviewLine이 null을 돌려주고 기존 content 폴백으로 조용히 떨어진다
   // (과잉 일반화 금지 계약 확認).
   it('양성대조 — 미지원 event_key는 raw content 폴백으로 떨어진다(과잉 일반화 금지)', async () => {

@@ -92,8 +92,11 @@ export interface ChatMessage {
      * story #3884 — `work_item` 값이 dict로 넓어졌다(events.py `_render_event_
      * notification_work_item_ref`): 찾음(`{found:true, token}`)·리졸버는 있는데 못
      * 찾음(`{found:false, type}`)·리졸버 자체가 없음(키 자체 부재). 구계약(순 문자열)도
-     * 방어적으로 허용(EventBlockCard가 둘 다 받는다). */
-    refs?: Record<string, string | null | { found: boolean; token?: string; type?: string }>;
+     * 방어적으로 허용(EventBlockCard가 둘 다 받는다).
+     * story #3893 — `assignee`/`assigned_by` 값(events.py `_render_event_notification_
+     * member_ref`): 찾음(`{found:true, name}`)·못 찾음(`{found:false}`) — member는 항상
+     * 단일 리졸버라 "리졸버 자체가 없음" 갈래가 없다(work_item의 3모양 中 2모양만). */
+    refs?: Record<string, string | null | { found: boolean; token?: string; type?: string; name?: string }>;
   } | null;
   /** story #2985 — 'request'(액션 카드)/'result'(회신 카드) 판별(BE msg_metadata.activation.kind
    * → _activation_payload가 top-level로 노출). story #3001부터 'request_info'는 BE가 더
