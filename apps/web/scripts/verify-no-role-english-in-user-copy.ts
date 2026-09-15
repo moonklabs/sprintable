@@ -6,14 +6,16 @@
  * in-ko-value.ts)는 대문자 토큰(`\b[A-Z]{2,}\b`)·값 전체 순 ASCII만 봐서 소문자 `owner`/
  * `admin`이 한국어 문장에 섞인 자리는 원리상 못 잡는다 — 축이 다른 자매 가드다.
  *
- * ## 기전 — messages/ko.json에서 `content`·`organization`·`pricingPlans`·`contentRules`
- * 네임스페이스만 재귀 순회, leaf 문자열 값에서 단어경계 소문자 슬러그 `\b(owner|admin)\b`
- * (ASCII)를 검출. 자리(키 경로)가 ALLOWLIST에 있으면 예외 — 사용자가 역할 필드에 실제로
- * 타이핑하는 리터럴 슬러그를 예시로 보여주는 placeholder는 정당한 노출이라 허용한다.
+ * ## 기전 — messages/ko.json에서 `content`·`organization`·`pricingPlans`·`contentRules`·
+ * `settings` 네임스페이스만 재귀 순회, leaf 문자열 값에서 단어경계 소문자 슬러그
+ * `\b(owner|admin)\b`(ASCII)를 검출. 자리(키 경로)가 ALLOWLIST에 있으면 예외 — 사용자가
+ * 역할 필드에 실제로 타이핑하는 리터럴 슬러그를 예시로 보여주는 placeholder는 정당한
+ * 노출이라 허용한다.
  *
- * ## 대상 네임스페이스를 4개로 한정한 이유 — 영어 UI(en.json)나 기술 키(로그·이벤트명 등)
- * 까지 훑으면 오탐이 는다. 이 카드가 확定한 «사용자 문장» 표면은 이 4개 네임스페이스뿐이라
- * 스코프를 거기로 고정한다(settings.* 역할 낱말은 #3892가 별도로 처리 — 여기 스코프 밖).
+ * ## 대상 네임스페이스를 한정한 이유 — 영어 UI(en.json)나 기술 키(로그·이벤트명 등)까지
+ * 훑으면 오탐이 는다. 이 카드가 확定한 «사용자 문장» 표면은 이 네임스페이스들뿐이라 스코프를
+ * 거기로 고정한다. settings는 #3892(PR #4295)가 settings.* 역할 낱말을 소유자/관리자로
+ * 정리해 develop에 착지한 뒤 승격됐다(그 전에 넣었으면 settings 잔존 슬러그로 CI RED).
  */
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -26,7 +28,9 @@ export interface RoleSlugRef {
 }
 
 // 이 카드가 확定한 «사용자 문장» 네임스페이스 — 여기 값만 검사한다.
-export const TARGET_NAMESPACES: readonly string[] = ['content', 'organization', 'pricingPlans', 'contentRules'];
+// settings는 #3892(PR #4295)가 settings.* 역할 낱말을 소유자/관리자로 정리한 뒤 승격됐다
+// (그 전에 넣었으면 CI RED였다 — 만료 조건: #4295 develop 착지).
+export const TARGET_NAMESPACES: readonly string[] = ['content', 'organization', 'pricingPlans', 'contentRules', 'settings'];
 
 // 단어경계 소문자 ASCII 슬러그. Korean 음절·`/`·`·`(middot)·공백은 전부 non-word라
 // "owner/admin"·"owner·admin"·"owner가"·"조직 owner에게" 모두 매칭된다. 대문자(Owner)나

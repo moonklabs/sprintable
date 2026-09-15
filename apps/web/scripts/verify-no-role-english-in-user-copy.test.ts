@@ -48,8 +48,16 @@ describe('scanRoleSlugs — story #3894 셀프테스트', () => {
     expect(scanRoleSlugs(fixture)).toEqual([]);
   });
 
-  it('음성대조 — 대상 밖 네임스페이스(settings 등)의 owner/admin은 스캔 안 함', () => {
+  it('⭐settings 네임스페이스도 스캔한다(#4295 착지 뒤 승격) — owner → RED', () => {
     const fixture = { settings: { memberRoleChangeOwnerOnlyError: 'owner 권한이 필요한 작업입니다' } };
+    const refs = scanRoleSlugs(fixture);
+    expect(refs).toHaveLength(1);
+    expect(refs[0]!.key).toBe('settings.memberRoleChangeOwnerOnlyError');
+    expect(refs[0]!.slug).toBe('owner');
+  });
+
+  it('음성대조 — 대상 밖 네임스페이스(docs 등)의 owner/admin은 스캔 안 함', () => {
+    const fixture = { docs: { someKey: 'owner 권한이 필요한 작업입니다' } };
     expect(scanRoleSlugs(fixture)).toEqual([]);
   });
 });
@@ -78,8 +86,14 @@ describe('computeViolations — ALLOWLIST(placeholder 예시 슬러그)', () => 
 });
 
 describe('TARGET_NAMESPACES — 스코프 고정', () => {
-  it('대상은 정확히 content·organization·pricingPlans·contentRules 4개', () => {
-    expect([...TARGET_NAMESPACES].sort()).toEqual(['content', 'contentRules', 'organization', 'pricingPlans']);
+  it('대상은 정확히 content·organization·pricingPlans·contentRules·settings 5개(#4295 뒤 settings 승격)', () => {
+    expect([...TARGET_NAMESPACES].sort()).toEqual([
+      'content',
+      'contentRules',
+      'organization',
+      'pricingPlans',
+      'settings',
+    ]);
   });
 });
 
