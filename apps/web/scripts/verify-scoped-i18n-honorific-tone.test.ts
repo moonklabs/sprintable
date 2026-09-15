@@ -701,6 +701,11 @@ describe('실 ko.json — presence·commandPalette·accountSwitcher·common·act
   });
 });
 
+// story #3923 — unsubscribe·authResetRequired·forgotPassword·nativeOauthReturn 네임스페이스
+// 전량 검증은 별도 파일 verify-scoped-i18n-honorific-tone.3923.test.ts로 분리(페드루 PO
+// 2차 지시, 2026-09-15 — 병렬 append PR 다수라 이 공유 파일에 블록을 덧붙이면 구조적으로
+// 충돌 재발).
+
 // ---------------------------------------------------------------------------
 // story #3909 — canvas·docs 네임스페이스 전량(SCOPED_NAMESPACES 승격, honorific-scope/
 // canvas.json·docs.json). 다른 namespace 승격 스토리들과 정확히 같은 3형 검증

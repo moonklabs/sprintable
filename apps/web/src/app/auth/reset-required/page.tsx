@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { ShieldCheck } from 'lucide-react';
+import { useTranslations } from 'next-intl';
 import { SprintableLogo } from '@/components/brand/sprintable-logo';
 
 /**
@@ -19,6 +20,7 @@ import { SprintableLogo } from '@/components/brand/sprintable-logo';
  * 코드베이스 어디에도 없어 지어내지 않음(no-fiction). 지원 채널이 확定되면 후속으로 추가.
  */
 export default function AuthResetRequiredPage() {
+  const t = useTranslations('authResetRequired');
   return (
     <div className="flex min-h-screen items-center justify-center bg-muted">
       <div className="w-full max-w-sm space-y-6 rounded-2xl bg-background p-4 shadow-lg sm:p-8">
@@ -30,9 +32,9 @@ export default function AuthResetRequiredPage() {
           <div className="flex justify-center text-info">
             <ShieldCheck className="size-10" aria-hidden="true" />
           </div>
-          <h1 className="text-lg font-semibold text-foreground">보안이 강화되었습니다</h1>
+          <h1 className="text-lg font-semibold text-foreground">{t('heading')}</h1>
           <p className="text-sm text-muted-foreground">
-            안전한 로그인을 위해 비밀번호를 한 번 재설정해 주세요. 계정과 데이터는 그대로 유지됩니다.
+            {t('body')}
           </p>
         </div>
 
@@ -40,7 +42,7 @@ export default function AuthResetRequiredPage() {
           href="/forgot-password"
           className="flex w-full min-h-[44px] items-center justify-center rounded-lg bg-brand px-4 py-3 text-sm font-medium text-brand-foreground transition hover:bg-brand/90"
         >
-          비밀번호 재설정하기
+          {t('resetButton')}
         </Link>
       </div>
     </div>

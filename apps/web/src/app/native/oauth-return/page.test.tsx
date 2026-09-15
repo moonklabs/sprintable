@@ -8,6 +8,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { NextIntlClientProvider } from 'next-intl';
+import koMessages from '../../../../messages/ko.json';
 
 const h = vi.hoisted(() => ({ searchParams: new URLSearchParams() }));
 
@@ -34,7 +36,13 @@ afterEach(async () => {
 
 async function mountAndWait() {
   const { default: NativeOauthReturnPage } = await import('./page');
-  await act(async () => { root.render(<NativeOauthReturnPage />); });
+  await act(async () => {
+    root.render(
+      <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+        <NativeOauthReturnPage />
+      </NextIntlClientProvider>,
+    );
+  });
 }
 
 describe('NativeOauthReturnPage — custom scheme 버튼 (P1 후속)', () => {

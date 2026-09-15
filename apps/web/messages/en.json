@@ -1231,6 +1231,33 @@
     "retryLink": "Request again (from Settings, after signing in)",
     "backToLogin": "Back to login"
   },
+  "forgotPassword": {
+    "title": "Forgot password",
+    "sentMessage": "We sent a reset link to your email. Please check your inbox.",
+    "backToLogin": "Back to login",
+    "instructions": "Enter the email you signed up with and we'll send you a password reset link.",
+    "emailPlaceholder": "Email",
+    "sending": "Sending...",
+    "submitButton": "Send reset link"
+  },
+  "authResetRequired": {
+    "heading": "Security has been strengthened",
+    "body": "Please reset your password once for a more secure login. Your account and data stay the same.",
+    "resetButton": "Reset password"
+  },
+  "unsubscribe": {
+    "invalidLink": "This link is invalid.",
+    "processing": "Processing...",
+    "unsubscribed": "You've been unsubscribed.",
+    "linkExpired": "This link is invalid or has expired.",
+    "processError": "Something went wrong while processing your request.",
+    "backToLogin": "Back to login"
+  },
+  "nativeOauthReturn": {
+    "title": "You're signed in",
+    "body": "Tap the button below to return to the Sprintable app.",
+    "returnButton": "Return to Sprintable app"
+  },
   "onboarding": {
     "createOrg": "Create Organization",
     "welcome": "Welcome to Sprintable!",
@@ -3341,7 +3368,10 @@
     "invitedByOrg": "Invited by {org}.",
     "signupEmail": "You'll sign up with {email}.",
     "decline": "Decline (for now)",
-    "acceptFailed": "Failed to accept invitation."
+    "acceptFailed": "Failed to accept invitation.",
+    "linkInvalidTitle": "This invite isn't valid",
+    "linkInvalidBody": "This invite link has expired or was already used.",
+    "goToChatButton": "Go to chat"
   },
   "resetPassword": {
     "title": "Set a new password",
