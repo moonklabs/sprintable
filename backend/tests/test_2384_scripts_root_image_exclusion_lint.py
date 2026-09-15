@@ -65,6 +65,12 @@ _CI_OR_LOCAL_ONLY_ALLOWLIST = frozenset({
                                                    # DB 무접속, throwaway 로컬 DB만 왕복.
     "verify_no_new_korean_user_strings.py",       # story #3779(1층) — CI lint 게이트(app/ 재귀
                                                    # AST 정적 스캔, 운영 DB 무접속).
+    "verify_user_facing_tone.py",                 # story #3931(2층) — CI lint 게이트(app/ 재귀
+                                                   # AST/정규식 정적 스캔 + FE api-error-message.ts
+                                                   # 읽기 전용 파싱, 운영 DB 무접속 —
+                                                   # verify_no_new_korean_user_strings.py와 동형
+                                                   # 관례. ci.yml의 「BE 한글 사용자 문장 재발
+                                                   # 가드」 잡이 직접 호출).
     "measure_korean_user_string_reachability.py", # story #3779(2층) — 로컬/카드용 1회성 목록
                                                    # 산출 도구(model_db_drift_audit.py와 동일
                                                    # 범주, CI 미등재). 운영 DB 무접속, app/ 정적
