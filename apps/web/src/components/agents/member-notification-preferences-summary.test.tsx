@@ -78,15 +78,15 @@ describe('MemberNotificationPreferencesSummary — story #2623', () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: { data: [] }, error: null, meta: null }) })));
     await act(async () => { root.render(wrap(<MemberNotificationPreferencesSummary memberId="agent-1" memberLabel="Agent One" />)); });
     await act(async () => {});
-    expect(document.body.textContent).toContain('설정된 대화별 수신 레벨이 없습니다');
+    expect(document.body.textContent).toContain('설정된 대화별 수신 레벨이 없어요');
   });
 
   it('fetch 실패(예: BE 착지 前 무권한 403)는 에러 상태로 갈린다 — 빈 목록으로 오인하지 않는다', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, json: async () => ({}) })));
     await act(async () => { root.render(wrap(<MemberNotificationPreferencesSummary memberId="agent-1" memberLabel="Agent One" />)); });
     await act(async () => {});
-    expect(document.body.textContent).toContain('수신 계약을 불러오지 못했습니다');
-    expect(document.body.textContent).not.toContain('설정된 대화별 수신 레벨이 없습니다');
+    expect(document.body.textContent).toContain('수신 계약을 불러오지 못했어요');
+    expect(document.body.textContent).not.toContain('설정된 대화별 수신 레벨이 없어요');
   });
 
   it('유나 확定 ④ — GET /api/conversations/{id}로 대화 제목을 해소해 raw id 대신 보여준다', async () => {

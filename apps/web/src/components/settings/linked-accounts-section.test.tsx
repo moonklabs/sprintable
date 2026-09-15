@@ -110,7 +110,7 @@ describe('LinkedAccountsSection — 최소 1개 로그인 수단 가드 (AC3)', 
     const btn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '연결 해제');
     await act(async () => { btn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await flush();
-    expect(container.textContent).toContain('이 계정의 유일한 로그인 수단입니다');
+    expect(container.textContent).toContain('이 계정의 유일한 로그인 수단이에요');
   });
 });
 
@@ -118,19 +118,19 @@ describe('LinkedAccountsSection — 콜백 리다이렉트 쿼리 문구 (AC2)',
   it('linked=apple면 성공 문구', async () => {
     useSearchParamsMock.mockReturnValue(new URLSearchParams('linked=apple'));
     await mount({ linked_providers: ['apple'] });
-    expect(container.textContent).toContain('Apple 계정이 연결되었습니다.');
+    expect(container.textContent).toContain('Apple 계정이 연결됐어요.');
   });
 
   it('link_error=PROVIDER_ALREADY_LINKED면 "다른 계정에 이미 연결됨" 문구(병합 아님을 명시)', async () => {
     useSearchParamsMock.mockReturnValue(new URLSearchParams('link_error=PROVIDER_ALREADY_LINKED'));
     await mount({ linked_providers: [] });
-    expect(container.textContent).toContain('이미 다른 Sprintable 계정에 연결되어 있습니다');
+    expect(container.textContent).toContain('이미 다른 Sprintable 계정에 연결되어 있어요');
   });
 
   it('link_error=LINK_SESSION_MISMATCH면 세션 변경 안내', async () => {
     useSearchParamsMock.mockReturnValue(new URLSearchParams('link_error=LINK_SESSION_MISMATCH'));
     await mount({ linked_providers: [] });
-    expect(container.textContent).toContain('연결 중 세션이 변경되었습니다');
+    expect(container.textContent).toContain('연결 중 세션이 변경됐어요');
   });
 });
 
@@ -219,6 +219,6 @@ describe('LinkedAccountsSection — story #3772 CHANGES(카디르 QA b5ca5e384) 
 
     // ⭐되돌리면(refresh의 isInitialLoad 구분 제거) RED — 후속 refresh 실패가 onLoadError를 또 부른다.
     expect(onLoadError).not.toHaveBeenCalled();
-    expect(container.textContent).toContain('계정 연결이 해제되었습니다');
+    expect(container.textContent).toContain('계정 연결이 해제됐어요');
   });
 });

@@ -59,7 +59,7 @@ describe('ProjectAccessSection — 인가는 서버 응답으로 판정(story #3
     await act(async () => { root.render(wrap(<ProjectAccessSection projectId="proj-1" />)); });
     await flush();
 
-    expect(container.textContent).toContain('관리자 전용 페이지입니다');
+    expect(container.textContent).toContain('관리자 전용 페이지예요');
   });
 
   it('project-access-candidates가 200이면 org-admin이 아니어도(project-level admin) 정상 렌더된다 — 신규 회귀 pin', async () => {
@@ -78,7 +78,7 @@ describe('ProjectAccessSection — 인가는 서버 응답으로 판정(story #3
     await act(async () => { root.render(wrap(<ProjectAccessSection projectId="proj-1" />)); });
     await flush();
 
-    expect(container.textContent).not.toContain('관리자 전용 페이지입니다');
+    expect(container.textContent).not.toContain('관리자 전용 페이지예요');
     expect(container.textContent).toContain('프로젝트 관리자');
   });
 
