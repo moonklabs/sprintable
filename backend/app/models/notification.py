@@ -19,7 +19,8 @@ class Notification(Base):
     type: Mapped[str] = mapped_column(Text, nullable=False)
     title: Mapped[str] = mapped_column(Text, nullable=False)
     body: Mapped[str | None] = mapped_column(Text, nullable=True)
-    is_read: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # story #3896 — DB has DEFAULT false, ORM lacked server_default (drift).
+    is_read: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     reference_type: Mapped[str | None] = mapped_column(Text, nullable=True)
     reference_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -35,4 +36,5 @@ class NotificationSetting(Base):
     member_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
     channel: Mapped[str] = mapped_column(Text, nullable=False)
     event_type: Mapped[str] = mapped_column(Text, nullable=False)
-    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # story #3896 — DB has DEFAULT true, ORM lacked server_default (drift).
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")

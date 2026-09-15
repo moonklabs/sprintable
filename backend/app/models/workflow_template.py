@@ -19,7 +19,8 @@ class WorkflowTemplate(Base):
     steps: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     presets: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     rules_template: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
-    is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # story #3896 — DB has DEFAULT true, ORM lacked server_default (drift).
+    is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     created_at: Mapped[str] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[str] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)

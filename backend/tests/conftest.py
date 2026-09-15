@@ -158,6 +158,85 @@ def _reset_schema_for_destructive_tests(request):
     yield
 
 
+# story #3896(customer-zero·BE·테스트 위생, 카디르 재QA 2026-09-14) — non-destructive
+# 스윕을 단일 프로세스로 돌리면 도중에 `users.marketing_email_opt_out`의 server_default가
+# 벗겨져(information_schema.columns 직접 대조로 실측) 그 컬럼에 의존하는 raw INSERT 패턴
+# 테스트 73파일이 968건 연쇄 FAIL한다 — 같은 파일 단독 격리·CI 샤딩 실행은 항상 clean(즉
+# "그 파일이 문제"가 아니라 "그 파일보다 먼저 실행된 어떤 파일이 스키마를 건드렸다"는
+# 신호). 원인 파일을 수동으로 찾는 대신(968건이 다 터진 뒤에야 보이는 소음), 모듈(파일)
+# 단위로 스키마 스냅샷을 앞뒤 대조해 **드리프트가 실제로 일어난 바로 그 모듈**에서 즉시
+# RED로 표면화한다 — 968건 대신 1건, 그것도 원인 파일 이름이 찍힌 채로.
+#
+# `users` 1개 테이블만 본다(카디르 실측 재현 대상이 정확히 이 테이블 — "전 테이블"로
+# 넓히면 쿼리 비용이 테이블 수만큼 늘고, 이 사고 클래스 자체가 "어떤 모델이든 ORM
+# server_default가 비면 같은 방식으로 터질 수 있다"는 일반론이라 users 하나로도 충분히
+# 회귀를 잡는다 — 다른 테이블에서 같은 클래스가 재발하면 이 감시 대상을 넓히면 된다,
+# story #3175 usage_meter 선례와 같은 "발견되면 넓힌다" 원칙).
+#
+# destructive_schema 마커가 붙은 모듈은 스코프 밖(no-op) — 그 파일들은 파일별 프로세스
+# 격리 + 자체 스키마 리셋(위 `_reset_schema_for_destructive_tests`)을 전제로 스스로
+# 스키마를 바꾸는 게 정상 동작이지 버그가 아니다. `pytestmark`가 리스트든 단일 마커든
+# 둘 다 커버(이 코드베이스의 기존 두 관례 모두 실측).
+_SCHEMA_DRIFT_WATCH_TABLES = ("users",)
+
+
+def _snapshot_columns(url: str, table: str) -> tuple[tuple[str, str | None, str, str], ...] | None:
+    """(column_name, column_default, is_nullable, data_type) 정렬 튜플 — 순서 무관 비교용.
+    테이블 자체가 없으면 None(존재 여부는 이 자의 관심사 밖, 다른 가드 몫)."""
+    engine = create_engine(_sync_url(url))
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(
+                text(
+                    "SELECT column_name, column_default, is_nullable, data_type "
+                    "FROM information_schema.columns WHERE table_schema='public' AND table_name=:t"
+                ),
+                {"t": table},
+            ).all()
+    finally:
+        engine.dispose()
+    if not rows:
+        return None
+    return tuple(sorted((r[0], r[1], r[2], r[3]) for r in rows))
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _detect_schema_drift_in_non_destructive_module(request):
+    """모듈(파일) 단위 전/후 스냅샷 대조 — 로우 데이터가 아니라 컬럼 메타데이터만 보므로
+    (create_all/drop_all/ALTER 등으로만 바뀌는 것) 정상적인 매 테스트 데이터 변경엔
+    false-positive 0. realdb URL(PARITY/ALEMBIC) 미설정 시(=순수 mock 세션) no-op."""
+    module_pytestmark = getattr(request.module, "pytestmark", [])
+    if not isinstance(module_pytestmark, list):
+        module_pytestmark = [module_pytestmark]
+    if any(getattr(m, "name", None) == _MARKER_NAME for m in module_pytestmark):
+        yield
+        return
+
+    url = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
+    if not url:
+        yield
+        return
+
+    before = {t: _snapshot_columns(url, t) for t in _SCHEMA_DRIFT_WATCH_TABLES}
+    yield
+    after = {t: _snapshot_columns(url, t) for t in _SCHEMA_DRIFT_WATCH_TABLES}
+
+    drifted = {t: (before[t], after[t]) for t in _SCHEMA_DRIFT_WATCH_TABLES if before[t] != after[t]}
+    if drifted:
+        details = []
+        for table, (b, a) in drifted.items():
+            b_set = set(b or ())
+            a_set = set(a or ())
+            changed = sorted(map(str, (b_set - a_set) | (a_set - b_set)))
+            details.append(f"{table}: {changed}")
+        pytest.fail(
+            f"story #3896 스키마 드리프트 자 — 모듈 {request.module.__name__} 실행 前後로 "
+            "공유 alembic-migrated DB의 스키마(information_schema.columns)가 바뀌었습니다"
+            "(로우 데이터가 아니라 컬럼 메타데이터 — create_all/drop_all/ALTER 등 이 파일이나 "
+            "이 파일이 부르는 헬퍼가 스키마를 건드렸다는 뜻). 변경분: " + "; ".join(details)
+        )
+
+
 # story #3330(PR#3711) CI 재현 — `_MARKER_NAME`(destructive_schema) 미부여 테스트 전체(=
 # non-destructive realdb 스위트, "Backend pytest" job) 대상 conftest autouse 승격. 근본원인
 # (실측 확認, CI와 동일 스택트레이스로 로컬 재현): `app.core.database.engine`(전역·프로세스

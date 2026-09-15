@@ -35,7 +35,8 @@ class AuthIdentity(Base):
     provider_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     provider_subject: Mapped[str | None] = mapped_column(Text, nullable=True)
     email_at_link: Mapped[str | None] = mapped_column(Text, nullable=True)
-    email_verified_at_link: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # story #3896 — DB has DEFAULT false, ORM lacked server_default (drift).
+    email_verified_at_link: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     linked_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -56,7 +57,8 @@ class AuthMigration(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     firebase_uid: Mapped[str | None] = mapped_column(Text, nullable=True)
     legacy_auth_allowed_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    mfa_reenroll_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # story #3896 — DB has DEFAULT false, ORM lacked server_default (drift).
+    mfa_reenroll_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     last_error_code: Mapped[str | None] = mapped_column(Text, nullable=True)
     attempt_count: Mapped[int] = mapped_column(nullable=False, default=0)
     updated_at: Mapped[datetime] = mapped_column(
