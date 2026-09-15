@@ -1,4 +1,13 @@
-import { readFileSync } from 'node:fs';
+import {
+  copyFileSync as fsCopyFileSync,
+  mkdtempSync as fsMkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir as osTmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -10,6 +19,7 @@ import {
   findHardcodedParticleAfterPlaceholder,
   findHonorificToneInScopedKeys,
   findPersonaAdnominalTerminal,
+  loadHonorificScopeDir,
   resolveEffectiveScopedKeys,
 } from './verify-scoped-i18n-honorific-tone';
 
@@ -163,29 +173,86 @@ describe('실 ko.json — 스코프 키 count-lock(baseline 0, 새 자리 0)', (
 // story #3885 AC2 — SCOPED_NAMESPACES(chats 전량 승격) + resolveEffectiveScopedKeys.
 // ---------------------------------------------------------------------------
 
-describe('SCOPED_NAMESPACES — story #3885/#3889/#3892/#3895/#3898/#3899/#3901/#3908 AC2', () => {
-  it('chats·content·channelConnect·settings·agents·flow·gateConfig·recruiter·loops·cage·organization·pricingPlans·contentRules·onboarding·login·storage·insightsBoard·standup·goals 19개가 등재됐다(잔존 채무 0으로 확定된 네임스페이스만)', () => {
+// story #3916 — 등록이 honorific-scope/*.json 디렉터리에서 유도되므로(파일명 알파벳순),
+// 이 목록은 더는 "손으로 추가"가 아니라 "파일이 유도한 결과"를 고정하는 마이그레이션
+// 정합성 스냅샷이다(착수 시점 develop의 19개 배열과 항목 수·이름·minLeaf 전부 동일함을
+// 고정 — story #3916 AC1). 앞으로 새 네임스페이스가 추가돼도 이 테스트는 안 건드린다
+// (새 파일만 추가하면 되고, 이 스냅샷은 마이그레이션 그 자체의 무결성만 증명한다).
+describe('SCOPED_NAMESPACES — honorific-scope/ 디렉터리에서 유도(story #3916 AC1, 마이그레이션 정합성)', () => {
+  it('19개가 파일명 알파벳순으로 유도됐다(착수 시점 develop 배열과 항목 수·이름 전부 동일)', () => {
     expect(SCOPED_NAMESPACES).toEqual([
+      'agents',
+      'cage',
+      'channelConnect',
       'chats',
       'content',
-      'channelConnect',
-      'settings',
-      'agents',
+      'contentRules',
       'flow',
       'gateConfig',
-      'recruiter',
+      'goals',
+      'insightsBoard',
+      'login',
       'loops',
-      'cage',
+      'onboarding',
       'organization',
       'pricingPlans',
-      'contentRules',
-      'onboarding',
-      'login',
-      'storage',
-      'insightsBoard',
+      'recruiter',
+      'settings',
       'standup',
-      'goals',
+      'storage',
     ]);
+  });
+
+  it('각 네임스페이스의 minLeaf가 착수 시점 develop 배열의 값과 동일하다(마이그레이션 정합성)', () => {
+    const entries = loadHonorificScopeDir();
+    const minLeafByNamespace = Object.fromEntries(entries.map((e) => [e.namespace, e.minLeaf]));
+    expect(minLeafByNamespace).toEqual({
+      chats: 200, content: 500, channelConnect: 150, settings: 450, agents: 150, flow: 160,
+      gateConfig: 15, recruiter: 100, loops: 105, cage: 230, organization: 190, pricingPlans: 125,
+      contentRules: 70, onboarding: 75, login: 30, storage: 70, insightsBoard: 90, standup: 100, goals: 130,
+    });
+  });
+});
+
+describe('loadHonorificScopeDir — 자기 테스트(story #3916 AC2, 병렬 무충돌 설계의 실 메커니즘 검증)', () => {
+  const REAL_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'honorific-scope');
+
+  function copyDirToTemp(): string {
+    const tmp = fsMkdtempSync(path.join(osTmpdir(), 'honorific-scope-test-'));
+    for (const f of readdirSync(REAL_DIR)) {
+      fsCopyFileSync(path.join(REAL_DIR, f), path.join(tmp, f));
+    }
+    return tmp;
+  }
+
+  it('파일 하나를 제거하면(임시 복사본) 유도 결과가 정확히 1건 줄어든다(count-lock 메커니즘 검증)', () => {
+    const tmp = copyDirToTemp();
+    try {
+      const before = loadHonorificScopeDir(tmp);
+      const removed = before[0]!.namespace;
+      unlinkSync(path.join(tmp, `${removed}.json`));
+      const after = loadHonorificScopeDir(tmp);
+      expect(after.length).toBe(before.length - 1);
+      expect(after.map((e) => e.namespace)).not.toContain(removed);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('minLeaf가 measuredLeaf보다 큰 파일이 있으면(임시 복사본, 데이터 입력 실수 시뮬레이션) throw한다', () => {
+    const tmp = copyDirToTemp();
+    try {
+      const target = readdirSync(tmp)[0]!;
+      const data = JSON.parse(readFileSync(path.join(tmp, target), 'utf8')) as { minLeaf: number; measuredLeaf: number };
+      writeFileSync(path.join(tmp, target), JSON.stringify({ ...data, minLeaf: data.measuredLeaf + 1 }));
+      expect(() => loadHonorificScopeDir(tmp)).toThrow(/minLeaf\(\d+\)가 measuredLeaf\(\d+\)보다 큽니다/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('음성대조 — 실 honorific-scope/ 디렉터리는 모든 파일이 minLeaf ≤ measuredLeaf라 throw 없이 로드된다', () => {
+    expect(() => loadHonorificScopeDir()).not.toThrow();
   });
 });
 
@@ -259,50 +326,50 @@ describe('checkScopedNamespaceMinimums — 순수 함수', () => {
   it('⭐네임스페이스 19개가 ko.json에 아예 없으면(개명·삭제 시뮬레이션) 19건 위반을 낸다', () => {
     const violations = checkScopedNamespaceMinimums({ board: { x: 'y' } }); // 19개 다 없음
     expect(violations).toEqual([
+      { namespace: 'agents', actualCount: 0, minExpected: 150 },
+      { namespace: 'cage', actualCount: 0, minExpected: 230 },
+      { namespace: 'channelConnect', actualCount: 0, minExpected: 150 },
       { namespace: 'chats', actualCount: 0, minExpected: 200 },
       { namespace: 'content', actualCount: 0, minExpected: 500 },
-      { namespace: 'channelConnect', actualCount: 0, minExpected: 150 },
-      { namespace: 'settings', actualCount: 0, minExpected: 450 },
-      { namespace: 'agents', actualCount: 0, minExpected: 150 },
+      { namespace: 'contentRules', actualCount: 0, minExpected: 70 },
       { namespace: 'flow', actualCount: 0, minExpected: 160 },
       { namespace: 'gateConfig', actualCount: 0, minExpected: 15 },
-      { namespace: 'recruiter', actualCount: 0, minExpected: 100 },
+      { namespace: 'goals', actualCount: 0, minExpected: 130 },
+      { namespace: 'insightsBoard', actualCount: 0, minExpected: 90 },
+      { namespace: 'login', actualCount: 0, minExpected: 30 },
       { namespace: 'loops', actualCount: 0, minExpected: 105 },
-      { namespace: 'cage', actualCount: 0, minExpected: 230 },
+      { namespace: 'onboarding', actualCount: 0, minExpected: 75 },
       { namespace: 'organization', actualCount: 0, minExpected: 190 },
       { namespace: 'pricingPlans', actualCount: 0, minExpected: 125 },
-      { namespace: 'contentRules', actualCount: 0, minExpected: 70 },
-      { namespace: 'onboarding', actualCount: 0, minExpected: 75 },
-      { namespace: 'login', actualCount: 0, minExpected: 30 },
-      { namespace: 'storage', actualCount: 0, minExpected: 70 },
-      { namespace: 'insightsBoard', actualCount: 0, minExpected: 90 },
+      { namespace: 'recruiter', actualCount: 0, minExpected: 100 },
+      { namespace: 'settings', actualCount: 0, minExpected: 450 },
       { namespace: 'standup', actualCount: 0, minExpected: 100 },
-      { namespace: 'goals', actualCount: 0, minExpected: 130 },
+      { namespace: 'storage', actualCount: 0, minExpected: 70 },
     ]);
   });
 
   it('⭐네임스페이스가 있지만 leaf가 하한 밑이면(부분 삭제·오염) 위반을 낸다', () => {
     const violations = checkScopedNamespaceMinimums({ chats: { a: 'x', b: 'y' } }); // 2개뿐, 나머지는 아예 없음
     expect(violations).toEqual([
+      { namespace: 'agents', actualCount: 0, minExpected: 150 },
+      { namespace: 'cage', actualCount: 0, minExpected: 230 },
+      { namespace: 'channelConnect', actualCount: 0, minExpected: 150 },
       { namespace: 'chats', actualCount: 2, minExpected: 200 },
       { namespace: 'content', actualCount: 0, minExpected: 500 },
-      { namespace: 'channelConnect', actualCount: 0, minExpected: 150 },
-      { namespace: 'settings', actualCount: 0, minExpected: 450 },
-      { namespace: 'agents', actualCount: 0, minExpected: 150 },
+      { namespace: 'contentRules', actualCount: 0, minExpected: 70 },
       { namespace: 'flow', actualCount: 0, minExpected: 160 },
       { namespace: 'gateConfig', actualCount: 0, minExpected: 15 },
-      { namespace: 'recruiter', actualCount: 0, minExpected: 100 },
+      { namespace: 'goals', actualCount: 0, minExpected: 130 },
+      { namespace: 'insightsBoard', actualCount: 0, minExpected: 90 },
+      { namespace: 'login', actualCount: 0, minExpected: 30 },
       { namespace: 'loops', actualCount: 0, minExpected: 105 },
-      { namespace: 'cage', actualCount: 0, minExpected: 230 },
+      { namespace: 'onboarding', actualCount: 0, minExpected: 75 },
       { namespace: 'organization', actualCount: 0, minExpected: 190 },
       { namespace: 'pricingPlans', actualCount: 0, minExpected: 125 },
-      { namespace: 'contentRules', actualCount: 0, minExpected: 70 },
-      { namespace: 'onboarding', actualCount: 0, minExpected: 75 },
-      { namespace: 'login', actualCount: 0, minExpected: 30 },
-      { namespace: 'storage', actualCount: 0, minExpected: 70 },
-      { namespace: 'insightsBoard', actualCount: 0, minExpected: 90 },
+      { namespace: 'recruiter', actualCount: 0, minExpected: 100 },
+      { namespace: 'settings', actualCount: 0, minExpected: 450 },
       { namespace: 'standup', actualCount: 0, minExpected: 100 },
-      { namespace: 'goals', actualCount: 0, minExpected: 130 },
+      { namespace: 'storage', actualCount: 0, minExpected: 70 },
     ]);
   });
 

@@ -34,7 +34,7 @@
  * 판정 축은 값(value)만이다 — 키 이름·주석은 대상이 아니다(한자 가드·agent-tone 가드와
  * 동일 원칙).
  */
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -178,27 +178,45 @@ export const SCOPED_KEYS = [
 // 하한보다 많은 실 함수 재측이 항상 상한 자. goals.deleteConfirmTitle은 의문형
 // (「목표를 삭제하시겠습니까?」, story #3900 소관)이라 애초에 이 가드 대상이 아니다 —
 // 전환 전 플레이스홀더-계사 인접 0건 사전 스캔 확認).
-export const SCOPED_NAMESPACES = [
-  'chats',
-  'content',
-  'channelConnect',
-  'settings',
-  'agents',
-  'flow',
-  'gateConfig',
-  'recruiter',
-  'loops',
-  'cage',
-  'organization',
-  'pricingPlans',
-  'contentRules',
-  'onboarding',
-  'login',
-  'storage',
-  'insightsBoard',
-  'standup',
-  'goals',
-] as const;
+//
+// story #3916 — 위 19개(+추가되는 모든 네임스페이스)를 이 배열에 «꼬리로 append»하던
+// 방식은 같은 날 병렬로 열린 §⑤ 어조 PR마다 CONFLICTING을 냈다(4312 착지 → 4314·4315·
+// 4316 CONFLICTING·4314→4315→4316→4317 rebase 열차, 각 회 CI 25분+재앵커). GitHub 서버
+// 측 merge가 `.gitattributes merge=union`을 무시하는 것도 실측 확認(#4209) — 병렬 append
+// 충돌은 «파일당 하나»로만 없어진다. 그래서 등록을 `honorific-scope/<namespace>.json`
+// 디렉터리로 옮기고, 이 배열/맵은 그 디렉터리에서 유도한다(더는 손으로 안 건드림 — 새
+// 네임스페이스는 새 파일 하나만 추가하면 된다, 기존 파일은 무변).
+const HONORIFIC_SCOPE_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'honorific-scope');
+
+export interface HonorificScopeEntry {
+  namespace: string;
+  minLeaf: number;
+  story: string;
+  measuredLeaf: number;
+}
+
+/** honorific-scope/*.json을 읽어 네임스페이스 등록 목록을 유도한다(파일명 알파벳순 —
+ * 등재 순서에 의미를 두지 않는다, 판정은 항상 네임스페이스 단위라 순서 무관). 각 파일의
+ * minLeaf가 자신의 measuredLeaf보다 크면(데이터 입력 실수 — "여유 하한"이 실측치를
+ * 넘어설 수 없다) 그 자리에서 throw한다(fail-loud, 조용히 잘못된 하한으로 새지 않음). */
+export function loadHonorificScopeDir(dirPath: string = HONORIFIC_SCOPE_DIR): HonorificScopeEntry[] {
+  const files = readdirSync(dirPath).filter((f) => f.endsWith('.json')).sort();
+  return files.map((f) => {
+    const namespace = f.replace(/\.json$/, '');
+    const raw = readFileSync(path.join(dirPath, f), 'utf8');
+    const data = JSON.parse(raw) as { minLeaf: number; story: string; measuredLeaf: number };
+    if (data.minLeaf > data.measuredLeaf) {
+      throw new Error(
+        `honorific-scope/${f}: minLeaf(${data.minLeaf})가 measuredLeaf(${data.measuredLeaf})보다 큽니다 — ` +
+          '여유 하한은 실측치를 넘을 수 없습니다(데이터 입력 실수로 보입니다).',
+      );
+    }
+    return { namespace, minLeaf: data.minLeaf, story: data.story, measuredLeaf: data.measuredLeaf };
+  });
+}
+
+const HONORIFIC_SCOPE_ENTRIES = loadHonorificScopeDir();
+export const SCOPED_NAMESPACES: readonly string[] = HONORIFIC_SCOPE_ENTRIES.map((e) => e.namespace);
 
 function flattenNamespaceLeafKeys(root: Record<string, unknown>, namespace: string): string[] {
   const nsRoot = root[namespace];
@@ -237,27 +255,13 @@ export interface NamespaceLeafCountViolation {
 // 승격이 아무것도 안 더하는 상태) 이 가드가 chats 신규 위반을 하나도 못 잡게 된다.
 // 네임스페이스별 leaf 최소 개수(실측값에서 여유를 둔 하한 — 리팩터로 인한 자연 증감은
 // 통과하되, 네임스페이스 자체가 사라지면 반드시 fail-loud)로 이 사각을 막는다.
-const SCOPED_NAMESPACE_MIN_LEAF_COUNT: Readonly<Record<(typeof SCOPED_NAMESPACES)[number], number>> = {
-  chats: 200, // 실측 239개(2026-09-14, story #3885 그라운딩) — 여유 하한
-  content: 500, // 실측 584개(2026-09-14, story #3889 그라운딩) — 여유 하한
-  channelConnect: 150, // 실측 174개(2026-09-14, story #3889 그라운딩) — 여유 하한
-  settings: 450, // 실측 538개(2026-09-14, story #3892 그라운딩) — 여유 하한
-  agents: 150, // 실측 191개(2026-09-15, story #3895 그라운딩) — 여유 하한
-  flow: 160, // 실측 202개(2026-09-15, story #3895 그라운딩) — 여유 하한
-  gateConfig: 15, // 실측 20개(2026-09-15, story #3895 그라운딩) — 여유 하한
-  recruiter: 100, // 실측 114개(2026-09-15, story #3899 그라운딩) — 여유 하한
-  loops: 105, // 실측 119개(2026-09-15, story #3899 그라운딩) — 여유 하한
-  cage: 230, // 실측 259개(2026-09-15, story #3899 그라운딩) — 여유 하한
-  organization: 190, // 실측 212개(2026-09-14, story #3898 그라운딩) — 여유 하한
-  pricingPlans: 125, // 실측 141개(2026-09-14, story #3898 그라운딩) — 여유 하한
-  contentRules: 70, // 실측 81개(2026-09-14, story #3898 그라운딩) — 여유 하한
-  onboarding: 75, // 실측 88개(2026-09-15, story #3901 그라운딩) — 여유 하한
-  login: 30, // 실측 35개(2026-09-15, story #3901 그라운딩) — 여유 하한
-  storage: 70, // 실측 82개(2026-09-15, story #3901 그라운딩) — 여유 하한
-  insightsBoard: 90, // 실측 103개(2026-09-15, story #3901 그라운딩) — 여유 하한
-  standup: 100, // 실측 118개(2026-09-15, story #3908 그라운딩) — 여유 하한
-  goals: 130, // 실측 148개(2026-09-15, story #3908 그라운딩) — 여유 하한
-};
+// story #3916 — honorific-scope/*.json에서 유도(위 HONORIFIC_SCOPE_ENTRIES 참고). 각
+// 파일의 minLeaf·measuredLeaf·story 그라운딩은 그 파일 자체에 있다(예: honorific-
+// scope/chats.json). 새 네임스페이스는 새 파일만 추가하면 되고, 이 맵은 손으로 건드릴
+// 자리가 아니다.
+const SCOPED_NAMESPACE_MIN_LEAF_COUNT: Readonly<Record<string, number>> = Object.fromEntries(
+  HONORIFIC_SCOPE_ENTRIES.map((e) => [e.namespace, e.minLeaf]),
+);
 
 /** SCOPED_NAMESPACES 각각의 실제 leaf 개수가 하한을 밑도는지 검사하는 순수 함수 —
  * 위반을 반환한다(main()이 이 반환값을 보고 exit 1을 결정, 이 함수 자체는 throw/exit
