@@ -190,6 +190,11 @@ const NON_NUMBER_PLACEHOLDER_NAMES = new Set([
   // 'navigate'="이동"과 부분문자열로 겹치는 건 «이동» 섹션 헤더와 «항목별 이동 문구»라
   // 애초에 사람이 헷갈릴 자리가 아니다(#2352·#2365류 "다른 두 셈이 같은 말"이 아니다).
   'label', 'particle',
+  // story #3900(§⑤ 어조 가드 사각 3) — 플레이스홀더 뒤 받침 의존 조사(이/가·을/를)를
+  // korean-particle 헬퍼로 뽑아 넣는 {josa}. 'particle'과 같은 결(한글 문법 조사·절대 수가
+  // 아님) — verify.evidenceSignedBy="{name}{josa} 남김"·recruiter.verifyGuideMcp="…{runtime}{josa} 열어…"
+  // 등 6키가 이 이름을 쓴다. 개별 EXEMPT_PAIRS 대신 규칙(이 이름은 수-인접이 아님)으로 안다.
+  'josa',
 ]);
 const PLACEHOLDER_NAME_RE = /\{([a-zA-Z_][a-zA-Z0-9_]*)\}/g;
 

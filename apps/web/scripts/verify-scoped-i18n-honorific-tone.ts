@@ -273,15 +273,24 @@ export function checkScopedNamespaceMinimums(ko: Record<string, unknown>): Names
 // U+1161)와 이어 붙었는지로 잡는다 — 실측 확認(합니다·됩니다·갑니다·입니다 전부 검출).
 const NFD_JONGSEONG_B_NIDA = 'ᆸ니다';
 
+// story #3900 — 의문형 needle. 'ᆸ'(종성 ㅂ)+니까를 NFD로 정규화해 두면 「입니까」류의 NFD
+// (받침 ㅂ이 분해돼 「니까」 앞에 붙음)와 .includes로 맞는다. escape로 정의해 소스가 NFC로
+// 저장돼도 안전(직접 친 needle의 NFC/NFD 함정 회피 — memory).
+const NFD_JONGSEONG_B_NIKKA = 'ᆸ니까'.normalize('NFD');
+
 function matchesFormalRegister(value: string): string[] {
   const matches: string[] = [];
-  const literalMatches = value.match(/습니다|십시오/g);
+  // 서술(습니다/십시오) + 의문(습니까·story #3900) 리터럴.
+  const literalMatches = value.match(/습니다|십시오|습니까/g);
   if (literalMatches) matches.push(...literalMatches);
-  // 습니다 자체가 이미 받침ㅂ(습=스+ㅂ)을 포함해 NFD 검사에도 걸린다 — 습니다/십시오로 이미
-  // 잡힌 값은 중복 태그(「습니다」+「ㅂ니다」 동시 표시)를 피하려 ㅂ니다 검사를 건너뛴다.
-  // 「합니다」·「됩니다」처럼 습니다/십시오가 전혀 없는 순수 모음어간 케이스만 ㅂ니다로 잡는다.
-  if (matches.length === 0 && value.normalize('NFD').includes(NFD_JONGSEONG_B_NIDA)) {
+  const nfd = value.normalize('NFD');
+  // 「합니다」·「됩니다」류(모음어간 서술) — 습니다/십시오 리터럴로 이미 잡힌 값은 ㅂ니다 중복 회피.
+  if (!matches.includes('습니다') && !matches.includes('십시오') && nfd.includes(NFD_JONGSEONG_B_NIDA)) {
     matches.push('ㅂ니다');
+  }
+  // story #3900 — 「입니까」·「합니까」류(모음어간 의문). 습니까 리터럴로 이미 잡힌 값은 중복 회피.
+  if (!matches.includes('습니까') && nfd.includes(NFD_JONGSEONG_B_NIKKA)) {
+    matches.push('ㅂ니까');
   }
   return matches;
 }
@@ -333,6 +342,66 @@ export function findHonorificToneInScopedKeys(
   return findings;
 }
 
+// ---------------------------------------------------------------------------
+// story #3900 axis ② — 페르소나 관형형 종결(스코프 네임스페이스 값이 완결 종결어미 없이
+// 관형형 '는'/'인' + 마침표로 끝나는 것). 에이전트를 "완결 문장"으로 이관하는 과정에서
+// 「~되돌리는.」·「~엣지인.」처럼 관형형만 남기고 마침표를 찍는 실수가 재발하지 않도록
+// 막는다. 「~는 것」·「~인 것」 등 정당한 관형형+의존명사는 마침표가 아니라 뒤에 명사가
+// 오므로 아래 정규식에 걸리지 않는다.
+// ---------------------------------------------------------------------------
+export interface AdnominalTerminalFinding {
+  key: string;
+  value: string;
+}
+
+const ADNOMINAL_TERMINAL_RE = /[가-힣](는|인)\.(\s|$)/;
+
+export function findPersonaAdnominalTerminal(
+  ko: Record<string, unknown>,
+  keys: readonly string[] = [],
+): AdnominalTerminalFinding[] {
+  const findings: AdnominalTerminalFinding[] = [];
+  for (const key of keys) {
+    const value = getByPath(ko, key);
+    if (typeof value !== 'string') continue;
+    // '~는 것' / '~인 것' 등 정당한 관형형+의존명사는 마침표가 아니라 뒤에 명사가 오므로
+    // 위 정규식에 안 걸린다.
+    if (ADNOMINAL_TERMINAL_RE.test(value)) findings.push({ key, value });
+  }
+  return findings;
+}
+
+// ---------------------------------------------------------------------------
+// story #3900 axis ③ — 플레이스홀더 값 바로 뒤에 조사를 문자열에 고정해 둔 자리(런타임
+// 값의 받침 유무에 따라 절반은 비문이 되는 자리). 이 축은 스코프 무관 — ko.json 전체 leaf
+// 값을 스캔한다(어느 화면이든 플레이스홀더+고정 조사는 잘못이다). 이중형(`{name}이(가)`)은
+// 조사 뒤에 '('가 오지 공백/문자열끝이 아니라 아래 정규식에 걸리지 않는다(의도된 허용).
+// ---------------------------------------------------------------------------
+export interface PlaceholderParticleFinding {
+  key: string;
+  value: string;
+}
+
+const PLACEHOLDER_PARTICLE_RE = /\{[a-zA-Z_][a-zA-Z0-9_]*\}(이|가|을|를|은|는|과|와|으로|로)(\s|$)/;
+
+export function findHardcodedParticleAfterPlaceholder(
+  ko: Record<string, unknown>,
+): PlaceholderParticleFinding[] {
+  const findings: PlaceholderParticleFinding[] = [];
+  function walk(obj: Record<string, unknown>, prefix: string): void {
+    for (const [k, v] of Object.entries(obj)) {
+      const dottedKey = prefix ? `${prefix}.${k}` : k;
+      if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
+        walk(v as Record<string, unknown>, dottedKey);
+      } else if (typeof v === 'string') {
+        if (PLACEHOLDER_PARTICLE_RE.test(v)) findings.push({ key: dottedKey, value: v });
+      }
+    }
+  }
+  walk(ko, '');
+  return findings;
+}
+
 function main(): void {
   const text = readFileSync(path.join(MESSAGES_DIR, KO_FILE), 'utf8');
   const ko = JSON.parse(text) as Record<string, unknown>;
@@ -367,6 +436,37 @@ function main(): void {
   }
 
   console.log(`OK: 스코프 키(${effectiveKeys.length}개 — SCOPED_KEYS ${SCOPED_KEYS.length}+SCOPED_NAMESPACES[${SCOPED_NAMESPACES.join(',')}])의 ko.json 값에 합니다체 0건`);
+
+  // story #3900 axis ② — 페르소나 관형형 종결(스코프 키 값이 완결 어미 없이 '는'/'인'+마침표로 끝나는 것).
+  const adnominalFindings = findPersonaAdnominalTerminal(ko, effectiveKeys);
+  if (adnominalFindings.length > 0) {
+    console.error(`❌ 스코프 키(${effectiveKeys.length}개)의 ko.json 값에 관형형 종결(완결 어미 없이 '는'/'인'+마침표) ${adnominalFindings.length}건 발견:`);
+    for (const f of adnominalFindings) {
+      console.error(`  - ${f.key} → ${JSON.stringify(f.value)}`);
+    }
+    console.error(
+      "\n→ 문장은 완결 종결어미(~해요/~예요 등)로 끝나야 한다. 관형형('~는'/'~인')만 남기고" +
+        ' 마침표를 찍으면 미완결 비문이다. 완결 어미로 고쳐라.',
+    );
+    process.exit(1);
+  }
+  console.log(`OK: 스코프 키(${effectiveKeys.length}개)의 ko.json 값에 관형형 종결(완결 어미 없는 '는'/'인'+마침표) 0건`);
+
+  // story #3900 axis ③ — 플레이스홀더 값 바로 뒤 고정 조사(스코프 무관·ko.json 전체 leaf 스캔).
+  const particleFindings = findHardcodedParticleAfterPlaceholder(ko);
+  if (particleFindings.length > 0) {
+    console.error(`❌ ko.json 전체 leaf 값에 플레이스홀더 뒤 고정 조사 ${particleFindings.length}건 발견:`);
+    for (const f of particleFindings) {
+      console.error(`  - ${f.key} → ${JSON.stringify(f.value)}`);
+    }
+    console.error(
+      '\n→ 플레이스홀더 값의 받침 유무에 따라 조사가 갈린다(비문 위험). @/lib/korean-particle의' +
+        ' 헬퍼(pickIGaJosa·pickEulReulJosa·pickEunNeunJosa·pickEuroJosa)로 컴포넌트에서 조사를' +
+        ' 넘기거나, 조사가 필요 없게 문장을 재구성하거나, 이중형(`{x}이(가)`)으로 적어라.',
+    );
+    process.exit(1);
+  }
+  console.log('OK: ko.json 전체 leaf 값에 플레이스홀더 뒤 고정 조사 0건');
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

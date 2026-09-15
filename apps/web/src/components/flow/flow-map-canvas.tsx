@@ -15,6 +15,7 @@ import {
   PAST_EXPANDED_ROW_HEIGHT, PAST_EXPANDED_BOX_WIDTH, isNodeStalled,
 } from './derive-flow-map';
 import { isValidPortDropTarget, PORT_LINK_KINDS, resolveUndoTitle, type PortLinkKind } from './flow-port-linking';
+import { pickIGaJosa } from '@/lib/korean-particle';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
@@ -1214,7 +1215,7 @@ export function FlowMapCanvas({
             <DialogHeader>
               <DialogTitle>
                 {titleResolution.key === 'portUndoTitleOther'
-                  ? t('portUndoTitleOther', { name: titleResolution.name })
+                  ? t('portUndoTitleOther', { name: titleResolution.name, josa: pickIGaJosa(titleResolution.name) })
                   : t(titleResolution.key)}
               </DialogTitle>
               <DialogDescription>

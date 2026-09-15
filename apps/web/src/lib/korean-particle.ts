@@ -46,3 +46,25 @@ export function pickEunNeunJosa(word: string): '은' | '는' {
   const jongseong = offset % JONGSEONG_COUNT;
   return jongseong === 0 ? '는' : '은';
 }
+
+// story #3900(UX-v3·§⑤ 어조 가드 사각 3) — 플레이스홀더 뒤 「{name}이/가」·「{title}을/를」을
+// 문자열에 고정해 둔 자리(값의 받침 유무에 따라 비문이 되는 자리)를 pickEuroJosa·pickEunNeunJosa와
+// 동일한 근거(완성형 한글 종성 유무=예외 없는 기계적 규칙)로 결정적 함수로 푼다. 「이/가」·「을/를」은
+// 「은/는」과 같은 규칙(받침 有→이/을·받침 無→가/를 — ㄹ 예외 없음). 비한글(숫자·영문)은 받침 없는
+// 쪽으로 폴백(안전한 쪽·pickEunNeunJosa 관례와 동형) — 숫자 읽기 받침이 문제되는 자리는 조사 회피로
+// 문장을 재구성한다(§⑤ 3900 ③ 표).
+export function pickIGaJosa(word: string): '이' | '가' {
+  const ch = lastHangulChar(word);
+  if (ch === null) return '가';
+  const offset = ch.codePointAt(0)! - HANGUL_BASE;
+  const jongseong = offset % JONGSEONG_COUNT;
+  return jongseong === 0 ? '가' : '이';
+}
+
+export function pickEulReulJosa(word: string): '을' | '를' {
+  const ch = lastHangulChar(word);
+  if (ch === null) return '를';
+  const offset = ch.codePointAt(0)! - HANGUL_BASE;
+  const jongseong = offset % JONGSEONG_COUNT;
+  return jongseong === 0 ? '를' : '을';
+}

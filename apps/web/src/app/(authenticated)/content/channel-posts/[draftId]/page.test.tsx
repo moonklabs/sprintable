@@ -5403,7 +5403,7 @@ describe('ChannelPostEditPage — 릴스 영상 슬롯(story #3556)', () => {
     await flush();
 
     const errorText = container.querySelector('[data-testid="channel-post-video-upload-error"] p')?.textContent ?? '';
-    expect(errorText).toBe('영상을 올리지 못했어요 — 서버가 403로 응답했어요.');
+    expect(errorText).toBe(koMessages.content.errorChannelVideoUploadFailedWithStatus.replace('{status}', '403'));
     expect(errorText).not.toContain('다시 시도');
     expect(
       [...container.querySelectorAll('details')].find((d) => d.querySelector('summary')?.textContent === koMessages.content.errorRawDetailsToggle),
@@ -5473,7 +5473,7 @@ describe('ChannelPostEditPage — 릴스 영상 슬롯(story #3556)', () => {
     await flush();
 
     const errorText = container.querySelector('[data-testid="channel-post-video-upload-error"] p')?.textContent ?? '';
-    expect(errorText).toBe('영상을 올리지 못했어요 — 서버가 200로 응답했어요.');
+    expect(errorText).toBe(koMessages.content.errorChannelVideoUploadFailedWithStatus.replace('{status}', '200'));
     expect(
       [...container.querySelectorAll('details')].find((d) => d.querySelector('summary')?.textContent === koMessages.content.errorRawDetailsToggle),
     ).not.toBeUndefined();

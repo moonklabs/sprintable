@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
+import { pickIGaJosa } from '@/lib/korean-particle';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { deriveTrustStage, asVerificationSheet, type EvidenceItem, type EvidenceType, type VerificationSheetItem } from '@/services/verify';
@@ -325,7 +326,7 @@ export function EvidenceSection({
             ) : items && items.length > 0 ? (
               <>
                 {signerName ? (
-                  <p className="mb-1.5 text-[11px] text-muted-foreground">{t('evidenceSignedBy', { name: signerName })}</p>
+                  <p className="mb-1.5 text-[11px] text-muted-foreground">{t('evidenceSignedBy', { name: signerName, josa: pickIGaJosa(signerName) })}</p>
                 ) : null}
                 <ul className="space-y-1">
                   {(visibleItems ?? []).map((item) => {

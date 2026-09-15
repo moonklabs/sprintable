@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
+import { pickIGaJosa } from '@/lib/korean-particle';
 import { AnchorPin } from './anchor-pin';
 import type { MemberRef } from '@/services/canvas';
 import type { CommentThread } from '@/services/canvas-comments';
@@ -77,7 +78,7 @@ export function CommentThreadCard({
         ) : null}
 
         {resolved && thread.resolved_by ? (
-          <p className="text-[10px] text-muted-foreground">{t('resolvedByNote', { name: memberMap[thread.resolved_by]?.name ?? '—' })}</p>
+          <p className="text-[10px] text-muted-foreground">{t('resolvedByNote', { name: memberMap[thread.resolved_by]?.name ?? '—', josa: pickIGaJosa(memberMap[thread.resolved_by]?.name ?? '—') })}</p>
         ) : null}
 
         {!resolved ? (

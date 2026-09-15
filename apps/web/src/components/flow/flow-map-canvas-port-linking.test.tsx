@@ -12,6 +12,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import { FlowMapCanvas, type CreateLinkResult, type DeleteLinkResult, type RejectLinkResult } from './flow-map-canvas';
 import type { FlowMapLane, FlowMapNode, FlowMapEdge } from './derive-flow-map';
 import koMessages from '../../../messages/ko.json';
+import { pickIGaJosa } from '@/lib/korean-particle';
 
 // story #2353 v1.1 정정 — 되돌리기 다이얼로그 제목이 declaredBy와 currentTeamMemberId(로그인
 // 본인) 비교로 갈린다(resolveUndoTitle, flow-port-linking.ts). 기본은 'member-9'를 "나"로
@@ -485,7 +486,12 @@ describe('FlowMapCanvas — 되돌리기 (AC7·AC8, 그 선 자체가 진입점)
     await act(async () => { line.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
     const dialogTitle = document.body.querySelector('[data-slot="dialog-title"]');
-    expect(dialogTitle?.textContent).toBe('디디이 만든 연결이에요');
+    // story #3900 — 이 테스트는 원래 「디디이 만든」(받침 없는 '디디' 뒤에 틀린 조사 '이')을 정본으로
+    // 박아 두었다. 3900이 flow.portUndoTitleOther의 조사를 {josa}(pickIGaJosa)로 뽑게 하며 '디디가'로
+    // 바로잡혔다 — ko.json 값 + 헬퍼로 대조해 회귀를 막는다.
+    expect(dialogTitle?.textContent).toBe(
+      koMessages.flow.portUndoTitleOther.replace('{name}', '디디').replace('{josa}', pickIGaJosa('디디')),
+    );
   });
 
   // doc v1.1 ㉣ — 모르는 채 「내가」로 단정하지 않는다(declaredBy가 없거나, memberMap에
