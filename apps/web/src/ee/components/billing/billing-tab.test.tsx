@@ -174,12 +174,13 @@ describe('BillingTab — 결제②-D 4티어 재편', () => {
 
   it('can_manage=false면 member 안내를 보여준다', async () => {
     await mount(async () => statusResponse({ can_manage: false }));
-    expect(container.textContent).toContain('결제 관리는 owner 또는 admin만 가능합니다');
+    // i18n 값을 리터럴로 박지 않고 ko.json에서 읽어 대조한다(톤/낱말 PR 회귀 방지).
+    expect(container.textContent).toContain(koMessages.pricingPlans.memberNotice);
   });
 
   it('can_manage=true면 member 안내를 숨긴다', async () => {
     await mount(async () => statusResponse({ can_manage: true }));
-    expect(container.textContent).not.toContain('결제 관리는 owner 또는 admin만 가능합니다');
+    expect(container.textContent).not.toContain(koMessages.pricingPlans.memberNotice);
   });
 
   it('fetch 실패 시 에러 alert를 role="alert"로 노출한다', async () => {
