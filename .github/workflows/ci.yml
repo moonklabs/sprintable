@@ -119,7 +119,14 @@ jobs:
     # 안 스텝의 fail-closed(`!= 'false'`, 아래)가 전혀 무의미해진다 — 잡 자체가 안 돈다.
     # always()로 무조건 돌게 하고, 안에서 출력이 비어 있으면(=위 job 실패) 스텝 조건이
     # fail-closed로 정상 실행된다.
-    if: always()
+    #
+    # story #3929(2026-09-15, PO 지시) — `edited`가 base 변경 없이(title/body만) 발화하면
+    # 이 잡을 명시적으로 skip한다. 이건 위 landmine과 다른 클래스다 — GitHub Actions는
+    # "job이 자신의 `if:` 조건으로 skip되면 그 체크는 Success로 보고"하지만(트러블슈팅
+    # 문서 확認, 2026-09-15), "job이 실패한 `needs` 의존성 때문에 cascade로 skip되면 성공
+    # 처리가 안 되고 머지를 막을 수 있다" — 전자(명시적 조건)만 쓰고 always()는 그대로
+    # 둔다(cascade-skip 방지는 여전히 유효, 이 조건은 그 위에 AND로 얹는다).
+    if: always() && (github.event.action != 'edited' || github.event.changes.base != null)
     runs-on: ubuntu-latest
     # story 8236bbc3(2026-07-03): 217초 실측(전체 스위트 3391개 대다수, 비파괴 real-DB 84개
     # 파일 포함) + 파괴적 54개 파일 격리 순회 오버헤드 버퍼. 규모상 샤딩 불요(설계 §1-D).
@@ -945,7 +952,9 @@ jobs:
     needs: [detect-changed-scope]
     # alembic-fresh-db와 동일 이유 — always() 없으면 detect-changed-scope 실패 시 이 잡이
     # (backend-test의 필수 판정 근거) cascade로 스킵된다.
-    if: always()
+    # story #3929 — 이 잡이 바로 「edited 중복 run이 부하로 8샤드 timeout/실패」 실사고의
+    # 본체(오늘 4328/4329 사고). alembic-fresh-db와 동일 근거로 명시적 skip 추가(위 참고).
+    if: always() && (github.event.action != 'edited' || github.event.changes.base != null)
     runs-on: ubuntu-latest
     # story #3383 AC3/AC4(2026-09-03 실측, PR CI run 33750476433, 템플릿 DB 적용 후):
     # 4샤드 9m31s·10m8s·9m21s·8m58s — 최대 10m8s·편차 1m10s(AC3 기준 12분/3분 이내 통과).
@@ -1172,7 +1181,11 @@ jobs:
     name: Backend pytest
     runs-on: ubuntu-latest
     needs: [backend-test-destructive, detect-changed-scope]
-    if: always()
+    # story #3929 — required 체크("Backend pytest") 자신. edited(base 무변)면 명시적
+    # skip(alembic-fresh-db 상단 주석 참고 — cascade-skip과 달리 required 체크가
+    # Success로 보고된다). always()는 그대로(detect-changed-scope 실패 시 cascade-skip
+    # 방지 목적 유지).
+    if: always() && (github.event.action != 'edited' || github.event.changes.base != null)
     # story #1982(2026-07-17): postgres service + real-PG env 배선. 이 갭은 story #1472
     # (2026-06-21)에서 이미 발견됐고, story 8236bbc3(#1619, 2026-07-03)이 "backend-test job
     # 무변경(회귀0 최대보수)"으로 의도적으로 유보했던 트레이드오프다 — 그 결과 `_REAL_DB_SKIP`
@@ -1283,7 +1296,13 @@ jobs:
           key: weights-drift-streak-${{ github.run_id }}
 
       - name: Require all destructive-schema shards to have succeeded
-        if: needs.backend-test-destructive.result != 'success'
+        # story #3929 — backend-test-destructive가 이제 edited(base 무변)에서 명시적
+        # skip되면 .result가 'skipped'다(success 아님) — 그 값만으로 이 스텝을 원래
+        # 조건대로 돌리면 매 edited마다 이 잡이 «가짜 실패»한다(이 카드가 막으려는
+        # 바로 그 클래스를 다른 자리에서 재도입하는 것). 그 skip이 내 의도적 조건과
+        # 일치할 때만 이 Require도 같이 안 돈다 — 그 밖의 모든 non-success(진짜 실패·
+        # cascade-skip 등)는 그대로 잡는다.
+        if: needs.backend-test-destructive.result != 'success' && (github.event.action != 'edited' || github.event.changes.base != null)
         run: |
           echo "backend-test-destructive result=${{ needs.backend-test-destructive.result }} — destructive-schema 94개의 유일한 실행처가 실패했거나 안 돎"
           # story #3541(페드루 PO 確定) — GitHub Actions는 timeout-minutes로 죽인 잡과
@@ -1410,6 +1429,15 @@ jobs:
     name: Lint, Type Check, Test, Build
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # story #3929(2026-09-15, PO 지시) — required 체크("Lint, Type Check, Test, Build")
+    # 자신. edited(base 무변, title/body만 편집)가 head SHA는 그대로인 채 이 무거운
+    # 잡을 매번 전량 재실행시켜(오늘 4328·4329 실사고, 러너 부하로 다른 required 잡의
+    # 8샤드가 timeout) 게이트가 «최신 run»을 잘못 판정·머지를 막았다. 이 잡은 다른
+    # job에 needs 의존이 없어(cascade-skip 대상 아님) alembic-fresh-db류의 always()
+    # 방어가 불필요 — 조건 자체만. GitHub는 "job이 자신의 if:로 skip되면 그 체크는
+    # Success로 보고"한다(required-status-check 트러블슈팅 문서 확認) — 머지를 막지
+    # 않는다.
+    if: github.event.action != 'edited' || github.event.changes.base != null
 
     steps:
       - name: Checkout
