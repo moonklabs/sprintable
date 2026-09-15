@@ -8,16 +8,23 @@ design-org-knowledge-mentions-backlinks §2.
     `#` 트리거 검색 결과 선택 시 삽입)을 (entity_type, id) 쌍으로 **전부** 추출한다. 채팅
     메시지는 수정 불가 전제라 파서도 매번 전체를 새로 파싱해 insert-only 로 쓴다(재조정 불필요).
   · `extract_chat_doc_mention_ids` — 위의 doc-only 하위호환 래퍼(기존 호출부/테스트용).
-  · `extract_doc_mention_ids` — doc content(HTML — tiptap `editor.getHTML()` 그대로 저장,
-    content_format 무관하게 실제 마크업은 HTML)에서 wikiLink(`<span data-type="wikiLink"
-    data-doc-id="...">`) 와 pageEmbed(`<div data-page-embed data-doc-id="...">`) 의
-    `data-doc-id` attribute 를 추출한다. **정규식이 아닌 `html.parser.HTMLParser` 사용** —
-    attribute 순서가 보장되지 않는다는 게 설계 doc 의 근거(mergeAttributes 가 만드는 순서는
-    tiptap 내부 구현에 의존하므로 위치 기반 정규식은 취약).
-  · `extract_doc_entity_ref_targets`(story #3858) — 같은 doc content(HTML)에서
+  · `extract_doc_mention_ids` — doc content가 **HTML일 때**(tiptap `editor.getHTML()` 그대로
+    저장된 경우 — ⛔story #3858 AC1-b(2026-09-15) 정정: "content_format 무관하게 실제 마크업은
+    HTML"이라던 이 문단의 옛 전제는 거짓이었다. `Doc.content_format` 기본값이 `"markdown"`
+    이고 에디터는 실제로 순수 마크다운 텍스트를 저장한다 — `reconcile_doc_mentions`가 이
+    HTML 전용 파서와 마크다운 파서(`extract_chat_entity_mentions`, 재사용)를 둘 다 돌려서
+    어느 형식이 와도 놓치지 않는다, 아래 `reconcile_doc_mentions` docstring 참조)에서
+    wikiLink(`<span data-type="wikiLink" data-doc-id="...">`) 와 pageEmbed(`<div
+    data-page-embed data-doc-id="...">`) 의 `data-doc-id` attribute 를 추출한다. **정규식이
+    아닌 `html.parser.HTMLParser` 사용** — attribute 순서가 보장되지 않는다는 게 설계 doc 의
+    근거(mergeAttributes 가 만드는 순서는 tiptap 내부 구현에 의존하므로 위치 기반 정규식은
+    취약).
+  · `extract_doc_entity_ref_targets`(story #3858) — 같은 doc content가 HTML일 때
     `<a href="entity:<type>:<uuid>">` 앵커(story #2639가 렌더하는 그 형식·chat의
     `[title](entity:<type>:<uuid>)`가 markdownToHtml을 거친 모양)를 (target_type, target_id)
     쌍으로 추출한다 — wikiLink/pageEmbed와 달리 target_type을 "doc"으로 고정하지 않는다.
+    content가 마크다운일 때는 이 함수가 0건을 내고(HTML 태그가 없으니), `reconcile_doc_
+    mentions`가 대신 `extract_chat_entity_mentions`로 마크다운 토큰을 직접 뽑는다.
 
 추출 함수는 malformed 토큰(파싱 실패·잘못된 UUID)을 **조용히 스킵**한다 — 멘션 파싱 실패로
 본 메시지/문서 저장 전체가 실패하면 안 된다는 원칙(AC와 별개로, 파서 자체의 malformed-tolerance).
@@ -319,9 +326,14 @@ class _DocMentionHTMLParser(HTMLParser):
     story #3858(customer-zero·BE·연결 쓰기, 페드루 AC0 확定 2026-09-14 08:10Z) — `entity:
     <type>:<uuid>` 마크다운 링크(story #2639가 이미 렌더하는, doc-content-renderer.tsx의
     EntityChip과 같은 형식·chat_message의 `extract_chat_entity_mentions`(_CHAT_TOKEN_RE)와
-    같은 토큰 문법)는 doc 저장 시 markdownToHtml을 거쳐 **`<a href="entity:type:uuid">`
-    앵커**로 실존한다(doc.content는 항상 HTML — content_format 무관, docs.py `html_content=
-    doc.content` 확認). ⛔이 파서는 wikiLink/pageEmbed와 달리 target_type을 「doc」으로
+    같은 토큰 문법)는 doc.content_format="html"인 doc에서는 저장 시 markdownToHtml을 거쳐
+    **`<a href="entity:type:uuid">` 앵커**로 실존한다. ⛔AC1-b(2026-09-15) 정정 — 이 문단이
+    원래 전제하던 "doc.content는 항상 HTML"은 거짓이었다(`Doc.content_format` 기본값=
+    "markdown", 실 저장은 순수 마크다운 텍스트). content_format="markdown"인 doc에서는 이
+    파서가 0건을 내고(HTML 태그가 없으니 이 HTMLParser는 아무것도 못 본다), 대신
+    `reconcile_doc_mentions`가 `extract_chat_entity_mentions`로 같은 링크를 마크다운
+    문법 그대로 직접 뽑는다(두 파서를 무조건 병행 — content_format 분기 없음). 이 파서는
+    wikiLink/pageEmbed와 달리 target_type을 「doc」으로
     고정하지 않는다 — href의 type 그룹을 그대로 살려(entity_refs) reconcile_doc_mentions가
     돌려준다. AC0가 확定한 스코프는 「링크 1종」뿐(bare #NNNN·story 전용 임베드 노드는 에디터
     삽입 UI 자체가 없어 이 카드 밖) — 그래도 파서 자체를 "story만" 하드코딩하지 않는 이유는
@@ -757,7 +769,7 @@ async def reconcile_doc_mentions(
     *,
     org_id: uuid.UUID,
     doc_id: uuid.UUID,
-    html_content: str,
+    content: str,
     created_by: uuid.UUID,
 ) -> None:
     """doc write-path: diff 기반 reconcile(create/update 공용 — create 는 existing=∅ 이라 순수
@@ -804,18 +816,39 @@ async def reconcile_doc_mentions(
     doc만 가리킨다"를 여기 하드코딩(`target_types={"doc"}`)해 두면 파서가 나중에 다른
     entity_type을 뽑게 되는 날(선생님 지시 원문 "어떤 엔티티든 임베드") 파서는 뽑았는데
     필터가 조용히 막는 벽이 된다. no-op인 지금 없애 두면 파서가 늘 때 이 함수를 안 고쳐도
-    자동으로 따라온다."""
+    자동으로 따라온다.
+
+    ⭐story #3858 AC1-b(2026-09-15, PO 배포 89 라이브 실측 — 되돌림 뒤 재확定): 이 함수의
+    옛 파라미터 이름(`html_content`)과 위 story #2316 AC7 문단이 세운 "doc.content는 항상
+    HTML"이라는 전제가 «거짓»이었다. `Doc.content_format` 기본값은 `"markdown"`(app/models/
+    doc.py)이고, 에디터가 실제로 저장하는 값은 그 경우 순수 마크다운 텍스트다(`markdownToHtml`
+    변환은 렌더 시점 FE 몫이지 저장 시점 BE 몫이 아니다 — AC1(원래분)의 실PG 테스트가 HTML
+    합성 표본만 써서 이 갭을 못 봤다). 처방: 파라미터를 형식 중립 이름(`content`)으로 바꾸고,
+    HTML 전용 파서(`extract_doc_mention_targets`·`extract_doc_entity_ref_targets`, `<span
+    data-type=wikiLink>`·`<a href="entity:...">`)와 마크다운 토큰 파서(`extract_chat_entity_
+    mentions` — 채팅 `_CHAT_TOKEN_RE`, `[라벨](entity:type:uuid)`를 그대로 재사용, 같은
+    문법이라 새 정규식을 안 짓는다)를 **둘 다** 무조건 돌린다(content_format 분기 없음) —
+    두 토큰 모양(HTML 태그 vs 마크다운 대괄호-괄호)은 구조적으로 겹치지 않아(마크다운 텍스트
+    안엔 `<a href=...>`가, 렌더된 HTML 안엔 `[라벨](entity:...)`가 나타나지 않는다) 어느 쪽이
+    와도 안전하게 공존한다 — content_format 필드 값을 신뢰해 분기하는 것보다 실제 내용을
+    둘 다 긁는 쪽이 더 견고하다(필드가 드리프트해도 무관). 두 파서의 합집합에 중복이 생겨도
+    `reconcile_entity_references`의 `target_refs`가 집합(set) 컴프리헨션이라 자연히 dedup된다
+    (위 508-523행 코어 로직, 이 함수를 더 손댈 필요 없음)."""
     # story #2679: doc은 wikiLink/pageEmbed 브라켓 문법뿐(맨 #숫자 자동감지 없음) — 항상 explicit.
     # story #3858(2026-09-14) — `entity:<type>:<uuid>` 링크(예: story)도 이제 여기 합류한다.
     # 위 docstring이 예고한 그대로: target_types를 명시 안 해 뒀기 때문에(코어 기본값=registry
     # 전체) 이 함수 자체는 한 글자도 안 고쳐도 됐다 — 새로 추가한 건 extracted_refs 리스트
     # 조립에 항 하나 더한 것뿐(파서가 늘 때 이 함수를 안 고쳐도 자동으로 따라온다던 그 예언).
+    # story #3858 AC1-b(2026-09-15) — 위 두 항(HTML 전용)에 마크다운 토큰 항을 더한다.
     extracted_refs = [
         ("doc", target_id, form, "explicit")
-        for target_id, form in extract_doc_mention_targets(html_content)
+        for target_id, form in extract_doc_mention_targets(content)
     ] + [
         (target_type, target_id, "mention", "explicit")
-        for target_type, target_id in extract_doc_entity_ref_targets(html_content)
+        for target_type, target_id in extract_doc_entity_ref_targets(content)
+    ] + [
+        (target_type, target_id, "mention", "explicit")
+        for target_type, target_id in extract_chat_entity_mentions(content)
     ]
     await reconcile_entity_references(
         db, org_id=org_id, source_type="doc", source_field="body", source_id=doc_id,

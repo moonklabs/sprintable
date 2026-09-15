@@ -4,13 +4,24 @@ Reference write-path. 3852(읽기: `backlinks?source_type=doc`)가 라이브여�
 pageEmbed=doc→doc만 파싱) — 이 스토리가 그 write-path를 연다.
 
 AC0 그라운딩 확定(디디, 07:55Z~08:09Z 3개 후보 형식 실물 대조):
-  ① 링크(`entity:story:<uuid>`) — 이미 실존. story #2639가 이 형식을 EntityChip으로 렌더 —
-    doc.content는 항상 HTML(markdownToHtml 변환, docs.py `html_content=doc.content`)이라
-    저장된 HTML엔 `<a href="entity:story:...">`로 남는다.
+  ① 링크(`entity:story:<uuid>`) — 이미 실존. story #2639가 이 형식을 EntityChip으로 렌더.
   ② 텍스트 #NNNN — 실물 0(에디터에 `#` 트리거 mention 확장 자체가 없음).
   ③ 임베드 노드 — 실물 0(wikiLink `[[`·슬래시 PageEmbed 둘 다 `/api/docs`만 조회, 스토리
     검색/삽입 UI가 아예 없음).
 → AC1 확定: 링크 1종만(발명 0) — ②③은 에디터 삽입 UI 신설이 필요한 별건 카드(이 스토리 밖).
+
+⭐AC1-b(2026-09-15, PO 배포 89 라이브 실측 — 되돌림): 위 ①의 원래 그라운딩(「doc.content는
+항상 HTML — markdownToHtml 변환」)이 거짓이었다. `Doc.content_format` 기본값은 `"markdown"`
+이고 에디터가 실제로 저장하는 값은 그 경우 **순수 마크다운 텍스트**다(`[라벨](entity:story:
+<uuid>)`, HTML 태그 0) — `markdownToHtml` 변환은 렌더 시점 FE 몫이지 저장 시점 BE 몫이 아니다.
+이 파일의 기존 4개 테스트는 `content_format`을 명시하지 않아 스키마 기본값(`"markdown"`)이
+DB에 박히는데 `content` 필드엔 리터럴 HTML 문자열을 실었다 — 즉 「content_format=markdown인데
+content는 HTML」이라는 실사용과 다른 합성 조합이었고, 옛 파서(HTML 전용)가 content_format을
+아예 안 보고 그 HTML을 그대로 파싱해 우연히 초록이었다(이게 바로 이 카드가 되돌려진 이유 —
+실 에디터가 저장하는 «진짜 마크다운» 표본은 이 파일에 한 번도 없었다). 아래
+`test_*_markdown_content_*` 2개가 그 진짜 저장 형식(순수 마크다운, HTML 태그 0)으로
+양성대조·회수를 검증한다 — 기존 4개(HTML 합성 표본)는 그대로 둔다(HTML 파서 자체의 회귀
+가드로는 여전히 유효 — content_format="html"로 실제 저장되는 문서가 있다면 그 경로용).
 
 이 파일은 그 실 write-path(`POST /api/v2/docs`·`PATCH /api/v2/docs/{id}`가 저장 시
 `reconcile_doc_mentions`를 태움)를 HTTP로 직접 타고, 3852의 읽기 route(`GET /api/v2/
@@ -160,6 +171,13 @@ def _entity_link_html(label: str, target_type: str, target_id) -> str:
     return f'<p><a href="entity:{target_type}:{target_id}">{label}</a></p>'
 
 
+def _entity_link_markdown(label: str, target_type: str, target_id) -> str:
+    """AC1-b — 에디터가 content_format="markdown"일 때 실제로 저장하는 형식 그대로(순수
+    마크다운 텍스트, HTML 태그 0). `_entity_link_html`과 달리 `<p>`/`<a>` 등 어떤 태그도
+    없다 — 옛 파서(HTML 전용)라면 이 문자열에서 0건을 낸다는 게 이 카드가 고친 결함."""
+    return f"관련 내용: [{label}](entity:{target_type}:{target_id}) 이어지는 본문."
+
+
 @pytest.mark.anyio
 async def test_doc_entity_story_link_creates_reference_visible_in_story_backlinks():
     """⭐AC1/AC2 핵심 — doc 본문에 `entity:story:<uuid>` 링크 1건을 실어 `POST /api/v2/docs`로
@@ -207,6 +225,125 @@ async def test_doc_entity_story_link_creates_reference_visible_in_story_backlink
             assert data[0]["source_type"] == "doc"
             assert data[0]["doc"]["id"] == str(doc_id)
             assert data[0]["doc"]["title"] == "관련 문서"
+        finally:
+            await client.aclose()
+            app.dependency_overrides.clear()
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_doc_entity_story_link_in_markdown_content_creates_reference():
+    """⭐AC1-b 핵심(2026-09-15, 배포 89 라이브 실측 되돌림의 원인 재현) — content_format=
+    "markdown"·content=순수 마크다운 텍스트(HTML 태그 0, 에디터가 실제로 저장하는 형식
+    그대로)로 doc을 생성해도 reconcile_doc_mentions가 doc→story Reference를 쓴다.
+    되돌리기 前 원래 AC1 테스트(HTML 합성 표본)는 이 경로를 한 번도 안 탔다."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id, "P")
+            member_id, user_id = await _make_human_member(s, org.id, project.id)
+            story = await _make_story(s, org.id, project.id, title="Linked Story (MD)")
+
+        await _setup_app_human(app, Session, user_id, org.id)
+        client = _client_for(app)
+        try:
+            create_resp = await client.post(
+                "/api/v2/docs",
+                json={
+                    "project_id": str(project.id),
+                    "org_id": str(org.id),
+                    "title": "마크다운 관련 문서",
+                    "slug": f"doc-{uuid.uuid4().hex[:8]}",
+                    "content_format": "markdown",
+                    "content": _entity_link_markdown("Linked Story (MD)", "story", story.id),
+                },
+            )
+            assert create_resp.status_code == 201, create_resp.text
+            doc_id = uuid.UUID(create_resp.json()["id"])
+
+            async with Session() as s:
+                from app.models.doc import Doc
+                doc_row = await s.get(Doc, doc_id)
+                assert doc_row.content_format == "markdown", "선행조건 — 실제로 markdown으로 저장됐는지"
+                assert "<" not in doc_row.content, "선행조건 — 저장된 content에 HTML 태그가 없는지(순수 마크다운)"
+
+                ref = await _find_reference(
+                    s, org_id=org.id, source_type="doc", source_id=doc_id,
+                    target_type="story", target_id=story.id,
+                )
+                assert ref is not None, "마크다운 본문에 entity:story: 링크를 실었는데 Reference 행이 안 생겼다"
+                assert ref.form == "mention"
+                assert ref.source_field == "body"
+
+            backlinks_resp = await client.get(f"/api/v2/stories/{story.id}/backlinks?source_type=doc")
+            assert backlinks_resp.status_code == 200, backlinks_resp.text
+            data = backlinks_resp.json()["data"]
+            assert len(data) == 1, data
+            assert data[0]["doc"]["id"] == str(doc_id)
+        finally:
+            await client.aclose()
+            app.dependency_overrides.clear()
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_removing_entity_link_from_markdown_doc_body_revokes_reference():
+    """⭐AC1-b — 마크다운 본문에서도 링크를 지우고 저장(PATCH)하면 Reference가 회수된다
+    (HTML 경로의 기존 회수 테스트와 동형, 저장 형식만 다름)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id, "P")
+            member_id, user_id = await _make_human_member(s, org.id, project.id)
+            story = await _make_story(s, org.id, project.id, title="Will Be Unlinked (MD)")
+
+        await _setup_app_human(app, Session, user_id, org.id)
+        client = _client_for(app)
+        try:
+            create_resp = await client.post(
+                "/api/v2/docs",
+                json={
+                    "project_id": str(project.id),
+                    "org_id": str(org.id),
+                    "title": "곧 링크 지울 마크다운 문서",
+                    "slug": f"doc-{uuid.uuid4().hex[:8]}",
+                    "content_format": "markdown",
+                    "content": _entity_link_markdown("Will Be Unlinked (MD)", "story", story.id),
+                },
+            )
+            assert create_resp.status_code == 201, create_resp.text
+            doc_id = uuid.UUID(create_resp.json()["id"])
+
+            async with Session() as s:
+                ref = await _find_reference(
+                    s, org_id=org.id, source_type="doc", source_id=doc_id,
+                    target_type="story", target_id=story.id,
+                )
+                assert ref is not None, "선행 조건 실패 — 링크가 애초에 안 써짐"
+
+            patch_resp = await client.patch(
+                f"/api/v2/docs/{doc_id}", json={"content": "이제 스토리 얘기 없음."},
+            )
+            assert patch_resp.status_code == 200, patch_resp.text
+
+            async with Session() as s:
+                ref_after = await _find_reference(
+                    s, org_id=org.id, source_type="doc", source_id=doc_id,
+                    target_type="story", target_id=story.id,
+                )
+                assert ref_after is None, "마크다운 본문에서 링크를 지웠는데 Reference가 안 회수됐다"
+
+            backlinks_resp = await client.get(f"/api/v2/stories/{story.id}/backlinks?source_type=doc")
+            assert backlinks_resp.status_code == 200, backlinks_resp.text
+            assert backlinks_resp.json()["data"] == []
         finally:
             await client.aclose()
             app.dependency_overrides.clear()
