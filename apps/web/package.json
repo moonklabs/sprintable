@@ -58,6 +58,7 @@
     "verify:no-raw-ascii-jsx-text": "tsx scripts/verify-no-raw-ascii-jsx-text.ts",
     "verify:no-raw-ascii-jsx-attr": "tsx scripts/verify-no-raw-ascii-jsx-attr.ts",
     "verify:no-ascii-token-in-ko-value": "tsx scripts/verify-no-ascii-token-in-ko-value.ts",
+    "verify:no-latin-in-uppercase-eyebrow": "tsx scripts/verify-no-latin-in-uppercase-eyebrow.ts",
     "verify:no-role-english-in-user-copy": "tsx scripts/verify-no-role-english-in-user-copy.ts",
     "verify:pasted-secret-bff-route-registered": "tsx scripts/verify-pasted-secret-bff-route-registered.ts",
     "verify:be-proxy-header-passthrough": "tsx scripts/verify-be-proxy-header-passthrough.ts",

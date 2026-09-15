@@ -981,7 +981,7 @@
     "trustMergeReady": "머지 준비",
     "trustDone": "완료",
     "trustAxisView": "6단계 신뢰축 + 완료",
-    "trustClassicView": "5-status 클래식",
+    "trustClassicView": "5단계 클래식",
     "trustLockedDropHint": "드롭 불가 — 게이트가 정함",
     "trustResolveGate": "게이트 열기",
     "epicSwimlaneTitle": "에픽 스윔레인",
@@ -2139,7 +2139,7 @@
     "loadingStep2Desc": "가설별 검증/반증 + 상위 회고 신호에서 배운 것 도출",
     "loadingStep3Label": "다음 검증 가설 도출",
     "loadingStep3Desc": "다음 스프린트에서 검증해볼 만한 방향 제안",
-    "loadingTranslineSynthesis": "Sprintable AI가 참고 자료를 만드는 중이에요 · 판단은 당신이 해요."
+    "loadingTranslineSynthesis": "Sprintable AI가 참고 자료를 만드는 중이에요 · 판단은 직접 해요."
   },
   "share": {
     "share": "공유",
@@ -4311,7 +4311,7 @@
     "createLoopDraftCta": "AI 초안 제안",
     "createLoopDrafting": "제안 중…",
     "createLoopDraftNoteTitle": "AI 초안이에요 — 검토·수정 후 확정하세요.",
-    "createLoopDraftNoteBody": "이 문구는 그대로 제출되지 않으며, 당신이 확인해야 반영돼요.",
+    "createLoopDraftNoteBody": "이 문구는 그대로 제출되지 않으며, 직접 확인해야 반영돼요.",
     "createLoopDraftRetry": "다시 제안",
     "aiAttributionLabel": "Sprintable AI",
     "aiConfidenceLabel": "근거 {count}건 · {level}",
@@ -4319,7 +4319,7 @@
     "aiConfidenceLevel_high": "높음",
     "aiConfidenceLevel_medium": "보통",
     "aiConfidenceLevel_low": "낮음",
-    "aiTransparencyLine": "AI가 도운 참고 자료예요 · 판단은 당신이 해요.",
+    "aiTransparencyLine": "AI가 도운 참고 자료예요 · 판단은 직접 해요.",
     "createLoopRecipeLabel": "실행 방식 (선택)",
     "createLoopRecipeNone": "직접 진행"
   },
@@ -4391,7 +4391,7 @@
     "declareStatementPlaceholder": "이 스프린트에서 무엇을 검증하는지",
     "declareDraftCta": "AI 초안으로 시작",
     "declareDraftNoteTitle": "AI 초안 — 검토·수정 후 확정하세요.",
-    "declareDraftNoteBody": "확정은 당신이 한다 — 편집하거나 그대로 두세요.",
+    "declareDraftNoteBody": "확정은 직접 해요 — 편집하거나 그대로 두세요.",
     "declareGa4DateRangePlaceholder": "측정 기간(일)",
     "declareMeasureAfterLabel": "측정 시점",
     "declareMetricNameLabel": "지표 이름",
@@ -4409,7 +4409,7 @@
     "loadingHeadlineDraft": "가 초안을 짓는 중…",
     "loadingStepDraftLabel": "가설 초안 짓는 중",
     "loadingStepDraftDesc": "목표 맥락에서 statement·지표·측정 시점을 한 번에 제안",
-    "loadingTranslineDraft": "AI 초안이에요 · 검토·수정 후 확정은 당신이 해요."
+    "loadingTranslineDraft": "AI 초안이에요 · 검토·수정 후 확정은 직접 해요."
   },
   "presence": {
     "panelTitle": "팀 현황",
@@ -5086,7 +5086,7 @@
     "sigEvidenceViewedLabel": "위 근거를 확인했어요",
     "sigReasonLabel": "결정 사유",
     "sigReasonPlaceholder": "기록에 남을 결정 사유를 입력하세요",
-    "sigConsequenceNote": "승인은 당신의 서명으로 기록돼요",
+    "sigConsequenceNote": "승인은 내 서명으로 기록돼요",
     "sigRequestChanges": "변경 요청",
     "sigApproveAndSign": "승인하고 서명",
     "sigApproveAndSignNewsletterSend": "발송 승인하고 서명",
@@ -5193,7 +5193,7 @@
     "copy": "복사",
     "copied": "복사됨",
     "download": "다운로드",
-    "scopeTitle": "scoped key 권한",
+    "scopeTitle": "스코프 키 권한",
     "rotate": "재발급",
     "scopeCore": "핵심",
     "scopeCoreNote": "항상 허용",

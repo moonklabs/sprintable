@@ -1,0 +1,21 @@
+{
+  "_comment": [
+    "story #3925(§⑤ 낱말 드리프트, 2026-09-15) 첫 도입 시점 잔존분 — 전부 다른 카드가 이미",
+    "손대는 중이라 이 카드 스코프 밖(PO 지시 09:43Z, shrink-only — 새로 늘면 FAIL):",
+    "attentionQueue.kicker → #3920(유나)이 \"오늘\"로 전환 중.",
+    "canvas.versionLineage → #3926(디디) 스코프.",
+    "canvas.descriptionPaneHeading → #4328(민)에서 이미 \"설명 — 보이는 문서\"로 해결됨 —",
+    "  이 브랜치가 #4328 착지 前 develop(adb7c3d39a)에서 분기해 아직 반영 前이라 실측에",
+    "  잡힘, rebase 뒤 자동으로 사라질 항목(전량 정리 대상 아님, shrink 확인만).",
+    "proofCapsule.evidence.label/gate.label/claim.label → #3920 AC5(2026-09-15 06:52Z 추가)",
+    "  범위 — claim/evidence/gate 3 라벨 세트를 그 카드가 명사구+해요체로 통일."
+  ],
+  "keys": [
+    "attentionQueue.kicker",
+    "canvas.versionLineage",
+    "canvas.descriptionPaneHeading",
+    "proofCapsule.evidence.label",
+    "proofCapsule.gate.label",
+    "proofCapsule.claim.label"
+  ]
+}
