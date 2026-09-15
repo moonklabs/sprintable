@@ -10,8 +10,8 @@
     "mailOrderLabel": "통신판매업 신고번호"
   },
   "notFound": {
-    "title": "페이지를 찾을 수 없습니다",
-    "description": "요청하신 페이지가 존재하지 않거나 이동되었습니다",
+    "title": "페이지를 찾을 수 없어요",
+    "description": "요청하신 페이지가 존재하지 않거나 이동됐어요",
     "cta": "대시보드로"
   },
   "common": {
@@ -54,7 +54,7 @@
     "stepOrgCreated": "조직 만들기",
     "stepAgentConnected": "에이전트 연결하기",
     "stepFirstRoundtrip": "첫 지시 보내고 회신 받기",
-    "firstInstructionStartFailed": "대화를 시작하지 못했습니다. 다시 시도해 주세요.",
+    "firstInstructionStartFailed": "대화를 시작하지 못했어요. 다시 시도해 주세요.",
     "collapseAria": "접기",
     "expandAria": "펼치기",
     "collapsedChip": "가입 완료 {completed}/{total}"
@@ -305,9 +305,9 @@
   },
   "channel": {
     "title": "채널 채팅",
-    "missingAgentId": "어떤 에이전트의 채널인지 지정되지 않았습니다. 워크포스에서 에이전트를 골라 다시 열어 주세요.",
+    "missingAgentId": "어떤 에이전트의 채널인지 지정되지 않았어요. 워크포스에서 에이전트를 골라 다시 열어 주세요.",
     "connecting": "연결 중…",
-    "empty": "메시지가 없습니다.",
+    "empty": "메시지가 없어요.",
     "attachment": "첨부 파일",
     "reply": "답장",
     "cancelReply": "답장 취소",
@@ -370,20 +370,20 @@
   },
   "proofCapsule": {
     "claim": {
-      "label": "Claim · 에이전트 완료 주장",
+      "label": "에이전트 주장 · 완료했다고 말해요",
       "executor": "실행 {name}",
       "now": "지금: <b>{now}</b>",
       "running": "실행 중"
     },
     "evidence": {
-      "label": "Evidence · 요구 대조",
-      "acMet": "AC {met}/{total} 충족",
-      "autoPassed": "자동검증 passed",
-      "autoFailed": "자동검증 failed",
+      "label": "증거 · 요구와 대조",
+      "acMet": "완료 조건 {met}/{total} 충족",
+      "autoPassed": "자동검증 통과",
+      "autoFailed": "자동검증 실패",
       "count": "증거 {count}건"
     },
     "gate": {
-      "label": "Human gate · 인간이 책임집니다",
+      "label": "휴먼 게이트 · 휴먼이 책임져요",
       "owner": "책임 <b>{name}</b>",
       "risk": "위험도 {risk}"
     },
@@ -439,9 +439,9 @@
     "decideReviewContext": "검토가 필요해요",
     "decideBlockerTitle": "내가 막고 있는 작업",
     "decideBlockerContext": "다른 작업이 이 작업을 기다리고 있어요",
-    "signalAgentStuckTitle": "에이전트가 다음 단계를 기다립니다",
+    "signalAgentStuckTitle": "에이전트가 다음 단계를 기다려요",
     "signalAgentStuckContext": "승인을 기다리고 있어요 — 확인이 필요해요",
-    "signalBlockerTitle": "막힌 업무가 응답을 기다립니다",
+    "signalBlockerTitle": "막힌 업무가 응답을 기다려요",
     "signalBlockerContext": "확인이 필요해요",
     "signalHypothesisFalsifiedTitle": "가설 하나가 반증됐어요",
     "doneGenericContext": "근거를 확인하고 승인하세요",
@@ -1144,8 +1144,8 @@
     }
   },
   "session": {
-    "expiredTitle": "세션이 만료되었습니다",
-    "expiredBody": "보안을 위해 세션이 만료되었습니다. 다시 로그인하면 보던 화면으로 돌아갑니다.",
+    "expiredTitle": "세션이 만료됐어요",
+    "expiredBody": "보안을 위해 세션이 만료됐어요. 다시 로그인하면 보던 화면으로 돌아가요.",
     "reloginCta": "다시 로그인"
   },
   "login": {
@@ -1192,7 +1192,7 @@
     "passwordPlaceholder": "비밀번호",
     "ruleLength": "8자 이상",
     "ruleCategories": "대문자·소문자·숫자·특수문자 중 3가지 이상 ({count}/3)",
-    "tosPrefix": "다음에 동의합니다:",
+    "tosPrefix": "다음에 동의해요:",
     "termsOfService": "이용약관",
     "and": "및",
     "privacyPolicy": "개인정보처리방침",
@@ -1201,9 +1201,9 @@
     "orContinueWith": "또는 다음으로 계속",
     "continueWithGoogle": "Google로 계속",
     "tosRequiredError": "먼저 이용약관과 개인정보처리방침에 동의해 주세요.",
-    "registrationFailed": "가입에 실패했습니다. 다시 시도해 주세요.",
-    "registerEmailTaken": "이미 가입된 이메일입니다.",
-    "registerTosRequired": "서비스 이용약관에 동의해야 합니다.",
+    "registrationFailed": "가입에 실패했어요. 다시 시도해 주세요.",
+    "registerEmailTaken": "이미 가입된 이메일이에요.",
+    "registerTosRequired": "서비스 이용약관에 동의해야 해요.",
     "alreadyHaveAccount": "이미 계정이 있으신가요?",
     "signIn": "로그인"
   },
@@ -1839,7 +1839,7 @@
   },
   "shell": {
     "projectSelectPrompt": "현재 프로젝트 선택",
-    "projectSelectDescription": "헤더의 프로젝트 스위처에서 현재 프로젝트를 선택하면 이 화면이 활성화됩니다."
+    "projectSelectDescription": "헤더의 프로젝트 스위처에서 현재 프로젝트를 선택하면 이 화면이 활성화돼요."
   },
   "standup": {
     "orgLevelTitle": "오늘의 스탠드업",
@@ -2099,10 +2099,10 @@
     "linkCopied": "링크 복사됨",
     "stopSharing": "공개 중단",
     "regenerateLink": "링크 재발급",
-    "shareSingleDocNote": "이 문서 한 개만 공개됩니다.",
-    "publicLinkInvalid": "유효하지 않은 링크입니다.",
-    "attachmentUnavailable": "공개 보기에서 첨부를 표시할 수 없습니다",
-    "imageUnavailable": "공개 보기에서 이미지를 표시할 수 없습니다"
+    "shareSingleDocNote": "이 문서 한 개만 공개돼요.",
+    "publicLinkInvalid": "유효하지 않은 링크예요.",
+    "attachmentUnavailable": "공개 보기에서 첨부를 표시할 수 없어요",
+    "imageUnavailable": "공개 보기에서 이미지를 표시할 수 없어요"
   },
   "channelConnect": {
     "pageTitle": "채널 연결",
@@ -3181,12 +3181,12 @@
     "adminOnlyHint": "조직 관리자/소유자만 리워드 지급 가능"
   },
   "attentionQueue": {
-    "kicker": "오늘 · Attention Queue",
+    "kicker": "오늘",
     "title": "지금 개입할 것",
     "count": "<b>{count}</b>건 · 로그 안 열고 판단",
     "allClear": "ALL CLEAR",
     "emptyTitle": "지금 개입할 것 없음",
-    "emptyBody": "모든 작업이 흐르고 있습니다. 예외가 생기면 여기에 표시됩니다.",
+    "emptyBody": "모든 작업이 흐르고 있어요. 예외가 생기면 여기에 표시돼요.",
     "flowDemoted": "나머지는 흐르는 중 — {overflow}건은 여기 안 올림",
     "kindVerifyFail": "검증 실패",
     "kindDecisionNeeded": "결정 필요",
@@ -3404,13 +3404,13 @@
     "perMonth": "월",
     "perYear": "년",
     "checkoutFailed": "결제 처리 실패",
-    "checkoutCanceled": "결제가 취소되었습니다",
-    "noPriceMapping": "가격 정보를 찾을 수 없습니다",
+    "checkoutCanceled": "결제가 취소됐어요",
+    "noPriceMapping": "가격 정보를 찾을 수 없어요",
     "downgradeWarningTitle": "다운그레이드 경고",
-    "downgradeWarningDesc": "다운그레이드하면 일부 기능이 제한될 수 있습니다. 초과된 리소스는 유지되지만 새로 생성할 수 없습니다.",
+    "downgradeWarningDesc": "다운그레이드하면 일부 기능이 제한될 수 있어요. 초과된 리소스는 유지되지만 새로 생성할 수 없어요.",
     "cancel": "취소",
     "confirmDowngrade": "다운그레이드 확인",
-    "checkoutSuccess": "결제가 완료되었습니다! 대시보드로 이동합니다.",
+    "checkoutSuccess": "결제가 완료됐어요! 대시보드로 이동해요.",
     "unlimited": "무제한"
   },
   "billing": {
@@ -4133,10 +4133,10 @@
     "loadingTranslineDraft": "AI 초안이에요 · 검토·수정 후 확정은 직접 해요."
   },
   "glance": {
-    "noProject": "프로젝트가 선택되지 않았습니다.",
+    "noProject": "프로젝트가 선택되지 않았어요.",
     "loading": "불러오는 중…",
-    "exceptionsEmpty": "승인 흐름(단계 결재)에서 멈춘 것이 없습니다",
-    "exceptionsLoadError": "목록을 불러오지 못했습니다",
+    "exceptionsEmpty": "승인 흐름(단계 결재)에서 멈춘 것이 없어요",
+    "exceptionsLoadError": "목록을 불러오지 못했어요",
     "exceptionKindGatePending": "결재 대기",
     "exceptionActionGatePending": "검토",
     "exceptionKindBlocked": "다른 일에 막힘",
@@ -4147,7 +4147,7 @@
       "notStarted": "시작 전",
       "justStarted": "시작 단계",
       "underway": "진행 중",
-      "almostThere": "거의 다 왔습니다",
+      "almostThere": "거의 다 왔어요",
       "wrappingUp": "막바지"
     }
   },
@@ -4677,9 +4677,9 @@
   },
   "activityTimeline": {
     "title": "최근 활동",
-    "description": "팀의 최근 10건 활동 실시간 피드입니다.",
+    "description": "팀의 최근 10건 활동 실시간 피드예요.",
     "viewAll": "더 보기",
-    "empty": "아직 기록된 활동이 없습니다.",
+    "empty": "아직 기록된 활동이 없어요.",
     "unknownActor": "시스템",
     "actionStoryStatus": "스토리 {entity} 상태 변경",
     "actionStoryCreated": "스토리 {entity} 생성",
@@ -4758,7 +4758,7 @@
   },
   "orgGatePolicy": {
     "title": "결재 태세 및 기본 승인자",
-    "description": "조직 전체의 게이트 판정 태세와, 머지 게이트에 승인자가 지정되지 않았을 때 쓰일 기본 승인자를 설정합니다.",
+    "description": "조직 전체의 게이트 판정 태세와, 머지 게이트에 승인자가 지정되지 않았을 때 쓰일 기본 승인자를 설정해요.",
     "postureLabel": "결재 태세",
     "postureConservative": "보수적",
     "postureBalanced": "균형",
@@ -4768,9 +4768,9 @@
     "approverPickPlaceholder": "승인자를 선택하세요",
     "approverLoading": "불러오는 중…",
     "save": "저장",
-    "saved": "저장됐습니다.",
-    "saveFailed": "저장에 실패했습니다.",
-    "loadFailed": "정책을 불러오지 못했습니다."
+    "saved": "저장됐어요.",
+    "saveFailed": "저장에 실패했어요.",
+    "loadFailed": "정책을 불러오지 못했어요."
   },
   "githubLinks": {
     "sectionLabel": "PR 연결",
@@ -5395,7 +5395,7 @@
     "subtitle": "측정 기한이 지났거나 결과 판정이 없는 항목 전부",
     "unclaimedOnlyToggle": "담당자 없는 항목만",
     "loading": "불러오는 중…",
-    "empty": "지금은 닫히지 않은 루프가 없습니다",
+    "empty": "지금은 닫히지 않은 루프가 없어요",
     "claimedBy": "{name} 담당",
     "unclaimed": "담당자 없음",
     "claimAction": "내가 맡기",
@@ -5627,9 +5627,9 @@
     "targetLabel": "대상 macOS (Apple Silicon)",
     "versionLabel": "버전 {version}",
     "buildLabel": "빌드 {sha}",
-    "notarizationNotice": "Apple 공증 전 내부용입니다.",
+    "notarizationNotice": "Apple 공증 전 내부용이에요.",
     "gatekeeperNotice": "처음 열 때는 파일을 우클릭한 뒤 「열기」를 선택하세요.",
     "downloadCta": "다운로드",
-    "unavailable": "지금은 받을 수 없습니다."
+    "unavailable": "지금은 받을 수 없어요."
   }
 }

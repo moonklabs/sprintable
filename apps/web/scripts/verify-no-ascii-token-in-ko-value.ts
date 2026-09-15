@@ -104,7 +104,7 @@ export const ALLOWLIST: ReadonlySet<string> = new Set<string>([
 //    §⑤ 허용 액센트 패턴과 유사해 보이나 PO/유나 확定 없이 단정 금지).
 export const TOKEN_ALLOWLIST: ReadonlySet<string> = new Set<string>([
   'API', 'AI', 'URL', 'MCP', 'ID', 'SSE', 'UTM', 'HTML', 'JSON', 'LLM', 'CI', 'SHA', 'DM',
-  'BYOA', 'STT', 'CSV', 'SLA', 'PDF', 'HTTP', 'AC', 'SDK', 'HTTPS', 'POST', 'BYOM', 'PC',
+  'BYOA', 'STT', 'CSV', 'SLA', 'PDF', 'HTTP', 'SDK', 'HTTPS', 'POST', 'BYOM', 'PC',
   'UI', 'SID', 'XXX', 'PNG', 'OS', 'CTA', 'SNS', 'GB', 'SSO', 'BYO', 'TOTP', 'QR', 'MB', 'PR',
 ]);
 

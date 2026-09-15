@@ -350,7 +350,7 @@ describe('Workcell Evidence layer (Proof Capsule 재사용 · null=정직한 빈
       </NextIntlClientProvider>,
     );
     expect(markup).toContain('재시도 로직 구현 완료');
-    expect(markup).toContain('AC 4/4');
+    expect(markup).toContain('완료 조건 4/4');
     expect(markup).toContain('Merge gate 열기');
   });
 });
