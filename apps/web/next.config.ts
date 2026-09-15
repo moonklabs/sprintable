@@ -136,6 +136,26 @@ const nextConfig: NextConfig = {
       // Next.js redirects()가 destination에 자동 병합(문서화된 동작, dev 빌드로 curl 실측 확認
       // 완료 — 값으로 닫음).
       { source: '/:ws/:proj/board', destination: '/:ws/:proj/flow?view=list', permanent: false },
+      // story #3915 — 이 세 은퇴 주소는 전에 page.tsx 안에서 next/navigation의 redirect()를
+      // 직접 호출했는데, 셋 다 조상 디렉토리에 loading.tsx(스트리밍 Suspense 경계)가 있어
+      // React 렌더 단계까지 redirect()가 밀려 들어갔다 — 그 경계가 응답 헤더를 200으로
+      // 커밋한 뒤에야 redirect()가 실행되면 Next가 깨끗한 3xx를 못 내고 "server rendering
+      // errored→client 전환" 열화 경로(meta refresh + NEXT_REDIRECT digest)를 타는데, 그
+      // 경로가 Next.js 자체 내부 싱글턴 Router(app-router.js의 mpaNavigation 분기 — 그
+      // 소스 자신의 주석이 "violates the rules of hooks"라고 자인)의 훅 호출 수를 렌더마다
+      // 다르게 만들어 React 오류 코드 310("Rendered more hooks than during the previous
+      // render")을 던졌다(curl 실측: recruiter·hitl·membersAgentsLegacy 셋 다 200+메타
+      // 리프레시, 같은 loading.tsx 경계 밖의 다른 은퇴 주소는 깨끗한 307). 우리 애플리케이션
+      // 코드엔 조건부 훅이 없어 "훅 앞에 무조건 호출" 처방을 적용할 자리가 없다 — 대신
+      // redirect를 이 라우팅 단계로 옮기면 React 렌더/스트리밍 진입 자체가 사라져 그 경합이
+      // 원천적으로 발생할 수 없다(위 board/agents 선례와 동일 메커니즘, 새 패턴 아님).
+      // organization/workforce/loading.tsx 경계: recruiter(구 채용관, story d63d3f73)·
+      // hitl(구 HITL 승인 대기, story #2054 AC4). settings/loading.tsx 경계:
+      // members/agents/[id](구 에이전트 상세, story d63d3f73 — :id 캡처 재사용은 위
+      // /agents/:path* 선례와 동형).
+      { source: '/organization/workforce/recruiter', destination: '/organization/workforce?tab=recruit', permanent: true },
+      { source: '/organization/workforce/hitl', destination: '/inbox', permanent: true },
+      { source: '/settings/members/agents/:id', destination: '/organization/workforce/:id', permanent: true },
     ];
   },
   async rewrites() {
