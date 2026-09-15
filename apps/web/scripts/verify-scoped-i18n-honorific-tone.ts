@@ -173,6 +173,11 @@ export const SCOPED_KEYS = [
 // storage 26·insightsBoard 25=95건 — PO 임시 needle 하한 74건보다 많음, ㅂ니다 계열까지
 // NFD로 잡은 실 함수 재측이 항상 상한 자다. 전환 전 플레이스홀더-계사 인접 0건 사전 스캔
 // 확認).
+// story #3908 — standup(스탠드업)·goals(목표)도 전량 해요체 이관 완료(잔존 0, 실 함수
+// findHonorificToneInScopedKeys로 head 재측 standup 28·goals 24=52건 — PO 임시 needle
+// 하한보다 많은 실 함수 재측이 항상 상한 자. goals.deleteConfirmTitle은 의문형
+// (「목표를 삭제하시겠습니까?」, story #3900 소관)이라 애초에 이 가드 대상이 아니다 —
+// 전환 전 플레이스홀더-계사 인접 0건 사전 스캔 확認).
 export const SCOPED_NAMESPACES = [
   'chats',
   'content',
@@ -191,6 +196,8 @@ export const SCOPED_NAMESPACES = [
   'login',
   'storage',
   'insightsBoard',
+  'standup',
+  'goals',
 ] as const;
 
 function flattenNamespaceLeafKeys(root: Record<string, unknown>, namespace: string): string[] {
@@ -248,6 +255,8 @@ const SCOPED_NAMESPACE_MIN_LEAF_COUNT: Readonly<Record<(typeof SCOPED_NAMESPACES
   login: 30, // 실측 35개(2026-09-15, story #3901 그라운딩) — 여유 하한
   storage: 70, // 실측 82개(2026-09-15, story #3901 그라운딩) — 여유 하한
   insightsBoard: 90, // 실측 103개(2026-09-15, story #3901 그라운딩) — 여유 하한
+  standup: 100, // 실측 118개(2026-09-15, story #3908 그라운딩) — 여유 하한
+  goals: 130, // 실측 148개(2026-09-15, story #3908 그라운딩) — 여유 하한
 };
 
 /** SCOPED_NAMESPACES 각각의 실제 leaf 개수가 하한을 밑도는지 검사하는 순수 함수 —

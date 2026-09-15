@@ -163,8 +163,8 @@ describe('실 ko.json — 스코프 키 count-lock(baseline 0, 새 자리 0)', (
 // story #3885 AC2 — SCOPED_NAMESPACES(chats 전량 승격) + resolveEffectiveScopedKeys.
 // ---------------------------------------------------------------------------
 
-describe('SCOPED_NAMESPACES — story #3885/#3889/#3892/#3895/#3898/#3899/#3901 AC2', () => {
-  it('chats·content·channelConnect·settings·agents·flow·gateConfig·recruiter·loops·cage·organization·pricingPlans·contentRules·onboarding·login·storage·insightsBoard 17개가 등재됐다(잔존 채무 0으로 확定된 네임스페이스만)', () => {
+describe('SCOPED_NAMESPACES — story #3885/#3889/#3892/#3895/#3898/#3899/#3901/#3908 AC2', () => {
+  it('chats·content·channelConnect·settings·agents·flow·gateConfig·recruiter·loops·cage·organization·pricingPlans·contentRules·onboarding·login·storage·insightsBoard·standup·goals 19개가 등재됐다(잔존 채무 0으로 확定된 네임스페이스만)', () => {
     expect(SCOPED_NAMESPACES).toEqual([
       'chats',
       'content',
@@ -183,6 +183,8 @@ describe('SCOPED_NAMESPACES — story #3885/#3889/#3892/#3895/#3898/#3899/#3901 
       'login',
       'storage',
       'insightsBoard',
+      'standup',
+      'goals',
     ]);
   });
 });
@@ -254,8 +256,8 @@ describe('실 ko.json — chats 네임스페이스 전량(story #3885 AC2)', () 
 // ---------------------------------------------------------------------------
 
 describe('checkScopedNamespaceMinimums — 순수 함수', () => {
-  it('⭐네임스페이스 14개가 ko.json에 아예 없으면(개명·삭제 시뮬레이션) 14건 위반을 낸다', () => {
-    const violations = checkScopedNamespaceMinimums({ board: { x: 'y' } }); // 14개 다 없음
+  it('⭐네임스페이스 19개가 ko.json에 아예 없으면(개명·삭제 시뮬레이션) 19건 위반을 낸다', () => {
+    const violations = checkScopedNamespaceMinimums({ board: { x: 'y' } }); // 19개 다 없음
     expect(violations).toEqual([
       { namespace: 'chats', actualCount: 0, minExpected: 200 },
       { namespace: 'content', actualCount: 0, minExpected: 500 },
@@ -274,6 +276,8 @@ describe('checkScopedNamespaceMinimums — 순수 함수', () => {
       { namespace: 'login', actualCount: 0, minExpected: 30 },
       { namespace: 'storage', actualCount: 0, minExpected: 70 },
       { namespace: 'insightsBoard', actualCount: 0, minExpected: 90 },
+      { namespace: 'standup', actualCount: 0, minExpected: 100 },
+      { namespace: 'goals', actualCount: 0, minExpected: 130 },
     ]);
   });
 
@@ -297,6 +301,8 @@ describe('checkScopedNamespaceMinimums — 순수 함수', () => {
       { namespace: 'login', actualCount: 0, minExpected: 30 },
       { namespace: 'storage', actualCount: 0, minExpected: 70 },
       { namespace: 'insightsBoard', actualCount: 0, minExpected: 90 },
+      { namespace: 'standup', actualCount: 0, minExpected: 100 },
+      { namespace: 'goals', actualCount: 0, minExpected: 130 },
     ]);
   });
 
@@ -418,6 +424,22 @@ describe('SCOPED_NAMESPACE_MIN_LEAF_COUNT — 하한이 실측치보다 낮게 �
     const effectiveKeys = resolveEffectiveScopedKeys(ko);
     const insightsBoardLeafCount = effectiveKeys.filter((k) => k.startsWith('insightsBoard.')).length;
     expect(insightsBoardLeafCount).toBeGreaterThanOrEqual(90);
+  });
+
+  it('실 ko.json의 standup leaf 개수가 하한(100) 이상이다(실측 118, story #3908)', () => {
+    const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
+    const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    const standupLeafCount = effectiveKeys.filter((k) => k.startsWith('standup.')).length;
+    expect(standupLeafCount).toBeGreaterThanOrEqual(100);
+  });
+
+  it('실 ko.json의 goals leaf 개수가 하한(130) 이상이다(실측 148, story #3908)', () => {
+    const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
+    const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    const goalsLeafCount = effectiveKeys.filter((k) => k.startsWith('goals.')).length;
+    expect(goalsLeafCount).toBeGreaterThanOrEqual(130);
   });
 });
 
