@@ -1,0 +1,1 @@
+{"file": "tests/test_3893_assignee_ref_realdb.py", "sec": 11.6, "source": "미르코 로컬 실측(2026-09-15, docker-compose 로컬 Postgres·uv run pytest -m destructive_schema, 3 tests, 11.59s wall — story 23bf1913 등재 요구 대응)"}
