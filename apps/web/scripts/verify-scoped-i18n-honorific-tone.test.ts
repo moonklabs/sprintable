@@ -547,12 +547,16 @@ describe('실 ko.json — agents·flow·gateConfig 네임스페이스 전량(sto
     });
   });
 
+  // story #3899(rebase, 2026-09-15) — 이 자리도 cage.gateDetailNotFound를 고정 fixture로
+  // 썼으나, 3899가 cage를 SCOPED_NAMESPACES로 승격하며 그 값도 해요체로 이관(잔존 0)돼
+  // 더 이상 "스코프 밖" 표본이 못 된다 — 위 SCOPED_KEYS describe 블록과 같은 자리
+  // (board.epicSwimlaneLoadError)로 교체, 같은 구조의 표본 유지.
   it('무관 PR no-op — agents·flow·gateConfig 밖·SCOPED_KEYS 밖의 실 합니다체 키는 namespace 전량 승격 뒤에도 안 본다', () => {
-    const outOfScopeValue = (ko.cage as Record<string, unknown> | undefined)?.gateDetailNotFound;
+    const outOfScopeValue = (ko.board as Record<string, unknown> | undefined)?.epicSwimlaneLoadError;
     expect(typeof outOfScopeValue).toBe('string');
     expect(outOfScopeValue as string).toMatch(/습니다|ㅂ니다|십시오/);
     const effectiveKeys = resolveEffectiveScopedKeys(ko);
-    expect(effectiveKeys).not.toContain('cage.gateDetailNotFound');
+    expect(effectiveKeys).not.toContain('board.epicSwimlaneLoadError');
     expect(findHonorificToneInScopedKeys(ko, effectiveKeys)).toEqual([]);
   });
 });
