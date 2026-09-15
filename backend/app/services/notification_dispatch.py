@@ -408,7 +408,13 @@ async def dispatch_notification(
                     # 이벤트 받는 오라우팅 방지. 미지정 시 뷰 행의 project_id(기존 거동).
                     _agent_proj = source_project_id or member_row.project_id
                     if _agent_proj:
-                        event = Event(
+                        # story #3903 — 이 로컬 변수를 `event`로 두면 위 함수 파라미터 `event:
+                        # dict | None`(같은 함수 스코프)을 덮어써, 뒤 human 분기(line ~447)의
+                        # `Notification(event=event)`가 이 Event ORM 인스턴스를 그대로 받아
+                        # JSON 직렬화 TypeError → 그 member의 Notification INSERT가 통째로
+                        # 조용히 실패한다(실사고, test_2216_* realdb 재현). `dispatch_event`로
+                        # 분리해 파라미터 `event`를 절대 안 가리게 한다.
+                        dispatch_event = Event(
                             project_id=_agent_proj,
                             org_id=org_id,
                             event_type="dispatched",
@@ -428,8 +434,8 @@ async def dispatch_notification(
                             },
                             status="pending",
                         )
-                        db.add(event)
-                        created_events.append(event)
+                        db.add(dispatch_event)
+                        created_events.append(dispatch_event)
                         inserted = True
                 elif member_row.user_id:
                     # human: Notification + Event 각각 독립 savepoint — 하나 실패해도 다른 쪽 롤백 방지
@@ -460,7 +466,9 @@ async def dispatch_notification(
                                 # 인데 delivered_at=NULL — "배달됐다"만 있고 "언제"가 없어, 이 값을
                                 # coalesce(delivered_at, now())로 지연을 재려던 첫 시도가 「p50 9.4일」
                                 # 이라는 거짓 수치를 냈다(실제로는 그 행들 나이가 now()로 치환된 것).
-                                event = Event(
+                                # story #3903 — `dispatch_event`로 명명(위 agent 분기와 동일
+                                # 이유: 함수 파라미터 `event`를 가리면 안 됨).
+                                dispatch_event = Event(
                                     project_id=member_row.project_id,
                                     org_id=org_id,
                                     event_type="dispatched",
@@ -480,8 +488,8 @@ async def dispatch_notification(
                                     # 값이 없는 대신 "틀린 값"으로 재발한다.
                                     delivered_at=datetime.now(timezone.utc),
                                 )
-                                db.add(event)
-                            created_events.append(event)
+                                db.add(dispatch_event)
+                            created_events.append(dispatch_event)
                             inserted = True
                         except Exception:
                             logger.warning("Event INSERT failed member_id=%s event_type=%s", member_row.id, event_type)
