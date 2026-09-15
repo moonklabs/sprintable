@@ -187,7 +187,7 @@ describe('ActionZone — story #2288, PO 지시(2026-07-29): 못 알아보는 �
     });
     expect(container.textContent).not.toContain('새 종류의 항목'); // 개별 줄은 안 그린다(splitRenderableQueue가 걸러냄).
     expect(container.textContent).not.toContain('리뷰·머지 대기');
-    expect(container.textContent).toContain('1건은 표시할 수 없습니다'); // 대신 요약 한 줄.
+    expect(container.textContent).toContain(koMessages.dashboard.ccQueueUnrenderableCount.replace('{count}', '1')); // 대신 요약 한 줄.
   });
 
   it('인식되는 항목과 못 알아보는 항목이 섞이면, 아는 것은 정상 렌더하고 모르는 것만 요약에 센다', async () => {
@@ -202,7 +202,7 @@ describe('ActionZone — story #2288, PO 지시(2026-07-29): 못 알아보는 �
       is_clear: false,
     });
     expect(container.textContent).toContain('게이트 승인 대기');
-    expect(container.textContent).toContain('2건은 표시할 수 없습니다');
+    expect(container.textContent).toContain(koMessages.dashboard.ccQueueUnrenderableCount.replace('{count}', '2'));
   });
 });
 
@@ -249,7 +249,7 @@ describe('ActionZone — story #2288 §7-4·§8-4 잘림 표시·자르는 순�
       attention: { scope: 'project', items: [], pending: [] },
       is_clear: false,
     });
-    expect(container.textContent).toContain('8건 중 5건을 보이고 있습니다');
+    expect(container.textContent).toContain(koMessages.dashboard.ccQueueTruncated.replace('{total}', '8').replace('{shown}', '5'));
     // 보호 항목(결재 대기·내가 막고 있음)은 잘리지 않고 반드시 보인다.
     expect(container.textContent).toContain('게이트 승인 대기');
     expect(container.textContent).toContain('내가 막고 있음');
@@ -273,7 +273,7 @@ describe('ActionZone — story #2288 §8-8 자리를 비운 사이', () => {
       attention: { scope: 'project', items: [], pending: [] },
       is_clear: false,
     });
-    expect(container.textContent).toContain('내 것 1건에 변경이 있었습니다');
+    expect(container.textContent).toContain(koMessages.dashboard.ccChangedSince.replace('{count}', '1'));
   });
 
   it('방문 시 기준점을 갱신한다(다음 렌더에서 같은 항목을 다시 새것으로 안 센다)', async () => {
@@ -284,7 +284,7 @@ describe('ActionZone — story #2288 §8-8 자리를 비운 사이', () => {
       is_clear: false,
     };
     await render(data);
-    expect(container.textContent).toContain('내 것 1건에 변경이 있었습니다');
+    expect(container.textContent).toContain(koMessages.dashboard.ccChangedSince.replace('{count}', '1'));
 
     await act(async () => { root.unmount(); });
     root = createRoot(container);
@@ -303,7 +303,7 @@ describe('ActionZone — story #2288 §8-8 자리를 비운 사이', () => {
       },
       is_clear: false,
     });
-    expect(container.textContent).toContain('내 것 1건에 변경이 있었습니다');
+    expect(container.textContent).toContain(koMessages.dashboard.ccChangedSince.replace('{count}', '1'));
   });
 });
 

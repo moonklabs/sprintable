@@ -77,7 +77,7 @@ describe('AgentRunToolCallsSection', () => {
     expect(container.textContent).not.toContain(koMessages.agentRuns.toolCallsEmptyPending);
   });
 
-  it('story #3722(빈 상태 축③) — 진행 중 run·0건은 「아직 기록이 없습니다」(다른 사실)', async () => {
+  it('story #3722(빈 상태 축③) — 진행 중 run·0건은 「아직 기록이 없어요」(다른 사실)', async () => {
     stubFetch(() => ({ ok: true, json: async () => ({ data: [], meta: { totalCount: 0 } }) }));
     await mountSection('running');
     await flush();
@@ -171,7 +171,7 @@ describe('AgentRunToolCallsSection', () => {
   // 줄(고정 문구)은 행을 펼치면 항상 보이고, 서버 원문(raw)은 그 안에서도 <details>로
   // 한 번 더 접혀 있다(기본 닫힘) — textContent만으로는 hidden 여부를 못 가르므로
   // <details>.open 프로퍼티로 직접 잰다.
-  it('⭐오류는 「이 호출이 실패했습니다」 고정 문구가 항상 먼저 보이고, 원문은 <details> 기본 닫힘 안에 있다', async () => {
+  it('⭐오류는 「이 호출이 실패했어요」 고정 문구가 항상 먼저 보이고, 원문은 <details> 기본 닫힘 안에 있다', async () => {
     stubFetch(() => ({
       ok: true,
       json: async () => ({ data: [row({ error: 'Traceback (most recent call last): boom' })], meta: { totalCount: 1 } }),

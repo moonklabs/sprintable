@@ -194,10 +194,13 @@ describe('MorePage — story #fddd0e6b(IA ⑦ 전체 메뉴)', () => {
     expect(links[0]?.textContent).toContain('기억');
   });
 
-  it('⭐찾기 — 0건이면 「「{q}」에 맞는 화면이 없습니다」 한 줄만 뜨고 카드는 0장', async () => {
+  it('⭐찾기 — 0건이면 「「{q}」에 맞는 화면이 없어요」 한 줄만 뜨고 카드는 0장', async () => {
     await mount();
     await typeQuery('zzz-no-such-screen');
-    expect(container.querySelector('[data-testid="more-search-empty"]')?.textContent).toBe('「zzz-no-such-screen」에 맞는 화면이 없습니다');
+    // story #3913 — 리터럴 재-pin 대신 ko.json 템플릿 값을 {q} 치환해 대조.
+    expect(container.querySelector('[data-testid="more-search-empty"]')?.textContent).toBe(
+      koMessages.nav.moreSearchEmpty.replace('{q}', 'zzz-no-such-screen'),
+    );
     expect(container.querySelectorAll('a')).toHaveLength(0);
   });
 

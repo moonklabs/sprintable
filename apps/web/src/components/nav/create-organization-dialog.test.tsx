@@ -87,7 +87,7 @@ describe('CreateOrganizationDialog — PLAN_LIMIT_EXCEEDED envelope (story #2470
     await fillAndSubmit();
 
     expect(document.body.textContent).not.toContain('Free plan org limit (1) reached');
-    expect(document.body.textContent).toContain('업그레이드가 필요합니다');
+    expect(document.body.textContent).toContain(koMessages.nav.orgLimitBannerTitle);
     expect(document.body.textContent).toContain(koMessages.onboarding.orgLimitExceededError.replace('{limit}', '1'));
     expect(document.body.querySelector('a[href="/settings?tab=billing"]')).not.toBeNull();
   });
@@ -102,7 +102,7 @@ describe('CreateOrganizationDialog — PLAN_LIMIT_EXCEEDED envelope (story #2470
     await mount();
     await fillAndSubmit();
 
-    expect(document.body.textContent).toContain('업그레이드가 필요합니다');
+    expect(document.body.textContent).toContain(koMessages.nav.orgLimitBannerTitle);
     expect(document.body.textContent).toContain(koMessages.onboarding.orgLimitExceededError.replace('{limit}', '1'));
   });
 
@@ -119,8 +119,8 @@ describe('CreateOrganizationDialog — PLAN_LIMIT_EXCEEDED envelope (story #2470
     // story #2484 — CONFLICT(=슬러그 중복)도 이제 code로 분기해 raw 영문 대신 번역 문구를
     // 쓴다(이전엔 여기서 raw message가 그대로 노출됐음 — 회귀가드 겸함).
     expect(document.body.textContent).not.toContain('Slug already exists');
-    expect(document.body.textContent).toContain('이미 사용 중인 슬러그입니다');
-    expect(document.body.textContent).not.toContain('업그레이드가 필요합니다');
+    expect(document.body.textContent).toContain(koMessages.nav.createOrgSlugTaken);
+    expect(document.body.textContent).not.toContain(koMessages.nav.orgLimitBannerTitle);
   });
 
   it('알려지지 않은 code — 안전 폴백, raw message 미노출 (story #2484)', async () => {
@@ -134,7 +134,7 @@ describe('CreateOrganizationDialog — PLAN_LIMIT_EXCEEDED envelope (story #2470
     await fillAndSubmit();
 
     expect(document.body.textContent).not.toContain('brand new raw string');
-    expect(document.body.textContent).toContain('조직을 만들지 못했습니다');
+    expect(document.body.textContent).toContain(koMessages.nav.createOrgGenericError);
   });
 
   it('en locale에선 영문 배너로 렌더된다(회귀 없음)', async () => {
@@ -198,7 +198,7 @@ describe('CreateOrganizationDialog — i18n (story #2482)', () => {
     // handleSlugChange가 [a-z0-9-] 외 문자는 이미 걸러내므로(공백·특수문자), SLUG_REGEX를
     // 실제로 깨는 값은 "시작/끝이 하이픈"류뿐이다.
     await act(async () => { setNativeValue(slugInput, '-bad-'); });
-    expect(document.body.textContent).toContain('영소문자, 숫자, 하이픈만 사용 가능합니다');
+    expect(document.body.textContent).toContain(koMessages.nav.createOrgSlugError);
   });
 
   it('제출 실패(일반 에러, code 없음)도 i18n 문구로 뜬다', async () => {
@@ -209,7 +209,7 @@ describe('CreateOrganizationDialog — i18n (story #2482)', () => {
     })));
     await mount('ko');
     await fillAndSubmit();
-    expect(document.body.textContent).toContain('조직을 만들지 못했습니다. 잠시 후 다시 시도해 주세요.');
+    expect(document.body.textContent).toContain(koMessages.nav.createOrgGenericError);
   });
 
   // 양성대조(AC) — 라벨 하나를 하드코딩으로 되돌리면 이 검사가 실제로 빨간불이어야 한다.
