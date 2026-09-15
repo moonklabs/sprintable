@@ -1207,6 +1207,30 @@
     "alreadyHaveAccount": "Already have an account?",
     "signIn": "Sign in"
   },
+  "verifyEmail": {
+    "invalidLink": "This verification link is invalid.",
+    "verifying": "Verifying your email...",
+    "verifiedSuccess": "Your email has been verified.",
+    "linkExpired": "This verification link is invalid or has expired.",
+    "userNotFound": "We couldn't find your account.",
+    "verifyFailed": "Verification failed.",
+    "verifyError": "Something went wrong during verification.",
+    "startButton": "Get started",
+    "backToLogin": "Back to login"
+  },
+  "setPassword": {
+    "invalidLink": "This confirmation link is invalid.",
+    "settingUp": "Setting your password...",
+    "successMessage": "Your password has been set. Please sign in with your new password. For security, all other devices and sessions have been signed out.",
+    "alreadySet": "A password is already set for this account.",
+    "linkExpired": "This confirmation link is invalid or has expired.",
+    "userNotFound": "We couldn't find your account.",
+    "setFailed": "Failed to set your password.",
+    "processError": "Something went wrong while processing your request.",
+    "loginButton": "Sign in",
+    "retryLink": "Request again (from Settings, after signing in)",
+    "backToLogin": "Back to login"
+  },
   "onboarding": {
     "createOrg": "Create Organization",
     "welcome": "Welcome to Sprintable!",

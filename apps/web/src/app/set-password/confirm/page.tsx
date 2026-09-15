@@ -3,13 +3,13 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import { useTranslations } from 'next-intl';
 import { SprintableLogo } from '@/components/brand/sprintable-logo';
 
 // story #ab2a503f([버그·보안·HIGH] set-password 재인증 게이트) — 이메일 확인 링크가 여는
-// 2단계 페이지. verify-email/page.tsx와 동형(next-intl 미배선, 하드코딩 한국어 — 그 페이지의
-// "Phase2 i18n" 유보와 동일 스코프 판단, 유나군이 별도 후속 스토리로 등재). confirm은 새 세션
-// 토큰을 발급하지 않으므로(BE 설계 doc §① — "이 요청 자체가 인증 세션이 아님") "시작하기"
-// 없이 로그인 페이지 안내만 준다.
+// 2단계 페이지. verify-email/page.tsx와 동형 구조. confirm은 새 세션 토큰을 발급하지
+// 않으므로(BE 설계 doc §① — "이 요청 자체가 인증 세션이 아님") "시작하기" 없이 로그인
+// 페이지 안내만 준다.
 //
 // 유나 design:changes(PR#3688, 2026-09-01) — 세 방어:
 // ①success에 «다른 기기 로그아웃»(BE가 confirm 성공 시 refresh token 전량 revoke하는데
@@ -19,6 +19,7 @@ import { SprintableLogo } from '@/components/brand/sprintable-logo';
 // ③ALREADY_HAS_PASSWORD는 실패가 아니라 「이미 완료」라 빨강(destructive)이 부적절 —
 //   중립 톤(neutral status) 전용.
 export default function SetPasswordConfirmPage() {
+  const t = useTranslations('setPassword');
   const searchParams = useSearchParams();
   const token = searchParams.get('token') ?? '';
 
@@ -26,7 +27,7 @@ export default function SetPasswordConfirmPage() {
     () => (token ? 'loading' : 'error')
   );
   const [message, setMessage] = useState(
-    () => (token ? '' : '유효하지 않은 확인 링크입니다.')
+    () => (token ? '' : t('invalidLink'))
   );
   // INVALID_TOKEN(만료)일 때만 /settings 재요청 동선을 보여준다 — 다른 실패는 재요청으로
   // 해결되지 않는 사유라(USER_NOT_FOUND 등) 오히려 오도.
@@ -47,30 +48,30 @@ export default function SetPasswordConfirmPage() {
           // ⭐유나 design:changes ① — BE가 confirm 성공 시 활성 refresh token 전량을
           // revoke한다(탈취 refresh token 우회 봉합). 그 부수효과(다른 기기 로그아웃)를
           // 사용자가 놀라지 않게 명시.
-          setMessage('비밀번호가 설정되었습니다. 새 비밀번호로 로그인해 주세요. 보안을 위해 기존에 로그인되어 있던 다른 기기·세션은 모두 로그아웃 처리되었습니다.');
+          setMessage(t('successMessage'));
         } else if (json.error?.code === 'ALREADY_HAS_PASSWORD') {
           // ⭐유나 design:changes ③ — 실패가 아니라 「이미 완료」. 중립 톤.
           setStatus('neutral');
-          setMessage('이미 비밀번호가 설정되어 있습니다.');
+          setMessage(t('alreadySet'));
         } else {
           setStatus('error');
           // backend auth.py confirm_set_password()가 _err()로 직접 발급하는 안정 값만
           // 분기(raw 서버 message 미노출 — verify-email/page.tsx와 동일 관례).
           if (json.error?.code === 'INVALID_TOKEN') {
-            setMessage('확인 링크가 유효하지 않거나 만료되었습니다.');
+            setMessage(t('linkExpired'));
             setShowRetryLink(true); // ⭐유나 design:changes ②
           } else if (json.error?.code === 'USER_NOT_FOUND') {
-            setMessage('사용자를 찾을 수 없습니다.');
+            setMessage(t('userNotFound'));
           } else {
-            setMessage('비밀번호 설정에 실패했습니다.');
+            setMessage(t('setFailed'));
           }
         }
       })
       .catch(() => {
         setStatus('error');
-        setMessage('처리 중 오류가 발생했습니다.');
+        setMessage(t('processError'));
       });
-  }, [token]);
+  }, [token, t]);
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-muted">
@@ -80,14 +81,14 @@ export default function SetPasswordConfirmPage() {
         </div>
 
         {status === 'loading' && (
-          <p className="text-sm text-muted-foreground">비밀번호 설정 중...</p>
+          <p className="text-sm text-muted-foreground">{t('settingUp')}</p>
         )}
 
         {status === 'success' && (
           <div className="space-y-4">
             <p className="text-sm font-medium text-success" role="status" aria-live="polite" aria-atomic="true">{message}</p>
             <Link href="/login" className="block text-sm font-medium text-brand hover:text-brand/80">
-              로그인하기
+              {t('loginButton')}
             </Link>
           </div>
         )}
@@ -96,7 +97,7 @@ export default function SetPasswordConfirmPage() {
           <div className="space-y-4">
             <p className="text-sm font-medium text-foreground" role="status" aria-live="polite" aria-atomic="true">{message}</p>
             <Link href="/login" className="block text-sm font-medium text-brand hover:text-brand/80">
-              로그인하기
+              {t('loginButton')}
             </Link>
           </div>
         )}
@@ -106,11 +107,11 @@ export default function SetPasswordConfirmPage() {
             <p className="text-sm text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{message}</p>
             {showRetryLink && (
               <Link href="/settings" className="block text-sm font-medium text-brand hover:text-brand/80">
-                다시 요청하기(로그인 후 설정에서)
+                {t('retryLink')}
               </Link>
             )}
             <Link href="/login" className="block text-sm font-medium text-brand hover:text-brand/80">
-              로그인으로 돌아가기
+              {t('backToLogin')}
             </Link>
           </div>
         )}

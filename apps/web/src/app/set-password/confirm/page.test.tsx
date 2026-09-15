@@ -1,12 +1,15 @@
 // @vitest-environment jsdom
 //
 // story #ab2a503f([버그·보안·HIGH] set-password 재인증 게이트) — 이메일 확인 링크가 여는
-// 착지 페이지. verify-email/page.test.tsx(story #2484)와 동형 패턴: next-intl 미배선이라
-// 인라인 한국어 문자열로 code별 분기, raw 서버 message 미노출을 고정한다.
+// 착지 페이지. story #3921 — next-intl은 항상 배선돼 있었다(root layout의 전역
+// NextIntlClientProvider, #2484/#2485 당시의 "미배선" 전제가 오판) — setPassword.* i18n
+// 키로 전환, 이 테스트도 실 NextIntlClientProvider로 마운트한다.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { NextIntlClientProvider } from 'next-intl';
+import koMessages from '../../../../messages/ko.json';
 
 vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams('token=tok-1'),
@@ -30,21 +33,29 @@ afterEach(async () => {
   vi.resetModules();
 });
 
+function wrap(node: React.ReactNode) {
+  return (
+    <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+      {node}
+    </NextIntlClientProvider>
+  );
+}
+
 async function mountAndWait() {
   const { default: SetPasswordConfirmPage } = await import('./page');
-  await act(async () => { root.render(<SetPasswordConfirmPage />); });
+  await act(async () => { root.render(wrap(<SetPasswordConfirmPage />)); });
   await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 }
 
 describe('SetPasswordConfirmPage — error.code 분기(#ab2a503f)', () => {
-  it('성공 — raw 서버 문구 대신 한국어 문구, 로그인 링크로 안내', async () => {
+  it('성공 — raw 서버 문구 대신 i18n 문구, 로그인 링크로 안내', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({
       json: async () => ({ data: { message: 'Password set successfully — please log in with your new password' } }),
     })));
     await mountAndWait();
     expect(container.textContent).not.toContain('Password set successfully');
-    expect(container.textContent).toContain('비밀번호가 설정되었습니다');
-    expect([...container.querySelectorAll('a')].some((a) => a.textContent === '로그인하기')).toBe(true);
+    expect(container.textContent).toContain(koMessages.setPassword.successMessage);
+    expect([...container.querySelectorAll('a')].some((a) => a.textContent === koMessages.setPassword.loginButton)).toBe(true);
   });
 
   // 유나 design:changes(PR#3688, 2026-09-01) ① — BE가 confirm 성공 시 refresh token
@@ -58,13 +69,13 @@ describe('SetPasswordConfirmPage — error.code 분기(#ab2a503f)', () => {
     expect(container.textContent).toContain('로그아웃');
   });
 
-  it('INVALID_TOKEN(만료·서명불일치) — raw 영문 대신 한국어 문구', async () => {
+  it('INVALID_TOKEN(만료·서명불일치) — raw 영문 대신 i18n 문구', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({
       json: async () => ({ error: { code: 'INVALID_TOKEN', message: 'Confirmation link is invalid or expired' } }),
     })));
     await mountAndWait();
     expect(container.textContent).not.toContain('Confirmation link is invalid');
-    expect(container.textContent).toContain('확인 링크가 유효하지 않거나 만료되었습니다.');
+    expect(container.textContent).toContain(koMessages.setPassword.linkExpired);
   });
 
   // 유나 design:changes(PR#3688) ② — 만료 링크는 "실패로 끝"이 아니라 재요청 경로가
@@ -88,13 +99,13 @@ describe('SetPasswordConfirmPage — error.code 분기(#ab2a503f)', () => {
     expect(retryLink).toBeUndefined();
   });
 
-  it('ALREADY_HAS_PASSWORD(TOCTOU) — raw 영문 대신 한국어 문구', async () => {
+  it('ALREADY_HAS_PASSWORD(TOCTOU) — raw 영문 대신 i18n 문구', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({
       json: async () => ({ error: { code: 'ALREADY_HAS_PASSWORD', message: 'User already has a password set' } }),
     })));
     await mountAndWait();
     expect(container.textContent).not.toContain('User already has a password set');
-    expect(container.textContent).toContain('이미 비밀번호가 설정되어 있습니다.');
+    expect(container.textContent).toContain(koMessages.setPassword.alreadySet);
   });
 
   // 유나 design:changes(PR#3688) ③ — 「이미 완료」는 실패가 아니라 중립 톤(text-foreground/
@@ -104,7 +115,7 @@ describe('SetPasswordConfirmPage — error.code 분기(#ab2a503f)', () => {
       json: async () => ({ error: { code: 'ALREADY_HAS_PASSWORD', message: 'x' } }),
     })));
     await mountAndWait();
-    const msg = [...container.querySelectorAll('p')].find((p) => p.textContent === '이미 비밀번호가 설정되어 있습니다.');
+    const msg = [...container.querySelectorAll('p')].find((p) => p.textContent === koMessages.setPassword.alreadySet);
     expect(msg).not.toBeUndefined();
     expect(msg?.className).toContain('text-foreground');
     expect(msg?.className).not.toContain('text-destructive');
@@ -116,7 +127,7 @@ describe('SetPasswordConfirmPage — error.code 분기(#ab2a503f)', () => {
       json: async () => ({ error: { code: 'INVALID_TOKEN', message: 'x' } }),
     })));
     await mountAndWait();
-    const msg = [...container.querySelectorAll('p')].find((p) => p.textContent === '확인 링크가 유효하지 않거나 만료되었습니다.');
+    const msg = [...container.querySelectorAll('p')].find((p) => p.textContent === koMessages.setPassword.linkExpired);
     expect(msg?.className).toContain('text-destructive');
     expect(msg?.getAttribute('role')).toBe('alert');
   });
@@ -127,7 +138,7 @@ describe('SetPasswordConfirmPage — error.code 분기(#ab2a503f)', () => {
     })));
     await mountAndWait();
     expect(container.textContent).not.toContain('brand new raw string');
-    expect(container.textContent).toContain('비밀번호 설정에 실패했습니다.');
+    expect(container.textContent).toContain(koMessages.setPassword.setFailed);
   });
 
   it('token 쿼리파라미터 자체가 없으면 fetch 없이 즉시 에러 상태', async () => {
@@ -137,8 +148,8 @@ describe('SetPasswordConfirmPage — error.code 분기(#ab2a503f)', () => {
     // useSearchParams 모킹을 이 테스트만 토큰 없는 값으로 오버라이드.
     vi.doMock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams() }));
     const { default: SetPasswordConfirmPage } = await import('./page');
-    await act(async () => { root.render(<SetPasswordConfirmPage />); });
+    await act(async () => { root.render(wrap(<SetPasswordConfirmPage />)); });
     await act(async () => { await Promise.resolve(); });
-    expect(container.textContent).toContain('유효하지 않은 확인 링크입니다.');
+    expect(container.textContent).toContain(koMessages.setPassword.invalidLink);
   });
 });
