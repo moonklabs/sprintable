@@ -3285,6 +3285,8 @@
     "noNotifications": "알림이 없어요",
     "mentionTitle": "{name}님이 나를 멘션했어요",
     "messageTitle": "{name}님의 새 메시지",
+    "gatePendingApprovalTitle": "결재 대기 중인 게이트가 있어요",
+    "gatePendingApprovalBody": "{gateType} 게이트가 승인/거부를 기다리고 있어요",
     "backToList": "알림",
     "reasonAssigned": "나에게 배정됨",
     "reasonInvited": "초대됨",

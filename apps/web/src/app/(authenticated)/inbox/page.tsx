@@ -22,6 +22,7 @@ import {
 } from '@/services/notification-display';
 import { groupByIdenticalContent, referenceTypeLabel } from '@/lib/inbox-generic-notification-grouping';
 import { composeEventPreviewLine, type EventPreviewHelpers } from '@/components/chat/event-block-card';
+import { gateTypeLabel } from '@/lib/gate-type-label';
 import { useOrgDomainLabels } from '@/hooks/use-org-domain-labels';
 
 // 알림 type 아이콘 렌더 — NOTIFICATION_TYPE_ICONS(lucide)서 lookup·미상 type은 fallback 아이콘.
@@ -40,6 +41,11 @@ function NotifIcon({ type, fallback: Fallback, className }: { type: string; fall
  *   옮긴 것) 조합.
  * - body: `event.event_key`가 preset.*(이벤트 발행 메시지)면 composeEventPreviewLine
  *   (3888/3893과 완전히 같은 재료·같은 함수) 재사용 — raw preset 키·slug 0.
+ * - gate.pending_approval(story #4316 CHANGES1, PO 라이브 실측 2026-09-15) — 결재함
+ *   BE 고정 title/body 中 유일하게 합니다체가 남아 있던 자리(29곳 중 2곳). `event.payload.
+ *   gate_type`이 있으면 gateTypeLabel(dashboard.ccGateType*, 기존 게이트 상세·결재함
+ *   재사용 — 신규 어간 0)로 사람 낱말을 조합. reopen/신규 두 BE 문구를 FE 한 문장으로
+ *   합친다(재제출 여부는 폴백 title/body에만 남고 FE 조합에선 구분 0 — 과잉 세분화 방지).
  */
 function composeNotificationDisplay(
   notification: Notification,
@@ -56,6 +62,12 @@ function composeNotificationDisplay(
     } else if (notification.type === 'conversation.message') {
       title = t('messageTitle', { name: event.sender_name });
     }
+  }
+
+  if (notification.type === 'gate.pending_approval' && typeof event?.payload?.['gate_type'] === 'string') {
+    const gateTypeLbl = gateTypeLabel(eventPreviewHelpers.tDashboard, event.payload['gate_type']);
+    title = t('gatePendingApprovalTitle');
+    body = t('gatePendingApprovalBody', { gateType: gateTypeLbl });
   }
 
   if (event?.event_key && event.payload) {
@@ -85,8 +97,8 @@ interface Notification {
   reference_type: string | null;
   reference_id: string | null;
   href?: string | null;
-  // story #3903(migration 0378, additive) — conversation.mention/conversation.message만
-  // 채움(sender_name + 이벤트 발행 메시지면 event_key/payload/refs). 렌더 시점에
+  // story #3903(migration 0378, additive) — conversation.mention/conversation.message·
+  // gate.pending_approval(story #4316 CHANGES1, payload.gate_type)만 채움. 렌더 시점에
   // 3888 eventCard 조합·제목 조합 재료로 쓴다. 없으면(옛 행·다른 발행 경로) title/body 폴백.
   event?: {
     sender_name?: string;

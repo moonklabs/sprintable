@@ -974,9 +974,9 @@ app/services/gate_service.py::→ held. pending 게이트만 보류 가능.
 app/services/gate_service.py::→ pending. 보류(held) 게이트만 재개 가능.
 app/services/gate_service.py::→ voided. pending 게이트만 무효화 가능.
 app/services/gate_service.py::게이트가 강제 결정되었습니다
-app/services/gate_service.py::게이트가 승인/거부를 기다리고 있습니다.
-app/services/gate_service.py::게이트가 재제출되어 다시 승인/거부를 기다리고 있습니다.
-app/services/gate_service.py::결재 대기 중인 게이트가 있습니다
+app/services/gate_service.py::게이트가 승인/거부를 기다리고 있어요.
+app/services/gate_service.py::게이트가 재제출되어 다시 승인/거부를 기다리고 있어요.
+app/services/gate_service.py::결재 대기 중인 게이트가 있어요
 app/services/gate_service.py::논의 요청 불가: 게이트가
 app/services/gate_service.py::논의 요청 사유(reason)는 필수입니다.
 app/services/gate_service.py::로 강제 결정했습니다:

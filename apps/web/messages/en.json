@@ -3285,6 +3285,8 @@
     "noNotifications": "No notifications",
     "mentionTitle": "{name} mentioned you",
     "messageTitle": "New message from {name}",
+    "gatePendingApprovalTitle": "You have a gate awaiting approval",
+    "gatePendingApprovalBody": "The {gateType} gate is waiting for approval/rejection",
     "backToList": "Notifications",
     "reasonAssigned": "Assigned to you",
     "reasonInvited": "You're invited",
