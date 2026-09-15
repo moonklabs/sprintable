@@ -364,7 +364,9 @@ describe('ChatListView — story #3888 이벤트 메시지 미리보기(raw slug
     expect(container.textContent).not.toContain('preset.work.assigned');
   });
 
-  it('goal.measured 이벤트는 헤더+값+단위로 렌더한다', async () => {
+  // story #3893 CHANGES①(PO PR#4298 리뷰 2026-09-15) — 그라운딩 정정: metric_unit은
+  // metric 이름(등재 4종은 outcomeLoop.metric_X 라벨로), «%» 리터럴이 아니다.
+  it('goal.measured 이벤트는 헤더+값+등재 metric 라벨로 렌더한다', async () => {
     stubFetchWithConversations([{
       id: 'conv-event-4', type: 'dm', title: '측정봇',
       latest_message: {
@@ -372,14 +374,32 @@ describe('ChatListView — story #3888 이벤트 메시지 미리보기(raw slug
         created_at: '2026-09-14T18:00:00Z',
         event: {
           event_key: 'preset.goal.measured',
-          payload: { goal_id: 'G-1', metric_value: 12, metric_unit: '%', source: 'internal_ops' },
+          payload: { goal_id: 'G-1', metric_value: 12, metric_unit: 'completion_pct', source: 'internal_ops' },
         },
       },
       updated_at: '2026-09-14T18:00:00Z', unread_count: 0,
     }]);
     await mount();
-    expect(container.textContent).toContain('목표 측정 · 12%');
+    expect(container.textContent).toContain('목표 측정 · 12 완료율 %');
     expect(container.textContent).not.toContain('preset.goal.measured');
+  });
+
+  it('goal.measured — metric_unit이 미등재(GA4 임의값)면 값만 렌더(raw slug 0)', async () => {
+    stubFetchWithConversations([{
+      id: 'conv-event-4b', type: 'dm', title: '측정봇(GA4)',
+      latest_message: {
+        content: '[이벤트] preset.goal.measured',
+        created_at: '2026-09-14T18:00:00Z',
+        event: {
+          event_key: 'preset.goal.measured',
+          payload: { goal_id: 'G-4', metric_value: 30, metric_unit: 'sessions', source: 'ga4' },
+        },
+      },
+      updated_at: '2026-09-14T18:00:00Z', unread_count: 0,
+    }]);
+    await mount();
+    expect(container.textContent).toContain('목표 측정 · 30');
+    expect(container.textContent).not.toContain('sessions');
   });
 
   // 음성대조 — refs.assignee가 없으면(구버전 캐시 등) 반쪽 요약 금지 원칙에 따라 raw

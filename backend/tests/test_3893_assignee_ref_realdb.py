@@ -264,7 +264,10 @@ async def test_publish_assignee_ref_found_false_when_member_deleted():
 @pytest.mark.anyio
 async def test_publish_assignee_ref_absent_when_payload_lacks_assignee_field():
     """assignee_member_id가 없는 payload(다른 preset)는 refs에 assignee 키 자체가 없다
-    (work_item_pair 부재 시 refs.work_item이 없는 것과 동일 원칙, test_3332 회귀 확認)."""
+    (work_item_pair 부재 시 refs.work_item이 없는 것과 동일 원칙, test_3332 회귀 확認).
+    CHANGES②(PO PR#4298 리뷰 2026-09-15) — 같은 발행이 `goal_id`를 실었으므로 이제
+    `refs["goal"]`도 계산된다(epic 갈래 신설, `_render_event_notification_work_item_ref`
+    재사용) — assignee/assigned_by 부재와 goal 계산이 서로 독립임을 같은 발행으로 확認."""
     from app.routers.events import EventPublishRequest, publish_registry_event
     from fastapi import BackgroundTasks
     from starlette.requests import Request as StarletteRequest
@@ -316,5 +319,19 @@ async def test_publish_assignee_ref_absent_when_payload_lacks_assignee_field():
             refs = (msg.msg_metadata or {}).get("event", {}).get("refs") or {}
             assert "assignee" not in refs
             assert "assigned_by" not in refs
+            assert refs.get("goal") == {
+                "found": True,
+                "token": f"[측정 목표](entity:epic:{goal.id})",
+            }
     finally:
         await engine.dispose()
+
+
+# 「못 찾음」(found:False) 갈래는 realdb로 재현 불가 — `_resolve_event_project_id`가
+# goal_id로 project_id를 먼저 해소하는데(같은 org_id+id 쿼리), 존재하지 않는 goal_id는
+# 이 단계에서 이미 400(payload에서 project를 해소할 수 없습니다)으로 거부돼 refs 계산
+# 자체에 도달하지 못한다(발행 파이프라인의 구조적 제약, work_item과 다른 점 — work_item은
+# 소프트삭제로 "존재하되 못 찾음"이 자연스러운데 goal_id는 project 해소와 결합돼 있다).
+# 이 갈래는 test_3893_epic_ref_unit.py::test_epic_not_found_returns_found_false_with_type
+# (mock DB로 리졸버 함수 자체만 격리 검증)가 이미 커버 — 3884가 세운 "edge 갈래는 unit,
+# happy path는 realdb 통합"과 동일 분업.

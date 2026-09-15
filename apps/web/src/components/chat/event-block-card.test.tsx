@@ -16,6 +16,10 @@ const helpers: EventPreviewHelpers = {
     workAssignedHeader: '작업 배정', goalMeasuredHeader: '목표 측정',
   } as Record<string, string>)[key] ?? key,
   tEntity: (key) => ({ entityTypeStory: '스토리' } as Record<string, string>)[key] ?? key,
+  tOutcomeLoop: (key) => ({
+    metric_velocity: '벨로시티', metric_backlog_remaining: '백로그 잔여',
+    metric_progress: '진행률', metric_completion_pct: '완료율 %',
+  } as Record<string, string>)[key] ?? key,
   domainLabels: { statusLabel: () => undefined },
 };
 
@@ -107,13 +111,26 @@ describe('composeEventPreviewLine — story #3888', () => {
     expect(line).toBe('작업 배정 · 스토리 → 미르코');
   });
 
-  it('⭐preset.goal.measured — 헤더+값+단위를 "{헤더} · {value}{unit}"로 조립한다(PO 예시와 동형, 단위는 공백 없이 접합)', () => {
+  // story #3893 CHANGES①(PO PR#4298 리뷰 2026-09-15) — 그라운딩 정정: metric_unit은
+  // 「%」 단위 기호가 아니라 metric 이름(completion_pct 등). 등재 4종은 outcomeLoop.
+  // metric_X 라벨로 매핑(공백 접합 — 라벨 자체가 기호를 품는다), 미등재는 값만.
+  it('⭐preset.goal.measured — 등재 metric은 outcomeLoop 라벨로 매핑해 "{헤더} · {value} {라벨}"로 조립한다', () => {
     const line = composeEventPreviewLine(
       'preset.goal.measured',
-      { metric_value: 12, metric_unit: '%' },
+      { metric_value: 12, metric_unit: 'completion_pct' },
       helpers,
     );
-    expect(line).toBe('목표 측정 · 12%');
+    expect(line).toBe('목표 측정 · 12 완료율 %');
+  });
+
+  it('preset.goal.measured — metric_unit이 미등재(GA4 임의 문자열)면 값만(raw slug 0)', () => {
+    const line = composeEventPreviewLine(
+      'preset.goal.measured',
+      { metric_value: 12, metric_unit: 'sessions' },
+      helpers,
+    );
+    expect(line).toBe('목표 측정 · 12');
+    expect(line).not.toContain('sessions');
   });
 
   it('preset.goal.measured — metric_unit이 없으면 값만("{헤더} · {value}")', () => {

@@ -59,8 +59,35 @@ AC2 단일 파이프 유지).
 `assigned_by_member_id`("배정자"/"Assigned by" — 담당자와 다른 낱말, 3역할
 대상·담당자·배정자 구분)도 담당자와 동일 member-ref 리졸버로 이름 해석
 (`refs["assigned_by"]` — `_render_event_notification_member_ref` 재사용, 새 로직
-0)한다. `measured_at`("측정 시각"/"Measured at")은 별도 리졸버 불필요한 순 payload
-값(타임스탬프, 지어낼 게 없음) — `{{payload.measured_at}}` 그대로.
+0)한다. `measured_at`("측정 시각"/"Measured at")은 FE `lib/i18n.ts::
+formatLocaleDateTime`(기존 Intl 포매터)로 렌더 시점 로케일 포맷 — `{{label.
+measured_at}}`(파싱 실패는 optional 생략, 새 리졸버 불요·payload 파생).
+
+## CHANGES(PO PR#4298 리뷰 2026-09-15, 코드 그라운딩 정정 5건)
+1. **metric_unit** — 실 값은 `completion_pct`(internal_ops epic 유일값)·GA4 소스는
+   임의 문자열(org이 설정한 `metric_definition.metric`, 닫힌 집합 아님 — outcome_
+   scorer.py 그라운딩 재확認). 「%」 리터럴 접미가 아니라 FE 기존 `outcomeLoop.
+   metric_{slug}` 낱말(outcome-intent-fields.tsx가 이미 씀 — `metric_velocity`·
+   `metric_backlog_remaining`·`metric_progress`·`metric_completion_pct`, 신규 어간
+   0)을 재사용해 등재 metric만 라벨로 변환하고 미등재(GA4 임의값)는 단위 필드
+   자체를 생략한다(optional elision) — `{{label.metric_unit_label}}`.
+2. **goal_id**(raw UUID, 실은 epic.id) — `_render_event_notification_work_item_ref`
+   에 "epic" 갈래 신설(`app.models.pm.Goal` 조회, SoftDeleteMixin 없어 deleted_at
+   필터 없음) + `_publish_registry_event_core`가 `goal_id` 존재 시 `refs["goal"]`
+   계산(work_item과 별도 트리거 — goal_id는 work_item_type/id 페어가 아님).
+   FE `entity:epic` 참조 토큰 렌더는 이미 지원(embed-card.tsx RICH_PREVIEW_TYPES·
+   getEntityHref 사전 확認 済 — 새 FE 렌더 경로 0) — `{{label.goal_target}}`.
+3. **measured_at** — 위 AC1 처방 그대로(payload 파생, 새 리졸버 0).
+4. **event-definition-summary(조직 이벤트 정의 페이지) 렌더 안전성** —
+   `EventDefinitionSummary`가 `EventBlockCard`를 `refs` 없이(샘플 payload만) 호출한다
+   (그라운딩 확認). 0376은 refs 의존 라벨(`work_item_target` 등)을 전부 **optional
+   fields** 안에서만 참조해 refs 부재 시 그 필드 행이 조용히 생략됐다 — 0377의
+   `preset.work.assigned` 초안이 `{{label.assignee_name}}`을 **비-optional text
+   블록**(block-template.ts는 "fields"만 optional 생략을 지원, "text"는 없음)에
+   직접 넣어 이 화면에서 `⟨missing: label.assignee_name⟩`이 새는 걸 실측으로 확認
+   — 처방: text 블록은 `{{label.work_item_type}}`(payload 파생, refs 무관 — 항상
+   안전) 단독으로 좁히고, 담당자는 optional fields 행에서만 참조한다(기존에도
+   optional이었음, 위치만 text에서 fields-only로 정리).
 
 org별 block_template 복제/자동 생성 메커니즘 0건(0375/0376 실측 재확認, 변화 없음).
 """
@@ -80,7 +107,7 @@ _TEMPLATES: dict[str, dict] = {
     "preset.work.assigned": {
         "blocks": [
             {"type": "header", "text": "{{t.workAssignedHeader}}"},
-            {"type": "text", "text": "**{{label.work_item_type}}** → **{{label.assignee_name}}**"},
+            {"type": "text", "text": "**{{label.work_item_type}}**"},
             {"type": "fields", "fields": [
                 {"label": "{{t.targetLabel}}", "value": "{{label.work_item_target}}", "optional": True},
                 {"label": "{{t.assigneeLabel}}", "value": "{{label.assignee_name}}", "optional": True},
@@ -93,10 +120,10 @@ _TEMPLATES: dict[str, dict] = {
             {"type": "header", "text": "{{t.goalMeasuredHeader}}"},
             {"type": "text", "text": "{{t.metricValueLabel}} **{{payload.metric_value}}**"},
             {"type": "fields", "fields": [
-                {"label": "{{t.goalLabel}}", "value": "{{payload.goal_id}}"},
-                {"label": "{{t.unitLabel}}", "value": "{{payload.metric_unit}}", "optional": True},
+                {"label": "{{t.goalLabel}}", "value": "{{label.goal_target}}", "optional": True},
+                {"label": "{{t.unitLabel}}", "value": "{{label.metric_unit_label}}", "optional": True},
                 {"label": "{{t.sourceLabel}}", "value": "{{payload.source}}"},
-                {"label": "{{t.measuredAtLabel}}", "value": "{{payload.measured_at}}", "optional": True},
+                {"label": "{{t.measuredAtLabel}}", "value": "{{label.measured_at}}", "optional": True},
             ]},
         ],
     },

@@ -13,6 +13,12 @@ import { useOrgDomainLabels } from '@/hooks/use-org-domain-labels';
 import { gateStatusLabel } from '@/lib/gate-status-label';
 import { gateTypeLabel } from '@/lib/gate-type-label';
 import { entityTypeLabel } from '@/components/chat/chat-input-entity-tokens';
+import { formatLocaleDateTime } from '@/lib/i18n';
+
+// story #3893 CHANGES①(PO PR#4298 리뷰 2026-09-15) — outcome-intent-fields.tsx의
+// INTERNAL_METRICS와 동일 닫힌 집합(outcomeLoop.metric_{slug} 낱말이 실존하는 metric
+// 이름만) — 이 목록 밖은 GA4 소스의 임의 문자열이라 번역 대상이 아니다(단위 생략).
+const METRIC_UNIT_KEYS = ['velocity', 'backlog_remaining', 'progress', 'completion_pct'] as const;
 
 // story #3881(customer-zero) — story status_changed preset의 {{label.from_status}}/
 // {{label.to_status}} 해소용. story-detail-panel.tsx:846의 statusKeyMap과 동형(그 파일은
@@ -176,6 +182,7 @@ export function EventBlockCard({ template, payload, refs }: EventBlockCardProps)
   const tCage = useTranslations('cage');
   const tDashboard = useTranslations('dashboard');
   const tEventCard = useTranslations('eventCard');
+  const tOutcomeLoop = useTranslations('outcomeLoop');
   const locale = useLocale();
   const { currentMemberType, role, orgId } = useDashboardContext();
   // story #3287(도메인탈고정) — org 커스텀 status 라벨 오버라이드. statusLabel()이 undefined면
@@ -258,6 +265,41 @@ export function EventBlockCard({ template, payload, refs }: EventBlockCardProps)
         labels[labelKey] = tEventCard('assigneeMissing');
       }
     }
+  }
+
+  // story #3893 CHANGES②(PO PR#4298 리뷰 2026-09-15) — refs.goal(preset.goal.measured의
+  // goal_id, 실은 epic.id — events.py `_render_event_notification_work_item_ref`의
+  // "epic" 갈래 재사용, work_item_target과 완전 동형 3모양 계약)을 labels.goal_target으로.
+  const goalRef = refs?.['goal'];
+  if (goalRef && typeof goalRef === 'object') {
+    if (goalRef.found && typeof goalRef.token === 'string') {
+      labels['goal_target'] = goalRef.token;
+    } else if (!goalRef.found && typeof goalRef.type === 'string') {
+      labels['goal_target'] = tEventCard('targetMissing', {
+        type: entityTypeLabel(goalRef.type, t).toLowerCase(),
+      });
+    }
+  }
+
+  // story #3893 CHANGES①(PO PR#4298 리뷰 2026-09-15) — metric_unit은 「%」 같은 단위
+  // 기호가 아니라 metric **이름**이다(completion_pct·GA4 임의 문자열 — outcome_scorer.py
+  // 그라운딩). outcomeLoop 네임스페이스의 기존 `metric_{slug}` 낱말(outcome-intent-
+  // fields.tsx가 이미 씀, 신규 어간 0)을 재사용해 등재 4종만 번역하고, 미등재(GA4 임의
+  // 값 등)는 라벨을 아예 안 채워 optional 필드 자체를 생략한다(raw slug 노출 방지 —
+  // 지어내지 않는다 원칙, targetMissing류 은은한 폴백조차 없음: "번역 불가능한 임의
+  // 문자열"은 «삭제됨» 같은 알려진 상태가 아니라 그냥 노출하지 않는 게 맞다).
+  const metricUnit = payload['metric_unit'];
+  if (typeof metricUnit === 'string' && (METRIC_UNIT_KEYS as readonly string[]).includes(metricUnit)) {
+    labels['metric_unit_label'] = tOutcomeLoop(`metric_${metricUnit}` as 'metric_velocity');
+  }
+
+  // story #3893 CHANGES③ — measured_at(ISO 8601)을 lib/i18n.ts::formatLocaleDateTime
+  // (기존 Intl 포매터, 신규 로직 0)로 렌더 시점 로케일 포맷. 파싱 실패(빈 문자열 반환,
+  // formatLocaleDate의 기존 계약)는 labels 키를 안 채워 optional 생략.
+  const measuredAtRaw = payload['measured_at'];
+  if (typeof measuredAtRaw === 'string') {
+    const formatted = formatLocaleDateTime(measuredAtRaw, locale);
+    if (formatted) labels['measured_at'] = formatted;
   }
 
   // story #3884 AC2 — preset.gate.verdict 본문 접속어. PO 구조 결정: 리터럴 「게이트」를
@@ -484,6 +526,9 @@ export interface EventPreviewHelpers {
   tDashboard: (key: string) => string;
   tEventCard: (key: string) => string;
   tEntity: (key: string) => string;
+  /** story #3893 CHANGES①(PO PR#4298 리뷰) — metric_unit(metric 이름, 「%」 아님) 매핑용,
+   * event-block-card.tsx의 METRIC_UNIT_KEYS 닫힌 집합과 동형 재사용. */
+  tOutcomeLoop: (key: string) => string;
   domainLabels: { statusLabel: (slug: string) => string | undefined };
 }
 
@@ -518,7 +563,7 @@ export function composeEventPreviewLine(
   refs?: Record<string, string | null | { found: boolean; token?: string; type?: string; name?: string }>,
 ): string | null {
   if (!eventKey || !payload) return null;
-  const { tBoard, tCage, tDashboard, tEventCard, tEntity, domainLabels } = helpers;
+  const { tBoard, tCage, tDashboard, tEventCard, tEntity, tOutcomeLoop, domainLabels } = helpers;
 
   if (eventKey === 'preset.gate.verdict') {
     const gateType = payload['gate_type'];
@@ -561,15 +606,23 @@ export function composeEventPreviewLine(
     return `${tEventCard('workAssignedHeader')} · ${typeLabel} → ${assigneeName}`;
   }
 
-  // story #3893(유나 §⑤ 확定) — "목표 측정 · {metric_value}{metric_unit}"(예 "목표 측정 ·
-  // 12%"). metric_unit은 접미사 접합(공백 0) — 원 필드가 "%"류 기호라 공백을 넣으면
-  // "12 %"로 어색해진다(유나 예시 문자열 그대로 재현).
+  // story #3893(유나 §⑤ 확定 「목표 측정 · {metric_value}{metric_unit}」) — CHANGES①(PO
+  // PR#4298 리뷰 2026-09-15)로 metric_unit 해석 그라운딩 정정: 원 문구는 metric_unit을
+  // 「%」류 단위 기호로 가정했으나 실 값은 metric **이름**(completion_pct·GA4 임의
+  // 문자열, outcome_scorer.py 그라운딩) — outcomeLoop.metric_{slug} 낱말(기존 재사용,
+  // 신규 어간 0)로 등재 4종만 매핑하고 미등재는 값만("목표 측정 · 12", raw slug 0).
+  // 등재분은 라벨 자체가 단위 기호를 품고 있어(예: 「완료율 %」) 공백으로 접합한다
+  // (metric_unit이 진짜 기호였을 때의 접미 접합과 다른 합성 — 그 가정 자체가 틀렸다).
   if (eventKey === 'preset.goal.measured') {
     const metricValue = payload['metric_value'];
     if (metricValue === undefined || metricValue === null || metricValue === '') return null;
     const metricUnit = payload['metric_unit'];
-    const unitStr = typeof metricUnit === 'string' ? metricUnit : '';
-    return `${tEventCard('goalMeasuredHeader')} · ${metricValue}${unitStr}`;
+    const unitLabel =
+      typeof metricUnit === 'string' && (METRIC_UNIT_KEYS as readonly string[]).includes(metricUnit)
+        ? tOutcomeLoop(`metric_${metricUnit}` as 'metric_velocity')
+        : null;
+    const summary = unitLabel ? `${metricValue} ${unitLabel}` : `${metricValue}`;
+    return `${tEventCard('goalMeasuredHeader')} · ${summary}`;
   }
 
   return null;

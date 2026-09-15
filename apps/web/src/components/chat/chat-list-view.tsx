@@ -144,6 +144,7 @@ function ConversationRow({
   const tCage = useTranslations('cage');
   const tDashboard = useTranslations('dashboard');
   const tEventCard = useTranslations('eventCard');
+  const tOutcomeLoop = useTranslations('outcomeLoop');
   // useLocale()은 순수 Context 읽기(HTTP 요청 0)라 행마다 불러도 되는 것 — CHANGES①이
   // 지적한 것은 useOrgDomainLabels(HTTP fetch를 매 마운트 발사)뿐이다.
   const locale = useLocale();
@@ -161,7 +162,7 @@ function ConversationRow({
   const eventPreview = composeEventPreviewLine(
     conv.latest_message?.event?.event_key,
     conv.latest_message?.event?.payload,
-    { tBoard, tCage, tDashboard, tEventCard, tEntity: t, domainLabels },
+    { tBoard, tCage, tDashboard, tEventCard, tEntity: t, tOutcomeLoop, domainLabels },
     conv.latest_message?.event?.refs,
   );
   const preview = eventPreview ?? conv.latest_message?.content ?? t('noMessages');
