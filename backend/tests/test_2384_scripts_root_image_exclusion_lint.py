@@ -78,6 +78,13 @@ _CI_OR_LOCAL_ONLY_ALLOWLIST = frozenset({
                                                    # AST/정규식 정적 대조, 운영 DB 무접속 —
                                                    # lint_channel_insight_metrics_drift.py와
                                                    # 동형 관례).
+    "extract_fe_paths_referenced_by_backend_tests.py",  # story #3897 — ci.yml
+                                                   # detect-changed-scope 판정 전용(backend/
+                                                   # tests/**/*.py를 AST 아닌 정규식+괄호매칭
+                                                   # 정적 스캔, 운영 DB 무접속 — lint_*.py류와
+                                                   # 동형 관례). check_backend_relevant_diff.sh가
+                                                   # 이 스크립트를 호출(같은 카드, .sh라 이
+                                                   # allowlist 대상 밖).
 })
 
 
