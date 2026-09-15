@@ -3283,6 +3283,8 @@
     "revoke_failed": "Failed to revoke access.",
     "cancel": "Cancel",
     "noNotifications": "No notifications",
+    "mentionTitle": "{name} mentioned you",
+    "messageTitle": "New message from {name}",
     "backToList": "Notifications",
     "reasonAssigned": "Assigned to you",
     "reasonInvited": "You're invited",

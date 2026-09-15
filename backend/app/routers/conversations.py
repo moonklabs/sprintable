@@ -3056,10 +3056,22 @@ async def send_message(
                             # story #3758 — sender.name이 None일 수 있다(ResolvedMember/
                             # TeamMember 둘 다 name nullable 완화 뒤) — 그대로 f-string에
                             # 꽂으면 "None님이..."로 샌다.
-                            title=f"{sender.name or UNNAMED_MEMBER_LABEL}님이 회원님을 멘션했습니다",
+                            # story #3903 AC1 — 합니다체("멘션했습니다")→해요체. 옛 행(event
+                            # 컬럼 도입 前) 전용 폴백 문구로만 남는다(아래 event 있으면 FE가
+                            # 렌더 시점에 이 title 대신 event.sender_name으로 직접 조합).
+                            title=f"{sender.name or UNNAMED_MEMBER_LABEL}님이 회원님을 멘션했어요",
                             body=(msg.content or "")[:200],
                             reference_type="conversation", reference_id=conversation_id,
                             source_project_id=conv.project_id,
+                            # story #3903(migration 0377) — sender_name(제목 렌더시 조합용)
+                            # + 이 메시지가 이벤트 발행 메시지면 event_key/payload/refs(#2637
+                            # 구조 그대로, _event_payload 재사용)까지 같이 싣는다. FE가 event
+                            # 있으면 eventCard 조합(신규 낱말 0)으로 제목·요약을 짓고, 없으면
+                            # 위 title/body로 폴백.
+                            event={
+                                "sender_name": sender.name or UNNAMED_MEMBER_LABEL,
+                                **(_event_payload(msg).get("event") or {}),
+                            },
                             # story #2460(§6 봉합②): 개인 webhook·Expo push 실배달을 요청 트랜잭션 밖으로.
                             via_outbox=True,
                         )
@@ -3095,10 +3107,17 @@ async def send_message(
                         db, org_id=org_id, event_type="conversation.message",
                         target_member_ids=message_targets,
                         # story #3758 — 위 mention 블록과 동형(sender.name None-safe).
+                        # 「새 메시지」는 명사구라 합니다체/해요체 어미 자체가 없음(AC1 대상
+                        # 아님, 3903 실측 확認) — 그대로.
                         title=f"{sender.name or UNNAMED_MEMBER_LABEL}님의 새 메시지",
                         body=(msg.content or "")[:200],
                         reference_type="conversation", reference_id=conversation_id,
                         source_project_id=conv.project_id,
+                        # story #3903(migration 0377) — 위 mention 블록과 동형.
+                        event={
+                            "sender_name": sender.name or UNNAMED_MEMBER_LABEL,
+                            **(_event_payload(msg).get("event") or {}),
+                        },
                         # story #2460(§6 봉합②): 개인 webhook·Expo push 실배달을 요청 트랜잭션 밖으로.
                         via_outbox=True,
                     )

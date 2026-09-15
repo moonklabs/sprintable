@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, Text, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -23,6 +23,10 @@ class Notification(Base):
     is_read: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     reference_type: Mapped[str | None] = mapped_column(Text, nullable=True)
     reference_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # story #3903 — migration 0377(additive·nullable). conversation.mention/conversation.
+    # message 발행 시점에만 채워진다(sender_name 제목 조합용 + msg.event가 있으면 그대로
+    # 얹음, #2637 구조 재사용). 나머지 발행 경로·옛 행은 NULL — FE가 title/body로 폴백.
+    event: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

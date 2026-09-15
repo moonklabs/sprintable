@@ -245,11 +245,18 @@ async def dispatch_notification(
     reference_id: uuid.UUID | None = None,
     source_project_id: uuid.UUID | None = None,
     context: dict | None = None,
+    event: dict | None = None,
     story_id: uuid.UUID | None = None,
     sprint_id: uuid.UUID | None = None,
     via_outbox: bool = True,
 ) -> None:
     """notification_settings 필터 후 enabled member에게 알림 발송.
+
+    ``event``: story #3903(migration 0377, additive·nullable) — human Notification 행에
+    그대로 실린다(옵셔널, 기본 None — 이 파라미터를 안 넘기는 기존 ~40개 호출부는 무회귀).
+    `context`(개인 webhook 전용, 행에 영속 안 됨)와 다른 파라미터다: `event`는 FE가 렌더
+    시점에 3888 eventCard 조합(「{헤더} · {요약}」)·제목 조합을 짓는 재료로 쓴다 — 지금은
+    conversation.mention/conversation.message(conversations.py) 2곳만 채운다.
 
     ``via_outbox``: 기본값 True(story #2696 — 자세한 배경은 `_deliver_personal_webhooks`
     docstring 참고). True면 개인 webhook·Expo push 실배달을 이 호출 안에서 하지 않고
@@ -437,6 +444,7 @@ async def dispatch_notification(
                                 is_read=False,
                                 reference_type=reference_type,
                                 reference_id=reference_id,
+                                event=event,
                             )
                             db.add(notification)
                         inserted = True

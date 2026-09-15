@@ -21,11 +21,49 @@ import {
   NOTIFICATION_TYPE_ICONS,
 } from '@/services/notification-display';
 import { groupByIdenticalContent, referenceTypeLabel } from '@/lib/inbox-generic-notification-grouping';
+import { composeEventPreviewLine, type EventPreviewHelpers } from '@/components/chat/event-block-card';
+import { useOrgDomainLabels } from '@/hooks/use-org-domain-labels';
 
 // 알림 type 아이콘 렌더 — NOTIFICATION_TYPE_ICONS(lucide)서 lookup·미상 type은 fallback 아이콘.
 function NotifIcon({ type, fallback: Fallback, className }: { type: string; fallback: LucideIcon; className?: string }) {
   const Icon = NOTIFICATION_TYPE_ICONS[type] ?? Fallback;
   return <Icon className={className} />;
+}
+
+/**
+ * story #3903 AC2 — 알림의 title/body를 렌더 시점에 조합한다(발행 시점 BE 고정 문구
+ * 대신). `notification.event`(migration 0377)가 있을 때만 조합, 없으면(옛 행·다른 발행
+ * 경로) 기존 title/body 그대로 — 과잉 일반화 금지(3888 composeEventPreviewLine의 기존
+ * 계약과 동형).
+ * - title: conversation.mention/conversation.message는 `event.sender_name`+`type`으로
+ *   `inbox.mentionTitle`/`messageTitle`(신규 어간 0, BE 폴백 문구를 그대로 i18n 키로
+ *   옮긴 것) 조합.
+ * - body: `event.event_key`가 preset.*(이벤트 발행 메시지)면 composeEventPreviewLine
+ *   (3888/3893과 완전히 같은 재료·같은 함수) 재사용 — raw preset 키·slug 0.
+ */
+function composeNotificationDisplay(
+  notification: Notification,
+  t: (key: string, values?: Record<string, string | number>) => string,
+  eventPreviewHelpers: EventPreviewHelpers,
+): { title: string; body: string | null } {
+  const event = notification.event;
+  let title = notification.title;
+  let body = notification.body;
+
+  if (event?.sender_name) {
+    if (notification.type === 'conversation.mention') {
+      title = t('mentionTitle', { name: event.sender_name });
+    } else if (notification.type === 'conversation.message') {
+      title = t('messageTitle', { name: event.sender_name });
+    }
+  }
+
+  if (event?.event_key && event.payload) {
+    const composed = composeEventPreviewLine(event.event_key, event.payload, eventPreviewHelpers, event.refs);
+    if (composed) body = composed;
+  }
+
+  return { title, body };
 }
 
 interface WorkflowExecItem {
@@ -47,6 +85,15 @@ interface Notification {
   reference_type: string | null;
   reference_id: string | null;
   href?: string | null;
+  // story #3903(migration 0377, additive) — conversation.mention/conversation.message만
+  // 채움(sender_name + 이벤트 발행 메시지면 event_key/payload/refs). 렌더 시점에
+  // 3888 eventCard 조합·제목 조합 재료로 쓴다. 없으면(옛 행·다른 발행 경로) title/body 폴백.
+  event?: {
+    sender_name?: string;
+    event_key?: string;
+    payload?: Record<string, unknown>;
+    refs?: Record<string, string | null | { found: boolean; token?: string; type?: string; name?: string }>;
+  } | null;
   created_at: string;
 }
 
@@ -195,13 +242,27 @@ export default function InboxPage() {
   const t = useTranslations('inbox');
   const tCommon = useTranslations('common');
   const tCage = useTranslations('cage');
+  // story #3903 AC2 — 3888 eventCard 조합(composeEventPreviewLine) 재사용 재료. 알림
+  // 목록/상세가 raw preset 키를 그대로 보여주던 결함(대화 목록은 3888이 이미 고쳤고, 알림
+  // 목록은 별개 소비처라 남아 있었다) 처방 — 새 낱말 0, 새 라벨 해석 로직 0.
+  const tBoard = useTranslations('board');
+  const tDashboard = useTranslations('dashboard');
+  const tEventCard = useTranslations('eventCard');
+  const tEntity = useTranslations('chats');
+  const tOutcomeLoop = useTranslations('outcomeLoop');
   const locale = useLocale();
   // story #3493 — resolveDisplayTimezone() 호출을 useMemo로 감싸 값 안정성을 React
   // Compiler가 증명할 수 있게 한다(아래 inboxSections useMemo의 dep으로 쓰일 때
   // "may be mutated later"로 메모이제이션 보존을 포기하던 것의 근본 수정 — 이 값
   // 자체의 실제 산출 로직은 그대로, 안정화만 추가).
   const displayTimezone = useMemo(() => resolveDisplayTimezone().tz, []);
-  const { currentTeamMemberId, projectId } = useDashboardContext();
+  const { currentTeamMemberId, projectId, orgId } = useDashboardContext();
+  // story #3903 AC2 — composeEventPreviewLine의 domainLabels 재료(org 커스텀 status
+  // 라벨 오버라이드). chat-list-view.tsx의 기존 재사용 패턴과 동형.
+  const domainLabels = useOrgDomainLabels(orgId, locale);
+  const eventPreviewHelpers: EventPreviewHelpers = {
+    tBoard, tCage, tDashboard, tEventCard, tEntity, tOutcomeLoop, domainLabels,
+  };
   const activeTab = searchParams.get('tab') ?? 'notifications';
   // story #2164(2026-07-25, 까심): 예전엔 이 세 탭 중 notifications 탭 라벨과 페이지 헤더가
   // t('title')("결재함") 하나를 재사용했다 — 헤더가 항상 "결재함"이라 찍히는데 기본 진입 시
@@ -350,6 +411,13 @@ export default function InboxPage() {
     () => notifications.find((n) => n.id === selectedId) ?? null,
     [notifications, selectedId],
   );
+
+  // story #3903 AC2 — 상세 패널 title/body도 목록 행과 동일하게 렌더 시점 조합(순수
+  // 함수·저비용이라 useMemo 불요, composeEventPreviewLine 자체가 이미 매 렌더 재계산
+  // 전제인 순수함수 — chat-list-view.tsx의 기존 호출 패턴과 동형).
+  const selectedDisplay = selectedNotification
+    ? composeNotificationDisplay(selectedNotification, t, eventPreviewHelpers)
+    : null;
 
   // f2ec5395: 같은 스토리 status_changed 알림을 reference_id로 그룹(2건+). 타 type·단건은 개별 유지.
   // story #0d1c69f3(v2 4호) — status_change 그룹에 안 들어간 나머지 중 동일 type+제목+본문이
@@ -666,6 +734,8 @@ export default function InboxPage() {
                       const isSelected = notification.id === selectedId;
                       // ⓐ 도달 사유 칩(왜 내게) — 추론 가능할 때만, 없으면 생략(graceful degrade).
                       const reasonKey = getNotificationReasonKey(notification.type);
+                      // story #3903 AC2 — 렌더 시점 title/body 조합(3888 eventCard 재사용).
+                      const display = composeNotificationDisplay(notification, t, eventPreviewHelpers);
                       return (
                         <button
                           key={notification.id}
@@ -681,12 +751,12 @@ export default function InboxPage() {
                           <div className="min-w-0 flex-1 space-y-1">
                             <div className="flex items-start justify-between gap-2">
                               <p className={`truncate text-sm ${notification.is_read ? 'text-muted-foreground' : 'font-semibold text-foreground'}`}>
-                                {notification.title}
+                                {display.title}
                               </p>
                               <span className="shrink-0 text-[11px] text-muted-foreground">{formatTime(notification.created_at)}</span>
                             </div>
-                            {notification.body ? (
-                              <p className="line-clamp-1 text-xs text-muted-foreground">{notification.body}</p>
+                            {display.body ? (
+                              <p className="line-clamp-1 text-xs text-muted-foreground">{display.body}</p>
                             ) : null}
                             {/* 목업 ⑤: 타입 1급 — agent_joined=Bot 칩·도달사유 칩. story #3049
                                 (2984-S1) — AgentIdentity 프리미티브(헤어라인+proof-blue 신호
@@ -759,13 +829,13 @@ export default function InboxPage() {
                       {t('receivedAt')} · {formatRelativeTime(selectedNotification.created_at, locale, displayTimezone)}
                     </span>
                   </div>
-                  <h2 className="text-lg font-semibold text-foreground">{selectedNotification.title}</h2>
+                  <h2 className="text-lg font-semibold text-foreground">{selectedDisplay?.title ?? selectedNotification.title}</h2>
                 </div>
               </div>
 
-              {selectedNotification.body ? (
+              {selectedDisplay?.body ? (
                 <div className="rounded-xl border border-white/8 bg-muted/55 p-4 text-sm leading-6 text-foreground whitespace-pre-wrap">
-                  {selectedNotification.body}
+                  {selectedDisplay.body}
                 </div>
               ) : null}
 
