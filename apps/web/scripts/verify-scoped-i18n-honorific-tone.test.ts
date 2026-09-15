@@ -193,6 +193,16 @@ describe('SCOPED_NAMESPACES — honorific-scope/ 디렉터리에서 유도(story
     expect(SCOPED_NAMESPACES).toEqual(filenamesSorted);
   });
 
+  // 페드루 PO 리뷰(2026-09-15) — 위 테스트는 "같은 디렉터리에서 유도한 값끼리" 대조라
+  // 틀릴 수 없는 표본이다(디렉터리 전체가 비거나 loadHonorificScopeDir 자체가 고장나도
+  // 양쪽이 똑같이 비어 통과한다). 하드코딩이 아닌 하한 리터럴 하나로 그 사각을 막는다 —
+  // 대량 삭제·로더 고장은 이 줄이 잡고, PR마다 이 줄을 고칠 필요는 없다(하한만 넘으면
+  // 통과). story #3920(ko.json 최상위 네임스페이스 집합과의 «등식» 승격, 진행 中) 착지
+  // 뒤 이 하한을 그 등식으로 교체한다.
+  it('SCOPED_NAMESPACES가 최소 25개다(하한 리터럴 — 대량 삭제·로더 고장 감지, story #3920 전 임시)', () => {
+    expect(SCOPED_NAMESPACES.length).toBeGreaterThanOrEqual(25);
+  });
+
   it('loadHonorificScopeDir()의 각 minLeaf가 그 파일 자신의 원본 값과 정확히 일치한다(중간에 값이 새지 않음)', () => {
     const entries = loadHonorificScopeDir();
     expect(entries.length).toBeGreaterThan(0);
