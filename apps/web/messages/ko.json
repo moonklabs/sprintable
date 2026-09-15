@@ -3277,6 +3277,8 @@
     "filter_story_assigned": "스토리 배정",
     "filter_invitation": "초대",
     "filter_agent_joined": "에이전트 합류",
+    "filter_gate_pending_approval": "게이트 결재 대기",
+    "filter_generic": "알림",
     "revoke_agent": "접근 권한 취소",
     "revoke_agent_confirm": "이 에이전트를 비활성화할까요?",
     "revoke_success": "에이전트 접근 권한이 취소됐어요.",

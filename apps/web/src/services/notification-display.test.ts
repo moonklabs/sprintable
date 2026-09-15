@@ -15,17 +15,30 @@ const translations: Record<string, string> = {
   filter_info: '안내',
   filter_warning: '경고',
   filter_system: '시스템',
+  filter_gate_pending_approval: '게이트 결재 대기',
+  filter_generic: '알림',
+  eventMention: '새 멘션',
+  eventMessage: '새 메시지',
 };
 
 describe('notification-display', () => {
-  it('localizes known notification labels and passes unknown types through raw', () => {
+  it('localizes known notification labels and localizes unknown types to a generic fallback', () => {
     const t = (key: string) => translations[key] ?? key;
 
     expect(getInboxNotificationLabel(t, 'info')).toBe('안내');
     expect(getInboxNotificationLabel(t, 'warning')).toBe('경고');
-    // 837a36c4: 'memo'는 NOTIFICATION_TYPES 비포함 → switch default가 raw 타입 반환(localize 안 함).
-    // 구 테스트는 존재하지 않는 filter_memo 키로 '메모'를 기대했으나, 현 계약은 unknown=raw passthrough.
-    expect(getInboxNotificationLabel(t, 'memo')).toBe('memo');
+    // story #4316 CHANGES2(PO 라이브 실측 2026-09-15) — 상세 패널 타입 배지가 미상 type을
+    // raw로 노출하던 결함(gate.pending_approval 실측)을 닫음: switch default가 이제
+    // raw passthrough가 아니라 filter_generic(일반 라벨)로 떨어진다.
+    expect(getInboxNotificationLabel(t, 'memo')).toBe('알림');
+  });
+
+  it('localizes conversation.mention·conversation.message·gate.pending_approval(story #4316 CHANGES2, raw slug 노출 회귀가드)', () => {
+    const t = (key: string) => translations[key] ?? key;
+
+    expect(getInboxNotificationLabel(t, 'conversation.mention')).toBe('새 멘션');
+    expect(getInboxNotificationLabel(t, 'conversation.message')).toBe('새 메시지');
+    expect(getInboxNotificationLabel(t, 'gate.pending_approval')).toBe('게이트 결재 대기');
   });
 
   it('keeps info and warning filter types available for the inbox surface', () => {

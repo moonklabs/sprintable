@@ -3277,6 +3277,8 @@
     "filter_story_assigned": "Story Assigned",
     "filter_invitation": "Invitation",
     "filter_agent_joined": "Agent Joined",
+    "filter_gate_pending_approval": "Gate Pending Approval",
+    "filter_generic": "Notification",
     "revoke_agent": "Revoke Access",
     "revoke_agent_confirm": "Deactivate this agent?",
     "revoke_success": "Agent access revoked.",

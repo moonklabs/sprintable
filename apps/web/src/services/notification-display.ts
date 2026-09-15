@@ -55,8 +55,20 @@ export function getInboxNotificationLabel(
       return t('filter_invitation');
     case 'agent_joined':
       return t('filter_agent_joined');
+    // story #4316 CHANGES2(PO 라이브 실측 2026-09-15) — 상세 패널 타입 배지가 미상 type을
+    // raw로 그대로 찍던 것(gate.pending_approval 실측 발견 — conversation.mention·message도
+    // 같은 결함, 이 switch에 매핑이 없었음)을 닫는다. eventMention·eventMessage는
+    // getEventTypeCopy(EVENT_TYPE_COPY_KEYS)가 이미 쓰는 같은 inbox 네임스페이스 키
+    // 재사용(신규 어간 0) — 알림 벨과 배지가 같은 낱말을 쓰게 통일.
+    case 'conversation.mention':
+      return t('eventMention');
+    case 'conversation.message':
+      return t('eventMessage');
+    case 'gate.pending_approval':
+      return t('filter_gate_pending_approval');
     default:
-      return type;
+      // raw type 노출 금지(AC 「모르는 타입이 raw로 새는 클래스」 닫기) — 일반 라벨로.
+      return t('filter_generic');
   }
 }
 
