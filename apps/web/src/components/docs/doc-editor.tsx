@@ -162,10 +162,9 @@ export function DocEditor({
   const [tocHeadings, setTocHeadings] = useState<DocHeading[]>([]);
   const [isFocused, setIsFocused] = useState(false);
   const editorContentRef = useRef<HTMLDivElement>(null);
-  // S4 첨부 진입: gutter "+" 위치 / 빈 문서 힌트 / DnD active-zone.
+  // S4 첨부 진입: gutter "+" 위치 / DnD active-zone.
   const [gutterTop, setGutterTop] = useState<number | null>(null);
   const [insertMenuOpen, setInsertMenuOpen] = useState(false);
-  const [isEmpty, setIsEmpty] = useState(true);
   const [isDragging, setIsDragging] = useState(false);
   const dragDepthRef = useRef(0);
 
@@ -251,11 +250,10 @@ export function DocEditor({
     return registerDocIdProvider(editor, () => currentDocId);
   }, [editor, currentDocId]);
 
-  // gutter "+" 위치(현재 캐럿 줄) + 빈 문서 여부 추적.
+  // gutter "+" 위치(현재 캐럿 줄) 추적.
   useEffect(() => {
     if (!editor) return;
     const sync = () => {
-      setIsEmpty(editor.isEmpty);
       const wrap = editorContentRef.current;
       if (!wrap) return;
       try {
@@ -616,13 +614,11 @@ export function DocEditor({
           >
             <EditorContent editor={editor} className="tiptap-content h-full outline-none" />
 
-            {/* 빈 문서 힌트 — 첨부 진입 discoverability(+ · / · DnD). 콘텐츠를 따라가는 것이
-                맞다 — 안쪽 relative(스크롤 컨테이너) 기준 그대로 둔다. */}
-            {editable && isEmpty ? (
-              <p className="pointer-events-none absolute left-9 top-3 select-none text-sm text-muted-foreground">
-                {tEditor('attachEmptyHint')}
-              </p>
-            ) : null}
+            {/* story #3917 — 예전엔 여기에 별도 절대배치 <p>(attachEmptyHint)가 Tiptap
+                Placeholder 확장의 CSS ::before 문구와 같은 자리(좌상단)에 겹쳐 그려졌다
+                (빈 문서에서 두 문장이 포개짐). "이미지·파일을 끌어다 놓거나" 정보는
+                labels.placeholder(위 Placeholder.configure)로 병합해 한 상태=한 안내
+                불변식을 지킨다 — 우회(z-index·opacity) 아니라 중복 소스 제거. */}
 
             {/* gutter "+" — 현재 줄 좌측 거터·항상 표시·클릭 시 이미지/파일 삽입 메뉴. 캐럿
                 위치를 따라가는 것이 맞다 — 안쪽 relative 기준 그대로 둔다. */}
