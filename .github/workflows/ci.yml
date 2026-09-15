@@ -1793,10 +1793,10 @@ jobs:
       - name: "Verify no ASCII token in ko.json value (story #3880 AC2(b) regression guard)"
         run: pnpm --filter web verify:no-ascii-token-in-ko-value
 
-      # story #3894 — content/organization/pricingPlans/contentRules 값 안에 역할 낱말이
-      # 영어 슬러그(owner/admin)로 남는 클래스를 막는다(#3880 CAPS 가드는 소문자 슬러그를
-      # 원리상 못 봄, 자매 축). channelConnect 정본(소유자/관리자)으로 확定 — 역할 필드
-      # 입력 예시 placeholder 2키만 ALLOWLIST 예외.
+      # story #3894 — content/organization/pricingPlans/contentRules/settings 값 안에 역할
+      # 낱말이 영어 슬러그(owner/admin)로 남는 클래스를 막는다(#3880 CAPS 가드는 소문자
+      # 슬러그를 원리상 못 봄, 자매 축). channelConnect 정본(소유자/관리자)으로 확定 — 역할
+      # 필드 입력 예시 placeholder 2키만 ALLOWLIST 예외. (settings는 #3892/#4295 착지 뒤 승격.)
       - name: "Verify no English role slug in user copy (story #3894 regression guard)"
         run: pnpm --filter web verify:no-role-english-in-user-copy
 
