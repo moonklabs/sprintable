@@ -49,7 +49,7 @@ def test_needle_catches_sup_nida_literal():
 
 def test_needle_catches_vowel_stem_b_nida_via_nfd():
     # 「합니다」는 NFC에 독립된 ㅂ 문자가 없다 — NFD 정규화로만 잡힌다(FE 쪽 정의 그대로).
-    assert matches_formal_register("이 액션은 org owner 만 가능합니다.") == ["ㅂ니다"]
+    assert matches_formal_register("이 액션은 조직 소유자만 가능합니다.") == ["ㅂ니다"]
 
 
 def test_needle_catches_question_form():
@@ -57,7 +57,7 @@ def test_needle_catches_question_form():
 
 
 def test_needle_does_not_flag_haeyo_tone():
-    assert matches_formal_register("이 액션은 org owner 만 가능해요.") == []
+    assert matches_formal_register("이 액션은 조직 소유자만 가능해요.") == []
 
 
 def test_find_tone_issues_catches_hanja():
@@ -73,7 +73,7 @@ def test_find_tone_issues_catches_persona_adnominal_terminal():
 
 
 def test_find_tone_issues_is_empty_for_clean_haeyo_string():
-    assert find_tone_issues("이 액션은 org owner 만 가능해요.") == []
+    assert find_tone_issues("이 액션은 조직 소유자만 가능해요.") == []
 
 
 # ---------------------------------------------------------------------------

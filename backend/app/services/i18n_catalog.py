@@ -102,7 +102,7 @@ _CATALOG: dict[str, dict[str, str]] = {
         "en": "No permission to act on this doc approval — access to the target project is required",
     },
     "gates.approve_no_project_admin_access": {
-        "ko": "이 게이트를 승인/거부할 권한이 없어요 (해당 프로젝트의 owner/admin이어야 해요). 프로젝트 관리자에게 권한을 요청하세요.",
+        "ko": "이 게이트를 승인/거부할 권한이 없어요 (해당 프로젝트의 소유자/관리자여야 해요). 프로젝트 관리자에게 권한을 요청하세요.",
         "en": "No permission to approve or reject this gate — project owner/admin required; ask a project admin for access",
     },
     "gates.transition_high_risk_note_required": {
@@ -114,7 +114,7 @@ _CATALOG: dict[str, dict[str, str]] = {
         "en": "Approving a high-risk gate (risk_grade=high) requires confirming you reviewed the evidence (evidence_viewed=true)",
     },
     "gates.reevaluate_merge_only": {
-        "ko": "merge 게이트만 재평가를 지원해요.",
+        "ko": "병합 게이트만 재평가를 지원해요.",
         "en": "Only merge gates support re-evaluation",
     },
     "gates.reevaluate_no_pr_info": {
@@ -138,11 +138,11 @@ _CATALOG: dict[str, dict[str, str]] = {
         "en": "Couldn't determine the GitHub PR head SHA",
     },
     "gates.void_owner_admin_only": {
-        "ko": "게이트 무효화는 org owner/admin 만 가능해요.",
+        "ko": "게이트 무효화는 조직 소유자/관리자만 가능해요.",
         "en": "Voiding a gate requires org admin/owner",
     },
     "gates.require_admin_generic": {
-        "ko": "이 액션은 org owner/admin 만 가능해요.",
+        "ko": "이 액션은 조직 소유자/관리자만 가능해요.",
         "en": "This action requires org admin/owner",
     },
     "gates.delegate_designated_only": {
@@ -181,7 +181,7 @@ _CATALOG: dict[str, dict[str, str]] = {
         "en": "An approval that's already been decided can't be sent to another room.",
     },
     "gates.require_owner_generic": {
-        "ko": "이 액션은 org owner 만 가능해요.",
+        "ko": "이 액션은 조직 소유자만 가능해요.",
         "en": "This action requires org owner",
     },
     # story #3796(페드루 PO 確定 2026-09-10 — 2차 CHANGES 2026-09-11, 3779 가드 발견) —
