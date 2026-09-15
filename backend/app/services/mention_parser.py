@@ -111,8 +111,25 @@ _UUID_RE = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-f
 # 조용히 죽는다(chat_message도 언더스코어가 있지만 그 타입은 채팅 본문 토큰 경로로
 # 쓰이지 않아 — proof form 별도 경로 — 지금까지 이 구멍이 안 드러났을 뿐). `[a-z_]+`로
 # 넓혀 두 정규식(아래 SHAPE_RE도 동일 근거) 다 대비한다.
+#
+# ⭐story #3858 CHANGES 1(2026-09-15, PO 배포 89 라이브 실측 — 되돌림, 합성 표본 함정
+# 2번째 재발): 위 #2282의 escape 처방은 "제목의 `]`는 항상 `build_reference_token`이
+# escape해 내보낸다"는 전제였는데, 문서 에디터(story #3866)가 실제로 저장하는 마크다운
+# 링크는 escape가 «전혀 없는» 1단 중첩 대괄호 그대로다(이 조직 스토리 제목 관례 "[TAG]
+# 제목" 그 자체 — 예: `[[SMOKE·삭제예정] 3567 릴스 1건](entity:story:<uuid>)`). 옛
+# `(?:[^\]\\]|\\.)*`는 escape된 `\]`만 견디지 raw `[...]` 중첩은 못 견뎌 첫 안쪽 `]`에서
+# 매치가 통째로 실패했다(원래 AC1-b의 합성 fixture는 대괄호 없는 라벨만 써서 이 갭도
+# 못 봤다). 처방: FE `apps/web/src/components/docs/lib/content-converter.ts`의 마크다운
+# 링크 파서(story #3866, 같은 문제를 같은 방식으로 이미 처방)와 구조적으로 동형인 3분기
+# 반복군으로 교체 — ① `\\[\[\]]`(escape된 대괄호, #2282 하위호환) ② `\[[^\[\]]*\]`(대괄호
+# 안 대괄호 없는 raw 1단 중첩 — 문서 에디터의 실제 저장 형태) ③ `[^\[\]]`(그 외 대괄호
+# 아닌 낱글자). CommonMark처럼 무한 재귀는 안 가되(정규식 엔진이 재귀를 못 함) 1단 중첩까지
+# 커버 — 진짜 닫는 `]`(바로 뒤 `(`가 오는 자리)는 세 분기 어디에도 안 걸려 반복이 거기서
+# 자연히 멈춘다. 채팅(`extract_chat_entity_mentions`)과 doc(`reconcile_doc_mentions`, story
+# #3858 AC1-b)이 이 정규식 하나를 공유하므로 채팅 멘션도 같이 좋아진다(회귀 0 — 기존
+# escape 형·대괄호 없는 형 둘 다 그대로 매치).
 _CHAT_TOKEN_RE = re.compile(
-    r"\[(?:[^\]\\]|\\.)*\]\(entity:(?P<type>[a-z_]+):(?P<id>" + _UUID_RE + r")\)"
+    r"\[(?:\\[\[\]]|\[[^\[\]]*\]|[^\[\]])*\]\(entity:(?P<type>[a-z_]+):(?P<id>" + _UUID_RE + r")\)"
 )
 
 
@@ -177,8 +194,11 @@ def extract_chat_entity_mentions(content: str) -> list[tuple[str, uuid.UUID]]:
 # `reason="malformed_token"`으로 얹는다. 코어(`reconcile_entity_references`)에 안 넣는
 # 이유: 코어는 이미 파싱된 `extracted_refs`만 받는 계약이라(#2301) 애초에 추출조차 안 된
 # 토큰은 코어의 시야 밖 — #2301의 "얇은 변환" 원칙 위반이 아니라 코어가 볼 수 없는 축이다.
+# story #3858 CHANGES 1 — 위 _CHAT_TOKEN_RE와 같은 3분기 라벨 문법으로 맞춘다(라벨
+# 파싱 규칙이 두 정규식에서 갈리면 "모양은 맞는데 못 파싱"의 «모양» 판정 자체가 서로
+# 달라지는 twin-system 갭이 된다 — id만 느슨한 게 이 SHAPE_RE의 유일한 차이여야 한다).
 _CHAT_TOKEN_SHAPE_RE = re.compile(
-    r"\[(?:[^\]\\]|\\.)*\]\(entity:(?P<type>[a-z_]+):(?P<id>[^)]*)\)"
+    r"\[(?:\\[\[\]]|\[[^\[\]]*\]|[^\[\]])*\]\(entity:(?P<type>[a-z_]+):(?P<id>[^)]*)\)"
 )
 
 

@@ -97,24 +97,49 @@ def test_extract_chat_title_with_escaped_paren_and_backslash_still_matches():
     assert extract_chat_entity_mentions(content) == [("doc", doc_id)]
 
 
-def test_extract_chat_hand_typed_unescaped_bracket_title_intentionally_fails():
-    """story #3213 그라운딩(2026-08-29) — 위 두 테스트가 고정한 «escape된» 토큰과 대조군.
-    사람이 `build_reference_token`/FE `applyEntity`를 거치지 않고 **원문 그대로**(백슬래시
-    escape 없이) 손으로 토큰을 짓거나 붙여넣으면(이 조직의 실제 명명 관례 `[TAG] 제목`이
-    정확히 이 모양) 여전히 매치 실패한다 — 이건 #2282 미해결이 아니라 **설계 그대로**다.
+def test_extract_chat_hand_typed_one_level_nested_bracket_title_now_matches():
+    """⭐story #3858 CHANGES 1(2026-09-15)이 이 테스트의 옛 이름·주장(`..._intentionally_
+    fails`)을 뒤집는다 — 원래 story #3213 그라운딩(2026-08-29)은 손으로 친(escape 없는)
+    `[TAG] 제목`류가 영원히 매치 실패하는 게 "설계 그대로"라고 선언했지만, 문서 에디터
+    (story #3866)가 실제로 저장하는 마크다운 링크가 정확히 이 모양(1단 raw 중첩 대괄호,
+    escape 0)이라는 게 배포 89 라이브에서 드러났다(디디 2026-09-14 3866 릴스 "SMOKE" 제목
+    실측) — «설계 그대로»가 실사용의 절대다수를 조용히 깨고 있었다.
 
-    이 정규식을 완전한 bracket-balancing 파서로 바꾸면(원문 그대로도 파싱되게) #2282가
-    막은 바로 그 phishing 위험(escape 안 된 `]`/`(` 조합으로 링크 구조를 변조)이 다시
-    열린다(reference_token.py 모듈 docstring 참조) — 그래서 백엔드는 고치지 않는다.
-
-    실제 처방(story #3213 AC2)은 FE 쪽이다: 등록 실패(references 미저장)가 "대상이
-    없습니다"로 오표기되던 걸 정직한 폴백(클릭 시 실 fetch로 존재판정)으로 바꿨다 —
-    `apps/web/src/components/chat/embed-card.tsx`의 EntityChip ghost 분기 참조."""
+    안전성 재검토: #2282/#3213이 우려한 "escape 안 된 `]`/`(` 조합으로 링크 구조를 변조"
+    라는 phishing 프레임은 **일반 마크다운 링크**(`[text](임의 URL)` — FE
+    content-converter.ts가 `javascript:` 필터를 따로 두는 이유)에서 온 유비였다. 이
+    토큰의 href 쪽은 `entity:<등록된 type>:<UUID>`로 **엄격히 고정**돼 임의 외부 URL이
+    될 수 없다 — 1단 중첩을 허용해도 최종적으로 추출되는 (type, id)는 항상 문자열에 그대로
+    적힌 그 UUID뿐이다(외부로 리디렉션할 여지 0). 그래서 FE `content-converter.ts:471`
+    (story #3866)과 동형으로 1단 중첩까지 허용하도록 처방(mention_parser.py
+    `_CHAT_TOKEN_RE` CHANGES 1 주석 참조) — 이제 이 케이스가 정상 매치된다."""
     from app.services.mention_parser import extract_chat_entity_mentions
 
     story_id = uuid.uuid4()
     unescaped_title = "[빌링·메일] 구독 취소 확인 메일 부재"
     content = f"[{unescaped_title}](entity:story:{story_id})"
+    assert extract_chat_entity_mentions(content) == [("story", story_id)]
+
+
+def test_extract_chat_real_3866_stored_string_with_bracketed_tag_title_matches():
+    """⭐story #3858 CHANGES 1 — 페드루 PO가 배포 89 라이브에서 실측한 정확한 문자열
+    그대로(2026-09-15 02:46Z 채팅 인용, PII/실 UUID만 합성 값으로 치환) — 문서 에디터
+    저장 본문 실물이 이 형태임을 고정한다."""
+    from app.services.mention_parser import extract_chat_entity_mentions
+
+    story_id = uuid.uuid4()
+    content = f"# [[SMOKE·삭제예정] 3567 릴스 1건 (video+cover evidence)](entity:story:{story_id})"
+    assert extract_chat_entity_mentions(content) == [("story", story_id)]
+
+
+def test_extract_chat_deeply_nested_bracket_title_still_fails_by_design():
+    """⭐경계 확認 — 1단(정확히 한 겹)까지만 허용한다. 2단 이상 중첩(`[[[삼중]]] 제목`류)은
+    CommonMark처럼 무한 재귀를 지원하지 않는다는 설계 그대로(정규식 엔진이 재귀를 못 함,
+    FE content-converter.ts와 동형 한계) — 여전히 매치 실패해야 한다(과욕 방지 회귀 가드)."""
+    from app.services.mention_parser import extract_chat_entity_mentions
+
+    story_id = uuid.uuid4()
+    content = f"[[[삼중 중첩]] 제목](entity:story:{story_id})"
     assert extract_chat_entity_mentions(content) == []
 
 

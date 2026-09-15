@@ -352,6 +352,126 @@ async def test_removing_entity_link_from_markdown_doc_body_revokes_reference():
 
 
 @pytest.mark.anyio
+async def test_doc_entity_link_with_bracketed_tag_title_creates_reference():
+    """⭐story #3858 CHANGES 1(2026-09-15, PO 배포 89 라이브 실측 — 되돌림의 두 번째
+    원인) — 3866 에디터가 실제로 저장한 정확한 본문 그대로(페드루 PO 02:46Z 채팅 인용,
+    실 UUID만 합성 값으로 치환): `# [[SMOKE·삭제예정] 3567 릴스 1건 (video+cover
+    evidence)](entity:story:<uuid>)`. 이 조직 스토리 제목 관례(`[TAG] 제목`)가 그대로
+    링크 라벨 «안»에 escape 없이 1단 중첩된 실물 — AC1-b(HTML/마크다운 이원화)까지 고쳤어도
+    이 정규식 갭 때문에 실사용 대부분(제목이 `[TAG]`로 시작하는 거의 모든 스토리)에서
+    여전히 안 썼던 자리. `_CHAT_TOKEN_RE`가 1단 raw 중첩 대괄호를 허용하도록 고친 뒤에야
+    이 테스트가 통과한다."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id, "P")
+            member_id, user_id = await _make_human_member(s, org.id, project.id)
+            story = await _make_story(s, org.id, project.id, title="[SMOKE·삭제예정] 3567 릴스 1건")
+
+        await _setup_app_human(app, Session, user_id, org.id)
+        client = _client_for(app)
+        try:
+            create_resp = await client.post(
+                "/api/v2/docs",
+                json={
+                    "project_id": str(project.id),
+                    "org_id": str(org.id),
+                    "title": "브래킷 태그 제목 링크 문서",
+                    "slug": f"doc-{uuid.uuid4().hex[:8]}",
+                    "content_format": "markdown",
+                    "content": (
+                        f"# [[SMOKE·삭제예정] 3567 릴스 1건 (video+cover evidence)]"
+                        f"(entity:story:{story.id})"
+                    ),
+                },
+            )
+            assert create_resp.status_code == 201, create_resp.text
+            doc_id = uuid.UUID(create_resp.json()["id"])
+
+            async with Session() as s:
+                ref = await _find_reference(
+                    s, org_id=org.id, source_type="doc", source_id=doc_id,
+                    target_type="story", target_id=story.id,
+                )
+                assert ref is not None, (
+                    "[TAG] 제목류 1단 중첩 대괄호 라벨을 실었는데 Reference 행이 안 생겼다 "
+                    "(이 조직 스토리 제목 관례 대부분이 이 모양이라 실사용 영향이 크다)"
+                )
+
+            backlinks_resp = await client.get(f"/api/v2/stories/{story.id}/backlinks?source_type=doc")
+            assert backlinks_resp.status_code == 200, backlinks_resp.text
+            assert len(backlinks_resp.json()["data"]) == 1
+        finally:
+            await client.aclose()
+            app.dependency_overrides.clear()
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_removing_bracketed_tag_title_entity_link_from_doc_body_revokes_reference():
+    """⭐CHANGES 1 — 브래킷 태그 제목 케이스도 회수가 정상 동작한다(1단 중첩 라벨 경로의
+    diff/삭제 로직 회귀 0 확認)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id, "P")
+            member_id, user_id = await _make_human_member(s, org.id, project.id)
+            story = await _make_story(s, org.id, project.id, title="[TAG] Will Be Unlinked")
+
+        await _setup_app_human(app, Session, user_id, org.id)
+        client = _client_for(app)
+        try:
+            create_resp = await client.post(
+                "/api/v2/docs",
+                json={
+                    "project_id": str(project.id),
+                    "org_id": str(org.id),
+                    "title": "브래킷 태그 제목 — 곧 링크 지울 문서",
+                    "slug": f"doc-{uuid.uuid4().hex[:8]}",
+                    "content_format": "markdown",
+                    "content": f"[[TAG] Will Be Unlinked](entity:story:{story.id})",
+                },
+            )
+            assert create_resp.status_code == 201, create_resp.text
+            doc_id = uuid.UUID(create_resp.json()["id"])
+
+            async with Session() as s:
+                ref = await _find_reference(
+                    s, org_id=org.id, source_type="doc", source_id=doc_id,
+                    target_type="story", target_id=story.id,
+                )
+                assert ref is not None, "선행 조건 실패 — 링크가 애초에 안 써짐"
+
+            patch_resp = await client.patch(
+                f"/api/v2/docs/{doc_id}", json={"content": "이제 스토리 얘기 없음."},
+            )
+            assert patch_resp.status_code == 200, patch_resp.text
+
+            async with Session() as s:
+                ref_after = await _find_reference(
+                    s, org_id=org.id, source_type="doc", source_id=doc_id,
+                    target_type="story", target_id=story.id,
+                )
+                assert ref_after is None, "브래킷 태그 제목 링크를 지웠는데 Reference가 안 회수됐다"
+
+            backlinks_resp = await client.get(f"/api/v2/stories/{story.id}/backlinks?source_type=doc")
+            assert backlinks_resp.status_code == 200, backlinks_resp.text
+            assert backlinks_resp.json()["data"] == []
+        finally:
+            await client.aclose()
+            app.dependency_overrides.clear()
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_removing_entity_link_from_doc_body_revokes_reference():
     """AC1/AC2 — 본문에서 링크를 지우고 저장(PATCH)하면 그 Reference도 회수(delete)된다
     (reconcile의 기존 diff 로직 그대로 — doc→doc 회수와 동형, 이 카드가 새로 짤 필요 0)."""
