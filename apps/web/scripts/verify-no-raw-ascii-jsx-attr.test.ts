@@ -149,6 +149,8 @@ describe('실 파일 실측 양성대조 — page-embed-node.tsx(placeholder, �
 });
 
 describe('scanRepo — story #3880(실 트리 실행)', () => {
+  // story #3902 — 부하 시 vitest 기본 5000ms를 넘길 수 있는 실 전수 스캔(측정: 동시부하
+  // 재현 5회 = 659·786·779·655·766ms 중 최댓값 786ms → ×3 ≈ 2358ms → 2500ms로 반올림).
   it('실 트리(apps/web/src) — ALLOWLIST+baseline과 정확히 일치(신규 0·stale 0)', () => {
     const refs = scanRepo(SRC_ROOT);
     const baseline = loadBaseline(BASELINE_PATH);
@@ -156,5 +158,5 @@ describe('scanRepo — story #3880(실 트리 실행)', () => {
     const staleBaseline = computeStaleBaseline(refs.filter((r) => !ALLOWLIST.has(refKey(r))), baseline);
     expect(newViolations).toEqual([]);
     expect(staleBaseline).toEqual([]);
-  });
+  }, 2500);
 });

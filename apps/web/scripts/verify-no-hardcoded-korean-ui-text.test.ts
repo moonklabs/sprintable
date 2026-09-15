@@ -176,20 +176,23 @@ describe('창건 사례 — app/unsubscribe/page.tsx의 실 위반이 지금도 
     expect(content).toContain('링크가 유효하지 않거나 만료되었습니다.');
   });
 
+  // story #3902 — 부하 시 vitest 기본 5000ms를 넘길 수 있는 실 전수 스캔(측정: 동시부하
+  // 재현 5회 = 814·775·741·1130·874ms 중 최댓값 1130ms → ×3 ≈ 3390ms → 3500ms로 반올림).
   it('실 저장소 스캔이 이 창건 사례를 담는다(자가 죽어있지 않다)', () => {
     const violations = scanRepo(path.resolve(__dirname, '../src'));
     const hit = violations.find((v) => v.file === FOUNDED_CASE_REL && v.text === '링크가 유효하지 않거나 만료되었습니다.');
     expect(hit).toBeDefined();
-  });
+  }, 3500);
 });
 
 describe('EXEMPT_FILES — 내부 도그푸드·약관(스토리 明示 ④)', () => {
+  // story #3902 — 635·850·728·851·686ms 중 최댓값 851ms → ×3 ≈ 2553ms → 3000ms로 반올림.
   it('exempt로 등재된 파일은 위반이 있어도 스캔에서 완전히 제외된다', () => {
     const violations = scanRepo(path.resolve(__dirname, '../src'));
     for (const exempt of EXEMPT_FILES) {
       expect(violations.some((v) => v.file === exempt)).toBe(false);
     }
-  });
+  }, 3000);
 });
 
 // story #3776(유나 지적 06:09Z) — EXEMPT_FILES는 baseline stale 검사와 달리 자가만료가

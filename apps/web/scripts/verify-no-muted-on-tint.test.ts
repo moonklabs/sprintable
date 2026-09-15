@@ -323,10 +323,16 @@ describe('analyzeTreeForTintCompleteness — 전 트리 양성대조(PO 보강)'
 });
 
 describe('scanTreeForTintCompleteness — 실 src 트리(UNANALYZED_TINT_SITES와 일치)', () => {
+  // story #3902 — 부하 시 vitest 기본 5000ms를 넘길 수 있는 실 전수 스캔(측정: apps/web
+  // 전체 스위트 동시부하 재현 5회 = 1654·1629·1695·2156·1547ms, scripts/ 디렉터리만 동시
+  // 실행했을 때 5842ms까지 관측 — 이 파일은 `scan[A-Z]...` 명명(scanTreeForTintCompleteness)
+  // 이라 story 착수 시 최초 grep(scanRepo|readdirSync)이 못 잡았다가, 전체 파일 재검토
+  // 中 실제 RED 재현으로 뒤늦게 발견해 스코프에 편입). 최댓값 5842ms × 3 ≈ 17526ms →
+  // 18000ms로 반올림.
   it('실 SRC_ROOT 스캔이 ambiguousReasons 0(모호한 cva 없음)', () => {
     const { ambiguousReasons } = scanTreeForTintCompleteness(SRC_ROOT, UI_DIR);
     expect(ambiguousReasons).toEqual([]);
-  });
+  }, 18000);
 });
 
 // story #3850 AC3 — 신설 분석기 2축(객체 맵·삼항/템플릿 리터럴)이 실제로 JSX 조상 추적에

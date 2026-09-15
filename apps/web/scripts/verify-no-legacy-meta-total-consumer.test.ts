@@ -64,10 +64,12 @@ describe('scanFileContent — story #3761 후속(소비처 가드) 셀프테스�
 describe('scanRepo — story #3761 후속(실 트리 실행)', () => {
   // 지금 develop(이 PR 처리 뒤) — apps/web/src 전수에서 legacy meta.total 읽기는
   // ALLOWLIST(derive-loop-queue.ts:77, 근거는 스크립트 상단 docstring) 하나만 남고 0건.
+  // story #3902 — 부하 시 vitest 기본 5000ms를 넘길 수 있는 실 전수 스캔(측정: 동시부하
+  // 재현 5회 = 1793·1559·1474·1441·1913ms 중 최댓값 1913ms → ×3 ≈ 5739ms → 6000ms로 반올림).
   it('실 트리(apps/web/src) — legacy 읽기 0건(ALLOWLIST 제외), ALLOWLIST는 전부 실제로 걸린다', () => {
     const { refs, fileCount, allowlistHit } = scanRepo(SRC_ROOT);
     expect(fileCount).toBeGreaterThan(1500);
     expect(refs).toEqual([]);
     expect(allowlistHit.size).toBe(1);
-  });
+  }, 6000);
 });

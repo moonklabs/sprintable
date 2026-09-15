@@ -19,7 +19,9 @@ describe('findHardcodedAriaLabels — 단위(패턴 자체)', () => {
 });
 
 describe('story #3557 회귀가드 — 전수 스캔 0건', () => {
+  // story #3902 — 부하 시 vitest 기본 5000ms를 넘길 수 있는 실 전수 스캔(측정: 동시부하
+  // 재현 5회 = 97·88·228·68·102ms 중 최댓값 228ms → ×3 ≈ 684ms → 1000ms로 반올림).
   it('새 FAIL은 없다(#3557이 알려진 3곳을 전부 고친 뒤의 clean-slate)', () => {
     expect(scanRepository()).toEqual([]);
-  });
+  }, 1000);
 });

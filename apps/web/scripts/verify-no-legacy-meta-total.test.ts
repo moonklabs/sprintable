@@ -66,9 +66,11 @@ describe('scanFileContent — story #3761 셀프테스트', () => {
 describe('scanRepo — story #3761(실 트리 실행)', () => {
   // 지금 develop(#3761 처리 뒤) — API route.ts 전수 위반 0. 되돌리면(누군가 total을 다시
   // 쓰면) RED.
+  // story #3902 — 부하 시 vitest 기본 5000ms를 넘길 수 있는 실 전수 스캔(측정: 동시부하
+  // 재현 5회 = 156·150·176·201·159ms 중 최댓값 201ms → ×3 ≈ 603ms → 1000ms로 반올림).
   it('실 트리(apps/web/src/app/api) — legacy total 프로퍼티 0건', () => {
     const { refs, fileCount } = scanRepo(API_ROOT);
     expect(fileCount).toBeGreaterThan(400);
     expect(refs).toEqual([]);
-  });
+  }, 1000);
 });
