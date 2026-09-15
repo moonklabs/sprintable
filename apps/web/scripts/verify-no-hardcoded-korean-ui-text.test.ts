@@ -167,20 +167,24 @@ describe('computeNewViolations', () => {
 //     아니다 — 표본은 그때그때 살아있는 실 위반으로 교체하는 것이 이 파일의 관례
 //     (「합성 문자열만으론 통과 의식」이라는 원 취지가 여전히 우선). settings/page.tsx는
 //     30여 건이 몰려 있어 단기간 완전 소진 위험이 낮은 자리로 표본을 옮긴다.
-describe('창건 사례 — app/unsubscribe/page.tsx의 실 위반이 지금도 잡힌다', () => {
-  const FOUNDED_CASE_FILE = path.resolve(__dirname, '../src/app/unsubscribe/page.tsx');
-  const FOUNDED_CASE_REL = 'app/unsubscribe/page.tsx';
+//   story #3923(2026-09-15) — 앞 표본(app/unsubscribe/page.tsx)이 이번엔 직접 이 스토리의
+//   작업 대상이라 수리됐다(§⑤·i18n 밖 app/ 페이지 전수 전환). 다시 짧은 기간에 소진된
+//   패턴 그대로 — 표본을 components/chat/file-viewer.tsx(FORMAT_LABEL 상수, 36건 몰림 —
+//   단기 소진 위험 낮음)로 옮긴다.
+describe('창건 사례 — components/chat/file-viewer.tsx의 실 위반이 지금도 잡힌다', () => {
+  const FOUNDED_CASE_FILE = path.resolve(__dirname, '../src/components/chat/file-viewer.tsx');
+  const FOUNDED_CASE_REL = 'components/chat/file-viewer.tsx';
 
-  it('app/unsubscribe/page.tsx가 실제로 「링크가 유효하지 않거나 만료되었습니다.」 자리를 아직 갖고 있다', () => {
+  it('components/chat/file-viewer.tsx가 실제로 FORMAT_LABEL의 「이미지」 자리를 아직 갖고 있다', () => {
     const content = readFileSync(FOUNDED_CASE_FILE, 'utf8');
-    expect(content).toContain('링크가 유효하지 않거나 만료되었습니다.');
+    expect(content).toContain("image: '이미지'");
   });
 
   // story #3902 — 부하 시 vitest 기본 5000ms를 넘길 수 있는 실 전수 스캔(측정: 동시부하
   // 재현 5회 = 814·775·741·1130·874ms 중 최댓값 1130ms → ×3 ≈ 3390ms → 3500ms로 반올림).
   it('실 저장소 스캔이 이 창건 사례를 담는다(자가 죽어있지 않다)', () => {
     const violations = scanRepo(path.resolve(__dirname, '../src'));
-    const hit = violations.find((v) => v.file === FOUNDED_CASE_REL && v.text === '링크가 유효하지 않거나 만료되었습니다.');
+    const hit = violations.find((v) => v.file === FOUNDED_CASE_REL && v.text === '이미지');
     expect(hit).toBeDefined();
   }, 3500);
 });

@@ -14,10 +14,12 @@
 // 금지, 버튼 탭에서만 이동한다. scheme·path는 App.js OAUTH_RETURN_SCHEME_URL과 byte-exact
 // (`ai.sprintable:/oauth-return` — 단일 슬래시).
 import { useSearchParams } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 
 const OAUTH_RETURN_SCHEME_URL = 'ai.sprintable:/oauth-return';
 
 export default function NativeOauthReturnPage() {
+  const t = useTranslations('nativeOauthReturn');
   const searchParams = useSearchParams();
   const query = searchParams.toString();
   const appReturnUrl = query ? `${OAUTH_RETURN_SCHEME_URL}?${query}` : OAUTH_RETURN_SCHEME_URL;
@@ -25,15 +27,15 @@ export default function NativeOauthReturnPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-muted px-4">
       <div className="max-w-sm rounded-2xl bg-background p-8 text-center shadow-sm">
-        <h1 className="mb-2 text-lg font-semibold text-foreground">로그인이 완료됐습니다</h1>
+        <h1 className="mb-2 text-lg font-semibold text-foreground">{t('title')}</h1>
         <p className="mb-6 text-sm text-muted-foreground">
-          아래 버튼을 눌러 Sprintable 앱으로 돌아가 주세요.
+          {t('body')}
         </p>
         <a
           href={appReturnUrl}
           className="inline-flex min-h-[44px] w-full items-center justify-center rounded-lg bg-brand px-4 py-3 text-sm font-medium text-brand-foreground transition hover:bg-brand/90"
         >
-          Sprintable 앱으로 돌아가기
+          {t('returnButton')}
         </a>
       </div>
     </div>

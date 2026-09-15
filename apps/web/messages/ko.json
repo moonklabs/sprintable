@@ -1231,6 +1231,33 @@
     "retryLink": "다시 요청하기(로그인 후 설정에서)",
     "backToLogin": "로그인으로 돌아가기"
   },
+  "forgotPassword": {
+    "title": "비밀번호 찾기",
+    "sentMessage": "입력하신 이메일로 재설정 링크를 보냈어요. 메일함을 확인해 주세요.",
+    "backToLogin": "로그인으로 돌아가기",
+    "instructions": "가입하신 이메일 주소를 입력하시면 비밀번호 재설정 링크를 보내드려요.",
+    "emailPlaceholder": "이메일",
+    "sending": "전송 중...",
+    "submitButton": "재설정 링크 전송"
+  },
+  "authResetRequired": {
+    "heading": "보안이 강화됐어요",
+    "body": "안전한 로그인을 위해 비밀번호를 한 번 재설정해 주세요. 계정과 데이터는 그대로 유지돼요.",
+    "resetButton": "비밀번호 재설정하기"
+  },
+  "unsubscribe": {
+    "invalidLink": "유효하지 않은 링크예요.",
+    "processing": "처리 중...",
+    "unsubscribed": "안내 메일 수신이 해제됐어요.",
+    "linkExpired": "링크가 유효하지 않거나 만료됐어요.",
+    "processError": "처리 중 오류가 발생했어요.",
+    "backToLogin": "로그인으로 돌아가기"
+  },
+  "nativeOauthReturn": {
+    "title": "로그인이 완료됐어요",
+    "body": "아래 버튼을 눌러 Sprintable 앱으로 돌아가 주세요.",
+    "returnButton": "Sprintable 앱으로 돌아가기"
+  },
   "onboarding": {
     "createOrg": "조직 만들기",
     "welcome": "Sprintable에 오신 것을 환영해요!",
@@ -3340,7 +3367,10 @@
     "invitedByOrg": "{org}에서 초대했어요.",
     "signupEmail": "{email} 계정으로 가입돼요.",
     "decline": "거절 (나중에)",
-    "acceptFailed": "초대 수락에 실패했어요."
+    "acceptFailed": "초대 수락에 실패했어요.",
+    "linkInvalidTitle": "초대가 유효하지 않아요",
+    "linkInvalidBody": "만료됐거나 이미 사용된 초대 링크예요.",
+    "goToChatButton": "채팅으로 이동"
   },
   "resetPassword": {
     "title": "새 비밀번호 설정",
