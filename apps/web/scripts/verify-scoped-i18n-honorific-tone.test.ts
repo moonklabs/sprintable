@@ -176,18 +176,23 @@ describe('실 ko.json — 스코프 키 count-lock(baseline 0, 새 자리 0)', (
 // story #3916 — 등록이 honorific-scope/*.json 디렉터리에서 유도되므로(파일명 알파벳순),
 // 이 목록은 더는 "손으로 추가"가 아니라 "파일이 유도한 결과"를 고정하는 마이그레이션
 // 정합성 스냅샷이다(착수 시점 develop의 19개 + 4314 rebase로 접힌 4개(#3912) + 4317
-// rebase로 접힌 3개(#3913: agentRuns·nav·dashboard) = 26개 배열과 항목 수·이름·minLeaf
+// rebase로 접힌 3개(#3913) + story #3919가 신설한 8개 = 34개 배열과 항목 수·이름·minLeaf
 // 전부 동일함을 고정 — story #3916 AC1). 앞으로 새 네임스페이스가 추가돼도 이 테스트는
 // 안 건드린다(새 파일만 추가하면 되고, 이 스냅샷은 마이그레이션 그 자체의 무결성만
 // 증명한다).
 describe('SCOPED_NAMESPACES — honorific-scope/ 디렉터리에서 유도(story #3916 AC1, 마이그레이션 정합성)', () => {
-  it('26개가 파일명 알파벳순으로 유도됐다(착수 시점 develop 배열+4314·4317 rebase 접힌 값과 항목 수·이름 전부 동일)', () => {
+  it('34개가 파일명 알파벳순으로 유도됐다(착수 시점 develop 배열+4314·4317 rebase·#3919 신설 접힌 값과 항목 수·이름 전부 동일)', () => {
     expect(SCOPED_NAMESPACES).toEqual([
+      'accountSwitcher',
+      'activityLog',
+      'agentPerformance',
       'agentRuns',
       'agents',
       'cage',
       'channelConnect',
       'chats',
+      'commandPalette',
+      'common',
       'content',
       'contentRules',
       'dashboard',
@@ -202,17 +207,20 @@ describe('SCOPED_NAMESPACES — honorific-scope/ 디렉터리에서 유도(story
       'nav',
       'onboarding',
       'organization',
+      'presence',
       'pricingPlans',
       'recruiter',
       'settings',
+      'sprints',
       'standup',
       'storage',
       'supportWidget',
+      'teamActivity',
       'usage',
     ]);
   });
 
-  it('각 네임스페이스의 minLeaf가 착수 시점 develop 배열+4314·4317 rebase 접힌 값과 동일하다(마이그레이션 정합성)', () => {
+  it('각 네임스페이스의 minLeaf가 착수 시점 develop 배열+4314·4317 rebase·#3919 신설 접힌 값과 동일하다(마이그레이션 정합성)', () => {
     const entries = loadHonorificScopeDir();
     const minLeafByNamespace = Object.fromEntries(entries.map((e) => [e.namespace, e.minLeaf]));
     expect(minLeafByNamespace).toEqual({
@@ -220,6 +228,8 @@ describe('SCOPED_NAMESPACES — honorific-scope/ 디렉터리에서 유도(story
       gateConfig: 15, recruiter: 100, loops: 105, cage: 230, organization: 190, pricingPlans: 125,
       contentRules: 70, onboarding: 75, login: 30, storage: 70, insightsBoard: 90, standup: 100, goals: 130,
       usage: 60, invite: 20, meeting: 50, supportWidget: 20, agentRuns: 55, nav: 100, dashboard: 45,
+      presence: 10, commandPalette: 17, accountSwitcher: 7, common: 25, activityLog: 10,
+      teamActivity: 16, agentPerformance: 9, sprints: 70,
     });
   });
 });
@@ -333,14 +343,19 @@ describe('실 ko.json — chats 네임스페이스 전량(story #3885 AC2)', () 
 // ---------------------------------------------------------------------------
 
 describe('checkScopedNamespaceMinimums — 순수 함수', () => {
-  it('⭐네임스페이스 26개가 ko.json에 아예 없으면(개명·삭제 시뮬레이션) 26건 위반을 낸다', () => {
-    const violations = checkScopedNamespaceMinimums({ board: { x: 'y' } }); // 26개 다 없음
+  it('⭐네임스페이스 34개가 ko.json에 아예 없으면(개명·삭제 시뮬레이션) 34건 위반을 낸다', () => {
+    const violations = checkScopedNamespaceMinimums({ board: { x: 'y' } }); // 34개 다 없음
     expect(violations).toEqual([
+      { namespace: 'accountSwitcher', actualCount: 0, minExpected: 7 },
+      { namespace: 'activityLog', actualCount: 0, minExpected: 10 },
+      { namespace: 'agentPerformance', actualCount: 0, minExpected: 9 },
       { namespace: 'agentRuns', actualCount: 0, minExpected: 55 },
       { namespace: 'agents', actualCount: 0, minExpected: 150 },
       { namespace: 'cage', actualCount: 0, minExpected: 230 },
       { namespace: 'channelConnect', actualCount: 0, minExpected: 150 },
       { namespace: 'chats', actualCount: 0, minExpected: 200 },
+      { namespace: 'commandPalette', actualCount: 0, minExpected: 17 },
+      { namespace: 'common', actualCount: 0, minExpected: 25 },
       { namespace: 'content', actualCount: 0, minExpected: 500 },
       { namespace: 'contentRules', actualCount: 0, minExpected: 70 },
       { namespace: 'dashboard', actualCount: 0, minExpected: 45 },
@@ -355,12 +370,15 @@ describe('checkScopedNamespaceMinimums — 순수 함수', () => {
       { namespace: 'nav', actualCount: 0, minExpected: 100 },
       { namespace: 'onboarding', actualCount: 0, minExpected: 75 },
       { namespace: 'organization', actualCount: 0, minExpected: 190 },
+      { namespace: 'presence', actualCount: 0, minExpected: 10 },
       { namespace: 'pricingPlans', actualCount: 0, minExpected: 125 },
       { namespace: 'recruiter', actualCount: 0, minExpected: 100 },
       { namespace: 'settings', actualCount: 0, minExpected: 450 },
+      { namespace: 'sprints', actualCount: 0, minExpected: 70 },
       { namespace: 'standup', actualCount: 0, minExpected: 100 },
       { namespace: 'storage', actualCount: 0, minExpected: 70 },
       { namespace: 'supportWidget', actualCount: 0, minExpected: 20 },
+      { namespace: 'teamActivity', actualCount: 0, minExpected: 16 },
       { namespace: 'usage', actualCount: 0, minExpected: 60 },
     ]);
   });
@@ -368,11 +386,16 @@ describe('checkScopedNamespaceMinimums — 순수 함수', () => {
   it('⭐네임스페이스가 있지만 leaf가 하한 밑이면(부분 삭제·오염) 위반을 낸다', () => {
     const violations = checkScopedNamespaceMinimums({ chats: { a: 'x', b: 'y' } }); // 2개뿐, 나머지는 아예 없음
     expect(violations).toEqual([
+      { namespace: 'accountSwitcher', actualCount: 0, minExpected: 7 },
+      { namespace: 'activityLog', actualCount: 0, minExpected: 10 },
+      { namespace: 'agentPerformance', actualCount: 0, minExpected: 9 },
       { namespace: 'agentRuns', actualCount: 0, minExpected: 55 },
       { namespace: 'agents', actualCount: 0, minExpected: 150 },
       { namespace: 'cage', actualCount: 0, minExpected: 230 },
       { namespace: 'channelConnect', actualCount: 0, minExpected: 150 },
       { namespace: 'chats', actualCount: 2, minExpected: 200 },
+      { namespace: 'commandPalette', actualCount: 0, minExpected: 17 },
+      { namespace: 'common', actualCount: 0, minExpected: 25 },
       { namespace: 'content', actualCount: 0, minExpected: 500 },
       { namespace: 'contentRules', actualCount: 0, minExpected: 70 },
       { namespace: 'dashboard', actualCount: 0, minExpected: 45 },
@@ -387,12 +410,15 @@ describe('checkScopedNamespaceMinimums — 순수 함수', () => {
       { namespace: 'nav', actualCount: 0, minExpected: 100 },
       { namespace: 'onboarding', actualCount: 0, minExpected: 75 },
       { namespace: 'organization', actualCount: 0, minExpected: 190 },
+      { namespace: 'presence', actualCount: 0, minExpected: 10 },
       { namespace: 'pricingPlans', actualCount: 0, minExpected: 125 },
       { namespace: 'recruiter', actualCount: 0, minExpected: 100 },
       { namespace: 'settings', actualCount: 0, minExpected: 450 },
+      { namespace: 'sprints', actualCount: 0, minExpected: 70 },
       { namespace: 'standup', actualCount: 0, minExpected: 100 },
       { namespace: 'storage', actualCount: 0, minExpected: 70 },
       { namespace: 'supportWidget', actualCount: 0, minExpected: 20 },
+      { namespace: 'teamActivity', actualCount: 0, minExpected: 16 },
       { namespace: 'usage', actualCount: 0, minExpected: 60 },
     ]);
   });
@@ -587,6 +613,145 @@ describe('SCOPED_NAMESPACE_MIN_LEAF_COUNT — 하한이 실측치보다 낮게 �
     const effectiveKeys = resolveEffectiveScopedKeys(ko);
     const dashboardLeafCount = effectiveKeys.filter((k) => k.startsWith('dashboard.')).length;
     expect(dashboardLeafCount).toBeGreaterThanOrEqual(45);
+  });
+
+  it('실 ko.json의 presence leaf 개수가 하한(10) 이상이다(실측 12, story #3919)', () => {
+    const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
+    const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    const presenceLeafCount = effectiveKeys.filter((k) => k.startsWith('presence.')).length;
+    expect(presenceLeafCount).toBeGreaterThanOrEqual(10);
+  });
+
+  it('실 ko.json의 commandPalette leaf 개수가 하한(17) 이상이다(실측 21, story #3919)', () => {
+    const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
+    const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    const commandPaletteLeafCount = effectiveKeys.filter((k) => k.startsWith('commandPalette.')).length;
+    expect(commandPaletteLeafCount).toBeGreaterThanOrEqual(17);
+  });
+
+  it('실 ko.json의 accountSwitcher leaf 개수가 하한(7) 이상이다(실측 9, story #3919)', () => {
+    const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
+    const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    const accountSwitcherLeafCount = effectiveKeys.filter((k) => k.startsWith('accountSwitcher.')).length;
+    expect(accountSwitcherLeafCount).toBeGreaterThanOrEqual(7);
+  });
+
+  it('실 ko.json의 common leaf 개수가 하한(25) 이상이다(실측 30, story #3919)', () => {
+    const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
+    const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    const commonLeafCount = effectiveKeys.filter((k) => k.startsWith('common.')).length;
+    expect(commonLeafCount).toBeGreaterThanOrEqual(25);
+  });
+
+  it('실 ko.json의 activityLog leaf 개수가 하한(10) 이상이다(실측 13, story #3919)', () => {
+    const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
+    const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    const activityLogLeafCount = effectiveKeys.filter((k) => k.startsWith('activityLog.')).length;
+    expect(activityLogLeafCount).toBeGreaterThanOrEqual(10);
+  });
+
+  it('실 ko.json의 teamActivity leaf 개수가 하한(16) 이상이다(실측 20, story #3919)', () => {
+    const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
+    const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    const teamActivityLeafCount = effectiveKeys.filter((k) => k.startsWith('teamActivity.')).length;
+    expect(teamActivityLeafCount).toBeGreaterThanOrEqual(16);
+  });
+
+  it('실 ko.json의 agentPerformance leaf 개수가 하한(9) 이상이다(실측 11, story #3919)', () => {
+    const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
+    const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    const agentPerformanceLeafCount = effectiveKeys.filter((k) => k.startsWith('agentPerformance.')).length;
+    expect(agentPerformanceLeafCount).toBeGreaterThanOrEqual(9);
+  });
+
+  it('실 ko.json의 sprints leaf 개수가 하한(70) 이상이다(실측 86, story #3919)', () => {
+    const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
+    const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    const sprintsLeafCount = effectiveKeys.filter((k) => k.startsWith('sprints.')).length;
+    expect(sprintsLeafCount).toBeGreaterThanOrEqual(70);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// story #3919 — presence·commandPalette·accountSwitcher·common·activityLog·teamActivity·
+// agentPerformance·sprints 네임스페이스 전량(SCOPED_NAMESPACES 승격). onboarding/login/
+// storage/insightsBoard(#3901)와 정확히 같은 3형 검증(0건·양성대조·무관 PR no-op).
+// ---------------------------------------------------------------------------
+
+describe('실 ko.json — presence·commandPalette·accountSwitcher·common·activityLog·teamActivity·agentPerformance·sprints 네임스페이스 전량(story #3919 AC1/AC3)', () => {
+  const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
+  const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
+
+  it('SCOPED_KEYS+전 네임스페이스 전량(effective)의 ko.json 값에 합니다체 0건(story #3919 AC1 8네임스페이스=22키 전량 이관 확認)', () => {
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    expect(effectiveKeys.length).toBeGreaterThan(SCOPED_KEYS.length);
+    expect(findHonorificToneInScopedKeys(ko, effectiveKeys)).toEqual([]);
+  });
+
+  it('양성대조 — presence.empty를 원래 합니다체로 되돌리면 RED가 된다(namespace 전량 승격 증명)', () => {
+    expect(SCOPED_KEYS as readonly string[]).not.toContain('presence.empty');
+    const mutated = JSON.parse(JSON.stringify(ko)) as Record<string, unknown>;
+    (mutated.presence as Record<string, unknown>).empty = '표시할 에이전트가 없습니다';
+    const effectiveKeys = resolveEffectiveScopedKeys(mutated);
+    const findings = findHonorificToneInScopedKeys(mutated, effectiveKeys);
+    expect(findings).toContainEqual({ key: 'presence.empty', matches: ['습니다'], value: '표시할 에이전트가 없습니다' });
+  });
+
+  it('양성대조 — accountSwitcher.switchFailed를 원래 합니다체로 되돌리면 RED가 된다(namespace 전량 승격 증명)', () => {
+    expect(SCOPED_KEYS as readonly string[]).not.toContain('accountSwitcher.switchFailed');
+    const mutated = JSON.parse(JSON.stringify(ko)) as Record<string, unknown>;
+    (mutated.accountSwitcher as Record<string, unknown>).switchFailed = '계정 전환에 실패했습니다. 다시 시도해 주세요.';
+    const effectiveKeys = resolveEffectiveScopedKeys(mutated);
+    const findings = findHonorificToneInScopedKeys(mutated, effectiveKeys);
+    expect(findings).toContainEqual({ key: 'accountSwitcher.switchFailed', matches: ['습니다'], value: '계정 전환에 실패했습니다. 다시 시도해 주세요.' });
+  });
+
+  it('양성대조 — teamActivity.emptyTitle을 원래 합니다체로 되돌리면 RED가 된다(namespace 전량 승격 증명)', () => {
+    expect(SCOPED_KEYS as readonly string[]).not.toContain('teamActivity.emptyTitle');
+    const mutated = JSON.parse(JSON.stringify(ko)) as Record<string, unknown>;
+    (mutated.teamActivity as Record<string, unknown>).emptyTitle = '아직 활동이 없습니다';
+    const effectiveKeys = resolveEffectiveScopedKeys(mutated);
+    const findings = findHonorificToneInScopedKeys(mutated, effectiveKeys);
+    expect(findings).toContainEqual({ key: 'teamActivity.emptyTitle', matches: ['습니다'], value: '아직 활동이 없습니다' });
+  });
+
+  // 양성대조(ㅂ니다 계열) — common.upgradeRequired("필요합니다")로 NFD 처방이 이 여덟
+  // 네임스페이스 승격에서도 실제로 작동하는지 확認(습니다 리터럴이 아닌 자리).
+  it('양성대조 — common.upgradeRequired(ㅂ니다 계열)를 원래 합니다체로 되돌리면 RED가 된다', () => {
+    expect(SCOPED_KEYS as readonly string[]).not.toContain('common.upgradeRequired');
+    const mutated = JSON.parse(JSON.stringify(ko)) as Record<string, unknown>;
+    (mutated.common as Record<string, unknown>).upgradeRequired = '업그레이드가 필요합니다';
+    const effectiveKeys = resolveEffectiveScopedKeys(mutated);
+    const findings = findHonorificToneInScopedKeys(mutated, effectiveKeys);
+    expect(findings).toContainEqual({ key: 'common.upgradeRequired', matches: ['ㅂ니다'], value: '업그레이드가 필요합니다' });
+  });
+
+  it('무관 PR no-op — 8 네임스페이스 밖·SCOPED_KEYS 밖의 실 합니다체 키는 namespace 전량 승격 뒤에도 안 본다', () => {
+    const outOfScopeValue = (ko.board as Record<string, unknown> | undefined)?.epicSwimlaneLoadError;
+    expect(typeof outOfScopeValue).toBe('string');
+    expect(outOfScopeValue as string).toMatch(/습니다|ㅂ니다|십시오/);
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    expect(effectiveKeys).not.toContain('board.epicSwimlaneLoadError');
+    expect(findHonorificToneInScopedKeys(ko, effectiveKeys)).toEqual([]);
+  });
+
+  // story #3919 — presence.panelTitle·fabLabelWorking의 영문 「presence」 낱말 제거 확認
+  // (§⑤: ko 화면에 코드/영문 낱말 0). 「팀 현황」으로 통일.
+  it('presence.panelTitle·fabLabelWorking에 더는 영문 「presence」가 없다(§⑤ 낱말 축)', () => {
+    expect(ko.presence).toBeDefined();
+    const p = ko.presence as Record<string, unknown>;
+    expect(p.panelTitle).not.toMatch(/presence/i);
+    expect(p.fabLabelWorking).not.toMatch(/presence/i);
+    expect(p.panelTitle).toBe('팀 현황');
+    expect(p.fabLabelWorking).toBe('팀 현황 · {count}명 작업 중');
   });
 });
 
