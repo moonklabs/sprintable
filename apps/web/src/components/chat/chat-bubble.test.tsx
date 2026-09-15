@@ -750,7 +750,8 @@ describe('ChatBubble — story #2604 P2 결재 요청(approval_target) 카드', 
     await act(async () => {
       root.render(wrap(<ChatBubble message={approvalMessage} isMine={false} />));
     });
-    expect(container.textContent).toContain('승인할 권한이 없습니다');
+    // story #3899 — 리터럴 재-pin 대신 ko.json 값을 읽어 대조(어조 전환마다 깨지는 걸 막는다).
+    expect(container.textContent).toContain(koMessages.cage.gateReadonlyNotAuthorized);
     expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent?.includes('승인'))).toBe(false);
   });
 

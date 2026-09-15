@@ -135,8 +135,10 @@ describe('BoostExecutionControl — story #3806(Phase3·3-2 PR5, 유나 §절 §
     const trigger = document.body.querySelector('[data-testid="boost-pause-trigger"]') as HTMLButtonElement;
     await act(async () => { trigger.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
+    // story #3899 — 리터럴 재-pin 대신 ko.json 값을 읽어 대조(어조 전환마다 이 테스트가
+    // 깨지는 걸 막는다 — cage.boostExecutionPauseConfirmDescription 자체가 §⑤ 스코프 키).
     expect(document.body.querySelector('[data-testid="boost-pause-confirm-dialog"]')?.textContent)
-      .toContain('홍보를 중지하면 이후 광고비가 발생하지 않습니다');
+      .toContain(koMessages.cage.boostExecutionPauseConfirmDescription);
   });
 
   it('⭐확認 클릭 → POST .../pause 호출 뒤 재조회로 「중지됨」으로 전환된다', async () => {
@@ -306,7 +308,9 @@ describe('BoostExecutionControl — story #3806(Phase3·3-2 PR5, 유나 §절 §
       await act(async () => { btn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
       await flush();
 
-      expect(document.body.querySelector('[data-testid="boost-spend-refresh-error"]')?.textContent).toBe('240초 뒤 다시 시도할 수 있습니다.');
+      // story #3899 — ko.json 값(템플릿)을 읽어 {seconds} 치환 후 대조.
+      expect(document.body.querySelector('[data-testid="boost-spend-refresh-error"]')?.textContent)
+        .toBe(koMessages.cage.boostExecutionSpendRefreshRateLimited.replace('{seconds}', '240'));
     });
 
     it('429(Retry-After 헤더 없음) — 초를 지어내지 않고 "잠시 뒤" 문구로 물러난다', async () => {
@@ -323,7 +327,9 @@ describe('BoostExecutionControl — story #3806(Phase3·3-2 PR5, 유나 §절 §
       await act(async () => { btn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
       await flush();
 
-      expect(document.body.querySelector('[data-testid="boost-spend-refresh-error"]')?.textContent).toBe('잠시 뒤 다시 시도할 수 있습니다.');
+      // story #3899 — ko.json 값을 읽어 대조.
+      expect(document.body.querySelector('[data-testid="boost-spend-refresh-error"]')?.textContent)
+        .toBe(koMessages.cage.boostExecutionSpendRefreshRateLimitedUnknown);
     });
 
     it('409(ADS_BOOST_NOT_STARTED 등 generic) — 공용 에러 문구', async () => {
