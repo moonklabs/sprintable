@@ -118,11 +118,15 @@ describe('isInsideContext — 접두 매칭', () => {
 // (c) 실사고 재현+회귀가드 — 배포 58을 일으킨 정확한 import(#3729 前 상태)를 합성 픽스처로
 // 재현한다. 현재 develop(3729 착지 뒤)은 이 위반이 없어야 한다는 것도 같이 고정.
 describe('scanRepository — 실 저장소 스캔(현재 develop 기준)', () => {
+  // story #3902 — 부하 시 vitest 기본 5000ms를 넘길 수 있는 실 전수 스캔(측정: apps/web
+  // 전체 스위트 동시부하 재현 5회 = 276·278·325·241·274ms 중 최댓값 325ms → ×3 ≈ 975ms →
+  // 1000ms로 반올림). CI 리포터가 기본값이라 개별 테스트 duration이 로그에 안 남아 전체
+  // 스위트 동시부하 재현치를 대체 자로 씀.
   it('apps/web 비-테스트 파일 전수 스캔 — 컨텍스트 밖 상대 import 0건(#3729 핫픽스+#3731 이관 뒤)', () => {
     const { violations, scanned } = scanRepository();
     expect(scanned).toBeGreaterThan(1000); // 유나 실측 1,233개 규모 — 큰 폭 감소는 walk 로직 회귀 신호
     expect(violations).toEqual([]);
-  });
+  }, 1000);
 });
 
 // AC㉤(커밋③) — 주석 속 import 문자열은 stripComments()로 제외된다. 이 자체는 scanRepository
@@ -154,6 +158,8 @@ describe('AC㉤ — 주석 속 import 문자열은 위반으로 안 잡힌다(st
       if (existsSync(fixturePath)) unlinkSync(fixturePath);
     });
 
+    // story #3902 — 부하 시 vitest 기본 5000ms를 넘길 수 있는 실 전수 스캔(측정: 동시부하
+    // 재현 5회 = 285·288·386·265·254ms 중 최댓값 386ms → ×3 ≈ 1158ms → 1500ms로 반올림).
     it('apps/web 실경로에 주석 속 컨텍스트 밖 import를 심어도 위반으로 안 잡힌다', () => {
       writeFileSync(
         fixturePath,
@@ -161,6 +167,6 @@ describe('AC㉤ — 주석 속 import 문자열은 위반으로 안 잡힌다(st
       );
       const { violations } = scanRepository();
       expect(violations.some((v) => v.file.endsWith('__ac40-fixture.ts'))).toBe(false);
-    });
+    }, 1500);
   });
 });

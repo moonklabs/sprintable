@@ -81,6 +81,8 @@ describe('scanI18nMessages — story #3764 셀프테스트(i18n 값형)', () => 
 });
 
 describe('scanRepo — story #3764(실 트리 실행)', () => {
+  // story #3902 — 부하 시 vitest 기본 5000ms를 넘길 수 있는 실 전수 스캔(측정: 동시부하
+  // 재현 5회 = 621·930·852·963·809ms 중 최댓값 963ms → ×3 ≈ 2889ms → 3000ms로 반올림).
   it('실 트리(apps/web/src + ko/en.json) — JSX 조립형·i18n 값형 둘 다 0건(ALLOWLIST 제외), ALLOWLIST는 전부 실제로 걸린다', () => {
     const koMessages = JSON.parse(readFileSync(KO_PATH, 'utf8')) as Record<string, unknown>;
     const enMessages = JSON.parse(readFileSync(EN_PATH, 'utf8')) as Record<string, unknown>;
@@ -92,5 +94,5 @@ describe('scanRepo — story #3764(실 트리 실행)', () => {
     // (202870e0f 위 rebase) — 지금 남은 건 탭 라벨 영구 예외 2키(i18n)뿐, JSX는 0.
     expect(jsxAllowlistHit.size).toBe(0);
     expect(i18nAllowlistHit.size).toBe(2);
-  });
+  }, 3000);
 });

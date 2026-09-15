@@ -141,6 +141,8 @@ describe('scanRepo — story #3770(실 트리 실행)', () => {
   // ALLOWLIST에 없다). CHANGES(PO 2026-09-14 13:36Z) — 키를 file:line에서
   // file::field::표현식 텍스트(+개수)로 교체(muted-on-tint GRANDFATHER_BASELINE 동형,
   // compareToBaseline으로 정확 일치 판정).
+  // story #3902 — 부하 시 vitest 기본 5000ms를 넘길 수 있는 실 전수 스캔(측정: 동시부하
+  // 재현 5회 = 620·860·871·1085·721ms 중 최댓값 1085ms → ×3 ≈ 3255ms → 3500ms로 반올림).
   it('실 트리(apps/web/src) — ALLOWLIST와 정확히 일치(신규 0·stale 0)', () => {
     const { allRefs, fileCount, actualCounts } = scanRepo(SRC_ROOT);
     expect(fileCount).toBeGreaterThan(400);
@@ -148,7 +150,7 @@ describe('scanRepo — story #3770(실 트리 실행)', () => {
     const { increased, stale } = compareToBaseline(actualCounts, ALLOWLIST);
     expect(increased).toEqual([]);
     expect(stale).toEqual([]);
-  });
+  }, 3500);
 });
 
 // story #3878(§⑤ 낱말 드리프트) — 실 파일 뮤테이션(합성 표본 아님, AC2 명시): 7곳 中 대표

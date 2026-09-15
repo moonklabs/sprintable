@@ -60,7 +60,9 @@ describe('scanContent — AST literal extraction only (story #2710 lesson)', () 
 });
 
 describe('repo state (story #2420 destructive pilot)', () => {
+  // story #3902 — 부하 시 vitest 기본 5000ms를 넘길 수 있는 실 전수 스캔(측정: 동시부하
+  // 재현 5회 = 1013·1183·1055·1468·1394ms 중 최댓값 1468ms → ×3 ≈ 4404ms → 4500ms로 반올림).
   it('has zero closed-family subtle alpha bg across src (destructive fully migrated to bg-destructive-tint)', () => {
     expect(scanRepo(SRC_ROOT)).toEqual([]);
-  });
+  }, 4500);
 });

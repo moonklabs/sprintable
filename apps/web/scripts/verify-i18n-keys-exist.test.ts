@@ -522,6 +522,14 @@ describe('scanFileContent — story #5ead8723 CHANGES⑤⑥(커스텀 훅이 반
 // ⭐양성대조(story #5ead8723 판별) — develop HEAD 실 소스에 대해 이 가드가 실제로 통과하는지,
 // 그리고 뮤테이션(존재하지 않는 키 삽입)을 걸면 실제로 RED가 되는지 왕복 확認한다.
 describe('scanRepo — 양성대조(실 develop 소스)', () => {
+  // story #3902 — develop CI run 34916994911(head f5d3ca388d)에서 이 테스트가 vitest
+  // 기본 5000ms를 넘겨 RED(러너 부하 — 같은 트리 내용의 다른 PR head는 초록, 비결정).
+  // 실측(로컬, apps/web 전체 스위트 `vitest run --reporter=verbose`를 5회 반복해 동시부하
+  // 재현 — CI가 기본 리포터+`tail -80`이라 개별 테스트 duration이 로그에 안 남아 이걸 대체
+  // 자로 씀): 974ms(격리 단독 실행, 무부하) · 전체스위트 동시부하 재현 5회 = 2102ms·1280ms·
+  // 4683ms·4498ms·6692ms(최댓값, 5000ms 초과 재현). 최댓값 6692ms × 3 ≈ 20076ms → 21000ms로
+  // 반올림(잡 timeout-minutes 안에서 여유). 양성대조=1ms로 낮추면 RED 재현 확認 뒤 복원(PR
+  // 본문 서술).
   it('⭐실 소스 전수 스캔 — 리터럴 키 전부 ko/en에 실존(누락 0)·ko↔en 말단 키 집합 동일', () => {
     const koMessages = JSON.parse(readFileSync(KO_PATH, 'utf8'));
     const enMessages = JSON.parse(readFileSync(EN_PATH, 'utf8'));
@@ -541,7 +549,7 @@ describe('scanRepo — 양성대조(실 develop 소스)', () => {
     const enOnly = [...enLeaves].filter((k) => !koLeaves.has(k));
     expect(koOnly, JSON.stringify(koOnly.slice(0, 10))).toEqual([]);
     expect(enOnly, JSON.stringify(enOnly.slice(0, 10))).toEqual([]);
-  });
+  }, 21000);
 
   // ⭐뮤테이션 킬 — 실 소스에 «존재하지 않는 키」를 참조하는 파일 하나를 섞어 넣으면(문자열
   // 픽스처로 scanFileContent 직접 호출·resolveMessageKey 대조) 실제로 걸리는지 증명.
