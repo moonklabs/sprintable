@@ -82,31 +82,27 @@ import ts from 'typescript';
 // 이 허용목록에서 걷는다 — 지금은 "국문 법무 문서라 정당한 예외"지만 미래엔 그 전제가
 // 사라진다는 뜻. internal-dogfood는 무렌스 내부 전용이라 만료 조건이 다르다(별건).
 // story #3776(1층A, PO 判 2026-09-10 05:41Z) — `verify-email/page.tsx`·`set-password/confirm/page.tsx`
-// 둘 다 story #2484/#2485(유나 design 確認, 2026-08-06)로 **의도적으로 next-intl 미배선**이다
-// (두 파일 자신의 머리 주석 참조 — "#2484는 raw 서버 노출 제거만 스코프라 여기서 전면 i18n
-// 전환은 안 함"). baseline 그랜드파더로 개별 텍스트만 얼리는 대신 파일째 EXEMPT하는 이유 —
-// 이 페이지들에 새로 추가되는 한국어 텍스트도(아직 존재하지 않는 것까지) 이 결정 아래
-// 똑같이 유예 대상이라, 개별 baseline 항목으로는 "새 텍스트가 늘 때마다 baseline을 또
-// 늘려야" 하는데 그건 이 결정의 성격(파일 전체가 미배선)과 안 맞는다.
+// 둘 다 story #2484/#2485(유나 design 確認, 2026-08-06)로 **의도적으로 next-intl 미배선**
+// 이었다(그 결정 당시 두 파일 자신의 머리 주석 — "#2484는 raw 서버 노출 제거만 스코프라
+// 여기서 전면 i18n 전환은 안 함"). baseline 그랜드파더로 개별 텍스트만 얼리는 대신 파일째
+// EXEMPT했던 이유 — 이 페이지들에 새로 추가되는 한국어 텍스트도(아직 존재하지 않는 것까지)
+// 이 결정 아래 똑같이 유예 대상이라, 개별 baseline 항목으로는 "새 텍스트가 늘 때마다
+// baseline을 또 늘려야" 하는데 그건 이 결정의 성격(파일 전체가 미배선)과 안 맞았다.
 //
-// story #3776(유나 06:09Z 정정) — 이 예외가 덮는 건 「시작하기」 1건이 아니라 **20건**
-// 이다(`set-password/confirm/page.tsx` 11건 + `verify-email/page.tsx` 9건, 고정 rev
-// `d0e4f12d7` 실측) — 파일 하나가 통째로 미배선이면 그 안의 모든 한글이 같이 유예된다는
-// 뜻이라 수가 작지 않다. 다음 사람이 「작은 예외」로 안 읽도록 수를 여기 박아 둔다.
-//
-// **만료** — #2485(auth·온보딩 경로 next-intl 배선)가 착지하면 두 파일을 여기서 걷는다.
-// 그때 baseline이 335 → 355로 돌아온다(20건이 baseline grandfather로 복귀). 걷는 것을
-// 잊지 않도록 `computeDeadExemptFiles()`(아래)가 main()에서 자가검출한다 — 배선이 끝나
-// 그 파일의 한글 히트가 0이 되는 순간 이 가드가 스스로 RED로 잡는다(baseline stale
-// 검사와 동형 성질 — EXEMPT_FILES는 예전엔 이 성질이 없어 조용히 영영 안 걷힐 위험이
-// 있었다).
+// story #3921(2026-09-15) — **만료 확認**. 그라운딩 中 "next-intl 미배선"이라는 전제
+// 자체가 틀렸다는 게 드러났다 — `src/app/layout.tsx`가 `NextIntlClientProvider`를
+// 전역(모든 페이지 공통) 제공 중이라 `useTranslations()`는 애초에 항상 됐다(login/
+// register/page.tsx 등 형제 페이지가 실제로 그렇게 쓰고 있었다). #2484/#2485 당시의
+// "미배선" 판단은 사실 오판이었던 것으로 보인다 — 이 스토리가 두 페이지를 실제로
+// i18n 전환(verifyEmail.*·setPassword.* 네임스페이스, §⑤ 해요체)해 `computeDeadExemptFiles()`
+// 자가검출이 정확히 예견한 대로 두 파일의 한글 히트가 0이 됐다 — 여기서 EXEMPT_FILES를
+// 건는다(baseline이 그 20건만큼 늘어난 것으로 self-expire·grandfather로 복귀 0건, 새
+// 코드는 전부 i18n 키라 baseline에 안 실린다).
 export const EXEMPT_FILES = new Set<string>([
   'app/internal-dogfood/page.tsx',
   'app/terms/page.tsx',
   'app/privacy/page.tsx',
   'app/refund-policy/page.tsx',
-  'app/verify-email/page.tsx',
-  'app/set-password/confirm/page.tsx',
 ]);
 
 const HANGUL_RE = /[가-힣]/;

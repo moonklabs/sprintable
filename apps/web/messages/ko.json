@@ -1207,6 +1207,30 @@
     "alreadyHaveAccount": "이미 계정이 있으신가요?",
     "signIn": "로그인"
   },
+  "verifyEmail": {
+    "invalidLink": "유효하지 않은 인증 링크예요.",
+    "verifying": "이메일 인증 중...",
+    "verifiedSuccess": "이메일 인증이 완료됐어요.",
+    "linkExpired": "인증 링크가 유효하지 않거나 만료됐어요.",
+    "userNotFound": "사용자를 찾을 수 없어요.",
+    "verifyFailed": "인증에 실패했어요.",
+    "verifyError": "인증 중 오류가 발생했어요.",
+    "startButton": "시작하기",
+    "backToLogin": "로그인으로 돌아가기"
+  },
+  "setPassword": {
+    "invalidLink": "유효하지 않은 확인 링크예요.",
+    "settingUp": "비밀번호 설정 중...",
+    "successMessage": "비밀번호가 설정됐어요. 새 비밀번호로 로그인해 주세요. 보안을 위해 기존에 로그인되어 있던 다른 기기·세션은 모두 로그아웃됐어요.",
+    "alreadySet": "이미 비밀번호가 설정돼 있어요.",
+    "linkExpired": "확인 링크가 유효하지 않거나 만료됐어요.",
+    "userNotFound": "사용자를 찾을 수 없어요.",
+    "setFailed": "비밀번호 설정에 실패했어요.",
+    "processError": "처리 중 오류가 발생했어요.",
+    "loginButton": "로그인하기",
+    "retryLink": "다시 요청하기(로그인 후 설정에서)",
+    "backToLogin": "로그인으로 돌아가기"
+  },
   "onboarding": {
     "createOrg": "조직 만들기",
     "welcome": "Sprintable에 오신 것을 환영해요!",
