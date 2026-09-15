@@ -89,6 +89,17 @@ measured_at}}`(파싱 실패는 optional 생략, 새 리졸버 불요·payload �
    안전) 단독으로 좁히고, 담당자는 optional fields 행에서만 참조한다(기존에도
    optional이었음, 위치만 text에서 fields-only로 정리).
 
+## CHANGES 2차(PO PR#4298 재리뷰 2026-09-15 01:58Z) — 「출처」 raw slug 잔존
+CHANGES①(metric_unit)과 같은 결함 클래스를 「출처」 필드에서 놓쳤다 — ko/en 카드 둘 다
+"internal_ops" raw slug가 그대로 보였다(1차 캡처의 "raw slug 0 육안 확認"은 이 값을
+«코드 낱말»로 못 알아본 판정 오류 — 자는 "렌더가 되는가"가 아니라 "사용자에게 코드
+낱말이 보이는가"). outcome_scorer.py 그라운딩상 이 preset의 실 source 값은
+"internal_ops"/"ga4" 둘뿐인 닫힌 집합 — hypotheses 네임스페이스의 기존
+`sourceInternal`/`sourceGa4` 낱말(hypothesis-form.tsx 등 4개 소비처가 이미 씀, 신규
+어간 0)을 재사용한다. 「출처」 field value를 `{{payload.source}}`에서
+`{{label.source_label}}`(optional)로 교체 — 미등재 값은 metric_unit과 동일 원칙으로
+필드 행 자체를 생략한다(지어내지 않는다).
+
 org별 block_template 복제/자동 생성 메커니즘 0건(0375/0376 실측 재확認, 변화 없음).
 """
 from __future__ import annotations
@@ -122,7 +133,7 @@ _TEMPLATES: dict[str, dict] = {
             {"type": "fields", "fields": [
                 {"label": "{{t.goalLabel}}", "value": "{{label.goal_target}}", "optional": True},
                 {"label": "{{t.unitLabel}}", "value": "{{label.metric_unit_label}}", "optional": True},
-                {"label": "{{t.sourceLabel}}", "value": "{{payload.source}}"},
+                {"label": "{{t.sourceLabel}}", "value": "{{label.source_label}}", "optional": True},
                 {"label": "{{t.measuredAtLabel}}", "value": "{{label.measured_at}}", "optional": True},
             ]},
         ],

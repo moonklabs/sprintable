@@ -1167,7 +1167,7 @@ async def _work_item_ref_token(
 async def _render_event_notification_member_ref(
     db: AsyncSession, *, org_id: uuid.UUID, member_id: uuid.UUID,
 ) -> dict | None:
-    """story #3893(PO 確定 2026-09-14 20:0x) — payload의 raw member UUID(예:
+    """story #3893(PO 確定 2026-09-14 20:07Z) — payload의 raw member UUID(예:
     `assignee_member_id`)를 표시 이름으로. `_render_event_notification_work_item_ref`와
     동형 계약(dict found-판별, 텍스트를 여기서 굽지 않는다)이되, member는 항상 단일
     리졸버(TeamMember/OrgMember, `resolve_member_display_name` 기존 SSOT 재사용 — 새

@@ -20,6 +20,19 @@ import { formatLocaleDateTime } from '@/lib/i18n';
 // 이름만) — 이 목록 밖은 GA4 소스의 임의 문자열이라 번역 대상이 아니다(단위 생략).
 const METRIC_UNIT_KEYS = ['velocity', 'backlog_remaining', 'progress', 'completion_pct'] as const;
 
+// story #3893 CHANGES(PO PR#4298 2차 리뷰 2026-09-15) — preset.goal.measured의
+// 「출처」 필드가 `{{payload.source}}`(raw slug "internal_ops"/"ga4")를 그대로 노출했다
+// (metric_unit과 같은 클래스 결함 — 「raw slug 0」은 코드 낱말이 사용자에게 보이는지가
+// 기준이지, 렌더 성공 여부가 아니다). outcome_scorer.py 그라운딩상 이 preset의 실
+// source 값은 "internal_ops"/"ga4" 둘뿐(닫힌 집합) — hypotheses 네임스페이스의 기존
+// sourceInternal/sourceGa4 낱말(hypothesis-form.tsx 등 4곳이 이미 씀, 신규 어간 0)을
+// 그대로 재사용한다. 미등재 값은 라벨을 안 채워 optional 필드 생략(metric_unit과 동일
+// 원칙 — 지어내지 않는다).
+const SOURCE_LABEL_KEYS: Record<string, 'sourceInternal' | 'sourceGa4'> = {
+  internal_ops: 'sourceInternal',
+  ga4: 'sourceGa4',
+};
+
 // story #3881(customer-zero) — story status_changed preset의 {{label.from_status}}/
 // {{label.to_status}} 해소용. story-detail-panel.tsx:846의 statusKeyMap과 동형(그 파일은
 // export 안 해 재사용 불가 — 이 저장소 기존 관례가 이미 소비처마다 로컬 복제, kanban-
@@ -183,6 +196,7 @@ export function EventBlockCard({ template, payload, refs }: EventBlockCardProps)
   const tDashboard = useTranslations('dashboard');
   const tEventCard = useTranslations('eventCard');
   const tOutcomeLoop = useTranslations('outcomeLoop');
+  const tHypotheses = useTranslations('hypotheses');
   const locale = useLocale();
   const { currentMemberType, role, orgId } = useDashboardContext();
   // story #3287(도메인탈고정) — org 커스텀 status 라벨 오버라이드. statusLabel()이 undefined면
@@ -300,6 +314,14 @@ export function EventBlockCard({ template, payload, refs }: EventBlockCardProps)
   if (typeof measuredAtRaw === 'string') {
     const formatted = formatLocaleDateTime(measuredAtRaw, locale);
     if (formatted) labels['measured_at'] = formatted;
+  }
+
+  // story #3893 CHANGES(PO PR#4298 2차 리뷰 2026-09-15) — source(raw slug "internal_ops"/
+  // "ga4")를 hypotheses.sourceInternal/sourceGa4 기존 낱말로. 미등재는 optional 생략
+  // (metric_unit과 동일 원칙).
+  const source = payload['source'];
+  if (typeof source === 'string' && source in SOURCE_LABEL_KEYS) {
+    labels['source_label'] = tHypotheses(SOURCE_LABEL_KEYS[source]!);
   }
 
   // story #3884 AC2 — preset.gate.verdict 본문 접속어. PO 구조 결정: 리터럴 「게이트」를

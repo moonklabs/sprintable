@@ -246,7 +246,7 @@ const GOAL_MEASURED_0377 = {
     { type: 'fields', fields: [
       { label: '{{t.goalLabel}}', value: '{{label.goal_target}}', optional: true },
       { label: '{{t.unitLabel}}', value: '{{label.metric_unit_label}}', optional: true },
-      { label: '{{t.sourceLabel}}', value: '{{payload.source}}' },
+      { label: '{{t.sourceLabel}}', value: '{{label.source_label}}', optional: true },
       { label: '{{t.measuredAtLabel}}', value: '{{label.measured_at}}', optional: true },
     ] },
   ],
@@ -419,6 +419,11 @@ describe('story #3886(가드) — EventBlockCard 실 소비 렌더(AC1)', () => 
     };
     await act(async () => { root.render(wrap(<ChatBubble message={message} isMine={false} eventDefinitionsByKey={EVENT_CATALOG} />)); });
     expectNoMissingMarkers(container.textContent ?? '');
+    // story #3893 CHANGES 2차(PO PR#4298 2차 리뷰) — 「출처」가 raw slug("internal_ops")
+    // 그대로 새던 결함의 회귀 고정: 매핑된 낱말(hypotheses.sourceInternal="내부")만
+    // 보이고 raw slug는 0이어야 한다.
+    expect(container.textContent).toContain('내부');
+    expect(container.textContent).not.toContain('internal_ops');
   });
 
   it('goal.measured — 목표 못 찾음(found:false)·미등재 단위(GA4 임의값)·측정시각 부재 전부 optional 생략 ⟨missing⟩ 0, en 로케일', async () => {
@@ -433,6 +438,23 @@ describe('story #3886(가드) — EventBlockCard 실 소비 렌더(AC1)', () => 
     await act(async () => { root.render(wrapEn(<ChatBubble message={message} isMine={false} eventDefinitionsByKey={EVENT_CATALOG} />)); });
     expectNoMissingMarkers(container.textContent ?? '');
     expect(container.textContent).not.toContain('sessions');
+    // 등재 source(ga4)는 en에서도 매핑된 낱말("GA4")만 보인다(raw slug와 우연히 같은
+    // 문자열이라 별도 not.toContain은 의미 없음 — 매핑 낱말 출현 자체를 양성대조).
+    expect(container.textContent).toContain('GA4');
+  });
+
+  it('goal.measured — source 미등재(닫힌 집합 밖 임의값)는 optional 생략 ⟨missing⟩ 0, raw slug 0', async () => {
+    const message: ChatMessage = {
+      ...baseMessage, content: '[이벤트] preset.goal.measured', sender_type: 'agent',
+      event: {
+        event_key: 'preset.goal.measured',
+        payload: { goal_id: 'G-4', metric_value: 3, source: 'unknown_source_xyz' },
+        refs: {},
+      },
+    };
+    await act(async () => { root.render(wrap(<ChatBubble message={message} isMine={false} eventDefinitionsByKey={EVENT_CATALOG} />)); });
+    expectNoMissingMarkers(container.textContent ?? '');
+    expect(container.textContent).not.toContain('unknown_source_xyz');
   });
 
   it('goal.measured — refs.goal 키 자체 부재(구버전 캐시)도 optional 생략 ⟨missing⟩ 0', async () => {
@@ -446,6 +468,7 @@ describe('story #3886(가드) — EventBlockCard 실 소비 렌더(AC1)', () => 
     };
     await act(async () => { root.render(wrap(<ChatBubble message={message} isMine={false} eventDefinitionsByKey={EVENT_CATALOG} />)); });
     expectNoMissingMarkers(container.textContent ?? '');
+    expect(container.textContent).toContain('내부');
   });
 });
 
