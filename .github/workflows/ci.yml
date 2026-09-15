@@ -77,24 +77,22 @@ jobs:
           CHANGED="$(git diff --name-only "${BASE_SHA}...${HEAD_SHA}")"
           echo "changed files:"
           echo "${CHANGED}"
-          # 이 allowlist에 «전부» 속하는 diff만 백엔드-무관으로 본다 — 모르는 경로가 하나라도
-          # 있으면 fail-closed(백엔드 전량 실행). packages/{db,shared,core-storage,storage-api}
-          # 포함 packages/* 전부 TS-only(package.json+tsconfig뿐, .py 파일 0개 확認,
-          # 2026-08-16) — backend Python 런타임과 언어 경계로 격리돼 있다. backend/·ee/·
-          # infra/·supabase/·connectors/·scripts/(루트)·.github/는 이 allowlist 밖(모르면
-          # 포함 안 함 — 특히 .github/는 이 워크플로 자신의 안전을 위해 항상 백엔드-관련으로 본다).
-          NON_SAFE="$(printf '%s\n' "${CHANGED}" \
-            | grep -Ev '^docs/|\.md$|^apps/web/|^packages/' || true)"
-          if [ -z "${NON_SAFE}" ] && [ -n "${CHANGED}" ]; then
-            echo "backend_relevant=false" >> "$GITHUB_OUTPUT"
-            echo "전 변경 파일이 백엔드-무관 allowlist(docs/·*.md·apps/web/·packages/) 안 — 백엔드 무거운 잡 skip 대상."
-          else
+
+          # story #3897(2026-09-15, 3889 사고 처방) — 판정 로직 전체(allowlist 후보 +
+          # backend/tests/**가 «코드로» 참조하는 FE 경로 접촉 여부)는 check_backend_relevant_
+          # diff.sh로 뽑아 독립 테스트한다(check_realtime_relevant_diff.sh와 같은 이유 —
+          # 임시 git repo만으로 단위 검증). 4294(3889)가 apps/web/messages/ko.json을 바꿨는데
+          # test_3815_youtube_publish.py가 그 파일을 직접 읽어 BE i18n_catalog와 대조하는데도
+          # 이 job의 예전 판정(allowlist 후보만 봄)이 그 참조를 몰라 develop CI에서만 RED가
+          # 터졌다(PR 자체 CI는 스킵 때문에 success). exit 0=관련(전량 실행)·exit 1=무관(skip).
+          set +e
+          bash backend/scripts/check_backend_relevant_diff.sh "${BASE_SHA}" "${HEAD_SHA}"
+          SCOPE_RC=$?
+          set -e
+          if [ "${SCOPE_RC}" -eq 0 ]; then
             echo "backend_relevant=true" >> "$GITHUB_OUTPUT"
-            echo "allowlist 밖 변경 있음(또는 변경 0건) — fail-closed로 백엔드 전량 실행."
-            if [ -n "${NON_SAFE}" ]; then
-              echo "allowlist 밖 파일:"
-              echo "${NON_SAFE}"
-            fi
+          else
+            echo "backend_relevant=false" >> "$GITHUB_OUTPUT"
           fi
 
           # story #3273(CI사각) — support-gateway는 backend와 반대 방향 필터가 안전하다.
