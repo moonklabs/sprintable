@@ -67,7 +67,6 @@
     "pricingPlans.tierName_free",
     "pricingPlans.tierName_starter",
     "pricingPlans.tierName_team",
-    "recruiter.deployedMember",
     "recruiter.equipMcpConfigLabel",
     "recruiter.scopeCore",
     "settings.agentMcpTitle",
