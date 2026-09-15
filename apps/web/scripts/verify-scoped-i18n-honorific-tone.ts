@@ -178,6 +178,33 @@ export function countAllLeaves(root: Record<string, unknown>): number {
   return flattenAllLeafKeys(root).length;
 }
 
+export interface UnsupportedLeafTypeViolation {
+  key: string;
+  type: string;
+}
+
+/** `flattenAllLeafKeys`와 똑같은 walk이되, 거기선 조용히 건너뛰던 자리(배열 등 문자열도
+ * 객체도 아닌 leaf)를 여기선 위반으로 기록한다 — story #3932 AC6(카디르 #4335 리뷰 발견):
+ * 배열 값이 `Array.isArray`에 걸려 재귀 walk도, string 분기도 안 타 통째로 무시되던 fail-open
+ * 자리였다. 톤 스캔 스코프 밖으로 조용히 빠지는 leaf가 있으면 안 되므로 RED로 승격한다. */
+export function findUnsupportedLeafTypes(root: Record<string, unknown>): UnsupportedLeafTypeViolation[] {
+  const violations: UnsupportedLeafTypeViolation[] = [];
+  function walk(obj: Record<string, unknown>, prefix: string): void {
+    for (const [k, v] of Object.entries(obj)) {
+      const qualifiedKey = prefix ? `${prefix}.${k}` : k;
+      if (Array.isArray(v)) {
+        violations.push({ key: qualifiedKey, type: 'array' });
+      } else if (v !== null && typeof v === 'object') {
+        walk(v as Record<string, unknown>, qualifiedKey);
+      } else if (typeof v !== 'string') {
+        violations.push({ key: qualifiedKey, type: v === null ? 'null' : typeof v });
+      }
+    }
+  }
+  walk(root, '');
+  return violations;
+}
+
 /** story #3877~#3926 시절엔 "SCOPED_KEYS ∪ 승격된 네임스페이스"의 합집합이었다. story
  * #3927부터는 스코프 자체가 ko.json 전체라 이 함수는 `flattenAllLeafKeys`의 얇은 별칭이다
  * — 이름은 유지한다(per-story 전용 테스트 파일·이 파일 자신의 다른 axis 테스트가 이
@@ -410,6 +437,20 @@ function main(): void {
     console.error(
       `FAIL: ko.json 전체 leaf가 ${v.actualCount}개뿐(최소 ${v.minExpected}개 기대) — ` +
         '대량 삭제 또는 messages/ko.json 로더 고장이 의심된다(가드가 헛돌고 있을 수 있다).',
+    );
+    process.exit(1);
+  }
+
+  const unsupportedLeafTypes = findUnsupportedLeafTypes(ko);
+  if (unsupportedLeafTypes.length > 0) {
+    console.error(
+      `FAIL: ko.json에 지원하지 않는 leaf 타입 ${unsupportedLeafTypes.length}건 발견(문자열도 ` +
+        '객체도 아님 — 톤 스캔이 조용히 건너뛰는 자리다):',
+    );
+    for (const v of unsupportedLeafTypes) console.error(`  - ${v.key} [${v.type}]`);
+    console.error(
+      '\n→ i18n leaf 값은 문자열만 지원한다. 배열/숫자/불리언 등은 톤 검사를 우회하므로' +
+        ' 구조를 문자열로 고칠 것.',
     );
     process.exit(1);
   }
