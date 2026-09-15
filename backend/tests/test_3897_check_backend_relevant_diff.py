@@ -1,4 +1,4 @@
-"""story #3897 — check_backend_relevant_diff.sh(+extract_fe_paths_referenced_by_backend_tests.sh)
+"""story #3897 — check_backend_relevant_diff.sh(+extract_fe_paths_referenced_by_backend_tests.py)
 회귀가드.
 
 3889 사고(2026-09-14): PR 4294가 apps/web/messages/ko.json의 한 문구를 해요체로 바꿨는데,
@@ -7,10 +7,18 @@ ci.yml의 detect-changed-scope가 "FE-only PR"로 판단해 백엔드 pytest 레
 ko.json 파일을 직접 읽어 BE i18n_catalog 원문과 바이트 대조하는 파리티 테스트라, 경로 기반
 스킵이 그 참조를 몰라 develop CI에서만(머지된 뒤에야) RED가 터졌다.
 
-check_backend_relevant_diff.sh는 순수 git diff + backend/tests/**/*.py 코드 스캔 로직이라
-임시 git repo(backend/tests 안에 그 스캔 대상이 될 파일 몇 개만 있으면 됨)만으로 전체 판정
-경로(관련/무관/추출 실패 fail-closed)를 검증할 수 있다(cloudbuild·GitHub Actions 목업 불요
-— check_realtime_relevant_diff.sh 테스트와 같은 설계).
+CHANGES 1(페드루 PO 리뷰, 2026-09-15) — PO가 실 develop 트리에서 이 스크립트를 돌려
+os.path.join(dirname(__file__), "..", "..", "apps", "web", "src", ...) 콤마 세그먼트
+형태(여러 줄에 걸침) 4곳이 최초 버전(형태 ①②만)에서 «조용히» 빠지는 걸 발견 — 이 카드가
+막으려는 바로 그 클래스가 스크립트 자신 안에서 재발했다. 처방: 형태 ③(os.path.join 콤마
+조인) 추가 + 완전성 fail-closed(파일에 apps/packages 리터럴이 있는데 3형 다 0건이면
+exit 1 — "4번째 미지의 형태"로 보고 조용히 넘어가지 않는다).
+
+check_backend_relevant_diff.sh/extract_fe_paths_referenced_by_backend_tests.py는 순수
+git diff + backend/tests/**/*.py 코드 스캔 로직이라 임시 git repo(backend/tests 안에 그
+스캔 대상이 될 파일 몇 개만 있으면 됨)만으로 전체 판정 경로(관련/무관/추출 실패 fail-closed
+/완전성 위반 fail-closed)를 검증할 수 있다(cloudbuild·GitHub Actions 목업 불요 —
+check_realtime_relevant_diff.sh 테스트와 같은 설계).
 """
 from __future__ import annotations
 
@@ -19,7 +27,8 @@ import subprocess
 
 _SCRIPTS_DIR = os.path.join(os.path.dirname(__file__), "..", "scripts")
 _DECISION_SCRIPT = os.path.join(_SCRIPTS_DIR, "check_backend_relevant_diff.sh")
-_EXTRACT_SCRIPT = os.path.join(_SCRIPTS_DIR, "extract_fe_paths_referenced_by_backend_tests.sh")
+_EXTRACT_SCRIPT = os.path.join(_SCRIPTS_DIR, "extract_fe_paths_referenced_by_backend_tests.py")
+_REAL_BACKEND_TESTS_DIR = os.path.dirname(__file__)
 
 
 def _git(repo, *args):
@@ -78,12 +87,12 @@ def _run_decision(repo, base_sha, head_sha="HEAD"):
 
 def _run_extract(repo, test_root="backend/tests"):
     return subprocess.run(
-        ["bash", "backend/scripts/extract_fe_paths_referenced_by_backend_tests.sh", test_root],
+        ["python3", "backend/scripts/extract_fe_paths_referenced_by_backend_tests.py", test_root],
         cwd=str(repo), capture_output=True, text=True,
     )
 
 
-# ── extract_fe_paths_referenced_by_backend_tests.sh ─────────────────────────
+# ── extract_fe_paths_referenced_by_backend_tests.py — 형태 ①② ──────────────
 
 def test_extract_finds_single_string_literal_path(tmp_path):
     repo, _ = _init_repo(tmp_path)
@@ -120,9 +129,6 @@ def test_extract_ignores_unquoted_prose_mention(tmp_path):
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", "add prose-only file")
     proc = _run_extract(repo)
-    # base commit의 test_fake_i18n_parity.py가 실 참조를 내므로 0건은 아니지만, 이 산문
-    # 문장에서 "apps/web"이 «그 자체로 하나의 추출 결과»로 잡히지 않아야 한다(따옴표 리터럴
-    # 아님 — 실 참조인 apps/web/messages/ko.json만 나와야 한다).
     assert proc.returncode == 0, proc.stderr
     results = proc.stdout.splitlines()
     assert "apps/web" not in results
@@ -145,6 +151,96 @@ def test_extract_missing_test_root_is_fail_closed(tmp_path):
     repo, _ = _init_repo(tmp_path)
     proc = _run_extract(repo, test_root="backend/does-not-exist")
     assert proc.returncode == 1
+
+
+# ── extract_fe_paths_referenced_by_backend_tests.py — 형태 ③(CHANGES 1) ─────
+
+def test_extract_finds_os_path_join_comma_segments_multiline(tmp_path):
+    """⭐CHANGES 1 핵심 재현 — os.path.join(dirname(__file__), "..", "..", "apps", "web",
+    "src", ..., "billing-tab.tsx") 콤마 세그먼트(여러 줄에 걸침, PO가 실 develop
+    test_e_org_multi_s5_3_polar_checkout.py:146 등에서 실측한 형태 그대로)에서 ".."는
+    버리고 "apps"부터 재조립해 apps/web/src/ee/components/billing/billing-tab.tsx를
+    뽑아야 한다."""
+    repo, _ = _init_repo(tmp_path, with_parity_test=False)
+    _write(
+        repo, "backend/tests/test_fake_os_path_join.py",
+        'import os\n\n'
+        'def test_billing_tab_has_checkout_ui():\n'
+        '    path = os.path.join(\n'
+        '        os.path.dirname(__file__), "..", "..", "apps", "web", "src",\n'
+        '        "ee", "components", "billing", "billing-tab.tsx"\n'
+        '    )\n'
+        '    with open(path) as f:\n'
+        '        content = f.read()\n',
+    )
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "add os.path.join comma-segment ref")
+    proc = _run_extract(repo)
+    assert proc.returncode == 0, proc.stderr
+    assert "apps/web/src/ee/components/billing/billing-tab.tsx" in proc.stdout.splitlines()
+
+
+def test_extract_on_real_repo_tree_finds_s5_paths_and_ko_json(tmp_path):
+    """⭐실 트리 표본(합성 fixture 말고 이 리포의 진짜 backend/tests/ 전체) — PO가 지적한
+    실 파일(test_e_org_multi_s5_3_polar_checkout.py 등)의 billing-tab.tsx 경로와
+    AC1 최소 기대(ko.json)가 동시에 뽑히는지 실물로 확認."""
+    backend_dir = os.path.abspath(os.path.join(_REAL_BACKEND_TESTS_DIR, ".."))
+    proc = subprocess.run(
+        ["python3", "scripts/extract_fe_paths_referenced_by_backend_tests.py", "tests"],
+        cwd=backend_dir, capture_output=True, text=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+    results = proc.stdout.splitlines()
+    assert "apps/web/messages/ko.json" in results
+    assert "apps/web/messages/en.json" in results
+    assert "apps/web/src/ee/components/billing/billing-tab.tsx" in results
+    assert "apps/web/src/components/nav/create-organization-dialog.tsx" in results
+
+
+# ── extract_fe_paths_referenced_by_backend_tests.py — 완전성 fail-closed(CHANGES 1) ──
+
+def test_extract_completeness_fail_closed_on_unknown_form(tmp_path):
+    """⭐완전성 양성대조 — 어떤 파일이 따옴표로 감싼 "apps" 토큰을 갖고 있는데(진짜 참조가
+    있다는 강한 신호) 알려진 3형 어디로도 안 걸리면(예: 4번째 미지의 형태), 이 스크립트가
+    그 파일 하나만 조용히 빠뜨리는 대신 «전체를» fail-closed(exit 1)해야 한다 — 정확히
+    이번 CHANGES 1이 잡은 재발 클래스."""
+    repo, _ = _init_repo(tmp_path)  # with_parity_test=True — 정상 참조 1건도 같이 있음
+    _write(
+        repo, "backend/tests/test_fake_unknown_form.py",
+        # "apps" 토큰은 따옴표로 감싸져 있지만(강한 신호) ①②③ 어느 형태에도 해당하지 않는
+        # 가짜 4번째 형태(예: 리스트 컴프리헨션 join) — 의도적으로 추출기가 못 잡게 구성.
+        'SEGS = ["apps", "web", "messages", "ko.json"]\n'
+        'PATH = "/".join([s for s in SEGS])\n',
+    )
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "add unknown-form file")
+    proc = _run_extract(repo)
+    assert proc.returncode == 1, (
+        f"완전성 위반(미지 형태)인데 exit 0 — fail-closed 계약 위반: {proc.stdout!r}"
+    )
+    assert "test_fake_unknown_form.py" in proc.stderr
+
+
+def test_extract_completeness_check_does_not_false_positive_on_docstring_boundary(tmp_path):
+    """⭐완전성 음성대조(CHANGES 1 자기회귀 — PO 리뷰 중 실 재현) — 독스트링이 우연히
+    `\"\"\"apps/web/...` 로 시작해도(트리플쿼트의 마지막 "가 "apps/web/" 바로 앞에 옴) 이건
+    실 코드 참조가 아니라 문서 경계 우연이다. 실 파일(test_email_shell.py 형태)로
+    재현 — 완전성 체크가 이걸 «미지 형태」로 오탐하면 이 리포의 실 backend/tests 스캔
+    자체가 상시 fail-closed에 빠져 카드의 목적(정확한 판정)이 무너진다."""
+    repo, _ = _init_repo(tmp_path)  # with_parity_test=True — 정상 참조 1건 있음
+    _write(
+        repo, "backend/tests/test_fake_docstring_boundary.py",
+        '"""apps/web/src/lib/legal/business-info.ts와 글자 단위 일치 확認(이 파일은 import\n'
+        '못 하는 별도 런타임이라 값을 손으로 맞춰 유지)."""\n'
+        'def test_noop():\n'
+        '    assert True\n',
+    )
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "add docstring-boundary file")
+    proc = _run_extract(repo)
+    assert proc.returncode == 0, (
+        f"독스트링 트리플쿼트 경계 우연을 미지 형태로 오탐(완전성 fail-closed 오발) — {proc.stderr!r}"
+    )
 
 
 # ── check_backend_relevant_diff.sh (전체 판정) ───────────────────────────────
@@ -173,6 +269,31 @@ def test_fe_only_pr_touching_parity_dependency_is_relevant(tmp_path):
     proc = _run_decision(repo, base_sha)
     assert proc.returncode == 0, f"파리티 의존 경로 변경인데 무관 판정(3889 재발) — stderr={proc.stderr!r}"
     assert "ko.json" in proc.stderr
+
+
+def test_fe_only_pr_touching_os_path_join_dependency_is_relevant(tmp_path):
+    """⭐AC2 양성대조 ②(CHANGES 1 — 형태 ③) — os.path.join 콤마 세그먼트로만 참조되는
+    FE 파일(billing-tab.tsx류)이 바뀌어도 관련 판정이어야 한다."""
+    repo, base_sha = _init_repo(tmp_path)
+    _write(
+        repo, "backend/tests/test_fake_os_path_join.py",
+        'import os\n\n'
+        'def test_billing_tab_has_checkout_ui():\n'
+        '    path = os.path.join(\n'
+        '        os.path.dirname(__file__), "..", "..", "apps", "web", "src",\n'
+        '        "ee", "components", "billing", "billing-tab.tsx"\n'
+        '    )\n',
+    )
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "add os.path.join fixture")
+    base_sha2 = _git(repo, "rev-parse", "HEAD").stdout.strip()
+
+    _write(repo, "apps/web/src/ee/components/billing/billing-tab.tsx", "export const X = 2\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "touch billing-tab.tsx")
+
+    proc = _run_decision(repo, base_sha2)
+    assert proc.returncode == 0, f"os.path.join 의존 경로 변경인데 무관 판정 — stderr={proc.stderr!r}"
 
 
 def test_backend_file_touch_is_relevant_as_before(tmp_path):

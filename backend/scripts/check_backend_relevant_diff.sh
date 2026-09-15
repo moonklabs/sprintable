@@ -10,8 +10,8 @@
 #      라도 건드리면 → 관련(exit 0) — 3889 사고(파리티 테스트가 실제로 그 파일을 읽는데
 #      경로 기반 스킵이 몰라서 develop CI에서만 RED) 처방.
 #   3) 둘 다 아니면 → 무관(exit 1, 스킵 가능).
-#   FE 경로 추출 자체가 실패/0건이면(extract_fe_paths_referenced_by_backend_tests.sh가
-#   exit 1) → fail-closed로 관련(exit 0).
+#   FE 경로 추출 자체가 실패/0건/완전성 위반이면(extract_fe_paths_referenced_by_backend_
+#   tests.py가 exit 1) → fail-closed로 관련(exit 0).
 #
 # exit 0 = backend_relevant=true(백엔드 잡 전량 실행).
 # exit 1 = backend_relevant=false(백엔드 무거운 잡 skip 가능).
@@ -53,7 +53,7 @@ if [ -n "${NON_SAFE}" ] || [ -z "${CHANGED}" ]; then
     exit 0
 fi
 
-FE_DEPS="$(bash "${SCRIPT_DIR}/extract_fe_paths_referenced_by_backend_tests.sh" backend/tests)"
+FE_DEPS="$(python3 "${SCRIPT_DIR}/extract_fe_paths_referenced_by_backend_tests.py" backend/tests)"
 FE_DEPS_RC=$?
 if [ "${FE_DEPS_RC}" -ne 0 ] || [ -z "${FE_DEPS}" ]; then
     echo "check_backend_relevant_diff: FE 경로 추출 실패/0건(rc=${FE_DEPS_RC}) — fail-closed 관련(exit 0)" >&2
