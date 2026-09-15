@@ -996,10 +996,13 @@ def test_mutation_removing_backend_relevant_guard_reintroduces_false_positive(ca
 # 못 따라간** 것이 근본 — PO 처방 (b) 그대로: 등재 가중치를 실측으로 재기준선한다
 # (같은 run 동시 부하 보정 (a)는 상관관계 증거가 없어 채택하지 않음).
 #
-# 처방: infra/destructive-schema-shard-weights/의 두 파일을 34.0/45.0 → 60.0(클린
-# 실측 최댓값 59/57 위 여유 반올림)으로 갱신 — own-weight 여유축(weight×3.0=180.0)이
-# 세 사고 경과치(163/134/161) 전부보다 커져 더는 FAIL 조건(AND의 두 번째 항)을
-# 충족 못 한다. 알고리즘(slow_files_normalized 자체)은 무변경 — 데이터만 고친다.
+# ⛔fix(2026-09-15, PO 재측 정정) — 최초 60.0(두 파일 공통)안은 PR#4318 자체의
+# shard-durations 아티팩트에서 PO가 직접 재측한 결과와 어긋났다: 클린 run
+# 34932596611(PR#4313, success) test_3502=**62.0s**가 60.0을 넘음(같은 창의 run
+# 34932229501(PR#4312, success)은 test_3497=56.0·test_3502=49.0 — 이쪽은 60.0 안). 「클린
+# 최댓값 위 여유」 전제가 test_3502에서만 깨져 있었다 — test_3497은 60.0 유지, test_3502만
+# 관측 최댓값(62.0) 위로 재상향(70.0). 알고리즘(slow_files_normalized 자체)은 무변경 —
+# 데이터만 고친다.
 
 _S3911_INCIDENT_A_ELAPSED = {
     "tests/normal_a.py": 25.2, "tests/normal_b.py": 25.2, "tests/normal_c.py": 25.2,
@@ -1028,7 +1031,8 @@ _S3911_INCIDENT_C_WEIGHTS_OLD = {
     "tests/test_3502_insights_board.py": 45.0,
 }  # median_ratio≈2.263333 → threshold≈135.8(PR#4314 run 34932958948 실사고와 일치)
 
-_S3911_NEW_WEIGHT = 60.0  # 클린 실측 최댓값(59/57s) 위 여유 반올림 — 두 파일 공통 재기준선
+_S3911_NEW_WEIGHT_3497 = 60.0  # 클린 실측 최댓값(59s, PO 재측 56s 포함) 위 여유 반올림
+_S3911_NEW_WEIGHT_3502 = 70.0  # 클린 실측 최댓값(PO 재측 62.0s) 위 여유 반올림 — 60.0은 부족했음(위 fix 참고)
 
 
 def test_s3911_incident_a_still_fails_with_stale_registered_weight():
@@ -1063,7 +1067,7 @@ def test_s3911_incident_a_resolved_by_rebaselined_weight():
     own-weight 여유축(180.0)이 163.0보다 커져 실사고 ①이 더는 FAIL이 아니다."""
     mod = _load()
     weights = dict(_S3911_INCIDENT_A_WEIGHTS_OLD)
-    weights["tests/test_3497_insight_snapshots.py"] = _S3911_NEW_WEIGHT
+    weights["tests/test_3497_insight_snapshots.py"] = _S3911_NEW_WEIGHT_3497
     slow, _, _ = mod.slow_files_normalized(_S3911_INCIDENT_A_ELAPSED, weights)
     assert slow == [], f"재기준선 후에도 여전히 걸림: {slow}"
 
@@ -1072,28 +1076,29 @@ def test_s3911_incident_b_resolved_by_rebaselined_weight():
     """⭐실사고 ②도 재기준선(60.0) 후 FAIL 해소(180.0 > 134.0)."""
     mod = _load()
     weights = dict(_S3911_INCIDENT_B_WEIGHTS_OLD)
-    weights["tests/test_3497_insight_snapshots.py"] = _S3911_NEW_WEIGHT
+    weights["tests/test_3497_insight_snapshots.py"] = _S3911_NEW_WEIGHT_3497
     slow, _, _ = mod.slow_files_normalized(_S3911_INCIDENT_B_ELAPSED, weights)
     assert slow == [], f"재기준선 후에도 여전히 걸림: {slow}"
 
 
 def test_s3911_incident_c_resolved_by_rebaselined_weight():
-    """⭐실사고 ③도 재기준선(60.0) 후 FAIL 해소(180.0 > 161.0)."""
+    """⭐실사고 ③도 재기준선(70.0, test_3502 전용) 후 FAIL 해소(210.0 > 161.0)."""
     mod = _load()
     weights = dict(_S3911_INCIDENT_C_WEIGHTS_OLD)
-    weights["tests/test_3502_insights_board.py"] = _S3911_NEW_WEIGHT
+    weights["tests/test_3502_insights_board.py"] = _S3911_NEW_WEIGHT_3502
     slow, _, _ = mod.slow_files_normalized(_S3911_INCIDENT_C_ELAPSED, weights)
     assert slow == [], f"재기준선 후에도 여전히 걸림: {slow}"
 
 
-def test_s3911_registered_weights_json_updated_to_60():
+def test_s3911_registered_weights_json_updated():
     """실 등재 파일(infra/destructive-schema-shard-weights/)이 재기준선 값을 실제로
     담고 있는지 — 위 단위 테스트는 값을 손으로 넣어 알고리즘만 검증하므로, 이 테스트가
-    "그 값이 실제 등재 파일에도 반영됐다"는 배선을 고정한다."""
+    "그 값이 실제 등재 파일에도 반영됐다"는 배선을 고정한다. 두 파일이 서로 다른
+    값(60.0/70.0)인 이유는 위 PO 재측 정정 fix 참고."""
     mod = _load()
     weights = mod.load_weights()
-    assert weights["tests/test_3497_insight_snapshots.py"] == _S3911_NEW_WEIGHT
-    assert weights["tests/test_3502_insights_board.py"] == _S3911_NEW_WEIGHT
+    assert weights["tests/test_3497_insight_snapshots.py"] == _S3911_NEW_WEIGHT_3497
+    assert weights["tests/test_3502_insights_board.py"] == _S3911_NEW_WEIGHT_3502
 
 
 def test_s3911_genuinely_hanging_file_still_caught_after_rebaseline():
@@ -1106,7 +1111,7 @@ def test_s3911_genuinely_hanging_file_still_caught_after_rebaseline():
     }
     weights = {
         "tests/normal_a.py": 10.0, "tests/normal_b.py": 10.0, "tests/normal_c.py": 10.0,
-        "tests/test_3497_insight_snapshots.py": _S3911_NEW_WEIGHT,
+        "tests/test_3497_insight_snapshots.py": _S3911_NEW_WEIGHT_3497,
     }
     slow, threshold, _ = mod.slow_files_normalized(elapsed, weights)
     assert slow == ["tests/test_3497_insight_snapshots.py"]
