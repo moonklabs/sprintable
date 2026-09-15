@@ -120,7 +120,7 @@ describe('ChatProofSection — story #2265(C-7) PR1b 섹션 렌더', () => {
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('network'); }));
     await act(async () => { root.render(wrap(<ChatProofSection storyId="story-1" />)); });
     await act(async () => { await Promise.resolve(); });
-    expect(container.textContent).toContain('불러오지 못했습니다');
+    expect(container.textContent).toContain('불러오지 못했어요');
     expect(container.textContent).toContain('다시 시도');
   });
 
@@ -128,7 +128,7 @@ describe('ChatProofSection — story #2265(C-7) PR1b 섹션 렌더', () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) })));
     await act(async () => { root.render(wrap(<ChatProofSection storyId="story-1" />)); });
     await act(async () => { await Promise.resolve(); });
-    expect(container.textContent).toContain('불러오지 못했습니다');
+    expect(container.textContent).toContain('불러오지 못했어요');
   });
 
   it('다시 시도를 누르면 재요청하고, 그때 성공하면 정상 렌더로 복귀한다', async () => {
@@ -138,7 +138,7 @@ describe('ChatProofSection — story #2265(C-7) PR1b 섹션 렌더', () => {
     vi.stubGlobal('fetch', fetchMock);
     await act(async () => { root.render(wrap(<ChatProofSection storyId="story-1" />)); });
     await act(async () => { await Promise.resolve(); });
-    expect(container.textContent).toContain('불러오지 못했습니다');
+    expect(container.textContent).toContain('불러오지 못했어요');
 
     const retryBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '다시 시도');
     await act(async () => { retryBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });

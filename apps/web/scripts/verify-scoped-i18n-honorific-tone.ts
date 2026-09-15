@@ -420,6 +420,33 @@ export function findHardcodedParticleAfterPlaceholder(
   return findings;
 }
 
+// ---------------------------------------------------------------------------
+// story #3914 axis ④ — 에이전트 어미 누출(스코프 값이 '…지?' 반말/자문 물음으로 끝나는 것).
+// 배경: 에이전트 말투('~하는지?'/'~할지?')가 해요체 이관을 거쳐 사용자 UI에 샌 실 사례
+// (retro.stageForwardConfirm·retro.stageBackConfirm·standup.deleteFeedbackConfirm 3건).
+// 사용자 대상 물음은 완결 해요체 의문형(~까요?/~나요?/~가요? = '요?')이어야 한다. '지?'는
+// 반말 자문투라 RED — '~까요?'/'~나요?'/'~가요?'는 '요?'로 끝나 아래 정규식에 안 걸린다(허용).
+// ---------------------------------------------------------------------------
+export interface AgentEndingLeakFinding {
+  key: string;
+  value: string;
+}
+
+const AGENT_ENDING_QUESTION_RE = /[가-힣]지\?/;
+
+export function findAgentEndingQuestionLeak(
+  ko: Record<string, unknown>,
+  keys: readonly string[] = [],
+): AgentEndingLeakFinding[] {
+  const findings: AgentEndingLeakFinding[] = [];
+  for (const key of keys) {
+    const value = getByPath(ko, key);
+    if (typeof value !== 'string') continue;
+    if (AGENT_ENDING_QUESTION_RE.test(value)) findings.push({ key, value });
+  }
+  return findings;
+}
+
 function main(): void {
   const text = readFileSync(path.join(MESSAGES_DIR, KO_FILE), 'utf8');
   const ko = JSON.parse(text) as Record<string, unknown>;
@@ -469,6 +496,21 @@ function main(): void {
     process.exit(1);
   }
   console.log(`OK: 스코프 키(${effectiveKeys.length}개)의 ko.json 값에 관형형 종결(완결 어미 없는 '는'/'인'+마침표) 0건`);
+
+  // story #3914 axis ④ — 에이전트 어미 누출(스코프 값이 '…지?' 반말 물음으로 끝나는 것).
+  const agentEndingFindings = findAgentEndingQuestionLeak(ko, effectiveKeys);
+  if (agentEndingFindings.length > 0) {
+    console.error(`❌ 스코프 키(${effectiveKeys.length}개)의 ko.json 값에 에이전트 어미 누출('…지?' 반말 물음) ${agentEndingFindings.length}건 발견:`);
+    for (const f of agentEndingFindings) {
+      console.error(`  - ${f.key} → ${JSON.stringify(f.value)}`);
+    }
+    console.error(
+      "\n→ 사용자 대상 물음은 완결 해요체 의문형(~까요?/~나요?/~가요?)이어야 한다. '~지?'는" +
+        ' 반말 자문투(에이전트 말투)라 사용자 UI에 두면 안 된다. 「~까요?」로 고쳐라.',
+    );
+    process.exit(1);
+  }
+  console.log(`OK: 스코프 키(${effectiveKeys.length}개)의 ko.json 값에 에이전트 어미 누출('…지?' 반말 물음) 0건`);
 
   // story #3900 axis ③ — 플레이스홀더 값 바로 뒤 고정 조사(스코프 무관·ko.json 전체 leaf 스캔).
   const particleFindings = findHardcodedParticleAfterPlaceholder(ko);
