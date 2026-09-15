@@ -34,7 +34,8 @@ class Conversation(Base, OrgScopedMixin, TimestampMixin):
     # story #2603 P0(delivery-contract-blueprint-v0-1) AC2: 대화 스코프 옵트아웃 — true면 이
     # 대화의 에이전트 recipient는 mentions 기본계약이 all로 완화된다(단 회원 자신의 명시
     # mute는 이걸로 안 뒤집힘 — channel_router.py 참조). 기본 false(무회귀).
-    free_response: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # story #3896 — DB has DEFAULT false, ORM lacked server_default (drift).
+    free_response: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 
     participants: Mapped[list["ConversationParticipant"]] = relationship(
         "ConversationParticipant", back_populates="conversation", lazy="select"

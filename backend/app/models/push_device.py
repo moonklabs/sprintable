@@ -49,7 +49,8 @@ class PushDevice(Base):
     platform: Mapped[str | None] = mapped_column(Text, nullable=True)  # ios | android | macos | 미보고(CHECK)
     device_id: Mapped[str | None] = mapped_column(Text, nullable=True)  # 앱 설치 단위 식별(관측용, 선택)
     app_version: Mapped[str | None] = mapped_column(Text, nullable=True)  # 관측용
-    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)  # DeviceNotRegistered→false(S3)
+    # story #3896 — DB has DEFAULT true, ORM lacked server_default (drift).
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")  # DeviceNotRegistered→false(S3)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

@@ -133,7 +133,8 @@ class ArtifactComment(Base):
     parent_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("artifact_comments.id", ondelete="SET NULL"), nullable=True, index=True
     )
-    resolved: Mapped[bool] = mapped_column(nullable=False, default=False)
+    # story #3896 — DB has DEFAULT false, ORM lacked server_default (drift).
+    resolved: Mapped[bool] = mapped_column(nullable=False, default=False, server_default="false")
     resolved_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
