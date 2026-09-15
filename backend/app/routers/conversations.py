@@ -3059,7 +3059,9 @@ async def send_message(
                             # story #3903 AC1 — 합니다체("멘션했습니다")→해요체. 옛 행(event
                             # 컬럼 도입 前) 전용 폴백 문구로만 남는다(아래 event 있으면 FE가
                             # 렌더 시점에 이 title 대신 event.sender_name으로 직접 조합).
-                            title=f"{sender.name or UNNAMED_MEMBER_LABEL}님이 회원님을 멘션했어요",
+                            # story #3903 PO PASS 후속 — 「회원님을」→「나를」(inbox.mentionTitle과
+                            # 동일 문구·PO 2인칭 통일 지시 그대로 적용, f0083e15dc).
+                            title=f"{sender.name or UNNAMED_MEMBER_LABEL}님이 나를 멘션했어요",
                             body=(msg.content or "")[:200],
                             reference_type="conversation", reference_id=conversation_id,
                             source_project_id=conv.project_id,
