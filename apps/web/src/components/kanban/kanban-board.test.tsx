@@ -1034,7 +1034,7 @@ describe('KanbanBoard — 6단계 신뢰축 뷰(story #2933 H4)', () => {
   // PO 긴급 fix(선생님 지적, 2026-08-22) — 방향서 P0-04 원문 «기본 상태는 신뢰 파이프라인으로»를
   // #2933 done 선언 당시 전원(오르테가·QA·design)이 놓쳐 기본값이 거꾸로 'status'였다(실측
   // 결함). 이 테스트는 원래 그 잘못된 기본값을 그린으로 고정했던 자리 — 스펙대로 뒤집는다.
-  it('기본은 6단계 신뢰축 뷰(P0-04 스펙) — localStorage 미설정 시 5-status 클래식 라벨이 안 보인다', async () => {
+  it('기본은 6단계 신뢰축 뷰(P0-04 스펙) — localStorage 미설정 시 5단계 클래식 라벨이 안 보인다', async () => {
     stubFetch([{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium', trust_stage: 'queued' }]);
     await mount();
     expect(container.textContent).toContain('입력 필요');
@@ -1042,10 +1042,10 @@ describe('KanbanBoard — 6단계 신뢰축 뷰(story #2933 H4)', () => {
     expect(container.textContent).not.toContain('개발 대기');
   });
 
-  it('사용자가 명시적으로 5-status 클래식을 선택하면(localStorage) 기본값 뒤집기와 무관하게 존중된다', async () => {
+  it('사용자가 명시적으로 5단계 클래식을 선택하면(localStorage) 기본값 뒤집기와 무관하게 존중된다', async () => {
     stubFetch([{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium', trust_stage: 'queued' }]);
     await mount();
-    const classicBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '5-status 클래식');
+    const classicBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '5단계 클래식');
     expect(classicBtn, '클래식 토글 버튼을 못 찾음').toBeDefined();
     await act(async () => { classicBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(container.textContent).not.toContain('입력 필요');
@@ -1261,14 +1261,14 @@ describe('KanbanBoard — 6단계 신뢰축 뷰(story #2933 H4)', () => {
 // story #3043(PO+유나 IA 확定 ⓒ, 2026-08-25) — viewMode('board'|'list')가 예전엔 뷰포트 무관
 // 'board'로 하드코딩돼 있었다(유나 실측: flow-client의 view='list' 세그로 진입해도 여기서
 // 다시 'board'로 떨어져 3.55배 가로 overflow 재발 — 이름이 같은 두 「board/list」 개념 충돌).
-// story #3638(유나 §8 kanban-board.tsx:929/:987, PO 확定 착수분) — 5-status 클래식 드래그
+// story #3638(유나 §8 kanban-board.tsx:929/:987, PO 확定 착수분) — 5단계 클래식 드래그
 // (handleDragEnd)도 트러스트축 형제와 동일 병(FORBIDDEN만 말하고 나머지는 조용)을 앓는다.
-describe('KanbanBoard — 5-status 클래식 드래그, FORBIDDEN 아닌 실패도 알린다(story #3638)', () => {
+describe('KanbanBoard — 5단계 클래식 드래그, FORBIDDEN 아닌 실패도 알린다(story #3638)', () => {
   it('bulk PATCH 500이면 storyMoveFailed 토스트가 뜬다(구 조용한 롤백)', async () => {
     stubFetch([{ id: 's-classic', title: '클래식카드', status: 'backlog', priority: 'medium' }]);
     await mount();
-    // 기본은 6단계 신뢰축(P0-04) — 5-status 클래식으로 명시 전환해야 handleDragEnd가 걸린다.
-    const classicBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '5-status 클래식');
+    // 기본은 6단계 신뢰축(P0-04) — 5단계 클래식으로 명시 전환해야 handleDragEnd가 걸린다.
+    const classicBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '5단계 클래식');
     await act(async () => { classicBtn!.click(); });
     expect(container.textContent).toContain('클래식카드');
 
@@ -1368,7 +1368,7 @@ describe('KanbanBoard — org 라벨 오버라이드 소비(#3287 AC4)', () => {
       [{ domain: 'status', canonical_slug: 'backlog', label_ko: '아이디어', label_en: 'Idea' }],
     );
     await mount();
-    const classicBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '5-status 클래식');
+    const classicBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '5단계 클래식');
     expect(classicBtn, '클래식 토글 버튼을 못 찾음').toBeDefined();
     await act(async () => { classicBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
@@ -1381,7 +1381,7 @@ describe('KanbanBoard — org 라벨 오버라이드 소비(#3287 AC4)', () => {
   it('오버라이드 미설정(빈 목록)이면 전 컬럼이 기존 canonical i18n 라벨 그대로다(회귀 0)', async () => {
     stubFetchWithDomainLabels([{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium' }], []);
     await mount();
-    const classicBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '5-status 클래식');
+    const classicBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '5단계 클래식');
     await act(async () => { classicBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 

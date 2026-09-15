@@ -336,7 +336,7 @@ async function mount(stub: FetchStub) {
   // «시간 기다리기» 대신 «상태 기다리기» — 로딩 문구(TopBarSlot 타이틀은 로딩 중에도
   // 항상 보이므로 신호가 못 됨) 대신 로드 完了 분기에서만 뜨는 축 토글 텍스트로 조건을 잰다.
   await act(async () => {
-    await waitForCondition(() => container.textContent?.includes('5-status 클래식') ?? false, 'mount 로딩 完了');
+    await waitForCondition(() => container.textContent?.includes('5단계 클래식') ?? false, 'mount 로딩 完了');
   });
 }
 
@@ -522,7 +522,7 @@ describe('EpicSwimlaneBoard — 열 축 토글(story #2931, H4 공유)', () => {
   // story #2959(PO 배포 실픽셀, 2026-08-23) — kanban-board.tsx(#3378)와 동형 반전. 이 뷰도
   // COLUMNS/TRUST_COLUMNS를 같은 형제 상수로 공유하는데 기본만 옛 'status' 잔재였다(유나 판정:
   // P0-04 «기본=신뢰 파이프라인»은 워크스페이스 뷰 3종 전역 프레임).
-  it('기본은 6단계 신뢰축 — 5-status 클래식 라벨이 안 보인다', async () => {
+  it('기본은 6단계 신뢰축 — 5단계 클래식 라벨이 안 보인다', async () => {
     await mount({ epics: [{ id: 'e1', title: '에픽', status: 'active', position: 1 }] });
     expect(container.textContent).toContain('입력 필요');
     expect(container.textContent).not.toContain('개발 대기');
@@ -530,7 +530,7 @@ describe('EpicSwimlaneBoard — 열 축 토글(story #2931, H4 공유)', () => {
 
   it('명시적으로 클래식 축을 선택하면(로컬 클릭) 존중되고, 재마운트 후에도 유지된다', async () => {
     await mount({ epics: [{ id: 'e1', title: '에픽', status: 'active', position: 1 }] });
-    const toggle = [...container.querySelectorAll('button')].find((b) => b.textContent === '5-status 클래식');
+    const toggle = [...container.querySelectorAll('button')].find((b) => b.textContent === '5단계 클래식');
     await act(async () => { toggle!.click(); });
     expect(container.textContent).not.toContain('입력 필요');
   });
@@ -595,7 +595,7 @@ describe('EpicSwimlaneBoard — 드래그(story #2931)', () => {
     });
     // story #2959로 기본이 trust로 반전 — 이 테스트는 status 축의 'in-progress' 컬럼 id를
     // 드롭 타깃으로 쓰므로(축 자체 검증이 목적 아님) 명시적으로 클래식 축으로 전환한다.
-    const classicToggle = [...container.querySelectorAll('button')].find((b) => b.textContent === '5-status 클래식');
+    const classicToggle = [...container.querySelectorAll('button')].find((b) => b.textContent === '5단계 클래식');
     await act(async () => { classicToggle!.click(); });
 
     const handler = capturedDragEndHandlers.at(-1);
@@ -727,7 +727,7 @@ describe('EpicSwimlaneBoard — 드래그(story #2931)', () => {
     expect(storiesGetCount).toBe(1);
     // story #2959로 기본이 trust로 반전 — 이 테스트는 status 축의 'in-progress' 컬럼 id를
     // 드롭 타깃으로 쓰므로(축 자체 검증이 목적 아님) 명시적으로 클래식 축으로 전환한다.
-    const classicToggle = [...container.querySelectorAll('button')].find((b) => b.textContent === '5-status 클래식');
+    const classicToggle = [...container.querySelectorAll('button')].find((b) => b.textContent === '5단계 클래식');
     await act(async () => { classicToggle!.click(); });
 
     const handler = capturedDragEndHandlers.at(-1);
@@ -820,7 +820,7 @@ describe('EpicSwimlaneBoard — 드래그(story #2931)', () => {
     });
     // story #2959로 기본이 trust로 반전 — 이 테스트는 원래부터 명시적으로 클래식 축(주석
     // 참조)을 가정해 만들어졌으나 이제 그 가정 자체를 명시로 만들어야 한다.
-    const classicToggle = [...container.querySelectorAll('button')].find((b) => b.textContent === '5-status 클래식');
+    const classicToggle = [...container.querySelectorAll('button')].find((b) => b.textContent === '5단계 클래식');
     await act(async () => { classicToggle!.click(); });
 
     const handler = capturedDragEndHandlers.at(-1);

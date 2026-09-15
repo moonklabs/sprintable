@@ -1,0 +1,15 @@
+{
+  "_comment": [
+    "story #3925(§⑤ 낱말 드리프트, 2026-09-15) 첫 도입 시점 잔존 6건 중 5건이 develop 착지로",
+    "이미 해소됨(rebase 뒤 재실측, shrink-only 계약대로 즉시 축소):",
+    "attentionQueue.kicker → #3920(PR #4331)이 \"오늘\"로 전환·착지 완료.",
+    "canvas.descriptionPaneHeading → #3922(PR #4328)이 \"설명 — 보이는 문서\"로 전환·착지 완료.",
+    "proofCapsule.evidence.label/gate.label/claim.label → #3920 AC5(PR #4331)가 명사구+해요체로",
+    "  통일·착지 완료.",
+    "남은 1건은 여전히 이 카드 스코프 밖:",
+    "canvas.versionLineage → #3926(디디) 스코프, 아직 미착지."
+  ],
+  "keys": [
+    "canvas.versionLineage"
+  ]
+}

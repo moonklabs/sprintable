@@ -1790,6 +1790,14 @@ jobs:
       - name: "Verify no ASCII token in ko.json value (story #3880 AC2(b) regression guard)"
         run: pnpm --filter web verify:no-ascii-token-in-ko-value
 
+      # story #3925(§⑤ 낱말 드리프트, 2026-09-15) — 두 ASCII 가드(위 축1-CAPS·축2-whole-value)
+      # 다 ko.json **원본 문자열**만 본다는 공통 맹점: CSS `uppercase` 클래스가 화면에서만
+      # 대문자로 바꿔치는 자리는 원본이 소문자/Title-Case여도 두 가드 모두 통과한다(실 사고
+      # — attentionQueue.kicker="오늘 · Attention Queue"가 uppercase 클래스로 "ATTENTION
+      # QUEUE"로 노출됐는데도 두 가드 GREEN이었다). t() 소비 JSX를 정적으로 대조해 봉쇄.
+      - name: "Verify no Latin text in CSS-uppercase eyebrow (story #3925 regression guard)"
+        run: pnpm --filter web verify:no-latin-in-uppercase-eyebrow
+
       # story #3894 — content/organization/pricingPlans/contentRules/settings 값 안에 역할
       # 낱말이 영어 슬러그(owner/admin)로 남는 클래스를 막는다(#3880 CAPS 가드는 소문자
       # 슬러그를 원리상 못 봄, 자매 축). channelConnect 정본(소유자/관리자)으로 확定 — 역할

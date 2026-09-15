@@ -361,7 +361,7 @@ export type TrustColumnId = (typeof TRUST_COLUMNS)[number]['id'];
 
 // story #2933 H4 — settable 트러스트 컬럼 드롭 시 set할 status(v4 §C 매핑표 그대로). PO
 // 확定④: queued는 backlog+ready-for-dev를 흡수하지만 드롭(다른 컬럼→queued로 이동)은 항상
-// ready-for-dev로 승격 — backlog 강등은 이 보드에서 안 하고(5-status 클래식 뷰/카드 메뉴 몫).
+// ready-for-dev로 승격 — backlog 강등은 이 보드에서 안 하고(5단계 클래식 뷰/카드 메뉴 몫).
 // 파생 3개는 여기 없다 — resolveTrustColumnId가 그 컬럼으로의 드롭 자체를 절대 허용하지 않는다.
 export const TRUST_COLUMN_TO_STATUS: Partial<Record<TrustColumnId, string>> = {
   queued: 'ready-for-dev',
