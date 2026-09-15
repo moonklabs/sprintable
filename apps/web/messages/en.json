@@ -1761,7 +1761,6 @@
     "revoke": "Revoke",
     "resend": "Resend",
     "membersTabPeople": "People",
-    "membersTabAgents": "Agents",
     "orgAgentsTitle": "Organization Agents",
     "orgAgentsDescription": "View and manage agents across all projects in your organization.",
     "agentNamePlaceholder": "Agent name",
@@ -3595,7 +3594,6 @@
     "orderHistoryColReceipt": "Receipt"
   },
   "usage": {
-    "eyebrow": "OPERATOR USAGE",
     "title": "Usage",
     "surfaceDescription": "Review monthly usage, slice it by project or operator view, export the current slice, and verify threshold alerts from one operator surface.",
     "settingsTab": "Settings",
@@ -3702,7 +3700,6 @@
         "content": "Content"
       }
     },
-    "statusEyebrow": "STATUS DASHBOARD",
     "statusDescription": "Track launch status, model choice, and persona usage without leaving the operator shell.",
     "featureTaskTitle": "Autonomous task execution",
     "featureTaskBody": "Assign a story and your agent writes code, updates the board, and reports progress just like a teammate.",

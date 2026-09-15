@@ -192,10 +192,10 @@ describe('ArtifactViewer (SSR snapshot)', () => {
       await act(async () => {
         root.render(wrap(<ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} specPins={[MOCK_SPEC_PIN]} />));
       });
-      const toggle = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('description pane'))!;
+      const toggle = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('설명 패널'))!;
       await act(async () => { toggle.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
-      expect(container.textContent).toContain('보이는 PRD');
+      expect(container.textContent).toContain('보이는 문서');
       expect(container.textContent).not.toContain('C2에서 제공 예정');
 
       await act(async () => { root.unmount(); });
@@ -235,7 +235,7 @@ describe('ArtifactViewer (SSR snapshot)', () => {
 
       const pinButton = container.querySelector('.lucide-file-text')!.closest('button') as HTMLButtonElement;
       await act(async () => { pinButton.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-      const toggle = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('description pane'))!;
+      const toggle = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('설명 패널'))!;
       await act(async () => { toggle.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
       expect(container.textContent).toContain('헤더는 primary 배경입니다.');
