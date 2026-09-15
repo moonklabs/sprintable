@@ -16,6 +16,7 @@ import {
   SCOPED_KEYS,
   SCOPED_NAMESPACES,
   checkScopedNamespaceMinimums,
+  findAgentEndingQuestionLeak,
   findHardcodedParticleAfterPlaceholder,
   findHonorificToneInScopedKeys,
   findPersonaAdnominalTerminal,
@@ -1438,5 +1439,50 @@ describe('findHardcodedParticleAfterPlaceholder — 순수 판정 함수(axis �
     const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
     const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
     expect(findHardcodedParticleAfterPlaceholder(ko)).toEqual([]);
+  });
+});
+
+// story #3914 axis ④ — findAgentEndingQuestionLeak(에이전트 어미 누출 '…지?'·스코프 값).
+describe('findAgentEndingQuestionLeak — 순수 판정 함수(axis ④)', () => {
+  it("스코프 값이 '…지?' 반말 물음이면 잡는다(진행할지?·되돌아갈지?·삭제할지?·하는지?)", () => {
+    const ko = {
+      retro: { a: '{stage} 단계로 진행할지?', b: '되돌아갈지? 데이터는 보존돼요.' },
+      standup: { c: '이 피드백을 삭제할지?' },
+      chats: { d: '지금 시작할지 여쭤보는지?' },
+    };
+    const keys = ['retro.a', 'retro.b', 'standup.c', 'chats.d'];
+    expect(findAgentEndingQuestionLeak(ko, keys)).toEqual([
+      { key: 'retro.a', value: '{stage} 단계로 진행할지?' },
+      { key: 'retro.b', value: '되돌아갈지? 데이터는 보존돼요.' },
+      { key: 'standup.c', value: '이 피드백을 삭제할지?' },
+      { key: 'chats.d', value: '지금 시작할지 여쭤보는지?' },
+    ]);
+  });
+
+  it("완결 해요체 의문형(~까요?/~나요?/~가요? = '요?')은 안 잡는다(허용)", () => {
+    const ko = {
+      retro: { a: '{stage} 단계로 진행할까요?', b: '되돌아갈까요? 데이터는 보존돼요.' },
+      standup: { c: '이 피드백을 삭제할까요?' },
+      x: { d: '맞나요?', e: '어디인가요?' },
+    };
+    const keys = ['retro.a', 'retro.b', 'standup.c', 'x.d', 'x.e'];
+    expect(findAgentEndingQuestionLeak(ko, keys)).toEqual([]);
+  });
+
+  it('⭐양성대조 — 실 ko.json에서 standup.deleteFeedbackConfirm을 「삭제할지?」로 되돌리면 스코프 스캔이 RED(1건)', () => {
+    const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
+    const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
+    (ko.standup as Record<string, unknown>).deleteFeedbackConfirm = '이 피드백을 삭제할지?';
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    expect(findAgentEndingQuestionLeak(ko, effectiveKeys)).toEqual([
+      { key: 'standup.deleteFeedbackConfirm', value: '이 피드백을 삭제할지?' },
+    ]);
+  });
+
+  it('음성대조 — 실 ko.json의 확인 다이얼로그 3건이 「~까요?」로 이관돼 0건(retro.stageForwardConfirm·retro.stageBackConfirm·standup.deleteFeedbackConfirm)', () => {
+    const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
+    const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
+    const keys = ['retro.stageForwardConfirm', 'retro.stageBackConfirm', 'standup.deleteFeedbackConfirm'];
+    expect(findAgentEndingQuestionLeak(ko, keys)).toEqual([]);
   });
 });
