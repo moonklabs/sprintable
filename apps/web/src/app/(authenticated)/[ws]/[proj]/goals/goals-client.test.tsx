@@ -95,7 +95,7 @@ describe('GoalsClient — 목표 first-touch 정체성', () => {
     await act(async () => { draftFilterButton!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
     const html = container.innerHTML;
-    expect(html).toContain('이 상태의 목표가 없습니다.');
+    expect(html).toContain(koMessages.goals.noGoalsFiltered);
     // 정체성 explainer(진짜 빈상태 전용 카피)는 여기 새면 안 됨 — 목표가 실재하는데 "시작 안 함"은 거짓.
     expect(html).not.toContain('아직 목표가 없어요');
   });
