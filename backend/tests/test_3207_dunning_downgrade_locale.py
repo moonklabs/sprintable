@@ -38,8 +38,8 @@ def test_dunning_email_content_locale_branch_and_shell_wrapped():
     ko_subject, ko_html = _dunning_email_content(tier="team", grace_expires_at=date(2026, 9, 1), locale="ko")
     en_subject, en_html = _dunning_email_content(tier="team", grace_expires_at=date(2026, 9, 1), locale="en")
 
-    assert ko_subject == "[Sprintable] 결제가 처리되지 않았습니다 — 확인해 주세요"
-    assert "안녕하세요, Sprintable입니다." in ko_html
+    assert ko_subject == "[Sprintable] 결제가 처리되지 않았어요 — 확인해 주세요"
+    assert "안녕하세요, Sprintable이에요." in ko_html
     assert en_subject == "[Sprintable] Your payment couldn't be processed — please check"
     assert "Hello, this is Sprintable." in en_html
     # story #3206 공용 셸 경유 확認(회사정보 푸터 존재).
@@ -70,7 +70,7 @@ async def test_notify_dunning_failure_sends_locale_matched_copy_per_recipient(mo
     assert len(sent) == 2
     ko_sent = next(s for s in sent if s["to"] == "ko@example.com")
     en_sent = next(s for s in sent if s["to"] == "en@example.com")
-    assert "결제가 처리되지 않았습니다" in ko_sent["subject"]
+    assert "결제가 처리되지 않았어요" in ko_sent["subject"]
     assert "couldn't be processed" in en_sent["subject"]
 
 
@@ -102,8 +102,8 @@ async def test_notify_downgrade_auto_cancelled_sends_locale_matched_copy_per_rec
     assert len(sent) == 2
     ko_sent = next(s for s in sent if s["to"] == "ko@example.com")
     en_sent = next(s for s in sent if s["to"] == "en@example.com")
-    assert "취소되었습니다" in ko_sent["subject"]
-    assert "취소되었습니다" not in en_sent["subject"]
+    assert "취소됐어요" in ko_sent["subject"]
+    assert "취소됐어요" not in en_sent["subject"]
     assert "seat limit exceeded" in en_sent["subject"]
     assert "주식회사 뭉클랩" in ko_sent["html"]
     assert "주식회사 뭉클랩" in en_sent["html"]  # 회사정보 푸터는 locale 무관 고정.
@@ -133,4 +133,4 @@ async def test_notify_downgrade_auto_cancelled_none_locale_falls_back_to_ko(monk
     )
 
     assert len(sent) == 1
-    assert "취소되었습니다" in sent[0]["subject"]
+    assert "취소됐어요" in sent[0]["subject"]

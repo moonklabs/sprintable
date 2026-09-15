@@ -32,8 +32,8 @@ async def _require_human(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID)
         raise HTTPException(
             status_code=403,
             detail=human_error(
-                "COMMENT_REFRESH_HUMAN_ONLY", "댓글 재수집은 휴먼 멤버만 가능합니다.",
-                user_message="댓글 재수집은 휴먼 멤버만 가능합니다.",
+                "COMMENT_REFRESH_HUMAN_ONLY", "댓글 재수집은 휴먼 멤버만 가능해요.",
+                user_message="댓글 재수집은 휴먼 멤버만 가능해요.",
             ),
         )
     return resolved
@@ -253,8 +253,8 @@ async def refresh_publication_comments_endpoint(
         raise HTTPException(
             status_code=422,
             detail=human_error(
-                "COMMENT_COLLECTION_UNSUPPORTED", "이 채널은 댓글 수집을 지원하지 않습니다.",
-                user_message="이 채널은 댓글 수집을 지원하지 않습니다.",
+                "COMMENT_COLLECTION_UNSUPPORTED", "이 채널은 댓글 수집을 지원하지 않아요.",
+                user_message="이 채널은 댓글 수집을 지원하지 않아요.",
             ),
         ) from exc
     except CommentFetchError as exc:

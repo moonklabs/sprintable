@@ -138,8 +138,8 @@ async def _require_human(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID)
             status_code=403,
             detail=human_error(
                 "CHANNEL_POST_PUBLISH_HUMAN_ONLY",
-                "채널 포스트 발행은 휴먼 멤버만 가능합니다(에이전트는 초안·상신까지).",
-                user_message="채널 포스트 발행은 휴먼 멤버만 가능합니다(에이전트는 초안·상신까지).",
+                "채널 포스트 발행은 휴먼 멤버만 가능해요(에이전트는 초안·상신까지).",
+                user_message="채널 포스트 발행은 휴먼 멤버만 가능해요(에이전트는 초안·상신까지).",
             ),
         )
     return resolved

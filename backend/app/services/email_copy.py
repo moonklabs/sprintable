@@ -15,12 +15,12 @@ TRANSACTIONAL_COPY: dict[str, dict[str, dict]] = {
         "ko": {
             "subject": "Sprintable 이메일 인증을 완료해 주세요",
             "intro_lines": [
-                "Sprintable에 가입해 주셔서 감사합니다.",
-                "아래 버튼을 눌러 이메일 인증을 완료하시면 바로 시작하실 수 있습니다.",
+                "Sprintable에 가입해 주셔서 감사해요.",
+                "아래 버튼을 눌러 이메일 인증을 완료하시면 바로 시작하실 수 있어요.",
             ],
             "cta_label": "이메일 인증하기",
-            "expiry_note": "이 링크는 24시간 동안 유효합니다.",
-            "security_note": "본인이 요청한 가입이 아니라면 이 메일을 무시하셔도 됩니다.",
+            "expiry_note": "이 링크는 24시간 동안 유효해요.",
+            "security_note": "본인이 요청한 가입이 아니라면 이 메일을 무시하셔도 돼요.",
             "fallback_label": "버튼이 열리지 않으면 아래 주소를 브라우저에 붙여넣어 주세요:",
         },
         "en": {
@@ -40,12 +40,12 @@ TRANSACTIONAL_COPY: dict[str, dict[str, dict]] = {
         "ko": {
             "subject": "Sprintable 비밀번호 재설정 안내",
             "intro_lines": [
-                "비밀번호 재설정을 요청하셨습니다.",
+                "비밀번호 재설정을 요청하셨어요.",
                 "아래 버튼을 눌러 새 비밀번호를 설정해 주세요.",
             ],
             "cta_label": "비밀번호 재설정",
-            "expiry_note": "이 링크는 30분 동안 유효합니다.",
-            "security_note": "본인이 요청하지 않으셨다면 이 메일을 무시하셔도 됩니다 — 비밀번호는 변경되지 않습니다.",
+            "expiry_note": "이 링크는 30분 동안 유효해요.",
+            "security_note": "본인이 요청하지 않으셨다면 이 메일을 무시하셔도 돼요 — 비밀번호는 변경되지 않아요.",
             "fallback_label": "버튼이 열리지 않으면 아래 주소를 브라우저에 붙여넣어 주세요:",
         },
         "en": {
@@ -70,12 +70,12 @@ TRANSACTIONAL_COPY: dict[str, dict[str, dict]] = {
         "ko": {
             "subject": "Sprintable 비밀번호 설정을 완료해 주세요",
             "intro_lines": [
-                "비밀번호 설정을 요청하셨습니다.",
+                "비밀번호 설정을 요청하셨어요.",
                 "아래 버튼을 눌러 설정을 완료해 주세요.",
             ],
             "cta_label": "비밀번호 설정 완료",
-            "expiry_note": "이 링크는 15분 동안 유효합니다.",
-            "security_note": "본인이 요청하지 않으셨다면 이 메일을 무시하셔도 됩니다 — 비밀번호는 설정되지 않습니다.",
+            "expiry_note": "이 링크는 15분 동안 유효해요.",
+            "security_note": "본인이 요청하지 않으셨다면 이 메일을 무시하셔도 돼요 — 비밀번호는 설정되지 않아요.",
             "fallback_label": "버튼이 열리지 않으면 아래 주소를 브라우저에 붙여넣어 주세요:",
         },
         "en": {
@@ -101,13 +101,13 @@ TRANSACTIONAL_COPY: dict[str, dict[str, dict]] = {
     # 대기 초안(다른 5종과 동일 상태).
     "payment_receipt": {
         "ko": {
-            "subject": "Sprintable 결제가 완료됐습니다",
+            "subject": "Sprintable 결제가 완료됐어요",
             "intro_lines": [
-                "결제가 정상적으로 완료됐습니다.",
+                "결제가 정상적으로 완료됐어요.",
                 "결제 금액: {amount}",
             ],
             "cta_label": "영수증 보기",
-            "expiry_note": "영수증은 결제사(Toss)가 제공하며, 이 링크로 언제든 다시 확인하실 수 있습니다.",
+            "expiry_note": "영수증은 결제사(Toss)가 제공하며, 이 링크로 언제든 다시 확인하실 수 있어요.",
             # security_note는 story #3263부터 정적 값이 아니라 resolve_urgent_contact_note()
             # (이 파일 하단)로 env-분기 해소 — 이유는 그 함수 docstring 참고.
             "fallback_label": "버튼이 열리지 않으면 아래 주소를 브라우저에 붙여넣어 주세요:",
@@ -130,13 +130,13 @@ TRANSACTIONAL_COPY: dict[str, dict[str, dict]] = {
     # 발명 안 함, 로그인 후 기존 버튼 그대로 사용).
     "subscription_downgrade_reserved": {
         "ko": {
-            "subject": "[Sprintable] {tier} 플랜으로 변경이 예약됐습니다",
+            "subject": "[Sprintable] {tier} 플랜으로 변경이 예약됐어요",
             "intro_lines": [
-                "플랜 변경이 예약됐습니다.",
-                "{apply_date}부터 {tier} 플랜으로 전환됩니다.",
+                "플랜 변경이 예약됐어요.",
+                "{apply_date}부터 {tier} 플랜으로 전환돼요.",
             ],
             "cta_label": "예약 확인·철회하기",
-            "expiry_note": "적용 전까지 언제든 예약을 철회하고 현재 플랜을 유지하실 수 있습니다.",
+            "expiry_note": "적용 전까지 언제든 예약을 철회하고 현재 플랜을 유지하실 수 있어요.",
             "fallback_label": "버튼이 열리지 않으면 아래 주소를 브라우저에 붙여넣어 주세요:",
         },
         "en": {
@@ -152,13 +152,13 @@ TRANSACTIONAL_COPY: dict[str, dict[str, dict]] = {
     },
     "subscription_cancel_reserved": {
         "ko": {
-            "subject": "[Sprintable] 구독 해지가 예약됐습니다",
+            "subject": "[Sprintable] 구독 해지가 예약됐어요",
             "intro_lines": [
-                "구독 해지가 예약됐습니다.",
-                "{apply_date}까지는 현재 플랜을 그대로 이용하실 수 있고, 그 이후 Free 플랜으로 전환됩니다.",
+                "구독 해지가 예약됐어요.",
+                "{apply_date}까지는 현재 플랜을 그대로 이용하실 수 있고, 그 이후 Free 플랜으로 전환돼요.",
             ],
             "cta_label": "예약 확인·철회하기",
-            "expiry_note": "적용 전까지 언제든 예약을 철회하고 구독을 유지하실 수 있습니다.",
+            "expiry_note": "적용 전까지 언제든 예약을 철회하고 구독을 유지하실 수 있어요.",
             "fallback_label": "버튼이 열리지 않으면 아래 주소를 브라우저에 붙여넣어 주세요:",
         },
         "en": {
@@ -201,15 +201,15 @@ _URGENT_CONTACT_NOTE_WIDGET_ON: dict[str, dict[str, str]] = {
 }
 _URGENT_CONTACT_NOTE_WIDGET_OFF: dict[str, dict[str, str]] = {
     "payment_receipt": {
-        "ko": "본인이 결제하지 않으셨다면 Sprintable에 로그인해 결제 내역을 확인해 주세요. 이 메일은 발신 전용입니다.",
+        "ko": "본인이 결제하지 않으셨다면 Sprintable에 로그인해 결제 내역을 확인해 주세요. 이 메일은 발신 전용이에요.",
         "en": "If you didn't make this payment, please log in to Sprintable to review your billing history. This email is sent from an unmonitored address.",
     },
     "subscription_downgrade_reserved": {
-        "ko": "본인이 요청하지 않으셨다면 Sprintable에 로그인해 플랜 설정을 확인해 주세요. 이 메일은 발신 전용입니다.",
+        "ko": "본인이 요청하지 않으셨다면 Sprintable에 로그인해 플랜 설정을 확인해 주세요. 이 메일은 발신 전용이에요.",
         "en": "If you didn't request this, please log in to Sprintable to review your plan settings. This email is sent from an unmonitored address.",
     },
     "subscription_cancel_reserved": {
-        "ko": "본인이 요청하지 않으셨다면 Sprintable에 로그인해 구독 설정을 확인해 주세요. 이 메일은 발신 전용입니다.",
+        "ko": "본인이 요청하지 않으셨다면 Sprintable에 로그인해 구독 설정을 확인해 주세요. 이 메일은 발신 전용이에요.",
         "en": "If you didn't request this, please log in to Sprintable to review your subscription settings. This email is sent from an unmonitored address.",
     },
 }
@@ -229,11 +229,11 @@ def resolve_urgent_contact_note(template_key: str, locale: str) -> str:
 
 REMINDER_COPY: dict[str, dict[str, str]] = {
     "ko": {
-        "subject": "Sprintable — 가입 완료까지 몇 단계 남았습니다",
+        "subject": "Sprintable — 가입 완료까지 몇 단계 남았어요",
         "intro": (
-            "Sprintable 가입을 환영합니다. 아직 에이전트 연결이나 첫 지시를 완료하지 않으셨네요"
+            "Sprintable 가입을 환영해요. 아직 에이전트 연결이나 첫 지시를 완료하지 않으셨네요"
             " — 몇 분이면 끝나는 남은 단계를 마무리하면 Sprintable의 진짜 가치를 바로 확인하실 수"
-            " 있습니다."
+            " 있어요."
         ),
         "cta_label": "이어서 진행하기",
         "unsub_label": "이런 안내를 더 이상 받고 싶지 않다면 여기를 눌러 주세요",
@@ -252,17 +252,17 @@ REMINDER_COPY: dict[str, dict[str, str]] = {
 
 INVITE_COPY: dict[str, dict[str, str]] = {
     "ko": {
-        "subject": "[Sprintable] {org_name} 조직에 초대됐습니다",
+        "subject": "[Sprintable] {org_name} 조직에 초대됐어요",
         "heading": "팀에 초대됐어요!",
-        "body": "<strong>{inviter_name}</strong>님이 <strong>{org_name}</strong> 조직에 <strong>{role}</strong>로 초대했습니다.",
-        "sub_body": "아래 버튼을 클릭하면 초대를 수락할 수 있습니다. 링크는 7일간 유효합니다.",
+        "body": "<strong>{inviter_name}</strong>님이 <strong>{org_name}</strong> 조직에 <strong>{role}</strong>로 초대했어요.",
+        "sub_body": "아래 버튼을 클릭하면 초대를 수락할 수 있어요. 링크는 7일간 유효해요.",
         "cta_label": "초대 수락하기",
         "fallback_label": "버튼이 보이지 않으면 아래 주소를 브라우저에 붙여 넣으세요:",
         # story #3206 — 공용 셸(render_email_shell)이 회사정보·연도·법적 링크 푸터를
         # 전담하면서 이 필드의 "© {year} Sprintable." 부분은 셸과 중복이라 걷어냈다(유나
         # doc email-brand-shell-proposal-3206 ③ 수렴 지시). "왜 이 메일을 받았는지"만
         # 콘텐츠 영역 마지막 줄로 남긴다.
-        "auto_generated_note": "이 이메일은 초대 발송으로 자동 생성되었습니다.",
+        "auto_generated_note": "이 이메일은 초대 발송으로 자동 생성됐어요.",
         "default_inviter": "팀 관리자",
     },
     "en": {
@@ -285,8 +285,8 @@ STORAGE_WARN_COPY: dict[str, dict[str, str]] = {
     "ko": {
         "subject": "[Sprintable] 스토리지 사용량 {pct}% 도달",
         "body": (
-            "<p>안녕하세요, Sprintable입니다.</p>"
-            "<p>조직의 스토리지 사용량이 <b>{pct}%</b>({used_mb}MB / {cap_mb}MB)에 도달했습니다.</p>"
+            "<p>안녕하세요, Sprintable이에요.</p>"
+            "<p>조직의 스토리지 사용량이 <b>{pct}%</b>({used_mb}MB / {cap_mb}MB)에 도달했어요.</p>"
             "<p>업로드 제한을 피하려면 사용하지 않는 파일을 정리하거나 플랜을 업그레이드해 주세요.</p>"
         ),
     },
@@ -305,11 +305,11 @@ AU_WARN_COPY: dict[str, dict[str, str]] = {
     "ko": {
         "subject": "[Sprintable] 자동화 사용량(AU) {pct}% 도달",
         "body": (
-            "<p>안녕하세요, Sprintable입니다.</p>"
+            "<p>안녕하세요, Sprintable이에요.</p>"
             "<p>조직의 이번 달 자동화 사용량(AU)이 <b>{pct}%</b>({current} / {au_limit} AU)에"
-            " 도달했습니다.</p>"
-            "<p>100%에 도달하면 MCP/API 쓰기 및 자동화가 일시 중지됩니다(읽기와 사람 UI는 계속"
-            " 사용 가능합니다). 한도에 도달하기 전 플랜 업그레이드를 검토해 주세요.</p>"
+            " 도달했어요.</p>"
+            "<p>100%에 도달하면 MCP/API 쓰기 및 자동화가 일시 중지돼요(읽기와 사람 UI는 계속"
+            " 사용 가능해요). 한도에 도달하기 전 플랜 업그레이드를 검토해 주세요.</p>"
         ),
     },
     "en": {
@@ -333,10 +333,10 @@ AU_WARN_COPY: dict[str, dict[str, str]] = {
 # (정책 부재)를 채웠으므로 이번엔 그 반려의 근거 자체가 해소된 상태에서 다시 제안한다.
 DUNNING_COPY: dict[str, dict[str, str]] = {
     "ko": {
-        "subject": "[Sprintable] 결제가 처리되지 않았습니다 — 확인해 주세요",
-        "greeting": "안녕하세요, Sprintable입니다.",
-        "intro": "정기결제 시도가 처리되지 않았습니다. 저희 쪽에서 매일 자동으로 재시도하고 있으니, 등록하신 카드 정보를 확인해 주시면 감사하겠습니다.",
-        "grace_note": "<b>{grace_date}</b>까지 결제가 완료되지 않으면 조직의 플랜이 자동으로 Free로 전환됩니다. Free로 전환되어도 <b>기존 데이터는 삭제되지 않으며</b>, 신규 업로드만 제한됩니다. 이후 결제를 완료하시면 즉시 원래 플랜({tier_display})으로 복귀합니다.",
+        "subject": "[Sprintable] 결제가 처리되지 않았어요 — 확인해 주세요",
+        "greeting": "안녕하세요, Sprintable이에요.",
+        "intro": "정기결제 시도가 처리되지 않았어요. 저희 쪽에서 매일 자동으로 재시도하고 있으니, 등록하신 카드 정보를 확인해 주시면 감사하겠어요.",
+        "grace_note": "<b>{grace_date}</b>까지 결제가 완료되지 않으면 조직의 플랜이 자동으로 Free로 전환돼요. Free로 전환되어도 <b>기존 데이터는 삭제되지 않으며</b>, 신규 업로드만 제한돼요. 이후 결제를 완료하시면 즉시 원래 플랜({tier_display})으로 복귀해요.",
         "cta_label": "결제 정보 확인하러 가기",
         "closing": "문의사항이 있으시면 언제든 회신해 주세요.",
     },
@@ -352,10 +352,10 @@ DUNNING_COPY: dict[str, dict[str, str]] = {
 
 DOWNGRADE_AUTO_CANCEL_COPY: dict[str, dict[str, str]] = {
     "ko": {
-        "subject": "[Sprintable] 예약된 하향 전환이 취소되었습니다 — 좌석 한도 초과",
-        "greeting": "안녕하세요, Sprintable입니다.",
-        "body1": "예약하신 {tier} 플랜으로의 하향 전환이 자동으로 취소되었습니다. 현재 조직 멤버가 {seat_count}명으로, 해당 플랜의 포함 좌석({included_seats}석)을 초과하기 때문입니다.",
-        "body2": "기존 멤버는 제거되지 않았습니다. 팀 규모를 줄이거나 현재 플랜을 유지하신 뒤, 하향 전환이 여전히 필요하시면 다시 예약해 주세요.",
+        "subject": "[Sprintable] 예약된 하향 전환이 취소됐어요 — 좌석 한도 초과",
+        "greeting": "안녕하세요, Sprintable이에요.",
+        "body1": "예약하신 {tier} 플랜으로의 하향 전환이 자동으로 취소됐어요. 현재 조직 멤버가 {seat_count}명으로, 해당 플랜의 포함 좌석({included_seats}석)을 초과하기 때문이에요.",
+        "body2": "기존 멤버는 제거되지 않았어요. 팀 규모를 줄이거나 현재 플랜을 유지하신 뒤, 하향 전환이 여전히 필요하시면 다시 예약해 주세요.",
         "closing": "문의사항이 있으시면 언제든 회신해 주세요.",
     },
     "en": {
@@ -373,10 +373,10 @@ DOWNGRADE_AUTO_CANCEL_COPY: dict[str, dict[str, str]] = {
 # 동형(greeting/body1/body2/closing, render_email_shell 직접 사용 — CTA 버튼 없음).
 SUBSCRIPTION_DOWNGRADE_APPLIED_COPY: dict[str, dict[str, str]] = {
     "ko": {
-        "subject": "[Sprintable] {tier} 플랜으로 전환이 완료됐습니다",
-        "greeting": "안녕하세요, Sprintable입니다.",
-        "body1": "예약하신 {tier} 플랜으로 전환이 완료됐습니다.",
-        "body2": "기존 데이터는 삭제되지 않고 그대로 보존되며, 변경된 플랜 한도 내에서 계속 이용하실 수 있습니다.",
+        "subject": "[Sprintable] {tier} 플랜으로 전환이 완료됐어요",
+        "greeting": "안녕하세요, Sprintable이에요.",
+        "body1": "예약하신 {tier} 플랜으로 전환이 완료됐어요.",
+        "body2": "기존 데이터는 삭제되지 않고 그대로 보존되며, 변경된 플랜 한도 내에서 계속 이용하실 수 있어요.",
         "closing": "문의사항이 있으시면 언제든 회신해 주세요.",
     },
     "en": {
@@ -390,10 +390,10 @@ SUBSCRIPTION_DOWNGRADE_APPLIED_COPY: dict[str, dict[str, str]] = {
 
 SUBSCRIPTION_CANCEL_APPLIED_COPY: dict[str, dict[str, str]] = {
     "ko": {
-        "subject": "[Sprintable] 구독이 해지되어 Free 플랜으로 전환됐습니다",
-        "greeting": "안녕하세요, Sprintable입니다.",
-        "body1": "예약하신 구독 해지가 적용되어 Free 플랜으로 전환됐습니다.",
-        "body2": "기존 데이터와 콘텐츠는 삭제되지 않고 그대로 보존됩니다 — 언제든 다시 업그레이드해 이어서 이용하실 수 있습니다.",
+        "subject": "[Sprintable] 구독이 해지되어 Free 플랜으로 전환됐어요",
+        "greeting": "안녕하세요, Sprintable이에요.",
+        "body1": "예약하신 구독 해지가 적용되어 Free 플랜으로 전환됐어요.",
+        "body2": "기존 데이터와 콘텐츠는 삭제되지 않고 그대로 보존돼요 — 언제든 다시 업그레이드해 이어서 이용하실 수 있어요.",
         "closing": "문의사항이 있으시면 언제든 회신해 주세요.",
     },
     "en": {

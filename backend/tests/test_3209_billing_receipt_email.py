@@ -48,7 +48,7 @@ async def test_sends_to_owner_admin_recipients_with_per_recipient_locale():
     assert send_email_mock.call_count == 2
     ko_call = next(c for c in send_email_mock.call_args_list if c.args[0] == "owner@example.com")
     en_call = next(c for c in send_email_mock.call_args_list if c.args[0] == "admin@example.com")
-    assert ko_call.args[1] == "Sprintable 결제가 완료됐습니다"
+    assert ko_call.args[1] == "Sprintable 결제가 완료됐어요"
     assert "49,000원" in ko_call.args[2]
     assert "https://dashboard.tosspayments.com/receipt/abc" in ko_call.args[2]
     assert en_call.args[1] == "Your Sprintable payment is complete"

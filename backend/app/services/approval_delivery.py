@@ -659,7 +659,7 @@ async def dispatch_approval_result_reply(
                     db, org_id=org_id, event_type=event_type,
                     target_member_ids=[requester_id],
                     title=f"결재 결과: {decision_label}",
-                    body=resolution_note or f"'{title}'가 {decision_label}됐습니다.",
+                    body=resolution_note or f"'{title}'가 {decision_label}됐어요.",
                     reference_type="gate", reference_id=gate_id,
                     source_project_id=project_id,
                     # story #2696: outbox 이관(동일 결함 클래스 예방).
@@ -748,7 +748,7 @@ async def dispatch_approval_discussion_reply(
                     db, org_id=org_id, event_type="doc_approval_discussion_requested",
                     target_member_ids=[requester_id],
                     title="문서 결재 — 논의 요청",
-                    body=reason or f"'{doc.title}' 문서 결재에 대해 논의를 요청받았습니다.",
+                    body=reason or f"'{doc.title}' 문서 결재에 대해 논의를 요청받았어요.",
                     reference_type="gate", reference_id=gate_id,
                     source_project_id=doc.project_id,
                     # story #2696: outbox 이관(동일 결함 클래스 예방).
@@ -1295,7 +1295,7 @@ async def maybe_nudge_draft_doc_shared_in_chat(
                 await dispatch_notification(
                     db, org_id=org_id, event_type="doc_draft_discussed_in_chat",
                     target_member_ids=[doc_author_id],
-                    title="draft 문서가 채팅에서 논의됐습니다",
+                    title="draft 문서가 채팅에서 논의됐어요",
                     # 유나 CHANGES 2(2026-09-07, PR #4011) — 같은 함수가 같은 doc_author에게
                     # 채팅 DM(위 content, 「검토 요청」)과 알림(이 body) 둘 다 보내는데,
                     # 알림만 「결재 상신」으로 남으면 한 사람이 두 낱말을 읽는 자리라 낱말을
