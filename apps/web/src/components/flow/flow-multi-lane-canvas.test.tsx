@@ -110,7 +110,7 @@ describe('FlowMultiLaneCanvas — N개 레인 병렬 fetch', () => {
     });
 
     expect(container.textContent).toContain('움직임 없는 목표 23개');
-    expect(container.textContent).toContain('숨긴 것이 아니라 접은 것입니다');
+    expect(container.textContent).toContain('숨긴 것이 아니라 접은 거예요');
   });
 
   it('does NOT render the folded-count row when foldedCount is 0 (nothing to explain)', async () => {

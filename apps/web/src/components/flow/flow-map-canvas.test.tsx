@@ -308,13 +308,13 @@ describe('FlowMapCanvas — 8종 양성대조(유나양 4×2 규격)', () => {
       edges: [makeEdge({ fromNodeId: 'n1', toNodeId: 'u1', kind: 'spawn', confirmed: true })],
     });
     await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[withEdges]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} onRejectLink={NOOP_REJECT_LINK} memberMap={{}} />)); });
-    expect(container.textContent).toContain('기계가 찾아낸 후보 일부입니다');
+    expect(container.textContent).toContain('기계가 찾아낸 후보 일부예요');
     // 옛 4종×2축 문구(실선=확定 등)는 완전히 사라져야 한다.
     expect(container.textContent).not.toContain('실선=확定');
 
     const noEdges = makeLane({ nowNodes: [makeNode({ id: 'n1' })] });
     await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[noEdges]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} onRejectLink={NOOP_REJECT_LINK} memberMap={{}} />)); });
-    expect(container.textContent).not.toContain('기계가 찾아낸 후보 일부입니다');
+    expect(container.textContent).not.toContain('기계가 찾아낸 후보 일부예요');
   });
 
   // 유나 가디언 리뷰(2026-07-31, PR#2720 issuecomment-5139624505) — 뒤 절("사람이 확인한
@@ -327,8 +327,8 @@ describe('FlowMapCanvas — 8종 양성대조(유나양 4×2 규격)', () => {
       edges: [makeEdge({ fromNodeId: 'n1', toNodeId: 'u1', kind: 'spawn', confirmed: true })],
     });
     await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} onRejectLink={NOOP_REJECT_LINK} memberMap={{}} />)); });
-    expect(container.textContent).toContain('기계가 찾아낸 후보 일부입니다');
-    expect(container.textContent).not.toContain('사람이 확인한 것은 아직 없습니다');
+    expect(container.textContent).toContain('기계가 찾아낸 후보 일부예요');
+    expect(container.textContent).not.toContain('사람이 확인한 것은 아직 없어요');
   });
 
   it('keeps the "no one has confirmed yet" clause when every drawn edge line is still PROPOSED', async () => {
@@ -338,8 +338,8 @@ describe('FlowMapCanvas — 8종 양성대조(유나양 4×2 규격)', () => {
       edges: [makeEdge({ fromNodeId: 'n1', toNodeId: 'u1', kind: 'spawn', confirmed: false })],
     });
     await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} onRejectLink={NOOP_REJECT_LINK} memberMap={{}} />)); });
-    expect(container.textContent).toContain('기계가 찾아낸 후보 일부입니다');
-    expect(container.textContent).toContain('사람이 확인한 것은 아직 없습니다');
+    expect(container.textContent).toContain('기계가 찾아낸 후보 일부예요');
+    expect(container.textContent).toContain('사람이 확인한 것은 아직 없어요');
   });
 
   // 까심 QA REQUEST_CHANGES 원사유(2026-07-31, PO 전달) 그대로 재현·회귀 가드 — 옛 조건
@@ -355,7 +355,7 @@ describe('FlowMapCanvas — 8종 양성대조(유나양 4×2 규격)', () => {
     });
     await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[ghostEdgeLane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} onRejectLink={NOOP_REJECT_LINK} memberMap={{}} />)); });
     expect(container.querySelector('line[data-edge-kind]')).toBeNull();
-    expect(container.textContent).not.toContain('기계가 찾아낸 후보 일부입니다');
+    expect(container.textContent).not.toContain('기계가 찾아낸 후보 일부예요');
   });
 });
 
@@ -417,7 +417,7 @@ describe('FlowMapCanvas — past-bundle card (묶음이 선을 통과시킨다)'
     await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} onRejectLink={NOOP_REJECT_LINK} memberMap={{}} />)); });
     const internalCountEl = Array.from(container.querySelectorAll('div')).find((d) => d.textContent === '안에서 이어진 것 99');
     const outgoingCountEl = Array.from(container.querySelectorAll('div')).find((d) => d.textContent === '여기서 나온 다음 8건');
-    const hintEl = Array.from(container.querySelectorAll('div')).find((d) => d.textContent === '누르면 펼쳐집니다');
+    const hintEl = Array.from(container.querySelectorAll('div')).find((d) => d.textContent === '누르면 펼쳐져요');
     expect(internalCountEl?.getAttribute('class')).toContain('text-foreground');
     expect(internalCountEl?.getAttribute('class')).not.toContain('text-muted-foreground');
     expect(outgoingCountEl?.getAttribute('class')).toContain('text-foreground');
@@ -557,7 +557,7 @@ describe('FlowMapCanvas — story #2369 가로 잘림 발견성(세로 접힘 �
     const lane = makeQueueLane([0, 1, 2, 3, 4]);
     await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} onRejectLink={NOOP_REJECT_LINK} memberMap={{}} />)); });
     const hint = container.querySelector('[data-testid="flow-canvas-offscreen-hint"]');
-    const reasonSpan = Array.from(hint?.querySelectorAll('span') ?? []).find((s) => s.textContent === '— 오른쪽으로 스크롤하면 보입니다.');
+    const reasonSpan = Array.from(hint?.querySelectorAll('span') ?? []).find((s) => s.textContent === '— 오른쪽으로 스크롤하면 보여요.');
     expect(reasonSpan?.getAttribute('class')).toContain('text-foreground');
   });
 

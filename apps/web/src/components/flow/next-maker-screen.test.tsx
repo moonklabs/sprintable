@@ -320,7 +320,7 @@ describe('NextMakerScreen — real fetch orchestration + lane grouping', () => {
       await new Promise((r) => setTimeout(r, 0));
     });
 
-    expect(container.textContent).toContain('목표에 안 붙은 일이 1건 있습니다');
+    expect(container.textContent).toContain('목표에 안 붙은 일이 1건 있어요');
 
     const summaryButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('목표에 안 붙은 일이'));
     await act(async () => {
@@ -384,7 +384,7 @@ describe('NextMakerScreen — real fetch orchestration + lane grouping', () => {
       await new Promise((r) => setTimeout(r, 0));
     });
 
-    expect(container.textContent).toContain('처리에 실패했습니다');
+    expect(container.textContent).toContain('처리에 실패했어요');
     // headline은 그대로 "목표 3개 중 3개에" — 로컬 상태가 조용히 바뀌지 않았다.
     expect(container.textContent).toContain('목표 3개 중 3개에');
   });
@@ -410,7 +410,7 @@ describe('NextMakerScreen — real fetch orchestration + lane grouping', () => {
       await new Promise((r) => setTimeout(r, 0));
     });
 
-    expect(container.textContent).toContain('처리에 실패했습니다');
+    expect(container.textContent).toContain('처리에 실패했어요');
     expect(container.textContent).toContain('목표 3개 중 3개에');
   });
 
@@ -546,7 +546,7 @@ describe('NextMakerScreen — 실패를 "0건"으로 삼키지 않는다(story #
       await new Promise((r) => setTimeout(r, 0));
     });
 
-    expect(container.textContent).toContain('다음을 불러오지 못했습니다');
+    expect(container.textContent).toContain('다음을 불러오지 못했어요');
     expect(container.textContent).not.toContain('목표 0개');
   });
 });

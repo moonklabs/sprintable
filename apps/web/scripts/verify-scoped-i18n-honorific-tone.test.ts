@@ -157,9 +157,11 @@ describe('실 ko.json — 스코프 키 count-lock(baseline 0, 새 자리 0)', (
 // story #3885 AC2 — SCOPED_NAMESPACES(chats 전량 승격) + resolveEffectiveScopedKeys.
 // ---------------------------------------------------------------------------
 
-describe('SCOPED_NAMESPACES — story #3885/#3889/#3892 AC2', () => {
-  it('chats·content·channelConnect·settings 4개가 등재됐다(잔존 채무 0으로 확定된 네임스페이스만)', () => {
-    expect(SCOPED_NAMESPACES).toEqual(['chats', 'content', 'channelConnect', 'settings']);
+describe('SCOPED_NAMESPACES — story #3885/#3889/#3892/#3895 AC2', () => {
+  it('chats·content·channelConnect·settings·agents·flow·gateConfig 7개가 등재됐다(잔존 채무 0으로 확定된 네임스페이스만)', () => {
+    expect(SCOPED_NAMESPACES).toEqual([
+      'chats', 'content', 'channelConnect', 'settings', 'agents', 'flow', 'gateConfig',
+    ]);
   });
 });
 
@@ -230,13 +232,16 @@ describe('실 ko.json — chats 네임스페이스 전량(story #3885 AC2)', () 
 // ---------------------------------------------------------------------------
 
 describe('checkScopedNamespaceMinimums — 순수 함수', () => {
-  it('⭐네임스페이스 4개가 ko.json에 아예 없으면(개명·삭제 시뮬레이션) 4건 위반을 낸다', () => {
-    const violations = checkScopedNamespaceMinimums({ board: { x: 'y' } }); // 4개 다 없음
+  it('⭐네임스페이스 7개가 ko.json에 아예 없으면(개명·삭제 시뮬레이션) 7건 위반을 낸다', () => {
+    const violations = checkScopedNamespaceMinimums({ board: { x: 'y' } }); // 7개 다 없음
     expect(violations).toEqual([
       { namespace: 'chats', actualCount: 0, minExpected: 200 },
       { namespace: 'content', actualCount: 0, minExpected: 500 },
       { namespace: 'channelConnect', actualCount: 0, minExpected: 150 },
       { namespace: 'settings', actualCount: 0, minExpected: 450 },
+      { namespace: 'agents', actualCount: 0, minExpected: 150 },
+      { namespace: 'flow', actualCount: 0, minExpected: 160 },
+      { namespace: 'gateConfig', actualCount: 0, minExpected: 15 },
     ]);
   });
 
@@ -247,6 +252,9 @@ describe('checkScopedNamespaceMinimums — 순수 함수', () => {
       { namespace: 'content', actualCount: 0, minExpected: 500 },
       { namespace: 'channelConnect', actualCount: 0, minExpected: 150 },
       { namespace: 'settings', actualCount: 0, minExpected: 450 },
+      { namespace: 'agents', actualCount: 0, minExpected: 150 },
+      { namespace: 'flow', actualCount: 0, minExpected: 160 },
+      { namespace: 'gateConfig', actualCount: 0, minExpected: 15 },
     ]);
   });
 
@@ -288,6 +296,30 @@ describe('SCOPED_NAMESPACE_MIN_LEAF_COUNT — 하한이 실측치보다 낮게 �
     const effectiveKeys = resolveEffectiveScopedKeys(ko);
     const settingsLeafCount = effectiveKeys.filter((k) => k.startsWith('settings.')).length;
     expect(settingsLeafCount).toBeGreaterThanOrEqual(450);
+  });
+
+  it('실 ko.json의 agents leaf 개수가 하한(150) 이상이다(실측 191, story #3895)', () => {
+    const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
+    const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    const agentsLeafCount = effectiveKeys.filter((k) => k.startsWith('agents.')).length;
+    expect(agentsLeafCount).toBeGreaterThanOrEqual(150);
+  });
+
+  it('실 ko.json의 flow leaf 개수가 하한(160) 이상이다(실측 202, story #3895)', () => {
+    const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
+    const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    const flowLeafCount = effectiveKeys.filter((k) => k.startsWith('flow.')).length;
+    expect(flowLeafCount).toBeGreaterThanOrEqual(160);
+  });
+
+  it('실 ko.json의 gateConfig leaf 개수가 하한(15) 이상이다(실측 20, story #3895)', () => {
+    const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
+    const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    const gateConfigLeafCount = effectiveKeys.filter((k) => k.startsWith('gateConfig.')).length;
+    expect(gateConfigLeafCount).toBeGreaterThanOrEqual(15);
   });
 });
 
@@ -370,6 +402,64 @@ describe('실 ko.json — content·channelConnect 네임스페이스 전량(stor
 });
 
 // ---------------------------------------------------------------------------
+// story #3895 — agents·flow·gateConfig 네임스페이스 전량(SCOPED_NAMESPACES 승격).
+// chats/content/channelConnect/settings와 정확히 같은 3형 검증(0건·양성대조·무관 PR no-op).
+// ---------------------------------------------------------------------------
+
+describe('실 ko.json — agents·flow·gateConfig 네임스페이스 전량(story #3895 AC1/AC2)', () => {
+  const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
+  const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
+
+  it('SCOPED_KEYS+7개 네임스페이스 전량(effective)의 ko.json 값에 합니다체 0건(story #3895 AC1 128키 전량 이관 확認)', () => {
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    expect(effectiveKeys.length).toBeGreaterThan(SCOPED_KEYS.length);
+    expect(findHonorificToneInScopedKeys(ko, effectiveKeys)).toEqual([]);
+  });
+
+  it('양성대조 — agents.workflowNoHumans를 원래 합니다체로 되돌리면 RED가 된다(namespace 전량 승격 증명)', () => {
+    expect(SCOPED_KEYS as readonly string[]).not.toContain('agents.workflowNoHumans');
+    const mutated = JSON.parse(JSON.stringify(ko)) as Record<string, unknown>;
+    (mutated.agents as Record<string, unknown>).workflowNoHumans = '이 프로젝트에 활성 사람 멤버가 아직 없습니다.';
+    const effectiveKeys = resolveEffectiveScopedKeys(mutated);
+    const findings = findHonorificToneInScopedKeys(mutated, effectiveKeys);
+    expect(findings).toContainEqual({
+      key: 'agents.workflowNoHumans', matches: ['습니다'], value: '이 프로젝트에 활성 사람 멤버가 아직 없습니다.',
+    });
+  });
+
+  it('양성대조 — flow.earthFoldEmpty를 원래 합니다체로 되돌리면 RED가 된다(namespace 전량 승격 증명)', () => {
+    expect(SCOPED_KEYS as readonly string[]).not.toContain('flow.earthFoldEmpty');
+    const mutated = JSON.parse(JSON.stringify(ko)) as Record<string, unknown>;
+    (mutated.flow as Record<string, unknown>).earthFoldEmpty = '아직 연결된 스토리가 없습니다';
+    const effectiveKeys = resolveEffectiveScopedKeys(mutated);
+    const findings = findHonorificToneInScopedKeys(mutated, effectiveKeys);
+    expect(findings).toContainEqual({
+      key: 'flow.earthFoldEmpty', matches: ['습니다'], value: '아직 연결된 스토리가 없습니다',
+    });
+  });
+
+  it('양성대조 — gateConfig.saveFailed를 원래 합니다체로 되돌리면 RED가 된다(namespace 전량 승격 증명)', () => {
+    expect(SCOPED_KEYS as readonly string[]).not.toContain('gateConfig.saveFailed');
+    const mutated = JSON.parse(JSON.stringify(ko)) as Record<string, unknown>;
+    (mutated.gateConfig as Record<string, unknown>).saveFailed = '저장에 실패했습니다.';
+    const effectiveKeys = resolveEffectiveScopedKeys(mutated);
+    const findings = findHonorificToneInScopedKeys(mutated, effectiveKeys);
+    expect(findings).toContainEqual({
+      key: 'gateConfig.saveFailed', matches: ['습니다'], value: '저장에 실패했습니다.',
+    });
+  });
+
+  it('무관 PR no-op — agents·flow·gateConfig 밖·SCOPED_KEYS 밖의 실 합니다체 키는 namespace 전량 승격 뒤에도 안 본다', () => {
+    const outOfScopeValue = (ko.cage as Record<string, unknown> | undefined)?.gateDetailNotFound;
+    expect(typeof outOfScopeValue).toBe('string');
+    expect(outOfScopeValue as string).toMatch(/습니다|ㅂ니다|십시오/);
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    expect(effectiveKeys).not.toContain('cage.gateDetailNotFound');
+    expect(findHonorificToneInScopedKeys(ko, effectiveKeys)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // story #3889 CHANGES 1(PO PR 코멘트, 2026-09-14 19:19Z) — 플레이스홀더 «값» 바로 뒤에
 // 계사(예요/이에요)를 붙이면 런타임 값의 받침 유무에 따라 절반은 문법이 어긋난다(「입니다」
 // 는 받침 무관이라 문제가 없었지만, 해요체 전환의 「예요/이에요」는 앞 음절 받침으로
@@ -398,12 +488,16 @@ describe('story #3889 CHANGES 1 — 플레이스홀더 값 뒤 계사(예요/이
 
   const PLACEHOLDER_COPULA_RE = /\}(예요|이에요)/;
 
-  it('content·channelConnect·settings 전 leaf에 "}예요"·"}이에요"(placeholder 바로 뒤 계사) 0건', () => {
-    // story #3892 — 스캔 범위에 settings 추가(AC2 명시, 3889와 같은 자).
+  it('content·channelConnect·settings·agents·flow·gateConfig 전 leaf에 "}예요"·"}이에요"(placeholder 바로 뒤 계사) 0건', () => {
+    // story #3892 — 스캔 범위에 settings 추가. story #3895 — agents·flow·gateConfig 추가
+    // (착수 전 사전 스캔 0건 확認·전환 뒤 재확認 — 3889 교훈 그대로 재적용).
     const values = [
       ...collectLeafValues(ko.content as Record<string, unknown>, 'content'),
       ...collectLeafValues(ko.channelConnect as Record<string, unknown>, 'channelConnect'),
       ...collectLeafValues(ko.settings as Record<string, unknown>, 'settings'),
+      ...collectLeafValues(ko.agents as Record<string, unknown>, 'agents'),
+      ...collectLeafValues(ko.flow as Record<string, unknown>, 'flow'),
+      ...collectLeafValues(ko.gateConfig as Record<string, unknown>, 'gateConfig'),
     ];
     const violations = values.filter(([, v]) => PLACEHOLDER_COPULA_RE.test(v));
     expect(violations).toEqual([]);

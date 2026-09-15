@@ -162,7 +162,7 @@ describe('NextActionsStrip — 접힌 채 기본, 펼치면 승격/전환 동사
       await new Promise((r) => setTimeout(r, 0));
     });
 
-    expect(container.textContent).toContain('아직 하는 중입니까?');
+    expect(container.textContent).toContain('아직 하는 중인가요?');
     const closeButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '닫는다');
     expect(closeButton).toBeTruthy();
     // story #2844 — "닫는다"는 이제 즉시 POST하지 않고 outcome 판정 다이얼로그를 먼저 연다
