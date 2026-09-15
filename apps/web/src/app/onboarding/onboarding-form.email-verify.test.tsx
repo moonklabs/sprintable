@@ -130,7 +130,8 @@ describe('OnboardingForm — EMAIL_VERIFICATION_REQUIRED (story #2441)', () => {
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 
     expect(calls).toContain('/api/auth/resend-verification');
-    expect(container.textContent).toContain('인증 메일을 다시 보냈습니다');
+    // story #3901 — 리터럴 재-pin 대신 ko.json 값을 읽어 대조.
+    expect(container.textContent).toContain(koMessages.onboarding.resendSent);
   });
 
   it('재전송 429(rate-limit) → 재전송 실패가 아니라 rate-limit 전용 문구를 보여준다', async () => {
@@ -158,7 +159,8 @@ describe('OnboardingForm — EMAIL_VERIFICATION_REQUIRED (story #2441)', () => {
     await act(async () => { resendBtn.click(); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 
-    expect(container.textContent).toContain('너무 자주 요청했습니다');
+    // story #3901 — 리터럴 재-pin 대신 ko.json 값을 읽어 대조.
+    expect(container.textContent).toContain(koMessages.onboarding.resendRateLimited);
   });
 
   it('다른 403(code 없음/다른 code)은 기존 일반 에러 배너로 가고, 재전송 UI는 뜨지 않는다(회귀 없음)', async () => {
@@ -182,7 +184,8 @@ describe('OnboardingForm — EMAIL_VERIFICATION_REQUIRED (story #2441)', () => {
     // story #2484 — 유나 design:changes(2026-08-06): 이 폴백은 raw 서버 message를 그대로
     // 노출했었다(같은 병). 지금은 generic 번역 문구로 간다 — raw는 절대 안 보여야 한다.
     expect(container.textContent).not.toContain('Slug already exists');
-    expect(container.textContent).toContain('조직 생성에 실패했습니다');
+    // story #3901 — 리터럴 재-pin 대신 ko.json 값을 읽어 대조.
+    expect(container.textContent).toContain(koMessages.onboarding.createOrgFailed);
     const resendBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '인증 메일 재전송');
     expect(resendBtn).toBeUndefined();
   });

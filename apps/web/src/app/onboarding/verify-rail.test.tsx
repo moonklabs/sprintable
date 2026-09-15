@@ -90,18 +90,18 @@ describe('VerifyRail — story #2418 (failed인데 reason이 없으면 침묵하
   it('reason이 있으면 그 reason 그대로 보여준다', () => {
     const markup = render([step({ status: 'failed', reason: 'MCP 서버에 연결할 수 없습니다' })]);
     expect(markup).toContain('MCP 서버에 연결할 수 없습니다');
-    expect(markup).not.toContain('왜인지 서버가 말해주지 않았습니다');
+    expect(markup).not.toContain(ko.onboarding.verifyReasonUnknown);
   });
 
   it('실측된 결함 재현 — failed인데 reason이 없으면(현재 BE 실제 형태) fallback 문구가 뜬다', () => {
     const markup = render([step({ status: 'failed', reason: undefined })]);
-    expect(markup).toContain('왜인지 서버가 말해주지 않았습니다');
+    expect(markup).toContain(ko.onboarding.verifyReasonUnknown);
   });
 
   it('음성대조 — done/pending/active엔 fallback 문구가 뜨지 않는다', () => {
     for (const status of ['done', 'pending', 'active'] as const) {
       const markup = render([step({ status, reason: undefined })]);
-      expect(markup).not.toContain('왜인지 서버가 말해주지 않았습니다');
+      expect(markup).not.toContain(ko.onboarding.verifyReasonUnknown);
     }
   });
 });

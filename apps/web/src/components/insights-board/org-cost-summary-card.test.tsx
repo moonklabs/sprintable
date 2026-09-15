@@ -96,21 +96,21 @@ describe('OrgCostSummaryCard(story #3809, PR3)', () => {
     stubFetchFailed(500);
     await act(async () => { root.render(wrap(<OrgCostSummaryCard orgId="org-1" />)); });
     await flush();
-    expect(container.querySelector('[data-testid="org-cost-summary-card-failed"]')?.textContent).toBe('비용 요약을 불러오지 못했습니다.');
+    expect(container.querySelector('[data-testid="org-cost-summary-card-failed"]')?.textContent).toBe(koMessages.insightsBoard.orgCostLoadFailed);
   });
 
   it('승인된 광고 홍보 0건 — 「없습니다」만, 0을 숫자로 안 그린다', async () => {
     stubFetchOk(NO_APPROVED_BOOSTS);
     await act(async () => { root.render(wrap(<OrgCostSummaryCard orgId="org-1" />)); });
     await flush();
-    expect(container.querySelector('[data-testid="org-cost-ads-none"]')?.textContent).toBe('승인된 광고 홍보가 없습니다.');
+    expect(container.querySelector('[data-testid="org-cost-ads-none"]')?.textContent).toBe(koMessages.insightsBoard.orgCostAdsNoApprovedBoosts);
     expect(container.querySelector('[data-testid="org-cost-ads-amounts"]')).toBeNull();
     expect(container.querySelector('[data-testid="org-cost-ads-currency-mixed"]')).toBeNull();
     // story #3809(PO 라이브 캡처 정정 2026-09-11 20:57Z+유나 정정 21:00Z) — 정책
     // 없으면(null) 줄 자체를 지우던 걸 되돌림(X축은 항상 「아직 측정 안 됨」 줄이
     // 있는데 이 축만 침묵하면 0/미측정을 못 가른다) — X와 같은 결의 문장으로.
-    expect(container.querySelector('[data-testid="org-cost-generation-unmeasured"]')?.textContent).toBe('생성 비용은 아직 측정되지 않습니다.');
-    expect(container.querySelector('[data-testid="org-cost-x-cost-unmeasured"]')?.textContent).toBe('X 비용은 아직 측정되지 않습니다.');
+    expect(container.querySelector('[data-testid="org-cost-generation-unmeasured"]')?.textContent).toBe(koMessages.insightsBoard.orgCostGenerationUnmeasured);
+    expect(container.querySelector('[data-testid="org-cost-x-cost-unmeasured"]')?.textContent).toBe(koMessages.insightsBoard.orgCostXCostUnmeasured);
   });
 
   it('⭐생성 비용 정책은 있고 이 기간 지출 0 — 특별 문장 없이 그냥 「생성 비용 0원」(0 특별취급 과잉, 유나 지적)', async () => {
@@ -140,7 +140,7 @@ describe('OrgCostSummaryCard(story #3809, PR3)', () => {
     await act(async () => { root.render(wrap(<OrgCostSummaryCard orgId="org-1" />)); });
     await flush();
     expect(container.querySelector('[data-testid="org-cost-ads-approved-count"]')?.textContent).toBe('승인된 광고 홍보 2건');
-    expect(container.querySelector('[data-testid="org-cost-ads-currency-mixed"]')?.textContent).toBe('통화가 섞여 합계를 표시하지 않습니다.');
+    expect(container.querySelector('[data-testid="org-cost-ads-currency-mixed"]')?.textContent).toBe(koMessages.insightsBoard.orgCostAdsCurrencyMixed);
     expect(container.querySelector('[data-testid="org-cost-ads-amounts"]')).toBeNull();
     // null을 어떤 형태로든(0·"null"·raw) 숫자로 새어 보이지 않는다.
     expect(container.textContent).not.toContain('null');
@@ -154,7 +154,7 @@ describe('OrgCostSummaryCard(story #3809, PR3)', () => {
     });
     await act(async () => { root.render(wrap(<OrgCostSummaryCard orgId="org-1" />)); });
     await flush();
-    expect(container.querySelector('[data-testid="org-cost-generation-failed"]')?.textContent).toBe('생성 비용 정보를 확인하지 못했습니다.');
+    expect(container.querySelector('[data-testid="org-cost-generation-failed"]')?.textContent).toBe(koMessages.insightsBoard.orgCostGenerationCheckFailed);
     expect(container.querySelector('[data-testid="org-cost-generation-amount"]')).toBeNull();
   });
 
@@ -202,7 +202,7 @@ describe('OrgCostSummaryCard(story #3809, PR3)', () => {
     });
     await act(async () => { root.render(wrap(<OrgCostSummaryCard orgId="org-1" />)); });
     await flush();
-    expect(container.querySelector('[data-testid="org-cost-x-cost-failed"]')?.textContent).toBe('X 비용 정보를 확인하지 못했습니다.');
+    expect(container.querySelector('[data-testid="org-cost-x-cost-failed"]')?.textContent).toBe(koMessages.insightsBoard.orgCostXCostCheckFailed);
     expect(container.querySelector('[data-testid="org-cost-x-cost-amount"]')).toBeNull();
   });
 

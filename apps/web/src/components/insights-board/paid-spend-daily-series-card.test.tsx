@@ -78,14 +78,14 @@ describe('PaidSpendDailySeriesCard(story #3809, PR4b)', () => {
     stubFetchFailed(500);
     await act(async () => { root.render(wrap(<PaidSpendDailySeriesCard orgId="org-1" />)); });
     await flush();
-    expect(container.querySelector('[data-testid="paid-spend-daily-series-card-failed"]')?.textContent).toBe('일별 지출을 불러오지 못했습니다.');
+    expect(container.querySelector('[data-testid="paid-spend-daily-series-card-failed"]')?.textContent).toBe(koMessages.insightsBoard.paidSpendDailySeriesLoadFailed);
   });
 
   it('캡처 0건 — 「표시할 캡처가 없습니다」만, 막대 0개', async () => {
     stubFetchOk([]);
     await act(async () => { root.render(wrap(<PaidSpendDailySeriesCard orgId="org-1" />)); });
     await flush();
-    expect(container.querySelector('[data-testid="paid-spend-daily-series-empty"]')?.textContent).toBe('표시할 지출 캡처가 아직 없습니다.');
+    expect(container.querySelector('[data-testid="paid-spend-daily-series-empty"]')?.textContent).toBe(koMessages.insightsBoard.paidSpendDailySeriesEmpty);
     expect(container.querySelectorAll('[data-testid="paid-spend-daily-series-point"]').length).toBe(0);
   });
 
@@ -93,7 +93,7 @@ describe('PaidSpendDailySeriesCard(story #3809, PR4b)', () => {
     stubFetchOk(SINGLE_DAY_KRW);
     await act(async () => { root.render(wrap(<PaidSpendDailySeriesCard orgId="org-1" />)); });
     await flush();
-    expect(container.querySelector('[data-testid="paid-spend-daily-series-caption"]')?.textContent).toBe('캡처 시점 기준 — 매일 자동 수집을 보장하지 않습니다.');
+    expect(container.querySelector('[data-testid="paid-spend-daily-series-caption"]')?.textContent).toBe(koMessages.insightsBoard.paidSpendDailySeriesCaption);
     const points = container.querySelectorAll('[data-testid="paid-spend-daily-series-point"]');
     expect(points.length).toBe(1);
     expect(points[0].getAttribute('data-mixed')).toBe('false');

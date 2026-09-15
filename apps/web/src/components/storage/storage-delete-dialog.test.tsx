@@ -139,8 +139,9 @@ describe('StorageDeleteDialog — #3241 삭제 왕복 + 에러 카피', () => {
     });
     const deleteButton = Array.from(document.querySelectorAll('button')).find((b) => b.textContent === '삭제');
     await act(async () => { deleteButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    expect(document.body.textContent).toContain('자산을 삭제하지 못했습니다');
-    expect(document.body.textContent).not.toContain('자산을 불러오지 못했습니다');
+    // story #3901 — 리터럴 재-pin 대신 ko.json 값을 읽어 대조(어조 전환마다 깨지는 걸 막는다).
+    expect(document.body.textContent).toContain(koMessages.storage.deleteErrorTitle);
+    expect(document.body.textContent).not.toContain(koMessages.storage.errorTitle);
     expect(onOpenChange).not.toHaveBeenCalledWith(false);
   });
 });
