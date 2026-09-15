@@ -430,7 +430,7 @@ _CATALOG: dict[str, dict[str, str]] = {
     # `reset_timezone`(=채널 어댑터의 `quota_reset_timezone` 선언값, `reset_at`과
     # 같은 소스)으로 조회해 넘긴다(두 곳이 각자 짓지 않는다).
     "channel_posts.youtube_usage_exceeded": {
-        "ko": "오늘 YouTube 사용량을 다 썼습니다 — 사용량은 매일 {tz_display} 자정에 초기화됩니다(플랫폼 공유 한도).",
+        "ko": "오늘 YouTube 사용량을 다 썼어요 — 사용량은 매일 {tz_display} 자정에 초기화돼요(플랫폼 공유 한도).",
         "en": "Today's YouTube usage limit has been reached — it resets daily at midnight {tz_display} (shared platform-wide limit).",
     },
     # story #3815(Phase3·3-5, 미르코 PR4 그라운딩 발견 → 페드루 PO 지적 2026-09-12
