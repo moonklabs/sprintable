@@ -266,3 +266,44 @@ describe('ActivationChecklistBanner — "첫 지시…" 항목 클릭(story #320
     expect(container.textContent).toContain('대화를 시작하지 못했습니다. 다시 시도해 주세요.');
   });
 });
+
+// story #3907(PO 눈 리뷰, 3901 캡처 그라운딩) — 5번째("첫 지시…") Button만 min-h-11(size
+// variant 기본)·border를 형제(4번째 Link)와 다르게 얹어 실측(getBoundingClientRect)
+// iconX 42→43(+1px)·liHeight 24→44(+20px)로 밀려 보였다. min-h-0·border-0로 명시
+// 상쇄한 것을 회귀가드로 고정 — 지우면(size variant 기본값 그대로 새는 자리로 돌아가면)
+// 이 테스트가 잡는다.
+describe('ActivationChecklistBanner — 5번째 항목 아이콘 들여쓰기/행 높이 정합(story #3907)', () => {
+  it('"첫 지시…" Button이 4번째 Link와 같은 박스모델 클래스(min-h-0·border-0·h-auto·min-w-0)를 갖는다', async () => {
+    stubChecklist(PARTIAL);
+    await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+    await flush();
+
+    const firstRoundtripBtn = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent?.includes('첫 지시 보내고 회신 받기'),
+    ) as HTMLButtonElement;
+    expect(firstRoundtripBtn).not.toBeUndefined();
+
+    for (const cls of ['h-auto', 'min-h-0', 'w-full', 'min-w-0', 'border-0', 'gap-1.5', 'px-1', 'py-0.5']) {
+      expect(firstRoundtripBtn.className).toContain(cls);
+    }
+  });
+
+  it('4번째(에이전트 연결하기) Link와 5번째(첫 지시…) Button의 행 폭·패딩 클래스가 동일 집합이다(구조 드리프트 회귀가드)', async () => {
+    stubChecklist(PARTIAL);
+    await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+    await flush();
+
+    const agentLink = Array.from(container.querySelectorAll('a')).find(
+      (a) => a.textContent?.includes('에이전트 연결하기'),
+    ) as HTMLAnchorElement;
+    const roundtripBtn = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent?.includes('첫 지시 보내고 회신 받기'),
+    ) as HTMLButtonElement;
+
+    const SHARED_BOX_CLASSES = ['h-auto', 'w-full', 'min-w-0', 'gap-1.5', 'rounded', 'px-1', 'py-0.5'];
+    for (const cls of SHARED_BOX_CLASSES) {
+      expect(agentLink.className.split(' ')).toContain(cls);
+      expect(roundtripBtn.className.split(' ')).toContain(cls);
+    }
+  });
+});
