@@ -1824,9 +1824,42 @@ jobs:
         # set -o pipefail so vitest's non-zero exit propagates through `| tail` instead
         # of being masked by tail's 0 — without it the unit-test gate was a no-op
         # (story 2d5c8662). GitHub's default bash runner does not enable pipefail.
+        #
+        # story #3904 — `--reporter=json --outputFile.json=...`를 default 리포터와 병행
+        # 추가(vitest는 다중 리포터를 동시에 지원 — 콘솔에 찍히는 default 출력은 그대로라
+        # 위 `| tail -80` 계약·판정/exit code 전부 무변, A/B 로컬 실측상 시간 증가도 노이즈
+        # 수준). 이 JSON이 있어야 다음 스텝들이 «성공 run에서도» 테스트별 duration을 읽을
+        # 수 있다(story #3902의 «측정치×3»이 CI 로그 실측 없이 로컬 관측으로 대체된 갭 처방).
         run: |
           set -o pipefail
-          pnpm vitest run 2>&1 | tail -80
+          pnpm vitest run --reporter=default --reporter=json --outputFile.json=/tmp/vitest-results.json 2>&1 | tail -80
+
+      # story #3904 AC1 — 위 JSON을 후처리해 «느린 테스트 상위 30» 표를 이 스텝 자신의
+      # 로그에 찍는다(별도 스텝 출력이라 위 Test 스텝의 `tail -80`에 안 잘린다). `if:
+      # always()` — 실패 run에서도(부분적으로 완주된 테스트들의) duration을 볼 수 있어야
+      # 디버깅에 쓸모가 있다. 이 스텝 자체의 실패(JSON 파싱 오류 등)가 CI 판정에 영향을
+      # 주면 안 되므로(AC3) 스크립트 내부에서 실패를 삼키고 exit 0 — 여기 워크플로 스텝도
+      # 판정에 안 걸리는 순수 계측.
+      - name: Summarize vitest test durations (story #3904)
+        if: always()
+        run: node apps/web/scripts/ci/summarize-vitest-durations.mjs /tmp/vitest-results.json /tmp/vitest-durations-summary.json 30
+
+      # story #3904 AC2 — 원본 vitest JSON 리포터 출력이 아니라 위 스텝이 다듬은 «작은»
+      # 요약(파일 상대경로·테스트명·ms만)을 올린다. story #3864(2026-09-14, 이 워크플로
+      # 파일 안 실사고)가 겪은 "매 run always() 업로드 누적이 org 단위 artifact 저장
+      # 한도를 채운" 클래스(playwright-report, 실측 7,996개·1,719MB)를 이 카드가 그대로
+      # 재현하지 않도록 payload를 미리 줄여 둔 것 — retention도 짧게(7일, AC2 명시).
+      # `if-no-files-found: ignore` — 위 스텝이 JSON 파싱 실패로 요약 파일을 못 쓴
+      # 드문 경우에도 이 업로드 스텝 자체는 실패시키지 않는다(계측 실패가 판정에 안
+      # 번지는 원칙을 여기서도 유지).
+      - name: Upload vitest duration summary (story #3904)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vitest-duration-summary
+          path: /tmp/vitest-durations-summary.json
+          retention-days: 7
+          if-no-files-found: ignore
 
       - name: Build
         run: pnpm build
