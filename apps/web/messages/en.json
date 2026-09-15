@@ -4627,7 +4627,17 @@
     "noteLabel": "Note",
     "reasonLabel": "Reason",
     "gateConnective": "**{gateType}** — **{verdict}**",
-    "targetMissing": "(deleted {type})"
+    "targetMissing": "(deleted {type})",
+    "workAssignedHeader": "Assigned",
+    "goalMeasuredHeader": "Goal measured",
+    "assigneeLabel": "Assignee",
+    "assigneeMissing": "(removed assignee)",
+    "assignedByLabel": "Assigned by",
+    "goalLabel": "Goal",
+    "unitLabel": "Unit",
+    "sourceLabel": "Source",
+    "metricValueLabel": "Measured value",
+    "measuredAtLabel": "Measured at"
   },
   "activityLog": {
     "title": "Activity Log",

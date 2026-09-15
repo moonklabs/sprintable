@@ -13,6 +13,25 @@ import { useOrgDomainLabels } from '@/hooks/use-org-domain-labels';
 import { gateStatusLabel } from '@/lib/gate-status-label';
 import { gateTypeLabel } from '@/lib/gate-type-label';
 import { entityTypeLabel } from '@/components/chat/chat-input-entity-tokens';
+import { formatLocaleDateTime } from '@/lib/i18n';
+
+// story #3893 CHANGES①(PO PR#4298 리뷰 2026-09-15) — outcome-intent-fields.tsx의
+// INTERNAL_METRICS와 동일 닫힌 집합(outcomeLoop.metric_{slug} 낱말이 실존하는 metric
+// 이름만) — 이 목록 밖은 GA4 소스의 임의 문자열이라 번역 대상이 아니다(단위 생략).
+const METRIC_UNIT_KEYS = ['velocity', 'backlog_remaining', 'progress', 'completion_pct'] as const;
+
+// story #3893 CHANGES(PO PR#4298 2차 리뷰 2026-09-15) — preset.goal.measured의
+// 「출처」 필드가 `{{payload.source}}`(raw slug "internal_ops"/"ga4")를 그대로 노출했다
+// (metric_unit과 같은 클래스 결함 — 「raw slug 0」은 코드 낱말이 사용자에게 보이는지가
+// 기준이지, 렌더 성공 여부가 아니다). outcome_scorer.py 그라운딩상 이 preset의 실
+// source 값은 "internal_ops"/"ga4" 둘뿐(닫힌 집합) — hypotheses 네임스페이스의 기존
+// sourceInternal/sourceGa4 낱말(hypothesis-form.tsx 등 4곳이 이미 씀, 신규 어간 0)을
+// 그대로 재사용한다. 미등재 값은 라벨을 안 채워 optional 필드 생략(metric_unit과 동일
+// 원칙 — 지어내지 않는다).
+const SOURCE_LABEL_KEYS: Record<string, 'sourceInternal' | 'sourceGa4'> = {
+  internal_ops: 'sourceInternal',
+  ga4: 'sourceGa4',
+};
 
 // story #3881(customer-zero) — story status_changed preset의 {{label.from_status}}/
 // {{label.to_status}} 해소용. story-detail-panel.tsx:846의 statusKeyMap과 동형(그 파일은
@@ -43,8 +62,18 @@ interface EventBlockCardProps {
    * 시점에 짓는다)·리졸버 자체가 없음(키 자체 부재, agent_decision·support_escalation
    * — 구조적 부재). 예전 계약(순 문자열)도 방어적으로 남겨둔다(구버전 캐시/직접 호출부
    * 호환) — 현재 실 프리셋은 더 이상 `{{ref.X}}`를 직접 참조하지 않는다(전부
-   * `labels.work_item_target` 경유, 아래). */
-  refs?: Record<string, string | null | { found: boolean; token?: string; type?: string }>;
+   * `labels.work_item_target` 경유, 아래).
+   *
+   * story #3893 — `assignee`/`assigned_by` 값은 `work_item`과 다른 두 모양(member는
+   * 항상 단일 리졸버라 "리졸버 자체가 없음" 갈래가 없다, events.py
+   * `_render_event_notification_member_ref`): 찾음(`{found:true, name}`)·못 찾음
+   * (`{found:false}` — 텍스트는 이 컴포넌트가 렌더 시점에 짓는다). */
+  refs?: Record<
+    string,
+    | string
+    | null
+    | { found: boolean; token?: string; type?: string; name?: string }
+  >;
 }
 
 // story #2637 — 유나 design 스티어 2차(08-14, 재작업 방식까지 PR 前 확定).
@@ -166,6 +195,8 @@ export function EventBlockCard({ template, payload, refs }: EventBlockCardProps)
   const tCage = useTranslations('cage');
   const tDashboard = useTranslations('dashboard');
   const tEventCard = useTranslations('eventCard');
+  const tOutcomeLoop = useTranslations('outcomeLoop');
+  const tHypotheses = useTranslations('hypotheses');
   const locale = useLocale();
   const { currentMemberType, role, orgId } = useDashboardContext();
   // story #3287(도메인탈고정) — org 커스텀 status 라벨 오버라이드. statusLabel()이 undefined면
@@ -229,6 +260,70 @@ export function EventBlockCard({ template, payload, refs }: EventBlockCardProps)
     }
   }
 
+  // story #3893(PO 確定 2026-09-14) — refs.assignee/refs.assigned_by(events.py
+  // `_render_event_notification_member_ref`의 두 모양)를 labels.assignee_name/
+  // assigned_by_name으로 미리 해석한다. work_item_target과 동형 원칙이되 member는
+  // "리졸버 자체가 없음" 갈래가 없다(항상 단일 리졸버) — 찾음=이름 그대로 / 못 찾음=
+  // 은은한 assigneeMissing 문구(fail-loud ⟨missing:…⟩ 마커와 다른 층, targetMissing과
+  // 동일 원칙) / refs 키 자체 부재(해당 preset이 아님)=labels 키 미설정→optional
+  // elision.
+  for (const [refsKey, labelKey] of [
+    ['assignee', 'assignee_name'],
+    ['assigned_by', 'assigned_by_name'],
+  ] as const) {
+    const memberRef = refs?.[refsKey];
+    if (memberRef && typeof memberRef === 'object') {
+      if (memberRef.found && typeof memberRef.name === 'string') {
+        labels[labelKey] = memberRef.name;
+      } else if (!memberRef.found) {
+        labels[labelKey] = tEventCard('assigneeMissing');
+      }
+    }
+  }
+
+  // story #3893 CHANGES②(PO PR#4298 리뷰 2026-09-15) — refs.goal(preset.goal.measured의
+  // goal_id, 실은 epic.id — events.py `_render_event_notification_work_item_ref`의
+  // "epic" 갈래 재사용, work_item_target과 완전 동형 3모양 계약)을 labels.goal_target으로.
+  const goalRef = refs?.['goal'];
+  if (goalRef && typeof goalRef === 'object') {
+    if (goalRef.found && typeof goalRef.token === 'string') {
+      labels['goal_target'] = goalRef.token;
+    } else if (!goalRef.found && typeof goalRef.type === 'string') {
+      labels['goal_target'] = tEventCard('targetMissing', {
+        type: entityTypeLabel(goalRef.type, t).toLowerCase(),
+      });
+    }
+  }
+
+  // story #3893 CHANGES①(PO PR#4298 리뷰 2026-09-15) — metric_unit은 「%」 같은 단위
+  // 기호가 아니라 metric **이름**이다(completion_pct·GA4 임의 문자열 — outcome_scorer.py
+  // 그라운딩). outcomeLoop 네임스페이스의 기존 `metric_{slug}` 낱말(outcome-intent-
+  // fields.tsx가 이미 씀, 신규 어간 0)을 재사용해 등재 4종만 번역하고, 미등재(GA4 임의
+  // 값 등)는 라벨을 아예 안 채워 optional 필드 자체를 생략한다(raw slug 노출 방지 —
+  // 지어내지 않는다 원칙, targetMissing류 은은한 폴백조차 없음: "번역 불가능한 임의
+  // 문자열"은 «삭제됨» 같은 알려진 상태가 아니라 그냥 노출하지 않는 게 맞다).
+  const metricUnit = payload['metric_unit'];
+  if (typeof metricUnit === 'string' && (METRIC_UNIT_KEYS as readonly string[]).includes(metricUnit)) {
+    labels['metric_unit_label'] = tOutcomeLoop(`metric_${metricUnit}` as 'metric_velocity');
+  }
+
+  // story #3893 CHANGES③ — measured_at(ISO 8601)을 lib/i18n.ts::formatLocaleDateTime
+  // (기존 Intl 포매터, 신규 로직 0)로 렌더 시점 로케일 포맷. 파싱 실패(빈 문자열 반환,
+  // formatLocaleDate의 기존 계약)는 labels 키를 안 채워 optional 생략.
+  const measuredAtRaw = payload['measured_at'];
+  if (typeof measuredAtRaw === 'string') {
+    const formatted = formatLocaleDateTime(measuredAtRaw, locale);
+    if (formatted) labels['measured_at'] = formatted;
+  }
+
+  // story #3893 CHANGES(PO PR#4298 2차 리뷰 2026-09-15) — source(raw slug "internal_ops"/
+  // "ga4")를 hypotheses.sourceInternal/sourceGa4 기존 낱말로. 미등재는 optional 생략
+  // (metric_unit과 동일 원칙).
+  const source = payload['source'];
+  if (typeof source === 'string' && source in SOURCE_LABEL_KEYS) {
+    labels['source_label'] = tHypotheses(SOURCE_LABEL_KEYS[source]!);
+  }
+
   // story #3884 AC2 — preset.gate.verdict 본문 접속어. PO 구조 결정: 리터럴 「게이트」를
   // 없애고(미등재 gate_type이 ccGateGeneric 「게이트」 폴백일 때 헤더 "게이트 판정"과
   // 겹쳐 "게이트 게이트 — …"로 이중 인쇄되는 잠재 결함 해소) gateType/verdict 두 라벨만
@@ -252,6 +347,16 @@ export function EventBlockCard({ template, payload, refs }: EventBlockCardProps)
     targetLabel: tEventCard('targetLabel'),
     noteLabel: tEventCard('noteLabel'),
     reasonLabel: tEventCard('reasonLabel'),
+    // story #3893
+    workAssignedHeader: tEventCard('workAssignedHeader'),
+    goalMeasuredHeader: tEventCard('goalMeasuredHeader'),
+    assigneeLabel: tEventCard('assigneeLabel'),
+    assignedByLabel: tEventCard('assignedByLabel'),
+    goalLabel: tEventCard('goalLabel'),
+    unitLabel: tEventCard('unitLabel'),
+    sourceLabel: tEventCard('sourceLabel'),
+    metricValueLabel: tEventCard('metricValueLabel'),
+    measuredAtLabel: tEventCard('measuredAtLabel'),
   };
 
   // story #3884 — 현재 실 프리셋(status_changed·gate.verdict)은 더 이상 `{{ref.X}}`를
@@ -443,6 +548,9 @@ export interface EventPreviewHelpers {
   tDashboard: (key: string) => string;
   tEventCard: (key: string) => string;
   tEntity: (key: string) => string;
+  /** story #3893 CHANGES①(PO PR#4298 리뷰) — metric_unit(metric 이름, 「%」 아님) 매핑용,
+   * event-block-card.tsx의 METRIC_UNIT_KEYS 닫힌 집합과 동형 재사용. */
+  tOutcomeLoop: (key: string) => string;
   domainLabels: { statusLabel: (slug: string) => string | undefined };
 }
 
@@ -458,17 +566,26 @@ export interface EventPreviewHelpers {
  * 안 쓴다 — 그 값이 ChatMarkdown용 `**bold**` 마크다운을 품고 있어(block-template 렌더
  * 전용) 순수 텍스트 리스트 행에 쓰면 별표(`**`)가 그대로 샌다.
  *
- * 현재 이 두 preset만 처리(PO가 실측한 사고 자리 정확히 그만큼) — 다른 event_key·필수
- * payload 필드 부재는 null을 돌려줘 호출부가 기존 content 폴백으로 떨어진다(과잉
- * 일반화 금지, 발명 0).
+ * 현재 이 4 preset만 처리(gate.verdict·work.status_changed — PO가 실측한 사고 자리,
+ * story #3893으로 work.assigned·goal.measured 추가) — 다른 event_key·필수 payload
+ * 필드 부재(work.assigned는 refs.assignee 미해소 포함)는 null을 돌려줘 호출부가 기존
+ * content 폴백으로 떨어진다(과잉 일반화 금지, 발명 0).
  */
 export function composeEventPreviewLine(
   eventKey: string | undefined,
   payload: Record<string, unknown> | undefined,
   helpers: EventPreviewHelpers,
+  // story #3893(PO 確定 2026-09-14) — preset.work.assigned 미리보기가 담당자 이름을
+  // 실으려면 BE가 발행 시점에 계산한 refs(assignee)가 필요하다(work_item_target과
+  // 동형 원칙 — FE가 매 행마다 멤버 조회 API를 새로 부르면 CHANGES①(useOrgDomainLabels
+  // 행별 중복요청 제거)이 막은 것과 같은 N+1 클래스가 된다). msg_metadata['event']에
+  // 이미 실려 있다(_event_payload()가 additive로 그대로 투영, BE 스키마 변경 0 —
+  // 그라운딩 확認: _publish_registry_event_core가 event_context 전체를 msg_metadata에
+  // 저장하고 그 dict가 이미 refs를 포함).
+  refs?: Record<string, string | null | { found: boolean; token?: string; type?: string; name?: string }>,
 ): string | null {
   if (!eventKey || !payload) return null;
-  const { tBoard, tCage, tDashboard, tEventCard, tEntity, domainLabels } = helpers;
+  const { tBoard, tCage, tDashboard, tEventCard, tEntity, tOutcomeLoop, domainLabels } = helpers;
 
   if (eventKey === 'preset.gate.verdict') {
     const gateType = payload['gate_type'];
@@ -493,6 +610,41 @@ export function composeEventPreviewLine(
     const typeLabel = typeof workItemType === 'string' ? entityTypeLabel(workItemType, tEntity) : null;
     const summary = typeLabel ? `${typeLabel} ${fromLabel} → ${toLabel}` : `${fromLabel} → ${toLabel}`;
     return `${tEventCard('statusChangedHeader')} · ${summary}`;
+  }
+
+  // story #3893(유나 §⑤ 확定 2026-09-14 19:47Z) — "작업 배정 · {work_item_type 라벨} →
+  // {담당자 이름}"(예 "작업 배정 · 스토리 → 미르코"). 담당자 미해소(refs.assignee 없음/
+  // found:false)는 다른 필수 필드 부재와 동일하게 null(과잉 일반화 금지 — 이 preset은
+  // 담당자 없이는 문장이 성립하지 않는다, work_item_type/verdict 부재 시 null과 동형).
+  if (eventKey === 'preset.work.assigned') {
+    const workItemType = payload['work_item_type'];
+    const typeLabel = typeof workItemType === 'string' ? entityTypeLabel(workItemType, tEntity) : null;
+    const assigneeRef = refs?.['assignee'];
+    const assigneeName =
+      assigneeRef && typeof assigneeRef === 'object' && assigneeRef.found && typeof assigneeRef.name === 'string'
+        ? assigneeRef.name
+        : null;
+    if (!typeLabel || !assigneeName) return null;
+    return `${tEventCard('workAssignedHeader')} · ${typeLabel} → ${assigneeName}`;
+  }
+
+  // story #3893(유나 §⑤ 확定 「목표 측정 · {metric_value}{metric_unit}」) — CHANGES①(PO
+  // PR#4298 리뷰 2026-09-15)로 metric_unit 해석 그라운딩 정정: 원 문구는 metric_unit을
+  // 「%」류 단위 기호로 가정했으나 실 값은 metric **이름**(completion_pct·GA4 임의
+  // 문자열, outcome_scorer.py 그라운딩) — outcomeLoop.metric_{slug} 낱말(기존 재사용,
+  // 신규 어간 0)로 등재 4종만 매핑하고 미등재는 값만("목표 측정 · 12", raw slug 0).
+  // 등재분은 라벨 자체가 단위 기호를 품고 있어(예: 「완료율 %」) 공백으로 접합한다
+  // (metric_unit이 진짜 기호였을 때의 접미 접합과 다른 합성 — 그 가정 자체가 틀렸다).
+  if (eventKey === 'preset.goal.measured') {
+    const metricValue = payload['metric_value'];
+    if (metricValue === undefined || metricValue === null || metricValue === '') return null;
+    const metricUnit = payload['metric_unit'];
+    const unitLabel =
+      typeof metricUnit === 'string' && (METRIC_UNIT_KEYS as readonly string[]).includes(metricUnit)
+        ? tOutcomeLoop(`metric_${metricUnit}` as 'metric_velocity')
+        : null;
+    const summary = unitLabel ? `${metricValue} ${unitLabel}` : `${metricValue}`;
+    return `${tEventCard('goalMeasuredHeader')} · ${summary}`;
   }
 
   return null;

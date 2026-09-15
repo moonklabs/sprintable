@@ -47,7 +47,21 @@ interface ConversationItem {
   // 실어주는 additive 필드(msg_metadata['event'], _event_payload()와 동형 — conversations.py
   // GET /conversations 참고). 이벤트 메시지면 미리보기를 헤더+요약으로 조립하는 데 쓴다.
   // 없으면(구버전 캐시·일반 메시지 등) 기존 content 그대로 쓴다.
-  latest_message: { content: string; created_at: string; event?: { event_key: string; payload: Record<string, unknown> } | null } | null;
+  //
+  // story #3893 — `refs`는 이미 `_event_payload()`가 그대로 투영해오던 값(BE 스키마
+  // 변경 0, msg_metadata['event']에 애초부터 실려 있었다 — events.py
+  // `_publish_registry_event_core`의 event_context가 refs를 포함, 그라운딩 확認).
+  // 이 타입 선언에 없어 여태 FE가 못 읽었을 뿐 — preset.work.assigned 미리보기(담당자
+  // 이름)가 처음으로 이 값을 소비한다.
+  latest_message: {
+    content: string;
+    created_at: string;
+    event?: {
+      event_key: string;
+      payload: Record<string, unknown>;
+      refs?: Record<string, string | null | { found: boolean; token?: string; type?: string; name?: string }>;
+    } | null;
+  } | null;
   updated_at: string;
   unread_count?: number;
   participants?: Participant[];
@@ -130,6 +144,7 @@ function ConversationRow({
   const tCage = useTranslations('cage');
   const tDashboard = useTranslations('dashboard');
   const tEventCard = useTranslations('eventCard');
+  const tOutcomeLoop = useTranslations('outcomeLoop');
   // useLocale()은 순수 Context 읽기(HTTP 요청 0)라 행마다 불러도 되는 것 — CHANGES①이
   // 지적한 것은 useOrgDomainLabels(HTTP fetch를 매 마운트 발사)뿐이다.
   const locale = useLocale();
@@ -147,7 +162,8 @@ function ConversationRow({
   const eventPreview = composeEventPreviewLine(
     conv.latest_message?.event?.event_key,
     conv.latest_message?.event?.payload,
-    { tBoard, tCage, tDashboard, tEventCard, tEntity: t, domainLabels },
+    { tBoard, tCage, tDashboard, tEventCard, tEntity: t, tOutcomeLoop, domainLabels },
+    conv.latest_message?.event?.refs,
   );
   const preview = eventPreview ?? conv.latest_message?.content ?? t('noMessages');
   const time = conv.latest_message?.created_at ?? conv.updated_at;

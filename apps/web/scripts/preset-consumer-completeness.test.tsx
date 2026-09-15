@@ -20,6 +20,8 @@ import { NextIntlClientProvider } from 'next-intl';
 import { readFileSync, readdirSync, statSync } from 'fs';
 import path from 'path';
 import { ChatBubble } from '../src/components/chat/chat-bubble';
+import { EventBlockCard } from '../src/components/chat/event-block-card';
+import { parseBlockTemplate } from '@/lib/block-template';
 import type { ChatMessage } from '@/hooks/use-chat-sse';
 import type { EventDefinitionSummary } from '@/lib/block-template';
 import koMessages from '../messages/ko.json';
@@ -133,6 +135,11 @@ describe('story #3886(가드) — preset 블록 템플릿 소비처 완전성(AC
 const BACKEND_ALEMBIC_VERSIONS_DIR = path.resolve(__dirname, '../../../backend/alembic/versions');
 const TARGET_MIGRATION_FILE = '0376_event_card_target_ref_and_ui_copy_t_namespace.py';
 const PRESET_KEYS = ['preset.work.status_changed', 'preset.gate.verdict'] as const;
+// story #3893 — 나머지 2 preset(work.assigned·goal.measured)의 최신 SSOT는 0377(별도
+// 파일 — 0376이 다룬 키와 서로소라 두 자가 독립적으로 공존한다, 이 파일이 하나를 고치며
+// 다른 하나를 헛돌게 만들지 않는다).
+const TARGET_MIGRATION_FILE_0377 = '0377_work_assigned_goal_measured_t_namespace.py';
+const PRESET_KEYS_0377 = ['preset.work.assigned', 'preset.goal.measured'] as const;
 
 /** 중괄호 짝을 찾되, 큰따옴표 문자열 리터럴(백슬래시 이스케이프 포함) 안의 `{`/`}`는
  * 세지 않는다 — 이 딕셔너리의 값 자체가 `"{{t.statusChangedHeader}}"`처럼 mustache
@@ -176,6 +183,7 @@ function extractTemplatesDict(filePath: string): Record<string, unknown> {
 }
 
 const MIGRATED_TEMPLATES = extractTemplatesDict(path.join(BACKEND_ALEMBIC_VERSIONS_DIR, TARGET_MIGRATION_FILE));
+const MIGRATED_TEMPLATES_0377 = extractTemplatesDict(path.join(BACKEND_ALEMBIC_VERSIONS_DIR, TARGET_MIGRATION_FILE_0377));
 
 const STATUS_CHANGED_0376 = {
   blocks: [
@@ -218,6 +226,52 @@ describe('story #3886(가드) — CHANGES(페드루 2026-09-14 18:27Z) TS 미러
   });
 });
 
+// story #3893 — work.assigned/goal.measured의 SSOT(0377) 미러+최신성 자. 0376 자와 완전
+// 병렬(대상 키 집합만 다름, 서로 간섭 0).
+const WORK_ASSIGNED_0377 = {
+  blocks: [
+    { type: 'header', text: '{{t.workAssignedHeader}}' },
+    { type: 'text', text: '**{{label.work_item_type}}**' },
+    { type: 'fields', fields: [
+      { label: '{{t.targetLabel}}', value: '{{label.work_item_target}}', optional: true },
+      { label: '{{t.assigneeLabel}}', value: '{{label.assignee_name}}', optional: true },
+      { label: '{{t.assignedByLabel}}', value: '{{label.assigned_by_name}}', optional: true },
+    ] },
+  ],
+};
+const GOAL_MEASURED_0377 = {
+  blocks: [
+    { type: 'header', text: '{{t.goalMeasuredHeader}}' },
+    { type: 'text', text: '{{t.metricValueLabel}} **{{payload.metric_value}}**' },
+    { type: 'fields', fields: [
+      { label: '{{t.goalLabel}}', value: '{{label.goal_target}}', optional: true },
+      { label: '{{t.unitLabel}}', value: '{{label.metric_unit_label}}', optional: true },
+      { label: '{{t.sourceLabel}}', value: '{{label.source_label}}', optional: true },
+      { label: '{{t.measuredAtLabel}}', value: '{{label.measured_at}}', optional: true },
+    ] },
+  ],
+};
+
+describe('story #3893(가드) — 0377 TS 미러 drift 자', () => {
+  it('TS 상수가 0377 마이그 파일의 _TEMPLATES와 바이트(구조) 동일하다 — 드리프트 시 RED', () => {
+    expect(MIGRATED_TEMPLATES_0377['preset.work.assigned']).toEqual(WORK_ASSIGNED_0377);
+    expect(MIGRATED_TEMPLATES_0377['preset.goal.measured']).toEqual(GOAL_MEASURED_0377);
+  });
+
+  it('0377이 이 두 preset 키를 마지막으로 건드린 마이그레이션이다(더 최신 파일이 같은 키를 또 바꾸면 RED)', () => {
+    const files = readdirSync(BACKEND_ALEMBIC_VERSIONS_DIR).filter((f) => /^\d{4}_.*\.py$/.test(f));
+    let latest: { file: string; revision: number } | null = null;
+    for (const f of files) {
+      const revision = Number(f.slice(0, 4));
+      const content = readFileSync(path.join(BACKEND_ALEMBIC_VERSIONS_DIR, f), 'utf8');
+      const touchesAny = PRESET_KEYS_0377.some((k) => content.includes(`"${k}"`));
+      if (!touchesAny) continue;
+      if (!latest || revision > latest.revision) latest = { file: f, revision };
+    }
+    expect(latest?.file).toBe(TARGET_MIGRATION_FILE_0377);
+  });
+});
+
 function catalogOf(entries: Record<string, unknown>): Record<string, EventDefinitionSummary> {
   const out: Record<string, EventDefinitionSummary> = {};
   for (const [key, block_template] of Object.entries(entries)) {
@@ -229,6 +283,8 @@ function catalogOf(entries: Record<string, unknown>): Record<string, EventDefini
 const EVENT_CATALOG = catalogOf({
   'preset.work.status_changed': STATUS_CHANGED_0376,
   'preset.gate.verdict': GATE_VERDICT_0376,
+  'preset.work.assigned': WORK_ASSIGNED_0377,
+  'preset.goal.measured': GOAL_MEASURED_0377,
 });
 
 function expectNoMissingMarkers(text: string) {
@@ -313,6 +369,139 @@ describe('story #3886(가드) — EventBlockCard 실 소비 렌더(AC1)', () => 
     await act(async () => { root.render(wrap(<ChatBubble message={message} isMine={false} eventDefinitionsByKey={EVENT_CATALOG} />)); });
     expectNoMissingMarkers(container.textContent ?? '');
   });
+
+  // story #3893 — work.assigned/goal.measured(0377). member ref는 work_item과 다른
+  // 2모양(found/found:false, 리졸버 자체가 없는 갈래는 없음 — 항상 단일 리졸버).
+  it('work.assigned — 담당자·배정자 둘 다 찾음(found:true) ⟨missing⟩ 0', async () => {
+    const message: ChatMessage = {
+      ...baseMessage, content: '[이벤트] preset.work.assigned', sender_type: 'agent',
+      event: {
+        event_key: 'preset.work.assigned',
+        payload: { work_item_type: 'story', work_item_id: 'S-3', assignee_member_id: 'M-1', assigned_by_member_id: 'M-2' },
+        refs: {
+          work_item: { found: true, token: '[결제 흐름 재설계](entity:story:S-3)' },
+          assignee: { found: true, name: '미르코' },
+          assigned_by: { found: true, name: '페드루' },
+        },
+      },
+    };
+    await act(async () => { root.render(wrap(<ChatBubble message={message} isMine={false} eventDefinitionsByKey={EVENT_CATALOG} />)); });
+    expectNoMissingMarkers(container.textContent ?? '');
+  });
+
+  it('work.assigned — 담당자 못 찾음(found:false)·배정자 필드 부재(optional 생략) ⟨missing⟩ 0, en 로케일', async () => {
+    const message: ChatMessage = {
+      ...baseMessage, content: '[이벤트] preset.work.assigned', sender_type: 'agent',
+      event: {
+        event_key: 'preset.work.assigned',
+        payload: { work_item_type: 'task', work_item_id: 'T-1', assignee_member_id: 'M-9' },
+        refs: {
+          work_item: { found: false, type: 'task' },
+          assignee: { found: false },
+        },
+      },
+    };
+    await act(async () => { root.render(wrapEn(<ChatBubble message={message} isMine={false} eventDefinitionsByKey={EVENT_CATALOG} />)); });
+    expectNoMissingMarkers(container.textContent ?? '');
+  });
+
+  // story #3893 CHANGES①②③(PO PR#4298 리뷰 2026-09-15) — metric_unit은 등재 metric
+  // (completion_pct)만 라벨 해석, goal_id는 refs.goal(epic 갈래) 경유, measured_at은
+  // formatLocaleDateTime 경유 — 셋 다 payload/refs 파생이라 refs.goal이 있으면 렌더.
+  it('goal.measured — 목표(refs.goal found:true)·등재 단위·측정시각 전부 있음 ⟨missing⟩ 0', async () => {
+    const message: ChatMessage = {
+      ...baseMessage, content: '[이벤트] preset.goal.measured', sender_type: 'agent',
+      event: {
+        event_key: 'preset.goal.measured',
+        payload: { goal_id: 'G-1', metric_value: 12, metric_unit: 'completion_pct', source: 'internal_ops', measured_at: '2026-09-14T00:00:00.000Z' },
+        refs: { goal: { found: true, token: '[결제 트랙 완주](entity:epic:G-1)' } },
+      },
+    };
+    await act(async () => { root.render(wrap(<ChatBubble message={message} isMine={false} eventDefinitionsByKey={EVENT_CATALOG} />)); });
+    expectNoMissingMarkers(container.textContent ?? '');
+    // story #3893 CHANGES 2차(PO PR#4298 2차 리뷰) — 「출처」가 raw slug("internal_ops")
+    // 그대로 새던 결함의 회귀 고정: 매핑된 낱말(hypotheses.sourceInternal="내부")만
+    // 보이고 raw slug는 0이어야 한다.
+    expect(container.textContent).toContain('내부');
+    expect(container.textContent).not.toContain('internal_ops');
+  });
+
+  it('goal.measured — 목표 못 찾음(found:false)·미등재 단위(GA4 임의값)·측정시각 부재 전부 optional 생략 ⟨missing⟩ 0, en 로케일', async () => {
+    const message: ChatMessage = {
+      ...baseMessage, content: '[이벤트] preset.goal.measured', sender_type: 'agent',
+      event: {
+        event_key: 'preset.goal.measured',
+        payload: { goal_id: 'G-2', metric_value: 8, metric_unit: 'sessions', source: 'ga4' },
+        refs: { goal: { found: false, type: 'epic' } },
+      },
+    };
+    await act(async () => { root.render(wrapEn(<ChatBubble message={message} isMine={false} eventDefinitionsByKey={EVENT_CATALOG} />)); });
+    expectNoMissingMarkers(container.textContent ?? '');
+    expect(container.textContent).not.toContain('sessions');
+    // 등재 source(ga4)는 en에서도 매핑된 낱말("GA4")만 보인다(raw slug와 우연히 같은
+    // 문자열이라 별도 not.toContain은 의미 없음 — 매핑 낱말 출현 자체를 양성대조).
+    expect(container.textContent).toContain('GA4');
+  });
+
+  it('goal.measured — source 미등재(닫힌 집합 밖 임의값)는 optional 생략 ⟨missing⟩ 0, raw slug 0', async () => {
+    const message: ChatMessage = {
+      ...baseMessage, content: '[이벤트] preset.goal.measured', sender_type: 'agent',
+      event: {
+        event_key: 'preset.goal.measured',
+        payload: { goal_id: 'G-4', metric_value: 3, source: 'unknown_source_xyz' },
+        refs: {},
+      },
+    };
+    await act(async () => { root.render(wrap(<ChatBubble message={message} isMine={false} eventDefinitionsByKey={EVENT_CATALOG} />)); });
+    expectNoMissingMarkers(container.textContent ?? '');
+    expect(container.textContent).not.toContain('unknown_source_xyz');
+  });
+
+  it('goal.measured — refs.goal 키 자체 부재(구버전 캐시)도 optional 생략 ⟨missing⟩ 0', async () => {
+    const message: ChatMessage = {
+      ...baseMessage, content: '[이벤트] preset.goal.measured', sender_type: 'agent',
+      event: {
+        event_key: 'preset.goal.measured',
+        payload: { goal_id: 'G-3', metric_value: 5, source: 'internal_ops' },
+        refs: {},
+      },
+    };
+    await act(async () => { root.render(wrap(<ChatBubble message={message} isMine={false} eventDefinitionsByKey={EVENT_CATALOG} />)); });
+    expectNoMissingMarkers(container.textContent ?? '');
+    expect(container.textContent).toContain('내부');
+  });
+});
+
+// story #3893 CHANGES④(PO PR#4298 리뷰 2026-09-15) — 조직 이벤트 정의 페이지
+// (EventDefinitionSummary, organization/event-definition-summary.tsx)가 `EventBlockCard`
+// 를 `refs` 프롭 없이(샘플 payload만) 호출한다는 걸 실측 — 0377의 `preset.work.assigned`
+// 초안이 `{{label.assignee_name}}`을 비-optional text 블록에 직접 넣어 이 화면에서
+// `⟨missing: label.assignee_name⟩`이 샜다(처방: text 블록을 payload 파생만으로 좁힘).
+// 이 자가 그 사고 클래스를 직접 재현·고정한다 — EventBlockCard를 `refs` 완전 생략으로
+// 호출(그 페이지와 똑같은 호출 모양)해도 4 preset 전부 ⟨missing⟩ 0이어야 한다.
+describe('story #3893(가드) — EventDefinitionSummary와 동형 호출(refs 완전 부재) ⟨missing⟩ 0', () => {
+  const SAMPLE_PAYLOADS: Record<string, Record<string, unknown>> = {
+    'preset.work.status_changed': { work_item_type: 'story', from_status: 'ready-for-dev', to_status: 'in-progress', work_item_id: '예시 work_item_id', note: '예시 note' },
+    'preset.gate.verdict': { gate_type: 'external_publish', verdict: 'approved', work_item_id: '예시 work_item_id', resolution_note: '예시 resolution_note' },
+    'preset.work.assigned': { work_item_type: 'story', work_item_id: '예시 work_item_id', assignee_member_id: '예시 assignee_member_id', assigned_by_member_id: '예시 assigned_by_member_id' },
+    'preset.goal.measured': { goal_id: '예시 goal_id', metric_value: 0, metric_unit: '예시 metric_unit', source: '예시 source', measured_at: new Date(0).toISOString() },
+  };
+
+  for (const [key, template] of Object.entries({
+    'preset.work.status_changed': STATUS_CHANGED_0376,
+    'preset.gate.verdict': GATE_VERDICT_0376,
+    'preset.work.assigned': WORK_ASSIGNED_0377,
+    'preset.goal.measured': GOAL_MEASURED_0377,
+  })) {
+    it(`${key} — refs 프롭 없이(샘플 payload만) 렌더해도 ⟨missing⟩ 0`, async () => {
+      const parsed = parseBlockTemplate(template);
+      expect(parsed).not.toBeNull();
+      await act(async () => {
+        root.render(wrap(<EventBlockCard template={parsed!} payload={SAMPLE_PAYLOADS[key]!} />));
+      });
+      expectNoMissingMarkers(container.textContent ?? '');
+    });
+  }
 });
 
 describe('story #3886(가드) — ApprovalRequestCard(twin 소비처) 실 소비 렌더(AC1)', () => {
