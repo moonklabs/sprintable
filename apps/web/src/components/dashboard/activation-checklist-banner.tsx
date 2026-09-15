@@ -133,7 +133,11 @@ export function ActivationChecklistBanner() {
                   onClick={() => void handleFirstInstructionClick()}
                   disabled={navigatingToInstruction || !projectId}
                   className={cn(
-                    'h-auto w-full min-w-0 justify-start gap-1.5 rounded px-1 py-0.5 text-left text-sm font-normal hover:underline disabled:no-underline',
+                    // story #3907(PO 눈 리뷰, 3901 캡처 그라운딩) — Button의 size="default"
+                    // 변형이 min-h-11(44px)·border(형제 <Link>/<li>엔 없음)를 얹어 5번째
+                    // 행만 키·아이콘 x좌표가 밀렸다. h-auto/min-w-0만으론 min-h-11이
+                    // 오버라이드 안 됨(다른 CSS 속성) — min-h-0·border-0로 명시 상쇄.
+                    'h-auto min-h-0 w-full min-w-0 border-0 justify-start gap-1.5 rounded px-1 py-0.5 text-left text-sm font-normal hover:underline disabled:no-underline',
                     // story #3839(critical·2pt, 카디르 QA 2026-09-14 01:18Z) — text-muted-
                     // foreground(ink-3 v3값 #6E6C67)가 이 Alert variant="info"의 blue-soft
                     // (#E7EDF7) 배경 위에서 대비 미달(4.3:1<4.5, axe color-contrast 신규
