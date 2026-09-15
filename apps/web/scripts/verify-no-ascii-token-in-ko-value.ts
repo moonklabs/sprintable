@@ -168,7 +168,11 @@ export const WHOLE_VALUE_ALLOWLIST: ReadonlySet<string> = new Set<string>([
   // 필드명과 어긋난다.
   'channelConnect.appCredentialsAppIdLabel', 'channelConnect.appCredentialsAppSecretLabel',
   'onboarding.mcpConfigTitle', 'recruiter.equipMcpConfigLabel', 'settings.agentMcpTitle',
-  'settings.agentWebhookTitle', 'settings.ghAppTitle', 'docs.formatHtml',
+  'settings.ghAppTitle', 'docs.formatHtml',
+  // settings.agentWebhookTitle: story #3926 후속(유나 design CHANGES·PO 確定
+  // 2026-09-15 11:27Z) — 같은 설정 화면에 「웹훅」 17키·「Webhook URL」 3키 혼재가
+  // 발견돼 「웹훅 URL」로 통일(URL만 기술어 유지) → 이 키는 더 이상 순 ASCII가
+  // 아니라 이 목록에서 제거(stale 자가검출).
 
   // 이니셜리즘(축1 TOKEN_ALLOWLIST와 동일 근거 — 프로토콜/표준/외부 도구 고유명, 자리별
   // 판단 불필요) — 축2(전체값)는 별도 baseline이라 키마다 재등재 필요.
@@ -348,13 +352,10 @@ export const LOWERCASE_WORD_ALLOWLIST: ReadonlySet<string> = new Set<string>([
 // 3926 스코프 밖, 가드는 지금 도입). 각 PR이 착지하면 값이 바뀌어 이 스캔에서 자동으로
 // 안 걸리고, stale 자가검출이 그 시점에 이 baseline 항목을 걸어 정리를 강제한다(축1·2와
 // 동일 메커니즘) — #4331 착지 뒤 실측대로 board.workcellGateAction·proofCapsule.gate.label·
-// proofCapsule.evidence.autoFailed/autoPassed 4건을 이미 지웠다(stale 자가검출이 실제로
-// 작동함을 그대로 증명). 남은 2키(3 word-entry)는 #4332(#3925) 착지 대기.
-export const LOWERCASE_WORD_BASELINE: ReadonlySet<string> = new Set<string>([
-  'recruiter.scopeTitle::scoped', // #4332 — "스코프 키 권한"으로 전환 中
-  'recruiter.scopeTitle::key', // #4332 — 위와 동일 착지
-  'board.trustClassicView::status', // #4332 — "5단계 클래식"으로 전환 中
-]);
+// proofCapsule.evidence.autoFailed/autoPassed 4건, #4332 착지 뒤 recruiter.scopeTitle
+// (scoped·key)·board.trustClassicView(status) 3건을 지웠다(stale 자가검출이 실제로
+// 작동함을 그대로 증명, 2회째). 현재 baseline 0건 — 목표(전량 처리 뒤 0)대로 도달.
+export const LOWERCASE_WORD_BASELINE: ReadonlySet<string> = new Set<string>([]);
 
 export function computeNewLowercaseWordViolations(
   refs: LowercaseWordRef[],
