@@ -977,3 +977,142 @@ def test_mutation_removing_backend_relevant_guard_reintroduces_false_positive(ca
         artifact_dir, expected_shard_count=8, shard_result="success", backend_relevant="false",
     )
     assert exit_code == 1, "뮤테이션이 걸리지 않았다(backend_relevant 무시하고도 exit 0이 나왔다)"
+
+
+# ── story #3911(CI 후속) — 등재 weight 자체가 낡아 own-weight 여유축(#3636)이 실제
+# 클린 런 소요보다 훨씬 낮게 잡혀 있던 사고 2건(2026-09-15, 한 시간 새 세 번째 표본까지
+# 포함해 fleet 25분씩 rerun 물림).
+#
+# ① PR #4308(run 34928133926, shard 3) — tests/test_3497_insight_snapshots.py 163s>151.2s
+# ② PR #4311(run 34929762296, shard 3) — 같은 파일 134s>120.0s
+# ③ PR #4314(run 34932958948, shard 6) — tests/test_3502_insights_board.py 161s>135.8s
+#
+# 그라운딩(포크 실측, run 60개 창 — story #3911 AC0): "동시 CI run 수"를 부하 대리
+# 지표로 써 봤으나 상관관계가 없었다(클린 run도 동시성 3~6에서 관측, 사고 run과 겹침).
+# 대신 등재 weight 자체가 이미 낡아 있었다 — test_3497(등재 34.0s)의 **클린** 런 실측은
+# 49~59s(등재 대비 1.4~1.7배, 처음부터 과소), test_3502(등재 45.0s)의 클린 실측은
+# 50~57s(1.1~1.3배). 사고 경과치(163/134/161s)는 클린 기준선 대비 2.3~3.4배로,
+# «러너 전체가 느려진 정규화 대상 편차»가 아니라 **이 두 파일의 등재값이 실측을
+# 못 따라간** 것이 근본 — PO 처방 (b) 그대로: 등재 가중치를 실측으로 재기준선한다
+# (같은 run 동시 부하 보정 (a)는 상관관계 증거가 없어 채택하지 않음).
+#
+# ⛔fix(2026-09-15, PO 재측 정정) — 최초 60.0(두 파일 공통)안은 PR#4318 자체의
+# shard-durations 아티팩트에서 PO가 직접 재측한 결과와 어긋났다: 클린 run
+# 34932596611(PR#4313, success) test_3502=**62.0s**가 60.0을 넘음(같은 창의 run
+# 34932229501(PR#4312, success)은 test_3497=56.0·test_3502=49.0 — 이쪽은 60.0 안). 「클린
+# 최댓값 위 여유」 전제가 test_3502에서만 깨져 있었다 — test_3497은 60.0 유지, test_3502만
+# 관측 최댓값(62.0) 위로 재상향(70.0). 알고리즘(slow_files_normalized 자체)은 무변경 —
+# 데이터만 고친다.
+
+_S3911_INCIDENT_A_ELAPSED = {
+    "tests/normal_a.py": 25.2, "tests/normal_b.py": 25.2, "tests/normal_c.py": 25.2,
+    "tests/test_3497_insight_snapshots.py": 163.0,
+}
+_S3911_INCIDENT_A_WEIGHTS_OLD = {
+    "tests/normal_a.py": 10.0, "tests/normal_b.py": 10.0, "tests/normal_c.py": 10.0,
+    "tests/test_3497_insight_snapshots.py": 34.0,
+}  # median_ratio=2.52 → threshold=151.2(PR#4308 run 34928133926 실사고와 일치)
+
+_S3911_INCIDENT_B_ELAPSED = {
+    "tests/normal_a.py": 20.0, "tests/normal_b.py": 20.0, "tests/normal_c.py": 20.0,
+    "tests/test_3497_insight_snapshots.py": 134.0,
+}
+_S3911_INCIDENT_B_WEIGHTS_OLD = {
+    "tests/normal_a.py": 10.0, "tests/normal_b.py": 10.0, "tests/normal_c.py": 10.0,
+    "tests/test_3497_insight_snapshots.py": 34.0,
+}  # median_ratio=2.0 → threshold=120.0(PR#4311 run 34929762296 실사고와 일치)
+
+_S3911_INCIDENT_C_ELAPSED = {
+    "tests/normal_a.py": 22.633333, "tests/normal_b.py": 22.633333, "tests/normal_c.py": 22.633333,
+    "tests/test_3502_insights_board.py": 161.0,
+}
+_S3911_INCIDENT_C_WEIGHTS_OLD = {
+    "tests/normal_a.py": 10.0, "tests/normal_b.py": 10.0, "tests/normal_c.py": 10.0,
+    "tests/test_3502_insights_board.py": 45.0,
+}  # median_ratio≈2.263333 → threshold≈135.8(PR#4314 run 34932958948 실사고와 일치)
+
+_S3911_NEW_WEIGHT_3497 = 60.0  # 클린 실측 최댓값(59s, PO 재측 56s 포함) 위 여유 반올림
+_S3911_NEW_WEIGHT_3502 = 70.0  # 클린 실측 최댓값(PO 재측 62.0s) 위 여유 반올림 — 60.0은 부족했음(위 fix 참고)
+
+
+def test_s3911_incident_a_still_fails_with_stale_registered_weight():
+    """뮤테이션(AC2 양성대조) — 낡은 등재값(34.0)으로는 실사고 ①이 오늘도 재현된다
+    (own-weight 여유축=34.0*3.0=102.0이 163.0보다 한참 낮다 — 근본원인 고정)."""
+    mod = _load()
+    slow, threshold, _ = mod.slow_files_normalized(_S3911_INCIDENT_A_ELAPSED, _S3911_INCIDENT_A_WEIGHTS_OLD)
+    assert threshold == pytest.approx(151.2)
+    assert slow == ["tests/test_3497_insight_snapshots.py"]
+
+
+def test_s3911_incident_b_still_fails_with_stale_registered_weight():
+    """뮤테이션(AC2 양성대조) — 실사고 ②도 낡은 등재값으로 재현(own-weight
+    여유축=102.0 < 134.0)."""
+    mod = _load()
+    slow, threshold, _ = mod.slow_files_normalized(_S3911_INCIDENT_B_ELAPSED, _S3911_INCIDENT_B_WEIGHTS_OLD)
+    assert threshold == pytest.approx(120.0)
+    assert slow == ["tests/test_3497_insight_snapshots.py"]
+
+
+def test_s3911_incident_c_still_fails_with_stale_registered_weight():
+    """뮤테이션(AC2 양성대조) — 실사고 ③도 낡은 등재값으로 재현(own-weight
+    여유축=45.0*3.0=135.0 < 161.0 — 근소하지만 실측과 정확히 일치하는 경계)."""
+    mod = _load()
+    slow, threshold, _ = mod.slow_files_normalized(_S3911_INCIDENT_C_ELAPSED, _S3911_INCIDENT_C_WEIGHTS_OLD)
+    assert threshold == pytest.approx(135.8, abs=0.1)
+    assert slow == ["tests/test_3502_insights_board.py"]
+
+
+def test_s3911_incident_a_resolved_by_rebaselined_weight():
+    """⭐story #3911 핵심(처방) — test_3497의 등재값을 60.0으로 재기준선하면
+    own-weight 여유축(180.0)이 163.0보다 커져 실사고 ①이 더는 FAIL이 아니다."""
+    mod = _load()
+    weights = dict(_S3911_INCIDENT_A_WEIGHTS_OLD)
+    weights["tests/test_3497_insight_snapshots.py"] = _S3911_NEW_WEIGHT_3497
+    slow, _, _ = mod.slow_files_normalized(_S3911_INCIDENT_A_ELAPSED, weights)
+    assert slow == [], f"재기준선 후에도 여전히 걸림: {slow}"
+
+
+def test_s3911_incident_b_resolved_by_rebaselined_weight():
+    """⭐실사고 ②도 재기준선(60.0) 후 FAIL 해소(180.0 > 134.0)."""
+    mod = _load()
+    weights = dict(_S3911_INCIDENT_B_WEIGHTS_OLD)
+    weights["tests/test_3497_insight_snapshots.py"] = _S3911_NEW_WEIGHT_3497
+    slow, _, _ = mod.slow_files_normalized(_S3911_INCIDENT_B_ELAPSED, weights)
+    assert slow == [], f"재기준선 후에도 여전히 걸림: {slow}"
+
+
+def test_s3911_incident_c_resolved_by_rebaselined_weight():
+    """⭐실사고 ③도 재기준선(70.0, test_3502 전용) 후 FAIL 해소(210.0 > 161.0)."""
+    mod = _load()
+    weights = dict(_S3911_INCIDENT_C_WEIGHTS_OLD)
+    weights["tests/test_3502_insights_board.py"] = _S3911_NEW_WEIGHT_3502
+    slow, _, _ = mod.slow_files_normalized(_S3911_INCIDENT_C_ELAPSED, weights)
+    assert slow == [], f"재기준선 후에도 여전히 걸림: {slow}"
+
+
+def test_s3911_registered_weights_json_updated():
+    """실 등재 파일(infra/destructive-schema-shard-weights/)이 재기준선 값을 실제로
+    담고 있는지 — 위 단위 테스트는 값을 손으로 넣어 알고리즘만 검증하므로, 이 테스트가
+    "그 값이 실제 등재 파일에도 반영됐다"는 배선을 고정한다. 두 파일이 서로 다른
+    값(60.0/70.0)인 이유는 위 PO 재측 정정 fix 참고."""
+    mod = _load()
+    weights = mod.load_weights()
+    assert weights["tests/test_3497_insight_snapshots.py"] == _S3911_NEW_WEIGHT_3497
+    assert weights["tests/test_3502_insights_board.py"] == _S3911_NEW_WEIGHT_3502
+
+
+def test_s3911_genuinely_hanging_file_still_caught_after_rebaseline():
+    """회귀 0(AC1 "진짜 멈춤은 여전히 잡힌다") — 재기준선(60.0) 후에도 그 파일이
+    러너 정상(배율~1) 상태에서 자기 weight의 3배 이상(180s+)로 튀면 여전히 FAIL."""
+    mod = _load()
+    elapsed = {
+        "tests/normal_a.py": 10.0, "tests/normal_b.py": 10.0, "tests/normal_c.py": 10.0,
+        "tests/test_3497_insight_snapshots.py": 200.0,  # 60.0의 3배(180.0) 초과 — 진짜 회귀
+    }
+    weights = {
+        "tests/normal_a.py": 10.0, "tests/normal_b.py": 10.0, "tests/normal_c.py": 10.0,
+        "tests/test_3497_insight_snapshots.py": _S3911_NEW_WEIGHT_3497,
+    }
+    slow, threshold, _ = mod.slow_files_normalized(elapsed, weights)
+    assert slow == ["tests/test_3497_insight_snapshots.py"]
+    assert threshold == 60.0  # 정상 러너(배율 1.0)
