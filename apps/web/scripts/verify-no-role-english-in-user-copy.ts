@@ -6,16 +6,31 @@
  * in-ko-value.ts)는 대문자 토큰(`\b[A-Z]{2,}\b`)·값 전체 순 ASCII만 봐서 소문자 `owner`/
  * `admin`이 한국어 문장에 섞인 자리는 원리상 못 잡는다 — 축이 다른 자매 가드다.
  *
+ * story #3906(2026-09-15) — `member` 슬러그도 같은 클래스로 편입. recruiter.deployedMember
+ * ="member"(채용 완료 카드 배지, ko/en 동일 영문 소문자)가 실물 — 어조 가드(matchesFormal
+ * Register)는 합니다체가 아니라서, 이 가드는 owner/admin만 봐서 둘 다 놓쳤다. settings.
+ * agentRoleMember="구성원"(이웃 배지, 같은 화면 agentRoleAdmin="관리자"와 짝)이 이미 확定된
+ * 정본 — deployedMember를 그 값으로 맞춘다. `recruiter` 네임스페이스를 TARGET_NAMESPACES에
+ * 새로 추가(이전까지 스캔 대상이 아니었음 — 그래서 deployedMember="member"가 지금까지
+ * 이 가드에 한 번도 안 걸렸다).
+ *
  * ## 기전 — messages/ko.json에서 `content`·`organization`·`pricingPlans`·`contentRules`·
- * `settings` 네임스페이스만 재귀 순회, leaf 문자열 값에서 단어경계 소문자 슬러그
- * `\b(owner|admin)\b`(ASCII)를 검출. 자리(키 경로)가 ALLOWLIST에 있으면 예외 — 사용자가
- * 역할 필드에 실제로 타이핑하는 리터럴 슬러그를 예시로 보여주는 placeholder는 정당한
- * 노출이라 허용한다.
+ * `settings`·`recruiter` 네임스페이스만 재귀 순회, leaf 문자열 값에서 단어경계 소문자 슬러그
+ * `\b(owner|admin|member)\b`(ASCII)를 검출. 자리(키 경로)가 ALLOWLIST에 있으면 예외 —
+ * 사용자가 역할 필드에 실제로 타이핑하는 리터럴 슬러그를 예시로 보여주는 placeholder는
+ * 정당한 노출이라 허용한다.
  *
  * ## 대상 네임스페이스를 한정한 이유 — 영어 UI(en.json)나 기술 키(로그·이벤트명 등)까지
  * 훑으면 오탐이 는다. 이 카드가 확定한 «사용자 문장» 표면은 이 네임스페이스들뿐이라 스코프를
  * 거기로 고정한다. settings는 #3892(PR #4295)가 settings.* 역할 낱말을 소유자/관리자로
  * 정리해 develop에 착지한 뒤 승격됐다(그 전에 넣었으면 settings 잔존 슬러그로 CI RED).
+ * recruiter는 #3906이 deployedMember·roleGuide를 정리한 뒤 승격.
+ *
+ * ⛔#3906 그라운딩(head 전수 재측)에서 `cage.reassignedBy`의 `{admin}`·`chats.
+ * policyDeniedAllowlistMiss`의 `{member}`도 함께 걸렸으나 둘 다 렌더 시점에 실제 사람
+ * 식별자로 치환되는 보간 변수 «이름»(코드)이지 사용자에게 그대로 보이는 영문 낱말이 아니다
+ * — cage·chats 둘 다 TARGET_NAMESPACES 밖이라(이 카드는 recruiter만 추가) 이 가드가 원래
+ * 안 본다. 그 상태 그대로 둔다(발명 0 — 이 카드 범위는 recruiter뿐).
  */
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -30,12 +45,13 @@ export interface RoleSlugRef {
 // 이 카드가 확定한 «사용자 문장» 네임스페이스 — 여기 값만 검사한다.
 // settings는 #3892(PR #4295)가 settings.* 역할 낱말을 소유자/관리자로 정리한 뒤 승격됐다
 // (그 전에 넣었으면 CI RED였다 — 만료 조건: #4295 develop 착지).
-export const TARGET_NAMESPACES: readonly string[] = ['content', 'organization', 'pricingPlans', 'contentRules', 'settings'];
+export const TARGET_NAMESPACES: readonly string[] = ['content', 'organization', 'pricingPlans', 'contentRules', 'settings', 'recruiter'];
 
 // 단어경계 소문자 ASCII 슬러그. Korean 음절·`/`·`·`(middot)·공백은 전부 non-word라
 // "owner/admin"·"owner·admin"·"owner가"·"조직 owner에게" 모두 매칭된다. 대문자(Owner)나
 // 부분 문자열(coowner·administrator)은 매칭 안 된다(standalone lowercase only).
-const ROLE_SLUG_RE = /\b(owner|admin)\b/g;
+// story #3906 — `member`도 같은 클래스(recruiter.deployedMember="member" 실물).
+const ROLE_SLUG_RE = /\b(owner|admin|member)\b/g;
 
 // ALLOWLIST — 자리(키 경로) 단위 영구 예외. 사용자가 역할 필드에 실제로 입력하는 리터럴
 // 슬러그를 예시로 보여주는 placeholder(값에 "예: owner, admin"). 여기서 `owner`/`admin`은
@@ -57,7 +73,7 @@ function flatten(obj: Record<string, unknown>, prefix: string, out: Map<string, 
   }
 }
 
-/** 대상 4개 네임스페이스의 leaf 문자열만 dot-path로 평탄화. */
+/** 대상 네임스페이스(TARGET_NAMESPACES)의 leaf 문자열만 dot-path로 평탄화. */
 export function flattenTargetNamespaces(koJson: Record<string, unknown>): Map<string, string> {
   const out = new Map<string, string>();
   for (const ns of TARGET_NAMESPACES) {
@@ -123,23 +139,24 @@ function main(): number {
   const violations = computeViolations(refs, ALLOWLIST);
 
   console.log(
-    `[story #3894] 사용자 문장 역할 슬러그(owner/admin) 스캔 — 대상 네임스페이스 ${TARGET_NAMESPACES.length}개 · ` +
+    `[story #3894] 사용자 문장 역할 슬러그(owner/admin/member) 스캔 — 대상 네임스페이스 ${TARGET_NAMESPACES.length}개 · ` +
       `leaf ${flat.size}개 · 검출 ${refs.length}건 · ALLOWLIST ${ALLOWLIST.size}건 · 위반 ${violations.length}건`,
   );
 
   if (violations.length > 0) {
-    console.error('\nFAIL: 사용자 문장 값 안에 영어 역할 슬러그(owner/admin) 발견 — 한국어 정본(소유자/관리자)으로 옮길 것:');
+    console.error('\nFAIL: 사용자 문장 값 안에 영어 역할 슬러그(owner/admin/member) 발견 — 한국어 정본(소유자/관리자)으로 옮길 것:');
     for (const r of violations.sort((a, b) => a.key.localeCompare(b.key))) {
       console.error(`  - ${r.key}="${r.value}" (슬러그: ${r.slug})`);
     }
     console.error(
-      '\n→ channelConnect 정본대로 owner→소유자 · admin→관리자로 치환할 것(조사 정합 주의: owner·admin이→소유자·관리자가). ' +
+      '\n→ channelConnect/settings 정본대로 owner→소유자 · admin→관리자 · member→구성원으로 치환할 것' +
+        '(조사 정합 주의: owner·admin·member이→소유자·관리자·구성원이). ' +
         '사용자가 역할 필드에 그대로 입력하는 리터럴 예시(placeholder)라면 이 스크립트의 ALLOWLIST에 사유와 함께 등재(PO 승인).',
     );
     return 1;
   }
 
-  console.log('\nOK: 대상 네임스페이스 사용자 문장에 영어 역할 슬러그(owner/admin) 없음(ALLOWLIST 예외 제외).');
+  console.log('\nOK: 대상 네임스페이스 사용자 문장에 영어 역할 슬러그(owner/admin/member) 없음(ALLOWLIST 예외 제외).');
   return 0;
 }
 
