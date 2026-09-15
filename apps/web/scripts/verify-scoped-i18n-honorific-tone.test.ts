@@ -341,7 +341,10 @@ describe('checkScopedNamespaceMinimums — 순수 함수', () => {
     const violations = checkScopedNamespaceMinimums({ board: { x: 'y' } }); // 등록된 네임스페이스 전부 없음
     const expected = loadHonorificScopeDir()
       .map((e) => ({ namespace: e.namespace, actualCount: 0, minExpected: e.minLeaf }))
-      .sort((a, b) => a.namespace.localeCompare(b.namespace));
+      // 가드는 SCOPED_NAMESPACES(=loadHonorificScopeDir의 파일명 .sort(), 코드포인트) 순으로
+      // 위반을 반환한다 — 기대값도 같은 코드포인트 순이어야 한다(localeCompare는 orgGatePolicy·
+      // orgBriefing↔organization에서 .sort()와 갈려 story #3920 착수 시 이 테스트를 깨뜨렸다).
+      .sort((a, b) => (a.namespace < b.namespace ? -1 : a.namespace > b.namespace ? 1 : 0));
     expect(violations).toEqual(expected);
   });
 
@@ -349,7 +352,10 @@ describe('checkScopedNamespaceMinimums — 순수 함수', () => {
     const violations = checkScopedNamespaceMinimums({ chats: { a: 'x', b: 'y' } }); // 2개뿐, 나머지는 아예 없음
     const expected = loadHonorificScopeDir()
       .map((e) => ({ namespace: e.namespace, actualCount: e.namespace === 'chats' ? 2 : 0, minExpected: e.minLeaf }))
-      .sort((a, b) => a.namespace.localeCompare(b.namespace));
+      // 가드는 SCOPED_NAMESPACES(=loadHonorificScopeDir의 파일명 .sort(), 코드포인트) 순으로
+      // 위반을 반환한다 — 기대값도 같은 코드포인트 순이어야 한다(localeCompare는 orgGatePolicy·
+      // orgBriefing↔organization에서 .sort()와 갈려 story #3920 착수 시 이 테스트를 깨뜨렸다).
+      .sort((a, b) => (a.namespace < b.namespace ? -1 : a.namespace > b.namespace ? 1 : 0));
     expect(violations).toEqual(expected);
   });
 
