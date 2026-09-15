@@ -17,10 +17,12 @@ import {
 // 과 공유 verify-scoped-i18n-honorific-tone.test.ts가 공통으로 import한다 — "실 키를
 // 스코프 밖 표본으로 쓰는 테스트 0"이 구조적으로 성립(더 이상 파일마다 재발명 불가).
 //
-// story #3927(민, 전역 가드 승격) 착지 뒤에는 이 헬퍼의 단언 방향이 뒤집힐 예정이다 —
-// "예외 목록에 없는 네임스페이스는 전부 잡힌다"가 새 기본이 되면 합성 ns도 걸려야 맞는
-// 쪽으로 바뀐다. 그때 이 모듈 하나만 갱신하면 모든 소비 파일에 전파된다(그게 이 분리의
-// 또 다른 이유 — 예전엔 파일마다 따로 고쳐야 했다).
+// story #3927(민, 전역 가드 승격, 2026-09-15) 착지 — 헬퍼의 단언 방향이 실제로 뒤집혔다.
+// "예외 목록(HONORIFIC_TONE_EXCEPTIONS)에 없는 네임스페이스는 전부 잡힌다"가 새 기본이라
+// 합성 ns도 이제 걸려야 맞다 — `assertOutOfScopeFixtureIgnoredByEffectiveKeys`를
+// `assertOutOfScopeFixtureCaughtByGlobalScan`으로 이름+본문 반전. 이 모듈 하나만
+// 갱신하면 모든 소비 파일(공유 테스트+per-story 전용 테스트)에 전파된다(그게 애초에 이
+// 분리를 한 이유 — 예전엔 파일마다 따로 고쳐야 했다).
 const OUT_OF_SCOPE_FIXTURE_NAMESPACE = '__outOfScopeFixture3903';
 export const OUT_OF_SCOPE_FIXTURE_KEY = `${OUT_OF_SCOPE_FIXTURE_NAMESPACE}.sample`;
 // "습니다"를 리터럴로 포함(NFC 그대로) — "입니다"류는 실 스캐너가 NFD 정규화 뒤에야
@@ -34,14 +36,20 @@ export function withOutOfScopeFixture(ko: Record<string, unknown>): Record<strin
   };
 }
 
-/** SCOPED_NAMESPACES 승격 뒤에도(resolveEffectiveScopedKeys 경유) 등재 밖 네임스페이스는
- * 여전히 무시됨을 합성 fixture로 증명한다 — 대부분의 "무관 PR no-op" 블록이 쓴다. */
-export function assertOutOfScopeFixtureIgnoredByEffectiveKeys(ko: Record<string, unknown>): void {
+/** story #3927 이후 — 전역 스캔(resolveEffectiveScopedKeys=flattenAllLeafKeys 경유)이라
+ * 등재 여부와 무관하게 새 네임스페이스도 반드시 잡힌다는 것을 합성 fixture로 증명한다 —
+ * "새 네임스페이스도 빠짐없이 걸린다"는 이 가드의 핵심 계약에 대한 양성대조(예전 "무관 PR
+ * no-op" 블록 대부분이 이걸 썼다 — 그 자리들은 이제 정반대 의미의 양성대조로 재사용). */
+export function assertOutOfScopeFixtureCaughtByGlobalScan(ko: Record<string, unknown>): void {
   const mutated = withOutOfScopeFixture(ko);
   expect(OUT_OF_SCOPE_FIXTURE_VALUE).toMatch(/습니다|ㅂ니다|십시오/);
   const effectiveKeys = resolveEffectiveScopedKeys(mutated);
-  expect(effectiveKeys).not.toContain(OUT_OF_SCOPE_FIXTURE_KEY);
-  expect(findHonorificToneInScopedKeys(mutated, effectiveKeys)).toEqual([]);
+  expect(effectiveKeys).toContain(OUT_OF_SCOPE_FIXTURE_KEY);
+  expect(findHonorificToneInScopedKeys(mutated, effectiveKeys)).toContainEqual({
+    key: OUT_OF_SCOPE_FIXTURE_KEY,
+    matches: ['습니다'],
+    value: OUT_OF_SCOPE_FIXTURE_VALUE,
+  });
 }
 
 /** SCOPED_KEYS(고정 리스트) 밖 키는 namespace 승격과 무관하게 애초에 안 본다는 것을

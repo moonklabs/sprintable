@@ -12,39 +12,42 @@
  * 빈-상태 카드 안에서 register가 섞여 있었다) — 그 자리에서 즉시 해요체로 고치고
  * SCOPED_KEYS에 추가해 총 104키.
  *
- * ⚠️scope는 **namespace 전체가 아니라 정확히 이 104키**다(SCOPED_KEYS). namespace
- * 통째로 스캔하면(예: `cage`·`goals`·`standup`) Mirko 감사가 의도적으로 거른 스코프 밖
- * 화면의 기존 합니다체 값(예: `cage.gateDetailNotFound`·`goals.createError`·
- * `standup.loadFailed` 등 78건 실측)까지 baseline 0을 요구하게 돼 이 스토리가 안 건드린
- * 자리에서 거짓 RED가 난다 — namespace는 "어디서 이 키들을 찾았나"의 분류 메타데이터일
- * 뿐, 판정 축은 항상 키 단위다. AC1 표가 "AC2·AC3의 판별선"(페드루 PO 확定)이라는 게
- * 정확히 이 뜻이다. 다음 카드가 스코프를 넓히면 SCOPED_KEYS에 새 키를 추가한다(namespace
- * 째 추가 아님).
+ * story #3916~#3926 — 위 104키 스코프를 점진적으로 네임스페이스 단위로 승격했다
+ * (`honorific-scope/<ns>.json` 파일 하나당 네임스페이스 하나, story #3916 설계 —
+ * 병렬 PR의 배열 append 충돌을 원천 봉쇄). 2026-09-15 13:xxZ 기준 68→74개 전체
+ * 네임스페이스가 전부 승격 완료돼 "스코프=ko.json 전체"가 성립했다.
  *
- * story #3885 AC2 — 위 원칙의 예외 하나: `chats` 네임스페이스는 그 예외가 성립하지
- * «않는» 경우다. #3877 AC1 표가 cage/goals/standup처럼 일부러 남겨둔 스코프 밖 잔존
- * 합니다체가 chats에는 없다 — 이 스토리가 PO 재측 규칙(습니다/ㅂ니다/십시오 리터럴+NFD)
- * 으로 chats leaf 값 전수(239개)를 스캔해 걸린 66키(중복 문자열 2개 제외 고유 값 64건)
- * «전부»를 해요체로 이관했다(잔존 0). 그래서 chats만은 SCOPED_NAMESPACES(namespace
- * prefix 통째 스캔)로 승격해도 안전 — 앞으로 chats에 새로 추가되는 어떤 키든(기존 104
- * SCOPED_KEYS 목록에 미리 적어두지 않아도) 합니다체가 섞이면 자동으로 잡힌다. 다른
- * 네임스페이스(cage 등)는 여전히 잔존 채무가 있어 이 승격을 하면 안 된다 — namespace를
- * SCOPED_NAMESPACES에 추가하는 건 "이 네임스페이스는 이제 0건이 확定됐다"는 선언이다.
+ * story #3927 — 그 시점에 실측한 결함 클래스: 네임스페이스를 추가하는 PR마다
+ * `honorific-scope/<ns>.json` 신설+공유 테스트 파일 append가 필요했고, 목록형은
+ * "새 ns를 빠뜨리면 조용히 안 잰다"(fail-open) — 한 번 실제로 8ns·172leaf가 등록
+ * 누락된 채 방치된 적이 있었다(그 ns들에 합니다체가 우연히 0건이라 안 드러났을 뿐).
+ * 그래서 스코프 목록형을 폐기하고 **기본=ko.json 전체를 스캔, 예외만 명시 목록**으로
+ * 뒤집었다 — 이제 새 네임스페이스가 생겨도 이 가드는 아무 편집 없이 자동으로 본다.
+ * `SCOPED_NAMESPACES`·`honorific-scope/*.json`·`loadHonorificScopeDir`·
+ * `checkScopedNamespaceMinimums`(네임스페이스별 leaf 하한)는 전량 삭제 — 대신 ko.json
+ * **전체** leaf 수 하한 하나(`checkTotalLeafFloor`, 대량 삭제·로더 고장 감지)로 대체됐다.
+ * `SCOPED_KEYS`(104개)는 삭제하지 않았다 — story #3877 원 표의 count-lock 회귀 테스트와
+ * per-story 전용 테스트 파일(`*.3903/3921/3923.test.ts`)이 여전히 참조하는 레거시
+ * 데이터이자, `findHonorificToneInScopedKeys`의 기본 인자 값으로 남아있다(더 이상 어떤
+ * 필터링도 하지 않는다 — 이제 "스코프"는 언제나 ko.json 전체다).
  *
- * 판정 축은 값(value)만이다 — 키 이름·주석은 대상이 아니다(한자 가드·agent-tone 가드와
- * 동일 원칙).
+ * ⚠️scope는 이제 **ko.json leaf 전체**다. 값(value)이 판정 축이고, 키 이름·주석은
+ * 대상이 아니다(한자 가드·agent-tone 가드와 동일 원칙). 정말 스캔에서 빼야 하는 자리
+ * (법적 고지문 인용 등)는 `HONORIFIC_TONE_EXCEPTIONS`에 key·match·reason·addedBy를
+ * 채워 명시 등록한다 — 등록 없이는 예외가 없다.
  */
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const MESSAGES_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
 const KO_FILE = 'ko.json';
 
-// story #3877 AC1 표(doc 5590a4c5 §4①, develop f35a59d46c에서 재실측·0건 diff) 94키 +
-// AC4가 소비처 有로 확認해 편입한 orgBriefing 9키 + AC5 캡처 中 발견한 1키
-// (docs.emptyDescription) = 104키. "namespace.leafKey" 형식. 확장 시 이 배열에 새 키를
-// 추가한다(namespace를 통째로 추가하지 않는다 — 위 헤더 참고).
+// story #3877 AC1 표(doc 5590a4c5 §4①) 94키 + AC4 orgBriefing 9키 + AC5 docs.emptyDescription
+// 1키 = 104키. story #3927(전역 스캔 승격) 이후로는 더 이상 어떤 필터링에도 쓰이지 않는
+// 레거시 데이터다 — findHonorificToneInScopedKeys의 기본 인자 값 + 회귀 count-lock 테스트
+// + per-story 전용 테스트 파일(3903/3921/3923)의 "이 실 사고 키는 SCOPED_KEYS 정적 목록
+// 안에 없었다"는 역사적 증거로만 남는다. 새 키를 추가하지 않는다(전역 스캔이 이미 본다).
 export const SCOPED_KEYS = [
   'board.acSaveFailed',
   'board.assigneeNotSetTitle',
@@ -152,84 +155,14 @@ export const SCOPED_KEYS = [
   'standup.noFeedback',
 ] as const;
 
-// story #3885 AC2 — chats는 잔존 채무 0으로 확定된 네임스페이스라 prefix 통째 스캔으로
-// 승격(위 헤더 §3885 AC2 단락 참고). 새 네임스페이스를 추가하려면 그 네임스페이스의
-// 합니다체 잔존이 정말 0인지(이 카드처럼) 먼저 전수 실측해야 한다 — 추측 금지.
-// story #3889 — content(마케팅 축 콘텐츠·블로그/채널 포스트)·channelConnect(채널 연결)도
-// 전량 해요체 이관 완료(잔존 0, PO 재측 271건 = findHonorificToneInScopedKeys 실 함수로
-// 그라운딩 — 코드 0 규율, 직접 손으로 친 needle 재현은 NFC/NFD 함정 재발이라 실 함수만
-// 신뢰) — chats와 동형 전량 승격.
-// story #3892 — settings(조직·프로젝트·알림·결제 설정)도 전량 해요체 이관 완료(잔존 0,
-// 실 함수로 head 재측 170건 = PO 실측과 일치 — 3889 교훈 그대로 코드 0 재확認).
-// story #3895 — agents(에이전트 관리)·flow(플로우/일감 보드)·gateConfig(게이트 설정)도
-// 전량 해요체 이관 완료(잔존 0, 실 함수로 head 재측 128건=62+61+5 = PO 실측과 일치).
-// story #3899 — recruiter(채용)·loops(실험 루프)·cage(결재/게이트)도 전량 해요체 이관
-// 완료(잔존 0, 실 함수로 head 재측 recruiter 36·loops 34·cage 29=99건 = PO 실측과 일치 —
-// 3889/3892 교훈 그대로 코드 0 재확認. 전환 전 플레이스홀더-계사 인접(`}입니다`류) 세
-// 네임스페이스 내 0건도 사전 스캔으로 확認).
-// story #3898 — organization·pricingPlans·contentRules도 전량 해요체 이관(100키) 완료.
-// story #3901 — onboarding(온보딩)·login(로그인)·storage(스토리지)·insightsBoard(인사이트
-// 보드)도 전량 해요체 이관 완료(잔존 0, 실 함수로 head 재측 onboarding 27·login 17·
-// storage 26·insightsBoard 25=95건 — PO 임시 needle 하한 74건보다 많음, ㅂ니다 계열까지
-// NFD로 잡은 실 함수 재측이 항상 상한 자다. 전환 전 플레이스홀더-계사 인접 0건 사전 스캔
-// 확認).
-// story #3908 — standup(스탠드업)·goals(목표)도 전량 해요체 이관 완료(잔존 0, 실 함수
-// findHonorificToneInScopedKeys로 head 재측 standup 28·goals 24=52건 — PO 임시 needle
-// 하한보다 많은 실 함수 재측이 항상 상한 자. goals.deleteConfirmTitle은 의문형
-// (「목표를 삭제하시겠습니까?」, story #3900 소관)이라 애초에 이 가드 대상이 아니다 —
-// 전환 전 플레이스홀더-계사 인접 0건 사전 스캔 확認).
-// story #3912 — usage(사용량)·invite(초대)·meeting(회의록)·supportWidget(지원 위젯)도
-// 전량 해요체 이관 완료(잔존 0, 실 함수 findHonorificToneInScopedKeys로 head 재측
-// usage 13·invite 11·meeting 11·supportWidget 10=45건 — 3889 교훈 그대로 코드 0 재확認.
-// 네 네임스페이스 모두 의문형(습니까) 0건, 전환 전 플레이스홀더-계사 인접 0건 사전 스캔
-// 확認. usage는 한도/쿼터 숫자가 많아 계사 함정에 특히 주의해 절 끝에 값을 두는 형으로 유지).
-//
-// story #3916 — 위 19개(+추가되는 모든 네임스페이스)를 이 배열에 «꼬리로 append»하던
-// 방식은 같은 날 병렬로 열린 §⑤ 어조 PR마다 CONFLICTING을 냈다(4312 착지 → 4314·4315·
-// 4316 CONFLICTING·4314→4315→4316→4317 rebase 열차, 각 회 CI 25분+재앵커). GitHub 서버
-// 측 merge가 `.gitattributes merge=union`을 무시하는 것도 실측 확認(#4209) — 병렬 append
-// 충돌은 «파일당 하나»로만 없어진다. 그래서 등록을 `honorific-scope/<namespace>.json`
-// 디렉터리로 옮기고, 이 배열/맵은 그 디렉터리에서 유도한다(더는 손으로 안 건드림 — 새
-// 네임스페이스는 새 파일 하나만 추가하면 된다, 기존 파일은 무변).
-const HONORIFIC_SCOPE_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'honorific-scope');
-
-export interface HonorificScopeEntry {
-  namespace: string;
-  minLeaf: number;
-  story: string;
-  measuredLeaf: number;
-}
-
-/** honorific-scope/*.json을 읽어 네임스페이스 등록 목록을 유도한다(파일명 알파벳순 —
- * 등재 순서에 의미를 두지 않는다, 판정은 항상 네임스페이스 단위라 순서 무관). 각 파일의
- * minLeaf가 자신의 measuredLeaf보다 크면(데이터 입력 실수 — "여유 하한"이 실측치를
- * 넘어설 수 없다) 그 자리에서 throw한다(fail-loud, 조용히 잘못된 하한으로 새지 않음). */
-export function loadHonorificScopeDir(dirPath: string = HONORIFIC_SCOPE_DIR): HonorificScopeEntry[] {
-  const files = readdirSync(dirPath).filter((f) => f.endsWith('.json')).sort();
-  return files.map((f) => {
-    const namespace = f.replace(/\.json$/, '');
-    const raw = readFileSync(path.join(dirPath, f), 'utf8');
-    const data = JSON.parse(raw) as { minLeaf: number; story: string; measuredLeaf: number };
-    if (data.minLeaf > data.measuredLeaf) {
-      throw new Error(
-        `honorific-scope/${f}: minLeaf(${data.minLeaf})가 measuredLeaf(${data.measuredLeaf})보다 큽니다 — ` +
-          '여유 하한은 실측치를 넘을 수 없습니다(데이터 입력 실수로 보입니다).',
-      );
-    }
-    return { namespace, minLeaf: data.minLeaf, story: data.story, measuredLeaf: data.measuredLeaf };
-  });
-}
-
-const HONORIFIC_SCOPE_ENTRIES = loadHonorificScopeDir();
-export const SCOPED_NAMESPACES: readonly string[] = HONORIFIC_SCOPE_ENTRIES.map((e) => e.namespace);
-
-function flattenNamespaceLeafKeys(root: Record<string, unknown>, namespace: string): string[] {
-  const nsRoot = root[namespace];
-  if (nsRoot === null || typeof nsRoot !== 'object' || Array.isArray(nsRoot)) return [];
+/** ko.json 전체(임의 객체)를 재귀 walk해 모든 string leaf의 dotted-path 키를 낸다 —
+ * story #3927 전역 스캔의 유일한 소스. 네임스페이스 필터·레지스트리 조회 없음(스코프 자체가
+ * "이 객체가 가진 leaf 전부"이므로). */
+export function flattenAllLeafKeys(root: Record<string, unknown>): string[] {
   const keys: string[] = [];
   function walk(obj: Record<string, unknown>, prefix: string): void {
     for (const [k, v] of Object.entries(obj)) {
-      const qualifiedKey = `${prefix}.${k}`;
+      const qualifiedKey = prefix ? `${prefix}.${k}` : k;
       if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
         walk(v as Record<string, unknown>, qualifiedKey);
       } else if (typeof v === 'string') {
@@ -237,50 +170,44 @@ function flattenNamespaceLeafKeys(root: Record<string, unknown>, namespace: stri
       }
     }
   }
-  walk(nsRoot as Record<string, unknown>, namespace);
+  walk(root, '');
   return keys;
 }
 
-/** SCOPED_KEYS(개별 지정)와 SCOPED_NAMESPACES(전량 승격) 둘을 합친 실제 판정 대상 키
- * 목록 — ko.json 실 트리를 봐야 네임스페이스 leaf를 펼칠 수 있어 ko를 인자로 받는다. */
-export function resolveEffectiveScopedKeys(ko: Record<string, unknown>): string[] {
-  const namespaceKeys = SCOPED_NAMESPACES.flatMap((ns) => flattenNamespaceLeafKeys(ko, ns));
-  return [...new Set([...SCOPED_KEYS, ...namespaceKeys])];
+export function countAllLeaves(root: Record<string, unknown>): number {
+  return flattenAllLeafKeys(root).length;
 }
 
-export interface NamespaceLeafCountViolation {
-  namespace: string;
+/** story #3877~#3926 시절엔 "SCOPED_KEYS ∪ 승격된 네임스페이스"의 합집합이었다. story
+ * #3927부터는 스코프 자체가 ko.json 전체라 이 함수는 `flattenAllLeafKeys`의 얇은 별칭이다
+ * — 이름은 유지한다(per-story 전용 테스트 파일·이 파일 자신의 다른 axis 테스트가 이
+ * 이름으로 "지금 실제로 보는 키 전체"를 얻는 진입점으로 계속 쓴다). @deprecated 새 코드는
+ * `flattenAllLeafKeys`를 직접 쓸 것. */
+export function resolveEffectiveScopedKeys(ko: Record<string, unknown>): string[] {
+  return flattenAllLeafKeys(ko);
+}
+
+export interface TotalLeafFloorViolation {
   actualCount: number;
   minExpected: number;
 }
 
-// story #3885 CHANGES①(PO PR 코멘트, 2026-09-14 18:02Z) — `flattenNamespaceLeafKeys`는
-// 네임스페이스가 ko.json에서 사라지거나 개명되면 조용히 []를 돌려준다 — 그러면
-// `resolveEffectiveScopedKeys`가 소리 없이 SCOPED_KEYS만으로 좁아져(namespace 전량
-// 승격이 아무것도 안 더하는 상태) 이 가드가 chats 신규 위반을 하나도 못 잡게 된다.
-// 네임스페이스별 leaf 최소 개수(실측값에서 여유를 둔 하한 — 리팩터로 인한 자연 증감은
-// 통과하되, 네임스페이스 자체가 사라지면 반드시 fail-loud)로 이 사각을 막는다.
-// story #3916 — honorific-scope/*.json에서 유도(위 HONORIFIC_SCOPE_ENTRIES 참고). 각
-// 파일의 minLeaf·measuredLeaf·story 그라운딩은 그 파일 자체에 있다(예: honorific-
-// scope/chats.json). 새 네임스페이스는 새 파일만 추가하면 되고, 이 맵은 손으로 건드릴
-// 자리가 아니다.
-const SCOPED_NAMESPACE_MIN_LEAF_COUNT: Readonly<Record<string, number>> = Object.fromEntries(
-  HONORIFIC_SCOPE_ENTRIES.map((e) => [e.namespace, e.minLeaf]),
-);
+// story #3927 — 네임스페이스별 leaf 하한(SCOPED_NAMESPACE_MIN_LEAF_COUNT, honorific-scope/
+// *.json 74개 파일)을 대체하는 단일 전역 하한. "대량 삭제·로더 고장"만 감지하면 되는
+// 목적이라 네임스페이스 단위로 쪼갤 이유가 없다(오히려 매 네임스페이스 PR마다 파일 편집을
+// 요구하던 구조 자체가 이 스토리가 없애려는 결함이었다). 실측(develop 46652946e, 2026-09-15
+// 13:xxZ, #4316·#4333 着地 뒤) 74ns·leaf수는 이 파일 자기 테스트에 실 수치로 고정 —
+// 하한은 그 실측치의 ~80%(3916 관례 그대로, 자연 증감은 통과하되 대량 삭제는 fail-loud).
+export const MIN_TOTAL_LEAF_COUNT = 4363;
 
-/** SCOPED_NAMESPACES 각각의 실제 leaf 개수가 하한을 밑도는지 검사하는 순수 함수 —
- * 위반을 반환한다(main()이 이 반환값을 보고 exit 1을 결정, 이 함수 자체는 throw/exit
- * 안 함 — 다른 판정 함수들과 같은 결). */
-export function checkScopedNamespaceMinimums(ko: Record<string, unknown>): NamespaceLeafCountViolation[] {
-  const violations: NamespaceLeafCountViolation[] = [];
-  for (const ns of SCOPED_NAMESPACES) {
-    const actualCount = flattenNamespaceLeafKeys(ko, ns).length;
-    const minExpected = SCOPED_NAMESPACE_MIN_LEAF_COUNT[ns];
-    if (actualCount < minExpected) {
-      violations.push({ namespace: ns, actualCount, minExpected });
-    }
+/** ko.json 전체 leaf 수가 하한을 밑도는지 검사하는 순수 함수 — 위반이면 길이 1 배열,
+ * 아니면 빈 배열(다른 판정 함수들과 같은 결, main()이 반환값으로 exit 여부를 결정). */
+export function checkTotalLeafFloor(ko: Record<string, unknown>): TotalLeafFloorViolation[] {
+  const actualCount = countAllLeaves(ko);
+  if (actualCount < MIN_TOTAL_LEAF_COUNT) {
+    return [{ actualCount, minExpected: MIN_TOTAL_LEAF_COUNT }];
   }
-  return violations;
+  return [];
 }
 
 // 「습니다」·「십시오」는 완성형(NFC) 원문에 그대로 리터럴로 존재한다(자음어간 종결 — 예:
@@ -289,7 +216,7 @@ export function checkScopedNamespaceMinimums(ko: Record<string, unknown>): Names
 // 원문엔 독립된 「ㅂ」 자모 문자가 없다. NFD(자모 분해)로 정규화하면 그 받침이
 // U+11B8(HANGUL JONGSEONG PIEUP)로 분리돼 나오므로, 분해된 「니다」(U+1102 U+1175 U+1103
 // U+1161)와 이어 붙었는지로 잡는다 — 실측 확認(합니다·됩니다·갑니다·입니다 전부 검출).
-const NFD_JONGSEONG_B_NIDA = 'ᆸ니다';
+const NFD_JONGSEONG_B_NIDA = 'ᆸ니다'.normalize('NFD');
 
 // story #3900 — 의문형 needle. 'ᆸ'(종성 ㅂ)+니까를 NFD로 정규화해 두면 「입니까」류의 NFD
 // (받침 ㅂ이 분해돼 「니까」 앞에 붙음)와 .includes로 맞는다. escape로 정의해 소스가 NFC로
@@ -320,9 +247,11 @@ export interface HonorificToneException {
   addedBy: string;
 }
 
-// story #3877 baseline — 0건(이 스토리가 SCOPED_KEYS 104개 전부를 해요체로 이관). 새로
-// 느는 자리만 이 가드가 막는다(can-only-shrink, 이 저장소 baseline 가드 공통 계약). 정말
-// 필요하면 key·match·reason·addedBy를 모두 채워야 등록된다(한자 가드 관례 그대로).
+// story #3877 baseline — 0건. story #3927(전역 스캔 승격)에서도 0건으로 시작한다(legal·
+// githubLinks 등 예외 후보로 의심되는 네임스페이스를 직접 실측했으나 합니다체 잔존 0 —
+// 지금 시점 필요한 예외가 없다). 새로 느는 자리만 이 가드가 막는다(can-only-shrink 아님 —
+// 이 목록 자체는 grow-with-approval, 등록 없이 조용히 늘 수 없다는 뜻). 정말 필요하면
+// key·match·reason·addedBy를 모두 채워야 등록된다(한자 가드 관례 그대로).
 export const HONORIFIC_TONE_EXCEPTIONS: HonorificToneException[] = [];
 
 function isExempt(key: string, match: string): boolean {
@@ -358,6 +287,30 @@ export function findHonorificToneInScopedKeys(
     }
   }
   return findings;
+}
+
+export interface StaleExceptionViolation {
+  key: string;
+  match: string;
+}
+
+// story #3927 CHANGES 2(PO 리뷰, 2026-09-15) — 예외 목록(HONORIFIC_TONE_EXCEPTIONS)
+// 자체가 이 스토리가 봉쇄하려던 것과 같은 fail-open 클래스를 열어 둔 채였다: 예외를 건
+// key·match가 나중에 값이 해요체로 고쳐지거나 키 자체가 사라져도, 그 예외 항목은
+// ko.json 어디에도 안 걸리는 채로 조용히 남는다(baseline can-only-shrink 계약이 이
+// 목록엔 없었다). 예외는 "지금 실재하는 예외"만이어야 한다(한자 가드·다른 baseline
+// 가드들과 같은 계약) — 다 쓴 예외를 지우지 않으면 다음 사람이 "이 자리는 왜 예외지?"를
+// 다시 조사해야 한다.
+export function checkStaleExceptions(ko: Record<string, unknown>): StaleExceptionViolation[] {
+  const violations: StaleExceptionViolation[] = [];
+  for (const exc of HONORIFIC_TONE_EXCEPTIONS) {
+    const value = getByPath(ko, exc.key);
+    const currentMatches = typeof value === 'string' ? matchesFormalRegister(value) : [];
+    if (!currentMatches.includes(exc.match)) {
+      violations.push({ key: exc.key, match: exc.match });
+    }
+  }
+  return violations;
 }
 
 // ---------------------------------------------------------------------------
@@ -451,24 +404,30 @@ function main(): void {
   const text = readFileSync(path.join(MESSAGES_DIR, KO_FILE), 'utf8');
   const ko = JSON.parse(text) as Record<string, unknown>;
 
-  const namespaceViolations = checkScopedNamespaceMinimums(ko);
-  if (namespaceViolations.length > 0) {
-    for (const v of namespaceViolations) {
-      console.error(
-        `FAIL: SCOPED_NAMESPACES의 "${v.namespace}" 네임스페이스 leaf가 ${v.actualCount}개뿐` +
-          `(최소 ${v.minExpected}개 기대) — ko.json에서 "${v.namespace}" 네임스페이스가 사라졌거나` +
-          ' 개명됐을 수 있다. 이대로면 가드가 헛돌고 있다(namespace 전량 승격이 조용히' +
-          ' SCOPED_KEYS만으로 좁아진다).',
-      );
-    }
+  const floorViolations = checkTotalLeafFloor(ko);
+  if (floorViolations.length > 0) {
+    const v = floorViolations[0]!;
+    console.error(
+      `FAIL: ko.json 전체 leaf가 ${v.actualCount}개뿐(최소 ${v.minExpected}개 기대) — ` +
+        '대량 삭제 또는 messages/ko.json 로더 고장이 의심된다(가드가 헛돌고 있을 수 있다).',
+    );
     process.exit(1);
   }
 
-  const effectiveKeys = resolveEffectiveScopedKeys(ko);
+  const staleExceptions = checkStaleExceptions(ko);
+  if (staleExceptions.length > 0) {
+    console.error(`FAIL: HONORIFIC_TONE_EXCEPTIONS에 ${staleExceptions.length}건이 등재됐으나 지금 ko.json 어디에도 안 걸린다:`);
+    for (const v of staleExceptions) console.error(`  - ${v.key}::${v.match}`);
+    console.error('\n→ 고쳐졌다면(해요체로 옮겼거나 키를 삭제했다면) HONORIFIC_TONE_EXCEPTIONS에서 그 항목을 지울 것.');
+    process.exit(1);
+  }
+
+  const effectiveKeys = flattenAllLeafKeys(ko);
+  const nsCount = new Set(Object.keys(ko)).size;
   const findings = findHonorificToneInScopedKeys(ko, effectiveKeys);
 
   if (findings.length > 0) {
-    console.log(`❌ 스코프 키(${effectiveKeys.length}개 — SCOPED_KEYS ${SCOPED_KEYS.length}+SCOPED_NAMESPACES[${SCOPED_NAMESPACES.join(',')}])의 ko.json 값에 합니다체 ${findings.length}건 발견:`);
+    console.log(`❌ ko.json 전체(${nsCount}ns·${effectiveKeys.length}leaf)의 값에 합니다체 ${findings.length}건 발견:`);
     for (const f of findings) {
       console.log(`  - ${f.key} [${f.matches.join(', ')}] → ${JSON.stringify(f.value)}`);
     }
@@ -480,12 +439,12 @@ function main(): void {
     process.exit(1);
   }
 
-  console.log(`OK: 스코프 키(${effectiveKeys.length}개 — SCOPED_KEYS ${SCOPED_KEYS.length}+SCOPED_NAMESPACES[${SCOPED_NAMESPACES.join(',')}])의 ko.json 값에 합니다체 0건`);
+  console.log(`OK: ko.json 전체(${nsCount}ns·${effectiveKeys.length}leaf)의 값에 합니다체 0건`);
 
-  // story #3900 axis ② — 페르소나 관형형 종결(스코프 키 값이 완결 어미 없이 '는'/'인'+마침표로 끝나는 것).
+  // story #3900 axis ② — 페르소나 관형형 종결(값이 완결 어미 없이 '는'/'인'+마침표로 끝나는 것).
   const adnominalFindings = findPersonaAdnominalTerminal(ko, effectiveKeys);
   if (adnominalFindings.length > 0) {
-    console.error(`❌ 스코프 키(${effectiveKeys.length}개)의 ko.json 값에 관형형 종결(완결 어미 없이 '는'/'인'+마침표) ${adnominalFindings.length}건 발견:`);
+    console.error(`❌ ko.json 전체(${effectiveKeys.length}leaf)의 값에 관형형 종결(완결 어미 없이 '는'/'인'+마침표) ${adnominalFindings.length}건 발견:`);
     for (const f of adnominalFindings) {
       console.error(`  - ${f.key} → ${JSON.stringify(f.value)}`);
     }
@@ -495,12 +454,12 @@ function main(): void {
     );
     process.exit(1);
   }
-  console.log(`OK: 스코프 키(${effectiveKeys.length}개)의 ko.json 값에 관형형 종결(완결 어미 없는 '는'/'인'+마침표) 0건`);
+  console.log(`OK: ko.json 전체(${effectiveKeys.length}leaf)의 값에 관형형 종결(완결 어미 없는 '는'/'인'+마침표) 0건`);
 
-  // story #3914 axis ④ — 에이전트 어미 누출(스코프 값이 '…지?' 반말 물음으로 끝나는 것).
+  // story #3914 axis ④ — 에이전트 어미 누출(값이 '…지?' 반말 물음으로 끝나는 것).
   const agentEndingFindings = findAgentEndingQuestionLeak(ko, effectiveKeys);
   if (agentEndingFindings.length > 0) {
-    console.error(`❌ 스코프 키(${effectiveKeys.length}개)의 ko.json 값에 에이전트 어미 누출('…지?' 반말 물음) ${agentEndingFindings.length}건 발견:`);
+    console.error(`❌ ko.json 전체(${effectiveKeys.length}leaf)의 값에 에이전트 어미 누출('…지?' 반말 물음) ${agentEndingFindings.length}건 발견:`);
     for (const f of agentEndingFindings) {
       console.error(`  - ${f.key} → ${JSON.stringify(f.value)}`);
     }
@@ -510,7 +469,7 @@ function main(): void {
     );
     process.exit(1);
   }
-  console.log(`OK: 스코프 키(${effectiveKeys.length}개)의 ko.json 값에 에이전트 어미 누출('…지?' 반말 물음) 0건`);
+  console.log(`OK: ko.json 전체(${effectiveKeys.length}leaf)의 값에 에이전트 어미 누출('…지?' 반말 물음) 0건`);
 
   // story #3900 axis ③ — 플레이스홀더 값 바로 뒤 고정 조사(스코프 무관·ko.json 전체 leaf 스캔).
   const particleFindings = findHardcodedParticleAfterPlaceholder(ko);

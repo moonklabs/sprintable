@@ -7,7 +7,7 @@ import {
   findHonorificToneInScopedKeys,
   resolveEffectiveScopedKeys,
 } from './verify-scoped-i18n-honorific-tone';
-import { assertOutOfScopeFixtureIgnoredByEffectiveKeys } from './honorific-tone-out-of-scope-fixture';
+import { assertOutOfScopeFixtureCaughtByGlobalScan } from './honorific-tone-out-of-scope-fixture';
 
 // story #3921 — verifyEmail·setPassword 네임스페이스 전량(SCOPED_NAMESPACES 승격) —
 // 두 페이지가 next-intl 미배선이라는(오판) 전제로 하드코딩 한국어를 직접 써 오던 것을
@@ -64,7 +64,9 @@ describe('실 ko.json — verifyEmail·setPassword 네임스페이스 전량(sto
   // 실 키 fixture(이 파일이 원래 쓰던 것)를 해요체 전환+board 승격으로 무효화한 것을
   // 계기로, 모든 per-story 파일이 공유 합성 fixture 헬퍼로 전환(재발 방지 — 실 키를
   // 쓰면 어떤 네임스페이스든 승격/정리될 때마다 다시 깨진다).
-  it('무관 PR no-op — verifyEmail·setPassword 밖·SCOPED_KEYS 밖의 실 합니다체 키는 namespace 전량 승격 뒤에도 안 본다', () => {
-    assertOutOfScopeFixtureIgnoredByEffectiveKeys(ko);
+  // story #3927(전역 스캔 승격) — 이 자리의 의미가 반전됐다: "등재 밖은 안 본다"가 아니라
+  // "새 네임스페이스도 빠짐없이 잡힌다"가 이제 이 가드의 핵심 계약이다.
+  it('story #3927 반전 — 등재 여부와 무관하게 합성 네임스페이스도 전역 스캔에 잡힌다', () => {
+    assertOutOfScopeFixtureCaughtByGlobalScan(ko);
   });
 });

@@ -15,7 +15,7 @@ import {
   findHonorificToneInScopedKeys,
   resolveEffectiveScopedKeys,
 } from './verify-scoped-i18n-honorific-tone';
-import { assertOutOfScopeFixtureIgnoredByEffectiveKeys } from './honorific-tone-out-of-scope-fixture';
+import { assertOutOfScopeFixtureCaughtByGlobalScan } from './honorific-tone-out-of-scope-fixture';
 
 describe('실 ko.json — inbox·board 네임스페이스 전량(story #3903 AC1/AC2)', () => {
   const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
@@ -50,8 +50,10 @@ describe('실 ko.json — inbox·board 네임스페이스 전량(story #3903 AC1
   // board.epicSwimlaneLoadError(#3921·#3923가 재도입) 순으로 이미 4회 재발) 계속
   // 깨진다 — 공유 헬퍼(honorific-tone-out-of-scope-fixture.ts, PO 3차 처방
   // 2026-09-15)로 통일해 이 클래스를 구조적으로 종식.
-  it('무관 PR no-op — inbox·board 밖·SCOPED_KEYS 밖의 실 합니다체 키는 namespace 전량 승격 뒤에도 안 본다', () => {
-    assertOutOfScopeFixtureIgnoredByEffectiveKeys(ko);
+  // story #3927(전역 스캔 승격) — 이 자리의 의미가 반전됐다: "등재 밖은 안 본다"가 아니라
+  // "새 네임스페이스도 빠짐없이 잡힌다"가 이제 이 가드의 핵심 계약이다.
+  it('story #3927 반전 — 등재 여부와 무관하게 합성 네임스페이스도 전역 스캔에 잡힌다', () => {
+    assertOutOfScopeFixtureCaughtByGlobalScan(ko);
   });
 
   it('실 ko.json의 inbox leaf 개수가 하한(70) 이상이다(실측 88, honorific-scope/inbox.json)', () => {
