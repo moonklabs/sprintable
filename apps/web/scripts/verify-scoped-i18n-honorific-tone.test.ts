@@ -161,10 +161,22 @@ describe('실 ko.json — 스코프 키 count-lock(baseline 0, 새 자리 0)', (
 // story #3885 AC2 — SCOPED_NAMESPACES(chats 전량 승격) + resolveEffectiveScopedKeys.
 // ---------------------------------------------------------------------------
 
-describe('SCOPED_NAMESPACES — story #3885/#3889/#3892/#3895/#3899 AC2', () => {
-  it('chats·content·channelConnect·settings·agents·flow·gateConfig·recruiter·loops·cage 10개가 등재됐다(잔존 채무 0으로 확定된 네임스페이스만)', () => {
+describe('SCOPED_NAMESPACES — story #3885/#3889/#3892/#3895/#3898/#3899 AC2', () => {
+  it('chats·content·channelConnect·settings·agents·flow·gateConfig·recruiter·loops·cage·organization·pricingPlans·contentRules 13개가 등재됐다(잔존 채무 0으로 확定된 네임스페이스만)', () => {
     expect(SCOPED_NAMESPACES).toEqual([
-      'chats', 'content', 'channelConnect', 'settings', 'agents', 'flow', 'gateConfig', 'recruiter', 'loops', 'cage',
+      'chats',
+      'content',
+      'channelConnect',
+      'settings',
+      'agents',
+      'flow',
+      'gateConfig',
+      'recruiter',
+      'loops',
+      'cage',
+      'organization',
+      'pricingPlans',
+      'contentRules',
     ]);
   });
 });
@@ -249,6 +261,9 @@ describe('checkScopedNamespaceMinimums — 순수 함수', () => {
       { namespace: 'recruiter', actualCount: 0, minExpected: 100 },
       { namespace: 'loops', actualCount: 0, minExpected: 105 },
       { namespace: 'cage', actualCount: 0, minExpected: 230 },
+      { namespace: 'organization', actualCount: 0, minExpected: 190 },
+      { namespace: 'pricingPlans', actualCount: 0, minExpected: 125 },
+      { namespace: 'contentRules', actualCount: 0, minExpected: 70 },
     ]);
   });
 
@@ -265,6 +280,9 @@ describe('checkScopedNamespaceMinimums — 순수 함수', () => {
       { namespace: 'recruiter', actualCount: 0, minExpected: 100 },
       { namespace: 'loops', actualCount: 0, minExpected: 105 },
       { namespace: 'cage', actualCount: 0, minExpected: 230 },
+      { namespace: 'organization', actualCount: 0, minExpected: 190 },
+      { namespace: 'pricingPlans', actualCount: 0, minExpected: 125 },
+      { namespace: 'contentRules', actualCount: 0, minExpected: 70 },
     ]);
   });
 
@@ -418,6 +436,30 @@ describe('실 ko.json — recruiter·loops·cage 네임스페이스 전량(story
     const effectiveKeys = resolveEffectiveScopedKeys(ko);
     expect(effectiveKeys).not.toContain('board.epicSwimlaneLoadError');
     expect(findHonorificToneInScopedKeys(ko, effectiveKeys)).toEqual([]);
+  });
+
+  it('실 ko.json의 organization leaf 개수가 하한(190) 이상이다(실측 212)', () => {
+    const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
+    const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    const organizationLeafCount = effectiveKeys.filter((k) => k.startsWith('organization.')).length;
+    expect(organizationLeafCount).toBeGreaterThanOrEqual(190);
+  });
+
+  it('실 ko.json의 pricingPlans leaf 개수가 하한(125) 이상이다(실측 141)', () => {
+    const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
+    const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    const pricingPlansLeafCount = effectiveKeys.filter((k) => k.startsWith('pricingPlans.')).length;
+    expect(pricingPlansLeafCount).toBeGreaterThanOrEqual(125);
+  });
+
+  it('실 ko.json의 contentRules leaf 개수가 하한(70) 이상이다(실측 81)', () => {
+    const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
+    const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    const contentRulesLeafCount = effectiveKeys.filter((k) => k.startsWith('contentRules.')).length;
+    expect(contentRulesLeafCount).toBeGreaterThanOrEqual(70);
   });
 });
 

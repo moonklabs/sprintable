@@ -167,6 +167,7 @@ export const SCOPED_KEYS = [
 // 완료(잔존 0, 실 함수로 head 재측 recruiter 36·loops 34·cage 29=99건 = PO 실측과 일치 —
 // 3889/3892 교훈 그대로 코드 0 재확認. 전환 전 플레이스홀더-계사 인접(`}입니다`류) 세
 // 네임스페이스 내 0건도 사전 스캔으로 확認).
+// story #3898 — organization·pricingPlans·contentRules도 전량 해요체 이관(100키) 완료.
 export const SCOPED_NAMESPACES = [
   'chats',
   'content',
@@ -178,6 +179,9 @@ export const SCOPED_NAMESPACES = [
   'recruiter',
   'loops',
   'cage',
+  'organization',
+  'pricingPlans',
+  'contentRules',
 ] as const;
 
 function flattenNamespaceLeafKeys(root: Record<string, unknown>, namespace: string): string[] {
@@ -228,6 +232,9 @@ const SCOPED_NAMESPACE_MIN_LEAF_COUNT: Readonly<Record<(typeof SCOPED_NAMESPACES
   recruiter: 100, // 실측 114개(2026-09-15, story #3899 그라운딩) — 여유 하한
   loops: 105, // 실측 119개(2026-09-15, story #3899 그라운딩) — 여유 하한
   cage: 230, // 실측 259개(2026-09-15, story #3899 그라운딩) — 여유 하한
+  organization: 190, // 실측 212개(2026-09-14, story #3898 그라운딩) — 여유 하한
+  pricingPlans: 125, // 실측 141개(2026-09-14, story #3898 그라운딩) — 여유 하한
+  contentRules: 70, // 실측 81개(2026-09-14, story #3898 그라운딩) — 여유 하한
 };
 
 /** SCOPED_NAMESPACES 각각의 실제 leaf 개수가 하한을 밑도는지 검사하는 순수 함수 —
