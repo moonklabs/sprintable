@@ -1,14 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import {
   ALLOWLIST,
+  computeNewLowercaseWordViolations,
   computeNewViolations,
   computeNewWholeValueViolations,
   computeStaleBaseline,
+  computeStaleLowercaseWordBaseline,
   computeStaleTokenAllowlist,
   computeStaleWholeValueBaseline,
   loadBaseline,
   loadKoJson,
+  LOWERCASE_WORD_ALLOWLIST,
+  LOWERCASE_WORD_BASELINE,
+  lowercaseWordRefKey,
   refKey,
+  scanKoLowercaseWords,
   scanKoValues,
   scanKoWholeValues,
   TOKEN_ALLOWLIST,
@@ -279,3 +285,111 @@ describe('scanKoWholeValues — story #3880 CHANGES②(실 트리 실행)', () =
     expect(staleBaseline).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// 축 3 — story #3926(§⑤ 낱말 드리프트 축3) 셀프테스트.
+// ---------------------------------------------------------------------------
+
+describe('scanKoLowercaseWords — story #3926 축3 셀프테스트', () => {
+  it('⭐한글 포함 값 안 소문자 3자+ 영단어 → RED', () => {
+    const fixture = { usage: { alert: '월 billing 확인' } };
+    const refs = scanKoLowercaseWords(fixture);
+    expect(refs).toHaveLength(1);
+    expect(refs[0]).toEqual({ key: 'usage.alert', value: '월 billing 확인', word: 'billing' });
+  });
+
+  it('⭐한 값 안 여러 낱말 → 낱말마다 각각(중복 제거)', () => {
+    const fixture = { usage: { hint: 'billing과 alert를 같이 봐요' } };
+    const refs = scanKoLowercaseWords(fixture);
+    expect(refs.map((r) => r.word).sort()).toEqual(['alert', 'billing']);
+  });
+
+  it('중첩 네임스페이스도 dot-path로 플래튼된다', () => {
+    const fixture = { a: { b: { c: '한글 섞인 export 낱말' } } };
+    const refs = scanKoLowercaseWords(fixture);
+    expect(refs).toEqual([{ key: 'a.b.c', value: '한글 섞인 export 낱말', word: 'export' }]);
+  });
+
+  it('뮤테이션 대조 — 순 한국어 값은 GREEN', () => {
+    const fixture = { usage: { alert: '월 결제 알림 확인' } };
+    expect(scanKoLowercaseWords(fixture)).toEqual([]);
+  });
+
+  it('음성대조 — 한글이 전혀 없는 값은 GREEN(축1·2가 이미 본다)', () => {
+    const fixture = { usage: { title: 'Billing Alert' } };
+    expect(scanKoLowercaseWords(fixture)).toEqual([]);
+  });
+
+  it('음성대조 — 2자 이하 소문자는 GREEN(정규식 {3,} 미달)', () => {
+    const fixture = { usage: { hint: '한글 뒤 pc 낱말' } };
+    expect(scanKoLowercaseWords(fixture)).toEqual([]);
+  });
+
+  it('음성대조 — 대문자 시작 낱말은 GREEN(\\b[a-z]{3,}\\b는 소문자 시작만)', () => {
+    const fixture = { usage: { title: '한글 Billing 확인' } };
+    expect(scanKoLowercaseWords(fixture)).toEqual([]);
+  });
+
+  it('처방 — ICU plural/select 문법 키워드(plural·select·one·other·few·many·zero·offset)는 값이 아니라 문법이라 GREEN', () => {
+    const fixture = {
+      a: { count: '한글 {count, plural, one {한 개} other {# 개}} 확인' },
+      b: { kind: '한글 {kind, select, other {기타}} 값' },
+    };
+    expect(scanKoLowercaseWords(fixture)).toEqual([]);
+  });
+
+  it('처방 — {placeholder} 안 낱말은 URL/변수명이라도 GREEN(중괄호 콘텐츠 전체 제외)', () => {
+    const fixture = { usage: { hint: '한글 {someVariableName} 확인' } };
+    expect(scanKoLowercaseWords(fixture)).toEqual([]);
+  });
+
+  it('처방 — URL 안 낱말은 GREEN(URL 전체 제외)', () => {
+    const fixture = { usage: { hint: '한글 https://example.com/path/to/resource 확인' } };
+    expect(scanKoLowercaseWords(fixture)).toEqual([]);
+  });
+
+  it('처방 — 파일 확장자/미디어 포맷명(jpeg·webp·webm·wav·ogg 등)은 GREEN(자리 무관 항상 예외)', () => {
+    const fixture = { meeting: { formats: '한글 webm, wav, mp4, mp3, ogg 확인' } };
+    expect(scanKoLowercaseWords(fixture)).toEqual([]);
+  });
+});
+
+describe('lowercaseWordRefKey — 안정 키(축1 refKey와 동형, key::word)', () => {
+  it('값의 다른 부분이 바뀌어도 같은 낱말이면 같은 키', () => {
+    const r1 = { key: 'usage.alert', word: 'billing' };
+    const r2 = { key: 'usage.alert', word: 'billing' };
+    expect(lowercaseWordRefKey(r1)).toBe(lowercaseWordRefKey(r2));
+  });
+});
+
+describe('computeNewLowercaseWordViolations — LOWERCASE_WORD_ALLOWLIST(키::낱말 단위)', () => {
+  it('⭐ALLOWLIST에 있는 key::word 조합만 허용(같은 낱말이라도 다른 키면 여전히 위반)', () => {
+    const fixture = { recruiter: { keyOnceBody: '한글 mcp 확인' }, other: { note: '한글 mcp 확인' } };
+    const refs = scanKoLowercaseWords(fixture);
+    const violations = computeNewLowercaseWordViolations(refs, LOWERCASE_WORD_ALLOWLIST, LOWERCASE_WORD_BASELINE);
+    expect(violations.map((r) => r.key)).toEqual(['other.note']); // recruiter.keyOnceBody::mcp는 ALLOWLIST, other.note::mcp는 아님
+  });
+});
+
+describe('computeStaleLowercaseWordBaseline — LOWERCASE_WORD_BASELINE 죽은 항목 탐지', () => {
+  it('⭐ko.json 어디에도 없는 baseline 항목은 stale로 잡힌다(타 PR 착지 뒤 정리 강제)', () => {
+    const staleBaseline = new Set(['nowhere.key::ghost']);
+    const refs = scanKoLowercaseWords({ real: { key: '한글 ghost 확인' } }); // 다른 키의 같은 낱말 — stale 판정은 refKey 단위
+    const stale = computeStaleLowercaseWordBaseline(refs, staleBaseline);
+    expect(stale).toEqual(['nowhere.key::ghost']);
+  });
+
+  it('음성대조 — 전부 실제로 남아있는 조합이면 stale 0', () => {
+    const fixture = { recruiter: { keyOnceBody: '한글 mcp 확인' } };
+    const refs = scanKoLowercaseWords(fixture);
+    const baseline = new Set(['recruiter.keyOnceBody::mcp']);
+    expect(computeStaleLowercaseWordBaseline(refs, baseline)).toEqual([]);
+  });
+});
+
+// story #3926 — 「무관 PR no-op」·실 ko.json 양성대조·실 트리 전량검증은
+// verify-no-ascii-token-in-ko-value-3926.test.ts로 분리(페드루 PO 지시, 2026-09-15 —
+// 4327/4329 전용 테스트가 실 키를 «무관 PR no-op» 표본으로 박아 그 값을 고치는 다른
+// PR(#4316)에서 RED가 난 전례 재발 방지 + 이 공유 자기테스트 파일에 여러 §⑤ PR이
+// 동시에 append하는 구조적 충돌 회피 — 순수 함수 단위 테스트(합성 fixture)만 이 자리에
+// 남긴다).

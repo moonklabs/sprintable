@@ -270,7 +270,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
       const res = await fetch('/api/docs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project_id: projectId, title: 'Untitled', slug, content: '', content_format: 'markdown', parent_id: parentId }),
+        body: JSON.stringify({ project_id: projectId, title: t('newDocDefaultTitle'), slug, content: '', content_format: 'markdown', parent_id: parentId }),
       });
       if (!res.ok) throw new Error('Failed to create doc');
       const { data } = await res.json();
@@ -287,7 +287,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
   const handleNewDoc = useCallback(() => { void createDoc(null); }, [createDoc]);
   const handleAddChild = useCallback((parentId: string) => createDoc(parentId), [createDoc]);
 
-  // story #1950(prod-에스컬레이트 #43) — createDoc()은 항상 is_folder 없이 "Untitled" 문서를
+  // story #1950(prod-에스컬레이트 #43) — createDoc()은 항상 is_folder 없이 "제목 없음" 문서를
   // 만들고 바로 편집기로 보내(제목은 그 화면에서 정함) — 폴더는 컨테이너라 트리 안에 머무는
   // 채로 이름부터 받는 게 맞다(storage-folder-tree.tsx #1939 인라인 폼과 동일 결). 팝오버
   // 대신 사이드바 안에 그대로 펼치는 인라인 폼(#1942 결함 클래스 회피 — 뷰포트 clamp 불요).

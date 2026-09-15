@@ -17,13 +17,18 @@ function pickProjectName(projects: TeamMemberRow['projects']) {
   return projects?.name ?? null;
 }
 
+// story #3926 — 이 파일(listInternalDogfoodActors·resolveInternalDogfoodActor)은 실
+// 소비처 0(grep 확認 — 실제로 렌더되는 /internal-dogfood/page.tsx는 이 모듈이 아니라
+// lib/internal-dogfood.ts의 동명 함수를 쓴다, 그쪽 project_name 폴백은 env var
+// 기반이라 이 축 대상 밖). 렌더 경로가 없어 next-intl 배선(no-fiction) 대신 한국어
+// 리터럴로만 고친다.
 function toActor(row: TeamMemberRow): InternalDogfoodActor {
   return {
     id: row.id,
     org_id: row.org_id,
     project_id: row.project_id,
     name: row.name?.trim() || 'Internal member',
-    project_name: pickProjectName(row.projects) ?? 'Untitled Project',
+    project_name: pickProjectName(row.projects) ?? '이름 없는 프로젝트',
   };
 }
 

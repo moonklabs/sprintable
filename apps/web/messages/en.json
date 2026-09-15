@@ -3102,6 +3102,7 @@
     "copyMarkdown": "Copy Markdown",
     "deleteDoc": "Delete",
     "createFailed": "Failed to create document",
+    "newDocDefaultTitle": "Untitled",
     "renameFailed": "Failed to rename",
     "moveFailed": "Failed to move",
     "deleteFailed": "Failed to delete",

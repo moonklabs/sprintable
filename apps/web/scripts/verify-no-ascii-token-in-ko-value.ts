@@ -168,7 +168,11 @@ export const WHOLE_VALUE_ALLOWLIST: ReadonlySet<string> = new Set<string>([
   // 필드명과 어긋난다.
   'channelConnect.appCredentialsAppIdLabel', 'channelConnect.appCredentialsAppSecretLabel',
   'onboarding.mcpConfigTitle', 'recruiter.equipMcpConfigLabel', 'settings.agentMcpTitle',
-  'settings.agentWebhookTitle', 'settings.ghAppTitle', 'docs.formatHtml',
+  'settings.ghAppTitle', 'docs.formatHtml',
+  // settings.agentWebhookTitle: story #3926 후속(유나 design CHANGES·PO 確定
+  // 2026-09-15 11:27Z) — 같은 설정 화면에 「웹훅」 17키·「Webhook URL」 3키 혼재가
+  // 발견돼 「웹훅 URL」로 통일(URL만 기술어 유지) → 이 키는 더 이상 순 ASCII가
+  // 아니라 이 목록에서 제거(stale 자가검출).
 
   // 이니셜리즘(축1 TOKEN_ALLOWLIST와 동일 근거 — 프로토콜/표준/외부 도구 고유명, 자리별
   // 판단 불필요) — 축2(전체값)는 별도 baseline이라 키마다 재등재 필요.
@@ -206,6 +210,171 @@ const WHOLE_VALUE_BASELINE_PATH = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   'ascii-whole-value-in-ko-value-baseline.json',
 );
+
+// ---------------------------------------------------------------------------
+// 축 3 — story #3926(§⑤ 낱말 드리프트 축3, PO doc e746ff3f 판정 표 v2, 2026-09-15) —
+// 축1(대문자 2자+ 토큰)·축2(값 전체 순 ASCII)는 둘 다 "한글이 섞인 문자열"을 구조적으로
+// 안 본다(축1은 대문자만, 축2는 값 전체가 ASCII일 때만 매칭 — isUntranslatedCopy() 자체
+// 문서가 "한글 섞인 문자열은 다른 클래스"라 명시). 실사고: PR #4328 AC3이 usage 9·canvas
+// 2·docs 1(Storage)·descriptionPaneHeading 1을 이 사각에서 짚었고, PO 재측정(한글 포함
+// 값 ∧ `[a-z]{3,}` 소문자 단어, ICU plural 문법·{placeholder}·URL·파일확장자 제외)으로
+// 100값·27ns 전수 확인 — 축3을 신설해 이 클래스를 구조적으로 막는다.
+// ---------------------------------------------------------------------------
+
+const LOWERCASE_WORD_RE = /\b[a-z]{3,}\b/g;
+const HANGUL_IN_VALUE_RE = /[가-힣]/;
+const URL_IN_VALUE_RE = /https?:\/\/\S+/g;
+const PLACEHOLDER_IN_VALUE_RE = /\{[^}]*\}/g;
+
+// ICU MessageFormat 문법 키워드(plural/select 분기 셀렉터) — 값이 아니라 문법이라
+// 이 자에서 애초에 제외한다(story #3926 처방).
+const ICU_GRAMMAR_WORDS: ReadonlySet<string> = new Set([
+  'plural', 'select', 'selectordinal', 'one', 'other', 'few', 'many', 'zero', 'offset',
+]);
+
+// 파일 확장자/미디어 포맷명 — 축1·2의 확장자 예외와 동일 범주(브랜드/낱말 선택 여지
+// 없음). meeting.supportedFormats("webm, wav, mp4, mp3, ogg")가 이 예외로 걸러진다 —
+// 어느 키에 나와도 항상 무해해 개별 ALLOWLIST 등재 불요.
+const EXTENSION_WORDS: ReadonlySet<string> = new Set([
+  'jpeg', 'jpg', 'png', 'webp', 'gif', 'svg', 'pdf', 'csv', 'json', 'txt', 'docx', 'xlsx',
+  'pptx', 'mp4', 'mp3', 'zip', 'md', 'html', 'css', 'yaml', 'yml', 'webm', 'wav', 'ogg',
+]);
+
+export interface LowercaseWordRef {
+  key: string;
+  value: string;
+  word: string;
+}
+
+export function scanKoLowercaseWords(koJson: Record<string, unknown>): LowercaseWordRef[] {
+  const flat = new Map<string, string>();
+  flatten(koJson, '', flat);
+
+  const refs: LowercaseWordRef[] = [];
+  for (const [key, value] of flat) {
+    if (!HANGUL_IN_VALUE_RE.test(value)) continue; // 한글이 아예 없으면 축1·2가 이미 본다.
+    const stripped = value.replace(URL_IN_VALUE_RE, ' ').replace(PLACEHOLDER_IN_VALUE_RE, ' ');
+    const matches = stripped.match(LOWERCASE_WORD_RE);
+    if (!matches) continue;
+    for (const word of new Set(matches.map((w) => w.toLowerCase()))) {
+      if (ICU_GRAMMAR_WORDS.has(word) || EXTENSION_WORDS.has(word)) continue;
+      refs.push({ key, value, word });
+    }
+  }
+  return refs;
+}
+
+/** 축3의 안정 키 — 축1 refKey와 동형(key::word), i18n 키+낱말 단위. */
+export function lowercaseWordRefKey(r: Pick<LowercaseWordRef, 'key' | 'word'>): string {
+  return `${r.key}::${r.word}`;
+}
+
+// ALLOWLIST — story #3926 PO 確定(2026-09-15, doc e746ff3f 판정 표 v2)의 ②허용
+// 94건 스코프 중 41개 키(중복 키 3개 제외 실질 41개). 분류 근거(그라운딩 — 각 자리의
+// 실 문맥을 messages/ko.json에서 직접 대조, 문서에 사유 1줄씩 고정):
+//  - 마크업 태그명(<link>·<cmd>·<code>) — HTML 유사 구문, 프롬프트 텍스트 아님.
+//  - 실 파일명(.mcp.json)·CLI 바이너리명(uvx)·프로토콜 고유 용어(MCP transport) —
+//    번역하면 실행 불가능해지는 리터럴.
+//  - 코드 필드명 리터럴 레이블(slug·source·scope)·UTM 파라미터명.
+//  - 사용자가 그대로 타이핑해야 하는 커맨드/태그/역할-슬러그/enum 입력 예시 —
+//    organization.definerAuthRolesPlaceholder·eventActionAuthRolePlaceholder는 기존
+//    `verify-no-role-english-in-user-copy.ts` ALLOWLIST에 이미 동일 사유로 등재된 자리.
+//  - GitHub Check Run API 실제 상태값 리터럴(pending) — GitHub 자체 UI도 그렇게 표시.
+//  - 실 에이전트에게 그대로 복사-전달되는 리터럴 프로토콜 페이로드(sprintable agent
+//    name/api key 등)·실행 가능한 셸 명령/변수 리터럴(export ...·HAS_WEBHOOK="true")·
+//    stderr에 실제로 찍히는 로그 문자열 리터럴.
+//  - 브랜드명 예시(moonklabs)·시스템 기능명 리터럴(ping).
+export const LOWERCASE_WORD_ALLOWLIST: ReadonlySet<string> = new Set<string>([
+  'agents.toolPermissions.coreAlways::ping',
+  'board.backlinksEmptyScoped::source',
+  'cage.githubCheckRependingReason::pending',
+  'cage.githubCheckRependingReasonWithPrior::pending',
+  'chats.commandArgHintPriority::critical',
+  'chats.commandArgHintPriority::high',
+  'chats.commandArgHintPriority::medium',
+  'chats.commandArgHintPriority::low',
+  'content.channelPostsCommandInFlightReasonBlocked::link',
+  'content.channelPostsUnpublishConnectionNotActive::link',
+  'content.channelPostsUnpublishScopeInsufficientOwner::link',
+  'content.commentsReplyFailureConnectionBlocked::link',
+  'content.editMeta::slug',
+  'content.fieldSlugLangLocked::slug',
+  'contentRules.utmRulesCampaignFromFixedNote::slug',
+  'docs.docTagsPlaceholder::docs',
+  'docs.docTagsPlaceholder::mobile',
+  'docs.docTagsPlaceholder::parity',
+  'docs.searchTree::slug',
+  'loops.createLoopTagsPlaceholder::marketing',
+  'loops.createLoopTagsPlaceholder::pricing',
+  'nav.createOrgSlugPlaceholder::moonklabs',
+  'onboarding.localGuideNote::uvx',
+  'onboarding.slugPlaceholder::moonklabs',
+  'onboarding.transportLocal::uvx',
+  'organization.definerAuthRolesPlaceholder::owner',
+  'organization.definerAuthRolesPlaceholder::admin',
+  'organization.definerSignalKindsPlaceholder::verdict',
+  'organization.definerSignalKindsPlaceholder::scope',
+  'organization.definerSignalKindsPlaceholder::direction',
+  'organization.definerStagesSlugHint::slug',
+  'organization.definerStagesSlugHint::enum',
+  'organization.eventActionAuthRolePlaceholder::admin',
+  'organization.eventActionAuthRolePlaceholder::owner',
+  'organization.eventKeyPrefixHint::org',
+  'recruiter.keyOnceBody::mcp',
+  'recruiter.keyOnceBodyNoMcp::transport',
+  'recruiter.kitOrientingConnectBodyCli::cmd',
+  'recruiter.kitOrientingConnectBodyMcp::mcp',
+  'recruiter.kitOrientingWakeBody_channel-plugin-marketplace::code',
+  'recruiter.mcpNotApplicable::transport',
+  'recruiter.rotateConfirmBody::mcp',
+  'recruiter.verifyGuideMcp::mcp',
+  'recruiter.verifyGuideMcpStdio::mcp',
+  'settings.agentApiKeyOnboardingMessageBase::sprintable',
+  'settings.agentApiKeyOnboardingMessageBase::agent',
+  'settings.agentApiKeyOnboardingMessageBase::name',
+  'settings.agentApiKeyOnboardingMessageBase::api',
+  'settings.agentApiKeyOnboardingMessageBase::key',
+  'settings.agentApiKeyOnboardingMessageMcpSuffix::mcp',
+  'settings.agentApiKeyScopeLabel::scope',
+  'settings.agentFakechatEnvKeyInstruction::export',
+  'settings.agentFakechatSuccessCheck::stderr',
+  'settings.agentFakechatSuccessCheck::code',
+  'settings.agentFakechatSuccessCheck::sprintable',
+  'settings.agentFakechatSuccessCheck::stream',
+  'settings.agentFakechatSuccessCheck::open',
+  'settings.agentFakechatWebhookActiveNote::launch',
+  'settings.agentFakechatWebhookActiveNote::true',
+  'settings.agentFakechatWebhookOffNote::true',
+]);
+
+// story #3926 처방 — 이 3926 PR이 처리하는 게 아니라 같은 자리를 동시에 고치는 다른
+// 열린 PR이 있는 키는 임시 baseline으로 통과시킨다(PO 지시 — "이미/곧 소진" 항목은
+// 3926 스코프 밖, 가드는 지금 도입). 각 PR이 착지하면 값이 바뀌어 이 스캔에서 자동으로
+// 안 걸리고, stale 자가검출이 그 시점에 이 baseline 항목을 걸어 정리를 강제한다(축1·2와
+// 동일 메커니즘) — #4331 착지 뒤 실측대로 board.workcellGateAction·proofCapsule.gate.label·
+// proofCapsule.evidence.autoFailed/autoPassed 4건, #4332 착지 뒤 recruiter.scopeTitle
+// (scoped·key)·board.trustClassicView(status) 3건을 지웠다(stale 자가검출이 실제로
+// 작동함을 그대로 증명, 2회째). 현재 baseline 0건 — 목표(전량 처리 뒤 0)대로 도달.
+export const LOWERCASE_WORD_BASELINE: ReadonlySet<string> = new Set<string>([]);
+
+export function computeNewLowercaseWordViolations(
+  refs: LowercaseWordRef[],
+  allowlist: ReadonlySet<string>,
+  baseline: ReadonlySet<string>,
+): LowercaseWordRef[] {
+  return refs.filter((r) => {
+    const key = lowercaseWordRefKey(r);
+    return !allowlist.has(key) && !baseline.has(key);
+  });
+}
+
+export function computeStaleLowercaseWordBaseline(
+  refs: LowercaseWordRef[],
+  baseline: ReadonlySet<string>,
+): string[] {
+  const foundKeys = new Set(refs.map(lowercaseWordRefKey));
+  return [...baseline].filter((k) => !foundKeys.has(k));
+}
 
 export function computeNewWholeValueViolations(
   refs: WholeValueAsciiRef[],
@@ -373,9 +542,46 @@ function main(): number {
     console.error('\n→ 고쳐졌다면(한국어로 옮겼거나 삭제했다면) baseline에서 그 항목을 지울 것.');
   }
 
+  // 축 3 — story #3926 — 한글 포함 값 안 소문자 영단어 혼입.
+  const lowercaseWordRefs = scanKoLowercaseWords(koJson);
+  const newLowercaseWordViolations = computeNewLowercaseWordViolations(
+    lowercaseWordRefs, LOWERCASE_WORD_ALLOWLIST, LOWERCASE_WORD_BASELINE,
+  );
+  const staleLowercaseWordBaseline = computeStaleLowercaseWordBaseline(
+    lowercaseWordRefs.filter((r) => !LOWERCASE_WORD_ALLOWLIST.has(lowercaseWordRefKey(r))),
+    LOWERCASE_WORD_BASELINE,
+  );
+
+  console.log(
+    `[story #3926 축3] ko.json 값 콘텐츠 한글 포함 값 안 소문자 영단어 스캔 — ` +
+      `검출 ${lowercaseWordRefs.length}건 · ALLOWLIST ${LOWERCASE_WORD_ALLOWLIST.size}건 · ` +
+      `baseline(타 PR 소진 대기) ${LOWERCASE_WORD_BASELINE.size}건 · 신규 ${newLowercaseWordViolations.length}건 · ` +
+      `stale ${staleLowercaseWordBaseline.length}건`,
+  );
+
+  if (newLowercaseWordViolations.length > 0) {
+    failed = true;
+    console.error('\nFAIL: ALLOWLIST/baseline에 없는 ko.json 값 안 소문자 영단어 혼입 발견:');
+    for (const r of newLowercaseWordViolations.sort((a, b) => a.key.localeCompare(b.key))) {
+      console.error(`  - ${r.key}="${r.value}" (낱말: ${r.word})`);
+    }
+    console.error(
+      '\n→ 한국어 낱말로 옮길 것. 실 파일명·프로토콜 고유 용어·마크업 태그명·사용자 입력 리터럴 예시 등 ' +
+        '번역 불가/부적절한 자리면 사유와 함께 LOWERCASE_WORD_ALLOWLIST에 등재(PO 승인). ' +
+        '다른 PR이 이미 같은 자리를 처리 中이면 LOWERCASE_WORD_BASELINE에 처리 PR 번호와 함께 등재(PO 승인).',
+    );
+  }
+
+  if (staleLowercaseWordBaseline.length > 0) {
+    failed = true;
+    console.error(`\nFAIL: baseline(축3)에 ${staleLowercaseWordBaseline.length}건이 등재됐으나 이번 스캔에서 안 걸렸다:`);
+    for (const k of staleLowercaseWordBaseline.sort()) console.error(`  - ${k}`);
+    console.error('\n→ 처리 PR이 착지해 고쳐졌다면 baseline에서 그 항목을 지울 것.');
+  }
+
   if (failed) return 1;
 
-  console.log('\nOK: ALLOWLIST/baseline 초과 없음(신규 0건) · stale 0건(죽은 baseline 항목 없음) — 축1·축2 둘 다.');
+  console.log('\nOK: ALLOWLIST/baseline 초과 없음(신규 0건) · stale 0건(죽은 baseline 항목 없음) — 축1·축2·축3 전부.');
   return 0;
 }
 
