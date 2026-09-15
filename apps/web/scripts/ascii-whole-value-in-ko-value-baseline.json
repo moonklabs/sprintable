@@ -44,8 +44,6 @@
     "loops.entityTypeLoop",
     "loops.outcomeHit",
     "loops.outcomeMiss",
-    "nav.createOrgSlugLabel",
-    "nav.createOrgSlugPlaceholder",
     "onboarding.mcpConfigTitle",
     "onboarding.roleDevops",
     "onboarding.rolePm",
