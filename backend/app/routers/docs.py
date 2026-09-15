@@ -274,7 +274,7 @@ async def create_doc(
     # 계약 단순화 — create/update 양쪽에서 canonical 여부와 무관하게 동일하게 호출 가능).
     from app.services.mention_parser import reconcile_doc_mentions
     await reconcile_doc_mentions(
-        session, org_id=org_id, doc_id=doc.id, html_content=doc.content, created_by=created_by,
+        session, org_id=org_id, doc_id=doc.id, content=doc.content, created_by=created_by,
     )
     # 활동로그: doc 생성 이벤트 기록 (생성류 미기록 갭 — 피드 정상화)
     from app.services.activity_log import record_created_activity
@@ -636,7 +636,7 @@ async def update_doc(
         from app.services.mention_parser import reconcile_doc_mentions
         actor_id = await _resolve_doc_member_id(auth, repo.org_id, session)
         await reconcile_doc_mentions(
-            session, org_id=repo.org_id, doc_id=doc.id, html_content=doc.content, created_by=actor_id,
+            session, org_id=repo.org_id, doc_id=doc.id, content=doc.content, created_by=actor_id,
         )
 
         # story #3561(Phase2·BE, 페드루 PO 確定 2026-09-06) — 이 doc을 근거자료로 삼은

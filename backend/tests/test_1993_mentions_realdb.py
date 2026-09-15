@@ -153,7 +153,7 @@ async def test_doc_reconcile_adds_and_removes_stale_mentions():
             # 1차: B 를 wikiLink 로 멘션.
             html_v1 = f'<span data-type="wikiLink" data-doc-id="{target_b}">B</span>'
             await reconcile_doc_mentions(
-                session, org_id=org.id, doc_id=source_doc_id, html_content=html_v1,
+                session, org_id=org.id, doc_id=source_doc_id, content=html_v1,
                 created_by=member.id,
             )
             await session.commit()
@@ -166,7 +166,7 @@ async def test_doc_reconcile_adds_and_removes_stale_mentions():
             # 2차: B 제거·C 추가(pageEmbed) — stale(B) 삭제 + 신규(C) insert.
             html_v2 = f'<div data-page-embed data-doc-id="{target_c}"></div>'
             await reconcile_doc_mentions(
-                session, org_id=org.id, doc_id=source_doc_id, html_content=html_v2,
+                session, org_id=org.id, doc_id=source_doc_id, content=html_v2,
                 created_by=member.id,
             )
             await session.commit()
@@ -205,7 +205,7 @@ async def test_doc_reconcile_wikilink_and_page_embed_land_as_distinct_forms():
                 f'<div data-page-embed data-doc-id="{embed_target}"></div>'
             )
             await reconcile_doc_mentions(
-                session, org_id=org.id, doc_id=source_doc_id, html_content=html,
+                session, org_id=org.id, doc_id=source_doc_id, content=html,
                 created_by=member.id,
             )
             await session.commit()
@@ -238,14 +238,14 @@ async def test_doc_reconcile_switching_page_embed_to_wikilink_swaps_form_not_sta
 
             html_v1 = f'<div data-page-embed data-doc-id="{target}"></div>'
             await reconcile_doc_mentions(
-                session, org_id=org.id, doc_id=source_doc_id, html_content=html_v1,
+                session, org_id=org.id, doc_id=source_doc_id, content=html_v1,
                 created_by=member.id,
             )
             await session.commit()
 
             html_v2 = f'<span data-type="wikiLink" data-doc-id="{target}">X</span>'
             await reconcile_doc_mentions(
-                session, org_id=org.id, doc_id=source_doc_id, html_content=html_v2,
+                session, org_id=org.id, doc_id=source_doc_id, content=html_v2,
                 created_by=member.id,
             )
             await session.commit()
@@ -285,7 +285,7 @@ async def test_doc_reconcile_proof_rows_untouched_by_reconcile():
 
             # 본문에 아무 언급도 없음 — reconcile이 "다 지운다"면 proof도 같이 지워질 위험.
             await reconcile_doc_mentions(
-                session, org_id=org.id, doc_id=source_doc_id, html_content="<p>empty</p>",
+                session, org_id=org.id, doc_id=source_doc_id, content="<p>empty</p>",
                 created_by=member.id,
             )
             await session.commit()
@@ -385,7 +385,7 @@ async def test_self_reference_mention_dropped():
             html = f'<span data-type="wikiLink" data-doc-id="{self_doc_id}">self</span>'
 
             await reconcile_doc_mentions(
-                session, org_id=org.id, doc_id=self_doc_id, html_content=html, created_by=member.id,
+                session, org_id=org.id, doc_id=self_doc_id, content=html, created_by=member.id,
             )
             await session.commit()
 
@@ -461,7 +461,7 @@ async def test_mentions_rollback_when_enclosing_transaction_fails():
             html = f'<span data-type="wikiLink" data-doc-id="{target_doc_id}">X</span>'
 
             await reconcile_doc_mentions(
-                session, org_id=org.id, doc_id=source_doc_id, html_content=html, created_by=member.id,
+                session, org_id=org.id, doc_id=source_doc_id, content=html, created_by=member.id,
             )
             # 참조 insert 는 flush 상태 — 아직 커밋 안 됨. 여기서 본요청(doc 저장)이 실패했다고
             # 가정(예: 이후 slug 충돌 등으로 라우터가 예외 raise) → get_db 의 except 블록이
