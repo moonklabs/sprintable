@@ -189,7 +189,7 @@ describe('BillingTab — 결제②-D 4티어 재편', () => {
     });
     const alertEl = container.querySelector('[role="alert"]');
     expect(alertEl).not.toBeNull();
-    expect(alertEl?.textContent).toContain('요금제 정보를 불러올 수 없습니다');
+    expect(alertEl?.textContent).toContain(koMessages.pricingPlans.loadError);
   });
 });
 
@@ -244,7 +244,7 @@ describe('BillingTab — Toss 체크아웃 리다이렉트 왕복(story #2510)',
     await mount(async () => statusResponse({ tier: 'free' }));
 
     expect(completeCheckoutMock).toHaveBeenCalledWith({ authKey: 'ak-1', tier: 'team', billingCycle: 'monthly' });
-    expect(container.textContent).toContain('Team 구독이 시작되었습니다');
+    expect(container.textContent).toContain(koMessages.pricingPlans.checkoutSuccessBanner.replace('{tier}', 'Team'));
     expect(replaceMock).toHaveBeenCalledWith('/settings?tab=billing');
   });
 
@@ -257,13 +257,13 @@ describe('BillingTab — Toss 체크아웃 리다이렉트 왕복(story #2510)',
     await mount(async () => statusResponse());
 
     const alertEl = container.querySelector('[role="alert"]');
-    expect(alertEl?.textContent).toContain('카드 승인이 거절되었습니다');
+    expect(alertEl?.textContent).toContain(koMessages.pricingPlans.checkoutDeclinedBanner.replace('{reason}', '한도초과'));
     expect(alertEl?.textContent).toContain('한도초과');
     // 유나 design 가디언(2026-08-07) — declined는 502 등 시스템오류(destructive)와 색으로
     // 구분돼야 한다. warning이어야지 destructive면 안 된다.
     expect(alertEl?.className).toContain('warning-tint');
     expect(alertEl?.className).not.toContain('destructive-tint');
-    expect(alertEl?.textContent).toContain('구독은 시작되지 않았고 청구된 금액도 없습니다');
+    expect(alertEl?.textContent).toContain(koMessages.pricingPlans.checkoutDeclinedReassurance);
   });
 
   it('checkout=success 이지만 completeCheckout이 HTTP 에러를 반환하면 에러 배너를 보인다', async () => {
@@ -271,14 +271,14 @@ describe('BillingTab — Toss 체크아웃 리다이렉트 왕복(story #2510)',
     completeCheckoutMock.mockResolvedValue({ kind: 'error', status: 502 });
     await mount(async () => statusResponse());
 
-    expect(container.textContent).toContain('결제 처리 중 오류가 발생했습니다');
+    expect(container.textContent).toContain(koMessages.pricingPlans.checkoutErrorBanner);
   });
 
   it('checkout=fail(Toss 위젯 인증 실패/취소) → 위젯 실패 배너를 보이고 completeCheckout은 호출하지 않는다', async () => {
     searchParams = new URLSearchParams({ checkout: 'fail', code: 'USER_CANCEL', message: '취소' });
     await mount(async () => statusResponse());
 
-    expect(container.textContent).toContain('카드 인증이 완료되지 않았습니다');
+    expect(container.textContent).toContain(koMessages.pricingPlans.checkoutWidgetFailedBanner);
     expect(completeCheckoutMock).not.toHaveBeenCalled();
     expect(replaceMock).toHaveBeenCalledWith('/settings?tab=billing');
   });
@@ -287,14 +287,14 @@ describe('BillingTab — Toss 체크아웃 리다이렉트 왕복(story #2510)',
     searchParams = new URLSearchParams({ checkout: 'success', tier: 'team', cycle: 'monthly' });
     await mount(async () => statusResponse());
 
-    expect(container.textContent).toContain('카드 인증이 완료되지 않았습니다');
+    expect(container.textContent).toContain(koMessages.pricingPlans.checkoutWidgetFailedBanner);
     expect(completeCheckoutMock).not.toHaveBeenCalled();
   });
 
   it('checkout 쿼리가 없으면 아무 배너도 안 뜨고 completeCheckout도 안 부른다', async () => {
     await mount(async () => statusResponse());
     expect(completeCheckoutMock).not.toHaveBeenCalled();
-    expect(container.textContent).not.toContain('구독이 시작되었습니다');
+    expect(container.textContent).not.toContain(koMessages.pricingPlans.checkoutSuccessBanner.replace('{tier}', 'Team'));
   });
 });
 
@@ -333,7 +333,7 @@ describe('UpgradeCheckoutDialog — 확인 클릭 시 Toss 위젯을 연다(stor
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(document.body.textContent).toContain('결제창을 여는 중 문제가 발생했습니다');
+    expect(document.body.textContent).toContain(koMessages.pricingPlans.checkoutWidgetOpenErrorInline);
     expect((confirmBtn as HTMLButtonElement).disabled).toBe(false);
   });
 
