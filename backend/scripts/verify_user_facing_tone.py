@@ -87,6 +87,11 @@ NFD_JONGSEONG_B_NIKKA = unicodedata.normalize("NFD", "ᆸ니까")
 HANJA_RE = re.compile("[一-龥]")
 ADNOMINAL_TERMINAL_RE = re.compile(r"[가-힣](는|인)\.(\s|$)")
 
+# 카디르 QA 明示(2026-09-15) — 표면③에서 code는 허용목록에 속하는데 message를 정적으로
+# 재구성 못 한 자리(변수·복잡한 f-string 조합 등)를 나타내는 센티넬. find_tone_issues가
+# 이 값을 최우선으로 인식해 무조건 위반으로 처리한다(fail-closed).
+UNRESOLVABLE_MESSAGE_SENTINEL = "\x00UNRESOLVABLE_LITERAL_MESSAGE\x00"
+
 
 def matches_formal_register(value: str) -> list[str]:
     """FE `matchesFormalRegister`와 동일 정의 — 습니다/십시오/습니까 리터럴 +
@@ -103,7 +108,13 @@ def matches_formal_register(value: str) -> list[str]:
 
 def find_tone_issues(value: str) -> list[str]:
     """story #3931 AC3 — FE needle(습니다체 축) + 이 스토리 확장 3축(한자·당신·페르소나
-    관형형 종결). 어느 한 축이라도 걸리면 그 값은 "2층 위반"."""
+    관형형 종결). 어느 한 축이라도 걸리면 그 값은 "2층 위반".
+
+    카디르 QA 明示(2026-09-15) — 표면③에서 code는 허용목록에 속하는데 message를
+    정적으로 재구성 못 한 자리(UNRESOLVABLE_MESSAGE_SENTINEL)는 톤 판정 전에 먼저
+    무조건 위반으로 처리한다(fail-closed — "판정 불가"를 "깨끗함"으로 착각하지 않는다)."""
+    if value == UNRESOLVABLE_MESSAGE_SENTINEL:
+        return ["정적 분석 불가(fail-closed) — message가 리터럴로 재구성 안 됨"]
     issues = list(matches_formal_register(value))
     if HANJA_RE.search(value):
         issues.append("한자")
@@ -275,22 +286,54 @@ def parse_human_safe_error_codes(ts_path: Path) -> frozenset[str]:
     return codes
 
 
+def _extract_code_and_message_from_detail(
+    detail_node: ast.expr,
+) -> tuple[object, ast.expr | None]:
+    """`HTTPException(detail=...)`의 detail 값에서 (code, message_node)를 뽑는다. 카디르
+    QA 실 재현(2026-09-15, PR#4336 코멘트) — 원래는 `human_error(...)` 호출 shape만
+    봤는데, `detail={"code": "...", "message": "..."}` 같은 **raw dict 리터럴**로 같은
+    런타임 shape(FE가 code/message를 그대로 읽는 envelope)을 만들면 human_error(-국한
+    스캔이 AST·regex 양쪽 다 못 봐서 0==0으로 "건강"을 오판했다(fail-open). 두 shape
+    모두 지원한다 — 새 shape가 또 생기면(둘 다 아니면) code_val=None이라 허용목록
+    매칭에서 자연히 걸러진다(아래 자기검증 좌변이 그 누락도 규정한다)."""
+    if isinstance(detail_node, ast.Call) and _call_func_name(detail_node) == "human_error":
+        code_node = detail_node.args[0] if detail_node.args else None
+        code_val = code_node.value if isinstance(code_node, ast.Constant) else None
+        message_node = detail_node.args[1] if len(detail_node.args) > 1 else None
+        if message_node is None:
+            message_node = next((kw.value for kw in detail_node.keywords if kw.arg == "message"), None)
+        return code_val, message_node
+    if isinstance(detail_node, ast.Dict):
+        code_val = None
+        message_node = None
+        for k, v in zip(detail_node.keys, detail_node.values):
+            if isinstance(k, ast.Constant) and k.value == "code" and isinstance(v, ast.Constant):
+                code_val = v.value
+            if isinstance(k, ast.Constant) and k.value == "message":
+                message_node = v
+        return code_val, message_node
+    return None, None
+
+
 def extract_surface3_from_source(
     source: str, file_label: str, allowed_codes: frozenset[str]
 ) -> list[ExtractedString]:
     tree = ast.parse(source)
     results: list[ExtractedString] = []
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Call) or _call_func_name(node) != "human_error":
+        if not isinstance(node, ast.Call) or _call_func_name(node) != "HTTPException":
             continue
-        code_node = node.args[0] if node.args else None
-        code_val = code_node.value if isinstance(code_node, ast.Constant) else None
+        detail_node = next((kw.value for kw in node.keywords if kw.arg == "detail"), None)
+        if detail_node is None and len(node.args) > 1:
+            detail_node = node.args[1]
+        if detail_node is None:
+            continue
+        code_val, message_node = _extract_code_and_message_from_detail(detail_node)
         if code_val not in allowed_codes:
             continue
-        message_node = node.args[1] if len(node.args) > 1 else None
-        if message_node is None:
-            message_node = next((kw.value for kw in node.keywords if kw.arg == "message"), None)
-        text = _literal_text(message_node) or ""
+        text = _literal_text(message_node) if message_node is not None else None
+        if text is None:
+            text = UNRESOLVABLE_MESSAGE_SENTINEL
         results.append(
             ExtractedString(
                 surface="③ human_error allowlist",
@@ -304,11 +347,14 @@ def extract_surface3_from_source(
 
 
 def count_surface3_regex_occurrences(source: str, allowed_codes: frozenset[str]) -> int:
-    """표면③ 자기검증 좌변 — 허용목록 코드별 `human_error("<code>"` 호출을 AST 없이
-    순수 텍스트 정규식으로 독립 카운트. AST 워커가 놓친 자리(예: 콜 형태를 못 알아본
-    경우)가 있으면 이 수와 AST 추출 수가 어긋난다."""
+    """표면③ 자기검증 좌변 — 허용목록 코드 **문자열 리터럴**이 파일 안에 등장하는 수를
+    wrapper 무관하게 센다(카디르 QA 2026-09-15 — 예전엔 `human_error("<code>"` 패턴에만
+    국한해 raw dict 우회 shape를 못 봤다). code 문자열이 raw dict든 human_error() 호출
+    이든 «어떤 shape로든» 소스에 리터럴로 있으면 여기서 잡힌다 — AST 추출(우변)이 그
+    shape를 아직 못 읽는 새로운 우회가 생기면 좌변>우변으로 갈라져 아래 main()의
+    자기검증이 RED를 낸다(그 자리를 사람이 직접 봐야 한다는 신호)."""
     return sum(
-        len(re.findall(rf'human_error\(\s*["\']' + re.escape(code) + r'["\']', source)) for code in allowed_codes
+        len(re.findall(r'["\']' + re.escape(code) + r'["\']', source)) for code in allowed_codes
     )
 
 

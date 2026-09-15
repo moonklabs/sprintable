@@ -25,6 +25,7 @@ from verify_user_facing_tone import (  # noqa: E402
     EMAIL_COPY_PATH,
     I18N_CATALOG_PATH,
     ExtractedString,
+    count_surface3_regex_occurrences,
     discover_surface4_dict_const_names,
     extract_surface1_from_source,
     extract_surface1_notification_kwargs,
@@ -199,6 +200,69 @@ def _require_something():
     extracted = extract_surface3_from_source(source, "app/routers/fixture.py", fixture_allowed_codes)
     assert len(extracted) == 1
     assert find_tone_issues(extracted[0].text) == ["습니다"]
+
+
+# ---------------------------------------------------------------------------
+# CHANGES③(카디르 QA 실 재현, 2026-09-15, PR#4336) — human_error(-국한 스캔이 raw dict
+# 리터럴 detail={"code":..., "message":...} 우회 shape를 AST·regex 양쪽 다 못 봐서
+# 0==0으로 "건강" 오판했다(fail-open). 두 shape(human_error 호출·raw dict 리터럴) 모두
+# 같은 코드 경로로 잡히는지 고정.
+# ---------------------------------------------------------------------------
+def test_kadir_repro_raw_dict_detail_bypasses_human_error_is_still_caught():
+    """카디르 QA 실 재현 그대로 — human_error() 헬퍼를 안 거치고 detail=dict 리터럴로
+    직접 code/message를 심어도(같은 런타임 envelope shape) 표면③이 잡아야 한다."""
+    source = '''
+from fastapi import HTTPException
+
+
+def refresh_publication_comments_endpoint():
+    raise HTTPException(
+        status_code=400,
+        detail={"code": "COMMENT_REFRESH_HUMAN_ONLY", "message": "댓글 재수집은 휴먼 멤버만 가능합니다"},
+    )
+'''
+    fixture_allowed_codes = frozenset({"COMMENT_REFRESH_HUMAN_ONLY"})
+    extracted = extract_surface3_from_source(source, "app/routers/fixture.py", fixture_allowed_codes)
+    assert len(extracted) == 1, "raw dict detail= 우회 shape가 표면③에서 여전히 추출 안 됨(카디르 QA 재발)"
+    assert find_tone_issues(extracted[0].text) == ["ㅂ니다"]
+
+
+def test_kadir_repro_self_check_equality_would_have_caught_the_gap():
+    """수정 前 설계였다면(human_error(-국한 regex) 이 좌변이 0으로 나와 0==0 오판이
+    났을 자리 — 수정 後(코드 문자열 wrapper-agnostic 카운트)는 raw dict shape도 세어
+    좌변이 우변(AST 추출 수)과 일치한다."""
+    source = '''
+from fastapi import HTTPException
+
+
+def refresh_publication_comments_endpoint():
+    raise HTTPException(
+        status_code=400,
+        detail={"code": "COMMENT_REFRESH_HUMAN_ONLY", "message": "댓글 재수집은 휴먼 멤버만 가능합니다"},
+    )
+'''
+    fixture_allowed_codes = frozenset({"COMMENT_REFRESH_HUMAN_ONLY"})
+    extracted = extract_surface3_from_source(source, "app/routers/fixture.py", fixture_allowed_codes)
+    regex_count = count_surface3_regex_occurrences(source, fixture_allowed_codes)
+    assert regex_count == len(extracted) == 1
+
+
+def test_unresolvable_message_is_red_not_silently_skipped():
+    """카디르 QA 明示 — code는 허용목록에 속하는데 message가 정적으로 재구성 불가(변수
+    조합)면 "조용히 통과"가 아니라 그 자체가 위반이어야 한다(fail-closed)."""
+    source = '''
+from fastapi import HTTPException
+from app.core.error_envelope import human_error
+
+
+def _foo(dynamic_msg):
+    raise HTTPException(status_code=400, detail=human_error("COMMENT_REFRESH_HUMAN_ONLY", dynamic_msg))
+'''
+    fixture_allowed_codes = frozenset({"COMMENT_REFRESH_HUMAN_ONLY"})
+    extracted = extract_surface3_from_source(source, "app/routers/fixture.py", fixture_allowed_codes)
+    assert len(extracted) == 1
+    issues = find_tone_issues(extracted[0].text)
+    assert issues and "fail-closed" in issues[0]
 
 
 # ---------------------------------------------------------------------------
