@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { OperatorInput, OperatorTextarea, OperatorSelect } from '@/components/ui/operator-control';
 import { useTranslations } from 'next-intl';
 import { fetchWithAuth } from '@/lib/db/client';
+import { getPublicAppHost } from '@/lib/public-app-host';
 import { ConnectStep } from './connect-step';
 import { emitOnboardingEvent } from './onboarding-telemetry';
 
@@ -490,7 +491,7 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
                 // 결함 — 이미 존재하는 수동 slug 입력 칸(바로 위)으로 안내해 막힘을 뚫는다.
                 <p className="text-xs text-destructive">{t('slugManualRequired')}</p>
               ) : (
-                <p className="text-xs text-muted-foreground">sprintable.app/{orgSlug || '...'}</p>
+                <p className="text-xs text-muted-foreground">{getPublicAppHost()}/{orgSlug || '...'}</p>
               )}
             </div>
             <Button

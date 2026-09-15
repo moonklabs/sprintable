@@ -1712,6 +1712,13 @@ jobs:
       - name: "Verify no hardcoded aria-label (story #3557 regression guard)"
         run: pnpm --filter web verify:no-hardcoded-aria-label
 
+      # story #3905(PO 눈 리뷰, 3901 캡처 그라운딩) 회귀가드 — 온보딩 1/4·조직 만들기
+      # 대화상자의 URL 슬러그 미리보기가 리터럴 `sprintable.app`(실 도메인 아님, 실
+      # 도메인은 sprintable.ai)을 하드코딩하던 첫인상 결함. getPublicAppHost()
+      # (NEXT_PUBLIC_APP_URL 1원천)로 옮긴 뒤 clean-slate로 연다 — 새 FAIL 즉시 차단.
+      - name: "Verify no hardcoded app domain (story #3905 regression guard)"
+        run: pnpm --filter web verify:no-hardcoded-app-domain
+
       # story #3592(§22-18 정본) 회귀가드("유나의 자") — 목록 안 반복 행 액션 버튼이
       # 순번 없이 같은 접근 이름을 공유하면(스크린리더가 항목을 못 가름) 새로 늘 때만
       # FAIL(baseline-freeze — verify-no-new-raw-button.ts와 동형 관례, 기존 잔존은

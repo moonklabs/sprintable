@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { useRenderNonce } from '@/hooks/use-render-nonce';
+import { getPublicAppHost } from '@/lib/public-app-host';
 
 const SLUG_REGEX = /^[a-z0-9][a-z0-9-]{0,48}[a-z0-9]$|^[a-z0-9]$/;
 
@@ -188,7 +189,7 @@ export function CreateOrganizationDialog({
               <p className="text-xs text-destructive">{slugError}</p>
             ) : (
               <p className="text-xs text-muted-foreground">
-                sprintable.app/{slug || '...'}
+                {getPublicAppHost()}/{slug || '...'}
               </p>
             )}
           </div>
