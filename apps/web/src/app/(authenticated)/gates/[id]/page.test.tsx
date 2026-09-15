@@ -300,7 +300,8 @@ describe('GateDetailPage — transition 실패 사유 노출 (story #2500)', () 
     await act(async () => { approveBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 
-    expect(container.textContent).toContain('게이트 대상 커밋이 승인 확인 이후 변경되었습니다');
+    // story #3899 — 리터럴 재-pin 대신 ko.json 값을 읽어 대조(다른 assertion들과 같은 관례).
+    expect(container.textContent).toContain(koMessages.cage.gateHeadChangedError);
     expect(gateFetchCount).toBe(2); // 최초 로드(1) + 409 이후 재조회(2) — 화면이 옛 SHA에 안 멈춘다.
   });
 

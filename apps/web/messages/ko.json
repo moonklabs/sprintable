@@ -5085,7 +5085,7 @@
     "runtimeExperimental": "실험적",
     "runtimeComingSoonBadge": "준비 중",
     "runtimeCustomOtherLabel": "Custom / Other",
-    "runtimeCustomOtherGuide": "위 9개 런타임에 전용 어댑터가 없을 때 쓰는 BYO(직접 연결) 옵션이에요 — 네 런타임에 맞는 어댑터가 없다면 이걸로.",
+    "runtimeCustomOtherGuide": "위 9개 런타임에 전용 어댑터가 없을 때 쓰는 BYO(직접 연결) 옵션이에요 — 사용 중인 런타임에 맞는 어댑터가 없으면 이 옵션을 선택하세요.",
     "runtimeLoadError": "런타임 목록을 불러오지 못했어요.",
     "runtimeLoadErrorNote": "잠시 후 다시 시도해 주세요. 최소 Claude Code로 채용은 계속할 수 있어요.",
     "agentQuestion": "어느 에이전트로 채용하나요?",
