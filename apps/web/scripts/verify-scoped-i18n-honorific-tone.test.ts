@@ -173,64 +173,53 @@ describe('실 ko.json — 스코프 키 count-lock(baseline 0, 새 자리 0)', (
 // story #3885 AC2 — SCOPED_NAMESPACES(chats 전량 승격) + resolveEffectiveScopedKeys.
 // ---------------------------------------------------------------------------
 
-// story #3916 — 등록이 honorific-scope/*.json 디렉터리에서 유도되므로(파일명 알파벳순),
-// 이 목록은 더는 "손으로 추가"가 아니라 "파일이 유도한 결과"를 고정하는 마이그레이션
-// 정합성 스냅샷이다(착수 시점 develop의 19개 + 4314 rebase로 접힌 4개(#3912) + 4317
-// rebase로 접힌 3개(#3913) + story #3919가 신설한 8개 = 34개 배열과 항목 수·이름·minLeaf
-// 전부 동일함을 고정 — story #3916 AC1). 앞으로 새 네임스페이스가 추가돼도 이 테스트는
-// 안 건드린다(새 파일만 추가하면 되고, 이 스냅샷은 마이그레이션 그 자체의 무결성만
-// 증명한다).
-describe('SCOPED_NAMESPACES — honorific-scope/ 디렉터리에서 유도(story #3916 AC1, 마이그레이션 정합성)', () => {
-  it('34개가 파일명 알파벳순으로 유도됐다(착수 시점 develop 배열+4314·4317 rebase·#3919 신설 접힌 값과 항목 수·이름 전부 동일)', () => {
-    expect(SCOPED_NAMESPACES).toEqual([
-      'accountSwitcher',
-      'activityLog',
-      'agentPerformance',
-      'agentRuns',
-      'agents',
-      'cage',
-      'channelConnect',
-      'chats',
-      'commandPalette',
-      'common',
-      'content',
-      'contentRules',
-      'dashboard',
-      'flow',
-      'gateConfig',
-      'goals',
-      'insightsBoard',
-      'invite',
-      'login',
-      'loops',
-      'meeting',
-      'nav',
-      'onboarding',
-      'organization',
-      'presence',
-      'pricingPlans',
-      'recruiter',
-      'settings',
-      'sprints',
-      'standup',
-      'storage',
-      'supportWidget',
-      'teamActivity',
-      'usage',
-    ]);
+// 애초 이 자리는 착수 시점 23개를 «하드코딩 스냅샷»으로 고정했었다 — 그런데 그 스냅샷
+// 자체가 병렬 PR마다 손대야 하는 자리라, #3916이 없애려던 바로 그 append-충돌 클래스를
+// 이 테스트가 재도입하는 역설이 있었다(story #3909 rebase 中 발견·PO 확認, 2026-09-15 —
+// #3913(4317)·#3919(4325)가 병렬로 열려 같은 자리를 리터럴로 반복 재도입해 매번
+// CONFLICTING이 난 것이 그 증거). story #3909 — 그래서 이 블록을 «파일 수/내용에서
+// 직접 유도한 값과 대조»하는 자기 검증으로 바꾼다(페드루 지시: "정합 스냅샷 테스트는
+// 3916 방식(파일 수 유도)에 맞춤") — 이제 새 네임스페이스가 추가돼도(새
+// honorific-scope/<ns>.json 파일 하나만) 이 테스트는 정말로 안 건드려도 된다(하드코딩된
+// 목록이 없으므로).
+describe('SCOPED_NAMESPACES — honorific-scope/ 디렉터리에서 유도(story #3916 AC1 + #3909 자기검증화)', () => {
+  const REAL_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'honorific-scope');
+
+  it('SCOPED_NAMESPACES가 honorific-scope/*.json 파일명(확장자 제외, 알파벳순)과 개수·이름·순서까지 정확히 일치한다', () => {
+    const filenamesSorted = readdirSync(REAL_DIR)
+      .filter((f) => f.endsWith('.json'))
+      .map((f) => f.replace(/\.json$/, ''))
+      .sort();
+    expect(SCOPED_NAMESPACES).toEqual(filenamesSorted);
   });
 
-  it('각 네임스페이스의 minLeaf가 착수 시점 develop 배열+4314·4317 rebase·#3919 신설 접힌 값과 동일하다(마이그레이션 정합성)', () => {
+  // 페드루 PO 리뷰(2026-09-15) — 위 테스트는 "같은 디렉터리에서 유도한 값끼리" 대조라
+  // 틀릴 수 없는 표본이다(디렉터리 전체가 비거나 loadHonorificScopeDir 자체가 고장나도
+  // 양쪽이 똑같이 비어 통과한다). 하드코딩이 아닌 하한 리터럴 하나로 그 사각을 막는다 —
+  // 대량 삭제·로더 고장은 이 줄이 잡고, PR마다 이 줄을 고칠 필요는 없다(하한만 넘으면
+  // 통과). story #3920(ko.json 최상위 네임스페이스 집합과의 «등식» 승격, 진행 中) 착지
+  // 뒤 이 하한을 그 등식으로 교체한다.
+  it('SCOPED_NAMESPACES가 최소 25개다(하한 리터럴 — 대량 삭제·로더 고장 감지, story #3920 전 임시)', () => {
+    expect(SCOPED_NAMESPACES.length).toBeGreaterThanOrEqual(25);
+  });
+
+  it('loadHonorificScopeDir()의 각 minLeaf가 그 파일 자신의 원본 값과 정확히 일치한다(중간에 값이 새지 않음)', () => {
     const entries = loadHonorificScopeDir();
-    const minLeafByNamespace = Object.fromEntries(entries.map((e) => [e.namespace, e.minLeaf]));
-    expect(minLeafByNamespace).toEqual({
-      chats: 200, content: 500, channelConnect: 150, settings: 450, agents: 150, flow: 160,
-      gateConfig: 15, recruiter: 100, loops: 105, cage: 230, organization: 190, pricingPlans: 125,
-      contentRules: 70, onboarding: 75, login: 30, storage: 70, insightsBoard: 90, standup: 100, goals: 130,
-      usage: 60, invite: 20, meeting: 50, supportWidget: 20, agentRuns: 55, nav: 100, dashboard: 45,
-      presence: 10, commandPalette: 17, accountSwitcher: 7, common: 25, activityLog: 10,
-      teamActivity: 16, agentPerformance: 9, sprints: 70,
-    });
+    expect(entries.length).toBeGreaterThan(0);
+    for (const e of entries) {
+      const raw = JSON.parse(readFileSync(path.join(REAL_DIR, `${e.namespace}.json`), 'utf8')) as { minLeaf: number };
+      expect(e.minLeaf).toBe(raw.minLeaf);
+    }
+  });
+
+  // 페드루 PO 리뷰(2026-09-15) — 위 테스트는 "같은 디렉터리에서 유도한 값끼리" 대조라
+  // 틀릴 수 없는 표본이다(디렉터리 전체가 비거나 loadHonorificScopeDir 자체가 고장나도
+  // 양쪽이 똑같이 비어 통과한다). 하드코딩이 아닌 하한 리터럴 하나로 그 사각을 막는다 —
+  // 대량 삭제·로더 고장은 이 줄이 잡고, PR마다 이 줄을 고칠 필요는 없다(하한만 넘으면
+  // 통과). story #3920(ko.json 최상위 네임스페이스 집합과의 «등식» 승격, 진행 中) 착지
+  // 뒤 이 하한을 그 등식으로 교체한다.
+  it('SCOPED_NAMESPACES가 최소 36개다(하한 리터럴 — 대량 삭제·로더 고장 감지, story #3920 전 임시)', () => {
+    expect(SCOPED_NAMESPACES.length).toBeGreaterThanOrEqual(36);
   });
 });
 
@@ -343,84 +332,24 @@ describe('실 ko.json — chats 네임스페이스 전량(story #3885 AC2)', () 
 // ---------------------------------------------------------------------------
 
 describe('checkScopedNamespaceMinimums — 순수 함수', () => {
-  it('⭐네임스페이스 34개가 ko.json에 아예 없으면(개명·삭제 시뮬레이션) 34건 위반을 낸다', () => {
-    const violations = checkScopedNamespaceMinimums({ board: { x: 'y' } }); // 34개 다 없음
-    expect(violations).toEqual([
-      { namespace: 'accountSwitcher', actualCount: 0, minExpected: 7 },
-      { namespace: 'activityLog', actualCount: 0, minExpected: 10 },
-      { namespace: 'agentPerformance', actualCount: 0, minExpected: 9 },
-      { namespace: 'agentRuns', actualCount: 0, minExpected: 55 },
-      { namespace: 'agents', actualCount: 0, minExpected: 150 },
-      { namespace: 'cage', actualCount: 0, minExpected: 230 },
-      { namespace: 'channelConnect', actualCount: 0, minExpected: 150 },
-      { namespace: 'chats', actualCount: 0, minExpected: 200 },
-      { namespace: 'commandPalette', actualCount: 0, minExpected: 17 },
-      { namespace: 'common', actualCount: 0, minExpected: 25 },
-      { namespace: 'content', actualCount: 0, minExpected: 500 },
-      { namespace: 'contentRules', actualCount: 0, minExpected: 70 },
-      { namespace: 'dashboard', actualCount: 0, minExpected: 45 },
-      { namespace: 'flow', actualCount: 0, minExpected: 160 },
-      { namespace: 'gateConfig', actualCount: 0, minExpected: 15 },
-      { namespace: 'goals', actualCount: 0, minExpected: 130 },
-      { namespace: 'insightsBoard', actualCount: 0, minExpected: 90 },
-      { namespace: 'invite', actualCount: 0, minExpected: 20 },
-      { namespace: 'login', actualCount: 0, minExpected: 30 },
-      { namespace: 'loops', actualCount: 0, minExpected: 105 },
-      { namespace: 'meeting', actualCount: 0, minExpected: 50 },
-      { namespace: 'nav', actualCount: 0, minExpected: 100 },
-      { namespace: 'onboarding', actualCount: 0, minExpected: 75 },
-      { namespace: 'organization', actualCount: 0, minExpected: 190 },
-      { namespace: 'presence', actualCount: 0, minExpected: 10 },
-      { namespace: 'pricingPlans', actualCount: 0, minExpected: 125 },
-      { namespace: 'recruiter', actualCount: 0, minExpected: 100 },
-      { namespace: 'settings', actualCount: 0, minExpected: 450 },
-      { namespace: 'sprints', actualCount: 0, minExpected: 70 },
-      { namespace: 'standup', actualCount: 0, minExpected: 100 },
-      { namespace: 'storage', actualCount: 0, minExpected: 70 },
-      { namespace: 'supportWidget', actualCount: 0, minExpected: 20 },
-      { namespace: 'teamActivity', actualCount: 0, minExpected: 16 },
-      { namespace: 'usage', actualCount: 0, minExpected: 60 },
-    ]);
+  // story #3909 — 이 두 테스트도 예전엔 전 네임스페이스 목록을 손으로 나열해(23개) 새
+  // 네임스페이스가 늘 때마다 편집이 필요했다(#3916이 없애려던 바로 그 패턴) — 실 등록
+  // (loadHonorificScopeDir)에서 기대값을 유도해 파일 하나만 추가해도 이 테스트는 안
+  // 건드리게 바꾼다.
+  it('⭐등록된 모든 네임스페이스가 ko.json에 아예 없으면(개명·삭제 시뮬레이션) 등록 개수만큼 위반을 낸다', () => {
+    const violations = checkScopedNamespaceMinimums({ board: { x: 'y' } }); // 등록된 네임스페이스 전부 없음
+    const expected = loadHonorificScopeDir()
+      .map((e) => ({ namespace: e.namespace, actualCount: 0, minExpected: e.minLeaf }))
+      .sort((a, b) => a.namespace.localeCompare(b.namespace));
+    expect(violations).toEqual(expected);
   });
 
   it('⭐네임스페이스가 있지만 leaf가 하한 밑이면(부분 삭제·오염) 위반을 낸다', () => {
     const violations = checkScopedNamespaceMinimums({ chats: { a: 'x', b: 'y' } }); // 2개뿐, 나머지는 아예 없음
-    expect(violations).toEqual([
-      { namespace: 'accountSwitcher', actualCount: 0, minExpected: 7 },
-      { namespace: 'activityLog', actualCount: 0, minExpected: 10 },
-      { namespace: 'agentPerformance', actualCount: 0, minExpected: 9 },
-      { namespace: 'agentRuns', actualCount: 0, minExpected: 55 },
-      { namespace: 'agents', actualCount: 0, minExpected: 150 },
-      { namespace: 'cage', actualCount: 0, minExpected: 230 },
-      { namespace: 'channelConnect', actualCount: 0, minExpected: 150 },
-      { namespace: 'chats', actualCount: 2, minExpected: 200 },
-      { namespace: 'commandPalette', actualCount: 0, minExpected: 17 },
-      { namespace: 'common', actualCount: 0, minExpected: 25 },
-      { namespace: 'content', actualCount: 0, minExpected: 500 },
-      { namespace: 'contentRules', actualCount: 0, minExpected: 70 },
-      { namespace: 'dashboard', actualCount: 0, minExpected: 45 },
-      { namespace: 'flow', actualCount: 0, minExpected: 160 },
-      { namespace: 'gateConfig', actualCount: 0, minExpected: 15 },
-      { namespace: 'goals', actualCount: 0, minExpected: 130 },
-      { namespace: 'insightsBoard', actualCount: 0, minExpected: 90 },
-      { namespace: 'invite', actualCount: 0, minExpected: 20 },
-      { namespace: 'login', actualCount: 0, minExpected: 30 },
-      { namespace: 'loops', actualCount: 0, minExpected: 105 },
-      { namespace: 'meeting', actualCount: 0, minExpected: 50 },
-      { namespace: 'nav', actualCount: 0, minExpected: 100 },
-      { namespace: 'onboarding', actualCount: 0, minExpected: 75 },
-      { namespace: 'organization', actualCount: 0, minExpected: 190 },
-      { namespace: 'presence', actualCount: 0, minExpected: 10 },
-      { namespace: 'pricingPlans', actualCount: 0, minExpected: 125 },
-      { namespace: 'recruiter', actualCount: 0, minExpected: 100 },
-      { namespace: 'settings', actualCount: 0, minExpected: 450 },
-      { namespace: 'sprints', actualCount: 0, minExpected: 70 },
-      { namespace: 'standup', actualCount: 0, minExpected: 100 },
-      { namespace: 'storage', actualCount: 0, minExpected: 70 },
-      { namespace: 'supportWidget', actualCount: 0, minExpected: 20 },
-      { namespace: 'teamActivity', actualCount: 0, minExpected: 16 },
-      { namespace: 'usage', actualCount: 0, minExpected: 60 },
-    ]);
+    const expected = loadHonorificScopeDir()
+      .map((e) => ({ namespace: e.namespace, actualCount: e.namespace === 'chats' ? 2 : 0, minExpected: e.minLeaf }))
+      .sort((a, b) => a.namespace.localeCompare(b.namespace));
+    expect(violations).toEqual(expected);
   });
 
   it('음성대조 — 실 ko.json은 하한을 넉넉히 넘어 위반 0건', () => {
@@ -678,6 +607,22 @@ describe('SCOPED_NAMESPACE_MIN_LEAF_COUNT — 하한이 실측치보다 낮게 �
     const sprintsLeafCount = effectiveKeys.filter((k) => k.startsWith('sprints.')).length;
     expect(sprintsLeafCount).toBeGreaterThanOrEqual(70);
   });
+
+  it('실 ko.json의 canvas leaf 개수가 하한(100) 이상이다(실측 114, story #3909)', () => {
+    const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
+    const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    const canvasLeafCount = effectiveKeys.filter((k) => k.startsWith('canvas.')).length;
+    expect(canvasLeafCount).toBeGreaterThanOrEqual(100);
+  });
+
+  it('실 ko.json의 docs leaf 개수가 하한(220) 이상이다(실측 245, story #3909)', () => {
+    const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
+    const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    const docsLeafCount = effectiveKeys.filter((k) => k.startsWith('docs.')).length;
+    expect(docsLeafCount).toBeGreaterThanOrEqual(220);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -752,6 +697,54 @@ describe('실 ko.json — presence·commandPalette·accountSwitcher·common·act
     expect(p.fabLabelWorking).not.toMatch(/presence/i);
     expect(p.panelTitle).toBe('팀 현황');
     expect(p.fabLabelWorking).toBe('팀 현황 · {count}명 작업 중');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// story #3909 — canvas·docs 네임스페이스 전량(SCOPED_NAMESPACES 승격, honorific-scope/
+// canvas.json·docs.json). 다른 namespace 승격 스토리들과 정확히 같은 3형 검증
+// (0건·양성대조·무관 PR no-op).
+// ---------------------------------------------------------------------------
+
+describe('실 ko.json — canvas·docs 네임스페이스 전량(story #3909 AC1/AC2)', () => {
+  const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
+  const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
+
+  it('SCOPED_KEYS+전 네임스페이스 전량(effective)의 ko.json 값에 합니다체 0건(story #3909 AC1 canvas 20·docs 21=41키 전량 이관 확認)', () => {
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    expect(effectiveKeys.length).toBeGreaterThan(SCOPED_KEYS.length);
+    expect(findHonorificToneInScopedKeys(ko, effectiveKeys)).toEqual([]);
+  });
+
+  it('양성대조 — canvas.canvasEmptyContent를 원래 합니다체로 되돌리면 RED가 된다(namespace 전량 승격 증명)', () => {
+    expect(SCOPED_KEYS as readonly string[]).not.toContain('canvas.canvasEmptyContent');
+    const mutated = JSON.parse(JSON.stringify(ko)) as Record<string, unknown>;
+    (mutated.canvas as Record<string, unknown>).canvasEmptyContent = '이 산출물에는 아직 콘텐츠가 없습니다';
+    const effectiveKeys = resolveEffectiveScopedKeys(mutated);
+    const findings = findHonorificToneInScopedKeys(mutated, effectiveKeys);
+    expect(findings).toContainEqual({
+      key: 'canvas.canvasEmptyContent', matches: ['습니다'], value: '이 산출물에는 아직 콘텐츠가 없습니다',
+    });
+  });
+
+  it('양성대조 — docs.noDocs를 원래 합니다체로 되돌리면 RED가 된다(namespace 전량 승격 증명)', () => {
+    expect(SCOPED_KEYS as readonly string[]).not.toContain('docs.noDocs');
+    const mutated = JSON.parse(JSON.stringify(ko)) as Record<string, unknown>;
+    (mutated.docs as Record<string, unknown>).noDocs = '문서가 없습니다';
+    const effectiveKeys = resolveEffectiveScopedKeys(mutated);
+    const findings = findHonorificToneInScopedKeys(mutated, effectiveKeys);
+    expect(findings).toContainEqual({
+      key: 'docs.noDocs', matches: ['습니다'], value: '문서가 없습니다',
+    });
+  });
+
+  it('무관 PR no-op — canvas·docs 밖·SCOPED_KEYS 밖의 실 합니다체 키는 namespace 전량 승격 뒤에도 안 본다', () => {
+    const outOfScopeValue = (ko.board as Record<string, unknown> | undefined)?.epicSwimlaneLoadError;
+    expect(typeof outOfScopeValue).toBe('string');
+    expect(outOfScopeValue as string).toMatch(/습니다|ㅂ니다|십시오/);
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    expect(effectiveKeys).not.toContain('board.epicSwimlaneLoadError');
+    expect(findHonorificToneInScopedKeys(ko, effectiveKeys)).toEqual([]);
   });
 });
 
@@ -958,6 +951,56 @@ describe('실 ko.json — usage·invite·meeting·supportWidget 네임스페이�
   });
 
   it('무관 PR no-op — usage·invite·meeting·supportWidget 밖·SCOPED_KEYS 밖의 실 합니다체 키는 namespace 전량 승격 뒤에도 안 본다', () => {
+    const outOfScopeValue = (ko.board as Record<string, unknown> | undefined)?.epicSwimlaneLoadError;
+    expect(typeof outOfScopeValue).toBe('string');
+    expect(outOfScopeValue as string).toMatch(/습니다|ㅂ니다|십시오/);
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    expect(effectiveKeys).not.toContain('board.epicSwimlaneLoadError');
+    expect(findHonorificToneInScopedKeys(ko, effectiveKeys)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// story #3909 — canvas·docs 네임스페이스 전량(SCOPED_NAMESPACES 승격, honorific-scope/
+// canvas.json·docs.json). chats(#3885)·content/channelConnect(#3889)·settings(#3892)·
+// agents/flow/gateConfig(#3895)·recruiter/loops/cage(#3899)·onboarding/login/storage/
+// insightsBoard(#3901)·usage/invite/meeting/supportWidget(#3912)와 정확히 같은 3형
+// 검증(0건·양성대조·무관 PR no-op).
+// ---------------------------------------------------------------------------
+
+describe('실 ko.json — canvas·docs 네임스페이스 전량(story #3909 AC1/AC2)', () => {
+  const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
+  const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
+
+  it('SCOPED_KEYS+전 네임스페이스 전량(effective)의 ko.json 값에 합니다체 0건(story #3909 AC1 canvas 20·docs 21=41키 전량 이관 확認)', () => {
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    expect(effectiveKeys.length).toBeGreaterThan(SCOPED_KEYS.length);
+    expect(findHonorificToneInScopedKeys(ko, effectiveKeys)).toEqual([]);
+  });
+
+  it('양성대조 — canvas.canvasEmptyContent를 원래 합니다체로 되돌리면 RED가 된다(namespace 전량 승격 증명)', () => {
+    expect(SCOPED_KEYS as readonly string[]).not.toContain('canvas.canvasEmptyContent');
+    const mutated = JSON.parse(JSON.stringify(ko)) as Record<string, unknown>;
+    (mutated.canvas as Record<string, unknown>).canvasEmptyContent = '이 산출물에는 아직 콘텐츠가 없습니다';
+    const effectiveKeys = resolveEffectiveScopedKeys(mutated);
+    const findings = findHonorificToneInScopedKeys(mutated, effectiveKeys);
+    expect(findings).toContainEqual({
+      key: 'canvas.canvasEmptyContent', matches: ['습니다'], value: '이 산출물에는 아직 콘텐츠가 없습니다',
+    });
+  });
+
+  it('양성대조 — docs.noDocs를 원래 합니다체로 되돌리면 RED가 된다(namespace 전량 승격 증명)', () => {
+    expect(SCOPED_KEYS as readonly string[]).not.toContain('docs.noDocs');
+    const mutated = JSON.parse(JSON.stringify(ko)) as Record<string, unknown>;
+    (mutated.docs as Record<string, unknown>).noDocs = '문서가 없습니다';
+    const effectiveKeys = resolveEffectiveScopedKeys(mutated);
+    const findings = findHonorificToneInScopedKeys(mutated, effectiveKeys);
+    expect(findings).toContainEqual({
+      key: 'docs.noDocs', matches: ['습니다'], value: '문서가 없습니다',
+    });
+  });
+
+  it('무관 PR no-op — canvas·docs 밖·SCOPED_KEYS 밖의 실 합니다체 키는 namespace 전량 승격 뒤에도 안 본다', () => {
     const outOfScopeValue = (ko.board as Record<string, unknown> | undefined)?.epicSwimlaneLoadError;
     expect(typeof outOfScopeValue).toBe('string');
     expect(outOfScopeValue as string).toMatch(/습니다|ㅂ니다|십시오/);
@@ -1224,7 +1267,7 @@ describe('story #3889 CHANGES 1 — 플레이스홀더 값 뒤 계사(예요/이
 
   const PLACEHOLDER_COPULA_RE = /\}(예요|이에요)/;
 
-  it('content·channelConnect·settings·agents·flow·gateConfig·recruiter·loops·cage·onboarding·login·storage·insightsBoard·usage·invite·meeting·supportWidget 전 leaf에 "}예요"·"}이에요"(placeholder 바로 뒤 계사) 0건', () => {
+  it('content·channelConnect·settings·agents·flow·gateConfig·recruiter·loops·cage·onboarding·login·storage·insightsBoard·usage·invite·meeting·supportWidget·canvas·docs 전 leaf에 "}예요"·"}이에요"(placeholder 바로 뒤 계사) 0건', () => {
     // story #3892 — 스캔 범위에 settings 추가. story #3895 — agents·flow·gateConfig 추가
     // (착수 전 사전 스캔 0건 확認·전환 뒤 재확認 — 3889 교훈 그대로 재적용).
     // story #3899 — 스캔 범위에 recruiter·loops·cage 추가(전환 전 사전 스캔에서도 0건
@@ -1232,6 +1275,7 @@ describe('story #3889 CHANGES 1 — 플레이스홀더 값 뒤 계사(예요/이
     // story #3901 — 스캔 범위에 onboarding·login·storage·insightsBoard 추가(같은 자).
     // story #3912 — 스캔 범위에 usage·invite·meeting·supportWidget 추가(usage는 한도/쿼터
     // 숫자 placeholder가 많아 특히 이 계사 함정 대상 — 전환 전·후 모두 0건 확認).
+    // story #3909 — 스캔 범위에 canvas·docs 추가(같은 자 — 착수 전 사전 스캔 0건 확認).
     const values = [
       ...collectLeafValues(ko.content as Record<string, unknown>, 'content'),
       ...collectLeafValues(ko.channelConnect as Record<string, unknown>, 'channelConnect'),
@@ -1250,6 +1294,8 @@ describe('story #3889 CHANGES 1 — 플레이스홀더 값 뒤 계사(예요/이
       ...collectLeafValues(ko.invite as Record<string, unknown>, 'invite'),
       ...collectLeafValues(ko.meeting as Record<string, unknown>, 'meeting'),
       ...collectLeafValues(ko.supportWidget as Record<string, unknown>, 'supportWidget'),
+      ...collectLeafValues(ko.canvas as Record<string, unknown>, 'canvas'),
+      ...collectLeafValues(ko.docs as Record<string, unknown>, 'docs'),
     ];
     const violations = values.filter(([, v]) => PLACEHOLDER_COPULA_RE.test(v));
     expect(violations).toEqual([]);

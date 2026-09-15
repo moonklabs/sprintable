@@ -124,7 +124,7 @@ describe('ArtifactGalleryView (story a15cea4f)', () => {
     const featureBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '기능');
     expect(featureBtn).toBeDefined();
     expect(featureBtn?.hasAttribute('disabled')).toBe(true);
-    expect(featureBtn?.getAttribute('title')).toBe('기능별 모아보기는 아직 지원하지 않습니다');
+    expect(featureBtn?.getAttribute('title')).toBe('기능별 모아보기는 아직 지원하지 않아요');
   });
 
   it('shows the anchor pill only for artifacts that actually have an anchor version (no fabricated anchors)', async () => {

@@ -86,7 +86,7 @@ describe('ArtifactDetailView — standalone 상세(story #2713)', () => {
   it('404(미존재/접근 불가)면 not-found 상태로 빠진다 — existence-non-disclosure 그대로 상속', async () => {
     stubFetch(false);
     await mount('artifact-missing');
-    expect(container.textContent).toContain('산출물을 찾을 수 없습니다');
+    expect(container.textContent).toContain('산출물을 찾을 수 없어요');
     expect(container.textContent).not.toContain('갤러리로 돌아가기');
   });
 });

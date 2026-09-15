@@ -487,7 +487,7 @@ describe('ArtifactStage — 캔버스 뷰포트(story 1948d19d)', () => {
     it('shows the mouse hint when the device is not pointer:coarse (기존 회귀 0)', async () => {
       stubMatchMedia(false);
       await mount();
-      expect(container.textContent).toContain('드래그로 이동, 휠로 확대·축소합니다');
+      expect(container.textContent).toContain('드래그로 이동, 휠로 확대·축소해요');
       expect(container.textContent).not.toContain('한 손가락으로 이동');
       expect(matchMediaSpy).toHaveBeenCalledWith('(pointer: coarse)');
     });
@@ -495,8 +495,8 @@ describe('ArtifactStage — 캔버스 뷰포트(story 1948d19d)', () => {
     it('shows the touch hint when the device matches pointer:coarse (#2143에서 누락됐던 갭 봉합)', async () => {
       stubMatchMedia(true);
       await mount();
-      expect(container.textContent).toContain('한 손가락으로 이동하고, 두 손가락으로 확대·축소합니다. 더블탭하면 화면에 맞춥니다.');
-      expect(container.textContent).not.toContain('드래그로 이동, 휠로 확대·축소합니다');
+      expect(container.textContent).toContain('한 손가락으로 이동하고, 두 손가락으로 확대·축소해요. 더블탭하면 화면에 맞춰요.');
+      expect(container.textContent).not.toContain('드래그로 이동, 휠로 확대·축소해요');
     });
   });
 
@@ -521,20 +521,20 @@ describe('ArtifactStage — 캔버스 뷰포트(story 1948d19d)', () => {
   describe('tree 포맷 — nodes=[] 조용한 폴백 방지(story 1da4cccf, 산출물 8de4e981 진단에서 발견)', () => {
     it('empty parsed tree("[]") shows an explicit "no content" placeholder, not a silent blank box', async () => {
       await mount({ format: 'tree', content: '[]' });
-      expect(container.textContent).toContain('이 산출물에는 아직 콘텐츠가 없습니다');
+      expect(container.textContent).toContain('이 산출물에는 아직 콘텐츠가 없어요');
       expect(container.textContent).not.toContain('트리 렌더는 준비 중');
     });
 
     it('unparseable content still shows the original parse-failure placeholder (별도 문구, 원인이 다름)', async () => {
       await mount({ format: 'tree', content: 'not json' });
       expect(container.textContent).toContain('트리 렌더는 준비 중');
-      expect(container.textContent).not.toContain('이 산출물에는 아직 콘텐츠가 없습니다');
+      expect(container.textContent).not.toContain('이 산출물에는 아직 콘텐츠가 없어요');
     });
 
     it('a non-empty tree renders its nodes as before (회귀 없음, 두 placeholder 모두 안 뜸)', async () => {
       await mount({ format: 'tree', content: JSON.stringify([{ id: 'n1', type: 'text', props: { text: 'hello' } }]) });
       expect(container.textContent).toContain('hello');
-      expect(container.textContent).not.toContain('이 산출물에는 아직 콘텐츠가 없습니다');
+      expect(container.textContent).not.toContain('이 산출물에는 아직 콘텐츠가 없어요');
       expect(container.textContent).not.toContain('트리 렌더는 준비 중');
     });
   });

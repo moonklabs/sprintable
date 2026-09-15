@@ -16,7 +16,7 @@ function wrap(node: React.ReactNode) {
 describe('PropertyPanel (C3 §2 — 선택 요소 없으면 중립 안내, 낙인 문구 금지)', () => {
   it('renders a neutral empty-state message when no node is selected', () => {
     const markup = renderToStaticMarkup(wrap(<PropertyPanel node={null} onChangeText={vi.fn()} onDelete={vi.fn()} />));
-    expect(markup).toContain('요소를 선택하면 속성이 여기 표시됩니다');
+    expect(markup).toContain('요소를 선택하면 속성이 여기 표시돼요');
     expect(markup).not.toContain('<input');
   });
 
