@@ -263,7 +263,7 @@ describe('ActivationChecklistBanner — "첫 지시…" 항목 클릭(story #320
     await flush();
 
     expect(routerPushMock).not.toHaveBeenCalledWith(expect.stringContaining('/chats/'));
-    expect(container.textContent).toContain('대화를 시작하지 못했습니다. 다시 시도해 주세요.');
+    expect(container.textContent).toContain('대화를 시작하지 못했어요. 다시 시도해 주세요.');
   });
 });
 

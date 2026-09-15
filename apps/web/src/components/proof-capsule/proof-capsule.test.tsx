@@ -116,8 +116,8 @@ describe('ProofCapsule (optional fields — evidence/gate/agent 없이도 정직
         density="full"
       />,
     );
-    expect(markup).toContain('AC 4/4');
-    expect(markup).toContain('자동검증 passed');
+    expect(markup).toContain('완료 조건 4/4');
+    expect(markup).toContain('자동검증 통과');
     expect(markup).toContain('diff +142');
     expect(markup).toContain('Merge gate 열기');
   });

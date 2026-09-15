@@ -727,7 +727,7 @@ describe('StoryDetailPanel — Workcell Evidence 구획 실배선(story #2922 W2
     await mountEvidence({}, [{ id: 'gate-1', gate_type: 'merge', status: 'pending', risk_grade: 'high', neutral_facts: {} }]);
     const link = Array.from(container.querySelectorAll('a')).find((a) => a.getAttribute('href') === '/gates/gate-1');
     expect(link).toBeTruthy();
-    expect(link?.textContent).toContain('Merge gate');
+    expect(link?.textContent).toContain('병합 게이트');
   });
 
   it('merge 게이트가 이미 resolved면 게이트 버튼을 다시 안 띄운다(no-fiction — 끝난 결정을 대기 중처럼 보이면 안 됨)', async () => {

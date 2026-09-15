@@ -113,7 +113,7 @@ export const ALLOWLIST: ReadonlySet<string> = new Set<string>([
 //    전환 — 값이 사라져 이 축엔 안 남음.
 export const TOKEN_ALLOWLIST: ReadonlySet<string> = new Set<string>([
   'API', 'AI', 'URL', 'MCP', 'ID', 'SSE', 'UTM', 'HTML', 'JSON', 'LLM', 'CI', 'SHA', 'DM',
-  'BYOA', 'STT', 'CSV', 'SLA', 'PDF', 'HTTP', 'AC', 'SDK', 'HTTPS', 'POST', 'BYOM', 'PC',
+  'BYOA', 'STT', 'CSV', 'SLA', 'PDF', 'HTTP', 'SDK', 'HTTPS', 'POST', 'BYOM', 'PC',
   'UI', 'SID', 'XXX', 'PNG', 'OS', 'CTA', 'SNS', 'GB', 'SSO', 'BYO', 'TOTP', 'QR', 'MB', 'PR',
   'QA', 'PO', 'PM', 'AU',
 ]);
