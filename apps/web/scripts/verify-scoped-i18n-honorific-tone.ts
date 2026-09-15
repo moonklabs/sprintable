@@ -178,6 +178,11 @@ export const SCOPED_KEYS = [
 // 하한보다 많은 실 함수 재측이 항상 상한 자. goals.deleteConfirmTitle은 의문형
 // (「목표를 삭제하시겠습니까?」, story #3900 소관)이라 애초에 이 가드 대상이 아니다 —
 // 전환 전 플레이스홀더-계사 인접 0건 사전 스캔 확認).
+// story #3912 — usage(사용량)·invite(초대)·meeting(회의록)·supportWidget(지원 위젯)도
+// 전량 해요체 이관 완료(잔존 0, 실 함수 findHonorificToneInScopedKeys로 head 재측
+// usage 13·invite 11·meeting 11·supportWidget 10=45건 — 3889 교훈 그대로 코드 0 재확認.
+// 네 네임스페이스 모두 의문형(습니까) 0건, 전환 전 플레이스홀더-계사 인접 0건 사전 스캔
+// 확認. usage는 한도/쿼터 숫자가 많아 계사 함정에 특히 주의해 절 끝에 값을 두는 형으로 유지).
 export const SCOPED_NAMESPACES = [
   'chats',
   'content',
@@ -198,6 +203,10 @@ export const SCOPED_NAMESPACES = [
   'insightsBoard',
   'standup',
   'goals',
+  'usage',
+  'invite',
+  'meeting',
+  'supportWidget',
 ] as const;
 
 function flattenNamespaceLeafKeys(root: Record<string, unknown>, namespace: string): string[] {
@@ -257,6 +266,10 @@ const SCOPED_NAMESPACE_MIN_LEAF_COUNT: Readonly<Record<(typeof SCOPED_NAMESPACES
   insightsBoard: 90, // 실측 103개(2026-09-15, story #3901 그라운딩) — 여유 하한
   standup: 100, // 실측 118개(2026-09-15, story #3908 그라운딩) — 여유 하한
   goals: 130, // 실측 148개(2026-09-15, story #3908 그라운딩) — 여유 하한
+  usage: 60, // 실측 67개(2026-09-15, story #3912 그라운딩) — 여유 하한
+  invite: 20, // 실측 26개(2026-09-15, story #3912 그라운딩) — 여유 하한
+  meeting: 50, // 실측 57개(2026-09-15, story #3912 그라운딩) — 여유 하한
+  supportWidget: 20, // 실측 26개(2026-09-15, story #3912 그라운딩) — 여유 하한
 };
 
 /** SCOPED_NAMESPACES 각각의 실제 leaf 개수가 하한을 밑도는지 검사하는 순수 함수 —

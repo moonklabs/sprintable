@@ -163,8 +163,8 @@ describe('실 ko.json — 스코프 키 count-lock(baseline 0, 새 자리 0)', (
 // story #3885 AC2 — SCOPED_NAMESPACES(chats 전량 승격) + resolveEffectiveScopedKeys.
 // ---------------------------------------------------------------------------
 
-describe('SCOPED_NAMESPACES — story #3885/#3889/#3892/#3895/#3898/#3899/#3901/#3908 AC2', () => {
-  it('chats·content·channelConnect·settings·agents·flow·gateConfig·recruiter·loops·cage·organization·pricingPlans·contentRules·onboarding·login·storage·insightsBoard·standup·goals 19개가 등재됐다(잔존 채무 0으로 확定된 네임스페이스만)', () => {
+describe('SCOPED_NAMESPACES — story #3885/#3889/#3892/#3895/#3898/#3899/#3901/#3908/#3912 AC2', () => {
+  it('chats·content·channelConnect·settings·agents·flow·gateConfig·recruiter·loops·cage·organization·pricingPlans·contentRules·onboarding·login·storage·insightsBoard·standup·goals·usage·invite·meeting·supportWidget 23개가 등재됐다(잔존 채무 0으로 확定된 네임스페이스만)', () => {
     expect(SCOPED_NAMESPACES).toEqual([
       'chats',
       'content',
@@ -185,6 +185,10 @@ describe('SCOPED_NAMESPACES — story #3885/#3889/#3892/#3895/#3898/#3899/#3901/
       'insightsBoard',
       'standup',
       'goals',
+      'usage',
+      'invite',
+      'meeting',
+      'supportWidget',
     ]);
   });
 });
@@ -256,8 +260,8 @@ describe('실 ko.json — chats 네임스페이스 전량(story #3885 AC2)', () 
 // ---------------------------------------------------------------------------
 
 describe('checkScopedNamespaceMinimums — 순수 함수', () => {
-  it('⭐네임스페이스 19개가 ko.json에 아예 없으면(개명·삭제 시뮬레이션) 19건 위반을 낸다', () => {
-    const violations = checkScopedNamespaceMinimums({ board: { x: 'y' } }); // 19개 다 없음
+  it('⭐네임스페이스 23개가 ko.json에 아예 없으면(개명·삭제 시뮬레이션) 23건 위반을 낸다', () => {
+    const violations = checkScopedNamespaceMinimums({ board: { x: 'y' } }); // 23개 다 없음
     expect(violations).toEqual([
       { namespace: 'chats', actualCount: 0, minExpected: 200 },
       { namespace: 'content', actualCount: 0, minExpected: 500 },
@@ -278,6 +282,10 @@ describe('checkScopedNamespaceMinimums — 순수 함수', () => {
       { namespace: 'insightsBoard', actualCount: 0, minExpected: 90 },
       { namespace: 'standup', actualCount: 0, minExpected: 100 },
       { namespace: 'goals', actualCount: 0, minExpected: 130 },
+      { namespace: 'usage', actualCount: 0, minExpected: 60 },
+      { namespace: 'invite', actualCount: 0, minExpected: 20 },
+      { namespace: 'meeting', actualCount: 0, minExpected: 50 },
+      { namespace: 'supportWidget', actualCount: 0, minExpected: 20 },
     ]);
   });
 
@@ -303,6 +311,10 @@ describe('checkScopedNamespaceMinimums — 순수 함수', () => {
       { namespace: 'insightsBoard', actualCount: 0, minExpected: 90 },
       { namespace: 'standup', actualCount: 0, minExpected: 100 },
       { namespace: 'goals', actualCount: 0, minExpected: 130 },
+      { namespace: 'usage', actualCount: 0, minExpected: 60 },
+      { namespace: 'invite', actualCount: 0, minExpected: 20 },
+      { namespace: 'meeting', actualCount: 0, minExpected: 50 },
+      { namespace: 'supportWidget', actualCount: 0, minExpected: 20 },
     ]);
   });
 
@@ -441,6 +453,38 @@ describe('SCOPED_NAMESPACE_MIN_LEAF_COUNT — 하한이 실측치보다 낮게 �
     const goalsLeafCount = effectiveKeys.filter((k) => k.startsWith('goals.')).length;
     expect(goalsLeafCount).toBeGreaterThanOrEqual(130);
   });
+
+  it('실 ko.json의 usage leaf 개수가 하한(60) 이상이다(실측 67, story #3912)', () => {
+    const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
+    const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    const usageLeafCount = effectiveKeys.filter((k) => k.startsWith('usage.')).length;
+    expect(usageLeafCount).toBeGreaterThanOrEqual(60);
+  });
+
+  it('실 ko.json의 invite leaf 개수가 하한(20) 이상이다(실측 26, story #3912)', () => {
+    const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
+    const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    const inviteLeafCount = effectiveKeys.filter((k) => k.startsWith('invite.')).length;
+    expect(inviteLeafCount).toBeGreaterThanOrEqual(20);
+  });
+
+  it('실 ko.json의 meeting leaf 개수가 하한(50) 이상이다(실측 57, story #3912)', () => {
+    const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
+    const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    const meetingLeafCount = effectiveKeys.filter((k) => k.startsWith('meeting.')).length;
+    expect(meetingLeafCount).toBeGreaterThanOrEqual(50);
+  });
+
+  it('실 ko.json의 supportWidget leaf 개수가 하한(20) 이상이다(실측 26, story #3912)', () => {
+    const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
+    const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    const supportWidgetLeafCount = effectiveKeys.filter((k) => k.startsWith('supportWidget.')).length;
+    expect(supportWidgetLeafCount).toBeGreaterThanOrEqual(20);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -508,6 +552,80 @@ describe('실 ko.json — onboarding·login·storage·insightsBoard 네임스페
   });
 
   it('무관 PR no-op — onboarding·login·storage·insightsBoard 밖·SCOPED_KEYS 밖의 실 합니다체 키는 namespace 전량 승격 뒤에도 안 본다', () => {
+    const outOfScopeValue = (ko.board as Record<string, unknown> | undefined)?.epicSwimlaneLoadError;
+    expect(typeof outOfScopeValue).toBe('string');
+    expect(outOfScopeValue as string).toMatch(/습니다|ㅂ니다|십시오/);
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    expect(effectiveKeys).not.toContain('board.epicSwimlaneLoadError');
+    expect(findHonorificToneInScopedKeys(ko, effectiveKeys)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// story #3912 — usage·invite·meeting·supportWidget 네임스페이스 전량
+// (SCOPED_NAMESPACES 승격). chats(#3885)·content/channelConnect(#3889)·settings(#3892)·
+// agents/flow/gateConfig(#3895)·recruiter/loops/cage(#3899)·onboarding/login/storage/
+// insightsBoard(#3901)와 정확히 같은 3형 검증(0건·양성대조·무관 PR no-op).
+// ---------------------------------------------------------------------------
+
+describe('실 ko.json — usage·invite·meeting·supportWidget 네임스페이스 전량(story #3912 AC1/AC2)', () => {
+  const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
+  const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
+
+  it('SCOPED_KEYS+전 네임스페이스 전량(effective)의 ko.json 값에 합니다체 0건(story #3912 AC1 usage 13·invite 11·meeting 11·supportWidget 10=45키 전량 이관 확認)', () => {
+    const effectiveKeys = resolveEffectiveScopedKeys(ko);
+    expect(effectiveKeys.length).toBeGreaterThan(SCOPED_KEYS.length);
+    expect(findHonorificToneInScopedKeys(ko, effectiveKeys)).toEqual([]);
+  });
+
+  it('양성대조 — usage.noUsage를 원래 합니다체로 되돌리면 RED가 된다(namespace 전량 승격 증명)', () => {
+    expect(SCOPED_KEYS as readonly string[]).not.toContain('usage.noUsage');
+    const mutated = JSON.parse(JSON.stringify(ko)) as Record<string, unknown>;
+    (mutated.usage as Record<string, unknown>).noUsage = '이번 달 사용량 데이터가 없습니다';
+    const effectiveKeys = resolveEffectiveScopedKeys(mutated);
+    const findings = findHonorificToneInScopedKeys(mutated, effectiveKeys);
+    expect(findings).toContainEqual({ key: 'usage.noUsage', matches: ['습니다'], value: '이번 달 사용량 데이터가 없습니다' });
+  });
+
+  it('양성대조 — invite.inviteNotFound를 원래 합니다체로 되돌리면 RED가 된다(namespace 전량 승격 증명)', () => {
+    expect(SCOPED_KEYS as readonly string[]).not.toContain('invite.inviteNotFound');
+    const mutated = JSON.parse(JSON.stringify(ko)) as Record<string, unknown>;
+    (mutated.invite as Record<string, unknown>).inviteNotFound = '초대를 찾을 수 없습니다.';
+    const effectiveKeys = resolveEffectiveScopedKeys(mutated);
+    const findings = findHonorificToneInScopedKeys(mutated, effectiveKeys);
+    expect(findings).toContainEqual({ key: 'invite.inviteNotFound', matches: ['습니다'], value: '초대를 찾을 수 없습니다.' });
+  });
+
+  it('양성대조 — meeting.noMeetings를 원래 합니다체로 되돌리면 RED가 된다(namespace 전량 승격 증명)', () => {
+    expect(SCOPED_KEYS as readonly string[]).not.toContain('meeting.noMeetings');
+    const mutated = JSON.parse(JSON.stringify(ko)) as Record<string, unknown>;
+    (mutated.meeting as Record<string, unknown>).noMeetings = '회의록이 없습니다';
+    const effectiveKeys = resolveEffectiveScopedKeys(mutated);
+    const findings = findHonorificToneInScopedKeys(mutated, effectiveKeys);
+    expect(findings).toContainEqual({ key: 'meeting.noMeetings', matches: ['습니다'], value: '회의록이 없습니다' });
+  });
+
+  it('양성대조 — supportWidget.errorTitle을 원래 합니다체로 되돌리면 RED가 된다(namespace 전량 승격 증명)', () => {
+    expect(SCOPED_KEYS as readonly string[]).not.toContain('supportWidget.errorTitle');
+    const mutated = JSON.parse(JSON.stringify(ko)) as Record<string, unknown>;
+    (mutated.supportWidget as Record<string, unknown>).errorTitle = '연결에 실패했습니다';
+    const effectiveKeys = resolveEffectiveScopedKeys(mutated);
+    const findings = findHonorificToneInScopedKeys(mutated, effectiveKeys);
+    expect(findings).toContainEqual({ key: 'supportWidget.errorTitle', matches: ['습니다'], value: '연결에 실패했습니다' });
+  });
+
+  // 양성대조(ㅂ니다 계열) — meeting.transcriptRequired("전사 텍스트가 필요합니다")로 NFD
+  // 처방이 이 네 네임스페이스 승격에서도 실제로 작동하는지 확認(습니다 리터럴이 아닌 자리).
+  it('양성대조 — meeting.transcriptRequired(ㅂ니다 계열)를 원래 합니다체로 되돌리면 RED가 된다', () => {
+    expect(SCOPED_KEYS as readonly string[]).not.toContain('meeting.transcriptRequired');
+    const mutated = JSON.parse(JSON.stringify(ko)) as Record<string, unknown>;
+    (mutated.meeting as Record<string, unknown>).transcriptRequired = '전사 텍스트가 필요합니다';
+    const effectiveKeys = resolveEffectiveScopedKeys(mutated);
+    const findings = findHonorificToneInScopedKeys(mutated, effectiveKeys);
+    expect(findings).toContainEqual({ key: 'meeting.transcriptRequired', matches: ['ㅂ니다'], value: '전사 텍스트가 필요합니다' });
+  });
+
+  it('무관 PR no-op — usage·invite·meeting·supportWidget 밖·SCOPED_KEYS 밖의 실 합니다체 키는 namespace 전량 승격 뒤에도 안 본다', () => {
     const outOfScopeValue = (ko.board as Record<string, unknown> | undefined)?.epicSwimlaneLoadError;
     expect(typeof outOfScopeValue).toBe('string');
     expect(outOfScopeValue as string).toMatch(/습니다|ㅂ니다|십시오/);
@@ -774,12 +892,14 @@ describe('story #3889 CHANGES 1 — 플레이스홀더 값 뒤 계사(예요/이
 
   const PLACEHOLDER_COPULA_RE = /\}(예요|이에요)/;
 
-  it('content·channelConnect·settings·agents·flow·gateConfig·recruiter·loops·cage·onboarding·login·storage·insightsBoard 전 leaf에 "}예요"·"}이에요"(placeholder 바로 뒤 계사) 0건', () => {
+  it('content·channelConnect·settings·agents·flow·gateConfig·recruiter·loops·cage·onboarding·login·storage·insightsBoard·usage·invite·meeting·supportWidget 전 leaf에 "}예요"·"}이에요"(placeholder 바로 뒤 계사) 0건', () => {
     // story #3892 — 스캔 범위에 settings 추가. story #3895 — agents·flow·gateConfig 추가
     // (착수 전 사전 스캔 0건 확認·전환 뒤 재확認 — 3889 교훈 그대로 재적용).
     // story #3899 — 스캔 범위에 recruiter·loops·cage 추가(전환 전 사전 스캔에서도 0건
     // 확認했고, 이 가드로 재발도 막는다).
     // story #3901 — 스캔 범위에 onboarding·login·storage·insightsBoard 추가(같은 자).
+    // story #3912 — 스캔 범위에 usage·invite·meeting·supportWidget 추가(usage는 한도/쿼터
+    // 숫자 placeholder가 많아 특히 이 계사 함정 대상 — 전환 전·후 모두 0건 확認).
     const values = [
       ...collectLeafValues(ko.content as Record<string, unknown>, 'content'),
       ...collectLeafValues(ko.channelConnect as Record<string, unknown>, 'channelConnect'),
@@ -794,6 +914,10 @@ describe('story #3889 CHANGES 1 — 플레이스홀더 값 뒤 계사(예요/이
       ...collectLeafValues(ko.login as Record<string, unknown>, 'login'),
       ...collectLeafValues(ko.storage as Record<string, unknown>, 'storage'),
       ...collectLeafValues(ko.insightsBoard as Record<string, unknown>, 'insightsBoard'),
+      ...collectLeafValues(ko.usage as Record<string, unknown>, 'usage'),
+      ...collectLeafValues(ko.invite as Record<string, unknown>, 'invite'),
+      ...collectLeafValues(ko.meeting as Record<string, unknown>, 'meeting'),
+      ...collectLeafValues(ko.supportWidget as Record<string, unknown>, 'supportWidget'),
     ];
     const violations = values.filter(([, v]) => PLACEHOLDER_COPULA_RE.test(v));
     expect(violations).toEqual([]);
