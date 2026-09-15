@@ -27,7 +27,12 @@ const _CSP = [
   // story #2510 — Toss 결제위젯 SDK(js.tosspayments.com)가 script-src에 없으면 카드
   // 인증창 자체가 CSP로 막힌다(라이브 실측 중 실물 확認 — 유닛테스트는 브라우저 CSP를
   // 실행하지 않아 이 클래스를 못 잡는다).
-  "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.tosspayments.com",
+  // story #3918 — Cloudflare Zone이 Web Analytics beacon(static.cloudflareinsights.com)을
+  // 자동 주입하는데 CSP가 막아 콘솔에러가 났다. 판정은 원래 "끄기"(GA4가 정본)였으나
+  // 공유 CF API 토큰이 zone 스코프뿐이라 Web Analytics(계정 스코프 rum API) 자체를
+  // 끌 권한이 없다(PO 실측, Authentication error) — 사용자 영향 0인 콘솔 오류 하나로
+  // 선생님께 계정 권한 상신을 쌓지 않고 허용으로 닫는다(PO 결정).
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.tosspayments.com https://static.cloudflareinsights.com",
   "style-src 'self' 'unsafe-inline'",
   // GCS 파일, Google/GitHub 아바타 이미지 + story #3532(PO 재대조 2026-09-06) —
   // 브랜드 킷 로고는 고객이 «자기 사이트»에 올린 임의 URL이다(우리 인프라가 아니다)
@@ -42,7 +47,9 @@ const _CSP = [
   // 직접 호출하는 유일한 비-self API 오리진(다른 모든 데이터 fetch는 Next.js BFF 프록시
   // 경유라 'self'로 충분, 위젯만 예외).
   [
-    "connect-src 'self' https://*.googleapis.com https://*.tosspayments.com",
+    // story #3918 — beacon 스크립트 자체(script-src)뿐 아니라 그게 쏘는 리포트 호출도
+    // connect-src가 막는다(같은 콘솔 오류 클래스) — cloudflareinsights.com 추가.
+    "connect-src 'self' https://*.googleapis.com https://*.tosspayments.com https://cloudflareinsights.com",
     _SUPPORT_GATEWAY_CSP_ORIGIN,
   ].filter(Boolean).join(' '),
   // story #2083 — 채팅 첨부 영상(GCS 서명 URL)이 <video>로 로드될 때 media-src에

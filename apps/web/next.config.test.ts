@@ -114,13 +114,29 @@ describe('CSP connect-src — Support Gateway origin (story #3260 2차 회귀가
     delete process.env[ENV_KEY];
     const csp = await cspHeaderValue();
     expect(csp).not.toContain('run.app');
-    expect(csp).toContain("connect-src 'self' https://*.googleapis.com https://*.tosspayments.com");
+    expect(csp).toContain("connect-src 'self' https://*.googleapis.com https://*.tosspayments.com https://cloudflareinsights.com");
   });
 
   it('URL로 파싱 안 되는 값이면 CSP 문법을 깨지 않고 안전하게 무시한다(정직한 부재 취급)', async () => {
     process.env[ENV_KEY] = 'not-a-valid-url';
     const csp = await cspHeaderValue();
-    expect(csp).toContain("connect-src 'self' https://*.googleapis.com https://*.tosspayments.com");
+    expect(csp).toContain("connect-src 'self' https://*.googleapis.com https://*.tosspayments.com https://cloudflareinsights.com");
     expect(csp).not.toContain('not-a-valid-url');
+  });
+});
+
+// story #3918 — Cloudflare Zone이 자동 주입하는 Web Analytics beacon
+// (static.cloudflareinsights.com)을 CSP가 막아 dev-app 전 페이지 콘솔에 에러가 났다.
+// 판정은 "끄기"가 정론(GA4가 정본 계측)이었으나 공유 CF API 토큰이 zone 스코프뿐이라
+// Web Analytics(계정 스코프 rum API) 자체를 끌 권한이 없어(PO 실측) 허용으로 닫는다
+// (PO 결정 2026-09-15) — script-src의 beacon 스크립트, connect-src의 리포트 호출 둘 다
+// 열려야 콘솔 에러가 0이 된다(하나만 열면 나머지 축에서 계속 막힌다).
+describe('CSP — Cloudflare Web Analytics beacon 허용(story #3918 AC3)', () => {
+  it('script-src가 beacon 스크립트 origin을 허용한다', () => {
+    expect(extractDirective('script-src')).toContain('https://static.cloudflareinsights.com');
+  });
+
+  it('connect-src가 beacon 리포트 호출 origin을 허용한다', () => {
+    expect(extractDirective('connect-src')).toContain('https://cloudflareinsights.com');
   });
 });

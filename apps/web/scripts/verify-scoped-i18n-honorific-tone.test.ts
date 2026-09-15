@@ -543,12 +543,14 @@ describe('SCOPED_NAMESPACE_MIN_LEAF_COUNT — 하한이 실측치보다 낮게 �
     expect(navLeafCount).toBeGreaterThanOrEqual(100);
   });
 
-  it('실 ko.json의 dashboard leaf 개수가 하한(45) 이상이다(실측 50, story #3913)', () => {
+  // story #3918 — ActionZone(command-center) 은퇴로 dashboard.* leaf가 50→25(죽은
+  // 25키 삭제, honorific-scope/dashboard.json도 재기준선 45→20) — 하한 값만 갱신.
+  it('실 ko.json의 dashboard leaf 개수가 하한(20) 이상이다(실측 25, story #3913·재기준선 #3918)', () => {
     const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
     const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
     const effectiveKeys = resolveEffectiveScopedKeys(ko);
     const dashboardLeafCount = effectiveKeys.filter((k) => k.startsWith('dashboard.')).length;
-    expect(dashboardLeafCount).toBeGreaterThanOrEqual(45);
+    expect(dashboardLeafCount).toBeGreaterThanOrEqual(20);
   });
 
   it('실 ko.json의 presence leaf 개수가 하한(10) 이상이다(실측 12, story #3919)', () => {

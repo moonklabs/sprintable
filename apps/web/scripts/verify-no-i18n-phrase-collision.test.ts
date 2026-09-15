@@ -321,9 +321,11 @@ describe('GRANDFATHER_BASELINE — 기존 채무는 통과, 새 충돌만 막는
 // story #3808(isKeyStemExtension 도입, 2026-09-12) — 20→17. 같은 네임스페이스+접두
 // 확장형 3건(chats.agent<->agentCount·goals.spExceeded<->spExceededDetail·
 // storage.delete<->deleteImpact)이 이제 이 스캔 자체에 안 걸린다.
+// story #3918(ActionZone 은퇴 코드 정리, 2026-09-15) — 17→16.
+// dashboard.ccQueueTruncated/dashboard.ccWaitingTitle 둘 다 삭제돼 그 쌍 자체가 없어졌다.
 describe('GRANDFATHER_BASELINE_COUNT_TEST — 41번째부터는 PO 승인, 조용한 증감을 막는다', () => {
-  it('정리 후(#3808 후속) 크기는 정확히 17건이다', () => {
-    expect(GRANDFATHER_BASELINE.size).toBe(17);
+  it('정리 후(#3918 후속) 크기는 정확히 16건이다', () => {
+    expect(GRANDFATHER_BASELINE.size).toBe(16);
   });
 });
 
@@ -335,14 +337,15 @@ describe('GRANDFATHER_BASELINE_COUNT_TEST — 41번째부터는 PO 승인, 조�
 // 다시 벌어지면 그 자체가 신호)는 서로 다른 것을 지키는 별개의 안전장치라 계속 둔다.
 // story #3808(isKeyStemExtension 도입, 2026-09-12) — 20→17(위 GRANDFATHER_BASELINE_
 // COUNT_TEST와 동형 갱신, 선언=실걸림 계속 일치).
+// story #3918(ActionZone 은퇴 코드 정리, 2026-09-15) — 17→16(위와 동형 갱신).
 describe('GRANDFATHER_LIVE_COUNT_TEST — 「선언된 수」와 「지금 실제로 걸리는 수」는 다른 축이다', () => {
   // story #3902 — 이 파일은 scanRepository()(실 apps/web/src 전수 스캔, 메모이즈 없음)를
   // 여러 it()이 독립적으로 다시 호출한다 — 부하 시 vitest 기본 5000ms를 넘길 수 있어 각
   // 호출부마다 개별 실측(동시부하 재현 5회)×3을 적용한다. 이 테스트: 89·115·77·146·108ms
   // 중 최댓값 146ms → ×3 ≈ 438ms → 500ms로 반올림.
-  it('실제 저장소 스캔에서 지금 걸리는 grandfather는 17건이다(정리 후 선언 수와 일치)', () => {
+  it('실제 저장소 스캔에서 지금 걸리는 grandfather는 16건이다(정리 후 선언 수와 일치)', () => {
     const { grandfatherHit } = scanRepository();
-    expect(grandfatherHit.size).toBe(17);
+    expect(grandfatherHit.size).toBe(16);
   }, 500);
 
   // story #3902 — 83·101·90·89·98ms 중 최댓값 101ms → ×3 ≈ 303ms → 500ms로 반올림.
