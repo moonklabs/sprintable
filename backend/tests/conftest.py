@@ -35,9 +35,9 @@ list_stories(...)`처럼 **직접 호출**하는 테스트가 흔한데(HTTP 왕
 import ast
 import functools
 import inspect
+import json
 import os
 import re
-import sys
 import uuid
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -219,7 +219,15 @@ def _is_registered_destructive_file(module) -> bool:
     처방: 마커 재도출을 그만두고, `infra/destructive-schema-shard-weights/`(story
     23bf1913 가드가 보는 그 SSOT — destructive_schema 파일은 전부 여기 등재돼야 한다)를
     직접 읽어 "이 모듈이 destructive로 등록된 파일인가"를 판정한다 — 마커 부여 방식(모듈
-    전체 vs 함수별)과 완전히 무관해진다."""
+    전체 vs 함수별)과 완전히 무관해진다.
+
+    ⛔fix(2026-09-15, PO PR#4304 CI RED 재발견) — 처음엔 `sys.path.insert` 뒤
+    `scripts.shard_destructive_tests`를 import해 `load_weights()`를 재사용했는데,
+    `test_2662_missing_model_import_guard.py`가 서브프로세스로 pytest를 다시 띄우는
+    맥락(rootdir/cwd가 다름)에서 그 sys.path 조작이 안 서서
+    `ModuleNotFoundError: No module named 'shard_destructive_tests'`로 fixture 자체가
+    죽어 2662의 진단 단언이 깨졌다 — import 의존을 완전히 걷어내고 JSON을 직접
+    glob+파싱한다(sys.path 무변경)."""
     module_file = getattr(module, "__file__", None)
     if not module_file:
         return False
@@ -234,11 +242,19 @@ def _is_registered_destructive_file(module) -> bool:
 def _registered_destructive_files() -> frozenset[str]:
     """`infra/destructive-schema-shard-weights/*.json`의 `file` 필드 전수(story 23bf1913
     SSOT) — 세션당 1회만 디스크 읽기(다수 모듈이 매번 재계산할 필요 없음, 파일 목록은
-    같은 pytest 프로세스 안에서 안 바뀐다)."""
-    sys.path.insert(0, str(_BACKEND_DIR_FOR_WEIGHTS / "scripts"))
-    from shard_destructive_tests import load_weights  # noqa: PLC0415
-
-    return frozenset(load_weights().keys())
+    같은 pytest 프로세스 안에서 안 바뀐다). `scripts/shard_destructive_tests.py`를
+    import하지 않는다(서브프로세스 pytest 맥락에서 sys.path 조작이 깨진 실사고, 위
+    docstring 참고) — 같은 디렉터리(파일마다 정확히 하나의 `<test_file>.json`, 항상
+    `{"file": ..., "sec": ..., "source": ...}` 평평한 객체 하나) 계약을 JSON으로 직접
+    읽는다. 디렉터리 레벨 메타는 형제 파일(`<dirname>.meta.json`, 이 디렉터리 밖)이라
+    이 glob엔 안 걸린다."""
+    weights_dir = _BACKEND_DIR_FOR_WEIGHTS.parent / "infra" / "destructive-schema-shard-weights"
+    files = set()
+    for path in weights_dir.glob("*.json"):
+        with path.open(encoding="utf-8") as f:
+            entry = json.load(f)
+        files.add(entry["file"])
+    return frozenset(files)
 
 
 _BACKEND_DIR_FOR_WEIGHTS = Path(__file__).resolve().parent.parent
