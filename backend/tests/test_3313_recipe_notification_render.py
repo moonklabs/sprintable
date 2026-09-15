@@ -237,23 +237,25 @@ async def test_last_stage_has_no_next_stage_line():
 @pytest.mark.anyio
 async def test_unresolvable_work_item_falls_back_to_raw_id():
     """work item title을 못 찾으면(work_item_type이 이 렌더러가 지원하는 타입 — story·task·
-    doc·visual_artifact, story #3884가 doc/visual_artifact를 추가로 확장 — 자체가 아님)
-    참조 토큰 대신 원시 work_item_type/work_item_id를 그대로 남긴다(정보 손실 없음, 지어내지
-    않음). story #3884 이전엔 doc이 이 미지원 예시였으나 doc 리졸버 추가로 더는 유효하지
-    않다(doc은 이제 실제로 해소된다) — epic(Goal 실체)으로 교체: PROJECT_SCOPED_WORK_ITEM_
-    TYPES(gate_service.py)엔 있어 발행 자체(project 해소)는 성공하면서도, 이 함수(제목
-    lookup)의 4종엔 없어 "미지원 타입" 취지가 그대로 유효하다(agent_decision·
+    doc·visual_artifact·epic, story #3884가 doc/visual_artifact를, story #3893
+    CHANGES②가 epic을 추가로 확장 — 자체가 아님) 참조 토큰 대신 원시 work_item_type/
+    work_item_id를 그대로 남긴다(정보 손실 없음, 지어내지 않음). story #3884 이전엔 doc이
+    이 미지원 예시였으나 doc 리졸버 추가로 더는 유효하지 않았고(doc은 실제로 해소된다),
+    그래서 epic으로 교체했었는데 story #3893 CHANGES②가 epic도 해소되게 만들어 또
+    교체 필요 — sprint로 교체: PROJECT_SCOPED_WORK_ITEM_TYPES(gate_service.py)엔 있어
+    발행 자체(project 해소)는 성공하면서도, 이 함수(제목 lookup)의 5종(story·task·doc·
+    visual_artifact·epic)엔 없어 "미지원 타입" 취지가 그대로 유효하다(agent_decision·
     support_escalation은 project-무관 self-referencing anchor라 발행 자체가 400으로
     막혀 이 시나리오에 못 쓴다 — 별개 관심사와 섞임 방지, 3884 실측으로 발견)."""
-    from app.models.pm import Goal
+    from app.models.pm import Sprint
 
     engine, Session = await _realdb_session()
     try:
         async with Session() as s:
             org_id, project_id = await _seed_org_project(s, slug="e3313c")
             publisher_id = await _seed_agent(s, org_id, project_id)
-            epic = Goal(id=uuid.uuid4(), org_id=org_id, project_id=project_id, title="어떤 에픽")
-            s.add(epic)
+            sprint = Sprint(id=uuid.uuid4(), org_id=org_id, project_id=project_id, title="어떤 스프린트")
+            s.add(sprint)
             await s.commit()
 
             schema = {
@@ -272,12 +274,12 @@ async def test_unresolvable_work_item_falls_back_to_raw_id():
             )
             content, _resp = await _publish_and_get_content(
                 s, definition_key=definition_key,
-                payload={"stage": "monitor", "work_item_type": "epic", "work_item_id": str(epic.id)},
+                payload={"stage": "monitor", "work_item_type": "sprint", "work_item_id": str(sprint.id)},
                 publisher_id=publisher_id, org_id=org_id,
             )
-            assert "- work_item_type: epic" in content
-            assert f"- work_item_id: {epic.id}" in content
-            assert "entity:epic:" not in content
+            assert "- work_item_type: sprint" in content
+            assert f"- work_item_id: {sprint.id}" in content
+            assert "entity:sprint:" not in content
     finally:
         await engine.dispose()
 

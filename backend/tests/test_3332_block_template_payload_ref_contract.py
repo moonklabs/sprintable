@@ -457,8 +457,14 @@ async def test_publish_computes_work_item_ref_when_payload_has_work_item_pair():
 @_REAL_DB_SKIP
 @pytest.mark.anyio
 async def test_publish_refs_empty_when_payload_lacks_work_item_pair():
-    """preset.goal.measured처럼 work_item_type/id가 없는 payload는 refs가 빈 dict —
-    지어내지 않는다."""
+    """work_item_type/id 페어가 없는 payload는 refs.work_item이 없다(지어내지 않는다).
+
+    story #3893 CHANGES②(PO PR#4298 리뷰 2026-09-15) — preset.goal.measured의 `goal_id`
+    는 더는 「work_item 페어가 없으니 refs 전체가 비어야 한다」는 이 테스트 원래 전제에
+    안 맞는다: goal_id 전용 경로(work_item과 별도 트리거)가 신설돼 `refs.goal`이 정상
+    채워진다 — `_render_event_notification_work_item_ref`의 "epic" 갈래 재사용. refs가
+    완전히 빈 게 아니라 "work_item 키만 없다"로 자를 좁힌다(스토리 취지 자체가 "goal_id도
+    이제 해소된다"이므로 이게 정확한 계약)."""
     from app.routers.events import EventPublishRequest, publish_registry_event
     from fastapi import BackgroundTasks
     from starlette.requests import Request as StarletteRequest
@@ -516,7 +522,12 @@ async def test_publish_refs_empty_when_payload_lacks_work_item_pair():
             msg = (await s.execute(
                 select(ConversationMessage).where(ConversationMessage.id == uuid.UUID(resp["message_id"]))
             )).scalar_one()
-            assert (msg.msg_metadata or {}).get("event", {}).get("refs") == {}
+            refs = (msg.msg_metadata or {}).get("event", {}).get("refs") or {}
+            assert "work_item" not in refs
+            assert refs.get("goal") == {
+                "found": True,
+                "token": f"[측정 목표](entity:epic:{goal.id})",
+            }
     finally:
         await engine.dispose()
 
