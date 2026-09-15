@@ -88,13 +88,13 @@ describe('DocEditor — story #3917: 빈 문서 안내는 한 자리에 하나(�
   });
 
   it('실 ko.json editorPlaceholder가 "/" 안내와 끌어다 놓기 안내를 한 문자열로 담는다(병합 확認)', () => {
-    const value = (koMessages.docs as Record<string, string>).editorPlaceholder;
+    const value = (koMessages.docs as Record<string, unknown>).editorPlaceholder as string;
     expect(value).toContain('/');
     expect(value).toContain('끌어다');
   });
 
   it('실 en.json editorPlaceholder도 동형 병합 — drag 안내를 포함한다', () => {
-    const value = (enMessages.docs as Record<string, string>).editorPlaceholder;
+    const value = (enMessages.docs as Record<string, unknown>).editorPlaceholder as string;
     expect(value.toLowerCase()).toContain('drag');
     expect(value).toContain('/');
   });
