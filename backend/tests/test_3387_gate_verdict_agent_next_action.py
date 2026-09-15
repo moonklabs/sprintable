@@ -122,7 +122,7 @@ class TestExternalPublishAgentNextAction:
         # 사례 1~4 — 승인 카드가 제품에 없는 «발행 도구»를 더 이상 권하지 않는다.
         text = await _render(_payload(gate_type="external_publish", verdict="approved"))
         assert "발행 도구" not in text
-        assert "- 다음 행동: 할 일 없음 — 발행은 휴먼이 화면에서 합니다." in text
+        assert "- 다음 행동: 할 일 없음 — 발행은 휴먼이 화면에서 해요." in text
 
     async def test_rejected_with_discontinue_signal_has_no_next_action_line_at_all(self):
         # 사례 5 — 「발행 금지·폐기 대상」으로 반려했는데 재상신을 권하던 모순을 없앤다.
@@ -151,7 +151,7 @@ class TestExternalPublishAgentNextAction:
             _payload(gate_type="external_publish", verdict="approved"),
             gate_row=gate_row, site_post_draft_exists=True, site_post_command_exists=True,
         )
-        assert "발행은 휴먼이 화면에서 합니다" not in text
+        assert "발행은 휴먼이 화면에서 해요" not in text
         assert "다음 워커 tick" in text
         assert "발행 결과" in text
 
@@ -177,7 +177,7 @@ class TestExternalPublishAgentNextAction:
             _payload(gate_type="external_publish", verdict="approved"),
             gate_row=gate_row, site_post_draft_exists=True, site_post_command_exists=False,
         )
-        assert "- 다음 행동: 할 일 없음 — 발행은 휴먼이 화면에서 합니다." in text
+        assert "- 다음 행동: 할 일 없음 — 발행은 휴먼이 화면에서 해요." in text
         assert "다음 워커 tick" not in text
 
     async def test_site_post_external_destination_scope_mismatch_keeps_human_screen_text(self):
@@ -199,7 +199,7 @@ class TestExternalPublishAgentNextAction:
             _payload(gate_type="external_publish", verdict="approved"),
             gate_row=gate_row, site_post_draft_exists=True, site_post_command_exists=False,
         )
-        assert "- 다음 행동: 할 일 없음 — 발행은 휴먼이 화면에서 합니다." in text
+        assert "- 다음 행동: 할 일 없음 — 발행은 휴먼이 화면에서 해요." in text
         assert "다음 워커 tick" not in text
 
     async def test_channel_post_approved_keeps_old_text_regression(self):
@@ -211,7 +211,7 @@ class TestExternalPublishAgentNextAction:
             _payload(gate_type="external_publish", verdict="approved"),
             gate_row=gate_row, site_post_draft_exists=False,
         )
-        assert "- 다음 행동: 할 일 없음 — 발행은 휴먼이 화면에서 합니다." in text
+        assert "- 다음 행동: 할 일 없음 — 발행은 휴먼이 화면에서 해요." in text
         assert "다음 워커 tick" not in text
 
     async def test_gate_id_in_payload_fetches_exact_row_not_reconstructed(self):

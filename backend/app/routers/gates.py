@@ -1859,8 +1859,8 @@ async def _transition_gate_endpoint(
             raise HTTPException(
                 status_code=409,
                 detail=human_error(
-                    "COMMENT_REPLY_TARGET_DELETED", "답변 대상 댓글이 삭제되어 승인할 수 없습니다.",
-                    user_message="답변 대상 댓글이 삭제되어 승인할 수 없습니다.",
+                    "COMMENT_REPLY_TARGET_DELETED", "답변 대상 댓글이 삭제되어 승인할 수 없어요.",
+                    user_message="답변 대상 댓글이 삭제되어 승인할 수 없어요.",
                 ),
             ) from exc
     # ⭐S23 RC① + RC#1(방어심층): resolver_id 를 **전 status 무조건 인증 caller 로 강제**(body 무시).

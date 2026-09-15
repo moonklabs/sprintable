@@ -109,7 +109,7 @@ async def _notify_doc_approval_requested(
             session, org_id=org_id, event_type="doc_approval_requested",
             target_member_ids=approver_ids,
             title="문서 결재 요청",
-            body=f"'{doc.title}' 문서가 결재 대기 중입니다.",
+            body=f"'{doc.title}' 문서가 결재 대기 중이에요.",
             reference_type="gate", reference_id=gate_id,
             source_project_id=doc.project_id,
             # story #2687: 동기 개인 webhook 재시도(최대 3회·1s/2s backoff)가 이 함수를 호출한

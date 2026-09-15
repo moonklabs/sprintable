@@ -579,6 +579,16 @@ jobs:
           else
             echo "baseline growth check skipped: no comparison base ($COMPARE_LABEL에 korean_user_strings_baseline.txt 없음 — 이 PR이 그 파일을 «처음 도입»하는 중이면 정상이다, story #3779 자신이 그 경우다. 다음 PR부터는 develop에 파일이 있어 실제 비교가 돈다)"
           fi
+      # story #3931(2층, 페드루 PO 處方 2026-09-15) — 1층(위 두 스텝)은 "코드에 하드코딩된
+      # 한글이 있는가"만 본다. 이 스텝은 그 중 실제로 사용자에게 닿는 4표면(알림 title/
+      # body · i18n_catalog.py ko · HUMAN_SAFE_ERROR_MESSAGE_CODES 허용목록 raise site ·
+      # email_copy.py ko)만 스코프로 좁혀 "톤이 맞는가"를 본다 — baseline 없음(전면 전환
+      # 대상, 새 위반은 즉시 RED). 기존 잡("BE 한글 사용자 문장 재발 가드")에 스텝만
+      # 추가한다(새 job 신설 금지, AC5 明示 — 1층·2층이 서로 다른 잡이면 병렬 스케줄링에
+      # 따라 "1층은 초록인데 2층 결과가 아직 안 보인다" 류 착시가 생길 수 있다).
+      - name: "Verify user-facing tone (story #3931 2층 — 4 surfaces, no baseline)"
+        working-directory: backend
+        run: python3 scripts/verify_user_facing_tone.py
 
   project-access-403-lint:
     name: has_project_access 403 lint (guard, story #2342)

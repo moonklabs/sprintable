@@ -133,7 +133,7 @@ async def _notify_artifact_created(
         session, org_id=org_id, event_type="artifact.created",
         target_member_ids=list(target_member_ids),
         title=f"새 산출물 생성됨: {artifact.title}",
-        body="새 시각 산출물이 생성됐습니다.",
+        body="새 시각 산출물이 생성됐어요.",
         reference_type="visual_artifact", reference_id=artifact.id,
         source_project_id=project_id,
         # story #2696: outbox 이관(동일 결함 클래스 예방).
@@ -1084,7 +1084,7 @@ async def complete_png_export(
             session, org_id=org_id, event_type="artifact.exported",
             target_member_ids=target_member_ids,
             title=f"산출물 export: {artifact.title}",
-            body="PNG export가 완료됐습니다.",
+            body="PNG export가 완료됐어요.",
             reference_type="visual_artifact", reference_id=artifact.id,
             source_project_id=project_id,
             # story #2696: outbox 이관(동일 결함 클래스 예방).
@@ -1161,7 +1161,7 @@ async def create_html_export(
             session, org_id=org_id, event_type="artifact.exported",
             target_member_ids=target_member_ids,
             title=f"산출물 export: {artifact.title}",
-            body="HTML export가 완료됐습니다.",
+            body="HTML export가 완료됐어요.",
             reference_type="visual_artifact", reference_id=artifact.id,
             source_project_id=project_id,
             # story #2696: outbox 이관(동일 결함 클래스 예방).
@@ -1356,7 +1356,7 @@ async def _notify_artifact_updated(
             session, org_id=org_id, event_type="artifact.updated",
             target_member_ids=target_member_ids,
             title=f"산출물 수정됨: {artifact.title}",
-            body="artifact가 새 버전으로 갱신됐습니다.",
+            body="artifact가 새 버전으로 갱신됐어요.",
             reference_type="visual_artifact", reference_id=artifact.id,
             source_project_id=project_id,
             # story #2696: outbox 이관(동일 결함 클래스 예방).

@@ -111,25 +111,25 @@ app/routers/channel_post_comment_replies.py::PublicationCommand.status 그대로
 app/routers/channel_post_comment_replies.py::transient 백오프 다음 시도 시각(ISO) — 없으면 null.
 app/routers/channel_post_comment_replies.py::voided 사유(PublicationCommand.reason_code 그대로, 새 이름 짓지 않음 — 이 컬럼은 channel_post 발행류(publication_command.py)와 공유라 열거를 닫지 않는다). 페드루 PO 대조(2026-09-06) — **현재 관측 값**: "GATE_NOT_APPROVED_OR_RESEALED"(게이트 재검증 실패) · "TARGET_COMMENT_DELETED"(승인 뒤 워커 도달 前 대상 댓글 삭제 레이스) · "CONTENT_CHANGED"(channel_posts.py 재승인 필요 전이 축, 댓글 답변 경로가 아니어도 같은 컬럼에 실린다). 이 외에도 미래 값이 더 생길 수 있다 — 화면은 아는 값만 문구로 대응하고 모르는 값은 원문 그대로/일반 문구로 안전히 처리해야 한다. voided 아니면 null.
 app/routers/channel_post_comment_replies.py::답변 단건 조회(에이전트 가능) — target_comment_state 포함
-app/routers/channel_post_comment_replies.py::답변 대상 댓글이 삭제되어 상신할 수 없습니다.
+app/routers/channel_post_comment_replies.py::답변 대상 댓글이 삭제되어 상신할 수 없어요.
 app/routers/channel_post_comment_replies.py::답변 상신(휴먼 전용) — external_publish 게이트 생성
 app/routers/channel_post_comment_replies.py::답변 초안 생성(에이전트 가능)
 app/routers/channel_post_comment_replies.py::답변을 찾을 수 없습니다:
 app/routers/channel_post_comment_replies.py::댓글을 story로 전환
 app/routers/channel_post_comment_replies.py::댓글을 찾을 수 없습니다:
-app/routers/channel_post_comment_replies.py::안 보낸 초안이 이미 있습니다.
+app/routers/channel_post_comment_replies.py::안 보낸 초안이 이미 있어요.
 app/routers/channel_post_comment_replies.py::유나 design §11-5 세 값(connection|needs_check|transient) — 실패 없었으면 null.
-app/routers/channel_post_comment_replies.py::이 액션은 휴먼 멤버만 가능합니다.
-app/routers/channel_post_comment_replies.py::이 채널은 답변 발송을 지원하지 않습니다.
+app/routers/channel_post_comment_replies.py::이 액션은 휴먼 멤버만 가능해요.
+app/routers/channel_post_comment_replies.py::이 채널은 답변 발송을 지원하지 않아요.
 app/routers/channel_post_comment_replies.py::조각②-b(additive) — 봉인 시점(submit) 대상 댓글 원문. null=아직 게이트가 없다(draft)이거나 이 필드 추가 前에 submit된 구버전 게이트. 표시 전용 — target_comment_state 판정은 여전히 target_text_sha256(비노출)만 쓴다.
 app/routers/channel_post_comments.py::PublicationCommand.status 그대로 — 다음 할 일이 갈리는 네 값(유나 §22-15): "pending"(백오프 대기 중, 기다리면 자동 재시도) · "blocked"(연결 복구 필요, 사람이 재인증해야 함) · "dead_letter"(자동 재시도 포기, 사람 판단 필요) · "voided"(전제가 바뀌어 종결, 재시도 개념 자체가 안 맞음). 그 외 "completed" 등은 성공/진행 중.
 app/routers/channel_post_comments.py::transient 백오프 다음 시도 시각(ISO) — 없으면 null.
 app/routers/channel_post_comments.py::voided 사유(PublicationCommand.reason_code 그대로, 새 이름 짓지 않음 — 이 컬럼은 channel_post 발행류(publication_command.py)와 공유라 열거를 닫지 않는다). 페드루 PO 대조(2026-09-06) — **현재 관측 값**: "GATE_NOT_APPROVED_OR_RESEALED"(게이트 재검증 실패) · "TARGET_COMMENT_DELETED"(승인 뒤 워커 도달 前 대상 댓글 삭제 레이스) · "CONTENT_CHANGED"(channel_posts.py 재승인 필요 전이 축, 댓글 답변 경로가 아니어도 같은 컬럼에 실린다). 이 외에도 미래 값이 더 생길 수 있다 — 화면은 아는 값만 문구로 대응하고 모르는 값은 원문 그대로/일반 문구로 안전히 처리해야 한다. voided 아니면 null.
-app/routers/channel_post_comments.py::댓글 재수집은 휴먼 멤버만 가능합니다.
+app/routers/channel_post_comments.py::댓글 재수집은 휴먼 멤버만 가능해요.
 app/routers/channel_post_comments.py::발행 기록을 찾을 수 없습니다:
 app/routers/channel_post_comments.py::연결이 활성 상태가 아니라 댓글을 대조/수집할 수 없습니다 — 연결 화면에서 확인해 주세요.
 app/routers/channel_post_comments.py::유나 design §11-5 세 값(connection|needs_check|transient) — 실패 없었으면 null.
-app/routers/channel_post_comments.py::이 채널은 댓글 수집을 지원하지 않습니다.
+app/routers/channel_post_comments.py::이 채널은 댓글 수집을 지원하지 않아요.
 app/routers/channel_post_comments.py::지금은 댓글을 다시 수집할 수 없습니다 — 잠시 후 다시 시도해 주세요.
 app/routers/channel_post_comments.py::채널 연결이 만료되어 댓글을 수집할 수 없습니다 — 연결 화면에서 다시 연결해 주세요.
 app/routers/channel_post_comments.py::채널 연결이 해지되어 댓글을 수집할 수 없습니다 — 연결 화면에서 다시 연결해 주세요.
@@ -153,7 +153,7 @@ app/routers/channel_posts.py::예약 시각 범위 끝(tz-aware ISO, gate.sealed
 app/routers/channel_posts.py::예약 시각 범위 시작(tz-aware ISO, gate.sealed_scheduled_at 기준 — publication_command의 스냅샷 값이 아니다). unscheduled와 함께 줄 수 없다.
 app/routers/channel_posts.py::원문을 찾을 수 없습니다:
 app/routers/channel_posts.py::은 timezone 정보가 있어야 합니다(예: Z 또는 +09:00).
-app/routers/channel_posts.py::채널 포스트 발행은 휴먼 멤버만 가능합니다(에이전트는 초안·상신까지).
+app/routers/channel_posts.py::채널 포스트 발행은 휴먼 멤버만 가능해요(에이전트는 초안·상신까지).
 app/routers/content_rules.py::콘텐츠 규칙 편집은 조직 owner·admin만 가능합니다.
 app/routers/context_pack.py::임베딩 서비스를 사용할 수 없습니다. 잠시 후 다시 시도하세요.
 app/routers/context_pack.py::해당 프로젝트 접근 권한이 없습니다
@@ -244,7 +244,7 @@ app/routers/gates.py::게이트 대상 커밋이 승인 확인 이후 변경되�
 app/routers/gates.py::게이트 상태(
 app/routers/gates.py::결정 요청
 app/routers/gates.py::결정 요청은 결재자를 지정해야 합니다.
-app/routers/gates.py::답변 대상 댓글이 삭제되어 승인할 수 없습니다.
+app/routers/gates.py::답변 대상 댓글이 삭제되어 승인할 수 없어요.
 app/routers/gates.py::대상 대화에 지정 결재자가 참여하고 있지 않습니다.
 app/routers/gates.py::만 허용합니다. voided/held/unhold 는 전용 엔드포인트(/void·/hold·/unhold)를 사용하세요.
 app/routers/gates.py::본인을 결재자로 지정할 수 없습니다.
@@ -364,7 +364,7 @@ app/routers/team_members.py::assignee는 별도입니다(update_story의 assigne
 app/routers/team_members.py::participation 미보장 — 이 org에 기본 participation role이 없어 게이트/verdict attribution이 안 잡힘(관리자 확인 필요)
 app/routers/team_members.py::먼저 조직에 초대해야 합니다
 app/routers/team_members.py::새 에이전트 합류:
-app/routers/team_members.py::을 생성했습니다.
+app/routers/team_members.py::을 생성했어요.
 app/routers/verdict_capture.py::GitHub webhook 서명 검증 실패
 app/routers/verdict_capture.py::JSON object 아님
 app/routers/verdict_capture.py::JSON 파싱 실패
@@ -372,11 +372,11 @@ app/routers/verdict_capture.py::X-GitHub-Delivery 헤더 없음
 app/routers/verdict_capture.py::story #2327 PO 판정 2026-07-30: close-on-merge 정지 — done은 사람 확認 後
 app/routers/verdict_capture.py::처리 중 오류(재시도 가능)
 app/routers/visual_artifacts.py::HTML export 업로드 실패
-app/routers/visual_artifacts.py::HTML export가 완료됐습니다.
+app/routers/visual_artifacts.py::HTML export가 완료됐어요.
 app/routers/visual_artifacts.py::ISO 8601 created_at, fetch after this time — 이전 페이지 meta.next_cursor 값 그대로(오래된순 정렬이라 forward-cursor)
 app/routers/visual_artifacts.py::ISO 8601 created_at, fetch before this time — 이전 페이지 meta.next_cursor 값 그대로
-app/routers/visual_artifacts.py::PNG export가 완료됐습니다.
-app/routers/visual_artifacts.py::artifact가 새 버전으로 갱신됐습니다.
+app/routers/visual_artifacts.py::PNG export가 완료됐어요.
+app/routers/visual_artifacts.py::artifact가 새 버전으로 갱신됐어요.
 app/routers/visual_artifacts.py::comma-separated artifact ids — 배치 앵커 조회(정확한 집합, ORDER BY/limit 무관, story #2262 PR② 칩 상태 배치조회)
 app/routers/visual_artifacts.py::delete op에는 id가 필요합니다
 app/routers/visual_artifacts.py::latest version not found — artifact 상태 비정상
@@ -386,7 +386,7 @@ app/routers/visual_artifacts.py::update 대상 node를 찾을 수 없습니다:
 app/routers/visual_artifacts.py::산출물 export:
 app/routers/visual_artifacts.py::산출물 수정됨:
 app/routers/visual_artifacts.py::새 산출물 생성됨:
-app/routers/visual_artifacts.py::새 시각 산출물이 생성됐습니다.
+app/routers/visual_artifacts.py::새 시각 산출물이 생성됐어요.
 app/routers/visual_artifacts.py::새 코멘트:
 app/routers/visual_artifacts.py::생성자만 삭제할 수 있습니다
 app/routers/visual_artifacts.py::업로드된 객체를 찾을 수 없습니다(head_object 실패)
@@ -458,10 +458,10 @@ app/services/approval_delivery.py::' 결재 결과:
 app/services/approval_delivery.py::' 결재 요청
 app/services/approval_delivery.py::' 결재 요청 (토스됨)
 app/services/approval_delivery.py::' 문서 결재 — 논의 요청\n사유:
-app/services/approval_delivery.py::' 문서 결재에 대해 논의를 요청받았습니다.
+app/services/approval_delivery.py::' 문서 결재에 대해 논의를 요청받았어요.
 app/services/approval_delivery.py::' 문서가 채팅에서 논의됐습니다 — 이 내용이 확정본이면 검토 요청을, 아직 고칠 게 있으면 편집을 진행해 주세요.
 app/services/approval_delivery.py::'가
-app/services/approval_delivery.py::draft 문서가 채팅에서 논의됐습니다
+app/services/approval_delivery.py::draft 문서가 채팅에서 논의됐어요
 app/services/approval_delivery.py::gate toss 카드 삽입 실패 — tossed_by 미확인 gate=
 app/services/approval_delivery.py::gate toss 카드 삽입 실패 — 대상 conversation 미확인 gate=
 app/services/approval_delivery.py::갱신
@@ -469,7 +469,7 @@ app/services/approval_delivery.py::결재 결과:
 app/services/approval_delivery.py::고쳐
 app/services/approval_delivery.py::고치
 app/services/approval_delivery.py::교체
-app/services/approval_delivery.py::됐습니다.
+app/services/approval_delivery.py::됐어요.
 app/services/approval_delivery.py::문서 결재 — 논의 요청
 app/services/approval_delivery.py::바꾸
 app/services/approval_delivery.py::바꿔
@@ -559,8 +559,8 @@ app/services/billing_scheduler.py::Sprintable 정기결제(갱신)
 app/services/billing_scheduler.py::WITH absolute_latest_grants AS (\n                    -- companion 유무와 무관하게, org별 «절대 최신» grant 정확히 1건을\n                    -- 먼저 확定(위 불변식 ⓐ 이전 단계 — superseded 판정의 유일한 축).\n                    SELECT DISTINCT ON (org_id) id, org_id, amount_minor, currency,\n                           metadata AS entry_metadata\n                    FROM billing_ledger_entries\n                    WHERE entry_type = 'credit_grant' AND metadata->>'kind' = 'tier_grant'\n                    ORDER BY org_id, ts DESC\n                )\n                SELECT lg.id, lg.org_id, lg.amount_minor, lg.currency, lg.entry_metadata\n                FROM absolute_latest_grants lg\n                WHERE NOT EXISTS (\n                    -- «그 특정 절대-최신 행 하나»에만 companion 유무를 검사(불변식 ⓐ).\n                    -- companion이 있으면 이 org는 이번 스윕에서 후보가 아예 없음(구\n                    -- grant로 되돌아가지 않는다 — superseded는 영구 제외).\n                    SELECT 1 FROM billing_ledger_entries r\n                    WHERE r.entry_type = 'adjustment'\n                      AND r.metadata->>'kind' = 'tier_grant_revert'\n                      AND r.metadata->>'reverted_entry_id' = lg.id::text\n                )
 app/services/blog_destinations.py::블로그 목적지는 아직 배선되지 않았습니다(wordpress=조각③b·webhook=조각④에서 배선 예정).
 app/services/campaigns.py::campaign을 찾을 수 없습니다:
-app/services/chain_escalation.py::)이 발생해 agent 발신이 일시 차단되었습니다. 이 알림의 «차단 해제»로 즉시 풀 수 있습니다.
-app/services/chain_escalation.py::)이 발생했습니다.
+app/services/chain_escalation.py::)이 발생해 agent 발신이 일시 차단됐어요. 이 알림의 «차단 해제»로 즉시 풀 수 있어요.
+app/services/chain_escalation.py::)이 발생했어요.
 app/services/chain_escalation.py::human 참가자가 없는 대화에서 최근
 app/services/chain_escalation.py::건(임계
 app/services/chain_escalation.py::무인간 대화 무감독 연쇄 감지
@@ -752,7 +752,7 @@ app/services/disposition_advisor.py::건) — 현 disposition(
 app/services/disposition_advisor.py::무정정 통과율
 app/services/disposition_advisor.py::통과율
 app/services/disposition_advisor.py::표본 부족 (verdicts=
-app/services/doc.py::' 문서가 결재 대기 중입니다.
+app/services/doc.py::' 문서가 결재 대기 중이에요.
 app/services/doc.py::confirmed 전이는 휴먼만 가능합니다.
 app/services/doc.py::결재 대기 문서는 Gate 승인/반려로만 전이됩니다.
 app/services/doc.py::문서 결재 요청
@@ -772,75 +772,75 @@ app/services/email.py::· 사업자등록번호
 app/services/email.py::경기도 고양시 일산동구 무궁화로 20-38, 5층 502호
 app/services/email.py::윤도선
 app/services/email.py::주식회사 뭉클랩
-app/services/email_copy.py::<b>{grace_date}</b>까지 결제가 완료되지 않으면 조직의 플랜이 자동으로 Free로 전환됩니다. Free로 전환되어도 <b>기존 데이터는 삭제되지 않으며</b>, 신규 업로드만 제한됩니다. 이후 결제를 완료하시면 즉시 원래 플랜({tier_display})으로 복귀합니다.
-app/services/email_copy.py::<p>안녕하세요, Sprintable입니다.</p><p>조직의 스토리지 사용량이 <b>{pct}%</b>({used_mb}MB / {cap_mb}MB)에 도달했습니다.</p><p>업로드 제한을 피하려면 사용하지 않는 파일을 정리하거나 플랜을 업그레이드해 주세요.</p>
-app/services/email_copy.py::<p>안녕하세요, Sprintable입니다.</p><p>조직의 이번 달 자동화 사용량(AU)이 <b>{pct}%</b>({current} / {au_limit} AU)에 도달했습니다.</p><p>100%에 도달하면 MCP/API 쓰기 및 자동화가 일시 중지됩니다(읽기와 사람 UI는 계속 사용 가능합니다). 한도에 도달하기 전 플랜 업그레이드를 검토해 주세요.</p>
-app/services/email_copy.py::<strong>{inviter_name}</strong>님이 <strong>{org_name}</strong> 조직에 <strong>{role}</strong>로 초대했습니다.
-app/services/email_copy.py::Sprintable — 가입 완료까지 몇 단계 남았습니다
-app/services/email_copy.py::Sprintable 가입을 환영합니다. 아직 에이전트 연결이나 첫 지시를 완료하지 않으셨네요 — 몇 분이면 끝나는 남은 단계를 마무리하면 Sprintable의 진짜 가치를 바로 확인하실 수 있습니다.
-app/services/email_copy.py::Sprintable 결제가 완료됐습니다
+app/services/email_copy.py::<b>{grace_date}</b>까지 결제가 완료되지 않으면 조직의 플랜이 자동으로 Free로 전환돼요. Free로 전환되어도 <b>기존 데이터는 삭제되지 않으며</b>, 신규 업로드만 제한돼요. 이후 결제를 완료하시면 즉시 원래 플랜({tier_display})으로 복귀해요.
+app/services/email_copy.py::<p>안녕하세요, Sprintable이에요.</p><p>조직의 스토리지 사용량이 <b>{pct}%</b>({used_mb}MB / {cap_mb}MB)에 도달했어요.</p><p>업로드 제한을 피하려면 사용하지 않는 파일을 정리하거나 플랜을 업그레이드해 주세요.</p>
+app/services/email_copy.py::<p>안녕하세요, Sprintable이에요.</p><p>조직의 이번 달 자동화 사용량(AU)이 <b>{pct}%</b>({current} / {au_limit} AU)에 도달했어요.</p><p>100%에 도달하면 MCP/API 쓰기 및 자동화가 일시 중지돼요(읽기와 사람 UI는 계속 사용 가능해요). 한도에 도달하기 전 플랜 업그레이드를 검토해 주세요.</p>
+app/services/email_copy.py::<strong>{inviter_name}</strong>님이 <strong>{org_name}</strong> 조직에 <strong>{role}</strong>로 초대했어요.
+app/services/email_copy.py::Sprintable — 가입 완료까지 몇 단계 남았어요
+app/services/email_copy.py::Sprintable 가입을 환영해요. 아직 에이전트 연결이나 첫 지시를 완료하지 않으셨네요 — 몇 분이면 끝나는 남은 단계를 마무리하면 Sprintable의 진짜 가치를 바로 확인하실 수 있어요.
+app/services/email_copy.py::Sprintable 결제가 완료됐어요
 app/services/email_copy.py::Sprintable 비밀번호 설정을 완료해 주세요
 app/services/email_copy.py::Sprintable 비밀번호 재설정 안내
 app/services/email_copy.py::Sprintable 이메일 인증을 완료해 주세요
-app/services/email_copy.py::Sprintable에 가입해 주셔서 감사합니다.
-app/services/email_copy.py::[Sprintable] {org_name} 조직에 초대됐습니다
-app/services/email_copy.py::[Sprintable] {tier} 플랜으로 변경이 예약됐습니다
-app/services/email_copy.py::[Sprintable] {tier} 플랜으로 전환이 완료됐습니다
-app/services/email_copy.py::[Sprintable] 결제가 처리되지 않았습니다 — 확인해 주세요
-app/services/email_copy.py::[Sprintable] 구독 해지가 예약됐습니다
-app/services/email_copy.py::[Sprintable] 구독이 해지되어 Free 플랜으로 전환됐습니다
+app/services/email_copy.py::Sprintable에 가입해 주셔서 감사해요.
+app/services/email_copy.py::[Sprintable] {org_name} 조직에 초대됐어요
+app/services/email_copy.py::[Sprintable] {tier} 플랜으로 변경이 예약됐어요
+app/services/email_copy.py::[Sprintable] {tier} 플랜으로 전환이 완료됐어요
+app/services/email_copy.py::[Sprintable] 결제가 처리되지 않았어요 — 확인해 주세요
+app/services/email_copy.py::[Sprintable] 구독 해지가 예약됐어요
+app/services/email_copy.py::[Sprintable] 구독이 해지되어 Free 플랜으로 전환됐어요
 app/services/email_copy.py::[Sprintable] 스토리지 사용량 {pct}% 도달
-app/services/email_copy.py::[Sprintable] 예약된 하향 전환이 취소되었습니다 — 좌석 한도 초과
+app/services/email_copy.py::[Sprintable] 예약된 하향 전환이 취소됐어요 — 좌석 한도 초과
 app/services/email_copy.py::[Sprintable] 자동화 사용량(AU) {pct}% 도달
-app/services/email_copy.py::{apply_date}까지는 현재 플랜을 그대로 이용하실 수 있고, 그 이후 Free 플랜으로 전환됩니다.
-app/services/email_copy.py::{apply_date}부터 {tier} 플랜으로 전환됩니다.
+app/services/email_copy.py::{apply_date}까지는 현재 플랜을 그대로 이용하실 수 있고, 그 이후 Free 플랜으로 전환돼요.
+app/services/email_copy.py::{apply_date}부터 {tier} 플랜으로 전환돼요.
 app/services/email_copy.py::결제 금액: {amount}
 app/services/email_copy.py::결제 정보 확인하러 가기
-app/services/email_copy.py::결제가 정상적으로 완료됐습니다.
-app/services/email_copy.py::구독 해지가 예약됐습니다.
-app/services/email_copy.py::기존 데이터는 삭제되지 않고 그대로 보존되며, 변경된 플랜 한도 내에서 계속 이용하실 수 있습니다.
-app/services/email_copy.py::기존 데이터와 콘텐츠는 삭제되지 않고 그대로 보존됩니다 — 언제든 다시 업그레이드해 이어서 이용하실 수 있습니다.
-app/services/email_copy.py::기존 멤버는 제거되지 않았습니다. 팀 규모를 줄이거나 현재 플랜을 유지하신 뒤, 하향 전환이 여전히 필요하시면 다시 예약해 주세요.
+app/services/email_copy.py::결제가 정상적으로 완료됐어요.
+app/services/email_copy.py::구독 해지가 예약됐어요.
+app/services/email_copy.py::기존 데이터는 삭제되지 않고 그대로 보존되며, 변경된 플랜 한도 내에서 계속 이용하실 수 있어요.
+app/services/email_copy.py::기존 데이터와 콘텐츠는 삭제되지 않고 그대로 보존돼요 — 언제든 다시 업그레이드해 이어서 이용하실 수 있어요.
+app/services/email_copy.py::기존 멤버는 제거되지 않았어요. 팀 규모를 줄이거나 현재 플랜을 유지하신 뒤, 하향 전환이 여전히 필요하시면 다시 예약해 주세요.
 app/services/email_copy.py::문의사항이 있으시면 언제든 회신해 주세요.
 app/services/email_copy.py::버튼이 보이지 않으면 아래 주소를 브라우저에 붙여 넣으세요:
 app/services/email_copy.py::버튼이 열리지 않으면 아래 주소를 브라우저에 붙여넣어 주세요:
-app/services/email_copy.py::본인이 결제하지 않으셨다면 Sprintable에 로그인해 결제 내역을 확인해 주세요. 이 메일은 발신 전용입니다.
+app/services/email_copy.py::본인이 결제하지 않으셨다면 Sprintable에 로그인해 결제 내역을 확인해 주세요. 이 메일은 발신 전용이에요.
 app/services/email_copy.py::본인이 결제하지 않으셨다면 Sprintable에 로그인해 화면 하단의 지원 채팅으로 즉시 문의해 주세요.
-app/services/email_copy.py::본인이 요청하지 않으셨다면 Sprintable에 로그인해 구독 설정을 확인해 주세요. 이 메일은 발신 전용입니다.
-app/services/email_copy.py::본인이 요청하지 않으셨다면 Sprintable에 로그인해 플랜 설정을 확인해 주세요. 이 메일은 발신 전용입니다.
+app/services/email_copy.py::본인이 요청하지 않으셨다면 Sprintable에 로그인해 구독 설정을 확인해 주세요. 이 메일은 발신 전용이에요.
+app/services/email_copy.py::본인이 요청하지 않으셨다면 Sprintable에 로그인해 플랜 설정을 확인해 주세요. 이 메일은 발신 전용이에요.
 app/services/email_copy.py::본인이 요청하지 않으셨다면 Sprintable에 로그인해 화면 하단의 지원 채팅으로 즉시 문의해 주세요.
-app/services/email_copy.py::본인이 요청하지 않으셨다면 이 메일을 무시하셔도 됩니다 — 비밀번호는 변경되지 않습니다.
-app/services/email_copy.py::본인이 요청하지 않으셨다면 이 메일을 무시하셔도 됩니다 — 비밀번호는 설정되지 않습니다.
-app/services/email_copy.py::본인이 요청한 가입이 아니라면 이 메일을 무시하셔도 됩니다.
+app/services/email_copy.py::본인이 요청하지 않으셨다면 이 메일을 무시하셔도 돼요 — 비밀번호는 변경되지 않아요.
+app/services/email_copy.py::본인이 요청하지 않으셨다면 이 메일을 무시하셔도 돼요 — 비밀번호는 설정되지 않아요.
+app/services/email_copy.py::본인이 요청한 가입이 아니라면 이 메일을 무시하셔도 돼요.
 app/services/email_copy.py::비밀번호 설정 완료
-app/services/email_copy.py::비밀번호 설정을 요청하셨습니다.
+app/services/email_copy.py::비밀번호 설정을 요청하셨어요.
 app/services/email_copy.py::비밀번호 재설정
-app/services/email_copy.py::비밀번호 재설정을 요청하셨습니다.
+app/services/email_copy.py::비밀번호 재설정을 요청하셨어요.
 app/services/email_copy.py::아래 버튼을 눌러 새 비밀번호를 설정해 주세요.
 app/services/email_copy.py::아래 버튼을 눌러 설정을 완료해 주세요.
-app/services/email_copy.py::아래 버튼을 눌러 이메일 인증을 완료하시면 바로 시작하실 수 있습니다.
-app/services/email_copy.py::아래 버튼을 클릭하면 초대를 수락할 수 있습니다. 링크는 7일간 유효합니다.
-app/services/email_copy.py::안녕하세요, Sprintable입니다.
+app/services/email_copy.py::아래 버튼을 눌러 이메일 인증을 완료하시면 바로 시작하실 수 있어요.
+app/services/email_copy.py::아래 버튼을 클릭하면 초대를 수락할 수 있어요. 링크는 7일간 유효해요.
+app/services/email_copy.py::안녕하세요, Sprintable이에요.
 app/services/email_copy.py::영수증 보기
-app/services/email_copy.py::영수증은 결제사(Toss)가 제공하며, 이 링크로 언제든 다시 확인하실 수 있습니다.
+app/services/email_copy.py::영수증은 결제사(Toss)가 제공하며, 이 링크로 언제든 다시 확인하실 수 있어요.
 app/services/email_copy.py::예약 확인·철회하기
-app/services/email_copy.py::예약하신 {tier} 플랜으로 전환이 완료됐습니다.
-app/services/email_copy.py::예약하신 {tier} 플랜으로의 하향 전환이 자동으로 취소되었습니다. 현재 조직 멤버가 {seat_count}명으로, 해당 플랜의 포함 좌석({included_seats}석)을 초과하기 때문입니다.
-app/services/email_copy.py::예약하신 구독 해지가 적용되어 Free 플랜으로 전환됐습니다.
-app/services/email_copy.py::이 링크는 15분 동안 유효합니다.
-app/services/email_copy.py::이 링크는 24시간 동안 유효합니다.
-app/services/email_copy.py::이 링크는 30분 동안 유효합니다.
-app/services/email_copy.py::이 이메일은 초대 발송으로 자동 생성되었습니다.
+app/services/email_copy.py::예약하신 {tier} 플랜으로 전환이 완료됐어요.
+app/services/email_copy.py::예약하신 {tier} 플랜으로의 하향 전환이 자동으로 취소됐어요. 현재 조직 멤버가 {seat_count}명으로, 해당 플랜의 포함 좌석({included_seats}석)을 초과하기 때문이에요.
+app/services/email_copy.py::예약하신 구독 해지가 적용되어 Free 플랜으로 전환됐어요.
+app/services/email_copy.py::이 링크는 15분 동안 유효해요.
+app/services/email_copy.py::이 링크는 24시간 동안 유효해요.
+app/services/email_copy.py::이 링크는 30분 동안 유효해요.
+app/services/email_copy.py::이 이메일은 초대 발송으로 자동 생성됐어요.
 app/services/email_copy.py::이런 안내를 더 이상 받고 싶지 않다면 여기를 눌러 주세요
 app/services/email_copy.py::이메일 인증하기
 app/services/email_copy.py::이어서 진행하기
-app/services/email_copy.py::적용 전까지 언제든 예약을 철회하고 구독을 유지하실 수 있습니다.
-app/services/email_copy.py::적용 전까지 언제든 예약을 철회하고 현재 플랜을 유지하실 수 있습니다.
-app/services/email_copy.py::정기결제 시도가 처리되지 않았습니다. 저희 쪽에서 매일 자동으로 재시도하고 있으니, 등록하신 카드 정보를 확인해 주시면 감사하겠습니다.
+app/services/email_copy.py::적용 전까지 언제든 예약을 철회하고 구독을 유지하실 수 있어요.
+app/services/email_copy.py::적용 전까지 언제든 예약을 철회하고 현재 플랜을 유지하실 수 있어요.
+app/services/email_copy.py::정기결제 시도가 처리되지 않았어요. 저희 쪽에서 매일 자동으로 재시도하고 있으니, 등록하신 카드 정보를 확인해 주시면 감사하겠어요.
 app/services/email_copy.py::초대 수락하기
 app/services/email_copy.py::팀 관리자
 app/services/email_copy.py::팀에 초대됐어요!
-app/services/email_copy.py::플랜 변경이 예약됐습니다.
+app/services/email_copy.py::플랜 변경이 예약됐어요.
 app/services/embedding_backlog.py::(반복 실패
 app/services/embedding_backlog.py::embed_text 반복 실패(
 app/services/embedding_backlog.py::회 연속 — 재시도 중단)
@@ -973,13 +973,13 @@ app/services/gate_service.py::void 사유(reason)는 필수입니다.
 app/services/gate_service.py::→ held. pending 게이트만 보류 가능.
 app/services/gate_service.py::→ pending. 보류(held) 게이트만 재개 가능.
 app/services/gate_service.py::→ voided. pending 게이트만 무효화 가능.
-app/services/gate_service.py::게이트가 강제 결정되었습니다
+app/services/gate_service.py::게이트가 강제 결정됐어요
 app/services/gate_service.py::게이트가 승인/거부를 기다리고 있어요.
 app/services/gate_service.py::게이트가 재제출되어 다시 승인/거부를 기다리고 있어요.
 app/services/gate_service.py::결재 대기 중인 게이트가 있어요
 app/services/gate_service.py::논의 요청 불가: 게이트가
 app/services/gate_service.py::논의 요청 사유(reason)는 필수입니다.
-app/services/gate_service.py::로 강제 결정했습니다:
+app/services/gate_service.py::로 강제 결정했어요:
 app/services/gate_service.py::반려(변경 요청) 사유(note) 입력이 필수입니다.
 app/services/gate_service.py::본인이 해소한 게이트만 취소할 수 있습니다.
 app/services/gate_service.py::분)이 지났습니다.
@@ -988,7 +988,7 @@ app/services/gate_service.py::상태입니다 (pending만 가능).
 app/services/gate_service.py::상태입니다 (승인/반려된 게이트만 취소 가능).
 app/services/gate_service.py::예약 명령 미생성(draft 해석 실패)
 app/services/gate_service.py::예약 명령 미생성(승인된 목적지와 초안의 현재 목적지 불일치)
-app/services/gate_service.py::이(가) 정본으로 확정됐습니다.
+app/services/gate_service.py::이(가) 정본으로 확정됐어요.
 app/services/gate_service.py::정본 확정:
 app/services/gate_service.py::취소 불가: 게이트가
 app/services/gate_service.py::취소 창(
@@ -1271,10 +1271,10 @@ app/services/workflow_line_status.py::라인 도입 전/off 전이(grandfathered
 app/services/workflow_line_status.py::전이는 진행됨 · 라인 관측만 실패(재시도 불필요)
 app/services/workflow_parallel_approval.py::old_approver_id 에 해당하는 pending 결재자가 없습니다.
 app/services/workflow_parallel_approval.py::게이트 결재 요청
-app/services/workflow_parallel_approval.py::결재가 대기 중입니다.
+app/services/workflow_parallel_approval.py::결재가 대기 중이에요.
 app/services/workflow_parallel_approval.py::결재자가 여러 명입니다 — old_approver_id 를 지정하세요.
 app/services/workflow_parallel_approval.py::결재자로 재지정됨
-app/services/workflow_parallel_approval.py::관리자가 당신을 이 결재의 새 결재자로 지정했습니다.
+app/services/workflow_parallel_approval.py::관리자가 나를 이 결재의 새 결재자로 지정했어요.
 app/services/workflow_parallel_approval.py::새 결재자가 SoD 당사자(요청자/구현자/최초결재자)와 동일 — 자기승인 우회 금지.
 app/services/workflow_parallel_approval.py::새 결재자가 이 org 의 멤버가 아닙니다.
 app/services/workflow_parallel_approval.py::새 결재자가 해당 프로젝트 접근권이 없습니다.

@@ -36,8 +36,8 @@ async def _require_human(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID)
         raise HTTPException(
             status_code=403,
             detail=human_error(
-                "COMMENT_REPLY_HUMAN_ONLY", "이 액션은 휴먼 멤버만 가능합니다.",
-                user_message="이 액션은 휴먼 멤버만 가능합니다.",
+                "COMMENT_REPLY_HUMAN_ONLY", "이 액션은 휴먼 멤버만 가능해요.",
+                user_message="이 액션은 휴먼 멤버만 가능해요.",
             ),
         )
     return resolved
@@ -215,8 +215,8 @@ async def create_comment_reply_draft_endpoint(
         raise HTTPException(
             status_code=409,
             detail=human_error(
-                "COMMENT_REPLY_DRAFT_ALREADY_OPEN", "안 보낸 초안이 이미 있습니다.",
-                user_message="안 보낸 초안이 이미 있습니다.",
+                "COMMENT_REPLY_DRAFT_ALREADY_OPEN", "안 보낸 초안이 이미 있어요.",
+                user_message="안 보낸 초안이 이미 있어요.",
                 existing_reply_id=str(exc.existing_reply_id),
             ),
         ) from exc
@@ -261,16 +261,16 @@ async def submit_comment_reply_endpoint(
         raise HTTPException(
             status_code=409,
             detail=human_error(
-                "COMMENT_REPLY_TARGET_DELETED", "답변 대상 댓글이 삭제되어 상신할 수 없습니다.",
-                user_message="답변 대상 댓글이 삭제되어 상신할 수 없습니다.",
+                "COMMENT_REPLY_TARGET_DELETED", "답변 대상 댓글이 삭제되어 상신할 수 없어요.",
+                user_message="답변 대상 댓글이 삭제되어 상신할 수 없어요.",
             ),
         ) from exc
     except CommentReplyChannelUnsupportedError as exc:
         raise HTTPException(
             status_code=422,
             detail=human_error(
-                "COMMENT_REPLY_CHANNEL_UNSUPPORTED", "이 채널은 답변 발송을 지원하지 않습니다.",
-                user_message="이 채널은 답변 발송을 지원하지 않습니다.",
+                "COMMENT_REPLY_CHANNEL_UNSUPPORTED", "이 채널은 답변 발송을 지원하지 않아요.",
+                user_message="이 채널은 답변 발송을 지원하지 않아요.",
             ),
         ) from exc
     except CommentNotFoundError as exc:
