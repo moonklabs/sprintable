@@ -56,6 +56,23 @@ describe('scanRoleSlugs — story #3894 셀프테스트', () => {
     expect(refs[0]!.slug).toBe('owner');
   });
 
+  // story #3906 — member 슬러그 자체가 실제로 잡히는지(양성대조).
+  it('⭐양성대조 — member 슬러그도 잡힌다(#3906)', () => {
+    const fixture = { content: { someKey: 'member만 볼 수 있어요.' } };
+    const refs = scanRoleSlugs(fixture);
+    expect(refs).toHaveLength(1);
+    expect(refs[0]!.slug).toBe('member');
+  });
+
+  // story #3906 — recruiter 네임스페이스 신규 편입.
+  it('⭐recruiter 네임스페이스도 스캔한다(#3906 착지 뒤 승격) — member → RED', () => {
+    const fixture = { recruiter: { deployedMember: 'member' } };
+    const refs = scanRoleSlugs(fixture);
+    expect(refs).toHaveLength(1);
+    expect(refs[0]!.key).toBe('recruiter.deployedMember');
+    expect(refs[0]!.slug).toBe('member');
+  });
+
   it('음성대조 — 대상 밖 네임스페이스(docs 등)의 owner/admin은 스캔 안 함', () => {
     const fixture = { docs: { someKey: 'owner 권한이 필요한 작업입니다' } };
     expect(scanRoleSlugs(fixture)).toEqual([]);
@@ -86,12 +103,13 @@ describe('computeViolations — ALLOWLIST(placeholder 예시 슬러그)', () => 
 });
 
 describe('TARGET_NAMESPACES — 스코프 고정', () => {
-  it('대상은 정확히 content·organization·pricingPlans·contentRules·settings 5개(#4295 뒤 settings 승격)', () => {
+  it('대상은 정확히 content·organization·pricingPlans·contentRules·settings·recruiter 6개(#3906 뒤 recruiter 승격)', () => {
     expect([...TARGET_NAMESPACES].sort()).toEqual([
       'content',
       'contentRules',
       'organization',
       'pricingPlans',
+      'recruiter',
       'settings',
     ]);
   });
@@ -128,5 +146,32 @@ describe('scanRoleSlugs — story #3894(실 트리 실행)', () => {
     };
     const violations = computeViolations(scanRoleSlugs(mutated), ALLOWLIST);
     expect(violations.some((r) => r.key === 'content.unpublishDisabledReason')).toBe(true);
+  });
+
+  // story #3906 — 이 카드가 고친 실 자리(recruiter.deployedMember)를 원래(합니다체 아닌,
+  // 어조 가드 밖이었던 그 자체) "member"로 되돌리면 이 가드가 실제로 잡는지 실 ko.json으로
+  // 직접 확認(양성대조, 이 카드의 핵심 계약).
+  it('⭐실 파일 뮤테이션 — recruiter.deployedMember를 "member"로 되돌리면 RED(#3906 핵심)', () => {
+    const koJson = loadKoJson(KO_JSON_PATH);
+    const recruiterNs = koJson.recruiter as Record<string, unknown>;
+    expect(recruiterNs.deployedMember).toBe('구성원');
+    const mutated = { ...koJson, recruiter: { ...recruiterNs, deployedMember: 'member' } };
+    const violations = computeViolations(scanRoleSlugs(mutated), ALLOWLIST);
+    expect(violations.some((r) => r.key === 'recruiter.deployedMember' && r.slug === 'member')).toBe(true);
+  });
+
+  it('실 파일 뮤테이션 — recruiter.roleGuide를 admin 영문으로 되돌리면 RED', () => {
+    const koJson = loadKoJson(KO_JSON_PATH);
+    const recruiterNs = koJson.recruiter as Record<string, unknown>;
+    expect(recruiterNs.roleGuide).not.toMatch(/\badmin\b/);
+    const mutated = {
+      ...koJson,
+      recruiter: {
+        ...recruiterNs,
+        roleGuide: '직무 카드의 도구 칩은 그 직무가 받을 기본 권한 미리보기예요. admin·삭제 계열은 기본 미포함이에요.',
+      },
+    };
+    const violations = computeViolations(scanRoleSlugs(mutated), ALLOWLIST);
+    expect(violations.some((r) => r.key === 'recruiter.roleGuide' && r.slug === 'admin')).toBe(true);
   });
 });
