@@ -211,7 +211,7 @@ describe('FlowEpicNodes — clicking the past-bundle card expands it (실제 fet
     expect(container.textContent).not.toContain('안에서 이어진 것');
   });
 
-  it('collapses back when the expanded card is clicked again (다시 누르면 접힙니다)', async () => {
+  it('collapses back when the expanded card is clicked again (다시 누르면 접혀요)', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes('/api/analytics/epic-flow-nodes')) {
@@ -240,7 +240,7 @@ describe('FlowEpicNodes — clicking the past-bundle card expands it (실제 fet
     await act(async () => { bundleButton()?.dispatchEvent(new MouseEvent('click', { bubbles: true })); await new Promise((r) => setTimeout(r, 0)); });
     expect(container.textContent).toContain('Past Story');
 
-    const collapseButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('다시 누르면 접힙니다'));
+    const collapseButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('다시 누르면 접혀요'));
     expect(collapseButton).not.toBeUndefined();
     await act(async () => { collapseButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); await new Promise((r) => setTimeout(r, 0)); });
 

@@ -161,7 +161,9 @@ export const SCOPED_KEYS = [
 // 신뢰) — chats와 동형 전량 승격.
 // story #3892 — settings(조직·프로젝트·알림·결제 설정)도 전량 해요체 이관 완료(잔존 0,
 // 실 함수로 head 재측 170건 = PO 실측과 일치 — 3889 교훈 그대로 코드 0 재확認).
-export const SCOPED_NAMESPACES = ['chats', 'content', 'channelConnect', 'settings'] as const;
+// story #3895 — agents(에이전트 관리)·flow(플로우/일감 보드)·gateConfig(게이트 설정)도
+// 전량 해요체 이관 완료(잔존 0, 실 함수로 head 재측 128건=62+61+5 = PO 실측과 일치).
+export const SCOPED_NAMESPACES = ['chats', 'content', 'channelConnect', 'settings', 'agents', 'flow', 'gateConfig'] as const;
 
 function flattenNamespaceLeafKeys(root: Record<string, unknown>, namespace: string): string[] {
   const nsRoot = root[namespace];
@@ -205,6 +207,9 @@ const SCOPED_NAMESPACE_MIN_LEAF_COUNT: Readonly<Record<(typeof SCOPED_NAMESPACES
   content: 500, // 실측 584개(2026-09-14, story #3889 그라운딩) — 여유 하한
   channelConnect: 150, // 실측 174개(2026-09-14, story #3889 그라운딩) — 여유 하한
   settings: 450, // 실측 538개(2026-09-14, story #3892 그라운딩) — 여유 하한
+  agents: 150, // 실측 191개(2026-09-15, story #3895 그라운딩) — 여유 하한
+  flow: 160, // 실측 202개(2026-09-15, story #3895 그라운딩) — 여유 하한
+  gateConfig: 15, // 실측 20개(2026-09-15, story #3895 그라운딩) — 여유 하한
 };
 
 /** SCOPED_NAMESPACES 각각의 실제 leaf 개수가 하한을 밑도는지 검사하는 순수 함수 —
