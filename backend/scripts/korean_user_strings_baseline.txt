@@ -158,7 +158,7 @@ app/routers/content_rules.py::콘텐츠 규칙 편집은 조직 owner·admin만 
 app/routers/context_pack.py::임베딩 서비스를 사용할 수 없습니다. 잠시 후 다시 시도하세요.
 app/routers/context_pack.py::해당 프로젝트 접근 권한이 없습니다
 app/routers/conversations.py::님의 새 메시지
-app/routers/conversations.py::님이 회원님을 멘션했습니다
+app/routers/conversations.py::님이 나를 멘션했어요
 app/routers/conversations.py::서킷브레이커 해제는 org owner/admin만 가능합니다.
 app/routers/conversations.py::폭주 감지로 이 대화의 agent 발신이 일시 차단되었습니다 — org owner/admin의 해제 또는 자동 해소를 기다려주세요.
 app/routers/conversations.py::현재 보고 있는 프로젝트(제외 대상)
@@ -974,9 +974,9 @@ app/services/gate_service.py::→ held. pending 게이트만 보류 가능.
 app/services/gate_service.py::→ pending. 보류(held) 게이트만 재개 가능.
 app/services/gate_service.py::→ voided. pending 게이트만 무효화 가능.
 app/services/gate_service.py::게이트가 강제 결정되었습니다
-app/services/gate_service.py::게이트가 승인/거부를 기다리고 있습니다.
-app/services/gate_service.py::게이트가 재제출되어 다시 승인/거부를 기다리고 있습니다.
-app/services/gate_service.py::결재 대기 중인 게이트가 있습니다
+app/services/gate_service.py::게이트가 승인/거부를 기다리고 있어요.
+app/services/gate_service.py::게이트가 재제출되어 다시 승인/거부를 기다리고 있어요.
+app/services/gate_service.py::결재 대기 중인 게이트가 있어요
 app/services/gate_service.py::논의 요청 불가: 게이트가
 app/services/gate_service.py::논의 요청 사유(reason)는 필수입니다.
 app/services/gate_service.py::로 강제 결정했습니다:

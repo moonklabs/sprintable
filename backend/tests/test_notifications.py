@@ -22,6 +22,7 @@ def _mock_notification(is_read: bool = False) -> MagicMock:
     n.is_read = is_read
     n.reference_type = None
     n.reference_id = None
+    n.event = None  # story #3903(migration 0378, additive) — MagicMock 기본값은 mock 객체라 pydantic dict|None 검증 실패
     n.created_at = datetime(2026, 4, 30, tzinfo=timezone.utc)
     return n
 
