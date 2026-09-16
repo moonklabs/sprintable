@@ -449,6 +449,59 @@ async def _resolve_usage(session: AsyncSession, org_id: uuid.UUID) -> dict[str, 
     return {"platform": platform_items, "ad_spend": {"measured": False}}
 
 
+async def _resolve_today_results(
+    session: AsyncSession, org_id: uuid.UUID, tz: str,
+) -> dict[str, Any]:
+    """story #3959(3954 그라운딩 doc 처방 그대로) — 「오늘 결과」 집계 3(4번째
+    read-model). 전부 org_midnight_utc(tz) 경계·집계 쿼리 1개씩(루프 0, N+1 0).
+
+    landed_today: story_activities(activity_type="status_changed", new_value="done")
+    실측 카운트. 이 행은 story_status_events.py::emit_story_status_changed()가
+    ``if actor_id:`` 조건에서만 남긴다 — board PATCH·gate-merge-approve 두 실
+    경로 다 actor_id를 갖고 호출하므로, actor 없는 자동 전이는 구조적으로 이
+    카운트에 안 잡힌다(근사 0 — PO 確認 2026-09-16, 배제 자체가 계약이라
+    approx 플래그를 두지 않는다. 이 배제를 테스트로 고정한다).
+
+    qa_passed_today: gates.status="approved" AND resolved_at 실측 —
+    gate_service.py가 상태 전이 시 ``datetime.now(utc)``로 정확히 세팅해
+    근사가 불요하다.
+
+    open_defects: verdict(source="qa", result="fail") 테이블은 스키마는 있으나
+    이를 채우는 유일한 통로 POST /capture-review(verdict_capture.py)의 실
+    호출처가 레포 전체 0(cron·webhook·스크립트 없음, 테스트만 참조) — 지금
+    count를 내면 실제 결함이 있어도 거짓 0이 나온다. PO 確定(2026-09-16):
+    measured=False 고정·count=None(usage.ad_spend와 동일 관례, 가짜 0 금지).
+    """
+    from app.models.gate import Gate
+    from app.models.pm import StoryActivity
+
+    since = org_midnight_utc(tz)
+
+    landed_today_count = await session.scalar(
+        select(func.count(StoryActivity.id)).where(
+            StoryActivity.org_id == org_id,
+            StoryActivity.activity_type == "status_changed",
+            StoryActivity.new_value == "done",
+            StoryActivity.created_at >= since,
+        )
+    )
+
+    qa_passed_today_count = await session.scalar(
+        select(func.count(Gate.id)).where(
+            Gate.org_id == org_id,
+            Gate.status == "approved",
+            Gate.resolved_at.isnot(None),
+            Gate.resolved_at >= since,
+        )
+    )
+
+    return {
+        "landed_today": {"count": landed_today_count or 0, "since": since},
+        "qa_passed_today": {"count": qa_passed_today_count or 0, "since": since},
+        "open_defects": {"count": None, "measured": False},
+    }
+
+
 async def build_today_snapshot(
     session: AsyncSession, *, org_id: uuid.UUID, auth: AuthContext, tz: str,
 ) -> dict[str, Any]:
@@ -457,6 +510,7 @@ async def build_today_snapshot(
     completed_today = await _resolve_completed_today(session, org_id, auth, tz)
     published_today = await _resolve_published_today(session, org_id, tz)
     usage = await _resolve_usage(session, org_id)
+    today_results = await _resolve_today_results(session, org_id, tz)
     return {
         "needs_me": needs_me,
         "needs_me_count": needs_me_count,
@@ -464,4 +518,5 @@ async def build_today_snapshot(
         "completed_today": completed_today,
         "published_today": published_today,
         "usage": usage,
+        **today_results,
     }
