@@ -491,6 +491,14 @@ steps:
     waitFor: ['-']
 
   # ─── Frontend (Next.js standalone) ────────────────────────────────────────
+  # story #3947(2026-09-16, 페드루 PO 판정) — `_NEXT_PUBLIC_APP_URL`은 cloud-build.yml의
+  # steps.env가 dev/prod로 이미 정확히 분기해 SUBST로 넘기지만(163행 주석·이 파일 167행
+  # 기본값 참고), 정작 이 docker build 스텝의 --build-arg 목록에 없었다 — 다른
+  # NEXT_PUBLIC_* 값들과 동형 「분기는 있는데 이 스테이지까지 안 옴」 클래스(EE_ENABLED
+  # #2728·TOSS_CLIENT_KEY #2758 선례). Next.js는 NEXT_PUBLIC_*를 빌드 시점에 리터럴로
+  # 인라인하므로(apps/web/src/lib/public-app-host.ts) 런타임 --update-env-vars(694·780행)
+  # 만으로는 client 번들에 절대 안 반영된다 — dev-app이 코드 하드코딩 localhost:3108
+  # fallback을 그대로 보여준 근본 원인.
   - id: build-frontend
     name: gcr.io/cloud-builders/docker
     args:
@@ -518,6 +526,15 @@ steps:
       - NEXT_PUBLIC_SUPPORT_GATEWAY_URL=${_NEXT_PUBLIC_SUPPORT_GATEWAY_URL}
       - --build-arg
       - NEXT_PUBLIC_TOSS_CLIENT_KEY=${_TOSS_CLIENT_KEY}
+      - --build-arg
+      - NEXT_PUBLIC_APP_URL=${_NEXT_PUBLIC_APP_URL}
+      # story #3947 CHANGES(페드루 PO, 카디르 재현) — next.config.ts의 배포 빌드 가드가
+      # 처음엔 NODE_ENV=production으로 켜졌는데 `next build`는 CI 검증·로컬 smoke
+      # test에서도 항상 이 값을 강제해 무관 빌드까지 죽일 뻔했다(ci.yml Build 잡·
+      # docker-smoke-test.yml 둘 다 이 값을 안 줌). 이 마커는 **이 Cloud Build 배포
+      # 빌드에서만** 심는다 — "진짜 배포 빌드인가"를 NODE_ENV와 분리.
+      - --build-arg
+      - SPRINTABLE_DEPLOY_BUILD=1
       - .
     env:
       - DOCKER_BUILDKIT=1
