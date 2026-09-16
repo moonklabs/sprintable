@@ -218,7 +218,7 @@ export default function ConversationPage() {
   if (!currentTeamMemberId) {
     return (
       <div className="flex h-64 items-center justify-center">
-        <p className="text-sm text-muted-foreground">로딩 중…</p>
+        <p className="text-sm text-muted-foreground">{tc('loading')}</p>
       </div>
     );
   }
@@ -226,7 +226,7 @@ export default function ConversationPage() {
   // story #3776(1층B) — "대화"(폴백 제목), chats ns의 기존 title 키 재사용.
   const headerTitle = meta
     ? formatHeaderTitle(meta, currentTeamMemberId, t, tc)
-    : (meta === null ? t('title') : '로딩 중…');
+    : (meta === null ? t('title') : tc('loading'));
 
   // story #2968 — 리스트(chat-list-view.tsx)와 동일 원칙: 1:1(DM)만 상대가 특정되므로
   // avatar.tsx 정본으로 실사진을 보여준다. group은 다인원이라 대표 사진이 없어 미표시 유지.
@@ -297,7 +297,7 @@ export default function ConversationPage() {
                   else if (e.key === 'Escape') setEditingTitle(false);
                 }}
                 onBlur={() => void handleSaveTitle()}
-                aria-label="방 이름 편집"
+                aria-label={t('editRoomName')}
                 className="min-w-0 rounded border border-border bg-background px-1.5 py-0.5 text-sm font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
               />
             ) : meta?.type === 'group' ? (
@@ -305,7 +305,7 @@ export default function ConversationPage() {
                 type="button"
                 onClick={() => { setTitleDraft(meta.title ?? ''); setEditingTitle(true); }}
                 className="group/title flex min-w-0 items-center gap-1"
-                aria-label="방 이름 편집"
+                aria-label={t('editRoomName')}
               >
                 {/* story #2969 §1.3-b(doc proofline-system-layer-2969, PR-5) — 헤더 상대명/
                     방이름=Claim(600)로 재분류(리스트 대화명과 동일 처방, 구조·크기 불변). */}
@@ -325,12 +325,12 @@ export default function ConversationPage() {
                 type="button"
                 onClick={() => void handleToggleMute()}
                 className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition hover:bg-muted hover:text-foreground"
-                title={meta.muted ? '알림 켜기' : '알림 끄기'}
-                aria-label={meta.muted ? '알림 켜기' : '알림 끄기'}
+                title={meta.muted ? t('unmuteNotifications') : t('muteNotifications')}
+                aria-label={meta.muted ? t('unmuteNotifications') : t('muteNotifications')}
                 aria-pressed={meta.muted}
               >
                 {meta.muted ? <BellOff className="h-3.5 w-3.5" /> : <Bell className="h-3.5 w-3.5" />}
-                {meta.muted ? <span className="hidden sm:inline">알림 꺼짐</span> : null}
+                {meta.muted ? <span className="hidden sm:inline">{t('notificationsMuted')}</span> : null}
               </button>
               <button
                 type="button"

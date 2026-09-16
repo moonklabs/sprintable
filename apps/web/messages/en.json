@@ -35,6 +35,8 @@
     "saving": "Saving…",
     "deleting": "Deleting…",
     "creating": "Creating…",
+    "aiUpcomingDraft": "Draft coming up",
+    "aiUpcomingSynthesis": "Synthesis coming up",
     "adding": "Adding…",
     "loadMore": "Load more",
     "error": "An error occurred",
@@ -1117,7 +1119,26 @@
       "blockingLabel": "Blocking",
       "dependsOnLabel": "Depends on",
       "dependedByLabel": "Depended by"
-    }
+    },
+    "storyDeleteFailed": "Failed to delete the story.",
+    "assigneeChangeFailed": "Failed to change the assignee.",
+    "markdownPlaceholder": "Write in Markdown…",
+    "attachmentFileFallback": "Attachment",
+    "attachmentDelete": "Remove attachment",
+    "attachmentUploadFailed": "Attachment upload failed. Please try again.",
+    "noLabel": "No labels",
+    "newLabelNamePlaceholder": "New label name",
+    "createLabel": "Create",
+    "collapseSection": "Collapse",
+    "expandSection": "Expand",
+    "storyDeleteConfirmTitle": "Delete this story?",
+    "storyDeleteIrreversible": "This action can't be undone. Tasks linked to this story will also be deleted.",
+    "permanentDelete": "Delete permanently",
+    "addGeneric": "+ Add",
+    "workflowExecuted": "Workflow executed",
+    "ruleMatched": "Rule matched",
+    "ruleNone": "No rule",
+    "entityCandidatesLabel": "Entity candidates"
   },
   "session": {
     "expiredTitle": "Your session expired",
@@ -1235,6 +1256,11 @@
     "returnButton": "Return to Sprintable app"
   },
   "onboarding": {
+    "slugCharsHint": "Only lowercase letters, numbers, and hyphens are allowed",
+    "verifyStatusDone": "Done",
+    "verifyStatusActive": "In progress",
+    "verifyStatusFailed": "Failed",
+    "verifyStatusWaiting": "Waiting",
     "createOrg": "Create Organization",
     "welcome": "Welcome to Sprintable!",
     "orgName": "Organization Name",
@@ -3292,6 +3318,7 @@
     "actionConfirm": "Confirm"
   },
   "inbox": {
+    "workflowExecutionLabel": "Workflow execution",
     "attentionTabLabel": "Today",
     "notificationsTabLabel": "Notifications",
     "surfaceDescription": "Review story, memo, reward, and system notifications from one operator surface.",
@@ -4078,6 +4105,7 @@
     "switchToVerify": "Switch to verified"
   },
   "goals": {
+    "goalDeleteFailed": "Failed to delete the goal.",
     "title": "Goals",
     "subtitle": "Manage the big outcomes your workspace is working toward as goals.",
     "forbiddenTitle": "Access denied",
@@ -4368,6 +4396,7 @@
     "createLoopRecipeNone": "Go it alone"
   },
   "sprints": {
+    "personCountUnit": "",
     "title": "Sprints",
     "loading": "Loading…",
     "noSprints": "No sprints started yet",
@@ -4783,7 +4812,11 @@
     "conversionFailed": "Conversion failed.",
     "pdfConversionFailedDesc": "Couldn't convert this document to PDF.",
     "converting": "Converting…",
-    "firstViewSlowNotice": "The first view can take up to 1–2 minutes ({elapsed}s elapsed)."
+    "firstViewSlowNotice": "The first view can take up to 1–2 minutes ({elapsed}s elapsed).",
+    "editRoomName": "Edit room name",
+    "muteNotifications": "Mute notifications",
+    "unmuteNotifications": "Unmute notifications",
+    "notificationsMuted": "Notifications muted"
   },
   "eventCard": {
     "statusChangedHeader": "Status changed",
@@ -4861,6 +4894,7 @@
     "agentStatsDescription": "Done stories, assigned stories, and average lead time per agent.",
     "velocityTitle": "Team Velocity",
     "velocityDescription": "Story points delivered per sprint (last 5 sprints).",
+    "noSprintData": "No sprint data.",
     "leaderboardTitle": "Leaderboard",
     "leaderboardDescription": "Agents ranked by total reward balance.",
     "noAgents": "No agents deployed yet.",

@@ -29,7 +29,10 @@ export function OperatorDropdownSelect({
   value,
   onValueChange,
   options,
-  placeholder = '선택하세요',
+  // components/ui/*는 도메인 ns가 없다 — 로케일 문구가 필요한 호출부가 명시로 넘긴다
+  // (story #3930, 실 소비처 13곳 전수 확認: value가 항상 options 중 하나와 매치돼 이
+  // 기본값 자체는 렌더된 적이 없다 — 렌더 회귀 0).
+  placeholder = 'Select',
   disabled = false,
   className,
   align = 'start',

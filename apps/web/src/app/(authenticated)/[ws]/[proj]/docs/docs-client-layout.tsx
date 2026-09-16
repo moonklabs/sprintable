@@ -653,7 +653,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
               gnbHidden && '-translate-y-[calc(100%+var(--gnb-mobile-height))]',
             )}
           >
-            <button type="button" onClick={() => setTreeDrawerOpen(true)} className="flex min-h-[44px] min-w-0 max-w-full items-center gap-2 rounded-lg border border-border px-3 text-sm text-foreground transition-colors hover:bg-accent" aria-label="문서 트리 열기">
+            <button type="button" onClick={() => setTreeDrawerOpen(true)} className="flex min-h-[44px] min-w-0 max-w-full items-center gap-2 rounded-lg border border-border px-3 text-sm text-foreground transition-colors hover:bg-accent" aria-label={t('openDocTree')}>
               <FileText className="size-4 shrink-0 text-muted-foreground" />
               <span className="min-w-0 truncate font-medium">{currentDocTitle ?? t('title')}</span>
               <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />

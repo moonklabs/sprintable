@@ -483,7 +483,7 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
               {orgSlug && !slugValid ? (
                 // ⚠️Phase2 i18n·#2485 — 클라 측 정규식 검증 문구가 하드코딩 한국어다(t() 아님,
                 // 서버 응답과 무관 — raw 서버 누수는 아님). #2484 스코프 밖, 유나 design 확認.
-                <p className="text-xs text-destructive">영소문자, 숫자, 하이픈만 사용 가능합니다</p>
+                <p className="text-xs text-destructive">{t('slugCharsHint')}</p>
               ) : !orgSlug && orgName.trim() ? (
                 // story #2750 — 조직명이 한글 등 비-ASCII로만 이뤄지면 handleOrgNameChange의
                 // 자동 파생(로마자/숫자만 남기는 정규식)이 전부 걸러내 orgSlug가 빈 문자열로

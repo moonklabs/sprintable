@@ -175,21 +175,32 @@ describe('computeNewViolations', () => {
 //   「이미지」)이 이번엔 직접 이 PR의 작업 대상(components/chat/* 78건 t() 전환)이라
 //   수리됐다 — 세 번째 소진. 표본을 components/kanban/story-detail-panel.tsx(16건
 //   몰림 — PR②③ 대상이나 즉시 착수 예정 아님)의 「라벨 없음」으로 옮긴다.
-describe('창건 사례 — components/kanban/story-detail-panel.tsx의 실 위반이 지금도 잡힌다', () => {
-  const FOUNDED_CASE_FILE = path.resolve(__dirname, '../src/components/kanban/story-detail-panel.tsx');
-  const FOUNDED_CASE_REL = 'components/kanban/story-detail-panel.tsx';
-
-  it('components/kanban/story-detail-panel.tsx가 실제로 「라벨 없음」 자리를 아직 갖고 있다', () => {
-    const content = readFileSync(FOUNDED_CASE_FILE, 'utf8');
-    expect(content).toContain('라벨 없음');
-  });
-
-  // story #3902 — 부하 시 vitest 기본 5000ms를 넘길 수 있는 실 전수 스캔(측정: 동시부하
-  // 재현 5회 = 814·775·741·1130·874ms 중 최댓값 1130ms → ×3 ≈ 3390ms → 3500ms로 반올림).
-  it('실 저장소 스캔이 이 창건 사례를 담는다(자가 죽어있지 않다)', () => {
-    const violations = scanRepo(path.resolve(__dirname, '../src'));
-    const hit = violations.find((v) => v.file === FOUNDED_CASE_REL && v.text === '라벨 없음');
-    expect(hit).toBeDefined();
+//   story #3930 PR③(2026-09-16) — 이번엔 PR③ 자신이 baseline 41→0(kanban·app·onboarding·
+//   기타 전량)을 마감해 story-detail-panel.tsx의 「라벨 없음」까지 수리한다 — 네 번째
+//   소진이자 「baseline에 남은 실 위반이 하나도 없다」는 첫 사례(레포 전체가 정말로
+//   0건이면 옮겨갈 다음 실 파일 자체가 없다). 실 레포 파일에 의존하는 표본은 구조적으로
+//   더 지속 가능하지 않다 — EXEMPT_FILES 자가만료 테스트(아래 describe)가 이미 쓰는
+//   임시 디렉터리 합성 표본 기법(같은 파일 mkdtempSync)으로 이 표본도 옮긴다. 실 파일이
+//   아니라 scanRepo가 실제로 한글을 재는지(계약)만 확認하므로 baseline 소진과 완전히
+//   독립적이고, 앞으로 다시는 옮길 필요가 없다.
+describe('창건 사례 — scanRepo가 실제로 한글 위반을 재는지(합성 표본, 실 파일 소진과 독립)', () => {
+  // scanRepo는 MIN_EXPECTED_FILES(400) 미만이면 "잘못된 srcRoot" 자가진단으로 throw한다
+  // (운영 오용 방지 안전장치) — 격리된 임시 디렉터리(파일 1개)로는 이 안전장치 자체에
+  // 걸려 scanRepo를 못 부른다. 그래서 진짜 src 트리 안에 합성 파일 하나를 잠깐 심어
+  // 실 전수 스캔(파일 수 조건 자동 충족)이 그 파일을 실제로 잡는지 본다 — 레포의 기존
+  // 위반 중 어느 하나가 살아있는지에는 완전히 무관(finally에서 항상 걷어낸다).
+  it('한글 JsxText가 있는 합성 파일은 scanRepo가 실제로 잡는다(실 src 트리에 임시 파일)', () => {
+    const srcRoot = path.resolve(__dirname, '../src');
+    const relPath = '__founding-case-temp__.tsx';
+    const abs = path.join(srcRoot, relPath);
+    writeFileSync(abs, "export function C() { return <p>합성 창건 사례 문구</p>; }");
+    try {
+      const violations = scanRepo(srcRoot);
+      const hit = violations.find((v) => v.file === relPath && v.text === '합성 창건 사례 문구');
+      expect(hit).toBeDefined();
+    } finally {
+      rmSync(abs, { force: true });
+    }
   }, 3500);
 });
 

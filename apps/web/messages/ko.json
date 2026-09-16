@@ -35,6 +35,8 @@
     "saving": "저장 중…",
     "deleting": "삭제 중…",
     "creating": "만드는 중…",
+    "aiUpcomingDraft": "곧 나올 초안",
+    "aiUpcomingSynthesis": "곧 나올 종합",
     "adding": "추가 중…",
     "loadMore": "더 보기",
     "error": "문제가 발생했어요",
@@ -1117,7 +1119,26 @@
       "blockingLabel": "이 일이 막는 일",
       "dependsOnLabel": "이 일이 기다리는 일",
       "dependedByLabel": "이 일을 기다리는 일"
-    }
+    },
+    "storyDeleteFailed": "스토리 삭제에 실패했어요.",
+    "assigneeChangeFailed": "담당자 변경에 실패했어요.",
+    "markdownPlaceholder": "Markdown 형식으로 작성하세요…",
+    "attachmentFileFallback": "첨부파일",
+    "attachmentDelete": "첨부 삭제",
+    "attachmentUploadFailed": "첨부 업로드에 실패했어요. 다시 시도해 주세요.",
+    "noLabel": "라벨 없음",
+    "newLabelNamePlaceholder": "새 라벨 이름",
+    "createLabel": "생성",
+    "collapseSection": "접기",
+    "expandSection": "펼치기",
+    "storyDeleteConfirmTitle": "스토리를 삭제하시겠어요?",
+    "storyDeleteIrreversible": "이 작업은 되돌릴 수 없어요. 스토리에 연결된 태스크도 함께 삭제돼요.",
+    "permanentDelete": "영구 삭제",
+    "addGeneric": "+ 추가",
+    "workflowExecuted": "워크플로우 실행됨",
+    "ruleMatched": "규칙 매칭",
+    "ruleNone": "규칙 없음",
+    "entityCandidatesLabel": "엔티티 후보"
   },
   "session": {
     "expiredTitle": "세션이 만료됐어요",
@@ -1235,6 +1256,11 @@
     "returnButton": "Sprintable 앱으로 돌아가기"
   },
   "onboarding": {
+    "slugCharsHint": "영소문자, 숫자, 하이픈만 사용 가능해요",
+    "verifyStatusDone": "완료",
+    "verifyStatusActive": "진행 중",
+    "verifyStatusFailed": "실패",
+    "verifyStatusWaiting": "대기",
     "createOrg": "조직 만들기",
     "welcome": "Sprintable에 오신 것을 환영해요!",
     "orgName": "조직 이름",
@@ -3292,6 +3318,7 @@
     "actionConfirm": "확인"
   },
   "inbox": {
+    "workflowExecutionLabel": "워크플로우 실행",
     "attentionTabLabel": "오늘",
     "notificationsTabLabel": "알림",
     "surfaceDescription": "스토리, 메모, 리워드, 시스템 알림을 하나의 운영 표면으로 확인해요.",
@@ -4078,6 +4105,7 @@
     "switchToVerify": "달성으로 전환"
   },
   "goals": {
+    "goalDeleteFailed": "목표 삭제에 실패했어요.",
     "title": "목표",
     "subtitle": "워크스페이스의 주요 목표와 작업 범위를 관리해요.",
     "forbiddenTitle": "접근 권한 없음",
@@ -4368,6 +4396,7 @@
     "createLoopRecipeNone": "직접 진행"
   },
   "sprints": {
+    "personCountUnit": "명",
     "title": "스프린트",
     "loading": "불러오는 중…",
     "noSprints": "아직 시작한 스프린트가 없어요",
@@ -4783,7 +4812,11 @@
     "conversionFailed": "변환에 실패했어요.",
     "pdfConversionFailedDesc": "이 문서를 PDF로 변환하지 못했어요.",
     "converting": "변환 중이에요…",
-    "firstViewSlowNotice": "첫 열람은 최대 1~2분 걸릴 수 있어요({elapsed}초 경과)."
+    "firstViewSlowNotice": "첫 열람은 최대 1~2분 걸릴 수 있어요({elapsed}초 경과).",
+    "editRoomName": "방 이름 편집",
+    "muteNotifications": "알림 끄기",
+    "unmuteNotifications": "알림 켜기",
+    "notificationsMuted": "알림 꺼짐"
   },
   "eventCard": {
     "statusChangedHeader": "작업 상태 변경",
@@ -4861,6 +4894,7 @@
     "agentStatsDescription": "에이전트별 완료 스토리, 배정 스토리, 평균 리드타임이에요.",
     "velocityTitle": "팀 벨로시티",
     "velocityDescription": "스프린트별 완료 스토리 포인트 (최근 5 스프린트).",
+    "noSprintData": "스프린트 데이터가 없어요.",
     "leaderboardTitle": "리더보드",
     "leaderboardDescription": "보상 잔액 기준 에이전트 순위예요.",
     "noAgents": "배포된 에이전트가 없어요.",
