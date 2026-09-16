@@ -140,6 +140,56 @@ else
 fi
 
 echo
+echo "── 전부 DELETE 실패 → deleted_count=0·failed_count 정확·exit≠0(PO CHANGES②) ──"
+# 예전 버전은 while이 파이프 서브셸에서 돌아 deleted 변수가 안 밖으로 안 나오고,
+# JSON의 deleted_count가 실제 성공수가 아니라 삭제 "시도 대상 수"를 그대로 찍어
+# DELETE가 전부 실패해도 deleted_count=5·exit 0으로 보고됐다 — 이 스텝이 그 회귀를 잡는다.
+FAKE_BIN_DELFAIL="$WORK/bin-delete-fail"
+mkdir -p "$FAKE_BIN_DELFAIL"
+cat > "$FAKE_BIN_DELFAIL/gh" <<GHSTUB
+#!/usr/bin/env bash
+if [ "\$1" = "api" ] && [ "\$2" = "--paginate" ]; then
+  cat "$FIXTURE" | jq -c '.artifacts[]'
+  exit 0
+fi
+if [ "\$1" = "api" ] && [ "\$2" = "-X" ] && [ "\$3" = "DELETE" ]; then
+  echo "synthetic DELETE failure" >&2
+  exit 1
+fi
+echo "unexpected gh invocation: \$*" >&2
+exit 1
+GHSTUB
+chmod +x "$FAKE_BIN_DELFAIL/gh"
+
+set +e
+DELFAIL_JSON="$(PATH="$FAKE_BIN_DELFAIL:$PATH" "$SCRIPT" --apply --json 2>/tmp/delfail-stderr.$$)"
+DELFAIL_CODE=$?
+set -e
+DELFAIL_STDERR="$(cat /tmp/delfail-stderr.$$)"; rm -f /tmp/delfail-stderr.$$
+
+if [ "$DELFAIL_CODE" -ne 0 ]; then
+  echo "  ok   DELETE 전부 실패 시 스크립트가 exit 0이 아님(exit ${DELFAIL_CODE}) — 호출부 워크플로의 실패 감지가 실제로 돎"
+else
+  echo "  FAIL DELETE 전부 실패인데 exit 0 — 워크플로가 성공으로 오판함"
+  FAIL=1
+fi
+DELFAIL_DELETED="$(echo "$DELFAIL_JSON" | jq -r '.deleted_count')"
+DELFAIL_FAILED="$(echo "$DELFAIL_JSON" | jq -r '.failed_count')"
+if [ "$DELFAIL_DELETED" = "0" ]; then
+  echo "  ok   deleted_count=0(실제 성공 0건을 정직하게 보고 — 대상 수로 부풀리지 않음)"
+else
+  echo "  FAIL deleted_count=${DELFAIL_DELETED}(기대 0) — 출력: $DELFAIL_JSON"
+  FAIL=1
+fi
+if [ "$DELFAIL_FAILED" = "5" ]; then
+  echo "  ok   failed_count=5(대상 5건 전부 실패로 정확 집계)"
+else
+  echo "  FAIL failed_count=${DELFAIL_FAILED}(기대 5) — 출력: $DELFAIL_JSON"
+  FAIL=1
+fi
+assert_contains "$DELFAIL_STDERR" "삭제 실패" "실패 stderr 메시지가 실제로 출력됨(카운터만 조용히 틀린 게 아니라 눈에 보임)"
+
+echo
 if [ "$FAIL" -eq 0 ]; then
   echo "ALL PASS"
   exit 0

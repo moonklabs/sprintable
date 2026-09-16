@@ -132,14 +132,25 @@ if [ "$APPLY" = false ]; then
   exit 0
 fi
 
+# 페드루 PO CHANGES②(카디르 재현, PR#4350 리뷰) — 이전 버전 두 가지 결함:
+# (a) `jq ... | while read` 형태는 while 루프가 파이프 오른쪽이라 서브셸에서 돈다 —
+#     루프 안에서 늘린 `deleted` 변수는 루프가 끝나면 서브셸과 함께 사라져 바깥에서
+#     안 보인다(전형적 bash 서브셸 스코프 함정). (b) 그래서 최종 JSON의 deleted_count는
+#     실제 `deleted` 변수를 아예 안 쓰고 삭제 *시도 대상 수*(`target_count`)를 그대로
+#     찍었다 — DELETE가 전부 실패해도 deleted_count가 부풀려 보고되고, 실패해도 이
+#     스크립트는 exit 0으로 끝났다(호출부 워크플로의 "Fail loudly" 스텝이 못 돎).
+# 처방: 프로세스 치환(`< <(...)`)으로 while을 현재 셸에서 돌려 카운터가 안 사라지게
+# 하고, deleted/failed를 분리 집계 — 실패가 하나라도 있으면 exit 1.
 deleted=0
-echo "$targets_json" | jq -r '.[].id' | while IFS= read -r id; do
+failed=0
+while IFS= read -r id; do
   if gh api -X DELETE "/repos/${REPO}/actions/artifacts/${id}" >/dev/null 2>&1; then
     deleted=$((deleted + 1))
   else
+    failed=$((failed + 1))
     echo "  ⚠️ 삭제 실패: id=${id}" >&2
   fi
-done
+done < <(echo "$targets_json" | jq -r '.[].id')
 
 # 삭제 뒤 전체 재집계(before와 동일 쿼리 — 전후 대조가 같은 기준이어야 한다).
 all_after_json=$(gh api --paginate "/repos/${REPO}/actions/artifacts" \
@@ -148,13 +159,19 @@ all_after_count=$(echo "$all_after_json" | jq 'length')
 all_after_bytes=$(echo "$all_after_json" | jq '[.[].size_in_bytes] | add // 0')
 
 echo "" >&2
-echo "삭제 완료. 삭제 後 전체(만료 前, 이름 무관): ${all_after_count}건 · ${all_after_bytes} bytes" >&2
+echo "삭제 완료(성공 ${deleted}건 · 실패 ${failed}건). 삭제 後 전체(만료 前, 이름 무관): ${all_after_count}건 · ${all_after_bytes} bytes" >&2
 echo "감소: $((all_before_count - all_after_count))건 · $((all_before_bytes - all_after_bytes)) bytes" >&2
 
 if [ "$JSON_OUT" = true ]; then
   jq -n \
-    --argjson target_count "$target_count" \
+    --argjson deleted_count "$deleted" \
+    --argjson failed_count "$failed" \
     --argjson before_count "$all_before_count" --argjson before_bytes "$all_before_bytes" \
     --argjson after_count "$all_after_count" --argjson after_bytes "$all_after_bytes" \
-    '{applied: true, deleted_count: $target_count, before_count: $before_count, before_bytes: $before_bytes, after_count: $after_count, after_bytes: $after_bytes}'
+    '{applied: true, deleted_count: $deleted_count, failed_count: $failed_count, before_count: $before_count, before_bytes: $before_bytes, after_count: $after_count, after_bytes: $after_bytes}'
+fi
+
+if [ "$failed" -gt 0 ]; then
+  echo "삭제 ${failed}건 실패 — 위 ⚠️ 로그 참고(gh API/권한 문제 가능성)" >&2
+  exit 1
 fi
