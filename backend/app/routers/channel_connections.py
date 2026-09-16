@@ -1907,3 +1907,69 @@ async def get_channel_publishing_limit(
     return PublishingLimitResponse(
         quota_usage=quota_usage, quota_total=quota_total, quota_duration_seconds=quota_duration,
     )
+
+
+# ─── story #3953(마케팅·안전장치·블루프린트 §1-5, 페드루 PO 確定 2026-09-16) — 조직
+# 전체 외부 발행 일시 중지. owner만 조작(_require_owner 재사용, 이 파일의 기존 패턴
+# 그대로 — 새 인가 로직 0) — admin·에이전트 키 403. ────────────────────────────────
+
+
+class ExternalPublishPauseResponse(BaseModel):
+    paused: bool
+    paused_at: str | None
+    paused_by: uuid.UUID | None
+    reason: str | None
+
+
+class SetExternalPublishPauseRequest(BaseModel):
+    paused: bool
+    reason: str | None = None
+
+
+@router.get("/{org_id}/external-publish-pause", response_model=ExternalPublishPauseResponse)
+async def get_external_publish_pause(
+    org_id: uuid.UUID,
+    auth: AuthContext = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ExternalPublishPauseResponse:
+    """member 이상 열람(위 목록 열람과 동형 폭 — 중지 여부는 비밀이 아니다, 발행
+    표면에 배너를 그려야 하는 모든 멤버가 읽을 수 있어야 한다)."""
+    await resolve_member(auth, org_id, db)  # 조직 소속만 확認(role 무관)
+
+    from app.models.organization import Organization
+
+    org = await db.get(Organization, org_id)
+    if org is None:
+        raise HTTPException(status_code=404, detail="organization not found")
+    return ExternalPublishPauseResponse(
+        paused=org.external_publish_paused_at is not None,
+        paused_at=org.external_publish_paused_at.isoformat() if org.external_publish_paused_at else None,
+        paused_by=org.external_publish_paused_by,
+        reason=org.external_publish_pause_reason,
+    )
+
+
+@router.put("/{org_id}/external-publish-pause", response_model=ExternalPublishPauseResponse)
+async def put_external_publish_pause(
+    org_id: uuid.UUID,
+    body: SetExternalPublishPauseRequest,
+    auth: AuthContext = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ExternalPublishPauseResponse:
+    """owner만(admin·에이전트 키 403) — 채널 연결·해제·재인증과 같은 급의 민감도
+    (조직 전체 발행을 좌우하는 스위치). 해제 시 pause로 blocked된 명령 자동 재큐까지
+    이 한 호출에서 끝난다(external_publish_pause.py::set_external_publish_pause)."""
+    resolved = await _require_owner(db, auth, org_id)
+
+    from app.services.external_publish_pause import set_external_publish_pause
+
+    org = await set_external_publish_pause(
+        db, org_id=org_id, paused=body.paused, reason=body.reason, actor_member_id=resolved.id,
+    )
+    await db.commit()
+    return ExternalPublishPauseResponse(
+        paused=org.external_publish_paused_at is not None,
+        paused_at=org.external_publish_paused_at.isoformat() if org.external_publish_paused_at else None,
+        paused_by=org.external_publish_paused_by,
+        reason=org.external_publish_pause_reason,
+    )

@@ -1591,6 +1591,17 @@ async def publish_channel_post_draft(
     if draft is None:
         raise ChannelPostDraftNotFoundError(draft_id)
 
+    # story #3953(블루프린트 §1-5) — 게이트/봉인/예산 재검증보다 먼저 조직 pause를
+    # 본다(어댑터 호출까지 안 가는 재검증 중 가장 싸고, 즉시-발행 라우터·워커 둘
+    # 다 이 함수를 그대로 부르므로 여기 한 번이 두 경로를 동시에 막는다). 예약·
+    # 승인 자체는 무효화하지 않는다(command 생성 경로인 resolve_command_target은
+    # 이 검사가 없다 — pause는 "실행"만 막지 "예약"은 안 막는다, 카드 明示).
+    from app.services.external_publish_pause import ExternalPublishPausedError, is_external_publish_paused
+
+    paused, pause_reason = await is_external_publish_paused(db, org_id=org_id)
+    if paused:
+        raise ExternalPublishPausedError(reason=pause_reason)
+
     from app.services.gate_service import find_gate_slot_with_pr_fallback
 
     gate = await find_gate_slot_with_pr_fallback(
