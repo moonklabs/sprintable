@@ -135,6 +135,51 @@ else
 fi
 
 echo
+echo "── dropdb 인프라 실패도 대칭으로 즉시 fail-fast(PO 5라운드 — createdb만 자가진단 있었음) ──"
+FAKE_BIN_INFRA_DROP="$WORK/bin-infra-fail-dropdb"
+mkdir -p "$FAKE_BIN_INFRA_DROP"
+cat > "$FAKE_BIN_INFRA_DROP/dropdb" <<'EOF'
+#!/usr/bin/env bash
+echo "synthetic dropdb failure" >&2
+exit 1
+EOF
+chmod +x "$FAKE_BIN_INFRA_DROP/dropdb"
+cp "$FAKE_BIN/createdb" "$FAKE_BIN_INFRA_DROP/createdb"
+
+INFRA_DROP_FAILED_OUT="$WORK/infra-drop-failed.txt"
+INFRA_DROP_ELAPSED_OUT="$WORK/infra-drop-elapsed.tsv"
+: > "$INFRA_DROP_ELAPSED_OUT"
+set +e
+INFRA_DROP_OUT="$(PATH="$FAKE_BIN_INFRA_DROP:$PATH" \
+  WRAPPER_SCRIPT="$WRAPPER_SCRIPT" \
+  STALL_TIMEOUT_MIN=8 \
+  FILES_LIST_FILE="$FILES_LIST" \
+  ELAPSED_OUT_FILE="$INFRA_DROP_ELAPSED_OUT" \
+  FAILED_OUT_FILE="$INFRA_DROP_FAILED_OUT" \
+  "$LOOP_SCRIPT" "$WORK/fake-pytest.sh" 2>&1)"
+INFRA_DROP_CODE=$?
+set -e
+
+if [ "$INFRA_DROP_CODE" -eq 1 ]; then
+  echo "  ok   dropdb 실패 시 루프 스크립트가 즉시 exit 1"
+else
+  echo "  FAIL dropdb 실패인데 exit code=${INFRA_DROP_CODE}(기대 1) — 출력: $INFRA_DROP_OUT"
+  FAIL=1
+fi
+if [[ "$INFRA_DROP_OUT" == *"::error::"* ]] && [[ "$INFRA_DROP_OUT" == *"dropdb"* ]]; then
+  echo "  ok   ::error:: 메시지가 dropdb 재생성 실패를 명시함"
+else
+  echo "  FAIL dropdb 실패 ::error:: 메시지 누락 — 출력: $INFRA_DROP_OUT"
+  FAIL=1
+fi
+if [ ! -s "$INFRA_DROP_FAILED_OUT" ]; then
+  echo "  ok   FAILED_OUT_FILE에 안 섞임(dropdb 실패도 «파일 실패» 목록이 아니다)"
+else
+  echo "  FAIL dropdb 인프라 실패가 FAILED_OUT_FILE에 섞여 들어감 — 내용: $(cat "$INFRA_DROP_FAILED_OUT")"
+  FAIL=1
+fi
+
+echo
 if [ "$FAIL" -eq 0 ]; then
   echo "ALL PASS"
   exit 0
