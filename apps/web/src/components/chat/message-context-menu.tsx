@@ -72,7 +72,7 @@ export function MessageContextMenu({ x, y, isMine, onReply, onCopy, onDelete, on
         className="flex w-full items-center gap-2.5 px-3 py-2 text-sm hover:bg-muted"
       >
         <MessageSquareReply className="h-3.5 w-3.5 text-muted-foreground" />
-        답글 달기
+        {tChats('replyToMessage')}
       </button>
       <button
         type="button"
@@ -81,7 +81,7 @@ export function MessageContextMenu({ x, y, isMine, onReply, onCopy, onDelete, on
         className="flex w-full items-center gap-2.5 px-3 py-2 text-sm hover:bg-muted"
       >
         <Copy className="h-3.5 w-3.5 text-muted-foreground" />
-        복사
+        {tChats('copyMessage')}
       </button>
       {!isMine && onBlock && (
         <button
@@ -102,7 +102,7 @@ export function MessageContextMenu({ x, y, isMine, onReply, onCopy, onDelete, on
           className="flex w-full items-center gap-2.5 px-3 py-2 text-sm hover:bg-muted"
         >
           <Quote className="h-3.5 w-3.5 text-muted-foreground" />
-          {citeAction.kind === 'start' ? '여기부터 인용' : '여기까지 인용'}
+          {citeAction.kind === 'start' ? tChats('citeFromHere') : tChats('citeToHere')}
         </button>
       )}
       {isMine && !isDeleted && (

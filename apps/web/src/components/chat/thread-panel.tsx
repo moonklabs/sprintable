@@ -89,6 +89,7 @@ export function ThreadPanel({
 }: ThreadPanelProps) {
   // story #3783 — "불러오는 중…", common ns의 기존 loading 키 재사용.
   const tc = useTranslations('common');
+  const t = useTranslations('chats');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -208,7 +209,7 @@ export function ThreadPanel({
           className="flex shrink-0 items-center gap-1 rounded bg-muted px-1.5 py-1 text-xs text-muted-foreground transition hover:text-foreground"
         >
           <ArrowLeft className="size-3 shrink-0" />
-          <span>대화</span>
+          <span>{t('title')}</span>
         </button>
         <span className="text-xs text-border">›</span>
         <span
@@ -221,7 +222,7 @@ export function ThreadPanel({
         <button
           type="button"
           onClick={onClose}
-          aria-label="스레드 닫기"
+          aria-label={t('closeThread')}
           className="ml-auto shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
         >
           <X className="h-4 w-4" />
@@ -233,7 +234,7 @@ export function ThreadPanel({
           메시지 pin + 좌측 라인" — 답글이 원 메시지에서 뻗어나온 것처럼). 기존 border-border
           토큰 재사용(신규 색 0). */}
       <div className="flex-shrink-0 border-b border-l-2 border-border bg-muted/30 py-3 pl-3 pr-4">
-        <p className="mb-1 text-[10px] font-medium text-muted-foreground">원본 메시지</p>
+        <p className="mb-1 text-[10px] font-medium text-muted-foreground">{t('originalMessage')}</p>
         <ChatBubble
           message={parentMessage}
           isMine={parentMessage.created_by === currentTeamMemberId}
@@ -253,7 +254,7 @@ export function ThreadPanel({
         {loading ? (
           <p className="text-center text-sm text-muted-foreground">{tc('loading')}</p>
         ) : messages.length === 0 ? (
-          <p className="text-center text-sm text-muted-foreground">아직 답글이 없습니다.</p>
+          <p className="text-center text-sm text-muted-foreground">{t('noRepliesYet')}</p>
         ) : (
           // story #2911 — rail은 목록 전체를 감싸는 이 wrapper 하나(border-l-2, 원본 메시지
           // 블록과 동일 x-오프셋 — 둘 다 컨테이너 왼쪽 끝에서 시작)뿐이라 개별 ChatBubble
@@ -289,7 +290,7 @@ export function ThreadPanel({
         threadId={`${conversationId}:thread:${parentMessage.id}`}
         onSend={handleSend}
         projectId={projectId}
-        placeholder="답글을 입력하세요… (Enter 전송 / Shift+Enter 줄바꿈)"
+        placeholder={t('threadReplyPlaceholder')}
         // story #2032 AC5류 우선순위 — 스레드 패널이 열린 상태에서 ESC는 대화 전체를 나가는
         // 것이 아니라 이 패널을 먼저 닫는다(중첩 오버레이는 안쪽부터 닫히는 것과 동형).
         onEscape={onClose}

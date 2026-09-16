@@ -5,6 +5,7 @@ import { EntityGlyph, resolveEntityIcon } from '@/components/chat/entity-registr
 import { FileViewer } from '@/components/chat/file-viewer';
 import { getFileIcon } from '@/lib/file-icon';
 import { X } from 'lucide-react';
+import { useTranslations } from 'next-intl';
 
 /**
  * story #2766(레인 A)·#2780(엔티티 확장)·#2781(asset 편입) — 채팅을 벗어나지 않는 우측 리딩
@@ -75,6 +76,7 @@ export function ReadingPanel({
    * 뒤로"가 되도록 호출부가 stack.length에 따라 onNavigateTo/onClose 중 골라 넘긴다). */
   onClose: () => void;
 }) {
+  const t = useTranslations('chats');
   const top = stack[stack.length - 1];
   if (!top) return null;
 
@@ -107,8 +109,8 @@ export function ReadingPanel({
           <button
             type="button"
             onClick={onClose}
-            aria-label="전체 닫기"
-            title="전체 닫기"
+            aria-label={t('closeAll')}
+            title={t('closeAll')}
             className="ml-auto shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
           >
             <X className="size-3.5" />

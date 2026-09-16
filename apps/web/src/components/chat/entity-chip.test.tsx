@@ -108,12 +108,12 @@ describe('EntityChip variant=inline-meta — 기존 전개 그대로(escape hatc
   });
 });
 
-describe('EntityChip ghost — story #3213(미등록≠비존재, "대상이 없습니다" 정적 단정 제거)', () => {
-  it('ghost는 "대상이 없습니다"를 더 이상 안 쓰고 실 라벨을 보인다', async () => {
+describe('EntityChip ghost — story #3213(미등록≠비존재, "대상이 없어요" 정적 단정 제거)', () => {
+  it('ghost는 "대상이 없어요"를 더 이상 안 쓰고 실 라벨을 보인다', async () => {
     await act(async () => {
       root.render(wrap(<EntityChip entityType="story" entityId="s-1" label={LONG_LABEL} href={null} ghost referenceMeta={META} />));
     });
-    expect(container.textContent).not.toContain('대상이 없습니다');
+    expect(container.textContent).not.toContain('대상이 없어요');
     expect(container.textContent).toContain(LONG_LABEL);
   });
 

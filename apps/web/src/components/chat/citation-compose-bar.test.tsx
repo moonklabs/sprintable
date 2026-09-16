@@ -87,8 +87,8 @@ describe('CitationComposeBar — story #2265(C-7) 저장 조각', () => {
   });
 
   it.each([
-    ['error_permission', '권한이 없습니다'],
-    ['error_invalid', '처리할 수 없습니다'],
+    ['error_permission', '권한이 없어요'],
+    ['error_invalid', '처리할 수 없어요'],
     ['error_network', '네트워크를 확인'],
   ] as const)('saveState=%s이면 그 원인에 맞는 문구가 뜨고 저장 버튼으로 재시도할 수 있다(중복 idle 복귀 없음)', async (state, expectedSubstring) => {
     await act(async () => {

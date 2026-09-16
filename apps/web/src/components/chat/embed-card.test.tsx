@@ -8,7 +8,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { NextIntlClientProvider } from 'next-intl';
 import { EmbedCard } from './embed-card';
+import koMessages from '../../../messages/ko.json';
 
 const pushMock = vi.hoisted(() => vi.fn());
 vi.mock('next/navigation', () => ({
@@ -55,7 +57,11 @@ describe('EmbedCard doc — story #2168 PR-①', () => {
       }),
     }));
     await act(async () => {
-      root.render(<EmbedCard entity_type="doc" entity_id="doc-1" title="T" status={null} />);
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <EmbedCard entity_type="doc" entity_id="doc-1" title="T" status={null} />
+        </NextIntlClientProvider>,
+      );
     });
     await clickMainDocButton();
     expect(pushMock).toHaveBeenCalledWith('/acme/content/docs/other-doc/view');
@@ -69,7 +75,11 @@ describe('EmbedCard doc — story #2168 PR-①', () => {
       }),
     }));
     await act(async () => {
-      root.render(<EmbedCard entity_type="doc" entity_id="doc-2" title="T" status={null} />);
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <EmbedCard entity_type="doc" entity_id="doc-2" title="T" status={null} />
+        </NextIntlClientProvider>,
+      );
     });
     await clickMainDocButton();
     expect(pushMock).toHaveBeenCalledWith('/docs/legacy-doc/view');
@@ -78,7 +88,11 @@ describe('EmbedCard doc — story #2168 PR-①', () => {
   it('preview fetch 실패 시 이동하지 않고 navigating 스피너를 해제한다', async () => {
     stubFetch(async () => ({ ok: false, json: async () => ({}) }));
     await act(async () => {
-      root.render(<EmbedCard entity_type="doc" entity_id="doc-3" title="T" status={null} />);
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <EmbedCard entity_type="doc" entity_id="doc-3" title="T" status={null} />
+        </NextIntlClientProvider>,
+      );
     });
     await clickMainDocButton();
     expect(pushMock).not.toHaveBeenCalled();

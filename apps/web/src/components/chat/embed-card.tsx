@@ -194,7 +194,7 @@ export const MdBody = ({ content }: { content: string }) => (
 // story #2780 — 컴포넌트가 아니라 순수 함수로 둔다: 호출부(embed-card 모달 body)가 반환값이
 // null인지(=보여줄 내용 없음) 직접 검사해야 하는데, JSX `<EntityDetail/>` 호출은 그 반환값을
 // 렌더 트리 밖에서 들여다볼 수 없다(엘리먼트 서술자는 항상 non-null이다 — 안이 null이어도).
-function renderEntityDetail(entityType: string, entityId: string, detail: Record<string, unknown>, tc: (key: string) => string): React.ReactNode | null {
+function renderEntityDetail(entityType: string, entityId: string, detail: Record<string, unknown>, tc: (key: string) => string, t: (key: string) => string): React.ReactNode | null {
   if (entityType === 'story') {
     const d = detail as { status?: string; priority?: string; story_points?: number; description?: string; acceptance_criteria?: string };
     const statusLabel = d.status ? translateEntityStatus('story', d.status) : null;
@@ -313,7 +313,7 @@ function renderEntityDetail(entityType: string, entityId: string, detail: Record
         )}
         {parentHref && (
           <a href={parentHref} className="text-xs text-primary hover:underline">
-            부모 스토리 보기 →
+            {t('viewParentStory')}
           </a>
         )}
       </div>
@@ -408,6 +408,7 @@ export function EntityPreviewModal({
   // 유일한 소비 지점.
   // story #3776(1층B) — "닫기" aria-label, common ns의 기존 close 키 재사용.
   const tc = useTranslations('common');
+  const t = useTranslations('chats');
   // story #3888 — renderGateSummary의 risk 배지 라벨(workList.riskBadgeHigh/riskBadgeUnknown).
   const tWorkList = useTranslations('workList');
   const hasFetchStrategy = entityType === 'doc' || entityType === 'gate' || Boolean(ENTITY_API[entityType]);
@@ -684,7 +685,7 @@ export function EntityPreviewModal({
   // sprint) EntityDetail이 null을 반환해 몸통이 완전 공백이었다(옛 "미리보기 없음" 문구보다
   // 덜 정직한 새 위반형). "RICH 타입인가"가 아니라 "실제로 보여줄 내용이 있는가"로 이
   // 문구를 하나로 통일한다 — 한 번만 계산해 조건과 렌더 양쪽에 쓴다(이중 호출 금지).
-  const richContent = detail && RICH_PREVIEW_TYPES.has(entityType) ? renderEntityDetail(entityType, entityId, detail, tc) : null;
+  const richContent = detail && RICH_PREVIEW_TYPES.has(entityType) ? renderEntityDetail(entityType, entityId, detail, tc, t) : null;
   // gate는 RICH_PREVIEW_TYPES 밖(parity 계약) — richContent와 별개 축으로 계산해 병합.
   const gateSummary = detail && entityType === 'gate' ? renderGateSummary(detail, tWorkList) : null;
 
@@ -696,13 +697,13 @@ export function EntityPreviewModal({
           {tc('loading')}
         </div>
       ) : notFound ? (
-        <p className="py-4 text-xs text-muted-foreground">대상을 찾을 수 없습니다.</p>
+        <p className="py-4 text-xs text-muted-foreground">{t('entityNotFound')}</p>
       ) : richContent !== null ? (
         richContent
       ) : gateSummary !== null ? (
         gateSummary
       ) : (
-        <p className="py-4 text-xs text-muted-foreground">이 엔티티는 별도 미리보기가 없습니다.</p>
+        <p className="py-4 text-xs text-muted-foreground">{t('entityNoPreview')}</p>
       )}
     </div>
   );
@@ -712,7 +713,7 @@ export function EntityPreviewModal({
   const footer = !loading && (
     <div className="flex-shrink-0 border-t border-border px-6 py-3">
       {notFound ? (
-        <span className="flex cursor-default items-center gap-1.5 text-sm text-muted-foreground">대상이 없습니다</span>
+        <span className="flex cursor-default items-center gap-1.5 text-sm text-muted-foreground">{t('entityTargetMissing')}</span>
       ) : resolvedHref ? (
         <Link
           href={resolvedHref}
@@ -720,10 +721,10 @@ export function EntityPreviewModal({
           className="flex items-center gap-1.5 text-sm text-primary hover:underline"
         >
           <ExternalLink className="h-3.5 w-3.5" />
-          {linkKind === 'via-parent' ? '담긴 곳으로 갑니다' : '전체 보기'}
+          {linkKind === 'via-parent' ? t('goToParent') : t('viewAll')}
         </Link>
       ) : (
-        <span className="flex cursor-default items-center gap-1.5 text-sm text-muted-foreground">열 수 있는 화면이 없습니다</span>
+        <span className="flex cursor-default items-center gap-1.5 text-sm text-muted-foreground">{t('noScreenToOpen')}</span>
       )}
     </div>
   );
@@ -757,6 +758,7 @@ export function EmbedCard({
    * Dialog 모달 그대로 — 회귀 없음. */
   onOpenReadingPanel?: (entityType: string, entityId: string, title: string | null, status: string | null, href: string | null) => void;
 }) {
+  const t = useTranslations('chats');
   const [showModal, setShowModal] = useState(false);
   const [navigating, setNavigating] = useState(false);
   const router = useRouter();
@@ -894,8 +896,8 @@ export function EmbedCard({
               setShowModal(true);
             }}
             className="shrink-0 rounded p-1 opacity-70 transition-opacity hover:bg-black/10 hover:opacity-100 dark:hover:bg-white/10"
-            aria-label="미리보기"
-            title="미리보기"
+            aria-label={t('preview')}
+            title={t('preview')}
           >
             <Eye className="size-3.5" />
           </button>
@@ -1070,14 +1072,14 @@ export function EntityChip({
           — 클릭할 것도 없으므로 기존 "대상이 없습니다"(시제 중립 문구, 발명 0) 그대로 유지.
           AC3 — truncate된 라벨의 전체 텍스트를 title(native)로도 보장. */}
       <span className={entityChipLabelVariants({ variant })} title={ghost && !entityId ? undefined : label}>
-        {ghost && !entityId ? '대상이 없습니다' : label}
+        {ghost && !entityId ? tChats('entityTargetMissing') : label}
       </span>
       {/* AC1 — 사실성(상수 "관찰됨": entity_references 자체가 관찰됨 tier) · 표면 · 지점.
           ⛔색으로만 구분하지 않고 글자로 적는다(가디언 규율 재사용). inline-meta 변형에서만
           항상 펼친다 — inline(기본)은 아래 tooltip으로 격납. */}
       {showInlineMeta && referenceMeta ? (
         <span className="opacity-70">
-          · 관찰됨 · {formLabel(referenceMeta.form)} · {formatReferencePoint(referenceMeta.referencedAt)}
+          {tChats('observedMarker')} {formLabel(referenceMeta.form)} · {formatReferencePoint(referenceMeta.referencedAt)}
         </span>
       ) : null}
       {showInlineMeta && statusLabel ? <span className="opacity-70">· {statusLabel}</span> : null}
@@ -1107,9 +1109,9 @@ export function EntityChip({
     <div className="space-y-1">
       <p className="font-semibold">{label}</p>
       <div className="space-y-0.5 border-t border-background/20 pt-1">
-        {statusLabel ? tooltipRow('상태', statusLabel) : null}
-        {referenceMeta ? tooltipRow('참조 형태', formLabel(referenceMeta.form)) : null}
-        {referenceMeta ? tooltipRow('관찰', formatReferencePoint(referenceMeta.referencedAt)) : null}
+        {statusLabel ? tooltipRow(tChats('statusLabel'), statusLabel) : null}
+        {referenceMeta ? tooltipRow(tChats('referenceFormLabel'), formLabel(referenceMeta.form)) : null}
+        {referenceMeta ? tooltipRow(tChats('observedLabel'), formatReferencePoint(referenceMeta.referencedAt)) : null}
       </div>
     </div>
   ) : null;
@@ -1128,7 +1130,7 @@ export function EntityChip({
           onClick={(e) => e.stopPropagation()}
           className="inline-flex shrink-0 items-center rounded border border-primary/40 px-1.5 py-0.5 text-xs font-medium text-primary no-underline hover:bg-primary/10"
         >
-          결재자 지정하고 올리기
+          {tChats('assignApproverAndSubmit')}
         </Link>
       ) : effectiveDocStatus === 'pending' ? (
         <Link

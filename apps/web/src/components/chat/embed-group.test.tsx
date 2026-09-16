@@ -92,7 +92,11 @@ describe('EmbedGroup — artifact 캐러셀', () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({}) })));
     const refs = [{ entityId: 'a-1', label: '목업 하나' }, { entityId: 'a-2', label: '목업 둘' }];
     await act(async () => {
-      root.render(<EmbedGroup entityType="artifact" refs={refs} />);
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <EmbedGroup entityType="artifact" refs={refs} />
+        </NextIntlClientProvider>,
+      );
     });
     const scroller = container.querySelector('.overflow-x-auto');
     expect(scroller).toBeTruthy();
@@ -185,7 +189,11 @@ describe('EmbedGroup — story #2905 open-panel 클릭 왕복(회귀가드)', ()
     const onOpenReadingPanel = vi.fn();
     const refs = [{ entityId: 'a-1', label: '목업 하나' }];
     await act(async () => {
-      root.render(<EmbedGroup entityType="artifact" refs={refs} onOpenReadingPanel={onOpenReadingPanel} />);
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <EmbedGroup entityType="artifact" refs={refs} onOpenReadingPanel={onOpenReadingPanel} />
+        </NextIntlClientProvider>,
+      );
     });
     const itemButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('목업 하나'));
     expect(itemButton).toBeTruthy();

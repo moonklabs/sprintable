@@ -15,6 +15,7 @@ import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { queuePendingToast } from './cross-project-toast-provider';
 import { Avatar } from '@/components/shared/avatar';
 import { Button } from '@/components/ui/button';
+import { CountBadge } from '@/components/ui/count-badge';
 import { NowStrip } from './now-strip';
 import { PulseCard } from './pulse-card';
 import { useChatRailOptional } from '@/app/(authenticated)/chats/chat-rail-context';
@@ -779,7 +780,14 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
           disabled={loadingMore}
           className="h-auto w-full rounded-lg py-2 text-xs font-normal text-muted-foreground transition hover:text-foreground disabled:opacity-50"
         >
-          {loadingMore ? tc('loading') : `더 보기 (${myTotal - conversations.length}건)`}
+          {loadingMore ? (
+            tc('loading')
+          ) : (
+            <span className="inline-flex items-center gap-1.5">
+              {tc('loadMore')}
+              <CountBadge count={myTotal - conversations.length} />
+            </span>
+          )}
         </Button>
       )}
     </div>
@@ -843,7 +851,10 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
           onClick={() => void fetchAllConversations(agentOffset, true)}
           className="h-auto w-full rounded-lg py-2 text-xs font-normal text-muted-foreground transition hover:text-foreground"
         >
-          더 보기 ({agentTotal - allConversations.length}건)
+          <span className="inline-flex items-center gap-1.5">
+            {tc('loadMore')}
+            <CountBadge count={agentTotal - allConversations.length} />
+          </span>
         </Button>
       )}
     </div>

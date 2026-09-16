@@ -635,7 +635,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
                   onClick={() => removePendingFile(i)}
                   disabled={sending}
                   className="text-muted-foreground hover:text-foreground disabled:opacity-40"
-                  aria-label="첨부 제거"
+                  aria-label={t('removeAttachment')}
                 >
                   <X className="h-3.5 w-3.5" />
                 </button>
@@ -647,7 +647,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
       {/* story #2105 2차 — handleSend가 재시도 전 두 상태 모두 false로 리셋해(위 정의) 매
           시도마다 언마운트→리마운트된다. */}
       {uploadFailed && (
-        <p role="alert" aria-live="assertive" aria-atomic="true" className="mb-1 text-xs text-destructive">첨부 업로드에 실패했습니다. 다시 시도해 주세요.</p>
+        <p role="alert" aria-live="assertive" aria-atomic="true" className="mb-1 text-xs text-destructive">{t('attachmentUploadFailed')}</p>
       )}
       {sendFailed && (
         <p role="alert" aria-live="assertive" aria-atomic="true" className="mb-1 text-xs text-destructive">{t('sendFailed')}</p>
@@ -661,7 +661,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
         <p role="alert" aria-live="assertive" aria-atomic="true" className="mb-1 text-xs text-destructive">{steerError}</p>
       )}
       {atMaxAttachments && (
-        <p className="mb-1 text-xs text-muted-foreground">첨부는 최대 {MAX_ATTACHMENTS}개까지 가능합니다.</p>
+        <p className="mb-1 text-xs text-muted-foreground">{t('maxAttachmentsReached', { max: MAX_ATTACHMENTS })}</p>
       )}
 
       {/* S8: command-candidate / 리터럴 escape 입력 affordance (시각 보조 — 전송 차단 아님) */}
@@ -787,7 +787,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
         {/* story #92f00dc4 — w-72→w-80: 서버 카탈로그 인자 힌트(예: `<스토리#> <멤버명>`)가
             추가되며 한 줄에 명령+힌트+설명이 안 맞아 줄바꿈되던 것 보정. */}
         {commandCandidates.length > 0 && (
-          <ul role="listbox" aria-label="커맨드 후보" className="focus-inset absolute bottom-full left-8 z-50 mb-1 max-h-48 w-80 overflow-y-auto rounded-md border border-border bg-popover shadow-[var(--elev-overlay)]">
+          <ul role="listbox" aria-label={t('commandCandidatesLabel')} className="focus-inset absolute bottom-full left-8 z-50 mb-1 max-h-48 w-80 overflow-y-auto rounded-md border border-border bg-popover shadow-[var(--elev-overlay)]">
             {commandCandidates.map((cmd, idx) => (
               <li key={cmd.name}>
                 <button
@@ -821,7 +821,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
 
         {/* Mention dropdown */}
         {mentionMembers.length > 0 && (
-          <ul role="listbox" aria-label="멘션 후보" className="focus-inset absolute bottom-full left-8 z-50 mb-1 max-h-48 w-56 overflow-y-auto rounded-md border border-border bg-popover shadow-[var(--elev-overlay)]">
+          <ul role="listbox" aria-label={t('mentionCandidatesLabel')} className="focus-inset absolute bottom-full left-8 z-50 mb-1 max-h-48 w-56 overflow-y-auto rounded-md border border-border bg-popover shadow-[var(--elev-overlay)]">
             {mentionMembers.map((member, idx) => (
               <li key={member.id}>
                 <button
@@ -843,7 +843,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
         {/* Entity dropdown — story #2263(C-5) ㉡: 종류별 구역(머리글)으로 묶되 열은 안 나눈다
             (entityResults가 이미 groupEntitiesByType로 그룹 순서라 렌더 순서=entityIndex 순서). */}
         {entityPicker.entityResults.length > 0 && (
-          <ul role="listbox" aria-label="엔티티 후보" className="focus-inset absolute bottom-full left-8 z-50 mb-1 max-h-48 w-72 overflow-y-auto rounded-md border border-border bg-popover shadow-[var(--elev-overlay)]">
+          <ul role="listbox" aria-label={t('entityCandidatesLabel')} className="focus-inset absolute bottom-full left-8 z-50 mb-1 max-h-48 w-72 overflow-y-auto rounded-md border border-border bg-popover shadow-[var(--elev-overlay)]">
             {entityPicker.entityResults.map((entity, idx) => {
               const EntityIcon = ENTITY_ICONS[entity.entity_type] ?? Hash;
               const isNewGroup = idx === 0 || entityPicker.entityResults[idx - 1]!.entity_type !== entity.entity_type;
