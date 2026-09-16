@@ -21,61 +21,14 @@ import {
   NOTIFICATION_TYPE_ICONS,
 } from '@/services/notification-display';
 import { groupByIdenticalContent, referenceTypeLabel } from '@/lib/inbox-generic-notification-grouping';
-import { composeEventPreviewLine, type EventPreviewHelpers } from '@/components/chat/event-block-card';
-import { gateTypeLabel } from '@/lib/gate-type-label';
+import type { EventPreviewHelpers } from '@/components/chat/event-block-card';
+import { composeNotificationDisplay, type Notification } from './inbox-notification-display';
 import { useOrgDomainLabels } from '@/hooks/use-org-domain-labels';
 
 // 알림 type 아이콘 렌더 — NOTIFICATION_TYPE_ICONS(lucide)서 lookup·미상 type은 fallback 아이콘.
 function NotifIcon({ type, fallback: Fallback, className }: { type: string; fallback: LucideIcon; className?: string }) {
   const Icon = NOTIFICATION_TYPE_ICONS[type] ?? Fallback;
   return <Icon className={className} />;
-}
-
-/**
- * story #3903 AC2 — 알림의 title/body를 렌더 시점에 조합한다(발행 시점 BE 고정 문구
- * 대신). `notification.event`(migration 0378)가 있을 때만 조합, 없으면(옛 행·다른 발행
- * 경로) 기존 title/body 그대로 — 과잉 일반화 금지(3888 composeEventPreviewLine의 기존
- * 계약과 동형).
- * - title: conversation.mention/conversation.message는 `event.sender_name`+`type`으로
- *   `inbox.mentionTitle`/`messageTitle`(신규 어간 0, BE 폴백 문구를 그대로 i18n 키로
- *   옮긴 것) 조합.
- * - body: `event.event_key`가 preset.*(이벤트 발행 메시지)면 composeEventPreviewLine
- *   (3888/3893과 완전히 같은 재료·같은 함수) 재사용 — raw preset 키·slug 0.
- * - gate.pending_approval(story #4316 CHANGES1, PO 라이브 실측 2026-09-15) — 결재함
- *   BE 고정 title/body 中 유일하게 합니다체가 남아 있던 자리(29곳 중 2곳). `event.payload.
- *   gate_type`이 있으면 gateTypeLabel(dashboard.ccGateType*, 기존 게이트 상세·결재함
- *   재사용 — 신규 어간 0)로 사람 낱말을 조합. reopen/신규 두 BE 문구를 FE 한 문장으로
- *   합친다(재제출 여부는 폴백 title/body에만 남고 FE 조합에선 구분 0 — 과잉 세분화 방지).
- */
-function composeNotificationDisplay(
-  notification: Notification,
-  t: (key: string, values?: Record<string, string | number>) => string,
-  eventPreviewHelpers: EventPreviewHelpers,
-): { title: string; body: string | null } {
-  const event = notification.event;
-  let title = notification.title;
-  let body = notification.body;
-
-  if (event?.sender_name) {
-    if (notification.type === 'conversation.mention') {
-      title = t('mentionTitle', { name: event.sender_name });
-    } else if (notification.type === 'conversation.message') {
-      title = t('messageTitle', { name: event.sender_name });
-    }
-  }
-
-  if (notification.type === 'gate.pending_approval' && typeof event?.payload?.['gate_type'] === 'string') {
-    const gateTypeLbl = gateTypeLabel(eventPreviewHelpers.tDashboard, event.payload['gate_type']);
-    title = t('gatePendingApprovalTitle');
-    body = t('gatePendingApprovalBody', { gateType: gateTypeLbl });
-  }
-
-  if (event?.event_key && event.payload) {
-    const composed = composeEventPreviewLine(event.event_key, event.payload, eventPreviewHelpers, event.refs);
-    if (composed) body = composed;
-  }
-
-  return { title, body };
 }
 
 interface WorkflowExecItem {
@@ -85,27 +38,6 @@ interface WorkflowExecItem {
   rule_name: string | null;
   status: string;
   completed_at: string | null;
-  created_at: string;
-}
-
-interface Notification {
-  id: string;
-  type: string;
-  title: string;
-  body: string | null;
-  is_read: boolean;
-  reference_type: string | null;
-  reference_id: string | null;
-  href?: string | null;
-  // story #3903(migration 0378, additive) — conversation.mention/conversation.message·
-  // gate.pending_approval(story #4316 CHANGES1, payload.gate_type)만 채움. 렌더 시점에
-  // 3888 eventCard 조합·제목 조합 재료로 쓴다. 없으면(옛 행·다른 발행 경로) title/body 폴백.
-  event?: {
-    sender_name?: string;
-    event_key?: string;
-    payload?: Record<string, unknown>;
-    refs?: Record<string, string | null | { found: boolean; token?: string; type?: string; name?: string }>;
-  } | null;
   created_at: string;
 }
 
