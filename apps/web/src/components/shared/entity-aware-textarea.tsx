@@ -23,6 +23,9 @@ interface EntityAwareTextareaProps {
    * 파일(chat-input-entity-tokens.ts) 자체는 diff 0 규율(#2264 AC3)이라 여기 소비처에서만 얹는다. */
   getEntityTypeLabel?: (canonicalSlug: string) => string | undefined;
   'data-testid'?: string;
+  /** 후보 리스트박스 aria-label — chat-input.tsx의 동형 dropdown과 같은 문구를 쓰려면
+   * 호출부가 자신의 로케일 문구를 넘긴다(story #3930, 이 공용 파일엔 도메인 ns가 없음). */
+  entityCandidatesLabel?: string;
 }
 
 /**
@@ -31,7 +34,7 @@ interface EntityAwareTextareaProps {
  * use-entity-picker.ts, 이 파일은 그 위의 얇은 렌더 래퍼 — chat-input.tsx의 entity dropdown
  * JSX를 그대로 재사용). story description/AC(story-detail-panel.tsx)가 첫 소비자.
  */
-export function EntityAwareTextarea({ value, onChange, projectId, placeholder, className, autoFocus, onPaste, getEntityTypeLabel, 'data-testid': dataTestId }: EntityAwareTextareaProps) {
+export function EntityAwareTextarea({ value, onChange, projectId, placeholder, className, autoFocus, onPaste, getEntityTypeLabel, 'data-testid': dataTestId, entityCandidatesLabel = 'Entity candidates' }: EntityAwareTextareaProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const entityPicker = useEntityPicker(projectId);
 
@@ -84,7 +87,7 @@ export function EntityAwareTextarea({ value, onChange, projectId, placeholder, c
       {/* story #2263(C-5) ㉠㉡㉢ 그대로 재사용 — chat-input.tsx 엔티티 dropdown과 동형 렌더. */}
       {entityPicker.entityResults.length > 0 && (
         // story #3007(로드맵 P2·PR-E, L1) — 자동완성 리스트박스는 floating이라 --elev-overlay.
-        <ul role="listbox" aria-label="엔티티 후보" className="focus-inset absolute left-0 z-50 mt-1 max-h-48 w-72 overflow-y-auto rounded-md border border-border bg-popover shadow-[var(--elev-overlay)]">
+        <ul role="listbox" aria-label={entityCandidatesLabel} className="focus-inset absolute left-0 z-50 mt-1 max-h-48 w-72 overflow-y-auto rounded-md border border-border bg-popover shadow-[var(--elev-overlay)]">
           {entityPicker.entityResults.map((entity, idx) => {
             const EntityIcon = ENTITY_ICONS[entity.entity_type] ?? Hash;
             const isNewGroup = idx === 0 || entityPicker.entityResults[idx - 1]!.entity_type !== entity.entity_type;

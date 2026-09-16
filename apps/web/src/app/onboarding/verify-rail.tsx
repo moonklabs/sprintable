@@ -128,12 +128,12 @@ export function VerifyRail({ steps }: { steps: DisplayStep[] }) {
           const isLast = i === steps.length - 1;
           const statusText =
             step.status === 'done'
-              ? '완료'
+              ? t('verifyStatusDone')
               : step.status === 'active'
-                ? '진행 중'
+                ? t('verifyStatusActive')
                 : step.status === 'failed'
-                  ? '실패'
-                  : '대기';
+                  ? t('verifyStatusFailed')
+                  : t('verifyStatusWaiting');
           return (
             <li
               key={step.state}

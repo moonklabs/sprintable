@@ -306,7 +306,7 @@ export function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProp
                     placeholder="0"
                     className="w-full rounded-xl border border-border bg-background px-3 py-2 pr-6 text-sm text-foreground tabular-nums placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                   />
-                  <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">명</span>
+                  <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">{t('personCountUnit')}</span>
                 </div>
               </div>
             </div>
@@ -872,7 +872,7 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
           {selected.team_size != null ? (
             <span className="flex items-center gap-1 rounded-md border border-border bg-muted/30 px-2.5 py-1 text-xs font-medium tabular-nums text-foreground">
               <Users className="size-3.5 text-muted-foreground" />
-              {selected.team_size}<span className="ml-0.5 text-muted-foreground">명</span>
+              {selected.team_size}<span className="ml-0.5 text-muted-foreground">{t('personCountUnit')}</span>
             </span>
           ) : null}
           <span className="flex items-center gap-1 rounded-md border border-border bg-muted/30 px-2.5 py-1 text-xs font-medium tabular-nums text-foreground">

@@ -869,7 +869,7 @@ describe('StoryDetailPanel — 삭제 404/이중발사 처방(story #3169)', () 
     await act(async () => { confirmButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 
-    expect(container.textContent).toContain('스토리 삭제에 실패했습니다.');
+    expect(container.textContent).toContain('스토리 삭제에 실패했어요.');
     expect(onDeleteSuccess).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
   });

@@ -1071,17 +1071,17 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
       if (!res.ok) {
         // story #2485 — backend delete_goal()은 generic HTTP상태 코드만 낸다
         // (진짜 비즈니스 code 없음, 그라운딩 확認) — raw 서버 message 노출 대신 고정 문구.
-        addToast({ type: 'error', title: '목표 삭제에 실패했습니다.' });
+        addToast({ type: 'error', title: t('goalDeleteFailed') });
         void fetchGoals();
       }
     } catch {
-      addToast({ type: 'error', title: '목표 삭제에 실패했습니다.' });
+      addToast({ type: 'error', title: t('goalDeleteFailed') });
       void fetchGoals();
     } finally {
       setDeleting(false);
       setDeleteConfirmId(null);
     }
-  }, [fetchGoals, addToast]);
+  }, [fetchGoals, addToast, t]);
 
   const handleCreated = useCallback((epic: Goal) => {
     setGoals((prev) => [epic, ...prev]);

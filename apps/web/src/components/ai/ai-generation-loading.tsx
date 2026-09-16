@@ -1,3 +1,4 @@
+import { useTranslations } from 'next-intl';
 import { Sparkles } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
@@ -101,10 +102,11 @@ export function AiGenerationLoading({
 }
 
 function GenerationSkeleton({ variant }: { variant: 'synthesis' | 'draft' }) {
+  const tc = useTranslations('common');
   if (variant === 'draft') {
     return (
       <div className="flex flex-col gap-2 border-t border-dashed border-border pt-3">
-        <p className="text-[9.5px] font-bold uppercase tracking-[0.14em] text-muted-foreground">곧 나올 초안</p>
+        <p className="text-[9.5px] font-bold uppercase tracking-[0.14em] text-muted-foreground">{tc('aiUpcomingDraft')}</p>
         <div className="space-y-2 rounded-lg border border-border bg-card p-2.5">
           <Skeleton variant="text" className="w-[85%]" />
           <Skeleton variant="text" className="w-[55%]" />
@@ -119,7 +121,7 @@ function GenerationSkeleton({ variant }: { variant: 'synthesis' | 'draft' }) {
   }
   return (
     <div className="flex flex-col gap-2 border-t border-dashed border-border pt-3">
-      <p className="text-[9.5px] font-bold uppercase tracking-[0.14em] text-muted-foreground">곧 나올 종합</p>
+      <p className="text-[9.5px] font-bold uppercase tracking-[0.14em] text-muted-foreground">{tc('aiUpcomingSynthesis')}</p>
       <div className="space-y-2.5 rounded-lg border border-border bg-card p-2.5">
         {[0, 1].map((i) => (
           <div key={i} className="flex items-start gap-2">

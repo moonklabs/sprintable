@@ -530,19 +530,19 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
       if (!res.ok && res.status !== 404) {
         // story #2485 — backend delete_story()는 generic HTTP상태 코드만 낸다(진짜
         // 비즈니스 code 없음, 그라운딩 확認) — raw 서버 message 노출 대신 고정 문구.
-        addToast({ type: 'error', title: '스토리 삭제에 실패했습니다.' });
+        addToast({ type: 'error', title: t('storyDeleteFailed') });
         return;
       }
       onDeleteSuccess?.(story.id);
       onClose();
     } catch {
-      addToast({ type: 'error', title: '스토리 삭제에 실패했습니다.' });
+      addToast({ type: 'error', title: t('storyDeleteFailed') });
     } finally {
       deletingRef.current = false;
       setDeleting(false);
       setShowDeleteConfirm(false);
     }
-  }, [story.id, onDeleteSuccess, onClose, addToast]);
+  }, [story.id, onDeleteSuccess, onClose, addToast, t]);
 
   const titleInputRef = useRef<HTMLInputElement>(null);
 
@@ -1068,7 +1068,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
     } else {
       assigneeIdsRef.current = prev; // PATCH 실패 → 직전 값 롤백
       setLocalAssigneeIds(prev);
-      addToast({ type: 'error', title: '담당자 변경에 실패했습니다.' });
+      addToast({ type: 'error', title: t('assigneeChangeFailed') });
     }
   };
 
@@ -1083,7 +1083,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
     } else {
       assigneeIdsRef.current = prev; // 롤백
       setLocalAssigneeIds(prev);
-      addToast({ type: 'error', title: '담당자 변경에 실패했습니다.' });
+      addToast({ type: 'error', title: t('assigneeChangeFailed') });
     }
   };
 
@@ -1669,10 +1669,11 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                     onChange={setDescriptionDraft}
                     onPaste={handlePasteAttach}
                     projectId={projectId}
-                    placeholder="Markdown 형식으로 작성하세요..."
+                    placeholder={t('markdownPlaceholder')}
                     className="flex field-sizing-content min-h-[160px] w-full resize-y rounded-lg border border-input bg-transparent px-2.5 py-2 font-mono text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                     autoFocus
                     getEntityTypeLabel={getEntityTypeLabel}
+                    entityCandidatesLabel={t('entityCandidatesLabel')}
                   />
                   <div className="flex gap-2">
                     <Button size="sm" onClick={handleSaveDescription} disabled={savingDescription}>
@@ -1728,10 +1729,11 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                     value={acDraft}
                     onChange={setAcDraft}
                     projectId={projectId}
-                    placeholder="Markdown 형식으로 작성하세요..."
+                    placeholder={t('markdownPlaceholder')}
                     className="flex field-sizing-content min-h-[160px] w-full resize-y rounded-lg border border-input bg-transparent px-2.5 py-2 font-mono text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                     autoFocus
                     getEntityTypeLabel={getEntityTypeLabel}
+                    entityCandidatesLabel={t('entityCandidatesLabel')}
                   />
                   <div className="flex gap-2">
                     <Button size="sm" onClick={handleSaveAC} disabled={savingAC}>
@@ -1778,7 +1780,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                   disabled={uploadingAttachment || (story.attachments?.length ?? 0) >= STORY_ATTACHMENT_LIMIT}
                   className="h-auto min-h-0 min-w-0 flex items-center gap-1 p-0 text-xs font-normal text-muted-foreground hover:text-foreground disabled:opacity-40"
                 >
-                  <Paperclip className="size-3" /> + 추가
+                  <Paperclip className="size-3" /> {t('addGeneric')}
                 </Button>
               </div>
               <input
@@ -1794,7 +1796,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                   {story.attachments.map((att, i) => {
                     const isImage = att.content_type?.startsWith('image/');
                     const Icon = getFileIcon(att.content_type);
-                    const label = att.name ?? '첨부파일';
+                    const label = att.name ?? t('attachmentFileFallback');
                     return (
                       <div key={att.url ?? i} className="group relative">
                         {/* a54ddc16 B1: 보드 첨부도 auth-gated 서명 라우트 경유(chat과 동일 컴포넌트·3상태). */}
@@ -1810,7 +1812,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                           variant="ghost"
                           onClick={() => void handleRemoveAttachment(att.url)}
                           className="h-auto min-h-0 min-w-0 absolute right-1 top-1 hidden rounded bg-destructive-tint p-0.5 text-destructive group-hover:block hover:brightness-95"
-                          aria-label="첨부 삭제"
+                          aria-label={t('attachmentDelete')}
                         >
                           <X className="size-3" />
                         </Button>
@@ -1836,7 +1838,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
               {/* story #2105 2차 — handleAttachFiles가 재시도 전 setAttachError(false)를 먼저
                   호출해(위 정의) 매 시도마다 언마운트→리마운트된다. */}
               {attachError && (
-                <p role="alert" aria-live="assertive" aria-atomic="true" className="mt-1 text-xs text-destructive">첨부 업로드에 실패했습니다. 다시 시도해 주세요.</p>
+                <p role="alert" aria-live="assertive" aria-atomic="true" className="mt-1 text-xs text-destructive">{t('attachmentUploadFailed')}</p>
               )}
             </div>
 
@@ -1853,7 +1855,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                   onClick={() => setShowLabelPicker((v) => !v)}
                   className="h-auto min-h-0 min-w-0 rounded px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground hover:bg-muted"
                 >
-                  {showLabelPicker ? tc('close') : '+ 추가'}
+                  {showLabelPicker ? tc('close') : t('addGeneric')}
                 </Button>
               </div>
 
@@ -1882,7 +1884,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                       ))}
                     </div>
                   ) : (
-                    <p className="mb-2 text-xs text-muted-foreground">라벨 없음</p>
+                    <p className="mb-2 text-xs text-muted-foreground">{t('noLabel')}</p>
                   )}
 
                   {showLabelPicker && (
@@ -1926,7 +1928,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                           value={newLabelName}
                           onChange={(e) => setNewLabelName(e.target.value)}
                           onKeyDown={(e) => { if (e.key === 'Enter') void handleCreateLabel(); }}
-                          placeholder="새 라벨 이름"
+                          placeholder={t('newLabelNamePlaceholder')}
                           className="min-w-0 flex-1 rounded border border-border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
                         />
                         <Button
@@ -1936,7 +1938,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                           disabled={!newLabelName.trim() || creatingLabel}
                           className="h-auto min-h-0 min-w-0 rounded bg-primary px-2 py-1 text-xs font-normal text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
                         >
-                          {creatingLabel ? '...' : '생성'}
+                          {creatingLabel ? '...' : t('createLabel')}
                         </Button>
                       </div>
                     </div>
@@ -2326,7 +2328,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                                   onClick={() => setExpandedActivityId(expanded ? null : activity.id)}
                                   className="h-auto min-h-0 min-w-0 ml-auto rounded px-1.5 py-0.5 font-normal text-muted-foreground hover:bg-muted hover:text-foreground"
                                 >
-                                  {expanded ? '접기' : '펼치기'}
+                                  {expanded ? t('collapseSection') : t('expandSection')}
                                 </Button>
                               ) : null}
                             </div>
@@ -2354,9 +2356,9 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
       <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>스토리를 삭제하시겠습니까?</DialogTitle>
+            <DialogTitle>{t('storyDeleteConfirmTitle')}</DialogTitle>
             <DialogDescription>
-              이 작업은 되돌릴 수 없습니다. 스토리에 연결된 태스크도 함께 삭제됩니다.
+              {t('storyDeleteIrreversible')}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -2369,7 +2371,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
               onClick={() => void handleDelete()}
               disabled={deleting}
             >
-              {deleting ? '삭제 중…' : '영구 삭제'}
+              {deleting ? tc('deleting') : t('permanentDelete')}
             </Button>
           </DialogFooter>
         </DialogContent>
