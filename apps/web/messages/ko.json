@@ -4652,7 +4652,7 @@
     "personCount": "{count}명",
     "agentCount": "나 + {count}명의 에이전트",
     "addParticipantFailed": "참여자 추가에 실패했어요. 다시 시도해 보세요.",
-    "noAvailableMembersToAdd": "추가 가능한 팀원이 없는",
+    "noAvailableMembersToAdd": "추가 가능한 팀원이 없어요",
     "copied": "복사됨",
     "clickToCopy": "클릭해 복사",
     "copyCode": "코드 복사",
