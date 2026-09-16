@@ -9,6 +9,7 @@ import { useTodaySnapshot } from '@/components/org-briefing/use-today-snapshot';
 import { EMPTY_TODAY_SNAPSHOT, type TodayCount, type TodaySnapshot } from '@/components/org-briefing/derive-today';
 import { TodayV3Decisions } from './today-v3-decisions';
 import { TodayV3AgentProgress } from './today-v3-agent-progress';
+import { useMyOrgRole } from './use-my-org-role';
 
 /**
  * story #3962(E-UX-OVERHAUL·「오늘」 구현 3/N·FE) — 시안 ①(artifact d31b9e6d) 그대로.
@@ -105,6 +106,8 @@ export function TodayV3Screen() {
   const t = useTranslations('todayV3');
   const tc = useTranslations('common');
   const locale = useLocale();
+  const myRole = useMyOrgRole();
+  const isAdminOrOwner = myRole === 'owner' || myRole === 'admin';
 
   const dateLabel = new Intl.DateTimeFormat(locale, { month: 'long', day: 'numeric', weekday: 'long' }).format(new Date());
   // story #3962 ④(FE 계산) — 서버는 agent.id를 안 준다(derive-today.ts가 agentName만
@@ -137,7 +140,10 @@ export function TodayV3Screen() {
               </div>
             ) : (
               <div className="space-y-6">
-                <TodayV3Decisions items={snapshot.needsMe} count={snapshot.needsMeCount} />
+                <TodayV3Decisions
+                  items={snapshot.needsMe} count={snapshot.needsMeCount}
+                  isAdminOrOwner={isAdminOrOwner} onActionSuccess={retry}
+                />
                 <TodayV3AgentProgress items={snapshot.agentProgress} />
                 <TodayResultsSummary snapshot={snapshot} />
               </div>
