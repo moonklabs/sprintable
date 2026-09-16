@@ -28,13 +28,14 @@ def _mock_story(story_id=STORY_ID, org_id=ORG_ID):
 
 async def _post_capture_review(payload: dict, mock_session):
     from app.main import app
-    from app.dependencies.database import get_db
     from httpx import ASGITransport, AsyncClient
+    from tests.conftest import override_db_and_read
 
     async def override_db():
         yield mock_session
 
-    app.dependency_overrides[get_db] = override_db
+    # story #2451 가드 — get_db만 걸고 get_read_db를 빠뜨리는 재발 클래스, 이 헬퍼 하나로만.
+    override_db_and_read(app, override_db)
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
             return await c.post(
