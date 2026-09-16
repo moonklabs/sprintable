@@ -133,8 +133,8 @@ describe('story #2642 — own-href(story/epic/asset)도 크로스프로젝트 �
   });
 });
 
-describe('AC3/AC4 — task는 부모 story로("담긴 곳으로 가요")', () => {
-  it('task 상세 fetch가 story_id를 주면 풋터가 파랑 링크 "담긴 곳으로 가요"·/board?story=로 간다', async () => {
+describe('AC3/AC4 — task는 부모 story로("상위 스토리로 가요")', () => {
+  it('task 상세 fetch가 story_id를 주면 풋터가 파랑 링크 "상위 스토리로 가요"·/board?story=로 간다', async () => {
     stubFetch(async (url) => {
       expect(url).toContain('/api/tasks/');
       return { ok: true, json: async () => ({ data: { story_id: 's-parent-1' } }) };
@@ -146,7 +146,7 @@ describe('AC3/AC4 — task는 부모 story로("담긴 곳으로 가요")', () =>
     await flush();
     const link = document.querySelector('a[href="/board?story=s-parent-1"]');
     expect(link).not.toBeNull();
-    expect(link!.textContent).toContain('담긴 곳으로 가요');
+    expect(link!.textContent).toContain('상위 스토리로 가요');
   });
 
   // story #2642(BE #3044) — TaskResponse가 story_id→Story.project_id 1-hop을 이미 해소해
@@ -163,7 +163,7 @@ describe('AC3/AC4 — task는 부모 story로("담긴 곳으로 가요")', () =>
     await flush();
     const link = document.querySelector('a[href="/acme/content/board?story=s-parent-2"]');
     expect(link).not.toBeNull();
-    expect(link!.textContent).toContain('담긴 곳으로 가요');
+    expect(link!.textContent).toContain('상위 스토리로 가요');
     expect(document.querySelector('a[href="/board?story=s-parent-2"]')).toBeNull();
   });
 });
@@ -184,7 +184,7 @@ function stubArtifactPreviewThenDetail(
 }
 
 describe('AC3/AC4 — artifact는 레코드마다 갈린다(FK 있으면 ②, 전부 없으면 ③)', () => {
-  it('story_id가 있는 artifact는 "담긴 곳으로 가요"로 그 story로 간다', async () => {
+  it('story_id가 있는 artifact는 "상위 스토리로 가요"로 그 story로 간다', async () => {
     stubArtifactPreviewThenDetail(async () => ({
       ok: true,
       json: async () => ({ data: { story_id: 's-1', epic_id: null, doc_id: null } }),
@@ -196,7 +196,7 @@ describe('AC3/AC4 — artifact는 레코드마다 갈린다(FK 있으면 ②, �
     await flush();
     const link = document.querySelector('a[href="/board?story=s-1"]');
     expect(link).not.toBeNull();
-    expect(link!.textContent).toContain('담긴 곳으로 가요');
+    expect(link!.textContent).toContain('상위 스토리로 가요');
   });
 
   it('story #3208 핵심 처방 — 뷰어가 다른 project를 보던 중이어도 preview가 해소한 project_id를 detail fetch에 X-Project-Id로 명시 실어 보낸다(«현재 project»로 스코프되지 않음)', async () => {
@@ -291,7 +291,7 @@ describe('AC3/AC4 — artifact는 레코드마다 갈린다(FK 있으면 ②, �
     await flush(8);
     const link = document.querySelector('a[href="/acme/content/docs/other-doc/view"]');
     expect(link).not.toBeNull();
-    expect(link!.textContent).toContain('담긴 곳으로 가요');
+    expect(link!.textContent).toContain('상위 스토리로 가요');
     // 옛 project-무관 bare 링크가 더는 안 남아야 한다(진짜로 직행 링크로 교체됐는지 확認).
     expect(document.querySelector('a[href="/docs?id=doc-9"]')).toBeNull();
   });
@@ -315,7 +315,7 @@ describe('AC3/AC4 — artifact는 레코드마다 갈린다(FK 있으면 ②, �
     await flush(8);
     const link = document.querySelector('a[href="/docs?id=doc-10"]');
     expect(link).not.toBeNull();
-    expect(link!.textContent).toContain('담긴 곳으로 가요');
+    expect(link!.textContent).toContain('상위 스토리로 가요');
   });
 
   it('전부 null(독립 artifact)이면 회색·행동0 "열 수 있는 화면이 없어요"(거짓 링크 금지)', async () => {
@@ -457,7 +457,7 @@ describe('story #2780 — "미리보기 없음" 문구는 "실제로 보여줄 �
   });
 });
 
-describe('AC3/AC4 — evidence는 부모 story로("담긴 곳으로 가요", story #2314 승격)', () => {
+describe('AC3/AC4 — evidence는 부모 story로("상위 스토리로 가요", story #2314 승격)', () => {
   it('story #2314(2026-07-29): GET /api/v2/evidence/{id} 개통 前엔 임시 ③이었으나, 이제 fetch해서 ②로 판정한다 — resolved_story_id를 BE가 이미 한 번에 해소해 준다(task처럼 2단 조인 불필요)', async () => {
     stubFetch(async (url) => {
       expect(url).toContain('/api/evidence/');
@@ -470,7 +470,7 @@ describe('AC3/AC4 — evidence는 부모 story로("담긴 곳으로 가요", sto
     await flush();
     const link = document.querySelector('a[href="/board?story=s-parent-2"]');
     expect(link).not.toBeNull();
-    expect(link!.textContent).toContain('담긴 곳으로 가요');
+    expect(link!.textContent).toContain('상위 스토리로 가요');
   });
 
   it('resolved_story_id가 없으면(예: 부모 task가 사라짐) 회색·행동0 "열 수 있는 화면이 없어요"(거짓 링크 금지)', async () => {
@@ -498,7 +498,7 @@ describe('AC3/AC4 — evidence는 부모 story로("담긴 곳으로 가요", sto
     await flush();
     const link = document.querySelector('a[href="/acme/content/board?story=s-parent-3"]');
     expect(link).not.toBeNull();
-    expect(link!.textContent).toContain('담긴 곳으로 가요');
+    expect(link!.textContent).toContain('상위 스토리로 가요');
     expect(document.querySelector('a[href="/board?story=s-parent-3"]')).toBeNull();
   });
 });
