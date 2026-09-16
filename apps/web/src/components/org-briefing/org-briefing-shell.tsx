@@ -9,8 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { fetchWithAuth } from '@/lib/db/client';
-import { EMPTY_TODAY_SNAPSHOT, parseToday, type TodaySnapshot } from './derive-today';
+import { EMPTY_TODAY_SNAPSHOT, useTodaySnapshot } from './use-today-snapshot';
 import { AgentProgressSection, NeedsMeSection, PublishedSection } from './today-sections';
 
 // story #3831(UX-v3·FE 3·오늘, 페드루 PO 確定 2026-09-13) — 옛 조직 브리핑(NowFace·
@@ -23,27 +22,6 @@ import { AgentProgressSection, NeedsMeSection, PublishedSection } from './today-
 // 스켈레톤을 대신 그리던 시절)도 배너 조건이었다 — today route는 org 스코프뿐이라(project_id
 // 파라미터 자체가 없다) 그 조건은 이제 거짓이 된다(项目 없어도 내용은 뜬다). `next`(#2212
 // 리다이렉트 복귀 안내)만 남긴다.
-
-function useTodaySnapshot() {
-  const [data, setData] = useState<TodaySnapshot | null>(null);
-  const [loadError, setLoadError] = useState(false);
-  const [reloadNonce, setReloadNonce] = useState(0);
-
-  useEffect(() => {
-    let cancelled = false;
-    // 재시도(reloadNonce) 때마다 이전 에러 배너를 먼저 걷어야 새 fetch 결과가 도착할
-    // 때까지 헌 상태가 안 남는다(channels/page.tsx의 load() 관례와 동형).
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setLoadError(false);
-    fetchWithAuth('/api/today')
-      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
-      .then((json) => { if (!cancelled) setData(parseToday(json)); })
-      .catch(() => { if (!cancelled) setLoadError(true); });
-    return () => { cancelled = true; };
-  }, [reloadNonce]);
-
-  return { data, loadError, retry: () => setReloadNonce((n) => n + 1) };
-}
 
 function InstructionInput({ autoFocus }: { autoFocus: boolean }) {
   const t = useTranslations('orgBriefing');

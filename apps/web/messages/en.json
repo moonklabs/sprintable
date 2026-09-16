@@ -469,6 +469,23 @@
     "workforceTrustVerified": "Human verified",
     "workforceTrustClaimed": "Agent-reported · awaiting review"
   },
+  "todayV3": {
+    "title": "Today",
+    "headerSummary": "{decisions} decisions need your call · {agents} agents are working.",
+    "loadErrorTitle": "Couldn't load this",
+    "resultsSectionTitle": "Today's results",
+    "resultsHint": "See Results for details",
+    "resultsSummaryLine": "{landed} landed today · {qaPassed} passed review · {openDefects} open issues · {published} published.",
+    "unmeasured": "Not measured",
+    "searchPlaceholder": "Search or give an instruction",
+    "targetColumnEmpty": "Nothing selected.",
+    "chatColumnEmpty": "Select a conversation to see it here.",
+    "navToday": "Today",
+    "navChats": "Chats",
+    "navWork": "Work",
+    "navResults": "Results",
+    "navConnectRules": "Connections & Rules"
+  },
   "workList": {
     "title": "Work",
     "subtitle": "Goals lead to stories, stories to tasks. Work you take on and work you delegate are kept apart.",
