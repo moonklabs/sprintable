@@ -109,3 +109,46 @@ describe('composeNotificationDisplay — event 없는 legacy 레코드 폴백 �
     expect(body).not.toContain('토큰 만료'); // legacy 라벨이 덮어쓰지 않는다
   });
 });
+
+// story #3949(E-UX-OVERHAUL·customer-zero·§①) — event도 없고 legacy「[이벤트] preset.X」
+// 패턴과도 안 맞는(=«보통» conversation.message가 event 페이로드 없이 도착) body는 위
+// 두 분기 다 안 걸려 raw notification.body 그대로 반환됐다 — 마크다운 링크/entity 참조
+// 토큰이 그대로 샐 수 있다. 실 레코드 fixture = PO 라이브 실측(b676dc29·대화 6a584f3e)
+// 원문 형태 재현(chat-list-view.test.tsx·entity-backlinks-section.test.tsx와 동일 원문).
+describe('composeNotificationDisplay — story #3949 평문화(event 無·legacy 패턴도 無)', () => {
+  it('⭐entity 참조 토큰이 든 일반 메시지 body는 라벨만 남는다', () => {
+    const { body } = composeNotificationDisplay(
+      baseNotification({
+        body: '[PO 픽스처 2·삭제예정] 같은 org 산출물 참조 [\\[PO 픽스처 산출물…\\]]'
+          + '(entity:artifact:c92d9614-1111-2222-3333-444455556666)',
+      }),
+      (key: string) => key,
+      helpers,
+    );
+    expect(body).toBe('[PO 픽스처 2·삭제예정] 같은 org 산출물 참조 [PO 픽스처 산출물…]');
+    expect(body).not.toContain('entity:artifact:');
+    expect(body).not.toContain('](');
+  });
+
+  it('음성대조 — 마크다운 문법이 없는 평범한 body는 무변', () => {
+    const { body } = composeNotificationDisplay(
+      baseNotification({ body: '오늘 배포 몇 시예요?' }),
+      (key: string) => key,
+      helpers,
+    );
+    expect(body).toBe('오늘 배포 몇 시예요?');
+  });
+
+  it('무관 no-op — event로 이미 조합된 body(entity 문법 없음)는 그대로', () => {
+    const { body } = composeNotificationDisplay(
+      baseNotification({
+        body: '[이벤트] preset.gate.verdict',
+        event: { event_key: 'preset.gate.verdict', payload: { gate_type: 'external_publish', verdict: 'approved' } },
+      }),
+      (key: string) => key,
+      helpers,
+    );
+    expect(body).not.toBeNull();
+    expect(body).not.toContain('entity:');
+  });
+});

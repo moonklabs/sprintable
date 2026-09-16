@@ -440,6 +440,40 @@ describe('ChatListView — story #3888 이벤트 메시지 미리보기(raw slug
   });
 });
 
+// story #3949(E-UX-OVERHAUL·customer-zero·§①) — 이벤트가 아닌 «보통» 메시지가 마크다운
+// 링크/entity 참조 토큰을 담고 있으면(예: 사람이 채팅에 산출물 참조를 붙여 보냄) 이 자리는
+// 본문 칩 렌더러를 안 거쳐 원문 그대로 샜다. 실 레코드 fixture = PO 라이브 실측(b676dc29·
+// 대화 6a584f3e) 원문 형태 재현.
+describe('ChatListView — story #3949 미리보기 평문화(entity 토큰·마크다운 링크)', () => {
+  it('⭐entity 참조 토큰이 든 메시지는 라벨만 뜬다(원문 대괄호·href 노출 0)', async () => {
+    stubFetchWithConversations([{
+      id: 'conv-entity-1', type: 'dm', title: '테스트 대화',
+      latest_message: {
+        content: '[PO 픽스처 2·삭제예정] 같은 org 산출물 참조 [\\[PO 픽스처 산출물…\\]]'
+          + '(entity:artifact:c92d9614-1111-2222-3333-444455556666)',
+        created_at: '2026-09-16T11:10:00Z', event: null,
+      },
+      updated_at: '2026-09-16T11:10:00Z', unread_count: 0,
+    }]);
+    await mount();
+    expect(container.textContent).toContain('[PO 픽스처 산출물…]');
+    expect(container.textContent).not.toContain('entity:artifact:');
+    expect(container.textContent).not.toContain('](');
+  });
+
+  // 무관 PR no-op — 3888 eventCard 경로(event 필드 有)는 이 헬퍼를 안 거친다(이미 위
+  // describe가 검증). event==null인 일반 메시지에 마크다운 문법이 아예 없으면 무변.
+  it('음성대조 — 마크다운 문법이 없는 평범한 메시지는 무변', async () => {
+    stubFetchWithConversations([{
+      id: 'conv-plain-2', type: 'dm', title: '평범한 대화',
+      latest_message: { content: '오늘 배포 몇 시예요?', created_at: '2026-09-16T11:10:00Z', event: null },
+      updated_at: '2026-09-16T11:10:00Z', unread_count: 0,
+    }]);
+    await mount();
+    expect(container.textContent).toContain('오늘 배포 몇 시예요?');
+  });
+});
+
 // story #3888 CHANGES①(PO PR 코멘트, 2026-09-14 18:53Z) — useOrgDomainLabels를
 // ConversationRow(행) 안에서 부르면 행 개수만큼 같은 domain-labels 요청이 중복 발사된다
 // (훅 자체엔 캐시·dedupe가 없다, use-org-domain-labels.ts 그라운딩). ChatListView가 1회만
