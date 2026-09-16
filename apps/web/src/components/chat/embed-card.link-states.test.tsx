@@ -221,7 +221,7 @@ describe('AC3/AC4 — artifact는 레코드마다 갈린다(FK 있으면 ②, �
     expect(detailCall!.headers['x-project-id']).toBe('p-owning');
   });
 
-  it('epic_id만 있으면 그 epic(/goals/)으로 간다', async () => {
+  it('epic_id만 있으면 그 epic(/goals/)으로 간다 — 풋터 문구도 "상위 목표로 가요"(story #3935 CHANGES, epic 부모는 「스토리」가 아니다)', async () => {
     stubArtifactPreviewThenDetail(async () => ({
       ok: true,
       json: async () => ({ data: { story_id: null, epic_id: 'e-9', doc_id: null } }),
@@ -231,7 +231,9 @@ describe('AC3/AC4 — artifact는 레코드마다 갈린다(FK 있으면 ②, �
     });
     await openCard();
     await flush();
-    expect(document.querySelector('a[href="/goals/e-9"]')).not.toBeNull();
+    const link = document.querySelector('a[href="/goals/e-9"]');
+    expect(link).not.toBeNull();
+    expect(link!.textContent).toContain('상위 목표로 가요');
   });
 
   // story #2642(BE #3044) — ArtifactResponse는 artifact 자기 행의 org_id/project_id를
@@ -291,7 +293,7 @@ describe('AC3/AC4 — artifact는 레코드마다 갈린다(FK 있으면 ②, �
     await flush(8);
     const link = document.querySelector('a[href="/acme/content/docs/other-doc/view"]');
     expect(link).not.toBeNull();
-    expect(link!.textContent).toContain('상위 스토리로 가요');
+    expect(link!.textContent).toContain('상위 문서로 가요');
     // 옛 project-무관 bare 링크가 더는 안 남아야 한다(진짜로 직행 링크로 교체됐는지 확認).
     expect(document.querySelector('a[href="/docs?id=doc-9"]')).toBeNull();
   });
@@ -315,7 +317,7 @@ describe('AC3/AC4 — artifact는 레코드마다 갈린다(FK 있으면 ②, �
     await flush(8);
     const link = document.querySelector('a[href="/docs?id=doc-10"]');
     expect(link).not.toBeNull();
-    expect(link!.textContent).toContain('상위 스토리로 가요');
+    expect(link!.textContent).toContain('상위 문서로 가요');
   });
 
   it('전부 null(독립 artifact)이면 회색·행동0 "열 수 있는 화면이 없어요"(거짓 링크 금지)', async () => {
