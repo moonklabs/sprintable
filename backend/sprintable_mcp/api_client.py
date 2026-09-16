@@ -89,14 +89,21 @@ class SprintableApiError(Exception):
     """story #3933 — `.code`/`.message`/`.detail`을 붙여 `response.py::err()`가 구조화된
     응답을 조립할 수 있게 한다. 생성자 시그니처(status, message, body)는 그대로 — 기존
     호출부·테스트 fixture(`SprintableApiError(404, "NOT_FOUND: ...")`류)가 전부 이 2·3-인자
-    형이라 바꾸면 그 전부를 고쳐야 한다(불필요한 파급). `.code`는 message 앞부분에서
-    파생만 한다."""
+    형이라 바꾸면 그 전부를 고쳐야 한다(불필요한 파급).
 
-    def __init__(self, status: int, message: str, body: Any = None) -> None:
-        super().__init__(message)
+    페드루 PO CHANGES①(PR#4357 리뷰) — `code`는 키워드 인자로 «명시 전달»이 정본이다
+    (`request()`가 이미 `_extract_error_code(body)`로 code를 따로 알고 있는 자리 —
+    `_extract_error_message`가 만든 `f"{code}: {message}"` 문자열을 다시 정규식으로
+    쪼개 되파싱하는 건 문자열 왕복에 기대는 불필요한 간접이었다). code를 안 주면(기존
+    호출부·테스트 fixture 하위호환) message 앞부분에서 파생하는 폴백으로만 동작한다."""
+
+    def __init__(self, status: int, message: str, body: Any = None, code: str | None = None) -> None:
+        super().__init__(message)  # str(exc)는 항상 원본 `message`(보통 "{code}: msg" 합본) 그대로 — 하위호환.
         self.status = status
         self.body = body
-        self.code, self.message = _split_code_message(message)
+        _derived_code, stripped_message = _split_code_message(message)
+        self.code = code or _derived_code
+        self.message = stripped_message
         self.detail = body
 
 
@@ -117,6 +124,25 @@ def _format_validation_errors(detail: list) -> str | None:
         msg = item.get("msg") or item.get("type") or "invalid"
         parts.append(f"{field}: {msg}")
     return "; ".join(parts) if parts else None
+
+
+def _extract_error_code(body: Any) -> str | None:
+    """story #3933 CHANGES①(PR#4357) — `_extract_error_message`와 정확히 같은 우선순위로
+    code «만» 뽑는다(문자열로 합친 뒤 되파싱하지 않고, raise 시점에 명시 전달하기 위함).
+    shape 3(422 배열)·4(평문)·5(비-JSON)는 code 개념이 없어 None."""
+    if not isinstance(body, dict):
+        return None
+    env = body.get("error")
+    if isinstance(env, dict):
+        code = env.get("code")
+        if code:
+            return str(code)
+    detail = body.get("detail")
+    if isinstance(detail, dict):
+        code = detail.get("code")
+        if code:
+            return str(code)
+    return None
 
 
 def _extract_error_message(status: int, body: Any) -> str:
@@ -377,7 +403,7 @@ class SprintableClient:
                 except Exception:
                     body = None
             message = _extract_error_message(resp.status_code, body)
-            raise SprintableApiError(resp.status_code, message, body)
+            raise SprintableApiError(resp.status_code, message, body, code=_extract_error_code(body))
 
         data = resp.json()
         # ⛔story #2294 ③ 후속(오르테가 라이브 실측, 2026-07-29): {data: T, ...sibling} 래핑을
