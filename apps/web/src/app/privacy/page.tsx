@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { getTranslations } from 'next-intl/server';
 import { SprintableLogo } from '@/components/brand/sprintable-logo';
 import { DocContentRenderer } from '@/components/docs/doc-content-renderer';
 import { getCurrentLegalDocument } from '@/lib/legal-docs';
@@ -13,6 +14,7 @@ export const revalidate = 300;
 
 export default async function PrivacyPage() {
   const doc = await getCurrentLegalDocument('privacy');
+  const t = await getTranslations('docs');
 
   return (
     <div className="min-h-screen bg-muted py-12">
@@ -30,7 +32,12 @@ export default async function PrivacyPage() {
               <p className="mb-6 text-xs text-muted-foreground">
                 시행일: {formatScheduledAt(doc.effectiveFrom, resolveDisplayTimezone().tz).display}
               </p>
-              <DocContentRenderer content={doc.content} contentFormat={doc.contentFormat} publicMode />
+              <DocContentRenderer
+                content={doc.content}
+                contentFormat={doc.contentFormat}
+                publicMode
+                untitledEmbedLabel={t('newDocDefaultTitle')}
+              />
             </>
           ) : (
             <p className="text-sm text-muted-foreground">
