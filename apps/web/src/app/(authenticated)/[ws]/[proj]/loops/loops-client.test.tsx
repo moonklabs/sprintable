@@ -111,3 +111,14 @@ describe('LoopsClient — 실험실 first-touch 정체성', () => {
     expect(loopCreateDialogOpenSpy).toHaveBeenCalledWith(true);
   });
 });
+
+// story #3946(규칙: 「TopBarSlot 제목은 그 화면에 다른 제목이 없을 때만 h1」) — 이 화면은
+// 본문에 별도 마스트헤드가 없어(3946 AC1 실측) TopBarSlot의 h1이 그대로 유일한 h1이다.
+// 새 h1을 더 안 만든다(과교정) — 이 자리는 그 사실을 고정해 미래에 본문 제목이 추가될 때
+// h1이 2개가 되는 걸 잡는다.
+describe('LoopsClient — 페이지 h1 1개(story #3946)', () => {
+  it('⭐h1이 정확히 1개다(TopBarSlot 제목)', async () => {
+    await mount();
+    expect(container.querySelectorAll('h1')).toHaveLength(1);
+  });
+});

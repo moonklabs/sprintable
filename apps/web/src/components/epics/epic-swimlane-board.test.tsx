@@ -1047,3 +1047,12 @@ describe('EpicSwimlaneBoard — 인라인 StoryCard 배지 org 라벨 오버라�
     expect(container.textContent).not.toContain('백로그');
   });
 });
+
+// story #3946(규칙: 「TopBarSlot 제목은 그 화면에 다른 제목이 없을 때만 h1」) — 이 화면은
+// 본문에 별도 마스트헤드가 없어(3946 AC1 실측) TopBarSlot의 h1이 그대로 유일한 h1이다.
+describe('EpicSwimlaneBoard — 페이지 h1 1개(story #3946)', () => {
+  it('⭐h1이 정확히 1개다(TopBarSlot 제목)', async () => {
+    await mount({ epics: [], stories: [] });
+    expect(container.querySelectorAll('h1')).toHaveLength(1);
+  });
+});

@@ -609,7 +609,14 @@ export default function RetroSessionPage() {
             {session ? (
               <h1 className="text-sm font-medium">{session.title}</h1>
             ) : (
-              <Skeleton variant="text" className="h-4 w-32" />
+              <>
+                {/* story #3946(유나 확認·페드루 정정) — session이 아직 안 왔을 때 Skeleton은
+                    h1이 아니라 페이지 h1이 0개가 되던 gap. 시각 무변(sr-only) — 세션 제목은
+                    이 시점에 아직 모른다(지어내지 않는다), retro.title(목록 화면과 같은
+                    정본 키)로 자리만 채운다. */}
+                <h1 className="sr-only">{t('title')}</h1>
+                <Skeleton variant="text" className="h-4 w-32" />
+              </>
             )}
             {session && currentStage ? (
               <Badge variant={STAGE_VARIANTS[currentStage]}>
