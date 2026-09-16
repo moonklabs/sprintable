@@ -750,6 +750,15 @@ jobs:
       - name: Scan tests/ for shared-DB-destroying SQL literals (bare DELETE/DROP/TRUNCATE)
         working-directory: backend
         run: python3 scripts/lint_destructive_test_sql.py
+      # story #3944(페드루 PO CHANGES②) — run-with-stall-detection.test.sh·
+      # ci-loop-errexit-survival.test.sh 둘 다 만들어졌지만(migrations-nontx-allowlist-lint
+      # 위 코멘트가 짚은 것과 동형 결함) 도는 자리가 없었다. 둘 다 Postgres/uv 불요·순수
+      # bash 자기완결 스모크라 이 job(같은 성격의 정적 스캔)에 얹는다 — DB 필요한
+      # backend-test-destructive 본체와 분리해 매 PR에 값싸게 상시 돈다.
+      - name: Self-test stall-detection wrapper + loop errexit-survival (story #3944)
+        run: |
+          bash scripts/run-with-stall-detection.test.sh
+          bash scripts/ci-loop-errexit-survival.test.sh
 
   # story 23bf1913(CI 후속, 2026-09-04) — 오늘 4 PR(#3769·#3773·#3774·#3775)이 신규
   # destructive_schema 파일을 shard-weights.json에 안 넣은 채 열려, story #3392의
@@ -995,7 +1004,22 @@ jobs:
     # 확認됐다(모든 샤드 startedAt 동일·특정 파일 병목 0) — 러너/Postgres IO 동시성
     # 부하 문제라 weights.json 재실측(파일 간 *상대* 비중이라 안 듣는다)이나 샤드 수
     # 확대(8→12, 각 샤드 p95≈7분 예상)는 이번엔 보류하고 재발 시 착수한다(선택 남김).
-    timeout-minutes: 30
+    #
+    # story #3944(2026-09-16, 페드루 PO 판정) — 재발(오늘 shard0/shard3, 둘 다 정확히
+    # 30:1x분 kill·형제 7개는 13분대 정상 완주·취소 직전까지 파일 계속 통과 중 — 정지
+    # 아님). 샤드 확대는 이번엔 기각 — 샤드를 늘리면 동시 잡 수만 늘어 같은 러너 부하를
+    # 오히려 키운다(오늘 p50이 #3541 무부하 기준 7.7분→12.5분으로 이미 오른 방향과 동형).
+    # 3.5배 느려진 인스턴스는 샤드 크기가 아니라 「그 잡이 앉은 호스트가 그 시간에
+    # 과점유」된 문제로 판단(호스트 그라운딩은 #3944 AC0 적기만, 인프라 축이라 손 안 댐).
+    # #2293의 "천장을 올려도 다음 표본에서 다시 붙는다"는 «천장이 판정 자일 때»의
+    # 이야기 — 이제 판정 자는 파일 단위 정지 감지(STALL_TIMEOUT_MIN=8분, 위 루프)로
+    # 옮겼으므로, 이 job timeout은 "진행 中인 샤드가 (정지 감지가 있는 한) 절대 안 닿는
+    # 백스톱"일 뿐이다 — 오늘 외삽한 최대 완주 시간(47~48분) 위로 60분.
+    # 페드루 PO CHANGES(PR#4348 재리뷰 2라운드) — 60→90. 정지 감지가 못 보는 멈춤
+    # (래퍼 자신이 죽거나 timeout(1) 자체가 고장나는 등, run-with-stall-detection.sh
+    # 바깥의 결함)까지 감안한 순수 백스톱이라 여유를 더 둔다. 90분에 실제로 닿으면
+    # 그건 정지 감지도 못 잡는 새 결함 클래스라 카드를 다시 연다(같은 수로 덮지 않는다).
+    timeout-minutes: 90
     strategy:
       fail-fast: false  # 한 샤드 실패가 다른 샤드를 취소하면 "어디까지 진짜 돌았는지"가 흐려진다
       matrix:
@@ -1122,30 +1146,50 @@ jobs:
           # 끝난 뒤 한 번에 판정한다. exit 1은 여전히 여기서만 나므로 #2293/#3392의
           # "실측 가능한 만큼은 계속 잰다" 철학은 무변화.
           elapsed_file=$(mktemp)
-          for f in "${files[@]}"; do
-            echo "::group::isolated $f"
-            PGPASSWORD=sprintable dropdb -h localhost -U sprintable --if-exists sprintable_test_iso
-            PGPASSWORD=sprintable createdb -h localhost -U sprintable -T sprintable_test_tpl sprintable_test_iso
-            _t0=$(date +%s)
-            ALEMBIC_DATABASE_URL=postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test_iso \
-            PARITY_TEST_DATABASE_URL=postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test_iso \
-            DATABASE_URL=postgresql+asyncpg://sprintable:sprintable@localhost:5432/sprintable_test_iso \
-            uv run pytest -q "$f" || failed_files+=("$f")
-            _elapsed=$(( $(date +%s) - _t0 ))
-            echo "elapsed: ${_elapsed}s"
-            printf '%s\t%s\n' "$f" "$_elapsed" >> "$elapsed_file"
-            # story #3392(AC1) — unweighted 파일이 평균의 배수(threshold)를 실측으로
-            # 넘으면 경고가 아니라 실패다. weights.json에 없다는 이유로 "몰랐다"가 통하면
-            # 다음 신규 파일도 같은 사고를 반복한다. (unweighted 파일은 story #3396의
-            # 정규화 표본·판정 대상 모두에서 빠진다 — 이 가드가 계속 전담한다.)
-            for uw in "${unweighted_files[@]+"${unweighted_files[@]}"}"; do
-              if [ "$uw" = "$f" ] && [ "$_elapsed" -gt "$overage_threshold" ]; then
-                overage_files+=("$f (${_elapsed}s > ${overage_threshold}s)")
-                echo "::error::unweighted 파일이 평균의 ${overage_multiplier}배를 넘었다(story #3392 AC1): $f (${_elapsed}s > ${overage_threshold}s) — infra/destructive-schema-shard-weights/에 이 파일의 json을 추가하라."
-              fi
-            done
-            echo "::endgroup::"
-          done
+          # story #3944(2026-09-16, 페드루 PO 판정) — 30분 job timeout은 "멈춤"을 잡으려던
+          # 것인데 실제로 재는 건 "오래 걸림"이라, 형제 7개 샤드가 13분대로 정상 완주하는
+          # 동안 그 인스턴스 1개만(호스트 과점유 추정) 진행 中인 채 죽는 사고가 반복됐다
+          # (2026-09-16 shard0/shard3 둘 다 정확히 30:1x분에 kill, 취소 직전까지 파일이
+          # 계속 통과 중이었고 남은 진행률로 외삽하면 완주까지 47~48분 필요). #2293의
+          # "천장을 올려도 다음 표본에서 다시 붙는다" 원칙은 "천장이 자일 때"의 이야기 —
+          # 여기서는 자를 파일 단위 «정지 감지»(STALL_TIMEOUT_MIN)로 옮기고, job
+          # timeout-minutes는 그 정지 감지가 절대 못 미치는 백스톱으로만 남긴다(아래).
+          # 페드루 PO CHANGES③(PR#4348 리뷰) — 8분의 근거: 취소된 attempt 1 로그(job
+          # 104692022182=shard0·104693851441=shard3, cancel 원인이 아니라 그 안 개별
+          # 파일의 pytest 자체 보고 "passed in Ns" 실측)에서 «느린 인스턴스의 최대 단일
+          # 파일 소요»를 재니 shard3의 217.65s(3.63분, shard0 최댓값 163.10s보다 큼)가
+          # 두 인스턴스 통틀어 최댓값 — 4분(240s)을 안 넘어 배율 규칙(4분 넘으면 8 대신
+          # 그 2배)이 발동 안 하고 기본 8분 유지(3.63분의 ≈2.2배 여유). 이 최댓값이 4분을
+          # 넘는 날이 오면 STALL_TIMEOUT_MIN을 8이 아니라 그 실측값×2로 다시 잡는다(같은
+          # 8을 무한정 우려먹지 않는다).
+          STALL_TIMEOUT_MIN=8
+          failed_out=$(mktemp)
+          overage_out=$(mktemp)
+          unweighted_file=$(mktemp)
+          printf '%s\n' "${unweighted_files[@]+"${unweighted_files[@]}"}" > "$unweighted_file"
+          # story #3944(카디르 뮤테이션 테스트 지적, PR#4348 3라운드) — 파일별 루프 본체
+          # (DB 재생성+정지감지 래퍼 호출+exit 분류+overage 판정)를 scripts/
+          # run-destructive-shard-loop.sh로 뺐다. 예전엔 ci-loop-errexit-survival.test.sh가
+          # 이 루프를 손으로 베껴 검증해 "ci.yml만 옛 구조로 되돌려도 그 사본 테스트는
+          # 여전히 ALL PASS"인 못 틀리는 대조였다 — 이제 ci.yml과 테스트 둘 다 이 파일
+          # 하나를 그대로 부른다(뮤테이션하면 테스트가 실측으로 빨개진다).
+          WRAPPER_SCRIPT="${{ github.workspace }}/scripts/run-with-stall-detection.sh" \
+          STALL_TIMEOUT_MIN="$STALL_TIMEOUT_MIN" \
+          FILES_LIST_FILE=/tmp/shard_files.txt \
+          ELAPSED_OUT_FILE="$elapsed_file" \
+          FAILED_OUT_FILE="$failed_out" \
+          UNWEIGHTED_FILES_FILE="$unweighted_file" \
+          OVERAGE_THRESHOLD_SEC="$overage_threshold" \
+          OVERAGE_MULTIPLIER="$overage_multiplier" \
+          OVERAGE_OUT_FILE="$overage_out" \
+          ALEMBIC_DATABASE_URL=postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test_iso \
+          PARITY_TEST_DATABASE_URL=postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test_iso \
+          DATABASE_URL=postgresql+asyncpg://sprintable:sprintable@localhost:5432/sprintable_test_iso \
+          "${{ github.workspace }}/scripts/run-destructive-shard-loop.sh" uv run pytest -q
+
+          mapfile -t failed_files < "$failed_out"
+          mapfile -t overage_files < "$overage_out"
+          rm -f "$failed_out" "$overage_out" "$unweighted_file"
           if [ "${#failed_files[@]}" -gt 0 ]; then
             echo "FAILED files: ${failed_files[*]}"
             exit 1
