@@ -6,6 +6,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { fetchWithAuth } from '@/lib/db/client';
+import { toPlainPreview } from '@/components/chat/entity-ref';
 
 interface BacklinkMember { id: string; name: string; type: string }
 
@@ -41,7 +42,9 @@ const SOURCE_TYPE_ICON = {
 function backlinkLabel(item: BacklinkItem): string | undefined {
   switch (item.source_type) {
     case 'doc': return item.doc?.title;
-    case 'chat_message': return item.message?.content_snippet;
+    // story #3949 — content_snippet은 메시지 원문 조각이라 마크다운 링크/entity 참조
+    // 토큰이 그대로 실릴 수 있다(본문 칩 렌더러를 거치지 않는 자리라 평문화 필요).
+    case 'chat_message': return item.message?.content_snippet != null ? toPlainPreview(item.message.content_snippet) : undefined;
     case 'meeting': return item.meeting?.title;
     case 'story': return item.story?.title;
   }
