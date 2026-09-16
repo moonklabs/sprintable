@@ -90,6 +90,16 @@ describe('scanContent — 라인 마커(// i18n-exempt: <사유>, story #3937)',
     expect(v.some((x) => x.text === '미확認')).toBe(true);
   });
 
+  it('멀티라인 템플릿 리터럴 «안»의 "// i18n-exempt: …" 문구 바로 다음 줄 위반은 면제되지 않는다(카디르 재현식 그대로, 페드루 CHANGES3 — 원문 줄 스캔 반창고 두 번째 재발)', () => {
+    const content = [
+      'const template = `',
+      '  // i18n-exempt: example`;',
+      "const SENTINEL = '미확認';",
+    ].join('\n');
+    const v = scanContent(content, 'fake.tsx');
+    expect(v.some((x) => x.text === '미확認')).toBe(true);
+  });
+
   it('실 gate-evidence.tsx — _UNCONFIRMED 상수는 마커로 면제되고 baseline·EXEMPT_FILES 밖에서도 GREEN이다', () => {
     const filePath = path.resolve(__dirname, '../src/components/cage/gate-evidence.tsx');
     const content = readFileSync(filePath, 'utf8');

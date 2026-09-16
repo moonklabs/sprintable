@@ -132,27 +132,62 @@ export interface Violation {
 // 때문에 파일째 빠졌던 blast radius 자각, PR#4341 디디 자기 지적). 이 마커는 그 자리
 // «하나만» 스캔에서 뺀다 — 위반 리터럴이 선 바로 그 줄(0-index)의 **바로 앞 줄**에
 // `// i18n-exempt: <사유>` 라인 주석이 있으면 그 위반만 면제한다.
-//   ⚠️ 왜 AST leading-comment(`ts.getLeadingCommentRanges`)가 아니라 원문 줄 텍스트로
-//   보는가 — `const X = '한글';`류에서 문자열 리터럴 노드의 `getFullStart()`는 `= ` 뒤
-//   (공백 하나)에서 시작한다. 그 앞 주석은 `const` 키워드(또는 그 앞 식별자) 쪽에 붙지
-//   문자열 리터럴 쪽에 안 붙는다 — 트리비아가 "문(statement) 전체"가 아니라 "가장
-//   가까운 토큰"에 붙는 TS 스캐너 성질이라, 노드 트리비아 기반 조회는 실측 결과
-//   매치 0건이었다(실 반례로 확認, 아래 3937 self-test가 이 자리를 고정). 원문 줄
-//   텍스트 조회는 이 함정을 구조적으로 비켜간다 — "그 줄 바로 위"라는 AC1 문구
-//   그대로를 그대로 코드로 옮긴 것.
-// story #3937 CHANGES2(카디르 P2·페드루 정정) — 앞선 버전은 `/i18n-exempt:\s*\S/`로
-// 앞줄 원문 아무 데나 그 문자열만 있으면 매치했다 — `const note = 'i18n-exempt: x';`
-// 같은 "일반 문자열 리터럴 안의 우연한 문구"도 면제로 오인하는 우회가 실제로
-// 재현됐다(이 PR의 목적 자체가 사각 좁히기라 같은 클래스 결함은 특히 치명적).
-// `^\s*\/\/`로 "그 줄이 실제로 라인 주석으로 시작한다"를 앵커해 막는다.
-const I18N_EXEMPT_MARKER_RE = /^\s*\/\/\s*i18n-exempt:\s*\S/;
+//
+// story #3937 CHANGES1·2(카디르 P2·페드루 정정 두 차례) — "원문 줄 텍스트를 정규식으로
+// 본다"는 접근을 두 번 땜질했다(1회차: 무앵커 → 아무 문자열 리터럴 안 문구도 매치.
+// 2회차: `^\s*\/\/` 앵커 → 그래도 멀티라인 템플릿 리터럴 «안»의 `// i18n-exempt: …`
+// 줄은 실제 주석 토큰이 아니라 그냥 문자열 내용인데, 원문 줄 스캔은 그 구분을 원리적으로
+// 못 한다 — 같은 클래스가 세 번째로 재현됨, 카디르). 반창고를 그만 쌓고 클래스를 닫는다:
+// 파서가 실제로 인식한 주석 트리비아만 쓴다 — 문자열/템플릿 리터럴 «안»의 `//`는
+// 파서가 그 리터럴 토큰의 내용으로 흡수하지 트리비아로 잘라내지 않으므로, 트리비아
+// 기반 조회는 이 클래스의 우회를 구조적으로 배제한다.
+//
+// «노드별 leading-comment 조회가 실패했던» 원래 함정(헤더 옛 주석 — `const X = '한글';`
+// 에서 문자열 리터럴 노드 자신의 getFullStart()엔 앞 주석이 안 붙고 `const` 키워드
+// 쪽에 붙는 TS 트리비아 성질)은 "노드 하나만" 볼 때의 문제였다 — 파일의 **모든 토큰**
+// (`node.getChildren(sf)`로 키워드·구두점까지 전부 순회, `forEachChild`는 키워드 같은
+// 토큰을 건너뛴다)의 leading·trailing 코멘트 범위를 전부 모아 파일 전체 코멘트 Set을
+// 만들면 "어느 토큰에 붙었는가"는 상관없어진다 — 그 Set 안에 있으면 파일 어딘가의
+// 진짜 주석이다.
+const I18N_EXEMPT_MARKER_RE = /^\/\/\s*i18n-exempt:\s*\S/;
 
-function hasExemptMarker(node: ts.Node, sf: ts.SourceFile): boolean {
+// pos(주석 시작 오프셋) 기준으로 dedupe — 인접한 여러 토큰이 같은 코멘트 범위를
+// leading/trailing 양쪽에서 중복 보고하기 때문.
+function collectCommentMarkerLines(sf: ts.SourceFile): Set<number> {
+  const fullText = sf.getFullText();
+  const seenPos = new Set<number>();
+  const markerLines = new Set<number>();
+
+  function considerRanges(ranges: ts.CommentRange[] | undefined): void {
+    if (!ranges) return;
+    for (const r of ranges) {
+      if (r.kind !== ts.SyntaxKind.SingleLineCommentTrivia) continue;
+      if (seenPos.has(r.pos)) continue;
+      seenPos.add(r.pos);
+      const { line, character } = sf.getLineAndCharacterOfPosition(r.pos);
+      // "그 줄이 실제로 그 주석으로 시작한다"(코드 뒤에 붙는 트레일링 주석 제외) —
+      // 주석 시작 앞 컬럼이 전부 공백이어야 «마커 줄»로 인정한다.
+      const linePrefix = fullText.slice(r.pos - character, r.pos);
+      if (linePrefix.trim().length > 0) continue;
+      const commentText = fullText.slice(r.pos, r.end);
+      if (I18N_EXEMPT_MARKER_RE.test(commentText)) markerLines.add(line);
+    }
+  }
+
+  function visitToken(node: ts.Node): void {
+    considerRanges(ts.getLeadingCommentRanges(fullText, node.getFullStart()));
+    considerRanges(ts.getTrailingCommentRanges(fullText, node.getEnd()));
+    for (const child of node.getChildren(sf)) visitToken(child);
+  }
+  visitToken(sf);
+
+  return markerLines;
+}
+
+function hasExemptMarker(node: ts.Node, sf: ts.SourceFile, markerLines: Set<number>): boolean {
   const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line;
   if (line === 0) return false;
-  const lines = sf.getFullText().split('\n');
-  const prevLine = lines[line - 1] ?? '';
-  return I18N_EXEMPT_MARKER_RE.test(prevLine);
+  return markerLines.has(line - 1);
 }
 
 export function scanContent(content: string, file: string): Violation[] {
@@ -165,11 +200,12 @@ export function scanContent(content: string, file: string): Violation[] {
     isTsx ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
   );
 
+  const markerLines = collectCommentMarkerLines(sf);
   const violations: Violation[] = [];
   function addIfHangul(node: ts.Node, text: string): void {
     const trimmed = text.trim();
     if (trimmed.length > 0 && HANGUL_RE.test(trimmed)) {
-      if (hasExemptMarker(node, sf)) return;
+      if (hasExemptMarker(node, sf, markerLines)) return;
       const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
       violations.push({ file, line, text: trimmed });
     }
