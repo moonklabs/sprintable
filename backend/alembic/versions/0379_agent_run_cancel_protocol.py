@@ -34,12 +34,16 @@ _EVENT_KEY = "preset.agent_run.cancel_requested"
 _PAYLOAD_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
-    "required": ["run_id", "agent_id", "requested_by_member_id"],
+    "required": ["run_id", "agent_id", "requested_by_member_id", "timeout_at"],
     "properties": {
         "run_id": {"type": "string", "format": "uuid"},
         "agent_id": {"type": "string", "format": "uuid"},
         "requested_by_member_id": {"type": "string", "format": "uuid"},
         "reason": {"type": ["string", "null"]},
+        # 15분(agent_runs.py::_CANCEL_ACK_TIMEOUT_MINUTES SSOT) 뒤 ack 없으면 서버가
+        # cancelled_unacknowledged로 確定하는 시각 — 수신 런타임이 상수를 따로 안 들고 있어도
+        # 됨(값 자체를 페이로드로 전달).
+        "timeout_at": {"type": "string", "format": "date-time"},
     },
 }
 # 정지 대상 에이전트 자신이 개입(자기보고 ack)을 요청받는 사람 — escalation
