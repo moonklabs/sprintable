@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { deriveWorkList, type WorkListInput } from './derive-work-list';
+import { deriveWorkList, UNASSIGNED_GOAL_ID, type WorkListInput } from './derive-work-list';
 
 function page<T>(items: T[], hasMore: boolean | null = false) {
   return { items, hasMore };
@@ -42,6 +42,38 @@ describe('deriveWorkList — 목표/스토리 그룹핑', () => {
       agentRuns: page([{ id: 'r1', story_id: 's-unknown', agent_id: 'a1', agent_name: '미르코', status: 'running' }]),
     }));
     expect(result.groups).toHaveLength(0);
+  });
+
+  // story #3934(실사고 — 3928 라이브 실측) — 목표(epic_id) 미할당 스토리가 예전엔 어떤
+  // goal.id와도 안 맞아 groups에서 통째로 빠졌다(프로젝트에 스토리 20개가 있어도 "표시할
+  // 일이 없어요"로 오독). 미분류 합성 그룹(UNASSIGNED_GOAL_ID)으로 담기는지 고정.
+  it('목표 미할당 스토리는 UNASSIGNED_GOAL_ID 합성 그룹으로 담긴다(사라지지 않는다)', () => {
+    const result = deriveWorkList(baseInput({
+      goals: page([]),
+      stories: page([{ id: 's1', title: '미할당 스토리', epic_id: null }]),
+      tasks: page([{ id: 't1', story_id: 's1', assignee_id: null, title: '할일1', status: 'in-progress' }]),
+    }));
+    expect(result.groups).toHaveLength(1);
+    expect(result.groups[0].goalId).toBe(UNASSIGNED_GOAL_ID);
+    expect(result.groups[0].stories).toHaveLength(1);
+    expect(result.groups[0].stories[0].storyId).toBe('s1');
+    expect(result.groups[0].totalCount).toBe(1);
+    expect(result.groups[0].isActive).toBe(false);
+  });
+
+  it('목표 있는 스토리와 미할당 스토리가 섞이면 둘 다 각자 그룹으로 남는다', () => {
+    const result = deriveWorkList(baseInput({
+      stories: page([
+        { id: 's1', title: '목표 있는 스토리', epic_id: 'g1' },
+        { id: 's2', title: '미할당 스토리', epic_id: null },
+      ]),
+      tasks: page([
+        { id: 't1', story_id: 's1', assignee_id: null, title: '할일1', status: 'todo' },
+        { id: 't2', story_id: 's2', assignee_id: null, title: '할일2', status: 'todo' },
+      ]),
+    }));
+    expect(result.groups).toHaveLength(2);
+    expect(result.groups.map((g) => g.goalId).sort()).toEqual(['g1', UNASSIGNED_GOAL_ID].sort());
   });
 });
 

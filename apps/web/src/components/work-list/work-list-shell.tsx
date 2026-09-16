@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { fetchWorkList, type FetchedWorkList } from './fetch-work-list';
 import { filterWorkList, type WorkListFilters } from './filter-work-list';
+import { UNASSIGNED_GOAL_ID } from './derive-work-list';
 import { WorkListRowView } from './work-list-row';
 import { useWorkListSelection } from './use-work-list-selection';
 import { WorkListDetailPanel } from './work-list-detail-panel';
@@ -125,7 +126,10 @@ export function WorkListShell({ projectId }: { projectId: string }) {
 
   // 필터 후보(목표/가설 옵션)는 필터링 «전» 전체 목록에서 뽑는다 — 필터를 걸수록 자기
   // 자신을 고를 옵션이 사라지는 lock-out을 막는다.
-  const goalOptions = useMemo(() => data?.groups.map((g) => ({ id: g.goalId, label: g.title })) ?? [], [data]);
+  const goalOptions = useMemo(
+    () => data?.groups.map((g) => ({ id: g.goalId, label: g.goalId === UNASSIGNED_GOAL_ID ? t('unassignedGoalTitle') : g.title })) ?? [],
+    [data, t],
+  );
   const hypothesisIdsInView = useMemo(() => {
     const seen = new Set<string>();
     for (const g of data?.groups ?? []) for (const s of g.stories) for (const id of s.hypothesisIds) seen.add(id);
@@ -237,7 +241,9 @@ export function WorkListShell({ projectId }: { projectId: string }) {
                 {filtered.groups.map((group) => (
                   <Card key={group.goalId} className="space-y-1 p-3">
                     <div className="flex items-center justify-between gap-2 px-1">
-                      <h2 className="text-sm font-semibold text-foreground">{group.title}</h2>
+                      <h2 className="text-sm font-semibold text-foreground">
+                        {group.goalId === UNASSIGNED_GOAL_ID ? t('unassignedGoalTitle') : group.title}
+                      </h2>
                       <span className="text-xs text-muted-foreground">
                         {/* PO 지적(2026-09-14, 시안 재대조) — 「진행 중」 낱말은 GoalStatus==='active'
                             일 때만(데이터 없으면 지어내지 않는다). 기간 pill(예: 「이번 주」)은

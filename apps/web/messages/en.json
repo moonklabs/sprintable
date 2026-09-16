@@ -472,6 +472,7 @@
     "partialNotice": "Couldn't load everything. There's more.",
     "goalProgressLabel": "{done}/{total} done",
     "goalSummaryLabel": "Assigned {assigned} · Delegated {delegated} · Hypotheses {hypotheses}",
+    "unassignedGoalTitle": "Unassigned",
     "stateAwaitingApproval": "Awaiting approval",
     "stateAwaitingSignature": "Awaiting signature",
     "stateAwaitingAnswer": "Awaiting answer",
