@@ -779,7 +779,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
           disabled={loadingMore}
           className="h-auto w-full rounded-lg py-2 text-xs font-normal text-muted-foreground transition hover:text-foreground disabled:opacity-50"
         >
-          {loadingMore ? tc('loading') : `더 보기 (${myTotal - conversations.length}건)`}
+          {loadingMore ? tc('loading') : t('showMoreCount', { count: myTotal - conversations.length })}
         </Button>
       )}
     </div>
@@ -843,7 +843,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
           onClick={() => void fetchAllConversations(agentOffset, true)}
           className="h-auto w-full rounded-lg py-2 text-xs font-normal text-muted-foreground transition hover:text-foreground"
         >
-          더 보기 ({agentTotal - allConversations.length}건)
+          {t('showMoreCount', { count: agentTotal - allConversations.length })}
         </Button>
       )}
     </div>

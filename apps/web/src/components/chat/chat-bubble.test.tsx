@@ -109,17 +109,17 @@ describe('ChatBubble — story #2263 AC6 유령 칩(stored 참조 대조)', () =
     });
     const chip = container.querySelector('button');
     expect(chip).not.toBeNull();
-    expect(container.textContent).not.toContain('대상이 없습니다');
+    expect(container.textContent).not.toContain('대상이 없어요');
   });
 
   it('references가 빈 배열(읽기 경로가 참조 0건을 확認)이면 본문 토큰이 유령으로 그려진다', async () => {
     await act(async () => {
       root.render(wrap(<ChatBubble message={{ ...baseMessage, references: [] }} isMine={false} />));
     });
-    // story #3213 — 유령이라도 미등록≠비존재라 "대상이 없습니다"를 더 이상 단정하지 않는다.
+    // story #3213 — 유령이라도 미등록≠비존재라 "대상이 없어요"를 더 이상 단정하지 않는다.
     // 클릭(EntityPreviewModal의 실 fetch)으로 진짜 존재판정을 위임 — 그래서 버튼은 있어야 한다.
     expect(container.querySelector('button')).not.toBeNull();
-    expect(container.textContent).not.toContain('대상이 없습니다');
+    expect(container.textContent).not.toContain('대상이 없어요');
     expect(container.textContent).toContain('제안서.md');
   });
 
@@ -134,7 +134,7 @@ describe('ChatBubble — story #2263 AC6 유령 칩(stored 참조 대조)', () =
     });
     const chip = container.querySelector('button');
     expect(chip).not.toBeNull();
-    expect(container.textContent).not.toContain('대상이 없습니다');
+    expect(container.textContent).not.toContain('대상이 없어요');
     expect(container.textContent).toContain('제안서.md');
   });
 
@@ -147,7 +147,7 @@ describe('ChatBubble — story #2263 AC6 유령 칩(stored 참조 대조)', () =
     await act(async () => {
       root.render(wrap(<ChatBubble message={assetMsg} isMine={false} />));
     });
-    expect(container.textContent).not.toContain('대상이 없습니다');
+    expect(container.textContent).not.toContain('대상이 없어요');
   });
 });
 
@@ -1783,7 +1783,7 @@ describe('ChatBubble — story #2671 EmbedCard 단독 참조 문단 카드 렌�
     expect(container.querySelector('button[aria-label="미리보기"]')).toBeNull(); // EmbedCard doc 전용 마커 아님
   });
 
-  it('참조가 유령(stored 참조에 없음)이면 단독 문단이어도 카드가 아니라 유령 칩이다(story #3213 — 클릭은 가능, 정적 "대상이 없습니다" 단정은 없음)', async () => {
+  it('참조가 유령(stored 참조에 없음)이면 단독 문단이어도 카드가 아니라 유령 칩이다(story #3213 — 클릭은 가능, 정적 "대상이 없어요" 단정은 없음)', async () => {
     await act(async () => {
       root.render(wrap(
         <ChatBubble
@@ -1794,7 +1794,7 @@ describe('ChatBubble — story #2671 EmbedCard 단독 참조 문단 카드 렌�
     });
     expect(container.querySelector('.rounded-md')).toBeNull();
     expect(container.querySelector('button')).not.toBeNull();
-    expect(container.textContent).not.toContain('대상이 없습니다');
+    expect(container.textContent).not.toContain('대상이 없어요');
     expect(container.textContent).toContain('제안서.md');
   });
 

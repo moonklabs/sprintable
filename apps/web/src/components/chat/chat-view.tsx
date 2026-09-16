@@ -908,9 +908,9 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
             className="flex min-h-[44px] items-center gap-1 px-1 text-sm text-muted-foreground hover:text-foreground"
           >
             <ChevronLeft className="h-4 w-4" />
-            대화
+            {t('title')}
           </button>
-          <span className="truncate text-sm font-medium text-foreground">스레드</span>
+          <span className="truncate text-sm font-medium text-foreground">{t('threadLabel')}</span>
         </div>
       )}
 
@@ -992,7 +992,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
                       disabled={loadingMore}
                       className="text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
                     >
-                      {loadingMore ? tc('loading') : '이전 메시지 보기'}
+                      {loadingMore ? tc('loading') : t('viewPreviousMessages')}
                     </button>
                   </div>
                 )}
@@ -1087,7 +1087,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
                 onClick={() => { setShowNewIndicator(false); scrollToBottom(true); }}
                 className="rounded-full border border-border bg-background px-3 py-1 text-xs font-medium text-primary shadow-sm transition-colors hover:bg-muted/50"
               >
-                ↓ 새 메시지
+                {t('newMessagesIndicator')}
               </button>
             </div>
           )}

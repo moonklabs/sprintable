@@ -103,7 +103,7 @@ export function NewConversationModal({ projectId, onClose, onCreated }: NewConve
       const data = await res.json() as { id: string };
       onCreated(data.id);
     } catch {
-      setError({ kind: 'generic', message: '대화 생성에 실패했습니다. 다시 시도해보세요.' });
+      setError({ kind: 'generic', message: t('createConversationFailed') });
     } finally {
       setCreating(false);
     }
@@ -194,7 +194,7 @@ export function NewConversationModal({ projectId, onClose, onCreated }: NewConve
             {tc('cancel')}
           </Button>
           <Button size="sm" onClick={() => void handleCreate()} disabled={!canCreate || creating}>
-            {creating ? '생성 중…' : t('create')}
+            {creating ? tc('creating') : t('create')}
           </Button>
         </div>
       </DialogContent>

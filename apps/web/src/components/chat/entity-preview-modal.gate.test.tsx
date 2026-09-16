@@ -107,7 +107,7 @@ describe('EntityPreviewModal gate 분기 — story #2889/S2d', () => {
     expect(link?.textContent).toContain('전체 보기');
   });
 
-  it('fetch 실패 시 "대상을 찾을 수 없습니다"로 정직하게 떨어진다(무한 스피너 금지)', async () => {
+  it('fetch 실패 시 "대상을 찾을 수 없어요"로 정직하게 떨어진다(무한 스피너 금지)', async () => {
     stubFetchWithAuth(async () => ({ ok: false, json: async () => ({}) }));
     await act(async () => {
       root.render(
@@ -117,6 +117,6 @@ describe('EntityPreviewModal gate 분기 — story #2889/S2d', () => {
       );
     });
     await flush();
-    expect(container.textContent).toContain('대상을 찾을 수 없습니다');
+    expect(container.textContent).toContain('대상을 찾을 수 없어요');
   });
 });

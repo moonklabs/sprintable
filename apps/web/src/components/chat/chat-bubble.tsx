@@ -130,6 +130,7 @@ function prepareMentions(content: string): string {
 // 코너 버튼. inline/block 판별은 doc-content-renderer.tsx의 기존 검증된 휴리스틱과 동일
 // (className에 language- 없음 + 개행 없음 = inline) — 팀 컨벤션 재사용.
 function CopyableCode({ raw, inline, className }: { raw: string; inline: boolean; className: string }) {
+  const t = useTranslations('chats');
   const [copied, setCopied] = useState(false);
 
   const handleCopy = useCallback(() => {
@@ -155,7 +156,7 @@ function CopyableCode({ raw, inline, className }: { raw: string; inline: boolean
         tabIndex={0}
         onClick={handleCopy}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleCopy(); } }}
-        title={copied ? '복사됨' : '클릭해 복사'}
+        title={copied ? t('copied') : t('clickToCopy')}
         className={`${className} cursor-pointer transition hover:brightness-95 active:brightness-90`}
       >
         {raw}
@@ -170,8 +171,8 @@ function CopyableCode({ raw, inline, className }: { raw: string; inline: boolean
       <button
         type="button"
         onClick={handleCopy}
-        aria-label={copied ? '복사됨' : '코드 복사'}
-        title={copied ? '복사됨' : '코드 복사'}
+        aria-label={copied ? t('copied') : t('copyCode')}
+        title={copied ? t('copied') : t('copyCode')}
         className="absolute right-1 top-1 rounded p-1 opacity-60 transition hover:bg-black/10 group-hover/code:opacity-100 dark:hover:bg-white/10"
       >
         {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
@@ -431,8 +432,8 @@ export function ChatBubble({
   const lightboxItems: LightboxItem[] = useMemo(
     () => imageAttachmentEntries
       .filter((e) => e.imageIndex !== undefined)
-      .map((e) => ({ storedUrl: e.att.url!, alt: e.att.name ?? e.att.filename ?? '첨부파일' })),
-    [imageAttachmentEntries],
+      .map((e) => ({ storedUrl: e.att.url!, alt: e.att.name ?? e.att.filename ?? t('attachmentFileAlt') })),
+    [imageAttachmentEntries, t],
   );
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const handleOpenProfilePopover = useCallback((e: { currentTarget: Element }) => {
@@ -710,7 +711,7 @@ export function ChatBubble({
               {imageAttachmentEntries.map(({ att, imageIndex }, i) => {
                 const href = att.url;
                 if (!href) return null;
-                const label = att.name ?? att.filename ?? '첨부파일';
+                const label = att.name ?? att.filename ?? t('attachmentFileAlt');
                 if (imageIndex !== undefined) {
                   return (
                     <AttachmentImage
@@ -765,7 +766,7 @@ export function ChatBubble({
               className="mt-0.5 flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs font-medium text-primary transition-colors hover:bg-primary/8"
             >
               <MessageSquare className="h-3 w-3" />
-              {replyCount}개의 답글
+              {t('replyCount', { count: replyCount })}
               {lastReplyTime && (
                 <span className="font-normal text-muted-foreground">{lastReplyTime}</span>
               )}

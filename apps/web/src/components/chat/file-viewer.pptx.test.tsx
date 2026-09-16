@@ -106,7 +106,7 @@ describe('FileViewer pptx (story #2803)', () => {
     }));
 
     mount(<FileViewer target={target} onClose={() => {}} />);
-    await waitFor(() => container.querySelector('iframe') !== null || container.textContent!.includes('변환에 실패했습니다'));
+    await waitFor(() => container.querySelector('iframe') !== null || container.textContent!.includes('변환에 실패했어요'));
 
     const iframe = container.querySelector('iframe');
     expect(iframe, `iframe 없음. text=${container.textContent}`).not.toBeNull();
@@ -166,7 +166,7 @@ describe('FileViewer pptx (story #2803)', () => {
     });
 
     mount(<FileViewer target={target} onClose={() => {}} />);
-    await waitFor(() => container.textContent!.includes('변환에 실패했습니다'));
+    await waitFor(() => container.textContent!.includes('변환에 실패했어요'));
 
     expect(container.querySelector('iframe')).toBeNull();
     expect(container.querySelector('.animate-spin')).toBeNull();
@@ -185,7 +185,7 @@ describe('FileViewer pptx (story #2803)', () => {
     });
 
     mount(<FileViewer target={legacyTarget} onClose={() => {}} />);
-    await waitFor(() => container.textContent!.includes('미리보기 준비 중입니다'));
+    await waitFor(() => container.textContent!.includes('미리보기 준비 중이에요'));
 
     expect(fetchWithAuthMock.mock.calls.some((call) => String(call[0]).includes('/convert'))).toBe(false);
   });
@@ -203,12 +203,12 @@ describe('FileViewer pptx (story #2803)', () => {
     mount(<FileViewer target={target} onClose={() => {}} />);
     await act(async () => { await Promise.resolve(); });
     await act(async () => { await Promise.resolve(); });
-    expect(container.textContent).toContain('변환 중입니다');
+    expect(container.textContent).toContain('변환 중이에요');
 
     await act(async () => { await vi.advanceTimersByTimeAsync(130000); });
 
     expect(container.querySelector('iframe')).toBeNull();
-    expect(container.textContent).toContain('변환에 실패했습니다');
+    expect(container.textContent).toContain('변환에 실패했어요');
     vi.useRealTimers();
   });
 
@@ -234,7 +234,7 @@ describe('FileViewer pptx (story #2803)', () => {
     await act(async () => { await Promise.resolve(); });
     await act(async () => { await Promise.resolve(); });
     await act(async () => { await vi.advanceTimersByTimeAsync(130000); });
-    expect(container.textContent).toContain('변환에 실패했습니다');
+    expect(container.textContent).toContain('변환에 실패했어요');
 
     // failed 확정 후에야 convert가 뒤늦게 성공 응답으로 resolve — 나머지(sign) 왕복이 실제로
     // 흘러도 이미 확정된 failed를 되돌리면 안 된다.
@@ -244,7 +244,7 @@ describe('FileViewer pptx (story #2803)', () => {
       await new Promise((r) => setTimeout(r, 300));
     });
 
-    expect(container.textContent).toContain('변환에 실패했습니다');
+    expect(container.textContent).toContain('변환에 실패했어요');
     expect(container.querySelector('iframe')).toBeNull();
   });
 });
