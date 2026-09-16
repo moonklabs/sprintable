@@ -54,12 +54,35 @@ export interface TodayUsage {
   adSpendMeasured: boolean;
 }
 
+/** story #3962(오늘 v3 「오늘 결과」) — story #3959(BE `landed_today`/`qa_passed_today`/
+ * `open_defects`)가 이 글을 쓰는 시점 develop에 아직 없다(PR in-review, 페드루 PO 確認
+ * 2026-09-16 15:36Z). 3필드 다 옵셔널 — 응답에 없으면 undefined, 있으면 `measured`가
+ * false(집계 소스 부재, open_defects의 verdict_capture 미연결 등)일 수 있다. 화면은
+ * undefined든 measured===false든 같은 렌더(시안 낱말 「미측정」) — 3959 착지 뒤 값이
+ * 저절로 산다(이 파일도 스텁도 별도 PR도 불요, 페드루 PO 지시 그대로). */
+export interface TodayCountSince {
+  count: number;
+  since: string | null;
+  measured: true;
+}
+
+export interface TodayCountUnmeasured {
+  count: null;
+  since: null;
+  measured: false;
+}
+
+export type TodayCount = TodayCountSince | TodayCountUnmeasured;
+
 export interface TodaySnapshot {
   needsMe: TodayNeedsMeItem[];
   needsMeCount: number;
   agentProgress: TodayAgentProgressItem[];
   published: TodayPublished;
   usage: TodayUsage;
+  landedToday?: TodayCount;
+  qaPassedToday?: TodayCount;
+  openDefects?: TodayCount;
 }
 
 export const EMPTY_TODAY_SNAPSHOT: TodaySnapshot = {
@@ -182,6 +205,18 @@ function parseUsage(raw: unknown): TodayUsage {
   return { platform, adSpendMeasured: adSpend?.['measured'] === true };
 }
 
+/** story #3962/#3959 — `{count,since}` 또는 `{count,measured}` 응답 모양(3954 doc §AC2
+ * 제안) 둘 다 받는다. 필드 자체가 응답에 없으면(3959 미착지) undefined(화면이 「미측정」
+ * 자리로 안 그림) — measured===false로 명시돼 와도 같은 「미측정」 렌더로 합류(둘 다
+ * "지금은 숫자가 없다"는 같은 사실이라 화면 분기를 늘리지 않는다). */
+function parseTodayCount(raw: unknown): TodayCount | undefined {
+  if (!isRecord(raw)) return undefined;
+  if (raw['measured'] === false) return { count: null, since: null, measured: false };
+  const count = num(raw['count']);
+  if (count === null) return undefined;
+  return { count, since: str(raw['since']), measured: true };
+}
+
 /** 실 payload → 검증된 TodaySnapshot. 핵심 식별자 없는 항목은 지어낼 수 없어 생략
  * (no-fiction — derive-now-face.ts와 동일 원칙). */
 export function parseToday(json: unknown): TodaySnapshot {
@@ -212,5 +247,8 @@ export function parseToday(json: unknown): TodaySnapshot {
     agentProgress,
     published: parsePublished(inner['published_today']),
     usage: parseUsage(inner['usage']),
+    landedToday: parseTodayCount(inner['landed_today']),
+    qaPassedToday: parseTodayCount(inner['qa_passed_today']),
+    openDefects: parseTodayCount(inner['open_defects']),
   };
 }
