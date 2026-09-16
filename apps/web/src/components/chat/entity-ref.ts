@@ -43,9 +43,13 @@ export function unescapeReferenceLabel(label: string): string {
  * 안의 `\[`/`\]` 이스케이프까지 원복한다. 본문 칩 렌더(EntityChip·parseEntityRef)는
  * 무변 — 이 함수는 "칩을 못 그리는" 평문 전용 자리에만 쓴다(no-fiction: 원문 라벨
  * 그대로, 문법 기호만 벗김·리라이트 0).
+ *
+ * PO CHANGES 1회차(2026-09-16 11:42Z) C1 — 마크다운 이미지 `![alt](url)`도 같은 클래스
+ * (문법 기호가 평문 자리에 샘)라 선행 `!` 1글자까지 같이 벗긴다(`!?` — 있으면 소비,
+ * 없으면 기존 링크 동작 그대로).
  */
 export function toPlainPreview(content: string): string {
   return content
-    .replace(/\[((?:\\.|[^[\]\\])*)\]\([^)]*\)/g, (_m, label: string) => unescapeReferenceLabel(label))
+    .replace(/!?\[((?:\\.|[^[\]\\])*)\]\([^)]*\)/g, (_m, label: string) => unescapeReferenceLabel(label))
     .trim();
 }
