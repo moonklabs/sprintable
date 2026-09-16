@@ -182,4 +182,28 @@ describe('StoryOriginSection', () => {
     await render('s1');
     expect(container.textContent).toBe('');
   });
+
+  // story #3949 CHANGES2(유나 design, 2026-09-16) — entity-backlinks-section.tsx의
+  // backlinkLabel()과 byte-동일 누출(같은 content_snippet 필드). 실 레코드 fixture(b676dc29
+  // 원문 형태) 재사용.
+  it('⭐chat_message content_snippet의 entity 참조 토큰은 라벨만 뜬다(원문 대괄호·href 노출 0)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      data: [{
+        id: 'r1', source_type: 'chat_message', source_id: 'msg1', created_by: null,
+        created_at: '2026-09-16T11:10:00Z', relation: 'created_from', still_exists: true,
+        doc: null,
+        message: {
+          id: 'msg1', conversation_id: 'conv1',
+          content_snippet: '[PO 픽스처 2·삭제예정] 같은 org 산출물 참조 [\\[PO 픽스처 산출물…\\]]'
+            + '(entity:artifact:c92d9614-1111-2222-3333-444455556666)',
+          sender: null,
+        },
+        meeting: null, story: null,
+      }],
+    }))));
+    await render('s1');
+    expect(container.textContent).toContain('[PO 픽스처 산출물…]');
+    expect(container.textContent).not.toContain('entity:artifact:');
+    expect(container.textContent).not.toContain('](');
+  });
 });
