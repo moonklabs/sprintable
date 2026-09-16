@@ -14,7 +14,7 @@ import { SectionCardBody } from '@/components/ui/section-card';
 import { Card } from '@/components/ui/card';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { fetchWithAuth } from '@/lib/db/client';
-import { channelConnectionIdentityLabel, channelLabel, channelMarkColor, channelMarkInitials } from '@/lib/channel-label';
+import { channelConnectionIdentityLabel, useChannelLabel, channelMarkColor, channelMarkInitials } from '@/lib/channel-label';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { formatCount } from '@/components/content/generation-budget-indicator';
@@ -594,6 +594,7 @@ function ConnectionRow({
   const [testing, setTesting] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
   const [disconnectError, setDisconnectError] = useState<string | null>(null);
+  const channelLabel = useChannelLabel();
 
   const handleTest = useCallback(async () => {
     setTesting(true);
@@ -636,7 +637,7 @@ function ConnectionRow({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0">
           <p className="flex flex-wrap items-center gap-1.5 truncate text-sm font-medium text-foreground">
-            {channelConnectionIdentityLabel(conn, t)}
+            {channelConnectionIdentityLabel(conn, channelLabel)}
             {/* story f30da19a AC4③(유나 확定) — 연결 카드는 「테스트용 연결」(글 목록/
                 캘린더의 「테스트」와 다른 정본 — 여기는 "이 연결 자체가 테스트"라는 뜻).
                 story #3523(PO 실측(3523 그라운딩·page.tsx:239)·確定 2026-09-06) — channel===
@@ -709,7 +710,7 @@ function ConnectionRow({
             aria-hidden="true"
           />
           {testResult.ok
-            ? t('channelTestOk', { account: String(testResult.account?.['username'] ?? channelConnectionIdentityLabel(conn, t)) })
+            ? t('channelTestOk', { account: String(testResult.account?.['username'] ?? channelConnectionIdentityLabel(conn, channelLabel)) })
             : t('channelTestFailed', { error: testResult.error ?? '' })}
         </p>
       ) : null}
@@ -740,7 +741,7 @@ function ConnectionRow({
         {derived.status === 'reauth_required' ? (
           conn.credential_kind === 'none' ? (
             <p className="text-xs text-muted-foreground" data-testid="channel-sandbox-reauth-unavailable">
-              {t('channelSandboxReauthUnavailableNote', { channel: channelLabel(conn.channel, t) })}
+              {t('channelSandboxReauthUnavailableNote', { channel: channelLabel(conn.channel) })}
             </p>
           ) : conn.credential_kind === 'oauth' ? (
             isOwnerStrict ? (
@@ -821,6 +822,7 @@ function ChannelSection({
   const { channel, credential_kind } = item;
   const locale = useLocale();
   const tc = useTranslations('common');
+  const channelLabel = useChannelLabel();
   const displayTimezone = resolveDisplayTimezone().tz;
   const rowStatuses = connections.map((c) =>
     deriveChannelConnectionStatus({
@@ -910,7 +912,7 @@ function ChannelSection({
     if (single && singleDerived) {
       if (singleDerived.status === 'reauth_required' || singleDerived.status === 'provider_error') {
         return single.credential_kind === 'none'
-          ? t('channelSandboxReauthUnavailableNote', { channel: channelLabel(channel, t) })
+          ? t('channelSandboxReauthUnavailableNote', { channel: channelLabel(channel) })
           : reauthSubtitleText(singleDerived.reauthReason, t, single.last_error_code);
       }
       // story #3808 — 위 ConnectionRow 부제와 동형: status가 아니라 isAutoRefreshInfo
@@ -918,7 +920,7 @@ function ChannelSection({
       if (singleDerived.isAutoRefreshInfo !== undefined) {
         return expiringSoonSubtitleText({ isAutoRefreshInfo: singleDerived.isAutoRefreshInfo, tokenExpiresAt: single.token_expires_at, t });
       }
-      return `${channelConnectionIdentityLabel(single, t)} · ${t('channelConnectedBy', { time: formatRelativeTime(single.created_at, locale, displayTimezone) })}`;
+      return `${channelConnectionIdentityLabel(single, channelLabel)} · ${t('channelConnectedBy', { time: formatRelativeTime(single.created_at, locale, displayTimezone) })}`;
     }
     return undefined;
   })();
@@ -938,15 +940,15 @@ function ChannelSection({
         if (effectiveSource === 'none') {
           return isOwnerStrict ? { label: t('appCredentialsRegisterAction'), onClick: onExpand, testId: 'channel-row-primary-register' } : null;
         }
-        return isOwnerStrict ? { label: t('channelConnectAction', { channel: channelLabel(channel, t) }), href: connectHref, testId: 'channel-row-primary-connect' } : null;
+        return isOwnerStrict ? { label: t('channelConnectAction', { channel: channelLabel(channel) }), href: connectHref, testId: 'channel-row-primary-connect' } : null;
       }
       if (credential_kind === 'none') {
         return isOwnerOrAdmin
-          ? { label: creatingSandbox ? tc('creating') : t('channelConnectSandboxAction', { channel: channelLabel(channel, t) }), onClick: () => void handleCreateSandbox(), disabled: creatingSandbox, testId: 'channel-connect-sandbox-button' }
+          ? { label: creatingSandbox ? tc('creating') : t('channelConnectSandboxAction', { channel: channelLabel(channel) }), onClick: () => void handleCreateSandbox(), disabled: creatingSandbox, testId: 'channel-connect-sandbox-button' }
           : null;
       }
       if (credential_kind === 'pasted_secret') {
-        return isOwnerOrAdmin ? { label: t('channelConnectAction', { channel: channelLabel(channel, t) }), onClick: onExpand, testId: 'channel-row-primary-connect' } : null;
+        return isOwnerOrAdmin ? { label: t('channelConnectAction', { channel: channelLabel(channel) }), onClick: onExpand, testId: 'channel-row-primary-connect' } : null;
       }
       return null;
     }
@@ -992,10 +994,10 @@ function ChannelSection({
     menuItems.push({ key: 'manage', label: t('channelManageConnectionsAction'), onClick: onExpand });
   }
   if (credential_kind === 'oauth' && effectiveSource !== 'none') {
-    menuItems.push({ key: 'app-credentials', label: t('appCredentialsTitle', { channel: channelLabel(channel, t) }), onClick: onExpand });
+    menuItems.push({ key: 'app-credentials', label: t('appCredentialsTitle', { channel: channelLabel(channel) }), onClick: onExpand });
   }
   if (canStartConnect && connections.length >= 1 && credential_kind !== 'none' && isOwnerOrAdmin) {
-    menuItems.push({ key: 'add-another', label: t('channelConnectAnotherAction', { channel: channelLabel(channel, t) }), onClick: onExpand });
+    menuItems.push({ key: 'add-another', label: t('channelConnectAnotherAction', { channel: channelLabel(channel) }), onClick: onExpand });
   }
 
   return (
@@ -1004,7 +1006,7 @@ function ChannelSection({
         <ListRow
           className="p-0"
           mark={<ListRowMark label={channelMarkInitials(channel)} color={channelMarkColor(channel)} />}
-          title={channelLabel(channel, t)}
+          title={channelLabel(channel)}
           subtitle={subtitle}
           status={(
             <ChannelStatusChip
@@ -1036,7 +1038,7 @@ function ChannelSection({
           menu={menuItems.length > 0 ? (
             <DropdownMenu>
               <DropdownMenuTrigger
-                aria-label={t('channelRowMoreActionsAriaLabel', { channel: channelLabel(channel, t) })}
+                aria-label={t('channelRowMoreActionsAriaLabel', { channel: channelLabel(channel) })}
                 data-testid="channel-row-more-actions"
                 className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
               >
@@ -1058,13 +1060,13 @@ function ChannelSection({
           </p>
         ) : null}
         {credential_kind === 'oauth' && !isOwnerStrict && connections.length === 0 && effectiveSource !== 'none' ? (
-          <p className="mt-1 text-xs text-muted-foreground">{t('channelConnectOwnerOnlyReason', { channel: channelLabel(channel, t) })}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{t('channelConnectOwnerOnlyReason', { channel: channelLabel(channel) })}</p>
         ) : null}
         {credential_kind === 'none' && !isOwnerOrAdmin && connections.length === 0 ? (
           <p className="mt-1 text-xs text-muted-foreground">{t('channelOwnerOrAdminOnlyReason')}</p>
         ) : null}
         {credential_kind === 'pasted_secret' && !isOwnerOrAdmin && connections.length === 0 ? (
-          <p className="mt-1 text-xs text-muted-foreground">{t('channelConnectOwnerOrAdminOnlyReason', { channel: channelLabel(channel, t) })}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{t('channelConnectOwnerOrAdminOnlyReason', { channel: channelLabel(channel) })}</p>
         ) : null}
         {credential_kind === 'none' && sandboxError ? (
           <p className="mt-1 text-xs text-destructive" data-testid="channel-connect-sandbox-error">{sandboxError}</p>
@@ -1118,12 +1120,12 @@ function ChannelSection({
           {credential_kind === 'oauth' && canStartConnect && connections.length >= 1 ? (
             isOwnerStrict ? (
               <Button asChild size="sm">
-                <a href={connectHref}>{t('channelConnectAnotherAction', { channel: channelLabel(channel, t) })}</a>
+                <a href={connectHref}>{t('channelConnectAnotherAction', { channel: channelLabel(channel) })}</a>
               </Button>
             ) : (
               // story #3436 묶음10(§5) — 「또 다른 계정 연결」도 owner 전용(같은
               // authorize_channel_connection 경로) — 버튼 대신 사유 한 줄.
-              <p className="text-xs text-muted-foreground">{t('channelConnectOwnerOnlyReason', { channel: channelLabel(channel, t) })}</p>
+              <p className="text-xs text-muted-foreground">{t('channelConnectOwnerOnlyReason', { channel: channelLabel(channel) })}</p>
             )
           ) : null}
         </SectionCardBody>
@@ -1142,6 +1144,7 @@ export default function OrganizationChannelsPage() {
   const isOwnerStrict = currentRole === 'owner';
   const isOwnerOrAdmin = currentRole === 'owner' || currentRole === 'admin';
   const t = useTranslations('channelConnect');
+  const channelLabel = useChannelLabel();
   const searchParams = useSearchParams();
 
   const [availableChannels, setAvailableChannels] = useState<AvailableChannelItem[]>([]);
@@ -1328,7 +1331,7 @@ export default function OrganizationChannelsPage() {
               <DropdownMenuContent align="end">
                 {unregisteredOauthChannels.map((it) => (
                   <DropdownMenuItem key={it.channel} onClick={() => goToChannel(it.channel)}>
-                    {channelLabel(it.channel, t)}
+                    {channelLabel(it.channel)}
                   </DropdownMenuItem>
                 ))}
               </DropdownMenuContent>
@@ -1349,14 +1352,14 @@ export default function OrganizationChannelsPage() {
         <Alert variant="info" role="status" aria-live="polite" aria-atomic="true" data-testid="channel-reauth-mismatch-note">
           <AlertDescription>
             {t('channelReauthMismatchNote', {
-              updated: channelConnectionIdentityLabel(mismatchUpdatedConn, t),
-              intended: channelConnectionIdentityLabel(mismatchTargetConn, t),
+              updated: channelConnectionIdentityLabel(mismatchUpdatedConn, channelLabel),
+              intended: channelConnectionIdentityLabel(mismatchTargetConn, channelLabel),
             })}
           </AlertDescription>
         </Alert>
       ) : connected && !isMismatchCase ? (
         <Alert variant="success" role="status" aria-live="polite" aria-atomic="true">
-          <AlertDescription>{t('channelConnectSuccess', { channel: channelLabel(connected, t) })}</AlertDescription>
+          <AlertDescription>{t('channelConnectSuccess', { channel: channelLabel(connected) })}</AlertDescription>
         </Alert>
       ) : null}
       {connectError ? (

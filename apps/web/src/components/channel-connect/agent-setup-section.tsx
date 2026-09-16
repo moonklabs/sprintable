@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { ListRow, ListRowMark } from '@/components/ui/list-row';
 import { fetchWithAuth } from '@/lib/db/client';
-import { channelLabel, channelMarkColor, channelMarkInitials } from '@/lib/channel-label';
+import { useChannelLabel, channelMarkColor, channelMarkInitials } from '@/lib/channel-label';
 
 /**
  * story #3743(UI 재설계 ③, 시안 a98386e6 「담당 에이전트가 설정하는 것」) — 옛
@@ -72,11 +72,12 @@ function ConnectorRow({ connector, t }: { connector: ConnectorItem; t: ReturnTyp
   // backend/app/routers/connectors.py ConnectorFieldEntry).
   const setupHint = missingFields.find((f) => f.setup_hint)?.setup_hint;
   const subtitle = ready ? undefined : (setupHint ?? t('agentSetupNeedsSetupHint', { count: missingFields.length }));
+  const channelLabel = useChannelLabel();
   return (
     <ListRow
       data-testid={`agent-setup-row-${connector.connector_key}`}
       mark={<ListRowMark label={channelMarkInitials(connector.channel)} color={channelMarkColor(connector.channel)} />}
-      title={t('agentSetupConnectorTitle', { channel: channelLabel(connector.channel, t) })}
+      title={t('agentSetupConnectorTitle', { channel: channelLabel(connector.channel) })}
       subtitle={subtitle}
       status={<ConnectorReadinessChip ready={ready} t={t} />}
       action={ready ? undefined : (

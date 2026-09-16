@@ -12,7 +12,7 @@ import { parseEntityRef, unescapeReferenceLabel } from '@/components/chat/entity
 import { EntityChip, getEntityHref } from '@/components/chat/embed-card';
 import { isCommentReplyGate } from '@/components/cage/gate-risk';
 import { AuthorKindBadge } from '@/components/content/author-kind-badge';
-import { channelLabel } from '@/lib/channel-label';
+import { useChannelLabel } from '@/lib/channel-label';
 import { formatMinorCurrency, type GenerationBudgetCurrency } from '@/components/content/generation-budget-indicator';
 import { adsBoostObjectiveLabel } from '@/lib/ads-boost-objective-label';
 
@@ -649,10 +649,11 @@ function HypothesisOutcomeDraft({ draft }: { draft: HypothesisOutcomeDraftFacts 
  */
 function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
   const t = useTranslations('cage');
-  // story #3367(유나 CHANGES 2026-09-10) — channelLabel()의 표시명 키(channelLabel
-  // HostedSite/Wordpress 등)는 content ns에 산다(content/[draftId]/page.tsx 기존
-  // 소비처와 동일 배선) — cage ns의 이 컴포넌트가 별도로 바인딩한다.
   const tContent = useTranslations('content');
+  // story #3742(디디, 근본 처방) — channelLabel()의 표시명 키는 channelConnect
+  // 네임스페이스 하나가 정본(useChannelLabel 훅이 내부에서 고정) — 예전엔 content ns에
+  // 복제해 두고 cage가 tContent를 넘겨 그 복제분을 썼다(#3367 주석 정정).
+  const channelLabel = useChannelLabel();
   const locale = useLocale();
   const displayTimezone = resolveDisplayTimezone().tz;
   const [expanded, setExpanded] = useState(false);
@@ -827,7 +828,7 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
             {facts.destinationConnectionId === null
               ? t('recipeApprovalDestinationHostedSite')
               : facts.destinationChannel
-                ? channelLabel(facts.destinationChannel, tContent)
+                ? channelLabel(facts.destinationChannel)
                 // 연결이 삭제됐거나(드묾) enrich가 못 채운 예외 — uuid를 보이지
                 // 않는다(유나 CHANGES 원칙), 표시명도 지어내지 않는다. "—"는 순수
                 // 구두점(글자·숫자 0개, content.originAuthorUnknown과 동형 관례)이라
