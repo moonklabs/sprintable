@@ -1133,7 +1133,6 @@
     "createLabel": "생성",
     "collapseSection": "접기",
     "expandSection": "펼치기",
-    "storyDeleteConfirmTitle": "스토리를 삭제하시겠어요?",
     "storyDeleteIrreversible": "이 작업은 되돌릴 수 없어요. 스토리에 연결된 태스크도 함께 삭제돼요.",
     "permanentDelete": "영구 삭제",
     "addGeneric": "+ 추가",

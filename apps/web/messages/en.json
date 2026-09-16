@@ -1133,7 +1133,6 @@
     "createLabel": "Create",
     "collapseSection": "Collapse",
     "expandSection": "Expand",
-    "storyDeleteConfirmTitle": "Delete this story?",
     "storyDeleteIrreversible": "This action can't be undone. Tasks linked to this story will also be deleted.",
     "permanentDelete": "Delete permanently",
     "addGeneric": "+ Add",
