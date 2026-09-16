@@ -438,4 +438,19 @@ describe('DocsClientLayout — story #3784 loading/loadError 컨텍스트 실 �
     expect(h1s).toHaveLength(1);
     expect(h1s[0]!.className).not.toContain('text-sm font-medium');
   });
+
+  // story #3946(유나 확認·페드루 정정) — 로디드 스냅샷만 재면 트리 fetch가 아직 안 풀린
+  // 순간(DocsIndex가 `return null`)엔 h1이 0개가 되는 gap을 못 잡는다. fetch를 고의로
+  // pending으로 묶어 «첫 렌더 직후(아직 응답 전)»를 그대로 잰다.
+  it('⭐트리 fetch가 아직 안 풀린 로딩 상태에도 h1이 정확히 1개다(sr-only 자리표시자)', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
+    await act(async () => {
+      root.render(wrap(
+        <DocsClientLayout wsSlug="ws1" projSlug="proj1" projectId="proj-1"><DocsIndex /></DocsClientLayout>,
+      ));
+    });
+    const h1s = [...container.querySelectorAll('h1')];
+    expect(h1s).toHaveLength(1);
+    expect(h1s[0]!.className).toContain('sr-only');
+  });
 });
