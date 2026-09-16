@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback } from 'react';
+import { useTranslations } from 'next-intl';
 import { Node, mergeAttributes } from '@tiptap/core';
 import { ReactNodeViewRenderer, NodeViewWrapper, NodeViewContent, type ReactNodeViewProps } from '@tiptap/react';
 import { Columns2, Columns3 } from 'lucide-react';
@@ -8,6 +9,7 @@ import { Columns2, Columns3 } from 'lucide-react';
 // ─── Columns Block View ───────────────────────────────────────────────────────
 
 function ColumnsBlockView({ node, editor, getPos, updateAttributes }: ReactNodeViewProps) {
+  const t = useTranslations('docs');
   const cols = (node.attrs.columns as number) ?? 2;
 
   const switchTo = useCallback((target: 2 | 3) => {
@@ -53,7 +55,7 @@ function ColumnsBlockView({ node, editor, getPos, updateAttributes }: ReactNodeV
         contentEditable={false}
         className="mb-1.5 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
       >
-        <span className="text-[10px] uppercase tracking-widest text-muted-foreground mr-1">컬럼</span>
+        <span className="text-[10px] uppercase tracking-widest text-muted-foreground mr-1">{t('columnsLabel')}</span>
         <button
           type="button"
           onClick={() => switchTo(2)}
@@ -63,7 +65,7 @@ function ColumnsBlockView({ node, editor, getPos, updateAttributes }: ReactNodeV
               : 'border-border text-muted-foreground hover:border-brand/30 hover:text-foreground'
           }`}
         >
-          <Columns2 className="size-3" />2단
+          <Columns2 className="size-3" />{t('columnsTwo')}
         </button>
         <button
           type="button"
@@ -74,7 +76,7 @@ function ColumnsBlockView({ node, editor, getPos, updateAttributes }: ReactNodeV
               : 'border-border text-muted-foreground hover:border-brand/30 hover:text-foreground'
           }`}
         >
-          <Columns3 className="size-3" />3단
+          <Columns3 className="size-3" />{t('columnsThree')}
         </button>
       </div>
 

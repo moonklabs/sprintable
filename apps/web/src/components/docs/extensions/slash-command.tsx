@@ -94,18 +94,19 @@ export interface SlashMenuStrings {
     horizontalRule: string;
   };
   embedPrompt: string;
-  /** 선택 — 없으면 한글 기본값(시작/끝) 유지. 삽입되는 문서 콘텐츠라 UI chrome이 아님. */
-  mermaidDefault?: { start: string; end: string };
-  /** 선택 — 없으면 한글 기본값('토글 제목') 유지. */
-  toggleDefaultTitle?: string;
+  /** 삽입되는 문서 콘텐츠 기본값(mermaid 템플릿의 시작/끝 라벨) — 유일한 실 호출부
+   * (doc-editor.tsx)가 항상 채워 넘긴다(story #3930, 미사용 옵셔널 한글 폴백 제거). */
+  mermaidDefault: { start: string; end: string };
+  /** 삽입되는 문서 콘텐츠 기본값(새 토글 블록 제목) — 유일한 실 호출부가 항상 채워 넘긴다. */
+  toggleDefaultTitle: string;
 }
 
 /** title/icon/command은 리터럴로 고정(로케일 무관 검색 키), label/description/embed
  * prompt/삽입 기본값만 `strings`에서 resolve한다. */
 export function buildSlashMenuCategories(strings: SlashMenuStrings): SlashMenuCategory[] {
-  const mermaidStart = strings.mermaidDefault?.start ?? '시작';
-  const mermaidEnd = strings.mermaidDefault?.end ?? '끝';
-  const toggleTitle = strings.toggleDefaultTitle ?? '토글 제목';
+  const mermaidStart = strings.mermaidDefault.start;
+  const mermaidEnd = strings.mermaidDefault.end;
+  const toggleTitle = strings.toggleDefaultTitle;
 
   return [
     {

@@ -91,7 +91,7 @@ function EmbedView({ node, updateAttributes, selected }: ReactNodeViewProps) {
             onChange={(e) => setEditUrl(e.target.value)}
             onKeyDown={handleKeyDown}
             onBlur={applyUrl}
-            placeholder="URL 입력 후 Enter"
+            placeholder={t('embedUrlPlaceholder')}
             className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
           />
         </div>
@@ -137,7 +137,7 @@ function EmbedView({ node, updateAttributes, selected }: ReactNodeViewProps) {
       ) : (
         <div className="flex items-center gap-2 rounded-xl border border-dashed border-border px-4 py-4 text-sm text-muted-foreground">
           <Link2 className="size-4" />
-          <span>블록을 선택해 URL을 입력하세요</span>
+          <span>{t('embedUrlSelectHint')}</span>
         </div>
       )}
     </NodeViewWrapper>

@@ -177,7 +177,7 @@ export function WorkflowTemplateGallerySection({
         setApplyResult({ ok: false, message: data.error?.message ?? tOrg('eventApplyErrorGeneric') });
       }
     } catch {
-      setApplyResult({ ok: false, message: '네트워크 오류' });
+      setApplyResult({ ok: false, message: _t('workflowGalleryNetworkError') });
     } finally {
       setApplying(false);
     }
@@ -187,7 +187,7 @@ export function WorkflowTemplateGallerySection({
     return (
       <SectionCard>
         <SectionCardHeader>
-          <h2 className="text-base font-semibold text-foreground">워크플로우 템플릿 갤러리</h2>
+          <h2 className="text-base font-semibold text-foreground">{_t('workflowGalleryTitle')}</h2>
         </SectionCardHeader>
         <SectionCardBody>
           <p className="text-sm text-muted-foreground">{tc('loading')}</p>
@@ -203,14 +203,14 @@ export function WorkflowTemplateGallerySection({
     return (
       <SectionCard>
         <SectionCardHeader>
-          <h2 className="text-base font-semibold text-foreground">워크플로우 템플릿 갤러리</h2>
+          <h2 className="text-base font-semibold text-foreground">{_t('workflowGalleryTitle')}</h2>
         </SectionCardHeader>
         <SectionCardBody>
           <div
             className="flex items-center justify-between gap-2 rounded-md border border-destructive/30 bg-destructive-tint px-3 py-2 text-sm text-foreground"
             data-testid="workflow-gallery-load-error"
           >
-            <span>템플릿 목록을 불러오지 못했습니다.</span>
+            <span>{_t('workflowGalleryLoadFailed')}</span>
             <Button variant="outline" size="sm" onClick={() => void loadData()}>{tc('retry')}</Button>
           </div>
         </SectionCardBody>
@@ -222,8 +222,8 @@ export function WorkflowTemplateGallerySection({
     <SectionCard>
       <SectionCardHeader>
         <div className="space-y-1">
-          <h2 className="text-base font-semibold text-foreground">워크플로우 템플릿 갤러리</h2>
-          <p className="text-sm text-muted-foreground">템플릿을 선택해 단계별 담당 에이전트를 배정합니다.</p>
+          <h2 className="text-base font-semibold text-foreground">{_t('workflowGalleryTitle')}</h2>
+          <p className="text-sm text-muted-foreground">{_t('workflowGalleryDesc')}</p>
         </div>
       </SectionCardHeader>
       <SectionCardBody>
@@ -231,7 +231,7 @@ export function WorkflowTemplateGallerySection({
             빈 그리드로만 보였다(loadError와 구분 불가). */}
         {cyclicDefinitions.length === 0 ? (
           <p className="text-sm text-muted-foreground" data-testid="workflow-gallery-empty">
-            적용 가능한 워크플로우 템플릿이 없습니다.
+            {_t('workflowGalleryEmpty')}
           </p>
         ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -253,7 +253,7 @@ export function WorkflowTemplateGallerySection({
                 <div className="flex shrink-0 flex-col items-end gap-1">
                   <StageCountBadge count={cyclicStages(def).length} />
                   {appliedKeys.has(def.key) && (
-                    <Badge variant="success" className="text-[10px]">적용됨</Badge>
+                    <Badge variant="success" className="text-[10px]">{_t('workflowGalleryApplied')}</Badge>
                   )}
                 </div>
               </div>
@@ -269,7 +269,7 @@ export function WorkflowTemplateGallerySection({
         {selected && !loadingBindings && (
           <div className="mt-6 rounded-lg border border-border bg-muted/30 p-4 space-y-4">
             <div>
-              <h3 className="font-semibold text-sm text-foreground">{selected.name || selected.key} — 역할 매핑</h3>
+              <h3 className="font-semibold text-sm text-foreground">{selected.name || selected.key} {_t('workflowGalleryRoleMappingSuffix')}</h3>
               <p className="mt-0.5 text-xs text-muted-foreground">
                 {tOrg('eventApplyRoleMappingHint')}
               </p>
@@ -289,7 +289,7 @@ export function WorkflowTemplateGallerySection({
               // text-foreground, 강조만 text-warning-strong(my-notification-channel-section.tsx
               // 동형 패턴).
               <div className="space-y-1 rounded-md border border-warning-border bg-warning-tint p-2 text-xs text-foreground">
-                <p className="font-medium text-warning-strong">주의</p>
+                <p className="font-medium text-warning-strong">{_t('workflowGalleryWarningLabel')}</p>
                 <ul className="list-disc space-y-0.5 pl-4">
                   {applyWarnings.map((w, i) => <li key={i}>{w}</li>)}
                 </ul>
@@ -314,7 +314,7 @@ export function WorkflowTemplateGallerySection({
             >
               {/* story #3776(1층A) — "적용 중..."/"적용하기", organization ns의 기존
                   eventApplySubmitting/eventApplySubmit 키 재사용("재적용(덮어쓰기)"는 대응 키 없어 2층). */}
-              {applying ? tOrg('eventApplySubmitting') : (appliedKeys.has(selected.key) ? '재적용(덮어쓰기)' : tOrg('eventApplySubmit'))}
+              {applying ? tOrg('eventApplySubmitting') : (appliedKeys.has(selected.key) ? _t('workflowGalleryReapply') : tOrg('eventApplySubmit'))}
             </Button>
           </div>
         )}

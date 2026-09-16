@@ -32,6 +32,7 @@ function extractSnippet(content: string, maxChars = 200): string {
 }
 
 function DocPreviewCard({ title, snippet, x, y }: { title: string; snippet: string; x: number; y: number }) {
+  const t = useTranslations('docs');
   const CARD_WIDTH = 280;
   const CARD_EST_HEIGHT = 120;
   const GAP = 12;
@@ -50,7 +51,7 @@ function DocPreviewCard({ title, snippet, x, y }: { title: string; snippet: stri
       {snippet ? (
         <p className="text-[11px] leading-relaxed text-muted-foreground line-clamp-4">{snippet}</p>
       ) : (
-        <p className="text-[11px] text-muted-foreground opacity-60">내용 없음</p>
+        <p className="text-[11px] text-muted-foreground opacity-60">{t('noContentPreview')}</p>
       )}
     </div>,
     document.body,

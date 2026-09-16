@@ -16,6 +16,7 @@ import { renderMermaid } from '../lib/mermaid-renderer';
 // ─── Mermaid Block ───────────────────────────────────────────────────────────
 
 function MermaidBlockView({ node, editor, selected }: ReactNodeViewProps) {
+  const t = useTranslations('docs');
   const [svg, setSvg] = useState('');
   const [error, setError] = useState('');
   const id = useId();
@@ -35,11 +36,11 @@ function MermaidBlockView({ node, editor, selected }: ReactNodeViewProps) {
         const { svg: rendered } = await renderMermaid(code);
         if (!cancelled) { setSvg(rendered); setError(''); }
       } catch (err: unknown) {
-        if (!cancelled) { setError(err instanceof Error ? err.message : '렌더링 실패'); setSvg(''); }
+        if (!cancelled) { setError(err instanceof Error ? err.message : t('mermaidRenderFailed')); setSvg(''); }
       }
     })();
     return () => { cancelled = true; };
-  }, [code]);
+  }, [code, t]);
 
   const handlePreviewClick = useCallback(() => {
     if (isEditable) editor?.commands.focus();
@@ -51,7 +52,7 @@ function MermaidBlockView({ node, editor, selected }: ReactNodeViewProps) {
         <div className="flex items-center justify-between px-3 py-2" contentEditable={false}>
           <span className="text-[11px] font-medium text-muted-foreground">mermaid</span>
           {isEditable && (
-            <span className="text-[11px] text-muted-foreground">{showCode ? '코드 편집 중' : '클릭하여 편집'}</span>
+            <span className="text-[11px] text-muted-foreground">{showCode ? t('mermaidEditingCode') : t('mermaidClickToEdit')}</span>
           )}
         </div>
 
@@ -84,7 +85,7 @@ function MermaidBlockView({ node, editor, selected }: ReactNodeViewProps) {
                 className="flex justify-center [&_svg]:max-w-full [&_svg]:h-auto"
               />
             ) : (
-              <p className="text-xs text-muted-foreground">다이어그램을 입력하세요</p>
+              <p className="text-xs text-muted-foreground">{t('mermaidPlaceholder')}</p>
             )}
           </div>
         )}
