@@ -1123,6 +1123,10 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
         {/* story #3945 — 아래 :1157(본문 «목표» 제목)이 이 페이지의 진짜 h1이다. 로딩
             상태에도 같은 TopBarSlot 라벨을 쓰므로 일관되게 비-헤딩(<p>)으로. */}
         <TopBarSlot title={<p className="text-sm font-medium">{t('title')}</p>} showContextChip />
+        {/* story #3946(유나 확認·페드루 정정) — 로딩 상태엔 본문 마스트헤드(:1157)가 아직
+            안 그려져 h1이 0개가 되던 gap. 시각은 무변(스크린리더 전용) — sr-only h1로
+            "페이지 h1 항상 정확히 1개" 불변식을 로딩 분기에서도 지킨다. */}
+        <h1 className="sr-only">{t('title')}</h1>
         <div className="flex h-64 items-center justify-center">
           <p className="text-sm text-muted-foreground">{t('loading')}</p>
         </div>

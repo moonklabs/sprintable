@@ -95,9 +95,14 @@ export default function DocViewPage() {
     return parent?.title ?? null;
   }, [doc, tree]);
 
+  // story #3946(유나 확認·페드루 정정) — doc이 아직 안 왔거나(null) 못 찾았을 때(false)
+  // 본문 마스트헤드(:150의 doc.title h1)가 안 그려져 페이지 h1이 0개가 되던 gap. 시각은
+  // 무변(sr-only) — docs-index.tsx와 같은 원칙, 같은 정본 키(docs.title)를 쓴다(doc
+  // 자체 제목은 이 시점에 아직 모른다 — 지어내지 않는다).
   if (doc === null) {
     return (
       <div className="flex h-full items-center justify-center">
+        <h1 className="sr-only">{t('title')}</h1>
         <p className="text-sm text-muted-foreground">{t('loading')}</p>
       </div>
     );
@@ -106,6 +111,7 @@ export default function DocViewPage() {
   if (doc === false) {
     return (
       <div className="flex h-full items-center justify-center">
+        <h1 className="sr-only">{t('title')}</h1>
         <p className="text-sm text-muted-foreground">{t('notFound')}</p>
       </div>
     );

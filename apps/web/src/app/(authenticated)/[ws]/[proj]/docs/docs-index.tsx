@@ -106,8 +106,11 @@ export function DocsIndex() {
 
   // story #3784 — "아직 안 옴"·"실패"·"정말 0건"을 가른다. 로딩 中엔 조용히 아무것도
   // 그리지 않는다(사이드바가 이미 로딩 중 신호를 그린다 — 이 존까지 스켈레톤을 겹칠 이유 0).
+  // story #3946(유나 확認·페드루 정정) — 시각은 그대로 아무것도 안 그리되, docs-client-
+  // layout.tsx의 TopBarSlot이 비-헤딩(<p>)이라 이 로딩 순간엔 페이지 전체에 h1이 0개가
+  // 된다("페이지 h1 항상 정확히 1개" 불변식 gap). sr-only h1로만 메운다(시각 무변).
   if (loading) {
-    return null;
+    return <h1 className="sr-only">{t('title')}</h1>;
   }
 
   if (loadError) {

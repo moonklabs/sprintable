@@ -361,4 +361,17 @@ describe('GoalsClient — 페이지 h1 1개 원칙(story #3945)', () => {
     // (TopBarSlot이 <p>로 낮아졌다면 이 클래스 조합의 h1 자체가 존재할 수 없다).
     expect(h1s.some((h) => h.className.includes('text-sm font-medium'))).toBe(false);
   });
+
+  // story #3946(유나 확認·페드루 정정) — 로디드 스냅샷만 재면 로딩 분기(본문 마스트헤드가
+  // 아직 안 그려진 순간)에서 h1이 0개가 되는 gap을 못 잡는다. fetch를 고의로 pending
+  // 상태로 묶어 두고 «첫 렌더 직후(아직 응답 전)»를 그대로 잰다.
+  it('⭐로딩 상태에도 h1이 정확히 1개다(sr-only 자리표시자)', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
+    const { GoalsClient } = await import('./goals-client');
+    await act(async () => { root.render(wrap(<GoalsClient projectId="proj-1" />)); });
+    const h1s = [...container.querySelectorAll('h1')];
+    expect(h1s).toHaveLength(1);
+    expect(h1s[0]!.className).toContain('sr-only');
+    expect(h1s[0]!.textContent).toBe('목표');
+  });
 });
