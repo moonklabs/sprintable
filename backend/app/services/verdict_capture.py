@@ -374,12 +374,17 @@ async def capture_review_verdict(
     member_id: uuid.UUID,
     result: str | None,
     rounds: int | None = None,
+    source: str | None = None,
 ) -> dict[str, Any]:
-    """QA/디자인 게이트 결과를 verdict로 기록.
+    """QA/디자인/PO 게이트 결과를 verdict로 기록.
 
-    role_key: 'qa' | 'design' (org participation_role.key)
+    role_key: 'qa' | 'design' | 'po'(org participation_role.key) — "누가 이 역할을 맡았는지".
     result: 'pass' | 'fail' | None
-    멱등: record_verdict uq(participation_id, source) upsert.
+    source(story #3963, PO 확定 2026-09-16 16:34Z): Verdict.source 값 — 생략 시 기존 관례
+    그대로 role_key를 그대로 씀(무회귀). GitHub 코멘트 기반 자동 캡처처럼 "어느 경로로
+    들어왔는지"를 role과 별도로 남기고 싶을 때만 명시 override(예: "github_comment") —
+    Verdict.source는 원래 자유 확장 어휘(모델 docstring, enum 아님)라 새 값 추가에 마이그
+    불요. uq(participation_id, source) upsert 멱등은 role_key든 override든 그 값 기준.
     role 없거나 story 없으면 skip(거짓기록 금지).
     """
     participation = await ensure_review_participation(session, org_id, story_id, member_id, role_key)
@@ -390,7 +395,7 @@ async def capture_review_verdict(
 
     await record_verdict(
         session, org_id, participation.id,
-        source=role_key,
+        source=source or role_key,
         result=result,
         rounds=rounds,
     )
@@ -401,4 +406,4 @@ async def capture_review_verdict(
         )
     except Exception:
         pass
-    return {"recorded": True, "source": role_key, "result": result, "skipped_reason": None}
+    return {"recorded": True, "source": source or role_key, "result": result, "skipped_reason": None}
