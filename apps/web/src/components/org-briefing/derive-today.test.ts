@@ -74,6 +74,7 @@ describe('parseToday — story #3823 실 응답 모양 파싱(no-fiction)', () =
     expect(snapshot.agentProgress).toHaveLength(1);
     expect(snapshot.agentProgress[0]).toEqual({
       runId: 'r1', agentName: '미르코', workItemTitle: 'YouTube 영상 올리기', status: 'running', startedAt: '2026-09-13T03:00:00Z',
+      cancel: null,
     });
     expect(snapshot.published).toEqual({ count: 3, byChannel: [{ channelKind: 'blog', count: 2 }, { channelKind: 'newsletter', count: 1 }] });
     expect(snapshot.usage).toEqual({ platform: [{ connectionId: 'c1', channelKind: 'youtube', used: 100, limit: 10000, resetAt: '2026-09-14T00:00:00Z' }], adSpendMeasured: false });

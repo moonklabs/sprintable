@@ -144,7 +144,7 @@ export function TodayV3Screen() {
                   items={snapshot.needsMe} count={snapshot.needsMeCount}
                   isAdminOrOwner={isAdminOrOwner} onActionSuccess={retry}
                 />
-                <TodayV3AgentProgress items={snapshot.agentProgress} />
+                <TodayV3AgentProgress items={snapshot.agentProgress} onActionSuccess={retry} />
                 <TodayResultsSummary snapshot={snapshot} />
               </div>
             )}
