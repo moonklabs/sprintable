@@ -1,5 +1,5 @@
 import { composeEventPreviewLine, type EventPreviewHelpers } from '@/components/chat/event-block-card';
-import { unescapeReferenceLabel } from '@/components/chat/entity-ref';
+import { unescapeReferenceLabel, toPlainPreview } from '@/components/chat/entity-ref';
 import { gateTypeLabel } from '@/lib/gate-type-label';
 
 // story #3760(가드) — page.tsx(App Router 라우트 파일)는 Next.js export 화이트리스트 밖의
@@ -110,5 +110,9 @@ export function composeNotificationDisplay(
     if (legacyComposed) body = legacyComposed;
   }
 
-  return { title, body };
+  // story #3949 — event/legacy 조합이 전부 안 걸리면(예: 일반 conversation.message가
+  // event 페이로드 없이 도착) body는 위에서 손 안 댄 raw notification.body 그대로다 —
+  // 마크다운 링크/entity 참조 토큰이 샐 수 있어 평문화한다. 이미 조합된 body(위 두
+  // 분기)는 entity 문법이 없어 이 함수가 no-op으로 통과한다.
+  return { title, body: body ? toPlainPreview(body) : body };
 }
