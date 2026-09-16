@@ -32,11 +32,16 @@ shift 2
 # 보낸다. 기본 30초(CI 실제 값)지만 자가진단(TERM 무시 양성대조)이 30초씩 기다리지
 # 않도록 STALL_KILL_AFTER 환경값으로 짧게 주입할 수 있게 뺐다.
 KILL_AFTER="${STALL_KILL_AFTER:-30s}"
-_start=$(date +%s)
+# 페드루 PO CHANGES(PR#4348 5라운드, 카디르 재현) — `date +%s`(초 절삭)는 경과시간을
+# 항상 "크게" 재는 쪽으로 편향된다(예: 8분 제한에서 실제 7.99분 뒤 즉발 137이 와도
+# 절삭 때문에 elapsed가 480s로 반올림돼 STALL로 잘못 새는 창이 생김 — 8분처럼 큰
+# 제한에선 ≤1s라 무시해도 되지만, 합성 테스트처럼 초 단위 제한에선 그 창이 전체의
+# 상당 비율이라 실제로 샌다). `%s.%N`(나노초)+awk 실수 비교로 그 창을 구조적으로 닫는다.
+_start=$(date +%s.%N)
 timeout -k "$KILL_AFTER" "${TIMEOUT_MIN}m" "$@"
 code=$?
-_elapsed=$(( $(date +%s) - _start ))
-_limit_sec=$(awk "BEGIN { printf \"%d\", (${TIMEOUT_MIN} * 60) }")
+_elapsed=$(awk "BEGIN { printf \"%.3f\", $(date +%s.%N) - ${_start} }")
+_limit_sec=$(awk "BEGIN { printf \"%.3f\", (${TIMEOUT_MIN} * 60) }")
 
 # 페드루 PO CHANGES(PR#4348 잔여③→4라운드) — GNU coreutils timeout(1) 매뉴얼:
 # TERM만으로 죽으면 124, TERM을 무시해 KILL(9)까지 가면 **137**(128+9)로 exit code가
@@ -49,7 +54,7 @@ _limit_sec=$(awk "BEGIN { printf \"%d\", (${TIMEOUT_MIN} * 60) }")
 # (124는 coreutils 자신이 "시간이 다 됐다"고 판단했을 때만 나오는 값이라 이 모호함이
 # 없다 — 경과시간 대조 불필요.)
 if [ "$code" -eq 137 ]; then
-  if [ "$_elapsed" -ge "$_limit_sec" ]; then
+  if awk "BEGIN { exit !(${_elapsed} >= ${_limit_sec}) }"; then
     echo "STALL: 명령이 ${TIMEOUT_MIN}분 안에 안 끝나 강제 종료됨(TERM 무시 → ${KILL_AFTER} 뒤 KILL escalation) — $*" >&2
     exit 124
   else
