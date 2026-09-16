@@ -98,25 +98,24 @@ import ts from 'typescript';
 // 자가검출이 정확히 예견한 대로 두 파일의 한글 히트가 0이 됐다 — 여기서 EXEMPT_FILES를
 // 건는다(baseline이 그 20건만큼 늘어난 것으로 self-expire·grandfather로 복귀 0건, 새
 // 코드는 전부 i18n 키라 baseline에 안 실린다).
-// story #3930 PR③(2026-09-16, 페드루 확認·PO 승인) — 이 둘은 "UI 렌더 문구가 아니라
-// 번역하면 오히려 깨지는 자리"라 baseline 그랜드파더가 아니라 파일째 EXEMPT한다.
-//   `components/cage/gate-evidence.tsx`의 `_UNCONFIRMED = '미확認'` — BE(전역 sentinel
-//   계약값, recipe_gate_hooks.py 등)가 실제로 보내는 값과 그대로 비교하는 상수. 번역하면
-//   en 로케일에서 BE의 실 한글 sentinel과 매치가 깨진다(기능 회귀). ⚠️이 파일은 다른
-//   자리에 정상 t() 소비처가 여러 곳 있다(cage ns) — 이 예외는 그 상수 하나 때문에 파일
-//   전체 스캔을 끈다는 뜻이라, 새 하드코딩 한국어가 이 파일에 더 생겨도 이 가드가 못
-//   잡는다(범위 자각, 필요해지면 라인 단위 예외로 좁히는 후속 별건).
-//   `components/locale-switcher.tsx`의 `한국어로 변경` — 로케일 스위처 자체가 "지금
-//   아닌 언어로 전환" 툴팁이라 항상 그 언어 자체의 문자로 서야 한다(en일 때 「한국어」로
-//   보여야 사용자가 알아봄, 대칭축 반대편 en 문구 "Switch to English"도 코드에 이미
-//   하드코딩 — 둘 다 로케일 자체를 가리키는 라벨이라 번역 대상이 아님). 이 파일은
-//   전체가 이 라벨 하나뿐이라 위 gate-evidence와 달리 범위 자각 리스크가 낮다.
+// story #3930 PR③(2026-09-16, 페드루 확認·PO 승인) — locale-switcher.tsx의
+// `한국어로 변경` — 로케일 스위처 자체가 "지금 아닌 언어로 전환" 툴팁이라 항상 그
+// 언어 자체의 문자로 서야 한다(en일 때 「한국어」로 보여야 사용자가 알아봄, 대칭축
+// 반대편 en 문구 "Switch to English"도 코드에 이미 하드코딩 — 둘 다 로케일 자체를
+// 가리키는 라벨이라 번역 대상이 아님). 이 파일은 전체가 이 라벨 하나뿐이라 파일 단위
+// EXEMPT의 blast radius 리스크가 낮다("UI 렌더 문구가 아니라 번역하면 오히려 깨지는
+// 자리"는 baseline 그랜드파더가 아니라 EXEMPT가 맞는 판정 — story #3930 PR③ 그대로).
+// story #3937(2026-09-16, PO 승인) — `components/cage/gate-evidence.tsx`는 여기서
+// 뺐다. PR#4341 당시엔 `_UNCONFIRMED` 상수 하나 때문에 파일째 EXEMPT했는데, 그 파일은
+// 다른 자리에 정상 t() 소비처가 여러 곳 있어(cage ns) 새 하드코딩 한국어가 그 파일에
+// 더 생겨도 이 가드가 못 잡는 blast radius였다(PR#4341 디디 자기 지적·PO 승인분).
+// `_UNCONFIRMED` 자리만 아래 `i18n-exempt:` 라인 마커로 좁혀 그 파일의 나머지는 다시
+// 스캔 축 «안»에 든다.
 export const EXEMPT_FILES = new Set<string>([
   'app/internal-dogfood/page.tsx',
   'app/terms/page.tsx',
   'app/privacy/page.tsx',
   'app/refund-policy/page.tsx',
-  'components/cage/gate-evidence.tsx',
   'components/locale-switcher.tsx',
 ]);
 
@@ -126,6 +125,114 @@ export interface Violation {
   file: string;
   line: number;
   text: string;
+}
+
+// story #3937(2026-09-16, PO 승인) — EXEMPT_FILES(파일 단위)는 그 파일의 다른 자리에
+// 새 하드코딩 한국어가 생겨도 못 잡는다(gate-evidence.tsx가 `_UNCONFIRMED` 상수 하나
+// 때문에 파일째 빠졌던 blast radius 자각, PR#4341 디디 자기 지적). 이 마커는 그 자리
+// «하나만» 스캔에서 뺀다 — 위반 리터럴이 선 바로 그 줄(0-index)의 **바로 앞 줄**에
+// `// i18n-exempt: <사유>` 라인 주석이 있으면 그 위반만 면제한다.
+//
+// story #3937 CHANGES1·2(카디르 P2·페드루 정정 두 차례) — "원문 줄 텍스트를 정규식으로
+// 본다"는 접근을 두 번 땜질했다(1회차: 무앵커 → 아무 문자열 리터럴 안 문구도 매치.
+// 2회차: `^\s*\/\/` 앵커 → 그래도 멀티라인 템플릿 리터럴 «안»의 `// i18n-exempt: …`
+// 줄은 실제 주석 토큰이 아니라 그냥 문자열 내용인데, 원문 줄 스캔은 그 구분을 원리적으로
+// 못 한다 — 같은 클래스가 세 번째로 재현됨, 카디르). 반창고를 그만 쌓고 클래스를 닫는다:
+// 파서가 실제로 인식한 주석 트리비아만 쓴다 — 문자열/템플릿 리터럴 «안»의 `//`는
+// 파서가 그 리터럴 토큰의 내용으로 흡수하지 트리비아로 잘라내지 않으므로, 트리비아
+// 기반 조회는 이 클래스의 우회를 구조적으로 배제한다.
+//
+// «노드별 leading-comment 조회가 실패했던» 원래 함정(헤더 옛 주석 — `const X = '한글';`
+// 에서 문자열 리터럴 노드 자신의 getFullStart()엔 앞 주석이 안 붙고 `const` 키워드
+// 쪽에 붙는 TS 트리비아 성질)은 "노드 하나만" 볼 때의 문제였다 — 파일의 **모든 토큰**
+// (`node.getChildren(sf)`로 키워드·구두점까지 전부 순회, `forEachChild`는 키워드 같은
+// 토큰을 건너뛴다)의 leading·trailing 코멘트 범위를 전부 모아 파일 전체 코멘트 Set을
+// 만들면 "어느 토큰에 붙었는가"는 상관없어진다 — 그 Set 안에 있으면 파일 어딘가의
+// 진짜 주석이다.
+//
+// story #3937 CHANGES4(카디르 codex 4번째 재현·페드루 정정) — `ts.getLeadingCommentRanges
+// (fullText, pos)`는 "파서가 확定한 주석 목록"이 아니라 **주어진 pos에서 원문을 다시
+// 스캔**하는 함수다. `JsxText` 구간(코드가 아닌 텍스트) 안에 "// i18n-exempt: …" 처럼
+// 보이는 내용이 있으면 그 pos에서 시작한 재스캔이 코드 트리비아로 오인한다 — TSX에서
+// 그런 구간은 JsxText뿐이다(문자열·템플릿은 토큰 «내용»이라 스캔 대상 밖).
+// 처음엔 "JsxText 노드 자신의 getFullStart/getEnd에서만 조회를 건너뛴다"로 처방했으나
+// 실측 결과 불충분 — `<div>` 여는 태그의 `>` 토큰(GreaterThanToken)의
+// getTrailingCommentRanges(fullText, `>` 바로 다음 위치)가 «다른 토큰에서» 똑같은
+// JsxText 구간을 재스캔해 같은 오탐을 재현했다. 그래서 판별선을 "어느 토큰이
+// 방아쇠였는가"에서 "그 pos가 JsxText 구간 안인가"로 옮겼다 — 아래
+// `collectCommentMarkerLines`가 모든 JsxText 노드의 [getFullStart, getEnd) 구간을
+// 먼저 모으고, 코멘트 후보의 pos가 그 구간 안이면 «어느 토큰에서 나왔든» 무시한다.
+const I18N_EXEMPT_MARKER_RE = /^\/\/\s*i18n-exempt:\s*\S/;
+
+// pos(주석 시작 오프셋) 기준으로 dedupe — 인접한 여러 토큰이 같은 코멘트 범위를
+// leading/trailing 양쪽에서 중복 보고하기 때문.
+function collectCommentMarkerLines(sf: ts.SourceFile): Set<number> {
+  const fullText = sf.getFullText();
+
+  // story #3937 CHANGES5(페드루 CI 실측·2026-09-16 07:32Z RED) — CHANGES3·4가 넣은
+  // 전수 토큰 순회(`getChildren(sf)`로 토큰 배열 생성 + leading/trailing 코멘트
+  // 재스캔)가 «파일마다» 도는 게 문제였다 — 마커 문구가 아예 없는(레포 대다수) 파일도
+  // 똑같이 그 비용을 치러 CI 부하 속에서 #3902 천장(3s)을 넘었다(타임아웃 RED). 처방은
+  // 천장을 올리는 게 아니라 «마커 문구가 없으면 순회 자체를 안 한다» — 원문에
+  // "i18n-exempt" 부분문자열조차 없으면 진짜 주석이든 문자열/JsxText 안 텍스트든
+  // markerLines가 빌 수밖에 없으므로(그 문자열 없이는 I18N_EXEMPT_MARKER_RE가 무조건
+  // false), 순회 전체를 건너뛰고 빈 Set을 즉시 돌려준다 — 대다수 파일이 옛 비용으로
+  // 복귀한다.
+  if (!fullText.includes('i18n-exempt')) return new Set<number>();
+
+  // story #3937 CHANGES4 실측 정정 — "JsxText 노드 자신의 getFullStart/getEnd에서만
+  // 조회를 건너뛴다"는 처음 처방으론 부족했다: `<div>` 여는 태그의 `>` 토큰(GreaterThan)
+  // 의 getTrailingCommentRanges(fullText, `>` 다음 위치)가 바로 그 JsxText 구간을 다시
+  // 스캔해 같은 오탐을 일으킨다 — «어느 토큰이 방아쇠였는가»가 아니라 «그 위치가 JsxText
+  // 구간 안인가»가 진짜 판별선이다. 그래서 JsxText 노드들의 [getFullStart, getEnd) 구간을
+  // 먼저 전부 모아 두고, 코멘트 후보의 pos가 그 구간 «안»이면 통째로 버린다(어느 토큰의
+  // leading/trailing에서 나왔는지는 더 이상 안 따진다).
+  const jsxTextSpans: Array<[number, number]> = [];
+  function collectJsxTextSpans(node: ts.Node): void {
+    if (node.kind === ts.SyntaxKind.JsxText) {
+      jsxTextSpans.push([node.getFullStart(), node.getEnd()]);
+    }
+    ts.forEachChild(node, collectJsxTextSpans);
+  }
+  collectJsxTextSpans(sf);
+  function isInsideJsxText(pos: number): boolean {
+    return jsxTextSpans.some(([s, e]) => pos >= s && pos < e);
+  }
+
+  const seenPos = new Set<number>();
+  const markerLines = new Set<number>();
+
+  function considerRanges(ranges: ts.CommentRange[] | undefined): void {
+    if (!ranges) return;
+    for (const r of ranges) {
+      if (r.kind !== ts.SyntaxKind.SingleLineCommentTrivia) continue;
+      if (seenPos.has(r.pos)) continue;
+      seenPos.add(r.pos);
+      if (isInsideJsxText(r.pos)) continue;
+      const { line, character } = sf.getLineAndCharacterOfPosition(r.pos);
+      // "그 줄이 실제로 그 주석으로 시작한다"(코드 뒤에 붙는 트레일링 주석 제외) —
+      // 주석 시작 앞 컬럼이 전부 공백이어야 «마커 줄»로 인정한다.
+      const linePrefix = fullText.slice(r.pos - character, r.pos);
+      if (linePrefix.trim().length > 0) continue;
+      const commentText = fullText.slice(r.pos, r.end);
+      if (I18N_EXEMPT_MARKER_RE.test(commentText)) markerLines.add(line);
+    }
+  }
+
+  function visitToken(node: ts.Node): void {
+    considerRanges(ts.getLeadingCommentRanges(fullText, node.getFullStart()));
+    considerRanges(ts.getTrailingCommentRanges(fullText, node.getEnd()));
+    for (const child of node.getChildren(sf)) visitToken(child);
+  }
+  visitToken(sf);
+
+  return markerLines;
+}
+
+function hasExemptMarker(node: ts.Node, sf: ts.SourceFile, markerLines: Set<number>): boolean {
+  const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line;
+  if (line === 0) return false;
+  return markerLines.has(line - 1);
 }
 
 export function scanContent(content: string, file: string): Violation[] {
@@ -138,10 +245,12 @@ export function scanContent(content: string, file: string): Violation[] {
     isTsx ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
   );
 
+  const markerLines = collectCommentMarkerLines(sf);
   const violations: Violation[] = [];
   function addIfHangul(node: ts.Node, text: string): void {
     const trimmed = text.trim();
     if (trimmed.length > 0 && HANGUL_RE.test(trimmed)) {
+      if (hasExemptMarker(node, sf, markerLines)) return;
       const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
       violations.push({ file, line, text: trimmed });
     }

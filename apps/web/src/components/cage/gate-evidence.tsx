@@ -118,6 +118,7 @@ function hypothesisOutcomeDraft(gate: GateItem): HypothesisOutcomeDraftFacts | n
 // 전용)와 완전히 다르다 — work_item_reference_token·draft_doc_reference_token·channel·
 // draft_doc_summary·stage. `미확認`(BE sentinel, 값을 못 찾았다는 명시 표기)은 실 증거가
 // 아니므로 걸러낸다(지어내지 않음 — realString).
+// i18n-exempt: BE sentinel 계약값(recipe_gate_hooks.py 등과 그대로 비교) — 번역하면 매치가 깨진다. UI 렌더 문구 아님(story #3937).
 const _UNCONFIRMED = '미확認';
 
 function realString(v: unknown): string | null {
