@@ -26,6 +26,7 @@ import { ProofCapsule, type ProofState } from '@/components/proof-capsule/proof-
 import { useSseNotifications } from '@/hooks/use-sse-notifications';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { buildGateTransitionBody, buildHitlDecisionBody, classifyGateTransitionErrorCode } from '@/lib/gate-decision-payload';
 
 // story #1960(P2-S4) — 결재함 통합 큐. Gate 3종(게이트·문서결재·머지게이트, gate_type/
 // work_item_type discriminator로 단일 Gate 테이블에 자연 수렴 — #1954에서 확定된 스코프
@@ -335,7 +336,7 @@ export function ApprovalsQueue() {
       const res = await fetch(`/api/v1/hitl-requests/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status }),
+        body: JSON.stringify(buildHitlDecisionBody({ status })),
       });
       if (res.ok) setItems((prev) => prev.filter((it) => it.id !== id));
     } finally {
@@ -362,10 +363,9 @@ export function ApprovalsQueue() {
         headers: { 'Content-Type': 'application/json' },
         // story #2027 AC2 — gates/[id]/page.tsx와 동일 계약(evidence_viewed는 고위험 서명
         // 플로우 onApprove에서만 true로 실린다, 아래 GateSignatureApproval 배선 참조).
-        body: JSON.stringify({
-          status, note: note?.trim() || null, evidence_viewed: evidenceViewed ?? false,
-          reviewed_head_sha: g?.github_check_run_sha ?? null,
-        }),
+        body: JSON.stringify(buildGateTransitionBody({
+          status, note, evidenceViewed, reviewedHeadSha: g?.github_check_run_sha ?? null,
+        })),
       });
       if (res.ok) {
         setResolvedGates((prev) => ({ ...prev, [id]: status }));
@@ -376,12 +376,13 @@ export function ApprovalsQueue() {
       } else {
         const body = await res.json().catch(() => null) as { error?: { message?: string; code?: string; current_status?: string } } | null;
         const code = body?.error?.code;
+        const errorKind = classifyGateTransitionErrorCode(code);
         // story #2975·#2982(PO 확定) — code 부착 거부는 raw BE 문구(한국어 평문·i18n 안 됨)
         // 대신 사람 문구로. gate_already_resolved는 이 시점부터 서버 진실을 아는 것이므로
         // (current_status), 재조회 없이도 즉시 「완료」 카드로 전환할 수 있다(AC1 — 죽은
         // 버튼이 다시 안 뜬다) — approved/rejected만 이 큐의 표시 슬롯이 있고, 그 외
         // (held/voided 등)는 표시할 슬롯이 없어 목록에서만 제거(클릭-스루로 상세에서 확認).
-        if (code === 'gate_already_resolved') {
+        if (errorKind === 'already_resolved') {
           const cur = body?.error?.current_status;
           if (cur === 'approved' || cur === 'rejected') {
             setResolvedGates((prev) => ({ ...prev, [id]: cur }));
@@ -390,8 +391,8 @@ export function ApprovalsQueue() {
           }
           setSignatureTargetId((c) => (c === id ? null : c));
         }
-        const reason = code === 'gate_head_changed' ? t('gateHeadChangedError')
-          : code === 'gate_already_resolved' ? t('gateAlreadyResolvedError')
+        const reason = errorKind === 'head_changed' ? t('gateHeadChangedError')
+          : errorKind === 'already_resolved' ? t('gateAlreadyResolvedError')
           : (body?.error?.message ?? t('gateTransitionErrorGeneric'));
         setGateErrors((prev) => ({ ...prev, [id]: reason }));
       }
