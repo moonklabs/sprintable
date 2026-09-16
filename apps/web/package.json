@@ -24,6 +24,7 @@
     "verify:no-new-raw-fetch-api": "tsx scripts/verify-no-new-raw-fetch-api.ts",
     "verify:no-card-surfaceless-box": "tsx scripts/verify-no-card-surfaceless-box.ts",
     "verify:frontend-docker-import-context": "tsx scripts/verify-frontend-docker-import-context.ts",
+    "verify:next-public-build-arg-wiring": "tsx scripts/verify-next-public-build-arg-wiring.ts",
     "verify:no-direct-backend-v2-call": "tsx scripts/verify-no-direct-backend-v2-call.ts",
     "verify:no-date-tolocalestring": "tsx scripts/verify-no-date-tolocalestring.ts",
     "verify:tint-foreground-contrast": "tsx scripts/verify-tint-foreground-contrast.ts",
