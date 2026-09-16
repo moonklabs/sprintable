@@ -564,8 +564,14 @@ export function EntityPreviewModal({
   // "카드 전체를 죽이지 않는다"(AC4) 원칙대로 여기서만 계산 — 헤더의 아이콘·제목·상태는 이 값과
   // 무관하게 항상 그대로 보인다(아래 return, 안 바뀜). 바뀌는 건 풋터의 링크/문구뿐이다.
   type LinkKind = 'own' | 'via-parent' | null;
+  // story #3935 CHANGES(2026-09-16, 카디르 실증·페드루 판정) — linkKind만으론 "부모가
+  // 있다"만 알지 그 부모가 story/epic/doc 중 무엇인지 몰라, via-parent 문구가 항상
+  // "상위 스토리"로 고정돼 있었다(artifact의 epic/doc 부모에도 거짓 문구). 실 부모
+  // 종류를 옆에 같이 들고 footer 문구를 그 종류로 가른다.
+  type ParentKind = 'story' | 'epic' | 'doc' | null;
   let resolvedHref: string | null;
   let linkKind: LinkKind;
+  let parentKind: ParentKind = null;
   if (entityType === 'doc') {
     // #2168 PR-①: org_slug+project_slug 가 있으면 `/{ws}/{proj}/docs/{slug}/view`로 직행 —
     // CURRENT_PROJECT_COOKIE 기반 middleware 추측(proxy.ts redirectLegacyResourcePath, "현재
@@ -589,6 +595,7 @@ export function EntityPreviewModal({
       (ws, proj) => storyBoardUrl(ws, proj, t!.story_id!),
     );
     linkKind = resolvedHref ? 'via-parent' : null;
+    parentKind = 'story';
   } else if (entityType === 'artifact') {
     // 레코드마다 갈린다(story #2302 그라운딩) — story_id/epic_id/doc_id 전부 nullable·최대 1개
     // (hypothesis의 다대다 링크테이블과 다른 모양이라 "하나 고르면 나머지를 숨기는 거짓"이 될
@@ -615,6 +622,7 @@ export function EntityPreviewModal({
         : null;
     resolvedHref = parentHref;
     linkKind = parentHref ? 'via-parent' : null;
+    parentKind = d?.story_id ? 'story' : d?.epic_id ? 'epic' : d?.doc_id ? 'doc' : null;
   } else if (entityType === 'evidence') {
     // ② — story #2314(2026-07-29): BE GET /{id}가 work_item_type이 story든 task든 이미
     // resolved_story_id 하나로 해소해 준다(task처럼 여기서 또 한 번 join할 필요가 없다).
@@ -627,6 +635,7 @@ export function EntityPreviewModal({
       (ws, proj) => storyBoardUrl(ws, proj, ev!.resolved_story_id!),
     );
     linkKind = resolvedHref ? 'via-parent' : null;
+    parentKind = 'story';
   } else if (entityType === 'hypothesis') {
     // ③ 고정 — 위 getEntityHref 주석 참고.
     resolvedHref = null;
@@ -721,7 +730,9 @@ export function EntityPreviewModal({
           className="flex items-center gap-1.5 text-sm text-primary hover:underline"
         >
           <ExternalLink className="h-3.5 w-3.5" />
-          {linkKind === 'via-parent' ? t('goToParent') : t('viewAll')}
+          {linkKind === 'via-parent'
+            ? (parentKind === 'epic' ? t('goToParentGoal') : parentKind === 'doc' ? t('goToParentDoc') : t('goToParentStory'))
+            : t('viewAll')}
         </Link>
       ) : (
         <span className="flex cursor-default items-center gap-1.5 text-sm text-muted-foreground">{t('noScreenToOpen')}</span>

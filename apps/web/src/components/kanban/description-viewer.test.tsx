@@ -98,9 +98,9 @@ describe('DescriptionViewer — entity: 링크가 EntityChip으로 그려지는�
       ));
     });
 
-    // 유령이면 '대상이 없습니다' 텍스트로 바뀐다 — 정상 칩은 label 그대로 유지.
+    // 유령이면 '대상이 없어요' 텍스트로 바뀐다 — 정상 칩은 label 그대로 유지.
     expect(container.textContent).toContain('스토리 제목');
-    expect(container.textContent).not.toContain('대상이 없습니다');
+    expect(container.textContent).not.toContain('대상이 없어요');
     expect(container.querySelector('button')).toBeTruthy();
   });
 
@@ -114,9 +114,9 @@ describe('DescriptionViewer — entity: 링크가 EntityChip으로 그려지는�
       ));
     });
 
-    // entityId가 UUID까지 파싱됐다 — 미등록≠비존재라 "대상이 없습니다" 단정 없이 실 라벨을
+    // entityId가 UUID까지 파싱됐다 — 미등록≠비존재라 "대상이 없어요" 단정 없이 실 라벨을
     // 보이고, 클릭(EntityChip→EntityPreviewModal 실 fetch)으로 진짜 존재판정을 위임한다.
-    expect(container.textContent).not.toContain('대상이 없습니다');
+    expect(container.textContent).not.toContain('대상이 없어요');
     expect(container.textContent).toContain('스토리 제목');
     expect(container.querySelector('button')).toBeTruthy();
   });
@@ -129,7 +129,7 @@ describe('DescriptionViewer — entity: 링크가 EntityChip으로 그려지는�
     });
 
     expect(container.textContent).toContain('스토리 제목');
-    expect(container.textContent).not.toContain('대상이 없습니다');
+    expect(container.textContent).not.toContain('대상이 없어요');
   });
 
   it('entity: 링크 클릭도 부모(편집모드 진입) onClick으로 안 샌다', async () => {
@@ -212,7 +212,7 @@ describe('DescriptionViewer — bare #<번호>가 bareNumberTargets로 렌더되
     });
 
     expect(container.textContent).toContain('#2258');
-    expect(container.textContent).not.toContain('대상이 없습니다');
+    expect(container.textContent).not.toContain('대상이 없어요');
     expect(container.querySelector('button')).toBeTruthy();
   });
 
@@ -237,7 +237,7 @@ describe('DescriptionViewer — bare #<번호>가 bareNumberTargets로 렌더되
     });
 
     expect(container.textContent).toContain('#2258');
-    expect(container.textContent).not.toContain('대상이 없습니다');
+    expect(container.textContent).not.toContain('대상이 없어요');
     expect(container.querySelector('button')).toBeFalsy();
     expect(container.querySelector('a')).toBeFalsy();
   });

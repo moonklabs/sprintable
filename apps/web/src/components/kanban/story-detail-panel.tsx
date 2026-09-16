@@ -2356,7 +2356,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
       <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{t('storyDeleteConfirmTitle')}</DialogTitle>
+            <DialogTitle>{t('deleteStoryDialogTitle')}</DialogTitle>
             <DialogDescription>
               {t('storyDeleteIrreversible')}
             </DialogDescription>

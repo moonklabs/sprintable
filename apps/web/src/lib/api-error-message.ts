@@ -45,12 +45,12 @@
 export const HUMAN_SAFE_ERROR_MESSAGE_CODES = new Set<string>([
   // channel_post_comments.py::refresh_publication_comments_endpoint(raise 1곳)
   'COMMENT_REFRESH_HUMAN_ONLY', // "댓글 재수집은 휴먼 멤버만 가능해요."
-  'COMMENT_COLLECTION_UNSUPPORTED', // "이 채널은 댓글 수집을 지원하지 않습니다."(raise 1곳)
+  'COMMENT_COLLECTION_UNSUPPORTED', // "이 채널은 댓글 수집을 지원하지 않아요."(raise 1곳)
   // channel_post_comment_replies.py·gates.py
   'COMMENT_REPLY_HUMAN_ONLY', // "이 액션은 휴먼 멤버만 가능해요."(raise 1곳)
-  'COMMENT_REPLY_TARGET_DELETED', // raise 2곳 — "답변 대상 댓글이 삭제되어 상신할 수 없습니다."(replies.py) · "…승인할 수 없습니다."(gates.py) 둘 다 안전
-  'COMMENT_REPLY_CHANNEL_UNSUPPORTED', // "이 채널은 답변 발송을 지원하지 않습니다."(raise 1곳)
-  'COMMENT_REPLY_DRAFT_ALREADY_OPEN', // "안 보낸 초안이 이미 있습니다."(raise 1곳)
+  'COMMENT_REPLY_TARGET_DELETED', // raise 2곳 — "답변 대상 댓글이 삭제되어 상신할 수 없어요."(replies.py) · "…승인할 수 없어요."(gates.py) 둘 다 안전
+  'COMMENT_REPLY_CHANNEL_UNSUPPORTED', // "이 채널은 답변 발송을 지원하지 않아요."(raise 1곳)
+  'COMMENT_REPLY_DRAFT_ALREADY_OPEN', // "안 보낸 초안이 이미 있어요."(raise 1곳)
   // channel_posts.py::_require_human(발행류 공용, retry 엔드포인트도 공유, raise 1곳)
   'CHANNEL_POST_PUBLISH_HUMAN_ONLY', // "채널 포스트 발행은 휴먼 멤버만 가능해요(에이전트는 초안·상신까지)."
   // ⛔ CHANNEL_CONNECTION_NOT_ACTIVE는 raise 20곳+(site_posts.py·insight_snapshots.py·
