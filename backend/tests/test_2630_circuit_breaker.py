@@ -421,7 +421,10 @@ async def test_send_message_blocked_for_agent_when_breaker_open():
                     auth=_agent_auth(agent_id, org_id), org_id=org_id,
                 )
             assert ei.value.status_code == 423
-            assert ei.value.detail["error"] == "circuit_breaker_open"
+            # story #3933 AC3 — `error` 키를 `code`로, 값을 이 레포 코드 관례(대문자+밑줄)로
+            # 맞춰 api_client.py::_extract_error_message의 dict-detail 케이스가 code+message로
+            # 뽑게 했다.
+            assert ei.value.detail["code"] == "CIRCUIT_BREAKER_OPEN"
 
             from sqlalchemy import select, func
             from app.models.conversation import ConversationMessage

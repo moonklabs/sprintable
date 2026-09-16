@@ -45,4 +45,4 @@ async def get_session_context(args: SessionContextInput) -> list[TextContent]:
             params["activity_limit"] = args.activity_limit
         return ok(await client.get("/api/v2/session-context", params=params))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)

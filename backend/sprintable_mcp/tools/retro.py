@@ -65,7 +65,7 @@ async def list_retro_sessions(args: ListRetroSessionsInput) -> list[TextContent]
         has_more, next_cursor = _has_more_from_headers(headers, items)
         return ok_paginated(items, has_more=has_more, next_cursor=next_cursor, tool_name="sprintable_list_retro_sessions")
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def create_retro_session(args: CreateRetroSessionInput) -> list[TextContent]:
@@ -81,7 +81,7 @@ async def create_retro_session(args: CreateRetroSessionInput) -> list[TextConten
             body["sprint_id"] = args.sprint_id
         return ok(await client.post("/api/v2/retros", json=body))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def vote_retro_item(args: VoteRetroItemInput) -> list[TextContent]:
@@ -94,7 +94,7 @@ async def vote_retro_item(args: VoteRetroItemInput) -> list[TextContent]:
             params={"project_id": client.require_project_id()},
         ))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def add_retro_action(args: AddRetroActionInput) -> list[TextContent]:
@@ -110,7 +110,7 @@ async def add_retro_action(args: AddRetroActionInput) -> list[TextContent]:
             params={"project_id": client.require_project_id()},
         ))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def change_retro_phase(args: ChangeRetroPhaseInput) -> list[TextContent]:
@@ -123,7 +123,7 @@ async def change_retro_phase(args: ChangeRetroPhaseInput) -> list[TextContent]:
             params={"project_id": client.require_project_id()},
         ))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def add_retro_item(args: AddRetroItemInput) -> list[TextContent]:
@@ -136,7 +136,7 @@ async def add_retro_item(args: AddRetroItemInput) -> list[TextContent]:
             params={"project_id": client.require_project_id()},
         ))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def export_retro(args: ExportRetroInput) -> list[TextContent]:
@@ -144,4 +144,4 @@ async def export_retro(args: ExportRetroInput) -> list[TextContent]:
     try:
         return ok(await client.get(f"/api/v2/retros/{args.session_id}/export", params={"project_id": client.require_project_id()}))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)

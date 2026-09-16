@@ -39,7 +39,8 @@ async def test_get_loop_context_wraps_exception_as_err():
     client.get = AsyncMock(side_effect=RuntimeError("boom"))
     with patch.object(l, "client", client):
         out = await l.get_loop_context(l.GetLoopContextInput(loop_id="loop-1"))
-    assert out[0].text == "Error: boom"
+    # story #3933 — 1행 하위호환(startswith) + code/message JSON 블록 신설.
+    assert out[0].text.startswith("Error: boom\n")
 
 
 # ── always-allowed 등록(SSOT+vendored 양쪽) ─────────────────────────────────────

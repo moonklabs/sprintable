@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import contextvars
 import logging
+import re
 from typing import Any
 
 import httpx
@@ -69,11 +70,34 @@ _auth_ctx_cache: dict[str, dict[str, str]] = {}
 _ERROR_BODY_MAX = 1500
 
 
+# story #3933 — `{CODE}: 사람이 읽는 문장` 관례는 이 코드베이스가 이미 어디서나 쓴다
+# (_extract_error_message 자신의 출력·아래 tests/*의 합성 fixture 전부 이 모양). code는
+# 대문자+숫자+밑줄만(소문자 섞인 "mentioned_ids: invalid UUID" 같은 필드명류 메시지를
+# code로 오인하지 않게) — 첫 콜론만 자른다(message 안에 콜론이 더 있어도 안전, maxsplit
+# 없이 정규식 자체가 non-greedy 앞부분만 code로 잡음).
+_CODE_PREFIX_RE = re.compile(r"^([A-Z][A-Z0-9_]*): (.*)$", re.DOTALL)
+
+
+def _split_code_message(message: str) -> tuple[str | None, str]:
+    m = _CODE_PREFIX_RE.match(message)
+    if m:
+        return m.group(1), m.group(2)
+    return None, message
+
+
 class SprintableApiError(Exception):
+    """story #3933 — `.code`/`.message`/`.detail`을 붙여 `response.py::err()`가 구조화된
+    응답을 조립할 수 있게 한다. 생성자 시그니처(status, message, body)는 그대로 — 기존
+    호출부·테스트 fixture(`SprintableApiError(404, "NOT_FOUND: ...")`류)가 전부 이 2·3-인자
+    형이라 바꾸면 그 전부를 고쳐야 한다(불필요한 파급). `.code`는 message 앞부분에서
+    파생만 한다."""
+
     def __init__(self, status: int, message: str, body: Any = None) -> None:
         super().__init__(message)
         self.status = status
         self.body = body
+        self.code, self.message = _split_code_message(message)
+        self.detail = body
 
 
 def _format_validation_errors(detail: list) -> str | None:

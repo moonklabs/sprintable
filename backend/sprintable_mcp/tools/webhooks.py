@@ -35,7 +35,7 @@ async def list_webhook_configs(args: ListWebhookConfigsInput) -> list[TextConten
     try:
         return ok(await client.get("/api/v2/webhooks/config", params=params))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def upsert_webhook_config(args: UpsertWebhookConfigInput) -> list[TextContent]:
@@ -56,7 +56,7 @@ async def upsert_webhook_config(args: UpsertWebhookConfigInput) -> list[TextCont
     try:
         return ok(await client.put("/api/v2/webhooks/config", json=body))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def delete_webhook_config(args: DeleteWebhookConfigInput) -> list[TextContent]:
@@ -64,4 +64,4 @@ async def delete_webhook_config(args: DeleteWebhookConfigInput) -> list[TextCont
     try:
         return ok(await client.delete("/api/v2/webhooks/config", params={"id": args.id}))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)

@@ -353,7 +353,7 @@ async def send_chat_message(args: SendChatInput) -> list[TextContent]:
                 "send_chat_message: message create failed after %d attachment upload(s) — "
                 "orphaned object(s): %s", len(uploaded_urls), uploaded_urls,
             )
-        return err(str(exc))
+        return err(exc)
 
 
 async def list_conversations(args: ListConversationsInput) -> list[TextContent]:
@@ -372,7 +372,7 @@ async def list_conversations(args: ListConversationsInput) -> list[TextContent]:
             params["offset"] = str(args.offset)
         return ok(await client.get_full("/api/v2/conversations", params=params))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def create_conversation(args: CreateConversationInput) -> list[TextContent]:
@@ -391,7 +391,7 @@ async def create_conversation(args: CreateConversationInput) -> list[TextContent
         conv_id = conv.get("id") if isinstance(conv, dict) else None
         return ok({"conversation_id": conv_id, **(conv if isinstance(conv, dict) else {})})
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def list_chat_messages(args: ListChatMessagesInput) -> list[TextContent]:
@@ -408,7 +408,7 @@ async def list_chat_messages(args: ListChatMessagesInput) -> list[TextContent]:
     try:
         return ok(await client.get(f"/api/v2/conversations/{args.conversation_id}/messages", params=params))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def get_chat_message(args: GetChatMessageInput) -> list[TextContent]:
@@ -420,4 +420,4 @@ async def get_chat_message(args: GetChatMessageInput) -> list[TextContent]:
     try:
         return ok(await client.get(f"/api/v2/conversations/{args.conversation_id}/messages/{args.message_id}"))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)

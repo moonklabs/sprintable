@@ -49,7 +49,7 @@ async def list_sprints(args: ListSprintsInput) -> list[TextContent]:
         has_more, next_cursor = _has_more_from_headers(headers, items)
         return ok_paginated(items, has_more=has_more, next_cursor=next_cursor, tool_name="sprintable_list_sprints")
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def sprint_summary(args: SprintIdInput) -> list[TextContent]:
@@ -57,7 +57,7 @@ async def sprint_summary(args: SprintIdInput) -> list[TextContent]:
     try:
         return ok(await client.get(f"/api/v2/sprints/{args.sprint_id}/summary"))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def activate_sprint(args: SprintIdInput) -> list[TextContent]:
@@ -65,7 +65,7 @@ async def activate_sprint(args: SprintIdInput) -> list[TextContent]:
     try:
         return ok(await client.post(f"/api/v2/sprints/{args.sprint_id}/activate"))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def close_sprint(args: SprintIdInput) -> list[TextContent]:
@@ -73,7 +73,7 @@ async def close_sprint(args: SprintIdInput) -> list[TextContent]:
     try:
         return ok(await client.post(f"/api/v2/sprints/{args.sprint_id}/close"))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def get_velocity(args: SprintIdInput) -> list[TextContent]:
@@ -81,7 +81,7 @@ async def get_velocity(args: SprintIdInput) -> list[TextContent]:
     try:
         return ok(await client.get(f"/api/v2/sprints/{args.sprint_id}/velocity"))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def create_sprint(args: CreateSprintInput) -> list[TextContent]:
@@ -96,7 +96,7 @@ async def create_sprint(args: CreateSprintInput) -> list[TextContent]:
             body["team_size"] = args.team_size
         return ok(await client.post("/api/v2/sprints", json=body))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def update_sprint(args: UpdateSprintInput) -> list[TextContent]:
@@ -113,4 +113,4 @@ async def update_sprint(args: UpdateSprintInput) -> list[TextContent]:
     try:
         return ok(await client.patch(f"/api/v2/sprints/{args.sprint_id}", json=updates))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)

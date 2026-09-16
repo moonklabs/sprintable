@@ -63,7 +63,7 @@ async def publish_event(args: PublishEventInput) -> list[TextContent]:
             )]
         return ok(result)
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def list_event_definitions(args: ListEventDefinitionsInput) -> list[TextContent]:
@@ -76,7 +76,7 @@ async def list_event_definitions(args: ListEventDefinitionsInput) -> list[TextCo
     try:
         return ok(await client.get("/api/v2/events/definitions"))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 class RegisterEventDefinitionInput(SprintableInput):
@@ -111,7 +111,7 @@ async def register_event_definition(args: RegisterEventDefinitionInput) -> list[
             "key": args.key, "payload_schema": args.payload_schema, "routing": args.routing,
         }))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def update_event_definition(args: UpdateEventDefinitionInput) -> list[TextContent]:
@@ -131,4 +131,4 @@ async def update_event_definition(args: UpdateEventDefinitionInput) -> list[Text
     try:
         return ok(await client.patch(f"/api/v2/events/definitions/{args.definition_id}", json=body))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
