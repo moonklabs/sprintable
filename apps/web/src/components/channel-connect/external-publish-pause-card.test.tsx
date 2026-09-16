@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 //
 // story #3953(블루프린트 §1-5) — 조직 전체 외부 발행 일시 중지 스위치 카드.
+// 문구는 유나 §⑤ judgment(ec5d82b4-2106-4d29-83b2-afafbb7b393c) 정본 리터럴로 고정.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -42,7 +43,7 @@ function jsonResponse(data: unknown, ok = true) {
 }
 
 describe('ExternalPublishPauseCard', () => {
-  it('활성 상태 — 정상 운영 문구만 뜨고 owner라도 「중지」 버튼과 사유 입력만(재개 버튼 없음)', async () => {
+  it('⭐활성 상태(owner) — 정상 pill·owner 설명 문구·멈추기 버튼(재개 버튼 없음)', async () => {
     mockFetchWithAuth.mockResolvedValue(
       jsonResponse({ paused: false, paused_at: null, paused_by: null, reason: null }),
     );
@@ -51,13 +52,14 @@ describe('ExternalPublishPauseCard', () => {
     });
     await act(async () => { await Promise.resolve(); });
 
-    expect(container.querySelector('[data-testid="external-publish-pause-status-active"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="external-publish-pause-status-pill"]')?.textContent).toBe('정상');
+    expect(container.textContent).toContain('켜면 조직의 모든 외부 발행이 멈춰요. 소유자만 켤 수 있어요.');
     expect(container.querySelector('[data-testid="external-publish-pause-banner"]')).toBeNull();
     expect(container.querySelector('[data-testid="external-publish-pause-action"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="external-publish-resume-action"]')).toBeNull();
   });
 
-  it('⭐중지 상태 — 배너가 뜨고 사유가 있으면 문구에 실린다', async () => {
+  it('⭐중지 상태(owner) — 멈춤 중 pill·배너 문구·재개 버튼(멈추기 버튼 없음)', async () => {
     mockFetchWithAuth.mockResolvedValue(
       jsonResponse({ paused: true, paused_at: '2026-09-17T00:00:00Z', paused_by: 'm1', reason: '점검' }),
     );
@@ -66,25 +68,14 @@ describe('ExternalPublishPauseCard', () => {
     });
     await act(async () => { await Promise.resolve(); });
 
+    expect(container.querySelector('[data-testid="external-publish-pause-status-pill"]')?.textContent).toBe('멈춤 중');
     const banner = container.querySelector('[data-testid="external-publish-pause-banner"]');
-    expect(banner).not.toBeNull();
-    expect(banner?.textContent).toContain('점검');
-  });
-
-  it('중지 상태 — owner에게는 재개 버튼만(중지 버튼·사유 입력 없음)', async () => {
-    mockFetchWithAuth.mockResolvedValue(
-      jsonResponse({ paused: true, paused_at: '2026-09-17T00:00:00Z', paused_by: 'm1', reason: null }),
-    );
-    await act(async () => {
-      root.render(wrap(<ExternalPublishPauseCard orgId="org-1" isOwnerStrict={true} />));
-    });
-    await act(async () => { await Promise.resolve(); });
-
+    expect(banner?.textContent).toBe('외부 발행이 일시 중지됐어요 — 소유자가 풀면 다시 나가요. 승인·예약은 그대로예요.');
     expect(container.querySelector('[data-testid="external-publish-resume-action"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="external-publish-pause-action"]')).toBeNull();
   });
 
-  it('음성대조 — admin(isOwnerStrict=false)은 상태만 보고 조작 버튼이 하나도 안 뜬다', async () => {
+  it('음성대조 — admin(isOwnerStrict=false)은 조작 버튼·사유 입력이 하나도 안 뜨고 소유자 전용 안내만', async () => {
     mockFetchWithAuth.mockResolvedValue(
       jsonResponse({ paused: false, paused_at: null, paused_by: null, reason: null }),
     );
@@ -93,12 +84,37 @@ describe('ExternalPublishPauseCard', () => {
     });
     await act(async () => { await Promise.resolve(); });
 
-    expect(container.querySelector('[data-testid="external-publish-pause-status-active"]')).not.toBeNull();
+    expect(container.textContent).toContain('소유자만 바꿀 수 있어요.');
     expect(container.querySelector('[data-testid="external-publish-pause-action"]')).toBeNull();
     expect(container.querySelector('[data-testid="external-publish-resume-action"]')).toBeNull();
+    expect(container.querySelector('[data-testid="external-publish-pause-reason-input"]')).toBeNull();
   });
 
-  it('owner가 중지 버튼을 누르면 PUT paused=true로 호출한다', async () => {
+  it('사유 placeholder(멈추기 방향) — 오발행 확인 예시가 실린 정본 문구', async () => {
+    mockFetchWithAuth.mockResolvedValue(
+      jsonResponse({ paused: false, paused_at: null, paused_by: null, reason: null }),
+    );
+    await act(async () => {
+      root.render(wrap(<ExternalPublishPauseCard orgId="org-1" isOwnerStrict={true} />));
+    });
+    await act(async () => { await Promise.resolve(); });
+    const pauseInput = container.querySelector('[data-testid="external-publish-pause-reason-input"]') as HTMLInputElement;
+    expect(pauseInput.placeholder).toBe('멈추는 이유를 한 줄로 적어 주세요 — 감사 로그에 남아요. (예: 오발행 확인 중·토큰 점검)');
+  });
+
+  it('사유 placeholder(풀기 방향) — 멈추기 방향과 다른 정본 문구', async () => {
+    mockFetchWithAuth.mockResolvedValue(
+      jsonResponse({ paused: true, paused_at: '2026-09-17T00:00:00Z', paused_by: 'm1', reason: null }),
+    );
+    await act(async () => {
+      root.render(wrap(<ExternalPublishPauseCard orgId="org-1" isOwnerStrict={true} />));
+    });
+    await act(async () => { await Promise.resolve(); });
+    const resumeInput = container.querySelector('[data-testid="external-publish-resume-reason-input"]') as HTMLInputElement;
+    expect(resumeInput.placeholder).toBe('푸는 이유를 적어 주세요 — 감사 로그에 남아요.');
+  });
+
+  it('owner가 사유를 적고 멈추기를 누르면 PUT paused=true·reason으로 호출한다', async () => {
     mockFetchWithAuth.mockResolvedValueOnce(
       jsonResponse({ paused: false, paused_at: null, paused_by: null, reason: null }),
     );
@@ -107,8 +123,15 @@ describe('ExternalPublishPauseCard', () => {
     });
     await act(async () => { await Promise.resolve(); });
 
+    const input = container.querySelector('[data-testid="external-publish-pause-reason-input"]') as HTMLInputElement;
+    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => {
+      nativeSetter.call(input, '오발행 확인 중');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
     mockFetchWithAuth.mockResolvedValueOnce(
-      jsonResponse({ paused: true, paused_at: '2026-09-17T00:00:00Z', paused_by: 'm1', reason: null }),
+      jsonResponse({ paused: true, paused_at: '2026-09-17T00:00:00Z', paused_by: 'm1', reason: '오발행 확인 중' }),
     );
     const button = container.querySelector('[data-testid="external-publish-pause-action"]') as HTMLButtonElement;
     await act(async () => {
@@ -119,7 +142,37 @@ describe('ExternalPublishPauseCard', () => {
     const putCall = mockFetchWithAuth.mock.calls.find((c) => (c[1] as { method?: string } | undefined)?.method === 'PUT');
     expect(putCall).toBeDefined();
     expect(putCall![0]).toBe('/api/organizations/org-1/external-publish-pause');
-    expect(JSON.parse((putCall![1] as { body: string }).body)).toEqual({ paused: true, reason: null });
+    expect(JSON.parse((putCall![1] as { body: string }).body)).toEqual({ paused: true, reason: '오발행 확인 중' });
+  });
+
+  it('owner가 사유를 적고 풀기를 누르면 PUT paused=false·reason으로 호출한다(재개도 사유를 받는다)', async () => {
+    mockFetchWithAuth.mockResolvedValueOnce(
+      jsonResponse({ paused: true, paused_at: '2026-09-17T00:00:00Z', paused_by: 'm1', reason: '점검' }),
+    );
+    await act(async () => {
+      root.render(wrap(<ExternalPublishPauseCard orgId="org-1" isOwnerStrict={true} />));
+    });
+    await act(async () => { await Promise.resolve(); });
+
+    const input = container.querySelector('[data-testid="external-publish-resume-reason-input"]') as HTMLInputElement;
+    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => {
+      nativeSetter.call(input, '점검 끝');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    mockFetchWithAuth.mockResolvedValueOnce(
+      jsonResponse({ paused: false, paused_at: null, paused_by: null, reason: null }),
+    );
+    const button = container.querySelector('[data-testid="external-publish-resume-action"]') as HTMLButtonElement;
+    await act(async () => {
+      button.click();
+      await Promise.resolve();
+    });
+
+    const putCall = mockFetchWithAuth.mock.calls.find((c) => (c[1] as { method?: string } | undefined)?.method === 'PUT');
+    expect(putCall).toBeDefined();
+    expect(JSON.parse((putCall![1] as { body: string }).body)).toEqual({ paused: false, reason: '점검 끝' });
   });
 
   it('실패(PUT 4xx/5xx) — 에러 문구가 뜨고 상태는 그대로(낙관적 갱신 0)', async () => {
@@ -139,6 +192,6 @@ describe('ExternalPublishPauseCard', () => {
     });
 
     expect(container.querySelector('[data-testid="external-publish-pause-error"]')).not.toBeNull();
-    expect(container.querySelector('[data-testid="external-publish-pause-status-active"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="external-publish-pause-status-pill"]')?.textContent).toBe('정상');
   });
 });

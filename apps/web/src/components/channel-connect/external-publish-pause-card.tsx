@@ -12,8 +12,10 @@ import { fetchWithAuth } from '@/lib/db/client';
  * 전체 「외부 발행 일시 중지」 스위치. GET은 member 이상 열람(BE — 중지 여부는
  * 비밀이 아니다), PUT은 owner만(admin·에이전트 키 403).
  *
- * 문구는 초안(유나 §⑤ 판정 전 임시) — 「무슨 일 — 무엇을 하라」형·해요체·내부어 0
- * 원칙만 맞춰뒀다. design 리뷰에서 전→후가 오면 그대로 교체.
+ * 문구는 유나 §⑤ judgment(ec5d82b4-2106-4d29-83b2-afafbb7b393c, 착수 前 미리 판정)
+ * 정본 그대로 — 낱말 정본(「멈춤 中」/「정상」)이 스위치·배너·감사 로그 사유
+ * placeholder까지 한 벌로 일관된다. reason은 표시 0(입력만·감사 로그행에만 남음
+ * — judgment가 "다시 보여줘라"를 요구하지 않는다).
  */
 interface PauseState {
   paused: boolean;
@@ -47,7 +49,7 @@ export function ExternalPublishPauseCard({ orgId, isOwnerStrict }: { orgId: stri
       const res = await fetchWithAuth(`/api/organizations/${orgId}/external-publish-pause`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ paused: nextPaused, reason: nextPaused ? (reasonInput || null) : null }),
+        body: JSON.stringify({ paused: nextPaused, reason: reasonInput || null }),
       });
       if (res.ok) {
         const json = (await res.json().catch(() => null)) as { data?: PauseState } | null;
@@ -65,38 +67,54 @@ export function ExternalPublishPauseCard({ orgId, isOwnerStrict }: { orgId: stri
 
   return (
     <Card className="p-4 space-y-3" data-testid="external-publish-pause-card">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-medium text-foreground">{t('externalPublishPauseCardTitle')}</p>
+          {isOwnerStrict ? (
+            <p className="text-xs text-muted-foreground">{t('externalPublishPauseCardOwnerDescription')}</p>
+          ) : (
+            <p className="text-xs text-muted-foreground">{t('externalPublishAdminReadonlyNote')}</p>
+          )}
+        </div>
+        <span
+          className={
+            state.paused
+              ? 'rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-900 dark:bg-amber-900/30 dark:text-amber-300'
+              : 'rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground'
+          }
+          data-testid="external-publish-pause-status-pill"
+        >
+          {state.paused ? t('externalPublishStatusPaused') : t('externalPublishStatusActive')}
+        </span>
+      </div>
+
       {state.paused ? (
         <Alert variant="destructive" role="alert" aria-live="polite" aria-atomic="true" data-testid="external-publish-pause-banner">
-          <AlertDescription>
-            {state.reason
-              ? t('externalPublishPausedWithReason', { reason: state.reason })
-              : t('externalPublishPaused')}
-          </AlertDescription>
+          <AlertDescription>{t('externalPublishPaused')}</AlertDescription>
         </Alert>
-      ) : (
-        <p className="text-sm text-muted-foreground" data-testid="external-publish-pause-status-active">
-          {t('externalPublishActive')}
-        </p>
-      )}
+      ) : null}
+
       {isOwnerStrict ? (
-        state.paused ? (
-          <Button
-            variant="outline" size="sm" disabled={submitting}
-            data-testid="external-publish-resume-action"
-            onClick={() => handleToggle(false)}
-          >
-            {t('externalPublishResumeAction')}
-          </Button>
-        ) : (
-          <div className="space-y-2">
-            <input
-              type="text"
-              className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm"
-              placeholder={t('externalPublishPauseReasonPlaceholder')}
-              value={reasonInput}
-              onChange={(e) => setReasonInput(e.target.value)}
-              data-testid="external-publish-pause-reason-input"
-            />
+        <div className="space-y-2">
+          <input
+            type="text"
+            className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm"
+            placeholder={
+              state.paused ? t('externalPublishResumeReasonPlaceholder') : t('externalPublishPauseReasonPlaceholder')
+            }
+            value={reasonInput}
+            onChange={(e) => setReasonInput(e.target.value)}
+            data-testid={state.paused ? 'external-publish-resume-reason-input' : 'external-publish-pause-reason-input'}
+          />
+          {state.paused ? (
+            <Button
+              variant="outline" size="sm" disabled={submitting}
+              data-testid="external-publish-resume-action"
+              onClick={() => handleToggle(false)}
+            >
+              {t('externalPublishResumeAction')}
+            </Button>
+          ) : (
             <Button
               variant="destructive" size="sm" disabled={submitting}
               data-testid="external-publish-pause-action"
@@ -104,8 +122,8 @@ export function ExternalPublishPauseCard({ orgId, isOwnerStrict }: { orgId: stri
             >
               {t('externalPublishPauseAction')}
             </Button>
-          </div>
-        )
+          )}
+        </div>
       ) : null}
       {error ? (
         <p className="text-xs text-destructive" data-testid="external-publish-pause-error">
