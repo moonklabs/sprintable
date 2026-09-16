@@ -472,6 +472,7 @@
     "partialNotice": "전부 불러오지 못했어요. 더 있어요",
     "goalProgressLabel": "{done}/{total} 완료",
     "goalSummaryLabel": "사람 배정 {assigned} · 에이전트 위임 {delegated} · 가설 {hypotheses}",
+    "unassignedGoalTitle": "미분류",
     "stateAwaitingApproval": "승인 대기",
     "stateAwaitingSignature": "서명 대기",
     "stateAwaitingAnswer": "답 대기",

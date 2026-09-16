@@ -60,6 +60,12 @@ export const TASK_STATUS_VALUES = [TASK_STATUS_TODO, TASK_STATUS_IN_PROGRESS, TA
 // 정본 소스: backend/sprintable_mcp/schemas.py::GoalStatus(Enum) — draft|active|done|archived.
 export const GOAL_STATUS_ACTIVE = 'active';
 
+// story #3934(실사고 — 3928 라이브 실측, 유나) — 목표(epic_id) 미할당 스토리를 담는 합성
+// 그룹의 sentinel id. 실 goal id(UUID)와 충돌 불가능한 형태로 고정. 라벨("미분류")은 이
+// 순수 파생 함수가 아니라 렌더 계층(work-list-shell.tsx)에서 t()로 채운다 — docs-index.tsx의
+// UNCATEGORIZED 선례와 동형(하드코딩 한글 가드는 apps/web도 BE와 같은 계약, 새 기전 발명 금지).
+export const UNASSIGNED_GOAL_ID = '__unassigned_goal__';
+
 // today_service.py::_AGENT_RUN_IN_PROGRESS_STATUSES와 동일 SSOT(agent_runs.py
 // _AGENT_RUN_STATUS_VALUES: queued|held|running|hitl_pending|completed|failed|abandoned 중
 // completed만 종결로 세고, failed/abandoned는 §①에 대응 낱말이 없어 null로 둔다 — 지어내지 않음).
@@ -264,12 +270,14 @@ export function deriveWorkList(input: WorkListInput): WorkList {
   }
 
   function bumpGoalTotals(goalId: string | null, row: WorkListRow): void {
-    if (!goalId) return;
-    const t = goalTotals.get(goalId) ?? { done: 0, total: 0, assigned: 0, delegated: 0 };
+    // story #3934 — 목표 미할당(null)도 UNASSIGNED_GOAL_ID로 접어 집계한다(이전엔 여기서
+    // return해 미할당 스토리의 일이 어떤 총량에도 안 잡히고 화면에서도 통째로 사라졌다).
+    const key = goalId ?? UNASSIGNED_GOAL_ID;
+    const t = goalTotals.get(key) ?? { done: 0, total: 0, assigned: 0, delegated: 0 };
     t.total += 1;
     if (row.state === 'done') t.done += 1;
     if (row.isDelegated) t.delegated += 1; else t.assigned += 1;
-    goalTotals.set(goalId, t);
+    goalTotals.set(key, t);
   }
 
   for (const task of input.tasks.items) {
@@ -341,6 +349,33 @@ export function deriveWorkList(input: WorkListInput): WorkList {
       delegatedCount: totals.delegated,
       hypothesisCount: hypothesisIds.size,
       stories,
+    });
+  }
+
+  // story #3934(실사고) — 목표(epic_id) 미할당 스토리는 위 루프가 못 걷는다(어떤 goal.id와도
+  // 안 맞으므로). 3928 라이브 실측: 프로젝트에 스토리 20개가 있는데도 전부 미할당이면 groups가
+  // 통째로 비어 "표시할 일이 없어요"로 오독됐다 — docs-index.tsx UNCATEGORIZED·doc-groups.ts
+  // {groups, ungrouped} 선례와 동형으로 "미분류" 합성 그룹을 붙인다(걷어내지 않는다).
+  const unassignedStories: WorkListStoryGroup[] = [];
+  for (const story of input.stories.items) {
+    if (story.epic_id !== null) continue;
+    const g = storyGroups.get(story.id);
+    if (g && g.rows.length > 0) unassignedStories.push(g);
+  }
+  if (unassignedStories.length > 0) {
+    const totals = goalTotals.get(UNASSIGNED_GOAL_ID) ?? { done: 0, total: 0, assigned: 0, delegated: 0 };
+    const hypothesisIds = new Set<string>();
+    for (const s of unassignedStories) for (const id of s.hypothesisIds) hypothesisIds.add(id);
+    groups.push({
+      goalId: UNASSIGNED_GOAL_ID,
+      title: '', // 렌더 계층이 UNASSIGNED_GOAL_ID를 보고 t('unassignedGoalTitle')로 채운다.
+      isActive: false, // 실 goal이 아니라 GoalStatus 개념 자체가 없다 — 지어내지 않는다.
+      doneCount: totals.done,
+      totalCount: totals.total,
+      assignedCount: totals.assigned,
+      delegatedCount: totals.delegated,
+      hypothesisCount: hypothesisIds.size,
+      stories: unassignedStories,
     });
   }
 
