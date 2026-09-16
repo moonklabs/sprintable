@@ -49,6 +49,7 @@ describe('POST /api/auth/refresh', () => {
     mockFetch.mockResolvedValue({
       ok: false,
       status: 401,
+      headers: { get: () => null },
       json: async () => ({ error: { code: 'TOKEN_REVOKED', message: 'revoked' } }),
     });
     const res = await POST(makeRequest());
@@ -80,6 +81,7 @@ describe('POST /api/auth/refresh', () => {
       mockFetch.mockResolvedValue({
         ok: false,
         status: 401,
+        headers: { get: () => null },
         json: async () => ({ error: { code: 'TOKEN_REVOKED', message: 'revoked' } }),
       });
       const res = await POST(makeRequest());
@@ -110,6 +112,7 @@ describe('POST /api/auth/refresh', () => {
       mockFetch.mockResolvedValue({
         ok: false,
         status: 401,
+        headers: { get: () => null },
         json: async () => ({ error: { code: 'TOKEN_REVOKED', message: 'revoked' } }),
       });
       const body = JSON.stringify({ diagnostics: { visibility_state: 'hidden', idle_ms: 2390000, tab_count: 2 } });
@@ -117,7 +120,7 @@ describe('POST /api/auth/refresh', () => {
 
       expect(warnSpy).toHaveBeenCalledWith(
         '[auth-refresh] hard 401',
-        { visibility_state: 'hidden', idle_ms: 2390000, tab_count: 2 },
+        { correlation_key: null, visibility_state: 'hidden', idle_ms: 2390000, tab_count: 2 },
       );
     });
 
@@ -125,6 +128,7 @@ describe('POST /api/auth/refresh', () => {
       mockFetch.mockResolvedValue({
         ok: false,
         status: 401,
+        headers: { get: () => null },
         json: async () => ({ error: { code: 'TOKEN_REVOKED', message: 'revoked' } }),
       });
       const req = new Request('http://localhost/api/auth/refresh', { method: 'POST' }); // body 자체 없음
@@ -133,12 +137,30 @@ describe('POST /api/auth/refresh', () => {
       expect(res.status).toBe(401);
       expect(warnSpy).toHaveBeenCalledWith(
         '[auth-refresh] hard 401',
-        { visibility_state: null, idle_ms: null, tab_count: null },
+        { correlation_key: null, visibility_state: null, idle_ms: null, tab_count: null },
+      );
+    });
+
+    // story #2449 CHANGES(카디르 codex 읽기 검수, 페드루 PO 채택 2026-09-16 13:28Z) —
+    // BE가 X-Auth-Correlation 헤더로 실어 보낸 값을 BFF 로그 필드로 그대로 반영하는지.
+    it('⭐BE가 실은 X-Auth-Correlation 헤더값을 correlation_key로 로그에 싣는다', async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 401,
+        headers: { get: (name: string) => (name === 'x-auth-correlation' ? '883005ad8a1f' : null) },
+        json: async () => ({ error: { code: 'TOKEN_REVOKED', message: 'revoked' } }),
+      });
+      const body = JSON.stringify({ diagnostics: { visibility_state: 'hidden', idle_ms: 100, tab_count: 1 } });
+      await POST(makeRequest(body));
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        '[auth-refresh] hard 401',
+        expect.objectContaining({ correlation_key: '883005ad8a1f' }),
       );
     });
 
     it('음성대조 — 401이 아닌 실패(5xx)는 진단 로그를 안 남긴다(#2449 클래스 밖)', async () => {
-      mockFetch.mockResolvedValue({ ok: false, status: 502, json: async () => ({}) });
+      mockFetch.mockResolvedValue({ ok: false, status: 502, headers: { get: () => null }, json: async () => ({}) });
       const body = JSON.stringify({ diagnostics: { visibility_state: 'visible', idle_ms: 100, tab_count: 1 } });
       await POST(makeRequest(body));
 
