@@ -1320,56 +1320,42 @@ jobs:
           # "천장을 올려도 다음 표본에서 다시 붙는다" 원칙은 "천장이 자일 때"의 이야기 —
           # 여기서는 자를 파일 단위 «정지 감지»(STALL_TIMEOUT_MIN)로 옮기고, job
           # timeout-minutes는 그 정지 감지가 절대 못 미치는 백스톱으로만 남긴다(아래).
-          # 페드루 PO CHANGES③(PR#4348 리뷰) — 8분의 근거: 취소된 attempt 1 로그(shard0/
-          # shard3, cancel 원인이 아니라 그 안 개별 파일 실측)에서 «최대 단일 파일 소요»를
-          # 재니 shard3의 217.65s(3.63분)가 두 인스턴스 통틀어 최댓값 — 4분(240s)을 안
-          # 넘어 배율 규칙(4분 넘으면 8 대신 그 2배)이 발동 안 하고 기본 8분 유지(3.63분의
-          # ≈2.2배 여유). 이 최댓값이 4분을 넘는 날이 오면 STALL_TIMEOUT_MIN을 8이 아니라
-          # 그 실측값×2로 다시 잡는다(같은 8을 무한정 우려먹지 않는다).
+          # 페드루 PO CHANGES③(PR#4348 리뷰) — 8분의 근거: 취소된 attempt 1 로그(job
+          # 104692022182=shard0·104693851441=shard3, cancel 원인이 아니라 그 안 개별
+          # 파일의 pytest 자체 보고 "passed in Ns" 실측)에서 «느린 인스턴스의 최대 단일
+          # 파일 소요»를 재니 shard3의 217.65s(3.63분, shard0 최댓값 163.10s보다 큼)가
+          # 두 인스턴스 통틀어 최댓값 — 4분(240s)을 안 넘어 배율 규칙(4분 넘으면 8 대신
+          # 그 2배)이 발동 안 하고 기본 8분 유지(3.63분의 ≈2.2배 여유). 이 최댓값이 4분을
+          # 넘는 날이 오면 STALL_TIMEOUT_MIN을 8이 아니라 그 실측값×2로 다시 잡는다(같은
+          # 8을 무한정 우려먹지 않는다).
           STALL_TIMEOUT_MIN=8
-          for f in "${files[@]}"; do
-            echo "::group::isolated $f"
-            PGPASSWORD=sprintable dropdb -h localhost -U sprintable --if-exists sprintable_test_iso
-            PGPASSWORD=sprintable createdb -h localhost -U sprintable -T sprintable_test_tpl sprintable_test_iso
-            _t0=$(date +%s)
-            # 페드루 PO HIGH(PR#4348 재리뷰, 카디르 재현) — GHA `run:`는 기본
-            # `bash -eo pipefail`이다. 아래 래퍼 호출을 맨 줄에 두고 다음 줄에서 `$?`를
-            # 읽으면(원래 방식) 래퍼가 0이 아닌 순간(정지 124뿐 아니라 일반 pytest 실패
-            # 1도) `-e`가 즉시 스텝을 죽여, "한 파일 실패해도 나머지는 계속 돈다"던 옛
-            # `|| failed_files+=` 보장이 조용히 사라진다. `if` 조건 위치는(`||`/`&&`와
-            # 동일하게) `-e` 면제 문맥이라 여기 넣어야 다음 파일로 계속 간다. env 접두는
-            # `if` 자신이 아니라 그 조건절인 simple command에 직접 붙여야 한다 — `VAR=x`를
-            # `if` 앞에 두면 `if`는 compound command라 접두 대입 문법이 안 먹어(bash -n
-            # 로 실측: `syntax error near unexpected token 'then'`).
-            if ALEMBIC_DATABASE_URL=postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test_iso \
-               PARITY_TEST_DATABASE_URL=postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test_iso \
-               DATABASE_URL=postgresql+asyncpg://sprintable:sprintable@localhost:5432/sprintable_test_iso \
-               "${{ github.workspace }}/scripts/run-with-stall-detection.sh" "$STALL_TIMEOUT_MIN" -- uv run pytest -q "$f"; then
-              _pytest_exit=0
-            else
-              _pytest_exit=$?
-            fi
-            if [ "$_pytest_exit" -eq 124 ]; then
-              echo "::error::STALL(story #3944) — $f 가 ${STALL_TIMEOUT_MIN}분 안에 안 끝나 강제 종료됨. 「오래 걸림」이 아니라 「멈춤」으로 판정 — 즉시 실패."
-              failed_files+=("$f (STALL: exceeded ${STALL_TIMEOUT_MIN}m)")
-            elif [ "$_pytest_exit" -ne 0 ]; then
-              failed_files+=("$f")
-            fi
-            _elapsed=$(( $(date +%s) - _t0 ))
-            echo "elapsed: ${_elapsed}s"
-            printf '%s\t%s\n' "$f" "$_elapsed" >> "$elapsed_file"
-            # story #3392(AC1) — unweighted 파일이 평균의 배수(threshold)를 실측으로
-            # 넘으면 경고가 아니라 실패다. weights.json에 없다는 이유로 "몰랐다"가 통하면
-            # 다음 신규 파일도 같은 사고를 반복한다. (unweighted 파일은 story #3396의
-            # 정규화 표본·판정 대상 모두에서 빠진다 — 이 가드가 계속 전담한다.)
-            for uw in "${unweighted_files[@]+"${unweighted_files[@]}"}"; do
-              if [ "$uw" = "$f" ] && [ "$_elapsed" -gt "$overage_threshold" ]; then
-                overage_files+=("$f (${_elapsed}s > ${overage_threshold}s)")
-                echo "::error::unweighted 파일이 평균의 ${overage_multiplier}배를 넘었다(story #3392 AC1): $f (${_elapsed}s > ${overage_threshold}s) — infra/destructive-schema-shard-weights/에 이 파일의 json을 추가하라."
-              fi
-            done
-            echo "::endgroup::"
-          done
+          failed_out=$(mktemp)
+          overage_out=$(mktemp)
+          unweighted_file=$(mktemp)
+          printf '%s\n' "${unweighted_files[@]+"${unweighted_files[@]}"}" > "$unweighted_file"
+          # story #3944(카디르 뮤테이션 테스트 지적, PR#4348 3라운드) — 파일별 루프 본체
+          # (DB 재생성+정지감지 래퍼 호출+exit 분류+overage 판정)를 scripts/
+          # run-destructive-shard-loop.sh로 뺐다. 예전엔 ci-loop-errexit-survival.test.sh가
+          # 이 루프를 손으로 베껴 검증해 "ci.yml만 옛 구조로 되돌려도 그 사본 테스트는
+          # 여전히 ALL PASS"인 못 틀리는 대조였다 — 이제 ci.yml과 테스트 둘 다 이 파일
+          # 하나를 그대로 부른다(뮤테이션하면 테스트가 실측으로 빨개진다).
+          WRAPPER_SCRIPT="${{ github.workspace }}/scripts/run-with-stall-detection.sh" \
+          STALL_TIMEOUT_MIN="$STALL_TIMEOUT_MIN" \
+          FILES_LIST_FILE=/tmp/shard_files.txt \
+          ELAPSED_OUT_FILE="$elapsed_file" \
+          FAILED_OUT_FILE="$failed_out" \
+          UNWEIGHTED_FILES_FILE="$unweighted_file" \
+          OVERAGE_THRESHOLD_SEC="$overage_threshold" \
+          OVERAGE_MULTIPLIER="$overage_multiplier" \
+          OVERAGE_OUT_FILE="$overage_out" \
+          ALEMBIC_DATABASE_URL=postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test_iso \
+          PARITY_TEST_DATABASE_URL=postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test_iso \
+          DATABASE_URL=postgresql+asyncpg://sprintable:sprintable@localhost:5432/sprintable_test_iso \
+          "${{ github.workspace }}/scripts/run-destructive-shard-loop.sh" uv run pytest -q
+
+          mapfile -t failed_files < "$failed_out"
+          mapfile -t overage_files < "$overage_out"
+          rm -f "$failed_out" "$overage_out" "$unweighted_file"
           if [ "${#failed_files[@]}" -gt 0 ]; then
             echo "FAILED files: ${failed_files[*]}"
             exit 1
