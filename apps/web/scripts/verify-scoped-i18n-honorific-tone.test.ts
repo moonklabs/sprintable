@@ -13,6 +13,7 @@ import {
   findHardcodedParticleAfterPlaceholder,
   findHonorificToneInScopedKeys,
   findPersonaAdnominalTerminal,
+  findUnsupportedLeafTypes,
   flattenAllLeafKeys,
   resolveEffectiveScopedKeys,
 } from './verify-scoped-i18n-honorific-tone';
@@ -262,6 +263,39 @@ describe('checkStaleExceptions — 순수 함수(예외 목록 자체의 fail-op
     const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
     const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
     expect(checkStaleExceptions(ko)).toEqual([]);
+  });
+});
+
+// story #3932 AC6(카디르 #4335 리뷰 발견, pre-existing) — flattenAllLeafKeys가 배열 값을
+// Array.isArray로 걸러 재귀 walk도, string 분기도 안 타 통째로 조용히 스킵하던 자리.
+// findUnsupportedLeafTypes가 같은 walk에서 그 자리를 위반으로 기록해 RED로 승격한다.
+describe('findUnsupportedLeafTypes — 순수 함수(배열 등 문자열도 객체도 아닌 leaf를 fail-open 없이 잡는다)', () => {
+  it('⭐합성 배열 leaf를 위반으로 잡는다(number·null도 같이 — 배열만 특례 취급하지 않는다는 증거)', () => {
+    const synthetic = {
+      fakeNs: {
+        arrLeaf: ['a', 'b'],
+        strLeaf: '정상 문자열 leaf',
+        numLeaf: 42,
+        nullLeaf: null,
+        nested: { ok: '정상 중첩 leaf' },
+      },
+    };
+    expect(findUnsupportedLeafTypes(synthetic as unknown as Record<string, unknown>)).toEqual([
+      { key: 'fakeNs.arrLeaf', type: 'array' },
+      { key: 'fakeNs.numLeaf', type: 'number' },
+      { key: 'fakeNs.nullLeaf', type: 'null' },
+    ]);
+  });
+
+  it('음성대조 — 문자열·중첩 객체 leaf만 있으면 위반 0건', () => {
+    const synthetic = { fakeNs: { strLeaf: '정상', nested: { ok: '정상' } } };
+    expect(findUnsupportedLeafTypes(synthetic)).toEqual([]);
+  });
+
+  it('실 ko.json — 배열/숫자/null 등 지원하지 않는 leaf 타입 0건(모든 leaf가 문자열)', () => {
+    const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
+    const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
+    expect(findUnsupportedLeafTypes(ko)).toEqual([]);
   });
 });
 
