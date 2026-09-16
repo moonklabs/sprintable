@@ -29,11 +29,18 @@ _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATAB
 pytestmark = [
     pytest.mark.skipif(not _REAL_DB_URL, reason="통합 테스트는 실 PG(PARITY/ALEMBIC_DATABASE_URL) 필요"),
     pytest.mark.anyio,
-    pytest.mark.destructive_schema,
 ]
 
 APP_SECRET = "app-secret-3963"
-INSTALLATION_ID = 555001
+
+
+def _fresh_installation_id() -> int:
+    # story #3963 뮤테이션 셀프체크 中 실발견 — 고정 상수(옛 555001)를 여러 테스트가
+    # 공유하면 github_installation.installation_id의 전역 UNIQUE 제약(GitHub App 설치
+    # ID는 실제로 org 무관 전역 유일값이라 정확한 제약)에 걸려 이 파일이 진짜 격리
+    # (per-file fresh DB) 밖에서 돌 때(비파괴적 공유 DB, test_2327류 관례) 두 번째
+    # 테스트부터 IntegrityError로 죽는다 — 테스트마다 새 값을 뽑는다.
+    return uuid.uuid4().int % 1_000_000_000
 
 
 @pytest.fixture
@@ -112,7 +119,7 @@ async def _delivery_row(Session, delivery_id):
 
 
 def _issue_comment_payload(
-    *, body: str, story_number: int | None, action="created",
+    *, body: str, story_number: int | None, installation_id: int, action="created",
     is_pr=True, author_association="MEMBER",
 ):
     issue: dict = {"title": f"[SID:{story_number}] work" if story_number else "chore: work", "body": ""}
@@ -121,7 +128,7 @@ def _issue_comment_payload(
     return {
         "action": action,
         "repository": {"full_name": "moonklabs/sprintable"},
-        "installation": {"id": INSTALLATION_ID},
+        "installation": {"id": installation_id},
         "issue": issue,
         "comment": {"body": body, "author_association": author_association},
     }
@@ -134,6 +141,7 @@ async def _seed_org_project_story(Session, *, story_number: int, seed_po_role: b
     from app.models.pm import Story
     from app.models.project import Project
 
+    installation_id = _fresh_installation_id()
     async with Session() as s:
         org = Organization(id=uuid.uuid4(), name="Org3963", slug=f"org3963-{uuid.uuid4().hex[:8]}")
         s.add(org)
@@ -147,7 +155,7 @@ async def _seed_org_project_story(Session, *, story_number: int, seed_po_role: b
         )
         s.add(story)
         s.add(GithubInstallation(
-            id=uuid.uuid4(), org_id=org.id, installation_id=INSTALLATION_ID,
+            id=uuid.uuid4(), org_id=org.id, installation_id=installation_id,
             account_login="moonklabs",
         ))
         # story #3963 AC — "qa" role은 이미 org에 있다는 실측 전제(기존 chat 트리거 경로가
@@ -156,7 +164,7 @@ async def _seed_org_project_story(Session, *, story_number: int, seed_po_role: b
         if seed_po_role:
             s.add(ParticipationRole(id=uuid.uuid4(), org_id=org.id, key="po", label="PO"))
         await s.commit()
-        return org.id, story.id
+        return org.id, story.id, installation_id
 
 
 @pytest.mark.anyio
@@ -165,10 +173,11 @@ async def test_codex_qa_verdict_comment_records_verdict_realdb():
     시스템 발행 앵커(_get_or_create_system_publisher)."""
     engine, Session = await _session_factory()
     try:
-        org_id, story_id = await _seed_org_project_story(Session, story_number=1001)
+        org_id, story_id, installation_id = await _seed_org_project_story(Session, story_number=1001)
 
         payload = _issue_comment_payload(
             body="## QA verdict: approved (qa:pass)\n**Head:** `abc123`\n", story_number=1001,
+            installation_id=installation_id,
         )
         resp = await _post_issue_comment(payload, Session, delivery_id=f"dlv-{uuid.uuid4().hex[:8]}")
         assert resp.status_code == 200, resp.text
@@ -204,10 +213,13 @@ async def test_po_review_comment_skips_when_po_role_not_seeded_realdb():
     """AC② — "po" 참여 역할이 org에 아직 없으면 no_po_role로 정직하게 skip(거짓기록 금지)."""
     engine, Session = await _session_factory()
     try:
-        await _seed_org_project_story(Session, story_number=1002, seed_po_role=False)
+        _org_id, _story_id, installation_id = await _seed_org_project_story(
+            Session, story_number=1002, seed_po_role=False,
+        )
 
         payload = _issue_comment_payload(
             body="## PO review — PASS · head abc123\n", story_number=1002,
+            installation_id=installation_id,
         )
         resp = await _post_issue_comment(payload, Session, delivery_id=f"dlv-{uuid.uuid4().hex[:8]}")
         assert resp.status_code == 200, resp.text
@@ -221,10 +233,13 @@ async def test_po_review_comment_records_when_po_role_seeded_realdb():
     """AC② 반대편 — "po" role이 있으면 정상 기록."""
     engine, Session = await _session_factory()
     try:
-        await _seed_org_project_story(Session, story_number=1003, seed_po_role=True)
+        _org_id, _story_id, installation_id = await _seed_org_project_story(
+            Session, story_number=1003, seed_po_role=True,
+        )
 
         payload = _issue_comment_payload(
             body="## PO 리뷰 — CHANGES 3건(소형) (head abc123)\n", story_number=1003,
+            installation_id=installation_id,
         )
         resp = await _post_issue_comment(payload, Session, delivery_id=f"dlv-{uuid.uuid4().hex[:8]}")
         assert resp.status_code == 200, resp.text
@@ -240,16 +255,18 @@ async def test_skip_reasons_realdb():
     """AC③ — 6가지 skip 사유가 각각 정확히 delivery.skipped_reason에 남는다."""
     engine, Session = await _session_factory()
     try:
-        org_id, story_id = await _seed_org_project_story(Session, story_number=2001, seed_po_role=True)
+        org_id, story_id, installation_id = await _seed_org_project_story(
+            Session, story_number=2001, seed_po_role=True,
+        )
         verdict_body = "## QA verdict: approved (qa:pass)\n"
 
         cases = [
-            ("edited", _issue_comment_payload(body=verdict_body, story_number=2001, action="edited"), "not_created_action"),
-            ("not_pr", _issue_comment_payload(body=verdict_body, story_number=2001, is_pr=False), "not_a_pull_request_comment"),
-            ("untrusted", _issue_comment_payload(body=verdict_body, story_number=2001, author_association="NONE"), "untrusted_author_association"),
-            ("not_verdict", _issue_comment_payload(body="그냥 잡담", story_number=2001), "not_a_verdict_comment"),
-            ("no_sid", _issue_comment_payload(body=verdict_body, story_number=None), "no_sid_tag"),
-            ("story_missing", _issue_comment_payload(body=verdict_body, story_number=999999), "story_not_found"),
+            ("edited", _issue_comment_payload(body=verdict_body, story_number=2001, installation_id=installation_id, action="edited"), "not_created_action"),
+            ("not_pr", _issue_comment_payload(body=verdict_body, story_number=2001, installation_id=installation_id, is_pr=False), "not_a_pull_request_comment"),
+            ("untrusted", _issue_comment_payload(body=verdict_body, story_number=2001, installation_id=installation_id, author_association="NONE"), "untrusted_author_association"),
+            ("not_verdict", _issue_comment_payload(body="그냥 잡담", story_number=2001, installation_id=installation_id), "not_a_verdict_comment"),
+            ("no_sid", _issue_comment_payload(body=verdict_body, story_number=None, installation_id=installation_id), "no_sid_tag"),
+            ("story_missing", _issue_comment_payload(body=verdict_body, story_number=999999, installation_id=installation_id), "story_not_found"),
         ]
         for label, payload, expected_reason in cases:
             delivery_id = f"dlv-{label}-{uuid.uuid4().hex[:8]}"
@@ -270,10 +287,13 @@ async def test_duplicate_delivery_is_noop_realdb():
     """AC④ — 같은 delivery_id 재전송은 dedup(uq)로 2xx no-op(webhook ingress 공통 로직 재확認)."""
     engine, Session = await _session_factory()
     try:
-        await _seed_org_project_story(Session, story_number=3001, seed_po_role=False)
+        _org_id, _story_id, installation_id = await _seed_org_project_story(
+            Session, story_number=3001, seed_po_role=False,
+        )
         delivery_id = f"dlv-dup-{uuid.uuid4().hex[:8]}"
         payload = _issue_comment_payload(
             body="## QA verdict: approved (qa:pass)\n", story_number=3001,
+            installation_id=installation_id,
         )
         resp1 = await _post_issue_comment(payload, Session, delivery_id=delivery_id)
         assert resp1.status_code == 200, resp1.text
