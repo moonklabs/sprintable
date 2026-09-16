@@ -80,9 +80,20 @@ export function resolveChannelLabel(channel: string, t: (key: string) => string)
 // `channelConnect` 하나로 못 박고, 훅으로 감싸 호출부가 아예 t를 못 넘기게 한다 —
 // 이 함수가 `useTranslations`를 직접 부르므로 훅 규칙상 컴포넌트 최상단에서 한 번만
 // 불러야 한다(반환값인 순수 함수는 그 뒤 루프·콜백 안 어디서나 자유롭게 호출 가능).
-export function useChannelLabel(): (channel: string) => string {
+//
+// story #3742 CHANGES(카디르 재현·페드루 클래스 폐쇄) — content/channel-posts/
+// calendar/page.tsx가 `channelConnectionIdentityLabel(c, t)`(옛 시그니처)를 그대로
+// 남긴 채 tsc가 조용히 통과했다 — `(channel: string) => string`(이 함수)과
+// `(key: string) => string`(next-intl의 `t`)이 구조적으로 완전히 같은 모양이라
+// 구조적 타이핑이 실수를 못 잡았다(「옛 시그니처 호출 0」 grep도 함수 호출 형태가
+// 똑같아 못 걸렀다). 반환 타입에 명목적 브랜드를 얹어 «채널 라벨 함수인지 임의의
+// (string)=>string인지»를 타입 레벨에서 가른다 — `t`를 넘기면 이제 tsc가 막는다.
+export type ChannelLabelFn = ((channel: string) => string) & { readonly __brand: 'ChannelLabelFn' };
+
+export function useChannelLabel(): ChannelLabelFn {
   const t = useTranslations('channelConnect');
-  return useCallback((channel: string) => resolveChannelLabel(channel, t), [t]);
+  const fn = useCallback((channel: string) => resolveChannelLabel(channel, t), [t]);
+  return fn as ChannelLabelFn;
 }
 
 // story #3743(UI 재설계 ③, 시안 a98386e6) — 행 목록의 표식(마크) 배경색. 순수 장식(사용자
@@ -129,7 +140,7 @@ export function channelMarkInitials(channel: string): string {
 // (channelLabel 재사용).
 export function channelConnectionIdentityLabel(
   conn: { id: string; channel: string; account_label: string | null },
-  channelLabel: (channel: string) => string,
+  channelLabel: ChannelLabelFn,
 ): string {
   return conn.account_label ?? `${channelLabel(conn.channel)}(…${conn.id.slice(-8)})`;
 }
