@@ -1173,13 +1173,16 @@ jobs:
       # 8개 샤드의 산출물을 모아 weights.json과 절대 배율(2배/0.5배) 경고 대조를 한다.
       # `if: always()`(위 pytest 스텝이 실패해도 산출물은 남긴다 — 실패 원인 진단에도
       # "이 run에서 각 파일이 실제로 얼마나 걸렸는지"가 유용하다).
+      # story #3890(2026-09-16) — retention 7일→1일. always()라 매 run(성공 포함) 8개씩
+      # 누적되는 게 원인 그 자체(#3864의 playwright-report always() 사고와 동형 클래스,
+      # 실측 4,846개·4.6MB) — 다음 잡이 그 run 안에서 바로 소비하니 하루면 충분하다.
       - name: Upload shard durations (story #3558)
         if: always() && needs.detect-changed-scope.outputs.backend_relevant != 'false'
         uses: actions/upload-artifact@v4
         with:
           name: shard-durations-${{ matrix.shard }}
           path: /tmp/shard-durations-${{ matrix.shard }}.json
-          retention-days: 7
+          retention-days: 1
           if-no-files-found: ignore
 
       - name: Skip reason (backend-irrelevant PR)
@@ -1893,7 +1896,10 @@ jobs:
       # 요약(파일 상대경로·테스트명·ms만)을 올린다. story #3864(2026-09-14, 이 워크플로
       # 파일 안 실사고)가 겪은 "매 run always() 업로드 누적이 org 단위 artifact 저장
       # 한도를 채운" 클래스(playwright-report, 실측 7,996개·1,719MB)를 이 카드가 그대로
-      # 재현하지 않도록 payload를 미리 줄여 둔 것 — retention도 짧게(7일, AC2 명시).
+      # 재현하지 않도록 payload를 미리 줄여 둔 것 — retention도 짧게.
+      # story #3890(2026-09-16) — 그 "짧게"가 여전히 7일이라 always()로 매 run 누적된
+      # 실측치(100개·49.5MB)가 남아 있었다 — 1일로 더 좁힌다(요약은 그 run 로그로도
+      # 바로 보이므로 다음날까지 남길 이유가 없다).
       # `if-no-files-found: ignore` — 위 스텝이 JSON 파싱 실패로 요약 파일을 못 쓴
       # 드문 경우에도 이 업로드 스텝 자체는 실패시키지 않는다(계측 실패가 판정에 안
       # 번지는 원칙을 여기서도 유지).
@@ -1903,7 +1909,7 @@ jobs:
         with:
           name: vitest-duration-summary
           path: /tmp/vitest-durations-summary.json
-          retention-days: 7
+          retention-days: 1
           if-no-files-found: ignore
 
       - name: Build

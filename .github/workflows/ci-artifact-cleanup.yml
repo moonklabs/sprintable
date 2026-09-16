@@ -1,0 +1,43 @@
+name: CI Artifact Cleanup
+
+# story #3890(2026-09-16) — GitHub Actions artifact 저장 한도(org 단위)가 하루 수백 개씩
+# 쌓이는 report성 artifact(playwright-report·lighthouse-results·shard-durations-*·
+# vitest-duration-summary)로 채워져 mobile 레포의 진단 artifact 업로드까지 막힌 사고
+# (2026-09-14, 「Artifact storage quota has been hit」) — #3864가 그날의 부채를
+# `scripts/cleanup-ci-artifacts.sh`로 일회성 정리하고 ci.yml 쪽 retention도 줄였지만,
+# 이 사이클을 반복 실행되는 cron으로 얹어 「그래도 남는 것」까지 상시 정리하는 백스톱이
+# 없었다 — 이 워크플로가 그 자리(env-drift-guard.yml과 동일 관례: PR/배포 예산과
+# 안 섞이게 독립 스케줄 워크플로).
+on:
+  schedule:
+    - cron: '0 3 * * 1'  # 매주 월요일 03:00 UTC(=12:00 KST) 1회 — 다른 일간 cron들과 시각 분리
+  workflow_dispatch: {}  # 수동 dry-run/즉시 정리용
+
+concurrency:
+  group: ci-artifact-cleanup
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: write  # artifact DELETE API(cleanup-ci-artifacts.sh)에 필요한 최소 권한
+
+jobs:
+  cleanup:
+    name: Clean up old CI report artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # story #3890 AC2 — 스크립트 자신이 이름 화이트리스트·만료 여부·cutoff 일수를
+      # 전부 방어한다(cleanup-ci-artifacts.sh 헤더 참고) — 여기서는 --apply --json만
+      # 준다. gh CLI는 GITHUB_TOKEN을 자동으로 쓰므로 별도 인증 스텝 불요.
+      - name: Run cleanup (dry-run report always printed to log)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/cleanup-ci-artifacts.sh --apply --json | tee /tmp/cleanup-result.json
+
+      - name: Fail loudly if the script itself errored
+        if: failure()
+        run: echo "::error::CI artifact cleanup 스크립트가 실패했다 — 위 로그를 보고 원인을 확認하라(화이트리스트 밖 삭제는 스크립트 설계상 불가능하므로 이 실패는 gh API/권한 문제일 가능성이 높다)."

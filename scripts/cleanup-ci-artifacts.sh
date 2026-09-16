@@ -10,11 +10,18 @@
 # artifact 중 오래된 것만 일회성으로 정리한다(AC2 — 반복 실행되는 cron이 아니다,
 # "지금 이 부채"를 갚는 용도).
 #
+# story #3890(2026-09-16) — 위 일회성 정리 뒤에도 CI가 매일 새로 굽는 리포트 artifact가
+# 다시 쌓인다(재실측: shard-durations-N 8종 4,846개·4.6MB·vitest-duration-summary
+# 100개·49.5MB — ci.yml 쪽 retention은 이 스토리에서 7일→1일로 이미 줄였으나, 이 스크립트를
+# 주간 cron(.github/workflows/ci-artifact-cleanup.yml)에 얹어 "그래도 남는" 것까지 정리하는
+# 상시 백스톱으로 승격한다). 그래서 기본 이름 목록에 shard-durations-0..7·
+# vitest-duration-summary를 추가 — dockerbuild-* 등 report가 아닌 것(빌드 캐시)은 여전히
+# 목록 밖(그 클래스는 이 카드 스코프 밖, PO 明示).
+#
 # ⛔이 스크립트가 «절대 하지 않는» 것(안전 경계, reclaim-merged-worktrees.sh와 동형 원칙):
-#   - name이 CLEANUP_ARTIFACT_NAMES 목록(기본: playwright-report, lighthouse-results)에
-#     정확히 없는 artifact는 절대 건드리지 않는다(dmg·apk·shard-durations-* 등 — PO 규율
-#     명시 "손 0"). 필터는 정확 일치(startswith 아님) — "playwright-report-foo" 같은
-#     미래의 다른 이름이 실수로 걸리지 않게.
+#   - name이 CLEANUP_ARTIFACT_NAMES 목록에 정확히 없는 artifact는 절대 건드리지 않는다
+#     (dmg·apk·dockerbuild-* 등 — PO 규율 명시 "손 0"). 필터는 정확 일치(startswith
+#     아님) — "playwright-report-foo" 같은 미래의 다른 이름이 실수로 걸리지 않게.
 #   - 이미 만료(expired=true)된 artifact는 건드리지 않는다(GitHub가 곧 자동 정리 — 중복
 #     작업 불요, API 응답에 이미 안 잡히거나 상태만 다를 수 있어 명시로 한 번 더 거른다).
 #   - CUTOFF_DAYS(기본 7일) 이내에 만들어진 artifact는 절대 안 지운다(최근 실패 run의
@@ -30,8 +37,12 @@
 #
 # 환경변수:
 #   CLEANUP_REPO           기본 moonklabs/sprintable — 대상 레포(owner/repo).
-#   CLEANUP_ARTIFACT_NAMES  기본 "playwright-report lighthouse-results" — 공백구분 정확
-#                           일치 필터 목록(대소문자 구분). 이 목록에 없는 name은 절대 대상 0.
+#   CLEANUP_ARTIFACT_NAMES  기본 "playwright-report lighthouse-results shard-durations-0
+#                           shard-durations-1 shard-durations-2 shard-durations-3
+#                           shard-durations-4 shard-durations-5 shard-durations-6
+#                           shard-durations-7 vitest-duration-summary"(story #3890 확장)
+#                           — 공백구분 정확 일치 필터 목록(대소문자 구분). 이 목록에 없는
+#                           name은 절대 대상 0.
 #   CLEANUP_CUTOFF_DAYS    기본 7 — 이 값(일)보다 오래된 것만 삭제 대상.
 
 set -euo pipefail
@@ -47,7 +58,7 @@ for arg in "$@"; do
 done
 
 REPO="${CLEANUP_REPO:-moonklabs/sprintable}"
-ARTIFACT_NAMES="${CLEANUP_ARTIFACT_NAMES:-playwright-report lighthouse-results}"
+ARTIFACT_NAMES="${CLEANUP_ARTIFACT_NAMES:-playwright-report lighthouse-results shard-durations-0 shard-durations-1 shard-durations-2 shard-durations-3 shard-durations-4 shard-durations-5 shard-durations-6 shard-durations-7 vitest-duration-summary}"
 CUTOFF_DAYS="${CLEANUP_CUTOFF_DAYS:-7}"
 
 # 공백구분 이름 목록 → jq IN() 연산용 JSON 배열.
