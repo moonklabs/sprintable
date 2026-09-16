@@ -63,6 +63,15 @@ dev/CI 등 정상 환경에서는 4 게이트 전부 no-op(스키마 무변). **
 재생되는 순간)은 선생님 승격 결재 뒤**다 — 이 리비전 자체는 지금 develop에 착지해도
 아무 실제 효과가 없다.
 
+## PO CHANGES 1회차(2026-09-16 11:24Z) — 사후 존재-체크
+사전 게이트("아직 없으면 재생")만으로는 원본 `upgrade()` 하나가 조용히 no-op이 되는
+클래스(파일 안 조건 분기·이름 바뀐 테이블 등)를 못 잡는다 — 카드 確定 절의 「마이그
+자신은 60개 대표 산출물 존재-체크(inspector)까지」를 `_require_exists()`로 구현: 구간별
+분기(재생/skip) 직후 대표 산출물이 실제로 있는지 다시 확認하고, 없으면 `RuntimeError`로
+올려 단일 트랜잭션 전체를 롤백시킨다. 구간④는 초입 산출물(`channel_connections`, 0312)
+뿐 아니라 구간 마지막 파일(`channel_post_versions.hook_key`, 0353)까지 같이 확認 — 57개
+중 앞부분만 성공하고 뒤가 조용히 no-op이어도 초입 산출물만으로는 못 잡기 때문.
+
 Revision ID: 0354a
 Revises: 0354
 Create Date: 2026-09-16
@@ -168,6 +177,25 @@ def _replay(filenames: list[str]) -> None:
         _load_upgrade_fn(filename)()
 
 
+def _require_exists(bind: sa.engine.Connection, table: str, column: str | None = None) -> None:
+    """PO CHANGES 1회차(2026-09-16 11:24Z) C1 — "재생을 했다"는 사실을 마이그 자신이
+    사후에 확認한다. 사전 게이트만으로는 원본 upgrade() 하나가 조용히 no-op이 되는
+    클래스(파일 안 조건 분기·이름 바뀐 테이블 등)를 못 잡는다 — 재생 뒤(또는 skip
+    직후, 어느 경로든) 대표 산출물이 실제로 있는지 inspector로 단언하고, 없으면
+    RuntimeError로 올려 트랜잭션 전체를 롤백시킨다."""
+    inspector = sa.inspect(bind)
+    if not inspector.has_table(table):
+        raise RuntimeError(
+            f"0354a 사후 존재-체크 실패 — 테이블 '{table}' 부재(재생이 조용히 no-op됐을 가능성)",
+        )
+    if column is not None:
+        cols = {c["name"] for c in inspector.get_columns(table)}
+        if column not in cols:
+            raise RuntimeError(
+                f"0354a 사후 존재-체크 실패 — '{table}.{column}' 부재(재생이 조용히 no-op됐을 가능성)",
+            )
+
+
 def _replay_segments(bind: sa.engine.Connection) -> list[str]:
     summary: list[str] = []
 
@@ -178,6 +206,7 @@ def _replay_segments(bind: sa.engine.Connection) -> list[str]:
         summary.append("구간① 0282(platform_settings.vat_rate_bp): 재생함")
     else:
         summary.append("구간① 0282(platform_settings.vat_rate_bp): skip(이미 존재)")
+    _require_exists(bind, "platform_settings", "vat_rate_bp")
 
     inspector = sa.inspect(bind)
     os_cols = {c["name"] for c in inspector.get_columns("org_subscriptions")}
@@ -186,6 +215,7 @@ def _replay_segments(bind: sa.engine.Connection) -> list[str]:
         summary.append("구간② 0288(org_subscriptions.au_warn_80_notified_at): 재생함")
     else:
         summary.append("구간② 0288(org_subscriptions.au_warn_80_notified_at): skip(이미 존재)")
+    _require_exists(bind, "org_subscriptions", "au_warn_80_notified_at")
 
     inspector = sa.inspect(bind)
     bo_cols = {c["name"] for c in inspector.get_columns("billing_orders")}
@@ -194,6 +224,7 @@ def _replay_segments(bind: sa.engine.Connection) -> list[str]:
         summary.append("구간③ 0291(billing_orders.receipt_url): 재생함")
     else:
         summary.append("구간③ 0291(billing_orders.receipt_url): skip(이미 존재)")
+    _require_exists(bind, "billing_orders", "receipt_url")
 
     inspector = sa.inspect(bind)
     if "channel_connections" not in inspector.get_table_names():
@@ -201,6 +232,10 @@ def _replay_segments(bind: sa.engine.Connection) -> list[str]:
         summary.append(f"구간④ 0296~0353({len(_SEGMENT_4_FILES)}개, channel_connections): 재생함")
     else:
         summary.append(f"구간④ 0296~0353({len(_SEGMENT_4_FILES)}개, channel_connections): skip(이미 존재)")
+    # 구간④는 57개 중 마지막 0353의 산출물까지 같이 단언 — channel_connections 하나만
+    # 보면 구간 초입(0312)만 성공하고 나머지가 조용히 no-op이어도 통과해버린다.
+    _require_exists(bind, "channel_connections")
+    _require_exists(bind, "channel_post_versions", "hook_key")
 
     return summary
 

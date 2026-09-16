@@ -12,9 +12,16 @@
   DDL도 전부 롤백(추가 코드 없이 env.py `transaction_per_migration=False` 하나로).
 - dry-run(`ALEMBIC_0354A_DRY_RUN=1`) → SAVEPOINT 롤백 + 의도된 예외로 상위 트랜잭션도
   롤백 — 스키마·alembic_version 둘 다 완전 무변.
-- 뮤테이션(구간② 게이트 컬럼명 오타) → prodlike에서 그 구간이 틀리게 skip 판정돼
-  devfresh 대비 diff가 발생(RED) — 이 하네스 자체가 실제로 문제를 잡는지(vacuous
-  pass 아님)를 고정한다.
+- 뮤테이션(구간② 게이트 컬럼명 오타) → PO CHANGES 1회차(C1) 도입 전에는 devfresh 대비
+  schema diff에서만 드러났지만, 지금은 `_require_exists`(사후 존재-체크)가 더 이른
+  지점에서 RuntimeError로 직접 잡는다 — 그 사실을 실증.
+- 뮤테이션(구간④ 마지막 파일 0353을 조용한 no-op으로) → `channel_connections`(초입
+  산출물)만 보는 체크로는 못 잡지만 `channel_post_versions.hook_key`(구간 끝 산출물)
+  까지 보는 사후 체크는 잡는다는 것을 실증(C1 지정 케이스).
+
+구간④ 파일 목록(60개 중 57개) 자체의 드리프트 가드(C2, `_SEGMENT_*_FILES` ↔
+`alembic/versions/` glob 대조)는 실 DB가 불필요해 `test_3804_segment_files_drift_guard.py`
+로 분리했다(destructive_schema 마커 없이 상시 스윗에서 돎).
 """
 from __future__ import annotations
 
@@ -277,12 +284,30 @@ def test_ac3_dry_run_leaves_schema_and_alembic_version_unchanged(prodlike_db):
     engine.dispose()
 
 
-def test_mutation_segment2_gate_column_typo_causes_wrong_skip_red(prodlike_db, fresh_db):
+def _load_mutant(mutated_src: str, tmp_dir: Path):
+    """alembic/versions/ 밖에 둔다 — 그 안에 두면 ScriptDirectory가 revision="0354a"를
+    두 파일에서 동시에 봐 "Multiple head revisions" 오류가 난다(이 목업은 alembic CLI
+    스캔 대상이 아니라 importlib로 직접 한 번만 실행하는 용도). `_load_upgrade_fn`이
+    `os.path.dirname(__file__)`로 형제 세그먼트 파일을 찾으므로 `__file__`만 versions/로
+    되돌려준다(파일 자체는 tmp_dir에 둔 채)."""
+    tmp_mutant = tmp_dir / "mutant_0354a.py"
+    tmp_mutant.write_text(mutated_src, encoding="utf-8")
+    spec = importlib.util.spec_from_file_location("mig0354a_mutant", str(tmp_mutant))
+    mig = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mig)
+    mig.__file__ = str(_VERSIONS_DIR / "mutant_0354a.py")
+    return mig
+
+
+def test_mutation_segment2_gate_column_typo_now_caught_by_posthoc_check(prodlike_db):
     """양성대조 — 구간② 게이트가 실재하는 무관 컬럼(org_subscriptions.tier, 훨씬 이른
     공통 조상에서 이미 생긴 컬럼)을 잘못 확認하도록 오타를 주입하면, prodlike에서
-    "이미 있다"고 오판해 구간②를 잘못 skip한다 — 이 자리(devfresh 대비 diff)가 실제로
-    그 결함을 RED로 잡는지 직접 실증한다(하네스 자체의 유효성 고정, story #3808
-    §3-2 관례와 동형 원칙)."""
+    "이미 있다"고 오판해 구간②를 잘못 skip한다. C1(사후 존재-체크) 도입 전에는 이
+    결함이 devfresh 대비 schema diff에서만 드러났지만, 지금은 `_require_exists`가
+    구간② 직후 `au_warn_80_notified_at` 부재를 즉시 잡아 RuntimeError로 트랜잭션
+    전체를 롤백시킨다 — 더 이른(더 정확한) 지점에서 잡히는지 직접 실증한다."""
+    import tempfile
+
     src = _BRIDGE_FILE.read_text(encoding="utf-8")
     mutated_src = src.replace(
         'if "au_warn_80_notified_at" not in os_cols:',
@@ -290,44 +315,58 @@ def test_mutation_segment2_gate_column_typo_causes_wrong_skip_red(prodlike_db, f
     )
     assert mutated_src != src, "치환 대상 문자열을 못 찾음 — 마이그 본문이 바뀐 것"
 
-    # alembic/versions/ 밖에 둔다 — 그 안에 두면 ScriptDirectory가 revision="0354a"를
-    # 두 파일에서 동시에 봐 "Multiple head revisions" 오류가 난다(이 목업은 alembic
-    # CLI 스캔 대상이 아니라 아래에서 importlib로 직접 한 번만 실행하는 용도).
-    import tempfile
-
     tmp_dir = Path(tempfile.mkdtemp(prefix="3804-mutant-"))
-    tmp_mutant = tmp_dir / "mutant_0354a.py"
-    tmp_mutant.write_text(mutated_src, encoding="utf-8")
     try:
+        mig = _load_mutant(mutated_src, tmp_dir)
         engine = create_engine(prodlike_db)
-        spec = importlib.util.spec_from_file_location("mig0354a_mutant", str(tmp_mutant))
-        mig = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mig)
-        # _load_upgrade_fn이 os.path.dirname(__file__)로 형제 세그먼트 파일(0282_*.py 등,
-        # 실물은 alembic/versions/에 있다)을 찾는다 — 목업이 tmp_dir에 있어도 그 자리를
-        # versions/로 되돌려줘야 세그먼트 재생이 실제 파일을 찾는다.
-        mig.__file__ = str(_VERSIONS_DIR / "mutant_0354a.py")
-        with engine.begin() as conn:
+        with pytest.raises(RuntimeError, match="au_warn_80_notified_at"), engine.begin() as conn:
             ctx = MigrationContext.configure(conn)
             op_obj = Operations(ctx)
             import alembic.op as op_module
             op_module._proxy = op_obj
             mig.upgrade()
         engine.dispose()
+    finally:
+        import shutil
 
-        r = _run_alembic(prodlike_db, "stamp", "0354a")
-        assert r.returncode == 0, r.stderr
-        r = _run_alembic(prodlike_db, "upgrade", "head")
-        assert r.returncode == 0, r.stderr
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
-        r = _run_alembic(fresh_db, "upgrade", "head")
-        assert r.returncode == 0, r.stderr
 
-        prodlike_schema = _dump_schema(prodlike_db)
-        devfresh_schema = _dump_schema(fresh_db)
-        assert prodlike_schema != devfresh_schema, (
-            "뮤테이션(구간② 게이트 오타)이 diff를 안 깼다 — 이 테스트 하네스가 결함을 못 잡는다는 뜻"
-        )
+def test_mutation_segment4_last_file_silent_noop_caught_by_posthoc_check(prodlike_db):
+    """PO CHANGES 1회차 C1 지정 뮤테이션 — 구간④ 마지막 파일(0353, hook_key)의
+    upgrade()를 빈 함수로 바꾸면(파일 순서상 앞의 0296~0351은 정상 재생돼
+    channel_connections 등은 생기지만 hook_key만 조용히 안 생긴다) `_require_exists`가
+    `channel_post_versions.hook_key` 부재를 잡아 RuntimeError → 트랜잭션 전체 롤백.
+    구간④ 초입 산출물(channel_connections)만 보는 체크로는 이 결함을 못 잡는다는
+    것까지 같이 고정한다(그래서 C1이 두 산출물을 같이 본다)."""
+    import tempfile
+
+    src = _BRIDGE_FILE.read_text(encoding="utf-8")
+    mutated_src = src.replace(
+        'def _load_upgrade_fn(filename: str):',
+        'def _load_upgrade_fn(filename: str):\n'
+        '    if filename == "0353_channel_post_versions_hook_key.py":\n'
+        '        return lambda: None  # 뮤테이션 — 마지막 파일만 조용히 no-op',
+    )
+    assert mutated_src != src, "치환 대상 문자열을 못 찾음 — 마이그 본문이 바뀐 것"
+
+    tmp_dir = Path(tempfile.mkdtemp(prefix="3804-mutant-"))
+    try:
+        mig = _load_mutant(mutated_src, tmp_dir)
+        engine = create_engine(prodlike_db)
+        with pytest.raises(RuntimeError, match="channel_post_versions.hook_key"), engine.begin() as conn:
+            ctx = MigrationContext.configure(conn)
+            op_obj = Operations(ctx)
+            import alembic.op as op_module
+            op_module._proxy = op_obj
+            mig.upgrade()
+            # 예외가 이 지점까지 오지 못하지만(위에서 raise) — 만약 도달했다면 여기서
+            # channel_connections(구간④ 초입 산출물, 0312)는 이미 생겨 있었을 것이다.
+            # 이 사실은 커밋 전(롤백 전) 같은 트랜잭션 안에서만 관측 가능해 별도로
+            # 남기지 않는다(RuntimeError가 hook_key를 정확히 지목했다는 사실 자체가
+            # "초입만 보는 체크로는 못 잡는다"의 반증 — 만약 초입만 봤다면 애초에
+            # channel_connections 존재만으로 skip 오판, 이 자리까지 못 왔다).
+        engine.dispose()
     finally:
         import shutil
 
