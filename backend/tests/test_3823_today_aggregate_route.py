@@ -372,6 +372,11 @@ async def test_needs_me_kind_and_risk_mapping_four_paths_realdb():
 
             wf = by_work_item[str(wf_story.id)]
             assert wf["kind"] == "approval" and wf["risk"] == "high"
+            # story #3965 AC2 — workflow_step 소스가 노출하는 액션 키(POST
+            # /gates/{id}/approvers/{approval_id}/decision·hold=기존 gate-level
+            # /{id}/hold가 각각 실 처리) 고정. 화면(needs_me)이 이 키를 렌더 근거로
+            # 삼으니 서비스가 실수로 빼거나 이름을 바꾸면 이 테스트가 먼저 빨개진다.
+            assert wf["actions"] == ["approve", "request_changes", "hold"]
         finally:
             await client.aclose()
     finally:
