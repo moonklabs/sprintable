@@ -1120,7 +1120,9 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
   if (loading) {
     return (
       <>
-        <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} showContextChip />
+        {/* story #3945 — 아래 :1157(본문 «목표» 제목)이 이 페이지의 진짜 h1이다. 로딩
+            상태에도 같은 TopBarSlot 라벨을 쓰므로 일관되게 비-헤딩(<p>)으로. */}
+        <TopBarSlot title={<p className="text-sm font-medium">{t('title')}</p>} showContextChip />
         <div className="flex h-64 items-center justify-center">
           <p className="text-sm text-muted-foreground">{t('loading')}</p>
         </div>
@@ -1271,7 +1273,7 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
   return (
     <>
       <TopBarSlot
-        title={<h1 className="text-sm font-medium">{t('title')}</h1>}
+        title={<p className="text-sm font-medium">{t('title')}</p>}
         actions={
           <Button size="sm" variant="outline" onClick={() => setShowCreate(true)}>
             <Plus className="mr-1.5 h-3.5 w-3.5" />
