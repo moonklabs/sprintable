@@ -1544,17 +1544,30 @@ describe('OrganizationChannelsPage — GA4 연결(story #3583)', () => {
   // story #3598(유나 §AC9 문구 確定 2026-09-06 15:44Z) — channelReauthError 교체 2 —
   // 「갱신에 실패했습니다」(reason=error가 갱신 문제라고 잘못 단정하던 옛 문구)를
   // 「이 연결로 지금 발행할 수 없어요 — 다시 연결해 주세요.」로(재연결로 풀린다고
-  // 약속하지 않는다).
-  it('⭐#3598 — needs_reauth reason=error면 새 문구(발행 불가·재연결 유도)가 뜬다', async () => {
+  // 약속하지 않는다). story #3951(3595 표 후속, 유나 §⑤ 판정 2026-09-16) — ④(앱
+  // 비활성)가 Graph 신호로 구별 불가하다는 그라운딩이 확定돼(developers.facebook.com
+  // 공식 문서 재확認) 「다시 연결해 주세요」의 단정을 「다시 연결해 보세요」로
+  // 완화(재연결이 항상 통한다고 거짓 약속하지 않는다).
+  it('⭐#3598/#3951 — needs_reauth reason=error면 새 문구(발행 불가·재연결 유도·완화된 어미)가 뜬다', async () => {
     stubFetch({
       measurementConnections: [
         { key: 'ga4', status: 'needs_reauth', last_seen_at: null, count_7d: null, settings_path: null, reason: 'error' },
       ],
     });
     await mount('owner');
-    expect(container.textContent).toContain('이 연결로 지금 발행할 수 없어요 — 다시 연결해 주세요.');
+    expect(container.textContent).toContain(koMessages.channelConnect.channelReauthError);
     expect(container.textContent).not.toContain('갱신에 실패했습니다');
     expect(container.textContent).not.toContain('서버 응답');
+  });
+
+  // story #3951 — 유나 §⑤ 판정(전→후)을 값으로 고정(판정 선언은 테스트로 pin) —
+  // 3문장이 「무슨 일 — 무엇을 하라」 한 형태로 통일됐는지 리터럴로 잠근다. ②·③
+  // (권한 회수·페이지 연결 해제)은 안 가른다는 판정이라 channelReauthRevoked 하나가
+  // 둘 다를 포괄하는 문장이어야 한다(별도 pin 불요 — 같은 키 재사용 자체가 그 증거).
+  it('⭐#3951 — 유나 판정 문구 3종이 정확히 그 값으로 고정된다', () => {
+    expect(koMessages.channelConnect.channelReauthExpired).toBe('연결이 만료됐어요 — 다시 연결해 주세요.');
+    expect(koMessages.channelConnect.channelReauthRevoked).toBe('채널 쪽에서 연결이 끊겼어요 — 다시 연결해 주세요.');
+    expect(koMessages.channelConnect.channelReauthError).toBe('이 연결로 지금 발행할 수 없어요 — 다시 연결해 보세요.');
   });
 
   it('needs_reauth — reason이 없으면 note 자체를 안 그린다', async () => {

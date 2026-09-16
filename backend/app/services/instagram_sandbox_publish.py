@@ -26,6 +26,13 @@ from app.services.threads_publish import ThreadsPublishError
 _MARKER_429 = "[sandbox:429]"
 _MARKER_PROVIDER_ERROR = "[sandbox:provider-error]"
 _MARKER_EXPIRED_TOKEN = "[sandbox:expired-token]"
+# story #3951(3595 표 후속, 페드루 PO 確定 2026-09-16) — sandbox_publish.py(범용
+# Threads)와 같은 마커 문자열·같은 provider_error_code/subcode/type 배정(신규
+# 마커 어휘 0). 3595 표 행 ②③④(권한 회수·페이지 연결 해제·앱 비활성) 시뮬레이션 —
+# IG/FB 샌드박스엔 이 마커가 없었던 것이 3595의 발견 그 자체였다.
+_MARKER_REVOKED = "[sandbox:revoked]"
+_MARKER_PAGE_UNLINKED = "[sandbox:page-unlinked]"
+_MARKER_APP_INACTIVE = "[sandbox:app-inactive]"
 # story #3554(Phase2, 페드루 PO 確定 2026-09-06⑤) — 릴스 전용 마커 2종. "processing-
 # failed"는 Meta 쪽 비동기 영상 처리 실패(코덱은 통과했지만 인코딩 파이프라인
 # 자체가 거부하는 케이스, 예: 손상된 프레임)를 흉내낸다 — 서버 업로드 시점 파서
@@ -59,6 +66,21 @@ async def create_container(
     if _MARKER_EXPIRED_TOKEN in text:
         raise ThreadsPublishError(
             "SANDBOX_INSTAGRAM_TOKEN_EXPIRED", "sandbox: [sandbox:expired-token] 마커 시뮬레이션", status_code=401,
+        )
+    if _MARKER_REVOKED in text:
+        raise ThreadsPublishError(
+            "SANDBOX_INSTAGRAM_CONNECTION_REVOKED", "sandbox: [sandbox:revoked] 마커 시뮬레이션", status_code=401,
+            provider_error_code=190, provider_error_subcode=490, provider_error_type="OAuthException",
+        )
+    if _MARKER_PAGE_UNLINKED in text:
+        raise ThreadsPublishError(
+            "SANDBOX_INSTAGRAM_PAGE_UNLINKED", "sandbox: [sandbox:page-unlinked] 마커 시뮬레이션", status_code=401,
+            provider_error_code=190, provider_error_subcode=458, provider_error_type="OAuthException",
+        )
+    if _MARKER_APP_INACTIVE in text:
+        raise ThreadsPublishError(
+            "SANDBOX_INSTAGRAM_APP_INACTIVE", "sandbox: [sandbox:app-inactive] 마커 시뮬레이션", status_code=401,
+            provider_error_code=190, provider_error_subcode=467, provider_error_type="OAuthException",
         )
     if image_url is None:
         raise ThreadsPublishError(
