@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
-import { TopBarProvider } from '@/components/nav/top-bar-context';
+import { TopBarProvider, useTopBar } from '@/components/nav/top-bar-context';
 import koMessages from '../../../../messages/ko.json';
 
 const { useDashboardContextMock, pushMock, replaceMock } = vi.hoisted(() => ({
@@ -133,5 +133,33 @@ describe('인박스 기본 탭 커서 페이지네이션 (story #2195)', () => {
     expect(container.textContent).toContain('notif-3');
     // 2페이지째는 hasMore:false라 버튼이 사라진다.
     expect([...container.querySelectorAll('button')].find((b) => b.textContent === '더 보기')).toBeFalsy();
+  });
+});
+
+// story #3946(규칙: 「TopBarSlot 제목은 그 화면에 다른 제목이 없을 때만 h1」) — 이 화면은
+// 본문에 별도 마스트헤드가 없어(3946 AC1 실측) TopBarSlot의 h1이 그대로 유일한 h1이다.
+// 라벨은 activeTabLabel(탭별 동적)이지만 TopBarSlot 호출 자체는 항상 1곳뿐이라 탭과
+// 무관하게 h1은 항상 정확히 1개다.
+function TopBarTitleProbe() {
+  const { title } = useTopBar();
+  return <div>{title}</div>;
+}
+
+describe('InboxPage — 페이지 h1 1개(story #3946)', () => {
+  it('⭐h1이 정확히 1개다(TopBarSlot 제목, activeTabLabel)', async () => {
+    stubFetch([{ hasMore: false, nextCursor: null, items: [] }]);
+    const { default: InboxPage } = await import('./page');
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <TopBarProvider>
+            <TopBarTitleProbe />
+            <InboxPage />
+          </TopBarProvider>
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.querySelectorAll('h1')).toHaveLength(1);
   });
 });

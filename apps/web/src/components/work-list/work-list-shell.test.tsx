@@ -9,7 +9,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
-import { TopBarProvider } from '@/components/nav/top-bar-context';
+import { TopBarProvider, useTopBar } from '@/components/nav/top-bar-context';
 import type { FetchedWorkList } from './fetch-work-list';
 
 const { fetchWorkListMock, searchParamsValueRef } = vi.hoisted(() => ({
@@ -125,5 +125,25 @@ describe('WorkListShell — task 0개(목표 유무 무관, story #3934 재판�
     await mount();
     expect(container.textContent).toContain('표시할 일이 없어요');
     expect(container.textContent).not.toContain('아직 일로 나뉜 작업이 없어요');
+  });
+});
+
+// story #3946(규칙: 「TopBarSlot 제목은 그 화면에 다른 제목이 없을 때만 h1」) — 이 화면은
+// 본문에 별도 마스트헤드가 없어(3946 AC1 실측) TopBarSlot의 h1이 그대로 유일한 h1이다.
+// 별도 파일 내 별도 mount — 기존 wrap()에 소비처를 얹으면 그 존의 container.textContent
+// 부분일치 단언들(위 describe들)에 title 문구가 섞여드는 위험이 있어, 이 자리만 좁게 둔다.
+function TopBarTitleProbe() {
+  const { title } = useTopBar();
+  return <div>{title}</div>;
+}
+
+describe('WorkListShell — 페이지 h1 1개(story #3946)', () => {
+  it('⭐h1이 정확히 1개다(TopBarSlot 제목)', async () => {
+    fetchWorkListMock.mockResolvedValue({ workList: { groups: [], partial: false, totalStoryCount: 0 }, hypotheses: [] });
+    const { WorkListShell } = await import('./work-list-shell');
+    await act(async () => {
+      root.render(wrap(<><TopBarTitleProbe /><WorkListShell projectId="p1" /></>));
+    });
+    expect(container.querySelectorAll('h1')).toHaveLength(1);
   });
 });
