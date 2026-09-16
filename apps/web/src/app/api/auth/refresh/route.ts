@@ -48,7 +48,11 @@ export async function POST(request: Request) {
       // story #2449 AC1 — BFF 로그 1줄로 클라이언트 신호를 남긴다(PII 0). BE(auth.py)의
       // delta_since_revoke_s·successor_used·ua와 짝지어, 다음 하드 401이 「동시경합
       // straggler」인지 「탭이 오래 회전된 RT를 들고 있었다」인지 수동 상관 없이 갈린다.
+      // CHANGES(카디르 codex 읽기 검수, 페드루 PO 채택 2026-09-16 13:28Z) — correlation_key
+      // 없이는 이 로그 줄과 BE 로그 줄을 자동으로 못 짝지었다. BE가 X-Auth-Correlation
+      // 헤더(token_hash[:12], 비밀값 아님)로 실어 보내는 값을 그대로 반영.
       console.warn('[auth-refresh] hard 401', {
+        correlation_key: fastapiRes.headers.get('x-auth-correlation'),
         visibility_state: diagnostics?.visibility_state ?? null,
         idle_ms: diagnostics?.idle_ms ?? null,
         tab_count: diagnostics?.tab_count ?? null,

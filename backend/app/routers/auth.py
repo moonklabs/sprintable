@@ -93,10 +93,11 @@ def _ok(data: object, status_code: int = 200) -> JSONResponse:
     return JSONResponse({"data": data, "error": None, "meta": None}, status_code=status_code)
 
 
-def _err(code: str, message: str, status_code: int = 400) -> JSONResponse:
+def _err(code: str, message: str, status_code: int = 400, *, headers: dict[str, str] | None = None) -> JSONResponse:
     return JSONResponse(
         {"data": None, "error": {"code": code, "message": message}, "meta": None},
         status_code=status_code,
+        headers=headers,
     )
 
 
@@ -1019,7 +1020,15 @@ async def refresh_token(
                 "delta_since_revoke_s=%s successor_used=%s ua=%r",
                 correlation_key, _diag_user_id, _diag_delta_since_revoke_s, _diag_successor_used, _diag_ua,
             )
-            return _err("TOKEN_REVOKED", "Refresh token revoked or expired", 401)
+            # story #2449 CHANGES(카디르 codex 읽기 검수, 페드루 PO 채택 2026-09-16
+            # 13:28Z) — 이 로그의 correlation_key(위 #2449 계측 3필드와 같은 값)가
+            # BFF(route.ts) warn 로그엔 안 실려 두 로그 줄을 자동으로 못 짝지었다.
+            # 비밀값 아님(token_hash[:12], 원본 토큰 복원 불가) — 응답 헤더로 얹어
+            # BFF가 그대로 읽어 자기 로그에 반영하게 한다.
+            return _err(
+                "TOKEN_REVOKED", "Refresh token revoked or expired", 401,
+                headers={"X-Auth-Correlation": correlation_key},
+            )
         logger.info(
             "auth.refresh chain_resolve_window_reuse key=%s user_id=%s "
             "reason=multi_instance_race_loser_fork_rotation",
