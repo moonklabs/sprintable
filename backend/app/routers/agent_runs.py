@@ -1,3 +1,4 @@
+import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Literal
@@ -18,6 +19,7 @@ from app.schemas.agent_run_tool_call import AgentRunToolCallResponse
 from app.services.agent_run_lifecycle import AGENT_RUN_TIMEOUT_HOURS
 
 router = APIRouter(prefix="/api/v2/agent-runs", tags=["agent-runs", "Work"])
+logger = logging.getLogger(__name__)
 
 # story #2161(원 3값) + story #3961(「정지」 액션, PO 확定 2026-09-16) — cancelled·
 # cancelled_unacknowledged도 종결(그 run은 더 이상 진행 중이 아니다·finished_at 채움).
@@ -406,13 +408,13 @@ async def update_agent_run(
     if body.status in ("cancel_requested", "cancelled_unacknowledged"):
         raise HTTPException(
             status_code=422,
-            detail=f"status={body.status!r}는 자기보고로 직접 설정할 수 없습니다(서버/사람 전용 전이).",
+            detail=f"status={body.status!r} cannot be set via self-report (server/human-only transition).",
         )
     if body.status == "cancelled" and existing.status != "cancel_requested":
         raise HTTPException(
             status_code=409,
-            detail="ack(cancelled)는 그 run이 cancel_requested 상태일 때만 가능합니다"
-            f"(현재 status={existing.status!r}).",
+            detail=f"ack (status=cancelled) is only valid when the run is cancel_requested "
+            f"(current status={existing.status!r}).",
         )
     _cancel_ack_fields: dict = {}
     if body.status == "cancelled":
@@ -510,7 +512,7 @@ async def cancel_agent_run(
     # 그라운딩 근거)까지 "그 일의 assignee"로 인정하면 에이전트가 자기 자신·다른 에이전트의
     # run을 인가 없이 멈추게 허용하는 셈이라 명시로 막는다.
     if caller.type != "human":
-        raise HTTPException(status_code=403, detail="이 액션은 사람만 요청할 수 있습니다.")
+        raise HTTPException(status_code=403, detail="Only a human can request this action.")
     is_admin = await is_org_owner_or_admin(repo.session, uuid.UUID(auth.user_id), org_id)
     is_story_owner = False
     if existing.story_id is not None:
@@ -524,14 +526,14 @@ async def cancel_agent_run(
     if not (is_admin or is_story_owner):
         raise HTTPException(
             status_code=403,
-            detail="org owner/admin 또는 이 일의 담당자만 실행을 중단 요청할 수 있습니다.",
+            detail="Only org owner/admin or this work item's assignee can request cancellation.",
         )
 
     if existing.status not in _CANCELLABLE_STATUSES:
         raise HTTPException(
             status_code=409,
-            detail=f"status={existing.status!r}인 run은 중단 요청할 수 없습니다"
-            f"(가능한 상태: {sorted(_CANCELLABLE_STATUSES)}).",
+            detail=f"status={existing.status!r} runs cannot be cancel-requested "
+            f"(cancellable statuses: {sorted(_CANCELLABLE_STATUSES)}).",
         )
 
     now = datetime.now(timezone.utc)
@@ -545,9 +547,12 @@ async def cancel_agent_run(
     if run is None:
         raise HTTPException(status_code=404, detail="Agent run not found")
 
-    # story #3961 — best-effort 격리(story_status_events.py::emit_story_status_changed와
-    # 동형 계약): 이벤트 발행 실패가 이미 확定된 cancel_requested 전이 자체를 롤백하면
-    # 안 된다(발행은 부가 신호, 상태 전이가 1차 사실).
+    # story #3961(페드루 PO CHANGES①, PR#4364 16:02Z) — best-effort 격리(story_status_events.py::
+    # emit_story_status_changed와 동형 계약): 이벤트 발행 실패가 이미 확定된 cancel_requested
+    # 전이 자체를 롤백하면 안 된다(발행은 부가 신호, 상태 전이가 1차 사실).
+    # timeout_at(now+15분) — 수신 런타임이 "언제까지 ack해야 unacknowledged로 確定되는지"를
+    # 자기 로컬 시계로 다시 계산할 필요 없게(_CANCEL_ACK_TIMEOUT_MINUTES SSOT는 서버 쪽에만
+    # 있다 — 값을 페이로드에 실어 그대로 전달, 클라가 상수를 따로 하드코딩할 필요 0).
     try:
         from app.routers.events import publish_preset_event
 
@@ -558,12 +563,11 @@ async def cancel_agent_run(
                 "agent_id": str(run.agent_id),
                 "requested_by_member_id": str(caller.id),
                 "reason": body.reason,
+                "timeout_at": (now + timedelta(minutes=_CANCEL_ACK_TIMEOUT_MINUTES)).isoformat(),
             },
         )
     except Exception:
-        import logging
-
-        logging.getLogger(__name__).warning(
+        logger.warning(
             "agent_run.cancel_requested 이벤트 발행 실패(run=%s org=%s)", run.id, org_id, exc_info=True,
         )
 

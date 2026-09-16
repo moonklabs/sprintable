@@ -273,6 +273,61 @@ async def test_today_agent_progress_surfaces_cancel_requested_and_hides_expired_
         await engine.dispose()
 
 
+async def test_cancel_publishes_preset_event_with_timeout_at_realdb():
+    """AC(페드루 PO CHANGES①, PR#4364 16:02Z) — cancel 성공 경로가 기존 publish_preset_event
+    헬퍼로 preset.agent_run.cancel_requested를 실제로 1건 발행한다(정의 시드만으로는 poll_events/
+    알림에 안 뜬다는 지적 반영) — run_id·agent_id·requested_by_member_id·timeout_at(now+15분)
+    페이로드를 직접 검증."""
+    from app.main import app
+    from app.routers import agent_runs as agent_runs_router
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            owner_id, owner_user_id = await _make_member(s, org.id, project.id, org_role="owner")
+            agent_id, _ = await _make_member(s, org.id, project.id, type_="agent")
+            run = await _make_agent_run(s, org.id, project.id, agent_id=agent_id, story_id=None, status="running")
+
+        calls: list[tuple] = []
+        from app.routers import events as events_router
+        _orig_publish = events_router.publish_preset_event
+
+        async def _capturing_publish(db, org_id, definition_key, payload):
+            calls.append((org_id, definition_key, payload))
+            return await _orig_publish(db, org_id, definition_key, payload)
+
+        # cancel_agent_run이 지역 import(`from app.routers.events import publish_preset_event`)로
+        # 부르므로, 그 이름이 바인딩되는 모듈(events_router) 자체의 속성을 패치해야 잡힌다.
+        events_router.publish_preset_event = _capturing_publish
+        try:
+            await _setup_app_human(app, Session, owner_user_id, org.id)
+            client = _client_for(app)
+            before = datetime.now(timezone.utc)
+            try:
+                resp = await client.post(f"/api/v2/agent-runs/{run.id}/cancel", json={"reason": "검증"})
+                assert resp.status_code == 200, resp.text
+            finally:
+                await client.aclose()
+                app.dependency_overrides.clear()
+        finally:
+            events_router.publish_preset_event = _orig_publish
+
+        assert len(calls) == 1, f"발행 호출 {len(calls)}회 — 정확히 1회 기대"
+        _org_id, _key, payload = calls[0]
+        assert _key == "preset.agent_run.cancel_requested"
+        assert payload["run_id"] == str(run.id)
+        assert payload["agent_id"] == str(agent_id)
+        assert payload["requested_by_member_id"] == str(owner_id)
+        assert payload["reason"] == "검증"
+        timeout_at = datetime.fromisoformat(payload["timeout_at"])
+        expected_min = before + timedelta(minutes=agent_runs_router._CANCEL_ACK_TIMEOUT_MINUTES)
+        assert abs((timeout_at - expected_min).total_seconds()) < 5
+    finally:
+        await engine.dispose()
+
+
 async def test_existing_self_report_patch_unaffected_realdb():
     """AC(기존 자기보고 무변) — 진행 中 running PATCH(예: result_summary만 갱신)는 이번
     변경과 무관하게 그대로 동작한다."""
