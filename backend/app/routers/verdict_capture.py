@@ -94,12 +94,22 @@ async def capture_pr_verdict(
 
 # ── QA·디자인 게이트 verdict 캡처 ─────────────────────────────────────────────
 
-_VALID_REVIEW_ROLES = frozenset({"qa", "design"})
+# story #3963(PO 확定 2026-09-16 16:08Z) — "po" 추가: PO(페드루)의 PR review PASS/CHANGES
+# 코멘트도 QA codex verdict와 별개 축으로 원장에 남긴다("누가 낸 CHANGES인지" 구분 가능하게).
+# open_defects 정의(3959)는 qa∪po 둘 다 "마지막 판정"으로 센다 — role 자체는 구분해 두되
+# 집계 쪽에서 합친다(3959 후속 PR의 몫, 이 파일은 role 어휘만 넓힌다).
+_VALID_REVIEW_ROLES = frozenset({"qa", "design", "po"})
 
 
 class CaptureReviewBody(BaseModel):
-    story_id: uuid.UUID
-    role: str                # 'qa' | 'design'
+    # story #3963 — CRON_SECRET 호출자(GitHub Action)는 org 컨텍스트가 없어 story_id(UUID)를
+    # 미리 못 구한다(우리 팀 실 PR 관례가 `[SID:정수]` story_number라 parse_story_id의 UUID
+    # 파싱과 안 맞음, capture-pr과 동일 구조적 제약). story_id 직접 지정(기존 호출자 무회귀)
+    # 또는 (org_id, story_number) 조합 중 하나만 필요 — 둘 다 없으면 422.
+    story_id: uuid.UUID | None = None
+    org_id: uuid.UUID | None = None
+    story_number: int | None = None
+    role: str                # 'qa' | 'design' | 'po'
     member_id: uuid.UUID
     result: str | None = None  # 'pass' | 'fail' | None
     rounds: int | None = None
@@ -122,11 +132,22 @@ async def capture_review(
     if body.role not in _VALID_REVIEW_ROLES:
         return _err("INVALID_ROLE", f"role must be one of {sorted(_VALID_REVIEW_ROLES)}", 422)
 
-    # story 조회 → org_id 획득
-    story_r = await session.execute(
-        select(Story).where(Story.id == body.story_id, Story.deleted_at.is_(None))
-    )
-    story = story_r.scalar_one_or_none()
+    if body.story_id is not None:
+        story_r = await session.execute(
+            select(Story).where(Story.id == body.story_id, Story.deleted_at.is_(None))
+        )
+        story = story_r.scalar_one_or_none()
+    elif body.org_id is not None and body.story_number is not None:
+        # story #3963 — capture-pr류 UUID SID와 달리, GitHub Action 호출자는 story_number
+        # (팀 실 관례)만 갖고 있다. resolve_story_for_pr과 동일 SSOT 헬퍼 재사용(0건/2건+
+        # ambiguous는 None — 추측 없이 skip, 그 파일의 close-on-merge 규율과 동형).
+        from app.services.pr_story_link import _scoped_story_by_number
+
+        story = await _scoped_story_by_number(session, body.org_id, body.story_number)
+    else:
+        return _err(
+            "INVALID_STORY_REF", "either story_id or (org_id and story_number) is required", 422,
+        )
     if story is None:
         return _ok({"skipped_reason": "story_not_found", "recorded": False})
 
@@ -134,7 +155,7 @@ async def capture_review(
         result = await capture_review_verdict(
             session=session,
             org_id=story.org_id,
-            story_id=body.story_id,
+            story_id=story.id,
             role_key=body.role,
             member_id=body.member_id,
             result=body.result,
