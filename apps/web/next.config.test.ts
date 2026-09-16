@@ -140,3 +140,43 @@ describe('CSP — Cloudflare Web Analytics beacon 허용(story #3918 AC3)', () =
     expect(extractDirective('connect-src')).toContain('https://cloudflareinsights.com');
   });
 });
+
+// story #3947(2026-09-16, 페드루 PO 판정) — dev-app이 NEXT_PUBLIC_APP_URL 빌드타임 배선
+// 누락으로 localhost:3108을 노출한 사고(cloudbuild.yaml build-frontend 스텝에 --build-arg가
+// 없었음). apps/web/src/lib/public-app-host.ts의 런타임 가드는 그 함수가 실제로 호출되는
+// 시점(클라 렌더)에만 걸려 `next build` 자체는 통과할 수 있다 — 이 config 모듈 레벨
+// 가드는 `next build`가 설정을 로드하는 즉시(빌드 시작 단계) 실패시켜 "빌드 자체가 RED"를
+// 보장한다. 실측: `NEXT_PUBLIC_APP_URL` 없이 `pnpm build` 실행 → `next.config.ts` 로드
+// 단계에서 즉시 실패 확認(양성대조), 값 설정 후 재실행 → 정상 빌드 확認.
+describe('next.config.ts 모듈 레벨 가드 — NEXT_PUBLIC_APP_URL 배포 빌드 배선(story #3947)', () => {
+  const ENV_KEY = 'NEXT_PUBLIC_APP_URL';
+  const originalEnvValue = process.env[ENV_KEY];
+  const originalNodeEnv = process.env.NODE_ENV;
+
+  afterEach(() => {
+    if (originalEnvValue === undefined) delete process.env[ENV_KEY];
+    else process.env[ENV_KEY] = originalEnvValue;
+    process.env.NODE_ENV = originalNodeEnv;
+  });
+
+  it('NODE_ENV=production인데 env가 없으면 설정 로드 자체가 던진다(next build 즉시 실패)', async () => {
+    vi.resetModules();
+    process.env.NODE_ENV = 'production';
+    delete process.env[ENV_KEY];
+    await expect(import('./next.config')).rejects.toThrow(/NEXT_PUBLIC_APP_URL/);
+  });
+
+  it('NODE_ENV=production이고 env가 있으면 정상 로드(회귀 없음)', async () => {
+    vi.resetModules();
+    process.env.NODE_ENV = 'production';
+    process.env[ENV_KEY] = 'https://dev-app.sprintable.ai';
+    await expect(import('./next.config')).resolves.toBeDefined();
+  });
+
+  it('NODE_ENV=development(로컬 next dev)면 env 없어도 조용히 통과', async () => {
+    vi.resetModules();
+    process.env.NODE_ENV = 'development';
+    delete process.env[ENV_KEY];
+    await expect(import('./next.config')).resolves.toBeDefined();
+  });
+});

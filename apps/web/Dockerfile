@@ -72,6 +72,16 @@ ENV NEXT_PUBLIC_SUPPORT_GATEWAY_URL=${NEXT_PUBLIC_SUPPORT_GATEWAY_URL}
 # 문자열(미설정 시 dev-safe fallback, 위 컨벤션과 동일).
 ARG NEXT_PUBLIC_TOSS_CLIENT_KEY=""
 ENV NEXT_PUBLIC_TOSS_CLIENT_KEY=${NEXT_PUBLIC_TOSS_CLIENT_KEY}
+# story #3947(2026-09-16, 페드루 PO 판정) — apps/web/src/lib/public-app-host.ts의
+# getPublicAppHost()가 읽는 빌드타임 인라인 값. cloudbuild.yaml `_NEXT_PUBLIC_APP_URL`은
+# dev/prod로 이미 정확히 분기(cloud-build.yml steps.env)돼 있었지만 이 Dockerfile의
+# ARG/ENV 어디에도 배선된 적이 없어(EE_ENABLED·TOSS_CLIENT_KEY와 동형 「분기는 있는데
+# 이 스테이지까지 안 옴」 클래스) 빌드 시점엔 항상 undefined — dev-app이 코드 하드코딩
+# localhost fallback을 그대로 인라인했다. 기본값을 안 둔다(다른 ARG들과 결이 다름 —
+# 이 값이 없으면 다음 줄의 `pnpm build`가 public-app-host.ts의 프로덕션 가드에서 즉시
+# 실패해야 한다, "조용한 fallback" 자체가 이 카드의 사고 원인이었다).
+ARG NEXT_PUBLIC_APP_URL
+ENV NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}
 RUN pnpm build
 
 # ─── 런타임 ──────────────────────────────────────────────────────────────────

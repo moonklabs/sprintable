@@ -84,6 +84,20 @@ const _SECURITY_HEADERS = [
   { key: 'Strict-Transport-Security', value: 'max-age=31536000; includeSubDomains' },
 ];
 
+// story #3947(2026-09-16, 페드루 PO 판정) — apps/web/src/lib/public-app-host.ts의 런타임
+// 가드(NODE_ENV=production인데 env 부재면 throw)는 그 함수가 실제로 호출될 때만(클라
+// 렌더 시점) 걸린다 — create-organization-dialog.tsx/onboarding-form.tsx는 인증 뒤
+// 화면이라 정적 프리렌더 대상이 아니라 `next build` 자체는 통과하고 브라우저에서만
+// 늦게 터질 수 있었다. 이 모듈은 `next build`가 로드하자마자(설정 파싱 시점) 실행되므로
+// 여기서 한 번 더 검사하면 **빌드 자체가** 즉시 RED — 조용한 fallback이 CI/배포까지
+// 새어나가는 것을 원천 차단한다(`next dev`는 NODE_ENV=development라 안 걸림).
+if (process.env.NODE_ENV === 'production' && !process.env.NEXT_PUBLIC_APP_URL?.trim()) {
+  throw new Error(
+    'NEXT_PUBLIC_APP_URL이 배포 빌드에 배선되지 않았다(story #3947) — cloudbuild.yaml의 ' +
+      'build-frontend 스텝 --build-arg / Dockerfile ARG·ENV를 확認하라.'
+  );
+}
+
 const nextConfig: NextConfig = {
   // Allow dev server access from non-localhost origins (e.g. Tailscale, LAN)
   // Set NEXT_DEV_ALLOWED_ORIGINS=host1,host2 in .env.local to enable
