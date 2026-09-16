@@ -34,6 +34,29 @@ else
 fi
 
 echo
+echo "── TERM 무시(고아 프로세스 방지) → KILL escalation도 결국 124로 정규화 ──"
+# 페드루 PO CHANGES(PR#4348 잔여①) — 자식이 TERM을 씹으면(uv/pytest가 신호를 못
+# 넘기는 경우의 재현) `-k`가 KILL까지 보내는지, 그리고 그 KILL 경로(coreutils
+# 실측 exit 137)도 이 래퍼가 124로 정규화해 돌려주는지 실측한다. STALL_KILL_AFTER를
+# 짧게 줘서 기본 30초를 기다리지 않는다(CI 실제 값은 여전히 30초 그대로).
+set +e
+OUT="$(STALL_KILL_AFTER=1s "$SCRIPT" 0.02 -- bash -c 'trap "" TERM; sleep 60' 2>&1)"
+CODE=$?
+set -e
+if [ "$CODE" -eq 124 ]; then
+  echo "  ok   TERM 무시해도 KILL 뒤 exit 124로 정규화됨(137 그대로 새지 않음)"
+else
+  echo "  FAIL exit code=${CODE}(기대 124) — TERM 무시 시 KILL escalation이 137로 샐 수 있음"
+  FAIL=1
+fi
+if [[ "$OUT" == *"STALL"* ]] && [[ "$OUT" == *"KILL"* ]]; then
+  echo "  ok   STALL 메시지가 KILL escalation 여부를 명시함"
+else
+  echo "  FAIL STALL/KILL 메시지 누락 — 출력: $OUT"
+  FAIL=1
+fi
+
+echo
 echo "── 진행 中(제한 시간 안에 정상 완주) → 통과(원 종료 코드 그대로) ──"
 set +e
 OUT="$("$SCRIPT" 0.5 -- sleep 0.1 2>&1)"

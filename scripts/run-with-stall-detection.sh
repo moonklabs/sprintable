@@ -25,11 +25,23 @@ shift 2
 # 페드루 PO CHANGES①(PR#4348 리뷰) — `timeout`은 기본 TERM만 보낸다. uv가 자식
 # pytest에 TERM을 못 넘기면(예: uv 자신이 신호를 무시·전달 지연) 고아 pytest가 같은
 # Postgres 세션을 붙든 채 남아 «다음 파일이 오염된 DB에서 실패」로 나와 정지 원인이
-# 가려진다 — `-k 30s`로 TERM 뒤 30초 안에 안 죽으면 KILL(무시 불가)까지 확실히 보낸다.
-timeout -k 30s "${TIMEOUT_MIN}m" "$@"
+# 가려진다 — `-k`로 TERM 뒤 일정 시간 안에 안 죽으면 KILL(무시 불가)까지 확실히
+# 보낸다. 기본 30초(CI 실제 값)지만 자가진단(TERM 무시 양성대조)이 30초씩 기다리지
+# 않도록 STALL_KILL_AFTER 환경값으로 짧게 주입할 수 있게 뺐다.
+KILL_AFTER="${STALL_KILL_AFTER:-30s}"
+timeout -k "$KILL_AFTER" "${TIMEOUT_MIN}m" "$@"
 code=$?
 
-if [ "$code" -eq 124 ]; then
+# 페드루 PO CHANGES(PR#4348 잔여③ 자가진단 그라운딩 중 실측 발견) — GNU coreutils
+# timeout(1) 매뉴얼: TERM만으로 죽으면 124, 그런데 TERM을 무시해 KILL(9)까지 가면
+# **137**(128+9)로 exit code가 달라진다(실측: `timeout -k 1s 1s bash -c 'trap "" TERM;
+# sleep 60'` → exit 137, 2초 소요 — 124가 아니었다). 이 스크립트의 계약은 "정지=124"
+# 하나뿐이므로 KILL 경로도 여기서 124로 정규화한다 — 호출부(ci.yml 루프)가 137까지
+# 따로 알아야 하면 계약이 새는 것.
+if [ "$code" -eq 137 ]; then
+  echo "STALL: 명령이 ${TIMEOUT_MIN}분 안에 안 끝나 강제 종료됨(TERM 무시 → ${KILL_AFTER} 뒤 KILL escalation) — $*" >&2
+  exit 124
+elif [ "$code" -eq 124 ]; then
   echo "STALL: 명령이 ${TIMEOUT_MIN}분 안에 안 끝나 강제 종료됨 — $*" >&2
 fi
 
