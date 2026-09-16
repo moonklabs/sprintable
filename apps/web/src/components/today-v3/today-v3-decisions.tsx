@@ -8,7 +8,7 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { hrefForNeedsMeItem, type TodayNeedsMeItem } from '@/components/org-briefing/derive-today';
-import { buildGateTransitionBody, buildHitlDecisionBody } from '@/lib/gate-decision-payload';
+import { buildGateTransitionBody, buildHitlDecisionBody, classifyGateTransitionErrorCode } from '@/lib/gate-decision-payload';
 import { TodayV3ReasonDialog } from './today-v3-reason-dialog';
 
 /**
@@ -34,31 +34,43 @@ const ACTION_KEY: Record<TodayNeedsMeItem['state'], string> = {
   answer: 'actionAnswerNow',
 };
 
-async function postGateTransition(id: string, status: 'approved' | 'rejected', note?: string): Promise<boolean> {
+// story #3964 CHANGES(페드루 PO C1, 2026-09-16 16:37Z) — gate_already_resolved(남이
+// 먼저 처리)는 "실패"가 아니라 원하던 결과(그 항목이 큐에서 사라짐)가 이미 일어난
+// 것 — alreadyResolved를 별도로 실어 호출부가 재조회만 트리거하고 오류문장은
+// 안 띄우게 한다. hold/hitl 엔드포인트는 이 코드 체계가 없어 항상 false.
+interface ActionResult {
+  ok: boolean;
+  alreadyResolved: boolean;
+}
+
+async function postGateTransition(id: string, status: 'approved' | 'rejected', note?: string): Promise<ActionResult> {
   const res = await fetch(`/api/gates/${id}/transition`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(buildGateTransitionBody({ status, note })),
   });
-  return res.ok;
+  if (res.ok) return { ok: true, alreadyResolved: false };
+  const body = await res.json().catch(() => null) as { error?: { code?: string } } | null;
+  const alreadyResolved = classifyGateTransitionErrorCode(body?.error?.code) === 'already_resolved';
+  return { ok: false, alreadyResolved };
 }
 
-async function postGateHold(id: string, reason?: string): Promise<boolean> {
+async function postGateHold(id: string, reason?: string): Promise<ActionResult> {
   const res = await fetch(`/api/gates/${id}/hold`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ reason: reason?.trim() || null }),
   });
-  return res.ok;
+  return { ok: res.ok, alreadyResolved: false };
 }
 
-async function patchHitlDecision(id: string, status: 'approved' | 'rejected', responseText?: string): Promise<boolean> {
+async function patchHitlDecision(id: string, status: 'approved' | 'rejected', responseText?: string): Promise<ActionResult> {
   const res = await fetch(`/api/v1/hitl-requests/${id}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(buildHitlDecisionBody({ status, responseText: responseText || undefined })),
   });
-  return res.ok;
+  return { ok: res.ok, alreadyResolved: false };
 }
 
 type DialogKind = 'requestChanges' | 'hold';
@@ -77,11 +89,11 @@ function GateSignatureCard({ item, isAdminOrOwner, onDone }: {
   const submitDialog = async (reason: string) => {
     setBusy(true);
     setDialogError(null);
-    const ok = dialogKind === 'hold'
+    const result = dialogKind === 'hold'
       ? await postGateHold(item.id, reason)
       : await postGateTransition(item.id, 'rejected', reason);
     setBusy(false);
-    if (ok) { setDialogKind(null); onDone(); } else { setDialogError(t('decisionActionFailed')); }
+    if (result.ok || result.alreadyResolved) { setDialogKind(null); onDone(); } else { setDialogError(t('decisionActionFailed')); }
   };
 
   return (
@@ -139,9 +151,9 @@ function HitlAnswerCard({ item, onDone }: { item: TodayNeedsMeItem; onDone: () =
   const decide = async (status: 'approved' | 'rejected') => {
     setBusy(true);
     setError(null);
-    const ok = await patchHitlDecision(item.id, status, responseText);
+    const result = await patchHitlDecision(item.id, status, responseText);
     setBusy(false);
-    if (ok) onDone(); else setError(t('decisionActionFailed'));
+    if (result.ok) onDone(); else setError(t('decisionActionFailed'));
   };
 
   return (
@@ -209,10 +221,10 @@ export function TodayV3Decisions({ items, count, isAdminOrOwner, onActionSuccess
     setBulkError(null);
     let failures = 0;
     for (const item of lowRiskBulk) {
-      const ok = item.source === 'hitl'
+      const result = item.source === 'hitl'
         ? await patchHitlDecision(item.id, 'approved')
         : await postGateTransition(item.id, 'approved');
-      if (!ok) failures += 1;
+      if (!result.ok && !result.alreadyResolved) failures += 1;
     }
     setBulkBusy(false);
     if (failures > 0) setBulkError(t('bulkApprovePartialFailure', { failed: failures, total: lowRiskBulk.length }));
