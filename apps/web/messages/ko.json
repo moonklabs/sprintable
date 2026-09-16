@@ -4664,7 +4664,6 @@
     "commandCandidatesLabel": "커맨드 후보",
     "mentionCandidatesLabel": "멘션 후보",
     "entityCandidatesLabel": "엔티티 후보",
-    "showMoreCount": "더 보기 ({count}건)",
     "threadLabel": "스레드",
     "viewPreviousMessages": "이전 메시지 보기",
     "newMessagesIndicator": "↓ 새 메시지",

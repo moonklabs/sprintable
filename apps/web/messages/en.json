@@ -4664,7 +4664,6 @@
     "commandCandidatesLabel": "Command candidates",
     "mentionCandidatesLabel": "Mention candidates",
     "entityCandidatesLabel": "Entity candidates",
-    "showMoreCount": "Show more ({count})",
     "threadLabel": "Thread",
     "viewPreviousMessages": "View previous messages",
     "newMessagesIndicator": "↓ New messages",
