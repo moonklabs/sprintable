@@ -16,7 +16,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { fetchWorkList, type FetchedWorkList } from './fetch-work-list';
-import { filterWorkList, type WorkListFilters } from './filter-work-list';
+import { filterWorkList, EMPTY_WORK_LIST_FILTERS, type WorkListFilters } from './filter-work-list';
 import { UNASSIGNED_GOAL_ID } from './derive-work-list';
 import { WorkListRowView } from './work-list-row';
 import { useWorkListSelection } from './use-work-list-selection';
@@ -144,6 +144,12 @@ export function WorkListShell({ projectId }: { projectId: string }) {
   const selectedHypothesisLabel = filters.hypothesisId ? (hypothesisById.get(filters.hypothesisId) ?? filters.hypothesisId) : null;
 
   const filtered = data ? filterWorkList(data, filters) : null;
+  // story #3934 AC3 — 필터가 걸린 채 groups가 0개면 "필터에 안 걸림"이지 "일로 안 쪼개짐"이
+  // 아니다. 필터 무관(EMPTY_WORK_LIST_FILTERS)일 때만 task-0 전용 문구를 쓴다.
+  const hasActiveFilters = filters.goalId !== EMPTY_WORK_LIST_FILTERS.goalId
+    || filters.hypothesisId !== EMPTY_WORK_LIST_FILTERS.hypothesisId
+    || filters.mineOnly !== EMPTY_WORK_LIST_FILTERS.mineOnly
+    || filters.delegatedOnly !== EMPTY_WORK_LIST_FILTERS.delegatedOnly;
 
   // story #3845(우패널) 픽셀 커밋 ①(페드루 PO 판정 2026-09-14 09:11Z) — "URL이 SSOT":
   // 선택된 rowId는 data(필터 前 전체 트리)에서 찾는다 — filtered(화면에 보이는 목록)만
@@ -235,7 +241,21 @@ export function WorkListShell({ projectId }: { projectId: string }) {
             ) : null}
 
             {filtered.groups.length === 0 ? (
-              <Card className="p-6 text-center text-sm text-muted-foreground">{t('emptyStateTitle')}</Card>
+              <Card className="p-6 text-center text-sm text-muted-foreground">
+                {/* story #3934 AC2(b) — "표시할 일이 없어요"(전체 부정)는 스토리가 있지만
+                    아직 task로 안 쪼개진 경우에도 떴다(PO Test Org 실사고, deploy92). 필터가
+                    안 걸린 채 스토리는 있는데(totalStoryCount>0) groups가 0개면 사실대로
+                    "일로 안 쪼개짐"을 말한다 — 스토리 자체가 0개인 진짜 빈 프로젝트는
+                    기존 문구 그대로 유지(과교정 금지). */}
+                {!hasActiveFilters && filtered.totalStoryCount > 0 ? (
+                  <>
+                    <p>{t('emptyStateNoTasksTitle')}</p>
+                    <p className="mt-1 text-xs">{t('emptyStateNoTasksHint')}</p>
+                  </>
+                ) : (
+                  t('emptyStateTitle')
+                )}
+              </Card>
             ) : (
               <div className="space-y-4">
                 {filtered.groups.map((group) => (

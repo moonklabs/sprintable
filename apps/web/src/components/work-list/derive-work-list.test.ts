@@ -25,6 +25,28 @@ describe('deriveWorkList — 목표/스토리 그룹핑', () => {
     expect(result.groups).toHaveLength(0);
   });
 
+  // story #3934(재판정 — PO Test Org deploy92 실사고) — groups가 0개인 이유를 렌더 계층이
+  // 가르려면 totalStoryCount(필터 무관 원본 스토리 수)가 필요하다. AC3(ii)/(iii) 고정.
+  it('스토리는 있지만(task 0개) groups가 0개일 때 totalStoryCount는 실제 스토리 수를 그대로 보고한다', () => {
+    const result = deriveWorkList(baseInput());
+    expect(result.groups).toHaveLength(0);
+    expect(result.totalStoryCount).toBe(1); // baseInput()의 s1(목표 있음·task 0개)
+  });
+
+  it('목표 있는 스토리라도 task/agent_run이 0개면 목표 유무와 무관하게 groups에서 빠진다', () => {
+    const result = deriveWorkList(baseInput({
+      stories: page([{ id: 's1', title: '목표 있음·일 없음', epic_id: 'g1' }]),
+    }));
+    expect(result.groups).toHaveLength(0);
+    expect(result.totalStoryCount).toBe(1);
+  });
+
+  it('스토리 자체가 0개(진짜 빈 프로젝트)면 totalStoryCount도 0이다', () => {
+    const result = deriveWorkList(baseInput({ stories: page([]) }));
+    expect(result.groups).toHaveLength(0);
+    expect(result.totalStoryCount).toBe(0);
+  });
+
   it('task가 있는 스토리만 goal 아래 남는다', () => {
     const result = deriveWorkList(baseInput({
       tasks: page([{ id: 't1', story_id: 's1', assignee_id: null, title: '할일1', status: 'todo' }]),

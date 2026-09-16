@@ -469,6 +469,8 @@
     "subtitle": "Goals lead to stories, stories to tasks. Work you take on and work you delegate are kept apart.",
     "loadErrorTitle": "Couldn't load",
     "emptyStateTitle": "Nothing to show",
+    "emptyStateNoTasksTitle": "No work has been broken into tasks yet",
+    "emptyStateNoTasksHint": "You can check stories on the Board tab",
     "partialNotice": "Couldn't load everything. There's more.",
     "goalProgressLabel": "{done}/{total} done",
     "goalSummaryLabel": "Assigned {assigned} · Delegated {delegated} · Hypotheses {hypotheses}",

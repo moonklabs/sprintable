@@ -469,6 +469,8 @@
     "subtitle": "목표에서 스토리로, 스토리에서 일로 이어져요. 사람이 맡은 일과 에이전트에 위임한 일이 갈려요.",
     "loadErrorTitle": "불러오지 못했어요",
     "emptyStateTitle": "표시할 일이 없어요",
+    "emptyStateNoTasksTitle": "아직 일로 나뉜 작업이 없어요",
+    "emptyStateNoTasksHint": "스토리는 보드 탭에서 확인할 수 있어요",
     "partialNotice": "전부 불러오지 못했어요. 더 있어요",
     "goalProgressLabel": "{done}/{total} 완료",
     "goalSummaryLabel": "사람 배정 {assigned} · 에이전트 위임 {delegated} · 가설 {hypotheses}",

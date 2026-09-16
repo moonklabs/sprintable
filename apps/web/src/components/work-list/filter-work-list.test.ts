@@ -13,6 +13,7 @@ function baseRow(overrides: Partial<WorkList['groups'][number]['stories'][number
 function baseWorkList(): WorkList {
   return {
     partial: false,
+    totalStoryCount: 2,
     groups: [
       {
         goalId: 'g1', title: '목표1', isActive: true, doneCount: 0, totalCount: 2, assignedCount: 1, delegatedCount: 1, hypothesisCount: 1,
@@ -72,5 +73,13 @@ describe('filterWorkList', () => {
     wl.partial = true;
     const result = filterWorkList(wl, filters());
     expect(result.partial).toBe(true);
+  });
+
+  // story #3934 — totalStoryCount는 필터로 groups가 줄어도 원본 총량을 그대로 보존해야
+  // 렌더 계층이 "필터 탓"과 "일로 안 쪼개짐"을 가를 수 있다(값이 필터 따라 바뀌면 못 가른다).
+  it('totalStoryCount는 필터와 무관하게 원본 값을 그대로 보존한다', () => {
+    const result = filterWorkList(baseWorkList(), filters({ goalId: 'g1', hypothesisId: 'h-nonexistent' }));
+    expect(result.groups).toHaveLength(0);
+    expect(result.totalStoryCount).toBe(2);
   });
 });
