@@ -33,7 +33,11 @@ export default function ChatsPage() {
 
   return (
     <>
-      <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} showContextChip />
+      {/* story #3945 CHANGES1(카디르 실측) — 같은 라우트의 chats/layout.tsx:110에 이미
+          진짜 <h1 id="chat-rail-heading">(대화 목록 레일 제목)이 있고, App Router에서
+          layout+page는 항상 동시 마운트라(goals/retro/loops의 loading/loaded
+          mutually-exclusive 분기와 다름) 이 자리가 세 번째 h1이었다 — 비-헤딩으로. */}
+      <TopBarSlot title={<p className="text-sm font-medium">{t('title')}</p>} showContextChip />
       <div className="flex h-full items-center justify-center">
         {!conversationsLoading && (
           conversationsLoadError ? (
