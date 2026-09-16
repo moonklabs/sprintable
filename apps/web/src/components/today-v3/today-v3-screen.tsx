@@ -7,16 +7,17 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useTodaySnapshot } from '@/components/org-briefing/use-today-snapshot';
 import { EMPTY_TODAY_SNAPSHOT, type TodayCount, type TodaySnapshot } from '@/components/org-briefing/derive-today';
-import { NeedsMeSection, AgentProgressSection } from '@/components/org-briefing/today-sections';
+import { TodayV3Decisions } from './today-v3-decisions';
+import { TodayV3AgentProgress } from './today-v3-agent-progress';
 
 /**
  * story #3962(E-UX-OVERHAUL·「오늘」 구현 3/N·FE) — 시안 ①(artifact d31b9e6d) 그대로.
- * 본문 데이터 구역(내 결정·진행 中)은 org-briefing이 이미 쓰는 검증된 컴포넌트
- * (`today-sections.tsx::NeedsMeSection`/`AgentProgressSection`, story #3831)를 그대로
- * 재사용한다(새 렌더 로직 0) — 이 파일이 새로 짓는 건 v3 셸(좌 nav·상단·3단 프레임)
- * 과 「오늘 결과」 4수 요약 한 줄(TodayResultsSummary, story #3959 3필드+기존
- * published_today)뿐이다. 대상(중앙)·대화(우측) 컬럼은 이 카드 스코프 밖(「하지
- * 않는 것: 대화/일감 화면」) — 3단 프레임 자체(시안 픽셀)는 서되, 내용은 빈 자리.
+ * CHANGES-2(페드루 PO, 2026-09-16 16:08Z) — 내 결정·진행 中은 v3 전용 컴포넌트
+ * (`today-v3-decisions.tsx`/`today-v3-agent-progress.tsx`)로 짓는다 — 옛
+ * `today-sections.tsx`(story #3831, org-briefing 전용)에 없는 시안 ① 요소 2개
+ * (위험 등급 태그+저위험 모아 승인 자리·「정지」 자리)가 필요해서다. 옛 컴포넌트는
+ * 무접촉(org-briefing이 그대로 쓴다) — v3는 같은 `TodaySnapshot`/`derive-today.ts`
+ * 타입만 공유하고 렌더는 독립.
  */
 
 const NAV_ITEMS: { key: string; href: string; active?: boolean }[] = [
@@ -136,8 +137,8 @@ export function TodayV3Screen() {
               </div>
             ) : (
               <div className="space-y-6">
-                <NeedsMeSection items={snapshot.needsMe} count={snapshot.needsMeCount} />
-                <AgentProgressSection items={snapshot.agentProgress} />
+                <TodayV3Decisions items={snapshot.needsMe} count={snapshot.needsMeCount} />
+                <TodayV3AgentProgress items={snapshot.agentProgress} />
                 <TodayResultsSummary snapshot={snapshot} />
               </div>
             )}

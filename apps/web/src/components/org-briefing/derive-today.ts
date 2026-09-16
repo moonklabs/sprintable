@@ -9,11 +9,17 @@
  */
 
 export type NeedsMeState = 'approval' | 'signature' | 'answer';
+export type NeedsMeRisk = 'low' | 'high';
 
 export interface TodayNeedsMeItem {
   id: string;
   source: 'gate' | 'hitl' | 'workflow_step';
   state: NeedsMeState;
+  // story #3962 CHANGES-2(페드루 PO C2, 2026-09-16 16:08Z) — 시안 ① 위험 등급 태그가
+  // state(승인/서명/답)와 별개 축(BE `risk: Literal["low","high"]`, today.py:39 실측)
+  // 이라 원값을 그대로 보존한다 — deriveNeedsMeState가 이미 이 값을 판정에 쓰지만
+  // 그 결과(state)만 남기고 버렸던 걸 v3가 필요로 해서 복원.
+  risk: NeedsMeRisk;
   workItemType: string;
   workItemId: string;
   workItemTitle: string;
@@ -130,6 +136,11 @@ function parseNeedsMeItem(raw: unknown): TodayNeedsMeItem | null {
   if (!isRecord(raw)) return null;
   const source = raw['source'];
   if (source !== 'gate' && source !== 'hitl' && source !== 'workflow_step') return null;
+  // story #3962 CHANGES-2 — BE는 risk를 Literal["low","high"](today.py:39, 항상 존재)로
+  // 낸다 — source와 같은 급의 핵심 판별값이라 같은 fail-closed 관례(모르는 값이면 이
+  // 항목 자체를 못 그리는 걸로 취급, 지어내지 않는다).
+  const risk = raw['risk'];
+  if (risk !== 'low' && risk !== 'high') return null;
   const id = str(raw['source_id']);
   const workItem = isRecord(raw['work_item']) ? raw['work_item'] : null;
   const workItemId = workItem ? str(workItem['id']) : null;
@@ -139,7 +150,8 @@ function parseNeedsMeItem(raw: unknown): TodayNeedsMeItem | null {
   return {
     id,
     source,
-    state: deriveNeedsMeState(raw['kind'], raw['risk']),
+    state: deriveNeedsMeState(raw['kind'], risk),
+    risk,
     workItemType: str(workItem?.['type']) ?? '',
     workItemId,
     workItemTitle: str(workItem?.['title']) ?? '',
