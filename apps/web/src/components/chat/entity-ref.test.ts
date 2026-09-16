@@ -64,4 +64,11 @@ describe('toPlainPreview (story #3949)', () => {
   it('빈 문자열은 빈 문자열', () => {
     expect(toPlainPreview('')).toBe('');
   });
+
+  // PO CHANGES 1회차(2026-09-16 11:42Z) C1 — 이미지 문법도 같은 클래스(문법 기호가
+  // 평문 자리에 샘). `!`까지 같이 벗기지 않으면 "!캡처"처럼 느낌표만 잔존한다.
+  it('⭐마크다운 이미지 문법(!)도 같이 벗긴다', () => {
+    expect(toPlainPreview('![캡처](https://example.com/cap.png)')).toBe('캡처');
+    expect(toPlainPreview('참고: ![스크린샷](https://x.png) 확인')).toBe('참고: 스크린샷 확인');
+  });
 });
