@@ -353,8 +353,13 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
   // 자체가 안 바뀌고 release 시점에만 커밋되므로 — useSwipeDrawer 참고). Tab 트랩+Esc+반환만.
   const drawerTrapRef = useFocusTrap(treeDrawerOpen, closeDrawer);
 
+  // story #3945(#3942 배포 92 디자인 감사) — TopBarSlot의 이 브레드크럼 라벨을 <h1>로
+  // 쓰면 docs-index.tsx(:170)·[slug]/view/page.tsx(:150)의 «진짜» 페이지 제목 h1과
+  // 겹쳐 한 페이지에 h1이 2개가 됐다(헤딩 위계 위반). 이 라벨은 상단바 크롬(현재
+  // 위치 표시)이지 페이지 본문의 제목이 아니라 비-헤딩(<p>)으로 낮춘다 — 시각(className)
+  // 무변, 실제 페이지 h1은 아래 두 소비처가 그대로 유지한다.
   const topBarTitle = useMemo(
-    () => <h1 className="text-sm font-medium">{t('title')}</h1>,
+    () => <p className="text-sm font-medium">{t('title')}</p>,
     [t]
   );
   const topBarActions = useMemo(
