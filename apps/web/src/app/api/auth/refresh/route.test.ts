@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // story e5225c0a(P0) 재진단: 이 route는 proxy.ts PUBLIC_PREFIX('/api/auth/')라 미들웨어의
 // stale-cookie cleanup을 안 거친다 — 별도 실패 경로에서 쿠키를 지우는지 직접 검증.
@@ -14,8 +14,8 @@ vi.stubGlobal('fetch', mockFetch);
 
 import { POST } from './route';
 
-function makeRequest(): Request {
-  return new Request('http://localhost/api/auth/refresh', { method: 'POST', body: '{}' });
+function makeRequest(body: string = '{}'): Request {
+  return new Request('http://localhost/api/auth/refresh', { method: 'POST', body });
 }
 
 describe('POST /api/auth/refresh', () => {
@@ -91,5 +91,69 @@ describe('POST /api/auth/refresh', () => {
       delete process.env['NEXT_PUBLIC_APP_URL'];
       delete process.env['NEXT_PUBLIC_COOKIE_DOMAIN'];
     }
+  });
+
+  // story #2449 AC1(계측, 페드루 PO 지시 2026-09-16) — 클라이언트 진단 3종이 하드 401
+  // 실패 시 BFF 로그 1줄로 찍히는지 직접 고정.
+  describe('story #2449 AC1 — 진단 로그', () => {
+    let warnSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    });
+
+    afterEach(() => {
+      warnSpy.mockRestore();
+    });
+
+    it('⭐하드 401 시 diagnostics(visibility_state·idle_ms·tab_count)를 로그 1줄에 싣는다', async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 401,
+        json: async () => ({ error: { code: 'TOKEN_REVOKED', message: 'revoked' } }),
+      });
+      const body = JSON.stringify({ diagnostics: { visibility_state: 'hidden', idle_ms: 2390000, tab_count: 2 } });
+      await POST(makeRequest(body));
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        '[auth-refresh] hard 401',
+        { visibility_state: 'hidden', idle_ms: 2390000, tab_count: 2 },
+      );
+    });
+
+    it('diagnostics 없이(구버전 클라·onboarding-form.tsx 무-body 호출) 와도 null로 로그·크래시 0', async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 401,
+        json: async () => ({ error: { code: 'TOKEN_REVOKED', message: 'revoked' } }),
+      });
+      const req = new Request('http://localhost/api/auth/refresh', { method: 'POST' }); // body 자체 없음
+      const res = await POST(req);
+
+      expect(res.status).toBe(401);
+      expect(warnSpy).toHaveBeenCalledWith(
+        '[auth-refresh] hard 401',
+        { visibility_state: null, idle_ms: null, tab_count: null },
+      );
+    });
+
+    it('음성대조 — 401이 아닌 실패(5xx)는 진단 로그를 안 남긴다(#2449 클래스 밖)', async () => {
+      mockFetch.mockResolvedValue({ ok: false, status: 502, json: async () => ({}) });
+      const body = JSON.stringify({ diagnostics: { visibility_state: 'visible', idle_ms: 100, tab_count: 1 } });
+      await POST(makeRequest(body));
+
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it('음성대조 — refresh 성공(200)이면 진단 로그를 안 남긴다', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({ data: { access_token: 'new-at', refresh_token: 'new-rt' } }),
+      });
+      const body = JSON.stringify({ diagnostics: { visibility_state: 'visible', idle_ms: 100, tab_count: 1 } });
+      await POST(makeRequest(body));
+
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
   });
 });
