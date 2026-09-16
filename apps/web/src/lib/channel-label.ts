@@ -64,9 +64,11 @@ export const CHANNEL_LABEL_KEYS: Record<string, string> = {
   stibee_sandbox: 'channelLabelStibeeSandbox',
 };
 
-// story #3742 — 순수 로직(파서 테스트용으로 export). useChannelLabel()이 실 소비처의
-// 유일한 공개 경로다 — 이 함수 자체를 직접 부르는 렌더 코드는 없다(훅 규칙을 우회하는
-// 지름길로 쓰면 이 스토리가 막은 클래스가 되돌아온다).
+// story #3742(페드루 관찰) — 순수 로직(파서 테스트용으로 export)이지 렌더 코드의
+// 진입점이 아니다. `t`는 반드시 channelConnect 네임스페이스에 바인딩된 것이어야
+// 한다(다른 ns의 t를 넘기면 CHANGES가 실측한 MISSING_MESSAGE 클래스가 재발) —
+// 렌더 코드(외부 소비처)는 이 함수를 직접 부르지 말고 항상 useChannelLabel() 훅을
+// 거친다(훅 규칙 우회 지름길로 쓰면 이 스토리가 막은 클래스가 되돌아온다).
 export function resolveChannelLabel(channel: string, t: (key: string) => string): string {
   const key = CHANNEL_LABEL_KEYS[channel];
   return key ? t(key) : channel;
