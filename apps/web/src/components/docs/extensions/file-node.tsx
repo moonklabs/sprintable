@@ -19,15 +19,6 @@ export function formatFileSize(bytes: number): string {
 
 export const MAX_FILE_BYTES = 5 * 1024 * 1024;
 
-export async function fileToDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error('FileReader 오류'));
-    reader.onload = (e) => resolve(e.target?.result as string);
-    reader.readAsDataURL(file);
-  });
-}
-
 /** 파일 타입 글리프 — getFileIcon 결과를 createElement 로 직접 렌더(render 중 컴포넌트 생성 lint 회피). */
 function fileGlyph(mimeType: string, className: string) {
   return createElement(getFileIcon(mimeType), { className });

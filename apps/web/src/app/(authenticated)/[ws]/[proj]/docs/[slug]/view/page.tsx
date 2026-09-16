@@ -168,6 +168,10 @@ export default function DocViewPage() {
                 codeCopyLabel={t('codeCopy')}
                 codeCopiedLabel={t('codeCopied')}
                 assetImageErrorLabel={t('attachImageUnavailable')}
+                untitledEmbedLabel={t('newDocDefaultTitle')}
+                mermaidRenderFailedLabel={t('mermaidRenderFailed')}
+                mermaidRenderingLabel={t('mermaidRendering')}
+                mathRenderFailedLabel={t('mathRenderFailed')}
                 suppressLeadingTitle={doc.title}
                 bodyEmphasis="full"
               />

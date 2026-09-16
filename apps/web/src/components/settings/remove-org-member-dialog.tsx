@@ -55,9 +55,9 @@ export function RemoveOrgMemberDialog({
         const json = await res.json() as { data?: AffectedProject[] };
         setAffected(json.data ?? []);
       })
-      .catch(() => setError('영향 프로젝트 목록을 불러오지 못했습니다. 다시 시도하세요.'))
+      .catch(() => setError(ts('affectedProjectsLoadFailed')))
       .finally(() => setLoading(false));
-  }, [open, member.id]);
+  }, [open, member.id, ts]);
 
   const handleConfirm = async () => {
     setConfirming(true);
@@ -72,11 +72,11 @@ export function RemoveOrgMemberDialog({
     <Dialog open={open} onOpenChange={(o) => { if (!o) onCancel(); }}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>멤버 제거</DialogTitle>
+          <DialogTitle>{ts('removeMemberTitle')}</DialogTitle>
           <DialogDescription>
             <span className="font-medium text-foreground">{member.name}</span>
             {member.email ? <span className="text-muted-foreground"> ({member.email})</span> : null}
-            <span> 을(를) 조직에서 제거합니다.</span>
+            <span> {ts('removeMemberConfirmSuffix')}</span>
           </DialogDescription>
         </DialogHeader>
 
@@ -95,7 +95,7 @@ export function RemoveOrgMemberDialog({
             <Alert variant="warning">
               <AlertTriangle className="h-4 w-4" />
               <AlertDescription>
-                이 사용자는 아래 프로젝트에서도 함께 제거됩니다:
+                {ts('affectedProjectsWillBeRemoved')}
               </AlertDescription>
             </Alert>
             <div className="space-y-1 rounded-md border border-border bg-muted/30 px-3 py-2">
@@ -106,12 +106,12 @@ export function RemoveOrgMemberDialog({
                 </div>
               ))}
             </div>
-            <p className="text-xs text-muted-foreground">이 작업은 되돌릴 수 없습니다.</p>
+            <p className="text-xs text-muted-foreground">{ts('removeMemberIrreversible')}</p>
           </div>
         ) : (
           <div className="space-y-2 text-sm">
-            <p className="text-muted-foreground">이 사용자는 어느 프로젝트에도 참여하지 않습니다.</p>
-            <p className="text-xs text-muted-foreground">이 작업은 되돌릴 수 없습니다.</p>
+            <p className="text-muted-foreground">{ts('memberNotInAnyProject')}</p>
+            <p className="text-xs text-muted-foreground">{ts('removeMemberIrreversible')}</p>
           </div>
         )}
 

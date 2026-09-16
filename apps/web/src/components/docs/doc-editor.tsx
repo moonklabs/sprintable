@@ -416,7 +416,7 @@ export function DocEditor({
           <button
             type="button"
             onClick={onOpenTree}
-            aria-label="문서 트리 열기"
+            aria-label={tEditor('openDocTree')}
             className="flex size-7 shrink-0 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-accent hover:text-foreground lg:hidden"
           >
             <PanelLeft className="size-4" />
@@ -515,28 +515,28 @@ export function DocEditor({
           <BubbleButton
             active={editor.isActive('bold')}
             onClick={() => editor.chain().focus().toggleBold().run()}
-            title="굵게 (Ctrl+B)"
+            title={`${tEditor('toolbarBold')} (Ctrl+B)`}
           >
             <Bold className="size-3.5" />
           </BubbleButton>
           <BubbleButton
             active={editor.isActive('italic')}
             onClick={() => editor.chain().focus().toggleItalic().run()}
-            title="기울임 (Ctrl+I)"
+            title={`${tEditor('toolbarItalic')} (Ctrl+I)`}
           >
             <Italic className="size-3.5" />
           </BubbleButton>
           <BubbleButton
             active={editor.isActive('strike')}
             onClick={() => editor.chain().focus().toggleStrike().run()}
-            title="취소선"
+            title={tEditor('toolbarStrikethrough')}
           >
             <Strikethrough className="size-3.5" />
           </BubbleButton>
           <BubbleButton
             active={editor.isActive('code')}
             onClick={() => editor.chain().focus().toggleCode().run()}
-            title="인라인 코드"
+            title={tEditor('toolbarInlineCode')}
           >
             <Code className="size-3.5" />
           </BubbleButton>
@@ -559,7 +559,7 @@ export function DocEditor({
           <BubbleButton
             active={editor.isActive('highlight')}
             onClick={() => editor.chain().focus().toggleHighlight().run()}
-            title="형광펜"
+            title={tEditor('toolbarHighlight')}
           >
             <Highlighter className="size-3.5" />
           </BubbleButton>

@@ -33,6 +33,7 @@ interface ProjectAccessSectionProps {
 
 export function ProjectAccessSection({ projectId }: ProjectAccessSectionProps) {
   const t = useTranslations('settings');
+  const tc = useTranslations('common');
   const [orgMembers, setOrgMembers] = useState<OrgMember[]>([]);
   const [grants, setGrants] = useState<ProjectGrant[]>([]);
   const [loading, setLoading] = useState(true);
@@ -93,7 +94,7 @@ export function ProjectAccessSection({ projectId }: ProjectAccessSectionProps) {
           setMessage({ type: 'success', text: `${member.name} 접근 권한 해제됨` });
           await refreshData();
         } else {
-          setMessage({ type: 'error', text: '권한 해제 실패' });
+          setMessage({ type: 'error', text: t('projectAccessRevokeFailed') });
         }
       } else {
         // 허용 — POST grant
@@ -106,7 +107,7 @@ export function ProjectAccessSection({ projectId }: ProjectAccessSectionProps) {
           setMessage({ type: 'success', text: `${member.name} 접근 권한 부여됨` });
           await refreshData();
         } else {
-          setMessage({ type: 'error', text: '권한 부여 실패' });
+          setMessage({ type: 'error', text: t('projectAccessGrantFailed') });
         }
       }
     } finally {
@@ -119,8 +120,8 @@ export function ProjectAccessSection({ projectId }: ProjectAccessSectionProps) {
       <SectionCard>
         <SectionCardHeader>
           <div className="space-y-1">
-            <h2 className="text-base font-semibold text-foreground">접근 권한</h2>
-            <p className="text-sm text-muted-foreground">불러오는 중...</p>
+            <h2 className="text-base font-semibold text-foreground">{t('projectAccessTitle')}</h2>
+            <p className="text-sm text-muted-foreground">{tc('loading')}</p>
           </div>
         </SectionCardHeader>
         <SectionCardBody>
@@ -147,12 +148,12 @@ export function ProjectAccessSection({ projectId }: ProjectAccessSectionProps) {
     return (
       <SectionCard>
         <SectionCardHeader>
-          <h2 className="text-base font-semibold text-foreground">접근 권한</h2>
+          <h2 className="text-base font-semibold text-foreground">{t('projectAccessTitle')}</h2>
         </SectionCardHeader>
         <SectionCardBody>
           {/* story #3776(1층B) — "관리자 전용 페이지입니다", settings ns의 기존 orgMembersAdminOnly 키 재사용. */}
           <p className="text-sm font-medium text-foreground">{t('orgMembersAdminOnly')}</p>
-          <p className="mt-1 text-sm text-muted-foreground">이 프로젝트의 관리자·소유자만 접근 권한을 관리할 수 있습니다.</p>
+          <p className="mt-1 text-sm text-muted-foreground">{t('projectAccessAdminOnlyDesc')}</p>
         </SectionCardBody>
       </SectionCard>
     );
@@ -166,14 +167,14 @@ export function ProjectAccessSection({ projectId }: ProjectAccessSectionProps) {
       <SectionCardHeader>
         <div className="flex items-start justify-between gap-3">
           <div className="space-y-1">
-            <h2 className="text-base font-semibold text-foreground">접근 권한</h2>
+            <h2 className="text-base font-semibold text-foreground">{t('projectAccessTitle')}</h2>
             <p className="text-sm text-muted-foreground">
-              조직 구성원 중 본 프로젝트 접근을 허용한 사람을 선택합니다.
+              {t('projectAccessSubtitle')}
             </p>
           </div>
           <div className="shrink-0 text-right text-xs text-muted-foreground tabular-nums">
             <div className="font-medium text-foreground">{grantedCount} / {totalCount}</div>
-            <div>허용됨</div>
+            <div>{t('projectAccessGrantedLabel')}</div>
           </div>
         </div>
       </SectionCardHeader>
@@ -193,7 +194,7 @@ export function ProjectAccessSection({ projectId }: ProjectAccessSectionProps) {
 
         {orgMembers.length === 0 ? (
           <p className="rounded-md border border-dashed border-border px-3 py-6 text-sm text-muted-foreground">
-            조직 구성원이 없습니다. 조직 구성원 탭에서 먼저 초대하세요.
+            {t('noOrgMembersInviteFirst')}
           </p>
         ) : (
           <div className="divide-y divide-border overflow-hidden rounded-md border border-border">
@@ -226,7 +227,7 @@ export function ProjectAccessSection({ projectId }: ProjectAccessSectionProps) {
                       {isOwner ? (
                         <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
                           <Shield className="h-3 w-3" />
-                          상시 허용
+                          {t('projectAccessAlwaysAllowed')}
                         </span>
                       ) : canManage ? (
                         <Button
@@ -245,9 +246,9 @@ export function ProjectAccessSection({ projectId }: ProjectAccessSectionProps) {
                           {toggling ? (
                             <Loader2 className="h-3 w-3 animate-spin" />
                           ) : granted ? (
-                            <><Shield className="h-3 w-3" />허용</>
+                            <><Shield className="h-3 w-3" />{t('projectAccessAllowed')}</>
                           ) : (
-                            <><ShieldOff className="h-3 w-3" />차단</>
+                            <><ShieldOff className="h-3 w-3" />{t('projectAccessBlocked')}</>
                           )}
                         </Button>
                       ) : (
@@ -256,7 +257,7 @@ export function ProjectAccessSection({ projectId }: ProjectAccessSectionProps) {
                           granted ? 'text-success' : 'text-muted-foreground',
                         )}>
                           {granted ? <Shield className="h-3 w-3" /> : <ShieldOff className="h-3 w-3" />}
-                          {granted ? '허용' : '차단'}
+                          {granted ? t('projectAccessAllowed') : t('projectAccessBlocked')}
                         </span>
                       )}
                     </>

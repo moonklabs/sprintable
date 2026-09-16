@@ -36,6 +36,14 @@ interface DocContentRendererProps {
   publicImageLabel?: string;
   /** authed-mode label shown when an asset-ref image fails to resolve via the signed route. */
   assetImageErrorLabel?: string;
+  /** label shown in a page-embed card when the embedded doc has no title. */
+  untitledEmbedLabel?: string;
+  /** label shown when a mermaid diagram fails to render. */
+  mermaidRenderFailedLabel?: string;
+  /** label shown while a mermaid diagram is rendering. */
+  mermaidRenderingLabel?: string;
+  /** label shown when a KaTeX math block/inline fails to render. */
+  mathRenderFailedLabel?: string;
   /** story #2967(선생님 실사용 판정) — 리더가 마스트헤드 H1(doc.title)을 그리는데 본문 첫
    * 줄이 같은 제목을 `#`로 다시 쓴 문서가 대부분이라 2중 렌더로 보였다. 이 값(=doc.title)이
    * 본문 첫 heading과 정규화 비교(대소문자·공백·선행 # 무시) 동일하면 그 heading만 생략한다
@@ -213,6 +221,10 @@ export function DocContentRenderer({
   publicAttachmentLabel = 'Attachment unavailable in public view',
   publicImageLabel = 'Image unavailable in public view',
   assetImageErrorLabel = 'This image could not be loaded',
+  untitledEmbedLabel = 'Untitled',
+  mermaidRenderFailedLabel = 'Render failed',
+  mermaidRenderingLabel = 'Rendering...',
+  mathRenderFailedLabel = 'KaTeX render failed',
   suppressLeadingTitle,
   bodyEmphasis = 'default',
 }: DocContentRendererProps) {
@@ -327,7 +339,7 @@ export function DocContentRenderer({
       block.innerHTML = `
         ${iconMarkup}
         <div class="min-w-0 flex-1">
-          <p class="truncate text-sm font-medium">${escapeHtmlText(title || '(제목 없음)')}</p>
+          <p class="truncate text-sm font-medium">${escapeHtmlText(title || `(${untitledEmbedLabel})`)}</p>
           ${slug ? `<p class="truncate text-xs opacity-60">/${escapeHtmlText(slug)}</p>` : ''}
         </div>`;
       // publicMode: doc-to-doc traversal 금지(wikiLink와 동일 meta-leak 경계) — 카드 렌더는
@@ -343,7 +355,7 @@ export function DocContentRenderer({
     mathBlocks.forEach((block) => {
       const latex = block.getAttribute('data-latex') ?? block.textContent ?? '';
       if (!latex.trim()) return;
-      void renderKatex(latex, true).then(({ html: katexHtml, error }) => {
+      void renderKatex(latex, true, mathRenderFailedLabel).then(({ html: katexHtml, error }) => {
         if (error) {
           block.innerHTML = `<div class="rounded-lg border border-destructive/30 bg-destructive-tint p-3 text-xs text-foreground font-mono">${escapeHtmlText(error)}</div>`;
         } else {
@@ -357,7 +369,7 @@ export function DocContentRenderer({
     mathInlines.forEach((span) => {
       const latex = span.textContent ?? '';
       if (!latex.trim()) return;
-      void renderKatex(latex, false).then(({ html: katexHtml, error }) => {
+      void renderKatex(latex, false, mathRenderFailedLabel).then(({ html: katexHtml, error }) => {
         if (error) {
           span.className = 'rounded bg-destructive-tint px-1 text-xs text-foreground font-mono';
         } else {
@@ -549,7 +561,7 @@ export function DocContentRenderer({
       assetImgCleanup.forEach((dispose) => dispose());
       toggleCleanup.forEach((dispose) => dispose());
     };
-  }, [codeCopiedLabel, codeCopyLabel, content, contentFormat, publicMode, publicAttachmentLabel, publicImageLabel, assetImageErrorLabel]);
+  }, [codeCopiedLabel, codeCopyLabel, content, contentFormat, publicMode, publicAttachmentLabel, publicImageLabel, assetImageErrorLabel, untitledEmbedLabel, mathRenderFailedLabel]);
 
   const decoratedHtml = useMemo(() => {
     const sanitized = sanitizeDocHtml(content);
@@ -619,7 +631,7 @@ export function DocContentRenderer({
       if (!inline) {
         const lang = String(codeClassName ?? '').replace('language-', '') || null;
         if (lang === 'mermaid') {
-          return <MermaidReadonlyBlock code={childText} />;
+          return <MermaidReadonlyBlock code={childText} renderFailedLabel={mermaidRenderFailedLabel} renderingLabel={mermaidRenderingLabel} />;
         }
         return (
           <ShikiCodeBlock
@@ -632,7 +644,7 @@ export function DocContentRenderer({
       }
       return <code>{children}</code>;
     },
-  }), [publicMode, assetImageErrorLabel, codeCopyLabel, codeCopiedLabel]);
+  }), [publicMode, assetImageErrorLabel, codeCopyLabel, codeCopiedLabel, mermaidRenderFailedLabel, mermaidRenderingLabel]);
 
   const rootClassName = cn(
     'doc-renderer prose dark:prose-invert prose-sm max-w-none text-foreground',
@@ -710,7 +722,7 @@ export function DocContentRenderer({
   );
 }
 
-function MermaidReadonlyBlock({ code }: { code: string }) {
+function MermaidReadonlyBlock({ code, renderFailedLabel, renderingLabel }: { code: string; renderFailedLabel: string; renderingLabel: string }) {
   const [svg, setSvg] = useState('');
   const [error, setError] = useState('');
 
@@ -720,17 +732,17 @@ function MermaidReadonlyBlock({ code }: { code: string }) {
     void renderMermaid(code).then(({ svg: rendered }) => {
       if (!cancelled) { setSvg(rendered); setError(''); }
     }).catch((err: unknown) => {
-      if (!cancelled) { setError(err instanceof Error ? err.message : '렌더링 실패'); setSvg(''); }
+      if (!cancelled) { setError(err instanceof Error ? err.message : renderFailedLabel); setSvg(''); }
     });
     return () => { cancelled = true; };
-  }, [code]);
+  }, [code, renderFailedLabel]);
 
   if (error) {
     // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
     return <div className="not-prose my-4 rounded-xl border border-destructive-border bg-destructive-tint p-3 text-xs text-foreground">{error}</div>;
   }
   if (!svg) {
-    return <div className="not-prose my-4 rounded-xl border border-border bg-muted p-4 text-xs text-muted-foreground">렌더링 중...</div>;
+    return <div className="not-prose my-4 rounded-xl border border-border bg-muted p-4 text-xs text-muted-foreground">{renderingLabel}</div>;
   }
   return (
     <div

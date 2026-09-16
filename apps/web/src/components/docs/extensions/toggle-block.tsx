@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect } from 'react';
+import { useTranslations } from 'next-intl';
 import { Node, mergeAttributes } from '@tiptap/core';
 import { ReactNodeViewRenderer, NodeViewWrapper, NodeViewContent, type ReactNodeViewProps } from '@tiptap/react';
 import { ChevronRight, ChevronDown } from 'lucide-react';
@@ -8,6 +9,7 @@ import { ChevronRight, ChevronDown } from 'lucide-react';
 // ─── Toggle Summary View ──────────────────────────────────────────────────────
 
 function ToggleSummaryView({ getPos, editor }: ReactNodeViewProps) {
+  const t = useTranslations('docs');
   const readParentOpen = useCallback((): boolean => {
     if (typeof getPos !== 'function') return false;
     try {
@@ -54,7 +56,7 @@ function ToggleSummaryView({ getPos, editor }: ReactNodeViewProps) {
         contentEditable={false}
         onClick={handleToggle}
         className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-        aria-label={isOpen ? '접기' : '펼치기'}
+        aria-label={isOpen ? t('toggleCollapse') : t('toggleExpand')}
       >
         {isOpen
           ? <ChevronDown className="size-3.5" />
