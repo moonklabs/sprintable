@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { writeFileSync, mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import {
@@ -391,9 +391,15 @@ describe('computeStaleBaseline — story #3776(③-b)', () => {
 });
 
 describe('실 저장소 baseline 파일 형식', () => {
-  it('hardcoded-korean-ui-text-baseline.json은 파싱 가능하고 모든 키가 file::text 형식이다', () => {
+  // story #3930 PR③(2026-09-16) — 이 파일 첫 도입(#3741) 이래 baseline.size > 0을
+  // 당연한 전제로 뒀으나, PR①②③이 원 197건 grandfather 전량을 t() 전환하며 baseline이
+  // 처음으로 진짜 0에 도달했다(scanRepo 실측도 0건/0파일 — 창건 사례 자가진단이
+  // 별도 합성 표본으로 이 부재와 독립적으로 검증). "0이면 안 된다"는 파일이 깨졌다는
+  // 뜻이 아니라 빚이 다 갚혔다는 뜻일 수 있으므로, size는 0 이상만 요구하고 형식
+  // 검증(파싱 가능·file::text)만 비어있지 않을 때 돈다.
+  it('hardcoded-korean-ui-text-baseline.json은 파싱 가능하고(0건이어도 유효) 있는 키는 전부 file::text 형식이다', () => {
     const baseline = loadBaseline(path.resolve(__dirname, 'hardcoded-korean-ui-text-baseline.json'));
-    expect(baseline.size).toBeGreaterThan(0);
+    expect(baseline.size).toBeGreaterThanOrEqual(0);
     for (const key of baseline) {
       expect(key).toContain('::');
     }
