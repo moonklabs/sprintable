@@ -86,4 +86,26 @@ describe('composeNotificationDisplay — event 없는 legacy 레코드 폴백 �
     );
     expect(body).not.toContain('토큰 만료'); // legacy body 라벨이 새지 않는다
   });
+
+  // story #3940 실사고(카디르 QA 적발, PR#4344 codex 뮤테이션 6건 中 5건 발산) — event가
+  // 있지만 event_key가 없는 gate.pending_approval은 원래 `else`(현재 `else if (event ==
+  // null)`)로 떨어져 방금 gatePendingApprovalBody로 정상 조합한 body를 legacy 파싱이
+  // 다시 덮어썼다. notification.body가 우연히 legacy 패턴과 겹치는 실사고 재현으로 고정.
+  it('gate.pending_approval(event 有·event_key 無)은 legacy 폴백에 덮이지 않는다(카디르 QA 적발 회귀)', () => {
+    const { title, body } = composeNotificationDisplay(
+      baseNotification({
+        type: 'gate.pending_approval',
+        body: REAL_LEGACY_BODY_NESTED_BRACKETS, // BE raw body가 우연히 legacy 패턴과 일치해도
+        event: { payload: { gate_type: 'external_publish' } }, // event_key 없음(이 preset 계약)
+      }),
+      (key: string, values?: Record<string, string | number>) =>
+        key === 'gatePendingApprovalTitle' ? '결재 대기'
+        : key === 'gatePendingApprovalBody' ? `${values?.['gateType']} 게이트 결재 대기`
+        : key,
+      helpers,
+    );
+    expect(title).toBe('결재 대기');
+    expect(body).toBe('ccGateTypeExternalPublish 게이트 결재 대기'); // tDashboard 스텁=항등, gateTypeLabel이 그 매핑키를 넘김
+    expect(body).not.toContain('토큰 만료'); // legacy 라벨이 덮어쓰지 않는다
+  });
 });
