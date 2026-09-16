@@ -169,6 +169,17 @@ const I18N_EXEMPT_MARKER_RE = /^\/\/\s*i18n-exempt:\s*\S/;
 function collectCommentMarkerLines(sf: ts.SourceFile): Set<number> {
   const fullText = sf.getFullText();
 
+  // story #3937 CHANGES5(페드루 CI 실측·2026-09-16 07:32Z RED) — CHANGES3·4가 넣은
+  // 전수 토큰 순회(`getChildren(sf)`로 토큰 배열 생성 + leading/trailing 코멘트
+  // 재스캔)가 «파일마다» 도는 게 문제였다 — 마커 문구가 아예 없는(레포 대다수) 파일도
+  // 똑같이 그 비용을 치러 CI 부하 속에서 #3902 천장(3s)을 넘었다(타임아웃 RED). 처방은
+  // 천장을 올리는 게 아니라 «마커 문구가 없으면 순회 자체를 안 한다» — 원문에
+  // "i18n-exempt" 부분문자열조차 없으면 진짜 주석이든 문자열/JsxText 안 텍스트든
+  // markerLines가 빌 수밖에 없으므로(그 문자열 없이는 I18N_EXEMPT_MARKER_RE가 무조건
+  // false), 순회 전체를 건너뛰고 빈 Set을 즉시 돌려준다 — 대다수 파일이 옛 비용으로
+  // 복귀한다.
+  if (!fullText.includes('i18n-exempt')) return new Set<number>();
+
   // story #3937 CHANGES4 실측 정정 — "JsxText 노드 자신의 getFullStart/getEnd에서만
   // 조회를 건너뛴다"는 처음 처방으론 부족했다: `<div>` 여는 태그의 `>` 토큰(GreaterThan)
   // 의 getTrailingCommentRanges(fullText, `>` 다음 위치)가 바로 그 JsxText 구간을 다시
