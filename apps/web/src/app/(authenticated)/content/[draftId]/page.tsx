@@ -9,7 +9,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { fetchWithAuth } from '@/lib/db/client';
-import { channelLabel } from '@/lib/channel-label';
+import { useChannelLabel } from '@/lib/channel-label';
 import {
   deriveContentPostStatus,
   type ContentPostStatusInput,
@@ -213,6 +213,7 @@ export default function ContentPostEditPage() {
   const { orgId, role } = useDashboardContext();
   const t = useTranslations('content');
   const tc = useTranslations('common');
+  const channelLabel = useChannelLabel();
 
   const [versions, setVersions] = useState<SitePostVersion[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1270,7 +1271,7 @@ export default function ContentPostEditPage() {
         >
           <div>
             <span className="text-xs font-medium text-muted-foreground">{t('externalPublicationDestinationLabel')}</span>{' '}
-            {channelLabel(publication.destination, t)}
+            {channelLabel(publication.destination)}
           </div>
           {publication.channel_publication ? (
             <>
@@ -1374,7 +1375,7 @@ export default function ContentPostEditPage() {
               <option value="">{t('channelPostsCreateVariantSelectPlaceholder')}</option>
               {activeConnections.map((c) => (
                 <option key={c.id} value={c.id}>
-                  {channelLabel(c.channel, t)}
+                  {channelLabel(c.channel)}
                   {c.account_label ? ` · ${c.account_label}` : ''}
                 </option>
               ))}
@@ -1423,7 +1424,7 @@ export default function ContentPostEditPage() {
               return (
                 <li key={v.draft_id} className="flex items-center justify-between gap-2" data-testid="content-variants-list-item">
                   <Link href={`/content/channel-posts/${v.draft_id}`} className="underline">
-                    {channelLabel(v.channel, t)}
+                    {channelLabel(v.channel)}
                     {accountLabel ? ` · ${accountLabel}` : ''}
                   </Link>
                   <span className="flex items-center gap-2">

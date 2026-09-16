@@ -1,12 +1,22 @@
 // @vitest-environment node
 //
 // story 3436(묶음 6) — 채널 종류가 사람이 읽는 문구에 원문 그대로 새던 6곳(threads가
-// 「sandbox · Sandbox」처럼 겹쳐 보이던 것 등)을 channelLabel() 하나로 수렴. 어휘 정본
+// 「sandbox · Sandbox」처럼 겹쳐 보이던 것 등)을 resolveChannelLabel() 하나로 수렴. 어휘 정본
 // (유나 2026-09-05 03:56Z)을 그대로 pin — 모르는 값은 지어내지 않고 원문 폴백.
 import { describe, expect, it } from 'vitest';
-import { CHANNEL_LABEL_KEYS, channelLabel, channelMarkColor, channelMarkInitials } from './channel-label';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { NextIntlClientProvider } from 'next-intl';
+import { CHANNEL_LABEL_KEYS, resolveChannelLabel, useChannelLabel, channelMarkColor, channelMarkInitials } from './channel-label';
 import koMessages from '../../messages/ko.json';
 import enMessages from '../../messages/en.json';
+
+function wrap(node: React.ReactNode) {
+  return (
+    <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+      {node}
+    </NextIntlClientProvider>
+  );
+}
 
 function t(key: string): string {
   const table: Record<string, string> = {
@@ -21,7 +31,7 @@ function t(key: string): string {
   return table[key] ?? key;
 }
 
-describe('channelLabel — 어휘 정본(story 3436 묶음 6)', () => {
+describe('resolveChannelLabel — 어휘 정본(story 3436 묶음 6)', () => {
   it.each([
     ['threads', 'Threads'],
     ['hosted_site', 'Sprintable 블로그'],
@@ -32,15 +42,36 @@ describe('channelLabel — 어휘 정본(story 3436 묶음 6)', () => {
     ['x', 'X'],
     ['x_sandbox', 'X 테스트용'],
   ])('%s → %s', (channel, expected) => {
-    expect(channelLabel(channel, t)).toBe(expected);
+    expect(resolveChannelLabel(channel, t)).toBe(expected);
   });
 
   it('⭐webhook — 디디 ④/⑤ 착지 前이라도 키는 이미 유효(선등록, 죽은 키 스윕 대상 아님)', () => {
-    expect(channelLabel('webhook', t)).toBe('웹훅');
+    expect(resolveChannelLabel('webhook', t)).toBe('웹훅');
   });
 
   it('모르는 채널 값은 지어내지 않고 원문 그대로 폴백한다', () => {
-    expect(channelLabel('some_future_channel', t)).toBe('some_future_channel');
+    expect(resolveChannelLabel('some_future_channel', t)).toBe('some_future_channel');
+  });
+});
+
+// story #3742 — useChannelLabel() 자체(실 소비처가 부르는 공개 API)가 실 ko.json
+// channelConnect 네임스페이스로 정확히 해소하는지 end-to-end로 확認한다(resolveChannelLabel
+// 유닛 테스트는 합성 `t` 목업이라 실 카탈로그 배선까지는 안 잰다). NextIntlClientProvider로
+// 실 koMessages를 물려 렌더 — 훅이 진짜 'channelConnect' 네임스페이스를 쓰는지까지 확인.
+function ChannelLabelProbe({ channel }: { channel: string }) {
+  const channelLabel = useChannelLabel();
+  return <span data-testid="probe">{channelLabel(channel)}</span>;
+}
+
+describe('useChannelLabel — 실 카탈로그(channelConnect) end-to-end(story #3742)', () => {
+  it('⭐threads → ko.json channelConnect.channelThreads 실값 그대로', () => {
+    const markup = renderToStaticMarkup(wrap(<ChannelLabelProbe channel="threads" />));
+    expect(markup).toContain((koMessages.channelConnect as Record<string, string>)['channelThreads']);
+  });
+
+  it('모르는 채널은 원문 그대로 폴백(실 훅 경로에서도 지어내지 않는다)', () => {
+    const markup = renderToStaticMarkup(wrap(<ChannelLabelProbe channel="some_future_channel" />));
+    expect(markup).toContain('some_future_channel');
   });
 });
 

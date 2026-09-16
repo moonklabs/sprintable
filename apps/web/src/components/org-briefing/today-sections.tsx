@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { formatCount } from '@/components/content/generation-budget-indicator';
-import { channelLabel } from '@/lib/channel-label';
+import { useChannelLabel } from '@/lib/channel-label';
 import {
   hrefForNeedsMeItem,
   type NeedsMeState,
@@ -158,8 +158,11 @@ export function PublishedSection({ published, usage }: { published: TodayPublish
   const t = useTranslations('orgBriefing');
   // 페드루 PO CHANGES(2026-09-14 00:58Z, PR #4256) — channel_kind가 BE 코드값 그대로
   // (youtube·hosted_site 등) 새던 결함, 채널 연결/콘텐츠 화면이 이미 쓰는 표시명 맵
-  // (channel-label.ts, 'content' 네임스페이스에도 등재돼 있음)을 재사용 — 새 낱말 0.
-  const tContent = useTranslations('content');
+  // (channel-label.ts)을 재사용 — 새 낱말 0.
+  // story #3742(디디, 근본 처방) — channelLabel()이 useChannelLabel() 훅으로 바뀌며
+  // channelConnect 네임스페이스를 내부에서 스스로 고정한다(예전엔 tContent를 넘겨
+  // 'content' 네임스페이스의 복제 키를 썼다 — 그 복제분 자체가 이 스토리로 걷혔다).
+  const channelLabel = useChannelLabel();
   const locale = useLocale();
   const isEmpty = published.count === 0 && usage.platform.length === 0;
   return (
@@ -181,7 +184,7 @@ export function PublishedSection({ published, usage }: { published: TodayPublish
               {published.byChannel.length > 0 ? (
                 <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
                   {published.byChannel
-                    .map((c) => `${channelLabel(c.channelKind, tContent)} ${formatCount(c.count, locale)}`)
+                    .map((c) => `${channelLabel(c.channelKind)} ${formatCount(c.count, locale)}`)
                     .join(' · ')}
                 </p>
               ) : null}
@@ -189,7 +192,7 @@ export function PublishedSection({ published, usage }: { published: TodayPublish
           ) : null}
           {usage.platform.map((p) => (
             <Card key={p.connectionId} className="p-3.5">
-              <p className="text-[11px] text-muted-foreground">{channelLabel(p.channelKind, tContent)}</p>
+              <p className="text-[11px] text-muted-foreground">{channelLabel(p.channelKind)}</p>
               <p className="mt-1 text-lg font-semibold text-foreground">
                 {formatCount(p.used, locale)}/{formatCount(p.limit, locale)}
               </p>

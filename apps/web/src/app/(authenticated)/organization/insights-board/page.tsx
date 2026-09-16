@@ -17,7 +17,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { fetchWithAuth } from '@/lib/db/client';
-import { channelLabel } from '@/lib/channel-label';
+import { useChannelLabel } from '@/lib/channel-label';
 import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { InsightsBoardMetricCell } from '@/components/insights-board/insights-board-metric-cell';
 import { AdsSpendCell } from '@/components/insights-board/ads-spend-cell';
@@ -133,6 +133,7 @@ export default function InsightsBoardPage() {
   // story #3656 — 훅 미태깅 묶음 라벨은 새 낱말을 안 만들고 docs 네임스페이스 기존
   // 키(indexCategoryUncategorized, 「미분류」)를 재사용한다(유나 確定).
   const tDocs = useTranslations('docs');
+  const channelLabel = useChannelLabel();
   const displayTimezone = resolveDisplayTimezone().tz;
 
   const windowParam = (searchParams.get('window') as InsightsBoardWindow | null) ?? DEFAULT_WINDOW;
@@ -629,7 +630,7 @@ export default function InsightsBoardPage() {
                         row.title
                       )}
                     </td>
-                    <td className="px-3 py-2.5 text-muted-foreground">{channelLabel(row.channel, tContent)}</td>
+                    <td className="px-3 py-2.5 text-muted-foreground">{channelLabel(row.channel)}</td>
                     {/* story #3746(유나 픽셀 PASS 곁들임, 2026-09-09) — 「발행」 칸은
                         merge-base부터 상대 시각(formatRelativeTime)이었다. 이 화면
                         정정 판에서 같이 잡는다: 「그저께」류가 서로 다른 날을 겹쳐

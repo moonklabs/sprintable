@@ -5,7 +5,7 @@ import { useTranslations } from 'next-intl';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { fetchWithAuth } from '@/lib/db/client';
-import { channelLabel } from '@/lib/channel-label';
+import { useChannelLabel } from '@/lib/channel-label';
 import { connectErrorLabelKey } from '@/components/channel-connect/connect-error';
 
 /**
@@ -152,6 +152,7 @@ export function PastedSecretConnectCard({
   const [values, setValues] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const channelLabel = useChannelLabel();
 
   if (!fields) return null;
 
@@ -164,7 +165,7 @@ export function PastedSecretConnectCard({
   // 공유)이 아니라 이 연결 버튼 전용 channelConnectOwnerOrAdminOnlyReason으로 —
   // 공용 키를 바꾸면 다른 자리 문구가 조용히 좁아진다.
   if (!isOwner) {
-    return <p className="text-xs text-muted-foreground">{t('channelConnectOwnerOrAdminOnlyReason', { channel: channelLabel(channel, t) })}</p>;
+    return <p className="text-xs text-muted-foreground">{t('channelConnectOwnerOrAdminOnlyReason', { channel: channelLabel(channel) })}</p>;
   }
 
   const allFilled = fields.every((f) => (values[f.name] ?? '').trim().length > 0);
@@ -211,7 +212,7 @@ export function PastedSecretConnectCard({
           onClick={() => setEditing(true)}
           data-testid={`channel-connect-pasted-secret-button-${channel}`}
         >
-          {t(connectionCount === 0 ? 'channelConnectPastedSecretAction' : 'channelConnectPastedSecretAnotherAction', { channel: channelLabel(channel, t) })}
+          {t(connectionCount === 0 ? 'channelConnectPastedSecretAction' : 'channelConnectPastedSecretAnotherAction', { channel: channelLabel(channel) })}
         </Button>
       ) : (
         <div className="w-full space-y-2" data-testid={`channel-connect-pasted-secret-form-${channel}`}>
