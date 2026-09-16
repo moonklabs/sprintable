@@ -1,9 +1,12 @@
+import { useCallback } from 'react';
+import { useTranslations } from 'next-intl';
+
 // story 3436(묶음 6, 유나 어휘 정본 2026-09-05 03:56Z) — 채널 종류(raw string,
 // BE 코드값/adapter display_name)가 사람이 읽는 문구에 그대로 새던 여러 자리(sandbox가
 // "sandbox · Sandbox"로 겹쳐 보이던 것 등)를 한 맵으로 수렴. #3805
 // CAMPAIGN_STATUS_LABEL_KEYS와 같은 형 — 모르는 값은 지어내지 않고 원문 그대로 폴백.
 // story #3815(Phase3·3-5, 페드루 PO 지적 2026-09-12) — export는 completeness
-// 가드 테스트(channel-label.test.ts)가 3697 FE 채널 목록(19) 전부를 이 맵과
+// 가드 테스트(channel-label.test.tsx)가 3697 FE 채널 목록(19) 전부를 이 맵과
 // 직접 대조하기 위함(채널 하나가 통째로 빠지면 raw 낱말 유출 클래스가 재발 —
 // meta_ads·x·ghost·이번 youtube/stibee_sandbox까지 3회 반복된 실 결함).
 export const CHANNEL_LABEL_KEYS: Record<string, string> = {
@@ -54,16 +57,32 @@ export const CHANNEL_LABEL_KEYS: Record<string, string> = {
   // 없어 raw "youtube"/"youtube_sandbox" 원문이 화면(행 제목 등)에 그대로 새고
   // 있었다. stibee_sandbox도 같은 자리에서 함께 발견(stibee만 등록돼 있고 짝인
   // sandbox는 빠져 있던 것 — stibee_sandbox 등록 시점에 이 맵을 안 챙긴 결과).
-  // channel-label.test.ts의 완전성 가드 테스트가 이 클래스를 계속 놓치지 않게
+  // channel-label.test.tsx의 완전성 가드 테스트가 이 클래스를 계속 놓치지 않게
   // 3697 FE 채널 목록(19) 전부를 이 맵과 대조한다.
   youtube: 'channelLabelYoutube',
   youtube_sandbox: 'channelLabelYoutubeSandbox',
   stibee_sandbox: 'channelLabelStibeeSandbox',
 };
 
-export function channelLabel(channel: string, t: (key: string) => string): string {
+// story #3742 — 순수 로직(파서 테스트용으로 export). useChannelLabel()이 실 소비처의
+// 유일한 공개 경로다 — 이 함수 자체를 직접 부르는 렌더 코드는 없다(훅 규칙을 우회하는
+// 지름길로 쓰면 이 스토리가 막은 클래스가 되돌아온다).
+export function resolveChannelLabel(channel: string, t: (key: string) => string): string {
   const key = CHANNEL_LABEL_KEYS[channel];
   return key ? t(key) : channel;
+}
+
+// story #3742(디디, 근본 처방) — 예전엔 이 함수가 `t`를 그대로 받아 호출부가 «어느
+// 네임스페이스의 t를 넘기느냐»를 스스로 골라야 했다 — #4082(3737)가 `organization`
+// 네임스페이스에 채널 라벨 키 10개를 통째로 복제한 사고가 이 자리에서 났다(content·
+// channelConnect·organization 세 곳에 같은 키·같은 값이 살며 하나 고치면 나머지
+// 2곳×2로케일을 따로 고쳐야 하는데 그걸 잡는 가드가 0이었다). 정본 네임스페이스를
+// `channelConnect` 하나로 못 박고, 훅으로 감싸 호출부가 아예 t를 못 넘기게 한다 —
+// 이 함수가 `useTranslations`를 직접 부르므로 훅 규칙상 컴포넌트 최상단에서 한 번만
+// 불러야 한다(반환값인 순수 함수는 그 뒤 루프·콜백 안 어디서나 자유롭게 호출 가능).
+export function useChannelLabel(): (channel: string) => string {
+  const t = useTranslations('channelConnect');
+  return useCallback((channel: string) => resolveChannelLabel(channel, t), [t]);
 }
 
 // story #3743(UI 재설계 ③, 시안 a98386e6) — 행 목록의 표식(마크) 배경색. 순수 장식(사용자
@@ -109,7 +128,8 @@ export function channelMarkInitials(channel: string): string {
 // 자신의 id(항상 UUID·URL이 아님)에서 뽑아 채널 종류와 무관하게 안전하다. 새 낱말 0
 // (channelLabel 재사용).
 export function channelConnectionIdentityLabel(
-  conn: { id: string; channel: string; account_label: string | null }, t: (key: string) => string,
+  conn: { id: string; channel: string; account_label: string | null },
+  channelLabel: (channel: string) => string,
 ): string {
-  return conn.account_label ?? `${channelLabel(conn.channel, t)}(…${conn.id.slice(-8)})`;
+  return conn.account_label ?? `${channelLabel(conn.channel)}(…${conn.id.slice(-8)})`;
 }

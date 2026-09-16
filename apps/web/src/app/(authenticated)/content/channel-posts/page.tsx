@@ -17,7 +17,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { useToast } from '@/components/ui/toast';
 import { fetchWithAuth } from '@/lib/db/client';
-import { channelLabel } from '@/lib/channel-label';
+import { useChannelLabel } from '@/lib/channel-label';
 import { resolveDisplayTimezone, formatScheduledAt } from '@/components/content/schedule-format';
 import { deriveChannelPostView, type ChannelPublicationStatus } from '@/components/content/channel-post-status';
 import { deriveFailureAction, type CommandStatus } from '@/components/content/failure-action';
@@ -116,6 +116,7 @@ function toStatusTab(status: string | undefined): Exclude<StatusTab, 'all'> {
 export default function ChannelPostListPage() {
   const { orgId } = useDashboardContext();
   const t = useTranslations('content');
+  const channelLabel = useChannelLabel();
   const tBoard = useTranslations('board');
   // story #3744(유나 CHANGES·PO 채택) — orgChannels는 nav 네임스페이스 키다(content가
   // 아니다). t('orgChannels')로 잘못 부르면 next-intl이 키를 못 찾아 원문 키 문자열이
@@ -388,7 +389,7 @@ export default function ChannelPostListPage() {
                       <Link href={`/content/channel-posts/${draft.draft_id}`} className="truncate hover:underline">
                         {hasTextPreview
                           ? draft.text_preview
-                          : `${channelLabel(draft.channel, t)} · v${draft.current_version}`}
+                          : `${channelLabel(draft.channel)} · v${draft.current_version}`}
                       </Link>
                       {/* story #3744(페드루 CHANGES Ⓒ, 시안 v6) — 버전·글자 수 부제는
                           시안에 없다("v1 · 12"처럼 분모 이름 없는 수는 오히려 읽는 사람을
@@ -419,7 +420,7 @@ export default function ChannelPostListPage() {
                     </td>
                     <td className="px-3 py-2.5">
                       <div className="flex flex-wrap items-center gap-1.5 text-muted-foreground">
-                        {channelLabel(draft.channel, t)}
+                        {channelLabel(draft.channel)}
                         {isSandboxChannelDraft(draft.channel) ? <SandboxTestBadge /> : null}
                       </div>
                     </td>

@@ -11,7 +11,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { getEntityHref } from '@/components/chat/embed-card';
 import { fetchWithAuth } from '@/lib/db/client';
-import { channelLabel } from '@/lib/channel-label';
+import { useChannelLabel } from '@/lib/channel-label';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { CommentReplyDialog, type CommentReplyOutcome } from '@/components/content/comment-reply-dialog';
@@ -125,6 +125,7 @@ export default function ChannelPostsEngagementPage() {
   const router = useRouter();
   const { orgId, orgTimezone } = useDashboardContext();
   const t = useTranslations('content');
+  const channelLabel = useChannelLabel();
   const locale = useLocale();
   const displayTimezone = resolveDisplayTimezone(orgTimezone).tz;
 
@@ -314,9 +315,9 @@ export default function ChannelPostsEngagementPage() {
             <span key={c.connection_id}>
               {c.last_collected_at
                 ? t('engagementCollectionStatusCollected', {
-                    channel: channelLabel(c.channel, t), time: formatRelativeTime(c.last_collected_at, locale, displayTimezone),
+                    channel: channelLabel(c.channel), time: formatRelativeTime(c.last_collected_at, locale, displayTimezone),
                   })
-                : t('engagementCollectionStatusNotCollected', { channel: channelLabel(c.channel, t) })}
+                : t('engagementCollectionStatusNotCollected', { channel: channelLabel(c.channel) })}
               {shouldShowReplyDetectionUnavailable(c) ? (
                 <>
                   {' · '}
@@ -353,7 +354,7 @@ export default function ChannelPostsEngagementPage() {
           >
             <option value="all">{t('engagementFilterChannelAll')}</option>
             {channelOptions.map((c) => (
-              <option key={c} value={c}>{channelLabel(c, t)}</option>
+              <option key={c} value={c}>{channelLabel(c)}</option>
             ))}
           </select>
         </label>
@@ -421,7 +422,7 @@ export default function ChannelPostsEngagementPage() {
                 const ordinal = index + 1;
                 return (
                   <tr key={item.id} className="border-b border-border last:border-0">
-                    <td className="px-3 py-2 align-top">{channelLabel(item.channel, t)}</td>
+                    <td className="px-3 py-2 align-top">{channelLabel(item.channel)}</td>
                     <td className="px-3 py-2 align-top">
                       <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
                         {t(KIND_LABEL_KEY[item.kind])}
@@ -546,7 +547,7 @@ export default function ChannelPostsEngagementPage() {
 
       {convertTarget ? (
         <CommentConvertToTaskDialog
-          postTitle={channelLabel(convertTarget.channel, t)}
+          postTitle={channelLabel(convertTarget.channel)}
           comment={toCommentItem(convertTarget)}
           onClose={() => setConvertTargetId(null)}
           onSubmit={async ({ title, note }) => {
