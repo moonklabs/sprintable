@@ -119,3 +119,16 @@ class AgentRunResponse(BaseModel):
     finished_at: datetime | None = None
     deadline_at: datetime | None = None
     created_at: datetime
+    # story #3961(「정지」 액션) — additive(from_attributes로 ORM 컬럼 그대로, 값 없으면
+    # null·지어내지 않는다). cancel_outcome이 "acknowledged"|"unacknowledged"로 채워지면
+    # status 자체도 이미 cancelled|cancelled_unacknowledged로 종결돼 있다(agent_runs.py
+    # SSOT) — 이 4필드는 "언제·누가·왜"만 더한다.
+    cancel_requested_by: uuid.UUID | None = None
+    cancel_requested_at: datetime | None = None
+    cancel_reason: str | None = None
+    cancel_ack_at: datetime | None = None
+    cancel_outcome: str | None = None
+
+
+class CancelAgentRun(BaseModel):
+    reason: str | None = None

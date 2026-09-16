@@ -1,0 +1,1 @@
+{"file": "tests/test_3961_agent_run_cancel_protocol_realdb.py", "sec": 15.0, "source": "story-3961-local-2026-09-16(로컬 1회 실측 wall time 5.55s + dropdb/createdb 셋업 여유 — 형제 파일 test_3959_today_results_aggregates_realdb.py.json과 동일 규모 추정치, CI 실측치로 갱신 대상)"}

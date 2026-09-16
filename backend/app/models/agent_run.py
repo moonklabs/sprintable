@@ -97,3 +97,17 @@ class AgentRun(Base):
     # story #2161(0206): 생성 시점에 기록되는 종료 예정 시각 — app/services/agent_run_lifecycle.py
     # 의 cron 스위퍼가 이 값을 넘긴 'running' run을 능동적으로 'abandoned' 전이한다.
     deadline_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # story #3961(「정지」 액션 — 중단 요청 프로토콜, PO 확定 2026-09-16) — 별 테이블 0,
+    # 이 5컬럼이 요청→ack/만료 전 구간의 감사 전체(Gate.resolved_at/resolver_id/
+    # resolution_note와 동일 관례). status 자체가 cancel_requested→cancelled|
+    # cancelled_unacknowledged로 전이하는 SSOT(agent_runs.py::_AGENT_RUN_STATUS_VALUES
+    # 참조) — 이 컬럼들은 "언제·누가·왜"만 담는다.
+    cancel_requested_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    cancel_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancel_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cancel_ack_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # 'acknowledged' | 'unacknowledged' — status와 별도로 두는 이유: status는 이후 다른
+    # 값으로 안 바뀌지만(cancelled류는 종결 상태) outcome은 "그 종결이 ack로 왔는지 타임아웃
+    # 으로 왔는지"를 status 문자열 파싱 없이 바로 읽게 한다.
+    cancel_outcome: Mapped[str | None] = mapped_column(Text, nullable=True)

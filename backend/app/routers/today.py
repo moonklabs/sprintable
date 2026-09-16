@@ -49,6 +49,15 @@ class NeedsMeItem(BaseModel):
     conversation_id: uuid.UUID | None = None
 
 
+class AgentRunCancelState(BaseModel):
+    """story #3961 — 「정지」 액션의 화면 상태. state는 순수 파생값(agent_runs.status/
+    cancel_requested_at으로 읽기 시점 계산, agent_runs.py::_effective_cancel_outcome과
+    동일 판정 — 두 곳이 갈리지 않는다). 낱말은 PO 확定: unacknowledged도 실패가 아니다."""
+    requested_at: datetime
+    reason: str | None = None
+    state: str  # "requested" | "acknowledged" | "unacknowledged"
+
+
 class AgentProgressItem(BaseModel):
     run_id: uuid.UUID
     agent: TodayActor
@@ -58,6 +67,8 @@ class AgentProgressItem(BaseModel):
     started_at: datetime
     # story #3828 — 이 실행을 촉발한 대화(agent_runs.conversation_id). 없으면 null.
     conversation_id: uuid.UUID | None = None
+    # story #3961 — 중단 요청 中/ack/미응답 상태. 요청된 적 없으면 null(지어내지 않는다).
+    cancel: AgentRunCancelState | None = None
 
 
 class CompletedTodayItem(BaseModel):
