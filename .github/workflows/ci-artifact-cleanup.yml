@@ -1,0 +1,66 @@
+name: CI Artifact Cleanup
+
+# story #3890(2026-09-16) — GitHub Actions artifact 저장 한도(org 단위)가 하루 수백 개씩
+# 쌓이는 report성 artifact(playwright-report·lighthouse-results·shard-durations-*·
+# vitest-duration-summary)로 채워져 mobile 레포의 진단 artifact 업로드까지 막힌 사고
+# (2026-09-14, 「Artifact storage quota has been hit」) — #3864가 그날의 부채를
+# `scripts/cleanup-ci-artifacts.sh`로 일회성 정리하고 ci.yml 쪽 retention도 줄였지만,
+# 이 사이클을 반복 실행되는 cron으로 얹어 「그래도 남는 것」까지 상시 정리하는 백스톱이
+# 없었다 — 이 워크플로가 그 자리(env-drift-guard.yml과 동일 관례: PR/배포 예산과
+# 안 섞이게 독립 스케줄 워크플로).
+on:
+  schedule:
+    - cron: '0 3 * * 1'  # 매주 월요일 03:00 UTC(=12:00 KST) 1회 — 다른 일간 cron들과 시각 분리
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: '체크하면 실제 삭제까지 실행(안 하면 dry-run만 — 리포트만 보고 아무것도 안 지움)'
+        type: boolean
+        default: false
+
+concurrency:
+  group: ci-artifact-cleanup
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: write  # artifact DELETE API(cleanup-ci-artifacts.sh)에 필요한 최소 권한
+
+jobs:
+  cleanup:
+    name: Clean up old CI report artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # 페드루 PO CHANGES①(카디르 재현, PR#4350 리뷰) — `run:`에 `shell:`을 명시 안 하면
+      # GHA 기본은 `bash -e {0}`일 뿐 **pipefail이 안 켜진다**(`shell: bash`를 명시해야만
+      # `-eo pipefail`이 된다 — 흔한 GHA 함정, `shell:` 부재=암묵 기본은 pipefail 미포함).
+      # 이전 버전은 `... | tee` 파이프를 썼는데, pipefail 없이는 파이프 왼쪽(스크립트
+      # 본체)이 실패해도 파이프 오른쪽(tee, 거의 항상 성공)의 exit code가 스텝 전체를
+      # 대표해 스텝이 «성공」으로 찍히고, 그 아래 「Fail loudly」(`if: failure()`)가
+      # 영영 안 돈다. 처방: `shell: bash` 명시(방어) + 애초에 파이프 자체를 없앰(스크립트
+      # 출력을 파일로 직접 받고, 그 다음 스텝에서 따로 cat — 파이프 유무와 무관하게
+      # 스크립트 자신의 exit code가 스텝의 exit code가 되도록).
+      - name: Run cleanup
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          APPLY_FLAG=""
+          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ inputs.apply }}" = "true" ]; then
+            APPLY_FLAG="--apply"
+          fi
+          # 페드루 PO CHANGES③ — cron은 항상 실 삭제(주간 백스톱의 존재 이유), 수동
+          # workflow_dispatch는 기본 dry-run(위 `inputs.apply` 체크박스로만 실 삭제 옵트인)
+          # — 예전엔 `--apply`가 트리거 무관 항상 켜져 있어 헤더 주석("수동 dry-run")과
+          # 실제 동작이 어긋났다.
+          echo "trigger=${{ github.event_name }} apply=${APPLY_FLAG:-<dry-run>}"
+          scripts/cleanup-ci-artifacts.sh $APPLY_FLAG --json > /tmp/cleanup-result.json
+          cat /tmp/cleanup-result.json
+
+      - name: Fail loudly if the script itself errored
+        if: failure()
+        run: echo "::error::CI artifact cleanup 스크립트가 실패했다 — 위 로그를 보고 원인을 확認하라(화이트리스트 밖 삭제는 스크립트 설계상 불가능하므로 이 실패는 gh API/권한 문제이거나 일부 DELETE 실패일 가능성이 높다)."

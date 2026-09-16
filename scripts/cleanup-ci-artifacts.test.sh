@@ -34,6 +34,8 @@ assert_not_contains() {
 # ── 합성 artifact 목록 ───────────────────────────────────────────────────────
 # now - 30일(old, 삭제 대상) · now - 1일(recent, cutoff 안쪽 — 안 지워짐) ·
 # 다른 이름(old지만 name 불일치 — 안 지워짐) · 이미 만료(expired — 안 지워짐).
+# story #3890 — shard-durations-2·vitest-duration-summary도 기본 목록에 추가됐으므로
+# 「다른 이름」 음성대조는 그 둘과 무관한 dockerbuild-*(빌드 캐시, 여전히 스코프 밖)로 교체.
 if date -v-1d >/dev/null 2>&1; then
   OLD_DATE="$(date -u -v-30d +%Y-%m-%dT%H:%M:%SZ)"
   RECENT_DATE="$(date -u -v-1d +%Y-%m-%dT%H:%M:%SZ)"
@@ -49,9 +51,11 @@ cat > "$FIXTURE" <<JSON
     {"id": 101, "name": "playwright-report", "expired": false, "created_at": "$OLD_DATE", "size_in_bytes": 1000},
     {"id": 102, "name": "playwright-report", "expired": false, "created_at": "$OLD_DATE", "size_in_bytes": 2000},
     {"id": 103, "name": "playwright-report", "expired": false, "created_at": "$RECENT_DATE", "size_in_bytes": 3000},
-    {"id": 104, "name": "shard-durations-2", "expired": false, "created_at": "$OLD_DATE", "size_in_bytes": 4000},
+    {"id": 104, "name": "dockerbuild-abc123", "expired": false, "created_at": "$OLD_DATE", "size_in_bytes": 4000},
     {"id": 105, "name": "playwright-report", "expired": true, "created_at": "$OLD_DATE", "size_in_bytes": 5000},
-    {"id": 106, "name": "lighthouse-results", "expired": false, "created_at": "$OLD_DATE", "size_in_bytes": 6000}
+    {"id": 106, "name": "lighthouse-results", "expired": false, "created_at": "$OLD_DATE", "size_in_bytes": 6000},
+    {"id": 107, "name": "shard-durations-2", "expired": false, "created_at": "$OLD_DATE", "size_in_bytes": 7000},
+    {"id": 108, "name": "vitest-duration-summary", "expired": false, "created_at": "$OLD_DATE", "size_in_bytes": 8000}
   ]
 }
 JSON
@@ -81,17 +85,21 @@ run_script() {
   PATH="$FAKE_BIN:$PATH" "$SCRIPT" "$@"
 }
 
-echo "── dry-run(기본, names=playwright-report+lighthouse-results) ──"
+echo "── dry-run(기본, story #3890 확장 목록) ──"
 DRYRUN_OUT="$(run_script 2>&1)"
 assert_contains "$DRYRUN_OUT" "id=101" "old playwright-report(101) 대상에 포함"
 assert_contains "$DRYRUN_OUT" "id=102" "old playwright-report(102) 대상에 포함"
 assert_contains "$DRYRUN_OUT" "id=106" "old lighthouse-results(106) 대상에 포함(다중 이름 필터)"
+assert_contains "$DRYRUN_OUT" "id=107" "old shard-durations-2(107) 대상에 포함(story #3890 확장)"
+assert_contains "$DRYRUN_OUT" "id=108" "old vitest-duration-summary(108) 대상에 포함(story #3890 확장)"
 assert_not_contains "$DRYRUN_OUT" "id=103" "recent playwright-report(103, cutoff 안쪽) 대상 제외"
-assert_not_contains "$DRYRUN_OUT" "id=104" "다른 이름(shard-durations-2, 104) 대상 제외 — name 정확일치 필터"
+assert_not_contains "$DRYRUN_OUT" "id=104" "다른 이름(dockerbuild-abc123, 104) 대상 제외 — name 정확일치 필터"
 assert_not_contains "$DRYRUN_OUT" "id=105" "이미 만료된 artifact(105) 대상 제외"
-assert_contains "$DRYRUN_OUT" "삭제 대상 합계: 3건" "대상 count=3 정확 집계"
+assert_contains "$DRYRUN_OUT" "삭제 대상 합계: 5건" "대상 count=5 정확 집계"
 assert_contains "$DRYRUN_OUT" "playwright-report: 2건" "이름별 분류 — playwright-report 2건"
 assert_contains "$DRYRUN_OUT" "lighthouse-results: 1건" "이름별 분류 — lighthouse-results 1건"
+assert_contains "$DRYRUN_OUT" "shard-durations-2: 1건" "이름별 분류 — shard-durations-2 1건"
+assert_contains "$DRYRUN_OUT" "vitest-duration-summary: 1건" "이름별 분류 — vitest-duration-summary 1건"
 if [ -s "$DELETE_LOG" ]; then
   echo "  FAIL dry-run인데 DELETE 로그가 비어있지 않다(실 삭제가 나갔다는 뜻)"
   FAIL=1
@@ -110,11 +118,13 @@ assert_contains "$DELETED_IDS" "106" "106(lighthouse-results)이 삭제 요청�
 assert_not_contains "$DELETED_IDS" "103" "103(recent)은 삭제 요청 안 됨"
 assert_not_contains "$DELETED_IDS" "104" "104(다른 이름)는 삭제 요청 안 됨"
 assert_not_contains "$DELETED_IDS" "105" "105(이미 만료)는 삭제 요청 안 됨"
+assert_contains "$DELETED_IDS" "107" "107(shard-durations-2)이 삭제 요청됨(story #3890 확장)"
+assert_contains "$DELETED_IDS" "108" "108(vitest-duration-summary)이 삭제 요청됨(story #3890 확장)"
 DELETE_COUNT="$(wc -l < "$DELETE_LOG" | tr -d ' ')"
-if [ "$DELETE_COUNT" -eq 3 ]; then
-  echo "  ok   정확히 3건만 삭제 요청됨(과잉살상 0)"
+if [ "$DELETE_COUNT" -eq 5 ]; then
+  echo "  ok   정확히 5건만 삭제 요청됨(과잉살상 0)"
 else
-  echo "  FAIL 삭제 요청 건수=${DELETE_COUNT}(기대 3)"
+  echo "  FAIL 삭제 요청 건수=${DELETE_COUNT}(기대 5)"
   FAIL=1
 fi
 echo
@@ -122,12 +132,62 @@ echo "── --json 출력 ──"
 : > "$DELETE_LOG"
 JSON_OUT="$(run_script --apply --json 2>/dev/null)"
 JSON_DELETED_COUNT="$(echo "$JSON_OUT" | jq -r '.deleted_count')"
-if [ "$JSON_DELETED_COUNT" = "3" ]; then
-  echo "  ok   --json 요약의 deleted_count=3"
+if [ "$JSON_DELETED_COUNT" = "5" ]; then
+  echo "  ok   --json 요약의 deleted_count=5"
 else
-  echo "  FAIL --json deleted_count=${JSON_DELETED_COUNT}(기대 3) — 출력: $JSON_OUT"
+  echo "  FAIL --json deleted_count=${JSON_DELETED_COUNT}(기대 5) — 출력: $JSON_OUT"
   FAIL=1
 fi
+
+echo
+echo "── 전부 DELETE 실패 → deleted_count=0·failed_count 정확·exit≠0(PO CHANGES②) ──"
+# 예전 버전은 while이 파이프 서브셸에서 돌아 deleted 변수가 안 밖으로 안 나오고,
+# JSON의 deleted_count가 실제 성공수가 아니라 삭제 "시도 대상 수"를 그대로 찍어
+# DELETE가 전부 실패해도 deleted_count=5·exit 0으로 보고됐다 — 이 스텝이 그 회귀를 잡는다.
+FAKE_BIN_DELFAIL="$WORK/bin-delete-fail"
+mkdir -p "$FAKE_BIN_DELFAIL"
+cat > "$FAKE_BIN_DELFAIL/gh" <<GHSTUB
+#!/usr/bin/env bash
+if [ "\$1" = "api" ] && [ "\$2" = "--paginate" ]; then
+  cat "$FIXTURE" | jq -c '.artifacts[]'
+  exit 0
+fi
+if [ "\$1" = "api" ] && [ "\$2" = "-X" ] && [ "\$3" = "DELETE" ]; then
+  echo "synthetic DELETE failure" >&2
+  exit 1
+fi
+echo "unexpected gh invocation: \$*" >&2
+exit 1
+GHSTUB
+chmod +x "$FAKE_BIN_DELFAIL/gh"
+
+set +e
+DELFAIL_JSON="$(PATH="$FAKE_BIN_DELFAIL:$PATH" "$SCRIPT" --apply --json 2>/tmp/delfail-stderr.$$)"
+DELFAIL_CODE=$?
+set -e
+DELFAIL_STDERR="$(cat /tmp/delfail-stderr.$$)"; rm -f /tmp/delfail-stderr.$$
+
+if [ "$DELFAIL_CODE" -ne 0 ]; then
+  echo "  ok   DELETE 전부 실패 시 스크립트가 exit 0이 아님(exit ${DELFAIL_CODE}) — 호출부 워크플로의 실패 감지가 실제로 돎"
+else
+  echo "  FAIL DELETE 전부 실패인데 exit 0 — 워크플로가 성공으로 오판함"
+  FAIL=1
+fi
+DELFAIL_DELETED="$(echo "$DELFAIL_JSON" | jq -r '.deleted_count')"
+DELFAIL_FAILED="$(echo "$DELFAIL_JSON" | jq -r '.failed_count')"
+if [ "$DELFAIL_DELETED" = "0" ]; then
+  echo "  ok   deleted_count=0(실제 성공 0건을 정직하게 보고 — 대상 수로 부풀리지 않음)"
+else
+  echo "  FAIL deleted_count=${DELFAIL_DELETED}(기대 0) — 출력: $DELFAIL_JSON"
+  FAIL=1
+fi
+if [ "$DELFAIL_FAILED" = "5" ]; then
+  echo "  ok   failed_count=5(대상 5건 전부 실패로 정확 집계)"
+else
+  echo "  FAIL failed_count=${DELFAIL_FAILED}(기대 5) — 출력: $DELFAIL_JSON"
+  FAIL=1
+fi
+assert_contains "$DELFAIL_STDERR" "삭제 실패" "실패 stderr 메시지가 실제로 출력됨(카운터만 조용히 틀린 게 아니라 눈에 보임)"
 
 echo
 if [ "$FAIL" -eq 0 ]; then
