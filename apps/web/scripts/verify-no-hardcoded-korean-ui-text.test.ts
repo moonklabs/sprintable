@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { writeFileSync, mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import {
@@ -22,6 +22,69 @@ describe('scanContent — JsxText', () => {
   it('does not flag t(...) call results(dynamic, not a literal)', () => {
     const content = "function C() { const t = useTranslations(); return <p>{t('title')}</p>; }";
     expect(scanContent(content, 'fake.tsx')).toEqual([]);
+  });
+});
+
+// story #3937(2026-09-16, PO 승인) — EXEMPT_FILES(파일 단위)가 gate-evidence.tsx를
+// blast-radius 넓게 껐던 것을 line/symbol 단위 `// i18n-exempt: <사유>` 마커로 좁혔다.
+// 이 describe가 그 마커 자체의 계약(바로 앞줄·사유 필수·다른 자리는 그대로 걸림)을
+// 고정한다 — «합성 한글 주입 → RED / 예외 자리 → GREEN»(AC3)을 scanContent 유닛
+// 레벨로 검증(파일 I/O 없이 결정적·빠름, 위 founding-case describe의 실 트리 기법과는
+// 다른 층위 — 여긴 마커 판정 로직 자체가 대상).
+describe('scanContent — 라인 마커(// i18n-exempt: <사유>, story #3937)', () => {
+  it('⭐마커가 바로 앞줄에 있으면 그 문자열만 면제된다', () => {
+    const content = [
+      "function f() {",
+      "  // i18n-exempt: BE sentinel 계약값 — 번역하면 매치가 깨진다.",
+      "  const SENTINEL = '미확認';",
+      "  return SENTINEL;",
+      "}",
+    ].join('\n');
+    expect(scanContent(content, 'fake.tsx')).toEqual([]);
+  });
+
+  it('양성대조 — 같은 파일의 마커 없는 다른 한글은 그대로 걸린다(RED)', () => {
+    const content = [
+      "function f() {",
+      "  // i18n-exempt: BE sentinel 계약값 — 번역하면 매치가 깨진다.",
+      "  const SENTINEL = '미확認';",
+      "  const other = '합성 신규 한글';",
+      "  return SENTINEL + other;",
+      "}",
+    ].join('\n');
+    const v = scanContent(content, 'fake.tsx');
+    expect(v).toHaveLength(1);
+    expect(v[0]!.text).toBe('합성 신규 한글');
+  });
+
+  it('마커가 있어도 그 줄이 아니라 한 줄 더 위면 면제되지 않는다(«바로 앞줄»만)', () => {
+    const content = [
+      "// i18n-exempt: 너무 멀리 있는 마커 — 이 줄은 안 통한다.",
+      "",
+      "const SENTINEL = '미확認';",
+    ].join('\n');
+    const v = scanContent(content, 'fake.tsx');
+    expect(v).toHaveLength(1);
+    expect(v[0]!.text).toBe('미확認');
+  });
+
+  it('사유 없는 마커("i18n-exempt:" 뒤에 텍스트 없음)는 면제하지 않는다(AC1 "사유 필수")', () => {
+    const content = [
+      "// i18n-exempt:",
+      "const SENTINEL = '미확認';",
+    ].join('\n');
+    const v = scanContent(content, 'fake.tsx');
+    expect(v).toHaveLength(1);
+    expect(v[0]!.text).toBe('미확認');
+  });
+
+  it('실 gate-evidence.tsx — _UNCONFIRMED 상수는 마커로 면제되고 baseline·EXEMPT_FILES 밖에서도 GREEN이다', () => {
+    const filePath = path.resolve(__dirname, '../src/components/cage/gate-evidence.tsx');
+    const content = readFileSync(filePath, 'utf8');
+    const relPath = 'components/cage/gate-evidence.tsx';
+    expect(EXEMPT_FILES.has(relPath)).toBe(false);
+    const v = scanContent(content, relPath);
+    expect(v.some((x) => x.text === '미확認')).toBe(false);
   });
 });
 
@@ -97,7 +160,7 @@ describe('scanContent — ③ .ts 파일의 제네릭은 JSX로 오인되지 않
     const content = 'const 매핑: Record<string, number> = {};';
     // 변수명 자체에 한글이 섞여도(식별자는 JsxText/JsxAttribute가 아니라 애초에 대상 밖)
     // 제네릭의 `<...>`가 JSX로 잘못 파싱되지만 않으면 이 케이스는 통과해야 한다.
-    expect(scanContent(content, 'fake.ts')).toEqual([]);
+    expect(scanContent(content, 'fake.tsx')).toEqual([]);
   });
 
   it('the same generic-heavy content parsed as .tsx is still safe(no JsxText exists to flag)', () => {
@@ -391,17 +454,24 @@ describe('computeStaleBaseline — story #3776(③-b)', () => {
 });
 
 describe('실 저장소 baseline 파일 형식', () => {
-  // story #3930 PR③(2026-09-16) — 이 파일 첫 도입(#3741) 이래 baseline.size > 0을
-  // 당연한 전제로 뒀으나, PR①②③이 원 197건 grandfather 전량을 t() 전환하며 baseline이
-  // 처음으로 진짜 0에 도달했다(scanRepo 실측도 0건/0파일 — 창건 사례 자가진단이
-  // 별도 합성 표본으로 이 부재와 독립적으로 검증). "0이면 안 된다"는 파일이 깨졌다는
-  // 뜻이 아니라 빚이 다 갚혔다는 뜻일 수 있으므로, size는 0 이상만 요구하고 형식
-  // 검증(파싱 가능·file::text)만 비어있지 않을 때 돈다.
-  it('hardcoded-korean-ui-text-baseline.json은 파싱 가능하고(0건이어도 유효) 있는 키는 전부 file::text 형식이다', () => {
-    const baseline = loadBaseline(path.resolve(__dirname, 'hardcoded-korean-ui-text-baseline.json'));
-    expect(baseline.size).toBeGreaterThanOrEqual(0);
-    for (const key of baseline) {
-      expect(key).toContain('::');
+  // story #3930 PR①②③(2026-09-16) — 이 파일 첫 도입(#3741) 이래 baseline.size > 0을
+  // 당연한 전제로 뒀으나, 원 197건 grandfather 전량을 t() 전환하며 baseline이 처음으로
+  // 진짜 0에 도달했다(scanRepo 실측도 0건/0파일 — 창건 사례 자가진단이 별도 합성
+  // 표본으로 이 부재와 독립적으로 검증). "0이면 안 된다"는 파일이 깨졌다는 뜻이
+  // 아니라 빚이 다 갚혔다는 뜻일 수 있다.
+  // story #3937(2026-09-16, 페드루 지적) — `baseline.size >= 0`은 Set.size가 항상
+  // 음수가 아니므로 무슨 값이 와도 참인 항상-참 단언이었다(무엇을 깨도 안 잡음, 남길
+  // 이유 없음). `loadBaseline()`은 파싱 실패·파일 없음을 전부 삼켜 빈 Set을 돌려주므로
+  // (재사용 목적상 정당한 설계) 그 경유로는 "파일이 깨졌다"와 "진짜 0건이다"를
+  // 구분 못 한다 — 이 테스트는 그 둘을 갈라야 하므로 raw JSON을 직접 파싱하고
+  // `Array.isArray(keys)`로 구조를 확認한다(파싱 실패·keys 비-배열이면 여기서 throw).
+  it('hardcoded-korean-ui-text-baseline.json은 파싱 가능하고 keys는 배열이며(0건이어도 유효) 있는 키는 전부 file::text 형식이다', () => {
+    const raw = readFileSync(path.resolve(__dirname, 'hardcoded-korean-ui-text-baseline.json'), 'utf8');
+    const parsed = JSON.parse(raw) as { keys?: unknown };
+    expect(Array.isArray(parsed.keys)).toBe(true);
+    for (const key of parsed.keys as unknown[]) {
+      expect(typeof key).toBe('string');
+      expect(key as string).toContain('::');
     }
   });
 });

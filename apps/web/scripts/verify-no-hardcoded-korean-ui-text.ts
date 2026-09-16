@@ -98,25 +98,24 @@ import ts from 'typescript';
 // 자가검출이 정확히 예견한 대로 두 파일의 한글 히트가 0이 됐다 — 여기서 EXEMPT_FILES를
 // 건는다(baseline이 그 20건만큼 늘어난 것으로 self-expire·grandfather로 복귀 0건, 새
 // 코드는 전부 i18n 키라 baseline에 안 실린다).
-// story #3930 PR③(2026-09-16, 페드루 확認·PO 승인) — 이 둘은 "UI 렌더 문구가 아니라
-// 번역하면 오히려 깨지는 자리"라 baseline 그랜드파더가 아니라 파일째 EXEMPT한다.
-//   `components/cage/gate-evidence.tsx`의 `_UNCONFIRMED = '미확認'` — BE(전역 sentinel
-//   계약값, recipe_gate_hooks.py 등)가 실제로 보내는 값과 그대로 비교하는 상수. 번역하면
-//   en 로케일에서 BE의 실 한글 sentinel과 매치가 깨진다(기능 회귀). ⚠️이 파일은 다른
-//   자리에 정상 t() 소비처가 여러 곳 있다(cage ns) — 이 예외는 그 상수 하나 때문에 파일
-//   전체 스캔을 끈다는 뜻이라, 새 하드코딩 한국어가 이 파일에 더 생겨도 이 가드가 못
-//   잡는다(범위 자각, 필요해지면 라인 단위 예외로 좁히는 후속 별건).
-//   `components/locale-switcher.tsx`의 `한국어로 변경` — 로케일 스위처 자체가 "지금
-//   아닌 언어로 전환" 툴팁이라 항상 그 언어 자체의 문자로 서야 한다(en일 때 「한국어」로
-//   보여야 사용자가 알아봄, 대칭축 반대편 en 문구 "Switch to English"도 코드에 이미
-//   하드코딩 — 둘 다 로케일 자체를 가리키는 라벨이라 번역 대상이 아님). 이 파일은
-//   전체가 이 라벨 하나뿐이라 위 gate-evidence와 달리 범위 자각 리스크가 낮다.
+// story #3930 PR③(2026-09-16, 페드루 확認·PO 승인) — locale-switcher.tsx의
+// `한국어로 변경` — 로케일 스위처 자체가 "지금 아닌 언어로 전환" 툴팁이라 항상 그
+// 언어 자체의 문자로 서야 한다(en일 때 「한국어」로 보여야 사용자가 알아봄, 대칭축
+// 반대편 en 문구 "Switch to English"도 코드에 이미 하드코딩 — 둘 다 로케일 자체를
+// 가리키는 라벨이라 번역 대상이 아님). 이 파일은 전체가 이 라벨 하나뿐이라 파일 단위
+// EXEMPT의 blast radius 리스크가 낮다("UI 렌더 문구가 아니라 번역하면 오히려 깨지는
+// 자리"는 baseline 그랜드파더가 아니라 EXEMPT가 맞는 판정 — story #3930 PR③ 그대로).
+// story #3937(2026-09-16, PO 승인) — `components/cage/gate-evidence.tsx`는 여기서
+// 뺐다. PR#4341 당시엔 `_UNCONFIRMED` 상수 하나 때문에 파일째 EXEMPT했는데, 그 파일은
+// 다른 자리에 정상 t() 소비처가 여러 곳 있어(cage ns) 새 하드코딩 한국어가 그 파일에
+// 더 생겨도 이 가드가 못 잡는 blast radius였다(PR#4341 디디 자기 지적·PO 승인분).
+// `_UNCONFIRMED` 자리만 아래 `i18n-exempt:` 라인 마커로 좁혀 그 파일의 나머지는 다시
+// 스캔 축 «안»에 든다.
 export const EXEMPT_FILES = new Set<string>([
   'app/internal-dogfood/page.tsx',
   'app/terms/page.tsx',
   'app/privacy/page.tsx',
   'app/refund-policy/page.tsx',
-  'components/cage/gate-evidence.tsx',
   'components/locale-switcher.tsx',
 ]);
 
@@ -126,6 +125,29 @@ export interface Violation {
   file: string;
   line: number;
   text: string;
+}
+
+// story #3937(2026-09-16, PO 승인) — EXEMPT_FILES(파일 단위)는 그 파일의 다른 자리에
+// 새 하드코딩 한국어가 생겨도 못 잡는다(gate-evidence.tsx가 `_UNCONFIRMED` 상수 하나
+// 때문에 파일째 빠졌던 blast radius 자각, PR#4341 디디 자기 지적). 이 마커는 그 자리
+// «하나만» 스캔에서 뺀다 — 위반 리터럴이 선 바로 그 줄(0-index)의 **바로 앞 줄**에
+// `// i18n-exempt: <사유>` 라인 주석이 있으면 그 위반만 면제한다.
+//   ⚠️ 왜 AST leading-comment(`ts.getLeadingCommentRanges`)가 아니라 원문 줄 텍스트로
+//   보는가 — `const X = '한글';`류에서 문자열 리터럴 노드의 `getFullStart()`는 `= ` 뒤
+//   (공백 하나)에서 시작한다. 그 앞 주석은 `const` 키워드(또는 그 앞 식별자) 쪽에 붙지
+//   문자열 리터럴 쪽에 안 붙는다 — 트리비아가 "문(statement) 전체"가 아니라 "가장
+//   가까운 토큰"에 붙는 TS 스캐너 성질이라, 노드 트리비아 기반 조회는 실측 결과
+//   매치 0건이었다(실 반례로 확認, 아래 3937 self-test가 이 자리를 고정). 원문 줄
+//   텍스트 조회는 이 함정을 구조적으로 비켜간다 — "그 줄 바로 위"라는 AC1 문구
+//   그대로를 그대로 코드로 옮긴 것.
+const I18N_EXEMPT_MARKER_RE = /i18n-exempt:\s*\S/;
+
+function hasExemptMarker(node: ts.Node, sf: ts.SourceFile): boolean {
+  const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line;
+  if (line === 0) return false;
+  const lines = sf.getFullText().split('\n');
+  const prevLine = lines[line - 1] ?? '';
+  return I18N_EXEMPT_MARKER_RE.test(prevLine);
 }
 
 export function scanContent(content: string, file: string): Violation[] {
@@ -142,6 +164,7 @@ export function scanContent(content: string, file: string): Violation[] {
   function addIfHangul(node: ts.Node, text: string): void {
     const trimmed = text.trim();
     if (trimmed.length > 0 && HANGUL_RE.test(trimmed)) {
+      if (hasExemptMarker(node, sf)) return;
       const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
       violations.push({ file, line, text: trimmed });
     }
