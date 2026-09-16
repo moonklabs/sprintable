@@ -68,12 +68,12 @@ describe('TodayV3Screen — 렌더 3', () => {
     expect(summary?.textContent).toBe('착지 미측정건 · 검수 통과 미측정건 · 열린 결함 미측정건 · 나간 글 0건.');
   });
 
-  it('⭐결정 N — needs_me N건이 렌더된다', async () => {
+  it('⭐결정 N — needs_me N건이 렌더된다(고위험 카드 2)', async () => {
     stubToday({
       ...EMPTY_TODAY,
       needs_me: [
         {
-          source: 'gate', source_id: 'g1', kind: 'approval', risk: 'low',
+          source: 'gate', source_id: 'g1', kind: 'approval', risk: 'high',
           work_item: { id: 'w1', type: 'channel_post', title: '블로그 글 발행' },
           requested_by: null, reason: null, created_at: '2026-09-17T00:00:00Z', conversation_id: null,
         },
@@ -102,6 +102,62 @@ describe('TodayV3Screen — 렌더 3', () => {
     await mount();
     expect(container.textContent).toContain('담롱 온찬');
     expect(container.textContent).toContain('미르코 페트로비치');
+  });
+
+  // story #3962 CHANGES-2(페드루 PO C1, 2026-09-16 16:08Z) — 「정지」는 story #3961
+  // 착지 前엔 자리만(비활성·클릭 0). 클릭해도 상태가 안 바뀌는 것(=API 호출 0)까지
+  // 실증 — 「비활성이라 클릭 자체가 안 된다」는 jsdom에서 disabled 버튼의 click()이
+  // 여전히 이벤트를 내지만 onClick이 없어 아무 일도 안 일어나는 것으로 고정.
+  it('⭐정지 버튼 — 비활성(disabled)이고 onClick이 없어 클릭해도 무변', async () => {
+    stubToday({
+      ...EMPTY_TODAY,
+      agent_progress: [
+        { run_id: 'r1', agent: { name: '담롱 온찬' }, work_item: { title: '블로그 글 초안' }, status: 'running', started_at: '2026-09-17T00:00:00Z', conversation_id: null },
+      ],
+    });
+    await mount();
+    const stopButton = container.querySelector('[data-testid="today-v3-stop-action"]') as HTMLButtonElement;
+    expect(stopButton).not.toBeNull();
+    expect(stopButton.disabled).toBe(true);
+    const putOrPostCallsBefore = fetchMock.mock.calls.length;
+    await act(async () => { stopButton.click(); });
+    expect(fetchMock.mock.calls.length).toBe(putOrPostCallsBefore);
+  });
+
+  // story #3962 CHANGES-2(페드루 PO C2) — 위험 등급 태그(고위험=amber 배지)·저위험은
+  // 개별 카드 대신 「저위험 N건」 한 줄로 묶이고 그 옆 「모아 승인」은 비활성(자리만).
+  it('⭐위험 등급 태그·저위험 모아 승인 — 고위험은 배지·저위험은 묶이고 모아 승인은 비활성', async () => {
+    stubToday({
+      ...EMPTY_TODAY,
+      needs_me: [
+        {
+          source: 'gate', source_id: 'g1', kind: 'approval', risk: 'high',
+          work_item: { id: 'w1', type: 'channel_post', title: '블로그 글 발행' },
+          requested_by: null, reason: null, created_at: '2026-09-17T00:00:00Z', conversation_id: null,
+        },
+        {
+          source: 'gate', source_id: 'g2', kind: 'approval', risk: 'low',
+          work_item: { id: 'w2', type: 'channel_post', title: '태그 정리' },
+          requested_by: null, reason: null, created_at: '2026-09-17T00:00:00Z', conversation_id: null,
+        },
+        {
+          source: 'gate', source_id: 'g3', kind: 'approval', risk: 'low',
+          work_item: { id: 'w3', type: 'channel_post', title: '스토리 이동' },
+          requested_by: null, reason: null, created_at: '2026-09-17T00:00:00Z', conversation_id: null,
+        },
+      ],
+      needs_me_count: 3,
+    });
+    await mount();
+    // 고위험 카드만 개별로(태그 포함), 저위험 2건은 개별 제목이 안 뜨고 한 줄로 묶인다.
+    expect(container.textContent).toContain('블로그 글 발행');
+    expect(container.textContent).toContain('고위험');
+    expect(container.textContent).not.toContain('태그 정리');
+    expect(container.textContent).not.toContain('스토리 이동');
+    const lowRiskRow = container.querySelector('[data-testid="today-v3-low-risk-row"]');
+    expect(lowRiskRow?.textContent).toContain('2');
+    const bulkButton = container.querySelector('[data-testid="today-v3-bulk-approve-action"]') as HTMLButtonElement;
+    expect(bulkButton.disabled).toBe(true);
   });
 
   it('오늘 결과 — 3959 필드가 있으면(measured) 그 수를 그대로 쓴다', async () => {
