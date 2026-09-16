@@ -1127,9 +1127,10 @@ jobs:
     #   4370  (run 미상) / 105144123213         1      09:10:24→09:40:41
     #   4386  35204737873 / 105153178797       3      09:40:40→10:10:57
     # destructive_schema 파일도 3541 당시보다 늘어 지금 356개(샤드당 44~45개)라 여유가
-    # 더 줄었다. 8→12로 확대(각 샤드 p95≈7분 예상, #3541 실측 배율 그대로 재적용) —
-    # 천장(30분)은 무변경, weights.json 로직도 무변경(파일 간 *상대* 비중은 이 사고와
-    # 무관 — #3393/#3541과 동일 원칙, 러너 절대 배율 문제엔 가중치 재실측이 안 듣는다).
+    # 더 줄었다. 8→12로 확대(각 샤드 p95≈7분 예상, #3541 실측 배율 그대로 재적용) — 이
+    # 샤드 수 확대(12) 자체는 아래 matrix에 그대로 살아 있다. weights.json 로직도
+    # 무변경(파일 간 *상대* 비중은 이 사고와 무관 — #3393/#3541과 동일 원칙, 러너 절대
+    # 배율 문제엔 가중치 재실측이 안 듣는다).
     #
     # story #4007 AC2(2026-09-17, 실 run 35210396351 12/12 완주 실측) — 위 "p95≈7분
     # 예상"의 실측값. 최대·중앙값·최소 순, PR 4388 헤드 기준:
@@ -1137,10 +1138,25 @@ jobs:
     #            시그니처, 파일 병목 아니라 그 시점 러너 부하로 추정, 형제와 파일수差 0)
     #   shard 8  11.6분 · 7   10.0분 · 2  9.8분 · 4  9.6분 · 10  9.6분
     #   shard 5   9.0분 · 3   8.9분 · 0  8.4분 · 9  8.2분 · 11  7.5분 · 6  6.5분
-    #   p50 9.6분 — 천장(30분) 대비 최대치도 2배 여유(30/15.1≈2.0), #3541이 세운
-    #   "정상 p95의 2.7배까지 덮는다" 원칙과 정합. 356개 산출물 전부 회수(무손실,
-    #   story #3558 AC2 경고 67건은 등재값 과소— 실패 아님·이 카드 스코프 밖).
-    timeout-minutes: 30
+    #   p50 9.6분. 356개 산출물 전부 회수(무손실, story #3558 AC2 경고 67건은 등재값
+    #   과소 — 실패 아님·이 카드 스코프 밖).
+    #
+    # story #3944(2026-09-16, 페드루 PO 판정 — #4007과 같은 날 인접, rebase 시점 병합:
+    # #4007은 «천장 값»을, 이 스토리는 «천장을 판정 자로 쓰는 방식 자체»를 바꾼다,
+    # 서로 대체가 아니라 다른 축) — 재발(같은 날 shard0/shard3, 둘 다 정확히 30:1x분
+    # kill·형제 7개는 13분대 정상 완주·취소 직전까지 파일 계속 통과 중 — 정지 아님).
+    # 샤드 확대는 이번엔 기각 — 샤드를 늘리면 동시 잡 수만 늘어 같은 러너 부하를
+    # 오히려 키운다(그날 p50이 #3541 무부하 기준 7.7분→12.5분으로 이미 오른 방향과
+    # 동형). 3.5배 느려진 인스턴스는 샤드 크기가 아니라 「그 잡이 앉은 호스트가 그
+    # 시간에 과점유」된 문제로 판단(호스트 그라운딩은 #3944 AC0 적기만, 인프라 축이라
+    # 손 안 댐). #2293의 "천장을 올려도 다음 표본에서 다시 붙는다"는 «천장이 판정
+    # 자일 때»의 이야기 — 이제 판정 자는 파일 단위 정지 감지(STALL_TIMEOUT_MIN=8분,
+    # 위 루프)로 옮겼으므로, 이 job timeout은 "진행 中인 샤드가 (정지 감지가 있는 한)
+    # 절대 안 닿는 백스톱"일 뿐이다 — #4007 AC2 12샤드 실측(max 15.1분)이 #3944
+    # 외삽(47~48분)보다도 빠르므로 60분은 12샤드 기준으로도 여전히 넉넉한 상한.
+    # 이 60분에 실제로 닿으면 그건 정지 감지도 못 잡는 새 결함 클래스라 카드를 다시
+    # 연다(같은 수로 덮지 않는다).
+    timeout-minutes: 60
     strategy:
       fail-fast: false  # 한 샤드 실패가 다른 샤드를 취소하면 "어디까지 진짜 돌았는지"가 흐려진다
       matrix:
@@ -1284,6 +1300,15 @@ jobs:
           # 끝난 뒤 한 번에 판정한다. exit 1은 여전히 여기서만 나므로 #2293/#3392의
           # "실측 가능한 만큼은 계속 잰다" 철학은 무변화.
           elapsed_file=$(mktemp)
+          # story #3944(2026-09-16, 페드루 PO 판정) — 30분 job timeout은 "멈춤"을 잡으려던
+          # 것인데 실제로 재는 건 "오래 걸림"이라, 형제 7개 샤드가 13분대로 정상 완주하는
+          # 동안 그 인스턴스 1개만(호스트 과점유 추정) 진행 中인 채 죽는 사고가 반복됐다
+          # (2026-09-16 shard0/shard3 둘 다 정확히 30:1x분에 kill, 취소 직전까지 파일이
+          # 계속 통과 중이었고 남은 진행률로 외삽하면 완주까지 47~48분 필요). #2293의
+          # "천장을 올려도 다음 표본에서 다시 붙는다" 원칙은 "천장이 자일 때"의 이야기 —
+          # 여기서는 자를 파일 단위 «정지 감지»(STALL_TIMEOUT_MIN)로 옮기고, job
+          # timeout-minutes는 그 정지 감지가 절대 못 미치는 백스톱으로만 남긴다(아래).
+          STALL_TIMEOUT_MIN=8
           for f in "${files[@]}"; do
             echo "::group::isolated $f"
             PGPASSWORD=sprintable dropdb -h localhost -U sprintable --if-exists sprintable_test_iso
@@ -1292,7 +1317,14 @@ jobs:
             ALEMBIC_DATABASE_URL=postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test_iso \
             PARITY_TEST_DATABASE_URL=postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test_iso \
             DATABASE_URL=postgresql+asyncpg://sprintable:sprintable@localhost:5432/sprintable_test_iso \
-            uv run pytest -q "$f" || failed_files+=("$f")
+            "${{ github.workspace }}/scripts/run-with-stall-detection.sh" "$STALL_TIMEOUT_MIN" -- uv run pytest -q "$f"
+            _pytest_exit=$?
+            if [ "$_pytest_exit" -eq 124 ]; then
+              echo "::error::STALL(story #3944) — $f 가 ${STALL_TIMEOUT_MIN}분 안에 안 끝나 강제 종료됨. 「오래 걸림」이 아니라 「멈춤」으로 판정 — 즉시 실패."
+              failed_files+=("$f (STALL: exceeded ${STALL_TIMEOUT_MIN}m)")
+            elif [ "$_pytest_exit" -ne 0 ]; then
+              failed_files+=("$f")
+            fi
             _elapsed=$(( $(date +%s) - _t0 ))
             echo "elapsed: ${_elapsed}s"
             printf '%s\t%s\n' "$f" "$_elapsed" >> "$elapsed_file"
