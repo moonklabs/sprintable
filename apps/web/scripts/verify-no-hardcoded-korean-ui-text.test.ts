@@ -160,7 +160,10 @@ describe('scanContent — ③ .ts 파일의 제네릭은 JSX로 오인되지 않
     const content = 'const 매핑: Record<string, number> = {};';
     // 변수명 자체에 한글이 섞여도(식별자는 JsxText/JsxAttribute가 아니라 애초에 대상 밖)
     // 제네릭의 `<...>`가 JSX로 잘못 파싱되지만 않으면 이 케이스는 통과해야 한다.
-    expect(scanContent(content, 'fake.tsx')).toEqual([]);
+    // story #3937(페드루 CI 리뷰) — 이전 커밋에서 .ts 스캔 경로 양성대조를 지우는
+    // 일괄치환('fake.ts' → 'fake.tsx')에 이 자리가 실수로 같이 걸려 아래 .tsx 테스트와
+    // 같은 케이스가 돼 있었다 — 원복.
+    expect(scanContent(content, 'fake.ts')).toEqual([]);
   });
 
   it('the same generic-heavy content parsed as .tsx is still safe(no JsxText exists to flag)', () => {
