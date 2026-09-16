@@ -9,7 +9,7 @@ from ..api_client import client
 from ..response import err, ok
 from ..schemas import SprintableInput
 
-RunStatus = Literal["running", "completed", "failed"]
+RunStatus = Literal["running", "completed", "failed", "cancelled"]
 
 
 class EmitEventInput(SprintableInput):
