@@ -42,6 +42,10 @@ _CI_OR_LOCAL_ONLY_ALLOWLIST = frozenset({
     "lint_destructive_publish_path_dispose_fixture.py",  # story a05da51b — CI lint 게이트(tests/ 재귀 AST 스캔, 운영 DB 무접속)
     "lint_legacy_subscriptions_reuse.py",         # story #2476 — CI lint 게이트(app/ 재귀 정적 스캔, 운영 DB 무접속)
     "lint_model_registration_completeness.py",    # story #2255 — CI lint 게이트(app/models AST 정적 스캔, 운영 DB 무접속)
+    "parse_pr_verdict_comment.py",                # story #3963 — CI 전용 순수 파서(GH Action이
+                                                   # 코멘트 body를 stdin으로 넘겨 호출, 운영 DB·
+                                                   # 네트워크 무접속 — 결과 JSON을 워크플로가 읽어
+                                                   # capture-review 호출은 워크플로 자신이 curl로 함)
     "lint_project_access_403.py",                 # story #2342 AC7 — CI lint 게이트
     "lint_query_sentinel_direct_calls.py",        # story #2335 — CI lint 게이트
     "lint_raw_auth_id_into_member_field.py",      # story #3370 — CI lint 게이트(app/routers·
