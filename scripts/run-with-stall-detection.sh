@@ -22,7 +22,11 @@ fi
 TIMEOUT_MIN="$1"
 shift 2
 
-timeout "${TIMEOUT_MIN}m" "$@"
+# 페드루 PO CHANGES①(PR#4348 리뷰) — `timeout`은 기본 TERM만 보낸다. uv가 자식
+# pytest에 TERM을 못 넘기면(예: uv 자신이 신호를 무시·전달 지연) 고아 pytest가 같은
+# Postgres 세션을 붙든 채 남아 «다음 파일이 오염된 DB에서 실패」로 나와 정지 원인이
+# 가려진다 — `-k 30s`로 TERM 뒤 30초 안에 안 죽으면 KILL(무시 불가)까지 확실히 보낸다.
+timeout -k 30s "${TIMEOUT_MIN}m" "$@"
 code=$?
 
 if [ "$code" -eq 124 ]; then
