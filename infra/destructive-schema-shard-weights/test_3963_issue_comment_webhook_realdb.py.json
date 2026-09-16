@@ -1,0 +1,1 @@
+{"file": "tests/test_3963_issue_comment_webhook_realdb.py", "sec": 15.0, "source": "story-3963-local-2026-09-16(로컬 환경 이슈로 정밀 실측 못 함 — 형제 webhook 실PG 파일 test_2327_webhook_skipped_reason_realdb.py 규모 추정치, CI 실측치로 갱신 대상)"}

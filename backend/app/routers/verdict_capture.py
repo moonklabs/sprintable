@@ -28,6 +28,7 @@ from app.routers.cron import CRON_SECRET, _err, _ok, verify_cron
 from app.services.github_app import get_installation_token
 from app.services.merge_verdict_gate import reconcile_merge_gate_with_real_evidence
 from app.services.pr_story_link import merge_link_evidence, resolve_story_for_pr, upsert_link
+from app.services.pr_verdict_comment_parser import parse_verdict_comment
 from app.services.verdict_capture import (
     capture_pr_ci_verdict,
     capture_review_verdict,
@@ -35,6 +36,7 @@ from app.services.verdict_capture import (
     fetch_pr_changed_files,
     fetch_status_check_rollup,
     parse_story_id,
+    parse_story_number,
 )
 
 logger = logging.getLogger(__name__)
@@ -333,6 +335,95 @@ async def _resolve_legacy_org_by_repo_owner(
     return rows[0], "org_resolved_via_repo_owner"
 
 
+_TRUSTED_AUTHOR_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
+
+
+async def _handle_issue_comment_event(
+    session: AsyncSession, source: str, payload: dict, installation_id: int | None,
+) -> tuple[dict, str]:
+    """story #3963(적어둠 — verdict 원장 배선, PO 확定 2026-09-16 16:34Z) — PR 코멘트
+    3형(codex QA verdict·PO review/리뷰·명시적 비-verdict) → capture_review_verdict.
+
+    독립 분기(그라운딩·PO 판정): `issue_comment`는 pull_request/status와 payload 모양이
+    완전히 달라(`issue`+`comment`, `pull_request` 최상위 객체 없음) 기존 `resolve_story_for_pr`/
+    `_candidate_texts`(PR 라이프사이클 전용, 수년째 실사고로 다듬어진 로직) 재사용을 시도하지
+    않는다 — org 해소(app installation·legacy repo-owner)만 그 두 경로와 동형으로 재현하고,
+    story 해소는 `_scoped_story_by_number`(팀 실 SID 관례, story #3963 그라운딩)로 독립 처리.
+
+    member_id(PO 확定): 새 대리 멤버 신설 0 — `events.py::_get_or_create_system_publisher`
+    (org당 1·이미 「시스템 발행」으로 존재하는 anchor)를 그대로 participation의 member로
+    재사용한다. 「누가」는 role(qa/po)+source(github_comment)가 말하고, 실제 GitHub 계정
+    (author_login)은 이번 스코프에서 원장에 안 싣는다(Verdict 모델에 meta/note 컬럼 0,
+    신설 안 함 — PO 지시, 적기만).
+
+    author_association ∉ {OWNER, MEMBER, COLLABORATOR}면 skip — PASS/approved 낱말을 흉내
+    낸 임의 GitHub 계정의 코멘트가 verdict로 기록되는 스푸핑 방지(PO 지시)."""
+    if payload.get("action") != "created":
+        return {"skipped_reason": "not_created_action", "recorded": []}, "ignored"
+
+    issue = payload.get("issue") or {}
+    if not issue.get("pull_request"):
+        return {"skipped_reason": "not_a_pull_request_comment", "recorded": []}, "ignored"
+
+    comment = payload.get("comment") or {}
+    author_association = comment.get("author_association")
+    if author_association not in _TRUSTED_AUTHOR_ASSOCIATIONS:
+        return {"skipped_reason": "untrusted_author_association", "recorded": []}, "ignored"
+
+    body = comment.get("body") or ""
+    verdict = parse_verdict_comment(body)
+    if verdict is None:
+        return {"skipped_reason": "not_a_verdict_comment", "recorded": []}, "ignored"
+
+    story_number = parse_story_number(issue.get("title") or "") or parse_story_number(issue.get("body") or "")
+    if story_number is None:
+        return {"skipped_reason": "no_sid_tag", "recorded": []}, "ignored"
+
+    repo = (payload.get("repository") or {}).get("full_name") or ""
+    org_id: uuid.UUID | None = None
+    if source == "app":
+        if installation_id is None:
+            return {"skipped_reason": "no_installation_id", "recorded": []}, "ignored"
+        installation = (
+            await session.execute(
+                select(GithubInstallation).where(
+                    GithubInstallation.installation_id == installation_id,
+                    GithubInstallation.suspended_at.is_(None),
+                )
+            )
+        ).scalar_one_or_none()
+        if installation is None:
+            return {"skipped_reason": "installation_not_registered_or_suspended", "recorded": []}, "ignored"
+        org_id = installation.org_id
+    else:  # source == "legacy"
+        org_id, reason = await _resolve_legacy_org_by_repo_owner(session, repo)
+        if org_id is None:
+            return {"skipped_reason": reason, "recorded": []}, "ignored"
+
+    from app.services.pr_story_link import _scoped_story_by_number
+
+    story = await _scoped_story_by_number(session, org_id, story_number)
+    if story is None:
+        return {"skipped_reason": "story_not_found", "recorded": []}, "ignored"
+
+    from app.routers.events import _get_or_create_system_publisher
+
+    system_member = await _get_or_create_system_publisher(session, org_id)
+
+    result = await capture_review_verdict(
+        session=session,
+        org_id=org_id,
+        story_id=story.id,
+        role_key=verdict["role"],
+        member_id=system_member.id,
+        result=verdict["result"],
+        source="github_comment",
+    )
+    if not result.get("recorded"):
+        return result, "ignored"
+    return result, "processed"
+
+
 async def _process_webhook_event(
     session: AsyncSession, source: str, event: str, payload: dict, installation_id: int | None,
     delivery: GithubWebhookDelivery,
@@ -363,6 +454,9 @@ async def _process_webhook_event(
     가 실제로 SHA 재-pending을 발생시킨 경우에만(단순 재확인·SHA 일치는 대상 아님) qa:pass/
     design:pass 라벨 제거 요청을 append — 마찬가지로 commit 後 background_tasks로 발행.
     """
+    if event == "issue_comment":
+        return await _handle_issue_comment_event(session, source, payload, installation_id)
+
     texts = _candidate_texts(payload)
     repo = (payload.get("repository") or {}).get("full_name") or ""
     pr_number, merged, ci_conclusion, head_sha = _extract_pr_ci(event, payload)
