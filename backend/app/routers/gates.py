@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,6 +21,7 @@ from app.models.github_installation import GithubInstallation
 from app.models.hitl import HitlRequest
 from app.models.pm import Story, Task
 from app.models.visual_artifact import VisualArtifact
+from app.models.workflow_line import WorkflowLineStepApproval
 from app.routers.agent_gateway import wake_agent
 from app.routers.events import _push_to_agent
 from app.services.gate_github_check import is_repo_check_enforced, publish_gate_check, resolve_pr_link
@@ -2711,6 +2712,106 @@ async def _reassign_gate_approver_endpoint(
         return result
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
+
+
+class WorkflowStepApprovalDecisionRequest(BaseModel):
+    decision: Literal["approved", "rejected", "abstained"]
+    note: str | None = None
+
+    @model_validator(mode="after")
+    def _note_required_for_reject(self) -> "WorkflowStepApprovalDecisionRequest":
+        # pydantic v2는 필드가 기본값(None)을 쓴 경우 field_validator를 건너뛴다
+        # (validate_default=False가 기본) — model_validator(mode="after")는 기본값
+        # 사용 여부와 무관하게 항상 실행돼 이 필수-사유 계약을 확실히 강제한다.
+        if self.decision == "rejected" and not (self.note and self.note.strip()):
+            raise ValueError("note is required when decision is 'rejected'")
+        return self
+
+
+class WorkflowStepApprovalDecisionResponse(BaseModel):
+    approver: GateApproverResponse
+    outcome: str
+    skipped: bool
+    approved: int
+    rejected: int
+    total_blocking: int
+
+
+@router.post(
+    "/{id}/approvers/{approval_id}/decision",
+    response_model=WorkflowStepApprovalDecisionResponse,
+)
+async def decide_gate_approval_endpoint(
+    id: uuid.UUID,
+    approval_id: uuid.UUID,
+    body: WorkflowStepApprovalDecisionRequest,
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth=Depends(get_current_user),
+    locale: str | None = None,
+    accept_language: str | None = Header(None, alias="Accept-Language"),
+) -> WorkflowStepApprovalDecisionResponse:
+    """story #3793 — 라우트 진입점, `Header()` DI 마커는 여기서만 받는다(까심 QA CI FAILURE
+    원칙). 직접-호출 테스트는 `_decide_gate_approval_endpoint`를 불러야 한다."""
+    return await _decide_gate_approval_endpoint(
+        id, approval_id, body, session=session, org_id=org_id, auth=auth,
+        resolved_locale=resolve_locale_from_request(locale, accept_language),
+    )
+
+
+async def _decide_gate_approval_endpoint(
+    id: uuid.UUID,
+    approval_id: uuid.UUID,
+    body: WorkflowStepApprovalDecisionRequest,
+    *,
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    auth,
+    resolved_locale: str,
+) -> WorkflowStepApprovalDecisionResponse:
+    """story #3965 — 「오늘」 needs_me의 ``workflow_step`` 소스(today_service.py::
+    _needs_me_from_workflow_steps)가 이미 노출 중인 ``actions: ["approve","request_changes","hold"]``
+    가운데 approve/request_changes(reject)를 실제로 처리하는 첫 HTTP 엔드포인트 — story #3334가
+    미리 심어둔 ``record_parallel_decision``(그때까지 라우터 미배선·자기 테스트만 호출자였음)을
+    처음 배선한다. hold는 기존 gate-level ``/{id}/hold``(admin 전용)가 그대로 담당해 이 카드
+    범위 밖(approver row 단위가 아니라 gate 단위 동작이라 다른 축).
+
+    resolver=인증 caller 본인 강제(body 신뢰 0 — 대리결정 없음). ``record_parallel_decision``
+    자체가 resolver_id != approver_member_id 면 SelfApprovalError(SoD)를 던져 "본인 row만
+    해소"를 서비스층에서 이미 강제하지만, 그 함수는 org_id 스코프를 받지 않아(PK 단독 조회) 이
+    라우트가 org/gate 스코프 404 가드를 앞단에 추가로 건다(cross-org IDOR 차단)."""
+    resolved = await resolve_member(auth, org_id, session)
+    appr = (await session.execute(
+        select(WorkflowLineStepApproval).where(
+            WorkflowLineStepApproval.id == approval_id,
+            WorkflowLineStepApproval.org_id == org_id,
+            WorkflowLineStepApproval.gate_id == id,
+        )
+    )).scalar_one_or_none()
+    if appr is None:
+        raise HTTPException(status_code=404, detail=t("gates.approval_not_found", resolved_locale))
+
+    from app.services.workflow_parallel_approval import SelfApprovalError, record_parallel_decision
+    try:
+        result = await record_parallel_decision(
+            session, approval_id, body.decision, resolver_id=resolved.id, note=body.note,
+        )
+    except SelfApprovalError:
+        raise HTTPException(status_code=403, detail=t("gates.approval_self_or_foreign", resolved_locale))
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    await session.commit()
+    await session.refresh(appr)
+    enriched = await _enrich_approvers(session, org_id, [appr])
+    return WorkflowStepApprovalDecisionResponse(
+        approver=enriched[0],
+        outcome=result["outcome"],
+        skipped=result["skipped"],
+        approved=result["approved"],
+        rejected=result["rejected"],
+        total_blocking=result["total_blocking"],
+    )
 
 
 class GateOverrideRequest(BaseModel):
