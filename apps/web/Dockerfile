@@ -78,10 +78,19 @@ ENV NEXT_PUBLIC_TOSS_CLIENT_KEY=${NEXT_PUBLIC_TOSS_CLIENT_KEY}
 # ARG/ENV 어디에도 배선된 적이 없어(EE_ENABLED·TOSS_CLIENT_KEY와 동형 「분기는 있는데
 # 이 스테이지까지 안 옴」 클래스) 빌드 시점엔 항상 undefined — dev-app이 코드 하드코딩
 # localhost fallback을 그대로 인라인했다. 기본값을 안 둔다(다른 ARG들과 결이 다름 —
-# 이 값이 없으면 다음 줄의 `pnpm build`가 public-app-host.ts의 프로덕션 가드에서 즉시
-# 실패해야 한다, "조용한 fallback" 자체가 이 카드의 사고 원인이었다).
+# 이 값이 없으면 next.config.ts의 배포 빌드 가드(SPRINTABLE_DEPLOY_BUILD 마커 참고,
+# 아래)가 `pnpm build`를 즉시 실패시켜야 한다, "조용한 fallback" 자체가 이 카드의
+# 사고 원인이었다).
 ARG NEXT_PUBLIC_APP_URL
 ENV NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}
+# story #3947 CHANGES(카디르 재현) — 위 가드를 처음엔 NODE_ENV=production으로 걸었는데
+# `next build`는 로컬 smoke test·CI 검증 빌드에서도 항상 이 값을 강제해 무관 빌드까지
+# 죽였다(ci.yml "Lint, Type Check, Test, Build"·docker-smoke-test.yml 둘 다 실사고
+# 직전). 이 마커는 **cloudbuild.yaml의 진짜 Cloud Build 배포 빌드에서만** 심긴다(다른
+# 어떤 파이프라인도 이 값을 안 심음) — "이게 실제 배포 빌드인가"를 NODE_ENV와 분리해서
+# 묻는다.
+ARG SPRINTABLE_DEPLOY_BUILD
+ENV SPRINTABLE_DEPLOY_BUILD=${SPRINTABLE_DEPLOY_BUILD}
 RUN pnpm build
 
 # ─── 런타임 ──────────────────────────────────────────────────────────────────

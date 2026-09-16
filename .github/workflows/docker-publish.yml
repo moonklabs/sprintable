@@ -51,5 +51,13 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # story #3947(페드루 PO CHANGES) — 이 이미지를 실제로 실행하면(자가호스트 사용자
+          # 배포) create-organization-dialog.tsx/onboarding-form.tsx 렌더 시 public-app-host.ts의
+          # 런타임 프로덕션 가드가 NEXT_PUBLIC_APP_URL 부재로 던진다. SPRINTABLE_DEPLOY_BUILD를
+          # 안 심으니 next.config.ts의 빌드 가드는 안 걸리지만, 이 값은 채워야 한다(자가호스트
+          # 사용자는 자기 도메인으로 재빌드하거나 이 기본값을 감수 — 이 워크플로의 기존
+          # NEXT_PUBLIC_SUPABASE_* 미배선과 동형, 이 카드 스코프 밖).
+          build-args: |
+            NEXT_PUBLIC_APP_URL=http://localhost:3108
           cache-from: type=gha
           cache-to: type=gha,mode=max
