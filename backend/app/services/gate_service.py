@@ -2052,7 +2052,7 @@ async def _resolve_artifact_canonicalize_gate(session: AsyncSession, gate: Gate,
                 session, org_id=gate.org_id, event_type="artifact.canonicalized",
                 target_member_ids=list(target_ids),
                 title=f"정본 확정: {artifact.title}",
-                body=f"v{version_number}이(가) 정본으로 확정됐습니다." if version_number else None,
+                body=f"v{version_number}이(가) 정본으로 확정됐어요." if version_number else None,
                 reference_type="visual_artifact", reference_id=artifact.id,
                 source_project_id=artifact.project_id,
                 # story #2694: #2688(create_gate 2콜)과 동일 결함 클래스 — 이 호출부(transition_gate
@@ -2386,8 +2386,8 @@ async def override_gate(
             await dispatch_notification(
                 session, org_id=org_id, event_type="gate_overridden",
                 target_member_ids=list(targets.values()),
-                title="게이트가 강제 결정되었습니다",
-                body=f"owner 가 게이트를 {decision} 로 강제 결정했습니다: {reason}",
+                title="게이트가 강제 결정됐어요",
+                body=f"owner 가 게이트를 {decision} 로 강제 결정했어요: {reason}",
                 reference_type="gate", reference_id=gate_id,
                 # story #1953: sr(라인 step_run)이 해소된 경우 project_id는 그 값 그대로(신규
                 # 쿼리 0). story #1968: sr=None(단일 gate·활성 step_run 없음) 케이스는

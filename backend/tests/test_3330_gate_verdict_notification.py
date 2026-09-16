@@ -307,7 +307,7 @@ async def test_approved_gate_also_reaches_work_item_assignee():
             assert "- 게이트: external_publish → approved" in content
             # story #3387 — external_publish approved는 신 문구(실행 동사 0, 화면 실 버튼과
             # 헷갈릴 여지 자체를 없앤다). 옛 문구는 이제 다른 gate_type 전용이다.
-            assert "- 다음 행동: 할 일 없음 — 발행은 휴먼이 화면에서 합니다." in content
+            assert "- 다음 행동: 할 일 없음 — 발행은 휴먼이 화면에서 해요." in content
             assert "다음 stage 이벤트를 발행하세요" not in content
             # story 1cd72bfc AC(음성대조) — 사유 없이 승인하면 사유 줄 자체가 없다(지어내지 않음).
             assert "- 사유:" not in content

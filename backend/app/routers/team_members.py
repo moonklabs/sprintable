@@ -414,7 +414,7 @@ async def create_team_member(
                 # "None(에이전트)이..."로 샌다. member(신규 에이전트)는 생성 필수 필드라
                 # None 걱정 없음.
                 title=f"새 에이전트 합류: {member.name}",
-                body=f"{actor.name or UNNAMED_MEMBER_LABEL}(에이전트)이 {member.name}을 생성했습니다.",
+                body=f"{actor.name or UNNAMED_MEMBER_LABEL}(에이전트)이 {member.name}을 생성했어요.",
                 reference_type="team_member",
                 reference_id=member.id,
                 # story #1953: 신규 에이전트(member) 자신의 project_id — TeamMember.project_id

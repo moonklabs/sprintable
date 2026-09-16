@@ -115,7 +115,7 @@ async def test_same_combination_three_times_collapses_to_one_root_two_replies():
 
             assert "PR #4233" in replies[0].content
             assert "PR #4234" in replies[1].content
-            assert "다시 결재가 필요합니다" in replies[0].content
+            assert "다시 결재가 필요해요" in replies[0].content
     finally:
         await engine.dispose()
 

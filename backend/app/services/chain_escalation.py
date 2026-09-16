@@ -243,8 +243,8 @@ async def evaluate_unsupervised_chain_episode(
                 title="무인간 대화 자동 차단(서킷브레이커)",
                 body=(
                     f"human 참가자가 없는 대화에서 최근 {window_seconds}초간 메시지 {velocity}건"
-                    f"(임계 {threshold})이 발생해 agent 발신이 일시 차단되었습니다. "
-                    "이 알림의 «차단 해제»로 즉시 풀 수 있습니다."
+                    f"(임계 {threshold})이 발생해 agent 발신이 일시 차단됐어요. "
+                    "이 알림의 «차단 해제»로 즉시 풀 수 있어요."
                 ),
                 reference_type="conversation", reference_id=breaker_id,
                 source_project_id=project_id,
@@ -257,7 +257,7 @@ async def evaluate_unsupervised_chain_episode(
                 title="무인간 대화 무감독 연쇄 감지",
                 body=(
                     f"human 참가자가 없는 대화에서 최근 {window_seconds}초간 메시지 {velocity}건"
-                    f"(임계 {threshold})이 발생했습니다."
+                    f"(임계 {threshold})이 발생했어요."
                 ),
                 reference_type="conversation", reference_id=conversation_id,
                 source_project_id=project_id,

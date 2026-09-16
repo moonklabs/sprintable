@@ -158,7 +158,7 @@ async def test_send_activation_reminder_uses_user_locale(monkeypatch):
     await send_activation_reminder(db, ko_user)
     await send_activation_reminder(db, en_user)
 
-    assert sent[0]["subject"] == "Sprintable — 가입 완료까지 몇 단계 남았습니다"
+    assert sent[0]["subject"] == "Sprintable — 가입 완료까지 몇 단계 남았어요"
     assert "이어서 진행하기" in sent[0]["html_body"]
     assert sent[1]["subject"] == "Sprintable — a few steps left to finish setup"
     assert "Continue setup" in sent[1]["html_body"]
@@ -213,5 +213,5 @@ def test_send_invite_email_defaults_to_ko(monkeypatch):
     monkeypatch.setattr("app.services.org_invite_email.send_email", _fake_send_email)
     err = send_invite_email(to="invitee@example.com", org_name="Acme", token="tok123", role="admin")
     assert err is None
-    assert sent["subject"] == "[Sprintable] Acme 조직에 초대됐습니다"
+    assert sent["subject"] == "[Sprintable] Acme 조직에 초대됐어요"
     assert "팀에 초대됐어요!" in sent["html_body"]

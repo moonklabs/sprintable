@@ -35,7 +35,7 @@ async def test_notify_downgrade_reserved_downgrade_variant_locale_matched(monkey
     assert len(sent) == 2
     ko_sent = next(s for s in sent if s["to"] == "ko@example.com")
     en_sent = next(s for s in sent if s["to"] == "en@example.com")
-    assert ko_sent["subject"] == "[Sprintable] Starter 플랜으로 변경이 예약됐습니다"
+    assert ko_sent["subject"] == "[Sprintable] Starter 플랜으로 변경이 예약됐어요"
     assert "2026-09-29" in ko_sent["html"]
     assert "plan change to Starter is scheduled" in en_sent["subject"]
     # CTA(철회 링크)가 빌링 설정 페이지를 가리킨다 — 새 원클릭 엔드포인트 발명 없음.
@@ -58,8 +58,8 @@ async def test_notify_downgrade_reserved_cancellation_variant_uses_cancel_copy(m
     )
 
     assert len(sent) == 1
-    assert sent[0]["subject"] == "[Sprintable] 구독 해지가 예약됐습니다"
-    assert "Free 플랜으로 전환됩니다" in sent[0]["html"]
+    assert sent[0]["subject"] == "[Sprintable] 구독 해지가 예약됐어요"
+    assert "Free 플랜으로 전환돼요" in sent[0]["html"]
 
 
 @pytest.mark.anyio
@@ -115,7 +115,7 @@ async def test_notify_downgrade_applied_cancellation_variant(monkeypatch):
     await mod._notify_downgrade_applied(session, org_id=uuid.uuid4(), new_tier="free", is_cancellation=True)
 
     assert len(sent) == 1
-    assert sent[0]["subject"] == "[Sprintable] 구독이 해지되어 Free 플랜으로 전환됐습니다"
+    assert sent[0]["subject"] == "[Sprintable] 구독이 해지되어 Free 플랜으로 전환됐어요"
     assert "삭제되지 않고 그대로 보존" in sent[0]["html"]
 
 

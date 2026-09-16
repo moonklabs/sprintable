@@ -134,7 +134,7 @@ async def _notify_parallel_gate_approvers(
             session, org_id=step_run.org_id, event_type="gate_approval_requested",
             target_member_ids=approver_ids,
             title="게이트 결재 요청",
-            body=f"{step_run.entity_type} 항목의 {gate.gate_type} 결재가 대기 중입니다.",
+            body=f"{step_run.entity_type} 항목의 {gate.gate_type} 결재가 대기 중이에요.",
             reference_type="gate", reference_id=gate.id,
             source_project_id=step_run.project_id,
             # story #2696: outbox 이관(동일 결함 클래스 예방).
@@ -350,7 +350,7 @@ async def reassign_approver(
         await dispatch_notification(
             session, org_id=org_id, event_type="gate_reassigned",
             target_member_ids=[new_approver_id], title="결재자로 재지정됨",
-            body="관리자가 당신을 이 결재의 새 결재자로 지정했습니다.",
+            body="관리자가 나를 이 결재의 새 결재자로 지정했어요.",
             reference_type="gate", reference_id=gate_id,
             # story #1953: target(WorkflowLineStepApproval).project_id NOT NULL — 신규 조회
             # 없이 그대로 실음.
