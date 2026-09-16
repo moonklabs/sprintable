@@ -100,6 +100,28 @@ describe('scanContent — 라인 마커(// i18n-exempt: <사유>, story #3937)',
     expect(v.some((x) => x.text === '미확認')).toBe(true);
   });
 
+  it('JSX children 텍스트("// i18n-exempt: …"로 보이는 JsxText) 다음 줄 위반은 면제되지 않는다(카디르 codex 4번째 재현, 페드루 CHANGES4)', () => {
+    const content = [
+      'const v = <div>',
+      '// i18n-exempt: example',
+      "{'미확認'}",
+      '</div>;',
+    ].join('\n');
+    const v = scanContent(content, 'fake.tsx');
+    expect(v.some((x) => x.text === '미확認')).toBe(true);
+  });
+
+  it('JSX children 텍스트 마커 다음 줄이 속성값 변형(<span title=...>)이어도 면제되지 않는다(CHANGES4 변형)', () => {
+    const content = [
+      'const v = <div>',
+      '// i18n-exempt: example',
+      "<span title='미확認' />",
+      '</div>;',
+    ].join('\n');
+    const v = scanContent(content, 'fake.tsx');
+    expect(v.some((x) => x.text === '미확認')).toBe(true);
+  });
+
   it('실 gate-evidence.tsx — _UNCONFIRMED 상수는 마커로 면제되고 baseline·EXEMPT_FILES 밖에서도 GREEN이다', () => {
     const filePath = path.resolve(__dirname, '../src/components/cage/gate-evidence.tsx');
     const content = readFileSync(filePath, 'utf8');

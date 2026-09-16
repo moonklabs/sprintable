@@ -149,12 +149,45 @@ export interface Violation {
 // 토큰을 건너뛴다)의 leading·trailing 코멘트 범위를 전부 모아 파일 전체 코멘트 Set을
 // 만들면 "어느 토큰에 붙었는가"는 상관없어진다 — 그 Set 안에 있으면 파일 어딘가의
 // 진짜 주석이다.
+//
+// story #3937 CHANGES4(카디르 codex 4번째 재현·페드루 정정) — `ts.getLeadingCommentRanges
+// (fullText, pos)`는 "파서가 확定한 주석 목록"이 아니라 **주어진 pos에서 원문을 다시
+// 스캔**하는 함수다. `JsxText` 구간(코드가 아닌 텍스트) 안에 "// i18n-exempt: …" 처럼
+// 보이는 내용이 있으면 그 pos에서 시작한 재스캔이 코드 트리비아로 오인한다 — TSX에서
+// 그런 구간은 JsxText뿐이다(문자열·템플릿은 토큰 «내용»이라 스캔 대상 밖).
+// 처음엔 "JsxText 노드 자신의 getFullStart/getEnd에서만 조회를 건너뛴다"로 처방했으나
+// 실측 결과 불충분 — `<div>` 여는 태그의 `>` 토큰(GreaterThanToken)의
+// getTrailingCommentRanges(fullText, `>` 바로 다음 위치)가 «다른 토큰에서» 똑같은
+// JsxText 구간을 재스캔해 같은 오탐을 재현했다. 그래서 판별선을 "어느 토큰이
+// 방아쇠였는가"에서 "그 pos가 JsxText 구간 안인가"로 옮겼다 — 아래
+// `collectCommentMarkerLines`가 모든 JsxText 노드의 [getFullStart, getEnd) 구간을
+// 먼저 모으고, 코멘트 후보의 pos가 그 구간 안이면 «어느 토큰에서 나왔든» 무시한다.
 const I18N_EXEMPT_MARKER_RE = /^\/\/\s*i18n-exempt:\s*\S/;
 
 // pos(주석 시작 오프셋) 기준으로 dedupe — 인접한 여러 토큰이 같은 코멘트 범위를
 // leading/trailing 양쪽에서 중복 보고하기 때문.
 function collectCommentMarkerLines(sf: ts.SourceFile): Set<number> {
   const fullText = sf.getFullText();
+
+  // story #3937 CHANGES4 실측 정정 — "JsxText 노드 자신의 getFullStart/getEnd에서만
+  // 조회를 건너뛴다"는 처음 처방으론 부족했다: `<div>` 여는 태그의 `>` 토큰(GreaterThan)
+  // 의 getTrailingCommentRanges(fullText, `>` 다음 위치)가 바로 그 JsxText 구간을 다시
+  // 스캔해 같은 오탐을 일으킨다 — «어느 토큰이 방아쇠였는가»가 아니라 «그 위치가 JsxText
+  // 구간 안인가»가 진짜 판별선이다. 그래서 JsxText 노드들의 [getFullStart, getEnd) 구간을
+  // 먼저 전부 모아 두고, 코멘트 후보의 pos가 그 구간 «안»이면 통째로 버린다(어느 토큰의
+  // leading/trailing에서 나왔는지는 더 이상 안 따진다).
+  const jsxTextSpans: Array<[number, number]> = [];
+  function collectJsxTextSpans(node: ts.Node): void {
+    if (node.kind === ts.SyntaxKind.JsxText) {
+      jsxTextSpans.push([node.getFullStart(), node.getEnd()]);
+    }
+    ts.forEachChild(node, collectJsxTextSpans);
+  }
+  collectJsxTextSpans(sf);
+  function isInsideJsxText(pos: number): boolean {
+    return jsxTextSpans.some(([s, e]) => pos >= s && pos < e);
+  }
+
   const seenPos = new Set<number>();
   const markerLines = new Set<number>();
 
@@ -164,6 +197,7 @@ function collectCommentMarkerLines(sf: ts.SourceFile): Set<number> {
       if (r.kind !== ts.SyntaxKind.SingleLineCommentTrivia) continue;
       if (seenPos.has(r.pos)) continue;
       seenPos.add(r.pos);
+      if (isInsideJsxText(r.pos)) continue;
       const { line, character } = sf.getLineAndCharacterOfPosition(r.pos);
       // "그 줄이 실제로 그 주석으로 시작한다"(코드 뒤에 붙는 트레일링 주석 제외) —
       // 주석 시작 앞 컬럼이 전부 공백이어야 «마커 줄»로 인정한다.
