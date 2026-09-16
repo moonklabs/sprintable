@@ -290,10 +290,6 @@ importers:
         version: 5.9.3
 
   packages/db:
-    dependencies:
-      '@supabase/supabase-js':
-        specifier: ^2.101.1
-        version: 2.101.1
     devDependencies:
       '@types/node':
         specifier: ^20
