@@ -157,10 +157,11 @@ app/routers/channel_posts.py::채널 포스트 발행은 휴먼 멤버만 가능
 app/routers/content_rules.py::콘텐츠 규칙 편집은 조직 owner·admin만 가능합니다.
 app/routers/context_pack.py::임베딩 서비스를 사용할 수 없습니다. 잠시 후 다시 시도하세요.
 app/routers/context_pack.py::해당 프로젝트 접근 권한이 없습니다
+app/routers/conversations.py::org owner/admin의 해제 또는 자동 해소를 기다려주세요
 app/routers/conversations.py::님의 새 메시지
 app/routers/conversations.py::님이 나를 멘션했어요
 app/routers/conversations.py::서킷브레이커 해제는 org owner/admin만 가능합니다.
-app/routers/conversations.py::폭주 감지로 이 대화의 agent 발신이 일시 차단되었습니다 — org owner/admin의 해제 또는 자동 해소를 기다려주세요.
+app/routers/conversations.py::폭주 감지로 이 대화의 agent 발신이 일시 차단되었습니다
 app/routers/conversations.py::현재 보고 있는 프로젝트(제외 대상)
 app/routers/cron.py::관찰된 참조 0건(수집범위: mention/embed, source=chat_message·doc만 — PR/커밋/증거자유텍스트는 미수집이라 이 수에 없음)
 app/routers/cron.py::인데 CRON_SECRET 미설정 — 내부 cron 엔드포인트가 인증 없이 공개된다(fail-closed·story #2072).
