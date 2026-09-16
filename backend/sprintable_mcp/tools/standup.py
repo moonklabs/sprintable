@@ -63,7 +63,7 @@ async def standup_missing(args: StandupDateInput) -> list[TextContent]:
     try:
         return ok(await client.get("/api/v2/standups/missing", params={"project_id": client.require_project_id(), "date": args.date}))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def standup_history(args: StandupHistoryInput) -> list[TextContent]:
@@ -76,7 +76,7 @@ async def standup_history(args: StandupHistoryInput) -> list[TextContent]:
             params["days"] = str(args.days)
         return ok(await client.get("/api/v2/standups/history", params=params))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def get_standup(args: GetStandupInput) -> list[TextContent]:
@@ -86,7 +86,7 @@ async def get_standup(args: GetStandupInput) -> list[TextContent]:
         params: dict = {"author_id": args.member_id, "date": args.date, "project_id": client.require_project_id()}
         return ok(await client.get("/api/v2/standups", params=params))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def save_standup(args: SaveStandupInput) -> list[TextContent]:
@@ -105,7 +105,7 @@ async def save_standup(args: SaveStandupInput) -> list[TextContent]:
     try:
         return ok(await client.post("/api/v2/standups", json=body))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def list_standup_entries(args: ListStandupEntriesInput) -> list[TextContent]:
@@ -114,7 +114,7 @@ async def list_standup_entries(args: ListStandupEntriesInput) -> list[TextConten
     try:
         return ok(await client.get("/api/v2/standups", params={"project_id": client.require_project_id(), "date": args.date}))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def get_retro_session(args: GetRetroSessionInput) -> list[TextContent]:
@@ -126,7 +126,7 @@ async def get_retro_session(args: GetRetroSessionInput) -> list[TextContent]:
             body["title"] = args.title
         return ok(await client.post("/api/v2/retros/by-sprint", json=body))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def update_retro_action_status(args: UpdateRetroActionStatusInput) -> list[TextContent]:
@@ -137,7 +137,7 @@ async def update_retro_action_status(args: UpdateRetroActionStatusInput) -> list
             f"/api/v2/retros/{args.session_id}/actions/{args.action_id}", json={"status": args.status}
         ))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def checkin_sprint(args: CheckinSprintInput) -> list[TextContent]:
@@ -145,4 +145,4 @@ async def checkin_sprint(args: CheckinSprintInput) -> list[TextContent]:
     try:
         return ok(await client.get(f"/api/v2/sprints/{args.sprint_id}/checkin", params={"date": args.date}))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)

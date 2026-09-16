@@ -26,7 +26,7 @@ async def list_projects(_args: ListProjectsInput) -> list:
         result = await client.get("/api/v2/projects")
         return ok(result)
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 class SetDefaultProjectInput(BaseModel):
@@ -57,4 +57,4 @@ async def set_default_project(args: SetDefaultProjectInput) -> list:
                 _auth_ctx_cache[_key]["is_project_ambiguous"] = False
         return ok(result)
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)

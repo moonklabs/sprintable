@@ -117,7 +117,8 @@ async def test_get_content_rules_wraps_exception_as_err():
     client.get = AsyncMock(side_effect=RuntimeError("boom"))
     with patch.object(cr, "client", client):
         out = await cr.get_content_rules(cr.GetContentRulesInput())
-    assert out[0].text == "Error: boom"
+    # story #3933 — 1행 하위호환(startswith) + code/message JSON 블록 신설.
+    assert out[0].text.startswith("Error: boom\n")
 
 
 # ── toolset 등재(SSOT+vendored, catalog) ────────────────────────────────────────

@@ -60,7 +60,7 @@ async def get_project_overview(args: SprintableInput) -> list[TextContent]:
     try:
         return ok(await client.get("/api/v2/analytics/overview", params={"project_id": client.require_project_id()}))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def get_member_workload(args: WorkloadInput) -> list[TextContent]:
@@ -68,7 +68,7 @@ async def get_member_workload(args: WorkloadInput) -> list[TextContent]:
     try:
         return ok(await client.get("/api/v2/analytics/workload", params={"project_id": client.require_project_id(), "member_id": args.member_id}))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def get_sprint_velocity_history(args: SprintableInput) -> list[TextContent]:
@@ -76,7 +76,7 @@ async def get_sprint_velocity_history(args: SprintableInput) -> list[TextContent
     try:
         return ok(await client.get("/api/v2/analytics/velocity-history", params={"project_id": client.require_project_id()}))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def search_stories(args: SearchStoriesInput) -> list[TextContent]:
@@ -91,7 +91,7 @@ async def search_stories(args: SearchStoriesInput) -> list[TextContent]:
         has_more, next_cursor = _has_more_from_headers(headers, items)
         return ok_paginated(items, has_more=has_more, next_cursor=next_cursor, tool_name="sprintable_search_stories")
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def get_blocked_stories(args: SprintFilterInput) -> list[TextContent]:
@@ -108,7 +108,7 @@ async def get_blocked_stories(args: SprintFilterInput) -> list[TextContent]:
         has_more, next_cursor = _has_more_from_headers(headers, items)
         return ok_paginated(items, has_more=has_more, next_cursor=next_cursor, tool_name="sprintable_get_blocked_stories")
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def get_unassigned_stories(args: SprintFilterInput) -> list[TextContent]:
@@ -125,7 +125,7 @@ async def get_unassigned_stories(args: SprintFilterInput) -> list[TextContent]:
         has_more, next_cursor = _has_more_from_headers(headers, items)
         return ok_paginated(items, has_more=has_more, next_cursor=next_cursor, tool_name="sprintable_get_unassigned_stories")
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def get_overdue_tasks(args: OverdueMemberInput) -> list[TextContent]:
@@ -147,7 +147,7 @@ async def get_overdue_tasks(args: OverdueMemberInput) -> list[TextContent]:
         has_more, next_cursor = _has_more_from_headers(headers, items)
         return ok_paginated(items, has_more=has_more, next_cursor=next_cursor, tool_name="sprintable_get_overdue_tasks")
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def get_recent_activity(args: ActivityInput) -> list[TextContent]:
@@ -158,7 +158,7 @@ async def get_recent_activity(args: ActivityInput) -> list[TextContent]:
             params["limit"] = str(args.limit)
         return ok(await client.get("/api/v2/analytics/activity", params=params))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def get_goal_progress(args: GoalProgressInput) -> list[TextContent]:
@@ -166,7 +166,7 @@ async def get_goal_progress(args: GoalProgressInput) -> list[TextContent]:
     try:
         return ok(await client.get("/api/v2/analytics/epic-progress", params={"project_id": client.require_project_id(), "epic_id": args.goal_id}))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def get_agent_stats(args: AgentStatsInput) -> list[TextContent]:
@@ -174,7 +174,7 @@ async def get_agent_stats(args: AgentStatsInput) -> list[TextContent]:
     try:
         return ok(await client.get("/api/v2/analytics/agent-stats", params={"project_id": client.require_project_id(), "agent_id": args.agent_id}))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def get_project_health(args: SprintableInput) -> list[TextContent]:
@@ -182,4 +182,4 @@ async def get_project_health(args: SprintableInput) -> list[TextContent]:
     try:
         return ok(await client.get("/api/v2/analytics/health", params={"project_id": client.require_project_id()}))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)

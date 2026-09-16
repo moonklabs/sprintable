@@ -45,7 +45,7 @@ async def add_judgment(args: AddJudgmentInput) -> list[TextContent]:
         result = await client.post("/api/v2/judgments", json=payload)
         return ok(result)
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 class ListJudgmentsInput(SprintableInput):
@@ -79,4 +79,4 @@ async def list_judgments(args: ListJudgmentsInput) -> list[TextContent]:
         result = await client.get("/api/v2/judgments", params=params)
         return ok(result)
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)

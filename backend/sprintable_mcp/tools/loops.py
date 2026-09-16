@@ -23,4 +23,4 @@ async def get_loop_context(args: GetLoopContextInput) -> list[TextContent]:
         result = await client.get(f"/api/v2/loops/{args.loop_id}/context-pack")
         return ok(result)
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)

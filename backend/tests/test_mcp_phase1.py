@@ -135,7 +135,12 @@ def test_err_returns_call_tool_result_with_is_error():
     assert isinstance(result, list)
     assert len(result) == 1
     assert result[0].type == "text"
-    assert result[0].text == "Error: something went wrong"
+    # story #3933(2026-09-16) — 1행은 예전 그대로 유지(fleet의 `startswith("Error:")`류
+    # 파싱이 안 깨지게), 그 뒤 code/message 구조 JSON 블록이 새로 붙는다.
+    assert result[0].text.startswith("Error: something went wrong\n")
+    import json as _json
+    payload = _json.loads(result[0].text.split("\n", 1)[1])
+    assert payload == {"code": "UNKNOWN", "message": "something went wrong"}
 
 
 # ─── fix/mcp-error-surfacing: 4xx 본문 표면화 ───────────────────────────────
