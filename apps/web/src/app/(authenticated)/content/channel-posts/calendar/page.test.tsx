@@ -110,6 +110,14 @@ describe('ChannelPostCalendarPage (story #3422 ③)', () => {
   // 칩 문구를 무너뜨린다, 3661과 동형 결함). 채널명+연결 id 짧은 꼬리로 폴백한다
   // (channelConnectionIdentityLabel, 새 낱말 0). 뮤테이션 표적: label을
   // c.account_label ?? c.account_id로 되돌리면 이 테스트가 RED(전체 URL 노출).
+  //
+  // story #3742 CHANGES(카디르 재현) — 이 자리가 `channelConnectionIdentityLabel(c, t)`
+  // (t는 'content' 네임스페이스)로 남아있던 걸 못 잡았던 이유: 아래 두 assertion이
+  // "URL이 안 보인다"·"…이 있다"만 재서, 채널 라벨 부분이 실제로 「웹훅」인지 아니면
+  // next-intl MISSING_MESSAGE 아티팩트("content.channelLabelWebhook" 같은 원시 키
+  // 문자열)인지는 안 갈랐다 — content ns에서 그 키를 지운 이 스토리(3742)에서야
+  // 처음으로 실측 드러남. 실 값(koMessages.channelConnect.channelLabelWebhook="웹훅")을
+  // 직접 대조해 이 클래스를 다시 못 놓치게 고정한다.
   it('⭐account_label이 없는 연결은 필터 칩에 「채널명(…짧은 꼬리)」로 폴백하고 URL 전체를 노출하지 않는다', async () => {
     stubFetch({
       connections: [{
@@ -125,6 +133,11 @@ describe('ChannelPostCalendarPage (story #3422 ③)', () => {
     expect(container.querySelector('[data-testid="channel-post-calendar-grid"]')).not.toBeNull();
     expect(container.textContent).not.toContain('https://example.com');
     expect(container.textContent).toContain('…');
+    // 채널 라벨이 정본(channelConnect.channelLabelWebhook="웹훅")과 정확히 일치 — 다른
+    // 네임스페이스에서 못 찾은 키를 next-intl이 그대로 노출하는 MISSING_MESSAGE
+    // 아티팩트("content.channelLabelWebhook" 원시 키 문자열)는 부재.
+    expect(container.textContent).toContain(koMessages.channelConnect.channelLabelWebhook);
+    expect(container.textContent).not.toContain('channelLabelWebhook');
   });
 
   it('「날짜 미정」 항목은 레인에 뜨고 격자 셀에는 안 나온다', async () => {
