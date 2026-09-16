@@ -88,6 +88,53 @@ else
 fi
 
 echo
+echo "── dropdb/createdb 인프라 실패는 즉시 fail-fast(exit 1, 파일별 실패로 안 흡수) ──"
+# 페드루 PO CHANGES(PR#4348 4라운드) — createdb가 실패하면(고아 커넥션 등) 조용히
+# 지나가 다음 pytest가 없는/절반짜리 DB에서 돌다 그 파일 자체의 회귀로 오진된다.
+FAKE_BIN_INFRA="$WORK/bin-infra-fail"
+mkdir -p "$FAKE_BIN_INFRA"
+cp "$FAKE_BIN/dropdb" "$FAKE_BIN_INFRA/dropdb"
+cat > "$FAKE_BIN_INFRA/createdb" <<'EOF'
+#!/usr/bin/env bash
+echo "synthetic createdb failure" >&2
+exit 1
+EOF
+chmod +x "$FAKE_BIN_INFRA/createdb"
+
+INFRA_FAILED_OUT="$WORK/infra-failed.txt"
+INFRA_ELAPSED_OUT="$WORK/infra-elapsed.tsv"
+: > "$INFRA_ELAPSED_OUT"
+set +e
+INFRA_OUT="$(PATH="$FAKE_BIN_INFRA:$PATH" \
+  WRAPPER_SCRIPT="$WRAPPER_SCRIPT" \
+  STALL_TIMEOUT_MIN=8 \
+  FILES_LIST_FILE="$FILES_LIST" \
+  ELAPSED_OUT_FILE="$INFRA_ELAPSED_OUT" \
+  FAILED_OUT_FILE="$INFRA_FAILED_OUT" \
+  "$LOOP_SCRIPT" "$WORK/fake-pytest.sh" 2>&1)"
+INFRA_CODE=$?
+set -e
+
+if [ "$INFRA_CODE" -eq 1 ]; then
+  echo "  ok   createdb 실패 시 루프 스크립트가 즉시 exit 1(인프라 실패를 일반 pytest 실패와 구분)"
+else
+  echo "  FAIL createdb 실패인데 exit code=${INFRA_CODE}(기대 1) — 출력: $INFRA_OUT"
+  FAIL=1
+fi
+if [[ "$INFRA_OUT" == *"::error::"* ]] && [[ "$INFRA_OUT" == *"createdb"* ]]; then
+  echo "  ok   ::error:: 메시지가 createdb 재생성 실패를 명시함"
+else
+  echo "  FAIL createdb 실패 ::error:: 메시지 누락 — 출력: $INFRA_OUT"
+  FAIL=1
+fi
+if [ ! -s "$INFRA_FAILED_OUT" ]; then
+  echo "  ok   FAILED_OUT_FILE에 안 섞임(인프라 실패는 «파일 실패» 목록이 아니다)"
+else
+  echo "  FAIL 인프라 실패가 FAILED_OUT_FILE에 섞여 들어감 — 내용: $(cat "$INFRA_FAILED_OUT")"
+  FAIL=1
+fi
+
+echo
 if [ "$FAIL" -eq 0 ]; then
   echo "ALL PASS"
   exit 0

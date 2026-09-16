@@ -57,13 +57,27 @@ fi
 
 for f in "${files[@]}"; do
   echo "::group::isolated $f"
-  PGPASSWORD="${PGPASSWORD:-sprintable}" dropdb -h localhost -U sprintable --if-exists sprintable_test_iso
-  PGPASSWORD="${PGPASSWORD:-sprintable}" createdb -h localhost -U sprintable -T sprintable_test_tpl sprintable_test_iso
+  # 페드루 PO CHANGES(PR#4348 4라운드) — 이 스크립트는 -e를 안 켰으므로 dropdb/createdb가
+  # 실패해도(예: 이전 파일이 남긴 커넥션 때문에 DROP DATABASE가 거부되는 등) 조용히
+  # 지나가 이후 pytest가 절반짜리/없는 DB에서 돌다 실패한다 — 그 실패가 «이 파일의
+  # 회귀»로 오진되고 진짜 원인(인프라)은 로그에 안 남는다. 여기서 즉시 잡아 죽인다 —
+  # `exit 1`(이 스크립트 자체의 exit code)은 이 스크립트를 부르는 ci.yml 쪽 simple
+  # command 호출 지점에서 GHA 기본 `bash -eo pipefail`(그 스텝 자신은 이 스크립트와
+  # 별도 프로세스라 여전히 -e 활성)이 즉시 스텝을 죽인다 — 파일별 pytest 실패(항상 0
+  # 반환, FAILED_OUT_FILE로만 누적)와 인프라 실패(이 스크립트 자체가 죽음)를 이렇게
+  # 종료코드 층위에서 구분한다(실측: 별도 프로세스는 부모 -e를 안 물려받지만, 그
+  # 프로세스의 최종 exit code가 0이 아니면 부모의 -e는 정상적으로 발동함 — `bash -c
+  # 'set -e; ./child.sh; echo unreachable'`로 확인).
+  PGPASSWORD="${PGPASSWORD:-sprintable}" dropdb -h localhost -U sprintable --if-exists sprintable_test_iso \
+    || { echo "::error::STALL-무관 인프라 실패(story #3944) — $f 처리 前 dropdb sprintable_test_iso 재생성 실패"; exit 1; }
+  PGPASSWORD="${PGPASSWORD:-sprintable}" createdb -h localhost -U sprintable -T sprintable_test_tpl sprintable_test_iso \
+    || { echo "::error::STALL-무관 인프라 실패(story #3944) — $f 처리 前 createdb sprintable_test_iso 재생성 실패"; exit 1; }
   _t0=$(date +%s)
-  # 페드루 PO HIGH(PR#4348 재리뷰, 카디르 재현) — GHA `run:`는 기본 `bash -eo pipefail`
-  # 이지만 이 스크립트는 set -e를 안 켰으므로 이 if 없이도 -e 문제는 없다 — 그래도
-  # if/then/else 형태를 유지하는 건(이 스크립트가 언젠가 -e 켠 셸에서 source될 가능성을
-  # 막는 방어) + 가독성 때문.
+  # 페드루 PO HIGH(PR#4348 재리뷰, 카디르 재현) — 이 스크립트를 별도 프로세스로
+  # 부르면(현재 ci.yml 호출 방식) -e가 안 상속돼 이 if 없이도 문제는 안 생긴다. 하지만
+  # 이 if/then/else는 "이 파일이 어디서(-e 켜진 셸에 source되거나, 나중에 인라인으로
+  # 되돌려지거나) 실행되든 지키는" 불변식으로 일부러 남긴다 — 파일 하나 실패가 나머지
+  # 파일 실행을 막으면 안 된다는 계약은 호출 컨텍스트에 의존해서는 안 된다(#2293 철학).
   if "$WRAPPER_SCRIPT" "$STALL_TIMEOUT_MIN" -- "${PYTEST_PREFIX[@]}" "$f"; then
     _pytest_exit=0
   else
