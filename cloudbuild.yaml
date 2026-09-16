@@ -528,6 +528,13 @@ steps:
       - NEXT_PUBLIC_TOSS_CLIENT_KEY=${_TOSS_CLIENT_KEY}
       - --build-arg
       - NEXT_PUBLIC_APP_URL=${_NEXT_PUBLIC_APP_URL}
+      # story #3947 CHANGES(페드루 PO, 카디르 재현) — next.config.ts의 배포 빌드 가드가
+      # 처음엔 NODE_ENV=production으로 켜졌는데 `next build`는 CI 검증·로컬 smoke
+      # test에서도 항상 이 값을 강제해 무관 빌드까지 죽일 뻔했다(ci.yml Build 잡·
+      # docker-smoke-test.yml 둘 다 이 값을 안 줌). 이 마커는 **이 Cloud Build 배포
+      # 빌드에서만** 심는다 — "진짜 배포 빌드인가"를 NODE_ENV와 분리.
+      - --build-arg
+      - SPRINTABLE_DEPLOY_BUILD=1
       - .
     env:
       - DOCKER_BUILDKIT=1

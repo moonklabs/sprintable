@@ -89,9 +89,19 @@ const _SECURITY_HEADERS = [
 // 렌더 시점) 걸린다 — create-organization-dialog.tsx/onboarding-form.tsx는 인증 뒤
 // 화면이라 정적 프리렌더 대상이 아니라 `next build` 자체는 통과하고 브라우저에서만
 // 늦게 터질 수 있었다. 이 모듈은 `next build`가 로드하자마자(설정 파싱 시점) 실행되므로
-// 여기서 한 번 더 검사하면 **빌드 자체가** 즉시 RED — 조용한 fallback이 CI/배포까지
-// 새어나가는 것을 원천 차단한다(`next dev`는 NODE_ENV=development라 안 걸림).
-if (process.env.NODE_ENV === 'production' && !process.env.NEXT_PUBLIC_APP_URL?.trim()) {
+// 여기서 한 번 더 검사하면 **빌드 자체가** 즉시 RED.
+//
+// 페드루 PO CHANGES(카디르 재현) — 처음엔 이 조건을 `NODE_ENV === 'production'`으로
+// 뒀는데, `next build`는 **모든** 빌드(진짜 배포든 CI 검증이든 로컬 smoke든)에서 항상
+// NODE_ENV=production을 강제한다 — "배포 빌드"의 대용값이 아니다. 그 결과 ci.yml의
+// "Lint, Type Check, Test, Build" 잡의 `pnpm build`(NEXT_PUBLIC_APP_URL 없음)와
+// docker-smoke-test.yml(build-args가 Supabase 2개뿐)의 next build 양쪽에서 이 가드가
+// 던져 이 PR을 포함한 **모든 PR의 CI**가 RED가 될 뻔했다(무관 PR을 건드리는 새 가드는
+// 그 자체가 결함). 진짜 Cloud Build 배포 빌드에서만 켜지는 명시적 마커
+// `SPRINTABLE_DEPLOY_BUILD`(cloudbuild.yaml에서만 `--build-arg SPRINTABLE_DEPLOY_BUILD=1`
+// 로 심음, CI/로컬/스모크는 안 심음)로 바꿔 "실제 배포 빌드인가"와 "NODE_ENV가 뭔가"를
+// 분리한다.
+if (process.env.SPRINTABLE_DEPLOY_BUILD === '1' && !process.env.NEXT_PUBLIC_APP_URL?.trim()) {
   throw new Error(
     'NEXT_PUBLIC_APP_URL이 배포 빌드에 배선되지 않았다(story #3947) — cloudbuild.yaml의 ' +
       'build-frontend 스텝 --build-arg / Dockerfile ARG·ENV를 확認하라.'
