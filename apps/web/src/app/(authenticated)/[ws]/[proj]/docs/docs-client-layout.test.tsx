@@ -424,4 +424,18 @@ describe('DocsClientLayout — story #3784 loading/loadError 컨텍스트 실 �
     expect(container.textContent).not.toContain('문서를 선택하세요');
     expect(container.textContent).toContain('아직 쌓인 문서가 없어요');
   });
+
+  // story #3945(#3942 배포 92 디자인 감사) — TopBarSlot 브레드크럼 라벨이 DocsIndex의
+  // 마스트헤드 h1과 같이 <h1>이라 페이지에 h1이 2개(개념적으로 다른 문구: "문서" vs
+  // 실 목록 제목)였다(헤딩 위계 위반). TopBarSlot을 실 자식(DocsIndex)과 함께 마운트해
+  // 실 페이지 조합 그대로 재현·고정한다 — DocsIndex는 goals-client와 달리 마스트헤드를
+  // 반응형으로 이중 렌더하지 않아(단일 wrapper) 정확히 1개가 정답.
+  it('⭐문서 목록 화면은 h1이 정확히 1개다(TopBarSlot 라벨은 비-헤딩, DocsIndex 마스트헤드만 h1)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: [DOC_A, DOC_B], meta: { hasMore: false, nextCursor: null } }) })));
+    await mountWithIndex();
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    const h1s = [...container.querySelectorAll('h1')];
+    expect(h1s).toHaveLength(1);
+    expect(h1s[0]!.className).not.toContain('text-sm font-medium');
+  });
 });

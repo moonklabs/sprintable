@@ -337,3 +337,28 @@ describe('GoalsClient — 로드맵 P2·PR-C L1(에픽 카드 elevation 토큰, 
     expect(container.querySelector('.shadow-lg')).toBeNull();
   });
 });
+
+// story #3945(#3942 배포 92 디자인 감사) — TopBarSlot 브레드크럼 라벨이 본문 마스트헤드와
+// 같이 <h1>이라 페이지에 h1이 2개(개념적으로 다른 두 제목)였다(헤딩 위계 위반). TopBarSlot은
+// 위에서 <div>로만 목업하므로(title을 그대로 렌더) 이 테스트가 실제로 그 중복 클래스를
+// 재현·고정한다.
+//
+// ⚠️jsdom은 CSS를 계산하지 않는다 — listPanel(본문 마스트헤드 h1을 담은 블록)이 데스크톱
+// (`hidden … lg:flex`)·모바일(`… lg:hidden`) 두 반응형 래퍼에 각각 렌더돼(오직 한 뷰포트만
+// 실제로 보이는, 실 브라우저에선 display:none이 접근성 트리에서 자동 제외되는 정당한 패턴)
+// 원문 h1이 정확히 2개(같은 문구) 나온다 — 이 자체는 이 스토리의 결함이 아니다(뷰포트마다
+// 실제로 보이는 h1은 1개). 이 카드가 고친 것은 «TopBarSlot이 3번째(다른 문구의) h1을
+// 추가로 얹던» 자리이므로, 테스트는 "h1이 정확히 2개(반응형 쌍)·전부 같은 본문 제목"으로
+// TopBarSlot의 기여분이 0임을 확認한다.
+describe('GoalsClient — 페이지 h1 1개 원칙(story #3945)', () => {
+  it('⭐TopBarSlot 브레드크럼은 h1을 안 만든다 — 남은 h1은 반응형 쌍(데스크톱+모바일)뿐, 전부 같은 본문 제목', async () => {
+    stubFetch([{ id: 'e1', title: '목표A', status: 'active', total_stories: 2, done_stories: 1 }]);
+    await mount();
+    const h1s = [...container.querySelectorAll('h1')];
+    expect(h1s).toHaveLength(2);
+    expect(new Set(h1s.map((h) => h.textContent))).toEqual(new Set(['목표']));
+    // TopBarSlot 라벨 특유의 className(text-sm font-medium)을 가진 h1은 0개여야 한다
+    // (TopBarSlot이 <p>로 낮아졌다면 이 클래스 조합의 h1 자체가 존재할 수 없다).
+    expect(h1s.some((h) => h.className.includes('text-sm font-medium'))).toBe(false);
+  });
+});
