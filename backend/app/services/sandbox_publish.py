@@ -34,12 +34,23 @@
   `classify_graph_oauth_error`가 CHANNEL_CONNECTION_REVOKED로 분류하게 한다. subcode는
   스토리 본문 確定①에 PO가 못박은 목록(458 앱 권한 없음/460 비번 변경/463 만료/467
   무효/490 사용자가 앱 권한 취소) 안에서만 고른다 — 3595 표의 3사건과 정확히 1:1
-  대응하는 별도 subcode가 Meta 쪽에 없어(그라운딩 갭, PO 재확認 요망) 의미가 가장
-  가까운 것으로 잠정 배정했다: `revoked`=490(문자 그대로 "권한 취소"), `page-unlinked`
-  =458(페이지에 대한 앱 권한을 잃는 것 — "앱 권한 없음"과 같은 결과), `app-inactive`
-  =467(앱이 꺼지면 그 앱으로 발급된 토큰이 "무효"가 된다는 해석). 셋 다 classify_graph_
-  oauth_error 안에서는 동일하게 "revoked"로 수렴한다(현재 reason 어휘가 expired|
-  revoked|error 3종뿐이라 그 이상 세분화할 자리가 없다 — 어휘가 늘면 재배정).
+  대응하는 별도 subcode가 Meta 쪽에 없어 의미가 가장 가까운 것으로 배정했다:
+  `revoked`=490(문자 그대로 "권한 취소"), `page-unlinked`=458(페이지에 대한 앱
+  권한을 잃는 것 — "앱 권한 없음"과 같은 결과), `app-inactive`=467(앱이 꺼지면 그
+  앱으로 발급된 토큰이 "무효"가 된다는 해석). 셋 다 classify_graph_oauth_error
+  안에서는 동일하게 "revoked"로 수렴한다(현재 reason 어휘가 expired|revoked|error
+  3종뿐이라 그 이상 세분화할 자리가 없다 — 어휘가 늘면 재배정).
+  story #3951(3595 표 후속, 그라운딩 갭 해소·페드루 PO 確定 2026-09-16) — 위
+  「정확히 1:1 대응하는 subcode가 Meta 쪽에 없다」는 그라운딩을 공식 문서로
+  확定했다: developers.facebook.com/docs/graph-api/guides/error-handling가
+  code 190(OAuthException) 아래 문서화한 subcode는 458·459·460·463 **4개뿐**이고
+  전부 「사용자 세션/인증 상태」를 가리킨다 — 앱 자체의 비활성/개발자disable/
+  Meta정지를 가리키는 전용 subcode는 존재하지 않는다(모듈 상단 190 밖 family
+  10·200~299의 fail-closed 판단과 같은 결의 사실). `app-inactive` 마커가 467을
+  빌려 쓰는 것은 그래서 **영구적으로 잠정** 배정이다(더 정밀한 subcode가 나중에
+  Meta 쪽에 생기지 않는 한 이 이상 나눌 근거가 없다) — instagram_sandbox_publish.py
+  /facebook_sandbox_publish.py로 이식할 때도 이 배정을 그대로 물려받는다(신규
+  subcode 발명 0).
 - `[sandbox:permission-error]`(story #3605, 3598 AC6 일반화 시뮬레이션) — `create_
   container`가 401로 실패하되 `provider_error_code=10`(type 없음 — code==10은
   190과 달리 OAuthException 타입 표기 없이도 이 family에 걸린다, 그라운딩:
