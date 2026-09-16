@@ -10,8 +10,11 @@
 #
 # 사용법: run-with-stall-detection.sh <timeout_minutes> -- <command...>
 #   지정 시간(분) 안에 command가 안 끝나면 강제종료하고 STALL 메시지를 stderr에
-#   찍은 뒤 exit 124(coreutils timeout(1)의 관례값 그대로 — 새 계약 발명 금지).
-#   command가 스스로 끝나면 그 종료 코드를 그대로 돌려준다(성공/실패 무변경).
+#   찍은 뒤 exit 124(coreutils timeout(1)의 관례값 그대로 — 새 계약 발명 금지). TERM을
+#   무시해 KILL escalation까지 간 경우(coreutils 자체 실측 137)도 실제로 제한시간에
+#   도달했을 때만 여기 포함해 124로 정규화한다.
+#   command가 스스로 끝나거나, 제한시간 도달 前에 외부 원인(예: 진짜 SIGKILL)으로
+#   죽으면 그 종료 코드를 그대로 돌려준다(성공/실패/외부종료 무변경).
 set -uo pipefail
 
 if [ "$#" -lt 3 ] || [ "$2" != "--" ]; then
@@ -29,18 +32,29 @@ shift 2
 # 보낸다. 기본 30초(CI 실제 값)지만 자가진단(TERM 무시 양성대조)이 30초씩 기다리지
 # 않도록 STALL_KILL_AFTER 환경값으로 짧게 주입할 수 있게 뺐다.
 KILL_AFTER="${STALL_KILL_AFTER:-30s}"
+_start=$(date +%s)
 timeout -k "$KILL_AFTER" "${TIMEOUT_MIN}m" "$@"
 code=$?
+_elapsed=$(( $(date +%s) - _start ))
+_limit_sec=$(awk "BEGIN { printf \"%d\", (${TIMEOUT_MIN} * 60) }")
 
-# 페드루 PO CHANGES(PR#4348 잔여③ 자가진단 그라운딩 중 실측 발견) — GNU coreutils
-# timeout(1) 매뉴얼: TERM만으로 죽으면 124, 그런데 TERM을 무시해 KILL(9)까지 가면
-# **137**(128+9)로 exit code가 달라진다(실측: `timeout -k 1s 1s bash -c 'trap "" TERM;
-# sleep 60'` → exit 137, 2초 소요 — 124가 아니었다). 이 스크립트의 계약은 "정지=124"
-# 하나뿐이므로 KILL 경로도 여기서 124로 정규화한다 — 호출부(ci.yml 루프)가 137까지
-# 따로 알아야 하면 계약이 새는 것.
+# 페드루 PO CHANGES(PR#4348 잔여③→4라운드) — GNU coreutils timeout(1) 매뉴얼:
+# TERM만으로 죽으면 124, TERM을 무시해 KILL(9)까지 가면 **137**(128+9)로 exit code가
+# 달라진다(실측: `timeout -k 1s 1s bash -c 'trap "" TERM; sleep 60'` → exit 137).
+# 다만 137은 우리 KILL escalation 말고도 **외부에서 온 진짜 SIGKILL**(OOM killer 등,
+# 이 스크립트의 제한시간과 무관)에서도 나온다(카디르 재현) — 그 즉발 137까지 STALL로
+# 정규화하면 "왜 멈췄는지"가 거짓으로 찍힌다. 그래서 137은 실측 경과시간이 우리
+# 제한시간(TIMEOUT_MIN)에 실제로 도달했을 때만 STALL(124 정규화)로 판정하고, 그 전에
+# (제한시간 도달 전) 137이 오면 우리 정지감지가 한 일이 아니므로 137 그대로 전달한다.
+# (124는 coreutils 자신이 "시간이 다 됐다"고 판단했을 때만 나오는 값이라 이 모호함이
+# 없다 — 경과시간 대조 불필요.)
 if [ "$code" -eq 137 ]; then
-  echo "STALL: 명령이 ${TIMEOUT_MIN}분 안에 안 끝나 강제 종료됨(TERM 무시 → ${KILL_AFTER} 뒤 KILL escalation) — $*" >&2
-  exit 124
+  if [ "$_elapsed" -ge "$_limit_sec" ]; then
+    echo "STALL: 명령이 ${TIMEOUT_MIN}분 안에 안 끝나 강제 종료됨(TERM 무시 → ${KILL_AFTER} 뒤 KILL escalation) — $*" >&2
+    exit 124
+  else
+    echo "명령이 외부 SIGKILL(137)로 즉시 종료됨(경과 ${_elapsed}s < 제한 ${_limit_sec}s) — 이 스크립트의 정지 감지와 무관, 원 코드 그대로 전달 — $*" >&2
+  fi
 elif [ "$code" -eq 124 ]; then
   echo "STALL: 명령이 ${TIMEOUT_MIN}분 안에 안 끝나 강제 종료됨 — $*" >&2
 fi
