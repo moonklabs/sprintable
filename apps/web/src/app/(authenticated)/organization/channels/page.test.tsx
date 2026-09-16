@@ -10,6 +10,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../../../messages/ko.json';
+import enMessages from '../../../../../messages/en.json';
 
 const { useDashboardContextMock, useSearchParamsMock } = vi.hoisted(() => ({
   useDashboardContextMock: vi.fn(),
@@ -1564,10 +1565,18 @@ describe('OrganizationChannelsPage — GA4 연결(story #3583)', () => {
   // 3문장이 「무슨 일 — 무엇을 하라」 한 형태로 통일됐는지 리터럴로 잠근다. ②·③
   // (권한 회수·페이지 연결 해제)은 안 가른다는 판정이라 channelReauthRevoked 하나가
   // 둘 다를 포괄하는 문장이어야 한다(별도 pin 불요 — 같은 키 재사용 자체가 그 증거).
-  it('⭐#3951 — 유나 판정 문구 3종이 정확히 그 값으로 고정된다', () => {
+  it('⭐#3951 — 유나 판정 문구 3종이 정확히 그 값으로 고정된다(ko)', () => {
     expect(koMessages.channelConnect.channelReauthExpired).toBe('연결이 만료됐어요 — 다시 연결해 주세요.');
     expect(koMessages.channelConnect.channelReauthRevoked).toBe('채널 쪽에서 연결이 끊겼어요 — 다시 연결해 주세요.');
     expect(koMessages.channelConnect.channelReauthError).toBe('이 연결로 지금 발행할 수 없어요 — 다시 연결해 보세요.');
+  });
+
+  // story #3951 — 유나가 별도 코멘트(2026-09-16 12:58Z, artifact 9ec22395)로 못박은
+  // en.json 짝(「디디군이 영어 발명 안 하게」) — ko와 마찬가지로 리터럴 고정.
+  it('⭐#3951 — 유나 판정 문구 3종이 정확히 그 값으로 고정된다(en)', () => {
+    expect(enMessages.channelConnect.channelReauthExpired).toBe('This connection expired — please reconnect.');
+    expect(enMessages.channelConnect.channelReauthRevoked).toBe('The channel disconnected this connection — please reconnect.');
+    expect(enMessages.channelConnect.channelReauthError).toBe("You can't publish with this connection right now — try reconnecting.");
   });
 
   it('needs_reauth — reason이 없으면 note 자체를 안 그린다', async () => {
