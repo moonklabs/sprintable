@@ -36,6 +36,7 @@ from app.models.api_key import ApiKey
 from app.models.agent_auth_failure import AgentAuthFailure
 from app.models.agent_api_key_usage_log import AgentApiKeyUsageLog
 from app.models.human_api_key import HumanApiKey
+from app.models.agent_device_credential import AgentDeviceCredential
 from app.models.org_subscription import OrgSubscription
 from app.models.pricing_version import PricingVersion
 from app.models.offering_version import OfferingVersion

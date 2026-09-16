@@ -60,3 +60,6 @@ backend/scripts/*_result.json
 backend/scripts/*_survey*.json
 backend/scripts/*_dump.json
 backend/scripts/*_dump.csv
+
+# re0 iteration scratch (local, never shipped)
+.re0/

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import logging
 import uuid
 from dataclasses import dataclass, field
@@ -275,6 +277,42 @@ async def _resolve_api_key(
     )
 
 
+async def _bump_device_seq_committed(
+    *, credential_id: uuid.UUID, new_value: int, touch_last_seen: bool,
+) -> bool:
+    """기기 자격증명 리플레이 CAS — **자기 세션에서 수행하고 커밋한다.**
+
+    ``_touch_api_key_last_used`` 와 같은 이유로 전용 세션 + 단독 짧은 트랜잭션이다.
+    다만 저쪽은 fail-silent(인증에 영향 없음)이고, **이쪽은 인증의 일부**라 결과를
+    반환한다 — CAS 가 0행이면 호출부가 401 로 거부해야 한다(리플레이/폐기).
+
+    ⚠️초판은 caller `db` 세션에서 CAS 했다. 그 세션은 커밋 없는 ``async with`` 라
+    세션 종료 시 **롤백**되어 카운터가 DB 에 영구히 남지 않았다(리플레이 방어 무력).
+    동시에 그 row-lock 을 응답 끝까지 물어 별도 커넥션과 교착했다. 여기서 분리하면
+    둘 다 해소된다 — 이 행을 쓰는 주체가 이 세션 하나뿐이라 경합도 없다.
+
+    스로틀 판정(`touch_last_seen`)은 호출부가 조회 시점 메모리 값으로 이미 했다.
+    """
+    from app.services import device_credential as dc
+
+    try:
+        async with async_session_factory() as s:
+            bumped = await dc.atomic_bump_device_credential_seq(
+                s, credential_id=credential_id, new_value=new_value, touch_last_seen=touch_last_seen,
+            )
+            if not bumped:
+                # 커밋할 변경이 없다 — 롤백으로 종료해도 무해하나 명시로 남긴다.
+                await s.rollback()
+                return False
+            await s.commit()
+            return True
+    except Exception:
+        # 인증 경로 — 예외를 401 로 수렴시킨다(카운터를 못 올렸으면 리플레이를 막을 수
+        # 없으므로 통과시키면 안 된다). fail-open 금지.
+        logger.warning("_bump_device_seq_committed failed credential_id=%s", credential_id, exc_info=True)
+        return False
+
+
 async def _touch_human_api_key_last_used(key_id: uuid.UUID) -> None:
     """_touch_api_key_last_used(agent)와 동형 — 전용 세션·단독 짧은 트랜잭션·fail-silent."""
     from app.models.human_api_key import HumanApiKey
@@ -346,6 +384,202 @@ async def _resolve_human_api_key(raw_key: str, db: AsyncSession) -> AuthContext:
             },
         },
         org_id=str(member.org_id),
+    )
+
+
+async def _resolve_device_credential(
+    raw_credential: str,
+    db: AsyncSession,
+    *,
+    method: str,
+    route: str,
+    timestamp: str | None,
+    server_seq: str | None,
+    signature_b64: str | None,
+    body_sha256: str | None,
+) -> AuthContext:
+    """기기별 자격증명(``dt_live_<uuid>``)으로 AuthContext 반환.
+
+    `sk_live_*`(org 전역 장수명 bearer) 대비 blast radius를 좁힌다 — 기기 1대를 잃으면
+    그 자격증명만 폐기하면 되고, 연결된 다른 기기는 무영향이다.
+
+    ⚠️`dt_live_` 는 **토큰이 아니라 기기 식별자**다. 장수명 bearer 비밀이 아예 없고(개인키는
+    서버에 오지 않는다), 인증은 **매 요청 서명**으로 성립한다 — 그래서 ``api_key_id`` claim을
+    싣지 않는다(그 필드는 "ApiKey로 해소된 에이전트" 판별자라, 여기 실으면 ~15개 truthiness
+    소비처가 이 경로를 잘못 분류한다). 대신 ``actor_type="agent"`` 를 명시한다 —
+    `is_au_billable_agent`(아래)가 그 둘을 함께 보도록 이미 고쳐져 있다(데스크톱 에이전트는
+    자동화 트래픽이라 AU 부과 대상).
+
+    ⚠️앱 무결성(attestation) 계층은 여기 없다 — 의도적이다(자체호스팅에서도 성립해야 하는
+    경로라 Apple App Attest/Play Integrity에 묶지 않는다). 이 함수는 저장된 공개키로 요청
+    서명만 검증한다.
+
+    ⚠️리플레이 방어의 CAS는 **자기 세션에서 커밋한다**(`_bump_device_seq_committed`).
+
+    초판은 "caller 트랜잭션에 참여하면 `get_current_user`가 세션을 닫을 때 그 경계에서
+    커밋된다"고 가정했다 — **그 가정이 거짓이었다.** 이 경로의 caller 세션은 커밋 없는
+    ``async with async_session_factory() as db:`` 라, 세션 종료 시 ``Session.close()`` 가
+    **진행 중 트랜잭션을 롤백**한다(SQLAlchemy: "ends any transaction in progress").
+    실측 확인: 커밋 없이 종료하면 INSERT/UPDATE 가 DB 에 남지 않는다. 그 결과
+    ``last_server_seq`` 가 영구 NULL 이 되어 ``IS NULL`` 분기가 항상 매칭 — 캡처한 서명
+    요청 1개가 창(300초) 동안 무제한 재사용 가능했다(리플레이 방어 = 0).
+
+    동시에, CAS 를 caller 세션에서 수행하면 그 row-lock 을 응답 끝까지 문 채로 남아
+    별도 커넥션이 같은 행을 갱신하려다 교착한다(실측: 30초 타임아웃). 그래서 CAS 를
+    **caller 세션에서 완전히 떼어내** 전용 세션에서 수행·커밋한다 — 작성자가 하나뿐이라
+    경합도 없다. 조회~CAS 사이 revoke 는 CAS 의 ``status='active'`` 조건이 잡는다.
+    """
+    from app.models.agent_device_credential import AgentDeviceCredential
+    from app.services import device_credential as dc
+
+    try:
+        credential_uuid = dc.parse_device_credential_id(raw_credential)
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid device credential") from exc
+
+    row = (await db.execute(
+        select(AgentDeviceCredential)
+        .where(AgentDeviceCredential.id == credential_uuid)
+        .where(AgentDeviceCredential.status == "active")
+        .where(AgentDeviceCredential.revoked_at.is_(None))
+    )).scalar_one_or_none()
+    if row is None:
+        # 미존재/비활성/폐기를 구분 없이 동일 401(enumeration 방지 — native_bootstrap 관례).
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid device credential")
+
+    # 서명/타임스탬프/seq 중 하나라도 없으면 서명된 요청이 아니다 — "무증명 통과" 금지.
+    if not signature_b64 or not timestamp or not server_seq:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing device proof")
+
+    try:
+        timestamp_int = int(timestamp)
+        seq_int = int(server_seq)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid device proof") from exc
+
+    try:
+        dc.assert_timestamp_within_window(timestamp_int)
+    except dc.DeviceTimestampError as exc:
+        logger.warning("auth.device_credential rejected reason=timestamp_outside_window id=%s", credential_uuid)
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Device proof expired") from exc
+
+    transcript = dc.build_device_auth_transcript(
+        credential_id=str(credential_uuid),
+        http_method=method,
+        route=route,
+        timestamp=timestamp_int,
+        server_seq=seq_int,
+        body_sha256=body_sha256,
+    )
+    try:
+        signature = base64.b64decode(signature_b64, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid device proof") from exc
+
+    try:
+        dc.verify_device_request_signature(
+            signed_bytes=transcript, signature=signature, stored_public_key_der=row.public_key_der,
+        )
+    except dc.DeviceSignatureError as exc:
+        logger.warning("auth.device_credential rejected reason=signature_invalid id=%s", credential_uuid)
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid device signature") from exc
+
+    # 리플레이 방어 — CAS가 0행이면 "이미 같거나 더 큰 seq를 봤다"(재사용된 서명) 또는
+    # 조회~CAS 사이 revoke가 끼어들었다(둘 다 거부, 사유 구분 없음).
+    #
+    # **전용 세션에서 수행·커밋한다**(`_bump_device_seq_committed`). caller 세션은 커밋
+    # 없는 `async with`라 거기서 CAS 하면 세션 종료 시 롤백되어 카운터가 영구히 안 남는다
+    # (docstring 참조 — 초판의 실제 결함). 스로틀 판정은 여기서 메모리 값으로 한 뒤 넘긴다.
+    now = datetime.now(timezone.utc)
+    _needs_touch = row.last_seen_at is None or (now - row.last_seen_at) > _LAST_USED_AT_THROTTLE
+    bumped = await _bump_device_seq_committed(
+        credential_id=credential_uuid, new_value=seq_int, touch_last_seen=_needs_touch,
+    )
+    if not bumped:
+        logger.warning("auth.device_credential rejected reason=seq_replay_or_revoked id=%s", credential_uuid)
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Device proof replayed")
+
+    # 신원 해소 — sk_live_ 경로와 **같은 축**이다. agent_member_id(=members.id)를 그대로
+    # user_id로 쓰면 member_ssot_apikey_cut on/off와 무관하게 동일한 결과가 나온다(off 경로가
+    # team_members를 조회해 내는 값도 0075 1:1 불변식으로 같은 id — 그 불변식이 이 경로의
+    # 전제다). 그래서 이 해소는 `member_ssot_apikey_cut` 토글에 의존하지 않는다.
+    from app.models.member import Member
+    m = (await db.execute(
+        select(Member).where(
+            Member.id == row.agent_member_id,
+            Member.type == "agent",
+            Member.is_active.is_(True),
+            Member.deleted_at.is_(None),
+        )
+    )).scalar_one_or_none()
+    if not m:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Device credential member not found")
+
+    member_id = m.id
+    org_id = str(m.org_id)
+
+    # 기본 프로젝트 — `_resolve_api_key` 의 해소와 **동형**이어야 한다(두 경로가 같은
+    # 에이전트에 대해 다른 기본 프로젝트를 내면 그게 드리프트다). 그쪽의 기본 프로젝트는
+    # agent_project_profiles(placement) ∪ project_access(granted) 를 project_id ASC 로
+    # 정렬한 첫 값(0075 1:1 불변식으로 members.id 축과 동일) — `default_project_id`(E-MCP-OPT
+    # 0177)는 그 경로가 아직 안 쓰므로 여기서도 앞세우지 않는다. 비어 있으면 그때만
+    # default_project_id 로 폴백한다(무프로젝트 401 을 피하는 유일한 명시 신호).
+    project_id: str | None = None
+    project_ids: list[str] = []
+    try:
+        from app.models.member import AgentProjectProfile
+        from app.models.project_access import ProjectAccess
+        from app.services.project_auth import accessible_project_ids_in_org
+
+        _proj_union = union(
+            select(AgentProjectProfile.project_id).where(AgentProjectProfile.member_id == member_id),
+            select(ProjectAccess.project_id).where(
+                ProjectAccess.member_id == member_id, ProjectAccess.permission == "granted"
+            ),
+        ).subquery()
+        proj = (await db.execute(
+            select(_proj_union.c.project_id).order_by(_proj_union.c.project_id.asc()).limit(1)
+        )).scalar_one_or_none()
+        if proj is not None:
+            project_id = str(proj)
+        accessible = await accessible_project_ids_in_org(db, member_id, uuid.UUID(org_id))
+        project_ids = [str(pid) for pid in accessible]
+    except Exception:
+        logger.warning("_resolve_device_credential: project 해소 실패 — 기본 project_id 폴백", exc_info=True)
+    if project_id is None and m.default_project_id is not None:
+        project_id = str(m.default_project_id)
+    if project_id is None and project_ids:
+        project_id = project_ids[0]
+    if project_id and project_id not in project_ids:
+        project_ids.append(project_id)
+    # 기본 프로젝트조차 없으면 401 — 이건 "프로젝트 해소 자체가 불가능한 자격증명"이고,
+    # `_resolve_api_key` cut-on 경로도 같은 자리(proj is None)에서 401 이다(무프로젝트를
+    # project_id=None 으로 통과시키면 그 경로 대비 인증 widening — 까심 finding① 과 동형).
+    if not project_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Device credential member not found")
+
+    # scope — `sk_live_` 키는 `agent_api_keys.scope`(발급 시 지정, 레거시 기본 read/write)를
+    # 싣는다. 기기 자격증명은 그 컬럼이 없고 제품상 "그 기기가 할 수 있는 일"을 좁히는 축이
+    # 아직 없다(blast radius 축은 «어느 기기인가»이지 «무엇을 할 수 있는가»가 아니다) —
+    # 그래서 레거시 기본값과 동일한 read/write 를 싣는다. scope 를 좁히는 요구가 생기면
+    # 그건 자격증명 컬럼이 아니라 별도 설계다(여기서 지어내지 않는다).
+    scope: list[str] = ["read", "write"]
+
+    return AuthContext(
+        user_id=str(member_id),
+        email=None,
+        claims={
+            "sub": str(member_id),
+            "app_metadata": {
+                "device_credential_id": str(credential_uuid),
+                "actor_type": "agent",
+                "org_id": org_id,
+                "project_id": project_id,
+                "project_ids": project_ids,
+                "scope": scope,
+            },
+        },
+        org_id=org_id,
     )
 
 
@@ -462,7 +696,34 @@ def is_au_billable_agent(auth: AuthContext) -> bool:
     app_metadata = auth.claims.get("app_metadata", {})
     is_api_key = bool(app_metadata.get("api_key_id"))
     is_human_claimed = app_metadata.get("actor_type") == "human"
-    return is_api_key and not is_human_claimed
+    if is_api_key and not is_human_claimed:
+        return True
+    # 기기별 자격증명(`dt_live_*`, _resolve_device_credential) — `api_key_id`를 일부러 싣지
+    # 않으므로(그 필드는 ~15개 truthiness 소비처가 "ApiKey로 해소된 요청"으로 읽는다) 위
+    # 판정만으로는 False로 떨어져 AU 과금이 누락된다. 데스크톱 에이전트 트래픽은 자동화라
+    # AU 부과 대상이므로 `actor_type`을 명시로 본다 — 위 docstring이 예고한 "반드시 이 둘을
+    # 함께 본다"의 세 번째 분기다(휴먼 개인키와 대칭).
+    return app_metadata.get("actor_type") == "agent"
+
+
+def is_agent_credential(auth: AuthContext) -> bool:
+    """자격증명(비-JWT)으로 해소된 **에이전트** 요청인가 — `is_au_billable_agent` 의
+    판별 축을 그대로 공유한다(둘이 갈라지면 과금과 인가가 어긋난다).
+
+    ⛔`bool(app_metadata.get("api_key_id"))` 를 직접 쓰지 말 것. 그 필드는 `sk_live_`
+    경로만 싣고, `dt_live_`(기기 자격증명)는 **일부러 싣지 않는다**(§5.2.1 — 그 필드를
+    ~20개 truthiness 소비처가 "ApiKey 로 해소된 요청"으로 읽는다). 그래서 `api_key_id`
+    만 보는 판정은 `dt_live_` 를 **에이전트가 아니라고** 오분류한다.
+
+    실사고: `agent_gateway.py` 의 SSE 스트림·ACK 가 `api_key_id` 만 보고 403 을 냈다 →
+    기기 자격증명이 인증은 통과하는데 **자기 목적 경로(스트림)를 못 열었다.**
+
+    휴먼 개인키(`hu_live_*`)는 `actor_type: "human"` 이라 여기서 False 다 — 그게 의도다.
+    """
+    app_metadata = auth.claims.get("app_metadata", {})
+    if app_metadata.get("actor_type") == "human":
+        return False  # hu_live_* — 사람. JWT 와 함께 비-에이전트로 수렴.
+    return bool(app_metadata.get("api_key_id")) or app_metadata.get("actor_type") == "agent"
 
 
 async def get_current_user(
@@ -545,6 +806,26 @@ async def _resolve_current_user_auth_context(
     if token.startswith("hu_live_"):
         async with async_session_factory() as db:
             return await _resolve_human_api_key(token, db)
+
+    # 기기별 자격증명(`dt_live_<uuid>`) — `sk_live_*`(org 전역 장수명 bearer)의 blast radius를
+    # 좁히는 경로. 위 `hu_live_` 와 같은 이유로 x-agent-api-key 헤더 경로(아래 아님, 위쪽)에는
+    # 이 분기를 붙이지 않는다 — 그 헤더는 "에이전트 SSE 브릿지 전용" 표면으로 굳어 있다.
+    #
+    # ⚠️기존 `sk_live_` 경로는 한 줄도 안 건드린다(이 분기는 그 위/아래 어디에도 끼어들지
+    # 않는다) — 회귀 위험을 최소화하는 게 이 설계의 핵심이다.
+    from app.services.device_credential import DEVICE_CREDENTIAL_SCHEME
+    if token.startswith(DEVICE_CREDENTIAL_SCHEME):
+        proof = _extract_device_proof(request)
+        async with async_session_factory() as db:
+            return await _resolve_device_credential(
+                token, db,
+                method=(request.method if request is not None else ""),
+                route=(request.url.path if request is not None else ""),
+                timestamp=proof["timestamp"],
+                server_seq=proof["server_seq"],
+                signature_b64=proof["signature"],
+                body_sha256=proof["body_sha256"],
+            )
 
     # story 455e528d(E-AUTH-REBUILD Phase1-S2·doc §4.2): Firebase 세션(RS256)은 alg 헤더로
     # 정확 분기 — 순차 fallback 아님. FIREBASE_AUTH_ACCEPT_SESSION=false(기본)면 이 분기는
@@ -651,6 +932,27 @@ async def _verify_org_membership(
 _WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
 
+def _extract_device_proof(request: Request | None) -> dict[str, str | None]:
+    """기기 자격증명 요청의 서명 증거(헤더)를 뽑는다.
+
+    ⚠️**이름 있는 서명 증거만** 읽는다 — remote_ip·User-Agent 등 요청 메타데이터는 일절
+    수집하지 않는다(사용자 지시로 명시 제외된 축). 아래 4개 외에 이 경로가 읽는 요청 정보는
+    없다.
+
+    `X-Device-Body-Sha256`는 옵션이다 — 본문을 서명에 묶고 싶은 클라이언트만 보낸다(안 보내면
+    transcript의 body_sha256이 null이 되고, 그 사실 자체가 서명 대상이라 나중에 본문을 붙여
+    보내도 검증이 깨진다).
+    """
+    if request is None:
+        return {"timestamp": None, "server_seq": None, "signature": None, "body_sha256": None}
+    return {
+        "timestamp": request.headers.get("X-Device-Timestamp"),
+        "server_seq": request.headers.get("X-Device-Seq"),
+        "signature": request.headers.get("X-Device-Signature"),
+        "body_sha256": request.headers.get("X-Device-Body-Sha256"),
+    }
+
+
 def _check_api_key_scope(auth: AuthContext, method: str, path: str | None = None) -> None:
     """API Key 경로일 때만 scope 체크 — JWT 사용자(웹 UI)는 미적용.
 
@@ -661,8 +963,12 @@ def _check_api_key_scope(auth: AuthContext, method: str, path: str | None = None
     2) 7b63c226: Stage 2=path→toolset group 서버사이드 강제 — 키 scope 외 그룹 엔드포인트 직접
        호출 차단(MCP 클라 우회 방어·진짜 boundary). always-allowed/미매핑 면제·일반키 무회귀.
     """
-    if not auth.claims.get("app_metadata", {}).get("api_key_id"):
-        return  # JWT 경로 → 스킵
+    # ⛔`api_key_id` truthiness 로 판정하지 말 것 — `dt_live_`(기기 자격증명)는 그 필드를
+    # 일부러 안 실어(§5.2.1) 이 게이트가 **통째로 스킵**됐다. 즉 기기 자격증명은 scope 검사를
+    # 한 번도 안 받았다(공유 판별자로 교체 — `is_agent_credential` 주석 참조).
+    # 휴먼(JWT·hu_live_)은 여전히 스킵된다: 그쪽 scope 경계는 이 게이트가 아니라 별도 축이다.
+    if not is_agent_credential(auth):
+        return  # 휴먼 경로 → 스킵
     scope: list[str] = auth.claims.get("app_metadata", {}).get("scope", ["read", "write"])
     from app.services.mcp_toolset import _LEGACY_SCOPES
     # Stage 1: 레거시(read/write) scope 키에만 coarse 게이팅. 툴그룹 scope 키는 Stage 2(path)가 강제.
@@ -685,8 +991,9 @@ def _check_api_key_scope(auth: AuthContext, method: str, path: str | None = None
 def require_api_scope(required_scope: str):
     """특정 scope를 명시적으로 요구하는 dependency factory."""
     def _check(auth: AuthContext = Depends(get_current_user)) -> None:
-        if not auth.claims.get("app_metadata", {}).get("api_key_id"):
-            return  # JWT 사용자 → 스킵
+        # 위 `_check_api_key_scope` 와 동형 — `dt_live_` 도 자격증명이므로 검사 대상이다.
+        if not is_agent_credential(auth):
+            return  # 휴먼 사용자 → 스킵
         scope: list[str] = auth.claims.get("app_metadata", {}).get("scope", ["read", "write"])
         if required_scope not in scope:
             raise HTTPException(

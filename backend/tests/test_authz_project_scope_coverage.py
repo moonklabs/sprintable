@@ -344,6 +344,15 @@ _ID_MUTATION_FALSE_POSITIVE_ALLOWLIST: dict[str, str] = {
         "키를 key_id로 지정해도 404인지 실증한다. 그 테스트를 지우거나 약화시키면 이 면제의 "
         "근거도 함께 사라진다."
     ),
+    "app.routers.device_credentials:revoke_device_credential": (
+        "경로의 credential_id는 agent_device_credentials 행을 가리키고, 대상 리소스가 "
+        "project-소속이 아니라 caller 자신 소유(member_id) — me:revoke_my_api_key와 동일 결의 "
+        "SELF_DERIVED(project 접근권 검증이 무의미한 축). 라우터가 조회와 UPDATE **양쪽** WHERE에 "
+        "member_id == caller를 걸어 타인 소유는 404(존재 여부 누설 없이) — 받치는 것은 "
+        "test_caller_cannot_revoke_another_members_device(test_device_credentials_realdb.py)로, "
+        "타 org caller가 남의 credential_id를 지정해도 404이고 그 행이 active로 남는지 실증한다. "
+        "그 테스트를 지우거나 약화시키면 이 면제의 근거도 함께 사라진다."
+    ),
     # org/user-level 리소스 — project 축 없음 — ORG_ONLY
     "app.routers.labels:delete_label": "org taxonomy(project_id 컬럼 없음)·org-scope",
     "app.routers.labels:detach_label": "org taxonomy·org-scope",

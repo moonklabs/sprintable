@@ -15,7 +15,7 @@ import uuid
 from fastapi import HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies.auth import AuthContext
+from app.dependencies.auth import AuthContext, is_agent_credential
 
 _AMBIGUOUS_MESSAGE = (
     "여러 프로젝트에 접근 가능한 키입니다. 요청에 project_id를 지정하거나 "
@@ -35,10 +35,16 @@ def enforce_write_scope(auth: AuthContext, request: Request) -> None:
     무제한 통과**했다(산티아고 실DB 실증 — `scope=['docs']`로 6개 mutation 전부 성공).
 
     이 6라우트는 toolgroup 개념이 아예 없으므로, scope 타입 불문 **레거시 'write' 토큰 명시 보유**
-    만 통과시킨다(path-group 우회 경로 자체를 안 탐 — 가장 보수적 근본). JWT(human) 경로는
-    api_key_id 부재로 자동 스킵(기존 `_check_api_key_scope`와 동일 관례)."""
-    if not auth.claims.get("app_metadata", {}).get("api_key_id"):
-        return  # JWT(human) 경로 — 스킵.
+    만 통과시킨다(path-group 우회 경로 자체를 안 탐 — 가장 보수적 근본). 휴먼(JWT·hu_live_)
+    경로는 자동 스킵(기존 `_check_api_key_scope`와 동일 관례) — 판정은 `is_agent_credential`
+    로 하며, **`api_key_id` truthiness 로 하면 안 된다**(아래 주석 참조)."""
+    # ⛔`api_key_id` truthiness 로 판정하지 말 것 — `dt_live_`(기기 자격증명)는 그 필드를
+    # 일부러 안 실어(§5.2.1) 이 게이트가 **스킵**됐고, 그러면 기기 자격증명이
+    # `agent_routing_rules`/`hitl`(admin-adjacent, toolgroup 무대응)을 **write 토큰 검사 없이**
+    # 통과한다 — 이 게이트가 막으려던 바로 그 우회(아래 docstring 의 d764522c 실증)다.
+    # 휴먼(JWT·hu_live_)은 종전대로 스킵 — 그쪽 경계는 별도 축이다.
+    if not is_agent_credential(auth):
+        return  # 휴먼 경로 — 스킵.
     scope: list[str] = auth.claims.get("app_metadata", {}).get("scope") or ["read", "write"]
     if "write" not in scope:
         raise HTTPException(status_code=403, detail="API Key scope 'write' required")

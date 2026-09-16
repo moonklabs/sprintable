@@ -127,6 +127,7 @@ CREATE TABLE public.agent_device_credentials (
   key_fingerprint   text NOT NULL,
   status            text NOT NULL DEFAULT 'active',   -- active | revoked
   last_seen_at      timestamptz,
+  last_server_seq   bigint,                  -- 리플레이 방어: 서버 발급 카운터(CAS)
   created_at        timestamptz NOT NULL DEFAULT now(),
   revoked_at        timestamptz,
   UNIQUE (member_id, device_label)
@@ -135,8 +136,11 @@ CREATE TABLE public.agent_device_credentials (
 CREATE INDEX ON public.agent_device_credentials (key_fingerprint) WHERE status = 'active';
 ```
 
-- **평문 비밀 저장 안 함** — 공개키만.
-- **토큰 접두사 `dt_live_`** 로 `sk_live_` 와 분리. 섞으면 인증 분기가 모호해진다.
+- **평문 비밀 저장 안 함** — 공개키만. **개인키는 서버에 오지 않는다.**
+- **`dt_live_` 는 토큰이 아니라 기기 식별자다** (2026-09-14 정정). 장수명 bearer 비밀이
+  존재하지 않으므로 탈취할 토큰이 없다. `sk_live_` 와 섞이지 않도록 접두사로 분리.
+- **계층적 증명** — 키쌍 기기 증명(서명)은 항상, 앱 무결성(attestation)은 자체호스팅에서만
+  생략. "무증명"이 아니다.
 - `device_installations`(`backend/app/models/device_installation.py`) 구조를 참고하되, 그것은
   App Attest/Play Integrity 기반 **앱 무결성 증명**이라 데스크톱용은 목적이 다르다 — 개념만 차용.
 
@@ -146,15 +150,88 @@ CREATE INDEX ON public.agent_device_credentials (key_fingerprint) WHERE status =
 (SSE `/agent/stream`, MCP 툴, ack)를 처리한다. 엔드포인트를 고칠 필요가 없다.
 
 ```
-_resolve_api_key(token):
-  if token.startswith('dt_live_'):
-      → agent_device_credentials 조회 (fingerprint, status='active', revoked_at IS NULL)
-      → member_id / org_id / agent_member_id 해소, last_seen_at 갱신
+_resolve_api_key(credential):
+  if credential.startswith('dt_live_'):
+      → 기기 식별자로 agent_device_credentials 조회
+        (status='active', revoked_at IS NULL)
+      → 요청 서명을 등록된 public_key 로 검증
+      → 타임스탬프 허용 윈도우 + 리플레이 방어 확인
+      → member_id / org_id / agent_member_id 해소, last_seen_at 갱신(스로틀)
   else:  # sk_live_ — 기존 경로 한 줄도 변경 없음
       → 현행 유지
 ```
 
 **기존 `sk_live_` 경로 불변이 회귀 위험을 최소화하는 지점이다.**
+
+### 5.2.1 `AuthContext` claim — 에이전트 판별 축 (2026-09-15 확정)
+
+`_resolve_api_key` 는 얇은 조회가 아니라 **8단계 파이프라인**이다(401 원장·readiness 계측·
+`first_auth_seen`·`last_used_at` 스로틀·사용 이력·`scope`·`project_ids` 산출). 그래서
+`dt_live_` 를 그 안에 넣지 않고, **같은 `AuthContext` 를 내는 신규 함수**로 둔다.
+
+**claim 형태 — `api_key_id` 를 싣지 않는다:**
+
+```python
+claims={"app_metadata": {
+    "device_credential_id": "<uuid>",   # 기기 자격증명 식별자 (ApiKey 아님)
+    "actor_type": "agent",              # ← 판별·과금 축
+    "org_id": ..., "project_id": ..., "project_ids": [...], "scope": [...],
+}}
+```
+
+**근거 — `auth.py:452~465` 가 직접 처방을 적어놨다:**
+
+```python
+⛔단순히 `api_key_id` claim 존재만 보면 안 된다 — `_resolve_human_api_key`(hu_live_*,
+휴먼 개인 API key)가 `"human_api_key_id"`로 싣고 `"actor_type": "human"`을 명시하는
+기존 예외 경로가 있다. 그 경로를 에이전트로 오분류하면 사람 UI/개인키 작업에 AU를
+잘못 부과해 스펙(사람=0)을 위반한다. 판별자는 반드시 이 둘을 함께 본다.
+```
+```python
+is_api_key = bool(app_metadata.get("api_key_id"))
+is_human_claimed = app_metadata.get("actor_type") == "human"
+return is_api_key and not is_human_claimed
+```
+
+`hu_live_*` 선례(`auth.py:302`)가 같은 방식을 쓴다 — *"`human_api_key_id` 로만 싣는다
+(이름이 달라 어떤 기존 소비처의 `api_key_id` 판정도 …)"*.
+
+**그리고 claim 의 `api_key_id` 는 `ApiKey` 로 «조회되지 않는다»**(READ 실측):
+
+| 소비 방식 | 개수 |
+|---|---|
+| `bool(meta.get("api_key_id"))` — truthiness | ~15곳 |
+| `== "system-publisher"` — 합성값 비교 | 1곳 (`events.py:1837`) |
+| **`ApiKey` 로 조회** | **0곳** |
+
+값이 식별자로 소비되지 않으므로 합성값(`system-publisher` 선례)도 가능하지만, **정답은
+`api_key_id` 를 비우고 `actor_type` 을 명시하는 것**이다:
+
+1. **AU 과금이 맞게 잡힌다.** 데스크톱 에이전트는 자동화 트래픽 → AU 부과 대상.
+   `api_key_id` 가 없으면 `is_api_key=False` → **AU 0 = 과금 누락**.
+2. **`actor_type: "agent"` 명시가 그걸 고친다** — 코드가 "반드시 이 둘을 함께 본다"고 했다.
+3. **`api_key_id` 를 안 실어 `hu_live_` 선례로 안전** — 기존 truthiness 판정을 오염시키지 않는다.
+
+⚠️ **비용:** `bool(meta.get("api_key_id"))` 를 쓰는 **~15곳**은 device 를 휴먼/익명으로
+본다. 그중 **관리자 권한·데이터 스코프가 걸린 곳은 `actor_type` 도 함께 보도록 고쳐야**
+한다. 과금 축은 이미 그렇게 되어 있으니, 나머지를 같은 형태로 맞추는 일이다 → **G10**
+
+**커넥터는 수정하지 않는다.** SDK 가 자격증명을 정적 bearer 문자열로 싣기 때문에
+(`connectors/sdk/sprintable-sse.ts:65`), 서명은 **로컬 프록시**가 만든다:
+
+```
+커넥터 → SPRINTABLE_API_URL=http://127.0.0.1:<port>   (로컬 프록시)
+       AGENT_API_KEY=<아무 값>                        (프록시가 대체)
+         ↓
+로컬 프록시 (데스크톱 앱) — 키체인의 개인키로 매 요청 서명
+         ↓
+Sprintable 서버 — 공개키로 서명 검증
+```
+
+이유: SDK 사본이 **8개**(sdk·opencode·openclaw·pi·connectors-pkg·hermes×2)이고
+`pi-sprintable/README.md` 가 이미 그 벤더링을 부채로 추적한다(`project_vendored_sdk_sync_debt`).
+거기에 서명 로직을 8곳 심으면 조용한 보안 드리프트가 된다. `sk_live_` 는 데스크톱이
+없는 CLI 수동 설치 경로에 그대로 남는다.
 
 ### 5.3 셀프 발급
 
@@ -352,8 +429,15 @@ baseUrl은 `http://host.docker.internal:11434/v1` — `validateCustomEndpoint` �
 4. **Pi를 어떻게 할 것인가** — 제외 / 별도 처리
 5. **에이전트 1 : 세션 N 매핑을 Sprintable에 저장하는가** — 저장하면 세션 목록이 기기 간 공유,
    안 하면 기기마다 별도
-6. **기기 상한** 및 **`dt_live_` 수명·갱신 정책**
-7. **로컬 dev 모드 보안 강도** 감수 여부
+6. ~~**기기 상한** 및 **`dt_live_` 수명·갱신 정책**~~ — **둘 다 확정**
+   (2026-09-14). `dt_live_` 는 토큰이 아니라 **기기 식별자**이고 서명은 매 요청
+   생성되므로 갱신할 것이 없다. 그 자리를 **서명 타임스탬프 윈도우 + 리플레이 방어**가
+   대체한다. **기기 상한은 제품 정책으로 만들지 않는다** — 자원 보호는 기존 per-agent
+   동시 스트림 제한(free 3 / team 15 / pro 30)이 이미 담당하므로, 상한을 추가하면
+   드리프트하는 두 번째 숫자만 생긴다. 남용 방어용 상한 50 만 두고 "정책 아님"으로 둔다
+7. ~~**로컬 dev 모드 보안 강도** 감수 여부~~ — **확정 (2026-09-14)**: 계층적 증명.
+   키쌍 증명은 항상, **앱 무결성만** 자체호스팅에서 생략. 조건 3개 — 호스팅에서
+   도달 불가 / 감사 기록(`attestation_type`) / 사용자 문서에 강도 차이 명시
 
 ---
 

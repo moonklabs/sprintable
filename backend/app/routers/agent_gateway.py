@@ -21,7 +21,12 @@ from pydantic import BaseModel
 from sqlalchemy import delete, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies.auth import AuthContext, get_current_user, get_current_user_streaming
+from app.dependencies.auth import (
+    AuthContext,
+    get_current_user,
+    get_current_user_streaming,
+    is_agent_credential,
+)
 from app.core.database import async_session_factory
 from app.core import shutdown as _shutdown_module
 from app.dependencies.database import get_db
@@ -424,8 +429,11 @@ async def agent_stream(
     Last-Event-ID í¤ë = ë§ì§ë§ ìì  gateway_seq.
     start_seq = max(DB acked_seq, Last-Event-ID).
     """
-    is_api_key = bool(auth.claims.get("app_metadata", {}).get("api_key_id"))
-    if not is_api_key:
+    # ⛔`api_key_id` truthiness 를 직접 쓰지 말 것 — `dt_live_`(기기 자격증명)는 그 필드를
+    # 일부러 안 실어(§5.2.1) 이 판정이 False 로 떨어지고, **인증은 통과하는데 스트림이
+    # 403** 이었다(기기 자격증명의 존재 이유가 이 스트림인데 자기 목적 경로를 못 여는 상태).
+    # `is_agent_credential` 이 과금 판별자와 같은 축을 공유한다.
+    if not is_agent_credential(auth):
         raise HTTPException(status_code=403, detail="API key required for agent stream")
 
     agent_id = uuid.UUID(auth.user_id)
@@ -777,8 +785,9 @@ async def ack_event(
     auth: AuthContext = Depends(get_current_user),
 ) -> dict:
     """에이전트가 처리 완료한 gateway_seq ACK — agent_event_cursors 갱신."""
-    is_api_key = bool(auth.claims.get("app_metadata", {}).get("api_key_id"))
-    if not is_api_key:
+    # ⛔위 스트림과 동형 — `dt_live_` 는 `api_key_id` 를 안 실으므로 직접 판정하면
+    # 기기 자격증명의 ACK(5조 계약 ④)가 403 이 된다.
+    if not is_agent_credential(auth):
         raise HTTPException(status_code=403, detail="API key required")
 
     agent_id = uuid.UUID(auth.user_id)
