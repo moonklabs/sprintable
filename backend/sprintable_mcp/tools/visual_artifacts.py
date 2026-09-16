@@ -191,7 +191,7 @@ async def create_artifact(args: CreateArtifactInput) -> list[TextContent]:
         result = await client.post("/api/v2/visual-artifacts", json=body)
         return ok(result)
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 # story #3753 — BE _MAX_IMPORT_IMAGE_BYTES(visual_artifacts.py)와 동일 상한 로컬 미러(이
@@ -265,7 +265,7 @@ async def import_image_artifact(args: ImportImageArtifactInput) -> list[TextCont
         result = await client.post("/api/v2/visual-artifacts/import-image", json=body)
         return ok(result)
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def get_artifact(args: GetArtifactInput) -> list[TextContent]:
@@ -274,7 +274,7 @@ async def get_artifact(args: GetArtifactInput) -> list[TextContent]:
         result = await client.get(f"/api/v2/visual-artifacts/{args.artifact_id}")
         return ok(result)
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def list_artifacts(args: ListArtifactsInput) -> list[TextContent]:
@@ -301,7 +301,7 @@ async def list_artifacts(args: ListArtifactsInput) -> list[TextContent]:
             tool_name="sprintable_list_artifacts",
         )
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def list_artifact_comments(args: ListArtifactCommentsInput) -> list[TextContent]:
@@ -321,7 +321,7 @@ async def list_artifact_comments(args: ListArtifactCommentsInput) -> list[TextCo
             tool_name="sprintable_list_artifact_comments",
         )
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def add_artifact_comment(args: AddArtifactCommentInput) -> list[TextContent]:
@@ -342,7 +342,7 @@ async def add_artifact_comment(args: AddArtifactCommentInput) -> list[TextConten
         result = await client.post(f"/api/v2/visual-artifacts/{args.artifact_id}/comments", json=body)
         return ok(result)
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def edit_artifact(args: EditArtifactInput) -> list[TextContent]:
@@ -370,7 +370,7 @@ async def edit_artifact(args: EditArtifactInput) -> list[TextContent]:
         result = await client.post(f"/api/v2/visual-artifacts/{args.artifact_id}/edit", json=body)
         return ok(result)
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def list_spec_pins(args: ListSpecPinsInput) -> list[TextContent]:
@@ -381,7 +381,7 @@ async def list_spec_pins(args: ListSpecPinsInput) -> list[TextContent]:
         result = await client.get(f"/api/v2/visual-artifacts/{args.artifact_id}/pins")
         return ok(result)
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def create_spec_pin(args: CreateSpecPinInput) -> list[TextContent]:
@@ -401,7 +401,7 @@ async def create_spec_pin(args: CreateSpecPinInput) -> list[TextContent]:
         result = await client.post(f"/api/v2/visual-artifacts/{args.artifact_id}/pins", json=body)
         return ok(result)
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def update_spec_pin(args: UpdateSpecPinInput) -> list[TextContent]:
@@ -414,7 +414,7 @@ async def update_spec_pin(args: UpdateSpecPinInput) -> list[TextContent]:
         )
         return ok(result)
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def delete_spec_pin(args: DeleteSpecPinInput) -> list[TextContent]:
@@ -423,7 +423,7 @@ async def delete_spec_pin(args: DeleteSpecPinInput) -> list[TextContent]:
         result = await client.delete(f"/api/v2/visual-artifacts/{args.artifact_id}/pins/{args.pin_id}")
         return ok(result)
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def delete_artifact(args: DeleteArtifactInput) -> list[TextContent]:
@@ -435,7 +435,7 @@ async def delete_artifact(args: DeleteArtifactInput) -> list[TextContent]:
         result = await client.delete(f"/api/v2/visual-artifacts/{args.artifact_id}")
         return ok(result)
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def propose_canonical_version(args: ProposeCanonicalInput) -> list[TextContent]:
@@ -447,4 +447,4 @@ async def propose_canonical_version(args: ProposeCanonicalInput) -> list[TextCon
         )
         return ok(result)
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)

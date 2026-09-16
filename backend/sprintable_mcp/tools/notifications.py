@@ -59,7 +59,7 @@ async def check_notifications(args: CheckNotificationsInput) -> list[TextContent
             ))
         return blocks
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def mark_notification_read(args: MarkNotificationReadInput) -> list[TextContent]:
@@ -76,7 +76,7 @@ async def mark_notification_read(args: MarkNotificationReadInput) -> list[TextCo
     try:
         return ok(await client.patch(f"/api/v2/notifications/{args.notification_id}/read"))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def mark_all_notifications_read(args: MarkAllNotificationsReadInput) -> list[TextContent]:
@@ -91,4 +91,4 @@ async def mark_all_notifications_read(args: MarkAllNotificationsReadInput) -> li
     try:
         return ok(await client.patch("/api/v2/notifications/mark-all-read"))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)

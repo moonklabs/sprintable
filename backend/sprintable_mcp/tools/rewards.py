@@ -33,7 +33,7 @@ async def get_wallet(args: GetWalletInput) -> list[TextContent]:
     try:
         return ok(await client.get("/api/v2/rewards", params={"project_id": client.require_project_id(), "member_id": args.member_id, "balance": "true"}))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def give_reward(args: GiveRewardInput) -> list[TextContent]:
@@ -52,7 +52,7 @@ async def give_reward(args: GiveRewardInput) -> list[TextContent]:
             body["reference_id"] = args.reference_id
         return ok(await client.post("/api/v2/rewards", json=body))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def get_leaderboard_v2(args: GetLeaderboardInput) -> list[TextContent]:
@@ -65,4 +65,4 @@ async def get_leaderboard_v2(args: GetLeaderboardInput) -> list[TextContent]:
             params["limit"] = str(args.limit)
         return ok(await client.get("/api/v2/rewards", params=params))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)

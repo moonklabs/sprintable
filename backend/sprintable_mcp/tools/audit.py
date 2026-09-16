@@ -23,4 +23,4 @@ async def list_audit_logs(args: ListAuditLogsInput) -> list[TextContent]:
     try:
         return ok(await client.get("/api/v2/audit-logs", params=params))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
