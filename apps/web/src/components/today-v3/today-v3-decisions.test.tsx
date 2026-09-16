@@ -88,6 +88,30 @@ describe('TodayV3Decisions — 고위험 gate 카드(서명 링크+변경요청+
     expect(onDone).toHaveBeenCalledTimes(1);
   });
 
+  // story #3964 CHANGES(페드루 PO C1, 2026-09-16 16:37Z) — gate_already_resolved(남이
+  // 먼저 처리)는 실패 문구가 아니라 재조회로 처리한다(그 항목이 큐에서 사라지는 게
+  // 정상 — 이미 원하던 결과가 났다).
+  it('⭐변경 요청 — gate_already_resolved면 오류문장 대신 재조회(onDone)만 호출된다', async () => {
+    fetchMock.mockResolvedValue({
+      ok: false, status: 409,
+      json: async () => ({ error: { code: 'gate_already_resolved', current_status: 'approved' } }),
+    });
+    const onDone = await mount([base]);
+    const btn = container.querySelector('[data-testid="today-v3-request-changes-action"]') as HTMLButtonElement;
+    await act(async () => { btn.click(); });
+    const textarea = document.body.querySelector('[data-testid="today-v3-reason-textarea"]') as HTMLTextAreaElement;
+    const textareaSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+    await act(async () => {
+      textareaSetter.call(textarea, '근거가 부족해요');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const submit = document.body.querySelector('[data-testid="today-v3-reason-submit"]') as HTMLButtonElement;
+    await act(async () => { submit.click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(onDone).toHaveBeenCalledTimes(1);
+    expect(document.body.querySelector('[role="alert"]')).toBeNull();
+  });
+
   it('⭐보류 — admin/owner에게만 버튼이 보인다(비활성 아니라 렌더 자체가 없음)', async () => {
     await mount([base], { isAdminOrOwner: false });
     expect(container.querySelector('[data-testid="today-v3-hold-action"]')).toBeNull();
@@ -196,5 +220,21 @@ describe('TodayV3Decisions — 저위험 모아 승인(순차 전이·부분 실
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
     const alert = container.querySelector('[role="alert"]');
     expect(alert?.textContent).toContain('1');
+  });
+
+  // story #3964 CHANGES(페드루 PO C1) — 모아 승인 순차전이 中 한 건이 gate_already_resolved면
+  // (남이 먼저 처리) 그 건은 실패로 안 센다 — 원하던 결과(큐에서 사라짐)가 이미 났다.
+  it('⭐부분 실패 판정 — gate_already_resolved는 실패로 안 센다(실패 문장 0)', async () => {
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url === '/api/gates/g2/transition') {
+        return { ok: false, status: 409, json: async () => ({ error: { code: 'gate_already_resolved' } }) };
+      }
+      return { ok: true, status: 200, json: async () => ({ data: null }) };
+    });
+    await mount([gateLow1, gateLow2]);
+    const btn = container.querySelector('[data-testid="today-v3-bulk-approve-action"]') as HTMLButtonElement;
+    await act(async () => { btn.click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(container.querySelector('[role="alert"]')).toBeNull();
   });
 });
