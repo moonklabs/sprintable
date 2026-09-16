@@ -819,6 +819,15 @@ jobs:
       - name: Scan tests/ for shared-DB-destroying SQL literals (bare DELETE/DROP/TRUNCATE)
         working-directory: backend
         run: python3 scripts/lint_destructive_test_sql.py
+      # story #3944(페드루 PO CHANGES②) — run-with-stall-detection.test.sh·
+      # ci-loop-errexit-survival.test.sh 둘 다 만들어졌지만(migrations-nontx-allowlist-lint
+      # 위 코멘트가 짚은 것과 동형 결함) 도는 자리가 없었다. 둘 다 Postgres/uv 불요·순수
+      # bash 자기완결 스모크라 이 job(같은 성격의 정적 스캔)에 얹는다 — DB 필요한
+      # backend-test-destructive 본체와 분리해 매 PR에 값싸게 상시 돈다.
+      - name: Self-test stall-detection wrapper + loop errexit-survival (story #3944)
+        run: |
+          bash scripts/run-with-stall-detection.test.sh
+          bash scripts/ci-loop-errexit-survival.test.sh
 
   # story 23bf1913(CI 후속, 2026-09-04) — 오늘 4 PR(#3769·#3773·#3774·#3775)이 신규
   # destructive_schema 파일을 shard-weights.json에 안 넣은 채 열려, story #3392의
@@ -1151,12 +1160,15 @@ jobs:
     # 시간에 과점유」된 문제로 판단(호스트 그라운딩은 #3944 AC0 적기만, 인프라 축이라
     # 손 안 댐). #2293의 "천장을 올려도 다음 표본에서 다시 붙는다"는 «천장이 판정
     # 자일 때»의 이야기 — 이제 판정 자는 파일 단위 정지 감지(STALL_TIMEOUT_MIN=8분,
-    # 위 루프)로 옮겼으므로, 이 job timeout은 "진행 中인 샤드가 (정지 감지가 있는 한)
+    # 위 루프)로 옮겼으므로, 이 job timeout은 "진행 중인 샤드가 (정지 감지가 있는 한)
     # 절대 안 닿는 백스톱"일 뿐이다 — #4007 AC2 12샤드 실측(max 15.1분)이 #3944
-    # 외삽(47~48분)보다도 빠르므로 60분은 12샤드 기준으로도 여전히 넉넉한 상한.
-    # 이 60분에 실제로 닿으면 그건 정지 감지도 못 잡는 새 결함 클래스라 카드를 다시
-    # 연다(같은 수로 덮지 않는다).
-    timeout-minutes: 60
+    # 외삽(47~48분)보다도 빠르므로 애초 60분 산정은 12샤드 기준으로도 넉넉한 상한.
+    #
+    # 페드루 PO CHANGES(PR#4348 재리뷰 2라운드) — 60→90. 정지 감지가 못 보는 멈춤
+    # (래퍼 자신이 죽거나 timeout(1) 자체가 고장나는 등, run-with-stall-detection.sh
+    # 바깥의 결함)까지 감안한 순수 백스톱이라 여유를 더 둔다. 90분에 실제로 닿으면
+    # 그건 정지 감지도 못 잡는 새 결함 클래스라 카드를 다시 연다(같은 수로 덮지 않는다).
+    timeout-minutes: 90
     strategy:
       fail-fast: false  # 한 샤드 실패가 다른 샤드를 취소하면 "어디까지 진짜 돌았는지"가 흐려진다
       matrix:
@@ -1308,17 +1320,35 @@ jobs:
           # "천장을 올려도 다음 표본에서 다시 붙는다" 원칙은 "천장이 자일 때"의 이야기 —
           # 여기서는 자를 파일 단위 «정지 감지»(STALL_TIMEOUT_MIN)로 옮기고, job
           # timeout-minutes는 그 정지 감지가 절대 못 미치는 백스톱으로만 남긴다(아래).
+          # 페드루 PO CHANGES③(PR#4348 리뷰) — 8분의 근거: 취소된 attempt 1 로그(shard0/
+          # shard3, cancel 원인이 아니라 그 안 개별 파일 실측)에서 «최대 단일 파일 소요»를
+          # 재니 shard3의 217.65s(3.63분)가 두 인스턴스 통틀어 최댓값 — 4분(240s)을 안
+          # 넘어 배율 규칙(4분 넘으면 8 대신 그 2배)이 발동 안 하고 기본 8분 유지(3.63분의
+          # ≈2.2배 여유). 이 최댓값이 4분을 넘는 날이 오면 STALL_TIMEOUT_MIN을 8이 아니라
+          # 그 실측값×2로 다시 잡는다(같은 8을 무한정 우려먹지 않는다).
           STALL_TIMEOUT_MIN=8
           for f in "${files[@]}"; do
             echo "::group::isolated $f"
             PGPASSWORD=sprintable dropdb -h localhost -U sprintable --if-exists sprintable_test_iso
             PGPASSWORD=sprintable createdb -h localhost -U sprintable -T sprintable_test_tpl sprintable_test_iso
             _t0=$(date +%s)
-            ALEMBIC_DATABASE_URL=postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test_iso \
-            PARITY_TEST_DATABASE_URL=postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test_iso \
-            DATABASE_URL=postgresql+asyncpg://sprintable:sprintable@localhost:5432/sprintable_test_iso \
-            "${{ github.workspace }}/scripts/run-with-stall-detection.sh" "$STALL_TIMEOUT_MIN" -- uv run pytest -q "$f"
-            _pytest_exit=$?
+            # 페드루 PO HIGH(PR#4348 재리뷰, 카디르 재현) — GHA `run:`는 기본
+            # `bash -eo pipefail`이다. 아래 래퍼 호출을 맨 줄에 두고 다음 줄에서 `$?`를
+            # 읽으면(원래 방식) 래퍼가 0이 아닌 순간(정지 124뿐 아니라 일반 pytest 실패
+            # 1도) `-e`가 즉시 스텝을 죽여, "한 파일 실패해도 나머지는 계속 돈다"던 옛
+            # `|| failed_files+=` 보장이 조용히 사라진다. `if` 조건 위치는(`||`/`&&`와
+            # 동일하게) `-e` 면제 문맥이라 여기 넣어야 다음 파일로 계속 간다. env 접두는
+            # `if` 자신이 아니라 그 조건절인 simple command에 직접 붙여야 한다 — `VAR=x`를
+            # `if` 앞에 두면 `if`는 compound command라 접두 대입 문법이 안 먹어(bash -n
+            # 로 실측: `syntax error near unexpected token 'then'`).
+            if ALEMBIC_DATABASE_URL=postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test_iso \
+               PARITY_TEST_DATABASE_URL=postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test_iso \
+               DATABASE_URL=postgresql+asyncpg://sprintable:sprintable@localhost:5432/sprintable_test_iso \
+               "${{ github.workspace }}/scripts/run-with-stall-detection.sh" "$STALL_TIMEOUT_MIN" -- uv run pytest -q "$f"; then
+              _pytest_exit=0
+            else
+              _pytest_exit=$?
+            fi
             if [ "$_pytest_exit" -eq 124 ]; then
               echo "::error::STALL(story #3944) — $f 가 ${STALL_TIMEOUT_MIN}분 안에 안 끝나 강제 종료됨. 「오래 걸림」이 아니라 「멈춤」으로 판정 — 즉시 실패."
               failed_files+=("$f (STALL: exceeded ${STALL_TIMEOUT_MIN}m)")
