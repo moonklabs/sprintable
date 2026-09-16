@@ -40,8 +40,21 @@ KILL_AFTER="${STALL_KILL_AFTER:-30s}"
 _start=$(date +%s.%N)
 timeout -k "$KILL_AFTER" "${TIMEOUT_MIN}m" "$@"
 code=$?
-_elapsed=$(awk "BEGIN { printf \"%.3f\", $(date +%s.%N) - ${_start} }")
-_limit_sec=$(awk "BEGIN { printf \"%.3f\", (${TIMEOUT_MIN} * 60) }")
+_limit_sec=$(awk "BEGIN { printf \"%.9f\", (${TIMEOUT_MIN} * 60) }")
+# 페드루 PO CHANGES(PR#4348 6라운드, 카디르 재현) — 직전 버전은 `%.3f`로 반올림한
+# 문자열을 그 뒤 비교에도 그대로 재사용해, 예를 들어 raw 0.5996s(제한 0.6s 直前)가
+# 0.600으로 반올림돼 "제한 도달"로 오분류될 수 있었다(0.4ms 경계 실측). 반올림은
+# **로그 출력 전용**으로만 쓰고, 판정 비교는 raw float끼리 한 awk 안에서 직접 뺄셈+
+# 비교한다(중간에 문자열로 왕복하며 반올림이 끼어들 자리를 아예 없앰).
+# STALL_TEST_ELAPSED_OVERRIDE — 자가진단이 실제 wall-clock 경계 타이밍(수백 μs~ms 폭)에
+# 기대지 않고 이 경계 판정 자체를 결정론적으로 고정할 수 있게 하는 테스트 전용 훅
+# (프로덕션 경로에선 절대 설정 안 됨 — 설정 시 실측 대신 그 값을 그대로 raw elapsed로 씀).
+if [ -n "${STALL_TEST_ELAPSED_OVERRIDE:-}" ]; then
+  _raw_elapsed="$STALL_TEST_ELAPSED_OVERRIDE"
+else
+  _raw_elapsed=$(awk "BEGIN { printf \"%.9f\", $(date +%s.%N) - ${_start} }")
+fi
+_elapsed_fmt=$(awk "BEGIN { printf \"%.3f\", ${_raw_elapsed} }")
 
 # 페드루 PO CHANGES(PR#4348 잔여③→4라운드) — GNU coreutils timeout(1) 매뉴얼:
 # TERM만으로 죽으면 124, TERM을 무시해 KILL(9)까지 가면 **137**(128+9)로 exit code가
@@ -54,11 +67,11 @@ _limit_sec=$(awk "BEGIN { printf \"%.3f\", (${TIMEOUT_MIN} * 60) }")
 # (124는 coreutils 자신이 "시간이 다 됐다"고 판단했을 때만 나오는 값이라 이 모호함이
 # 없다 — 경과시간 대조 불필요.)
 if [ "$code" -eq 137 ]; then
-  if awk "BEGIN { exit !(${_elapsed} >= ${_limit_sec}) }"; then
+  if awk "BEGIN { exit !(${_raw_elapsed} >= ${_limit_sec}) }"; then
     echo "STALL: 명령이 ${TIMEOUT_MIN}분 안에 안 끝나 강제 종료됨(TERM 무시 → ${KILL_AFTER} 뒤 KILL escalation) — $*" >&2
     exit 124
   else
-    echo "명령이 외부 SIGKILL(137)로 즉시 종료됨(경과 ${_elapsed}s < 제한 ${_limit_sec}s) — 이 스크립트의 정지 감지와 무관, 원 코드 그대로 전달 — $*" >&2
+    echo "명령이 외부 SIGKILL(137)로 즉시 종료됨(경과 ${_elapsed_fmt}s < 제한 ${_limit_sec}s) — 이 스크립트의 정지 감지와 무관, 원 코드 그대로 전달 — $*" >&2
   fi
 elif [ "$code" -eq 124 ]; then
   echo "STALL: 명령이 ${TIMEOUT_MIN}분 안에 안 끝나 강제 종료됨 — $*" >&2

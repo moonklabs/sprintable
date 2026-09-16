@@ -82,6 +82,36 @@ else
 fi
 
 echo
+echo "── 경계 결정론 자가진단(PO 6라운드) — 반올림이 판정에 안 새는지 실제 타이밍 없이 고정 ──"
+# 페드루 PO CHANGES(PR#4348 6라운드, 카디르 0.4ms 경계 재현) — 이전 버전은 elapsed를
+# `%.3f`로 반올림한 문자열을 판정 비교에도 그대로 썼다 — raw 0.5996s(제한 0.6s 直前)가
+# 0.600으로 반올림되면 "제한 도달"로 잘못 넘어간다. 실제 wall-clock으로 이 경계를
+# 맞히려면 수백 μs~ms 폭의 타이밍 레이스가 필요해 자가진단으로 못 쓴다 —
+# STALL_TEST_ELAPSED_OVERRIDE로 그 경계 값 자체를 주입해 결정론으로 고정한다.
+# 제한시간 0.01분=정확히 0.6초(TIMEOUT_MIN*60, 반올림 없이 정확).
+set +e
+UNDER_OUT="$(STALL_TEST_ELAPSED_OVERRIDE=0.5996 "$SCRIPT" 0.01 -- bash -c 'kill -9 $$' 2>&1)"
+UNDER_CODE=$?
+set -e
+if [ "$UNDER_CODE" -eq 137 ]; then
+  echo "  ok   raw elapsed 0.5996s(제한 0.6s 直前) → 137 그대로(반올림했다면 0.600으로 붙어 STALL 오분류)"
+else
+  echo "  FAIL 경계 直前인데 exit code=${UNDER_CODE}(기대 137) — 출력: $UNDER_OUT"
+  FAIL=1
+fi
+
+set +e
+OVER_OUT="$(STALL_TEST_ELAPSED_OVERRIDE=0.6004 "$SCRIPT" 0.01 -- bash -c 'kill -9 $$' 2>&1)"
+OVER_CODE=$?
+set -e
+if [ "$OVER_CODE" -eq 124 ]; then
+  echo "  ok   raw elapsed 0.6004s(제한 0.6s 직후) → 124(STALL)로 정확히 정규화"
+else
+  echo "  FAIL 경계 직후인데 exit code=${OVER_CODE}(기대 124) — 출력: $OVER_OUT"
+  FAIL=1
+fi
+
+echo
 echo "── 진행 中(제한 시간 안에 정상 완주) → 통과(원 종료 코드 그대로) ──"
 set +e
 OUT="$("$SCRIPT" 0.5 -- sleep 0.1 2>&1)"
