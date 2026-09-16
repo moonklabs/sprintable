@@ -182,7 +182,11 @@ export function ActivationChecklistBanner() {
           }
           return (
             // story #3839 — 위 두 분기와 동일 처방(색 통일, 아이콘이 met 전달).
-            <li key={key} className={cn('flex items-center gap-1.5 text-sm', 'text-foreground')}>
+            // story #3939 — 클릭 가능한 두 항목(Link·Button)은 px-1 py-0.5 hit-area를 갖는데
+            // 이 비-인터랙티브 항목은 안 가져 아이콘 x가 4px, 행 높이가 어긋났다(3901 캡처·
+            // 라이브 실측: 아이콘 left 294 vs 298 · 행 pitch 26/28/30). 같은 box(rounded px-1
+            // py-0.5)로 통일해 5항목 아이콘 x·행 pitch를 맞춘다(hover 배경은 인터랙티브 항목만).
+            <li key={key} className={cn('flex items-center gap-1.5 rounded px-1 py-0.5 text-sm', 'text-foreground')}>
               {icon}
               <span>{label}</span>
             </li>
