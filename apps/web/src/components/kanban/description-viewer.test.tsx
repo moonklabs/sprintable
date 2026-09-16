@@ -226,7 +226,7 @@ describe('DescriptionViewer — bare #<번호>가 bareNumberTargets로 렌더되
       ));
     });
 
-    expect(container.textContent).toContain('대상이 없습니다');
+    expect(container.textContent).toContain('대상이 없어요');
     expect(container.textContent).not.toContain('삭제');
     expect(container.querySelector('button')).toBeFalsy();
   });
@@ -255,7 +255,7 @@ describe('DescriptionViewer — bare #<번호>가 bareNumberTargets로 렌더되
     const html = container.innerHTML;
     const buttons = container.querySelectorAll('button');
     expect(buttons.length).toBe(1);
-    expect(html).toContain('대상이 없습니다');
+    expect(html).toContain('대상이 없어요');
   });
 
   it('코드블록 안의 #<번호>는 치환되지 않는다(AC0-3 세는 정의)', async () => {

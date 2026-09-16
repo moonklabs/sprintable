@@ -171,20 +171,24 @@ describe('computeNewViolations', () => {
 //   작업 대상이라 수리됐다(§⑤·i18n 밖 app/ 페이지 전수 전환). 다시 짧은 기간에 소진된
 //   패턴 그대로 — 표본을 components/chat/file-viewer.tsx(FORMAT_LABEL 상수, 36건 몰림 —
 //   단기 소진 위험 낮음)로 옮긴다.
-describe('창건 사례 — components/chat/file-viewer.tsx의 실 위반이 지금도 잡힌다', () => {
-  const FOUNDED_CASE_FILE = path.resolve(__dirname, '../src/components/chat/file-viewer.tsx');
-  const FOUNDED_CASE_REL = 'components/chat/file-viewer.tsx';
+//   story #3930 PR①(2026-09-16, 페드루 CI 리뷰) — 앞 표본(file-viewer.tsx FORMAT_LABEL
+//   「이미지」)이 이번엔 직접 이 PR의 작업 대상(components/chat/* 78건 t() 전환)이라
+//   수리됐다 — 세 번째 소진. 표본을 components/kanban/story-detail-panel.tsx(16건
+//   몰림 — PR②③ 대상이나 즉시 착수 예정 아님)의 「라벨 없음」으로 옮긴다.
+describe('창건 사례 — components/kanban/story-detail-panel.tsx의 실 위반이 지금도 잡힌다', () => {
+  const FOUNDED_CASE_FILE = path.resolve(__dirname, '../src/components/kanban/story-detail-panel.tsx');
+  const FOUNDED_CASE_REL = 'components/kanban/story-detail-panel.tsx';
 
-  it('components/chat/file-viewer.tsx가 실제로 FORMAT_LABEL의 「이미지」 자리를 아직 갖고 있다', () => {
+  it('components/kanban/story-detail-panel.tsx가 실제로 「라벨 없음」 자리를 아직 갖고 있다', () => {
     const content = readFileSync(FOUNDED_CASE_FILE, 'utf8');
-    expect(content).toContain("image: '이미지'");
+    expect(content).toContain('라벨 없음');
   });
 
   // story #3902 — 부하 시 vitest 기본 5000ms를 넘길 수 있는 실 전수 스캔(측정: 동시부하
   // 재현 5회 = 814·775·741·1130·874ms 중 최댓값 1130ms → ×3 ≈ 3390ms → 3500ms로 반올림).
   it('실 저장소 스캔이 이 창건 사례를 담는다(자가 죽어있지 않다)', () => {
     const violations = scanRepo(path.resolve(__dirname, '../src'));
-    const hit = violations.find((v) => v.file === FOUNDED_CASE_REL && v.text === '이미지');
+    const hit = violations.find((v) => v.file === FOUNDED_CASE_REL && v.text === '라벨 없음');
     expect(hit).toBeDefined();
   }, 3500);
 });
