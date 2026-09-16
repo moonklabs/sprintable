@@ -140,7 +140,12 @@ export interface Violation {
 //   매치 0건이었다(실 반례로 확認, 아래 3937 self-test가 이 자리를 고정). 원문 줄
 //   텍스트 조회는 이 함정을 구조적으로 비켜간다 — "그 줄 바로 위"라는 AC1 문구
 //   그대로를 그대로 코드로 옮긴 것.
-const I18N_EXEMPT_MARKER_RE = /i18n-exempt:\s*\S/;
+// story #3937 CHANGES2(카디르 P2·페드루 정정) — 앞선 버전은 `/i18n-exempt:\s*\S/`로
+// 앞줄 원문 아무 데나 그 문자열만 있으면 매치했다 — `const note = 'i18n-exempt: x';`
+// 같은 "일반 문자열 리터럴 안의 우연한 문구"도 면제로 오인하는 우회가 실제로
+// 재현됐다(이 PR의 목적 자체가 사각 좁히기라 같은 클래스 결함은 특히 치명적).
+// `^\s*\/\/`로 "그 줄이 실제로 라인 주석으로 시작한다"를 앵커해 막는다.
+const I18N_EXEMPT_MARKER_RE = /^\s*\/\/\s*i18n-exempt:\s*\S/;
 
 function hasExemptMarker(node: ts.Node, sf: ts.SourceFile): boolean {
   const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line;

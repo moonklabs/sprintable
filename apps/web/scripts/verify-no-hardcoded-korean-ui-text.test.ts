@@ -78,6 +78,18 @@ describe('scanContent — 라인 마커(// i18n-exempt: <사유>, story #3937)',
     expect(v[0]!.text).toBe('미확認');
   });
 
+  it('마커 문구가 실 라인 주석이 아니라 일반 문자열 리터럴 안에 우연히 있으면 면제되지 않는다(카디르 P2·페드루 CHANGES2 — 우회 재현됐던 자리)', () => {
+    const content = [
+      "const note = 'i18n-exempt: 이건 그냥 문자열이지 주석이 아니다';",
+      "const SENTINEL = '미확認';",
+    ].join('\n');
+    const v = scanContent(content, 'fake.tsx');
+    // note 리터럴 자신도 한글을 담은 일반 StringLiteral이라 별도로 걸린다(그 줄이
+    // "// i18n-exempt:"로 시작하지 않으므로) — 이 테스트의 요지는 SENTINEL이
+    // 면제되지 «않는다»는 것뿐이라 note 쪽 판정은 부수 확認으로 남긴다.
+    expect(v.some((x) => x.text === '미확認')).toBe(true);
+  });
+
   it('실 gate-evidence.tsx — _UNCONFIRMED 상수는 마커로 면제되고 baseline·EXEMPT_FILES 밖에서도 GREEN이다', () => {
     const filePath = path.resolve(__dirname, '../src/components/cage/gate-evidence.tsx');
     const content = readFileSync(filePath, 'utf8');
