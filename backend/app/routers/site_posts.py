@@ -18,6 +18,7 @@ from app.dependencies.database import get_db
 from app.services.member_resolver import resolve_member, resolve_member_db_verified
 from app.routers.insight_snapshots import InsightSnapshotView
 from app.services.generation_budget import GenerationBudgetExceededError
+from app.services.external_publish_pause import ExternalPublishPausedError
 from app.services.insight_snapshots import get_latest_insight_snapshot
 from app.services.content_rules import get_org_content_rules
 from app.services.site_posts import (
@@ -901,6 +902,16 @@ async def publish_site_post_from_draft_endpoint(
         raise HTTPException(
             status_code=403,
             detail={"code": "EXTERNAL_PUBLISH_APPROVAL_REQUIRED", "message": str(exc)},
+        ) from exc
+    except ExternalPublishPausedError as exc:
+        # story #3953(블루프린트 §1-5) — hosted_site 분기(connection_id None)만 이
+        # 자리에서 예외를 받는다(외부 목적지 분기는 command만 만들고 실제 발행은
+        # 워커 몫이라 여기 안 걸린다 — publish_site_post_from_draft 자체 안의 검사가
+        # 워커 쪽 경로를 막는다). conversations.py circuit_breaker_open과 같은 결
+        # (일시 차단·423).
+        raise HTTPException(
+            status_code=423,
+            detail={"code": "EXTERNAL_PUBLISH_PAUSED", "message": str(exc)},
         ) from exc
     except SitePostSealMissingError as exc:
         raise HTTPException(

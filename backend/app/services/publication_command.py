@@ -49,6 +49,13 @@ _BACKOFF_BASE_SECONDS = 60
 FAILURE_KIND_CONNECTION = "connection"
 FAILURE_KIND_NEEDS_CHECK = "needs_check"
 FAILURE_KIND_TRANSIENT = "transient"
+# story #3953(블루프린트 §1-5) — 위 3값과 같은 열(failure_kind, DB CHECK 無·psql \d
+# publication_commands 실측 확認)이지만 유나 §11-5의 원래 3분류엔 없다 — 이건 실패가
+# 아니라 조직 owner의 의도적 정지다("재시도해도 되는지 모른다"류 불확실성과 다른
+# 축이라 needs_check로 뭉개지 않는다). external_publish_pause.py의 해제(resume)
+# 재큐가 이 값으로 "pause 때문에 blocked"만 골라낸다(connection 복구 대기 blocked와
+# 절대 안 섞인다).
+FAILURE_KIND_PAUSED = "paused"
 
 # story #3414 — 어떤 서버 error code가 어느 failure_kind인지의 유일한 매핑 표. 새 코드가
 # 추가되면 여기 등재하지 않는 한 자동으로 needs_check(fail-closed)로 떨어진다 — "일단
@@ -281,7 +288,29 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
     story e4fc29fa(조각③c) — `content_kind`(SSOT 컬럼)가 "site_post"면 아래 channel_
     post 전용 로직(ChannelPostVersion·publish_channel_post_draft 하드코딩)을 전혀
     안 타고 `_process_one_site_post_command`로 넘긴다 — approved_version이 어느
-    테이블을 가리키는지(ChannelPostVersion vs SitePostVersion)의 유일한 판별축."""
+    테이블을 가리키는지(ChannelPostVersion vs SitePostVersion)의 유일한 판별축.
+
+    story #3953(블루프린트 §1-5) — content_kind 분기보다 먼저 조직 pause를 본다
+    (5도메인 전부를 한 자리에서 막는 유일한 이유 — 여기서 막히면 아래 5개 분기
+    중 어느 것도 adapter를 부르는 자리까지 못 간다). 이 함수는 이미 in_progress로
+    클레임된 «이번 tick»의 command 하나만 처리하므로, pause를 여기서 한 번만 보면
+    "중지 순간 in_progress인 명령은 완주"가 저절로 성립한다(이 호출 도중엔 pause
+    상태를 다시 안 본다 — 중간에 끊을 자리 자체가 없다)."""
+    from app.services.external_publish_pause import is_external_publish_paused
+
+    paused, pause_reason = await is_external_publish_paused(db, org_id=command.org_id)
+    if paused:
+        await record_publication_attempt(
+            db, command=command, approval_check="paused", adapter_called=False,
+            started_at=now, finished_at=now, result_code=None,
+        )
+        command.status = "blocked"
+        command.failure_kind = FAILURE_KIND_PAUSED
+        command.last_error = (
+            f"EXTERNAL_PUBLISH_PAUSED: {pause_reason}" if pause_reason else "EXTERNAL_PUBLISH_PAUSED"
+        )
+        return
+
     if command.content_kind == "site_post":
         await _process_one_site_post_command(db, command, now=now)
         return
