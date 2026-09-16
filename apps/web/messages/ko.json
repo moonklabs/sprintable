@@ -466,6 +466,16 @@
     "workforceTrustVerified": "사람이 확인함",
     "workforceTrustClaimed": "에이전트 완료 · 검토 대기"
   },
+  "todayV3": {
+    "progressSectionTitle": "진행 중 {count}",
+    "progressEmptyTitle": "진행 중인 위임이 없어요",
+    "stopAction": "정지",
+    "stopRequestedLabel": "정지 요청됨",
+    "stopActionForbidden": "멈출 권한이 없어요",
+    "reasonDialogStopTitle": "정지 사유",
+    "reasonDialogStopPlaceholder": "정지 사유 (선택)",
+    "decisionActionFailed": "처리하지 못했어요"
+  },
   "workList": {
     "title": "일감",
     "subtitle": "목표에서 스토리로, 스토리에서 일로 이어져요. 사람이 맡은 일과 에이전트에 위임한 일이 갈려요.",
