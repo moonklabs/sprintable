@@ -632,17 +632,34 @@ async def test_sandbox_reels_codec_rejected_marker():
 # test_5b27b32f_sandbox_channel.py의 같은 이름 테스트와 동형 — 401뿐 아니라
 # _classify_threads_error를 거쳐 CHANNEL_CONNECTION_REVOKED로 분류되는지까지 확認.
 @pytest.mark.anyio
-async def test_sandbox_revoked_page_unlinked_app_inactive_markers_classify_as_connection_revoked():
+async def test_sandbox_revoked_page_unlinked_markers_classify_as_connection_revoked():
     from app.services.facebook_sandbox_publish import create_container
     from app.services.threads_publish import ThreadsPublishError
     from app.services.channel_posts import _classify_threads_error
 
-    for marker in ("[sandbox:revoked]", "[sandbox:page-unlinked]", "[sandbox:app-inactive]"):
+    for marker in ("[sandbox:revoked]", "[sandbox:page-unlinked]"):
         with pytest.raises(ThreadsPublishError) as exc_info:
             await create_container(None, access_token="tok", threads_user_id="page-1", text=marker)
         assert exc_info.value.status_code == 401
         error_code, _ = _classify_threads_error(exc_info.value, connection_id=uuid.uuid4())
         assert error_code == "CHANNEL_CONNECTION_REVOKED", marker
+
+
+# story #3951 CHANGES-2(페드루 PO C2, 2026-09-16 13:00Z) — app-inactive는 "revoked"가
+# 아니라 "error"로 재배정됐다(앱 비활성 전용 subcode가 Meta에 없다는 그라운딩 확定).
+@pytest.mark.anyio
+async def test_sandbox_app_inactive_marker_classifies_as_connection_auth_error():
+    from app.services.facebook_sandbox_publish import create_container
+    from app.services.threads_publish import ThreadsPublishError
+    from app.services.channel_posts import _classify_threads_error
+
+    with pytest.raises(ThreadsPublishError) as exc_info:
+        await create_container(None, access_token="tok", threads_user_id="page-1", text="[sandbox:app-inactive]")
+    assert exc_info.value.status_code == 401
+    assert exc_info.value.provider_error_code == 190
+    assert exc_info.value.provider_error_subcode is None
+    error_code, _ = _classify_threads_error(exc_info.value, connection_id=uuid.uuid4())
+    assert error_code == "CHANNEL_CONNECTION_AUTH_ERROR"
 
 
 @pytest.mark.anyio

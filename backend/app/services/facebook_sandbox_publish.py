@@ -62,9 +62,12 @@ async def create_container(
             provider_error_code=190, provider_error_subcode=458, provider_error_type="OAuthException",
         )
     if _MARKER_APP_INACTIVE in text:
+        # story #3951 CHANGES-2(페드루 PO C2, 2026-09-16 13:00Z) — instagram_sandbox_
+        # publish.py와 동형 처방(앱 비활성 전용 subcode가 Meta에 없다는 그라운딩대로
+        # subcode=None → classify_graph_error_code가 "error"로 떨어지게).
         raise ThreadsPublishError(
             "SANDBOX_FACEBOOK_APP_INACTIVE", "sandbox: [sandbox:app-inactive] 마커 시뮬레이션", status_code=401,
-            provider_error_code=190, provider_error_subcode=467, provider_error_type="OAuthException",
+            provider_error_code=190, provider_error_subcode=None, provider_error_type="OAuthException",
         )
     if _MARKER_EXPIRE_AFTER_PUBLISH in text:
         return f"sandbox-fb-post-{uuid.uuid4().hex}{_EXPIRE_AFTER_PUBLISH_SUFFIX}"

@@ -28,29 +28,35 @@
   분류).
 - `[sandbox:expired-token]` — `create_container`가 401로 실패(기존 _classify_threads_
   error가 이미 CHANNEL_TOKEN_EXPIRED로 분류).
-- `[sandbox:revoked]`·`[sandbox:page-unlinked]`·`[sandbox:app-inactive]`(story #3598,
-  3595 표 행 ②③④를 시뮬레이션 가능하게) — 셋 다 `create_container`가 401로 실패하되
-  Graph 표준 오류 envelope(`provider_error_code`/`_subcode`/`_type`)을 함께 실어
-  `classify_graph_oauth_error`가 CHANNEL_CONNECTION_REVOKED로 분류하게 한다. subcode는
-  스토리 본문 確定①에 PO가 못박은 목록(458 앱 권한 없음/460 비번 변경/463 만료/467
-  무효/490 사용자가 앱 권한 취소) 안에서만 고른다 — 3595 표의 3사건과 정확히 1:1
-  대응하는 별도 subcode가 Meta 쪽에 없어 의미가 가장 가까운 것으로 배정했다:
-  `revoked`=490(문자 그대로 "권한 취소"), `page-unlinked`=458(페이지에 대한 앱
-  권한을 잃는 것 — "앱 권한 없음"과 같은 결과), `app-inactive`=467(앱이 꺼지면 그
-  앱으로 발급된 토큰이 "무효"가 된다는 해석). 셋 다 classify_graph_oauth_error
-  안에서는 동일하게 "revoked"로 수렴한다(현재 reason 어휘가 expired|revoked|error
-  3종뿐이라 그 이상 세분화할 자리가 없다 — 어휘가 늘면 재배정).
-  story #3951(3595 표 후속, 그라운딩 갭 해소·페드루 PO 確定 2026-09-16) — 위
-  「정확히 1:1 대응하는 subcode가 Meta 쪽에 없다」는 그라운딩을 공식 문서로
-  확定했다: developers.facebook.com/docs/graph-api/guides/error-handling가
-  code 190(OAuthException) 아래 문서화한 subcode는 458·459·460·463 **4개뿐**이고
-  전부 「사용자 세션/인증 상태」를 가리킨다 — 앱 자체의 비활성/개발자disable/
-  Meta정지를 가리키는 전용 subcode는 존재하지 않는다(모듈 상단 190 밖 family
-  10·200~299의 fail-closed 판단과 같은 결의 사실). `app-inactive` 마커가 467을
-  빌려 쓰는 것은 그래서 **영구적으로 잠정** 배정이다(더 정밀한 subcode가 나중에
-  Meta 쪽에 생기지 않는 한 이 이상 나눌 근거가 없다) — instagram_sandbox_publish.py
-  /facebook_sandbox_publish.py로 이식할 때도 이 배정을 그대로 물려받는다(신규
-  subcode 발명 0).
+- `[sandbox:revoked]`·`[sandbox:page-unlinked]`(story #3598, 3595 표 행 ②③를
+  시뮬레이션 가능하게) — 둘 다 `create_container`가 401로 실패하되 Graph 표준
+  오류 envelope(`provider_error_code`/`_subcode`/`_type`)을 함께 실어
+  `classify_graph_oauth_error`가 CHANNEL_CONNECTION_REVOKED로 분류하게 한다.
+  subcode는 스토리 본문 確定①에 PO가 못박은 목록(458 앱 권한 없음/460 비번
+  변경/463 만료/467 무효/490 사용자가 앱 권한 취소) 안에서만 고른다 — 3595
+  표의 사건과 정확히 1:1 대응하는 별도 subcode가 Meta 쪽에 없어 의미가 가장
+  가까운 것으로 배정했다: `revoked`=490(문자 그대로 "권한 취소"),
+  `page-unlinked`=458(페이지에 대한 앱 권한을 잃는 것 — "앱 권한 없음"과
+  같은 결과). 둘 다 classify_graph_oauth_error 안에서는 동일하게 "revoked"로
+  수렴한다(현재 reason 어휘가 expired|revoked|error 3종뿐이라 그 이상
+  세분화할 자리가 없다 — 어휘가 늘면 재배정).
+- `[sandbox:app-inactive]`(story #3598 신설, story #3951 CHANGES-2로 재배정,
+  3595 표 행 ④ 시뮬레이션) — **"revoked"가 아니라 "error"로 떨어진다.**
+  1차 구현(story #3598)은 467(무효)을 빌려 "revoked"로 떨어뜨렸으나,
+  story #3951의 그라운딩(30분 상한, PO 지시 2026-09-16)이 공식 문서
+  (developers.facebook.com/docs/graph-api/guides/error-handling)로 확定했다:
+  code 190(OAuthException) 아래 문서화된 subcode는 458·459·460·463
+  **4개뿐**이고 전부 「사용자 세션/인증 상태」를 가리킨다 — 앱 자체의
+  비활성/개발자disable/Meta정지를 가리키는 전용 subcode는 존재하지 않는다
+  (모듈 상단 190 밖 family 10·200~299의 fail-closed 판단과 같은 결의
+  사실). 그래서 `provider_error_code=190, provider_error_subcode=None`
+  (신호 없음 그대로)을 싣는다 — `classify_graph_oauth_error`가 미지
+  subcode를 "error"(fail-closed, CHANNEL_CONNECTION_AUTH_ERROR)로 분류한다.
+  467을 계속 빌려 "revoked"로 떨어뜨리면 화면에 `channelReauthError`(④
+  완화 문장)가 영영 안 떠 AC3 라이브 관측(②·③ 같은 문장·④ 다른 문장이
+  기대값)이 불가능해진다 — instagram_sandbox_publish.py/facebook_sandbox_
+  publish.py도 같은 처방(신규 subcode 발명 0, 있는 그대로 "모른다"를
+  표현할 뿐).
 - `[sandbox:permission-error]`(story #3605, 3598 AC6 일반화 시뮬레이션) — `create_
   container`가 401로 실패하되 `provider_error_code=10`(type 없음 — code==10은
   190과 달리 OAuthException 타입 표기 없이도 이 family에 걸린다, 그라운딩:
@@ -206,9 +212,15 @@ async def create_container(
             provider_error_code=190, provider_error_subcode=458, provider_error_type="OAuthException",
         )
     if _MARKER_APP_INACTIVE in text:
+        # story #3951 CHANGES-2(페드루 PO C2, 2026-09-16 13:00Z) — 이 스토리(#3598) 원래
+        # 배정은 467(무효)을 빌려 "revoked"로 떨어뜨렸으나, #3951의 공식 문서 그라운딩이
+        # 「앱 비활성 전용 subcode는 Meta에 없다」를 확定했다 — subcode=None(신호 없음
+        # 그대로)을 실어 classify_graph_error_code가 "error"(fail-closed)로 떨어지게
+        # 정정한다. 467을 계속 빌리면 IG/FB 화면에서 channelReauthError(앱 비활성 완화
+        # 문장)가 영영 안 떠 라이브 검증이 불가능해진다(②·③과 같은 문장으로 뭉개짐).
         raise ThreadsPublishError(
             "SANDBOX_APP_INACTIVE", "sandbox: [sandbox:app-inactive] 마커 시뮬레이션", status_code=401,
-            provider_error_code=190, provider_error_subcode=467, provider_error_type="OAuthException",
+            provider_error_code=190, provider_error_subcode=None, provider_error_type="OAuthException",
         )
     if _MARKER_PERMISSION_ERROR in text:
         raise ThreadsPublishError(

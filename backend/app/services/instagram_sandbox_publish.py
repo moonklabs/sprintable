@@ -78,9 +78,16 @@ async def create_container(
             provider_error_code=190, provider_error_subcode=458, provider_error_type="OAuthException",
         )
     if _MARKER_APP_INACTIVE in text:
+        # story #3951 CHANGES-2(페드루 PO C2, 2026-09-16 13:00Z) — 앱 비활성을
+        # 가리키는 전용 subcode가 Meta에 없다는 이 스토리 자신의 그라운딩대로,
+        # subcode=None(신호 없음 그대로)을 실어 classify_graph_error_code가
+        # "error"(fail-closed, CHANNEL_CONNECTION_AUTH_ERROR)로 떨어지게 한다 —
+        # 467을 빌려 "revoked"로 떨어뜨리면 화면에 channelReauthError(④ 완화
+        # 문장)가 영영 안 뜬다(②·③과 같은 문장으로 뭉개짐, AC3 라이브 관측의
+        # 「④만 다른 문장」을 검증 불가하게 만드는 결함).
         raise ThreadsPublishError(
             "SANDBOX_INSTAGRAM_APP_INACTIVE", "sandbox: [sandbox:app-inactive] 마커 시뮬레이션", status_code=401,
-            provider_error_code=190, provider_error_subcode=467, provider_error_type="OAuthException",
+            provider_error_code=190, provider_error_subcode=None, provider_error_type="OAuthException",
         )
     if image_url is None:
         raise ThreadsPublishError(

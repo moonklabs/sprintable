@@ -481,12 +481,12 @@ async def test_sandbox_markers_simulate_failures():
 # 실제로 _classify_threads_error를 거쳐 CHANNEL_CONNECTION_REVOKED로 분류되는지
 # 까지 확認한다(마커만 있고 분류가 안 되면 여전히 "미감지").
 @pytest.mark.anyio
-async def test_sandbox_revoked_page_unlinked_app_inactive_markers_classify_as_connection_revoked():
+async def test_sandbox_revoked_page_unlinked_markers_classify_as_connection_revoked():
     from app.services.instagram_sandbox_publish import create_container
     from app.services.threads_publish import ThreadsPublishError
     from app.services.channel_posts import _classify_threads_error
 
-    for marker in ("[sandbox:revoked]", "[sandbox:page-unlinked]", "[sandbox:app-inactive]"):
+    for marker in ("[sandbox:revoked]", "[sandbox:page-unlinked]"):
         with pytest.raises(ThreadsPublishError) as exc_info:
             await create_container(
                 None, access_token="x", threads_user_id="ig-1", text=marker,
@@ -495,6 +495,27 @@ async def test_sandbox_revoked_page_unlinked_app_inactive_markers_classify_as_co
         assert exc_info.value.status_code == 401
         error_code, _ = _classify_threads_error(exc_info.value, connection_id=uuid.uuid4())
         assert error_code == "CHANNEL_CONNECTION_REVOKED", marker
+
+
+# story #3951 CHANGES-2(페드루 PO C2, 2026-09-16 13:00Z) — app-inactive는 "revoked"가
+# 아니라 "error"로 재배정됐다(앱 비활성 전용 subcode가 Meta에 없다는 그라운딩 확定 —
+# 467을 계속 빌리면 이 화면에서 channelReauthError(④ 완화 문장)가 영영 안 뜬다).
+@pytest.mark.anyio
+async def test_sandbox_app_inactive_marker_classifies_as_connection_auth_error():
+    from app.services.instagram_sandbox_publish import create_container
+    from app.services.threads_publish import ThreadsPublishError
+    from app.services.channel_posts import _classify_threads_error
+
+    with pytest.raises(ThreadsPublishError) as exc_info:
+        await create_container(
+            None, access_token="x", threads_user_id="ig-1", text="[sandbox:app-inactive]",
+            image_url="https://example.com/img.jpg",
+        )
+    assert exc_info.value.status_code == 401
+    assert exc_info.value.provider_error_code == 190
+    assert exc_info.value.provider_error_subcode is None
+    error_code, _ = _classify_threads_error(exc_info.value, connection_id=uuid.uuid4())
+    assert error_code == "CHANNEL_CONNECTION_AUTH_ERROR"
 
 
 @pytest.mark.anyio
