@@ -93,10 +93,11 @@ def _ok(data: object, status_code: int = 200) -> JSONResponse:
     return JSONResponse({"data": data, "error": None, "meta": None}, status_code=status_code)
 
 
-def _err(code: str, message: str, status_code: int = 400) -> JSONResponse:
+def _err(code: str, message: str, status_code: int = 400, *, headers: dict[str, str] | None = None) -> JSONResponse:
     return JSONResponse(
         {"data": None, "error": {"code": code, "message": message}, "meta": None},
         status_code=status_code,
+        headers=headers,
     )
 
 
@@ -983,14 +984,51 @@ async def refresh_token(
             # 있으면 user_id를 읽기만(best-effort, 인가 판정에 영향 0 — 이미 위에서 거부 확定
             # 後의 순수 로깅 조회) 해 로그에 싣는다. 새 규칙 발명 0 — window_reuse가 이미
             # 로깅하는 user_id 축을 실패 로그에도 동일하게 확장하는 것뿐.
-            _diag_user_id = (await session.execute(
-                select(RefreshToken.user_id).where(RefreshToken.token_hash == token_hash)
-            )).scalar_one_or_none()
+            #
+            # story #2449 AC1(계측 전환, 페드루 PO 지시 2026-09-16 — AC0 실측이 N=1이라
+            # 처방 A(탭 락, 동시요청 경합 전제)를 그 표본이 지지 못함 확認. 다음 사건이
+            # «동시경합 straggler» vs «같은 브라우저가 이미 회전된 RT를 오래 들고 있었다»
+            # (Set-Cookie 미반영류) 어느 클래스인지 자동으로 가르도록 3필드 추가):
+            # delta_since_revoke_s(제시된 RT가 이미 폐기/회전됐다면 그 시각부터 지금까지
+            # 경과초 — #2449 AC0가 실측한 「직전 성공 회전과의 Δ」를 매 사건마다 로그
+            # 하나로 즉시 구한다) · successor_used(그 회전의 후속 RT, replaced_by가
+            # 이후 실제로 또 회전됐는지 — True면 «정상 소유 탭이 이미 새 토큰을 정상
+            # 사용 중」이라 이 실패는 순수 straggler, False/None이면 후속 토큰 자체가
+            # 아직 한 번도 안 쓰였다는 뜻이라 다른 클래스를 시사) · ua(User-Agent, 같은
+            # UA 반복이면 다중기기 아닌 단일 브라우저 장시간 유휴 가설 지지). PII 0 —
+            # 셋 다 이미 관측 가능한 시스템 사실(시각차·불리언·UA 문자열)이지 개인식별
+            # 정보가 아니다.
+            _diag_row = (await session.execute(
+                select(RefreshToken.user_id, RefreshToken.revoked_at, RefreshToken.replaced_by)
+                .where(RefreshToken.token_hash == token_hash)
+            )).first()
+            _diag_user_id = _diag_row.user_id if _diag_row else None
+            _diag_delta_since_revoke_s: float | None = None
+            _diag_successor_used: bool | None = None
+            if _diag_row is not None and _diag_row.revoked_at is not None:
+                _diag_delta_since_revoke_s = (
+                    datetime.now(timezone.utc) - _diag_row.revoked_at
+                ).total_seconds()
+                if _diag_row.replaced_by is not None:
+                    _successor_revoked_at = (await session.execute(
+                        select(RefreshToken.revoked_at).where(RefreshToken.id == _diag_row.replaced_by)
+                    )).scalar_one_or_none()
+                    _diag_successor_used = _successor_revoked_at is not None
+            _diag_ua = request.headers.get("user-agent", "")[:200]
             logger.warning(
-                "auth.refresh 실패 reason=token_not_found_or_revoked_or_expired key=%s user_id=%s",
-                correlation_key, _diag_user_id,
+                "auth.refresh 실패 reason=token_not_found_or_revoked_or_expired key=%s user_id=%s "
+                "delta_since_revoke_s=%s successor_used=%s ua=%r",
+                correlation_key, _diag_user_id, _diag_delta_since_revoke_s, _diag_successor_used, _diag_ua,
             )
-            return _err("TOKEN_REVOKED", "Refresh token revoked or expired", 401)
+            # story #2449 CHANGES(카디르 codex 읽기 검수, 페드루 PO 채택 2026-09-16
+            # 13:28Z) — 이 로그의 correlation_key(위 #2449 계측 3필드와 같은 값)가
+            # BFF(route.ts) warn 로그엔 안 실려 두 로그 줄을 자동으로 못 짝지었다.
+            # 비밀값 아님(token_hash[:12], 원본 토큰 복원 불가) — 응답 헤더로 얹어
+            # BFF가 그대로 읽어 자기 로그에 반영하게 한다.
+            return _err(
+                "TOKEN_REVOKED", "Refresh token revoked or expired", 401,
+                headers={"X-Auth-Correlation": correlation_key},
+            )
         logger.info(
             "auth.refresh chain_resolve_window_reuse key=%s user_id=%s "
             "reason=multi_instance_race_loser_fork_rotation",
