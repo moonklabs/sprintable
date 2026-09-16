@@ -46,5 +46,7 @@ export function filterWorkList(workList: WorkList, filters: WorkListFilters): Wo
     if (stories.length === 0) continue;
     groups.push({ ...goal, stories });
   }
-  return { groups, partial: workList.partial };
+  // story #3934 — totalStoryCount는 필터 무관 원본 총량(빈 상태 문구 판정용, 렌더 계층이
+  // "필터로 걸러졌다" vs "애초에 일로 안 쪼개졌다" vs "스토리 자체가 0개"를 가르는 데 쓴다).
+  return { groups, partial: workList.partial, totalStoryCount: workList.totalStoryCount };
 }

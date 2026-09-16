@@ -182,6 +182,12 @@ export interface WorkList {
    * limit/cursor 파라미터가 아예 없다, 처음엔 규약 A 페이지 소스로 잘못 모델링해 실 데이터
    * 0건인데도 "전부 불러오지 못했어요" 배너가 항상 뜨는 결함을 라이브 검증에서 발견·수정). */
   partial: boolean;
+  /** story #3934(재판정, 페드루 PO AC2(b) 2026-09-16 03:47Z) — 미필터 원본 `input.stories.
+   * items.length`. groups가 0개일 때 「스토리 자체가 0개(진짜 빈 프로젝트)」와 「스토리는
+   * 있는데 전부 task/agent_run 0개라 rows가 안 생겨 걸러짐(일로 안 쪼개짐)」을 렌더 계층이
+   * 구분하게 한다 — PO Test Org 실사고(deploy92): 스토리 20개가 실재하는데도 이 구분이 없어
+   * "표시할 일이 없어요"(전체 부정)로 오독됐다. */
+  totalStoryCount: number;
 }
 
 export interface WorkListPageResult<T> {
@@ -382,5 +388,6 @@ export function deriveWorkList(input: WorkListInput): WorkList {
   return {
     groups,
     partial: isPartial(input.goals, input.stories, input.tasks, input.agentRuns),
+    totalStoryCount: input.stories.items.length,
   };
 }

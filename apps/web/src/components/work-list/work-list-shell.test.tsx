@@ -12,8 +12,9 @@ import koMessages from '../../../messages/ko.json';
 import { TopBarProvider } from '@/components/nav/top-bar-context';
 import type { FetchedWorkList } from './fetch-work-list';
 
-const { fetchWorkListMock } = vi.hoisted(() => ({
+const { fetchWorkListMock, searchParamsValueRef } = vi.hoisted(() => ({
   fetchWorkListMock: vi.fn<(projectId: string) => Promise<FetchedWorkList>>(),
+  searchParamsValueRef: { current: '' as string },
 }));
 
 vi.mock('./fetch-work-list', () => ({
@@ -21,7 +22,7 @@ vi.mock('./fetch-work-list', () => ({
 }));
 
 vi.mock('next/navigation', () => ({
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => new URLSearchParams(searchParamsValueRef.current),
   usePathname: () => '/work-list',
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
   useParams: () => ({ ws: 'moonklabs', proj: 'sprintable' }),
@@ -47,6 +48,7 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
   fetchWorkListMock.mockReset();
+  searchParamsValueRef.current = '';
 });
 
 afterEach(async () => {
@@ -77,6 +79,7 @@ function unassignedOnlyPayload(): FetchedWorkList {
         }],
       }],
       partial: false,
+      totalStoryCount: 1,
     },
     hypotheses: [],
   };
@@ -97,8 +100,30 @@ describe('WorkListShell — 목표 미할당 스토리(story #3934)', () => {
   });
 
   it('그룹이 정말 0개면(실제로 일이 없으면) 여전히 빈 상태를 보인다', async () => {
-    fetchWorkListMock.mockResolvedValue({ workList: { groups: [], partial: false }, hypotheses: [] });
+    fetchWorkListMock.mockResolvedValue({ workList: { groups: [], partial: false, totalStoryCount: 0 }, hypotheses: [] });
     await mount();
     expect(container.textContent).toContain('표시할 일이 없어요');
+  });
+});
+
+// story #3934(재판정 — PO Test Org deploy92 실사고, 페드루 PO AC2(b) 2026-09-16 03:47Z) —
+// "표시할 일이 없어요"(전체 부정)가 스토리는 있지만(totalStoryCount>0) task로 안 쪼개진
+// 경우에도 그대로 떠서 "프로젝트에 일이 없다"고 오독시켰다. 필터 없이 groups가 0개인데
+// totalStoryCount>0이면 사실대로 정정된 문구를 보여야 한다.
+describe('WorkListShell — task 0개(목표 유무 무관, story #3934 재판정)', () => {
+  it('스토리는 있지만(task 0개) groups가 0개면 "일로 안 쪼개짐" 문구를 보인다(전체 부정 문구 아님)', async () => {
+    fetchWorkListMock.mockResolvedValue({ workList: { groups: [], partial: false, totalStoryCount: 20 }, hypotheses: [] });
+    await mount();
+    expect(container.textContent).not.toContain('표시할 일이 없어요');
+    expect(container.textContent).toContain('아직 일로 나뉜 작업이 없어요');
+    expect(container.textContent).toContain('보드');
+  });
+
+  it('필터가 걸려 groups가 0개일 때는(totalStoryCount>0이어도) 기존 빈 상태 문구를 유지한다', async () => {
+    searchParamsValueRef.current = 'goal=some-goal-id';
+    fetchWorkListMock.mockResolvedValue({ workList: { groups: [], partial: false, totalStoryCount: 20 }, hypotheses: [] });
+    await mount();
+    expect(container.textContent).toContain('표시할 일이 없어요');
+    expect(container.textContent).not.toContain('아직 일로 나뉜 작업이 없어요');
   });
 });

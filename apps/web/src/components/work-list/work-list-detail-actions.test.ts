@@ -91,6 +91,7 @@ function row(id: string): WorkListRow {
 function workList(rowIds: string[]): WorkList {
   return {
     partial: false,
+    totalStoryCount: 1,
     groups: [{
       goalId: 'goal-1', title: '목표 A', isActive: true, doneCount: 0, totalCount: rowIds.length,
       assignedCount: 0, delegatedCount: 0, hypothesisCount: 0,
