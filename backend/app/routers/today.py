@@ -101,6 +101,27 @@ class UsageSection(BaseModel):
     ad_spend: AdSpendUsage
 
 
+class LandedToday(BaseModel):
+    """story #3959(3954 그라운딩 doc 처방) — 오늘 done 전이 카운트. story_activities
+    실측(actor_id 있는 전이만 남는 행 — 근사 없음, 그 배제 자체가 계약)."""
+    count: int
+    since: datetime
+
+
+class QaPassedToday(BaseModel):
+    """오늘 승인된 게이트 카운트 — gates.resolved_at 실측(근사 불요)."""
+    count: int
+    since: datetime
+
+
+class OpenDefects(BaseModel):
+    # story #3959 — verdict(source="qa") 테이블은 있으나 이를 채우는 POST /capture-review
+    # 실 호출처가 0(cron·webhook·스크립트 전무) — 지금 count를 내면 거짓 0이 된다.
+    # AdSpendUsage와 동일 관례: measured=False 고정, count=None(가짜 0 금지).
+    count: int | None = None
+    measured: bool = False
+
+
 class TodayResponse(BaseModel):
     needs_me: list[NeedsMeItem]
     needs_me_count: int
@@ -108,6 +129,9 @@ class TodayResponse(BaseModel):
     completed_today: list[CompletedTodayItem]
     published_today: PublishedToday
     usage: UsageSection
+    landed_today: LandedToday
+    qa_passed_today: QaPassedToday
+    open_defects: OpenDefects
 
 
 @router.get("", response_model=TodayResponse)
