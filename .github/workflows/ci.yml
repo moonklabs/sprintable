@@ -807,6 +807,28 @@ jobs:
         working-directory: backend
         run: python3 scripts/lint_no_script_output_artifacts.py
 
+  # story #4012(critical·prod 승격 준비, 페드루 PO CHANGES 2026-09-17 실사고 방지) —
+  # cloudbuild.yaml의 bash 스텝 스크립트 안 로컬 셸 변수를 `$NAME`(단일 $)로 적으면
+  # Cloud Build가 자기 substitution으로 오인해 미정의 치환 오류로 빌드 제출 자체를 거부
+  # 한다(develop 관례: `$$NAME`/`$${NAME}` 이스케이프 필수). CI는 cloudbuild.yaml을 실제로
+  # gcloud builds submit하지 않으므로(GCP 인증 없는 CI 환경) 이 정적 가드가 유일한 사전
+  # 방어선 — 이번 PR의 신규 deploy-frontend 스텝이 이 실수를 낼 뻔했다(CHANGES로 수정).
+  # baseline(cloudbuild-shell-var-escaping-baseline.txt)은 발견된 기존 위반(deploy-mcp
+  # 검산부 3개, 이 스토리 스코프 밖) grandfather — 새 위반만 RED.
+  cloudbuild-shell-var-escaping-lint:
+    name: cloudbuild.yaml shell var escaping lint (guard, story #4012)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
+      - name: Self-test (positive/negative controls, including this PR's original bug)
+        run: python3 scripts/verify-cloudbuild-shell-var-escaping.py --self-test
+      - name: Scan cloudbuild.yaml for unescaped shell variables (new violations only, baseline grandfathers pre-existing)
+        run: python3 scripts/verify-cloudbuild-shell-var-escaping.py
+
   # story #3216(위생·가드, 2026-08-29 · #3206 design 리뷰 유나 비차단 기록) — 메일 셸
   # 푸터의 회사정보(email.py 수동 사본)가 FE business-info.ts(전자상거래법 §10 SSOT)와
   # 크로스파일이라 정본이 바뀌어도 조용히 낡던 구멍. 자구(문자열 그대로) 대조만, baseline

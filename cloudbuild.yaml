@@ -695,7 +695,7 @@ steps:
         # dev 분기에서만 명시로 붙이고, prod에선 아예 안 실어 미설정=꺼짐(fail-closed) —
         # 값이 정확히 "true"일 때만 켜진다(isDesktopDownloadEnabled 판정과 짝).
         if [ "${_DEPLOY_ENV}" == "dev" ]; then
-          ENV_VARS="$ENV_VARS,DESKTOP_DOWNLOAD_ENABLED=true"
+          ENV_VARS="$${ENV_VARS},DESKTOP_DOWNLOAD_ENABLED=true"
         fi
         gcloud run deploy sprintable-frontend-${_DEPLOY_ENV} \
           --image=${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/frontend:${COMMIT_SHA} \
@@ -704,7 +704,7 @@ steps:
           --min-instances=${_FRONTEND_MIN_INSTANCES} \
           --max-instances=${_FRONTEND_MAX_INSTANCES} \
           --cpu-boost \
-          --update-env-vars="$ENV_VARS" \
+          --update-env-vars="$${ENV_VARS}" \
           --quiet
     waitFor: [push-frontend]
 
