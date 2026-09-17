@@ -67,6 +67,9 @@ function mockFetchRoutes(routes: {
   gates?: unknown[];
   artifacts?: unknown[];
   transitionStatus?: number;
+  // story #3976
+  tasks?: unknown[];
+  activityLogItems?: unknown[];
 }) {
   fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
     if (init?.method === 'POST' && url.includes('/transition')) {
@@ -83,6 +86,12 @@ function mockFetchRoutes(routes: {
     }
     if (url.startsWith('/api/visual-artifacts')) {
       return jsonResponse(routes.artifacts ?? []);
+    }
+    if (url.startsWith('/api/tasks?story_id=')) {
+      return jsonResponse(routes.tasks ?? []);
+    }
+    if (url.startsWith('/api/activity-logs')) {
+      return jsonResponse({ items: routes.activityLogItems ?? [] });
     }
     if (url.startsWith('/api/gates')) {
       return jsonResponse(routes.gates ?? []);
@@ -226,6 +235,50 @@ describe('WorkListDetailPanel — 탭→데이터 매핑', () => {
     await mountPanel(baseRow(), 'story-99');
     await act(async () => { (container.querySelector('[data-testid="panel-tab-artifacts"]') as HTMLElement).click(); });
     expect(container.querySelector('[data-testid="stub-artifact-section"]')?.getAttribute('data-story-id')).toBe('story-99');
+  });
+
+  // story #3976 AC2 — 「일」 체크리스트(기존 GET /api/tasks?story_id= 재사용, 새 BE 0).
+  it('⭐일 탭 — task 제목+상태 라벨(entity-status-labels.ts SSOT)이 뜬다', async () => {
+    mockFetchRoutes({ tasks: [{ id: 't1', title: '시안 그리기', status: 'in-progress' }, { id: 't2', title: 'PO 렌더 검수', status: 'todo' }] });
+    await mountPanel();
+    await act(async () => { (container.querySelector('[data-testid="panel-tab-tasks"]') as HTMLElement).click(); });
+    const list = container.querySelector('[data-testid="panel-tasks-list"]');
+    expect(list?.textContent).toContain('시안 그리기');
+    expect(list?.textContent).toContain('진행 중');
+    expect(list?.textContent).toContain('PO 렌더 검수');
+    expect(list?.textContent).toContain('할 일');
+  });
+
+  it('일 탭 — 0건이면 「아직 일로 안 나뉘었어요」', async () => {
+    mockFetchRoutes({ tasks: [] });
+    await mountPanel();
+    await act(async () => { (container.querySelector('[data-testid="panel-tab-tasks"]') as HTMLElement).click(); });
+    expect(container.querySelector('[data-testid="panel-tasks-empty"]')?.textContent).toBe(koMessages.workList.panelEmptyTasks);
+  });
+
+  // story #3976 AC1 — 「이력」(기존 GET /api/v2/activity-logs?entity_type=story&entity_id=
+  // 재사용, 3971 정정 확認한 그 API — 새 BE 0). action 원시값은 노출하지 않고 문장으로.
+  it('⭐이력 탭 — action별 문장으로 렌더된다(원시값 노출 0)', async () => {
+    mockFetchRoutes({
+      activityLogItems: [
+        { id: 'l1', actor_name: '페드루', action: 'story_created', created_at: new Date().toISOString() },
+        { id: 'l2', actor_name: '유나', action: 'story_updated', created_at: new Date().toISOString() },
+      ],
+    });
+    await mountPanel();
+    await act(async () => { (container.querySelector('[data-testid="panel-tab-history"]') as HTMLElement).click(); });
+    const list = container.querySelector('[data-testid="panel-history-list"]');
+    expect(list?.textContent).toContain('페드루가 만들었어요');
+    expect(list?.textContent).toContain('유나가 바꿨어요');
+    expect(list?.textContent).not.toContain('story_created');
+    expect(list?.textContent).not.toContain('story_updated');
+  });
+
+  it('이력 탭 — 0건이면 「아직 이력이 없어요」', async () => {
+    mockFetchRoutes({ activityLogItems: [] });
+    await mountPanel();
+    await act(async () => { (container.querySelector('[data-testid="panel-tab-history"]') as HTMLElement).click(); });
+    expect(container.querySelector('[data-testid="panel-history-empty"]')?.textContent).toBe(koMessages.workList.panelEmptyHistory);
   });
 
   // 픽셀 커밋 CHANGES 2(페드루 PO 판정 09:40Z) — 3탭 다 "아직 로딩 중"과 "진짜 0건"을
