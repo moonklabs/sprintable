@@ -511,6 +511,8 @@
     "threadRailTitle": "대화",
     "threadRailEmpty": "아직 대화가 없어요",
     "threadRowAriaLabel": "{label}, 목록 {n}번째",
+    "conversationUnavailableTitle": "이 대화를 열 수 없어요",
+    "conversationUnavailableDescription": "없는 대화이거나 볼 권한이 없어요. 왼쪽 목록에서 다른 대화를 골라 주세요.",
     "unknownParticipant": "알 수 없음",
     "roleTagAgent": "에이전트",
     "meLabel": "나",

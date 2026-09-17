@@ -19,8 +19,11 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { DEFAULT_NAV_V3_FLAGS } from '@/lib/nav-v3-destinations';
 
+// story #4018 — usePathname/useSearchParams 추가(주소 쿼리 `conversation` 딥링크).
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: vi.fn() }),
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  usePathname: () => '/chat',
+  useSearchParams: () => new URLSearchParams(),
 }));
 
 class FakeEventSource {
