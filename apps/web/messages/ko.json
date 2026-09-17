@@ -6048,6 +6048,7 @@
     "sectionExpand": "펼치기",
     "sectionCollapse": "접기",
     "filtersToggleLabel": "필터",
+    "filtersToggleLabelWithCount": "필터 · {count}개 적용",
     "publishingTrustSectionTitle": "발행 신뢰도",
     "rowExpandAction": "자세히 보기",
     "rowDetailOrganicViewsLabel": "자연 조회",

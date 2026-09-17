@@ -4,29 +4,40 @@
 // «조회»(자연, views 고정) D+1/D+7을 항상 보이고, 광고 축은 ads_boost(지출/잔여)
 // 그대로(AdsBoostSummaryView엔 «광고 조회» 수 자체가 없다 — 3977 §3, 지어내지
 // 않는다).
-import { describe, expect, it } from 'vitest';
+//
+// story #3979 CHANGES(페드루 PO 2026-09-17 01:14Z) — 댓글·후속 조치·원본과 대조
+// 를 표(page.tsx)에서 여기로 진짜 옮겼다 — 이 패널이 이제 그 셋도 렌더한다.
+import { describe, expect, it, vi } from 'vitest';
+import { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { NextIntlClientProvider, useTranslations } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
-import { InsightsBoardRowDetail } from './insights-board-row-detail';
+import { InsightsBoardRowDetail, type InsightsBoardRowDetailProps } from './insights-board-row-detail';
 import type { Ga4ConnectionStatus, InsightsBoardRow } from './types';
 
-function Harness({ row, ga4ConnectionStatus }: { row: InsightsBoardRow; ga4ConnectionStatus: Ga4ConnectionStatus }) {
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+type HarnessOverrides = Partial<Omit<InsightsBoardRowDetailProps, 'row' | 'tBoard' | 'tContent' | 'tChannelConnect'>>;
+
+function Harness({ row, ga4ConnectionStatus, overrides }: { row: InsightsBoardRow; ga4ConnectionStatus: Ga4ConnectionStatus; overrides?: HarnessOverrides }) {
   const tContent = useTranslations('content');
   const tBoard = useTranslations('insightsBoard');
   const tChannelConnect = useTranslations('channelConnect');
   return (
     <InsightsBoardRowDetail
       row={row} tBoard={tBoard} tContent={tContent} tChannelConnect={tChannelConnect}
-      ga4ConnectionStatus={ga4ConnectionStatus} locale="ko"
+      ga4ConnectionStatus={ga4ConnectionStatus} locale="ko" rowIndex={0}
+      canCreateFollowUp={true} canReconcile={true} onFollowUp={vi.fn()} onReconcile={vi.fn()} reconcileLoading={false}
+      {...overrides}
     />
   );
 }
 
-function render(row: InsightsBoardRow, ga4ConnectionStatus: Ga4ConnectionStatus = 'connected') {
+function renderStatic(row: InsightsBoardRow, ga4ConnectionStatus: Ga4ConnectionStatus = 'connected', overrides?: HarnessOverrides) {
   return renderToStaticMarkup(
     <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
-      <Harness row={row} ga4ConnectionStatus={ga4ConnectionStatus} />
+      <Harness row={row} ga4ConnectionStatus={ga4ConnectionStatus} overrides={overrides} />
     </NextIntlClientProvider>,
   );
 }
@@ -49,13 +60,13 @@ const BASE_ROW: InsightsBoardRow = {
 
 describe('InsightsBoardRowDetail(story #3979)', () => {
   it('⭐metricParam 무관하게 자연 조회 D+1/D+7 views를 항상 보인다', () => {
-    const html = render(BASE_ROW);
+    const html = renderStatic(BASE_ROW);
     expect(html).toContain('100');
     expect(html).toContain('400');
   });
 
   it('⭐ads_boost가 null이면 「해당 없음」(지어낸 광고 조회 수 0)', () => {
-    const html = render(BASE_ROW);
+    const html = renderStatic(BASE_ROW);
     expect(html).toContain(koMessages.insightsBoard.adsSpendNotApplicable);
   });
 
@@ -67,7 +78,37 @@ describe('InsightsBoardRowDetail(story #3979)', () => {
         captured_spend_minor: 40_000, remaining_minor: 60_000, run_status: 'running',
       },
     };
-    const html = render(withAds);
+    const html = renderStatic(withAds);
     expect(html).not.toContain(koMessages.insightsBoard.adsSpendNotApplicable);
+  });
+
+  // story #3979 CHANGES — 댓글·행동 버튼이 이제 이 패널 안에 있다(page.tsx
+  // 플랫 열/버튼 제거).
+  it('⭐댓글 칸이 패널 안에 있다(자리 옮김 ③)', () => {
+    const html = renderStatic(BASE_ROW);
+    expect(html).toContain('data-testid="insights-board-comments-cell"');
+  });
+
+  it('⭐canCreateFollowUp/canReconcile 둘 다 true면 두 버튼이 다 보인다', async () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root: Root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <Harness row={BASE_ROW} ga4ConnectionStatus="connected" />
+        </NextIntlClientProvider>,
+      );
+    });
+    expect(container.querySelector('[data-testid="insights-board-follow-up-button"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="insights-board-reconcile-button"]')).not.toBeNull();
+    await act(async () => { root.unmount(); });
+    container.remove();
+  });
+
+  it('⭐canCreateFollowUp=false·canReconcile=false면 행동 영역 자체가 없다', () => {
+    const html = renderStatic(BASE_ROW, 'connected', { canCreateFollowUp: false, canReconcile: false });
+    expect(html).not.toContain('data-testid="insights-board-follow-up-button"');
+    expect(html).not.toContain('data-testid="insights-board-reconcile-button"');
   });
 });

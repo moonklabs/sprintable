@@ -27,7 +27,7 @@ import { formatMinorCurrency, type GenerationBudgetCurrency } from '@/components
  * 없으면(서버 응답 불완전) `GenerationBudgetIndicator`의 failed 갈래와 동형으로
  * 접는다(추정 채움 금지).
  */
-interface OrgAdsCostSummary {
+export interface OrgAdsCostSummary {
   approved_boost_count: number;
   sealed_ads_currency: string | null;
   sealed_budget_minor: number | null;
@@ -36,7 +36,7 @@ interface OrgAdsCostSummary {
   cap_reached_count: number;
 }
 
-interface OrgCostSummary {
+export interface OrgCostSummary {
   ads: OrgAdsCostSummary;
   generation_cost_spent_minor: number | null;
   generation_cost_period_start: string | null;
@@ -48,18 +48,28 @@ interface OrgCostSummary {
   x_currency: string | null;
 }
 
-type LoadState =
+export type OrgCostSummaryLoadState =
   | { status: 'loading' }
   | { status: 'failed' }
   | { status: 'ok'; summary: OrgCostSummary };
 
-export function OrgCostSummaryCard({ orgId }: { orgId: string }) {
+export interface OrgCostSummaryCardProps {
+  orgId: string;
+  // story #3979 CHANGES(페드루 PO 2026-09-17 01:14Z) — 첫 화면 콜 수 ≤2(AC3) 위반
+  // 처방: 이 프롭을 주면(undefined 아니면) 이 컴포넌트는 자체 fetch를 하지 않고
+  // 페이지가 이미 부른 값을 그대로 쓴다. 안 주면(기존 org-cost-summary-card.test.tsx
+  // 전부 그렇다) 예전 그대로 자체 fetch — 기존 테스트 무수정 GREEN.
+  preloadedState?: OrgCostSummaryLoadState;
+}
+
+export function OrgCostSummaryCard({ orgId, preloadedState }: OrgCostSummaryCardProps) {
   const t = useTranslations('insightsBoard');
   const tContent = useTranslations('content');
   const locale = useLocale();
-  const [state, setState] = useState<LoadState>({ status: 'loading' });
+  const [ownState, setOwnState] = useState<OrgCostSummaryLoadState>({ status: 'loading' });
 
   useEffect(() => {
+    if (preloadedState !== undefined) return;
     if (!orgId) return;
     let cancelled = false;
     async function load() {
@@ -67,22 +77,24 @@ export function OrgCostSummaryCard({ orgId }: { orgId: string }) {
         const res = await fetchWithAuth(`/api/organizations/${orgId}/insights-board/cost-summary`);
         if (cancelled) return;
         if (!res.ok) {
-          setState({ status: 'failed' });
+          setOwnState({ status: 'failed' });
           return;
         }
         const json = (await res.json().catch(() => null)) as { data?: OrgCostSummary } | null;
         if (!json?.data) {
-          setState({ status: 'failed' });
+          setOwnState({ status: 'failed' });
           return;
         }
-        setState({ status: 'ok', summary: json.data });
+        setOwnState({ status: 'ok', summary: json.data });
       } catch {
-        if (!cancelled) setState({ status: 'failed' });
+        if (!cancelled) setOwnState({ status: 'failed' });
       }
     }
     void load();
     return () => { cancelled = true; };
-  }, [orgId]);
+  }, [orgId, preloadedState]);
+
+  const state = preloadedState ?? ownState;
 
   if (state.status === 'loading') {
     return (

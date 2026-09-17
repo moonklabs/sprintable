@@ -73,6 +73,20 @@ async function mount() {
   await flush();
 }
 
+// story #3979 CHANGES(페드루 PO 2026-09-17 01:14Z) — 댓글·후속 조치·원본과 대조가
+// 행 상세(펼침) 안으로 옮겨졌다. 아래 헬퍼로 "그 행을 펼친 뒤" 같은 testid를
+// 찾는다 — selector 범위만 바뀌고 각 테스트의 단언(찾는 문구·href·상태)은 무수정.
+async function expandRow(rowEl: Element) {
+  const toggle = rowEl.querySelector('[data-testid="insights-board-row-expand-toggle"]') as HTMLElement;
+  await act(async () => { toggle.click(); });
+  await flush();
+}
+
+async function expandFirstRow() {
+  const row = container.querySelector('[data-testid="insights-board-row"]') as HTMLElement;
+  await expandRow(row);
+}
+
 async function openMenuAndClick(triggerTestId: string, itemText: string) {
   const trigger = container.querySelector(`[data-testid="${triggerTestId}"]`) as HTMLElement;
   await act(async () => {
@@ -466,12 +480,14 @@ describe('InsightsBoardPage — 후속 조치 다이얼로그(story #3503)', () 
     useDashboardContextMock.mockReturnValue({ orgId: ORG_ID, currentMemberType: 'agent' });
     stubFetch({});
     await mount();
+    await expandFirstRow();
     expect(container.querySelector('[data-testid="insights-board-follow-up-button"]')).toBeNull();
   });
 
   it('doc a0da40c9 §21-5(유나 2026-09-05) — 제목 입력이 「[유형] {원문 제목}」으로 미리 채워지고, 유형을 바꾸면 갈아끼워진다', async () => {
     stubFetch({});
     await mount();
+    await expandFirstRow();
     const btn = container.querySelector('[data-testid="insights-board-follow-up-button"]') as HTMLButtonElement;
     await act(async () => { btn.click(); });
     await flush();
@@ -487,6 +503,7 @@ describe('InsightsBoardPage — 후속 조치 다이얼로그(story #3503)', () 
   it('PO REQUEST(2026-09-05, PR#3853 재리뷰) — 사람이 직접 고친 제목은 유형을 바꿔도 소리 없이 안 지워진다', async () => {
     stubFetch({});
     await mount();
+    await expandFirstRow();
     const btn = container.querySelector('[data-testid="insights-board-follow-up-button"]') as HTMLButtonElement;
     await act(async () => { btn.click(); });
     await flush();
@@ -509,6 +526,7 @@ describe('InsightsBoardPage — 후속 조치 다이얼로그(story #3503)', () 
   it('⭐성공 경로 — 만들면 story_id로 /board?story= 링크가 뜬다(getEntityHref 재사용)', async () => {
     stubFetch({ followUp: () => ({ status: 201, body: { story_id: 'story-99' } }) });
     await mount();
+    await expandFirstRow();
     const btn = container.querySelector('[data-testid="insights-board-follow-up-button"]') as HTMLButtonElement;
     await act(async () => { btn.click(); });
     await flush();
@@ -525,6 +543,7 @@ describe('InsightsBoardPage — 후속 조치 다이얼로그(story #3503)', () 
   it('403 FOLLOW_UP_CREATE_HUMAN_ONLY — 알려진 코드의 사람 말 문구가 뜬다', async () => {
     stubFetch({ followUp: () => ({ status: 403, body: { detail: { code: 'FOLLOW_UP_CREATE_HUMAN_ONLY', message: 'human only' } } }) });
     await mount();
+    await expandFirstRow();
     const btn = container.querySelector('[data-testid="insights-board-follow-up-button"]') as HTMLButtonElement;
     await act(async () => { btn.click(); });
     await flush();
@@ -537,6 +556,7 @@ describe('InsightsBoardPage — 후속 조치 다이얼로그(story #3503)', () 
   it('404 publication 없음(플레인 문자열 detail) — 서버 원문이 그대로 뜬다(지어내지 않는다)', async () => {
     stubFetch({ followUp: () => ({ status: 404, body: { detail: 'publication을 찾을 수 없습니다: pub-404' } }) });
     await mount();
+    await expandFirstRow();
     const btn = container.querySelector('[data-testid="insights-board-follow-up-button"]') as HTMLButtonElement;
     await act(async () => { btn.click(); });
     await flush();
@@ -549,6 +569,7 @@ describe('InsightsBoardPage — 후속 조치 다이얼로그(story #3503)', () 
   it('422 FOLLOW_UP_INVALID_KIND — 알려진 코드의 사람 말 문구가 뜬다', async () => {
     stubFetch({ followUp: () => ({ status: 422, body: { detail: { code: 'FOLLOW_UP_INVALID_KIND', message: 'bad kind' } } }) });
     await mount();
+    await expandFirstRow();
     const btn = container.querySelector('[data-testid="insights-board-follow-up-button"]') as HTMLButtonElement;
     await act(async () => { btn.click(); });
     await flush();
@@ -567,6 +588,7 @@ describe('InsightsBoardPage — 댓글 칸 네 갈래(story #3517)', () => {
   it('① site_post 행 — "해당 없음"(댓글 축 자체가 없다)', async () => {
     stubFetch({ page1: [{ ...ROW_B, comments_supported: false, comments_last_collected_at: null, comments_count: null, channel_post_draft_id: null }] });
     await mount();
+    await expandFirstRow();
     expect(container.querySelector('[data-testid="insights-board-comments-not-applicable"]')?.textContent).toBe('해당 없음');
   });
 
@@ -575,6 +597,7 @@ describe('InsightsBoardPage — 댓글 칸 네 갈래(story #3517)', () => {
   it('② channel_publication인데 채널이 댓글 수집 미지원 — "채널 미제공"(①과 다른 문구·다른 testid)', async () => {
     stubFetch({ page1: [{ ...ROW_A, comments_supported: false, comments_last_collected_at: null, comments_count: null, channel_post_draft_id: null }] });
     await mount();
+    await expandFirstRow();
     expect(container.querySelector('[data-testid="insights-board-comments-not-applicable"]')).toBeNull();
     expect(container.querySelector('[data-testid="insights-board-comments-channel-unsupported"]')?.textContent).toBe('채널 미제공');
   });
@@ -582,18 +605,21 @@ describe('InsightsBoardPage — 댓글 칸 네 갈래(story #3517)', () => {
   it('③ comments_supported=true인데 last_collected_at=null — "아직 수집 전"(0건과 다른 문구)', async () => {
     stubFetch({ page1: [{ ...ROW_A, comments_supported: true, comments_last_collected_at: null, comments_count: null, channel_post_draft_id: null }] });
     await mount();
+    await expandFirstRow();
     expect(container.querySelector('[data-testid="insights-board-comments-uncollected"]')?.textContent).toBe('아직 수집 전');
   });
 
   it('④-a 수집됨·0건 — 이제 "댓글 0"으로 적는다(미수집과 신호로 갈렸으므로 §22-7 원칙이 선다)', async () => {
     stubFetch({ page1: [{ ...ROW_A, comments_supported: true, comments_last_collected_at: '2026-09-05T10:00:00Z', comments_count: 0, channel_post_draft_id: null }] });
     await mount();
+    await expandFirstRow();
     expect(container.querySelector('[data-testid="insights-board-comments-text"]')?.textContent).toBe('댓글 0');
   });
 
   it('④-b 수집됨·n건·draft_id 있음 — /content/channel-posts/{draft_id} 링크', async () => {
     stubFetch({ page1: [{ ...ROW_A, comments_supported: true, comments_last_collected_at: '2026-09-05T10:00:00Z', comments_count: 5, channel_post_draft_id: 'draft-42' }] });
     await mount();
+    await expandFirstRow();
     const link = container.querySelector('[data-testid="insights-board-comments-link"]') as HTMLAnchorElement;
     expect(link?.textContent).toBe('댓글 5');
     expect(link?.getAttribute('href')).toBe('/content/channel-posts/draft-42');
@@ -602,6 +628,7 @@ describe('InsightsBoardPage — 댓글 칸 네 갈래(story #3517)', () => {
   it('④-c 수집됨·n건·draft_id 없음(BE 예외 케이스) — 링크 없이 수만', async () => {
     stubFetch({ page1: [{ ...ROW_A, comments_supported: true, comments_last_collected_at: '2026-09-05T10:00:00Z', comments_count: 5, channel_post_draft_id: null }] });
     await mount();
+    await expandFirstRow();
     expect(container.querySelector('[data-testid="insights-board-comments-link"]')).toBeNull();
     expect(container.querySelector('[data-testid="insights-board-comments-text"]')?.textContent).toBe('댓글 5');
   });
@@ -648,9 +675,10 @@ describe('InsightsBoardPage — 원본과 대조 행 액션(story #3620)', () =>
     stubFetch({});
     await mount();
     const rows = [...container.querySelectorAll('[data-testid="insights-board-row"]')];
-    expect(rows[0]!.querySelector('[data-testid="insights-board-reconcile-button"]')).not.toBeNull();
-    expect(rows[1]!.querySelector('[data-testid="insights-board-reconcile-button"]')).toBeNull();
-    expect(rows[2]!.querySelector('[data-testid="insights-board-reconcile-button"]')).not.toBeNull();
+    await expandRow(rows[0]!); await expandRow(rows[1]!); await expandRow(rows[2]!);
+    expect(rows[0]!.nextElementSibling?.querySelector('[data-testid="insights-board-reconcile-button"]')).not.toBeNull();
+    expect(rows[1]!.nextElementSibling?.querySelector('[data-testid="insights-board-reconcile-button"]')).toBeNull();
+    expect(rows[2]!.nextElementSibling?.querySelector('[data-testid="insights-board-reconcile-button"]')).not.toBeNull();
   });
 
   it('누르면 진행 中 비활성 상태를 거쳐 결과가 행 아래 한 줄로 뜬다(지표별 일치/불일치/미측정)', async () => {
@@ -665,8 +693,9 @@ describe('InsightsBoardPage — 원본과 대조 행 액션(story #3620)', () =>
       }),
     });
     await mount();
+    await expandFirstRow();
     const rows = [...container.querySelectorAll('[data-testid="insights-board-row"]')];
-    const btn = rows[0]!.querySelector('[data-testid="insights-board-reconcile-button"]') as HTMLButtonElement;
+    const btn = rows[0]!.nextElementSibling!.querySelector('[data-testid="insights-board-reconcile-button"]') as HTMLButtonElement;
     expect(btn.disabled).toBe(false);
 
     await act(async () => { btn.click(); });
@@ -686,8 +715,9 @@ describe('InsightsBoardPage — 원본과 대조 행 액션(story #3620)', () =>
       reconcile: () => ({ status: 409, body: { detail: { code: 'CHANNEL_CONNECTION_NOT_ACTIVE', message: 'raw' } } }),
     });
     await mount();
+    await expandFirstRow();
     const rows = [...container.querySelectorAll('[data-testid="insights-board-row"]')];
-    const btn = rows[0]!.querySelector('[data-testid="insights-board-reconcile-button"]') as HTMLButtonElement;
+    const btn = rows[0]!.nextElementSibling!.querySelector('[data-testid="insights-board-reconcile-button"]') as HTMLButtonElement;
     await act(async () => { btn.click(); });
     await flush();
 
@@ -766,14 +796,20 @@ describe('InsightsBoardPage — 「사람 차례」 행 배지(story #3766)', ()
     stubFetch({ page1: [ROW_DEAD_LETTER] });
     await mount();
     const row = container.querySelector('[data-testid="insights-board-row"]')!;
-    expect(row.querySelector('[data-testid="insights-board-reconcile-button"]')).not.toBeNull();
+    await expandRow(row);
+    expect(row.nextElementSibling!.querySelector('[data-testid="insights-board-reconcile-button"]')).not.toBeNull();
   });
 
-  // ①② — 배지도 버튼도 없을 때 그 자리 자체가 남지 않는다(빈 flex div가 gap만
-  // 먹는 회귀 방지). site_post 행(canReconcile=false)이면서 command_status가 없는
-  // 행으로 재는다 — canCreateFollowUp은 useDashboardContext mock의
-  // currentMemberType='human'이라 기본 true인 만큼, agent로 바꿔 버튼 축까지 끈다.
-  it('①② 배지도 행동 버튼도 없으면 그 td가 완전히 빈다(빈 wrapper 노드 0)', async () => {
+  // ① — 배지가 없을 때 그 wrapper div 자체가 안 남는다(빈 div가 margin만 먹는
+  // 회귀 방지). story #3979 CHANGES(페드루 PO 2026-09-17 01:14Z)로 후속 조치·
+  // 원본과 대조 버튼이 행 상세로 옮겨가 Actions 칸엔 이제 배지(조건부)+펼침
+  // 토글(항상)만 남는다 — "칸이 완전히 빈다"는 옛 불변식은 토글이 항상 있어
+  // 더는 성립하지 않는다(칸 자체가 아니라 «배지 유무»가 지금의 불변식). site_post
+  // 행(canReconcile=false)이면서 command_status가 없는 행으로 재는다 —
+  // canCreateFollowUp은 useDashboardContext mock의 currentMemberType='human'이라
+  // 기본 true인 만큼, agent로 바꿔 버튼 축까지 끈다(행 상세 안 버튼 유무는 이
+  // 테스트의 관심사가 아니다 — Actions 칸 자체만 본다).
+  it('① 배지가 없으면 Actions 칸엔 펼침 토글 1개만(배지 wrapper div는 없다)', async () => {
     useDashboardContextMock.mockReturnValue({ orgId: ORG_ID, currentMemberType: 'agent' });
     const rowNoActionsNoBadge = {
       publication_id: 'pub-none', kind: 'site_post', channel: 'hosted_site', work_item_id: 'wi-none',
@@ -783,10 +819,11 @@ describe('InsightsBoardPage — 「사람 차례」 행 배지(story #3766)', ()
     stubFetch({ page1: [rowNoActionsNoBadge] });
     await mount();
     const row = container.querySelector('[data-testid="insights-board-row"]')!;
-    // story #3806(PR5 조각⑥) — 광고비 칸이 comments 뒤·actions 앞에 신설돼 actions는
-    // 이제 8번째(index 7) 열이다(제목·채널·발행·d1·d7·댓글·광고비·행동).
-    const actionCell = row.querySelectorAll('td')[7] as HTMLElement;
-    expect(actionCell.children.length).toBe(0);
+    // story #3979 CHANGES — 댓글 열이 빠져 Actions는 이제 7번째(index 6) 열이다
+    // (제목·채널·발행·d1·d7·광고비·행동).
+    const actionCell = row.querySelectorAll('td')[6] as HTMLElement;
+    expect(actionCell.children.length).toBe(1);
+    expect(actionCell.querySelector('[data-testid="insights-board-row-expand-toggle"]')).not.toBeNull();
   });
 });
 
