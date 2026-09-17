@@ -63,8 +63,8 @@ export function ChatV3ThreadRail({ threads, meId, selectedId, onSelect }: {
                   aria-describedby={[roleId, previewId].filter(Boolean).join(' ')}
                   className={
                     isSelected
-                      ? 'h-auto min-h-0 w-full items-start justify-start gap-2.5 rounded-none border-b border-border bg-primary/10 px-4 py-3 text-left font-normal whitespace-normal hover:bg-primary/10'
-                      : 'h-auto min-h-0 w-full items-start justify-start gap-2.5 rounded-none border-b border-border px-4 py-3 text-left font-normal whitespace-normal hover:bg-muted/50'
+                      ? 'h-auto min-h-0 w-full items-start justify-start gap-2.5 rounded-none border-b border-border bg-primary/10 px-4 py-3 text-left font-normal whitespace-normal hover:bg-primary/10 focus-visible:ring-inset active:translate-y-0'
+                      : 'h-auto min-h-0 w-full items-start justify-start gap-2.5 rounded-none border-b border-border px-4 py-3 text-left font-normal whitespace-normal hover:bg-muted/50 focus-visible:ring-inset active:translate-y-0'
                   }
                 >
                   <div className="min-w-0 flex-1">
