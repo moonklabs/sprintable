@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EmbedCard } from '@/components/chat/embed-card';
 import { cn } from '@/lib/utils';
+import { fetchWithAuth } from '@/lib/db/client';
 import { ChatV3EventCard } from './chat-v3-event-card';
 import type { ChatMessage } from '@/hooks/use-chat-sse';
 import type { TodayNeedsMeItem } from '@/components/org-briefing/derive-today';
@@ -50,7 +51,7 @@ export function ChatV3Messages({ threadId, meId, agentName, locale, needsMe, tod
     let cancelled = false;
     setMessages(null);
     setLoadError(false);
-    fetch(`/api/conversations/${threadId}/messages`)
+    fetchWithAuth(`/api/conversations/${threadId}/messages`)
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
       .then((json: { data?: ChatMessage[] }) => {
         if (cancelled) return;
@@ -80,7 +81,7 @@ export function ChatV3Messages({ threadId, meId, agentName, locale, needsMe, tod
     const content = draft.trim();
     if (!content) return;
     setSending(true);
-    const res = await fetch(`/api/conversations/${threadId}/messages`, {
+    const res = await fetchWithAuth(`/api/conversations/${threadId}/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ content }),
