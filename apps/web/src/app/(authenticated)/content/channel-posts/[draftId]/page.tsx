@@ -2328,8 +2328,15 @@ export default function ChannelPostEditPage() {
             channelPostsAwaitingContainerNotice 알림과 문장이 겹친다(알림이 배지 문구를
             글자 그대로 포함 + 「다음 발」까지 지님). 목록(page.tsx:427)엔 이 알림이 없어
             배지가 유일한 신호라 그대로 두고, 상세는 알림이 대신하므로 이 상태에서만
-            배지를 안 그린다. */}
-        {failureAction && failureAction.kind !== 'processing' ? (
+            배지를 안 그린다.
+
+            story #4015(PO CHANGES 2) — processing_kind==='awaiting_container'면 위 상태
+            알림 IIFE가 컨테이너 대기 알림을 «먼저» 세운다(command_status 무관). kind===
+            'processing'(=pending+awaiting_container)만 억제하면 dead_letter 등 다른
+            command_status가 그 사이 awaiting_container로 오는 조합에서 배지+알림이 둘 다
+            떠 「실패 신호 정확히 1개」가 깨진다. 그래서 awaiting_container면 command_status
+            무관하게 배지를 억제한다(컨테이너 대기 알림이 그 자리의 유일한 신호). */}
+        {failureAction && draft.processing_kind !== 'awaiting_container' ? (
           <FailureActionBadge
             action={failureAction} displayTimezone={displayTimezone}
             // story #3402 갭 후속(페드루 PO, 2026-09-10 ②) — 이 화면(상세)엔 아래
@@ -2632,19 +2639,23 @@ export default function ChannelPostEditPage() {
           //        없음)+canPublish: 「다시 발행」 안내(버튼 활성) / 아니면 사실만(버튼
           //        약속 0)  - completed: 도달 불가(all-published라야 completed) → 폴백.
           if (failureAction !== undefined) return null;
-          const noticeKey =
+          // #4015 CHANGES 2 — 「다시 발행」이라는 없는 버튼을 지어내지 않는다. 안내에
+          // 끼우는 이름은 실제 발행 버튼과 «같은 키»(view.isRepublish ? publishRepublishCta
+          // : publishCta — 아래 발행 버튼 라벨과 동일)로 보간해 늘 버튼 텍스트와 일치시킨다.
+          const republishActionLabel = t(view.isRepublish ? 'publishRepublishCta' : 'publishCta');
+          const failedNotice =
             draft.command_status === 'cancelled'
-              ? 'channelPostsPublicationFailedCancelledNotice'
+              ? t('channelPostsPublicationFailedCancelledNotice')
               : draft.command_status === 'pending'
-                ? 'channelPostsPublicationFailedPendingRetryNotice'
+                ? t('channelPostsPublicationFailedPendingRetryNotice')
                 : draft.command_status === 'in_progress'
-                  ? 'channelPostsPublicationFailedInProgressNotice'
+                  ? t('channelPostsPublicationFailedInProgressNotice')
                   : !draft.command_status && canPublish
-                    ? 'channelPostsPublicationFailedRepublishNotice'
-                    : 'channelPostsPublicationFailedNotice';
+                    ? t('channelPostsPublicationFailedRepublishNotice', { action: republishActionLabel })
+                    : t('channelPostsPublicationFailedNotice');
           return (
             <Alert role="status" data-testid="channel-post-publication-failed-notice">
-              <AlertDescription>{t(noticeKey)}</AlertDescription>
+              <AlertDescription>{failedNotice}</AlertDescription>
             </Alert>
           );
         }
