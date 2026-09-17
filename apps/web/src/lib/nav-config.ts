@@ -179,8 +179,11 @@ export const NAV_GROUPS: NavGroupConfig[] = [
 export const LEGACY_NAV_ITEMS: LegacyNavItemConfig[] = [
   { id: 'goals', labelKey: 'goals', descriptionKey: 'descGoals', icon: Layers, kind: 'resource', path: 'goals', scope: 'project', absorbTarget: 'work' },
   { id: 'loops', labelKey: 'loops', descriptionKey: 'descLoops', icon: FlaskConical, kind: 'resource', path: 'loops', scope: 'project', absorbTarget: 'work' },
-  { id: 'docs', labelKey: 'docs', descriptionKey: 'descDocs', icon: BookOpen, kind: 'resource', path: 'docs', scope: 'project', absorbTarget: 'work' },
-  { id: 'artifacts', labelKey: 'artifacts', descriptionKey: 'descArtifacts', icon: GalleryVerticalEnd, kind: 'resource', path: 'artifacts', scope: 'project', absorbTarget: 'work' },
+  // story #3989(「일감」 흡수 3/N) — 연결분(문서/산출물 탭)만 일감이고, 전수
+  // 라이브러리/갤러리(트리·검색)는 «조직 자산 전수 탐색» 축이라 일감과 다르다
+  // (PO 확定 — worklist-6item-absorption doc §검증1). work → knowledge로 이사.
+  { id: 'docs', labelKey: 'docs', descriptionKey: 'descDocs', icon: BookOpen, kind: 'resource', path: 'docs', scope: 'project', absorbTarget: 'knowledge' },
+  { id: 'artifacts', labelKey: 'artifacts', descriptionKey: 'descArtifacts', icon: GalleryVerticalEnd, kind: 'resource', path: 'artifacts', scope: 'project', absorbTarget: 'knowledge' },
   { id: 'storage', labelKey: 'storage', descriptionKey: 'descStorage', icon: HardDrive, kind: 'resource', path: 'storage', scope: 'project', absorbTarget: 'knowledge' },
   { id: 'activity', labelKey: 'activity', descriptionKey: 'descActivity', icon: ClipboardList, kind: 'static', path: '/activity', scope: 'project', absorbTarget: 'history' },
   { id: 'org-trust', labelKey: 'orgTrust', descriptionKey: 'descOrgTrust', icon: Award, kind: 'static', path: '/organization/trust', scope: 'org', absorbTarget: 'connect' },

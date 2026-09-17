@@ -10,6 +10,7 @@ import {
   FolderKanban,
   Gauge,
   GitPullRequest,
+  Lightbulb,
   List,
   Search,
   UserPlus,
@@ -75,6 +76,9 @@ const GUARD_ANCHOR_ITEMS: Array<{ id: string; icon: LucideIcon; labelKey: string
   // RED) — WorkspaceFrameTabs가 얹은 탭 경로는 이 가드가 진입점으로 안 센다(4264가 retro를
   // 여기 앵커한 선례 그대로) — work-list도 동형으로 앵커.
   { id: 'go-work-list', icon: List, labelKey: 'goWorkList', href: '/work-list' },
+  // story #3989(「일감」 흡수 3/N) — 「가설」 탭도 WorkspaceFrameTabs 전용 진입점(router.push
+  // 템플릿 리터럴)뿐이라 같은 이유로 앵커가 필요하다(go-work-list·go-retro 선례 그대로).
+  { id: 'go-hypotheses', icon: Lightbulb, labelKey: 'goHypotheses', href: '/hypotheses' },
 ];
 
 // 명령(action)당 아이콘 — command-palette-actions.ts는 순수 데이터만 다뤄 lucide 컴포넌트를
