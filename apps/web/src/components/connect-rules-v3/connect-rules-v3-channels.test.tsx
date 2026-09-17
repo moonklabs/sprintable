@@ -245,5 +245,24 @@ describe('ConnectRulesV3Channels', () => {
       await mount();
       expect(routerReplaceMock).not.toHaveBeenCalled();
     });
+
+    // PO CHANGES-2(2026-09-17 16:26Z) — 배너가 loadState('loading'|'error') 분기
+    // 안쪽에 있으면 목록 로딩/실패 중엔 배너 자체가 안 떠서, ?connect_error=로 돌아온
+    // 사람이 실패 이유를 못 봄(레거시엔 loadState 개념이 없어 이 문제가 없었음). 배너를
+    // 3상태 공통 래퍼로 옮긴 회귀 방지.
+    it('⭐목록 fetch가 아직 안 끝났어도(로딩 중) ?connected= 배너는 뜬다', async () => {
+      useSearchParamsMock.mockReturnValue(new URLSearchParams('connected=threads'));
+      fetchMock.mockImplementation(() => new Promise(() => {}));
+      await mount();
+      expect(container.textContent).toContain('Threads 연결이 완료됐어요');
+    });
+
+    it('⭐목록 fetch가 실패해도 ?connect_error= 배너와 구획 오류가 둘 다 뜬다', async () => {
+      useSearchParamsMock.mockReturnValue(new URLSearchParams('connect_error=CHANNEL_APP_CREDENTIALS_MISSING'));
+      fetchMock.mockResolvedValue({ ok: false, status: 500, json: async () => ({}) });
+      await mount(true);
+      expect(container.textContent).toContain(koMessages.channelConnect.channelConnectErrorAppCredentialsMissing);
+      expect(container.textContent).toContain('불러오지 못했어요');
+    });
   });
 });
