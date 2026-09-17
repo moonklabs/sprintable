@@ -1,7 +1,0 @@
-# story #4012(2026-09-17, verify-cloudbuild-shell-var-escaping.py 첫 실행 발견) —
-# deploy-mcp 스텝 검산부(배포 자체가 아니라 그 뒤 서빙 이미지 확인 echo/조건문)의 기존
-# 미이스케이프 3개. 이 PR이 만든 게 아니고(#4012 스코프 밖·인프라는 PO 레인), 이 가드가
-# 새로 늘지 않는 것만 지킨다 — 이 3개를 고치는 건 별도 판단(PO 보고).
-deploy-mcp::served
-deploy-mcp::expected
-deploy-mcp::names
