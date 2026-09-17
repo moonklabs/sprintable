@@ -69,17 +69,25 @@ export default function GateDetailPage() {
   // resolution_note로 영구 기록된다, AC3).
   const [selectedOption, setSelectedOption] = useState<string | null>(null);
 
-  const fetchGate = useCallback(async () => {
-    setLoading(true);
-    setNotFound(false);
+  // story #4027(유나 전수→PO 코드 확認) — 실시간 구독(아래 mux.subscribe 2곳)이 부르는 재조회는
+  // `silent: true`로 넘겨 `loading`을 켜지 않는다. 이전엔 매번 setLoading(true)를 태워, 다른
+  // 승인자가 같은 게이트를 먼저 해소·위임하는 순간 이 화면 전체가 «불러오는 중» 한 줄로
+  // 무너졌다 복구됐다(ProofCapsule 서브트리 통째 언마운트→리마운트라 입력 중이던 결정
+  // 메모·선택안도 함께 날아감, AC2). 형제 `approval-request-card.tsx`는 애초 fetchGate가
+  // loading state 자체를 안 건드리는 구조(초기값만 loading)라 이 결함이 없었다 — 그 패턴을
+  // 그대로 가져와 최소 변경: 성공하면 화면 교체·실패(404 제외)하면 기존 화면 유지, 첫
+  // 로드·id 변경 때만(호출부가 silent 생략) «불러오는 중».
+  const fetchGate = useCallback(async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setLoading(true);
     try {
       const res = await fetchWithAuth(`/api/gates/${id}`);
       if (res.status === 404) { setNotFound(true); return; }
       if (!res.ok) return;
       const json = await res.json();
       setGate((json?.data ?? json) as GateDetail);
+      setNotFound(false);
     } finally {
-      setLoading(false);
+      if (!opts?.silent) setLoading(false);
     }
   }, [id]);
 
@@ -97,7 +105,7 @@ export default function GateDetailPage() {
     const unsub = mux.subscribe('conversation.gate_resolved', (raw) => {
       try {
         const payload = JSON.parse(raw) as { gate_id?: string };
-        if (payload.gate_id === id) void fetchGate();
+        if (payload.gate_id === id) void fetchGate({ silent: true });
       } catch { /* malformed — 무시(다음 정상 이벤트나 fetchGate 재시도로 자연 회복) */ }
     });
     return unsub;
@@ -108,7 +116,7 @@ export default function GateDetailPage() {
     const unsub = mux.subscribe('conversation.gate_delegated', (raw) => {
       try {
         const payload = JSON.parse(raw) as { gate_id?: string };
-        if (payload.gate_id === id) void fetchGate();
+        if (payload.gate_id === id) void fetchGate({ silent: true });
       } catch { /* malformed — 무시 */ }
     });
     return unsub;
