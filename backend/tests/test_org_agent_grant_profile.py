@@ -69,8 +69,8 @@ async def test_revoke_agent_grant_removes_profile(monkeypatch):
         project_id, uuid.uuid4(), auth=MagicMock(), session=session
     )
     assert out == {"ok": True}
-    # execute 2회: record select + agent_project_profiles delete
-    assert session.execute.await_count == 2
+    # execute 3회: record select + story #3999 시스템 발행 예약 거부 조회 + agent_project_profiles delete
+    assert session.execute.await_count == 3
     session.delete.assert_awaited_once_with(record)
 
 
@@ -96,6 +96,7 @@ async def test_revoke_human_grant_skips_profile_delete(monkeypatch):
         project_id, uuid.uuid4(), auth=MagicMock(), session=session
     )
     assert out == {"ok": True}
-    # execute 1회: record select 만 (profile delete 없음)
-    assert session.execute.await_count == 1
+    # execute 2회: record select + story #3999 시스템 발행 예약 거부 조회(휴먼도 member_id가
+    # 항상 채워져 있어(AC3-2c canonical 앵커) 이 조회는 돈다 — profile delete는 없음)
+    assert session.execute.await_count == 2
     session.delete.assert_awaited_once_with(record)

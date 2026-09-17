@@ -12,6 +12,7 @@ from app.models.project import OrgMember
 from app.models.team import TeamMember
 from app.repositories.webhook_config import WebhookConfigRepository
 from app.schemas.webhook_config import UpsertWebhookConfig, WebhookConfigResponse
+from app.services.system_publisher_guard import assert_member_id_not_system_publisher
 
 router = APIRouter(prefix="/api/v2/webhooks", tags=["webhooks", "Organization"])
 
@@ -153,6 +154,9 @@ async def upsert_webhook_config(
                 status_code=403,
                 detail="Admin role required to configure another member's webhook",
             )
+
+    # story #3999 — 예약 멤버(「시스템 발행」) 대상 webhook 설정을 원자적으로 거부.
+    await assert_member_id_not_system_publisher(session, target_member_id)
 
     config = await repo.upsert(
         member_id=target_member_id,

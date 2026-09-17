@@ -147,7 +147,7 @@ async def test_recruit_ignores_inaccessible_x_project_id_when_owner(
     agent_id = uuid.uuid4()
     project_id = uuid.uuid4()
     member = _mock_agent_member(org_id=org_id, project_id=project_id)
-    monkeypatch.setattr(agents_router, "assert_agent_owner", AsyncMock(return_value=member))
+    monkeypatch.setattr(agents_router, "assert_agent_owner_mutable", AsyncMock(return_value=member))
 
     role_template = MagicMock()
     role_template.slug = "backend-dev"
@@ -205,7 +205,7 @@ async def test_recruit_still_403_for_genuine_non_owner(test_client, mock_session
     agent_id = uuid.uuid4()
     monkeypatch.setattr(
         agents_router,
-        "assert_agent_owner",
+        "assert_agent_owner_mutable",
         AsyncMock(side_effect=HTTPException(status_code=403, detail="Not the owner of this agent")),
     )
 

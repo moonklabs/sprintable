@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id_no_project_gate
 from app.dependencies.database import get_db
-from app.dependencies.ownership import assert_agent_owner
+from app.dependencies.ownership import assert_agent_owner, assert_agent_owner_mutable
 from app.models.project import Project
 from app.models.team import TeamMember
 from app.repositories.agent_persona import AgentPersonaRepository
@@ -402,7 +402,7 @@ async def _recruit_agent_endpoint(
 ) -> dict:
     """``recruit_agent_endpoint`` 실 로직 — Header() DI 마커 없음(plain str만).
     직접-호출(realdb·유닛 테스트)은 이 함수를 부른다."""
-    member = await assert_agent_owner(agent_id, session, org_id, uuid.UUID(auth.user_id))
+    member = await assert_agent_owner_mutable(agent_id, session, org_id, uuid.UUID(auth.user_id))
 
     if body.runtime not in SUPPORTED_RUNTIMES:
         raise HTTPException(status_code=400, detail=f"unsupported runtime: {body.runtime}")

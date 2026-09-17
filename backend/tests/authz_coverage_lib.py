@@ -36,6 +36,10 @@ GUARD_FUNCTIONS: frozenset[str] = frozenset({
     "assert_caller_is_member",
     "is_caller_member",
     "assert_agent_owner",
+    # story #3999 — assert_agent_owner_mutable(app/dependencies/ownership.py)은
+    # assert_agent_owner를 그대로 호출한 뒤 「시스템 발행」 예약 거부만 얹는 상위집합
+    # 가드다(쓰기 경로 전용) — 인가 축 자체는 무변경이라 여기도 같이 인정한다.
+    "assert_agent_owner_mutable",
     "_is_org_admin",
     "has_project_role",
     "has_project_access",

@@ -65,7 +65,7 @@ async def _client():
 async def test_create_api_key_201():
     client, session, app = await _client()
     try:
-        with patch("app.routers.api_keys.assert_agent_owner", new_callable=AsyncMock), \
+        with patch("app.routers.api_keys.assert_agent_owner_mutable", new_callable=AsyncMock), \
              patch("app.routers.api_keys.acquire_agent_mutation_lock", new_callable=AsyncMock), \
              patch("app.services.agent_message_policy.ensure_creator_allowlisted", new_callable=AsyncMock), \
              patch("app.repositories.api_key.ApiKeyRepository.revoke_all_active", new_callable=AsyncMock) as mock_revoke_all, \
@@ -129,7 +129,7 @@ async def test_rotate_key_201():
         new_plaintext = _PREFIX_MARKER + "n" * 64
 
         with patch("app.services.agent_message_policy.ensure_creator_allowlisted", new_callable=AsyncMock), \
-             patch("app.routers.api_keys.assert_agent_owner", new_callable=AsyncMock), \
+             patch("app.routers.api_keys.assert_agent_owner_mutable", new_callable=AsyncMock), \
              patch("app.repositories.api_key.ApiKeyRepository.get", new_callable=AsyncMock) as mock_get, \
              patch("app.services.recruit_service.acquire_agent_mutation_lock", new_callable=AsyncMock), \
              patch("app.repositories.api_key.ApiKeyRepository.rotate", new_callable=AsyncMock) as mock_rotate:
@@ -153,7 +153,7 @@ async def test_rotate_key_404():
     """존재하는 키(get 성공)인데 rotate가 None(CAS 손실/레이스 패배)인 케이스 — 404 매핑."""
     client, session, app = await _client()
     try:
-        with patch("app.routers.api_keys.assert_agent_owner", new_callable=AsyncMock), \
+        with patch("app.routers.api_keys.assert_agent_owner_mutable", new_callable=AsyncMock), \
              patch("app.repositories.api_key.ApiKeyRepository.get", new_callable=AsyncMock) as mock_get, \
              patch("app.services.recruit_service.acquire_agent_mutation_lock", new_callable=AsyncMock), \
              patch("app.repositories.api_key.ApiKeyRepository.rotate", new_callable=AsyncMock) as mock_rotate:
@@ -195,7 +195,7 @@ async def test_rotate_key_rejects_cross_org_key_403_or_404():
 
     client, session, app = await _client()
     try:
-        with patch("app.routers.api_keys.assert_agent_owner", new_callable=AsyncMock) as mock_owner, \
+        with patch("app.routers.api_keys.assert_agent_owner_mutable", new_callable=AsyncMock) as mock_owner, \
              patch("app.repositories.api_key.ApiKeyRepository.get", new_callable=AsyncMock) as mock_get, \
              patch("app.repositories.api_key.ApiKeyRepository.rotate", new_callable=AsyncMock) as mock_rotate:
             mock_get.return_value = _mock_key()  # 다른 org 소속 agent의 키(team_member_id=AGENT_ID)
