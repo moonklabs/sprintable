@@ -28,6 +28,7 @@ import os
 import uuid
 
 import pytest
+from sqlalchemy import select
 
 from tests.test_2266_story_backlinks_realdb import (
     _client_for,
@@ -336,6 +337,19 @@ async def test_recruit_rejected_for_system_publisher():
             keys = await ApiKeyRepository(s).list_by_member(agent_id)
         assert keys == [], "recruit 거부는 키도 발급하면 안 됨"
     finally:
+        # story #3999(페드루 PO 지적, 2026-09-17) — realdb 오염 청소. RoleTemplate은
+        # destructive_schema가 아니라 이 세션의 실 PG에 그대로 남아 test_e_recruit_s14
+        # (전체 role_template 개수 카운트)·test_migration_0166(EN role_behaviors 전수)를
+        # 깨뜨렸다 — global count/전수 검사에 기대는 다른 realdb 테스트를 오염시키지
+        # 않도록 이 테스트가 만든 행은 반드시 지운다.
+        from app.models.role_template import RoleTemplate
+        async with Session() as s:
+            rt = (await s.execute(
+                select(RoleTemplate).where(RoleTemplate.slug == role_slug)
+            )).scalar_one_or_none()
+            if rt is not None:
+                await s.delete(rt)
+                await s.commit()
         await engine.dispose()
 
 
@@ -357,6 +371,23 @@ async def test_recruit_still_succeeds_for_normal_agent_regression():
         row = await _member_row(Session, agent_id)
         assert row.runtime_type == "claude-code"
     finally:
+        # story #3999 — 위와 동일 청소(이번엔 recruit이 성공해 AgentPersona 행도 하나
+        # 실제로 생겼다 — agent_id로 직접 찾는다, role_template_id는 config JSONB 안에
+        # 있어(agent_persona.py의 config["role_template_id"] 마커 관례) 컬럼 조회가 아님).
+        from app.models.agent_deployment import AgentPersona
+        from app.models.role_template import RoleTemplate
+        async with Session() as s:
+            personas = (await s.execute(
+                select(AgentPersona).where(AgentPersona.agent_id == agent_id)
+            )).scalars().all()
+            for p in personas:
+                await s.delete(p)
+            rt = (await s.execute(
+                select(RoleTemplate).where(RoleTemplate.slug == role_slug)
+            )).scalar_one_or_none()
+            if rt is not None:
+                await s.delete(rt)
+            await s.commit()
         await engine.dispose()
 
 
