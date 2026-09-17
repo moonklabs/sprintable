@@ -31,16 +31,20 @@ from app.services.publication_command import FAILURE_KIND_PAUSED
 class ExternalPublishPausedError(Exception):
     """story #3953 — 조직이 외부 발행을 일시 중지한 상태에서 어댑터 호출 직전
     삽입점(publish_channel_post_draft·publish_site_post_from_draft·워커)에
-    도달했다. `.reason`은 owner가 적은 사유(없으면 None) — 사유 문구에 그대로
-    노출한다(ExternalPublishGateNotApprovedError와 동형 관례)."""
+    도달했다. `.reason`은 owner가 적은 사유(없으면 None).
+
+    story #3779 BE 한글 사용자 문장 가드(신규 파일 grandfather 불가) — 이 예외
+    메시지 자체는 publication_command.py::_process_one_command의 기존
+    `last_error`(`EXTERNAL_PUBLISH_PAUSED: {reason}`류, Korean 0)와 같은 코드꼴
+    중립 문자열로 둔다. 사람에게 보이는 실제 한글 문장은 호출부(site_posts.py/
+    channel_posts.py, 이미 baseline 등재된 기존 파일)가 `.reason`을 읽어
+    거기서 조립한다(ExternalPublishGateNotApprovedError와 다른 결 — 그쪽은
+    구파일이라 그대로 둬도 안전하지만, 이 신규 파일은 0→N 성장 자체가 가드
+    위반이라 문자열을 여기 안 둔다)."""
 
     def __init__(self, *, reason: str | None):
         self.reason = reason
-        detail = (
-            f"조직이 외부 발행을 일시 중지했습니다(사유: {reason})"
-            if reason
-            else "조직이 외부 발행을 일시 중지했습니다"
-        )
+        detail = f"EXTERNAL_PUBLISH_PAUSED: {reason}" if reason else "EXTERNAL_PUBLISH_PAUSED"
         super().__init__(detail)
 
 

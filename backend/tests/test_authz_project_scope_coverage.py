@@ -390,6 +390,14 @@ _ID_MUTATION_FALSE_POSITIVE_ALLOWLIST: dict[str, str] = {
         "_require_owner(→org owner) — ga4_connections는 project 축이 없는 org-level "
         "리소스(channel_connections:set_channel_app_credentials와 동형 ORG_ONLY 결)."
     ),
+    # story #3953 — path의 {org_id}는 organizations 행 자신(external_publish_paused_at/
+    # _by/_reason 컬럼, project_id 축 자체가 없음, channel_connections:set_channel_app_
+    # credentials와 동형 ORG_ONLY 리소스). _require_owner(→_require_human)가 org
+    # 멤버십+role(owner)을 검증한다 — project 스코프 검증이 애초에 무의미.
+    "app.routers.channel_connections:put_external_publish_pause": (
+        "_require_owner(→org owner) — organizations 행 자신(project_id 축 없음, "
+        "channel_connections:set_channel_app_credentials와 동형 ORG_ONLY 결)."
+    ),
 }
 
 # ── known-debt: 실 project-scoped IDOR — 후속 라운드 상환(6후보·story 5285888c 감사). ──

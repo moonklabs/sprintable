@@ -2088,6 +2088,10 @@ async def publish_channel_post_draft_endpoint(
         command.failure_kind = FAILURE_KIND_PAUSED
         command.last_error = str(exc)[:2000]
         await db.commit()
+        # FE(api-error.ts EXTERNAL_PUBLISH_PAUSED 엔트리, "reason 보간 0" 명시
+        # 주석)가 이 message를 안 쓰고 정적 labelKey만 렌더한다 — str(exc)는
+        # 중립 코드꼴(external_publish_pause.py, §3779 가드 회피로 Korean 0)이라
+        # 그대로 실어도 안전(publication_command.py 워커 경로의 last_error와 동형).
         raise HTTPException(
             status_code=423,
             detail=_with_command_state({"code": "EXTERNAL_PUBLISH_PAUSED", "message": str(exc)}),

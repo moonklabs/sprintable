@@ -155,6 +155,7 @@ from app.models.publication_attempt import PublicationAttempt
 from app.models.insight_snapshot import InsightSnapshot
 from app.models.channel_publication_reconciliation import ChannelPublicationReconciliation
 from app.models.ads_boost_run import AdsBoostRun
+from app.models.external_publish_pause_audit_log import ExternalPublishPauseAuditLog
 
 __all__ = [
     "RoleTemplate",
