@@ -592,7 +592,7 @@ export function OnboardingForm({ initialStep, initialOrgId, todayV3Enabled = fal
         )}
 
         {step === 'connect' && (
-          <ConnectStep agentId={agentId} apiKey={newApiKey} projectId={projectId} onFinish={handleFinish} />
+          <ConnectStep agentId={agentId} apiKey={newApiKey} projectId={projectId} onFinish={handleFinish} todayV3Enabled={todayV3Enabled} />
         )}
       </div>
       {showUpgrade && <UpgradeModal message={upgradeReason} onClose={() => setShowUpgrade(false)} />}
