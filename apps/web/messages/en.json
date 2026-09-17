@@ -471,7 +471,7 @@
   },
   "todayV3": {
     "title": "Today",
-    "headerSummary": "{decisions} decisions need your call · {agents} agents are working.",
+    "headerSummary": "{decisions} decisions need your call · {agents} agents are working on your tasks.",
     "loadErrorTitle": "Couldn't load this",
     "decisionsSectionTitle": "My decisions {count}",
     "decisionsEmptyTitle": "All caught up",

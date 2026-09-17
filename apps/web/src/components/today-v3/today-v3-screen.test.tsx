@@ -102,6 +102,10 @@ describe('TodayV3Screen — 렌더 3', () => {
     await mount();
     expect(container.textContent).toContain('담롱 온찬');
     expect(container.textContent).toContain('미르코 페트로비치');
+    // 3998 PO 지적(2026-09-17 10:08Z) — M은 _resolve_agent_progress 범위(내 일에 붙은
+    // 에이전트)인데 옛 문구는 조직 전체로 읽혔다. 「내 일을」로 범위를 명시한 문구가
+    // 실제로 렌더되는지 고정(distinctAgentCount=2 — agentName 2종).
+    expect(container.textContent).toContain('에이전트 2명이 내 일을 하고 있어요');
   });
 
   // story #3962 CHANGES-2(페드루 PO C1, 2026-09-16 16:08Z) — 「정지」는 story #3961
