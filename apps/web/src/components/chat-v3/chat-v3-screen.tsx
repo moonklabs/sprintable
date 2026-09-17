@@ -71,6 +71,15 @@ export function ChatV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3Fl
   // "첫 대화"를 다시 골라 URL을 갈아치우면 사용자가 다른 대화를 보고 있어도 실시간
   // 트래픽만으로 선택이 튀는 회귀가 난다.
   const didDefaultSelectRef = useRef(false);
+  // story #4018 CHANGES 1(PO 지적) — 목록 콜(`GET /api/conversations`)엔 limit이 없어
+  // BE 기본 30건만 온다(conversations.py:1453). 딥링크가 그 30건 밖(예: 알림으로 들어온
+  // 오래된 대화)을 가리키면 `threads.find()`가 못 찾아 멀쩡한 대화도 "열 수 없어요"로
+  // 오판정됐다 — 목록에 없으면 바로 「없음」으로 단정하지 않고 단건 조회
+  // (`GET /api/conversations/{id}`, story #2009가 이미 이 갭을 위해 participants까지
+  // 실어 준다)로 한 번 더 확인한다.
+  const [directConversation, setDirectConversation] = useState<ChatV3Thread | null>(null);
+  const [directConversationStatus, setDirectConversationStatus] = useState<'idle' | 'loading' | 'unavailable' | 'error'>('idle');
+  const directFetchedIdRef = useRef<string | null>(null);
 
   const loadConversations = useCallback((currentMe: Me) => {
     let cancelled = false;
@@ -98,6 +107,46 @@ export function ChatV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3Fl
     // eslint-disable-next-line react-hooks/set-state-in-effect
     return loadConversations(me);
   }, [me, loadConversations]);
+
+  // story #4018 CHANGES 1 — 30건 캡 밖 대화 단건 조회. 404/403은 「열 수 없어요」(AC2,
+  // 존재/권한을 안 가름) · 그 밖의 실패(5xx·네트워크)는 로드 오류로 갈라 "없는 대화"로
+  // 단정하지 않는다(PO 지시). 재시도(아래 retryDirectConversation)도 이 함수를 그대로 씀.
+  const fetchDirectConversation = useCallback((id: string) => {
+    directFetchedIdRef.current = id;
+    setDirectConversationStatus('loading');
+    setDirectConversation(null);
+    return fetchWithAuth(`/api/conversations/${id}`)
+      .then(async (res) => {
+        if (res.status === 404 || res.status === 403) { setDirectConversationStatus('unavailable'); return; }
+        if (!res.ok) { setDirectConversationStatus('error'); return; }
+        const data = (await res.json()) as ChatV3Thread;
+        setDirectConversation({ ...data, latest_message: data.latest_message ?? null, unread_count: data.unread_count ?? 0 });
+        setDirectConversationStatus('idle');
+      })
+      .catch(() => { setDirectConversationStatus('error'); });
+  }, []);
+
+  useEffect(() => {
+    if (!threads || !selectedId) return;
+    if (threads.some((th) => th.id === selectedId)) {
+      // 지금 선택이 30건 목록 안이면(정상 경로) 이전 선택의 단건 조회 잔여 상태를 청소.
+      // 정적분석 오탐(위 loadConversations 마운트 effect·conversationParam 동기화 effect와
+      // 동일 사유 — connect-step.tsx·now-strip.tsx 관례).
+      if (directFetchedIdRef.current !== null) {
+        directFetchedIdRef.current = null;
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setDirectConversation(null);
+        setDirectConversationStatus('idle');
+      }
+      return;
+    }
+    if (directFetchedIdRef.current === selectedId) return; // 이 id는 이미 조회 완료(성공/실패 무관).
+    void fetchDirectConversation(selectedId);
+  }, [threads, selectedId, fetchDirectConversation]);
+
+  const retryDirectConversation = useCallback(() => {
+    if (selectedId) void fetchDirectConversation(selectedId);
+  }, [selectedId, fetchDirectConversation]);
 
   // story #4018 AC1/AC3 — 주소의 `conversation` 인자가 정본. 있으면(존재/권한 무관, id
   // 그대로) 그 값을 선택 상태로 반영 — 목록에 없으면 아래 selectedThread가 undefined가
@@ -184,7 +233,8 @@ export function ChatV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3Fl
     else if (me) { setThreads(null); loadConversations(me); }
   };
 
-  const selectedThread = threads?.find((th) => th.id === selectedId) ?? null;
+  // story #4018 CHANGES 1 — 30건 목록에 없으면 단건 조회 결과(directConversation)로 폴백.
+  const selectedThread = threads?.find((th) => th.id === selectedId) ?? directConversation;
   const otherParticipant = selectedThread?.participants.find((p) => p.member_id !== me?.id) ?? selectedThread?.participants[0];
   const agentName = otherParticipant?.name ?? t('unknownParticipant');
 
@@ -241,12 +291,24 @@ export function ChatV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3Fl
                   todayHref={todayHref}
                 />
               </>
-            ) : (
+            ) : directConversationStatus === 'error' ? (
+              // story #4018 CHANGES 1 — 단건 조회 자체가 실패(5xx·네트워크)한 경우는
+              // "없는 대화"로 단정하지 않는다(PO 지시) — 일반 로드 오류로 갈라 재시도 제공.
+              <div className="flex flex-1 flex-col items-center justify-center gap-3">
+                <p role="alert" className="text-sm text-destructive">{t('loadErrorTitle')}</p>
+                <Button size="sm" variant="outline" onClick={retryDirectConversation} data-testid="chat-v3-conversation-retry">{tc('retry')}</Button>
+              </div>
+            ) : directConversationStatus === 'unavailable' ? (
               // story #4018 AC2(유나 시안 703ed02d §4018) — 없는/권한 없는 대화 id.
               // 존재 여부를 안 가른다(같은 문장) · 목록(레일)은 그대로 · 계열색 0.
               <div className="flex flex-1 flex-col items-center justify-center gap-1 p-5 text-center" data-testid="chat-v3-conversation-unavailable">
                 <p className="text-sm font-medium text-foreground">{t('conversationUnavailableTitle')}</p>
                 <p className="text-sm text-muted-foreground">{t('conversationUnavailableDescription')}</p>
+              </div>
+            ) : (
+              // 'idle'/'loading' — 30건 밖 id의 단건 조회가 아직 진행 中(찰나~짧은 로딩).
+              <div className="flex flex-1 flex-col gap-3 p-5" data-testid="chat-v3-conversation-checking" aria-hidden="true">
+                <Skeleton className="h-12 w-full" />
               </div>
             )}
           </>
