@@ -805,3 +805,134 @@ async def test_send_message_filters_cross_org_mentions_group():
         assert mention_calls.get("targets") == {valid_id}
     finally:
         app.dependency_overrides.clear()
+
+
+async def test_list_conversations_latest_message_has_attachments_true():
+    """story #3973(E-UX-OVERHAUL·「대화」 3/N) — 목록 행 클립 아이콘용 has_attachments.
+    첨부가 있고 삭제 안 됐으면 true."""
+    client, session, app = await _make_client()
+    try:
+        mock_member = _make_member()
+        mock_conv = _make_conv()
+        mock_msg = _make_msg()
+        mock_msg.attachments = [{"url": "https://x/y.png", "name": "y.png", "content_type": "image/png"}]
+        mock_msg.deleted_at = None
+
+        member_result = MagicMock()
+        member_result.scalars.return_value.first.return_value = mock_member
+        conv_ids_result = MagicMock()
+        conv_ids_result.all.return_value = [
+            MagicMock(conversation_id=CONV_ID, muted_at=None, last_read_at=None)
+        ]
+        total_result = MagicMock()
+        total_result.scalar_one.return_value = 1
+        convs_result = MagicMock()
+        convs_result.scalars.return_value.all.return_value = [mock_conv]
+        p_rows_result = MagicMock()
+        p_rows_result.all.return_value = []
+        unread_result = MagicMock()
+        unread_result.all.return_value = []
+        latest_msg_result = MagicMock()
+        latest_msg_result.scalar_one_or_none.return_value = mock_msg
+        approval_rows_result = MagicMock()
+        approval_rows_result.all.return_value = []
+
+        session.execute = AsyncMock(side_effect=[
+            member_result, conv_ids_result, total_result,
+            convs_result, p_rows_result, unread_result, approval_rows_result, latest_msg_result,
+        ])
+
+        async with client as c:
+            resp = await c.get(f"/api/v2/conversations?project_id={PROJECT_ID}")
+
+        assert resp.status_code == 200
+        assert resp.json()["data"][0]["latest_message"]["has_attachments"] is True
+    finally:
+        app.dependency_overrides.clear()
+
+
+async def test_list_conversations_latest_message_has_attachments_false_when_empty():
+    """음성대조 — attachments가 빈 배열이면 false."""
+    client, session, app = await _make_client()
+    try:
+        mock_member = _make_member()
+        mock_conv = _make_conv()
+        mock_msg = _make_msg()
+        mock_msg.attachments = []
+        mock_msg.deleted_at = None
+
+        member_result = MagicMock()
+        member_result.scalars.return_value.first.return_value = mock_member
+        conv_ids_result = MagicMock()
+        conv_ids_result.all.return_value = [
+            MagicMock(conversation_id=CONV_ID, muted_at=None, last_read_at=None)
+        ]
+        total_result = MagicMock()
+        total_result.scalar_one.return_value = 1
+        convs_result = MagicMock()
+        convs_result.scalars.return_value.all.return_value = [mock_conv]
+        p_rows_result = MagicMock()
+        p_rows_result.all.return_value = []
+        unread_result = MagicMock()
+        unread_result.all.return_value = []
+        latest_msg_result = MagicMock()
+        latest_msg_result.scalar_one_or_none.return_value = mock_msg
+        approval_rows_result = MagicMock()
+        approval_rows_result.all.return_value = []
+
+        session.execute = AsyncMock(side_effect=[
+            member_result, conv_ids_result, total_result,
+            convs_result, p_rows_result, unread_result, approval_rows_result, latest_msg_result,
+        ])
+
+        async with client as c:
+            resp = await c.get(f"/api/v2/conversations?project_id={PROJECT_ID}")
+
+        assert resp.status_code == 200
+        assert resp.json()["data"][0]["latest_message"]["has_attachments"] is False
+    finally:
+        app.dependency_overrides.clear()
+
+
+async def test_list_conversations_latest_message_has_attachments_false_when_tombstoned():
+    """story #2319 스크럽 관례 재확認 — 첨부가 있어도 deleted_at이 찍혀 있으면(오발송
+    스크럽) has_attachments는 false로 덮는다(삭제된 메시지의 첨부 존재를 새지 않는다)."""
+    client, session, app = await _make_client()
+    try:
+        mock_member = _make_member()
+        mock_conv = _make_conv()
+        mock_msg = _make_msg()
+        mock_msg.attachments = [{"url": "https://x/y.png", "name": "y.png", "content_type": "image/png"}]
+        mock_msg.deleted_at = datetime(2026, 5, 14, 12, 5, tzinfo=timezone.utc)
+
+        member_result = MagicMock()
+        member_result.scalars.return_value.first.return_value = mock_member
+        conv_ids_result = MagicMock()
+        conv_ids_result.all.return_value = [
+            MagicMock(conversation_id=CONV_ID, muted_at=None, last_read_at=None)
+        ]
+        total_result = MagicMock()
+        total_result.scalar_one.return_value = 1
+        convs_result = MagicMock()
+        convs_result.scalars.return_value.all.return_value = [mock_conv]
+        p_rows_result = MagicMock()
+        p_rows_result.all.return_value = []
+        unread_result = MagicMock()
+        unread_result.all.return_value = []
+        latest_msg_result = MagicMock()
+        latest_msg_result.scalar_one_or_none.return_value = mock_msg
+        approval_rows_result = MagicMock()
+        approval_rows_result.all.return_value = []
+
+        session.execute = AsyncMock(side_effect=[
+            member_result, conv_ids_result, total_result,
+            convs_result, p_rows_result, unread_result, approval_rows_result, latest_msg_result,
+        ])
+
+        async with client as c:
+            resp = await c.get(f"/api/v2/conversations?project_id={PROJECT_ID}")
+
+        assert resp.status_code == 200
+        assert resp.json()["data"][0]["latest_message"]["has_attachments"] is False
+    finally:
+        app.dependency_overrides.clear()
