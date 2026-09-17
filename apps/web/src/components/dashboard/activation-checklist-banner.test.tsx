@@ -5,9 +5,14 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { ActivationChecklistBanner } from './activation-checklist-banner';
+import { _resetActivationStatusCacheForTests } from '@/hooks/use-activation-status';
 
 // story #3201 — useDashboardContext(projectId)·useRouter 신규 의존성. storage-capacity-
 // banner.test.tsx와 동일 패턴(실 dashboard-shell.tsx 전체 모듈 그래프를 끌어들이지 않음).
+// story #3610(3607 잔여) CHANGES-2(유나 확認·PO 채택 2026-09-07) — orgId 비교를 폐기하고
+// BE가 낸 scope_is_requested_org 불리언만 본다(dashboard-shell 의존 0으로 축소). 기존
+// 픽스처(PARTIAL·COMPLETE)는 이 필드를 안 실어(undefined) 새 가드(`=== false`만 숨김)가
+// 항상 통과해 회귀 0 — 신규 테스트만 명시로 채운다.
 vi.mock('@/app/dashboard/dashboard-shell', () => ({
   useDashboardContext: () => ({ projectId: 'proj-1' }),
 }));
@@ -50,6 +55,7 @@ beforeEach(() => {
   stubStorages();
   routerPushMock.mockClear();
   createFirstInstructionConversationMock.mockReset();
+  _resetActivationStatusCacheForTests();
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -79,6 +85,7 @@ function stubChecklist(data: {
   total: number;
   all_complete: boolean;
   first_instruction_conversation_id?: string | null;
+  scope_is_requested_org?: boolean;
 }) {
   vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data }) })));
 }
@@ -106,6 +113,57 @@ describe('ActivationChecklistBanner — 미완주 렌더 (story #3159)', () => {
     expect(container.textContent).toContain('가입을 마무리해 볼까요?');
     expect(container.textContent).toContain('2/5단계 완료');
     expect(container.textContent).toContain('이메일 인증하기');
+  });
+});
+
+// story #4032(Lighthouse CI 실측 — 인증화면 6곳 전부 CLS>0.1, 공통 뿌리가 이 배너였다) —
+// fetch 완료 前 null을 그대로 반환하면 부모의 `empty:hidden` 래퍼가 0높이로 접혔다가
+// 실 콘텐츠가 도착하는 순간 나타나며 그 아래 전체(모든 페이지 공통 그리드)를 밀어낸다.
+// 처방(스켈레톤으로 자리 선점)이 실제로 "fetch 미완료 순간에도 박스가 이미 있다"를
+// 만드는지, 그리고 그 박스가 실 콘텐츠와 같은 행 수(5)를 갖는지를 이 두 테스트가 고정한다.
+describe('ActivationChecklistBanner — 로딩 스켈레톤이 자리를 선점한다 (story #4032, CLS 처방)', () => {
+  // story #4027 선례와 동일 패턴 — 자동응답 스텁은 이 컴포넌트의 fetch 체인이 같은
+  // act() 사이클 안에서 이미 resolve돼(실측: 자동응답으로는 "flush 前" 순간을 못 잡음)
+  // 로딩 상태를 관측할 수 없었다. 응답을 수동으로 붙잡아 두는 deferred promise로
+  // "아직 안 왔다"를 실제로 만든다.
+  function deferredChecklistResponse() {
+    let resolve!: (data: typeof PARTIAL) => void;
+    const promise = new Promise<typeof PARTIAL>((res) => { resolve = res; });
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: await promise }) })));
+    return { resolve };
+  }
+
+  it('fetch 완료 前에는 실 텍스트 0인 채로 aria-busy 박스를 먼저 그린다(마운트 즉시, flush 前)', async () => {
+    const { resolve } = deferredChecklistResponse();
+    await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+    const busyEl = container.querySelector('[aria-busy="true"]');
+    expect(busyEl).not.toBeNull();
+    expect(container.textContent).toBe('');
+    await act(async () => { resolve(PARTIAL); });
+    await flush();
+    expect(container.querySelector('[aria-busy="true"]')).toBeNull();
+    expect(container.textContent).toContain('가입을 마무리해 볼까요?');
+  });
+
+  it('스켈레톤 박스는 실 배너와 동일한 5행을 갖는다(행 수가 갈리면 실 콘텐츠 교체 시 다시 흔들린다)', async () => {
+    const { resolve } = deferredChecklistResponse();
+    await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+    expect(container.querySelectorAll('li').length).toBe(5);
+    await act(async () => { resolve(PARTIAL); });
+    await flush();
+    expect(container.querySelectorAll('li').length).toBe(5);
+  });
+
+  it('all_complete=true(완주)면 스켈레톤도 안 거치고 바로 미노출이다(로딩 상태 자체가 없음)', async () => {
+    stubChecklist(COMPLETE);
+    await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+    // COMPLETE는 skip 플래그 유무와 무관하게 fetch가 도착하기 前까지는 state===null이라
+    // allComplete는 아직 false(§useActivationStatus: allComplete = skip || state?.all_complete)
+    // — skip이 false인 이 케이스는 fetch 도착 前까지 스켈레톤이 뜨는 게 맞다(정상 설계,
+    // 완주 사실 자체를 아직 모르니까). flush 뒤에는 사라져야 한다.
+    await flush();
+    expect(container.querySelector('[aria-busy="true"]')).toBeNull();
+    expect(container.textContent).toBe('');
   });
 });
 
@@ -162,6 +220,29 @@ describe('ActivationChecklistBanner — 접기(collapse), 완전 dismiss는 없�
   });
 });
 
+describe('ActivationChecklistBanner — scope_is_requested_org 불일치 시 미노출(story #3610, 3607 잔여·CHANGES-2)', () => {
+  it('scope_is_requested_org===true면 그대로 렌더된다(오탐 0)', async () => {
+    stubChecklist({ ...PARTIAL, scope_is_requested_org: true });
+    await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+    await flush();
+    expect(container.textContent).toContain('가입을 마무리해 볼까요?');
+  });
+
+  it('scope_is_requested_org===false면 아무것도 렌더하지 않는다(요청 org와 판정 org가 갈리는 switch-org 전환 창 포함 — orgId 프레임 불일치 원인과 무관하게 BE 판단만 본다)', async () => {
+    stubChecklist({ ...PARTIAL, scope_is_requested_org: false });
+    await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+    await flush();
+    expect(container.textContent).toBe('');
+  });
+
+  it('scope_is_requested_org가 undefined(구 응답 shape)면 기존처럼 렌더 유지(과다 은닉 방지)', async () => {
+    stubChecklist({ ...PARTIAL });
+    await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+    await flush();
+    expect(container.textContent).toContain('가입을 마무리해 볼까요?');
+  });
+});
+
 describe('ActivationChecklistBanner — 조회 실패 시 미노출', () => {
   it('fetch 실패하면 아무것도 렌더하지 않는다(에러 표면 없음)', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('network'); }));
@@ -214,5 +295,66 @@ describe('ActivationChecklistBanner — "첫 지시…" 항목 클릭(story #320
       (li) => li.textContent?.includes('이메일 인증하기'),
     );
     expect(emailItem?.querySelector('button')).toBeNull();
+  });
+
+  // story #3638(유나 §8 별건) — 대화 생성이 null을 반환하면(실패) 스피너만 멈추고
+  // 조용했다(클릭했는데 아무 일도 없었던 것처럼 보임). connect-step.tsx의 같은 호출은
+  // null을 "건너뛰고 진행"으로 의도적으로 쓰므로(온보딩 흐름이 이 클릭 하나로 안
+  // 막혀야 함) 그쪽은 그대로 두고, 이 배너는 클릭 자체가 유일한 목적이라 실패를 알린다.
+  it('신규 DM 생성이 실패(null)하면 firstInstructionStartFailed 문구가 뜬다(구 침묵)', async () => {
+    stubChecklist({ ...PARTIAL, first_instruction_conversation_id: null });
+    createFirstInstructionConversationMock.mockResolvedValue(null);
+    await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+    await flush();
+
+    const target = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent?.includes('첫 지시 보내고 회신 받기'),
+    ) as HTMLButtonElement;
+    await act(async () => { target.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    expect(routerPushMock).not.toHaveBeenCalledWith(expect.stringContaining('/chats/'));
+    expect(container.textContent).toContain('대화를 시작하지 못했어요. 다시 시도해 주세요.');
+  });
+});
+
+// story #3907(PO 눈 리뷰, 3901 캡처 그라운딩) — 5번째("첫 지시…") Button만 min-h-11(size
+// variant 기본)·border를 형제(4번째 Link)와 다르게 얹어 실측(getBoundingClientRect)
+// iconX 42→43(+1px)·liHeight 24→44(+20px)로 밀려 보였다. min-h-0·border-0로 명시
+// 상쇄한 것을 회귀가드로 고정 — 지우면(size variant 기본값 그대로 새는 자리로 돌아가면)
+// 이 테스트가 잡는다.
+describe('ActivationChecklistBanner — 5번째 항목 아이콘 들여쓰기/행 높이 정합(story #3907)', () => {
+  it('"첫 지시…" Button이 4번째 Link와 같은 박스모델 클래스(min-h-0·border-0·h-auto·min-w-0)를 갖는다', async () => {
+    stubChecklist(PARTIAL);
+    await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+    await flush();
+
+    const firstRoundtripBtn = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent?.includes('첫 지시 보내고 회신 받기'),
+    ) as HTMLButtonElement;
+    expect(firstRoundtripBtn).not.toBeUndefined();
+
+    for (const cls of ['h-auto', 'min-h-0', 'w-full', 'min-w-0', 'border-0', 'gap-1.5', 'px-1', 'py-0.5']) {
+      expect(firstRoundtripBtn.className).toContain(cls);
+    }
+  });
+
+  it('4번째(에이전트 연결하기) Link와 5번째(첫 지시…) Button의 행 폭·패딩 클래스가 동일 집합이다(구조 드리프트 회귀가드)', async () => {
+    stubChecklist(PARTIAL);
+    await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+    await flush();
+
+    const agentLink = Array.from(container.querySelectorAll('a')).find(
+      (a) => a.textContent?.includes('에이전트 연결하기'),
+    ) as HTMLAnchorElement;
+    const roundtripBtn = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent?.includes('첫 지시 보내고 회신 받기'),
+    ) as HTMLButtonElement;
+
+    const SHARED_BOX_CLASSES = ['h-auto', 'w-full', 'min-w-0', 'gap-1.5', 'rounded', 'px-1', 'py-0.5'];
+    for (const cls of SHARED_BOX_CLASSES) {
+      expect(agentLink.className.split(' ')).toContain(cls);
+      expect(roundtripBtn.className.split(' ')).toContain(cls);
+    }
   });
 });
