@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Card } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
 import { PaidSpendDailySeriesCard } from './paid-spend-daily-series-card';
 import { OrgCostSummaryCard, type OrgCostSummaryLoadState } from './org-cost-summary-card';
 
@@ -33,10 +34,11 @@ export function AdsCapCard({ orgId, costSummaryState }: AdsCapCardProps) {
 
   return (
     <Card className="p-3 text-xs" data-testid="ads-cap-card">
-      <button
+      <Button
         type="button"
+        variant="ghost"
         onClick={() => setExpanded((v) => !v)}
-        className="flex w-full items-center justify-between text-left font-medium text-foreground"
+        className="h-auto w-full justify-between rounded-md px-2 py-1.5 text-left font-medium text-foreground"
         aria-expanded={expanded}
         data-testid="ads-cap-card-toggle"
       >
@@ -49,7 +51,7 @@ export function AdsCapCard({ orgId, costSummaryState }: AdsCapCardProps) {
           ) : null}
         </span>
         <span className="text-muted-foreground">{expanded ? t('sectionCollapse') : t('sectionExpand')}</span>
-      </button>
+      </Button>
       {expanded ? (
         <div className="mt-3 space-y-3" data-testid="ads-cap-card-body">
           <OrgCostSummaryCard orgId={orgId} preloadedState={costSummaryState} />
