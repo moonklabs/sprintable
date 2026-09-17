@@ -47,6 +47,7 @@ from app.models.site_post import SitePost
 from app.models.ads_boost_run import AdsBoostRun
 from app.models.site_post_draft import SitePostDraft
 from app.services.ads_spend_snapshots import organic_snapshots_only, paid_snapshots_only
+from app.services.today_service import resolve_published_in_window
 from app.services.insight_snapshots import (
     NORMALIZED_KEYS,
     assemble_channel_post_asset_evidence,
@@ -587,9 +588,14 @@ async def list_insights_board(
     )).scalar_one_or_none()
     ga4_connection_status = _derive_board_ga4_connection_status(ga4_connection)
 
+    # story #3978(「결과」 §7 갭 #1 처방) — 「오늘」과 같은 판정 함수(resolve_published_
+    # since)를 이 화면의 window 경계(같은 `since`)로 호출. 채널 연결 0이면 null(자체가
+    # 없음)·있으면 발행 0건도 실 0(미측정 아님).
+    published_in_window = await resolve_published_in_window(db, org_id, since)
+
     return {
         "rows": rows_out, "has_more": has_more, "next_cursor": next_cursor, "hidden_count": hidden_count,
-        "ga4_connection_status": ga4_connection_status,
+        "ga4_connection_status": ga4_connection_status, "published_in_window": published_in_window,
     }
 
 
