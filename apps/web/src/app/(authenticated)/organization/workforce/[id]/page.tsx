@@ -326,14 +326,23 @@ export default function AgentDetailPage() {
 
   if (!agent) return null;
 
-  const canEdit =
+  const canEditBase =
     (currentUserId !== null && agent.created_by === currentUserId) ||
     orgRole === 'admin' ||
     orgRole === 'owner';
+  // story #3994 CHANGES-2(페드루 PO 판정 2026-09-17) — 「시스템 발행」은 예약 멤버라
+  // 아무도 손으로 바꾸면 안 된다(런타임 재저장 시 다음 자동 발행이 두 번째 「시스템
+  // 발행」을 만드는 실 결함까지 확認됨). canEdit을 여기 한 곳에서 좁혀 이름 편집·
+  // 아바타·활성/비활성 토글·런타임 저장·메시지 정책(전부 기존 `canEdit &&`/`canEdit ?`
+  // 게이트)이 전부 자동으로 읽기 전용이 되게 한다(자리마다 조건 분산 금지). API 키
+  // 섹션만은 canEditBase를 그대로 써서(아래) 중립 설명 1줄을 그 자리에 낸다 — 나머지는
+  // 이미 있는 "비-canEdit 읽기 전용" 표시로 충분(새 문구 0).
+  const isSystemPublisherAgent = isSystemPublisher(agent.runtime_type);
+  const canEdit = canEditBase && !isSystemPublisherAgent;
   // story 933248fa — 타 멤버 웹훅 설정은 BE가 admin/owner role만 허용(creator 단독은 불가, 산티아고
   // IDOR 방어 유지). canEdit(creator 포함)보다 엄격하게 별도 게이트 — 아니면 편집 UI가 "가능해 보이는데
   // 실제로 실패"하는 정직하지 않은 상태가 재발한다(§673 프로젝트 grant 게이트와 동일 패턴).
-  const canEditWebhook = orgRole === 'admin' || orgRole === 'owner';
+  const canEditWebhook = (orgRole === 'admin' || orgRole === 'owner') && !isSystemPublisherAgent;
 
   const handleSaveRuntime = async () => {
     setSavingRuntime(true);
@@ -556,9 +565,12 @@ export default function AgentDetailPage() {
           키를 발급받을 연결 대상이 아니다(연결된 키로 고객 에이전트가 "시스템 발행"
           이름을 사칭해 메시지를 보낼 수 있는 모양이 되는 실 문제). 서버 쪽 발급 거부는
           새 BE라 이 카드 밖(PO가 별도 카드로) — 여기서는 FE 진입점만 막고 목록과 같은
-          중립 설명 1줄로 대체(런타임 선택 자체는 §3107이 이미 배제 — 아래 §478 참고). */}
-      {canEdit && (
-        isSystemPublisher(agent.runtime_type) ? (
+          중립 설명 1줄로 대체(런타임 선택 자체는 §3107이 이미 배제 — 아래 §478 참고).
+          canEditBase를 쓴다(위에서 좁힌 canEdit이 아니라) — 그래야 편집권 있는 뷰어가
+          여기서 «못 만짐»이 아니라 «중립 설명»을 본다(narrowed canEdit이면 이 블록
+          자체가 안 뜬다). */}
+      {canEditBase && (
+        isSystemPublisherAgent ? (
           <SectionCard>
             <SectionCardBody>
               <p className="text-xs text-muted-foreground" data-testid="agent-detail-system-publisher-notice">
@@ -659,8 +671,15 @@ export default function AgentDetailPage() {
       {canEdit && <MessagingPolicySection agentId={id} creatorUserId={agent.created_by} />}
 
       {/* story #2751(설계①) — 연결 설정 상시 섹션. connection-artifact를 항상 재조회해
-          .mcp.json 등 연결 구조를 언제든 다시 볼 수 있게 한다(freshApiKey 유무와 무관). */}
-      <AgentConnectionSettingsSection agentId={id} freshApiKey={freshApiKey} />
+          .mcp.json 등 연결 구조를 언제든 다시 볼 수 있게 한다(freshApiKey 유무와 무관).
+          story #3994 CHANGES-2(페드루 PO 판정 2026-09-17) — 「시스템 발행」은 연결
+          대상이 아니다(위 키 관리 자리의 중립 설명 "따로 연결하지 않아도 돼요" 바로
+          아래에 "이렇게 연결하세요"가 뜨는 모순 발견) — 이 섹션 자체를 안 그린다
+          (중립 설명을 또 하나 더 안 얹는다 — 위 1줄로 충분, 두 번째 대체 문구는
+          같은 말을 반복할 뿐 새 정보가 없다). */}
+      {!isSystemPublisherAgent ? (
+        <AgentConnectionSettingsSection agentId={id} freshApiKey={freshApiKey} />
+      ) : null}
 
       {/* Fakechat 채널 (SSE) — story #2362(2026-07-31): 예전엔 여기가 "이 포트로 접속하라"고
           안내했는데, fakechat은 다이얼아웃 방식이라 그 주소를 아무도 안 연다(포트를 안 쓴다).
@@ -719,7 +738,7 @@ export default function AgentDetailPage() {
       <AgentProjectAccessSection
         agentMemberId={id}
         projects={projects}
-        canEdit={orgRole === 'admin' || orgRole === 'owner'}
+        canEdit={(orgRole === 'admin' || orgRole === 'owner') && !isSystemPublisherAgent}
       />
     </div>
   );
