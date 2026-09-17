@@ -337,10 +337,17 @@ def test_ac4_real_repo_scan_counts_are_recorded():
     # 임박)에서 code_read_exempt로 승격(mcp-secrets.ts fail-closed 구조 코드 확認, #3174
     # 착지 커밋 6a176fd70) → high 2→1·exempt 30→31. 남은 high 1건은 `_INCIDENT_KEYS`
     # 고정 픽스처 FIREBASE_BFF_INTERNAL_SECRET.
+    # 2026-09-17(페드루 PO 정본) — v3 플래그 3키(CHAT_V3_ENABLED·TODAY_V3_ENABLED·
+    # CONNECT_RULES_V3_ENABLED, 전부 FIREBASE_OAUTH_HANDOFF_ENABLED와 동형
+    # 안전-닫힘 feature flag — 값 부재 시 false, throw 없음)를 code_read_exempt에
+    # 브랜치 무관 동일하게 등재한다(exempt 31→34, 착지 여러 v3 브랜치가 바이트
+    # 동일 블록을 들고 있어야 충돌 없이 합쳐진다) — 이 세 키를 실제로 code read
+    # 하는 브랜치에서는 그만큼 high에서 빠지고, 안 읽는 브랜치에서는 exempt
+    # 개수에만 반영된다(high/low 불변).
     assert len(highest) == 1, highest
     assert len(high) == 1, high
     assert len(low) == 9, low
-    assert len(exempt) == 31
+    assert len(exempt) == 34
 
 
 # ── AC5 — 값을 안 읽는다 ──────────────────────────────────────────────────────
