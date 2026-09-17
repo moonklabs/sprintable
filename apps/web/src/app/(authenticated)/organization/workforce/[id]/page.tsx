@@ -7,6 +7,7 @@ import { useTranslations } from 'next-intl';
 import { AlertTriangle, ArrowLeft, Check, Copy, MinusCircle, Pencil, X, XCircle } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { AgentApiKeyManager } from '@/components/agents/agent-api-key-manager';
+import { isSystemPublisher } from '@/lib/runtime-capabilities';
 import { AgentConnectionSettingsSection } from '@/components/agents/agent-connection-settings-section';
 import { MessagingPolicySection } from '@/components/agents/messaging-policy-section';
 import { Badge } from '@/components/ui/badge';
@@ -101,6 +102,7 @@ export default function AgentDetailPage() {
   const t = useTranslations('settings');
   const tc = useTranslations('common');
   const to = useTranslations('organization');
+  const ta = useTranslations('agents');
   const router = useRouter();
   const { id } = useParams<{ id: string }>();
   const { addToast } = useToast();
@@ -530,12 +532,27 @@ export default function AgentDetailPage() {
       })()}
 
       {/* API Keys */}
+      {/* story #3994(«거짓 경고» 클래스, PO CHANGES-1 2026-09-17) — 「시스템 발행」은
+          키를 발급받을 연결 대상이 아니다(연결된 키로 고객 에이전트가 "시스템 발행"
+          이름을 사칭해 메시지를 보낼 수 있는 모양이 되는 실 문제). 서버 쪽 발급 거부는
+          새 BE라 이 카드 밖(PO가 별도 카드로) — 여기서는 FE 진입점만 막고 목록과 같은
+          중립 설명 1줄로 대체(런타임 선택 자체는 §3107이 이미 배제 — 아래 §478 참고). */}
       {canEdit && (
-        <AgentApiKeyManager
-          agentId={id}
-          agentName={agent.name}
-          onNewKey={(key) => { setFreshApiKey(key); setHasActiveKey(true); }}
-        />
+        isSystemPublisher(agent.runtime_type) ? (
+          <SectionCard>
+            <SectionCardBody>
+              <p className="text-xs text-muted-foreground" data-testid="agent-detail-system-publisher-notice">
+                {ta('systemPublisherNeutralDescription')}
+              </p>
+            </SectionCardBody>
+          </SectionCard>
+        ) : (
+          <AgentApiKeyManager
+            agentId={id}
+            agentName={agent.name}
+            onNewKey={(key) => { setFreshApiKey(key); setHasActiveKey(true); }}
+          />
+        )
       )}
 
       {/* Notification channel section */}
