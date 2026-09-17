@@ -67,7 +67,9 @@ const NAV_ITEM_SHORTCUTS: Record<string, string[]> = {
 // 리터럴)으로만 남으면 verify-no-orphan-resource-routes.ts의 ㉠조합 시야 밖이라(같은
 // 파일 상단 주석 "지우지 말 것" 경고 그대로 — go-sprints 선례와 동형) go-retro 앵커가
 // 없으면 조용한 orphan이 된다. 지우면 그 가드가 못 잡는다.
-const GUARD_ANCHOR_ITEMS: Array<{ id: string; icon: LucideIcon; labelKey: string; href: string }> = [
+// story #4013 — export해 팔레트 정의를 직접 순회하는 가드(scripts/verify-command-
+// palette-workspaceless-href-resolves.test.ts)가 이름 목록을 손으로 다시 안 베끼게 한다.
+export const GUARD_ANCHOR_ITEMS: Array<{ id: string; icon: LucideIcon; labelKey: string; href: string }> = [
   { id: 'go-sprints', icon: CalendarRange, labelKey: 'goSprints', href: '/sprints' },
   { id: 'go-epics', icon: FolderKanban, labelKey: 'goEpics', href: '/epics' },
   { id: 'go-retro', icon: Gauge, labelKey: 'goRetro', href: '/retro' },
