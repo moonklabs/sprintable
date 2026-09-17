@@ -70,8 +70,12 @@ function ConnectRulesV3Topbar() {
   );
 }
 
-function useOrgId() {
+// PO CHANGES-r3-1(2026-09-17) — `/api/me`는 이 화면에서 org_id 해소용으로 이미 1회
+// 부른다. `role`도 같은 응답에 실려 오므로 여기서 함께 뽑아 하위 절(에이전트)로
+// prop 전달 — 그 절이 같은 콜을 중복하지 않게 한다(첫 화면 콜 예산 ≤6 준수).
+function useMe() {
   const [orgId, setOrgId] = useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [loadError, setLoadError] = useState(false);
   const [retryNonce, setRetryNonce] = useState(0);
 
@@ -80,17 +84,22 @@ function useOrgId() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoadError(false);
     fetchWithAuth('/api/me')
-      .then((res) => (res.ok ? res.json() as Promise<{ data?: { org_id?: string } }> : Promise.reject(new Error(`HTTP ${res.status}`))))
+      .then((res) => (res.ok ? res.json() as Promise<{ data?: { org_id?: string; role?: string } }> : Promise.reject(new Error(`HTTP ${res.status}`))))
       .then((json) => {
         if (cancelled) return;
         const id = json.data?.org_id;
-        if (id) setOrgId(id); else setLoadError(true);
+        if (id) {
+          setOrgId(id);
+          setIsAdmin(json.data?.role === 'admin' || json.data?.role === 'owner');
+        } else {
+          setLoadError(true);
+        }
       })
       .catch(() => { if (!cancelled) setLoadError(true); });
     return () => { cancelled = true; };
   }, [retryNonce]);
 
-  return { orgId, loadError, retry: () => setRetryNonce((n) => n + 1) };
+  return { orgId, isAdmin, loadError, retry: () => setRetryNonce((n) => n + 1) };
 }
 
 export function ConnectRulesV3Screen({
@@ -98,7 +107,7 @@ export function ConnectRulesV3Screen({
 }: { todayV3Enabled?: boolean; chatV3Enabled?: boolean }) {
   const t = useTranslations('connectRulesV3');
   const tc = useTranslations('common');
-  const { orgId, loadError, retry } = useOrgId();
+  const { orgId, isAdmin, loadError, retry } = useMe();
 
   return (
     <div className="flex h-screen min-h-0 bg-muted/20" data-testid="connect-rules-v3-screen">
@@ -129,7 +138,7 @@ export function ConnectRulesV3Screen({
                     <h2 className="text-sm font-semibold text-foreground">{t('agentsSectionTitle')}</h2>
                     <span className="text-[11px] text-muted-foreground">{t('agentsSectionHint')}</span>
                   </div>
-                  <ConnectRulesV3Agents />
+                  <ConnectRulesV3Agents isAdmin={isAdmin} />
                 </section>
 
                 <section aria-label={t('channelsSectionTitle')}>

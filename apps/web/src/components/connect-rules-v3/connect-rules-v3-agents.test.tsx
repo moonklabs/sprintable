@@ -4,6 +4,11 @@
 // 행도 사라지지 않고 배지로 남는다·「에이전트 추가」 링크는 항상 렌더·행 펼침엔 항상
 // 「연결 설정 보기」가 있다) 고정. PO CHANGES-4 반영 — 역할은 agent_role(실데이터는
 // null이 흔함)+runtime_type 조합, 지어낸 roleLabel* 없음.
+//
+// PO CHANGES-r3-1(2026-09-17) — `isAdmin`은 이제 화면(부모)의 `/api/me`를 재사용한
+// prop이라 이 컴포넌트 자신은 `/api/me`를 안 부른다. `/api/projects`·`/api/agents/
+// access-matrix`도 마운트가 아니라 첫 행 펼침 때만 1회(그 뒤 캐시) — 아래 마운트
+// fetch 수(1) · 첫 펼침 fetch 수 단언이 이 계약을 고정한다.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -40,9 +45,9 @@ afterEach(async () => {
   vi.resetModules();
 });
 
-async function mount() {
+async function mount(isAdmin = false) {
   const { ConnectRulesV3Agents } = await import('./connect-rules-v3-agents');
-  await act(async () => { root.render(wrap(<ConnectRulesV3Agents />)); });
+  await act(async () => { root.render(wrap(<ConnectRulesV3Agents isAdmin={isAdmin} />)); });
   await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 }
 
@@ -56,12 +61,15 @@ function routeFetch(map: Record<string, unknown>) {
 }
 
 describe('ConnectRulesV3Agents', () => {
+  it('⭐마운트 — fetch는 team-members 1콜뿐(/api/me·/api/projects·access-matrix 0)', async () => {
+    routeFetch({ '/api/team-members?type=agent': { data: [] } });
+    await mount(true);
+    expect(fetchMock.mock.calls.length).toBe(1);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe('/api/team-members?type=agent');
+  });
+
   it('⭐빈 상태 — 에이전트 0건이어도 「에이전트 추가」 링크는 사라지지 않는다', async () => {
-    routeFetch({
-      '/api/team-members?type=agent': { data: [] },
-      '/api/me': { data: { role: 'owner' } },
-      '/api/projects': { data: [] },
-    });
+    routeFetch({ '/api/team-members?type=agent': { data: [] } });
     await mount();
     expect(container.textContent).toContain('아직 연결된 에이전트가 없어요');
     expect(container.querySelector('[data-testid="connect-rules-v3-add-agent-link"]')).not.toBeNull();
@@ -79,8 +87,6 @@ describe('ConnectRulesV3Agents', () => {
       '/api/team-members?type=agent': {
         data: [{ id: 'a1', name: '유나 홀름', agent_role: null, runtime_type: null, is_active: true, verified: false, presence_status: 'offline', project_id: null }],
       },
-      '/api/me': { data: { role: 'owner' } },
-      '/api/projects': { data: [] },
     });
     await mount();
     expect(container.textContent).toContain('유나 홀름');
@@ -92,8 +98,6 @@ describe('ConnectRulesV3Agents', () => {
       '/api/team-members?type=agent': {
         data: [{ id: 'a2', name: '디디 은두카쿠', agent_role: null, runtime_type: null, is_active: true, verified: true, presence_status: 'online', project_id: 'p1' }],
       },
-      '/api/me': { data: { role: 'member' } },
-      '/api/projects': { data: [{ id: 'p1', name: 'Sprintable' }] },
     });
     await mount();
     expect(container.textContent).toContain('디디 은두카쿠');
@@ -106,8 +110,6 @@ describe('ConnectRulesV3Agents', () => {
       '/api/team-members?type=agent': {
         data: [{ id: 'a4', name: '유나 홀름', agent_role: 'UI Designer', runtime_type: 'claude-code', is_active: true, verified: true, presence_status: 'idle', project_id: null }],
       },
-      '/api/me': { data: { role: 'member' } },
-      '/api/projects': { data: [] },
     });
     await mount();
     expect(container.textContent).toContain('UI Designer · Claude Code');
@@ -119,8 +121,6 @@ describe('ConnectRulesV3Agents', () => {
       '/api/team-members?type=agent': {
         data: [{ id: 'a6', name: '담롱 온찬', agent_role: 'Growth Hacker', runtime_type: 'internal-beta', is_active: true, verified: true, presence_status: 'idle', project_id: null }],
       },
-      '/api/me': { data: { role: 'member' } },
-      '/api/projects': { data: [] },
     });
     await mount();
     expect(container.textContent).toContain('Growth Hacker');
@@ -132,48 +132,56 @@ describe('ConnectRulesV3Agents', () => {
       '/api/team-members?type=agent': {
         data: [{ id: 'a7', name: '카디르 아흐마디', agent_role: 'QA Engineer', runtime_type: null, is_active: true, verified: true, presence_status: 'idle', project_id: null }],
       },
-      '/api/me': { data: { role: 'member' } },
-      '/api/projects': { data: [] },
     });
     await mount();
     expect(container.textContent).toContain('QA Engineer');
     expect(container.textContent).not.toContain('QA Engineer ·');
   });
 
-  it('⭐행 펼침 — 항상 「연결 설정 보기」가 있고, project_id가 있으면 agent-stats·프로젝트 이름을 낸다', async () => {
+  it('⭐행 펼침(관리자) — 첫 펼침에 projects+access-matrix 정확히 1회, 재펼침엔 재조회 0', async () => {
     routeFetch({
       '/api/team-members?type=agent': {
-        data: [{ id: 'a3', name: '카디르 아흐마디', agent_role: null, runtime_type: null, is_active: true, verified: true, presence_status: 'idle', project_id: 'p9' }],
+        data: [
+          { id: 'a3', name: '카디르 아흐마디', agent_role: null, runtime_type: null, is_active: true, verified: true, presence_status: 'idle', project_id: 'p9' },
+          { id: 'a8', name: '유나 홀름', agent_role: null, runtime_type: null, is_active: true, verified: true, presence_status: 'idle', project_id: null },
+        ],
       },
-      '/api/me': { data: { role: 'owner' } },
       '/api/projects': { data: [{ id: 'p9', name: 'Sprintable' }] },
       '/api/agents/access-matrix': { data: [{ agent_member_id: 'a3', project_id: 'p9', record_id: 'r1' }] },
       '/api/analytics/agent-stats': { data: { completed: 4, total_stories: 5, done_story_points: 8, avg_lead_time_ms: 2 * 24 * 60 * 60 * 1000 } },
     });
-    await mount();
-    const row = container.querySelector('[data-testid="connect-rules-v3-agent-row"] button') as HTMLButtonElement;
-    const before = fetchMock.mock.calls.filter((c: unknown[]) => String(c[0]).startsWith('/api/analytics/agent-stats')).length;
-    expect(before).toBe(0);
-    await act(async () => { row.click(); await Promise.resolve(); await Promise.resolve(); });
-    const after = fetchMock.mock.calls.filter((c: unknown[]) => String(c[0]).startsWith('/api/analytics/agent-stats')).length;
-    expect(after).toBe(1);
+    await mount(true);
+    const rows = container.querySelectorAll('[data-testid="connect-rules-v3-agent-row"] button');
+    const firstRow = rows[0] as HTMLButtonElement;
+    const secondRow = rows[1] as HTMLButtonElement;
+
+    expect(fetchMock.mock.calls.some((c: unknown[]) => String(c[0]).startsWith('/api/projects'))).toBe(false);
+    await act(async () => { firstRow.click(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(fetchMock.mock.calls.filter((c: unknown[]) => String(c[0]).startsWith('/api/projects')).length).toBe(1);
+    expect(fetchMock.mock.calls.filter((c: unknown[]) => String(c[0]).startsWith('/api/agents/access-matrix')).length).toBe(1);
     expect(container.textContent).toContain('연결 설정 보기');
     expect(container.textContent).toContain('완료 4건');
     expect(container.textContent).toContain('Sprintable 기준');
     expect(container.textContent).toContain('프로젝트 1개 접근 허용');
+
+    // 재펼침(같은 행 접었다 다른 행 펼침) — projects/access-matrix 캐시돼 재조회 0.
+    await act(async () => { firstRow.click(); });
+    await act(async () => { secondRow.click(); await Promise.resolve(); await Promise.resolve(); });
+    expect(fetchMock.mock.calls.filter((c: unknown[]) => String(c[0]).startsWith('/api/projects')).length).toBe(1);
+    expect(fetchMock.mock.calls.filter((c: unknown[]) => String(c[0]).startsWith('/api/agents/access-matrix')).length).toBe(1);
   });
 
-  it('⭐비관리자 — 접근 권한 칸 자체가 없다(안내 문장 0, 칸째 제거)', async () => {
+  it('⭐비관리자 — 첫 펼침에 access-matrix는 안 부르고(칸 자체가 없다), projects만 부른다', async () => {
     routeFetch({
       '/api/team-members?type=agent': {
         data: [{ id: 'a5', name: '담롱 온찬', agent_role: null, runtime_type: null, is_active: true, verified: true, presence_status: 'offline', project_id: null }],
       },
-      '/api/me': { data: { role: 'member' } },
       '/api/projects': { data: [] },
     });
-    await mount();
+    await mount(false);
     const row = container.querySelector('[data-testid="connect-rules-v3-agent-row"] button') as HTMLButtonElement;
-    await act(async () => { row.click(); });
+    await act(async () => { row.click(); await Promise.resolve(); await Promise.resolve(); });
+    expect(fetchMock.mock.calls.some((c: unknown[]) => String(c[0]).startsWith('/api/agents/access-matrix'))).toBe(false);
     expect(container.textContent).not.toContain('접근');
   });
 });
