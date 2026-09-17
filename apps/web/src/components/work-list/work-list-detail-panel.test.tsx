@@ -641,4 +641,50 @@ describe('WorkListDetailPanel — 발행물 탭(story #3988)', () => {
     const siteCalls = fetchMock.mock.calls.filter((c: unknown[]) => (c as [string])[0].includes('/site-posts/drafts'));
     expect(siteCalls.some((c) => (c[0] as string).includes('work_item_id=story-2'))).toBe(true);
   });
+
+  // CHANGES-1(페드루 PO 판정 2026-09-17 03:49Z) — A에서 탭을 열어 조회가 나간 채(응답
+  // 지연) B로 옮기면, 나중에 도착한 A의 응답이 B 화면에 얹히는 경합. 세 조회 자리 공통
+  // ref(publicationsRequestForRef) 회귀가드.
+  it('⭐CHANGES-1 — A행 요청이 늦게 도착해도 그 사이 옮겨간 B행 화면을 덮어쓰지 않는다', async () => {
+    let resolveA: (v: Response) => void = () => {};
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.includes('/channel-posts/drafts')) return jsonResponse([]);
+      if (url.includes('/site-posts/drafts?work_item_id=story-A')) {
+        return new Promise<Response>((r) => { resolveA = r; });
+      }
+      if (url.includes('/site-posts/drafts?work_item_id=story-B')) {
+        return jsonResponse([{ draft_id: 'site-b', title: 'B행 글', slug: 'b', gate_status: null, reapproval_required: null, sealed_content_sha256: null, body_sha256: 'h', published_at: null }]);
+      }
+      return jsonResponse(url.startsWith('/api/gates') ? [] : null);
+    });
+
+    await mountPanel(baseRow(), 'story-A');
+    await act(async () => { (container.querySelector('[data-testid="panel-tab-publications"]') as HTMLElement).click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.querySelector('[data-testid="panel-publications-loading"]')).not.toBeNull();
+
+    // A 응답이 오기 전에 B로 옮긴다(이미 발행물 탭이 열려 있어 클릭 없이 즉시 재조회).
+    await mountPanel(baseRow(), 'story-B');
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.querySelector('[data-testid="panel-publications-list"]')?.textContent).toContain('B행 글');
+
+    // A의 지연 응답이 이제야 도착 — 이미 지나간 요청이라 버려져야 한다.
+    await act(async () => {
+      resolveA(jsonResponse([{ draft_id: 'site-a', title: 'A행 글', slug: 'a', gate_status: null, reapproval_required: null, sealed_content_sha256: null, body_sha256: 'h', published_at: null }]) as unknown as Response);
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    });
+    const list = container.querySelector('[data-testid="panel-publications-list"]');
+    expect(list?.textContent).toContain('B행 글');
+    expect(list?.textContent).not.toContain('A행 글');
+  });
+
+  it('작은 것(페드루 PO 판정) — orgId가 없으면 스켈레톤에 갇히지 않고 오류+「다시 시도」로', async () => {
+    dashboardContextRef.current = { currentMemberType: 'human', orgId: undefined };
+    mockFetchRoutes({});
+    await mountPanel();
+    await act(async () => { (container.querySelector('[data-testid="panel-tab-publications"]') as HTMLElement).click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.querySelector('[data-testid="panel-publications-loading"]')).toBeNull();
+    expect(container.querySelector('[data-testid="panel-publications-error"]')).not.toBeNull();
+  });
 });

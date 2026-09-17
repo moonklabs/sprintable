@@ -277,6 +277,20 @@ export function WorkListDetailPanel({
   useEffect(() => { activeTabRef.current = activeTab; }, [activeTab]);
   const orgIdRef = useRef(orgId);
   useEffect(() => { orgIdRef.current = orgId; }, [orgId]);
+  // story #3988 CHANGES-1(페드루 PO 판정 2026-09-17 03:49Z) — A행에서 「발행물」 탭을 연
+  // 채(조회 진행 中) B행으로 옮기면 A의 늦은 응답이 B 화면에 얹히는 경합. 세 조회 자리
+  // (행전환 effect·탭 onValueChange·재시도) 전부 이 ref에 "지금 요청 대상 storyId"를
+  // 적어 두고, 응답 도착 시 그 사이 다른 요청(다른 storyId)이 새로 시작됐으면(ref가
+  // 이미 바뀌어 있으면) 버린다.
+  const publicationsRequestForRef = useRef<string | null>(null);
+  const runPublicationsFetch = useCallback((org: string, forStoryId: string) => {
+    publicationsRequestForRef.current = forStoryId;
+    setPublications({ kind: 'loading' });
+    void fetchDraftsForWorkItem(org, forStoryId).then((res) => {
+      if (publicationsRequestForRef.current !== forStoryId) return;
+      setPublications(res.ok ? { kind: 'ready', channel: res.channel, site: res.site } : { kind: 'error' });
+    });
+  }, []);
 
   const loadGate = useCallback(async () => {
     setGate(await fetchPendingGate(row, storyId));
@@ -300,13 +314,18 @@ export function WorkListDetailPanel({
     // 불려서(값이 안 바뀌므로) idle에 머문 채 스켈레톤이 안 풀리는 결함이 생긴다 —
     // 그 경우엔 여기서 곧장 새 storyId로 조회한다.
     setPublications({ kind: 'idle' });
-    if (activeTabRef.current === 'publications' && orgIdRef.current) {
-      const org = orgIdRef.current;
-      setPublications({ kind: 'loading' });
-      void fetchDraftsForWorkItem(org, storyId).then((res) => {
-        if (cancelled) return;
-        setPublications(res.ok ? { kind: 'ready', channel: res.channel, site: res.site } : { kind: 'error' });
-      });
+    // CHANGES-1 — 탭이 지금 안 열려 있어도(아래 if가 새 요청을 안 쏴도) ref는 항상 이
+    // storyId로 갱신한다: 그래야 옛 storyId로 나가 있던 요청(예: 방금 A에서 쐈던 요청)의
+    // 응답이 늦게 와도 "지금은 이미 다른 storyId"임을 보고 버릴 수 있다.
+    publicationsRequestForRef.current = storyId;
+    if (activeTabRef.current === 'publications') {
+      if (orgIdRef.current) {
+        runPublicationsFetch(orgIdRef.current, storyId);
+      } else {
+        // 작은 것(페드루 PO 판정) — orgId가 없으면 로딩을 못 시작하니 스켈레톤에
+        // 영원히 갇힌다. 오류 상태로 명시해 「다시 시도」가 뜨게 한다.
+        setPublications({ kind: 'error' });
+      }
     }
 
     void fetchJsonData<StoryDetail>(`/api/stories/${storyId}`).then((v) => { if (!cancelled) setStory(v); });
@@ -322,7 +341,7 @@ export function WorkListDetailPanel({
     fetchPendingGate(row, storyId).then((v) => { if (!cancelled) setGate(v); }).catch(() => { if (!cancelled) setGate(null); });
 
     return () => { cancelled = true; };
-  }, [row, storyId]);
+  }, [row, storyId, runPublicationsFetch]);
 
   // 카디르 계약값 ⑥(페드루 판정 2026-09-14 10:55Z) — 「같은 화면 두 소스」결함 처방. row.state는
   // 목록 로드 시점의 inbox 스냅샷이고 주 액션 버튼은 이 패널이 연 시점의 fresh gate(gate state,
@@ -397,12 +416,12 @@ export function WorkListDetailPanel({
   const handleReject = useCallback((reason: string) => { void submitTransition('rejected', false, reason); }, [submitTransition]);
 
   const retryPublications = useCallback(() => {
-    setPublications({ kind: 'loading' });
-    if (!orgId) return;
-    void fetchDraftsForWorkItem(orgId, storyId).then((res) => {
-      setPublications(res.ok ? { kind: 'ready', channel: res.channel, site: res.site } : { kind: 'error' });
-    });
-  }, [orgId, storyId]);
+    if (!orgId) {
+      setPublications({ kind: 'error' });
+      return;
+    }
+    runPublicationsFetch(orgId, storyId);
+  }, [orgId, storyId, runPublicationsFetch]);
 
   // story #3988 — 이 지역변수로 먼저 좁혀 두면(if/else) 아래 JSX의 중첩 삼항이
   // PublicationsTabState 판별 유니언을 안정적으로 좁힌다(JSX 삼항 체인 안에서
@@ -567,11 +586,12 @@ export function WorkListDetailPanel({
             // 열릴 때 같이 부르면 첫 화면 콜 수가 늘어난다). idle일 때만 fetch해서
             // 같은 탭을 여러 번 여닫아도 재조회 0(다른 행으로 옮기면 위 useEffect가
             // idle로 되돌려 다음 열 때 다시 조회).
-            if (v === 'publications' && publications.kind === 'idle' && orgId) {
-              setPublications({ kind: 'loading' });
-              void fetchDraftsForWorkItem(orgId, storyId).then((res) => {
-                setPublications(res.ok ? { kind: 'ready', channel: res.channel, site: res.site } : { kind: 'error' });
-              });
+            if (v === 'publications' && publications.kind === 'idle') {
+              if (orgId) {
+                runPublicationsFetch(orgId, storyId);
+              } else {
+                setPublications({ kind: 'error' });
+              }
             }
           }}
           className="w-full"
