@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import { fetchWithAuth } from '@/lib/db/client';
 import { Button } from '@/components/ui/button';
@@ -33,6 +34,14 @@ export function ChatV3Screen({ todayV3Enabled }: { todayV3Enabled: boolean }) {
   const t = useTranslations('chatV3');
   const tc = useTranslations('common');
   const locale = useLocale();
+  // story #4018(AC1 PO 확定 2026-09-17) — 특정 대화 주소는 쿼리(`?conversation=<id>`),
+  // 경로 세그먼트 아님(둘 다 RESERVED_FIRST_SEGMENTS/proxy.ts엔 안전 — 첫 세그먼트
+  // 'chat'만 보는 로직이라 — 하지만 PO가 AC3 이유로 쿼리를 확定: 경로 세그먼트면
+  // 대화를 고를 때마다 페이지 자체가 바뀌어 화면 상태·목록이 다시 마운트될 위험,
+  // 쿼리는 같은 페이지에서 인자만 바뀐다).
+  const router = useRouter();
+  const pathname = usePathname();
+  const conversationParam = useSearchParams().get('conversation');
   const { me, error: meError, retry: retryMe } = useMe();
   // 페드루 PO 지시(2026-09-17 00:08Z, PR #4370 CHANGES) — 오늘 스냅샷은 여기서
   // 1콜만(맥락 패널 「관련」·이벤트 카드 「서명」 막다른 길 방지 둘 다 이 캐시 공유).
@@ -49,6 +58,11 @@ export function ChatV3Screen({ todayV3Enabled }: { todayV3Enabled: boolean }) {
   // 대신 밀어준다(위 import 주석 참고). ref는 선택 스레드가 바뀌어도 useCallback
   // 재생성이 필요 없다(안정 참조 — mux 재구독 유발 0).
   const messagesRef = useRef<ChatV3MessagesHandle>(null);
+  // story #4018 — 인자 없는 첫 진입의 기본 선택(목록 첫 대화)은 딱 한 번만 정한다.
+  // threads 배열은 SSE 재정렬(#4008 AC3)로 마운트 뒤에도 참조가 계속 바뀌는데, 그때마다
+  // "첫 대화"를 다시 골라 URL을 갈아치우면 사용자가 다른 대화를 보고 있어도 실시간
+  // 트래픽만으로 선택이 튀는 회귀가 난다.
+  const didDefaultSelectRef = useRef(false);
 
   const loadConversations = useCallback((currentMe: Me) => {
     let cancelled = false;
@@ -63,9 +77,7 @@ export function ChatV3Screen({ todayV3Enabled }: { todayV3Enabled: boolean }) {
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
       .then((json: { data?: ChatV3Thread[] }) => {
         if (cancelled) return;
-        const list = json.data ?? [];
-        setThreads(list);
-        setSelectedId((prev) => prev ?? list[0]?.id ?? null);
+        setThreads(json.data ?? []);
       })
       .catch(() => { if (!cancelled) setLoadError(true); });
     return () => { cancelled = true; };
@@ -78,6 +90,36 @@ export function ChatV3Screen({ todayV3Enabled }: { todayV3Enabled: boolean }) {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     return loadConversations(me);
   }, [me, loadConversations]);
+
+  // story #4018 AC1/AC3 — 주소의 `conversation` 인자가 정본. 있으면(존재/권한 무관, id
+  // 그대로) 그 값을 선택 상태로 반영 — 목록에 없으면 아래 selectedThread가 undefined가
+  // 돼 렌더가 「이 대화를 열 수 없어요」로 가른다(PO 지시: 잘못된 id도 주소에 그대로
+  // 둔다 — 새로고침해도 같은 안내). 인자가 없으면 목록 첫 대화를 딱 한 번만 기본
+  // 선택하고 `replace`로 주소에 반영(뒤로가기 기록 안 쌓임, PO 지시 1).
+  useEffect(() => {
+    if (!threads) return;
+    if (conversationParam) {
+      // 주소(외부 시스템)를 선택 상태(React state)로 동기화하는 자리 — connect-step.tsx·
+      // now-strip.tsx와 같은 관례로 정적분석이 "effect 안 setState"를 오탐한다(위 loadConversations
+      // 마운트 effect와 동일 사유). handleSelectThread에서도 같은 selectedId를 즉시(router.push의
+      // 내비게이션 완료를 안 기다리고) 반영해야 클릭 응답이 매끄러워 렌더 시점 파생으로 못 바꾼다.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSelectedId(conversationParam);
+      return;
+    }
+    if (didDefaultSelectRef.current) return;
+    didDefaultSelectRef.current = true;
+    const defaultId = threads[0]?.id ?? null;
+    setSelectedId(defaultId);
+    if (defaultId) router.replace(`${pathname}?conversation=${defaultId}`);
+  }, [threads, conversationParam, pathname, router]);
+
+  // story #4018 AC3 — 사람이 직접 고르면 주소를 push(뒤로가기 = 이전 대화). 기본
+  // 선택(위 effect)과 달리 이건 항상 새 기록을 쌓는다 — 그게 사용자 의도적 이동이므로.
+  const handleSelectThread = useCallback((id: string) => {
+    setSelectedId(id);
+    router.push(`${pathname}?conversation=${id}`);
+  }, [pathname, router]);
 
   // story #4008 AC3 — 스레드 레일 실시간(chat-list-view.tsx applyConversationMessageUpdate와
   // 동형: 미리보기·시각 갱신 + 최근 순 재정렬). 대상 스레드가 목록에 없으면(새 대화 등)
@@ -158,10 +200,20 @@ export function ChatV3Screen({ todayV3Enabled }: { todayV3Enabled: boolean }) {
             <Skeleton className="h-12 w-full" />
             <Skeleton className="h-12 w-full" />
           </div>
+        ) : threads.length === 0 ? (
+          <div className="flex flex-1 items-center justify-center">
+            <p className="text-sm text-muted-foreground">{t('threadRailEmpty')}</p>
+          </div>
         ) : (
           <>
-            <ChatV3ThreadRail threads={threads} meId={me.id} selectedId={selectedId} onSelect={setSelectedId} />
-            {selectedThread ? (
+            <ChatV3ThreadRail threads={threads} meId={me.id} selectedId={selectedId} onSelect={handleSelectThread} />
+            {selectedId === null ? (
+              // story #4018 — 기본 선택 effect가 아직 안 돈 찰나(같은 커밋 안에서 곧
+              // 해소됨). threads.length>0이 이미 보장돼 있어 이 상태는 일시적이다.
+              <div className="flex flex-1 items-center justify-center">
+                <p className="text-sm text-muted-foreground">{t('threadRailEmpty')}</p>
+              </div>
+            ) : selectedThread ? (
               <>
                 <ChatV3Messages
                   ref={messagesRef}
@@ -183,8 +235,11 @@ export function ChatV3Screen({ todayV3Enabled }: { todayV3Enabled: boolean }) {
                 />
               </>
             ) : (
-              <div className="flex flex-1 items-center justify-center">
-                <p className="text-sm text-muted-foreground">{t('threadRailEmpty')}</p>
+              // story #4018 AC2(유나 시안 703ed02d §4018) — 없는/권한 없는 대화 id.
+              // 존재 여부를 안 가른다(같은 문장) · 목록(레일)은 그대로 · 계열색 0.
+              <div className="flex flex-1 flex-col items-center justify-center gap-1 p-5 text-center" data-testid="chat-v3-conversation-unavailable">
+                <p className="text-sm font-medium text-foreground">{t('conversationUnavailableTitle')}</p>
+                <p className="text-sm text-muted-foreground">{t('conversationUnavailableDescription')}</p>
               </div>
             )}
           </>
