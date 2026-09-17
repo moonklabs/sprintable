@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
+import { cardVariants } from '@/components/ui/card';
 import {
   VerifyRail, useVerificationRail,
   type Transport,
@@ -341,7 +342,7 @@ export function ConnectStep({ agentId, apiKey, projectId, onFinish, todayV3Enabl
           다운로드 로직 0). 보조 경로(아래 기존 웹 connect 흐름)는 삭제 0.
           CHANGES ③: 절 제목을 안 둔다(카드 자체가 이미 「데스크톱 앱」 제목을
           갖는다 — 두 제목이 부딪힌다). 부제만 남긴다. */}
-      <section className="space-y-3 rounded-lg border border-border bg-card p-4" data-testid="connect-step-desktop-primary">
+      <section className={cn(cardVariants(), 'space-y-3 p-4')} data-testid="connect-step-desktop-primary">
         <p className="text-xs text-muted-foreground">{t('desktopHandoffSubtitle')}</p>
         <DesktopDownloadCard />
         {/* CHANGES ①: 데스크톱 앱은 이 화면 밖이라 키를 붙여 넣을 곳이 없다 —
