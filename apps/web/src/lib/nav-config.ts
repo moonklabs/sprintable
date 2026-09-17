@@ -10,6 +10,7 @@ import {
   HardDrive,
   Inbox,
   Layers,
+  Link2,
   ListChecks,
   MessageSquare,
   Newspaper,
@@ -22,6 +23,7 @@ import {
   Zap,
   type LucideIcon,
 } from 'lucide-react';
+import { resolveNavV3Destinations, type NavV3Flags } from './nav-v3-destinations';
 
 // story #2681(모바일 IA S1, doc mobile-ia-full-completion-2678) — 데스크톱 GNB(app-sidebar.tsx)와
 // 모바일 /more 허브(S2에서 착수)가 「한 정의」에서 파생되도록 이 파일이 그 SSOT다. 두 벌 목적지
@@ -154,6 +156,40 @@ export const NAV_GROUPS: NavGroupConfig[] = [
     ],
   },
 ];
+
+// story #4003(E-UX-OVERHAUL·셸 통합 2/N) — 3998 결함②/4002 그라운딩 처방. NAV_GROUPS
+// 자체는 그대로 둔다(command-palette.tsx 등 기존 소비처 무영향, path 불변 원칙과도
+// 부합) — 이 함수가 렌더 시점에만 5항목(오늘·일감·결과·연결·규칙, 대화는 별도
+// resolveChatCenterItem)의 목적지를 플래그로 덮어쓴다(복붙 규칙 0 — nav-v3-
+// destinations.ts 결정 함수 재사용, app-sidebar.tsx도 같은 함수를 그대로 쓴다).
+// CHANGES(페드루 PO, PR#4386 1차 리뷰) — 「일감」도 이 함수가 정한다: dest.work는
+// `{kind:'resource', path:'work-list'|'flow'}` **서술자**(org/project 접두 전)라
+// item.path(리소스 fragment)만 교체 — 실제 접두는 그대로 app-sidebar.tsx의
+// resourceLink()가 한다(그 헬퍼의 접두 로직 자체는 안 복붙, nav-v3-destinations.ts
+// 파일 상단 주석 참고). 「연결·규칙」 항목 ON이면 통합 v3 화면 링크를 옛 채널 연결·
+// 콘텐츠 규칙 2항목 **앞에 추가**한다(옛 진입점 제거 금지 원칙 — 대체가 아니라 병기).
+export function resolveNavGroups(flags: NavV3Flags): NavGroupConfig[] {
+  const dest = resolveNavV3Destinations(flags);
+  return NAV_GROUPS.map((group): NavGroupConfig => {
+    if (group.id === 'now') {
+      return { ...group, items: group.items.map((item) => (item.id === 'org-briefing' ? { ...item, path: dest.today.path } : item)) };
+    }
+    if (group.id === 'dev') {
+      return { ...group, items: group.items.map((item) => (item.id === 'board' ? { ...item, path: dest.work.path } : item)) };
+    }
+    if (group.id === 'results') {
+      return { ...group, items: group.items.map((item) => (item.id === 'org-insights-board' ? { ...item, path: dest.results.path } : item)) };
+    }
+    if (group.id === 'connect-rules' && dest.connectRules) {
+      const v3Item: NavItemConfig = {
+        id: 'connect-rules-v3', labelKey: 'zoneConnectRules', descriptionKey: 'descConnectRulesV3',
+        icon: Link2, kind: 'static', path: dest.connectRules.path, scope: 'org',
+      };
+      return { ...group, items: [v3Item, ...group.items] };
+    }
+    return group;
+  });
+}
 
 // story #3824 — 5항목 축소로 사이드바에서 빠지는 17개 목적지. 라우트는 전부 그대로
 // 살아있다(북마크·딥링크 무손상, path 불변) — 이 배열이 이제 이들의 1급 진입점
@@ -288,6 +324,12 @@ export const CHAT_CENTER_ITEM: NavItemConfig = {
   // 요구한다(팔레트 등 다른 소비처가 이 항목도 같은 타입으로 다룬다) — 값은 채운다.
   id: 'chats', labelKey: 'chats', descriptionKey: 'descChats', icon: MessageSquare, kind: 'static', path: '/chats', badgeKey: 'chats',
 };
+
+// story #4003 — CHAT_CENTER_ITEM의 flag-aware href(ON: /chat · OFF: 위 원본과 바이트
+// 동일 /chats). 라벨·아이콘·배지 등 나머지 필드는 무변(원본 그대로 spread).
+export function resolveChatCenterItem(flags: NavV3Flags): NavItemConfig {
+  return { ...CHAT_CENTER_ITEM, path: resolveNavV3Destinations(flags).chats.path };
+}
 
 // story #d986fd6c(IA·S4)의 «뷰포트 높이 역산 접힘» 전제(필요 높이(px) = 615.5 + 32×N)는
 // 이 스토리(#f81657f8, 선생님 決 2026-09-09 01:28Z 「그냥 디폴트를 다 펼쳐두고 접을 수 있게
