@@ -19,6 +19,7 @@ import { fetchWorkList, type FetchedWorkList } from './fetch-work-list';
 import { filterWorkList, EMPTY_WORK_LIST_FILTERS, type WorkListFilters } from './filter-work-list';
 import { UNASSIGNED_GOAL_ID } from './derive-work-list';
 import { WorkListRowView } from './work-list-row';
+import { translateEntityStatus } from '@/components/chat/entity-status-labels';
 import { useWorkListSelection } from './use-work-list-selection';
 import { WorkListDetailPanel } from './work-list-detail-panel';
 import { findSelectedRowContext, isRowVisibleInFiltered } from './work-list-detail-actions';
@@ -68,6 +69,19 @@ function FilterDropdown({
     </DropdownMenu>
   );
 }
+
+// story #3976(PO 확定) — 스토리 카드 배지 색. Story.status는 work-list-row.tsx의
+// STATE_TEXT(일/실행 파생 실행상태)와 다른 축이라 그 맵을 재사용하지 않고 별도로 둔다
+// (섞지 않는다). 낱말 자체는 entity-status-labels.ts::translateEntityStatus('story',…)
+// (SSOT, 새 번역 0) — 여기선 색 클래스만. 색 규칙은 STATE_TEXT와 동형(대기류=muted·
+// 검토=warning-strong·완료=success).
+const STORY_STATUS_CLASS: Record<string, string> = {
+  backlog: 'text-muted-foreground',
+  'ready-for-dev': 'text-muted-foreground',
+  'in-progress': 'text-muted-foreground',
+  'in-review': 'text-warning-strong',
+  done: 'text-success',
+};
 
 /**
  * story #3844(UX-v3·FE 4·일감 1) — 「일감」 목록 탭 쉘. fetch(fetch-work-list.ts) →
@@ -269,9 +283,16 @@ export function WorkListShell({ projectId }: { projectId: string }) {
                             일 때만(데이터 없으면 지어내지 않는다). 기간 pill(예: 「이번 주」)은
                             target_date 기반 설계가 스코프 밖이라 PO 승인으로 생략. */}
                         {group.isActive ? `${t('stateInProgress')} · ` : ''}
+                        {/* story #3976(PO 확定) — 분수는 기존 일+실행 개수 그대로(SP 기준 새 콜 0),
+                            단위 낱말("일")만 붙여 무엇을 센 것인지 보이게 한다. */}
                         {t('goalProgressLabel', { done: group.doneCount, total: group.totalCount })}
                       </span>
                     </div>
+                    {/* story #3976(PO 확定) — 「목표 없음」 그룹에만 안내 문장(그 외 목표는
+                        제목만으로 충분해 문장 0, 지어내지 않는다). */}
+                    {group.goalId === UNASSIGNED_GOAL_ID ? (
+                      <p className="px-1 text-xs text-muted-foreground">{t('unassignedGoalHint')}</p>
+                    ) : null}
                     <div className="px-1 text-xs text-muted-foreground">
                       {t('goalSummaryLabel', { assigned: group.assignedCount, delegated: group.delegatedCount, hypotheses: group.hypothesisCount })}
                     </div>
@@ -282,9 +303,23 @@ export function WorkListShell({ projectId }: { projectId: string }) {
                         08:28Z 정정: 세로 선은 primary(파랑)가 아니라 중립 border-border — 파랑은
                         「사람 손 필요/주 액션」 전용 자리라 순수 구조선엔 안 쓴다. */}
                     <div className="space-y-4 pt-1">
-                      {group.stories.map((story) => (
+                      {group.stories.map((story) => {
+                        // story #3976(PO 확定) — 스토리 카드 배지는 Story.status(SSOT) 축.
+                        // work-list-row.tsx의 STATE_TEXT(일/실행 파생 실행상태)와 별개라 섞지
+                        // 않는다 — 시안 06d2d61c가 "완료/검토 中/진행 中/대기" 배지를 스토리
+                        // 줄에 그린 것은 이 축을 가리킨다(그라운딩 3975 부재⑤ 판정).
+                        const storyStatusLabel = translateEntityStatus('story', story.status);
+                        const storyStatusClass = STORY_STATUS_CLASS[story.status] ?? 'text-muted-foreground';
+                        return (
                         <div key={story.storyId} className="border-l-2 border-border pl-3">
-                          <div className="pb-1 text-sm font-semibold text-foreground">{story.title}</div>
+                          <div className="flex items-baseline gap-2 pb-1">
+                            <span className="truncate text-sm font-semibold text-foreground">{story.title}</span>
+                            {storyStatusLabel ? (
+                              <span className={cn('shrink-0 text-xs font-medium', storyStatusClass)} data-testid="story-status-badge">
+                                {storyStatusLabel}
+                              </span>
+                            ) : null}
+                          </div>
                           {story.rows.map((row) => (
                             <WorkListRowView
                               key={row.id}
@@ -294,7 +329,8 @@ export function WorkListShell({ projectId }: { projectId: string }) {
                             />
                           ))}
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </Card>
                 ))}

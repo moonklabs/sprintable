@@ -87,6 +87,10 @@ export interface WorkListStoryInput {
   title: string;
   /** BE StoryResponse.epic_id — 목표 id. */
   epic_id: string | null;
+  /** story #3976 — 스토리 카드 배지용(SSOT). BE StoryResponse.status(backlog|ready-for-dev|
+   * in-progress|in-review|done, entity-status-labels.ts STATUS_LABELS.story와 동형) —
+   * 일/실행 행의 파생 실행상태(WorkListRowState)와는 다른 축이라 섞지 않는다(PO 확定). */
+  status: string;
 }
 
 export interface WorkListTaskInput {
@@ -149,6 +153,8 @@ export interface WorkListRow {
 export interface WorkListStoryGroup {
   storyId: string;
   title: string;
+  /** story #3976 — Story.status SSOT(위 WorkListStoryInput 주석 참고). */
+  status: string;
   rows: WorkListRow[];
   /** 이 스토리에 직접·상속(부모 goal 경유) 둘 다로 연결된 가설 id들(필터용). */
   hypothesisIds: string[];
@@ -271,7 +277,7 @@ export function deriveWorkList(input: WorkListInput): WorkList {
 
   function ensureStoryGroup(story: WorkListStoryInput): WorkListStoryGroup {
     let g = storyGroups.get(story.id);
-    if (!g) { g = { storyId: story.id, title: story.title, rows: [], hypothesisIds: hypothesisIdsForStory(story) }; storyGroups.set(story.id, g); }
+    if (!g) { g = { storyId: story.id, title: story.title, status: story.status, rows: [], hypothesisIds: hypothesisIdsForStory(story) }; storyGroups.set(story.id, g); }
     return g;
   }
 

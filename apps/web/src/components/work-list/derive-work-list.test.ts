@@ -8,7 +8,7 @@ function page<T>(items: T[], hasMore: boolean | null = false) {
 function baseInput(overrides: Partial<WorkListInput> = {}): WorkListInput {
   return {
     goals: page([{ id: 'g1', title: '목표1', status: 'active' }]),
-    stories: page([{ id: 's1', title: '스토리1', epic_id: 'g1' }]),
+    stories: page([{ id: 's1', title: '스토리1', epic_id: 'g1', status: 'in-progress' }]),
     tasks: page([]),
     agentRuns: page([]),
     inbox: [],
@@ -35,7 +35,7 @@ describe('deriveWorkList — 목표/스토리 그룹핑', () => {
 
   it('목표 있는 스토리라도 task/agent_run이 0개면 목표 유무와 무관하게 groups에서 빠진다', () => {
     const result = deriveWorkList(baseInput({
-      stories: page([{ id: 's1', title: '목표 있음·일 없음', epic_id: 'g1' }]),
+      stories: page([{ id: 's1', title: '목표 있음·일 없음', epic_id: 'g1', status: 'backlog' }]),
     }));
     expect(result.groups).toHaveLength(0);
     expect(result.totalStoryCount).toBe(1);
@@ -72,7 +72,7 @@ describe('deriveWorkList — 목표/스토리 그룹핑', () => {
   it('목표 미할당 스토리는 UNASSIGNED_GOAL_ID 합성 그룹으로 담긴다(사라지지 않는다)', () => {
     const result = deriveWorkList(baseInput({
       goals: page([]),
-      stories: page([{ id: 's1', title: '미할당 스토리', epic_id: null }]),
+      stories: page([{ id: 's1', title: '미할당 스토리', epic_id: null, status: 'backlog' }]),
       tasks: page([{ id: 't1', story_id: 's1', assignee_id: null, title: '할일1', status: 'in-progress' }]),
     }));
     expect(result.groups).toHaveLength(1);
@@ -86,8 +86,8 @@ describe('deriveWorkList — 목표/스토리 그룹핑', () => {
   it('목표 있는 스토리와 미할당 스토리가 섞이면 둘 다 각자 그룹으로 남는다', () => {
     const result = deriveWorkList(baseInput({
       stories: page([
-        { id: 's1', title: '목표 있는 스토리', epic_id: 'g1' },
-        { id: 's2', title: '미할당 스토리', epic_id: null },
+        { id: 's1', title: '목표 있는 스토리', epic_id: 'g1', status: 'in-progress' },
+        { id: 's2', title: '미할당 스토리', epic_id: null, status: 'backlog' },
       ]),
       tasks: page([
         { id: 't1', story_id: 's1', assignee_id: null, title: '할일1', status: 'todo' },

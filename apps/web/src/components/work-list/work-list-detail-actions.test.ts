@@ -95,7 +95,7 @@ function workList(rowIds: string[]): WorkList {
     groups: [{
       goalId: 'goal-1', title: '목표 A', isActive: true, doneCount: 0, totalCount: rowIds.length,
       assignedCount: 0, delegatedCount: 0, hypothesisCount: 0,
-      stories: [{ storyId: 'story-1', title: '스토리 A', hypothesisIds: [], rows: rowIds.map(row) }],
+      stories: [{ storyId: 'story-1', title: '스토리 A', status: 'in-progress', hypothesisIds: [], rows: rowIds.map(row) }],
     }],
   };
 }
