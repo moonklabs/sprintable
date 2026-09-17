@@ -90,10 +90,14 @@ PHYSICAL_SIGNAL_COLUMN = "vat_rate_bp"
 
 
 def _physical_signal_already_applied(conn) -> bool:
+    # 페드루 PO 비차단 제안(2026-09-17 12:39Z) — table_schema 조건 없이는 다른 스키마의
+    # 동명 테이블/컬럼에도 오탐할 수 있다. current_schema()로 좁힌다(search_path가
+    # 가리키는 실제 스키마 — migrate.sh/alembic이 붙는 그 스키마 그대로).
     result = conn.execute(
         text(
             "SELECT 1 FROM information_schema.columns "
-            "WHERE table_name = :table_name AND column_name = :column_name"
+            "WHERE table_schema = current_schema() "
+            "AND table_name = :table_name AND column_name = :column_name"
         ),
         {"table_name": PHYSICAL_SIGNAL_TABLE, "column_name": PHYSICAL_SIGNAL_COLUMN},
     ).scalar()
