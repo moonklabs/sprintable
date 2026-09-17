@@ -477,7 +477,7 @@
     "lowRiskGroupedLine": "저위험 {count}건",
     "bulkApproveAction": "모아 승인",
     "progressSectionTitle": "진행 중 {count}",
-    "progressEmptyTitle": "진행 중인 위임이 없어요",
+    "progressEmptyTitle": "아직 진행 중인 위임이 없어요",
     "stopAction": "정지",
     "resultsSectionTitle": "오늘 결과",
     "resultsHint": "자세히는 결과에서",

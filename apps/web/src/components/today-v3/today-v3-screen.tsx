@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
-import { Card } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { useTodaySnapshot } from '@/components/org-briefing/use-today-snapshot';
 import { EMPTY_TODAY_SNAPSHOT, type TodayCount, type TodaySnapshot } from '@/components/org-briefing/derive-today';
@@ -132,8 +132,8 @@ export function TodayV3Screen() {
               </div>
             ) : !data ? (
               <div className="space-y-3" aria-hidden="true" data-testid="today-v3-loading">
-                <Card className="h-24 animate-pulse bg-muted/30" />
-                <Card className="h-24 animate-pulse bg-muted/30" />
+                <Skeleton className="h-24 w-full" />
+                <Skeleton className="h-24 w-full" />
               </div>
             ) : (
               <div className="space-y-6">
