@@ -18,8 +18,9 @@ import { useTodaySnapshot } from '@/components/org-briefing/use-today-snapshot';
  *  - 스레드 레일: `GET /api/conversations?include_agent_conversations=true`
  *    (owner/admin 제한은 BE 그대로 — 비-admin은 자기 대화만, 새 인가 0).
  *  - 대화 열: 기존 메시지 프록시+임베드 칩+전송 재사용(`chat-v3-messages.tsx`).
- *  - 맥락 패널: 열린 산출물(references 파생)·관련(오늘 스냅샷 역조회) 실값,
- *    근거·이력은 자리만(집계 API 부재, #3971 부재 4·5 — BE 별 카드).
+ *  - 맥락 패널: 열린 산출물(references 파생)·관련(오늘 스냅샷 역조회)·근거·이력
+ *    (references 최근 story/task 파생 스코프로 기존 evidence·activity-logs API,
+ *    story #3990 — #3971 부재 4·5 정정으로 새 BE 0) 전부 실값.
  * 옛 `/chats`·`ChatListView`·`ChatView`·`approval-request-card.tsx` 전부 무접촉
  * (재사용은 import/조각뿐, 그 파일들 자체는 1줄도 안 건드림).
  */
@@ -40,6 +41,9 @@ export function ChatV3Screen({ todayV3Enabled }: { todayV3Enabled: boolean }) {
   const [loadError, setLoadError] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [openArtifactId, setOpenArtifactId] = useState<string | null>(null);
+  // story #3990 — 「근거」·「이력」 절이 스코프할 일(work item). chat-v3-messages.tsx가
+  // openArtifactId와 같은 파생 루프에서 같이 뽑아 올린다.
+  const [workItemRef, setWorkItemRef] = useState<{ type: 'story' | 'task'; id: string } | null>(null);
 
   const loadConversations = useCallback((currentMe: Me) => {
     let cancelled = false;
@@ -114,8 +118,15 @@ export function ChatV3Screen({ todayV3Enabled }: { todayV3Enabled: boolean }) {
                   needsMe={needsMe}
                   todayV3Enabled={todayV3Enabled}
                   onOpenArtifactChange={setOpenArtifactId}
+                  onWorkItemRefChange={setWorkItemRef}
                 />
-                <ChatV3ContextPanel conversationId={selectedThread.id} openArtifactId={openArtifactId} needsMe={needsMe} todayV3Enabled={todayV3Enabled} />
+                <ChatV3ContextPanel
+                  conversationId={selectedThread.id}
+                  openArtifactId={openArtifactId}
+                  workItemRef={workItemRef}
+                  needsMe={needsMe}
+                  todayV3Enabled={todayV3Enabled}
+                />
               </>
             ) : (
               <div className="flex flex-1 items-center justify-center">
