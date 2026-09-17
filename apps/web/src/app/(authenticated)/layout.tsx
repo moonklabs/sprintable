@@ -49,8 +49,13 @@ export default async function AuthenticatedLayout({
   const pathOrgId = hdrs.get('x-resolved-org-id') ?? undefined;
   const pathProjectId = hdrs.get('x-resolved-project-id') ?? undefined;
 
+  // story #4017(PO 확定 2026-09-17) — 아래 두 buildLoginRedirect 호출(session 없음/401)의
+  // 기본 착지도 목적지 모듈과 정렬하려 이 읽기를 원래 자리(§148 근방)보다 앞으로 당겼다
+  // (today-v3.ts 등 헬퍼는 아직 develop에 없음, story #4003 주석과 동일 근거로 직접 읽기).
+  const chatV3EnabledEarly = process.env['CHAT_V3_ENABLED'] === 'true';
+
   const session = await getServerSession();
-  if (!session) redirect(buildLoginRedirect(currentPath));
+  if (!session) redirect(buildLoginRedirect(currentPath, chatV3EnabledEarly));
 
   const fastapiUrl = process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
   const authHeader = { Authorization: `Bearer ${session.access_token}` };
@@ -62,7 +67,7 @@ export default async function AuthenticatedLayout({
   ]);
 
   // 401(인증 만료)만 /login 리다이렉트, 다른 에러(500 등)는 children 렌더링 유지
-  if (!meRes || meRes.status === 401) redirect(buildLoginRedirect(currentPath));
+  if (!meRes || meRes.status === 401) redirect(buildLoginRedirect(currentPath, chatV3EnabledEarly));
 
   // 🔴 org 없는 유저(신규 OAuth 가입자 등 — team_member 미생성 시 /me 404) → 온보딩으로.
   // auth/callback이 is_new_user 무관 /inbox 리다이렉트하는 결함을 layout에서 OAuth+email/pw 공통 커버
@@ -146,7 +151,8 @@ export default async function AuthenticatedLayout({
   // 읽기 지점 — DashboardShell→AppSidebar로 값만 내려보낸다.
   const navV3Flags: NavV3Flags = {
     todayV3Enabled: process.env['TODAY_V3_ENABLED'] === 'true',
-    chatV3Enabled: process.env['CHAT_V3_ENABLED'] === 'true',
+    // story #4017 — 위 §55의 이른 읽기와 값 동일(재읽기 대신 재사용, env 값은 요청 내내 불변).
+    chatV3Enabled: chatV3EnabledEarly,
     connectRulesV3Enabled: process.env['CONNECT_RULES_V3_ENABLED'] === 'true',
   };
   const projectNameForDisplay = (!pathProjectId || pathProjectId === me?.project_id)

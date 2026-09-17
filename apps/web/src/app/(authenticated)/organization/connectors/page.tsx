@@ -4,6 +4,9 @@ import { redirect } from 'next/navigation';
 // 준비 상태)가 organization/channels의 「담당 에이전트가 설정하는 것」 구획으로 흡수됐다
 // (agent-setup-section.tsx). 라우트 자체는 남겨 리다이렉트만 한다 — 북마크·딥링크·아직
 // 못 걷은 외부 참조(agent 스킬 안내 문구 등)가 있을 수 있어 404보다 안전하다.
+// story #4017(PO 확定 2026-09-17) — (authenticated)/layout.tsx:148-150과 동일하게
+// process.env 직접 읽기(connect-rules-v3.ts 헬퍼는 아직 develop에 없음).
 export default function OrganizationConnectorsRedirectPage() {
-  redirect('/organization/channels');
+  const connectRulesV3Enabled = process.env['CONNECT_RULES_V3_ENABLED'] === 'true';
+  redirect(connectRulesV3Enabled ? '/connect-rules' : '/organization/channels');
 }

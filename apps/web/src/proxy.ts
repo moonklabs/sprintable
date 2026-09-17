@@ -298,9 +298,14 @@ function isSafeInternalPath(value: string): boolean {
   return value.startsWith('/') && !value.startsWith('//') && !value.includes('\\');
 }
 
+// story #4017(PO 확定 2026-09-17) — (authenticated)/layout.tsx:148-150과 동일하게
+// process.env 직접 읽기(today-v3.ts 헬퍼는 아직 develop에 없음, story #4003 주석 참고).
+// 북마크 등으로 `/org-briefing`을 직접 방문하는 경우는 이 리다이렉트를 안 거치므로 레거시
+// 그대로(#4017 AC 스코프 — 적기만, 이 카드에서 안 고침).
 function redirectToProjectPicker(request: NextRequest, originalPathname: string): NextResponse {
   const url = request.nextUrl.clone();
-  url.pathname = '/org-briefing';
+  const todayV3Enabled = process.env['TODAY_V3_ENABLED'] === 'true';
+  url.pathname = todayV3Enabled ? '/today' : '/org-briefing';
   const targetSearch = new URLSearchParams(request.nextUrl.search);
   targetSearch.set(RESOLVE_RETRY_PARAM, '1');
   const targetQuery = targetSearch.toString();

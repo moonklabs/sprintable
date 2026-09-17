@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { MoreHorizontal } from 'lucide-react';
-import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { useChatsHref, useConnectRulesHref, useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -115,6 +115,10 @@ function toStatusTab(status: string | undefined): Exclude<StatusTab, 'all'> {
 
 export default function ChannelPostListPage() {
   const { orgId } = useDashboardContext();
+  // story #4017(PO 확定 2026-09-17) — 아래 대화 CTA(/chats)를 목적지 모듈로.
+  const chatsHref = useChatsHref();
+  // story #4017 — 아래 「채널 연결」 CTA(/organization/channels)를 목적지 모듈로.
+  const connectRulesHref = useConnectRulesHref('/organization/channels');
   const t = useTranslations('content');
   const tBoard = useTranslations('board');
   // story #3744(유나 CHANGES·PO 채택) — orgChannels는 nav 네임스페이스 키다(content가
@@ -266,7 +270,7 @@ export default function ChannelPostListPage() {
 
   const connectChannelAction = (
     <Button asChild variant="hero">
-      <Link href="/organization/channels">{tNav('orgChannels')}</Link>
+      <Link href={connectRulesHref}>{tNav('orgChannels')}</Link>
     </Button>
   );
 
@@ -276,7 +280,7 @@ export default function ChannelPostListPage() {
   // (시안 "차이는 열 셋과 뷰 전환뿐").
   const chatAction = (
     <Button asChild variant="hero">
-      <Link href="/chats">{t('openChatCta')}</Link>
+      <Link href={chatsHref}>{t('openChatCta')}</Link>
     </Button>
   );
 

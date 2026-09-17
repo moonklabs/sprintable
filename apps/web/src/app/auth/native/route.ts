@@ -158,7 +158,8 @@ export async function POST(request: Request) {
 
   // doc §9.1 6단계: 303 + 원래 딥링크 경로(허용목록 검증) + no-store + Referrer-Policy: no-referrer
   // (code가 이 응답 이전 요청의 body에만 있었으므로 여기선 이미 무관 — 그래도 방어적으로 설정).
-  const target = safeNextPath(redirectPathInput);
+  // story #4017(PO 확定 2026-09-17) — 서버 라우트라 process.env 직접 읽기(§4003과 동형).
+  const target = safeNextPath(redirectPathInput, process.env['CHAT_V3_ENABLED'] === 'true');
   // story #1933 — request.url을 base로 쓰면 Cloud Run 내부 주소가 샌다(플랫폼 성질,
   // 이 라우트만의 우연 아님). resolveAppUrl(null)로 공개 주소를 강제한다(oauth-handoff와 동일 패턴).
   const res = NextResponse.redirect(new URL(target, resolveAppUrl(null)), 303);

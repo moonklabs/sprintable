@@ -210,8 +210,10 @@ async function handleCallback(request: Request, provider: string, code: string |
 
   // AC3: 세션 만료로 OAuth 재로그인한 경우 작업 경로 복귀(safeNextPath 가드)·없으면 홈(chat).
   // story #3179(S3c) 후속(추가 실측 발견) — /dashboard 폐합, 홈=chat 재조준.
+  // story #4017(PO 확定 2026-09-17) — 서버 라우트라 process.env 직접 읽기(§4003과 동형).
+  const chatV3Enabled = process.env['CHAT_V3_ENABLED'] === 'true';
   const destinationUrl = new URL(
-    inviteToken ? `${origin}/chats` : `${origin}${safeNextPath(nextCookie)}`,
+    inviteToken ? `${origin}${chatV3Enabled ? '/chat' : '/chats'}` : `${origin}${safeNextPath(nextCookie, chatV3Enabled)}`,
   );
   // story #3204 — register/page.tsx(email 경로)와 동일 파라미터로 발화 지점을 하나로
   // 모은다(google-analytics.tsx route-change effect가 소비). is_new_user=false(로그인)면
