@@ -10,6 +10,7 @@ import { EmbedCard } from '@/components/chat/embed-card';
 import { cn } from '@/lib/utils';
 import { fetchWithAuth } from '@/lib/db/client';
 import { ChatV3EventCard } from './chat-v3-event-card';
+import { seedFromCompose } from './chat-v3-compose';
 import { normalizeToMessage, type ChatMessage } from '@/hooks/use-chat-sse';
 import type { TodayNeedsMeItem } from '@/components/org-briefing/derive-today';
 
@@ -53,16 +54,23 @@ export interface ChatV3MessagesProps {
   // 파생 규칙(최근 메시지부터 훑어 첫 story/task 참조)이라 같은 루프에서 같이 뽑는다
   // (메시지 배열 재순회 0).
   onWorkItemRefChange: (ref: { type: 'story' | 'task'; id: string } | null) => void;
+  // story #4028 — 주소 `?compose=`로 실려 온 첫 지시. 마운트 시 한 번만 입력창에 미리
+  // 채운다(전송 0 — 사람이 직접 누른다). 부모(chat-v3-screen)가 주소에서 값을 캡처해
+  // 넘겨주고 URL에선 compose를 지운다 — 여기선 그 값을 받기만 한다.
+  initialCompose?: string | null;
 }
 
 export const ChatV3Messages = forwardRef<ChatV3MessagesHandle, ChatV3MessagesProps>(function ChatV3Messages({
-  threadId, meId, agentName, locale, needsMe, todayV3Enabled, onOpenArtifactChange, onWorkItemRefChange,
+  threadId, meId, agentName, locale, needsMe, todayV3Enabled, onOpenArtifactChange, onWorkItemRefChange, initialCompose,
 }, ref) {
   const t = useTranslations('chatV3');
   const tc = useTranslations('common');
   const [messages, setMessages] = useState<ChatMessage[] | null>(null);
   const [loadError, setLoadError] = useState(false);
-  const [draft, setDraft] = useState('');
+  // story #4028 — 주소의 첫 지시로 마운트 1회만 시드(상한 넘으면 안 싣고 안내). lazy
+  // 초기화라 이후 threadId 변경·부모 리렌더로 다시 채워지지 않는다(한 번만 미리 채움).
+  const [draft, setDraft] = useState(() => seedFromCompose(initialCompose).draft);
+  const [composeTooLong, setComposeTooLong] = useState(() => seedFromCompose(initialCompose).tooLong);
   const [sending, setSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -249,10 +257,19 @@ export const ChatV3Messages = forwardRef<ChatV3MessagesHandle, ChatV3MessagesPro
           <div ref={bottomRef} />
         </div>
       )}
-      <div className="flex shrink-0 items-center gap-2 border-t border-border p-3">
+      <div className="shrink-0 border-t border-border">
+        {composeTooLong ? (
+          // story #4028 AC3 — 첫 지시가 상한을 넘어 미리 채우지 못했을 때 안내(자르지
+          // 않음). 대화는 이미 열려 있으니 「직접 적어 주세요」로만 안내하고, 사람이
+          // 입력을 시작하면(onChange) 소임을 다해 지운다.
+          <p role="status" className="px-3 pt-2.5 text-xs text-muted-foreground" data-testid="chat-v3-compose-too-long">
+            {t('composeTooLongNotice')}
+          </p>
+        ) : null}
+        <div className="flex items-center gap-2 p-3">
         <Input
           value={draft}
-          onChange={(e) => setDraft(e.target.value)}
+          onChange={(e) => { setDraft(e.target.value); if (composeTooLong) setComposeTooLong(false); }}
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void handleSend(); } }}
           placeholder={t('instructionPlaceholder', { agent: agentName })}
           aria-label={t('instructionPlaceholder', { agent: agentName })}
@@ -261,6 +278,7 @@ export const ChatV3Messages = forwardRef<ChatV3MessagesHandle, ChatV3MessagesPro
         <Button size="sm" disabled={!draft.trim() || sending} onClick={() => void handleSend()} data-testid="chat-v3-send-action">
           {t('sendAction')}
         </Button>
+        </div>
       </div>
     </section>
   );

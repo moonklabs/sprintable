@@ -41,7 +41,16 @@ export function ChatV3Screen({ todayV3Enabled }: { todayV3Enabled: boolean }) {
   // 쿼리는 같은 페이지에서 인자만 바뀐다).
   const router = useRouter();
   const pathname = usePathname();
-  const conversationParam = useSearchParams().get('conversation');
+  const searchParams = useSearchParams();
+  const conversationParam = searchParams.get('conversation');
+  // story #4028 — 컴패니언 「첫 지시」(story #4021)가 v3 셸 사용자에게 열어 주는
+  // `/chat?conversation=<id>&compose=<지시>`. v3는 지금껏 compose를 안 읽어 그 지시가
+  // 버려졌다(레거시로 튕김). 여기서 값을 «마운트 1회» 캡처해 대화 열(ChatV3Messages)에
+  // 넘기고(입력창 미리 채움·전송 0), 주소에선 compose만 지운다(AC2 — 새로고침·공유 때
+  // 다시 채워지지 않게, conversation은 유지). useState 초기값으로 첫 렌더 값을 고정해
+  // 아래 URL 제거로 composeParam이 null이 돼도 안전하다(setter 없음 → 이후 안 바뀜).
+  const composeParam = searchParams.get('compose');
+  const [initialCompose] = useState(composeParam);
   const { me, error: meError, retry: retryMe } = useMe();
   // 페드루 PO 지시(2026-09-17 00:08Z, PR #4370 CHANGES) — 오늘 스냅샷은 여기서
   // 1콜만(맥락 패널 「관련」·이벤트 카드 「서명」 막다른 길 방지 둘 다 이 캐시 공유).
@@ -163,6 +172,15 @@ export function ChatV3Screen({ todayV3Enabled }: { todayV3Enabled: boolean }) {
     if (defaultId) router.replace(`${pathname}?conversation=${defaultId}`);
   }, [threads, conversationParam, pathname, router]);
 
+  // story #4028 AC2 — 첫 지시 값을 캡처(위 initialCompose)한 뒤 주소에서 compose만
+  // 지운다: 새로고침·주소 공유로 지시가 다시 채워지지 않게. conversation 인자는 그대로
+  // 두고 `replace`로 바꿔 뒤로가기 기록도 안 쌓는다. compose가 있을 때만 1회 — 지운 뒤
+  // composeParam이 null이 되면 다음 실행은 즉시 반환(루프 0).
+  useEffect(() => {
+    if (!composeParam) return;
+    router.replace(conversationParam ? `${pathname}?conversation=${conversationParam}` : pathname);
+  }, [composeParam, conversationParam, pathname, router]);
+
   // story #4018 AC3 — 사람이 직접 고르면 주소를 push(뒤로가기 = 이전 대화). 기본
   // 선택(위 effect)과 달리 이건 항상 새 기록을 쌓는다 — 그게 사용자 의도적 이동이므로.
   const handleSelectThread = useCallback((id: string) => {
@@ -275,6 +293,7 @@ export function ChatV3Screen({ todayV3Enabled }: { todayV3Enabled: boolean }) {
                   todayV3Enabled={todayV3Enabled}
                   onOpenArtifactChange={setOpenArtifactId}
                   onWorkItemRefChange={setWorkItemRef}
+                  initialCompose={initialCompose}
                 />
                 <ChatV3ContextPanel
                   conversationId={selectedThread.id}
