@@ -41,9 +41,9 @@ CI/merge outcome. Contributors in this repository may opt to tag a PR by includi
 this is **optional**, and untagged PRs are handled gracefully. The detailed tagging
 conventions used by this repo's own agents live in [`AGENTS.md`](AGENTS.md).
 
-Convention-free linking for product use (in-app, no branch/PR naming rules) is planned
-and provided separately — the tagging above is an internal convenience, not a
-requirement for using Sprintable.
+Explicit in-app linking (`POST /api/v2/integrations/github/links`) takes priority over
+tags and needs no branch/PR naming rules — the tagging above is an internal
+convenience, not a requirement for using Sprintable.
 
 ## Code Style
 

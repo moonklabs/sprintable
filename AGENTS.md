@@ -1,105 +1,43 @@
 # AGENTS.md — repo-internal conventions for Sprintable's own agents
 
-This file documents conventions used by **this repository's own agent contributors**.
-It is an internal convenience, **not** a requirement for customers using Sprintable.
-(Customer-facing contribution notes live in [`CONTRIBUTING.md`](CONTRIBUTING.md).)
+This file documents conventions used by **this repository's own agent contributors**. It is an internal convenience, **not** a requirement for customers using Sprintable. (Customer-facing contribution notes live in [`CONTRIBUTING.md`](CONTRIBUTING.md).)
 
-## Linking PRs to story gates (gate CI evidence)
+## Linking PRs to story gates
 
-Sprintable's approval gates record the **real** CI/merge outcome of a story instead of
-self-report. A live GitHub webhook (`app/routers/verdict_capture.py`) parses a story id
-from PR/CI events and feeds the verdict into that story's gate via
-`capture_pr_ci_verdict` → `resolve_gate_from_verdict`. If no story id is found, the
-verdict is skipped and the gate stays `CI unknown (self-report only)`.
+Approval gates record the real CI/merge outcome of a story instead of self-report. A live GitHub webhook ([`verdict_capture.py`](backend/app/routers/verdict_capture.py)) parses a story id from PR/CI events and feeds the verdict into that story's gate; when no id resolves, the verdict is skipped and the gate stays `CI unknown (self-report only)`.
 
-The id is matched by `_SID_RE` in `app/services/verdict_capture.py` as a **fallback
-chain** — any one of these, when present, links the gate:
+The id resolves through [`pr_story_link.py`](backend/app/services/pr_story_link.py), highest priority first: an explicit link (`POST /api/v2/integrations/github/links`, stored in `pull_request_story_link`) outranks every tag, confident auto-match (exact title-slug against a single candidate) outranks SID tags, and partial-token suggestions never close anything. SID tags carry the full 36-character story UUID — a `sid-<uuid>` (or `sid/<uuid>`) segment in the branch name or `[SID:<uuid>]` in the PR body — while short-number tags (`[SID:2288]`, `fix(#2288)`) resolve only inside one org with exactly one match and otherwise skip rather than guess.
 
-1. **Explicit link** (planned, convention-free — product surface; tracked separately).
-2. **Branch name** — a `sid-<full-uuid>` / `sid/<full-uuid>` segment.
-3. **PR body** — a `[SID:<full-uuid>]` tag.
+When an agent opens a story-backed PR in this repo, link it explicitly in-app and tag both carriers. Put a `sid-<full-story-uuid>` segment in the branch name, e.g. `feat/sid-14744174-35d3-452c-9594-386fc2c3b0ef-gate-ci-linking` — CI events carry only `head_branch`, so the branch is the only carrier for the CI verdict. Put `[SID:<full-story-uuid>]` in the PR body — the PR template has a placeholder; this covers the merge verdict and shows the link to reviewers.
 
-None is mandatory; untagged PRs are handled gracefully (skipped).
+Resolve the full UUID from the story in Sprintable, never the short 8-char id. Tagging stays optional — untagged PRs are skipped gracefully. A non-blocking advisory check ([`sid-link-check.yml`](.github/workflows/sid-link-check.yml)) warns when a PR has neither carrier and never blocks merge.
 
-### Convention for our agents (fast internal unblock)
+## Checking whether a PR's CI is actually green
 
-When an agent opens a story-backed PR in this repo, tag it so its gate gets real CI
-evidence:
+When confirming PR status programmatically, count anything whose `bucket` isn't `pass` as blocking: `gh pr checks <PR> --json name,bucket,link | jq -r '.[] | select(.bucket!="pass" and .bucket!="skipping")'`.
 
-- **Branch** — include a `sid-<full-story-uuid>` segment, e.g.
-  `feat/sid-14744174-35d3-452c-9594-386fc2c3b0ef-gate-ci-linking`.
-  This is the **primary carrier for CI evidence**: CI webhook events (`workflow_run`,
-  `check_suite`, `status`) carry only `head_branch` — not the PR title/body — so the
-  branch is the only reliable carrier for the *CI* verdict.
-- **PR body** — include `[SID:<full-story-uuid>]` (the PR template has a placeholder).
-  This covers the *merge* verdict and shows the link to reviewers.
+Filtering on `FAILURE` alone misses `CANCELLED`/`TIMED_OUT`/`ACTION_REQUIRED`, which still block the branch-protection merge gate while reading as an empty failures list. `skipping` stays excluded — it marks conditionally-skipped jobs, not blocked ones.
 
-Notes:
-- Use the **full 36-character story UUID**, not the short 8-char id — `_SID_RE` requires
-  the full UUID. Resolve it from the story in Sprintable.
-- A non-blocking advisory check (`.github/workflows/sid-link-check.yml`) emits a warning
-  when a PR has neither carrier. It never blocks merge.
+## Live-QA temporary story cards
 
-## Checking whether a PR's CI is actually green (story #2285)
-
-When confirming PR status programmatically, count anything whose `bucket` isn't `pass`
-as blocking: `gh pr checks <PR> --json name,bucket,link | jq -r '.[] | select(.bucket!="pass" and .bucket!="skipping")'`.
-Filtering on `conclusion == "FAILURE"` alone misses `CANCELLED`/`TIMED_OUT`/`ACTION_REQUIRED` —
-those read as an empty "failures" list even though the check is not passing (PR #2570,
-2026-07-28: a `Backend pytest` run hit its 25-minute ceiling and was cancelled, and a
-`FAILURE`-only filter reported zero failures). GitHub's branch-protection merge gate
-already treats non-`SUCCESS` conclusions as blocking regardless of this tooling gap — the
-risk here is a human/agent being told "clear to merge" by a script when the actual gate
-is still red. `skipping` is excluded — it's a conditionally-skipped job (e.g. "Main
-Alembic preflight" when its precondition doesn't apply), not a blocked one.
-
-## Live-QA temporary story cards (story #2187)
-
-Live verification sometimes needs a real story to click through/observe SSE against,
-without touching an actual product story. `DELETE /api/v2/stories/{id}` is human-only
-(agent API keys get 403) by design — an agent that creates a throwaway card **cannot
-clean it up itself**. Without a convention, these accumulate on the board forever and
-inflate "how much is left" counts (exactly the class of defect this story reports).
+Live verification sometimes needs a throwaway card to click through or observe SSE against without touching a product story. `DELETE /api/v2/stories/{id}` is human-only by design (agent API keys get 403), so an agent that creates a throwaway card cannot clean it up itself; unmarked cards accumulate on the board and inflate remaining-work counts.
 
 **When creating one:**
-- Prefix the title with `[TEMP-QA]` (or an equally unambiguous marker — existing
-  examples use `[TEST-PROBE·삭제예정]` / `[삭제 대상 — ...]`, `[TEMP-QA]` is preferred
-  going forward for grep-ability).
-- Immediately mark it `is_excluded: true` (`sprintable_update_story` or the equivalent
-  API field) — do this in the same turn you create the card, not as a follow-up. The
-  board/backlog UI (`kanban-board.tsx`, story #2187) filters `is_excluded` cards out of
-  every column unconditionally, so this is what actually keeps the card from inflating
-  visible counts; `command_center`/analytics already excluded it before this story.
+- Prefix the title with `[TEMP-QA]`.
+- Mark it `is_excluded: true` (`sprintable_update_story` or the equivalent API field) in the same turn, not as a follow-up. The [board/backlog UI](apps/web/src/components/kanban/kanban-board.tsx) hides `is_excluded` cards from every column unconditionally, and `command_center`/analytics exclude them too.
 
 **When cleaning up:**
-- You cannot delete it yourself. Don't leave the request implicit in a chat message that
-  will scroll away — batch pending `[TEMP-QA]` deletions and ask the PO for a bulk
-  delete once per branch of work (not per-card), e.g. at the end of a live-verification
-  session. `gh`/Sprintable search for the `[TEMP-QA]` prefix to compile the list.
-- Do not request agent delete-permission as a workaround (rejected direction — see story
-  #2187 AC4: the human-only block is an intentional safeguard against an agent deleting
-  someone else's work, and throwaway-card convenience isn't worth trading that away).
+- You cannot delete the card yourself. Don't leave the request implicit in a chat message that scrolls away — batch pending `[TEMP-QA]` deletions into one bulk-delete request to the PO per branch of work, and search the `[TEMP-QA]` prefix, including any legacy unambiguous markers still on the board, to compile the list.
+- Do not request agent delete-permission as a workaround: the human-only block guards against an agent deleting someone else's work, and throwaway-card convenience is not worth trading that away.
 
-## Attaching visual evidence (screenshots/images) to a Sprintable artifact (story #2707, path corrected story #3767)
+## Attaching visual evidence to a Sprintable artifact
 
-`sprintable_create_artifact` only takes `nodes[]` (html/tree structure) — there's no
-`image` field. Don't embed a screenshot as base64 `<img src="data:...">` inside an
-`html_blob` node; a ~45KB PNG becomes ~60K tokens in the tool call. Use
-`sprintable_import_image_artifact` instead — a one-shot upload+artifact-create tool made
-exactly for this (agent API key, no browser session needed).
+`sprintable_create_artifact` takes only `nodes[]` and has no image field, so never embed a screenshot as base64 `<img src="data:...">` inside an `html_blob` node — a ~45KB PNG costs ~60K tokens in the tool call. Use `sprintable_import_image_artifact` instead, a one-shot upload-plus-artifact-create call that works with an agent API key and no browser session.
 
-There is **no** separate "upload-only, get a URL back, then call
-sprintable_create_artifact" flow — no such bare-upload endpoint exists on the backend
-for agents (story #3767: an earlier version of this doc pointed at a non-`v2`,
-multipart form of this same path — that variant doesn't exist for agents; the only
-backend endpoint reachable with an agent API key is
-`/api/v2/visual-artifacts/import-image`, and it's JSON base64-in, **full artifact**-out
-in one call, not a bare URL).
+There is no upload-only flow that returns a URL for a later `sprintable_create_artifact` call: the only agent-reachable endpoint is `POST /api/v2/visual-artifacts/import-image` ([`visual_artifacts.py`](backend/app/routers/visual_artifacts.py)), JSON base64-in and full artifact-out in one call.
 
-- If the file is local to the agent's filesystem: call `sprintable_import_image_artifact`
-  with `image_path` — the server reads the bytes directly (no re-typing, byte-exact).
-- If the agent has Bash/HTTP access and wants to skip the MCP round-trip for a large
-  image, curl the same endpoint directly instead of the MCP tool:
+- If the file is local to the agent's filesystem, pass `image_path` so the server reads the bytes byte-exact.
+- If the agent has Bash/HTTP access and wants to skip the MCP round-trip for a large image, curl the endpoint directly instead of the MCP tool:
   ```
   curl -X POST $SPRINTABLE_API_URL/api/v2/visual-artifacts/import-image \
     -H "Authorization: Bearer $AGENT_API_KEY" \
@@ -107,9 +45,5 @@ in one call, not a bare URL).
     -d "{\"title\": \"screenshot\", \"content_type\": \"image/png\", \
          \"image_base64\": \"$(base64 -i screenshot.png | tr -d '\n')\"}"
   ```
-  This one call returns a complete artifact (same shape as `get_artifact`) — do **not**
-  also call `sprintable_create_artifact` afterward, there's nothing left to do.
-- Only use `image_base64` (either via the MCP tool or curl above) for small images —
-  the base64 string is typed/re-typed as text, and a single wrong character silently
-  corrupts the stored image (real incident, story #3753). Prefer `image_path`/a local
-  file whenever the agent has filesystem access.
+  This one call returns a complete artifact (same shape as `get_artifact`) — do **not** also call `sprintable_create_artifact` afterward, there's nothing left to do.
+- Reserve `image_base64` (either via the MCP tool or curl above) for small images: the base64 string is re-typed as text and a single wrong character silently corrupts the stored image, so prefer a local file whenever the agent has filesystem access.
