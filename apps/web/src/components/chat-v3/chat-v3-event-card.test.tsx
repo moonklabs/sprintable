@@ -41,9 +41,9 @@ afterEach(async () => {
 
 const approvalTarget = { work_item_type: 'channel_post', work_item_id: 'w1', gate_id: 'g1', actions: ['approve', 'reject'] };
 
-async function mount(onDone = vi.fn(), isInTodayQueue = true) {
+async function mount(onDone = vi.fn(), isInTodayQueue = true, todayV3Enabled = true) {
   await act(async () => {
-    root.render(wrap(<ChatV3EventCard approvalTarget={approvalTarget} content="발행 승인을 올려요" isInTodayQueue={isInTodayQueue} onDone={onDone} />));
+    root.render(wrap(<ChatV3EventCard approvalTarget={approvalTarget} content="발행 승인을 올려요" isInTodayQueue={isInTodayQueue} todayV3Enabled={todayV3Enabled} onDone={onDone} />));
   });
   return onDone;
 }
@@ -64,6 +64,14 @@ describe('ChatV3EventCard', () => {
     await mount(vi.fn(), false);
     expect(container.querySelector('[data-testid="chat-v3-event-card-sign"]')).toBeNull();
     expect(container.querySelector('[data-testid="chat-v3-event-card-request-changes"]')).not.toBeNull();
+  });
+
+  // story #3972 CHANGES(페드루 PO 2026-09-17 01:54Z, 실결함) — TODAY_V3_ENABLED
+  // OFF면 /today가 404 — 옛 게이트 상세로 되돌린다.
+  it('⭐todayV3Enabled=false면 서명 링크가 /gates/{gate_id}로 간다(404 방지)', async () => {
+    await mount(vi.fn(), true, false);
+    const link = container.querySelector('[data-testid="chat-v3-event-card-sign"]');
+    expect(link?.getAttribute('href')).toBe('/gates/g1');
   });
 
   it('⭐BE가 지은 문구(content)를 그대로 보여준다(제목 발명 0)', async () => {

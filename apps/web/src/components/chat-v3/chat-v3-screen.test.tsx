@@ -72,9 +72,9 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-async function mount() {
+async function mount(todayV3Enabled = true) {
   const { ChatV3Screen } = await import('./chat-v3-screen');
-  await act(async () => { root.render(wrap(<ChatV3Screen />)); });
+  await act(async () => { root.render(wrap(<ChatV3Screen todayV3Enabled={todayV3Enabled} />)); });
   await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 }
 
@@ -156,8 +156,27 @@ describe('ChatV3Screen — 첫 화면 렌더', () => {
   // 교차 PR 드리프트 항목 2 — 빈 aria-hidden div 대신 Skeleton이 실제로 보인다.
   it('⭐로딩 中엔 빈 div가 아니라 Skeleton이 뜬다', async () => {
     fetchMock.mockImplementation(() => new Promise(() => {})); // 영원히 pending
-    await act(async () => { const { ChatV3Screen } = await import('./chat-v3-screen'); root.render(wrap(<ChatV3Screen />)); });
+    await act(async () => { const { ChatV3Screen } = await import('./chat-v3-screen'); root.render(wrap(<ChatV3Screen todayV3Enabled />)); });
     const loading = container.querySelector('[data-testid="chat-v3-loading"]');
     expect(loading?.children.length).toBeGreaterThan(0);
+  });
+});
+
+// story #3972 CHANGES(페드루 PO 2026-09-17 01:54Z, 실결함) — 화면 플래그 조합
+// (CHAT_V3_ENABLED=true·TODAY_V3_ENABLED OFF)에서 「오늘」 링크 3곳(nav·관련·
+// 서명)이 그대로 /today면 404. 서버(app/chat/page.tsx)가 이 prop을 내려준다.
+describe('ChatV3Screen — TODAY_V3_ENABLED OFF(story #3972 CHANGES)', () => {
+  it('⭐ON이면 nav 「오늘」이 /today로 간다', async () => {
+    stub();
+    await mount(true);
+    const navLink = [...container.querySelectorAll('a')].find((a) => a.textContent === '오늘');
+    expect(navLink?.getAttribute('href')).toBe('/today');
+  });
+
+  it('⭐OFF면 nav 「오늘」이 /inbox로 간다(404 방지)', async () => {
+    stub();
+    await mount(false);
+    const navLink = [...container.querySelectorAll('a')].find((a) => a.textContent === '오늘');
+    expect(navLink?.getAttribute('href')).toBe('/inbox');
   });
 });

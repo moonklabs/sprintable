@@ -48,15 +48,26 @@ const needsMeItem: TodayNeedsMeItem = {
 describe('ChatV3ContextPanel — 관련(오늘 스냅샷 역조회)', () => {
   it('⭐conversationId가 needsMe[].conversationId와 일치하면 관련 링크가 뜬다', async () => {
     await act(async () => {
-      root.render(wrap(<ChatV3ContextPanel conversationId="conv-1" openArtifactId={null} needsMe={[needsMeItem]} />));
+      root.render(wrap(<ChatV3ContextPanel conversationId="conv-1" openArtifactId={null} needsMe={[needsMeItem]} todayV3Enabled />));
     });
-    expect(container.querySelector('[data-testid="chat-v3-related-today-link"]')).not.toBeNull();
+    const link = container.querySelector('[data-testid="chat-v3-related-today-link"]');
+    expect(link).not.toBeNull();
+    expect(link?.getAttribute('href')).toBe('/today');
   });
 
   it('일치하는 needsMe가 없으면 관련은 빈 상태 문구', async () => {
     await act(async () => {
-      root.render(wrap(<ChatV3ContextPanel conversationId="conv-2" openArtifactId={null} needsMe={[needsMeItem]} />));
+      root.render(wrap(<ChatV3ContextPanel conversationId="conv-2" openArtifactId={null} needsMe={[needsMeItem]} todayV3Enabled />));
     });
     expect(container.querySelector('[data-testid="chat-v3-related-today-link"]')).toBeNull();
+  });
+
+  // story #3972 CHANGES(페드루 PO 2026-09-17 01:54Z, 실결함) — TODAY_V3_ENABLED
+  // OFF면 /today가 404라 옛 큐(/inbox)로 보낸다.
+  it('⭐todayV3Enabled=false면 관련 링크가 /inbox로 간다(404 방지)', async () => {
+    await act(async () => {
+      root.render(wrap(<ChatV3ContextPanel conversationId="conv-1" openArtifactId={null} needsMe={[needsMeItem]} todayV3Enabled={false} />));
+    });
+    expect(container.querySelector('[data-testid="chat-v3-related-today-link"]')?.getAttribute('href')).toBe('/inbox');
   });
 });

@@ -23,7 +23,8 @@ import { useTodaySnapshot } from '@/components/org-briefing/use-today-snapshot';
  * 옛 `/chats`·`ChatListView`·`ChatView`·`approval-request-card.tsx` 전부 무접촉
  * (재사용은 import/조각뿐, 그 파일들 자체는 1줄도 안 건드림).
  */
-export function ChatV3Screen() {
+export function ChatV3Screen({ todayV3Enabled }: { todayV3Enabled: boolean }) {
+  const todayHref = todayV3Enabled ? '/today' : '/inbox';
   const t = useTranslations('chatV3');
   const tc = useTranslations('common');
   const locale = useLocale();
@@ -81,7 +82,7 @@ export function ChatV3Screen() {
     <div className="flex h-screen min-h-0 bg-muted/20" data-testid="chat-v3-screen">
       <aside className="flex w-[216px] shrink-0 flex-col border-r border-border bg-card p-3">
         <nav className="mt-1 flex flex-col gap-0.5">
-          <Link href="/today" className="rounded-md px-2.5 py-2 text-sm text-muted-foreground hover:bg-muted">{t('navToday')}</Link>
+          <Link href={todayHref} className="rounded-md px-2.5 py-2 text-sm text-muted-foreground hover:bg-muted">{t('navToday')}</Link>
           <span className="rounded-md bg-primary/10 px-2.5 py-2 text-sm font-medium text-primary">{t('navChats')}</span>
         </nav>
       </aside>
@@ -108,9 +109,10 @@ export function ChatV3Screen() {
                   agentName={agentName}
                   locale={locale}
                   needsMe={needsMe}
+                  todayV3Enabled={todayV3Enabled}
                   onOpenArtifactChange={setOpenArtifactId}
                 />
-                <ChatV3ContextPanel conversationId={selectedThread.id} openArtifactId={openArtifactId} needsMe={needsMe} />
+                <ChatV3ContextPanel conversationId={selectedThread.id} openArtifactId={openArtifactId} needsMe={needsMe} todayV3Enabled={todayV3Enabled} />
               </>
             ) : (
               <div className="flex flex-1 items-center justify-center">

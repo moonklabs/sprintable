@@ -25,12 +25,15 @@ function formatDayLabel(key: string, locale: string): string {
   return new Intl.DateTimeFormat(locale, { month: 'long', day: 'numeric', weekday: 'long' }).format(new Date(`${key}T00:00:00`));
 }
 
-export function ChatV3Messages({ threadId, meId, agentName, locale, needsMe, onOpenArtifactChange }: {
+export function ChatV3Messages({ threadId, meId, agentName, locale, needsMe, todayV3Enabled, onOpenArtifactChange }: {
   threadId: string;
   meId: string;
   agentName: string;
   locale: string;
   needsMe: TodayNeedsMeItem[];
+  // story #3972 CHANGES(페드루 PO 2026-09-17 01:54Z, 실결함) — 이벤트 카드 서명
+  // 버튼도 같은 게이트(TODAY_V3_ENABLED OFF면 /today가 404).
+  todayV3Enabled: boolean;
   onOpenArtifactChange: (artifactId: string | null) => void;
 }) {
   const t = useTranslations('chatV3');
@@ -137,6 +140,7 @@ export function ChatV3Messages({ threadId, meId, agentName, locale, needsMe, onO
                         // 곳뿐(시안 SSOT) — 이 게이트가 보는 사람의 오늘 큐(needsMe)에
                         // 없으면 막다른 길이라 서명 버튼 자체를 숨긴다(자리 0).
                         isInTodayQueue={needsMe.some((item) => item.source === 'gate' && item.id === m.approval_target!.gate_id)}
+                        todayV3Enabled={todayV3Enabled}
                         onDone={() => { /* story #3972 — 낙관 갱신 0, 다음 목록 재조회 때 반영(가짜 0) */ }}
                       />
                     </div>

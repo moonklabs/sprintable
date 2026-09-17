@@ -53,17 +53,21 @@ function useArtifactDetail(artifactId: string | null): ArtifactDetail | null {
   return detail;
 }
 
-export function ChatV3ContextPanel({ conversationId, openArtifactId, needsMe }: {
+export function ChatV3ContextPanel({ conversationId, openArtifactId, needsMe, todayV3Enabled }: {
   conversationId: string;
   openArtifactId: string | null;
   // 페드루 PO 지시(2026-09-17 00:08Z, PR #4370 CHANGES) — 오늘 스냅샷은 화면 최상위
   // (`ChatV3Screen`)에서 1콜만 하고 이 패널·이벤트 카드(서명 버튼 막다른 길 방지)가
   // 같이 나눠 쓴다(중복 콜 0).
   needsMe: TodayNeedsMeItem[];
+  // story #3972 CHANGES(페드루 PO 2026-09-17 01:54Z, 실결함) — TODAY_V3_ENABLED
+  // OFF면 「오늘」 링크가 404라 옛 큐(/inbox)로 보낸다.
+  todayV3Enabled: boolean;
 }) {
   const t = useTranslations('chatV3');
   const artifact = useArtifactDetail(openArtifactId);
   const relatedNeedsMe = needsMe.find((item) => item.conversationId === conversationId) ?? null;
+  const todayHref = todayV3Enabled ? '/today' : '/inbox';
 
   return (
     <section className="flex w-[340px] shrink-0 flex-col bg-card" data-testid="chat-v3-context-panel">
@@ -102,7 +106,7 @@ export function ChatV3ContextPanel({ conversationId, openArtifactId, needsMe }: 
         <div>
           <p className="mb-1.5 text-[11px] text-muted-foreground">{t('contextRelatedLabel')}</p>
           {relatedNeedsMe ? (
-            <Link href="/today" className="block rounded-md bg-primary/10 px-3 py-2.5 text-[12.5px] text-primary" data-testid="chat-v3-related-today-link">
+            <Link href={todayHref} className="block rounded-md bg-primary/10 px-3 py-2.5 text-[12.5px] text-primary" data-testid="chat-v3-related-today-link">
               {t('contextRelatedTodayLink')}
             </Link>
           ) : (
