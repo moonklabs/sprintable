@@ -6,7 +6,7 @@
  * 그 판정을 고정한다((a)는 옛 로직으로 되돌리면 RED).
  */
 import { describe, expect, it } from 'vitest';
-import { classifyDiffScope, countProofTokenLineChanges } from './verify-v3-token-diff-scope';
+import { classifyDiffScope, countProofTokenLineChanges, isPromotionBaseRef } from './verify-v3-token-diff-scope';
 
 const TARGET_FILE = 'apps/web/src/app/globals.css';
 
@@ -37,6 +37,55 @@ describe('classifyDiffScope — 핫픽스 스코프 판정', () => {
       2,
     );
     expect(verdict.kind).toBe('in_scope');
+  });
+});
+
+describe('classifyDiffScope — story #4011 AC2 base 축 표 테스트', () => {
+  it('ⓐ base=main(승격 PR) + --proof-* 값줄 변경 + 다른 파일 다수 → OK(skip) — 이 스킵 조건을 지우면 RED(원 결함 재현)', () => {
+    const verdict = classifyDiffScope(
+      [TARGET_FILE, 'apps/web/src/components/foo.tsx', 'backend/app/main.py'],
+      5,
+      true,
+    );
+    expect(verdict.kind).toBe('not_applicable');
+  });
+
+  it('ⓑ base=develop + 같은 변경 → FAIL(기존 AC1 음성 대조 유지, 바이트 무변)', () => {
+    const verdict = classifyDiffScope(
+      [TARGET_FILE, 'apps/web/src/components/foo.tsx', 'backend/app/main.py'],
+      5,
+      false,
+    );
+    expect(verdict.kind).toBe('fail');
+  });
+
+  it('ⓒ base=스택 부모 브랜치(main도 develop도 아님) + 같은 변경 → FAIL(isPromotionBase=false와 동형)', () => {
+    expect(isPromotionBaseRef('origin/feat/3997-members-runtime-type')).toBe(false);
+    const verdict = classifyDiffScope(
+      [TARGET_FILE, 'apps/web/src/components/foo.tsx'],
+      3,
+      isPromotionBaseRef('origin/feat/3997-members-runtime-type'),
+    );
+    expect(verdict.kind).toBe('fail');
+  });
+
+  it('ⓓ base=develop + globals.css만 --proof-* 값줄 변경 → OK(기존 in_scope 판정 무변)', () => {
+    const verdict = classifyDiffScope([TARGET_FILE], 3, false);
+    expect(verdict.kind).toBe('in_scope');
+  });
+});
+
+describe('isPromotionBaseRef', () => {
+  it('origin/main·bare main은 승격 base로 판정', () => {
+    expect(isPromotionBaseRef('origin/main')).toBe(true);
+    expect(isPromotionBaseRef('main')).toBe(true);
+  });
+
+  it('origin/develop·스택 브랜치·main을 이름에 포함만 하는 브랜치는 승격 base가 아니다', () => {
+    expect(isPromotionBaseRef('origin/develop')).toBe(false);
+    expect(isPromotionBaseRef('origin/feat/4011-v3-token-diff-guard-promote-scope')).toBe(false);
+    // "main"으로 끝나지 않는 한 다른 위치에 포함돼도 오탐 금지(예: 브랜치명에 "main"이 부분 문자열).
+    expect(isPromotionBaseRef('origin/maintenance-branch')).toBe(false);
   });
 });
 
