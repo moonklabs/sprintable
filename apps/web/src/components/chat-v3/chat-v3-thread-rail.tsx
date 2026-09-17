@@ -43,10 +43,11 @@ export function ChatV3ThreadRail({ threads, meId, selectedId, onSelect }: {
         <p className="p-5 text-center text-sm text-muted-foreground">{t('threadRailEmpty')}</p>
       ) : (
         <ul className="focus-inset flex-1 overflow-auto">
-          {threads.map((thread) => {
+          {threads.map((thread, index) => {
             const other = otherParticipant(thread.participants, meId);
             const isAgent = other?.type === 'agent';
             const isSelected = thread.id === selectedId;
+            const rowLabel = other?.name ?? t('unknownParticipant');
             return (
               <li key={thread.id}>
                 <button
@@ -54,6 +55,7 @@ export function ChatV3ThreadRail({ threads, meId, selectedId, onSelect }: {
                   onClick={() => onSelect(thread.id)}
                   data-testid="chat-v3-thread-row"
                   aria-current={isSelected}
+                  aria-label={t('threadRowAriaLabel', { n: index + 1, label: rowLabel })}
                   className={
                     isSelected
                       ? 'flex w-full items-start gap-2.5 border-b border-border bg-primary/10 px-4 py-3 text-left'
@@ -62,7 +64,7 @@ export function ChatV3ThreadRail({ threads, meId, selectedId, onSelect }: {
                 >
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5">
-                      <span className="truncate text-[13.5px] font-semibold text-foreground">{other?.name ?? t('unknownParticipant')}</span>
+                      <span className="truncate text-[13.5px] font-semibold text-foreground">{rowLabel}</span>
                       {/* 교차 PR 드리프트(유나 점검표 1c6a0ced, 항목 4) — 색 있는
                           attention(위험·질문·사람 손 필요)만 Badge, 중립 역할
                           라벨은 muted-text span(4373 task 상태 라벨과 같은 결). */}
