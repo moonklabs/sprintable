@@ -603,6 +603,33 @@ def _baseline_entry_expired(entry: dict, today) -> str | None:
     return None
 
 
+_BASELINE_EXPIRY_WARNING_DAYS = 14  # story #4023 — 만료 임박 경고 창(만료 자체는 이미 FAIL 축).
+
+
+def _baseline_entries_expiring_soon(
+    baseline: dict[str, dict], today, warning_days: int = _BASELINE_EXPIRY_WARNING_DAYS
+) -> list[str]:
+    """story #4023(재발 방지, AC3) — 아직 만료 안 됐지만 `warning_days`일 안에 만료될 baseline
+    항목을 report-only 경고 줄로 돌려준다(실패로 막지 않음 — 이미 만료된 건 `_baseline_entry_
+    expired`가 별도로 FAIL로 잡는다). 09-17 사고(«걷는다»는 문장만 있고 아무도 안 지켜 만료
+    당일까지 방치됨)의 재발 방지 — 만료 전에 눈에 띄게 한다."""
+    from datetime import date
+
+    lines: list[str] = []
+    for key, entry in sorted(baseline.items()):
+        until_raw = entry.get("until")
+        if not until_raw:
+            continue
+        try:
+            until = date.fromisoformat(str(until_raw))
+        except ValueError:
+            continue
+        horizon = (until - today).days
+        if 0 <= horizon <= warning_days:
+            lines.append(f"{key} — {horizon}일 뒤 만료(until={until}) — 만료 전에 재triage 필요")
+    return lines
+
+
 def _split_high_by_baseline(
     high_items: list[tuple[str, str]], baseline: dict[str, dict], today
 ) -> tuple[list[str], list[str]]:
@@ -806,6 +833,10 @@ def main(only_env: str | None = None) -> int:
         f"⑤㉠ baseline(known, self-expiring): {code_read_baseline_ok_count}건 "
         f"— infra/manual-env-allowlist.yml의 code_read_high_baseline 참고"
     )
+    # story #4023 AC3 — 만료 임박 경고(FAIL 아님, report-only). 「걷는다」는 문장만 있고
+    # 아무도 안 지켜 만료 당일까지 방치되는 재발을 막는다.
+    for line in _baseline_entries_expiring_soon(code_read_baseline, today):
+        print(f"⚠️ ⑤㉠ baseline 만료 임박: {line}")
 
     if has_fail or has_report_only:
         print(
