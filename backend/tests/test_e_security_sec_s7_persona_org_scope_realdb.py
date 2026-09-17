@@ -58,16 +58,12 @@ async def _seed_two_orgs(session):
     session.add_all([project_a, project_b])
     await session.commit()
 
-    agent_a = Member(id=uuid.uuid4(), org_id=org_a.id, type="agent", name="Org A Agent", is_active=True)
-    agent_b = Member(id=uuid.uuid4(), org_id=org_b.id, type="agent", name="Org B Agent", is_active=True)
-    session.add_all([agent_a, agent_b])
-    await session.commit()
-
     # story #3370 회귀 클래스(페드루 PO 지시 2026-09-11) — create_persona가 이제
     # resolve_member_db_verified()로 caller를 실측한다(fail-closed). 201까지 가는 유일한
     # 테스트(test_create_persona_same_org_agent_still_free)를 위해 실 org_a 휴먼 caller를
     # 심는다(다른 테스트는 org_a agent_id로 못 도달하는 가드에서 먼저 막혀 무관).
     from app.models.project import OrgMember
+    from app.models.project_access import ProjectAccess
     from app.models.user import User
 
     caller_user = User(id=uuid.uuid4(), email=f"caller-{uuid.uuid4().hex[:8]}@test.com", hashed_password="x")
@@ -75,6 +71,27 @@ async def _seed_two_orgs(session):
     await session.commit()
     caller_om = OrgMember(id=uuid.uuid4(), org_id=org_a.id, user_id=caller_user.id, role="member")
     session.add(caller_om)
+    await session.commit()
+    # story #4000(보안 감사) — assert_agent_owner는 team_members VIEW(0110)로 agent를 찾는데,
+    # 이 VIEW의 모든 UNION 분기가 project_access join을 요구한다(grant 無=뷰에 행 자체가 안 뜸,
+    # 소유자라도 404). caller를 human Member로도 심고(owner_member_id가 가리킬 대상 필요·VIEW의
+    # `owner.user_id AS created_by` 투영), agent_a에 project_access(granted)+owner_member_id를
+    # 붙여야 "같은 org agent는 자유롭다"가 아니라 "그 agent를 소유한 caller는 통과"로 재현된다
+    # (#4000 전에는 org 소속만으로 통과했던 게 바로 이 스토리가 막은 구멍 — 회귀 아님).
+    caller_member = Member(id=caller_om.id, org_id=org_a.id, type="human", user_id=caller_user.id, name="Caller")
+    session.add(caller_member)
+    await session.commit()
+
+    agent_a = Member(
+        id=uuid.uuid4(), org_id=org_a.id, type="agent", name="Org A Agent", is_active=True,
+        owner_member_id=caller_member.id,
+    )
+    agent_b = Member(id=uuid.uuid4(), org_id=org_b.id, type="agent", name="Org B Agent", is_active=True)
+    session.add_all([agent_a, agent_b])
+    await session.commit()
+    session.add(ProjectAccess(
+        id=uuid.uuid4(), project_id=project_a.id, member_id=agent_a.id, permission="granted", role="member",
+    ))
     await session.commit()
 
     return {
