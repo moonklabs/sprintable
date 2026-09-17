@@ -193,8 +193,11 @@ describe('scanRepo — story #3760 AC1/AC4(실 트리 실행)', () => {
   // story #3982(2026-09-17) — `/connect-rules`(v3 「연결·규칙」 화면, (authenticated)
   // 밖 신규 라우트 그룹) page.tsx+layout.tsx 신설로 103→105(develop 착지).
   // [SID:4021](2026-09-17, rebase 시점 재정정 2026-09-22) — onboarding/first-instruction/
-  // page.tsx 신설(컴패니언 «첫 지시»가 여는 웹 진입·3995 선행)로 105→106 — 이 브랜치 자체
-  // 기준 +1은 develop의 다른 라우트 추가 PR들과 독립 가산.
+  // page.tsx 신설(컴패니언 «첫 지시»가 여는 웹 진입·3995 선행)로 105→106(develop 착지).
+  // story #4008(2026-09-17, rebase 시점 재정정 2026-09-22) — app/chat/layout.tsx 삭제 +
+  // app/(v3)/layout.tsx 신설(그룹 레이아웃 하나로 통합, RealtimeProvider 공급) +
+  // app/chat/page.tsx가 app/(v3)/chat/page.tsx로 이동 — 이 브랜치 자체 기준 순증감 0
+  // (−1 챗 레이아웃, +1 v3 그룹 레이아웃, 이동은 파일 수 불변).
   it('실 트리(apps/web/src/app) — 라우트 파일 106개·위반 0건', () => {
     const { violations, fileCount } = scanRepo(APP_ROOT);
     expect(fileCount).toBe(106);

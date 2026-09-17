@@ -10,7 +10,7 @@ import { EmbedCard } from '@/components/chat/embed-card';
 import { cn } from '@/lib/utils';
 import { fetchWithAuth } from '@/lib/db/client';
 import { ChatV3EventCard } from './chat-v3-event-card';
-import { normalizeToMessage, type ChatMessage } from '@/hooks/use-chat-sse';
+import { normalizeToMessage, useChatSse, type ChatMessage } from '@/hooks/use-chat-sse';
 import type { TodayNeedsMeItem } from '@/components/org-briefing/derive-today';
 
 /**
@@ -101,6 +101,37 @@ export function ChatV3Messages({
     bottomRef.current?.scrollIntoView?.({ block: 'end' });
   }, [messages]);
 
+  // story #4008 AC2 — 내가 보낸 POST 응답과 SSE 에코가 같은 메시지를 두 번 넣지
+  // 않게 id로 dedupe(chat-view.tsx addMessage와 동일 규율).
+  const addMessage = useCallback((msg: ChatMessage) => {
+    setMessages((prev) => {
+      if (!prev) return prev;
+      if (prev.some((m) => m.id === msg.id)) return prev;
+      return [...prev, msg];
+    });
+  }, []);
+
+  // story #4008 AC2 — 이 화면(선택된 스레드)에 온 새 메시지만 반영. 스레드 레일의
+  // 미리보기·안읽음 갱신은 chat-v3-screen.tsx가 별도 useChatSse 인스턴스로 맡는다
+  // (chat-view.tsx/chat-list-view.tsx가 이미 그렇게 분리돼 있는 관례 그대로).
+  const handleConversationMessage = useCallback((payload: Record<string, unknown>) => {
+    const conversationId = (payload.conversation_id ?? payload.id) as string | undefined;
+    if (conversationId !== threadId) return;
+    addMessage(normalizeToMessage(payload));
+  }, [threadId, addMessage]);
+
+  // story #4008 AC4 — 재연결(탭 복귀 포함, useChatSse 내부 visibility 리스너가 같은
+  // 콜백을 태운다) 시 놓친 메시지를 1회 재조회로 따라잡는다(chat-view.tsx handleReconnect
+  // 와 동형 — merge는 loadMessages/mergeBackfilledMessages가 아니라 이 화면의 loadMessages
+  // 재호출로 통째 재조회, v3는 백그라운드 backfill-merge 없이 단순 재조회로 충분한 규모).
+  const handleReconnect = useCallback(() => { loadMessages(); }, [loadMessages]);
+
+  useChatSse({
+    currentTeamMemberId: meId,
+    onConversationMessage: handleConversationMessage,
+    onReconnect: handleReconnect,
+  });
+
   const handleSend = async () => {
     const content = draft.trim();
     if (!content) return;
@@ -113,8 +144,8 @@ export function ChatV3Messages({
     setSending(false);
     if (res.ok) {
       setDraft('');
-      const json = (await res.json().catch(() => null)) as { data?: Record<string, unknown> } | null;
-      if (json?.data) setMessages((prev) => [...(prev ?? []), normalizeToMessage(json.data as Record<string, unknown>)]);
+      const json = (await res.json().catch(() => null)) as { data?: ChatMessage } | null;
+      if (json?.data) addMessage(json.data);
     }
   };
 

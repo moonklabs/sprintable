@@ -12,6 +12,7 @@ import { ChatV3ContextPanel } from './chat-v3-context-panel';
 import { useTodaySnapshot } from '@/components/org-briefing/use-today-snapshot';
 import { NavV3ItemList } from '@/components/nav/nav-v3-item-list';
 import { DEFAULT_NAV_V3_FLAGS, resolveNavV3Destinations, type NavV3Flags } from '@/lib/nav-v3-destinations';
+import { useChatSse, type SseConversationReadPayload } from '@/hooks/use-chat-sse';
 
 /**
  * story #3972(E-UX-OVERHAUL·「대화」 구현 2/N·FE) — 시안 ②(artifact c707a913)
@@ -80,6 +81,46 @@ export function ChatV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3Fl
     // eslint-disable-next-line react-hooks/set-state-in-effect
     return loadConversations(me);
   }, [me, loadConversations]);
+
+  // story #4008 AC3 — 스레드 레일 실시간(chat-list-view.tsx applyConversationMessageUpdate와
+  // 동형: 미리보기·시각 갱신 + 최근 순 재정렬). 대상 스레드가 목록에 없으면(새 대화 등)
+  // 통째 재조회로 폴백. 「지금 열린 스레드는 안읽음 점 안 켬」(AC3 명시 문구) — legacy처럼
+  // mark-read SSE 왕복으로 되돌리는 대신 이 화면 규모에 맞게 즉시 스킵(신규 mark-read
+  // 배선은 이 스토리 범위 밖).
+  const handleThreadMessage = useCallback((payload: Record<string, unknown>) => {
+    const conversationId = (payload.conversation_id ?? payload.id) as string | undefined;
+    const content = payload.content as string | undefined;
+    const createdAt = payload.created_at as string | undefined;
+    if (!conversationId) return;
+    setThreads((prev) => {
+      if (!prev) return prev;
+      const idx = prev.findIndex((th) => th.id === conversationId);
+      if (idx === -1) { if (me) loadConversations(me); return prev; }
+      const updated = [...prev];
+      const item = { ...updated[idx]! };
+      if (content && createdAt) {
+        item.latest_message = { content, created_at: createdAt };
+        if (conversationId !== selectedId) item.unread_count = (item.unread_count ?? 0) + 1;
+      }
+      updated.splice(idx, 1);
+      return [item, ...updated];
+    });
+  }, [selectedId, loadConversations, me]);
+
+  const handleThreadRead = useCallback((payload: SseConversationReadPayload) => {
+    setThreads((prev) =>
+      prev ? prev.map((th) => (th.id === payload.conversation_id ? { ...th, unread_count: payload.unread_count } : th)) : prev,
+    );
+  }, []);
+
+  const handleThreadReconnect = useCallback(() => { if (me) loadConversations(me); }, [me, loadConversations]);
+
+  useChatSse({
+    currentTeamMemberId: me?.id,
+    onConversationMessage: handleThreadMessage,
+    onConversationRead: handleThreadRead,
+    onReconnect: handleThreadReconnect,
+  });
 
   // 교차 PR 드리프트(유나 점검표 1c6a0ced, 항목 4) — 오류 자리에 보이는 「다시
   // 시도」. me 자체가 실패면 me부터, me는 있는데 대화 목록만 실패면 그것만.
