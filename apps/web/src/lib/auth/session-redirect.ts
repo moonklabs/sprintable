@@ -1,23 +1,22 @@
 // AC3(af8d3641): graceful 세션-만료 redirect 계약. 인증 실패 redirect 는 전부
 // `/login?next=<enc>&reason=session_expired` 로 통일 — login 이 reason 배너 + next 복귀(작업 손실
 // 최소화)에 사용. server(proxy·layout)·client(fetchWithAuth) 공용 순수 함수.
+import { resolveChatsHref, type NavV3Flags } from '@/lib/nav-v3-destinations';
 
 export const SESSION_EXPIRED_REASON = 'session_expired';
 
-// story #4017(PO 확定 2026-09-17) — chatV3Enabled 인자로 기본 착지를 목적지 모듈과
-// 정렬(OFF=/chats 그대로, ON=/chat). 이 파일은 server(proxy·layout)·client(fetchWithAuth)
-// 공용 순수 함수라 process.env를 직접 안 읽고, 호출부가 자기 컨텍스트에서 읽은 값을
-// 넘긴다(서버=env 직접, client=useDashboardContext().navV3Flags). 생략 시 기존 기본값
-// (false→/chats)과 바이트 동일 — 로그인 전 화면(login/register, DashboardContext 밖)은
+// story #4017 CHANGES 2(페드루 PO 지적, 2026-09-17 15:31Z) — 첫 판은 chatV3Enabled
+// 불리언 하나로 '/chat'·'/chats' 리터럴을 여기서 다시 조립했다. 목적지 문자열은
+// nav-v3-destinations.ts 한 곳에서만 나와야 한다는 4016·4017의 원 취지와 어긋나(여러
+// 곳에서 같은 결정을 다시 내리는 문제 재발) — resolveChatsHref(그 파일의 기존 헬퍼)를
+// 그대로 재사용한다(로컬 폴백 함수 자체를 없앰, 복붙 규칙 0). 생략 시 기존 기본값
+// (OFF→/chats)과 바이트 동일 — 로그인 전 화면(login/register, DashboardContext 밖)은
 // 아직 이 인자를 못 넘겨(플래그를 알 방법이 없음) 레거시 그대로(#4017 AC 스코프 밖,
 // PO에 별도 보고 — 그라운딩 DM 참고).
-function chatsFallback(chatV3Enabled: boolean): string {
-  return chatV3Enabled ? '/chat' : '/chats';
-}
 
 /** 현재 경로(pathname+search)를 next 로 보존한 /login redirect 경로. */
-export function buildLoginRedirect(currentPathAndSearch: string, chatV3Enabled = false): string {
-  const fallback = chatsFallback(chatV3Enabled);
+export function buildLoginRedirect(currentPathAndSearch: string, navV3Flags?: NavV3Flags): string {
+  const fallback = resolveChatsHref(navV3Flags);
   const target = currentPathAndSearch && currentPathAndSearch.startsWith('/') ? currentPathAndSearch : fallback;
   return `/login?next=${encodeURIComponent(target)}&reason=${SESSION_EXPIRED_REASON}`;
 }
@@ -27,8 +26,8 @@ export function buildLoginRedirect(currentPathAndSearch: string, chatV3Enabled =
  * 아니면 `/chats`(story #3179 S3c AC2 — 로그인 랜딩=chat, 「홈=chat」 확定 반영). login 성공/콜백
  * 복귀 시 외부 도메인 유도(`//evil.com`·`http://`)를 차단.
  */
-export function safeNextPath(next: string | null | undefined, chatV3Enabled = false): string {
-  const fallback = chatsFallback(chatV3Enabled);
+export function safeNextPath(next: string | null | undefined, navV3Flags?: NavV3Flags): string {
+  const fallback = resolveChatsHref(navV3Flags);
   if (!next) return fallback;
   let decoded: string;
   try { decoded = decodeURIComponent(next); } catch { return fallback; }
