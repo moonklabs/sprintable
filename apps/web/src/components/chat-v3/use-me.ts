@@ -29,10 +29,6 @@ export function useMe(): { me: Me | null; error: boolean; retry: () => void } {
 
   useEffect(() => {
     let cancelled = false;
-    // 기존 코드베이스 관례(connect-step.tsx·now-strip.tsx) — fetchWithAuth 마운트-
-    // fetch 패턴을 정적분석이 "effect 안 setState"로 오탐하는 자리, disable.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setError(false);
     fetchWithAuth('/api/me')
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
       .then((json: { data?: { id?: string; project_id?: string; role?: string } }) => {
@@ -46,7 +42,9 @@ export function useMe(): { me: Me | null; error: boolean; retry: () => void } {
     return () => { cancelled = true; };
   }, [reloadNonce]);
 
-  const retry = useCallback(() => setReloadNonce((n) => n + 1), []);
+  // 페드루 PO 선택 사항(2026-09-17 01:48Z) — 초기화를 effect가 아니라 retry() 안에서
+  // 하면 eslint-disable 없이도 된다(초기 마운트는 error 기본값 false로 이미 정직).
+  const retry = useCallback(() => { setError(false); setReloadNonce((n) => n + 1); }, []);
 
   return { me, error, retry };
 }
