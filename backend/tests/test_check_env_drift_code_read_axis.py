@@ -335,14 +335,13 @@ def test_ac4_real_repo_scan_counts_are_recorded():
     # 코드 read가 스캔에서 통째로 사라짐(baseline exemption 불요, 가드가 자연히 green) → high
     # 3→2. 남은 high 2건은 MCP_ALLOWED_TOKEN_REFS(baseline, 보안 정책 판단 대기) +
     # `_INCIDENT_KEYS` 고정 픽스처 FIREBASE_BFF_INTERNAL_SECRET 1건.
-    # 2026-09-17 story #3972 후속 — CHAT_V3_ENABLED(apps/web/src/lib/chat-v3.ts)·
-    # TODAY_V3_ENABLED(apps/web/src/lib/today-v3.ts) 신규 code read 2건, 둘 다
-    # FIREBASE_OAUTH_HANDOFF_ENABLED와 동형 안전-닫힘 feature flag(값 부재 시 false,
-    # throw 없음)라 code_read_exempt로 승격(exempt 30→32) — high는 그대로 2.
-    # 2026-09-17 페드루 PO 지시 — v3 플래그 3키(CHAT_V3·TODAY_V3·CONNECT_RULES_V3)를
-    # 바이트 동일 블록으로 4365·4370·4377에 맞춰 둔다(착지 시 충돌 없이 합쳐지도록).
-    # 이 브랜치(#3972)엔 CONNECT_RULES_V3_ENABLED code read가 없어(그 브랜치 #3982
-    # 전용 파일) high/low엔 영향 없이 exempt 목록에만 +1(32→33).
+    # 2026-09-17(페드루 PO 정본) — v3 플래그 3키(CHAT_V3_ENABLED·TODAY_V3_ENABLED·
+    # CONNECT_RULES_V3_ENABLED, 전부 FIREBASE_OAUTH_HANDOFF_ENABLED와 동형
+    # 안전-닫힘 feature flag — 값 부재 시 false, throw 없음)를 code_read_exempt에
+    # 브랜치 무관 동일하게 등재한다(exempt 30→33, 착지 여러 v3 브랜치가 바이트
+    # 동일 블록을 들고 있어야 충돌 없이 합쳐진다) — 이 세 키를 실제로 code read
+    # 하는 브랜치에서는 그만큼 high에서 빠지고, 안 읽는 브랜치에서는 exempt
+    # 개수에만 반영된다(high/low 불변).
     assert len(highest) == 1, highest
     assert len(high) == 2, high
     assert len(low) == 9, low
