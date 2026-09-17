@@ -646,7 +646,8 @@ describe('ChannelPostListPage (story #3402)', () => {
       await act(async () => { root.render(wrap(<ChannelPostListPage />)); });
       await flush();
 
-      const buttons = [...container.querySelectorAll('button')].filter(
+      // story #4014 — 표·카드 DOM이 항상 둘 다 있어(AC5/6) 표 쪽만 스코프.
+      const buttons = [...container.querySelectorAll('table button')].filter(
         (el) => el.textContent === koMessages.content.approvalRequestViewCta,
       );
       expect(buttons).toHaveLength(2);
@@ -757,7 +758,8 @@ describe('ChannelPostListPage (story #3402)', () => {
       await act(async () => { root.render(wrap(<ChannelPostListPage />)); });
       await flush();
 
-      const triggers = container.querySelectorAll('[data-testid="channel-post-row-actions-trigger"]');
+      // story #4014 — 표·카드 DOM이 항상 둘 다 있어(AC5/6) 표 쪽만 스코프.
+      const triggers = container.querySelectorAll('table [data-testid="channel-post-row-actions-trigger"]');
       expect(triggers).toHaveLength(2);
       const labels = [...triggers].map((b) => b.getAttribute('aria-label'));
       expect(labels[0]).not.toBeNull();
