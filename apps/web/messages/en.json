@@ -478,6 +478,7 @@
     "roleTagAgent": "Agent",
     "meLabel": "Me",
     "instructionPlaceholder": "Instruct {agent}…",
+    "composeTooLongNotice": "That first instruction was too long to prefill. Type it in the box below instead.",
     "sendAction": "Send",
     "contextPanelTitle": "Context",
     "contextOpenArtifactLabel": "Open artifact",
