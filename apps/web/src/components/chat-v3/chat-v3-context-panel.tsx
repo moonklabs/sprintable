@@ -224,7 +224,15 @@ export function ChatV3ContextPanel({ conversationId, openArtifactId, workItemRef
   // 공짜로 얻는다 — 이력이 아직 없거나(0건) 로딩/실패 中이면 이 줄 자체를 생략한다
   // (모른다≠지어낸다 — 제목 없이 "기준" 줄만 없는 건 근거·이력 절 자체엔 영향 0).
   const scopeTitle = history.kind === 'ready' ? (history.items[0]?.entity_title ?? null) : null;
-  const scopeHref = workItemRef && scopeTitle ? getEntityHref(workItemRef.type, workItemRef.id) : null;
+  // CHANGES-2(페드루 PO 판정 2026-09-17 04:37Z·유나 확定 04:42Z) — 제목을 아직
+  // 모른다고(이력 0건/로딩/실패) 줄 자체를 지우지 않는다. getEntityHref는 제목 없이도
+  // 되니(#3990 최초 구현이 놓친 지점), workItemRef만 있으면 줄을 유지하고 라벨만
+  // 「이어진 일 열기」로 대체한다(산출물의 「제목 없음」=라벨 없는 제목과 다른 개념 —
+  // 이건 "열 수 있는 행동" 문구, 유나 구별).
+  const scopeHref = workItemRef ? getEntityHref(workItemRef.type, workItemRef.id) : null;
+  const scopeLabel = scopeTitle
+    ? t('contextWorkItemScopeLabel', { title: scopeTitle })
+    : (workItemRef ? t('contextOpenLinkedWorkItem') : null);
 
   return (
     <section className="flex w-[340px] shrink-0 flex-col bg-card" data-testid="chat-v3-context-panel">
@@ -250,14 +258,14 @@ export function ChatV3ContextPanel({ conversationId, openArtifactId, workItemRef
           )}
         </div>
 
-        {scopeTitle ? (
+        {scopeLabel ? (
           scopeHref ? (
             <Link href={scopeHref} className="-mb-2 block text-[11px] text-muted-foreground hover:underline" data-testid="chat-v3-context-scope">
-              {t('contextWorkItemScopeLabel', { title: scopeTitle })}
+              {scopeLabel}
             </Link>
           ) : (
             <p className="-mb-2 text-[11px] text-muted-foreground" data-testid="chat-v3-context-scope">
-              {t('contextWorkItemScopeLabel', { title: scopeTitle })}
+              {scopeLabel}
             </p>
           )
         ) : null}
@@ -280,18 +288,27 @@ export function ChatV3ContextPanel({ conversationId, openArtifactId, workItemRef
             <p className="text-xs text-muted-foreground" data-testid="chat-v3-evidence-empty">{t('contextEmptySection')}</p>
           ) : (
             <ul className="space-y-1.5" data-testid="chat-v3-evidence-list">
-              {evidence.items.map((item) => (
-                <li key={item.id} className="text-xs">
-                  <span className="text-muted-foreground">{tVerify(EVIDENCE_TYPE_LABEL_KEY[item.type])}</span>
-                  {isLinkableRef(item.ref) ? (
-                    <a href={item.ref} target="_blank" rel="noreferrer" className="ml-1.5 truncate text-primary underline-offset-2 hover:underline">
-                      {item.note ?? item.ref}
-                    </a>
-                  ) : (
-                    <span className="ml-1.5 truncate text-foreground">{item.note ?? item.ref}</span>
-                  )}
-                </li>
-              ))}
+              {evidence.items.map((item) => {
+                const primaryText = item.note ?? item.ref;
+                return (
+                  <li key={item.id} className="flex items-start gap-1.5 text-xs">
+                    <span className="shrink-0 text-muted-foreground">{tVerify(EVIDENCE_TYPE_LABEL_KEY[item.type])}</span>
+                    {/* CHANGES-1(페드루 PO 판정 2026-09-17 04:37Z) — evidence-section.tsx의
+                        기존 처방 그대로: 부모를 flex+min-w-0로 좁혀야 자식 truncate가 실제로
+                        먹는다(긴 note, 예 3984 AC6 ~1500자·여러줄이 패널에 통째로 쏟아지던
+                        결함). 첫 줄만 보이고 전문은 title 속성으로. */}
+                    <div className="min-w-0 flex-1">
+                      {isLinkableRef(item.ref) ? (
+                        <a href={item.ref} target="_blank" rel="noreferrer" title={primaryText} className="block truncate text-primary underline-offset-2 hover:underline">
+                          {primaryText}
+                        </a>
+                      ) : (
+                        <span title={primaryText} className="block truncate text-foreground">{primaryText}</span>
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>

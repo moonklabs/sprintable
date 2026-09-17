@@ -128,6 +128,21 @@ describe('ChatV3ContextPanel — 근거·이력(story #3990, work-item 스코프
     expect(link?.textContent).toBe('PR 링크');
   });
 
+  // CHANGES-1(페드루 PO 판정 2026-09-17 04:37Z) — 긴 note(예 3984 AC6 evidence
+  // ~1500자·여러 줄)가 inline truncate라 안 먹혀 패널에 통째로 쏟아지던 결함.
+  // block+min-w-0(evidence-section.tsx 기존 처방)로 한 줄 표시+title로 전문 보관.
+  it('⭐근거 목록 — 긴 note는 truncate 대상(block)에 담기고 title 속성에 전문이 남는다', async () => {
+    const longNote = 'A'.repeat(1500);
+    await mountWithWorkItem({ type: 'story', id: 's1' }, {
+      evidence: [{ id: 'e1', type: 'url', ref: 'https://x.dev', note: longNote, source: null, created_by: null, created_at: '2026-09-16T00:00:00Z', org_id: 'o1', work_item_id: 's1', work_item_type: 'story', artifact_version_id: null, artifact_id: null, artifact_version_number: null }],
+    });
+    const link = container.querySelector('[data-testid="chat-v3-evidence-list"] a') as HTMLAnchorElement;
+    expect(link.className).toContain('truncate');
+    expect(link.className).toContain('block');
+    expect(link.parentElement?.className).toContain('min-w-0');
+    expect(link.getAttribute('title')).toBe(longNote);
+  });
+
   it('⭐근거 실패 — 보이는 오류+「다시 시도」, 성공으로 바뀐 뒤 클릭하면 목록이 뜬다', async () => {
     let evidenceStatus = 500;
     fetchMock.mockImplementation(async (url: string) => {
@@ -177,9 +192,25 @@ describe('ChatV3ContextPanel — 근거·이력(story #3990, work-item 스코프
     expect(scope?.getAttribute('href')).toBe('/board?story=s1');
   });
 
-  it('이력이 0건이면 「기준」 줄 자체가 안 뜬다(제목 출처가 없다 — 지어내지 않는다)', async () => {
+  // CHANGES-2(페드루 PO 판정 2026-09-17 04:37Z·유나 확定 04:42Z) — 제목 출처가 없어도
+  // getEntityHref는 링크되니 줄 자체는 유지, 라벨만 「이어진 일 열기」로 대체한다.
+  it('⭐이력이 0건이면(제목 출처 없음) 「기준」줄이 사라지지 않고 「이어진 일 열기」로 링크는 유지된다', async () => {
     await mountWithWorkItem({ type: 'story', id: 's1' }, { history: [] });
+    const scope = container.querySelector('[data-testid="chat-v3-context-scope"]');
+    expect(scope?.textContent).toBe('이어진 일 열기');
+    expect(scope?.getAttribute('href')).toBe('/board?story=s1');
+  });
+
+  it('workItemRef가 없으면(이어진 일 자체가 없음) 「기준」 줄이 안 뜬다', async () => {
+    await mountWithWorkItem(null);
     expect(container.querySelector('[data-testid="chat-v3-context-scope"]')).toBeNull();
+  });
+
+  it('task 참조는 getEntityHref가 own-href 0(embed-card.tsx 기존 규약)이라 「기준」줄이 링크 없는 평문으로 뜬다', async () => {
+    await mountWithWorkItem({ type: 'task', id: 't1' }, { history: [] });
+    const scope = container.querySelector('[data-testid="chat-v3-context-scope"]');
+    expect(scope?.textContent).toBe('이어진 일 열기');
+    expect(scope?.tagName).toBe('P');
   });
 
   // CHANGES-1(4381)과 같은 클래스 — A work item 조회 中(지연) B로 옮기면 A의 늦은
