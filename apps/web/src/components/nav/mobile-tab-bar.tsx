@@ -24,14 +24,22 @@ import { fetchWithAuth } from '@/lib/db/client';
 // 목적지를 직접 가리킨다(한 홉 절약 + 이름-목적지 일치, #2224 §④ "사람이 누르는 진입점"
 // 표면). `/flow`는 아직 모바일 전용 화면(#2225)이 없어 데스크톱과 같은 레이아웃을 그대로
 // 받는다 — 이번 판에서는 "폰에서 깨지지 않게"까지만 손대고, 본격 모바일 재설계는 #2225.
-// story #3824 CHANGES②(페드루 PO 確定, 2026-09-13 09:01Z) — "같은 사실=같은 낱말": 이
-// 탭 바의 「지금」·「채팅」과 데스크톱 사이드바/모바일 허브의 「오늘」·「대화」는 같은 두
-// 화면을 가리키는데 각자 다른 i18n 키(mobileTabBar.now/chat vs nav.zoneNow/chats)를 써서
-// 문구가 갈라져 있었다 — 값이 아니라 **labelKey 자체**를 공유해 한쪽이 바뀌면 다른 쪽도
-// 자동으로 같이 바뀌게 한다(재발 방지, 문구만 맞춰두면 다음 개명 때 또 갈라진다). 「결재」는
+// story #3824 CHANGES②(페드루 PO 確定, 2026-09-13 09:01Z) — "같은 사실=같은 낱말": 「채팅」
+// 탭과 데스크톱 사이드바 「대화」는 같은 화면(/chats)을 가리키는데 각자 다른 i18n 키
+// (mobileTabBar.chat vs nav.chats)를 써서 문구가 갈라져 있었다 — 값이 아니라 **labelKey
+// 자체**를 공유해 한쪽이 바뀌면 다른 쪽도 자동으로 같이 바뀌게 한다(재발 방지). 「결재」는
 // 모바일 IA 통합이 후속 카드 스코프라 자기 키(mobileTabBar.approvals) 그대로 둔다.
+//
+// story #4020(페드루 PO 확定 2026-09-17, 유나 PR 4399 design 관찰) — "now" 탭의 labelKey는
+// 원래(3824) `zoneNow`(「오늘」)였으나, 그 판정은 "탭 바 「지금」과 사이드바 「오늘」은 같은
+// 화면"이라는 **틀린 전제**에 기댔다 — 실제 목적지 `/flow`는 사이드바에서 「일감」
+// (nav-config.ts의 `board` 항목, labelKey `zoneDev`)이고, 사이드바의 진짜 「오늘」은
+// `/org-briefing`(다른 항목)이다. 목적지는 선생님 2026-07-30 결정(#2224)이라 유지하고,
+// 라벨을 그 목적지의 실제 이름(zoneDev)으로 맞춘다 — prod(main)는 이미 라벨이 「지금」
+// (mobileTabBar.now, 목적지와 이름이 어긋나지 않는 옛 낱말)이라 이 수정이 오히려 3824
+// 이전 prod와도, 사이드바 실목적지와도 동시에 맞아떨어진다.
 export const TABS = [
-  { key: 'now', href: '/flow', icon: CircleDot, labelKey: 'zoneNow' as const, namespace: 'nav' as const },
+  { key: 'now', href: '/flow', icon: CircleDot, labelKey: 'zoneDev' as const, namespace: 'nav' as const },
   // story #2279(PO 판정, 2026-07-29): 라벨("결재")·배지(게이트 대기 수)와 착지가 어긋나
   // 있던 것 — 이름=가는 곳=세는 것 셋을 한 줄로 맞춘다. #2164가 세운 "진입점 라벨은 착지
   // 탭과 일치" 규칙은 그대로 두고 착지 쪽을 게이트 탭으로 옮긴다(라벨을 규칙에 맞춘다).
