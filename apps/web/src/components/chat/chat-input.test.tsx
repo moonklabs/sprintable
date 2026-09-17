@@ -664,3 +664,41 @@ describe('ChatInput — prefillCommand(story #92f00dc4 §🎯 모호 후보 클�
     expect(textarea().value).toBe('');
   });
 });
+
+// story #3997 CHANGES(페드루 PO 지적 2026-09-17) — @멘션 후보가 `/api/members`를 그대로
+// 쓰는데 「시스템 발행」을 안 걸러 멘션할 수 있던 결함(연결 대상이 아닌 내부 멤버).
+describe('ChatInput — @멘션 후보 시스템 발행 제외(story #3997 CHANGES)', () => {
+  it('⭐@멘션 드롭다운에 「시스템 발행」이 안 뜨고 실 멤버는 그대로 뜬다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/members')) {
+        return new Response(JSON.stringify({
+          data: [
+            { id: 'm1', name: '유나', type: 'human', role: 'member' },
+            { id: 'sp1', name: '시스템 발행', type: 'agent', role: 'member', runtime_type: 'system-publisher' },
+            { id: 'a1', name: '점검봇', type: 'agent', role: 'member', runtime_type: 'claude-code' },
+          ],
+        }));
+      }
+      return new Response(JSON.stringify({ data: [] }));
+    }));
+
+    await act(async () => {
+      root.render(withIntl(<ChatInput threadId="c1" projectId="p1" onSend={vi.fn()} />));
+    });
+    const el = textarea();
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setter.call(el, '@');
+      el.selectionStart = 1;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    const listbox = container.querySelector('[role="listbox"]');
+    expect(listbox).not.toBeNull();
+    const text = listbox!.textContent ?? '';
+    expect(text).not.toContain('시스템 발행');
+    expect(text).toContain('유나');
+    expect(text).toContain('점검봇');
+  });
+});

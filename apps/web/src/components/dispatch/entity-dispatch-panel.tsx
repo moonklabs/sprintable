@@ -8,12 +8,16 @@ import { useToast } from '@/components/ui/toast';
 import { normalizeAssigneePatch } from '@/components/kanban/types';
 import { useOrgSyncVersion } from '@/lib/project-context-client';
 import { fetchWithAuth } from '@/lib/db/client';
+import { isSystemPublisher } from '@/lib/runtime-capabilities';
 
 interface TeamMember {
   id: string;
   name: string;
   type: 'human' | 'agent';
   is_active: boolean;
+  // story #3997 CHANGES(페드루 PO 지적 2026-09-17) — 이 자리가 실은 진짜 "담당자
+  // 선택"(스토리·doc·에픽 배정+디스패치)이라 「시스템 발행」을 걸러야 한다.
+  runtime_type?: string | null;
 }
 
 interface EntityDispatchPanelProps {
@@ -72,7 +76,7 @@ export function EntityDispatchPanel({
       .then((r) => r.ok ? r.json() : Promise.reject())
       .then((json) => {
         const data = (json?.data ?? json) as TeamMember[];
-        setMembers(data.filter((m) => m.is_active));
+        setMembers(data.filter((m) => m.is_active && !isSystemPublisher(m.runtime_type)));
       })
       .catch(() => {});
   }, [projectId, orgSyncVersion]);
