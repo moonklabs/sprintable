@@ -11,6 +11,19 @@ import koMessages from '../../../messages/ko.json';
 
 const fetchMock = vi.fn();
 
+// story #4019 — OAuthResultBanner(channel-connect/oauth-result-banner.tsx)가 이제
+// 이 화면 맨 위에서 useSearchParams·usePathname·useRouter를 쓴다(결과 인자 정리,
+// legacy channels/page.test.tsx와 동형 mock 관례).
+const { useSearchParamsMock, routerReplaceMock } = vi.hoisted(() => ({
+  useSearchParamsMock: vi.fn(),
+  routerReplaceMock: vi.fn(),
+}));
+vi.mock('next/navigation', () => ({
+  useSearchParams: () => useSearchParamsMock(),
+  usePathname: () => '/connect-rules',
+  useRouter: () => ({ replace: routerReplaceMock }),
+}));
+
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let container: HTMLDivElement;
@@ -30,6 +43,8 @@ beforeEach(() => {
   root = createRoot(container);
   fetchMock.mockReset();
   vi.stubGlobal('fetch', fetchMock);
+  useSearchParamsMock.mockReturnValue(new URLSearchParams());
+  routerReplaceMock.mockClear();
 });
 
 afterEach(async () => {
@@ -39,9 +54,9 @@ afterEach(async () => {
   vi.resetModules();
 });
 
-async function mount() {
+async function mount(isOwnerStrict = true) {
   const { ConnectRulesV3Channels } = await import('./connect-rules-v3-channels');
-  await act(async () => { root.render(wrap(<ConnectRulesV3Channels orgId="org1" />)); });
+  await act(async () => { root.render(wrap(<ConnectRulesV3Channels orgId="org1" isOwnerStrict={isOwnerStrict} />)); });
   await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 }
 
@@ -170,5 +185,65 @@ describe('ConnectRulesV3Channels', () => {
     await mount();
     expect(container.textContent).toContain('불러오지 못했어요');
     expect(container.querySelector('button')?.textContent).toContain('다시 시도');
+  });
+
+  // story #4019(PO 確定 2026-09-17) — OAuthResultBanner를 목록 맨 위에 마운트. 레거시
+  // organization/channels/page.test.tsx와 같은 문구 키로 뜨는지(바이트 동일 보장의
+  // 실측), AC2(결과 인자 정리)도 이 화면에서 똑같이 동작하는지.
+  describe('OAuth 결과 배너(story #4019, 레거시와 공유 컴포넌트)', () => {
+    it('⭐?connected= 쿼리로 성공 배너가 채널 목록 위에 뜬다(레거시와 같은 문구)', async () => {
+      useSearchParamsMock.mockReturnValue(new URLSearchParams('connected=threads'));
+      routeFetch({
+        '/api/organizations/org1/channel-connections/available-channels': { data: [] },
+        '/api/organizations/org1/channel-connections': { data: [] },
+        '/api/organizations/org1/measurement-connections': { data: [] },
+      });
+      await mount();
+      expect(container.textContent).toContain('Threads 연결이 완료됐어요');
+    });
+
+    it('⭐?connect_error=로 알려진 코드는 사람 말로 뜬다(레거시와 같은 문구 키)', async () => {
+      useSearchParamsMock.mockReturnValue(new URLSearchParams('connect_error=CHANNEL_APP_CREDENTIALS_MISSING'));
+      routeFetch({
+        '/api/organizations/org1/channel-connections/available-channels': { data: [] },
+        '/api/organizations/org1/channel-connections': { data: [] },
+        '/api/organizations/org1/measurement-connections': { data: [] },
+      });
+      await mount(true);
+      expect(container.textContent).toContain(koMessages.channelConnect.channelConnectErrorAppCredentialsMissing);
+    });
+
+    it('isOwnerStrict=false면 member용 문구가 뜬다(owner용 문구 없음)', async () => {
+      useSearchParamsMock.mockReturnValue(new URLSearchParams('connect_error=CHANNEL_APP_CREDENTIALS_MISSING'));
+      routeFetch({
+        '/api/organizations/org1/channel-connections/available-channels': { data: [] },
+        '/api/organizations/org1/channel-connections': { data: [] },
+        '/api/organizations/org1/measurement-connections': { data: [] },
+      });
+      await mount(false);
+      expect(container.textContent).toContain(koMessages.channelConnect.channelConnectErrorAppCredentialsMissingMember);
+      expect(container.textContent).not.toContain(koMessages.channelConnect.channelConnectErrorAppCredentialsMissing);
+    });
+
+    it('⭐표시 뒤 router.replace로 결과 인자를 지운다(AC2, scroll:false — 레거시와 동형)', async () => {
+      useSearchParamsMock.mockReturnValue(new URLSearchParams('connected=threads'));
+      routeFetch({
+        '/api/organizations/org1/channel-connections/available-channels': { data: [] },
+        '/api/organizations/org1/channel-connections': { data: [] },
+        '/api/organizations/org1/measurement-connections': { data: [] },
+      });
+      await mount();
+      expect(routerReplaceMock).toHaveBeenCalledWith('/connect-rules', { scroll: false });
+    });
+
+    it('결과 인자가 없으면 배너도 router.replace 호출도 없다', async () => {
+      routeFetch({
+        '/api/organizations/org1/channel-connections/available-channels': { data: [] },
+        '/api/organizations/org1/channel-connections': { data: [] },
+        '/api/organizations/org1/measurement-connections': { data: [] },
+      });
+      await mount();
+      expect(routerReplaceMock).not.toHaveBeenCalled();
+    });
   });
 });

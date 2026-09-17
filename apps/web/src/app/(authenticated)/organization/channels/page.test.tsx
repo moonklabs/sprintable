@@ -11,16 +11,22 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../../../messages/ko.json';
 
-const { useDashboardContextMock, useSearchParamsMock } = vi.hoisted(() => ({
+const { useDashboardContextMock, useSearchParamsMock, routerReplaceMock } = vi.hoisted(() => ({
   useDashboardContextMock: vi.fn(),
   useSearchParamsMock: vi.fn(),
+  routerReplaceMock: vi.fn(),
 }));
 
 vi.mock('@/app/dashboard/dashboard-shell', () => ({
   useDashboardContext: () => useDashboardContextMock(),
 }));
+// story #4019 — OAuthResultBanner(oauth-result-banner.tsx)가 usePathname·useRouter도
+// 쓴다(결과 인자 정리, AC2). replace는 no-op 목 — 실 네비게이션은 안 검증(그 자체는
+// oauth-result-banner.test.tsx 몫), 여기는 이 화면이 배너를 그대로 그리는지만 본다.
 vi.mock('next/navigation', () => ({
   useSearchParams: () => useSearchParamsMock(),
+  usePathname: () => '/organization/channels',
+  useRouter: () => ({ replace: routerReplaceMock }),
 }));
 
 import OrganizationChannelsPage from './page';
@@ -407,6 +413,45 @@ describe('OrganizationChannelsPage — 목록·상태(story #3376)', () => {
     await mount('owner');
     // story 3436(묶음 6) — channelLabel()이 raw 쿼리값을 사람이 읽는 이름으로 정규화한다.
     expect(container.textContent).toContain('Threads 연결이 완료됐어요');
+  });
+
+  // story #4019(PO 確定 2026-09-17 16:05Z) AC2 — 두 화면 다 표시 뒤 결과 인자를 지워
+  // 새로고침 반복을 0으로 만든다. 조건①(state 캡처 뒤 제거라 안 꺼짐)·③(결과 인자
+  // 5개만·select_pending류는 보존)·④(history 새 항목 0·스크롤 0=router.replace+
+  // {scroll:false}).
+  describe('OAuth 결과 인자 정리(story #4019 AC2)', () => {
+    it('⭐배너를 그린 뒤 router.replace로 결과 인자 5개를 지운다(select_pending류는 보존) — 지운다고 배너가 사라지지 않는다', async () => {
+      useSearchParamsMock.mockReturnValue(
+        new URLSearchParams('connected=threads&select_pending=instagram&pending_id=p1&candidates=%5B%5D'),
+      );
+      stubFetch({ connections: [] });
+      routerReplaceMock.mockClear();
+      await mount('owner');
+      expect(container.textContent).toContain('Threads 연결이 완료됐어요');
+      expect(routerReplaceMock).toHaveBeenCalledTimes(1);
+      const [url, opts] = routerReplaceMock.mock.calls[0]!;
+      expect(url).not.toContain('connected=');
+      expect(url).toContain('select_pending=instagram');
+      expect(url).toContain('pending_id=p1');
+      expect(url).toContain('candidates=');
+      expect(opts).toEqual({ scroll: false });
+    });
+
+    it('결과 인자가 아예 없으면 router.replace를 안 부른다(빈 리다이렉트 소음 0)', async () => {
+      useSearchParamsMock.mockReturnValue(new URLSearchParams('select_pending=instagram&pending_id=p1&candidates=%5B%5D'));
+      stubFetch({ connections: [] });
+      routerReplaceMock.mockClear();
+      await mount('owner');
+      expect(routerReplaceMock).not.toHaveBeenCalled();
+    });
+
+    it('결과 인자만 있고 다른 쿼리가 없으면 물음표 없는 pathname으로 정리한다', async () => {
+      useSearchParamsMock.mockReturnValue(new URLSearchParams('connected=threads'));
+      stubFetch({ connections: [] });
+      routerReplaceMock.mockClear();
+      await mount('owner');
+      expect(routerReplaceMock).toHaveBeenCalledWith('/organization/channels', { scroll: false });
+    });
   });
 
   it('?connect_error=로 알려진 코드는 사람 말로, 모르는 코드는 일반 실패 문구로 뜬다', async () => {
