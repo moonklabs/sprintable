@@ -146,22 +146,33 @@ CREATE INDEX ON public.agent_device_credentials (key_fingerprint) WHERE status =
 
 ### 5.2 인증 확장 — 초크포인트 1곳
 
-`backend/app/dependencies/auth.py` 의 **`_resolve_api_key()`** 가 모든 에이전트 인증 경로
-(SSE `/agent/stream`, MCP 툴, ack)를 처리한다. 엔드포인트를 고칠 필요가 없다.
+`backend/app/dependencies/auth.py` 의 **`AuthContext` 형태**가 초크포인트다 — 엔드포인트를
+고칠 필요가 없다. (초판은 "함수 1개 `_resolve_api_key()`"라고 적었는데, 그 함수는 얇은 조회가
+아니라 8단계 파이프라인이라 `dt_live_` 분기를 안에 넣지 않는다 — §5.2.1 참조.)
+
+**구현됨(2026-09-16).** 신규 `_resolve_device_credential()` 이 `sk_live_` 와 **같은
+`AuthContext`** 를 내고, `get_current_user`·`get_current_user_streaming` 두 변형이 접두사로
+분기한다(`dt_live_` 는 x-agent-api-key 헤더 경로에 붙이지 않는다 — 그 표면은 SSE 브릿지 전용).
 
 ```
-_resolve_api_key(credential):
+get_current_user / get_current_user_streaming:
   if credential.startswith('dt_live_'):
+      → _resolve_device_credential()  (전용 세션, 즉시 close)
       → 기기 식별자로 agent_device_credentials 조회
         (status='active', revoked_at IS NULL)
       → 요청 서명을 등록된 public_key 로 검증
       → 타임스탬프 허용 윈도우 + 리플레이 방어 확인
       → member_id / org_id / agent_member_id 해소, last_seen_at 갱신(스로틀)
   else:  # sk_live_ — 기존 경로 한 줄도 변경 없음
-      → 현행 유지
+      → _resolve_api_key() 현행 유지
 ```
 
 **기존 `sk_live_` 경로 불변이 회귀 위험을 최소화하는 지점이다.**
+
+⚠️**함께 고쳐야 했던 것(구현 중 실측):** `api_key_id` claim 의 truthiness 로 "에이전트인가"를
+판정하던 소비처 22곳이 `dt_live_` 를 human 분기로 떨어뜨려 하드 실패했다(400/404). 판정은
+`is_agent_credential()` 하나로 수렴하고, 그 함수가 **과금 판별자(`is_au_billable_agent`)와
+같은 축**을 공유한다 — 둘이 갈라지면 과금과 인가가 어긋난다.
 
 ### 5.2.1 `AuthContext` claim — 에이전트 판별 축 (2026-09-15 확정)
 
@@ -200,7 +211,7 @@ return is_api_key and not is_human_claimed
 
 | 소비 방식 | 개수 |
 |---|---|
-| `bool(meta.get("api_key_id"))` — truthiness | ~15곳 |
+| `bool(meta.get("api_key_id"))` — truthiness | **22곳**(READ 추정 ~15 는 과소 — 구현 중 실측) |
 | `== "system-publisher"` — 합성값 비교 | 1곳 (`events.py:1837`) |
 | **`ApiKey` 로 조회** | **0곳** |
 
@@ -212,9 +223,14 @@ return is_api_key and not is_human_claimed
 2. **`actor_type: "agent"` 명시가 그걸 고친다** — 코드가 "반드시 이 둘을 함께 본다"고 했다.
 3. **`api_key_id` 를 안 실어 `hu_live_` 선례로 안전** — 기존 truthiness 판정을 오염시키지 않는다.
 
-⚠️ **비용:** `bool(meta.get("api_key_id"))` 를 쓰는 **~15곳**은 device 를 휴먼/익명으로
+⚠️ **비용:** `bool(meta.get("api_key_id"))` 를 쓰는 **22곳**은 device 를 휴먼/익명으로
 본다. 그중 **관리자 권한·데이터 스코프가 걸린 곳은 `actor_type` 도 함께 보도록 고쳐야**
 한다. 과금 축은 이미 그렇게 되어 있으니, 나머지를 같은 형태로 맞추는 일이다 → **G10**
+
+**✅ 완료(2026-09-16).** 22곳을 `is_agent_credential(auth)` 로 교체했다. 그중 셋은
+**기능이 막혀 있던 자리**였다 — `agent_gateway` 의 SSE 스트림·ACK(`dt_live_` 가 403),
+`project_scope.enforce_write_scope`(scope 검사가 통째로 스킵 → admin-adjacent 표면 무검사),
+`mcp` manifest(MCP 경로 전면 403). 남은 잔존은 저장소 전역 소스 스캔 가드가 막는다.
 
 **커넥터는 수정하지 않는다.** SDK 가 자격증명을 정적 bearer 문자열로 싣기 때문에
 (`connectors/sdk/sprintable-sse.ts:65`), 서명은 **로컬 프록시**가 만든다:
@@ -391,7 +407,7 @@ baseUrl은 `http://host.docker.internal:11434/v1` — `validateCustomEndpoint` �
 |---|---|---|
 | ~~1~~ | ~~`LOCAL_KMS_MASTER_KEY` 배선 + 셋업 스크립트~~ | ✅ 완료 (§6.2 ①) |
 | ~~2~~ | ~~`extra_hosts` + 로컬 LLM 문서~~ | ✅ 완료 (§6.2 ②) |
-| 3 | `agent_device_credentials` + `_resolve_api_key` 분기 | 이 레포 (백엔드) |
+| ~~3~~ | ~~`agent_device_credentials` + 인증 분기~~ | ✅ 완료 (2026-09-16, §5.2) |
 | 4 | `self-issue` (멤버 셀프발급, 상한 1) | 이 레포 (백엔드) |
 | 5 | conversation ↔ 로컬 세션 매핑 모델 (1:N) | 이 레포 (백엔드) |
 | 6 | 기기 등록 로컬 dev 모드 | 이 레포 (백엔드) |
@@ -402,7 +418,10 @@ baseUrl은 `http://host.docker.internal:11434/v1` — `validateCustomEndpoint` �
 **1~6번이 이 레포 안, 백엔드다.** 데스크톱(7~8) 없이도 `docker compose up` 으로 검증 가능하다.
 9번이 가장 불확실하다.
 
-**1·2번 완료(2026-09-14).** 다음 착수 지점은 3번(`agent_device_credentials` + 인증 분기)이다.
+**1·2번 완료(2026-09-14) · 3번 완료(2026-09-16).** 3번은 등록·폐기 라우터
+(`POST/DELETE /api/v2/device-credentials`), `dt_live_` 인증 해소, 리플레이 방어(CAS),
+판별 축 정합까지 포함한다. `docker compose up` 실증은 이 머신에 Docker 부재로 **미실시**이며,
+다음 착수 지점은 4번(`self-issue`)이다.
 
 ---
 
@@ -413,7 +432,7 @@ baseUrl은 `http://host.docker.internal:11434/v1` — `validateCustomEndpoint` �
 | **세션 이력 = 개인정보** | `~/.claude/projects/*.jsonl` 에 대화 전문이 있다. 데스크톱이 파싱해 서버로 올리면 유출 | 로컬에서만 읽고 서버엔 메타데이터(프로젝트·시각)만 전송 |
 | **Pi 미지원** | 세션 저장소가 없어 온보딩 목록에 못 뜬다 | 비전에서 Pi 제외를 명시하거나, "실행 중 세션에 붙기"로 별도 처리 |
 | **기기 상한 없음** | 에이전트는 사용자당 1개인데 기기 무제한이면 좌석 1·스트림 N | `_AGENT_STREAM_TIER_LIMITS`(free 3/team 15/pro 30) 안에서 상한 결정 |
-| **`dt_live_` 수명 미정** | 영구면 `sk_live_` 와 같은 문제, 짧으면 "사용자가 모르는" 상태에서 조용히 끊김 | 수명·갱신 정책 결정 필요 |
+| ~~**`dt_live_` 수명 미정**~~ | — | **소멸** — 토큰이 아니라 기기 식별자라 수명·갱신 문제 자체가 없다(§9-6). 그 자리를 서명 타임스탬프 윈도우 + 리플레이 방어가 대체 |
 | **로컬 dev 보안 강도** | 평문 HTTP + attestation 생략 | 감수 여부 결정. 자체호스팅 한정 여부 |
 | **웹 채팅 이중 유지** | 채팅 컴포넌트 38개(+유틸)를 재구현하면 유지보수 2배 | §9-1 결정 |
 | **파일 규모** | OpenClaw 88,856 / Hermes 179,459 파일 | 필터 필수 |
