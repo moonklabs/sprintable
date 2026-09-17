@@ -491,7 +491,12 @@ export default function AgentDetailPage() {
       </SectionCard>
 
       {/* 런타임 타입 (E-CHAT-CMD S2) */}
-      {(() => {
+      {/* story #3994 CHANGES-4(페드루 PO C3 2026-09-17) — 「시스템 발행」의 runtime_type
+          은 §3107 예약값이라 resolveRuntimeStatus()의 두 capability 축이 둘 다 false로
+          해석돼 'unsupported'(destructive 빨간 배지+XCircle)로 떨어진다 — "연결 필요
+          없음" 화면 한복판에 빨간 경고가 뜨는 거짓 신호(헤더에 이미 있는 「커넥터:
+          Sprintable」 칩으로 충분, 새 문구 0). */}
+      {!isSystemPublisherAgent && (() => {
         const savedRuntime = agent.runtime_type ?? '';
         const runtimeStatus = resolveRuntimeStatus(selectedRuntime || null);
         const ui = RUNTIME_STATUS_UI[runtimeStatus];
@@ -588,7 +593,11 @@ export default function AgentDetailPage() {
       )}
 
       {/* Notification channel section */}
-      {(() => {
+      {/* story #3994 CHANGES-4(페드루 PO C4 2026-09-17) — 「시스템 발행」은 canEditWebhook이
+          false라 webhookAdminOnly("관리자만 다른 멤버의 웹훅을 설정할 수 있어요")가 org
+          admin 본인에게도 뜬다 — 실제 사유(예약 멤버라 무조건 편집 불가)와 다른 거짓
+          사유라 카드 자체를 미렌더(아래 알림 설정 요약 카드도 동일 사유·동일 처방). */}
+      {!isSystemPublisherAgent && (() => {
         const webhookState = getWebhookState(webhookConfigs);
         return (
           <SectionCard>
@@ -653,19 +662,23 @@ export default function AgentDetailPage() {
       {/* story #2623 — 멤버 관점 요약(AC3, «이 에이전트는 어느 대화에서 무엇을 받나»). 웹훅
           섹션과 동일 admin/owner 게이트(canEditWebhook — story 933248fa와 같은 org role 축,
           새 인가 어휘 발명 없음) 재사용. BE #2623 착지 대기 — 착지 前엔 로드에러/자기자신
-          목록으로 보일 수 있다(컴포넌트 자체 docstring 참고, 조용히 감추지 않는다). */}
-      <SectionCard>
-        <SectionCardHeader>
-          <h2 className="text-base font-semibold text-foreground">{t('notificationPreferencesSummaryTitle')}</h2>
-        </SectionCardHeader>
-        <SectionCardBody>
-          {!canEditWebhook ? (
-            <p className="text-xs text-muted-foreground">{t('webhookAdminOnly')}</p>
-          ) : (
-            <MemberNotificationPreferencesSummary memberId={id} memberLabel={agent.name} />
-          )}
-        </SectionCardBody>
-      </SectionCard>
+          목록으로 보일 수 있다(컴포넌트 자체 docstring 참고, 조용히 감추지 않는다).
+          story #3994 CHANGES-4(페드루 PO C4) — 위 알림 채널 카드와 동일 사유(거짓
+          webhookAdminOnly 사유 회피)로 시스템 발행이면 미렌더. */}
+      {!isSystemPublisherAgent && (
+        <SectionCard>
+          <SectionCardHeader>
+            <h2 className="text-base font-semibold text-foreground">{t('notificationPreferencesSummaryTitle')}</h2>
+          </SectionCardHeader>
+          <SectionCardBody>
+            {!canEditWebhook ? (
+              <p className="text-xs text-muted-foreground">{t('webhookAdminOnly')}</p>
+            ) : (
+              <MemberNotificationPreferencesSummary memberId={id} memberLabel={agent.name} />
+            )}
+          </SectionCardBody>
+        </SectionCard>
+      )}
 
       {/* Messaging policy (E-MSG-POLICY S3) */}
       {canEdit && <MessagingPolicySection agentId={id} creatorUserId={agent.created_by} />}
