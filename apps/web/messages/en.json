@@ -2955,7 +2955,11 @@
     "channelPostsImageRemoveAction": "Remove",
     "channelPostsImageRemoveActionLabel": "Remove image {position}",
     "channelPostsAwaitingContainerNotice": "This is being automatically continued. Please check back shortly.",
-    "channelPostsPublicationFailedNotice": "Publishing failed — this attempt will continue on the next publish."
+    "channelPostsPublicationFailedNotice": "Publishing failed.",
+    "channelPostsPublicationFailedCancelledNotice": "Publishing failed, and the retry was cancelled.",
+    "channelPostsPublicationFailedPendingRetryNotice": "Publishing failed. It will retry automatically soon.",
+    "channelPostsPublicationFailedInProgressNotice": "Publishing failed. Retrying now.",
+    "channelPostsPublicationFailedRepublishNotice": "Publishing failed. You can try again with {action}."
   },
   "docs": {
     "title": "Docs",
