@@ -8,10 +8,12 @@ import { LEGACY_NAV_ITEMS, VISIBLE_LEGACY_NAV_ITEMS, groupVisibleLegacyByTarget,
 
 // AC1 — 카드 본문 「갈 곳 지도」 표 그대로(2026-09-14 착수 시점 develop HEAD 실측과 대조
 // 확認 완료 — 카드 표와 실물이 1:1이었다, 페드루에게 별도 정정 보고 불요).
+// story #3989(「일감」 흡수 3/N) — docs·artifacts는 work→knowledge로 재배정(PO 확定,
+// worklist-6item-absorption doc §검증1 — 연결분만 일감, 전수 라이브러리는 지식 축).
 const EXPECTED_TARGET_BY_ID: Record<string, AbsorbTarget> = {
-  goals: 'work', loops: 'work', docs: 'work', artifacts: 'work', content: 'work', 'channel-posts': 'work',
+  goals: 'work', loops: 'work', content: 'work', 'channel-posts': 'work',
   'org-trust': 'connect', 'org-members': 'connect', 'org-workforce': 'connect', 'org-roles': 'connect', 'org-events': 'connect',
-  storage: 'knowledge', 'org-memory': 'knowledge',
+  docs: 'knowledge', artifacts: 'knowledge', storage: 'knowledge', 'org-memory': 'knowledge',
   activity: 'history',
   settings: 'settings',
   // inbox는 MOBILE_HUB_EXCLUDE_IDS로 VISIBLE_LEGACY_NAV_ITEMS에서 걸러져 groupVisibleLegacyByTarget

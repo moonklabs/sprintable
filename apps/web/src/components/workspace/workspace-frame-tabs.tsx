@@ -19,6 +19,11 @@ const TABS = [
   // 이 프레임은 그 위에 얹힌 얕은 nav일 뿐 — WorkspaceFrameTabs 파일 상단 주석 참고).
   // labelKey 'retro'는 nav-config.ts::LEGACY_NAV_ITEMS가 이미 쓰던 값 재사용(사본 0).
   { key: 'retro', path: 'retro' },
+  // story #3989(「일감」 흡수 3/N, PO 확定 — worklist-6item-absorption doc §②-1) — 전수
+  // 가설 집. 다른 탭과 동형(실 라우트 /hypotheses 보존, 이 프레임은 얕은 nav일 뿐).
+  // labelKey 'hypothesis'는 flow.ladderName_earth와 같은 낱말(「가설」)이라 값만 맞추고
+  // 키는 새로 둔다(namespace가 다름 — 사본이 아니라 같은 사실·다른 화면).
+  { key: 'hypothesis', path: 'hypotheses' },
 ] as const;
 
 type WorkspaceFrameTabKey = (typeof TABS)[number]['key'];

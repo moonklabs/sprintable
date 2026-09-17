@@ -430,16 +430,17 @@ describe('AppSidebar — story #3824 5항목 축소 렌더 회귀가드(UX-v3·F
 
 // story #3844(PO 지적 2026-09-14 07:53Z, 캡처 3 라이브 눈확認로 발견) — 「일감」(id 'board')이
 // resourceLink('flow') 단일 경로만 알아 WorkspaceFrameTabs가 그 위에 얹은 나머지 탭
-// (work-list·sprints·epics·retro)에선 사이드바가 비활성으로 떨어졌다. 처방: resourceLink에
-// WORKSPACE_FRAME_TAB_PATHS(workspace-frame-tabs.tsx SSOT)를 extraActivePaths로 넘긴다 —
-// 탭을 하나 늘리면 이 판정도 하드코딩 없이 자동으로 늘어난다.
-const EXPECTED_WORKSPACE_FRAME_TAB_PATHS = ['work-list', 'flow', 'sprints', 'epics', 'retro'];
+// (work-list·sprints·epics·retro·hypotheses)에선 사이드바가 비활성으로 떨어졌다. 처방:
+// resourceLink에 WORKSPACE_FRAME_TAB_PATHS(workspace-frame-tabs.tsx SSOT)를
+// extraActivePaths로 넘긴다 — 탭을 하나 늘리면 이 판정도 하드코딩 없이 자동으로 늘어난다.
+// story #3989(「일감」 흡수 3/N) — 「가설」 탭(경로 hypotheses) 합류로 5→6개.
+const EXPECTED_WORKSPACE_FRAME_TAB_PATHS = ['work-list', 'flow', 'sprints', 'epics', 'retro', 'hypotheses'];
 
 describe('AppSidebar — 「일감」 활성 판정은 WorkspaceFrameTabs 경로 SSOT에서 파생(story #3844)', () => {
   // ⭐되돌리면 RED — WorkspaceFrameTabs에 탭이 추가/삭제됐는데 이 표를 안 갱신하면(또는
   // app-sidebar.tsx가 그 SSOT를 다시 안 읽으면) 여기서 먼저 잡힌다. 아래 it.each는 이 표를
   // 하드코딩 소스로 쓰므로, 이 대조 자체가 "표류 감지"의 유일한 자리다.
-  it('WORKSPACE_FRAME_TAB_PATHS가 정확히 5개다(work-list·flow·sprints·epics·retro)', async () => {
+  it('WORKSPACE_FRAME_TAB_PATHS가 정확히 6개다(work-list·flow·sprints·epics·retro·hypotheses)', async () => {
     const { WORKSPACE_FRAME_TAB_PATHS } = await import('@/components/workspace/workspace-frame-tabs');
     expect(WORKSPACE_FRAME_TAB_PATHS).toEqual(EXPECTED_WORKSPACE_FRAME_TAB_PATHS);
   });

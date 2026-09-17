@@ -105,6 +105,7 @@
     "sprints": "Sprints",
     "epic": "Epic",
     "workList": "List",
+    "hypothesis": "Hypothesis",
     "search": "Search…",
     "help": "Help",
     "openGlobalNav": "Open menu",
@@ -296,6 +297,7 @@
     "goEpics": "Go to Epics",
     "goRetro": "Go to Retro",
     "goWorkList": "Go to List",
+    "goHypotheses": "Go to Hypothesis",
     "actionDelegateStory": "Delegate {title}",
     "actionDelegateStoryImpact": "Delegates {title} to a teammate. Takes you to the story.",
     "actionGateDecision": "Review a gate decision",
@@ -527,7 +529,11 @@
     "historyOtherChange": "made another change",
     "historyUnknownActor": "Someone",
     "panelHiddenByFilter": "This item isn't shown in the current filter",
-    "panelClearFilters": "Clear filters"
+    "panelClearFilters": "Clear filters",
+    "hypothesesEmptyTitle": "No hypotheses yet",
+    "hypothesesFilterEmptyTitle": "No hypotheses match this filter",
+    "hypothesesFilterAll": "All",
+    "hypothesesLinkedWorkCta": "View linked work"
   },
   "organization": {
     "rolesTitle": "Permissions",

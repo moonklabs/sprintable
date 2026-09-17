@@ -105,6 +105,7 @@
     "sprints": "스프린트",
     "epic": "에픽",
     "workList": "목록",
+    "hypothesis": "가설",
     "search": "검색…",
     "help": "도움말",
     "openGlobalNav": "전체 메뉴 열기",
@@ -296,6 +297,7 @@
     "goEpics": "에픽으로 이동",
     "goRetro": "회고로 이동",
     "goWorkList": "목록으로 이동",
+    "goHypotheses": "가설로 이동",
     "actionDelegateStory": "{title} 위임하기",
     "actionDelegateStoryImpact": "{title}{josa} 담당자에게 위임해요. 스토리 화면으로 이동해요.",
     "actionGateDecision": "게이트 결재하기",
@@ -527,7 +529,11 @@
     "historyOtherChange": "그 밖의 변경을 했어요",
     "historyUnknownActor": "누군가",
     "panelHiddenByFilter": "지금 필터에서는 목록에 안 보이는 일이에요",
-    "panelClearFilters": "필터 지우기"
+    "panelClearFilters": "필터 지우기",
+    "hypothesesEmptyTitle": "아직 가설이 없어요",
+    "hypothesesFilterEmptyTitle": "고른 상태에 맞는 가설이 없어요",
+    "hypothesesFilterAll": "전체",
+    "hypothesesLinkedWorkCta": "연결된 일 보기"
   },
   "organization": {
     "rolesTitle": "권한",
