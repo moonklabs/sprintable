@@ -116,6 +116,57 @@ describe('ActivationChecklistBanner — 미완주 렌더 (story #3159)', () => {
   });
 });
 
+// story #4032(Lighthouse CI 실측 — 인증화면 6곳 전부 CLS>0.1, 공통 뿌리가 이 배너였다) —
+// fetch 완료 前 null을 그대로 반환하면 부모의 `empty:hidden` 래퍼가 0높이로 접혔다가
+// 실 콘텐츠가 도착하는 순간 나타나며 그 아래 전체(모든 페이지 공통 그리드)를 밀어낸다.
+// 처방(스켈레톤으로 자리 선점)이 실제로 "fetch 미완료 순간에도 박스가 이미 있다"를
+// 만드는지, 그리고 그 박스가 실 콘텐츠와 같은 행 수(5)를 갖는지를 이 두 테스트가 고정한다.
+describe('ActivationChecklistBanner — 로딩 스켈레톤이 자리를 선점한다 (story #4032, CLS 처방)', () => {
+  // story #4027 선례와 동일 패턴 — 자동응답 스텁은 이 컴포넌트의 fetch 체인이 같은
+  // act() 사이클 안에서 이미 resolve돼(실측: 자동응답으로는 "flush 前" 순간을 못 잡음)
+  // 로딩 상태를 관측할 수 없었다. 응답을 수동으로 붙잡아 두는 deferred promise로
+  // "아직 안 왔다"를 실제로 만든다.
+  function deferredChecklistResponse() {
+    let resolve!: (data: typeof PARTIAL) => void;
+    const promise = new Promise<typeof PARTIAL>((res) => { resolve = res; });
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: await promise }) })));
+    return { resolve };
+  }
+
+  it('fetch 완료 前에는 실 텍스트 0인 채로 aria-busy 박스를 먼저 그린다(마운트 즉시, flush 前)', async () => {
+    const { resolve } = deferredChecklistResponse();
+    await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+    const busyEl = container.querySelector('[aria-busy="true"]');
+    expect(busyEl).not.toBeNull();
+    expect(container.textContent).toBe('');
+    await act(async () => { resolve(PARTIAL); });
+    await flush();
+    expect(container.querySelector('[aria-busy="true"]')).toBeNull();
+    expect(container.textContent).toContain('가입을 마무리해 볼까요?');
+  });
+
+  it('스켈레톤 박스는 실 배너와 동일한 5행을 갖는다(행 수가 갈리면 실 콘텐츠 교체 시 다시 흔들린다)', async () => {
+    const { resolve } = deferredChecklistResponse();
+    await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+    expect(container.querySelectorAll('li').length).toBe(5);
+    await act(async () => { resolve(PARTIAL); });
+    await flush();
+    expect(container.querySelectorAll('li').length).toBe(5);
+  });
+
+  it('all_complete=true(완주)면 스켈레톤도 안 거치고 바로 미노출이다(로딩 상태 자체가 없음)', async () => {
+    stubChecklist(COMPLETE);
+    await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+    // COMPLETE는 skip 플래그 유무와 무관하게 fetch가 도착하기 前까지는 state===null이라
+    // allComplete는 아직 false(§useActivationStatus: allComplete = skip || state?.all_complete)
+    // — skip이 false인 이 케이스는 fetch 도착 前까지 스켈레톤이 뜨는 게 맞다(정상 설계,
+    // 완주 사실 자체를 아직 모르니까). flush 뒤에는 사라져야 한다.
+    await flush();
+    expect(container.querySelector('[aria-busy="true"]')).toBeNull();
+    expect(container.textContent).toBe('');
+  });
+});
+
 describe('ActivationChecklistBanner — 완주 시 완전 소멸 (PO 지시)', () => {
   it('all_complete=true면 아무것도 렌더하지 않고 localStorage에 영구 기록한다', async () => {
     stubChecklist(COMPLETE);
