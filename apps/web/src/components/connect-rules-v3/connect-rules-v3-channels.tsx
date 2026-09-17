@@ -19,6 +19,7 @@ import {
   ConnectRulesV3SectionError,
   ConnectRulesV3SectionSkeleton,
 } from './connect-rules-v3-section-state';
+import { OAuthResultBanner } from '@/components/channel-connect/oauth-result-banner';
 
 /**
  * story #3982 §(d) 연결된 채널(+성과 수집) — `channel-connect/connection-status.ts`의
@@ -190,7 +191,7 @@ function MeasurementSection({
   );
 }
 
-export function ConnectRulesV3Channels({ orgId }: { orgId: string }) {
+export function ConnectRulesV3Channels({ orgId, isOwnerStrict }: { orgId: string; isOwnerStrict: boolean }) {
   const t = useTranslations('connectRulesV3');
   const tc = useTranslations('channelConnect');
   const locale = useLocale();
@@ -229,39 +230,59 @@ export function ConnectRulesV3Channels({ orgId }: { orgId: string }) {
     return () => { cancelled = true; };
   }, [orgId, retryKey]);
 
-  if (loadState === 'loading') return <ConnectRulesV3SectionSkeleton />;
-  if (loadState === 'error') return <ConnectRulesV3SectionError onRetry={() => setRetryKey((k) => k + 1)} />;
-
   const mainChannels = available.filter((c) => c.kind !== 'ads');
   const adChannels = available.filter((c) => c.kind === 'ads');
 
+  // PO CHANGES-2(2026-09-17 16:26Z) — 배너가 loadState 분기 안쪽에 있으면 목록
+  // 로딩/실패 중엔 배너 자체가 안 뜬다(레거시는 loadState라는 개념이 없어 이 문제가
+  // 없었음). ?connect_error=로 돌아온 사람이 채널 목록 fetch가 실패했을 때 실패 이유를
+  // 영영 못 보는 사고 — 배너를 loading/error/ready 3상태 밖 공통 래퍼로 옮긴다.
+  // connections는 loading/error 동안 빈 배열이라 mismatch 판정이 "대상 못 찾음"으로
+  // 조용히 건너뛰지만(조건② 그대로), ready로 넘어가면 실 목록과 대조해 자연히 뜬다.
+  let body: React.ReactNode;
+  if (loadState === 'loading') {
+    body = <ConnectRulesV3SectionSkeleton />;
+  } else if (loadState === 'error') {
+    body = <ConnectRulesV3SectionError onRetry={() => setRetryKey((k) => k + 1)} />;
+  } else {
+    body = (
+      <>
+        {available.length === 0 ? (
+          <ConnectRulesV3SectionEmpty title={t('channelsEmptyTitle')} />
+        ) : (
+          <div className="space-y-2">
+            {mainChannels.map((item) => (
+              <ChannelRow key={item.channel} item={item} connections={connections} t={t} tc={tc} />
+            ))}
+            {adChannels.length > 0 ? (
+              <div className="pt-1">
+                <p className="mb-1.5 text-[11px] font-medium text-muted-foreground">{t('adAccountsSectionTitle')}</p>
+                <div className="space-y-2">
+                  {adChannels.map((item) => (
+                    <ChannelRow key={item.channel} item={item} connections={connections} t={t} tc={tc} />
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        )}
+
+        <MeasurementSection items={measurement} tc={tc} locale={locale} />
+
+        <Link href="/organization/channels" className="inline-block text-xs font-medium text-primary hover:underline">
+          {t('goToChannelSettingsLink')}
+        </Link>
+      </>
+    );
+  }
+
   return (
     <div className="space-y-4">
-      {available.length === 0 ? (
-        <ConnectRulesV3SectionEmpty title={t('channelsEmptyTitle')} />
-      ) : (
-        <div className="space-y-2">
-          {mainChannels.map((item) => (
-            <ChannelRow key={item.channel} item={item} connections={connections} t={t} tc={tc} />
-          ))}
-          {adChannels.length > 0 ? (
-            <div className="pt-1">
-              <p className="mb-1.5 text-[11px] font-medium text-muted-foreground">{t('adAccountsSectionTitle')}</p>
-              <div className="space-y-2">
-                {adChannels.map((item) => (
-                  <ChannelRow key={item.channel} item={item} connections={connections} t={t} tc={tc} />
-                ))}
-              </div>
-            </div>
-          ) : null}
-        </div>
-      )}
-
-      <MeasurementSection items={measurement} tc={tc} locale={locale} />
-
-      <Link href="/organization/channels" className="inline-block text-xs font-medium text-primary hover:underline">
-        {t('goToChannelSettingsLink')}
-      </Link>
+      {/* story #4019(PO 確定 2026-09-17) — 채널 목록 맨 위, OAuth 콜백 결과(연결됨/오류/
+          계정 불일치) 배너. 레거시와 같은 공유 컴포넌트(문구·판정 바이트 동일). 3상태
+          분기 밖에 둬야 목록 로딩/실패 중에도 배너가 뜬다(PO CHANGES-2). */}
+      <OAuthResultBanner connections={connections} isOwnerStrict={isOwnerStrict} />
+      {body}
     </div>
   );
 }

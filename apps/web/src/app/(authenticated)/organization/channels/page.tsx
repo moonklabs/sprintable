@@ -23,7 +23,7 @@ import { deriveChannelConnectionStatus, worstChannelConnectionStatus } from '@/c
 import { AppCredentialsCard } from '@/components/channel-connect/app-credentials-card';
 import { PastedSecretConnectCard } from '@/components/channel-connect/pasted-secret-connect-card';
 import { ReplaceCredentialCard } from '@/components/channel-connect/replace-credential-card';
-import { connectErrorLabelKey } from '@/components/channel-connect/connect-error';
+import { OAuthResultBanner } from '@/components/channel-connect/oauth-result-banner';
 import { FacebookPageSelectCard, type SelectCandidate } from '@/components/channel-connect/facebook-page-select-card';
 import type { AppCredentialsStatusResponse, ChannelConnectionResponse, TestConnectionResponse } from '@/components/channel-connect/types';
 import { AgentSetupSection } from '@/components/channel-connect/agent-setup-section';
@@ -1258,30 +1258,10 @@ export default function OrganizationChannelsPage() {
   // eslint-disable-next-line react-hooks/set-state-in-effect -- 위 load()와 같은 관례
   useEffect(() => { void loadMeasurement(); }, [loadMeasurement]);
 
-  const connected = searchParams.get('connected');
-  const connectError = searchParams.get('connect_error');
-  // story #3672(2026-09-07, 3663 실사고) — BE unhandled_exception_handler가 실어 준
-  // error_id를 BFF(authorize/callback route.ts)가 그대로 릴레이한다(AC4). 있을 때만
-  // 표시(AC5) — 없으면 지금 문구 그대로, 복사 가능한 일반 텍스트(select-text).
-  // 페드루 PO 권고②(#4025 리뷰) — 쿼리는 조작 가능한 입력이라, uuid 형식이 아니면
-  // (손상된 URL·수동 조작) «오류 번호» 자리에 임의 문자열을 그대로 띄우지 않는다.
-  const rawConnectErrorId = searchParams.get('error_id');
-  const connectErrorId = rawConnectErrorId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawConnectErrorId)
-    ? rawConnectErrorId
-    : null;
-  // story #3650(PO Test Org 실측 2026-09-07) — 재연결 대상 행과 콜백이 실제로 갱신한
-  // 행이 다를 때(다른 계정을 승인) BFF가 함께 싣는 두 id. 라벨은 이 화면이 이미
-  // 불러온 connections에서 붙인다(콜백 라우트는 opaque 릴레이 그대로 유지).
-  const mismatchTargetId = searchParams.get('mismatch');
-  const mismatchUpdatedId = searchParams.get('updated');
-  const mismatchTargetConn = connections.find((c) => c.id === mismatchTargetId);
-  const mismatchUpdatedConn = connections.find((c) => c.id === mismatchUpdatedId);
-  // story #3661(유나 판정 정정) — mismatch 파라미터가 있으면 이미 「불일치 재연결」로
-  // 확定된 것(plain 성공 배너 대상이 아니다). 목록이 아직 안 불렸으면(connections=[])
-  // find()가 둘 다 undefined라 아래 렌더 조건이 자연히 막는다 — 대상 연결을 못
-  // 찾은 채로(로드 前이든 삭제된 뒤든) raw UUID로 Alert를 그리는 대신 조용히
-  // 건너뛴다(«모르는 것을 UUID로 단정» 금지).
-  const isMismatchCase = Boolean(connected && mismatchTargetId && mismatchUpdatedId);
+  // story #4019(PO 確定 2026-09-17) — connected·connect_error·error_id·mismatch·
+  // updated 파생+렌더는 OAuthResultBanner(channel-connect/oauth-result-banner.tsx)
+  // 로 이관 — v3 connect-rules-v3-channels.tsx와 바이트 동일 문구·판정을 보장한다
+  // (재파생만 공유하면 두 화면이 갈릴 수 있어 컴포넌트 자체를 공유).
 
   // story #3549(§13-8②, 3547 계약) — 콜백 BFF(api/oauth-channel/callback/[channel])가
   // 2개 이상 페이지를 찾으면 `?select_pending={channel}&pending_id=...&candidates=...`
@@ -1345,39 +1325,7 @@ export default function OrganizationChannelsPage() {
         </div>
       ) : null}
 
-      {isMismatchCase && mismatchTargetConn && mismatchUpdatedConn ? (
-        <Alert variant="info" role="status" aria-live="polite" aria-atomic="true" data-testid="channel-reauth-mismatch-note">
-          <AlertDescription>
-            {t('channelReauthMismatchNote', {
-              updated: channelConnectionIdentityLabel(mismatchUpdatedConn, t),
-              intended: channelConnectionIdentityLabel(mismatchTargetConn, t),
-            })}
-          </AlertDescription>
-        </Alert>
-      ) : connected && !isMismatchCase ? (
-        <Alert variant="success" role="status" aria-live="polite" aria-atomic="true">
-          <AlertDescription>{t('channelConnectSuccess', { channel: channelLabel(connected, t) })}</AlertDescription>
-        </Alert>
-      ) : null}
-      {connectError ? (
-        <Alert variant="destructive" role="alert" aria-live="assertive" aria-atomic="true">
-          {/* story #3504 — CHANNEL_APP_CREDENTIALS_MISSING의 "누구에게 요청하나" 분기는
-              app-credentials 등록 자격(owner 전용, 앱 자격 저장과 같은 폭)을 묻는다 —
-              owner|admin 폭인 isOwnerOrAdmin이 아니라 isOwnerStrict가 맞다. */}
-          <AlertDescription>
-            {t(connectErrorLabelKey(connectError, isOwnerStrict))}
-            {connectErrorId ? (
-              // 유나 라이브 픽셀 실측(#4025 리뷰, 2026-09-07) — AlertDescription 자체가
-              // opacity-90이라 그 안에서 text-muted-foreground는 0.9와 합성돼 라이트
-              // 4.150(하한 4.5 미달)로 떨어진다. text-foreground(12.597/12.592)로 —
-              // opacity 층은 자식에 opacity-100을 줘도 상쇄 안 된다(부모 합성 자체).
-              <span className="mt-1 block select-text text-xs text-foreground">
-                {t('channelConnectErrorId', { errorId: connectErrorId })}
-              </span>
-            ) : null}
-          </AlertDescription>
-        </Alert>
-      ) : null}
+      <OAuthResultBanner connections={connections} isOwnerStrict={isOwnerStrict} />
       {loadState === 'error' ? (
         <Alert variant="destructive" role="alert" aria-live="assertive" aria-atomic="true">
           <AlertDescription>{t('channelLoadFailed')}</AlertDescription>
