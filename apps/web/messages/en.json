@@ -488,6 +488,7 @@
     "contextRelatedTodayLink": "Today › My decisions — decide here",
     "contextNoLinkedWorkItem": "No work item is linked to this conversation",
     "contextWorkItemScopeLabel": "Based on {title}",
+    "contextOpenLinkedWorkItem": "Open linked work",
     "contextEvidenceLoadError": "Couldn't load evidence",
     "contextHistoryLoadError": "Couldn't load history",
     "historyActionCreated": "created this",
