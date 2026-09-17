@@ -19,6 +19,7 @@ import {
   ConnectRulesV3SectionError,
   ConnectRulesV3SectionSkeleton,
 } from './connect-rules-v3-section-state';
+import { OAuthResultBanner } from '@/components/channel-connect/oauth-result-banner';
 
 /**
  * story #3982 §(d) 연결된 채널(+성과 수집) — `channel-connect/connection-status.ts`의
@@ -190,7 +191,7 @@ function MeasurementSection({
   );
 }
 
-export function ConnectRulesV3Channels({ orgId }: { orgId: string }) {
+export function ConnectRulesV3Channels({ orgId, isOwnerStrict }: { orgId: string; isOwnerStrict: boolean }) {
   const t = useTranslations('connectRulesV3');
   const tc = useTranslations('channelConnect');
   const locale = useLocale();
@@ -237,6 +238,9 @@ export function ConnectRulesV3Channels({ orgId }: { orgId: string }) {
 
   return (
     <div className="space-y-4">
+      {/* story #4019(PO 確定 2026-09-17) — 채널 목록 맨 위, OAuth 콜백 결과(연결됨/오류/
+          계정 불일치) 배너. 레거시와 같은 공유 컴포넌트(문구·판정 바이트 동일). */}
+      <OAuthResultBanner connections={connections} isOwnerStrict={isOwnerStrict} />
       {available.length === 0 ? (
         <ConnectRulesV3SectionEmpty title={t('channelsEmptyTitle')} />
       ) : (
