@@ -89,10 +89,10 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-async function mount(userName?: string) {
+async function mount(userName?: string, navV3Flags?: { todayV3Enabled: boolean; chatV3Enabled: boolean; connectRulesV3Enabled: boolean }) {
   await act(async () => {
     root.render(withProviders(
-      <AppSidebar projectMemberships={[]} chatUnreadTotal={0} userName={userName} />,
+      <AppSidebar projectMemberships={[]} chatUnreadTotal={0} userName={userName} navV3Flags={navV3Flags} />,
     ));
   });
   await act(async () => { await Promise.resolve(); await Promise.resolve(); });
@@ -125,9 +125,11 @@ const EXPECTED_GROUPS: Array<{ labelKey: string | null; labels: string[] }> = [
 // 카디르 QA(PR#3100) 지적 — 라벨은 맞는데 href가 다른 항목과 뒤바뀐 뮤테이션은 그룹별 라벨
 // 순서 대조(위 EXPECTED_GROUPS)만으론 못 잡는다. 5항목(챗 center 제외 4 + 챗 center 1,
 // 아래 별도 스위트) 전부의 라벨→href 쌍을 개별 대조해 그 구멍을 닫는다.
+// story #4003 — 「일감」은 work-list로 전환(위 별도 테스트 참고, v3 플래그 무관). 나머지
+// 4항목은 flag OFF(이 스위트의 기본 렌더 조건) 기대값 그대로 — 바이트 동일 회귀 0.
 const EXPECTED_HREF_BY_LABEL: Record<string, string> = {
   '오늘': '/org-briefing',
-  '일감': '/flow',
+  '일감': '/work-list',
   '결과': '/organization/insights-board',
   '채널 연결': '/organization/channels',
   '콘텐츠 규칙': '/organization/content-rules',
@@ -178,12 +180,16 @@ describe('AppSidebar — story #3824 5항목 축소 렌더 회귀가드(UX-v3·F
     expect(rulesLink?.getAttribute('href')).toBe('/organization/content-rules');
   });
 
+  // story #4003(4002 그라운딩 AC1) — 「일감」 1차 href를 work-list로 전환(구 /flow는
+  // WORKSPACE_FRAME_TAB_PATHS를 통해 여전히 활성 판정 대상 — 탭 커버리지 무변, 아래
+  // 별도 테스트가 확認). 이 전환은 v3 플래그 3개와 무관(work-list는 story #3844로
+  // 이미 develop에 착지한 비-게이트 라우트) — flag OFF에서도 이 href는 바뀐다.
   it('리소스 항목(일감, org/project slug 없음)이 bare href로 폴백한다(기존 resourceLink 동작)', async () => {
     expandAllGroups();
     await mount();
     // startsWith 유지 — kbd 힌트 접미사가 붙는 항목이 있어 정확한 === 매칭은 못 쓴다.
     const workLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('일감'));
-    expect(workLink?.getAttribute('href')).toBe('/flow');
+    expect(workLink?.getAttribute('href')).toBe('/work-list');
   });
 
   it('kbd 힌트(일감=B)가 정확히 붙는다', async () => {
@@ -506,5 +512,35 @@ describe('AppSidebar — story #3775 셸 결함(userName 빈 값이어도 Profil
       (el) => el.textContent === koMessages.accountSwitcher.setName,
     );
     expect(setNameItem).toBeFalsy();
+  });
+});
+
+// story #4003(E-UX-OVERHAUL·셸 통합 2/N) — navV3Flags prop이 실제로 렌더된 href까지
+// 전파되는지(nav-config.ts::resolveNavGroups/resolveChatCenterItem 소비 배선 확認).
+// 결정 로직 자체(플래그 8조합 표)는 nav-v3-destinations.test.ts·nav-config-v3-flags
+// .test.ts가 전담 — 여기선 "prop을 실제로 넘기면 화면이 바뀌는가"만.
+describe('AppSidebar — v3 nav 단일 소스(story #4003) 플래그 배선', () => {
+  it('⭐navV3Flags 미전달(OFF 기본값) — 지금 develop과 바이트 동일 href', async () => {
+    expandAllGroups();
+    await mount();
+    const todayLink = [...container.querySelectorAll('a')].find((a) => a.textContent === '오늘');
+    expect(todayLink?.getAttribute('href')).toBe('/org-briefing');
+  });
+
+  it('todayV3Enabled — 「오늘」 href가 /today로 바뀐다', async () => {
+    expandAllGroups();
+    await mount(undefined, { todayV3Enabled: true, chatV3Enabled: false, connectRulesV3Enabled: false });
+    const todayLink = [...container.querySelectorAll('a')].find((a) => a.textContent === '오늘');
+    expect(todayLink?.getAttribute('href')).toBe('/today');
+  });
+
+  it('connectRulesV3Enabled — 연결·규칙 그룹에 통합 항목이 앞에 추가되고 옛 2항목도 그대로 보인다(옛 진입점 유지)', async () => {
+    expandAllGroups();
+    await mount(undefined, { todayV3Enabled: false, chatV3Enabled: false, connectRulesV3Enabled: true });
+    const links = [...container.querySelectorAll('a')];
+    const v3Link = links.find((a) => a.getAttribute('href') === '/connect-rules');
+    expect(v3Link).toBeDefined();
+    expect(links.some((a) => a.getAttribute('href') === '/organization/channels')).toBe(true);
+    expect(links.some((a) => a.getAttribute('href') === '/organization/content-rules')).toBe(true);
   });
 });

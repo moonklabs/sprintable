@@ -35,6 +35,14 @@ export interface NavV3Destinations {
   connectRules: string | null;
 }
 
+// prop이 안 넘어온 소비처(예: 테스트, navV3Flags 미배선 자리)의 안전한 기본값 —
+// 전부 false = 지금 develop과 바이트 동일 경로(회귀 0 보장).
+export const DEFAULT_NAV_V3_FLAGS: NavV3Flags = {
+  todayV3Enabled: false,
+  chatV3Enabled: false,
+  connectRulesV3Enabled: false,
+};
+
 export function resolveNavV3Destinations(flags: NavV3Flags): NavV3Destinations {
   return {
     today: flags.todayV3Enabled ? '/today' : '/org-briefing',
