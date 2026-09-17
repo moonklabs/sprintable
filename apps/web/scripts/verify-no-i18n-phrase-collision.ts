@@ -733,6 +733,23 @@ export const EXEMPT_PAIRS = new Set<string>([
   // 실수로 낳은 근접 중복이 아니다).
   'chats.approvalRequestEscalationReason <-> eventCard.reasonLabel',
   'chats.approvalRequestResolutionNote <-> eventCard.reasonLabel',
+  // story #4015(§③ 색↔사람 할 일·유나·PO 확定 2026-09-17) — 새 발행-실패 안내 문구 3쌍.
+  // 셋 다 한 화면에 «동시에» 안 뜨거나(상호 배타·코드로 확認) 의도적 보간이라 겹쳐 읽힐
+  // 자리가 없다(#2352·#2365의 «두 문구가 나란히 헷갈린다» 모양 아님). GRANDFATHER 아님.
+  //   ① 재발행 안내는 deriveFailureAction=undefined 갈래에서만 뜬다
+  //      (page.tsx:2641 `if (failureAction !== undefined) return null` 뒤 :2654),
+  //      「다시 시도」 확認 버튼(channelPostsRetryConfirmAction)은 FailureActionBadge
+  //      (:2331 `failureAction && …` 게이트)의 onRetryClick(:2346)이 여는 ConfirmDialog
+  //      (:2370) — 배지가 서려면 failureAction이 «정의»돼야 하니 undefined 갈래인 재발행
+  //      안내와 상호 배타(한 화면 동시 X).
+  'content.channelPostsPublicationFailedRepublishNotice <-> content.channelPostsRetryConfirmAction',
+  //   ② 둘 다 publicationFailed 알림의 command_status별 분기(page.tsx:2646-2655 삼항)라
+  //      렌더당 정확히 하나만 뜬다(상호 배타).
+  'content.channelPostsPublicationFailedNotice <-> content.channelPostsPublicationFailedRepublishNotice',
+  //   ③ 재발행 안내가 발행 버튼 이름을 «의도적으로» {action}에 보간한다(page.tsx:2654,
+  //      `t(view.isRepublish ? 'publishRepublishCta' : 'publishCta')` — 안내 속 이름이
+  //      실제 버튼 텍스트와 «같은 키»여야 하는 게 목적, #4015 CHANGES 2) — 겹침이 설계다.
+  'content.channelPostsPublicationFailedRepublishNotice <-> content.publishCta',
 ]);
 
 // ⛔⭐오르테가군 지적(2026-07-31) — 이 목록에 «새로» 넣는 것은 PO 승인을 거친다. 이유 없이
