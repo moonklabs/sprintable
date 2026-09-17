@@ -88,22 +88,32 @@ describe('ConnectRulesV3Screen', () => {
   // PO CHANGES-r3-1(2026-09-17, PASS 재오픈·카디르 콜 카운트 지적) — 첫 화면 마운트
   // 콜 = me·team-members·available-channels·channel-connections·measurement-connections·
   // content-rules 6개뿐(관리자·비관리자 동일 — access-matrix/projects는 첫 펼침 때만,
-  // 에이전트 절 자체 /api/me 중복 제거).
-  it('⭐마운트 fetch 수 = 6(관리자)', async () => {
+  // 에이전트 절 자체 /api/me 중복 제거). story #3985 AC4 — 이벤트·자동화 절이
+  // `/api/events/definitions` 1콜을 더해 예산은 4376의 6 + 1 = 7.
+  it('⭐마운트 fetch 수 = 7(관리자, 4376의 6 + 이벤트·자동화 1)', async () => {
     fetchMock.mockImplementation(async (url: string) => {
       if (url === '/api/me') return { ok: true, status: 200, json: async () => ({ data: { org_id: 'org1', role: 'owner' } }) };
       return { ok: true, status: 200, json: async () => ({ data: [] }) };
     });
     await mount();
-    expect(fetchMock.mock.calls.length).toBe(6);
+    expect(fetchMock.mock.calls.length).toBe(7);
   });
 
-  it('⭐마운트 fetch 수 = 6(비관리자, access-matrix 자체가 안 걸림)', async () => {
+  it('⭐마운트 fetch 수 = 7(비관리자, access-matrix 자체가 안 걸림)', async () => {
     fetchMock.mockImplementation(async (url: string) => {
       if (url === '/api/me') return { ok: true, status: 200, json: async () => ({ data: { org_id: 'org1', role: 'member' } }) };
       return { ok: true, status: 200, json: async () => ({ data: [] }) };
     });
     await mount();
-    expect(fetchMock.mock.calls.length).toBe(6);
+    expect(fetchMock.mock.calls.length).toBe(7);
+  });
+
+  it('org_id 해소 성공 — 이벤트·자동화 절 제목도 렌더된다', async () => {
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url === '/api/me') return { ok: true, status: 200, json: async () => ({ data: { org_id: 'org1', role: 'owner' } }) };
+      return { ok: true, status: 200, json: async () => ({ data: [] }) };
+    });
+    await mount();
+    expect(container.textContent).toContain('이벤트·자동화');
   });
 });

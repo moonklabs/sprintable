@@ -2608,7 +2608,10 @@
     "ruleOff": "꺼짐",
     "generationBudgetPeriodMonth": "월",
     "goToChannelSettingsLink": "채널 설정으로",
-    "goToContentRulesLink": "콘텐츠 규칙 설정으로"
+    "goToContentRulesLink": "콘텐츠 규칙 설정으로",
+    "eventsAutomationSectionTitle": "이벤트·자동화",
+    "eventsAutomationEmptyTitle": "아직 정의가 없어요",
+    "goToEventsLink": "이벤트 관리"
   },
   "content": {
     "title": "블로그 포스트",

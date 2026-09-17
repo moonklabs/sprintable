@@ -9,6 +9,7 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { ConnectRulesV3Agents } from './connect-rules-v3-agents';
 import { ConnectRulesV3Channels } from './connect-rules-v3-channels';
 import { ConnectRulesV3Rules } from './connect-rules-v3-rules';
+import { ConnectRulesV3Events } from './connect-rules-v3-events';
 
 /**
  * story #3982(E-UX-OVERHAUL·「연결·규칙」 구현 2/N·FE) — 시안 ⑤ 그대로. 「오늘」(#3962)·
@@ -155,6 +156,13 @@ export function ConnectRulesV3Screen({
                     <span className="text-[11px] text-muted-foreground">{t('rulesSectionHint')}</span>
                   </div>
                   <ConnectRulesV3Rules orgId={orgId} />
+                </section>
+
+                <section aria-label={t('eventsAutomationSectionTitle')}>
+                  <div className="mb-2.5 flex items-baseline gap-2.5">
+                    <h2 className="text-sm font-semibold text-foreground">{t('eventsAutomationSectionTitle')}</h2>
+                  </div>
+                  <ConnectRulesV3Events orgId={orgId} />
                 </section>
               </>
             )}
