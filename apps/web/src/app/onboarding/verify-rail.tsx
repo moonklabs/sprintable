@@ -219,6 +219,10 @@ export interface UseVerificationRailResult {
    * 실패 문구를 보일 자리 — 이 훅은 UI를 안 그린다). */
   copyVerifyPromptFailed: boolean;
   handleCopyVerifyPrompt: () => Promise<void>;
+  /** story #3986 CHANGES(페드루 PO 2회차) — copyVerifyPromptFailed는 더는 자동으로
+   * 안 꺼진다(손으로 고를 시간을 3초로 자르지 않는다). 호출부가 다음 성공 시
+   * 자동 리셋 외에, 바깥 클릭·Esc·닫기 버튼으로 명시 리셋할 때 쓴다. */
+  dismissCopyVerifyPromptFailed: () => void;
   /** story #2407 ②-4: http는 heartbeat(tool 호출)가 verify 메커니즘 자체라 예시프롬프트가
    * 인과적으로 맞는 안내이지만, stdio는 세션이 살아있으면 이벤트 ack가 자동으로 진행돼
    * "tool을 부르면 완료된다"는 문구가 부정확하다(agent_verify.py get_verification_state 축
@@ -359,14 +363,21 @@ export function useVerificationRail({
   const handleCopyVerifyPrompt = useCallback(async () => {
     const result = await copyTextSafely(t('verifyExamplePrompt'));
     if (!result.ok) {
+      // story #3986 CHANGES(페드루 PO 2회차) — 이전엔 3초 뒤 자동으로 꺼져 손으로
+      // 고를 시간이 있기도 전에 안내+원문 칸이 통째로 사라졌다. 다음 성공(아래
+      // else 분기)이나 호출부의 dismissCopyVerifyPromptFailed(바깥클릭·Esc·닫기)
+      // 까지 유지한다.
       setCopyVerifyPromptFailed(true);
-      setTimeout(() => setCopyVerifyPromptFailed(false), 3000);
       return;
     }
     setCopyVerifyPromptFailed(false);
     setCopiedVerifyPrompt(true);
     setTimeout(() => setCopiedVerifyPrompt(false), 2000);
   }, [t]);
+
+  const dismissCopyVerifyPromptFailed = useCallback(() => {
+    setCopyVerifyPromptFailed(false);
+  }, []);
 
   return {
     displaySteps,
@@ -377,6 +388,7 @@ export function useVerificationRail({
     copiedVerifyPrompt,
     copyVerifyPromptFailed,
     handleCopyVerifyPrompt,
+    dismissCopyVerifyPromptFailed,
     showVerifyExamplePrompt: computeShowVerifyExamplePrompt(transport, verified),
     // verified되면 대기·타임아웃 표시는 자동으로 꺼진다(늦게 성공해도 힌트가 안 남는다).
     awaitingVerification: enabled && Boolean(agentId) && Boolean(transport) && !verified,

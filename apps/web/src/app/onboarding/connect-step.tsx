@@ -123,6 +123,7 @@ export function ConnectStep({ agentId, apiKey, projectId, onFinish, todayV3Enabl
   const [copyFailedRawConfig, setCopyFailedRawConfig] = useState<string | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const leftRef = useRef(false);
+  const verifyPromptFailedPanelRef = useRef<HTMLDivElement>(null);
 
   // story #3986 CHANGES(페드루 PO C4) — 실패 시 뜬 raw config는 그 transport/키 것이다.
   // transport를 바꾸거나 키가 갱신되는데 리셋을 안 하면 이전 transport의 raw config가
@@ -230,7 +231,28 @@ export function ConnectStep({ agentId, apiKey, projectId, onFinish, todayV3Enabl
     enabled: Boolean(apiKey),
     configCopiedDone: hasCopied,
   });
-  const { displaySteps, verified, verifying, awaitingVerification, timedOut } = rail;
+  const { displaySteps, verified, verifying, awaitingVerification, timedOut, copyVerifyPromptFailed: railCopyVerifyPromptFailed, dismissCopyVerifyPromptFailed } = rail;
+
+  // story #3986 CHANGES(페드루 PO 2회차) — 검증 예시 프롬프트 실패 패널도 더는
+  // 3초 뒤 자동으로 안 꺼진다(verify-rail.tsx 쪽 처방). 대신 바깥 클릭·Esc로
+  // 닫는다(다음 성공은 훅 안에서 이미 리셋).
+  useEffect(() => {
+    if (!railCopyVerifyPromptFailed) return;
+    const onPointerDown = (e: MouseEvent) => {
+      if (verifyPromptFailedPanelRef.current && !verifyPromptFailedPanelRef.current.contains(e.target as Node)) {
+        dismissCopyVerifyPromptFailed();
+      }
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') dismissCopyVerifyPromptFailed();
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [railCopyVerifyPromptFailed, dismissCopyVerifyPromptFailed]);
 
   // unload(탭닫기/이탈) best-effort — 미검증 시 abandoned_explicit 보조 신호(SoT는 BE 파생).
   useEffect(() => {
@@ -598,16 +620,27 @@ export function ConnectStep({ agentId, apiKey, projectId, onFinish, todayV3Enabl
               <span className="min-w-0 truncate text-foreground">
                 {t('verifyExampleLabel')} <span className="font-mono text-foreground">&ldquo;{t('verifyExamplePrompt')}&rdquo;</span>
               </span>
-              <Button variant="outline" size="sm" onClick={() => void handleCopyVerifyPrompt()} className="shrink-0">
+              <Button variant="outline" size="sm" onClick={() => void handleCopyVerifyPrompt()} className="shrink-0" data-testid="connect-step-verify-prompt-copy">
                 {rail.copiedVerifyPrompt ? <><Check className="h-3.5 w-3.5" />{t('copied')}</> : <><Copy className="h-3.5 w-3.5" />{t('copyConfig')}</>}
               </Button>
             </div>
-            {/* story #3986 CHANGES(페드루 PO C2) — 위 인용부호 안 문구는 truncate라
-                좁은 화면에선 말줄임표로 잘린다. 실패했을 때만 안 잘린 전체 문구를
-                선택 가능하게 새로 보여준다. */}
-            {rail.copyVerifyPromptFailed ? (
-              <div className="space-y-1">
-                <p role="alert" className="text-xs text-destructive">{tc('copyFailedSelectManually')}</p>
+            {/* story #3986 CHANGES(페드루 PO C2·2회차) — 위 인용부호 안 문구는
+                truncate라 좁은 화면에선 말줄임표로 잘린다. 실패했을 때만 안 잘린
+                전체 문구를 선택 가능하게 새로 보여준다 — 3초로 안 자르고 다음
+                성공·바깥 클릭·Esc·닫기까지 유지한다. */}
+            {railCopyVerifyPromptFailed ? (
+              <div ref={verifyPromptFailedPanelRef} className="space-y-1">
+                <div className="flex items-start justify-between gap-2">
+                  <p role="alert" className="text-xs text-destructive">{tc('copyFailedSelectManually')}</p>
+                  <button
+                    type="button"
+                    onClick={dismissCopyVerifyPromptFailed}
+                    aria-label={tc('close')}
+                    className="shrink-0 text-muted-foreground hover:text-foreground"
+                  >
+                    ✕
+                  </button>
+                </div>
                 <input
                   readOnly
                   value={t('verifyExamplePrompt')}
