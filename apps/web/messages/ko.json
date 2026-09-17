@@ -2845,6 +2845,7 @@
     "engagementFilterChannelLabel": "채널",
     "engagementAssigneeNone": "담당 없음",
     "engagementAssigneeLabel": "담당 · {name}",
+    "engagementAssigneeLoadFailed": "담당자 목록을 불러오지 못했어요.",
     "engagementDeletedCommentPlaceholder": "삭제된 댓글",
     "engagementEmptyTitle": "받은 반응이 없어요.",
     "engagementEmptyDescription": "게시물에 댓글이 달리면 여기에 모여요.",
