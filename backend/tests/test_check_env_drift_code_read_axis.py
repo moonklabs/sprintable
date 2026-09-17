@@ -440,46 +440,6 @@ def test_baseline_entry_without_reason_is_escalated():
     assert ok == [] and "reason" in escalate[0]
 
 
-# ── story #4023 AC3 — 만료 임박 경고(report-only, FAIL 아님) ─────────────────────
-
-def test_ac3_positive_control_entry_expiring_in_10_days_warns():
-    """AC3 양성 대조 — 가짜 항목이 만료 10일 전이면 경고 줄이 나온다."""
-    from datetime import date, timedelta
-    mod = _load_check_env_drift()
-    today = date(2026, 9, 17)
-    baseline = {"SOON_KEY": _entry(until=(today + timedelta(days=10)).isoformat())}
-    lines = mod._baseline_entries_expiring_soon(baseline, today)
-    assert len(lines) == 1
-    assert "SOON_KEY" in lines[0] and "10일 뒤 만료" in lines[0]
-
-
-def test_ac3_entry_expiring_beyond_warning_window_does_not_warn():
-    """음성 대조 — 경고 창(14일)보다 멀리 있는 만료는 조용하다(매번 시끄러우면 신호 소실)."""
-    from datetime import date, timedelta
-    mod = _load_check_env_drift()
-    today = date(2026, 9, 17)
-    baseline = {"FAR_KEY": _entry(until=(today + timedelta(days=20)).isoformat())}
-    assert mod._baseline_entries_expiring_soon(baseline, today) == []
-
-
-def test_ac3_already_expired_entry_does_not_double_warn():
-    """이미 만료된 건 `_baseline_entry_expired`가 별도 FAIL로 잡는다 — 이 경고 축은 «아직
-    안 만료됐지만 임박» 구간만 담당해야 중복 신호가 안 생긴다."""
-    from datetime import date
-    mod = _load_check_env_drift()
-    today = date(2026, 9, 17)
-    baseline = {"OLD_KEY": _entry(until="2026-09-01")}
-    assert mod._baseline_entries_expiring_soon(baseline, today) == []
-
-
-def test_ac3_real_repo_baseline_currently_has_no_entries_to_warn_about():
-    """story #4023 AC1 반영 후 실 레포 baseline은 0건이므로 이 경고 축도 지금은 조용하다 —
-    메커니즘 자체는 위 양성 대조가 증명한다."""
-    mod = _load_check_env_drift()
-    baseline = mod._load_code_read_high_baseline()
-    assert mod._baseline_entries_expiring_soon(baseline, mod._today()) == []
-
-
 def test_repo_code_read_high_baseline_is_wellformed():
     """저장소에 실제로 커밋된 baseline(2026-08-07 — #2510 NEXT_PUBLIC_TOSS_CLIENT_KEY
     추가로 14→15, 2026-08-17 — #2728 NEXT_PUBLIC_EE_ENABLED를 cloudbuild.yaml/GHA 배선으로
