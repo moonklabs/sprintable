@@ -206,4 +206,35 @@ describe('ResponsiveDataTable', () => {
     await act(async () => { root.unmount(); });
     container.remove();
   });
+
+  // story #4014 — insights-board의 스크롤-투-로우 딥링크(rowRefs)가 <tr>/카드 wrapper
+  // DOM 노드 참조와 className(하이라이트 배경)을 직접 잡아야 해서 만든 탈출구.
+  it('⭐getRowProps — ref·className이 표 <tr>·카드 wrapper 둘 다에 실린다', async () => {
+    const refs: HTMLElement[] = [];
+    const { container, root } = mountTable();
+    await act(async () => {
+      root.render(
+        <ResponsiveDataTable
+          columns={COLUMNS}
+          rows={[ROWS[0]]}
+          rowKey={(r) => r.id}
+          getRowProps={() => ({
+            ref: (el) => { if (el) refs.push(el); },
+            className: 'bg-primary/10',
+          })}
+        />,
+      );
+    });
+
+    const tr = container.querySelector('table tbody tr');
+    expect(tr!.className).toContain('bg-primary/10');
+    const cardWrapper = container.querySelector('[data-testid="responsive-data-table-cards"] .rounded-md.border');
+    expect(cardWrapper!.className).toContain('bg-primary/10');
+    // ref 콜백이 표·카드 두 실 DOM 노드 모두에서 호출됐다(항상 둘 다 DOM에 있다는
+    // AC5/6 계약과 정합 — 하나만 마운트되면 refs.length===1이었을 것).
+    expect(refs.length).toBe(2);
+
+    await act(async () => { root.unmount(); });
+    container.remove();
+  });
 });

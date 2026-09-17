@@ -37,6 +37,9 @@ export interface ResponsiveDataTableColumn<T> {
   header: ReactNode;
   /** 표 `<th>` className 추가분(폭 등) — 표 마크업 무변 유지를 위해 화면별로 기존 값 그대로 넘긴다. */
   headerClassName?: string;
+  /** 표 `<th>`에 직접 스프레드할 추가 속성(예: `aria-sort` — ARIA 스펙상 columnheader
+   * role인 `<th>` 자신에 있어야 보조기술이 읽는다, 안쪽 span에 달면 무효). */
+  headerProps?: Record<string, unknown>;
   /** 표 `<td>` className 추가분. */
   cellClassName?: string;
   /** 카드(<1024) 모드에서 이 열이 어느 자리에 놓이는가. 'hidden'은 카드에서 아예 안 그림
@@ -74,6 +77,17 @@ export interface ResponsiveDataTableProps<T> {
   renderGroupHeader?: (row: T, index: number, key: string) => ResponsiveDataTableRenderedPair;
   /** 각 데이터 행에 붙는 보조 내용(재조정 결과류) — null/undefined 반환 시 그 행엔 안 붙임. */
   renderRowFooter?: (row: T, index: number) => ResponsiveDataTableRenderedPair | null;
+  /** 표 `<tr>`·카드 wrapper `<div>` 둘 다에 스프레드되는 추가 속성(ref·className·
+   * data-* 등) — 예: 딥링크 스크롤-투-로우가 DOM 노드 참조를 잡아야 하는 경우. ref는
+   * HTMLElement로 좁혀 표(`<tr>`)·카드(`<div>`) 양쪽에 다 쓸 수 있게 한다. `mode`로
+   * 어느 쪽 호출인지 알려준다 — 표·카드가 항상 둘 다 DOM에 있어(AC5/6) 같은 행이 두 실
+   * 노드를 갖는데, 폭에 따라 한쪽은 `display:none`이라 ref를 하나의 Map에 덮어쓰면
+   * "숨은 쪽" 참조가 남을 수 있다(scrollIntoView가 조용히 실패). 호출부가 표·카드
+   * 참조를 별도로 추적해 보이는 쪽만 골라 쓰게 한다. */
+  getRowProps?: (row: T, index: number, mode: 'table' | 'card') => {
+    ref?: (el: HTMLElement | null) => void;
+    className?: string;
+  } & Record<string, unknown>;
 }
 
 const CARD_WRAPPER_CLASS = 'block space-y-1.5 rounded-md border border-border p-2 text-xs';
@@ -89,13 +103,25 @@ export function ResponsiveDataTable<T>({
   groupKey,
   renderGroupHeader,
   renderRowFooter,
+  getRowProps,
 }: ResponsiveDataTableProps<T>) {
   const titleColumns = columns.filter((c) => c.cardSlot === 'title');
   const metaColumns = columns.filter((c) => c.cardSlot === 'meta');
   const metricColumns = columns.filter((c) => c.cardSlot === 'metric');
   const actionColumns = columns.filter((c) => c.cardSlot === 'action');
 
-  let lastGroupKey: string | null = null;
+  // 그룹 경계(새 groupKey 등장) 여부를 렌더 前에 순수 계산 — .map() 콜백 안에서 지역
+  // 변수를 재대입하면 렌더 순수성 린트(react-hooks/immutability)에 걸린다.
+  const isNewGroupFlags: boolean[] = [];
+  {
+    let prevKey: string | null = null;
+    for (let i = 0; i < rows.length; i++) {
+      const key = groupKey?.(rows[i], i) ?? null;
+      const isNew = key !== null && key !== prevKey;
+      isNewGroupFlags.push(isNew);
+      if (isNew) prevKey = key;
+    }
+  }
 
   return (
     <>
@@ -105,7 +131,11 @@ export function ResponsiveDataTable<T>({
           <thead className={theadClassName ?? 'bg-muted/50 text-xs text-muted-foreground'}>
             <tr>
               {columns.map((col) => (
-                <th key={col.key} className={col.headerClassName ?? 'px-3 py-2 text-left font-medium'}>
+                <th
+                  key={col.key}
+                  className={col.headerClassName ?? 'px-3 py-2 text-left font-medium'}
+                  {...col.headerProps}
+                >
                   {col.header}
                 </th>
               ))}
@@ -114,14 +144,14 @@ export function ResponsiveDataTable<T>({
           <tbody className={tbodyClassName ?? 'divide-y divide-border'}>
             {rows.map((row, index) => {
               const key = groupKey?.(row, index) ?? null;
-              const isNewGroup = key !== null && key !== lastGroupKey;
-              if (isNewGroup) lastGroupKey = key;
-              const groupHeaderPair = isNewGroup ? renderGroupHeader?.(row, index, key) : undefined;
+              const isNewGroup = isNewGroupFlags[index];
+              const groupHeaderPair = isNewGroup && key !== null ? renderGroupHeader?.(row, index, key) : undefined;
               const footerPair = renderRowFooter?.(row, index);
+              const rowProps = getRowProps?.(row, index, 'table');
               return (
                 <Fragment key={rowKey(row, index)}>
                   {groupHeaderPair ? groupHeaderPair.table : null}
-                  <tr data-testid={rowTestId}>
+                  <tr data-testid={rowTestId} {...rowProps}>
                     {columns.map((col) => (
                       <td key={col.key} className={col.cellClassName ?? 'px-3 py-2.5'}>
                         {col.renderCell(row, index)}
@@ -138,18 +168,21 @@ export function ResponsiveDataTable<T>({
 
       {/* <1024 — 카드 리스트(시안 §3). */}
       <div className="space-y-2 lg:hidden" data-testid="responsive-data-table-cards">
-        {(() => {
-          lastGroupKey = null;
-          return rows.map((row, index) => {
+        {rows.map((row, index) => {
             const key = groupKey?.(row, index) ?? null;
-            const isNewGroup = key !== null && key !== lastGroupKey;
-            if (isNewGroup) lastGroupKey = key;
-            const groupHeaderPair = isNewGroup ? renderGroupHeader?.(row, index, key) : undefined;
+            const isNewGroup = isNewGroupFlags[index];
+            const groupHeaderPair = isNewGroup && key !== null ? renderGroupHeader?.(row, index, key) : undefined;
             const footerPair = renderRowFooter?.(row, index);
+            const rowProps = getRowProps?.(row, index, 'card');
+            const { className: extraClassName, ...restRowProps } = rowProps ?? {};
             return (
               <div key={rowKey(row, index)}>
                 {groupHeaderPair ? <div>{groupHeaderPair.card}</div> : null}
-                <div className={CARD_WRAPPER_CLASS} data-testid={rowTestId}>
+                <div
+                  className={`${CARD_WRAPPER_CLASS}${extraClassName ? ` ${extraClassName}` : ''}`}
+                  data-testid={rowTestId}
+                  {...restRowProps}
+                >
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0 flex-1 space-y-1">
                       {titleColumns.map((col) => (
@@ -189,8 +222,7 @@ export function ResponsiveDataTable<T>({
                 </div>
               </div>
             );
-          });
-        })()}
+          })}
       </div>
     </>
   );

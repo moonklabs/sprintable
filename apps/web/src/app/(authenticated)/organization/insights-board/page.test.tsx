@@ -206,7 +206,7 @@ describe('InsightsBoardPage — d1/d7 셀 3겹 null 축(story #3503)', () => {
     stubFetch({});
     await mount();
 
-    const rows = [...container.querySelectorAll('[data-testid="insights-board-row"]')];
+    const rows = [...container.querySelectorAll('table [data-testid="insights-board-row"]')];
     expect(rows).toHaveLength(3);
 
     // Row A: d1=null(미스케줄) · d7=captured, 기본 지표(views)=0(정상 캡처값 — null 아님).
@@ -260,7 +260,7 @@ describe('InsightsBoardPage — d1/d7 셀 3겹 null 축(story #3503)', () => {
     stubFetch({ page1: [{ ...ROW_A, published_at: recentPublishedAt }] });
     await mount();
 
-    const rows = [...container.querySelectorAll('[data-testid="insights-board-row"]')];
+    const rows = [...container.querySelectorAll('table [data-testid="insights-board-row"]')];
     const publishedCell = rows[0]!.querySelector('[data-testid="insights-board-published-at"]');
     expect(publishedCell?.textContent).toMatch(/^\d{2}-\d{2} \d{2}:\d{2} /);
     expect(publishedCell?.textContent).not.toMatch(/전|그저께|어제|오늘/);
@@ -461,14 +461,14 @@ describe('InsightsBoardPage — 더 보기 누적(story #3503)', () => {
   it('has_more면 더 보기 버튼이 뜨고, 누르면 새 행이 «교체»가 아니라 «추가»된다', async () => {
     stubFetch({ page1: [ROW_A], page1HasMore: true, page1NextCursor: 'cursor-1', page2: [ROW_B] });
     await mount();
-    expect(container.querySelectorAll('[data-testid="insights-board-row"]')).toHaveLength(1);
+    expect(container.querySelectorAll('table [data-testid="insights-board-row"]')).toHaveLength(1);
 
     const loadMoreBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.insightsBoard.loadMore) as HTMLButtonElement;
     expect(loadMoreBtn).not.toBeUndefined();
     await act(async () => { loadMoreBtn.click(); });
     await flush();
 
-    const rows = container.querySelectorAll('[data-testid="insights-board-row"]');
+    const rows = container.querySelectorAll('table [data-testid="insights-board-row"]');
     expect(rows).toHaveLength(2);
     expect(container.textContent).toContain('글 A');
     expect(container.textContent).toContain('글 B');
@@ -640,11 +640,19 @@ describe('InsightsBoardPage — ?highlight로 들어온 행 강조(story #3617)'
   it('?highlight=pub-b — 그 행에 scrollIntoView가 불리고 강조 클래스가 붙는다', async () => {
     const scrollIntoViewMock = vi.fn();
     Element.prototype.scrollIntoView = scrollIntoViewMock;
+    // story #4014 — ResponsiveDataTable이 표 <tr>·카드 <div> 둘 다 항상 DOM에 두므로
+    // (AC5/6) 실 브라우저에선 offsetParent로 "지금 보이는 쪽"만 스크롤 대상으로 고른다
+    // (production 코드 참고). jsdom은 레이아웃을 계산하지 않아 offsetParent가 항상
+    // null이라 실측을 흉내낸다(둘 다 "보인다"로 — 어느 쪽이 골라지든 이 테스트의
+    // 단언(강조 표시+scrollIntoView 호출 여부)엔 무관).
+    Object.defineProperty(HTMLElement.prototype, 'offsetParent', {
+      configurable: true, get: () => document.body,
+    });
     useSearchParamsMock.mockReturnValue(new URLSearchParams('highlight=pub-b'));
     stubFetch({});
     await mount();
 
-    const rows = container.querySelectorAll('[data-testid="insights-board-row"]');
+    const rows = container.querySelectorAll('table [data-testid="insights-board-row"]');
     const highlighted = [...rows].find((r) => r.getAttribute('data-highlighted') === 'true');
     expect(highlighted).not.toBeUndefined();
     expect(scrollIntoViewMock).toHaveBeenCalled();
@@ -654,7 +662,7 @@ describe('InsightsBoardPage — ?highlight로 들어온 행 강조(story #3617)'
     useSearchParamsMock.mockReturnValue(new URLSearchParams());
     stubFetch({});
     await mount();
-    const rows = container.querySelectorAll('[data-testid="insights-board-row"]');
+    const rows = container.querySelectorAll('table [data-testid="insights-board-row"]');
     expect([...rows].some((r) => r.getAttribute('data-highlighted') === 'true')).toBe(false);
   });
 
@@ -674,7 +682,7 @@ describe('InsightsBoardPage — 원본과 대조 행 액션(story #3620)', () =>
   it('channel_publication 행(A·C)에만 버튼이 있고, site_post 행(B)엔 없다', async () => {
     stubFetch({});
     await mount();
-    const rows = [...container.querySelectorAll('[data-testid="insights-board-row"]')];
+    const rows = [...container.querySelectorAll('table [data-testid="insights-board-row"]')];
     await expandRow(rows[0]!); await expandRow(rows[1]!); await expandRow(rows[2]!);
     expect(rows[0]!.nextElementSibling?.querySelector('[data-testid="insights-board-reconcile-button"]')).not.toBeNull();
     expect(rows[1]!.nextElementSibling?.querySelector('[data-testid="insights-board-reconcile-button"]')).toBeNull();
@@ -694,7 +702,7 @@ describe('InsightsBoardPage — 원본과 대조 행 액션(story #3620)', () =>
     });
     await mount();
     await expandFirstRow();
-    const rows = [...container.querySelectorAll('[data-testid="insights-board-row"]')];
+    const rows = [...container.querySelectorAll('table [data-testid="insights-board-row"]')];
     const btn = rows[0]!.nextElementSibling!.querySelector('[data-testid="insights-board-reconcile-button"]') as HTMLButtonElement;
     expect(btn.disabled).toBe(false);
 
@@ -716,7 +724,7 @@ describe('InsightsBoardPage — 원본과 대조 행 액션(story #3620)', () =>
     });
     await mount();
     await expandFirstRow();
-    const rows = [...container.querySelectorAll('[data-testid="insights-board-row"]')];
+    const rows = [...container.querySelectorAll('table [data-testid="insights-board-row"]')];
     const btn = rows[0]!.nextElementSibling!.querySelector('[data-testid="insights-board-reconcile-button"]') as HTMLButtonElement;
     await act(async () => { btn.click(); });
     await flush();
@@ -787,7 +795,7 @@ describe('InsightsBoardPage — 「사람 차례」 행 배지(story #3766)', ()
   it('pending·voided는 배지가 안 뜬다(이 보드엔 failure_kind/reasonCode가 없어 그 갈래는 애초에 판정 불가)', async () => {
     stubFetch({ page1: [ROW_PENDING, ROW_VOIDED] });
     await mount();
-    const rows = [...container.querySelectorAll('[data-testid="insights-board-row"]')];
+    const rows = [...container.querySelectorAll('table [data-testid="insights-board-row"]')];
     expect(rows[0]!.querySelector('[data-testid="channel-post-failure-badge"]')).toBeNull();
     expect(rows[1]!.querySelector('[data-testid="channel-post-failure-badge"]')).toBeNull();
   });
@@ -855,8 +863,8 @@ describe('InsightsBoardPage — 소재/훅 묶음 토글(story #3656, 목 데이
   it('기본값(묶음=없음)은 무회귀 — 그룹 헤더 행이 안 뜨고 기존처럼 행마다 하나씩', async () => {
     stubFetch({ page1: [GROUPABLE_ROW_IG, GROUPABLE_ROW_FB, GROUPABLE_ROW_THREADS] });
     await mount();
-    expect(container.querySelectorAll('[data-testid="insights-board-group-header"]').length).toBe(0);
-    expect(container.querySelectorAll('[data-testid="insights-board-row"]').length).toBe(3);
+    expect(container.querySelectorAll('table [data-testid="insights-board-group-header"]').length).toBe(0);
+    expect(container.querySelectorAll('table [data-testid="insights-board-row"]').length).toBe(3);
   });
 
   it('묶음=소재 — 같은 asset_sha256s[0]을 공유하는 IG·FB가 한 그룹(대표=sha256 앞 8자)으로, 단일 소재(threads)는 별도 그룹으로 묶인다', async () => {
@@ -872,10 +880,10 @@ describe('InsightsBoardPage — 소재/훅 묶음 토글(story #3656, 목 데이
     await act(async () => { root.render(wrap(<InsightsBoardPage />)); });
     await flush();
 
-    const headers = [...container.querySelectorAll('[data-testid="insights-board-group-header"]')];
+    const headers = [...container.querySelectorAll('table [data-testid="insights-board-group-header"]')];
     expect(headers).toHaveLength(2);
     expect(headers[0]!.querySelector('[data-testid="insights-board-group-label"]')?.textContent).toBe('abcdefab');
-    expect(container.querySelectorAll('[data-testid="insights-board-row"]').length).toBe(3);
+    expect(container.querySelectorAll('table [data-testid="insights-board-row"]').length).toBe(3);
   });
 
   it('묶음=훅 — hook_key가 null인 FB는 「미분류」(docs 재사용) 그룹으로, IG·threads는 hook-A 그룹으로 합쳐진다', async () => {
@@ -889,7 +897,7 @@ describe('InsightsBoardPage — 소재/훅 묶음 토글(story #3656, 목 데이
     await act(async () => { root.render(wrap(<InsightsBoardPage />)); });
     await flush();
 
-    const headers = [...container.querySelectorAll('[data-testid="insights-board-group-header"]')];
+    const headers = [...container.querySelectorAll('table [data-testid="insights-board-group-header"]')];
     const labels = headers.map((h) => h.querySelector('[data-testid="insights-board-group-label"]')?.textContent);
     expect(labels).toEqual(['hook-A', koMessages.docs.indexCategoryUncategorized]);
     const hookAHeader = headers[0]!;
