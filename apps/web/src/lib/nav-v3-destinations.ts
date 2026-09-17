@@ -8,12 +8,12 @@
  * 교체하는 건 3/N(story #4004, v3 PR 착지 뒤) 스코프 — 그 파일들은 develop에 아직
  * 없어(미착지 PR 4365·4370·4376에만 존재) 이 카드에서 손대지 않는다.
  *
- * 「일감」·「결과」는 여기 없다: 「일감」은 work-list(story #3844)가 이미 develop에
- * 있고 어느 플래그에도 안 걸려 org/project 문맥만으로 해소되는 resource-kind
- * 경로라(app-sidebar.tsx의 resourceLink('work-list', WORKSPACE_FRAME_TAB_PATHS)로
- * 직접 처리, 이 모듈이 다루면 resourceLink의 org/project 접두 로직을 복붙하게 된다 —
- * AC2가 금지하는 그 중복) 이 모듈의 스코프 밖이다. 「결과」는 플래그 무관 고정 경로
- * (/organization/insights-board, v3/레거시 둘 다 이미 동일)라 애초에 분기가 없다.
+ * CHANGES(페드루 PO, PR#4386 첫 리뷰) — 첫 버전은 절대경로 문자열만 반환해 「일감」·
+ * 「결과」를 스코프 밖으로 뺐는데, 그러면 4004에서 v3 세 화면이 또 손으로 정하게
+ * 된다. **서술자**(`{kind, path}`)로 5항목 전부를 이 모듈이 정하고, resource-kind는
+ * "org/project 접두가 필요한 상대 경로 조각"만 돌려줘 실제 접두는 호출부(레거시=
+ * app-sidebar.tsx의 resourceLink, 4004=v3 화면의 동형 헬퍼)가 한다 — 접두 로직 자체는
+ * 안 복붙(AC2).
  */
 
 export interface NavV3Flags {
@@ -22,17 +22,32 @@ export interface NavV3Flags {
   connectRulesV3Enabled: boolean;
 }
 
+/** static = 그대로 href로 쓰는 절대경로. resource = org/project 접두가 필요한 조각(호출부의 resourceLink류가 해석). */
+export type NavV3Destination =
+  | { kind: 'static'; path: string }
+  | { kind: 'resource'; path: string };
+
 export interface NavV3Destinations {
   /** 「오늘」 — ON: /today(story #3962) · OFF: /org-briefing(기존 「지금」 존) */
-  today: string;
+  today: NavV3Destination;
   /** 「대화」 — ON: /chat(story #3972) · OFF: /chats(기존 챗 center) */
-  chats: string;
+  chats: NavV3Destination;
+  /**
+   * 「일감」 — CHANGES: 어느 단일 v3 플래그에도 안 걸린 화면이라, 셋 중 **하나라도**
+   * ON이면(=이 배치의 v3 전환이 시작됐다는 신호) work-list(story #3844, 시안 ③ 첫 탭)
+   * 로, 셋 다 OFF(=지금 prod 상태)면 기존 flow 그대로 — 「플래그 전부 OFF=바이트
+   * 동일」 불변식을 「일감」도 지킨다(1차 리뷰 CHANGES①: work-list 무조건 전환은
+   * 착지 즉시 전 사용자 노출이라 반려됨).
+   */
+  work: NavV3Destination;
+  /** 「결과」 — 플래그 무관 고정 경로(v3/레거시 둘 다 이미 /organization/insights-board 공용). */
+  results: NavV3Destination;
   /**
    * 「연결·규칙」 — ON: /connect-rules(story #3982, 통합 화면) · OFF: null(항목 자체를
    * 안 낸다 — 레거시는 지금처럼 「채널 연결」·「콘텐츠 규칙」 2항목을 그대로 유지,
    * 「옛 진입점 지우지 않는다」 원칙).
    */
-  connectRules: string | null;
+  connectRules: NavV3Destination | null;
 }
 
 // prop이 안 넘어온 소비처(예: 테스트, navV3Flags 미배선 자리)의 안전한 기본값 —
@@ -44,9 +59,12 @@ export const DEFAULT_NAV_V3_FLAGS: NavV3Flags = {
 };
 
 export function resolveNavV3Destinations(flags: NavV3Flags): NavV3Destinations {
+  const anyV3Enabled = flags.todayV3Enabled || flags.chatV3Enabled || flags.connectRulesV3Enabled;
   return {
-    today: flags.todayV3Enabled ? '/today' : '/org-briefing',
-    chats: flags.chatV3Enabled ? '/chat' : '/chats',
-    connectRules: flags.connectRulesV3Enabled ? '/connect-rules' : null,
+    today: { kind: 'static', path: flags.todayV3Enabled ? '/today' : '/org-briefing' },
+    chats: { kind: 'static', path: flags.chatV3Enabled ? '/chat' : '/chats' },
+    work: { kind: 'resource', path: anyV3Enabled ? 'work-list' : 'flow' },
+    results: { kind: 'static', path: '/organization/insights-board' },
+    connectRules: flags.connectRulesV3Enabled ? { kind: 'static', path: '/connect-rules' } : null,
   };
 }
