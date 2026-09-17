@@ -21,6 +21,7 @@ import type { RoleTemplateSummary, RecruitResponse, McpConfigBundle, RuntimeCapa
 import { RUNTIME_CAPABILITIES_FALLBACK, RUNTIME_GUIDE_FILENAME_FALLBACK, KIT_FILENAME, resolveRuntimeWakeInfo, RUNTIME_CONNECT_CLI, resolveConnectConfirm } from '@/services/recruit';
 import type { PresenceStatus } from '@/components/chat/presence-dot';
 import { fetchWithAuth } from '@/lib/db/client';
+import { isSystemPublisher } from '@/lib/runtime-capabilities';
 
 // ─── 상수/헬퍼 ──────────────────────────────────────────────────────────────
 
@@ -610,8 +611,14 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
         // 흐름은 현재 프로젝트 스코프라 새로 만들기(scope_mode=projects)와 동일하게 project_id 로 스코프.
         const res = await fetchWithAuth(`/api/team-members?project_id=${projectId}&type=agent`);
         if (!res.ok) return;
-        const json = (await res.json()) as { data?: Array<{ id: string; name: string; type: string }> };
-        setExistingAgents((json.data ?? []).filter((m) => m.type === 'agent').map((m) => ({ id: m.id, name: m.name })));
+        const json = (await res.json()) as { data?: Array<{ id: string; name: string; type: string; runtime_type?: string | null }> };
+        // story #3994 — 「시스템 발행」에 채용 역할을 붙이는 것 자체가 의미 없다(연결
+        // 대상이 아닌 내부 멤버) — 고르는 자리에서 제외.
+        setExistingAgents(
+          (json.data ?? [])
+            .filter((m) => m.type === 'agent' && !isSystemPublisher(m.runtime_type))
+            .map((m) => ({ id: m.id, name: m.name })),
+        );
       } catch {
         setExistingAgents([]);
       }

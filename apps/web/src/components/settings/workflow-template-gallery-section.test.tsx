@@ -185,6 +185,41 @@ describe('WorkflowTemplateGallerySection — 축2-ⓒ 프리필(PO 확定 A)', (
   });
 });
 
+// story #3994(«거짓 경고» 클래스, PO 확定) — 「시스템 발행」에 워크플로 역할을
+// 매핑하는 것 자체가 의미 없다(연결 대상이 아닌 내부 멤버) — select에서 제외.
+describe('WorkflowTemplateGallerySection — 시스템 발행 제외(story #3994)', () => {
+  it('⭐team-members에 「시스템 발행」이 섞여 와도 역할매핑 select 옵션엔 안 뜬다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/events/definitions' && !init) return { ok: true, json: async () => [DEFINITION] };
+      if (url.includes('/api/team-members')) {
+        return {
+          ok: true,
+          json: async () => ({
+            data: [
+              { id: 'sp1', name: '시스템 발행', type: 'agent', runtime_type: 'system-publisher' },
+              { id: 'a1', name: '디디군', type: 'agent', runtime_type: 'claude-code' },
+            ],
+          }),
+        };
+      }
+      if (url.includes('/api/events/definitions/def-1/bindings')) return { ok: true, json: async () => ({ bindings: {} }) };
+      throw new Error('unexpected fetch: ' + url);
+    }));
+
+    await act(async () => { root.render(wrap(<WorkflowTemplateGallerySection projectId="proj-1" />)); });
+    await flush();
+
+    const tmplBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('테스트 레시피'));
+    await act(async () => { tmplBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    const select = container.querySelector('select');
+    const optionLabels = [...(select?.querySelectorAll('option') ?? [])].map((o) => o.textContent);
+    expect(optionLabels).not.toContain('시스템 발행');
+    expect(optionLabels).toContain('디디군');
+  });
+});
+
 // story #3316 — apply 응답 warnings[]가 지금까지 이 갤러리에서 destructure조차 안 돼(응답 필드
 // 자체가 빠짐) 조용히 버려지고 있었다(회귀 없음 확인 + 재발 방지 핀).
 describe('WorkflowTemplateGallerySection — apply warnings[] 렌더(story #3316 회귀수정)', () => {
