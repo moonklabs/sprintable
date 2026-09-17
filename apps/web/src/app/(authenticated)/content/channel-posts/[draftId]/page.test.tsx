@@ -1221,6 +1221,70 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     expect(container.querySelector('[data-testid="channel-post-publication-failed-notice"]')).toBeNull();
   });
 
+  // ===== story #4015 — publicationFailed 알림: 실패 신호 정확히 1개(§③ 색↔사람 할 일) =====
+  // AC4 — publication_status='failed' × command_status × failure_kind 조합을 순회하며
+  // ①배지가 서는 조합(deriveFailureAction 정의) = 알림 없음·배지 하나 ②배지 없는 조합
+  // (undefined) = 중립 알림(role=status·참 문장) 하나·배지 없음. 어느 조합이든 실패 신호는
+  // «정확히 1개». 옛 blanket destructive+「이어서 처리돼요」로 되돌리면 배지 조합에서
+  // 알림이 다시 떠 RED가 된다(양성대조 아래).
+  const FAILED = { gate_status: 'approved', sealed_content_sha256: 'h1', publication_status: 'failed' as const };
+  it.each([
+    { name: 'dead_letter', over: { command_status: 'dead_letter' } },
+    { name: 'blocked+connection', over: { command_status: 'blocked', failure_kind: 'connection' } },
+    { name: 'pending+transient(auto_retry)', over: { command_status: 'pending', failure_kind: 'transient', next_retry_at: '2026-09-20T00:00:00Z' } },
+    { name: 'voided', over: { command_status: 'voided' } },
+  ])('배지 있는 조합($name) — publicationFailed 알림 없음·배지 하나(신호 1개)', async ({ over }) => {
+    stubFetch({ draftDetail: { ...FAILED, ...over } });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="channel-post-publication-failed-notice"]')).toBeNull();
+    expect(container.querySelector('[data-testid="channel-post-failure-badge"]')).not.toBeNull();
+  });
+
+  it.each([
+    { name: 'cancelled', over: { command_status: 'cancelled' }, key: 'channelPostsPublicationFailedCancelledNotice' },
+    { name: 'pending·kind 없음', over: { command_status: 'pending' }, key: 'channelPostsPublicationFailedPendingRetryNotice' },
+    { name: 'in_progress·kind 없음', over: { command_status: 'in_progress' }, key: 'channelPostsPublicationFailedInProgressNotice' },
+    { name: 'completed(도달 불가 폴백)', over: { command_status: 'completed' }, key: 'channelPostsPublicationFailedNotice' },
+  ])('배지 없는 조합($name) — 중립 알림 하나(참 문장·role=status)·배지 없음', async ({ over, key }) => {
+    stubFetch({ draftDetail: { ...FAILED, ...over } });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const notice = container.querySelector('[data-testid="channel-post-publication-failed-notice"]');
+    expect(notice).not.toBeNull();
+    expect(notice?.getAttribute('role')).toBe('status'); // 중립(경고색 아님)
+    expect(notice?.textContent).toBe((koMessages.content as Record<string, string>)[key]);
+    expect(container.querySelector('[data-testid="channel-post-failure-badge"]')).toBeNull();
+  });
+
+  it('배지 없는 조합(null·canPublish) — 「다시 발행」 안내(role=status)', async () => {
+    stubFetch({ draftDetail: { ...FAILED, body_sha256: 'h1', command_status: null } });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const notice = container.querySelector('[data-testid="channel-post-publication-failed-notice"]');
+    expect(notice?.getAttribute('role')).toBe('status');
+    expect(notice?.textContent).toBe(koMessages.content.channelPostsPublicationFailedRepublishNotice);
+    expect(container.querySelector('[data-testid="channel-post-failure-badge"]')).toBeNull();
+  });
+
+  it('배지 없는 조합(null·!canPublish=해시 불일치) — 사실만(버튼 약속 0)', async () => {
+    stubFetch({ draftDetail: { ...FAILED, body_sha256: 'h2', command_status: null } });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const notice = container.querySelector('[data-testid="channel-post-publication-failed-notice"]');
+    expect(notice?.textContent).toBe(koMessages.content.channelPostsPublicationFailedNotice);
+    expect(container.querySelector('[data-testid="channel-post-failure-button"]')).toBeNull();
+  });
+
+  it('양성대조 — 어느 조합에서도 옛 blanket 「이어서 처리」 문구는 화면에 0', async () => {
+    stubFetch({ draftDetail: { ...FAILED, command_status: 'dead_letter' } });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    // dead_letter는 배지 조합 → 알림 없음. 옛 분기로 되돌리면 여기 알림이 다시 떠 RED.
+    expect(container.querySelector('[data-testid="channel-post-publication-failed-notice"]')).toBeNull();
+    expect(container.textContent ?? '').not.toContain('이어서 처리');
+  });
+
   // story #3402 PR2 ②-a(AC5·doc §5) — 발행/발행 취소 버튼 게이팅(API 배선은 ②-b, 이
   // 조각에선 버튼이 실제 호출을 하지 않는다 — onClick 미배선).
   it('⭐canPublish=true(승인+해시일치) — 발행 버튼이 활성화되고 비활성 사유가 안 보인다', async () => {
