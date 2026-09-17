@@ -2412,7 +2412,10 @@
     "ruleOff": "Off",
     "generationBudgetPeriodMonth": "month",
     "goToChannelSettingsLink": "Go to channel settings",
-    "goToContentRulesLink": "Go to content rules settings"
+    "goToContentRulesLink": "Go to content rules settings",
+    "eventsAutomationSectionTitle": "Events & automation",
+    "eventsAutomationEmptyTitle": "No definitions yet",
+    "goToEventsLink": "Manage events"
   },
   "content": {
     "title": "Blog posts",
