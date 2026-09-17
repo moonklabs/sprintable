@@ -2,6 +2,8 @@ import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { getServerSession } from '@/lib/db/server';
 import { InviteAcceptClient } from './invite-accept-client';
+import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
+import { resolveChatsHref } from '@/lib/nav-v3-destinations';
 
 interface Props {
   searchParams: Promise<{ token?: string }>;
@@ -10,6 +12,10 @@ interface Props {
 export default async function InviteAcceptPage({ searchParams }: Props) {
   const { token } = await searchParams;
   if (!token) redirect('/');
+
+  // story #4017 CHANGES 2(페드루 PO 지적, 2026-09-17 15:44Z) — 이 page.tsx는 서버
+  // 컴포넌트라 여기서 직접 읽어, 아래 <a>와 InviteAcceptClient prop 둘 다에 쓴다.
+  const chatsHref = resolveChatsHref(readNavV3FlagsFromEnv());
 
   const session = await getServerSession().catch(() => null);
   if (!session) {
@@ -37,9 +43,10 @@ export default async function InviteAcceptPage({ searchParams }: Props) {
         <div className="max-w-sm text-center space-y-3">
           <h1 className="text-xl font-semibold text-foreground">{t('linkInvalidTitle')}</h1>
           <p className="text-sm text-muted-foreground">{t('linkInvalidBody')}</p>
-          {/* story #3179(S3c) — /dashboard 폐합, 홈=chat 재조준. */}
-          {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- story a539c649 S2 오탐, invite-accept-client.tsx 주석 참고 */}
-          <a href="/chats" className="inline-block rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90">
+          {/* story #3179(S3c) — /dashboard 폐합, 홈=chat 재조준. story #4017 CHANGES 2 —
+              목적지 모듈 경유(chatsHref, 동적 표현식이라 no-html-link-for-pages가 애초에
+              안 걸려 옛 eslint-disable 주석은 제거). */}
+          <a href={chatsHref} className="inline-block rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90">
             {t('goToChatButton')}
           </a>
         </div>
@@ -60,6 +67,7 @@ export default async function InviteAcceptPage({ searchParams }: Props) {
       role={invite.role ?? 'member'}
       email={invite.email ?? ''}
       projects={invite.projects ?? []}
+      chatsHref={chatsHref}
     />
   );
 }

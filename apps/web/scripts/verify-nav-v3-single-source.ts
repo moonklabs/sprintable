@@ -1,6 +1,6 @@
 /**
- * story #4017 CHANGES 2(페드루 PO 지적, 2026-09-17 15:31Z) — "v3 플래그 결정을 여러
- * 곳에서 각자 내린다"는 4016·4017 스택이 원래 없애려던 결함 그 자체가 이 스택 **안**에서
+ * story #4017 CHANGES 2(페드루 PO 지적, 2026-09-17 15:31Z·15:44Z) — "v3 플래그 결정을
+ * 여러 곳에서 각자 내린다"는 4016·4017이 원래 없애려던 결함 그 자체가 이 스택 **안**에서
  * 재발했다: session-redirect.ts가 chatV3Enabled 불리언 하나로 '/chat'·'/chats' 리터럴을
  * 자체 조립했고, api/auth/callback 라우트도 같은 리터럴을 또 조립했고, proxy.ts·
  * app/page.tsx·organization/connectors/page.tsx가 TODAY_V3_ENABLED 등 env 이름을 각자
@@ -12,6 +12,11 @@
  *      곳에서만 나온다.
  * 두 축 다 *.test.* 파일은 항상 허용(기대값 assert가 본업이라 리터럴이 있어야 정상) —
  * 아래 ALLOWED_NON_TEST_FILES만 비-테스트 예외(전부 그라운딩 근거 첨부, PO 확認 대상).
+ *
+ * PO 지적 2(2026-09-17 15:44Z) — 첫 판의 예외가 **파일 단위**(그 파일에 하나라도 있으면
+ * 통과)라 예외 파일에 리터럴이 몰래 늘어도 안 걸렸다. 파일×리터럴×**정확한 허용
+ * 개수**로 고정한다 — count-pin(story #3164/#3785류 baseline-freeze와 동형 규율).
+ * 허용 개수를 초과하면 FAIL(줄어드는 건 통과 — 고쳤다면 그만큼 좋은 일).
  *
  * ⚠️이 가드가 «못 잡는» 것: 문자열이 `//`·`/* *‌/` 주석 밖 실 코드에 있는지만 구분한다
  * (라인/블록 주석 스트립 후 스캔) — 동적으로 조립된 문자열(`'/ch' + 'ats'`류)은 못 잡는다
@@ -26,27 +31,73 @@ const SRC_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../
 
 export const ENV_NAMES = ['TODAY_V3_ENABLED', 'CHAT_V3_ENABLED', 'CONNECT_RULES_V3_ENABLED'] as const;
 export const DEST_LITERALS = ['/today', '/org-briefing', '/chats', '/chat', '/connect-rules'] as const;
+export type EnvName = (typeof ENV_NAMES)[number];
+export type DestLiteral = (typeof DEST_LITERALS)[number];
 
 const ENV_HOME_FILE = 'src/lib/nav-v3-flags-server.ts';
 const DEST_HOME_FILE = 'src/lib/nav-v3-destinations.ts';
 
+export interface AllowedEntry<K extends string> {
+  reason: string;
+  counts: Partial<Record<K, number>>;
+}
+
 // story #4017 그라운딩(AC1 표) + 이 가드 작성 시점 실 스캔이 확定한 비-테스트 예외 —
 // 전부 "이 파일은 애초에 이 목적지 모듈이 결정할 대상이 아니다"는 근거가 있다(PO 확認).
-export const DEST_ALLOWED_NON_TEST_FILES: Record<string, string> = {
-  'src/app/(authenticated)/chats/[conversation_id]/page.tsx': '/chats 캐노니컬 라우트 자기참조(pagination·history 복귀) — 그 라우트 자신이라 목적지 "결정"이 아님.',
-  'src/app/(authenticated)/chats/layout.tsx': '위와 동형 — /chats 자기 경로 판정(isListRoute).',
-  'src/app/dashboard/dashboard-shell.tsx': 'TAB_ROOT_PREFIXES — 태블릿 레이아웃 CSS 적용 판정 배열(다른 축), nav 목적지 결정이 아님.',
-  'src/app/invite/accept/invite-accept-client.tsx': '로그인 전 화면(DashboardContext 밖) — 플래그를 받을 방법이 아직 없음(#4017 AC 스코프 밖, PO 그라운딩 DM 참고).',
-  'src/app/invite/accept/page.tsx': '위와 동형(로그인 전).',
-  'src/app/invite/page.tsx': '위와 동형(로그인 전).',
-  'src/app/mfa/page.tsx': '위와 동형(로그인 전).',
-  'src/app/onboarding/onboarding-form.tsx': '위와 동형(로그인 전).',
-  'src/components/chat/chat-view.tsx': 'backHref 기본 prop 값(호출부가 얼마든지 override) — 컴포넌트 API 기본값이지 하드코딩 내비게이션이 아님.',
-  'src/components/support-widget/support-widget-launcher.tsx': '현재 pathname을 읽어 UI 분기(isMobileChatDetailRoute)할 뿐 — 목적지를 "결정"하지 않음.',
-  'src/lib/nav-config.ts': 'NAV_GROUPS/CHAT_CENTER_ITEM의 레거시 baseline 값 — resolveNavGroups/resolveChatCenterItem(같은 파일)이 이 baseline 위에 플래그를 얹는다(목적지 모듈이 소비하는 원본, 목적지 모듈 자신이 아닐 뿐).',
+// counts는 그 시점 실측 개수(count-pin) — 늘면 FAIL, 줄어들면 통과(고쳤다면 좋은 일,
+// 다음에 이 파일 손댈 사람이 숫자를 낮춰 갱신).
+export const DEST_ALLOWED_NON_TEST_FILES: Record<string, AllowedEntry<DestLiteral>> = {
+  'src/app/(authenticated)/chats/[conversation_id]/page.tsx': {
+    reason: '/chats 캐노니컬 라우트 자기참조(pagination·history 복귀) — 그 라우트 자신이라 목적지 "결정"이 아님.',
+    counts: { '/chats': 2 },
+  },
+  'src/app/(authenticated)/chats/layout.tsx': {
+    reason: '위와 동형 — /chats 자기 경로 판정(isListRoute).',
+    counts: { '/chats': 1 },
+  },
+  'src/app/dashboard/dashboard-shell.tsx': {
+    reason: 'TAB_ROOT_PREFIXES — 태블릿 레이아웃 CSS 적용 판정 배열(다른 축), nav 목적지 결정이 아님.',
+    counts: { '/chats': 1 },
+  },
+  // story #4017 CHANGES 2(페드루 PO 지적 2·2026-09-17 15:44Z) — 로그인 전 화면
+  // (login/register/invite/mfa/onboarding)은 원래 그 자체가 client 컴포넌트라 서버
+  // 헬퍼를 못 불렀다. 각자 얇은 서버 page.tsx 래퍼(invite/page.tsx·mfa/page.tsx)를
+  // 더하거나(부모가 이미 서버면 그대로, invite/accept/page.tsx·onboarding/page.tsx)
+  // resolveChatsHref(readNavV3FlagsFromEnv())로 구한 값을 client 쪽에 chatsHref prop
+  // 으로 흘려보낸다 — 아래는 그 prop의 *기본값*(호출부 생략 시 폴백)만 남은 자리로,
+  // chat-view.tsx의 backHref와 동형인 "컴포넌트 API 기본값"이지 하드코딩 내비게이션이
+  // 아니다(실제 목적지 결정은 각 page.tsx 서버 래퍼가 함).
+  'src/app/invite/accept/invite-accept-client.tsx': {
+    reason: 'chatsHref 기본 prop 값(부모 invite/accept/page.tsx가 서버에서 실값을 넘김).',
+    counts: { '/chats': 1 },
+  },
+  'src/app/invite/invite-client.tsx': {
+    reason: '위와 동형(부모 invite/page.tsx가 서버 래퍼).',
+    counts: { '/chats': 1 },
+  },
+  'src/app/mfa/mfa-client.tsx': {
+    reason: '위와 동형(부모 mfa/page.tsx가 서버 래퍼).',
+    counts: { '/chats': 1 },
+  },
+  'src/app/onboarding/onboarding-form.tsx': {
+    reason: '위와 동형(부모 onboarding/page.tsx가 서버, 원래도 존재).',
+    counts: { '/chats': 1 },
+  },
+  'src/components/chat/chat-view.tsx': {
+    reason: 'backHref 기본 prop 값(호출부가 얼마든지 override) — 컴포넌트 API 기본값이지 하드코딩 내비게이션이 아님.',
+    counts: { '/chats': 1 },
+  },
+  'src/components/support-widget/support-widget-launcher.tsx': {
+    reason: '현재 pathname을 읽어 UI 분기(isMobileChatDetailRoute)할 뿐 — 목적지를 "결정"하지 않음.',
+    counts: { '/chats': 1 },
+  },
+  'src/lib/nav-config.ts': {
+    reason: 'NAV_GROUPS/CHAT_CENTER_ITEM의 레거시 baseline 값 — resolveNavGroups/resolveChatCenterItem(같은 파일)이 이 baseline 위에 플래그를 얹는다(목적지 모듈이 소비하는 원본, 목적지 모듈 자신이 아닐 뿐).',
+    counts: { '/org-briefing': 1, '/chats': 1 },
+  },
 };
 
-export const ENV_ALLOWED_NON_TEST_FILES: Record<string, string> = {};
+export const ENV_ALLOWED_NON_TEST_FILES: Record<string, AllowedEntry<EnvName>> = {};
 
 function stripComments(content: string): string {
   return content.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
@@ -68,9 +119,25 @@ function isTestFile(rel: string): boolean {
   return /\.test\.tsx?$/.test(rel);
 }
 
+function countOccurrences(code: string, needle: string): number {
+  return (code.match(new RegExp(`\\b${needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'g')) ?? []).length;
+}
+
+function countLiteral(code: string, literal: string): number {
+  const pattern = new RegExp(`['"\`]${literal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['"\`]`, 'g');
+  return (code.match(pattern) ?? []).length;
+}
+
+export interface CountViolation<K extends string> {
+  file: string;
+  key: K;
+  actual: number;
+  allowed: number;
+}
+
 export interface ScanResult {
-  envViolations: Array<{ file: string; names: string[] }>;
-  destViolations: Array<{ file: string; literals: string[] }>;
+  envViolations: Array<CountViolation<EnvName>>;
+  destViolations: Array<CountViolation<DestLiteral>>;
 }
 
 export function scan(repoRootAbs: string, webRootRel = 'apps/web'): ScanResult {
@@ -83,21 +150,21 @@ export function scan(repoRootAbs: string, webRootRel = 'apps/web'): ScanResult {
     const rel = path.relative(path.join(repoRootAbs, webRootRel), abs).split(path.sep).join('/');
     const code = stripComments(readFileSync(abs, 'utf-8'));
 
-    if (rel === ENV_HOME_FILE || isTestFile(rel)) {
-      // home file/tests always allowed for env names.
-    } else {
-      const foundEnvNames = ENV_NAMES.filter((n) => code.includes(n));
-      if (foundEnvNames.length > 0 && !(rel in ENV_ALLOWED_NON_TEST_FILES)) {
-        envViolations.push({ file: rel, names: foundEnvNames });
+    if (rel !== ENV_HOME_FILE && !isTestFile(rel)) {
+      const allowedEntry = ENV_ALLOWED_NON_TEST_FILES[rel];
+      for (const name of ENV_NAMES) {
+        const actual = countOccurrences(code, name);
+        const allowed = allowedEntry?.counts[name] ?? 0;
+        if (actual > allowed) envViolations.push({ file: rel, key: name, actual, allowed });
       }
     }
 
-    if (rel === DEST_HOME_FILE || isTestFile(rel)) {
-      // home file/tests always allowed for destination literals.
-    } else {
-      const foundLiterals = DEST_LITERALS.filter((lit) => new RegExp(`['"\`]${lit.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['"\`]`).test(code));
-      if (foundLiterals.length > 0 && !(rel in DEST_ALLOWED_NON_TEST_FILES)) {
-        destViolations.push({ file: rel, literals: foundLiterals });
+    if (rel !== DEST_HOME_FILE && !isTestFile(rel)) {
+      const allowedEntry = DEST_ALLOWED_NON_TEST_FILES[rel];
+      for (const literal of DEST_LITERALS) {
+        const actual = countLiteral(code, literal);
+        const allowed = allowedEntry?.counts[literal] ?? 0;
+        if (actual > allowed) destViolations.push({ file: rel, key: literal, actual, allowed });
       }
     }
   }
@@ -113,22 +180,22 @@ function main(): number {
 
   if (envViolations.length > 0) {
     failed = true;
-    console.error(`FAIL: env 이름을 ${ENV_HOME_FILE} 밖에서 다시 읽는 자리(story #4017 CHANGES 2):`);
-    for (const v of envViolations) console.error(`  - ${v.file}: ${v.names.join(', ')}`);
+    console.error(`FAIL: env 이름을 ${ENV_HOME_FILE} 밖에서 허용치보다 많이 읽는 자리(story #4017 CHANGES 2):`);
+    for (const v of envViolations) console.error(`  - ${v.file}: ${v.key} ${v.actual}건(허용 ${v.allowed}건)`);
   }
 
   if (destViolations.length > 0) {
     failed = true;
-    console.error(`FAIL: 목적지 문자열 리터럴을 ${DEST_HOME_FILE} 밖에서 다시 조립하는 자리(story #4017 CHANGES 2):`);
-    for (const v of destViolations) console.error(`  - ${v.file}: ${v.literals.join(', ')}`);
+    console.error(`FAIL: 목적지 문자열 리터럴을 ${DEST_HOME_FILE} 밖에서 허용치보다 많이 다시 조립하는 자리(story #4017 CHANGES 2):`);
+    for (const v of destViolations) console.error(`  - ${v.file}: ${v.key} ${v.actual}건(허용 ${v.allowed}건)`);
   }
 
   if (failed) {
-    console.error('\n→ readNavV3FlagsFromEnv()/resolveNavV3Destinations()를 그대로 재사용할 것 — 정말 예외면 이 스크립트의 ALLOWED 목록에 근거와 함께 등재(PO 승인).');
+    console.error('\n→ readNavV3FlagsFromEnv()/resolveNavV3Destinations()를 그대로 재사용할 것 — 정말 예외면 이 스크립트의 ALLOWED 목록에 근거·정확한 개수와 함께 등재(PO 승인).');
     return 1;
   }
 
-  console.log('OK: env 이름·목적지 리터럴 둘 다 단일 소스 유지(story #4017 CHANGES 2).');
+  console.log('OK: env 이름·목적지 리터럴 둘 다 단일 소스 유지(story #4017 CHANGES 2, count-pin 초과 0건).');
   return 0;
 }
 
