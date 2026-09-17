@@ -687,8 +687,8 @@ describe('ChatV3Screen — 첫 지시 compose(story #4028)', () => {
     await mount();
     const input = container.querySelector('[data-testid="chat-v3-compose-input"]') as HTMLInputElement;
     expect(input.value).toBe('배포 상태 알려줘');
-    // compose만 빠지고 conversation은 남는다 · push 아님(뒤로가기 기록 0).
-    expect(replaceMock).toHaveBeenCalledWith('/chat?conversation=conv-1');
+    // compose만 빠지고 conversation은 남는다 · push 아님(뒤로가기 기록 0) · scroll:false(화면 안 튐).
+    expect(replaceMock).toHaveBeenCalledWith('/chat?conversation=conv-1', { scroll: false });
     expect(pushMock).not.toHaveBeenCalled();
   });
 
@@ -697,7 +697,7 @@ describe('ChatV3Screen — 첫 지시 compose(story #4028)', () => {
     searchParamsRef.current = new URLSearchParams('conversation=conv-does-not-exist&compose=' + encodeURIComponent('아무 지시'));
     await mount();
     expect(container.querySelector('[data-testid="chat-v3-conversation-unavailable"]')).not.toBeNull();
-    expect(replaceMock).toHaveBeenCalledWith('/chat?conversation=conv-does-not-exist');
+    expect(replaceMock).toHaveBeenCalledWith('/chat?conversation=conv-does-not-exist', { scroll: false });
   });
 
   it('음성 대조 — compose 없이 conversation만 있으면 주소 제거 replace가 안 불린다', async () => {
