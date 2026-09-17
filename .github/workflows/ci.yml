@@ -2093,6 +2093,11 @@ jobs:
       - name: "Verify no card-surfaceless box (story #3785 regression guard)"
         run: pnpm --filter web verify:no-card-surfaceless-box
 
+      # story #4014(AC1) — 좁은 폭 마케팅 목록 표 3곳(블로그 포스트·채널 포스트·성과 보드)이
+      # 공용 ResponsiveDataTable을 우회해 다시 손으로 <table>을 조립하지 않게 고정.
+      - name: "Verify no hand-rolled marketing table (story #4014 regression guard)"
+        run: pnpm --filter web verify:no-hand-rolled-marketing-table
+
       # story #3741(유나 전수 2026-09-09 08:46Z) 회귀가드 — 영어 로케일 화면에 한글이
       # 그대로 서는 하드코딩 문자열(JsxText·placeholder/title/alt/aria-* 속성)이 새로
       # 늘면 FAIL(baseline-freeze, hardcoded-korean-ui-text-baseline.json 참조 — 창건
