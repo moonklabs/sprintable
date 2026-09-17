@@ -48,6 +48,14 @@ const MESSAGES = {
       content: '초안을 마쳤어요.', attachments: [], created_at: '2026-09-16T06:41:00Z',
       references: [], approval_target: null,
     },
+    // 페드루 PO 추가 지적(2026-09-17 10:09Z, PR 4370 코멘트) — isMine(:115 m.created_by
+    // === meId)은 결함④의 나머지 반쪽. sender.id===meId 메시지가 없으면 이 축이 안 깨진다.
+    {
+      id: 'm2', conversation_id: 'conv-1', thread_id: null,
+      sender: { id: 'me-1', name: '나', type: 'human', avatar_url: null, runtime_type: null },
+      content: '고마워요, 확認해볼게요.', attachments: [], created_at: '2026-09-16T06:42:00Z',
+      references: [], approval_target: null,
+    },
   ],
 };
 const EMPTY_TODAY = { data: { needs_me: [], needs_me_count: 0, agent_progress: [], published_today: { count: 0, by_channel: [] }, usage: { platform: [], ad_spend: { measured: false } } } };
@@ -93,6 +101,12 @@ describe('ChatV3Screen — 첫 화면 렌더', () => {
     // 결함④(3998 PO 지적, 4370 CHANGES) — 말풍선에 보낸 사람 이름이 실제로 렌더돼야 한다
     // (중첩 sender 응답을 normalizeToMessage 없이 캐스트만 하면 이 라벨이 빈칸으로 샌다).
     expect(messagesColumn?.textContent).toContain('담롱 온찬');
+    // 결함④ 나머지 반쪽(페드루 PO 2026-09-17 10:09Z) — isMine(created_by===meId)도 정규화
+    // 없인 항상 false로 샌다. 「나」 라벨 + 오른쪽 정렬(ml-auto) 둘 다 확認.
+    const labels = [...(messagesColumn?.querySelectorAll('p.text-xs.text-muted-foreground') ?? [])];
+    const myLabel = labels.find((p) => p.textContent === '나');
+    expect(myLabel).toBeDefined();
+    expect(myLabel?.parentElement?.className).toContain('ml-auto');
   });
 
   // 교차 PR 드리프트(유나 점검표 1c6a0ced, 항목 4) — 색 있는 attention만 Badge,
