@@ -201,6 +201,98 @@ describe('ChatV3Messages — 재연결 따라잡기(story #4008 AC4)', () => {
     expect(container.textContent).toContain('초안을 마쳤어요');
     expect(container.querySelector('[role="alert"]')).toBeNull();
   });
+
+  // story #4008 CHANGES(PO 지적 ①, 2026-09-17) — reload()가 부른 loadMessages의 cancelled
+  // 플래그는 imperative 호출 경로에선 아무도 안 봐준다. 뮤테이션 셀프체크: activeThreadIdRef
+  // 대조를 없애면(예전 코드로 되돌리면) 이 테스트가 RED로 뒤집힘(수동 재현·원복 완료).
+  it('⭐재조회 진행 中 대화를 전환하면, 늦게 온 이전 대화 응답이 새 대화 화면에 안 섞인다', async () => {
+    stub();
+    const ref = createRef<ChatV3MessagesHandle>();
+    await mount(ref);
+    expect(container.textContent).toContain('초안을 마쳤어요');
+
+    // conv-1 재조회를 pending으로 묶어둔다(reload).
+    let resolveConv1Reload: (value: unknown) => void = () => {};
+    fetchMock.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveConv1Reload = resolve; }),
+    );
+    act(() => { ref.current?.reload(); });
+
+    // conv-2로 전환(즉시 응답하는 별도 스텁) — 이 전환의 정상 로드가 화면을 채운다.
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url === '/api/conversations/conv-2/messages') {
+        return {
+          ok: true, status: 200,
+          json: async () => ({
+            data: [{
+              id: 'm-conv2', created_by: 'agent-1', sender_name: '담롱 온찬', sender_type: 'agent',
+              sender_avatar_url: null, sender_runtime_type: null, content: 'conv-2 전용 메시지',
+              attachments: [], created_at: '2026-09-17T00:00:00Z', references: [], approval_target: null,
+            }],
+          }),
+        };
+      }
+      return { ok: true, status: 200, json: async () => ({ data: null }) };
+    });
+    const { ChatV3Messages } = await import('./chat-v3-messages');
+    await act(async () => {
+      root.render(wrap(
+        <ChatV3Messages
+          ref={ref} threadId="conv-2" meId="me-1" agentName="담롱 온찬" locale="ko" needsMe={[]}
+          todayV3Enabled onOpenArtifactChange={() => {}} onWorkItemRefChange={() => {}}
+        />,
+      ));
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    });
+    expect(container.textContent).toContain('conv-2 전용 메시지');
+
+    // 이제야 늦게 도착한 conv-1의 stale 응답 — conv-2 화면에 섞이면 안 된다.
+    await act(async () => {
+      resolveConv1Reload({ ok: true, status: 200, json: async () => ({ data: [{ ...INITIAL_MESSAGES.data[0], content: 'stale conv-1 응답' }] }) });
+      await Promise.resolve(); await Promise.resolve();
+    });
+    expect(container.textContent).not.toContain('stale conv-1 응답');
+    expect(container.textContent).toContain('conv-2 전용 메시지');
+  });
+
+  // story #4008 CHANGES(PO 지적 ②, 2026-09-17) — silent 재조회가 통째 교체면, 재조회
+  // 진행 中 도착한 실시간 메시지(receiveMessage)가 그 스냅숏(조회 시작 시점 기준)보다
+  // 최신이라 fetch 응답엔 없어 통째 교체 때 사라진다(AC4 「따라잡기」가 오히려 잃는 역설).
+  // 뮤테이션 셀프체크: id 병합을 setMessages(fetched) 통째 교체로 되돌리면 이 테스트가
+  // RED로 뒤집힘(수동 재현·원복 완료).
+  it('⭐reload() 진행 中 도착한 실시간 메시지는 재조회 응답이 늦게 와도 안 사라진다(id 병합)', async () => {
+    stub();
+    const ref = createRef<ChatV3MessagesHandle>();
+    await mount(ref);
+    expect(container.textContent).toContain('초안을 마쳤어요');
+
+    let resolveReload: (value: unknown) => void = () => {};
+    fetchMock.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveReload = resolve; }),
+    );
+    act(() => { ref.current?.reload(); });
+
+    // 재조회가 아직 안 끝난 사이 실시간 메시지가 먼저 도착.
+    act(() => {
+      ref.current?.receiveMessage({
+        id: 'm-live', conversation_id: 'conv-1', sender: { id: 'agent-1', name: '담롱 온찬', type: 'agent' },
+        content: '재조회 中 실시간 도착', created_at: '2026-09-16T06:43:00Z', references: [],
+      });
+    });
+    expect(container.textContent).toContain('재조회 中 실시간 도착');
+
+    // 재조회 응답이 뒤늦게 도착(그 시점 스냅숏이라 실시간 메시지는 안 들어있음).
+    await act(async () => {
+      resolveReload({ ok: true, status: 200, json: async () => INITIAL_MESSAGES });
+      await Promise.resolve(); await Promise.resolve();
+    });
+
+    // 둘 다 남아 있어야 한다(교체가 아니라 병합) — 중복도 0.
+    expect(container.textContent).toContain('초안을 마쳤어요');
+    expect(container.textContent).toContain('재조회 中 실시간 도착');
+    const liveCount = [...container.querySelectorAll('*')].filter((el) => el.textContent === '재조회 中 실시간 도착').length;
+    expect(liveCount).toBeGreaterThan(0);
+  });
 });
 
 describe('ChatV3Messages — 대화 전환 스켈레톤(story #4008 CHANGES)', () => {

@@ -66,6 +66,15 @@ export const ChatV3Messages = forwardRef<ChatV3MessagesHandle, ChatV3MessagesPro
   const [sending, setSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
+  // story #4008 CHANGES(PO 지적 ①, 2026-09-17) — reload()가 직접 호출하는 loadMessages는
+  // React 이펙트가 아니라 그 cleanup(cancelled=true)을 아무도 안 불러준다 — 재연결으로
+  // A 재조회가 진행 中일 때 threadId가 B로 바뀌면, 늦게 도착한 A 응답이 B 화면에 그대로
+  // setMessages된다. "지금 보고 있는 대화"를 ref로 따로 들고 응답이 그 대화 것이 맞는지
+  // 매번 대조한다(effect 재실행·언마운트로 끊기는 cancelled 플래그보다 imperative 호출
+  // 경로까지 균일하게 보호).
+  const activeThreadIdRef = useRef(threadId);
+  useEffect(() => { activeThreadIdRef.current = threadId; }, [threadId]);
+
   // story #4008 CHANGES(유나 design·PO 지적, 2026-09-17) — 재연결·탭 복귀마다 이 화면이
   // 스켈레톤으로 순간 비워졌다: reload()가 이 함수를 그대로 불러 매번 setMessages(null)부터
   // 했기 때문(레일 쪽 handleThreadMessage는 성공 때만 교체해 안 비워지는 것과 대조).
@@ -74,23 +83,40 @@ export const ChatV3Messages = forwardRef<ChatV3MessagesHandle, ChatV3MessagesPro
   // 변경으로 이 콜백 자체가 재생성될 때)에만 뜬다.
   const loadMessages = useCallback((options?: { silent?: boolean }) => {
     let cancelled = false;
+    const requestThreadId = threadId;
     if (!options?.silent) {
       setMessages(null);
       setLoadError(false);
     }
-    fetchWithAuth(`/api/conversations/${threadId}/messages`)
+    fetchWithAuth(`/api/conversations/${requestThreadId}/messages`)
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
       .then((json: { data?: ChatMessage[] }) => {
-        if (cancelled) return;
-        const list = json.data ?? [];
-        setMessages(list);
+        if (cancelled || activeThreadIdRef.current !== requestThreadId) return;
+        const fetched = json.data ?? [];
+        // story #4008 CHANGES(PO 지적 ②) — silent(reload)는 통째 교체가 아니라 id 기준
+        // 병합(레거시 chat-view.tsx의 mergeBackfilledMessages와 동형 원칙). 재조회가 도는
+        // 동안 도착한 실시간 메시지(receiveMessage→addMessage)는 이 스냅숏(조회 시작 시점
+        // 기준)보다 최신이라 fetch 응답엔 없을 수 있는데, 통째 교체하면 그 메시지가
+        // 사라진다(AC4 「따라잡기」가 오히려 잃는 역설).
+        let finalList: ChatMessage[] = fetched;
+        if (options?.silent) {
+          setMessages((prev) => {
+            if (!prev) { finalList = fetched; return fetched; }
+            const byId = new Map(prev.map((m) => [m.id, m] as const));
+            for (const m of fetched) byId.set(m.id, m);
+            finalList = [...byId.values()].sort((a, b) => a.created_at.localeCompare(b.created_at));
+            return finalList;
+          });
+        } else {
+          setMessages(fetched);
+        }
         // story #3972 — 최근 것부터 훑어 첫 artifact 참조를 「열린 산출물」로(맥락 패널).
         // story #3990 — 같은 한 번의 역순회에서 첫 story/task 참조도 같이 뽑는다(「근거」·
         // 「이력」 스코프, #3972와 동일 "가장 최근 참조 1개" 규칙 — 재순회 0).
         let latestArtifactId: string | null = null;
         let latestWorkItemRef: { type: 'story' | 'task'; id: string } | null = null;
-        for (let i = list.length - 1; i >= 0; i -= 1) {
-          const refs = list[i]?.references ?? [];
+        for (let i = finalList.length - 1; i >= 0; i -= 1) {
+          const refs = finalList[i]?.references ?? [];
           if (latestArtifactId === null) {
             const found = refs.find((r) => r.target_type === 'artifact');
             if (found) latestArtifactId = found.target_id;
@@ -105,7 +131,7 @@ export const ChatV3Messages = forwardRef<ChatV3MessagesHandle, ChatV3MessagesPro
         onWorkItemRefChange(latestWorkItemRef);
       })
       .catch(() => {
-        if (cancelled) return;
+        if (cancelled || activeThreadIdRef.current !== requestThreadId) return;
         // silent(reload) 실패는 기존 messages를 그대로 둔다(PO 처방 — "실패면 기존 유지").
         if (!options?.silent) setLoadError(true);
       });
