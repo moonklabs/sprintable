@@ -238,7 +238,7 @@ async def test_po_review_comment_records_when_po_role_seeded_realdb():
         )
 
         payload = _issue_comment_payload(
-            body="## PO 리뷰 — CHANGES 3건(소형) (head abc123)\n", story_number=1003,
+            body="## PO review — CHANGES 3건(소형) (head abc123)\n", story_number=1003,
             installation_id=installation_id,
         )
         resp = await _post_issue_comment(payload, Session, delivery_id=f"dlv-{uuid.uuid4().hex[:8]}")
