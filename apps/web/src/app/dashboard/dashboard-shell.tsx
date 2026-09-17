@@ -18,7 +18,7 @@ import { SessionExpiredDialog } from '@/components/auth/session-expired-dialog';
 import { ToastProvider } from '@/components/ui/toast';
 import { BottomDock } from '@/components/nav/bottom-dock';
 import { AppSidebar } from '@/components/nav/app-sidebar';
-import type { NavV3Flags } from '@/lib/nav-v3-destinations';
+import { resolveChatsHref, resolveConnectRulesHref, type NavV3Flags } from '@/lib/nav-v3-destinations';
 import { MobileTabBar } from '@/components/nav/mobile-tab-bar';
 import { TopBar } from '@/components/nav/top-bar';
 import { TopBarProvider, useTopBar } from '@/components/nav/top-bar-context';
@@ -85,6 +85,11 @@ interface DashboardContext {
   // 새 흔들림을 만드는" 결함을 닫는다. undefined(조회 실패 등)면 기존처럼 클라이언트가
   // 알아낸다(안전한 폴백, 과다신뢰 없음).
   initialActivationComplete?: boolean;
+  // story #4017 — v3 플래그 3개를 context에도 노출한다(그동안은 AppSidebar/MobileTabBar
+  // 같은 prop 수신처에만 갔다). content/page.tsx류 임의 후손 client 컴포넌트가 본문
+  // CTA 주소(/chats·/org-briefing·/organization/channels 등)를 목적지 모듈로 치환하려면
+  // process.env를 못 읽는 client 컴포넌트 입장에서 이 context가 유일한 경로다.
+  navV3Flags?: NavV3Flags;
 }
 
 const DashboardCtx = createContext<DashboardContext>({
@@ -94,6 +99,17 @@ const DashboardCtx = createContext<DashboardContext>({
 
 export function useDashboardContext() {
   return useContext(DashboardCtx);
+}
+
+// story #4017(PO 확定 2026-09-17) — 본문 CTA(not-found·recruiter-client·content 목록류)
+// 여러 곳이 각자 목적지 계산을 반복하지 않게 얇은 래퍼로 — 실 로직(순수 함수, 단위테스트
+// 대상)은 nav-v3-destinations.ts의 resolveChatsHref/resolveConnectRulesHref.
+export function useChatsHref(): string {
+  return resolveChatsHref(useDashboardContext().navV3Flags);
+}
+
+export function useConnectRulesHref(legacyFallback: string): string {
+  return resolveConnectRulesHref(useDashboardContext().navV3Flags, legacyFallback);
 }
 
 interface DashboardShellProps extends DashboardContext {
@@ -112,10 +128,6 @@ interface DashboardShellProps extends DashboardContext {
   // 부분적으로 stale하면(org_id는 reset·project_id는 옛 org 그대로) `orgId`와 갈릴 수 있다 — 아래
   // 자동 switch-org effect의 불일치 판정은 이 값을 우선한다(없으면 `orgId`로 폴백).
   jwtOrgId?: string;
-  // story #4003(E-UX-OVERHAUL·셸 통합 2/N) — (authenticated)/layout.tsx(서버)가 읽은
-  // v3 플래그 3개를 AppSidebar까지 그대로 흘려보낸다(이 컴포넌트 자체는 'use client'라
-  // process.env를 직접 못 읽는다).
-  navV3Flags?: NavV3Flags;
   children: React.ReactNode;
 }
 
@@ -441,7 +453,7 @@ export function DashboardShell({
 
   return (
     <ToastProvider>
-    <DashboardCtx.Provider value={{ currentTeamMemberId, orgId: effectiveOrgId, orgTimezone, projectId: effectiveProjectId, projectName: effectiveProjectName, currentProjectSlug, userName, role, currentMemberType, projectMemberships, orgMemberships, orgSyncPending, bottomDockBannerSlot, setBottomDockBannerSlot, initialActivationComplete }}>
+    <DashboardCtx.Provider value={{ currentTeamMemberId, orgId: effectiveOrgId, orgTimezone, projectId: effectiveProjectId, projectName: effectiveProjectName, currentProjectSlug, userName, role, currentMemberType, projectMemberships, orgMemberships, orgSyncPending, bottomDockBannerSlot, setBottomDockBannerSlot, initialActivationComplete, navV3Flags }}>
       <RefreshProvider>
       <RealtimeProvider currentTeamMemberId={currentTeamMemberId}>
         <TopBarProvider>

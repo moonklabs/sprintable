@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { resolveNavV3Destinations, type NavV3Destination, type NavV3Flags } from './nav-v3-destinations';
+import {
+  resolveNavV3Destinations,
+  resolveChatsHref,
+  resolveConnectRulesHref,
+  type NavV3Destination,
+  type NavV3Flags,
+} from './nav-v3-destinations';
 
 // story #4003 AC1/AC3(CHANGES, PR#4386 1차 리뷰) — 플래그 3개(2^3=8조합) × 항목
 // 5개(오늘·대화·일감·결과·연결·규칙) 표. work/results도 서술자로 이 모듈이 정한다
@@ -60,5 +66,51 @@ describe('resolveNavV3Destinations — 플래그 8조합 × 항목 5개 표(stor
       expect(result.approvals).toEqual(APPROVALS);
       expect(result.more).toEqual(MORE);
     }
+  });
+});
+
+// story #4017(PO 확定 2026-09-17) AC3 — 본문 CTA·session-redirect.ts가 쓰는 얇은 헬퍼의
+// 실 로직. dashboard-shell.tsx의 useChatsHref/useConnectRulesHref는 이 함수에
+// useDashboardContext().navV3Flags만 얹는 래퍼라, 무거운 React/DashboardShell 의존 없이
+// 여기서 OFF/ON 양쪽 + 양성 대조를 고정한다.
+describe('resolveChatsHref — story #4017 AC3', () => {
+  it('⭐flags undefined(컨텍스트 미배선) — 레거시 /chats', () => {
+    expect(resolveChatsHref(undefined)).toBe('/chats');
+  });
+
+  it('⭐chatV3Enabled=false — /chats(OFF 바이트 동일)', () => {
+    expect(resolveChatsHref({ todayV3Enabled: false, chatV3Enabled: false, connectRulesV3Enabled: false })).toBe('/chats');
+  });
+
+  it('⭐chatV3Enabled=true — /chat(다른 플래그 무관)', () => {
+    expect(resolveChatsHref({ todayV3Enabled: false, chatV3Enabled: true, connectRulesV3Enabled: false })).toBe('/chat');
+    expect(resolveChatsHref({ todayV3Enabled: true, chatV3Enabled: true, connectRulesV3Enabled: true })).toBe('/chat');
+  });
+
+  it('양성 대조 — resolveNavV3Destinations를 안 거치고 직접 반환하면(예: 항상 /chats) 위 ON 시험이 RED', () => {
+    // resolveChatsHref가 실제로 resolveNavV3Destinations(flags).chats.path를 위임하는지
+    // 확認 — 8조합 표(COMBOS)의 chats 값과 1:1 대조.
+    for (const { flags, chats } of COMBOS) {
+      expect(resolveChatsHref(flags)).toBe(chats.path);
+    }
+  });
+});
+
+describe('resolveConnectRulesHref — story #4017 AC3', () => {
+  it('⭐flags undefined — legacyFallback 그대로', () => {
+    expect(resolveConnectRulesHref(undefined, '/organization/channels')).toBe('/organization/channels');
+    expect(resolveConnectRulesHref(undefined, '/organization/content-rules')).toBe('/organization/content-rules');
+  });
+
+  it('⭐connectRulesV3Enabled=false — legacyFallback 그대로(자리마다 다른 값)', () => {
+    const flags: NavV3Flags = { todayV3Enabled: false, chatV3Enabled: false, connectRulesV3Enabled: false };
+    expect(resolveConnectRulesHref(flags, '/organization/channels')).toBe('/organization/channels');
+    expect(resolveConnectRulesHref(flags, '/organization/content-rules')).toBe('/organization/content-rules');
+  });
+
+  it('⭐connectRulesV3Enabled=true — legacyFallback 무관하게 항상 /connect-rules(통합 화면)', () => {
+    const flags: NavV3Flags = { todayV3Enabled: false, chatV3Enabled: false, connectRulesV3Enabled: true };
+    expect(resolveConnectRulesHref(flags, '/organization/channels')).toBe('/connect-rules');
+    expect(resolveConnectRulesHref(flags, '/organization/content-rules')).toBe('/connect-rules');
   });
 });

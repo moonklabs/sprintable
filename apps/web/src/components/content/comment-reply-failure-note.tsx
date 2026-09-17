@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { formatScheduledAt } from '@/components/content/schedule-format';
 import type { FailureAction } from '@/components/content/failure-action';
+import { useConnectRulesHref } from '@/app/dashboard/dashboard-shell';
 
 // story #3544(유나 §22-15, 3517 조각③, PO 確定 2026-09-06) — comment_reply의
 // voided 사유는 channel_post와 다른 값(GATE_NOT_APPROVED_OR_RESEALED·
@@ -47,6 +48,8 @@ export function CommentReplyFailureNote({
   const t = useTranslations('content');
   const [retrying, setRetrying] = useState(false);
   const [retryOutcome, setRetryOutcome] = useState<'ok' | string | null>(null);
+  // story #4017(PO 확定 2026-09-17) — 아래 blocked 문구의 "연결 화면" 링크를 목적지 모듈로.
+  const connectRulesHref = useConnectRulesHref('/organization/channels');
 
   async function handleRetryClick() {
     if (!onRetry) return;
@@ -74,7 +77,7 @@ export function CommentReplyFailureNote({
     return (
       <p className="text-xs text-muted-foreground" data-testid="comments-item-reply-failure-note">
         {t.rich('commentsReplyFailureConnectionBlocked', {
-          link: (chunks) => <Link href="/organization/channels" className="underline">{chunks}</Link>,
+          link: (chunks) => <Link href={connectRulesHref} className="underline">{chunks}</Link>,
         })}
       </p>
     );

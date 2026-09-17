@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Button } from '@/components/ui/button';
 import { subscribeSessionExpired } from '@/lib/auth/session-expired-signal';
 import { buildLoginRedirect } from '@/lib/auth/session-redirect';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 
 /**
  * AC3(af8d3641): 세션 만료 모달. fetchWithAuth 의 refresh 최종 실패 신호(session-expired-signal)를 받아
@@ -22,12 +23,16 @@ import { buildLoginRedirect } from '@/lib/auth/session-redirect';
 export function SessionExpiredDialog() {
   const t = useTranslations('session');
   const [open, setOpen] = useState(false);
+  // story #4017(PO 확定 2026-09-17) — 이 컴포넌트는 DashboardShell 안(DashboardCtx.Provider
+  // 자손)에 1회 마운트되므로 그 context로 플래그를 받는다('use client'라 process.env 직접
+  // 못 읽음, dashboard-shell.tsx의 DashboardContext.navV3Flags 참고).
+  const { navV3Flags } = useDashboardContext();
 
   useEffect(() => subscribeSessionExpired(() => setOpen(true)), []);
 
   const relogin = () => {
     const path = typeof window !== 'undefined' ? window.location.pathname + window.location.search : '/inbox';
-    window.location.href = buildLoginRedirect(path);
+    window.location.href = buildLoginRedirect(path, navV3Flags?.chatV3Enabled ?? false);
   };
 
   return (

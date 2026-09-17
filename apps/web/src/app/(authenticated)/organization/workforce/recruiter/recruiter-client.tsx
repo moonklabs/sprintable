@@ -13,6 +13,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
+import { useChatsHref } from '@/app/dashboard/dashboard-shell';
 import { cn } from '@/lib/utils';
 import { pickEulReulJosa, pickEunNeunJosa } from '@/lib/korean-particle';
 import { VerifyRail, useVerificationRail } from '@/app/onboarding/verify-rail';
@@ -291,6 +292,8 @@ interface RecruiterClientProps {
 }
 
 export function RecruiterClient({ projectId, showTopBar = true, onExit }: RecruiterClientProps) {
+  // story #4017(PO 확定 2026-09-17) — 아래 「완료」 CTA(/chats)를 목적지 모듈로.
+  const chatsHref = useChatsHref();
   // S25(ae844d74): 카탈로그·recruit이 소비할 활성 UI locale — locale-switcher가 쿠키 전환 후 풀
   // 리로드하므로 마운트 시점 값이면 충분(별도 리스너 불필요).
   const locale = useLocale();
@@ -1559,8 +1562,8 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
 
               <div className="flex justify-between gap-2 pt-2">
                 <Button variant="ghost" onClick={() => setStep(4)}><ChevronLeft className="h-4 w-4" />{t('back')}</Button>
-                {/* story #3179(S3c) — /dashboard 폐합, 홈=chat 재조준. */}
-                <Link href="/chats" onClick={handleFinish}><Button variant={verified ? 'hero' : 'glass'}>{t('finish')}</Button></Link>
+                {/* story #3179(S3c) — /dashboard 폐합, 홈=chat 재조준. story #4017 — 목적지 모듈. */}
+                <Link href={chatsHref} onClick={handleFinish}><Button variant={verified ? 'hero' : 'glass'}>{t('finish')}</Button></Link>
               </div>
             </div>
           )}

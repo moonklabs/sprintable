@@ -8,6 +8,7 @@ import { Card } from '@/components/ui/card';
 import { ListRow, ListRowMark } from '@/components/ui/list-row';
 import { fetchWithAuth } from '@/lib/db/client';
 import { useChannelLabel, channelMarkColor, channelMarkInitials } from '@/lib/channel-label';
+import { useChatsHref } from '@/app/dashboard/dashboard-shell';
 
 /**
  * story #3743(UI 재설계 ③, 시안 a98386e6 「담당 에이전트가 설정하는 것」) — 옛
@@ -63,6 +64,8 @@ function ConnectorReadinessChip({ ready, t }: { ready: boolean; t: ReturnType<ty
 }
 
 function ConnectorRow({ connector, t }: { connector: ConnectorItem; t: ReturnType<typeof useTranslations> }) {
+  // story #4017(PO 확定 2026-09-17) — 아래 "담당에게 요청" 링크(/chats)를 목적지 모듈로.
+  const chatsHref = useChatsHref();
   const missingFields = missingRequiredConnectorFields(connector);
   const ready = missingFields.length === 0;
   // story #3743 CHANGES Ⓒ(페드루 PO, 2026-09-09 12:41Z 유나 定) — `name`(raw 필드 키,
@@ -82,7 +85,7 @@ function ConnectorRow({ connector, t }: { connector: ConnectorItem; t: ReturnTyp
       status={<ConnectorReadinessChip ready={ready} t={t} />}
       action={ready ? undefined : (
         <Button asChild size="sm" variant="outline">
-          <Link href="/chats">{t('agentSetupAskAgentAction')}</Link>
+          <Link href={chatsHref}>{t('agentSetupAskAgentAction')}</Link>
         </Button>
       )}
     />

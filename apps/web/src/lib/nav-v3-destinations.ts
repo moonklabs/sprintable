@@ -78,3 +78,21 @@ export function resolveNavV3Destinations(flags: NavV3Flags): NavV3Destinations {
     more: { kind: 'static', path: '/more' },
   };
 }
+
+// story #4017(PO 확定 2026-09-17) — 본문 CTA(not-found·recruiter-client·content 목록류
+// 등)·session-redirect.ts류가 "플래그 없으면 레거시 리터럴, 있으면 목적지 모듈"을 매번
+// 반복하지 않게 순수 함수로 뺀다(React 의존 0 — dashboard-shell.tsx의 useChatsHref/
+// useConnectRulesHref는 이 함수에 useDashboardContext().navV3Flags만 얹는 얇은 래퍼,
+// 무거운 DashboardShell 의존 트리 없이 이 파일에서 직접 단위테스트 가능).
+export function resolveChatsHref(flags: NavV3Flags | undefined): string {
+  return flags ? resolveNavV3Destinations(flags).chats.path : '/chats';
+}
+
+// connectRules는 OFF일 때 목적지 모듈 자체가 null(사이드바 항목 자체를 안 그린다는 뜻)이라,
+// 본문 CTA는 호출부가 자기 자리의 옛 목적지(채널 연결 화면 vs 콘텐츠 규칙 화면 — 자리마다
+// 다름)를 legacyFallback으로 넘긴다.
+export function resolveConnectRulesHref(flags: NavV3Flags | undefined, legacyFallback: string): string {
+  if (!flags) return legacyFallback;
+  const dest = resolveNavV3Destinations(flags);
+  return dest.connectRules ? dest.connectRules.path : legacyFallback;
+}

@@ -36,3 +36,23 @@ describe('buildLoginRedirect (AC3)', () => {
     expect(buildLoginRedirect('')).toContain(`next=${encodeURIComponent('/chats')}`);
   });
 });
+
+// story #4017(PO 확定 2026-09-17) — chatV3Enabled 인자로 기본 착지를 목적지 모듈과 정렬.
+// 생략 시(위 기존 시험들) 기존 동작과 바이트 동일(AC2) — 여기는 그 위에 얹힌 ON 분기만.
+describe('safeNextPath/buildLoginRedirect — story #4017 chatV3Enabled', () => {
+  it('⭐chatV3Enabled=true면 폴백이 /chat(아직 /chats 아님)', () => {
+    expect(safeNextPath(null, true)).toBe('/chat');
+    expect(safeNextPath('//evil.com', true)).toBe('/chat');
+    expect(buildLoginRedirect('', true)).toContain(`next=${encodeURIComponent('/chat')}`);
+  });
+
+  it('chatV3Enabled 생략/false는 기존 /chats 그대로(OFF 바이트 동일)', () => {
+    expect(safeNextPath(null, false)).toBe('/chats');
+    expect(safeNextPath(null)).toBe('/chats');
+    expect(buildLoginRedirect('', false)).toContain(`next=${encodeURIComponent('/chats')}`);
+  });
+
+  it('유효한 next가 있으면 chatV3Enabled와 무관하게 그 값 그대로(폴백 분기를 안 탐)', () => {
+    expect(safeNextPath('/board', true)).toBe('/board');
+  });
+});
