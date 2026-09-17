@@ -14,12 +14,16 @@ import {
 } from './connect-rules-v3-section-state';
 
 /**
- * story #3982 §(c) 연결된 에이전트 — `GET /api/team-members?type=agent`(agent-management-
- * tab.tsx와 같은 콜) 1콜 + `GET /api/projects`(그 파일이 이미 하는 project 이름 조회,
- * grantCounts 축과 같은 원천 — 새 콜 패턴 0) 1콜. 행 펼침은 project_id가 있는 행만
- * agent-stats를 추가로(project_id 필수 파라미터라 org 전체 집계는 없다, #3980 그라운딩
- * 확認 그대로) 지연 조회하고, access-matrix(org admin/owner 전용, 403 가능)는 펼침과
- * 무관하게 org 1콜만 미리 받아 클라에서 필터한다(N+1 금지).
+ * story #3982 §(c) 연결된 에이전트 — `GET /api/team-members?type=agent` 1콜만 마운트
+ * 시 부른다. `agent_role`+`runtime_type` 조합 표시(PO CHANGES-4).
+ *
+ * PO CHANGES-r3-1(2026-09-17, PASS 재오픈·카디르 콜 카운트 지적) — 첫 화면 콜이
+ * 비관리자 8·관리자 9로 AC2(≤6) 초과 판명. 처방: ① `role`을 화면(이미 `/api/me`를
+ * 부른다)에서 prop으로 받아 이 절의 중복 `/api/me` 콜 제거 ② `/api/projects`(프로젝트
+ * 이름)·`/api/agents/access-matrix`(admin/owner 전용)는 마운트 즉시가 아니라 **첫 행
+ * 펼침 때 1회만** 지연 로드하고 그 뒤엔 캐시(재펼침마다 재조회 0) — 둘 다 펼친 행에만
+ * 쓰는 데이터라 마운트 예산에 넣을 이유가 없었다. 결과: 마운트 콜 = team-members
+ * 1개뿐(화면 예산엔 이미 안 잡힘), 첫 펼침 때만 +1(projects)/+2(관리자, +access-matrix).
  *
  * PO CHANGES-4(2026-09-17, dev 실측: moonklabs 에이전트 11 전원 role="member"·
  * agent_role=null) — team_member.role은 실제로 SoD 워크플로 라벨(implementation/
@@ -67,29 +71,28 @@ function formatLeadTimeDays(avgLeadTimeMs: number): number {
   return Math.round(avgLeadTimeMs / (24 * 60 * 60 * 1000));
 }
 
-export function ConnectRulesV3Agents() {
+export function ConnectRulesV3Agents({ isAdmin }: { isAdmin: boolean }) {
   const t = useTranslations('connectRulesV3');
   const ta = useTranslations('agents');
   const [agents, setAgents] = useState<OrgAgent[]>([]);
-  const [projectsById, setProjectsById] = useState<Record<string, string>>({});
-  const [isAdmin, setIsAdmin] = useState(false);
+  const [projectsById, setProjectsById] = useState<Record<string, string> | null>(null);
   const [accessMatrix, setAccessMatrix] = useState<AccessMatrixRow[] | null>(null);
   const [loadState, setLoadState] = useState<'loading' | 'error' | 'ready'>('loading');
   const [retryKey, setRetryKey] = useState(0);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [statsByAgent, setStatsByAgent] = useState<Record<string, AgentStats | null | 'error'>>({});
   const [statsLoadingId, setStatsLoadingId] = useState<string | null>(null);
+  // story #3982 PO CHANGES-r3-1 — projects·access-matrix는 첫 펼침에 1회만(중복 fetch
+  // 방어는 projectsById!==null/accessMatrix!==null 체크만으론 "요청 진행 中" 구간을 못
+  // 잡는다 — 연타 펼침 레이스 방지용 별도 ref-less 플래그).
+  const [expandDataLoading, setExpandDataLoading] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       setLoadState('loading');
       try {
-        const [agentsRes, meRes, projectsRes] = await Promise.all([
-          fetchWithAuth('/api/team-members?type=agent'),
-          fetchWithAuth('/api/me'),
-          fetchWithAuth('/api/projects'),
-        ]);
+        const agentsRes = await fetchWithAuth('/api/team-members?type=agent');
         if (!agentsRes.ok) {
           if (!cancelled) setLoadState('error');
           return;
@@ -97,30 +100,7 @@ export function ConnectRulesV3Agents() {
         const agentsJson = await agentsRes.json() as { data?: OrgAgent[] };
         if (cancelled) return;
         setAgents(agentsJson.data ?? []);
-
-        if (projectsRes.ok) {
-          const projectsJson = await projectsRes.json() as { data?: ProjectOption[] };
-          if (!cancelled) {
-            setProjectsById(Object.fromEntries((projectsJson.data ?? []).map((p) => [p.id, p.name])));
-          }
-        }
-
-        let admin = false;
-        if (meRes.ok) {
-          const meJson = await meRes.json() as { data?: { role?: string } };
-          admin = meJson.data?.role === 'admin' || meJson.data?.role === 'owner';
-        }
-        if (cancelled) return;
-        setIsAdmin(admin);
-
-        if (admin) {
-          const matrixRes = await fetchWithAuth('/api/agents/access-matrix').catch(() => null);
-          if (!cancelled && matrixRes?.ok) {
-            const matrixJson = await matrixRes.json() as { data?: AccessMatrixRow[] };
-            setAccessMatrix(matrixJson.data ?? []);
-          }
-        }
-        if (!cancelled) setLoadState('ready');
+        setLoadState('ready');
       } catch {
         if (!cancelled) setLoadState('error');
       }
@@ -130,6 +110,21 @@ export function ConnectRulesV3Agents() {
 
   const toggleExpand = useCallback((agent: OrgAgent) => {
     setExpandedId((prev) => (prev === agent.id ? null : agent.id));
+
+    if (projectsById === null && !expandDataLoading) {
+      setExpandDataLoading(true);
+      void Promise.all([
+        fetchWithAuth('/api/projects').then((res) => (res.ok ? res.json() as Promise<{ data?: ProjectOption[] }> : null)),
+        isAdmin ? fetchWithAuth('/api/agents/access-matrix').catch(() => null) : Promise.resolve(null),
+      ]).then(async ([projectsJson, matrixRes]) => {
+        setProjectsById(Object.fromEntries((projectsJson?.data ?? []).map((p) => [p.id, p.name])));
+        if (matrixRes?.ok) {
+          const matrixJson = await matrixRes.json() as { data?: AccessMatrixRow[] };
+          setAccessMatrix(matrixJson.data ?? []);
+        }
+      }).finally(() => setExpandDataLoading(false));
+    }
+
     if (agent.project_id && !(agent.id in statsByAgent)) {
       setStatsLoadingId(agent.id);
       void fetchWithAuth(`/api/analytics/agent-stats?project_id=${agent.project_id}&agent_id=${agent.id}`)
@@ -139,7 +134,7 @@ export function ConnectRulesV3Agents() {
         )
         .finally(() => setStatsLoadingId((prev) => (prev === agent.id ? null : prev)));
     }
-  }, [statsByAgent]);
+  }, [statsByAgent, projectsById, expandDataLoading, isAdmin]);
 
   if (loadState === 'loading') return <ConnectRulesV3SectionSkeleton />;
   if (loadState === 'error') return <ConnectRulesV3SectionError onRetry={() => setRetryKey((k) => k + 1)} />;
@@ -160,7 +155,7 @@ export function ConnectRulesV3Agents() {
             : agent.presence_status === 'idle'
               ? t('presenceIdle')
               : t('presenceOffline');
-          const projectName = agent.project_id ? projectsById[agent.project_id] : undefined;
+          const projectName = agent.project_id ? projectsById?.[agent.project_id] : undefined;
 
           return (
             <div key={agent.id} className="rounded-md border border-border bg-muted/30 text-sm" data-testid="connect-rules-v3-agent-row">
