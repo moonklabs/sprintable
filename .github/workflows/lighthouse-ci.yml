@@ -203,36 +203,48 @@ jobs:
       # JWT_SECRET/NEXTAUTH_SECRET이 이 파일에 박힌 테스트 리터럴이고 backend가
       # 러너 localhost:8211·DB가 임시 postgres 서비스라 그 토큰으로 유효한 서버가
       # 세상에 없다.
-      # story #4029 CHANGES 6(PO 지적③) — repo `pnpm-lock.yaml`/루트 `package.json`에
-      # puppeteer 계열 모듈이 0건(PO 직접 grep 확認) → puppeteerScript가 top-level로 옮겨져
-      # `@lhci/cli`가 그 모듈을 실제로 불러오려는 순간 GHA에서 "Unable to require 'puppeteer'"
-      # 로 막혔을 것(로컬 재현: 설치 제거 후 동일 에러 재현 완료). 레포 의존성 그래프(lockfile)
-      # 는 안 건드리고 격리된 경로에만 CI 전용으로 설치 후 NODE_PATH로 노출한다 — `@lhci/cli`
-      # 의 모듈 탐색 로직이 일반 경로 탐색(NODE_PATH 포함) 다음에 process.cwd() 상대경로도
-      # 시도하므로(소스 직접대조 완료) 이 방식이면 격리 설치로도 반드시 잡힌다.
-      # 경량 core 모듈+시스템 Chrome 경로 조합도 로컬(/tmp/ppttest)에서 별도로 검증까지는
-      # 됐으나, 그 경우 lhci 자신의 내부 브라우저 실행(`PuppeteerManager.getChromiumPath()`가
-      # `puppeteerScript` 활성 시 그 모듈의 `executablePath()`를 그대로 반환해 자기 자신의
-      # Chrome 실행 경로로도 쓴다)과 이 스크립트의 `browser.launch()` 호출이 "같은 바이너리를
-      # 쓰는지"가 소스만으로는 100% 확정이 안 됐다(별도 미해결 리스크로 기록해 둠) — 예산이
-      # 이번 한 번뿐이라 그 불확실성을 안고 가지 않기로 한다. 온전한 풀버전(번들 Chromium
-      # 포함)을 쓰면 두 호출 경로가 전부 같은 모듈의 `executablePath()`를 참조하게 되어
-      # 이 리스크 자체가 구조적으로 사라진다 — 다운로드 회피(PO③ 선호)보다 이 한 번의
-      # 확실성을 우선했다, 이 판단 근거는 결과 보고 시 PO에게 그대로 전달한다.
-      # story #4029 — 버전 고정 근거(로컬 실측): puppeteer 최신(25.x)은 executablePath()가
-      # Promise를 반환하도록 바뀌어 있다(멀티 브라우저 지원 리팩터, v23~대 변경). @lhci/cli
-      # 0.15.1의 내부 Chrome 경로 판정은 그 반환값을 동기 문자열로 취급해 `fs.existsSync()`에
-      # 바로 넘긴다(소스 직접대조) — 최신 버전을 쓰면 이 판정 자체가 조용히 깨진다. 21계열은
-      # 그 리팩터 이전이라 동기 문자열을 그대로 반환함을 직접 확認(로컬 node -e 실행).
-      # NODE_PATH 경유 격리설치→다른 cwd에서 require 성공까지 로컬 확認 완료 — 단
-      # puppeteer 본체의 Chromium 다운로드(postinstall)까지는 이 dev 환경 자체의
-      # allowScripts 정책이 막아 로컬 재현 불가(실 GHA 러너엔 이 제약이 없음, 표준 동작이라
-      # 별도 검증 없이 신뢰).
-      - name: Install puppeteer for Lighthouse auth script (CI-only, isolated — repo lockfile 무변경)
+      # story #4029 CHANGES 7(PO 지적 — 소스 재대조로 이전 라운드의 미해결 리스크를 완전히
+      # 닫음) — `packages/cli/src/utils.js`의 `determineChromePath()` 우선순위는
+      # `options.chromePath` → `CHROME_PATH` env → `PuppeteerManager.getChromiumPath()` →
+      # `getChromeInstallationsSafe()[0]` 순이다. 즉 `collect.chromePath`를 명시하면
+      # `getChromiumPath()`(puppeteer 모듈의 `executablePath()`를 호출하는 그 함수) 자체가
+      # 안 불린다 — 지난 라운드에 걱정한 "puppeteer-core의 executablePath()가 뭘 뱉을지
+      # 모른다"·"25.x가 Promise를 반환해 동기판정이 깨진다" 둘 다 이 경로를 안 타 무관해진다.
+      # 또한 `puppeteer-manager.js:_getBrowser()`가 `puppeteer.launch({...,
+      # executablePath: this._options.chromePath})`로 브라우저를 **한 번만** 띄우고
+      # `collect.js`가 Lighthouse를 그 브라우저의 포트에 그대로 붙인다(별도 chrome-launcher
+      # 기동 없음, 소스 확認) — "lhci 내부 실행과 스크립트 브라우저가 같은 바이너리인지"도
+      # 애초에 브라우저가 하나뿐이라 성립하지 않는 질문이었다. 따라서 다운로드가 필요한
+      # 풀버전 대신 puppeteer-core로 전환한다(경로는 아래에서 실재 확認 후 명시).
+      # repo lockfile에 puppeteer 계열 0건은 여전하므로 격리설치+NODE_PATH 노출은 그대로
+      # 유지(그 논거는 CHANGES 6과 동일, 재론 안 함).
+      - name: Install puppeteer-core + locate runner Chrome (CI-only, isolated — repo lockfile 무변경)
+        timeout-minutes: 3
         run: |
+          set -euo pipefail
           mkdir -p /tmp/lhci-puppeteer
-          cd /tmp/lhci-puppeteer && npm install puppeteer@21 --no-save --no-audit --no-fund
+          cd /tmp/lhci-puppeteer && npm install puppeteer-core@21 --no-save --no-audit --no-fund
           echo "NODE_PATH=/tmp/lhci-puppeteer/node_modules" >> "$GITHUB_ENV"
+
+          # story #4029 CHANGES 7(PO 지적②③) — GH 호스팅 ubuntu 러너는 표준 이미지에
+          # Google Chrome이 사전설치돼 있다(이전 run들의 비-인증 6/6 login 측정 자체가
+          # 이미 그 증거 — chrome-launcher가 매번 실제로 브라우저를 띄워 성능수치를 냈다).
+          # 그 경로를 실재 확認한 뒤 CHROME_PATH env·collect.chromePath 양쪽에 같은 값을
+          # 싣는다(대체 아님 — PO 지시대로 두 곳 다). 못 찾으면 이 스텝에서 바로 하드 실패
+          # (다음 스텝들로 조용히 안 넘어가게).
+          chrome_path=""
+          for c in google-chrome-stable google-chrome chromium-browser chromium; do
+            if p=$(command -v "$c" 2>/dev/null); then
+              chrome_path="$p"
+              break
+            fi
+          done
+          if [ -z "$chrome_path" ]; then
+            echo "::error::러너에 Chrome이 없다 — 인증 브라우저를 띄울 수 없음"
+            exit 1
+          fi
+          echo "runner Chrome: $chrome_path"
+          echo "CHROME_PATH=${chrome_path}" >> "$GITHUB_ENV"
 
       - name: Generate authenticated lighthouserc + puppeteer auth script
         run: |
@@ -254,12 +266,19 @@ jobs:
           collect['settings']['disableStorageReset'] = True
           # story #4029 CHANGES 6(PO 지적④) — puppeteerScript 활성 시 @lhci/cli는
           # settings.chromeFlags를 무시하는 경고를 낸다(소스 확認, checkIgnoredChromeFlagsOption).
-          # 공식 문서가 명시하는 정식 채널은 collect.puppeteerLaunchOptions.args — 이 러너의
-          # 일반 Lighthouse 감사(chrome-launcher 경유)는 지금까지 별도 sandbox 플래그 없이도
-          # 성공해 왔으나, puppeteerScript용 브라우저는 PuppeteerManager가 직접
-          # puppeteer.launch()를 호출하는 별개 경로라 기본 launch args가 다를 수 있다 —
-          # 리눅스 CI 컨테이너의 표준 관례(--no-sandbox)를 정식 채널로 선제 반영한다.
+          # 공식 문서가 명시하는 정식 채널은 collect.puppeteerLaunchOptions.args로 이전한다
+          # (리눅스 CI 컨테이너의 표준 관례 --no-sandbox 선제 반영).
           collect['puppeteerLaunchOptions'] = {'args': ['--no-sandbox']}
+          # story #4029 CHANGES 7(PO 지적①②, 소스 재대조) — \`determineChromePath()\`
+          # (packages/cli/src/utils.js)는 \`options.chromePath\`가 있으면 그것을 최우선으로
+          # 쓰고 puppeteer 모듈의 \`executablePath()\`를 호출하는 \`getChromiumPath()\` 자체를
+          # 안 부른다. 이전 스텝이 실재 확認한 러너 Chrome 경로를 여기 명시하면 puppeteer
+          # 모듈(puppeteer-core) 쪽 executablePath 관련 불확실성 자체가 애초에 발생하지
+          # 않는다. \`_getBrowser()\`가 이 chromePath로 브라우저를 한 번만 띄우고 Lighthouse
+          # 는 그 브라우저 포트에 그대로 붙는다(별도 chrome-launcher 기동 없음, 소스 확認)
+          # — \"내부 실행과 스크립트 브라우저가 같은 바이너리인가\"는 브라우저가 하나뿐이라
+          # 애초에 성립하지 않는 질문이었다.
+          collect['chromePath'] = os.environ['CHROME_PATH']
           with open('lighthouserc.ci.json', 'w') as f:
               json.dump(cfg, f, indent=2)
 
