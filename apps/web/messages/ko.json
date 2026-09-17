@@ -502,7 +502,7 @@
     "loadErrorTitle": "불러오지 못했어요",
     "threadRailTitle": "대화",
     "threadRailEmpty": "아직 대화가 없어요",
-    "threadRowAriaLabel": "{n}번째 상대 {label}",
+    "threadRowAriaLabel": "{label}, 목록 {n}번째",
     "unknownParticipant": "알 수 없음",
     "roleTagAgent": "에이전트",
     "meLabel": "나",

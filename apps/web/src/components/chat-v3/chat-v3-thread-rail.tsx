@@ -48,6 +48,8 @@ export function ChatV3ThreadRail({ threads, meId, selectedId, onSelect }: {
             const isAgent = other?.type === 'agent';
             const isSelected = thread.id === selectedId;
             const rowLabel = other?.name ?? t('unknownParticipant');
+            const roleId = isAgent ? `chat-v3-thread-${thread.id}-role` : null;
+            const previewId = `chat-v3-thread-${thread.id}-preview`;
             return (
               <li key={thread.id}>
                 <button
@@ -56,6 +58,7 @@ export function ChatV3ThreadRail({ threads, meId, selectedId, onSelect }: {
                   data-testid="chat-v3-thread-row"
                   aria-current={isSelected}
                   aria-label={t('threadRowAriaLabel', { n: index + 1, label: rowLabel })}
+                  aria-describedby={[roleId, previewId].filter(Boolean).join(' ')}
                   className={
                     isSelected
                       ? 'flex w-full items-start gap-2.5 border-b border-border bg-primary/10 px-4 py-3 text-left'
@@ -67,10 +70,14 @@ export function ChatV3ThreadRail({ threads, meId, selectedId, onSelect }: {
                       <span className="truncate text-[13.5px] font-semibold text-foreground">{rowLabel}</span>
                       {/* 교차 PR 드리프트(유나 점검표 1c6a0ced, 항목 4) — 색 있는
                           attention(위험·질문·사람 손 필요)만 Badge, 중립 역할
-                          라벨은 muted-text span(4373 task 상태 라벨과 같은 결). */}
-                      {isAgent ? <span className="shrink-0 text-[10px] text-muted-foreground" data-testid="chat-v3-role-tag-agent">{t('roleTagAgent')}</span> : null}
+                          라벨은 muted-text span(4373 task 상태 라벨과 같은 결).
+                          story #3972 CI 후속(페드루 PO) — 버튼에 aria-label을
+                          붙이면 스크린리더가 자식 텍스트를 더 안 읽어(대체가
+                          아니라 은폐) 이 역할 표시·미리보기가 사라졌다 —
+                          aria-describedby로 다시 잇는다. */}
+                      {isAgent ? <span id={roleId ?? undefined} className="shrink-0 text-[10px] text-muted-foreground" data-testid="chat-v3-role-tag-agent">{t('roleTagAgent')}</span> : null}
                     </div>
-                    <p className="mt-0.5 truncate text-xs text-muted-foreground">{thread.latest_message?.content ?? ''}</p>
+                    <p id={previewId} className="mt-0.5 truncate text-xs text-muted-foreground">{thread.latest_message?.content ?? ''}</p>
                   </div>
                   {thread.unread_count > 0 ? (
                     <span className="mt-1 size-2 shrink-0 rounded-full bg-primary" data-testid="chat-v3-unread-dot" />
