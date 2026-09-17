@@ -485,7 +485,7 @@
     "resultsSectionTitle": "Today's results",
     "resultsHint": "See Results for details",
     "resultsSummaryLine": "{landed} landed today · {qaPassed} passed review · {openDefects} open issues · {published} published.",
-    "unmeasured": "Not measured",
+    "unmeasured": "Unmeasured",
     "searchPlaceholder": "Search or give an instruction",
     "targetColumnEmpty": "Nothing selected.",
     "chatColumnEmpty": "Select a conversation to see it here.",
