@@ -1229,6 +1229,9 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
   // Record로 받아(값이 늘면 이 Record가 컴파일 실패 → 조합을 반드시 추가하게) ×
   // processing_kind × canPublish 곱으로 전수. publication_status='failed'인 모든 조합에서
   // 실패 신호(배지 · publicationFailed 알림 · 컨테이너 대기 알림)가 «정확히 1개»여야 한다.
+  // (일부 조합 — 예: dead_letter+awaiting_container — 은 서버가 dead_letter 전이 시
+  // processing_kind를 null로 되돌려 «서버상 도달 불가»다. 방어로 전수에 그대로 포함해,
+  // 그런 조합이 혹시 와도 신호가 1개로 유지됨을 보장한다.)
   const COMMAND_STATUS_ALL: Record<CommandStatus, true> = {
     pending: true, in_progress: true, completed: true, blocked: true, dead_letter: true, voided: true, cancelled: true,
   };

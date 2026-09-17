@@ -2330,11 +2330,12 @@ export default function ChannelPostEditPage() {
             배지를 안 그린다.
 
             story #4015(PO CHANGES 2) — processing_kind==='awaiting_container'면 위 상태
-            알림 IIFE가 컨테이너 대기 알림을 «먼저» 세운다(command_status 무관). kind===
-            'processing'(=pending+awaiting_container)만 억제하면 dead_letter 등 다른
-            command_status가 그 사이 awaiting_container로 오는 조합에서 배지+알림이 둘 다
-            떠 「실패 신호 정확히 1개」가 깨진다. 그래서 awaiting_container면 command_status
-            무관하게 배지를 억제한다(컨테이너 대기 알림이 그 자리의 유일한 신호). */}
+            알림 IIFE가 컨테이너 대기 알림을 «먼저» 세운다(command_status 무관). 서버는
+            명령이 blocked/dead_letter로 가면 processing_kind를 null로 되돌리므로(위 컨테이너
+            대기 분기 주석) awaiting_container는 pending에서만 온다 — 즉 dead_letter+awaiting_
+            container 같은 조합은 «서버상 도달 불가»다. 도달 가능한 상태에선 kind!=='processing'
+            억제와 동작이 같고, 이 넓힌 조건은 그 도달 불가 조합에 대한 «방어»다(전수 곱
+            테스트가 그 조합까지 돌려도 실패 신호가 1개로 유지되게 한다). */}
         {failureAction && draft.processing_kind !== 'awaiting_container' ? (
           <FailureActionBadge
             action={failureAction} displayTimezone={displayTimezone}
