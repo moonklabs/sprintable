@@ -12,6 +12,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { getEntityHref } from '@/components/chat/embed-card';
 import { fetchWithAuth } from '@/lib/db/client';
 import { useChannelLabel } from '@/lib/channel-label';
+import { isSystemPublisher } from '@/lib/runtime-capabilities';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { CommentReplyDialog, type CommentReplyOutcome } from '@/components/content/comment-reply-dialog';
@@ -116,6 +117,16 @@ interface OrgMemberOption {
   name: string;
 }
 
+// story #4005(BFF `/api/organizations/{id}/members`가 백엔드에 없는 경로로
+// 프록시해 404를 catch가 삼키던 결함 처방) — `/api/members`(story #3997이
+// additive로 실은 `runtime_type`) 응답 raw shape. name은 canonical member
+// 해소가 None을 낼 수 있어 null 허용(members.py::MemberResponse와 동형).
+interface MemberListRow {
+  id: string;
+  name: string | null;
+  runtime_type?: string | null;
+}
+
 async function readJson<T>(res: Response): Promise<T | null> {
   const body = (await res.json().catch(() => null)) as { data?: T } | null;
   return body?.data ?? null;
@@ -126,6 +137,7 @@ export default function ChannelPostsEngagementPage() {
   const { orgId, orgTimezone } = useDashboardContext();
   const t = useTranslations('content');
   const channelLabel = useChannelLabel();
+  const tc = useTranslations('common');
   const locale = useLocale();
   const displayTimezone = resolveDisplayTimezone(orgTimezone).tz;
 
@@ -140,6 +152,7 @@ export default function ChannelPostsEngagementPage() {
   const [patchError, setPatchError] = useState<string | null>(null);
   const [collectionStatus, setCollectionStatus] = useState<CollectionStatusItem[]>([]);
   const [members, setMembers] = useState<OrgMemberOption[]>([]);
+  const [membersLoadError, setMembersLoadError] = useState(false);
   const [replyTargetId, setReplyTargetId] = useState<string | null>(null);
   const [convertTargetId, setConvertTargetId] = useState<string | null>(null);
 
@@ -204,22 +217,31 @@ export default function ChannelPostsEngagementPage() {
     return () => { cancelled = true; };
   }, [orgId]);
 
-  useEffect(() => {
+  const loadMembers = useCallback(async () => {
     if (!orgId) return;
-    let cancelled = false;
-    async function loadMembers() {
-      try {
-        const res = await fetchWithAuth(`/api/organizations/${orgId}/members`);
-        if (!res.ok || cancelled) return;
-        const data = await readJson<{ id: string; name: string }[]>(res);
-        if (!cancelled && data) setMembers(data.map((m) => ({ id: m.id, name: m.name })));
-      } catch {
-        // 배정 드롭다운이 비어도 목록 자체는 정상 — fail-soft.
-      }
+    setMembersLoadError(false);
+    try {
+      // story #4005 — 404를 조용히 삼키던 옛 BFF(`/api/organizations/{id}/members`,
+      // 백엔드에 없는 라우트로 프록시)를 걷어내고, 이미 정상 동작하는 canonical
+      // SSOT 엔드포인트(`/api/members` → BE `/api/v2/members`, project_id 생략 시
+      // org 전원=휴먼 org_members 전원+에이전트 team_members 전부)로 교체.
+      const res = await fetchWithAuth('/api/members');
+      if (!res.ok) { setMembersLoadError(true); return; }
+      const data = await readJson<MemberListRow[]>(res);
+      if (!data) { setMembersLoadError(true); return; }
+      // story #3997과 같은 결 — 「시스템 발행」은 사람이 고를 배정 대상이 아니다
+      // (add-participant-modal.tsx 선례와 동형 필터, 새 판정 로직 발명 0).
+      setMembers(
+        data
+          .filter((m) => !isSystemPublisher(m.runtime_type))
+          .map((m) => ({ id: m.id, name: m.name ?? '' })),
+      );
+    } catch {
+      setMembersLoadError(true);
     }
-    void loadMembers();
-    return () => { cancelled = true; };
   }, [orgId]);
+
+  useEffect(() => { void loadMembers(); }, [loadMembers]);
 
   const channelOptions = useMemo(
     () => Array.from(new Set([...items.map((i) => i.channel), ...collectionStatus.map((c) => c.channel)])),
@@ -377,6 +399,17 @@ export default function ChannelPostsEngagementPage() {
       {patchError ? (
         <Alert variant="destructive" role="alert">
           <AlertDescription>{patchError}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      {membersLoadError ? (
+        <Alert variant="destructive" role="alert">
+          <AlertDescription className="flex items-center justify-between gap-3">
+            <span>{t('engagementAssigneeLoadFailed')}</span>
+            <Button size="sm" variant="outline" onClick={() => void loadMembers()} data-testid="engagement-members-retry">
+              {tc('retry')}
+            </Button>
+          </AlertDescription>
         </Alert>
       ) : null}
 
