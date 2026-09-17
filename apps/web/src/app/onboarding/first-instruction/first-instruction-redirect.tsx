@@ -12,6 +12,10 @@ import { createFirstInstructionConversation } from '@/lib/onboarding/first-instr
 // 여기서 정한다(과도한 주소 방지). 넘으면 잘라 싣지 않고 안내(AC3).
 export const MAX_COMPOSE_LENGTH = 2000;
 
+// 목록/상세 페이지네이션 — DM은 첫 페이지 밖에도 있을 수 있어 total까지 훑는다(PO CHANGES3).
+const CONVERSATIONS_PAGE_SIZE = 100;
+const MAX_CONVERSATION_PAGES = 20;
+
 interface ParticipantLite {
   member_id: string;
   type?: 'agent' | 'human';
@@ -23,26 +27,19 @@ export interface ConversationLite {
   participants?: ParticipantLite[];
 }
 
-// AC2·PO 보탬1 — «찾기» 우선(POST /api/conversations는 중복 방지가 없어 부를 때마다 새 대화가 쌓인다).
-// ① 체크리스트 first_instruction_conversation_id — 단 그 대화 참가자에 이 에이전트가 있을 때만.
-// ② 목록에서 나+이 에이전트 DM 최신 1건. 둘 다 없으면 null(→ 생성 1회).
-export function pickExistingConversationId(
-  checklistId: string | null,
-  conversations: ConversationLite[],
+export function participantsIncludeAgent(
+  participants: ParticipantLite[] | undefined,
   agentId: string,
-): string | null {
-  const hasAgent = (c: ConversationLite) =>
-    (c.participants ?? []).some((p) => p.member_id === agentId);
+): boolean {
+  return (participants ?? []).some((p) => p.member_id === agentId);
+}
 
-  if (checklistId) {
-    const match = conversations.find((c) => c.id === checklistId);
-    if (match && hasAgent(match)) return checklistId;
-  }
-
-  const agentDms = conversations
-    .filter((c) => c.type === 'dm' && hasAgent(c))
+// ② 목록에서 나+이 에이전트 DM 최신 1건(순수). ①(체크리스트)은 대화 상세 조회가 필요해 효과 안에서.
+export function pickNewestAgentDm(conversations: ConversationLite[], agentId: string): string | null {
+  const dms = conversations
+    .filter((c) => c.type === 'dm' && participantsIncludeAgent(c.participants, agentId))
     .sort((a, b) => (b.updated_at ?? '').localeCompare(a.updated_at ?? ''));
-  return agentDms[0]?.id ?? null;
+  return dms[0]?.id ?? null;
 }
 
 // 대화 화면 목적지. compose 비면 compose 없이, 상한 넘으면 싣지 않고 tooLong 표시(AC3).
@@ -59,6 +56,42 @@ export function buildFirstInstructionTarget(
   return { path: `/chats/${conversationId}?compose=${encodeURIComponent(compose)}`, tooLong: false };
 }
 
+// 이 프로젝트의 에이전트 멤버 id 집합. null = 조회 실패(생성으로 안 넘어감·PO CHANGES2).
+async function fetchProjectAgentMemberIds(projectId: string): Promise<Set<string> | null> {
+  try {
+    const res = await fetchWithAuth(`/api/team-members?project_id=${encodeURIComponent(projectId)}&type=agent`);
+    if (!res.ok) return null;
+    const json = (await res.json()) as { data?: { id: string }[] };
+    return new Set((json.data ?? []).map((m) => m.id));
+  } catch {
+    return null;
+  }
+}
+
+// 기본 목록만(include_agent_conversations=owner/admin 전용이라 일반 멤버는 403·PO CHANGES2). 내 DM은
+// 기본 목록에 있다. total까지 페이지네이션(PO CHANGES3). 한 페이지라도 실패면 null(→ error·생성 0).
+async function fetchAllProjectConversations(projectId: string): Promise<ConversationLite[] | null> {
+  const all: ConversationLite[] = [];
+  for (let page = 0; page < MAX_CONVERSATION_PAGES; page++) {
+    const offset = page * CONVERSATIONS_PAGE_SIZE;
+    let res: Response;
+    try {
+      res = await fetchWithAuth(
+        `/api/conversations?project_id=${encodeURIComponent(projectId)}&limit=${CONVERSATIONS_PAGE_SIZE}&offset=${offset}`,
+      );
+    } catch {
+      return null;
+    }
+    if (!res.ok) return null;
+    const json = (await res.json()) as { data?: ConversationLite[]; total?: number };
+    const items = json.data ?? [];
+    all.push(...items);
+    const total = json.total ?? all.length;
+    if (items.length === 0 || all.length >= total) break;
+  }
+  return all;
+}
+
 async function fetchChecklistConversationId(): Promise<string | null> {
   try {
     const res = await fetchWithAuth('/api/activation/checklist');
@@ -70,16 +103,15 @@ async function fetchChecklistConversationId(): Promise<string | null> {
   }
 }
 
-async function fetchAgentConversations(projectId: string): Promise<ConversationLite[]> {
+// GET /api/conversations/{id} — 참가자를 최상위에 그대로 실어 준다(chats 상세와 동일 계약). null=조회 실패.
+async function fetchConversationParticipants(conversationId: string): Promise<ParticipantLite[] | null> {
   try {
-    const res = await fetchWithAuth(
-      `/api/conversations?project_id=${encodeURIComponent(projectId)}&include_agent_conversations=true&limit=50`,
-    );
-    if (!res.ok) return [];
-    const json = (await res.json()) as { data?: ConversationLite[] };
-    return json.data ?? [];
+    const res = await fetchWithAuth(`/api/conversations/${conversationId}`);
+    if (!res.ok) return null;
+    const conv = (await res.json()) as { participants?: ParticipantLite[] };
+    return conv.participants ?? [];
   } catch {
-    return [];
+    return null;
   }
 }
 
@@ -99,7 +131,7 @@ export function FirstInstructionRedirect({ agentId, compose, projectId }: FirstI
   // tooLong일 때 compose 없이 열 대화 주소(안내의 「대화 열기」 링크).
   const [conversationHref, setConversationHref] = useState<string | null>(null);
   // AC2·보탬2 — 효과는 마운트당 1회만(StrictMode 이중 호출·새로고침 이중 생성 방지). 생성 자체의
-  // 재발 방지는 «찾기»(pickExistingConversationId)가 맡는다.
+  // 재발 방지는 «찾기»(멤버십·목록 조회)가 맡는다.
   const ranRef = useRef(false);
 
   useEffect(() => {
@@ -109,22 +141,65 @@ export function FirstInstructionRedirect({ agentId, compose, projectId }: FirstI
     ranRef.current = true;
 
     let cancelled = false;
+    const fail = () => {
+      if (!cancelled) setPhase('error');
+    };
+
     (async () => {
       try {
-        const [checklistId, conversations] = await Promise.all([
-          fetchChecklistConversationId(),
-          fetchAgentConversations(projectId),
-        ]);
-        let conversationId = pickExistingConversationId(checklistId, conversations, agentId);
-        if (!conversationId) {
-          // ③ 없을 때만 웹이 이미 쓰는 생성 경로(에이전트 지정)로 1회. 다른 org·없는 멤버면 null.
-          conversationId = await createFirstInstructionConversation(projectId, agentId);
-        }
+        // PO CHANGES1 사전확認 — 이 에이전트가 이 프로젝트 멤버인가. 다른 org/없는 멤버면 생성 API가
+        // 조용히 빼고 «나 혼자 방»을 만드므로(conversations.py:1417 filter_org_member_ids), 생성 前에
+        // 막는다. 멤버십 조회 실패도 error(생성 0·PO CHANGES2).
+        const agentMemberIds = await fetchProjectAgentMemberIds(projectId);
         if (cancelled) return;
-        if (!conversationId) {
-          setPhase('error');
+        if (!agentMemberIds || !agentMemberIds.has(agentId)) {
+          fail();
           return;
         }
+
+        // PO CHANGES2/3 — 기본 목록을 total까지. 조회 실패면 생성으로 안 넘어가고 error.
+        const conversations = await fetchAllProjectConversations(projectId);
+        if (cancelled) return;
+        if (!conversations) {
+          fail();
+          return;
+        }
+
+        // ① 체크리스트 first_instruction_conversation_id — 그 대화 참가자에 이 에이전트가 있을 때만
+        // (조회는 GET /{id}로·PO CHANGES3). 체크리스트/상세 실패는 ① 건너뛰기(soft).
+        let conversationId: string | null = null;
+        const checklistId = await fetchChecklistConversationId();
+        if (cancelled) return;
+        if (checklistId) {
+          const parts = await fetchConversationParticipants(checklistId);
+          if (cancelled) return;
+          if (parts && participantsIncludeAgent(parts, agentId)) {
+            conversationId = checklistId;
+          }
+        }
+
+        // ② 목록에서 나+이 에이전트 DM 최신 1.
+        if (!conversationId) {
+          conversationId = pickNewestAgentDm(conversations, agentId);
+        }
+
+        // ③ 없을 때만 생성(에이전트는 이미 프로젝트 멤버로 확認됨). 생성 결과 참가자에 그 에이전트가
+        // 정말 있는지 재확認(생성 측 드롭 방어·PO CHANGES1).
+        if (!conversationId) {
+          conversationId = await createFirstInstructionConversation(projectId, agentId);
+          if (cancelled) return;
+          if (!conversationId) {
+            fail();
+            return;
+          }
+          const createdParts = await fetchConversationParticipants(conversationId);
+          if (cancelled) return;
+          if (!createdParts || !participantsIncludeAgent(createdParts, agentId)) {
+            fail();
+            return;
+          }
+        }
+
         const { path, tooLong } = buildFirstInstructionTarget(conversationId, compose);
         if (tooLong) {
           setConversationHref(`/chats/${conversationId}`);
@@ -134,7 +209,7 @@ export function FirstInstructionRedirect({ agentId, compose, projectId }: FirstI
         // AC2 — 교체 이동(뒤로가기로 이 중간 주소에 안 돌아옴). 전송은 사람이 대화 화면에서 누른다.
         router.replace(path);
       } catch {
-        if (!cancelled) setPhase('error');
+        fail();
       }
     })();
 
