@@ -466,6 +466,16 @@
     "workforceTrustVerified": "Human verified",
     "workforceTrustClaimed": "Agent-reported · awaiting review"
   },
+  "todayV3": {
+    "progressSectionTitle": "In progress {count}",
+    "progressEmptyTitle": "No delegations in progress yet",
+    "stopAction": "Stop",
+    "stopRequestedLabel": "Stop requested",
+    "stopActionForbidden": "You don't have permission to stop this",
+    "reasonDialogStopTitle": "Stop reason",
+    "reasonDialogStopPlaceholder": "Reason (optional)",
+    "decisionActionFailed": "Couldn't process this"
+  },
   "workList": {
     "title": "Work",
     "subtitle": "Goals lead to stories, stories to tasks. Work you take on and work you delegate are kept apart.",
