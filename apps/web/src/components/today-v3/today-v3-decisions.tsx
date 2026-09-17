@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input';
 import { hrefForNeedsMeItem, type TodayNeedsMeItem } from '@/components/org-briefing/derive-today';
 import { buildGateTransitionBody, buildHitlDecisionBody, classifyGateTransitionErrorCode } from '@/lib/gate-decision-payload';
 import { TodayV3ReasonDialog } from './today-v3-reason-dialog';
+import { fetchWithAuth } from '@/lib/db/client';
 
 /**
  * story #3964(E-UX-OVERHAUL·「오늘」 구현 4/N) — #3962/CHANGES-2가 지은 자리(위험
@@ -44,7 +45,7 @@ interface ActionResult {
 }
 
 async function postGateTransition(id: string, status: 'approved' | 'rejected', note?: string): Promise<ActionResult> {
-  const res = await fetch(`/api/gates/${id}/transition`, {
+  const res = await fetchWithAuth(`/api/gates/${id}/transition`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(buildGateTransitionBody({ status, note })),
@@ -56,7 +57,7 @@ async function postGateTransition(id: string, status: 'approved' | 'rejected', n
 }
 
 async function postGateHold(id: string, reason?: string): Promise<ActionResult> {
-  const res = await fetch(`/api/gates/${id}/hold`, {
+  const res = await fetchWithAuth(`/api/gates/${id}/hold`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ reason: reason?.trim() || null }),
@@ -65,7 +66,7 @@ async function postGateHold(id: string, reason?: string): Promise<ActionResult> 
 }
 
 async function patchHitlDecision(id: string, status: 'approved' | 'rejected', responseText?: string): Promise<ActionResult> {
-  const res = await fetch(`/api/v1/hitl-requests/${id}`, {
+  const res = await fetchWithAuth(`/api/v1/hitl-requests/${id}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(buildHitlDecisionBody({ status, responseText: responseText || undefined })),
