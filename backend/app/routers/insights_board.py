@@ -102,6 +102,23 @@ class InsightsBoardAdsBoostView(BaseModel):
     run_status: str | None
 
 
+class PublishedInWindowChannelView(BaseModel):
+    channel_kind: str
+    count: int
+
+
+class PublishedInWindowView(BaseModel):
+    count: int
+    by_channel: list[PublishedInWindowChannelView]
+    since: datetime
+
+
+class ViewsInWindowView(BaseModel):
+    sum: int
+    captured_rows: int
+    total_rows: int
+
+
 class InsightsBoardResponse(BaseModel):
     rows: list[InsightsBoardRow]
     has_more: bool
@@ -114,6 +131,14 @@ class InsightsBoardResponse(BaseModel):
     # 아니다). FE 셀(insights-board-metric-cell.tsx)이 inflow_* 지표 null의 원인을
     # 이 값으로 가른다 — 「지표 키 이름」만으로 단정하던 결함의 처방.
     ga4_connection_status: Literal["not_connected", "needs_reauth", "connected"]
+    # story #3978(「결과」 §7 갭 #1) — "나간 글" 기간 카운트. today_service.py::
+    # resolve_published_since와 같은 판정식(「오늘」과 같은 함수). 채널 연결이 org에
+    # 0개면 null(발행 개념 자체가 아직 없음 — 지어내지 않는다), 있으면 0건도 실 0.
+    published_in_window: PublishedInWindowView | None = None
+    # story #3978 CHANGES(페드루 PO 추가 AC) — "조회" 요약. rows[]는 페이지네이션이라
+    # FE 합산이 한 페이지 합이 되는 문제 처방 — 창 안 전체 D+7 organic captured views
+    # 합계(페이지 무관). captured_rows==0(창 안 캡처 0건)이면 null(미측정).
+    views_in_window: ViewsInWindowView | None = None
 
 
 class MeasuredMetricValue(BaseModel):
