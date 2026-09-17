@@ -15,6 +15,7 @@ import { emitOnboardingEvent, beaconOnboardingEvent } from './onboarding-telemet
 
 import { fetchWithAuth, refreshAuthTokens } from '@/lib/db/client';
 import { createFirstInstructionConversation } from '@/lib/onboarding/first-instruction';
+import { DesktopDownloadCard } from '@/components/desktop/desktop-download-card';
 
 // story #2407 — Transport는 이제 verify-rail.tsx가 소유(useVerificationRail이 그 값을 직접
 // 다룸). 이 re-export는 기존 소비자(onboarding-form.tsx 등)의 import 경로를 안 건드리려는
@@ -308,6 +309,24 @@ export function ConnectStep({ agentId, apiKey, projectId, onFinish }: ConnectSte
 
   return (
     <div className="space-y-4">
+      {/* story #3983(PO 확定 2026-09-17 01:41Z) — 주 경로 「데스크톱 앱에서
+          이어서」(기존 DesktopDownloadCard 그대로, 새 다운로드 로직 0). 보조
+          경로(아래 기존 웹 connect 흐름)는 삭제 0 — 항상 그대로 이어서
+          렌더한다(데스크톱 없는 사람·다른 런타임 사용자를 안 끊는다). */}
+      <section className="space-y-3 rounded-lg border border-border bg-card p-4" data-testid="connect-step-desktop-primary">
+        <div>
+          <p className="text-sm font-semibold text-foreground">{t('desktopHandoffTitle')}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">{t('desktopHandoffSubtitle')}</p>
+        </div>
+        <DesktopDownloadCard />
+        <Button variant="hero" size="sm" onClick={handleDashboard} data-testid="connect-step-desktop-finish">
+          {t('dashboardCta')}
+        </Button>
+      </section>
+      <p className="text-xs font-medium text-muted-foreground" data-testid="connect-step-web-secondary-label">
+        {t('webConnectSecondaryLabel')}
+      </p>
+
       {/* [0] transport 세그먼트 토글 */}
       <div className="flex gap-0 rounded-md border border-border bg-muted p-[3px]">
         <button
@@ -409,6 +428,11 @@ export function ConnectStep({ agentId, apiKey, projectId, onFinish }: ConnectSte
           {t('artifactGuide')}
         </p>
         <p className="text-xs text-muted-foreground">{t('keyOneTimeNote')}</p>
+        {/* story #3983(PO 확定) — 키 핸드오프 문구 한 쌍(낱말 표 등재, 컴패니언
+            쪽 짝 문구는 이 카드 범위 밖). 이 웹 화면 몫만. */}
+        <p className="text-xs text-muted-foreground" data-testid="connect-step-desktop-key-handoff">
+          {t('desktopKeyHandoffTitle')} — {t('desktopKeyHandoffCanonicalNote')}
+        </p>
         {/* story #4cdad425(prod 에스컬레이트) — 「설정만 붙이면 자동」 오해가 무한 대기의 근본이었다
             (실유저 5회 재시도). 설정 저장 뒤 «Claude Code 재시작»이 연결 적용의 필수 단계라 그
             자리에 명시한다. info 톤(안내·연결 미확認≠에러). */}
