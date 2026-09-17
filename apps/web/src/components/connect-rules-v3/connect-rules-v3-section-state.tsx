@@ -1,7 +1,7 @@
 'use client';
 
 import { useTranslations } from 'next-intl';
-import { Card } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 
 /**
@@ -12,9 +12,9 @@ import { Button } from '@/components/ui/button';
  */
 export function ConnectRulesV3SectionSkeleton({ rows = 3 }: { rows?: number }) {
   return (
-    <div className="space-y-2" aria-hidden="true">
+    <div className="space-y-2" aria-hidden="true" data-testid="connect-rules-v3-skeleton">
       {Array.from({ length: rows }, (_, i) => (
-        <Card key={i} className="h-14 animate-pulse bg-muted/30" />
+        <Skeleton key={i} className="h-14" />
       ))}
     </div>
   );

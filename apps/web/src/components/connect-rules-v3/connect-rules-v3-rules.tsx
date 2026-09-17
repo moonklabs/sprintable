@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
-import { Badge } from '@/components/ui/badge';
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatMinorCurrency, type GenerationBudgetCurrency } from '@/components/content/generation-budget-indicator';
 import {
@@ -13,33 +12,44 @@ import {
 } from './connect-rules-v3-section-state';
 
 /**
- * story #3982 §(e) 콘텐츠 규칙 — 낱말표 D절 정본: 한도는 켜짐/꺼짐이 아니라 «설정
- * 금액·기간 / 없으면 「없음」»으로 표시하고(GenerationBudgetIndicator의 "정책 없으면
- * 줄 자체를 안 그린다" §19-3 관례는 이 화면엔 안 씀 — 「사라짐 0」이 우선), 생성 비용
- * 한도·X 비용 한도는 반드시 별행 2개(시안의 "API 사용 상한·켜짐" 1행 통합 표기는
- * 폐기). 통화 포맷은 generation-budget-indicator.tsx::formatMinorCurrency 재사용(손
- * 문자열 이어붙이기 금지, PR#4202 addendum 정신 재사용).
+ * story #3982 §(e) 콘텐츠 규칙 — 「첫 화면 콜 ≤5(A 제외)」 예산을 지키려고 별도
+ * `/generation-budget`·`/api-usage-budget` GET을 새로 부르지 않는다: `GET .../
+ * content-rules`(ContentRulesFields, `app/routers/content_rules.py:123`) 응답에
+ * 이미 `generation_budget`/`api_usage_budget`/`utm_rules`가 정책값(limit_minor·
+ * currency·period)으로 실려 온다 — 이 화면은 spent/remaining이 필요 없어(설정
+ * 금액·기간만 보여주면 됨, 낱말표 D절) 그 계산까지 하는 별도 GET은 과한 콜이다.
+ * 낱말표 D절 정본: 한도는 켜짐/꺼짐이 아니라 «설정 금액·기간 / 없으면 「없음」»으로
+ * 표시하고, 생성 비용 한도·X 비용 한도는 반드시 별행 2개(시안의 "API 사용 상한·
+ * 켜짐" 1행 통합 표기는 폐기). 통화 포맷은 formatMinorCurrency 재사용(손 문자열
+ * 이어붙이기 금지).
  */
+interface BudgetRule {
+  limit_minor: number;
+  currency: GenerationBudgetCurrency;
+  period: 'month';
+}
+
+interface UtmRules {
+  enabled: boolean;
+}
+
 interface ContentRules {
   banned_terms: string[];
   require_utm: boolean;
   tone: string | null;
   taxonomy: string[];
   channel_priority: string[];
-  brand_kit: { logo_url?: string; colors?: string[]; fonts?: string[] };
-}
-
-interface BudgetField {
-  limit_minor: number | null;
-  currency: GenerationBudgetCurrency | null;
-  period: 'month';
+  brand_kit: { logo_url?: string; colors?: string[]; fonts?: string[] } | null;
+  generation_budget: BudgetRule | null;
+  api_usage_budget: BudgetRule | null;
+  utm_rules: UtmRules | null;
 }
 
 function BudgetRow({
   label, budget, t, tContent, locale,
 }: {
   label: string;
-  budget: BudgetField | null;
+  budget: BudgetRule | null;
   t: ReturnType<typeof useTranslations<'connectRulesV3'>>;
   // formatMinorCurrency(generation-budget-indicator.tsx)의 CURRENCY_AMOUNT_KEYS는
   // `content` 네임스페이스 키(generationBudgetAmountKrw/Usd)로 고정돼 있다 — 이 화면
@@ -47,14 +57,13 @@ function BudgetRow({
   tContent: ReturnType<typeof useTranslations<'content'>>;
   locale: string;
 }) {
-  const hasLimit = budget?.limit_minor !== null && budget?.limit_minor !== undefined && budget.currency;
   return (
     <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/30 px-3 py-2.5 text-sm" data-testid="connect-rules-v3-budget-row">
       <span className="font-medium text-foreground">{label}</span>
       <span className="text-xs text-muted-foreground">
-        {hasLimit && budget
+        {budget
           ? t('ruleLimitSet', {
-              amount: formatMinorCurrency(budget.limit_minor as number, budget.currency as GenerationBudgetCurrency, locale, tContent),
+              amount: formatMinorCurrency(budget.limit_minor, budget.currency, locale, tContent),
               period: t('generationBudgetPeriodMonth'),
             })
           : t('ruleLimitNone')}
@@ -69,8 +78,6 @@ export function ConnectRulesV3Rules({ orgId }: { orgId: string }) {
   const tContent = useTranslations('content');
   const locale = useLocale();
   const [rules, setRules] = useState<ContentRules | null>(null);
-  const [generationBudget, setGenerationBudget] = useState<BudgetField | null>(null);
-  const [apiUsageBudget, setApiUsageBudget] = useState<BudgetField | null>(null);
   const [loadState, setLoadState] = useState<'loading' | 'error' | 'ready'>('loading');
   const [retryKey, setRetryKey] = useState(0);
   const [referenceOpen, setReferenceOpen] = useState(false);
@@ -80,11 +87,7 @@ export function ConnectRulesV3Rules({ orgId }: { orgId: string }) {
     void (async () => {
       setLoadState('loading');
       try {
-        const [rulesRes, genRes, apiRes] = await Promise.all([
-          fetchWithAuth(`/api/organizations/${orgId}/content-rules`),
-          fetchWithAuth(`/api/organizations/${orgId}/generation-budget`),
-          fetchWithAuth(`/api/organizations/${orgId}/api-usage-budget`),
-        ]);
+        const rulesRes = await fetchWithAuth(`/api/organizations/${orgId}/content-rules`);
         if (!rulesRes.ok) {
           if (!cancelled) setLoadState('error');
           return;
@@ -92,15 +95,7 @@ export function ConnectRulesV3Rules({ orgId }: { orgId: string }) {
         const rulesJson = await rulesRes.json() as { data?: { rules?: ContentRules } };
         if (cancelled) return;
         setRules(rulesJson.data?.rules ?? null);
-        if (genRes.ok) {
-          const genJson = await genRes.json() as { data?: BudgetField };
-          if (!cancelled) setGenerationBudget(genJson.data ?? null);
-        }
-        if (apiRes.ok) {
-          const apiJson = await apiRes.json() as { data?: BudgetField };
-          if (!cancelled) setApiUsageBudget(apiJson.data ?? null);
-        }
-        if (!cancelled) setLoadState('ready');
+        setLoadState('ready');
       } catch {
         if (!cancelled) setLoadState('error');
       }
@@ -112,6 +107,8 @@ export function ConnectRulesV3Rules({ orgId }: { orgId: string }) {
   if (loadState === 'error') return <ConnectRulesV3SectionError onRetry={() => setRetryKey((k) => k + 1)} />;
   if (!rules) return <ConnectRulesV3SectionEmpty title={t('rulesEmptyTitle')} />;
 
+  const brandKit = rules.brand_kit ?? {};
+
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/30 px-3 py-2.5 text-sm">
@@ -119,17 +116,24 @@ export function ConnectRulesV3Rules({ orgId }: { orgId: string }) {
           <p className="font-medium text-foreground">{t('ruleBannedTerms')}</p>
           <p className="text-xs text-muted-foreground">{t('ruleBannedTermsDescription')}</p>
         </div>
-        <Badge variant="secondary">{rules.banned_terms.length}</Badge>
+        <span className="text-xs text-muted-foreground">{rules.banned_terms.length > 0 ? t('ruleOn') : t('ruleOff')}</span>
       </div>
       <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/30 px-3 py-2.5 text-sm">
         <div>
           <p className="font-medium text-foreground">{t('ruleRequireUtm')}</p>
           <p className="text-xs text-muted-foreground">{t('ruleRequireUtmDescription')}</p>
         </div>
-        <Badge variant="secondary">{rules.require_utm ? t('ruleOn') : t('ruleOff')}</Badge>
+        <span className="text-xs text-muted-foreground">{rules.require_utm ? t('ruleOn') : t('ruleOff')}</span>
       </div>
-      <BudgetRow label={t('ruleGenerationBudget')} budget={generationBudget} t={t} tContent={tContent} locale={locale} />
-      <BudgetRow label={t('ruleApiUsageBudget')} budget={apiUsageBudget} t={t} tContent={tContent} locale={locale} />
+      <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/30 px-3 py-2.5 text-sm" data-testid="connect-rules-v3-utm-auto-row">
+        <div>
+          <p className="font-medium text-foreground">{tcr('utmRulesSectionTitle')}</p>
+          <p className="text-xs text-muted-foreground">{tcr('utmRulesSectionDescription')}</p>
+        </div>
+        <span className="text-xs text-muted-foreground">{rules.utm_rules?.enabled ? t('ruleOn') : t('ruleOff')}</span>
+      </div>
+      <BudgetRow label={t('ruleGenerationBudget')} budget={rules.generation_budget} t={t} tContent={tContent} locale={locale} />
+      <BudgetRow label={t('ruleApiUsageBudget')} budget={rules.api_usage_budget} t={t} tContent={tContent} locale={locale} />
 
       <button
         type="button"
@@ -147,7 +151,7 @@ export function ConnectRulesV3Rules({ orgId }: { orgId: string }) {
           <p>{tcr('channelPriorityLabel')}: {rules.channel_priority.length > 0 ? rules.channel_priority.join(', ') : tcr('contentRulesNotSetLabel')}</p>
           <p>
             {tcr('brandKitLabel')}: {
-              rules.brand_kit.logo_url || (rules.brand_kit.colors?.length ?? 0) > 0 || (rules.brand_kit.fonts?.length ?? 0) > 0
+              brandKit.logo_url || (brandKit.colors?.length ?? 0) > 0 || (brandKit.fonts?.length ?? 0) > 0
                 ? t('ruleOn')
                 : tcr('contentRulesNotSetLabel')
             }

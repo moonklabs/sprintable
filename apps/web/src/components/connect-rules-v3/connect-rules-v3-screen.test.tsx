@@ -38,9 +38,9 @@ afterEach(async () => {
   vi.resetModules();
 });
 
-async function mount() {
+async function mount(props?: { todayV3Enabled?: boolean; chatV3Enabled?: boolean }) {
   const { ConnectRulesV3Screen } = await import('./connect-rules-v3-screen');
-  await act(async () => { root.render(wrap(<ConnectRulesV3Screen />)); });
+  await act(async () => { root.render(wrap(<ConnectRulesV3Screen {...props} />)); });
   await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 }
 
@@ -69,5 +69,19 @@ describe('ConnectRulesV3Screen', () => {
     expect(container.textContent).toContain('연결된 에이전트');
     expect(container.textContent).toContain('연결된 채널');
     expect(container.textContent).toContain('콘텐츠 규칙');
+  });
+
+  it('⭐교차 링크 — 오늘·대화 v3 플래그 off(기본)면 기존 라이브 경로로, on이면 v3 경로로', async () => {
+    fetchMock.mockImplementation(async () => ({ ok: true, status: 200, json: async () => ({ data: [] }) }));
+    await mount();
+    expect(container.querySelector('[data-testid="connect-rules-v3-nav-navToday"]')?.getAttribute('href')).toBe('/org-briefing');
+    expect(container.querySelector('[data-testid="connect-rules-v3-nav-navChats"]')?.getAttribute('href')).toBe('/chats');
+  });
+
+  it('교차 링크 — 오늘·대화 v3 플래그 on이면 새 v3 경로로 바뀐다', async () => {
+    fetchMock.mockImplementation(async () => ({ ok: true, status: 200, json: async () => ({ data: [] }) }));
+    await mount({ todayV3Enabled: true, chatV3Enabled: true });
+    expect(container.querySelector('[data-testid="connect-rules-v3-nav-navToday"]')?.getAttribute('href')).toBe('/today');
+    expect(container.querySelector('[data-testid="connect-rules-v3-nav-navChats"]')?.getAttribute('href')).toBe('/chat');
   });
 });

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
 import { fetchWithAuth } from '@/lib/db/client';
 import {
   ConnectRulesV3SectionEmpty,
@@ -13,19 +14,33 @@ import {
 
 /**
  * story #3982 §(c) 연결된 에이전트 — `GET /api/team-members?type=agent`(agent-management-
- * tab.tsx와 같은 콜) 1콜. 행 펼침은 project_id가 있는 행만 agent-stats를 추가로(project_id
- * 필수 파라미터라 org 전체 집계는 없다, #3980 그라운딩 확認 그대로) 지연 조회하고,
- * access-matrix(org admin/owner 전용, 403 가능)는 펼침과 무관하게 org 1콜만 미리 받아
- * 클라에서 필터한다(N+1 금지).
+ * tab.tsx와 같은 콜) 1콜 + `GET /api/projects`(그 파일이 이미 하는 project 이름 조회,
+ * grantCounts 축과 같은 원천 — 새 콜 패턴 0) 1콜. 행 펼침은 project_id가 있는 행만
+ * agent-stats를 추가로(project_id 필수 파라미터라 org 전체 집계는 없다, #3980 그라운딩
+ * 확認 그대로) 지연 조회하고, access-matrix(org admin/owner 전용, 403 가능)는 펼침과
+ * 무관하게 org 1콜만 미리 받아 클라에서 필터한다(N+1 금지).
+ *
+ * PO CHANGES-4(2026-09-17, dev 실측: moonklabs 에이전트 11 전원 role="member"·
+ * agent_role=null) — team_member.role은 실제로 SoD 워크플로 라벨(implementation/
+ * design/qa/po/devops)로 안 쓰인다(가정이 틀렸었다). 지어낸 roleLabel* 5키를
+ * 삭제하고 `agent_role`이 있을 때만 그 값을 그대로 보여준다(번역 0 — 값 자체가
+ * 자유 문자열이라 지어낼 수 없다) + `runtime_type`을 「· {runtime}」로 덧붙인다
+ * (시안 「디자인 담당 에이전트 · Claude Code」의 뒷부분, team_member.py:82 확認 필드).
  */
 interface OrgAgent {
   id: string;
   name: string;
-  role: string;
+  agent_role?: string | null;
+  runtime_type?: string | null;
   is_active: boolean;
   verified?: boolean | null;
   presence_status?: 'online' | 'idle' | 'offline' | null;
   project_id?: string | null;
+}
+
+interface ProjectOption {
+  id: string;
+  name: string;
 }
 
 interface AgentStats {
@@ -41,19 +56,6 @@ interface AccessMatrixRow {
   record_id: string;
 }
 
-// story #3982 — trust-utils.tsx::DEFAULT_ROLE_LABEL_KEY와 같은 축(team_member.role은
-// 사람에겐 member/admin/owner 권한값이지만, 에이전트 행에선 SoD 워크플로 역할값
-// implementation/po/qa/design/devops로 쓰인다, agent-management-tab.tsx가 이미 같은
-// 필드로 resolveRoleLabel을 부르는 선례) — 이 화면은 유나 낱말표 D절 패턴("{역할} 담당
-// 에이전트")을 그 축 위에 적용한 전용 라벨(짧은 trustRoleLabel*과 다른 문구, 새 필드 0).
-const ROLE_LABEL_KEY: Record<string, string> = {
-  implementation: 'roleLabelImplementation',
-  design: 'roleLabelDesign',
-  qa: 'roleLabelQa',
-  po: 'roleLabelPo',
-  devops: 'roleLabelDevops',
-};
-
 function formatLeadTimeDays(avgLeadTimeMs: number): number {
   return Math.round(avgLeadTimeMs / (24 * 60 * 60 * 1000));
 }
@@ -62,21 +64,24 @@ export function ConnectRulesV3Agents() {
   const t = useTranslations('connectRulesV3');
   const ta = useTranslations('agents');
   const [agents, setAgents] = useState<OrgAgent[]>([]);
+  const [projectsById, setProjectsById] = useState<Record<string, string>>({});
   const [isAdmin, setIsAdmin] = useState(false);
   const [accessMatrix, setAccessMatrix] = useState<AccessMatrixRow[] | null>(null);
   const [loadState, setLoadState] = useState<'loading' | 'error' | 'ready'>('loading');
   const [retryKey, setRetryKey] = useState(0);
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [statsByAgent, setStatsByAgent] = useState<Record<string, AgentStats | null>>({});
+  const [statsByAgent, setStatsByAgent] = useState<Record<string, AgentStats | null | 'error'>>({});
+  const [statsLoadingId, setStatsLoadingId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       setLoadState('loading');
       try {
-        const [agentsRes, meRes] = await Promise.all([
+        const [agentsRes, meRes, projectsRes] = await Promise.all([
           fetchWithAuth('/api/team-members?type=agent'),
           fetchWithAuth('/api/me'),
+          fetchWithAuth('/api/projects'),
         ]);
         if (!agentsRes.ok) {
           if (!cancelled) setLoadState('error');
@@ -85,6 +90,13 @@ export function ConnectRulesV3Agents() {
         const agentsJson = await agentsRes.json() as { data?: OrgAgent[] };
         if (cancelled) return;
         setAgents(agentsJson.data ?? []);
+
+        if (projectsRes.ok) {
+          const projectsJson = await projectsRes.json() as { data?: ProjectOption[] };
+          if (!cancelled) {
+            setProjectsById(Object.fromEntries((projectsJson.data ?? []).map((p) => [p.id, p.name])));
+          }
+        }
 
         let admin = false;
         if (meRes.ok) {
@@ -112,10 +124,13 @@ export function ConnectRulesV3Agents() {
   const toggleExpand = useCallback((agent: OrgAgent) => {
     setExpandedId((prev) => (prev === agent.id ? null : agent.id));
     if (agent.project_id && !(agent.id in statsByAgent)) {
+      setStatsLoadingId(agent.id);
       void fetchWithAuth(`/api/analytics/agent-stats?project_id=${agent.project_id}&agent_id=${agent.id}`)
-        .then((res) => (res.ok ? res.json() as Promise<{ data?: AgentStats }> : null))
-        .then((json) => setStatsByAgent((prev) => ({ ...prev, [agent.id]: json?.data ?? null })))
-        .catch(() => setStatsByAgent((prev) => ({ ...prev, [agent.id]: null })));
+        .then((res) => (res.ok ? res.json() as Promise<{ data?: AgentStats }> : Promise.reject(new Error(`HTTP ${res.status}`))))
+        .then((json) => setStatsByAgent((prev) => ({ ...prev, [agent.id]: json.data ?? 'error' })))
+        .catch(() => setStatsByAgent((prev) => ({ ...prev, [agent.id]: 'error' }))
+        )
+        .finally(() => setStatsLoadingId((prev) => (prev === agent.id ? null : prev)));
     }
   }, [statsByAgent]);
 
@@ -131,12 +146,14 @@ export function ConnectRulesV3Agents() {
           const expanded = expandedId === agent.id;
           const grantCount = accessMatrix?.filter((r) => r.agent_member_id === agent.id).length;
           const stats = statsByAgent[agent.id];
-          const roleKey = Object.hasOwn(ROLE_LABEL_KEY, agent.role) ? ROLE_LABEL_KEY[agent.role] : undefined;
+          const statsLoading = statsLoadingId === agent.id;
+          const roleLine = [agent.agent_role, agent.runtime_type].filter(Boolean).join(' · ');
           const presenceLabel = agent.presence_status === 'online'
             ? t('presenceOnline')
             : agent.presence_status === 'idle'
               ? t('presenceIdle')
               : t('presenceOffline');
+          const projectName = agent.project_id ? projectsById[agent.project_id] : undefined;
 
           return (
             <div key={agent.id} className="rounded-md border border-border bg-muted/30 text-sm" data-testid="connect-rules-v3-agent-row">
@@ -149,40 +166,39 @@ export function ConnectRulesV3Agents() {
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                     <span className="truncate font-medium text-foreground">{agent.name}</span>
-                    <span className="text-xs text-muted-foreground">{roleKey ? t(roleKey) : agent.role}</span>
+                    {roleLine ? <span className="text-xs text-muted-foreground">{roleLine}</span> : null}
                   </div>
                   <p className="mt-0.5 text-xs text-muted-foreground">{presenceLabel}</p>
                 </div>
                 {agent.verified === false ? (
                   <Badge variant="warning">{ta('agentNotConnected')}</Badge>
                 ) : (
-                  <Badge variant="secondary">{t('agentConnected')}</Badge>
+                  <span className="shrink-0 text-xs text-muted-foreground">{t('agentConnected')}</span>
                 )}
               </button>
 
               {expanded ? (
                 <div className="space-y-2 border-t border-border px-3 py-3 text-xs text-muted-foreground" data-testid="connect-rules-v3-agent-row-expanded">
-                  {agent.verified === false ? (
-                    <Link href={`/organization/workforce/${agent.id}`} className="font-medium text-primary hover:underline">
-                      {ta('viewConnectionSettings')}
-                    </Link>
-                  ) : null}
+                  <Link href={`/organization/workforce/${agent.id}`} className="font-medium text-primary hover:underline">
+                    {ta('viewConnectionSettings')}
+                  </Link>
                   {agent.project_id ? (
-                    stats ? (
+                    statsLoading ? (
+                      <Skeleton className="h-4 w-40" />
+                    ) : stats === 'error' ? (
+                      <p className="text-destructive">{t('loadErrorTitle')}</p>
+                    ) : stats ? (
                       <p>
                         {t('agentStatsCompleted', { count: stats.completed })}
                         {' · '}
                         {t('agentStatsLeadTime', { days: formatLeadTimeDays(stats.avg_lead_time_ms) })}
+                        {projectName ? ` · ${t('agentStatsProjectScope', { project: projectName })}` : ''}
                       </p>
                     ) : null
                   ) : null}
-                  {isAdmin ? (
-                    grantCount !== undefined ? (
-                      <p>{t('agentAccessGranted', { count: grantCount })}</p>
-                    ) : null
-                  ) : (
-                    <p>{t('agentAccessUnavailable')}</p>
-                  )}
+                  {isAdmin && grantCount !== undefined ? (
+                    <p>{t('agentAccessGranted', { count: grantCount })}</p>
+                  ) : null}
                 </div>
               ) : null}
             </div>

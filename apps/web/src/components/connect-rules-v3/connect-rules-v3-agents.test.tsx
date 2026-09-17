@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 //
 // story #3982 §(c) 연결된 에이전트 — 3상태(로딩·빈·오류)와 「사라짐 0」(verified=false
-// 행도 사라지지 않고 배지로 남는다·「에이전트 추가」 링크는 항상 렌더) 고정.
+// 행도 사라지지 않고 배지로 남는다·「에이전트 추가」 링크는 항상 렌더·행 펼침엔 항상
+// 「연결 설정 보기」가 있다) 고정. PO CHANGES-4 반영 — 역할은 agent_role(실데이터는
+// null이 흔함)+runtime_type 조합, 지어낸 roleLabel* 없음.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -58,6 +60,7 @@ describe('ConnectRulesV3Agents', () => {
     routeFetch({
       '/api/team-members?type=agent': { data: [] },
       '/api/me': { data: { role: 'owner' } },
+      '/api/projects': { data: [] },
     });
     await mount();
     expect(container.textContent).toContain('아직 연결된 에이전트가 없어요');
@@ -74,36 +77,49 @@ describe('ConnectRulesV3Agents', () => {
   it('⭐verified=false 행 — 사라지지 않고 「연결 안 됨」 배지로 남는다(사라짐 0)', async () => {
     routeFetch({
       '/api/team-members?type=agent': {
-        data: [{ id: 'a1', name: '유나 홀름', role: 'design', is_active: true, verified: false, presence_status: 'offline', project_id: null }],
+        data: [{ id: 'a1', name: '유나 홀름', agent_role: null, runtime_type: null, is_active: true, verified: false, presence_status: 'offline', project_id: null }],
       },
       '/api/me': { data: { role: 'owner' } },
+      '/api/projects': { data: [] },
     });
     await mount();
     expect(container.textContent).toContain('유나 홀름');
-    expect(container.textContent).toContain('디자인 담당 에이전트');
     expect(container.textContent).toContain('연결 안 됨');
   });
 
-  it('연결됨 행 + 역할 라벨 — presence 보조 문구도 함께 렌더', async () => {
+  it('⭐dev 실측 형태(agent_role=null) — 역할 세그먼트를 지어내지 않고 이름·상태만 렌더', async () => {
     routeFetch({
       '/api/team-members?type=agent': {
-        data: [{ id: 'a2', name: '디디 은두카쿠', role: 'implementation', is_active: true, verified: true, presence_status: 'online', project_id: 'p1' }],
+        data: [{ id: 'a2', name: '디디 은두카쿠', agent_role: null, runtime_type: null, is_active: true, verified: true, presence_status: 'online', project_id: 'p1' }],
       },
       '/api/me': { data: { role: 'member' } },
+      '/api/projects': { data: [{ id: 'p1', name: 'Sprintable' }] },
     });
     await mount();
     expect(container.textContent).toContain('디디 은두카쿠');
-    expect(container.textContent).toContain('개발 담당 에이전트');
     expect(container.textContent).toContain('연결됨');
     expect(container.textContent).toContain('온라인');
   });
 
-  it('⭐행 펼침 — project_id가 있는 행을 펼치면 agent-stats를 1회 조회한다', async () => {
+  it('agent_role·runtime_type이 있으면 「{role} · {runtime}」로 렌더', async () => {
     routeFetch({
       '/api/team-members?type=agent': {
-        data: [{ id: 'a3', name: '카디르 아흐마디', role: 'qa', is_active: true, verified: true, presence_status: 'idle', project_id: 'p9' }],
+        data: [{ id: 'a4', name: '유나 홀름', agent_role: 'UI Designer', runtime_type: 'Claude Code', is_active: true, verified: true, presence_status: 'idle', project_id: null }],
+      },
+      '/api/me': { data: { role: 'member' } },
+      '/api/projects': { data: [] },
+    });
+    await mount();
+    expect(container.textContent).toContain('UI Designer · Claude Code');
+  });
+
+  it('⭐행 펼침 — 항상 「연결 설정 보기」가 있고, project_id가 있으면 agent-stats·프로젝트 이름을 낸다', async () => {
+    routeFetch({
+      '/api/team-members?type=agent': {
+        data: [{ id: 'a3', name: '카디르 아흐마디', agent_role: null, runtime_type: null, is_active: true, verified: true, presence_status: 'idle', project_id: 'p9' }],
       },
       '/api/me': { data: { role: 'owner' } },
+      '/api/projects': { data: [{ id: 'p9', name: 'Sprintable' }] },
       '/api/agents/access-matrix': { data: [{ agent_member_id: 'a3', project_id: 'p9', record_id: 'r1' }] },
       '/api/analytics/agent-stats': { data: { completed: 4, total_stories: 5, done_story_points: 8, avg_lead_time_ms: 2 * 24 * 60 * 60 * 1000 } },
     });
@@ -114,7 +130,23 @@ describe('ConnectRulesV3Agents', () => {
     await act(async () => { row.click(); await Promise.resolve(); await Promise.resolve(); });
     const after = fetchMock.mock.calls.filter((c: unknown[]) => String(c[0]).startsWith('/api/analytics/agent-stats')).length;
     expect(after).toBe(1);
+    expect(container.textContent).toContain('연결 설정 보기');
     expect(container.textContent).toContain('완료 4건');
+    expect(container.textContent).toContain('Sprintable 기준');
     expect(container.textContent).toContain('프로젝트 1개 접근 허용');
+  });
+
+  it('⭐비관리자 — 접근 권한 칸 자체가 없다(안내 문장 0, 칸째 제거)', async () => {
+    routeFetch({
+      '/api/team-members?type=agent': {
+        data: [{ id: 'a5', name: '담롱 온찬', agent_role: null, runtime_type: null, is_active: true, verified: true, presence_status: 'offline', project_id: null }],
+      },
+      '/api/me': { data: { role: 'member' } },
+      '/api/projects': { data: [] },
+    });
+    await mount();
+    const row = container.querySelector('[data-testid="connect-rules-v3-agent-row"] button') as HTMLButtonElement;
+    await act(async () => { row.click(); });
+    expect(container.textContent).not.toContain('접근');
   });
 });
