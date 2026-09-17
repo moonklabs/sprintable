@@ -325,6 +325,11 @@ jobs:
       # uploadArtifacts:false와 결과가 같다) — PO 판정(2026-09-14 10:23Z)에 따라 소비처
       # 0으로 확定, uploadArtifacts:false로 유지(story #4029도 이 결정과 충돌 안 함 —
       # 로컬 .lighthouseci/manifest.json은 업로드 여부와 무관하게 항상 남는다, 아래 스텝).
+      # story #4029(PO 지적, 5차 run 실측) — /memos는 실제로는 /inbox로 흡수돼(리다이렉트)
+      # finalUrl이 /inbox로 도착한다 — 이 목록의 6곳은 진짜론 5종 화면(/inbox가 2회 측정)
+      # 이다. 지금 목록을 손대면 방금 얻은 6/6 실화면 증명이 새 목록에 대해선 다시 없는
+      # 상태가 되고 22분 run을 또 써야 하므로, 목록 자체는 그대로 두고 사실만 기록한다 —
+      # 목록 재검토는 후속 카드.
       - name: Run Lighthouse CI
         uses: treosh/lighthouse-ci-action@v11
         with:
