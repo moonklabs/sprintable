@@ -502,6 +502,7 @@
     "loadErrorTitle": "Couldn't load this",
     "threadRailTitle": "Chats",
     "threadRailEmpty": "No conversations yet",
+    "threadRowAriaLabel": "Chat {n} with {label}",
     "unknownParticipant": "Unknown",
     "roleTagAgent": "Agent",
     "meLabel": "Me",
