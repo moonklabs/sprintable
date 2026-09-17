@@ -16,9 +16,11 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { cn } from '@/lib/utils';
 import {
   NAV_GROUPS,
-  CHAT_CENTER_ITEM,
   groupVisibleLegacyByTarget,
+  resolveNavGroups,
+  resolveChatCenterItem,
 } from '@/lib/nav-config';
+import { DEFAULT_NAV_V3_FLAGS, type NavV3Flags } from '@/lib/nav-v3-destinations';
 import { useSseMultiplexerContext } from '@/components/realtime-provider';
 import { WORKSPACE_FRAME_TAB_PATHS } from '@/components/workspace/workspace-frame-tabs';
 import {
@@ -49,6 +51,9 @@ interface AppSidebarProps {
   // story #2007(perf·서버부하): dashboard-shell.tsx가 단일 useChatUnreadTotal() 호출 결과를
   // prop으로 내려준다 — 여기서 직접 훅을 호출하면 MobileTabBar와 각자 SSE 연결을 열게 된다.
   chatUnreadTotal: number;
+  // story #4003(E-UX-OVERHAUL·셸 통합 2/N) — (authenticated)/layout.tsx(서버)가 읽은
+  // v3 플래그 3개. 이 컴포넌트는 'use client'라 process.env를 직접 못 읽는다.
+  navV3Flags?: NavV3Flags;
 }
 
 // story #d986fd6c(IA·S4)의 «활성 구역+뷰포트 높이로 기본 접힘을 역산» 규칙은 폐기된
@@ -135,9 +140,13 @@ export function AppSidebar({
   projectMemberships,
   userName,
   chatUnreadTotal,
+  navV3Flags = DEFAULT_NAV_V3_FLAGS,
 }: AppSidebarProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  // story #4003 — nav-v3-destinations.ts 결정 함수를 그대로 재사용(복붙 규칙 0, AC2).
+  const navGroups = useMemo(() => resolveNavGroups(navV3Flags), [navV3Flags]);
+  const chatCenterItem = useMemo(() => resolveChatCenterItem(navV3Flags), [navV3Flags]);
   // story a539c649(S2 최초·S3 리소스 확장) — 실 ws/proj slug 있으면 직접 path(리다이렉트 홉
   // 절약) — 없으면 bare `/{resource}`(미들웨어의 bare→쿠키 default 해소 301 안전망이 받는다).
   const orgSlug = orgMemberships.find((o) => o.orgId === orgId)?.orgSlug;
@@ -347,7 +356,7 @@ export function AppSidebar({
   const chatCenterCard = (
     <div className="mx-2.5 mt-2">
       <Link
-        href={CHAT_CENTER_ITEM.path}
+        href={chatCenterItem.path}
         // story #3054(2984-S6) — GATE_BUTTON_TONE.primary(proof-capsule.tsx)와 동형으로
         // 헤어라인+elev 채택, bg-proof-blue-soft 채움 폐지. hover는 이제 solid 전환 대신
         // bg-sidebar-accent(기존 다른 nav 항목의 hover 관례와 정합) — AA 대비 이슈였던
@@ -355,7 +364,7 @@ export function AppSidebar({
         className="flex items-center gap-2 rounded-[9px] border border-proof-blue bg-transparent px-2.5 py-2 text-proof-blue shadow-[var(--elev-card)] transition hover:bg-sidebar-accent"
       >
         <MessageSquare className="size-[18px] shrink-0" />
-        <span className="flex-1 truncate text-[13px] font-bold">{t(CHAT_CENTER_ITEM.labelKey)}</span>
+        <span className="flex-1 truncate text-[13px] font-bold">{t(chatCenterItem.labelKey)}</span>
         {/* text-white 대신 sidebar-primary-foreground(다크에서 근흑색 — 수동 대비 확認,
             4.61 라이트·4.81 다크는 카드 톤이고 이 자리는 solid pill이라 별도 확認 필요했다:
             bg-proof-blue+text-white는 다크에서 3.21로 AA 미달. sidebar-primary-foreground는
@@ -407,7 +416,7 @@ export function AppSidebar({
             전역 스크롤바 숨김(#2165)까지 겹쳐 신뢰 아래 구역이 스크롤 가능한데도 "없다"로
             보였다(그라운딩: org/role 무관 재현 — CSS overflow affordance 결함, 컨텍스트
             문제 아님). .scrollbar-visible은 story #2528과 동일한 기존 옵트인 패턴. */}
-        {NAV_GROUPS.map((group, groupIndex) => {
+        {navGroups.map((group, groupIndex) => {
           // story #d986fd6c(IA·S4) — 라벨 없는 유틸 그룹(설정)은 접기 대상이 아니다(항목
           // 1개뿐이라 접어 봤자 얻는 게 없고, ia-4zone 확定이 이미 "라벨 없는 유틸 그룹"
           // 으로 못박아 뒀다 — 헤더 자체가 없으니 토글할 자리도 없다).
@@ -444,9 +453,16 @@ export function AppSidebar({
             <SidebarGroupContent>
               <SidebarMenu>
                 {group.items.map((item) => {
+                  // story #4003(4002 그라운딩 AC1) — 「일감」(id 'board')의 1차 진입점을
+                  // 시안 ③이 채운 work-list(WORKSPACE_FRAME_TAB_PATHS의 실 기본 탭)로
+                  // 전환. isActive는 여전히 WORKSPACE_FRAME_TAB_PATHS 전체(flow 포함)를
+                  // 봐 sprints/epics/retro/flow 탭에서도 사이드바가 계속 활성으로 뜬다
+                  // (story #3844 선례와 동일 계약 — 탭 커버리지 무변, 1차 href만 갱신).
                   const link = item.kind === 'static'
                     ? { href: item.path, isActive: isActive(item.path) }
-                    : resourceLink(item.path, item.id === 'board' ? WORKSPACE_FRAME_TAB_PATHS : []);
+                    : item.id === 'board'
+                      ? resourceLink('work-list', WORKSPACE_FRAME_TAB_PATHS)
+                      : resourceLink(item.path, []);
                   const Icon = item.icon;
                   const badgeCount = item.badgeKey === 'inbox' ? inboxPendingCount : 0;
                   const badgeCap = item.badgeKey === 'inbox' ? 9 : 99;

@@ -151,6 +151,7 @@
     "descOrgChannels": "Connects the channels posts go out to",
     "descOrgGenerationConnectors": "Connects the generation provider the generation stage uses",
     "descOrgContentRules": "Rules that check drafts",
+    "descConnectRulesV3": "Agents, channels, and rules in one place",
     "descOrgInsightsBoard": "How much published posts got read",
     "descActivity": "What happened",
     "descOrgTrust": "Who follows through",

@@ -18,6 +18,7 @@ import { SessionExpiredDialog } from '@/components/auth/session-expired-dialog';
 import { ToastProvider } from '@/components/ui/toast';
 import { BottomDock } from '@/components/nav/bottom-dock';
 import { AppSidebar } from '@/components/nav/app-sidebar';
+import type { NavV3Flags } from '@/lib/nav-v3-destinations';
 import { MobileTabBar } from '@/components/nav/mobile-tab-bar';
 import { TopBar } from '@/components/nav/top-bar';
 import { TopBarProvider, useTopBar } from '@/components/nav/top-bar-context';
@@ -102,6 +103,10 @@ interface DashboardShellProps extends DashboardContext {
   // 부분적으로 stale하면(org_id는 reset·project_id는 옛 org 그대로) `orgId`와 갈릴 수 있다 — 아래
   // 자동 switch-org effect의 불일치 판정은 이 값을 우선한다(없으면 `orgId`로 폴백).
   jwtOrgId?: string;
+  // story #4003(E-UX-OVERHAUL·셸 통합 2/N) — (authenticated)/layout.tsx(서버)가 읽은
+  // v3 플래그 3개를 AppSidebar까지 그대로 흘려보낸다(이 컴포넌트 자체는 'use client'라
+  // process.env를 직접 못 읽는다).
+  navV3Flags?: NavV3Flags;
   children: React.ReactNode;
 }
 
@@ -125,7 +130,7 @@ function isTabRootPage(pathname: string): boolean {
 // useChatSse 호출과 동일한 위치 조건이 된다).
 function ShellBody({
   currentTeamMemberId, showTopBar, tabletCentered, orgId, orgMemberships, projectId, projectMemberships,
-  currentProjectSlug, userName, children,
+  currentProjectSlug, userName, navV3Flags, children,
 }: {
   currentTeamMemberId?: string;
   showTopBar: boolean;
@@ -136,6 +141,7 @@ function ShellBody({
   projectMemberships: DashboardProjectOption[];
   currentProjectSlug?: string;
   userName?: string;
+  navV3Flags?: NavV3Flags;
   children: React.ReactNode;
 }) {
   const chatUnreadTotal = useChatUnreadTotal(currentTeamMemberId);
@@ -149,6 +155,7 @@ function ShellBody({
         orgMemberships={orgMemberships}
         userName={userName}
         chatUnreadTotal={chatUnreadTotal}
+        navV3Flags={navV3Flags}
       />
       <ScrollShell
         showTopBar={showTopBar}
@@ -328,6 +335,7 @@ export function DashboardShell({
   pathOrgId,
   pathProjectId,
   jwtOrgId,
+  navV3Flags,
   children,
 }: DashboardShellProps) {
   const pathname = usePathname();
@@ -443,6 +451,7 @@ export function DashboardShell({
               projectMemberships={projectMemberships}
               currentProjectSlug={currentProjectSlug}
               userName={userName}
+              navV3Flags={navV3Flags}
             >
               {children}
             </ShellBody>
