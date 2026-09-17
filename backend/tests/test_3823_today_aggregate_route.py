@@ -154,13 +154,13 @@ async def _make_step_run(
 
 async def _make_workflow_approval(
     session, org_id, project_id, *, step_run_id, approver_member_id, requested_by_member_id=None,
-    status="pending",
+    status="pending", gate_id=None,
 ):
     from app.models.workflow_line import WorkflowLineStepApproval
 
     a = WorkflowLineStepApproval(
         id=uuid.uuid4(), org_id=org_id, project_id=project_id,
-        step_run_id=step_run_id, approval_group_id=uuid.uuid4(),
+        step_run_id=step_run_id, approval_group_id=uuid.uuid4(), gate_id=gate_id,
         approver_member_id=approver_member_id, approver_member_type="human",
         requested_by_member_id=requested_by_member_id,
         kind="approver", blocking=True, status=status,
@@ -350,7 +350,11 @@ async def test_needs_me_kind_and_risk_mapping_four_paths_realdb():
                 s, org.id, project.id, entity_type="story", entity_id=wf_story.id,
                 effective_gate_type="qa", risk_snapshot={"high_risk": True},
             )
-            await _make_workflow_approval(s, org.id, project.id, step_run_id=run.id, approver_member_id=caller_id)
+            wf_gate_id = uuid.uuid4()
+            await _make_workflow_approval(
+                s, org.id, project.id, step_run_id=run.id, approver_member_id=caller_id,
+                gate_id=wf_gate_id,
+            )
 
         await _setup_app_human(app, Session, caller_user_id, org.id)
         client = _client_for(app)
@@ -362,6 +366,7 @@ async def test_needs_me_kind_and_risk_mapping_four_paths_realdb():
 
             ext = by_work_item[str(ext_story.id)]
             assert ext["kind"] == "signature" and ext["risk"] == "high"
+            assert ext["gate_id"] is None  # story #3965 — gate 소스는 그 개념이 없음(지어내지 않는다)
 
             low = by_work_item[str(low_story.id)]
             assert low["kind"] == "approval" and low["risk"] == "low"
@@ -377,6 +382,10 @@ async def test_needs_me_kind_and_risk_mapping_four_paths_realdb():
             # /{id}/hold가 각각 실 처리) 고정. 화면(needs_me)이 이 키를 렌더 근거로
             # 삼으니 서비스가 실수로 빼거나 이름을 바꾸면 이 테스트가 먼저 빨개진다.
             assert wf["actions"] == ["approve", "request_changes", "hold"]
+            # story #3965 PO CHANGES 소형(2026-09-17) — gate_id 없이는 FE가
+            # POST /gates/{id}/approvers/{approval_id}/decision을 needs_me 응답만으로
+            # 못 부른다(별도 조회 왕복 필요해짐). 대표 Gate id가 그대로 노출되는지 고정.
+            assert wf["gate_id"] == str(wf_gate_id)
         finally:
             await client.aclose()
     finally:
