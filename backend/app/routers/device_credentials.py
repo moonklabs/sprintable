@@ -129,21 +129,40 @@ async def _resolve_caller_member(auth: AuthContext, session: AsyncSession) -> Me
 
 
 async def _resolve_own_agent_member_id(
-    session: AsyncSession, *, member: Member, user_id: uuid.UUID | None, agent_id: uuid.UUID | None,
+    session: AsyncSession, *, member: Member, agent_id: uuid.UUID | None,
 ) -> uuid.UUID:
     """이 기기가 인증할 에이전트(members.id) 해소 — **본인 소유만**.
 
-    소유 판정은 기존 공개 헬퍼(`ownership.assert_agent_owner`)를 그대로 쓴다(새 판정자
-    발명 0) — 그 함수가 이미 "생성자 본인 또는 org admin/owner" 규칙과 404/403 응답을
-    갖고 있다. 미지정이면 본인이 만든 에이전트(`owner_member_id`) 중 결정적 순서(id ASC)
-    첫 값 — 무에이전트면 400(인증할 주체 없는 기기를 만들지 않는다).
+    ⛔`assert_agent_owner` 를 **그대로 쓰지 않는다** — 그 함수는 "생성자 본인 **또는 org
+    admin/owner**" 라는 규칙이라(`ownership.py`) admin 이 **남의** 에이전트에 기기를 묶을 수
+    있다. 이 라우터에서 그건 의도가 아니다: 기기 자격증명의 blast radius 축은 "**그 사람의
+    기기**"이고(폐기 1대 = 그 기기만), 기기 등록은 admin 대리 행위가 아니라 본인 셀프서브다.
+    admin 경로가 열려 있으면 "이 기기는 누구 것인가"가 흐려져 축이 무너진다.
+
+    대조: `sk_live_` 발급(`api_keys.py`)은 `assert_agent_owner` 를 쓰는 게 맞다 — 키는
+    **조직 자원**이라 admin 이 관리할 정당성이 있고, 실제로 그 경로는 그렇게 되어 있다.
+    기기는 사람에 붙는 자원이라 판단이 다르다(같은 헬퍼를 쓰면 그 구분이 사라진다).
+
+    판정은 `owner_member_id == caller` **하나뿐**이다(`created_by` 는 team_members 뷰에서
+    owner.user_id 로 투영된 값이라 members 축과 섞지 않는다 — 여기선 members.id 로 직접 본다).
+    미지정이면 본인이 만든 에이전트 중 결정적 순서(id ASC) 첫 값 — 무에이전트면 400(인증할
+    주체 없는 기기를 만들지 않는다).
     """
     if agent_id is not None:
-        if user_id is None:
+        own = (await session.execute(
+            select(Member.id).where(
+                Member.id == agent_id,
+                Member.org_id == member.org_id,
+                Member.type == "agent",
+                Member.is_active.is_(True),
+                Member.deleted_at.is_(None),
+                # ⛔본인 소유만 — admin 분기를 물려받지 않는다(위 docstring 참조).
+                Member.owner_member_id == member.id,
+            )
+        )).scalar_one_or_none()
+        if own is None:
+            # 존재 여부 누설 금지 — 타인 소유·미존재·타 org 를 구분 없이 동일 404.
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
-        from app.dependencies.ownership import assert_agent_owner
-
-        await assert_agent_owner(agent_id, session, member.org_id, user_id)
         return agent_id
 
     own_ids = (await session.execute(
@@ -206,10 +225,6 @@ async def register_device_credential(
     """
     member = await _resolve_caller_member(auth, session)
     org_id = member.org_id
-    try:
-        user_id: uuid.UUID | None = uuid.UUID(auth.user_id)
-    except (ValueError, TypeError):
-        user_id = None
 
     label = (body.device_label or "").strip()
     if not label:
@@ -219,7 +234,7 @@ async def register_device_credential(
 
     public_key_der = _decode_public_key(body.public_key_der_b64)
     agent_member_id = await _resolve_own_agent_member_id(
-        session, member=member, user_id=user_id, agent_id=body.agent_id,
+        session, member=member, agent_id=body.agent_id,
     )
 
     # 어뷰징 방어(제품 한도 아님 — 위 상수 주석 참고). active 기준으로 센다: 폐기한 기기는

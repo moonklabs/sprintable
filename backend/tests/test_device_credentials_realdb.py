@@ -102,6 +102,31 @@ async def _seed_agent(session, org_id, project_id, *, created_by_member_id=None,
     return agent_id
 
 
+async def _seed_human_in_org(session, org_id, *, role="member"):
+    """같은 org 안의 다른 휴먼(user + org_member + members 앙커).
+
+    `_seed_org_project_human` 은 owner 를 새 org 와 함께 만들므로, "같은 org의
+    admin" 을 세우려면 별도 헬퍼가 필요하다(0075 불변식:
+    members.id = org_members.id).
+    """
+    from app.models.member import Member
+    from app.models.project import OrgMember
+    from app.models.user import User
+
+    user_id = uuid.uuid4()
+    session.add(User(
+        id=user_id, email=f"dc-{user_id.hex[:8]}@test.com",
+        hashed_password="x", is_active=True, email_verified=True,
+    ))
+    await session.commit()
+    org_member_id = uuid.uuid4()
+    session.add(OrgMember(id=org_member_id, org_id=org_id, user_id=user_id, role=role))
+    await session.commit()
+    session.add(Member(id=org_member_id, org_id=org_id, type="human", user_id=user_id, name="Other"))
+    await session.commit()
+    return user_id, org_member_id
+
+
 def _keypair():
     """EC P-256 키쌍 → (private_key, public_key_der). 개인키는 서버로 가지 않는다."""
     from cryptography.hazmat.primitives import serialization
@@ -1565,4 +1590,156 @@ def test_human_only_surface_guard_shares_agent_axis():
     src = inspect.getsource(auth_router._requires_interactive_session)
     assert "is_agent_credential(auth)" in src, (
         "휴먼 전용 표면 가드가 공유 판별자를 안 쓴다 — dt_live_ 우회로 재발"
+    )
+
+
+async def test_streaming_dependency_dispatches_dt_live_prefix():
+    """⛔목적 경로의 **인증 배선** — `get_current_user_streaming`(SSE 전용 변형)에도
+    `dt_live_` 분기가 있어야 한다.
+
+    실사고: 가드(`agent_gateway.py`)만 `is_agent_credential` 로 바꾸고 이 dependency 는
+    안 고쳐서, 스트림은 403 이 아니라 **401** 로 막혀 있었다 — `dt_live_` 토큰이 어느
+    접두사에도 안 걸려 `decode_jwt` 로 떨어지고 "Invalid token" 이 된다. 즉 가드 수정만으로는
+    기기 자격증명의 목적 경로가 열리지 않는다.
+    """
+    from unittest.mock import AsyncMock, patch
+
+    from fastapi.security import HTTPAuthorizationCredentials
+
+    from app.dependencies import auth
+    from app.dependencies.auth import AuthContext, get_current_user_streaming
+
+    fake_ctx = AuthContext(
+        user_id="a1", email=None,
+        claims={"app_metadata": {"device_credential_id": "c1", "actor_type": "agent"}},
+        org_id="o1",
+    )
+    creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials="dt_live_deadbeef")
+    with patch.object(auth, "_resolve_device_credential", new=AsyncMock(return_value=fake_ctx)) as mock_resolve:
+        ctx = await get_current_user_streaming(credentials=creds, x_agent_api_key=None)
+    mock_resolve.assert_awaited_once()
+    assert mock_resolve.await_args.args[0] == "dt_live_deadbeef"
+    assert ctx is fake_ctx
+
+
+async def test_register_device_binding_is_own_only_not_admin():
+    """⛔blast radius 축 — 기기 등록은 **본인 소유 에이전트**만. org admin 이 남의
+    에이전트에 기기를 묶을 수 있으면 "기기 자격증명 = 그 사람의 기기"라는 축이 흐려진다.
+
+    구 분기: `assert_agent_owner` 는 "생성자 **또는** org admin/owner" 라 admin 이 통과했다
+    (`ownership.py:44`). 기기 등록은 admin 대리 행위가 아니라 **본인 기기 셀프서브**이므로
+    admin 분기를 물려받지 않는다. `sk_live_` 발급 경로(`api_keys.py`)는 admin 허용이 맞지만
+    (키는 조직 자원), 기기는 사람에 붙는 자원이라 정당성이 다르다.
+    """
+    from fastapi import HTTPException
+    from sqlalchemy import select
+
+    from app.dependencies.auth import AuthContext
+    from app.models.project import OrgMember
+    from app.routers.device_credentials import RegisterDeviceRequest, register_device_credential
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id, owner_user_id, owner_member_id = await _seed_org_project_human(s)
+            # 같은 org 의 **다른** 휴먼을 admin 으로 세운다(owner 와 별개의 사람).
+            other_user_id, other_member_id = await _seed_human_in_org(s, org_id, role="admin")
+            target_agent_id = await _seed_agent(
+                s, org_id, project_id, created_by_member_id=owner_member_id, name="not-mine",
+            )
+        _priv, der = _keypair()
+        async with Session() as s:
+            admin_auth = AuthContext(
+                user_id=str(other_user_id), email=None,
+                claims={"sub": str(other_user_id), "app_metadata": {
+                    "org_id": str(org_id), "actor_type": "human", "role": "admin",
+                }},
+                org_id=str(org_id),
+            )
+            with pytest.raises(HTTPException) as exc:
+                await register_device_credential(
+                    _FakeRequest(),
+                    RegisterDeviceRequest(
+                        device_label="admin-borrowing",
+                        public_key_der_b64=base64.b64encode(der).decode(),
+                        agent_id=target_agent_id,
+                    ),
+                    auth=admin_auth, session=s,
+                )
+            assert exc.value.status_code in (403, 404), (
+                "org admin 이 타인 에이전트에 기기를 묶었다 — blast radius 축이 무너진다"
+            )
+
+        # 무회귀: 생성자 본인은 자기 에이전트에 묶을 수 있다.
+        async with Session() as s:
+            own = await register_device_credential(
+                _FakeRequest(),
+                RegisterDeviceRequest(
+                    device_label="mine", public_key_der_b64=base64.b64encode(der).decode(),
+                    agent_id=target_agent_id,
+                ),
+                auth=_auth_for(owner_user_id, org_id), session=s,
+            )
+        assert own.agent_member_id == target_agent_id
+    finally:
+        await engine.dispose()
+
+
+class _FakeBodyRequest:
+    """`_verified_device_body_sha256` 용 — starlette Request 의 `body()` 만 흉내낸다."""
+
+    def __init__(self, body: bytes) -> None:
+        self._body = body
+
+    async def body(self) -> bytes:
+        return self._body
+
+
+async def test_body_hash_is_verified_against_actual_body_not_trusted():
+    """⛔본문 바인딩 — 클라이언트가 주장한 `X-Device-Body-Sha256` 을 **그대로 믿지 않는다**.
+
+    실결함: transcript 의 body_sha256 에 헤더 값을 그대로 넣어, 서명 검증을 통과한 채
+    **본문만 바꿔치기**할 수 있었다(서명이 본문에 안 묶임). 서버가 본문을 읽어 해시해
+    대조해야 한다.
+    """
+    from fastapi import HTTPException
+
+    from app.dependencies.auth import _verified_device_body_sha256
+
+    real = b'{"story": "original"}'
+    real_hash = hashlib.sha256(real).hexdigest()
+
+    # 일치 → 실제 본문 해시를 돌려준다(서명 대상은 «서버가 계산한» 값).
+    assert await _verified_device_body_sha256(_FakeBodyRequest(real), real_hash) == real_hash
+
+    # 불일치(다른 본문을 주장) → 401. 바꿔치기의 핵심 케이스.
+    with pytest.raises(HTTPException) as exc:
+        await _verified_device_body_sha256(_FakeBodyRequest(b'{"story": "tampered"}'), real_hash)
+    assert exc.value.status_code == 401
+
+    # 대소문자/공백 표기는 관용(hex 는 대문자로도 온다).
+    assert await _verified_device_body_sha256(_FakeBodyRequest(real), real_hash.upper()) == real_hash
+
+    # 헤더 없음 → None(무회귀: 본문 미바인딩 · 그 사실이 서명 대상).
+    assert await _verified_device_body_sha256(_FakeBodyRequest(real), None) is None
+
+    # 헤더는 있는데 request 가 없어 검증 불가 → 401(fail-closed, 주장을 믿지 않는다).
+    with pytest.raises(HTTPException) as exc2:
+        await _verified_device_body_sha256(None, real_hash)
+    assert exc2.value.status_code == 401
+
+
+async def test_device_auth_dispatch_verifies_body_hash():
+    """배선 — 두 `dt_live_` 진입점이 **검증된** 해시를 resolver 에 넘기는지(주장값 아님)."""
+    import inspect
+
+    from app.dependencies import auth as auth_mod
+
+    src = inspect.getsource(auth_mod)
+    assert src.count('_verified_device_body_sha256(request, proof["body_sha256"])') >= 2, (
+        "dt_live_ 진입점이 본문 해시를 검증하지 않는다 — 바꿔치기 재발"
+    )
+    # 주장값을 그대로 넘기던 형태가 남아 있으면 결함이 살아 있다.
+    assert 'body_sha256=proof["body_sha256"]' not in src, (
+        "클라이언트 주장값을 그대로 transcript 에 넣는다 — 본문 바꿔치기 가능"
     )

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
+import hmac
 import logging
 import uuid
 from dataclasses import dataclass, field
@@ -816,6 +818,9 @@ async def _resolve_current_user_auth_context(
     from app.services.device_credential import DEVICE_CREDENTIAL_SCHEME
     if token.startswith(DEVICE_CREDENTIAL_SCHEME):
         proof = _extract_device_proof(request)
+        # 본문 바인딩 — 클라이언트 주장값을 실제 본문 해시와 대조한 값으로 교체한다(헤더가
+        # 없으면 None 유지 — 무회귀).
+        body_sha256 = await _verified_device_body_sha256(request, proof["body_sha256"])
         async with async_session_factory() as db:
             return await _resolve_device_credential(
                 token, db,
@@ -824,7 +829,7 @@ async def _resolve_current_user_auth_context(
                 timestamp=proof["timestamp"],
                 server_seq=proof["server_seq"],
                 signature_b64=proof["signature"],
-                body_sha256=proof["body_sha256"],
+                body_sha256=body_sha256,
             )
 
     # story 455e528d(E-AUTH-REBUILD Phase1-S2·doc §4.2): Firebase 세션(RS256)은 alg 헤더로
@@ -942,6 +947,11 @@ def _extract_device_proof(request: Request | None) -> dict[str, str | None]:
     `X-Device-Body-Sha256`는 옵션이다 — 본문을 서명에 묶고 싶은 클라이언트만 보낸다(안 보내면
     transcript의 body_sha256이 null이 되고, 그 사실 자체가 서명 대상이라 나중에 본문을 붙여
     보내도 검증이 깨진다).
+
+    ⛔여기서 나오는 `body_sha256` 은 **클라이언트 주장값**이다 — 그대로 transcript 에 넣으면
+    "서명 검증은 통과하는데 본문만 바꿔치기" 가 가능하다(서명이 본문에 묶이지 않는다).
+    실제 본문 해시와의 대조는 `_verified_device_body_sha256` 이 한다(호출부가 request 를
+    갖고 있는 배선 지점에서만 가능 — 이 함수는 헤더 파싱만).
     """
     if request is None:
         return {"timestamp": None, "server_seq": None, "signature": None, "body_sha256": None}
@@ -951,6 +961,38 @@ def _extract_device_proof(request: Request | None) -> dict[str, str | None]:
         "signature": request.headers.get("X-Device-Signature"),
         "body_sha256": request.headers.get("X-Device-Body-Sha256"),
     }
+
+
+async def _verified_device_body_sha256(request: Request | None, claimed: str | None) -> str | None:
+    """`X-Device-Body-Sha256` 주장값을 **실제 요청 본문 해시와 대조**해 확定한다.
+
+    결함(초판): transcript 의 `body_sha256` 에 **클라이언트 헤더를 그대로** 넣었다. 서명은
+    그 값에 묶이므로 검증은 통과하고, **본문만 바꿔치기**할 수 있었다 — 서명이 본문에 묶여
+    있지 않았다.
+
+    규칙:
+    - 헤더 없음(`claimed is None`) → `None` 반환. **무회귀**: 종전과 같이 본문 미바인딩이고,
+      그 사실(`body_sha256: null`)이 서명 대상이라 나중에 본문을 붙여 보내도 검증이 깨진다.
+    - 헤더 있음 → 서버가 본문을 읽어 해시하고 **상수시간 비교**. 불일치면 401(본문 바꿔치기).
+    - request 자체가 없는데 헤더가 있으면 **검증 불가** → 401(fail-closed. 검증 못 하는 주장을
+      믿고 통과시키면 이 결함이 그대로 남는다).
+
+    ⚠️본문 소비: `request.body()` 는 starlette 이 캐시하므로(첫 호출이 `_body` 에 저장) 이후
+    라우터의 파싱과 **중복 소비가 없다**. SSE 스트림은 GET 이라 본문이 없고, POST/PUT/PATCH 는
+    `ToolCallRecordingMiddleware` 가 이미 `request.body()` 를 불러 캐시해 둔 뒤 이 dependency
+    가 돈다 — 스트리밍 경로와 충돌하지 않는다(실측 확인).
+    """
+    if claimed is None:
+        return None
+    if request is None:
+        logger.warning("auth.device_credential rejected reason=body_hash_unverifiable")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid device proof")
+    raw = await request.body()
+    actual = hashlib.sha256(raw).hexdigest()
+    if not hmac.compare_digest(actual, claimed.strip().lower()):
+        logger.warning("auth.device_credential rejected reason=body_hash_mismatch")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid device proof")
+    return actual
 
 
 def _check_api_key_scope(auth: AuthContext, method: str, path: str | None = None) -> None:
@@ -1417,6 +1459,28 @@ async def get_current_user_streaming(
     if token.startswith("hu_live_"):
         async with async_session_factory() as db:
             return await _resolve_human_api_key(token, db)
+
+    # 기기별 자격증명(`dt_live_<uuid>`) — **이 변형에도 있어야 한다.** 여기 분기가 없으면
+    # `dt_live_` 토큰이 어느 접두사에도 안 걸려 아래 `decode_jwt` 로 떨어지고 "Invalid token"
+    # **401** 이 된다 — 즉 가드(`agent_gateway.py` 의 `is_agent_credential`)만 고쳐서는 목적
+    # 경로(SSE 스트림)가 열리지 않는다(초판 실측: 스트림은 403 이 아니라 401 이었다).
+    # 단명 세션으로 해소 후 즉시 close — 스트림 yield 구간에 커넥션을 들고 있지 않는다
+    # (위 API key 경로와 동형. CAS 는 자체 세션에서 커밋하므로 caller 세션 무관).
+    from app.services.device_credential import DEVICE_CREDENTIAL_SCHEME
+    if token.startswith(DEVICE_CREDENTIAL_SCHEME):
+        proof = _extract_device_proof(request)
+        # 본문 바인딩 — 위 `_resolve_current_user_auth_context` 와 동형(같은 이유·같은 값).
+        body_sha256 = await _verified_device_body_sha256(request, proof["body_sha256"])
+        async with async_session_factory() as db:
+            return await _resolve_device_credential(
+                token, db,
+                method=(request.method if request is not None else ""),
+                route=(request.url.path if request is not None else ""),
+                timestamp=proof["timestamp"],
+                server_seq=proof["server_seq"],
+                signature_b64=proof["signature"],
+                body_sha256=body_sha256,
+            )
 
     # story 455e528d(doc §4.3 "mirror the dual verifier in get_current_user_streaming"):
     # get_current_user와 동일하게 alg 헤더로 정확 분기(순차 fallback 아님). 단명 세션으로
