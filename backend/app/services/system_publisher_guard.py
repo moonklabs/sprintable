@@ -3,7 +3,9 @@
 자동 발행이 두 번째 「시스템 발행」을 만드는 실 결함까지 확認됨, story #3994 CHANGES-2
 그라운딩). FE는 3994/3997이 진입점을 이미 읽기 전용/제외로 막았지만, FE 게이트는 직접
 API 호출로 우회 가능하므로 서버가 정본이어야 한다(§3779: BE는 사람 문장을 싣지 않는다 —
-코드형 409만, 프런트가 KNOWN_ERRORS 정적 labelKey로 렌더).
+코드형 409만). 페드루 PO 정정(2026-09-17) — FE 진입점 자체가 없어(3994/3997이 이미
+숨김·제외) `apps/web`에 `SYSTEM_PUBLISHER_RESERVED` 소비처 0건 — 오직 직접 API 호출로만
+도달하며, FE `KNOWN_ERRORS` labelKey 매핑은 없다(추가 필요도 없음, 생기면 그때 추가).
 
 읽기 경로(키 목록/정책 조회 등)는 이 가드를 타지 않는다 — «시스템 발행에 키가 0개다」를
 보는 것 자체는 무해하고, AC1의 관심사는 오직 예약 멤버의 상태를 바꾸는 쓰기 경로다.
@@ -23,8 +25,9 @@ def assert_not_system_publisher(runtime_type: str | None) -> None:
     """쓰기(mutation) 경로 전용 — 대상 멤버의 runtime_type이 이미 조회돼 있을 때 이 함수 하나로
     409를 던진다. `detail`을 dict로 줘 `app.main.http_exception_handler`의 구조화-에러
     패스스루(코드 dict → `error.code`로 그대로 승격, AGENT_MESSAGE_POLICY_DENIED와 동일
-    관례)를 타게 한다 — `error.code == "SYSTEM_PUBLISHER_RESERVED"`(§3779 — 사람 문장 0,
-    FE `KNOWN_ERRORS` 정적 labelKey가 렌더)."""
+    관례)를 타게 한다 — `error.code == "SYSTEM_PUBLISHER_RESERVED"`(§3779 — 사람 문장 0).
+    페드루 PO 정정 — FE 진입점이 없어 직접 API 호출로만 도달, FE labelKey 매핑 없음(위
+    모듈 docstring 참고)."""
     if runtime_type == SYSTEM_PUBLISHER_RUNTIME_TYPE:
         raise HTTPException(status_code=409, detail={"code": "SYSTEM_PUBLISHER_RESERVED"})
 
