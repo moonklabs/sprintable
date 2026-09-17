@@ -989,7 +989,11 @@ def assert_sandbox_channel_not_registered_in_prod() -> None:
 
     test_channels = [ch for ch, cfg in CHANNEL_ADAPTERS.items() if cfg.is_test_channel]
     if settings.is_prod_deploy and test_channels:
+        # story #3779 가드(AST Constant 단위 스캔) — 변수 보간({test_channels})을 문장 중간에
+        # 두면 그 앞뒤 정적 한글 구간이 Constant 노드 2개로 갈라져 baseline이 헛순증한다
+        # (실사고, PO CHANGES 2026-09-17). 보간을 맨 끝에 둬 앞의 두 인접 리터럴이 파서
+        # 단계에서 병합돼 Constant 1개로 유지되게 한다.
         raise RuntimeError(
-            f"fail-closed: prod 배포에 테스트용 채널 어댑터가 등재돼 있습니다: {test_channels}"
-            "(SANDBOX_CHANNEL_ENABLED가 prod에 잘못 설정됐을 가능성 — story #4009 AC3)."
+            f"fail-closed: prod 배포에 테스트용 채널 어댑터가 등재돼 있습니다"
+            f"(SANDBOX_CHANNEL_ENABLED가 prod에 잘못 설정됐을 가능성 — story #4009 AC3): {test_channels}"
         )
