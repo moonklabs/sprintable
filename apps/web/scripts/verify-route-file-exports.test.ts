@@ -185,9 +185,11 @@ describe('scanRepo — story #3760 AC1/AC4(실 트리 실행)', () => {
   // agents/[id] 세 page.tsx 삭제(React 오류 코드 310 근본원인 — loading.tsx 스트리밍
   // 경계 아래 redirect() 호출을 next.config.ts redirects()로 이관, page.tsx 자체가
   // 불요해짐. hitl·[id] 디렉토리도 dangling 없이 통째 제거)로 101→98.
-  it('실 트리(apps/web/src/app) — 라우트 파일 98개·위반 0건', () => {
+  // story #3982(2026-09-17) — `/connect-rules`(v3 「연결·규칙」 화면, (authenticated)
+  // 밖 신규 라우트 그룹) page.tsx+layout.tsx 신설로 98→100.
+  it('실 트리(apps/web/src/app) — 라우트 파일 100개·위반 0건', () => {
     const { violations, fileCount } = scanRepo(APP_ROOT);
-    expect(fileCount).toBe(98);
+    expect(fileCount).toBe(100);
     expect(violations).toEqual([]);
   }, 1000);
 });
