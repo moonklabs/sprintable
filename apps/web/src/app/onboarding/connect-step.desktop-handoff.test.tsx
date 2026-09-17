@@ -131,6 +131,20 @@ describe('ConnectStep — 데스크톱 절 키 복사 칸(story #3983 CHANGES①
     await act(async () => { copyBtn.click(); });
     expect(copyBtn.textContent).toContain(ko.onboarding.copied);
   });
+
+  // 페드루 PO CHANGES r2(2026-09-17 02:23Z, 1차 ④와 같은 목적) — config_copied는
+  // 웹 경로 이벤트(verify rail 첫 상태)라 데스크톱 복사가 그걸 재사용하면
+  // 데스크톱/웹 활성화 퍼널이 다시 섞인다 — 별도 이름으로 가른다.
+  it('⭐데스크톱 키 복사는 desktop_key_copied만 emit하고 config_copied는 안 낸다', async () => {
+    const { fetchMock } = await mount();
+    const copyBtn = container.querySelector('[data-testid="connect-step-desktop-key-copy"]') as HTMLButtonElement;
+    await act(async () => { copyBtn.click(); });
+    const bodies = fetchMock.mock.calls
+      .filter((c) => c[0] === '/api/onboarding/events')
+      .map((c) => String(c[1]?.body ?? ''));
+    expect(bodies.some((b) => b.includes('desktop_key_copied'))).toBe(true);
+    expect(bodies.some((b) => b.includes('"event":"config_copied"'))).toBe(false);
+  });
 });
 
 describe('ConnectStep — 보조 경로 삭제 0(story #3983 AC1)', () => {

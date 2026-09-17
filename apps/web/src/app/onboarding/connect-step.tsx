@@ -277,7 +277,9 @@ export function ConnectStep({ agentId, apiKey, projectId, onFinish, todayV3Enabl
     }
     setDesktopKeyCopied(true);
     setTimeout(() => setDesktopKeyCopied(false), 2000);
-    emitOnboardingEvent('config_copied', { agent_id: agentId, flow: 'onboarding' });
+    // story #3983 CHANGES r2(페드루 PO 2026-09-17 02:23Z) — config_copied는
+    // 웹 경로 이벤트(verify rail 첫 상태)라 재사용하면 퍼널이 섞인다 — 별도 이름.
+    emitOnboardingEvent('desktop_key_copied', { agent_id: agentId, flow: 'onboarding' });
   };
 
   // story #3201(activation·절벽 처방) — 1차 깔때기 "연결까지 온 사람 중 첫 왕복 0%" 절벽.
