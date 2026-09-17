@@ -33,14 +33,16 @@ class ExternalPublishPausedError(Exception):
     삽입점(publish_channel_post_draft·publish_site_post_from_draft·워커)에
     도달했다. `.reason`은 owner가 적은 사유(없으면 None).
 
-    story #3779 BE 한글 사용자 문장 가드(신규 파일 grandfather 불가) — 이 예외
-    메시지 자체는 publication_command.py::_process_one_command의 기존
+    story #3779(페드루 PO 정정 2026-09-17) — BE는 사람 문장을 싣지 않는다: 이
+    예외 메시지는 publication_command.py::_process_one_command의 기존
     `last_error`(`EXTERNAL_PUBLISH_PAUSED: {reason}`류, Korean 0)와 같은 코드꼴
-    중립 문자열로 둔다. 사람에게 보이는 실제 한글 문장은 호출부(site_posts.py/
-    channel_posts.py, 이미 baseline 등재된 기존 파일)가 `.reason`을 읽어
-    거기서 조립한다(ExternalPublishGateNotApprovedError와 다른 결 — 그쪽은
-    구파일이라 그대로 둬도 안전하지만, 이 신규 파일은 0→N 성장 자체가 가드
-    위반이라 문자열을 여기 안 둔다)."""
+    중립 문자열이고, 호출부(site_posts.py/channel_posts.py)도 이걸 그대로
+    `str(exc)`로 실을 뿐 한글로 다시 조립하지 않는다 — 실제 한글 문장은 FE
+    `errorExternalPublishPaused` 정적 labelKey가 짓는다(api-error.ts, "reason
+    표시 0" — reason은 감사 로그행에만 남는다, external-publish-pause-card.tsx와
+    동형). ExternalPublishGateNotApprovedError는 구파일(baseline 등재)이라
+    한글을 그대로 둬도 안전하지만, 이 신규 파일은 0→N 성장 자체가 §3779 가드
+    위반이라 애초에 한글을 안 싣는다."""
 
     def __init__(self, *, reason: str | None):
         self.reason = reason
