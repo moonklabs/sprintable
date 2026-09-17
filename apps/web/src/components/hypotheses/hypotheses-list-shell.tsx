@@ -12,16 +12,20 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/ui/empty-state';
 import { cn } from '@/lib/utils';
 import { HypothesisStatusBadge } from './hypothesis-status-badge';
-import { fetchWorkList, type FetchedWorkList } from '@/components/work-list/fetch-work-list';
+import { fetchHypotheses } from '@/components/work-list/fetch-work-list';
+import type { WorkListHypothesisInput } from '@/components/work-list/derive-work-list';
 
 /**
  * story #3989(「일감」 흡수 3/N·FE) — 전수 가설 집(일감 「가설」 보기). ⌘K는 페이지
  * 네비만 하고 개별 엔티티를 검색하지 않아(worklist-6item-absorption doc §검증1)
- * 전수 가설의 집이 갭이었다 — work-list-shell.tsx가 이미 fetchWorkList로 받는
- * hypotheses 원본을 그대로 재사용한다(새 BE 0). 상세는 flow 페이지의 기존
- * `?hypothesis=<id>` 딥링크(HypothesisNarrativePanel, story #2533)를 그대로 쓰고,
- * 연결된 일은 work-list의 기존 `?hypothesis=<id>` 필터(useWorkListFilters)를 그대로
- * 쓴다 — 둘 다 발명 0.
+ * 전수 가설의 집이 갭이었다. 상세는 flow 페이지의 기존 `?hypothesis=<id>` 딥링크
+ * (HypothesisNarrativePanel, story #2533)를 그대로 쓰고, 연결된 일은 work-list의
+ * 기존 `?hypothesis=<id>` 필터(useWorkListFilters)를 그대로 쓴다 — 둘 다 발명 0.
+ *
+ * story #3989 CHANGES(페드루 PO) — 처음엔 fetchWorkList(8개 Promise.all)를 통째로
+ * 불렀다가, 무관한 원본(예: inbox) 실패에도 이 화면이 통째로 오류로 떨어지고 탭
+ * 하나에 요청 8개가 나가던 결함을 지적받았다 — fetchHypotheses(`/api/hypotheses?
+ * project_id=` 1콜, fetchWorkList도 내부에서 재사용하는 같은 함수)로 좁힌다.
  */
 export function HypothesesListShell({ projectId }: { projectId: string }) {
   const t = useTranslations('workList');
@@ -32,7 +36,7 @@ export function HypothesesListShell({ projectId }: { projectId: string }) {
   const searchParams = useSearchParams();
   const params = useParams<{ ws: string; proj: string }>();
 
-  const [fetched, setFetched] = useState<FetchedWorkList | null>(null);
+  const [hypotheses, setHypotheses] = useState<WorkListHypothesisInput[] | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [reloadNonce, setReloadNonce] = useState(0);
 
@@ -41,8 +45,8 @@ export function HypothesesListShell({ projectId }: { projectId: string }) {
     // work-list-shell.tsx와 동형(재시도마다 헌 에러 배너 먼저 걷기).
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoadError(false);
-    fetchWorkList(projectId)
-      .then((wl) => { if (!cancelled) setFetched(wl); })
+    fetchHypotheses(projectId)
+      .then((data) => { if (!cancelled) setHypotheses(data); })
       .catch(() => { if (!cancelled) setLoadError(true); });
     return () => { cancelled = true; };
   }, [projectId, reloadNonce]);
@@ -56,8 +60,7 @@ export function HypothesesListShell({ projectId }: { projectId: string }) {
     router.replace(qs ? `${pathname}?${qs}` : pathname);
   }, [searchParams, pathname, router]);
 
-  const hypotheses = fetched?.hypotheses ?? [];
-  const filtered = statusFilter ? hypotheses.filter((h) => h.status === statusFilter) : hypotheses;
+  const filtered = statusFilter ? (hypotheses ?? []).filter((h) => h.status === statusFilter) : (hypotheses ?? []);
 
   const goToDetail = useCallback((id: string) => {
     router.push(`/${params.ws}/${params.proj}/flow?hypothesis=${id}`);
@@ -78,6 +81,7 @@ export function HypothesesListShell({ projectId }: { projectId: string }) {
       <div className="flex flex-wrap items-center gap-1.5">
         <button
           type="button"
+          aria-pressed={statusFilter === null}
           onClick={() => setStatusFilter(null)}
           className={cn(
             'rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors',
@@ -92,6 +96,7 @@ export function HypothesesListShell({ projectId }: { projectId: string }) {
           <button
             key={status}
             type="button"
+            aria-pressed={statusFilter === status}
             onClick={() => setStatusFilter(statusFilter === status ? null : status)}
             className={cn(
               'rounded-lg transition-opacity',
@@ -103,9 +108,23 @@ export function HypothesesListShell({ projectId }: { projectId: string }) {
         ))}
       </div>
 
-      {fetched ? (
+      {hypotheses ? (
         filtered.length === 0 ? (
-          <EmptyState title={t('hypothesesEmptyTitle')} />
+          hypotheses.length === 0 ? (
+            <EmptyState title={t('hypothesesEmptyTitle')} />
+          ) : (
+            // story #3989 CHANGES(페드루 PO) — «전혀 없음»과 «필터에 맞는 것 없음」은
+            // 다른 사실이다(가설은 있는데 지금 고른 상태에만 없는 것) — 필터를 지울 수
+            // 있어야 한다(panelClearFilters 재사용, 새 낱말 0).
+            <EmptyState
+              title={t('hypothesesFilterEmptyTitle')}
+              action={
+                <Button type="button" variant="outline" size="sm" onClick={() => setStatusFilter(null)}>
+                  {t('panelClearFilters')}
+                </Button>
+              }
+            />
+          )
         ) : (
           <div className="space-y-2">
             {filtered.map((h) => (
