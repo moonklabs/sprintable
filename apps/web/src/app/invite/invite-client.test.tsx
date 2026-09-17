@@ -66,7 +66,7 @@ afterEach(async () => {
 describe('InviteClient — joinHeading t.rich() 렌더 (story #2084)', () => {
   it('ko: 조직명이 <b> 리터럴 없이 강조 span으로 렌더되고 문장이 정확하다', async () => {
     stubSuccessFlow();
-    await act(async () => { root.render(wrap('ko', <InviteClient />)); });
+    await act(async () => { root.render(wrap('ko', <InviteClient chatsHref="/chats" />)); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 
     const h1 = container.querySelector('h1');
@@ -79,7 +79,7 @@ describe('InviteClient — joinHeading t.rich() 렌더 (story #2084)', () => {
 
   it('en: 조직명이 <b> 리터럴 없이 강조 span으로 렌더되고 문장이 정확하다', async () => {
     stubSuccessFlow();
-    await act(async () => { root.render(wrap('en', <InviteClient />)); });
+    await act(async () => { root.render(wrap('en', <InviteClient chatsHref="/chats" />)); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 
     const h1 = container.querySelector('h1');
@@ -104,7 +104,7 @@ describe('InviteClient — 결과 피드백 접근성(story #2105 2차)', () => 
       }
       throw new Error('unexpected fetch: ' + url);
     }));
-    await act(async () => { root.render(wrap('ko', <InviteClient />)); });
+    await act(async () => { root.render(wrap('ko', <InviteClient chatsHref="/chats" />)); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 
     const alertEl = container.querySelector('[role="alert"]');
@@ -125,7 +125,7 @@ describe('InviteClient — 결과 피드백 접근성(story #2105 2차)', () => 
       }
       throw new Error('unexpected fetch: ' + url);
     }));
-    await act(async () => { root.render(wrap('ko', <InviteClient />)); });
+    await act(async () => { root.render(wrap('ko', <InviteClient chatsHref="/chats" />)); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 
     const nameInput = container.querySelector('input[type="text"]') as HTMLInputElement;
@@ -170,7 +170,7 @@ describe('InviteClient — error.code 분기 (story #2484)', () => {
       }
       throw new Error('unexpected fetch: ' + url);
     }));
-    await act(async () => { root.render(wrap('ko', <InviteClient />)); });
+    await act(async () => { root.render(wrap('ko', <InviteClient chatsHref="/chats" />)); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 
     const emailInput = container.querySelector('input[type="email"]') as HTMLInputElement;
@@ -207,7 +207,7 @@ describe('InviteClient — error.code 분기 (story #2484)', () => {
       }
       throw new Error('unexpected fetch: ' + url);
     }));
-    await act(async () => { root.render(wrap('ko', <InviteClient />)); });
+    await act(async () => { root.render(wrap('ko', <InviteClient chatsHref="/chats" />)); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 
     const nameInput = container.querySelector('input[type="text"]') as HTMLInputElement;

@@ -13,13 +13,15 @@ interface InviteAcceptClientProps {
   role: string;
   email: string;
   projects: { id: string; name: string }[];
-  // story #4017 CHANGES 2(페드루 PO 지적, 2026-09-17 15:44Z) — 이 컴포넌트는 client라
-  // process.env를 못 읽는다. 부모 page.tsx(서버)가 resolveChatsHref(readNavV3FlagsFromEnv())
-  // 로 미리 구해 prop으로 내려준다(생략 시 기존 '/chats'와 바이트 동일, AC2).
-  chatsHref?: string;
+  // story #4017 CHANGES 2(페드루 PO 지적, 2026-09-17 15:44Z/15:56Z) — 이 컴포넌트는
+  // client라 process.env를 못 읽는다. 부모 page.tsx(서버)가
+  // resolveChatsHref(readNavV3FlagsFromEnv())로 구해 prop으로 내려준다. 필수로 둬서
+  // (기본값 없음) 호출부가 빠뜨리면 타입 에러로 즉시 걸린다 — 가드 예외(리터럴 기본값)도
+  // 이걸로 사라진다.
+  chatsHref: string;
 }
 
-export function InviteAcceptClient({ token, orgName, role, email, projects, chatsHref = '/chats' }: InviteAcceptClientProps) {
+export function InviteAcceptClient({ token, orgName, role, email, projects, chatsHref }: InviteAcceptClientProps) {
   const t = useTranslations('settings');
   const tInvite = useTranslations('invite');
   const [accepting, setAccepting] = useState(false);

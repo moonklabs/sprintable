@@ -40,7 +40,7 @@ function setNativeValue(el: HTMLInputElement, value: string) {
 
 async function mountAndSubmit() {
   const { MfaClient } = await import('./mfa-client');
-  await act(async () => { root.render(<MfaClient />); });
+  await act(async () => { root.render(<MfaClient chatsHref="/chats" />); });
   const codeInput = container.querySelector('input[type="text"]') as HTMLInputElement;
   await act(async () => { setNativeValue(codeInput, '123456'); });
   const verifyBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === 'Verify');

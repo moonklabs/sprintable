@@ -69,14 +69,15 @@ const STEPS: Step[] = ['org', 'project', 'agent', 'connect'];
 interface OnboardingFormProps {
   initialStep?: Step;
   initialOrgId?: string;
-  // story #4017 CHANGES 2(페드루 PO 지적, 2026-09-17 15:44Z) — 이 컴포넌트는 client라
-  // process.env를 못 읽는다. 부모 page.tsx(서버)가 resolveChatsHref(readNavV3FlagsFromEnv())
-  // 로 미리 구해 prop으로 내려준다 — 목적지 문자열은 여전히 nav-v3-destinations.ts
-  // 한 곳에서만 나온다(생략 시 기존 '/chats'와 바이트 동일, AC2).
-  chatsHref?: string;
+  // story #4017 CHANGES 2(페드루 PO 지적, 2026-09-17 15:44Z/15:56Z) — 이 컴포넌트는
+  // client라 process.env를 못 읽는다. 부모 page.tsx(서버)가
+  // resolveChatsHref(readNavV3FlagsFromEnv())로 구해 prop으로 내려준다. 필수로 둬서
+  // (기본값 없음) 호출부가 빠뜨리면 타입 에러로 즉시 걸린다 — 가드 예외(리터럴 기본값)도
+  // 이걸로 사라진다.
+  chatsHref: string;
 }
 
-export function OnboardingForm({ initialStep, initialOrgId, chatsHref = '/chats' }: OnboardingFormProps = {}) {
+export function OnboardingForm({ initialStep, initialOrgId, chatsHref }: OnboardingFormProps) {
   const t = useTranslations('onboarding');
   const tc = useTranslations('common');
 

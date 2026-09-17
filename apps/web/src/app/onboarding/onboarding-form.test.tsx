@@ -58,7 +58,7 @@ describe('OnboardingForm — error.code 분기 (story #2484)', () => {
       }
       throw new Error('unexpected fetch: ' + url);
     }));
-    await act(async () => { root.render(wrap(<OnboardingForm />)); });
+    await act(async () => { root.render(wrap(<OnboardingForm chatsHref="/chats" />)); });
 
     const nameInput = container.querySelector('input') as HTMLInputElement;
     await act(async () => { setNativeValue(nameInput, 'My Org'); });
@@ -81,7 +81,7 @@ describe('OnboardingForm — error.code 분기 (story #2484)', () => {
       }
       throw new Error('unexpected fetch: ' + url);
     }));
-    await act(async () => { root.render(wrap(<OnboardingForm />)); });
+    await act(async () => { root.render(wrap(<OnboardingForm chatsHref="/chats" />)); });
 
     const nameInput = container.querySelector('input') as HTMLInputElement;
     await act(async () => { setNativeValue(nameInput, 'My Org'); });
@@ -110,7 +110,7 @@ describe('OnboardingForm — error.code 분기 (story #2484)', () => {
       throw new Error('unexpected fetch: ' + url);
     }));
     await act(async () => {
-      root.render(wrap(<OnboardingForm initialStep="project" initialOrgId="org-1" />));
+      root.render(wrap(<OnboardingForm initialStep="project" initialOrgId="org-1" chatsHref="/chats" />));
     });
 
     const nameInput = container.querySelector('input') as HTMLInputElement;
@@ -141,7 +141,7 @@ describe('OnboardingForm — error.code 분기 (story #2484)', () => {
       }
       throw new Error('unexpected fetch: ' + url);
     }));
-    await act(async () => { root.render(wrap(<OnboardingForm />)); });
+    await act(async () => { root.render(wrap(<OnboardingForm chatsHref="/chats" />)); });
 
     const orgNameInput = container.querySelector('input') as HTMLInputElement;
     await act(async () => { setNativeValue(orgNameInput, 'My Org'); });
