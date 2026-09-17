@@ -2955,7 +2955,11 @@
     "channelPostsImageRemoveAction": "삭제",
     "channelPostsImageRemoveActionLabel": "{position}번째 이미지 삭제",
     "channelPostsAwaitingContainerNotice": "자동으로 이어서 처리 중이에요. 잠시 후 다시 확인해 주세요.",
-    "channelPostsPublicationFailedNotice": "발행에 실패했어요 — 이 시도는 다음 발행에서 이어서 처리돼요."
+    "channelPostsPublicationFailedNotice": "발행에 실패했어요.",
+    "channelPostsPublicationFailedCancelledNotice": "발행에 실패했고, 다시 시도는 취소됐어요.",
+    "channelPostsPublicationFailedPendingRetryNotice": "발행에 실패했어요. 곧 자동으로 다시 시도해요.",
+    "channelPostsPublicationFailedInProgressNotice": "발행에 실패했어요. 지금 다시 발행하고 있어요.",
+    "channelPostsPublicationFailedRepublishNotice": "발행에 실패했어요. 「다시 발행」으로 다시 시도할 수 있어요."
   },
   "docs": {
     "title": "문서",
