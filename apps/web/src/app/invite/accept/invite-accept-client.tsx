@@ -13,9 +13,13 @@ interface InviteAcceptClientProps {
   role: string;
   email: string;
   projects: { id: string; name: string }[];
+  // story #4017 CHANGES 2(페드루 PO 지적, 2026-09-17 15:44Z) — 이 컴포넌트는 client라
+  // process.env를 못 읽는다. 부모 page.tsx(서버)가 resolveChatsHref(readNavV3FlagsFromEnv())
+  // 로 미리 구해 prop으로 내려준다(생략 시 기존 '/chats'와 바이트 동일, AC2).
+  chatsHref?: string;
 }
 
-export function InviteAcceptClient({ token, orgName, role, email, projects }: InviteAcceptClientProps) {
+export function InviteAcceptClient({ token, orgName, role, email, projects, chatsHref = '/chats' }: InviteAcceptClientProps) {
   const t = useTranslations('settings');
   const tInvite = useTranslations('invite');
   const [accepting, setAccepting] = useState(false);
@@ -42,7 +46,7 @@ export function InviteAcceptClient({ token, orgName, role, email, projects }: In
       } else {
         setResult({ type: 'success', text: `${tInvite('success')} ${tInvite('redirecting')}` });
         // story #3179(S3c) 후속(카디르 QA 발견) — /dashboard 폐합, 홈=chat 재조준.
-        setTimeout(() => { window.location.href = '/chats'; }, 1500);
+        setTimeout(() => { window.location.href = chatsHref; }, 1500);
       }
     } finally {
       setAccepting(false);
@@ -104,9 +108,10 @@ export function InviteAcceptClient({ token, orgName, role, email, projects }: In
             </Button>
             {/* story #3179(S3c) — /dashboard 폐합, 홈=chat 재조준. 이전 eslint-disable(story
                 a539c649 S2, href="/dashboard"에 대한 no-html-link-for-pages 오탐)은 href="/chats"
-                에서는 오탐이 아니라 실 위반으로 밝혀져 <a>→<Link> 전환으로 근본 해결한다. */}
+                에서는 오탐이 아니라 실 위반으로 밝혀져 <a>→<Link> 전환으로 근본 해결한다.
+                story #4017 CHANGES 2 — 목적지 모듈 경유(chatsHref prop). */}
             <Link
-              href="/chats"
+              href={chatsHref}
               className="block text-center text-sm text-muted-foreground hover:text-foreground/70"
             >
               {tInvite('decline')}
