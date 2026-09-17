@@ -358,7 +358,19 @@ jobs:
       # 다시 깨짐)이므로 아래 로그인-리다이렉트 판정과 서로 다른 처방이 필요하다 — 흔적 없이
       # 로그인 판정만 보면 두 원인을 다시 못 가른다(직전 두 번의 실패가 이 구분 부재로 인한
       # 헷갈림이었다).
+      # story #4032(PO 지적, AC5 음성대조 준비 中 발견) — 이 스텝들에 `if:` 조건이 없어
+      # `Run Lighthouse CI`가 실패(예: assert 단언이 error로 승격된 뒤 임계 초과)하면
+      # GHA 기본 동작상 아래 검증 스텝 전부가 skipped로 건너뛰어진다. 그러면 "빨강이
+      # 떴다"만 남고 정작 필요한 "어느 화면이 몇으로 나빠졌는지" 표 자체가 안 나온다 —
+      # 이 카드 내내 지켜온 축("로그가 스스로 원인을 말하게 하기")과 정반대 결과다.
+      # `success() || failure()`(취소는 제외)로 Run Lighthouse CI가 실패해도 이 검증
+      # 스텝들이 계속 돌아 manifest.json을 직접 읽어 표를 낸다. `.lighthouseci/manifest.
+      # json`은 assert 실패와 무관하게 collect 단계가 이미 다 써 둔 파일이라(assert는
+      # collect 이후 별도 단계) 이 판정 자체는 여전히 유효하다 — 단 collect 자체가
+      # 통째로 깨진 경우(그 파일조차 없음)는 "측정 자체가 안 됐다"로 분명히 갈라야
+      # 하므로 존재 확認을 먼저 한다(흔적 단언과 같은 모양).
       - name: Verify puppeteer auth script actually ran (trace count)
+        if: success() || failure()
         run: |
           set -euo pipefail
           if [ ! -f ./lighthouse-auth-trace.log ]; then
@@ -375,9 +387,14 @@ jobs:
 
       - name: Verify authenticated screens measured (not /login) + write summary
         id: verify
+        if: success() || failure()
         run: |
           python3 -c "
           import json, sys, os
+
+          if not os.path.exists('.lighthouseci/manifest.json'):
+              print('::error::.lighthouseci/manifest.json 자체가 없다 — collect 단계가 통째로 깨져 측정 자체가 안 됐다(위 Verify puppeteer auth script 스텝의 흔적 확認부터 볼 것)')
+              sys.exit(1)
 
           with open('.lighthouseci/manifest.json') as f:
               manifest = json.load(f)
@@ -439,8 +456,13 @@ jobs:
       # (공개 링크)로 올렸다. puppeteerScript 전환이 그 노출 경로 자체를 없앴는지 매 run
       # 실측으로 확認한다(값은 안 찍고 개수만 — 새는 게 있어도 이 로그에 다시 안 남게).
       - name: Verify no session token leakage in reports
+        if: success() || failure()
         run: |
           set -euo pipefail
+          if [ ! -d .lighthouseci ] || [ -z "$(ls -A .lighthouseci/*.json 2>/dev/null)" ]; then
+            echo "::error::.lighthouseci/ 에 리포트 JSON이 0개 — collect 단계가 통째로 깨져 측정 자체가 안 됐다(0건은 이 경우 안전이 아니라 검사 자체를 안 함이다)"
+            exit 1
+          fi
           count=0
           for f in .lighthouseci/*.json; do
             [ "$(basename "$f")" = "manifest.json" ] && continue
@@ -454,7 +476,7 @@ jobs:
           fi
 
       - name: Comment PR with Lighthouse results
-        if: github.event_name == 'pull_request'
+        if: (success() || failure()) && github.event_name == 'pull_request'
         continue-on-error: true
         uses: actions/github-script@v7
         env:
