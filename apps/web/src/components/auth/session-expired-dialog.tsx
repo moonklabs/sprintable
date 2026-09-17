@@ -32,7 +32,9 @@ export function SessionExpiredDialog() {
 
   const relogin = () => {
     const path = typeof window !== 'undefined' ? window.location.pathname + window.location.search : '/inbox';
-    window.location.href = buildLoginRedirect(path, navV3Flags?.chatV3Enabled ?? false);
+    // story #4017 CHANGES 2 — flags 전체를 넘긴다(chatV3Enabled 불리언 추출 금지, 목적지
+    // 문자열은 buildLoginRedirect 내부의 resolveNavV3Destinations() 한 곳에서만 나온다).
+    window.location.href = buildLoginRedirect(path, navV3Flags);
   };
 
   return (
