@@ -256,22 +256,48 @@ describe('WorkListDetailPanel — 탭→데이터 매핑', () => {
     expect(container.querySelector('[data-testid="panel-tasks-empty"]')?.textContent).toBe(koMessages.workList.panelEmptyTasks);
   });
 
-  // story #3976 AC1 — 「이력」(기존 GET /api/v2/activity-logs?entity_type=story&entity_id=
-  // 재사용, 3971 정정 확認한 그 API — 새 BE 0). action 원시값은 노출하지 않고 문장으로.
-  it('⭐이력 탭 — action별 문장으로 렌더된다(원시값 노출 0)', async () => {
+  // story #3976 CHANGES(페드루 PO C1, 2026-09-17 00:38Z, dev 실측 3픽스처 — moonklabs
+  // 스토리 로그 100건: story_updated의 81%에 context.old_status/new_status·14%에
+  // context.fields). action 원시값·필드명 원시값은 노출 0, 실측 모양 그대로 검증.
+  it('⭐이력 탭 — 생성은 그대로, 상태 전후 있으면 SSOT 라벨로 「상태를 X → Y로」', async () => {
     mockFetchRoutes({
       activityLogItems: [
-        { id: 'l1', actor_name: '페드루', action: 'story_created', created_at: new Date().toISOString() },
-        { id: 'l2', actor_name: '유나', action: 'story_updated', created_at: new Date().toISOString() },
+        { id: 'l1', actor_name: '페드루', action: 'story_created', created_at: new Date().toISOString(), context: {} },
+        { id: 'l2', actor_name: '유나', action: 'story_updated', created_at: new Date().toISOString(), context: { old_status: 'in-progress', new_status: 'in-review' } },
       ],
     });
     await mountPanel();
     await act(async () => { (container.querySelector('[data-testid="panel-tab-history"]') as HTMLElement).click(); });
     const list = container.querySelector('[data-testid="panel-history-list"]');
     expect(list?.textContent).toContain('페드루가 만들었어요');
-    expect(list?.textContent).toContain('유나가 바꿨어요');
+    expect(list?.textContent).toContain('유나가 상태를 진행 중 → 검토 중으로 바꿨어요');
     expect(list?.textContent).not.toContain('story_created');
-    expect(list?.textContent).not.toContain('story_updated');
+    expect(list?.textContent).not.toContain('in-progress');
+  });
+
+  it('⭐이력 탭 — fields만 있으면(status 전후 없음) §3875 유형 라벨로 「{필드} 바꿨어요」', async () => {
+    mockFetchRoutes({
+      activityLogItems: [
+        { id: 'l3', actor_name: '디디', action: 'story_updated', created_at: new Date().toISOString(), context: { fields: ['title'] } },
+      ],
+    });
+    await mountPanel();
+    await act(async () => { (container.querySelector('[data-testid="panel-tab-history"]') as HTMLElement).click(); });
+    expect(container.querySelector('[data-testid="panel-history-list"]')?.textContent).toContain('디디가 제목을 바꿨어요');
+  });
+
+  it('⭐이력 탭 — 미등록 필드(story_points 등)·근거 부재는 중립 폴백 「그 밖의 변경」 1개로(원시 필드명 노출 0)', async () => {
+    mockFetchRoutes({
+      activityLogItems: [
+        { id: 'l4', actor_name: '미르코', action: 'story_updated', created_at: new Date().toISOString(), context: { fields: ['story_points', 'priority'] } },
+      ],
+    });
+    await mountPanel();
+    await act(async () => { (container.querySelector('[data-testid="panel-tab-history"]') as HTMLElement).click(); });
+    const list = container.querySelector('[data-testid="panel-history-list"]');
+    expect(list?.textContent).toContain('미르코가 그 밖의 변경을 했어요');
+    expect(list?.textContent).not.toContain('story_points');
+    expect(list?.textContent).not.toContain('priority');
   });
 
   it('이력 탭 — 0건이면 「아직 이력이 없어요」', async () => {
