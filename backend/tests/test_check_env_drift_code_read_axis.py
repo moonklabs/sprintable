@@ -335,10 +335,17 @@ def test_ac4_real_repo_scan_counts_are_recorded():
     # 코드 read가 스캔에서 통째로 사라짐(baseline exemption 불요, 가드가 자연히 green) → high
     # 3→2. 남은 high 2건은 MCP_ALLOWED_TOKEN_REFS(baseline, 보안 정책 판단 대기) +
     # `_INCIDENT_KEYS` 고정 픽스처 FIREBASE_BFF_INTERNAL_SECRET 1건.
+    # 2026-09-17(페드루 PO 정본) — v3 플래그 3키(CHAT_V3_ENABLED·TODAY_V3_ENABLED·
+    # CONNECT_RULES_V3_ENABLED, 전부 FIREBASE_OAUTH_HANDOFF_ENABLED와 동형
+    # 안전-닫힘 feature flag — 값 부재 시 false, throw 없음)를 code_read_exempt에
+    # 브랜치 무관 동일하게 등재한다(exempt 30→33, 착지 여러 v3 브랜치가 바이트
+    # 동일 블록을 들고 있어야 충돌 없이 합쳐진다) — 이 세 키를 실제로 code read
+    # 하는 브랜치에서는 그만큼 high에서 빠지고, 안 읽는 브랜치에서는 exempt
+    # 개수에만 반영된다(high/low 불변).
     assert len(highest) == 1, highest
     assert len(high) == 2, high
     assert len(low) == 9, low
-    assert len(exempt) == 30
+    assert len(exempt) == 33
 
 
 # ── AC5 — 값을 안 읽는다 ──────────────────────────────────────────────────────
