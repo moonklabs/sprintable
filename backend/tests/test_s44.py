@@ -18,6 +18,17 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
+@pytest.fixture(autouse=True)
+def _mock_assert_agent_owner(monkeypatch):
+    """story #4000(보안 감사) — transition_session이 이제 assert_agent_owner(TeamMember VIEW
+    실조회)를 부른다. 이 파일은 순수 AsyncMock 세션이 대상이라 test_s41/42/43과 동형 이유로
+    통과 처리(가드 자체 검증은 test_4000_agent_owner_guard_realdb.py 몫)."""
+    monkeypatch.setattr(
+        "app.routers.agent_sessions.assert_agent_owner",
+        AsyncMock(return_value=MagicMock()),
+    )
+
+
 async def _client():
     from app.main import app
     ctx = MagicMock()
@@ -102,7 +113,9 @@ async def test_list_sessions_with_filters_200():
 async def test_transition_session_active_200():
     client, session, app = await _client()
     try:
-        with patch("app.repositories.agent_session.AgentSessionRepository.transition", new_callable=AsyncMock) as mock_tx:
+        with patch("app.repositories.agent_session.AgentSessionRepository.transition", new_callable=AsyncMock) as mock_tx, \
+             patch("app.repositories.agent_session.AgentSessionRepository.get", new_callable=AsyncMock, return_value=_make_session("active")):
+            # story #4000 — 이 분기는 이제 transition 前 repo.get()으로 대상 agent_id를 먼저 찾는다.
             mock_tx.return_value = _make_session("active")
             async with client as c:
                 resp = await c.patch(f"/api/v2/agent-sessions/{SESSION_ID}", json={"status": "active"})
@@ -118,7 +131,8 @@ async def test_transition_session_active_200():
 async def test_transition_session_suspended_200():
     client, session, app = await _client()
     try:
-        with patch("app.repositories.agent_session.AgentSessionRepository.transition", new_callable=AsyncMock) as mock_tx:
+        with patch("app.repositories.agent_session.AgentSessionRepository.transition", new_callable=AsyncMock) as mock_tx, \
+             patch("app.repositories.agent_session.AgentSessionRepository.get", new_callable=AsyncMock, return_value=_make_session("active")):
             s = _make_session("suspended")
             s.suspended_at = datetime.now(timezone.utc)
             mock_tx.return_value = s
@@ -135,7 +149,10 @@ async def test_transition_session_not_found_404():
     client, session, app = await _client()
     try:
         from app.repositories.agent_session import AgentSessionError
-        with patch("app.repositories.agent_session.AgentSessionRepository.transition", new_callable=AsyncMock) as mock_tx:
+        with patch("app.repositories.agent_session.AgentSessionRepository.transition", new_callable=AsyncMock) as mock_tx, \
+             patch("app.repositories.agent_session.AgentSessionRepository.get", new_callable=AsyncMock, return_value=_make_session("active")):
+            # story #4000 — repo.get()은 존재를 찾되(소유권 통과) transition() 자체가 레이스로
+            # 404를 내는 케이스(이 테스트의 원래 의도)를 그대로 보존.
             mock_tx.side_effect = AgentSessionError("SESSION_NOT_FOUND", 404, "Session not found")
             async with client as c:
                 resp = await c.patch(f"/api/v2/agent-sessions/{SESSION_ID}", json={"status": "active"})
@@ -149,7 +166,8 @@ async def test_transition_session_not_found_404():
 async def test_transition_session_terminated_200():
     client, session, app = await _client()
     try:
-        with patch("app.repositories.agent_session.AgentSessionRepository.transition", new_callable=AsyncMock) as mock_tx:
+        with patch("app.repositories.agent_session.AgentSessionRepository.transition", new_callable=AsyncMock) as mock_tx, \
+             patch("app.repositories.agent_session.AgentSessionRepository.get", new_callable=AsyncMock, return_value=_make_session("active")):
             s = _make_session("terminated")
             s.ended_at = datetime.now(timezone.utc)
             s.terminated_at = datetime.now(timezone.utc)
@@ -166,7 +184,8 @@ async def test_transition_session_terminated_200():
 async def test_transition_session_idle_200():
     client, session, app = await _client()
     try:
-        with patch("app.repositories.agent_session.AgentSessionRepository.transition", new_callable=AsyncMock) as mock_tx:
+        with patch("app.repositories.agent_session.AgentSessionRepository.transition", new_callable=AsyncMock) as mock_tx, \
+             patch("app.repositories.agent_session.AgentSessionRepository.get", new_callable=AsyncMock, return_value=_make_session("active")):
             s = _make_session("idle")
             s.idle_at = datetime.now(timezone.utc)
             mock_tx.return_value = s
