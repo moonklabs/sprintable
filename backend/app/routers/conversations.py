@@ -1573,7 +1573,9 @@ async def list_conversations(
                 # story #3973(E-UX-OVERHAUL·「대화」 3/N) — 목록 행 클립 아이콘용. tombstone
                 # (deleted_at 있음)이면 story #2319 스크럽 관례(위 _serialize_message의
                 # 동일 근거) 그대로 false — 삭제된 메시지의 첨부 존재를 새지 않는다.
-                "has_attachments": bool(latest_msg.attachments) if latest_msg.deleted_at is None else False,
+                "has_attachments": (
+                    isinstance(latest_msg.attachments, list) and len(latest_msg.attachments) > 0
+                ) if latest_msg.deleted_at is None else False,
                 # story #3888(§⑤·Chat, PO 확定 2026-09-14 18:19Z) — FE가 이벤트 메시지를
                 # raw content(발행 시점 slug) 대신 렌더 시점 「헤더 · 요약」으로 조립하려면
                 # event_key/payload가 필요하다. _event_payload()(기존 함수, 전체 메시지
