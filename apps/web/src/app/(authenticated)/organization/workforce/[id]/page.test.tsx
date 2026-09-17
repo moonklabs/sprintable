@@ -123,13 +123,18 @@ describe('AgentDetailPage — 시스템 발행 키 관리 숨김(story #3994 CHA
     // story #3994 CHANGES-3(유나 재앵커 적발) — Fakechat(SSE) 인라인 섹션은 일반
     // 에이전트에겐 그대로 뜬다(회귀 0).
     expect(container.textContent).toContain('실시간 연결');
+    // story #3994 CHANGES-4(페드루 PO C3/C4) — 런타임 카드·알림 채널 카드·알림
+    // 설정 요약 카드도 일반 에이전트에겐 그대로 뜬다(회귀 0).
+    expect(container.textContent).toContain('런타임 타입');
+    expect(container.textContent).toContain('알림 채널');
+    expect(container.textContent).toContain('수신 계약 요약');
   });
 
   // story #3994 CHANGES-2(페드루 PO 판정 2026-09-17) — 유나 전수+PO 코드대조 결과
   // 「시스템 발행」에 손댈 수 있는 자리가 키 발급·연결 설정 말고도 더 있었다(런타임
   // 재저장·활성화 토글·아바타·webhook·메시지 정책·프로젝트 접근). canEdit을 한
   // 곳에서 좁혀 전부 읽기 전용으로.
-  it('⭐「시스템 발행」— 편집 가능한 것 0(런타임 저장·활성 토글·아바타·webhook·메시지정책·프로젝트접근·키관리·연결설정·실시간연결)', async () => {
+  it('⭐「시스템 발행」— 편집 가능한 것 0(런타임 저장·활성 토글·아바타·webhook·메시지정책·프로젝트접근·키관리·연결설정·실시간연결·런타임카드·알림채널·알림요약)', async () => {
     stubFetch({ agent: { ...AGENT, name: '시스템 발행', runtime_type: 'system-publisher' } });
     await mount();
     expect(container.querySelector('[data-testid="stub-agent-api-key-manager"]')).toBeNull();
@@ -138,14 +143,20 @@ describe('AgentDetailPage — 시스템 발행 키 관리 숨김(story #3994 CHA
     expect(container.querySelector('[data-testid="stub-messaging-policy-section"]')).toBeNull();
     expect(container.querySelector('[data-testid="project-access-projects-count"]')?.getAttribute('data-can-edit')).toBe('false');
     expect([...container.querySelectorAll('button')].some((b) => b.textContent === '비활성화' || b.textContent === '활성화')).toBe(false);
-    // 런타임 쪽 「저장」 버튼 자체가 안 그려진다(읽기전용 분기) — webhook 쪽 1개만 남는다.
-    expect([...container.querySelectorAll('button')].filter((b) => b.textContent === '저장').length).toBe(1);
-    const webhookSwitch = container.querySelector('[role="switch"]');
-    expect(webhookSwitch?.hasAttribute('data-disabled')).toBe(true);
+    // story #3994 CHANGES-4(페드루 PO C4) — 알림 채널 카드 자체가 미렌더되어 그 안의
+    // webhook 「저장」 버튼·Switch도 함께 사라진다(런타임 카드도 C3로 미렌더 — 저장
+    // 버튼 0개, 웹훅 switch 자체가 DOM에 없음).
+    expect([...container.querySelectorAll('button')].filter((b) => b.textContent === '저장').length).toBe(0);
+    expect(container.querySelector('[role="switch"]')).toBeNull();
     const notice = container.querySelector('[data-testid="agent-detail-system-publisher-notice"]');
     expect(notice?.textContent).toBe('Sprintable이 자동으로 남기는 알림·기록의 보낸 이예요 — 따로 연결하지 않아도 돼요.');
     // story #3994 CHANGES-3(유나 재앵커 적발) — Fakechat(SSE) 인라인 섹션 미렌더
     // (연결 지시 + amber 거짓 경고 제거, 9번째 차단 자리).
     expect(container.textContent).not.toContain('실시간 연결');
+    // story #3994 CHANGES-4(페드루 PO C3/C4) — 런타임 카드(거짓 red unsupported 배지)·
+    // 알림 채널·알림 설정 요약 카드(거짓 webhookAdminOnly 사유) 미렌더.
+    expect(container.textContent).not.toContain('런타임 타입');
+    expect(container.textContent).not.toContain('알림 채널');
+    expect(container.textContent).not.toContain('수신 계약 요약');
   });
 });
