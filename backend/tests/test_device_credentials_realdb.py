@@ -2134,3 +2134,62 @@ async def test_rejected_device_request_does_not_touch_last_seen():
             )
     finally:
         await engine.dispose()
+
+
+async def test_admin_cannot_revoke_another_members_device():
+    """G4.2 판정 확정 — 폐기도 **본인만**이다(admin 대리 폐기 불가).
+
+    원 게이트 문구는 "본인 성공 / org admin 성공 / 제3자 거부"였지만, #9 판정(기기 = 그 사람의
+    자원, 등록은 본인 셀프서브)을 폐기에도 같은 축으로 적용한다 — admin 이 남의 기기를 끊을 수
+    있으면 "이 기기는 누구 것인가"가 다시 흐려진다. 대리 폐기 요구가 생기면 그건 별도 판정이다.
+
+    `sk_live_` 발급/폐기(`api_keys.py`)가 admin 을 허용하는 것과 대조된다 — 키는 조직 자원이다.
+    """
+    from fastapi import HTTPException
+    from sqlalchemy import select
+
+    from app.dependencies.auth import AuthContext
+    from app.models.agent_device_credential import AgentDeviceCredential
+    from app.routers.device_credentials import (
+        RegisterDeviceRequest,
+        register_device_credential,
+        revoke_device_credential,
+    )
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id, owner_user_id, owner_member_id = await _seed_org_project_human(s)
+            admin_user_id, _admin_member_id = await _seed_human_in_org(s, org_id, role="admin")
+            await _seed_agent(s, org_id, project_id, created_by_member_id=owner_member_id)
+        _priv, der = _keypair()
+        async with Session() as s:
+            dev = await register_device_credential(
+                _FakeRequest(),
+                RegisterDeviceRequest(device_label="owner-dev", public_key_der_b64=base64.b64encode(der).decode()),
+                auth=_auth_for(owner_user_id, org_id), session=s,
+            )
+
+        admin_auth = AuthContext(
+            user_id=str(admin_user_id), email=None,
+            claims={"sub": str(admin_user_id), "app_metadata": {
+                "org_id": str(org_id), "actor_type": "human", "role": "admin",
+            }},
+            org_id=str(org_id),
+        )
+        async with Session() as s:
+            with pytest.raises(HTTPException) as exc:
+                await revoke_device_credential(dev.id, auth=admin_auth, session=s)
+            assert exc.value.status_code == 404, "admin 이 타인 기기를 폐기했다"
+        # 실제로 살아 있다.
+        async with Session() as s:
+            row = (await s.execute(
+                select(AgentDeviceCredential).where(AgentDeviceCredential.id == dev.id)
+            )).scalar_one()
+            assert row.status == "active" and row.revoked_at is None
+
+        # 본인은 폐기된다(경계의 반대편).
+        async with Session() as s:
+            assert await revoke_device_credential(dev.id, auth=_auth_for(owner_user_id, org_id), session=s) == {"ok": True}
+    finally:
+        await engine.dispose()
