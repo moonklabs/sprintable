@@ -21,17 +21,16 @@ import { channelLabel } from '@/lib/channel-label';
 import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { InsightsBoardMetricCell } from '@/components/insights-board/insights-board-metric-cell';
 import { AdsSpendCell } from '@/components/insights-board/ads-spend-cell';
-import { InsightsBoardCommentsCell } from '@/components/insights-board/insights-board-comments-cell';
 import { FollowUpDialog } from '@/components/insights-board/follow-up-dialog';
 import { ReconcileResultLine } from '@/components/insights-board/reconcile-result-line';
 import { parseInsightsBoardApiError } from '@/components/insights-board/insights-board-error';
 import { ASSET_LABEL_PREFIX_LENGTH, aggregateGroupBucket, groupInsightsBoardRows, type InsightsBoardGroupBy } from '@/components/insights-board/group-rows';
 import { DEFAULT_METRIC, SELECTABLE_METRIC_KEYS, type BoardMetric, type Ga4ConnectionStatus, type InsightsBoardResponse, type InsightsBoardRow, type InsightsBoardWindow } from '@/components/insights-board/types';
 import { PublishingMetricsBand } from '@/components/content/publishing-metrics-band';
-import { OrgCostSummaryCard } from '@/components/insights-board/org-cost-summary-card';
 import { AdsCapCard } from '@/components/insights-board/ads-cap-card';
 import { ResultsSummaryCards } from '@/components/insights-board/results-summary-cards';
 import { InsightsBoardRowDetail } from '@/components/insights-board/insights-board-row-detail';
+import type { OrgCostSummary, OrgCostSummaryLoadState } from '@/components/insights-board/org-cost-summary-card';
 import { deriveFailureAction, type CommandStatus } from '@/components/content/failure-action';
 import { FailureActionBadge } from '@/components/content/failure-action-badge';
 import type { PublishedInWindow, ViewsInWindow } from '@/components/insights-board/types';
@@ -179,9 +178,45 @@ export default function InsightsBoardPage() {
   // (스택 아님)이라 그 PR 머지 순서와 무관하게 옵셔널로 받는다(?? null).
   const [publishedInWindow, setPublishedInWindow] = useState<PublishedInWindow | null>(null);
   const [viewsInWindow, setViewsInWindow] = useState<ViewsInWindow | null>(null);
+  // story #3979 CHANGES(페드루 PO 2026-09-17 01:14Z) — cost-summary는 페이지에서
+  // 딱 1번만 부른다(AC3 첫 화면 콜 수 ≤2 — 요약 카드와 OrgCostSummaryCard가 각자
+  // 부르면 3콜이 된다). 내려 받는 쪽 둘(ResultsSummaryCards·AdsCapCard 안
+  // OrgCostSummaryCard preloadedState)은 이 state만 읽는다.
+  const [costSummaryState, setCostSummaryState] = useState<OrgCostSummaryLoadState>({ status: 'loading' });
+  const loadCostSummary = useCallback(async () => {
+    if (!orgId) return;
+    setCostSummaryState({ status: 'loading' });
+    try {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/insights-board/cost-summary`);
+      if (!res.ok) { setCostSummaryState({ status: 'failed' }); return; }
+      const json = (await res.json().catch(() => null)) as { data?: OrgCostSummary } | null;
+      if (!json?.data) { setCostSummaryState({ status: 'failed' }); return; }
+      setCostSummaryState({ status: 'ok', summary: json.data });
+    } catch {
+      setCostSummaryState({ status: 'failed' });
+    }
+  }, [orgId]);
+  useEffect(() => { void loadCostSummary(); }, [loadCostSummary]);
   // story #3979(자리 옮김 ④) — 표 머리 필터 7종을 접힌 토글 하나로. 기본 접힘(첫
   // 화면은 요약 우선), 안의 마크업은 기존 그대로(무삭제).
-  const [showFilters, setShowFilters] = useState(false);
+  // story #3979 CHANGES(페드루 PO 2026-09-17 01:14Z, 실결함) — URL에 이미 필터가
+  // 걸려 있는데(공유 링크 등) 접힌 채로 열리면 «표는 걸렀는데 화면엔 흔적 0»이
+  // 된다 — 초기값을 URL 파라미터 기준으로 계산한다(showArchived는 URL에 안
+  // 실리는 순수 로컬 state라 이 계산엔 안 낀다, 항상 false로 시작).
+  const [showFilters, setShowFilters] = useState(() =>
+    channelParam !== '' || statusParam !== '' || metricParam !== DEFAULT_METRIC ||
+    sortRoleParam !== DEFAULT_SORT_ROLE || sortDirParam !== DEFAULT_SORT_DIR || groupByParam !== DEFAULT_GROUP_BY,
+  );
+  // story #3979 CHANGES — 토글 라벨에 보일 개수(기본값과 다른 것만 센다).
+  const appliedFilterCount = [
+    channelParam !== '',
+    statusParam !== '',
+    metricParam !== DEFAULT_METRIC,
+    sortRoleParam !== DEFAULT_SORT_ROLE,
+    sortDirParam !== DEFAULT_SORT_DIR,
+    groupByParam !== DEFAULT_GROUP_BY,
+    showArchived,
+  ].filter(Boolean).length;
   // story #3979(자리 옮김 ⑤) — 발행 신뢰도 절, 기본 접힘.
   const [showPublishingTrust, setShowPublishingTrust] = useState(false);
   // story #3979(자리 옮김 ①) — 행 펼침(유입원 자연 D+1/D+7 + 광고비).
@@ -394,32 +429,37 @@ export default function InsightsBoardPage() {
           남은 한도), 채널별 표보다 위. */}
       {orgId ? (
         <ResultsSummaryCards
-          orgId={orgId}
           publishedInWindow={publishedInWindow}
           viewsInWindow={viewsInWindow}
           ga4ConnectionStatus={ga4ConnectionStatus}
+          costSummaryState={costSummaryState}
+          onRetryCostSummary={() => void loadCostSummary()}
         />
       ) : null}
 
-      {/* story #3809(Phase3·3-7 PR 3) — 조직 비용 원장 카드. window/channel/status
-          필터와 무관한 org 전체 스코프(cost-summary API는 쿼리 파라미터가 없다) —
-          아래 표 필터 줄보다 위, 화면의 다른 무엇에도 종속되지 않는 자리. */}
-      {orgId ? <OrgCostSummaryCard orgId={orgId} /> : null}
-      {/* story #3979(자리 옮김 ②) — 일별 paid 지출 시계열은 이제 「광고 상한」 카드
-          펼침 안(기본 접힘, PaidSpendDailySeriesCard 그대로·삭제 0). */}
-      {orgId ? <AdsCapCard orgId={orgId} /> : null}
+      {/* story #3979(자리 옮김 ②) — 일별 paid 지출 시계열 + 조직 비용 원장 카드
+          (OrgCostSummaryCard, CHANGES로 여기 안에 합류·자체 fetch 안 함)는 이제
+          「광고 상한」 카드 펼침 안(기본 접힘, 삭제 0). */}
+      {orgId ? <AdsCapCard orgId={orgId} costSummaryState={costSummaryState} /> : null}
 
       {/* story #3979(자리 옮김 ④) — 필터 7종은 기본 접힘. 토글 안 마크업은 기존
-          그대로(무삭제) — «자리 옮김»이 필터 자체를 지우지 않는다. */}
-      <button
+          그대로(무삭제) — «자리 옮김»이 필터 자체를 지우지 않는다.
+          story #3979 CHANGES(페드루 PO 2026-09-17 01:14Z, 실결함) — 적용된 개수를
+          라벨에 보여 «걸러졌는데 흔적 0»을 막는다(showFilters 초기값 계산과 같은
+          축, showArchived만 별도로 더한다 — 그건 URL에 안 실리지만 실제로 표를
+          거른다). */}
+      <Button
         type="button"
+        variant="outline"
+        size="sm"
         onClick={() => setShowFilters((v) => !v)}
-        className="inline-flex items-center gap-1.5 rounded-[0.5rem] border border-border bg-card px-[10px] py-[7px] text-[12px] text-muted-foreground"
         aria-expanded={showFilters}
         data-testid="insights-board-filters-toggle"
       >
-        {t('filtersToggleLabel')} {showFilters ? t('sectionCollapse') : t('sectionExpand')}
-      </button>
+        {appliedFilterCount > 0
+          ? t('filtersToggleLabelWithCount', { count: appliedFilterCount })
+          : t('filtersToggleLabel')} {showFilters ? t('sectionCollapse') : t('sectionExpand')}
+      </Button>
 
       {/* CSS로만 접는다(React 트리에서 안 뺀다) — 기존 필터 테스트가 패널을 열지
           않고도 querySelector/fireEvent로 바로 상호작용하는 전제를 그대로 지킨다. */}
@@ -599,16 +639,18 @@ export default function InsightsBoardPage() {
                   >
                     {t('columnD7')} {metricLabel}
                   </th>
-                  <th className="px-3 py-2 text-left font-medium">{t('columnComments')}</th>
+                  {/* story #3979 CHANGES(페드루 PO 2026-09-17 01:14Z) — 댓글 열은
+                      행 펼침(상세) 안으로 옮긴다(자리 옮김 ③, 실제로 표가 좁아진다
+                      — columnComments 열 자체를 뺀다, 진짜 삭제가 아니라 InsightsBoardRowDetail
+                      로 이동, 기존 InsightsBoardCommentsCell 컴포넌트는 그대로). */}
                   {/* story #3806(Phase3·3-2 PR5 조각⑥, 유나 §절 §3) — 「광고비」 분리 칸.
                       정렬 대상 아님(§3에 정렬 언급 0 — d1/d7 정렬 축과 별개 개념, 헤더
                       클릭 정렬은 애초 이 화면 전체에서 금지·§21-4). */}
                   <th className="px-3 py-2 text-left font-medium">{t('columnAdsSpend')}</th>
+                  {/* story #3979 CHANGES — 이 열이 이제 배지(있으면)+펼침 토글을 갖는다
+                      (후속 조치·원본과 대조 버튼은 행 상세로 이동, 별도 9번째 열은
+                      만들지 않는다 — 표가 넓어지지 않는다). */}
                   <th className="px-3 py-2 text-left font-medium">{t('columnActions')}</th>
-                  {/* story #3979(자리 옮김 ①) — 새 9번째 열, 기존 8열은 무수정. */}
-                  <th className="px-3 py-2 text-left font-medium">
-                    <span className="sr-only">{t('rowExpandAction')}</span>
-                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -641,7 +683,7 @@ export default function InsightsBoardPage() {
                         ga4ConnectionStatus={ga4ConnectionStatus}
                       />
                     </td>
-                    <td colSpan={4} />
+                    <td colSpan={2} />
                   </tr>
                 ) : null}
                 {group.rows.map((row) => {
@@ -662,7 +704,6 @@ export default function InsightsBoardPage() {
                   // 이 좁은 조인으로도 정확히 그 둘만 걸린다.
                   const rowFailureAction = deriveFailureAction({ commandStatus: row.command_status as CommandStatus | null });
                   const showFailureBadge = rowFailureAction?.kind === 'dead_letter' || rowFailureAction?.kind === 'blocked';
-                  const hasRowActions = canCreateFollowUp || canReconcile;
                   return (
                     <Fragment key={row.publication_id}>
                   <tr
@@ -707,63 +748,23 @@ export default function InsightsBoardPage() {
                         tChannelConnect={tChannelConnect} ga4ConnectionStatus={ga4ConnectionStatus}
                       />
                     </td>
-                    <td className="px-3 py-2.5 text-muted-foreground" data-testid="insights-board-comments-cell">
-                      <InsightsBoardCommentsCell row={row} t={t} />
-                    </td>
                     <td className="px-3 py-2.5" data-testid="insights-board-ads-spend-cell">
                       <AdsSpendCell adsBoost={row.ads_boost} tBoard={t} tContent={tContent} locale={locale} />
                     </td>
+                    {/* story #3979 CHANGES(페드루 PO 2026-09-17 01:14Z) — 댓글·후속
+                        조치·원본과 대조는 진짜로 행 상세(InsightsBoardRowDetail)로
+                        옮겼다(자리 옮김 ①③, 표가 9→7열로 좁아진다). 이 칸엔 이제
+                        배지(있으면)+펼침 토글만 — story #3766의 "행동 없으면 td
+                        완전히 빈다" 불변식은 배지·토글 둘 다 없을 때가 아니라
+                        토글은 항상 있으니 그 불변식 자체가 이 칸엔 더 이상 안
+                        걸린다(그 테스트는 옛 follow-up/reconcile 버튼조합 기준이라
+                        selector 범위를 상세 패널 쪽으로 옮겨 다시 확認한다). */}
                     <td className="px-3 py-2.5">
-                      {/* story #3766(별건 ⑩, 유나 定 — issuecomment 2026-09-10 02:11Z)
-                          — 상태 딱지(FailureActionBadge)는 행동 자리(아래 버튼 div)와
-                          다른 자리를 쓴다: 행동칸에 섞으면 「자리가 뜻을 바꾼다」(PR#4107
-                          별건 ㉓과 동형 클래스 — 소유자 배지가 제거 열에 얹혀 세로로
-                          「소유자/제거/제거」로 읽히던 결함). 물음(왜 막혔나)이 생긴
-                          자리에 답이 있도록 배지가 버튼 줄 «위». 배지 없으면 그 줄
-                          노드 자체가 없다(①, 빈 줄이 gap만 먹지 않게). */}
                       {showFailureBadge && rowFailureAction ? (
                         <div className="mb-1.5 leading-tight">
                           <FailureActionBadge action={rowFailureAction} displayTimezone={displayTimezone} compact />
                         </div>
                       ) : null}
-                      {/* story #3592(§17-20 ⑧·§22-18 동형) — 행마다 같은 「후속 조치」
-                          접근 이름이라 보조기술 버튼 목록에서 어느 행인지 못 가른다.
-                          story #3766 — 버튼 div도 조건부(②, canCreateFollowUp·
-                          canReconcile 둘 다 false면 빈 flex div 자체를 안 남긴다 —
-                          배지가 뜬 행에서 그 빈 자리가 특히 눈에 띄는 걸 막는다). */}
-                      {hasRowActions ? (
-                        <div className="flex flex-wrap gap-1.5">
-                          {canCreateFollowUp ? (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => setFollowUpRow(row)}
-                              data-testid="insights-board-follow-up-button"
-                              aria-label={t('rowActionAriaLabel', { n: index + 1, label: t('followUpAction') })}
-                            >
-                              {t('followUpAction')}
-                            </Button>
-                          ) : null}
-                          {/* story #3620 AC3 — 「원본과 대조」, 진행 中 비활성. */}
-                          {canReconcile ? (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => void handleReconcile(row)}
-                              disabled={reconcile?.status === 'loading'}
-                              data-testid="insights-board-reconcile-button"
-                              aria-label={t('rowActionAriaLabel', { n: index + 1, label: t('reconcileAction') })}
-                            >
-                              {reconcile?.status === 'loading' ? t('reconcileInProgress') : t('reconcileAction')}
-                            </Button>
-                          ) : null}
-                        </div>
-                      ) : null}
-                    </td>
-                    {/* story #3979(자리 옮김 ①) — 전용 9번째 열(Actions 칸엔 안 얹는다,
-                        story #3766의 "행동 없으면 td 완전히 빈다" 불변식과 자리가
-                        다르다 — 배지·행동 자리 문제와 같은 클래스, 별 칸으로 분리). */}
-                    <td className="px-3 py-2.5">
                       <Button
                         size="sm"
                         variant="ghost"
@@ -778,17 +779,21 @@ export default function InsightsBoardPage() {
                   </tr>
                   {expandedRowIds.has(row.publication_id) ? (
                     <tr data-testid="insights-board-row-detail-row">
-                      <td colSpan={9} className="bg-muted/20 px-3 py-2.5">
+                      <td colSpan={7} className="bg-muted/20 px-3 py-2.5">
                         <InsightsBoardRowDetail
                           row={row} tBoard={t} tContent={tContent} tChannelConnect={tChannelConnect}
-                          ga4ConnectionStatus={ga4ConnectionStatus} locale={locale}
+                          ga4ConnectionStatus={ga4ConnectionStatus} locale={locale} rowIndex={index}
+                          canCreateFollowUp={canCreateFollowUp} canReconcile={canReconcile}
+                          onFollowUp={() => setFollowUpRow(row)}
+                          onReconcile={() => void handleReconcile(row)}
+                          reconcileLoading={reconcile?.status === 'loading'}
                         />
                       </td>
                     </tr>
                   ) : null}
                   {reconcile && reconcile.status !== 'loading' ? (
                     <tr data-testid="insights-board-reconcile-result-row">
-                      <td colSpan={9} className="px-3 py-1.5 text-xs">
+                      <td colSpan={7} className="px-3 py-1.5 text-xs">
                         {reconcile.status === 'error' ? (
                           <span className="text-destructive" data-testid="insights-board-reconcile-error">
                             {reconcile.message}
@@ -828,15 +833,16 @@ export default function InsightsBoardPage() {
           때 마운트 자체를 뺀다(불필요한 자체 fetch 방지). */}
       {orgId ? (
         <div>
-          <button
+          <Button
             type="button"
+            variant="outline"
+            size="sm"
             onClick={() => setShowPublishingTrust((v) => !v)}
-            className="inline-flex items-center gap-1.5 rounded-[0.5rem] border border-border bg-card px-[10px] py-[7px] text-[12px] text-muted-foreground"
             aria-expanded={showPublishingTrust}
             data-testid="insights-board-publishing-trust-toggle"
           >
             {t('publishingTrustSectionTitle')} {showPublishingTrust ? t('sectionCollapse') : t('sectionExpand')}
-          </button>
+          </Button>
           {showPublishingTrust ? (
             <div className="mt-3" data-testid="insights-board-publishing-trust-body">
               <PublishingMetricsBand orgId={orgId} window={windowParam} />
