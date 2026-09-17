@@ -368,6 +368,41 @@ describe('InsightsBoardPage — 쿼리 파라미터(story #3503)', () => {
     expect(lastUrl).toContain('metric=inflow_sessions');
   });
 
+  // story #4014 CHANGES(페드루 PO 지적, 2026-09-17) — d1/d7 카드 라벨(<1024)이 표
+  // <th>와 다른 문구를 쓰면(하드코딩 등) 지표를 바꿨을 때 한쪽만 갱신되는 드리프트가
+  // 생긴다. 두 값(views→clicks)으로 갈아끼우며 표·카드 라벨이 매번 같이 바뀌는지 직접
+  // 단언(ResponsiveDataTable 자체는 이미 "header 재사용"을 pin했지만, 이 화면이 실제로
+  // 그 header에 동적 라벨을 올바로 실어 보내는지는 페이지 단에서 별도로 확認해야 한다).
+  it('⭐지표를 바꾸면 표 <th>와 카드 라벨(d1/d7)이 항상 같이 바뀐다(단일 정본 — header 재사용)', async () => {
+    useSearchParamsMock.mockReturnValue(new URLSearchParams('metric=views'));
+    stubFetch({});
+    await mount();
+
+    const viewsLabel = koMessages.content.insightMetricViews;
+    const clicksLabel = koMessages.content.insightMetricClicks;
+
+    const tableD1Th = [...container.querySelectorAll('table th')].find((th) => th.textContent?.includes(viewsLabel));
+    expect(tableD1Th, '표 D1 <th>가 views 라벨을 포함해야 함').not.toBeUndefined();
+    const cardD1Label = [...container.querySelectorAll('[data-testid="responsive-data-table-cards"] p')]
+      .find((p) => p.textContent?.includes(viewsLabel));
+    expect(cardD1Label, '카드 D1 라벨이 views 라벨을 포함해야 함').not.toBeUndefined();
+
+    useSearchParamsMock.mockReturnValue(new URLSearchParams('metric=clicks'));
+    await act(async () => { root.render(wrap(<InsightsBoardPage />)); });
+    await flush();
+
+    // 옛 라벨(views)은 이제 D1/D7 열 자리(표·카드 둘 다)에서 사라지고 clicks로 대체돼야
+    // 한다 — 한쪽만 갱신되면(카드가 하드코딩이었다면) 여기서 잡힌다.
+    const tableD1ThAfter = [...container.querySelectorAll('table th')].find((th) => th.textContent?.includes(clicksLabel));
+    expect(tableD1ThAfter, '지표 전환 뒤 표 D1 <th>가 clicks 라벨로 바뀌어야 함').not.toBeUndefined();
+    const cardD1LabelAfter = [...container.querySelectorAll('[data-testid="responsive-data-table-cards"] p')]
+      .find((p) => p.textContent?.includes(clicksLabel));
+    expect(cardD1LabelAfter, '지표 전환 뒤 카드 D1 라벨이 clicks 라벨로 바뀌어야 함').not.toBeUndefined();
+    const staleCardLabel = [...container.querySelectorAll('[data-testid="responsive-data-table-cards"] p')]
+      .find((p) => p.textContent?.includes(viewsLabel));
+    expect(staleCardLabel, '지표 전환 뒤에도 카드에 옛(views) 라벨이 남아있으면 드리프트').toBeUndefined();
+  });
+
   it('필터/정렬/방향이 이미 걸린 URL로 진입하면 그 값 그대로(+window 항상 포함) fetch 쿼리에 실린다', async () => {
     useSearchParamsMock.mockReturnValue(new URLSearchParams('channel=threads&status=failed&sort=d7&metric=clicks&sort_dir=asc&window=30d'));
     const calls = stubFetch({});
