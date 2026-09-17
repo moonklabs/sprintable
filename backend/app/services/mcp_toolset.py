@@ -386,6 +386,12 @@ _ORG_SCOPED_UNMAPPED_SEGMENTS_WITH_REASON: dict[str, str] = {
     "generation-connectors": "human-only — org credential ledger (write-only credentials, "
                               "org_generation_connectors.py), human role required even for list) "
                               "— not exposed via MCP (same as campaigns/connectors, 3806 ads-boosts)",
+    # story #3953 — org owner-only kill switch (channel_connections.py::
+    # put_external_publish_pause/get). English reason (story #3779 BE Korean
+    # user-string guard — new dict entries go in English instead of grandfather).
+    # No MCP tool exposes this segment (org-wide admin toggle, not a content
+    # read/write surface an agent would call).
+    "external-publish-pause": "no MCP tool/keyword (org owner-only kill switch, admin-type, story 3953)",
 }
 
 

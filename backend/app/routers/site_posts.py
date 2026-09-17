@@ -908,7 +908,10 @@ async def publish_site_post_from_draft_endpoint(
         # 자리에서 예외를 받는다(외부 목적지 분기는 command만 만들고 실제 발행은
         # 워커 몫이라 여기 안 걸린다 — publish_site_post_from_draft 자체 안의 검사가
         # 워커 쪽 경로를 막는다). conversations.py circuit_breaker_open과 같은 결
-        # (일시 차단·423).
+        # (일시 차단·423). FE(api-error.ts EXTERNAL_PUBLISH_PAUSED 엔트리, "reason
+        # 보간 0" 명시 주석)가 이 message를 안 쓰고 정적 labelKey만 렌더한다 —
+        # str(exc)는 중립 코드꼴(external_publish_pause.py, §3779 가드 회피로
+        # Korean 0)이라 그대로 실어도 안전.
         raise HTTPException(
             status_code=423,
             detail={"code": "EXTERNAL_PUBLISH_PAUSED", "message": str(exc)},
