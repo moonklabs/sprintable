@@ -14,6 +14,7 @@ import { SectionCardBody } from '@/components/ui/section-card';
 import { Card } from '@/components/ui/card';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { fetchWithAuth } from '@/lib/db/client';
+import { copyTextSafely } from '@/lib/clipboard';
 import { channelConnectionIdentityLabel, useChannelLabel, channelMarkColor, channelMarkInitials } from '@/lib/channel-label';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
@@ -80,7 +81,11 @@ interface Ga4Property {
 // 인라인 패널을 연다. 재발급(rotate)·설치 검증 UI는 4180f67f 잔여(이 스토리 스코프
 // 밖) — 여기는 「받아서 심는다」까지만.
 function BeaconKeyPanel({ publicKey, t }: { publicKey: string; t: ReturnType<typeof useTranslations> }) {
+  const tc = useTranslations('common');
   const [copied, setCopied] = useState(false);
+  // story #3986(클래스 «거짓 성공 표시») — 옛 코드는 catch에서 아무것도 안 하고도
+  // setCopied(true)를 무조건 실행했다(try 밖).
+  const [copyFailed, setCopyFailed] = useState(false);
   // 페드루 PO REQUIRED①(2026-09-06, #3896 리뷰) — window.location.origin은 이
   // 대시보드(FE) 호스트다. 고객이 그대로 복사하면 없는 경로로 beacon을 쏜다 —
   // 정본은 sprintable-landing의 view-beacon.tsx가 실제로 쓰는 BE 베이스
@@ -90,11 +95,12 @@ function BeaconKeyPanel({ publicKey, t }: { publicKey: string; t: ReturnType<typ
   const snippet = `fetch('${backendBase}/api/v2/public/pageview', {\n  method: 'POST',\n  keepalive: true,\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify({\n    public_key: '${publicKey}',\n    path: location.pathname,\n    referrer: document.referrer || null,\n    utm_source: new URLSearchParams(location.search).get('utm_source'),\n    utm_medium: new URLSearchParams(location.search).get('utm_medium'),\n    utm_campaign: new URLSearchParams(location.search).get('utm_campaign'),\n    utm_content: new URLSearchParams(location.search).get('utm_content'),\n  }),\n});`;
 
   const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(publicKey);
-    } catch {
-      // clipboard 실패는 조용히 무시(복사 버튼 재클릭으로 재시도 가능).
+    const result = await copyTextSafely(publicKey);
+    if (!result.ok) {
+      setCopyFailed(true);
+      return;
     }
+    setCopyFailed(false);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -109,6 +115,9 @@ function BeaconKeyPanel({ publicKey, t }: { publicKey: string; t: ReturnType<typ
             {copied ? t('measurementBeaconKeyCopied') : t('measurementBeaconKeyCopyAction')}
           </Button>
         </div>
+        {/* story #3986 — publicKey는 위 <code>에 이미 선택 가능하게 떠 있어
+            별도 노출 블록은 불요, 실패 문구만. */}
+        {copyFailed ? <p role="alert" className="text-xs text-destructive">{tc('copyFailedSelectManually')}</p> : null}
       </div>
       <div className="space-y-1">
         <p className="text-xs font-medium text-muted-foreground">{t('measurementBeaconSnippetLabel')}</p>

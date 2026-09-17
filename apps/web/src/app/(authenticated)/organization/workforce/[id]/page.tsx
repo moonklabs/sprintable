@@ -32,6 +32,7 @@ import {
 
 import { fetchWithAuth } from '@/lib/db/client';
 import { resolveRoleLabel } from '@/app/(authenticated)/organization/trust/trust-utils';
+import { copyTextSafely } from '@/lib/clipboard';
 
 /** 런타임 상태(6종 중 ①~⑤) → 배지·헬퍼 표현. ⑥(드롭다운 dot)은 AC 범위 외(§11). */
 const RUNTIME_STATUS_UI: Record<
@@ -307,13 +308,15 @@ export default function AgentDetailPage() {
   // server.ts 참고). 복사할 것은 접속 URL이 아니라 그 에이전트의 런치 셸 export 한 줄이다.
   const handleCopyFakechatEnvKey = async () => {
     if (!freshApiKey) return;
-    try {
-      await navigator.clipboard.writeText(`export SPRINTABLE_API_KEY=${freshApiKey}`);
-      setFakechatEnvKeyCopied(true);
-      setTimeout(() => setFakechatEnvKeyCopied(false), 2000);
-    } catch {
-      addToast({ type: 'error', title: tc('error') });
+    const result = await copyTextSafely(`export SPRINTABLE_API_KEY=${freshApiKey}`);
+    if (!result.ok) {
+      // story #3986(클래스 «거짓 성공 표시») — 공용 헬퍼로 일반화(발명 0), 낱말도
+      // 일반 오류(tc('error'))에서 "직접 선택" 정본으로 정정.
+      addToast({ type: 'error', title: tc('copyFailedSelectManually') });
+      return;
     }
+    setFakechatEnvKeyCopied(true);
+    setTimeout(() => setFakechatEnvKeyCopied(false), 2000);
   };
 
   if (loading) {

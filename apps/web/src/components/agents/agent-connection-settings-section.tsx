@@ -8,6 +8,7 @@ import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui
 import { cn } from '@/lib/utils';
 import { fetchWithAuth } from '@/lib/db/client';
 import { HighlightedJson, inferTransport, renderArtifact, type Transport } from '@/app/onboarding/connect-step';
+import { copyTextSafely } from '@/lib/clipboard';
 
 interface ArtifactFile {
   filename: string;
@@ -37,6 +38,7 @@ interface AgentConnectionSettingsSectionProps {
 export function AgentConnectionSettingsSection({ agentId, freshApiKey }: AgentConnectionSettingsSectionProps) {
   const t = useTranslations('settings');
   const to = useTranslations('onboarding');
+  const tc = useTranslations('common');
 
   const [files, setFiles] = useState<ArtifactFile[] | null>(null);
   const [transport, setTransport] = useState<Transport | null>(null);
@@ -44,6 +46,9 @@ export function AgentConnectionSettingsSection({ agentId, freshApiKey }: AgentCo
   const [error, setError] = useState(false);
   const [hostedUnavailable, setHostedUnavailable] = useState(false);
   const [copied, setCopied] = useState(false);
+  // story #3986(클래스 «거짓 성공 표시») — 옛 코드는 실패를 삼키고 아무 표시도
+  // 안 했다(성공 표시는 안 됐지만 실패 안내도 없어 사용자가 원인을 모른다).
+  const [copyFailed, setCopyFailed] = useState(false);
 
   const fetchArtifact = useCallback(async (reqTransport?: Transport) => {
     setError(false);
@@ -93,13 +98,14 @@ export function AgentConnectionSettingsSection({ agentId, freshApiKey }: AgentCo
     if (!displayConfig) return;
     const toCopy = freshApiKey ? renderArtifact(mcpFile?.content ?? null, freshApiKey, false) : displayConfig;
     if (!toCopy) return;
-    try {
-      await navigator.clipboard.writeText(toCopy);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // ignore clipboard failure
+    const result = await copyTextSafely(toCopy);
+    if (!result.ok) {
+      setCopyFailed(true);
+      return;
     }
+    setCopyFailed(false);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   };
 
   return (
@@ -158,6 +164,25 @@ export function AgentConnectionSettingsSection({ agentId, freshApiKey }: AgentCo
             <pre className="overflow-x-auto bg-muted/40 p-3 text-xs leading-relaxed">
               <code className="font-mono">{displayConfig ? <HighlightedJson text={displayConfig} /> : null}</code>
             </pre>
+            {/* story #3986 — 실패 시 freshApiKey가 있으면 화면엔 마스킹판만
+                있어 클립보드용 실 config와 다르다 — 선택 가능한 실 config를
+                노출한다(유나 지시 — 별도 안내 줄은 안 만든다, 실패 문구가
+                이미 지시). */}
+            {copyFailed ? (
+              <div className="space-y-1.5 border-t border-border p-3">
+                <p role="alert" className="text-xs text-destructive">{tc('copyFailedSelectManually')}</p>
+                {freshApiKey ? (
+                  <textarea
+                    readOnly
+                    value={renderArtifact(mcpFile?.content ?? null, freshApiKey, false) ?? ''}
+                    onFocus={(e) => e.currentTarget.select()}
+                    className="w-full resize-none rounded border border-border bg-background p-2 font-mono text-xs text-foreground"
+                    rows={4}
+                    data-testid="agent-connection-settings-copy-failed-raw-config"
+                  />
+                ) : null}
+              </div>
+            ) : null}
           </div>
         ) : null}
 

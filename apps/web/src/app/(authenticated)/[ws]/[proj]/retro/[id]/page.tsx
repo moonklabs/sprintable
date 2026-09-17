@@ -35,6 +35,7 @@ import { SprintCloseCockpit } from '@/components/retro/sprint-close-cockpit';
 import { EvidenceStrip } from '@/components/retro/evidence-strip';
 import { Skeleton } from '@/components/ui/skeleton';
 import { fetchWithAuth } from '@/lib/db/client';
+import { copyTextSafely } from '@/lib/clipboard';
 
 type RetroItemCategory = 'good' | 'bad' | 'improve';
 type VisibleStage = RetroVisibleStage;
@@ -552,7 +553,10 @@ export default function RetroSessionPage() {
       // 동형 신규 1키.
       if (!res.ok) { addToast({ title: t('exportFailed'), type: 'error' }); return; }
       const json = await res.json() as { data: { markdown: string } };
-      await navigator.clipboard.writeText(json.data.markdown);
+      // story #3986(클래스 «거짓 성공 표시») — export 자체(fetch)와 클립보드 복사는
+      // 다른 실패축이다. 공용 헬퍼로 클립보드만 정직하게 갈라 정본 문구로 알린다.
+      const result = await copyTextSafely(json.data.markdown);
+      if (!result.ok) { addToast({ title: tc('copyFailedSelectManually'), type: 'error' }); return; }
       addToast({ title: t('exportCopied'), type: 'success' });
     } catch {
       addToast({ title: t('exportFailed'), type: 'error' });

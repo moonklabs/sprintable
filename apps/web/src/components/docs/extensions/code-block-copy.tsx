@@ -12,6 +12,7 @@ import {
   LANGUAGE_LABELS,
 } from '../lib/shiki-highlighter';
 import { renderMermaid } from '../lib/mermaid-renderer';
+import { copyTextSafely } from '@/lib/clipboard';
 
 // ─── Mermaid Block ───────────────────────────────────────────────────────────
 
@@ -100,6 +101,9 @@ function ShikiBlockView({ node, editor, selected }: ReactNodeViewProps) {
   // story #3776(1층B) — "복사됨"/"복사", docs ns의 기존 codeCopied/codeCopy 키 재사용.
   const t = useTranslations('docs');
   const [copied, setCopied] = useState(false);
+  // story #3986(클래스 «거짓 성공 표시») — 옛 코드는 실패해도 무조건 setCopied
+  // (true)였다. 코드 자체는 이 블록에 이미 선택 가능하게 떠 있다.
+  const [copyFailed, setCopyFailed] = useState(false);
   const [highlightedHtml, setHighlightedHtml] = useState('');
   const [showLangMenu, setShowLangMenu] = useState(false);
   const langMenuRef = useRef<HTMLDivElement>(null);
@@ -129,11 +133,13 @@ function ShikiBlockView({ node, editor, selected }: ReactNodeViewProps) {
   }, [code, resolvedLang]);
 
   const handleCopy = useCallback(async () => {
-    try {
-      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(code);
-      }
-    } catch { /* clipboard unavailable */ }
+    const result = await copyTextSafely(code);
+    if (!result.ok) {
+      setCopyFailed(true);
+      window.setTimeout(() => setCopyFailed(false), 1600);
+      return;
+    }
+    setCopyFailed(false);
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1600);
   }, [code]);
@@ -198,7 +204,7 @@ function ShikiBlockView({ node, editor, selected }: ReactNodeViewProps) {
             onClick={handleCopy}
             className="rounded-md border border-border bg-card px-3 py-1.5 text-[11px] font-medium text-muted-foreground transition hover:text-foreground"
           >
-            {copied ? t('codeCopied') : t('codeCopy')}
+            {copyFailed ? t('codeCopyFailed') : copied ? t('codeCopied') : t('codeCopy')}
           </button>
         </div>
 
