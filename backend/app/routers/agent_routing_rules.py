@@ -43,6 +43,22 @@ def _get_org_project(auth: AuthContext) -> tuple[uuid.UUID | None, uuid.UUID | N
     return uuid.UUID(str(org_id_str)), uuid.UUID(str(project_id_str))
 
 
+async def _assert_owns_or_is_target_agent(
+    agent_id: uuid.UUID, session: AsyncSession, org_id: uuid.UUID, current_user_id: uuid.UUID,
+) -> None:
+    """story #4000(보안 감사, PO CHANGES 정정) — `assert_agent_owner`(공용 가드, api_keys.py·
+    agent_message_policy.py·team_members.py 등 다른 라우터도 씀)에 자기소유 예외를 넣으면 그
+    라우터들까지 전부 넓어진다(에이전트가 자기 새 API 키를 스스로 발급하거나 자기 메시지
+    정책을 스스로 해제할 수 있게 됨 — PO 실측 적발). 이 예외는 agent_routing_rules.py에서만
+    필요하다(enforce_write_scope 상단 docstring이 이미 "이 6라우트는 API-key/agent 자기서비스
+    축이 있다"고 명시 — f0c99070/d764522c 실DB 테스트가 agent-as-caller로 자기 라우팅 규칙을
+    끄는 시나리오를 검증). 그래서 공용 함수는 원래대로 두고, 이 파일 로컬 래퍼에만 자기소유
+    예외를 둔다."""
+    if agent_id == current_user_id:
+        return
+    await assert_agent_owner(agent_id, session, org_id, current_user_id)
+
+
 async def _assert_owns_all_agents(
     session: AsyncSession, org_id: uuid.UUID, current_user_id: uuid.UUID, agent_ids: set[uuid.UUID],
 ) -> None:
@@ -51,7 +67,7 @@ async def _assert_owns_all_agents(
     「내가 소유/관리하지 않는 agent가 하나라도 섞이면 전체 거부」(부분 성공 없음 —
     disable_all/reorder 같은 벌크 API 계약 자체가 "전부 아니면 전무"다)."""
     for agent_id in agent_ids:
-        await assert_agent_owner(agent_id, session, org_id, current_user_id)
+        await _assert_owns_or_is_target_agent(agent_id, session, org_id, current_user_id)
 
 
 @router.get("")
@@ -88,8 +104,8 @@ async def create_rule(
         return _err("FORBIDDEN", "org_id required", 403)
     # story #4000(보안 감사) — enforce_write_scope는 호출자의 프로젝트 쓰기 권한만 보고
     # 대상 agent 소유권은 안 본다 — 남의 agent에 라우팅 규칙(어느 이벤트에 응답할지)을
-    # 붙일 수 있었다.
-    await assert_agent_owner(body.agent_id, repo.session, org_id, uuid.UUID(auth.user_id))
+    # 붙일 수 있었다(자기소유 예외는 이 파일 로컬 래퍼 참고).
+    await _assert_owns_or_is_target_agent(body.agent_id, repo.session, org_id, uuid.UUID(auth.user_id))
     try:
         # story #3370 회귀 클래스(페드루 PO 지시 2026-09-11) — actor_id는
         # AgentRoutingRule.created_by로 영속된다. resolve_member_db_verified()의
@@ -204,11 +220,11 @@ async def replace_or_update_rules(
         )
     req_update = UpdateRoutingRuleRequest.model_validate(body)
     # story #4000(보안 감사) — 이 분기는 rule id만으로 org/project 스코프만 보고
-    # 소유권 검사가 없었다. 대상 규칙의 agent_id를 먼저 찾아 소유자/admin만 통과.
+    # 소유권 검사가 없었다. 대상 규칙의 agent_id를 먼저 찾아 소유자/admin/자기서비스만 통과.
     existing_rule = await repo.get(req_update.id, org_id, project_id)
     if existing_rule is None:
         return _err("NOT_FOUND", "Routing rule not found", 404)
-    await assert_agent_owner(existing_rule.agent_id, repo.session, org_id, uuid.UUID(auth.user_id))
+    await _assert_owns_or_is_target_agent(existing_rule.agent_id, repo.session, org_id, uuid.UUID(auth.user_id))
     try:
         rule = await repo.update(
             req_update.id,
@@ -318,7 +334,7 @@ async def delete_rule(
     existing_rule = await repo.get(id, org_id, project_id)
     if existing_rule is None:
         return _err("NOT_FOUND", "Routing rule not found", 404)
-    await assert_agent_owner(existing_rule.agent_id, repo.session, org_id, uuid.UUID(auth.user_id))
+    await _assert_owns_or_is_target_agent(existing_rule.agent_id, repo.session, org_id, uuid.UUID(auth.user_id))
     ok = await repo.delete(id, org_id, project_id)
     if not ok:
         return _err("NOT_FOUND", "Routing rule not found", 404)
