@@ -334,12 +334,8 @@ class AgentPersonaRepository:
 
     async def seed_builtin(self, org_id: uuid.UUID, project_id: uuid.UUID, agent_id: uuid.UUID) -> dict:
         from sqlalchemy import text
-        # story #4000 그라운딩 중 발견(기존 버그, 인가와 무관) — `:name::uuid`(공백 없는 콜론+
-        # 캐스트)는 SQLAlchemy 2.0 text()의 bind-param 파서가 asyncpg 드라이버 하에서 오파싱해
-        # 원문 그대로 asyncpg에 보내버려 "syntax error at or near ':'"로 실호출자(성공 경로
-        # 포함) 전원이 500을 맞는다 — 실측 재현(space 삽입 시 정상) 후 즉시 수정.
         await self.session.execute(
-            text("SELECT seed_builtin_personas(:org_id ::uuid, :project_id ::uuid, :agent_id ::uuid)"),
+            text("SELECT seed_builtin_personas(:org_id::uuid, :project_id::uuid, :agent_id::uuid)"),
             {"org_id": str(org_id), "project_id": str(project_id), "agent_id": str(agent_id)},
         )
         await self.session.flush()

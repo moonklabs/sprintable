@@ -39,13 +39,6 @@ async def assert_agent_owner(
     agent = result.scalar_one_or_none()
     if agent is None:
         raise HTTPException(status_code=404, detail="Agent not found")
-    # story #4000 그라운딩 중 발견(f0c99070/test_d764522c 실DB 회귀로 실측) — 이 코드베이스
-    # 전역에서 agent는 자기 자신의 API 키로 인증해 스스로 API를 호출하는 게 정상 패턴이다
-    # (`user_id`가 agent 자신의 member id인 AuthContext, 수십 개 realdb 테스트가 이 패턴을
-    # 씀 — 휴먼 전용이 아님). 자기 자신을 대상으로 한 호출까지 막으면 자기소유 아닌 것으로
-    # 오판정돼 agent 자기서비스(예: 자기 라우팅 규칙 disable_all)가 전부 403 난다.
-    if agent_id == current_user_id:
-        return agent
     if agent.created_by == current_user_id:
         return agent
     if await _is_org_admin(session, org_id, current_user_id):

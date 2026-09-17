@@ -704,3 +704,69 @@ async def test_session_transition_attacker_403_owner_200():
             _clear_overrides()
     finally:
         await scenario["engine"].dispose()
+
+
+# ============================================================================
+# 고정 회귀 — 공용 assert_agent_owner(ownership.py)엔 자기소유 예외가 없어야 한다
+# ============================================================================
+
+
+@pytest.mark.anyio
+async def test_agent_self_service_still_blocked_on_shared_ownership_routes():
+    """PO CHANGES 정정(2026-09-17) 실측 고정 — 초안에서 `assert_agent_owner`(공용, api_keys.py·
+    agent_message_policy.py·agents.py·team_members.py도 같이 쓰는 함수) 안에 `agent_id ==
+    current_user_id` 자기소유 예외를 넣었다가, 그게 이 라우트들까지 전부 넓혀서(에이전트가
+    자기 자신의 API 키로 인증해 스스로에게 새 API 키를 발급하거나 자기 메시지 정책을 스스로
+    org_wide로 풀 수 있게 됨) PO가 실측 적발. 자기서비스 예외는 agent_routing_rules.py 로컬
+    래퍼(`_assert_owns_or_is_target_agent`)에만 있어야 한다 — 공용 함수 자체는 무예외.
+
+    뮤테이션 self-check(수동 재현·원복 완료, PR 코멘트 기록): `ownership.py::assert_agent_owner`
+    안에 `if agent_id == current_user_id: return agent`를 되넣으면 이 테스트의 두 assert가
+    모두 403→2xx로 뒤집혀 RED가 된다."""
+    scenario = await _build_scenario()
+    try:
+        from app.dependencies.auth import AuthContext, get_current_user
+        from app.main import app
+        from tests.conftest import override_db_and_read
+
+        async def _db():
+            async with scenario["Session"]() as s:
+                try:
+                    yield s
+                    await s.commit()
+                except Exception:
+                    await s.rollback()
+                    raise
+
+        async def _auth_as_agent_itself():
+            # agent가 자기 자신의 API 키로 인증해 스스로를 호출하는 축(코드베이스 전역 관례) —
+            # user_id가 human의 users.id가 아니라 agent 자신의 member id.
+            return AuthContext(
+                user_id=str(scenario["agent_id"]), email=None,
+                claims={
+                    "app_metadata": {
+                        "org_id": str(scenario["org_id"]), "project_id": str(scenario["project_id"]),
+                    },
+                },
+            )
+
+        override_db_and_read(app, _db)
+        app.dependency_overrides[get_current_user] = _auth_as_agent_itself
+        client = _client_for(app)
+        try:
+            resp = await client.post(
+                f"/api/v2/agents/{scenario['agent_id']}/api-keys",
+                json={"scope": ["read", "write"], "expires_at": None},
+            )
+            assert resp.status_code == 403, resp.text
+
+            resp2 = await client.put(
+                f"/api/v2/agents/{scenario['agent_id']}/message-policy",
+                json={"mode": "org_wide"},
+            )
+            assert resp2.status_code == 403, resp2.text
+        finally:
+            await client.aclose()
+            _clear_overrides()
+    finally:
+        await scenario["engine"].dispose()
