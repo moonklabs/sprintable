@@ -21,7 +21,9 @@ vi.mock('next/navigation', () => ({
   useRouter: () => routerMock,
 }));
 
-vi.mock('@/components/agents/agent-api-key-manager', () => ({ AgentApiKeyManager: () => null }));
+vi.mock('@/components/agents/agent-api-key-manager', () => ({
+  AgentApiKeyManager: () => <div data-testid="stub-agent-api-key-manager" />,
+}));
 vi.mock('@/components/agents/agent-connection-settings-section', () => ({ AgentConnectionSettingsSection: () => null }));
 vi.mock('@/components/agents/messaging-policy-section', () => ({ MessagingPolicySection: () => null }));
 vi.mock('@/components/shared/avatar-edit-card', () => ({ AvatarEditCard: () => null }));
@@ -61,10 +63,10 @@ const AGENT = {
   is_active: true, webhook_url: null, created_by: 'human-1', fakechat_port: null, runtime_type: 'claude-code',
 };
 
-function stubFetch(opts: { meReject?: boolean } = {}) {
+function stubFetch(opts: { meReject?: boolean; agent?: typeof AGENT } = {}) {
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
     if (typeof url !== 'string') return { ok: false, json: async () => null };
-    if (url === '/api/team-members/agent-1') return { ok: true, json: async () => ({ data: AGENT }) };
+    if (url === '/api/team-members/agent-1') return { ok: true, json: async () => ({ data: opts.agent ?? AGENT }) };
     if (url.startsWith('/api/agents/') && url.endsWith('/api-key')) return { ok: true, json: async () => ({ data: [] }) };
     if (url === '/api/projects') return { ok: true, json: async () => ({ data: [{ id: 'p1', name: '프로젝트 A' }, { id: 'p2', name: '프로젝트 B' }] }) };
     if (url === '/api/me') {
@@ -128,5 +130,26 @@ describe('AgentDetailPage — story #4129 런타임 신원 1줄 + 재기동 배�
     await mount();
     expect(container.textContent).not.toContain('런타임 v');
     expect(container.textContent).not.toContain('세션 시작');
+  });
+});
+
+// story #3994 CHANGES-1(페드루 PO 판정 2026-09-17) — 이 상세 화면이 에이전트 종류
+// 구분 없이 AgentApiKeyManager(키 발급)를 그려, 「시스템 발행」에도 키를 발급할 수
+// 있는 모양이었다(발급된 키로 고객 에이전트가 그 이름을 사칭해 메시지를 보낼 수
+// 있는 실 문제). 목록과 같은 중립 설명 1줄로 대체.
+describe('AgentDetailPage — 시스템 발행 키 관리 숨김(story #3994 CHANGES-1)', () => {
+  it('⭐일반 에이전트(claude-code) — 키 관리 영역이 그대로 뜬다(회귀 0)', async () => {
+    stubFetch({ agent: { ...AGENT, runtime_type: 'claude-code' } });
+    await mount();
+    expect(container.querySelector('[data-testid="stub-agent-api-key-manager"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="agent-detail-system-publisher-notice"]')).toBeNull();
+  });
+
+  it('⭐「시스템 발행」(runtime_type=system-publisher) — 키 관리 영역 0, 중립 설명 1줄로 대체', async () => {
+    stubFetch({ agent: { ...AGENT, name: '시스템 발행', runtime_type: 'system-publisher' } });
+    await mount();
+    expect(container.querySelector('[data-testid="stub-agent-api-key-manager"]')).toBeNull();
+    const notice = container.querySelector('[data-testid="agent-detail-system-publisher-notice"]');
+    expect(notice?.textContent).toBe('Sprintable이 자동으로 남기는 알림·기록의 보낸 이예요 — 따로 연결하지 않아도 돼요.');
   });
 });
