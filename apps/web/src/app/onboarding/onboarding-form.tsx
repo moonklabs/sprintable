@@ -69,9 +69,15 @@ const STEPS: Step[] = ['org', 'project', 'agent', 'connect'];
 interface OnboardingFormProps {
   initialStep?: Step;
   initialOrgId?: string;
+  // story #4017 CHANGES 2(페드루 PO 지적, 2026-09-17 15:44Z/15:56Z) — 이 컴포넌트는
+  // client라 process.env를 못 읽는다. 부모 page.tsx(서버)가
+  // resolveChatsHref(readNavV3FlagsFromEnv())로 구해 prop으로 내려준다. 필수로 둬서
+  // (기본값 없음) 호출부가 빠뜨리면 타입 에러로 즉시 걸린다 — 가드 예외(리터럴 기본값)도
+  // 이걸로 사라진다.
+  chatsHref: string;
 }
 
-export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProps = {}) {
+export function OnboardingForm({ initialStep, initialOrgId, chatsHref }: OnboardingFormProps) {
   const t = useTranslations('onboarding');
   const tc = useTranslations('common');
 
@@ -278,7 +284,7 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
   // 그 후 refresh로 새 JWT(sp_at)에 org_id 반영해야 보드/스토리 등 앱 전반 API가 차단되지 않는다.
   const finishToHome = async () => {
     await fetch('/api/auth/refresh', { method: 'POST' }).catch(() => null);
-    window.location.href = '/chats';
+    window.location.href = chatsHref;
   };
 
   const handleCreateProject = async () => {

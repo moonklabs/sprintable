@@ -33,7 +33,7 @@ async function mountAndAccept(fetchImpl: () => Promise<unknown>) {
   await act(async () => {
     root.render(
       <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
-        <InviteAcceptClient token="tok-1" orgName="뭉클랩" role="member" email="a@b.com" projects={[]} />
+        <InviteAcceptClient token="tok-1" orgName="뭉클랩" role="member" email="a@b.com" projects={[]} chatsHref="/chats" />
       </NextIntlClientProvider>,
     );
   });

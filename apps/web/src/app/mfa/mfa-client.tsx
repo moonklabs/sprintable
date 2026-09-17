@@ -1,0 +1,94 @@
+'use client';
+
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { SprintableLogo } from '@/components/brand/sprintable-logo';
+
+interface MfaClientProps {
+  // story #4017 CHANGES 2(페드루 PO 지적, 2026-09-17 15:44Z/15:56Z) — 이 컴포넌트는
+  // client라 process.env를 못 읽는다. 부모 page.tsx(서버)가
+  // resolveChatsHref(readNavV3FlagsFromEnv())로 구해 prop으로 내려준다. 필수로 둬서
+  // (기본값 없음) 호출부가 빠뜨리면 타입 에러로 즉시 걸린다 — 가드 예외(리터럴 기본값)도
+  // 이걸로 사라진다.
+  chatsHref: string;
+}
+
+export function MfaClient({ chatsHref }: MfaClientProps) {
+  const router = useRouter();
+  const [code, setCode] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const handleVerify = async () => {
+    if (!code.trim()) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/auth/2fa/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: code.trim() }),
+      });
+      const json = await res.json() as { data?: { ok: boolean }; error?: { code?: string; message: string } };
+      if (!res.ok || !json.data?.ok) {
+        // story #2484 — code로 분기(backend auth.py totp_verify()가 _err()로 직접 발급하는
+        // 안정 값). 알려지지 않은 code만 안전 폴백(raw message 미노출). ⚠️이 라우트는
+        // 현재 앱 내 어떤 링크·리다이렉트도 가리키지 않는 고아 경로로 그라운딩됨(#2484) —
+        // 동작 검증 실익이 낮지만 요청 스코프대로 동일 원칙 적용.
+        // ⚠️Phase2 i18n·#2485 — 이 페이지 전체(제목·라벨·버튼 포함)가 next-intl 미배선이라
+        // 아래 문구도 자체 하드코딩 영문이다(raw 서버 누수는 아님·i18n 완성도 축). #2484는
+        // "raw 서버 노출 제거"만 스코프라 여기서 전면 i18n 전환은 안 함 — 유나 design 확認.
+        if (json.error?.code === 'USER_NOT_FOUND') {
+          setError('We could not find your account. Please sign in again.');
+        } else if (json.error?.code === 'TOTP_NOT_SETUP') {
+          setError('Two-factor authentication has not been set up yet.');
+        } else if (json.error?.code === 'INVALID_TOTP') {
+          setError('That code did not match. Please try again.');
+        } else {
+          setError('Invalid verification code. Please try again.');
+        }
+        return;
+      }
+      router.push(chatsHref); // story #3179(S3c) — /dashboard 폐합, 홈=chat 재조준. story #4017 CHANGES 2 — 목적지 모듈 경유.
+    } catch {
+      setError('Verification failed. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-muted">
+      <div className="w-full max-w-sm space-y-6 rounded-2xl bg-background p-4 shadow-lg sm:p-8">
+        <div className="flex flex-col items-center gap-3 text-center">
+          <SprintableLogo variant="stacked" className="text-foreground" markClassName="h-14" wordmarkClassName="h-5" />
+          <h1 className="text-lg font-semibold text-foreground">Two-Factor Authentication</h1>
+          <p className="text-sm text-muted-foreground">Enter the 6-digit code from your authenticator app.</p>
+        </div>
+        <div className="space-y-3">
+          <input
+            type="text"
+            inputMode="numeric"
+            maxLength={6}
+            placeholder="000000"
+            className="w-full rounded-lg border border-border px-4 py-3 text-center text-xl font-mono tracking-widest text-foreground focus:outline-none focus:ring-2 focus:ring-brand"
+            value={code}
+            onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+            onKeyDown={(e) => e.key === 'Enter' && handleVerify()}
+            autoFocus
+          />
+          {/* story #2105 2차 — handleVerify가 재시도 전 setError(null)을 먼저 호출해(위 정의)
+              매 시도마다 언마운트→리마운트된다(#2096/#2105 1차와 동일 원칙). */}
+          {error && <p role="alert" aria-live="assertive" aria-atomic="true" className="text-sm text-destructive">{error}</p>}
+          <button
+            onClick={handleVerify}
+            disabled={loading || code.length !== 6}
+            className="w-full rounded-lg bg-brand px-4 py-3 text-sm font-medium text-brand-foreground transition hover:bg-brand/90 disabled:opacity-50"
+          >
+            {loading ? 'Verifying...' : 'Verify'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import { MoreHorizontal } from 'lucide-react';
-import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { useChatsHref, useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -94,6 +94,8 @@ function toStatusTab(status: string | undefined): Exclude<StatusTab, 'all'> {
 
 export default function ContentPostListPage() {
   const { orgId } = useDashboardContext();
+  // story #4017(PO 확定 2026-09-17) — 아래 대화 CTA(/chats)를 목적지 모듈로.
+  const chatsHref = useChatsHref();
   const t = useTranslations('content');
   // story #3744(페드루 스티어 2026-09-09) — 부분 상태 문구는 board.tasksPartialCount
   // (「{total}개 중 {loaded}개 표시 중」, story-detail-panel.tsx 선례)를 재사용한다.
@@ -220,7 +222,7 @@ export default function ContentPostListPage() {
 
   const chatAction = (
     <Button asChild variant="hero">
-      <Link href="/chats">{t('openChatCta')}</Link>
+      <Link href={chatsHref}>{t('openChatCta')}</Link>
     </Button>
   );
 

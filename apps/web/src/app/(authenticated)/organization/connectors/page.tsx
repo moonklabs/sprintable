@@ -1,9 +1,14 @@
 import { redirect } from 'next/navigation';
+import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
+import { resolveConnectRulesHref } from '@/lib/nav-v3-destinations';
 
 // story #3743(UI 재설계 ③, 페드루 PO 決 2026-09-09) — 이 화면(4180f67f)의 정보(커넥터
 // 준비 상태)가 organization/channels의 「담당 에이전트가 설정하는 것」 구획으로 흡수됐다
 // (agent-setup-section.tsx). 라우트 자체는 남겨 리다이렉트만 한다 — 북마크·딥링크·아직
 // 못 걷은 외부 참조(agent 스킬 안내 문구 등)가 있을 수 있어 404보다 안전하다.
+// story #4017 CHANGES 2(페드루 PO 지적, 2026-09-17 15:31Z) — env 읽기는
+// readNavV3FlagsFromEnv() 한 곳으로, 목적지 문자열은 resolveConnectRulesHref() 한
+// 곳으로만 — 여기서 '/connect-rules' 리터럴을 다시 조립하지 않는다.
 export default function OrganizationConnectorsRedirectPage() {
-  redirect('/organization/channels');
+  redirect(resolveConnectRulesHref(readNavV3FlagsFromEnv(), '/organization/channels'));
 }
