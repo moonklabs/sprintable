@@ -8,6 +8,7 @@ import { useMe } from './use-me';
 import { ChatV3ThreadRail, type ChatV3Thread } from './chat-v3-thread-rail';
 import { ChatV3Messages } from './chat-v3-messages';
 import { ChatV3ContextPanel } from './chat-v3-context-panel';
+import { useTodaySnapshot } from '@/components/org-briefing/use-today-snapshot';
 
 /**
  * story #3972(E-UX-OVERHAUL·「대화」 구현 2/N·FE) — 시안 ②(artifact c707a913)
@@ -23,7 +24,11 @@ import { ChatV3ContextPanel } from './chat-v3-context-panel';
 export function ChatV3Screen() {
   const t = useTranslations('chatV3');
   const locale = useLocale();
-  const me = useMe();
+  const { me, error: meError } = useMe();
+  // 페드루 PO 지시(2026-09-17 00:08Z, PR #4370 CHANGES) — 오늘 스냅샷은 여기서
+  // 1콜만(맥락 패널 「관련」·이벤트 카드 「서명」 막다른 길 방지 둘 다 이 캐시 공유).
+  const { data: todaySnapshot } = useTodaySnapshot();
+  const needsMe = todaySnapshot?.needsMe ?? [];
   const [threads, setThreads] = useState<ChatV3Thread[] | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -32,7 +37,13 @@ export function ChatV3Screen() {
   useEffect(() => {
     if (!me) return;
     let cancelled = false;
-    fetchWithAuth(`/api/conversations?project_id=${encodeURIComponent(me.projectId)}&include_agent_conversations=true`)
+    // 페드루 PO CHANGES C1(2026-09-17 00:04Z, PR #4370) — include_agent_conversations=true는
+    // owner/admin 전용(conversations.py:1462-1467, 그 외 role은 403) — role 무관하게 항상
+    // 붙이면 비-admin에게 화면 전체가 "불러오지 못했어요"로 죽는다. role 조건부로만 붙인다.
+    const includeAgentConversations = me.role === 'owner' || me.role === 'admin';
+    const params = new URLSearchParams({ project_id: me.projectId });
+    if (includeAgentConversations) params.set('include_agent_conversations', 'true');
+    fetchWithAuth(`/api/conversations?${params.toString()}`)
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
       .then((json: { data?: ChatV3Thread[] }) => {
         if (cancelled) return;
@@ -57,7 +68,7 @@ export function ChatV3Screen() {
         </nav>
       </aside>
       <div className="flex min-w-0 flex-1">
-        {loadError ? (
+        {loadError || meError ? (
           <div className="flex flex-1 items-center justify-center">
             <p role="alert" className="text-sm text-destructive">{t('loadErrorTitle')}</p>
           </div>
@@ -73,9 +84,10 @@ export function ChatV3Screen() {
                   meId={me.id}
                   agentName={agentName}
                   locale={locale}
+                  needsMe={needsMe}
                   onOpenArtifactChange={setOpenArtifactId}
                 />
-                <ChatV3ContextPanel conversationId={selectedThread.id} openArtifactId={openArtifactId} />
+                <ChatV3ContextPanel conversationId={selectedThread.id} openArtifactId={openArtifactId} needsMe={needsMe} />
               </>
             ) : (
               <div className="flex flex-1 items-center justify-center">

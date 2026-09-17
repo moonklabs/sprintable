@@ -6,7 +6,7 @@ import { useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { buildGateTransitionBody } from '@/lib/gate-decision-payload';
+import { buildGateTransitionBody, classifyGateTransitionErrorCode } from '@/lib/gate-decision-payload';
 import { ChatV3ReasonDialog } from './chat-v3-reason-dialog';
 
 /**
@@ -20,12 +20,16 @@ import { ChatV3ReasonDialog } from './chat-v3-reason-dialog';
  * 승인류 게이트는 지금 이 필드 자체를 안 받는다 — 정직한 상태, 가짜 placeholder
  * 0. `dispatch_approval_request_cards`를 타는 gate_type만 이 필드를 가진다).
  */
-export function ChatV3EventCard({ approvalTarget, content, onDone }: {
+export function ChatV3EventCard({ approvalTarget, content, isInTodayQueue, onDone }: {
   approvalTarget: { work_item_type: string; work_item_id: string; gate_id: string; actions?: string[] };
   // BE가 이 카드 전용으로 지은 설명 문장(dispatch_approval_request_cards가 채운
   // message.content) — 제목을 새로 지어내지 않고 그대로 옮긴다(work_item 제목은
   // approval_target에 없어 추가 콜 없이는 못 얻는다, no-fiction).
   content: string;
+  // 페드루 PO 지시(2026-09-17 00:08Z, PR #4370 CHANGES) — 서명은 「오늘」 한 곳에서만
+  // (시안 SSOT) → 링크는 `/today`(게이트 상세 아님). 이 게이트가 보는 사람의 오늘
+  // 큐(needsMe)에 없으면 눌러도 거기 없는 막다른 길이라 서명 버튼 자체를 숨긴다.
+  isInTodayQueue: boolean;
   onDone: () => void;
 }) {
   const t = useTranslations('chatV3');
@@ -42,18 +46,29 @@ export function ChatV3EventCard({ approvalTarget, content, onDone }: {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(buildGateTransitionBody({ status: 'rejected', note: reason })),
     });
+    if (res.ok) { setBusy(false); setDialogOpen(false); onDone(); return; }
+    // 페드루 PO CHANGES C3(2026-09-17 00:04Z, PR #4370) — gate_already_resolved(남이
+    // 먼저 처리)는 실패가 아니라 재조회로 흡수한다(#3964/#3970과 같은 결).
+    const body = await res.json().catch(() => null) as { error?: { code?: string } } | null;
     setBusy(false);
-    if (res.ok) { setDialogOpen(false); onDone(); } else { setError(t('eventCardActionFailed')); }
+    if (classifyGateTransitionErrorCode(body?.error?.code) === 'already_resolved') {
+      setDialogOpen(false);
+      onDone();
+    } else {
+      setError(t('eventCardActionFailed'));
+    }
   };
 
   return (
-    <Card className="max-w-md border-amber-200 bg-amber-50 p-3.5" data-testid="chat-v3-event-card">
+    <Card className="max-w-md border-warning-border bg-warning-tint p-3.5" data-testid="chat-v3-event-card">
       <Badge variant="warning" className="mb-1.5">{t('eventCardBadge')}</Badge>
       <p className="text-sm font-medium text-foreground">{content}</p>
       <div className="mt-2.5 flex flex-wrap gap-1.5">
-        <Button asChild size="sm">
-          <Link href={`/gates/${approvalTarget.gate_id}`}>{t('eventCardSignAction')}</Link>
-        </Button>
+        {isInTodayQueue ? (
+          <Button asChild size="sm">
+            <Link href="/today" data-testid="chat-v3-event-card-sign">{t('eventCardSignAction')}</Link>
+          </Button>
+        ) : null}
         <Button
           size="sm" variant="outline" disabled={busy}
           onClick={() => setDialogOpen(true)}

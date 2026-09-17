@@ -486,7 +486,7 @@
     "contextRelatedLabel": "Related",
     "contextEmptySection": "Nothing yet",
     "contextRelatedTodayLink": "Today › My decisions — decide here",
-    "eventCardBadge": "Decision pending",
+    "eventCardBadge": "Awaiting approval",
     "eventCardSignAction": "Sign in Today",
     "eventCardRequestChangesAction": "Request changes",
     "eventCardActionFailed": "Couldn't process this",

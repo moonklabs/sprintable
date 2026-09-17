@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { Card } from '@/components/ui/card';
 import { fetchWithAuth } from '@/lib/db/client';
-import { useTodaySnapshot } from '@/components/org-briefing/use-today-snapshot';
+import type { TodayNeedsMeItem } from '@/components/org-briefing/derive-today';
 
 interface ArtifactDetail {
   title: string | null;
@@ -53,14 +53,17 @@ function useArtifactDetail(artifactId: string | null): ArtifactDetail | null {
   return detail;
 }
 
-export function ChatV3ContextPanel({ conversationId, openArtifactId }: {
+export function ChatV3ContextPanel({ conversationId, openArtifactId, needsMe }: {
   conversationId: string;
   openArtifactId: string | null;
+  // 페드루 PO 지시(2026-09-17 00:08Z, PR #4370 CHANGES) — 오늘 스냅샷은 화면 최상위
+  // (`ChatV3Screen`)에서 1콜만 하고 이 패널·이벤트 카드(서명 버튼 막다른 길 방지)가
+  // 같이 나눠 쓴다(중복 콜 0).
+  needsMe: TodayNeedsMeItem[];
 }) {
   const t = useTranslations('chatV3');
   const artifact = useArtifactDetail(openArtifactId);
-  const { data: todaySnapshot } = useTodaySnapshot();
-  const relatedNeedsMe = todaySnapshot?.needsMe.find((item) => item.conversationId === conversationId) ?? null;
+  const relatedNeedsMe = needsMe.find((item) => item.conversationId === conversationId) ?? null;
 
   return (
     <section className="flex w-[340px] shrink-0 flex-col bg-card" data-testid="chat-v3-context-panel">

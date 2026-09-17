@@ -486,7 +486,7 @@
     "contextRelatedLabel": "관련",
     "contextEmptySection": "아직 없어요",
     "contextRelatedTodayLink": "오늘 › 내 결정 — 여기서 결정해요",
-    "eventCardBadge": "결정 대기",
+    "eventCardBadge": "승인 대기",
     "eventCardSignAction": "「오늘」에서 서명",
     "eventCardRequestChangesAction": "변경 요청",
     "eventCardActionFailed": "처리하지 못했어요",
