@@ -131,7 +131,7 @@ const EXPECTED_GROUPS: Array<{ labelKey: string | null; labels: string[] }> = [
 // 별도 describe(하단 "v3 nav 단일 소스" 스위트)가 ON 케이스로 검증.
 const EXPECTED_HREF_BY_LABEL: Record<string, string> = {
   '오늘': '/org-briefing',
-  '일감': '/work-list',
+  '일감': '/flow',
   '결과': '/organization/insights-board',
   '채널 연결': '/organization/channels',
   '연산 커넥터': '/organization/generation-connectors',
@@ -183,16 +183,12 @@ describe('AppSidebar — story #3824 5항목 축소 렌더 회귀가드(UX-v3·F
     expect(rulesLink?.getAttribute('href')).toBe('/organization/content-rules');
   });
 
-  // story #4003(4002 그라운딩 AC1) — 「일감」 1차 href를 work-list로 전환(구 /flow는
-  // WORKSPACE_FRAME_TAB_PATHS를 통해 여전히 활성 판정 대상 — 탭 커버리지 무변, 아래
-  // 별도 테스트가 확認). 이 전환은 v3 플래그 3개와 무관(work-list는 story #3844로
-  // 이미 develop에 착지한 비-게이트 라우트) — flag OFF에서도 이 href는 바뀐다.
   it('리소스 항목(일감, org/project slug 없음)이 bare href로 폴백한다(기존 resourceLink 동작)', async () => {
     expandAllGroups();
     await mount();
     // startsWith 유지 — kbd 힌트 접미사가 붙는 항목이 있어 정확한 === 매칭은 못 쓴다.
     const workLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('일감'));
-    expect(workLink?.getAttribute('href')).toBe('/work-list');
+    expect(workLink?.getAttribute('href')).toBe('/flow');
   });
 
   it('kbd 힌트(일감=B)가 정확히 붙는다', async () => {

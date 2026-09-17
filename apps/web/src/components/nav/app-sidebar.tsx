@@ -463,9 +463,7 @@ export function AppSidebar({
                   // 선례와 동일 계약 — 탭 커버리지 무변, 1차 href만 갱신).
                   const link = item.kind === 'static'
                     ? { href: item.path, isActive: isActive(item.path) }
-                    : item.id === 'board'
-                      ? resourceLink('work-list', WORKSPACE_FRAME_TAB_PATHS)
-                      : resourceLink(item.path, []);
+                    : resourceLink(item.path, item.id === 'board' ? WORKSPACE_FRAME_TAB_PATHS : []);
                   const Icon = item.icon;
                   const badgeCount = item.badgeKey === 'inbox' ? inboxPendingCount : 0;
                   const badgeCap = item.badgeKey === 'inbox' ? 9 : 99;
