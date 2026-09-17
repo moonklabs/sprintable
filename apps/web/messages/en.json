@@ -468,7 +468,7 @@
   },
   "todayV3": {
     "progressSectionTitle": "In progress {count}",
-    "progressEmptyTitle": "No delegations in progress",
+    "progressEmptyTitle": "No delegations in progress yet",
     "stopAction": "Stop",
     "stopRequestedLabel": "Stop requested",
     "stopActionForbidden": "You don't have permission to stop this",

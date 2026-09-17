@@ -468,7 +468,7 @@
   },
   "todayV3": {
     "progressSectionTitle": "진행 중 {count}",
-    "progressEmptyTitle": "진행 중인 위임이 없어요",
+    "progressEmptyTitle": "아직 진행 중인 위임이 없어요",
     "stopAction": "정지",
     "stopRequestedLabel": "정지 요청됨",
     "stopActionForbidden": "멈출 권한이 없어요",
