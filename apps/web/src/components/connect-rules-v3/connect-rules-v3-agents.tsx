@@ -6,6 +6,7 @@ import { useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { fetchWithAuth } from '@/lib/db/client';
+import { runtimeLabel } from '@/lib/runtime-capabilities';
 import {
   ConnectRulesV3SectionEmpty,
   ConnectRulesV3SectionError,
@@ -26,6 +27,12 @@ import {
  * 삭제하고 `agent_role`이 있을 때만 그 값을 그대로 보여준다(번역 0 — 값 자체가
  * 자유 문자열이라 지어낼 수 없다) + `runtime_type`을 「· {runtime}」로 덧붙인다
  * (시안 「디자인 담당 에이전트 · Claude Code」의 뒷부분, team_member.py:82 확認 필드).
+ *
+ * PO CHANGES-r2-1(2026-09-17) — `runtime_type` raw 키(`claude-code`·`codex`·
+ * `system-publisher`)를 그대로 찍으면 안 된다. `runtime-capabilities.ts::
+ * runtimeLabel()`(registry 조회, 등록키만 표시명·미등재/null이면 null — 원값
+ * 「보존」을 명시적으로 폐기한 story #3103 규율)을 그대로 재사용 — 새 라벨 매핑을
+ * 이 파일에 다시 짓지 않는다.
  */
 interface OrgAgent {
   id: string;
@@ -147,7 +154,7 @@ export function ConnectRulesV3Agents() {
           const grantCount = accessMatrix?.filter((r) => r.agent_member_id === agent.id).length;
           const stats = statsByAgent[agent.id];
           const statsLoading = statsLoadingId === agent.id;
-          const roleLine = [agent.agent_role, agent.runtime_type].filter(Boolean).join(' · ');
+          const roleLine = [agent.agent_role, runtimeLabel(agent.runtime_type)].filter(Boolean).join(' · ');
           const presenceLabel = agent.presence_status === 'online'
             ? t('presenceOnline')
             : agent.presence_status === 'idle'
