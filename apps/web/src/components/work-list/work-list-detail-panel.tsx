@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { FileText, Layers, X } from 'lucide-react';
 import Link from 'next/link';
@@ -10,7 +10,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import { getEntityHref } from '@/components/chat/embed-card';
 import { Card } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
 import { fetchWithAuth } from '@/lib/db/client';
+import { deriveContentPostStatus } from '@/components/content/post-status';
+import { deriveChannelPostView } from '@/components/content/channel-post-status';
+import { StatusChip } from '@/components/content/status-chip';
 import { EvidenceSection } from '@/components/verify/evidence-section';
 import { ArtifactSection } from '@/components/canvas/artifact-section';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
@@ -68,6 +72,64 @@ interface ActivityLogResponse {
   items: ActivityLogItem[];
 }
 
+// story #3988(E-UX-OVERHAUL·「일감」 흡수 2/N) — 「발행물」 탭. 기존
+// GET .../channel-posts/drafts·.../site-posts/drafts에 story #3988이 추가한
+// work_item_id 필터로 그 일에 이어진 초안만 받는다(새 BE 계약 0 — 이미 있는
+// 필드만 additive). 상태는 post-status.ts::deriveContentPostStatus(site)·
+// channel-post-status.ts::deriveChannelPostView(channel)를 그대로 재사용(새
+// 판정식 0) — 성과(조회·유입)는 이 탭에 안 그림(「결과」 몫, AC3).
+interface ChannelPostDraftSummary {
+  draft_id: string;
+  channel: string;
+  text_preview: string;
+  gate_status: 'pending' | 'approved' | 'rejected' | null;
+  reapproval_required: boolean | null;
+  sealed_content_sha256: string | null;
+  body_sha256: string;
+  published_at: string | null;
+  publication_status: 'container_created' | 'published' | 'failed' | 'unpublished' | null;
+  error_code: string | null;
+}
+interface SitePostDraftSummary {
+  draft_id: string;
+  title: string;
+  slug: string;
+  gate_status: 'pending' | 'approved' | 'rejected' | null;
+  reapproval_required: boolean | null;
+  sealed_content_sha256: string | null;
+  body_sha256: string;
+  published_at: string | null;
+}
+type PublicationsTabState =
+  | { kind: 'idle' }
+  | { kind: 'loading' }
+  | { kind: 'error' }
+  | { kind: 'ready'; channel: ChannelPostDraftSummary[]; site: SitePostDraftSummary[] };
+
+// story #3988 — 「발행물」 탭은 성과(조회·유입)는 안 그린다(AC3, 「결과」 몫) — 상태 칩과
+// 열기 링크뿐이라 5상태 파생의 .status 값 하나면 충분하다(post-status.ts/channel-post-
+// status.ts 재사용, 새 판정식 0).
+function siteDraftStatus(d: SitePostDraftSummary) {
+  return deriveContentPostStatus({
+    gateStatus: d.gate_status ?? undefined,
+    reapprovalRequired: d.reapproval_required ?? undefined,
+    sealedBodySha256: d.sealed_content_sha256 ?? undefined,
+    currentBodySha256: d.body_sha256,
+    hasPublishedSitePost: d.published_at != null,
+  }).status;
+}
+function channelDraftStatus(d: ChannelPostDraftSummary) {
+  return deriveChannelPostView({
+    gateStatus: d.gate_status ?? undefined,
+    reapprovalRequired: d.reapproval_required ?? undefined,
+    sealedBodySha256: d.sealed_content_sha256 ?? undefined,
+    currentBodySha256: d.body_sha256,
+    publicationStatus: d.publication_status,
+    errorCode: d.error_code,
+    publishedAt: d.published_at,
+  }).status;
+}
+
 // 낱말 표 §⑤-1 3875(2026-09-17 00:32Z 등재) — «유형» 라벨. 미등록 필드는 «알 수
 // 없음»이 아니라 중립 라벨 1개("그 밖의 변경")로 접는다(딱 하나, 원시 필드명 노출 0).
 const HISTORY_FIELD_LABEL_KEY: Record<string, string> = {
@@ -89,6 +151,26 @@ async function fetchJsonData<T>(url: string): Promise<T | null> {
     return json.data ?? null;
   } catch {
     return null;
+  }
+}
+
+// story #3988 — 「발행물」 탭 전용(fetchJsonData와 달리 실패를 삼키지 않는다, AC2가
+// 요구하는 보이는 「다시 시도」를 내려면 ok/error를 구분해야 한다). org_id는 이
+// 패널이 (authenticated) 안이라 useDashboardContext에서 그대로(신규 콜 0).
+async function fetchDraftsForWorkItem(
+  orgId: string, workItemId: string,
+): Promise<{ ok: true; channel: ChannelPostDraftSummary[]; site: SitePostDraftSummary[] } | { ok: false }> {
+  try {
+    const [channelRes, siteRes] = await Promise.all([
+      fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts?work_item_id=${workItemId}`),
+      fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts?work_item_id=${workItemId}`),
+    ]);
+    if (!channelRes.ok || !siteRes.ok) return { ok: false };
+    const channelJson = (await channelRes.json()) as { data?: ChannelPostDraftSummary[] };
+    const siteJson = (await siteRes.json()) as { data?: SitePostDraftSummary[] };
+    return { ok: true, channel: channelJson.data ?? [], site: siteJson.data ?? [] };
+  } catch {
+    return { ok: false };
   }
 }
 
@@ -164,7 +246,7 @@ export function WorkListDetailPanel({
   const tCommon = useTranslations('common');
   const locale = useLocale();
   const { tz } = resolveDisplayTimezone();
-  const { currentMemberType } = useDashboardContext();
+  const { currentMemberType, orgId } = useDashboardContext();
 
   const [story, setStory] = useState<StoryDetail | null>(null);
   // 픽셀 커밋 CHANGES 2(페드루 PO 판정 09:40Z) — 3탭 다 "로딩 중"과 "진짜 0건"을 구분해야
@@ -184,6 +266,17 @@ export function WorkListDetailPanel({
   const [transitioning, setTransitioning] = useState(false);
   const [transitionError, setTransitionError] = useState<'forbidden' | 'other' | null>(null);
   const [approved, setApproved] = useState(false);
+  // story #3988 — 「발행물」 탭은 다른 5탭과 달리 패널이 열릴 때 같이 안 부른다(첫 화면
+  // 콜 수 무증가, AC2 "탭 열 때만 조회"). idle=아직 그 탭을 연 적 없음.
+  const [activeTab, setActiveTab] = useState('evidence');
+  const [publications, setPublications] = useState<PublicationsTabState>({ kind: 'idle' });
+  // story #3988 — 아래 행-전환 effect가 [row, storyId]에만 반응해야 한다(activeTab을
+  // deps에 넣으면 탭을 바꿀 때마다 이 effect 전체가 재실행돼 다른 5탭의 "패널 열릴 때
+  // 1회 조회"가 깨진다) — 그래도 그 effect 안에서 "지금" activeTab을 읽어야 하니 ref로.
+  const activeTabRef = useRef(activeTab);
+  useEffect(() => { activeTabRef.current = activeTab; }, [activeTab]);
+  const orgIdRef = useRef(orgId);
+  useEffect(() => { orgIdRef.current = orgId; }, [orgId]);
 
   const loadGate = useCallback(async () => {
     setGate(await fetchPendingGate(row, storyId));
@@ -200,6 +293,21 @@ export function WorkListDetailPanel({
     setGate(undefined);
     setTransitionError(null);
     setApproved(false);
+    // story #3988 — 다른 행으로 옮기면 「발행물」 탭도 다시 idle(새 storyId 기준으로
+    // 다시 조회해야 한다 — 옛 행 결과를 새 행에 그대로 보여주면 안 된다). activeTab
+    // 자체는 안 되돌린다(다른 탭 보다가 행을 바꿔도 같은 탭에 머무는 게 자연스럽다) —
+    // 단, 지금 이미 발행물 탭이 열려 있는 채로 행을 바꾸면 onValueChange가 다시 안
+    // 불려서(값이 안 바뀌므로) idle에 머문 채 스켈레톤이 안 풀리는 결함이 생긴다 —
+    // 그 경우엔 여기서 곧장 새 storyId로 조회한다.
+    setPublications({ kind: 'idle' });
+    if (activeTabRef.current === 'publications' && orgIdRef.current) {
+      const org = orgIdRef.current;
+      setPublications({ kind: 'loading' });
+      void fetchDraftsForWorkItem(org, storyId).then((res) => {
+        if (cancelled) return;
+        setPublications(res.ok ? { kind: 'ready', channel: res.channel, site: res.site } : { kind: 'error' });
+      });
+    }
 
     void fetchJsonData<StoryDetail>(`/api/stories/${storyId}`).then((v) => { if (!cancelled) setStory(v); });
     void fetchJsonData<HypothesisSummary[]>(`/api/hypotheses?story_id=${storyId}`).then((v) => { if (!cancelled) setHypotheses(v ?? []); });
@@ -287,6 +395,60 @@ export function WorkListDetailPanel({
   // 일어나는 죽은 버튼을 남기지 않도록 gates/[id]/page.tsx와 동일한 실 transition으로
   // 잇는다(evidence_viewed는 반려엔 의미 없어 false 고정).
   const handleReject = useCallback((reason: string) => { void submitTransition('rejected', false, reason); }, [submitTransition]);
+
+  const retryPublications = useCallback(() => {
+    setPublications({ kind: 'loading' });
+    if (!orgId) return;
+    void fetchDraftsForWorkItem(orgId, storyId).then((res) => {
+      setPublications(res.ok ? { kind: 'ready', channel: res.channel, site: res.site } : { kind: 'error' });
+    });
+  }, [orgId, storyId]);
+
+  // story #3988 — 이 지역변수로 먼저 좁혀 두면(if/else) 아래 JSX의 중첩 삼항이
+  // PublicationsTabState 판별 유니언을 안정적으로 좁힌다(JSX 삼항 체인 안에서
+  // 직접 판별하면 마지막 갈래에서 좁혀지지 않는 TS 케이스 회피).
+  let publicationsContent: React.ReactNode;
+  if (publications.kind === 'idle' || publications.kind === 'loading') {
+    publicationsContent = (
+      <div className="space-y-2" data-testid="panel-publications-loading">
+        <Skeleton className="h-8 w-full" />
+        <Skeleton className="h-8 w-full" />
+      </div>
+    );
+  } else if (publications.kind === 'error') {
+    publicationsContent = (
+      <div className="space-y-2" data-testid="panel-publications-error">
+        <p className="text-xs text-destructive">{t('panelPublicationsError')}</p>
+        <Button variant="outline" size="sm" onClick={retryPublications}>{tCommon('retry')}</Button>
+      </div>
+    );
+  } else if (publications.channel.length === 0 && publications.site.length === 0) {
+    publicationsContent = (
+      <p className="text-xs text-muted-foreground" data-testid="panel-publications-empty">{t('panelEmptyPublications')}</p>
+    );
+  } else {
+    const { channel, site } = publications;
+    publicationsContent = (
+      <ul className="space-y-1.5" data-testid="panel-publications-list">
+        {site.map((d) => (
+          <li key={`site-${d.draft_id}`} className="flex items-center justify-between gap-2 text-xs">
+            <Link href={`/content/${d.draft_id}`} className="truncate text-primary underline-offset-2 hover:underline">
+              {d.title}
+            </Link>
+            <StatusChip status={siteDraftStatus(d)} />
+          </li>
+        ))}
+        {channel.map((d) => (
+          <li key={`channel-${d.draft_id}`} className="flex items-center justify-between gap-2 text-xs">
+            <Link href={`/content/channel-posts/${d.draft_id}`} className="truncate text-primary underline-offset-2 hover:underline">
+              {d.text_preview}
+            </Link>
+            <StatusChip status={channelDraftStatus(d)} />
+          </li>
+        ))}
+      </ul>
+    );
+  }
 
   return (
     <div className={cn('flex h-full min-h-0 flex-col', className)} data-testid="work-list-detail-panel">
@@ -397,13 +559,30 @@ export function WorkListDetailPanel({
             충돌군이라 각 TabsTrigger의 className(cn() 마지막 인자)이 그대로 이긴다. 활성
             text-foreground·비활성 text-muted-foreground는 이미 기존 컴포넌트 기본값
             그대로(별도 지정 불요). */}
-        <Tabs defaultValue="evidence" className="w-full">
+        <Tabs
+          value={activeTab}
+          onValueChange={(v) => {
+            setActiveTab(v);
+            // story #3988 AC2 — 「발행물」 탭을 처음 열 때만 조회(다른 5탭처럼 패널이
+            // 열릴 때 같이 부르면 첫 화면 콜 수가 늘어난다). idle일 때만 fetch해서
+            // 같은 탭을 여러 번 여닫아도 재조회 0(다른 행으로 옮기면 위 useEffect가
+            // idle로 되돌려 다음 열 때 다시 조회).
+            if (v === 'publications' && publications.kind === 'idle' && orgId) {
+              setPublications({ kind: 'loading' });
+              void fetchDraftsForWorkItem(orgId, storyId).then((res) => {
+                setPublications(res.ok ? { kind: 'ready', channel: res.channel, site: res.site } : { kind: 'error' });
+              });
+            }
+          }}
+          className="w-full"
+        >
           <TabsList variant="line" className="w-full border-b border-border">
             <TabsTrigger value="evidence" className="flex-1 after:bg-primary" data-testid="panel-tab-evidence">{t('tabEvidence')}</TabsTrigger>
             <TabsTrigger value="tasks" className="flex-1 after:bg-primary" data-testid="panel-tab-tasks">{t('tabTasks')}</TabsTrigger>
             <TabsTrigger value="docs" className="flex-1 after:bg-primary" data-testid="panel-tab-docs">{t('tabDocs')}</TabsTrigger>
             <TabsTrigger value="artifacts" className="flex-1 after:bg-primary" data-testid="panel-tab-artifacts">{t('tabArtifacts')}</TabsTrigger>
             <TabsTrigger value="history" className="flex-1 after:bg-primary" data-testid="panel-tab-history">{t('tabHistory')}</TabsTrigger>
+            <TabsTrigger value="publications" className="flex-1 after:bg-primary" data-testid="panel-tab-publications">{t('tabPublications')}</TabsTrigger>
           </TabsList>
 
           <TabsContent value="evidence" className="mt-4 space-y-3">
@@ -510,6 +689,14 @@ export function WorkListDetailPanel({
                 })}
               </ul>
             )}
+          </TabsContent>
+
+          {/* story #3988(E-UX-OVERHAUL·「일감」 흡수 2/N) — 「발행물」. 초안 상태+열기
+              링크뿐(성과는 「결과」 몫, AC3). idle은 아직 안 열어봄(이 자리는 안 그려짐 —
+              onValueChange가 열릴 때만 loading으로 바꾼다), error는 siblings와 달리
+              보이는 「다시 시도」를 낸다(AC2 — fetchJsonData의 실패-삼킴과 구별). */}
+          <TabsContent value="publications" className="mt-4">
+            {publicationsContent}
           </TabsContent>
         </Tabs>
       </div>
