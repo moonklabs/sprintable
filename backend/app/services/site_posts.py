@@ -664,6 +664,7 @@ async def list_site_post_drafts(
     db: AsyncSession, *, org_id: uuid.UUID, limit: int = 50, offset: int = 0,
     draft_id: uuid.UUID | None = None,
     include_deleted: bool = False,
+    work_item_id: uuid.UUID | None = None,
 ) -> list[tuple[SitePostDraft, SitePostVersion, SitePostVersion, Gate | None, SitePost | None]]:
     """story #3365 후속(S4 계약 갭, 페드루 PO 확定 2026-09-03) — 조직 스코프 초안 목록. S4
     화면이 열릴 때 draft_id를 미리 알 방법이 없어 만든 자리 — 항목마다 최신 버전(title·lang·
@@ -732,6 +733,10 @@ async def list_site_post_drafts(
         stmt = stmt.where(SitePostDraft.deleted_at.is_(None))
     if draft_id is not None:
         stmt = stmt.where(SitePostDraft.id == draft_id)
+    # story #3988(E-UX-OVERHAUL·「일감」 흡수 2/N) — 일감 상세 「발행물」 탭이 그
+    # work_item_id에 이어진 초안만 보이게. NOT NULL 컬럼(FK 없는 관례, 기존 조인 무변경).
+    if work_item_id is not None:
+        stmt = stmt.where(SitePostDraft.work_item_id == work_item_id)
     page_rows = [(row[0], row[1], row[2]) for row in (await db.execute(stmt)).all()]
     if not page_rows:
         return []
@@ -775,13 +780,19 @@ async def list_site_post_drafts(
     ]
 
 
-async def count_site_post_drafts(db: AsyncSession, *, org_id: uuid.UUID, include_deleted: bool = False) -> int:
+async def count_site_post_drafts(
+    db: AsyncSession, *, org_id: uuid.UUID, include_deleted: bool = False,
+    work_item_id: uuid.UUID | None = None,
+) -> int:
     """story #3744 — list_site_post_drafts와 같은 org_id/include_deleted 필터의 전체
     개수(limit/offset 무관). goals.py::list_epics_endpoint의 X-Total-Count 관례와
-    동형 — 목록 화면의 「N개 중 M개 표시 중」 부분 상태 표기용."""
+    동형 — 목록 화면의 「N개 중 M개 표시 중」 부분 상태 표기용. story #3988 —
+    work_item_id도 같은 additive 축(list와 같은 필터를 공유)."""
     stmt = select(func.count()).select_from(SitePostDraft).where(SitePostDraft.org_id == org_id)
     if not include_deleted:
         stmt = stmt.where(SitePostDraft.deleted_at.is_(None))
+    if work_item_id is not None:
+        stmt = stmt.where(SitePostDraft.work_item_id == work_item_id)
     return (await db.execute(stmt)).scalar_one()
 
 

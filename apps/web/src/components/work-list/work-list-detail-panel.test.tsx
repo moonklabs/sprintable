@@ -26,7 +26,7 @@ const { fetchMock } = vi.hoisted(() => ({ fetchMock: vi.fn() }));
 vi.stubGlobal('fetch', fetchMock);
 
 const { dashboardContextRef } = vi.hoisted(() => ({
-  dashboardContextRef: { current: { currentMemberType: 'human' as 'human' | 'agent' | undefined } },
+  dashboardContextRef: { current: { currentMemberType: 'human' as 'human' | 'agent' | undefined, orgId: 'org-1' as string | undefined } },
 }));
 vi.mock('@/app/dashboard/dashboard-shell', () => ({
   useDashboardContext: () => dashboardContextRef.current,
@@ -70,10 +70,21 @@ function mockFetchRoutes(routes: {
   // story #3976
   tasks?: unknown[];
   activityLogItems?: unknown[];
+  // story #3988
+  channelDrafts?: unknown[];
+  siteDrafts?: unknown[];
+  channelDraftsStatus?: number;
+  siteDraftsStatus?: number;
 }) {
   fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
     if (init?.method === 'POST' && url.includes('/transition')) {
       return jsonResponse({ id: 'g1', status: 'approved' }, { status: routes.transitionStatus ?? 200 });
+    }
+    if (url.includes('/channel-posts/drafts?work_item_id=')) {
+      return jsonResponse(routes.channelDrafts ?? [], { status: routes.channelDraftsStatus ?? 200 });
+    }
+    if (url.includes('/site-posts/drafts?work_item_id=')) {
+      return jsonResponse(routes.siteDrafts ?? [], { status: routes.siteDraftsStatus ?? 200 });
     }
     if (url.startsWith('/api/stories/') && url.endsWith('/backlinks?source_type=doc')) {
       return jsonResponse(routes.docs ?? []);
@@ -104,7 +115,7 @@ let container: HTMLDivElement;
 let root: Root;
 
 beforeEach(() => {
-  dashboardContextRef.current = { currentMemberType: 'human' };
+  dashboardContextRef.current = { currentMemberType: 'human', orgId: 'org-1' };
   fetchMock.mockReset();
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -439,7 +450,7 @@ describe('WorkListDetailPanel — 서명 플로우(고위험, 픽셀 커밋 ②:
 
 describe('WorkListDetailPanel — 에이전트 뷰어 403 회피', () => {
   it('⭐currentMemberType=agent면 pending gate가 있어도 주 액션 버튼 자체가 없다(평문 경로)', async () => {
-    dashboardContextRef.current = { currentMemberType: 'agent' };
+    dashboardContextRef.current = { currentMemberType: 'agent', orgId: 'org-1' };
     mockFetchRoutes({ gates: [{ id: 'g1', gate_type: 'doc_approval', risk_grade: 'low', status: 'pending', work_item_id: 'task-1', work_item_type: 'task' }] });
     await mountPanel();
     expect(container.querySelector('[data-testid="panel-primary-action-section"]')).toBeNull();
@@ -447,7 +458,7 @@ describe('WorkListDetailPanel — 에이전트 뷰어 403 회피', () => {
   });
 
   it('⭐currentMemberType=agent면 서명 플로우 경로도 통째로 안 뜬다(canShowPrimaryAction이 두 분기 공통 게이트)', async () => {
-    dashboardContextRef.current = { currentMemberType: 'agent' };
+    dashboardContextRef.current = { currentMemberType: 'agent', orgId: 'org-1' };
     mockFetchRoutes({ gates: [{ id: 'g1', gate_type: 'doc_approval', risk_grade: 'high', status: 'pending', work_item_id: 'task-1', work_item_type: 'task' }] });
     await mountPanel();
     expect(container.querySelector('[data-testid="panel-primary-action-section"]')).toBeNull();
@@ -505,5 +516,129 @@ describe('WorkListDetailPanel — 답하기(3860 AC2, BE #4273 착지 前 구조
     mockFetchRoutes({ gates: [{ id: 'g1', gate_type: 'doc_approval', risk_grade: 'low', status: 'pending', work_item_id: 'task-1', work_item_type: 'task', conversation_id: null }] });
     await mountPanel();
     expect(container.querySelector('[data-testid="panel-reply-action"]')).toBeNull();
+  });
+});
+
+// story #3988(E-UX-OVERHAUL·「일감」 흡수 2/N) — 「발행물」 탭. 다른 5탭과 달리 패널이
+// 열릴 때 같이 안 부른다(AC2 "탭 열 때만 조회" — 첫 화면 콜 수 무증가 회귀가드)·성공/
+// 실패를 구분해 보이는 「다시 시도」를 낸다(fetchJsonData의 실패-삼킴과 다른 계약).
+describe('WorkListDetailPanel — 발행물 탭(story #3988)', () => {
+  it('⭐마운트 시점엔 채널/사이트 초안 API를 안 부른다(탭을 열기 전까지 콜 수 무증가)', async () => {
+    mockFetchRoutes({});
+    await mountPanel();
+    const calledPublicationsRoute = fetchMock.mock.calls.some((call: unknown[]) => {
+      const [url] = call as [string];
+      return url.includes('/channel-posts/drafts') || url.includes('/site-posts/drafts');
+    });
+    expect(calledPublicationsRoute).toBe(false);
+  });
+
+  it('⭐탭을 열면 그제서야 두 초안 API를 storyId(work_item_id)로 부른다', async () => {
+    mockFetchRoutes({ channelDrafts: [], siteDrafts: [] });
+    await mountPanel(baseRow(), 'story-77');
+    await act(async () => { (container.querySelector('[data-testid="panel-tab-publications"]') as HTMLElement).click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    const channelCall = fetchMock.mock.calls.find((call: unknown[]) => (call as [string])[0].includes('/channel-posts/drafts'));
+    const siteCall = fetchMock.mock.calls.find((call: unknown[]) => (call as [string])[0].includes('/site-posts/drafts'));
+    expect((channelCall?.[0] as string)).toContain('work_item_id=story-77');
+    expect((siteCall?.[0] as string)).toContain('work_item_id=story-77');
+  });
+
+  it('탭을 열면 응답 도착 전까지 스켈레톤(로딩)이 뜬다', async () => {
+    let resolveChannel: (v: Response) => void = () => {};
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.includes('/channel-posts/drafts')) return new Promise<Response>((r) => { resolveChannel = r; });
+      if (url.includes('/site-posts/drafts')) return jsonResponse([]);
+      return jsonResponse(url.startsWith('/api/gates') ? [] : null);
+    });
+    await mountPanel();
+    await act(async () => { (container.querySelector('[data-testid="panel-tab-publications"]') as HTMLElement).click(); });
+    expect(container.querySelector('[data-testid="panel-publications-loading"]')).not.toBeNull();
+    await act(async () => { resolveChannel(jsonResponse([]) as unknown as Response); });
+  });
+
+  it('0건이면 「아직 연결된 발행물이 없어요」', async () => {
+    mockFetchRoutes({ channelDrafts: [], siteDrafts: [] });
+    await mountPanel();
+    await act(async () => { (container.querySelector('[data-testid="panel-tab-publications"]') as HTMLElement).click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.querySelector('[data-testid="panel-publications-empty"]')?.textContent).toBe(koMessages.workList.panelEmptyPublications);
+  });
+
+  it('⭐실패(500)면 보이는 에러+「다시 시도」가 뜬다(다른 탭들의 실패-삼킴과 다르다)', async () => {
+    mockFetchRoutes({ channelDraftsStatus: 500, siteDrafts: [] });
+    await mountPanel();
+    await act(async () => { (container.querySelector('[data-testid="panel-tab-publications"]') as HTMLElement).click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    const errorBox = container.querySelector('[data-testid="panel-publications-error"]');
+    expect(errorBox?.textContent).toContain(koMessages.workList.panelPublicationsError);
+    expect(errorBox?.textContent).toContain(koMessages.common.retry);
+  });
+
+  it('⭐다시 시도 클릭 — 성공 응답으로 바뀌면 재조회해 목록이 뜬다', async () => {
+    let siteStatus = 500;
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.includes('/channel-posts/drafts')) return jsonResponse([]);
+      if (url.includes('/site-posts/drafts')) {
+        return siteStatus === 500 ? jsonResponse(null, { status: 500 }) : jsonResponse([
+          { draft_id: 's1', title: '재시도로 뜬 글', slug: 'retry-post', gate_status: null, reapproval_required: null, sealed_content_sha256: null, body_sha256: 'h1', published_at: null },
+        ]);
+      }
+      return jsonResponse(url.startsWith('/api/gates') ? [] : null);
+    });
+    await mountPanel();
+    await act(async () => { (container.querySelector('[data-testid="panel-tab-publications"]') as HTMLElement).click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.querySelector('[data-testid="panel-publications-error"]')).not.toBeNull();
+    siteStatus = 200;
+    const retryBtn = container.querySelector('[data-testid="panel-publications-error"] button') as HTMLButtonElement;
+    await act(async () => { retryBtn.click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.querySelector('[data-testid="panel-publications-list"]')?.textContent).toContain('재시도로 뜬 글');
+  });
+
+  it('⭐사이트 초안(draft, gate 없음) + 채널 초안(approved+published) — 각자 열기 링크와 5상태 재사용 상태 라벨', async () => {
+    mockFetchRoutes({
+      siteDrafts: [
+        { draft_id: 'site-1', title: '초안 상태 글', slug: 'draft-post', gate_status: null, reapproval_required: null, sealed_content_sha256: null, body_sha256: 'h1', published_at: null },
+      ],
+      channelDrafts: [
+        {
+          draft_id: 'chan-1', channel: 'threads', text_preview: '발행된 채널 글',
+          gate_status: 'approved', reapproval_required: false,
+          sealed_content_sha256: 'same', body_sha256: 'same', published_at: '2026-09-17T00:00:00Z',
+          publication_status: 'published', error_code: null,
+        },
+      ],
+    });
+    await mountPanel();
+    await act(async () => { (container.querySelector('[data-testid="panel-tab-publications"]') as HTMLElement).click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    const list = container.querySelector('[data-testid="panel-publications-list"]') as HTMLElement;
+    expect(list.textContent).toContain('초안 상태 글');
+    expect(list.textContent).toContain(koMessages.content.contentStatusDraft);
+    expect(list.textContent).toContain('발행된 채널 글');
+    expect(list.textContent).toContain(koMessages.content.contentStatusPublished);
+    const siteLink = [...list.querySelectorAll('a')].find((a) => a.textContent === '초안 상태 글');
+    expect(siteLink?.getAttribute('href')).toBe('/content/site-1');
+    const channelLink = [...list.querySelectorAll('a')].find((a) => a.textContent === '발행된 채널 글');
+    expect(channelLink?.getAttribute('href')).toBe('/content/channel-posts/chan-1');
+  });
+
+  it('⭐발행물 탭을 이미 연 채로 다른 행으로 옮기면 idle 스켈레톤에 갇히지 않고 새 storyId로 즉시 재조회한다', async () => {
+    mockFetchRoutes({ siteDrafts: [{ draft_id: 'site-1', title: '첫 행 글', slug: 's', gate_status: null, reapproval_required: null, sealed_content_sha256: null, body_sha256: 'h', published_at: null }], channelDrafts: [] });
+    await mountPanel(baseRow(), 'story-1');
+    await act(async () => { (container.querySelector('[data-testid="panel-tab-publications"]') as HTMLElement).click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.querySelector('[data-testid="panel-publications-list"]')?.textContent).toContain('첫 행 글');
+
+    mockFetchRoutes({ siteDrafts: [{ draft_id: 'site-2', title: '둘째 행 글', slug: 's2', gate_status: null, reapproval_required: null, sealed_content_sha256: null, body_sha256: 'h', published_at: null }], channelDrafts: [] });
+    // 탭을 다시 클릭하지 않는다 — 이미 「발행물」 탭이 열려 있는 채로 storyId만 바뀌는
+    // 경우(딱 이 테스트가 재현)라 재조회가 클릭 없이도 일어나야 한다.
+    await mountPanel(baseRow(), 'story-2');
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.querySelector('[data-testid="panel-publications-list"]')?.textContent).toContain('둘째 행 글');
+    const siteCalls = fetchMock.mock.calls.filter((c: unknown[]) => (c as [string])[0].includes('/site-posts/drafts'));
+    expect(siteCalls.some((c) => (c[0] as string).includes('work_item_id=story-2'))).toBe(true);
   });
 });
