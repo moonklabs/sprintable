@@ -66,10 +66,18 @@ export const ChatV3Messages = forwardRef<ChatV3MessagesHandle, ChatV3MessagesPro
   const [sending, setSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  const loadMessages = useCallback(() => {
+  // story #4008 CHANGES(유나 design·PO 지적, 2026-09-17) — 재연결·탭 복귀마다 이 화면이
+  // 스켈레톤으로 순간 비워졌다: reload()가 이 함수를 그대로 불러 매번 setMessages(null)부터
+  // 했기 때문(레일 쪽 handleThreadMessage는 성공 때만 교체해 안 비워지는 것과 대조).
+  // `silent`(reload 전용)이면 기존 messages를 유지한 채 뒤에서 받아 교체하고, 실패해도
+  // 기존 화면을 그대로 둔다(에러 상태로 안 바꿈) — 스켈레톤은 첫 로드·대화 전환(threadId
+  // 변경으로 이 콜백 자체가 재생성될 때)에만 뜬다.
+  const loadMessages = useCallback((options?: { silent?: boolean }) => {
     let cancelled = false;
-    setMessages(null);
-    setLoadError(false);
+    if (!options?.silent) {
+      setMessages(null);
+      setLoadError(false);
+    }
     fetchWithAuth(`/api/conversations/${threadId}/messages`)
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
       .then((json: { data?: ChatMessage[] }) => {
@@ -96,7 +104,11 @@ export const ChatV3Messages = forwardRef<ChatV3MessagesHandle, ChatV3MessagesPro
         onOpenArtifactChange(latestArtifactId);
         onWorkItemRefChange(latestWorkItemRef);
       })
-      .catch(() => { if (!cancelled) setLoadError(true); });
+      .catch(() => {
+        if (cancelled) return;
+        // silent(reload) 실패는 기존 messages를 그대로 둔다(PO 처방 — "실패면 기존 유지").
+        if (!options?.silent) setLoadError(true);
+      });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- onOpenArtifactChange/onWorkItemRefChange는 부모가 매 렌더 새로 안 만든다는 계약(useCallback) 가정 밖·threadId 변경 시만 재조회.
   }, [threadId]);
@@ -126,8 +138,8 @@ export const ChatV3Messages = forwardRef<ChatV3MessagesHandle, ChatV3MessagesPro
     receiveMessage: (payload: Record<string, unknown>) => { addMessage(normalizeToMessage(payload)); },
     // story #4008 AC4 — 재연결(탭 복귀 포함) 시 놓친 메시지를 1회 재조회로 따라잡는다
     // (chat-view.tsx handleReconnect와 동형 — v3는 백그라운드 backfill-merge 없이
-    // 단순 재조회로 충분한 규모).
-    reload: () => { loadMessages(); },
+    // 단순 재조회로 충분한 규모). silent — 위 CHANGES 주석 참고(스켈레톤으로 안 비움).
+    reload: () => { loadMessages({ silent: true }); },
   }), [addMessage, loadMessages]);
 
   const handleSend = async () => {
@@ -154,7 +166,7 @@ export const ChatV3Messages = forwardRef<ChatV3MessagesHandle, ChatV3MessagesPro
       {loadError ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-3">
           <p role="alert" className="text-sm text-destructive">{t('loadErrorTitle')}</p>
-          <Button size="sm" variant="outline" onClick={loadMessages} data-testid="chat-v3-messages-retry">{tc('retry')}</Button>
+          <Button size="sm" variant="outline" onClick={() => loadMessages()} data-testid="chat-v3-messages-retry">{tc('retry')}</Button>
         </div>
       ) : !messages ? (
         <div className="flex flex-1 flex-col gap-3 p-5" data-testid="chat-v3-messages-loading" aria-hidden="true">
