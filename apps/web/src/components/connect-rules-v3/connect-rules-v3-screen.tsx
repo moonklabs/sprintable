@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
 import { fetchWithAuth } from '@/lib/db/client';
 import { ConnectRulesV3Agents } from './connect-rules-v3-agents';
 import { ConnectRulesV3Channels } from './connect-rules-v3-channels';
@@ -12,26 +13,34 @@ import { ConnectRulesV3Rules } from './connect-rules-v3-rules';
 /**
  * story #3982(E-UX-OVERHAUL·「연결·규칙」 구현 2/N·FE) — 시안 ⑤ 그대로. 「오늘」(#3962)·
  * 「대화」(#3972) 선례와 같은 NAV_ITEMS 손 배열(공유 셸 컴포넌트가 아직 없다 — 「셸 변경은
- * 흡수 화면 착지 뒤」 원칙, 다른 v3 화면 링크는 아직 옛 화면을 가리킨다). A(외부 발행 일시
- * 중지) 절은 #4363(#3953) 착지 뒤 별도 rebase로 추가(AC7) — 이 PR엔 없음.
+ * 흡수 화면 착지 뒤」 원칙). A(외부 발행 일시 중지) 절은 #4363(#3953) 착지 뒤 별도
+ * rebase로 추가(AC7) — 이 PR엔 없음.
  *
  * org_id는 (authenticated) 밖이라 DashboardContext가 없다 — agent-management-tab.tsx가
  * 이미 하는 `fetchWithAuth('/api/me')` 1콜을 그대로 반복해 org_id만 뽑는다(새 BE 0).
+ *
+ * PO CHANGES-8(2026-09-17) — 「오늘」·「대화」 nav 링크가 각자 v3 플래그 OFF면 새 라우트가
+ * 404난다(그 라우트 자체가 `notFound()`로 막혀 있어서). page.tsx(서버)가 그 두 플래그를
+ * 읽어 prop으로 내려주고, 여기서 ON이면 v3 경로·OFF면 기존 라이브 경로로 분기한다 — 두
+ * 화면 자체는 무접촉(경로 문자열만 안다).
  */
-const NAV_ITEMS: { key: string; href: string; active?: boolean }[] = [
-  { key: 'navToday', href: '/today' },
-  { key: 'navChats', href: '/chats' },
-  { key: 'navWork', href: '/flow' },
-  { key: 'navResults', href: '/organization/insights-board' },
-  { key: 'navConnectRules', href: '/connect-rules', active: true },
-];
+function useNavItems(todayV3Enabled: boolean, chatV3Enabled: boolean) {
+  return [
+    { key: 'navToday', href: todayV3Enabled ? '/today' : '/org-briefing' },
+    { key: 'navChats', href: chatV3Enabled ? '/chat' : '/chats' },
+    { key: 'navWork', href: '/flow' },
+    { key: 'navResults', href: '/organization/insights-board' },
+    { key: 'navConnectRules', href: '/connect-rules', active: true },
+  ];
+}
 
-function ConnectRulesV3Nav() {
+function ConnectRulesV3Nav({ todayV3Enabled, chatV3Enabled }: { todayV3Enabled: boolean; chatV3Enabled: boolean }) {
   const t = useTranslations('connectRulesV3');
+  const items = useNavItems(todayV3Enabled, chatV3Enabled);
   return (
     <aside className="flex w-[216px] shrink-0 flex-col border-r border-border bg-card p-3" data-testid="connect-rules-v3-nav">
       <nav className="mt-1 flex flex-col gap-0.5">
-        {NAV_ITEMS.map((item) => (
+        {items.map((item) => (
           <Link
             key={item.key}
             href={item.href}
@@ -84,14 +93,16 @@ function useOrgId() {
   return { orgId, loadError, retry: () => setRetryNonce((n) => n + 1) };
 }
 
-export function ConnectRulesV3Screen() {
+export function ConnectRulesV3Screen({
+  todayV3Enabled = false, chatV3Enabled = false,
+}: { todayV3Enabled?: boolean; chatV3Enabled?: boolean }) {
   const t = useTranslations('connectRulesV3');
   const tc = useTranslations('common');
   const { orgId, loadError, retry } = useOrgId();
 
   return (
     <div className="flex h-screen min-h-0 bg-muted/20" data-testid="connect-rules-v3-screen">
-      <ConnectRulesV3Nav />
+      <ConnectRulesV3Nav todayV3Enabled={todayV3Enabled} chatV3Enabled={chatV3Enabled} />
       <div className="flex min-w-0 flex-1 flex-col">
         <ConnectRulesV3Topbar />
         <div className="min-h-0 flex-1 overflow-auto p-6">
@@ -107,9 +118,9 @@ export function ConnectRulesV3Screen() {
                 <Button size="sm" variant="outline" onClick={retry}>{tc('retry')}</Button>
               </div>
             ) : !orgId ? (
-              <div className="space-y-3" aria-hidden="true" data-testid="connect-rules-v3-loading">
-                <div className="h-24 animate-pulse rounded-md bg-muted/30" />
-                <div className="h-24 animate-pulse rounded-md bg-muted/30" />
+              <div className="space-y-3" data-testid="connect-rules-v3-loading">
+                <Skeleton className="h-24" />
+                <Skeleton className="h-24" />
               </div>
             ) : (
               <>
