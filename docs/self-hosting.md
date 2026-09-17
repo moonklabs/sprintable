@@ -93,10 +93,24 @@ baseUrl: http://host.docker.internal:1234/v1      # LM Studio
 
 **인증 강도는 자체호스팅과 호스팅이 다르다.** 기기 자격증명은 등록 시 제출한 **공개키로 요청
 서명을 검증**하는 계층이 항상 성립한다(개인키는 서버에 오지 않는다). 그 위의 **앱 무결성
-증명(attestation)** 계층은 자체호스팅에서 쓰지 않는다 — Apple App Attest·Play Integrity 는
-공개 인터넷과 스토어 배포를 전제하므로 폐쇄망 로컬 스택에서 성립하지 않는다. 즉 자체호스팅은
-"무증명"이 아니라 **한 계층 얇은 증명**이고, 그만큼 "이 요청이 진짜 그 앱에서 났다"는 보증이
-약하다. 그 대신 기기 단위 폐기(`DELETE /api/v2/device-credentials/{id}`)가 통제 수단이다.
+증명(attestation)** 계층은 이 배포 형태에서 쓰지 않는다. 이유는 "인터넷이 없어서"가 아니라
+**플랫폼 커버리지와 범위 결정**이다:
+
+- App Attest 는 Apple 플랫폼(iOS·iPadOS·macOS 등), Play Integrity 는 Android 전용이다.
+  데스크톱 앱이 함께 돌아야 하는 **Linux·Windows 에는 대응 서비스가 없다.**
+- 서버측 검증 자체는 오프라인에서도 가능하다 — App Attest 의 assertion 검증은 저장된 공개키와
+  Apple 루트 인증서로 **로컬에서** 이뤄지고, 매 요청 Apple 에 접속할 필요가 없다. 네트워크가
+  필요한 것은 앱의 **최초 키 증명(enrollment)** 단계와, 그때 쓸 인증서 체인을 준비하는 쪽이다.
+- Play Integrity 는 verdict 가 여러 축이다. `appRecognitionVerdict=PLAY_RECOGNIZED` 는
+  "패키지·서명·버전이 Google Play 가 인식하는 것과 일치한다"는 뜻이라 **정확히 서명된
+  사이드로드 APK 도 받을 수 있다** — Play 설치를 요구하는 값이 아니다. 설치 경로를 보려면
+  별도 축인 `appLicensingVerdict`(Play 자격이 있으면 `LICENSED`, 사이드로드면 대개
+  `UNLICENSED`)를 함께 봐야 한다. 어느 쪽이든 검증은 서버가 로컬에서 한다.
+- 무엇보다 이 계층은 이번 구현에서 **의도적으로 범위 밖**이다(attestation 무접촉).
+
+즉 자체호스팅은 "무증명"이 아니라 **한 계층 얇은 증명**이고, 그만큼 "이 요청이 진짜 그 앱에서
+났다"는 보증이 약하다. 그 대신 기기 단위 폐기(`DELETE /api/v2/device-credentials/{id}`)가
+통제 수단이다.
 
 폐기는 다음 요청부터 즉시 유효하다. 등록·폐기 모두 **인증한 그 사람의 기기만** 대상이므로,
 조직 관리자도 남의 기기를 대신 끊을 수 없다 — 기기는 사람에 붙는 자원이다.
