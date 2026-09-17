@@ -17,7 +17,7 @@ vi.mock('@/lib/onboarding/first-instruction', () => ({
 }));
 
 function makeFetch() {
-  return vi.fn(async (url: string) => {
+  return vi.fn(async (url: string, _init?: RequestInit) => {
     if (url.includes('connection-artifact')) {
       return {
         ok: true,
@@ -40,7 +40,7 @@ function makeFetch() {
     // 이 404를 "지금은 받을 수 없어요"로 정직하게 처리한다(카드 자체 회귀는
     // desktop-download-card.test.tsx 전담, 여기선 마운트만 무사히 되는지만 본다).
     return { ok: false, json: async () => ({}) };
-  }) as unknown as typeof fetch;
+  });
 }
 
 let container: HTMLElement;
@@ -60,17 +60,18 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-async function mount(onFinish = vi.fn()) {
-  global.fetch = makeFetch();
+async function mount(onFinish = vi.fn(), todayV3Enabled = false) {
+  const fetchMock = makeFetch();
+  global.fetch = fetchMock as unknown as typeof fetch;
   await act(async () => {
     root.render(
       <NextIntlClientProvider locale="ko" messages={ko} timeZone="Asia/Seoul">
-        <ConnectStep agentId="a1" apiKey="sk_live_1234" projectId="p1" onFinish={onFinish} />
+        <ConnectStep agentId="a1" apiKey="sk_live_1234" projectId="p1" onFinish={onFinish} todayV3Enabled={todayV3Enabled} />
       </NextIntlClientProvider>,
     );
     await vi.advanceTimersByTimeAsync(100);
   });
-  return onFinish;
+  return { onFinish, fetchMock };
 }
 
 describe('ConnectStep — 주 경로(story #3983 AC1·AC2)', () => {
@@ -81,10 +82,54 @@ describe('ConnectStep — 주 경로(story #3983 AC1·AC2)', () => {
   });
 
   it('⭐주 경로 완료 버튼을 누르면 onFinish가 불린다', async () => {
-    const onFinish = await mount();
+    const { onFinish } = await mount();
     const btn = container.querySelector('[data-testid="connect-step-desktop-finish"]') as HTMLButtonElement;
     await act(async () => { btn.click(); });
     expect(onFinish).toHaveBeenCalledTimes(1);
+  });
+
+  // 페드루 PO CHANGES(2026-09-17 02:11Z) ③ — 카드 자체 제목("데스크톱 앱")과
+  // 부딪히는 절 제목을 없앴다(부제만 남는다).
+  it('⭐절 제목이 카드 자체 제목과 중복되지 않는다(절 전용 제목 자체가 없다)', async () => {
+    await mount();
+    const primary = container.querySelector('[data-testid="connect-step-desktop-primary"]');
+    expect(primary?.textContent).toContain(ko.onboarding.desktopHandoffSubtitle);
+  });
+
+  // CHANGES ② — 낱말은 실제 착지와 같아야 한다.
+  it('⭐todayV3Enabled=true면 완료 버튼이 「오늘」 낱말(도착지 착지)', async () => {
+    await mount(vi.fn(), true);
+    const btn = container.querySelector('[data-testid="connect-step-desktop-finish"]');
+    expect(btn?.textContent).toBe(ko.onboarding.desktopFinishToToday);
+  });
+
+  it('todayV3Enabled=false(기본)면 완료 버튼이 현행 dashboardCta 낱말', async () => {
+    await mount(vi.fn(), false);
+    const btn = container.querySelector('[data-testid="connect-step-desktop-finish"]');
+    expect(btn?.textContent).toBe(ko.onboarding.dashboardCta);
+  });
+
+  // CHANGES ④ — 데스크톱 경로 선택 자체가 측정돼야 웹/데스크톱 활성화 퍼널을
+  // 가를 수 있다.
+  it('⭐완료 버튼을 누르면 desktop_handoff_selected 이벤트가 emit된다(emitOnboardingEvent → POST /api/onboarding/events)', async () => {
+    const { fetchMock } = await mount();
+    const btn = container.querySelector('[data-testid="connect-step-desktop-finish"]') as HTMLButtonElement;
+    await act(async () => { btn.click(); });
+    const call = fetchMock.mock.calls.find((c) => c[0] === '/api/onboarding/events');
+    const body = String(call?.[1]?.body ?? '');
+    expect(body).toContain('desktop_handoff_selected');
+    expect(call).toBeDefined();
+  });
+});
+
+describe('ConnectStep — 데스크톱 절 키 복사 칸(story #3983 CHANGES①)', () => {
+  it('⭐키가 마스킹돼 보이고, 복사 버튼을 누르면 「복사됨」으로 바뀐다', async () => {
+    await mount();
+    const keyBox = container.querySelector('[data-testid="connect-step-desktop-key-handoff"]')!.parentElement!;
+    expect(keyBox.textContent).toContain('sk_live_••••1234');
+    const copyBtn = container.querySelector('[data-testid="connect-step-desktop-key-copy"]') as HTMLButtonElement;
+    await act(async () => { copyBtn.click(); });
+    expect(copyBtn.textContent).toContain(ko.onboarding.copied);
   });
 });
 
