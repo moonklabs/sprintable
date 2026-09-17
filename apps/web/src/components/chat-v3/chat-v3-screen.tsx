@@ -24,7 +24,10 @@ import { useTodaySnapshot } from '@/components/org-briefing/use-today-snapshot';
  * (재사용은 import/조각뿐, 그 파일들 자체는 1줄도 안 건드림).
  */
 export function ChatV3Screen({ todayV3Enabled }: { todayV3Enabled: boolean }) {
-  const todayHref = todayV3Enabled ? '/today' : '/inbox';
+  // 페드루 PO 정렬(2026-09-17 02:10Z) — nav 「오늘」의 OFF 폴백은 nav-config.ts의
+  // 「오늘」 zone 정본 경로(zoneNow) /org-briefing(이벤트 카드 서명·관련 링크는
+  // "결정할 것" 맥락이라 /gates/{id}·/inbox 그대로 — 이 줄만 정렬).
+  const todayHref = todayV3Enabled ? '/today' : '/org-briefing';
   const t = useTranslations('chatV3');
   const tc = useTranslations('common');
   const locale = useLocale();
