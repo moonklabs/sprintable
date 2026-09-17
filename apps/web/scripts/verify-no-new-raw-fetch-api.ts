@@ -43,7 +43,7 @@ export const EXEMPT_FILES = new Set<string>([
   'app/forgot-password/page.tsx', // POST /api/auth/forgot-password — 로그인 前.
   'app/register/page.tsx', // POST /api/auth/register — 계정 생성 자체, 세션 없음.
   'app/reset-password/page.tsx', // POST /api/auth/reset-password — 로그인 前.
-  'app/mfa/page.tsx', // POST /api/auth/2fa/verify — 로그인 2단계(주 세션 아직 미확立).
+  'app/mfa/mfa-client.tsx', // POST /api/auth/2fa/verify — 로그인 2단계(주 세션 아직 미확立). story #4017 CHANGES 2 — page.tsx(서버 래퍼)/mfa-client.tsx(client) 분리로 자리 이동.
   'app/unsubscribe/page.tsx', // GET /api/activation/unsubscribe — 이메일 링크 클릭, 세션 없는 방문자(story #3159).
   'app/set-password/confirm/page.tsx', // POST /api/auth/set-password/confirm — 이메일 링크 클릭, verify-email과 동형(pre-auth, story #ab2a503f).
   'lib/db/client.ts', // fetchWithAuth/refreshAuthTokens 자신의 구현 — raw fetch가 원시 primitive.
@@ -146,7 +146,7 @@ export const GRANDFATHER_BASELINE = new Set<string>([
   'app/(authenticated)/settings/page.tsx::/api/webhooks/config?id=',
   'app/dashboard/dashboard-shell.tsx::/api/switch-org',
   'app/invite/accept/invite-accept-client.tsx::/api/invites/',
-  'app/invite/page.tsx::/api/invites/',
+  'app/invite/invite-client.tsx::/api/invites/', // story #4017 CHANGES 2 — page.tsx(서버 래퍼)/invite-client.tsx(client) 분리로 자리 이동.
   'app/onboarding/onboarding-form.tsx::/api/auth/refresh',
   'app/onboarding/onboarding-form.tsx::/api/auth/resend-verification',
   'app/onboarding/onboarding-form.tsx::/api/current-project',
