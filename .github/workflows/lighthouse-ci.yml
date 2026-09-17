@@ -23,7 +23,14 @@ permissions:
 jobs:
   lighthouse:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # story #4029 CHANGES 7(PO 지적) — 20분은 로그인 리다이렉트만 재던 시절 값(2차 run
+    # collect 구간 실측 3.5분, 가벼운 /login 18회). 인증이 실제로 붙으면 무거워진다 —
+    # 1차 run에서 유일하게 진짜 렌더된 화면(inbox)이 로드 58초였다(PO 실측 인용). 앞단
+    # (설치·alembic·백엔드기동·빌드·시딩)만으로도 6분쯤 먹어 20분 천장에 실제로 닿았다
+    # (4차 run, Run Lighthouse CI 스텝에서 cancelled). main 필수 체크가 아니라 올려도
+    # 남에게 비용이 안 감 — numberOfRuns를 줄여 시간을 버는 대신(3회 중앙값이 이 측정의
+    # 값어치, PO 지적) 천장 자체를 올린다.
+    timeout-minutes: 35
 
     # story #4029 — 이 이전까지 Lighthouse는 인증 세션 없이 돌아 여섯 화면 전부가 `/login`
     # 으로 리다이렉트됐다(로그인 화면 하나를 여섯 번 잰 것, 실화면 실측 0건). 인증 세션을
