@@ -10,7 +10,7 @@ import { EmbedCard } from '@/components/chat/embed-card';
 import { cn } from '@/lib/utils';
 import { fetchWithAuth } from '@/lib/db/client';
 import { ChatV3EventCard } from './chat-v3-event-card';
-import type { ChatMessage } from '@/hooks/use-chat-sse';
+import { normalizeToMessage, type ChatMessage } from '@/hooks/use-chat-sse';
 import type { TodayNeedsMeItem } from '@/components/org-briefing/derive-today';
 
 /**
@@ -53,9 +53,12 @@ export function ChatV3Messages({ threadId, meId, agentName, locale, needsMe, tod
     setLoadError(false);
     fetchWithAuth(`/api/conversations/${threadId}/messages`)
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
-      .then((json: { data?: ChatMessage[] }) => {
+      .then((json: { data?: Record<string, unknown>[] }) => {
         if (cancelled) return;
-        const list = json.data ?? [];
+        // 결함④(3998 PO 지적) — 백엔드는 sender를 중첩(`sender:{id,name}`)으로 내려준다.
+        // 예전엔 여기서 raw를 ChatMessage로 그냥 캐스트해 sender_name/created_by가 항상
+        // undefined였다(이름 줄 빈칸·isMine 오판) — 레거시 훅과 같은 정규화 함수로 통과.
+        const list = (json.data ?? []).map(normalizeToMessage);
         setMessages(list);
         // story #3972 — 최근 것부터 훑어 첫 artifact 참조를 「열린 산출물」로(맥락 패널).
         let latestArtifactId: string | null = null;
@@ -89,8 +92,8 @@ export function ChatV3Messages({ threadId, meId, agentName, locale, needsMe, tod
     setSending(false);
     if (res.ok) {
       setDraft('');
-      const json = (await res.json().catch(() => null)) as { data?: ChatMessage } | null;
-      if (json?.data) setMessages((prev) => [...(prev ?? []), json.data as ChatMessage]);
+      const json = (await res.json().catch(() => null)) as { data?: Record<string, unknown> } | null;
+      if (json?.data) setMessages((prev) => [...(prev ?? []), normalizeToMessage(json.data as Record<string, unknown>)]);
     }
   };
 
