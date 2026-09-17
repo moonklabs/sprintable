@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import httpx
-from sqlalchemy import select, update
+from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.agent_deployment import AgentAuditLog, AgentDeployment, AgentPersona
