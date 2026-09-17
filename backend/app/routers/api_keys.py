@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
-from app.dependencies.ownership import assert_agent_owner
+from app.dependencies.ownership import assert_agent_owner, assert_agent_owner_mutable
 from app.repositories.api_key import ApiKeyRepository
 from app.schemas.api_key import (
     ApiKeyCreatedResponse,
@@ -41,7 +41,7 @@ async def rotate_api_key(
     existing = await repo.get(body.api_key_id)
     if existing is None:
         raise HTTPException(status_code=404, detail="API key not found")
-    await assert_agent_owner(existing.team_member_id, session, org_id, uuid.UUID(auth.user_id))
+    await assert_agent_owner_mutable(existing.team_member_id, session, org_id, uuid.UUID(auth.user_id))
     # E-RECRUIT S3 QA 재QA 잔여1건(크로스엔드포인트 레이스): recruit_agent()와 같은 agent-scoped
     # lock을 여기도 걸어 동시 rotate가 CAS 손실→AssertionError→500으로 새는 걸 막는다(PO 선호안 a).
     await acquire_agent_mutation_lock(session, existing.team_member_id)
@@ -100,7 +100,7 @@ async def create_agent_api_key(
     org_id: uuid.UUID = Depends(get_verified_org_id),
     repo: ApiKeyRepository = Depends(_get_repo),
 ) -> ApiKeyCreatedResponse:
-    await assert_agent_owner(agent_id, session, org_id, uuid.UUID(auth.user_id))
+    await assert_agent_owner_mutable(agent_id, session, org_id, uuid.UUID(auth.user_id))
     # story #2944(PO 정책 확定, 카디르 HIGH 발견 후속) — 「발급=교체」 통일: 이 엔드포인트가
     # 예전엔 기존 활성 키 확인 없이 무조건 신규 발급이라 다건 활성 키가 합법으로 생겼다(2941의
     # 다중 키 방어는 그 결과를 다루는 임시 봉합, 이건 유입 자체를 막는 정본). FE
@@ -130,7 +130,7 @@ async def revoke_agent_api_key(
     org_id: uuid.UUID = Depends(get_verified_org_id),
     repo: ApiKeyRepository = Depends(_get_repo),
 ) -> dict:
-    await assert_agent_owner(agent_id, session, org_id, uuid.UUID(auth.user_id))
+    await assert_agent_owner_mutable(agent_id, session, org_id, uuid.UUID(auth.user_id))
     key = await repo.get(key_id)
     if key is None or key.team_member_id != agent_id:
         raise HTTPException(status_code=404, detail="API key not found for this agent")
