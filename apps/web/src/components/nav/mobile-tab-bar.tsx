@@ -105,11 +105,24 @@ function isResourcePath(pathname: string, resourceFragment: string): boolean {
   return segments[2] === resourceFragment;
 }
 
-// static kind 목적지(예 dest.chats.path='/chats'·dest.approvals.path='/inbox?tab=gates')를
-// 판정에 쓴다 — usePathname()은 쿼리스트링을 안 싣으므로 경로 부분만 비교한다.
-function isStaticPath(pathname: string, staticPath: string): boolean {
-  const pathOnly = staticPath.split('?')[0]!;
+// static kind 목적지의 쿼리 부분을 뗀다 — usePathname()은 쿼리스트링을 안 싣는다.
+function staticPathOnly(staticPath: string): string {
+  return staticPath.split('?')[0]!;
+}
+
+// dest.chats.path(예 '/chats')처럼 정확일치+하위 경로(/chats/{id})까지 인식해야 하는 값.
+function isStaticPathOrChild(pathname: string, staticPath: string): boolean {
+  const pathOnly = staticPathOnly(staticPath);
   return pathname === pathOnly || pathname.startsWith(`${pathOnly}/`);
+}
+
+// story #4016 CHANGES(페드루 PO 지적, 2026-09-17 14:46Z) — dest.approvals.path(예
+// '/inbox?tab=gates')는 옛 코드부터 «정확일치만»이었다(/inbox/x는 "결재"가 아니라
+// "전체" — 알림 상세 등 /inbox 하위 라우트가 생기면 그건 더보기 소관). 위
+// isStaticPathOrChild처럼 하위 경로까지 인식하면 실질 영향은 지금 0(하위 라우트가
+// 아직 없음)이지만 AC2 "플래그 OFF 바이트 동일" 계약과 어긋나 정확일치로 좁힌다.
+function isStaticPathExact(pathname: string, staticPath: string): boolean {
+  return pathname === staticPathOnly(staticPath);
 }
 
 // 판정 순서(구체적인 것부터, 마지막이 fallback):
@@ -131,8 +144,8 @@ export function getActiveTabKey(
 ): (typeof TABS)[number]['key'] {
   const dest = resolveNavV3Destinations(navV3Flags);
   if (isResourcePath(pathname, dest.work.path) || pathname === '/glance' || pathname.startsWith('/glance/')) return 'now';
-  if (isStaticPath(pathname, dest.approvals.path) || pathname.startsWith('/gates/')) return 'approvals';
-  if (isStaticPath(pathname, dest.chats.path)) return 'chat';
+  if (isStaticPathExact(pathname, dest.approvals.path) || pathname.startsWith('/gates/')) return 'approvals';
+  if (isStaticPathOrChild(pathname, dest.chats.path)) return 'chat';
   return 'more';
 }
 

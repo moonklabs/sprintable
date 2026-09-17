@@ -26,6 +26,14 @@ describe('getActiveTabKey', () => {
     expect(getActiveTabKey('/inbox')).toBe('approvals');
   });
 
+  // story #4016 CHANGES(페드루 PO 지적, 2026-09-17 14:46Z) — /inbox 하위 경로는 옛
+  // 코드부터 approvals가 아니었다(정확일치만, alert/알림 상세 같은 /inbox/x는
+  // "전체" 소관). 대칭 리팩터 도중 dest.chats처럼 하위까지 인식하는 헬퍼를 잘못
+  // 재사용해 이 계약이 조용히 넓어질 뻔했다 — 정확일치로 되돌린 것을 고정.
+  it('/inbox 하위 경로(/inbox/x)는 approvals가 아니라 more다', () => {
+    expect(getActiveTabKey('/inbox/x')).toBe('more');
+  });
+
   it('게이트 canonical 상세(/gates/{id})는 approvals — #1951 parentTab=/inbox 매핑 그대로', () => {
     expect(getActiveTabKey('/gates/7d0fc67b-d6c2-4767-a156-1bcf7c786ad0')).toBe('approvals');
   });
