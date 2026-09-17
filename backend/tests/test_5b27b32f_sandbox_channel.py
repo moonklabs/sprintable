@@ -266,74 +266,114 @@ _LOOKS_SANDBOX_NAMED_SNIPPET = (
     "    return ch == 'sandbox' or ch.endswith('_sandbox')\n"
 )
 
+# story #4009 CHANGES(페드루 PO 지적 2026-09-17 1차) — 이전 subprocess 테스트는
+# `_ALL_TEST_CHANNELS`(이름 8개 하드코딩)만 순회했다. 9번째 sandbox 채널이 이번
+# 사고와 같은 모양(모듈 최상위 등록·`is_test_channel` 미선언)으로 추가되면 그
+# 하드코딩 목록엔 원래 없으니 그린 그대로였을 것 — `CHANNEL_ADAPTERS` 자체를
+# 순회해 양방향 대조한다(이름 목록 없이): `is_test_channel` 선언과 `_sandbox`
+# 접미(또는 단독 `sandbox`) 명명 관례가 모든 키에서 항상 같은 값이어야 한다.
+#
+# 2차 지적(같은 날) — 아래 두 문자열을 **판정식의 유일한 사본**으로 모듈
+# 상수로 뽑는다. 양성 대조(아래 test_check_script_*)가 이 문자열을 "다시 짜서"
+# 재는 게 아니라 **그대로 실행**해야, 이 문자열 자체에 오타가 생겨도(예:
+# `!=`를 `==`로 잘못 침) 양성 대조가 그걸 잡는다 — 서로 다른 코드를 재는
+# 대조는 가드가 아니다.
+_CHECK_SCRIPT = (
+    "from app.services.channel_adapters import CHANNEL_ADAPTERS\n"
+    + _LOOKS_SANDBOX_NAMED_SNIPPET
+    + "mismatches = [ch for ch, cfg in CHANNEL_ADAPTERS.items() "
+    "if cfg.is_test_channel != looks_sandbox_named(ch)]\n"
+    "assert not mismatches, f'is_test_channel과 명명 관례 불일치: {mismatches}'\n"
+)
+
+_OFF_SCRIPT = _CHECK_SCRIPT + (
+    "assert not any(cfg.is_test_channel for cfg in CHANNEL_ADAPTERS.values()), "
+    "'flag off인데 is_test_channel 어댑터가 남음'\n"
+    "assert not any(looks_sandbox_named(ch) for ch in CHANNEL_ADAPTERS), "
+    "'flag off인데 sandbox 명명 채널이 남음'\n"
+)
+
+# 합성 결함 주입 줄 — 이름은 관례를 따르는데(_sandbox 접미) is_test_channel
+# 선언이 빠짐(이번 실제 사고 — facebook_sandbox 등 4개와 정확히 같은 모양).
+_INJECT_UNMARKED_SANDBOX_NAMED = (
+    "from app.services.channel_adapters import ChannelAdapterConfig, CHANNEL_ADAPTERS\n"
+    "CHANNEL_ADAPTERS['foo_sandbox'] = ChannelAdapterConfig(\n"
+    "    authorize_url='', token_url='', scope='', refresh_mode='manual',\n"
+    "    credential_kind='none', display_name='Foo Sandbox',\n"
+    ")\n"
+)
+
+# 합성 결함 주입 줄(OFF 갈래) — is_test_channel=True인데 이름은 sandbox 관례를
+# 안 따름(두 신호가 독립적으로 필요함을 증명 — 이름만 보는 검사였다면 못 잡았을
+# 자리).
+_INJECT_MARKED_NON_SANDBOX_NAMED = (
+    "from app.services.channel_adapters import ChannelAdapterConfig, CHANNEL_ADAPTERS\n"
+    "CHANNEL_ADAPTERS['bad_test_channel'] = ChannelAdapterConfig(\n"
+    "    authorize_url='', token_url='', scope='', refresh_mode='manual',\n"
+    "    credential_kind='none', display_name='Bad Test Channel', is_test_channel=True,\n"
+    ")\n"
+)
+
 
 def test_test_channel_registration_matches_naming_convention_both_directions():
-    """story #4009 CHANGES(페드루 PO 지적 2026-09-17) — 위
-    test_sandbox_env_flag_gates_registration_via_subprocess는 `_ALL_TEST_CHANNELS`
-    (이름 8개 하드코딩)만 순회한다. 9번째 sandbox 채널이 이번 사고와 같은 모양
-    (모듈 최상위에 등록·`is_test_channel` 미선언)으로 추가되면 그 하드코딩 목록엔
-    원래 없으니 그 테스트는 초록 그대로였을 것 — 사고 클래스를 여전히 «손으로 적은
-    이름 목록»이 닫고 있는 셈이었다.
-
-    이 테스트는 `CHANNEL_ADAPTERS`를 그 자체로(이름 목록 없이) 순회해 양방향
-    대조한다: `is_test_channel` 선언과 `_sandbox` 접미(또는 단독 `sandbox`) 명명
-    관례가 모든 키에서 항상 같은 값이어야 한다 — 한쪽만 참이면(이름은 sandbox인데
-    속성이 없거나, 속성은 있는데 이름이 관례를 안 따르거나) 그 자체가 이번 실제
-    사고의 정확한 모양이라 RED."""
+    """`_CHECK_SCRIPT`/`_OFF_SCRIPT`를 실제 프로세스(import 시점 그대로)로
+    돌려 flag ON/OFF 둘 다 현재 등록 상태가 명명 관례와 일치하는지 확認."""
     import subprocess
     import sys
 
     backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    check_script = (
-        "from app.services.channel_adapters import CHANNEL_ADAPTERS\n"
-        + _LOOKS_SANDBOX_NAMED_SNIPPET
-        + "mismatches = [ch for ch, cfg in CHANNEL_ADAPTERS.items() "
-        "if cfg.is_test_channel != looks_sandbox_named(ch)]\n"
-        "assert not mismatches, f'is_test_channel과 명명 관례 불일치: {mismatches}'\n"
-    )
     r_on = subprocess.run(
-        [sys.executable, "-c", check_script], cwd=backend_dir, capture_output=True, text=True,
+        [sys.executable, "-c", _CHECK_SCRIPT], cwd=backend_dir, capture_output=True, text=True,
         env={**os.environ, "SANDBOX_CHANNEL_ENABLED": "true"},
     )
     assert r_on.returncode == 0, r_on.stderr
 
-    off_script = check_script + (
-        "assert not any(cfg.is_test_channel for cfg in CHANNEL_ADAPTERS.values()), "
-        "'flag off인데 is_test_channel 어댑터가 남음'\n"
-        "assert not any(looks_sandbox_named(ch) for ch in CHANNEL_ADAPTERS), "
-        "'flag off인데 sandbox 명명 채널이 남음'\n"
-    )
     env_off = {k: v for k, v in os.environ.items() if k != "SANDBOX_CHANNEL_ENABLED"}
     r_off = subprocess.run(
-        [sys.executable, "-c", off_script], cwd=backend_dir, capture_output=True, text=True, env=env_off,
+        [sys.executable, "-c", _OFF_SCRIPT], cwd=backend_dir, capture_output=True, text=True, env=env_off,
     )
     assert r_off.returncode == 0, r_off.stderr
 
 
-def test_test_channel_registration_consistency_check_catches_synthetic_violation(monkeypatch):
-    """양성 대조(페드루 PO 요청) — 위 양방향 대조 로직 자체가 늘 그린인 무의미한
-    검사가 아님을 증명한다. `_sandbox` 접미로 이름 짓고 `is_test_channel`을 안 든
-    합성 채널을 주입하면(이번 실제 사고 — facebook_sandbox 등 4개가 겪은 것과
-    정확히 같은 모양: 이름은 관례를 따르는데 속성 선언이 빠짐) 같은 로직이
-    반드시 이 채널을 mismatch로 잡아야 한다."""
-    import app.services.channel_adapters as adapters_mod
+def test_check_script_fails_on_synthetic_violation_when_flag_on():
+    """양성 대조(페드루 PO 2차 지적, 2026-09-17) — 판정식을 테스트 안에 따로
+    적어 재지 않는다: 실제 `_CHECK_SCRIPT` 문자열을 그대로 subprocess로 돌리되,
+    import 직후 `foo_sandbox`를 `is_test_channel` 없이 주입하는 한 줄만 앞에
+    붙인다 — `_CHECK_SCRIPT` 자체에 오타가 생겨 늘 통과하게 돼도 이 대조가
+    잡는다(서로 다른 코드를 재는 대조가 아니게)."""
+    import subprocess
+    import sys
 
-    bad_channel = adapters_mod.ChannelAdapterConfig(
-        authorize_url="", token_url="", scope="", refresh_mode="manual",
-        credential_kind="none", display_name="Foo Sandbox(합성 결함 재현)",
-        # is_test_channel 기본값 False로 방치 — 이번 실제 사고와 동형(이름은
-        # _sandbox 관례를 따르는데 속성 선언이 빠진 자리).
+    backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    r = subprocess.run(
+        [sys.executable, "-c", _INJECT_UNMARKED_SANDBOX_NAMED + _CHECK_SCRIPT],
+        cwd=backend_dir, capture_output=True, text=True,
+        env={**os.environ, "SANDBOX_CHANNEL_ENABLED": "true"},
     )
-    monkeypatch.setitem(adapters_mod.CHANNEL_ADAPTERS, "foo_sandbox", bad_channel)
+    assert r.returncode != 0, "합성 결함(이름 sandbox·속성 없음)을 못 잡음 — 대조 로직 자체가 무의미"
+    assert "foo_sandbox" in r.stderr, r.stderr
 
-    def looks_sandbox_named(ch: str) -> bool:
-        return ch == "sandbox" or ch.endswith("_sandbox")
 
-    mismatches = [
-        ch for ch, cfg in adapters_mod.CHANNEL_ADAPTERS.items()
-        if cfg.is_test_channel != looks_sandbox_named(ch)
-    ]
-    assert "foo_sandbox" in mismatches, "합성 결함(이름 sandbox·속성 없음)을 못 잡음 — 대조 로직 자체가 무의미"
+def test_check_script_fails_on_synthetic_violation_when_flag_off():
+    """위와 동형이나 flag OFF 갈래 — 실제 `_OFF_SCRIPT`를 그대로 돌리되,
+    `is_test_channel=True`인데 이름은 sandbox 관례를 안 따르는 합성 어댑터를
+    주입한다(이름만 보는 검사였다면 놓쳤을 자리 — is_test_channel 신호가
+    독립적으로 필요함을 증명)."""
+    import subprocess
+    import sys
+
+    backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    env_off = {k: v for k, v in os.environ.items() if k != "SANDBOX_CHANNEL_ENABLED"}
+    r = subprocess.run(
+        [sys.executable, "-c", _INJECT_MARKED_NON_SANDBOX_NAMED + _OFF_SCRIPT],
+        cwd=backend_dir, capture_output=True, text=True, env=env_off,
+    )
+    # `_OFF_SCRIPT` = `_CHECK_SCRIPT` + OFF 전용 단언 2개 — bad_test_channel은
+    # 이름이 관례를 안 따라 `_CHECK_SCRIPT` 자체의 첫 단언(명명 불일치)에서 이미
+    # 걸린다(OFF 전용 단언까지 갈 필요조차 없이). 어느 단언에서 걸리든 「합성
+    # 결함이 잡혔다」는 사실만 확認하면 된다 — 메시지 문자열 하나를 못박지 않는다.
+    assert r.returncode != 0, "flag off인데 is_test_channel 어댑터가 남아도 못 잡음 — 대조 로직 자체가 무의미"
+    assert "bad_test_channel" in r.stderr, r.stderr
 
 
 def test_get_publish_client_module_dispatches_by_channel():
