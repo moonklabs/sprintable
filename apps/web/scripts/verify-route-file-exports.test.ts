@@ -188,11 +188,13 @@ describe('scanRepo — story #3760 AC1/AC4(실 트리 실행)', () => {
   // story #4116(2026-09-21) — organization/generation-connectors/page.tsx 신설로 98→99.
   // story #3962(2026-09-17) — `/today`(v3 첫 화면, (authenticated) 밖 신규 라우트
   // 그룹) page.tsx+layout.tsx 신설로 99→101(develop 착지).
-  // story #3972(2026-09-16, rebase 시점 재정정) — app/chat/layout.tsx+page.tsx
-  // 신설(시안 ② 3단 허브, 기능 플래그 뒤)로 101→103.
-  it('실 트리(apps/web/src/app) — 라우트 파일 103개·위반 0건', () => {
+  // story #3972(2026-09-16) — app/chat/layout.tsx+page.tsx 신설(시안 ② 3단 허브,
+  // 기능 플래그 뒤)로 101→103(develop 착지).
+  // story #3982(2026-09-17, rebase 시점 재정정) — `/connect-rules`(v3 「연결·규칙」
+  // 화면, (authenticated) 밖 신규 라우트 그룹) page.tsx+layout.tsx 신설로 103→105.
+  it('실 트리(apps/web/src/app) — 라우트 파일 105개·위반 0건', () => {
     const { violations, fileCount } = scanRepo(APP_ROOT);
-    expect(fileCount).toBe(103);
+    expect(fileCount).toBe(105);
     expect(violations).toEqual([]);
   }, 1000);
 });
