@@ -101,16 +101,43 @@ describe('ConnectRulesV3Agents', () => {
     expect(container.textContent).toContain('온라인');
   });
 
-  it('agent_role·runtime_type이 있으면 「{role} · {runtime}」로 렌더', async () => {
+  it('⭐runtime_type 등록키 — runtime-capabilities 레지스트리 표시명으로 렌더(raw key 노출 0)', async () => {
     routeFetch({
       '/api/team-members?type=agent': {
-        data: [{ id: 'a4', name: '유나 홀름', agent_role: 'UI Designer', runtime_type: 'Claude Code', is_active: true, verified: true, presence_status: 'idle', project_id: null }],
+        data: [{ id: 'a4', name: '유나 홀름', agent_role: 'UI Designer', runtime_type: 'claude-code', is_active: true, verified: true, presence_status: 'idle', project_id: null }],
       },
       '/api/me': { data: { role: 'member' } },
       '/api/projects': { data: [] },
     });
     await mount();
     expect(container.textContent).toContain('UI Designer · Claude Code');
+    expect(container.textContent).not.toContain('claude-code');
+  });
+
+  it('⭐runtime_type 미등재값 — 라벨 생략(원값 「보존」 안 함, story #3103 규율)', async () => {
+    routeFetch({
+      '/api/team-members?type=agent': {
+        data: [{ id: 'a6', name: '담롱 온찬', agent_role: 'Growth Hacker', runtime_type: 'internal-beta', is_active: true, verified: true, presence_status: 'idle', project_id: null }],
+      },
+      '/api/me': { data: { role: 'member' } },
+      '/api/projects': { data: [] },
+    });
+    await mount();
+    expect(container.textContent).toContain('Growth Hacker');
+    expect(container.textContent).not.toContain('internal-beta');
+  });
+
+  it('runtime_type null — role만(구분자 없이)', async () => {
+    routeFetch({
+      '/api/team-members?type=agent': {
+        data: [{ id: 'a7', name: '카디르 아흐마디', agent_role: 'QA Engineer', runtime_type: null, is_active: true, verified: true, presence_status: 'idle', project_id: null }],
+      },
+      '/api/me': { data: { role: 'member' } },
+      '/api/projects': { data: [] },
+    });
+    await mount();
+    expect(container.textContent).toContain('QA Engineer');
+    expect(container.textContent).not.toContain('QA Engineer ·');
   });
 
   it('⭐행 펼침 — 항상 「연결 설정 보기」가 있고, project_id가 있으면 agent-stats·프로젝트 이름을 낸다', async () => {
