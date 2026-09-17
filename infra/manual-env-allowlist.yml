@@ -616,6 +616,13 @@ code_read_exempt:
       「오늘」) — `/today` v3 셸 개발 단계 게이트, 아직 미착지·미점화(#3970·#3972·#3983
       각 브랜치가 base=develop이라 이 파일을 복제해 들고 있음 — 착지 뒤 rebase로
       한 곳에 수렴 예정, 발명 0). 점화되면 covered-set에 자연히 잡힌다.
+  - key: CONNECT_RULES_V3_ENABLED
+    reason: >-
+      apps/web/src/lib/connect-rules-v3.ts `=== 'true'` 시에만 on(값 부재 시 false,
+      throw 없음) — CHAT_V3_ENABLED·TODAY_V3_ENABLED와 동형 안전-닫힘 feature flag.
+      story #3982(E-UX-OVERHAUL·「연결·규칙」 구현 2/N) — v3 셸 개발 단계 게이트,
+      아직 미착지·미점화. 점화되면(값이 실제 live가 되면) covered-set에 자연히
+      잡혀 이 exempt 자체가 report 대상에서 빠진다.
 
 # ⑤㉠(story #2296 후속, 파울로군 지시 2026-07-28) — «알려진 채무» 래칫 baseline.
 # ⛔code_read_exempt(위)와 다르다 — exempt는 "코드로 확認해 영구히 정상"이고, 이건 "아직

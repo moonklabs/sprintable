@@ -339,10 +339,14 @@ def test_ac4_real_repo_scan_counts_are_recorded():
     # TODAY_V3_ENABLED(apps/web/src/lib/today-v3.ts) 신규 code read 2건, 둘 다
     # FIREBASE_OAUTH_HANDOFF_ENABLED와 동형 안전-닫힘 feature flag(값 부재 시 false,
     # throw 없음)라 code_read_exempt로 승격(exempt 30→32) — high는 그대로 2.
+    # 2026-09-17 페드루 PO 지시 — v3 플래그 3키(CHAT_V3·TODAY_V3·CONNECT_RULES_V3)를
+    # 바이트 동일 블록으로 4365·4370·4377에 맞춰 둔다(착지 시 충돌 없이 합쳐지도록).
+    # 이 브랜치(#3972)엔 CONNECT_RULES_V3_ENABLED code read가 없어(그 브랜치 #3982
+    # 전용 파일) high/low엔 영향 없이 exempt 목록에만 +1(32→33).
     assert len(highest) == 1, highest
     assert len(high) == 2, high
     assert len(low) == 9, low
-    assert len(exempt) == 32
+    assert len(exempt) == 33
 
 
 # ── AC5 — 값을 안 읽는다 ──────────────────────────────────────────────────────

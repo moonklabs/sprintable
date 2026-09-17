@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { buildGateTransitionBody, classifyGateTransitionErrorCode } from '@/lib/gate-decision-payload';
+import { fetchWithAuth } from '@/lib/db/client';
 import { ChatV3ReasonDialog } from './chat-v3-reason-dialog';
 
 /**
@@ -45,7 +46,7 @@ export function ChatV3EventCard({ approvalTarget, content, isInTodayQueue, today
   const submit = async (reason: string) => {
     setBusy(true);
     setError(null);
-    const res = await fetch(`/api/gates/${approvalTarget.gate_id}/transition`, {
+    const res = await fetchWithAuth(`/api/gates/${approvalTarget.gate_id}/transition`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(buildGateTransitionBody({ status: 'rejected', note: reason })),
