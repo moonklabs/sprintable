@@ -190,11 +190,14 @@ describe('scanRepo — story #3760 AC1/AC4(실 트리 실행)', () => {
   // 그룹) page.tsx+layout.tsx 신설로 99→101(develop 착지).
   // story #3972(2026-09-16) — app/chat/layout.tsx+page.tsx 신설(시안 ② 3단 허브,
   // 기능 플래그 뒤)로 101→103(develop 착지).
-  // story #3982(2026-09-17, rebase 시점 재정정) — `/connect-rules`(v3 「연결·규칙」
-  // 화면, (authenticated) 밖 신규 라우트 그룹) page.tsx+layout.tsx 신설로 103→105.
-  it('실 트리(apps/web/src/app) — 라우트 파일 105개·위반 0건', () => {
+  // story #3982(2026-09-17) — `/connect-rules`(v3 「연결·규칙」 화면, (authenticated)
+  // 밖 신규 라우트 그룹) page.tsx+layout.tsx 신설로 103→105(develop 착지).
+  // [SID:4021](2026-09-17, rebase 시점 재정정 2026-09-22) — onboarding/first-instruction/
+  // page.tsx 신설(컴패니언 «첫 지시»가 여는 웹 진입·3995 선행)로 105→106 — 이 브랜치 자체
+  // 기준 +1은 develop의 다른 라우트 추가 PR들과 독립 가산.
+  it('실 트리(apps/web/src/app) — 라우트 파일 106개·위반 0건', () => {
     const { violations, fileCount } = scanRepo(APP_ROOT);
-    expect(fileCount).toBe(105);
+    expect(fileCount).toBe(106);
     expect(violations).toEqual([]);
   }, 1000);
 });
