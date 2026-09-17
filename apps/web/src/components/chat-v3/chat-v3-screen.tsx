@@ -1,10 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { fetchWithAuth } from '@/lib/db/client';
-import { useMe } from './use-me';
+import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
+import { useMe, type Me } from './use-me';
 import { ChatV3ThreadRail, type ChatV3Thread } from './chat-v3-thread-rail';
 import { ChatV3Messages } from './chat-v3-messages';
 import { ChatV3ContextPanel } from './chat-v3-context-panel';
@@ -23,8 +25,9 @@ import { useTodaySnapshot } from '@/components/org-briefing/use-today-snapshot';
  */
 export function ChatV3Screen() {
   const t = useTranslations('chatV3');
+  const tc = useTranslations('common');
   const locale = useLocale();
-  const { me, error: meError } = useMe();
+  const { me, error: meError, retry: retryMe } = useMe();
   // 페드루 PO 지시(2026-09-17 00:08Z, PR #4370 CHANGES) — 오늘 스냅샷은 여기서
   // 1콜만(맥락 패널 「관련」·이벤트 카드 「서명」 막다른 길 방지 둘 다 이 캐시 공유).
   const { data: todaySnapshot } = useTodaySnapshot();
@@ -34,14 +37,14 @@ export function ChatV3Screen() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [openArtifactId, setOpenArtifactId] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!me) return;
+  const loadConversations = useCallback((currentMe: Me) => {
     let cancelled = false;
+    setLoadError(false);
     // 페드루 PO CHANGES C1(2026-09-17 00:04Z, PR #4370) — include_agent_conversations=true는
     // owner/admin 전용(conversations.py:1462-1467, 그 외 role은 403) — role 무관하게 항상
     // 붙이면 비-admin에게 화면 전체가 "불러오지 못했어요"로 죽는다. role 조건부로만 붙인다.
-    const includeAgentConversations = me.role === 'owner' || me.role === 'admin';
-    const params = new URLSearchParams({ project_id: me.projectId });
+    const includeAgentConversations = currentMe.role === 'owner' || currentMe.role === 'admin';
+    const params = new URLSearchParams({ project_id: currentMe.projectId });
     if (includeAgentConversations) params.set('include_agent_conversations', 'true');
     fetchWithAuth(`/api/conversations?${params.toString()}`)
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
@@ -53,7 +56,22 @@ export function ChatV3Screen() {
       })
       .catch(() => { if (!cancelled) setLoadError(true); });
     return () => { cancelled = true; };
-  }, [me]);
+  }, []);
+
+  useEffect(() => {
+    if (!me) return;
+    // 기존 코드베이스 관례(connect-step.tsx·now-strip.tsx) — fetchWithAuth 마운트-
+    // fetch 패턴을 정적분석이 "effect 안 setState"로 오탐하는 자리, disable.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    return loadConversations(me);
+  }, [me, loadConversations]);
+
+  // 교차 PR 드리프트(유나 점검표 1c6a0ced, 항목 4) — 오류 자리에 보이는 「다시
+  // 시도」. me 자체가 실패면 me부터, me는 있는데 대화 목록만 실패면 그것만.
+  const retryLoad = () => {
+    if (meError) retryMe();
+    else if (me) { setThreads(null); loadConversations(me); }
+  };
 
   const selectedThread = threads?.find((th) => th.id === selectedId) ?? null;
   const otherParticipant = selectedThread?.participants.find((p) => p.member_id !== me?.id) ?? selectedThread?.participants[0];
@@ -69,11 +87,16 @@ export function ChatV3Screen() {
       </aside>
       <div className="flex min-w-0 flex-1">
         {loadError || meError ? (
-          <div className="flex flex-1 items-center justify-center">
+          <div className="flex flex-1 flex-col items-center justify-center gap-3">
             <p role="alert" className="text-sm text-destructive">{t('loadErrorTitle')}</p>
+            <Button size="sm" variant="outline" onClick={retryLoad} data-testid="chat-v3-retry">{tc('retry')}</Button>
           </div>
         ) : !threads || !me ? (
-          <div className="flex flex-1 items-center justify-center" data-testid="chat-v3-loading" aria-hidden="true" />
+          <div className="flex flex-1 flex-col gap-3 p-5" data-testid="chat-v3-loading" aria-hidden="true">
+            <Skeleton className="h-12 w-full" />
+            <Skeleton className="h-12 w-full" />
+            <Skeleton className="h-12 w-full" />
+          </div>
         ) : (
           <>
             <ChatV3ThreadRail threads={threads} meId={me.id} selectedId={selectedId} onSelect={setSelectedId} />

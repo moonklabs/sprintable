@@ -1,7 +1,6 @@
 'use client';
 
 import { useTranslations } from 'next-intl';
-import { Badge } from '@/components/ui/badge';
 
 export interface ChatV3ThreadParticipant {
   member_id: string;
@@ -64,7 +63,10 @@ export function ChatV3ThreadRail({ threads, meId, selectedId, onSelect }: {
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5">
                       <span className="truncate text-[13.5px] font-semibold text-foreground">{other?.name ?? t('unknownParticipant')}</span>
-                      {isAgent ? <Badge variant="secondary" className="shrink-0 text-[10px]">{t('roleTagAgent')}</Badge> : null}
+                      {/* 교차 PR 드리프트(유나 점검표 1c6a0ced, 항목 4) — 색 있는
+                          attention(위험·질문·사람 손 필요)만 Badge, 중립 역할
+                          라벨은 muted-text span(4373 task 상태 라벨과 같은 결). */}
+                      {isAgent ? <span className="shrink-0 text-[10px] text-muted-foreground" data-testid="chat-v3-role-tag-agent">{t('roleTagAgent')}</span> : null}
                     </div>
                     <p className="mt-0.5 truncate text-xs text-muted-foreground">{thread.latest_message?.content ?? ''}</p>
                   </div>

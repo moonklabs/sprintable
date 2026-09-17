@@ -11,8 +11,13 @@ let container: HTMLDivElement;
 let root: Root;
 
 function Probe() {
-  const { me, error } = useMe();
-  return <span data-testid="probe">{error ? 'error' : me ? JSON.stringify(me) : 'loading'}</span>;
+  const { me, error, retry } = useMe();
+  return (
+    <>
+      <span data-testid="probe">{error ? 'error' : me ? JSON.stringify(me) : 'loading'}</span>
+      <button type="button" data-testid="probe-retry" onClick={retry}>retry</button>
+    </>
+  );
 }
 
 function readProbe(): string {
@@ -69,5 +74,20 @@ describe('useMe — /api/me 1콜', () => {
     fetchMock.mockResolvedValue({ ok: true, json: async () => ({ data: {} }) });
     await mountProbe();
     expect(readProbe()).toBe('error');
+  });
+
+  // 교차 PR 드리프트(유나 점검표 1c6a0ced, 항목 4) — 오류 자리에 보이는 「다시
+  // 시도」가 필요해 retry()를 신설.
+  it('⭐retry() 호출하면 다시 fetch하고, 이번엔 성공하면 error가 풀린다', async () => {
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({}) });
+    await mountProbe();
+    expect(readProbe()).toBe('error');
+
+    fetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({ data: { id: 'me-1', project_id: 'proj-1', role: 'member' } }) });
+    const retryBtn = container.querySelector('[data-testid="probe-retry"]') as HTMLElement;
+    await act(async () => { retryBtn.click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(readProbe()).toContain('"id":"me-1"');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
