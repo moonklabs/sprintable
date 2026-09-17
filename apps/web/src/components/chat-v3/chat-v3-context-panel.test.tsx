@@ -1,13 +1,14 @@
 // @vitest-environment jsdom
 //
-// story #3972 — 맥락 패널 「관련」(오늘 스냅샷 역조회, BE 0)·「열린 산출물」
-// (openArtifactId prop 있을 때만 fetch) 단위 테스트.
+// story #3972 — 맥락 패널 「관련」(오늘 스냅샷 역조회, BE 0 — needsMe는 부모가 공유
+// 캐시로 넘겨준다)·「열린 산출물」(openArtifactId prop 있을 때만 fetch) 단위 테스트.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { ChatV3ContextPanel } from './chat-v3-context-panel';
+import type { TodayNeedsMeItem } from '@/components/org-briefing/derive-today';
 
 const fetchMock = vi.fn();
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -28,6 +29,7 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
   fetchMock.mockReset();
+  fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => ({ data: null }) });
   vi.stubGlobal('fetch', fetchMock);
 });
 
@@ -37,39 +39,24 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
+const needsMeItem: TodayNeedsMeItem = {
+  id: 'g1', source: 'gate', state: 'signature',
+  workItemType: 'channel_post', workItemId: 'w1', workItemTitle: '발행',
+  requestedByName: null, reason: null, createdAt: '2026-09-16T00:00:00Z', conversationId: 'conv-1',
+};
+
 describe('ChatV3ContextPanel — 관련(오늘 스냅샷 역조회)', () => {
-  it('⭐conversationId가 needs_me[].conversation_id와 일치하면 관련 링크가 뜬다', async () => {
-    fetchMock.mockImplementation(async (url: string) => {
-      if (url === '/api/today') {
-        return {
-          ok: true, status: 200, json: async () => ({
-            data: {
-              needs_me: [{
-                source: 'gate', source_id: 'g1', kind: 'approval', risk: 'low',
-                work_item: { id: 'w1', type: 'channel_post', title: '발행' },
-                requested_by: null, reason: null, created_at: '2026-09-16T00:00:00Z',
-                conversation_id: 'conv-1',
-              }],
-              needs_me_count: 1, agent_progress: [], published_today: { count: 0, by_channel: [] }, usage: { platform: [], ad_spend: { measured: false } },
-            },
-          }),
-        };
-      }
-      return { ok: true, status: 200, json: async () => ({ data: null }) };
-    });
+  it('⭐conversationId가 needsMe[].conversationId와 일치하면 관련 링크가 뜬다', async () => {
     await act(async () => {
-      root.render(wrap(<ChatV3ContextPanel conversationId="conv-1" openArtifactId={null} />));
+      root.render(wrap(<ChatV3ContextPanel conversationId="conv-1" openArtifactId={null} needsMe={[needsMeItem]} />));
     });
-    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
     expect(container.querySelector('[data-testid="chat-v3-related-today-link"]')).not.toBeNull();
   });
 
-  it('일치하는 needs_me가 없으면 관련은 빈 상태 문구', async () => {
-    fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => ({ data: null }) });
+  it('일치하는 needsMe가 없으면 관련은 빈 상태 문구', async () => {
     await act(async () => {
-      root.render(wrap(<ChatV3ContextPanel conversationId="conv-2" openArtifactId={null} />));
+      root.render(wrap(<ChatV3ContextPanel conversationId="conv-2" openArtifactId={null} needsMe={[needsMeItem]} />));
     });
-    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
     expect(container.querySelector('[data-testid="chat-v3-related-today-link"]')).toBeNull();
   });
 });

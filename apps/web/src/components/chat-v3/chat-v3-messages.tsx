@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { EmbedCard } from '@/components/chat/embed-card';
 import { ChatV3EventCard } from './chat-v3-event-card';
 import type { ChatMessage } from '@/hooks/use-chat-sse';
+import type { TodayNeedsMeItem } from '@/components/org-briefing/derive-today';
 
 /**
  * story #3972 AC1④ — 「대화 열」은 `ChatView`(옛 `/chats` 전용, 인라인 승인 등 이
@@ -23,11 +24,12 @@ function formatDayLabel(key: string, locale: string): string {
   return new Intl.DateTimeFormat(locale, { month: 'long', day: 'numeric', weekday: 'long' }).format(new Date(`${key}T00:00:00`));
 }
 
-export function ChatV3Messages({ threadId, meId, agentName, locale, onOpenArtifactChange }: {
+export function ChatV3Messages({ threadId, meId, agentName, locale, needsMe, onOpenArtifactChange }: {
   threadId: string;
   meId: string;
   agentName: string;
   locale: string;
+  needsMe: TodayNeedsMeItem[];
   onOpenArtifactChange: (artifactId: string | null) => void;
 }) {
   const t = useTranslations('chatV3');
@@ -122,6 +124,10 @@ export function ChatV3Messages({ threadId, meId, agentName, locale, onOpenArtifa
                       <ChatV3EventCard
                         approvalTarget={m.approval_target}
                         content={m.content}
+                        // 페드루 PO 지시(2026-09-17 00:08Z) — 서명 자리는 「오늘」 한
+                        // 곳뿐(시안 SSOT) — 이 게이트가 보는 사람의 오늘 큐(needsMe)에
+                        // 없으면 막다른 길이라 서명 버튼 자체를 숨긴다(자리 0).
+                        isInTodayQueue={needsMe.some((item) => item.source === 'gate' && item.id === m.approval_target!.gate_id)}
                         onDone={() => { /* story #3972 — 낙관 갱신 0, 다음 목록 재조회 때 반영(가짜 0) */ }}
                       />
                     </div>
