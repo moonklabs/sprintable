@@ -853,6 +853,29 @@ jobs:
       - name: Scan packages/db/supabase/migrations for unclassified CONCURRENTLY usage
         run: sh scripts/lint_migrations_nontx_allowlist.sh
 
+  # story #4023(PO CHANGES 1) — check_env_drift.py/check_serving_reality.py/
+  # mcp_path_contract_guard.py의 self-expiring 선언(until) 만료 임박 경고는 그 가드들이
+  # 라이브(GCP) 대조가 있어 스케줄 전용 워크플로우(env-drift-guard.yml, 새벽 로그)에서만
+  # 돈다 — PR을 여는 사람은 못 본다. 이 job은 그 세 가드와 별개인 PR CI 전용 경량 축
+  # (GCP/gcloud 호출 0, 파일만 읽음) — 만료 14일 이내 항목을 GitHub Actions 주석으로 PR
+  # 화면에 직접 띄운다. exit 0 고정(report-only, 실패로 안 막음 — 만료 자체의 FAIL 판정은
+  # 각 가드 본체 몫).
+  expiring-declarations-warning:
+    name: Self-expiring declarations — 14-day warning (guard, story #4023)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install deps
+        run: pip install --quiet pyyaml
+      - name: Warn on declarations expiring within 14 days
+        run: python3 infra/check_expiring_declarations.py
+
   # story bda4beac: alembic-fresh-db(위)는 checkout된 브랜치(develop/PR)의 파일셋 기준이라
   # main이 develop과 다른 파일셋(ee_pricing 0146/0147 부재)일 때의 그래프 단절을 원천적으로
   # 못 잡는다(실제로 못 잡아서 prod 승격이 롤백된 그 사고). PR base가 main일 때만 도는 이
