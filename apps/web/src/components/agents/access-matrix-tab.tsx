@@ -6,10 +6,15 @@ import { Check, Loader2 } from 'lucide-react';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { cn } from '@/lib/utils';
 import { fetchWithAuth } from '@/lib/db/client';
+import { isSystemPublisher } from '@/lib/runtime-capabilities';
 
 interface OrgAgent {
   id: string;
   name: string;
+  // story #3997 CHANGES(카디르 「고르는 자리」 전수, 페드루 확定 2026-09-17) — 「시스템
+  // 발행」 행 자체를 매트릭스에서 제외하는 데 쓴다(예약 멤버의 프로젝트 접근을 회수하면
+  // 자동 발행이 막힐 수 있어, 토글이 아니라 행 제외 — 서버 측 원자적 거부는 story #3999).
+  runtime_type?: string | null;
 }
 
 interface ProjectOption {
@@ -82,7 +87,7 @@ export function AccessMatrixTab() {
       const projectsJson = await projectsRes.json() as { data?: ProjectOption[] };
       const matrixJson = await matrixRes.json() as { data?: AccessMatrixRow[] };
 
-      setAgents(agentsJson.data ?? []);
+      setAgents((agentsJson.data ?? []).filter((a) => !isSystemPublisher(a.runtime_type)));
       setProjects((projectsJson.data ?? []).slice().sort((a, b) => a.name.localeCompare(b.name)));
 
       const map: Record<string, string> = {};
