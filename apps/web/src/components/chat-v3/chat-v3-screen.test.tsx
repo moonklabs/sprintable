@@ -15,6 +15,21 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
 }));
 
+// story #4008(E-UX-OVERHAUL·v3 셸 실시간) — 실 EventSource/멀티플렉서까지 안 끌고
+// 온다(chat-list-view.test.tsx와 동일 관례). 이 파일에선 화면 하위 2곳(스레드 레일=
+// chat-v3-screen.tsx 자체, 메시지 열=chat-v3-messages.tsx)이 각자 useChatSse를
+// 부르므로, 옵션 모양(onConversationRead 유무)으로 어느 쪽 호출인지 가른다.
+const { useChatSseMock } = vi.hoisted(() => ({
+  useChatSseMock: vi.fn((_opts?: unknown) => ({ connected: true, polling: false })),
+}));
+vi.mock('@/hooks/use-chat-sse', async () => {
+  const actual = await vi.importActual<typeof import('@/hooks/use-chat-sse')>('@/hooks/use-chat-sse');
+  return {
+    ...actual,
+    useChatSse: (opts: unknown) => useChatSseMock(opts),
+  };
+});
+
 const fetchMock = vi.fn();
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -69,6 +84,7 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
   fetchMock.mockReset();
+  useChatSseMock.mockClear();
   vi.stubGlobal('fetch', fetchMock);
 });
 
@@ -218,5 +234,106 @@ describe('ChatV3Screen — TODAY_V3_ENABLED OFF(story #3972 CHANGES)', () => {
     await mount(false);
     const navLink = [...container.querySelectorAll('a')].find((a) => a.textContent === '오늘');
     expect(navLink?.getAttribute('href')).toBe('/org-briefing');
+  });
+});
+
+// story #4008(E-UX-OVERHAUL·v3 셸 실시간) AC3 — 스레드 레일 실시간(미리보기·시각·
+// 안읽음 점 갱신·최근 순 재정렬), 지금 열린 스레드는 안읽음 점을 켜지 않는다.
+describe('ChatV3Screen — 스레드 레일 실시간(story #4008 AC3)', () => {
+  const TWO_THREADS = {
+    data: [
+      {
+        id: 'conv-1',
+        participants: [{ member_id: 'me-1', name: '나', type: 'human' }, { member_id: 'agent-1', name: '담롱 온찬', type: 'agent' }],
+        latest_message: { content: '발행 승인을 올려요', created_at: '2026-09-16T06:41:00Z' },
+        unread_count: 0,
+      },
+      {
+        id: 'conv-2',
+        participants: [{ member_id: 'me-1', name: '나', type: 'human' }, { member_id: 'agent-2', name: '카디르', type: 'agent' }],
+        latest_message: { content: '이전 대화', created_at: '2026-09-15T06:41:00Z' },
+        unread_count: 0,
+      },
+    ],
+  };
+
+  function stubTwoThreads() {
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url === '/api/me') return { ok: true, status: 200, json: async () => ME };
+      if (url.startsWith('/api/conversations?')) return { ok: true, status: 200, json: async () => TWO_THREADS };
+      if (url === '/api/conversations/conv-1/messages') return { ok: true, status: 200, json: async () => MESSAGES };
+      if (url === '/api/today') return { ok: true, status: 200, json: async () => EMPTY_TODAY };
+      return { ok: true, status: 200, json: async () => ({ data: null }) };
+    });
+  }
+
+  // 레일 쪽 호출은 onConversationRead를 실어보낸다(chat-v3-messages.tsx 쪽 호출과
+  // 구분하는 유일한 축 — 두 인스턴스가 같은 목 함수를 공유하므로). 재렌더마다 새
+  // 호출이 쌓이므로(콜백이 selectedId/me를 closure로 캡처) 최신 것만 써야 한다 —
+  // 이전 렌더의 stale closure(예: selectedId=null 시점)를 잡으면 오탐(실사고로 발견).
+  function railSseOptions() {
+    return [...useChatSseMock.mock.calls]
+      .reverse()
+      .map((c) => c[0] as Record<string, unknown>)
+      .find((opts) => 'onConversationRead' in opts) as {
+        onConversationMessage?: (payload: Record<string, unknown>) => void;
+        onConversationRead?: (payload: { conversation_id: string; unread_count: number }) => void;
+        onReconnect?: () => void;
+      } | undefined;
+  }
+
+  it('⭐다른 스레드(conv-2)에 새 메시지 — 미리보기 갱신+맨 위로 재정렬+안읽음 점 켬', async () => {
+    stubTwoThreads();
+    await mount();
+    // 초기 렌더 — conv-1(최신, 자동선택)이 먼저.
+    const rowsBefore = [...container.querySelectorAll('[data-testid="chat-v3-thread-row"]')];
+    expect(rowsBefore[0]?.textContent).toContain('담롱 온찬');
+
+    const opts = railSseOptions();
+    await act(async () => {
+      opts?.onConversationMessage?.({ conversation_id: 'conv-2', content: '새 소식이요', created_at: '2026-09-17T00:00:00Z' });
+    });
+
+    const rowsAfter = [...container.querySelectorAll('[data-testid="chat-v3-thread-row"]')];
+    expect(rowsAfter[0]?.textContent).toContain('카디르');
+    expect(rowsAfter[0]?.textContent).toContain('새 소식이요');
+    expect(rowsAfter[0]?.querySelector('[data-testid="chat-v3-unread-dot"]')).not.toBeNull();
+  });
+
+  it('⭐지금 열린 스레드(conv-1, 선택됨)에 새 메시지 — 미리보기는 갱신되지만 안읽음 점은 안 켠다', async () => {
+    stubTwoThreads();
+    await mount();
+    const opts = railSseOptions();
+    await act(async () => {
+      opts?.onConversationMessage?.({ conversation_id: 'conv-1', content: '방금 온 답장', created_at: '2026-09-17T00:01:00Z' });
+    });
+    const rowsAfter = [...container.querySelectorAll('[data-testid="chat-v3-thread-row"]')];
+    expect(rowsAfter[0]?.textContent).toContain('방금 온 답장');
+    expect(rowsAfter[0]?.querySelector('[data-testid="chat-v3-unread-dot"]')).toBeNull();
+  });
+
+  it('⭐conversation.read 이벤트 — 서버 truth로 안읽음 수를 되돌린다', async () => {
+    stubTwoThreads();
+    await mount();
+    const opts = railSseOptions();
+    await act(async () => {
+      opts?.onConversationMessage?.({ conversation_id: 'conv-2', content: '새 소식이요', created_at: '2026-09-17T00:00:00Z' });
+    });
+    expect([...container.querySelectorAll('[data-testid="chat-v3-thread-row"]')][0]?.querySelector('[data-testid="chat-v3-unread-dot"]')).not.toBeNull();
+
+    await act(async () => {
+      opts?.onConversationRead?.({ conversation_id: 'conv-2', unread_count: 0 });
+    });
+    expect([...container.querySelectorAll('[data-testid="chat-v3-thread-row"]')][0]?.querySelector('[data-testid="chat-v3-unread-dot"]')).toBeNull();
+  });
+
+  it('⭐재연결 — 목록을 통째로 재조회한다(AC4, 레일 쪽)', async () => {
+    stubTwoThreads();
+    await mount();
+    const callsBefore = fetchMock.mock.calls.filter((c) => String(c[0]).startsWith('/api/conversations?')).length;
+    const opts = railSseOptions();
+    await act(async () => { opts?.onReconnect?.(); await Promise.resolve(); await Promise.resolve(); });
+    const callsAfter = fetchMock.mock.calls.filter((c) => String(c[0]).startsWith('/api/conversations?')).length;
+    expect(callsAfter).toBe(callsBefore + 1);
   });
 });

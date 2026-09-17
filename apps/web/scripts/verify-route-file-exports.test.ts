@@ -187,6 +187,10 @@ describe('scanRepo — story #3760 AC1/AC4(실 트리 실행)', () => {
   // 불요해짐. hitl·[id] 디렉토리도 dangling 없이 통째 제거)로 101→98.
   // story #3972(2026-09-16) — app/chat/layout.tsx+page.tsx 신설(시안 ② 3단 허브,
   // 기능 플래그 뒤)로 98→100.
+  // story #4008(2026-09-17) — app/chat/layout.tsx 삭제 + app/(v3)/layout.tsx 신설(그룹
+  // 레이아웃 하나로 통합, RealtimeProvider 공급) + app/chat/page.tsx가 app/(v3)/chat/
+  // page.tsx로 이동 — 파일 수는 그대로 100(−1 챗 레이아웃, +1 v3 그룹 레이아웃, 이동은
+  // 순증감 0).
   it('실 트리(apps/web/src/app) — 라우트 파일 100개·위반 0건', () => {
     const { violations, fileCount } = scanRepo(APP_ROOT);
     expect(fileCount).toBe(100);
