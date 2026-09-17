@@ -468,7 +468,7 @@
   },
   "todayV3": {
     "title": "오늘",
-    "headerSummary": "눌러야 할 결정 {decisions}개 · 에이전트 {agents}명이 일하고 있어요.",
+    "headerSummary": "눌러야 할 결정 {decisions}개 · 에이전트 {agents}명이 내 일을 하고 있어요.",
     "loadErrorTitle": "불러오지 못했어요",
     "decisionsSectionTitle": "내 결정 {count}",
     "decisionsEmptyTitle": "모두 확인했어요",
