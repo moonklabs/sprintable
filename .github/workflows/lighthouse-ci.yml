@@ -331,6 +331,7 @@ jobs:
       # 상태가 되고 22분 run을 또 써야 하므로, 목록 자체는 그대로 두고 사실만 기록한다 —
       # 목록 재검토는 후속 카드.
       - name: Run Lighthouse CI
+        id: lhci
         uses: treosh/lighthouse-ci-action@v11
         with:
           urls: |
@@ -363,14 +364,24 @@ jobs:
       # GHA 기본 동작상 아래 검증 스텝 전부가 skipped로 건너뛰어진다. 그러면 "빨강이
       # 떴다"만 남고 정작 필요한 "어느 화면이 몇으로 나빠졌는지" 표 자체가 안 나온다 —
       # 이 카드 내내 지켜온 축("로그가 스스로 원인을 말하게 하기")과 정반대 결과다.
-      # `success() || failure()`(취소는 제외)로 Run Lighthouse CI가 실패해도 이 검증
-      # 스텝들이 계속 돌아 manifest.json을 직접 읽어 표를 낸다. `.lighthouseci/manifest.
-      # json`은 assert 실패와 무관하게 collect 단계가 이미 다 써 둔 파일이라(assert는
-      # collect 이후 별도 단계) 이 판정 자체는 여전히 유효하다 — 단 collect 자체가
-      # 통째로 깨진 경우(그 파일조차 없음)는 "측정 자체가 안 됐다"로 분명히 갈라야
-      # 하므로 존재 확認을 먼저 한다(흔적 단언과 같은 모양).
+      # `Run Lighthouse CI`가 실패해도 이 검증 스텝들이 계속 돌아 manifest.json을 직접
+      # 읽어 표를 낸다. `.lighthouseci/manifest.json`은 assert 실패와 무관하게 collect
+      # 단계가 이미 다 써 둔 파일이라(assert는 collect 이후 별도 단계) 이 판정 자체는
+      # 여전히 유효하다 — 단 collect 자체가 통째로 깨진 경우(그 파일조차 없음)는
+      # "측정 자체가 안 됐다"로 분명히 갈라야 하므로 존재 확認을 먼저 한다(흔적
+      # 단언과 같은 모양).
+      #
+      # story #4032(PO 지적, 2차) — 조건을 `success() || failure()`(job 전체 기준)가
+      # 아니라 `steps.lhci.conclusion`(그 스텝 자신 기준)으로 좁힌다. job 전체 기준이면
+      # Build project·backend기동 등 **더 앞선** 스텝이 깨져도 참이 돼, lhci 자체는
+      # 아예 안 돌았는데(그럼 결과는 `skipped`) 검증 스텝은 도는 바람에 "puppeteerScript
+      # 가 한 번도 안 불렸다 — 설정 배치·모듈 설치 배관 재점검"류 문구가 뜬다 — 진짜
+      # 원인(빌드/기동 실패)과 무관한 오귀속이다(이 카드 내내 태운 그 종류의 실수).
+      # lhci가 안 돌면 conclusion이 `skipped`라 이 조건 자체가 거짓이 되어 검증 스텝도
+      # 같이 skip — 오귀속 문구 자체가 안 뜬다. lhci가 돌고 실패한 경우(=이 스텝들이
+      # 실제로 겨냥하는 경우)만 그대로 돌아 표를 낸다.
       - name: Verify puppeteer auth script actually ran (trace count)
-        if: success() || failure()
+        if: steps.lhci.conclusion == 'success' || steps.lhci.conclusion == 'failure'
         run: |
           set -euo pipefail
           if [ ! -f ./lighthouse-auth-trace.log ]; then
@@ -387,7 +398,7 @@ jobs:
 
       - name: Verify authenticated screens measured (not /login) + write summary
         id: verify
-        if: success() || failure()
+        if: steps.lhci.conclusion == 'success' || steps.lhci.conclusion == 'failure'
         run: |
           python3 -c "
           import json, sys, os
@@ -456,7 +467,7 @@ jobs:
       # (공개 링크)로 올렸다. puppeteerScript 전환이 그 노출 경로 자체를 없앴는지 매 run
       # 실측으로 확認한다(값은 안 찍고 개수만 — 새는 게 있어도 이 로그에 다시 안 남게).
       - name: Verify no session token leakage in reports
-        if: success() || failure()
+        if: steps.lhci.conclusion == 'success' || steps.lhci.conclusion == 'failure'
         run: |
           set -euo pipefail
           if [ ! -d .lighthouseci ] || [ -z "$(ls -A .lighthouseci/*.json 2>/dev/null)" ]; then
@@ -476,7 +487,7 @@ jobs:
           fi
 
       - name: Comment PR with Lighthouse results
-        if: (success() || failure()) && github.event_name == 'pull_request'
+        if: (steps.lhci.conclusion == 'success' || steps.lhci.conclusion == 'failure') && github.event_name == 'pull_request'
         continue-on-error: true
         uses: actions/github-script@v7
         env:
