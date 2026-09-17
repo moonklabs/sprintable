@@ -168,3 +168,79 @@ async def test_insights_board_response_includes_published_in_window():
             assert result["published_in_window"]["by_channel"] == [{"channel_kind": "threads", "count": 1}]
     finally:
         await engine.dispose()
+
+
+async def _seed_site_post_with_d7_view(session, *, org_id, published_at, views):
+    """story #3978 CHANGES — SitePost 1건 + 그 D+7 organic captured InsightSnapshot
+    1건(views=주어진 값). test_3502_insights_board.py::_seed_site_post와 동형(중복
+    재발명 아님, 이 파일 self-contained 유지를 위해 최소 인라인)."""
+    from app.models.site_post import SitePost
+    from app.models.insight_snapshot import InsightSnapshot
+
+    work_item_id = uuid.uuid4()
+    post = SitePost(
+        id=uuid.uuid4(), org_id=org_id, lang="ko", slug=f"post-{uuid.uuid4().hex[:8]}", title="제목",
+        summary="요약", tags=[], body_md="본문", published_at=published_at, source_story_id=work_item_id,
+        gate_id=uuid.uuid4(),
+    )
+    session.add(post)
+    await session.commit()
+    snap = InsightSnapshot(
+        id=uuid.uuid4(), org_id=org_id, publication_id=post.id, publication_kind="site_post",
+        work_item_id=work_item_id, channel="hosted_site", due_at=published_at + timedelta(days=7),
+        status="captured", normalized={"views": views},
+    )
+    session.add(snap)
+    await session.commit()
+    return post.id
+
+
+@pytest.mark.anyio
+async def test_views_in_window_sums_captured_d7_views_page_independent():
+    """CHANGES AC — 페이지 크기 1로 불러도 합이 같다(전체 집계가 rows[] 페이지네이션과
+    무관함을 고정)."""
+    from app.services.insights_board import list_insights_board
+
+    engine, Session = await _session_factory()
+    try:
+        now = datetime.now(timezone.utc)
+        async with Session() as s:
+            org_id, _project_id = await _seed_org_project(s)
+            await _seed_site_post_with_d7_view(s, org_id=org_id, published_at=now - timedelta(days=1), views=100)
+            await _seed_site_post_with_d7_view(s, org_id=org_id, published_at=now - timedelta(days=2), views=50)
+
+            full_page = await list_insights_board(s, org_id=org_id, window="7d", limit=50)
+            one_page = await list_insights_board(s, org_id=org_id, window="7d", limit=1)
+
+        assert full_page["views_in_window"] == {"sum": 150, "captured_rows": 2, "total_rows": 2}
+        assert one_page["views_in_window"] == full_page["views_in_window"]  # 페이지 크기 무관
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_views_in_window_null_when_nothing_captured():
+    """CHANGES AC — 창 안에 발행은 있어도 D+7 captured 스냅샷이 0건이면 null(미측정,
+    0을 지어내지 않는다)."""
+    from app.services.insights_board import list_insights_board
+    from app.models.site_post import SitePost
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, _project_id = await _seed_org_project(s)
+            # 스냅샷 없이 발행만(아직 D+7 캡처 시점이 안 됐거나 실패한 상황을 흉내).
+            post = SitePost(
+                id=uuid.uuid4(), org_id=org_id, lang="ko", slug=f"post-{uuid.uuid4().hex[:8]}", title="제목",
+                summary="요약", tags=[], body_md="본문",
+                published_at=datetime.now(timezone.utc) - timedelta(days=1),
+                source_story_id=uuid.uuid4(), gate_id=uuid.uuid4(),
+            )
+            s.add(post)
+            await s.commit()
+
+            result = await list_insights_board(s, org_id=org_id, window="7d")
+
+        assert result["views_in_window"] is None
+    finally:
+        await engine.dispose()
