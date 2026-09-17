@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { OperatorTextarea } from '@/components/ui/operator-control';
 
 /**
  * story #3964(AC2)가 지은 `today-v3-reason-dialog.tsx`(얇은 Dialog-원시 조립,
@@ -40,14 +41,14 @@ export function ChatV3ReasonDialog({
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
-        <textarea
+        <OperatorTextarea
           rows={3}
           value={reason}
           onChange={(e) => setReason(e.target.value)}
           placeholder={placeholder}
           aria-label={placeholder}
           data-testid="chat-v3-reason-textarea"
-          className="w-full resize-none rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+          className="resize-none"
         />
         {error ? (
           <p role="alert" aria-live="assertive" className="text-xs text-destructive">{error}</p>
