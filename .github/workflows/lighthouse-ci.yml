@@ -287,9 +287,16 @@ jobs:
         if: github.event_name == 'pull_request'
         continue-on-error: true
         uses: actions/github-script@v7
+        env:
+          # story #4029 CHANGES 2(PO 지적) — 표 안에 백틱·`${`가 섞이면(예: 어떤 URL/문구가
+          # 우연히 이 패턴을 포함) JS 템플릿 리터럴에 `${{ }}`로 직접 꽂는 순간 스크립트
+          # 자체가 깨진다 — `${{ }}`는 실행 前 텍스트 치환이라 그 내용이 뭐든 그대로 JS
+          # 소스에 섞여 들어간다. env로 넘기면 값이 문자열 그대로 process.env에 실려
+          # JS 파싱을 안 거치므로 내용에 무엇이 있든 안전하다.
+          LH_TABLE: ${{ steps.verify.outputs.table }}
         with:
           script: |
-            const table = `${{ steps.verify.outputs.table }}`;
+            const table = process.env.LH_TABLE || '';
             const comment = `## ⚡ Lighthouse CI Results
 
             인증 세션으로 실측(story #4029) — 전체 리포트는 이 워크플로 run 로그의
