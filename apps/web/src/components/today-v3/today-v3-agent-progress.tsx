@@ -6,6 +6,7 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import type { TodayAgentProgressItem } from '@/components/org-briefing/derive-today';
 import { TodayV3ReasonDialog } from './today-v3-reason-dialog';
+import { fetchWithAuth } from '@/lib/db/client';
 
 /**
  * story #3970(E-UX-OVERHAUL·「오늘」 구현 5/N) — #3962/CHANGES-2가 지은 「정지」
@@ -29,7 +30,7 @@ import { TodayV3ReasonDialog } from './today-v3-reason-dialog';
 const CANCELLABLE_STATUSES = new Set(['queued', 'held', 'running', 'hitl_pending']);
 
 async function postCancelRun(runId: string, reason?: string): Promise<{ ok: true } | { ok: false; status: number }> {
-  const res = await fetch(`/api/agent-runs/${runId}/cancel`, {
+  const res = await fetchWithAuth(`/api/agent-runs/${runId}/cancel`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ reason: reason?.trim() || null }),
