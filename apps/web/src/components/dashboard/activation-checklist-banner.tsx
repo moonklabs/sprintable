@@ -7,10 +7,22 @@ import { useTranslations } from 'next-intl';
 import { ChevronDown, ChevronUp, Circle, CircleCheck, Loader2 } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useActivationStatus, type ActivationState } from '@/hooks/use-activation-status';
 import { createFirstInstructionConversation } from '@/lib/onboarding/first-instruction';
 import { cn } from '@/lib/utils';
+
+// story #4032(실측 — Lighthouse CI 인증화면 6곳 전부 CLS>0.1, layout-shift-elements 감사
+// 상위 기여요소가 6곳 모두 이 배너 바로 아래 그리드였다) — 진짜 원인은 `useActivationStatus`
+// 의 `state`가 마운트 직후 항상 `null`로 시작해(hooks/use-activation-status.ts:90) 이
+// 컴포넌트가 그 순간 `null`을 반환, 부모 `<div className="px-3 pt-3 empty:hidden">`가
+// 빈 채로 0높이로 접혀 있다가 `useEffect`의 비동기 fetch가 끝나 `state`가 채워지는
+// 순간 실 배너가 나타나며 그 아래 전체(모든 페이지 공통 그리드)를 밀어낸다 — 화면마다
+// 다른 원인이 아니라 이 배너 하나가 공통 뿌리(6곳 전부에서 거의 동일한 CLS 기여값
+// 0.134로 재현). 처방: "아직 모른다"와 "완주해서 필요 없다"를 더 이상 같은 null로
+// 뭉치지 않고, 전자는 실 배너와 같은 Alert 박스(테두리·패딩 동일)에 스켈레톤을 채워
+// 자리를 미리 잡는다 — 그 자리가 실 콘텐츠와 같은 박스라 나타날 때 높이가 안 바뀐다.
 
 /**
  * story #3159(retention·최소층) — 가입 후 남은 activation 단계를 상시 노출(완주 유도).
@@ -39,7 +51,51 @@ export function ActivationChecklistBanner() {
     }
   });
 
-  if (allComplete || !state) return null;
+  // story #3196 ④ — BE steps는 5개(signed_up 포함)인데 이 목록은 4개만 그려 "4/5 완료"
+  // 진행률과 눈에 보이는 항목 수가 안 맞았다(5번째가 뭔지 화면이 말 안 함). signed_up은
+  // 이 배너에 도달했다는 사실 자체가 이미 참(비인터랙티브 li로만 — 첫 지시 항목과 달리
+  // 딥링크 대상이 없다, 이미 지난 단계).
+  // story #4032 — 로딩 스켈레톤(아래)이 이 배열의 길이(5)로 자리를 잡아야 실 콘텐츠가
+  // 도착했을 때 행 수가 안 바뀐다 — state 유무와 무관해 가드보다 앞으로 옮겼다(단일
+  // 출처, 매직넘버 방지).
+  const stepItems: { key: keyof ActivationState['steps']; label: string }[] = [
+    { key: 'signed_up', label: t('stepSignedUp') },
+    { key: 'email_verified', label: t('stepEmailVerified') },
+    { key: 'org_created', label: t('stepOrgCreated') },
+    { key: 'agent_connected', label: t('stepAgentConnected') },
+    { key: 'first_roundtrip', label: t('stepFirstRoundtrip') },
+  ];
+
+  if (allComplete) return null;
+  // story #4032 — "완주해서 필요 없다"(위 allComplete)와 "아직 모른다"(여기, fetch
+  // 미완료)를 더 이상 같은 null로 뭉치지 않는다. 실 배너와 같은 Alert 박스에 스켈레톤을
+  // 채워 자리를 미리 잡아 두면, fetch가 끝나 실 콘텐츠로 바뀔 때 박스 높이가 그대로라
+  // 그 아래(모든 페이지 공통 그리드)가 밀리지 않는다.
+  if (!state) {
+    return (
+      <Alert variant="info" className="relative" aria-busy="true">
+        {/* story #4032 — 높이는 실 텍스트의 line-height에 맞춘다(폭은 CLS에 안 실린다):
+            AlertTitle은 leading-5(20px), AlertDescription은 text-xs leading-relaxed
+            (~19.5px→h-5로 근사), li 텍스트는 text-sm 기본 line-height(20px, story #3939가
+            5행 전부를 이 box로 통일해 둔 것과 동형) — 전부 h-5로 맞추면 실 콘텐츠 교체
+            시 박스 높이가 유지된다. */}
+        <AlertTitle>
+          <Skeleton variant="text" className="h-5 w-32" />
+        </AlertTitle>
+        <AlertDescription>
+          <Skeleton variant="text" className="mt-1 h-5 w-48" />
+        </AlertDescription>
+        <ul className="col-start-2 mt-2 space-y-1.5">
+          {stepItems.map(({ key }) => (
+            <li key={key} className="flex items-center gap-1.5 rounded px-1 py-0.5">
+              <Skeleton variant="circle" className="size-3.5 shrink-0" />
+              <Skeleton variant="text" className="h-5 w-24" />
+            </li>
+          ))}
+        </ul>
+      </Alert>
+    );
+  }
   // story #3610(3607 잔여) CHANGES-2(유나 확認·PO 채택 2026-09-07) — orgId(계정 기본
   // org, me.org_id)와 비교하던 최초판을 폐기 — BE가 이미 "요청 org(X-Org-Id)==판정
   // org"를 판정해 낸 불리언을 그대로 쓴다(다른 프레임 값 2개를 FE가 다시 맞대지
@@ -81,18 +137,6 @@ export function ActivationChecklistBanner() {
       setNavigatingToInstruction(false);
     }
   };
-
-  // story #3196 ④ — BE steps는 5개(signed_up 포함)인데 이 목록은 4개만 그려 "4/5 완료"
-  // 진행률과 눈에 보이는 항목 수가 안 맞았다(5번째가 뭔지 화면이 말 안 함). signed_up은
-  // 이 배너에 도달했다는 사실 자체가 이미 참(비인터랙티브 li로만 — 첫 지시 항목과 달리
-  // 딥링크 대상이 없다, 이미 지난 단계).
-  const stepItems: { key: keyof ActivationState['steps']; label: string }[] = [
-    { key: 'signed_up', label: t('stepSignedUp') },
-    { key: 'email_verified', label: t('stepEmailVerified') },
-    { key: 'org_created', label: t('stepOrgCreated') },
-    { key: 'agent_connected', label: t('stepAgentConnected') },
-    { key: 'first_roundtrip', label: t('stepFirstRoundtrip') },
-  ];
 
   if (collapsed) {
     return (
