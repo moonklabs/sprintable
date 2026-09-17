@@ -10,7 +10,12 @@ from sqlalchemy import and_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
+from app.dependencies.auth import (
+    AuthContext,
+    get_current_user,
+    get_verified_org_id,
+    is_agent_credential,
+)
 from app.dependencies.database import get_db
 from app.models.notification_preference import NotificationPreference
 from app.models.team import TeamMember
@@ -54,7 +59,7 @@ async def _get_member(
     E-MEMBER-SSOT AC2-2: API키→team_member; JWT 휴먼→team_member 우선(기존 preference
     키 보존), 없으면 org_member(grant-only 휴먼)로 fallback (35a0691e 잔여 해소).
     """
-    is_api_key = bool(auth.claims.get("app_metadata", {}).get("api_key_id"))
+    is_api_key = is_agent_credential(auth)
     if is_api_key:
         member = (await db.execute(
             select(TeamMember).where(TeamMember.id == uuid.UUID(auth.user_id))

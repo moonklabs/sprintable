@@ -252,13 +252,14 @@ async def _chat_predicate_inputs(
     분기 자체를 `false()`로 완전히 닫게 한다(doc-source 분기는 전혀 영향받지 않음 — 한 caller
     신원 해소 실패가 전체 응답을 poison하지 않는다는 B1 불변식과 동형)."""
     from app.routers.conversations import _resolve_member  # lazy: 순환 import 회피(기존 관례)
+    from app.dependencies.auth import is_agent_credential  # lazy: 동일 사유(기존 관례)
 
     try:
         sender = await _resolve_member(auth, org_id, db, project_id=None)
     except HTTPException:
         return None, None
     caller_member_id = sender.id
-    is_api_key = bool(auth.claims.get("app_metadata", {}).get("api_key_id"))
+    is_api_key = is_agent_credential(auth)
     return caller_member_id, is_api_key
 
 

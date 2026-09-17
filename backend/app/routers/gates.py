@@ -10,7 +10,12 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.error_envelope import human_error
-from app.dependencies.auth import get_current_user, get_scope_context, get_verified_org_id
+from app.dependencies.auth import (
+    get_current_user,
+    get_scope_context,
+    get_verified_org_id,
+    is_agent_credential,
+)
 from app.dependencies.database import get_db
 from app.services.agent_onboarding_config import resolve_locale_from_request
 from app.services.i18n_catalog import t
@@ -2107,7 +2112,7 @@ async def withdraw_gate_endpoint(
         # 흘리지 않는다. 본인 요청이 아니면 404(admin은 /void를 쓸 것).
         raise HTTPException(status_code=404, detail="Gate not found")
 
-    is_api_key = bool(auth.claims.get("app_metadata", {}).get("api_key_id"))
+    is_api_key = is_agent_credential(auth)
     actor_type = "agent" if is_api_key else "human"
 
     try:

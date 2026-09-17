@@ -14,7 +14,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.dependencies.auth import AuthContext
+from app.dependencies.auth import AuthContext, is_agent_credential
 from app.models.member import AgentProjectProfile, Member, MemberIdentityAlias
 from app.models.project import OrgMember
 from app.models.project_access import ProjectAccess
@@ -213,7 +213,7 @@ async def _resolve_member_legacy(
     project_id: uuid.UUID | None = None,
 ) -> ResolvedMember:
     """레거시 신원 해소 — API키(에이전트): team_member.id / JWT(휴먼): org_member.id + has_project_access."""
-    is_api_key = bool(auth.claims.get("app_metadata", {}).get("api_key_id"))
+    is_api_key = is_agent_credential(auth)
 
     if is_api_key:
         tm = (await session.execute(
@@ -290,7 +290,7 @@ async def _resolve_member_anchor(
     휴먼(JWT): members.id(=org_member.id), role=members.org_role, name=users.display_name
     (story #3755 — email 폴백 0, 없으면 None).
     """
-    is_api_key = bool(auth.claims.get("app_metadata", {}).get("api_key_id"))
+    is_api_key = is_agent_credential(auth)
 
     if is_api_key:
         member_id = uuid.UUID(auth.user_id)
@@ -584,7 +584,7 @@ async def is_caller_member(
     ``user_id`` 컬럼(동일 users.id 공간)과 비교한다 — org_member/members 어느 쪽도 개입하지 않음.
     """
     caller_id = uuid.UUID(auth.user_id)
-    is_api_key = bool(auth.claims.get("app_metadata", {}).get("api_key_id"))
+    is_api_key = is_agent_credential(auth)
     if is_api_key:
         return member_id == caller_id
     result = await session.execute(
@@ -636,7 +636,7 @@ async def resolve_auth_member(
     API키(에이전트): team_member.id. JWT 휴먼: team_member(project 스코프) 우선 → org_member.
     conversations._resolve_member와 동형 — 공유 SSOT.
     """
-    is_api_key = bool(auth.claims.get("app_metadata", {}).get("api_key_id"))
+    is_api_key = is_agent_credential(auth)
     if is_api_key:
         tm = (await session.execute(
             select(TeamMember).where(TeamMember.id == uuid.UUID(auth.user_id))

@@ -53,7 +53,7 @@ from app.core.security import (
     create_refresh_token,
 )
 from app.core.rate_limit import limiter, resend_verification_limiter
-from app.dependencies.auth import AuthContext, get_current_user
+from app.dependencies.auth import AuthContext, get_current_user, is_agent_credential
 from app.services.project_auth import (
     accessible_project_ids_in_org, first_accessible_project_id, has_project_access,
 )
@@ -1820,9 +1820,21 @@ def _requires_interactive_session(auth: AuthContext) -> bool:
     "사람"으로 예외처리하지만(사람 UI 작업=0 AU 스펙), 여기선 hu_live_*(휴먼 개인키)도
     sk_live_*(에이전트키)와 동일하게 막아야 한다: 이메일 링크는 API키 세션과 무관하게
     브라우저에서 별도로 완결되므로 API키가 "인증 강도"에 아무 기여를 안 하고, 스토리 원문이
-    "탈취 세션 또는 API키"를 대칭 위협으로 서술한다 — 한쪽만 막으면 공격자가 그쪽으로 우회."""
+    "탈취 세션 또는 API키"를 대칭 위협으로 서술한다 — 한쪽만 막으면 공격자가 그쪽으로 우회.
+
+    ⚠️**`dt_live_`(기기 자격증명)도 같은 이유로 막아야 한다** — 초판은 `api_key_id`·
+    `human_api_key_id` 두 필드만 봤고, `dt_live_` 는 그 둘을 **다 일부러 안 실어**(§5.2.1)
+    정확히 위 docstring 이 경고한 **우회로**가 됐다. 통과하면 라우터가 다음 줄에서
+    `_get_user_by_id(uuid.UUID(auth.user_id))` 를 부르는데, `dt_live_` 의 `user_id` 는
+    **agent member id(`TeamMember.id`)** 라 `users.id` 공간이 아니다 — 즉 이 가드가
+    막으려던 "API키가 인증 강도에 기여하지 않는" 상태가 그대로 성립한다.
+    `is_agent_credential` 이 `dt_live_`·`sk_live_` 를 함께 True 로 보므로 그 하나로
+    두 경로가 동시에 막힌다(휴먼 개인키는 아래에서 따로 — 그쪽은 판별자가 False 다)."""
     app_metadata = auth.claims.get("app_metadata", {})
-    return bool(app_metadata.get("api_key_id")) or bool(app_metadata.get("human_api_key_id"))
+    return (
+        is_agent_credential(auth)
+        or bool(app_metadata.get("human_api_key_id"))
+    )
 
 
 @router.post("/set-password/request")
@@ -2219,7 +2231,16 @@ async def get_auth_me(
     ambiguous = False
     accessible_ids: list[str] = []
     email_verified: bool | None = None
-    if meta.get("api_key_id"):
+    # ⛔`api_key_id` truthiness 로 판정하지 말 것 — `dt_live_`(기기 자격증명)는 그 필드를
+    # 일부러 안 실어(§5.2.1) 이 분기가 **human 으로 떨어졌다**. 그런데 이 엔드포인트는
+    # **MCP 서버의 컨텍스트 해소 경로**다(`sprintable_mcp/api_client.py::ensure_auth_context`
+    # 가 `GET /api/v2/auth/me` 를 호출해 `resolved_default_project_id` 를 키별 1회 캐시한다).
+    # human 으로 오분류되면 `resolved_default_project_id` 가 영구히 None → 멀티프로젝트
+    # 기기에서 `require_project_id()` 가 매 툴 호출을 422 로 막는다. 게다가 human 분기는
+    # `email_verified` 를 `User.id == auth.user_id`(= agent member id)로 조회하는데, 그건
+    # 애초에 다른 id 공간이라 무의미한 조회다. 판정을 과금 축과 공유하는 `is_agent_credential`
+    # 로 맞춘다 — human(JWT·`hu_live_`)은 종전대로 아래 else 로 간다(무회귀).
+    if is_agent_credential(auth):
         try:
             member_id = uuid.UUID(auth.user_id)
             org_id = uuid.UUID(str(auth.org_id or meta.get("org_id")))

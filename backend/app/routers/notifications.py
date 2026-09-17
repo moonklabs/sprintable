@@ -6,7 +6,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.pagination import assemble_page, decode_cursor
-from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
+from app.dependencies.auth import (
+    AuthContext,
+    get_current_user,
+    get_verified_org_id,
+    is_agent_credential,
+)
 from app.dependencies.database import get_db, get_read_db
 from app.dependencies.ownership import _is_org_admin
 from app.models.team import TeamMember
@@ -46,7 +51,7 @@ async def _resolve_notification_user_id(auth: AuthContext, db: AsyncSession) -> 
                   (알림 dispatch 시 user_id IS NOT NULL 조건으로 agent 제외됨 → 빈 배열 200 반환)
     JWT 경로: auth.user_id = user_id → 직접 사용
     """
-    is_api_key = bool(auth.claims.get("app_metadata", {}).get("api_key_id"))
+    is_api_key = is_agent_credential(auth)
     if is_api_key:
         # team_members projection VIEW — multi-project member N 행. id/user_id 동형이라 .limit(1)(아무 행 OK).
         result = await db.execute(

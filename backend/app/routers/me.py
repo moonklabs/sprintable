@@ -6,7 +6,7 @@ from sqlalchemy import update as sa_update
 from sqlalchemy.orm import joinedload
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies.auth import AuthContext, get_current_user
+from app.dependencies.auth import AuthContext, get_current_user, is_agent_credential
 from app.dependencies.database import get_db
 from app.routers.auth import _OAUTH_CONFIGS
 from app.models.member import Member
@@ -132,7 +132,7 @@ async def get_me(
     auth: AuthContext = Depends(get_current_user),
 ) -> MeResponse:
     uid = uuid.UUID(auth.user_id)
-    is_api_key = bool(auth.claims.get("app_metadata", {}).get("api_key_id"))
+    is_api_key = is_agent_credential(auth)
 
     if member_id:
         # S20(authz-coverage 스캐너 발견 — update_me엔 있는 self-check가 이 GET엔 없었다):
@@ -347,7 +347,7 @@ async def update_me(
     # E-ONBOARDING S1: 타겟 member를 auth에서 파생 — client Query 강제 제거(누락 시 422 해소).
     #   member_id를 명시해도 **본인 소유 member만** 매칭(ownership 강제 — 남의 프로필 변경 차단).
     uid = uuid.UUID(auth.user_id)
-    is_api_key = bool(auth.claims.get("app_metadata", {}).get("api_key_id"))
+    is_api_key = is_agent_credential(auth)
 
     if member_id is not None:
         # 명시 member_id는 호출자 본인 것일 때만 (api_key=TeamMember.id 본인, JWT=user_id 본인)

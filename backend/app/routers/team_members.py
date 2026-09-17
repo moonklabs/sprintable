@@ -8,7 +8,12 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
+from app.dependencies.auth import (
+    AuthContext,
+    get_current_user,
+    get_verified_org_id,
+    is_agent_credential,
+)
 from app.dependencies.database import get_db, get_read_db
 from app.dependencies.ownership import _is_org_admin, assert_agent_owner
 from app.models.pm import Story
@@ -206,7 +211,7 @@ _ROLE_RANK: dict[str, int] = {"owner": 4, "admin": 3, "manager": 2, "member": 1}
 
 async def _resolve_actor(auth: AuthContext, session: AsyncSession, org_id: uuid.UUID) -> TeamMember | None:
     """auth context → TeamMember 조회. API Key: user_id = member.id, JWT: user_id = supabase user_id."""
-    is_api_key = bool(auth.claims.get("app_metadata", {}).get("api_key_id"))
+    is_api_key = is_agent_credential(auth)
     if is_api_key:
         result = await session.execute(
             select(TeamMember).where(TeamMember.id == uuid.UUID(auth.user_id))

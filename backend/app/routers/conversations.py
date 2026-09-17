@@ -16,7 +16,12 @@ from sqlalchemy.orm import aliased
 
 from app.core.config import settings
 from app.core.pagination import assemble_page, decode_cursor
-from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
+from app.dependencies.auth import (
+    AuthContext,
+    get_current_user,
+    get_verified_org_id,
+    is_agent_credential,
+)
 from app.dependencies.database import get_db, get_read_db
 from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
 from app.models.doc import Doc
@@ -191,7 +196,7 @@ async def _resolve_member(
     project_id: uuid.UUID | None = None,
 ) -> "ResolvedMember | TeamMember":
     """TeamMember 우선; grant-only 휴먼이면 ResolvedMember(org_member.id) 반환."""
-    is_api_key = bool(auth.claims.get("app_metadata", {}).get("api_key_id"))
+    is_api_key = is_agent_credential(auth)
     if is_api_key:
         tm = (await db.execute(select(TeamMember).where(TeamMember.id == uuid.UUID(auth.user_id)))).scalars().first()
         if tm is None:
@@ -225,7 +230,7 @@ async def _effective_org_role(
     project_y의 agent-only 대화를 admin-bypass로 열람할 수 있었다(참가자 아님에도 200). fix=
     project_id가 주어지면 **그 project 전용** effective role을 get_project_role(P가 쓴 SSOT)로
     재평가 — 휴먼은 원래대로 org-wide OrgMember.role(진짜 org 전체 권한이라 무관)."""
-    if bool(auth.claims.get("app_metadata", {}).get("api_key_id")):
+    if is_agent_credential(auth):
         if project_id is None:
             return sender.role  # 레거시 폴백(project_id 미전달 호출부 — 현재 전 호출부가 전달함)
         from app.services.project_auth import get_project_role
@@ -1925,7 +1930,7 @@ async def _can_read_conversation(
             project_admin_valid_correlated,
         )
 
-        is_api_key = bool(auth.claims.get("app_metadata", {}).get("api_key_id"))
+        is_api_key = is_agent_credential(auth)
 
         admin_bypass_eligible = (
             project_admin_valid_correlated(

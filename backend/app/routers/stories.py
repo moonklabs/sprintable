@@ -12,7 +12,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.pagination import assemble_page, decode_cursor
-from app.dependencies.auth import AuthContext, enforce_body_context, get_current_user, get_project_scoped_org_id, get_verified_org_id
+from app.dependencies.auth import (
+    AuthContext,
+    enforce_body_context,
+    get_current_user,
+    get_project_scoped_org_id,
+    get_verified_org_id,
+    is_agent_credential,
+)
 from app.dependencies.database import get_db, get_read_db
 from app.models.deletion_audit import DeletionAuditLog
 from app.models.pm import Goal, Story, StoryActivity, StoryComment
@@ -1941,7 +1948,7 @@ async def bulk_update_stories(
                     if update_data["status"] == "done":
                         from app.services.gate_enforce import enforce_gate
                         _g_actor_type = (
-                            "agent" if auth.claims.get("app_metadata", {}).get("api_key_id")
+                            "agent" if is_agent_credential(auth)
                             else "human"
                         )
                         await enforce_gate(
@@ -2572,7 +2579,7 @@ async def update_story_status(
             from app.services.gate_enforce import enforce_gate
             # HIGH②: actor_type 은 인증 컨텍스트에서 신뢰 도출(API 키=agent / JWT=human)·None→human 묵시 금지.
             _g_actor_type = (
-                "agent" if auth.claims.get("app_metadata", {}).get("api_key_id") else "human"
+                "agent" if is_agent_credential(auth) else "human"
             )
             _g_actor_id: uuid.UUID | None = None
             try:  # actor_id 는 HitlRequest 귀속용(비보안)·best-effort.
@@ -2594,7 +2601,7 @@ async def update_story_status(
         # S4: actor 전파 — 라우터가 actor_id/type 을 안 넘기면 resolver 가 항상 no_member→cold_start 로
         # 고정돼 실 actor trust 가 snapshot 에 안 담긴다(SME 적출). 인증 컨텍스트에서 신뢰 도출.
         _line_actor_type = (
-            "agent" if auth.claims.get("app_metadata", {}).get("api_key_id") else "human"
+            "agent" if is_agent_credential(auth) else "human"
         )
         _line_actor_id: uuid.UUID | None = None
         try:

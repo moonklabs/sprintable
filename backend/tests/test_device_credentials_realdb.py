@@ -1370,3 +1370,199 @@ def test_register_rejects_non_p256_curve():
         with pytest.raises(HTTPException) as exc:
             _decode_public_key(base64.b64encode(der).decode())
         assert exc.value.status_code == 400
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# G10 — `api_key_id` truthiness 소비처 전수 정합 (2026-09-16)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# 왜 «파일 전역 소스 스캔»인가: 이 결함은 개별 사이트의 버그가 아니라 **축(axis)의
+# 불일치**다. `dt_live_` 는 `api_key_id` 를 일부러 안 싣고(§5.2.1) `actor_type="agent"`
+# 를 싣는데, truthiness 소비처는 그 필드 하나로 "ApiKey 로 해소된 요청"을 판정해 왔다.
+# 그래서 하나를 고쳐도 다음 소비처가 같은 방식으로 새로 생기면 재발한다 — 사이트별
+# 단위 테스트로는 그 재발을 못 막는다. 저장소 전역을 훑어 **잔존 0** 을 고정한다.
+
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_SCAN_ROOTS = ("backend/app",)
+# 판정에 쓰이는 truthiness 형태만 잡는다(값 비교 `== "system-publisher"` 는 정당한 사용).
+_TRUTHINESS_PATTERNS = (
+    'bool(auth.claims.get("app_metadata", {}).get("api_key_id"))',
+    'bool(meta.get("api_key_id"))',
+    'if meta.get("api_key_id"):',
+    'if not meta.get("api_key_id"):',
+)
+
+
+def _iter_py_files():
+    for root in _SCAN_ROOTS:
+        for dirpath, _dirnames, filenames in os.walk(os.path.join(_REPO_ROOT, root)):
+            if "__pycache__" in dirpath:
+                continue
+            for name in filenames:
+                if name.endswith(".py"):
+                    yield os.path.join(dirpath, name)
+
+
+def test_no_api_key_id_truthiness_left_in_agent_axis():
+    """⛔축 정합 회귀 가드 — `api_key_id` truthiness 로 «에이전트인가»를 판정하는 곳 0.
+
+    실사고 3건이 전부 이 축에서 나왔다(모두 이 슬라이스에서 수정):
+      · `agent_gateway.py`  — SSE 스트림·ACK 가 403 → **목적 경로 자체가 막힘**
+      · `project_scope.py`  — `enforce_write_scope` 스킵 → admin-adjacent 표면 무검사 통과
+      · `mcp.py`            — MCP manifest 403 → 기기 자격증명의 MCP 경로 전면 차단
+    그 외에도 `get_auth_me`(MCP 컨텍스트 해소) · `member_resolver` 4곳 · `me.py` 2곳 ·
+    `conversations` 3곳 · `notifications` · `notification_preferences` · `team_members` ·
+    `events` · `gates` · `backlinks` · `stories` 3곳이 human 분기로 떨어져 **하드 실패**했다
+    (실 PG 실측: agent member id 를 `TeamMember.user_id`/`OrgMember.user_id` 로 조회 → 0행
+    → 400/404, `conversations._effective_role` 은 `or "member"` 폴백으로 조용히 강등).
+
+    판정은 `is_agent_credential`(auth.py) 하나로 수렴한다 — 그 함수가 `is_au_billable_agent`
+    와 **같은 축**을 공유하므로 과금과 인가가 갈라질 수 없다.
+    """
+    offenders: list[str] = []
+    for path in _iter_py_files():
+        with open(path, encoding="utf-8") as fh:
+            src = fh.read()
+        for pattern in _TRUTHINESS_PATTERNS:
+            if pattern in src:
+                offenders.append(f"{os.path.relpath(path, _REPO_ROOT)} :: {pattern}")
+
+    assert not offenders, (
+        "api_key_id truthiness 판정이 잔존한다 — dt_live_ 가 human 분기로 떨어진다.\n"
+        "`is_agent_credential(auth)` 로 교체할 것:\n  " + "\n  ".join(offenders)
+    )
+
+
+def test_is_agent_credential_is_the_shared_axis():
+    """판별자가 `is_au_billable_agent` 와 **같은 축**을 공유하는지 — 과금/인가 분기 방지.
+
+    둘이 갈라지면 「과금은 agent 인데 인가는 human」 같은 상태가 생긴다(또는 그 반대).
+    """
+    import inspect
+
+    from app.dependencies import auth as auth_mod
+
+    ia = inspect.getsource(auth_mod.is_agent_credential)
+    ab = inspect.getsource(auth_mod.is_au_billable_agent)
+    # 둘 다 actor_type == "human" 을 먼저 배제하고, 둘 다 api_key_id 를 본다.
+    assert 'actor_type") == "human"' in ia, "is_agent_credential 이 휴먼 예외를 안 본다"
+    assert 'actor_type") == "human"' in ab, "is_au_billable_agent 가 휴먼 예외를 안 본다"
+    assert 'api_key_id' in ia and 'api_key_id' in ab, "두 판별자가 같은 축을 안 공유한다"
+
+
+def test_mcp_manifest_admits_device_credential_but_not_human():
+    """⛔MCP 경로 — manifest·manifest/check 가 `dt_live_` 를 막으면 안 된다.
+
+    MCP 서버도 로컬 프록시를 지난다: 데스크톱 앱이 `SPRINTABLE_API_URL`·`AGENT_API_KEY` 를
+    둘 다 대체하므로(docs/desktop-agent-onboarding.md §5.2) 커넥터·MCP 어느 쪽도 수정 없이
+    `dt_live_` 를 쓴다. manifest 가 403 이면 MCP 클라이언트는 fail-open(None=전체 허용)으로
+    떨어져 **백엔드 toolset 정책이 통째로 무시된다**(게다가 manifest 자체는 못 연다).
+    """
+    import inspect
+
+    from app.routers import mcp as mcp_mod
+
+    src = inspect.getsource(mcp_mod)
+    assert src.count("is_agent_credential(auth)") >= 2, (
+        "mcp.py 의 manifest/manifest-check 가 공유 판별자를 안 쓴다 — dt_live_ MCP 403 재발"
+    )
+    for bad in _TRUTHINESS_PATTERNS:
+        assert bad not in src, f"mcp.py 에 api_key_id 직접 판정 잔존: {bad}"
+
+
+def test_get_auth_me_agent_branch_admits_device_credential():
+    """⛔MCP 컨텍스트 해소 — `GET /api/v2/auth/me` 가 `dt_live_` 를 agent 분기로 보내야 한다.
+
+    `sprintable_mcp/api_client.py::ensure_auth_context` 가 이 엔드포인트로
+    `resolved_default_project_id` 를 키별 1회 해소·캐시한다. human 분기로 떨어지면 그 값이
+    영구히 None → 멀티프로젝트 기기에서 `require_project_id()` 가 매 툴 호출을 422 로 막는다.
+    """
+    import inspect
+
+    from app.routers import auth as auth_router
+
+    src = inspect.getsource(auth_router.get_auth_me)
+    assert "is_agent_credential(auth)" in src, (
+        "get_auth_me 가 공유 판별자를 안 쓴다 — dt_live_ 의 MCP 컨텍스트가 None 으로 고정된다"
+    )
+    for bad in _TRUTHINESS_PATTERNS:
+        assert bad not in src, f"get_auth_me 에 api_key_id 직접 판정 잔존: {bad}"
+
+
+def test_stories_gate_actor_type_uses_shared_axis():
+    """⛔감사 정확성 — `stories.py` 의 gate/workflow-line actor_type 이 기기를 agent 로 기록.
+
+    `api_key_id` truthiness 로 판정하면 `dt_live_` 의 write 가 **"human" 으로 감사 기록**된다
+    (gate 집행·workflow line 스냅샷 전부). 과금 축(`is_au_billable_agent`)은 기기를 agent 로
+    보는데 감사만 human 이면 같은 요청에 두 답이 생긴다.
+    """
+    import inspect
+
+    from app.routers import stories as stories_mod
+
+    src = inspect.getsource(stories_mod)
+    assert "is_agent_credential(auth)" in src, "stories.py 가 공유 판별자를 안 쓴다"
+    for bad in _TRUTHINESS_PATTERNS:
+        assert bad not in src, f"stories.py 에 api_key_id 직접 판정 잔존: {bad}"
+
+
+def test_member_resolver_four_sites_use_shared_axis():
+    """⛔정체성 해소 — `member_resolver.py` 4곳(216·293·587·639)이 같은 축을 써야 한다.
+
+    human 분기로 떨어지면 `auth.user_id`(= agent member id)를 `OrgMember.user_id` /
+    `User.id` 로 조회한다 — **다른 id 공간**이라 0행 → 400, 또는 조용한 오분류.
+    """
+    import inspect
+
+    from app.services import member_resolver as mr
+
+    src = inspect.getsource(mr)
+    assert src.count("is_agent_credential(auth)") >= 4, (
+        f"member_resolver 의 4곳 중 {src.count('is_agent_credential(auth)')}곳만 교체됨"
+    )
+    for bad in _TRUTHINESS_PATTERNS:
+        assert bad not in src, f"member_resolver 에 api_key_id 직접 판정 잔존: {bad}"
+
+
+def test_device_credential_cannot_open_human_only_surfaces():
+    """⛔G10.4 «반대 방향» — 기기가 **휴먼 전용 표면을 열지 않음**.
+
+    `_requires_interactive_session`(auth 라우터)은 *"탈취 세션 또는 API키"* 를 대칭 위협으로
+    보고 API키를 막는다 — 그 docstring 이 **"한쪽만 막으면 공격자가 그쪽으로 우회"** 라고
+    스스로 경고한다. 초판은 `api_key_id`·`human_api_key_id` 두 필드만 봤고 `dt_live_` 는
+    그 둘을 **다 일부러 안 실어**(§5.2.1) 정확히 그 우회로가 됐다.
+
+    통과하면 라우터가 `_get_user_by_id(uuid.UUID(auth.user_id))` 로 진행하는데, `dt_live_` 의
+    `user_id` 는 **agent member id**(TeamMember.id)라 `users.id` 공간이 아니다 — 즉 이 가드가
+    막으려던 "API키가 인증 강도에 기여하지 않는" 상태가 그대로 성립한다.
+    """
+    from app.dependencies.auth import AuthContext
+    from app.routers.auth import _requires_interactive_session
+
+    org = str(uuid.uuid4())
+
+    def ctx(meta, user_id=None):
+        return AuthContext(user_id=user_id or str(uuid.uuid4()), email=None,
+                           claims={"sub": "x", "app_metadata": {**meta, "org_id": org}}, org_id=org)
+
+    dev = _device_agent_ctx(uuid.uuid4(), org)
+    assert _requires_interactive_session(dev) is True, (
+        "dt_live_ 가 휴먼 전용 표면(비밀번호 설정 등)을 연다 — 우회로 재발"
+    )
+    # 기존 두 경로 무회귀
+    assert _requires_interactive_session(ctx({"api_key_id": "k"})) is True
+    assert _requires_interactive_session(ctx({"human_api_key_id": "hk", "actor_type": "human"})) is True
+    # 휴먼 JWT 는 열려 있어야 한다(이 가드의 목적은 «사람이 실시간으로 있는가»).
+    assert _requires_interactive_session(ctx({"actor_type": "human"})) is False
+
+
+def test_human_only_surface_guard_shares_agent_axis():
+    """`_requires_interactive_session` 이 공유 판별자를 쓰는지 소스로 고정(재발 방지)."""
+    import inspect
+
+    from app.routers import auth as auth_router
+
+    src = inspect.getsource(auth_router._requires_interactive_session)
+    assert "is_agent_credential(auth)" in src, (
+        "휴먼 전용 표면 가드가 공유 판별자를 안 쓴다 — dt_live_ 우회로 재발"
+    )

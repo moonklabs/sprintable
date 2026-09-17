@@ -36,6 +36,7 @@ from app.dependencies.auth import (
     get_current_user_streaming,
     get_verified_org_id,
     get_verified_org_id_streaming,
+    is_agent_credential,
 )
 from app.core import shutdown as _shutdown_module
 from app.dependencies.database import get_db
@@ -388,7 +389,7 @@ async def agent_event_stream(
     """
     from app.core.database import async_session_factory
 
-    is_api_key = bool(auth.claims.get("app_metadata", {}).get("api_key_id"))
+    is_api_key = is_agent_credential(auth)
 
     # AC2: API key → member_id 자동 추출 (auth.user_id = team_member.id)
     if is_api_key:
