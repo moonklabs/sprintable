@@ -16,9 +16,13 @@ a4fe633e) — 그러면 `alembic upgrade heads`가 "현재 stamp(0354)가 0353�
 
 ## 처방
 1. 판별: 현재 `alembic_version`이 정확히 ANCHOR_VERSION("0354")이고, 이 파일셋(develop
-   그래프)에 STAMP_TARGET("0353")이 실재하면 → REPLAY_SET 60개를 Operations API로
+   그래프)에 STAMP_TARGET("0353")이 실재하고, **물리 신호(PHYSICAL_SIGNAL_TABLE.
+   PHYSICAL_SIGNAL_COLUMN)가 아직 없으면** → REPLAY_SET 60개를 Operations API로
    직접 invoke(alembic 엔진을 거치지 않는 물리 재생, 선형 재생 우회)한 뒤
-   `alembic_version`을 STAMP_TARGET으로 stamp한다.
+   `alembic_version`을 STAMP_TARGET으로 stamp한다. 버전 문자열 "0354"만으로는 main
+   앵커와 "develop 계보로 0353까지 정상 적용된 뒤 우연히 0354에 멈춘 DB"를 구분할 수
+   없어(페드루 PO 검토, 2026-09-17 12:33Z) 물리 신호로 소거한다 — 없으면 이미 60개가
+   물리 적용된 정상 DB이니 no-op.
 2. **fail-closed**(페드루 PO 검토①, 2026-09-17): 위 조건이 아닌데 현재 stamp가 이
    파일셋(develop 그래프)에 아예 등록되지 않은 리비전이면 — "main에 이 잡 코드가
    모르는 리비전이 더 붙었다"는 뜻이라 no-op이 안전하지 않다(그대로 두면
@@ -71,6 +75,29 @@ ORPHAN_SKIPS = ("0282", "0288", "0291")
 
 REPLAY_SET = list(ORPHAN_SKIPS) + [f"{i:04d}" for i in range(296, 352)] + [STAMP_TARGET]
 assert len(REPLAY_SET) == 60, f"REPLAY_SET must be 60, got {len(REPLAY_SET)}"
+
+# 페드루 PO 검토(2026-09-17 12:33Z) — "alembic_version == '0354'" 문자열만으로는 main
+# 앵커(0295에서 재봉합)와 "develop 계보로 0353까지 정상 적용된 뒤 우연히 0354에 멈춘 DB"를
+# 구분 못 한다(둘 다 문자열은 똑같이 "0354") — 후자에 재생을 걸면 0282의 vat_rate_bp
+# 컬럼이 이미 있어 DuplicateColumn으로 죽는다(데이터는 안전하지만 정상 DB의 배포가
+# 막히는 오판). migrate.sh의 기존 EE-stamp precheck(uq_org_subscriptions_org_id 존재
+# 여부)와 동일 관례 — 버전 문자열이 아니라 **물리 신호**로 판별한다. PLATFORM_SETTINGS.
+# vat_rate_bp는 REPLAY_SET의 첫 항목(0282)이 만드는 컬럼이라 "이미 있으면 60개가 이미
+# 물리 적용됐다"는 뜻(test_4010_prescription_c_migrate_gate.py가 0282 ∈ REPLAY_SET을
+# 별도로 고정).
+PHYSICAL_SIGNAL_TABLE = "platform_settings"
+PHYSICAL_SIGNAL_COLUMN = "vat_rate_bp"
+
+
+def _physical_signal_already_applied(conn) -> bool:
+    result = conn.execute(
+        text(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_name = :table_name AND column_name = :column_name"
+        ),
+        {"table_name": PHYSICAL_SIGNAL_TABLE, "column_name": PHYSICAL_SIGNAL_COLUMN},
+    ).scalar()
+    return result is not None
 
 
 def _load_script_directory() -> ScriptDirectory:
@@ -138,6 +165,13 @@ def main() -> int:
                 print(f"[prescription-c] FAIL — ANCHOR_VERSION({ANCHOR_VERSION!r})이 다중 "
                       f"head({current_revs})와 함께 있다 — 예상 밖 상태, 판별 불가.", file=sys.stderr)
                 return 1
+            if _physical_signal_already_applied(conn):
+                print(
+                    f"[prescription-c] no-op — alembic_version={current_revs}이지만 물리 신호"
+                    f"({PHYSICAL_SIGNAL_TABLE}.{PHYSICAL_SIGNAL_COLUMN})가 이미 있다 — develop "
+                    "계보로 정상 진행돼 우연히 0354에 멈춘 DB(main 앵커 아님), 처방 C 불필요."
+                )
+                return 0
             try:
                 _replay(script, conn)
             except Exception:

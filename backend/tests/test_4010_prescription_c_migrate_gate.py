@@ -221,6 +221,19 @@ def test_replay_set_has_zero_non_transactional_ddl_operations():
     assert not offenders, f"REPLAY_SET에 비트랜잭션 연산 발견: {offenders}"
 
 
+def test_physical_signal_revision_is_in_replay_set_and_creates_that_column():
+    """페드루 PO 검토(2026-09-17 12:33Z) — PHYSICAL_SIGNAL_TABLE.PHYSICAL_SIGNAL_COLUMN이
+    실제로 REPLAY_SET 안의 리비전이 만드는 컬럼이 맞는지(그래야 "물리 신호 있음 ⟺ 60개
+    이미 적용됨"이 성립) 소스 grep으로 고정 — 0282가 옮겨지거나 컬럼명이 바뀌면 이
+    테스트가 먼저 깨진다."""
+    matches = list((_BACKEND_DIR / "alembic" / "versions").glob("0282_*.py"))
+    assert len(matches) == 1
+    assert "0282" in gate.REPLAY_SET
+    content = matches[0].read_text(encoding="utf-8")
+    assert gate.PHYSICAL_SIGNAL_TABLE in content
+    assert gate.PHYSICAL_SIGNAL_COLUMN in content
+
+
 # ============================================================================
 # migrate.sh 배선 순서 — 처방 C는 0183a fork precheck 뒤 · stamp-chain-integrity 앞.
 # ============================================================================
@@ -318,6 +331,38 @@ def test_ac3b_develop_fresh_db_is_noop(scratch_db):
         after = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
     engine.dispose()
     assert before == after, "develop-fresh DB인데 no-op 판정 뒤 alembic_version이 바뀜"
+
+
+def test_ac_develop_lineage_db_stopped_exactly_at_0354_is_noop_not_replay(scratch_db):
+    """페드루 PO 검토(2026-09-17 12:33Z) — «alembic_version == "0354"» 문자열만으로는
+    main 앵커(0295에서 재봉합)와 "develop 계보로 0353까지 정상 적용된 뒤 우연히 0354에
+    멈춘 DB"를 구분할 수 없다. 후자는 60개가 이미 물리 적용돼 있으므로 재생을 시도하면
+    안 된다(0282 vat_rate_bp 중복 컬럼으로 죽는다) — 물리 신호로 이 오판을 막는지 직접
+    실측."""
+    r = _run_alembic(scratch_db, "upgrade", gate.ANCHOR_VERSION)
+    assert r.returncode == 0, r.stderr
+
+    engine = create_engine(scratch_db)
+    with engine.connect() as conn:
+        current = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
+        assert current == gate.ANCHOR_VERSION
+        has_signal = conn.execute(text(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_name = :t AND column_name = :c"
+        ), {"t": gate.PHYSICAL_SIGNAL_TABLE, "c": gate.PHYSICAL_SIGNAL_COLUMN}).scalar()
+        assert has_signal is not None, "정상 develop 계보인데 물리 신호가 없다 — 픽스처 자체가 틀림"
+    engine.dispose()
+
+    gate_result = _run_gate(scratch_db)
+    assert gate_result.returncode == 0, gate_result.stderr
+    assert "no-op" in gate_result.stdout
+    assert "REPLAY" not in gate_result.stdout, "정상 develop 계보 DB인데 재생을 시도함 — 오판"
+
+    engine = create_engine(scratch_db)
+    with engine.connect() as conn:
+        after = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
+    engine.dispose()
+    assert after == gate.ANCHOR_VERSION, "no-op이어야 하는데 stamp가 바뀜"
 
 
 def test_ac3c_rerun_after_replay_is_noop(two_scratch_dbs):
