@@ -77,7 +77,12 @@ export const RESERVED_FIRST_SEGMENTS = new Set([
   // 실측으로 잡았다).
   'native', 'onboarding',
   'org-briefing', 'organization', 'privacy', 'refund-policy', 'register', 'reset-password',
-  'rewards', 'set-password', 'settings', 'share', 'terms', 'unsubscribe', 'verify-email',
+  'rewards', 'set-password', 'settings', 'share', 'terms',
+  // story #3962(2026-09-17) — 새 최상위 app/today(v3 첫 화면, (authenticated) 밖
+  // 별도 라우트 그룹) 신설. 미등재 시 '/today'가 워크스페이스 slug로 오인될 수 있다
+  // (위 #3807 desktop 선례와 동형 결함 클래스).
+  'today',
+  'unsubscribe', 'verify-email',
 ]);
 
 /**

@@ -65,7 +65,7 @@ describe('parseToday — story #3823 실 응답 모양 파싱(no-fiction)', () =
     expect(snapshot.needsMeCount).toBe(2);
     expect(snapshot.needsMe).toHaveLength(2);
     expect(snapshot.needsMe[0]).toEqual({
-      id: 'g1', source: 'gate', state: 'signature', workItemType: 'story', workItemId: 's1',
+      id: 'g1', source: 'gate', state: 'signature', risk: 'high', workItemType: 'story', workItemId: 's1',
       workItemTitle: 'Threads에 글 발행', requestedByName: null, reason: null,
       createdAt: '2026-09-13T05:00:00Z', conversationId: null,
     });
