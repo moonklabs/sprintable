@@ -1,8 +1,13 @@
 name: Lighthouse CI
 
+# story #4032 검증전용(v2, PO 지시) — 3차 시도: `!cancelled() && (steps.lhci.conclusion
+# == ...)`가 실제로 검증 스텝을 계속 돌게 하는지 재확認(이전 `steps.lhci.conclusion`
+# 단독 조건은 GHA 암묵 success()에 걸려 한 번도 실제로 검증 안 된 채 push될 뻔했다,
+# PO가 push 前에 적발). base=develop인 이 일회용 브랜치에만 pull_request branches에
+# develop을 추가한다(main 실 파일 무변경).
 on:
   pull_request:
-    branches: [main]
+    branches: [main, develop]
   push:
     branches: [main]
 
@@ -13,15 +18,56 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# story #4029 — PR 코멘트 스텝이 기본(무선언) 권한으로는 "Resource not accessible by
+# integration"으로 조용히 실패해 왔다(09-17 12:42Z run 실측). 다른 워크플로(design-review-
+# gate.yml 등)와 동형으로 명시 승격.
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   lighthouse:
     runs-on: ubuntu-latest
+    # story #4029 CHANGES 7(PO 지적) — 20분은 로그인 리다이렉트만 재던 시절 값(2차 run
+    # collect 구간 실측 3.5분, 가벼운 /login 18회). 인증이 실제로 붙으면 무거워진다 —
+    # 1차 run에서 유일하게 진짜 렌더된 화면(inbox)이 로드 58초였다(PO 실측 인용). 앞단
+    # (설치·alembic·백엔드기동·빌드·시딩)만으로도 6분쯤 먹어 20분 천장에 실제로 닿았다
+    # (4차 run, Run Lighthouse CI 스텝에서 cancelled). main 필수 체크가 아니라 올려도
+    # 남에게 비용이 안 감 — numberOfRuns를 줄여 시간을 버는 대신(3회 중앙값이 이 측정의
+    # 값어치, PO 지적) 천장 자체를 올린다.
+    timeout-minutes: 35
+
+    # story #4029 — 이 이전까지 Lighthouse는 인증 세션 없이 돌아 여섯 화면 전부가 `/login`
+    # 으로 리다이렉트됐다(로그인 화면 하나를 여섯 번 잰 것, 실화면 실측 0건). 인증 세션을
+    # 만들려면 실 회원가입→이메일인증→조직/프로젝트 생성이 필요해 backend+DB가 있어야
+    # 한다 — ci.yml의 backend-test job과 동일한 postgres 서비스 패턴 재사용(발명 0).
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: sprintable
+          POSTGRES_PASSWORD: sprintable
+          POSTGRES_DB: sprintable_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
     env:
       PORT: 3108
       NEXTAUTH_SECRET: lighthouse-ci-test-secret-32chars-min
       NEXTAUTH_URL: http://localhost:3108
       APP_BASE_URL: http://localhost:3108
       NEXT_PUBLIC_APP_URL: http://localhost:3108
+      NEXT_PUBLIC_FASTAPI_URL: http://localhost:8211
+      DATABASE_URL: postgresql+asyncpg://sprintable:sprintable@localhost:5432/sprintable_test
+      ALEMBIC_DATABASE_URL: postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test
+      JWT_SECRET: lighthouse-ci-test-secret-32chars-min
+      SPRINTABLE_LOCAL_DEV: '1'
+
     steps:
       - uses: actions/checkout@v4
 
@@ -36,6 +82,34 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: 'latest'
+
+      - name: alembic upgrade heads (fresh DB)
+        working-directory: backend
+        run: uv run alembic upgrade heads
+
+      - name: Start backend (background)
+        working-directory: backend
+        run: |
+          nohup uv run uvicorn app.main:app --host 0.0.0.0 --port 8211 > ../backend.log 2>&1 &
+          echo "backend pid=$!"
+
+      - name: Wait for backend health
+        run: |
+          for _ in $(seq 1 30); do
+            if curl -sf http://localhost:8211/api/v2/health > /dev/null; then
+              echo "backend healthy"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::backend did not become healthy in time"
+          cat backend.log
+          exit 1
+
       - name: Build project
         run: pnpm build
         env:
@@ -45,6 +119,207 @@ jobs:
           APP_BASE_URL: http://localhost:3108
           NEXT_PUBLIC_APP_URL: http://localhost:3108
 
+      # story #4029 AC1 — 회원가입→이메일 인증(진짜 발송 없음, RESEND_API_KEY 미설정이라
+      # backend가 콘솔 폴백으로 인증 링크를 로그에 남긴다, app/routers/auth.py register()의
+      # 기존 SPR-13 동작 그대로·신규 배관 0)→조직/프로젝트 생성까지 실 API로 걷고, 발급된
+      # access/refresh token을 세션 쿠키로 다음 Lighthouse 스텝에 넘긴다.
+      - name: Seed authenticated session (register → verify → org → project)
+        run: |
+          set -euo pipefail
+          BACKEND_URL=http://localhost:8211
+          RUN_ID="${{ github.run_id }}"
+          EMAIL="lhci-${RUN_ID}@ci.local"
+          PASSWORD="LhciCi2026Pass!"
+
+          register_res=$(curl -sS -X POST "$BACKEND_URL/api/v2/auth/register" \
+            -H "Content-Type: application/json" \
+            -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\",\"display_name\":\"LHCI Bot\",\"tos_accepted\":true}")
+          access_token=$(echo "$register_res" | jq -r '.data.access_token // empty')
+          refresh_token=$(echo "$register_res" | jq -r '.data.refresh_token // empty')
+          if [ -z "$access_token" ]; then
+            echo "::error::register failed: $register_res"
+            exit 1
+          fi
+
+          verify_link=$(grep -o "인증 링크: [^ ]*" backend.log | tail -1 | sed 's/인증 링크: //')
+          if [ -z "$verify_link" ]; then
+            echo "::error::verification link not found in backend.log (register email flow changed?)"
+            tail -100 backend.log
+            exit 1
+          fi
+          verify_token=$(echo "$verify_link" | sed -n 's/.*token=//p')
+          curl -sS "$BACKEND_URL/api/v2/auth/verify-email?token=$verify_token" > /dev/null
+
+          org_res=$(curl -sS -X POST "$BACKEND_URL/api/v2/organizations" \
+            -H "Content-Type: application/json" -H "Authorization: Bearer $access_token" \
+            -d "{\"name\":\"LHCI Org\",\"slug\":\"lhci-org-${RUN_ID}\"}")
+          org_id=$(echo "$org_res" | jq -r '.id // .data.id // empty')
+          if [ -z "$org_id" ]; then
+            echo "::error::org create failed: $org_res"
+            exit 1
+          fi
+
+          project_res=$(curl -sS -X POST "$BACKEND_URL/api/v2/projects" \
+            -H "Content-Type: application/json" -H "Authorization: Bearer $access_token" -H "X-Org-Id: $org_id" \
+            -d "{\"name\":\"LHCI Project\",\"slug\":\"lhci-project\",\"org_id\":\"$org_id\"}")
+          project_id=$(echo "$project_res" | jq -r '.id // .data.id // empty')
+          if [ -z "$project_id" ]; then
+            echo "::error::project create failed: $project_res"
+            exit 1
+          fi
+
+          # story #4029 — 등록 시 발급된 토큰의 app_metadata.org_id는 그 시점(조직 생성 前)
+          # 값으로 굳어 있다(라이브 실측: 방금 만든 org/project를 그대로 안 담음). `/refresh`가
+          # 호출 시점 DB 상태로 app_metadata를 다시 계산해 담아 준다(등록 재사용, 신규 배관
+          # 0) — 이 새 토큰이라야 `(authenticated)/layout.tsx`의 `me.org_id` 검사를 통과해
+          # `/onboarding`으로 안 튕긴다(실측: 이 스텝 없이는 여섯 곳 전부 `/onboarding`으로
+          # 갔다 — «로그인 화면」 대신 「온보딩 화면」으로 바뀌었을 뿐 같은 결함 부류였을 것).
+          refresh_res=$(curl -sS -X POST "$BACKEND_URL/api/v2/auth/refresh" \
+            -H "Content-Type: application/json" \
+            -d "{\"refresh_token\":\"$refresh_token\"}")
+          final_access_token=$(echo "$refresh_res" | jq -r '.data.access_token // empty')
+          final_refresh_token=$(echo "$refresh_res" | jq -r '.data.refresh_token // empty')
+          if [ -z "$final_access_token" ]; then
+            echo "::error::post-org refresh failed: $refresh_res"
+            exit 1
+          fi
+
+          {
+            echo "LH_SP_AT=${final_access_token}"
+            echo "LH_SP_RT=${final_refresh_token}"
+          } >> "$GITHUB_ENV"
+          echo "seeded org=$org_id project=$project_id"
+
+      # story #4029 CHANGES 3(PO 지적·실측) — 첫 시도는 `extraHeaders`로 Cookie를 주입했으나
+      # 실 GHA run(PR #4411)에서 6곳 중 1곳만 통과했다. 리포트 JSON의 `configSettings.
+      # extraHeaders`를 직접 대조해 실패·성공 run 둘 다 **완전히 동일한** 쿠키값이 설정에
+      # 실려 있었음을 확認(설정 전달 자체는 정상) — 그런데도 결과가 갈렸다는 것은 Lighthouse
+      # 의 `Network.setExtraHTTPHeaders`(CDP)가 매 run·매 URL 첫 내비게이션에 그 헤더를
+      # 실제로 붙이는 게 신뢰할 수 없다는 뜻(공식 문서·이슈에 보고된 알려진 부류 — extraHeaders
+      # 는 "요청 헤더 주입"일 뿐 브라우저 쿠키 저장소에 안 실린다, 리다이렉트·재내비게이션
+      # 경계에서 누락 사례가 실보고됨). 처방: `puppeteerScript`로 실제 Puppeteer
+      # `page.setCookie()`를 호출해 **진짜 브라우저 쿠키 저장소**에 쿠키를 심는다(공식 문서가
+      # 인증 시나리오의 정식 패턴으로 명시) — 이러면 실제 로그인한 사용자와 동일하게 모든
+      # 후속 요청·리다이렉트에 쿠키가 자연히 실린다. `disableStorageReset: true`를 같이
+      # 켜야 한다 — Lighthouse는 기본적으로 run마다(그리고 URL마다) 스토리지를 초기화하는데,
+      # 그러면 puppeteerScript가 심은 쿠키도 다음 run에서 지워진다(공식 문서가 이 조합을
+      # 명시 — 안 켜면 6곳×3회 중 첫 1회만 통과하는 사실상 같은 결함이 재발했을 것).
+      #
+      # 두 번째 이유(PO 지적) — extraHeaders 방식은 `configSettings.extraHeaders`에
+      # 토큰 원문이 그대로 박힌 채 `temporaryPublicStorage: true`(공개 링크)로 올라갔다
+      # (실패·성공 run의 그 필드를 대조할 수 있었던 것 자체가 증거). puppeteerScript는
+      # 쿠키를 리포트가 직렬화하는 `configSettings`가 아니라 브라우저 쿠키 저장소에
+      # 심으므로 이 노출 경로 자체가 없다 — 그래서 puppeteerScript로의 전환은 "더
+      # 간단한 extraHeaders로 되돌리면 안 되는" 이유이기도 하다(아래 검증 스텝의 리포트
+      # 토큰 노출 0건 확認이 그 근거). 이번 run의 토큰 자체는 실피해 없음(PO 확認) —
+      # JWT_SECRET/NEXTAUTH_SECRET이 이 파일에 박힌 테스트 리터럴이고 backend가
+      # 러너 localhost:8211·DB가 임시 postgres 서비스라 그 토큰으로 유효한 서버가
+      # 세상에 없다.
+      # story #4029 CHANGES 7(PO 지적 — 소스 재대조로 이전 라운드의 미해결 리스크를 완전히
+      # 닫음) — `packages/cli/src/utils.js`의 `determineChromePath()` 우선순위는
+      # `options.chromePath` → `CHROME_PATH` env → `PuppeteerManager.getChromiumPath()` →
+      # `getChromeInstallationsSafe()[0]` 순이다. 즉 `collect.chromePath`를 명시하면
+      # `getChromiumPath()`(puppeteer 모듈의 `executablePath()`를 호출하는 그 함수) 자체가
+      # 안 불린다 — 지난 라운드에 걱정한 "puppeteer-core의 executablePath()가 뭘 뱉을지
+      # 모른다"·"25.x가 Promise를 반환해 동기판정이 깨진다" 둘 다 이 경로를 안 타 무관해진다.
+      # 또한 `puppeteer-manager.js:_getBrowser()`가 `puppeteer.launch({...,
+      # executablePath: this._options.chromePath})`로 브라우저를 **한 번만** 띄우고
+      # `collect.js`가 Lighthouse를 그 브라우저의 포트에 그대로 붙인다(별도 chrome-launcher
+      # 기동 없음, 소스 확認) — "lhci 내부 실행과 스크립트 브라우저가 같은 바이너리인지"도
+      # 애초에 브라우저가 하나뿐이라 성립하지 않는 질문이었다. 따라서 다운로드가 필요한
+      # 풀버전 대신 puppeteer-core로 전환한다(경로는 아래에서 실재 확認 후 명시).
+      # repo lockfile에 puppeteer 계열 0건은 여전하므로 격리설치+NODE_PATH 노출은 그대로
+      # 유지(그 논거는 CHANGES 6과 동일, 재론 안 함).
+      - name: Install puppeteer-core + locate runner Chrome (CI-only, isolated — repo lockfile 무변경)
+        timeout-minutes: 3
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/lhci-puppeteer
+          cd /tmp/lhci-puppeteer && npm install puppeteer-core@21 --no-save --no-audit --no-fund
+          echo "NODE_PATH=/tmp/lhci-puppeteer/node_modules" >> "$GITHUB_ENV"
+
+          # story #4029 CHANGES 7(PO 지적②③) — GH 호스팅 ubuntu 러너는 표준 이미지에
+          # Google Chrome이 사전설치돼 있다(이전 run들의 비-인증 6/6 login 측정 자체가
+          # 이미 그 증거 — chrome-launcher가 매번 실제로 브라우저를 띄워 성능수치를 냈다).
+          # 그 경로를 실재 확認한 뒤 CHROME_PATH env·collect.chromePath 양쪽에 같은 값을
+          # 싣는다(대체 아님 — PO 지시대로 두 곳 다). 못 찾으면 이 스텝에서 바로 하드 실패
+          # (다음 스텝들로 조용히 안 넘어가게).
+          chrome_path=""
+          for c in google-chrome-stable google-chrome chromium-browser chromium; do
+            if p=$(command -v "$c" 2>/dev/null); then
+              chrome_path="$p"
+              break
+            fi
+          done
+          if [ -z "$chrome_path" ]; then
+            echo "::error::러너에 Chrome이 없다 — 인증 브라우저를 띄울 수 없음"
+            exit 1
+          fi
+          echo "runner Chrome: $chrome_path"
+          echo "CHROME_PATH=${chrome_path}" >> "$GITHUB_ENV"
+
+      - name: Generate authenticated lighthouserc + puppeteer auth script
+        run: |
+          python3 -c "
+          import json, os
+          with open('lighthouserc.json') as f:
+              cfg = json.load(f)
+          collect = cfg['ci']['collect']
+          # story #4029 CHANGES 5(자체발견, @lhci/cli 0.15.1 소스 직접대조) — 첫 puppeteerScript
+          # 시도가 6곳 다 실패한 진짜 원인: \`puppeteerScript\`는 \`collect.settings\` 밑이 아니라
+          # \`collect\` **바로 아래**(다른 축, staticDistDir·startServerCommand와 형제) 옵션이다
+          # — collect.js가 \`options.puppeteerScript\`를 직접 읽는다(\`options.settings.
+          # puppeteerScript\`가 아님). settings 밑에 넣으면 top-level \`options.puppeteerScript\`
+          # 가 그냥 undefined라 PuppeteerManager.isActive()가 false → invokePuppeteerScriptForUrl
+          # 이 조용히 no-op(스크립트 자체가 안 불림, 에러도 0) — 그래서 로그에 실패 흔적이 아예
+          # 없었다. \`disableStorageReset\`는 진짜 Lighthouse settings 필드라 그대로 settings
+          # 밑이 맞다(리포트 configSettings에도 실제로 찍혔던 것과 일치).
+          collect['puppeteerScript'] = './lighthouse-puppeteer-auth.js'
+          collect['settings']['disableStorageReset'] = True
+          # story #4029 CHANGES 6(PO 지적④) — puppeteerScript 활성 시 @lhci/cli는
+          # settings.chromeFlags를 무시하는 경고를 낸다(소스 확認, checkIgnoredChromeFlagsOption).
+          # 공식 문서가 명시하는 정식 채널은 collect.puppeteerLaunchOptions.args로 이전한다
+          # (리눅스 CI 컨테이너의 표준 관례 --no-sandbox 선제 반영).
+          collect['puppeteerLaunchOptions'] = {'args': ['--no-sandbox']}
+          # story #4029 CHANGES 7(PO 지적①②, 소스 재대조) — \`determineChromePath()\`
+          # (packages/cli/src/utils.js)는 \`options.chromePath\`가 있으면 그것을 최우선으로
+          # 쓰고 puppeteer 모듈의 \`executablePath()\`를 호출하는 \`getChromiumPath()\` 자체를
+          # 안 부른다. 이전 스텝이 실재 확認한 러너 Chrome 경로를 여기 명시하면 puppeteer
+          # 모듈(puppeteer-core) 쪽 executablePath 관련 불확실성 자체가 애초에 발생하지
+          # 않는다. \`_getBrowser()\`가 이 chromePath로 브라우저를 한 번만 띄우고 Lighthouse
+          # 는 그 브라우저 포트에 그대로 붙는다(별도 chrome-launcher 기동 없음, 소스 확認)
+          # — \"내부 실행과 스크립트 브라우저가 같은 바이너리인가\"는 브라우저가 하나뿐이라
+          # 애초에 성립하지 않는 질문이었다.
+          collect['chromePath'] = os.environ['CHROME_PATH']
+          with open('lighthouserc.ci.json', 'w') as f:
+              json.dump(cfg, f, indent=2)
+
+          sp_at = os.environ['LH_SP_AT']
+          sp_rt = os.environ['LH_SP_RT']
+          # story #4029 CHANGES 4(PO 지적) — path를 context.url에서 유도시키지 않고 '/'로
+          # 명시한다. 지금 측정 6곳은 전부 한 마디 경로(/memos·/board 등)라 유도해도 결과가
+          # '/'라 우연히 맞지만, 나중에 /project/<id>/board류 두 마디 이상 경로가 목록에
+          # 들어오면 유도된 path가 '/project/<id>'로 좁아져 다른 경로(백엔드 프록시 등) 호출에
+          # 쿠키가 안 실린다 — 지금 명시해 두면 그 함정 자체가 생기지 않는다.
+          # story #4029 CHANGES 6(PO 지적②) — \"스크립트가 안 불렸다\"와 \"불렸는데 인증이
+          # 실패했다\"를 로그만 보고 못 가르는 게 지난 두 번의 진짜 문제였다(첫 번째는 결과가
+          # 갈려서 못 가른 것, 두 번째는 대상 함수가 아예 안 불려서 흔적 자체가 없었던 것).
+          # URL마다 흔적 파일에 한 줄씩 남겨, verify 스텝이 결과를 재기 前에 그 줄 수부터
+          # 확認하게 한다(다음 스텝에서 6줄 단언).
+          script = '''module.exports = async (browser, context) => {
+            require(\"fs\").appendFileSync(\"./lighthouse-auth-trace.log\", new Date().toISOString() + \" \" + context.url + \"\\\\n\");
+            const page = await browser.newPage();
+            await page.setCookie(
+              { name: 'sp_at', value: SP_AT, url: context.url, path: '/' },
+              { name: 'sp_rt', value: SP_RT, url: context.url, path: '/' },
+            );
+            await page.close();
+          };
+          '''.replace('SP_AT', json.dumps(sp_at)).replace('SP_RT', json.dumps(sp_rt))
+          with open('lighthouse-puppeteer-auth.js', 'w') as f:
+              f.write(script)
+          "
+
       # story #3864(customer-zero·CI 인프라, 2026-09-14) — AC0 소비처 그라운딩: 이 잡을
       # 읽는 워크플로/문서 0건, PR 코멘트도 "workflow artifacts"를 가리키기만 할 뿐 직링크가
       # 없어 실제로는 아무도 GH Actions artifact를 열어보지 않는다(수동 zip 다운로드 필요).
@@ -53,8 +328,15 @@ jobs:
       # lighthouserc.json의 assertion이 전부 "warn"(에러 아님)이라 이 잡은 사실상 항상
       # 성공하므로 `if: failure()`로는 이 GH artifact가 의미 있게 남지 않았을 것(사실상
       # uploadArtifacts:false와 결과가 같다) — PO 판정(2026-09-14 10:23Z)에 따라 소비처
-      # 0으로 확定, uploadArtifacts:false로.
+      # 0으로 확定, uploadArtifacts:false로 유지(story #4029도 이 결정과 충돌 안 함 —
+      # 로컬 .lighthouseci/manifest.json은 업로드 여부와 무관하게 항상 남는다, 아래 스텝).
+      # story #4029(PO 지적, 5차 run 실측) — /memos는 실제로는 /inbox로 흡수돼(리다이렉트)
+      # finalUrl이 /inbox로 도착한다 — 이 목록의 6곳은 진짜론 5종 화면(/inbox가 2회 측정)
+      # 이다. 지금 목록을 손대면 방금 얻은 6/6 실화면 증명이 새 목록에 대해선 다시 없는
+      # 상태가 되고 22분 run을 또 써야 하므로, 목록 자체는 그대로 두고 사실만 기록한다 —
+      # 목록 재검토는 후속 카드.
       - name: Run Lighthouse CI
+        id: lhci
         uses: treosh/lighthouse-ci-action@v11
         with:
           urls: |
@@ -64,28 +346,182 @@ jobs:
             http://localhost:3108/inbox
             http://localhost:3108/standup
             http://localhost:3108/docs
-          configPath: ./lighthouserc.json
+          configPath: ./lighthouserc.ci.json
           uploadArtifacts: false
           temporaryPublicStorage: true
           runs: 3
 
+      # story #4029 AC2 음성 대조 + AC3 값 보존. `.lighthouseci/manifest.json`은
+      # uploadArtifacts 설정과 무관하게 lhci가 항상 로컬에 남기는 파일(위 #3864 결정과
+      # 충돌 없음) — 그 대표(median) run의 `finalUrl`을 실제로 읽어 로그인 리다이렉트
+      # 여부를 판정한다. 지금처럼 조용히 로그인 화면만 재는 상태로 되돌아가면(예: 세션 시딩
+      # 스텝이 향후 리팩터로 깨져도) 여기서 하드 실패한다 — "초록인데 대상이 틀렸다"는
+      # 이번 카드가 잡아낸 결함 부류의 재발을 이 스텝 자체가 막는다.
+      # story #4029 CHANGES 6(PO 지적②) — 인증 판정보다 먼저 "스크립트가 실제로 6번(URL당
+      # 1번, numberOfRuns 반복과 무관 — @lhci/cli 소스가 URL마다 딱 한 번만 호출함을 확認)
+      # 불렸는지"부터 하드 단언한다. 이 단언이 실패하면 원인은 "인증 자체가 실패"가 아니라
+      # "puppeteerScript가 아예 안 불림"류(예: 이번 CHANGES의 top-level 배치·모듈 설치 배관이
+      # 다시 깨짐)이므로 아래 로그인-리다이렉트 판정과 서로 다른 처방이 필요하다 — 흔적 없이
+      # 로그인 판정만 보면 두 원인을 다시 못 가른다(직전 두 번의 실패가 이 구분 부재로 인한
+      # 헷갈림이었다).
+      # story #4032(PO 지적, AC5 음성대조 준비 中 발견) — 이 스텝들에 `if:` 조건이 없어
+      # `Run Lighthouse CI`가 실패(예: assert 단언이 error로 승격된 뒤 임계 초과)하면
+      # GHA 기본 동작상 아래 검증 스텝 전부가 skipped로 건너뛰어진다. 그러면 "빨강이
+      # 떴다"만 남고 정작 필요한 "어느 화면이 몇으로 나빠졌는지" 표 자체가 안 나온다 —
+      # 이 카드 내내 지켜온 축("로그가 스스로 원인을 말하게 하기")과 정반대 결과다.
+      # `Run Lighthouse CI`가 실패해도 이 검증 스텝들이 계속 돌아 manifest.json을 직접
+      # 읽어 표를 낸다. `.lighthouseci/manifest.json`은 assert 실패와 무관하게 collect
+      # 단계가 이미 다 써 둔 파일이라(assert는 collect 이후 별도 단계) 이 판정 자체는
+      # 여전히 유효하다 — 단 collect 자체가 통째로 깨진 경우(그 파일조차 없음)는
+      # "측정 자체가 안 됐다"로 분명히 갈라야 하므로 존재 확認을 먼저 한다(흔적
+      # 단언과 같은 모양).
+      #
+      # story #4032(PO 지적, 2차) — 조건을 `success() || failure()`(job 전체 기준)가
+      # 아니라 `steps.lhci.conclusion`(그 스텝 자신 기준)으로 좁힌다. job 전체 기준이면
+      # Build project·backend기동 등 **더 앞선** 스텝이 깨져도 참이 돼, lhci 자체는
+      # 아예 안 돌았는데(그럼 결과는 `skipped`) 검증 스텝은 도는 바람에 "puppeteerScript
+      # 가 한 번도 안 불렸다 — 설정 배치·모듈 설치 배관 재점검"류 문구가 뜬다 — 진짜
+      # 원인(빌드/기동 실패)과 무관한 오귀속이다(이 카드 내내 태운 그 종류의 실수).
+      # lhci가 안 돌면 conclusion이 `skipped`라 이 조건 자체가 거짓이 되어 검증 스텝도
+      # 같이 skip — 오귀속 문구 자체가 안 뜬다. lhci가 돌고 실패한 경우(=이 스텝들이
+      # 실제로 겨냥하는 경우)만 그대로 돌아 표를 낸다.
+      #
+      # story #4032(PO 지적, 3차·자체 재현 없이 push했다가 적발됨) — `steps.lhci.
+      # conclusion == ...`만으로는 GHA의 암묵 `&& success()`를 못 없앤다. `if:` 식에
+      # 상태 함수(success()·failure()·always()·cancelled())가 하나도 없으면 GHA가
+      # 조건 전체에 `&& success()`를 자동으로 덧붙인다(공식 문서 규칙) — `steps.lhci.
+      # conclusion`은 컨텍스트지 상태 함수가 아니라서, lhci가 실패해 잡 상태가 failure가
+      # 되는 순간 그 암묵 success()가 거짓이 되어 검증 스텝이 다시 skipped로 돌아간다
+      # (직전 라운드에서 없앴다고 착각한 바로 그 결함이 형태만 바뀌어 재발할 뻔했다,
+      # 실제 run으로 확認 안 하고 push했다가 PO가 적발). `!cancelled()`를 조건 맨
+      # 앞에 둬 상태 함수를 확보하면서(취소된 run에서는 여전히 안 돎) 뒤의 conclusion
+      # 비교로 "lhci 자체가 안 돎(skipped)"만 정확히 걸러낸다.
+      - name: Verify puppeteer auth script actually ran (trace count)
+        if: ${{ !cancelled() && (steps.lhci.conclusion == 'success' || steps.lhci.conclusion == 'failure') }}
+        run: |
+          set -euo pipefail
+          if [ ! -f ./lighthouse-auth-trace.log ]; then
+            echo "::error::lighthouse-auth-trace.log 자체가 없다 — puppeteerScript가 한 번도 안 불렸다(설정 배치·모듈 설치 배관 재점검 필요, 인증 로직 문제 아님)"
+            exit 1
+          fi
+          trace_lines=$(wc -l < ./lighthouse-auth-trace.log | tr -d ' ')
+          echo "puppeteer 인증 스크립트 호출 흔적: ${trace_lines}줄(기대 6 — URL 6곳 × 1회)"
+          cat ./lighthouse-auth-trace.log
+          if [ "$trace_lines" -ne 6 ]; then
+            echo "::error::흔적 ${trace_lines}줄 ≠ 기대 6줄 — 스크립트가 일부 URL에서 안 불렸다(인증 실패가 아니라 호출 자체의 문제)"
+            exit 1
+          fi
+
+      - name: Verify authenticated screens measured (not /login) + write summary
+        id: verify
+        if: ${{ !cancelled() && (steps.lhci.conclusion == 'success' || steps.lhci.conclusion == 'failure') }}
+        run: |
+          python3 -c "
+          import json, sys, os
+
+          if not os.path.exists('.lighthouseci/manifest.json'):
+              print('::error::.lighthouseci/manifest.json 자체가 없다 — collect 단계가 통째로 깨져 측정 자체가 안 됐다(위 Verify puppeteer auth script 스텝의 흔적 확認부터 볼 것)')
+              sys.exit(1)
+
+          with open('.lighthouseci/manifest.json') as f:
+              manifest = json.load(f)
+
+          rows = []
+          login_count = 0
+          total = 0
+          for entry in manifest:
+              if not entry.get('isRepresentativeRun'):
+                  continue
+              total += 1
+              with open(entry['jsonPath']) as rf:
+                  lhr = json.load(rf)
+              final_url = lhr.get('finalUrl') or lhr.get('finalDisplayedUrl') or ''
+              if '/login' in final_url:
+                  login_count += 1
+              audits = lhr.get('audits', {})
+              def val(key):
+                  v = audits.get(key, {}).get('numericValue')
+                  return v if v is not None else float('nan')
+              rows.append({
+                  'url': entry.get('url', ''),
+                  'finalUrl': final_url,
+                  'lcp': val('largest-contentful-paint'),
+                  'tbt': val('total-blocking-time'),
+                  'cls': val('cumulative-layout-shift'),
+              })
+
+          ok_count = total - login_count
+          print(f'측정 {total}곳 중 실화면(비-/login) {ok_count}곳 · 로그인 리다이렉트 {login_count}곳')
+
+          lines = ['| 측정 URL | finalUrl | LCP(ms) | TBT(ms) | CLS |', '|---|---|---|---|---|']
+          for r in rows:
+              lines.append(f\"| {r['url']} | {r['finalUrl']} | {r['lcp']:.0f} | {r['tbt']:.0f} | {r['cls']:.3f} |\")
+          table = '\n'.join(lines)
+
+          summary_path = os.environ.get('GITHUB_STEP_SUMMARY')
+          if summary_path:
+              with open(summary_path, 'a') as sf:
+                  sf.write('## ⚡ Lighthouse CI — 인증 후 실화면 실측(story #4029)\n\n')
+                  sf.write(table + '\n')
+
+          # story #4029 — 다음 스텝(actions/github-script)이 별도 파일을 다시 읽지 않고
+          # step output(멀티라인 delimiter 형식)으로 이 표를 직접 물려받는다.
+          output_path = os.environ.get('GITHUB_OUTPUT')
+          if output_path:
+              with open(output_path, 'a') as of:
+                  of.write('table<<LH_TABLE_EOF\n')
+                  of.write(table + '\n')
+                  of.write('LH_TABLE_EOF\n')
+
+          if ok_count < 4:
+              print(f'::error::실화면 측정 {ok_count}곳 < 4 — 로그인 리다이렉트만 잡혔다(story #4029 AC2 음성대조)')
+              sys.exit(1)
+          "
+
+      # story #4029 CHANGES 3(PO 지적) — 옛 extraHeaders 방식은 `configSettings.
+      # extraHeaders`에 세션 토큰 원문을 그대로 실은 채 `temporaryPublicStorage: true`
+      # (공개 링크)로 올렸다. puppeteerScript 전환이 그 노출 경로 자체를 없앴는지 매 run
+      # 실측으로 확認한다(값은 안 찍고 개수만 — 새는 게 있어도 이 로그에 다시 안 남게).
+      - name: Verify no session token leakage in reports
+        if: ${{ !cancelled() && (steps.lhci.conclusion == 'success' || steps.lhci.conclusion == 'failure') }}
+        run: |
+          set -euo pipefail
+          if [ ! -d .lighthouseci ] || [ -z "$(ls -A .lighthouseci/*.json 2>/dev/null)" ]; then
+            echo "::error::.lighthouseci/ 에 리포트 JSON이 0개 — collect 단계가 통째로 깨져 측정 자체가 안 됐다(0건은 이 경우 안전이 아니라 검사 자체를 안 함이다)"
+            exit 1
+          fi
+          count=0
+          for f in .lighthouseci/*.json; do
+            [ "$(basename "$f")" = "manifest.json" ] && continue
+            n=$(grep -c 'sp_at\|sp_rt' "$f" || true)
+            count=$((count + n))
+          done
+          echo "리포트 JSON 내 세션토큰 문자열(sp_at/sp_rt) 노출 건수: $count"
+          if [ "$count" -ne 0 ]; then
+            echo "::error::리포트 JSON에 세션토큰 문자열이 ${count}건 노출됨 — puppeteerScript 전환 목적(리포트에 토큰 원문 안 남기기) 위반"
+            exit 1
+          fi
+
       - name: Comment PR with Lighthouse results
-        if: github.event_name == 'pull_request'
+        if: ${{ !cancelled() && (steps.lhci.conclusion == 'success' || steps.lhci.conclusion == 'failure') && github.event_name == 'pull_request' }}
         continue-on-error: true
         uses: actions/github-script@v7
+        env:
+          # story #4029 CHANGES 2(PO 지적) — 표 안에 백틱·`${`가 섞이면(예: 어떤 URL/문구가
+          # 우연히 이 패턴을 포함) JS 템플릿 리터럴에 `${{ }}`로 직접 꽂는 순간 스크립트
+          # 자체가 깨진다 — `${{ }}`는 실행 前 텍스트 치환이라 그 내용이 뭐든 그대로 JS
+          # 소스에 섞여 들어간다. env로 넘기면 값이 문자열 그대로 process.env에 실려
+          # JS 파싱을 안 거치므로 내용에 무엇이 있든 안전하다.
+          LH_TABLE: ${{ steps.verify.outputs.table }}
         with:
           script: |
+            const table = process.env.LH_TABLE || '';
             const comment = `## ⚡ Lighthouse CI Results
 
-            Performance metrics have been collected (story #3864 — GH artifact 저장 중단,
-            전체 리포트는 이 워크플로 run 로그의 temporaryPublicStorage 링크로 확인).
+            인증 세션으로 실측(story #4029) — 전체 리포트는 이 워크플로 run 로그의
+            temporaryPublicStorage 링크로 확인(story #3864, GH artifact 저장 중단).
 
-            📊 Measured surfaces:
-            - /memos (Memos List)
-            - /board (Epic Board)
-            - /inbox (Inbox)
-            - /standup (Standup)
-            - /docs (Documentation)
+            ${table}
             `;
 
             github.rest.issues.createComment({
