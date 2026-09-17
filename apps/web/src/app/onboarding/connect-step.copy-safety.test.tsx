@@ -105,6 +105,30 @@ describe('ConnectStep — 웹 설정 복사(.mcp.json) 실패 처리(story #3986
   // story #3986 CHANGES(페드루 PO C4) — copyFailed/copyFailedRawConfig가 transport
   // 바뀌어도 안 지워지면, 옛 transport의 raw config(실 키 포함)가 새 transport
   // 화면에 그대로 남아 엉뚱한 설정을 붙여넣게 된다.
+  // story #3986 CHANGES(페드루 PO 2회차) — copyVerifyPromptFailed가 3초 뒤 자동으로
+  // 꺼지면(원래 처방) 손으로 고를 시간이 있기도 전에 원문 칸까지 통째로 사라진다.
+  it('⭐검증 예시 프롬프트 복사 실패 — 3초가 지나도 원문 칸이 남아 있다', async () => {
+    vi.stubGlobal('navigator', { clipboard: { writeText: vi.fn().mockRejectedValue(new DOMException('denied', 'NotAllowedError')) } });
+    await mount();
+
+    // showVerifyExamplePrompt = transport==='http' && !verified — 기본 mock 콘텐츠는
+    // stdio로 추론되므로 http 탭으로 전환해야 이 블록이 뜬다.
+    const hostedTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(ko.onboarding.transportHosted)) as HTMLButtonElement;
+    await act(async () => { hostedTab.click(); await vi.advanceTimersByTimeAsync(100); });
+
+    const copyBtn = container.querySelector('[data-testid="connect-step-verify-prompt-copy"]') as HTMLButtonElement;
+    expect(copyBtn).toBeTruthy();
+    await act(async () => { copyBtn.click(); await vi.advanceTimersByTimeAsync(0); });
+
+    expect(container.querySelector('[data-testid="connect-step-verify-prompt-raw"]')).not.toBeNull();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(3500); });
+
+    const raw = container.querySelector('[data-testid="connect-step-verify-prompt-raw"]') as HTMLInputElement | null;
+    expect(raw).not.toBeNull();
+    expect(raw!.value).toBe(ko.onboarding.verifyExamplePrompt);
+  });
+
   it('⭐복사 실패 뒤 transport를 바꾸면 이전 raw config 노출이 사라진다', async () => {
     vi.stubGlobal('navigator', { clipboard: { writeText: vi.fn().mockRejectedValue(new DOMException('denied', 'NotAllowedError')) } });
     await mount();
