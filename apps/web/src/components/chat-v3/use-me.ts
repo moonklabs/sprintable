@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { fetchWithAuth } from '@/lib/db/client';
 
 /**
@@ -19,12 +19,20 @@ export interface Me {
   role: 'owner' | 'admin' | 'member';
 }
 
-export function useMe(): { me: Me | null; error: boolean } {
+export function useMe(): { me: Me | null; error: boolean; retry: () => void } {
   const [me, setMe] = useState<Me | null>(null);
   const [error, setError] = useState(false);
+  // story #3972 교차 PR 드리프트(유나 점검표 1c6a0ced, 항목 4) — 오류 자리에
+  // 보이는 「다시 시도」가 필요해 재조회 트리거를 신설(retry는 nonce만 올린다,
+  // 요청 자체는 아래 useEffect가 그대로 맡는다).
+  const [reloadNonce, setReloadNonce] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
+    // 기존 코드베이스 관례(connect-step.tsx·now-strip.tsx) — fetchWithAuth 마운트-
+    // fetch 패턴을 정적분석이 "effect 안 setState"로 오탐하는 자리, disable.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setError(false);
     fetchWithAuth('/api/me')
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
       .then((json: { data?: { id?: string; project_id?: string; role?: string } }) => {
@@ -36,7 +44,9 @@ export function useMe(): { me: Me | null; error: boolean } {
       })
       .catch(() => { if (!cancelled) setError(true); });
     return () => { cancelled = true; };
-  }, []);
+  }, [reloadNonce]);
 
-  return { me, error };
+  const retry = useCallback(() => setReloadNonce((n) => n + 1), []);
+
+  return { me, error, retry };
 }

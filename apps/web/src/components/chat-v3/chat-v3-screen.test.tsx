@@ -87,6 +87,17 @@ describe('ChatV3Screen — 첫 화면 렌더', () => {
     expect(container.querySelector('[data-testid="chat-v3-messages-column"]')?.textContent).toContain('초안을 마쳤어요');
   });
 
+  // 교차 PR 드리프트(유나 점검표 1c6a0ced, 항목 4) — 색 있는 attention만 Badge,
+  // 중립 역할 라벨은 muted span으로(4373 task 상태 라벨과 같은 결).
+  it('⭐역할 태그(에이전트)는 Badge가 아니라 muted-text span이다', async () => {
+    stub();
+    await mount();
+    const tag = container.querySelector('[data-testid="chat-v3-role-tag-agent"]');
+    expect(tag).not.toBeNull();
+    expect(tag?.tagName).toBe('SPAN');
+    expect(tag?.className).toContain('text-muted-foreground');
+  });
+
   it('⭐안읽음 점 — unread_count>0이면 렌더된다', async () => {
     stub();
     await mount();
@@ -121,5 +132,32 @@ describe('ChatV3Screen — 첫 화면 렌더', () => {
     await mount();
     expect(container.querySelector('[data-testid="chat-v3-loading"]')).toBeNull();
     expect(container.querySelector('[role="alert"]')?.textContent).toBe('불러오지 못했어요');
+  });
+
+  // 교차 PR 드리프트(유나 점검표 1c6a0ced, 항목 4) — 오류 자리에 보이는 「다시
+  // 시도」가 실제로 재조회를 트리거하는지.
+  it('⭐오류 상태엔 보이는 「다시 시도」 버튼이 있고, 누르면 다시 불러온다', async () => {
+    let meShouldFail = true;
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url === '/api/me') return meShouldFail ? { ok: false, status: 500, json: async () => ({}) } : { ok: true, status: 200, json: async () => ME };
+      if (url.startsWith('/api/conversations?')) return { ok: true, status: 200, json: async () => THREADS };
+      return { ok: true, status: 200, json: async () => ({ data: null }) };
+    });
+    await mount();
+    const retryBtn = container.querySelector('[data-testid="chat-v3-retry"]') as HTMLElement;
+    expect(retryBtn).not.toBeNull();
+    meShouldFail = false;
+    await act(async () => { retryBtn.click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(container.querySelector('[data-testid="chat-v3-thread-row"]')).not.toBeNull();
+  });
+
+  // 교차 PR 드리프트 항목 2 — 빈 aria-hidden div 대신 Skeleton이 실제로 보인다.
+  it('⭐로딩 中엔 빈 div가 아니라 Skeleton이 뜬다', async () => {
+    fetchMock.mockImplementation(() => new Promise(() => {})); // 영원히 pending
+    await act(async () => { const { ChatV3Screen } = await import('./chat-v3-screen'); root.render(wrap(<ChatV3Screen />)); });
+    const loading = container.querySelector('[data-testid="chat-v3-loading"]');
+    expect(loading?.children.length).toBeGreaterThan(0);
   });
 });

@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Skeleton } from '@/components/ui/skeleton';
 import { EmbedCard } from '@/components/chat/embed-card';
 import { ChatV3EventCard } from './chat-v3-event-card';
 import type { ChatMessage } from '@/hooks/use-chat-sse';
@@ -33,13 +34,14 @@ export function ChatV3Messages({ threadId, meId, agentName, locale, needsMe, onO
   onOpenArtifactChange: (artifactId: string | null) => void;
 }) {
   const t = useTranslations('chatV3');
+  const tc = useTranslations('common');
   const [messages, setMessages] = useState<ChatMessage[] | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
+  const loadMessages = useCallback(() => {
     let cancelled = false;
     setMessages(null);
     setLoadError(false);
@@ -61,6 +63,8 @@ export function ChatV3Messages({ threadId, meId, agentName, locale, needsMe, onO
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- onOpenArtifactChange는 부모가 매 렌더 새로 안 만든다는 계약(useCallback) 가정 밖·threadId 변경 시만 재조회.
   }, [threadId]);
+
+  useEffect(() => loadMessages(), [loadMessages]);
 
   useEffect(() => {
     // jsdom(테스트 환경)엔 scrollIntoView가 없다 — 방어적 optional call(실 브라우저는 항상 있음).
@@ -89,11 +93,16 @@ export function ChatV3Messages({ threadId, meId, agentName, locale, needsMe, onO
   return (
     <section className="flex min-w-0 flex-1 flex-col border-r border-border bg-background" data-testid="chat-v3-messages-column">
       {loadError ? (
-        <div className="flex flex-1 items-center justify-center">
+        <div className="flex flex-1 flex-col items-center justify-center gap-3">
           <p role="alert" className="text-sm text-destructive">{t('loadErrorTitle')}</p>
+          <Button size="sm" variant="outline" onClick={loadMessages} data-testid="chat-v3-messages-retry">{tc('retry')}</Button>
         </div>
       ) : !messages ? (
-        <div className="flex flex-1 items-center justify-center" data-testid="chat-v3-messages-loading" aria-hidden="true" />
+        <div className="flex flex-1 flex-col gap-3 p-5" data-testid="chat-v3-messages-loading" aria-hidden="true">
+          <Skeleton className="h-10 w-2/3" />
+          <Skeleton className="ml-auto h-10 w-2/3" />
+          <Skeleton className="h-10 w-1/2" />
+        </div>
       ) : (
         <div className="flex-1 space-y-3 overflow-auto p-5">
           {messages.map((m) => {
