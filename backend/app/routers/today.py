@@ -47,6 +47,12 @@ class NeedsMeItem(BaseModel):
     # story #3828(UX-v3·대화·BE 1) — 이 work_item을 태그한 가장 최근 대화(있으면).
     # 없으면 null(그 일을 얘기한 대화가 아직 없다는 정직한 사실 — 지어내지 않는다).
     conversation_id: uuid.UUID | None = None
+    # story #3965(페드루 PO CHANGES 소형, 2026-09-17) — source="workflow_step" 항목만
+    # 채워진다(gate_id는 WorkflowLineStepApproval.gate_id 그대로, S9 parallel gate
+    # 대표 Gate). FE가 이 값 없이는 POST /gates/{id}/approvers/{approval_id}/decision을
+    # 한 콜로 못 부른다(별도 조회 없이 needs_me 응답만으로 액션 완결). gate/hitl 소스는
+    # null(그 개념 자체가 없음 — 지어내지 않는다).
+    gate_id: uuid.UUID | None = None
 
 
 class AgentProgressItem(BaseModel):
