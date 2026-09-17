@@ -12,7 +12,12 @@ export type OnboardingEvent =
   // story #3983(페드루 PO CHANGES 2026-09-17 02:11Z) — 웹 connect는 config_copied·
   // verify_started로 활성화 진행을 재지만, 데스크톱 경로는 신호가 0이라 둘을
   // 못 갈랐다 — 데스크톱 절 완료 버튼 클릭 시 emit.
-  | 'desktop_handoff_selected';
+  | 'desktop_handoff_selected'
+  // story #3983 CHANGES r2(페드루 PO 2026-09-17 02:23Z) — 데스크톱 키 복사가
+  // config_copied(웹 경로 이벤트·verify rail 첫 상태)를 재사용하면 데스크톱
+  // 복사가 웹 설정 복사로 섞여 들어가 ④가 가르려던 퍼널이 다시 흐려진다 —
+  // 별도 이름.
+  | 'desktop_key_copied';
 
 // story(2026-08-02, 채용 흐름 텔레메트리 부재) — 두 흐름(onboarding/connect-step.tsx ·
 // recruiter STEP5)이 같은 이벤트 이름을 쏘게 되면서, 합계만 보고는 어느 흐름에서 온
