@@ -11,8 +11,17 @@ import koMessages from '../../../messages/ko.json';
 
 // story #3990 — story/task 참조가 있는 메시지는 EmbedCard(chat/embed-card.tsx)를
 // 그리는데, 그 컴포넌트가 useRouter()를 쓴다(app router 미마운트 테스트 환경 방어).
+// story #4018 — usePathname/useSearchParams 추가(주소 쿼리 `conversation` 딥링크).
+// searchParamsRef.current를 테스트마다 갈아 끼워 URL 인자를 시뮬레이션한다.
+const { pushMock, replaceMock, searchParamsRef } = vi.hoisted(() => ({
+  pushMock: vi.fn(),
+  replaceMock: vi.fn(),
+  searchParamsRef: { current: new URLSearchParams() },
+}));
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: vi.fn() }),
+  useRouter: () => ({ push: pushMock, replace: replaceMock }),
+  usePathname: () => '/chat',
+  useSearchParams: () => searchParamsRef.current,
 }));
 
 // story #4008(E-UX-OVERHAUL·v3 셸 실시간) — 실 EventSource/멀티플렉서까지 안 끌고
@@ -85,6 +94,9 @@ beforeEach(() => {
   root = createRoot(container);
   fetchMock.mockReset();
   useChatSseMock.mockClear();
+  pushMock.mockClear();
+  replaceMock.mockClear();
+  searchParamsRef.current = new URLSearchParams();
   vi.stubGlobal('fetch', fetchMock);
 });
 
@@ -371,4 +383,182 @@ describe('ChatV3Screen — 스레드 레일 실시간(story #4008 AC3)', () => {
     expect(listCallsAfter).toBe(listCallsBefore + 1);
     expect(messagesCallsAfter).toBe(messagesCallsBefore + 1);
   });
+});
+
+// story #4018(E-UX-OVERHAUL·v3 대화·특정 대화 주소) AC1/AC2/AC3/AC4 — PO 확定
+// (2026-09-17): 쿼리 `?conversation=<id>`. 인자 있으면 그 대화·없으면 첫 대화가 기본
+// (replace, 뒤로가기 기록 0) · 사람이 고르면 push(뒤로가기=이전 대화) · 없는/권한
+// 없는 id는 목록은 그대로 두고 스레드 열에 중립 안내(유나 시안 703ed02d §4018).
+describe('ChatV3Screen — 특정 대화 주소(story #4018)', () => {
+  const TWO_THREADS_4018 = {
+    data: [
+      {
+        id: 'conv-1',
+        participants: [{ member_id: 'me-1', name: '나', type: 'human' }, { member_id: 'agent-1', name: '담롱 온찬', type: 'agent' }],
+        latest_message: { content: '발행 승인을 올려요', created_at: '2026-09-16T06:41:00Z' },
+        unread_count: 0,
+      },
+      {
+        id: 'conv-2',
+        participants: [{ member_id: 'me-1', name: '나', type: 'human' }, { member_id: 'agent-2', name: '카디르', type: 'agent' }],
+        latest_message: { content: '이전 대화', created_at: '2026-09-15T06:41:00Z' },
+        unread_count: 0,
+      },
+    ],
+  };
+  const CONV2_MESSAGES = {
+    data: [
+      {
+        id: 'm2', created_by: 'agent-2', sender_name: '카디르', sender_type: 'agent', sender_avatar_url: null,
+        sender_runtime_type: null, content: '리뷰 남겼어요.', attachments: [], created_at: '2026-09-15T06:41:00Z',
+        references: [], approval_target: null,
+      },
+    ],
+  };
+
+  function stub4018() {
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url === '/api/me') return { ok: true, status: 200, json: async () => ME };
+      if (url.startsWith('/api/conversations?')) return { ok: true, status: 200, json: async () => TWO_THREADS_4018 };
+      if (url === '/api/conversations/conv-1/messages') return { ok: true, status: 200, json: async () => MESSAGES };
+      if (url === '/api/conversations/conv-2/messages') return { ok: true, status: 200, json: async () => CONV2_MESSAGES };
+      if (url === '/api/today') return { ok: true, status: 200, json: async () => EMPTY_TODAY };
+      // story #4018 CHANGES 1 — 30건 목록에 없는 id는 단건 조회로 한 번 더 확인한다.
+      // 이 테스트 파일의 존재하지 않는/권한없는 id는 실 BE의 404/403(conversations.py:1794)
+      // 를 그대로 재현 — 둘 다 같은 신호(AC2)로 소비돼야 한다.
+      if (url === '/api/conversations/conv-does-not-exist') return { ok: false, status: 404, json: async () => ({}) };
+      if (url === '/api/conversations/conv-other-org-no-access') return { ok: false, status: 403, json: async () => ({}) };
+      return { ok: true, status: 200, json: async () => ({ data: null }) };
+    });
+  }
+
+  it('⭐AC1 — 인자 있음(유효한 id): 그 대화가 선택·표시된다(첫 대화 아님)', async () => {
+    stub4018();
+    searchParamsRef.current = new URLSearchParams('conversation=conv-2');
+    await mount();
+    expect(container.querySelector('[data-testid="chat-v3-messages-column"]')?.textContent).toContain('리뷰 남겼어요');
+    expect(container.querySelector('[aria-current="true"]')?.textContent).toContain('카디르');
+  });
+
+  it('⭐AC1/AC3 — 인자 없음: 첫 대화가 기본 선택되고, 주소는 replace로 반영된다(push 아님)', async () => {
+    stub4018();
+    await mount();
+    expect(container.querySelector('[data-testid="chat-v3-messages-column"]')?.textContent).toContain('초안을 마쳤어요');
+    expect(replaceMock).toHaveBeenCalledWith('/chat?conversation=conv-1');
+    expect(pushMock).not.toHaveBeenCalled();
+  });
+
+  it('⭐AC2 — 없는 대화 id: 목록은 그대로, 스레드 열엔 중립 안내(존재 여부 안 밝힘)', async () => {
+    stub4018();
+    searchParamsRef.current = new URLSearchParams('conversation=conv-does-not-exist');
+    await mount();
+    const rows = [...container.querySelectorAll('[data-testid="chat-v3-thread-row"]')];
+    expect(rows.length).toBe(2); // 레일 무변 — 목록은 그대로 둘 다 보임.
+    expect(container.querySelector('[data-testid="chat-v3-conversation-unavailable"]')?.textContent).toContain('이 대화를 열 수 없어요');
+    expect(container.querySelector('[data-testid="chat-v3-conversation-unavailable"]')?.textContent).toContain('없는 대화이거나 볼 권한이 없어요');
+    expect(container.querySelector('[data-testid="chat-v3-messages-column"]')).toBeNull();
+  });
+
+  // AC2 — 권한 없는 대화 id도 클라이언트 관점에선 「없는 id」와 같은 신호다: BE가 이미
+  // /api/conversations를 호출자 접근 범위로 스코프해 응답하므로, 남의(비참가) 대화
+  // id는 이 목록에 애초에 없다 — 존재/미존재/권한없음을 안 가르는 게 바로 AC2의
+  // 프라이버시 요구(문구도 한 문장으로 통일)라 클라 코드도 판정을 안 가른다(같은
+  // 분기, 위 테스트와 동일 경로 재사용).
+  it('⭐AC2 — 권한 없는 대화 id도 같은 중립 안내(메시지 조회 0)', async () => {
+    stub4018();
+    // BE가 스코프한 응답엔 애초에 안 실리므로, 목록에 없는 id는 "없음"이든 "권한없음"
+    // 이든 클라에서 구별 불가능·구별할 필요도 없다(AC2 프라이버시 요구) — 같은 id로 재현.
+    searchParamsRef.current = new URLSearchParams('conversation=conv-other-org-no-access');
+    await mount();
+    expect(container.querySelector('[data-testid="chat-v3-conversation-unavailable"]')).not.toBeNull();
+    expect([...container.querySelectorAll('[data-testid="chat-v3-thread-row"]')].length).toBe(2);
+    // 페드루 PO CHANGES 1 — 권한 없는 대화는 메시지 열이 아예 안 뜨니 그 프록시도
+    // 안 불려야 한다(불필요한 조회·잠재 노출면 최소화).
+    expect(fetchMock.mock.calls.some((c) => String(c[0]) === '/api/conversations/conv-other-org-no-access/messages')).toBe(false);
+  });
+
+  // 페드루 PO CHANGES 1(2026-09-17) — 목록 콜(`GET /api/conversations`)엔 limit이 없어
+  // BE 기본 30건만 온다. 그 밖(예: 31번째, 알림 등으로 온 오래된 대화)의 유효한 id는
+  // 목록엔 없어도 실제로는 열려야 한다 — 단건 조회(`GET /api/conversations/{id}`)로 폴백.
+  describe('CHANGES 1 — 30건 목록 밖 id(단건 조회 폴백)', () => {
+    const OUTSIDE_PAGE_ID = 'conv-31st-outside-page';
+    const OUTSIDE_PAGE_CONVERSATION = {
+      id: OUTSIDE_PAGE_ID,
+      participants: [{ member_id: 'me-1', name: '나', type: 'human' }, { member_id: 'agent-3', name: '유나', type: 'agent' }],
+      unread_count: 0,
+    };
+    const OUTSIDE_PAGE_MESSAGES = {
+      data: [
+        {
+          id: 'm31', created_by: 'agent-3', sender_name: '유나', sender_type: 'agent', sender_avatar_url: null,
+          sender_runtime_type: null, content: '31번째 대화 메시지예요.', attachments: [], created_at: '2026-09-01T00:00:00Z',
+          references: [], approval_target: null,
+        },
+      ],
+    };
+
+    function stubOutsidePage(directResponse: { ok: boolean; status: number }) {
+      fetchMock.mockImplementation(async (url: string) => {
+        if (url === '/api/me') return { ok: true, status: 200, json: async () => ME };
+        if (url.startsWith('/api/conversations?')) return { ok: true, status: 200, json: async () => TWO_THREADS_4018 };
+        if (url === '/api/conversations/conv-1/messages') return { ok: true, status: 200, json: async () => MESSAGES };
+        if (url === '/api/today') return { ok: true, status: 200, json: async () => EMPTY_TODAY };
+        if (url === `/api/conversations/${OUTSIDE_PAGE_ID}`) {
+          return { ...directResponse, json: async () => (directResponse.ok ? OUTSIDE_PAGE_CONVERSATION : {}) };
+        }
+        if (url === `/api/conversations/${OUTSIDE_PAGE_ID}/messages`) return { ok: true, status: 200, json: async () => OUTSIDE_PAGE_MESSAGES };
+        return { ok: true, status: 200, json: async () => ({ data: null }) };
+      });
+    }
+
+    it('⭐31번째 id(목록 밖, 유효) — 단건 조회로 정상 열린다', async () => {
+      stubOutsidePage({ ok: true, status: 200 });
+      searchParamsRef.current = new URLSearchParams(`conversation=${OUTSIDE_PAGE_ID}`);
+      await mount();
+      expect(container.querySelector('[data-testid="chat-v3-messages-column"]')?.textContent).toContain('31번째 대화 메시지예요');
+      // 레일은 30건 목록 그대로(이 대화는 그 목록에 없으니 레일엔 하이라이트 자체가 없다 — 회귀 아님, 목록 무변이 계약).
+      expect([...container.querySelectorAll('[data-testid="chat-v3-thread-row"]')].length).toBe(2);
+    });
+
+    it('⭐404(단건 조회) — 「열 수 없어요」 중립 안내', async () => {
+      stubOutsidePage({ ok: false, status: 404 });
+      searchParamsRef.current = new URLSearchParams(`conversation=${OUTSIDE_PAGE_ID}`);
+      await mount();
+      expect(container.querySelector('[data-testid="chat-v3-conversation-unavailable"]')).not.toBeNull();
+    });
+
+    it('⭐403(단건 조회) — 「열 수 없어요」 중립 안내 + 메시지 조회 0', async () => {
+      stubOutsidePage({ ok: false, status: 403 });
+      searchParamsRef.current = new URLSearchParams(`conversation=${OUTSIDE_PAGE_ID}`);
+      await mount();
+      expect(container.querySelector('[data-testid="chat-v3-conversation-unavailable"]')).not.toBeNull();
+      expect(fetchMock.mock.calls.some((c) => String(c[0]) === `/api/conversations/${OUTSIDE_PAGE_ID}/messages`)).toBe(false);
+    });
+
+    it('⭐500(단건 조회) — 「없는 대화」로 단정하지 않고 로드 오류+재시도', async () => {
+      stubOutsidePage({ ok: false, status: 500 });
+      searchParamsRef.current = new URLSearchParams(`conversation=${OUTSIDE_PAGE_ID}`);
+      await mount();
+      expect(container.querySelector('[data-testid="chat-v3-conversation-unavailable"]')).toBeNull();
+      expect(container.querySelector('[data-testid="chat-v3-conversation-retry"]')).not.toBeNull();
+      expect(container.querySelector('[role="alert"]')?.textContent).toBe('불러오지 못했어요');
+    });
+  });
+
+  it('⭐AC3 — 사람이 다른 대화를 고르면 주소가 push로 갱신된다(뒤로가기=이전 대화)', async () => {
+    stub4018();
+    await mount();
+    pushMock.mockClear(); // 마운트 중 replace(기본 선택)는 이 단언 대상이 아님.
+    const rows = [...container.querySelectorAll('[data-testid="chat-v3-thread-row"]')];
+    const conv2Row = rows.find((r) => r.textContent?.includes('카디르')) as HTMLElement;
+    await act(async () => { conv2Row.click(); await Promise.resolve(); await Promise.resolve(); });
+    expect(pushMock).toHaveBeenCalledWith('/chat?conversation=conv-2');
+    expect(container.querySelector('[data-testid="chat-v3-messages-column"]')?.textContent).toContain('리뷰 남겼어요');
+  });
+
+  // AC4 양성 대조 — 주소 인자를 실제로 읽는지 스스로 검증(뮤테이션 self-check, 수동
+  // 재현 완료): chat-v3-screen.tsx의 `conversationParam` 읽기 분기를 임시로 주석
+  // 처리하고 이 두 테스트(위 "인자 있음" 1개 + AC2 "없는 id" 1개)를 재실행 →
+  // conv-2 선택 실패("리뷰 남겼어요" 못 찾음)·미존재 id도 조용히 conv-1이 뜨는 걸로
+  // RED 확인 → 원복 → GREEN 재확인. (되돌린 뒤 상태만 커밋 — 임시 주석은 남기지 않음.)
 });
