@@ -754,6 +754,105 @@ describe('GateDetailPage — 실시간 해소 반영(story #2985 AC2)', () => {
   });
 });
 
+// story #4027(유나 전수→PO 코드 확認) — 다른 승인자가 먼저 해소·위임하면 이 페이지가 실시간
+// 재조회로 «불러오는 중» 한 줄로 무너졌다 복구되던 결함. 위 #2985 스위트는 "재조회가 되는지"만
+// 봤고 "그 재조회가 로딩 상태를 켜는지"는 안 봤다 — 여기가 그 축.
+describe('GateDetailPage — 실시간 재조회는 로딩을 안 켠다(story #4027)', () => {
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((r) => { resolve = r; });
+    return { promise, resolve };
+  }
+
+  it('AC1 — mux 재조회 中에도 기존 화면(ProofCapsule 본문)이 유지되고 «불러오는 중»이 안 뜬다', async () => {
+    const first = gate({ status: 'pending', can_approve: true });
+    const second = gate({ status: 'approved', resolver_id: 'member-9' });
+    let call = 0;
+    const gateResolvedDeferred = deferred<{ ok: boolean; status: number; json: () => Promise<unknown> }>();
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/gates/gate-1') {
+        call += 1;
+        if (call === 1) return { ok: true, status: 200, json: async () => ({ data: first }) };
+        return gateResolvedDeferred.promise; // 두 번째(mux 트리거) 호출은 응답을 붙잡아 둔다.
+      }
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    const { default: GateDetailPage } = await import('./page');
+    const { TopBarProvider } = await import('@/components/nav/top-bar-context');
+    await act(async () => { root.render(wrap(<GateDetailPage />, TopBarProvider)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).not.toContain(koMessages.cage.gateInboxLoading);
+    expect(container.textContent).toContain(koMessages.cage.gateReject); // 본문 정상 렌더 확認.
+
+    const muxCall = muxSubscribeMock.mock.calls.find(([eventName]) => eventName === 'conversation.gate_resolved');
+    const handler = muxCall![1] as (raw: string, eventId?: string) => void;
+    await act(async () => { handler(JSON.stringify({ gate_id: 'gate-1', status: 'approved' })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    // 재조회가 아직 안 끝난 시점 — 로딩 문구 0, 기존 본문(반려 버튼) 그대로.
+    expect(container.textContent).not.toContain(koMessages.cage.gateInboxLoading);
+    expect(container.textContent).toContain(koMessages.cage.gateReject);
+
+    await act(async () => {
+      gateResolvedDeferred.resolve({ ok: true, status: 200, json: async () => ({ data: second }) });
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    });
+
+    // 응답 도착 후 — 화면이 해소된 상태로 교체(로딩 문구는 시종 0).
+    expect(container.textContent).not.toContain(koMessages.cage.gateInboxLoading);
+    expect(container.textContent).not.toContain(koMessages.cage.gateReject);
+  });
+
+  it('AC2 — 결정 게이트에서 고르던 선택안이 실시간 재조회 뒤에도 지워지지 않는다', async () => {
+    const decisionGateFixture = gate({
+      gate_type: 'agent_decision_request', can_approve: true, risk_grade: 'low', status: 'pending',
+      neutral_facts: { question: '유형 선택', options: ['A) 안건1', 'B) 안건2'] },
+    });
+    let call = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/gates/gate-1') { call += 1; return { ok: true, status: 200, json: async () => ({ data: decisionGateFixture }) }; }
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    const { default: GateDetailPage } = await import('./page');
+    const { TopBarProvider } = await import('@/components/nav/top-bar-context');
+    await act(async () => { root.render(wrap(<GateDetailPage />, TopBarProvider)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    const radios = container.querySelectorAll('input[type="radio"]');
+    await act(async () => { (radios[1] as HTMLInputElement).click(); });
+    expect((container.querySelectorAll('input[type="radio"]')[1] as HTMLInputElement).checked).toBe(true);
+
+    const muxCall = muxSubscribeMock.mock.calls.find(([eventName]) => eventName === 'conversation.gate_delegated');
+    const handler = muxCall![1] as (raw: string, eventId?: string) => void;
+    await act(async () => { handler(JSON.stringify({ gate_id: 'gate-1', new_approver_id: 'member-9' })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(call).toBe(2); // 재조회는 실제로 일어났다(회귀 아님).
+    expect((container.querySelectorAll('input[type="radio"]')[1] as HTMLInputElement).checked).toBe(true); // 선택은 그대로.
+  });
+
+  it('AC1 — 첫 로드(id 변경 포함)는 여전히 «불러오는 중»을 보여준다(첫 로드 회귀 방지)', async () => {
+    const g = gate({ status: 'pending' });
+    const first = deferred<{ ok: boolean; status: number; json: () => Promise<unknown> }>();
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/gates/gate-1') return first.promise;
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    const { default: GateDetailPage } = await import('./page');
+    const { TopBarProvider } = await import('@/components/nav/top-bar-context');
+    await act(async () => { root.render(wrap(<GateDetailPage />, TopBarProvider)); });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(container.textContent).toContain(koMessages.cage.gateInboxLoading);
+
+    await act(async () => {
+      first.resolve({ ok: true, status: 200, json: async () => ({ data: g }) });
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    });
+    expect(container.textContent).not.toContain(koMessages.cage.gateInboxLoading);
+  });
+});
+
 // story #3113(실사고·선생님 2026-08-26) — 상세 페이지에서도 결정 게이트(agent_decision_
 // request)의 question/assumption/options가 전문 열람 가능해야 한다(#3038이 고친 건 merge
 // 카드 렌더뿐, 이 gate_type은 미커버였다).
