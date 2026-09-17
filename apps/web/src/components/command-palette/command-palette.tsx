@@ -69,6 +69,26 @@ const NAV_ITEM_SHORTCUTS: Record<string, string[]> = {
 // 없으면 조용한 orphan이 된다. 지우면 그 가드가 못 잡는다.
 // story #4013 — export해 팔레트 정의를 직접 순회하는 가드(scripts/verify-command-
 // palette-workspaceless-href-resolves.test.ts)가 이름 목록을 손으로 다시 안 베끼게 한다.
+// story #4013 CHANGES(페드루 PO 지적 2026-09-17 12:52Z) — 'board'/'docs'는 kind='static'
+// 이지만 아래 ITEMS useMemo가 항상 resourceHref로 재계산해 워크스페이스 있는 경로로
+// 덮어쓴다(줄 ~135) — 워크스페이스 없는 href 후보에서 제외해야 한다. 이 이름을 export해
+// 컴포넌트의 오버라이드 분기와 아래 getWorkspacelessStaticNavItems()가 같은 값을 본다
+// (손으로 두 곳에 각각 적으면 새 오버라이드가 하나만 반영되고 드리프트할 위험).
+export const RESOURCE_HREF_OVERRIDE_IDS = new Set(['board', 'docs']);
+
+// story #4013 CHANGES — 팔레트가 실제로 렌더하는 "워크스페이스 없는 href" 후보 전부를
+// 손 목록 없이 파생한다(GUARD_ANCHOR_ITEMS + NAV_GROUPS/LEGACY_NAV_ITEMS/CHAT_CENTER_ITEM
+// 중 kind !== 'resource'이고 위 오버라이드 대상이 아닌 것). ITEMS useMemo(아래, 컴포넌트
+// 내부)가 실제로 만드는 href와 같은 소스·같은 필터 규칙을 쓴다 — 이 함수는 런타임 상태
+// (orgSlug/currentProjectSlug)에 안 기대는 순수 함수라 컴포넌트 밖에서 export해 가드
+// 테스트(verify-command-palette-workspaceless-href-resolves.test.ts)가 그대로 쓴다.
+export function getWorkspacelessStaticNavItems(): Array<{ id: string; href: string }> {
+  const navItems = [...NAV_GROUPS.flatMap((group) => group.items), ...LEGACY_NAV_ITEMS, CHAT_CENTER_ITEM];
+  return navItems
+    .filter((item) => item.kind !== 'resource' && !RESOURCE_HREF_OVERRIDE_IDS.has(item.id))
+    .map((item) => ({ id: item.id, href: item.path }));
+}
+
 export const GUARD_ANCHOR_ITEMS: Array<{ id: string; icon: LucideIcon; labelKey: string; href: string }> = [
   { id: 'go-sprints', icon: CalendarRange, labelKey: 'goSprints', href: '/sprints' },
   { id: 'go-epics', icon: FolderKanban, labelKey: 'goEpics', href: '/epics' },
@@ -132,6 +152,11 @@ export function CommandPalette({ open, onOpenChange, projectId, contextStoryId }
     const navItems = [...NAV_GROUPS.flatMap((group) => group.items), ...LEGACY_NAV_ITEMS, CHAT_CENTER_ITEM];
     const derived: CommandItem[] = navItems.map((navItem) => {
       let href = navItem.kind === 'resource' ? resourceHref(navItem.path) : navItem.path;
+      // ⛔이 두 줄이 RESOURCE_HREF_OVERRIDE_IDS(위 export)의 유일한 정의처다 — id별로
+      // 다른 resourceHref 파생식(boardHref엔 ?view=list가 더 붙음)이라 Set만으론 값을
+      // 못 만든다. 이 Set에 새 id를 추가하면 여기도 분기를 추가할 것(안 하면
+      // getWorkspacelessStaticNavItems()가 그 id를 조용히 워크스페이스-없음 후보에서
+      // 빼버려 가드가 눈먼다 — 반대 방향 드리프트).
       if (navItem.id === 'board') href = boardHref;
       else if (navItem.id === 'docs') href = docsHref;
       return {
