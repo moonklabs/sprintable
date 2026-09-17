@@ -168,10 +168,11 @@ const KNOWN_ERRORS: Record<string, KnownError> = {
   MEDIA_NOT_SUPPORTED_PHASE0: { labelKey: 'errorMediaNotSupported', kind: 'unknown' },
   SITE_POST_PUBLISH_HUMAN_ONLY: { labelKey: 'errorPublishHumanOnly', kind: 'permission' },
   EXTERNAL_PUBLISH_APPROVAL_REQUIRED: { labelKey: 'errorApprovalRequired', kind: 'approval_required' },
-  // story #3953(블루프린트 §1-5) — 조직 owner가 외부 발행을 일시 중지했다(423). 구체
-  // 사유는 /organization/channels의 ExternalPublishPauseCard가 별도로 보여준다 —
-  // 이 자리(발행 시도 즉시 실패 배너)는 "지금 왜 안 되는지" 1줄이면 충분(reason 보간 0,
-  // 다른 KNOWN_ERRORS 엔트리들도 동형 — labelKey는 정적 문구).
+  // story #3953(블루프린트 §1-5, 페드루 PO 정정 2026-09-17) — 조직 owner가 외부
+  // 발행을 일시 중지했다(423). reason은 어디서도 표시 0(external-publish-pause-
+  // card.tsx 자기 주석과 동형 — 입력만·감사 로그행에만 남음) — 이 자리(발행 시도
+  // 즉시 실패 배너)는 "지금 왜 안 되는지" 1줄이면 충분(다른 KNOWN_ERRORS
+  // 엔트리들도 동형 — labelKey는 정적 문구).
   EXTERNAL_PUBLISH_PAUSED: { labelKey: 'errorExternalPublishPaused', kind: 'external_publish_paused' },
   SITE_POST_REAPPROVAL_REQUIRED: { labelKey: 'errorReapprovalRequired', kind: 'reapproval_required' },
   SITE_POST_SEAL_MISSING: { labelKey: 'errorSealMissing', kind: 'seal_missing' },
