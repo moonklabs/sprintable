@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { fetchWithAuth } from '@/lib/db/client';
@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useMe, type Me } from './use-me';
 import { ChatV3ThreadRail, type ChatV3Thread } from './chat-v3-thread-rail';
-import { ChatV3Messages } from './chat-v3-messages';
+import { ChatV3Messages, type ChatV3MessagesHandle } from './chat-v3-messages';
 import { ChatV3ContextPanel } from './chat-v3-context-panel';
 import { useTodaySnapshot } from '@/components/org-briefing/use-today-snapshot';
 import { useChatSse, type SseConversationReadPayload } from '@/hooks/use-chat-sse';
@@ -45,6 +45,10 @@ export function ChatV3Screen({ todayV3Enabled }: { todayV3Enabled: boolean }) {
   // story #3990 — 「근거」·「이력」 절이 스코프할 일(work item). chat-v3-messages.tsx가
   // openArtifactId와 같은 파생 루프에서 같이 뽑아 올린다.
   const [workItemRef, setWorkItemRef] = useState<{ type: 'story' | 'task'; id: string } | null>(null);
+  // story #4008 CHANGES 2 — 대화 열의 SSE 구독을 없애고 이 화면의 단일 useChatSse가
+  // 대신 밀어준다(위 import 주석 참고). ref는 선택 스레드가 바뀌어도 useCallback
+  // 재생성이 필요 없다(안정 참조 — mux 재구독 유발 0).
+  const messagesRef = useRef<ChatV3MessagesHandle>(null);
 
   const loadConversations = useCallback((currentMe: Me) => {
     let cancelled = false;
@@ -85,6 +89,9 @@ export function ChatV3Screen({ todayV3Enabled }: { todayV3Enabled: boolean }) {
     const content = payload.content as string | undefined;
     const createdAt = payload.created_at as string | undefined;
     if (!conversationId) return;
+    // story #4008 CHANGES 2 — 이 화면(선택된 스레드)에 온 메시지는 대화 열로도
+    // 밀어준다(그 컴포넌트는 더 이상 자기 useChatSse가 없다 — 위 import 주석).
+    if (conversationId === selectedId) messagesRef.current?.receiveMessage(payload);
     setThreads((prev) => {
       if (!prev) return prev;
       const idx = prev.findIndex((th) => th.id === conversationId);
@@ -106,7 +113,12 @@ export function ChatV3Screen({ todayV3Enabled }: { todayV3Enabled: boolean }) {
     );
   }, []);
 
-  const handleThreadReconnect = useCallback(() => { if (me) loadConversations(me); }, [me, loadConversations]);
+  const handleThreadReconnect = useCallback(() => {
+    if (me) loadConversations(me);
+    // story #4008 CHANGES 2 — 대화 열도 같은 재연결 신호로 따라잡는다(그 컴포넌트
+    // 자기 useChatSse가 없어져 onReconnect를 직접 못 받는다 — 위 import 주석).
+    messagesRef.current?.reload();
+  }, [me, loadConversations]);
 
   useChatSse({
     currentTeamMemberId: me?.id,
@@ -152,6 +164,7 @@ export function ChatV3Screen({ todayV3Enabled }: { todayV3Enabled: boolean }) {
             {selectedThread ? (
               <>
                 <ChatV3Messages
+                  ref={messagesRef}
                   threadId={selectedThread.id}
                   meId={me.id}
                   agentName={agentName}

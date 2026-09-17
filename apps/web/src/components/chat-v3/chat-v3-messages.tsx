@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -10,8 +10,19 @@ import { EmbedCard } from '@/components/chat/embed-card';
 import { cn } from '@/lib/utils';
 import { fetchWithAuth } from '@/lib/db/client';
 import { ChatV3EventCard } from './chat-v3-event-card';
-import { normalizeToMessage, useChatSse, type ChatMessage } from '@/hooks/use-chat-sse';
+import { normalizeToMessage, type ChatMessage } from '@/hooks/use-chat-sse';
 import type { TodayNeedsMeItem } from '@/components/org-briefing/derive-today';
+
+// story #4008 CHANGES 2(PO 지적, 2026-09-17) — 이 컴포넌트가 chat-v3-screen.tsx와 각자
+// useChatSse를 불러 탭당 SSE 연결이 prod 설정(SSE_MULTIPLEX_ENABLED=false, cloud-build.yml)
+// 에서 2개로 늘었다(멀티플렉서 없으면 훅 호출마다 독립 EventSource — use-chat-sse.ts 폴백
+// 경로). 구독은 chat-v3-screen.tsx 한 곳으로 올리고, 이 컴포넌트는 그 결과를 ref로
+// 받기만 한다(상태를 부모로 끌어올리는 대신 최소 변경 — messages 배열 자체는 여기 소유
+// 유지, 부모는 "새 메시지 왔다"만 알려준다).
+export interface ChatV3MessagesHandle {
+  receiveMessage: (payload: Record<string, unknown>) => void;
+  reload: () => void;
+}
 
 /**
  * story #3972 AC1④ — 「대화 열」은 `ChatView`(옛 `/chats` 전용, 인라인 승인 등 이
@@ -28,9 +39,7 @@ function formatDayLabel(key: string, locale: string): string {
   return new Intl.DateTimeFormat(locale, { month: 'long', day: 'numeric', weekday: 'long' }).format(new Date(`${key}T00:00:00`));
 }
 
-export function ChatV3Messages({
-  threadId, meId, agentName, locale, needsMe, todayV3Enabled, onOpenArtifactChange, onWorkItemRefChange,
-}: {
+export interface ChatV3MessagesProps {
   threadId: string;
   meId: string;
   agentName: string;
@@ -44,7 +53,11 @@ export function ChatV3Messages({
   // 파생 규칙(최근 메시지부터 훑어 첫 story/task 참조)이라 같은 루프에서 같이 뽑는다
   // (메시지 배열 재순회 0).
   onWorkItemRefChange: (ref: { type: 'story' | 'task'; id: string } | null) => void;
-}) {
+}
+
+export const ChatV3Messages = forwardRef<ChatV3MessagesHandle, ChatV3MessagesProps>(function ChatV3Messages({
+  threadId, meId, agentName, locale, needsMe, todayV3Enabled, onOpenArtifactChange, onWorkItemRefChange,
+}, ref) {
   const t = useTranslations('chatV3');
   const tc = useTranslations('common');
   const [messages, setMessages] = useState<ChatMessage[] | null>(null);
@@ -105,26 +118,17 @@ export function ChatV3Messages({
     });
   }, []);
 
-  // story #4008 AC2 — 이 화면(선택된 스레드)에 온 새 메시지만 반영. 스레드 레일의
-  // 미리보기·안읽음 갱신은 chat-v3-screen.tsx가 별도 useChatSse 인스턴스로 맡는다
-  // (chat-view.tsx/chat-list-view.tsx가 이미 그렇게 분리돼 있는 관례 그대로).
-  const handleConversationMessage = useCallback((payload: Record<string, unknown>) => {
-    const conversationId = (payload.conversation_id ?? payload.id) as string | undefined;
-    if (conversationId !== threadId) return;
-    addMessage(normalizeToMessage(payload));
-  }, [threadId, addMessage]);
-
-  // story #4008 AC4 — 재연결(탭 복귀 포함, useChatSse 내부 visibility 리스너가 같은
-  // 콜백을 태운다) 시 놓친 메시지를 1회 재조회로 따라잡는다(chat-view.tsx handleReconnect
-  // 와 동형 — merge는 loadMessages/mergeBackfilledMessages가 아니라 이 화면의 loadMessages
-  // 재호출로 통째 재조회, v3는 백그라운드 backfill-merge 없이 단순 재조회로 충분한 규모).
-  const handleReconnect = useCallback(() => { loadMessages(); }, [loadMessages]);
-
-  useChatSse({
-    currentTeamMemberId: meId,
-    onConversationMessage: handleConversationMessage,
-    onReconnect: handleReconnect,
-  });
+  // story #4008 CHANGES 2 — SSE 구독 자체는 chat-v3-screen.tsx의 단일 useChatSse
+  // 인스턴스가 갖고 있다(탭당 연결 1개 유지, 위 import 주석 참고). 이 화면(선택된
+  // 스레드)에 온 새 메시지만 반영하는 threadId 필터는 부모가 이미 selectedId로
+  // 걸러서 넘겨주므로(receiveMessage는 매칭된 것만 호출됨) 여기선 정규화+dedupe만.
+  useImperativeHandle(ref, () => ({
+    receiveMessage: (payload: Record<string, unknown>) => { addMessage(normalizeToMessage(payload)); },
+    // story #4008 AC4 — 재연결(탭 복귀 포함) 시 놓친 메시지를 1회 재조회로 따라잡는다
+    // (chat-view.tsx handleReconnect와 동형 — v3는 백그라운드 backfill-merge 없이
+    // 단순 재조회로 충분한 규모).
+    reload: () => { loadMessages(); },
+  }), [addMessage, loadMessages]);
 
   const handleSend = async () => {
     const content = draft.trim();
@@ -222,4 +226,4 @@ export function ChatV3Messages({
       </div>
     </section>
   );
-}
+});
