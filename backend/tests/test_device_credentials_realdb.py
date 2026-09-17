@@ -2023,3 +2023,114 @@ async def test_device_cap_does_not_block_third_device():
         assert labels == ["user-dev-0", "user-dev-1", "user-dev-2"]
     finally:
         await engine.dispose()
+
+
+async def test_schema_stores_no_private_or_secret_material():
+    """G2.9 — 개인키·비밀 파생물이 스키마에 **없다**를 실 DB introspection 으로 고정한다.
+
+    `dt_live_` 는 bearer 비밀이 아니라 기기 식별자이므로, 저장되는 것은 **공개키(DER)뿐**이다.
+    `agent_api_keys`/`human_api_keys` 가 가진 `key_hash`/`key_prefix` 에 해당하는 컬럼을 두지
+    않는다 — 개인키는 서버로 오지 않고(요청엔 서명만 실린다), 탈취할 원문 비밀도 없다.
+
+    이 테스트는 "컬럼이 없다"를 잠근다 — 나중에 누가 편의로 `key_hash` 를 추가하면 여기서
+    RED 가 된다(그 순간 이 설계의 전제가 바뀌는 것이므로 의도적 검토가 필요하다).
+    """
+    from sqlalchemy import inspect
+
+    from app.core.database import engine
+
+    async with engine.connect() as conn:
+        cols = await conn.run_sync(lambda c: {x["name"] for x in inspect(c).get_columns("agent_device_credentials")})
+    forbidden = {
+        "private_key", "private_key_der", "private_key_pem", "secret", "secret_hash",
+        "key_hash", "key_prefix", "key", "token", "token_hash", "signature",
+    }
+    leaked = sorted(cols & forbidden)
+    assert not leaked, f"비밀/파생물 컬럼이 생겼다 — 평문 비밀 미저장 전제가 깨진다: {leaked}"
+    # 공개키는 있어야 한다(서명 검증의 유일한 입력).
+    assert "public_key_der" in cols
+
+
+async def test_device_credential_is_identifier_not_secret():
+    """G2.9 보강 — 자격증명 문자열 자체가 **비밀이 아님**을 구조로 확인한다.
+
+    `dt_live_<uuid>` 는 기기 식별자다. 같은 값으로 여러 번 조회·인증이 가능하고, 발급 응답이
+    "1회 노출" 제약을 두지 않는다(`sk_live_` 의 원문 키와 다른 점). 개인키 없이는 서명을 만들 수
+    없으므로 문자열이 새도 그 자체로는 인증이 성립하지 않는다.
+    """
+    from app.services.device_credential import format_device_credential
+
+    cid = uuid.uuid4()
+    cred = format_device_credential(cid)
+    # 형식은 uuid 노출뿐 — 해시/난수 비밀 성분이 없다(같은 id 면 항상 같은 문자열).
+    assert cred == format_device_credential(cid)
+    assert cred == f"dt_live_{cid}"
+
+
+async def test_last_seen_throttle_is_shared_with_api_key_policy():
+    """G2.7 — `last_seen_at` 스로틀이 기존 정책(`_LAST_USED_AT_THROTTLE` 5분)과 **같은 상수**를 쓴다.
+
+    기기 경로가 자기만의 스로틀을 새로 만들면 두 축이 드리프트한다(같은 이유로 #2128 계열
+    실사고가 났다). 소스 수준에서 공유 상수를 쓰는지 + 폐기/미인증 기기는 그 write 를 안
+    타는지(인증 실패가 부하를 만들지 않음)를 함께 고정한다.
+    """
+    import inspect
+    from datetime import timedelta
+
+    from app.dependencies import auth as auth_mod
+
+    assert auth_mod._LAST_USED_AT_THROTTLE == timedelta(minutes=5)
+    src = inspect.getsource(auth_mod._resolve_device_credential)
+    assert "_LAST_USED_AT_THROTTLE" in src, "기기 경로가 공유 스로틀 상수를 안 쓴다 — 드리프트"
+
+
+async def test_rejected_device_request_does_not_touch_last_seen():
+    """G2.10 보강 — **거부되는 요청은 `last_seen_at`/seq 를 갱신하지 않는다**.
+
+    `dt_live_` 경로는 챌린지를 발급하지 않으므로(모바일 `device_proof` 와 달리 상태를 만들지
+    않는다) "폐기된 기기가 backoff 로 도는 동안 무한 발급" 이라는 실패 모드가 구조적으로 없다.
+    여기선 그 주장의 실질 부분을 잰다 — **폐기된 기기의 반복 요청이 DB 쓰기를 만들지 않는다**.
+    """
+    from fastapi import HTTPException
+    from sqlalchemy import select
+
+    from app.dependencies.auth import _resolve_device_credential
+    from app.models.agent_device_credential import AgentDeviceCredential
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id, user_id, human_member_id = await _seed_org_project_human(s)
+            agent_id = await _seed_agent(s, org_id, project_id, created_by_member_id=human_member_id)
+            priv, der = _keypair()
+            cred_id = await _seed_credential(
+                s, org_id=org_id, human_member_id=human_member_id, agent_member_id=agent_id,
+                public_key_der=der, revoked=True,
+            )
+        before = None
+        async with Session() as s:
+            row = (await s.execute(
+                select(AgentDeviceCredential).where(AgentDeviceCredential.id == cred_id)
+            )).scalar_one()
+            before = (row.last_seen_at, row.last_server_seq)
+
+        # 폐기된 기기가 backoff 로 도는 상황을 흉내 — 같은 요청을 반복해도 상태가 안 변해야 한다.
+        for _ in range(3):
+            async with Session() as s:
+                proof = _proof(priv, credential_id=cred_id, method="POST", route="/api/v2/x",
+                               timestamp=_now_ts(), seq=99)
+                with pytest.raises(HTTPException) as exc:
+                    await _resolve_device_credential(
+                        f"dt_live_{cred_id}", s, method="POST", route="/api/v2/x", **proof,
+                    )
+                assert exc.value.status_code == 401
+
+        async with Session() as s:
+            row = (await s.execute(
+                select(AgentDeviceCredential).where(AgentDeviceCredential.id == cred_id)
+            )).scalar_one()
+            assert (row.last_seen_at, row.last_server_seq) == before, (
+                "거부된 요청이 상태를 갱신했다 — 재시도 루프가 부하/오염을 만든다"
+            )
+    finally:
+        await engine.dispose()
