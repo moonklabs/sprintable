@@ -9,6 +9,12 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 
+// story #3990 — story/task 참조가 있는 메시지는 EmbedCard(chat/embed-card.tsx)를
+// 그리는데, 그 컴포넌트가 useRouter()를 쓴다(app router 미마운트 테스트 환경 방어).
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn() }),
+}));
+
 const fetchMock = vi.fn();
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -159,6 +165,40 @@ describe('ChatV3Screen — 첫 화면 렌더', () => {
     await act(async () => { const { ChatV3Screen } = await import('./chat-v3-screen'); root.render(wrap(<ChatV3Screen todayV3Enabled />)); });
     const loading = container.querySelector('[data-testid="chat-v3-loading"]');
     expect(loading?.children.length).toBeGreaterThan(0);
+  });
+});
+
+// story #3990(E-UX-OVERHAUL·「대화」 구현 5/N) AC5 — 첫 화면 콜은 이어진 story/task
+// 참조가 있을 때만 +2(근거·이력). 참조가 없으면(기존 MESSAGES 픽스처, references:[])
+// 그 두 콜 자체가 안 나간다 — 회귀가드.
+describe('ChatV3Screen — 콜 예산(story #3990 AC5)', () => {
+  it('⭐이어진 story/task 참조가 없으면 근거·이력 콜이 안 나간다(기존 3콜 그대로)', async () => {
+    stub();
+    await mount();
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).startsWith('/api/evidence'))).toBe(false);
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).startsWith('/api/activity-logs'))).toBe(false);
+  });
+
+  it('⭐메시지에 story 참조가 있으면 근거·이력 콜이 +2로 나간다(work_item_id/entity_id 그 참조값)', async () => {
+    const messagesWithRef = {
+      data: [{
+        id: 'm1', created_by: 'agent-1', sender_name: '담롱 온찬', sender_type: 'agent', sender_avatar_url: null,
+        sender_runtime_type: null, content: '이 스토리 보세요.', attachments: [], created_at: '2026-09-16T06:41:00Z',
+        references: [{ target_type: 'story', target_id: 'story-77', form: 'mention' }], approval_target: null,
+      }],
+    };
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url === '/api/me') return { ok: true, status: 200, json: async () => ME };
+      if (url.startsWith('/api/conversations?')) return { ok: true, status: 200, json: async () => THREADS };
+      if (url === '/api/conversations/conv-1/messages') return { ok: true, status: 200, json: async () => messagesWithRef };
+      if (url === '/api/today') return { ok: true, status: 200, json: async () => EMPTY_TODAY };
+      return { ok: true, status: 200, json: async () => ({ data: null }) };
+    });
+    await mount();
+    const evidenceCall = fetchMock.mock.calls.find((c) => String(c[0]).startsWith('/api/evidence'));
+    const historyCall = fetchMock.mock.calls.find((c) => String(c[0]).startsWith('/api/activity-logs'));
+    expect(evidenceCall?.[0]).toBe('/api/evidence?work_item_id=story-77&work_item_type=story');
+    expect(historyCall?.[0]).toBe('/api/activity-logs?entity_type=story&entity_id=story-77');
   });
 });
 
