@@ -1446,6 +1446,11 @@ async def list_channel_post_drafts_endpoint(
         description="story #3734 — true면 보관된(deleted_at not null) 초안도 목록에 "
         "포함한다(「보관됨 보기」 필터). include_withdrawn과 독립 축. 기본은 제외.",
     ),
+    work_item_id: uuid.UUID | None = Query(
+        default=None,
+        description="story #3988 — 이 일(work_item_id)에 이어진 초안만(일감 상세 「발행물」 "
+        "탭 전용). 없으면 기존 응답과 완전히 동일(회귀 0).",
+    ),
     db: AsyncSession = Depends(get_db),
     verified_org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
@@ -1495,9 +1500,11 @@ async def list_channel_post_drafts_endpoint(
         db, org_id=org_id, limit=limit, offset=offset,
         scheduled_from=scheduled_from, scheduled_to=scheduled_to, unscheduled=unscheduled,
         include_withdrawn=include_withdrawn, include_deleted=include_deleted,
+        work_item_id=work_item_id,
     )
     total = await count_channel_post_drafts(
         db, org_id=org_id, include_withdrawn=include_withdrawn, include_deleted=include_deleted,
+        work_item_id=work_item_id,
     )
     response.headers["X-Total-Count"] = str(total)
     source_titles = await get_source_titles_and_latest_versions(

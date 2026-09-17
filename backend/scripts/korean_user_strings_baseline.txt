@@ -144,6 +144,7 @@ app/routers/channel_posts.py::scheduled_at은 현재 시각 이후여야 합니�
 app/routers/channel_posts.py::scheduled_from은 scheduled_to보다 늦을 수 없습니다.
 app/routers/channel_posts.py::story #3614(AC2) — true면 폐기된(status='withdrawn') 초안도 목록에 포함한다(「폐기됨 보기」 필터). 기본은 제외 — 폐기는 결재함·목록 양쪽에서 사라진다.
 app/routers/channel_posts.py::story #3734 — true면 보관된(deleted_at not null) 초안도 목록에 포함한다(「보관됨 보기」 필터). include_withdrawn과 독립 축. 기본은 제외.
+app/routers/channel_posts.py::story #3988 — 이 일(work_item_id)에 이어진 초안만(일감 상세 「발행물」 탭 전용). 없으면 기존 응답과 완전히 동일(회귀 0).
 app/routers/channel_posts.py::true면 gate.sealed_scheduled_at이 null인 draft만(캘린더 「날짜 미정」 레인). scheduled_from/scheduled_to와 상호 배타. 게이트 자체가 없는(아직 상신 안 한) 순수 초안도 포함한다 — 둘 다 「날짜 미정」이라는 점에서 같은 부류다(유나 §11-1).
 app/routers/channel_posts.py::unscheduled는 scheduled_from/scheduled_to와 함께 줄 수 없습니다.
 app/routers/channel_posts.py::«마지막 발행» publication의 id(버전 무관) — published_at/permalink/external_id와 같은 publication 행에서 온다. 발행 済 게시물에 새 버전이 생겨 재승인 대기(gate pending) 中이어도 null이 되지 않는다: 밖에 나가 있는 게시물은 새 버전과 무관하게 살아 있다(story #3525). 댓글·인사이트 조회 API(/publications/{publication_id}/comments·insights)의 path 파라미터가 이 값이다. "지금 버전 자체"의 발행 시도 상태는 publication_status/error_code가 별도로 담당(다른 축).
@@ -322,6 +323,7 @@ app/routers/session_context.py::이 시각 이후 활동만 포함(AC4 — 생�
 app/routers/site_posts.py::draft를 찾을 수 없습니다
 app/routers/site_posts.py::draft를 찾을 수 없습니다:
 app/routers/site_posts.py::story #3734 — true면 보관된(deleted_at not null) 초안도 목록에 포함한다(「보관됨 보기」 필터). 기본은 제외.
+app/routers/site_posts.py::story #3988 — 이 일(work_item_id)에 이어진 초안만(일감 상세 「발행물」 탭 전용). 없으면 기존 응답과 완전히 동일(회귀 0).
 app/routers/site_posts.py::글 공개는 휴먼 멤버만 가능합니다 (에이전트는 초안만 제출).
 app/routers/site_posts.py::발행 취소는 조직 owner 또는 admin만 가능합니다.
 app/routers/site_posts.py::발행 취소는 휴먼 멤버만 가능합니다.
