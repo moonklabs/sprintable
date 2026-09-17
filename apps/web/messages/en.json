@@ -5822,7 +5822,21 @@
     "reconcileErrorChannelUnsupported": "This channel doesn't support reconciliation.",
     "reconcileVerdictMatch": "Match",
     "reconcileVerdictMismatch": "Mismatch",
-    "reconcileVerdictUnmeasured": "Unmeasured"
+    "reconcileVerdictUnmeasured": "Unmeasured",
+    "resultsSummaryPublishedLabel": "Published",
+    "resultsSummaryOrganicViewsLabel": "Organic views",
+    "resultsSummarySpendLabel": "Ad spend",
+    "resultsSummaryRemainingLabel": "Remaining budget",
+    "resultsSummaryConnectCta": "Connect",
+    "resultsSummaryPartialCaptureNote": "Based on {captured}/{total} measured",
+    "adsCapCardTitle": "Ad cap",
+    "sectionExpand": "Expand",
+    "sectionCollapse": "Collapse",
+    "filtersToggleLabel": "Filters",
+    "publishingTrustSectionTitle": "Publishing trust",
+    "rowExpandAction": "View details",
+    "rowDetailOrganicViewsLabel": "Organic views",
+    "rowDetailAdsSpendLabel": "Ad spend"
   },
   "desktop": {
     "loading": "Loading…",
