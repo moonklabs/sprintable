@@ -16,7 +16,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { getFileIcon } from '@/lib/file-icon';
 import { commandName, dequoteLiteral, isCommand } from '@/lib/command-classifier';
-import { resolveRuntimeStatus, runtimeLabel } from '@/lib/runtime-capabilities';
+import { isSystemPublisher, resolveRuntimeStatus, runtimeLabel } from '@/lib/runtime-capabilities';
 import { orgRoleLabel } from '@/lib/org-member-role';
 import { resolveRoleLabel } from '@/app/(authenticated)/organization/trust/trust-utils';
 import type { SendAttachment } from '@/hooks/use-chat-sse';
@@ -119,6 +119,9 @@ interface MentionMember {
   // 등) 둘 다 이 목록에 섞여 온다(/api/members). role 낱말 축은 이 둘이 서로 다른 정본을
   // 쓰므로(orgRoleLabel vs resolveRoleLabel), 어느 쪽인지 판별할 이 필드가 필요하다.
   type?: string;
+  // story #3997 CHANGES(페드루 PO 지적 2026-09-17) — @멘션 후보에서 「시스템 발행」을
+  // 걸러내는 데 쓴다(연결 대상이 아닌 내부 멤버, 멘션할 이유가 없다).
+  runtime_type?: string | null;
 }
 
 // story #3770 — /api/members(backend/app/routers/members.py::MemberResponse)가 휴먼은
@@ -291,7 +294,9 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
       })
       .then((json) => {
         if (cancelled) return;
-        const all: MentionMember[] = (json.data ?? []).map((m: { id: string; name: string; role?: string | null; type?: string }) => ({ id: m.id, name: m.name, role: m.role, type: m.type }));
+        const all: MentionMember[] = (json.data ?? [])
+          .map((m: { id: string; name: string; role?: string | null; type?: string; runtime_type?: string | null }) => ({ id: m.id, name: m.name, role: m.role, type: m.type, runtime_type: m.runtime_type }))
+          .filter((m: MentionMember) => !isSystemPublisher(m.runtime_type));
         const q = mentionQuery.toLowerCase();
         setMentionMembers(q ? all.filter((m) => m.name.toLowerCase().includes(q)) : all);
         setMentionIndex(0);
