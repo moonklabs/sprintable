@@ -24,6 +24,13 @@ import { emitOnboardingEvent } from './onboarding-telemetry';
 // 복원한다(아래 참고).
 const ORG_DRAFT_STORAGE_PREFIX = 'sp_onboarding_org_draft:';
 
+// story #3983(PO 확定 2026-09-17 01:41Z) — 끝 착지 결정을 순수함수로 뽑아
+// 낸다(closure 안에 묻어 두면 폼 전체를 org→project→agent→connect까지
+// 몰아야 테스트가 되는 자리 — 결정 자체는 이 한 줄뿐이라 여기만 pin한다).
+export function resolveOnboardingLandingHref(todayV3Enabled: boolean): string {
+  return todayV3Enabled ? '/today' : '/chats';
+}
+
 function loadOrgDraft(uid: string): { orgName: string; orgSlug: string } | null {
   if (typeof window === 'undefined') return null;
   try {
@@ -69,9 +76,13 @@ const STEPS: Step[] = ['org', 'project', 'agent', 'connect'];
 interface OnboardingFormProps {
   initialStep?: Step;
   initialOrgId?: string;
+  // story #3983(PO 확定 2026-09-17 01:41Z) — 끝 착지: ON이면 「오늘」·OFF면 현행
+  // 그대로. 서버(page.tsx)가 내려준다(이 컴포넌트는 'use client'라 직접 못 읽음).
+  // 기본값 false = 기존 테스트(이 prop 없이 마운트)가 계속 현행 착지를 기대.
+  todayV3Enabled?: boolean;
 }
 
-export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProps = {}) {
+export function OnboardingForm({ initialStep, initialOrgId, todayV3Enabled = false }: OnboardingFormProps = {}) {
   const t = useTranslations('onboarding');
   const tc = useTranslations('common');
 
@@ -278,7 +289,7 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
   // 그 후 refresh로 새 JWT(sp_at)에 org_id 반영해야 보드/스토리 등 앱 전반 API가 차단되지 않는다.
   const finishToHome = async () => {
     await fetch('/api/auth/refresh', { method: 'POST' }).catch(() => null);
-    window.location.href = '/chats';
+    window.location.href = resolveOnboardingLandingHref(todayV3Enabled);
   };
 
   const handleCreateProject = async () => {
@@ -581,7 +592,7 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
         )}
 
         {step === 'connect' && (
-          <ConnectStep agentId={agentId} apiKey={newApiKey} projectId={projectId} onFinish={handleFinish} />
+          <ConnectStep agentId={agentId} apiKey={newApiKey} projectId={projectId} onFinish={handleFinish} todayV3Enabled={todayV3Enabled} />
         )}
       </div>
       {showUpgrade && <UpgradeModal message={upgradeReason} onClose={() => setShowUpgrade(false)} />}

@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
+import { cardVariants } from '@/components/ui/card';
 import {
   VerifyRail, useVerificationRail,
   type Transport,
@@ -15,6 +16,7 @@ import { emitOnboardingEvent, beaconOnboardingEvent } from './onboarding-telemet
 
 import { fetchWithAuth, refreshAuthTokens } from '@/lib/db/client';
 import { createFirstInstructionConversation } from '@/lib/onboarding/first-instruction';
+import { DesktopDownloadCard } from '@/components/desktop/desktop-download-card';
 
 // story #2407 — Transport는 이제 verify-rail.tsx가 소유(useVerificationRail이 그 값을 직접
 // 다룸). 이 re-export는 기존 소비자(onboarding-form.tsx 등)의 import 경로를 안 건드리려는
@@ -38,6 +40,10 @@ interface ConnectStepProps {
   apiKey: string | null;
   projectId: string | null;
   onFinish: () => void;
+  // story #3983 CHANGES(페드루 PO 2026-09-17 02:11Z) — 데스크톱 절 완료 버튼
+  // 낱말이 실제 착지와 같아야 한다(온보딩 원칙). 기본값 false = 기존 테스트
+  // (이 prop 없이 마운트)가 현행 낱말(dashboardCta)을 계속 기대.
+  todayV3Enabled?: boolean;
 }
 
 /** `sk_live_••••<last4>` — prefix + 마지막 4자만 노출.
@@ -95,7 +101,7 @@ export function HighlightedJson({ text }: { text: string }) {
   );
 }
 
-export function ConnectStep({ agentId, apiKey, projectId, onFinish }: ConnectStepProps) {
+export function ConnectStep({ agentId, apiKey, projectId, onFinish, todayV3Enabled = false }: ConnectStepProps) {
   const t = useTranslations('onboarding');
 
   // transport=null: 최초 default-resolve 응답 대기 中(BE edition 기본 판별 前).
@@ -254,6 +260,29 @@ export function ConnectStep({ agentId, apiKey, projectId, onFinish }: ConnectSte
     onFinish();
   };
 
+  // story #3983 CHANGES(페드루 PO 2026-09-17 02:11Z, 실결함④) — 웹 경로는
+  // config_copied·verify_started가 다 찍히는데 데스크톱 경로는 0이라 활성화
+  // 퍼널에서 둘을 못 갈랐다 — 같은 emitOnboardingEvent 패턴으로 신호 추가.
+  const handleDesktopFinish = () => {
+    emitOnboardingEvent('desktop_handoff_selected', { agent_id: agentId, flow: 'onboarding' });
+    handleDashboard();
+  };
+
+  const [desktopKeyCopied, setDesktopKeyCopied] = useState(false);
+  const handleCopyKeyForDesktop = async () => {
+    if (!apiKey) return;
+    try {
+      await navigator.clipboard.writeText(apiKey);
+    } catch {
+      // ignore clipboard failure
+    }
+    setDesktopKeyCopied(true);
+    setTimeout(() => setDesktopKeyCopied(false), 2000);
+    // story #3983 CHANGES r2(페드루 PO 2026-09-17 02:23Z) — config_copied는
+    // 웹 경로 이벤트(verify rail 첫 상태)라 재사용하면 퍼널이 섞인다 — 별도 이름.
+    emitOnboardingEvent('desktop_key_copied', { agent_id: agentId, flow: 'onboarding' });
+  };
+
   // story #3201(activation·절벽 처방) — 1차 깔때기 "연결까지 온 사람 중 첫 왕복 0%" 절벽.
   // PO 확定(2026-08-29): verified 무관 상시 노출(미연결인 채 눌러도 새 DM에서 #3194 침묵
   // 배너가 다음 행동을 안내하는 자기정합 구조). 생성 실패 시 onFinish()로 폴백(제3경로
@@ -308,6 +337,48 @@ export function ConnectStep({ agentId, apiKey, projectId, onFinish }: ConnectSte
 
   return (
     <div className="space-y-4">
+      {/* story #3983(PO 확定 2026-09-17 01:41Z, CHANGES 2026-09-17 02:11Z) — 주
+          경로 「데스크톱 앱에서 이어서」(기존 DesktopDownloadCard 그대로, 새
+          다운로드 로직 0). 보조 경로(아래 기존 웹 connect 흐름)는 삭제 0.
+          CHANGES ③: 절 제목을 안 둔다(카드 자체가 이미 「데스크톱 앱」 제목을
+          갖는다 — 두 제목이 부딪힌다). 부제만 남긴다. */}
+      <section className={cn(cardVariants(), 'space-y-3 p-4')} data-testid="connect-step-desktop-primary">
+        <p className="text-xs text-muted-foreground">{t('desktopHandoffSubtitle')}</p>
+        <DesktopDownloadCard />
+        {/* CHANGES ①: 데스크톱 앱은 이 화면 밖이라 키를 붙여 넣을 곳이 없다 —
+            웹 경로 쪽(재시작 안내 옆)에 있던 핸드오프 문구+복사 칸을 여기로
+            옮긴다(그쪽엔 데스크톱에 줄 키가 필요 없다 — 그 자리와 안 부딪힘). */}
+        <div className="rounded-md border border-border bg-muted/40 p-3">
+          <p className="text-xs text-muted-foreground" data-testid="connect-step-desktop-key-handoff">
+            {t('desktopKeyHandoffTitle')} — {t('desktopKeyHandoffCanonicalNote')}
+          </p>
+          <div className="mt-2 flex items-center justify-between gap-2 rounded border border-border bg-background px-2.5 py-1.5">
+            <code className="truncate font-mono text-xs text-foreground">{maskApiKey(apiKey)}</code>
+            <Button
+              variant="outline" size="sm"
+              onClick={() => void handleCopyKeyForDesktop()}
+              className="shrink-0"
+              data-testid="connect-step-desktop-key-copy"
+            >
+              {desktopKeyCopied ? (
+                <><Check className="h-3.5 w-3.5" />{t('copied')}</>
+              ) : (
+                <><Copy className="h-3.5 w-3.5" />{t('copyConfig')}</>
+              )}
+            </Button>
+          </div>
+        </div>
+        {/* CHANGES ②: 낱말 = 착지와 같이(ON이면 「오늘」 낱말·OFF면 현행
+            dashboardCta). variant도 outline(이 절의 주 행동은 내려받기 —
+            hero는 화면에 하나만, 웹 경로 「첫 지시 보내기」가 그 자리). */}
+        <Button variant="outline" size="sm" onClick={handleDesktopFinish} data-testid="connect-step-desktop-finish">
+          {todayV3Enabled ? t('desktopFinishToToday') : t('dashboardCta')}
+        </Button>
+      </section>
+      <p className="text-xs font-medium text-muted-foreground" data-testid="connect-step-web-secondary-label">
+        {t('webConnectSecondaryLabel')}
+      </p>
+
       {/* [0] transport 세그먼트 토글 */}
       <div className="flex gap-0 rounded-md border border-border bg-muted p-[3px]">
         <button
@@ -409,6 +480,10 @@ export function ConnectStep({ agentId, apiKey, projectId, onFinish }: ConnectSte
           {t('artifactGuide')}
         </p>
         <p className="text-xs text-muted-foreground">{t('keyOneTimeNote')}</p>
+        {/* story #3983 CHANGES(페드루 PO 2026-09-17 02:11Z) — 키 핸드오프 문구는
+            이 웹 절이 아니라 데스크톱 절로 옮겼다(여기 뒷문장이 keyOneTimeNote와
+            같은 말을 반복했고, 애초 이 웹 절엔 데스크톱에 «붙여 넣을» 필요가
+            없다 — 그 화면 쪽으로 가야 뜻이 선다). */}
         {/* story #4cdad425(prod 에스컬레이트) — 「설정만 붙이면 자동」 오해가 무한 대기의 근본이었다
             (실유저 5회 재시도). 설정 저장 뒤 «Claude Code 재시작»이 연결 적용의 필수 단계라 그
             자리에 명시한다. info 톤(안내·연결 미확認≠에러). */}
