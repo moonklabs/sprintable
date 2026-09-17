@@ -20,6 +20,7 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { resolveRoleLabel } from '@/app/(authenticated)/organization/trust/trust-utils';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { formatRelativeTime } from '@/lib/storage/format';
+import { isSystemPublisher } from '@/lib/runtime-capabilities';
 
 /**
  * story #4129 — 워크포스 1줄(«런타임 vX · (플러그인 vY) · 세션 시작 N시간 전», PO 확定
@@ -73,6 +74,10 @@ interface OrgAgent {
   // BE `_inject_active_stories()`가 조직 내 plugin_version MAX 대비 배치 주입. null=판단
   // 불가(플러그인 버전이 없거나 org에 비교대상 없음) — false와 구분(휴리스틱 배지 금지).
   needs_restart?: boolean | null;
+  // story #3994 — 「시스템 발행」(runtime_type==='system-publisher')은 verified가 항상
+  // false지만 연결 대상이 아니다(BE TeamMemberResponse가 이미 실어 보내던 필드, 이
+  // 로컬 타입에만 없었다 — 새 BE 0). 판별 없이 verified만 보면 거짓 「연결 안 됨」.
+  runtime_type?: string | null;
 }
 
 interface ProjectOption {
@@ -275,7 +280,9 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
                       <Badge variant="secondary">{t('agentMember')}</Badge>
                       <Badge variant="outline">{resolveRoleLabel(agent.role, null, to)}</Badge>
                       <Badge variant="info">{ta('manageProjectsGranted', { count: grantCounts[agent.id] ?? 0 })}</Badge>
-                      {agent.verified === false ? (
+                      {isSystemPublisher(agent.runtime_type) ? (
+                        <span className="text-xs text-muted-foreground">{ta('systemPublisherNeutralDescription')}</span>
+                      ) : agent.verified === false ? (
                         <Badge variant="warning">{ta('agentNotConnected')}</Badge>
                       ) : null}
                       {agent.needs_restart ? (
@@ -290,7 +297,7 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
                     })()}
                   </Link>
                   <div className="flex shrink-0 items-center gap-2">
-                    {agent.verified === false ? (
+                    {!isSystemPublisher(agent.runtime_type) && agent.verified === false ? (
                       <Link
                         href={`/organization/workforce/${agent.id}`}
                         className="whitespace-nowrap text-xs font-medium text-primary hover:underline"

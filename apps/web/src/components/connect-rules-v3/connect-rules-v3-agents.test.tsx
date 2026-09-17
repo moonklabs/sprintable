@@ -93,6 +93,32 @@ describe('ConnectRulesV3Agents', () => {
     expect(container.textContent).toContain('연결 안 됨');
   });
 
+  // story #3994(«거짓 경고» 클래스, PO 확定) — 「시스템 발행」은 verified=false지만
+  // 연결 대상이 아니다. 행은 남기되(선생님 3107) 경고 배지·연결 설정 CTA는 뗀다.
+  it('⭐「시스템 발행」(runtime_type=system-publisher, verified=false) — 행은 뜨되 「연결 안 됨」 배지 0, 중립 설명 1줄', async () => {
+    routeFetch({
+      '/api/team-members?type=agent': {
+        data: [{ id: 'sp1', name: '시스템 발행', agent_role: null, runtime_type: 'system-publisher', is_active: true, verified: false, presence_status: 'offline', project_id: null }],
+      },
+    });
+    await mount();
+    expect(container.textContent).toContain('시스템 발행');
+    expect(container.textContent).not.toContain('연결 안 됨');
+    expect(container.textContent).toContain('Sprintable이 자동으로 남기는 알림·기록의 보낸 이예요');
+  });
+
+  it('⭐「시스템 발행」 행을 펼쳐도 「연결 설정 보기」 CTA가 안 뜬다', async () => {
+    routeFetch({
+      '/api/team-members?type=agent': {
+        data: [{ id: 'sp1', name: '시스템 발행', agent_role: null, runtime_type: 'system-publisher', is_active: true, verified: false, presence_status: 'offline', project_id: null }],
+      },
+    });
+    await mount();
+    const row = container.querySelector('[data-testid="connect-rules-v3-agent-row"] button') as HTMLButtonElement;
+    await act(async () => { row.click(); });
+    expect(container.textContent).not.toContain('연결 설정 보기');
+  });
+
   it('⭐dev 실측 형태(agent_role=null) — 역할 세그먼트를 지어내지 않고 이름·상태만 렌더', async () => {
     routeFetch({
       '/api/team-members?type=agent': {
