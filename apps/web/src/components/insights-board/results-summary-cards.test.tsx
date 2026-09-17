@@ -70,6 +70,8 @@ async function mount(props: Partial<Parameters<typeof ResultsSummaryCards>[0]> =
         publishedInWindow={props.publishedInWindow ?? null}
         viewsInWindow={props.viewsInWindow ?? null}
         ga4ConnectionStatus={props.ga4ConnectionStatus ?? 'not_connected'}
+        boardLoading={props.boardLoading ?? false}
+        boardLoadFailed={props.boardLoadFailed ?? false}
         costSummaryState={props.costSummaryState ?? NO_APPROVED_BOOSTS}
         onRetryCostSummary={onRetryCostSummary}
       />,
@@ -154,5 +156,40 @@ describe('ResultsSummaryCards(story #3979 CHANGES) — 로딩·실패는 미측�
     const retryBtn = container.querySelector('[data-testid="results-summary-ads-spend-retry"]') as HTMLElement;
     await act(async () => { retryBtn.click(); });
     expect(onRetryCostSummary).toHaveBeenCalledTimes(1);
+  });
+
+  // 페드루 PO 선택 사항(2026-09-17 01:32Z) — 같은 요청 하나에 재시도 버튼 2개는
+  // 중복이라 「쓴 광고비」에만 두고 「남은 한도」는 문구만.
+  it('실패해도 「남은 한도」엔 재시도 버튼이 없다(같은 요청, 중복 제거)', async () => {
+    await mount({ costSummaryState: FAILED });
+    expect(container.querySelector('[data-testid="results-summary-ads-remaining-failed"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="results-summary-ads-remaining-retry"]')).toBeNull();
+  });
+});
+
+// story #3979 CHANGES r2(페드루 PO 2026-09-17 01:32Z, 실결함) — 나간 글·자연
+// 조회도 같은 클래스: publishedInWindow/viewsInWindow는 로딩 中·실패 뒤에도
+// 똑같이 null이라 「미측정」(자연 조회는 CTA까지)이 번쩍였다. 3테스트.
+describe('ResultsSummaryCards(story #3979 CHANGES r2) — 나간 글·자연 조회도 로딩·실패는 미측정이 아니다', () => {
+  it('⭐로딩 中엔 두 칸 다 Skeleton — 「미측정」이 안 뜬다', async () => {
+    await mount({ boardLoading: true });
+    expect(container.querySelector('[data-testid="results-summary-published-loading"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="results-summary-organic-views-loading"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="results-summary-published-unmeasured"]')).toBeNull();
+    expect(container.querySelector('[data-testid="results-summary-organic-views-unmeasured"]')).toBeNull();
+  });
+
+  it('⭐실패하면 두 칸 다 「불러오지 못했어요」 문구 — 「미측정」·연결 CTA가 안 뜬다(재시도는 페이지 Alert가 이미 있다)', async () => {
+    await mount({ boardLoadFailed: true, ga4ConnectionStatus: 'not_connected' });
+    expect(container.querySelector('[data-testid="results-summary-published-failed"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="results-summary-organic-views-failed"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="results-summary-published-unmeasured"]')).toBeNull();
+    expect(container.querySelector('[data-testid="results-summary-organic-views-cta"]')).toBeNull();
+  });
+
+  it('로딩도 실패도 아닌데 ok+null이면(정말 미측정) 그대로 「미측정」', async () => {
+    await mount({ boardLoading: false, boardLoadFailed: false, publishedInWindow: null, viewsInWindow: null });
+    expect(container.querySelector('[data-testid="results-summary-published-unmeasured"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="results-summary-organic-views-unmeasured"]')).not.toBeNull();
   });
 });

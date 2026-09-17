@@ -432,6 +432,8 @@ export default function InsightsBoardPage() {
           publishedInWindow={publishedInWindow}
           viewsInWindow={viewsInWindow}
           ga4ConnectionStatus={ga4ConnectionStatus}
+          boardLoading={loading}
+          boardLoadFailed={loadErrorMessage !== null}
           costSummaryState={costSummaryState}
           onRetryCostSummary={() => void loadCostSummary()}
         />

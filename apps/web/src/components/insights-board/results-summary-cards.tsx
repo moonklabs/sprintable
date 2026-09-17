@@ -24,16 +24,30 @@ import type { Ga4ConnectionStatus, PublishedInWindow, ViewsInWindow } from './ty
  *
  * §⑤ 규율(doc a699be00) 그대로: 없는 수를 0으로 안 그린다 — 실측이면 수, 아니면
  * 「미측정」(+연결 축이 있는 칸만 연결 CTA, 나간 글은 연결 개념이 없어 CTA 없음).
+ *
+ * story #3979 CHANGES r2(페드루 PO 2026-09-17 01:32Z, 실결함) — 나간 글·자연
+ * 조회도 같은 클래스 결함이었다: publishedInWindow/viewsInWindow가 로딩 中·
+ * 실패 뒤에도 똑같이 null이라 「미측정」(자연 조회는 CTA까지)이 번쩍였다. 이
+ * 둘은 cost-summary가 아니라 페이지의 기존 insights-board 로드(loading/
+ * loadErrorMessage)에 실려 오므로 그 두 값을 그대로 받는다 — 실패는 페이지
+ * 상단에 이미 Alert+재시도 없는 문구가 있어(loadErrorMessage) 여기선 문구만
+ * (재시도 버튼 중복 안 만든다, PO "재시도는 페이지 Alert가 있으니 생략
+ * 가능"). 광고 두 칸 재시도 버튼도 같은 요청 하나라 「쓴 광고비」에만 두고
+ * 「남은 한도」는 문구만(선택 사항 처방).
  */
 export interface ResultsSummaryCardsProps {
   publishedInWindow: PublishedInWindow | null;
   viewsInWindow: ViewsInWindow | null;
   ga4ConnectionStatus: Ga4ConnectionStatus;
+  boardLoading: boolean;
+  boardLoadFailed: boolean;
   costSummaryState: OrgCostSummaryLoadState;
   onRetryCostSummary: () => void;
 }
 
-export function ResultsSummaryCards({ publishedInWindow, viewsInWindow, ga4ConnectionStatus, costSummaryState, onRetryCostSummary }: ResultsSummaryCardsProps) {
+export function ResultsSummaryCards({
+  publishedInWindow, viewsInWindow, ga4ConnectionStatus, boardLoading, boardLoadFailed, costSummaryState, onRetryCostSummary,
+}: ResultsSummaryCardsProps) {
   const t = useTranslations('insightsBoard');
   const tContent = useTranslations('content');
   const tCommon = useTranslations('common');
@@ -53,9 +67,11 @@ export function ResultsSummaryCards({ publishedInWindow, viewsInWindow, ga4Conne
       return (
         <>
           <p className="text-muted-foreground" data-testid={`results-summary-ads-${kind}-failed`}>{t('orgCostLoadFailed')}</p>
-          <Button size="sm" variant="outline" onClick={onRetryCostSummary} data-testid={`results-summary-ads-${kind}-retry`}>
-            {tCommon('retry')}
-          </Button>
+          {kind === 'spend' ? (
+            <Button size="sm" variant="outline" onClick={onRetryCostSummary} data-testid={`results-summary-ads-${kind}-retry`}>
+              {tCommon('retry')}
+            </Button>
+          ) : null}
         </>
       );
     }
@@ -88,7 +104,11 @@ export function ResultsSummaryCards({ publishedInWindow, viewsInWindow, ga4Conne
           개념이 없다). */}
       <Card className="p-3 text-xs" data-testid="results-summary-published">
         <p className="mb-1 text-muted-foreground">{t('resultsSummaryPublishedLabel')}</p>
-        {publishedInWindow ? (
+        {boardLoading ? (
+          <Skeleton className="h-6 w-16" data-testid="results-summary-published-loading" />
+        ) : boardLoadFailed ? (
+          <p className="text-muted-foreground" data-testid="results-summary-published-failed">{t('loadError')}</p>
+        ) : publishedInWindow ? (
           <p className="text-lg font-medium text-foreground" data-testid="results-summary-published-value">
             {formatCount(publishedInWindow.count, locale)}
           </p>
@@ -102,7 +122,11 @@ export function ResultsSummaryCards({ publishedInWindow, viewsInWindow, ga4Conne
       {/* 자연 조회 — views_in_window.sum(자연 D+7만, 페드루 정정 2026-09-17 00:57Z). */}
       <Card className="p-3 text-xs" data-testid="results-summary-organic-views">
         <p className="mb-1 text-muted-foreground">{t('resultsSummaryOrganicViewsLabel')}</p>
-        {viewsInWindow ? (
+        {boardLoading ? (
+          <Skeleton className="h-6 w-16" data-testid="results-summary-organic-views-loading" />
+        ) : boardLoadFailed ? (
+          <p className="text-muted-foreground" data-testid="results-summary-organic-views-failed">{t('loadError')}</p>
+        ) : viewsInWindow ? (
           <>
             <p className="text-lg font-medium text-foreground" data-testid="results-summary-organic-views-value">
               {formatCount(viewsInWindow.sum, locale)}
