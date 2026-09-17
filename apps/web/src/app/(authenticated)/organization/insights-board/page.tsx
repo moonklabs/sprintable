@@ -29,9 +29,12 @@ import { ASSET_LABEL_PREFIX_LENGTH, aggregateGroupBucket, groupInsightsBoardRows
 import { DEFAULT_METRIC, SELECTABLE_METRIC_KEYS, type BoardMetric, type Ga4ConnectionStatus, type InsightsBoardResponse, type InsightsBoardRow, type InsightsBoardWindow } from '@/components/insights-board/types';
 import { PublishingMetricsBand } from '@/components/content/publishing-metrics-band';
 import { OrgCostSummaryCard } from '@/components/insights-board/org-cost-summary-card';
-import { PaidSpendDailySeriesCard } from '@/components/insights-board/paid-spend-daily-series-card';
+import { AdsCapCard } from '@/components/insights-board/ads-cap-card';
+import { ResultsSummaryCards } from '@/components/insights-board/results-summary-cards';
+import { InsightsBoardRowDetail } from '@/components/insights-board/insights-board-row-detail';
 import { deriveFailureAction, type CommandStatus } from '@/components/content/failure-action';
 import { FailureActionBadge } from '@/components/content/failure-action-badge';
+import type { PublishedInWindow, ViewsInWindow } from '@/components/insights-board/types';
 
 /**
  * story #3503 — 성과 보드 화면. BE #3502 의존(PR 브리프 헤더 참고, 이 파일 작성 시점
@@ -172,6 +175,25 @@ export default function InsightsBoardPage() {
   // not_connected는 「아직 안 왔다」 쪽으로 낙관하지 않는다(로딩 中 GA4 셀이 우연히
   // "집계 대기"를 보이는 것보다 "미연결"이 더 안전한 기본 — 실응답이 곧 덮는다).
   const [ga4ConnectionStatus, setGa4ConnectionStatus] = useState<Ga4ConnectionStatus>('not_connected');
+  // story #3979(시안 ④ 요약 4칸) — story #3978(PR#4374) 의존 필드 둘. base=develop
+  // (스택 아님)이라 그 PR 머지 순서와 무관하게 옵셔널로 받는다(?? null).
+  const [publishedInWindow, setPublishedInWindow] = useState<PublishedInWindow | null>(null);
+  const [viewsInWindow, setViewsInWindow] = useState<ViewsInWindow | null>(null);
+  // story #3979(자리 옮김 ④) — 표 머리 필터 7종을 접힌 토글 하나로. 기본 접힘(첫
+  // 화면은 요약 우선), 안의 마크업은 기존 그대로(무삭제).
+  const [showFilters, setShowFilters] = useState(false);
+  // story #3979(자리 옮김 ⑤) — 발행 신뢰도 절, 기본 접힘.
+  const [showPublishingTrust, setShowPublishingTrust] = useState(false);
+  // story #3979(자리 옮김 ①) — 행 펼침(유입원 자연 D+1/D+7 + 광고비).
+  const [expandedRowIds, setExpandedRowIds] = useState<ReadonlySet<string>>(new Set());
+  const toggleRowExpanded = useCallback((publicationId: string) => {
+    setExpandedRowIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(publicationId)) next.delete(publicationId);
+      else next.add(publicationId);
+      return next;
+    });
+  }, []);
   // doc a0da40c9 §21-5(유나 2026-09-05) — 제목 기본값(「[재발행] {원문 제목}」 등)을
   // 채워 보이려면 이 행의 원문 title이 필요하다 — publication_id만으론 부족해
   // row 전체를 들고 있는다.
@@ -241,6 +263,8 @@ export default function InsightsBoardPage() {
         setNextCursor(json?.data?.next_cursor ?? null);
         setHiddenCount(json?.data?.hidden_count ?? null);
         setGa4ConnectionStatus(json?.data?.ga4_connection_status ?? 'not_connected');
+        setPublishedInWindow(json?.data?.published_in_window ?? null);
+        setViewsInWindow(json?.data?.views_in_window ?? null);
       } else {
         const body = (await res.json().catch(() => null)) as { detail?: unknown; error?: Record<string, unknown> } | null;
         const info = parseInsightsBoardApiError(body);
@@ -366,15 +390,40 @@ export default function InsightsBoardPage() {
     <div className="mx-auto w-full max-w-6xl space-y-6 p-6">
       <PageHeader title={t('pageTitle')} description={t('pageDescription')} actions={windowControl} />
 
+      {/* story #3979(AC1, 시안 ④) — 첫 화면 요약 4칸(나간 글·자연 조회·쓴 광고비·
+          남은 한도), 채널별 표보다 위. */}
+      {orgId ? (
+        <ResultsSummaryCards
+          orgId={orgId}
+          publishedInWindow={publishedInWindow}
+          viewsInWindow={viewsInWindow}
+          ga4ConnectionStatus={ga4ConnectionStatus}
+        />
+      ) : null}
+
       {/* story #3809(Phase3·3-7 PR 3) — 조직 비용 원장 카드. window/channel/status
           필터와 무관한 org 전체 스코프(cost-summary API는 쿼리 파라미터가 없다) —
           아래 표 필터 줄보다 위, 화면의 다른 무엇에도 종속되지 않는 자리. */}
       {orgId ? <OrgCostSummaryCard orgId={orgId} /> : null}
-      {/* story #3809(Phase3·3-7 PR 4b) — 일별 paid 지출 시계열. 요약 카드 바로
-          아래, 같은 org 전체 스코프(쿼리 파라미터 무관)라 필터 줄보다 위. */}
-      {orgId ? <PaidSpendDailySeriesCard orgId={orgId} /> : null}
+      {/* story #3979(자리 옮김 ②) — 일별 paid 지출 시계열은 이제 「광고 상한」 카드
+          펼침 안(기본 접힘, PaidSpendDailySeriesCard 그대로·삭제 0). */}
+      {orgId ? <AdsCapCard orgId={orgId} /> : null}
 
-      <div className="flex flex-wrap items-center gap-2">
+      {/* story #3979(자리 옮김 ④) — 필터 7종은 기본 접힘. 토글 안 마크업은 기존
+          그대로(무삭제) — «자리 옮김»이 필터 자체를 지우지 않는다. */}
+      <button
+        type="button"
+        onClick={() => setShowFilters((v) => !v)}
+        className="inline-flex items-center gap-1.5 rounded-[0.5rem] border border-border bg-card px-[10px] py-[7px] text-[12px] text-muted-foreground"
+        aria-expanded={showFilters}
+        data-testid="insights-board-filters-toggle"
+      >
+        {t('filtersToggleLabel')} {showFilters ? t('sectionCollapse') : t('sectionExpand')}
+      </button>
+
+      {/* CSS로만 접는다(React 트리에서 안 뺀다) — 기존 필터 테스트가 패널을 열지
+          않고도 querySelector/fireEvent로 바로 상호작용하는 전제를 그대로 지킨다. */}
+      <div className={showFilters ? 'flex flex-wrap items-center gap-2' : 'hidden'} data-testid="insights-board-filters-panel">
         <input
           value={channelParam}
           onChange={(e) => updateQuery({ channel: e.target.value || null })}
@@ -478,8 +527,9 @@ export default function InsightsBoardPage() {
 
       {/* story #3746(3734 AC3 잔존 A) — 목록 두 화면과 같은 낱말·같은 뜻(`content.
           showArchivedToggle`/`hideArchivedToggle` 재사용, 값 두 벌 안 만든다). 숨은
-          건수는 셀 수 있을 때만(hiddenCount null이면 안 그린다 — 모른다≠0). */}
-      <div className="flex flex-wrap items-center gap-3">
+          건수는 셀 수 있을 때만(hiddenCount null이면 안 그린다 — 모른다≠0).
+          story #3979 — 「보관됨」도 필터 7종 중 하나(유나 diff doc) — 같은 접힘. */}
+      <div className={showFilters ? 'flex flex-wrap items-center gap-3' : 'hidden'} data-testid="insights-board-archived-toggle-panel">
         <Button
           type="button" variant="link"
           onClick={() => setShowArchived((v) => !v)}
@@ -555,6 +605,10 @@ export default function InsightsBoardPage() {
                       클릭 정렬은 애초 이 화면 전체에서 금지·§21-4). */}
                   <th className="px-3 py-2 text-left font-medium">{t('columnAdsSpend')}</th>
                   <th className="px-3 py-2 text-left font-medium">{t('columnActions')}</th>
+                  {/* story #3979(자리 옮김 ①) — 새 9번째 열, 기존 8열은 무수정. */}
+                  <th className="px-3 py-2 text-left font-medium">
+                    <span className="sr-only">{t('rowExpandAction')}</span>
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -587,7 +641,7 @@ export default function InsightsBoardPage() {
                         ga4ConnectionStatus={ga4ConnectionStatus}
                       />
                     </td>
-                    <td colSpan={3} />
+                    <td colSpan={4} />
                   </tr>
                 ) : null}
                 {group.rows.map((row) => {
@@ -706,10 +760,35 @@ export default function InsightsBoardPage() {
                         </div>
                       ) : null}
                     </td>
+                    {/* story #3979(자리 옮김 ①) — 전용 9번째 열(Actions 칸엔 안 얹는다,
+                        story #3766의 "행동 없으면 td 완전히 빈다" 불변식과 자리가
+                        다르다 — 배지·행동 자리 문제와 같은 클래스, 별 칸으로 분리). */}
+                    <td className="px-3 py-2.5">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => toggleRowExpanded(row.publication_id)}
+                        aria-expanded={expandedRowIds.has(row.publication_id)}
+                        data-testid="insights-board-row-expand-toggle"
+                        aria-label={t('rowActionAriaLabel', { n: index + 1, label: t('rowExpandAction') })}
+                      >
+                        {expandedRowIds.has(row.publication_id) ? t('sectionCollapse') : t('rowExpandAction')}
+                      </Button>
+                    </td>
                   </tr>
+                  {expandedRowIds.has(row.publication_id) ? (
+                    <tr data-testid="insights-board-row-detail-row">
+                      <td colSpan={9} className="bg-muted/20 px-3 py-2.5">
+                        <InsightsBoardRowDetail
+                          row={row} tBoard={t} tContent={tContent} tChannelConnect={tChannelConnect}
+                          ga4ConnectionStatus={ga4ConnectionStatus} locale={locale}
+                        />
+                      </td>
+                    </tr>
+                  ) : null}
                   {reconcile && reconcile.status !== 'loading' ? (
                     <tr data-testid="insights-board-reconcile-result-row">
-                      <td colSpan={8} className="px-3 py-1.5 text-xs">
+                      <td colSpan={9} className="px-3 py-1.5 text-xs">
                         {reconcile.status === 'error' ? (
                           <span className="text-destructive" data-testid="insights-board-reconcile-error">
                             {reconcile.message}
@@ -743,8 +822,28 @@ export default function InsightsBoardPage() {
           걷고 표 아래로. 발행 품질 셋만(정시율·중복·승인 없는 호출) — 연결 건강
           (만료·7일 내 만료)은 ③(3743) 행 칩+cron 알림이 맡아 은퇴. 띠 자체 기간
           컨트롤은 없다 — 이 화면의 windowParam을 그대로 따른다(7d/30d/90d 그대로,
-          띠가 자기 상태를 따로 안 갖는다). */}
-      {orgId ? <PublishingMetricsBand orgId={orgId} window={windowParam} /> : null}
+          띠가 자기 상태를 따로 안 갖는다).
+          story #3979(자리 옮김 ⑤) — 「발행 신뢰도」 접힌 절 안으로(기본 접힘). 이
+          밴드는 page.test.tsx가 직접 테스트하지 않아(자체 테스트 파일 보유) 접혔을
+          때 마운트 자체를 뺀다(불필요한 자체 fetch 방지). */}
+      {orgId ? (
+        <div>
+          <button
+            type="button"
+            onClick={() => setShowPublishingTrust((v) => !v)}
+            className="inline-flex items-center gap-1.5 rounded-[0.5rem] border border-border bg-card px-[10px] py-[7px] text-[12px] text-muted-foreground"
+            aria-expanded={showPublishingTrust}
+            data-testid="insights-board-publishing-trust-toggle"
+          >
+            {t('publishingTrustSectionTitle')} {showPublishingTrust ? t('sectionCollapse') : t('sectionExpand')}
+          </button>
+          {showPublishingTrust ? (
+            <div className="mt-3" data-testid="insights-board-publishing-trust-body">
+              <PublishingMetricsBand orgId={orgId} window={windowParam} />
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       {followUpRow && orgId ? (
         <FollowUpDialog

@@ -6037,7 +6037,21 @@
     "reconcileErrorChannelUnsupported": "이 채널은 실측 대조를 지원하지 않아요.",
     "reconcileVerdictMatch": "일치",
     "reconcileVerdictMismatch": "불일치",
-    "reconcileVerdictUnmeasured": "미측정"
+    "reconcileVerdictUnmeasured": "미측정",
+    "resultsSummaryPublishedLabel": "나간 글",
+    "resultsSummaryOrganicViewsLabel": "자연 조회",
+    "resultsSummarySpendLabel": "쓴 광고비",
+    "resultsSummaryRemainingLabel": "남은 한도",
+    "resultsSummaryConnectCta": "연결하러 가기",
+    "resultsSummaryPartialCaptureNote": "측정된 {captured}/{total}건 기준",
+    "adsCapCardTitle": "광고 상한",
+    "sectionExpand": "펼치기",
+    "sectionCollapse": "접기",
+    "filtersToggleLabel": "필터",
+    "publishingTrustSectionTitle": "발행 신뢰도",
+    "rowExpandAction": "자세히 보기",
+    "rowDetailOrganicViewsLabel": "자연 조회",
+    "rowDetailAdsSpendLabel": "광고비"
   },
   "desktop": {
     "loading": "불러오는 중…",
