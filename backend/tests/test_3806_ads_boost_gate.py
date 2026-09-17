@@ -473,6 +473,33 @@ async def test_wrong_channel_ad_connection_returns_422():
 
 
 @pytest.mark.anyio
+async def test_ads_sandbox_ad_connection_rejected_when_flag_off(monkeypatch):
+    """story #4009(critical, AC4 방어 2층) — ads_sandbox 연결 자체는 존재·active여도
+    SANDBOX_CHANNEL_ENABLED가 꺼져 있으면 거부된다(2차 방어: `_AD_CONNECTION_
+    CHANNELS`는 모듈 import 시점 스냅샷이라 이 테스트가 그 값 자체를 바꿀 순 없지만,
+    `_validate_ad_connection`이 매 요청마다 라이브로 `SANDBOX_CHANNEL_ENABLED`를
+    재확認하는 별도 분기가 이걸 독립적으로 막는다)."""
+    import app.services.channel_adapters as adapters_mod
+    from app.main import app
+
+    monkeypatch.setattr(adapters_mod, "SANDBOX_CHANNEL_ENABLED", False)
+
+    engine, Session, org_id, project_id, owner_id, pub, _, ad_conn_id = await _setup(await _session_factory())
+    try:
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+        async with _client_for(app) as client:
+            r = await client.post(
+                f"/api/v2/organizations/{org_id}/publications/{pub.id}/boosts",
+                json=_boost_body(ad_connection_id=ad_conn_id),
+            )
+        assert r.status_code == 422, r.text
+        assert r.json()["error"]["code"] == "ADS_BOOST_INVALID_AD_CONNECTION"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_inactive_ad_connection_returns_422():
     from app.main import app
 

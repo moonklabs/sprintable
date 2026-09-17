@@ -535,10 +535,16 @@ async def list_available_channels_endpoint(
     story e4fc29fa(페드루 PO 리뷰 B1, 2026-09-04) — 이 목록은 "연결 만들기" 버튼 대상
     이다(엔드포인트 자체 목적, f30da19a AC1). `requires_connection=False`인 채널
     (hosted_site — 연결 없이 항상 사용 가능)은 목록에서 뺀다 — 안 그러면 FE(#3435
-    AC2)가 credential_kind="none"만 보고 「샌드박스 연결 만들기」 분기를 잘못 탄다."""
+    AC2)가 credential_kind="none"만 보고 「샌드박스 연결 만들기」 분기를 잘못 탄다.
+
+    story #4009(critical, AC4 방어 2층) — `is_test_channel` 어댑터는 `SANDBOX_
+    CHANNEL_ENABLED`가 켜져 있을 때만 이 목록에 낸다. 등록 게이트(channel_adapters.py
+    모듈 최상위 `if`)가 이미 flag OFF에서 CHANNEL_ADAPTERS에 이 채널들을 아예 안 넣지만,
+    이 필터는 "등록이 뚫려도(예: 향후 버그) 이 목록만은 독립적으로 막는다"는 2차 방어다
+    — 같은 `SANDBOX_CHANNEL_ENABLED` 상수를 재사용(새 판정 로직 발명 0)."""
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
-    from app.services.channel_adapters import CHANNEL_ADAPTERS
+    from app.services.channel_adapters import CHANNEL_ADAPTERS, SANDBOX_CHANNEL_ENABLED
 
     return [
         AvailableChannelItem(
@@ -546,7 +552,7 @@ async def list_available_channels_endpoint(
             kind=cfg.kind,
         )
         for channel, cfg in CHANNEL_ADAPTERS.items()
-        if cfg.requires_connection
+        if cfg.requires_connection and (not cfg.is_test_channel or SANDBOX_CHANNEL_ENABLED)
     ]
 
 

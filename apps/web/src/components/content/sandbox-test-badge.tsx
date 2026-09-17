@@ -6,8 +6,14 @@ import { useTranslations } from 'next-intl';
 // 실수로 통과시키지 않는다. §17-1 오버레이 규율 — 상태 칩은 그대로, 이 배지를 얹는다.
 // 표기는 색이 아니라 «글자»로 전달한다(색각·의미 전달, 유나 확定 ②) — 배경색 신호에
 // 의존하지 않고 무채 테두리+텍스트로만 구별한다.
+// story #4009(critical, 페드루 PO 確定 2026-09-17) — 이전엔 'sandbox' 한 키만 봐서
+// instagram_sandbox/facebook_sandbox/ads_sandbox/x_sandbox/youtube_sandbox/
+// stibee_sandbox/ghost_sandbox 7개가 이 배지를 못 받았다. 백엔드는 모든 테스트용
+// 채널을 `<채널>_sandbox` 접미(또는 단독 `sandbox`)로 일관되게 이름짓는다
+// (channel_adapters.py::ChannelAdapterConfig.is_test_channel이 이 관례로 등록된
+// 8개 전부에 선언돼 있다) — FE는 그 관례를 그대로 읽는다(이름 한 키 비교 0).
 export function isSandboxChannelDraft(channel: string | null | undefined): boolean {
-  return channel === 'sandbox';
+  return channel === 'sandbox' || (channel ?? '').endsWith('_sandbox');
 }
 
 export function SandboxTestBadge() {

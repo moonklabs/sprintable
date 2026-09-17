@@ -54,7 +54,11 @@ def _configure_secrets(monkeypatch):
 @pytest.fixture(autouse=True)
 def _enable_sandbox_adapter(monkeypatch):
     """dict 항목 직접 주입 — SANDBOX_CHANNEL_ENABLED env 파싱 자체는 별도
-    test_sandbox_env_flag_gates_registration_via_subprocess가 독립 검증한다."""
+    test_sandbox_env_flag_gates_registration_via_subprocess가 독립 검증한다.
+
+    story #4009 — `is_test_channel=True`를 명시로 넣는다(기본값 False 그대로 두면
+    assert_sandbox_channel_not_registered_in_prod()가 이 주입을 더 이상 sandbox
+    채널로 못 알아본다 — 실 모듈 등록 코드와 같은 기준을 이 픽스처도 지켜야 한다)."""
     import app.services.channel_adapters as adapters_mod
 
     sandbox_config = adapters_mod.ChannelAdapterConfig(
@@ -65,6 +69,7 @@ def _enable_sandbox_adapter(monkeypatch):
         image_formats=("image/jpeg", "image/png"), image_max_bytes=8 * 1024 * 1024,
         image_aspect_max=10.0, image_width_min=320, image_width_max=1440,
         image_color_space="sRGB", image_max_count=1,
+        is_test_channel=True,
     )
     monkeypatch.setitem(adapters_mod.CHANNEL_ADAPTERS, "sandbox", sandbox_config)
     yield
@@ -211,16 +216,30 @@ async def _create_draft_submit_approve(client, s, *, org_id, connection_id, stor
 
 # ─── AC1 — env 게이트 실측(subprocess, monkeypatch 아님) ─────────────────────
 
+_ALL_TEST_CHANNELS = (
+    "sandbox", "instagram_sandbox", "facebook_sandbox", "ads_sandbox",
+    "x_sandbox", "youtube_sandbox", "stibee_sandbox", "ghost_sandbox",
+)
+
+
 def test_sandbox_env_flag_gates_registration_via_subprocess():
     """subprocess로 실제 프로세스 기동+import 순서를 그대로 재현 — dict 직접주입이
-    아니라 진짜 env var 파싱 경로 자체를 검증한다(AC1)."""
+    아니라 진짜 env var 파싱 경로 자체를 검증한다(AC1).
+
+    story #4009(critical, AC2) — 8개 테스트용 채널 전수. facebook_sandbox/
+    ads_sandbox/x_sandbox/youtube_sandbox는 이전엔 이 게이트 밖(모듈 최상위)에
+    무조건 등록돼 있었다(prod 노출 사고의 뿌리) — 이제 나머지 4개와 동형으로
+    같은 env 게이트를 통과해야만 등재된다."""
     import subprocess
     import sys
 
     backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    channels_repr = repr(_ALL_TEST_CHANNELS)
     script = (
         "from app.services.channel_adapters import CHANNEL_ADAPTERS\n"
-        "assert 'sandbox' in CHANNEL_ADAPTERS, 'enabled인데 미등재'\n"
+        f"for ch in {channels_repr}:\n"
+        "    assert ch in CHANNEL_ADAPTERS, f'enabled인데 미등재: {ch}'\n"
+        "    assert CHANNEL_ADAPTERS[ch].is_test_channel, f'is_test_channel 미선언: {ch}'\n"
     )
     r_on = subprocess.run(
         [sys.executable, "-c", script], cwd=backend_dir, capture_output=True, text=True,
@@ -230,7 +249,10 @@ def test_sandbox_env_flag_gates_registration_via_subprocess():
 
     script_off = (
         "from app.services.channel_adapters import CHANNEL_ADAPTERS\n"
-        "assert 'sandbox' not in CHANNEL_ADAPTERS, 'unset인데 등재됨(prod 사고 위험)'\n"
+        f"for ch in {channels_repr}:\n"
+        "    assert ch not in CHANNEL_ADAPTERS, f'unset인데 등재됨(prod 사고 위험): {ch}'\n"
+        "assert not any(cfg.is_test_channel for cfg in CHANNEL_ADAPTERS.values()), "
+        "'unset인데 is_test_channel 어댑터가 남아있음'\n"
     )
     env_off = {k: v for k, v in os.environ.items() if k != "SANDBOX_CHANNEL_ENABLED"}
     r_off = subprocess.run(
@@ -272,12 +294,42 @@ def test_dev_with_sandbox_registered_does_not_raise(monkeypatch):
 
 
 def test_prod_without_sandbox_registered_does_not_raise(monkeypatch):
+    """story #4009 — 가드가 이제 is_test_channel=True 전부를 보므로("sandbox" 한
+    키만 보던 예전과 다름), pytest 세션(conftest.py 기본값)이 이미 등록해 둔
+    나머지 7개(instagram_sandbox 등)도 같이 지워야 "테스트 채널 0건" 상태를
+    정확히 재현한다."""
     import app.services.channel_adapters as adapters_mod
     from app.core.config import settings
 
     monkeypatch.setattr(settings, "deploy_env", "prod")
-    monkeypatch.delitem(adapters_mod.CHANNEL_ADAPTERS, "sandbox", raising=False)
+    for ch, cfg in list(adapters_mod.CHANNEL_ADAPTERS.items()):
+        if cfg.is_test_channel:
+            monkeypatch.delitem(adapters_mod.CHANNEL_ADAPTERS, ch, raising=False)
     adapters_mod.assert_sandbox_channel_not_registered_in_prod()  # no raise
+
+
+def test_prod_with_only_one_of_four_previously_ungated_channels_raises(monkeypatch):
+    """story #4009(critical, AC3) — 가드가 리터럴 "sandbox" 하나만 보던 이전 결함을
+    정정한다: facebook_sandbox/ads_sandbox/x_sandbox/youtube_sandbox 中 아무거나
+    하나만 등록돼 있어도(다른 7개는 없어도) 잡혀야 한다("sandbox" 키가 아예 없는
+    조합으로 이전 가드가 실제로 뚫렸던 상태를 정확히 재현)."""
+    import app.services.channel_adapters as adapters_mod
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "deploy_env", "prod")
+    for ch, cfg in list(adapters_mod.CHANNEL_ADAPTERS.items()):
+        if cfg.is_test_channel:
+            monkeypatch.delitem(adapters_mod.CHANNEL_ADAPTERS, ch, raising=False)
+    only_ads_sandbox = adapters_mod.ChannelAdapterConfig(
+        authorize_url="https://www.facebook.com/v21.0/dialog/oauth",
+        token_url="https://graph.facebook.com/v21.0/oauth/access_token",
+        scope="ads_management", refresh_mode="reissue_from_access_token",
+        credential_kind="oauth", display_name="Meta Ads Sandbox", kind="ads",
+        requires_connection=True, is_test_channel=True,
+    )
+    monkeypatch.setitem(adapters_mod.CHANNEL_ADAPTERS, "ads_sandbox", only_ads_sandbox)
+    with pytest.raises(RuntimeError, match="fail-closed"):
+        adapters_mod.assert_sandbox_channel_not_registered_in_prod()
 
 
 # ─── AC2 — 연결 생성 endpoint ─────────────────────────────────────────────

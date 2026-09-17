@@ -74,6 +74,7 @@ def _enable_sandbox_flag(monkeypatch):
         image_formats=("image/jpeg",), image_max_bytes=8 * 1024 * 1024,
         image_aspect_max=1.91, image_aspect_min=0.8,
         image_width_min=320, image_width_max=1440, image_color_space="sRGB", image_max_count=1,
+        is_test_channel=True,  # story #4009 — 실 모듈 등록과 같은 기준(is_test_channel).
     )
     monkeypatch.setitem(adapters_mod.CHANNEL_ADAPTERS, "instagram_sandbox", ig_sandbox_cfg)
     yield

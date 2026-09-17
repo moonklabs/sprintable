@@ -42,6 +42,19 @@ import uuid
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
+# story #4009(critical, 페드루 PO 確定 2026-09-17) — channel_adapters.py의 8개
+# 테스트용 채널(sandbox·instagram_sandbox·facebook_sandbox·ads_sandbox·x_sandbox·
+# youtube_sandbox·stibee_sandbox·ghost_sandbox)이 전부 `SANDBOX_CHANNEL_ENABLED`
+# 플래그 뒤에 등록되게 통일됐다(이전엔 뒤 4개가 무조건 등록·prod 노출 사고의 뿌리,
+# AC2). pytest 스위트는 "dev" 취급(AC6 "dev 무회귀") — conftest.py는 모든 테스트
+# 모듈이 import되기 前에 로드되므로, 여기서 조기에(모듈 최상위 실행 시점) env를
+# 세팅해야 channel_adapters.py의 모듈 최상위 `if` 블록이 이 값을 보고 8개 채널을
+# 전부 등록한다(그래야 이 채널을 직접 참조하는 기존 테스트 파일들이 파일별
+# monkeypatch 없이도 그대로 통과한다). subprocess로 env를 명시 제어하는 개별
+# 테스트(예: test_sandbox_env_flag_gates_registration_via_subprocess)는 자기
+# 환경을 따로 넘기므로 이 기본값의 영향을 안 받는다.
+os.environ.setdefault("SANDBOX_CHANNEL_ENABLED", "true")
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 
