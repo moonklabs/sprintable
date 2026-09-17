@@ -1,6 +1,7 @@
 'use client';
 
 import { useTranslations } from 'next-intl';
+import { Button } from '@/components/ui/button';
 
 export interface ChatV3ThreadParticipant {
   member_id: string;
@@ -52,8 +53,9 @@ export function ChatV3ThreadRail({ threads, meId, selectedId, onSelect }: {
             const previewId = `chat-v3-thread-${thread.id}-preview`;
             return (
               <li key={thread.id}>
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
                   onClick={() => onSelect(thread.id)}
                   data-testid="chat-v3-thread-row"
                   aria-current={isSelected}
@@ -61,8 +63,8 @@ export function ChatV3ThreadRail({ threads, meId, selectedId, onSelect }: {
                   aria-describedby={[roleId, previewId].filter(Boolean).join(' ')}
                   className={
                     isSelected
-                      ? 'flex w-full items-start gap-2.5 border-b border-border bg-primary/10 px-4 py-3 text-left'
-                      : 'flex w-full items-start gap-2.5 border-b border-border px-4 py-3 text-left hover:bg-muted/50'
+                      ? 'h-auto min-h-0 w-full items-start justify-start gap-2.5 rounded-none border-b border-border bg-primary/10 px-4 py-3 text-left font-normal whitespace-normal hover:bg-primary/10'
+                      : 'h-auto min-h-0 w-full items-start justify-start gap-2.5 rounded-none border-b border-border px-4 py-3 text-left font-normal whitespace-normal hover:bg-muted/50'
                   }
                 >
                   <div className="min-w-0 flex-1">
@@ -82,7 +84,7 @@ export function ChatV3ThreadRail({ threads, meId, selectedId, onSelect }: {
                   {thread.unread_count > 0 ? (
                     <span className="mt-1 size-2 shrink-0 rounded-full bg-primary" data-testid="chat-v3-unread-dot" />
                   ) : null}
-                </button>
+                </Button>
               </li>
             );
           })}
