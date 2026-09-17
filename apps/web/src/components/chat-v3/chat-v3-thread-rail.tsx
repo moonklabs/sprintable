@@ -42,7 +42,7 @@ export function ChatV3ThreadRail({ threads, meId, selectedId, onSelect }: {
       {threads.length === 0 ? (
         <p className="p-5 text-center text-sm text-muted-foreground">{t('threadRailEmpty')}</p>
       ) : (
-        <ul className="flex-1 overflow-auto">
+        <ul className="focus-inset flex-1 overflow-auto">
           {threads.map((thread) => {
             const other = otherParticipant(thread.participants, meId);
             const isAgent = other?.type === 'agent';

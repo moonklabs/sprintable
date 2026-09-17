@@ -3,9 +3,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EmbedCard } from '@/components/chat/embed-card';
+import { cn } from '@/lib/utils';
 import { ChatV3EventCard } from './chat-v3-event-card';
 import type { ChatMessage } from '@/hooks/use-chat-sse';
 import type { TodayNeedsMeItem } from '@/components/org-briefing/derive-today';
@@ -120,12 +122,15 @@ export function ChatV3Messages({ threadId, meId, agentName, locale, needsMe, tod
                 ) : null}
                 <div className={isMine ? 'ml-auto max-w-[78%] text-right' : 'max-w-[78%]'}>
                   <p className="mb-1 text-xs text-muted-foreground">{isMine ? t('meLabel') : m.sender_name}</p>
-                  <div className={isMine
-                    ? 'inline-block rounded-xl rounded-tr-sm border border-border bg-primary/10 px-3.5 py-2.5 text-left text-sm'
-                    : 'inline-block rounded-xl rounded-tl-sm border border-border bg-card px-3.5 py-2.5 text-sm'}
+                  <Card
+                    radius="compact"
+                    className={cn(
+                      'inline-block px-3.5 py-2.5 text-sm',
+                      isMine ? 'rounded-tr-sm bg-primary/10 text-left' : 'rounded-tl-sm',
+                    )}
                   >
                     {m.content}
-                  </div>
+                  </Card>
                   {(m.references ?? []).map((ref) => (
                     <div key={`${ref.target_type}-${ref.target_id}`} className="mt-1.5">
                       <EmbedCard entity_type={ref.target_type} entity_id={ref.target_id} title={null} status={null} />

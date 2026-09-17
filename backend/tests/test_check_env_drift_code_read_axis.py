@@ -335,10 +335,14 @@ def test_ac4_real_repo_scan_counts_are_recorded():
     # 코드 read가 스캔에서 통째로 사라짐(baseline exemption 불요, 가드가 자연히 green) → high
     # 3→2. 남은 high 2건은 MCP_ALLOWED_TOKEN_REFS(baseline, 보안 정책 판단 대기) +
     # `_INCIDENT_KEYS` 고정 픽스처 FIREBASE_BFF_INTERNAL_SECRET 1건.
+    # 2026-09-17 story #3972 후속 — CHAT_V3_ENABLED(apps/web/src/lib/chat-v3.ts)·
+    # TODAY_V3_ENABLED(apps/web/src/lib/today-v3.ts) 신규 code read 2건, 둘 다
+    # FIREBASE_OAUTH_HANDOFF_ENABLED와 동형 안전-닫힘 feature flag(값 부재 시 false,
+    # throw 없음)라 code_read_exempt로 승격(exempt 30→32) — high는 그대로 2.
     assert len(highest) == 1, highest
     assert len(high) == 2, high
     assert len(low) == 9, low
-    assert len(exempt) == 30
+    assert len(exempt) == 32
 
 
 # ── AC5 — 값을 안 읽는다 ──────────────────────────────────────────────────────
