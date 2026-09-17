@@ -179,3 +179,45 @@ async def test_site_post_drafts_filter_by_work_item_id_hits_and_misses():
             assert len(r_all.json()) == 2
     finally:
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_site_post_drafts_filter_excludes_other_org():
+    """CHANGES-2(페드루 PO 판정 2026-09-17 03:49Z) — AC1 「다른 org 미노출」이 채널
+    쪽만 테스트돼 있던 갭. site_posts도 org_id 스코프가 work_item_id 필터보다 먼저
+    걸리는지(교차 org 노출 0) 채널과 동형으로 확認."""
+    from tests.test_3384_site_post_list_status import (
+        _client_for, _draft_body, _seed_agent, _seed_org, _seed_story, _session_factory,
+        _setup_org_scoped_app,
+    )
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            story_id = await _seed_story(s, org_id, project_id)
+
+            other_org_id, other_project_id = await _seed_org(s)
+            other_agent_id = await _seed_agent(s, other_org_id, other_project_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id)
+        async with _client_for(app) as client:
+            r = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts",
+                json=_draft_body(work_item_id=story_id),
+            )
+            assert r.status_code == 201, r.text
+        app.dependency_overrides.clear()
+
+        _setup_org_scoped_app(app, Session, other_org_id, user_id=other_agent_id)
+        async with _client_for(app) as client:
+            r_cross = await client.get(
+                f"/api/v2/organizations/{other_org_id}/site-posts/drafts",
+                params={"work_item_id": str(story_id)},
+            )
+            assert r_cross.status_code == 200, r_cross.text
+            assert r_cross.json() == []
+    finally:
+        await engine.dispose()
