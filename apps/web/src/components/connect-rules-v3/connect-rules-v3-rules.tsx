@@ -93,9 +93,28 @@ export function ConnectRulesV3Rules({ orgId }: { orgId: string }) {
           if (!cancelled) setLoadState('error');
           return;
         }
-        const rulesJson = await rulesRes.json() as { data?: { rules?: ContentRules } };
+        const rulesJson = await rulesRes.json() as { data?: { rules?: Partial<ContentRules> | null } };
         if (cancelled) return;
-        setRules(rulesJson.data?.rules ?? null);
+        // story #3982 CHANGES(3998 통합 리허설 디디 결함① — 페드루 PO 지시 2026-09-17) —
+        // 콘텐츠 규칙을 한 번도 저장 안 한 org는 BE가 `rules: {}`(빈 객체, 필드 자체가
+        // 없다 — content_rules.py:123 미설정 분기)를 준다. `{}`는 truthy라 위 `!rules`
+        // 통과분기를 뚫고 내려와 `rules.banned_terms.length` 등에서 크래시했다(테스트
+        // 픽스처 BASE_RULES가 늘 banned_terms:[] 등을 채워 둬 이 모양을 한 번도 안 쟀다).
+        // `Object.keys` 한 줄 판정 대신 필드 단위 기본값 정규화 — `{}`·필드 누락·명시
+        // null 셋 다 이 컴포넌트가 읽는 모든 필드에서 안전한 빈 상태(D절 "없음"/"꺼짐")로
+        // 수렴한다.
+        const raw = rulesJson.data?.rules;
+        setRules(raw ? {
+          banned_terms: raw.banned_terms ?? [],
+          require_utm: raw.require_utm ?? false,
+          tone: raw.tone ?? null,
+          taxonomy: raw.taxonomy ?? [],
+          channel_priority: raw.channel_priority ?? [],
+          brand_kit: raw.brand_kit ?? null,
+          generation_budget: raw.generation_budget ?? null,
+          api_usage_budget: raw.api_usage_budget ?? null,
+          utm_rules: raw.utm_rules ?? null,
+        } : null);
         setLoadState('ready');
       } catch {
         if (!cancelled) setLoadState('error');
