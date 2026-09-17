@@ -34,6 +34,15 @@ import type { Ga4ConnectionStatus, PublishedInWindow, ViewsInWindow } from './ty
  * (재시도 버튼 중복 안 만든다, PO "재시도는 페이지 Alert가 있으니 생략
  * 가능"). 광고 두 칸 재시도 버튼도 같은 요청 하나라 「쓴 광고비」에만 두고
  * 「남은 한도」는 문구만(선택 사항 처방).
+ *
+ * story #3987(2026-09-17, 페드루 PO 確定) — 승인된 boost가 0건이어도 광고 계정이
+ * 이미 연결된 조직에 「미측정+연결하러 가기」를 보이면 이미 연결한 사람에게
+ * 연결하라고 시키는 꼴이다. `ads.connection_status`(BE additive, ga4_connection_
+ * status와 같은 3값)로 갈라 connected면 CTA 없이 기존 키(orgCostAdsNoApproved
+ * Boosts) 「승인된 광고 홍보가 없어요.」만, not_connected/needs_reauth면 기존
+ * 「미측정」+CTA를 유지하되 needs_reauth는 낱말도 다르다(유나 선반영·2026-09-17
+ * 02:47Z: `channelConnect.channelReauthAction` 「다시 연결」 재사용, 4376 채널
+ * 절과 한 벌). 콜 수 불변 — 같은 cost-summary 응답의 기존 필드 확장일 뿐.
  */
 export interface ResultsSummaryCardsProps {
   publishedInWindow: PublishedInWindow | null;
@@ -51,6 +60,7 @@ export function ResultsSummaryCards({
   const t = useTranslations('insightsBoard');
   const tContent = useTranslations('content');
   const tCommon = useTranslations('common');
+  const tChannelConnect = useTranslations('channelConnect');
   const locale = useLocale();
 
   const ads = costSummaryState.status === 'ok' ? costSummaryState.summary.ads : null;
@@ -86,13 +96,24 @@ export function ResultsSummaryCards({
         </p>
       );
     }
+    if (ads?.connection_status === 'connected') {
+      return (
+        <p className="text-muted-foreground" data-testid={`results-summary-ads-${kind}-no-approved-boosts`}>
+          {t('orgCostAdsNoApprovedBoosts')}
+        </p>
+      );
+    }
     return (
       <>
         <p className="text-muted-foreground" data-testid={`results-summary-ads-${kind}-unmeasured`}>
           {t('reconcileVerdictUnmeasured')}
         </p>
-        <Link href="/organization/channels" className="text-primary underline" data-testid={`results-summary-ads-${kind}-cta`}>
-          {t('resultsSummaryConnectCta')}
+        <Link
+          href="/organization/channels"
+          className={ads?.connection_status === 'needs_reauth' ? 'font-medium text-warning-strong underline' : 'text-primary underline'}
+          data-testid={`results-summary-ads-${kind}-cta`}
+        >
+          {ads?.connection_status === 'needs_reauth' ? tChannelConnect('channelReauthAction') : t('resultsSummaryConnectCta')}
         </Link>
       </>
     );
