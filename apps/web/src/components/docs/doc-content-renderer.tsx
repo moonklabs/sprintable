@@ -20,6 +20,7 @@ import { extractDocHeadings, slugifyHeading } from './doc-heading-utils';
 import { EntityChip, getEntityHref } from '@/components/chat/embed-card';
 import { parseEntityRef } from '@/components/chat/entity-ref';
 import { fetchWithAuth } from '@/lib/db/client';
+import { copyTextSafely } from '@/lib/clipboard';
 
 interface DocContentRendererProps {
   content: string;
@@ -28,6 +29,9 @@ interface DocContentRendererProps {
   contentRef?: RefObject<HTMLDivElement | null>;
   codeCopyLabel?: string;
   codeCopiedLabel?: string;
+  /** story #3986(클래스 «거짓 성공 표시») — 실패해도 codeCopiedLabel을 그대로
+   * 보이던 결함 처방. 안 주면 영문 기본값("Copy failed"). */
+  codeCopyFailedLabel?: string;
   /** Public share viewer — render internal doc links as plain text (no navigation/traversal). */
   publicMode?: boolean;
   /** publicMode placeholder text for auth-gated attachments that can't render publicly. */
@@ -222,6 +226,7 @@ export function DocContentRenderer({
   contentRef,
   codeCopyLabel = 'Copy',
   codeCopiedLabel = 'Copied',
+  codeCopyFailedLabel = 'Copy failed',
   publicMode = false,
   publicAttachmentLabel = 'Attachment unavailable in public view',
   publicImageLabel = 'Image unavailable in public view',
@@ -286,20 +291,14 @@ export function DocContentRenderer({
         const pre = shell?.querySelector('pre');
         const text = pre?.textContent ?? '';
 
-        try {
-          if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-            await navigator.clipboard.writeText(text);
-          }
-          button.textContent = codeCopiedLabel;
-          window.setTimeout(() => {
-            button.textContent = codeCopyLabel;
-          }, 1600);
-        } catch {
-          button.textContent = codeCopiedLabel;
-          window.setTimeout(() => {
-            button.textContent = codeCopyLabel;
-          }, 1600);
-        }
+        // story #3986(클래스 «거짓 성공 표시») — catch도 codeCopiedLabel(성공과
+        // 동일)을 보이던 결함. 공용 헬퍼로 성공/실패를 실제로 가른다. 코드
+        // 자체는 위 <pre>에 이미 선택 가능하게 떠 있어 별도 노출 블록은 불요.
+        const result = await copyTextSafely(text);
+        button.textContent = result.ok ? codeCopiedLabel : codeCopyFailedLabel;
+        window.setTimeout(() => {
+          button.textContent = codeCopyLabel;
+        }, 1600);
       };
 
       button.addEventListener('click', handleClick);
@@ -566,7 +565,7 @@ export function DocContentRenderer({
       assetImgCleanup.forEach((dispose) => dispose());
       toggleCleanup.forEach((dispose) => dispose());
     };
-  }, [codeCopiedLabel, codeCopyLabel, content, contentFormat, publicMode, publicAttachmentLabel, publicImageLabel, assetImageErrorLabel, untitledEmbedLabel, mathRenderFailedLabel]);
+  }, [codeCopiedLabel, codeCopyLabel, codeCopyFailedLabel, content, contentFormat, publicMode, publicAttachmentLabel, publicImageLabel, assetImageErrorLabel, untitledEmbedLabel, mathRenderFailedLabel]);
 
   const decoratedHtml = useMemo(() => {
     const sanitized = sanitizeDocHtml(content);
@@ -644,12 +643,13 @@ export function DocContentRenderer({
             language={lang}
             copyLabel={codeCopyLabel}
             copiedLabel={codeCopiedLabel}
+            copyFailedLabel={codeCopyFailedLabel}
           />
         );
       }
       return <code>{children}</code>;
     },
-  }), [publicMode, assetImageErrorLabel, codeCopyLabel, codeCopiedLabel, mermaidRenderFailedLabel, mermaidRenderingLabel]);
+  }), [publicMode, assetImageErrorLabel, codeCopyLabel, codeCopiedLabel, codeCopyFailedLabel, mermaidRenderFailedLabel, mermaidRenderingLabel]);
 
   const rootClassName = cn(
     'doc-renderer prose dark:prose-invert prose-sm max-w-none text-foreground',
@@ -758,15 +758,19 @@ function MermaidReadonlyBlock({ code, renderFailedLabel, renderingLabel }: { cod
 }
 
 function ShikiCodeBlock({
-  code, language, copyLabel, copiedLabel,
+  code, language, copyLabel, copiedLabel, copyFailedLabel,
 }: {
   code: string;
   language: string | null;
   copyLabel: string;
   copiedLabel: string;
+  copyFailedLabel: string;
 }) {
   const [html, setHtml] = useState('');
   const [copied, setCopied] = useState(false);
+  // story #3986(클래스 «거짓 성공 표시») — 옛 코드는 실패해도 무조건 setCopied
+  // (true)였다. 코드 자체는 아래 <pre>/<code>에 이미 선택 가능하게 떠 있다.
+  const [copyFailed, setCopyFailed] = useState(false);
 
   useEffect(() => {
     if (!code.trim()) return;
@@ -783,11 +787,13 @@ function ShikiCodeBlock({
   }, [code, language]);
 
   const handleCopy = useCallback(async () => {
-    try {
-      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(code);
-      }
-    } catch { /* unavailable */ }
+    const result = await copyTextSafely(code);
+    if (!result.ok) {
+      setCopyFailed(true);
+      window.setTimeout(() => setCopyFailed(false), 1600);
+      return;
+    }
+    setCopyFailed(false);
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1600);
   }, [code]);
@@ -800,7 +806,7 @@ function ShikiCodeBlock({
           onClick={handleCopy}
           className="rounded-md border border-border bg-card px-3 py-1.5 text-[11px] font-medium text-muted-foreground transition hover:text-foreground"
         >
-          {copied ? copiedLabel : copyLabel}
+          {copyFailed ? copyFailedLabel : copied ? copiedLabel : copyLabel}
         </button>
       </div>
       {html ? (

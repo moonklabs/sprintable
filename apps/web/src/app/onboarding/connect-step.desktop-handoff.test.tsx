@@ -51,6 +51,10 @@ beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
+  // story #3986 — jsdom엔 Clipboard API가 없어(copyTextSafely가 execCommand
+  // 폴백으로 떨어지고, jsdom의 execCommand는 항상 false라 "실패"가 정직하게
+  // 재현된다) 성공 경로를 재려면 명시 스텁이 필요하다.
+  vi.stubGlobal('navigator', { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } });
 });
 
 afterEach(() => {
@@ -58,6 +62,7 @@ afterEach(() => {
   container.remove();
   vi.useRealTimers();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 async function mount(onFinish = vi.fn(), todayV3Enabled = false) {
@@ -144,6 +149,23 @@ describe('ConnectStep — 데스크톱 절 키 복사 칸(story #3983 CHANGES①
       .map((c) => String(c[1]?.body ?? ''));
     expect(bodies.some((b) => b.includes('desktop_key_copied'))).toBe(true);
     expect(bodies.some((b) => b.includes('"event":"config_copied"'))).toBe(false);
+  });
+
+  // story #3986(클래스 «거짓 성공 표시») — 클립보드 실패를 삼키고도 「복사됨」을
+  // 띄우던 결함의 처방 pin. 실패하면 「복사됨」이 안 뜨고, 마스킹판 대신 실 키가
+  // 선택 가능한 입력으로 바뀐다(유나 지시 — 별도 "선택 가능" 안내 줄은 안 만든다,
+  // 실패 문구 자체가 지시).
+  it('⭐클립보드 복사가 실패하면(권한 거부 등) 「복사됨」이 안 뜨고, 실패 문구+선택 가능한 실 키가 뜬다', async () => {
+    vi.stubGlobal('navigator', { clipboard: { writeText: vi.fn().mockRejectedValue(new DOMException('denied', 'NotAllowedError')) } });
+    await mount();
+    const copyBtn = container.querySelector('[data-testid="connect-step-desktop-key-copy"]') as HTMLButtonElement;
+    await act(async () => { copyBtn.click(); });
+    expect(copyBtn.textContent).not.toContain(ko.onboarding.copied);
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe(ko.common.copyFailedSelectManually);
+    const rawKeyInput = container.querySelector('[data-testid="connect-step-desktop-key-raw"]') as HTMLInputElement;
+    expect(rawKeyInput).not.toBeNull();
+    expect(rawKeyInput.value).toBe('sk_live_1234');
+    expect(rawKeyInput.readOnly).toBe(true);
   });
 });
 

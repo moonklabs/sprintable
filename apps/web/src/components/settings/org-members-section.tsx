@@ -16,6 +16,7 @@ import { useRenderNonce } from '@/hooks/use-render-nonce';
 
 import { fetchWithAuth } from '@/lib/db/client';
 import { canEditOrgMemberRole, orgRoleLabel } from '@/lib/org-member-role';
+import { copyTextSafely } from '@/lib/clipboard';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 
@@ -79,6 +80,9 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
   const [resendingId, setResendingId] = useState<string | null>(null);
   const [revokingId, setRevokingId] = useState<string | null>(null);
   const [copiedInviteId, setCopiedInviteId] = useState<string | null>(null);
+  // story #3986 CHANGES(페드루 PO C2) — 초대 목록 행은 invite_url 자체를 화면에
+  // 안 그린다(버튼 title에만 있음). 실패했을 때만 선택 가능하게 노출한다.
+  const [copyFailedInviteUrl, setCopyFailedInviteUrl] = useState<string | null>(null);
 
   const canManage = currentRole === 'owner' || currentRole === 'admin';
   // story #3491(페드루 PO 確定) — canEditOrgMemberRole의 자기 자신 판정에 필요.
@@ -242,16 +246,21 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
     );
   }
 
+  // story #3986(클래스 «거짓 성공 표시») — 이 자리는 이미 성공/실패를 가르고
+  // 있었다(회귀 대상은 아님), 공용 헬퍼로 일반화만(발명 0) + 낱말 정본 통일
+  // (유나 지시 2026-09-17 02:47Z — orgMemberClipboardCopyFailed 걷음).
   const handleCopyInviteLink = async (inviteId: string, url: string | undefined) => {
     if (!url) return;
-    try {
-      await navigator.clipboard.writeText(url);
-      setCopiedInviteId(inviteId);
-      setTimeout(() => setCopiedInviteId(null), 1500);
-    } catch {
+    const result = await copyTextSafely(url);
+    if (!result.ok) {
       bumpActionMessageNonce();
-      setActionMessage({ type: 'error', text: t('orgMemberClipboardCopyFailed') });
+      setActionMessage({ type: 'error', text: tc('copyFailedSelectManually') });
+      setCopyFailedInviteUrl(url);
+      return;
     }
+    setCopyFailedInviteUrl(null);
+    setCopiedInviteId(inviteId);
+    setTimeout(() => setCopiedInviteId(null), 1500);
   };
 
   return (
@@ -356,6 +365,15 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
         >
           <AlertDescription>{actionMessage.text}</AlertDescription>
         </Alert>
+      )}
+      {copyFailedInviteUrl && (
+        <input
+          readOnly
+          value={copyFailedInviteUrl}
+          onFocus={(e) => e.currentTarget.select()}
+          className="w-full rounded border border-border bg-background px-2 py-1 font-mono text-xs text-foreground"
+          data-testid="org-members-copy-failed-raw-invite-url"
+        />
       )}
 
       {/* 멤버 목록 */}

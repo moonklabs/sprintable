@@ -167,6 +167,7 @@ export default function DocViewPage() {
                 contentRef={contentRef}
                 codeCopyLabel={t('codeCopy')}
                 codeCopiedLabel={t('codeCopied')}
+                codeCopyFailedLabel={t('codeCopyFailed')}
                 assetImageErrorLabel={t('attachImageUnavailable')}
                 untitledEmbedLabel={t('newDocDefaultTitle')}
                 mermaidRenderFailedLabel={t('mermaidRenderFailed')}

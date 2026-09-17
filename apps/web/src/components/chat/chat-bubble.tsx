@@ -9,6 +9,7 @@ import { useTranslations } from 'next-intl';
 import type { ChatMessage } from '@/hooks/use-chat-sse';
 import { AgentIdentity } from '@/components/ui/agent-identity';
 import { commandArgs, commandName, dequoteLiteral, isCommand } from '@/lib/command-classifier';
+import { copyTextSafely } from '@/lib/clipboard';
 import { EmbedCard, EntityChip, getEntityHref } from '@/components/chat/embed-card';
 import { parseEntityRef } from '@/components/chat/entity-ref';
 import { resolveEmbedDecision } from '@/components/chat/embed-renderer';
@@ -131,19 +132,22 @@ function prepareMentions(content: string): string {
 // (className에 language- 없음 + 개행 없음 = inline) — 팀 컨벤션 재사용.
 function CopyableCode({ raw, inline, className }: { raw: string; inline: boolean; className: string }) {
   const t = useTranslations('chats');
+  const tc = useTranslations('common');
   const [copied, setCopied] = useState(false);
+  // story #3986(클래스 «거짓 성공 표시») — 옛 코드는 실패를 삼키고 피드백 자체가
+  // 없었다(성공 표시는 안 됐지만 "왜 안 됐는지"도 안 보였다). 코드 자체는
+  // <code>에 이미 선택 가능하게 떠 있어 별도 노출 블록은 불요.
+  const [copyFailed, setCopyFailed] = useState(false);
 
   const handleCopy = useCallback(() => {
     void (async () => {
-      try {
-        if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-          await navigator.clipboard.writeText(raw);
-        } else {
-          return;
-        }
-      } catch {
-        return; // 클립보드 권한거부/미지원 — 조용히 무시(피드백 미표시로 실패가 드러남)
+      const result = await copyTextSafely(raw);
+      if (!result.ok) {
+        setCopyFailed(true);
+        window.setTimeout(() => setCopyFailed(false), 3000);
+        return;
       }
+      setCopyFailed(false);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1200);
     })();
@@ -151,17 +155,25 @@ function CopyableCode({ raw, inline, className }: { raw: string; inline: boolean
 
   if (inline) {
     return (
-      <code
-        role="button"
-        tabIndex={0}
-        onClick={handleCopy}
-        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleCopy(); } }}
-        title={copied ? t('copied') : t('clickToCopy')}
-        className={`${className} cursor-pointer transition hover:brightness-95 active:brightness-90`}
-      >
-        {raw}
-        {copied && <Check className="ml-0.5 inline size-3 align-text-top" aria-hidden />}
-      </code>
+      <>
+        <code
+          role="button"
+          tabIndex={0}
+          onClick={handleCopy}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleCopy(); } }}
+          title={copyFailed ? tc('copyFailedSelectManually') : copied ? t('copied') : t('clickToCopy')}
+          className={`${className} cursor-pointer transition hover:brightness-95 active:brightness-90`}
+        >
+          {raw}
+          {copied && <Check className="ml-0.5 inline size-3 align-text-top" aria-hidden />}
+        </code>
+        {/* story #3986 CHANGES(페드루 PO C3) — title만 바뀌면 터치 기기·hover 없이는
+            실패가 안 보였다. 눈에 보이는 3초짜리 알림을 별도로 낸다(<code> 자체는
+            이미 선택 가능한 원문이라 여기선 문구만). */}
+        {copyFailed && (
+          <span role="alert" className="ml-1 text-xs text-destructive">{tc('copyFailedSelectManually')}</span>
+        )}
+      </>
     );
   }
 
@@ -171,11 +183,11 @@ function CopyableCode({ raw, inline, className }: { raw: string; inline: boolean
       <button
         type="button"
         onClick={handleCopy}
-        aria-label={copied ? t('copied') : t('copyCode')}
-        title={copied ? t('copied') : t('copyCode')}
+        aria-label={copyFailed ? tc('copyFailedSelectManually') : copied ? t('copied') : t('copyCode')}
+        title={copyFailed ? tc('copyFailedSelectManually') : copied ? t('copied') : t('copyCode')}
         className="absolute right-1 top-1 rounded p-1 opacity-60 transition hover:bg-black/10 group-hover/code:opacity-100 dark:hover:bg-white/10"
       >
-        {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+        {copied ? <Check className="size-3.5" /> : <Copy className={copyFailed ? 'size-3.5 text-destructive' : 'size-3.5'} />}
       </button>
     </span>
   );
@@ -378,6 +390,7 @@ export function ChatBubble({
   hitlAnswer = null, onRespondHitl, eventDefinitionsByKey, onOpenReadingPanel, onFillComposer, gateByKey,
 }: ChatBubbleProps) {
   const t = useTranslations('chats');
+  const tc = useTranslations('common');
   const isAgent = message.sender_type === 'agent';
   // story #2319 — tombstone. content는 서버가 이미 ""로 스크럽했다(오발송 대응 목적).
   const isDeleted = Boolean(message.deleted_at);
@@ -481,8 +494,16 @@ export function ChatBubble({
     }
   }, []);
 
+  // story #3986(클래스 «거짓 성공 표시») — 옛 코드는 결과를 아예 안 봤다(성공
+  // 표시도 원래 없었으니 그 자리는 그대로 두되, 실패는 이제 알려야 한다).
+  const [copyMessageFailed, setCopyMessageFailed] = useState(false);
   const handleCopy = useCallback(() => {
-    void navigator.clipboard.writeText(message.content);
+    void copyTextSafely(message.content).then((result) => {
+      if (!result.ok) {
+        setCopyMessageFailed(true);
+        setTimeout(() => setCopyMessageFailed(false), 3000);
+      }
+    });
   }, [message.content]);
 
   const handleDelete = useCallback(() => {
@@ -774,6 +795,14 @@ export function ChatBubble({
           )}
         </div>
       </div>
+
+      {/* story #3986(클래스 «거짓 성공 표시») — 컨텍스트 메뉴 「복사」 실패 안내
+          (메시지 내용 자체는 위 버블에 이미 선택 가능하게 떠 있다). */}
+      {copyMessageFailed ? (
+        <p role="alert" className={`mt-0.5 text-xs text-destructive ${isMine ? 'text-right' : 'text-left'}`}>
+          {tc('copyFailedSelectManually')}
+        </p>
+      ) : null}
 
       {/* AC1/AC2: 컨텍스트 메뉴 */}
       {contextMenu && (

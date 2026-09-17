@@ -383,3 +383,56 @@ describe('OrgMembersSection — 목록 헤더 제목 고정 + CountBadge(story #
     expect(heading!.querySelector('span')?.textContent).toContain('1');
   });
 });
+
+// story #3986 CHANGES(페드루 PO C2) — 초대 목록 행은 invite_url을 화면에 안 그린다
+// (버튼 title에만 있다). 복사가 실패했을 때만 그 링크를 선택 가능하게 노출해야
+// 「직접 선택해 복사해 주세요」 문구가 거짓이 되지 않는다.
+describe('OrgMembersSection — 초대 링크 복사 실패 시 원문 노출(story #3986 CHANGES)', () => {
+  const INVITE_URL = 'https://sprintable.example/i/abc';
+
+  async function mountWithInvite() {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/org-members') return { ok: true, json: async () => ({ data: [] }) };
+      if (url === '/api/organizations/org-1/invites') {
+        return {
+          ok: true,
+          json: async () => ({
+            data: [{ id: 'inv1', email: 'bob@example.com', role: 'member', status: 'pending', expires_at: '2026-09-14T00:00:00Z', invite_url: INVITE_URL }],
+          }),
+        };
+      }
+      if (url === '/api/projects') return { ok: true, json: async () => ({ data: [] }) };
+      if (url === '/api/me') return { ok: true, json: async () => ({ data: { user_id: 'u-admin-self' } }) };
+      throw new Error('unexpected fetch: ' + url);
+    }));
+    await act(async () => { root.render(wrap(<OrgMembersSection orgId="org-1" currentRole="admin" />)); });
+    await flush();
+  }
+
+  it('복사 실패 — 링크 원문이 선택 가능한 input으로 뜬다', async () => {
+    await mountWithInvite();
+    vi.stubGlobal('navigator', { clipboard: { writeText: vi.fn().mockRejectedValue(new Error('denied')) } });
+
+    const copyBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('링크 복사'));
+    expect(copyBtn).toBeTruthy();
+    await act(async () => { copyBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    const raw = container.querySelector('[data-testid="org-members-copy-failed-raw-invite-url"]') as HTMLInputElement | null;
+    expect(raw).toBeTruthy();
+    expect(raw!.value).toBe(INVITE_URL);
+    const alert = container.querySelector('[role="alert"]');
+    expect(alert?.textContent).toBe('복사하지 못했어요 — 직접 선택해 복사해 주세요.');
+  });
+
+  it('복사 성공 — 원문 노출 없음', async () => {
+    await mountWithInvite();
+    vi.stubGlobal('navigator', { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } });
+
+    const copyBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('링크 복사'));
+    await act(async () => { copyBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    expect(container.querySelector('[data-testid="org-members-copy-failed-raw-invite-url"]')).toBeNull();
+  });
+});

@@ -31,6 +31,7 @@ import { HumanOnlyAction } from '@/components/ui/human-only-action';
 
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatRelativeTime } from '@/lib/storage/format';
+import { copyTextSafely } from '@/lib/clipboard';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 
 interface DocDetail {
@@ -81,6 +82,15 @@ export default function DocSlugPage() {
   const [contentFormat, setContentFormat] = useState<'markdown' | 'html'>('markdown');
   const [autosave, setAutosave] = useState(true);
   const [mdCopied, setMdCopied] = useState(false);
+  // story #3986(클래스 «거짓 성공 표시») — 옛 코드는 clipboard 실패를 삼키고도
+  // 무조건 setMdCopied(true)를 실행했다. 문서 내용은 에디터에 이미 선택 가능하게
+  // 떠 있어 별도 노출 블록은 불요 — 아이콘 버튼 title/aria-label만 실패 문구로.
+  const [mdCopyFailed, setMdCopyFailed] = useState(false);
+  // story #3986 CHANGES(페드루 PO C2·C3) — 에디터가 그리는 건 렌더링 결과지 markdown
+  // 원문이 아니다(html 문서는 변환 결과라 원문과 다르다). 실패했을 때만 실제로
+  // 클립보드에 보내려던 markdown을 선택 가능하게 보여준다.
+  const [mdCopyFailedRaw, setMdCopyFailedRaw] = useState<string | null>(null);
+  const mdCopyFailedPanelRef = useRef<HTMLDivElement>(null);
   const [slugLocked, setSlugLocked] = useState(false);
   const [urlDialogOpen, setUrlDialogOpen] = useState(false);
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
@@ -192,14 +202,40 @@ export default function DocSlugPage() {
 
   const handleCopyMarkdown = useCallback(async () => {
     const md = contentFormat === 'markdown' ? content : htmlToMarkdown(content);
-    try {
-      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(md);
-      }
-    } catch { /* clipboard unavailable */ }
+    const result = await copyTextSafely(md);
+    if (!result.ok) {
+      setMdCopyFailed(true);
+      setMdCopyFailedRaw(md);
+      window.setTimeout(() => setMdCopyFailed(false), 3000);
+      return;
+    }
+    setMdCopyFailed(false);
+    setMdCopyFailedRaw(null);
     setMdCopied(true);
     window.setTimeout(() => setMdCopied(false), 1600);
   }, [content, contentFormat]);
+
+  // story #3986 CHANGES(페드루 PO 2회차) — mdCopyFailed(아이콘/aria용 3초 코스메틱
+  // 플래그)와 원문 노출 칸을 분리했다(패널 자체는 mdCopyFailedRaw만으로 뜬다). 손으로
+  // 고를 시간을 3초로 자르지 않되, 그렇다고 화면에 영영 안 사라지면 안 되니 다음
+  // 성공(핸들러 안)·바깥 클릭·Esc로 닫는다.
+  useEffect(() => {
+    if (mdCopyFailedRaw == null) return;
+    const onPointerDown = (e: MouseEvent) => {
+      if (mdCopyFailedPanelRef.current && !mdCopyFailedPanelRef.current.contains(e.target as Node)) {
+        setMdCopyFailedRaw(null);
+      }
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMdCopyFailedRaw(null);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [mdCopyFailedRaw]);
 
   const handleDelete = useCallback(async () => {
     if (!selectedDoc || !projectId) return;
@@ -285,15 +321,45 @@ export default function DocSlugPage() {
   const docActions = (
     <>
       <InlineSaveIndicator status={saveStatus} onAction={save} t={t} tc={tc} />
-      <button
-        type="button"
-        onClick={handleCopyMarkdown}
-        title={t('copyMarkdown')}
-        aria-label={t('copyMarkdown')}
-        className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-      >
-        {mdCopied ? <Check className="h-4 w-4 text-success" /> : <Copy className="h-4 w-4" />}
-      </button>
+      <div className="relative">
+        <button
+          type="button"
+          onClick={handleCopyMarkdown}
+          title={mdCopyFailed ? tc('copyFailedSelectManually') : t('copyMarkdown')}
+          aria-label={mdCopyFailed ? tc('copyFailedSelectManually') : t('copyMarkdown')}
+          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+        >
+          {mdCopied ? <Check className="h-4 w-4 text-success" /> : <Copy className={mdCopyFailed ? 'h-4 w-4 text-destructive' : 'h-4 w-4'} />}
+        </button>
+        {/* story #3986 CHANGES(페드루 PO C2·C3) — 아이콘 버튼만으론 실패가 안 보였다
+            (title·aria-label·아이콘 색만 바뀜 — 터치 기기는 title도 못 봄). 눈에 보이는
+            role=alert + markdown 원문 선택 칸을 드롭다운으로 띄운다. 패널 자체는
+            mdCopyFailed(3초 코스메틱)와 분리해 mdCopyFailedRaw만으로 뜬다 — 손으로
+            고를 시간을 3초로 자르지 않는다(다음 성공·바깥 클릭·Esc·✕로 닫는다). */}
+        {mdCopyFailedRaw != null ? (
+          <div ref={mdCopyFailedPanelRef} className="absolute right-0 top-full z-50 mt-1 w-72 space-y-1.5 rounded-md border border-border bg-popover p-2 shadow-md">
+            <div className="flex items-start justify-between gap-2">
+              <p role="alert" className="text-xs text-destructive">{tc('copyFailedSelectManually')}</p>
+              <button
+                type="button"
+                onClick={() => setMdCopyFailedRaw(null)}
+                aria-label={tc('close')}
+                className="shrink-0 text-muted-foreground hover:text-foreground"
+              >
+                ✕
+              </button>
+            </div>
+            <textarea
+              readOnly
+              value={mdCopyFailedRaw}
+              onFocus={(e) => e.currentTarget.select()}
+              className="w-full resize-none rounded border border-border bg-background p-1.5 font-mono text-xs text-foreground"
+              rows={4}
+              data-testid="docs-copy-markdown-failed-raw"
+            />
+          </div>
+        ) : null}
+      </div>
       {/* story #2967(선생님 실사용 판정 ⑤) — 인덱스 클릭 목적지를 리더→에디터로 되돌리며
           리더 진입점이 사라지면 안 되니 opt-in 명시 링크를 "..." 드롭다운에서 상단 아이콘
           버튼으로 승격(발견성). 목적지·라벨(t('preview'))은 기존 그대로 — 위치만 이동. */}
