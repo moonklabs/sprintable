@@ -15,7 +15,7 @@ import { cn } from '@/lib/utils';
 
 // story #4032(실측 — Lighthouse CI 인증화면 6곳 전부 CLS>0.1, layout-shift-elements 감사
 // 상위 기여요소가 6곳 모두 이 배너 바로 아래 그리드였다) — 진짜 원인은 `useActivationStatus`
-// 의 `state`가 마운트 직후 항상 `null`로 시작해(hooks/use-activation-status.ts:90) 이
+// 의 `state`가 마운트 직후 항상 `null`로 시작해(hooks/use-activation-status.ts) 이
 // 컴포넌트가 그 순간 `null`을 반환, 부모 `<div className="px-3 pt-3 empty:hidden">`가
 // 빈 채로 0높이로 접혀 있다가 `useEffect`의 비동기 fetch가 끝나 `state`가 채워지는
 // 순간 실 배너가 나타나며 그 아래 전체(모든 페이지 공통 그리드)를 밀어낸다 — 화면마다
@@ -23,6 +23,17 @@ import { cn } from '@/lib/utils';
 // 0.134로 재현). 처방: "아직 모른다"와 "완주해서 필요 없다"를 더 이상 같은 null로
 // 뭉치지 않고, 전자는 실 배너와 같은 Alert 박스(테두리·패딩 동일)에 스켈레톤을 채워
 // 자리를 미리 잡는다 — 그 자리가 실 콘텐츠와 같은 박스라 나타날 때 높이가 안 바뀐다.
+//
+// CHANGES-1(PO 지적) — 위 스켈레톤만으로는 "완주했지만 이 브라우저는 모른다"(새 기기·
+// 시크릿 창·저장소 삭제) 사용자에게 **없던 흔들림을 새로 만든다**: localStorage 플래그가
+// 없어 스켈레톤이 먼저 뜨고, fetch가 완주를 확認하는 순간 스켈레톤째 접힌다(이전엔
+// null→null이라 흔들림이 0이었다). 처방: `useDashboardContext().initialActivationComplete`
+// (서버가 org 컨텍스트 확定 뒤 이미 조회해 둔 값, dashboard-shell.tsx 참고)를
+// `useActivationStatus`에 시드값으로 넘긴다 — true면 클라이언트 fetch 자체를 스킵해
+// 스켈레톤도 안 거치고 처음부터 미노출이다. JWT app_metadata 빌더(`_build_app_metadata`,
+// org/project 해소 이력 사고가 반복된 자리)에 새 클레임을 얹는 대신 레이아웃의 기존
+// 서버조회 패턴(이미 me/memberships/organizations를 이렇게 조회한다)에 1개를 더하는
+// 쪽을 골랐다 — 이 카드 목적(CLS 폴리시)에 비해 그 빌더의 블래스트 반경이 과도하다.
 
 /**
  * story #3159(retention·최소층) — 가입 후 남은 activation 단계를 상시 노출(완주 유도).
@@ -38,8 +49,8 @@ const COLLAPSE_KEY = 'sprintable_activation_checklist_collapsed';
 export function ActivationChecklistBanner() {
   const t = useTranslations('activation');
   const router = useRouter();
-  const { projectId } = useDashboardContext();
-  const { state, allComplete } = useActivationStatus();
+  const { projectId, initialActivationComplete } = useDashboardContext();
+  const { state, allComplete } = useActivationStatus(initialActivationComplete);
   const [navigatingToInstruction, setNavigatingToInstruction] = useState(false);
   const [instructionStartError, setInstructionStartError] = useState(false);
   const [collapsed, setCollapsed] = useState<boolean>(() => {

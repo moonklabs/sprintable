@@ -85,8 +85,14 @@ export interface UseActivationStatusResult {
   allComplete: boolean;
 }
 
-export function useActivationStatus(): UseActivationStatusResult {
-  const [skip] = useState<boolean>(() => readLocalFlag(COMPLETE_KEY));
+// story #4032(CLS 처방 CHANGES-1, PO 지적) — `initialAllComplete`는 서버가 이미
+// 확認해 둔 값((authenticated)/layout.tsx가 org 컨텍스트 확정 뒤 /api/v2/activation/
+// checklist를 1회 조회해 흘려보낸다)이다. true면 이 브라우저에 localStorage 플래그가
+// 없어도(새 기기·시크릿 창·저장소 삭제) 처음부터 완주로 취급해 fetch 자체를 스킵한다 —
+// 그 경로가 없으면 "완주했지만 이 기기는 모른다"는 사용자에게 로딩 스켈레톤이 떴다
+// 접히는 새 흔들림이 생긴다(첫 CHANGES에서 로컬 스토리지만 보던 자리의 결함).
+export function useActivationStatus(initialAllComplete?: boolean): UseActivationStatusResult {
+  const [skip] = useState<boolean>(() => initialAllComplete === true || readLocalFlag(COMPLETE_KEY));
   const [state, setState] = useState<ActivationState | null>(null);
 
   useEffect(() => {

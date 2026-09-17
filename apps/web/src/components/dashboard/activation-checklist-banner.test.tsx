@@ -13,8 +13,12 @@ import { _resetActivationStatusCacheForTests } from '@/hooks/use-activation-stat
 // BE가 낸 scope_is_requested_org 불리언만 본다(dashboard-shell 의존 0으로 축소). 기존
 // 픽스처(PARTIAL·COMPLETE)는 이 필드를 안 실어(undefined) 새 가드(`=== false`만 숨김)가
 // 항상 통과해 회귀 0 — 신규 테스트만 명시로 채운다.
+// story #4032(CLS 처방 CHANGES-1) — initialActivationComplete는 기본 undefined(기존
+// 16건 회귀 없음, 서버가 모르는 것과 동일하게 클라이언트가 알아낸다) — 신규 테스트만
+// mutable 참조로 덮어써 "서버가 이미 완주를 안다" 경로를 시뮬레이션한다.
+let mockInitialActivationComplete: boolean | undefined;
 vi.mock('@/app/dashboard/dashboard-shell', () => ({
-  useDashboardContext: () => ({ projectId: 'proj-1' }),
+  useDashboardContext: () => ({ projectId: 'proj-1', initialActivationComplete: mockInitialActivationComplete }),
 }));
 const routerPushMock = vi.fn();
 vi.mock('next/navigation', () => ({
@@ -56,6 +60,7 @@ beforeEach(() => {
   routerPushMock.mockClear();
   createFirstInstructionConversationMock.mockReset();
   _resetActivationStatusCacheForTests();
+  mockInitialActivationComplete = undefined;
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -121,18 +126,18 @@ describe('ActivationChecklistBanner — 미완주 렌더 (story #3159)', () => {
 // 실 콘텐츠가 도착하는 순간 나타나며 그 아래 전체(모든 페이지 공통 그리드)를 밀어낸다.
 // 처방(스켈레톤으로 자리 선점)이 실제로 "fetch 미완료 순간에도 박스가 이미 있다"를
 // 만드는지, 그리고 그 박스가 실 콘텐츠와 같은 행 수(5)를 갖는지를 이 두 테스트가 고정한다.
-describe('ActivationChecklistBanner — 로딩 스켈레톤이 자리를 선점한다 (story #4032, CLS 처방)', () => {
-  // story #4027 선례와 동일 패턴 — 자동응답 스텁은 이 컴포넌트의 fetch 체인이 같은
-  // act() 사이클 안에서 이미 resolve돼(실측: 자동응답으로는 "flush 前" 순간을 못 잡음)
-  // 로딩 상태를 관측할 수 없었다. 응답을 수동으로 붙잡아 두는 deferred promise로
-  // "아직 안 왔다"를 실제로 만든다.
-  function deferredChecklistResponse() {
-    let resolve!: (data: typeof PARTIAL) => void;
-    const promise = new Promise<typeof PARTIAL>((res) => { resolve = res; });
-    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: await promise }) })));
-    return { resolve };
-  }
+// story #4027 선례와 동일 패턴 — 자동응답 스텁은 이 컴포넌트의 fetch 체인이 같은
+// act() 사이클 안에서 이미 resolve돼(실측: 자동응답으로는 "flush 前" 순간을 못 잡음)
+// 로딩 상태를 관측할 수 없었다. 응답을 수동으로 붙잡아 두는 deferred promise로
+// "아직 안 왔다"를 실제로 만든다. 모듈 스코프로 둬 다른 describe도 재사용한다.
+function deferredChecklistResponse() {
+  let resolve!: (data: typeof PARTIAL) => void;
+  const promise = new Promise<typeof PARTIAL>((res) => { resolve = res; });
+  vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: await promise }) })));
+  return { resolve };
+}
 
+describe('ActivationChecklistBanner — 로딩 스켈레톤이 자리를 선점한다 (story #4032, CLS 처방)', () => {
   it('fetch 완료 前에는 실 텍스트 0인 채로 aria-busy 박스를 먼저 그린다(마운트 즉시, flush 前)', async () => {
     const { resolve } = deferredChecklistResponse();
     await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
@@ -154,16 +159,48 @@ describe('ActivationChecklistBanner — 로딩 스켈레톤이 자리를 선점�
     expect(container.querySelectorAll('li').length).toBe(5);
   });
 
-  it('all_complete=true(완주)면 스켈레톤도 안 거치고 바로 미노출이다(로딩 상태 자체가 없음)', async () => {
+  it('서버도 완주 여부를 모르면(initialActivationComplete=undefined) fetch 도착 前까지는 스켈레톤이 뜬다(잔여 갭 — 아래 서버-known 테스트가 이 갭을 좁히는 정상 경로)', async () => {
     stubChecklist(COMPLETE);
     await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
-    // COMPLETE는 skip 플래그 유무와 무관하게 fetch가 도착하기 前까지는 state===null이라
-    // allComplete는 아직 false(§useActivationStatus: allComplete = skip || state?.all_complete)
-    // — skip이 false인 이 케이스는 fetch 도착 前까지 스켈레톤이 뜨는 게 맞다(정상 설계,
-    // 완주 사실 자체를 아직 모르니까). flush 뒤에는 사라져야 한다.
+    // story #4032 CHANGES-1(PO 지적) — 이전엔 이 테스트가 "정상 설계"라고 적었으나, 이
+    // 시나리오(로컬스토리지도 서버신호도 둘 다 없음)가 바로 「완주했지만 이 기기는
+    // 모른다」는 실사용자 경로였다 — fetch 도착 前 스켈레톤이 떴다가 도착 즉시 접히는
+    // 것 자체가 새로 만든 흔들림이었다. 아래 테스트(initialActivationComplete=true)가
+    // 실사용에서 이 경로를 실제로 대체한다((authenticated)/layout.tsx가 서버에서 이미
+    // 조회해 둔 값을 넘긴다) — 이 테스트는 그 서버신호 자체가 없는(SSR 조회 실패 등)
+    // 좁은 잔여 케이스만 고정한다.
     await flush();
     expect(container.querySelector('[aria-busy="true"]')).toBeNull();
     expect(container.textContent).toBe('');
+  });
+});
+
+// story #4032 CHANGES-1(PO 지적) — "완주했지만 이 브라우저는 모른다"(새 기기·시크릿 창·
+// 저장소 삭제) 사용자가 스켈레톤 노출→접힘의 새 흔들림을 겪지 않으려면, 서버가 이미
+// 아는 값((authenticated)/layout.tsx가 org 컨텍스트 확定 뒤 조회)을 첫 렌더부터 신뢰해야
+// 한다 — 이 값이 있으면 로컬스토리지 유무와 무관하게 클라이언트 fetch 자체를 스킵한다.
+describe('ActivationChecklistBanner — 서버가 이미 아는 완주 신호(story #4032 CHANGES-1)', () => {
+  it('initialActivationComplete=true면 localStorage 플래그가 없어도(새 기기 시뮬레이션) fetch 자체를 스킵하고 스켈레톤 없이 바로 미노출이다', async () => {
+    mockInitialActivationComplete = true;
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+    expect(window.localStorage.getItem(COMPLETE_KEY)).toBeNull(); // 새 기기 전제 확認
+    await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+    expect(container.querySelector('[aria-busy="true"]')).toBeNull(); // 스켈레톤 자체가 없음
+    expect(container.textContent).toBe('');
+    await flush();
+    expect(fetchSpy).not.toHaveBeenCalled(); // 클라이언트 fetch 자체가 안 나감
+    expect(container.textContent).toBe('');
+  });
+
+  it('initialActivationComplete=false면 서버가 "아직 아님"을 확認해 준 것이므로 fetch로 실 진행률을 마저 받아온다(스켈레톤 경로는 그대로 유지)', async () => {
+    mockInitialActivationComplete = false;
+    const { resolve } = deferredChecklistResponse();
+    await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+    expect(container.querySelector('[aria-busy="true"]')).not.toBeNull();
+    await act(async () => { resolve(PARTIAL); });
+    await flush();
+    expect(container.textContent).toContain('가입을 마무리해 볼까요?');
   });
 });
 
