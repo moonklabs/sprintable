@@ -165,6 +165,12 @@ class OrgAdsCostSummaryView(BaseModel):
     captured_spend_minor: int | None
     remaining_minor: int | None
     cap_reached_count: int
+    # story #3987(2026-09-17, 페드루 PO 確定) — approved_boost_count==0만으로
+    # "미측정"을 판정하면 광고 계정을 이미 연결한 조직에도 "연결하러 가기"가
+    # 뜨는 결함(승인된 boost가 없을 뿐 연결은 됐다). `ga4_connection_status`와
+    # 같은 3값 모양(org_cost_summary.py::_derive_ads_connection_status) —
+    # additive, 기존 필드·소비처 무변경.
+    connection_status: Literal["not_connected", "needs_reauth", "connected"]
 
 
 class PaidSpendDailyPointView(BaseModel):

@@ -42,15 +42,34 @@ afterEach(async () => {
 const MEASURED_ADS: OrgCostSummaryLoadState = {
   status: 'ok',
   summary: {
-    ads: { approved_boost_count: 2, sealed_ads_currency: 'KRW', sealed_budget_minor: 150_000, captured_spend_minor: 12_345, remaining_minor: 137_655, cap_reached_count: 0 },
+    ads: { approved_boost_count: 2, sealed_ads_currency: 'KRW', sealed_budget_minor: 150_000, captured_spend_minor: 12_345, remaining_minor: 137_655, cap_reached_count: 0, connection_status: 'connected' },
     generation_cost_spent_minor: null, generation_cost_period_start: null, generation_cost_period_end: null,
     generation_currency: null, x_cost_spent_minor: null, x_cost_period_start: null, x_cost_period_end: null, x_currency: null,
   },
 };
+// story #3987 — 승인 0건일 때 connection_status로 세 갈래(not_connected 기존
+// 동작 유지·connected는 CTA 없이 「승인된 광고 홍보가 없어요」·needs_reauth는
+// 「다시 연결」 낱말).
 const NO_APPROVED_BOOSTS: OrgCostSummaryLoadState = {
   status: 'ok',
   summary: {
-    ads: { approved_boost_count: 0, sealed_ads_currency: null, sealed_budget_minor: 0, captured_spend_minor: 0, remaining_minor: 0, cap_reached_count: 0 },
+    ads: { approved_boost_count: 0, sealed_ads_currency: null, sealed_budget_minor: 0, captured_spend_minor: 0, remaining_minor: 0, cap_reached_count: 0, connection_status: 'not_connected' },
+    generation_cost_spent_minor: null, generation_cost_period_start: null, generation_cost_period_end: null,
+    generation_currency: null, x_cost_spent_minor: null, x_cost_period_start: null, x_cost_period_end: null, x_currency: null,
+  },
+};
+const NO_APPROVED_BOOSTS_CONNECTED: OrgCostSummaryLoadState = {
+  status: 'ok',
+  summary: {
+    ads: { approved_boost_count: 0, sealed_ads_currency: null, sealed_budget_minor: 0, captured_spend_minor: 0, remaining_minor: 0, cap_reached_count: 0, connection_status: 'connected' },
+    generation_cost_spent_minor: null, generation_cost_period_start: null, generation_cost_period_end: null,
+    generation_currency: null, x_cost_spent_minor: null, x_cost_period_start: null, x_cost_period_end: null, x_currency: null,
+  },
+};
+const NO_APPROVED_BOOSTS_NEEDS_REAUTH: OrgCostSummaryLoadState = {
+  status: 'ok',
+  summary: {
+    ads: { approved_boost_count: 0, sealed_ads_currency: null, sealed_budget_minor: 0, captured_spend_minor: 0, remaining_minor: 0, cap_reached_count: 0, connection_status: 'needs_reauth' },
     generation_cost_spent_minor: null, generation_cost_period_start: null, generation_cost_period_end: null,
     generation_currency: null, x_cost_spent_minor: null, x_cost_period_start: null, x_cost_period_end: null, x_currency: null,
   },
@@ -125,12 +144,30 @@ describe('ResultsSummaryCards(story #3979 AC1) — 쓴 광고비 / 남은 한도
     expect(container.querySelector('[data-testid="results-summary-ads-remaining-value"]')).not.toBeNull();
   });
 
-  it('⭐approved_boost_count===0이면 둘 다 「미측정」+연결 CTA(0을 그리지 않는다)', async () => {
+  it('⭐approved_boost_count===0·미연결이면 둘 다 「미측정」+연결 CTA(0을 그리지 않는다)', async () => {
     await mount({ costSummaryState: NO_APPROVED_BOOSTS });
     expect(container.querySelector('[data-testid="results-summary-ads-spend-unmeasured"]')?.textContent).toBe('미측정');
     expect(container.querySelector('[data-testid="results-summary-ads-spend-value"]')).toBeNull();
     expect(container.querySelector('[data-testid="results-summary-ads-remaining-unmeasured"]')?.textContent).toBe('미측정');
     expect(container.querySelector('[data-testid="results-summary-ads-spend-cta"]')?.textContent).toBe('연결하러 가기');
+  });
+
+  // story #3987(2026-09-17, 페드루 PO 確定) — approved_boost_count===0만으로
+  // 「미측정+연결하러 가기」를 판정하면 광고 계정이 이미 연결된 조직에도 그
+  // CTA가 뜨는 결함(이미 연결한 사람에게 연결하라는 꼴). connection_status로
+  // 세 갈래를 명시적으로 고정.
+  it('⭐approved_boost_count===0·connected면 CTA 없이 「승인된 광고 홍보가 없어요」(사라짐 0 아님·오분류 처방)', async () => {
+    await mount({ costSummaryState: NO_APPROVED_BOOSTS_CONNECTED });
+    expect(container.querySelector('[data-testid="results-summary-ads-spend-no-approved-boosts"]')?.textContent).toBe('승인된 광고 홍보가 없어요.');
+    expect(container.querySelector('[data-testid="results-summary-ads-remaining-no-approved-boosts"]')?.textContent).toBe('승인된 광고 홍보가 없어요.');
+    expect(container.querySelector('[data-testid="results-summary-ads-spend-cta"]')).toBeNull();
+    expect(container.querySelector('[data-testid="results-summary-ads-spend-unmeasured"]')).toBeNull();
+  });
+
+  it('⭐approved_boost_count===0·needs_reauth면 「미측정」+「다시 연결」(연결하러 가기 아님)', async () => {
+    await mount({ costSummaryState: NO_APPROVED_BOOSTS_NEEDS_REAUTH });
+    expect(container.querySelector('[data-testid="results-summary-ads-spend-unmeasured"]')?.textContent).toBe('미측정');
+    expect(container.querySelector('[data-testid="results-summary-ads-spend-cta"]')?.textContent).toBe('다시 연결');
   });
 });
 
