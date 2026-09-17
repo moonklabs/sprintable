@@ -6041,7 +6041,7 @@
     "resultsSummaryPublishedLabel": "Published",
     "resultsSummaryOrganicViewsLabel": "Organic views",
     "resultsSummarySpendLabel": "Ad spend",
-    "resultsSummaryRemainingLabel": "Remaining budget",
+    "resultsSummaryRemainingLabel": "Remaining cap",
     "resultsSummaryConnectCta": "Connect",
     "resultsSummaryPartialCaptureNote": "Based on {captured}/{total} measured",
     "adsCapCardTitle": "Ad cap",
