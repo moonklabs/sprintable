@@ -101,4 +101,22 @@ describe('ConnectStep — 웹 설정 복사(.mcp.json) 실패 처리(story #3986
     await act(async () => { copyBtn.click(); });
     expect(copyBtn.textContent).not.toContain(ko.onboarding.copied);
   });
+
+  // story #3986 CHANGES(페드루 PO C4) — copyFailed/copyFailedRawConfig가 transport
+  // 바뀌어도 안 지워지면, 옛 transport의 raw config(실 키 포함)가 새 transport
+  // 화면에 그대로 남아 엉뚱한 설정을 붙여넣게 된다.
+  it('⭐복사 실패 뒤 transport를 바꾸면 이전 raw config 노출이 사라진다', async () => {
+    vi.stubGlobal('navigator', { clipboard: { writeText: vi.fn().mockRejectedValue(new DOMException('denied', 'NotAllowedError')) } });
+    await mount();
+    const copyBtn = container.querySelector('[aria-label="복사"]') as HTMLButtonElement;
+    await act(async () => { copyBtn.click(); });
+    expect(container.querySelector('[data-testid="connect-step-copy-failed-raw-config"]')).not.toBeNull();
+
+    const hostedTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(ko.onboarding.transportHosted)) as HTMLButtonElement;
+    expect(hostedTab.disabled).toBe(false);
+    await act(async () => { hostedTab.click(); });
+
+    expect(container.querySelector('[data-testid="connect-step-copy-failed-raw-config"]')).toBeNull();
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+  });
 });

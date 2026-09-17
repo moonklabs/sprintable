@@ -86,6 +86,10 @@ export default function DocSlugPage() {
   // 무조건 setMdCopied(true)를 실행했다. 문서 내용은 에디터에 이미 선택 가능하게
   // 떠 있어 별도 노출 블록은 불요 — 아이콘 버튼 title/aria-label만 실패 문구로.
   const [mdCopyFailed, setMdCopyFailed] = useState(false);
+  // story #3986 CHANGES(페드루 PO C2·C3) — 에디터가 그리는 건 렌더링 결과지 markdown
+  // 원문이 아니다(html 문서는 변환 결과라 원문과 다르다). 실패했을 때만 실제로
+  // 클립보드에 보내려던 markdown을 선택 가능하게 보여준다.
+  const [mdCopyFailedRaw, setMdCopyFailedRaw] = useState<string | null>(null);
   const [slugLocked, setSlugLocked] = useState(false);
   const [urlDialogOpen, setUrlDialogOpen] = useState(false);
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
@@ -200,10 +204,12 @@ export default function DocSlugPage() {
     const result = await copyTextSafely(md);
     if (!result.ok) {
       setMdCopyFailed(true);
+      setMdCopyFailedRaw(md);
       window.setTimeout(() => setMdCopyFailed(false), 3000);
       return;
     }
     setMdCopyFailed(false);
+    setMdCopyFailedRaw(null);
     setMdCopied(true);
     window.setTimeout(() => setMdCopied(false), 1600);
   }, [content, contentFormat]);
@@ -292,15 +298,33 @@ export default function DocSlugPage() {
   const docActions = (
     <>
       <InlineSaveIndicator status={saveStatus} onAction={save} t={t} tc={tc} />
-      <button
-        type="button"
-        onClick={handleCopyMarkdown}
-        title={mdCopyFailed ? tc('copyFailedSelectManually') : t('copyMarkdown')}
-        aria-label={mdCopyFailed ? tc('copyFailedSelectManually') : t('copyMarkdown')}
-        className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-      >
-        {mdCopied ? <Check className="h-4 w-4 text-success" /> : <Copy className={mdCopyFailed ? 'h-4 w-4 text-destructive' : 'h-4 w-4'} />}
-      </button>
+      <div className="relative">
+        <button
+          type="button"
+          onClick={handleCopyMarkdown}
+          title={mdCopyFailed ? tc('copyFailedSelectManually') : t('copyMarkdown')}
+          aria-label={mdCopyFailed ? tc('copyFailedSelectManually') : t('copyMarkdown')}
+          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+        >
+          {mdCopied ? <Check className="h-4 w-4 text-success" /> : <Copy className={mdCopyFailed ? 'h-4 w-4 text-destructive' : 'h-4 w-4'} />}
+        </button>
+        {/* story #3986 CHANGES(페드루 PO C2·C3) — 아이콘 버튼만으론 실패가 안 보였다
+            (title·aria-label·아이콘 색만 바뀜 — 터치 기기는 title도 못 봄). 3초짜리
+            눈에 보이는 role=alert + markdown 원문 선택 칸을 드롭다운으로 띄운다. */}
+        {mdCopyFailed && mdCopyFailedRaw != null ? (
+          <div className="absolute right-0 top-full z-50 mt-1 w-72 space-y-1.5 rounded-md border border-border bg-popover p-2 shadow-md">
+            <p role="alert" className="text-xs text-destructive">{tc('copyFailedSelectManually')}</p>
+            <textarea
+              readOnly
+              value={mdCopyFailedRaw}
+              onFocus={(e) => e.currentTarget.select()}
+              className="w-full resize-none rounded border border-border bg-background p-1.5 font-mono text-xs text-foreground"
+              rows={4}
+              data-testid="docs-copy-markdown-failed-raw"
+            />
+          </div>
+        ) : null}
+      </div>
       {/* story #2967(선생님 실사용 판정 ⑤) — 인덱스 클릭 목적지를 리더→에디터로 되돌리며
           리더 진입점이 사라지면 안 되니 opt-in 명시 링크를 "..." 드롭다운에서 상단 아이콘
           버튼으로 승격(발견성). 목적지·라벨(t('preview'))은 기존 그대로 — 위치만 이동. */}

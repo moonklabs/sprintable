@@ -66,6 +66,10 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
   };
   const [copiedOnboarding, setCopiedOnboarding] = useState(false);
   const [copiedKey, setCopiedKey] = useState(false);
+  // story #3986 CHANGES(페드루 PO C2) — 헤더의 「온보딩 메시지 복사」는 다이얼로그가
+  // 닫혀 있을 때도 쓸 수 있는데, 그 메시지 본문은 이 화면 어디에도 안 떠 있다.
+  // 실패했을 때만 본문을 선택 가능하게 노출한다.
+  const [copyFailedOnboardingMessage, setCopyFailedOnboardingMessage] = useState<string | null>(null);
   const [revokeConfirmDialog, setRevokeConfirmDialog] = useState(false);
   // story #2416 — 개별 키 revoke의 native confirm() 대체. null=닫힘, 아니면 대상 키 id.
   const [revokeKeyId, setRevokeKeyId] = useState<string | null>(null);
@@ -191,11 +195,14 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
   };
 
   const copyOnboardingMessage = async (apiKey: string, mcpConfig?: string | null) => {
-    const result = await copyTextSafely(buildOnboardingMessage(apiKey, mcpConfig));
+    const message = buildOnboardingMessage(apiKey, mcpConfig);
+    const result = await copyTextSafely(message);
     if (!result.ok) {
       addToast({ type: 'error', title: t('agentApiKeyCopyFailTitle'), body: tc('copyFailedSelectManually') });
+      setCopyFailedOnboardingMessage(message);
       return;
     }
+    setCopyFailedOnboardingMessage(null);
     setCopiedOnboarding(true);
     addToast({ type: 'success', title: t('agentApiKeyOnboardingCopiedTitle') });
     window.setTimeout(() => setCopiedOnboarding(false), 1500);
@@ -241,6 +248,16 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
               Generate API Key
             </Button>
           </div>
+          {copyFailedOnboardingMessage ? (
+            <textarea
+              readOnly
+              value={copyFailedOnboardingMessage}
+              onFocus={(e) => e.currentTarget.select()}
+              className="w-full resize-none rounded border border-border bg-background p-2 font-mono text-xs text-foreground"
+              rows={4}
+              data-testid="agent-api-key-copy-failed-raw-onboarding-message"
+            />
+          ) : null}
         </div>
       </div>
 

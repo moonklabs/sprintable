@@ -1239,7 +1239,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                         {equipMcpCopied ? <><Check className="size-3" />{t('copied')}</> : <>{t('copy')}</>}
                       </Button>
                     </div>
-                    {equipMcpCopyFailed ? <p role="alert" className="text-xs text-destructive">{tc('copyFailedSelectManually')}</p> : null}
+                    {equipMcpCopyFailed ? <p role="alert" className="text-xs text-foreground">{tc('copyFailedSelectManually')}</p> : null}
                     <pre className="overflow-x-auto rounded-md border border-border bg-muted/30 p-3 text-xs text-foreground/80">
                       {JSON.stringify(equipResult.mcp_config, null, 2)}
                     </pre>

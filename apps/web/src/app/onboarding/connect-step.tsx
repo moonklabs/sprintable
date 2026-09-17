@@ -125,6 +125,14 @@ export function ConnectStep({ agentId, apiKey, projectId, onFinish, todayV3Enabl
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const leftRef = useRef(false);
 
+  // story #3986 CHANGES(페드루 PO C4) — 실패 시 뜬 raw config는 그 transport/키 것이다.
+  // transport를 바꾸거나 키가 갱신되는데 리셋을 안 하면 이전 transport의 raw config가
+  // 새 화면에 그대로 남아, 사용자가 선택해 붙이면 엉뚱한 transport 설정을 붙이게 된다.
+  useEffect(() => {
+    setCopyFailed(false);
+    setCopyFailedRawConfig(null);
+  }, [transport, apiKey]);
+
   const hasCopied = transport ? Boolean(hasCopiedMap[transport]) : false;
   // misconfig 폴백(아래) — edition 기본이 http인데 배포가 없을 때 stdio로 명시 재요청해야
   // 한다. useCallback으로 메모된 fetchArtifact가 자기 자신을 몸체 안에서 직접 호출하면
@@ -499,7 +507,7 @@ export function ConnectStep({ agentId, apiKey, projectId, onFinish, todayV3Enabl
             줄은 안 만든다). */}
         {copyFailed && copyFailedRawConfig ? (
           <div className="space-y-1.5 rounded-md border border-destructive/30 bg-destructive-tint p-3">
-            <p role="alert" className="text-xs text-destructive">{tc('copyFailedSelectManually')}</p>
+            <p role="alert" className="text-xs text-foreground">{tc('copyFailedSelectManually')}</p>
             <textarea
               readOnly
               value={copyFailedRawConfig}
@@ -595,9 +603,20 @@ export function ConnectStep({ agentId, apiKey, projectId, onFinish, todayV3Enabl
                 {rail.copiedVerifyPrompt ? <><Check className="h-3.5 w-3.5" />{t('copied')}</> : <><Copy className="h-3.5 w-3.5" />{t('copyConfig')}</>}
               </Button>
             </div>
-            {/* story #3986 — 예시 문구는 위 인용부호 안에 이미 선택 가능하게 떠 있다. */}
+            {/* story #3986 CHANGES(페드루 PO C2) — 위 인용부호 안 문구는 truncate라
+                좁은 화면에선 말줄임표로 잘린다. 실패했을 때만 안 잘린 전체 문구를
+                선택 가능하게 새로 보여준다. */}
             {rail.copyVerifyPromptFailed ? (
-              <p role="alert" className="text-xs text-destructive">{tc('copyFailedSelectManually')}</p>
+              <div className="space-y-1">
+                <p role="alert" className="text-xs text-destructive">{tc('copyFailedSelectManually')}</p>
+                <input
+                  readOnly
+                  value={t('verifyExamplePrompt')}
+                  onFocus={(e) => e.currentTarget.select()}
+                  className="w-full rounded border border-border bg-background px-2 py-1 font-mono text-xs text-foreground"
+                  data-testid="connect-step-verify-prompt-raw"
+                />
+              </div>
             ) : null}
           </div>
         )}
