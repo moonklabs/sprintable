@@ -75,6 +75,15 @@ interface DashboardContext {
   // 순간엔 소비부가 배너 렌더를 건너뛴다(크래시 대신 그 프레임만 안 보임, 다음 렌더에 채워짐).
   bottomDockBannerSlot?: HTMLDivElement | null;
   setBottomDockBannerSlot?: (el: HTMLDivElement | null) => void;
+  // story #4032(CLS 처방 CHANGES-1, PO 지적) — activation 완주 플래그가 client storage
+  // (localStorage)에만 있으면 새 기기·시크릿 창·저장소 삭제 사용자는 "이미 완주"를 서버가
+  // 첫 페인트에 못 읽어(authenticated)/layout.tsx가 서버에서 이미 아는 값(/api/v2/activation/
+  // checklist, org 컨텍스트 확정 뒤 1회 조회)을 여기로 흘려보낸다. true면 클라이언트가
+  // fetch 자체를 안 타 로딩 스켈레톤도 안 거친다(그 경로가 있어야 할 이유가 없으므로) —
+  // 이걸로 처음 CHANGES에서 놓친 "완주자의 새 브라우저 첫 로드가 스켈레톤→접힘으로
+  // 새 흔들림을 만드는" 결함을 닫는다. undefined(조회 실패 등)면 기존처럼 클라이언트가
+  // 알아낸다(안전한 폴백, 과다신뢰 없음).
+  initialActivationComplete?: boolean;
 }
 
 const DashboardCtx = createContext<DashboardContext>({
@@ -313,6 +322,7 @@ export function DashboardShell({
   pathOrgId,
   pathProjectId,
   jwtOrgId,
+  initialActivationComplete,
   children,
 }: DashboardShellProps) {
   const pathname = usePathname();
@@ -406,7 +416,7 @@ export function DashboardShell({
 
   return (
     <ToastProvider>
-    <DashboardCtx.Provider value={{ currentTeamMemberId, orgId: effectiveOrgId, orgTimezone, projectId: effectiveProjectId, projectName: effectiveProjectName, currentProjectSlug, userName, role, currentMemberType, projectMemberships, orgMemberships, orgSyncPending, bottomDockBannerSlot, setBottomDockBannerSlot }}>
+    <DashboardCtx.Provider value={{ currentTeamMemberId, orgId: effectiveOrgId, orgTimezone, projectId: effectiveProjectId, projectName: effectiveProjectName, currentProjectSlug, userName, role, currentMemberType, projectMemberships, orgMemberships, orgSyncPending, bottomDockBannerSlot, setBottomDockBannerSlot, initialActivationComplete }}>
       <RefreshProvider>
       <RealtimeProvider currentTeamMemberId={currentTeamMemberId}>
         <TopBarProvider>
