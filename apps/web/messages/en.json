@@ -614,6 +614,7 @@
     "panelHiddenByFilter": "This item isn't shown in the current filter",
     "panelClearFilters": "Clear filters",
     "hypothesesEmptyTitle": "No hypotheses yet",
+    "hypothesesFilterEmptyTitle": "No hypotheses match this filter",
     "hypothesesFilterAll": "All",
     "hypothesesLinkedWorkCta": "View linked work"
   },

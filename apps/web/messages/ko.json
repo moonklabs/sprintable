@@ -614,6 +614,7 @@
     "panelHiddenByFilter": "지금 필터에서는 목록에 안 보이는 일이에요",
     "panelClearFilters": "필터 지우기",
     "hypothesesEmptyTitle": "아직 가설이 없어요",
+    "hypothesesFilterEmptyTitle": "고른 상태에 맞는 가설이 없어요",
     "hypothesesFilterAll": "전체",
     "hypothesesLinkedWorkCta": "연결된 일 보기"
   },
