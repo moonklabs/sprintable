@@ -293,10 +293,11 @@ describe('ChatV3Screen — 스레드 레일 실시간(story #4008 AC3)', () => {
     });
   }
 
-  // 레일 쪽 호출은 onConversationRead를 실어보낸다(chat-v3-messages.tsx 쪽 호출과
-  // 구분하는 유일한 축 — 두 인스턴스가 같은 목 함수를 공유하므로). 재렌더마다 새
-  // 호출이 쌓이므로(콜백이 selectedId/me를 closure로 캡처) 최신 것만 써야 한다 —
-  // 이전 렌더의 stale closure(예: selectedId=null 시점)를 잡으면 오탐(실사고로 발견).
+  // story #4008 CHANGES 2(PO 지적) — chat-v3-messages.tsx는 더 이상 자기 useChatSse가
+  // 없다(탭당 SSE 연결이 prod에서 2개로 늘던 문제 처방 — 구독은 이 화면 하나로 통합).
+  // 그래서 이 mock은 이제 호출점이 정확히 1곳(이 화면)뿐이다. 재렌더마다 새 호출이
+  // 쌓이므로(콜백이 selectedId/me를 closure로 캡처) 최신 것만 써야 한다 — 이전 렌더의
+  // stale closure(예: selectedId=null 시점)를 잡으면 오탐(실사고로 발견).
   function railSseOptions() {
     return [...useChatSseMock.mock.calls]
       .reverse()
@@ -338,6 +339,37 @@ describe('ChatV3Screen — 스레드 레일 실시간(story #4008 AC3)', () => {
     expect(rowsAfter[0]?.querySelector('[data-testid="chat-v3-unread-dot"]')).toBeNull();
   });
 
+  // story #4008 CHANGES 2 — 대화 열도 이제 이 화면의 단일 구독이 ref로 밀어준다
+  // (chat-v3-messages.tsx는 자기 SSE가 없다). 선택된 스레드로 온 메시지가 실제로
+  // 그 컬럼에도 반영되는지(단순 rail 갱신뿐 아니라) 여기서 통합 확인.
+  it('⭐지금 열린 스레드(conv-1)에 새 메시지 — 대화 열(메시지 컬럼)에도 실시간 반영된다', async () => {
+    stubTwoThreads();
+    await mount();
+    const opts = railSseOptions();
+    await act(async () => {
+      opts?.onConversationMessage?.({
+        conversation_id: 'conv-1', id: 'm-live', sender: { id: 'agent-1', name: '담롱 온찬', type: 'agent' },
+        content: '방금 온 답장', created_at: '2026-09-17T00:01:00Z',
+      });
+    });
+    expect(container.querySelector('[data-testid="chat-v3-messages-column"]')?.textContent).toContain('방금 온 답장');
+  });
+
+  // story #4008 CHANGES 2 — 다른 스레드(conv-2) 메시지는 대화 열(conv-1이 선택된 상태)에
+  // 안 새어든다(chat-v3-screen.tsx가 selectedId 일치할 때만 ref로 밀어주는 필터).
+  it('⭐다른 스레드(conv-2) 메시지는 지금 열린 대화 열(conv-1)에 안 새어든다', async () => {
+    stubTwoThreads();
+    await mount();
+    const opts = railSseOptions();
+    await act(async () => {
+      opts?.onConversationMessage?.({
+        conversation_id: 'conv-2', id: 'm-other', sender: { id: 'agent-2', name: '카디르', type: 'agent' },
+        content: '다른 대화로 온 메시지', created_at: '2026-09-17T00:02:00Z',
+      });
+    });
+    expect(container.querySelector('[data-testid="chat-v3-messages-column"]')?.textContent).not.toContain('다른 대화로 온 메시지');
+  });
+
   it('⭐conversation.read 이벤트 — 서버 truth로 안읽음 수를 되돌린다', async () => {
     stubTwoThreads();
     await mount();
@@ -353,13 +385,16 @@ describe('ChatV3Screen — 스레드 레일 실시간(story #4008 AC3)', () => {
     expect([...container.querySelectorAll('[data-testid="chat-v3-thread-row"]')][0]?.querySelector('[data-testid="chat-v3-unread-dot"]')).toBeNull();
   });
 
-  it('⭐재연결 — 목록을 통째로 재조회한다(AC4, 레일 쪽)', async () => {
+  it('⭐재연결 — 스레드 목록과 대화 열 둘 다 재조회한다(AC4, 단일 구독이 양쪽에 통지)', async () => {
     stubTwoThreads();
     await mount();
-    const callsBefore = fetchMock.mock.calls.filter((c) => String(c[0]).startsWith('/api/conversations?')).length;
+    const listCallsBefore = fetchMock.mock.calls.filter((c) => String(c[0]).startsWith('/api/conversations?')).length;
+    const messagesCallsBefore = fetchMock.mock.calls.filter((c) => c[0] === '/api/conversations/conv-1/messages').length;
     const opts = railSseOptions();
     await act(async () => { opts?.onReconnect?.(); await Promise.resolve(); await Promise.resolve(); });
-    const callsAfter = fetchMock.mock.calls.filter((c) => String(c[0]).startsWith('/api/conversations?')).length;
-    expect(callsAfter).toBe(callsBefore + 1);
+    const listCallsAfter = fetchMock.mock.calls.filter((c) => String(c[0]).startsWith('/api/conversations?')).length;
+    const messagesCallsAfter = fetchMock.mock.calls.filter((c) => c[0] === '/api/conversations/conv-1/messages').length;
+    expect(listCallsAfter).toBe(listCallsBefore + 1);
+    expect(messagesCallsAfter).toBe(messagesCallsBefore + 1);
   });
 });
