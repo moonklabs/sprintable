@@ -48,6 +48,14 @@ export interface NavV3Destinations {
    * 「옛 진입점 지우지 않는다」 원칙).
    */
   connectRules: NavV3Destination | null;
+  /**
+   * 「결재」 — story #4016(페드루 PO 確定 2026-09-17) 추가. 모바일 탭 바 전용이던 고정
+   * 경로(v3 3플래그 어디에도 안 걸림, results와 동형) — 이 모듈에 없으면 소비처(탭 바)가
+   * 손으로 다시 박게 된다(AC1 「파일 안 경로 리터럴 0」).
+   */
+  approvals: NavV3Destination;
+  /** 「전체」 — 위와 동형, 모바일 허브(더보기) 진입점. 플래그 무관 고정 경로. */
+  more: NavV3Destination;
 }
 
 // prop이 안 넘어온 소비처(예: 테스트, navV3Flags 미배선 자리)의 안전한 기본값 —
@@ -66,5 +74,7 @@ export function resolveNavV3Destinations(flags: NavV3Flags): NavV3Destinations {
     work: { kind: 'resource', path: anyV3Enabled ? 'work-list' : 'flow' },
     results: { kind: 'static', path: '/organization/insights-board' },
     connectRules: flags.connectRulesV3Enabled ? { kind: 'static', path: '/connect-rules' } : null,
+    approvals: { kind: 'static', path: '/inbox?tab=gates' },
+    more: { kind: 'static', path: '/more' },
   };
 }
