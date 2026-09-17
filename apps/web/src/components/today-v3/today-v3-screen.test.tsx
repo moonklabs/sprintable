@@ -125,8 +125,9 @@ describe('TodayV3Screen — 렌더 3', () => {
   });
 
   // story #3962 CHANGES-2(페드루 PO C2) — 위험 등급 태그(고위험=amber 배지)·저위험은
-  // 개별 카드 대신 「저위험 N건」 한 줄로 묶이고 그 옆 「모아 승인」은 비활성(자리만).
-  it('⭐위험 등급 태그·저위험 모아 승인 — 고위험은 배지·저위험은 묶이고 모아 승인은 비활성', async () => {
+  // 개별 카드 대신 「저위험 N건」 한 줄로 묶인다. 「모아 승인」 실동작 검증은 story
+  // #3964(today-v3-decisions.test.tsx)가 전담 — 여기선 그룹핑 표시만 확認.
+  it('⭐위험 등급 태그·저위험 모아 승인 — 고위험은 배지·저위험은 묶여 한 줄로 표시된다', async () => {
     stubToday({
       ...EMPTY_TODAY,
       needs_me: [
@@ -156,8 +157,7 @@ describe('TodayV3Screen — 렌더 3', () => {
     expect(container.textContent).not.toContain('스토리 이동');
     const lowRiskRow = container.querySelector('[data-testid="today-v3-low-risk-row"]');
     expect(lowRiskRow?.textContent).toContain('2');
-    const bulkButton = container.querySelector('[data-testid="today-v3-bulk-approve-action"]') as HTMLButtonElement;
-    expect(bulkButton.disabled).toBe(true);
+    expect(container.querySelector('[data-testid="today-v3-bulk-approve-action"]')).not.toBeNull();
   });
 
   it('오늘 결과 — 3959 필드가 있으면(measured) 그 수를 그대로 쓴다', async () => {
