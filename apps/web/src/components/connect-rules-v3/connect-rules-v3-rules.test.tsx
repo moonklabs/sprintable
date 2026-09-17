@@ -123,4 +123,33 @@ describe('ConnectRulesV3Rules', () => {
     expect(body?.textContent).toContain('블로그, 뉴스레터');
     expect(body?.textContent).toContain('threads, instagram');
   });
+
+  // story #3982 CHANGES(3998 통합 리허설 디디 결함① — 페드루 PO 지시 2026-09-17) —
+  // 콘텐츠 규칙을 한 번도 저장 안 한 org의 실 BE 응답 모양(`rules: {}`, content_rules.py:123
+  // 미설정 분기)을 이 픽스처가 한 번도 안 쟀다(BASE_RULES가 늘 필드를 다 채워 둠). `{}`는
+  // truthy라 `!rules` 분기를 못 잡아 `rules.banned_terms.length` 등에서 화면 전체 크래시.
+  it('⭐실 BE 미설정 모양 — rules:{}(완전 빈 객체)여도 크래시 없이 전부 «없음/꺼짐»으로 렌더', async () => {
+    stubContentRules({});
+    await mount();
+    expect(container.textContent).toContain('금칙어');
+    expect(container.textContent).toContain('UTM 필수');
+    expect(container.textContent).toContain('UTM 자동 부착');
+    expect(container.textContent).toContain('생성 비용 한도');
+    expect(container.textContent).toContain('X 비용 한도');
+    const toggle = container.querySelector('[data-testid="connect-rules-v3-reference-toggle"]') as HTMLButtonElement;
+    await act(async () => { toggle.click(); });
+    const body = container.querySelector('[data-testid="connect-rules-v3-reference-body"]');
+    expect(body?.textContent).toContain('안 정함');
+  });
+
+  it('⭐필드 일부 누락(taxonomy·channel_priority 없음) — 크래시 없이 그 두 필드만 「안 정함」', async () => {
+    stubContentRules({ banned_terms: ['spam'], require_utm: true, tone: '친근하게' });
+    await mount();
+    expect(container.textContent).toContain('금칙어');
+    const toggle = container.querySelector('[data-testid="connect-rules-v3-reference-toggle"]') as HTMLButtonElement;
+    await act(async () => { toggle.click(); });
+    const body = container.querySelector('[data-testid="connect-rules-v3-reference-body"]');
+    expect(body?.textContent).toContain('친근하게');
+    expect(body?.textContent?.match(/안 정함/g)?.length).toBeGreaterThanOrEqual(2);
+  });
 });
