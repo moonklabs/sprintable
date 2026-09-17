@@ -74,6 +74,44 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
+// story #3997(3994 후속, PO 確定) — 「시스템 발행」을 이 대화에 참가자로 추가하는
+// 것 자체가 의미 없다(연결 대상이 아닌 내부 멤버) — 선택지에서 제외.
+describe('AddParticipantModal — 시스템 발행 제외(story #3997)', () => {
+  it('⭐members에 「시스템 발행」이 섞여 와도 선택지엔 안 뜨고, 실 멤버는 그대로 뜬다', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.startsWith('/api/members')) {
+        return {
+          ok: true,
+          json: async () => ({
+            data: [
+              { id: 'sp1', name: '시스템 발행', type: 'agent', runtime_type: 'system-publisher' },
+              { id: 'a-bot', name: '점검봇', type: 'agent', runtime_type: 'claude-code' },
+            ],
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await act(async () => {
+      root.render(wrap(
+        <AddParticipantModal
+          conversationId={CONV_ID}
+          conversationType="group"
+          projectId={PROJECT_ID}
+          existingParticipantIds={['m-yuna']}
+          onClose={() => {}}
+          onAdded={() => {}}
+        />,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(document.body.textContent).not.toContain('시스템 발행');
+    expect(document.body.textContent).toContain('점검봇');
+  });
+});
+
 describe('AddParticipantModal — 에이전트 정책 거부 구조화 안내(story #2613)', () => {
   it('allowlist_miss — 대상 에이전트·멤버 이름과 워크포스 딥링크가 뜬다', async () => {
     await mountAndSelectBot(mockFetches(() => ({

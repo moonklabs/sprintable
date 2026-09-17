@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/dialog';
 import { resolveRecipientPrefill } from '@/lib/epic-steer';
 import { fetchWithAuth } from '@/lib/db/client';
+import { isSystemPublisher } from '@/lib/runtime-capabilities';
 
 interface AgentMember {
   id: string;
@@ -68,10 +69,12 @@ export function SteerDispatchModal({ projectId, items, onClose, onDispatched }: 
         const res = await fetchWithAuth('/api/team-members');
         if (!res.ok) throw new Error(`team-members ${res.status}`);
         const { data } = await res.json() as {
-          data: Array<{ id: string; name: string; type: string; is_active: boolean }>;
+          data: Array<{ id: string; name: string; type: string; is_active: boolean; runtime_type?: string | null }>;
         };
         const list = (data ?? [])
-          .filter((m) => m.type === 'agent' && m.is_active)
+          // story #3997 CHANGES(카디르 「고르는 자리」 전수, 페드루 확定 2026-09-17) —
+          // STEER 조타 커밋 수신자 후보다. 「시스템 발행」은 커밋을 수신할 대상이 아니다.
+          .filter((m) => m.type === 'agent' && m.is_active && !isSystemPublisher(m.runtime_type))
           .map((m) => ({ id: m.id, name: m.name }));
         if (!alive) return;
         setAgents(list);

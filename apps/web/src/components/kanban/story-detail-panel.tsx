@@ -57,6 +57,7 @@ import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { HumanOnlyAction } from '@/components/ui/human-only-action';
 import { useOrgSyncVersion } from '@/lib/project-context-client';
 import { fetchWithAuth } from '@/lib/db/client';
+import { isSystemPublisher } from '@/lib/runtime-capabilities';
 
 export interface Task {
   id: string;
@@ -1552,7 +1553,10 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                   >
                     — {t('clearAssignees')}
                   </Button>
-                  {members.filter((m, i, arr) => arr.findIndex((x) => x.id === m.id) === i).map((m) => {
+                  {/* story #3997 CHANGES(자체 그라운딩 확장 2026-09-17) — 담당자 배정
+                      토글 후보에서 「시스템 발행」 제외(연결 대상이 아닌 내부 멤버).
+                      memberMap 기반 기존 배정 표시는 안 건드린다(위 참고). */}
+                  {members.filter((m, i, arr) => arr.findIndex((x) => x.id === m.id) === i && !isSystemPublisher(m.runtime_type)).map((m) => {
                     const selected = localAssigneeIds.includes(m.id);
                     return (
                       <Button

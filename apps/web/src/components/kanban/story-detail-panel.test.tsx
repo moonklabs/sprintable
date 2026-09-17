@@ -1150,3 +1150,30 @@ describe('StoryDetailPanel — 의존성 추가 422 cycle/self-reference 판정(
     expect(container.textContent).not.toContain(koMessages.board.dep.cycleDetected);
   });
 });
+
+// story #3997 CHANGES(자체 그라운딩 확장 + 카디르 「고르는 자리」 전수, 페드루 확定
+// 2026-09-17) — 담당자 배정 토글 피커(members prop, kanban-board.tsx의 /api/members
+// fetch로 채워짐)가 「시스템 발행」을 못 걸렀다.
+describe('StoryDetailPanel — 담당자 배정 토글 시스템 발행 제외(story #3997 CHANGES)', () => {
+  it('⭐담당자 편집 후보에 「시스템 발행」이 안 뜨고 실 멤버는 그대로 뜬다', async () => {
+    stubFetch();
+    const members = [
+      { id: 'm1', name: '유나', type: 'human' },
+      { id: 'sp1', name: '시스템 발행', type: 'agent', runtime_type: 'system-publisher' },
+      { id: 'a1', name: '점검봇', type: 'agent', runtime_type: 'claude-code' },
+    ];
+    await act(async () => {
+      root.render(wrap(
+        <StoryDetailPanel story={makeStory()} tasks={[]} onClose={() => {}} projectId="proj-1" members={members} />,
+      ));
+    });
+    const editBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.board.edit));
+    expect(editBtn).not.toBeUndefined();
+    await act(async () => { editBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    const candidateBtns = [...container.querySelectorAll('button')].map((b) => b.textContent ?? '');
+    expect(candidateBtns.some((t) => t.includes('시스템 발행'))).toBe(false);
+    expect(candidateBtns.some((t) => t.includes('유나'))).toBe(true);
+    expect(candidateBtns.some((t) => t.includes('점검봇'))).toBe(true);
+  });
+});
