@@ -20,7 +20,7 @@ import { ChatV3ReasonDialog } from './chat-v3-reason-dialog';
  * 승인류 게이트는 지금 이 필드 자체를 안 받는다 — 정직한 상태, 가짜 placeholder
  * 0. `dispatch_approval_request_cards`를 타는 gate_type만 이 필드를 가진다).
  */
-export function ChatV3EventCard({ approvalTarget, content, isInTodayQueue, onDone }: {
+export function ChatV3EventCard({ approvalTarget, content, isInTodayQueue, todayV3Enabled, onDone }: {
   approvalTarget: { work_item_type: string; work_item_id: string; gate_id: string; actions?: string[] };
   // BE가 이 카드 전용으로 지은 설명 문장(dispatch_approval_request_cards가 채운
   // message.content) — 제목을 새로 지어내지 않고 그대로 옮긴다(work_item 제목은
@@ -30,6 +30,10 @@ export function ChatV3EventCard({ approvalTarget, content, isInTodayQueue, onDon
   // (시안 SSOT) → 링크는 `/today`(게이트 상세 아님). 이 게이트가 보는 사람의 오늘
   // 큐(needsMe)에 없으면 눌러도 거기 없는 막다른 길이라 서명 버튼 자체를 숨긴다.
   isInTodayQueue: boolean;
+  // story #3972 CHANGES(페드루 PO 2026-09-17 01:54Z, 실결함) — TODAY_V3_ENABLED
+  // OFF면 `/today` 자체가 404 — 옛 게이트 상세(`/gates/{id}`, 이 카드가 v3
+  // 원칙으로 걷기 前 서명 자리)로 되돌린다.
+  todayV3Enabled: boolean;
   onDone: () => void;
 }) {
   const t = useTranslations('chatV3');
@@ -66,7 +70,9 @@ export function ChatV3EventCard({ approvalTarget, content, isInTodayQueue, onDon
       <div className="mt-2.5 flex flex-wrap gap-1.5">
         {isInTodayQueue ? (
           <Button asChild size="sm">
-            <Link href="/today" data-testid="chat-v3-event-card-sign">{t('eventCardSignAction')}</Link>
+            <Link href={todayV3Enabled ? '/today' : `/gates/${approvalTarget.gate_id}`} data-testid="chat-v3-event-card-sign">
+              {t('eventCardSignAction')}
+            </Link>
           </Button>
         ) : null}
         <Button
