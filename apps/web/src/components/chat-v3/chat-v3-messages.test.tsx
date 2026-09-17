@@ -159,4 +159,84 @@ describe('ChatV3Messages — 재연결 따라잡기(story #4008 AC4)', () => {
     const callsAfter = fetchMock.mock.calls.filter((c) => c[0] === '/api/conversations/conv-1/messages').length;
     expect(callsAfter).toBe(2);
   });
+
+  // story #4008 CHANGES(유나 design·PO 지적, 2026-09-17) — reload()가 setMessages(null)부터
+  // 하면 재연결마다 화면이 스켈레톤으로 순간 비워진다(레일은 성공 때만 교체해 안 비워지는
+  // 것과 대조). 뮤테이션 셀프체크: loadMessages의 `if (!options?.silent)` 가드를 없애 매번
+  // setMessages(null)이 돌게 하면 이 테스트가 RED로 뒤집힘(수동 재현·원복 완료).
+  it('⭐reload() 도중에도 기존 메시지가 스켈레톤 없이 DOM에 그대로 남는다', async () => {
+    stub();
+    const ref = createRef<ChatV3MessagesHandle>();
+    await mount(ref);
+    expect(container.textContent).toContain('초안을 마쳤어요');
+    expect(container.querySelector('[data-testid="chat-v3-messages-loading"]')).toBeNull();
+
+    // fetch를 아직 안 풀리는 pending promise로 바꿔 "재조회 진행 中" 구간을 관찰한다.
+    let resolveFetch: (value: unknown) => void = () => {};
+    fetchMock.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveFetch = resolve; }),
+    );
+    act(() => { ref.current?.reload(); });
+
+    // 재조회가 아직 안 끝났어도(pending) 기존 메시지가 스켈레톤으로 안 바뀌어야 한다.
+    expect(container.textContent).toContain('초안을 마쳤어요');
+    expect(container.querySelector('[data-testid="chat-v3-messages-loading"]')).toBeNull();
+
+    await act(async () => {
+      resolveFetch({ ok: true, status: 200, json: async () => INITIAL_MESSAGES });
+      await Promise.resolve(); await Promise.resolve();
+    });
+    expect(container.textContent).toContain('초안을 마쳤어요');
+  });
+
+  it('⭐reload() 재조회가 실패해도 기존 메시지를 그대로 둔다(에러 상태로 안 바꿈)', async () => {
+    stub();
+    const ref = createRef<ChatV3MessagesHandle>();
+    await mount(ref);
+    expect(container.textContent).toContain('초안을 마쳤어요');
+
+    fetchMock.mockImplementationOnce(async () => ({ ok: false, status: 500, json: async () => ({}) }));
+    await act(async () => { ref.current?.reload(); await Promise.resolve(); await Promise.resolve(); });
+
+    expect(container.textContent).toContain('초안을 마쳤어요');
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+  });
+});
+
+describe('ChatV3Messages — 대화 전환 스켈레톤(story #4008 CHANGES)', () => {
+  it('⭐threadId가 바뀌면(대화 전환) 스켈레톤이 뜬다(reload()와 대조되는 축)', async () => {
+    stub();
+    const ref = createRef<ChatV3MessagesHandle>();
+    await mount(ref);
+    expect(container.textContent).toContain('초안을 마쳤어요');
+
+    let resolveFetch: (value: unknown) => void = () => {};
+    fetchMock.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveFetch = resolve; }),
+    );
+    const { ChatV3Messages } = await import('./chat-v3-messages');
+    act(() => {
+      root.render(wrap(
+        <ChatV3Messages
+          ref={ref}
+          threadId="conv-2"
+          meId="me-1"
+          agentName="담롱 온찬"
+          locale="ko"
+          needsMe={[]}
+          todayV3Enabled
+          onOpenArtifactChange={() => {}}
+          onWorkItemRefChange={() => {}}
+        />,
+      ));
+    });
+
+    expect(container.querySelector('[data-testid="chat-v3-messages-loading"]')).not.toBeNull();
+    expect(container.textContent).not.toContain('초안을 마쳤어요');
+
+    await act(async () => {
+      resolveFetch({ ok: true, status: 200, json: async () => ({ data: [] }) });
+      await Promise.resolve(); await Promise.resolve();
+    });
+  });
 });
