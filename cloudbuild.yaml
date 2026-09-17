@@ -691,7 +691,12 @@ steps:
       # 재사용해 두 키 다 이 스텝에서 명시 배선 — 폴백 우선순위상 APP_BASE_URL이 먼저
       # 읽히므로 그 값을 정본으로 통일하고 NEXT_PUBLIC_APP_URL은 이미 그 값을 쓰던 dev의
       # 하위호환(레거시 Amplify override 축, app-url.ts 주석 참고)으로 같이 채운다.
-      - --update-env-vars=REALTIME_URL=${_REALTIME_URL},APPLE_TEAM_ID=${_APPLE_TEAM_ID},MOBILE_APP_LINK_ORIGIN=${_MOBILE_APP_LINK_ORIGIN},APP_BASE_URL=${_NEXT_PUBLIC_APP_URL},NEXT_PUBLIC_APP_URL=${_NEXT_PUBLIC_APP_URL}
+      # story #4012(critical·prod 승격 준비) — DEPLOY_ENV는 backend ENV_VARS 문자열엔
+      # 이미 있었지만(위 §780 부근) frontend 서비스엔 이 스텝에 한 번도 배선된 적이
+      # 없었다. `/desktop` 다운로드 화면(Apple 공증 전 prod 노출 차단 스위치, AC1)이
+      # 이 값을 읽는다 — NEXT_PUBLIC_ 접두 없이 순수 서버측 env(--update-env-vars는
+      # additive, 기존 값 보존).
+      - --update-env-vars=REALTIME_URL=${_REALTIME_URL},APPLE_TEAM_ID=${_APPLE_TEAM_ID},MOBILE_APP_LINK_ORIGIN=${_MOBILE_APP_LINK_ORIGIN},APP_BASE_URL=${_NEXT_PUBLIC_APP_URL},NEXT_PUBLIC_APP_URL=${_NEXT_PUBLIC_APP_URL},DEPLOY_ENV=${_DEPLOY_ENV}
       - --quiet
     waitFor: [push-frontend]
 
