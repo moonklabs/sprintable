@@ -96,3 +96,20 @@ def test_real_repo_cloudbuild_secrets_flag_dev_prod_symmetric():
     dev/prod SECRETS_FLAG ENV 키가 예외 목록 대비 대칭임을 고정한다."""
     ok, lines = sym_gate.check()
     assert ok, f"실 cloudbuild.yaml SECRETS_FLAG dev/prod ENV 키 비대칭: {lines}"
+
+
+def test_ac2_positive_control_real_cloudbuild_prod_channel_key_removed_goes_red():
+    """AC2(PO CHANGES 2 지적 — 합성 텍스트 대조만으론 «못 틀리는 대조» 보장이 안 됨) — 실제
+    `cloudbuild.yaml` 파일 텍스트에서 직접 prod 채널 시크릿 조각을 지워 RED를 확인한다.
+    지우기 전 조각이 실 파일에 있다는 것도 먼저 단언(조각이 애초에 없으면 이 대조 자체가
+    무의미해지는 것을 방지)."""
+    real_text = sym_gate._CLOUDBUILD_YAML.read_text()
+    needle = ",CHANNEL_OAUTH_STATE_SECRET=CHANNEL_OAUTH_STATE_SECRET_PROD:latest"
+    assert needle in real_text, "지우기 전 조각이 실 파일에 없음 — 이 대조 자체가 무의미해짐"
+    mutated_text = real_text.replace(needle, "", 1)
+    assert needle not in mutated_text
+
+    dev_keys, prod_keys = sym_gate.extract_secrets_flag_keys(mutated_text)
+    ok, lines = sym_gate.check(dev_keys, prod_keys)
+    assert ok is False, "실 cloudbuild.yaml에서 prod 채널 키 한 줄을 지웠는데도 가드가 green — AC2 위반"
+    assert any("CHANNEL_OAUTH_STATE_SECRET" in line for line in lines)
