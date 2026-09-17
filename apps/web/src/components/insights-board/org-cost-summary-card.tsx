@@ -34,6 +34,12 @@ export interface OrgAdsCostSummary {
   captured_spend_minor: number | null;
   remaining_minor: number | null;
   cap_reached_count: number;
+  // story #3987(2026-09-17, 페드루 PO 確定) — approved_boost_count===0만으로
+  // "미측정"을 판정하면 광고 계정이 이미 연결된 조직에도 "연결하러 가기"가 뜨는
+  // 결함(BE org_cost_summary.py::_derive_ads_connection_status, ga4_connection_
+  // status와 같은 3값 모양). connected면 승인 0건이어도 "미측정"이 아니라
+  // "승인된 광고 홍보가 없어요"(중립)로 갈린다 — results-summary-cards.tsx 소비.
+  connection_status: 'not_connected' | 'needs_reauth' | 'connected';
 }
 
 export interface OrgCostSummary {

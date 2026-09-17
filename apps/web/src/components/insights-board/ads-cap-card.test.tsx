@@ -51,7 +51,7 @@ async function flush() {
 const NO_CAP: OrgCostSummaryLoadState = {
   status: 'ok',
   summary: {
-    ads: { approved_boost_count: 2, sealed_ads_currency: 'KRW', sealed_budget_minor: 100_000, captured_spend_minor: 10_000, remaining_minor: 90_000, cap_reached_count: 0 },
+    ads: { approved_boost_count: 2, sealed_ads_currency: 'KRW', sealed_budget_minor: 100_000, captured_spend_minor: 10_000, remaining_minor: 90_000, cap_reached_count: 0, connection_status: 'connected' },
     generation_cost_spent_minor: null, generation_cost_period_start: null, generation_cost_period_end: null,
     generation_currency: null, x_cost_spent_minor: null, x_cost_period_start: null, x_cost_period_end: null, x_currency: null,
   },
@@ -59,7 +59,7 @@ const NO_CAP: OrgCostSummaryLoadState = {
 const CAP_REACHED: OrgCostSummaryLoadState = {
   status: 'ok',
   summary: {
-    ads: { approved_boost_count: 2, sealed_ads_currency: 'KRW', sealed_budget_minor: 100_000, captured_spend_minor: 100_000, remaining_minor: 0, cap_reached_count: 3 },
+    ads: { approved_boost_count: 2, sealed_ads_currency: 'KRW', sealed_budget_minor: 100_000, captured_spend_minor: 100_000, remaining_minor: 0, cap_reached_count: 3, connection_status: 'connected' },
     generation_cost_spent_minor: null, generation_cost_period_start: null, generation_cost_period_end: null,
     generation_currency: null, x_cost_spent_minor: null, x_cost_period_start: null, x_cost_period_end: null, x_currency: null,
   },
