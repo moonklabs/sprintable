@@ -18,6 +18,7 @@ import {
 } from '@/components/ui/dialog';
 import { fetchWithAuth } from '@/lib/db/client';
 import { resolveRoleLabel } from '@/app/(authenticated)/organization/trust/trust-utils';
+import { isSystemPublisher } from '@/lib/runtime-capabilities';
 
 interface OrgAgent {
   id: string;
@@ -30,6 +31,10 @@ interface OrgAgent {
   // 방어) — 그 경우 CTA를 안 띄운다(거짓 "연결 안 됨" 낙인 방지, 침묵 실패보다 과소표시가
   // 안전한 방향).
   verified?: boolean | null;
+  // story #3994 — 「시스템 발행」(runtime_type==='system-publisher')은 verified가 항상
+  // false지만 연결 대상이 아니다(BE TeamMemberResponse가 이미 실어 보내던 필드, 이
+  // 로컬 타입에만 없었다 — 새 BE 0). 판별 없이 verified만 보면 거짓 「연결 안 됨」.
+  runtime_type?: string | null;
 }
 
 interface ProjectOption {
@@ -230,13 +235,15 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
                       <Badge variant="secondary">{t('agentMember')}</Badge>
                       <Badge variant="outline">{resolveRoleLabel(agent.role, null, to)}</Badge>
                       <Badge variant="info">{ta('manageProjectsGranted', { count: grantCounts[agent.id] ?? 0 })}</Badge>
-                      {agent.verified === false ? (
+                      {isSystemPublisher(agent.runtime_type) ? (
+                        <span className="text-xs text-muted-foreground">{ta('systemPublisherNeutralDescription')}</span>
+                      ) : agent.verified === false ? (
                         <Badge variant="warning">{ta('agentNotConnected')}</Badge>
                       ) : null}
                     </div>
                   </Link>
                   <div className="flex shrink-0 items-center gap-2">
-                    {agent.verified === false ? (
+                    {!isSystemPublisher(agent.runtime_type) && agent.verified === false ? (
                       <Link
                         href={`/organization/workforce/${agent.id}`}
                         className="whitespace-nowrap text-xs font-medium text-primary hover:underline"

@@ -5,6 +5,7 @@ import type { useTranslations } from 'next-intl';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { fetchWithAuth } from '@/lib/db/client';
+import { isSystemPublisher } from '@/lib/runtime-capabilities';
 import { cyclicStages, type EventDefinitionResponse } from '@/components/loops/loop-create-dialog';
 import { RecipeRoleMappingFields } from '@/components/organization/recipe-role-mapping-fields';
 import type { useToast } from '@/components/ui/toast';
@@ -12,6 +13,7 @@ import type { useToast } from '@/components/ui/toast';
 interface AgentOption {
   id: string;
   name: string;
+  runtime_type?: string | null;
 }
 
 // story #3316 — organization/events 카탈로그에 빠져 있던 "프로젝트에 적용" 진입점. gallery
@@ -76,7 +78,10 @@ export function ApplyRecipeDialog({
         // 동일하니 별도 플래그로 원인을 들고 나간다.
         if (memberRes?.ok) {
           const json = await memberRes.json() as { data?: AgentOption[] } | AgentOption[];
-          setAgents(Array.isArray(json) ? json : (json.data ?? []));
+          const members = Array.isArray(json) ? json : (json.data ?? []);
+          // story #3994 — 「시스템 발행」에 워크플로 역할을 매핑하는 것 자체가 의미
+          // 없다(연결 대상이 아닌 내부 멤버) — 고르는 자리에서 제외.
+          setAgents(members.filter((m) => !isSystemPublisher(m.runtime_type)));
         } else {
           setAgents([]);
           setAgentsLoadFailed(true);

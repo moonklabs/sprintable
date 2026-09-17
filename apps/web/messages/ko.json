@@ -3988,6 +3988,7 @@
     "manageProjectsGranted": "{count}개 프로젝트 허용",
     "agentNotConnected": "연결 안 됨",
     "viewConnectionSettings": "연결 설정 보기",
+    "systemPublisherNeutralDescription": "Sprintable이 자동으로 남기는 알림·기록의 보낸 이예요 — 따로 연결하지 않아도 돼요.",
     "accessTab": "접근권한",
     "matrixTitle": "접근권한 매트릭스",
     "matrixDescription": "셀을 눌러 허용/차단을 즉시 토글해요.",

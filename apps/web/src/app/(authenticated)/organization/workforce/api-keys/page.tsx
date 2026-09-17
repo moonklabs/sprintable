@@ -3,12 +3,16 @@
 import { useEffect, useState } from 'react';
 import { AgentApiKeyManager } from '@/components/agents/agent-api-key-manager';
 import { fetchWithAuth } from '@/lib/db/client';
+import { isSystemPublisher } from '@/lib/runtime-capabilities';
 
 interface Agent {
   id: string;
   name: string;
   type: string;
   is_active: boolean;
+  // story #3994 — 「시스템 발행」은 키를 발급받을 연결 대상이 아니다(제외, AC4와
+  // 같은 결 — "고를 자리에 실익 없는 행을 안 둔다").
+  runtime_type?: string | null;
 }
 
 export default function ApiKeysPage() {
@@ -21,7 +25,7 @@ export default function ApiKeysPage() {
         const res = await fetchWithAuth('/api/team-members?type=agent');
         if (!res.ok) return;
         const json = await res.json() as { data?: Agent[] };
-        setAgents((json.data ?? []).filter((m) => m.type === 'agent' && m.is_active));
+        setAgents((json.data ?? []).filter((m) => m.type === 'agent' && m.is_active && !isSystemPublisher(m.runtime_type)));
       } finally {
         setLoading(false);
       }

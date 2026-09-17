@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { fetchWithAuth } from '@/lib/db/client';
-import { runtimeLabel } from '@/lib/runtime-capabilities';
+import { isSystemPublisher, runtimeLabel } from '@/lib/runtime-capabilities';
 import {
   ConnectRulesV3SectionEmpty,
   ConnectRulesV3SectionError,
@@ -174,7 +174,9 @@ export function ConnectRulesV3Agents({ isAdmin }: { isAdmin: boolean }) {
                   </div>
                   <p className="mt-0.5 text-xs text-muted-foreground">{presenceLabel}</p>
                 </div>
-                {agent.verified === false ? (
+                {isSystemPublisher(agent.runtime_type) ? (
+                  <span className="shrink-0 text-xs text-muted-foreground">{ta('systemPublisherNeutralDescription')}</span>
+                ) : agent.verified === false ? (
                   <Badge variant="warning">{ta('agentNotConnected')}</Badge>
                 ) : (
                   <span className="shrink-0 text-xs text-muted-foreground">{t('agentConnected')}</span>
@@ -183,9 +185,13 @@ export function ConnectRulesV3Agents({ isAdmin }: { isAdmin: boolean }) {
 
               {expanded ? (
                 <div className="space-y-2 border-t border-border px-3 py-3 text-xs text-muted-foreground" data-testid="connect-rules-v3-agent-row-expanded">
-                  <Link href={`/organization/workforce/${agent.id}`} className="font-medium text-primary hover:underline">
-                    {ta('viewConnectionSettings')}
-                  </Link>
+                  {/* story #3994 AC3 — 이 행엔 연결 설정 CTA도 없다(연결 대상 자체가
+                      아니다, PO 판정). */}
+                  {!isSystemPublisher(agent.runtime_type) ? (
+                    <Link href={`/organization/workforce/${agent.id}`} className="font-medium text-primary hover:underline">
+                      {ta('viewConnectionSettings')}
+                    </Link>
+                  ) : null}
                   {agent.project_id ? (
                     statsLoading ? (
                       <Skeleton className="h-4 w-40" />

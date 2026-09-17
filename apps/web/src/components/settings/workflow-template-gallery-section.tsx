@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { fetchWithAuth } from '@/lib/db/client';
+import { isSystemPublisher } from '@/lib/runtime-capabilities';
 import { cyclicStages, isCyclicDefinition, type EventDefinitionResponse } from '@/components/loops/loop-create-dialog';
 import { RecipeRoleMappingFields } from '@/components/organization/recipe-role-mapping-fields';
 
@@ -21,6 +22,7 @@ interface TeamMember {
   name: string;
   type: string;
   role?: string;
+  runtime_type?: string | null;
 }
 
 function StageCountBadge({ count }: { count: number }) {
@@ -115,7 +117,9 @@ export function WorkflowTemplateGallerySection({
       if (memberRes?.ok) {
         const json = await memberRes.json() as { data?: TeamMember[] } | TeamMember[];
         const members = Array.isArray(json) ? json : ((json as { data?: TeamMember[] }).data ?? []);
-        setAgents(members);
+        // story #3994 — 「시스템 발행」에 워크플로 역할을 매핑하는 것 자체가 의미
+        // 없다(연결 대상이 아닌 내부 멤버) — 고르는 자리에서 제외.
+        setAgents(members.filter((m) => !isSystemPublisher(m.runtime_type)));
       }
     } catch {
       setLoadError(true);
