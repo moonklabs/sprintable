@@ -13,15 +13,49 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# story #4029 — PR 코멘트 스텝이 기본(무선언) 권한으로는 "Resource not accessible by
+# integration"으로 조용히 실패해 왔다(09-17 12:42Z run 실측). 다른 워크플로(design-review-
+# gate.yml 등)와 동형으로 명시 승격.
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   lighthouse:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    # story #4029 — 이 이전까지 Lighthouse는 인증 세션 없이 돌아 여섯 화면 전부가 `/login`
+    # 으로 리다이렉트됐다(로그인 화면 하나를 여섯 번 잰 것, 실화면 실측 0건). 인증 세션을
+    # 만들려면 실 회원가입→이메일인증→조직/프로젝트 생성이 필요해 backend+DB가 있어야
+    # 한다 — ci.yml의 backend-test job과 동일한 postgres 서비스 패턴 재사용(발명 0).
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: sprintable
+          POSTGRES_PASSWORD: sprintable
+          POSTGRES_DB: sprintable_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
     env:
       PORT: 3108
       NEXTAUTH_SECRET: lighthouse-ci-test-secret-32chars-min
       NEXTAUTH_URL: http://localhost:3108
       APP_BASE_URL: http://localhost:3108
       NEXT_PUBLIC_APP_URL: http://localhost:3108
+      NEXT_PUBLIC_FASTAPI_URL: http://localhost:8211
+      DATABASE_URL: postgresql+asyncpg://sprintable:sprintable@localhost:5432/sprintable_test
+      ALEMBIC_DATABASE_URL: postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test
+      JWT_SECRET: lighthouse-ci-test-secret-32chars-min
+      SPRINTABLE_LOCAL_DEV: '1'
+
     steps:
       - uses: actions/checkout@v4
 
@@ -36,6 +70,34 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: 'latest'
+
+      - name: alembic upgrade heads (fresh DB)
+        working-directory: backend
+        run: uv run alembic upgrade heads
+
+      - name: Start backend (background)
+        working-directory: backend
+        run: |
+          nohup uv run uvicorn app.main:app --host 0.0.0.0 --port 8211 > ../backend.log 2>&1 &
+          echo "backend pid=$!"
+
+      - name: Wait for backend health
+        run: |
+          for _ in $(seq 1 30); do
+            if curl -sf http://localhost:8211/api/v2/health > /dev/null; then
+              echo "backend healthy"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::backend did not become healthy in time"
+          cat backend.log
+          exit 1
+
       - name: Build project
         run: pnpm build
         env:
@@ -45,6 +107,90 @@ jobs:
           APP_BASE_URL: http://localhost:3108
           NEXT_PUBLIC_APP_URL: http://localhost:3108
 
+      # story #4029 AC1 — 회원가입→이메일 인증(진짜 발송 없음, RESEND_API_KEY 미설정이라
+      # backend가 콘솔 폴백으로 인증 링크를 로그에 남긴다, app/routers/auth.py register()의
+      # 기존 SPR-13 동작 그대로·신규 배관 0)→조직/프로젝트 생성까지 실 API로 걷고, 발급된
+      # access/refresh token을 세션 쿠키로 다음 Lighthouse 스텝에 넘긴다.
+      - name: Seed authenticated session (register → verify → org → project)
+        run: |
+          set -euo pipefail
+          BACKEND_URL=http://localhost:8211
+          RUN_ID="${{ github.run_id }}"
+          EMAIL="lhci-${RUN_ID}@ci.local"
+          PASSWORD="LhciCi2026Pass!"
+
+          register_res=$(curl -sS -X POST "$BACKEND_URL/api/v2/auth/register" \
+            -H "Content-Type: application/json" \
+            -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\",\"display_name\":\"LHCI Bot\",\"tos_accepted\":true}")
+          access_token=$(echo "$register_res" | jq -r '.data.access_token // empty')
+          refresh_token=$(echo "$register_res" | jq -r '.data.refresh_token // empty')
+          if [ -z "$access_token" ]; then
+            echo "::error::register failed: $register_res"
+            exit 1
+          fi
+
+          verify_link=$(grep -o "인증 링크: [^ ]*" backend.log | tail -1 | sed 's/인증 링크: //')
+          if [ -z "$verify_link" ]; then
+            echo "::error::verification link not found in backend.log (register email flow changed?)"
+            tail -100 backend.log
+            exit 1
+          fi
+          verify_token=$(echo "$verify_link" | sed -n 's/.*token=//p')
+          curl -sS "$BACKEND_URL/api/v2/auth/verify-email?token=$verify_token" > /dev/null
+
+          org_res=$(curl -sS -X POST "$BACKEND_URL/api/v2/organizations" \
+            -H "Content-Type: application/json" -H "Authorization: Bearer $access_token" \
+            -d "{\"name\":\"LHCI Org\",\"slug\":\"lhci-org-${RUN_ID}\"}")
+          org_id=$(echo "$org_res" | jq -r '.id // .data.id // empty')
+          if [ -z "$org_id" ]; then
+            echo "::error::org create failed: $org_res"
+            exit 1
+          fi
+
+          project_res=$(curl -sS -X POST "$BACKEND_URL/api/v2/projects" \
+            -H "Content-Type: application/json" -H "Authorization: Bearer $access_token" -H "X-Org-Id: $org_id" \
+            -d "{\"name\":\"LHCI Project\",\"slug\":\"lhci-project\",\"org_id\":\"$org_id\"}")
+          project_id=$(echo "$project_res" | jq -r '.id // .data.id // empty')
+          if [ -z "$project_id" ]; then
+            echo "::error::project create failed: $project_res"
+            exit 1
+          fi
+
+          # story #4029 — 등록 시 발급된 토큰의 app_metadata.org_id는 그 시점(조직 생성 前)
+          # 값으로 굳어 있다(라이브 실측: 방금 만든 org/project를 그대로 안 담음). `/refresh`가
+          # 호출 시점 DB 상태로 app_metadata를 다시 계산해 담아 준다(등록 재사용, 신규 배관
+          # 0) — 이 새 토큰이라야 `(authenticated)/layout.tsx`의 `me.org_id` 검사를 통과해
+          # `/onboarding`으로 안 튕긴다(실측: 이 스텝 없이는 여섯 곳 전부 `/onboarding`으로
+          # 갔다 — «로그인 화면」 대신 「온보딩 화면」으로 바뀌었을 뿐 같은 결함 부류였을 것).
+          refresh_res=$(curl -sS -X POST "$BACKEND_URL/api/v2/auth/refresh" \
+            -H "Content-Type: application/json" \
+            -d "{\"refresh_token\":\"$refresh_token\"}")
+          final_access_token=$(echo "$refresh_res" | jq -r '.data.access_token // empty')
+          final_refresh_token=$(echo "$refresh_res" | jq -r '.data.refresh_token // empty')
+          if [ -z "$final_access_token" ]; then
+            echo "::error::post-org refresh failed: $refresh_res"
+            exit 1
+          fi
+
+          {
+            echo "LH_AUTH_COOKIE=sp_at=${final_access_token}; sp_rt=${final_refresh_token}"
+          } >> "$GITHUB_ENV"
+          echo "seeded org=$org_id project=$project_id"
+
+      # story #4029 — extraHeaders는 런타임에만 정해지는 쿠키값이라 커밋된 lighthouserc.json
+      # 에 못 넣는다. 기존 파일의 preset/throttling/assert 설정은 그대로 두고 딱 이 한
+      # 필드만 얹은 사본을 만들어 그 사본을 쓴다(원본 무변경, 로컬 실행 경로는 그대로 유효).
+      - name: Generate authenticated lighthouserc
+        run: |
+          python3 -c "
+          import json, os
+          with open('lighthouserc.json') as f:
+              cfg = json.load(f)
+          cfg['ci']['collect']['settings']['extraHeaders'] = {'Cookie': os.environ['LH_AUTH_COOKIE']}
+          with open('lighthouserc.ci.json', 'w') as f:
+              json.dump(cfg, f, indent=2)
+          "
+
       # story #3864(customer-zero·CI 인프라, 2026-09-14) — AC0 소비처 그라운딩: 이 잡을
       # 읽는 워크플로/문서 0건, PR 코멘트도 "workflow artifacts"를 가리키기만 할 뿐 직링크가
       # 없어 실제로는 아무도 GH Actions artifact를 열어보지 않는다(수동 zip 다운로드 필요).
@@ -53,7 +199,8 @@ jobs:
       # lighthouserc.json의 assertion이 전부 "warn"(에러 아님)이라 이 잡은 사실상 항상
       # 성공하므로 `if: failure()`로는 이 GH artifact가 의미 있게 남지 않았을 것(사실상
       # uploadArtifacts:false와 결과가 같다) — PO 판정(2026-09-14 10:23Z)에 따라 소비처
-      # 0으로 확定, uploadArtifacts:false로.
+      # 0으로 확定, uploadArtifacts:false로 유지(story #4029도 이 결정과 충돌 안 함 —
+      # 로컬 .lighthouseci/manifest.json은 업로드 여부와 무관하게 항상 남는다, 아래 스텝).
       - name: Run Lighthouse CI
         uses: treosh/lighthouse-ci-action@v11
         with:
@@ -64,10 +211,77 @@ jobs:
             http://localhost:3108/inbox
             http://localhost:3108/standup
             http://localhost:3108/docs
-          configPath: ./lighthouserc.json
+          configPath: ./lighthouserc.ci.json
           uploadArtifacts: false
           temporaryPublicStorage: true
           runs: 3
+
+      # story #4029 AC2 음성 대조 + AC3 값 보존. `.lighthouseci/manifest.json`은
+      # uploadArtifacts 설정과 무관하게 lhci가 항상 로컬에 남기는 파일(위 #3864 결정과
+      # 충돌 없음) — 그 대표(median) run의 `finalUrl`을 실제로 읽어 로그인 리다이렉트
+      # 여부를 판정한다. 지금처럼 조용히 로그인 화면만 재는 상태로 되돌아가면(예: 세션 시딩
+      # 스텝이 향후 리팩터로 깨져도) 여기서 하드 실패한다 — "초록인데 대상이 틀렸다"는
+      # 이번 카드가 잡아낸 결함 부류의 재발을 이 스텝 자체가 막는다.
+      - name: Verify authenticated screens measured (not /login) + write summary
+        id: verify
+        run: |
+          python3 -c "
+          import json, sys, os
+
+          with open('.lighthouseci/manifest.json') as f:
+              manifest = json.load(f)
+
+          rows = []
+          login_count = 0
+          total = 0
+          for entry in manifest:
+              if not entry.get('isRepresentativeRun'):
+                  continue
+              total += 1
+              with open(entry['jsonPath']) as rf:
+                  lhr = json.load(rf)
+              final_url = lhr.get('finalUrl') or lhr.get('finalDisplayedUrl') or ''
+              if '/login' in final_url:
+                  login_count += 1
+              audits = lhr.get('audits', {})
+              def val(key):
+                  v = audits.get(key, {}).get('numericValue')
+                  return v if v is not None else float('nan')
+              rows.append({
+                  'url': entry.get('url', ''),
+                  'finalUrl': final_url,
+                  'lcp': val('largest-contentful-paint'),
+                  'tbt': val('total-blocking-time'),
+                  'cls': val('cumulative-layout-shift'),
+              })
+
+          ok_count = total - login_count
+          print(f'측정 {total}곳 중 실화면(비-/login) {ok_count}곳 · 로그인 리다이렉트 {login_count}곳')
+
+          lines = ['| 측정 URL | finalUrl | LCP(ms) | TBT(ms) | CLS |', '|---|---|---|---|---|']
+          for r in rows:
+              lines.append(f\"| {r['url']} | {r['finalUrl']} | {r['lcp']:.0f} | {r['tbt']:.0f} | {r['cls']:.3f} |\")
+          table = '\n'.join(lines)
+
+          summary_path = os.environ.get('GITHUB_STEP_SUMMARY')
+          if summary_path:
+              with open(summary_path, 'a') as sf:
+                  sf.write('## ⚡ Lighthouse CI — 인증 후 실화면 실측(story #4029)\n\n')
+                  sf.write(table + '\n')
+
+          # story #4029 — 다음 스텝(actions/github-script)이 별도 파일을 다시 읽지 않고
+          # step output(멀티라인 delimiter 형식)으로 이 표를 직접 물려받는다.
+          output_path = os.environ.get('GITHUB_OUTPUT')
+          if output_path:
+              with open(output_path, 'a') as of:
+                  of.write('table<<LH_TABLE_EOF\n')
+                  of.write(table + '\n')
+                  of.write('LH_TABLE_EOF\n')
+
+          if ok_count < 4:
+              print(f'::error::실화면 측정 {ok_count}곳 < 4 — 로그인 리다이렉트만 잡혔다(story #4029 AC2 음성대조)')
+              sys.exit(1)
+          "
 
       - name: Comment PR with Lighthouse results
         if: github.event_name == 'pull_request'
@@ -75,17 +289,13 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
+            const table = `${{ steps.verify.outputs.table }}`;
             const comment = `## ⚡ Lighthouse CI Results
 
-            Performance metrics have been collected (story #3864 — GH artifact 저장 중단,
-            전체 리포트는 이 워크플로 run 로그의 temporaryPublicStorage 링크로 확인).
+            인증 세션으로 실측(story #4029) — 전체 리포트는 이 워크플로 run 로그의
+            temporaryPublicStorage 링크로 확인(story #3864, GH artifact 저장 중단).
 
-            📊 Measured surfaces:
-            - /memos (Memos List)
-            - /board (Epic Board)
-            - /inbox (Inbox)
-            - /standup (Standup)
-            - /docs (Documentation)
+            ${table}
             `;
 
             github.rest.issues.createComment({
