@@ -62,3 +62,27 @@ describe('SteerDispatchModal — story #3053 에이전트 선택 헤어라인(so
     expect(agentBtn?.className).toContain('border-proof-blue/40');
   });
 });
+
+// story #3997 CHANGES(카디르 「고르는 자리」 전수, 페드루 확定 2026-09-17) — STEER 조타
+// 커밋 수신자 후보가 「시스템 발행」을 못 걸러 커밋을 그리로 보낼 수 있었다.
+describe('SteerDispatchModal — 수신자 후보 시스템 발행 제외(story #3997 CHANGES)', () => {
+  it('⭐수신자 후보에 「시스템 발행」이 안 뜨고 실 에이전트는 그대로 뜬다', async () => {
+    fetchWithAuthMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: [
+          { id: 'sp1', name: '시스템 발행', type: 'agent', is_active: true, runtime_type: 'system-publisher' },
+          { id: 'a1', name: '디디', type: 'agent', is_active: true, runtime_type: 'claude-code' },
+        ],
+      }),
+    });
+    await act(async () => {
+      root.render(wrap(
+        <SteerDispatchModal projectId="proj-1" items={[{ id: 'e1', position: 0 }]} onClose={() => {}} onDispatched={() => {}} />,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(document.body.textContent).not.toContain('시스템 발행');
+    expect(document.body.textContent).toContain('디디');
+  });
+});

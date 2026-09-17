@@ -13,7 +13,9 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { AccessMatrixMessage } from './access-matrix-tab';
+import { NextIntlClientProvider } from 'next-intl';
+import { AccessMatrixMessage, AccessMatrixTab } from './access-matrix-tab';
+import koMessages from '../../../messages/ko.json';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -64,5 +66,51 @@ describe('AccessMatrixMessage 접근성 (story #2153)', () => {
     });
     expect(container.querySelector('[role="alert"]')).toBeNull();
     expect(container.querySelector('[role="status"]')).toBeNull();
+  });
+});
+
+// story #3997 CHANGES(카디르 「고르는 자리」 전수, 페드루 확定 2026-09-17) — 예약 멤버
+// 「시스템 발행」의 프로젝트 접근을 회수하면 자동 발행이 막힐 수 있어, 매트릭스 행 자체를
+// 제외한다(토글이 아니라 행 제외 — 서버 측 원자적 거부는 story #3999).
+describe('AccessMatrixTab — 시스템 발행 행 제외(story #3997 CHANGES)', () => {
+  it('⭐매트릭스에 「시스템 발행」 행이 안 뜨고 실 에이전트 행은 그대로 뜬다', async () => {
+    const fetchMock = (globalThis as typeof globalThis & { fetch: typeof fetch }).fetch;
+    const originalFetch = fetchMock;
+    (globalThis as typeof globalThis & { fetch: typeof fetch }).fetch = (async (url: string) => {
+      if (typeof url === 'string' && url.startsWith('/api/team-members?type=agent')) {
+        return {
+          ok: true,
+          json: async () => ({
+            data: [
+              { id: 'sp1', name: '시스템 발행', runtime_type: 'system-publisher' },
+              { id: 'a1', name: '점검봇', runtime_type: 'claude-code' },
+            ],
+          }),
+        } as Response;
+      }
+      if (typeof url === 'string' && url === '/api/projects') {
+        return { ok: true, json: async () => ({ data: [{ id: 'p1', name: '프로젝트 A' }] }) } as Response;
+      }
+      if (typeof url === 'string' && url === '/api/agents/access-matrix') {
+        return { ok: true, json: async () => ({ data: [] }) } as Response;
+      }
+      return { ok: false, json: async () => null } as Response;
+    }) as typeof fetch;
+
+    try {
+      await act(async () => {
+        root.render(
+          <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+            <AccessMatrixTab />
+          </NextIntlClientProvider>,
+        );
+      });
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+      expect(container.textContent).not.toContain('시스템 발행');
+      expect(container.textContent).toContain('점검봇');
+    } finally {
+      (globalThis as typeof globalThis & { fetch: typeof fetch }).fetch = originalFetch;
+    }
   });
 });
