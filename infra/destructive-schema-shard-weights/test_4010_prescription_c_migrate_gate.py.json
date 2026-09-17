@@ -1,0 +1,1 @@
+{"file": "tests/test_4010_prescription_c_migrate_gate.py", "sec": 18.3, "source": "story #4010(2026-09-17) — 로컬 실측(uv run pytest -m destructive_schema, 13 tests, 격리 throwaway Postgres) 18.32s를 그대로 등재(잠정값 — 로컬이 CI보다 ~6배 빠르다는 story #3383 관례상 실 CI에서는 더 크게 나올 수 있음, 첫 CI run 로그로 재측정 필요)."}
