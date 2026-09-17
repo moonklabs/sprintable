@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 import uuid
 from datetime import datetime, timezone
@@ -30,6 +31,8 @@ from app.services.gate_seal import (
     compute_seal_hash,
 )
 from app.services.gate_service import ConceptApprovalNotApprovedError  # noqa: F401 (재-export, 라우터가 import — story #3561)
+
+logger = logging.getLogger(__name__)
 
 _SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 _LANG_RE = re.compile(r"^[a-z]{2}(-[A-Z]{2})?$")
@@ -782,6 +785,43 @@ async def count_site_post_drafts(db: AsyncSession, *, org_id: uuid.UUID, include
     return (await db.execute(stmt)).scalar_one()
 
 
+async def _notify_publish_approval_requested(
+    db: AsyncSession, *, org_id: uuid.UUID, work_item_id: uuid.UUID, gate: Gate,
+    requester_id: uuid.UUID,
+) -> None:
+    """story #3974(E-UX-OVERHAUL·「대화」 4/N) — channel_posts.py의 동명 헬퍼와 동형
+    (site_posts.py/channel_posts.py 미러 관례 그대로). external_publish는
+    `_non_doc_can_approve`(gates.py) rule B(project owner/admin) 대상이라
+    `list_gate_approver_ids`로 승인 자격자를 나열(새 규칙 발명 0). project_id는
+    이 도메인의 draft에 직접 없어(work_item_id=Story.id) 1회 join으로 해소한다.
+
+    best-effort(카드 배달 실패가 상신을 막지 않음 — doc.py/merge_verdict_gate.py와
+    동일 관용구)."""
+    try:
+        from app.models.pm import Story
+        story_row = (await db.execute(
+            select(Story.project_id, Story.title).where(Story.id == work_item_id, Story.org_id == org_id)
+        )).first()
+        if story_row is None:
+            return
+        project_id, story_title = story_row
+
+        from app.services.project_auth import list_gate_approver_ids
+        approver_ids = await list_gate_approver_ids(db, org_id, project_id, exclude_id=requester_id)
+        if not approver_ids:
+            return
+
+        from app.services.approval_delivery import dispatch_approval_request_cards
+        await dispatch_approval_request_cards(
+            db, org_id=org_id, work_item_type="story", work_item_id=work_item_id,
+            project_id=project_id, title=story_title, gate_id=gate.id, gate_type="external_publish",
+            requester_id=requester_id, approver_ids=approver_ids,
+            designated_approver_id=gate.designated_approver_id,
+        )
+    except Exception:  # noqa: BLE001 — 카드 배달 실패는 상신 비중단(Gate inbox 폴백 항상 존재).
+        logger.warning("발행 상신 결재자 카드(챗) 배달 실패 work_item=%s", work_item_id, exc_info=True)
+
+
 async def submit_site_post_draft(
     db: AsyncSession,
     *,
@@ -952,6 +992,12 @@ async def submit_site_post_draft(
     # version은 이 필드를 절대 안 건드린다 — submit() 재호출만이 재봉인 권한을 갖는다).
     gate.sealed_estimated_cost_minor = estimated_cost_minor
     gate.reapproval_required = False
+
+    await _notify_publish_approval_requested(
+        db, org_id=org_id, work_item_id=draft.work_item_id, gate=gate,
+        requester_id=requester_member_id,
+    )
+
     await db.commit()
     await db.refresh(gate)
     return gate, target.id

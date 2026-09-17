@@ -20,6 +20,7 @@ story #f8f7cb0f(Phase1·마케팅운영, 페드루 PO 확定 2026-09-03) — 실
 from __future__ import annotations
 
 import asyncio
+import logging
 import unicodedata
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -54,6 +55,8 @@ from app.services.site_posts import (  # noqa: F401 (재-export 편의 — 채�
     is_agent_caller,
 )
 from app.services.utm import attach_utm, resolve_utm_campaign
+
+logger = logging.getLogger(__name__)
 
 _EXTERNAL_PUBLISH_GATE_TYPE = "external_publish"
 # story #3813(Phase3·3-4 PR4, 페드루 PO 確定 2026-09-12) — 뉴스레터 발송 예정시각 축.
@@ -1268,6 +1271,47 @@ async def count_channel_post_drafts(
     return (await db.execute(stmt)).scalar_one()
 
 
+async def _notify_publish_approval_requested(
+    db: AsyncSession, *, org_id: uuid.UUID, work_item_id: uuid.UUID, gate: Gate,
+    requester_id: uuid.UUID,
+) -> None:
+    """story #3974(E-UX-OVERHAUL·「대화」 4/N) — doc.py `_notify_doc_approval_requested`/
+    merge_verdict_gate.py의 external_publish 미배선 갭 처방. `external_publish`는
+    `_non_doc_can_approve`(gates.py) rule B(project owner/admin, project-무관이면 org
+    owner/admin) 대상이라 merge/pr_review 등과 동일하게 `list_gate_approver_ids`로
+    승인 자격자를 나열한다(새 규칙 발명 0). project_id는 이 도메인의 draft에 직접
+    없어(work_item_id=Story.id) 1회 join으로 해소한다(merge_verdict_gate.py의
+    Story.title 조회와 동형 축 추가일 뿐). designated_approver_id는 create_gate 호출부가
+    지금 이 값을 안 넘겨(그라운딩 확認) 항상 None이지만, gate 자신의 값을 그대로
+    전달해 향후 위임(#2985류)이 생겨도 이 자리를 다시 안 고치게 한다.
+
+    best-effort(카드 배달 실패가 상신을 막지 않음 — doc.py/merge_verdict_gate.py와
+    동일 관용구)."""
+    try:
+        from app.models.pm import Story
+        story_row = (await db.execute(
+            select(Story.project_id, Story.title).where(Story.id == work_item_id, Story.org_id == org_id)
+        )).first()
+        if story_row is None:
+            return
+        project_id, story_title = story_row
+
+        from app.services.project_auth import list_gate_approver_ids
+        approver_ids = await list_gate_approver_ids(db, org_id, project_id, exclude_id=requester_id)
+        if not approver_ids:
+            return
+
+        from app.services.approval_delivery import dispatch_approval_request_cards
+        await dispatch_approval_request_cards(
+            db, org_id=org_id, work_item_type="story", work_item_id=work_item_id,
+            project_id=project_id, title=story_title, gate_id=gate.id, gate_type=_EXTERNAL_PUBLISH_GATE_TYPE,
+            requester_id=requester_id, approver_ids=approver_ids,
+            designated_approver_id=gate.designated_approver_id,
+        )
+    except Exception:  # noqa: BLE001 — 카드 배달 실패는 상신 비중단(Gate inbox 폴백 항상 존재).
+        logger.warning("발행 상신 결재자 카드(챗) 배달 실패 work_item=%s", work_item_id, exc_info=True)
+
+
 async def submit_channel_post_draft(
     db: AsyncSession,
     *,
@@ -1449,6 +1493,11 @@ async def submit_channel_post_draft(
     gate.sealed_media_sha256 = target.image_sha256
     gate.sealed_estimated_cost_minor = estimated_cost_minor
     gate.reapproval_required = False
+
+    await _notify_publish_approval_requested(
+        db, org_id=org_id, work_item_id=draft.work_item_id, gate=gate,
+        requester_id=requester_member_id,
+    )
 
     if was_approved:
         # story #3414 추가② — 이 재상신이 이미 승인된 게이트를 되돌린 경우(위에서

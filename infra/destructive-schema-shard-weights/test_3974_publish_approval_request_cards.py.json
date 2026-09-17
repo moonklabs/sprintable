@@ -1,0 +1,1 @@
+{"file": "tests/test_3974_publish_approval_request_cards.py", "sec": 10.0, "source": "story-3974-local-2026-09-17(create_all-only throwaway DB 실측 4.86s, HTTP+app.main 기동 오버헤드 포함 여유 폭 2x — CI 실측치로 갱신 대상)"}
