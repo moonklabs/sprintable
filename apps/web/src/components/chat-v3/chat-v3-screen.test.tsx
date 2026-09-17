@@ -668,3 +668,43 @@ describe('ChatV3Screen — 특정 대화 주소(story #4018)', () => {
   // conv-2 선택 실패("리뷰 남겼어요" 못 찾음)·미존재 id도 조용히 conv-1이 뜨는 걸로
   // RED 확인 → 원복 → GREEN 재확인. (되돌린 뒤 상태만 커밋 — 임시 주석은 남기지 않음.)
 });
+
+describe('ChatV3Screen — 첫 지시 compose(story #4028)', () => {
+  function stubNotFound() {
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url === '/api/me') return { ok: true, status: 200, json: async () => ME };
+      if (url.startsWith('/api/conversations?')) return { ok: true, status: 200, json: async () => THREADS };
+      if (url === '/api/conversations/conv-1/messages') return { ok: true, status: 200, json: async () => MESSAGES };
+      if (url === '/api/today') return { ok: true, status: 200, json: async () => EMPTY_TODAY };
+      if (url === '/api/conversations/conv-does-not-exist') return { ok: false, status: 404, json: async () => ({}) };
+      return { ok: true, status: 200, json: async () => ({ data: null }) };
+    });
+  }
+
+  it('AC1/AC2 — compose가 입력창에 채워지고, 주소에서 compose만 제거된다(conversation 유지·replace)', async () => {
+    stub();
+    searchParamsRef.current = new URLSearchParams('conversation=conv-1&compose=' + encodeURIComponent('배포 상태 알려줘'));
+    await mount();
+    const input = container.querySelector('[data-testid="chat-v3-compose-input"]') as HTMLInputElement;
+    expect(input.value).toBe('배포 상태 알려줘');
+    // compose만 빠지고 conversation은 남는다 · push 아님(뒤로가기 기록 0).
+    expect(replaceMock).toHaveBeenCalledWith('/chat?conversation=conv-1');
+    expect(pushMock).not.toHaveBeenCalled();
+  });
+
+  it('AC2 — 없는 대화 id면 4018 중립 안내는 그대로 뜨고, compose도 주소에서 제거된다', async () => {
+    stubNotFound();
+    searchParamsRef.current = new URLSearchParams('conversation=conv-does-not-exist&compose=' + encodeURIComponent('아무 지시'));
+    await mount();
+    expect(container.querySelector('[data-testid="chat-v3-conversation-unavailable"]')).not.toBeNull();
+    expect(replaceMock).toHaveBeenCalledWith('/chat?conversation=conv-does-not-exist');
+  });
+
+  it('음성 대조 — compose 없이 conversation만 있으면 주소 제거 replace가 안 불린다', async () => {
+    stub();
+    searchParamsRef.current = new URLSearchParams('conversation=conv-1');
+    await mount();
+    // compose-strip 효과가 안 불려야 한다(compose 없음) · 기본선택 replace도 안 일어남(conversation 있음).
+    expect(replaceMock).not.toHaveBeenCalled();
+  });
+});

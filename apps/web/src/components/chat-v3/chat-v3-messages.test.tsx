@@ -334,3 +334,73 @@ describe('ChatV3Messages — 대화 전환 스켈레톤(story #4008 CHANGES)', (
     });
   });
 });
+
+// story #4028(E-UX-OVERHAUL·v3 셸) AC1/AC3/AC4 — 주소 `?compose=`(컴패니언 첫 지시)를
+// 마운트 1회만 입력창에 미리 채운다. 사람이 직접 보낸다(전송 0). 상한(2000, 4021 미러)
+// 초과면 자르지 않고 안내만. 값이 없으면 입력창 빈 채(음성 대조).
+describe('ChatV3Messages — 첫 지시 미리 채우기(story #4028)', () => {
+  async function mountCompose(initialCompose: string | null) {
+    const { ChatV3Messages } = await import('./chat-v3-messages');
+    await act(async () => {
+      root.render(wrap(
+        <ChatV3Messages
+          ref={createRef<ChatV3MessagesHandle>()}
+          threadId="conv-1"
+          meId="me-1"
+          agentName="담롱 온찬"
+          locale="ko"
+          needsMe={[]}
+          todayV3Enabled
+          onOpenArtifactChange={() => {}}
+          onWorkItemRefChange={() => {}}
+          initialCompose={initialCompose}
+        />,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+  }
+
+  it('compose 값이 입력창에 미리 채워진다(AC1)', async () => {
+    stub();
+    await mountCompose('배포 상태 알려줘');
+    const input = container.querySelector('[data-testid="chat-v3-compose-input"]') as HTMLInputElement;
+    expect(input.value).toBe('배포 상태 알려줘');
+    expect(container.querySelector('[data-testid="chat-v3-compose-too-long"]')).toBeNull();
+  });
+
+  it('미리 채워도 전송은 0 — 사람이 직접 누른다(AC1/AC5)', async () => {
+    stub();
+    await mountCompose('배포 상태 알려줘');
+    const posts = fetchMock.mock.calls.filter((c) => (c[1] as { method?: string } | undefined)?.method === 'POST');
+    expect(posts.length).toBe(0);
+  });
+
+  it('compose 없음(null)이면 입력창은 빈 채·안내 0(음성 대조)', async () => {
+    stub();
+    await mountCompose(null);
+    const input = container.querySelector('[data-testid="chat-v3-compose-input"]') as HTMLInputElement;
+    expect(input.value).toBe('');
+    expect(container.querySelector('[data-testid="chat-v3-compose-too-long"]')).toBeNull();
+  });
+
+  it('상한(2000) 초과면 자르지 않고 입력창은 빈 채 + 안내(AC3)', async () => {
+    stub();
+    await mountCompose('x'.repeat(2001));
+    const input = container.querySelector('[data-testid="chat-v3-compose-input"]') as HTMLInputElement;
+    expect(input.value).toBe('');
+    expect(container.querySelector('[data-testid="chat-v3-compose-too-long"]')).not.toBeNull();
+  });
+
+  it('안내가 뜬 뒤 사람이 입력을 시작하면 안내가 사라진다', async () => {
+    stub();
+    await mountCompose('x'.repeat(2001));
+    expect(container.querySelector('[data-testid="chat-v3-compose-too-long"]')).not.toBeNull();
+    const input = container.querySelector('[data-testid="chat-v3-compose-input"]') as HTMLInputElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+      setter.call(input, '짧게 다시');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(container.querySelector('[data-testid="chat-v3-compose-too-long"]')).toBeNull();
+  });
+});
