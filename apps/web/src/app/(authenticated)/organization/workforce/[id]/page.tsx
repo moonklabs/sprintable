@@ -665,51 +665,59 @@ export default function AgentDetailPage() {
           안내했는데, fakechat은 다이얼아웃 방식이라 그 주소를 아무도 안 연다(포트를 안 쓴다).
           진짜 필요한 건 런치 셸의 env 한 줄 — API Keys 섹션(위)이 이미 관리하는 그 키를
           그대로 재사용한다(AC3 — 키 노출은 새 방식을 안 만들고 그 섹션의 fresh-key/masked
-          패턴을 그대로 쓴다). */}
-      <SectionCard>
-        <SectionCardHeader>
-          <div className="flex items-center justify-between w-full">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <h2 className="text-base font-semibold text-foreground">{t('agentFakechatTitle')}</h2>
-                <Badge variant="info">SSE</Badge>
+          패턴을 그대로 쓴다).
+          story #3994 CHANGES-3(유나 design 재앵커 적발·PO 코드 확認 2026-09-17) — 이 인라인
+          SectionCard가 canEdit류 게이트 없이 무조건 렌더돼, 「시스템 발행」(키 발급이 막혀
+          hasActiveKey는 항상 false)에게 「런치 셸에 export SPRINTABLE_API_KEY=… 넣으세요」
+          연결 지시 + agentFakechatEnvKeyRequired amber 거짓 경고(위 API 키 자리의 "따로
+          연결하지 않아도 돼요"와 같은 화면에서 모순)가 떴다. 연결 설정 섹션(위)과 동일하게
+          섹션 자체를 미렌더 — 새 대체 문구 추가 없음(위 중립 설명 1줄로 이미 충분). */}
+      {!isSystemPublisherAgent ? (
+        <SectionCard>
+          <SectionCardHeader>
+            <div className="flex items-center justify-between w-full">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <h2 className="text-base font-semibold text-foreground">{t('agentFakechatTitle')}</h2>
+                  <Badge variant="info">SSE</Badge>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  {t('agentFakechatDescription')}
+                </p>
               </div>
-              <p className="text-sm text-muted-foreground">
-                {t('agentFakechatDescription')}
+              {freshApiKey ? (
+                <Button variant="glass" size="sm" onClick={() => void handleCopyFakechatEnvKey()}>
+                  {fakechatEnvKeyCopied ? <Check className="h-3.5 w-3.5" /> : <><Copy className="h-3.5 w-3.5 mr-1" />Copy export</>}
+                </Button>
+              ) : null}
+            </div>
+          </SectionCardHeader>
+          <SectionCardBody className="space-y-3">
+            <div className="space-y-1.5 text-xs text-muted-foreground">
+              <p>{t('agentFakechatEnvKeyInstruction')}</p>
+              <p>{webhookActive ? t('agentFakechatWebhookActiveNote') : t('agentFakechatWebhookOffNote')}</p>
+              <p>
+                {t.rich('agentFakechatSuccessCheck', {
+                  code: (chunks) => <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">{chunks}</code>,
+                })}
               </p>
             </div>
-            {freshApiKey ? (
-              <Button variant="glass" size="sm" onClick={() => void handleCopyFakechatEnvKey()}>
-                {fakechatEnvKeyCopied ? <Check className="h-3.5 w-3.5" /> : <><Copy className="h-3.5 w-3.5 mr-1" />Copy export</>}
-              </Button>
-            ) : null}
-          </div>
-        </SectionCardHeader>
-        <SectionCardBody className="space-y-3">
-          <div className="space-y-1.5 text-xs text-muted-foreground">
-            <p>{t('agentFakechatEnvKeyInstruction')}</p>
-            <p>{webhookActive ? t('agentFakechatWebhookActiveNote') : t('agentFakechatWebhookOffNote')}</p>
-            <p>
-              {t.rich('agentFakechatSuccessCheck', {
-                code: (chunks) => <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">{chunks}</code>,
-              })}
-            </p>
-          </div>
 
-          {freshApiKey ? (
-            <>
-              <p className="text-xs text-success">{t('agentFakechatEnvKeyFreshNote')}</p>
-              <code className="block overflow-x-auto rounded-md border border-border bg-muted/30 p-3 text-xs text-foreground/80">
-                export SPRINTABLE_API_KEY={freshApiKey}
-              </code>
-            </>
-          ) : !hasActiveKey ? (
-            <p className="text-xs text-warning-strong">{t('agentFakechatEnvKeyRequired')}</p>
-          ) : (
-            <p className="text-xs text-muted-foreground">{t('agentFakechatEnvKeySecurityNote')}</p>
-          )}
-        </SectionCardBody>
-      </SectionCard>
+            {freshApiKey ? (
+              <>
+                <p className="text-xs text-success">{t('agentFakechatEnvKeyFreshNote')}</p>
+                <code className="block overflow-x-auto rounded-md border border-border bg-muted/30 p-3 text-xs text-foreground/80">
+                  export SPRINTABLE_API_KEY={freshApiKey}
+                </code>
+              </>
+            ) : !hasActiveKey ? (
+              <p className="text-xs text-warning-strong">{t('agentFakechatEnvKeyRequired')}</p>
+            ) : (
+              <p className="text-xs text-muted-foreground">{t('agentFakechatEnvKeySecurityNote')}</p>
+            )}
+          </SectionCardBody>
+        </SectionCard>
+      ) : null}
 
       {/* 프로젝트 접근 (org-agent 멀티프로젝트 단일키 grant) — 088987d8 */}
       {/* 프로젝트 grant 게이트는 page canEdit(creator 포함)보다 엄격 — creator라도 비-admin이면 과권한

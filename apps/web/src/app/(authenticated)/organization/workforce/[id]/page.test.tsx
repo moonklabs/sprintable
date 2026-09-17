@@ -120,13 +120,16 @@ describe('AgentDetailPage — 시스템 발행 키 관리 숨김(story #3994 CHA
     const webhookSwitch = container.querySelector('[role="switch"]');
     expect(webhookSwitch?.hasAttribute('data-disabled')).toBe(false);
     expect(container.querySelector('[data-testid="agent-detail-system-publisher-notice"]')).toBeNull();
+    // story #3994 CHANGES-3(유나 재앵커 적발) — Fakechat(SSE) 인라인 섹션은 일반
+    // 에이전트에겐 그대로 뜬다(회귀 0).
+    expect(container.textContent).toContain('실시간 연결');
   });
 
   // story #3994 CHANGES-2(페드루 PO 판정 2026-09-17) — 유나 전수+PO 코드대조 결과
   // 「시스템 발행」에 손댈 수 있는 자리가 키 발급·연결 설정 말고도 더 있었다(런타임
   // 재저장·활성화 토글·아바타·webhook·메시지 정책·프로젝트 접근). canEdit을 한
   // 곳에서 좁혀 전부 읽기 전용으로.
-  it('⭐「시스템 발행」— 편집 가능한 것 0(런타임 저장·활성 토글·아바타·webhook·메시지정책·프로젝트접근·키관리·연결설정)', async () => {
+  it('⭐「시스템 발행」— 편집 가능한 것 0(런타임 저장·활성 토글·아바타·webhook·메시지정책·프로젝트접근·키관리·연결설정·실시간연결)', async () => {
     stubFetch({ agent: { ...AGENT, name: '시스템 발행', runtime_type: 'system-publisher' } });
     await mount();
     expect(container.querySelector('[data-testid="stub-agent-api-key-manager"]')).toBeNull();
@@ -141,5 +144,8 @@ describe('AgentDetailPage — 시스템 발행 키 관리 숨김(story #3994 CHA
     expect(webhookSwitch?.hasAttribute('data-disabled')).toBe(true);
     const notice = container.querySelector('[data-testid="agent-detail-system-publisher-notice"]');
     expect(notice?.textContent).toBe('Sprintable이 자동으로 남기는 알림·기록의 보낸 이예요 — 따로 연결하지 않아도 돼요.');
+    // story #3994 CHANGES-3(유나 재앵커 적발) — Fakechat(SSE) 인라인 섹션 미렌더
+    // (연결 지시 + amber 거짓 경고 제거, 9번째 차단 자리).
+    expect(container.textContent).not.toContain('실시간 연결');
   });
 });
