@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""story #4023 CHANGES 1(PO 지적) — 자매 self-expiring 선언 파일 3개(manual-env-allowlist.yml
+"""story #4023 CHANGES 1/2(PO 지적) — 자매 self-expiring 선언 파일 3개(manual-env-allowlist.yml
 `code_read_high_baseline`·serving-reality-allowlist.yml `declared_pins`/`declared_stalls`·
 mcp-path-contract-allowlist.yml `declared_mismatches`/`declared_indirect`)는 각각의 가드
 본체(`check_env_drift.py`/`check_serving_reality.py`/`mcp_path_contract_guard.py`)가 만료
@@ -8,8 +8,17 @@ mcp-path-contract-allowlist.yml `declared_mismatches`/`declared_indirect`)는 �
 
 이 스크립트는 그 세 가드와 별개인 **네 번째, PR CI 전용, 경량 축**이다: GCP/gcloud 호출
 0(파일만 읽음), `until`이 앞으로 14일 이내인 항목을 GitHub Actions 주석
-(`::warning file=...::...`)으로 PR 화면에 직접 띄운다. exit 0 고정 — 이 축은 실패로 막지
-않는다(만료 자체의 FAIL 판정은 각 가드 본체가 여전히 담당).
+(`::warning file=...::...`)으로 PR 화면에 직접 띄운다.
+
+⚠️CHANGES 2(PO 지적) — 이 축이 조용히 꺼지는 길이 3개 있었다: ①파일 자체가 없어져도
+`_load_yaml`이 빈 dict를 돌려줘 "OK"로 보고됨 ②섹션 키 이름이 바뀌어도(리팩터 등)
+`data.get(section) or []`가 조용히 빈 목록 취급 ③`until` 날짜 형식이 깨져도 `continue`로
+그 항목 자체가 조회 대상에서 사라짐. 이 셋은 "지금 만료 임박 항목이 없다"(정상)와 근본적으로
+다른 상태 — **이 축 자체가 대상을 못 보고 있다**는 뜻이라 구조적 오류(`::error`+exit 1)로
+승격한다. 날짜 형식 파손은 즉시 위험은 아니되 숨기면 안 되므로 `::warning`으로 드러낸다.
+
+exit code: 구조적 오류(파일/섹션 부재·형식 파손) 있으면 1, 그 외(만료 임박 경고 포함)는 0 —
+"만료 임박"은 예정대로 report-only(실패로 안 막음, 각 가드 본체가 만료 자체의 FAIL을 담당).
 
 근본 사고(2026-09-17, story #4023) — «#3174가 착지하면 이 항목을 걷는다»는 문장만 있고
 그 PR이 실제로 걷지 않아 만료 당일(2026-09-26)까지 아무도 못 볼 뻔했다. 이 경고가 있었다면
@@ -21,11 +30,11 @@ mcp-path-contract-allowlist.yml `declared_mismatches`/`declared_indirect`)는 �
 from __future__ import annotations
 
 import sys
+from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-_INFRA_DIR = _REPO_ROOT / "infra"
 _WARNING_DAYS = 14
 
 # (파일명, [이 파일 안에서 `until` 계약을 쓰는 섹션 키들]) — declared_permanent_indirect
@@ -46,14 +55,6 @@ def _today() -> date:
     return datetime.now(timezone.utc).date()
 
 
-def _load_yaml(path: Path) -> dict:
-    import yaml
-
-    if not path.exists():
-        return {}
-    return yaml.safe_load(path.read_text()) or {}
-
-
 def _entry_label(entry: dict) -> str:
     """파일마다 항목을 식별하는 필드명이 다르다(key·service·module+function·
     module+method+path) — 사람이 읽을 한 줄로 정규화."""
@@ -68,34 +69,59 @@ def _entry_label(entry: dict) -> str:
     return "(알 수 없는 항목)"
 
 
-def collect_expiring_soon(
+@dataclass
+class ExpiryScanResult:
+    warnings: list[tuple[str, str]] = field(default_factory=list)  # 만료 임박·날짜 형식 파손
+    errors: list[tuple[str, str]] = field(default_factory=list)  # 파일/섹션 자체가 안 보임
+
+
+def collect_expiry_findings(
     repo_root: Path = _REPO_ROOT, today: date | None = None, warning_days: int = _WARNING_DAYS
-) -> list[tuple[str, str]]:
-    """(상대경로, 메시지) 목록 — 순수 함수(GCP/gcloud 호출 0, 파일 읽기만). 이미 만료됐거나
-    (각 가드 본체 FAIL 축이 담당) `until`이 아예 없는 항목(구조적 영구 등)은 대상이 아니다."""
+) -> ExpiryScanResult:
+    """순수 함수(GCP/gcloud 호출 0, 파일 읽기만). 이미 만료된 항목(각 가드 본체 FAIL 축이
+    담당)이나 `until`이 아예 없는 항목(구조적 영구 등)은 대상이 아니다 — 그건 정상이다.
+    반면 파일/섹션 키 자체가 안 보이는 것은 "지금 0건"과 다른 상태라 errors로 분리한다."""
     today = today if today is not None else _today()
-    findings: list[tuple[str, str]] = []
+    result = ExpiryScanResult()
     for filename, sections in _SOURCES:
         rel_path = f"infra/{filename}"
-        data = _load_yaml(repo_root / "infra" / filename)
+        path = repo_root / "infra" / filename
+        if not path.exists():
+            result.errors.append((rel_path, "파일 자체가 없다 — 이 축이 이 파일을 못 본다"))
+            continue
+        import yaml
+
+        data = yaml.safe_load(path.read_text()) or {}
         for section in sections:
-            for entry in data.get(section) or []:
+            if section not in data:
+                result.errors.append((
+                    rel_path,
+                    f"섹션 `{section}`이 이 파일에 없다(키 이름이 바뀌었거나 지워짐) — "
+                    "이 축이 그 섹션을 못 본다(빈 목록 `[]`이면 정상, 키 자체 부재는 오류)",
+                ))
+                continue
+            for entry in data[section] or []:
                 until_raw = entry.get("until")
                 if not until_raw:
                     continue
+                label = _entry_label(entry)
                 try:
                     until = date.fromisoformat(str(until_raw))
                 except ValueError:
+                    result.warnings.append((
+                        rel_path,
+                        f"{section} `{label}` — `until` 형식이 YYYY-MM-DD가 아니다: "
+                        f"{until_raw!r}(재triage 필요)",
+                    ))
                     continue
                 horizon = (until - today).days
                 if 0 <= horizon <= warning_days:
-                    label = _entry_label(entry)
-                    findings.append((
+                    result.warnings.append((
                         rel_path,
                         f"{section} `{label}` — {horizon}일 뒤 만료(until={until}) — "
                         "만료 전에 재triage 필요(story #4023 재발 방지 축)",
                     ))
-    return findings
+    return result
 
 
 def format_gha_warning(rel_path: str, message: str) -> str:
@@ -104,18 +130,23 @@ def format_gha_warning(rel_path: str, message: str) -> str:
     return f"::warning file={rel_path}::{message}"
 
 
+def format_gha_error(rel_path: str, message: str) -> str:
+    return f"::error file={rel_path}::{message}"
+
+
 def main() -> int:
-    findings = collect_expiring_soon()
-    if not findings:
+    result = collect_expiry_findings()
+    if not result.warnings and not result.errors:
         print(
             "OK — self-expiring 선언 3파일(manual-env-allowlist.yml·"
             "serving-reality-allowlist.yml·mcp-path-contract-allowlist.yml) 전부 "
             f"{_WARNING_DAYS}일 이내 만료 항목 없음."
         )
-        return 0
-    for rel_path, message in findings:
+    for rel_path, message in result.warnings:
         print(format_gha_warning(rel_path, message))
-    return 0  # report-only — 이 축은 실패로 막지 않는다(각 가드 본체가 만료 자체는 FAIL).
+    for rel_path, message in result.errors:
+        print(format_gha_error(rel_path, message))
+    return 1 if result.errors else 0
 
 
 if __name__ == "__main__":
