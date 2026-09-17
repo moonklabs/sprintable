@@ -21,6 +21,7 @@ vi.mock('next/navigation', () => ({
 }));
 
 import ChannelPostEditPage from './page';
+import type { CommandStatus, FailureKind } from '@/components/content/failure-action';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -1222,58 +1223,71 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
   });
 
   // ===== story #4015 — publicationFailed 알림: 실패 신호 정확히 1개(§③ 색↔사람 할 일) =====
-  // AC4 — publication_status='failed' × command_status × failure_kind 조합을 순회하며
-  // ①배지가 서는 조합(deriveFailureAction 정의) = 알림 없음·배지 하나 ②배지 없는 조합
-  // (undefined) = 중립 알림(role=status·참 문장) 하나·배지 없음. 어느 조합이든 실패 신호는
-  // «정확히 1개». 옛 blanket destructive+「이어서 처리돼요」로 되돌리면 배지 조합에서
-  // 알림이 다시 떠 RED가 된다(양성대조 아래).
   const FAILED = { gate_status: 'approved', sealed_content_sha256: 'h1', publication_status: 'failed' as const };
-  it.each([
-    { name: 'dead_letter', over: { command_status: 'dead_letter' } },
-    { name: 'blocked+connection', over: { command_status: 'blocked', failure_kind: 'connection' } },
-    { name: 'pending+transient(auto_retry)', over: { command_status: 'pending', failure_kind: 'transient', next_retry_at: '2026-09-20T00:00:00Z' } },
-    { name: 'voided', over: { command_status: 'voided' } },
-  ])('배지 있는 조합($name) — publicationFailed 알림 없음·배지 하나(신호 1개)', async ({ over }) => {
-    stubFetch({ draftDetail: { ...FAILED, ...over } });
-    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
-    await flush();
-    expect(container.querySelector('[data-testid="channel-post-publication-failed-notice"]')).toBeNull();
-    expect(container.querySelector('[data-testid="channel-post-failure-badge"]')).not.toBeNull();
-  });
 
+  // AC4(CHANGES 1) — 조합을 손으로 적지 않는다. CommandStatus·FailureKind 값을 «완전 열거»
+  // Record로 받아(값이 늘면 이 Record가 컴파일 실패 → 조합을 반드시 추가하게) ×
+  // processing_kind × canPublish 곱으로 전수. publication_status='failed'인 모든 조합에서
+  // 실패 신호(배지 · publicationFailed 알림 · 컨테이너 대기 알림)가 «정확히 1개»여야 한다.
+  const COMMAND_STATUS_ALL: Record<CommandStatus, true> = {
+    pending: true, in_progress: true, completed: true, blocked: true, dead_letter: true, voided: true, cancelled: true,
+  };
+  const FAILURE_KIND_ALL: Record<FailureKind, true> = { connection: true, needs_check: true, transient: true };
+  const CS_VALUES: (CommandStatus | null)[] = [null, ...(Object.keys(COMMAND_STATUS_ALL) as CommandStatus[])];
+  const FK_VALUES: (FailureKind | 'unknown_kind_zzz' | null)[] = [null, ...(Object.keys(FAILURE_KIND_ALL) as FailureKind[]), 'unknown_kind_zzz'];
+  const PK_VALUES: (string | null)[] = [null, 'awaiting_container'];
+  const CP_VALUES = [true, false]; // canPublish: 해시 일치/불일치
+  const SIGNAL_PRODUCT = CS_VALUES.flatMap((cs) =>
+    FK_VALUES.flatMap((fk) => PK_VALUES.flatMap((pk) => CP_VALUES.map((cp) => ({ cs, fk, pk, cp })))),
+  );
+
+  it.each(SIGNAL_PRODUCT)(
+    'AC4 실패 신호 정확히 1개 — command_status=$cs · failure_kind=$fk · processing_kind=$pk · canPublish=$cp',
+    async ({ cs, fk, pk, cp }) => {
+      stubFetch({
+        draftDetail: { ...FAILED, body_sha256: cp ? 'h1' : 'h2', command_status: cs, failure_kind: fk, processing_kind: pk },
+      });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+      const signals = [
+        container.querySelector('[data-testid="channel-post-failure-badge"]'),
+        container.querySelector('[data-testid="channel-post-publication-failed-notice"]'),
+        container.querySelector('[data-testid="channel-post-awaiting-container-notice"]'),
+      ].filter(Boolean);
+      expect(signals.length).toBe(1);
+    },
+  );
+
+  // AC3 — 배지 없는 조합의 «참인» 문장(자동 약속은 pending에만·중립 role=status).
   it.each([
-    { name: 'cancelled', over: { command_status: 'cancelled' }, key: 'channelPostsPublicationFailedCancelledNotice' },
-    { name: 'pending·kind 없음', over: { command_status: 'pending' }, key: 'channelPostsPublicationFailedPendingRetryNotice' },
-    { name: 'in_progress·kind 없음', over: { command_status: 'in_progress' }, key: 'channelPostsPublicationFailedInProgressNotice' },
-    { name: 'completed(도달 불가 폴백)', over: { command_status: 'completed' }, key: 'channelPostsPublicationFailedNotice' },
-  ])('배지 없는 조합($name) — 중립 알림 하나(참 문장·role=status)·배지 없음', async ({ over, key }) => {
+    { over: { command_status: 'cancelled' }, key: 'channelPostsPublicationFailedCancelledNotice' },
+    { over: { command_status: 'pending' }, key: 'channelPostsPublicationFailedPendingRetryNotice' },
+    { over: { command_status: 'in_progress' }, key: 'channelPostsPublicationFailedInProgressNotice' },
+    { over: { command_status: 'completed' }, key: 'channelPostsPublicationFailedNotice' }, // 도달 불가 폴백
+  ])('AC3 배지 없는 조합 문장 — command_status=$over.command_status', async ({ over, key }) => {
     stubFetch({ draftDetail: { ...FAILED, ...over } });
     await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
     await flush();
     const notice = container.querySelector('[data-testid="channel-post-publication-failed-notice"]');
-    expect(notice).not.toBeNull();
-    expect(notice?.getAttribute('role')).toBe('status'); // 중립(경고색 아님)
+    expect(notice?.getAttribute('role')).toBe('status'); // 경고색 아님
     expect(notice?.textContent).toBe((koMessages.content as Record<string, string>)[key]);
     expect(container.querySelector('[data-testid="channel-post-failure-badge"]')).toBeNull();
   });
 
-  it('배지 없는 조합(null·canPublish) — 「다시 발행」 안내(role=status)', async () => {
-    stubFetch({ draftDetail: { ...FAILED, body_sha256: 'h1', command_status: null } });
+  // CHANGES 2 — null·canPublish 안내는 «없는 「다시 발행」»을 지어내지 않고 실제 발행 버튼과
+  // 같은 키로 이름을 끼운다. 두 갈래(isRepublish false/true)에서 «안내 속 이름 == 버튼 텍스트».
+  const republishTemplate = koMessages.content.channelPostsPublicationFailedRepublishNotice;
+  it.each([
+    { name: 'isRepublish=false(발행)', over: { body_sha256: 'h1', command_status: null }, label: koMessages.content.publishCta },
+    { name: 'isRepublish=true(재발행)', over: { body_sha256: 'h1', command_status: null, published_at: '2026-09-10T00:00:00Z', published_body_sha256: 'hp' }, label: koMessages.content.publishRepublishCta },
+  ])('CHANGES 2 안내 속 이름 == 발행 버튼 텍스트 — $name', async ({ over, label }) => {
+    stubFetch({ draftDetail: { ...FAILED, ...over } });
     await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
     await flush();
+    const button = container.querySelector('[data-testid="channel-post-publish-button"]');
     const notice = container.querySelector('[data-testid="channel-post-publication-failed-notice"]');
-    expect(notice?.getAttribute('role')).toBe('status');
-    expect(notice?.textContent).toBe(koMessages.content.channelPostsPublicationFailedRepublishNotice);
-    expect(container.querySelector('[data-testid="channel-post-failure-badge"]')).toBeNull();
-  });
-
-  it('배지 없는 조합(null·!canPublish=해시 불일치) — 사실만(버튼 약속 0)', async () => {
-    stubFetch({ draftDetail: { ...FAILED, body_sha256: 'h2', command_status: null } });
-    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
-    await flush();
-    const notice = container.querySelector('[data-testid="channel-post-publication-failed-notice"]');
-    expect(notice?.textContent).toBe(koMessages.content.channelPostsPublicationFailedNotice);
-    expect(container.querySelector('[data-testid="channel-post-failure-button"]')).toBeNull();
+    expect(button?.textContent).toBe(label); // 두 갈래에서 실제 버튼 라벨이 갈린다
+    expect(notice?.textContent).toBe(republishTemplate.replace('{action}', label)); // 안내 이름 == 버튼 텍스트
   });
 
   it('양성대조 — 어느 조합에서도 옛 blanket 「이어서 처리」 문구는 화면에 0', async () => {
