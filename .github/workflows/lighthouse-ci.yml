@@ -173,22 +173,50 @@ jobs:
           fi
 
           {
-            echo "LH_AUTH_COOKIE=sp_at=${final_access_token}; sp_rt=${final_refresh_token}"
+            echo "LH_SP_AT=${final_access_token}"
+            echo "LH_SP_RT=${final_refresh_token}"
           } >> "$GITHUB_ENV"
           echo "seeded org=$org_id project=$project_id"
 
-      # story #4029 — extraHeaders는 런타임에만 정해지는 쿠키값이라 커밋된 lighthouserc.json
-      # 에 못 넣는다. 기존 파일의 preset/throttling/assert 설정은 그대로 두고 딱 이 한
-      # 필드만 얹은 사본을 만들어 그 사본을 쓴다(원본 무변경, 로컬 실행 경로는 그대로 유효).
-      - name: Generate authenticated lighthouserc
+      # story #4029 CHANGES 3(PO 지적·실측) — 첫 시도는 `extraHeaders`로 Cookie를 주입했으나
+      # 실 GHA run(PR #4411)에서 6곳 중 1곳만 통과했다. 리포트 JSON의 `configSettings.
+      # extraHeaders`를 직접 대조해 실패·성공 run 둘 다 **완전히 동일한** 쿠키값이 설정에
+      # 실려 있었음을 확認(설정 전달 자체는 정상) — 그런데도 결과가 갈렸다는 것은 Lighthouse
+      # 의 `Network.setExtraHTTPHeaders`(CDP)가 매 run·매 URL 첫 내비게이션에 그 헤더를
+      # 실제로 붙이는 게 신뢰할 수 없다는 뜻(공식 문서·이슈에 보고된 알려진 부류 — extraHeaders
+      # 는 "요청 헤더 주입"일 뿐 브라우저 쿠키 저장소에 안 실린다, 리다이렉트·재내비게이션
+      # 경계에서 누락 사례가 실보고됨). 처방: `puppeteerScript`로 실제 Puppeteer
+      # `page.setCookie()`를 호출해 **진짜 브라우저 쿠키 저장소**에 쿠키를 심는다(공식 문서가
+      # 인증 시나리오의 정식 패턴으로 명시) — 이러면 실제 로그인한 사용자와 동일하게 모든
+      # 후속 요청·리다이렉트에 쿠키가 자연히 실린다. `disableStorageReset: true`를 같이
+      # 켜야 한다 — Lighthouse는 기본적으로 run마다(그리고 URL마다) 스토리지를 초기화하는데,
+      # 그러면 puppeteerScript가 심은 쿠키도 다음 run에서 지워진다(공식 문서가 이 조합을
+      # 명시 — 안 켜면 6곳×3회 중 첫 1회만 통과하는 사실상 같은 결함이 재발했을 것).
+      - name: Generate authenticated lighthouserc + puppeteer auth script
         run: |
           python3 -c "
           import json, os
           with open('lighthouserc.json') as f:
               cfg = json.load(f)
-          cfg['ci']['collect']['settings']['extraHeaders'] = {'Cookie': os.environ['LH_AUTH_COOKIE']}
+          settings = cfg['ci']['collect']['settings']
+          settings['puppeteerScript'] = './lighthouse-puppeteer-auth.js'
+          settings['disableStorageReset'] = True
           with open('lighthouserc.ci.json', 'w') as f:
               json.dump(cfg, f, indent=2)
+
+          sp_at = os.environ['LH_SP_AT']
+          sp_rt = os.environ['LH_SP_RT']
+          script = '''module.exports = async (browser, context) => {
+            const page = await browser.newPage();
+            await page.setCookie(
+              { name: 'sp_at', value: SP_AT, url: context.url },
+              { name: 'sp_rt', value: SP_RT, url: context.url },
+            );
+            await page.close();
+          };
+          '''.replace('SP_AT', json.dumps(sp_at)).replace('SP_RT', json.dumps(sp_rt))
+          with open('lighthouse-puppeteer-auth.js', 'w') as f:
+              f.write(script)
           "
 
       # story #3864(customer-zero·CI 인프라, 2026-09-14) — AC0 소비처 그라운딩: 이 잡을
