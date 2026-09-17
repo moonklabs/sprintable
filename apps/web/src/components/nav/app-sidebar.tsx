@@ -453,16 +453,17 @@ export function AppSidebar({
             <SidebarGroupContent>
               <SidebarMenu>
                 {group.items.map((item) => {
-                  // story #4003(4002 그라운딩 AC1) — 「일감」(id 'board')의 1차 진입점을
-                  // 시안 ③이 채운 work-list(WORKSPACE_FRAME_TAB_PATHS의 실 기본 탭)로
-                  // 전환. isActive는 여전히 WORKSPACE_FRAME_TAB_PATHS 전체(flow 포함)를
-                  // 봐 sprints/epics/retro/flow 탭에서도 사이드바가 계속 활성으로 뜬다
-                  // (story #3844 선례와 동일 계약 — 탭 커버리지 무변, 1차 href만 갱신).
+                  // story #4003(4002 그라운딩 AC1, CHANGES PR#4386 1차 리뷰) — 「일감」
+                  // (id 'board')의 1차 진입점(item.path)은 이미 resolveNavGroups가
+                  // dest.work.path('work-list'|'flow', 플래그 인지)로 덮어써 넘겨준다 —
+                  // 여기선 그 값을 그대로 resourceLink에 넘길 뿐, 어느 경로인지 다시
+                  // 판단하지 않는다(단일 소스, id 분기 중복 0). isActive는 여전히
+                  // WORKSPACE_FRAME_TAB_PATHS 전체(flow 포함)를 봐 sprints/epics/
+                  // retro/flow 탭에서도 사이드바가 계속 활성으로 뜬다(story #3844
+                  // 선례와 동일 계약 — 탭 커버리지 무변, 1차 href만 갱신).
                   const link = item.kind === 'static'
                     ? { href: item.path, isActive: isActive(item.path) }
-                    : item.id === 'board'
-                      ? resourceLink('work-list', WORKSPACE_FRAME_TAB_PATHS)
-                      : resourceLink(item.path, []);
+                    : resourceLink(item.path, item.id === 'board' ? WORKSPACE_FRAME_TAB_PATHS : []);
                   const Icon = item.icon;
                   const badgeCount = item.badgeKey === 'inbox' ? inboxPendingCount : 0;
                   const badgeCap = item.badgeKey === 'inbox' ? 9 : 99;

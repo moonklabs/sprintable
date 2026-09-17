@@ -125,11 +125,12 @@ const EXPECTED_GROUPS: Array<{ labelKey: string | null; labels: string[] }> = [
 // 카디르 QA(PR#3100) 지적 — 라벨은 맞는데 href가 다른 항목과 뒤바뀐 뮤테이션은 그룹별 라벨
 // 순서 대조(위 EXPECTED_GROUPS)만으론 못 잡는다. 5항목(챗 center 제외 4 + 챗 center 1,
 // 아래 별도 스위트) 전부의 라벨→href 쌍을 개별 대조해 그 구멍을 닫는다.
-// story #4003 — 「일감」은 work-list로 전환(위 별도 테스트 참고, v3 플래그 무관). 나머지
-// 4항목은 flag OFF(이 스위트의 기본 렌더 조건) 기대값 그대로 — 바이트 동일 회귀 0.
+// story #4003 — flag OFF(이 스위트의 기본 렌더 조건, navV3Flags 미전달)에서 5항목
+// 전부 지금 develop과 바이트 동일(회귀 0). 「일감」의 flag-aware work-list 전환은
+// 별도 describe(하단 "v3 nav 단일 소스" 스위트)가 ON 케이스로 검증.
 const EXPECTED_HREF_BY_LABEL: Record<string, string> = {
   '오늘': '/org-briefing',
-  '일감': '/work-list',
+  '일감': '/flow',
   '결과': '/organization/insights-board',
   '채널 연결': '/organization/channels',
   '콘텐츠 규칙': '/organization/content-rules',
@@ -180,16 +181,12 @@ describe('AppSidebar — story #3824 5항목 축소 렌더 회귀가드(UX-v3·F
     expect(rulesLink?.getAttribute('href')).toBe('/organization/content-rules');
   });
 
-  // story #4003(4002 그라운딩 AC1) — 「일감」 1차 href를 work-list로 전환(구 /flow는
-  // WORKSPACE_FRAME_TAB_PATHS를 통해 여전히 활성 판정 대상 — 탭 커버리지 무변, 아래
-  // 별도 테스트가 확認). 이 전환은 v3 플래그 3개와 무관(work-list는 story #3844로
-  // 이미 develop에 착지한 비-게이트 라우트) — flag OFF에서도 이 href는 바뀐다.
   it('리소스 항목(일감, org/project slug 없음)이 bare href로 폴백한다(기존 resourceLink 동작)', async () => {
     expandAllGroups();
     await mount();
     // startsWith 유지 — kbd 힌트 접미사가 붙는 항목이 있어 정확한 === 매칭은 못 쓴다.
     const workLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('일감'));
-    expect(workLink?.getAttribute('href')).toBe('/work-list');
+    expect(workLink?.getAttribute('href')).toBe('/flow');
   });
 
   it('kbd 힌트(일감=B)가 정확히 붙는다', async () => {
@@ -542,5 +539,15 @@ describe('AppSidebar — v3 nav 단일 소스(story #4003) 플래그 배선', ()
     expect(v3Link).toBeDefined();
     expect(links.some((a) => a.getAttribute('href') === '/organization/channels')).toBe(true);
     expect(links.some((a) => a.getAttribute('href') === '/organization/content-rules')).toBe(true);
+  });
+
+  // CHANGES(페드루 PO, PR#4386 1차 리뷰) — 「일감」은 어느 단일 플래그에도 안 걸려있어
+  // 셋 중 하나만 켜도(여기선 connectRulesV3Enabled) work-list로 전환되는지 확認 —
+  // 반대로 셋 다 OFF면 위 「navV3Flags 미전달」 테스트와 동형으로 /flow 그대로.
+  it('임의 플래그 하나(connectRulesV3Enabled)만 ON이어도 「일감」이 work-list로 바뀐다(단일 플래그 의존 0)', async () => {
+    expandAllGroups();
+    await mount(undefined, { todayV3Enabled: false, chatV3Enabled: false, connectRulesV3Enabled: true });
+    const workLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('일감'));
+    expect(workLink?.getAttribute('href')).toBe('/work-list');
   });
 });
