@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils';
 
 import { fetchWithAuth } from '@/lib/db/client';
 import { useSseNotifications } from '@/hooks/use-sse-notifications';
+import { copyTextSafely } from '@/lib/clipboard';
 
 export type RailStatus = 'pending' | 'active' | 'done' | 'failed';
 
@@ -214,6 +215,9 @@ export interface UseVerificationRailResult {
    * recruiter가 http에서만 채우고 stdio에선 빈 문자열이었다 — 아무 근거 없는 비대칭이라 통일). */
   railStageLabel: string;
   copiedVerifyPrompt: boolean;
+  /** story #3986(클래스 «거짓 성공 표시») — 클립보드 실패 시 true(호출부가 정본
+   * 실패 문구를 보일 자리 — 이 훅은 UI를 안 그린다). */
+  copyVerifyPromptFailed: boolean;
   handleCopyVerifyPrompt: () => Promise<void>;
   /** story #2407 ②-4: http는 heartbeat(tool 호출)가 verify 메커니즘 자체라 예시프롬프트가
    * 인과적으로 맞는 안내이지만, stdio는 세션이 살아있으면 이벤트 ack가 자동으로 진행돼
@@ -274,6 +278,7 @@ export function useVerificationRail({
   const [beSteps, setBeSteps] = useState<RawStep[] | null>(null);
   const [verifying, setVerifying] = useState(false);
   const [copiedVerifyPrompt, setCopiedVerifyPrompt] = useState(false);
+  const [copyVerifyPromptFailed, setCopyVerifyPromptFailed] = useState(false);
   // story #4cdad425 — 진단 힌트 타이머. verifyNonce는 수동 재시도 시 타이머를 재무장하는 트리거.
   const [timedOut, setTimedOut] = useState(false);
   const [verifyNonce, setVerifyNonce] = useState(0);
@@ -352,13 +357,15 @@ export function useVerificationRail({
   }, [agentId, transport, pollStatus]);
 
   const handleCopyVerifyPrompt = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(t('verifyExamplePrompt'));
-      setCopiedVerifyPrompt(true);
-      setTimeout(() => setCopiedVerifyPrompt(false), 2000);
-    } catch {
-      // ignore clipboard failure
+    const result = await copyTextSafely(t('verifyExamplePrompt'));
+    if (!result.ok) {
+      setCopyVerifyPromptFailed(true);
+      setTimeout(() => setCopyVerifyPromptFailed(false), 3000);
+      return;
     }
+    setCopyVerifyPromptFailed(false);
+    setCopiedVerifyPrompt(true);
+    setTimeout(() => setCopiedVerifyPrompt(false), 2000);
   }, [t]);
 
   return {
@@ -368,6 +375,7 @@ export function useVerificationRail({
     handleVerify,
     railStageLabel: computeRailStageLabel(transport, t),
     copiedVerifyPrompt,
+    copyVerifyPromptFailed,
     handleCopyVerifyPrompt,
     showVerifyExamplePrompt: computeShowVerifyExamplePrompt(transport, verified),
     // verified되면 대기·타임아웃 표시는 자동으로 꺼진다(늦게 성공해도 힌트가 안 남는다).

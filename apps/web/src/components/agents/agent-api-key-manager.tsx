@@ -17,6 +17,7 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/components/ui/toast';
 import { ToolPermissionPicker } from '@/components/agents/tool-permission-picker';
+import { copyTextSafely } from '@/lib/clipboard';
 
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatRelativeTime } from '@/lib/storage/format';
@@ -175,46 +176,29 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
     }
   };
 
-  const writeToClipboard = async (text: string): Promise<void> => {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
+  // story #3986(클래스 «거짓 성공 표시») — 이 파일의 writeToClipboard(execCommand
+  // 폴백+실패 시 throw)가 선례였다. 공용 lib/clipboard.ts::copyTextSafely로
+  // 일반화됐으니(발명 0, 로직 그대로) 여기 로컬 사본은 걷는다.
+  const copyToClipboard = async (text: string) => {
+    const result = await copyTextSafely(text);
+    if (!result.ok) {
+      addToast({ type: 'error', title: t('agentApiKeyCopyFailTitle'), body: tc('copyFailedSelectManually') });
       return;
     }
-    const prev = document.activeElement as HTMLElement | null;
-    const el = document.createElement('textarea');
-    el.value = text;
-    el.setAttribute('readonly', '');
-    el.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px';
-    document.body.appendChild(el);
-    el.focus();
-    el.select();
-    el.setSelectionRange(0, el.value.length);
-    const ok = document.execCommand('copy');
-    document.body.removeChild(el);
-    prev?.focus();
-    if (!ok) throw new Error('execCommand copy failed');
-  };
-
-  const copyToClipboard = async (text: string) => {
-    try {
-      await writeToClipboard(text);
-      setCopiedKey(true);
-      addToast({ type: 'success', title: 'Copied', body: 'API key copied to clipboard' });
-      window.setTimeout(() => setCopiedKey(false), 1500);
-    } catch {
-      addToast({ type: 'error', title: 'Copy failed', body: t('agentApiKeyClipboardFailBody') });
-    }
+    setCopiedKey(true);
+    addToast({ type: 'success', title: 'Copied', body: 'API key copied to clipboard' });
+    window.setTimeout(() => setCopiedKey(false), 1500);
   };
 
   const copyOnboardingMessage = async (apiKey: string, mcpConfig?: string | null) => {
-    try {
-      await writeToClipboard(buildOnboardingMessage(apiKey, mcpConfig));
-      setCopiedOnboarding(true);
-      addToast({ type: 'success', title: t('agentApiKeyOnboardingCopiedTitle') });
-      window.setTimeout(() => setCopiedOnboarding(false), 1500);
-    } catch {
-      addToast({ type: 'error', title: t('agentApiKeyCopyFailTitle'), body: t('agentApiKeyClipboardFailBody') });
+    const result = await copyTextSafely(buildOnboardingMessage(apiKey, mcpConfig));
+    if (!result.ok) {
+      addToast({ type: 'error', title: t('agentApiKeyCopyFailTitle'), body: tc('copyFailedSelectManually') });
+      return;
     }
+    setCopiedOnboarding(true);
+    addToast({ type: 'success', title: t('agentApiKeyOnboardingCopiedTitle') });
+    window.setTimeout(() => setCopiedOnboarding(false), 1500);
   };
 
   const activeKeys = apiKeys.filter((k) => !k.revoked_at);

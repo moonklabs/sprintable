@@ -16,6 +16,7 @@ import { useRenderNonce } from '@/hooks/use-render-nonce';
 
 import { fetchWithAuth } from '@/lib/db/client';
 import { canEditOrgMemberRole, orgRoleLabel } from '@/lib/org-member-role';
+import { copyTextSafely } from '@/lib/clipboard';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 
@@ -242,16 +243,19 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
     );
   }
 
+  // story #3986(클래스 «거짓 성공 표시») — 이 자리는 이미 성공/실패를 가르고
+  // 있었다(회귀 대상은 아님), 공용 헬퍼로 일반화만(발명 0) + 낱말 정본 통일
+  // (유나 지시 2026-09-17 02:47Z — orgMemberClipboardCopyFailed 걷음).
   const handleCopyInviteLink = async (inviteId: string, url: string | undefined) => {
     if (!url) return;
-    try {
-      await navigator.clipboard.writeText(url);
-      setCopiedInviteId(inviteId);
-      setTimeout(() => setCopiedInviteId(null), 1500);
-    } catch {
+    const result = await copyTextSafely(url);
+    if (!result.ok) {
       bumpActionMessageNonce();
-      setActionMessage({ type: 'error', text: t('orgMemberClipboardCopyFailed') });
+      setActionMessage({ type: 'error', text: tc('copyFailedSelectManually') });
+      return;
     }
+    setCopiedInviteId(inviteId);
+    setTimeout(() => setCopiedInviteId(null), 1500);
   };
 
   return (

@@ -31,6 +31,7 @@ import { HumanOnlyAction } from '@/components/ui/human-only-action';
 
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatRelativeTime } from '@/lib/storage/format';
+import { copyTextSafely } from '@/lib/clipboard';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 
 interface DocDetail {
@@ -81,6 +82,10 @@ export default function DocSlugPage() {
   const [contentFormat, setContentFormat] = useState<'markdown' | 'html'>('markdown');
   const [autosave, setAutosave] = useState(true);
   const [mdCopied, setMdCopied] = useState(false);
+  // story #3986(클래스 «거짓 성공 표시») — 옛 코드는 clipboard 실패를 삼키고도
+  // 무조건 setMdCopied(true)를 실행했다. 문서 내용은 에디터에 이미 선택 가능하게
+  // 떠 있어 별도 노출 블록은 불요 — 아이콘 버튼 title/aria-label만 실패 문구로.
+  const [mdCopyFailed, setMdCopyFailed] = useState(false);
   const [slugLocked, setSlugLocked] = useState(false);
   const [urlDialogOpen, setUrlDialogOpen] = useState(false);
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
@@ -192,11 +197,13 @@ export default function DocSlugPage() {
 
   const handleCopyMarkdown = useCallback(async () => {
     const md = contentFormat === 'markdown' ? content : htmlToMarkdown(content);
-    try {
-      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(md);
-      }
-    } catch { /* clipboard unavailable */ }
+    const result = await copyTextSafely(md);
+    if (!result.ok) {
+      setMdCopyFailed(true);
+      window.setTimeout(() => setMdCopyFailed(false), 3000);
+      return;
+    }
+    setMdCopyFailed(false);
     setMdCopied(true);
     window.setTimeout(() => setMdCopied(false), 1600);
   }, [content, contentFormat]);
@@ -288,11 +295,11 @@ export default function DocSlugPage() {
       <button
         type="button"
         onClick={handleCopyMarkdown}
-        title={t('copyMarkdown')}
-        aria-label={t('copyMarkdown')}
+        title={mdCopyFailed ? tc('copyFailedSelectManually') : t('copyMarkdown')}
+        aria-label={mdCopyFailed ? tc('copyFailedSelectManually') : t('copyMarkdown')}
         className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
       >
-        {mdCopied ? <Check className="h-4 w-4 text-success" /> : <Copy className="h-4 w-4" />}
+        {mdCopied ? <Check className="h-4 w-4 text-success" /> : <Copy className={mdCopyFailed ? 'h-4 w-4 text-destructive' : 'h-4 w-4'} />}
       </button>
       {/* story #2967(선생님 실사용 판정 ⑤) — 인덱스 클릭 목적지를 리더→에디터로 되돌리며
           리더 진입점이 사라지면 안 되니 opt-in 명시 링크를 "..." 드롭다운에서 상단 아이콘

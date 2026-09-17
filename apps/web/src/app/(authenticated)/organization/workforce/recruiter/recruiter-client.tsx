@@ -21,6 +21,7 @@ import type { RoleTemplateSummary, RecruitResponse, McpConfigBundle, RuntimeCapa
 import { RUNTIME_CAPABILITIES_FALLBACK, RUNTIME_GUIDE_FILENAME_FALLBACK, KIT_FILENAME, resolveRuntimeWakeInfo, RUNTIME_CONNECT_CLI, resolveConnectConfirm } from '@/services/recruit';
 import type { PresenceStatus } from '@/components/chat/presence-dot';
 import { fetchWithAuth } from '@/lib/db/client';
+import { copyTextSafely } from '@/lib/clipboard';
 
 // ─── 상수/헬퍼 ──────────────────────────────────────────────────────────────
 
@@ -184,19 +185,26 @@ function CopyDownloadButtons({
   content, filename, copied, onCopied,
 }: { content: string; filename: string; copied: boolean; onCopied: () => void }) {
   const t = useTranslations('recruiter');
+  const tc = useTranslations('common');
+  // story #3986(클래스 «거짓 성공 표시») — 옛 코드는 실패를 삼키고 피드백 자체가
+  // 없었다(성공 표시는 원래 onCopied가 있을 때만 — 로직 유지, 실패만 새로 알린다).
+  const [copyFailed, setCopyFailed] = useState(false);
   const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(content);
-      onCopied();
-    } catch {
-      // ignore clipboard failure
+    const result = await copyTextSafely(content);
+    if (!result.ok) {
+      setCopyFailed(true);
+      setTimeout(() => setCopyFailed(false), 3000);
+      return;
     }
+    setCopyFailed(false);
+    onCopied();
   };
   return (
     <div className="flex shrink-0 items-center gap-1.5">
       <Button variant="outline" size="sm" onClick={() => void handleCopy()}>
         {copied ? <><Check className="h-3.5 w-3.5" />{t('copied')}</> : <><Copy className="h-3.5 w-3.5" />{t('copy')}</>}
       </Button>
+      {copyFailed ? <span role="alert" className="text-xs text-destructive">{tc('copyFailedSelectManually')}</span> : null}
       <Button variant="outline" size="sm" onClick={() => downloadTextFile(filename, content)}>
         <Download className="h-3.5 w-3.5" />{t('download')}
       </Button>
@@ -368,6 +376,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
     api_key: string | null;
   } | null>(null);
   const [equipMcpCopied, setEquipMcpCopied] = useState(false);
+  const [equipMcpCopyFailed, setEquipMcpCopyFailed] = useState(false);
   // story #2433(B) — OrgAgentCreate(POST /api/agents) 스키마엔 runtime_type이 없어(recruit 경로와
   // 달리 생성 호출 하나로 못 묶는다) 생성 직후 PATCH /api/team-members/{id}(관리화면이 쓰는 것과
   // 같은 경로)로 반영한다. 이 PATCH가 실패해도 키·MCP config는 이미 유효하므로 결과 화면 자체는
@@ -431,13 +440,15 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
 
   const handleCopyEquipMcp = async () => {
     if (!equipResult?.mcp_config) return;
-    try {
-      await navigator.clipboard.writeText(JSON.stringify(equipResult.mcp_config, null, 2));
-      setEquipMcpCopied(true);
-      setTimeout(() => setEquipMcpCopied(false), 2000);
-    } catch {
-      // ignore clipboard failure
+    const result = await copyTextSafely(JSON.stringify(equipResult.mcp_config, null, 2));
+    if (!result.ok) {
+      setEquipMcpCopyFailed(true);
+      setTimeout(() => setEquipMcpCopyFailed(false), 3000);
+      return;
     }
+    setEquipMcpCopyFailed(false);
+    setEquipMcpCopied(true);
+    setTimeout(() => setEquipMcpCopied(false), 2000);
   };
 
   // STEP 3(Full 경로) — runtime + agent(G1). equip-skip은 이 스텝을 건너뛰고 STEP2 이후 바로 생성한다.
@@ -1221,6 +1232,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                         {equipMcpCopied ? <><Check className="size-3" />{t('copied')}</> : <>{t('copy')}</>}
                       </Button>
                     </div>
+                    {equipMcpCopyFailed ? <p role="alert" className="text-xs text-destructive">{tc('copyFailedSelectManually')}</p> : null}
                     <pre className="overflow-x-auto rounded-md border border-border bg-muted/30 p-3 text-xs text-foreground/80">
                       {JSON.stringify(equipResult.mcp_config, null, 2)}
                     </pre>
