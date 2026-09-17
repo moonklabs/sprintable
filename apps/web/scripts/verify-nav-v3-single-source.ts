@@ -59,30 +59,14 @@ export const DEST_ALLOWED_NON_TEST_FILES: Record<string, AllowedEntry<DestLitera
     reason: 'TAB_ROOT_PREFIXES — 태블릿 레이아웃 CSS 적용 판정 배열(다른 축), nav 목적지 결정이 아님.',
     counts: { '/chats': 1 },
   },
-  // story #4017 CHANGES 2(페드루 PO 지적 2·2026-09-17 15:44Z) — 로그인 전 화면
+  // story #4017 CHANGES 2(페드루 PO 지적 2·2026-09-17 15:44Z/15:56Z) — 로그인 전 화면
   // (login/register/invite/mfa/onboarding)은 원래 그 자체가 client 컴포넌트라 서버
   // 헬퍼를 못 불렀다. 각자 얇은 서버 page.tsx 래퍼(invite/page.tsx·mfa/page.tsx)를
   // 더하거나(부모가 이미 서버면 그대로, invite/accept/page.tsx·onboarding/page.tsx)
-  // resolveChatsHref(readNavV3FlagsFromEnv())로 구한 값을 client 쪽에 chatsHref prop
-  // 으로 흘려보낸다 — 아래는 그 prop의 *기본값*(호출부 생략 시 폴백)만 남은 자리로,
-  // chat-view.tsx의 backHref와 동형인 "컴포넌트 API 기본값"이지 하드코딩 내비게이션이
-  // 아니다(실제 목적지 결정은 각 page.tsx 서버 래퍼가 함).
-  'src/app/invite/accept/invite-accept-client.tsx': {
-    reason: 'chatsHref 기본 prop 값(부모 invite/accept/page.tsx가 서버에서 실값을 넘김).',
-    counts: { '/chats': 1 },
-  },
-  'src/app/invite/invite-client.tsx': {
-    reason: '위와 동형(부모 invite/page.tsx가 서버 래퍼).',
-    counts: { '/chats': 1 },
-  },
-  'src/app/mfa/mfa-client.tsx': {
-    reason: '위와 동형(부모 mfa/page.tsx가 서버 래퍼).',
-    counts: { '/chats': 1 },
-  },
-  'src/app/onboarding/onboarding-form.tsx': {
-    reason: '위와 동형(부모 onboarding/page.tsx가 서버, 원래도 존재).',
-    counts: { '/chats': 1 },
-  },
+  // resolveChatsHref(readNavV3FlagsFromEnv())로 구한 값을 client 쪽에 필수(기본값
+  // 없음) chatsHref prop으로 흘려보낸다 — 호출부가 빠뜨리면 타입 에러로 걸려 여기 예외
+  // 목록 자체가 필요 없어졌다(invite-accept-client.tsx·invite-client.tsx·
+  // mfa-client.tsx·onboarding-form.tsx 4곳, PO 비차단 제안 적용).
   'src/components/chat/chat-view.tsx': {
     reason: 'backHref 기본 prop 값(호출부가 얼마든지 override) — 컴포넌트 API 기본값이지 하드코딩 내비게이션이 아님.',
     counts: { '/chats': 1 },
