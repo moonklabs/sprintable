@@ -155,17 +155,25 @@ function CopyableCode({ raw, inline, className }: { raw: string; inline: boolean
 
   if (inline) {
     return (
-      <code
-        role="button"
-        tabIndex={0}
-        onClick={handleCopy}
-        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleCopy(); } }}
-        title={copyFailed ? tc('copyFailedSelectManually') : copied ? t('copied') : t('clickToCopy')}
-        className={`${className} cursor-pointer transition hover:brightness-95 active:brightness-90`}
-      >
-        {raw}
-        {copied && <Check className="ml-0.5 inline size-3 align-text-top" aria-hidden />}
-      </code>
+      <>
+        <code
+          role="button"
+          tabIndex={0}
+          onClick={handleCopy}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleCopy(); } }}
+          title={copyFailed ? tc('copyFailedSelectManually') : copied ? t('copied') : t('clickToCopy')}
+          className={`${className} cursor-pointer transition hover:brightness-95 active:brightness-90`}
+        >
+          {raw}
+          {copied && <Check className="ml-0.5 inline size-3 align-text-top" aria-hidden />}
+        </code>
+        {/* story #3986 CHANGES(페드루 PO C3) — title만 바뀌면 터치 기기·hover 없이는
+            실패가 안 보였다. 눈에 보이는 3초짜리 알림을 별도로 낸다(<code> 자체는
+            이미 선택 가능한 원문이라 여기선 문구만). */}
+        {copyFailed && (
+          <span role="alert" className="ml-1 text-xs text-destructive">{tc('copyFailedSelectManually')}</span>
+        )}
+      </>
     );
   }
 

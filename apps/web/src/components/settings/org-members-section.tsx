@@ -80,6 +80,9 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
   const [resendingId, setResendingId] = useState<string | null>(null);
   const [revokingId, setRevokingId] = useState<string | null>(null);
   const [copiedInviteId, setCopiedInviteId] = useState<string | null>(null);
+  // story #3986 CHANGES(페드루 PO C2) — 초대 목록 행은 invite_url 자체를 화면에
+  // 안 그린다(버튼 title에만 있음). 실패했을 때만 선택 가능하게 노출한다.
+  const [copyFailedInviteUrl, setCopyFailedInviteUrl] = useState<string | null>(null);
 
   const canManage = currentRole === 'owner' || currentRole === 'admin';
   // story #3491(페드루 PO 確定) — canEditOrgMemberRole의 자기 자신 판정에 필요.
@@ -252,8 +255,10 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
     if (!result.ok) {
       bumpActionMessageNonce();
       setActionMessage({ type: 'error', text: tc('copyFailedSelectManually') });
+      setCopyFailedInviteUrl(url);
       return;
     }
+    setCopyFailedInviteUrl(null);
     setCopiedInviteId(inviteId);
     setTimeout(() => setCopiedInviteId(null), 1500);
   };
@@ -360,6 +365,15 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
         >
           <AlertDescription>{actionMessage.text}</AlertDescription>
         </Alert>
+      )}
+      {copyFailedInviteUrl && (
+        <input
+          readOnly
+          value={copyFailedInviteUrl}
+          onFocus={(e) => e.currentTarget.select()}
+          className="w-full rounded border border-border bg-background px-2 py-1 font-mono text-xs text-foreground"
+          data-testid="org-members-copy-failed-raw-invite-url"
+        />
       )}
 
       {/* 멤버 목록 */}
