@@ -12,6 +12,24 @@ When an agent opens a story-backed PR in this repo, link it explicitly in-app an
 
 Resolve the full UUID from the story in Sprintable, never the short 8-char id. Tagging stays optional — untagged PRs are skipped gracefully. A non-blocking advisory check ([`sid-link-check.yml`](.github/workflows/sid-link-check.yml)) warns when a PR has neither carrier and never blocks merge.
 
+## Authentication credentials — two kinds, one choke point
+
+Agent requests resolve to one `AuthContext`, and that shape is the choke point. Do not branch on a single claim field:
+
+- `sk_live_` — org-wide long-lived agent key (an `ApiKey` row). Carries `api_key_id`.
+- `dt_live_` — per-device credential. **Deliberately does not carry `api_key_id`** (a device is an identifier, not a bearer secret; the private key never reaches the server and auth is a per-request signature). It carries `actor_type: "agent"` instead.
+- `hu_live_` — human personal key. `actor_type: "human"`.
+
+`bool(app_metadata.get("api_key_id"))` therefore misclassifies `dt_live_` as non-agent. Use `is_agent_credential(auth)` ([auth.py](backend/app/dependencies/auth.py)), which shares its axis with the AU billing predicate `is_au_billable_agent` — if those two diverge, billing and authorization disagree. Human surfaces (password setup, device registration) stay human-only.
+
+Both `get_current_user` and the SSE variant `get_current_user_streaming` must dispatch the same prefixes; a guard that admits a credential while its dependency rejects it fails one layer later with a different status.
+
+## Database migrations are alembic
+
+Schema changes go in `backend/alembic/versions/` and are applied by `alembic upgrade heads` ([bootstrap.py](backend/bootstrap.py)), which the compose entrypoint runs. Keep a single head — a second head breaks fresh installs. Keep `downgrade()` working.
+
+`packages/db/supabase/` is a separate legacy/SaaS lineage and does not mirror new alembic revisions. Do not add a matching supabase migration for a new alembic table.
+
 ## Checking whether a PR's CI is actually green
 
 When confirming PR status programmatically, count anything whose `bucket` isn't `pass` as blocking: `gh pr checks <PR> --json name,bucket,link | jq -r '.[] | select(.bucket!="pass" and .bucket!="skipping")'`.
