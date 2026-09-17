@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { fetchWithAuth } from '@/lib/db/client';
+import { Button } from '@/components/ui/button';
 import { formatMinorCurrency, type GenerationBudgetCurrency } from '@/components/content/generation-budget-indicator';
 import {
   ConnectRulesV3SectionEmpty,
@@ -135,15 +136,16 @@ export function ConnectRulesV3Rules({ orgId }: { orgId: string }) {
       <BudgetRow label={t('ruleGenerationBudget')} budget={rules.generation_budget} t={t} tContent={tContent} locale={locale} />
       <BudgetRow label={t('ruleApiUsageBudget')} budget={rules.api_usage_budget} t={t} tContent={tContent} locale={locale} />
 
-      <button
+      <Button
         type="button"
+        variant="ghost"
         onClick={() => setReferenceOpen((o) => !o)}
         aria-expanded={referenceOpen}
-        className="text-xs font-medium text-muted-foreground hover:text-foreground"
+        className="h-auto min-h-0 min-w-0 w-fit p-0 text-xs font-medium text-muted-foreground hover:bg-transparent hover:text-foreground"
         data-testid="connect-rules-v3-reference-toggle"
       >
         {tcr('contentRulesReferenceSectionTitle')}
-      </button>
+      </Button>
       {referenceOpen ? (
         <div className="space-y-1 rounded-md border border-dashed border-border px-3 py-2.5 text-xs text-muted-foreground" data-testid="connect-rules-v3-reference-body">
           <p>{tcr('toneLabel')}: {rules.tone ?? tcr('contentRulesNotSetLabel')}</p>

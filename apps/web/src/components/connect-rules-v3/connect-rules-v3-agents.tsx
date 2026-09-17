@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { fetchWithAuth } from '@/lib/db/client';
 import { runtimeLabel } from '@/lib/runtime-capabilities';
@@ -159,11 +160,12 @@ export function ConnectRulesV3Agents({ isAdmin }: { isAdmin: boolean }) {
 
           return (
             <div key={agent.id} className="rounded-md border border-border bg-muted/30 text-sm" data-testid="connect-rules-v3-agent-row">
-              <button
+              <Button
                 type="button"
+                variant="ghost"
                 onClick={() => toggleExpand(agent)}
                 aria-expanded={expanded}
-                className="flex w-full items-center justify-between gap-3 px-3 py-3 text-left"
+                className="h-auto w-full items-center justify-between gap-3 rounded-md px-3 py-3 text-left font-normal"
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
@@ -177,7 +179,7 @@ export function ConnectRulesV3Agents({ isAdmin }: { isAdmin: boolean }) {
                 ) : (
                   <span className="shrink-0 text-xs text-muted-foreground">{t('agentConnected')}</span>
                 )}
-              </button>
+              </Button>
 
               {expanded ? (
                 <div className="space-y-2 border-t border-border px-3 py-3 text-xs text-muted-foreground" data-testid="connect-rules-v3-agent-row-expanded">
