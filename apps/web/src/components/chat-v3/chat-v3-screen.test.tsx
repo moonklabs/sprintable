@@ -37,11 +37,15 @@ const THREADS = {
     },
   ],
 };
+// 결함④(3998 PO 지적) — 실 백엔드 응답은 sender_name/created_by 평탄 필드가 아니라
+// 중첩 `sender:{id,name,type,avatar_url,runtime_type}`(conversations.py::_msg_payload).
+// 평탄 필드로 목을 만들면 normalizeToMessage 없이도 테스트가 green이 나 결함④를 놓친다.
 const MESSAGES = {
   data: [
     {
-      id: 'm1', created_by: 'agent-1', sender_name: '담롱 온찬', sender_type: 'agent', sender_avatar_url: null,
-      sender_runtime_type: null, content: '초안을 마쳤어요.', attachments: [], created_at: '2026-09-16T06:41:00Z',
+      id: 'm1', conversation_id: 'conv-1', thread_id: null,
+      sender: { id: 'agent-1', name: '담롱 온찬', type: 'agent', avatar_url: null, runtime_type: null },
+      content: '초안을 마쳤어요.', attachments: [], created_at: '2026-09-16T06:41:00Z',
       references: [], approval_target: null,
     },
   ],
@@ -84,7 +88,11 @@ describe('ChatV3Screen — 첫 화면 렌더', () => {
     await mount();
     expect(container.querySelector('[data-testid="chat-v3-thread-row"]')?.textContent).toContain('담롱 온찬');
     expect(container.textContent).toContain('에이전트');
-    expect(container.querySelector('[data-testid="chat-v3-messages-column"]')?.textContent).toContain('초안을 마쳤어요');
+    const messagesColumn = container.querySelector('[data-testid="chat-v3-messages-column"]');
+    expect(messagesColumn?.textContent).toContain('초안을 마쳤어요');
+    // 결함④(3998 PO 지적, 4370 CHANGES) — 말풍선에 보낸 사람 이름이 실제로 렌더돼야 한다
+    // (중첩 sender 응답을 normalizeToMessage 없이 캐스트만 하면 이 라벨이 빈칸으로 샌다).
+    expect(messagesColumn?.textContent).toContain('담롱 온찬');
   });
 
   // 교차 PR 드리프트(유나 점검표 1c6a0ced, 항목 4) — 색 있는 attention만 Badge,
