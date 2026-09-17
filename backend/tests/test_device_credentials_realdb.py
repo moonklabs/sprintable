@@ -1743,3 +1743,283 @@ async def test_device_auth_dispatch_verifies_body_hash():
     assert 'body_sha256=proof["body_sha256"]' not in src, (
         "클라이언트 주장값을 그대로 transcript 에 넣는다 — 본문 바꿔치기 가능"
     )
+
+# ─────────────────────────────────────────────────────────────────────────────
+# G2b — 멀티 기기 (F4 채택의 직접 근거)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+async def test_two_devices_for_same_agent_both_authenticate():
+    """G2b.1 — 같은 에이전트에 기기 2대를 등록하면 **양쪽 다 유효**하다.
+
+    `sk_live_` 는 「발급=교체」 라 기기2 발급이 기기1을 죽인다(§1.1 — 그래서 이 기능이
+    멀티 기기의 필요조건이다). 기기 자격증명은 그 축을 기기 단위로 분리한다 — 기기2 등록이
+    기기1의 인증을 무효화하지 않는다.
+    """
+    from app.dependencies.auth import _resolve_device_credential
+    from app.routers.device_credentials import RegisterDeviceRequest, register_device_credential
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id, user_id, human_member_id = await _seed_org_project_human(s)
+            agent_id = await _seed_agent(s, org_id, project_id, created_by_member_id=human_member_id)
+        priv1, der1 = _keypair()
+        priv2, der2 = _keypair()
+        async with Session() as s:
+            dev1 = await register_device_credential(
+                _FakeRequest(),
+                RegisterDeviceRequest(device_label="laptop", public_key_der_b64=base64.b64encode(der1).decode()),
+                auth=_auth_for(user_id, org_id), session=s,
+            )
+        async with Session() as s:
+            dev2 = await register_device_credential(
+                _FakeRequest(),
+                RegisterDeviceRequest(device_label="desktop", public_key_der_b64=base64.b64encode(der2).decode()),
+                auth=_auth_for(user_id, org_id), session=s,
+            )
+
+        # 기기2 등록 後에도 기기1이 그대로 인증된다.
+        async with Session() as s:
+            p1 = _proof(priv1, credential_id=dev1.id, method="POST", route="/api/v2/x",
+                        timestamp=_now_ts(), seq=dev1.next_server_seq)
+            ctx1 = await _resolve_device_credential(dev1.device_credential, s, method="POST", route="/api/v2/x", **p1)
+            await s.commit()
+        async with Session() as s:
+            p2 = _proof(priv2, credential_id=dev2.id, method="POST", route="/api/v2/x",
+                        timestamp=_now_ts(), seq=dev2.next_server_seq)
+            ctx2 = await _resolve_device_credential(dev2.device_credential, s, method="POST", route="/api/v2/x", **p2)
+            await s.commit()
+        for ctx, dev in ((ctx1, dev1), (ctx2, dev2)):
+            assert ctx.user_id == str(agent_id)
+            assert ctx.claims["app_metadata"]["device_credential_id"] == str(dev.id)
+    finally:
+        await engine.dispose()
+
+
+async def test_revoking_one_device_does_not_touch_the_other():
+    """G2b.3 — 기기1 폐기 → 기기1만 거부, 기기2 유효 유지(폐기 반경이 기기 1대)."""
+    from fastapi import HTTPException
+
+    from app.dependencies.auth import _resolve_device_credential
+    from app.routers.device_credentials import (
+        RegisterDeviceRequest,
+        register_device_credential,
+        revoke_device_credential,
+    )
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id, user_id, human_member_id = await _seed_org_project_human(s)
+            await _seed_agent(s, org_id, project_id, created_by_member_id=human_member_id)
+        priv1, der1 = _keypair()
+        priv2, der2 = _keypair()
+        async with Session() as s:
+            dev1 = await register_device_credential(
+                _FakeRequest(),
+                RegisterDeviceRequest(device_label="d1", public_key_der_b64=base64.b64encode(der1).decode()),
+                auth=_auth_for(user_id, org_id), session=s,
+            )
+        async with Session() as s:
+            dev2 = await register_device_credential(
+                _FakeRequest(),
+                RegisterDeviceRequest(device_label="d2", public_key_der_b64=base64.b64encode(der2).decode()),
+                auth=_auth_for(user_id, org_id), session=s,
+            )
+        async with Session() as s:
+            await revoke_device_credential(dev1.id, auth=_auth_for(user_id, org_id), session=s)
+
+        async with Session() as s:
+            p1 = _proof(priv1, credential_id=dev1.id, method="POST", route="/api/v2/x",
+                        timestamp=_now_ts(), seq=dev1.next_server_seq)
+            with pytest.raises(HTTPException) as exc:
+                await _resolve_device_credential(dev1.device_credential, s, method="POST", route="/api/v2/x", **p1)
+            assert exc.value.status_code == 401
+
+        async with Session() as s:
+            p2 = _proof(priv2, credential_id=dev2.id, method="POST", route="/api/v2/x",
+                        timestamp=_now_ts(), seq=dev2.next_server_seq)
+            ctx2 = await _resolve_device_credential(dev2.device_credential, s, method="POST", route="/api/v2/x", **p2)
+            await s.commit()
+        assert ctx2.claims["app_metadata"]["device_credential_id"] == str(dev2.id)
+    finally:
+        await engine.dispose()
+
+
+async def test_sk_live_rotate_does_not_touch_device_credentials():
+    """G2b.5 — `sk_live_` 의 「발급=교체」(`revoke_all_active`)가 **기기 경로를 침범하지 않는다**.
+
+    §1.1 이 "기기 자격증명은 멀티 기기의 필요조건"이라 한 이유의 반대편이다: 통합 키를
+    회전해도 기기는 살아 있어야 한다(둘은 다른 테이블·다른 축).
+    """
+    from sqlalchemy import select
+
+    from app.dependencies.auth import _resolve_device_credential
+    from app.models.agent_device_credential import AgentDeviceCredential
+    from app.repositories.api_key import ApiKeyRepository
+    from app.routers.device_credentials import RegisterDeviceRequest, register_device_credential
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id, user_id, human_member_id = await _seed_org_project_human(s)
+            agent_id = await _seed_agent(s, org_id, project_id, created_by_member_id=human_member_id)
+        priv, der = _keypair()
+        async with Session() as s:
+            dev = await register_device_credential(
+                _FakeRequest(),
+                RegisterDeviceRequest(device_label="paired", public_key_der_b64=base64.b64encode(der).decode()),
+                auth=_auth_for(user_id, org_id), session=s,
+            )
+
+        # 같은 에이전트의 sk_live_ 키를 발급=교체(기존 활성 전량 revoke).
+        async with Session() as s:
+            repo = ApiKeyRepository(s)
+            await repo.create(team_member_id=agent_id, scope=["read", "write"], expires_at=None)
+            revoked = await repo.revoke_all_active(agent_id)
+            await s.commit()
+        assert len(revoked) >= 1, "전제 실패 — 회전할 활성 키가 없었다"
+
+        # 기기 자격증명은 그대로 active 이고 인증도 계속된다.
+        async with Session() as s:
+            row = (await s.execute(
+                select(AgentDeviceCredential).where(AgentDeviceCredential.id == dev.id)
+            )).scalar_one()
+            assert row.status == "active" and row.revoked_at is None, (
+                "sk_live_ 회전이 기기 자격증명을 건드렸다 — 폐기 반경이 기기 밖으로 샜다"
+            )
+        async with Session() as s:
+            proof = _proof(priv, credential_id=dev.id, method="POST", route="/api/v2/x",
+                           timestamp=_now_ts(), seq=dev.next_server_seq)
+            ctx = await _resolve_device_credential(dev.device_credential, s, method="POST", route="/api/v2/x", **proof)
+            await s.commit()
+        assert ctx.user_id == str(agent_id)
+    finally:
+        await engine.dispose()
+
+
+async def test_device_registration_does_not_invalidate_sk_live():
+    """G2b.6 — 역방향: 기기 등록이 기존 `sk_live_` 를 무효화하지 않는다.
+
+    §1.1 의 「발급=교체」 는 sk_live_ 끼리의 규칙이지 sk_live_ 와 기기의 관계가 아니다.
+    기기를 추가했다고 통합 키가 죽으면 온보딩이 자기 발등을 찍는다.
+    """
+    from sqlalchemy import select
+
+    from app.models.api_key import ApiKey
+    from app.repositories.api_key import ApiKeyRepository
+    from app.routers.device_credentials import RegisterDeviceRequest, register_device_credential
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id, user_id, human_member_id = await _seed_org_project_human(s)
+            agent_id = await _seed_agent(s, org_id, project_id, created_by_member_id=human_member_id)
+        async with Session() as s:
+            repo = ApiKeyRepository(s)
+            key, _plain = await repo.create(
+                team_member_id=agent_id, scope=["read", "write"], expires_at=None,
+            )
+            await s.commit()
+            key_id = key.id
+
+        _priv, der = _keypair()
+        async with Session() as s:
+            await register_device_credential(
+                _FakeRequest(),
+                RegisterDeviceRequest(device_label="newcomer", public_key_der_b64=base64.b64encode(der).decode()),
+                auth=_auth_for(user_id, org_id), session=s,
+            )
+
+        async with Session() as s:
+            row = (await s.execute(select(ApiKey).where(ApiKey.id == key_id))).scalar_one()
+            assert row.revoked_at is None, "기기 등록이 sk_live_ 를 무효화했다"
+    finally:
+        await engine.dispose()
+
+
+async def test_per_key_stream_limit_allows_two_devices_on_free_tier():
+    """G2b.2 — free tier 동시 스트림 상한(3) 안에서 **같은 에이전트의 연결 2개가 둘 다 통과**한다.
+
+    F2 확정(제품 기기 상한 없음)으로 이 항목이 게이트의 핵심이 됐다: 자원 보호는 기기 수가
+    아니라 기존 per-agent 스트림 상한이 담당하므로, **기기 2대가 동시에 붙어도 그 상한에
+    걸리지 않아야** 한다(free=3).
+
+    ⚠️여기서 검증하는 것은 실제로 스트림이 쓰는 `sse_lease.acquire`(per-key scope)의
+    동시성 의미론이다 — mock 이 아니다. SSE **엔드포인트 자체**를 여는 종단 테스트는
+    `async_session_factory`(모듈 전역)가 테스트별 격리 이벤트루프와 맞지 않아 이 하네스에서
+    불가하므로 **G5(로컬 스택)로 미룬다**(닫힌 것처럼 쓰지 않는다).
+    """
+    from app.routers.agent_gateway import _AGENT_STREAM_TIER_LIMITS
+    from app.services import sse_lease
+
+    limit = _AGENT_STREAM_TIER_LIMITS["free"]
+    assert limit >= 2, f"free tier 상한이 기기 2대를 못 담는다: {limit}"
+
+    agent_scope = f"perkey:{uuid.uuid4()}"  # 같은 agent 의 두 기기 = 같은 scope 공유
+    dev1, dev2 = str(uuid.uuid4()), str(uuid.uuid4())
+    try:
+        for conn_id in (dev1, dev2):
+            got = await sse_lease.acquire(agent_scope, limit, conn_id)
+            # None = Redis 불가(in-process 폴백) — 그 경우도 «거부»는 아니다.
+            assert got is not False, "정상 기기 2대 동시 연결이 상한에 걸렸다"
+    finally:
+        for conn_id in (dev1, dev2):
+            await sse_lease.release(agent_scope, conn_id)
+
+
+async def test_per_key_stream_limit_still_bounds_the_flood():
+    """역방향 — 상한은 여전히 **넘으면 거부**한다(2대 허용이 무제한 허용은 아니다)."""
+    from app.routers.agent_gateway import _AGENT_STREAM_TIER_LIMITS
+    from app.services import sse_lease
+
+    limit = _AGENT_STREAM_TIER_LIMITS["free"]
+    agent_scope = f"perkey:{uuid.uuid4()}"
+    held = [str(uuid.uuid4()) for _ in range(limit)]
+    overflow = str(uuid.uuid4())
+    try:
+        results = [await sse_lease.acquire(agent_scope, limit, c) for c in held]
+        if any(r is None for r in results):
+            pytest.skip("Redis 없음 — in-process 폴백에선 이 상한을 여기서 못 잰다(G5)")
+        assert all(r is True for r in results), f"상한 {limit} 이내인데 거부됐다: {results}"
+        assert await sse_lease.acquire(agent_scope, limit, overflow) is False, (
+            f"상한 {limit} 초과인데 통과했다 — 폭주 방어가 없다"
+        )
+    finally:
+        for c in held + [overflow]:
+            await sse_lease.release(agent_scope, c)
+
+
+async def test_device_cap_does_not_block_third_device():
+    """G2b.4 — 남용 상한 50 이 **정책이 아니라 폭주 방어**임을 실증한다.
+
+    "정상 사용자의 3번째 기기"가 막히지 않아야 한다 — 상한은 그보다 훨씬 위에 있어야 하고,
+    실제로 3대를 순차·동시 등록해도 통과해야 한다.
+    """
+    from app.routers.device_credentials import (
+        MAX_DEVICES_PER_MEMBER,
+        RegisterDeviceRequest,
+        register_device_credential,
+    )
+
+    assert MAX_DEVICES_PER_MEMBER > 3, "남용 상한이 정상 사용 범위(3대)를 침범한다"
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id, user_id, human_member_id = await _seed_org_project_human(s)
+            await _seed_agent(s, org_id, project_id, created_by_member_id=human_member_id)
+        labels = []
+        for i in range(3):
+            _priv, der = _keypair()
+            async with Session() as s:
+                out = await register_device_credential(
+                    _FakeRequest(),
+                    RegisterDeviceRequest(device_label=f"user-dev-{i}", public_key_der_b64=base64.b64encode(der).decode()),
+                    auth=_auth_for(user_id, org_id), session=s,
+                )
+            labels.append(out.device_label)
+        assert labels == ["user-dev-0", "user-dev-1", "user-dev-2"]
+    finally:
+        await engine.dispose()
