@@ -390,15 +390,16 @@ async def _resolve_completed_today(
     return items
 
 
-async def _resolve_published_today(
-    session: AsyncSession, org_id: uuid.UUID, tz: str,
+async def resolve_published_since(
+    session: AsyncSession, org_id: uuid.UUID, since: datetime,
 ) -> dict[str, Any]:
-    """story #3821 AC6 — org_time.py::org_midnight_utc 재사용(query param tz를
-    그대로 「경계 시간대」로 사용 — org 설정이 아니라 요청 tz, 카드 규격 그대로).
-    PublicationCommand엔 완료 시각 컬럼이 없어(status만 'completed') updated_at을
-    "완료된 시각"으로 쓴다 — completed로의 전이가 그 행의 마지막 갱신이라는
-    전제(재시도 워커의 흔한 관례, apply_command_failure류와 동일 갱신축)."""
-    since = org_midnight_utc(tz)
+    """story #3978 — `_resolve_published_today`(story #3821 AC6)에서 추출한 공용
+    판정. PublicationCommand엔 완료 시각 컬럼이 없어(status만 'completed')
+    updated_at을 "완료된 시각"으로 쓴다 — completed로의 전이가 그 행의 마지막
+    갱신이라는 전제(재시도 워커의 흔한 관례, apply_command_failure류와 동일
+    갱신축). 「오늘」(자정 경계)·「결과」(기간 경계) 둘 다 같은 이 함수로 세서
+    두 화면 숫자가 다른 판정식이 되지 않게 한다(페드루 PO 確定 2026-09-17,
+    3977 그라운딩 갭 #1 처방)."""
     rows = (await session.execute(
         select(ChannelConnection.channel, func.count(PublicationCommand.id))
         .join(ChannelConnection, ChannelConnection.id == PublicationCommand.destination)
@@ -412,6 +413,35 @@ async def _resolve_published_today(
     by_channel = [{"channel_kind": kind, "count": cnt} for kind, cnt in rows]
     total = sum(c["count"] for c in by_channel)
     return {"count": total, "by_channel": by_channel, "since": since}
+
+
+async def resolve_published_in_window(
+    session: AsyncSession, org_id: uuid.UUID, since: datetime,
+) -> dict[str, Any] | None:
+    """story #3978(「결과」 §7 갭 #1 처방) — `resolve_published_since`에 "채널 연결
+    자체가 0"이면 null을 내는 계약을 얹은 래퍼. org_cost_summary.py::
+    get_org_ads_cost_summary의 "0건은 지어낸 게 아니라 더할 게 없다는 사실"
+    원칙과 동형 — 연결이 하나라도 있으면 발행 0건도 실 0(미측정 아님), 연결
+    자체가 없으면 "발행이라는 개념 자체가 아직 없다"는 뜻이라 null(0 아님).
+    「오늘」 쪽(`_resolve_published_today`)은 이 null 판정을 안 한다(그 화면은
+    항상 실 값 0으로 충분·byte 계약 무변, 이 래퍼는 「결과」 전용 신규 소비처)."""
+    has_connection = (await session.execute(
+        select(ChannelConnection.id).where(ChannelConnection.org_id == org_id).limit(1)
+    )).first()
+    if has_connection is None:
+        return None
+    return await resolve_published_since(session, org_id, since)
+
+
+async def _resolve_published_today(
+    session: AsyncSession, org_id: uuid.UUID, tz: str,
+) -> dict[str, Any]:
+    """story #3821 AC6 — org_time.py::org_midnight_utc 재사용(query param tz를
+    그대로 「경계 시간대」로 사용 — org 설정이 아니라 요청 tz, 카드 규격 그대로).
+    story #3978부터는 공용 `resolve_published_since`에 위임(판정식 자체는
+    무변경, 응답 byte 무변 — 기존 today 테스트 그대로 GREEN이어야 한다)."""
+    since = org_midnight_utc(tz)
+    return await resolve_published_since(session, org_id, since)
 
 
 async def _resolve_usage(session: AsyncSession, org_id: uuid.UUID) -> dict[str, Any]:
