@@ -402,3 +402,64 @@ describe('ChatV3Messages — 첫 지시 미리 채우기(story #4028)', () => {
     expect(container.querySelector('[data-testid="chat-v3-compose-too-long"]')).toBeNull();
   });
 });
+
+// story #4028 CHANGES 2(PO 지적) — 이 컴포넌트는 key가 없어 대화를 바꿔도 remount되지
+// 않는다(사람이 쓰던 초안 유지 목적). 그런데 «기계가 특정 대화를 겨냥해 넣은» 첫 지시가
+// 손 안 탄 채 다른 대화로 새면 그 대화에서 잘못 전송될 수 있다 → 시드 대화 밖으로 바뀌면
+// 시드분만 비운다(사람이 손댄 초안은 유지). 전송은 여전히 0.
+describe('ChatV3Messages — 대화 전환 시 시드 처리(story #4028 CHANGES 2)', () => {
+  async function renderAt(ref: React.RefObject<ChatV3MessagesHandle | null>, threadId: string, initialCompose?: string | null) {
+    const { ChatV3Messages } = await import('./chat-v3-messages');
+    await act(async () => {
+      root.render(wrap(
+        <ChatV3Messages
+          ref={ref}
+          threadId={threadId}
+          meId="me-1"
+          agentName="담롱 온찬"
+          locale="ko"
+          needsMe={[]}
+          todayV3Enabled
+          onOpenArtifactChange={() => {}}
+          onWorkItemRefChange={() => {}}
+          initialCompose={initialCompose}
+        />,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+  }
+  const input = () => container.querySelector('[data-testid="chat-v3-compose-input"]') as HTMLInputElement;
+  function typeInto(el: HTMLInputElement, value: string) {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    setter.call(el, value);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  it('손 안 탄 시드는 다른 대화로 바뀌면 비워진다(다른 대화로 전송 방지)', async () => {
+    stub();
+    const ref = createRef<ChatV3MessagesHandle>();
+    await renderAt(ref, 'conv-1', 'conv-1 에이전트용 첫 지시');
+    expect(input().value).toBe('conv-1 에이전트용 첫 지시');
+    await renderAt(ref, 'conv-2', 'conv-1 에이전트용 첫 지시'); // 전환(remount 아님)
+    expect(input().value).toBe('');
+  });
+
+  it('사람이 손댄 초안은 대화를 바꿔도 유지된다', async () => {
+    stub();
+    const ref = createRef<ChatV3MessagesHandle>();
+    await renderAt(ref, 'conv-1', '기계 시드');
+    await act(async () => { typeInto(input(), '사람이 직접 쓴 초안'); });
+    expect(input().value).toBe('사람이 직접 쓴 초안');
+    await renderAt(ref, 'conv-2', '기계 시드'); // 전환
+    expect(input().value).toBe('사람이 직접 쓴 초안'); // 사람 글자는 유지
+  });
+
+  it('시드→전환 과정에서 전송(POST)은 0', async () => {
+    stub();
+    const ref = createRef<ChatV3MessagesHandle>();
+    await renderAt(ref, 'conv-1', '기계 시드');
+    await renderAt(ref, 'conv-2', '기계 시드');
+    const posts = fetchMock.mock.calls.filter((c) => (c[1] as { method?: string } | undefined)?.method === 'POST');
+    expect(posts.length).toBe(0);
+  });
+});

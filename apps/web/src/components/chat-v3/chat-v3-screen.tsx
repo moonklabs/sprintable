@@ -175,10 +175,11 @@ export function ChatV3Screen({ todayV3Enabled }: { todayV3Enabled: boolean }) {
   // story #4028 AC2 — 첫 지시 값을 캡처(위 initialCompose)한 뒤 주소에서 compose만
   // 지운다: 새로고침·주소 공유로 지시가 다시 채워지지 않게. conversation 인자는 그대로
   // 두고 `replace`로 바꿔 뒤로가기 기록도 안 쌓는다. compose가 있을 때만 1회 — 지운 뒤
-  // composeParam이 null이 되면 다음 실행은 즉시 반환(루프 0).
+  // composeParam이 null이 되면 다음 실행은 즉시 반환(루프 0). CHANGES 2 — `{ scroll: false }`:
+  // 기본값은 맨 위로 스크롤이라, 대화를 보고 있는데 주소 정리만으로 화면이 튀지 않게 한다.
   useEffect(() => {
     if (!composeParam) return;
-    router.replace(conversationParam ? `${pathname}?conversation=${conversationParam}` : pathname);
+    router.replace(conversationParam ? `${pathname}?conversation=${conversationParam}` : pathname, { scroll: false });
   }, [composeParam, conversationParam, pathname, router]);
 
   // story #4018 AC3 — 사람이 직접 고르면 주소를 push(뒤로가기 = 이전 대화). 기본

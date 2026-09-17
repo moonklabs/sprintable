@@ -73,6 +73,14 @@ export const ChatV3Messages = forwardRef<ChatV3MessagesHandle, ChatV3MessagesPro
   const [composeTooLong, setComposeTooLong] = useState(() => seedFromCompose(initialCompose).tooLong);
   const [sending, setSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  // story #4028 CHANGES 2(PO 지적) — 이 컴포넌트는 key가 없어 threadId가 바뀌어도 remount
+  // 되지 않는다(draft는 대화 전환에도 유지 — 사람이 쓰던 초안을 안 잃게 한 기존 결). 그런데
+  // 시드는 «마운트 시점 대화(threadId)를 겨냥해 기계가 넣은» 첫 지시라, 사람이 손대지 않은
+  // 채 다른 대화로 바뀌면 그 대화에서 잘못 전송될 수 있다(사람 초안과 위험이 다르다). 시드한
+  // 대화 id와 「아직 시드 그대로인지」를 들고, 다른 대화로 바뀌면 시드분만 비운다(사람이
+  // 손댔으면 그 글자는 유지 — onChange에서 pristine=false).
+  const seededThreadIdRef = useRef<string | null>(initialCompose ? threadId : null);
+  const seedPristineRef = useRef<boolean>(!!initialCompose);
 
   // story #4008 CHANGES(PO 지적 ①, 2026-09-17) — reload()가 직접 호출하는 loadMessages는
   // React 이펙트가 아니라 그 cleanup(cancelled=true)을 아무도 안 불러준다 — 재연결으로
@@ -82,6 +90,17 @@ export const ChatV3Messages = forwardRef<ChatV3MessagesHandle, ChatV3MessagesPro
   // 경로까지 균일하게 보호).
   const activeThreadIdRef = useRef(threadId);
   useEffect(() => { activeThreadIdRef.current = threadId; }, [threadId]);
+
+  // story #4028 CHANGES 2 — 손 안 탄 시드를 겨냥 대화 밖으로는 안 새게 한다. 시드 대화가
+  // 아닌 다른 대화로 바뀌고 아직 시드 그대로면 draft·안내를 비운다(사람이 이미 손댔으면
+  // seedPristineRef=false라 여기서 아무것도 안 지운다 — 그 초안은 유지).
+  useEffect(() => {
+    if (!seedPristineRef.current || seededThreadIdRef.current === null) return;
+    if (threadId === seededThreadIdRef.current) return;
+    seedPristineRef.current = false;
+    setDraft('');
+    setComposeTooLong(false);
+  }, [threadId]);
 
   // story #4008 CHANGES(유나 design·PO 지적, 2026-09-17) — 재연결·탭 복귀마다 이 화면이
   // 스켈레톤으로 순간 비워졌다: reload()가 이 함수를 그대로 불러 매번 setMessages(null)부터
@@ -269,7 +288,7 @@ export const ChatV3Messages = forwardRef<ChatV3MessagesHandle, ChatV3MessagesPro
         <div className="flex items-center gap-2 p-3">
         <Input
           value={draft}
-          onChange={(e) => { setDraft(e.target.value); if (composeTooLong) setComposeTooLong(false); }}
+          onChange={(e) => { setDraft(e.target.value); seedPristineRef.current = false; if (composeTooLong) setComposeTooLong(false); }}
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void handleSend(); } }}
           placeholder={t('instructionPlaceholder', { agent: agentName })}
           aria-label={t('instructionPlaceholder', { agent: agentName })}
