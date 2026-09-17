@@ -38,7 +38,7 @@ export function AdsCapCard({ orgId, costSummaryState }: AdsCapCardProps) {
         type="button"
         variant="ghost"
         onClick={() => setExpanded((v) => !v)}
-        className="h-auto w-full justify-between rounded-md px-2 py-1.5 text-left font-medium text-foreground"
+        className="h-auto min-h-0 w-full justify-between p-0 text-left text-xs font-medium text-foreground whitespace-normal hover:bg-transparent aria-expanded:bg-transparent"
         aria-expanded={expanded}
         data-testid="ads-cap-card-toggle"
       >
