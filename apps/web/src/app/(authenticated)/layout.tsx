@@ -107,12 +107,23 @@ export default async function AuthenticatedLayout({
   // bare-link 결함의 진짜 근본원인.
   const projectAuthHeader = { ...authHeader, 'X-Org-Id': pathOrgId ?? me?.org_id ?? '' };
   const projectInfoTargetId = pathProjectId ?? me?.project_id;
-  const projectInfo = projectInfoTargetId
-    ? await fetch(`${fastapiUrl}/api/v2/projects/${projectInfoTargetId}`, { headers: projectAuthHeader, cache: 'no-store' })
-        .then((r) => (r.ok ? r.json() : null))
-        .then((json: { name?: string; slug?: string | null } | null) => json)
-        .catch(() => null)
-    : null;
+  // story #4032(CLS 처방 CHANGES-1, PO 지적) — activation 완주 여부를 서버가 org 컨텍스트가
+  // 확定된 이 시점에 조회해 둔다(신규 왕복 1개, projectInfo와 병렬). JWT app_metadata
+  // 빌더에 새 클레임을 얹는 대신(org/project 해소 이력 사고가 반복된 자리, 블래스트 반경
+  // 과다) 이 레이아웃이 이미 하는 서버조회 패턴을 그대로 재사용한다 — 실패/불명이면
+  // undefined로 흘려보내 클라이언트가 기존처럼 알아낸다(과다신뢰 없음).
+  const [projectInfo, activationChecklist] = await Promise.all([
+    projectInfoTargetId
+      ? fetch(`${fastapiUrl}/api/v2/projects/${projectInfoTargetId}`, { headers: projectAuthHeader, cache: 'no-store' })
+          .then((r) => (r.ok ? r.json() : null))
+          .then((json: { name?: string; slug?: string | null } | null) => json)
+          .catch(() => null)
+      : Promise.resolve(null),
+    fetch(`${fastapiUrl}/api/v2/activation/checklist`, { headers: projectAuthHeader, cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((json: { all_complete?: boolean } | null) => json?.all_complete)
+      .catch(() => undefined),
+  ]);
   // ⛔실측 결함(2026-08-09, PO puppeteer 재현 — 흐름 메뉴→/flow bare→dead-end 404) — 위 단건조회
   // (GET /projects/{id})가 정상 프로젝트(slug 有)인데도 이따금 slug 없이/실패 응답해 사이드바가
   // slug 없는 bare 링크만 만들었다(근본원인=위 X-Org-Id 누락). 리스트 엔드포인트(GET /projects)는
@@ -169,6 +180,7 @@ export default async function AuthenticatedLayout({
       orgMemberships={orgMemberships}
       pathOrgId={pathOrgId}
       pathProjectId={pathProjectId}
+      initialActivationComplete={activationChecklist}
     >
       <StorageCapacityToastProvider>
         <CrossProjectToastProvider>
