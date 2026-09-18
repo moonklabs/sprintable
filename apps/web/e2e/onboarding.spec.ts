@@ -10,7 +10,8 @@ test.describe('Onboarding — new user setup', () => {
     const password = 'TestPassword123!';
 
     await page.goto('/register');
-    await page.waitForLoadState('networkidle');
+    // CHANGES(페드루 PO, 2026-09-18) — networkidle 정리 — 바로 다음 줄의 이메일 입력창
+    // visible 대기가 이미 decisive 신호라 networkidle은 여기서도 그냥 중복.
     const emailInput = page.locator('input[placeholder="Email"]');
     await emailInput.waitFor({ state: 'visible', timeout: 10000 });
     await emailInput.click();
