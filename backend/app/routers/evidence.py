@@ -2,7 +2,7 @@
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, computed_field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,6 +12,8 @@ from app.dependencies.database import get_db
 from app.models.evidence import _CLIENT_CREATABLE_TYPES, Evidence
 from app.models.pm import Story, Task
 from app.models.visual_artifact import ArtifactVersion, VisualArtifact
+from app.services.agent_onboarding_config import resolve_locale_from_request
+from app.services.i18n_catalog import t
 from app.services.member_resolver import resolve_member
 from app.services.project_auth import has_project_access
 from app.services.reference_registry import _project_id_of_evidence
@@ -238,7 +240,7 @@ _EVIDENCE_KIND_TYPE_REGISTRY: dict[str, str] = {
 
 async def _validate_and_normalize_evidence_payload(
     session: AsyncSession, *, org_id: uuid.UUID, payload: dict | None, caller_type: str,
-    evidence_type: str, caller_id: uuid.UUID | None = None,
+    evidence_type: str, resolved_locale: str, caller_id: uuid.UUID | None = None,
 ) -> dict | None:
     """story #3498(페드루 PO REQUIRED, PR#3847 리뷰) — client-writable payload를 연
     대가로 두 가지를 서버가 강제한다.
@@ -286,9 +288,9 @@ async def _validate_and_normalize_evidence_payload(
                 status_code=422,
                 detail={
                     "code": "EVIDENCE_PAYLOAD_INVALID",
-                    "message": (
-                        f"payload.kind={kind!r}는 등재되지 않은 kind입니다 — 허용: "
-                        f"{sorted(_EVIDENCE_KIND_TYPE_REGISTRY)}."
+                    "message": t(
+                        "evidence.kind_unregistered", resolved_locale,
+                        kind=kind, allowed=", ".join(sorted(_EVIDENCE_KIND_TYPE_REGISTRY)),
                     ),
                 },
             )
@@ -297,9 +299,9 @@ async def _validate_and_normalize_evidence_payload(
                 status_code=422,
                 detail={
                     "code": "EVIDENCE_PAYLOAD_INVALID",
-                    "message": (
-                        f"payload.kind={kind!r}는 type={expected_type!r}로 실려야 합니다 "
-                        f"(받은 type={evidence_type!r})."
+                    "message": t(
+                        "evidence.kind_type_mismatch", resolved_locale,
+                        kind=kind, expected_type=expected_type, received_type=evidence_type,
                     ),
                 },
             )
@@ -366,7 +368,10 @@ async def create_evidence(
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
+    locale: str | None = None,
+    accept_language: str | None = Header(None, alias="Accept-Language"),
 ) -> EvidenceResponse:
+    resolved_locale = resolve_locale_from_request(locale, accept_language)
     caller = await resolve_member(auth, org_id, session)
     # story #2042/#1936(같은 결함 클래스, 실측으로 확定): resolve_member().id는 휴먼일 때
     # org_member.id인데 has_project_access가 기대하는 축은 raw auth.user_id(users.id) —
@@ -386,7 +391,7 @@ async def create_evidence(
 
     payload = await _validate_and_normalize_evidence_payload(
         session, org_id=org_id, payload=body.payload, caller_type=caller.type,
-        evidence_type=body.type, caller_id=caller.id,
+        evidence_type=body.type, resolved_locale=resolved_locale, caller_id=caller.id,
     )
 
     evidence = Evidence(
