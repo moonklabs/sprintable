@@ -71,6 +71,7 @@ function unassignedOnlyPayload(): FetchedWorkList {
         stories: [{
           storyId: 's1',
           title: '미할당 스토리',
+          status: 'backlog',
           hypothesisIds: [],
           rows: [{
             id: 't1', kind: 'task', workItemType: 'task', workItemId: 't1', title: '할일1',
@@ -103,6 +104,43 @@ describe('WorkListShell — 목표 미할당 스토리(story #3934)', () => {
     fetchWorkListMock.mockResolvedValue({ workList: { groups: [], partial: false, totalStoryCount: 0 }, hypotheses: [] });
     await mount();
     expect(container.textContent).toContain('표시할 일이 없어요');
+  });
+
+  // story #3976(AC3, PO 확定) — 「목표 없음」 그룹에만 안내 문장(그 외 목표는 문장 0).
+  it('⭐「미분류」 그룹에는 안내 문장이 함께 뜬다', async () => {
+    fetchWorkListMock.mockResolvedValue(unassignedOnlyPayload());
+    await mount();
+    expect(container.textContent).toContain('목표에 안 묶인 일이에요');
+  });
+});
+
+// story #3976(AC5, PO 확定) — 스토리 카드 배지는 Story.status SSOT(entity-status-labels.ts).
+// work-list-row.tsx의 파생 실행상태(STATE_TEXT)와 다른 축이라 섞지 않는다.
+describe('WorkListShell — 스토리 카드 상태 배지(Story.status SSOT, story #3976)', () => {
+  it('⭐ready-for-dev → 「착수 대기」로 렌더된다(work-list 행 상태 어휘와 무관)', async () => {
+    const payload = unassignedOnlyPayload();
+    payload.workList.groups[0]!.stories[0]!.status = 'ready-for-dev';
+    fetchWorkListMock.mockResolvedValue(payload);
+    await mount();
+    expect(container.querySelector('[data-testid="story-status-badge"]')?.textContent).toBe('착수 대기');
+  });
+
+  it('done → 「완료」로 렌더된다', async () => {
+    const payload = unassignedOnlyPayload();
+    payload.workList.groups[0]!.stories[0]!.status = 'done';
+    fetchWorkListMock.mockResolvedValue(payload);
+    await mount();
+    expect(container.querySelector('[data-testid="story-status-badge"]')?.textContent).toBe('완료');
+  });
+});
+
+// story #3976(AC4, PO 확定) — 진행률 분수는 기존 일+실행 개수 그대로(SP 기준 새 콜 0),
+// 단위 낱말만 붙여 무엇을 센 것인지 보이게 한다.
+describe('WorkListShell — 목표 진행률 단위 낱말(story #3976)', () => {
+  it('⭐진행률 문구에 단위 낱말("일")이 함께 있다', async () => {
+    fetchWorkListMock.mockResolvedValue(unassignedOnlyPayload());
+    await mount();
+    expect(container.textContent).toContain('일 0/1개 완료');
   });
 });
 
