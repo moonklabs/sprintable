@@ -1,0 +1,1 @@
+{"file": "tests/test_4045_creator_slot_stage_wiring.py", "sec": 2.5, "source": "story-4045(2026-09-18) — 로컬 실측(disposable Postgres 16, `uv run pytest` 단독실행, 3 passed in 2.51s). CI 러너 부하·병렬 스케줄링에 따라 실 CI 값은 달라질 수 있어 잠정값으로 표시 — story #3392 unweighted 가드가 재측정 필요 여부를 첫 CI run 후 알려줄 것(story #4039 test_4039_marketing_recipe_video_production_realdb.py.json 선례 그대로)."}
