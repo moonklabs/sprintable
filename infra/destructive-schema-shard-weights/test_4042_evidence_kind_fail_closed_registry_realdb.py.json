@@ -1,0 +1,1 @@
+{"file": "tests/test_4042_evidence_kind_fail_closed_registry_realdb.py", "sec": 8.0, "source": "story-4042(2026-09-18) — 로컬 실측 예정(throwaway pgvector 컨테이너, test_3561 동형 HTTP 하네스 재사용 — 파일당 own Base.metadata.create_all engine 8건). 첫 실 CI run 후 실측치로 교체 필요."}
