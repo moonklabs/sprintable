@@ -168,20 +168,25 @@ describe('computeStaleTokenAllowlist — TOKEN_ALLOWLIST 죽은 항목 탐지', 
 });
 
 // 실 파일 실측 양성대조 — story #3922(§⑤ 낱말 드리프트 전량 정리, 2026-09-15)가 #3880
-// 잔존 드리프트(PO·QA·PM·AU·SP·WIP)를 판정대로 전량 정리했는지 직접 확인. PO/QA/PM/AU는
-// 역할 약어 패밀리(AU는 "자동화" 병기)로 TOKEN_ALLOWLIST 이관, SP/WIP는 "포인트"/"진행
-// 한도"로 한국어 전환돼 값 자체가 사라졌다(baseline도 TOKEN_ALLOWLIST도 어디에도 안 남음).
+// 잔존 드리프트(PO·QA·PM·AU·SP·WIP)를 판정대로 전량 정리했는지 직접 확인. PO/QA/PM은
+// 역할 약어 패밀리로 TOKEN_ALLOWLIST 이관, SP/WIP는 "포인트"/"진행 한도"로 한국어
+// 전환돼 값 자체가 사라졌다(baseline도 TOKEN_ALLOWLIST도 어디에도 안 남음).
+//
+// AU는 그 뒤(2026-09-18, prod 승격 결제 되돌림)로 유일 소비처(automation-usage 경고
+// 배너 문구)가 ko.json에서 사라져 TOKEN_ALLOWLIST에서도 제거됐다 — story #3922 당시엔
+// 살아있던 값이 이후 별도 사유로 죽은 것이라 이 pin에서 뺀다(SP/WIP와 같은 결말,
+// 원인만 다르다).
 describe('실측 — story #3922가 PO·QA·PM·AU·SP·WIP를 判定대로 정리했다', () => {
-  it('PO·QA·PM·AU는 TOKEN_ALLOWLIST 안(역할 약어 패밀리)', () => {
-    for (const t of ['PO', 'QA', 'PM', 'AU']) {
+  it('PO·QA·PM은 TOKEN_ALLOWLIST 안(역할 약어 패밀리)', () => {
+    for (const t of ['PO', 'QA', 'PM']) {
       expect(TOKEN_ALLOWLIST.has(t)).toBe(true);
     }
   });
 
-  it('SP·WIP는 한국어로 전환돼 ko.json 어디에도 남아있지 않다(baseline도 TOKEN_ALLOWLIST도 불필요)', () => {
+  it('SP·WIP·AU는 ko.json 어디에도 남아있지 않다(baseline도 TOKEN_ALLOWLIST도 불필요)', () => {
     const koJson = loadKoJson(KO_JSON_PATH);
     const refs = scanKoValues(koJson);
-    for (const t of ['SP', 'WIP']) {
+    for (const t of ['SP', 'WIP', 'AU']) {
       expect(TOKEN_ALLOWLIST.has(t)).toBe(false);
       expect(refs.some((r) => r.token === t)).toBe(false);
     }
