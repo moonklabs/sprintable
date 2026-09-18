@@ -712,7 +712,7 @@
     "recipeFlowWorkflowLabel": "Workflow · single item · this screen",
     "recipeFlowEventLabel": "Event",
     "recipeFlowEventValue": "Fired by the workflow",
-    "recipeFlowRunLabel": "Run",
+    "recipeFlowRunLabel": "Agent",
     "recipeFlowRunValue": "Executes the stages",
     "recipeFlowCaption": "This screen = the workflow definition (template). What actually runs once applied is a workflow run (formerly \"loop\", a separate screen) — there's no current position here.",
     "definerTabBasic": "Basic",

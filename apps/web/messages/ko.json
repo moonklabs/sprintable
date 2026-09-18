@@ -712,7 +712,7 @@
     "recipeFlowWorkflowLabel": "워크플로우 · 개별 항목 · 이 화면",
     "recipeFlowEventLabel": "이벤트",
     "recipeFlowEventValue": "워크플로우가 쏨",
-    "recipeFlowRunLabel": "실행",
+    "recipeFlowRunLabel": "에이전트",
     "recipeFlowRunValue": "단계 수행",
     "recipeFlowCaption": "이 화면 = 워크플로우 정의(템플릿). 적용돼 도는 건 워크플로우 실행(구 루프·별도 화면)이라 여긴 현재 위치 없음.",
     "definerTabBasic": "기본",

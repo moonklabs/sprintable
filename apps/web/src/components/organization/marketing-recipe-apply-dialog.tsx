@@ -108,7 +108,7 @@ export function MarketingRecipeApplyDialog({
           <div className="flex items-center gap-3 rounded-md border border-input p-3" data-testid="slot-director">
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                {t('recipeApplyV2DirectorRole')} <Badge variant="info">{t('recipeApplyV2DirectorBadge')}</Badge>
+                {t('recipeApplyV2DirectorRole')} <Badge variant="secondary">{t('recipeApplyV2DirectorBadge')}</Badge>
               </div>
               <p className="mt-0.5 text-xs text-muted-foreground">{t('recipeApplyV2DirectorDesc')}</p>
             </div>
@@ -121,7 +121,7 @@ export function MarketingRecipeApplyDialog({
           <div className="flex items-center gap-3 rounded-md border border-input p-3" data-testid="slot-creator">
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                {t('recipeApplyV2CreatorRole')} <Badge variant="success">{t('recipeApplyV2CreatorBadge')}</Badge>
+                {t('recipeApplyV2CreatorRole')} <Badge variant="secondary">{t('recipeApplyV2CreatorBadge')}</Badge>
               </div>
               <p className="mt-0.5 text-xs text-muted-foreground">{t('recipeApplyV2CreatorDesc')}</p>
               <p className="mt-0.5 text-[11px] text-muted-foreground">{t('recipeApplyV2StageCoverage', { count: creatorStageCount })}</p>
@@ -142,7 +142,7 @@ export function MarketingRecipeApplyDialog({
           <div className="flex items-center gap-3 rounded-md border border-dashed border-input p-3 opacity-70" data-testid="slot-compute">
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                {t('recipeApplyV2ComputeRole')} <Badge variant="warning">{t('recipeApplyV2ComputeBadge')}</Badge>
+                {t('recipeApplyV2ComputeRole')} <Badge variant="secondary">{t('recipeApplyV2ComputeBadge')}</Badge>
               </div>
               <p className="mt-0.5 text-xs text-muted-foreground">{t('recipeApplyV2ComputeDesc')}</p>
             </div>
