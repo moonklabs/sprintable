@@ -9,6 +9,7 @@ import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { GateEvidence, GateActivityHistory, gateNeedsAction, gateDecision } from '@/components/cage/gate-evidence';
+import { ProductionWorkbenchEvidencePanel } from '@/components/cage/production-workbench-evidence';
 import { BoostExecutionControl } from '@/components/cage/boost-execution-control';
 import { GateSignatureApproval } from '@/components/cage/gate-signature-approval';
 import { GateUndoButton, isUndoEligible } from '@/components/cage/gate-undo-button';
@@ -38,6 +39,15 @@ import { gateApproveLabelKey } from '@/lib/newsletter-gate-approve-label';
 interface GateDetail extends GateItem {
   org_id: string;
   project_id?: string | null;
+}
+
+// story #4057(E-RECIPE-1 ③, 유나 작업대 시안 v1) — GateEvidence 옆에 크리에이터 에이전트
+// stage 산출물(#4041 계약)을 얹는다. work_item_type이 story/task가 아니면(doc·loop_run·
+// artifact 등) 이 축 자체가 없어 안 그린다 — GateItem.work_item_type은 서버 원문 문자열이라
+// 여기서 좁힌다(가짜 상태로 마운트하지 않는다).
+function GateProductionWorkbenchEvidence({ gate }: { gate: GateDetail }) {
+  if (gate.work_item_type !== 'story' && gate.work_item_type !== 'task') return null;
+  return <ProductionWorkbenchEvidencePanel workItemId={gate.work_item_id} workItemType={gate.work_item_type} />;
 }
 
 export default function GateDetailPage() {
@@ -396,6 +406,7 @@ export default function GateDetailPage() {
                 {!needsAction ? (
                   <div className="space-y-3">
                     <GateEvidence gate={gate} />
+                    <GateProductionWorkbenchEvidence gate={gate} />
                     {/* story #2043 AC1: status·requires_human·evidence_status 조합별 단일 문장 —
                         조합표(코드 근거):
                         - status≠pending → 이미 해소됨(무엇으로 닫혔는지)
@@ -437,6 +448,7 @@ export default function GateDetailPage() {
                   // 안 주고, 지어내지 않는다는 이 코드베이스 관례 그대로).
                   <div className="space-y-3">
                     <GateEvidence gate={gate} />
+                    <GateProductionWorkbenchEvidence gate={gate} />
                     <p className="text-[11px] text-muted-foreground">
                       {gate.designated_approver_id && gate.designated_approver_id !== currentTeamMemberId
                         ? t('gateReadonlyDesignatedElsewhere')
@@ -475,6 +487,7 @@ export default function GateDetailPage() {
                 ) : (
                   <div className="space-y-3">
                     <GateEvidence gate={gate} />
+                    <GateProductionWorkbenchEvidence gate={gate} />
                     {transitionError ? (
                       <p
                         className="rounded-lg border border-destructive/30 bg-destructive-tint px-3 py-2 text-xs text-foreground"
