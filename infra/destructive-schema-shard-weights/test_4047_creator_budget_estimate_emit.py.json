@@ -1,0 +1,1 @@
+{"file": "tests/test_4047_creator_budget_estimate_emit.py", "sec": 2.81, "source": "story-4047(2026-09-18) — 로컬 실측(disposable Postgres 16, `uv run pytest` 단독실행, 4 passed in 2.81s). CI 러너 부하·병렬 스케줄링에 따라 실 CI 값은 달라질 수 있어 잠정값으로 표시 — story #3392 unweighted 가드가 재측정 필요 여부를 첫 CI run 후 알려줄 것(story #4039/#4045 선례와 동형)."}
