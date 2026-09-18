@@ -380,8 +380,19 @@ jobs:
       # lhci가 안 돌면 conclusion이 `skipped`라 이 조건 자체가 거짓이 되어 검증 스텝도
       # 같이 skip — 오귀속 문구 자체가 안 뜬다. lhci가 돌고 실패한 경우(=이 스텝들이
       # 실제로 겨냥하는 경우)만 그대로 돌아 표를 낸다.
+      #
+      # story #4032(PO 지적, 3차·자체 재현 없이 push했다가 적발됨) — `steps.lhci.
+      # conclusion == ...`만으로는 GHA의 암묵 `&& success()`를 못 없앤다. `if:` 식에
+      # 상태 함수(success()·failure()·always()·cancelled())가 하나도 없으면 GHA가
+      # 조건 전체에 `&& success()`를 자동으로 덧붙인다(공식 문서 규칙) — `steps.lhci.
+      # conclusion`은 컨텍스트지 상태 함수가 아니라서, lhci가 실패해 잡 상태가 failure가
+      # 되는 순간 그 암묵 success()가 거짓이 되어 검증 스텝이 다시 skipped로 돌아간다
+      # (직전 라운드에서 없앴다고 착각한 바로 그 결함이 형태만 바뀌어 재발할 뻔했다,
+      # 실제 run으로 확認 안 하고 push했다가 PO가 적발). `!cancelled()`를 조건 맨
+      # 앞에 둬 상태 함수를 확보하면서(취소된 run에서는 여전히 안 돎) 뒤의 conclusion
+      # 비교로 "lhci 자체가 안 돎(skipped)"만 정확히 걸러낸다.
       - name: Verify puppeteer auth script actually ran (trace count)
-        if: steps.lhci.conclusion == 'success' || steps.lhci.conclusion == 'failure'
+        if: ${{ !cancelled() && (steps.lhci.conclusion == 'success' || steps.lhci.conclusion == 'failure') }}
         run: |
           set -euo pipefail
           if [ ! -f ./lighthouse-auth-trace.log ]; then
@@ -398,7 +409,7 @@ jobs:
 
       - name: Verify authenticated screens measured (not /login) + write summary
         id: verify
-        if: steps.lhci.conclusion == 'success' || steps.lhci.conclusion == 'failure'
+        if: ${{ !cancelled() && (steps.lhci.conclusion == 'success' || steps.lhci.conclusion == 'failure') }}
         run: |
           python3 -c "
           import json, sys, os
@@ -467,7 +478,7 @@ jobs:
       # (공개 링크)로 올렸다. puppeteerScript 전환이 그 노출 경로 자체를 없앴는지 매 run
       # 실측으로 확認한다(값은 안 찍고 개수만 — 새는 게 있어도 이 로그에 다시 안 남게).
       - name: Verify no session token leakage in reports
-        if: steps.lhci.conclusion == 'success' || steps.lhci.conclusion == 'failure'
+        if: ${{ !cancelled() && (steps.lhci.conclusion == 'success' || steps.lhci.conclusion == 'failure') }}
         run: |
           set -euo pipefail
           if [ ! -d .lighthouseci ] || [ -z "$(ls -A .lighthouseci/*.json 2>/dev/null)" ]; then
@@ -487,7 +498,7 @@ jobs:
           fi
 
       - name: Comment PR with Lighthouse results
-        if: (steps.lhci.conclusion == 'success' || steps.lhci.conclusion == 'failure') && github.event_name == 'pull_request'
+        if: ${{ !cancelled() && (steps.lhci.conclusion == 'success' || steps.lhci.conclusion == 'failure') && github.event_name == 'pull_request' }}
         continue-on-error: true
         uses: actions/github-script@v7
         env:
