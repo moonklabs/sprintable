@@ -50,7 +50,26 @@ const ROUTES: RouteSpec[] = [
 
 const WIDTHS = [390, 768, 1440] as const;
 
-/** ⓑ char-split zero — 텍스트를 품은 요소의 렌더 폭이 40px 미만인 것이 0개. */
+/**
+ * ⓑ char-split zero — 텍스트를 품은 요소가 좁은 폭에서 여러 줄로 «쪼개져» 렌더되는
+ * 것이 0개(글자 단위 줄바꿈).
+ *
+ * CHANGES(카디르 AC4 재현, 2026-09-18) — networkidle 처방 뒤 처음으로 실 단언까지
+ * 도달하자 `/content`·`/content/channel-posts` 목록의 「· v{현재버전}」 표시(예:
+ * "· v1")가 폭<40px로 걸렸다. 실측(Playwright, 390/768/1440 전부): 그 span은
+ * `Element.getClientRects()` 기준 **항상 rect 1개**(한 줄) — JSX가 "· v"와
+ * `{version}`을 형제 텍스트 노드 2개로 쪼개 놓아서 `Range.getClientRects()`(자식
+ * 노드 경계마다 새 rect)로 재면 2개로 잘못 보였을 뿐, 실제 줄바꿈(같은 요소가 서로
+ * 다른 y좌표에 걸침)은 0건이었다 — 실결함이 아니라 «짧은 라벨이 40px보다 좁다»는
+ * 자연스러운 사실을 폭 하나만으로 오판한 가드 자신의 결함(양쪽 다 실측, 추측 아님).
+ *
+ * 처방 — 폭<40px는 «후보» 조건으로만 쓰고, **그 요소 자신의 `getClientRects()`가
+ * 2개 이상**(=실제로 다른 y좌표에 걸쳐 렌더 — 진짜 글자 단위 줄바꿈)일 때만 위반으로
+ * 센다. `Element.getClientRects()`는 자식 텍스트 노드 경계가 아니라 실제 줄
+ * fragment 경계로 갈리므로(위 실측으로 확認), 형제 텍스트 노드가 몇 개든 한 줄이면
+ * 항상 1개를 돌려준다 — 짧은 라벨(폭<40px·1줄)과 진짜 char-split(폭<40px·2줄+)을
+ * 정확히 가른다.
+ */
 async function countNarrowTextNodes(page: Page, containerSelector: string): Promise<number> {
   return page.evaluate((sel) => {
     const container = document.querySelector(sel);
@@ -65,7 +84,11 @@ async function countNarrowTextNodes(page: Page, containerSelector: string): Prom
       if (hasDirectText) {
         const rect = node.getBoundingClientRect();
         const style = getComputedStyle(node);
-        if (style.display !== 'none' && rect.width > 0 && rect.width < 40) count++;
+        if (style.display !== 'none' && rect.width > 0 && rect.width < 40) {
+          // 폭만으론 「짧은 라벨」과 「진짜 줄바꿈」을 못 가른다 — 이 요소 자신이 실제로
+          // 여러 줄 fragment에 걸쳐 있을 때만(진짜 char-split) 센다.
+          if (node.getClientRects().length > 1) count++;
+        }
       }
       node = walker.nextNode() as Element | null;
     }
