@@ -566,7 +566,7 @@
     "memorySlotTitle": "Not available yet",
     "memorySlotBody": "Org-wide memory will appear here once it's ready.",
     "eventsTitle": "Recipes",
-    "eventsDescription": "View org event definitions (presets + custom) and create, edit, or deactivate custom ones.",
+    "eventsDescription": "View org workflows (presets + custom) and create, edit, or deactivate custom ones.",
     "eventsCustomGroupTitle": "Custom workflows",
     "eventsPresetGroupTitle": "Preset workflows",
     "eventsPresetReadonlyNote": "Preset workflows are read-only (platform-provided, not editable per org).",

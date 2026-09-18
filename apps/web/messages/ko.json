@@ -566,7 +566,7 @@
     "memorySlotTitle": "아직 준비 중인 화면이에요",
     "memorySlotBody": "조직 단위로 쌓이는 기억을 이 자리에서 보게 돼요.",
     "eventsTitle": "레시피",
-    "eventsDescription": "조직 이벤트 정의(기본 제공+내가 만든 정의)를 열람하고, 내가 만든 정의를 생성·수정·비활성해요.",
+    "eventsDescription": "조직 워크플로우(기본 제공+내가 만든 워크플로우)를 열람하고, 내가 만든 워크플로우를 생성·수정·비활성해요.",
     "eventsCustomGroupTitle": "내가 만든 워크플로우",
     "eventsPresetGroupTitle": "기본 제공 워크플로우",
     "eventsPresetReadonlyNote": "기본 제공 워크플로우는 읽기 전용이에요(플랫폼 제공, 조직에서 수정 불가).",
