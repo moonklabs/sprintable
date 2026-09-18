@@ -83,7 +83,7 @@ async def test_register_with_valid_block_template():
 
             resp = await create_event_definition(
                 CreateEventDefinitionRequest(
-                    key="org.acme.widget.made", payload_schema=_VALID_SCHEMA,
+                    key="org.acme.widget.made", name="위젯 제작 완료", payload_schema=_VALID_SCHEMA,
                     routing=_NONE_ROUTING, block_template=_VALID_TEMPLATE,
                 ),
                 db=s, auth=_human_auth(user_id, org_id), org_id=org_id,
@@ -107,7 +107,7 @@ async def test_register_without_block_template_stays_none():
 
             resp = await create_event_definition(
                 CreateEventDefinitionRequest(
-                    key="org.acme.widget.made", payload_schema=_VALID_SCHEMA, routing=_NONE_ROUTING,
+                    key="org.acme.widget.made", name="위젯 제작 완료", payload_schema=_VALID_SCHEMA, routing=_NONE_ROUTING,
                 ),
                 db=s, auth=_human_auth(user_id, org_id), org_id=org_id,
             )
@@ -130,7 +130,7 @@ async def test_register_rejects_invalid_block_template():
             with pytest.raises(HTTPException) as ei:
                 await create_event_definition(
                     CreateEventDefinitionRequest(
-                        key="org.acme.widget.made", payload_schema=_VALID_SCHEMA,
+                        key="org.acme.widget.made", name="위젯 제작 완료", payload_schema=_VALID_SCHEMA,
                         routing=_NONE_ROUTING, block_template={"blocks": [{"type": "carousel"}]},
                     ),
                     db=s, auth=_human_auth(user_id, org_id), org_id=org_id,
@@ -156,7 +156,7 @@ async def test_patch_block_template_bumps_version_and_revalidates():
 
             created = await create_event_definition(
                 CreateEventDefinitionRequest(
-                    key="org.acme.widget.made", payload_schema=_VALID_SCHEMA, routing=_NONE_ROUTING,
+                    key="org.acme.widget.made", name="위젯 제작 완료", payload_schema=_VALID_SCHEMA, routing=_NONE_ROUTING,
                 ),
                 db=s, auth=_human_auth(user_id, org_id), org_id=org_id,
             )

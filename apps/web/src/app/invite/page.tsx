@@ -8,6 +8,7 @@ import { SprintableLogo } from '@/components/brand/sprintable-logo';
 import { cn } from '@/lib/utils';
 import { InviteError, inviteErrorMessage } from '@/lib/invite-error-message';
 import { fetchWithAuth } from '@/lib/db/client';
+import { orgRoleLabel } from '@/lib/org-member-role';
 
 // d3619e80: invite_accept canonical InvitePreviewResponse 정합(org_name·role·status·expires_at·email).
 // inviter_name/email은 canonical 미제공(optional·미제공 시 generic 안내로 graceful degrade).
@@ -28,6 +29,7 @@ export default function InvitePage() {
   const t = useTranslations('invite');
   const t2 = useTranslations('login');
   const t3 = useTranslations('register');
+  const ts = useTranslations('settings');
   const searchParams = useSearchParams();
   const router = useRouter();
   const token = searchParams.get('token');
@@ -227,8 +229,8 @@ export default function InvitePage() {
                   </div>
                 )}
               </div>
-              <span className="shrink-0 rounded-md border border-border bg-background px-2 py-0.5 text-xs capitalize text-muted-foreground">
-                {preview.role}
+              <span className="shrink-0 rounded-md border border-border bg-background px-2 py-0.5 text-xs text-muted-foreground">
+                {orgRoleLabel(preview.role, ts)}
               </span>
             </div>
           </div>

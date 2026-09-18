@@ -80,6 +80,19 @@ describe('Alert 접근성 (story #2149)', () => {
     expect(container.querySelector('[role="status"]')).toBeNull();
   });
 
+  // 카디르 QA 지적(story #3748, 2026-09-09) — aria-live 기본값은 variant가 아니라 실제
+  // role을 따라야 한다. variant="default"라도 호출부가 role="status"를 명시하면(예:
+  // org-briefing-shell.tsx 안내 배너) 옛 손코딩 div(aria-live 없음=암묵 polite)와 동형으로
+  // polite여야 옳다 — 되돌리면 이관이 접근성 회귀(assertive)를 만든다.
+  it('⭐variant=default라도 role="status"를 명시하면 aria-live 기본값은 polite다(variant 아닌 role 기준)', async () => {
+    await act(async () => {
+      root.render(<Alert role="status"><AlertDescription>안내</AlertDescription></Alert>);
+    });
+    const el = container.querySelector('[role="status"]');
+    expect(el).not.toBeNull();
+    expect(el?.getAttribute('aria-live')).toBe('polite');
+  });
+
   it('destructive와 status가 동시에 잡히지 않는다(이중 낭독 방지)', async () => {
     await act(async () => {
       root.render(<Alert variant="destructive"><AlertDescription>에러</AlertDescription></Alert>);
@@ -142,6 +155,19 @@ describe('Alert variant 라이트 대비 통일 (story #2513)', () => {
       root.render(<Alert><AlertDescription>메시지</AlertDescription></Alert>);
     });
     expect(container.firstElementChild?.className).not.toContain('border-l-2');
+  });
+
+  // story #3676(유나 실측 2026-09-07) — AlertDescription 자체가 부모 opacity를
+  // 가지면 그 안의 text-muted-foreground가 자식에 opacity-100을 줘도 안 풀리는
+  // 채로 배경과 합성돼 틴트 4종 전부 라이트 AA 미달로 떨어진다(4.15~4.34). 이
+  // 컴포넌트 층에 opacity 클래스가 다시 안 생기는지 고정 — 뮤테이션 대상.
+  it('AlertDescription 자신은 opacity 클래스를 갖지 않는다(부모 opacity 재발 방지)', async () => {
+    await act(async () => {
+      root.render(<Alert variant="destructive"><AlertDescription>메시지</AlertDescription></Alert>);
+    });
+    const description = container.querySelectorAll('p')[0];
+    const classes = (description?.className ?? '').split(/\s+/);
+    expect(classes.some((c) => /^opacity-/.test(c))).toBe(false);
   });
 
   // 글자만 foreground로 통일됐을 뿐 variant 구분(색 정체성) 자체는 border/tint로 남아야

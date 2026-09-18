@@ -1,0 +1,1 @@
+{"file": "tests/test_3808_x_publish_budget.py", "sec": 3.4, "source": "story-3808(Phase3·3-3 PR3, 페드루 PO 確定 2026-09-11) — X 종량 API 지출 월 상한(kind/rule_key 파라미터화·evidence 멱등·api-budget-exceeded 마커) 신규 파일 실측(로컬, uv run pytest --durations=0 직접 1회 실행, 9건 wall time 약 3.4s — test_3808_x_publish.py 선례와 동일 방법론, 실 CI 샤드 로그로 재확認 필요)"}

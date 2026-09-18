@@ -5,6 +5,8 @@ import { useTranslations, useLocale } from 'next-intl';
 import { FlaskConical } from 'lucide-react';
 import { ProofCapsule, type ProofState } from '@/components/proof-capsule/proof-capsule';
 import { fetchWithAuth } from '@/lib/db/client';
+import { formatRelativeTime } from '@/lib/storage/format';
+import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 
 /**
  * story #2958 §4/§6(doc goals-outcome-ledger-redesign-handoff) — 결과 캡슐(상세) 우측 328px
@@ -48,7 +50,12 @@ export function GoalTrustRail({ outcomeStatus, measureAfter, createdAt, epicId, 
     return () => { cancelled = true; };
   }, [epicId, projectId]);
 
-  const fmtDate = (s: string) => new Date(s).toLocaleDateString(locale, { year: 'numeric', month: '2-digit', day: '2-digit' });
+  // story #3493 — measureAfter(측정 예정)는 "약속"(§11-2 formatScheduledAt),
+  // createdAt(생성 기록)은 "기록"(3436 묶음 8 formatRelativeTime) — 한 함수로
+  // 뭉뚱그리지 않는다.
+  const displayTimezone = resolveDisplayTimezone().tz;
+  const fmtScheduled = (s: string) => formatScheduledAt(s, displayTimezone).display;
+  const fmtRecord = (s: string) => formatRelativeTime(s, locale, displayTimezone);
   const judged = outcomeStatus && outcomeStatus !== 'n_a' && outcomeStatus !== 'pending';
   // 동적 t() 키 조립(문자열 이어붙이기) 대신 명시 매핑 — 정적 추출·타입 안전 둘 다 지킨다.
   const judgedLabel = outcomeStatus === 'hit' ? tOutcome('statusHit')
@@ -78,7 +85,7 @@ export function GoalTrustRail({ outcomeStatus, measureAfter, createdAt, epicId, 
           ) : (
             <div className="border border-dashed border-proof-blue/40 px-3 py-2">
               <div className="text-[13px] font-bold text-proof-blue">{t('trustRailOutcomePending')}</div>
-              {measureAfter ? <div className="mt-0.5 font-mono text-[11px] text-muted-foreground">{t('outcomeAwaitingMeasure')} · {fmtDate(measureAfter)}</div> : null}
+              {measureAfter ? <div className="mt-0.5 font-mono text-[11px] text-muted-foreground">{t('outcomeAwaitingMeasure')} · {fmtScheduled(measureAfter)}</div> : null}
             </div>
           )}
         </li>
@@ -101,7 +108,7 @@ export function GoalTrustRail({ outcomeStatus, measureAfter, createdAt, epicId, 
               유지하되, 솔리드 채도로 정합(제거 아니라 정제). */}
           <span className="absolute -left-[19px] top-2 size-2 rounded-full border-2 border-background bg-proof-blue" />
           <div className="text-[13px] font-medium text-foreground">{t('trustRailCreated')}</div>
-          <div className="font-mono text-[11px] text-muted-foreground">{fmtDate(createdAt)}</div>
+          <div className="font-mono text-[11px] text-muted-foreground">{fmtRecord(createdAt)}</div>
         </li>
       </ol>
 

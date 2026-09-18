@@ -30,7 +30,7 @@ describe('/api/stories/backlog — meta 구성(story #2190)', () => {
     expect(json.data).toHaveLength(20);
     expect(json.meta.hasMore).toBe(true);
     expect(json.meta.nextCursor).toBe('2026-07-23T07:20:58Z');
-    expect(json.meta.total).toBe(278);
+    expect(json.meta.totalCount).toBe(278);
   });
 
   it('음성대조 — 마지막 페이지(limit 미만 반환)면 hasMore=false·nextCursor=null', async () => {
@@ -63,7 +63,9 @@ describe('/api/stories/backlog — meta 구성(story #2190)', () => {
     expect(json.meta.hasMore).toBe(false);
   });
 
-  it('total 헤더가 없으면 meta.total 자체가 없다(추측으로 0을 채우지 않음)', async () => {
+  // story #3761 — 헤더 없으면 키 생략이 아니라 totalCount: null로 «모른다»를 명시한다
+  // (goals/tasks 관례, 추측으로 0을 채우지도 키를 숨기지도 않는다).
+  it('total 헤더가 없으면 meta.totalCount: null로 «모른다»를 명시한다(추측으로 0을 채우지 않음)', async () => {
     const items = Array.from({ length: 5 }, (_, i) => ({ id: `s${i}` }));
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(items), {
       status: 200,
@@ -74,6 +76,6 @@ describe('/api/stories/backlog — meta 구성(story #2190)', () => {
     const res = await GET(req);
     const json = await res.json();
 
-    expect('total' in json.meta).toBe(false);
+    expect(json.meta.totalCount).toBeNull();
   });
 });

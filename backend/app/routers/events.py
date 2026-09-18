@@ -17,6 +17,7 @@ import asyncio
 import json
 import logging
 import random
+import re
 import time
 import uuid
 from collections import defaultdict
@@ -25,8 +26,8 @@ from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict
-from sqlalchemy import and_, delete, func, or_, select, update
+from pydantic import BaseModel, ConfigDict, ValidationInfo, field_validator
+from sqlalchemy import String, and_, cast, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import (
@@ -40,6 +41,8 @@ from app.core import shutdown as _shutdown_module
 from app.dependencies.database import get_db
 from app.dependencies.ownership import _is_org_admin
 from app.models.event import Event
+from app.services.agent_onboarding_config import resolve_locale_from_request
+from app.services.i18n_catalog import t
 from app.services.member_resolver import assert_caller_is_member, resolve_member_identity
 
 router = APIRouter(prefix="/api/v2/events", tags=["events", "Organization"])
@@ -1054,12 +1057,641 @@ async def _get_or_create_event_conversation(
     )
 
 
-def _render_event_message_content(definition_key: str, payload: dict) -> str:
+def _generic_event_message_lines(definition_key: str, payload: dict) -> list[str]:
     """P2(story #2637)의 block_template 렌더러가 상륙하기 전 제네릭 폴백 — model.py docstring의
     "템플릿 없으면 제네릭 카드"와 동형 원칙을 메시지 본문 레벨에서 지금 구현. 필드 순서는
     payload dict 삽입 순서(파이썬 3.7+ 보장) 그대로 — 임의 정렬로 무의미하게 흔들지 않는다."""
     lines = [f"[이벤트] {definition_key}"]
     lines += [f"- {k}: {v}" for k, v in payload.items()]
+    return lines
+
+
+async def _render_event_notification_work_item_ref(
+    db: AsyncSession, *, org_id: uuid.UUID, work_item_type: str, work_item_id: uuid.UUID,
+) -> dict | None:
+    """work_item을 클릭되는 참조 토큰으로(story #3313 AC2·story #3884 AC1로 확장).
+
+    두 판별을 **구조로** 갈라 반환한다(story #3884 AC1(d), PO 확定 2026-09-14 15:51Z —
+    "구조적 부재"와 "실패"가 같은 모양으로 나오면 FAIL):
+    - 리졸버가 있는 타입(story/task/doc/visual_artifact)인데 그 id가 없음(삭제·조직 밖 등):
+      `{"found": False, "type": work_item_type}` — **텍스트를 굽지 않는다**, 호출부(FE
+      event-block-card.tsx)가 렌더 시점에 `t('eventCard.targetMissing', {type})`로 그린다
+      (문구가 읽는 사람 로케일에 달렸기 때문 — story #3881과 같은 원칙).
+    - 리졸버 자체가 없는 타입(agent_decision·support_escalation — 참조할 «엔티티» 개념이
+      구조적으로 없음, gate 자체도 TARGET_ONLY #2889 그대로): `None` — 호출부가 refs 키를
+      아예 안 심어 FE가 `optional: true` 필드 생략으로 처리한다.
+    - 찾음: `{"found": True, "token": "[제목](entity:type:id)"}`.
+
+    `work_item_type`("visual_artifact")과 참조 토큰 entity_type("artifact")이 갈리는 자리는
+    `toEntityType()`(FE approval-request-card.tsx의 기존 매핑과 동형 — Gate.work_item_type
+    어휘 vs embed-card entity_type 어휘가 다른, 2118에서 이미 확認된 차이)."""
+    from app.services.reference_token import build_reference_token
+
+    title: str | None = None
+    entity_type = work_item_type
+    if work_item_type == "story":
+        from app.models.pm import Story
+
+        title = (await db.execute(
+            select(Story.title).where(
+                Story.id == work_item_id, Story.org_id == org_id, Story.deleted_at.is_(None),
+            )
+        )).scalar_one_or_none()
+    elif work_item_type == "task":
+        from app.models.pm import Task
+
+        title = (await db.execute(
+            select(Task.title).where(
+                Task.id == work_item_id, Task.org_id == org_id, Task.deleted_at.is_(None),
+            )
+        )).scalar_one_or_none()
+    elif work_item_type == "doc":
+        from app.models.doc import Doc
+
+        title = (await db.execute(
+            select(Doc.title).where(
+                Doc.id == work_item_id, Doc.org_id == org_id, Doc.deleted_at.is_(None),
+            )
+        )).scalar_one_or_none()
+    elif work_item_type == "visual_artifact":
+        from app.models.visual_artifact import VisualArtifact
+
+        entity_type = "artifact"
+        title = (await db.execute(
+            select(VisualArtifact.title).where(
+                VisualArtifact.id == work_item_id, VisualArtifact.org_id == org_id,
+                VisualArtifact.deleted_at.is_(None),
+            )
+        )).scalar_one_or_none()
+    elif work_item_type == "epic":
+        # story #3893 CHANGES②(PO 확認 2026-09-15) — preset.goal.measured의 goal_id(raw
+        # UUID) 처방. `Goal`(구 Epic, app/models/pm.py)은 SoftDeleteMixin이 없어(grep
+        # 실측) deleted_at 필터가 없다 — story/task/doc과 필터 개수가 다른 이유. FE
+        # entity-ref.ts::parseEntityRef는 entityType을 검증 없이 그대로 통과시키고
+        # embed-card.tsx가 'epic' 엔티티(RICH_PREVIEW_TYPES·getEntityHref 둘 다)를 이미
+        # 지원한다(사전 확認 済 — 새 FE 렌더 경로 0).
+        from app.models.pm import Goal
+
+        title = (await db.execute(
+            select(Goal.title).where(Goal.id == work_item_id, Goal.org_id == org_id)
+        )).scalar_one_or_none()
+    else:
+        # agent_decision·support_escalation — 참조할 «엔티티» 개념이 구조적으로 없음
+        # (gate.work_item_type 실사용 5종 中 2종, story #3884 AC1 그라운딩 실측).
+        return None
+
+    if not title:
+        return {"found": False, "type": work_item_type}
+    token = build_reference_token(entity_type, work_item_id, title)
+    if not token:
+        return {"found": False, "type": work_item_type}
+    return {"found": True, "token": token}
+
+
+async def _work_item_ref_token(
+    db: AsyncSession, *, org_id: uuid.UUID, work_item_type: str, work_item_id: uuid.UUID,
+) -> str | None:
+    """평문 알림 줄(SSE·웹훅 등 구계통)용 얇은 어댑터 — story #3884가 확장한
+    `_render_event_notification_work_item_ref`의 dict 반환에서 "찾음" 토큰만 뽑는다.
+    found:False(삭제 등)·None(리졸버 없음) 둘 다 여기선 동일하게 폴백(raw id 표시, 호출부
+    기존 동작 그대로)으로 합류한다 — 구계통은 대화 카드처럼 두 모양을 구분해 보여줄 표면이
+    없다(평문 1줄, 회귀 0 유지가 목적)."""
+    result = await _render_event_notification_work_item_ref(
+        db, org_id=org_id, work_item_type=work_item_type, work_item_id=work_item_id,
+    )
+    if result and result.get("found"):
+        return result.get("token")
+    return None
+
+
+async def _render_event_notification_member_ref(
+    db: AsyncSession, *, org_id: uuid.UUID, member_id: uuid.UUID,
+) -> dict | None:
+    """story #3893(PO 確定 2026-09-14 20:07Z) — payload의 raw member UUID(예:
+    `assignee_member_id`)를 표시 이름으로. `_render_event_notification_work_item_ref`와
+    동형 계약(dict found-판별, 텍스트를 여기서 굽지 않는다)이되, member는 항상 단일
+    리졸버(TeamMember/OrgMember, `resolve_member_display_name` 기존 SSOT 재사용 — 새
+    조회 로직 0)라 "리졸버 자체가 없는 타입" 갈래가 없다(work_item의 3모양 中 2모양만
+    성립):
+    - 찾음: `{"found": True, "name": "표시 이름"}`
+    - 못 찾음(탈퇴·삭제 등, 이름을 지어내지 않는다 원칙): `{"found": False}` — 호출부
+      (event-block-card.tsx)가 렌더 시점 로케일로 문구를 짓는다(targetMissing과 동일
+      원칙, 새 fail 텍스트를 여기서 굽지 않는다).
+
+    참조 토큰(`[제목](entity:type:id)`)이 아니라 순 이름 문자열만 돌려준다 — member는
+    work_item처럼 클릭 딥링크 대상이 아니다(PO 確定 — 「담당자=이름 해석」만, 토큰화
+    요구 0)."""
+    from app.services.member_resolver import resolve_member_display_name
+
+    name = await resolve_member_display_name(member_id, org_id, db)
+    if not name:
+        return {"found": False}
+    return {"found": True, "name": name}
+
+
+async def _render_event_notification_doc_ref(
+    db: AsyncSession, *, org_id: uuid.UUID, doc_id_raw: str,
+) -> str | None:
+    """story #3323 AC1/AC3 — payload의 `*_doc_id` 값(uuid 문자열)을 doc 클릭 참조 토큰으로.
+    파싱 실패·같은 org에 존재하지 않는 doc은 None(지어내지 않음 — 호출부가 raw 값 폴백)."""
+    from app.models.doc import Doc
+    from app.services.reference_token import build_reference_token
+
+    try:
+        doc_id = uuid.UUID(str(doc_id_raw))
+    except (ValueError, AttributeError, TypeError):
+        return None
+    title = (await db.execute(
+        select(Doc.title).where(Doc.id == doc_id, Doc.org_id == org_id)
+    )).scalar_one_or_none()
+    if not title:
+        return None
+    return build_reference_token("doc", doc_id, title)
+
+
+# story #3323 — previous_output_doc_id는 일반 *_doc_id 토큰화와 같은 해소·폴백 규칙을 따르되
+# (present+해소 실패 시 raw 폴백, 부재 시 줄 자체 없음 — AC1/AC3 공통), 사람이 읽는 레이블만
+# 「앞 단계 산출물」로 특별 표기한다(승인자가 «이게 뭘 검토하는지» 한눈에 보게, 처방 1).
+_DOC_ID_PAYLOAD_LABELS: dict[str, str] = {"previous_output_doc_id": "앞 단계 산출물"}
+
+
+# story #3329 — stage_metadata.action 같은 자유 문구 안에 "박힌" UUID/8자 prefix를 찾는다.
+# ⚠️`\b`(Python re 기본 Unicode 워드 경계)는 한글을 워드 문자로 쳐서 "20808e14의"처럼
+# hex 뒤에 한글 조사가 바로 붙으면 경계가 안 생겨 매치 자체가 실패한다(실측 확인, 이
+# 스토리의 정확히 그 실패 사례) — 그래서 ASCII 영숫자만 보는 lookaround로 직접 짠다.
+# 전체 UUID를 8자 alt보다 먼저 두어, 8자 alt가 UUID의 첫 세그먼트만 따로 집어가지
+# 않게 한다(추가로 8자 alt는 뒤에 `-`가 오면 자체적으로 제외 — 이중 방어).
+_EMBEDDED_FULL_UUID_RE = re.compile(
+    r"(?<![0-9a-zA-Z])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9a-zA-Z])",
+    re.IGNORECASE,
+)
+_EMBEDDED_HEX8_RE = re.compile(
+    r"(?<![0-9a-zA-Z])[0-9a-f]{8}(?![0-9a-zA-Z-])",
+    re.IGNORECASE,
+)
+
+
+async def _resolve_doc_or_story_by_id(
+    db: AsyncSession, *, org_id: uuid.UUID, entity_id: uuid.UUID,
+) -> tuple[str, str] | None:
+    """entity_id가 이 org의 doc 또는 story로 실재하면 (entity_type, title). doc을 먼저 본다
+    (story #3329 실사례가 doc뿐이나 AC 문구가 doc/story 둘 다 명시 — doc/story id가 서로
+    겹칠 확률은 사실상 0이라 우선순위 자체는 결과에 영향 없음)."""
+    from app.models.doc import Doc
+
+    doc_title = (await db.execute(
+        select(Doc.title).where(Doc.id == entity_id, Doc.org_id == org_id, Doc.deleted_at.is_(None))
+    )).scalar_one_or_none()
+    if doc_title:
+        return ("doc", doc_title)
+
+    from app.models.pm import Story
+
+    story_title = (await db.execute(
+        select(Story.title).where(Story.id == entity_id, Story.org_id == org_id, Story.deleted_at.is_(None))
+    )).scalar_one_or_none()
+    if story_title:
+        return ("story", story_title)
+    return None
+
+
+async def _resolve_doc_or_story_by_hex8_prefix(
+    db: AsyncSession, *, org_id: uuid.UUID, prefix: str,
+) -> tuple[str, uuid.UUID, str] | None:
+    """story #3329 AC2 — 8자 hex prefix는 그 자체로 유일하지 않을 수 있다. doc+story를 합쳐
+    이 org에서 그 prefix로 시작하는 id가 **정확히 1건**일 때만 치환 대상으로 인정한다
+    (0건="그런 거 없음"·2건 이상="어느 쪽인지 모름" — 둘 다 원문 유지가 안전하다, AC1
+    "오탐 0"의 직접 구현). 대소문자 무관 매칭(id는 소문자로 저장되지만 문구엔 대문자로
+    적혔을 가능성 방어)."""
+    from app.models.doc import Doc
+    from app.models.pm import Story
+
+    like_pattern = f"{prefix.lower()}%"
+    doc_rows = (await db.execute(
+        select(Doc.id, Doc.title).where(
+            Doc.org_id == org_id, Doc.deleted_at.is_(None),
+            cast(Doc.id, String).like(like_pattern),
+        )
+    )).all()
+    story_rows = (await db.execute(
+        select(Story.id, Story.title).where(
+            Story.org_id == org_id, Story.deleted_at.is_(None),
+            cast(Story.id, String).like(like_pattern),
+        )
+    )).all()
+    candidates: list[tuple[str, uuid.UUID, str]] = (
+        [("doc", r.id, r.title) for r in doc_rows] + [("story", r.id, r.title) for r in story_rows]
+    )
+    if len(candidates) != 1:
+        return None
+    return candidates[0]
+
+
+async def _async_regex_sub(pattern: "re.Pattern[str]", async_replacer, text: str) -> str:
+    """`re.sub`의 async 버전 — stdlib엔 없다(콜백이 동기 함수만 허용). 매치를 순서대로
+    돌며 각 자리를 `await async_replacer(match)`의 결과로 채운다(non-overlapping은
+    `finditer`가 이미 보장)."""
+    parts: list[str] = []
+    last_end = 0
+    for m in pattern.finditer(text):
+        parts.append(text[last_end:m.start()])
+        parts.append(await async_replacer(m))
+        last_end = m.end()
+    parts.append(text[last_end:])
+    return "".join(parts)
+
+
+def _protected_reference_token_spans(text: str) -> list[tuple[int, int]]:
+    """PO 리뷰(PR#3713, 2026-09-02) — 이미 참조 토큰인 구간(`[제목](entity:type:id)`)의
+    **제목 부분**엔 커밋 sha·다른 엔티티의 8자 prefix·전체 UUID가 우연히 들어있을 수 있다
+    (정의 문구·스토리 제목에 sha 언급이 흔함). 그 구간까지 훑으면 "토큰 속 토큰"(중첩 마크다운
+    링크로 구조가 깨짐)을 만든다 — 기존 하이픈 제외 방어(`(?![0-9a-zA-Z-])`)는 `entity:
+    doc:XXXXXXXX-...`의 **첫 세그먼트만** 막지, 토큰 앞쪽 제목 텍스트는 못 막는다.
+
+    파싱은 이 조직의 기존 SSOT(`mention_parser.py::_CHAT_TOKEN_RE` — FE `applyEntity`가
+    만드는 정확한 토큰 모양, escape된 대괄호까지 인식하도록 여러 사고를 거쳐 다듬어진 정규식)를
+    그대로 재사용한다(새 정규식 발명 0). 호출부가 이 span 안에서 시작하는 매치를 스킵한다."""
+    from app.services.mention_parser import _CHAT_TOKEN_RE
+
+    return [(m.start(), m.end()) for m in _CHAT_TOKEN_RE.finditer(text)]
+
+
+def _starts_within_spans(pos: int, spans: list[tuple[int, int]]) -> bool:
+    return any(start <= pos < end for start, end in spans)
+
+
+async def _tokenize_embedded_entity_refs(db: AsyncSession, *, org_id: uuid.UUID, text: str) -> str:
+    """story #3329 — stage_metadata.action 같은 자유 문구 안에 박힌 org 내 doc/story
+    UUID(전체 또는 8자 prefix)를 클릭 참조 토큰으로 치환한다. 실재하는 엔티티로 해소될
+    때만 바꾸고(없으면·모호하면 원문 그대로 둔다) — AC1 "오탐 0"의 직접 구현. 전체 UUID
+    패스를 먼저 끝내고 나서 8자 prefix 패스를 돈다.
+
+    PO 리뷰(PR#3713) — 각 패스 직전에 `_protected_reference_token_spans`로 "이미 토큰인
+    구간"을 다시 계산해, 그 구간 **안에서 시작하는** 매치는 건드리지 않는다. 전체 UUID
+    패스는 원문 기준 보호구간(원문에 이미 있던 토큰의 제목 안 UUID 방어) — 8자 prefix
+    패스는 **전체 UUID 패스가 끝난 뒤의 텍스트** 기준으로 보호구간을 다시 계산한다(방금
+    만든 새 토큰의 제목 안 8자 hex까지 함께 방어 — 재계산이 핵심, 원문 기준 보호구간을
+    재사용하면 새로 생긴 토큰은 못 막는다)."""
+    from app.services.reference_token import build_reference_token
+
+    protected = _protected_reference_token_spans(text)
+
+    async def _replace_full(match: re.Match) -> str:
+        raw = match.group(0)
+        if _starts_within_spans(match.start(), protected):
+            return raw
+        try:
+            entity_id = uuid.UUID(raw)
+        except ValueError:
+            return raw
+        resolved = await _resolve_doc_or_story_by_id(db, org_id=org_id, entity_id=entity_id)
+        if resolved is None:
+            return raw
+        entity_type, title = resolved
+        return build_reference_token(entity_type, entity_id, title) or raw
+
+    text = await _async_regex_sub(_EMBEDDED_FULL_UUID_RE, _replace_full, text)
+
+    protected = _protected_reference_token_spans(text)
+
+    async def _replace_prefix(match: re.Match) -> str:
+        raw = match.group(0)
+        if _starts_within_spans(match.start(), protected):
+            return raw
+        resolved = await _resolve_doc_or_story_by_hex8_prefix(db, org_id=org_id, prefix=raw)
+        if resolved is None:
+            return raw
+        entity_type, entity_id, title = resolved
+        return build_reference_token(entity_type, entity_id, title) or raw
+
+    return await _async_regex_sub(_EMBEDDED_HEX8_RE, _replace_prefix, text)
+
+
+async def _render_gate_verdict_message(
+    db: AsyncSession, *, org_id: uuid.UUID, payload: dict, resolved_locale: str = "ko",
+) -> str:
+    """story #3330 — `preset.gate.verdict` 전용 렌더. 승인/반려 대상 work item·게이트
+    종류·판정·(반려 시) 사유·대상 산출물 doc 클릭 토큰·다음 행동을 담는다(AC2, #3323이
+    stage 알림에 한 것과 같은 규격). `preset.gate.verdict`는 `stage_metadata`가 없는
+    비사이클형 정의라 `_render_event_message_content`의 사이클 분기를 안 타므로 별도
+    함수로 둔다.
+
+    draft_doc_reference_token은 payload 계약에 없다(스키마 변경 0, AC4 "새 경로 발명
+    0") — `recipe_gate_hooks.py::_build_approval_neutral_facts`가 게이트 생성 시점에
+    이미 계산해 둔 `neutral_facts`를 게이트 행 재조회로 그대로 재사용한다(새로 계산
+    안 함)."""
+    from app.models.gate import Gate
+    from app.services.gate_reason_signal import has_discontinue_signal
+
+    work_item_type = payload.get("work_item_type")
+    work_item_id_raw = payload.get("work_item_id")
+    gate_type = payload.get("gate_type")
+    verdict = payload.get("verdict")
+    resolution_note = payload.get("resolution_note")
+
+    work_item_id: uuid.UUID | None = None
+    if work_item_id_raw:
+        try:
+            work_item_id = uuid.UUID(str(work_item_id_raw))
+        except (ValueError, AttributeError, TypeError):
+            work_item_id = None
+
+    lines = ["[이벤트] preset.gate.verdict"]
+
+    work_item_ref: str | None = None
+    if work_item_type and work_item_id is not None:
+        work_item_ref = await _work_item_ref_token(
+            db, org_id=org_id, work_item_type=work_item_type, work_item_id=work_item_id,
+        )
+    if work_item_ref:
+        lines.append(f"- work item: {work_item_ref}")
+    elif work_item_id_raw:
+        lines.append(f"- work_item_id: {work_item_id_raw}")
+
+    lines.append(f"- 게이트: {gate_type} → {verdict}")
+    # story #3370 AC2(유나 실측 2026-09-10 13:23Z) — 게이트가 종류로만 표기되고 있었다
+    # (gate_id는 아래 재조회 대상으로만 쓰이고 사람이 읽는 줄로는 한 번도 안 나갔다).
+    # 에이전트 표면(이 함수)이 AC2의 「gate ID」 요구를 실제로 충족하려면 값 자체를 찍어야
+    # 한다 — payload에 항상 있음(story #3487, 이 함수의 유일한 발행부가 항상 채움).
+    gate_id_raw = payload.get("gate_id")
+    if gate_id_raw:
+        lines.append(f"- gate_id: {gate_id_raw}")
+
+    # story 1cd72bfc(2026-09-02, 담롱 4바퀴 승인 실측·PO 확定) — 이전엔 verdict=="rejected"
+    # 게이트가 있어 승인(approved) 판정에 사유가 있어도(예: "Ddddd") 원천 차단됐다.
+    # 에이전트 표면(MCP message.content)에서는 이 함수가 사유 노출의 전부다(사람 표면인
+    # block_template의 "사유" 필드는 별개 — chat-bubble.tsx event-block-card, 이 스토리
+    # 스코프 밖). 값 없으면 줄 자체를 생략(승인·반려 공통 — 지어내지 않는다).
+    if resolution_note:
+        lines.append(f"- 사유: {resolution_note}")
+
+    draft_doc_ref: str | None = None
+    draft_id: str | None = None
+    version_id: str | None = None
+    # story #3359 — 레시피 stage 게이트의 neutral_facts엔 게이트 생성 시점(recipe_gate_
+    # hooks.py::_build_approval_neutral_facts)에 이미 stage/channel이 박혀 있다. 이
+    # payload 자체엔 없어(preset.gate.verdict 계약 불변) 아래 gate_row 재조회에서만
+    # 채워진다 — publish 다음-행동 문구를 채널별 커넥터명으로 구체화하는 데 쓴다.
+    gate_stage: str | None = None
+    gate_channel: str | None = None
+    # story #3487(0329) — payload에 gate_id가 있으면(이 함수의 유일한 발행부는 항상
+    # 채운다) 그 행만 정확히 읽는다. story #3478(gate.scope_key) 이후 같은 work_item에
+    # 목적지가 다른 external_publish 게이트가 둘 이상일 수 있어, 아래 (work_item_id,
+    # gate_type, status) 재조회+`order_by(resolved_at desc).limit(1)`는 "가장 최근
+    # resolved"인 게이트를 고르는 것이지 "지금 이 이벤트가 말하는" 그 게이트가 아니다
+    # — 옛 payload(gate_id 없음, 레거시 큐 재생 등)에 대한 하위호환 폴백으로만 유지.
+    # (gate_id_raw는 위에서 이미 구했다 — 「gate_id:」 줄과 이 재조회가 같은 값을 쓴다.)
+    if work_item_type and work_item_id is not None and gate_type:
+        if gate_id_raw:
+            try:
+                gate_row = await db.get(Gate, uuid.UUID(str(gate_id_raw)))
+            except (ValueError, TypeError, AttributeError):
+                gate_row = None
+        else:
+            gate_row = (await db.execute(
+                select(Gate).where(
+                    Gate.org_id == org_id, Gate.work_item_id == work_item_id,
+                    Gate.work_item_type == work_item_type, Gate.gate_type == gate_type,
+                    Gate.status == verdict,
+                ).order_by(Gate.resolved_at.desc()).limit(1)
+            )).scalar_one_or_none()
+        if gate_row is not None:
+            facts = gate_row.neutral_facts or {}
+            token = facts.get("draft_doc_reference_token")
+            if token and token != "미확認":
+                draft_doc_ref = token
+            # story #3387 — site_posts.py 흐름(external_publish)이 stamp한 draft_id.
+            # 레시피 흐름의 draft_doc_reference_token과는 상호배타(한 게이트가 두 흐름
+            # 모두에서 만들어지지 않는다) — 링크가 아니라 참조로만 싣는다(PO 2026-09-03
+            # 13:33Z, 실행 권유 아님).
+            draft_id = facts.get("draft_id")
+            # story #3370 AC2(유나 실측 2026-09-10 13:23Z) — draft_id(초안 자체 식별)와
+            # version_id(그 초안 중 «이번에 봉인·판정된» 특정 버전)는 다른 축이다. 이전엔
+            # version 자리가 아예 없어 draft_id를 version처럼 오독할 여지가 있었다 —
+            # site_posts.py/channel_posts.py의 submit/reseal 훅이 neutral_facts에 새로
+            # stamp한 값(gate.sealed_content_sha256과 동시에 찍히는, 그 sha256이 가리키는
+            # 실제 버전 행의 id)을 그대로 읽는다.
+            version_id = facts.get("version_id")
+            gate_stage = facts.get("stage")
+            _channel_raw = facts.get("channel")
+            gate_channel = _channel_raw if isinstance(_channel_raw, str) and _channel_raw and _channel_raw != "미확認" else None
+    if draft_doc_ref:
+        lines.append(f"- 대상 산출물: {draft_doc_ref}")
+    if draft_id:
+        lines.append(f"- draft_id: {draft_id}")
+    if version_id:
+        lines.append(f"- version_id: {version_id}")
+
+    # story #3387(결함·오도 문구, PO 2026-09-03 13:33Z 스코프 확定) — gate_type=
+    # external_publish는 이 아래 레시피 전용 문구(다른 gate_type용, 변경 없음)를 타지
+    # 않는다. 담롱 실사례 5건(온찬 eb9e797d) 전부 이 분기의 옛 문구와 문자 그대로
+    # 일치했다 — verdict만 보고 gate_type을 안 봐 "발행 도구"(제품에 없음)를 approved에
+    # 권하고, rejected엔 사유 무관 재상신을 권해 «폐기 대상» 반려와 정면으로 모순됐다.
+    #
+    # 유나 8칸 표(2026-09-03) 중 에이전트 칸(3·4·6·8)만 여기서 구현한다 — 휴먼 칸
+    # (1·2·5·7)은 이 함수의 스코프 밖(agent-only MCP 표면, 휴먼 3표면엔 다음 행동 문구를
+    # 신설하지 않기로 PO가 확定, 화면 실 버튼이 있는데 문구를 더하면 새 오도 자리가 된다).
+    # 실행 동사 0건 규율: "할 일 없음"으로 시작 — 이 표면 수신자는 항상 에이전트라
+    # "누르세요/쓰세요/발행하세요"류를 전부 금지한다(사람 표면 버튼과 헷갈릴 여지 자체를
+    # 없앤다).
+    if gate_type == "external_publish":
+        if verdict == "approved":
+            # story #3487(PO 실측 2026-09-05) — 옛 문구("발행은 휴먼이 화면에서 합니다")는
+            # site_post(외부 목적지·hosted_site 공통)의 실동작과 어긋난다: 승인 훅이
+            # publication_command를 즉시 만들고 **다음 워커 tick(최대 1분)이 어댑터를
+            # 호출**한다 — 휴먼 화면의 발행 버튼은 이미 completed된 command를 멱등
+            # 반환할 뿐(회수만 화면 액션이 실제로 필요). channel_post(예약 상신)는
+            # scheduled_at 시각에 발행되는 게 이미 맞는 문구라 무변(회귀 pin, AC2).
+            # draft_id가 site_post_drafts에 있는지로 도메인을 가른다 — destination
+            # 문자열(hosted_site/wordpress/webhook vs threads)에 기대는 것보다
+            # 채널 목록이 늘어나도 안 깨지는 축이다.
+            #
+            # story #3369 후속(자기점검 2차, 유나 실측·페드루 지시 2026-09-10) — 위
+            # #3487 주석은 "hosted_site 공통"이라 적었지만 실제로는 아니다:
+            # `gate_service.py::_maybe_create_scheduled_publication_command`가
+            # `destination_channel == "hosted_site"`면 publication_command 생성을
+            # 그 자리에서 건너뛴다("내부 동기 경로 그대로 — publication_command 불요").
+            # 즉 hosted_site 승인은 워커가 자동으로 발행하지 않는다 — 휴먼이 여전히
+            # 화면에서 «발행»/«재발행»을 직접 눌러야 한다. 이 표면의 수신자는 항상
+            # 에이전트(위 주석)라, hosted_site draft에 옛 문구("다음 워커 tick에
+            # 발행됩니다")를 그대로 보내면 에이전트가 "할 일 없음"으로 오판해 사람에게
+            # 재발행이 필요하다는 것을 못 알릴 수 있다.
+            #
+            # story #4155 유나 CHANGES(2026-09-10) — 위 수정이 connection_id 유무를
+            # 대리값으로 썼는데, `gate_service.py:1037-1072`엔 외부 목적지(connection_id
+            # 있음)인데도 command를 안 만들고 return하는 경로가 6개(_mark_unresolved 5·
+            # _mark_scope_mismatch 1 — scope mismatch는 설계된 도달 상태) 있어 그 경로
+            # 에서도 이 대리값이 "명령이 만들어졌다"로 잘못 읽었다. 대리값을 버리고 실제
+            # `PublicationCommand` 존재 여부를 직접 조회한다(gate_id로, 인덱스 有) — 이
+            # 한 조회가 hosted_site(애초에 명령 자체가 없는 경로)와 외부-이지만-생성
+            # 실패(위 6경로) 둘 다를 같은 방식으로 정확히 잡는다.
+            is_site_post = False
+            site_post_command_exists = False
+            if draft_id:
+                try:
+                    draft_uuid = uuid.UUID(draft_id)
+                except (ValueError, TypeError, AttributeError):
+                    draft_uuid = None
+                if draft_uuid is not None:
+                    from app.models.site_post_draft import SitePostDraft
+                    is_site_post = (await db.execute(
+                        select(SitePostDraft.id).where(SitePostDraft.id == draft_uuid)
+                    )).scalar_one_or_none() is not None
+            if is_site_post and gate_row is not None:
+                from app.models.publication_command import PublicationCommand
+                site_post_command_exists = (await db.execute(
+                    select(PublicationCommand.id).where(PublicationCommand.gate_id == gate_row.id)
+                )).first() is not None
+            if is_site_post and site_post_command_exists:
+                lines.append(f"- {t('events.gate_verdict_next_action_publish_command_created', resolved_locale)}")
+            else:
+                lines.append(f"- {t('events.gate_verdict_next_action_publish_human_only', resolved_locale)}")
+        elif verdict == "rejected":
+            # AC3 — 사유에 «폐기/중단» 신호가 있으면 다음 행동 자체를 비운다(침묵도
+            # 문구다). 재상신을 권하면 카드가 사람의 결정과 정면으로 반대되는 행동을
+            # 시킨다(스토리 관측 사례 5).
+            if not has_discontinue_signal(resolution_note):
+                lines.append("- 다음 행동: 할 일 없음 — 다시 올릴지는 작성자가 정합니다.")
+    # 페드루 리뷰(PR#3711) — "approve 게이트를 다시 발행"은 실재하지 않는 동작(게이트는
+    # 발행 대상이 아니라 이벤트 발행의 부산물)이라 최저 지능 에이전트가 그대로 따라도
+    # 실패하지 않을 실제 동작으로 정정: rejected는 「산출물 수정→같은 정의의 approve
+    # stage 이벤트 재발행(게이트는 그 발행에 자동 재오픈됨)」, approved는 「이 정의의
+    # 다음 stage 이벤트 발행」. ⚠️story #3387 — 이 갈래는 external_publish 이외
+    # gate_type 전용이다(회귀 0, 위에서 이미 갈라냈다).
+    elif verdict == "rejected":
+        lines.append(
+            "- 다음 행동: 산출물을 수정한 뒤, 같은 레시피 정의의 approve stage 이벤트를 "
+            "다시 발행하세요(payload.previous_output_doc_id=수정본 id) — 게이트는 그 "
+            "발행으로 자동 재오픈됩니다."
+        )
+    elif verdict == "approved":
+        # story #3359 — publish stage면 channel→connector_key를 리졸버로 구체화한다
+        # (예전엔 "발행 도구를 쓰세요"뿐이라 모든 채널이 정의에 박힌 connector_key
+        # 그대로 threads로 새는 클래스였다). publish가 아니거나 channel을 모르면
+        # 기존 제네릭 문구 그대로(회귀 0).
+        _connector_line: str | None = None
+        if gate_stage == "publish" and gate_channel:
+            from app.services.channel_connector_map import resolve_connector_key_for_channel
+
+            _connector_key = await resolve_connector_key_for_channel(db, org_id=org_id, channel=gate_channel)
+            if _connector_key:
+                _connector_line = (
+                    f"- 다음 행동: {_connector_key} 커넥터로 발행하세요(channel={gate_channel})."
+                )
+            else:
+                _connector_line = (
+                    f"- 다음 행동: channel={gate_channel}에 대한 커넥터 매핑이 없습니다 — "
+                    "조직 설정에 channel_connector_map을 등록하세요."
+                )
+        lines.append(
+            _connector_line
+            or "- 다음 행동: 이 정의의 다음 stage 이벤트를 발행하세요(publish 단계라면 이 "
+            "승인 게이트를 확인하는 발행 도구를 쓰세요)."
+        )
+
+    return "\n".join(lines)
+
+
+async def _render_event_message_content(
+    db: AsyncSession, *, org_id: uuid.UUID, definition, payload: dict, resolved_locale: str = "ko",
+) -> str:
+    """story #3313(마케팅자동화·온보딩 결함) — `block_template`가 없는 사이클형 정의(stage
+    이벤트)의 알림 본문이 "stage/work_item_id뿐"이라 수신 에이전트가 `list_event_definitions`
+    조회+스토리 정독 없이는 못 움직였다(담롱 실측, "최저 지능 LLM도 이벤트만 보고 척척" 온보딩
+    철학 미달). `stage_metadata[stage]`에 이미 있는 role/action과 `payload_schema.stage.enum`
+    순서로 뽑은 다음 stage+발행 예시를 본문에 싣는다.
+
+    ⚠️PO 확定(2026-09-02) — 조직 규칙/우리 문구를 기본값으로 박지 않는다: role/action은
+    정의(stage_metadata)에 이미 적힌 값을 그대로 옮길 뿐 새 문구를 짓지 않고, 발행 예시도
+    definition_key+payload 골격만(값 없이 구조만). 회귀 0인 두 갈래(둘 다 기존 제네릭
+    그대로): ①block_template가 있는 정의(P2 렌더러가 그 정의는 이미 담당) ②stage_metadata가
+    비어있는 비사이클형 정의("담당자 없는 stage는 모르면 안 준다" 원칙과 동일 — 지어낼
+    stage_metadata 자체가 없다).
+
+    story #3330 — `preset.gate.verdict`는 `stage_metadata`가 없는 비사이클형 정의라
+    ②로 떨어져 여태 제네릭 폴백뿐이었다(반려 사유·산출물 링크·다음 행동이 전혀 안
+    실림). 그 키만 전용 렌더(`_render_gate_verdict_message`)로 먼저 갈라낸다."""
+    if definition.key == "preset.gate.verdict":
+        return await _render_gate_verdict_message(db, org_id=org_id, payload=payload, resolved_locale=resolved_locale)
+    if definition.block_template is not None or not definition.stage_metadata:
+        return "\n".join(_generic_event_message_lines(definition.key, payload))
+
+    stage = payload.get("stage")
+    stage_meta = definition.stage_metadata.get(stage) if stage else None
+    if stage_meta is None:
+        # stage가 payload에 없거나 stage_metadata에 등재 안 됨 — 지어내지 않고 기존 폴백.
+        return "\n".join(_generic_event_message_lines(definition.key, payload))
+
+    # PO 리뷰(페드루, 2026-09-02) — validate_stage_metadata의 role/action 필수 검증은
+    # 2026-08-19 이후 "쓰기 시점" 가드라, 그 전에 저장된 정의는 role/action이 누락된 채
+    # DB에 있을 수 있다. 직접 인덱싱(stage_meta['role'])하면 그 정의의 publish 자체가
+    # KeyError로 죽는다(알림 개선이 발행 회귀가 되는 자리) — .get()으로 방어, 하나라도
+    # 없으면 지어내지 않고 기존 제네릭 폴백.
+    role = stage_meta.get("role")
+    action = stage_meta.get("action")
+    if not role or not action:
+        return "\n".join(_generic_event_message_lines(definition.key, payload))
+
+    # story #3329 — action 문구 안에 박힌 doc/story UUID(전체 또는 8자 prefix)를 참조
+    # 토큰으로. work_item_ref/*_doc_id와 같은 "실재하는 것만" 원칙(없으면 원문 그대로).
+    rendered_action = await _tokenize_embedded_entity_refs(db, org_id=org_id, text=action)
+
+    lines = [
+        f"[이벤트] {definition.key}",
+        f"- stage: {stage} ({role})",
+        f"- 할 일: {rendered_action}",
+    ]
+
+    enum = ((definition.payload_schema.get("properties") or {}).get("stage") or {}).get("enum") or []
+    next_stage = None
+    if stage in enum:
+        idx = enum.index(stage)
+        if idx + 1 < len(enum):
+            next_stage = enum[idx + 1]
+    if next_stage is not None:
+        next_role = (definition.stage_metadata.get(next_stage) or {}).get("role")
+        lines.append(f"- 다음 단계: {next_stage}" + (f" ({next_role})" if next_role else ""))
+        next_payload = {k: v for k, v in payload.items() if k != "stage"}
+        next_payload["stage"] = next_stage
+        example = json.dumps(
+            {"definition_key": definition.key, "payload": next_payload}, ensure_ascii=False,
+        )
+        lines.append(f"- 다음 단계로 넘기는 발행 예시: publish_event({example})")
+    else:
+        lines.append("- 다음 단계: 없음(마지막 stage)")
+
+    work_item_type = payload.get("work_item_type")
+    work_item_id_raw = payload.get("work_item_id")
+    work_item_ref: str | None = None
+    if work_item_type and work_item_id_raw:
+        try:
+            work_item_id = uuid.UUID(str(work_item_id_raw))
+        except (ValueError, AttributeError, TypeError):
+            work_item_id = None
+        if work_item_id is not None:
+            work_item_ref = await _work_item_ref_token(
+                db, org_id=org_id, work_item_type=work_item_type, work_item_id=work_item_id,
+            )
+    if work_item_ref:
+        lines.append(f"- work item: {work_item_ref}")
+    else:
+        # 참조 토큰을 못 만들었으면(타입 미지원·존재 안 함 등) raw 값을 그대로 남긴다 —
+        # 기존 폴백이 주던 정보(원시 id)를 잃지 않는다(지어내지 않음).
+        for k in ("work_item_type", "work_item_id"):
+            if k in payload:
+                lines.append(f"- {k}: {payload[k]}")
+
+    shown_keys = {"stage", "work_item_type", "work_item_id"}
+    for k, v in payload.items():
+        if k in shown_keys:
+            continue
+        if k.endswith("_doc_id") and isinstance(v, str) and v:
+            doc_ref = await _render_event_notification_doc_ref(db, org_id=org_id, doc_id_raw=v)
+            if doc_ref:
+                lines.append(f"- {_DOC_ID_PAYLOAD_LABELS.get(k, k)}: {doc_ref}")
+                continue
+        lines.append(f"- {k}: {v}")
+
     return "\n".join(lines)
 
 
@@ -1071,6 +1703,7 @@ async def publish_registry_event(
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
+    locale: str | None = None,
 ) -> dict:
     """POST /api/v2/events/publish — story #2633 AC1~AC3.
 
@@ -1085,11 +1718,21 @@ async def publish_registry_event(
 
     실 로직은 `_publish_registry_event_core`(story #2791 P0 추출) — 서버 자동발행
     (`publish_preset_event`)도 HTTP 요청 컨텍스트 없이 같은 core를 호출해 단일 파이프
-    원칙(#2633 AC2)을 유지한다. 이 엔드포인트는 auth 의존성 해석만 하고 넘긴다."""
+    원칙(#2633 AC2)을 유지한다. 이 엔드포인트는 auth 의존성 해석만 하고 넘긴다.
+
+    story #3369(BE, 페드루 PO 確定 2026-09-11) — `_render_gate_verdict_message`의
+    i18n_catalog 이관분이 쓸 locale. `#3796`/`#3614`와 같은 우선순위(explicit locale
+    → Accept-Language → 기본 "ko")이되, 이 함수는 이미 `request: Request`(plain
+    파라미터, `Header()` DI 마커가 아니다)를 받고 있어 그걸로 헤더를 직접 읽는다 —
+    별도 `Header()` 진입점/직접-호출 분리가 불필요하다(이 레포 realdb 테스트
+    10여 곳이 이 함수를 HTTP 경유 없이 직접 호출하는데, `request`는 이미 실
+    Starlette Request라 `.headers`가 항상 안전하게 동작한다 — `Header()` 마커였다면
+    그 호출부 전부가 깨졌을 것)."""
+    resolved_locale = resolve_locale_from_request(locale, request.headers.get("accept-language"))
     return await _publish_registry_event_core(
         db, org_id, auth, body.definition_key, body.payload, background_tasks,
         request=request, extra_broadcast_member_ids=body.extra_broadcast_member_ids,
-        conversation_id=body.conversation_id,
+        conversation_id=body.conversation_id, resolved_locale=resolved_locale,
     )
 
 
@@ -1104,6 +1747,12 @@ async def _publish_registry_event_core(
     request: Request | None = None,
     extra_broadcast_member_ids: "list[uuid.UUID] | None" = None,
     conversation_id: uuid.UUID | None = None,
+    # story #3369(BE, 페드루 PO 確定 2026-09-11) — `_render_gate_verdict_message`의
+    # i18n_catalog 이관분(#3796/#3614와 같은 형)이 쓸 locale. 서버 자동발행(publish_
+    # preset_event, HTTP 요청 컨텍스트 없음 — 이 함수 docstring 참조)은 이 인자를
+    # 안 넘겨 기본값 "ko"로 떨어진다(회귀 0) — HTTP 진입점(publish_registry_event)만
+    # Header()로 실제 값을 풀어 넘긴다.
+    resolved_locale: str = "ko",
 ) -> dict:
     """`publish_registry_event`(HTTP)·`publish_preset_event`(서버 자동발행, story #2791 P0)의
     공유 core — definition_key+payload를 검증하고 routing(상신선·전파선)을 실 member_id로
@@ -1181,15 +1830,33 @@ async def _publish_registry_event_core(
     try:
         escalation_ids = await resolve_routing_leg(
             definition.routing["escalation"], payload=payload, org_id=org_id, db=db,
+            definition_key=definition.key,
         )
         broadcast_ids = await resolve_routing_leg(
             definition.routing["broadcast"], payload=payload, org_id=org_id, db=db,
+            definition_key=definition.key,
         )
     except (MissingRoutingPayloadFieldError, InvalidWorkItemReferenceError, UnknownRoutingMemberError) as e:
         raise HTTPException(
             status_code=400,
             detail={"code": "invalid_payload", "message": str(e), "errors": [str(e)]},
         ) from e
+
+    # story #3312(M1→M3·마케팅자동화) — routing 해석 직후, 메시지 발송 이전에 게이트 부수효과를
+    # 먼저 정착시킨다(routing_resolver 호출과 동일 컴포지션 스타일 — 인라인 분기 아님).
+    # definition에 이 stage의 gate 선언이 없으면 완전 no-op(AC3 회귀 0).
+    from app.services.recipe_gate_hooks import maybe_create_stage_gate
+
+    await maybe_create_stage_gate(
+        db, org_id=org_id, definition=definition, payload=payload, requester_member_id=sender.id,
+    )
+
+    # story #3337(선생님 4바퀴 실사고) — 위 게이트 훅과 같은 컴포지션 지점, 같은 원칙(정의에
+    # 해당 없으면 완전 no-op). 첫 stage가 payload.repeat를 실었으면 반복 스케줄을 세우고,
+    # 이후 매 stage 발행마다 다음 회차 입력 스냅샷을 최신화한다.
+    from app.services.recipe_repeat_schedule import maybe_upsert_repeat_schedule
+
+    await maybe_upsert_repeat_schedule(db, org_id=org_id, definition=definition, payload=payload)
 
     if extra_broadcast_member_ids:
         # story #2693(AC2): payload_field routing과 동일 검증 — 예전엔 filter_org_member_ids로
@@ -1257,6 +1924,22 @@ async def _publish_registry_event_core(
 
     participant_ids = {sender.id} | escalation_ids | broadcast_ids
 
+    # story #3340(선생님 4바퀴 실사고, 페드루 PO 확定 — 시스템 발행만 좁힘) — escalation·
+    # broadcast 둘 다 빈 집합이면 참가자는 sender 하나뿐이 된다. 사람이 publish_event를
+    # 직접 호출한 경우는 그 응답의 zero_reach_warning을 읽는 사람이 있으니 현행 유지
+    # (범위 밖) — 여기는 `publish_preset_event`(서버 자동전이, 응답을 아무도 안 읽는다)
+    # 발신만 좁혀서, «시스템 발행 혼자 있는 방»(2026-08-19 생성 group 같은 사례)에 통지가
+    # 쌓이고 아무도 못 보는 경로를 없앤다 — project human owner(project_auth.py::
+    # resolve_project_relay_owner, sprint relay용으로 이미 존재하는 project owner→org
+    # owner→admin 순위 폴백을 그대로 재사용) 없으면 org owner/admin 순으로 대신 넣는다.
+    _is_system_publisher = auth.claims.get("app_metadata", {}).get("api_key_id") == "system-publisher"
+    if _is_system_publisher and not (escalation_ids | broadcast_ids) and project_id is not None:
+        from app.services.project_auth import resolve_project_relay_owner
+
+        _relay_owner_id = await resolve_project_relay_owner(db, project_id, org_id)
+        if _relay_owner_id is not None:
+            participant_ids.add(_relay_owner_id)
+
     if conversation_id is not None:
         # story #2935(설계 doc §2 보강) — 지정 conversation에 바로 발행. sender의 참가자
         # 여부는 send_message()의 기존 인가가 그대로 검증(및 human+non-dm이면 auto-join)한다
@@ -1300,13 +1983,79 @@ async def _publish_registry_event_core(
 
     from app.routers.conversations import SendMessageRequest, send_message
 
+    # story #3332 — block_template의 `{{ref.X}}` 머스태시가 FE에서 해소할 값. `{{payload.X}}`
+    # 와 달리 발행자가 직접 준 값이 아니라 **서버가 발행 시점에 계산**하는 참조 토큰이다 —
+    # 지금은 work_item 1종만(payload에 work_item_type/work_item_id 둘 다 있을 때만 계산,
+    # 기존 함수 재사용 — 새 로직 0). BLOCK_TEMPLATE_REF_VOCAB(event_definition_registry.py)
+    # 과 짝인 어휘라 새 종류를 추가하려면 둘 다 넓혀야 한다.
+    #
+    # story #3884 AC1(d) — refs["work_item"] 값은 세 모양(FE event-block-card.tsx가 그대로
+    # 소비): 찾음(dict found:True+token)·리졸버 있는데 못 찾음(dict found:False+type, FE가
+    # 렌더 시점 로케일로 targetMissing 텍스트를 짓는다)·리졸버 자체가 없음(키 자체 부재,
+    # FE optional 필드 생략). 텍스트를 여기서 굽지 않는다(3881과 동일 원칙).
+    refs: dict[str, str | dict | None] = {}
+    _refs_work_item_type = payload.get("work_item_type")
+    _refs_work_item_id_raw = payload.get("work_item_id")
+    if _refs_work_item_type and _refs_work_item_id_raw:
+        try:
+            _refs_work_item_id = uuid.UUID(str(_refs_work_item_id_raw))
+        except (ValueError, AttributeError, TypeError):
+            _refs_work_item_id = None
+        if _refs_work_item_id is not None:
+            _work_item_ref_result = await _render_event_notification_work_item_ref(
+                db, org_id=org_id, work_item_type=_refs_work_item_type, work_item_id=_refs_work_item_id,
+            )
+            if _work_item_ref_result is not None:
+                refs["work_item"] = _work_item_ref_result
+
+    # story #3893(PO 確定 2026-09-14) — assignee_member_id/assigned_by_member_id(raw
+    # UUID, 지금은 preset.work.assigned 1곳)도 위 work_item과 동일 원칙(key 존재
+    # 여부만으로 트리거, definition_key 무관 — 신규 발행 갈래 0, #2633 AC2 단일 파이프
+    # 유지)으로 발행 시점에 이름 해석한다. 두 필드 다 같은 리졸버(member_ref) 재사용 —
+    # payload 키 이름만 다르다(담당자 vs 배정자, 유나 확定 2026-09-14 20:16Z).
+    for _refs_member_payload_key, _refs_member_refs_key in (
+        ("assignee_member_id", "assignee"),
+        ("assigned_by_member_id", "assigned_by"),
+    ):
+        _refs_member_id_raw = payload.get(_refs_member_payload_key)
+        if not _refs_member_id_raw:
+            continue
+        try:
+            _refs_member_id = uuid.UUID(str(_refs_member_id_raw))
+        except (ValueError, AttributeError, TypeError):
+            continue
+        refs[_refs_member_refs_key] = await _render_event_notification_member_ref(
+            db, org_id=org_id, member_id=_refs_member_id,
+        )
+
+    # story #3893 CHANGES②(PO 확認 2026-09-15) — preset.goal.measured의 `goal_id`(raw UUID,
+    # 실제로는 epic.id — cron.py가 그렇게 싣는다)도 work_item과 동일 원칙(key 존재 여부만
+    # 트리거)으로 발행 시점에 참조 토큰을 계산한다. `_render_event_notification_work_item_ref`
+    # 의 "epic" 갈래를 work_item_type="epic"으로 직접 호출 — work_item_type/work_item_id
+    # 페어가 아니라 goal_id 단일 키라 위 work_item 블록과 트리거 조건이 다르다(신규 refs
+    # 키 "goal", 새 리졸버 함수는 만들지 않는다).
+    _refs_goal_id_raw = payload.get("goal_id")
+    if _refs_goal_id_raw:
+        try:
+            _refs_goal_id = uuid.UUID(str(_refs_goal_id_raw))
+        except (ValueError, AttributeError, TypeError):
+            _refs_goal_id = None
+        if _refs_goal_id is not None:
+            _goal_ref_result = await _render_event_notification_work_item_ref(
+                db, org_id=org_id, work_item_type="epic", work_item_id=_refs_goal_id,
+            )
+            if _goal_ref_result is not None:
+                refs["goal"] = _goal_ref_result
+
     # story #2637 AC 0-a: event_context → msg_metadata['event'](additive) — FE가 이 메시지를
     # "이벤트 발행분"으로 인지하고 event_key로 event_definitions를 조회해 block_template
     # 렌더러를 태울 근거. 렌더러 자체는 #2637 FE 레인(이 커밋은 스키마 배선만).
     send_body = SendMessageRequest(
-        content=_render_event_message_content(definition.key, payload),
+        content=await _render_event_message_content(
+            db, org_id=org_id, definition=definition, payload=payload, resolved_locale=resolved_locale,
+        ),
         mentioned_ids=list(escalation_ids),
-        event_context={"event_key": definition.key, "payload": payload},
+        event_context={"event_key": definition.key, "payload": payload, "refs": refs},
     )
     msg_response = await send_message(
         conv.id, send_body, background_tasks, db=db, auth=auth, org_id=org_id,
@@ -1661,9 +2410,12 @@ async def get_onboarding_guide(
 class CreateEventDefinitionRequest(BaseModel):
     key: str
     # story #2792(2790 P1, PO 확定 2026-08-19 ①) — 사람용 표시 이름(드롭다운 등). key는
-    # 기계용 식별자로 그대로 둔다. 기본값 ""은 DB server_default와 동일 안전망 컨벤션(#2636
-    # 기존 호출부가 name 없이도 여전히 동작 — 신규 필드가 기존 계약을 안 깬다).
-    name: str = ""
+    # 기계용 식별자로 그대로 둔다.
+    # story #3745(페드루 PO 決 2026-09-09) — 옛 기본값 ""(#2636 하위호환 안전망)이 "이름
+    # 없는 정의"(화면에 코드 키가 그대로 서는 결함)의 발생 경로였다 — 기본값을 없애 필수화
+    # (누락 자체가 자동 422), 빈 문자열·공백뿐인 값도 검증기로 막는다. 기존 행은 무변
+    # (이 검증은 신규 생성부터만 적용).
+    name: str
     description: str | None = None
     payload_schema: dict
     routing: dict
@@ -1679,8 +2431,25 @@ class CreateEventDefinitionRequest(BaseModel):
     # 가드①) — 비어 있으면(신호형/측정형) 검증 스킵.
     stage_metadata: dict = {}
 
+    # story #3745(name===key 잔존, 페드루 PO 決 2026-09-09) — 빈 이름을 막아도 org 커스텀
+    # 정의가 name=key로(코드 키를 그대로 이름 자리에) 등록되면 화면 제목 자리에 코드 키가
+    # 그대로 서는 같은 결함이 재발한다 — 빈 문자열과 "같은 결함 클래스"라 같은 필드
+    # validator에서 나란히 막는다(에러 loc도 name 그대로).
+    @field_validator("name")
+    @classmethod
+    def _name_not_blank(cls, v: str, info: ValidationInfo) -> str:
+        if not v.strip():
+            raise ValueError("name은 비울 수 없습니다(공백뿐인 값도 안 됨)")
+        key = info.data.get("key")
+        if key is not None and v.strip() == key:
+            raise ValueError("name은 key와 같을 수 없습니다(코드 키를 이름으로 쓸 수 없음)")
+        return v
+
 
 class UpdateEventDefinitionRequest(BaseModel):
+    # story #3745 — PATCH는 부분 갱신이라 None(=이 필드는 안 건드림)은 그대로 허용한다.
+    # 값을 실어 보내는 경우에만(빈 문자열·공백뿐인 값 포함) 막는다 — "이름을 지운다"는
+    # 요청 자체가 성립하지 않는다(정의는 항상 이름을 가진다는 계약).
     name: str | None = None
     description: str | None = None
     payload_schema: dict | None = None
@@ -1689,6 +2458,13 @@ class UpdateEventDefinitionRequest(BaseModel):
     block_template: dict | None = None
     action_auth: dict | None = None
     stage_metadata: dict | None = None
+
+    @field_validator("name")
+    @classmethod
+    def _name_not_blank_if_present(cls, v: str | None) -> str | None:
+        if v is not None and not v.strip():
+            raise ValueError("name은 비울 수 없습니다(공백뿐인 값도 안 됨)")
+        return v
 
 
 class EventDefinitionDetailResponse(BaseModel):
@@ -1754,6 +2530,7 @@ async def create_event_definition(
         InvalidStageMetadataError,
         validate_action_auth,
         validate_block_template,
+        validate_block_template_refs,
         validate_event_definition_key,
         validate_event_payload_schema_shape,
         validate_event_routing,
@@ -1771,6 +2548,10 @@ async def create_event_definition(
         validate_event_routing(body.routing, allow_server_derived=False)
         if body.block_template is not None:
             validate_block_template(body.block_template)
+            # story #3332 — 구조 게이트(validate_block_template) 통과 뒤, block_template이
+            # 참조하는 {{payload.X}}/{{ref.X}}가 실제로 해소 가능한지 내용 교차검증(오타를
+            # 등록 시점에 막는다 — 이전엔 이 검증이 전혀 없었다, PR#3711 리뷰 실측).
+            validate_block_template_refs(body.payload_schema, body.block_template)
         if body.action_auth is not None:
             validate_action_auth(body.action_auth)
         validate_stage_metadata(body.payload_schema, body.stage_metadata)
@@ -1830,6 +2611,7 @@ async def update_event_definition(
         InvalidStageMetadataError,
         validate_action_auth,
         validate_block_template,
+        validate_block_template_refs,
         validate_event_payload_schema_shape,
         validate_event_routing,
         validate_stage_metadata,
@@ -1853,6 +2635,16 @@ async def update_event_definition(
     if definition is None:
         raise HTTPException(status_code=404, detail="event definition not found")
 
+    # story #3745(name===key 잔존, 페드루 PO 決 2026-09-09) — `UpdateEventDefinitionRequest`
+    # 스키마엔 key가 없어(PATCH는 key를 안 바꾼다) 이 규칙을 Pydantic field_validator로 못
+    # 건다 — DB에서 방금 읽은 `definition.key`와 대조해 여기서 막는다. POST의 빈 이름
+    # 검증(`_name_not_blank`)과 같은 결함 클래스라 코드도 그 이웃에 등록.
+    if body.name is not None and body.name.strip() == definition.key:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "definition_name_equals_key", "message": "name은 key와 같을 수 없습니다(코드 키를 이름으로 쓸 수 없음)"},
+        )
+
     # story #2792 가드① — stage_metadata는 payload_schema와 짝인 검증이라, 둘 중 하나만
     # 바뀌어도 **유효 조합**(새 값 있으면 새 값·없으면 기존 값)으로 재검증한다. payload_schema만
     # 줄어들고 stage_metadata를 안 건드리면 기존 메타가 고아가 될 수 있어(예: enum에서 stage
@@ -1868,6 +2660,26 @@ async def update_event_definition(
             raise HTTPException(
                 status_code=400, detail={"code": "invalid_definition", "message": str(e)},
             ) from e
+
+    # story #3332 — block_template↔payload_schema 교차검증도 위 stage_metadata와 동일
+    # 규율: 둘 중 하나만 바뀌어도 **유효 조합**(새 값 있으면 새 값·없으면 기존 값)으로
+    # 재검증한다 — payload_schema만 줄어들고 block_template을 안 건드리면 그 템플릿이
+    # 참조하던 필드가 조용히 사라질 수 있다. 유효 block_template이 없으면(둘 다 None)
+    # 검증 대상 자체가 없어 스킵.
+    if body.payload_schema is not None or body.block_template is not None:
+        effective_schema_for_template = (
+            body.payload_schema if body.payload_schema is not None else definition.payload_schema
+        )
+        effective_block_template = (
+            body.block_template if body.block_template is not None else definition.block_template
+        )
+        if effective_block_template is not None:
+            try:
+                validate_block_template_refs(effective_schema_for_template, effective_block_template)
+            except InvalidBlockTemplateError as e:
+                raise HTTPException(
+                    status_code=400, detail={"code": "invalid_definition", "message": str(e)},
+                ) from e
 
     content_changed = False
     if body.name is not None:
@@ -1924,6 +2736,236 @@ async def update_event_definition(
     await db.commit()
     await db.refresh(definition)
     return _event_definition_detail(definition)
+
+
+class ApplyRecipeRoleBindingsRequest(BaseModel):
+    project_id: uuid.UUID | None = None
+    # story #3288(축2-ⓐ) — stage_slug → TeamMember.id(str). None project_id = org 전역
+    # 바인딩(모든 project 적용, 특정 project 바인딩이 있으면 그쪽이 우선 — 조회는
+    # event_routing_resolver.py의 project-먼저 순서로 이미 강제).
+    role_mapping: dict[str, str]
+
+
+class ApplyRecipeRoleBindingsResponse(BaseModel):
+    ok: bool
+    bindings_upserted: int
+    # story #3317 PR B(마케팅자동화·레시피 결함, PO 확定 2026-09-02) — capability(publish:
+    # <channel> 등) 요구 stage의 커넥터가 org_connector_registry에 미등록이거나 필수
+    # org_config가 미충족이면 여기 담긴다. apply 자체는 안 막는다(경고뿐 — role_mapping이
+    # 이미 정상 upsert됐는데 커넥터 설정이 늦어졌다고 그 upsert를 막을 이유가 없다는 PO
+    # 판단). additive·기존 호출부 무회귀(default 빈 배열).
+    warnings: list[str] = []
+
+
+@router.post(
+    "/definitions/{definition_id}/apply", response_model=ApplyRecipeRoleBindingsResponse, status_code=201,
+)
+async def apply_recipe_role_bindings(
+    definition_id: uuid.UUID,
+    body: ApplyRecipeRoleBindingsRequest,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> ApplyRecipeRoleBindingsResponse:
+    """POST /api/v2/events/definitions/{id}/apply — story #3288(축2-ⓐ).
+
+    구 `workflow_templates.py::apply_template`의 검증 체인을 이식(생성 로직 자체는 폐기 —
+    doc axis2-recipe-mechanism-event-definitions-design §설계정정 참고, AgentRoutingRule을
+    만들지 않고 recipe_role_bindings에 upsert만 한다):
+    ①project_id 지정 시 has_project_access 선검증(SEC-S8 CRITICAL 재발 방지 — 이 사고가 난
+    그 자리) ②role_mapping 키 집합이 정의의 stage_metadata.keys()(=사실상 stage enum) ⊇
+    하는지 검증 ③agent_id가 실제로 이 org의 TeamMember인지 검증.
+    """
+    from app.models.event_definition import EventDefinition
+    from app.models.recipe_role_binding import RecipeRoleBinding
+    from app.models.team import TeamMember
+    from app.services.project_auth import require_project_access
+
+    if body.project_id is not None:
+        # story #2697 SSOT — require_project_access로 수렴(raw inline has_project_access+raise
+        # 패턴 신규 추가 금지, 카디르 QA #3686 적발). 실패 시 항상 404(존재 비노출).
+        await require_project_access(db, uuid.UUID(auth.user_id), body.project_id, org_id, not_found_detail="Project not found")
+
+    definition = (await db.execute(
+        select(EventDefinition).where(
+            EventDefinition.id == definition_id,
+            or_(EventDefinition.org_id == org_id, EventDefinition.org_id.is_(None)),
+        )
+    )).scalar_one_or_none()
+    if definition is None:
+        raise HTTPException(status_code=404, detail="event definition not found")
+
+    valid_stages = set(definition.stage_metadata.keys())
+    unknown_stages = sorted(set(body.role_mapping.keys()) - valid_stages)
+    if unknown_stages:
+        raise HTTPException(
+            status_code=422,
+            detail=f"role_mapping에 이 정의의 stage_metadata에 없는 stage가 있습니다: {unknown_stages}",
+        )
+
+    agent_ids = {uuid.UUID(v) for v in body.role_mapping.values()}
+    valid_agents = set((await db.execute(
+        select(TeamMember.id).where(TeamMember.id.in_(agent_ids), TeamMember.org_id == org_id)
+    )).scalars().all())
+    missing_agents = [v for v in body.role_mapping.values() if uuid.UUID(v) not in valid_agents]
+    if missing_agents:
+        raise HTTPException(
+            status_code=422,
+            detail=f"agent(s) not found in this org: {missing_agents}",
+        )
+
+    # story #3317 PR B — capability(publish:<channel> 등) 요구 stage의 커넥터 준비 상태를
+    # 경고로만 알린다(apply 자체는 안 막음, PO 확定). capability 선언 없는 stage는 완전
+    # no-op(무선언 정의 회귀 0).
+    from app.services.channel_connector_map import resolve_connector_key_for_channel
+    from app.services.connector_registry import (
+        find_org_connectors_by_kind, get_org_connector, missing_required_org_config,
+    )
+
+    warnings: list[str] = []
+    for stage in body.role_mapping:
+        capability = (definition.stage_metadata.get(stage) or {}).get("capability")
+        if not capability:
+            continue
+        kind = capability["kind"]
+        # story #3359 — capability.connector_key는 정의 저자가 적은 채널 라벨(예:
+        # "threads"·"blog")이지 반드시 실 connector_key는 아니다. 리졸버(진리원천 하나,
+        # publish 다음-행동 문구와 동일 함수)로 해소한다 — 매핑 없으면 옛처럼 "그 커넥터가
+        # 없다"로 오인시키지 않고 "channel=X 매핑 없음"으로 명시(삼키지 않는다).
+        declared_channel = capability.get("connector_key")
+        connector_key = (
+            await resolve_connector_key_for_channel(db, org_id=org_id, channel=declared_channel)
+            if declared_channel else None
+        )
+        if declared_channel and not connector_key:
+            warnings.append(
+                f"stage={stage!r}: channel={declared_channel!r}에 대한 커넥터 매핑이 없습니다 — "
+                f"조직 설정에 channel_connector_map을 등록하세요."
+            )
+            continue
+        if connector_key:
+            row = await get_org_connector(db, org_id=org_id, connector_key=connector_key)
+            if row is None:
+                warnings.append(
+                    f"stage={stage!r}: connector_key={connector_key!r} 커넥터가 등록돼 있지 "
+                    f"않습니다 — 설정 스킬을 먼저 실행하세요."
+                )
+                continue
+            missing = missing_required_org_config(row)
+            if missing:
+                warnings.append(
+                    f"stage={stage!r}: connector_key={connector_key!r}의 필수 설정값이 비어 "
+                    f"있습니다 — {missing} (설정 화면에서 등록하세요)."
+                )
+        else:
+            candidates = await find_org_connectors_by_kind(db, org_id=org_id, kind=kind)
+            if not candidates:
+                warnings.append(
+                    f"stage={stage!r}: kind={kind!r}을 지원하는 커넥터가 이 org에 등록돼 있지 "
+                    f"않습니다 — 설정 스킬을 먼저 실행하세요."
+                )
+            elif not any(not missing_required_org_config(c) for c in candidates):
+                warnings.append(
+                    f"stage={stage!r}: kind={kind!r} 커넥터는 등록돼 있지만 필수 설정값이 "
+                    f"아직 비어 있습니다 — 설정 화면에서 등록하세요."
+                )
+
+    actor_id: uuid.UUID | None = None
+    try:
+        actor_id = uuid.UUID(str(auth.user_id))
+    except Exception:
+        pass
+
+    # SQL NULL은 `= NULL`로 안 잡힌다(IS NULL 필요) — project_id 스코프 절을 조건부로 구성.
+    project_scope_clause = (
+        RecipeRoleBinding.project_id.is_(None) if body.project_id is None
+        else RecipeRoleBinding.project_id == body.project_id
+    )
+
+    upserted = 0
+    for stage, agent_id_str in body.role_mapping.items():
+        agent_id = uuid.UUID(agent_id_str)
+        existing = (await db.execute(
+            select(RecipeRoleBinding).where(
+                RecipeRoleBinding.org_id == org_id,
+                project_scope_clause,
+                RecipeRoleBinding.event_definition_key == definition.key,
+                RecipeRoleBinding.stage == stage,
+            )
+        )).scalar_one_or_none()
+        if existing is not None:
+            existing.agent_member_id = agent_id
+        else:
+            db.add(RecipeRoleBinding(
+                org_id=org_id, project_id=body.project_id, event_definition_key=definition.key,
+                stage=stage, agent_member_id=agent_id, created_by=actor_id,
+            ))
+        upserted += 1
+
+    await db.commit()
+    return ApplyRecipeRoleBindingsResponse(ok=True, bindings_upserted=upserted, warnings=warnings)
+
+
+class RecipeRoleBindingsResponse(BaseModel):
+    bindings: dict[str, str]
+
+
+@router.get("/definitions/{definition_id}/bindings", response_model=RecipeRoleBindingsResponse)
+async def get_recipe_role_bindings(
+    definition_id: uuid.UUID,
+    project_id: uuid.UUID | None = None,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> RecipeRoleBindingsResponse:
+    """GET /api/v2/events/definitions/{id}/bindings — story #3293(축2-ⓒ §B).
+
+    축2-ⓐ(apply, story #3288)는 쓰기(upsert)만 만들었다 — 갤러리 FE가 "이미 배정됨"
+    배지·기존 role_mapping 프리필을 하려면 이 read가 필요(doc
+    axis2c-gallery-migration-map-and-design §3-B). project_id 지정 시 그 project
+    특이성 바인딩이 org 전역보다 우선(event_routing_resolver.py의 조회 우선순위와
+    동형 — 여기도 그대로 병합해 "실제로 발행 시 어느 값이 쓰일지"와 일치하는 뷰를
+    보여준다). project_id 미지정 시 org 전역 바인딩만.
+    """
+    from app.models.event_definition import EventDefinition
+    from app.models.recipe_role_binding import RecipeRoleBinding
+    from app.services.project_auth import require_project_access
+
+    if project_id is not None:
+        await require_project_access(db, uuid.UUID(auth.user_id), project_id, org_id, not_found_detail="Project not found")
+
+    definition = (await db.execute(
+        select(EventDefinition).where(
+            EventDefinition.id == definition_id,
+            or_(EventDefinition.org_id == org_id, EventDefinition.org_id.is_(None)),
+        )
+    )).scalar_one_or_none()
+    if definition is None:
+        raise HTTPException(status_code=404, detail="event definition not found")
+
+    # org 전역(project_id IS NULL) 먼저 채우고, project 특이성으로 덮어써 우선순위를
+    # 정확히 반영(project_scope_clause와 동형 우선순위, resolver의 실 조회 순서와 일치).
+    org_wide = (await db.execute(
+        select(RecipeRoleBinding.stage, RecipeRoleBinding.agent_member_id).where(
+            RecipeRoleBinding.org_id == org_id,
+            RecipeRoleBinding.project_id.is_(None),
+            RecipeRoleBinding.event_definition_key == definition.key,
+        )
+    )).all()
+    bindings: dict[str, str] = {stage: str(agent_id) for stage, agent_id in org_wide}
+
+    if project_id is not None:
+        project_scoped = (await db.execute(
+            select(RecipeRoleBinding.stage, RecipeRoleBinding.agent_member_id).where(
+                RecipeRoleBinding.org_id == org_id,
+                RecipeRoleBinding.project_id == project_id,
+                RecipeRoleBinding.event_definition_key == definition.key,
+            )
+        )).all()
+        for stage, agent_id in project_scoped:
+            bindings[stage] = str(agent_id)
+
+    return RecipeRoleBindingsResponse(bindings=bindings)
 
 
 class EventPublishHistoryItem(BaseModel):

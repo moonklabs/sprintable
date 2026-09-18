@@ -10,15 +10,19 @@ import {
   X,
   Zap,
 } from 'lucide-react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
+import { CornerCountBadge } from '@/components/ui/corner-count-badge';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { fetchWithAuth } from '@/lib/db/client';
+import { formatRelativeTime } from '@/lib/storage/format';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { useSseNotifications, type SseEventNotification } from '@/hooks/use-sse-notifications';
 import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { useMediaQuery } from '@/lib/use-media-query';
 import { getEventTypeCopy } from '@/services/notification-display';
 import { hasDesktopNotifyBridge, notifyViaDesktopBridge } from '@/lib/desktop-notify-bridge';
+import { useToast } from '@/components/ui/toast';
 
 type FilterTab = 'all' | 'story' | 'system';
 
@@ -91,17 +95,6 @@ function getEventIcon(eventType: string) {
   if (eventType === 'dispatched') return <Zap className="size-4" />;
   if (eventType.startsWith('doc')) return <BookOpen className="size-4" />;
   return <Bell className="size-4" />;
-}
-
-function timeAgo(dateStr: string, t: ReturnType<typeof useTranslations>): string {
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const mins = Math.floor(diff / 60_000);
-  if (mins < 1) return t('justNow');
-  if (mins < 60) return `${mins}${t('minutesAgo')}`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}${t('hoursAgo')}`;
-  const days = Math.floor(hours / 24);
-  return `${days}${t('daysAgo')}`;
 }
 
 // story #2192 — 30건에서 조용히 잘리던 결함의 회귀가드. NOTIFICATIONS_PAGE_SIZE만큼 요청해
@@ -197,6 +190,8 @@ function NotificationPanel({
 }: NotificationPanelProps) {
   const t = useTranslations('inbox');
   const tCommon = useTranslations('common');
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
   const [filterTab, setFilterTab] = useState<FilterTab>('all');
   const [showUnreadOnly, setShowUnreadOnly] = useState(false);
 
@@ -333,7 +328,7 @@ function NotificationPanel({
                       </p>
                     ) : null}
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                      {timeAgo(n.created_at, t)}
+                      {formatRelativeTime(n.created_at, locale, displayTimezone)}
                     </p>
                   </div>
                   {!n.read_at && (
@@ -367,6 +362,7 @@ export function NotificationBell() {
   const router = useRouter();
   const t = useTranslations('inbox');
   const { currentTeamMemberId, projectId } = useDashboardContext();
+  const { addToast } = useToast();
   const [open, setOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   // null = 로딩 중, array = 로드 완료
@@ -533,12 +529,14 @@ export function NotificationBell() {
     const res = await fetch(`/api/event-notifications/${id}/read`, { method: 'PATCH' });
     // 서버 실패 시 롤백
     if (!res.ok) {
+      // story #3637(유나 silent-failure-sweep-3632) — 안읽음으로 조용히 되돌아가던 자리.
+      addToast({ title: t('markReadFailed'), type: 'error' });
       setNotifications((prev) =>
         prev ? prev.map((n) => (n.id === id ? { ...n, read_at: null } : n)) : prev,
       );
       setUnreadCount((c) => c + 1);
     }
-  }, []);
+  }, [addToast, t]);
 
   const handleMarkAllRead = useCallback(async () => {
     const readAt = new Date().toISOString();
@@ -549,9 +547,11 @@ export function NotificationBell() {
     const res = await fetch(`/api/event-notifications/read-all${readAllParams}`, { method: 'PATCH' });
     // 서버 실패 시 unread count 재폴링으로 보정
     if (!res.ok) {
+      // story #3637(유나 silent-failure-sweep-3632) — 배지가 조용히 다시 차오르던 자리.
+      addToast({ title: t('markAllReadFailed'), type: 'error' });
       void fetchUnreadCount(projectId ?? undefined).then(setUnreadCount);
     }
-  }, [projectId]);
+  }, [projectId, addToast, t]);
 
   const handleNavigate = useCallback(
     (notification: EventNotification) => {
@@ -571,15 +571,24 @@ export function NotificationBell() {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        aria-label={unreadCount > 0 ? t('bellAriaLabelCount', { count: badgeLabel }) : t('panelTitle')}
+        // story #3518(유나 사전 스티어 G, 2026-09-05) — 이름엔 원수(unreadCount)를
+        // 쓴다. 배지 표시(badgeLabel)는 '99+' 문자열이라 그대로 넣으면 "알림 99+개"
+        // 처럼 문법이 어긋난다 — 100 이상은 전용 문장(bellAriaLabelCountCapped)으로
+        // "그 이상"이라는 사실을 말로 낸다(표시 '99+'와 같은 뜻, 다른 표현).
+        aria-label={
+          unreadCount > 0
+            ? (unreadCount > 99 ? t('bellAriaLabelCountCapped') : t('bellAriaLabelCount', { count: unreadCount }))
+            : t('panelTitle')
+        }
         aria-expanded={open}
         className="relative flex size-8 items-center justify-center rounded-md text-foreground/70 transition hover:bg-accent hover:text-foreground"
       >
         <Bell className="size-4" />
+        {/* story #3431(공용, PO 確定 2026-09-05) — 공용 CornerCountBadge로 통합(team-presence-
+            toggle.tsx와 동일 정의). 색 계산 근거(story 3466이 이미 확保)와 크기(9→10px,
+            AC4)는 corner-count-badge.tsx 주석 참고 — 정의를 두 곳에 중복하지 않는다. */}
         {unreadCount > 0 && (
-          <span className="absolute -right-0.5 -top-0.5 flex min-w-[16px] items-center justify-center rounded-full bg-destructive px-1 py-px font-mono text-[9px] font-bold leading-none text-destructive-foreground">
-            {badgeLabel}
-          </span>
+          <CornerCountBadge variant="destructive" value={badgeLabel} className="absolute -right-0.5 -top-0.5" />
         )}
       </button>
 

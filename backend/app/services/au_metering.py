@@ -49,7 +49,12 @@ logger = logging.getLogger(__name__)
 # GET /api/v2/events/stream(events.py)·GET /api/v2/agent/stream(agent_gateway.py). 각
 # 라우터 파일의 다른 엔드포인트(POST /events 등)는 정상 AU 계측 대상이라 라우터 prefix
 # 전체가 아니라 이 두 정확 경로만 denylist한다.
-_STREAMING_PATHS = frozenset({"/api/v2/events/stream", "/api/v2/agent/stream"})
+#
+# 언더스코어 없는 이름(모듈 밖 재사용 의도 명시) — story #3722의
+# `app/services/tool_call_recording.py`가 같은 스트리밍 제외 축을 재사용한다(판별 로직
+# 두 곳에 따로 짜면 드리프트 재발 클래스). prod 승격(결제 되돌림)으로 auth.py 쪽 소비처
+# (AU 집행 판정)는 빠졌지만 이 이름 자체는 tool_call_recording.py가 여전히 참조한다.
+STREAMING_PATHS = frozenset({"/api/v2/events/stream", "/api/v2/agent/stream"})
 
 _READ_METHODS = frozenset({"GET", "HEAD"})
 _WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
@@ -208,7 +213,7 @@ class AUMeteringMiddleware(BaseHTTPMiddleware):
     def _plan_metering(self, request: Request, response: Response) -> tuple[uuid.UUID | None, int]:
         """순수 판단(I/O 없음) — 이 요청이 계측 대상인지·몇 AU인지만 정한다. 실제 쓰기는
         호출부가 별도 태스크로 던진다(위 클래스 docstring 참고)."""
-        if request.url.path in _STREAMING_PATHS:
+        if request.url.path in STREAMING_PATHS:
             return None, 0
         if response.status_code >= 400:
             return None, 0

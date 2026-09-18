@@ -34,6 +34,8 @@ export function NewConversationModal({ projectId, onClose, onCreated }: NewConve
   const t = useTranslations('chats');
   // story #3194 — agentNotConnected 배지 문구 재사용(발명 0, agent-management-tab.tsx와 동일 키).
   const ta = useTranslations('agents');
+  // story #3776(1층B) — "취소", common ns의 기존 cancel 키 재사용.
+  const tc = useTranslations('common');
   const [members, setMembers] = useState<Member[]>([]);
   // story #3194 — 별도 state로 둔다(members setter와 순서 경쟁 없이 항상 render에서만 merge).
   const [verifiedById, setVerifiedById] = useState<Record<string, boolean | null>>({});
@@ -101,7 +103,7 @@ export function NewConversationModal({ projectId, onClose, onCreated }: NewConve
       const data = await res.json() as { id: string };
       onCreated(data.id);
     } catch {
-      setError({ kind: 'generic', message: '대화 생성에 실패했습니다. 다시 시도해보세요.' });
+      setError({ kind: 'generic', message: t('createConversationFailed') });
     } finally {
       setCreating(false);
     }
@@ -122,7 +124,7 @@ export function NewConversationModal({ projectId, onClose, onCreated }: NewConve
         <div className="max-h-[60vh] overflow-y-auto px-4 py-3">
           <p className="mb-2 text-xs text-muted-foreground">{t('selectMembers')}</p>
           {loading ? (
-            <div className="py-6 text-center text-sm text-muted-foreground">불러오는 중…</div>
+            <div className="py-6 text-center text-sm text-muted-foreground">{tc('loading')}</div>
           ) : (
             <ul className="space-y-1">
               {members.map((m) => (
@@ -189,10 +191,10 @@ export function NewConversationModal({ projectId, onClose, onCreated }: NewConve
         {/* Footer */}
         <div className="flex justify-end gap-2 border-t border-border px-4 py-3">
           <Button variant="outline" size="sm" onClick={onClose} disabled={creating}>
-            취소
+            {tc('cancel')}
           </Button>
           <Button size="sm" onClick={() => void handleCreate()} disabled={!canCreate || creating}>
-            {creating ? '생성 중…' : t('create')}
+            {creating ? tc('creating') : t('create')}
           </Button>
         </div>
       </DialogContent>

@@ -492,6 +492,11 @@ async def get_current_user(
     if request is not None:
         request.state.au_actor = "agent" if is_au_billable_agent(auth) else "human"
         request.state.au_org_id = auth.org_id
+        # story #3672 — 소비처③: main.py::unhandled_exception_handler가 미처리 500
+        # 발생 시 「누구 요청이었나」를 지어내지 않고 알 때만 싣는다(au_org_id와 동일
+        # 자리·동일 이유 — FastAPI dependency는 라우터 밖 미들웨어/전역 예외 핸들러로
+        # 안 새어나가 request.state에 명시 기록해야 그쪽이 볼 수 있다).
+        request.state.au_user_id = auth.user_id
     return auth
 
 
@@ -595,6 +600,29 @@ async def _verify_org_membership(
         )
     )
     is_member = result.scalar_one_or_none() is not None
+    # story f84227b5(2026-09-03, 페드루 PO 실측) — org_members는 human 전용 테이블(story #2058
+    # AC5②와 동일 구조적 사유)이라 에이전트 API 키 호출은 여기서 항상 미스한다. 에이전트의
+    # AuthContext.user_id는 User.id가 아니라 TeamMember.id(_resolve_api_key, auth.py 상단
+    # 참조)라 OrgMember.user_id와 애초에 다른 id 공간이다 — X-Org-Id 헤더를 실어 자기 조직을
+    # 명시한 에이전트가 «해당 조직의 멤버가 아닌」 403을 맞았다(헤더 생략 시엔 이 검증 자체를
+    # 안 타 우연히 통과 — 그래서 "헤더 붙이면 403·생략하면 200"이라는 비대칭 실사고가 났다).
+    # OrgMember 미스 시 TeamMember(해당 org·active)로 재확인 — is_org_owner_or_admin이 이미
+    # 세운 "agent 판정은 positive-match, human 미등재는 별개 갭"과 대칭인 축.
+    if not is_member:
+        from app.models.team import TeamMember
+
+        agent_result = await db.execute(
+            select(TeamMember.id)
+            .where(
+                TeamMember.org_id == org_id,
+                TeamMember.id == uuid.UUID(user_id),
+                TeamMember.is_active.is_(True),
+            )
+            .limit(1)  # team_members는 0088 이후 projection VIEW — 멀티프로젝트 에이전트는
+            # 같은 id로 여러 행(프로젝트당 1행)을 낸다. scalar_one_or_none은 그 경우
+            # MultipleResultsFound로 크래시하므로 limit(1)+first()로 존재만 본다.
+        )
+        is_member = agent_result.first() is not None
     setattr(request.state, cache_key, is_member)
     if not is_member:
         raise HTTPException(

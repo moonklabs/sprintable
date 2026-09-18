@@ -43,9 +43,27 @@
  *     순회 밖에 하드 배선)은 이 가드가 자동 검증 못 한다 — 렌더 검증은 app-sidebar.test.tsx
  *     가 맡는다(그룹 순서·라벨 회귀가드).
  */
-import { MOBILE_HUB_EXCLUDE_IDS, MOBILE_HUB_GROUP_ORDER, NAV_GROUPS } from '../src/lib/nav-config';
+import { LEGACY_NAV_ITEMS, MOBILE_HUB_EXCLUDE_IDS, MOBILE_HUB_GROUP_ORDER, NAV_GROUPS } from '../src/lib/nav-config';
 
 export const MAX_MOBILE_DEPTH = 2;
+
+// story #3824(UX-v3·FE 1, 페드루 PO 確定 2026-09-13 CI fail 처방) — 5항목 축소로 대부분의
+// 관리면이 NAV_GROUPS 밖(LEGACY_NAV_ITEMS)으로 옮겨갔다. 이 판별자의 취지("주요 관리
+// 화면 도달이 몇 탭인가")는 항목이 어느 배열에 사느냐와 무관하므로, 판별 축을 NAV_GROUPS
+// 하나에서 «NAV_GROUPS ∪ LEGACY_NAV_ITEMS»로 **확장**한다(삭제·완화 아님 — PO 명시:
+// "판별자를 삭제가 아니라 확장"). LEGACY_NAV_ITEMS는 more/page.tsx에서 그룹이 아니라
+// 평평한 배열이지만, 그 페이지는 이 배열 전체를 «그 밖의 화면» 카드 하나로 항상 렌더한다
+// (MOBILE_HUB_GROUP_ORDER의 조회 대상이 아니라 무조건 추가 — page.tsx의 `[...(...), legacyGroup]`
+// 구조 참고) — 그래서 이 합성 그룹은 실제 렌더 배선과 똑같이 "hubGroupIds에 항상 있다"로
+// 모델링한다. 도달불가(Infinity) 축은 죽지 않는다 — legacyGroupId를 실수로 hubGroupIds에서
+// 빼면(또는 more/page.tsx가 legacy 카드 렌더를 그만두면) 여전히 RED가 난다.
+const LEGACY_GROUP_ID = 'legacy';
+
+export function buildMobileNavUniverse() {
+  const groups = [...NAV_GROUPS, { id: LEGACY_GROUP_ID, items: LEGACY_NAV_ITEMS }];
+  const hubGroupIds = new Set([...MOBILE_HUB_GROUP_ORDER, LEGACY_GROUP_ID]);
+  return { groups, hubGroupIds };
+}
 
 export interface DepthEntry {
   id: string;
@@ -83,8 +101,10 @@ export function findDepthViolations(entries: DepthEntry[], maxDepth: number): De
 
 function main(): void {
   // computeMobileDepths/findDepthViolations은 순수 함수라 테스트가 가짜 입력으로 독립
-  // 검증한다(AC1 양성대조) — main()은 그 함수들에 실 NAV_GROUPS를 흘려보낼 뿐이다.
-  const entries = computeMobileDepths(NAV_GROUPS, MOBILE_HUB_EXCLUDE_IDS, new Set(MOBILE_HUB_GROUP_ORDER));
+  // 검증한다(AC1 양성대조) — main()은 그 함수들에 실 NAV_GROUPS ∪ LEGACY_NAV_ITEMS를
+  // 흘려보낼 뿐이다(story #3824 확장, buildMobileNavUniverse() 참고).
+  const { groups, hubGroupIds } = buildMobileNavUniverse();
+  const entries = computeMobileDepths(groups, MOBILE_HUB_EXCLUDE_IDS, hubGroupIds);
   const violations = findDepthViolations(entries, MAX_MOBILE_DEPTH);
 
   console.log(

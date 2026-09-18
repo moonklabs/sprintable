@@ -86,6 +86,48 @@ describe('ProfileMenu — 약관 및 정책 그룹 제거 회귀가드 (story #2
   });
 });
 
+// story #3775(유나 定 2026-09-10) — OAuth 신규 가입(display_name 없음)이 이전엔
+// `{userName && <ProfileMenu .../>}`(호출부)로 걸러져 이 컴포넌트 자체가 안 그려졌다 —
+// 인증 셸 안에서 /settings로 가는 **유일한 상시 진입점**이 그래서 통째로 막혔었다(유나
+// 전수 확認, 4개 후보 중 나머지 셋은 상시가 아님). name=null이어도 항상 그린다.
+describe('ProfileMenu — name 없음(OAuth 신규 가입)도 항상 그린다(story #3775, 설정 진입점 복원)', () => {
+  it('⭐name=null → 칩에 「이름 없는 구성원」(common.memberUnnamed 재사용, 새 낱말 0)', async () => {
+    await mount(<ProfileMenu name={null} />);
+    const trigger = container.querySelector('[data-slot="dropdown-menu-trigger"]') as HTMLElement;
+    expect(trigger).toBeTruthy();
+    expect(trigger.textContent).toContain(koMessages.common.memberUnnamed);
+  });
+
+  it('⭐name=null → 드롭다운에 「이름 설정」 항목이 있고 /settings로 간다', async () => {
+    await mount(<ProfileMenu name={null} />);
+    await openMenu();
+    const content = document.querySelector('[data-slot="dropdown-menu-content"]');
+    const setNameItem = Array.from(content!.querySelectorAll('a')).find(
+      (a) => a.textContent?.includes(koMessages.accountSwitcher.setName),
+    );
+    expect(setNameItem).toBeTruthy();
+    expect(setNameItem?.getAttribute('href')).toBe('/settings');
+  });
+
+  // ⭐되돌리면 RED — 이름이 있으면 「이름 설정」 항목이 사라져야 한다(재노출 조건 자체가
+  // 불필요하다는 유나 定의 핵심 — 상태가 곧 표시).
+  it('⭐name이 있으면(기존 회귀) 「이름 설정」 항목이 없다', async () => {
+    await mount(<ProfileMenu name="송윤재" />);
+    await openMenu();
+    const content = document.querySelector('[data-slot="dropdown-menu-content"]');
+    const setNameItem = Array.from(content!.querySelectorAll('*')).find(
+      (el) => el.textContent === koMessages.accountSwitcher.setName,
+    );
+    expect(setNameItem).toBeFalsy();
+  });
+
+  it('빈 문자열("")도 null과 동형(메일 로컬파트 등으로 굽지 않은 빈 값) — 「이름 없는 구성원」', async () => {
+    await mount(<ProfileMenu name="" />);
+    const trigger = container.querySelector('[data-slot="dropdown-menu-trigger"]') as HTMLElement;
+    expect(trigger.textContent).toContain(koMessages.common.memberUnnamed);
+  });
+});
+
 // story #3146/#3147(모바일 스위처 통합 재설계, doc mobile-switcher-redesign-spec-4758744a)
 // — 계정 스위치 로직을 useAccountSwitcher 훅으로 추출(profile-menu.tsx 원 동작 재구현
 // 0)+데스크톱 트리거를 밝은 배경(context-switcher-chip.tsx 계정층)에도 재사용 가능하게

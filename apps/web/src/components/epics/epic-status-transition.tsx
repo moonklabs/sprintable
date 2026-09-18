@@ -5,7 +5,7 @@ import { useTranslations } from 'next-intl';
 import { ChevronDown, ShieldCheck, Clock } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { ToastContainer, useToast } from '@/components/ui/toast';
+import { useToast } from '@/components/ui/toast';
 import { GoalOutcomeDialog, type GoalOutcomeSubmission } from '@/components/goals/goal-outcome-dialog';
 
 /**
@@ -60,7 +60,7 @@ export function EpicStatusTransition({
   const [pending, setPending] = useState(false); // gate 생성·승인 대기(status 미변경)
   // story #2844 — active→done은 outcome 다이얼로그를 먼저 거친다(다른 전이는 그대로 직행).
   const [outcomeDialogOpen, setOutcomeDialogOpen] = useState(false);
-  const { toasts, addToast, dismissToast } = useToast();
+  const { addToast } = useToast();
 
   const nexts = VALID_NEXT[status] ?? [];
 
@@ -155,7 +155,6 @@ export function EpicStatusTransition({
           onCancel={() => setOutcomeDialogOpen(false)}
         />
       ) : null}
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }

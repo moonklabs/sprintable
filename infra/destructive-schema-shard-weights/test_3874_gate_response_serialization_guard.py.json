@@ -1,0 +1,1 @@
+{"file": "tests/test_3874_gate_response_serialization_guard.py", "sec": 3.0, "source": "story-3874(2026-09-14, 로컬 실측 1.4s — Base.metadata.create_all+Gate/OrgGatePolicy 행 소수 insert뿐, CI 러너 여유를 감안해 반올림)"}

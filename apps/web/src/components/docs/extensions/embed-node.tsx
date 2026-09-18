@@ -4,6 +4,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { Node, mergeAttributes } from '@tiptap/core';
 import { ReactNodeViewRenderer, NodeViewWrapper, type ReactNodeViewProps } from '@tiptap/react';
 import { ExternalLink, Link2 } from 'lucide-react';
+import { useTranslations } from 'next-intl';
 
 // ─── URL Helpers ──────────────────────────────────────────────────────────────
 
@@ -59,6 +60,7 @@ export function detectEmbedService(url: string): EmbedInfo {
 // ─── Embed View ───────────────────────────────────────────────────────────────
 
 function EmbedView({ node, updateAttributes, selected }: ReactNodeViewProps) {
+  const t = useTranslations('docs');
   const url = (node.attrs.url as string) ?? '';
   const [editUrl, setEditUrl] = useState(url);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -89,7 +91,7 @@ function EmbedView({ node, updateAttributes, selected }: ReactNodeViewProps) {
             onChange={(e) => setEditUrl(e.target.value)}
             onKeyDown={handleKeyDown}
             onBlur={applyUrl}
-            placeholder="URL 입력 후 Enter"
+            placeholder={t('embedUrlPlaceholder')}
             className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
           />
         </div>
@@ -102,7 +104,7 @@ function EmbedView({ node, updateAttributes, selected }: ReactNodeViewProps) {
             <div className="aspect-video w-full overflow-hidden rounded-xl border border-border">
               <iframe
                 src={embedUrl}
-                title="YouTube video"
+                title={t('embedYoutubeTitle')}
                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                 allowFullScreen
                 className="h-full w-full"
@@ -113,7 +115,7 @@ function EmbedView({ node, updateAttributes, selected }: ReactNodeViewProps) {
             <div className="h-[480px] w-full overflow-hidden rounded-xl border border-border">
               <iframe
                 src={embedUrl}
-                title="Figma embed"
+                title={t('embedFigmaTitle')}
                 allow="fullscreen"
                 allowFullScreen
                 className="h-full w-full"
@@ -135,7 +137,7 @@ function EmbedView({ node, updateAttributes, selected }: ReactNodeViewProps) {
       ) : (
         <div className="flex items-center gap-2 rounded-xl border border-dashed border-border px-4 py-4 text-sm text-muted-foreground">
           <Link2 className="size-4" />
-          <span>블록을 선택해 URL을 입력하세요</span>
+          <span>{t('embedUrlSelectHint')}</span>
         </div>
       )}
     </NodeViewWrapper>

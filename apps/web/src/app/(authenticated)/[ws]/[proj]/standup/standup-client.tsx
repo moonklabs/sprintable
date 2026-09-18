@@ -7,6 +7,7 @@ import { useTranslations } from 'next-intl';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
 import { OperatorInput, OperatorTextarea } from '@/components/ui/operator-control';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
@@ -107,12 +108,36 @@ function shiftDate(dateStr: string, days: number): string {
 
 interface StandupClientProps {
   projectId: string;
+  /** story #3845(§① 2026-09-14) — 「스프린트」 탭 안 「하루 체크인」 절로 마운트될 때 true.
+   * 독립 /standup 라우트가 은퇴(legacy-resource-tables.ts RENAMED_RESOURCES로 /sprints
+   * 301 흡수)돼 이제 이 값은 사실상 항상 true지만, TopBarSlot은 싱글톤 컨텍스트 슬롯이라
+   * (top-bar-slot.tsx) sprints-client.tsx 자신의 TopBarSlot과 이 컴포넌트의 TopBarSlot이
+   * 동시에 마운트되면 나중 커밋 effect가 먼저 것을 조용히 덮어써 제목이 뒤바뀐다 — 그
+   * 충돌을 코드로 명시(prop 하나)해 둔다. false(비지정)면 옛 독립 라우트 동작(자체
+   * TopBarSlot 제목 "스탠드업") 그대로 — 테스트 회귀 없이 점진 전환. */
+  embedded?: boolean;
 }
 
 // story a539c649 S3a: projectId 는 이제 서버 layout(headers() 경유 resolve 결과)이 prop 으로
 // 내려준다 — useDashboardContext()(전역 "현재 프로젝트")가 아니라 URL 이 가리키는 project.
-export default function StandupPage({ projectId }: StandupClientProps) {
+export default function StandupPage({ projectId, embedded = false }: StandupClientProps) {
   const t = useTranslations('standup');
+  const tc = useTranslations('common');
+  // story #3878(§⑤ 낱말 드리프트) — story.status(canonical slug)를 t() 없이 그대로
+  // 그리던 자리 정본화. story-detail-panel.tsx의 statusKeyMap→t() 관례 그대로 재사용
+  // (§②-1 기존 상태 낱말, 새 키 0).
+  const tBoard = useTranslations('board');
+  const storyStatusKeyMap: Record<string, 'backlog' | 'readyForDev' | 'inProgress' | 'inReview' | 'done'> = {
+    backlog: 'backlog',
+    'ready-for-dev': 'readyForDev',
+    'in-progress': 'inProgress',
+    'in-review': 'inReview',
+    done: 'done',
+  };
+  const storyStatusLabel = (slug: string): string => {
+    const key = storyStatusKeyMap[slug];
+    return key ? tBoard(key) : slug;
+  };
   const { currentTeamMemberId, projectMemberships } = useDashboardContext();
 
   const [date, setDate] = useState(() => formatSeoulDate());
@@ -246,10 +271,15 @@ export default function StandupPage({ projectId }: StandupClientProps) {
         let nextStoriesCursor: string | null = null;
 
         if (projectId) {
+          // story #3519(§16-7 2부, PO 確定 2026-09-05) — missingRes는 주석("실패해도 본
+          // 화면은 막지 않음")상 부수인데, sprintsRes/feedbackRes(주)와 같은 미격리
+          // Promise.all 안에 있었다. missingRes의 fetch 자체가 네트워크단 reject(HTTP
+          // status가 아니라)하면 이 Promise.all 전체가 던져 주 데이터 둘도 같이 못
+          // 얻었다 — 주석과 코드가 어긋난 결함. missingRes만 leg 자체를 격리한다.
           const [sprintsRes, feedbackRes, missingRes] = await Promise.all([
             fetchWithAuth(`/api/sprints?project_id=${projectId}&status=active`),
             fetchWithAuth(`/api/standup/feedback?project_id=${projectId}&date=${date}`),
-            fetchWithAuth(`/api/standup/missing?project_id=${projectId}&date=${date}`),
+            fetchWithAuth(`/api/standup/missing?project_id=${projectId}&date=${date}`).catch(() => null),
           ]);
 
           const [sprintsData, fbData] = await Promise.all([
@@ -259,8 +289,8 @@ export default function StandupPage({ projectId }: StandupClientProps) {
           feedbackData = fbData;
 
           // S3: Missing = org 기준(projection get_missing). 실패해도 본 화면은 막지 않음.
-          const missingJson = await missingRes.json().catch(() => null) as { data?: { missing?: { id: string; name: string }[] } } | null;
-          missingList = missingRes.ok ? (missingJson?.data?.missing ?? []) : [];
+          const missingJson = await missingRes?.json().catch(() => null) as { data?: { missing?: { id: string; name: string }[] } } | null;
+          missingList = missingRes?.ok ? (missingJson?.data?.missing ?? []) : [];
 
           sprint = sprintsData.find((item) => item.status === 'active') ?? sprintsData[0] ?? null;
 
@@ -441,18 +471,35 @@ export default function StandupPage({ projectId }: StandupClientProps) {
 
   return (
     <>
-      <TopBarSlot
-        title={<h1 className="text-sm font-medium">{t('title')}</h1>}
-        actions={
-          <div className="hidden flex-wrap items-center gap-1.5 lg:flex">{dateNavControls}</div>
-        }
-        showContextChip
-      />
+      {embedded ? (
+        // story #3845(§①⑤) — sprints-client.tsx가 자기 TopBarSlot(제목 "스프린트")을 이미
+        // 소유하므로 여기서 또 TopBarSlot을 마운트하면 싱글톤 컨텍스트를 뺏어 제목이
+        // 뒤바뀐다(top-bar-slot.tsx 싱글톤 주석 참고) — 절 헤딩+날짜 네비 한 줄로 대체.
+        <div className="space-y-1 border-b border-border/80 px-6 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold text-foreground">{t('embeddedHeading')}</h2>
+            <div className="flex flex-wrap items-center gap-1.5">{dateNavControls}</div>
+          </div>
+          {!loading && entries.length === 0 ? (
+            <p className="text-xs text-muted-foreground">{t('noCheckinsToday')}</p>
+          ) : null}
+        </div>
+      ) : (
+        <>
+          <TopBarSlot
+            title={<h1 className="text-sm font-medium">{t('title')}</h1>}
+            actions={
+              <div className="hidden flex-wrap items-center gap-1.5 lg:flex">{dateNavControls}</div>
+            }
+            showContextChip
+          />
 
-      {/* S4: mobile date nav as its own full-width row (keeps the header title readable). */}
-      <div className="flex flex-wrap items-center gap-1.5 border-b border-border/80 px-4 py-2 lg:hidden">
-        {dateNavControls}
-      </div>
+          {/* S4: mobile date nav as its own full-width row (keeps the header title readable). */}
+          <div className="flex flex-wrap items-center gap-1.5 border-b border-border/80 px-4 py-2 lg:hidden">
+            {dateNavControls}
+          </div>
+        </>
+      )}
 
       <div className="focus-inset flex min-h-0 flex-1 flex-col overflow-y-auto">
         {headerBadges.length > 0 ? (
@@ -478,7 +525,10 @@ export default function StandupPage({ projectId }: StandupClientProps) {
             <>
               {/* 스프린트 섹션 — 접을 수 있는 컴팩트 카드 (d9847ef0: project-scoped — projectId 있을 때만) */}
               {projectId ? (
-              <div className="rounded-xl border border-border bg-background">
+              // story #3785(유나·페드루 라이브 실측 확定) — bg-background는 페이지 배경을
+              // 그대로 덧칠한 것이라 border-only와 같은 결함(배경과 한 색). 1층 규칙:
+              // Card(surface='solid').
+              <Card>
                 <button
                   type="button"
                   className="flex w-full flex-wrap items-center justify-between gap-3 px-4 py-3 text-left"
@@ -515,7 +565,7 @@ export default function StandupPage({ projectId }: StandupClientProps) {
                               <div key={story.id} className="rounded-xl border border-border/70 bg-background p-4 shadow-[var(--elev-card)]">
                                 <div className="flex flex-wrap items-center justify-between gap-2">
                                   <p className="text-sm font-medium text-foreground">{story.title}</p>
-                                  <Badge variant="outline">{story.status}</Badge>
+                                  <Badge variant="outline">{storyStatusLabel(story.status)}</Badge>
                                 </div>
                                 <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                                   <Badge variant="chip">{story.assignee_name ?? t('unknown')}</Badge>
@@ -576,7 +626,7 @@ export default function StandupPage({ projectId }: StandupClientProps) {
                     )}
                   </div>
                 ) : null}
-              </div>
+              </Card>
               ) : (
                 <div className="rounded-xl border border-dashed border-border bg-background p-6">
                   <EmptyState title={t('projectScopedHint')} />
@@ -735,7 +785,7 @@ export default function StandupPage({ projectId }: StandupClientProps) {
                                         <div className="min-w-0 flex-1 space-y-0.5">
                                           <div className="flex flex-wrap items-center justify-between gap-2">
                                             <p className="text-sm font-medium text-foreground">{story.title}</p>
-                                            <Badge variant="outline">{story.status}</Badge>
+                                            <Badge variant="outline">{storyStatusLabel(story.status)}</Badge>
                                           </div>
                                           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                                             <Badge variant="chip">{story.assignee_name ?? t('unknown')}</Badge>
@@ -762,7 +812,7 @@ export default function StandupPage({ projectId }: StandupClientProps) {
 
                             <div className="flex flex-wrap items-center gap-3 pt-1">
                               <Button variant="hero" size="lg" onClick={() => void handleSave()} disabled={saving}>
-                                {saving ? t('saving') : t('save')}
+                                {saving ? tc('saving') : t('save')}
                               </Button>
                               <Button variant="outline" onClick={() => setEditingSelf(false)}>{t('cancel')}</Button>
                               {saveError ? <p className="text-sm text-destructive">{saveError}</p> : null}

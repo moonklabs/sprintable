@@ -1,0 +1,1 @@
+{"file": "tests/test_3808_x_publish.py", "sec": 1.8, "source": "story-3808(Phase3·3-3 PR2, 페드루 PO 確定 2026-09-11) — X 발행(스레드 sequence·x_sandbox 마커 4종) 신규 파일 실측(로컬, uv run pytest --durations=0 직접 1회 실행, 10건 wall time 약 1.8s — test_3808_x_oauth.py 선례와 동일 방법론, 실 CI 샤드 로그로 재확認 필요)"}

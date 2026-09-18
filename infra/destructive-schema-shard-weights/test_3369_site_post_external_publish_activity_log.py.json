@@ -1,0 +1,1 @@
+{"file": "tests/test_3369_site_post_external_publish_activity_log.py", "sec": 42.0, "source": "story #3369 후속(2026-09-10) — 신규 destructive_schema 파일(외부 목적지 site_post 발행 감사로그 실 WordPress 스텁+실 워커 왕복). 로컬 실측 call+setup+teardown=6.85s(disposable PG, --durations=0) — story #3383 6배 스케일(로컬→CI) 적용해 ~42s로 등재. 실 CI 샤드 로그로 재확認 필요(AC2 재측정 규칙)."}

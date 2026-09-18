@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { useRenderNonce } from '@/hooks/use-render-nonce';
+import { getPublicAppHost } from '@/lib/public-app-host';
 
 const SLUG_REGEX = /^[a-z0-9][a-z0-9-]{0,48}[a-z0-9]$|^[a-z0-9]$/;
 
@@ -154,7 +155,7 @@ export function CreateOrganizationDialog({
           {error && (
             // story #2105 2차 — handleSubmit이 재시도 전 setError('')를 먼저 호출해(위 정의) 매
             // 시도마다 언마운트→리마운트된다.
-            <div role="alert" aria-live="assertive" aria-atomic="true" className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-foreground">
+            <div role="alert" aria-live="assertive" aria-atomic="true" className="rounded-md bg-destructive-tint px-3 py-2 text-sm text-foreground">
               {error}
             </div>
           )}
@@ -188,14 +189,14 @@ export function CreateOrganizationDialog({
               <p className="text-xs text-destructive">{slugError}</p>
             ) : (
               <p className="text-xs text-muted-foreground">
-                sprintable.app/{slug || '...'}
+                {getPublicAppHost()}/{slug || '...'}
               </p>
             )}
           </div>
           <DialogFooter>
             <DialogClose render={<Button type="button" variant="ghost" disabled={creating}>{tc('cancel')}</Button>} />
             <Button type="submit" disabled={!canSubmit}>
-              {creating ? t('switcherCreating') : t('switcherCreateButton')}
+              {creating ? tc('creating') : t('switcherCreateButton')}
             </Button>
           </DialogFooter>
         </form>

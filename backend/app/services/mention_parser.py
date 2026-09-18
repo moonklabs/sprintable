@@ -8,12 +8,23 @@ design-org-knowledge-mentions-backlinks §2.
     `#` 트리거 검색 결과 선택 시 삽입)을 (entity_type, id) 쌍으로 **전부** 추출한다. 채팅
     메시지는 수정 불가 전제라 파서도 매번 전체를 새로 파싱해 insert-only 로 쓴다(재조정 불필요).
   · `extract_chat_doc_mention_ids` — 위의 doc-only 하위호환 래퍼(기존 호출부/테스트용).
-  · `extract_doc_mention_ids` — doc content(HTML — tiptap `editor.getHTML()` 그대로 저장,
-    content_format 무관하게 실제 마크업은 HTML)에서 wikiLink(`<span data-type="wikiLink"
-    data-doc-id="...">`) 와 pageEmbed(`<div data-page-embed data-doc-id="...">`) 의
-    `data-doc-id` attribute 를 추출한다. **정규식이 아닌 `html.parser.HTMLParser` 사용** —
-    attribute 순서가 보장되지 않는다는 게 설계 doc 의 근거(mergeAttributes 가 만드는 순서는
-    tiptap 내부 구현에 의존하므로 위치 기반 정규식은 취약).
+  · `extract_doc_mention_ids` — doc content가 **HTML일 때**(tiptap `editor.getHTML()` 그대로
+    저장된 경우 — ⛔story #3858 AC1-b(2026-09-15) 정정: "content_format 무관하게 실제 마크업은
+    HTML"이라던 이 문단의 옛 전제는 거짓이었다. `Doc.content_format` 기본값이 `"markdown"`
+    이고 에디터는 실제로 순수 마크다운 텍스트를 저장한다 — `reconcile_doc_mentions`가 이
+    HTML 전용 파서와 마크다운 파서(`extract_chat_entity_mentions`, 재사용)를 둘 다 돌려서
+    어느 형식이 와도 놓치지 않는다, 아래 `reconcile_doc_mentions` docstring 참조)에서
+    wikiLink(`<span data-type="wikiLink" data-doc-id="...">`) 와 pageEmbed(`<div
+    data-page-embed data-doc-id="...">`) 의 `data-doc-id` attribute 를 추출한다. **정규식이
+    아닌 `html.parser.HTMLParser` 사용** — attribute 순서가 보장되지 않는다는 게 설계 doc 의
+    근거(mergeAttributes 가 만드는 순서는 tiptap 내부 구현에 의존하므로 위치 기반 정규식은
+    취약).
+  · `extract_doc_entity_ref_targets`(story #3858) — 같은 doc content가 HTML일 때
+    `<a href="entity:<type>:<uuid>">` 앵커(story #2639가 렌더하는 그 형식·chat의
+    `[title](entity:<type>:<uuid>)`가 markdownToHtml을 거친 모양)를 (target_type, target_id)
+    쌍으로 추출한다 — wikiLink/pageEmbed와 달리 target_type을 "doc"으로 고정하지 않는다.
+    content가 마크다운일 때는 이 함수가 0건을 내고(HTML 태그가 없으니), `reconcile_doc_
+    mentions`가 대신 `extract_chat_entity_mentions`로 마크다운 토큰을 직접 뽑는다.
 
 추출 함수는 malformed 토큰(파싱 실패·잘못된 UUID)을 **조용히 스킵**한다 — 멘션 파싱 실패로
 본 메시지/문서 저장 전체가 실패하면 안 된다는 원칙(AC와 별개로, 파서 자체의 malformed-tolerance).
@@ -100,8 +111,25 @@ _UUID_RE = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-f
 # 조용히 죽는다(chat_message도 언더스코어가 있지만 그 타입은 채팅 본문 토큰 경로로
 # 쓰이지 않아 — proof form 별도 경로 — 지금까지 이 구멍이 안 드러났을 뿐). `[a-z_]+`로
 # 넓혀 두 정규식(아래 SHAPE_RE도 동일 근거) 다 대비한다.
+#
+# ⭐story #3858 CHANGES 1(2026-09-15, PO 배포 89 라이브 실측 — 되돌림, 합성 표본 함정
+# 2번째 재발): 위 #2282의 escape 처방은 "제목의 `]`는 항상 `build_reference_token`이
+# escape해 내보낸다"는 전제였는데, 문서 에디터(story #3866)가 실제로 저장하는 마크다운
+# 링크는 escape가 «전혀 없는» 1단 중첩 대괄호 그대로다(이 조직 스토리 제목 관례 "[TAG]
+# 제목" 그 자체 — 예: `[[SMOKE·삭제예정] 3567 릴스 1건](entity:story:<uuid>)`). 옛
+# `(?:[^\]\\]|\\.)*`는 escape된 `\]`만 견디지 raw `[...]` 중첩은 못 견뎌 첫 안쪽 `]`에서
+# 매치가 통째로 실패했다(원래 AC1-b의 합성 fixture는 대괄호 없는 라벨만 써서 이 갭도
+# 못 봤다). 처방: FE `apps/web/src/components/docs/lib/content-converter.ts`의 마크다운
+# 링크 파서(story #3866, 같은 문제를 같은 방식으로 이미 처방)와 구조적으로 동형인 3분기
+# 반복군으로 교체 — ① `\\[\[\]]`(escape된 대괄호, #2282 하위호환) ② `\[[^\[\]]*\]`(대괄호
+# 안 대괄호 없는 raw 1단 중첩 — 문서 에디터의 실제 저장 형태) ③ `[^\[\]]`(그 외 대괄호
+# 아닌 낱글자). CommonMark처럼 무한 재귀는 안 가되(정규식 엔진이 재귀를 못 함) 1단 중첩까지
+# 커버 — 진짜 닫는 `]`(바로 뒤 `(`가 오는 자리)는 세 분기 어디에도 안 걸려 반복이 거기서
+# 자연히 멈춘다. 채팅(`extract_chat_entity_mentions`)과 doc(`reconcile_doc_mentions`, story
+# #3858 AC1-b)이 이 정규식 하나를 공유하므로 채팅 멘션도 같이 좋아진다(회귀 0 — 기존
+# escape 형·대괄호 없는 형 둘 다 그대로 매치).
 _CHAT_TOKEN_RE = re.compile(
-    r"\[(?:[^\]\\]|\\.)*\]\(entity:(?P<type>[a-z_]+):(?P<id>" + _UUID_RE + r")\)"
+    r"\[(?:\\[\[\]]|\[[^\[\]]*\]|[^\[\]])*\]\(entity:(?P<type>[a-z_]+):(?P<id>" + _UUID_RE + r")\)"
 )
 
 
@@ -166,8 +194,11 @@ def extract_chat_entity_mentions(content: str) -> list[tuple[str, uuid.UUID]]:
 # `reason="malformed_token"`으로 얹는다. 코어(`reconcile_entity_references`)에 안 넣는
 # 이유: 코어는 이미 파싱된 `extracted_refs`만 받는 계약이라(#2301) 애초에 추출조차 안 된
 # 토큰은 코어의 시야 밖 — #2301의 "얇은 변환" 원칙 위반이 아니라 코어가 볼 수 없는 축이다.
+# story #3858 CHANGES 1 — 위 _CHAT_TOKEN_RE와 같은 3분기 라벨 문법으로 맞춘다(라벨
+# 파싱 규칙이 두 정규식에서 갈리면 "모양은 맞는데 못 파싱"의 «모양» 판정 자체가 서로
+# 달라지는 twin-system 갭이 된다 — id만 느슨한 게 이 SHAPE_RE의 유일한 차이여야 한다).
 _CHAT_TOKEN_SHAPE_RE = re.compile(
-    r"\[(?:[^\]\\]|\\.)*\]\(entity:(?P<type>[a-z_]+):(?P<id>[^)]*)\)"
+    r"\[(?:\\[\[\]]|\[[^\[\]]*\]|[^\[\]])*\]\(entity:(?P<type>[a-z_]+):(?P<id>[^)]*)\)"
 )
 
 
@@ -298,6 +329,9 @@ def extract_chat_doc_mention_ids(content: str) -> list[uuid.UUID]:
     return [eid for etype, eid in extract_chat_entity_mentions(content) if etype == "doc"]
 
 
+_DOC_ENTITY_HREF_RE = re.compile(r"^entity:(?P<type>[a-z_]+):(?P<id>" + _UUID_RE + r")$")
+
+
 class _DocMentionHTMLParser(HTMLParser):
     """wikiLink(`span[data-type=wikiLink]`)·pageEmbed(`div[data-page-embed]`) 의 data-doc-id
     attribute 를 순서 무관하게 추출. 정규식 대신 HTMLParser 를 쓰는 이유(설계 doc §2 근거):
@@ -308,11 +342,31 @@ class _DocMentionHTMLParser(HTMLParser):
     story #2284: 어느 태그였는지(wikiLink=인라인 멘션 / pageEmbed=카드 임베드)를 **버리지
     않고** (doc_id, form) 쌍으로 남긴다 — 파싱 시점엔 이미 있던 구분이 예전엔 저장 시점에
     뭉개졌다(#2259 이후 form이 리터럴 "mention"으로 하드코딩됐던 자리).
+
+    story #3858(customer-zero·BE·연결 쓰기, 페드루 AC0 확定 2026-09-14 08:10Z) — `entity:
+    <type>:<uuid>` 마크다운 링크(story #2639가 이미 렌더하는, doc-content-renderer.tsx의
+    EntityChip과 같은 형식·chat_message의 `extract_chat_entity_mentions`(_CHAT_TOKEN_RE)와
+    같은 토큰 문법)는 doc.content_format="html"인 doc에서는 저장 시 markdownToHtml을 거쳐
+    **`<a href="entity:type:uuid">` 앵커**로 실존한다. ⛔AC1-b(2026-09-15) 정정 — 이 문단이
+    원래 전제하던 "doc.content는 항상 HTML"은 거짓이었다(`Doc.content_format` 기본값=
+    "markdown", 실 저장은 순수 마크다운 텍스트). content_format="markdown"인 doc에서는 이
+    파서가 0건을 내고(HTML 태그가 없으니 이 HTMLParser는 아무것도 못 본다), 대신
+    `reconcile_doc_mentions`가 `extract_chat_entity_mentions`로 같은 링크를 마크다운
+    문법 그대로 직접 뽑는다(두 파서를 무조건 병행 — content_format 분기 없음). 이 파서는
+    wikiLink/pageEmbed와 달리 target_type을 「doc」으로
+    고정하지 않는다 — href의 type 그룹을 그대로 살려(entity_refs) reconcile_doc_mentions가
+    돌려준다. AC0가 확定한 스코프는 「링크 1종」뿐(bare #NNNN·story 전용 임베드 노드는 에디터
+    삽입 UI 자체가 없어 이 카드 밖) — 그래도 파서 자체를 "story만" 하드코딩하지 않는 이유는
+    #2260이 이미 세운 원칙과 동일(추출은 있는 그대로 전부, "무엇을 쓸지"는 write-path의
+    target_types 필터가 결정 — reconcile_entity_references가 이미 그렇게 짜여 있다, 아래
+    reconcile_doc_mentions 참조). 파서에 story 하드코딩을 추가하는 게 오히려 #2260이 막은
+    "타입별 분기 재도입"이 된다.
     """
 
     def __init__(self) -> None:
         super().__init__()
         self.doc_refs: list[tuple[str, str]] = []  # (raw_doc_id, form)
+        self.entity_refs: list[tuple[str, str]] = []  # (target_type, raw_target_id)
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attr_map = dict(attrs)
@@ -324,6 +378,11 @@ class _DocMentionHTMLParser(HTMLParser):
             doc_id = attr_map.get("data-doc-id")
             if doc_id:
                 self.doc_refs.append((doc_id, "embed"))
+        elif tag == "a":
+            href = attr_map.get("href")
+            m = _DOC_ENTITY_HREF_RE.match(href) if href else None
+            if m:
+                self.entity_refs.append((m.group("type"), m.group("id")))
 
 
 def extract_doc_mention_targets(html_content: str) -> list[tuple[uuid.UUID, str]]:
@@ -353,6 +412,38 @@ def extract_doc_mention_targets(html_content: str) -> list[tuple[uuid.UUID, str]
         except ValueError:
             continue
         key = (doc_id, form)
+        if key not in seen:
+            seen.add(key)
+            result.append(key)
+    return result
+
+
+def extract_doc_entity_ref_targets(html_content: str) -> list[tuple[str, uuid.UUID]]:
+    """story #3858 — doc content(HTML)에서 `<a href="entity:<type>:<uuid>">` 앵커를 순서
+    보존 + 중복 제거로 추출한다. 반환: `[(target_type, target_id), ...]` — extract_doc_
+    mention_targets(wikiLink/pageEmbed, target_type이 항상 "doc")와 달리 target_type이
+    href 그대로다(파서 자신이 타입을 정하지 않는다 — story #2260/#2273 원칙, 위 파서
+    docstring 참조). `reconcile_doc_mentions`가 이 결과를 target_types 필터(레지스트리
+    기본값)와 함께 넘겨 실제로 어떤 타입까지 쓸지는 그쪽이 결정한다.
+
+    malformed href(패턴 불일치)·malformed UUID는 조용히 스킵(파서 예외로 전체 doc 저장이
+    실패하면 안 된다는 기존 malformed-tolerance 원칙 그대로)."""
+    if not html_content:
+        return []
+    parser = _DocMentionHTMLParser()
+    try:
+        parser.feed(html_content)
+        parser.close()
+    except Exception:
+        pass
+    seen: set[tuple[str, uuid.UUID]] = set()
+    result: list[tuple[str, uuid.UUID]] = []
+    for target_type, raw_id in parser.entity_refs:
+        try:
+            target_id = uuid.UUID(raw_id)
+        except ValueError:
+            continue
+        key = (target_type, target_id)
         if key not in seen:
             seen.add(key)
             result.append(key)
@@ -698,7 +789,7 @@ async def reconcile_doc_mentions(
     *,
     org_id: uuid.UUID,
     doc_id: uuid.UUID,
-    html_content: str,
+    content: str,
     created_by: uuid.UUID,
 ) -> None:
     """doc write-path: diff 기반 reconcile(create/update 공용 — create 는 existing=∅ 이라 순수
@@ -745,11 +836,39 @@ async def reconcile_doc_mentions(
     doc만 가리킨다"를 여기 하드코딩(`target_types={"doc"}`)해 두면 파서가 나중에 다른
     entity_type을 뽑게 되는 날(선생님 지시 원문 "어떤 엔티티든 임베드") 파서는 뽑았는데
     필터가 조용히 막는 벽이 된다. no-op인 지금 없애 두면 파서가 늘 때 이 함수를 안 고쳐도
-    자동으로 따라온다."""
+    자동으로 따라온다.
+
+    ⭐story #3858 AC1-b(2026-09-15, PO 배포 89 라이브 실측 — 되돌림 뒤 재확定): 이 함수의
+    옛 파라미터 이름(`html_content`)과 위 story #2316 AC7 문단이 세운 "doc.content는 항상
+    HTML"이라는 전제가 «거짓»이었다. `Doc.content_format` 기본값은 `"markdown"`(app/models/
+    doc.py)이고, 에디터가 실제로 저장하는 값은 그 경우 순수 마크다운 텍스트다(`markdownToHtml`
+    변환은 렌더 시점 FE 몫이지 저장 시점 BE 몫이 아니다 — AC1(원래분)의 실PG 테스트가 HTML
+    합성 표본만 써서 이 갭을 못 봤다). 처방: 파라미터를 형식 중립 이름(`content`)으로 바꾸고,
+    HTML 전용 파서(`extract_doc_mention_targets`·`extract_doc_entity_ref_targets`, `<span
+    data-type=wikiLink>`·`<a href="entity:...">`)와 마크다운 토큰 파서(`extract_chat_entity_
+    mentions` — 채팅 `_CHAT_TOKEN_RE`, `[라벨](entity:type:uuid)`를 그대로 재사용, 같은
+    문법이라 새 정규식을 안 짓는다)를 **둘 다** 무조건 돌린다(content_format 분기 없음) —
+    두 토큰 모양(HTML 태그 vs 마크다운 대괄호-괄호)은 구조적으로 겹치지 않아(마크다운 텍스트
+    안엔 `<a href=...>`가, 렌더된 HTML 안엔 `[라벨](entity:...)`가 나타나지 않는다) 어느 쪽이
+    와도 안전하게 공존한다 — content_format 필드 값을 신뢰해 분기하는 것보다 실제 내용을
+    둘 다 긁는 쪽이 더 견고하다(필드가 드리프트해도 무관). 두 파서의 합집합에 중복이 생겨도
+    `reconcile_entity_references`의 `target_refs`가 집합(set) 컴프리헨션이라 자연히 dedup된다
+    (위 508-523행 코어 로직, 이 함수를 더 손댈 필요 없음)."""
     # story #2679: doc은 wikiLink/pageEmbed 브라켓 문법뿐(맨 #숫자 자동감지 없음) — 항상 explicit.
+    # story #3858(2026-09-14) — `entity:<type>:<uuid>` 링크(예: story)도 이제 여기 합류한다.
+    # 위 docstring이 예고한 그대로: target_types를 명시 안 해 뒀기 때문에(코어 기본값=registry
+    # 전체) 이 함수 자체는 한 글자도 안 고쳐도 됐다 — 새로 추가한 건 extracted_refs 리스트
+    # 조립에 항 하나 더한 것뿐(파서가 늘 때 이 함수를 안 고쳐도 자동으로 따라온다던 그 예언).
+    # story #3858 AC1-b(2026-09-15) — 위 두 항(HTML 전용)에 마크다운 토큰 항을 더한다.
     extracted_refs = [
         ("doc", target_id, form, "explicit")
-        for target_id, form in extract_doc_mention_targets(html_content)
+        for target_id, form in extract_doc_mention_targets(content)
+    ] + [
+        (target_type, target_id, "mention", "explicit")
+        for target_type, target_id in extract_doc_entity_ref_targets(content)
+    ] + [
+        (target_type, target_id, "mention", "explicit")
+        for target_type, target_id in extract_chat_entity_mentions(content)
     ]
     await reconcile_entity_references(
         db, org_id=org_id, source_type="doc", source_field="body", source_id=doc_id,

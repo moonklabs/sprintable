@@ -85,6 +85,10 @@ export interface GateItem {
   // 가 OrgGatePolicy.posture+gate_type에서 순수 파생해 list/단건 조회 둘 다 동봉(additive). null/undefined는
   // BE가 아직 못 보낸 구버전 응답 대비 방어적 폴백일 뿐 — 정상 응답은 항상 "low"|"high" 둘 중 하나.
   risk_grade?: 'low' | 'high' | null;
+  // story #3860 — work_item↔conversation 파생(캐폴러-scoped, work_item_conversation.py
+  // SSOT). 「답하기」 배선(gateConversationId(), 3845 ③ PR)의 데이터 소스 — 타입 필드만
+  // 여기 추가(소비 0, 페드루 PO 판정 08:50Z). undefined = 구버전 응답(안전 폴백=비노출).
+  conversation_id?: string | null;
   // story #2893(설계안 §2 A1, 0271) — merge-type만 실제 값을 갖는다(PR 컨텍스트 없는 평가·
   // PR 개념이 없는 타 gate_type은 null). 한 스토리에 merge 게이트가 여러 개(PR마다 1개)일
   // 수 있게 된 뒤로, FE가 "이 gates 배열 중 어느 게 지금 관심 있는 PR의 것인지" 고르는 축.
@@ -117,6 +121,54 @@ export interface GateItem {
   // false(관측모드 확定)를 구분해야 하므로 optional·nullable 그대로 둔다(1단 run_id 휴리스틱과
   // 병용 — gate-evidence.tsx#githubCheckState 참조).
   github_check_enforced?: boolean | null;
+  // story #3367(Phase0 S2, PR#3733) — external_publish 전용 sealing(github_check_run_sha·
+  // approved_head_sha와 동형 축). 다른 gate_type은 전부 undefined/null(additive·하위호환).
+  // gate-evidence.tsx::recipeApprovalFacts가 승인 카드 본문 전문·버전·해시 표시에 쓴다.
+  sealed_content_version?: number | null;
+  sealed_content_sha256?: string | null;
+  sealed_content_body?: string | null;
+  // 승인 뒤 편집으로 pending 재오픈된 게이트인지(사람이 처음 상신한 pending과 구분) — S4가
+  // "재승인 필요" 배지·재상신 대기 카드를 그릴 신호. 다른 gate_type은 항상 false.
+  reapproval_required?: boolean;
+  // story #3560(concept_approval, 페드루 PO 確定 2026-09-06) — sealed_content_*와
+  // 동형이나 대상이 doc이다(external_publish=본문 텍스트 봉인·concept_approval=doc
+  // 봉인). BE additive(story #3569, GateResponse list/detail 공용) — 그 전까진
+  // 항상 undefined. sealed_doc_title은 "봉인 당시" 제목이 아니라 "지금" 제목(본문
+  // sha만 봉인, 제목은 표시용) — 다른 gate_type은 전부 undefined/null.
+  sealed_doc_id?: string | null;
+  sealed_doc_body_sha256?: string | null;
+  sealed_doc_title?: string | null;
+  // story #3367(3자기점검, 페드루 지적 2026-09-10) — AC7("승인 대상의... 마지막 수정
+  // 주체, 목적지를 확認할 수 있고"). null=hosted_site(site_posts.py::_reseal_gate_on_
+  // new_version 관례)·그 외는 ChannelConnection.id.
+  sealed_destination_connection_id?: string | null;
+  // story #3367(유나 CHANGES 2026-09-10) — sealed_destination_connection_id가
+  // non-null인 행의 실제 channel(예: "wordpress") — FE가 lib/channel-label.ts::
+  // channelLabel()로 표시명을 낸다(uuid 원문을 승인자에게 보이지 않는다).
+  sealed_destination_channel?: string | null;
+  // draft의 **지금** 최신 버전 author_kind — sealed_content_body의 작성자(봉인 시점,
+  // approved 뒤 편집이면 옛 버전에 묶임)와 다를 수 있다. external_publish 게이트만·
+  // draft_id 배치 enrich(BE gates.py) 대상이 아니면 undefined.
+  latest_author_kind?: 'agent' | 'human' | null;
+  // story #3806(Phase3·3-2 PR5, 유나 §절 §1 「결재 카드 봉인 5필드」) — ads_boost
+  // 전용 sealing. sealed_content_*/sealed_doc_*와 동일 선례(다른 gate_type은 전부
+  // undefined/null). BE gates.py::GateResponse 등재(PR5 자체발견 fix, 위 커밋).
+  sealed_ads_budget_minor?: number | null;
+  sealed_ads_currency?: string | null;
+  sealed_ads_starts_at?: string | null;
+  sealed_ads_ends_at?: string | null;
+  sealed_ads_objective?: string | null;
+  sealed_ads_connection_id?: string | null;
+  // story #3813(Phase3·3-4 PR4, 페드루 PO 確定 2026-09-12) — newsletter_send 전용
+  // sealing. sealed_ads_*와 동일 선례(다른 gate_type은 전부 undefined/null).
+  sealed_newsletter_segment_name?: string | null;
+  sealed_newsletter_scheduled_at?: string | null;
+  // Gate ORM 컬럼 아님 — get_gate_endpoint가 newsletter_send 게이트 상세에서만
+  // 어댑터 수준 조회(describe_segment)로 채운다. 실 stibee·조회 실패는 null.
+  estimated_recipient_count?: number | null;
+  // story #3813(Phase3·3-4 PR4, 페드루 PO CHANGES 2026-09-12) — 봉인 축 아님(gate
+  // ORM 컬럼 아님), publication의 최신 channel_payload.subject를 「지금」 값으로 읽음.
+  newsletter_subject?: string | null;
 }
 
 // story #2054: 결재함 통합 인박스에서 HitlRequest(gate_approval park) 항목 최소 스키마(BE
@@ -309,7 +361,7 @@ export type TrustColumnId = (typeof TRUST_COLUMNS)[number]['id'];
 
 // story #2933 H4 — settable 트러스트 컬럼 드롭 시 set할 status(v4 §C 매핑표 그대로). PO
 // 확定④: queued는 backlog+ready-for-dev를 흡수하지만 드롭(다른 컬럼→queued로 이동)은 항상
-// ready-for-dev로 승격 — backlog 강등은 이 보드에서 안 하고(5-status 클래식 뷰/카드 메뉴 몫).
+// ready-for-dev로 승격 — backlog 강등은 이 보드에서 안 하고(5단계 클래식 뷰/카드 메뉴 몫).
 // 파생 3개는 여기 없다 — resolveTrustColumnId가 그 컬럼으로의 드롭 자체를 절대 허용하지 않는다.
 export const TRUST_COLUMN_TO_STATUS: Partial<Record<TrustColumnId, string>> = {
   queued: 'ready-for-dev',

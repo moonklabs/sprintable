@@ -48,11 +48,11 @@ const ALL_STORIES = [
   { id: 's3', title: '로그인 다국어 대응' },
 ];
 
-function stubFetch() {
+function stubFetch(meta: { hasMore: boolean; nextCursor: string | null } = { hasMore: false, nextCursor: null }) {
   fetchMock = vi.fn(async (url: string) => {
     const q = new URL(url, 'http://localhost').searchParams.get('q');
     const data = q ? ALL_STORIES.filter((s) => s.title.includes(q)) : ALL_STORIES;
-    return { ok: true, status: 200, json: async () => ({ data }) };
+    return { ok: true, status: 200, json: async () => ({ data, meta }) };
   }) as unknown as ReturnType<typeof vi.fn>;
   vi.stubGlobal('fetch', fetchMock);
 }
@@ -116,5 +116,30 @@ describe('StoryPickerDialog — 검색 실배선(story 083176e8, 까심 #2148 QA
     const storyButton = [...document.body.querySelectorAll('button')].find((b) => b.textContent === '로그인 화면 개선')!;
     await act(async () => { storyButton.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(onSelect).toHaveBeenCalledWith('s1');
+  });
+});
+
+// story #3706(FE 완전성-정직) — 예전엔 fetchJson이 meta를 통째로 버려 hasMore를 담을 자리
+// 자체가 없었다(board-bridge-modal.tsx보다 한 단계 더한 갭). 봉투째 반환하도록 고친 뒤
+// meta.hasMore 조건부 한 줄이 실제로 뜨고/안 뜨는지 왕복 검증한다.
+describe('StoryPickerDialog — hasMore 조건부 한 줄(story #3706)', () => {
+  it('meta.hasMore=true면 「더 있음」 한 줄이 뜬다', async () => {
+    stubFetch({ hasMore: true, nextCursor: 's99' });
+    await mount();
+    expect(document.body.textContent).toContain(koMessages.canvas.storyPickerMoreResults);
+  });
+
+  it('meta.hasMore=false면 뜨지 않는다', async () => {
+    stubFetch({ hasMore: false, nextCursor: null });
+    await mount();
+    expect(document.body.textContent).not.toContain(koMessages.canvas.storyPickerMoreResults);
+  });
+
+  it('meta 자체가 없어도(규약 밖 응답) 죽지 않고 "더 없음"으로 안전하게 낙하한다(parseCursorMeta 위임)', async () => {
+    fetchMock = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ data: ALL_STORIES }) })) as unknown as ReturnType<typeof vi.fn>;
+    vi.stubGlobal('fetch', fetchMock);
+    await mount();
+    expect(document.body.textContent).not.toContain(koMessages.canvas.storyPickerMoreResults);
+    expect(document.body.textContent).toContain('로그인 화면 개선');
   });
 });

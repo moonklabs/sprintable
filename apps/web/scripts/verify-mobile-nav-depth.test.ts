@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { MOBILE_HUB_EXCLUDE_IDS, MOBILE_HUB_GROUP_ORDER, NAV_GROUPS } from '../src/lib/nav-config';
-import { computeMobileDepths, findDepthViolations, MAX_MOBILE_DEPTH, type DepthEntry } from './verify-mobile-nav-depth';
+import { buildMobileNavUniverse, computeMobileDepths, findDepthViolations, MAX_MOBILE_DEPTH, type DepthEntry } from './verify-mobile-nav-depth';
 
 describe('computeMobileDepths — story #2684', () => {
   it('MOBILE_HUB_EXCLUDE_IDS 항목은 depth 1(바텀 탭 직행)', () => {
@@ -51,41 +51,56 @@ describe('findDepthViolations — story #2684 AC1(양성대조)', () => {
   });
 });
 
-describe('실 NAV_GROUPS — story #2684 AC3 판별자(이벤트 포함 전 관리면 depth ≤2)', () => {
-  const hubGroupIds = new Set(MOBILE_HUB_GROUP_ORDER);
+// story #3824(UX-v3·FE 1, 페드루 PO 確定 2026-09-13 CI fail 처방) — 5항목 축소로 대부분의
+// 관리면(구 19항목 중 17개)이 NAV_GROUPS 밖 LEGACY_NAV_ITEMS로 옮겨갔다. 판별자를
+// «삭제»가 아니라 **«확장»**한다(PO 명시 문구) — NAV_GROUPS ∪ LEGACY_NAV_ITEMS를 대상으로
+// "모바일에서 모든 관리 항목 depth ≤2" 불변식을 그대로 유지한다. LEGACY_NAV_ITEMS는
+// more/page.tsx가 "그 밖의 화면" 카드 하나로 항상 렌더(MOBILE_HUB_GROUP_ORDER 조회 대상이
+// 아니라 무조건 추가)하므로 합성 legacy 그룹으로 모델링(buildMobileNavUniverse() 참고) —
+// 이 합성 그룹이 hubGroupIds에서 빠지면 여전히 도달불가(∞)로 RED 난다(완화 아님).
+describe('실 NAV_GROUPS ∪ LEGACY_NAV_ITEMS — story #2684 AC3 판별자, story #3824로 확장(이벤트 포함 전 관리면 depth ≤2)', () => {
+  const { groups, hubGroupIds } = buildMobileNavUniverse();
 
-  // story #2930(P0-G) I2 — chats가 NAV_GROUPS 자체에서 빠져(데스크톱 사이드바 챗 center로
-  // 승격 — 유나 확定 ⓒ, 모바일은 그대로 develop 5탭이라 대상 밖) 21→20항목. 데스크톱 챗
-  // center의 depth-1 대응(사이드바 상단 고정, 어떤 구역에도 안 묻힘)은 이 순수 데이터
-  // 스캔의 시야 밖이라 이 스위트가 못 잰다(nav-config.ts 상단 "AC2 — 이 가드가 못 잡는 것"
-  // ㉢·㉥류와 동형) — 렌더 검증은 app-sidebar.test.tsx가 맡는다.
-  // story #2930 I3(PO 스코프 확定 2026-08-22) — work 존 흐름+스프린트가 「보드」 단일 항목으로
-  // 접혀 20→19항목(스탠드업·회고는 CI orphan 가드가 nav 제거를 막아 잔존 — nav-config.ts
-  // 상단 주석 참고, «자동 리듬 표면»이 설 때까지의 커플링).
-  it('전 19항목(챗 center 제외)이 depth ≤2다(회귀 0 — 도달불가 0건 포함)', () => {
-    const entries = computeMobileDepths(NAV_GROUPS, MOBILE_HUB_EXCLUDE_IDS, hubGroupIds);
+  // story #3824 — NAV_GROUPS(5) + LEGACY_NAV_ITEMS(18) = 23항목(nav-config-descriptions.
+  // test.ts의 "정확히 23개다" 판정과 동일 총량 — 재분배만 있었지 증감 없음을 이 축에서도
+  // 재확認). 챗 center(CHAT_CENTER_ITEM)는 여전히 이 스캔 대상 밖(story #2930 I2, 상단
+  // ㉥ 참고 — nav-config.ts 어느 배열에도 없어 원래도 시야 밖).
+  // story #3845(§①④, 2026-09-14) — retro·standup이 「일감」 탭으로 흡수되며 LEGACY_NAV_
+  // ITEMS 18→16, 총량 23→21(nav-config-descriptions.test.ts와 동일 축, 동일 사유).
+  it('전 21항목(챗 center 제외)이 depth ≤2다(회귀 0 — 도달불가 0건 포함)', () => {
+    const entries = computeMobileDepths(groups, MOBILE_HUB_EXCLUDE_IDS, hubGroupIds);
+    expect(entries).toHaveLength(21);
     expect(findDepthViolations(entries, MAX_MOBILE_DEPTH)).toEqual([]);
   });
 
-  it('이벤트(판별자 자체)는 depth 2다', () => {
-    const entries = computeMobileDepths(NAV_GROUPS, MOBILE_HUB_EXCLUDE_IDS, hubGroupIds);
+  it('이벤트(판별자 자체, 이제 LEGACY_NAV_ITEMS 소속)는 depth 2다 — /more 「그 밖의 화면」 경유', () => {
+    const entries = computeMobileDepths(groups, MOBILE_HUB_EXCLUDE_IDS, hubGroupIds);
     const events = entries.find((e) => e.id === 'org-events');
     expect(events?.depth).toBe(2);
   });
 
-  // story #2930 I2 — 'chats'는 이제 NAV_GROUPS에 없어(챗 center 승격) 이 스캔 대상 밖이다.
-  // MOBILE_HUB_EXCLUDE_IDS엔 방어적으로 'chats'가 여전히 남아있지만(nav-config.ts 주석 참고)
-  // 매칭될 항목 자체가 없어 depth1Ids엔 안 잡힌다. story #2930 I3 — 'flow' id가 'board'로
-  // 개명(work 존 재편)돼 exclude set도 같이 갱신됐다(nav-config.ts 참고).
-  it('board·inbox는 depth 1이고 그 외는 전부 depth 2다(바텀 탭 축과 정확히 일치)', () => {
-    const entries = computeMobileDepths(NAV_GROUPS, MOBILE_HUB_EXCLUDE_IDS, hubGroupIds);
+  // story #3824 — inbox는 이제 LEGACY_NAV_ITEMS 소속이지만 MOBILE_HUB_EXCLUDE_IDS엔 여전히
+  // 있어(바텀 탭 「결재」가 이미 depth 1로 커버) 어느 배열에 살든 depth 1 그대로다. board도
+  // NAV_GROUPS 소속인 채 동일 취급 — "바텀 탭 커버 축"은 소속 배열과 무관하다는 것 자체가
+  // 이 판별자의 핵심 불변식.
+  it('board·inbox는 depth 1이고 그 외는 전부 depth 2다(바텀 탭 축과 정확히 일치, 소속 배열 무관)', () => {
+    const entries = computeMobileDepths(groups, MOBILE_HUB_EXCLUDE_IDS, hubGroupIds);
     const depth1Ids = entries.filter((e) => e.depth === 1).map((e) => e.id).sort();
     expect(depth1Ids).toEqual(['board', 'inbox']);
     expect(entries.filter((e) => e.depth === 2).length).toBe(entries.length - 2);
   });
 
-  it('NAV_GROUPS의 모든 그룹 id가 MOBILE_HUB_GROUP_ORDER에 있다(도달불가 0건 실증)', () => {
+  it('NAV_GROUPS의 모든 그룹 id가 MOBILE_HUB_GROUP_ORDER에 있다(도달불가 0건 실증, 실 그룹 축)', () => {
     const navGroupIds = new Set(NAV_GROUPS.map((g) => g.id));
-    for (const id of navGroupIds) expect(hubGroupIds.has(id)).toBe(true);
+    const realHubGroupIds = new Set(MOBILE_HUB_GROUP_ORDER);
+    for (const id of navGroupIds) expect(realHubGroupIds.has(id)).toBe(true);
+  });
+
+  it('합성 legacy 그룹이 hubGroupIds에서 빠지면 그 즉시 도달불가(∞)로 RED — 완화 아님을 자가증명(양성대조)', () => {
+    const hubGroupIdsWithoutLegacy = new Set(MOBILE_HUB_GROUP_ORDER);
+    const entries = computeMobileDepths(groups, MOBILE_HUB_EXCLUDE_IDS, hubGroupIdsWithoutLegacy);
+    const violations = findDepthViolations(entries, MAX_MOBILE_DEPTH);
+    expect(violations.length).toBeGreaterThan(0);
+    expect(violations.every((v) => v.depth === Number.POSITIVE_INFINITY)).toBe(true);
   });
 });

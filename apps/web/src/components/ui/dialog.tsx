@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog"
+import { useTranslations } from "next-intl"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -47,6 +48,10 @@ function DialogContent({
 }: DialogPrimitive.Popup.Props & {
   showCloseButton?: boolean
 }) {
+  // story 3436(묶음 1) — 전역 셸 접근 이름이 한국어 화면에서도 영문 하드코딩이라
+  // 스크린리더가 "Close"를 그대로 읽었다. common.close는 이미 toast.tsx·
+  // command-palette.tsx의 aria-label로 쓰이는 정본 키(새 키 0).
+  const t = useTranslations("common")
   return (
     <DialogPortal>
       <DialogOverlay />
@@ -75,7 +80,7 @@ function DialogContent({
           >
             <XIcon
             />
-            <span className="sr-only">Close</span>
+            <span className="sr-only">{t("close")}</span>
           </DialogPrimitive.Close>
         )}
       </DialogPrimitive.Popup>

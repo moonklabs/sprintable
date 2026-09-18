@@ -100,7 +100,7 @@ describe('ConversationPage — 뒤로가기 복귀 (story #2168 PR-② AC④)', 
     }));
     await mount();
 
-    const backBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('채팅'));
+    const backBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('대화'));
     await act(async () => { backBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
     expect(replaceMock).toHaveBeenCalledWith(`/chats?p=${FROM_PROJECT_UUID}`);
@@ -111,7 +111,7 @@ describe('ConversationPage — 뒤로가기 복귀 (story #2168 PR-② AC④)', 
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ title: null, type: 'dm', participants: [] }) })));
     await mount();
 
-    const backBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('채팅'));
+    const backBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('대화'));
     await act(async () => { backBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
     expect(replaceMock).toHaveBeenCalledWith('/chats');
@@ -121,7 +121,7 @@ describe('ConversationPage — 뒤로가기 복귀 (story #2168 PR-② AC④)', 
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ title: null, type: 'dm', participants: [] }) })));
     await mount();
 
-    const backBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('채팅'));
+    const backBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('대화'));
     await act(async () => { backBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
     expect(replaceMock).toHaveBeenCalledWith('/chats');
@@ -135,7 +135,7 @@ describe('ConversationPage — 실패 자리 (story #2168 PR-②, 능동 클릭 
     await mount();
 
     expect(container.querySelector('[data-testid="chat-view-stub"]')).toBeNull();
-    expect(container.textContent).toContain('이 대화를 열 수 없습니다');
+    expect(container.textContent).toContain('이 대화를 열 수 없어요');
     expect(container.textContent).toContain('sprintable-content');
     expect(container.textContent).toContain('관리자에게 요청하세요');
   });
@@ -144,7 +144,7 @@ describe('ConversationPage — 실패 자리 (story #2168 PR-②, 능동 클릭 
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 403, json: async () => null })));
     await mount();
 
-    expect(container.textContent).toContain('해당 프로젝트에 접근 권한이 없습니다');
+    expect(container.textContent).toContain('해당 프로젝트에 접근 권한이 없어요');
   });
 });
 
@@ -218,7 +218,7 @@ describe('ConversationPage — 헤더 아바타(story #2968)', () => {
     }));
     await mount();
 
-    const backBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('채팅'));
+    const backBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('대화'));
     const titleRoot = backBtn?.parentElement;
     expect(titleRoot?.className).toContain('py-1');
   });

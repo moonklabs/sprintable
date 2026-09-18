@@ -219,7 +219,8 @@ describe('ContextSwitcherChip — story #3147/#3146 재설계(44px·검색·3층
     // 트리거 자신도 현재 프로젝트명("Sprintable")을 상시 표시하므로 document.body 전체가
     // 아니라 시트 스크롤 본문(overflow-y-auto)으로 좁혀 잰다.
     const sheetBody = document.querySelector('.overflow-y-auto');
-    expect(sheetBody?.textContent).toContain('일치하는 프로젝트가 없습니다');
+    // story #3913 — 리터럴 재-pin 대신 ko.json 값을 읽어 대조.
+    expect(sheetBody?.textContent).toContain(koMessages.nav.switcherProjectSearchEmpty);
     expect(sheetBody?.textContent).not.toContain('Sprintable');
   });
 

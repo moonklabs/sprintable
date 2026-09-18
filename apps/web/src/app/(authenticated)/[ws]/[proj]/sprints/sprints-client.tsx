@@ -10,6 +10,11 @@ import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { EmptyState } from '@/components/ui/empty-state';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { WorkspaceFrameTabs } from '@/components/workspace/workspace-frame-tabs';
+// story #3845(§① 2026-09-14) — 「하루 체크인」 절. 독립 /standup 라우트가 은퇴(legacy-
+// resource-tables.ts RENAMED_RESOURCES 참고)하며 이 컴포넌트의 유일한 마운트 지점이
+// 됐다 — 경로는 그대로 두고(비route 파일로 남김, 파일 이동에 따른 import 처짐 회피)
+// embedded=true로만 소비한다.
+import StandupPage from '../standup/standup-client';
 
 // story 5e229540(doc resource-view-firsttouch-identity-pattern §4 "스프린트" 행 — 정체성=
 // 한 번의 집중 사이클·시작 시 가설 선언·끝에 배움 종합·visual=선택 기간bar): 실험실(원형
@@ -301,7 +306,7 @@ export function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProp
                     placeholder="0"
                     className="w-full rounded-xl border border-border bg-background px-3 py-2 pr-6 text-sm text-foreground tabular-nums placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                   />
-                  <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">명</span>
+                  <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">{t('personCountUnit')}</span>
                 </div>
               </div>
             </div>
@@ -361,7 +366,7 @@ function DeleteConfirmDialog({ sprintTitle, deleting, error, onConfirm, onClose 
     <Dialog open onOpenChange={(open) => { if (!open && !deleting) onClose(); }}>
       <DialogContent role="alertdialog" className="max-w-sm" showCloseButton={false}>
         <div className="mb-3 flex items-start gap-3">
-          <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-destructive/10 text-destructive">
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-destructive-tint text-destructive">
             <AlertTriangle className="size-5" />
           </span>
           <div className="min-w-0">
@@ -388,6 +393,18 @@ function DeleteConfirmDialog({ sprintTitle, deleting, error, onConfirm, onClose 
 export function SprintsClient({ projectId }: SprintsClientProps) {
   const t = useTranslations('sprints');
   const tc = useTranslations('common');
+  // story #3878(§⑤ 낱말 드리프트, 유나 §⑤ 표 확定 2026-09-14) — 스프린트 생애주기
+  // status(planning/active/closed)를 t() 없이 그대로 그리던 자리 정본화. 신규 낱말
+  // (계획 중/진행 중/종료됨) sprints 네임스페이스에 등재.
+  const sprintStatusKeyMap: Record<string, 'statusPlanning' | 'statusActive' | 'statusClosed'> = {
+    planning: 'statusPlanning',
+    active: 'statusActive',
+    closed: 'statusClosed',
+  };
+  const sprintStatusLabel = (slug: string): string => {
+    const key = sprintStatusKeyMap[slug];
+    return key ? t(key) : slug;
+  };
   const searchParams = useSearchParams();
   // story #2413 — 마운트 시점 1회 고정(실시간 tick 불필요, "페이지를 연 시점 기준 지났는가").
   const now = useMemo(() => new Date(), []);
@@ -464,22 +481,27 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
     setActionError(null);
 
     try {
+      // story #3519(§16-7 2부, PO 確定 2026-09-05) — 셋 다 부수(res.ok?채움:그대로 두는
+      // degrade, loadError 없음)인데 catch가 어디에도 없었다 — 셋 중 하나가 네트워크단
+      // reject(HTTP status가 아니라 fetch 자체 실패)면 Promise.all 전체가 던져 나머지도
+      // 조용히 못 채워졌다(setLoading은 finally라 꺼지긴 하나, 원인 표시가 0). leg별로
+      // 격리해 하나가 죽어도 나머지 둘은 그대로 채워진다(doc-status-rail.tsx 정본 패턴).
       const [burndownRes, storiesRes, backlogRes] = await Promise.all([
-        fetchWithAuth(`/api/sprints/${sprint.id}/burndown`),
-        fetchWithAuth(`/api/stories?project_id=${projectId}&sprint_id=${sprint.id}&limit=20`),
-        fetchWithAuth(`/api/stories/backlog?project_id=${projectId}&limit=20`),
+        fetchWithAuth(`/api/sprints/${sprint.id}/burndown`).catch(() => null),
+        fetchWithAuth(`/api/stories?project_id=${projectId}&sprint_id=${sprint.id}&limit=20`).catch(() => null),
+        fetchWithAuth(`/api/stories/backlog?project_id=${projectId}&limit=20`).catch(() => null),
       ]);
-      if (burndownRes.ok) {
+      if (burndownRes?.ok) {
         const json = await burndownRes.json();
         setBurndown(json.data);
       }
-      if (storiesRes.ok) {
+      if (storiesRes?.ok) {
         const json = await storiesRes.json() as { data?: Story[]; meta?: { hasMore?: boolean; nextCursor?: string | null } };
         setSprintStories(excludeHidden(json.data ?? []));
         setSprintStoriesHasMore(json.meta?.hasMore ?? false);
         setSprintStoriesNextCursor(json.meta?.nextCursor ?? null);
       }
-      if (backlogRes.ok) {
+      if (backlogRes?.ok) {
         const json = await backlogRes.json() as { data?: Story[]; meta?: { hasMore?: boolean; nextCursor?: string | null } };
         setBacklogStories(excludeHidden(json.data ?? []));
         setBacklogHasMore(json.meta?.hasMore ?? false);
@@ -662,14 +684,20 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sprint_id: selected?.id ?? null }),
       });
-      if (!res.ok) { console.error('스토리 스프린트 배정 실패', res.status); return; }
+      if (!res.ok) {
+        // story #3637(유나 silent-failure-sweep-3632) — console만 찍고 화면은 아무 일도
+        // 없던 것처럼 보이던 자리. activateError/closeError와 동형 페이지 배너 재사용.
+        console.error('스토리 스프린트 배정 실패', res.status);
+        setActionError(t('assignError'));
+        return;
+      }
       if (selected) {
         setSprintStories((prev) => [...prev, { ...story, sprint_id: selected.id }]);
         setBacklogStories((prev) => prev.filter((s) => s.id !== story.id));
       }
     } catch (err) {
-      // 71798d24: 에러를 조용히 무시하지 않는다(background 액션 — console.error).
       console.error('스토리 스프린트 배정 실패', err);
+      setActionError(t('assignError'));
     }
   };
 
@@ -680,12 +708,16 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sprint_id: null }),
       });
-      if (!res.ok) { console.error('스토리 스프린트 해제 실패', res.status); return; }
+      if (!res.ok) {
+        console.error('스토리 스프린트 해제 실패', res.status);
+        setActionError(t('unassignError'));
+        return;
+      }
       setSprintStories((prev) => prev.filter((s) => s.id !== story.id));
       setBacklogStories((prev) => [...prev, { ...story, sprint_id: null }]);
     } catch (err) {
-      // 71798d24: 에러를 조용히 무시하지 않는다(background 액션 — console.error).
       console.error('스토리 스프린트 해제 실패', err);
+      setActionError(t('unassignError'));
     }
   };
 
@@ -710,7 +742,14 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
       <div className="px-6 pt-3">
         <WorkspaceFrameTabs active="sprints" />
       </div>
-      <div className="flex min-h-0 flex-1 overflow-hidden">
+      {/* story #3845(§① 2026-09-14) — 「하루 체크인」 절을 이 페이지에 추가하며 리스트/상세
+          split(원래 flex-1로 남은 세로 공간 전부를 차지·각 컬럼이 자체 overflow-y-auto로
+          내부 스크롤)이 더 이상 페이지의 유일한 콘텐츠가 아니게 됐다 — 바깥을 세로 스크롤
+          컬럼으로 바꾸고(retro/page.tsx·docs 등 다른 [ws]/[proj] 페이지가 이미 쓰는
+          flex-1 overflow-y-auto 관례), split 자체는 고정 최소높이(shrink-0)로 내부
+          스크롤을 유지한 채 그 안 콘텐츠 조각이 된다. */}
+      <div className="focus-inset flex min-h-0 flex-1 flex-col overflow-y-auto">
+      <div className="flex min-h-[420px] shrink-0 overflow-hidden border-b border-border">
       {/* Sprint list */}
       <div className={`flex flex-col gap-3 overflow-y-auto p-6 transition-all duration-300 ${selected ? 'hidden w-1/2 lg:flex' : 'w-full'}`}>
         {sprints.length === 0 ? (
@@ -742,7 +781,7 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
                 <div className="flex items-center justify-between">
                   <span className="font-medium text-foreground">{sprint.title}</span>
                   <div className="flex items-center gap-2">
-                  <Badge variant={statusVariant(sprint.status)}>{sprint.status}</Badge>
+                  <Badge variant={statusVariant(sprint.status)}>{sprintStatusLabel(sprint.status)}</Badge>
                   {isSprintOverdue(sprint, now) ? (
                     // 유나 규격(2026-08-02, #2791 design:changes) — Badge variant="warning"의
                     // 계열색 텍스트(text-warning)는 light에서 2.06(AA 4.5의 절반 이하). 명도를
@@ -782,7 +821,7 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
         <div>
           <h2 className="text-lg font-semibold text-foreground">{selected.title}</h2>
           <div className="mt-1 flex items-center gap-2">
-            <Badge variant={statusVariant(selected.status)}>{selected.status}</Badge>
+            <Badge variant={statusVariant(selected.status)}>{sprintStatusLabel(selected.status)}</Badge>
             {isSprintOverdue(selected, now) ? (
               // 유나 규격(2026-08-02, #2791) — warning tint 위 text-foreground. 위 목록 배지와
               // 동일 근거(text-warning은 light에서 AA 미달, 문제는 배경이 아니라 글자).
@@ -815,7 +854,8 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
       {/* Goal */}
       {selected.goal ? (
         <p className="mb-3 rounded-lg border border-border bg-muted/20 px-3 py-2 text-sm text-foreground">
-          <span className="mr-1.5 inline-flex items-center gap-1 align-middle text-xs font-medium text-muted-foreground"><Target className="size-3 shrink-0" />목표</span>
+          {/* story #3776(1층B) — "목표", sprints ns의 기존 goalLabel 키 재사용(같은 화면의 스프린트 목표). */}
+          <span className="mr-1.5 inline-flex items-center gap-1 align-middle text-xs font-medium text-muted-foreground"><Target className="size-3 shrink-0" />{t('goalLabel')}</span>
           {selected.goal}
         </p>
       ) : null}
@@ -832,7 +872,7 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
           {selected.team_size != null ? (
             <span className="flex items-center gap-1 rounded-md border border-border bg-muted/30 px-2.5 py-1 text-xs font-medium tabular-nums text-foreground">
               <Users className="size-3.5 text-muted-foreground" />
-              {selected.team_size}<span className="ml-0.5 text-muted-foreground">명</span>
+              {selected.team_size}<span className="ml-0.5 text-muted-foreground">{t('personCountUnit')}</span>
             </span>
           ) : null}
           <span className="flex items-center gap-1 rounded-md border border-border bg-muted/30 px-2.5 py-1 text-xs font-medium tabular-nums text-foreground">
@@ -1034,6 +1074,14 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
       ) : null}
     </div>
   ) : null}
+      </div>
+
+      {/* story #3845(§① 2026-09-14) — 「하루 체크인」 절. StandupPage는 embedded=true일 때
+          자체 TopBarSlot을 생략하고 이 페이지의 TopBarSlot(제목 "스프린트")과 충돌하지
+          않는다(standup-client.tsx embedded prop 주석 참고). */}
+      <div className="shrink-0">
+        <StandupPage projectId={projectId} embedded />
+      </div>
     </div>
 
       {showCreate ? (

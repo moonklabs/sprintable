@@ -14,6 +14,7 @@ import { adaptComments, type BeArtifactComment, type CommentThread } from '@/ser
 import { derivePendingCanonicalizeVersion, type CanonicalizeGateLookup } from '@/services/canvas-canonicalize';
 import { deriveNodeOperations, type ArtifactNode } from '@/services/canvas-nodes';
 import { listSpecPins, type SpecPin } from '@/services/canvas-spec-pins';
+import { useToast } from '@/components/ui/toast';
 
 import { fetchWithAuth } from '@/lib/db/client';
 
@@ -76,6 +77,11 @@ export async function loadPendingCanonicalizeVersion(artifactId: string): Promis
  */
 export function ArtifactSection({ storyId, memberMap = {}, className }: ArtifactSectionProps) {
   const t = useTranslations('canvas');
+  // story #3644(3632 후속) — handleCommitEdit/handleCreateCommit 실패가 console.error만
+  // 남기고 사용자에게는 아무 신호가 없었다(편집 모드는 유지되지만 "왜"가 안 보임 — doc §3
+  // 클래스). onCommit={() => void handleXxx(...)}로 반환값을 버리는 호출부라 커밋에서
+  // 직접 알린다.
+  const { addToast } = useToast();
   const [items, setItems] = useState<ArtifactItem[]>([]);
   // C3-S7 휴먼 딸깍 편집 — 어느 artifact가 편집 모드인지(tree만 진입·viewer가 게이트). 커밋 성공
   // 후 종료해 fresh 재로드(BE가 버전마다 node.id 리매핑하므로 stale id 재사용 원천 차단).
@@ -171,6 +177,10 @@ export function ArtifactSection({ storyId, memberMap = {}, className }: Artifact
     if (!detail) {
       // 빈 catch 금지 계열 — 커밋 실패를 삼키지 않고 로깅, 편집 모드 유지(사용자 재시도 가능).
       console.error('[canvas-edit] artifact edit commit failed', item.artifact.id);
+      // story #3658 — specPinSaveFailedNote(스펙 핀 전용 이름)를 재사용해 키 이름이
+      // 쓰임을 속이던 것을 saveFailedNote(공용, 값 무변)로 rename — 스펙 핀 자리
+      // (pin-authoring-popover.tsx)도 같은 키로 갈아탔다.
+      addToast({ title: t('saveFailedNote'), type: 'error' });
       return;
     }
     const { artifact, versions } = adaptArtifactDetail(detail);
@@ -195,6 +205,7 @@ export function ArtifactSection({ storyId, memberMap = {}, className }: Artifact
     const detail = await createArtifact(storyId, t('untitledArtifact'), nodes, summary || undefined);
     if (!detail) {
       console.error('[canvas-create] artifact create commit failed', storyId);
+      addToast({ title: t('artifactCreateFailed'), type: 'error' });
       return;
     }
     const { artifact, versions } = adaptArtifactDetail(detail);

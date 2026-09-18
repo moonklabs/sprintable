@@ -17,8 +17,8 @@ from app.routers import gates as gates_mod
 from app.routers.gates import (
     GateCreateRequest,
     GateTransitionRequest,
-    create_gate_endpoint,
-    transition_gate_endpoint,
+    _create_gate_endpoint,
+    _transition_gate_endpoint,
 )
 from app.services.member_resolver import ResolvedMember
 from tests.gate_mock_factory import make_gate
@@ -62,10 +62,14 @@ async def _call(resolved, *, execute_results, has_access=None, status="approved"
     # authz)와 무관.
     transition = AsyncMock(return_value=make_gate(gate_type="merge_approval", neutral_facts=None))
     auth = SimpleNamespace(user_id=str(uuid.uuid4()))
+    # story #3874 — 직렬화 단일 통로(to_gate_response) 도입 뒤 model_validate만 patch하면
+    # risk_grade enrich가 문자열에 속성을 못 얹어 AttributeError로 깨진다(risk_grade는 이
+    # 파일의 관심사가 아니므로 그 통로 자체를 patch — test_gate_transition_human_only.py와
+    # 동일 처방).
     patches = [
         patch.object(gates_mod, "resolve_member", AsyncMock(return_value=resolved)),
         patch.object(gates_mod, "transition_gate", transition),
-        patch.object(gates_mod.GateResponse, "model_validate", lambda g: "OK"),
+        patch.object(gates_mod, "to_gate_response", AsyncMock(return_value="OK")),
     ]
     if has_access is not None:
         patches.append(patch.object(gates_mod, "has_project_access", AsyncMock(return_value=has_access)))
@@ -73,7 +77,8 @@ async def _call(resolved, *, execute_results, has_access=None, status="approved"
     with contextlib.ExitStack() as stack:
         for p in patches:
             stack.enter_context(p)
-        result = await transition_gate_endpoint(
+        result = await _transition_gate_endpoint(
+                resolved_locale="ko",
             # note+evidence_viewed 동봉: risk_grade 폴백(미분류 gate_type→고위험)이 이 authz
             # 테스트의 관심사가 아닌 사유-강제 가드(story #2027 AC1/AC2)에 걸리지 않도록.
             id=uuid.uuid4(), body=GateTransitionRequest(status=status, note="테스트 사유", evidence_viewed=True),
@@ -95,7 +100,8 @@ async def test_doc_gate_self_approval_forbidden():
     with patch.object(gates_mod, "resolve_member", AsyncMock(return_value=_human(mid))), \
          patch.object(gates_mod, "transition_gate", transition):
         with pytest.raises(HTTPException) as ei:
-            await transition_gate_endpoint(
+            await _transition_gate_endpoint(
+                resolved_locale="ko",
                 id=uuid.uuid4(), body=GateTransitionRequest(status="approved"),
                 background_tasks=BackgroundTasks(),
                 session=session, org_id=uuid.uuid4(), auth=auth,
@@ -115,7 +121,8 @@ async def test_doc_gate_missing_requester_fail_closed():
     with patch.object(gates_mod, "resolve_member", AsyncMock(return_value=_human(uuid.uuid4()))), \
          patch.object(gates_mod, "transition_gate", transition):
         with pytest.raises(HTTPException) as ei:
-            await transition_gate_endpoint(
+            await _transition_gate_endpoint(
+                resolved_locale="ko",
                 id=uuid.uuid4(), body=GateTransitionRequest(status="approved"),
                 background_tasks=BackgroundTasks(),
                 session=session, org_id=uuid.uuid4(), auth=auth,
@@ -137,7 +144,8 @@ async def test_doc_gate_no_project_access_forbidden():
          patch.object(gates_mod, "has_project_access", AsyncMock(return_value=False)), \
          patch.object(gates_mod, "transition_gate", transition):
         with pytest.raises(HTTPException) as ei:
-            await transition_gate_endpoint(
+            await _transition_gate_endpoint(
+                resolved_locale="ko",
                 id=uuid.uuid4(), body=GateTransitionRequest(status="approved"),
                 background_tasks=BackgroundTasks(),
                 session=session, org_id=uuid.uuid4(), auth=auth,
@@ -158,7 +166,8 @@ async def test_doc_gate_deleted_doc_forbidden():
          patch.object(gates_mod, "has_project_access", AsyncMock(return_value=True)), \
          patch.object(gates_mod, "transition_gate", transition):
         with pytest.raises(HTTPException) as ei:
-            await transition_gate_endpoint(
+            await _transition_gate_endpoint(
+                resolved_locale="ko",
                 id=uuid.uuid4(), body=GateTransitionRequest(status="approved"),
                 background_tasks=BackgroundTasks(),
                 session=session, org_id=uuid.uuid4(), auth=auth,
@@ -201,7 +210,8 @@ async def test_generic_endpoint_rejects_doc_approval_defense_in_depth():
     create = AsyncMock()
     with patch.object(gates_mod, "create_gate", create):
         with pytest.raises(HTTPException) as ei:
-            await create_gate_endpoint(
+            await _create_gate_endpoint(
+                resolved_locale="ko",
                 body=body, session=AsyncMock(), org_id=uuid.uuid4(), _auth=SimpleNamespace()
             )
     assert ei.value.status_code == 403

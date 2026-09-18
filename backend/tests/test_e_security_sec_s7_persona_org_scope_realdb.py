@@ -63,9 +63,24 @@ async def _seed_two_orgs(session):
     session.add_all([agent_a, agent_b])
     await session.commit()
 
+    # story #3370 회귀 클래스(페드루 PO 지시 2026-09-11) — create_persona가 이제
+    # resolve_member_db_verified()로 caller를 실측한다(fail-closed). 201까지 가는 유일한
+    # 테스트(test_create_persona_same_org_agent_still_free)를 위해 실 org_a 휴먼 caller를
+    # 심는다(다른 테스트는 org_a agent_id로 못 도달하는 가드에서 먼저 막혀 무관).
+    from app.models.project import OrgMember
+    from app.models.user import User
+
+    caller_user = User(id=uuid.uuid4(), email=f"caller-{uuid.uuid4().hex[:8]}@test.com", hashed_password="x")
+    session.add(caller_user)
+    await session.commit()
+    caller_om = OrgMember(id=uuid.uuid4(), org_id=org_a.id, user_id=caller_user.id, role="member")
+    session.add(caller_om)
+    await session.commit()
+
     return {
         "org_a_id": org_a.id, "org_b_id": org_b.id,
         "project_a_id": project_a.id, "agent_a_id": agent_a.id, "agent_b_id": agent_b.id,
+        "caller_user_id": caller_user.id,
     }
 
 
@@ -74,7 +89,7 @@ def _client_for(app):
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 
-async def _setup_app(app, Session, org_id, project_id):
+async def _setup_app(app, Session, org_id, project_id, user_id=None):
     from app.dependencies.auth import AuthContext, get_current_user
     from app.dependencies.database import get_db
 
@@ -89,7 +104,7 @@ async def _setup_app(app, Session, org_id, project_id):
 
     async def _auth():
         return AuthContext(
-            user_id=str(uuid.uuid4()), email="caller@test",
+            user_id=str(user_id or uuid.uuid4()), email="caller@test",
             claims={"app_metadata": {"org_id": str(org_id), "project_id": str(project_id)}},
         )
 
@@ -141,7 +156,7 @@ async def test_create_persona_same_org_agent_still_free():
         async with Session() as s:
             seeded = await _seed_two_orgs(s)
 
-        await _setup_app(app, Session, seeded["org_a_id"], seeded["project_a_id"])
+        await _setup_app(app, Session, seeded["org_a_id"], seeded["project_a_id"], user_id=seeded["caller_user_id"])
         client = _client_for(app)
         try:
             resp = await client.post(

@@ -1,0 +1,1 @@
+{"file": "tests/test_3813_newsletter_calendar_and_approval_card.py", "sec": 4.8, "source": "story-3813(Phase3·3-4 PR4, 페드루 PO 確定 2026-09-12 — campaign_scheduled_at 자체발견 처방 반영 뒤 재측) — 캘린더 newsletter 하위객체(campaign_scheduled_at 포함)·스케줄 축 COALESCE·승인 카드 estimated_recipient_count 실측(로컬, uv run pytest --durations=0 직접 1회 실행, 6건 wall time 약 4.8s — test_3766 등재 선례와 동일 방법론)"}

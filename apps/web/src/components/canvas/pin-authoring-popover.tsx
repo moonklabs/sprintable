@@ -27,6 +27,7 @@ interface PinAuthoringPopoverProps {
  */
 export function PinAuthoringPopover({ open, onOpenChange, initialDescription, onSave, onDelete }: PinAuthoringPopoverProps) {
   const t = useTranslations('canvas');
+  const tc = useTranslations('common');
   const [description, setDescription] = useState(initialDescription);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(false);
@@ -69,7 +70,7 @@ export function PinAuthoringPopover({ open, onOpenChange, initialDescription, on
           rows={4}
           className="w-full resize-none rounded-md border border-border bg-background px-2 py-1.5 text-[12px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
         />
-        {error ? <p className="mt-1 text-[10px] text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{t('specPinSaveFailedNote')}</p> : null}
+        {error ? <p className="mt-1 text-[10px] text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{t('saveFailedNote')}</p> : null}
 
         <DialogFooter className="flex items-center justify-between gap-2 sm:justify-between">
           {onDelete ? (
@@ -82,7 +83,7 @@ export function PinAuthoringPopover({ open, onOpenChange, initialDescription, on
               {t('specPinCancelAction')}
             </Button>
             <Button size="sm" onClick={() => void handleSave()} disabled={!canSave}>
-              {saving ? t('specPinSavingAction') : t('specPinSaveAction')}
+              {saving ? tc('saving') : t('specPinSaveAction')}
             </Button>
           </div>
         </DialogFooter>

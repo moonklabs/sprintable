@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { useTranslations, useLocale } from 'next-intl';
+import { useTranslations } from 'next-intl';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ArrowLeft, Pencil, Trash2, X } from 'lucide-react';
@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 import {
   Dialog, DialogContent, DialogDescription,
   DialogFooter, DialogHeader, DialogTitle,
@@ -18,7 +19,7 @@ import {
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { useGoalsRoute } from '../goals-context';
 import { EntityDispatchPanel } from '@/components/dispatch/entity-dispatch-panel';
-import { ToastContainer, useToast } from '@/components/ui/toast';
+import { useToast } from '@/components/ui/toast';
 import { OutcomeStatusBadge } from '@/components/outcome/outcome-status-badge';
 import { EpicStatusTransition } from '@/components/epics/epic-status-transition';
 import { HypothesesSection } from '@/components/hypotheses/hypotheses-section';
@@ -108,11 +109,12 @@ function priorityLabelKey(p: EpicPriority): 'priorityCritical' | 'priorityHigh' 
   return 'priorityLow';
 }
 
-// story #2084 근본: 'ko-KR' 하드코딩이었다 — locale=en에서도 날짜가 한국어 형식으로
-// 렌더되던 원인 중 하나(dashboard-activity-timeline.tsx와 동일하게 useLocale() 값을 받는다).
-function formatDate(d: string | null | undefined, locale: string) {
+// story #3493 — target_date/measure_after는 "약속"(목표 완료일·측정 예정일, 아직
+// 안 온 미래 시점) — §11-2 정본(formatScheduledAt)으로 통일. 고정 포맷이라 en/ko
+// locale 분기(구 #2084 근본원인)가 원천적으로 사라진다.
+function formatDate(d: string | null | undefined, displayTimezone: string) {
   if (!d) return '—';
-  return new Date(d).toLocaleDateString(locale, { year: 'numeric', month: '2-digit', day: '2-digit' });
+  return formatScheduledAt(d, displayTimezone).display;
 }
 
 // ─── UI components ────────────────────────────────────────────────────────────
@@ -160,6 +162,7 @@ function MdBody({ content }: { content: string }) {
 
 function EpicEditInline({ epic, onSaved, onCancel }: { epic: Epic; onSaved: (e: Epic) => void; onCancel: () => void }) {
   const t = useTranslations('goals');
+  const tc = useTranslations('common');
   const [title, setTitle] = useState(epic.title);
   const [description, setDescription] = useState(epic.description ?? '');
   const [objective, setObjective] = useState(epic.objective ?? '');
@@ -216,7 +219,7 @@ function EpicEditInline({ epic, onSaved, onCancel }: { epic: Epic; onSaved: (e: 
       <div className="flex justify-end gap-2">
         <Button variant="ghost" size="sm" onClick={onCancel}>{t('cancel')}</Button>
         <Button size="sm" disabled={saving || !title.trim()} onClick={() => void handleSave()}>
-          {saving ? t('saving') : t('saveChanges')}
+          {saving ? tc('saving') : t('saveChanges')}
         </Button>
       </div>
     </div>
@@ -227,11 +230,28 @@ function EpicEditInline({ epic, onSaved, onCancel }: { epic: Epic; onSaved: (e: 
 
 export default function EpicDetailPage() {
   const t = useTranslations('goals');
-  const locale = useLocale();
+  const tc = useTranslations('common');
+  // story #3878(§⑤ 낱말 드리프트, PO 재실측 2026-09-14 — 이 페이지가 실 클릭 플로우의
+  // 유일 도달점, AC5 "모든 디바이스에서 /epics/[id] 딥링크로 이동") — 스토리 그룹 헤딩의
+  // status(canonical slug)를 t() 없이 그대로 그리던 자리 정본화. story-detail-panel.tsx의
+  // statusKeyMap→t() 관례 그대로 재사용(§②-1 기존 상태 낱말, 새 키 0).
+  const tBoard = useTranslations('board');
+  const storyStatusKeyMap: Record<string, 'backlog' | 'readyForDev' | 'inProgress' | 'inReview' | 'done'> = {
+    backlog: 'backlog',
+    'ready-for-dev': 'readyForDev',
+    'in-progress': 'inProgress',
+    'in-review': 'inReview',
+    done: 'done',
+  };
+  const storyStatusLabel = (slug: string): string => {
+    const key = storyStatusKeyMap[slug];
+    return key ? tBoard(key) : slug;
+  };
+  const displayTimezone = resolveDisplayTimezone().tz;
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const { wsSlug, projSlug, projectId } = useGoalsRoute();
-  const { toasts, addToast, dismissToast } = useToast();
+  const { addToast } = useToast();
   const [epic, setEpic] = useState<Epic | null>(null);
   const [loading, setLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
@@ -392,7 +412,7 @@ export default function EpicDetailPage() {
               <button
                 type="button"
                 onClick={() => setShowDeleteConfirm(true)}
-                className="flex items-center gap-1.5 rounded-lg border border-destructive/40 px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-destructive/10 transition-colors"
+                className="flex items-center gap-1.5 rounded-lg border border-destructive/40 px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-destructive-tint transition-colors"
                 aria-label={t('deleteGoal')}
               >
                 <Trash2 className="h-3.5 w-3.5" />
@@ -410,7 +430,7 @@ export default function EpicDetailPage() {
             />
             <Badge variant={priorityBadgeVariant(epic.priority)}>{t(priorityLabelKey(epic.priority))}</Badge>
             {epic.outcome_status && epic.outcome_status !== 'n_a' ? <OutcomeStatusBadge status={epic.outcome_status} /> : null}
-            {epic.target_date && <span className="text-xs text-muted-foreground">{t('targetDate')}: {formatDate(epic.target_date, locale)}</span>}
+            {epic.target_date && <span className="text-xs text-muted-foreground">{t('targetDate')}: {formatDate(epic.target_date, displayTimezone)}</span>}
             {epic.target_sp != null && <span className="text-xs text-muted-foreground">{t('targetSp')}: {epic.target_sp}</span>}
           </div>
         </div>
@@ -448,7 +468,7 @@ export default function EpicDetailPage() {
             </div>
             <div className="mt-2 text-[13px] leading-snug text-foreground/80">
               {epic.success_criteria?.trim() ? epic.success_criteria.split('\n')[0] : t('outcomeCapsuleNoCriteria')}
-              {epic.measure_after ? ` · ${t('targetDate')} ${formatDate(epic.measure_after, locale)}` : ''}
+              {epic.measure_after ? ` · ${t('targetDate')} ${formatDate(epic.measure_after, displayTimezone)}` : ''}
             </div>
           </div>
         </div>
@@ -456,7 +476,7 @@ export default function EpicDetailPage() {
         {/* Dispatch */}
         {epic.project_id && (
           <div className="rounded-xl border border-border bg-muted/20 p-4">
-            <p className="mb-2 text-xs font-medium text-muted-foreground">Dispatch</p>
+            <p className="mb-2 text-xs font-medium text-muted-foreground">{tBoard('dispatch')}</p>
             <EntityDispatchPanel
               entityType="epic"
               entityId={epic.id}
@@ -523,8 +543,16 @@ export default function EpicDetailPage() {
 
         {/* Stories — grouped by status */}
         <section className="space-y-4">
+          {/* story #3764(UI 점검 B·E절, 유나 定 재정정) — 수를 제목 문자열 안에 넣지
+              않는다. 단 이 제목(text-xs font-medium text-muted-foreground)은 이미
+              CountBadge를 쓰는 자리(구성원·권한·이벤트, text-base font-semibold)보다
+              약한 위계다 — CountBadge(font-mono font-bold+테두리+엠보스)를 그대로
+              얹으면 수가 제목보다 강해져 E절이 막으려는 병(제목이 매번 달라 못
+              알아본다)을 다른 방식으로 되풀이한다. 위계가 그릇을 고른다 — 약한
+              제목엔 제목과 같은 대역의 수(tabular-nums, muted). */}
           <h2 className="text-xs font-medium text-muted-foreground">
-            {t('stories')} ({stories.length})
+            {t('stories')}
+            <span className="ml-1.5 tabular-nums text-muted-foreground">{stories.length}</span>
           </h2>
           {stories.length === 0 ? (
             <p className="text-sm italic text-muted-foreground">{t('noStories')}</p>
@@ -534,7 +562,7 @@ export default function EpicDetailPage() {
                 <div key={groupStatus}>
                   <div className="mb-1.5 flex items-center gap-2">
                     <Badge variant={storyStatusVariant(groupStatus)} className="text-[10px]">
-                      {groupStatus}
+                      {storyStatusLabel(groupStatus)}
                     </Badge>
                     <span className="text-xs text-muted-foreground">{t('itemCount', { count: items.length })}</span>
                   </div>
@@ -596,13 +624,12 @@ export default function EpicDetailPage() {
               onClick={() => void handleDelete()}
               disabled={deleting}
             >
-              {deleting ? t('deleting') : t('deleteConfirmButton')}
+              {deleting ? tc('deleting') : t('deleteConfirmButton')}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </>
   );
 }

@@ -1,0 +1,121 @@
+import Link from 'next/link';
+import { useTranslations } from 'next-intl';
+import { deriveChannelPostView, type ChannelPublicationStatus } from '@/components/content/channel-post-status';
+import { StatusChip } from '@/components/content/status-chip';
+import { formatScheduledAt } from '@/components/content/schedule-format';
+import { deriveFailureAction, type CommandStatus } from '@/components/content/failure-action';
+import { FailureActionBadge } from '@/components/content/failure-action-badge';
+import { isSandboxChannelDraft, SandboxTestBadge } from '@/components/content/sandbox-test-badge';
+import type { ChannelPostCalendarItem } from '@/components/content/use-channel-post-calendar-data';
+
+// story #3422(doc §11 T8) — 캘린더 격자 셀과 「날짜 미정」 레인이 공유하는 유일한 렌더
+// 단위(설계 코멘트 "ChannelPostCard가 유일한 렌더 단위" 그대로). deriveChannelPostView를
+// 그대로 재사용해 칩을 만든다(§17-1 — 새 파생 금지). 실패/회수 오버레이(§17-2·§17-10)는
+// B3(페드루 PO, 2026-09-04 13:14Z)에서 FailureActionBadge로 얹는다 — 칩 바로 아래.
+export interface ChannelPostCardProps {
+  item: ChannelPostCalendarItem;
+  /** 그리드/레인이 공유하는 단일 tz 출처(schedule-format.ts::resolveDisplayTimezone) —
+   * 셀마다 다시 계산하지 않는다(그룹핑·표기가 어긋나지 않게, story #3422 설계). */
+  displayTimezone: string;
+}
+
+export function ChannelPostCard({ item, displayTimezone }: ChannelPostCardProps) {
+  const t = useTranslations('content');
+  const hasGateContract = 'gate_status' in item;
+  const view = hasGateContract
+    ? deriveChannelPostView({
+        gateStatus: item.gate_status === 'pending' || item.gate_status === 'approved' || item.gate_status === 'rejected'
+          ? item.gate_status : undefined,
+        reapprovalRequired: item.reapproval_required ?? undefined,
+        sealedBodySha256: item.sealed_content_sha256 ?? undefined,
+        currentBodySha256: item.body_sha256,
+        publishedBodySha256: item.published_body_sha256 ?? undefined,
+        publicationStatus: item.publication_status as ChannelPublicationStatus | null | undefined,
+        errorCode: item.error_code,
+        publishedAt: 'published_at' in item ? item.published_at : undefined,
+      })
+    : { status: undefined, publishable: false, partialSuccess: false, publicationFailed: false, errorCode: undefined, unpublished: false, isRepublish: undefined, blockedReason: undefined };
+
+  // B3(페드루 PO, 2026-09-04 13:14Z) — [draftId]/page.tsx와 동형 재사용(같은 함수·같은
+  // 진리표, §17-2 "화면이 갈래를 다시 안 짠다").
+  const failureAction = deriveFailureAction({
+    commandStatus: item.command_status as CommandStatus | null | undefined,
+    failureKind: item.failure_kind,
+    nextRetryAt: item.next_retry_at,
+    reasonCode: item.command_reason_code,
+    reasonResetAt: item.command_reason_reset_at,
+    processingKind: item.processing_kind,
+  });
+
+  return (
+    <Link
+      href={`/content/channel-posts/${item.draft_id}`}
+      className="block space-y-1 rounded-md border border-border p-2 text-xs hover:bg-muted"
+      data-testid="channel-post-calendar-card"
+      data-status-chip={view.status ?? 'unknown'}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <StatusChip status={view.status} />
+          {/* story f30da19a AC5 — T8(캘린더 칸). */}
+          {isSandboxChannelDraft(item.channel) ? <SandboxTestBadge /> : null}
+        </div>
+        {item.scheduled_at ? (
+          <span className="text-muted-foreground" data-testid="channel-post-calendar-card-time">
+            {formatScheduledAt(item.scheduled_at, displayTimezone).display}
+          </span>
+        ) : null}
+      </div>
+      {/* N3(페드루 PO, 2026-09-04 13:26Z) — 카드 전체가 <Link>라 그 안에 배지의
+          <Button>을 그대로 두면 인터랙티브 요소가 중첩된다(a>button). compact로 라벨만
+          받는다 — 재시도는 카드를 눌러 상세로 들어간 다음에 한다. */}
+      {failureAction ? <FailureActionBadge action={failureAction} displayTimezone={displayTimezone} compact /> : null}
+      {/* story #3813(Phase3·3-4 PR4, 페드루 PO 確定 2026-09-12) — 뉴스레터 채널만 이
+          객체를 받는다(discriminator=BE의 channel 판별, content_kind류 신규 필드 0).
+          subject 우선(제목이 사람이 알아보는 값), 세그먼트는 미확定이면 기존 어휘
+          「미확인」(channelPostsCharLimitUnknown과 동형 낱말) 그대로 — 지어내지 않는다. */}
+      {item.newsletter ? (
+        <p className="truncate text-muted-foreground" data-testid="channel-post-calendar-card-newsletter">
+          <span className="mr-1 rounded bg-muted px-1 py-0.5 text-[10px] font-medium text-foreground">
+            {t('channelPostsNewsletterBadge')}
+          </span>
+          {item.newsletter.subject ?? t('channelPostsNewsletterSubjectUnknown')}
+          {' · '}
+          {item.newsletter.segment_name ?? t('channelPostsNewsletterSegmentUnknown')}
+        </p>
+      ) : null}
+      {/* story #3813(Phase3·3-4 PR4, 자체발견 — 라이브 데모 실측 2026-09-12) — 발송
+          요청 前엔 카드 상단 시각(item.scheduled_at) 하나로 충분하지만(그 하나가
+          「캠페인 만들기 예정」), 발송이 봉인된 뒤엔 그 상단 시각이 발송 예정으로
+          바뀌어(BE COALESCE) 캠페인 만들기 예정 시각이 안 보이게 된다 — PO 明示
+          "두 시각 라벨 다 보이게"를 위해 둘 다 있을 때만 명시 라벨로 갈라 보인다. */}
+      {item.newsletter?.campaign_scheduled_at && item.newsletter.send_scheduled_at ? (
+        <p className="text-[11px] text-muted-foreground" data-testid="channel-post-calendar-card-newsletter-schedules">
+          <span>
+            {t('channelPostsNewsletterCampaignScheduleLabel')}
+            {' '}
+            {formatScheduledAt(item.newsletter.campaign_scheduled_at, displayTimezone).display}
+          </span>
+          <span className="mx-1">·</span>
+          <span>
+            {t('channelPostsNewsletterSendScheduleLabel')}
+            {' '}
+            {formatScheduledAt(item.newsletter.send_scheduled_at, displayTimezone).display}
+          </span>
+        </p>
+      ) : null}
+      {item.text_preview ? (
+        <p className="truncate text-foreground" data-testid="channel-post-calendar-card-preview">{item.text_preview}</p>
+      ) : null}
+      {/* story #3457 후속(유나 §14-2 안전 표기, PO 확定 2026-09-04 20:54Z) — 카드 전체가
+          이미 <Link>라 원문 페이지로 가는 중첩 링크는 못 넣는다(a>a 무효 HTML) — 목록/상세와
+          같은 어휘를 평문으로만(카드 클릭 → 상세에서 실제 링크). source_title 없으면
+          (정상값) 이 줄 자체를 안 그린다. */}
+      {item.source_content_item_id && item.source_title ? (
+        <p className="truncate text-muted-foreground" data-testid="channel-post-calendar-card-source">
+          {t('channelPostsSourceLabel')} {t('channelPostsSourceLinkText', { title: item.source_title })}
+        </p>
+      ) : null}
+    </Link>
+  );
+}

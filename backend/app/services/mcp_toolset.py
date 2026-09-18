@@ -60,6 +60,25 @@ _GROUP_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     # "update_event_definition")가 먼저 있어 이 항목까지 안 내려온다(admin이 이 events보다
     # 리스트 앞쪽 — tool_group()은 첫 매치를 반환).
     ("events", ("event",)),
+    # story #3614 CHANGES(2026-09-07, 페드루 PO 判定)가 "channel_post" 키워드 하나로 이
+    # 그룹을 최소 신설(sprintable_withdraw_channel_post_draft의 카탈로그 커버리지 공백
+    # 임시 해소, PR#3972) — story #3631이 그 위에 나머지 콘텐츠 도구 키워드를 마저 얹어
+    # 완성한다.
+    #
+    # "comment"는 바로 안 쓴다 — sprintable_add_artifact_comment/sprintable_
+    # list_artifact_comments(canvas 그룹, "artifact" 키워드)와 겹친다. 이 리스트 순서
+    # (canvas가 먼저)상 그 둘은 이미 canvas로 먼저 매치되므로 실질 충돌은 없지만,
+    # "post_comment"(channel_post_comment류 실제 이름 패턴과 일치)로 더 구체화해 순서
+    # 의존성 자체를 없앤다(방어적 이중 안전).
+    #
+    # "withdraw"는 의도적으로 뺐다 — 이 하나의 동사만으로 미래의 무관한 도구(예: 보상/지갑
+    # 인출류)까지 이 그룹으로 잘못 끌어올 위험이 "channel_post" 등 구체 키워드보다 크다.
+    # 지금 유일한 실 도구(withdraw_channel_post_draft)는 "channel_post" 키워드로 이미 잡힌다.
+    # story #3769(2026-09-10): "content_rule" — sprintable_get_content_rules(신설, 콘텐츠
+    # 규칙 읽기)도 같은 콘텐츠 파이프라인 도구다. "channel_post"/"site_post" 등과 겹치지
+    # 않는 독립 키워드(순서 의존 없음).
+    ("content", ("channel_post", "site_post", "channel_connection", "post_comment", "insight",
+                 "content_rule")),
 ]
 
 _CORE = "core"  # ping/notifications-check 등 기본 — 항상 허용
@@ -282,6 +301,100 @@ _PATH_GROUP_PREFIXES: tuple[tuple[str, str], ...] = (
     ("/api/v2/visual-artifacts", "canvas"),
 )
 
+# story #3654(BE·REST·소형, 페드루 PO 確定 2026-09-07) — org 스코프 콘텐츠 경로
+# (`/api/v2/organizations/{org_id}/<segment>...`). `_PATH_GROUP_PREFIXES`(위, 고정
+# prefix 매칭)는 이 형을 표현 못 한다 — org_id가 동적 값으로 리터럴 prefix 사이에 끼어
+# 있어 `path.startswith(prefix)`가 안 통한다(test_3614_content_toolset_group_changes.py
+# 의 옛 pin이 이 갭을 기록해 뒀었다). 정규식 신설 대신 org_id **뒤 첫 세그먼트**만 뽑아
+# (그라운딩③ 싼 쪽) 이 표와 대조한다 — org_id 값 자체는 안 본다(UUID든 아니든 위치만).
+#
+# 그라운딩② 전수 — 6개 라우터(channel_posts·channel_connections·site_posts·
+# channel_post_comments·insight_snapshots·publishing_metrics)뿐 아니라 같은 콘텐츠
+# 파이프라인의 나머지 org-scoped 라우터(channel_post_comment_replies·insights_board)
+# 까지 실제 세그먼트를 전수 스캔하면 9개다(스토리 초안이 5개로 적었던 것보다 많다 —
+# publication-commands(발행 재시도)·comments(댓글 답변 초안)·insights/insights-board
+# (콘텐츠 성과 조회)도 같은 콘텐츠 파이프라인 자원이라 포함했다, PO 재확認 요청 완료).
+_ORG_SCOPED_PATH_GROUP_SEGMENTS: tuple[tuple[str, str], ...] = (
+    ("channel-posts", "content"),
+    ("site-posts", "content"),
+    ("publication-commands", "content"),
+    ("channel-connections", "content"),
+    ("publications", "content"),
+    ("comments", "content"),
+    ("insights", "content"),
+    ("insights-board", "content"),
+    ("publishing-metrics", "content"),
+    # story #3769(2026-09-10): sprintable_get_content_rules 신설로 "MCP 도구/키워드 0건"
+    # 사유가 더 이상 사실이 아니게 됐다 — 예외 목록(아래)에서 이리로 이관.
+    ("content-rules", "content"),
+    # story #3805(BE PR1 CI 정정, 카디르 실측·페드루 전달 2026-09-11) — 「반응」
+    # (Engagement) 화면. channel_post_comments와 같은 원본 테이블·같은 콘텐츠
+    # 파이프라인 자원이라 "comments"와 동형으로 content면 등재.
+    ("engagement", "content"),
+)
+
+# story #3654(정적 가드) — `test_3654_org_scoped_content_rest_group.py`의 가드 테스트가
+# `app/routers/` 전수를 스캔해, `/api/v2/organizations/{org_id}/<segment>...`(또는
+# `/{id}/<segment>`) 형 라우터의 모든 세그먼트가 위 표에 있거나 이 목록에 «이유»와 함께
+# 있어야만 통과시킨다 — 새 org-scoped 자원이 표·목록 어느 쪽에도 없이 추가되면 가드가
+# 스스로 RED(b4027b2e류 사각지대의 재발을 "조용한 통과"가 아니라 "빨간 실패"로 바꾼다).
+# 아래 사유는 전부 실측 확認(sprintable_mcp/ 전수 grep) — 이 세그먼트들과 매칭되는 MCP
+# 도구/키워드가 현재 0건이라, REST를 미매핑으로 두는 것이 MCP 쪽 취급(core, 이미 존재하는
+# 별도 갭)과 최소한 "새로 벌어지지는" 않는다는 뜻 — 이 갭 자체를 정당화하지 않는다(이
+# 스토리 범위 밖일 뿐, 후속 후보로 남긴다).
+_ORG_SCOPED_UNMAPPED_SEGMENTS_WITH_REASON: dict[str, str] = {
+    "campaigns": "MCP 도구/키워드 0건(REST·MCP 양쪽 다 core 취급 — 이 스토리가 새로 벌리는 격차 아님)",
+    "connectors": "MCP 도구/키워드 0건(connectors.py, 위와 동형)",
+    # story #3769(2026-09-10): "content-rules"는 sprintable_get_content_rules 신설로
+    # _ORG_SCOPED_PATH_GROUP_SEGMENTS(위)로 이관 — 여기 목록에선 제거(이중 등재 금지,
+    # test_content_group_reason_dict_has_no_overlap_with_mapped_segments 참고).
+    # "generation-budget"은 그 도구가 내부적으로 함께 읽어 응답에 병합하지만(비 1:1 REST
+    # 프록시), 이 세그먼트 자체를 독립 매핑하진 않는다 — 이유가 "0건"에서 "간접 소비"로
+    # 바뀌었을 뿐 REST 직접 호출 경로는 여전히 미매핑(permissive) 그대로 둔다(범위 밖 —
+    # 별도 필요성이 생기면 그때 매핑).
+    "generation-budget": "MCP 도구/키워드 있음(sprintable_get_content_rules가 간접 소비, 3769) — "
+                          "REST 1:1 전용 도구는 여전히 0건, 세그먼트 직접 매핑은 범위 밖으로 보류",
+    # story #3808(Phase3·3-3 PR3, 2026-09-11) — GET .../api-usage-budget. "generation-
+    # budget"과 동형 축 그대로: rules.api_usage_budget이 content-rules 스키마
+    # (ContentRulesFields)에 얹혀 sprintable_get_content_rules가 간접 소비하지만,
+    # 이 REST 세그먼트 자체를 1:1로 부르는 MCP 도구는 여전히 0건. 영문 사유(story #3779
+    # BE 한글 사용자 문장 재발 가드 — 신규 문자열은 grandfather 대신 영문으로).
+    "api-usage-budget": "MCP tool/keyword exists (indirectly consumed via sprintable_get_content_rules, "
+                         "story 3808) — no dedicated REST 1:1 tool yet, direct segment mapping deferred",
+    "domain-labels": "MCP 도구/키워드 0건(domain_labels.py, 사이트 도메인 설정·admin류)",
+    "gate-config": "MCP 도구/키워드 0건(gate_config.py, 승인 게이트 거버넌스 설정·admin류)",
+    "measurement-connections": "MCP 도구/키워드 0건(measurement_connections.py, GA4 연결 설정)",
+    "invites": "MCP 도구/키워드 0건(org_invites.py, org 멤버 초대·admin류)",
+    "metering-key": "MCP 도구/키워드 0건(pageview_metering.py, hosted-site 계측 설정·admin류)",
+    "pageviews": "MCP 도구/키워드 0건(pageview_metering.py, hosted-site pageview 조회)",
+    "impact": "MCP 도구/키워드 0건(organizations.py, org 임팩트 조회·admin류)",
+    "resolve": "MCP 도구/키워드 0건(organizations.py, slug→org 해소·session 유틸류)",
+    "(empty/root)": "MCP 도구/키워드 0건(organizations.py, org 목록/생성 자체·admin류)",
+    "(root, org_id only)": "MCP 도구/키워드 0건(organizations.py, org 단건 조회/수정·admin류)",
+    # story #3806(Phase3·3-2 PR3, 페드루 PO 確定 2026-09-11 — CI 빨감 정정) —
+    # ads_boost_execution.py의 start/pause/resume. content 매핑표(에이전트 읽기
+    # 전제)가 아니라 이 목록이 맞는 방향 — AC4가 에이전트를 실행/예산 API에서
+    # 명시적으로 배제(제안만)하므로 MCP 도구 자체를 0건으로 유지하는 것이 설계
+    # 의도. engagement(#3805)와 반대 방향.
+    "ads-boosts": "human-only (3806 AC4: agents propose only, no execution/budget API access); "
+                  "no MCP tool exposes it",
+}
+
+
+def _org_scoped_content_group(path: str) -> str | None:
+    """story #3654 — `/api/v2/organizations/<org_id>/<segment>[...]`에서 `<segment>`만
+    뽑아 `_ORG_SCOPED_PATH_GROUP_SEGMENTS`와 대조한다. org_id 자체는 값 무관(위치만
+    본다) — 정규식 없이 split만으로 충분하다."""
+    parts = [p for p in path.split("/") if p]
+    # ["api", "v2", "organizations", "<org_id>", "<segment>", ...]
+    if len(parts) < 5 or parts[0] != "api" or parts[1] != "v2" or parts[2] != "organizations":
+        return None
+    segment = parts[4]
+    for seg, group in _ORG_SCOPED_PATH_GROUP_SEGMENTS:
+        if seg == segment:
+            return group
+    return None
+
 
 def path_to_tool_group(path: str) -> str | None:
     """요청 path → toolset group. always-allowed/미매핑(core 취급)이면 None(강제 면제)."""
@@ -291,6 +404,9 @@ def path_to_tool_group(path: str) -> str | None:
     for prefix, group in _PATH_GROUP_PREFIXES:
         if path == prefix or path.startswith(prefix + "/"):
             return group
+    org_scoped_group = _org_scoped_content_group(path)
+    if org_scoped_group is not None:
+        return org_scoped_group
     return None  # 미매핑 → core 취급(허용)
 
 
@@ -356,7 +472,7 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
     "sprintable_get_velocity", "sprintable_get_wallet", "sprintable_get_workflow_guide",
     "sprintable_give_reward", "sprintable_list_audit_logs", "sprintable_list_backlog",
     "sprintable_get_chat_message",
-    "sprintable_list_chat_messages", "sprintable_list_docs", "sprintable_list_epics",
+    "sprintable_list_chat_messages", "sprintable_list_conversations", "sprintable_list_docs", "sprintable_list_epics",
     "sprintable_list_goals",
     "sprintable_list_meetings", "sprintable_list_my_tasks", "sprintable_list_retro_sessions",
     "sprintable_list_sprints", "sprintable_list_standup_entries", "sprintable_list_stories",
@@ -419,6 +535,16 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
     "sprintable_publish_event", "sprintable_list_event_definitions",
     # events registry 등록(story #2636) — POST/PATCH /api/v2/events/definitions(org 커스텀).
     "sprintable_register_event_definition", "sprintable_update_event_definition",
+    # channel post drafts (story #3614) — 이 도메인의 첫 MCP 도구. "channel_post"/"withdraw"
+    # 둘 다 _GROUP_KEYWORDS에 없어 tool_group()이 core로 분류한다(cross-cutting 취급) —
+    # 콘텐츠 전용 그룹이 아직 없다는 기존 갭(REST _PATH_GROUP_PREFIXES에도 channel-posts
+    # 미등록, 동일 갭)의 연장선. 새 그룹 신설은 이 스토리 범위 밖 — 후속 스토리 후보로 남긴다.
+    "sprintable_withdraw_channel_post_draft",
+    # 발행물 인사이트(story #3651) — 이름에 "insight"가 있어 _GROUP_KEYWORDS의 "content"
+    # 그룹(3631 신설)이 이미 커버한다(위 withdraw와 달리 새 갭이 아니다).
+    "sprintable_get_publication_insights",
+    # 콘텐츠 규칙 읽기(story #3769) — "content_rule" 키워드로 "content" 그룹.
+    "sprintable_get_content_rules",
 )
 
 # picker 표시 순서(비파괴 먼저). order 필드 힌트 + 배열 순서 둘 다 이 순서.
@@ -435,6 +561,11 @@ _CATALOG_DISPLAY_ORDER: tuple[str, ...] = (
     # default_tool_groups에 아직 이 토큰을 가진 role이 없다(선생님 승인 게이트 — 데이터
     # 마이그 없이 여기 등록만으로는 아무 role도 자동으로 이 도구를 못 쓴다, fail-closed).
     "events",
+    # story #3614 CHANGES가 최소 신설(events와 동일 이유로 당시 fail-closed) — story #3631
+    # (alembic 0350)이 growth-hacker·performance-marketer 2 role_template.default_tool_groups
+    # 에 "content" 토큰을 배선해 실제로 도는 자리로 완성한다(dev 실측 — 뭉클랩 활성
+    # 에이전트 11 전수 훑어도 이 2 role 밖에서 recruit된 콘텐츠 전담 role 0건).
+    "content",
 )
 
 

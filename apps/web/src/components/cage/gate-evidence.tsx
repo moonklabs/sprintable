@@ -2,10 +2,19 @@
 
 import { Fragment, useEffect, useState } from 'react';
 import { CheckCircle, XCircle, GitPullRequest, Check, Pause, Ban, Loader2, type LucideIcon } from 'lucide-react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
 import { fetchWithAuth } from '@/lib/db/client';
+import { formatRelativeTime } from '@/lib/storage/format';
+import { resolveDisplayTimezone, formatScheduledAt } from '@/components/content/schedule-format';
 import type { GateItem } from '@/components/kanban/types';
+import { parseEntityRef, unescapeReferenceLabel } from '@/components/chat/entity-ref';
+import { EntityChip, getEntityHref } from '@/components/chat/embed-card';
+import { isCommentReplyGate } from '@/components/cage/gate-risk';
+import { AuthorKindBadge } from '@/components/content/author-kind-badge';
+import { channelLabel } from '@/lib/channel-label';
+import { formatMinorCurrency, type GenerationBudgetCurrency } from '@/components/content/generation-budget-indicator';
+import { adsBoostObjectiveLabel } from '@/lib/ads-boost-objective-label';
 
 /**
  * H1-S8 머지 verdict 게이트 evidence(read-only 표시). 3 surface(GateInbox row·story detail·
@@ -103,6 +112,185 @@ function hypothesisOutcomeDraft(gate: GateItem): HypothesisOutcomeDraftFacts | n
   };
 }
 
+// story #3328(3바퀴 라이브 결함 · db967a77) — 레시피 approve 게이트(external_publish 등,
+// backend/app/services/recipe_gate_hooks.py::_build_approval_neutral_facts)의 neutral_facts
+// shape은 이 파일의 기존 신호(ci_result·trust·cold_start_seed 등, 전부 머지/가설 게이트
+// 전용)와 완전히 다르다 — work_item_reference_token·draft_doc_reference_token·channel·
+// draft_doc_summary·stage. `미확認`(BE sentinel, 값을 못 찾았다는 명시 표기)은 실 증거가
+// 아니므로 걸러낸다(지어내지 않음 — realString).
+// i18n-exempt: BE sentinel 계약값(recipe_gate_hooks.py 등과 그대로 비교) — 번역하면 매치가 깨진다. UI 렌더 문구 아님(story #3937).
+const _UNCONFIRMED = '미확認';
+
+function realString(v: unknown): string | null {
+  return typeof v === 'string' && v.length > 0 && v !== _UNCONFIRMED ? v : null;
+}
+
+interface ParsedReferenceToken {
+  entityType: string;
+  entityId: string;
+  label: string;
+  href: string | null;
+}
+
+// BE reference_token.py::build_reference_token의 `[제목](entity:타입:id)` 산출물을 다시
+// 쪼갠다 — entity-ref.ts(SSOT)의 href 파서를 그대로 재사용, 제목만 이 자리에서 분리.
+//
+// ⚠️PO 변경요청①(2026-09-02, PR#3710 리뷰) — BE `_escape_title`이 라벨 안의 `\ [ ] ( )`를
+// `\`-escape해 저장한다(reference_token.py). unescapeReferenceLabel(entity-ref.ts SSOT — 원래
+// chat-report-density.ts에만 있던 규칙을 헬퍼로 승격)로 원복하지 않으면 실 제목(예: 이 팀
+// 스토리 제목 관례 "[3바퀴·draft] ... v2(276/500자·반려 반영)")이 칩에 `\[...\] ... v2\(...\)`
+// 문자 그대로 새어 나간다 — 초기 구현이 이스케이프 없는 픽스처로만 테스트해 못 잡았던 자리.
+function parseReferenceToken(v: unknown): ParsedReferenceToken | null {
+  const s = realString(v);
+  if (!s) return null;
+  const m = s.match(/^\[(.*)\]\((.*)\)$/);
+  if (!m) return null;
+  const [, rawLabel, href] = m;
+  const ref = parseEntityRef(href);
+  if (!ref) return null;
+  return { ...ref, label: unescapeReferenceLabel(rawLabel), href: getEntityHref(ref.entityType, ref.entityId) };
+}
+
+interface RecipeApprovalFacts {
+  workItemRef: ParsedReferenceToken | null;
+  draftDocRef: ParsedReferenceToken | null;
+  draftDocSummary: string | null;
+  channel: string | null;
+  stage: string | null;
+  // story #3368(Phase0·마케팅운영 S4, doc phase0-post-manager-screen-design §4-3③·§6-3) —
+  // 글 관리 화면의 승인 요청이 채우는 필드. draft_doc_summary(300자 截단, doc 기반 채널용)
+  // 와 별개 — 이쪽은 "전문"이라 접힘 없이 항상 펼쳐 보인다(§6-3 "요약 → 전문" 확장 그대로).
+  // ⚠️BE 계약 정정(S2 실물, PR#3733) — neutral_facts가 아니라 Gate 전용 컬럼
+  // (sealed_content_sha256/version/body, GateItem top-level)이다. 최초 설계 당시(§4-3③)는
+  // neutral_facts로 가정했으나 S2가 github_check_run_sha와 동형인 전용 컬럼으로 구현했다.
+  contentBody: string | null;
+  contentVersion: number | null;
+  contentSha256: string | null;
+  // §3-1-2(페드루 PO 정정 2026-09-03 06:42Z) — 승인 뒤 편집으로 pending 재오픈된 게이트인지.
+  // true면 이 카드는 "승인 가능한 카드"가 아니라 "재상신 대기" 카드로 그린다(§3-1-2-1).
+  reapprovalRequired: boolean;
+  // story #3517(유나 §22-⑤, BE #3867 조각②, PO 確定 2026-09-05) — 댓글 답변 게이트
+  // (neutral_facts.kind='comment_reply') 전용 봉인 축 둘. contentBody(위)가 이미
+  // "답변 본문"(reply.text, Gate.sealed_content_body) 몫을 채운다 — 이 둘은 "대상
+  // 댓글" 몫만 추가한다. targetText는 그라운딩 확認 갭이라 BE 후속(neutral_facts.
+  // target_text additive) 착지 전까진 항상 null(지어내지 않는다 — RecipeApprovalFactsBlock
+  // 이 null이면 "제공되지 않음"으로 정직하게 비운다).
+  targetExternalCommentId: string | null;
+  targetText: string | null;
+  // story #3599(유나 §22-17 ⑥-1, 페드루 PO 追加 2026-09-07) — 게이트 생성 시점의
+  // sent 카운트 스냅샷(neutral_facts.sent_replies_count, additive). null=구버전
+  // 게이트(이 필드 자체가 없던 시절)·0=보낸 답변 없음 — 둘 다 줄을 안 그린다
+  // (§content.commentsReplyAlreadySentCount와 같은 규율: 수만·0이면 미표시).
+  alreadySentCount: number | null;
+  // story #3599(유나 §22-17 ⑥-4 조건 갱신, 페드루 PO 정정 2026-09-07) — 버전-미상
+  // 캡션은 «승인/반려 판단이 실제로 난» 행에서만. pending·held(일시정지)는
+  // 아직 판단 자체가 없고, voided는 판단이 아니라 행정 무효화라 지어낼 것도
+  // 없다 — approved/rejected/auto_passed만 이 조건을 만족한다.
+  isResolved: boolean;
+  // story #3560(concept_approval, 페드루 PO 確定 2026-09-06) — sealed_content_*와
+  // 동형이나 대상이 doc(external_publish=본문 텍스트 봉인·concept_approval=doc
+  // 봉인). BE additive(story #3569) — 그 전까진 항상 null. 「펼침」이 없다(본문
+  // 전문을 안 보인다 — 링크로 doc을 직접 열어 보는 쪽이 doc 자체의 편집 이력·
+  // 서식을 있는 그대로 보여준다, contentBody의 "요약→전문" 확장과 다른 결).
+  sealedDocRef: ParsedReferenceToken | null;
+  sealedDocBodySha256: string | null;
+  // story #3367(3자기점검, 페드루 지적 2026-09-10) — AC7("마지막 수정 주체·목적지").
+  // 봉인 축(contentBody 등)과 달리 이 둘은 "지금" 값이다(latestAuthorKind는 approved
+  // 뒤 편집이면 봉인 작성자와 갈릴 수 있다 — 그게 이 필드의 존재 이유).
+  latestAuthorKind: 'agent' | 'human' | null;
+  // Gate ORM 실 컬럼이라 모든 gate_type 응답에 항상 present(null 포함, sealed_doc_id와
+  // 동일 선례) — "hosted_site"와 "이 축이 없는 gate_type"을 이 필드 하나로는 못
+  // 가른다. 렌더는 contentVersion/contentSha256(site_posts 식별 신호)과 같은 조건에
+  // 묶는다(아래 RecipeApprovalFactsBlock — «모른다≠다르다» 규율은 그 조건 분기가 진다).
+  destinationConnectionId: string | null;
+  // story #3367(유나 CHANGES, 페드루 재검토 2026-09-10) — destinationConnectionId
+  // 원문(uuid)을 승인자에게 그대로 보이면 확認 불가능한 값으로 서명을 요구하는
+  // 결함이 된다. 그 연결의 channel(BE list_gates() 배치 enrich)을 channelLabel()
+  // (lib/channel-label.ts, 집안 정본)로 표시명을 낸다 — destinationConnectionId가
+  // null(hosted_site)이면 이 필드는 무의미(항상 null, 아래 렌더가 안 읽는다).
+  destinationChannel: string | null;
+  // story #3806(Phase3·3-2 PR5, 유나 §절 §1 「결재 카드 봉인 5필드」) — sealed_content_*/
+  // sealed_doc_*와 동일 선례(다른 gate_type은 전부 null). 통화·기간·목표는 §1 표
+  // 그대로(총예산은 adsBudgetMinor+adsCurrency 조합으로 formatMinorCurrency 재사용).
+  adsBudgetMinor: number | null;
+  adsCurrency: string | null;
+  adsStartsAt: string | null;
+  adsEndsAt: string | null;
+  adsObjective: string | null;
+  // story #3813(Phase3·3-4 PR4, 페드루 PO 確定 2026-09-12) — newsletter_send 전용
+  // sealing(adsBudgetMinor 등과 동일 선례, 다른 gate_type은 전부 null).
+  // estimatedRecipientCount는 봉인값이 아니다(어댑터 조회, 위 GateItem 주석 참고) —
+  // 그래도 승인 카드가 「이 세그먼트 N명에게 발송」을 보여줄 유일한 자리라 여기 싣는다.
+  newsletterSegmentName: string | null;
+  newsletterSendScheduledAt: string | null;
+  newsletterEstimatedRecipientCount: number | null;
+  // story #3813(Phase3·3-4 PR4, 페드루 PO CHANGES 2026-09-12, 라이브 캡처 실측) —
+  // 「무엇을」 보내는지 없이 승인하던 결함. estimatedRecipientCount와 동형(봉인값
+  // 아님, 어댑터/버전 조회).
+  newsletterSubject: string | null;
+}
+
+function recipeApprovalFacts(gate: GateItem): RecipeApprovalFacts | null {
+  const f = gate.neutral_facts;
+  const contentBody = realString(gate.sealed_content_body);
+  const contentVersion = typeof gate.sealed_content_version === 'number' ? gate.sealed_content_version : null;
+  const contentSha256 = realString(gate.sealed_content_sha256);
+  // story #3521(카디르 QA #3873 발견) — isCommentReplyGate(gate-risk.ts)와 판정을
+  // 한 벌로 통일(전엔 여기 인라인 kind==='comment_reply'가 별도 사본이었다).
+  const isCommentReply = isCommentReplyGate(gate);
+  const sealedDocId = realString(gate.sealed_doc_id);
+  const sealedDocRef: ParsedReferenceToken | null = sealedDocId
+    ? {
+        entityType: 'doc', entityId: sealedDocId,
+        label: realString(gate.sealed_doc_title) ?? sealedDocId.slice(0, 8),
+        href: getEntityHref('doc', sealedDocId),
+      }
+    : null;
+  const facts: RecipeApprovalFacts = {
+    workItemRef: parseReferenceToken(f?.['work_item_reference_token']),
+    draftDocRef: parseReferenceToken(f?.['draft_doc_reference_token']),
+    draftDocSummary: realString(f?.['draft_doc_summary']),
+    channel: realString(f?.['channel']),
+    stage: realString(f?.['stage']),
+    contentBody,
+    contentVersion,
+    contentSha256,
+    reapprovalRequired: gate.reapproval_required === true,
+    targetExternalCommentId: isCommentReply ? realString(f?.['target_external_comment_id']) : null,
+    targetText: isCommentReply ? realString(f?.['target_text']) : null,
+    alreadySentCount: isCommentReply && typeof f?.['sent_replies_count'] === 'number' ? f['sent_replies_count'] : null,
+    // story #3599(페드루 PO 정정 2026-09-07, 그라운딩 2026-09-07) — gate.status!==
+    // 'pending'은 held(일시정지·가역)·voided까지 "결정 남"으로 세어버린다. PO가
+    // 제시한 대안(resolved_at!==null)도 실측해 보니 안 맞는다 — void_gate(gate_
+    // service.py:1592)가 resolved_at을 채운다(voided도 포함돼 버림). "승인/반려
+    // 판단이 실제로 난" 상태만 명시 열거한다(GATE_STATUSES 중 이 셋만 본문에
+    // 대한 판단 — held는 판단 자체가 없고 voided는 판단이 아니라 행정 무효화).
+    isResolved: gate.status === 'approved' || gate.status === 'rejected' || gate.status === 'auto_passed',
+    sealedDocRef,
+    sealedDocBodySha256: realString(gate.sealed_doc_body_sha256),
+    latestAuthorKind: gate.latest_author_kind === 'agent' || gate.latest_author_kind === 'human'
+      ? gate.latest_author_kind : null,
+    destinationConnectionId: realString(gate.sealed_destination_connection_id) ?? null,
+    destinationChannel: realString(gate.sealed_destination_channel) ?? null,
+    adsBudgetMinor: typeof gate.sealed_ads_budget_minor === 'number' ? gate.sealed_ads_budget_minor : null,
+    adsCurrency: realString(gate.sealed_ads_currency),
+    adsStartsAt: realString(gate.sealed_ads_starts_at),
+    adsEndsAt: realString(gate.sealed_ads_ends_at),
+    adsObjective: realString(gate.sealed_ads_objective),
+    newsletterSegmentName: realString(gate.sealed_newsletter_segment_name),
+    newsletterSendScheduledAt: realString(gate.sealed_newsletter_scheduled_at),
+    newsletterEstimatedRecipientCount:
+      typeof gate.estimated_recipient_count === 'number' ? gate.estimated_recipient_count : null,
+    newsletterSubject: realString(gate.newsletter_subject),
+  };
+  const hasAny = isCommentReply ||
+    facts.workItemRef || facts.draftDocRef || facts.draftDocSummary || facts.channel || facts.stage ||
+    facts.contentBody || facts.contentVersion !== null || facts.contentSha256 ||
+    facts.sealedDocRef || facts.sealedDocBodySha256 || facts.adsBudgetMinor !== null ||
+    facts.newsletterSegmentName !== null || facts.newsletterSendScheduledAt !== null || facts.newsletterSubject !== null;
+  return hasAny ? facts : null;
+}
+
 /**
  * 카드에 사람이 평가할 '실 증거'가 있는가. 빈/cold-start 구분의 단일 소스.
  * self_report_only 단독은 증거 아님(trust 실값에 붙는 qualifier로만 — 빈카드 도배 원인 제거).
@@ -119,7 +307,11 @@ export function gateHasEvidence(gate: GateItem): boolean {
   // story #2862 — 측정 판정 초안도 실 증거다(같은 이유, 안 그러면 hypothesis_outcome_confirm
   // 게이트가 State A 빈 카드로 가라앉아 사람이 판정 초안을 아예 못 본다).
   const hasDraft = hypothesisOutcomeDraft(gate) !== null;
-  return hasCi || hasTrust || hasSeed || hasReason || hasGithubCheck || hasDraft;
+  // story #3328 — 레시피 approve 게이트의 승인 대상 실물(work item·draft doc·channel)도
+  // 실 증거다(같은 이유 — 안 그러면 external_publish 게이트가 State A로 가라앉아 승인자가
+  // 뭘 승인하는지 dialog 안에서 전혀 못 본다).
+  const hasRecipeApproval = recipeApprovalFacts(gate) !== null;
+  return hasCi || hasTrust || hasSeed || hasReason || hasGithubCheck || hasDraft || hasRecipeApproval;
 }
 
 type GithubCheckState = 'not_published' | 'in_progress' | 'success' | 'failure';
@@ -302,7 +494,31 @@ const GATE_ACTIVITY_LABEL_KEY: Record<string, string> = {
   gate_resolution_undone: 'gateActivityActionUndone',
   gate_voided: 'gateActivityActionVoided',
   gate_overridden: 'gateActivityActionOverridden',
+  // story #3806(Phase3·3-2 PR 12, 페드루 PO 실측 캡처 2026-09-11 18:16Z) —
+  // refresh_ads_boost_spend_now(ads_spend_snapshots.py)가 남기는 액션. 매핑
+  // 누락 시 raw 키가 그대로 노출되던 걸 실 캡처로 적발.
+  ads_spend_refresh_requested: 'gateActivityActionAdsSpendRefreshRequested',
+  // story #3806(Phase3·3-2 PR 14, 페드루 PO 確定 2026-09-11 19:52Z) —
+  // process_one_ads_boost_command 실행 성공 지점 신설 액션(ads_boost_execution.py
+  // ::_ACTIVITY_ACTION_BY_OP). ads_boost_paused는 scheduler+cap_reached 조합일
+  // 때만 아래 adsBoostActivityLabel()이 별도 문구로 덮어쓴다(이 맵은 그 기본값).
+  ads_boost_started: 'gateActivityActionAdsBoostStarted',
+  ads_boost_paused: 'gateActivityActionAdsBoostPaused',
+  ads_boost_resumed: 'gateActivityActionAdsBoostResumed',
 };
+
+// story #3806(Phase3·3-2 PR 14) — ads_boost_paused 한 action이 두 얼굴이다: 사람이
+// 「중지」를 눌렀거나(일반 문구), 상한 도달로 scheduler가 자동 중지했거나(별도 문구
+// — 사용자가 "왜 멈췄는지" 화면에서 바로 읽어야 한다는 게 이 PR의 존재 이유 그
+// 자체). context는 BE가 이미 실어 보낸다(ads_boost_execution.py::activity_context
+// — {initiated_by, reason?}), 여기서 새로 지어내지 않는다.
+function adsBoostActivityLabel(item: GateActivityLogItem, t: ReturnType<typeof useTranslations>): string | null {
+  if (item.action !== 'ads_boost_paused') return null;
+  if (item.context['initiated_by'] === 'scheduler' && item.context['reason'] === 'cap_reached') {
+    return t('gateActivityActionAdsBoostAutoPausedCapReached');
+  }
+  return null;
+}
 
 /**
  * story #2975 AC4(PO 확定 2026-08-24) — 「누가·언제·무엇을·어느 SHA에」 결재했는지. 2026-08-23
@@ -311,10 +527,19 @@ const GATE_ACTIVITY_LABEL_KEY: Record<string, string> = {
  * 로드. 실패/빈 응답은 GithubRependingReason과 동형으로 조용히(카드 붕괴 방지) — 단 성공+0건은
  * "이력 없음"을 정직하게 보여준다(신규 gate에서 당연한 상태와, 로드 실패를 구분).
  */
-export function GateActivityHistory({ gateId }: { gateId: string }) {
+export function GateActivityHistory({ gateId, refreshKey }: { gateId: string; refreshKey?: number }) {
   const t = useTranslations('cage');
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
   const [items, setItems] = useState<GateActivityLogItem[] | null>(null);
 
+  // story #3806(Phase3·3-2 PR 12, 페드루 PO 실측 캡처 2026-09-11 18:16Z) — 「눌렀는데
+  // 아무 일도 없었다」 결함 처방. 이 컴포넌트는 마운트 시 1회만 불러(원래 §2975 AC4
+  // 계약) 형제 컴포넌트(BoostExecutionControl)의 뮤테이션을 반영할 방법이 없었다.
+  // `refreshKey`가 바뀌면(부모가 뮤테이션 성공 뒤 증가) 재조회 — 상세페이지
+  // key-remount 표준(reference-detail-page-key-remount-standard)과 같은 사상,
+  // 여기선 컴포넌트 전체를 remount하는 대신 이 훅 안에서 재요청만 한다(activity
+  // 목록 자체 상태는 유지할 이유가 없어 remount와 결과는 동일).
   useEffect(() => {
     let cancelled = false;
     fetchWithAuth(`/api/gates/${gateId}/activity`)
@@ -328,7 +553,7 @@ export function GateActivityHistory({ gateId }: { gateId: string }) {
         if (!cancelled) setItems(null);
       });
     return () => { cancelled = true; };
-  }, [gateId]);
+  }, [gateId, refreshKey]);
 
   if (items === null) return null;
 
@@ -342,13 +567,15 @@ export function GateActivityHistory({ gateId }: { gateId: string }) {
           {items.map((item) => {
             const sha = typeof item.context['head_sha'] === 'string' ? (item.context['head_sha'] as string) : null;
             const labelKey = GATE_ACTIVITY_LABEL_KEY[item.action];
+            const adsBoostLabel = adsBoostActivityLabel(item, t);
             return (
               <li key={item.id} className="text-[11px] text-muted-foreground">
                 <span className="font-medium text-foreground">{item.actor_name ?? t('gateActivityActorFallback')}</span>
                 {' · '}
-                {labelKey ? t(labelKey) : item.action}
+                {adsBoostLabel ?? (labelKey ? t(labelKey) : item.action)}
                 {sha ? <span className="ml-1 font-mono">{t('githubCheckShaLabel', { sha: sha.slice(0, 7) })}</span> : null}
-                <span className="ml-1">· {new Date(item.created_at).toLocaleString()}</span>
+                {/* story #3493 — 게이트 활동 로그 항목은 "기록"(정본 formatRelativeTime). */}
+                <span className="ml-1">· {formatRelativeTime(item.created_at, locale, displayTimezone)}</span>
               </li>
             );
           })}
@@ -408,6 +635,263 @@ function HypothesisOutcomeDraft({ draft }: { draft: HypothesisOutcomeDraftFacts 
   );
 }
 
+/**
+ * story #3328 — 레시피 approve 게이트의 승인 대상 실물. work item·draft doc 참조 토큰은
+ * EntityChip(entity-ref.ts SSOT 파서 재사용, 채팅과 같은 렌더러)로 클릭 가능하게. 요약은
+ * 기본 접힘(카드 공간 절약, AC1 "접기 가능") — 없는 필드는 그냥 생략(지어내지 않음).
+ *
+ * ⚠️PO 변경요청②(2026-09-02, PR#3710 리뷰) — story #2420 규칙(HypothesisOutcomeDraft와
+ * 동일 근거, 위 참조): tint 배경(bg-muted/40) 위에서는 실 값(stage·channel)을 라벨과
+ * 같은 muted 톤으로 두지 않고 text-foreground로 — 두 톤이 겹치면 값이 라벨에 묻힌다.
+ * 라벨(필드명)만 muted 유지. WCAG 대비비 실측(globals.css --proof-ink/-ink-3/-sunk 기반,
+ * bg-muted/40을 카드/페이지 배경에 블렌드): text-foreground 16.2~17.4:1(라이트·다크 공통)
+ * vs 기존 text-muted-foreground 5.1~5.9:1(AA 4.5:1은 이미 통과하던 값이라 접근성 위반은
+ * 아니었으나, 값과 라벨의 시각적 위계가 안 갈렸다 — #2420과 동형 근거로 값을 승격).
+ */
+function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
+  const t = useTranslations('cage');
+  // story #3367(유나 CHANGES 2026-09-10) — channelLabel()의 표시명 키(channelLabel
+  // HostedSite/Wordpress 등)는 content ns에 산다(content/[draftId]/page.tsx 기존
+  // 소비처와 동일 배선) — cage ns의 이 컴포넌트가 별도로 바인딩한다.
+  const tContent = useTranslations('content');
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div className="mt-1.5 space-y-1 rounded-lg bg-muted/40 px-2.5 py-1.5 text-[11.5px]">
+      {/* story #3806(Phase3·3-2 PR5, 유나 §절 §1 「결재 카드 봉인 5필드」) — 총예산·기간·
+          목표 순서 그대로(통화는 총예산 표시에 붙는다, §절 표 그대로). ads_boost가
+          아닌 gate_type은 adsBudgetMinor가 항상 null이라 이 블록 자체가 안 그려진다. */}
+      {facts.adsBudgetMinor !== null ? (
+        <div className="space-y-0.5">
+          <p>
+            <span className="text-muted-foreground">{t('adsBoostBudgetLabel')} · </span>
+            <span className="text-foreground font-medium">
+              {facts.adsCurrency
+                ? formatMinorCurrency(facts.adsBudgetMinor, facts.adsCurrency as GenerationBudgetCurrency, locale, tContent)
+                : facts.adsBudgetMinor}
+            </span>
+          </p>
+          {facts.adsStartsAt && facts.adsEndsAt ? (
+            <p>
+              <span className="text-muted-foreground">{t('adsBoostScheduleLabel')} · </span>
+              <span className="text-foreground">
+                {formatScheduledAt(facts.adsStartsAt, displayTimezone).display}
+                {' ~ '}
+                {formatScheduledAt(facts.adsEndsAt, displayTimezone).display}
+                {' '}
+                ({t('adsBoostScheduleDays', {
+                  days: Math.round(
+                    (new Date(facts.adsEndsAt).getTime() - new Date(facts.adsStartsAt).getTime()) / 86_400_000,
+                  ),
+                })})
+              </span>
+            </p>
+          ) : null}
+          {facts.adsObjective ? (
+            <p>
+              <span className="text-muted-foreground">{t('adsBoostObjectiveLabel')} · </span>
+              <span className="text-foreground">{adsBoostObjectiveLabel(facts.adsObjective, tContent)}</span>
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+      {/* story #3813(Phase3·3-4 PR4, 페드루 PO 確定 2026-09-12) — newsletter_send 전용
+          sealing. ads_boost 블록과 동일 선례 — 이 gate_type이 아니면 두 필드 다 null이라
+          블록 자체가 안 그려진다. 「예상 수신」은 봉인값이 아니라 어댑터 조회(위 facts
+          타입 주석) — null이면 지어내지 않고 「미확인」. */}
+      {facts.newsletterSegmentName !== null || facts.newsletterSendScheduledAt !== null || facts.newsletterSubject !== null ? (
+        <div className="space-y-0.5">
+          {/* 페드루 PO CHANGES(2026-09-12, 라이브 캡처 실측) — 「무엇을」 보내는지가
+              세그먼트·시각·수신수보다 먼저 서야 사람이 승인 전에 그것부터 본다. */}
+          <p>
+            <span className="text-muted-foreground">{t('newsletterSubjectLabel')} · </span>
+            <span className="text-foreground font-medium">
+              {facts.newsletterSubject ?? t('newsletterSubjectUnknown')}
+            </span>
+          </p>
+          {facts.newsletterSegmentName ? (
+            <p>
+              <span className="text-muted-foreground">{t('newsletterSegmentLabel')} · </span>
+              <span className="text-foreground font-medium">{facts.newsletterSegmentName}</span>
+            </p>
+          ) : null}
+          {facts.newsletterSendScheduledAt ? (
+            <p>
+              <span className="text-muted-foreground">{t('newsletterSendScheduleLabel')} · </span>
+              <span className="text-foreground">{formatScheduledAt(facts.newsletterSendScheduledAt, displayTimezone).display}</span>
+            </p>
+          ) : null}
+          <p>
+            <span className="text-muted-foreground">{t('newsletterEstimatedRecipientLabel')} · </span>
+            <span className="text-foreground font-medium">
+              {facts.newsletterEstimatedRecipientCount !== null
+                ? t('newsletterEstimatedRecipientCount', {
+                    // 페드루 PO CHANGES(2026-09-12, CI 실측) — 숫자에 붙는 로케일
+                    // 메서드는 메서드명만으로 날짜 호출과 구분이 안 돼 verify-no-date-
+                    // tolocalestring 가드(story #3493)에 걸린다(가드는 주석 문자열도
+                    // 그대로 grep한다, 이 주석 자체가 그 예시였다 — 재발 방지로 그
+                    // 메서드명을 여기 다시 안 적는다). formatMinorCurrency와 동일
+                    // 정본(Intl.NumberFormat 직접)으로 정정.
+                    count: new Intl.NumberFormat(locale).format(facts.newsletterEstimatedRecipientCount),
+                  })
+                : t('newsletterRecipientUnknown')}
+            </span>
+          </p>
+        </div>
+      ) : null}
+      {facts.stage ? (
+        <p>
+          <span className="text-muted-foreground">{t('recipeApprovalStageLabel')} · </span>
+          <span className="text-foreground">{facts.stage}</span>
+        </p>
+      ) : null}
+      {facts.workItemRef ? (
+        <div className="flex flex-wrap items-center gap-1">
+          <span className="text-muted-foreground">{t('recipeApprovalWorkItemLabel')}</span>
+          <EntityChip
+            entityType={facts.workItemRef.entityType}
+            entityId={facts.workItemRef.entityId}
+            label={facts.workItemRef.label}
+            href={facts.workItemRef.href}
+          />
+        </div>
+      ) : null}
+      {facts.draftDocRef ? (
+        <div className="flex flex-wrap items-center gap-1">
+          <span className="text-muted-foreground">{t('recipeApprovalDraftLabel')}</span>
+          <EntityChip
+            entityType={facts.draftDocRef.entityType}
+            entityId={facts.draftDocRef.entityId}
+            label={facts.draftDocRef.label}
+            href={facts.draftDocRef.href}
+          />
+        </div>
+      ) : null}
+      {facts.channel ? (
+        <p>
+          <span className="text-muted-foreground">{t('recipeApprovalChannelLabel')} · </span>
+          <span className="text-foreground">{facts.channel}</span>
+        </p>
+      ) : null}
+      {facts.draftDocSummary ? (
+        <div>
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            className="text-muted-foreground underline underline-offset-2"
+          >
+            {expanded ? t('recipeApprovalSummaryCollapse') : t('recipeApprovalSummaryExpand')}
+          </button>
+          {expanded ? (
+            <p className="mt-1 whitespace-pre-wrap text-foreground">{facts.draftDocSummary}</p>
+          ) : null}
+        </div>
+      ) : null}
+      {/* story #3599(유나 §22-17 ⑥-4, PO 決 2026-09-07·조건 갱신 2026-09-07) —
+          sealed_content_version이 null인데 봉인 본문은 있는 행(scope_key가
+          comment_id 단위였던 옛 comment_reply 게이트 — 마이그레이션 0, 그대로
+          둔다는 §5 판정)은 「쌍」이 안 서 대조 불가하다. 「덮였습니다」로 단정
+          하지 않는다(못 대조하는 게이트 중엔 한 번 승인되고 끝난 정상 옛 행도
+          있다) — 아는 것만 말한다: 「확인할 수 없다」. isResolved = status가
+          approved|rejected|auto_passed 중 하나(명시 열거) 한정 — resolved_at은
+          판별 키가 아니다(void_gate도 resolved_at을 채운다, gate_service.py:1592
+          그라운딩 確認). held(판단 자체 없음)·voided(판단이 아니라 행정
+          무효화)는 이 열거에 없어 자동 제외. 이 자리
+          (버전·해시 줄)를 대신할 뿐 줄을 새로 만들지 않는다. */}
+      {facts.contentVersion === null && facts.contentBody && facts.isResolved ? (
+        <p className="text-muted-foreground">{t('recipeApprovalSealedVersionMissing')}</p>
+      ) : facts.contentVersion !== null || facts.contentSha256 ? (
+        <p className="font-mono text-muted-foreground">
+          {facts.contentVersion !== null ? `${t('recipeApprovalVersionLabel')} v${facts.contentVersion}` : null}
+          {facts.contentVersion !== null && facts.contentSha256 ? ' · ' : null}
+          {facts.contentSha256 ? `${t('recipeApprovalSealedHashLabel')} ${facts.contentSha256.slice(0, 12)}…` : null}
+        </p>
+      ) : null}
+      {/* story #3367(3자기점검, 페드루 지적 2026-09-10·유나 CHANGES 정정) — AC7
+          ("마지막 수정 주체·목적지를 확認할 수 있고"). 위 버전/해시 줄과 같은
+          site_posts 식별 조건(contentVersion/contentSha256)에 묶는다 — 다른
+          gate_type엔 이 축 자체가 없다(«모른다≠다르다», sealed_destination_
+          connection_id는 Gate 실 컬럼이라 항상 present라 이 조건 없이는 다른
+          gate_type에도 "호스팅 블로그"가 새 나갈 뻔했다). 목적지가 커넥션(WordPress/
+          webhook)이면 uuid 원문을 승인자에게 보이지 않고 channelLabel()(집안 정본)
+          로 표시명을 낸다 — 표시명을 지어내지 않는다는 원칙은 이 헬퍼 자신이 이미
+          지킨다(모르는 채널은 원문 그대로 폴백, uuid는 노출 안 함). */}
+      {facts.contentVersion !== null || facts.contentSha256 ? (
+        <p className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-muted-foreground">
+          <span>
+            <span>{t('recipeApprovalLatestAuthorLabel')} · </span>
+            <AuthorKindBadge kind={facts.latestAuthorKind} />
+          </span>
+          <span>
+            {t('recipeApprovalDestinationLabel')} ·{' '}
+            {facts.destinationConnectionId === null
+              ? t('recipeApprovalDestinationHostedSite')
+              : facts.destinationChannel
+                ? channelLabel(facts.destinationChannel, tContent)
+                // 연결이 삭제됐거나(드묾) enrich가 못 채운 예외 — uuid를 보이지
+                // 않는다(유나 CHANGES 원칙), 표시명도 지어내지 않는다. "—"는 순수
+                // 구두점(글자·숫자 0개, content.originAuthorUnknown과 동형 관례)이라
+                // 새 낱말이 아니다.
+                : '—'}
+          </span>
+        </p>
+      ) : null}
+      {/* story #3560(concept_approval, 페드루 PO 確定 2026-09-06) — 봉인 doc은
+          contentBody(전문 펼침)와 달리 링크로만(doc 자체를 열어 편집 이력·서식을
+          있는 그대로 본다) — 글자=doc 제목, 위 mono 배지와 같은 관례로 해시를 잇는다. */}
+      {facts.sealedDocRef || facts.sealedDocBodySha256 ? (
+        <div className="flex flex-wrap items-center gap-1 font-mono text-muted-foreground">
+          {facts.sealedDocRef ? (
+            <EntityChip
+              entityType={facts.sealedDocRef.entityType}
+              entityId={facts.sealedDocRef.entityId}
+              label={facts.sealedDocRef.label}
+              href={facts.sealedDocRef.href}
+            />
+          ) : null}
+          {facts.sealedDocRef && facts.sealedDocBodySha256 ? <span>· </span> : null}
+          {facts.sealedDocBodySha256 ? <span>{t('recipeApprovalSealedHashLabel')} {facts.sealedDocBodySha256.slice(0, 12)}…</span> : null}
+        </div>
+      ) : null}
+      {facts.contentBody ? (
+        // §6-3 "요약 → 전문" — draftDocSummary와 달리 접힘 없이 항상 전문을 보인다(승인자가
+        // 무엇을 승인하는지 클릭 한 번 없이 바로 보여야 한다는 processing #3328 원칙의 연장).
+        // story #3517(§22-⑤) — comment_reply 게이트에선 contentBody가 "답변 본문"이다
+        // (Gate.sealed_content_body=reply.text, submit이 그대로 봉인).
+        <p className="mt-1 whitespace-pre-wrap text-foreground">{facts.contentBody}</p>
+      ) : null}
+      {/* story #3517(유나 §22-⑤, BE #3867 조각②, PO 確定 2026-09-05) — 봉인 축 나머지
+          둘: 대상 댓글 식별(target_external_comment_id, comment_reply 게이트에만
+          존재)·「대상 댓글 본문」은 그라운딩 확認 갭이라 BE 후속(neutral_facts.
+          target_text additive) 착지 전까지 "제공되지 않음"으로 정직하게 비운다(지어
+          내지 않는다 — §22-2 결. 착지 뒤 이 자리가 자연히 채워진다, 호출부 변경 0). */}
+      {facts.targetExternalCommentId ? (
+        <div className="mt-1.5 space-y-1 border-t border-border pt-1.5">
+          <p>
+            <span className="text-muted-foreground">{t('commentReplyTargetLabel')} · </span>
+            <span className="font-mono text-foreground">{facts.targetExternalCommentId}</span>
+          </p>
+          <div>
+            <p className="text-[10px] font-medium text-muted-foreground">{t('commentReplyTargetTextLabel')}</p>
+            <p className="whitespace-pre-wrap text-foreground">
+              {facts.targetText ?? <span className="italic text-muted-foreground">{t('commentReplyTargetTextNotSealed')}</span>}
+            </p>
+          </div>
+          {/* story #3599(유나 §22-17 ⑥-1, 페드루 PO 追加 2026-09-07·정정 2026-09-07) —
+              답변 다이얼로그(content.commentsReplyAlreadySentCount)와 같은 사실·같은
+              규율(수만·0이면 미표시)의 승인자 짝, 순서도 다이얼로그와 같게(본문 →
+              이미 보낸 답변 N건). 이 사실은 이 답변이 아니라 그 댓글에 대한 것이라
+              대상 댓글 블록 안에 선다(행이 아니라 이 카드가 지는 이유와 동형). */}
+          {facts.alreadySentCount != null && facts.alreadySentCount > 0 ? (
+            <p className="text-muted-foreground">{t('commentReplyAlreadySentCount', { count: facts.alreadySentCount })}</p>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function GateEvidence({ gate, className }: { gate: GateItem; className?: string }) {
   const t = useTranslations('cage');
   const decision = gateDecision(gate);
@@ -430,6 +914,8 @@ export function GateEvidence({ gate, className }: { gate: GateItem; className?: 
   // story #2862 — hypothesis_outcome_confirm 게이트는 ci/trust/cold_start_seed가 없어 항상
   // State B(부분증거)로 떨어진다 — rich(State C) 분기엔 안 걸리므로 거기는 안 건드린다.
   const draft = hypothesisOutcomeDraft(gate);
+  // story #3328 — 레시피 approve 게이트도 동형(ci/trust/cold_start_seed 없음) — State B로.
+  const recipeFacts = recipeApprovalFacts(gate);
 
   const DecisionMark = decision ? DECISION_META[decision].mark : null;
   const decisionBadge = decision ? (
@@ -510,6 +996,7 @@ export function GateEvidence({ gate, className }: { gate: GateItem; className?: 
       ) : null}
       {showRepending ? <GithubRependingReason gateId={gate.id} /> : null}
       {draft ? <HypothesisOutcomeDraft draft={draft} /> : null}
+      {recipeFacts ? <RecipeApprovalFactsBlock facts={recipeFacts} /> : null}
       {reason ? (
         <p className="mt-1.5 text-[11.5px] text-muted-foreground">{t('reasonLabel')} · {reason}</p>
       ) : null}

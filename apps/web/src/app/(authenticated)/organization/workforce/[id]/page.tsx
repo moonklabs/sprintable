@@ -28,6 +28,7 @@ import {
 } from '@/lib/runtime-capabilities';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { resolveRoleLabel } from '@/app/(authenticated)/organization/trust/trust-utils';
 
 /** 런타임 상태(6종 중 ①~⑤) → 배지·헬퍼 표현. ⑥(드롭다운 dot)은 AC 범위 외(§11). */
 const RUNTIME_STATUS_UI: Record<
@@ -99,6 +100,7 @@ function isWebhookUrlAllowed(url: string): boolean {
 export default function AgentDetailPage() {
   const t = useTranslations('settings');
   const tc = useTranslations('common');
+  const to = useTranslations('organization');
   const router = useRouter();
   const { id } = useParams<{ id: string }>();
   const { addToast } = useToast();
@@ -136,15 +138,18 @@ export default function AgentDetailPage() {
   }, [id, router]);
 
   const fetchOrgContext = useCallback(async () => {
+    // story #3519(§16-7 2부, PO 確定 2026-09-05) — 둘 다 부수(ok?채움:방치, 그 외 화면을
+    // 안 막는다)인데 catch가 어디에도 없었다 — 하나가 네트워크단 reject하면 나머지도
+    // 조용히 못 채워졌다. leg별로 격리한다.
     const [projectRes, meRes] = await Promise.all([
-      fetchWithAuth('/api/projects'),
-      fetchWithAuth('/api/me'),
+      fetchWithAuth('/api/projects').catch(() => null),
+      fetchWithAuth('/api/me').catch(() => null),
     ]);
-    if (projectRes.ok) {
+    if (projectRes?.ok) {
       const json = await projectRes.json() as { data: ProjectOption[] };
       setProjects((json.data ?? []).slice().sort((a, b) => a.name.localeCompare(b.name)));
     }
-    if (meRes.ok) {
+    if (meRes?.ok) {
       const json = await meRes.json() as { data?: { user_id?: string | null; role?: string } };
       setCurrentUserId(json.data?.user_id ?? null);
       setOrgRole(json.data?.role ?? 'member');
@@ -412,7 +417,7 @@ export default function AgentDetailPage() {
                   </div>
                   <div className="mt-1 flex items-center gap-2">
                     <Badge variant="secondary">{t('agentMember')}</Badge>
-                    <Badge variant="outline">{agent.role}</Badge>
+                    <Badge variant="outline">{resolveRoleLabel(agent.role, null, to)}</Badge>
                     {/* story #3092(2단계, 표면3) — 커넥터 필드. runtime_type null이면 생략
                         (전역 폴백 규칙 — 추측·「미지정」류 문구 금지). 공식 로고는 법무
                         사인오프 전이라 이번엔 텍스트만(로고 트랙은 후속 스코프). */}

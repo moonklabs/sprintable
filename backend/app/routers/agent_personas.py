@@ -10,6 +10,7 @@ from app.dependencies.database import get_db
 from app.models.member import Member
 from app.repositories.agent_persona import AgentPersonaRepository
 from app.schemas.agent_persona import CreatePersonaRequest, UpdatePersonaRequest
+from app.services.member_resolver import resolve_member_db_verified
 from app.services.project_auth import assert_target_in_caller_org
 
 router = APIRouter(prefix="/api/v2/agent-personas", tags=["agent-personas", "Organization"])
@@ -72,11 +73,15 @@ async def create_persona(
         return _err("FORBIDDEN", "org_id required", 403)
     await _assert_agent_in_caller_org(repo.session, org_id, body.agent_id)
     try:
+        # story #3370 회귀 클래스(페드루 PO 지시 2026-09-11) — actor_id는
+        # AgentPersona.created_by로 영속된다. resolve_member_db_verified()의 영속
+        # 멤버 id로 정정(휴먼 JWT의 auth.user_id는 users.id, org 멤버 id가 아니다).
+        resolved = await resolve_member_db_verified(auth, org_id, repo.session)
         persona = await repo.create(
             org_id=org_id,
             project_id=project_id,
             agent_id=body.agent_id,
-            actor_id=uuid.UUID(auth.user_id),
+            actor_id=resolved.id,
             name=body.name,
             slug=body.slug,
             description=body.description,
@@ -134,9 +139,11 @@ async def update_persona(
     if not org_id:
         return _err("FORBIDDEN", "org_id required", 403)
     try:
+        # story #3370 회귀 클래스 — create_persona와 같은 actor_id 축(위 참고).
+        resolved = await resolve_member_db_verified(auth, org_id, repo.session)
         persona = await repo.update(
             id, org_id, project_id,
-            actor_id=uuid.UUID(auth.user_id),
+            actor_id=resolved.id,
             **{k: v for k, v in body.model_dump().items() if v is not None},
         )
         if persona is None:

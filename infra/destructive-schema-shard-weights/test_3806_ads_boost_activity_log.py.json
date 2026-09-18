@@ -1,0 +1,1 @@
+{"file": "tests/test_3806_ads_boost_activity_log.py", "sec": 3.9, "source": "story-3806(Phase3·3-2 PR 14, 페드루 PO 確定 2026-09-11 19:52Z — boost start/pause/resume 명령 실행 성공 지점 ActivityLog 신설) — 신규 파일 실측(로컬, uv run pytest --durations=0 직접 1회 실행, 4건 wall time 약 3.9s — test_3766 등재 선례와 동일 방법론)"}

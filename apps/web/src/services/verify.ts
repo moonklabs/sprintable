@@ -21,6 +21,25 @@ export interface EvidenceItem {
   artifact_version_id: string | null;
   artifact_id: string | null;
   artifact_version_number: number | null;
+  /** story #3560(concept_approval 검증 시트, PO 確定 2026-09-06) — type='report'일 때만
+   * 뜻이 있는 kind 판별 payload(3498 generation_cost와 동형 관례 — 그 kind는 아직 이
+   * 타입에 없어 여기서 처음 필드를 연다). 대부분 evidence는 undefined/null. */
+  payload?: Record<string, unknown> | null;
+}
+
+/** story #3560(PO 確定 2026-09-06) — Evidence.payload.kind='verification_sheet' 형.
+ * items≥1·verdict는 서버가 검증(422 EVIDENCE_PAYLOAD_INVALID) — FE는 값만 그린다. */
+export interface VerificationSheetItem {
+  name: string;
+  verdict: 'pass' | 'fail' | 'n_a';
+  note?: string | null;
+}
+
+export function asVerificationSheet(payload: Record<string, unknown> | null | undefined): VerificationSheetItem[] | null {
+  if (!payload || payload['kind'] !== 'verification_sheet') return null;
+  const items = payload['items'];
+  if (!Array.isArray(items)) return null;
+  return items as VerificationSheetItem[];
 }
 
 /**

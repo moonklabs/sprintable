@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { Check, ChevronDown, Copy } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -9,11 +9,15 @@ import { MemberRow } from '@/components/ui/member-row';
 import { RemoveOrgMemberDialog } from '@/components/settings/remove-org-member-dialog';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { Badge } from '@/components/ui/badge';
+import { CountBadge } from '@/components/ui/count-badge';
 import { OperatorInput } from '@/components/ui/operator-control';
 import { OperatorDropdownSelect } from '@/components/ui/operator-dropdown-select';
 import { useRenderNonce } from '@/hooks/use-render-nonce';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { canEditOrgMemberRole, orgRoleLabel } from '@/lib/org-member-role';
+import { formatRelativeTime } from '@/lib/storage/format';
+import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 
 interface OrgMember {
   id: string;
@@ -44,6 +48,12 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
   const [loading, setLoading] = useState(true);
 
   const t = useTranslations('settings');
+  // story #3606(잔여, 페드루 PO 確定 2026-09-07) — common.cancel·share.copyLink는
+  // 기존 키 재사용(새 낱말 0, §22-18 원칙과 동형).
+  const tc = useTranslations('common');
+  const tShare = useTranslations('share');
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
 
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<'admin' | 'member'>('member');
@@ -71,14 +81,22 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
   const [copiedInviteId, setCopiedInviteId] = useState<string | null>(null);
 
   const canManage = currentRole === 'owner' || currentRole === 'admin';
-  const isOwner = currentRole === 'owner';
+  // story #3491(페드루 PO 確定) — canEditOrgMemberRole의 자기 자신 판정에 필요.
+  // BE MeResponse.user_id(=members.user_id 축, project-scoped team member id인
+  // currentTeamMemberId와는 다른 값)와 org-members 응답의 user_id를 대조한다.
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   const refreshData = async () => {
-    const [membersRes, invitesRes, projectsRes] = await Promise.all([
+    const [membersRes, invitesRes, projectsRes, meRes] = await Promise.all([
       fetchWithAuth('/api/org-members').catch(() => null),
       fetchWithAuth(`/api/organizations/${orgId}/invites`).catch(() => null),
       fetchWithAuth('/api/projects').catch(() => null),
+      fetchWithAuth('/api/me').catch(() => null),
     ]);
+    if (meRes?.ok) {
+      const json = await meRes.json() as { data?: { user_id?: string | null } };
+      setCurrentUserId(json.data?.user_id ?? null);
+    }
     if (projectsRes?.ok) {
       const json = await projectsRes.json() as { data?: Array<{ id: string; name: string }> };
       setOrgProjects((json.data ?? []).map((p) => ({ id: p.id, name: p.name })));
@@ -140,7 +158,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
         setInviteResult({ type: 'error', text: t('memberInviteFailed') });
       }
     } else {
-      setInviteResult({ type: 'success', text: `초대 발송 완료${json.data?.invite_url ? ` — ${json.data.invite_url}` : ''}` });
+      setInviteResult({ type: 'success', text: `${t('orgMemberInviteSuccess')}${json.data?.invite_url ? ` — ${json.data.invite_url}` : ''}` });
       setInviteEmail('');
       setInviteProjectIds([]);
       setShowProjectPicker(false);
@@ -158,12 +176,22 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
       body: JSON.stringify({ role: newRole }),
     });
     if (res.ok) {
-      setActionMessage({ type: 'success', text: '역할이 변경됐습니다.' });
+      setActionMessage({ type: 'success', text: t('orgMemberRoleChangeSuccess') });
       await refreshData();
     } else {
-      // story #2485 — backend update_org_member()는 generic HTTP상태 코드만 낸다
-      // (진짜 비즈니스 code 없음, 그라운딩 확認) — raw 서버 message 노출 대신 고정 문구.
-      setActionMessage({ type: 'error', text: t('memberRoleChangeFailed') });
+      // story #3491 — update_org_member()가 이제 owner 보호 가드의 구조화 code를
+      // 낸다(ORG_MEMBER_OWNER_ONLY_ACTION·ORG_LAST_OWNER, story #2485 코멘트가 말한
+      // "진짜 비즈니스 code 없음" 시절은 지났다). FE 게이트가 canEditOrgMemberRole로
+      // 대부분 막지만, 다른 창에서 동시에 상태가 바뀌는 race는 남아 있어 서버 거부를
+      // 그대로 안내해야 한다(raw 서버 message 노출은 여전히 안 함, 고정 문구로).
+      const json = await res.json().catch(() => null) as { error?: { code?: string } } | null;
+      if (json?.error?.code === 'ORG_MEMBER_OWNER_ONLY_ACTION') {
+        setActionMessage({ type: 'error', text: t('memberRoleChangeOwnerOnlyError') });
+      } else if (json?.error?.code === 'ORG_LAST_OWNER') {
+        setActionMessage({ type: 'error', text: t('memberRoleChangeLastOwnerError') });
+      } else {
+        setActionMessage({ type: 'error', text: t('memberRoleChangeFailed') });
+      }
     }
     setChangingRoleId(null);
   };
@@ -172,7 +200,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
     setActionMessage(null);
     const res = await fetch(`/api/org-members/${memberId}`, { method: 'DELETE' });
     if (res.ok) {
-      setActionMessage({ type: 'success', text: '멤버가 제거됐습니다.' });
+      setActionMessage({ type: 'success', text: t('orgMemberRemoveSuccess') });
       await refreshData();
     } else {
       // story #2485 — backend delete_org_member()는 generic HTTP상태 코드만 낸다
@@ -222,7 +250,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
       setTimeout(() => setCopiedInviteId(null), 1500);
     } catch {
       bumpActionMessageNonce();
-      setActionMessage({ type: 'error', text: '클립보드 복사에 실패했습니다.' });
+      setActionMessage({ type: 'error', text: t('orgMemberClipboardCopyFailed') });
     }
   };
 
@@ -233,9 +261,9 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
         <SectionCard>
           <SectionCardHeader>
             <div className="space-y-1">
-              <h2 className="text-base font-semibold text-foreground">조직 전체 멤버</h2>
+              <h2 className="text-base font-semibold text-foreground">{t('orgMembersHeading')}</h2>
               <p className="text-sm text-muted-foreground">
-                여기서 새 멤버를 초대할 수 있습니다. 초대된 멤버는 조직에 합류한 후, 프로젝트별로 별도 추가됩니다.
+                {t('orgMembersInviteDescription')}
               </p>
             </div>
           </SectionCardHeader>
@@ -251,12 +279,12 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
                 value={inviteRole}
                 onValueChange={(v) => setInviteRole(v as 'admin' | 'member')}
                 options={[
-                  { value: 'member', label: 'Member' },
-                  { value: 'admin', label: 'Admin' },
+                  { value: 'member', label: t('roleMember') },
+                  { value: 'admin', label: t('roleAdmin') },
                 ]}
               />
               <Button variant="hero" size="lg" onClick={() => void handleInvite()} disabled={!inviteEmail.trim() || inviting}>
-                {inviting ? '...' : '초대'}
+                {inviting ? '...' : t('invite')}
               </Button>
             </div>
 
@@ -333,23 +361,40 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
       {/* 멤버 목록 */}
       <SectionCard>
         <SectionCardHeader>
-          <h2 className="text-base font-semibold text-foreground">멤버 ({members.length})</h2>
+          {/* story #3735(UI 점검 B·E절, 유나 定) — 수를 제목 문자열 안에 넣지 않는다.
+              제목 고정 + 수는 옆 CountBadge로(이벤트 화면 events/page.tsx와 동형). */}
+          <h2 className="flex items-center gap-2 text-base font-semibold text-foreground">
+            {t('orgMembersListHeading')}
+            <CountBadge count={members.length} />
+          </h2>
         </SectionCardHeader>
         <SectionCardBody>
           {/* HARD 픽셀 딴판 fix: 박시 per-member 카드 → project-access와 동일 de-boxy divide-y(공유 MemberRow flat·양 surface 정합) */}
           {members.length > 0 ? (
           <div className="divide-y divide-border overflow-hidden rounded-md border border-border">
-          {members.map((member) => {
+          {/* story #3592(§17-20 ⑧·§22-18 동형) — 행마다 같은 「제거」 접근 이름이라
+              보조기술 버튼 목록에서 어느 멤버 행인지 못 가른다. story #3606(잔여,
+              페드루 PO 確定 2026-09-07)에서 이 파일 전체 하드코딩 한글을 마저
+              i18n 키화했다(기존 키 재사용 우선, 새 낱말은 「문자열→키」 표 PR
+              본문 참고). */}
+          {members.map((member, index) => {
             const isThisOwner = member.role === 'owner';
-            const canEdit = isOwner && !isThisOwner;
+            const canEdit = canEditOrgMemberRole({ currentRole, currentUserId, member });
             return (
               <MemberRow
                 key={member.id}
                 name={member.name}
                 email={member.email}
                 className="border-0 rounded-none bg-transparent"
-                meta={member.joined_at ? `${new Date(member.joined_at).toLocaleDateString('ko-KR')} 가입` : undefined}
+                meta={member.joined_at ? t('orgMemberJoinedMeta', { time: formatRelativeTime(member.joined_at, locale, displayTimezone) }) : undefined}
                 actions={
+                  // story #3771(PO 별건 ㉓·유나 r65) — 역할 열/액션 열을 항상 둘 다 렌더한다
+                  // (행마다 열의 뜻이 같게). 역할 변경 불가 행(소유자·자기 자신)은 select 대신
+                  // 배지가 서지만, 그 배지가 «제거» 버튼이 있던 자리로 밀려 앉으면 세로로 읽을
+                  // 때 상태 딱지와 행동 버튼이 한 열에 섞인다(라이브 캡처로 실측된 결함) — 액션
+                  // 열은 canEdit=false일 때도 같은 Button(같은 텍스트·크기, 그래서 폭이 로케일과
+                  // 무관하게 정확히 같다)을 invisible로 그려 자리만 지킨다(클릭 불가·
+                  // aria-hidden — 보조기술 목록엔 아예 안 나온다).
                   <>
                     {canEdit ? (
                       <select
@@ -358,15 +403,30 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
                         disabled={changingRoleId === member.id}
                         onChange={(e) => void handleChangeRole(member.id, e.target.value as 'admin' | 'member')}
                       >
-                        <option value="admin">Admin</option>
-                        <option value="member">Member</option>
+                        <option value="admin">{t('roleAdmin')}</option>
+                        <option value="member">{t('roleMember')}</option>
                       </select>
                     ) : (
-                      <Badge variant={isThisOwner ? 'info' : 'secondary'} className="capitalize">{member.role}</Badge>
+                      <Badge variant={isThisOwner ? 'info' : 'secondary'}>{orgRoleLabel(member.role, t)}</Badge>
                     )}
-                    {canEdit && (
-                      <Button size="sm" variant="glass" onClick={() => setRemoveDialogMemberId(member.id)}>
-                        제거
+                    {canEdit ? (
+                      <Button
+                        size="sm" variant="glass" onClick={() => setRemoveDialogMemberId(member.id)}
+                        aria-label={t('orgMemberRowActionAriaLabel', { n: index + 1, label: t('removeFromProject') })}
+                      >
+                        {t('removeFromProject')}
+                      </Button>
+                    ) : (
+                      // story #3592 회귀 가드(verify-repeated-row-action-names) — aria-hidden이라
+                      // 보조기술엔 안 읽혀도 정적 스캔은 행마다 반복되는 라벨을 그대로 잡는다.
+                      // 실 버튼과 동일하게 순번을 품은 aria-label을 붙인다(무해 — aria-hidden이
+                      // 우선해 결국 안 읽힌다).
+                      <Button
+                        size="sm" variant="glass" tabIndex={-1} aria-hidden="true"
+                        className="invisible pointer-events-none"
+                        aria-label={t('orgMemberRowActionAriaLabel', { n: index + 1, label: t('removeFromProject') })}
+                      >
+                        {t('removeFromProject')}
                       </Button>
                     )}
                   </>
@@ -376,7 +436,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
           })}
           </div>
           ) : (
-            <p className="text-sm text-muted-foreground">멤버가 없습니다.</p>
+            <p className="text-sm text-muted-foreground">{t('orgMembersEmpty')}</p>
           )}
         </SectionCardBody>
       </SectionCard>
@@ -401,16 +461,26 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
       {invites.length > 0 && (
         <SectionCard>
           <SectionCardHeader>
-            <h2 className="text-base font-semibold text-foreground">초대 대기 ({invites.length})</h2>
+            {/* story #3735 CHANGES(유나 재검토) — orgMembersListHeading(:377)만 새 형으로
+                옮기고 이 옆 헤더는 옛 괄호 형으로 남겨 같은 화면 안 두 형이 세로로 나란히
+                서는 불일치를 만들었다. 같은 처방으로 통일. */}
+            <h2 className="flex items-center gap-2 text-base font-semibold text-foreground">
+              {t('orgInvitesListHeading')}
+              <CountBadge count={invites.length} />
+            </h2>
           </SectionCardHeader>
           <SectionCardBody>
             <div className="divide-y divide-border overflow-hidden rounded-md border border-border">
-            {invites.map((invite) => (
+            {/* story #3592(§17-20 ⑧·§22-18 동형)·story #3606(잔여, 페드루 PO 確定
+                2026-09-07) — 링크 복사·재발송·취소 aria-label은 기존
+                orgInviteRowActionAriaLabel 유지, 하드코딩 한글은 마저 키화(기존
+                키(share.copyLink·settings.resend·common.cancel) 재사용 우선). */}
+            {invites.map((invite, index) => (
               <MemberRow
                 key={invite.id}
                 name={invite.email}
                 className="border-0 rounded-none bg-transparent"
-                meta={`${invite.role} · 만료: ${new Date(invite.expires_at).toLocaleDateString('ko-KR')}`}
+                meta={t('orgInviteMeta', { role: invite.role, date: formatScheduledAt(invite.expires_at, displayTimezone).display })}
                 emphasis="subtle"
                 actions={
                   canManage ? (
@@ -421,21 +491,34 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
                         variant="glass"
                         disabled={!invite.invite_url}
                         onClick={() => void handleCopyInviteLink(invite.id, invite.invite_url)}
-                        title={invite.invite_url ? '초대 링크 복사' : '링크 사용 불가'}
+                        title={invite.invite_url ? t('orgInviteCopyLinkTitle') : t('orgInviteCopyLinkUnavailableTitle')}
                         className={copiedInviteId === invite.id ? 'text-foreground bg-success/12 border-success/30' : ''}
+                        aria-label={t('orgInviteRowActionAriaLabel', {
+                          n: index + 1, label: copiedInviteId === invite.id ? t('orgInviteCopiedLabel') : tShare('copyLink'),
+                        })}
                       >
                         {copiedInviteId === invite.id ? (
-                          <><Check className="h-3 w-3 mr-1" />복사됨</>
+                          <><Check className="h-3 w-3 mr-1" />{t('orgInviteCopiedLabel')}</>
                         ) : (
-                          <><Copy className="h-3 w-3 mr-1" />링크 복사</>
+                          <><Copy className="h-3 w-3 mr-1" />{tShare('copyLink')}</>
                         )}
                       </Button>
-                      <Button size="sm" variant="glass" disabled={resendingId === invite.id} onClick={() => void handleResendInvite(invite.id)}>
-                        {resendingId === invite.id ? '...' : '재발송'}
+                      <Button
+                        size="sm" variant="glass" disabled={resendingId === invite.id} onClick={() => void handleResendInvite(invite.id)}
+                        aria-label={t('orgInviteRowActionAriaLabel', { n: index + 1, label: resendingId === invite.id ? t('orgInviteResending') : t('resend') })}
+                      >
+                        {/* story #3608(유나 §22-18 ④-2)+#3606(i18n화) 병합 — pending
+                            "..."는 아무 말도 안 한다(낱말 "재발송 중…"로), 기본 라벨은
+                            #3606이 새로 i18n화한 t('resend') 키를 쓴다. */}
+                        {resendingId === invite.id ? t('orgInviteResending') : t('resend')}
                       </Button>
                       <Button size="sm" variant="glass" disabled={revokingId === invite.id} onClick={() => void handleRevokeInvite(invite.id)}
-                        className="text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60">
-                        {revokingId === invite.id ? '...' : '취소'}
+                        className="text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60"
+                        aria-label={t('orgInviteRowActionAriaLabel', { n: index + 1, label: revokingId === invite.id ? t('orgInviteCancelling') : tc('cancel') })}
+                      >
+                        {/* story #3608+#3606 병합 — 낱말("취소 중…")+기본 라벨은
+                            #3606이 쓰는 공용 tc('cancel') 키. */}
+                        {revokingId === invite.id ? t('orgInviteCancelling') : tc('cancel')}
                       </Button>
                     </div>
                   ) : undefined

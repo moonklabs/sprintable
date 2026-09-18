@@ -1,23 +1,21 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { BarChart2, Bell, Bot, CreditCard, FolderKanban, GitBranch, Menu, Palette, Plus, ShieldCheck, Trash2, User, Users, Webhook, X } from 'lucide-react';
+import { BarChart2, Bell, CreditCard, FolderKanban, GitBranch, LifeBuoy, Menu, Palette, Plus, ShieldCheck, Trash2, User, Users, Webhook, X } from 'lucide-react';
 import { UsageDashboard } from '@/components/settings/usage-dashboard';
 import { OrgMembersSection } from '@/components/settings/org-members-section';
 import { AddMemberModal } from '@/components/settings/add-member-modal';
 import { ProjectAccessSection } from '@/components/settings/project-access-section';
 
-import { AiSettingsSection } from '@/components/settings/ai-settings';
 import { MyProfileSection } from '@/components/settings/my-profile-section';
 import { MyNotificationChannelSection } from '@/components/settings/my-notification-channel-section';
 import { BlockedUsersSection } from '@/components/settings/blocked-users-section';
-import { ByomKeyManagement } from '@/components/settings/byom-key-management';
-import { McpConnectionSettings } from '@/components/settings/mcp-connection-settings';
 import { WorkflowTriggerTypesSection } from '@/components/settings/workflow-trigger-types-section';
+import { RecurringRecipesSection } from '@/components/settings/recurring-recipes-section';
 import { WorkflowExecutionHistorySection } from '@/components/settings/workflow-execution-history-section';
 import { WorkflowTemplateGallerySection } from '@/components/settings/workflow-template-gallery-section';
 import { WorkflowLineEditorSection } from '@/components/settings/workflow-line-editor-section';
@@ -25,6 +23,7 @@ import { ThemeSettings } from '@/components/settings/theme-settings';
 import { RefreshSettings } from '@/components/settings/refresh-settings';
 import { StandupDeadlineSection } from '@/components/settings/standup-deadline-section';
 import { GateLevelMatrix } from '@/components/settings/gate-level-matrix';
+import { OrgGatePolicySection } from '@/components/settings/org-gate-policy-section';
 import { TwoFactorSection } from '@/components/settings/two-factor-section';
 import { SetPasswordSection } from '@/components/settings/set-password-section';
 import { LinkedAccountsSection } from '@/components/settings/linked-accounts-section';
@@ -37,9 +36,11 @@ import { OperatorInput } from '@/components/ui/operator-control';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { LegalLinks, BusinessInfoBlock } from '@/components/legal/legal-footer';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { ToastContainer, useToast } from '@/components/ui/toast';
+import { useToast } from '@/components/ui/toast';
 import { NOTIFICATION_TYPES } from '@/lib/notification-types';
 import { isEEEnabled } from '@/lib/ee';
+import { isSupportWidgetEnabled } from '@/lib/support-widget-flag';
+import { SupportSettingsTabPanel } from '@/components/settings/support-tab-panel';
 import { HumanOnlyAction } from '@/components/ui/human-only-action';
 import dynamic from 'next/dynamic';
 import { fetchWithAuth } from '@/lib/db/client';
@@ -96,27 +97,51 @@ const NOTIFICATION_CATEGORIES = [
 
 type NotificationCategoryKey = typeof NOTIFICATION_CATEGORIES[number]['key'];
 
+// story #3762 — adminChecked(/api/me 응답 전) 구간엔 이 자리가 "권한 없음"이 아니라
+// "아직 모름"이다. null로 비우면 콜드 진입 시 레일이 통째로 짧아져 그 탭들이 애초에 없던
+// 것처럼 보인다(로딩≠권한없음 클래스 결함) — 판정 전엔 자리만 스켈레톤으로 지키고,
+// 판정 뒤에만 null(진짜 숨김)로 확정한다.
+function SettingsTabSkeleton() {
+  return (
+    <div className="flex h-8 items-center gap-2 px-3" data-testid="settings-tab-skeleton" aria-hidden="true">
+      <div className="size-4 animate-pulse rounded bg-muted" />
+      <div className="h-3 w-16 animate-pulse rounded bg-muted" />
+    </div>
+  );
+}
+
 function isWebhookUrlAllowed(url: string): boolean {
   if (!url) return true;
   if (/^https:\/\//i.test(url)) return true;
   return /^http:\/\/(localhost|127\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)/i.test(url);
 }
 
-// E-SETTINGS-IA: deprecate(숨김)된 settings 탭. 컴포넌트/route는 보존(reversible) —
-// 탭 트리거·콘텐츠·딥링크(?tab=)만 차단한다. 재노출 시 이 set에서 제거만 하면 IA 위치 복원.
-// story c4980e70: org-members 탭 = /organization/members로 승격(회귀 0 위해 코드는 보존, LNB에서만 숨김).
+// E-SETTINGS-IA: deprecate(숨김)된 settings 탭.
+// - 'workflow'·'org-members'는 컴포넌트/route 보존(reversible) — 탭 트리거·콘텐츠·
+//   딥링크(?tab=)만 차단, 재노출 시 이 set에서 제거만 하면 IA 위치 복원.
+//   story c4980e70: org-members 탭 = /organization/members로 승격(회귀 0 위해 코드는
+//   보존, LNB에서만 숨김).
+// - 'ai'는 story #2487(PO 決 2026-09-10)로 컴포넌트·BFF route·i18n 키까지 전부 삭제됐다
+//   (BE 라우트 0건 — Sprintable이 고객사 모델키/MCP연결을 호스팅하는 모델을 접었다는
+//   판단, 재노출은 새 구현이 필요·set에서 제거만으론 복원 안 됨). 이 문자열은 과거 딥링크
+//   (?tab=ai) 방어 폴백 용도로만 남긴다.
 const HIDDEN_SETTINGS_TABS = new Set<string>(['ai', 'workflow', 'org-members']);
 const DEFAULT_SETTINGS_TAB = 'profile';
 
 // ?tab= 딥링크가 숨김 탭을 가리키면 기본 탭으로 폴백 (빈 화면 방지).
+// story #3274 — support 탭은 isSupportWidgetEnabled() 뒤(prod는 아직 false)라 flag off일
+// 때 ?tab=support로 직접 들어오면 트리거/콘텐츠가 아예 안 그려져 빈 화면이 된다 — 그
+// 경우도 기본 탭으로 폴백.
 function resolveSettingsTab(tab: string | null): string {
   if (!tab || HIDDEN_SETTINGS_TABS.has(tab)) return DEFAULT_SETTINGS_TAB;
+  if (tab === 'support' && !isSupportWidgetEnabled()) return DEFAULT_SETTINGS_TAB;
   return tab;
 }
 
 export default function SettingsPage() {
   const t = useTranslations('settings');
   const tc = useTranslations('common');
+  const tNav = useTranslations('nav');
   const tLegal = useTranslations('legal');
   // story #2485 — projectLimitExceededError는 onboarding-form.tsx(#2484)와 동일 개념
   // (resource:"project" PLAN_LIMIT_EXCEEDED)이라 새 키를 만들지 않고 재사용한다.
@@ -125,8 +150,20 @@ export default function SettingsPage() {
   const searchParamsHook = useSearchParams();
   const { orgId: ctxOrgId, orgMemberships } = useDashboardContext();
   const [activeTab, setActiveTab] = useState(() => resolveSettingsTab(searchParamsHook.get('tab')));
+  // story #3772 — 프로필 탭 섹션 넷(내 프로필·비밀번호·연결된 계정·2FA)이 각자 /api/me를
+  // 읽다 실패하면 «이유 없이» 조용히 사라졌다. 섹션은 그대로 두고(각자의 「모름」 렌더
+  // 로직 무변) 탭 한 자리에서만 사유+재시도를 말한다(같은 사실 네 번 금지). retryNonce를
+  // key로 써서 재시도 클릭이 섹션 넷을 통째로 리마운트(=재-fetch)한다(상세페이지
+  // key-remount 정본과 동형, 섹션별 refetch 함수를 새로 노출할 필요가 없다).
+  const [profileLoadFailed, setProfileLoadFailed] = useState(false);
+  const [profileRetryNonce, setProfileRetryNonce] = useState(0);
+  const handleProfileSectionLoadError = useCallback(() => setProfileLoadFailed(true), []);
+  const handleProfileTabRetry = useCallback(() => {
+    setProfileLoadFailed(false);
+    setProfileRetryNonce((n) => n + 1);
+  }, []);
   const [lnbOpen, setLnbOpen] = useState(false);
-  const { toasts, addToast, dismissToast } = useToast();
+  const { addToast } = useToast();
 
   const handleTabChange = (tab: string) => {
     setActiveTab(tab);
@@ -660,7 +697,7 @@ export default function SettingsPage() {
       const refresh = await fetch('/api/webhooks/config');
       if (refresh.ok) { const j = await refresh.json() as { data?: WebhookConfig[] }; setWebhooks(j.data ?? []); }
     } catch {
-      setWebhookErrors((prev) => ({ ...prev, [memberId]: '네트워크 오류 — 다시 시도하세요.' }));
+      setWebhookErrors((prev) => ({ ...prev, [memberId]: t('webhookNetworkError') }));
     } finally {
       setWebhookSaving(null);
     }
@@ -690,26 +727,29 @@ export default function SettingsPage() {
               <Bell className="h-4 w-4" />
               {t('tabNotifications')}
             </TabsTrigger>
+            {isSupportWidgetEnabled() && (
+              <TabsTrigger value="support">
+                <LifeBuoy className="h-4 w-4" />
+                {t('tabSupport')}
+              </TabsTrigger>
+            )}
 
             <span className="px-2 pb-1 pt-4 text-[10px] font-medium text-muted-foreground">{t('projectSettings')}</span>
-            {currentProjectId && !HIDDEN_SETTINGS_TABS.has('ai') ? (
-              <TabsTrigger value="ai">
-                <Bot className="h-4 w-4" />
-                {t('tabAiAgents')}
-              </TabsTrigger>
-            ) : null}
+            {!adminChecked ? <SettingsTabSkeleton /> : null}
             {adminChecked ? (
               <TabsTrigger value="members">
                 <Users className="h-4 w-4" />
                 {t('tabMembers')}
               </TabsTrigger>
             ) : null}
+            {!adminChecked && !HIDDEN_SETTINGS_TABS.has('workflow') ? <SettingsTabSkeleton /> : null}
             {adminChecked && isAdmin && !HIDDEN_SETTINGS_TABS.has('workflow') ? (
               <TabsTrigger value="workflow">
                 <GitBranch className="h-4 w-4" />
                 {t('tabWorkflow')}
               </TabsTrigger>
             ) : null}
+            {!adminChecked ? <SettingsTabSkeleton /> : null}
             {adminChecked && isAdmin ? (
               <TabsTrigger value="workflow-policies">
                 <ShieldCheck className="h-4 w-4" />
@@ -717,6 +757,14 @@ export default function SettingsPage() {
               </TabsTrigger>
             ) : null}
 
+            {!adminChecked ? (
+              <>
+                <span className="truncate px-2 pb-1 pt-4 text-[10px] font-medium text-muted-foreground">{t('organizationSettings')}</span>
+                <SettingsTabSkeleton />
+                <SettingsTabSkeleton />
+                {!HIDDEN_SETTINGS_TABS.has('org-members') ? <SettingsTabSkeleton /> : null}
+              </>
+            ) : null}
             {adminChecked ? (
               <>
                 <span className="truncate px-2 pb-1 pt-4 text-[10px] font-medium text-muted-foreground">{t('organizationSettings')}</span>
@@ -724,10 +772,15 @@ export default function SettingsPage() {
                   <FolderKanban className="h-4 w-4" />
                   {t('tabOrganization')}
                 </TabsTrigger>
-                <TabsTrigger value="org-members">
-                  <Users className="h-4 w-4" />
-                  {t('tabOrgMembers')}
-                </TabsTrigger>
+                {/* story c4980e70: org-members = /organization/members로 승격(딥링크는 next.config.ts
+                    redirects()가 서버에서 걷어간다) — 트리거·콘텐츠 둘 다 HIDDEN_SETTINGS_TABS에서
+                    차단해야 하는데 트리거만 빠져 있었다(story #3762 발견·회귀 pin). */}
+                {!HIDDEN_SETTINGS_TABS.has('org-members') ? (
+                  <TabsTrigger value="org-members">
+                    <Users className="h-4 w-4" />
+                    {t('tabOrgMembers')}
+                  </TabsTrigger>
+                ) : null}
                 <TabsTrigger value="projects">
                   <FolderKanban className="h-4 w-4" />
                   {t('tabProjects')}
@@ -736,6 +789,13 @@ export default function SettingsPage() {
               </>
             ) : null}
 
+            {!adminChecked ? (
+              <>
+                <span className="truncate px-2 pb-1 pt-4 text-[10px] font-medium text-muted-foreground">{t('billing')}</span>
+                <SettingsTabSkeleton />
+                <SettingsTabSkeleton />
+              </>
+            ) : null}
             {adminChecked && isAdmin ? (
               <>
                 <span className="truncate px-2 pb-1 pt-4 text-[10px] font-medium text-muted-foreground">{t('billing')}</span>
@@ -765,7 +825,7 @@ export default function SettingsPage() {
             <span className="px-2 pb-1 pt-4 text-[10px] font-medium text-muted-foreground">{t('dangerZone')}</span>
             <TabsTrigger
               value="danger"
-              className="text-destructive hover:text-destructive data-active:text-destructive data-active:bg-destructive/10"
+              className="text-destructive hover:text-destructive data-active:text-destructive data-active:bg-destructive-tint"
             >
               <Trash2 className="h-4 w-4" />
               {t('deleteAccount')}
@@ -783,7 +843,7 @@ export default function SettingsPage() {
               type="button"
               onClick={() => setLnbOpen((v) => !v)}
               className="md:hidden rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-              aria-label="Toggle navigation"
+              aria-label={tNav('toggleSidebar')}
             >
               {lnbOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
             </button>
@@ -793,10 +853,25 @@ export default function SettingsPage() {
 
             <TabsContent value="profile">
               <div className="space-y-6">
-                <MyProfileSection />
-                <SetPasswordSection />
-                <LinkedAccountsSection />
-                <TwoFactorSection />
+                {profileLoadFailed && (
+                  <Alert variant="destructive">
+                    <AlertDescription className="flex items-center justify-between gap-3">
+                      <span>{t('accountInfoLoadError')}</span>
+                      <Button size="sm" variant="outline" onClick={handleProfileTabRetry}>
+                        {tc('retry')}
+                      </Button>
+                    </AlertDescription>
+                  </Alert>
+                )}
+                {/* story #3772 — key=retryNonce로 넷을 통째 리마운트해 재-fetch(상세페이지
+                    key-remount 정본). 섹션 각자의 onLoadError가 처음 하나만 배너를 올리면
+                    되므로 중복 호출 무관(idempotent setState). */}
+                <div key={profileRetryNonce} className="space-y-6">
+                  <MyProfileSection onLoadError={handleProfileSectionLoadError} />
+                  <SetPasswordSection onLoadError={handleProfileSectionLoadError} />
+                  <LinkedAccountsSection onLoadError={handleProfileSectionLoadError} />
+                  <TwoFactorSection onLoadError={handleProfileSectionLoadError} />
+                </div>
                 {currentProjectId && (
                   <MyNotificationChannelSection
                     projectId={currentProjectId}
@@ -811,18 +886,24 @@ export default function SettingsPage() {
               <ThemeSettings />
             </TabsContent>
 
+            {isSupportWidgetEnabled() && (
+              <TabsContent value="support">
+                <SupportSettingsTabPanel />
+              </TabsContent>
+            )}
+
             <TabsContent value="api-keys">
               <SectionCard>
                 <SectionCardBody>
                   <p className="text-sm text-muted-foreground">
-                    에이전트 API Key 관리는 <strong>에이전트 관리</strong>로 이관됐습니다.
+                    {t.rich('agentApiKeyMoved', { b: (chunks) => <strong>{chunks}</strong> })}
                   </p>
                   <button
                     type="button"
                     onClick={() => router.push('/organization/workforce')}
                     className="mt-3 rounded-md border border-border px-3 py-1.5 text-sm text-foreground hover:bg-muted transition-colors"
                   >
-                    에이전트 관리로 이동
+                    {t('agentManagementCta')}
                   </button>
                 </SectionCardBody>
               </SectionCard>
@@ -972,28 +1053,12 @@ export default function SettingsPage() {
               </div>
             </TabsContent>
 
-            {/* E-SETTINGS-IA: deprecate 숨김. activeTab은 resolveSettingsTab로 'ai' 도달 불가지만,
-                content도 gate off하여 딥링크/forceMount 어떤 경로로도 렌더 안 되게 한다. 컴포넌트는 보존. */}
-            {!HIDDEN_SETTINGS_TABS.has('ai') ? (
-              <TabsContent value="ai">
-                <div className="space-y-6">
-                  {currentProjectId ? (
-                    <>
-                      <AiSettingsSection projectId={currentProjectId} />
-                      <McpConnectionSettings projectId={currentProjectId} />
-                      <ByomKeyManagement projectId={currentProjectId} />
-                    </>
-                  ) : null}
-                </div>
-              </TabsContent>
-            ) : null}
-
             <TabsContent value="organization">
               <SectionCard>
                 <SectionCardHeader>
                   <div className="space-y-1">
-                    <h2 className="text-base font-semibold text-foreground">Organization 설정</h2>
-                    <p className="text-sm text-muted-foreground">Organization 기본 정보를 확인하고 수정합니다.</p>
+                    <h2 className="text-base font-semibold text-foreground">{t('orgSectionTitle')}</h2>
+                    <p className="text-sm text-muted-foreground">{t('orgSectionDescription')}</p>
                   </div>
                 </SectionCardHeader>
                 <SectionCardBody className="space-y-6">
@@ -1001,7 +1066,8 @@ export default function SettingsPage() {
                     <>
                       <div className="space-y-4">
                         <div className="space-y-1.5">
-                          <label className="text-sm font-medium text-foreground">이름</label>
+                          {/* story #3776(1층B) — "이름", settings ns의 기존 profileName 키 재사용. */}
+                          <label className="text-sm font-medium text-foreground">{t('profileName')}</label>
                           {(currentOrgRole === 'owner' || currentOrgRole === 'admin') ? (
                             <div className="flex items-center gap-2">
                               <input
@@ -1016,7 +1082,8 @@ export default function SettingsPage() {
                                 disabled={!editOrgName.trim() || editOrgName === orgInfo.name || savingOrgName}
                                 onClick={() => void handleSaveOrgName()}
                               >
-                                {savingOrgName ? '저장 중…' : '저장'}
+                                {/* story #3776(1층B) — "저장", common ns의 기존 save 키 재사용(유나 정정 — 폼 크롬은 common 소관). */}
+                                {savingOrgName ? tc('saving') : tc('save')}
                               </Button>
                             </div>
                           ) : (
@@ -1028,19 +1095,19 @@ export default function SettingsPage() {
                         <div className="space-y-1.5">
                           <label className="text-sm font-medium text-foreground">Slug</label>
                           <p className="rounded-md border border-input bg-muted/30 px-3 py-2 font-mono text-sm text-muted-foreground">{orgInfo.slug}</p>
-                          <p className="text-xs text-muted-foreground">slug는 변경할 수 없습니다.</p>
+                          <p className="text-xs text-muted-foreground">{t('orgSlugImmutable')}</p>
                         </div>
 
                         {orgInfo.plan && (
                           <div className="space-y-1.5">
-                            <label className="text-sm font-medium text-foreground">플랜</label>
+                            <label className="text-sm font-medium text-foreground">{t('orgPlanLabel')}</label>
                             <p className="rounded-md border border-input bg-muted/30 px-3 py-2 text-sm text-foreground capitalize">{orgInfo.plan}</p>
                           </div>
                         )}
 
                         {currentOrgRole && (
                           <div className="space-y-1.5">
-                            <label className="text-sm font-medium text-foreground">내 역할</label>
+                            <label className="text-sm font-medium text-foreground">{t('orgMyRoleLabel')}</label>
                             <p className="rounded-md border border-input bg-muted/30 px-3 py-2 text-sm text-foreground capitalize">{currentOrgRole}</p>
                           </div>
                         )}
@@ -1066,17 +1133,25 @@ export default function SettingsPage() {
                   />
                 </div>
               ) : null}
+              {/* story e0c1b24c — org 게이트 정책(posture·머지 게이트 기본 승인자). #3319/PR#3716로
+                  백엔드(GET/PUT /api/v2/gate-config/policy)는 착지했으나 값 넣을 화면이 없었다 —
+                  GateLevelMatrix(work_type×actor_type 매트릭스, 별개 개념)와 나란히 둔다. */}
+              {orgInfo ? (
+                <div className="mt-6">
+                  <OrgGatePolicySection canEdit={currentOrgRole === 'owner' || currentOrgRole === 'admin'} />
+                </div>
+              ) : null}
               {currentOrgRole === 'owner' && (
-                <SectionCard className="border-destructive/20 bg-destructive/10 mt-6">
+                <SectionCard className="border-destructive/20 bg-destructive-tint mt-6">
                   <SectionCardHeader className="border-b border-destructive/20">
                     <div className="space-y-1">
-                      <h2 className="text-base font-semibold text-destructive">위험 구역</h2>
-                      <p className="text-sm text-foreground">Organization을 삭제하면 모든 Project, Member, 데이터가 영구적으로 제거됩니다.</p>
+                      <h2 className="text-base font-semibold text-destructive">{t('dangerZone')}</h2>
+                      <p className="text-sm text-foreground">{t('orgDeleteWarning')}</p>
                     </div>
                   </SectionCardHeader>
                   <SectionCardBody>
                     <Button variant="destructive" onClick={() => void handleOpenDeleteOrg()}>
-                      Organization 삭제
+                      {t('orgDeleteTitle')}
                     </Button>
                   </SectionCardBody>
                 </SectionCard>
@@ -1289,7 +1364,7 @@ export default function SettingsPage() {
                     </SectionCard>
                   </div>
                 ) : (
-                  <p className="text-sm text-muted-foreground">프로젝트를 선택해주세요.</p>
+                  <p className="text-sm text-muted-foreground">{t('noProject')}</p>
                 )}
               </div>
             </TabsContent>
@@ -1301,6 +1376,7 @@ export default function SettingsPage() {
               <div className="space-y-6">
                 <WorkflowTriggerTypesSection />
                 {currentProjectId ? <WorkflowTemplateGallerySection projectId={currentProjectId} orgId={orgId ?? undefined} /> : null}
+                {currentProjectId ? <RecurringRecipesSection projectId={currentProjectId} /> : null}
                 {currentProjectId ? <WorkflowExecutionHistorySection projectId={currentProjectId} /> : null}
               </div>
             </TabsContent>
@@ -1341,7 +1417,7 @@ export default function SettingsPage() {
             )}
 
             <TabsContent value="danger">
-              <SectionCard className="border-destructive/20 bg-destructive/10">
+              <SectionCard className="border-destructive/20 bg-destructive-tint">
                 <SectionCardHeader className="border-b border-destructive/20">
                   <div className="space-y-1">
                     <h2 className="text-base font-semibold text-destructive">{t('dangerZone')}</h2>
@@ -1378,7 +1454,7 @@ export default function SettingsPage() {
           }}
         >
           <DialogContent className="max-w-md space-y-4 border-destructive/30" showCloseButton={false}>
-            <DialogTitle className="text-lg font-semibold text-destructive">Organization 삭제</DialogTitle>
+            <DialogTitle className="text-lg font-semibold text-destructive">{t('orgDeleteTitle')}</DialogTitle>
 
             {/* 영향도 */}
             {orgImpactLoading ? (
@@ -1387,14 +1463,14 @@ export default function SettingsPage() {
               </div>
             ) : orgImpact ? (
               <div className="rounded-md border border-border bg-muted/30 p-3 space-y-1 text-sm">
-                <p className="text-muted-foreground">삭제 시 영향 범위:</p>
+                <p className="text-muted-foreground">{t('orgDeleteImpactTitle')}</p>
                 <ul className="space-y-0.5 text-foreground">
-                  <li>• Project <span className="font-semibold">{orgImpact.project_count}개</span> 영구 삭제</li>
-                  <li>• Member <span className="font-semibold">{orgImpact.member_count}명</span> 접근 불가</li>
+                  <li>{t('orgDeleteImpactProjects', { count: orgImpact.project_count })}</li>
+                  <li>{t('orgDeleteImpactMembers', { count: orgImpact.member_count })}</li>
                   {/* story #2590(TIER1) — 조상(bg-muted/30)이 pale이라 text-warning도 대비 미달
                       (교차-요소). tint 위 계열색 글자는 text-foreground(#2420 규칙). */}
                   {orgImpact.has_active_subscription && (
-                    <li className="text-foreground">• 활성 구독이 있습니다 — 삭제 전 구독을 취소해주세요.</li>
+                    <li className="text-foreground">{t('orgDeleteImpactSubscription')}</li>
                   )}
                 </ul>
               </div>
@@ -1404,7 +1480,7 @@ export default function SettingsPage() {
               // 아래), 재시도 또는 명시 인정(탈출구)만 남긴다. 서버(#2898)가 최종 방어선.
               <Alert variant="warning">
                 <AlertDescription className="space-y-3">
-                  <p>영향 범위를 확인할 수 없습니다. 지금은 삭제를 진행할 수 없습니다.</p>
+                  <p>{t('orgDeleteImpactUnavailable')}</p>
                   <Button
                     type="button"
                     variant="outline"
@@ -1412,7 +1488,8 @@ export default function SettingsPage() {
                     onClick={() => void fetchOrgImpact()}
                     disabled={orgImpactLoading}
                   >
-                    다시 시도
+                    {/* story #3776(1층B) — "다시 시도", common ns의 기존 retry 키 재사용. */}
+                    {tc('retry')}
                   </Button>
                   <label className="flex items-start gap-2 pt-1">
                     <input
@@ -1422,8 +1499,8 @@ export default function SettingsPage() {
                       onChange={(e) => setConfirmWithoutImpact(e.target.checked)}
                     />
                     <span className="space-y-0.5">
-                      <span className="block">영향 범위를 확인하지 못한 상태로 삭제합니다.</span>
-                      <span className="block text-xs">확인 없이 삭제한 것으로 기록됩니다.</span>
+                      <span className="block">{t('orgDeleteWithoutImpact')}</span>
+                      <span className="block text-xs">{t('orgDeleteWithoutImpactAudit')}</span>
                     </span>
                   </label>
                 </AlertDescription>
@@ -1432,7 +1509,7 @@ export default function SettingsPage() {
 
             <div className="space-y-1.5">
               <label className="text-sm font-medium text-foreground">
-                확인을 위해 Organization 이름 <span className="font-mono text-destructive">{orgInfo.name}</span>을 입력하세요.
+                {t('orgDeleteConfirmPrompt', { name: orgInfo.name })}
               </label>
               <input
                 className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-destructive"
@@ -1450,7 +1527,8 @@ export default function SettingsPage() {
                 onClick={() => { setShowDeleteOrgConfirm(false); setDeleteOrgConfirmName(''); }}
                 disabled={deletingOrg}
               >
-                취소
+                {/* story #3776(1층B) — "취소", common ns의 기존 cancel 키 재사용. */}
+                {tc('cancel')}
               </Button>
               <Button
                 variant="destructive"
@@ -1466,7 +1544,7 @@ export default function SettingsPage() {
                   confirmWithoutImpact,
                 })}
               >
-                {deletingOrg ? '삭제 중…' : '영구 삭제'}
+                {deletingOrg ? tc('deleting') : t('orgDeleteConfirmCta')}
               </Button>
             </div>
           </DialogContent>
@@ -1543,7 +1621,6 @@ export default function SettingsPage() {
           }}
         />
       ) : null}
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </>
   );
 }

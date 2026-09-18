@@ -3,11 +3,15 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import { useTranslations } from 'next-intl';
 import { SprintableLogo } from '@/components/brand/sprintable-logo';
 
-// story #3159 — verify-email/page.tsx와 동형(pre-auth·raw fetch·미배선 하드코딩 한국어).
-// 이메일 링크 클릭이 진입점이라 세션이 없을 수 있다.
+// story #3159 — verify-email/page.tsx와 동형(pre-auth·raw fetch). 이메일 링크 클릭이
+// 진입점이라 세션이 없을 수 있다. story #3923 — next-intl은 root layout이 전역
+// 제공 중이라 항상 배선돼 있었다(#2484/#2485류 "미배선" 전제가 반복 오판이었음) —
+// unsubscribe.* i18n 키로 전환.
 export default function UnsubscribePage() {
+  const t = useTranslations('unsubscribe');
   const searchParams = useSearchParams();
   const token = searchParams.get('token') ?? '';
 
@@ -15,7 +19,7 @@ export default function UnsubscribePage() {
     () => (token ? 'loading' : 'error')
   );
   const [message, setMessage] = useState(
-    () => (token ? '' : '유효하지 않은 링크입니다.')
+    () => (token ? '' : t('invalidLink'))
   );
 
   useEffect(() => {
@@ -26,17 +30,17 @@ export default function UnsubscribePage() {
       .then((json: { data?: { unsubscribed: boolean }; error?: { code?: string; message: string } }) => {
         if (json.data?.unsubscribed) {
           setStatus('success');
-          setMessage('안내 메일 수신이 해제되었습니다.');
+          setMessage(t('unsubscribed'));
         } else {
           setStatus('error');
-          setMessage('링크가 유효하지 않거나 만료되었습니다.');
+          setMessage(t('linkExpired'));
         }
       })
       .catch(() => {
         setStatus('error');
-        setMessage('처리 중 오류가 발생했습니다.');
+        setMessage(t('processError'));
       });
-  }, [token]);
+  }, [token, t]);
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-muted">
@@ -46,7 +50,7 @@ export default function UnsubscribePage() {
         </div>
 
         {status === 'loading' && (
-          <p className="text-sm text-muted-foreground">처리 중...</p>
+          <p className="text-sm text-muted-foreground">{t('processing')}</p>
         )}
 
         {status === 'success' && (
@@ -58,7 +62,7 @@ export default function UnsubscribePage() {
         )}
 
         <Link href="/login" className="block text-sm font-medium text-brand hover:text-brand/80">
-          로그인으로 돌아가기
+          {t('backToLogin')}
         </Link>
       </div>
     </div>

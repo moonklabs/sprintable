@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { ArrowLeft, ChevronDown, ChevronRight, Inbox as InboxIcon, Zap, ZapOff, Bot, Bell, Info, type LucideIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
@@ -11,14 +11,19 @@ import { AgentIdentity } from '@/components/ui/agent-identity';
 import { ApprovalsQueue } from '@/components/inbox/approvals-queue';
 import { AttentionQueueView } from '@/components/attention-queue/attention-queue-view';
 import { useDashboardContext } from '../../dashboard/dashboard-shell';
-import { useToast, ToastContainer } from '@/components/ui/toast';
+import { useToast } from '@/components/ui/toast';
 import { fetchWithAuth } from '@/lib/db/client';
+import { formatRelativeTime } from '@/lib/storage/format';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import {
   getInboxNotificationLabel,
   getNotificationReasonKey,
   NOTIFICATION_TYPE_ICONS,
 } from '@/services/notification-display';
 import { groupByIdenticalContent, referenceTypeLabel } from '@/lib/inbox-generic-notification-grouping';
+import type { EventPreviewHelpers } from '@/components/chat/event-block-card';
+import { composeNotificationDisplay, type Notification } from './inbox-notification-display';
+import { useOrgDomainLabels } from '@/hooks/use-org-domain-labels';
 
 // 알림 type 아이콘 렌더 — NOTIFICATION_TYPE_ICONS(lucide)서 lookup·미상 type은 fallback 아이콘.
 function NotifIcon({ type, fallback: Fallback, className }: { type: string; fallback: LucideIcon; className?: string }) {
@@ -33,18 +38,6 @@ interface WorkflowExecItem {
   rule_name: string | null;
   status: string;
   completed_at: string | null;
-  created_at: string;
-}
-
-interface Notification {
-  id: string;
-  type: string;
-  title: string;
-  body: string | null;
-  is_read: boolean;
-  reference_type: string | null;
-  reference_id: string | null;
-  href?: string | null;
   created_at: string;
 }
 
@@ -79,6 +72,8 @@ function AgentJoinedDetailPanel({
 }) {
   const [confirming, setConfirming] = useState(false);
   const [revoking, setRevoking] = useState(false);
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
 
   async function handleRevoke() {
     if (!notification.reference_id) return;
@@ -113,7 +108,7 @@ function AgentJoinedDetailPanel({
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="outline">{t('filter_agent_joined')}</Badge>
             <span className="text-xs text-muted-foreground">
-              {t('receivedAt')} · {new Date(notification.created_at).toLocaleString()}
+              {t('receivedAt')} · {formatRelativeTime(notification.created_at, locale, displayTimezone)}
             </span>
           </div>
           <h2 className="text-lg font-semibold text-foreground">{notification.title}</h2>
@@ -191,7 +186,27 @@ export default function InboxPage() {
   const t = useTranslations('inbox');
   const tCommon = useTranslations('common');
   const tCage = useTranslations('cage');
-  const { currentTeamMemberId, projectId } = useDashboardContext();
+  // story #3903 AC2 — 3888 eventCard 조합(composeEventPreviewLine) 재사용 재료. 알림
+  // 목록/상세가 raw preset 키를 그대로 보여주던 결함(대화 목록은 3888이 이미 고쳤고, 알림
+  // 목록은 별개 소비처라 남아 있었다) 처방 — 새 낱말 0, 새 라벨 해석 로직 0.
+  const tBoard = useTranslations('board');
+  const tDashboard = useTranslations('dashboard');
+  const tEventCard = useTranslations('eventCard');
+  const tEntity = useTranslations('chats');
+  const tOutcomeLoop = useTranslations('outcomeLoop');
+  const locale = useLocale();
+  // story #3493 — resolveDisplayTimezone() 호출을 useMemo로 감싸 값 안정성을 React
+  // Compiler가 증명할 수 있게 한다(아래 inboxSections useMemo의 dep으로 쓰일 때
+  // "may be mutated later"로 메모이제이션 보존을 포기하던 것의 근본 수정 — 이 값
+  // 자체의 실제 산출 로직은 그대로, 안정화만 추가).
+  const displayTimezone = useMemo(() => resolveDisplayTimezone().tz, []);
+  const { currentTeamMemberId, projectId, orgId } = useDashboardContext();
+  // story #3903 AC2 — composeEventPreviewLine의 domainLabels 재료(org 커스텀 status
+  // 라벨 오버라이드). chat-list-view.tsx의 기존 재사용 패턴과 동형.
+  const domainLabels = useOrgDomainLabels(orgId, locale);
+  const eventPreviewHelpers: EventPreviewHelpers = {
+    tBoard, tCage, tDashboard, tEventCard, tEntity, tOutcomeLoop, domainLabels,
+  };
   const activeTab = searchParams.get('tab') ?? 'notifications';
   // story #2164(2026-07-25, 까심): 예전엔 이 세 탭 중 notifications 탭 라벨과 페이지 헤더가
   // t('title')("결재함") 하나를 재사용했다 — 헤더가 항상 "결재함"이라 찍히는데 기본 진입 시
@@ -217,7 +232,7 @@ export default function InboxPage() {
   const [pagedBeyondFirst, setPagedBeyondFirst] = useState(false);
   const [workflowExecs, setWorkflowExecs] = useState<WorkflowExecItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const { toasts, addToast, dismissToast } = useToast();
+  const { addToast } = useToast();
 
   const refreshNotifications = useCallback(async () => {
     if (pagedBeyondFirst) return;
@@ -331,22 +346,22 @@ export default function InboxPage() {
     setUnreadCount(0);
   };
 
-  const formatTime = (iso: string) => {
-    const d = new Date(iso);
-    const now = new Date();
-    const diffMs = now.getTime() - d.getTime();
-    const diffMin = Math.floor(diffMs / 60000);
-    if (diffMin < 1) return t('justNow');
-    if (diffMin < 60) return `${diffMin}${t('minutesAgo')}`;
-    const diffHr = Math.floor(diffMin / 60);
-    if (diffHr < 24) return `${diffHr}${t('hoursAgo')}`;
-    return d.toLocaleDateString();
-  };
+  // story #3493 — 손으로 짠 상대시각(justNow/minutesAgo/hoursAgo)이 3436 묶음 8
+  // 정본(formatRelativeTime)과 별개로 존재해 "한 제품에 시각 표기 두 벌"이던
+  // 자리. 손대신 정본에 위임 — 폴백도 §11-2(toLocaleDateString 아님)로 통일된다.
+  const formatTime = (iso: string) => formatRelativeTime(iso, locale, displayTimezone);
 
   const selectedNotification = useMemo(
     () => notifications.find((n) => n.id === selectedId) ?? null,
     [notifications, selectedId],
   );
+
+  // story #3903 AC2 — 상세 패널 title/body도 목록 행과 동일하게 렌더 시점 조합(순수
+  // 함수·저비용이라 useMemo 불요, composeEventPreviewLine 자체가 이미 매 렌더 재계산
+  // 전제인 순수함수 — chat-list-view.tsx의 기존 호출 패턴과 동형).
+  const selectedDisplay = selectedNotification
+    ? composeNotificationDisplay(selectedNotification, t, eventPreviewHelpers)
+    : null;
 
   // f2ec5395: 같은 스토리 status_changed 알림을 reference_id로 그룹(2건+). 타 type·단건은 개별 유지.
   // story #0d1c69f3(v2 4호) — status_change 그룹에 안 들어간 나머지 중 동일 type+제목+본문이
@@ -402,10 +417,20 @@ export default function InboxPage() {
     const now = new Date();
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
     const startOfYesterday = startOfToday - 86400000;
+    // story #3493(페드루 PO 보정) — 오늘/어제보다 오래된 날짜 버킷 라벨은
+    // "기록"도 "약속"도 아닌 셋째 자리(날짜만 묶는 section 헤더, 시각 불요).
+    // formatScheduledAt(...).display에서 "MM-DD"를 문자열로 발췌하던 첫 처방은
+    // §11-2 포맷 문자열의 정확한 모양(공백 구분 순서)에 조용히 묶여, 그 포맷이
+    // 바뀌면 이 구분선이 소리 없이 깨진다 — chat-view.tsx::groupByDate와 같은
+    // 형(Intl.DateTimeFormat 직접 호출, schedule-format.ts::toDateKey와 동형
+    // 패턴 — 새 포맷 함수 신설 아님)으로 맞춘다.
+    const dateBucketFmt = new Intl.DateTimeFormat(locale, {
+      month: '2-digit', day: '2-digit', timeZone: displayTimezone,
+    });
     const labelFor = (time: number) => {
       if (time >= startOfToday) return t('dateToday');
       if (time >= startOfYesterday) return t('dateYesterday');
-      return new Date(time).toLocaleDateString();
+      return dateBucketFmt.format(new Date(time));
     };
     const sections: { label: string; items: InboxItem[] }[] = [];
     for (const item of inboxItems) {
@@ -415,7 +440,7 @@ export default function InboxPage() {
       else sections.push({ label, items: [item] });
     }
     return sections;
-  }, [inboxItems, t]);
+  }, [inboxItems, t, displayTimezone, locale]);
 
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const toggleGroup = (key: string) => setExpandedGroups((prev) => {
@@ -495,7 +520,7 @@ export default function InboxPage() {
             보여준다(별 패널 제거, GATE/STEER/BLOCK/Q 병합). */}
         {workflowExecs.length > 0 && (
           <div className="shrink-0 border-b border-border/80 px-4 py-3">
-            <p className="mb-2 text-[11px] font-medium text-muted-foreground">워크플로우 실행</p>
+            <p className="mb-2 text-[11px] font-medium text-muted-foreground">{t('workflowExecutionLabel')}</p>
             <div className="flex flex-col gap-1.5">
               {workflowExecs.slice(0, 5).map((exec) => (
                 <div key={exec.id} className="flex items-center gap-2 rounded-lg bg-muted/55 px-3 py-2 text-xs">
@@ -510,7 +535,7 @@ export default function InboxPage() {
                     {exec.rule_name ?? exec.event_type}
                   </span>
                   <span className="shrink-0 text-[10px] text-muted-foreground">
-                    {exec.completed_at ? new Date(exec.completed_at).toLocaleString() : new Date(exec.created_at).toLocaleString()}
+                    {formatRelativeTime(exec.completed_at ?? exec.created_at, locale, displayTimezone)}
                   </span>
                 </div>
               ))}
@@ -653,6 +678,8 @@ export default function InboxPage() {
                       const isSelected = notification.id === selectedId;
                       // ⓐ 도달 사유 칩(왜 내게) — 추론 가능할 때만, 없으면 생략(graceful degrade).
                       const reasonKey = getNotificationReasonKey(notification.type);
+                      // story #3903 AC2 — 렌더 시점 title/body 조합(3888 eventCard 재사용).
+                      const display = composeNotificationDisplay(notification, t, eventPreviewHelpers);
                       return (
                         <button
                           key={notification.id}
@@ -668,12 +695,12 @@ export default function InboxPage() {
                           <div className="min-w-0 flex-1 space-y-1">
                             <div className="flex items-start justify-between gap-2">
                               <p className={`truncate text-sm ${notification.is_read ? 'text-muted-foreground' : 'font-semibold text-foreground'}`}>
-                                {notification.title}
+                                {display.title}
                               </p>
                               <span className="shrink-0 text-[11px] text-muted-foreground">{formatTime(notification.created_at)}</span>
                             </div>
-                            {notification.body ? (
-                              <p className="line-clamp-1 text-xs text-muted-foreground">{notification.body}</p>
+                            {display.body ? (
+                              <p className="line-clamp-1 text-xs text-muted-foreground">{display.body}</p>
                             ) : null}
                             {/* 목업 ⑤: 타입 1급 — agent_joined=Bot 칩·도달사유 칩. story #3049
                                 (2984-S1) — AgentIdentity 프리미티브(헤어라인+proof-blue 신호
@@ -743,16 +770,16 @@ export default function InboxPage() {
                       <Badge variant="info">{t(getNotificationReasonKey(selectedNotification.type) as string)}</Badge>
                     ) : null}
                     <span className="text-xs text-muted-foreground">
-                      {t('receivedAt')} · {new Date(selectedNotification.created_at).toLocaleString()}
+                      {t('receivedAt')} · {formatRelativeTime(selectedNotification.created_at, locale, displayTimezone)}
                     </span>
                   </div>
-                  <h2 className="text-lg font-semibold text-foreground">{selectedNotification.title}</h2>
+                  <h2 className="text-lg font-semibold text-foreground">{selectedDisplay?.title ?? selectedNotification.title}</h2>
                 </div>
               </div>
 
-              {selectedNotification.body ? (
+              {selectedDisplay?.body ? (
                 <div className="rounded-xl border border-white/8 bg-muted/55 p-4 text-sm leading-6 text-foreground whitespace-pre-wrap">
-                  {selectedNotification.body}
+                  {selectedDisplay.body}
                 </div>
               ) : null}
 
@@ -790,7 +817,6 @@ export default function InboxPage() {
         )}
       </div>
 
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </>
   );
 }

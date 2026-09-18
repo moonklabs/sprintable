@@ -86,8 +86,6 @@ async def list_activity_logs(
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
 ) -> ActivityLogListResponse:
-    from app.models.team import TeamMember
-
     # ratchet round7(잔여 HIGH): project_id 필터(지정 시)에 caller 접근권 검증이 없어
     # same-org cross-project 감사 로그(actor/action/entity/context 전문)가 노출됐다 —
     # resource-actual project_id 직접검증. actor_id/entity_id/entity_type 등은 project로
@@ -116,22 +114,30 @@ async def list_activity_logs(
         q = q.where(ActivityLog.created_at <= to)
 
     # S-C4: EE RBAC — is_ee_enabled 시 role별 가시성 필터 적용
+    #
+    # ⚠️story #3370(유나 실측·페드루 정정 2026-09-10) — 이전엔 `TeamMember.id == auth.
+    # user_id`로 caller를 직접 조회했다. 휴먼(JWT)의 auth.user_id는 users.id다(auth.py
+    # 계약) — legacy team_member 행이 있는 휴먼(레거시 org)만 우연히 매치했고,
+    # grant-only 휴먼(org_member 경유, E-MEMBER-SSOT 이후 만들어진 org 다수)은
+    # `caller_tm=None`이라 `ee_applied`가 False로 남아 **필터가 통째로 스킵**됐다
+    # (member 역할 휴먼이 org 전체 flat 로그를 봄 — fail-open 권한 무력화, 유나 라이브
+    # 재현). ActivityLog.actor_id 자체도 record_created_activity가 resolve_member().id
+    # (canonical 멤버 id)로 쓴다 — 이 필터의 「본인 actor_id만」 분기(filter_activity_
+    # by_role의 member 축)도 같은 축이어야 정합. `resolve_member_db_verified()`(member_
+    # resolver.py, 이 스토리에서 신설)로 role·id 둘 다 한 호출에서 정확히 해소 —
+    # `resolve_member()`(클레임 기반)이 아니라 이 변형을 쓰는 이유는 agent 판정을 DB로
+    # 하기 위해서다(기존 테스트 하네스 정합, 그 함수 자신의 docstring 그라운딩).
     ee_applied = False
     if _ee_rbac_filter is not None:
         try:
-            caller_tm = (await db.execute(
-                select(TeamMember).where(
-                    TeamMember.id == uuid.UUID(auth.user_id),
-                    TeamMember.org_id == org_id,
-                ).limit(1)
-            )).scalar_one_or_none()
-            if caller_tm:
-                q = _ee_rbac_filter(q, caller_tm.role, caller_tm.id)
-                ee_applied = True
-                logger.info(
-                    "activity_logs EE RBAC applied role=%s member_id=%s",
-                    caller_tm.role, caller_tm.id,
-                )
+            from app.services.member_resolver import resolve_member_db_verified
+            resolved_caller = await resolve_member_db_verified(auth, org_id, db)
+            q = _ee_rbac_filter(q, resolved_caller.role, resolved_caller.id)
+            ee_applied = True
+            logger.info(
+                "activity_logs EE RBAC applied role=%s member_id=%s",
+                resolved_caller.role, resolved_caller.id,
+            )
         # 까심 QA(#2073 REQUEST_CHANGES): 여기서 광범위 Exception을 삼키면 NameError류
         # 코드버그까지 fail-open(무필터 flat log)으로 마스킹된다 — DB/타입 계열의 실제
         # "필터 적용 실패"만 fail-open 허용하고, 나머지 코드 버그(NameError/AttributeError

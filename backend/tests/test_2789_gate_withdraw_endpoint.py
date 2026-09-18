@@ -41,6 +41,11 @@ def _session_returning(gate):
     return session
 
 
+# story #3874 — 이 파일의 관심사는 철회 authz/알림뿐이라 직렬화 단일 통로(to_gate_response)
+# 자체를 patch해 우회한다(_fake_gate가 SimpleNamespace라 gate_type이 없어 risk_grade enrich
+# 가 AttributeError로 깨진다 — 예전엔 GateResponse.model_validate만 patch해 피했었다).
+
+
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
@@ -60,7 +65,7 @@ async def test_withdraw_endpoint_requester_can_withdraw_own_gate():
 
     with patch.object(gates_mod, "resolve_member", AsyncMock(return_value=caller)), \
          patch.object(gates_mod, "void_gate", voidfn), \
-         patch.object(gates_mod.GateResponse, "model_validate", lambda g: g):
+         patch.object(gates_mod, "to_gate_response", AsyncMock(side_effect=lambda s, o, g, **kw: g)):
         result = await withdraw_gate_endpoint(
             id=gate.id, body=GateVoidRequest(reason="더 이상 필요 없음"),
             session=session, org_id=uuid.uuid4(),
@@ -183,7 +188,7 @@ async def test_withdraw_endpoint_actor_type_reflects_real_caller(is_api_key, exp
 
     with patch.object(gates_mod, "resolve_member", AsyncMock(return_value=caller)), \
          patch.object(gates_mod, "void_gate", voidfn), \
-         patch.object(gates_mod.GateResponse, "model_validate", lambda g: g):
+         patch.object(gates_mod, "to_gate_response", AsyncMock(side_effect=lambda s, o, g, **kw: g)):
         await withdraw_gate_endpoint(
             id=gate.id, body=GateVoidRequest(reason="x"),
             session=session, org_id=uuid.uuid4(),
@@ -209,7 +214,7 @@ async def test_withdraw_endpoint_notifies_designated_approver_as_withdrawn():
 
     with patch.object(gates_mod, "resolve_member", AsyncMock(return_value=caller)), \
          patch.object(gates_mod, "void_gate", voidfn), \
-         patch.object(gates_mod.GateResponse, "model_validate", lambda g: g), \
+         patch.object(gates_mod, "to_gate_response", AsyncMock(side_effect=lambda s, o, g, **kw: g)), \
          patch("app.services.approval_delivery.dispatch_approval_result_reply", dispatch):
         await withdraw_gate_endpoint(
             id=gate.id, body=GateVoidRequest(reason="더 이상 필요 없음"),
@@ -237,7 +242,7 @@ async def test_withdraw_endpoint_no_approver_skips_notification():
 
     with patch.object(gates_mod, "resolve_member", AsyncMock(return_value=caller)), \
          patch.object(gates_mod, "void_gate", voidfn), \
-         patch.object(gates_mod.GateResponse, "model_validate", lambda g: g), \
+         patch.object(gates_mod, "to_gate_response", AsyncMock(side_effect=lambda s, o, g, **kw: g)), \
          patch("app.services.approval_delivery.dispatch_approval_result_reply", dispatch):
         await withdraw_gate_endpoint(
             id=gate.id, body=GateVoidRequest(reason="x"),
@@ -262,7 +267,7 @@ async def test_withdraw_endpoint_notification_failure_does_not_block_commit():
 
     with patch.object(gates_mod, "resolve_member", AsyncMock(return_value=caller)), \
          patch.object(gates_mod, "void_gate", voidfn), \
-         patch.object(gates_mod.GateResponse, "model_validate", lambda g: g), \
+         patch.object(gates_mod, "to_gate_response", AsyncMock(side_effect=lambda s, o, g, **kw: g)), \
          patch("app.services.approval_delivery.dispatch_approval_result_reply", dispatch):
         await withdraw_gate_endpoint(
             id=gate.id, body=GateVoidRequest(reason="x"),

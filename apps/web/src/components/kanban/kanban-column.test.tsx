@@ -76,6 +76,57 @@ describe('KanbanColumn — story #2062 포커스 링 클리핑', () => {
   });
 });
 
+// story 3436(묶음 4) — done 칼럼 펼치기/접기 버튼 aria-label 하드코딩 영문("Expand/Collapse
+// done column") 정정 pin.
+describe('KanbanColumn — 접기/펼치기 버튼 접근 이름(story 3436)', () => {
+  it('⭐collapsed=true면 펼치기 버튼의 aria-label이 한국어다', async () => {
+    await act(async () => {
+      root.render(
+        wrap(
+          <KanbanColumn
+            id="done"
+            label="완료"
+            stories={[]}
+            epicMap={{}}
+            memberMap={{}}
+            onStoryClick={vi.fn()}
+            collapsed
+            onToggleCollapse={vi.fn()}
+          />,
+        ),
+      );
+    });
+
+    const btn = container.querySelector('button[aria-label]');
+    expect(btn?.getAttribute('aria-label')).toBe(koMessages.board.expandDoneColumn);
+    expect(btn?.getAttribute('aria-label')).not.toContain('Expand');
+  });
+
+  it('collapsed=false면 접기 버튼의 aria-label이 한국어다', async () => {
+    await act(async () => {
+      root.render(
+        wrap(
+          <KanbanColumn
+            id="done"
+            label="완료"
+            stories={[]}
+            epicMap={{}}
+            memberMap={{}}
+            onStoryClick={vi.fn()}
+            collapsed={false}
+            onToggleCollapse={vi.fn()}
+          />,
+        ),
+      );
+    });
+
+    const btn = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.getAttribute('aria-label') === koMessages.board.collapseDoneColumn,
+    );
+    expect(btn).toBeTruthy();
+  });
+});
+
 // story #2969 §1.3-b(doc proofline-system-layer-2969, PR-5) — 컬럼헤더=소헤딩(Heading
 // 무게로 재분류·크기/sans 불변, 한글이라 caps/mono 금지).
 describe('KanbanColumn — 컬럼헤더 소헤딩(story #2969 PR-5)', () => {
@@ -103,5 +154,57 @@ describe('KanbanColumn — 컬럼헤더 소헤딩(story #2969 PR-5)', () => {
     // 한글 라벨 — mono/uppercase/caps 금지(2967 교훈, [[feedback_copy_from_korean_convention]]).
     expect(header?.className).not.toContain('font-mono');
     expect(header?.className).not.toContain('uppercase');
+  });
+});
+
+// 유나 design:changes(PR#3687, story #3287 AC4, 2026-09-01) — org 커스텀 라벨은 길이가
+// 자유라 고정폭 컬럼(w-[280px])에서 WIP 카운트·버튼을 밀어낼 수 있었다.
+describe('KanbanColumn — 긴 org 라벨이 WIP 카운트를 안 밀어낸다(유나 design:changes, PR#3687)', () => {
+  it('헤더 h3가 min-w-0, 라벨 span이 truncate+title(전체 문구)을 갖는다', async () => {
+    const longLabel = '아이디어 검토 대기열 — 마케팅팀 승인 전 임시 보관함(매우 긴 org 커스텀 라벨)';
+    await act(async () => {
+      root.render(
+        wrap(
+          <KanbanColumn
+            id="backlog"
+            label={longLabel}
+            stories={[]}
+            epicMap={{}}
+            memberMap={{}}
+            onStoryClick={vi.fn()}
+          />,
+        ),
+      );
+    });
+
+    const header = container.querySelector('h3');
+    expect(header?.className).toContain('min-w-0');
+    const labelSpan = header?.querySelector('span[title]');
+    expect(labelSpan).not.toBeNull();
+    expect(labelSpan?.className).toContain('truncate');
+    expect(labelSpan?.getAttribute('title')).toBe(longLabel);
+    expect(labelSpan?.textContent).toBe(longLabel);
+  });
+
+  it('WIP 배지·카운트를 담은 우측 그룹은 shrink-0 — 라벨이 길어도 이쪽이 안 밀린다', async () => {
+    await act(async () => {
+      root.render(
+        wrap(
+          <KanbanColumn
+            id="backlog"
+            label="백로그"
+            stories={[]}
+            epicMap={{}}
+            memberMap={{}}
+            onStoryClick={vi.fn()}
+            wipLimit={5}
+          />,
+        ),
+      );
+    });
+
+    const header = container.querySelector('h3');
+    const rightGroup = header?.nextElementSibling;
+    expect(rightGroup?.className).toContain('shrink-0');
   });
 });

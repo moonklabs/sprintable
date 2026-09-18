@@ -67,7 +67,8 @@ class Doc(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     title: Mapped[str] = mapped_column(Text, nullable=False)
     slug: Mapped[str] = mapped_column(Text, nullable=False)
     # 4dd399c6: False=자동관리(제목 파생·untitled-* 교정 대상), True=사용자 고정(자동 교정 금지).
-    slug_locked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # story #3896 — DB has DEFAULT false, ORM lacked server_default (drift).
+    slug_locked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     content: Mapped[str] = mapped_column(Text, nullable=False, default="")
     icon: Mapped[str | None] = mapped_column(Text, nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

@@ -24,7 +24,8 @@ class AgentRoutingRule(Base):
     action: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     target_runtime: Mapped[str] = mapped_column(Text, nullable=False, default="openclaw")
     target_model: Mapped[str | None] = mapped_column(Text, nullable=True)
-    is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # story #3896 — DB has DEFAULT true, ORM lacked server_default (drift).
+    is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     rule_metadata: Mapped[dict] = mapped_column("metadata", JSONB, nullable=False, default=dict)
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(

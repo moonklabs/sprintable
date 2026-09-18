@@ -6,26 +6,40 @@ import { useLocale, useTranslations } from 'next-intl';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { CountBadge } from '@/components/ui/count-badge';
 import { Input } from '@/components/ui/input';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
-import { ToastContainer, useToast } from '@/components/ui/toast';
+import { useToast } from '@/components/ui/toast';
 import { EventDefinerForm } from '@/components/organization/event-definer-form';
 import {
   type DefinerFormState, deriveDefinition, emptyFormState, tryReverseParse, validateKeySuffix,
 } from '@/components/organization/event-definer-logic';
 import { EventDefinitionSummary } from '@/components/organization/event-definition-summary';
+import { ApplyRecipeDialog } from '@/components/organization/apply-recipe-dialog';
+import { stageRoleLabel } from '@/lib/stage-role';
+import { cyclicStages, isCyclicDefinition, type EventDefinitionResponse } from '@/components/loops/loop-create-dialog';
 import { fetchWithAuth } from '@/lib/db/client';
+import { formatRelativeTime } from '@/lib/storage/format';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { publishHistorySenderLabel } from '@/lib/member-display';
 
 // story #2664 — 목록(GET) 응답 모델(events.py EventDefinitionResponse)엔 아직 id가 없다
 // (BE #2663, PR#3069 재QA 중). id가 없는 항목은 수정/비활성 버튼을 아예 안 그린다 — #2663가
 // 머지되는 순간 이 화면은 코드 변경 없이 그 즉시 전 항목에서 수정/비활성이 열린다(forward-compat).
-interface EventDefinition {
+// story #3316 — name/description/stage_metadata를 loops/loop-create-dialog.tsx의
+// EventDefinitionResponse(SSOT)에서 그대로 얹는다(중복 선언 대신 재사용) — 카탈로그 상세 뷰가
+// 사이클형 정의의 stage_metadata(role/action/gate/capability)를 렌더링하고, "프로젝트에 적용"
+// 진입점(ApplyRecipeDialog)이 cyclicStages()/isCyclicDefinition() 판별을 그대로 재사용한다.
+interface EventDefinition extends Pick<EventDefinitionResponse, 'name' | 'description' | 'stage_metadata'> {
   id?: string;
   key: string;
   org_id: string | null;
-  payload_schema: Record<string, unknown>;
+  // cyclicStages()/isCyclicDefinition()(loop-create-dialog.tsx SSOT)이 요구하는
+  // properties.stage.enum 형태와 EventDefinitionSummary가 요구하는 Record<string, unknown>을
+  // 교집합으로 동시에 만족 — 이 화면이 두 소비처(요약 렌더러+사이클 판별)에 같은 필드를 넘긴다.
+  payload_schema: EventDefinitionResponse['payload_schema'] & Record<string, unknown>;
   routing: Record<string, unknown>;
   block_template: Record<string, unknown> | null;
   action_auth?: Record<string, unknown> | null;
@@ -60,7 +74,7 @@ export default function OrganizationEventsPage() {
   const isAdmin = currentRole === 'admin' || currentRole === 'owner';
   const t = useTranslations('organization');
   const tc = useTranslations('common');
-  const { toasts, addToast, dismissToast } = useToast();
+  const { addToast } = useToast();
 
   const [defs, setDefs] = useState<EventDefinition[]>([]);
   const [loading, setLoading] = useState(true);
@@ -70,6 +84,7 @@ export default function OrganizationEventsPage() {
   const [editTarget, setEditTarget] = useState<EventDefinition | null>(null);
   const [deactivateTarget, setDeactivateTarget] = useState<EventDefinition | null>(null);
   const [publishTarget, setPublishTarget] = useState<EventDefinition | null>(null);
+  const [applyTarget, setApplyTarget] = useState<EventDefinition | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -101,7 +116,7 @@ export default function OrganizationEventsPage() {
       });
       if (!res.ok) {
         const body = await res.json().catch(() => null) as { error?: { message?: string }; detail?: { message?: string } } | null;
-        throw new Error(body?.error?.message ?? body?.detail?.message ?? `HTTP ${res.status}`);
+        throw new Error(body?.error?.message ?? `HTTP ${res.status}`);
       }
       addToast({ type: 'success', title: t('eventDeactivateSuccessToast') });
       await refresh();
@@ -134,17 +149,22 @@ export default function OrganizationEventsPage() {
         <>
           <SectionCard>
             <SectionCardHeader>
-              <h2 className="text-base font-semibold text-foreground">
-                {t('eventsCustomGroupTitle')} ({customDefs.length})
+              {/* story #3737(E절, 유나 定) — 수를 제목 문자열 안에 넣지 않는다.
+                  제목 고정 + 수는 옆 배지로(구현 (4)류와 같은 형 문제). */}
+              <h2 className="flex items-center gap-2 text-base font-semibold text-foreground">
+                {t('eventsCustomGroupTitle')}
+                {/* 페드루 PO 적기만(#4082 리뷰) — CountBadge(trust/page.tsx와 동형). */}
+                <CountBadge count={customDefs.length} />
               </h2>
             </SectionCardHeader>
             <SectionCardBody>
               {customDefs.length > 0 ? (
                 <div className="divide-y divide-border overflow-hidden rounded-md border border-border">
-                  {customDefs.map((def) => (
+                  {customDefs.map((def, index) => (
                     <EventDefRow
                       key={def.key}
                       def={def}
+                      index={index}
                       expanded={expandedKey === def.key}
                       onToggleExpand={() => setExpandedKey((k) => (k === def.key ? null : def.key))}
                       readonly={false}
@@ -152,6 +172,7 @@ export default function OrganizationEventsPage() {
                       onEdit={() => setEditTarget(def)}
                       onDeactivate={() => setDeactivateTarget(def)}
                       onTestPublish={() => setPublishTarget(def)}
+                      onApply={() => setApplyTarget(def)}
                       t={t}
                     />
                   ))}
@@ -164,22 +185,28 @@ export default function OrganizationEventsPage() {
 
           <SectionCard>
             <SectionCardHeader>
-              <h2 className="text-base font-semibold text-foreground">
-                {t('eventsPresetGroupTitle')} ({presetDefs.length})
+              <h2 className="flex items-center gap-2 text-base font-semibold text-foreground">
+                {t('eventsPresetGroupTitle')}
+                <CountBadge count={presetDefs.length} />
               </h2>
               <p className="mt-1 text-xs text-muted-foreground">{t('eventsPresetReadonlyNote')}</p>
             </SectionCardHeader>
             <SectionCardBody>
               {presetDefs.length > 0 ? (
                 <div className="divide-y divide-border overflow-hidden rounded-md border border-border">
-                  {presetDefs.map((def) => (
+                  {presetDefs.map((def, index) => (
                     <EventDefRow
                       key={def.key}
                       def={def}
+                      index={index}
                       expanded={expandedKey === def.key}
                       onToggleExpand={() => setExpandedKey((k) => (k === def.key ? null : def.key))}
                       readonly
                       isAdmin={isAdmin}
+                      // story #3316 — 프리셋도 사이클형이면 gallery와 동형으로 "프로젝트에
+                      // 적용" 가능(프리셋=읽기전용은 "정의 자체 수정 불가"만 뜻함, 프로젝트
+                      // 바인딩 적용은 별개 축).
+                      onApply={() => setApplyTarget(def)}
                       t={t}
                     />
                   ))}
@@ -233,15 +260,23 @@ export default function OrganizationEventsPage() {
         tc={tc}
         addToast={addToast}
       />
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+      <ApplyRecipeDialog
+        target={applyTarget && applyTarget.id ? { ...applyTarget, id: applyTarget.id } : null}
+        open={applyTarget !== null}
+        onOpenChange={(open) => { if (!open) setApplyTarget(null); }}
+        t={t}
+        tc={tc}
+        addToast={addToast}
+      />
     </div>
   );
 }
 
 function EventDefRow({
-  def, expanded, onToggleExpand, readonly, isAdmin, onEdit, onDeactivate, onTestPublish, t,
+  def, index, expanded, onToggleExpand, readonly, isAdmin, onEdit, onDeactivate, onTestPublish, onApply, t,
 }: {
   def: EventDefinition;
+  index: number;
   expanded: boolean;
   onToggleExpand: () => void;
   readonly: boolean;
@@ -249,11 +284,21 @@ function EventDefRow({
   onEdit?: () => void;
   onDeactivate?: () => void;
   onTestPublish?: () => void;
+  onApply?: () => void;
   t: ReturnType<typeof useTranslations>;
 }) {
   // story #2664 — id 없는(구 목록 API, #2663 머지 전) 항목은 수정/비활성 버튼을 숨긴다(그릴 수
   // 없는 액션을 보여주는 게 UX상 더 나쁘다) — id가 실리는 순간 자동으로 나타난다.
   const canMutate = !readonly && isAdmin && !!def.id;
+  // story #3316 — "적용"은 사이클형(stage.enum이 있는) 정의에서만 의미가 있다(role_mapping이
+  // 붙을 stage가 아예 없으면 적용할 게 없다) — isCyclicDefinition()(loop-create-dialog SSOT)
+  // 그대로 재사용. id 필요조건은 canMutate와 동일 이유(ApplyRecipeDialog가 /apply 호출에 id 필요).
+  const canApply = isAdmin && !!def.id && isCyclicDefinition(def as unknown as EventDefinitionResponse);
+  // story #3745(name===key 잔존, 페드루 PO 決 2026-09-09) — `name || 폴백`만으론 org
+  // 커스텀 정의가 name=key로(코드 키를 그대로 이름 자리에) 등록된 옛 데이터를 못 잡는다
+  // (name이 빈 문자열이 아니라 truthy라 폴백이 안 걸림). 제목 자리 값을 한 곳에서
+  // 계산해 아래 부제 판정도 같은 값을 본다.
+  const titleLabel = def.name && def.name !== def.key ? def.name : t('eventUnnamedDefinition');
   return (
     <div className="p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -262,27 +307,70 @@ function EventDefRow({
             <button
               type="button"
               onClick={onToggleExpand}
-              className="truncate font-mono text-sm text-foreground hover:underline"
+              className="truncate text-sm text-foreground hover:underline"
+              data-testid={`event-def-toggle-${def.key}`}
             >
-              {def.key}
+              {titleLabel}
             </button>
+            {/* story #3737(D2, 유나 定) — 정의의 «사람 이름»(표시명)이 눌리는 컨트롤의
+                라벨이고, 코드 키는 그 아래 작은 글씨 부제로만.
+                story #3745(페드루 PO 決·유나 定 2026-09-09) — name이 비어 있으면(#3737
+                D2 잔존) 옛 `name || key` 폴백(raw 코드 키가 제목 자리에 서던 결함)을
+                걷고 정직한 「이름 없는 이벤트」로(지어낸 이름 아님 — 모름을 모름이라
+                쓴다, D2/D3와 같은 급). 부제는 제목이 이미 key와 같은 값이 아닐 때만
+                그린다(title===key인 자리, 예: org 커스텀 정의가 스스로 name=key로
+                등록한 옛 데이터)면 같은 값이 한 줄에 두 번 서는 것을 그대로 막는다
+                (#4082 CHANGES②와 같은 원칙 — 판정 축만 title로 일반화). */}
+            {titleLabel !== def.key ? (
+              <span
+                data-testid={`event-def-key-subtitle-${def.key}`}
+                className="truncate font-mono text-[11px] text-muted-foreground"
+              >
+                {def.key}
+              </span>
+            ) : null}
             <Badge variant={def.enabled ? 'success' : 'secondary'}>
               {def.enabled ? t('eventEnabledBadge') : t('eventDisabledBadge')}
             </Badge>
             <Badge variant="outline">{t('eventVersionLabel', { version: def.version })}</Badge>
           </div>
         </div>
+        {/* story #3592(§17-20 ⑧·§22-18 동형) — 행마다 같은 접근 이름이라 보조기술
+            버튼 목록에서 어느 이벤트 정의 행인지 못 가른다. customDefs·presetDefs는
+            화면상 별개 목록(제목이 다른 SectionCard 둘)이라 순번은 각 목록 안에서
+            1부터 다시 센다(호출부 두 곳이 각자 map index를 넘긴다). */}
         <div className="flex shrink-0 gap-1.5">
           {!readonly && isAdmin ? (
-            <Button size="sm" variant="ghost" disabled={!def.enabled} onClick={onTestPublish}>
+            <Button
+              size="sm" variant="ghost" disabled={!def.enabled} onClick={onTestPublish}
+              aria-label={t('eventRowActionAriaLabel', { n: index + 1, label: t('eventTestPublishCta') })}
+            >
               {t('eventTestPublishCta')}
+            </Button>
+          ) : null}
+          {canApply ? (
+            <Button
+              size="sm" variant="outline" onClick={onApply}
+              aria-label={t('eventRowActionAriaLabel', { n: index + 1, label: t('eventApplyCta') })}
+            >
+              {t('eventApplyCta')}
             </Button>
           ) : null}
           {canMutate ? (
             <>
-              <Button size="sm" variant="outline" onClick={onEdit}>{t('eventEditCta')}</Button>
+              <Button
+                size="sm" variant="outline" onClick={onEdit}
+                aria-label={t('eventRowActionAriaLabel', { n: index + 1, label: t('eventEditCta') })}
+              >
+                {t('eventEditCta')}
+              </Button>
               {def.enabled ? (
-                <Button size="sm" variant="destructive" onClick={onDeactivate}>{t('eventDeactivateCta')}</Button>
+                <Button
+                  size="sm" variant="destructive" onClick={onDeactivate}
+                  aria-label={t('eventRowActionAriaLabel', { n: index + 1, label: t('eventDeactivateCta') })}
+                >
+                  {t('eventDeactivateCta')}
+                </Button>
               ) : null}
             </>
           ) : null}
@@ -299,6 +387,28 @@ function EventDefRow({
             actionAuth={def.action_auth}
             blockTemplate={def.block_template}
           />
+          {/* story #3316 — 사이클형 정의의 stage_metadata(role/action/gate/capability)를
+              카탈로그 상세에도 노출한다(loop-create-dialog.tsx:295-310 렌더 패턴 재사용) —
+              지금까지는 loop 생성 다이얼로그 미리보기에서만 보였고, 그 stage 목록이 정확히
+              무엇을 뜻하는지 확인할 곳이 카탈로그 자체엔 없었다. */}
+          {cyclicStages(def as unknown as EventDefinitionResponse).length > 0 ? (
+            <div className="space-y-1 rounded-lg border border-dashed border-border bg-muted/30 p-2 text-[10.5px] text-muted-foreground">
+              <p className="font-medium text-foreground">{t('eventStageMetaLabel')}</p>
+              <ol className="list-decimal space-y-1 pl-4">
+                {cyclicStages(def as unknown as EventDefinitionResponse).map((stage) => {
+                  const meta = def.stage_metadata[stage];
+                  return (
+                    <li key={stage} className="break-words">
+                      <span className="font-medium text-foreground">{meta?.action ?? stage}</span>
+                      {meta?.role ? <> ({stageRoleLabel(meta.role, t)})</> : null}
+                      {meta?.gate ? <div>{t('eventStageMetaGateLabel', { type: meta.gate.type ?? '' })}</div> : null}
+                      {meta?.capability ? <div>{t('eventStageMetaCapabilityLabel', { kind: meta.capability.kind ?? '' })}</div> : null}
+                    </li>
+                  );
+                })}
+              </ol>
+            </div>
+          ) : null}
           {/* PR#3087 — 이 조회 자체가 BE org admin/owner 게이트라, 일반 멤버는 조회하면
               항상 403이라 아예 안 그린다(모두가 여는 매 행마다 헛된 실패 fetch 방지). */}
           {isAdmin ? <PublishHistorySection definitionKey={def.key} t={t} /> : null}
@@ -322,6 +432,8 @@ type PublishHistoryState = { kind: 'loading' } | { kind: 'resolved'; items: Publ
 
 function PublishHistorySection({ definitionKey, t }: { definitionKey: string; t: ReturnType<typeof useTranslations> }) {
   const locale = useLocale();
+  const tc = useTranslations('common');
+  const displayTimezone = resolveDisplayTimezone().tz;
   const [state, setState] = useState<PublishHistoryState>({ kind: 'loading' });
 
   useEffect(() => {
@@ -353,9 +465,9 @@ function PublishHistorySection({ definitionKey, t }: { definitionKey: string; t:
         <ul className="space-y-1 rounded-md border border-border bg-muted/40 p-2">
           {state.items.map((item) => (
             <li key={item.id} className="flex flex-wrap items-center justify-between gap-2 text-xs">
-              <span className="text-foreground">{item.sender_name ?? t('eventPublishHistoryUnknownSender')}</span>
+              <span className="text-foreground">{publishHistorySenderLabel(item, t, tc)}</span>
               <span className="flex items-center gap-2 text-muted-foreground">
-                {new Date(item.created_at).toLocaleString(locale, { dateStyle: 'short', timeStyle: 'short' })}
+                {formatRelativeTime(item.created_at, locale, displayTimezone)}
                 <Link href={`/chats/${item.conversation_id}`} className="text-primary hover:underline">
                   {t('eventPublishHistoryOpenChat')}
                 </Link>
@@ -383,6 +495,8 @@ function EventFormDialog({
 }) {
   const { currentTeamMemberId } = useDashboardContext();
   const prefix = `org.${orgSlug || '{org}'}.`;
+  // story #3745(페드루 PO 決) — 정의 편집 폼에 이름 필드(옛 화면엔 자리 자체가 없었다).
+  const [name, setName] = useState('');
   const [keySuffix, setKeySuffix] = useState('');
   const [payloadSchema, setPayloadSchema] = useState(DEFAULT_PAYLOAD_SCHEMA);
   const [routing, setRouting] = useState(DEFAULT_ROUTING);
@@ -408,6 +522,7 @@ function EventFormDialog({
   useEffect(() => {
     if (!open) return;
     if (mode === 'edit' && target) {
+      setName(target.name ?? '');
       setKeySuffix(target.key.startsWith(`org.${orgSlug}.`) ? target.key.slice(`org.${orgSlug}.`.length) : target.key);
       setPayloadSchema(JSON.stringify(target.payload_schema, null, 2));
       setRouting(JSON.stringify(target.routing, null, 2));
@@ -421,6 +536,7 @@ function EventFormDialog({
       else { setDefinerState(emptyFormState()); setTab('advanced'); setAdvancedOnly(true); }
       setSavedKey(target.key);
     } else {
+      setName('');
       setKeySuffix('');
       setPayloadSchema(DEFAULT_PAYLOAD_SCHEMA);
       setRouting(DEFAULT_ROUTING);
@@ -447,11 +563,15 @@ function EventFormDialog({
     setSaving(true);
     setError(null);
     try {
+      // story #3745 — BE가 이미 422로 막지만(공백뿐인 값도) 왕복 없이 그 자리에서 먼저
+      // 말해준다(정의 폼의 다른 필드들과 같은 클라측 선검증 관례, definerKeyError와 동형).
+      if (!name.trim()) throw new Error(t('eventNameRequiredError'));
       let body: Record<string, unknown>;
       if (tab === 'basic') {
         if (definerKeyError) throw new Error(definerKeyError === 'empty' ? t('definerKeyErrorEmpty') : t('definerKeyErrorCharset'));
         const derived = deriveDefinition(definerState, orgSlug);
         body = {
+          name: name.trim(),
           payload_schema: derived.payload_schema,
           routing: derived.routing,
           block_template: derived.block_template,
@@ -463,6 +583,7 @@ function EventFormDialog({
         const roles = rolesCsv.split(',').map((r) => r.trim()).filter(Boolean);
         const actionAuth = humanOnly || roles.length > 0 ? { human_only: humanOnly, role: roles } : null;
         body = {
+          name: name.trim(),
           payload_schema: parseJsonField(payloadSchema, t('eventPayloadSchemaLabel')),
           routing: parseJsonField(routing, t('eventRoutingLabel')),
           block_template: blockTemplate.trim() ? parseJsonField(blockTemplate, t('eventBlockTemplateLabel')) : null,
@@ -487,7 +608,7 @@ function EventFormDialog({
       }
       if (!res.ok) {
         const resBody = await res.json().catch(() => null) as { error?: { message?: string }; detail?: { message?: string } } | null;
-        throw new Error(resBody?.error?.message ?? resBody?.detail?.message ?? `HTTP ${res.status}`);
+        throw new Error(resBody?.error?.message ?? `HTTP ${res.status}`);
       }
       // POST /api/events/definitions는 raw passthrough(proxyToFastapi, apiSuccess로 안 감쌈)라
       // BE(EventDefinitionDetailResponse)를 그대로 준다 — {data:...}가 아니다. 다만 이 계층
@@ -575,6 +696,25 @@ function EventFormDialog({
           {tab === 'advanced' ? <DialogDescription>{t('eventKeyPrefixHint', { slug: orgSlug || '{org}' })}</DialogDescription> : null}
         </DialogHeader>
         <div className="min-h-0 flex-1 overflow-y-auto px-1">
+          {/* story #3745(페드루 PO 決·유나 定 2026-09-09) — 이 필드가 화면 제목 자리에
+              쓰이는 유일한 소스다(둘 다 config가 아니라 그 위 표시명이라 basic/advanced
+              탭 구분과 무관 — 탭 전환에도 값이 안 사라지게 탭 조건 밖에 둔다). PATCH는
+              생략을 허용하지만 이 폼은 항상 실어 보낸다(수정 폼을 열면 현재 값이 이미
+              채워져 있어 "생략"할 이유가 없다 — 사람이 지우고 빈 채로 저장하면 서버가
+              422로 막는다, BE 계약 그대로 클라도 재확인). */}
+          <div className="mb-3">
+            <label className="mb-1 block text-[11px] font-semibold text-muted-foreground" htmlFor="event-name">
+              {t('eventNameLabel')}
+            </label>
+            <Input
+              id="event-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder={t('eventNamePlaceholder')}
+              className="text-sm"
+            />
+            {!name.trim() ? <p className="mt-1 text-[11px] text-muted-foreground">{t('eventNameHint')}</p> : null}
+          </div>
           {tab === 'basic' ? (
             <EventDefinerForm
               state={definerState}
@@ -626,7 +766,7 @@ function EventFormDialog({
             </div>
           )}
           {error ? (
-            <p role="alert" aria-live="assertive" className="mt-3 rounded-md border border-destructive/30 bg-destructive/8 px-3 py-2 text-xs text-foreground">
+            <p role="alert" aria-live="assertive" className="mt-3 rounded-md border border-destructive/30 bg-destructive-tint px-3 py-2 text-xs text-foreground">
               {error}
             </p>
           ) : null}
@@ -638,7 +778,9 @@ function EventFormDialog({
           {mode === 'create' && savedKey ? null : (
             <Button
               onClick={() => void submit()}
-              disabled={saving || (tab === 'advanced' ? mode === 'create' && !!advancedKeyError : !!definerKeyError)}
+              // story #3745 — key 검증(definerKeyError/advancedKeyError)과 같은 fail-closed
+              // 관례(비활성, 클릭 뒤 에러 아님) — 이름도 같은 급의 필수 필드다.
+              disabled={saving || !name.trim() || (tab === 'advanced' ? mode === 'create' && !!advancedKeyError : !!definerKeyError)}
             >
               {saving ? '...' : mode === 'create' ? t('eventCreateSubmit') : t('eventEditSubmit')}
             </Button>
@@ -696,7 +838,7 @@ function TestPublishDialog({
       });
       if (!res.ok) {
         const body = await res.json().catch(() => null) as { error?: { message?: string }; detail?: { message?: string } } | null;
-        throw new Error(body?.error?.message ?? body?.detail?.message ?? `HTTP ${res.status}`);
+        throw new Error(body?.error?.message ?? `HTTP ${res.status}`);
       }
       addToast({ type: 'success', title: t('eventTestPublishSuccessToast') });
       onOpenChange(false);
@@ -716,7 +858,7 @@ function TestPublishDialog({
         </DialogHeader>
         <JsonField id="event-test-publish-payload" label={t('eventTestPublishPayloadLabel')} value={payload} onChange={setPayload} />
         {error ? (
-          <p role="alert" aria-live="assertive" className="rounded-md border border-destructive/30 bg-destructive/8 px-3 py-2 text-xs text-foreground">
+          <p role="alert" aria-live="assertive" className="rounded-md border border-destructive/30 bg-destructive-tint px-3 py-2 text-xs text-foreground">
             {error}
           </p>
         ) : null}

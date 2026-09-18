@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { formatRelativeTime } from '@/lib/storage/format';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { fetchWithAuth } from '@/lib/db/client';
 
 export interface RejectedRelationItem {
@@ -52,6 +53,8 @@ type LoadState = { kind: 'loading' } | { kind: 'failed' } | { kind: 'ready'; row
  */
 export function RejectedRelationsSection({ storyId }: { storyId: string }) {
   const t = useTranslations('board');
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
 
   useEffect(() => {
@@ -119,7 +122,7 @@ export function RejectedRelationsSection({ storyId }: { storyId: string }) {
             <div className="flex items-start gap-2">
               <div className="min-w-0 flex-1">
                 <span className="text-foreground [overflow-wrap:anywhere]">{title ?? t('rejectedRelationsTargetGone')}</span>
-                <div className="text-[10px] text-muted-foreground">{formatRelativeTime(item.rejected_at)}</div>
+                <div className="text-[10px] text-muted-foreground">{formatRelativeTime(item.rejected_at, locale, displayTimezone)}</div>
               </div>
               {restored ? (
                 // AC6 — 「다시 후보로 올라올 수 있습니다」까지만 말한다(시점 약속 없음).

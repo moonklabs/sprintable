@@ -11,7 +11,8 @@ from app.core.database import Base
 class ActivityLog(Base):
     __tablename__ = "activity_logs"
     __table_args__ = (
-        CheckConstraint("actor_type IN ('agent', 'human')", name="ck_activity_logs_actor_type"),
+        # story #3369(Phase0 S3, migration 0311) — 'platform'(서버 자신의 기계적 실행) 추가.
+        CheckConstraint("actor_type IN ('agent', 'human', 'platform')", name="ck_activity_logs_actor_type"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

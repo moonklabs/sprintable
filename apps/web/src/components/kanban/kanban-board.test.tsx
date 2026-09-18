@@ -63,6 +63,12 @@ vi.mock('@dnd-kit/core', async (importOriginal) => {
 
 let container: HTMLDivElement;
 let root: Root;
+// story #3759 — kanban-board.tsx는 이제 저장오류 배너를 useDashboardContext().
+// bottomDockBannerSlot으로 포털한다(BottomDock 소유 dock 컬럼 실물 대신 테스트용 DOM
+// 노드). `container`(createRoot 대상) 밖에 별도로 붙인다 — createRoot는 자기 container의
+// 자식 전체를 소유해 렌더마다 지우므로, container 안에 미리 넣어두면 첫 렌더에 사라진다.
+// 배너 관련 단언은 `bannerSlot`을 직접 쿼리한다(container 대신).
+let bannerSlot: HTMLDivElement;
 
 function wrap(node: React.ReactNode) {
   return (
@@ -144,10 +150,15 @@ function dispatchSse(eventName: string, data: unknown) {
 beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
+  bannerSlot = document.createElement('div');
+  document.body.appendChild(bannerSlot);
   root = createRoot(container);
   stubLocalStorage();
   stubEventSource();
-  useDashboardContextMock.mockReturnValue({ currentTeamMemberId: 'me-1', projectMemberships: [], orgMemberships: [], currentMemberType: 'human' });
+  useDashboardContextMock.mockReturnValue({
+    currentTeamMemberId: 'me-1', projectMemberships: [], orgMemberships: [], currentMemberType: 'human',
+    bottomDockBannerSlot: bannerSlot,
+  });
   capturedDragEndHandlers.length = 0;
   isMobileMock = false;
 });
@@ -155,13 +166,34 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => { root.unmount(); });
   container.remove();
+  bannerSlot.remove();
   vi.unstubAllGlobals();
   vi.resetModules();
 });
 
+// story #3759 — kanban-board.tsx가 useToast()로 공유 Context를 구독한다. afterEach의
+// vi.resetModules()가 모듈 레지스트리를 지우므로, 이 파일 최상단에서 한 번 정적 import한
+// ToastProvider/ToastContainer/useToast와 kanban-board.tsx가(동적 import 뒤) 실제로 읽는
+// 모듈 인스턴스가 서로 달라져(각자 다른 createContext() 결과물) Provider 밖 에러가 났다 —
+// kanban-board.tsx와 «같은» 새로 뜬 모듈 인스턴스를 매 mount()마다 함께 동적 import해
+// 이 파일도 그 인스턴스를 쓴다(정적 import 사본 0, 같은 자리에서 같이 새로 뜬다).
 async function mount() {
   const { KanbanBoard } = await import('./kanban-board');
-  await act(async () => { root.render(wrap(<KanbanBoard projectId="proj-1" wsSlug="ws-1" projSlug="proj-1" />)); });
+  const { ToastProvider, ToastContainer, useToast } = await import('@/components/ui/toast');
+
+  function TestToastRenderer() {
+    const { toasts, dismissToast } = useToast();
+    return <ToastContainer toasts={toasts} onDismiss={dismissToast} />;
+  }
+
+  await act(async () => {
+    root.render(wrap(
+      <ToastProvider>
+        <KanbanBoard projectId="proj-1" wsSlug="ws-1" projSlug="proj-1" />
+        <TestToastRenderer />
+      </ToastProvider>,
+    ));
+  });
   await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 }
 
@@ -173,8 +205,8 @@ describe('KanbanBoard — 보드 first-touch 절제된 배너', () => {
     expect(html).toContain('아직 움직이는 일이 없어요');
     expect(html).toContain('보드는 사람과 AI가 맡은 일이 지금 흐르는 곳이에요');
     expect(html).toContain('첫 스토리 만들기');
-    // 컬럼 그리드가 대체가 아니라 유지된다 — 기존 per-column "스토리가 없습니다" 플레이스홀더도 여전히 존재.
-    expect(html).toContain('스토리가 없습니다');
+    // 컬럼 그리드가 대체가 아니라 유지된다 — 기존 per-column "스토리가 없어요" 플레이스홀더도 여전히 존재.
+    expect(html).toContain('스토리가 없어요');
   });
 
   it('배너 CTA 클릭 시 트러스트 뷰 queued 컬럼의 인라인 컴포저(제목 입력 필드)가 열린다 — 축 전환 없음', async () => {
@@ -260,9 +292,11 @@ describe('KanbanBoard — 보드 first-touch 절제된 배너', () => {
 // 단독 실행(부하 적음)에서는 우연히 통과하고 287파일 전체 스위트(부하 큼·이벤트루프 지터
 // 증가)에서만 간헐적으로 실패하는 결과 불안정을 냈다(직접 확認 — 전체 스위트 3회 중 2회
 // 실패, 파일 단독은 항상 통과). 고정 틱 대신 실제 DOM 조건이 나타날 때까지 짧게 폴링한다.
+// story #3759 — 이 배너는 이제 container가 아니라 bannerSlot(BottomDock 대역 DOM 노드)으로
+// 포털된다(createPortal) — 쿼리 대상도 그에 맞춰 bannerSlot으로.
 async function waitForAlert(): Promise<Element | null> {
   for (let i = 0; i < 20; i++) {
-    const el = container.querySelector('[role="alert"]');
+    const el = bannerSlot.querySelector('[role="alert"]');
     if (el) return el;
     await act(async () => { await Promise.resolve(); });
   }
@@ -273,12 +307,31 @@ async function waitForAlert(): Promise<Element | null> {
 // 단순히 "alert가 있다"만 보면 아직 언마운트되지 않은 1차 알림을 그대로 재포착해 오탐할 수 있다.
 async function waitForFreshAlert(excludeNode: Element): Promise<Element | null> {
   for (let i = 0; i < 20; i++) {
-    const el = container.querySelector('[role="alert"]');
+    const el = bannerSlot.querySelector('[role="alert"]');
     if (el && el !== excludeNode) return el;
     await act(async () => { await Promise.resolve(); });
   }
   return null;
 }
+
+// story #3519(§16-7 2부, PO 確定 2026-09-05) — storyResults(보드 몸통, 주)와
+// sprintsRes/epicsRes/membersRes(부수)가 미격리 Promise.all에 있어, 부수 하나가
+// 네트워크단 reject하면 보드 주 데이터까지 조용히 텅 비던 결함의 회귀가드.
+describe('KanbanBoard — Promise.all 부수 격리(story #3519)', () => {
+  it('/api/members가 네트워크 reject해도 스토리(주 데이터)는 그대로 뜬다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (typeof url === 'string' && url.startsWith('/api/stories?')) {
+        const status = new URL(url, 'http://localhost').searchParams.get('status');
+        const matched = status === 'backlog' ? [{ id: 's1', title: '살아남은 스토리', status: 'backlog', priority: 'medium', trust_stage: 'queued' }] : [];
+        return { ok: true, json: async () => ({ data: matched, meta: { total: matched.length, nextCursor: null } }) };
+      }
+      if (typeof url === 'string' && url.startsWith('/api/members')) throw new Error('network down');
+      return { ok: false, json: async () => null };
+    }));
+    await mount();
+    expect(container.textContent).toContain('살아남은 스토리');
+  });
+});
 
 describe('KanbanBoard — 스토리 생성 실패 접근성(story #2105 2차)', () => {
   it('생성 실패 시 role="alert" aria-live="assertive"로 배너가 렌더된다', async () => {
@@ -298,8 +351,13 @@ describe('KanbanBoard — 스토리 생성 실패 접근성(story #2105 2차)', 
     });
     const alertEl = await waitForAlert();
     expect(alertEl).not.toBeNull();
-    expect(alertEl?.textContent).toContain('스토리 추가에 실패했습니다');
+    expect(alertEl?.textContent).toContain('스토리 추가에 실패했어요');
     expect(alertEl?.getAttribute('aria-live')).toBe('assertive');
+    // story 3466 후속(무효 유틸 4곳) — 이 배너가 no-op text-destructive-foreground
+    // 대신 실 렌더 색을 갖는지.
+    expect(alertEl?.className).toContain('text-white');
+    expect(alertEl?.className).toContain('dark:text-proof-bg');
+    expect(alertEl?.className).not.toContain('text-destructive-foreground');
   });
 
   // story #2154 — transitionError는 4초 후 자동 setTransitionError(null)로만 해소되고, 재시도
@@ -374,7 +432,7 @@ describe('KanbanBoard — 실시간(SSE) 반영', () => {
       });
       await Promise.resolve();
     });
-    expect(container.textContent).toContain('댄님이 S1 상태를 변경했습니다');
+    expect(container.textContent).toContain('댄님이 S1 상태를 변경했어요');
   });
 
   it('내 액션의 echo(actor_id===currentTeamMemberId)는 토스트를 안 띄운다(중복 방지)', async () => {
@@ -387,7 +445,7 @@ describe('KanbanBoard — 실시간(SSE) 반영', () => {
       });
       await Promise.resolve();
     });
-    expect(container.textContent).not.toContain('상태를 변경했습니다');
+    expect(container.textContent).not.toContain('상태를 변경했어요');
   });
 
   it('다른 project_id의 이벤트는 무시한다(org-wide 브로드캐스트 클라이언트 필터)', async () => {
@@ -400,7 +458,7 @@ describe('KanbanBoard — 실시간(SSE) 반영', () => {
       });
       await Promise.resolve();
     });
-    expect(container.textContent).not.toContain('상태를 변경했습니다');
+    expect(container.textContent).not.toContain('상태를 변경했어요');
   });
 
   it('아직 로드되지 않은 스토리 id의 이벤트는 조용히 무시한다(크래시 없음)', async () => {
@@ -413,7 +471,7 @@ describe('KanbanBoard — 실시간(SSE) 반영', () => {
       });
       await Promise.resolve();
     });
-    expect(container.textContent).not.toContain('상태를 변경했습니다');
+    expect(container.textContent).not.toContain('상태를 변경했어요');
   });
 
   it('담당자 변경 이벤트도 토스트로 드러난다', async () => {
@@ -426,7 +484,7 @@ describe('KanbanBoard — 실시간(SSE) 반영', () => {
       });
       await Promise.resolve();
     });
-    expect(container.textContent).toContain('까심님이 S1 담당자를 변경했습니다');
+    expect(container.textContent).toContain('까심님이 S1 담당자를 변경했어요');
   });
 
   // story #2130 — 토스트만 뜨고 카드 화면(아바타)은 안 바뀌던 결함의 회귀가드. StoryCard는
@@ -470,7 +528,7 @@ describe('KanbanBoard — 실시간(SSE) 반영', () => {
     });
     // 토스트는 여전히 뜬다(핸들러가 실행됐다는 관측 가능한 신호) — 카드 시각 확認은 memberMap
     // 의존이라 이 테스트 범위 밖(멤버 목록 자체가 별건).
-    expect(container.textContent).toContain('오르테가님이 S1 담당자를 변경했습니다');
+    expect(container.textContent).toContain('오르테가님이 S1 담당자를 변경했어요');
   });
 
   // story #2172 AC5 — BE(#2476)는 이미 story.position_changed를 발행하고 있었으나 FE 구독이
@@ -487,7 +545,7 @@ describe('KanbanBoard — 실시간(SSE) 반영', () => {
       });
       await Promise.resolve();
     });
-    expect(container.textContent).toContain('유나님이 S1 순서를 변경했습니다');
+    expect(container.textContent).toContain('유나님이 S1 순서를 변경했어요');
   });
 
   it('순서 변경 시 카드가 같은 컬럼 안에서 실제로 재배치된다(#2172 AC5②)', async () => {
@@ -527,7 +585,7 @@ describe('KanbanBoard — 실시간(SSE) 반영', () => {
       });
       await Promise.resolve();
     });
-    expect(container.textContent).not.toContain('순서를 변경했습니다');
+    expect(container.textContent).not.toContain('순서를 변경했어요');
   });
 
   it('내 액션의 echo(actor_id===currentTeamMemberId)는 순서 변경 토스트도 안 띄운다', async () => {
@@ -540,7 +598,7 @@ describe('KanbanBoard — 실시간(SSE) 반영', () => {
       });
       await Promise.resolve();
     });
-    expect(container.textContent).not.toContain('순서를 변경했습니다');
+    expect(container.textContent).not.toContain('순서를 변경했어요');
   });
 });
 
@@ -623,6 +681,249 @@ describe('KanbanBoard — 실시간(SSE) 상세 패널 동기화(#2137)', () => 
   });
 });
 
+// story #3588 — StoryDetailPanel이 selectedStory prop만 바뀌고 리마운트 안 되면(kanban-board.tsx/
+// epic-swimlane-board.tsx 둘 다 <StoryDetailPanel key 없이> 소비) editingTitle 등 로컬 state가
+// A→B 카드 전환 뒤에도 살아남는다. key={story.id}로 통짜 리마운트해 전부 초기화되는지 고정한다.
+describe('KanbanBoard — 상세 패널 story 전환 시 로컬 state 리셋(#3588)', () => {
+  async function openPanel(title: string) {
+    const card = container.querySelector(`[title="${title}"]`) as HTMLElement | null;
+    expect(card).not.toBeNull();
+    await act(async () => {
+      card!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+  }
+
+  it('A에서 제목 편집모드 진입 후 B로 전환하면 편집모드가 자동으로 닫힌다', async () => {
+    stubFetch([
+      { id: 's1', title: 'S1', status: 'backlog', priority: 'medium' },
+      { id: 's2', title: 'S2', status: 'backlog', priority: 'medium' },
+    ]);
+    await mount();
+    await openPanel('S1');
+    const dialog = () => container.querySelector('[role="dialog"]') as HTMLElement;
+    expect(dialog()).not.toBeNull();
+
+    const titleButton = dialog().querySelector('h2')!.closest('button') as HTMLElement;
+    await act(async () => {
+      titleButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(dialog().querySelector('[data-testid="story-title-input"]')).not.toBeNull();
+
+    await openPanel('S2');
+
+    expect(dialog().querySelector('[data-testid="story-title-input"]')).toBeNull();
+    expect(dialog().textContent).toContain('S2');
+  });
+});
+
+// story #3704(유나 발견+카디르 비블로커, #4054 재리뷰 中) — handleStoryClick이 진입 시
+// storyTasks 자신을 안 비우고, A→B 연타에서 늦게 온 A 응답이 B의 tasks/nextCursor/totalCount를
+// 덮을 수 있었다(형제 epic-swimlane-board.tsx엔 cancelled 가드가 있는데 kanban-board만 없었다).
+function deferredTaskResponse() {
+  let resolve!: (v: { ok: boolean; json: () => Promise<unknown> }) => void;
+  const promise = new Promise<{ ok: boolean; json: () => Promise<unknown> }>((res) => { resolve = res; });
+  return { promise, resolve };
+}
+
+function taskOk(rows: Array<{ id: string; title: string; status: string }>, totalCount: number, nextCursor: string | null = null) {
+  return { ok: true, json: async () => ({ data: rows, meta: { nextCursor, totalCount } }) };
+}
+
+function stubFetchWithTasks(
+  stories: Array<Record<string, unknown> & { status: string }>,
+  taskHandlers: Record<string, (url: string) => Promise<{ ok: boolean; json: () => Promise<unknown> }>>,
+) {
+  const withTrustStage = stories.map((s) => ('trust_stage' in s ? s : { ...s, trust_stage: deriveDefaultTrustStage(s.status) }));
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (typeof url === 'string' && url.startsWith('/api/stories?')) {
+      const status = new URL(url, 'http://localhost').searchParams.get('status');
+      const matched = withTrustStage.filter((s) => s.status === status);
+      return { ok: true, json: async () => ({ data: matched, meta: { total: matched.length, nextCursor: null } }) };
+    }
+    if (typeof url === 'string' && url.startsWith('/api/members')) {
+      return { ok: true, json: async () => ({ data: [] }) };
+    }
+    if (typeof url === 'string' && url.startsWith('/api/tasks?story_id=')) {
+      const storyId = new URL(url, 'http://localhost').searchParams.get('story_id')!;
+      const handler = taskHandlers[storyId];
+      if (handler) return handler(url);
+      return taskOk([], 0);
+    }
+    return { ok: false, json: async () => null };
+  }));
+}
+
+describe('KanbanBoard — handleStoryClick storyTasks 리셋·취소 가드(story #3704)', () => {
+  async function clickStory(title: string) {
+    const card = container.querySelector(`[title="${title}"]`) as HTMLElement | null;
+    expect(card).not.toBeNull();
+    await act(async () => {
+      card!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+  }
+
+  it('A 로드 後 B 클릭 응답 500 — B 패널에 A의 태스크가 한 건도 안 남는다(blocker①)', async () => {
+    stubFetchWithTasks(
+      [
+        { id: 's1', title: 'S1', status: 'backlog', priority: 'medium' },
+        { id: 's2', title: 'S2', status: 'backlog', priority: 'medium' },
+      ],
+      {
+        s1: () => Promise.resolve(taskOk([{ id: 't1', title: 'A태스크', status: 'todo' }], 1)),
+        s2: () => Promise.resolve({ ok: false, json: async () => null }),
+      },
+    );
+    await mount();
+    await clickStory('S1');
+    const dialog = () => container.querySelector('[role="dialog"]') as HTMLElement;
+    expect(dialog().textContent).toContain('A태스크');
+
+    await clickStory('S2');
+    expect(dialog().textContent).not.toContain('A태스크'); // 옛 스토리 태스크가 남으면 안 됨.
+    expect(dialog().textContent).toContain(koMessages.board.noTasks); // 정직한 빈 상태.
+  });
+
+  it('A 클릭→B 클릭, A 응답이 B보다 늦게 도착 — 패널은 끝까지 B 값이다(blocker②)', async () => {
+    const aResponse = deferredTaskResponse();
+    stubFetchWithTasks(
+      [
+        { id: 's1', title: 'S1', status: 'backlog', priority: 'medium' },
+        { id: 's2', title: 'S2', status: 'backlog', priority: 'medium' },
+      ],
+      {
+        s1: () => aResponse.promise,
+        s2: () => Promise.resolve(taskOk([{ id: 't2', title: 'B태스크', status: 'todo' }], 1)),
+      },
+    );
+    await mount();
+    await clickStory('S1'); // A 요청 발화 — 아직 응답 안 옴(deferred).
+    await clickStory('S2'); // B 요청 발화+즉시 응답 — 패널은 B 값으로 정착.
+
+    const dialog = () => container.querySelector('[role="dialog"]') as HTMLElement;
+    expect(dialog().textContent).toContain('B태스크');
+
+    await act(async () => { // 이제야 A의 늦은 응답이 도착 — 요청 순번이 안 맞아 버려져야 한다.
+      aResponse.resolve(taskOk([{ id: 't1', title: 'A태스크', status: 'todo' }], 1));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(dialog().textContent).toContain('B태스크'); // 여전히 B.
+    expect(dialog().textContent).not.toContain('A태스크'); // 늦게 온 A가 덮으면 안 됨.
+  });
+
+  // story #3704 후속(카디르 재-QA, PR#4055 2026-09-09) — 위 requestId 대조가 fetch 직후
+  // (res.json() 파싱 前)에만 있어, res.json() 자체가 비동기라 그 파싱 사이에 새 클릭이
+  // 순번을 올릴 수 있다 — 파싱 뒤(상태 반영 직전) 재대조가 없으면 옛 결과가 새 클릭보다
+  // 늦게 커밋된다.
+  it('res.json() 파싱 사이 새 클릭이 순번을 올리면 늦게 파싱된 A 결과를 커밋하지 않는다(blocker②-2)', async () => {
+    let resolveABody!: (v: unknown) => void;
+    const aBody = new Promise((res) => { resolveABody = res; });
+    stubFetchWithTasks(
+      [
+        { id: 's1', title: 'S1', status: 'backlog', priority: 'medium' },
+        { id: 's2', title: 'S2', status: 'backlog', priority: 'medium' },
+      ],
+      {
+        s1: () => Promise.resolve({ ok: true, json: () => aBody }), // fetch 레벨은 즉시 도착 — json() 파싱만 지연.
+        s2: () => Promise.resolve(taskOk([{ id: 't2', title: 'B태스크', status: 'todo' }], 1)),
+      },
+    );
+    await mount();
+    await clickStory('S1'); // A의 fetch 레벨 대조는 이미 통과 — 지금은 res.json() 파싱 대기 중.
+
+    await clickStory('S2'); // B로 이동 — requestId가 여기서 올라간다.
+    const dialog = () => container.querySelector('[role="dialog"]') as HTMLElement;
+    expect(dialog().textContent).toContain('B태스크');
+
+    await act(async () => { // A의 json() 파싱이 이제야 끝난다 — 파싱 뒤 재대조가 없으면 여기서 B를 덮는다.
+      resolveABody({ data: [{ id: 't1', title: 'A태스크', status: 'todo' }], meta: { nextCursor: null, totalCount: 1 } });
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(dialog().textContent).toContain('B태스크');
+    expect(dialog().textContent).not.toContain('A태스크');
+  });
+
+  // story #3704 후속(유나 design CHANGES, PR#4055 2026-09-09) — onLoadMoreTasks(「더 보기」)는
+  // handleStoryClick과 별개 자리라 이 가드가 안 걸렸다. A에서 「더 보기」 pending 중
+  // onNavigate(패널 안 이동, 패널은 안 닫힘)로 B로 넘어가면 A의 page2 응답이 B 목록에
+  // append되고 totalCount까지 A 것으로 덮일 수 있었다.
+  it('A 「더 보기」 pending 중 B로 이동 — 늦게 온 A page2가 B 목록/총계를 덮지 않는다(blocker③)', async () => {
+    let resolveAPage2!: (v: { ok: boolean; json: () => Promise<unknown> }) => void;
+    const aPage2 = new Promise<{ ok: boolean; json: () => Promise<unknown> }>((res) => { resolveAPage2 = res; });
+    stubFetchWithTasks(
+      [
+        { id: 's1', title: 'S1', status: 'backlog', priority: 'medium' },
+        { id: 's2', title: 'S2', status: 'backlog', priority: 'medium' },
+      ],
+      {
+        s1: (url: string) => (url.includes('cursor=')
+          ? aPage2 // 「더 보기」(page2) — deferred.
+          : Promise.resolve(taskOk([{ id: 't1', title: 'A1', status: 'todo' }], 5, 'c1'))), // page1, nextCursor=c1.
+        s2: () => Promise.resolve(taskOk([{ id: 't2', title: 'B태스크', status: 'todo' }], 1)),
+      },
+    );
+    await mount();
+    await clickStory('S1');
+    const dialog = () => container.querySelector('[role="dialog"]') as HTMLElement;
+    expect(dialog().textContent).toContain('A1');
+
+    const loadMoreBtn = () => [...dialog().querySelectorAll('button')].find((b) => b.textContent === koMessages.board.loadMore) as HTMLElement | undefined;
+    expect(loadMoreBtn()).toBeDefined();
+    await act(async () => {
+      loadMoreBtn()!.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    }); // page2 fetch 발화 — 아직 응답 안 옴(deferred).
+
+    await clickStory('S2'); // B로 이동 — requestId가 올라간다.
+    expect(dialog().textContent).toContain('B태스크');
+
+    await act(async () => { // 이제야 A의 page2가 도착 — B 패널을 덮으면 안 된다.
+      resolveAPage2(taskOk([{ id: 't1b', title: 'A2', status: 'todo' }], 5, null));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(dialog().textContent).toContain('B태스크');
+    expect(dialog().textContent).not.toContain('A2'); // A page2가 B 목록에 섞이면 안 됨.
+    expect(dialog().textContent).not.toContain('태스크 (5)'); // A의 총계(5)가 B 총계(1)를 덮으면 안 됨.
+  });
+
+  // story #3709(FE 완전성-정직, 3704 후속) — 응답 前(조회 中)엔 tasks=[]·totalCount=null인데
+  // 로딩 신호가 없으면 StoryDetailPanel이 이걸 "정말 0개"로 오단정했다.
+  it('응답 前(조회 中)엔 "태스크가 없어요" 대신 "불러오는 중"이 뜬다', async () => {
+    const aResponse = deferredTaskResponse();
+    stubFetchWithTasks(
+      [{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium' }],
+      { s1: () => aResponse.promise },
+    );
+    await mount();
+    await clickStory('S1'); // 응답 아직 안 옴(deferred) — 지금이 "조회 中" 창.
+
+    const dialog = () => container.querySelector('[role="dialog"]') as HTMLElement;
+    expect(dialog().textContent).not.toContain(koMessages.board.noTasks);
+    expect(dialog().textContent).toContain(koMessages.board.loading);
+
+    await act(async () => { // 응답 도착 — 진짜 0건이면 이제야 정당하게 "없습니다".
+      aResponse.resolve(taskOk([], 0));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(dialog().textContent).toContain(koMessages.board.noTasks);
+    expect(dialog().textContent).not.toContain(koMessages.board.loading);
+  });
+});
+
 // story #2104 — BE stories.py:1056(human-only 영구삭제 403)를 FE가 미리 안 보고 에이전트
 // 계정에도 삭제 트리거를 무조건 열었다(#2091/#2103과 같은 결함). 양방향 고정 — human까지
 // 잠그면 정당한 삭제가 봉쇄되는 더 큰 사고다(승격 위험목록의 잔여 미검증 칸 해소).
@@ -645,7 +946,10 @@ describe('StoryDetailPanel — 영구삭제 트리거 authz(story #2104)', () =>
   });
 
   it('agent면 스토리 영구삭제 트리거가 안 뜬다', async () => {
-    useDashboardContextMock.mockReturnValue({ currentTeamMemberId: 'me-1', projectMemberships: [], orgMemberships: [], currentMemberType: 'agent' });
+    useDashboardContextMock.mockReturnValue({
+      currentTeamMemberId: 'me-1', projectMemberships: [], orgMemberships: [], currentMemberType: 'agent',
+      bottomDockBannerSlot: bannerSlot,
+    });
     stubFetch([{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium' }]);
     await mount();
     await openPanel('S1');
@@ -730,7 +1034,7 @@ describe('KanbanBoard — 6단계 신뢰축 뷰(story #2933 H4)', () => {
   // PO 긴급 fix(선생님 지적, 2026-08-22) — 방향서 P0-04 원문 «기본 상태는 신뢰 파이프라인으로»를
   // #2933 done 선언 당시 전원(오르테가·QA·design)이 놓쳐 기본값이 거꾸로 'status'였다(실측
   // 결함). 이 테스트는 원래 그 잘못된 기본값을 그린으로 고정했던 자리 — 스펙대로 뒤집는다.
-  it('기본은 6단계 신뢰축 뷰(P0-04 스펙) — localStorage 미설정 시 5-status 클래식 라벨이 안 보인다', async () => {
+  it('기본은 6단계 신뢰축 뷰(P0-04 스펙) — localStorage 미설정 시 5단계 클래식 라벨이 안 보인다', async () => {
     stubFetch([{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium', trust_stage: 'queued' }]);
     await mount();
     expect(container.textContent).toContain('입력 필요');
@@ -738,10 +1042,10 @@ describe('KanbanBoard — 6단계 신뢰축 뷰(story #2933 H4)', () => {
     expect(container.textContent).not.toContain('개발 대기');
   });
 
-  it('사용자가 명시적으로 5-status 클래식을 선택하면(localStorage) 기본값 뒤집기와 무관하게 존중된다', async () => {
+  it('사용자가 명시적으로 5단계 클래식을 선택하면(localStorage) 기본값 뒤집기와 무관하게 존중된다', async () => {
     stubFetch([{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium', trust_stage: 'queued' }]);
     await mount();
-    const classicBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '5-status 클래식');
+    const classicBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '5단계 클래식');
     expect(classicBtn, '클래식 토글 버튼을 못 찾음').toBeDefined();
     await act(async () => { classicBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(container.textContent).not.toContain('입력 필요');
@@ -918,20 +1222,79 @@ describe('KanbanBoard — 6단계 신뢰축 뷰(story #2933 H4)', () => {
       expect(container.textContent).toContain('완료복귀카드');
     });
   });
+
+  // story #3638(유나 §8·«분기 안에서 일부만 알리는» 눈멂 ③) — handleTrustDragEnd의
+  // !res.ok 분기가 FORBIDDEN만 말하고 그 외 실 실패(500 등)는 롤백만 하고 조용했다.
+  describe('트러스트축 드래그 — FORBIDDEN 아닌 실패도 알린다(story #3638)', () => {
+    it('500 응답이면 storyMoveFailed 토스트가 뜬다(구 조용한 롤백)', async () => {
+      vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+        if (typeof url === 'string' && url.startsWith('/api/stories?')) {
+          const status = new URL(url, 'http://localhost').searchParams.get('status');
+          const matched = status === 'ready-for-dev'
+            ? [{ id: 's-queued', title: '대기카드', status: 'ready-for-dev', priority: 'medium', trust_stage: 'queued' }]
+            : [];
+          return { ok: true, json: async () => ({ data: matched, meta: { total: matched.length, nextCursor: null } }) };
+        }
+        if (typeof url === 'string' && url.startsWith('/api/members')) {
+          return { ok: true, json: async () => ({ data: [] }) };
+        }
+        if (typeof url === 'string' && url === '/api/stories/bulk') {
+          return { ok: false, json: async () => ({ error: { code: 'INTERNAL_ERROR' } }) };
+        }
+        return { ok: false, json: async () => null };
+      }));
+      await mount();
+      await toggleToTrustAxis();
+
+      const handler = capturedDragEndHandlers.at(-1);
+      expect(handler, 'handleTrustDragEnd를 캡처 못 함').toBeDefined();
+      await act(async () => {
+        handler!({ active: { id: 's-queued' }, over: { id: 'running' } });
+        await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+      });
+
+      expect(container.textContent).toContain('스토리 이동에 실패했어요');
+    });
+  });
 });
 
 // story #3043(PO+유나 IA 확定 ⓒ, 2026-08-25) — viewMode('board'|'list')가 예전엔 뷰포트 무관
 // 'board'로 하드코딩돼 있었다(유나 실측: flow-client의 view='list' 세그로 진입해도 여기서
 // 다시 'board'로 떨어져 3.55배 가로 overflow 재발 — 이름이 같은 두 「board/list」 개념 충돌).
+// story #3638(유나 §8 kanban-board.tsx:929/:987, PO 확定 착수분) — 5단계 클래식 드래그
+// (handleDragEnd)도 트러스트축 형제와 동일 병(FORBIDDEN만 말하고 나머지는 조용)을 앓는다.
+describe('KanbanBoard — 5단계 클래식 드래그, FORBIDDEN 아닌 실패도 알린다(story #3638)', () => {
+  it('bulk PATCH 500이면 storyMoveFailed 토스트가 뜬다(구 조용한 롤백)', async () => {
+    stubFetch([{ id: 's-classic', title: '클래식카드', status: 'backlog', priority: 'medium' }]);
+    await mount();
+    // 기본은 6단계 신뢰축(P0-04) — 5단계 클래식으로 명시 전환해야 handleDragEnd가 걸린다.
+    const classicBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '5단계 클래식');
+    await act(async () => { classicBtn!.click(); });
+    expect(container.textContent).toContain('클래식카드');
+
+    const handler = capturedDragEndHandlers.at(-1);
+    expect(handler, 'handleDragEnd를 캡처 못 함').toBeDefined();
+    await act(async () => {
+      handler!({ active: { id: 's-classic' }, over: { id: 'in-progress' } });
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    });
+
+    // 기본 stubFetch는 /api/stories/bulk를 명시 처리 안 해 그레이스풀 { ok: false }로
+    // 떨어진다(주석 그대로) — 이 스위트의 다른 테스트들에는 무해했지만(드래그를 직접
+    // 발화한 테스트가 이제껏 0건), 이 테스트에선 그 자체가 "실 실패" 재현이다.
+    expect(container.textContent).toContain('스토리 이동에 실패했어요');
+  });
+});
+
 describe('KanbanBoard — story #3043 <lg 기본값=list(칸반 다열은 opt-in)', () => {
   it('모바일(isMobile=true)이면 기본값이 list다 — board 다열 컬럼이 아니라 KanbanListView가 뜬다', async () => {
     isMobileMock = true;
     stubFetch([{ id: 's-mobile', title: '모바일카드', status: 'backlog', priority: 'medium' }]);
     await mount();
 
-    // board 뷰 전용 placeholder("스토리가 없습니다", 빈 컬럼마다 반복)는 list 뷰엔 없다 —
+    // board 뷰 전용 placeholder("스토리가 없어요", 빈 컬럼마다 반복)는 list 뷰엔 없다 —
     // list 뷰는 상태별 그룹 헤더(카운트 배지)로만 존재를 표현한다.
-    expect(container.textContent).not.toContain('스토리가 없습니다');
+    expect(container.textContent).not.toContain('스토리가 없어요');
     expect(container.textContent).toContain('모바일카드');
   });
 
@@ -940,7 +1303,7 @@ describe('KanbanBoard — story #3043 <lg 기본값=list(칸반 다열은 opt-in
     stubFetch([{ id: 's-desktop', title: '데스크톱카드', status: 'backlog', priority: 'medium' }]);
     await mount();
 
-    expect(container.textContent).toContain('스토리가 없습니다');
+    expect(container.textContent).toContain('스토리가 없어요');
   });
 
   it('모바일이라도 다열(board) 토글을 직접 누르면 그 선택이 뷰포트와 무관하게 유지된다(칸반 opt-in)', async () => {
@@ -948,11 +1311,11 @@ describe('KanbanBoard — story #3043 <lg 기본값=list(칸반 다열은 opt-in
     stubFetch([{ id: 's-toggle', title: '토글카드', status: 'backlog', priority: 'medium' }]);
     await mount();
 
-    const boardToggle = container.querySelector<HTMLButtonElement>('button[title="Board view"]');
+    const boardToggle = container.querySelector<HTMLButtonElement>('button[title="보드 보기"]');
     expect(boardToggle).not.toBeNull();
     await act(async () => { boardToggle!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
-    expect(container.textContent).toContain('스토리가 없습니다');
+    expect(container.textContent).toContain('스토리가 없어요');
   });
 
   it('list 뷰의 행은 board 뷰와 동일한 StoryCard atom(SID 3018)을 재사용한다 — full-width(max-w-none)로', async () => {
@@ -968,5 +1331,72 @@ describe('KanbanBoard — story #3043 <lg 기본값=list(칸반 다열은 opt-in
     // full-width row가 된다 — cn()=twMerge라 나중 클래스가 이긴다(story-card.tsx 확認).
     expect(container.innerHTML).toContain('max-w-none');
     expect(container.innerHTML).not.toContain('max-w-[280px]');
+  });
+});
+
+// story #3287([도메인탈고정·축1 Phase1] AC4) — org 라벨 오버라이드가 클래식(5-status)
+// 컬럼 헤더 텍스트만 바꾸고, canonical status(드래그·색상·전이 판정에 쓰는 col.id)와
+// 신뢰축(TRUST_COLUMNS, 다른 어휘) 라벨은 절대 안 건드리는지 실 렌더로 고정.
+describe('KanbanBoard — org 라벨 오버라이드 소비(#3287 AC4)', () => {
+  function stubFetchWithDomainLabels(
+    stories: Array<Record<string, unknown> & { status: string }>,
+    labels: Array<{ domain: string; canonical_slug: string; label_ko: string | null; label_en: string | null }>,
+  ) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (typeof url === 'string' && url.startsWith('/api/stories?')) {
+        const status = new URL(url, 'http://localhost').searchParams.get('status');
+        const matched = stories.filter((s) => s.status === status);
+        return { ok: true, json: async () => ({ data: matched, meta: { total: matched.length, nextCursor: null } }) };
+      }
+      if (typeof url === 'string' && url.includes('/domain-labels')) {
+        return { ok: true, json: async () => labels };
+      }
+      return { ok: false, json: async () => null };
+    }));
+  }
+
+  beforeEach(() => {
+    useDashboardContextMock.mockReturnValue({
+      currentTeamMemberId: 'me-1', orgId: 'org-1', projectMemberships: [], orgMemberships: [], currentMemberType: 'human',
+      bottomDockBannerSlot: bannerSlot,
+    });
+  });
+
+  it('클래식(5-status) 컬럼 헤더는 오버라이드 라벨로 바뀌고, 오버라이드 없는 컬럼은 canonical i18n 그대로다', async () => {
+    stubFetchWithDomainLabels(
+      [{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium' }],
+      [{ domain: 'status', canonical_slug: 'backlog', label_ko: '아이디어', label_en: 'Idea' }],
+    );
+    await mount();
+    const classicBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '5단계 클래식');
+    expect(classicBtn, '클래식 토글 버튼을 못 찾음').toBeDefined();
+    await act(async () => { classicBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(container.textContent).toContain('아이디어'); // backlog 오버라이드 적용
+    expect(container.textContent).not.toContain('백로그'); // canonical i18n 문구는 더는 안 보임
+    expect(container.textContent).toContain('완료'); // done엔 오버라이드 없음 — canonical i18n 그대로
+  });
+
+  it('오버라이드 미설정(빈 목록)이면 전 컬럼이 기존 canonical i18n 라벨 그대로다(회귀 0)', async () => {
+    stubFetchWithDomainLabels([{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium' }], []);
+    await mount();
+    const classicBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '5단계 클래식');
+    await act(async () => { classicBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(container.textContent).toContain('백로그');
+  });
+
+  it('신뢰축(TRUST_COLUMNS) 컬럼 헤더는 자기 어휘 그대로지만, 카드 내부 상태 배지는 story.status 오버라이드를 받는다', async () => {
+    stubFetchWithDomainLabels(
+      [{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium', trust_stage: 'queued' }],
+      [{ domain: 'status', canonical_slug: 'backlog', label_ko: '아이디어', label_en: 'Idea' }],
+    );
+    await mount(); // 기본값=trust축(P0-04) — 클래식 토글 안 누름.
+    // 컬럼 헤더(대기/실행 중/...)는 TRUST_COLUMNS 고유 어휘 그대로 — statusLabel()을 안 씀.
+    expect(container.textContent).toContain('입력 필요');
+    // 카드 내부 배지는 story.status(canonical, 축과 무관)를 보여주므로 오버라이드가 반영된다.
+    expect(container.textContent).toContain('아이디어');
   });
 });

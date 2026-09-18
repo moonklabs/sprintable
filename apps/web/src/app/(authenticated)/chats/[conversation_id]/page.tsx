@@ -10,11 +10,13 @@ import type { PresenceStatus } from '@/components/chat/presence-dot';
 import { AddParticipantModal } from '@/components/chat/add-participant-modal';
 import { DeliveryContractModal } from '@/components/chat/delivery-contract-modal';
 import { EmptyState } from '@/components/ui/empty-state';
+import { useToast } from '@/components/ui/toast';
 import { Avatar } from '@/components/shared/avatar';
 import { useDashboardContext } from '../../../dashboard/dashboard-shell';
 import { useSyntheticParentTabHistory } from '@/hooks/use-synthetic-parent-tab-history';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { participantDisplayLabel } from '@/lib/member-display';
 
 interface Participant {
   member_id: string;
@@ -26,6 +28,10 @@ interface Participant {
   // story #3194 — 미연결 배너 판별용(아래 fetchPresence가 채움). conversation 응답 자체엔
   // 없는 필드라 항상 undefined로 시작 — merge된 값만 ChatView에 내려간다(mutate 아님).
   verified?: boolean | null;
+  // story #3758(9번째, PO 決) — name=null이 「실존·표시명 없음」인지 「orphan(해소 실패)」
+  // 인지 가르는 비트(conversations.py `_fetch_conversation_participants`가 채움). optional
+  // — BE 기본값(True)과 짝 맞춰 필드 자체가 없으면 "실존"으로 읽는다(participantDisplayLabel).
+  resolved?: boolean;
 }
 
 interface ConversationMeta {
@@ -51,16 +57,21 @@ function isValidProjectId(value: string | null): value is string {
   return !!value && UUID_RE.test(value);
 }
 
-function formatHeaderTitle(meta: ConversationMeta, currentMemberId: string, t: (key: string) => string): string {
+function formatHeaderTitle(
+  meta: ConversationMeta, currentMemberId: string, t: (key: string) => string, tc: (key: string) => string,
+): string {
   if (meta.title) return meta.title;
   const others = meta.participants.filter((p) => p.member_id !== currentMemberId);
-  if (others.length === 0) return meta.type === 'dm' ? 'DM' : '그룹 채팅';
+  // story #3776(1층A) — "그룹 채팅", chats ns의 기존 groupSection 키 재사용.
+  if (others.length === 0) return meta.type === 'dm' ? 'DM' : t('groupSection');
   // story #3203(카디르 QA·PO 지시) — 같은 participants 계약 소비처, chat-list-view.tsx의
-  // formatParticipantNames와 동일 사람언어 폴백으로 통일('?'는 비인간어).
-  if (meta.type === 'dm') return others[0]?.name ?? t('unknownMember');
+  // formatParticipantNames와 동일 사람언어 폴백으로 통일('?'는 비인간어). story #3758
+  // (9번째) — resolved 비트로 「알 수 없는 구성원」(orphan)과 「이름 없는 구성원」(실존·
+  // 표시명 없음)을 갈라 그린다(participantDisplayLabel).
+  if (meta.type === 'dm') return participantDisplayLabel(others[0] ?? { name: null, resolved: false }, t, tc);
   const MAX = 3;
-  if (others.length <= MAX) return others.map((p) => p.name ?? t('unknownMember')).join(', ');
-  return `${others.slice(0, MAX).map((p) => p.name ?? t('unknownMember')).join(', ')} 외 ${others.length - MAX}명`;
+  if (others.length <= MAX) return others.map((p) => participantDisplayLabel(p, t, tc)).join(', ');
+  return `${others.slice(0, MAX).map((p) => participantDisplayLabel(p, t, tc)).join(', ')} 외 ${others.length - MAX}명`;
 }
 
 export default function ConversationPage() {
@@ -73,8 +84,13 @@ export default function ConversationPage() {
   // ChatView has key={conversation_id} so this is read fresh per conversation.
   const searchParams = useSearchParams();
   const scrollToMessageId = searchParams.get('messageId') ?? undefined;
+  // story #3831 — 「오늘」 지시 한 줄이 chat-list-view.tsx의 기존 리다이렉트/새 대화 경로를
+  // 거쳐 `?compose=`로 도착하면 ChatView의 기존 prefillCommand 기전에 그대로 싣는다.
+  const composeText = searchParams.get('compose');
   const t = useTranslations('chats');
+  const tc = useTranslations('common');
   const { currentTeamMemberId, projectId } = useDashboardContext();
+  const { addToast } = useToast();
   const [meta, setMeta] = useState<ConversationMeta | null>(null);
   const [showAddParticipant, setShowAddParticipant] = useState(false);
   const [showDeliveryContract, setShowDeliveryContract] = useState(false);
@@ -128,11 +144,16 @@ export default function ConversationPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ muted: next }),
       });
-      if (!res.ok) setMeta((m) => (m ? { ...m, muted: !next } : m));
+      // story #3638(유나 §8 별건) — 뮤트 토글이 실패해도 조용히 원복되던 자리(§2 클래스).
+      if (!res.ok) {
+        addToast({ title: t('muteToggleFailed'), type: 'error' });
+        setMeta((m) => (m ? { ...m, muted: !next } : m));
+      }
     } catch {
+      addToast({ title: t('muteToggleFailed'), type: 'error' });
       setMeta((m) => (m ? { ...m, muted: !next } : m));
     }
-  }, [meta, conversation_id]);
+  }, [meta, conversation_id, addToast, t]);
 
   // EF-S2: rename a group room. Optimistic; the BE PATCH persists the title.
   const handleSaveTitle = useCallback(async () => {
@@ -197,14 +218,15 @@ export default function ConversationPage() {
   if (!currentTeamMemberId) {
     return (
       <div className="flex h-64 items-center justify-center">
-        <p className="text-sm text-muted-foreground">로딩 중…</p>
+        <p className="text-sm text-muted-foreground">{tc('loading')}</p>
       </div>
     );
   }
 
+  // story #3776(1층B) — "대화"(폴백 제목), chats ns의 기존 title 키 재사용.
   const headerTitle = meta
-    ? formatHeaderTitle(meta, currentTeamMemberId, t)
-    : (meta === null ? '채팅' : '로딩 중…');
+    ? formatHeaderTitle(meta, currentTeamMemberId, t, tc)
+    : (meta === null ? t('title') : tc('loading'));
 
   // story #2968 — 리스트(chat-list-view.tsx)와 동일 원칙: 1:1(DM)만 상대가 특정되므로
   // avatar.tsx 정본으로 실사진을 보여준다. group은 다인원이라 대표 사진이 없어 미표시 유지.
@@ -217,7 +239,8 @@ export default function ConversationPage() {
   const commandTargets = (meta?.participants ?? [])
     .filter((p) => p.type === 'agent' && p.member_id !== currentTeamMemberId && p.runtime_type !== undefined)
     // story #3203(카디르 QA·PO 지시) — 같은 participants 계약 소비처, 사람언어 폴백 통일.
-    .map((p) => ({ agentId: p.member_id, agentName: p.name ?? t('unknownMember'), runtimeType: p.runtime_type ?? null }));
+    // story #3758(9번째) — resolved 비트로 갈라 그린다.
+    .map((p) => ({ agentId: p.member_id, agentName: participantDisplayLabel(p, t, tc), runtimeType: p.runtime_type ?? null }));
 
   return (
     <>
@@ -245,12 +268,18 @@ export default function ConversationPage() {
               className="flex flex-shrink-0 items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
             >
               <ChevronLeft className="h-4 w-4" />
-              <span className="lg:hidden">채팅</span>
+              {/* story #3776(1층B) — "대화", chats ns의 기존 title 키 재사용(위 225행과 동형). */}
+              <span className="lg:hidden">{t('title')}</span>
             </button>
             {headerAvatarParticipant && (
               <Avatar
                 // story #3203(카디르 QA·PO 지시) — 같은 participants 계약 소비처, 사람언어 폴백 통일.
-                name={headerAvatarParticipant.name ?? t('unknownMember')}
+                // story #3758(9번째) — resolved 비트로 갈라 그린다.
+                // story #3791(페드루 재검토 12:23Z) — name(이니셜 재료)에 표시-폴백 문구를
+                // 넘기면 그 문구 첫 글자가 가짜 이니셜로 뜬다(「이름 없는 구성원」→「이」 등)
+                // — name은 원시, 표시 문구는 label로.
+                name={headerAvatarParticipant.name ?? null}
+                label={participantDisplayLabel(headerAvatarParticipant, t, tc)}
                 avatarUrl={headerAvatarParticipant.avatar_url ?? null}
                 actorType={headerAvatarParticipant.type === 'agent' ? 'agent' : 'human'}
                 size={24}
@@ -268,7 +297,7 @@ export default function ConversationPage() {
                   else if (e.key === 'Escape') setEditingTitle(false);
                 }}
                 onBlur={() => void handleSaveTitle()}
-                aria-label="방 이름 편집"
+                aria-label={t('editRoomName')}
                 className="min-w-0 rounded border border-border bg-background px-1.5 py-0.5 text-sm font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
               />
             ) : meta?.type === 'group' ? (
@@ -276,7 +305,7 @@ export default function ConversationPage() {
                 type="button"
                 onClick={() => { setTitleDraft(meta.title ?? ''); setEditingTitle(true); }}
                 className="group/title flex min-w-0 items-center gap-1"
-                aria-label="방 이름 편집"
+                aria-label={t('editRoomName')}
               >
                 {/* story #2969 §1.3-b(doc proofline-system-layer-2969, PR-5) — 헤더 상대명/
                     방이름=Claim(600)로 재분류(리스트 대화명과 동일 처방, 구조·크기 불변). */}
@@ -296,21 +325,22 @@ export default function ConversationPage() {
                 type="button"
                 onClick={() => void handleToggleMute()}
                 className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition hover:bg-muted hover:text-foreground"
-                title={meta.muted ? '알림 켜기' : '알림 끄기'}
-                aria-label={meta.muted ? '알림 켜기' : '알림 끄기'}
+                title={meta.muted ? t('unmuteNotifications') : t('muteNotifications')}
+                aria-label={meta.muted ? t('unmuteNotifications') : t('muteNotifications')}
                 aria-pressed={meta.muted}
               >
                 {meta.muted ? <BellOff className="h-3.5 w-3.5" /> : <Bell className="h-3.5 w-3.5" />}
-                {meta.muted ? <span className="hidden sm:inline">알림 꺼짐</span> : null}
+                {meta.muted ? <span className="hidden sm:inline">{t('notificationsMuted')}</span> : null}
               </button>
               <button
                 type="button"
                 onClick={() => setShowAddParticipant(true)}
                 className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition hover:bg-muted hover:text-foreground"
-                title="참여자 추가"
+                // story #3776(1층B) — "참여자 추가", chats ns의 기존 addParticipants 키 재사용.
+                title={t('addParticipants')}
               >
                 <UserPlus className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">참여자 추가</span>
+                <span className="hidden sm:inline">{t('addParticipants')}</span>
               </button>
               {/* story #2621 v1 — 전달 계약 편집 진입점(대화 설정). */}
               <button
@@ -350,6 +380,7 @@ export default function ConversationPage() {
             scrollToMessageId={scrollToMessageId}
             initialLastReadAt={meta ? meta.lastReadAt : undefined}
             participants={(meta?.participants ?? []).map((p) => ({ ...p, verified: verifiedById[p.member_id] }))}
+            initialComposeText={composeText ?? undefined}
           />
         )}
       </div>

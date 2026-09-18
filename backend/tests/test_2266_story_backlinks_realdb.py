@@ -441,12 +441,23 @@ async def test_doc_backlinks_wrapper_still_returns_collection_scope_no_regressio
 @pytest.mark.anyio
 async def test_story_backlinks_query_uses_target_index():
     """⛔실측(AC7) — target_type+target_id 필터가 ix_entity_references_target을 Index
-    (Only) Scan으로 타는지 EXPLAIN으로 직접 확인한다(코드 읽고 "될 것 같다"가 아니라)."""
+    (Only) Scan으로 타는지 EXPLAIN으로 직접 확인한다(코드 읽고 "될 것 같다"가 아니라).
+
+    story #3659(PO 확定 2026-09-07, PR #4003 CI 1회 실패·rerun 통과 — 플레이키) — 이
+    단언이 지키려는 것은 "backlinks 쿼리가 target 컬럼 인덱스로 서빙 **가능한** 쿼리
+    모양이다"라는 쿼리-shape 회귀 방지이지, "CI 공유 DB의 통계·표본 행수에서 플래너가
+    실제로 그 경로를 고르는가"가 아니다 — 후자는 테이블이 작을 때(CI마다 다른 표본
+    행수) seq scan이 더 싸 보여 플래너가 흔들린다. `SET LOCAL enable_seqscan = off`로
+    "인덱스가 **쓰일 수 있는가**"만 결정적으로 잰다(표본 행수를 늘려 플래너를 설득하는
+    쪽(b)보다 싸다 — 스토리 처방 (a) 채택). 뮤테이션: 쿼리에서 target 조건을 지우거나
+    인덱스를 drop하면 여전히 RED(그 실패는 진짜 회귀다 — enable_seqscan=off는 "쓸 수
+    있으면 쓴다"를 강제할 뿐, 못 쓰는 쿼리를 쓰게 만들지 않는다)."""
     engine, Session = await _session_factory()
     try:
         async with Session() as s:
             org = await _make_org(s)
             from sqlalchemy import text
+            await s.execute(text("SET LOCAL enable_seqscan = off"))
             explain = await s.execute(text(
                 "EXPLAIN SELECT * FROM entity_references "
                 "WHERE org_id = :org_id AND target_type = 'story' AND target_id = :target_id "
@@ -455,7 +466,35 @@ async def test_story_backlinks_query_uses_target_index():
             plan_lines = [row[0] for row in explain.all()]
             plan_text = "\n".join(plan_lines)
             assert "ix_entity_references_target" in plan_text, (
-                f"target index를 안 탄다 — planner가 다른 경로를 골랐다:\n{plan_text}"
+                f"enable_seqscan=off인데도 target index를 안 탄다 — 인덱스가 이 쿼리 "
+                f"모양을 아예 못 서빙한다(진짜 회귀):\n{plan_text}"
+            )
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_story_backlinks_query_uses_target_index_mutation_no_filter_fails():
+    """뮤테이션(story #3659) — org_id/target_type/target_id 조건을 전부 뺀 쿼리는
+    enable_seqscan=off로도 ix_entity_references_target을 안 탄다(실측: 그 인덱스가
+    쓸 수 있는 조건이 하나도 없으면 PG는 off의 거대 비용 페널티를 감수하고도 seq
+    scan을 고른다 — off가 "무조건 인덱스"가 아니라 "쓸 수 있으면 쓴다"만 강제한다는
+    증거). DDL(DROP INDEX 등) 없이 쿼리 조건만 바꿔서 실증 — 공유 DB에 락 경합 위험이
+    없는 쪽을 택함(같은 표적을 시험할 더 무거운 대안 대신)."""
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            await _make_org(s)  # 표본 최소 1건 보장(빈 테이블 plan 왜곡 방지, 본 테스트와 동형).
+            from sqlalchemy import text
+            await s.execute(text("SET LOCAL enable_seqscan = off"))
+            explain = await s.execute(text(
+                "EXPLAIN SELECT * FROM entity_references "
+                "ORDER BY created_at DESC, id DESC LIMIT 31"
+            ))
+            plan_lines = [row[0] for row in explain.all()]
+            plan_text = "\n".join(plan_lines)
+            assert "ix_entity_references_target" not in plan_text, (
+                f"필터가 없는데도 target index가 잡힘 — 뮤테이션이 무력화됨:\n{plan_text}"
             )
     finally:
         await engine.dispose()

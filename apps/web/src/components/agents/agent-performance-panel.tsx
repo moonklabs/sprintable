@@ -43,6 +43,7 @@ interface AgentRow extends AgentMember {
 }
 
 function VelocityChart({ items }: { items: SprintVelocityItem[] }) {
+  const t = useTranslations('agentPerformance');
   const recent = items.slice(-5);
   const maxV = Math.max(...recent.map((s) => s.velocity ?? 0), 1);
 
@@ -67,7 +68,7 @@ function VelocityChart({ items }: { items: SprintVelocityItem[] }) {
         );
       })}
       {recent.length === 0 && (
-        <p className="py-4 text-center text-sm text-muted-foreground">스프린트 데이터가 없습니다.</p>
+        <p className="py-4 text-center text-sm text-muted-foreground">{t('noSprintData')}</p>
       )}
     </div>
   );

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useTranslations } from 'next-intl';
 import { Bold, Italic, Strikethrough, Code, Link2, Highlighter } from 'lucide-react';
 import type { Editor } from '@tiptap/core';
 
@@ -16,6 +17,9 @@ interface MenuPos { top: number; left: number }
 const MENU_EST_WIDTH = 296; // 6 × 44px + 2×4px padding
 
 export function MobileSelectionMenu({ editor }: { editor: Editor | null }) {
+  // story #3776(1층A) — "굵게"/"기울임", docs ns의 기존 toolbarBold/toolbarItalic 키
+  // 재사용(docs-shell-client.tsx·[slug]/page.tsx의 데스크톱 툴팁과 동형 자리).
+  const t = useTranslations('docs');
   const [visible, setVisible] = useState(false);
   const [pos, setPos] = useState<MenuPos>({ top: 0, left: 0 });
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -70,13 +74,14 @@ export function MobileSelectionMenu({ editor }: { editor: Editor | null }) {
   if (!visible || !editor) return null;
 
   const buttons = [
-    { icon: Bold, label: '굵게', action: () => editor.chain().focus().toggleBold().run(), active: editor.isActive('bold') },
-    { icon: Italic, label: '기울임', action: () => editor.chain().focus().toggleItalic().run(), active: editor.isActive('italic') },
-    { icon: Strikethrough, label: '취소선', action: () => editor.chain().focus().toggleStrike().run(), active: editor.isActive('strike') },
-    { icon: Code, label: '인라인 코드', action: () => editor.chain().focus().toggleCode().run(), active: editor.isActive('code') },
+    { icon: Bold, label: t('toolbarBold'), action: () => editor.chain().focus().toggleBold().run(), active: editor.isActive('bold') },
+    { icon: Italic, label: t('toolbarItalic'), action: () => editor.chain().focus().toggleItalic().run(), active: editor.isActive('italic') },
+    { icon: Strikethrough, label: t('toolbarStrikethrough'), action: () => editor.chain().focus().toggleStrike().run(), active: editor.isActive('strike') },
+    { icon: Code, label: t('toolbarInlineCode'), action: () => editor.chain().focus().toggleCode().run(), active: editor.isActive('code') },
     {
       icon: Link2,
-      label: '링크',
+      // story #3776(1층B) — "링크", docs ns의 기존 toolbarLink 키 재사용(doc-editor와 같은 컨트롤).
+      label: t('toolbarLink'),
       action: () => {
         if (editor.isActive('link')) { editor.chain().focus().unsetLink().run(); return; }
         const url = window.prompt('URL:');
@@ -84,13 +89,13 @@ export function MobileSelectionMenu({ editor }: { editor: Editor | null }) {
       },
       active: editor.isActive('link'),
     },
-    { icon: Highlighter, label: '형광펜', action: () => editor.chain().focus().toggleHighlight().run(), active: editor.isActive('highlight') },
+    { icon: Highlighter, label: t('toolbarHighlight'), action: () => editor.chain().focus().toggleHighlight().run(), active: editor.isActive('highlight') },
   ] as const;
 
   return createPortal(
     <div
       role="toolbar"
-      aria-label="텍스트 서식"
+      aria-label={t('toolbarTextFormat')}
       style={{ position: 'fixed', top: pos.top, left: pos.left, zIndex: 9999 }}
       // story #3007(로드맵 P2·PR-E, L1) — 툴바는 floating이라 --elev-overlay.
       className="flex items-center gap-0.5 rounded-xl border border-border bg-background p-1 shadow-[var(--elev-overlay)]"

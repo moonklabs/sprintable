@@ -2,12 +2,15 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
+import { useLocale } from 'next-intl';
 import { Menu, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ContextualPanelLayout, useContextualPanelState } from '@/components/ui/contextual-panel-layout';
 import { GlassPanel } from '@/components/ui/glass-panel';
 import { cn } from '@/lib/utils';
 import { fetchWithAuth } from '@/lib/db/client';
+import { formatRelativeTime } from '@/lib/storage/format';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 
 interface Sprint {
   id: string;
@@ -36,6 +39,8 @@ export function shouldClosePolicyPanelAfterSelection(mode: 'inline' | 'drawer') 
 }
 
 export function PolicyDocBrowser({ projectId, t }: PolicyDocBrowserProps) {
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
   const [loading, setLoading] = useState(true);
   const [sprints, setSprints] = useState<Sprint[]>([]);
   const [docs, setDocs] = useState<PolicyDocument[]>([]);
@@ -236,7 +241,8 @@ export function PolicyDocBrowser({ projectId, t }: PolicyDocBrowserProps) {
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <div className="text-sm font-semibold text-foreground">{selectedDoc?.title || selectedDoc?.epic?.title || t('selectPolicyEpic')}</div>
-                  {selectedDoc ? <div className="mt-1 text-xs text-muted-foreground">{t('lastUpdated')}: {new Date(selectedDoc.updated_at).toLocaleString()}</div> : null}
+                  {/* story #3493 — updated_at은 "기록"(정본 formatRelativeTime). */}
+                  {selectedDoc ? <div className="mt-1 text-xs text-muted-foreground">{t('lastUpdated')}: {formatRelativeTime(selectedDoc.updated_at, locale, displayTimezone)}</div> : null}
                 </div>
               </div>
             </div>

@@ -242,6 +242,71 @@ async def test_evaluate_auto_merge_path():
     create_spy.assert_awaited_once()  # AC⑥: gate row.
 
 
+async def _run_with_dispatch_spy(*, ci_result="pass", pr_result="pass", **cage):
+    """`_run`과 동형이지만 `dispatch_approval_request_cards`(로컬 import라 mod.의
+    속성이 아니다 — 원본 모듈 app.services.approval_delivery에서 직접 patch)를
+    스파이로 감싸 "카드가 실제로 호출됐는가"를 결정적으로 잰다(dispatch 내부는
+    실 DB session.execute를 쓰므로 _mock_session()으로는 진짜 메시지 생성 여부를
+    못 재고, best-effort try/except가 내부 실패도 삼켜 버려 이 스파이가 유일한
+    신뢰 가능한 관측점)."""
+    import contextlib
+    from app.services import approval_delivery as approval_delivery_mod
+    from app.services import project_auth as project_auth_mod
+
+    ctx, gate = _patch_cage(**cage)
+    with contextlib.ExitStack() as stack:
+        for p in ctx:
+            stack.enter_context(p)
+        create_spy = stack.enter_context(
+            patch.object(mod, "create_gate", AsyncMock(return_value=gate))
+        )
+        dispatch_spy = stack.enter_context(
+            patch.object(approval_delivery_mod, "dispatch_approval_request_cards", AsyncMock())
+        )
+        stack.enter_context(
+            patch.object(project_auth_mod, "list_gate_approver_ids", AsyncMock(return_value=[uuid.uuid4()]))
+        )
+        res = await evaluate_merge_gate(
+            _mock_session(), uuid.uuid4(), uuid.uuid4(),
+            pr_number=12, repo="o/r", ci_result=ci_result, pr_result=pr_result,
+        )
+    return res, create_spy, dispatch_spy
+
+
+@pytest.mark.anyio
+async def test_evaluate_auto_merge_path_dispatches_zero_approval_cards():
+    """story #3821(customer-zero 실측, 페드루 PO 확定 2026-09-13) — decide-먼저·
+    dispatch-나중 순서 정정의 양성대조 ①: 실 증거가 AUTO_MERGE로 떨어지면 카드
+    0건(사람이 물어볼 필요가 없다고 판정 난 결정에 pinging 0)."""
+    res, _create_spy, dispatch_spy = await _run_with_dispatch_spy(gate_status="auto_passed")
+    assert res.decision == AUTO_MERGE
+    dispatch_spy.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_evaluate_ask_human_pending_dispatches_one_approval_card():
+    """양성대조 ② — 정책 disposition=ask(gate_status="pending")이고 CI/PR 증거가
+    있어도(pass/pass) outcome이 auto 조건을 못 채우면 `_decide()`가 ASK_HUMAN을
+    내고, 그때만 카드가 정확히 1회 나간다."""
+    res, _create_spy, dispatch_spy = await _run_with_dispatch_spy(gate_status="pending")
+    assert res.decision == ASK_HUMAN
+    dispatch_spy.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_evaluate_block_ci_fail_dispatches_zero_approval_cards():
+    """story #3821 실 결함 pin — CI 하드 실패(ci=="fail")는 gate_status가 무엇이든
+    `_decide()`가 항상 BLOCK을 낸다(§AC②, 순서 무관). 옛 코드는 dispatch 조건이
+    `gate.status=="pending"`이라 이 케이스(정책이 "일단 물어봐"였던 gate)에서도
+    "결재 필요" 카드를 냈다 — 승인/거부 버튼을 눌러도 의미가 없는(이미 CI가
+    하드 차단한) 결정에 사람을 pinging하는 실 낭비였다. 뮤테이션 대상 — dispatch
+    조건을 `decision == ASK_HUMAN`에서 `gate.status == "pending"`(원래 축)으로
+    되돌리면 이 테스트가 RED(카드 1건)로 잡는다."""
+    res, _create_spy, dispatch_spy = await _run_with_dispatch_spy(gate_status="pending", ci_result="fail")
+    assert res.decision == BLOCK
+    dispatch_spy.assert_not_awaited()
+
+
 @pytest.mark.anyio
 async def test_evaluate_trust_none_asks_and_still_creates_gate():
     # R5 초기 안전성: trust 전원 null → ask_human(auto_merge 0).

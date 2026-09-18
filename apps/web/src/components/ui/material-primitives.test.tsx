@@ -6,16 +6,28 @@
 import { describe, expect, it } from 'vitest';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
+import { NextIntlClientProvider } from 'next-intl';
 import { MaterialChip } from './material-chip';
 import { CountBadge } from './count-badge';
 import { VerificationStamp } from './verification-stamp';
 import { AgentIdentity, AgentSignalDot, AGENT_MARK_FILL_CLASS } from './agent-identity';
+import koMessages from '../../../messages/ko.json';
 
 function mount() {
   const container = document.createElement('div');
   document.body.appendChild(container);
   const root = createRoot(container);
   return { container, root };
+}
+
+// story #3888(§⑤·Chat) — AgentIdentity가 useTranslations('chats')를 쓰게 되면서
+// NextIntlClientProvider 없이 마운트하면 throw한다.
+function withIntl(node: React.ReactNode) {
+  return (
+    <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+      {node}
+    </NextIntlClientProvider>
+  );
 }
 
 describe('MaterialChip', () => {
@@ -68,11 +80,11 @@ describe('VerificationStamp', () => {
 });
 
 describe('AgentIdentity', () => {
-  it('헤어라인+proof-blue 신호 dot을 쓰고 soft-fill은 안 쓴다("Bot" 텍스트)', async () => {
+  it('헤어라인+proof-blue 신호 dot을 쓰고 soft-fill은 안 쓴다("에이전트" 텍스트)', async () => {
     const { container, root } = mount();
-    await act(async () => { root.render(<AgentIdentity />); });
+    await act(async () => { root.render(withIntl(<AgentIdentity />)); });
     const el = container.querySelector('span');
-    expect(el?.textContent).toBe('Bot');
+    expect(el?.textContent).toBe('에이전트');
     expect(el?.className).toContain('border-proof-line');
     expect(el?.className).not.toMatch(/bg-\S+-soft/);
     expect(el?.querySelector('.bg-proof-blue')).toBeTruthy();

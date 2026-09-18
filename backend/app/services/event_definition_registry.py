@@ -31,7 +31,19 @@ _SEGMENT_CHARSET_RE = re.compile(r"^[a-z0-9_]+$")
 # 하므로, 여기 없는 target을 server_derived로 등록하면 해석기가 절대 못 푸는 정의가 만들어진다
 # — validate_event_routing이 등록 시점에 막는다(발행 시점에야 발견되는 것보다 이르게).
 SERVER_DERIVED_TARGETS = frozenset({"none", "work_item_stakeholders", "goal_owner"})
-_ROUTING_KINDS = frozenset({"payload_field", "server_derived"})
+# story #3312(M1→M3·마케팅자동화) — stage_metadata[stage].gate.approver의 닫힌 어휘.
+# SERVER_DERIVED_TARGETS와 동형 설계: PO 확定(페드루, 2026-09-02) "approver는 역할 참조로만
+# 선언(조직 상수 0) — 다른 org가 같은 정의를 apply해도 그 org 자신의 owner가 승인자". 실제
+# member_id 해석은 recipe_gate_hooks.py(발행 시점)의 몫 — 그 모듈이 이 어휘 전체를 커버하는
+# resolver를 갖는지 모듈 로드 시점에 assert로 고정한다(event_routing_resolver.py의
+# _SERVER_DERIVED_RESOLVERS 완결성 assert와 동일 패턴).
+APPROVER_ROLE_REFERENCES = frozenset({"org_owner"})
+# story #3288(축2-ⓐ) — "recipe_role_binding": 사이클형 정의의 stage를 recipe_role_bindings
+# 테이블(org/project 스코프 role→agent 바인딩)로 조회해 푸는 3번째 kind. payload_field처럼
+# payload의 필드를 직접 읽지도, server_derived처럼 고정 닫힌 어휘로 파생하지도 않는다 —
+# stage 자체가 payload에 있고(사이클형 정의 표준 필드) 그 stage로 org/project 스코프
+# 바인딩 테이블을 찾는 3번째 해석 방식(event_routing_resolver.py가 실 구현).
+_ROUTING_KINDS = frozenset({"payload_field", "server_derived", "recipe_role_binding"})
 
 
 class InvalidEventDefinitionKeyError(ValueError):
@@ -126,6 +138,18 @@ def _validate_routing_leg(leg: dict, *, leg_name: str, allow_server_derived: boo
         if not leg.get("member_id_field"):
             raise InvalidEventRoutingError(
                 f"routing.{leg_name}.kind='payload_field'는 member_id_field가 필수입니다."
+            )
+        return
+
+    if kind == "recipe_role_binding":
+        # story #3288 — member_id_field/target 둘 다 불요(payload의 stage로 org/project
+        # 스코프 바인딩 테이블을 조회하는 게 해석 방식 전체). org 커스텀 정의도 등록 가능
+        # (자기 org의 바인딩 테이블만 조회하므로 payload_field와 동형 위험도 — server_derived의
+        # "서버가 모르는 파생 역할" 우려와 다른 클래스).
+        if leg.get("member_id_field") or leg.get("target"):
+            raise InvalidEventRoutingError(
+                f"routing.{leg_name}.kind='recipe_role_binding'은 member_id_field/target을 "
+                "가질 수 없습니다(stage 기반 바인딩 조회이므로 추가 파라미터 불요)."
             )
         return
 
@@ -251,6 +275,80 @@ def validate_block_template(template: dict) -> None:
                         raise InvalidBlockTemplateError(f"blocks[{i}].actions[{j}].auth: {e}") from e
 
 
+_TEMPLATE_MUSTACHE_RE = re.compile(r"\{\{(payload|ref)\.([a-zA-Z0-9_]+)\}\}")
+
+# story #3332(PO 확定 2026-09-02) — `{{ref.X}}`의 닫힌 어휘. `{{payload.X}}`(발행자가 직접
+# 준 값)와 병렬인 두 번째 머스태시 네임스페이스로, 서버가 발행 시점에 계산해 event_context.
+# refs에 싣는 "참조 토큰"(클릭 가능한 `[제목](entity:type:id)`) 전용이다 — 지금은 work_item
+# 1종만(work_item_type/work_item_id 페어를 갖는 payload_schema 전제, events.py::
+# _render_event_notification_work_item_ref 재사용 계산). 새 종류를 열려면 이 어휘 +
+# events.py의 실 계산 로직 둘 다 넓혀야 한다(SERVER_DERIVED_TARGETS와 동형 이중 게이트).
+BLOCK_TEMPLATE_REF_VOCAB = frozenset({"work_item"})
+
+
+def _iter_block_template_texts(template: dict):
+    """block_template.blocks 안에서 머스태시 치환 대상인 문자열만 순서대로 낸다 — FE
+    substituteMustache/renderBlockTemplate이 실제로 치환하는 자리와 정확히 같은 범위
+    (header/text의 text, fields[].label·fields[].value — story #3884부터 field.label도
+    치환 대상이라 여기 포함, 이전엔 정적 텍스트였다). actions는 라벨/definition_key가
+    정적 텍스트라 치환 대상이 아니다(block-template.ts 주석과 동형 — 여기서 검사 범위를
+    넓히면 FE가 실제로 안 보는 자리까지 검증해 거짓양성을 낸다)."""
+    for block in template.get("blocks") or []:
+        if not isinstance(block, dict):
+            continue
+        block_type = block.get("type")
+        if block_type in ("header", "text"):
+            text = block.get("text")
+            if isinstance(text, str):
+                yield text
+        elif block_type == "fields":
+            for f in block.get("fields") or []:
+                if not isinstance(f, dict):
+                    continue
+                if isinstance(f.get("label"), str):
+                    yield f["label"]
+                if isinstance(f.get("value"), str):
+                    yield f["value"]
+
+
+def validate_block_template_refs(payload_schema: dict, template: dict) -> None:
+    """story #3332 — block_template이 참조하는 머스태시가 실제로 해소 가능한지 등록/PATCH
+    시점에 강제한다(이전엔 이 교차검증이 전혀 없어 `{{payload.work_item_title}}`처럼
+    payload_schema에 없는 키를 참조해도 등록이 통과했다 — 렌더 시점에야 FE가 `⟨missing:
+    payload.x⟩`로 조용히 드러내는 게 유일한 신호였다, PR#3711 리뷰에서 실측 발견).
+
+    두 네임스페이스를 각자 다른 기준으로 검사한다:
+    - `{{payload.X}}` — X가 `payload_schema.properties`에 실재해야 한다(오타를 등록
+      시점에 막는다 — "오타로 써도 통과하나"가 "아니오"가 되게).
+    - `{{ref.X}}` — X가 `BLOCK_TEMPLATE_REF_VOCAB`(서버가 실제로 계산해 줄 수 있는 종류)
+      안에 있어야 한다.
+
+    `validate_block_template`(구조 게이트)이 이미 통과한 template을 전제로 한다 — 이 함수는
+    그 뒤에 이어서 부르는 두 번째 게이트(내용 교차검증)다."""
+    properties = (payload_schema.get("properties") or {}) if isinstance(payload_schema, dict) else {}
+    unknown_payload_keys: set[str] = set()
+    unknown_ref_keys: set[str] = set()
+    for text in _iter_block_template_texts(template):
+        for namespace, key in _TEMPLATE_MUSTACHE_RE.findall(text):
+            if namespace == "payload" and key not in properties:
+                unknown_payload_keys.add(key)
+            elif namespace == "ref" and key not in BLOCK_TEMPLATE_REF_VOCAB:
+                unknown_ref_keys.add(key)
+    errors: list[str] = []
+    if unknown_payload_keys:
+        errors.append(
+            f"block_template이 payload_schema.properties에 없는 payload 키를 참조합니다: "
+            f"{sorted(unknown_payload_keys)}."
+        )
+    if unknown_ref_keys:
+        errors.append(
+            f"block_template이 지원하지 않는 ref 종류를 참조합니다: {sorted(unknown_ref_keys)} "
+            f"(허용: {sorted(BLOCK_TEMPLATE_REF_VOCAB)})."
+        )
+    if errors:
+        raise InvalidBlockTemplateError(" ".join(errors))
+
+
 def validate_event_payload_schema_shape(payload_schema: dict) -> None:
     """story #2636 AC1: org 커스텀 등록 시점에 payload_schema 자체가 유효한 JSON Schema이고
     top-level `additionalProperties: false`를 명시했는지 강제. 미선언 스키마는 JSON Schema
@@ -310,6 +408,51 @@ def validate_stage_metadata(payload_schema: dict, stage_metadata: dict) -> None:
             if not isinstance(meta.get(field), str) or not meta[field]:
                 raise InvalidStageMetadataError(
                     f"stage_metadata[{slug!r}].{field}는 비어있지 않은 문자열이어야 합니다."
+                )
+        # story #3312(M1→M3·마케팅자동화, PO 확定 2026-09-02②) — gate는 선택 필드지만, «막지
+        # 않는다고 검증 안 하면 오타가 조용히 무시»되는 자리라(recipe_gate_hooks.py가 gate
+        # 키가 없으면 그냥 no-op하므로, 오타 난 gate 선언은 "게이트가 영원히 안 생기는" 채로
+        # 조용히 죽는다 — story #2793류 실버그와 동일 클래스) 있으면 shape을 명시 강제한다.
+        if "gate" in meta:
+            gate = meta["gate"]
+            if not isinstance(gate, dict):
+                raise InvalidStageMetadataError(
+                    f"stage_metadata[{slug!r}].gate는 object({{type, approver}})여야 합니다 — "
+                    f"{type(gate).__name__} 아님."
+                )
+            if not isinstance(gate.get("type"), str) or not gate["type"]:
+                raise InvalidStageMetadataError(
+                    f"stage_metadata[{slug!r}].gate.type은 비어있지 않은 문자열이어야 합니다."
+                )
+            if gate.get("approver") not in APPROVER_ROLE_REFERENCES:
+                raise InvalidStageMetadataError(
+                    f"stage_metadata[{slug!r}].gate.approver는 {sorted(APPROVER_ROLE_REFERENCES)} "
+                    f"중 하나여야 합니다 — {gate.get('approver')!r}은 닫힌 어휘 밖입니다."
+                )
+        # story #3317 PR B(마케팅자동화·레시피 결함, PO 확定 2026-09-02) — capability도 gate와
+        # 동형: 선택 필드지만 있으면 shape 강제(오타 방치 금지). ⚠️kind는 gate.approver와
+        # 달리 **닫힌 어휘가 아니다** — PO 명시("제품은 능력, 규칙/값은 조직" 그라운드룰):
+        # 'publish' 외 'collect'/'measure'/'read' 등 조직이 뜻을 정하는 값이라 서버는 "비어
+        # 있지 않은 문자열"만 강제하고 뜻은 안 따진다. connector_key는 선택(있으면 그 커넥터
+        # 하나를 지정, 없으면 apply 검증이 org_connector_registry.kinds로 느슨 매칭한다 —
+        # services/connector_registry.py::find_org_connectors_by_kind 참조).
+        if "capability" in meta:
+            capability = meta["capability"]
+            if not isinstance(capability, dict):
+                raise InvalidStageMetadataError(
+                    f"stage_metadata[{slug!r}].capability는 object({{kind, connector_key?}})여야 "
+                    f"합니다 — {type(capability).__name__} 아님."
+                )
+            if not isinstance(capability.get("kind"), str) or not capability["kind"]:
+                raise InvalidStageMetadataError(
+                    f"stage_metadata[{slug!r}].capability.kind는 비어있지 않은 문자열이어야 합니다."
+                )
+            if "connector_key" in capability and (
+                not isinstance(capability["connector_key"], str) or not capability["connector_key"]
+            ):
+                raise InvalidStageMetadataError(
+                    f"stage_metadata[{slug!r}].capability.connector_key는 있으면 비어있지 않은 "
+                    f"문자열이어야 합니다."
                 )
 
 

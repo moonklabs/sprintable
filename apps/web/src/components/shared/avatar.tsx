@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { Bot, User } from 'lucide-react';
+import { useTranslations } from 'next-intl';
 import { PresenceDot, AGENT_LIVE_RING_CLASS, type PresenceStatus } from '@/components/chat/presence-dot';
 import { AGENT_MARK_FILL_CLASS } from '@/components/ui/agent-identity';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
@@ -10,7 +11,17 @@ import { avatarColor, initials } from '@/lib/storage/format';
 import { cn } from '@/lib/utils';
 
 export interface AvatarProps {
-  name: string;
+  // story #3791(display_name 없는 계정 크래시, 유나 定 2026-09-10 12:00Z) — 이니셜 계산
+  // «재료»다. null이면 아이콘 tier로 떨어진다(이미 있던 3단 폴백 그대로) — 폴백 글자를
+  // 새로 짓지 않는다. 호출부가 memberDisplayLabel() 같은 표시-문구를 여기 넘기면 그
+  // 문구의 첫 글자가 가짜 이니셜로 뜬다(이 카드가 피하려는 바로 그 일, 페드루 재검토
+  // 12:14Z 실물 확認) — 그 문구는 아래 label로 넘길 것.
+  name: string | null;
+  // story #3791 — 접근성 이름(aria-label/alt/tooltip 첫 줄). 생략 시 name을 그대로 쓴다.
+  // name이 null/빈 값일 때만 호출부가 memberDisplayLabel() 결과를 여기로 넘긴다(이니셜
+  // 재료와 분리 — «없는 이름을 지어내지 않는다»와 «그래도 스크린리더는 뭔가 말한다»를
+  // 동시에 만족).
+  label?: string;
   avatarUrl?: string | null;
   actorType: 'human' | 'agent';
   /** px 정사각. 기본 32(채팅 L1~L3 표준 규격은 호출부가 size로 스케일). */
@@ -44,8 +55,21 @@ export interface AvatarProps {
  * presence-dot.tsx — 옛 WORKING_RING_CLASS 개명+색 스왑, 그 파일 주석 참고).
  */
 export function Avatar({
-  name, avatarUrl, actorType, size = 32, presenceStatus, isWorking = false, runtimeType = null, className,
+  name, label, avatarUrl, actorType, size = 32, presenceStatus, isWorking = false, runtimeType = null, className,
 }: AvatarProps) {
+  // story #3888(§⑤·Chat, PO 확定 2026-09-14 18:19Z) — "Agent" 코너 배지·툴팁이 로케일
+  // 무관 리터럴이었다 — agent-identity.tsx의 "Bot" 칩과 같은 자리에서 다른 낱말을 쓰던
+  // 것을 `chats.agent`(기존 키, 신규 0)로 단일화.
+  const t = useTranslations('chats');
+  // story #3791(유나 定 12:00Z·카디르 QA 정정 12:52Z) — 접근성 이름은 label 우선, 없으면
+  // name 그대로(빈 문자열 대신 attribute 자체를 생략 — 아래 undefined). `??`는 null/
+  // undefined만 잡고 빈 문자열은 통과시켜 호출부가 `name ?? fallback`류로 label을 지어
+  // 넘기면(빈 이름이 ??를 안 타 그대로 온다) aria-label=""로 새는 결함이 있었다(카디르
+  // 재현 — chat-list-view.tsx 일반/에이전트 탭 둘 다) — label·name 둘 다 trim 후 빈
+  // 값이면 다음 단계로 넘어가는 형으로 방어한다(호출부 실수에도 이 컴포넌트 자신이
+  // 안 새는 단일 지점). 이니셜 계산은 이 값이 아니라 원시 name?.trim()으로 따로
+  // 판정한다(밑 tier 분기).
+  const a11yName = (label?.trim() ? label : undefined) ?? (name?.trim() ? name : undefined);
   const isAgent = actorType === 'agent';
   const dotSize = size >= 40 ? 'md' : 'sm';
   const iconSize = Math.round(size * 0.5);
@@ -70,7 +94,13 @@ export function Avatar({
   const showInitialsBadge =
     badgeDef?.kind === 'initials' ||
     (badgeDef?.kind === 'icon' && !showIconBadge && !!badgeDef.initials && size >= 28);
-  const showTextBadge = !showIconBadge && !showInitialsBadge;
+  // story #3888 CHANGES②(PO PR 코멘트, 2026-09-14 19:05Z·유나 §⑤ 확定 19:06Z) — 4배
+  // 확대 캡처 실측: 코너 텍스트 배지("에이전트"/"Agent")가 헤더(32px)에선 컨테이너
+  // 상단에 절반 잘리고 목록(40px)에선 7px 한글이 번져 안 읽혔다 + 같은 행의
+  // AgentIdentity 칩이 이미 같은 낱말이라 AC2 "겹침 0"도 미충족. 유나 확定: ≤40px(헤더·
+  // 목록·버블)는 코너 텍스트 배지 자체를 미렌더(dot 대체 아님 — ring+AgentIdentity 칩+
+  // 아바타 툴팁이 이미 신호를 나른다), >40px(프로필류)만 유지.
+  const showTextBadge = !showIconBadge && !showInitialsBadge && size > 40;
   // 디스크 지름 = clamp(16, 아바타×0.40, 30) · 마크 = 디스크×0.68(규격 §1~2).
   const diskSize = Math.min(30, Math.max(16, Math.round(size * 0.4)));
   const markSize = Math.round(diskSize * 0.68);
@@ -110,12 +140,12 @@ export function Avatar({
           // (storage-uploader-avatar.tsx·team-presence-panel.tsx·profile-menu.tsx 전부 동일
           // 이유로 raw img)와 동형. next/image 전환은 별도 remotePatterns 검토 스토리 몫.
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={avatarUrl} alt={name} className="h-full w-full object-cover" onError={() => setImgError(true)} />
-        ) : name.trim() ? (
+          <img src={avatarUrl} alt={a11yName ?? ''} className="h-full w-full object-cover" onError={() => setImgError(true)} />
+        ) : name?.trim() ? (
           <span
             className={cn('flex h-full w-full items-center justify-center font-semibold', avatarColor(isAgent))}
             style={{ fontSize: initSize }}
-            aria-label={name}
+            aria-label={a11yName}
           >
             {initials(name)}
           </span>
@@ -125,7 +155,7 @@ export function Avatar({
               'flex h-full w-full items-center justify-center',
               isAgent ? 'bg-accent-claim/15 text-accent-claim' : 'bg-muted text-muted-foreground',
             )}
-            aria-label={name}
+            aria-label={a11yName}
           >
             {isAgent ? <Bot style={{ width: iconSize, height: iconSize }} /> : <User style={{ width: iconSize, height: iconSize }} />}
           </span>
@@ -177,7 +207,7 @@ export function Avatar({
           className={cn('absolute -right-1.5 -top-1.5 rounded border border-proof-blue/40 font-bold', AGENT_MARK_FILL_CLASS)}
           style={{ fontSize: Math.max(7, Math.round(textBadgeSize * 0.55)), lineHeight: 1, padding: '2px 3px' }}
         >
-          Agent
+          {t('agent')}
         </span>
       )}
       {isAgent && presenceStatus ? (
@@ -197,13 +227,13 @@ export function Avatar({
       <TooltipTrigger render={avatarNode} />
       <TooltipContent side="top">
         <div className="flex flex-col gap-0.5 py-0.5">
-          <span className="text-xs font-medium">{name}</span>
+          <span className="text-xs font-medium">{a11yName}</span>
           {/* 툴팁 팝업 자체가 bg-foreground(반전 배경)라 text-background가 이미 고대비
               "본문" 색이다(popup 기본값 상속) — 유나 규격의 text-muted-foreground는 이
               반전 배경에서 그대로 쓰면 대비가 깨져(라이트/다크 실측 재계산: 8.49/7.11로
               AA는 통과하지만 톤 자체가 안 맞음) text-background/70(반전 배경용 동형 dim)로
               옮겨 적용 — 의도(2번째 줄=보조 정보)는 그대로, 토큰만 반전 표면에 맞게 보정. */}
-          <span className="text-[11px] text-background/70">{runtimeLbl ? `Agent · ${runtimeLbl}` : 'Agent'}</span>
+          <span className="text-[11px] text-background/70">{runtimeLbl ? `${t('agent')} · ${runtimeLbl}` : t('agent')}</span>
         </div>
       </TooltipContent>
     </Tooltip>

@@ -13,6 +13,7 @@ interface Props {
 
 export function StandupDeadlineSection({ projectId }: Props) {
   const t = useTranslations('settings');
+  const tc = useTranslations('common');
   const [deadline, setDeadline] = useState('09:00');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -61,7 +62,7 @@ export function StandupDeadlineSection({ projectId }: Props) {
               />
             </div>
             <Button size="sm" className="mt-4" onClick={handleSave} disabled={saving || !projectId}>
-              {saved ? <><Check className="size-4" />저장됨</> : saving ? '저장 중...' : t('save')}
+              {saved ? <><Check className="size-4" />{tc('saved')}</> : saving ? tc('saving') : t('save')}
             </Button>
           </div>
         </SectionCardBody>

@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { ShieldCheck, ChevronRight } from 'lucide-react';
 import { ProofCapsule } from '@/components/proof-capsule/proof-capsule';
 import { useSseNotifications } from '@/hooks/use-sse-notifications';
 import { formatRelativeTime } from '@/lib/storage/format';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { cn } from '@/lib/utils';
 import {
   parseAttentionQueueSignals, buildAttentionQueueFromBe,
@@ -45,6 +46,8 @@ export function AttentionRow({ item, highlighted, onNavigate }: {
   // 처리한다(role/tabIndex/onClick/버튼 전부 생략, 정적 표시만. 있지도 않은 라우트를 지어내지
   // 않는다는 원칙).
   const navigable = item.href !== null;
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
   return (
     <div
       role={navigable ? 'button' : undefined}
@@ -74,7 +77,7 @@ export function AttentionRow({ item, highlighted, onNavigate }: {
         human={item.actor && !item.actor.isAgent ? { name: item.actor.name, role: '' } : undefined}
         agent={item.actor?.isAgent ? { name: item.actor.name, initial: item.actor.name.slice(0, 1) } : undefined}
         gate={navigable ? { action: item.actionLabel, href: item.href!, tone: item.actionTone } : undefined}
-        duration={item.enteredStateAtMs !== null ? formatRelativeTime(new Date(item.enteredStateAtMs).toISOString()) : undefined}
+        duration={item.enteredStateAtMs !== null ? formatRelativeTime(new Date(item.enteredStateAtMs).toISOString(), locale, displayTimezone) : undefined}
         className="rounded-none border-0"
       />
     </div>

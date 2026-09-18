@@ -18,6 +18,23 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
+@pytest.fixture(autouse=True)
+def _mock_resolve_member_db_verified(monkeypatch):
+    """story #3370 회귀 클래스 정정(페드루 PO 지시 2026-09-11) — 라우터가 이제 actor_id를
+    쓰기 前 resolve_member_db_verified()로 영속 멤버 id를 실측한다(진짜 DB 조회). 이 파일의
+    세션은 순수 AsyncMock(실 PG 아님)이라 그 조회가 그대로 통과하면 응답 파싱이 깨진다 —
+    라우터 모듈에 import된 그 심볼만 목으로 갈아 이 파일의 서비스-계층 목킹 계약(create_
+    deployment 등 자체는 그대로 목)을 그대로 유지한다."""
+    from unittest.mock import AsyncMock as _AsyncMock
+
+    resolved = MagicMock()
+    resolved.id = uuid.uuid4()
+    monkeypatch.setattr(
+        "app.routers.agent_deployments.resolve_member_db_verified",
+        _AsyncMock(return_value=resolved),
+    )
+
+
 async def _client():
     from app.main import app
     ctx = MagicMock()

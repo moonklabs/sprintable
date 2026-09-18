@@ -122,7 +122,8 @@ describe('OnboardingForm — error.code 분기 (story #2484)', () => {
     // story #2484 핵심 회귀가드 — 예전엔 이 분기가 절대 안 탔다(코드명이 틀려서).
     // UpgradeModal은 Dialog(base-ui) 기반이라 body에 portal된다 — container 밖에서 찾는다.
     expect(document.body.textContent).not.toContain('Free plan project limit');
-    expect(document.body.textContent).toContain('무료 플랜은 프로젝트를 1개까지 만들 수 있습니다');
+    // story #3901 — 리터럴 재-pin 대신 ko.json 템플릿 값을 {limit} 치환해 대조.
+    expect(document.body.textContent).toContain(koMessages.onboarding.projectLimitExceededError.replace('{limit}', '1'));
   });
 
   it('create-agent 실패 — raw/하드코딩 영문 대신 번역 문구(#2484)', async () => {

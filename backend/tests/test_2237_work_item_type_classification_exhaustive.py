@@ -34,7 +34,13 @@ import pytest
 _KNOWN_PROJECT_SCOPED = frozenset(
     {"story", "task", "doc", "visual_artifact", "loop", "hypothesis", "epic", "sprint"}
 )
-_KNOWN_PROJECT_AGNOSTIC = frozenset({"wf_line_version", "agent_decision"})
+_KNOWN_PROJECT_AGNOSTIC = frozenset({
+    "wf_line_version", "agent_decision",
+    # story #3263(지원v1·5에스컬레이션) — support_escalation도 agent_decision과 동일 이유로
+    # project-agnostic(self-referencing standalone anchor, support_gateway_token.py::
+    # receive_escalation_event가 project_id를 직접 해소해 넘긴다).
+    "support_escalation",
+})
 
 
 def test_project_scoped_set_matches_hand_audited_inventory():

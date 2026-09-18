@@ -402,6 +402,104 @@ async def test_list_conversations():
         app.dependency_overrides.clear()
 
 
+async def test_list_conversations_latest_message_exposes_event_field():
+    """story #3888(§⑤·Chat, PO 확定 2026-09-14 18:19Z) — 대화 목록 미리보기가 이벤트
+    메시지의 raw content(발행 시점 slug) 대신 event_key/payload로 렌더 시점 조립하려면
+    latest_message.event가 필요하다. _event_payload()(전체 메시지 목록이 이미 쓰는
+    기존 함수)를 재사용해 additive로 실었는지 — 새 필드 자체가 응답에 나오는지 고정."""
+    client, session, app = await _make_client()
+    try:
+        mock_member = _make_member()
+        mock_conv = _make_conv()
+        mock_msg = _make_msg()
+        # _event_payload()는 msg.__dict__['msg_metadata']를 읽는다(getattr(msg, '__dict__')
+        # 경유, greenlet_spawn 회피 — _make_msg()의 평범한 속성 대입도 MagicMock.__dict__에
+        # 그대로 실린다).
+        mock_msg.msg_metadata = {
+            "event": {"event_key": "preset.gate.verdict", "payload": {"gate_type": "external_publish", "verdict": "approved"}},
+        }
+
+        member_result = MagicMock()
+        member_result.scalars.return_value.first.return_value = mock_member
+        conv_ids_result = MagicMock()
+        conv_ids_result.all.return_value = [
+            MagicMock(conversation_id=CONV_ID, muted_at=None, last_read_at=None)
+        ]
+        total_result = MagicMock()
+        total_result.scalar_one.return_value = 1
+        convs_result = MagicMock()
+        convs_result.scalars.return_value.all.return_value = [mock_conv]
+        p_rows_result = MagicMock()
+        p_rows_result.all.return_value = []
+        unread_result = MagicMock()
+        unread_result.all.return_value = []
+        latest_msg_result = MagicMock()
+        latest_msg_result.scalar_one_or_none.return_value = mock_msg
+        approval_rows_result = MagicMock()
+        approval_rows_result.all.return_value = []
+
+        session.execute = AsyncMock(side_effect=[
+            member_result, conv_ids_result, total_result,
+            convs_result, p_rows_result, unread_result, approval_rows_result, latest_msg_result,
+        ])
+
+        async with client as c:
+            resp = await c.get(f"/api/v2/conversations?project_id={PROJECT_ID}")
+
+        assert resp.status_code == 200
+        latest_message = resp.json()["data"][0]["latest_message"]
+        assert latest_message["event"] == {
+            "event_key": "preset.gate.verdict",
+            "payload": {"gate_type": "external_publish", "verdict": "approved"},
+        }
+    finally:
+        app.dependency_overrides.clear()
+
+
+async def test_list_conversations_latest_message_event_null_when_absent():
+    """음성대조 — msg_metadata에 event가 없으면(일반 메시지) latest_message.event는
+    null(additive 필드가 없는 메시지를 event로 오인하지 않는다)."""
+    client, session, app = await _make_client()
+    try:
+        mock_member = _make_member()
+        mock_conv = _make_conv()
+        mock_msg = _make_msg()  # msg_metadata 미설정(속성 자체 없음)
+
+        member_result = MagicMock()
+        member_result.scalars.return_value.first.return_value = mock_member
+        conv_ids_result = MagicMock()
+        conv_ids_result.all.return_value = [
+            MagicMock(conversation_id=CONV_ID, muted_at=None, last_read_at=None)
+        ]
+        total_result = MagicMock()
+        total_result.scalar_one.return_value = 1
+        convs_result = MagicMock()
+        convs_result.scalars.return_value.all.return_value = [mock_conv]
+        p_rows_result = MagicMock()
+        p_rows_result.all.return_value = []
+        unread_result = MagicMock()
+        unread_result.all.return_value = []
+        latest_msg_result = MagicMock()
+        latest_msg_result.scalar_one_or_none.return_value = mock_msg
+        approval_rows_result = MagicMock()
+        approval_rows_result.all.return_value = []
+
+        session.execute = AsyncMock(side_effect=[
+            member_result, conv_ids_result, total_result,
+            convs_result, p_rows_result, unread_result, approval_rows_result, latest_msg_result,
+        ])
+
+        async with client as c:
+            resp = await c.get(f"/api/v2/conversations?project_id={PROJECT_ID}")
+
+        assert resp.status_code == 200
+        latest_message = resp.json()["data"][0]["latest_message"]
+        assert latest_message["event"] is None
+        assert latest_message["content"] == "테스트 메시지"
+    finally:
+        app.dependency_overrides.clear()
+
+
 # ─── AC6: GET /conversations/{id}/messages — cursor 페이지네이션 ─────────────
 
 @pytest.mark.anyio

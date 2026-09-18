@@ -122,6 +122,8 @@ async def test_resolve_member_jwt_returns_org_member_id():
 
     session = AsyncMock()
     user_mock = MagicMock()
+    # story #3755 — name은 display_name에서(email 폴백 0).
+    user_mock.display_name = "유저 테스트"
     user_mock.email = "user@test.com"
     om_result = MagicMock(); om_result.scalar_one_or_none.return_value = om
     user_result = MagicMock(); user_result.scalar_one_or_none.return_value = user_mock
@@ -133,7 +135,7 @@ async def test_resolve_member_jwt_returns_org_member_id():
     assert resolved.id == ORG_MEMBER_ID
     assert resolved.type == "human"
     assert resolved.user_id == USER_ID
-    assert resolved.name == "user@test.com"
+    assert resolved.name == "유저 테스트"
 
 
 @pytest.mark.anyio
@@ -390,7 +392,8 @@ async def test_resolve_member_identity_falls_back_to_org_member():
     from app.services.member_resolver import resolve_member_identity
 
     om = _make_org_member()
-    user = MagicMock(); user.email = "human@test.com"; user.id = USER_ID
+    # story #3755 — name은 display_name에서(email 폴백 0).
+    user = MagicMock(); user.display_name = "휴먼 테스트"; user.email = "human@test.com"; user.id = USER_ID
 
     tm_result = MagicMock()
     tm_result.scalars.return_value.first.return_value = None  # TeamMember 미존재
@@ -407,7 +410,7 @@ async def test_resolve_member_identity_falls_back_to_org_member():
     assert resolved.id == ORG_MEMBER_ID
     assert resolved.type == "human"
     assert resolved.user_id == USER_ID
-    assert resolved.name == "human@test.com"
+    assert resolved.name == "휴먼 테스트"
     # 2단(+User) 조회 확정
     assert session.execute.await_count == 3
 

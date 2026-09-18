@@ -33,6 +33,7 @@ from app.models.pm import Goal, Story, StoryActivity, Task
 from app.models.workflow_line import WorkflowLineStepApproval, WorkflowLineStepRun
 from app.services.agent_auth_failure import AUTH_FAILURE_THRESHOLD, AUTH_FAILURE_WINDOW_MINUTES
 from app.services.member_resolver import resolve_member
+from app.services.org_time import get_org_timezone, org_date_sql
 
 router = APIRouter(prefix="/api/v2/command-center", tags=["command-center", "Work"])
 
@@ -775,16 +776,21 @@ async def overview(
     }
 
     # CC-BE.2 비용 추세(실·org aggregate only·개인별 비용 노출 0): agent_runs 일별 합. 없으면 honest empty.
+    # story #3674(BE 確定 2026-09-07) — 일별 그룹핑을 org 시간대 기준으로(org_time.py
+    # ::org_date_sql). Postgres func.date() 단독은 세션 TZ(기본 UTC) 기준이라 KST org가
+    # 00:00~09:00에 열면 "오늘" 막대가 비거나 하루 밀리던 결함(그라운딩 ① 신규 발견 자리).
+    org_timezone = await get_org_timezone(session, org_id)
+    cost_day = org_date_sql(AgentRun.started_at, org_timezone)
     cost_rows = (
         await session.execute(
             select(
-                func.date(AgentRun.started_at),
+                cost_day,
                 func.sum(AgentRun.cost_usd),
                 func.sum(func.coalesce(AgentRun.input_tokens, 0) + func.coalesce(AgentRun.output_tokens, 0)),
             )
             .where(AgentRun.org_id == org_id, AgentRun.started_at > now - timedelta(days=14))
-            .group_by(func.date(AgentRun.started_at))
-            .order_by(func.date(AgentRun.started_at))
+            .group_by(cost_day)
+            .order_by(cost_day)
         )
     ).all()
     points = [

@@ -426,7 +426,7 @@ _HTTP_MCP_CLI_SETUP_TEXT: dict[str, dict[str, str]] = {
         "title": "# Hermes MCP 연결",
         "intro": (
             "hermes는 `.mcp.json` 파일을 자동으로 읽지 않습니다 — 자체 CLI로 MCP 서버를 등록해야\n"
-            "합니다(라이브 왕복 실측 완료: story #2466, 실제 도구 110개 수신 확認)."
+            "합니다(라이브 왕복 실측 완료: story #2466, 실제 도구 110개 수신 확인)."
         ),
         "command_heading": "## 등록 명령",
         "command_note": "실행 중 인증 방식을 물으면 header를 선택하고, API key를 물으면 아래 값을 입력하세요.",

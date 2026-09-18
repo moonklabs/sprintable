@@ -1,14 +1,20 @@
 import Link from 'next/link';
+import { getTranslations } from 'next-intl/server';
 import { SprintableLogo } from '@/components/brand/sprintable-logo';
 import { DocContentRenderer } from '@/components/docs/doc-content-renderer';
 import { getCurrentLegalDocument } from '@/lib/legal-docs';
 import { BusinessInfoBlock } from '@/components/legal/legal-footer';
+// story #3493 — 시행일은 법률 문서의 고정 날짜("약속")다. 방금 시행됐다고 해서
+// "3일 전"으로 decay하면 안 되므로(formatRelativeTime 오분류였다), §11-2 정본
+// (formatScheduledAt)으로 절대 표기.
+import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 
 export const metadata = { title: 'Refund Policy — Sprintable' };
 export const revalidate = 300;
 
 export default async function RefundPolicyPage() {
   const doc = await getCurrentLegalDocument('refund_policy');
+  const t = await getTranslations('docs');
 
   return (
     <div className="min-h-screen bg-muted py-12">
@@ -24,9 +30,14 @@ export default async function RefundPolicyPage() {
           {doc ? (
             <>
               <p className="mb-6 text-xs text-muted-foreground">
-                시행일: {new Date(doc.effectiveFrom).toLocaleDateString('ko-KR')}
+                시행일: {formatScheduledAt(doc.effectiveFrom, resolveDisplayTimezone().tz).display}
               </p>
-              <DocContentRenderer content={doc.content} contentFormat={doc.contentFormat} publicMode />
+              <DocContentRenderer
+                content={doc.content}
+                contentFormat={doc.contentFormat}
+                publicMode
+                untitledEmbedLabel={t('newDocDefaultTitle')}
+              />
             </>
           ) : (
             <p className="text-sm text-muted-foreground">

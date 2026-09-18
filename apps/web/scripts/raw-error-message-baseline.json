@@ -10,8 +10,6 @@
   "reviewedSafe": [
     "src/components/agents/agent-api-key-manager.tsx",
     "src/components/ui/route-error-state.tsx",
-    "src/components/settings/mcp-connection-settings.tsx",
-    "src/components/settings/slack-integration-settings.tsx",
     "src/components/shared/rejected-relations-section.tsx",
     "src/components/flow/flow-epic-nodes.tsx",
     "src/components/flow/flow-multi-lane-canvas.tsx"

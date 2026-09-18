@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
@@ -50,6 +51,7 @@ async def lifespan(app: FastAPI):
     from app.services.event_broker import check_outbox_dual_publish_config
     from app.services.firebase_verifier import check_mobile_app_check_config
     from app.services.pg_pubsub import check_listen_config, listen_loop
+    from app.services.rate_limiter import warn_if_rate_limit_backend_is_memory
 
     # story c4c72eb1(E-ARCH GCE 이전) PR-A: asyncio.Event는 최초 .wait()/.set() 시점의 실행
     # 루프에 바인딩된다 — 테스트가 TestClient(app)로 lifespan을 여러 번(서로 다른 루프로) 태우는
@@ -86,6 +88,15 @@ async def lifespan(app: FastAPI):
     check_cron_secret_config()  # story #2072: non-local + CRON_SECRET 미설정 fail-closed.
     check_outbox_dual_publish_config()  # story #2138: outbox + dual_publish/dispatch 동시 fail-closed.
     check_mobile_app_check_config()  # 산티아고 §9 finding 1: mobile 발급 on + App Check 미필수 fail-closed.
+    warn_if_rate_limit_backend_is_memory()  # story #3418: 인스턴스 다중+memory=레이트리밋 인스턴스별 분리, 경고만(fail-closed 아님).
+    from app.services.channel_adapters import assert_sandbox_channel_not_registered_in_prod
+    assert_sandbox_channel_not_registered_in_prod()  # story 5b27b32f AC5: prod에 sandbox 채널 등재=기동 실패(fail-closed).
+    from app.routers.dev_wordpress_stub import assert_wordpress_stub_not_registered_in_prod
+    assert_wordpress_stub_not_registered_in_prod()  # story e4fc29fa 조각③c: prod에 WordPress 스텁 등재=기동 실패(fail-closed).
+    from app.routers.dev_webhook_stub import assert_webhook_stub_not_registered_in_prod
+    assert_webhook_stub_not_registered_in_prod()  # story e4fc29fa 조각④: prod에 webhook 스텁 등재=기동 실패(fail-closed).
+    from app.routers.dev_ghost_stub import assert_ghost_stub_not_registered_in_prod
+    assert_ghost_stub_not_registered_in_prod()  # story #3816 PR1: prod에 Ghost 스텁 등재=기동 실패(fail-closed).
     # story bea25062: cutover 존재-캐시는 의도적으로 startup에서 warm 안 함(자체 발견 —
     # TestClient(app)로 lifespan을 태우는 기존 SSE 테스트들이 라우트 전용으로 짜둔 유한한
     # mock db.execute() 순서-큐를 startup 시점의 이 캐시 조회가 몰래 하나 소비해 실패시켰다).
@@ -218,7 +229,7 @@ async def lifespan(app: FastAPI):
             await worker_engine.dispose()
 
 
-from app.routers import a2a, account, activation, activity_logs, admin_billing, activity_stream, agent_deployments, agent_gateway, agent_inbox, agent_message_policy, agent_personas, agent_routing_rules, agent_runs, agent_sessions, agents, analytics, api_keys, assets, billing_keys, toss_webhooks, org_subscription_checkout, billing_packs, context_pack, deeplink_manifest, gate_config, gate_metrics, attachments, audit_logs, auth, auth_firebase_internal, auth_native_bootstrap, bridge, channel, command_center, conversations, cron, current_project, dashboard, dependencies, device_installations, dispatch, docs, entities, goals, event_notifications, events, evidence, exclusion, file_locks, gates, github_integration, glance, health, hitl, hitl_config, hypotheses, integrations, invite_accept, judgments, labels, legal, loop_measure_due, loops, mcp, me, meetings, members, merge_gate, notification_preferences, notifications, onboarding, open_api_keys, org_invites, org_members, organizations, oss, participation, plan_features, platform_settings, policy_documents, project_access, project_settings, projects, public_docs, reference_candidates, references, release_notes, resolve, retros, rewards, role_templates, runtime_capabilities, session_context, sprints, standups, stories, subscription, tasks, team_members, team_presence, trust_scores, usage, user_blocks, verdict_capture, verdicts, visual_artifacts, webhooks, workflow_executions, workflow_line_config, workflow_report, workflow_templates, workflow_trigger, workflow_trigger_types, workflow_versions, ws_chat
+from app.routers import a2a, account, activation, activity_logs, admin_billing, admin_unhandled_errors, activity_stream, ads_boost, ads_boost_execution, agent_deployments, agent_gateway, agent_inbox, agent_message_policy, agent_personas, agent_routing_rules, agent_runs, agent_sessions, agents, analytics, api_keys, channel_post_comments, channel_post_comment_replies, engagement_items, insight_snapshots, insights_board, assets, billing_keys, toss_webhooks, org_subscription_checkout, billing_packs, campaigns, content_rules, context_pack, publishing_metrics, connectors, channel_connections, channel_posts, deeplink_manifest, domain_labels, gate_config, gate_metrics, attachments, audit_logs, auth, auth_firebase_internal, auth_native_bootstrap, bridge, channel, command_center, conversations, cron, current_project, dashboard, dependencies, device_installations, dispatch, docs, entities, goals, event_notifications, events, evidence, exclusion, file_locks, gates, github_integration, glance, health, hitl, hitl_config, hypotheses, integrations, invite_accept, judgments, labels, legal, loop_measure_due, loops, mcp, me, meetings, members, measurement_connections, merge_gate, newsletter_send, notification_preferences, notifications, onboarding, open_api_keys, org_invites, org_members, organizations, oss, pageview_metering, participation, plan_features, platform_settings, policy_documents, project_access, project_settings, projects, public_docs, public_pageview, public_site_posts, recipe_repeat_schedules, reference_candidates, references, release_notes, resolve, retros, rewards, role_templates, runtime_capabilities, session_context, site_posts, sprints, standups, stories, subscription, support_gateway_token, tasks, team_members, team_presence, today, trust_scores, usage, user_blocks, verdict_capture, verdicts, visual_artifacts, webhooks, workflow_executions, workflow_line_config, workflow_report, workflow_trigger, workflow_trigger_types, workflow_versions, ws_chat
 
 # 도메인 축 B(org-1st-class-surface-ia-design-b §3): OpenAPI 태그 조직-우선 위계.
 # 개별 라우터는 기존 세부 tag(예 "stories")를 그대로 유지하고 이 4축 태그를 추가로 보유(다중
@@ -316,9 +327,44 @@ async def rate_limit_storage_error_handler(request: Request, exc: StorageError) 
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    """예상치 못한 500 에러 — 내부 정보는 로그에만, 클라이언트엔 일반 메시지."""
-    _logger.exception("Unhandled exception on %s %s: %s", request.method, request.url.path, exc)
+    """예상치 못한 500 에러 — 내부 정보는 로그에만, 클라이언트엔 일반 메시지.
+
+    story #3672(2026-09-07, 3663 실사고) — 이 로그가 Cloud Run에만 남아 gcloud
+    재로그인 없이는 원인 추적이 안 됐다(사람 의존 재개 경로). error_id(uuid4) 하나를
+    로그 한 줄·응답 봉투 `error.error_id`·`unhandled_error_events` 행 셋에 같은 값으로
+    싣는다 — 셋을 나중에 그 id로 상관시킬 수 있다. DB 기록은 best-effort(실패해도
+    이 500 응답 자체는 그대로 나간다, record_unhandled_error_event 참고)."""
+    error_id = uuid.uuid4()
+    _logger.exception(
+        "Unhandled exception on %s %s [error_id=%s]: %s", request.method, request.url.path, error_id, exc
+    )
     detail = str(exc) if settings.debug else "Internal server error"
+
+    try:
+        from app.services.unhandled_error_events import record_unhandled_error_event
+        # story #3173 소비처와 같은 request.state 자리(au_org_id) — get_current_user()가
+        # 인증에 성공했을 때만 채운다(그 前에 죽은 요청은 None이 정직한 값, 지어내지
+        # 않는다). 문자열로 심겨 있어(AuthContext.org_id: str) UUID로 변환.
+        _raw_org_id = getattr(request.state, "au_org_id", None)
+        _raw_user_id = getattr(request.state, "au_user_id", None)
+        # 페드루 PO 권고①(#4025 리뷰, 2026-09-07) — dev-app은 CF 경유라 x-request-id가
+        # 지금은 거의 null. cf-ray(Cloudflare)·x-cloud-trace-context(GCP LB/Cloud Run)
+        # 순으로 폴백 — 셋 다 "이 한 요청의 트레이스 식별자"라는 같은 뜻, 상관용일 뿐
+        # 인가/검증에 안 쓰이니 값을 신뢰하지 않고 그대로 통과시켜도 안전하다.
+        _request_id = (
+            request.headers.get("x-request-id")
+            or request.headers.get("cf-ray")
+            or request.headers.get("x-cloud-trace-context")
+        )
+        await record_unhandled_error_event(
+            error_id=error_id, method=request.method, path=request.url.path,
+            exception_class=type(exc).__name__, message=str(exc)[:2000] if str(exc) else None,
+            org_id=uuid.UUID(_raw_org_id) if _raw_org_id else None,
+            user_id=uuid.UUID(_raw_user_id) if _raw_user_id else None,
+            request_id=_request_id,
+        )
+    except Exception:
+        _logger.exception("record_unhandled_error_event itself raised for error_id=%s", error_id)
 
     # story #2003: /rpc의 미처리 예외도 JSON-RPC envelope으로(code=-32603 표준 Internal error,
     # retryable=True — 5xx 분류). http_exception_handler와 동일 경로-정밀 매치.
@@ -327,7 +373,11 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 
     return JSONResponse(
         status_code=500,
-        content={"data": None, "error": {"code": "INTERNAL_ERROR", "message": detail}, "meta": None},
+        content={
+            "data": None,
+            "error": {"code": "INTERNAL_ERROR", "message": detail, "error_id": str(error_id)},
+            "meta": None,
+        },
     )
 
 
@@ -348,6 +398,13 @@ app.add_middleware(
     ],
 )
 
+# story #3354(공개 beacon)·#3360(공개 site-posts) — 공개(무인증) 라우트만 CORS 완전 개방
+# (app 전체 allowlist는 안 건드림). 전역 CORSMiddleware보다 나중에 add_middleware해 바깥쪽
+# (요청을 먼저 가로챔)에 둬야 preflight OPTIONS가 전역 allowlist 판정에 안 걸린다.
+from app.core.public_api_cors import PublicApiCorsMiddleware  # noqa: E402
+
+app.add_middleware(PublicApiCorsMiddleware)
+
 # story #3173(결제②-B) — AU(automation_units) 계측. app/dependencies/auth.py의
 # get_current_user()가 request.state.au_actor/au_org_id를 심어두면 여기서 응답 완료 후
 # 읽어 usage_meters에 쌓는다. 전체 fail-open(계측 예외가 요청에 영향 0) — 모듈 docstring 참고.
@@ -355,9 +412,19 @@ from app.services.au_metering import AUMeteringMiddleware  # noqa: E402
 
 app.add_middleware(AUMeteringMiddleware)
 
+# story #3722(Trust·BE) — 에이전트 인증 API 요청 1건 = agent_run_tool_calls 1행(서버
+# 관측 기록). AUMeteringMiddleware와 같은 SSOT(request.state.au_actor/au_org_id/
+# au_user_id)를 재사용 — 새 에이전트 판별 로직 0. fail-open(기록 실패가 요청에 영향 0).
+from app.services.tool_call_recording import ToolCallRecordingMiddleware  # noqa: E402
+
+app.add_middleware(ToolCallRecordingMiddleware)
+
 app.include_router(auth.router)
 app.include_router(health.router)
 app.include_router(activity_logs.router)
+app.include_router(ads_boost.router)
+app.include_router(ads_boost_execution.router)
+app.include_router(newsletter_send.router)
 app.include_router(activity_stream.router)
 app.include_router(events.router)
 app.include_router(agent_gateway.router)
@@ -384,6 +451,18 @@ app.include_router(exclusion.router)
 app.include_router(verdict_capture.router)
 app.include_router(trust_scores.router)
 app.include_router(hitl_config.router)
+app.include_router(domain_labels.router)
+app.include_router(connectors.router)
+app.include_router(channel_connections.router)
+app.include_router(channel_posts.router)
+app.include_router(campaigns.router)
+app.include_router(content_rules.router)
+app.include_router(publishing_metrics.router)
+app.include_router(insight_snapshots.router)
+app.include_router(channel_post_comments.router)
+app.include_router(channel_post_comment_replies.router)
+app.include_router(engagement_items.router)
+app.include_router(insights_board.router)
 app.include_router(gates.router)
 app.include_router(evidence.router)
 app.include_router(judgments.router)
@@ -391,11 +470,15 @@ app.include_router(session_context.router)
 app.include_router(github_integration.router)
 app.include_router(gate_config.router)
 app.include_router(gate_config.org_router)
+app.include_router(recipe_repeat_schedules.router)
 app.include_router(gate_metrics.router)
 app.include_router(workflow_line_config.router)
 app.include_router(tasks.router)
+app.include_router(today.router)
 app.include_router(docs.router)
 app.include_router(public_docs.router)
+app.include_router(public_pageview.router)
+app.include_router(public_site_posts.router)
 app.include_router(meetings.router)
 app.include_router(stories.router)
 app.include_router(projects.router)
@@ -428,8 +511,30 @@ app.include_router(glance.router)
 app.include_router(current_project.router)
 app.include_router(runtime_capabilities.router)
 app.include_router(members.router)
+app.include_router(measurement_connections.router)
+app.include_router(measurement_connections.ga4_callback_router)
 app.include_router(merge_gate.router)
 app.include_router(organizations.router)
+app.include_router(pageview_metering.router)
+app.include_router(site_posts.router)
+# story e4fc29fa(조각③c) — dev 전용 WordPress REST 모의(AC7 실왕복 표본 대상).
+# sandbox_publish.py 등재 조건(SANDBOX_CHANNEL_ENABLED)과 같은 사상 — 이 라우터 자체가
+# 조건부 등재(①층 방어), assert_wordpress_stub_not_registered_in_prod()가 기동 시
+# prod 오조작을 잡는다(②층, lifespan에서 호출).
+from app.routers import dev_wordpress_stub as _dev_wordpress_stub  # noqa: E402
+
+if _dev_wordpress_stub.wordpress_stub_enabled():
+    app.include_router(_dev_wordpress_stub.router)
+# story e4fc29fa(조각④) — dev 전용 signed webhook 수신 스텁. 위와 같은 이중방어 사상.
+from app.routers import dev_webhook_stub as _dev_webhook_stub  # noqa: E402
+
+if _dev_webhook_stub.webhook_stub_enabled():
+    app.include_router(_dev_webhook_stub.router)
+# story #3816(PR1) — dev 전용 Ghost Admin API 모의. 위와 같은 이중방어 사상.
+from app.routers import dev_ghost_stub as _dev_ghost_stub  # noqa: E402
+
+if _dev_ghost_stub.ghost_stub_enabled():
+    app.include_router(_dev_ghost_stub.router)
 app.include_router(resolve.router)
 app.include_router(org_invites.router)
 app.include_router(invite_accept.router)
@@ -443,11 +548,13 @@ app.include_router(agent_runs.router)
 app.include_router(agent_inbox.router)
 app.include_router(policy_documents.router)
 app.include_router(subscription.router)
+app.include_router(support_gateway_token.router)
 app.include_router(billing_keys.router)
 app.include_router(toss_webhooks.router)
 app.include_router(org_subscription_checkout.router)
 app.include_router(billing_packs.router)
 app.include_router(admin_billing.router)
+app.include_router(admin_unhandled_errors.router)
 app.include_router(account.router)
 app.include_router(account.accounts_router)
 app.include_router(oss.router)
@@ -465,7 +572,12 @@ app.include_router(integrations.router)
 app.include_router(workflow_versions.router)
 app.include_router(workflow_trigger_types.router)
 app.include_router(workflow_executions.router)
-app.include_router(workflow_templates.router)
+# story #3295(도메인탈고정 축2 후속) — workflow_templates HTTP 라우터 은퇴(FE 소비처 0건,
+# 축2-ⓒ에서 settings 갤러리가 신세대 recipe_role_bindings apply로 이전 完). 모델/
+# 리포지토리/테이블은 존치 — deployment_lifecycle.py가 WorkflowTemplateRepository를
+# fleet 배포 자동 라우팅 규칙 생성의 기본 경로로 여전히 실사용(별개 도메인, 이전 대상
+# 아님). 라우터 파일 자체는 안 지움 — SEC-S8 IDOR 회귀가드가 apply_template 함수를
+# 직접 호출(HTTP 대신)로 이관해 계속 재사용.
 app.include_router(file_locks.router)
 app.include_router(workflow_report.router)
 app.include_router(workflow_trigger.router)

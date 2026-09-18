@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
@@ -8,54 +8,28 @@ import { ChevronDown, ChevronUp, Circle, CircleCheck, Loader2 } from 'lucide-rea
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
-import { fetchWithAuth } from '@/lib/db/client';
+import { useActivationStatus, type ActivationState } from '@/hooks/use-activation-status';
 import { createFirstInstructionConversation } from '@/lib/onboarding/first-instruction';
 import { cn } from '@/lib/utils';
 
 /**
  * story #3159(retention·최소층) — 가입 후 남은 activation 단계를 상시 노출(완주 유도).
- * `/api/activation/checklist` 마운트 1회 조회(storage-capacity-banner.tsx와 동형 no-polling
- * 패턴). PO 지시(2026-08-27): 완전 소멸은 완주(all_complete) 시만 — 접기(collapse)는
- * 허용하되 접힌 상태에서도 진행률 칩은 남는다(수동 dismiss로 완전히 숨길 순 없음).
+ * PO 지시(2026-08-27): 완전 소멸은 완주(all_complete) 시만 — 접기(collapse)는 허용하되
+ * 접힌 상태에서도 진행률 칩은 남는다(수동 dismiss로 완전히 숨길 순 없음).
  *
- * 완주를 한 번 관측하면 localStorage에 영구 기록해 이후 세션은 fetch 자체를 건너뛴다
- * (activation은 단조 증가 — 한 번 다 채우면 되돌아가지 않는다. 활성 사용자 전원이 매
- * 세션 이 엔드포인트를 다시 때리는 낭비 방지).
+ * story #3274 — fetch/skip(COMPLETE_KEY) 로직은 `useActivationStatus()`(hooks/use-
+ * activation-status.ts)로 분리했다 — support-widget-launcher.tsx의 온보딩 단계 게이팅과
+ * 같은 조회를 공유한다(두 벌 판별자·중복 네트워크 호출 금지, AC①).
  */
-const COMPLETE_KEY = 'sprintable_activation_checklist_complete';
 const COLLAPSE_KEY = 'sprintable_activation_checklist_collapsed';
-
-interface ActivationState {
-  steps: {
-    signed_up: boolean;
-    email_verified: boolean;
-    org_created: boolean;
-    agent_connected: boolean;
-    first_roundtrip: boolean;
-  };
-  completed: number;
-  total: number;
-  all_complete: boolean;
-  // story #3201 — 왕복 성사된 대화(또는 org 최초 agent DM) id, 없으면 null.
-  first_instruction_conversation_id: string | null;
-}
-
-function readLocalFlag(key: string): boolean {
-  if (typeof window === 'undefined') return false;
-  try {
-    return window.localStorage.getItem(key) === '1';
-  } catch {
-    return false;
-  }
-}
 
 export function ActivationChecklistBanner() {
   const t = useTranslations('activation');
   const router = useRouter();
   const { projectId } = useDashboardContext();
-  const [state, setState] = useState<ActivationState | null>(null);
-  const [skip] = useState<boolean>(() => readLocalFlag(COMPLETE_KEY));
+  const { state, allComplete } = useActivationStatus();
   const [navigatingToInstruction, setNavigatingToInstruction] = useState(false);
+  const [instructionStartError, setInstructionStartError] = useState(false);
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     try {
@@ -65,33 +39,13 @@ export function ActivationChecklistBanner() {
     }
   });
 
-  useEffect(() => {
-    if (skip) return;
-    let cancelled = false;
-    void (async () => {
-      try {
-        const res = await fetchWithAuth('/api/activation/checklist');
-        if (!res.ok) return;
-        const json = (await res.json()) as { data?: ActivationState };
-        if (cancelled || !json.data) return;
-        setState(json.data);
-        if (json.data.all_complete) {
-          try {
-            window.localStorage.setItem(COMPLETE_KEY, '1');
-          } catch {
-            // 영속 실패해도 이번 렌더는 정상 동작(단지 다음 세션에 한 번 더 조회할 뿐)
-          }
-        }
-      } catch {
-        // 조회 실패는 치명적이지 않음 — 배너 미노출
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [skip]);
-
-  if (skip || !state || state.all_complete) return null;
+  if (allComplete || !state) return null;
+  // story #3610(3607 잔여) CHANGES-2(유나 확認·PO 채택 2026-09-07) — orgId(계정 기본
+  // org, me.org_id)와 비교하던 최초판을 폐기 — BE가 이미 "요청 org(X-Org-Id)==판정
+  // org"를 판정해 낸 불리언을 그대로 쓴다(다른 프레임 값 2개를 FE가 다시 맞대지
+  // 않는다). false일 때만 숨긴다 — undefined(구 응답 shape, 롤아웃 창)는 기존처럼
+  // 렌더 유지(과다 은닉 방지, 3610 최초판과 동일 원칙).
+  if (state.scope_is_requested_org === false) return null;
 
   const toggleCollapse = () => {
     const next = !collapsed;
@@ -114,9 +68,15 @@ export function ActivationChecklistBanner() {
     }
     if (!projectId) return;
     setNavigatingToInstruction(true);
+    setInstructionStartError(false);
     try {
       const convId = await createFirstInstructionConversation(projectId);
+      // story #3638(유나 §8 별건) — 대화 생성 실패 시 스피너만 멈추고 조용했다(클릭했는데
+      // 아무 일도 없었던 것처럼 보임). connect-step.tsx의 같은 호출은 null을 «건너뛰고
+      // 진행»으로 의도적으로 쓰지만(범위 밖, 그쪽은 그대로 둠), 이 배너는 그 클릭 자체가
+      // 유일한 목적이라 실패를 알려야 한다.
       if (convId) router.push(`/chats/${convId}`);
+      else setInstructionStartError(true);
     } finally {
       setNavigatingToInstruction(false);
     }
@@ -173,13 +133,28 @@ export function ActivationChecklistBanner() {
                   onClick={() => void handleFirstInstructionClick()}
                   disabled={navigatingToInstruction || !projectId}
                   className={cn(
-                    'h-auto w-full min-w-0 justify-start gap-1.5 rounded px-1 py-0.5 text-left text-sm font-normal hover:underline disabled:no-underline',
-                    met ? 'text-foreground' : 'text-muted-foreground',
+                    // story #3907(PO 눈 리뷰, 3901 캡처 그라운딩) — Button의 size="default"
+                    // 변형이 min-h-11(44px)·border(형제 <Link>/<li>엔 없음)를 얹어 5번째
+                    // 행만 키·아이콘 x좌표가 밀렸다. h-auto/min-w-0만으론 min-h-11이
+                    // 오버라이드 안 됨(다른 CSS 속성) — min-h-0·border-0로 명시 상쇄.
+                    'h-auto min-h-0 w-full min-w-0 border-0 justify-start gap-1.5 rounded px-1 py-0.5 text-left text-sm font-normal hover:underline disabled:no-underline',
+                    // story #3839(critical·2pt, 카디르 QA 2026-09-14 01:18Z) — text-muted-
+                    // foreground(ink-3 v3값 #6E6C67)가 이 Alert variant="info"의 blue-soft
+                    // (#E7EDF7) 배경 위에서 대비 미달(4.3:1<4.5, axe color-contrast 신규
+                    // 위반) — #2420 규율(tint 위 계열색·저대비 글자는 text-foreground) 그대로
+                    // 적용. met/unmet 구별은 아이콘 모양(CircleCheck/Circle)이 전달하므로
+                    // 색 통일에 따른 의미 손실 0(바로 위 text-success 제거 선례와 동형).
+                    'text-foreground',
                   )}
                 >
                   {navigatingToInstruction ? <Loader2 className="size-3.5 shrink-0 animate-spin" /> : icon}
                   <span>{label}</span>
                 </Button>
+                {instructionStartError ? (
+                  <p role="alert" aria-live="assertive" aria-atomic="true" className="px-1 pt-0.5 text-xs text-destructive">
+                    {t('firstInstructionStartFailed')}
+                  </p>
+                ) : null}
               </li>
             );
           }
@@ -195,7 +170,8 @@ export function ActivationChecklistBanner() {
                   href="/organization/workforce"
                   className={cn(
                     'flex h-auto w-full min-w-0 items-center gap-1.5 rounded px-1 py-0.5 text-left text-sm font-normal hover:underline',
-                    met ? 'text-foreground' : 'text-muted-foreground',
+                    // story #3839 — 위 first_roundtrip 분기와 동일 처방(색 통일, 아이콘이 met 전달).
+                    'text-foreground',
                   )}
                 >
                   {icon}
@@ -205,7 +181,12 @@ export function ActivationChecklistBanner() {
             );
           }
           return (
-            <li key={key} className={cn('flex items-center gap-1.5 text-sm', met ? 'text-foreground' : 'text-muted-foreground')}>
+            // story #3839 — 위 두 분기와 동일 처방(색 통일, 아이콘이 met 전달).
+            // story #3939 — 클릭 가능한 두 항목(Link·Button)은 px-1 py-0.5 hit-area를 갖는데
+            // 이 비-인터랙티브 항목은 안 가져 아이콘 x가 4px, 행 높이가 어긋났다(3901 캡처·
+            // 라이브 실측: 아이콘 left 294 vs 298 · 행 pitch 26/28/30). 같은 box(rounded px-1
+            // py-0.5)로 통일해 5항목 아이콘 x·행 pitch를 맞춘다(hover 배경은 인터랙티브 항목만).
+            <li key={key} className={cn('flex items-center gap-1.5 rounded px-1 py-0.5 text-sm', 'text-foreground')}>
               {icon}
               <span>{label}</span>
             </li>

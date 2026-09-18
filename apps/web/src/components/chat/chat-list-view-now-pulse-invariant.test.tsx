@@ -18,8 +18,14 @@ const { useDashboardContextMock, fetchWithAuthMock } = vi.hoisted(() => ({
 }));
 
 vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => useDashboardContextMock() }));
-vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn() }) }));
-vi.mock('@/hooks/use-chat-sse', () => ({ useChatSse: () => {} }));
+// story #3831 — ChatListView가 ?compose= 프리필을 위해 useSearchParams를 새로 쓴다
+// (compose 없음 = 빈 URLSearchParams, get('compose')는 null).
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(),
+}));
+// story #3621 — connected/polling을 반환하는 실제 훅 shape과 맞춘다.
+vi.mock('@/hooks/use-chat-sse', () => ({ useChatSse: () => ({ connected: true, polling: false }) }));
 vi.mock('@/hooks/use-auto-refresh', () => ({ useAutoRefresh: () => {} }));
 vi.mock('@/lib/db/client', () => ({ fetchWithAuth: fetchWithAuthMock }));
 
@@ -99,7 +105,7 @@ describe('ChatListView — S3a 스트립 + S3b pulse 카드 합산 불변식(최
     const headers = Array.from(container.querySelectorAll('button[aria-expanded]'));
     expect(headers).toHaveLength(2); // 스트립 헤더 + pulse 헤더.
     const stripHeader = headers.find((h) => h.textContent?.includes('지금'))!;
-    const pulseHeader = headers.find((h) => h.textContent?.includes('프로젝트 맥박'))!;
+    const pulseHeader = headers.find((h) => h.textContent?.includes('프로젝트 현황'))!;
     await act(async () => { stripHeader.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(stripHeader.getAttribute('aria-expanded')).toBe('true');
     expect(pulseHeader.getAttribute('aria-expanded')).toBe('false');
@@ -110,7 +116,7 @@ describe('ChatListView — S3a 스트립 + S3b pulse 카드 합산 불변식(최
     await flush();
     const headers = Array.from(container.querySelectorAll('button[aria-expanded]'));
     const stripHeader = headers.find((h) => h.textContent?.includes('지금'))!;
-    const pulseHeader = headers.find((h) => h.textContent?.includes('프로젝트 맥박'))!;
+    const pulseHeader = headers.find((h) => h.textContent?.includes('프로젝트 현황'))!;
 
     await act(async () => { stripHeader.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(stripHeader.getAttribute('aria-expanded')).toBe('true');

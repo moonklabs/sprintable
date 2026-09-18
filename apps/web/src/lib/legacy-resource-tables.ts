@@ -33,6 +33,11 @@ export const MIGRATED_RESOURCES: Record<string, string[]> = {
   // 안 보였는데, mobile-tab-bar.tsx의 "지금" 탭 href를 bare `/flow`로 바꾸며(옛 `/glance`
   // 대체) 처음으로 실사용 경로가 생겼다 — 등록 없이 나갔으면 즉시 404였을 것.
   flow: [],
+  // story #4013(2026-09-17, 유나 승격 감사 2탄 → PO 코드 확認) — command-palette.tsx의
+  // GUARD_ANCHOR_ITEMS 'go-work-list'가 작업 공간 없는 `/work-list`를 여는데 이 표에
+  // 키가 없어 404였다. 페이지 자체는 `[ws]/[proj]/work-list/page.tsx`에 실재 —
+  // go-sprints/go-epics/go-retro와 동형으로 등록.
+  'work-list': [],
   // story #2016: 당시 8fc51517(B1 리네이밍)이 epics→goals 경로 리터럴을 RENAMED_RESOURCES에만
   // 반영하고 여기(MIGRATED_RESOURCES)엔 신 이름 'goals'를 안 넣어, bare `/goals`(신 이름 그대로
   // 오는 딥링크·북마크·검색결과)가 이 표에 키가 없어 즉시 404였다(호스트/쿠키 무관 실측 확認).
@@ -75,6 +80,14 @@ export const RENAMED_RESOURCES: Record<string, string> = {
   // 2026-08-01 지적: prod 승격 #2373에서 board 라우트만 지우고 이 줄을 빠뜨려 외부 딥링크
   // ~14곳이 404를 만날 뻔했다 — board/page.tsx:12-13 자체가 이 위험을 이미 적어 두고 있었다).
   board: 'flow',
+  // story #3845(UX-v3·FE 5·일감 2, 페드루 PO 確定 §① 2026-09-14) — 스탠드업(하루 체크인)이
+  // 「스프린트」 탭 안 절로 흡수되며 /standup 독립 페이지(page.tsx·loading.tsx)가 삭제된다.
+  // board→flow와 동형(id 없는 목록형 페이지라 RETIRED_RESOURCES의 "id 공간이 갈린다" 우려도
+  // 없음 — RENAMED로 충분, 3번째 세그먼트 순수 치환). verify-no-orphan-resource-routes.ts는
+  // routeDirs를 page.tsx 실존으로 파생(listRouteDirs)하므로 이 삭제 자체로 standup이 그
+  // 스캔에서 빠진다 — retro(§②)와 달리 palette GUARD_ANCHOR_ITEMS 등재 불요(라우트 자체가
+  // 없어져 orphan 개념이 성립 안 함, board 선례와 동형).
+  standup: 'sprints',
 };
 
 /**

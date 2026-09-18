@@ -40,8 +40,12 @@ describe('inbox tab labels (#2164)', () => {
 
       // app-sidebar.tsx: <Link href="/inbox" /> 라벨
       expect(messages.nav.inbox).toBe(notificationsLabel);
-      // command-palette.tsx: { href: '/inbox', labelKey: 'goInbox' } 라벨
-      expect(messages.commandPalette.goInbox).toContain(notificationsLabel);
+      // story #3698(IA·후속) — command-palette.tsx가 이제 nav.inbox를 goDestination의
+      // {label}에 그대로 꿰어 렌더한다(전용 goInbox 키 폐기, 사본 0). nav.inbox가 위에서
+      // 이미 notificationsLabel과 같다고 확認됐고, goDestination이 {label}을 그대로
+      // 감싸는 템플릿이면 렌더 결과가 notificationsLabel을 포함한다는 게 구조로 보장된다
+      // (실제 렌더 대조는 command-palette.test.tsx가 DOM으로 잰다).
+      expect(messages.commandPalette.goDestination).toContain('{label}');
       // inbox/page.tsx 모바일 상세뷰 "목록으로" — 알림 목록으로 돌아가는 것이므로 동일
       expect(messages.inbox.backToList).toBe(notificationsLabel);
 

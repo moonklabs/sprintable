@@ -192,7 +192,7 @@ async def checkout_subscription(
     claim_result = await session.execute(claim_stmt)
     await session.commit()
     if claim_result.rowcount == 0:
-        raise CheckoutInProgress(f"org_id={org_id}에 다른 checkout이 이미 진행 中 — 완료 후 재시도")
+        raise CheckoutInProgress(f"org_id={org_id}에 다른 checkout이 이미 진행 중 — 완료 후 재시도")
 
     try:
         # ① 빌링키 발급(C1 재사용) — 카드 인증 완료.

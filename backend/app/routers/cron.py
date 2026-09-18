@@ -17,7 +17,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.dependencies.database import get_db, get_worker_db
-from app.models.agent_run import AgentRun
 from app.models.agent_session import AgentSession
 from app.models.asset import Asset
 from app.models.hitl import HitlRequest
@@ -274,6 +273,28 @@ async def workflow_sla(
         return _err("INTERNAL_ERROR", "Internal server error", 500)
 
 
+# ─── GET /api/v2/internal/cron/recipe-repeat-tick ─────────────────────────────
+# story #3337(선생님 4바퀴 실사고, 페드루 PO 설계 확定 2026-09-02) — 사이클형 레시피 정의의
+# 반복(payload.repeat)을 제품이 직접 발행. GCP Cloud Scheduler가 직접 침(레포 밖 SSOT,
+# workflow-sla와 동형 — Next.js /api/cron 프록시 불요). 잡 이름·주기는 PR 본문 참조(PO 등록).
+
+@router.get("/recipe-repeat-tick")
+async def recipe_repeat_tick(
+    request: Request,
+    # workflow_sla/workflow_handoff_watchdog와 동일 근거 — FOR UPDATE SKIP LOCKED 배치가
+    # 요청 primary 풀 예산을 소모하지 않게 전용 워커풀.
+    session: AsyncSession = Depends(get_worker_db),
+) -> JSONResponse:
+    verify_cron(request)
+    try:
+        from app.services.recipe_repeat_scheduler import process_recipe_repeat_ticks
+        counts = await process_recipe_repeat_ticks(session)
+        return _ok(counts)
+    except Exception as exc:
+        logger.exception("cron error: %s", exc)
+        return _err("INTERNAL_ERROR", "Internal server error", 500)
+
+
 # ─── GET /api/v2/internal/cron/workflow-grandfather-backfill ──────────────────
 # E-DG S19(P0-5): line enable 시점 in-flight story grandfather backfill(read-only·Gate 0·
 # idempotent). allowlist(=명시 enable) org 만 대상. board freeze 0.
@@ -399,62 +420,19 @@ async def zero_referenced_entities_check(
         return _err("INTERNAL_ERROR", "Internal server error", 500)
 
 
-# ─── GET /api/v2/internal/cron/retry-agent-runs ────────────────────────────────
-
-@router.get("/retry-agent-runs")
-async def retry_agent_runs(
-    request: Request,
-    dry_run: bool = Query(default=False),
-    session: AsyncSession = Depends(get_db),
-) -> JSONResponse:
-    verify_cron(request)
-    try:
-        now = datetime.now(timezone.utc)
-
-        # next_retry_at이 도래한 failed run의 retry-eligible 필터. dry_run/실행이 **동일 필터**를
-        # 써야 preview 수 == 실제 처리 건수가 보장된다(스케줄 가동 전 surge 규모 정확).
-        eligible_filter = (
-            AgentRun.status == "failed",
-            AgentRun.next_retry_at.is_not(None),
-            AgentRun.next_retry_at <= now,
-            AgentRun.retry_count < AgentRun.max_retries,
-        )
-
-        # dry_run: read-only preview — eligible count만 반환·mutate/commit 0(가동 전 안전 점검).
-        if dry_run:
-            count = (
-                await session.execute(
-                    select(func.count()).select_from(AgentRun).where(*eligible_filter)
-                )
-            ).scalar_one()
-            return _ok({"dry_run": True, "eligible_count": int(count)})
-
-        # next_retry_at이 도래한 failed run 조회
-        result = await session.execute(select(AgentRun).where(*eligible_filter))
-        pending = list(result.scalars().all())
-
-        retried: list[dict] = []
-        final_failures: list[dict] = []
-
-        for run in pending:
-            if run.retry_count >= run.max_retries:
-                run.failure_disposition = "final"
-                final_failures.append({"run_id": str(run.id), "status": "final_failure"})
-            else:
-                run.status = "queued"
-                run.next_retry_at = None
-                retried.append({"run_id": str(run.id), "status": "retried"})
-
-        await session.commit()
-
-        return _ok({
-            "retried": retried,
-            "final_failures": final_failures,
-            "total": len(retried) + len(final_failures),
-        })
-    except Exception as exc:
-        logger.exception("cron error: %s", exc)
-        return _err("INTERNAL_ERROR", "Internal server error", 500)
+# story #3781(PO 判 2026-09-10 09:47Z) — 이 자리에 있던 GET /retry-agent-runs 엔드포인트는
+# 은퇴됐다. 그라운딩(미르코): `next_retry_at`을 non-null로 채우는 코드가 backend 전체에
+# 0건이라(모델 필드 자체는 남아있음 — `deployment_lifecycle.py::build_cards`가 읽어 실
+# API 응답(`DeploymentCardResponse.latest_failed_run`)에 싣는 살아있는 소비처가 있어 컬럼은
+# 보존) 이 엔드포인트의 WHERE(`next_retry_at IS NOT NULL AND <= now`)는 대상 실행 존재
+# 여부와 무관하게 원리적으로 영원히 0행을 골랐다 — "돌지만 절대 못 고른다". PO 실측:
+# Cloud Scheduler엔 `retry-agent-runs-dev`가 10분 주기로 등록돼 있었으나(그 잡 자체는
+# PO가 배포 뒤 별도로 삭제) dev DB `agent_runs.status='queued'` 행은 0건(이 엔드포인트가
+# 만드는 그 전이가 실제로 한 번도 성공한 적이 없었다는 뜻 — 데이터 마이그레이션 불요).
+# `status="queued"`는 이 엔드포인트 전용 개념이 아니라
+# `deployment_lifecycle.py`의 배포 suspend/activate/fail/terminate 생명주기가 쓰는 정식
+# 상태이기도 하다(_hold_queued_runs/_resume_held_runs/_fail_queued_runs) — 그 메커니즘은
+# 이 은퇴 범위 밖, 손대지 않았다.
 
 
 # ─── POST /api/v2/internal/cron/score-ga4-outcomes ────────────────────────────
@@ -485,6 +463,7 @@ async def score_ga4_outcomes(
     verify_cron(request)
 
     from app.models.pm import Goal, Sprint, Story
+    from app.services.org_time import get_org_timezone
     from app.services.outcome_scorer import score_epic_outcome, score_ga4_outcome
 
     now = datetime.now(timezone.utc)
@@ -505,7 +484,9 @@ async def score_ga4_outcomes(
             if not md or md.get("source") != "ga4":
                 continue
             try:
-                scoring = await asyncio.to_thread(score_ga4_outcome, md)
+                # story #3674(BE 確定 2026-09-07) — GA4 "어제" 계산을 org 시간대로.
+                org_timezone = await get_org_timezone(session, sprint.org_id)
+                scoring = await asyncio.to_thread(score_ga4_outcome, md, org_timezone)
                 sprint.outcome_status = scoring["outcome_status"]
                 sprint.outcome_result = scoring["outcome_result"]
                 scored.append({"type": "sprint", "id": str(sprint.id), "outcome_status": scoring["outcome_status"]})
@@ -527,7 +508,9 @@ async def score_ga4_outcomes(
             if not md or md.get("source") != "ga4":
                 continue
             try:
-                scoring = await asyncio.to_thread(score_ga4_outcome, md)
+                # story #3674(BE 確定 2026-09-07) — GA4 "어제" 계산을 org 시간대로.
+                org_timezone = await get_org_timezone(session, story.org_id)
+                scoring = await asyncio.to_thread(score_ga4_outcome, md, org_timezone)
                 story.outcome_status = scoring["outcome_status"]
                 story.outcome_result = scoring["outcome_result"]
                 scored.append({"type": "story", "id": str(story.id), "outcome_status": scoring["outcome_status"]})
@@ -556,7 +539,9 @@ async def score_ga4_outcomes(
             source = md.get("source")
             try:
                 if source == "ga4":
-                    scoring = await asyncio.to_thread(score_ga4_outcome, md)
+                    # story #3674(BE 確定 2026-09-07) — GA4 "어제" 계산을 org 시간대로.
+                    org_timezone = await get_org_timezone(session, epic.org_id)
+                    scoring = await asyncio.to_thread(score_ga4_outcome, md, org_timezone)
                 elif source == "internal_ops":
                     # 하위 스토리 진행률 계산
                     story_rows = await session.execute(
@@ -1059,4 +1044,219 @@ async def toss_daily_reconciliation(
         return _ok(result)
     except Exception as exc:
         logger.exception("toss-daily-reconciliation cron error: %s", exc)
+        return _err("INTERNAL_ERROR", "Internal server error", 500)
+
+
+# ─── GET /api/v2/internal/cron/refresh-channel-tokens ──────────────────────────
+# story #3373(Phase1·마케팅운영) — channel_connections 만료 임박 토큰 자동 갱신(AC4). 만료
+# 실패는 status='expired'로 전이(owner 알림은 후속 FE 스토리 몫 — 이 잡은 상태 전이까지만).
+@router.get("/refresh-channel-tokens")
+async def refresh_channel_tokens(
+    request: Request,
+    session: AsyncSession = Depends(get_worker_db),
+) -> JSONResponse:
+    verify_cron(request)
+    try:
+        import httpx as _httpx
+        from app.services.channel_connection import (
+            apply_refresh_failure, apply_refresh_result, decrypt_for_use, decrypt_refresh_token_for_use,
+            list_connections_due_for_refresh,
+        )
+        from app.services.threads_oauth import ThreadsOAuthError, refresh_long_lived_token as refresh_threads_token
+        from app.services.instagram_oauth import (
+            InstagramOAuthError, refresh_long_lived_token as refresh_instagram_token,
+        )
+        from app.services.x_oauth import XOAuthError, refresh_access_token as refresh_x_token
+        from app.services.x_sandbox_oauth import refresh_access_token as refresh_x_sandbox_token
+        from app.services.youtube_oauth import YouTubeOAuthError, refresh_access_token as refresh_youtube_token
+        from app.services.youtube_sandbox_oauth import refresh_access_token as refresh_youtube_sandbox_token
+        from app.services.channel_app_credentials import resolve_app_credentials
+
+        # story #3320 — Phase1은 threads만 구현했던 skip-guard(`continue`)를 채널→
+        # 갱신함수 명시 dict로 확장(get_publish_client_module의 dispatch dict 근본
+        # 처방과 같은 사상 — "모르는 채널은 조용히 스킵"까지는 fail-closed로서
+        # 안전하지만, instagram은 이제 "아는 채널"이니 여기도 등록해야 실제로
+        # 갱신된다. 등록 안 된 채널은 여전히 스킵되고 다음 refresh tick도 못
+        # 건드리므로 만료 방치 위험 — 새 채널 추가 시 이 dict도 같이 늘릴 것).
+        #
+        # story #3598(BE·중형, PO 確定 2026-09-06) — facebook은 «의도적 부재»(조용히
+        # 빠진 게 아니다). Meta 문서: 장기 사용자 토큰으로 얻은 페이지 액세스 토큰은
+        # 만료되지 않는다(channel_adapters.py::"facebook".refresh_mode 주석에 인용문
+        # 전문) — 시간 경과로 갱신이 필요한 경로 자체가 없다. facebook 연결은 이제
+        # refresh_mode="manual"이라 list_connections_due_for_refresh()가 애초에 이
+        # 루프로 올리지도 않는다(can_auto_refresh("manual")==False) — 이 dict에 없는
+        # 건 "몰라서"가 아니라 "필요 없어서"다. facebook에 필요한 건 갱신이 아니라
+        # «무효화 감지»(classify_graph_oauth_error·샌드박스 마커 3종이 담당, 발행/댓글
+        # 수집 시점에 401/403으로 드러난다 — cron 사전 갱신과는 다른 자리).
+        _REFRESH_FN_BY_CHANNEL = {"threads": refresh_threads_token, "instagram": refresh_instagram_token}
+        # story #3808(Phase3·3-3 PR1) — X류(refresh_mode="refresh_token", **1회용
+        # 회전**)는 access_token이 아니라 refresh_token을 provider에 보내고 client_id/
+        # secret confidential-client 인증이 필요해(threads/instagram의 reissue_from_
+        # access_token 그랜트와 다른 그랜트 — 그쪽은 secret 불요) 위 dict와 나란히
+        # 병렬 등재한다(기존 채널 dispatch·시그니처 무변경, 회귀 0). 반환 3튜플
+        # (new_access_token, new_refresh_token, expires_in)의 두 번째 값이 바로 이
+        # PR이 짝으로 얹은 `apply_refresh_result(new_refresh_token=...)` 슬롯으로 간다
+        # — 여기서 안 갈아 끼우면 다음 tick이 이미 provider가 무효화한 옛 refresh_
+        # token으로 또 시도해 항상 실패한다(1회용 회전의 핵심 위험).
+        _ROTATING_REFRESH_FN_BY_CHANNEL = {
+            "x": refresh_x_token, "x_sandbox": refresh_x_sandbox_token,
+            # story #3815(Phase3·3-5 PR1) — youtube_oauth.py 상단 딱지: Google은
+            # 회전하지 않지만 이 dispatch 계약(3튜플 반환)을 그대로 재사용한다.
+            "youtube": refresh_youtube_token, "youtube_sandbox": refresh_youtube_sandbox_token,
+        }
+        _OAUTH_ERROR_TYPES = (ThreadsOAuthError, InstagramOAuthError, XOAuthError, YouTubeOAuthError)
+
+        rows = await list_connections_due_for_refresh(session, now=datetime.now(timezone.utc))
+        refreshed, failed = 0, 0
+        async with _httpx.AsyncClient(timeout=15) as client:
+            for row in rows:
+                rotating_refresh_fn = _ROTATING_REFRESH_FN_BY_CHANNEL.get(row.channel)
+                if rotating_refresh_fn is not None:
+                    current_refresh_token = decrypt_refresh_token_for_use(row)
+                    if current_refresh_token is None:
+                        await apply_refresh_failure(session, connection=row, error_message="no stored refresh token")
+                        failed += 1
+                        continue
+                    app_credentials = await resolve_app_credentials(session, org_id=row.org_id, channel=row.channel)
+                    if app_credentials is None:
+                        await apply_refresh_failure(session, connection=row, error_message="no app credentials registered")
+                        failed += 1
+                        continue
+                    app_id, app_secret = app_credentials
+                    try:
+                        new_access_token, new_refresh_token, expires_in = await rotating_refresh_fn(
+                            client, refresh_token=current_refresh_token, app_id=app_id, app_secret=app_secret,
+                        )
+                    except _OAUTH_ERROR_TYPES as exc:
+                        await apply_refresh_failure(session, connection=row, error_message=exc.message)
+                        failed += 1
+                        continue
+                    finally:
+                        del current_refresh_token, app_secret
+                    await apply_refresh_result(
+                        session, connection=row, new_access_token=new_access_token, expires_in_seconds=expires_in,
+                        new_refresh_token=new_refresh_token,
+                    )
+                    refreshed += 1
+                    continue
+
+                refresh_fn = _REFRESH_FN_BY_CHANNEL.get(row.channel)
+                if refresh_fn is None:
+                    continue  # 미등록 채널(sandbox류 등)은 갱신 대상 아님(토큰 자체가 더미이거나 없음)
+                current_token = decrypt_for_use(row)
+                if current_token is None:
+                    await apply_refresh_failure(session, connection=row, error_message="no stored access token")
+                    failed += 1
+                    continue
+                try:
+                    new_token, expires_in = await refresh_fn(client, current_token=current_token)
+                except _OAUTH_ERROR_TYPES as exc:
+                    await apply_refresh_failure(session, connection=row, error_message=exc.message)
+                    failed += 1
+                    continue
+                finally:
+                    del current_token
+                await apply_refresh_result(session, connection=row, new_access_token=new_token, expires_in_seconds=expires_in)
+                refreshed += 1
+        return _ok({"checked": len(rows), "refreshed": refreshed, "failed": failed})
+    except Exception as exc:
+        logger.exception("refresh-channel-tokens cron error: %s", exc)
+        return _err("INTERNAL_ERROR", "Internal server error", 500)
+
+
+# ─── POST /api/v2/internal/cron/publication-commands ──────────────────────────
+# story #3414(Phase1·마케팅운영, 페드루 PO 確定 2026-09-04) — 발행 명령 워커. 예약(scheduled_
+# at)이 도래했거나 재시도 대기(next_attempt_at)가 도래한 pending publication_commands를
+# SKIP LOCKED 배치로 집어 처리한다. 즉시 발행(scheduled_at 없음)은 보통 그 요청 안에서
+# 동기로 이미 끝나 있어야 하고, 이 워커가 그런 행을 집는다면 그 동기 경로가 중간에
+# 죽은 경우의 자가치유다. workflow_sla_processor.py::process_sla와 동형(상한 있는 배치·
+# cron 겹침 시 중복 처리 방지).
+
+@router.post("/publication-commands")
+async def publication_commands_tick(
+    request: Request,
+    session: AsyncSession = Depends(get_worker_db),
+) -> JSONResponse:
+    verify_cron(request)
+    try:
+        from app.services.publication_command import process_due_publication_commands
+        counts = await process_due_publication_commands(session)
+        # story #3497(그라운딩④, 페드루 決定 — 새 Cloud Scheduler 잡 0) — 같은 tick
+        # 안에서 due 인사이트 스냅샷도 이어 처리한다. 독립 try — 이 축의 미분류 버그가
+        # 이미 성공한 publication_commands 결과 응답까지 500으로 덮으면 안 된다(그
+        # 처리 자체는 이미 커밋됐다 — 응답 표시만의 문제).
+        try:
+            from app.services.insight_snapshots import process_due_insight_snapshots
+            counts["insight_snapshots"] = await process_due_insight_snapshots(session)
+        except Exception as exc:
+            logger.exception("insight-snapshots tick error: %s", exc)
+            counts["insight_snapshots"] = {"error": "unhandled"}
+        # story #3527(BE 결함, 2026-09-06) — 3516 배선 누락 처방: process_due_comment_
+        # collections가 만들어진 뒤 어디서도 호출되지 않아 due 3창(+1h·+1d·+7d) 자동
+        # 수집이 dev/라이브에서 한 번도 실행된 적이 없었다(수동 refresh만 실제 동작).
+        # insight_snapshots와 같은 자리·같은 피기백 사상(새 Cloud Scheduler 잡 0) —
+        # 독립 try로 이 축의 미분류 버그가 이미 커밋된 다른 두 축 결과를 500으로
+        # 덮지 않게 한다.
+        try:
+            from app.services.channel_post_comments import process_due_comment_collections
+            counts["comment_collections"] = await process_due_comment_collections(session)
+        except Exception as exc:
+            logger.exception("comment-collections tick error: %s", exc)
+            counts["comment_collections"] = {"error": "unhandled"}
+        # story #3547(2026-09-06) — Facebook Page 페이지 선택 중간 상태(TTL 15분) 만료분
+        # 스윕. 위 두 축과 같은 피기백 사상(새 Cloud Scheduler 잡 0) — 독립 try.
+        try:
+            from app.services.channel_oauth_pending_selection import sweep_expired_pending_selections
+            counts["oauth_pending_selections_swept"] = await sweep_expired_pending_selections(session)
+        except Exception as exc:
+            logger.exception("oauth-pending-selections sweep tick error: %s", exc)
+            counts["oauth_pending_selections_swept"] = {"error": "unhandled"}
+        # story #3672(2026-09-07) — unhandled_error_events 30일 보존 정리. 위 세 축과
+        # 같은 피기백 사상(새 Cloud Scheduler 잡 0) — 독립 try.
+        try:
+            from app.services.unhandled_error_events import sweep_old_unhandled_error_events
+            counts["unhandled_error_events_swept"] = await sweep_old_unhandled_error_events(session)
+        except Exception as exc:
+            logger.exception("unhandled-error-events sweep tick error: %s", exc)
+            counts["unhandled_error_events_swept"] = {"error": "unhandled"}
+        # story #3722(2026-09-09) — agent_run_tool_calls 30일 보존 정리. 위 축들과 같은
+        # 피기백 사상(새 Cloud Scheduler 잡 0) — 독립 try.
+        try:
+            from app.services.tool_call_recording import sweep_old_tool_calls
+            counts["agent_run_tool_calls_swept"] = await sweep_old_tool_calls(session)
+        except Exception as exc:
+            logger.exception("agent-run-tool-calls sweep tick error: %s", exc)
+            counts["agent_run_tool_calls_swept"] = {"error": "unhandled"}
+        # story #3806(Phase3·3-2 PR 6, 페드루 PO 確定 2026-09-11 13:27Z) — 봉인
+        # sealed_ads_starts_at 도래 게이트 자동 실행. 위 축들과 같은 피기백 사상
+        # (새 Cloud Scheduler 잡 0) — 독립 try.
+        try:
+            from app.services.ads_boost_execution import process_due_ads_boost_starts
+            counts["ads_boost_starts"] = await process_due_ads_boost_starts(session)
+        except Exception as exc:
+            logger.exception("ads-boost-starts tick error: %s", exc)
+            counts["ads_boost_starts"] = {"error": "unhandled"}
+        # story #3806(Phase3·3-2 PR 11, 페드루 PO 確定 2026-09-11 16:20Z) — 「만들어졌는데
+        # 도는 자리 없음」 처방: `process_due_ads_spend_snapshots`가 PR4에서 만들어진
+        # 뒤 어떤 cron 축에도 피기백되지 않아(3-7 그라운딩 도중 자체발견) paid 지출이
+        # 실제로는 한 번도 자동 수집되지 않고 있었다 — 위 축들과 같은 피기백 사상
+        # (새 Cloud Scheduler 잡 0)·독립 try.
+        try:
+            from app.services.ads_spend_snapshots import process_due_ads_spend_snapshots
+            counts["ads_spend_snapshots"] = await process_due_ads_spend_snapshots(session)
+        except Exception as exc:
+            logger.exception("ads-spend-snapshots tick error: %s", exc)
+            counts["ads_spend_snapshots"] = {"error": "unhandled"}
+        # story #3813(Phase3·3-4 PR2, 페드루 PO 確定 2026-09-12) — 봉인
+        # sealed_newsletter_scheduled_at 도래 게이트 자동 실행(ads_boost_starts와
+        # 동형 피기백, 새 Cloud Scheduler 잡 0)·독립 try.
+        try:
+            from app.services.newsletter_send_execution import process_due_newsletter_sends
+            counts["newsletter_sends"] = await process_due_newsletter_sends(session)
+        except Exception as exc:
+            logger.exception("newsletter-sends tick error: %s", exc)
+            counts["newsletter_sends"] = {"error": "unhandled"}
+        return _ok(counts)
+    except Exception as exc:
+        logger.exception("publication-commands cron error: %s", exc)
         return _err("INTERNAL_ERROR", "Internal server error", 500)

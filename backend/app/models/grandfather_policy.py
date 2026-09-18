@@ -32,7 +32,8 @@ class GrandfatherPolicy(Base):
         UUID(as_uuid=True), ForeignKey("offering_versions.id"), nullable=False
     )
     # 새 offering_version(같은 tier·currency)이 발행돼도 이 org를 자동으로 옮길지.
-    auto_migrate_on_new_version: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # story #3896 — DB has DEFAULT false, ORM lacked server_default (drift).
+    auto_migrate_on_new_version: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     # NULL = 무기한 고정(수동 개입 전까지 옛 버전 유지). N일 = 새 버전 발행 후 N일 뒤 강제 이전.
     grace_period_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # signup·plan_change·admin_grandfather_grant·forced_migration 등 — 왜 이 정책이 생겼는지.

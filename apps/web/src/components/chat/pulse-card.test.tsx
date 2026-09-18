@@ -87,7 +87,7 @@ describe('PulseCard — AC1 collapsed 기본, 펼치면 지표', () => {
     mockOverview({ epics: [{ epic_id: 'e1', title: '결제 ②-B', status: 'active', total: 10, done: 6, completion_pct: 60 }] });
     await act(async () => { root.render(wrap(<PulseCard />)); });
     await flush();
-    expect(container.textContent).toContain('프로젝트 맥박');
+    expect(container.textContent).toContain('프로젝트 현황');
     expect(container.textContent).toContain('결제 ②-B');
     expect(container.textContent).not.toContain('사이클 타임');
   });

@@ -1,16 +1,19 @@
 import uuid
 from datetime import datetime, timedelta, timezone
+from typing import Literal
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
-from sqlalchemy import select
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
+from app.models.agent_run_tool_call import AgentRunToolCall
 from app.models.project import Project
 from app.models.team import TeamMember
 from app.repositories.agent_run import AgentRunRepository
 from app.schemas.agent_run import AgentRunResponse, CreateAgentRun, UpdateAgentRun
+from app.schemas.agent_run_tool_call import AgentRunToolCallResponse
 from app.services.agent_run_lifecycle import AGENT_RUN_TIMEOUT_HOURS
 
 router = APIRouter(prefix="/api/v2/agent-runs", tags=["agent-runs", "Work"])
@@ -18,6 +21,14 @@ router = APIRouter(prefix="/api/v2/agent-runs", tags=["agent-runs", "Work"])
 # story #2161: PATCH가 이 세 상태로 전이시키는데 클라가 finished_at을 안 보내면 서버가 채운다
 # (server-authority — MCP는 이미 finished_at을 보낼 수 있지만 항상 보낸다고 신뢰하지 않는다).
 _TERMINAL_STATUSES = {"completed", "failed", "abandoned"}
+
+# story #3680 — list_agent_runs `status=` 필터의 유효값 집합. DB CHECK 제약
+# (agent_runs_status_check, alembic/versions/0207_agent_runs_status_check_widen.py)이
+# 이미 정본으로 갖고 있는 7값 그대로(신규 정의 0) — Literal이라 FastAPI가 불명값을
+# 자동 422(코드 발명 없이, 이 스토리의 「불명값 422」 AC를 그대로 만족).
+_AGENT_RUN_STATUS_VALUES = Literal[
+    "queued", "held", "running", "hitl_pending", "completed", "failed", "abandoned",
+]
 
 # story #2346 AC3(범위: 기록만) — 「긴 텍스트 필드」 정의, stories.py/docs.py와 동형.
 _LENGTH_TRACKED_FIELDS = ("result_summary", "last_error_code")
@@ -36,9 +47,13 @@ def _get_repo(session: AsyncSession = Depends(get_db)) -> AgentRunRepository:
 
 @router.get("", response_model=list[AgentRunResponse])
 async def list_agent_runs(
+    response: Response,
     project_id: uuid.UUID = Query(...),
     agent_id: uuid.UUID | None = Query(default=None),
     story_id: uuid.UUID | None = Query(default=None),
+    status: _AGENT_RUN_STATUS_VALUES | None = Query(default=None),
+    from_: str | None = Query(default=None, alias="from"),
+    to: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
     cursor: str | None = Query(default=None),
     session: AsyncSession = Depends(get_db),
@@ -56,7 +71,20 @@ async def list_agent_runs(
     story_id(story 7a7f6c36·Workcell 실 run 배선): 위 project 가드가 통과한 뒤, 이미
     project-bound된 run 집합을 story 단위로 좁히는 옵션 narrowing 필터. AND 축소라 결과를
     확장할 수 없고(A AND B ⊆ A) 신규 인가 축이 아니다 — 타 project story_id를 넣어도 그
-    project agent의 run은 이 집합 밖이라 0건."""
+    project agent의 run은 이 집합 밖이라 0건.
+
+    story #3680(BE·결함) — 그라운딩(2026-09-07): 이 엔드포인트가 지금껏 `status`/`from`/
+    `to`를 아예 안 받았다. FastAPI가 미선언 쿼리 파라미터를 조용히 버리므로(422도 아니고
+    무시) `?status=failed`가 200으로 completed 행을 그대로 돌려주는 "오타로 써도 통과하나"
+    클래스였다. `status`는 `agent_runs_status_check`(alembic 0207) DB CHECK가 이미 갖고
+    있는 7값 그대로 `Literal`로 못박아 — 유효값 밖은 FastAPI가 자동 422(신규 코드 0).
+    `from`/`to`는 ISO 8601(cursor와 동형 파싱·400)·`from>to`는 422(입력 자체가 모순).
+
+    story #3851(BE·목록 상한) — X-Total-Count·X-Next-Cursor(story #3841/goals.py·
+    retros.py와 동일 헤더 계약, /{id}/tool-calls의 X-Total-Count 선례를 이 목록
+    라우트에도 이식). total은 cursor 適用 後 남은 개수(base.py 관례 그대로 — cursor
+    前 grand total이 아니다). 바디는 그대로 bare list(봉투 변경 0) — 기존 소비처
+    (FE·MCP)가 무변경으로 첫 페이지를 받는다."""
     from app.services.project_auth import has_project_access
 
     proj_r = await session.execute(select(Project.id).where(Project.id == project_id, Project.org_id == org_id))
@@ -73,10 +101,149 @@ async def list_agent_runs(
             cursor_dt = datetime.fromisoformat(cursor)
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid cursor (expected ISO 8601 datetime)")
-    runs = await repo.list(
-        project_id=project_id, agent_id=agent_id, story_id=story_id, limit=limit, cursor=cursor_dt
+    from_dt: datetime | None = None
+    if from_:
+        try:
+            from_dt = datetime.fromisoformat(from_)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid from (expected ISO 8601 datetime)")
+        if from_dt.tzinfo is None:
+            from_dt = from_dt.replace(tzinfo=timezone.utc)
+    to_dt: datetime | None = None
+    if to:
+        try:
+            to_dt = datetime.fromisoformat(to)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid to (expected ISO 8601 datetime)")
+        if to_dt.tzinfo is None:
+            to_dt = to_dt.replace(tzinfo=timezone.utc)
+    if from_dt is not None and to_dt is not None and from_dt > to_dt:
+        raise HTTPException(status_code=422, detail="from must not be after to")
+    runs, total = await repo.list(
+        project_id=project_id, agent_id=agent_id, story_id=story_id, status=status,
+        from_dt=from_dt, to_dt=to_dt, limit=limit, cursor=cursor_dt,
     )
-    return [AgentRunResponse.model_validate(r) for r in runs]
+    response.headers["X-Total-Count"] = str(total)
+    if runs:
+        response.headers["X-Next-Cursor"] = runs[-1].created_at.isoformat()
+    name_map = await _agent_name_map(session, {r.agent_id for r in runs})
+    return [
+        AgentRunResponse.model_validate(r).model_copy(update={"agent_name": name_map.get(r.agent_id)})
+        for r in runs
+    ]
+
+
+@router.get("/{id}", response_model=AgentRunResponse)
+async def get_agent_run(
+    id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+    repo: AgentRunRepository = Depends(_get_repo),
+) -> AgentRunResponse:
+    """story #4725d9c0(라이브 결함, 유나 배포 53) — 이 라우터에 단건 GET이 아예 없어(GET ""·
+    POST ""·PATCH "/{id}"만 존재) 상세 화면이 405를 받았다(BFF는 이미 이 경로를 부르고
+    있었다 — 구조적 미도달). PATCH와 동일 인가축(org 검증 후 has_project_access) — 존재하지
+    않거나 타org·무접근권은 전부 404(비노출 관례)."""
+    from app.services.project_auth import has_project_access
+
+    run = await repo.get(id)
+    if run is None or run.org_id != org_id:
+        raise HTTPException(status_code=404, detail="Agent run not found")
+    if not await has_project_access(session, uuid.UUID(auth.user_id), run.project_id, org_id):
+        raise HTTPException(status_code=404, detail="Agent run not found")
+    name_map = await _agent_name_map(session, {run.agent_id})
+    return AgentRunResponse.model_validate(run).model_copy(update={"agent_name": name_map.get(run.agent_id)})
+
+
+@router.get("/{id}/tool-calls", response_model=list[AgentRunToolCallResponse])
+async def list_agent_run_tool_calls(
+    response: Response,
+    id: uuid.UUID,
+    limit: int = Query(default=50, ge=1, le=200),
+    cursor: str | None = Query(default=None),
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+    repo: AgentRunRepository = Depends(_get_repo),
+) -> list[AgentRunToolCallResponse]:
+    """story #3722(Trust·BE) — AgentRunResponse엔 안 싣는다(크기·조회 축 분리, PO 確定).
+    같은 인가축(get_agent_run과 동일 — org 검증 후 has_project_access, 없거나 타org·
+    무접근권은 404). 최신순(created_at DESC) — cursor는 이전 페이지 마지막 행의
+    created_at(ISO 8601), list_agent_runs의 커서 관례와 동형.
+
+    X-Total-Count(페드루 PO 追加 2026-09-09) — run_id 기준 전체 건수(limit 適用 前,
+    cursor 페이지와 무관) — 3703/3706류(«한 페이지=전부」 오판) 재발 방지, goals.py
+    list_goals와 동형 관례."""
+    from app.services.project_auth import has_project_access
+
+    run = await repo.get(id)
+    if run is None or run.org_id != org_id:
+        raise HTTPException(status_code=404, detail="Agent run not found")
+    if not await has_project_access(session, uuid.UUID(auth.user_id), run.project_id, org_id):
+        raise HTTPException(status_code=404, detail="Agent run not found")
+
+    cursor_dt: datetime | None = None
+    if cursor:
+        try:
+            cursor_dt = datetime.fromisoformat(cursor)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid cursor (expected ISO 8601 datetime)")
+
+    total = (await session.execute(
+        select(func.count()).select_from(AgentRunToolCall).where(AgentRunToolCall.run_id == id)
+    )).scalar_one()
+    response.headers["X-Total-Count"] = str(total)
+
+    q = select(AgentRunToolCall).where(AgentRunToolCall.run_id == id)
+    if cursor_dt is not None:
+        q = q.where(AgentRunToolCall.created_at < cursor_dt)
+    q = q.order_by(AgentRunToolCall.created_at.desc()).limit(limit)
+    rows = list((await session.execute(q)).scalars().all())
+    return [AgentRunToolCallResponse.model_validate(r) for r in rows]
+
+
+async def _agent_name_map(session: AsyncSession, agent_ids: set[uuid.UUID]) -> dict[uuid.UUID, str]:
+    """story #4725d9c0 — team_members는 멀티프로젝트 grant면 같은 id가 N행(VIEW)이지만 name은
+    멤버 전역값이라 dict 축약이 안전(같은 키에 같은 값 재기록뿐). 못 찾는 id는 그냥 dict에 없다
+    (호출부가 .get(...)으로 None 처리 — 지어내지 않는다)."""
+    if not agent_ids:
+        return {}
+    result = await session.execute(select(TeamMember.id, TeamMember.name).where(TeamMember.id.in_(agent_ids)))
+    return {row[0]: row[1] for row in result.all()}
+
+
+async def _validate_conversation_link(
+    session: AsyncSession, *, org_id: uuid.UUID,
+    conversation_id: uuid.UUID | None, triggering_message_id: uuid.UUID | None,
+) -> None:
+    """story #3828 — conversation_id/triggering_message_id는 org 소속 실존 레코드만
+    허용(존재 비노출 관례 그대로 — 없거나 타org=404, project_id 검증과 동형 폭).
+    triggering_message_id가 있으면 그 메시지의 실제 conversation_id가(conversation_id도
+    같이 왔다면) 서로 같은지 확인 — 다른 대화의 메시지를 엉뚱한 conversation_id와
+    묶어 잇는 것을 막는다."""
+    from app.models.conversation import Conversation, ConversationMessage
+
+    if conversation_id is not None:
+        row = await session.execute(
+            select(Conversation.id).where(Conversation.id == conversation_id, Conversation.org_id == org_id)
+        )
+        if row.scalar_one_or_none() is None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+
+    if triggering_message_id is not None:
+        msg_row = await session.execute(
+            select(ConversationMessage.conversation_id)
+            .join(Conversation, Conversation.id == ConversationMessage.conversation_id)
+            .where(ConversationMessage.id == triggering_message_id, Conversation.org_id == org_id)
+        )
+        msg_conv_id = msg_row.scalar_one_or_none()
+        if msg_conv_id is None:
+            raise HTTPException(status_code=404, detail="Message not found")
+        if conversation_id is not None and msg_conv_id != conversation_id:
+            raise HTTPException(
+                status_code=422, detail="triggering_message_id does not belong to conversation_id",
+            )
 
 
 @router.post("", response_model=AgentRunResponse, status_code=201)
@@ -117,9 +284,18 @@ async def create_agent_run(
     if member_r.scalar_one_or_none() is None:
         raise HTTPException(status_code=400, detail="agent_id not found or not an agent")
 
+    await _validate_conversation_link(
+        session, org_id=org_id,
+        conversation_id=body.conversation_id, triggering_message_id=body.triggering_message_id,
+    )
+
     # story #2161: "시작할 때 이미 끝날 시각을 갖고 태어나게" — deadline_at은 클라 미제공(항상
     # 서버 계산, A2ATask.deadline_at 선례와 동형·클라가 자기 기한을 임의 연장 못 하게).
-    run = await repo.create(
+    #
+    # story #3727 — started_at/finished_at은 미제공 시 각각 DB server_default(now())/NULL을
+    # 그대로 둔다(named-arg로 항상 넘기면 미제공=None이 그 기본값을 덮어써 버린다 — 「생략」과
+    # 「명시적 null」을 create 경로에서도 가른다, UpdateAgentRun의 exclude_unset과 동형 원칙).
+    create_fields: dict = dict(
         org_id=org_id,
         agent_id=body.agent_id,
         project_id=body.project_id,
@@ -127,14 +303,24 @@ async def create_agent_run(
         model=body.model,
         story_id=body.story_id,
         memo_id=body.memo_id,
+        conversation_id=body.conversation_id,
+        triggering_message_id=body.triggering_message_id,
         status=body.status,
         result_summary=body.result_summary,
+        error_message=body.error_message,
+        last_error_code=body.last_error_code,
         input_tokens=body.input_tokens,
         output_tokens=body.output_tokens,
         cost_usd=body.cost_usd,
         deadline_at=datetime.now(timezone.utc) + timedelta(hours=AGENT_RUN_TIMEOUT_HOURS),
     )
-    return AgentRunResponse.model_validate(run)
+    if body.started_at is not None:
+        create_fields["started_at"] = body.started_at
+    if body.finished_at is not None:
+        create_fields["finished_at"] = body.finished_at
+    run = await repo.create(**create_fields)
+    name_map = await _agent_name_map(session, {run.agent_id})
+    return AgentRunResponse.model_validate(run).model_copy(update={"agent_name": name_map.get(run.agent_id)})
 
 
 @router.patch("/{id}", response_model=AgentRunResponse)
@@ -170,6 +356,11 @@ async def update_agent_run(
     # 비우기) 여전히 지워진다 — "생략"과 "명시적 null"을 이제 구분한다(repo.update()의 예외
     # 특례는 그 구분을 못 해 항상 지웠다 — 아래에서 제거).
     _explicit_fields = body.model_dump(exclude_unset=True, exclude={"status", "finished_at"})
+    await _validate_conversation_link(
+        repo.session, org_id=org_id,
+        conversation_id=_explicit_fields.get("conversation_id"),
+        triggering_message_id=_explicit_fields.get("triggering_message_id"),
+    )
     # story #2346 AC3(범위: 기록만, AC7 차단 없음 — 위 모듈 상단 코멘트 참조): existing이 이미
     # access-check용으로 조회돼 있어(stories.py처럼 조건부 재조회 불필요) old 길이를 지금 스칼라로
     # 떠 둔다.
@@ -205,4 +396,5 @@ async def update_agent_run(
                 entity_id=id,
                 context={"length_changes": _length_changes},
             )
-    return AgentRunResponse.model_validate(run)
+    name_map = await _agent_name_map(repo.session, {run.agent_id})
+    return AgentRunResponse.model_validate(run).model_copy(update={"agent_name": name_map.get(run.agent_id)})

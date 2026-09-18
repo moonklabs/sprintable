@@ -313,7 +313,7 @@ async def test_doc_reconcile_to_nonexistent_target_is_dropped():
             # 안 됐는지»는 DB를 직접 대조해 확認한다(로그로 dropped 발화는 이미 확認됨,
             # 위 캡처된 WARNING 참조).
             await reconcile_doc_mentions(
-                s, org_id=org.id, doc_id=source_doc_id, html_content=html, created_by=member_id,
+                s, org_id=org.id, doc_id=source_doc_id, content=html, created_by=member_id,
             )
             await s.commit()
 

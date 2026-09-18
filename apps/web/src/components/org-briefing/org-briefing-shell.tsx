@@ -1,85 +1,164 @@
 'use client';
 
-import { useTranslations } from 'next-intl';
-import { useSearchParams } from 'next/navigation';
+import { useEffect, useRef, useState } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { useLocale, useTranslations } from 'next-intl';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
-import { NowFace } from './now-face';
-import { LoopFace } from './loop-face';
-import { WorkforceFace } from './workforce-face';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Card } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import { fetchWithAuth } from '@/lib/db/client';
+import { EMPTY_TODAY_SNAPSHOT, parseToday, type TodaySnapshot } from './derive-today';
+import { AgentProgressSection, NeedsMeSection, PublishedSection } from './today-sections';
 
-// story ded31cb3(S1)+6b707960(S2)+09fa254e(S3)+64b9a879(우아함 심화) — 조직 브리핑 셸. 목업
-// Frame A 배치 1:1: ①지금(hero·상단·폭 전체) → ②루프|③워크포스(2단·하단, lg 미만 스택 —
-// GNB lg:hidden과 일치, md 사용 금지).
-// 64b9a879: first-touch 온기 greeting 추가 — 로그인 직후 첫 화면=조직 OS 정체성 접점이라는
-// 근거가 이번 스토리로 명시됐다(이전 "근거 없는 장식이라 생략" 판단은 그 근거가 없던 시점 것 —
-// no-fiction 판단 자체는 유지, 근거가 새로 생겨 뒤집힌 것). userName 없으면 기존 정적 타이틀로
-// 안전하게 폴백(빈 이름+"님" 어색함 방지).
-// 3면 순차 fade-in stagger(lagom — clutter 추가 아닌 절제된 진입 리듬).
+// story #3831(UX-v3·FE 3·오늘, 페드루 PO 確定 2026-09-13) — 옛 조직 브리핑(NowFace·
+// LoopFace·WorkforceFace, 각자 다른 BFF 4종 조합)을 시안 v3(오늘 1caf61fe)로 흡수한다.
+// 수의 출처는 story #3823 `GET /api/v2/today` 단 하나(자체 집계 0) — 3구역(사람 손이
+// 필요한 일·에이전트가 하는 일·오늘 나간 것) + 하단 지시 한 줄. §② 흡수 지도대로
+// 실험실/워크포스는 이 화면에서 완전히 걷힌다(다른 자리로 흡수 — 삭제 아님).
+//
+// project 배너: 옛 로직은 `!projectId`(로컬 LoopFace/WorkforceFace가 project 없인 못 그려
+// 스켈레톤을 대신 그리던 시절)도 배너 조건이었다 — today route는 org 스코프뿐이라(project_id
+// 파라미터 자체가 없다) 그 조건은 이제 거짓이 된다(项目 없어도 내용은 뜬다). `next`(#2212
+// 리다이렉트 복귀 안내)만 남긴다.
 
-function FaceSkeletonPanel({ title, subject }: { title: string; subject: string }) {
+function useTodaySnapshot() {
+  const [data, setData] = useState<TodaySnapshot | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  const [reloadNonce, setReloadNonce] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    // 재시도(reloadNonce) 때마다 이전 에러 배너를 먼저 걷어야 새 fetch 결과가 도착할
+    // 때까지 헌 상태가 안 남는다(channels/page.tsx의 load() 관례와 동형).
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLoadError(false);
+    fetchWithAuth('/api/today')
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
+      .then((json) => { if (!cancelled) setData(parseToday(json)); })
+      .catch(() => { if (!cancelled) setLoadError(true); });
+    return () => { cancelled = true; };
+  }, [reloadNonce]);
+
+  return { data, loadError, retry: () => setReloadNonce((n) => n + 1) };
+}
+
+function InstructionInput({ autoFocus }: { autoFocus: boolean }) {
+  const t = useTranslations('orgBriefing');
+  const router = useRouter();
+  const [value, setValue] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // story #3831 후속(페드루 PO 確定, 2026-09-13 14:22Z) — 컴패니언 단축키가 `?focus=compose`
+  // 딥링크로 이 화면을 열면 하단 지시 한 줄에 바로 포커스한다(웹은 포커스만 — 단축키 자체는
+  // 3832, 데스크톱 전용 축).
+  useEffect(() => {
+    if (autoFocus) inputRef.current?.focus();
+  }, [autoFocus]);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = value.trim();
+    if (!trimmed) return;
+    // story #3831 PO 確定(c)(2026-09-13 14:04Z) — 수신자 발명 0. 「대화」의 기존 두 경로
+    // (최근 대화 프리필 / 0건이면 새 대화 모달, chat-list-view.tsx 참고)로 위임만 한다.
+    router.push(`/chats?compose=${encodeURIComponent(trimmed)}`);
+  };
+
   return (
-    <div className="rounded-2xl border border-border bg-card p-4">
-      <div className="mb-3 flex items-baseline gap-2.5">
-        <h2 className="text-sm font-semibold text-foreground">{title}</h2>
-        <span className="text-[11px] text-muted-foreground">{subject}</span>
-      </div>
-      <div className="space-y-3" aria-hidden="true">
-        <div className="space-y-1.5">
-          <div className="h-3 w-4/5 animate-pulse rounded bg-muted" />
-          <div className="h-2 w-16 animate-pulse rounded-full bg-muted" />
-        </div>
-        <div className="space-y-1.5 border-t border-border pt-3">
-          <div className="h-3 w-3/5 animate-pulse rounded bg-muted" />
-          <div className="h-2 w-20 animate-pulse rounded-full bg-muted" />
-        </div>
-      </div>
-    </div>
+    <form onSubmit={handleSubmit} className="flex items-center gap-2 border-t border-border pt-4">
+      <Input
+        ref={inputRef}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        placeholder={t('instructionInputPlaceholder')}
+        aria-label={t('instructionInputPlaceholder')}
+        data-testid="today-instruction-input"
+      />
+      <Button type="submit" size="sm" disabled={!value.trim()}>{t('instructionSendButton')}</Button>
+    </form>
   );
 }
 
 export function OrgBriefingShell() {
   const t = useTranslations('orgBriefing');
-  const { projectId, userName } = useDashboardContext();
-  // story #2212 — proxy.ts가 "프로젝트 미확定" 404 대신 여기로 next=<원 목적지>를 들고 보낸
-  // 경우, 위 프로젝트 스위처(사이드바/탑바 칩)로 프로젝트를 고르라는 안내를 보여준다. 실제
-  // 복귀는 use-unified-switcher.ts의 switchProject/switchOrgAndProject가 이 next를 읽어 처리.
-  //
-  // 유나양 카피 판정(2026-07-27) — 배너 문구는 상황이 둘이라 조건부다. "이 화면이
-  // 활성화됩니다"류 시스템어는 둘 다 안 쓴다:
-  //   next 있음(#2212 리다이렉트로 옴)  → 원래 가려던 화면이 있었음을 인정하고 그리로
-  //                                       돌려보낸다는 문장("왜 갑자기 여기 왔지"에 답함)
-  //   next 없음(그냥 방문·프로젝트 아예 없음) → 여기(org-briefing) 자체에 현황이 뜬다는 문장
-  //   둘 다 아님(next 없음 + 프로젝트 있음) → 평범한 방문이라 배너 자체가 불필요(소음)
+  const tc = useTranslations('common');
+  const locale = useLocale();
+  const { projectId: _projectId } = useDashboardContext();
+  void _projectId; // today route는 org 스코프뿐 — 이 화면 자체는 project를 더는 안 쓴다.
+  const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const nextTarget = searchParams.get('next');
-  const showProjectBanner = !!nextTarget || !projectId;
-  const projectBannerText = nextTarget ? t('projectRequiredBannerNext') : t('projectRequiredBannerEmpty');
+  const { data, loadError, retry } = useTodaySnapshot();
+  const snapshot = data ?? EMPTY_TODAY_SNAPSHOT;
+
+  // story #3831 후속(페드루 PO 確定, 2026-09-13 14:22Z) — `?focus=compose` 딥링크(컴패니언
+  // 단축키, story #3832)는 소비 뒤 URL에서 지운다(뒤로가기·새로고침마다 재포커스되면
+  // 사용자가 타이핑 중이던 걸 매번 뺏는 결함이 된다).
+  const shouldAutoFocusInstruction = searchParams.get('focus') === 'compose';
+  useEffect(() => {
+    if (!shouldAutoFocusInstruction) return;
+    const next = new URLSearchParams(searchParams);
+    next.delete('focus');
+    const qs = next.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 마운트 시 1회만(그 뒤 focus는 이미 지워짐).
+  }, []);
+
+  const today = new Date();
+  const dateLabel = new Intl.DateTimeFormat(locale, { month: 'long', day: 'numeric', weekday: 'long' }).format(today);
 
   return (
-    <div className="mx-auto max-w-7xl space-y-6 p-4 lg:p-6">
-      {showProjectBanner && (
-        <div className="rounded-xl border border-border bg-muted/40 px-4 py-3 text-sm text-foreground" role="status">
-          {projectBannerText}
+    <div className="mx-auto max-w-4xl space-y-6 p-4 lg:p-6">
+      {nextTarget ? (
+        <Alert role="status">
+          <AlertDescription>{t('projectRequiredBannerNext')}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      <div className="flex items-baseline justify-between gap-3">
+        <div>
+          <h1 className="text-lg font-semibold tracking-tight text-foreground">{t('title')}</h1>
+          <p className="mt-1 text-sm text-muted-foreground">{dateLabel}</p>
+        </div>
+        {data && snapshot.needsMeCount > 0 ? (
+          // story #3853(§③ 토큰 표 「사람 손 필요=경고 amber」) — 하드코딩 bg-primary/10
+          // (파랑)을 캐노니컬 Badge variant="warning"으로 교체(badge.tsx 기존 변형, 새
+          // 토큰 발명 0). data-testid는 org-briefing-shell.test.tsx가 그대로 쓴다.
+          <Badge variant="warning" data-testid="needs-me-header-badge" className="shrink-0">
+            {t('needsMeBadge', { count: snapshot.needsMeCount })}
+          </Badge>
+        ) : null}
+      </div>
+
+      {loadError ? (
+        <div className="flex flex-col items-center gap-3 py-10 text-center">
+          <p role="alert" className="text-sm text-destructive">{t('loadErrorTitle')}</p>
+          <Button size="sm" variant="outline" onClick={retry}>{tc('retry')}</Button>
+        </div>
+      ) : !data ? (
+        <div className="space-y-3" aria-hidden="true">
+          <Card className="h-24 animate-pulse bg-muted/30" />
+          <Card className="h-24 animate-pulse bg-muted/30" />
+        </div>
+      ) : (
+        <div className="space-y-6">
+          <NeedsMeSection items={snapshot.needsMe} count={snapshot.needsMeCount} />
+          <AgentProgressSection items={snapshot.agentProgress} />
+          <PublishedSection published={snapshot.published} usage={snapshot.usage} />
         </div>
       )}
-      <div>
-        <h1 className="text-lg font-semibold tracking-tight text-foreground">
-          {userName ? t('greeting', { name: userName }) : t('title')}
-        </h1>
-        <p className="mt-1 text-sm text-muted-foreground">{t('subtitle')}</p>
-      </div>
 
-      <div className="animate-in fade-in slide-in-from-bottom-1 duration-300">
-        <NowFace />
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <div className="animate-in fade-in slide-in-from-bottom-1 duration-300 [animation-delay:75ms] [animation-fill-mode:backwards]">
-          {projectId ? <LoopFace projectId={projectId} /> : <FaceSkeletonPanel title={t('loopTitle')} subject={t('loopSubject')} />}
-        </div>
-        <div className="animate-in fade-in slide-in-from-bottom-1 duration-300 [animation-delay:150ms] [animation-fill-mode:backwards]">
-          {projectId ? <WorkforceFace projectId={projectId} /> : <FaceSkeletonPanel title={t('workforceTitle')} subject={t('workforceSubject')} />}
-        </div>
+      {/* 페드루 PO CHANGES(2026-09-14 00:58Z, PR #4256) — 1440×900에서 이 입력이 스크롤
+          없이는 안 보이던 결함(「오늘」의 주 액션이라 접혀선 안 된다) → 본문 pane
+          (dashboard-shell.tsx의 overflow-y-auto 스크롤 조상) 하단에 sticky. -mx/px로
+          부모의 좌우 패딩을 상쇄해 배경이 그 폭 그대로 깔린다(border-t는 InstructionInput
+          자신의 form에 이미 있음 — 경계선 중복 0). */}
+      <div className="sticky bottom-0 -mx-4 bg-background px-4 pb-4 lg:-mx-6 lg:px-6">
+        <InstructionInput autoFocus={shouldAutoFocusInstruction} />
       </div>
     </div>
   );

@@ -233,6 +233,45 @@ async def test_org_summary_admin_only_latest_per_member_role_realdb():
 
 
 @pytest.mark.anyio
+async def test_org_summary_serializes_pending_realdb():
+    """story #3749(신뢰 센터 재설계) — org-summary 응답에 pending이 실려야 한다(콜드스타트
+    행의 부제가 "판정 대기 가설 N건이 판정되면 섭니다" 문장을 내려면 필요). 라우터가
+    이 필드를 그동안 안 실었다(metrics JSONB엔 이미 있었음, trust_score.py:217) —
+    한 줄 배선 pin. 뮤테이션 표적 — "pending" 키를 응답 dict에서 다시 지우면 이
+    단언이 실패해야 한다."""
+    from app.main import app
+    from app.models.trust_snapshot import OrgMemberTrustSnapshot
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_org_and_members(s)
+            s.add(OrgMemberTrustSnapshot(
+                id=uuid.uuid4(), org_id=seeded["org_id"], member_id=seeded["target_member_id"],
+                role_key="dev", window_days=90,
+                metrics={"role_label": "개발", "hit_rate": None, "resolved": 0, "pending": 3},
+                computed_at=datetime.now(timezone.utc),
+            ))
+            await s.commit()
+
+        await _setup_app(app, Session, seeded["admin_user_id"], seeded["org_id"])
+        client = _client_for(app)
+        try:
+            resp = await client.get("/api/v2/trust-scores/org-summary")
+            assert resp.status_code == 200, resp.text
+            members = resp.json()["members"]
+            assert len(members) == 1
+            assert members[0]["pending"] == 3, "org-summary가 pending을 안 실었다(라우터 배선 누락)"
+            assert members[0]["resolved"] == 0
+            assert members[0]["hit_rate"] is None
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_history_self_or_admin_ordered_desc_realdb():
     from app.main import app
     from app.models.trust_snapshot import OrgMemberTrustSnapshot

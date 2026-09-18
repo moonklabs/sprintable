@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { ChevronDown, ChevronRight, Lock } from 'lucide-react';
 import {
   DndContext, type DragEndEvent, PointerSensor, useDroppable, useSensor, useSensors,
@@ -11,7 +11,9 @@ import { parseCursorMeta } from '@/lib/pagination';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { StoryCard } from '@/components/kanban/story-card';
 import { StoryDetailPanel, type Task } from '@/components/kanban/story-detail-panel';
-import { useToast, ToastContainer } from '@/components/ui/toast';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { useOrgDomainLabels } from '@/hooks/use-org-domain-labels';
+import { useToast } from '@/components/ui/toast';
 import { WorkspaceFrameTabs } from '@/components/workspace/workspace-frame-tabs';
 import {
   COLUMNS, TRUST_COLUMNS, TRUST_COLUMN_TO_STATUS,
@@ -141,13 +143,16 @@ interface SwimlaneCellProps {
   memberMap: Record<string, KanbanMember>;
   onStoryClick: (story: KanbanStory) => void;
   isDragging: boolean;
+  /** story #3299(3687/3694 후속) — org status 라벨 오버라이드(useOrgDomainLabels().statusLabel),
+   * kanban-board.tsx의 StoryCard prop threading과 동형. 없으면 canonical t(...) 그대로. */
+  getStatusLabel?: (canonicalSlug: string) => string | undefined;
 }
 
 // story #2954(유나 처방·H4 kanban-trust-column.tsx:86,92 문법 이식) — 드래그 中엔 잠긴
 // (파생) 열이 "지금 못 놓는다"는 게 정적 상태만으론 안 드러났다(handleDragEnd:333의
 // targetLocked 방어는 침묵 실패 — 드롭해도 조용히 무효화). opacity-45로 드래그 중에만
 // 어둡게 해 시각이 그 침묵을 메운다.
-function SwimlaneCell({ laneId, columnId, locked, stories, memberMap, onStoryClick, isDragging }: SwimlaneCellProps) {
+function SwimlaneCell({ laneId, columnId, locked, stories, memberMap, onStoryClick, isDragging, getStatusLabel }: SwimlaneCellProps) {
   const { setNodeRef, isOver } = useDroppable({ id: `${laneId}::${columnId}`, disabled: locked });
   const closedDuringDrag = locked && isDragging;
   return (
@@ -165,6 +170,7 @@ function SwimlaneCell({ laneId, columnId, locked, stories, memberMap, onStoryCli
           assignees={(story.assignee_ids ?? []).flatMap((id) => memberMap[id] ? [memberMap[id]] : [])}
           onClick={() => onStoryClick(story)}
           locked={locked}
+          getStatusLabel={getStatusLabel}
         />
       ))}
     </div>
@@ -200,9 +206,11 @@ interface SwimlaneRowProps {
   memberMap: Record<string, KanbanMember>;
   onStoryClick: (story: KanbanStory) => void;
   isDragging: boolean;
+  /** story #3299 — SwimlaneCell로 그대로 물려준다(위 주석과 동형). */
+  getStatusLabel?: (canonicalSlug: string) => string | undefined;
 }
 
-function SwimlaneRow({ laneId, title, subtitle, columns, stories, axisMode, memberMap, onStoryClick, isDragging }: SwimlaneRowProps) {
+function SwimlaneRow({ laneId, title, subtitle, columns, stories, axisMode, memberMap, onStoryClick, isDragging, getStatusLabel }: SwimlaneRowProps) {
   const byColumn = useMemo(() => {
     const map: Record<string, KanbanStory[]> = {};
     for (const col of columns) map[col.id] = [];
@@ -231,6 +239,7 @@ function SwimlaneRow({ laneId, title, subtitle, columns, stories, axisMode, memb
             memberMap={memberMap}
             onStoryClick={onStoryClick}
             isDragging={isDragging}
+            getStatusLabel={getStatusLabel}
           />
         ))}
       </div>
@@ -240,6 +249,12 @@ function SwimlaneRow({ laneId, title, subtitle, columns, stories, axisMode, memb
 
 export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
   const t = useTranslations('board');
+  // story #3289 — kanban-board.tsx와 동형(useOrgDomainLabels 배선). story #3299(3687/3694
+  // 후속) — 그때 StoryDetailPanel에만 물렸던 domainLabels를 이제 인라인 StoryCard 배지
+  // (SwimlaneRow→SwimlaneCell→StoryCard prop threading)에도 물린다. 새 훅 배선 없음(재사용).
+  const { orgId } = useDashboardContext();
+  const locale = useLocale();
+  const domainLabels = useOrgDomainLabels(orgId, locale);
   const [stories, setStories] = useState<KanbanStory[]>([]);
   const [epics, setEpics] = useState<KanbanEpic[]>([]);
   const [members, setMembers] = useState<KanbanMember[]>([]);
@@ -258,8 +273,14 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
   const [draggingActive, setDraggingActive] = useState(false);
   const [storyTasks, setStoryTasks] = useState<Task[]>([]);
   const [storyTasksNextCursor, setStoryTasksNextCursor] = useState<string | null>(null);
+  // story #3703(FE 완전성-정직) — /api/tasks의 meta.totalCount(story_id 지정 시 BE 항상
+  // 반환). 기존에도 fetch는 하고 있었지만 nextCursor만 뽑고 이 값은 버렸다.
+  const [storyTasksTotalCount, setStoryTasksTotalCount] = useState<number | null>(null);
+  // story #3709(FE 완전성-정직, 3704 후속) — 조회 中(응답 前)엔 tasks=[]·totalCount=null이라
+  // StoryDetailPanel이 "정말 0개"와 구별을 못 했다(kanban-board.tsx와 동형 갭).
+  const [storyTasksLoading, setStoryTasksLoading] = useState(false);
   const [loadingMoreStoryTasks, setLoadingMoreStoryTasks] = useState(false);
-  const { toasts, addToast, dismissToast } = useToast();
+  const { addToast } = useToast();
 
   useEffect(() => { setAxisMode(loadAxisMode(projectId)); }, [projectId]);
 
@@ -271,22 +292,35 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
     if (!selectedStoryId) {
       setStoryTasks([]);
       setStoryTasksNextCursor(null);
+      setStoryTasksTotalCount(null);
+      setStoryTasksLoading(false);
       return;
     }
     let cancelled = false;
     setStoryTasks([]);
     setStoryTasksNextCursor(null);
+    setStoryTasksTotalCount(null);
+    setStoryTasksLoading(true);
     (async () => {
       try {
         const res = await fetchWithAuth(`/api/tasks?story_id=${selectedStoryId}&limit=20`);
         if (cancelled) return;
         if (res.ok) {
           const json = await res.json();
+          // story #3709 후속(카디르 재-QA, PR#4060, 2026-09-09) — 위 대조는 fetch 직후일
+          // 뿐, res.json() 자체가 비동기라 그 파싱 사이에 다른 스토리로 전환될 수 있다
+          // (kanban-board.tsx #3704 후속과 동형 갭) — 파싱 뒤 재대조 없으면 늦게 온 옛
+          // 응답이 새 스토리의 tasksLoading을 false로 내려 «조회 中»을 «없음»으로
+          // 오단정한다.
+          if (cancelled) return;
           setStoryTasks(json.data ?? []);
-          setStoryTasksNextCursor(parseCursorMeta(json.meta, 'EpicSwimlaneBoard tasks').nextCursor);
+          const tasksMeta = parseCursorMeta(json.meta, 'EpicSwimlaneBoard tasks');
+          setStoryTasksNextCursor(tasksMeta.nextCursor);
+          setStoryTasksTotalCount(typeof tasksMeta.totalCount === 'number' ? tasksMeta.totalCount : null);
         }
+        setStoryTasksLoading(false);
       } catch {
-        if (!cancelled) { setStoryTasks([]); setStoryTasksNextCursor(null); }
+        if (!cancelled) { setStoryTasks([]); setStoryTasksNextCursor(null); setStoryTasksTotalCount(null); setStoryTasksLoading(false); }
       }
     })();
     return () => { cancelled = true; };
@@ -442,7 +476,15 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
           method: 'PATCH', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ epic_id: newEpicId }),
         });
-        if (!res.ok) { void fetchAll(); return; }
+        if (!res.ok) {
+          // story #3637(유나 silent-failure-sweep-3632) — 카드가 조용히 제자리로 돌아가던
+          // 자리(형제 kanban-board.tsx의 알리는 원칙을 여기서 완성 — 정확 지점은
+          // handleCreateStory/createStoryFailed, 드래그 핸들러 자체는 형제도 FORBIDDEN
+          // 외엔 조용했다는 점을 PR 본문에 정정 기록).
+          addToast({ type: 'error', title: t('storyMoveFailed') });
+          void fetchAll();
+          return;
+        }
         // QA changes 8R HIGH①(카디르+codex, 2026-08-22) — 형제(kanban-board.tsx
         // handleTrustDragEnd, story #2933 H4 qa:changes)와 동형: 응답에 실린 진짜
         // trust_stage를 병합한다(재파생 아님, BE 판정값 그대로 — PO 조건②).
@@ -456,7 +498,15 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
           method: 'PATCH', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ items: [{ id: storyId, status: newStatus }] }),
         });
-        if (!res.ok) { void fetchAll(); return; }
+        if (!res.ok) {
+          // story #3637(유나 silent-failure-sweep-3632) — 카드가 조용히 제자리로 돌아가던
+          // 자리(형제 kanban-board.tsx의 알리는 원칙을 여기서 완성 — 정확 지점은
+          // handleCreateStory/createStoryFailed, 드래그 핸들러 자체는 형제도 FORBIDDEN
+          // 외엔 조용했다는 점을 PR 본문에 정정 기록).
+          addToast({ type: 'error', title: t('storyMoveFailed') });
+          void fetchAll();
+          return;
+        }
         const okItems = await res.json().then((j) => j?.data ?? j).catch(() => null);
         const okItem = Array.isArray(okItems) ? okItems.find((x) => x?.id === storyId) : null;
         // QA changes 10R HIGH②(카디르+codex, 2026-08-22) — bulk PATCH는 gate가 막은 항목도
@@ -501,7 +551,6 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
 
   return (
     <>
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
       <TopBarSlot title={<h1 className="text-sm font-medium">{t('epicSwimlaneTitle')}</h1>} showContextChip />
       <div className="space-y-3 p-4">
         <WorkspaceFrameTabs active="epic" />
@@ -573,6 +622,7 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
                     memberMap={memberMap}
                     onStoryClick={(s) => setSelectedStoryId(s.id)}
                     isDragging={draggingActive}
+                    getStatusLabel={domainLabels.statusLabel}
                   />
                 ))}
 
@@ -597,6 +647,7 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
                         memberMap={memberMap}
                         onStoryClick={(s) => setSelectedStoryId(s.id)}
                         isDragging={draggingActive}
+                        getStatusLabel={domainLabels.statusLabel}
                       />
                     ))}
                   </div>
@@ -611,14 +662,20 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
                   memberMap={memberMap}
                   onStoryClick={(s) => setSelectedStoryId(s.id)}
                   isDragging={draggingActive}
+                  getStatusLabel={domainLabels.statusLabel}
                 />
               </div>
             </DndContext>
 
             {selectedStory && (
               <StoryDetailPanel
+                key={selectedStory.id}
                 story={selectedStory}
                 tasks={storyTasks}
+                tasksTotalCount={storyTasksTotalCount}
+                tasksLoading={storyTasksLoading}
+                getStatusLabel={domainLabels.statusLabel}
+                getEntityTypeLabel={domainLabels.entityTypeLabel}
                 nextTasksCursor={storyTasksNextCursor}
                 loadingMoreTasks={loadingMoreStoryTasks}
                 onLoadMoreTasks={async () => {
@@ -632,7 +689,9 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
                         const existingIds = new Set(prev.map((task) => task.id));
                         return [...prev, ...((json.data ?? []) as Task[]).filter((task) => !existingIds.has(task.id))];
                       });
-                      setStoryTasksNextCursor(parseCursorMeta(json.meta, 'EpicSwimlaneBoard tasks(loadMore)').nextCursor);
+                      const tasksMeta = parseCursorMeta(json.meta, 'EpicSwimlaneBoard tasks(loadMore)');
+                      setStoryTasksNextCursor(tasksMeta.nextCursor);
+                      setStoryTasksTotalCount(typeof tasksMeta.totalCount === 'number' ? tasksMeta.totalCount : null);
                     }
                   } finally {
                     setLoadingMoreStoryTasks(false);

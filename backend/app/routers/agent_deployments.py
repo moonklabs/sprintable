@@ -12,6 +12,7 @@ from app.schemas.agent_deployment import (
     PatchDeploymentRequest,
 )
 from app.services.deployment_lifecycle import DeploymentLifecycleError, DeploymentLifecycleService
+from app.services.member_resolver import resolve_member_db_verified
 
 router = APIRouter(prefix="/api/v2/agent-deployments", tags=["agent-deployments", "Organization"])
 
@@ -62,11 +63,15 @@ async def create_deployment(
     if not org_id:
         return _err("FORBIDDEN", "org_id required", 403)
     try:
+        # story #3370 회귀 클래스(페드루 PO 지시 2026-09-11) — actor_id는
+        # AgentDeployment.created_by로 영속된다(휴먼 JWT의 auth.user_id는 users.id,
+        # org 멤버 id가 아니다). resolve_member_db_verified()의 영속 멤버 id로 정정.
+        resolved = await resolve_member_db_verified(auth, org_id, svc.session)
         result = await svc.create_deployment(
             org_id=org_id,
             project_id=project_id,
             agent_id=body.agent_id,
-            actor_id=uuid.UUID(auth.user_id),
+            actor_id=resolved.id,
             name=body.name,
             runtime=body.runtime,
             model=body.model,
@@ -89,6 +94,8 @@ async def run_preflight(
     org_id, project_id = _get_org_project(auth)
     if not org_id:
         return _err("FORBIDDEN", "org_id required", 403)
+    # story #3370 회귀 클래스 — create_deployment와 같은 actor_id 축(위 주석 참고).
+    resolved = await resolve_member_db_verified(auth, org_id, svc.session)
     preflight = await svc.run_deployment_preflight(
         org_id=org_id,
         project_id=project_id,
@@ -100,7 +107,7 @@ async def run_preflight(
         persona_id=body.persona_id,
         config=body.config,
         overwrite_routing_rules=body.overwrite_routing_rules,
-        actor_id=uuid.UUID(auth.user_id),
+        actor_id=resolved.id,
     )
     return _ok({"preflight": preflight.model_dump(mode="json")})
 
@@ -132,10 +139,13 @@ async def patch_deployment(
     if not org_id:
         return _err("FORBIDDEN", "org_id required", 403)
     try:
+        # story #3370 회귀 클래스 — actor_id는 AgentAuditLog.payload·AgentDeployment
+        # 감사기록에 "누가 이 전이를 했는지"로 실린다(create_deployment와 동형 축).
+        resolved = await resolve_member_db_verified(auth, org_id, svc.session)
         result = await svc.transition_deployment(
             org_id=org_id,
             project_id=project_id,
-            actor_id=uuid.UUID(auth.user_id),
+            actor_id=resolved.id,
             deployment_id=id,
             status=body.status,
             failure=body.failure,
@@ -155,10 +165,12 @@ async def delete_deployment(
     if not org_id:
         return _err("FORBIDDEN", "org_id required", 403)
     try:
+        # story #3370 회귀 클래스 — actor_id 축(위 patch_deployment와 동형).
+        resolved = await resolve_member_db_verified(auth, org_id, svc.session)
         result = await svc.terminate_deployment(
             org_id=org_id,
             project_id=project_id,
-            actor_id=uuid.UUID(auth.user_id),
+            actor_id=resolved.id,
             deployment_id=id,
         )
         return _ok(result.model_dump(mode="json"))
@@ -176,10 +188,13 @@ async def complete_verification(
     if not org_id:
         return _err("FORBIDDEN", "org_id required", 403)
     try:
+        # story #3370 회귀 클래스 — actor_id는 config.verification.completed_by로
+        # 영속된다("완료자" 표시 필드, create_deployment와 동형 축).
+        resolved = await resolve_member_db_verified(auth, org_id, svc.session)
         dep = await svc.complete_verification(
             org_id=org_id,
             project_id=project_id,
-            actor_id=uuid.UUID(auth.user_id),
+            actor_id=resolved.id,
             deployment_id=id,
         )
         return _ok({"deployment": dep.model_dump(mode="json")})

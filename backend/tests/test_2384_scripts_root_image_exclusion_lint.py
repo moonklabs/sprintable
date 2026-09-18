@@ -31,15 +31,66 @@ _CI_OR_LOCAL_ONLY_ALLOWLIST = frozenset({
     "ci_alembic_sibling_pr_collision_check.py",   # story #2401 — CI 전용, git+gh api만 사용(운영 DB 무접속)
     "ci_alembic_single_step_promotion_check.py",  # story #2330 — CI 전용 fresh-DB 재현
     "lint_business_info_email_footer_drift.py",   # story #3216 — CI lint 게이트(정적 텍스트 대조, 운영 DB 무접속)
+    "lint_channel_insight_metrics_drift.py",      # story #3697 — CI lint 게이트(channel_adapters.py↔
+                                                   # channel-declared-metrics.ts 정적 텍스트 대조,
+                                                   # 운영 DB 무접속 — lint_business_info_email_footer_
+                                                   # drift.py와 동형 관례).
     "lint_candidate_source_ownership.py",         # story #2363 AC6 — CI lint 게이트
     "lint_commit_before_validate.py",             # story #2459 — CI lint 게이트(AST 정적분석, 운영 DB 무접속)
     "lint_dependency_override_get_read_db.py",    # story #2451 — CI lint 게이트(tests/ override 스캔, 운영 DB 무접속)
     "lint_destructive_test_sql.py",               # story #2786 — CI lint 게이트(tests/ 재귀 AST 스캔, 운영 DB 무접속)
+    "lint_destructive_publish_path_dispose_fixture.py",  # story a05da51b — CI lint 게이트(tests/ 재귀 AST 스캔, 운영 DB 무접속)
+    "lint_legacy_subscriptions_reuse.py",         # story #2476 — CI lint 게이트(app/ 재귀 정적 스캔, 운영 DB 무접속)
+    "lint_model_registration_completeness.py",    # story #2255 — CI lint 게이트(app/models AST 정적 스캔, 운영 DB 무접속)
     "lint_project_access_403.py",                 # story #2342 AC7 — CI lint 게이트
     "lint_query_sentinel_direct_calls.py",        # story #2335 — CI lint 게이트
+    "lint_raw_auth_id_into_member_field.py",      # story #3370 — CI lint 게이트(app/routers·
+                                                   # app/services·ee AST 정적 스캔, 운영 DB 무접속 —
+                                                   # lint_project_access_403.py와 동형 관례).
     "lint_no_script_output_artifacts.py",         # story #3008 — CI lint 게이트(scripts/ 파일명·내용 정적 스캔, 운영 DB 무접속)
+    "lint_org_today_direct_call.py",              # story #3674 — CI lint 게이트(app/**/*.py 정적
+                                                   # 정규식 스캔, 운영 DB 무접속).
+    "lint_destructive_schema_weights_registered.py",  # story 23bf1913 — CI lint 게이트(pytest
+                                                   # --collect-only + infra/destructive-schema-shard-
+                                                   # weights.json 정적 대조, Postgres·운영 DB 무접속 —
+                                                   # 그 자신의 docstring에 실측 확認 명시).
     "model_db_drift_audit.py",                    # story #2181 — 로컬 1회성 감사(읽기 전용)
     "shard_destructive_tests.py",                 # story #2293 — CI 매트릭스 샤딩 유틸
+    "build_destructive_schema_template.py",       # story #3383 — CI 전용, backend-test-destructive
+                                                   # 잡이 샤드마다 부르는 스텝(ci.yml). 접속 대상은
+                                                   # CI/로컬 Postgres 서비스 컨테이너의 throwaway
+                                                   # DB(sprintable_test_tpl)뿐 — 운영 DB 무접속.
+    "measure_destructive_durations_local.py",     # story #3383 — 로컬 1회성 재측정 도구
+                                                   # (model_db_drift_audit.py와 동일 범주). 운영
+                                                   # DB 무접속, throwaway 로컬 DB만 왕복.
+    "verify_no_new_korean_user_strings.py",       # story #3779(1층) — CI lint 게이트(app/ 재귀
+                                                   # AST 정적 스캔, 운영 DB 무접속).
+    "verify_user_facing_tone.py",                 # story #3931(2층) — CI lint 게이트(app/ 재귀
+                                                   # AST/정규식 정적 스캔 + FE api-error-message.ts
+                                                   # 읽기 전용 파싱, 운영 DB 무접속 —
+                                                   # verify_no_new_korean_user_strings.py와 동형
+                                                   # 관례. ci.yml의 「BE 한글 사용자 문장 재발
+                                                   # 가드」 잡이 직접 호출).
+    "measure_korean_user_string_reachability.py", # story #3779(2층) — 로컬/카드용 1회성 목록
+                                                   # 산출 도구(model_db_drift_audit.py와 동일
+                                                   # 범주, CI 미등재). 운영 DB 무접속, app/ 정적
+                                                   # AST 스캔만.
+    "lint_no_hardcoded_iso_timestamp.py",         # story #3528(재발 가드) — CI lint 게이트
+                                                   # (backend/app/** AST 정적 스캔, 운영 DB
+                                                   # 무접속 — lint_business_info_email_footer_
+                                                   # drift.py와 동형 관례).
+    "lint_insight_snapshot_status_drift.py",      # story #3808(Phase3·3-3 PR4) — CI lint
+                                                   # 게이트(insight_snapshots.py↔types.ts
+                                                   # AST/정규식 정적 대조, 운영 DB 무접속 —
+                                                   # lint_channel_insight_metrics_drift.py와
+                                                   # 동형 관례).
+    "extract_fe_paths_referenced_by_backend_tests.py",  # story #3897 — ci.yml
+                                                   # detect-changed-scope 판정 전용(backend/
+                                                   # tests/**/*.py를 AST 아닌 정규식+괄호매칭
+                                                   # 정적 스캔, 운영 DB 무접속 — lint_*.py류와
+                                                   # 동형 관례). check_backend_relevant_diff.sh가
+                                                   # 이 스크립트를 호출(같은 카드, .sh라 이
+                                                   # allowlist 대상 밖).
 })
 
 

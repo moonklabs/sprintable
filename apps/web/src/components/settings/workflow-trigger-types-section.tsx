@@ -161,7 +161,7 @@ export function WorkflowTriggerTypesSection() {
           <p className="text-sm text-muted-foreground">...</p>
         ) : (
           <div className="space-y-2">
-            {triggerTypes.map((tt) => (
+            {triggerTypes.map((tt, index) => (
               <div key={tt.id} className="rounded-md border border-border bg-muted/30 px-3 py-3 text-sm">
                 {editingId === tt.id ? (
                   <div className="space-y-2">
@@ -176,10 +176,23 @@ export function WorkflowTriggerTypesSection() {
                       placeholder={t('workflowDescriptionPlaceholder')}
                     />
                     <div className="flex gap-2">
-                      <Button variant="hero" size="sm" onClick={() => void handleSaveEdit(tt.id)} disabled={!editLabel.trim() || saving === tt.id}>
-                        {saving === tt.id ? '...' : tc('save')}
+                      <Button
+                        variant="hero"
+                        size="sm"
+                        onClick={() => void handleSaveEdit(tt.id)}
+                        disabled={!editLabel.trim() || saving === tt.id}
+                        aria-label={t('workflowToggleAriaLabel', { n: index + 1, label: saving === tt.id ? tc('saving') : tc('save') })}
+                      >
+                        {/* story #3608(유나 §22-18 ④-2)+#3606(aria-label 배선) 병합 —
+                            "..."는 아무 말도 안 한다, 낱말("저장 중…")로. */}
+                        {saving === tt.id ? tc('saving') : tc('save')}
                       </Button>
-                      <Button variant="glass" size="sm" onClick={() => setEditingId(null)}>
+                      <Button
+                        variant="glass"
+                        size="sm"
+                        onClick={() => setEditingId(null)}
+                        aria-label={t('workflowToggleAriaLabel', { n: index + 1, label: tc('cancel') })}
+                      >
                         {tc('cancel')}
                       </Button>
                     </div>
@@ -197,14 +210,29 @@ export function WorkflowTriggerTypesSection() {
                         <p className="mt-0.5 text-xs text-muted-foreground">{tt.description}</p>
                       ) : null}
                     </div>
+                    {/* story #3592(§17-20 ⑧·§22-18 동형)·story #3606(잔여, 페드루 PO
+                        確定 2026-09-07) — edit/delete/confirm/cancel(tc(...) 공용 키)도
+                        같은 map·같은 index라 settings 네임스페이스의 기존
+                        workflowToggleAriaLabel(토글 버튼이 이미 쓰는 템플릿)을 그대로
+                        재사용해 마감한다 — common 키 자체는 안 건드림, aria 템플릿만
+                        이 파일 네임스페이스 것을 씀(§22-18 원칙 그대로). */}
                     <div className="flex shrink-0 gap-2">
                       <Button
                         variant="glass"
                         size="sm"
                         onClick={() => void handleToggle(tt)}
                         disabled={togglingId === tt.id}
+                        aria-label={t('workflowToggleAriaLabel', {
+                          n: index + 1,
+                          label: togglingId === tt.id ? t('workflowToggling') : tt.is_enabled ? t('workflowDisableBtn') : t('workflowEnableBtn'),
+                        })}
                       >
-                        {togglingId === tt.id ? '...' : tt.is_enabled ? t('workflowDisableBtn') : t('workflowEnableBtn')}
+                        {/* story #3608 — 이 버튼은 #3592가 aria-label까지 이미 배선한
+                            자리라 "..."가 그 aria-label 문자열 안에도 그대로 들어가
+                            "3번째 트리거 유형 ..."이 됐다(발견 시점 실측). 낱말
+                            ("변경 중…")로 바꿔 보이는 글자·aria-label 둘 다 한 번에
+                            고친다. */}
+                        {togglingId === tt.id ? t('workflowToggling') : tt.is_enabled ? t('workflowDisableBtn') : t('workflowEnableBtn')}
                       </Button>
                       {!tt.is_system ? (
                         <>
@@ -216,6 +244,7 @@ export function WorkflowTriggerTypesSection() {
                               setEditLabel(tt.label);
                               setEditDescription(tt.description ?? '');
                             }}
+                            aria-label={t('workflowToggleAriaLabel', { n: index + 1, label: tc('edit') })}
                           >
                             {tc('edit')}
                           </Button>
@@ -226,15 +255,28 @@ export function WorkflowTriggerTypesSection() {
                                 size="sm"
                                 onClick={() => void handleDelete(tt.id)}
                                 disabled={deletingId === tt.id}
+                                aria-label={t('workflowToggleAriaLabel', { n: index + 1, label: deletingId === tt.id ? tc('deleting') : tc('confirm') })}
                               >
-                                {deletingId === tt.id ? '...' : tc('confirm')}
+                                {/* story #3608(+#3606 aria-label 배선 병합) — "..."는
+                                    아무 말도 안 한다, 낱말("삭제 중…")로. */}
+                                {deletingId === tt.id ? tc('deleting') : tc('confirm')}
                               </Button>
-                              <Button variant="glass" size="sm" onClick={() => setConfirmDeleteId(null)}>
+                              <Button
+                                variant="glass"
+                                size="sm"
+                                onClick={() => setConfirmDeleteId(null)}
+                                aria-label={t('workflowToggleAriaLabel', { n: index + 1, label: tc('cancel') })}
+                              >
                                 {tc('cancel')}
                               </Button>
                             </>
                           ) : (
-                            <Button variant="glass" size="sm" onClick={() => setConfirmDeleteId(tt.id)}>
+                            <Button
+                              variant="glass"
+                              size="sm"
+                              onClick={() => setConfirmDeleteId(tt.id)}
+                              aria-label={t('workflowToggleAriaLabel', { n: index + 1, label: tc('delete') })}
+                            >
                               {tc('delete')}
                             </Button>
                           )}

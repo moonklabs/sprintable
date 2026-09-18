@@ -15,12 +15,12 @@ TRANSACTIONAL_COPY: dict[str, dict[str, dict]] = {
         "ko": {
             "subject": "Sprintable 이메일 인증을 완료해 주세요",
             "intro_lines": [
-                "Sprintable에 가입해 주셔서 감사합니다.",
-                "아래 버튼을 눌러 이메일 인증을 완료하시면 바로 시작하실 수 있습니다.",
+                "Sprintable에 가입해 주셔서 감사해요.",
+                "아래 버튼을 눌러 이메일 인증을 완료하시면 바로 시작하실 수 있어요.",
             ],
             "cta_label": "이메일 인증하기",
-            "expiry_note": "이 링크는 24시간 동안 유효합니다.",
-            "security_note": "본인이 요청한 가입이 아니라면 이 메일을 무시하셔도 됩니다.",
+            "expiry_note": "이 링크는 24시간 동안 유효해요.",
+            "security_note": "본인이 요청한 가입이 아니라면 이 메일을 무시하셔도 돼요.",
             "fallback_label": "버튼이 열리지 않으면 아래 주소를 브라우저에 붙여넣어 주세요:",
         },
         "en": {
@@ -40,12 +40,12 @@ TRANSACTIONAL_COPY: dict[str, dict[str, dict]] = {
         "ko": {
             "subject": "Sprintable 비밀번호 재설정 안내",
             "intro_lines": [
-                "비밀번호 재설정을 요청하셨습니다.",
+                "비밀번호 재설정을 요청하셨어요.",
                 "아래 버튼을 눌러 새 비밀번호를 설정해 주세요.",
             ],
             "cta_label": "비밀번호 재설정",
-            "expiry_note": "이 링크는 30분 동안 유효합니다.",
-            "security_note": "본인이 요청하지 않으셨다면 이 메일을 무시하셔도 됩니다 — 비밀번호는 변경되지 않습니다.",
+            "expiry_note": "이 링크는 30분 동안 유효해요.",
+            "security_note": "본인이 요청하지 않으셨다면 이 메일을 무시하셔도 돼요 — 비밀번호는 변경되지 않아요.",
             "fallback_label": "버튼이 열리지 않으면 아래 주소를 브라우저에 붙여넣어 주세요:",
         },
         "en": {
@@ -70,12 +70,12 @@ TRANSACTIONAL_COPY: dict[str, dict[str, dict]] = {
         "ko": {
             "subject": "Sprintable 비밀번호 설정을 완료해 주세요",
             "intro_lines": [
-                "비밀번호 설정을 요청하셨습니다.",
+                "비밀번호 설정을 요청하셨어요.",
                 "아래 버튼을 눌러 설정을 완료해 주세요.",
             ],
             "cta_label": "비밀번호 설정 완료",
-            "expiry_note": "이 링크는 15분 동안 유효합니다.",
-            "security_note": "본인이 요청하지 않으셨다면 이 메일을 무시하셔도 됩니다 — 비밀번호는 설정되지 않습니다.",
+            "expiry_note": "이 링크는 15분 동안 유효해요.",
+            "security_note": "본인이 요청하지 않으셨다면 이 메일을 무시하셔도 돼요 — 비밀번호는 설정되지 않아요.",
             "fallback_label": "버튼이 열리지 않으면 아래 주소를 브라우저에 붙여넣어 주세요:",
         },
         "en": {
@@ -94,11 +94,11 @@ TRANSACTIONAL_COPY: dict[str, dict[str, dict]] = {
 
 REMINDER_COPY: dict[str, dict[str, str]] = {
     "ko": {
-        "subject": "Sprintable — 가입 완료까지 몇 단계 남았습니다",
+        "subject": "Sprintable — 가입 완료까지 몇 단계 남았어요",
         "intro": (
-            "Sprintable 가입을 환영합니다. 아직 에이전트 연결이나 첫 지시를 완료하지 않으셨네요"
+            "Sprintable 가입을 환영해요. 아직 에이전트 연결이나 첫 지시를 완료하지 않으셨네요"
             " — 몇 분이면 끝나는 남은 단계를 마무리하면 Sprintable의 진짜 가치를 바로 확인하실 수"
-            " 있습니다."
+            " 있어요."
         ),
         "cta_label": "이어서 진행하기",
         "unsub_label": "이런 안내를 더 이상 받고 싶지 않다면 여기를 눌러 주세요",
@@ -117,17 +117,17 @@ REMINDER_COPY: dict[str, dict[str, str]] = {
 
 INVITE_COPY: dict[str, dict[str, str]] = {
     "ko": {
-        "subject": "[Sprintable] {org_name} 조직에 초대됐습니다",
+        "subject": "[Sprintable] {org_name} 조직에 초대됐어요",
         "heading": "팀에 초대됐어요!",
-        "body": "<strong>{inviter_name}</strong>님이 <strong>{org_name}</strong> 조직에 <strong>{role}</strong>로 초대했습니다.",
-        "sub_body": "아래 버튼을 클릭하면 초대를 수락할 수 있습니다. 링크는 7일간 유효합니다.",
+        "body": "<strong>{inviter_name}</strong>님이 <strong>{org_name}</strong> 조직에 <strong>{role}</strong>로 초대했어요.",
+        "sub_body": "아래 버튼을 클릭하면 초대를 수락할 수 있어요. 링크는 7일간 유효해요.",
         "cta_label": "초대 수락하기",
         "fallback_label": "버튼이 보이지 않으면 아래 주소를 브라우저에 붙여 넣으세요:",
         # story #3206 — 공용 셸(render_email_shell)이 회사정보·연도·법적 링크 푸터를
         # 전담하면서 이 필드의 "© {year} Sprintable." 부분은 셸과 중복이라 걷어냈다(유나
         # doc email-brand-shell-proposal-3206 ③ 수렴 지시). "왜 이 메일을 받았는지"만
         # 콘텐츠 영역 마지막 줄로 남긴다.
-        "auto_generated_note": "이 이메일은 초대 발송으로 자동 생성되었습니다.",
+        "auto_generated_note": "이 이메일은 초대 발송으로 자동 생성됐어요.",
         "default_inviter": "팀 관리자",
     },
     "en": {
@@ -150,8 +150,8 @@ STORAGE_WARN_COPY: dict[str, dict[str, str]] = {
     "ko": {
         "subject": "[Sprintable] 스토리지 사용량 {pct}% 도달",
         "body": (
-            "<p>안녕하세요, Sprintable입니다.</p>"
-            "<p>조직의 스토리지 사용량이 <b>{pct}%</b>({used_mb}MB / {cap_mb}MB)에 도달했습니다.</p>"
+            "<p>안녕하세요, Sprintable이에요.</p>"
+            "<p>조직의 스토리지 사용량이 <b>{pct}%</b>({used_mb}MB / {cap_mb}MB)에 도달했어요.</p>"
             "<p>업로드 제한을 피하려면 사용하지 않는 파일을 정리하거나 플랜을 업그레이드해 주세요.</p>"
         ),
     },
@@ -170,11 +170,11 @@ AU_WARN_COPY: dict[str, dict[str, str]] = {
     "ko": {
         "subject": "[Sprintable] 자동화 사용량(AU) {pct}% 도달",
         "body": (
-            "<p>안녕하세요, Sprintable입니다.</p>"
+            "<p>안녕하세요, Sprintable이에요.</p>"
             "<p>조직의 이번 달 자동화 사용량(AU)이 <b>{pct}%</b>({current} / {au_limit} AU)에"
-            " 도달했습니다.</p>"
-            "<p>100%에 도달하면 MCP/API 쓰기 및 자동화가 일시 중지됩니다(읽기와 사람 UI는 계속"
-            " 사용 가능합니다). 한도에 도달하기 전 플랜 업그레이드를 검토해 주세요.</p>"
+            " 도달했어요.</p>"
+            "<p>100%에 도달하면 MCP/API 쓰기 및 자동화가 일시 중지돼요(읽기와 사람 UI는 계속"
+            " 사용 가능해요). 한도에 도달하기 전 플랜 업그레이드를 검토해 주세요.</p>"
         ),
     },
     "en": {

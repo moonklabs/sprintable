@@ -5,7 +5,7 @@ import { useTranslations } from 'next-intl';
 import { AlertTriangle, Check, Loader2, RotateCcw, XCircle } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { ToastContainer, useToast } from '@/components/ui/toast';
+import { useToast } from '@/components/ui/toast';
 import { GateLineContext } from '@/components/cage/gate-line-context';
 import { StuckHandoffDetail } from '@/components/cage/stuck-handoff-detail';
 import type { KanbanMember, WorkflowLineStatus, WorkflowLineStepRun } from '@/components/kanban/types';
@@ -32,7 +32,7 @@ export function StuckHandoffSection({ storyId, memberMap = {} }: StuckHandoffSec
   const [step, setStep] = useState<WorkflowLineStepRun | null>(null);
   const [fallback, setFallback] = useState<FallbackState>('idle');
   const [withdraw, setWithdraw] = useState<WithdrawState>('idle');
-  const { toasts, addToast, dismissToast } = useToast();
+  const { addToast } = useToast();
 
   useEffect(() => {
     let cancelled = false;
@@ -96,8 +96,10 @@ export function StuckHandoffSection({ storyId, memberMap = {} }: StuckHandoffSec
   };
 
   const btn = {
-    idle: { cls: 'bg-destructive text-destructive-foreground hover:bg-destructive/90', Icon: AlertTriangle, label: t('fallbackNotifyOwner'), disabled: false },
-    notifying: { cls: 'bg-destructive/10 text-destructive', Icon: Loader2, label: t('fallbackNotifying'), disabled: true },
+    // story 3466 후속(무효 유틸 4곳) — text-destructive-foreground는 이 테마에 매핑이
+    // 없는 no-op(라이트 3.55·다크 3.00, AA 미달). trust-seal.tsx 선례와 같은 처방.
+    idle: { cls: 'bg-destructive text-white dark:text-proof-bg hover:bg-destructive/90', Icon: AlertTriangle, label: t('fallbackNotifyOwner'), disabled: false },
+    notifying: { cls: 'bg-destructive-tint text-destructive', Icon: Loader2, label: t('fallbackNotifying'), disabled: true },
     notified: { cls: 'bg-muted text-muted-foreground', Icon: Check, label: t('fallbackNotified'), disabled: true },
     failed: { cls: 'border border-destructive text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60', Icon: RotateCcw, label: t('fallbackRetry'), disabled: false },
   }[fallback];
@@ -133,10 +135,13 @@ export function StuckHandoffSection({ storyId, memberMap = {} }: StuckHandoffSec
             {t('withdrawn')}
           </div>
         ) : withdraw === 'confirming' ? (
-          <div className="space-y-1.5 rounded-md border border-destructive/40 bg-destructive/5 p-2">
+          <div className="space-y-1.5 rounded-md border border-destructive/40 bg-destructive-tint p-2">
             <p className="text-[11px] text-foreground">{t('withdrawIrreversibleWarning')}</p>
             <div className="flex gap-1.5">
-              <Button variant="ghost" size="sm" className="flex-1 text-muted-foreground" onClick={() => setWithdraw('idle')}>
+              {/* story #3869(AC1) — 이 버튼은 withdraw==='confirming'에서만 렌더되고, 그
+                  조상 div가 상시 bg-destructive-tint(리터럴, 132행)라 text-muted-foreground는
+                  AA 미달(#3839류) — text-foreground로 교체(§③ ink 규칙, 새 토큰 0). */}
+              <Button variant="ghost" size="sm" className="flex-1 text-foreground" onClick={() => setWithdraw('idle')}>
                 {t('withdrawCancel')}
               </Button>
               <Button variant="ghost" size="sm" className="flex-1 gap-1 text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60" onClick={() => void handleWithdraw()}>
@@ -158,7 +163,6 @@ export function StuckHandoffSection({ storyId, memberMap = {} }: StuckHandoffSec
           </Button>
         )}
       </div>
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }

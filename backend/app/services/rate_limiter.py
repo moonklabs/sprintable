@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import time
 from abc import ABC, abstractmethod
 from collections import defaultdict, deque
+
+logger = logging.getLogger(__name__)
 
 TIER_LIMITS: dict[str, int] = {
     "free": 60,
@@ -85,3 +88,27 @@ def get_rate_limiter() -> RateLimiter:
 
 def hash_api_key(plaintext: str) -> str:
     return hashlib.sha256(plaintext.encode()).hexdigest()
+
+
+def warn_if_rate_limit_backend_is_memory(s=None) -> None:
+    """story #3418 AC2 — 카디르 실측(dev, 2026-09-04): 백엔드 인스턴스가 최소 3개인데
+    `rate_limit_backend` 기본값이 `"memory"`라 `get_rate_limiter()`가 만드는
+    `InMemoryRateLimiter`가 프로세스 로컬 상태다 — beacon dedup(1분 내 재요청 억제)을
+    포함해 이 서비스를 쓰는 모든 레이트리밋이 인스턴스마다 따로 세게 된다(한도가 사실상
+    「인스턴스 수 배」로 느슨해짐).
+
+    ⚠️이 가드가 못 잡는 것(docstring 선언, 카디르 QA 관례) — 앱 프로세스는 자기가 몇 개의
+    인스턴스로 떠 있는지 모른다. 그래서 "정말 여러 인스턴스인데 memory"를 직접 검증하지
+    못하고, "memory인데 로컬이 아니다"(=Cloud Run 등 배포 환경, 통상 min-instances 여러
+    개로 뜬다)까지만 판정한다 — 로컬 단일 프로세스 개발(`is_really_local`)은 그 자체로
+    무해해 조용히 넘긴다."""
+    if s is None:
+        from app.core.config import settings as s
+
+    if s.rate_limit_backend != "redis" and not s.is_really_local:
+        logger.warning(
+            "[startup] rate_limit_backend=%s(기본값) — 인스턴스가 여러 개면 레이트리밋·"
+            "beacon dedup이 인스턴스별로 갈라진다(story #3418, dev 실측 1→2). "
+            "RATE_LIMIT_BACKEND=redis 배선 권장.",
+            s.rate_limit_backend,
+        )

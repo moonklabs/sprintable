@@ -72,7 +72,7 @@ class TeamMemberResponse(BaseModel):
     org_id: uuid.UUID
     user_id: uuid.UUID | None = None
     type: str
-    name: str
+    name: str | None  # story #3758 — 휴먼 org roster 분기(list_org_human_members)가 display_name 없으면 None을 정직하게 돌림(email/id 폴백 0)
     role: str
     avatar_url: str | None = None
     agent_config: dict[str, Any] | None = None

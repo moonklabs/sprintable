@@ -28,6 +28,7 @@ from app.schemas.agent_deployment import (
     DeploymentMutationResponse,
     DeploymentPreflightResponse,
 )
+from app.services.org_time import get_org_timezone, org_midnight_utc
 
 ACTIVE_STATUSES = ("DEPLOYING", "ACTIVE", "SUSPENDED")
 TRANSITIONS: dict[str, list[str]] = {
@@ -852,8 +853,11 @@ class DeploymentLifecycleService:
             )
             persona_name_by_id = {row.id: row.name for row in pr.all()}
 
-        from datetime import date
-        today_start = datetime.combine(date.today(), datetime.min.time()).replace(tzinfo=timezone.utc)
+        # story #3674(BE 確定 2026-09-07) — "오늘"은 조직 시간대 기준(org_time.py).
+        # org.timezone 미설정(null)이면 UTC로 폴백해 3665(#4020)의 환경-TZ 고정
+        # 동작을 그대로 보존한다(회귀 0).
+        org_timezone = await get_org_timezone(self.session, org_id)
+        today_start = org_midnight_utc(org_timezone)
 
         runs_today_r = await self.session.execute(
             select(AgentRun.deployment_id, AgentRun.input_tokens, AgentRun.output_tokens)

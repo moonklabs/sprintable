@@ -7,7 +7,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { NextIntlClientProvider } from 'next-intl';
 import { EntityPreviewModal } from './embed-card';
+import koMessages from '../../../messages/ko.json';
 
 let container: HTMLDivElement;
 let root: Root;
@@ -55,10 +57,12 @@ async function mount(content: string, contentFormat: string) {
   stubDocFetch(content, contentFormat);
   await act(async () => {
     root.render(
-      <EntityPreviewModal
-        entityType="doc" entityId="d-1" title="문서" status={null} href={null}
-        onClose={() => {}} embedded
-      />,
+      <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+        <EntityPreviewModal
+          entityType="doc" entityId="d-1" title="문서" status={null} href={null}
+          onClose={() => {}} embedded
+        />
+      </NextIntlClientProvider>,
     );
   });
   await flush();

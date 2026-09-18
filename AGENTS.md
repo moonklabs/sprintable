@@ -80,28 +80,36 @@ inflate "how much is left" counts (exactly the class of defect this story report
   #2187 AC4: the human-only block is an intentional safeguard against an agent deleting
   someone else's work, and throwaway-card convenience isn't worth trading that away).
 
-## Attaching visual evidence (screenshots/images) to a Sprintable artifact (story #2707)
+## Attaching visual evidence (screenshots/images) to a Sprintable artifact (story #2707, path corrected story #3767)
 
 `sprintable_create_artifact` only takes `nodes[]` (html/tree structure) — there's no
 `image` field. Don't embed a screenshot as base64 `<img src="data:...">` inside an
-`html_blob` node; a ~45KB PNG becomes ~60K tokens in the tool call. The working path
-(agent API key, no browser session needed) is two HTTP calls, only the second one an
-MCP tool:
+`html_blob` node; a ~45KB PNG becomes ~60K tokens in the tool call. Use
+`sprintable_import_image_artifact` instead — a one-shot upload+artifact-create tool made
+exactly for this (agent API key, no browser session needed).
 
-1. Upload the binary directly (**not** through the MCP tool call):
-   ```
-   curl -F file=@screenshot.png \
-     -H "Authorization: Bearer $AGENT_API_KEY" \
-     $SPRINTABLE_API_URL/api/visual-artifacts/import-image
-   ```
-   Returns `{"data": {"url": "https://storage.googleapis.com/..."}}`.
-2. Reference that url in `sprintable_create_artifact`:
-   ```
-   nodes: [{"type": "html_blob", "props": {"src": "<url from step 1>"}}]
-   ```
-   The FE derives `format: "image"` from `props.src` being a plain string and renders
-   it as an image (no code change needed on the consuming side).
+There is **no** separate "upload-only, get a URL back, then call
+sprintable_create_artifact" flow — no such bare-upload endpoint exists on the backend
+for agents (story #3767: an earlier version of this doc pointed at a non-`v2`,
+multipart form of this same path — that variant doesn't exist for agents; the only
+backend endpoint reachable with an agent API key is
+`/api/v2/visual-artifacts/import-image`, and it's JSON base64-in, **full artifact**-out
+in one call, not a bare URL).
 
-This requires the agent to have HTTP/curl access to do step 1 itself — an MCP-tool-only
-agent (no shell) can't take this path today (story #2707 AC5, not fixed — no known
-demand for it yet).
+- If the file is local to the agent's filesystem: call `sprintable_import_image_artifact`
+  with `image_path` — the server reads the bytes directly (no re-typing, byte-exact).
+- If the agent has Bash/HTTP access and wants to skip the MCP round-trip for a large
+  image, curl the same endpoint directly instead of the MCP tool:
+  ```
+  curl -X POST $SPRINTABLE_API_URL/api/v2/visual-artifacts/import-image \
+    -H "Authorization: Bearer $AGENT_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d "{\"title\": \"screenshot\", \"content_type\": \"image/png\", \
+         \"image_base64\": \"$(base64 -i screenshot.png | tr -d '\n')\"}"
+  ```
+  This one call returns a complete artifact (same shape as `get_artifact`) — do **not**
+  also call `sprintable_create_artifact` afterward, there's nothing left to do.
+- Only use `image_base64` (either via the MCP tool or curl above) for small images —
+  the base64 string is typed/re-typed as text, and a single wrong character silently
+  corrupts the stored image (real incident, story #3753). Prefer `image_path`/a local
+  file whenever the agent has filesystem access.

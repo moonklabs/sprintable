@@ -20,7 +20,7 @@ from app.schemas.team_member import (
 )
 from app.services.agent_onboarding_config import build_agent_mcp_config_bundle
 from app.services.avatar_upload import AvatarUploadError, confirm_upload, create_upload_url, delete_avatar
-from app.services.member_resolver import assert_caller_is_member, is_caller_member
+from app.services.member_resolver import UNNAMED_MEMBER_LABEL, assert_caller_is_member, is_caller_member
 from app.services.project_auth import has_project_access
 
 
@@ -409,8 +409,12 @@ async def create_team_member(
                 org_id=org_id,
                 event_type="agent_joined",
                 target_member_ids=admin_ids,
+                # story #3758 — actor는 휴먼일 수도 있고(team_members 뷰 휴먼 분기), 그
+                # name이 이제 nullable(members.name 완화)이라 그대로 f-string에 꽂으면
+                # "None(에이전트)이..."로 샌다. member(신규 에이전트)는 생성 필수 필드라
+                # None 걱정 없음.
                 title=f"새 에이전트 합류: {member.name}",
-                body=f"{actor.name}(에이전트)이 {member.name}을 생성했습니다.",
+                body=f"{actor.name or UNNAMED_MEMBER_LABEL}(에이전트)이 {member.name}을 생성했어요.",
                 reference_type="team_member",
                 reference_id=member.id,
                 # story #1953: 신규 에이전트(member) 자신의 project_id — TeamMember.project_id
@@ -741,8 +745,51 @@ async def claim_story(
     # 3414b6d7: claim=일 시작=실작업자 → implementation participation 멱등 생성(게이트/verdict
     # attribution). assignee(board)는 안 건드림 — participation만(claim만 하고 done해도 평가 가능).
     from app.services.participation_helpers import ensure_implementation_participation
-    await ensure_implementation_participation(session, org_id, body.story_id, id)
-    return {"claimed": True, "story_id": str(body.story_id)}
+    participation_ensured = await ensure_implementation_participation(session, org_id, body.story_id, id)
+
+    # story #3685(Trust·customer-zero, 페드루 PO 確定 2026-09-07) — run을 "지침"이 아니라
+    # "메커니즘"으로 기록한다. claim=착수(사람은 agent_run 개념 밖 — member.type=="agent"만).
+    if member.type == "agent":
+        from app.services.agent_run_tracking import ensure_agent_run_started
+        await ensure_agent_run_started(
+            session, org_id=org_id, project_id=effective_project_id,
+            agent_id=id, story_id=body.story_id,
+        )
+
+    # story 8b7e52d6(PO 재정의, 2026-09-04) — "신호 보정": claim_story의 실제 동작(위)은
+    # story 3414b6d7 결정 그대로 assignee/board를 절대 안 건드린다 — 그런데 기존 응답
+    # `{"claimed": True}` 한 줄만으로는 호출자가 "claim=내 것이 됨(assignee·board 반영)"
+    # 으로 합리적으로 오독한다(디디 그라운딩 실사례 — 0845cb03에서 본인이 그렇게 오독했다).
+    # 행동은 그대로 두고 응답에 실제 스코프(participation만 바뀌었고 assignee는 무변경)를
+    # 명시해 그 오독을 원천 차단한다.
+    from app.routers.stories import _attach_assignee_ids
+    await _attach_assignee_ids(session, org_id, [story])
+    assignee_ids = [str(a) for a in story.assignee_ids]
+
+    result: dict = {
+        "claimed": True,
+        "story_id": str(body.story_id),
+        # 페드루 리뷰 N1 재정정(2026-09-04) — "created"는 거짓 이름이었다(디디 지적
+        # 반영, 원래 이름이 맞았다) — ensure_implementation_participation은 이미 있던
+        # 행이든 방금 만든 행이든 똑같이 True를 반환하는 멱등 함수라 "새로 만들었다"는
+        # 뜻이 아니다. "ensured"로 되돌리고, False일 때만(=이 org에 default
+        # participation role 자체가 없어 참여 보장이 스킵된 진짜 이상 상태 — 정상
+        # org에선 안 뜨는 필드) 아래 warning으로 명시.
+        "participation": {"ensured": participation_ensured},
+        "assignee_changed": False,
+        "assignee_ids": assignee_ids,
+    }
+    if not assignee_ids:
+        result["hint"] = (
+            "assignee는 별도입니다(update_story의 assignee_id/assignee_ids) — "
+            "보드 배정 표시·통지 수신자는 claim이 아니라 assignee 기준입니다."
+        )
+    if not participation_ensured:
+        result["warning"] = (
+            "participation 미보장 — 이 org에 기본 participation role이 없어 "
+            "게이트/verdict attribution이 안 잡힘(관리자 확인 필요)"
+        )
+    return result
 
 
 @router.post("/{id}/unclaim")
@@ -767,12 +814,23 @@ async def unclaim_story(
 
     await assert_caller_is_member(id, auth, session, org_id, detail="Cannot unclaim as another member")
 
+    # story #3685 — active_story_id를 null로 지우기 前에 캡처(그 값이 사라지면 어느 run을
+    # 닫을지 알 방법이 없다).
+    prior_active_story_id = member.active_story_id
+
     # AC3-4 2-2: anchor-only — agent_project_profiles가 presence 유일 소스.
     from app.services.agent_anchor_sync import sync_agent_profile_presence
     await sync_agent_profile_presence(session, id, active_story_id=None)
     # AC7: unclaim 시 해당 멤버의 모든 file lock 해제
     from app.routers.file_locks import release_all_file_locks
     await release_all_file_locks(session, id)
+
+    # story #3685(Trust·customer-zero, 페드루 PO 確定 2026-09-07) — unclaim=포기. claim과
+    # 대칭(사람은 agent_run 개념 밖).
+    if member.type == "agent" and prior_active_story_id is not None:
+        from app.services.agent_run_tracking import close_agent_runs_for_story
+        await close_agent_runs_for_story(session, story_id=prior_active_story_id, status="abandoned", agent_id=id)
+
     return {"unclaimed": True}
 
 

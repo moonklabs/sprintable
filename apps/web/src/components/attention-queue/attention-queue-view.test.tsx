@@ -221,7 +221,7 @@ describe('AttentionQueueView — story #3099 빈 상태(모두 처리됨) 텍스
       if (url.includes('/api/glance/attention')) return { ok: true, json: async () => ({ data: { items: [] } }) };
       return { ok: true, json: async () => ({ data: [] }) };
     });
-    const label = [...container.querySelectorAll('div')].find((d) => d.textContent?.trim() === 'ALL CLEAR');
+    const label = [...container.querySelectorAll('div')].find((d) => d.textContent?.trim() === '안전');
     expect(label).toBeTruthy();
     expect(label?.className).toContain('text-proof-ink');
     expect(label?.className).not.toContain('text-proof-green');

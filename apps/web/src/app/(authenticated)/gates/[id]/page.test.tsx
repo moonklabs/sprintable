@@ -158,6 +158,63 @@ describe('GateDetailPage — can_approve 게이팅 (story #2091)', () => {
   });
 });
 
+// story #3813(Phase3·3-4 PR4, 페드루 PO 確定 2026-09-12) — 「발행」(ESP 캠페인 생성)과
+// 「발송」이 같은 승인 버튼을 공유하면 두 다른 행위가 같은 낱말("승인")로 뭉개진다.
+describe('GateDetailPage — 뉴스레터 승인 버튼 낱말 분리 (story #3813 PR4)', () => {
+  it('gate_type=newsletter_send이면 「발송 승인」으로 뜬다(기본 「승인」 아님)', async () => {
+    await mount(gate({ can_approve: true, gate_type: 'newsletter_send' }));
+    const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.gateApproveNewsletterSend))).toBe(true);
+    expect(buttons.some((t) => t === koMessages.cage.gateApprove)).toBe(false);
+  });
+
+  it('gate_type=external_publish + sealed_destination_channel=stibee_sandbox면 「캠페인 만들기」로 뜬다', async () => {
+    await mount(gate({ can_approve: true, gate_type: 'external_publish', sealed_destination_channel: 'stibee_sandbox' }));
+    const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.gateApproveCampaign))).toBe(true);
+  });
+
+  it('gate_type=external_publish + sealed_destination_channel=threads(뉴스레터 아님)면 기존 「승인」 그대로', async () => {
+    await mount(gate({ can_approve: true, gate_type: 'external_publish', sealed_destination_channel: 'threads' }));
+    const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(true);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.gateApproveCampaign))).toBe(false);
+  });
+
+  // story #3813(Phase3·3-4 PR4, 페드루 PO CHANGES 2026-09-12, 라이브 캡처 실측) — 실
+  // newsletter_send 게이트는 risk_grade="high"라 사람이 실제로 누르는 건 이 서명
+  // 플로우 버튼(GateSignatureApproval)이다 — 위 3건은 risk_grade='low' 고정 픽스처라
+  // 그 경로를 안 밟는다(처음 처방이 이 자리를 놓친 정확한 이유).
+  it('⭐risk_grade=high(고위험, 실 뉴스레터 게이트 실측값)면 서명 플로우 버튼도 「발송 승인하고 서명」으로 뜬다', async () => {
+    await mount(gate({ can_approve: true, gate_type: 'newsletter_send', risk_grade: 'high' }));
+    const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.sigApproveAndSignNewsletterSend))).toBe(true);
+    expect(buttons.some((t) => t === koMessages.cage.sigApproveAndSign)).toBe(false);
+  });
+
+  it('⭐risk_grade=high + 뉴스레터 캠페인(external_publish·stibee_sandbox)이면 서명 버튼이 「캠페인 승인하고 서명」으로 뜬다', async () => {
+    await mount(gate({
+      can_approve: true, gate_type: 'external_publish', sealed_destination_channel: 'stibee_sandbox', risk_grade: 'high',
+    }));
+    const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.sigApproveAndSignCampaign))).toBe(true);
+  });
+});
+
+// story #3813(Phase3·3-4 PR4, 페드루 PO CHANGES 2026-09-12, 라이브 캡처 실측) — 이
+// 상세 페이지엔 reapproval_required=true를 알리는 표시가 어디에도 없었다.
+describe('GateDetailPage — 재승인 칩 (story #3813 PR4)', () => {
+  it('⭐reapproval_required=true면 「변경됨 · 재승인 필요」 칩이 뜬다', async () => {
+    await mount(gate({ can_approve: true, reapproval_required: true }));
+    expect(container.textContent).toContain(koMessages.cage.gateReapprovalRequiredChip);
+  });
+
+  it('reapproval_required=false(기본)면 그 칩이 안 뜬다', async () => {
+    await mount(gate({ can_approve: true }));
+    expect(container.textContent).not.toContain(koMessages.cage.gateReapprovalRequiredChip);
+  });
+});
+
 // story #2500 — `body.detail`은 실 envelope({data,error,meta})에 없는 필드라 이 분기는
 // 항상 죽어있었다(그라운딩 확認) — #2027의 "고위험 승인 사유 필수" 서버 거부 문구가 한 번도
 // 실제로 화면에 뜬 적 없이 항상 "HTTP 422"만 보였다. error.message로 교정.
@@ -243,7 +300,8 @@ describe('GateDetailPage — transition 실패 사유 노출 (story #2500)', () 
     await act(async () => { approveBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 
-    expect(container.textContent).toContain('게이트 대상 커밋이 승인 확인 이후 변경되었습니다');
+    // story #3899 — 리터럴 재-pin 대신 ko.json 값을 읽어 대조(다른 assertion들과 같은 관례).
+    expect(container.textContent).toContain(koMessages.cage.gateHeadChangedError);
     expect(gateFetchCount).toBe(2); // 최초 로드(1) + 409 이후 재조회(2) — 화면이 옛 SHA에 안 멈춘다.
   });
 
@@ -445,11 +503,76 @@ describe('GateDetailPage — evidence_viewed 서버 계약 (story #2027 AC2)', (
 // 준다), 이 가드는 그대로 유지(회귀 시 잡아냄).
 describe('GateDetailPage — gate_type 배지 대비(P0-02, chip variant 기본으로 승계·#2937)', () => {
   it('gate_type 배지가 text-foreground를 쓴다(chip variant 기본값 — #2937 이후 지점 오버라이드 불요)', async () => {
+    // story #3565(2026-09-06) — gate_type이 사람 낱말로 바뀌면서, 미등재 값
+    // 'merge_gate'(실존 타입 아닌 픽스처값)는 이제 원문이 아니라 일반 「게이트」
+    // (ccGateGeneric)로 뜬다 — 이 테스트는 배지 CSS만 보므로 그 낱말로 찾는다.
     await mount(gate({ gate_type: 'merge_gate' }));
-    const chipEl = [...container.querySelectorAll('span')].find((el) => el.textContent === 'merge_gate');
+    const chipEl = [...container.querySelectorAll('span')].find((el) => el.textContent === '게이트');
     expect(chipEl, 'gate_type 배지를 못 찾음').toBeDefined();
     expect(chipEl!.className).toContain('text-foreground');
     expect(chipEl!.className).not.toContain('text-muted-foreground');
+  });
+});
+
+// story #3565(유나 §17-24 전수, 페드루 PO 確定 2026-09-06) — 게이트 상세도 결재함
+// 카드와 같은 표를 탄다. 음성 대조.
+describe('GateDetailPage — gate_type 사람 낱말(story #3565)', () => {
+  it('⭐external_publish가 원시값이 아니라 「외부 발행」으로 뜬다(음성 대조)', async () => {
+    await mount(gate({ gate_type: 'external_publish' }));
+    expect(container.textContent).toContain('외부 발행');
+    expect(container.textContent).not.toContain('external_publish');
+  });
+});
+
+// story #3806 PR 9(페드루 PO 리뷰 2026-09-11 — 「{member id}님이 처리 — 상태: approved」
+// 처럼 member id·상태 enum 원문이 그대로 뜨던 결함) — mount()는 /api/team-members를
+// 커스터마이즈 못 해(기본 폴백 {data:[]}) 이 describe는 자체 fetch mock을 쓴다.
+describe('GateDetailPage — 해소자·상태 낱말 원문 노출 금지(story #3806 PR 9)', () => {
+  async function mountWithTeamMembers(gateFixture: GateItem, teamMembers: { id: string; name: string }[]) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/gates/gate-1') return { ok: true, status: 200, json: async () => ({ data: gateFixture }) };
+      if (url === '/api/team-members') return { ok: true, json: async () => ({ data: teamMembers }) };
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    const { default: GateDetailPage } = await import('./page');
+    const { TopBarProvider } = await import('@/components/nav/top-bar-context');
+    await act(async () => { root.render(wrap(<GateDetailPage />, TopBarProvider)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    // team-members fetch가 비동기로 한 텀 더 걸린다 — memberNames state 반영까지 대기.
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+  }
+
+  it('⭐resolver_id가 team-members에 있으면 이름·번역된 상태 낱말이 뜨고 원시 id·enum은 0', async () => {
+    await mountWithTeamMembers(
+      gate({ status: 'approved', resolver_id: 'd823926d-aaaa-bbbb-cccc-000000000001', resolved_at: new Date().toISOString() }),
+      [{ id: 'd823926d-aaaa-bbbb-cccc-000000000001', name: '페드루 올리베이라' }],
+    );
+    expect(container.textContent).toContain('페드루 올리베이라님이 처리');
+    expect(container.textContent).toContain(koMessages.cage.gateStatusApproved);
+    expect(container.textContent).not.toContain('approved');
+    expect(container.textContent).not.toContain('d823926d');
+  });
+
+  // 정정 前엔 이 경우 `d823926d`(id 앞 8자)가 화면에 그대로 떴다 — 지금은 이름을
+  // 모르면 「누가」 자체를 말하지 않고 상태만 말한다(raw id 노출 경로 자체 제거).
+  it('⭐resolver_id가 team-members에 없으면(비동기 경합·조직 밖 등) raw id 대신 이름 없는 문장으로 물러난다', async () => {
+    await mountWithTeamMembers(
+      gate({ status: 'approved', resolver_id: 'd823926d-aaaa-bbbb-cccc-000000000001', resolved_at: new Date().toISOString() }),
+      [], // team-members 응답에 이 resolver가 없음
+    );
+    expect(container.textContent).toContain(koMessages.cage.gateDetailResolvedStatus.replace('{status}', koMessages.cage.gateStatusApproved));
+    expect(container.textContent).not.toContain('d823926d');
+    expect(container.textContent).not.toContain('approved');
+  });
+
+  it('status=rejected도 번역된 낱말(반려됨)로 뜬다(승인됨 하나만 대조하면 앞뒤 안 맞음)', async () => {
+    await mountWithTeamMembers(
+      gate({ status: 'rejected', resolver_id: 'm-1', resolved_at: new Date().toISOString() }),
+      [{ id: 'm-1', name: '카디르' }],
+    );
+    expect(container.textContent).toContain('카디르님이 처리');
+    expect(container.textContent).toContain(koMessages.cage.gateStatusRejected);
+    expect(container.textContent).not.toContain('rejected');
   });
 });
 
@@ -694,5 +817,57 @@ describe('GateDetailPage — story #3128 대상 실물 진입 경로', () => {
     }));
     const link = [...container.querySelectorAll('a')].find((a) => a.textContent === koMessages.cage.gateDetailViewTargetDoc);
     expect(link).toBeTruthy();
+  });
+});
+
+// story #3806 PR 10(페드루 PO 실측 2026-09-11 16:18Z 라이브 캡처 — 결함 1) — ads_boost
+// 실행 블록이 gate.status==='approved'로만 게이트돼 있어, 승인 뒤 예산·기간을 바꿔 게이트가
+// pending으로 재오픈(reapproval_required)되면 needsAction=true 분기 전체가 켜지면서 실행
+// 블록(실행 중·중지)이 통째로 사라졌다 — run_status가 실제로 'running'이라도 화면에서
+// 중지 스위치를 잃는다(재승인할 때까지). mount()는 /ads-boosts/.../spend를 커스터마이즈
+// 못 해(기본 폴백 {data:[]}) 이 describe는 자체 fetch mock을 쓴다.
+describe('GateDetailPage — ads_boost 실행 블록은 needsAction/gate.status와 무관(story #3806 PR 10)', () => {
+  const adsBoostGate = (overrides: Partial<GateItem> = {}) => gate({
+    gate_type: 'ads_boost', can_approve: true, risk_grade: 'high',
+    sealed_ads_budget_minor: 50_000, sealed_ads_currency: 'KRW',
+    sealed_ads_starts_at: '2026-09-01T00:00:00Z', sealed_ads_ends_at: '2026-09-19T00:00:00Z',
+    sealed_ads_objective: 'POST_ENGAGEMENT',
+    ...overrides,
+  });
+
+  async function mountWithSpend(gateFixture: GateItem, spend: { run_status: string | null }) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/gates/gate-1') return { ok: true, status: 200, json: async () => ({ data: gateFixture }) };
+      if (url.includes('/ads-boosts/') && url.includes('/spend')) return { ok: true, json: async () => ({ data: spend }) };
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    const { default: GateDetailPage } = await import('./page');
+    const { TopBarProvider } = await import('@/components/nav/top-bar-context');
+    await act(async () => { root.render(wrap(<GateDetailPage />, TopBarProvider)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+  }
+
+  it('⭐status=pending·requires_human=true(재승인 대기)여도 run_status=running이면 「중지」 버튼이 그대로 뜬다', async () => {
+    await mountWithSpend(
+      adsBoostGate({ status: 'pending', requires_human: true, reapproval_required: true }),
+      { run_status: 'running' },
+    );
+    expect(document.body.querySelector('[data-testid="boost-pause-trigger"]')).not.toBeNull();
+  });
+
+  it('status=approved(정상 승인 상태)에서도 회귀 없이 그대로 뜬다(기존 동작 pin)', async () => {
+    await mountWithSpend(
+      adsBoostGate({ status: 'approved', requires_human: false }),
+      { run_status: 'running' },
+    );
+    expect(document.body.querySelector('[data-testid="boost-pause-trigger"]')).not.toBeNull();
+  });
+
+  it('run_status=null(진짜 미승인·최초 요청)이면 지어내지 않고 실행 블록 자체가 안 뜬다', async () => {
+    await mountWithSpend(
+      adsBoostGate({ status: 'pending', requires_human: true, sealed_ads_starts_at: null }),
+      { run_status: null },
+    );
+    expect(document.body.querySelector('[data-testid="boost-execution-control"]')).toBeNull();
   });
 });

@@ -112,20 +112,28 @@ async def test_earliest_expiry_returns_soonest_score(_flag_on_fakeredis):
     await sse_lease.acquire("g", 3, "c1")
     await sse_lease.acquire("g", 3, "c2")
     key = sse_lease._key("g")
-    # c1이 c2보다 먼저 만료하도록 score를 직접 당겨둔다(둘 다 acquire 직후 score는 거의 같음).
-    await _flag_on_fakeredis.zadd(key, {"c1": time.time() + 10, "c2": time.time() + 80})
+    # story #3401 — 기대값을 zadd 시점에 한 번만 캡처한다. 예전엔 assert 쪽에서 time.time()을
+    # 다시 불러 "지금 기준 +10"과 비교했는데, earliest_expiry()는 그 사이 실제 Redis
+    # 라운드트립(비동기 await)을 거친다 — 느린 러너에서 이 간격이 늘어나면 두 time.time()
+    # 호출값이 갈라져(±2s 여유를 실측으로 넘긴 사례: 2.47s) 순전히 타이밍만으로 실패했다
+    # (develop run 33786510969). earliest_expiry()는 저장된 score를 그대로 반환하므로(재계산
+    # 없음), 같은 값과 정확히 비교하면 이 시계열 자체가 사라진다.
+    c1_expiry = time.time() + 10
+    await _flag_on_fakeredis.zadd(key, {"c1": c1_expiry, "c2": time.time() + 80})
     earliest = await sse_lease.earliest_expiry("g")
-    assert earliest is not None
-    assert abs(earliest - (time.time() + 10)) < 2  # c1(가장 이른 것)의 score
+    assert earliest == c1_expiry  # c1(가장 이른 것)의 score — 저장한 값과 정확히 같아야 한다
 
 
 async def test_earliest_expiry_skips_already_expired(_flag_on_fakeredis):
     """이미 만료(score<=now)된 건 evict된 뒤 계산 — 산 것 중 가장 이른 것만 본다."""
     key = sse_lease._key("g")
-    await _flag_on_fakeredis.zadd(key, {"zombie": time.time() - 5, "alive": time.time() + 50})
+    # story #3401 — 위 test_earliest_expiry_returns_soonest_score와 동일한 이유로 기대값을
+    # zadd 시점에 캡처해 정확 비교(assert 쪽 time.time() 재호출 제거 — 느린 러너에서 실측
+    # 2.47s 갈라짐으로 flaky, develop run 33786510969).
+    alive_expiry = time.time() + 50
+    await _flag_on_fakeredis.zadd(key, {"zombie": time.time() - 5, "alive": alive_expiry})
     earliest = await sse_lease.earliest_expiry("g")
-    assert earliest is not None
-    assert abs(earliest - (time.time() + 50)) < 2
+    assert earliest == alive_expiry
 
 
 async def test_earliest_expiry_none_when_live_full(_flag_on_fakeredis):

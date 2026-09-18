@@ -26,6 +26,12 @@ vi.mock('@/components/nav/top-bar-slot', () => ({
 vi.mock('@/components/workspace/workspace-frame-tabs', () => ({
   WorkspaceFrameTabs: () => null,
 }));
+// story #3845(§① 2026-09-14) — StandupPage(구 /standup 독립 라우트)가 이 페이지 안 「하루
+// 체크인」 절로 임베드됐다. 「더 보기」 커서 로직만 관심사인 이 스위트라 무관한 fetch
+// 표면(StandupPage 자체)은 WorkspaceFrameTabs와 동형으로 스텁.
+vi.mock('../standup/standup-client', () => ({
+  default: () => null,
+}));
 
 const { useDashboardContextMock } = vi.hoisted(() => ({ useDashboardContextMock: vi.fn() }));
 vi.mock('@/app/dashboard/dashboard-shell', () => ({
@@ -130,7 +136,7 @@ describe('SprintsClient — 백로그/스프린트 스토리 「더 보기」(st
     const loadMoreBtn = findLoadMoreButtons().find((b) => !b.disabled)!;
     await act(async () => { loadMoreBtn.click(); await Promise.resolve(); await Promise.resolve(); });
 
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain('더 불러오지 못했습니다');
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('더 불러오지 못했어요');
   });
 
   it('cursor에 "+00:00"이 있어도 실제 요청 URL에 인코딩되지 않은 "+"가 남지 않는다(sprint stories)', async () => {

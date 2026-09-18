@@ -63,7 +63,7 @@ describe('ArtifactVersionRail (C1 Lv1 — lineage, raw 편집 나열 금지·의
         />,
       ),
     );
-    expect(markup).toContain('description pane');
+    expect(markup).toContain('설명 패널');
     expect(markup).not.toContain('C2 슬롯 내용');
   });
 });

@@ -87,6 +87,18 @@ let interceptorInstalled = false;
  *   스킵 — 명시 스코프를 덮지 않는다.
  * - story #2497 — 둘을 항상 «함께» 싣는다(하나만 실으면 멀티-org 유저에서 org_id가
  *   JWT stale org로 새는 이 fire의 정확한 재발 형태다).
+ *
+ * ⚠️story #3260 4차 finding(2026-08-31, 유나 5축 라이브 재검 — CSP 뚫린 뒤 드러난 층) — 이
+ * "same-origin" 전제가 실제로는 **path 모양만** 봤다: 절대 URL(`http...`)이면 `new
+ * URL(url).pathname`만 뽑아 `/api/`로 시작하는지만 확認하고, 그 URL의 **origin/host는
+ * 아예 확認하지 않았다**. Support Gateway(`https://support-gateway-dev-...run.app/api/v1/
+ * sessions`, gateway-client.ts가 raw fetch로 부름)의 pathname이 하필 `/api/`로 시작해
+ * 이 "same-origin" 인터셉터가 **cross-origin 요청에도** X-Project-Id/X-Org-Id를 실어
+ * 버렸다 — Gateway는 Bearer 위임토큰만 신뢰하는 경계 서비스라 그 헤더들을 CORS
+ * Access-Control-Allow-Headers에 안 뒀고(경계를 무르게 해서 통과시키는 처방은 페드루 PO가
+ * 명시 기각), 그래서 OPTIONS 프리플라이트가 400으로 거부돼 POST 자체가 ERR_FAILED 났다.
+ * 처방: origin도 함께 확認해 실제 **동일 출처**일 때만 주입한다(cross-origin 절대 URL은
+ * path가 뭘 닮았든 스킵).
  */
 export function installProjectHeaderInterceptor(): void {
   if (interceptorInstalled || typeof window === 'undefined') return;
@@ -97,11 +109,15 @@ export function installProjectHeaderInterceptor(): void {
     try {
       if (typeof input === 'string' || input instanceof URL) {
         const url = typeof input === 'string' ? input : input.href;
-        const path = url.startsWith('http') ? new URL(url).pathname : url.split('?')[0];
+        const isAbsolute = /^https?:\/\//.test(url);
+        // 절대 URL이면 origin까지 파싱해 실제 동일 출처인지 확認한다 — path 모양(`/api/...`)만
+        // 보고 판단하면 cross-origin 서비스(예: Support Gateway)에도 새 나간다(위 finding).
+        const sameOrigin = !isAbsolute || new URL(url).origin === window.location.origin;
+        const path = isAbsolute ? new URL(url).pathname : url.split('?')[0];
         const projectId = effectiveProjectIdRef.current;
         const orgId = effectiveOrgIdRef.current;
         // 컨텍스트 제어 엔드포인트(`/api/switch-*`)는 자체 컨텍스트를 관리하므로 주입 제외.
-        const isApi = path.startsWith('/api/') && !path.startsWith('/api/switch-');
+        const isApi = sameOrigin && path.startsWith('/api/') && !path.startsWith('/api/switch-');
         if (isApi && projectId) {
           const headers = new Headers(init?.headers);
           if (!headers.has('X-Project-Id') && !headers.has('X-Org-Id')) {

@@ -48,9 +48,11 @@ class RoleTemplate(Base, TimestampMixin):
     # 런타임별 오버라이드(파일명·MCP 배선 노트 등 — 블루프린트 §4 런타임 어댑터). 미정 = {}.
     runtime_overrides: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     # true = 이 seed 마이그(제품 기본 카탈로그)가 심은 행 — 향후 커스텀 role_template 여지 남김.
-    is_builtin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # story #3896 — DB has DEFAULT false, ORM lacked server_default (drift).
+    is_builtin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     # 카탈로그 노출 게이트 — false 면 GET 목록/단건에서 숨김(작업 중/철회 대비, 삭제 아님).
-    is_published: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # story #3896 — DB has DEFAULT true, ORM lacked server_default (drift).
+    is_published: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     # 과금 게이트 — 직접 갖추기(BYO)는 free 여도 항상 가능(블루프린트 §5), tier 는 "자동 채용"
     # (미래 recruit 서비스) 게이팅용 메타데이터일 뿐 이 S1 에선 아무 것도 강제하지 않는다.
     tier: Mapped[str] = mapped_column(Text, nullable=False, default="free")

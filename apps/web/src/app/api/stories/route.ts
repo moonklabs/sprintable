@@ -52,8 +52,8 @@ export async function GET(request: Request) {
     // story #2534 카디르 QA HIGH(2026-08-09) — 미매달림 버킷 카운트가 stories.length
     // (limit=100에 잘린 페이지 길이)였다. BE(stories.py:233)는 unattached 필터를 WHERE
     // 레벨에서 걸러 X-Total-Count로 «정확한 전체 총계»를 이미 낸다(story #2190 backlog
-    // route와 동형 헤더) — StoryService 추상 대신 raw proxy로 그 헤더를 그대로 meta.total에
-    // 실어 보낸다(limit=100은 목록 표시용으로 그대로, 카운트만 헤더 기준으로 정직해진다).
+    // route와 동형 헤더) — StoryService 추상 대신 raw proxy로 그 헤더를 그대로 meta.totalCount에
+    // 실어 보낸다(story #3761 정본, limit=100은 목록 표시용으로 그대로, 카운트만 헤더 기준으로 정직해진다).
     //
     // story #3160 — no_sprint=true도 같은 이유로 이 조기 분기에 합류한다: BE가 no_sprint일 때
     // 완전히 다른 분기(list_backlog, cursor 미지원·X-Total-Count 계약)를 타서 아래 cursor
@@ -66,7 +66,9 @@ export async function GET(request: Request) {
       if (!_r.ok) return _r;
       const data = await _r.json();
       const totalHeader = _r.headers.get('x-total-count');
-      return apiSuccess(data, totalHeader !== null ? { total: Number(totalHeader) } : undefined);
+      // story #3761 — `total` 은퇴, 정본 `totalCount`(goals/tasks 관례) — 헤더 없으면
+      // 키 생략이 아니라 `totalCount: null`로 «모른다»를 명시한다.
+      return apiSuccess(data, { totalCount: totalHeader !== null ? Number(totalHeader) : null });
     }
 
     const repo = await createStoryRepository();

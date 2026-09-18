@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
@@ -18,6 +19,7 @@ import { sanitizeDocHtml } from '@/components/docs/doc-content-renderer';
 import { fetchWithAuth } from '@/lib/db/client';
 import { parseEntityRef } from './entity-ref';
 import { useReadingPanel } from './reading-panel-context';
+import type { ReferenceForm } from './embed-renderer';
 // story #2888(S2a) — 이관 후 재수출(기존 소비처 4곳 import 경로 무변경, 회귀 0). 정본은
 // entity-registry.tsx 참고.
 import { ENTITY_ICONS, ENTITY_COLORS, GRAY_STATE_COLOR, resolveEntityIcon, EntityGlyph } from './entity-registry';
@@ -192,7 +194,7 @@ export const MdBody = ({ content }: { content: string }) => (
 // story #2780 — 컴포넌트가 아니라 순수 함수로 둔다: 호출부(embed-card 모달 body)가 반환값이
 // null인지(=보여줄 내용 없음) 직접 검사해야 하는데, JSX `<EntityDetail/>` 호출은 그 반환값을
 // 렌더 트리 밖에서 들여다볼 수 없다(엘리먼트 서술자는 항상 non-null이다 — 안이 null이어도).
-function renderEntityDetail(entityType: string, entityId: string, detail: Record<string, unknown>): React.ReactNode | null {
+function renderEntityDetail(entityType: string, entityId: string, detail: Record<string, unknown>, tc: (key: string) => string, t: (key: string) => string): React.ReactNode | null {
   if (entityType === 'story') {
     const d = detail as { status?: string; priority?: string; story_points?: number; description?: string; acceptance_criteria?: string };
     const statusLabel = d.status ? translateEntityStatus('story', d.status) : null;
@@ -206,7 +208,7 @@ function renderEntityDetail(entityType: string, entityId: string, detail: Record
         {d.description && <MdBody content={d.description} />}
         {d.acceptance_criteria && (
           <div className="border-t border-border pt-3">
-            <p className="text-xs font-semibold text-muted-foreground mb-1">Acceptance Criteria</p>
+            <p className="text-xs font-semibold text-muted-foreground mb-1">{tc('acceptanceCriteria')}</p>
             <MdBody content={d.acceptance_criteria} />
           </div>
         )}
@@ -311,7 +313,7 @@ function renderEntityDetail(entityType: string, entityId: string, detail: Record
         )}
         {parentHref && (
           <a href={parentHref} className="text-xs text-primary hover:underline">
-            부모 스토리 보기 →
+            {t('viewParentStory')}
           </a>
         )}
       </div>
@@ -341,7 +343,15 @@ function renderEntityDetail(entityType: string, entityId: string, detail: Record
 // 요약만(제목·상태·risk 배지) — 근거확인/서명/승인 액션은 여기 안 붙인다(approval-request-
 // card.tsx가 이미 챗 카드에서 그 몫을 완결하고 있다, 사본 분화 금지 — 이건 "칩 클릭시 훑어보는
 // 요약"이지 결재 액션 표면이 아니다).
-function renderGateSummary(detail: Record<string, unknown>): React.ReactNode | null {
+// story #3888(§⑤·Chat, PO 확定 2026-09-14 18:19Z) — risk 배지 2개가 로케일 무관 리터럴
+// "High risk"/"Risk unknown"이었다(raw-ascii-jsx-attr baseline 등재분). workList.
+// riskBadgeHigh(기존 키, panel-work-list.tsx 등과 재사용)·workList.riskBadgeUnknown
+// (신규 1) — 순수 함수라 호출부(EntityPreviewModal)의 useTranslations('workList')를
+// 파라미터로 받는다(renderEntityDetail의 tc 스레딩과 동형, 새 기전 0).
+function renderGateSummary(
+  detail: Record<string, unknown>,
+  tWorkList: (key: string) => string,
+): React.ReactNode | null {
   const d = detail as {
     gate_type?: string; status?: string; risk_grade?: 'low' | 'high' | 'unknown' | null;
     work_item_summary?: { title: string; slug: string | null } | null; work_item_id?: string;
@@ -355,8 +365,8 @@ function renderGateSummary(detail: Record<string, unknown>): React.ReactNode | n
       <div className="flex flex-wrap items-center gap-1.5">
         {d.gate_type && <MdBadge label={d.gate_type} />}
         {statusLabel && <MdBadge label={statusLabel} />}
-        {d.risk_grade === 'high' && <MdBadge label="High risk" />}
-        {d.risk_grade === 'unknown' && <MdBadge label="Risk unknown" />}
+        {d.risk_grade === 'high' && <MdBadge label={tWorkList('riskBadgeHigh')} />}
+        {d.risk_grade === 'unknown' && <MdBadge label={tWorkList('riskBadgeUnknown')} />}
       </div>
     </div>
   );
@@ -396,6 +406,11 @@ export function EntityPreviewModal({
   // parity.test.ts가 BE ENTITY_RESOLVERS와 엄격 대조하는 자리)엔 못 들어간다. 그 계약 밖에서
   // gate 전용 fetch/href/렌더를 독립적으로 붙인다(parity 가드 무영향) — GateSummary(아래)가
   // 유일한 소비 지점.
+  // story #3776(1층B) — "닫기" aria-label, common ns의 기존 close 키 재사용.
+  const tc = useTranslations('common');
+  const t = useTranslations('chats');
+  // story #3888 — renderGateSummary의 risk 배지 라벨(workList.riskBadgeHigh/riskBadgeUnknown).
+  const tWorkList = useTranslations('workList');
   const hasFetchStrategy = entityType === 'doc' || entityType === 'gate' || Boolean(ENTITY_API[entityType]);
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(hasFetchStrategy);
@@ -549,8 +564,14 @@ export function EntityPreviewModal({
   // "카드 전체를 죽이지 않는다"(AC4) 원칙대로 여기서만 계산 — 헤더의 아이콘·제목·상태는 이 값과
   // 무관하게 항상 그대로 보인다(아래 return, 안 바뀜). 바뀌는 건 풋터의 링크/문구뿐이다.
   type LinkKind = 'own' | 'via-parent' | null;
+  // story #3935 CHANGES(2026-09-16, 카디르 실증·페드루 판정) — linkKind만으론 "부모가
+  // 있다"만 알지 그 부모가 story/epic/doc 중 무엇인지 몰라, via-parent 문구가 항상
+  // "상위 스토리"로 고정돼 있었다(artifact의 epic/doc 부모에도 거짓 문구). 실 부모
+  // 종류를 옆에 같이 들고 footer 문구를 그 종류로 가른다.
+  type ParentKind = 'story' | 'epic' | 'doc' | null;
   let resolvedHref: string | null;
   let linkKind: LinkKind;
+  let parentKind: ParentKind = null;
   if (entityType === 'doc') {
     // #2168 PR-①: org_slug+project_slug 가 있으면 `/{ws}/{proj}/docs/{slug}/view`로 직행 —
     // CURRENT_PROJECT_COOKIE 기반 middleware 추측(proxy.ts redirectLegacyResourcePath, "현재
@@ -574,6 +595,7 @@ export function EntityPreviewModal({
       (ws, proj) => storyBoardUrl(ws, proj, t!.story_id!),
     );
     linkKind = resolvedHref ? 'via-parent' : null;
+    parentKind = 'story';
   } else if (entityType === 'artifact') {
     // 레코드마다 갈린다(story #2302 그라운딩) — story_id/epic_id/doc_id 전부 nullable·최대 1개
     // (hypothesis의 다대다 링크테이블과 다른 모양이라 "하나 고르면 나머지를 숨기는 거짓"이 될
@@ -600,6 +622,7 @@ export function EntityPreviewModal({
         : null;
     resolvedHref = parentHref;
     linkKind = parentHref ? 'via-parent' : null;
+    parentKind = d?.story_id ? 'story' : d?.epic_id ? 'epic' : d?.doc_id ? 'doc' : null;
   } else if (entityType === 'evidence') {
     // ② — story #2314(2026-07-29): BE GET /{id}가 work_item_type이 story든 task든 이미
     // resolved_story_id 하나로 해소해 준다(task처럼 여기서 또 한 번 join할 필요가 없다).
@@ -612,6 +635,7 @@ export function EntityPreviewModal({
       (ws, proj) => storyBoardUrl(ws, proj, ev!.resolved_story_id!),
     );
     linkKind = resolvedHref ? 'via-parent' : null;
+    parentKind = 'story';
   } else if (entityType === 'hypothesis') {
     // ③ 고정 — 위 getEntityHref 주석 참고.
     resolvedHref = null;
@@ -659,7 +683,7 @@ export function EntityPreviewModal({
         type="button"
         onClick={onClose}
         className="mt-0.5 shrink-0 text-muted-foreground hover:text-foreground"
-        aria-label="닫기"
+        aria-label={tc('close')}
       >
         <X className="h-4 w-4" />
       </button>
@@ -670,25 +694,25 @@ export function EntityPreviewModal({
   // sprint) EntityDetail이 null을 반환해 몸통이 완전 공백이었다(옛 "미리보기 없음" 문구보다
   // 덜 정직한 새 위반형). "RICH 타입인가"가 아니라 "실제로 보여줄 내용이 있는가"로 이
   // 문구를 하나로 통일한다 — 한 번만 계산해 조건과 렌더 양쪽에 쓴다(이중 호출 금지).
-  const richContent = detail && RICH_PREVIEW_TYPES.has(entityType) ? renderEntityDetail(entityType, entityId, detail) : null;
+  const richContent = detail && RICH_PREVIEW_TYPES.has(entityType) ? renderEntityDetail(entityType, entityId, detail, tc, t) : null;
   // gate는 RICH_PREVIEW_TYPES 밖(parity 계약) — richContent와 별개 축으로 계산해 병합.
-  const gateSummary = detail && entityType === 'gate' ? renderGateSummary(detail) : null;
+  const gateSummary = detail && entityType === 'gate' ? renderGateSummary(detail, tWorkList) : null;
 
   const body = (
     <div className="flex-1 overflow-y-auto px-6 py-4">
       {loading ? (
         <div className="flex items-center justify-center gap-2 py-8 text-xs text-muted-foreground">
           <span className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
-          불러오는 중…
+          {tc('loading')}
         </div>
       ) : notFound ? (
-        <p className="py-4 text-xs text-muted-foreground">대상을 찾을 수 없습니다.</p>
+        <p className="py-4 text-xs text-muted-foreground">{t('entityNotFound')}</p>
       ) : richContent !== null ? (
         richContent
       ) : gateSummary !== null ? (
         gateSummary
       ) : (
-        <p className="py-4 text-xs text-muted-foreground">이 엔티티는 별도 미리보기가 없습니다.</p>
+        <p className="py-4 text-xs text-muted-foreground">{t('entityNoPreview')}</p>
       )}
     </div>
   );
@@ -698,7 +722,7 @@ export function EntityPreviewModal({
   const footer = !loading && (
     <div className="flex-shrink-0 border-t border-border px-6 py-3">
       {notFound ? (
-        <span className="flex cursor-default items-center gap-1.5 text-sm text-muted-foreground">대상이 없습니다</span>
+        <span className="flex cursor-default items-center gap-1.5 text-sm text-muted-foreground">{t('entityTargetMissing')}</span>
       ) : resolvedHref ? (
         <Link
           href={resolvedHref}
@@ -706,10 +730,12 @@ export function EntityPreviewModal({
           className="flex items-center gap-1.5 text-sm text-primary hover:underline"
         >
           <ExternalLink className="h-3.5 w-3.5" />
-          {linkKind === 'via-parent' ? '담긴 곳으로 갑니다' : '전체 보기'}
+          {linkKind === 'via-parent'
+            ? (parentKind === 'epic' ? t('goToParentGoal') : parentKind === 'doc' ? t('goToParentDoc') : t('goToParentStory'))
+            : t('viewAll')}
         </Link>
       ) : (
-        <span className="flex cursor-default items-center gap-1.5 text-sm text-muted-foreground">열 수 있는 화면이 없습니다</span>
+        <span className="flex cursor-default items-center gap-1.5 text-sm text-muted-foreground">{t('noScreenToOpen')}</span>
       )}
     </div>
   );
@@ -743,6 +769,7 @@ export function EmbedCard({
    * Dialog 모달 그대로 — 회귀 없음. */
   onOpenReadingPanel?: (entityType: string, entityId: string, title: string | null, status: string | null, href: string | null) => void;
 }) {
+  const t = useTranslations('chats');
   const [showModal, setShowModal] = useState(false);
   const [navigating, setNavigating] = useState(false);
   const router = useRouter();
@@ -880,8 +907,8 @@ export function EmbedCard({
               setShowModal(true);
             }}
             className="shrink-0 rounded p-1 opacity-70 transition-opacity hover:bg-black/10 hover:opacity-100 dark:hover:bg-white/10"
-            aria-label="미리보기"
-            title="미리보기"
+            aria-label={t('preview')}
+            title={t('preview')}
           >
             <Eye className="size-3.5" />
           </button>
@@ -926,8 +953,10 @@ export function EmbedCard({
 // story #2262 AC1(2026-08-08) — doc `flow-map-blueprint-v1` §2-3 표기 세 조각의 「표면」.
 // 스토리 본문의 AC1 정의 그대로: form은 'mention'|'embed'|'proof' 셋뿐(FORMS,
 // backend/app/models/reference.py) — 채팅 멘션 파서는 오늘 "mention"만 낸다(다른 값은
-// 문서·증빙 경로가 낼 수 있어 표는 셋 다 갖춘다).
-const FORM_LABELS: Record<string, string> = { mention: '멘션', embed: '임베드', proof: '근거' };
+// 문서·증빙 경로가 낼 수 있어 표는 셋 다 갖춘다). story #3776(1층B, 페드루 재검토 10:07Z) —
+// 이 셋은 닫힌 열거라 한 화면의 같은 값 목록 안에 섞이면 한쪽만 번역되는 게 더 나쁘다
+// (en에서 "Evidence" 옆에 "멘션"이 서는 자리). formLabel()이 이제 셋 다 chats ns 키로
+// 가로챈다 — 이 상수는 폐기.
 
 // 「지점」 — referenced_at(이 참조가 «언제 생겼나»)을 짧게. 블루프린트 예시("7/26 스레드")와
 // 같은 월/일 압축 표기 — 채팅 칩은 그 자체가 스레드 맥락이라 별도 "스레드" 접미어를 안 붙인다.
@@ -977,13 +1006,28 @@ export function EntityChip({
   ghost?: boolean;
   /** story #2262 AC1 — 「사실성 · 표면 · 지점」. null이면(유령이거나 references 자체가
    * 없는 경로) 표기하지 않는다 — 모르는 것을 지어내지 않는다(가디언 §H-2와 같은 원칙). */
-  referenceMeta?: { form: string; referencedAt: string } | null;
+  referenceMeta?: { form: ReferenceForm; referencedAt: string } | null;
   /** story #2262 AC2 PR② — 배치조회(chat-view.tsx) 결과. 호출부가 안 넘기면(undefined,
    * 배치조회 배선이 없는 기존 호출부 — 예: 과거 테스트) `{kind:'loading'}`으로 안전하게
    * 폴백한다(has-status면 "아직 모름", no-status-concept이면 "상태 없음" — renderEntityStatusLabel이
    * entityType으로 그 둘을 이미 가른다). */
   entityStatus?: EntityStatusFetchState;
 } & VariantProps<typeof entityChipLabelVariants>) {
+  // story #3776(1층A) — "결재함에서 보기" 딥링크 CTA, content ns의 기존 submitGateLink 키 재사용.
+  const tContent = useTranslations('content');
+  // story #3776(1층B, 페드루 재검토 10:07Z·10:14Z) — "근거"는 chats ns의 기존
+  // reportEvidenceLabel 키, "멘션"/"임베드"는 신설 embedFormMention/embedFormEmbed 키(닫힌
+  // 3값 열거라 하나만 번역되면 en에서 두 언어가 섞인다 — 셋을 함께 1층으로 처리).
+  // `Record<ReferenceForm, string>` 한 표로 — form이 ReferenceForm(embed-renderer.ts에서
+  // 이미 좁혀짐)이라 이 표에 키 하나가 비면 TS가 컴파일에서 잡는다(exhaustive, 원시값
+  // 폴백 없음 — story #3770 클래스, 화면에 원시 식별자가 새는 통로를 안 새로 심는다).
+  const tChats = useTranslations('chats');
+  const FORM_LABEL_KEYS: Record<ReferenceForm, string> = {
+    mention: 'embedFormMention',
+    embed: 'embedFormEmbed',
+    proof: 'reportEvidenceLabel',
+  };
+  const formLabel = (form: ReferenceForm) => tChats(FORM_LABEL_KEYS[form]);
   const [showModal, setShowModal] = useState(false);
   // story #461e9a54(P0) — 채팅 트리(ReadingPanelProvider 하위)에서는 패널로, 밖(doc-content-
   // renderer.tsx·story-detail-panel.tsx 등)에서는 null이라 기존 Dialog 모달로 폴백(회귀 0).
@@ -1039,14 +1083,14 @@ export function EntityChip({
           — 클릭할 것도 없으므로 기존 "대상이 없습니다"(시제 중립 문구, 발명 0) 그대로 유지.
           AC3 — truncate된 라벨의 전체 텍스트를 title(native)로도 보장. */}
       <span className={entityChipLabelVariants({ variant })} title={ghost && !entityId ? undefined : label}>
-        {ghost && !entityId ? '대상이 없습니다' : label}
+        {ghost && !entityId ? tChats('entityTargetMissing') : label}
       </span>
       {/* AC1 — 사실성(상수 "관찰됨": entity_references 자체가 관찰됨 tier) · 표면 · 지점.
           ⛔색으로만 구분하지 않고 글자로 적는다(가디언 규율 재사용). inline-meta 변형에서만
           항상 펼친다 — inline(기본)은 아래 tooltip으로 격납. */}
       {showInlineMeta && referenceMeta ? (
         <span className="opacity-70">
-          · 관찰됨 · {FORM_LABELS[referenceMeta.form] ?? referenceMeta.form} · {formatReferencePoint(referenceMeta.referencedAt)}
+          {tChats('observedMarker')} {formLabel(referenceMeta.form)} · {formatReferencePoint(referenceMeta.referencedAt)}
         </span>
       ) : null}
       {showInlineMeta && statusLabel ? <span className="opacity-70">· {statusLabel}</span> : null}
@@ -1076,9 +1120,9 @@ export function EntityChip({
     <div className="space-y-1">
       <p className="font-semibold">{label}</p>
       <div className="space-y-0.5 border-t border-background/20 pt-1">
-        {statusLabel ? tooltipRow('상태', statusLabel) : null}
-        {referenceMeta ? tooltipRow('참조 형태', FORM_LABELS[referenceMeta.form] ?? referenceMeta.form) : null}
-        {referenceMeta ? tooltipRow('관찰', formatReferencePoint(referenceMeta.referencedAt)) : null}
+        {statusLabel ? tooltipRow(tChats('statusLabel'), statusLabel) : null}
+        {referenceMeta ? tooltipRow(tChats('referenceFormLabel'), formLabel(referenceMeta.form)) : null}
+        {referenceMeta ? tooltipRow(tChats('observedLabel'), formatReferencePoint(referenceMeta.referencedAt)) : null}
       </div>
     </div>
   ) : null;
@@ -1097,7 +1141,7 @@ export function EntityChip({
           onClick={(e) => e.stopPropagation()}
           className="inline-flex shrink-0 items-center rounded border border-primary/40 px-1.5 py-0.5 text-xs font-medium text-primary no-underline hover:bg-primary/10"
         >
-          결재자 지정하고 올리기
+          {tChats('assignApproverAndSubmit')}
         </Link>
       ) : effectiveDocStatus === 'pending' ? (
         <Link
@@ -1105,7 +1149,7 @@ export function EntityChip({
           onClick={(e) => e.stopPropagation()}
           className="inline-flex shrink-0 items-center rounded border border-border px-1.5 py-0.5 text-xs font-medium text-muted-foreground no-underline hover:bg-muted"
         >
-          결재함에서 보기
+          {tContent('submitGateLink')}
         </Link>
       ) : null
     ) : null;

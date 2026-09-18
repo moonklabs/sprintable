@@ -169,6 +169,12 @@ export function flattenMessages(obj: Record<string, unknown>, prefix = ''): Map<
 //                쌍 예외)가 아니라 여기(이름 자체가 비수치임을 선언)가 맞는 자리다 — 이
 //                이름을 쓰는 다음 키가 생겨도 자동으로 같은 판정을 받는다(EXEMPT_PAIRS는
 //                그 다음 키를 또 개별 등재해야 한다).
+//   channel    — 채널 표시 이름(story #3583, 2026-09-06 — channelConnectAction<->
+//                channelConnectOwnerOnlyReason이 channels/page.tsx에서 처음 같은 파일에
+//                동시 노출돼 걸렸다). ko.json 전체 {channel} 보간 9곳을 직접 읽어 확認 —
+//                전부 "Threads"·"GA4" 류 채널 표시 이름이지 수가 아니다. role·project·
+//                slug·tier와 같은 축(카테고리/식별자 라벨). EXEMPT_PAIRS 개별 등재 대신
+//                여기 등재 — 앞으로 {channel} 보간 키가 늘어도 자동으로 같은 판정을 받는다.
 // ⛔새 이름을 여기 더하기 前에(PO 지적, 2026-08-02): 그 이름이 실제로 채우는 ko.json 값을
 // 먼저 읽는다. 정말 이름·경로류(수가 아님)면 더한다. 그런데 만약 «숫자인» 값인데 여기 걸려
 // EXEMPT_PAIRS에 다시 나타난다면, 그건 denylist 후보가 아니라 «진짜 충돌»이다 — 그 경우
@@ -178,7 +184,17 @@ export function flattenMessages(obj: Record<string, unknown>, prefix = ''): Map<
 // 재는지 모르게 되는 것)이 재발한다.
 const NON_NUMBER_PLACEHOLDER_NAMES = new Set([
   'name', 'runtime', 'filename', 'promptFile', 'gate', 'role', 'project', 'teamId', 'dir',
-  'sources', 'excludes', 'slug', 'tier', 'date', 'provider',
+  'sources', 'excludes', 'slug', 'tier', 'date', 'provider', 'channel',
+  // story #3698(IA·후속) — commandPalette.goDestination="{label}{particle} 이동". 둘 다
+  // 문자열(nav 라벨·한글 조사 으로/로)이지 카운터가 아니다 — command-palette.tsx 안에서
+  // 'navigate'="이동"과 부분문자열로 겹치는 건 «이동» 섹션 헤더와 «항목별 이동 문구»라
+  // 애초에 사람이 헷갈릴 자리가 아니다(#2352·#2365류 "다른 두 셈이 같은 말"이 아니다).
+  'label', 'particle',
+  // story #3900(§⑤ 어조 가드 사각 3) — 플레이스홀더 뒤 받침 의존 조사(이/가·을/를)를
+  // korean-particle 헬퍼로 뽑아 넣는 {josa}. 'particle'과 같은 결(한글 문법 조사·절대 수가
+  // 아님) — verify.evidenceSignedBy="{name}{josa} 남김"·recruiter.verifyGuideMcp="…{runtime}{josa} 열어…"
+  // 등 6키가 이 이름을 쓴다. 개별 EXEMPT_PAIRS 대신 규칙(이 이름은 수-인접이 아님)으로 안다.
+  'josa',
 ]);
 const PLACEHOLDER_NAME_RE = /\{([a-zA-Z_][a-zA-Z0-9_]*)\}/g;
 
@@ -187,6 +203,46 @@ export function isNumberAdjacent(value: string): boolean {
     if (!NON_NUMBER_PLACEHOLDER_NAMES.has(m[1]!)) return true;
   }
   return false;
+}
+
+// story #3582(유나 관측 · #3929 Design review 2026-09-06 09:39Z 비차단 · PO 確定) —
+// 카탈로그에 글자·숫자가 하나도 없는 값(「—」·「...」·「↳」·「≥」·「≤」류)이 9건 있다. 이
+// 가드가 잡으려는 병은 "«같은 뜻을 다르게»가 아니라 «다른 두 셈이 같은 말로 헷갈린다»"
+// 인데, 값이 순수 구두점/기호면 «구»(phrase)를 담지 않으니 애초에 이 축의 대상이 아니다
+// (3402·3575가 정확히 이 모양으로 3번 EXEMPT를 늘렸다 — 매 사유 문장마다 "—" 하나가
+// originAuthorUnknown과 겹쳐 걸렸다). 비교 쌍을 만들기 «전»에 제외한다 — 인스턴스별
+// EXEMPT 승인 대신 규칙이 이 축 자체를 안다.
+const LETTER_OR_NUMBER_RE = /\p{L}|\p{N}/u;
+export function hasLetterOrNumber(value: string): boolean {
+  return LETTER_OR_NUMBER_RE.test(value);
+}
+
+// story #3808(페드루 PO 지적 2026-09-12 18:18Z) — 4233에서 EXEMPT 6건이 한 PR에 쌓인 근본
+// 원인: 이 가드가 «다른 사실을 같은 낱말로»(#2352·#2365의 진짜 모양)와 «같은 키의 확장형»
+// (예: generationBudgetRemainingCompact <-> …CompactOverLimit — 뒤엣것이 앞엣것 그대로+
+// 접미만 붙인 같은 값의 변형)을 구별 못 했다. 처방=근본: 두 키가 (a) 같은 네임스페이스이고
+// (b) 한쪽 키의 로컬 이름이 다른 쪽 로컬 이름의 «접두사»(=상대가 그 이름에 접미만 덧붙인
+// 확장형)면, 값이 부분문자열로 겹쳐도(원래부터 항상 겹친다 — 확장 값이 원본 값을 그대로
+// 품는 구조) 충돌로 안 잡는다. EXEMPT_PAIRS는 "그 자체로 안 겹치지만 가드가 몰라서 거는"
+// 자리인데, 이 클래스는 애초에 «같은 개념의 표준 확장 관례»라 인스턴스마다 승인받을 이유가
+// 없다(§channel류·§tier류 NON_NUMBER_PLACEHOLDER_NAMES와 같은 결 — 개별 EXEMPT 대신 규칙
+// 자체가 안다).
+//
+// ⛔값 포함 관계만으로는 못 가른다(그건 이 함수를 부르는 자리에서 이미 참으로 확인된
+// 전제다) — 반드시 «키 이름 자체»가 접두-확장 관계인지를 같이 봐야 한다. 값이 우연히
+// 부분문자열로 겹치는데 키 이름은 전혀 무관한 진짜 충돌(#2352 「막힘」<->「막힘 신호 · {n}」
+// 류, 키 이름 blocked<->blockedCount처럼 이것도 실은 접두-확장 모양이지만 «다른 사실»을
+// 가리키는 경우가 실재)까지 이 규칙이 삼키면 과확장이다 — 그래서 GRANDFATHER_LIVE_COUNT_TEST가
+// 이 함수 도입 전후로 «몇 건이 실제로 이 클래스에 걸려 사라지는지»를 숫자로 고정해
+// 조용한 과확장을 못 지나가게 막는다(양성대조: 진짜 충돌 표본은 여전히 RED — 아래 테스트).
+export function isKeyStemExtension(keyA: string, keyB: string): boolean {
+  const nsA = keyA.slice(0, keyA.indexOf('.'));
+  const nsB = keyB.slice(0, keyB.indexOf('.'));
+  if (nsA === '' || nsB === '' || nsA !== nsB) return false;
+  const localA = keyA.slice(nsA.length + 1);
+  const localB = keyB.slice(nsB.length + 1);
+  if (localA === localB) return false;
+  return localA.startsWith(localB) || localB.startsWith(localA);
 }
 
 // ── 충돌 판정 ────────────────────────────────────────────────────────────
@@ -211,7 +267,41 @@ export function findSubstringCollisions(
       const [keyA, a] = entries[i];
       const [keyB, b] = entries[j];
       if (!a.numberAdjacent && !b.numberAdjacent) continue;
+      if (isKeyStemExtension(keyA, keyB)) continue;
       if (a.value.includes(b.value) || b.value.includes(a.value)) {
+        collisions.push({ keyA, keyB, valueA: a.value, valueB: b.value });
+      }
+    }
+  }
+  return collisions;
+}
+
+// story #3758(BE·표시명·결함 클래스 별건④, 유나 2회차 CHANGES 2026-09-09 — 손목록이 두 번
+// 새 나갔다고 스스로 지적하며 요청한 자 축) — 「구성원」/「멤버」 동의어 충돌. 이건
+// findSubstringCollisions의 부분문자열 축(#2352·#2365, numberAdjacent 필요)과 다른
+// 별개 축이다: 두 값이 서로를 포함하지 않아도(부분문자열 무관) 같은 개념을 다른 낱말로
+// 부르면 그 자체가 결함(nav.orgMembers=「구성원」이 정본 진입점, 페드루/유나 定 2026-09-09).
+// numberAdjacent 무관 — 「멤버 추가」/「구성원이 없습니다」처럼 수 없는 라벨도 걸려야
+// 한다(#2352·#2365가 잡는 "두 «수»가 헷갈리는" 병이 아니라 다른 병이므로 그 축의
+// 전제를 안 빌려온다). baseline=0(그랜드파더/exempt 없음 — 발견되면 그 자리에서 고친다,
+// 페드루 지시 "0 아니면 그 목록이 처방").
+const MEMBER_SYNONYM_A = '구성원';
+const MEMBER_SYNONYM_B = '멤버';
+
+export function findMemberSynonymCollisions(
+  phrases: Map<string, { value: string; numberAdjacent: boolean }>,
+): Array<{ keyA: string; keyB: string; valueA: string; valueB: string }> {
+  const entries = [...phrases.entries()].filter(([, v]) => v.value.trim().length > 0);
+  const collisions: Array<{ keyA: string; keyB: string; valueA: string; valueB: string }> = [];
+  for (let i = 0; i < entries.length; i += 1) {
+    for (let j = i + 1; j < entries.length; j += 1) {
+      const [keyA, a] = entries[i];
+      const [keyB, b] = entries[j];
+      const aHasGu = a.value.includes(MEMBER_SYNONYM_A);
+      const aHasMem = a.value.includes(MEMBER_SYNONYM_B);
+      const bHasGu = b.value.includes(MEMBER_SYNONYM_A);
+      const bHasMem = b.value.includes(MEMBER_SYNONYM_B);
+      if ((aHasGu && bHasMem) || (aHasMem && bHasGu)) {
         collisions.push({ keyA, keyB, valueA: a.value, valueB: b.value });
       }
     }
@@ -253,10 +343,19 @@ export function findSubstringCollisions(
 // 기준으로 재스캔해도 이 항목은 여전히 필요하다(아래 게이트 로그로 확認) — #2792의 임시
 // 항목과 달리 이건 #2410의 근본 fix로 해소되는 축이 아니라서 그대로 남는다.
 // story #2485(2026-08-06) — settings.tabProjects/roleMember <-> onboarding/settings의
-// PLAN_LIMIT_EXCEEDED 안내문 2쌍. sprints.days와 같은 축(길이 짧은 일반명사 키가 긴
-// 문장에 우연히 포함) — #2352/#2365가 잡으려는 "같은 화면에 선 두 «수»가 헷갈리는" 병이
-// 아니다: tabProjects/roleMember 양쪽 다 그 자체엔 수가 없다(단순 라벨). 겹치는 건 오직
-// "프로젝트"/"멤버"라는 공통 명사 부분이지, 두 카운트가 시각적으로 혼동되는 상황이 아니다.
+// PLAN_LIMIT_EXCEEDED 안내문 2쌍이었다. sprints.days와 같은 축(길이 짧은 일반명사 키가
+// 긴 문장에 우연히 포함) — #2352/#2365가 잡으려는 "같은 화면에 선 두 «수»가 헷갈리는"
+// 병이 아니다: tabProjects/roleMember 양쪽 다 그 자체엔 수가 없다(단순 라벨). 겹치는
+// 건 오직 "프로젝트"/"멤버"라는 공통 명사 부분이지, 두 카운트가 시각적으로 혼동되는
+// 상황이 아니다. story #3758(2026-09-09, 낱말 정 1회차 — settings.roleMember "멤버"→
+// "구성원") — roleMember 쪽 짝이 그 순간엔 죽은 예외였다(양성대조: exemptHit 41→40).
+// ⚠️정정(같은 스토리 2회차, 유나 CHANGES) — `memberLimitExceededError`도 "멤버를"→
+// "구성원을"로 같이 바뀌면서 **같은 파일(add-member-modal.tsx) 안에서 "구성원"이라는
+// 낱말로 다시 충돌**이 살아났다(부분문자열 축 그대로, 겹치는 낱말만 멤버→구성원으로
+// 이동). "면제는 그 이유가 사라지면 함께 사라진다"는 맞았으나, 이유(두 값이 같은
+// 파일에서 짧은 라벨과 긴 문장으로 겹친다는 사실 자체)는 안 사라졌다 — 겹치는
+// «낱말»이 바뀐 것과 «겹침 자체»가 없어진 것은 다른 사실이라 재등재한다. tabProjects
+// 짝은 그대로 아래 남아 있다.
 // story #2955(2026-08-23, docs-index.tsx) — docs.title="문서"(마스트헤드 H1, 수 없음)
 // <-> docs.indexDocCount="{count}개 문서"(dek의 총 문서 수). 같은 파일에 이미 그라운핑된
 // 동형 쌍(docs.title <-> docs.searchResultCount="{count}개 문서 일치", 위 GRANDFATHER_
@@ -265,21 +364,375 @@ export function findSubstringCollisions(
 // 흔한 정상 패턴이다(H1 "문서" 다음 "24개 문서"라는 산문이 오는 건 혼동을 안 낳는다).
 // 카디르 QA/유나 design 리뷰가 이 추가의 승인 자리(가드 규율 §41번째 항목부터).
 // story #2958(2026-08-23, goals-client.tsx/goal-trust-rail.tsx) — #2955와 정확히 같은 클래스
-// 3건. ①②는 마스트헤드 dek의 "활성 N·완료 M" 카운트(goals.indexCountActive/indexCountDone)와
-// 상태 필터 칩의 "활성"/"완료"(goals.statusActive/statusDone) — 제목류 단문+그 단문을 포함하는
-// 카운트 문장, #2955의 docs.title<->docs.indexDocCount와 동형. ③은 goal-trust-rail.tsx의
-// ProofCapsule(density="audit") stateLabel prop에 goals.outcomeLabel="결과"를 채우는데(그
-// 값 자체는 AuditRow가 시각 렌더하지 않는 required prop 채움용, #2955 doc-status-rail.tsx와
-// 동일 관례) 같은 컴포넌트가 goals.trustRailOutcomeJudged="결과 확定 · {label}"도 렌더한다 —
-// 부분문자열은 겹치지만 하나는 애초에 안 보이는 값이라 혼동 여지가 실질 0.
+// 2건(③은 story #3698에서 자동 해소 — 아래 참고). ①②는 마스트헤드 dek의 "활성 N·완료 M"
+// 카운트(goals.indexCountActive/indexCountDone)와 상태 필터 칩의 "활성"/"완료"(goals.
+// statusActive/statusDone) — 제목류 단문+그 단문을 포함하는 카운트 문장, #2955의
+// docs.title<->docs.indexDocCount와 동형.
+// story #3402(2026-09-04, 유나 design review·페드루 PO 판정) — content.channelPostsTextTooLong/
+// channelPostsRateLimitedUntil(둘 다 {max}/{current}/{time} 보간이 있어 numberAdjacent=true)
+// <-> content.originAuthorUnknown("—" 한 글자, 보간 없음)가 겪던 오탐. 겹치는 건 오직 문장
+// 중간의 「—」 구두점 하나뿐 — originAuthorUnknown이 "—"를 값으로 쓰는 건 «값을 모른다»는
+// 자리표시 기호(이 화면 전역에서 「키 부재→—」 관례)이지 이 두 문장이 말하는 "한도"·"reset
+// 시각"과 같은 개념을 가리키는 게 전혀 아니다. ⚠️story #3582(PO 確定 2026-09-06) — 이런
+// "값에 글자·숫자가 0개"인 오탐이 매 사유 문장마다 EXEMPT를 한 줄씩 늘리는 패턴이라(3575가
+// errorChannelVideoUploadFailedWithStatus 짝으로 세 번째를 늘렸다), 인스턴스별 승인 대신
+// hasLetterOrNumber() 사전 제외로 규칙 자체에 이 축을 흡수했다 — originAuthorUnknown이
+// 낀 세 쌍(3402 2·3575 1) 전부 그래서 삭제(양성대조: 제외 로직을 끄면 다시 RED가 되어야
+// 한다).
 export const EXEMPT_PAIRS = new Set<string>([
+  // story #3592(§22-18 정본, 2026-09-07) — 행 액션 접근 이름 재발 가드가 새로 심은
+  // aria-label 템플릿 11쌍. 전부 이 가드가 잡으려는 "화면에 «보이는» 두 문구가
+  // 헷갈린다"(#2352·#2365) 모양이 아니다 — aria-label은 스크린리더 전용이라 애초에
+  // 「화면에서 겹쳐 보인다」가 구조적으로 성립하지 않는다(사람 눈에는 둘 중 하나만
+  // 항상 보인다: 시각적 라벨 아니면 보조기술 이름). 짧은 라벨이 그 라벨을 포함하는
+  // 긴 문구에 들어간 정상 패턴(docs.title<->docs.indexDocCount류)이거나, 같은
+  // 템플릿 «형태»를 여러 형제 컨트롤이 공유해 생기는 자기충돌(AC7 — 그 자리에 실제
+  // 보이는 라벨을 그대로 품기는 게 규칙이라 형태가 같아지는 게 오히려 의도).
+  'content.commentsConvertToTaskAriaLabel <-> content.commentsSectionTitle',
+  'content.commentsMoreAriaLabel <-> content.commentsSectionTitle',
+  'content.commentsReplyAriaLabel <-> content.commentsSectionTitle',
+  'content.commentsRetryAriaLabel <-> content.commentsSectionTitle',
+  'content.commentsResubmitAriaLabel <-> content.commentsSectionTitle',
+  'content.commentsSectionTitle <-> content.commentsViewOnChannelAriaLabel',
+  // 위 6건 전부 — commentsSectionTitle="댓글"(제목, 보간 없음)이 모든 댓글별
+  // aria-label 템플릿("{n}번째 댓글...")의 부분 문자열이라 6개 전부와 겹친다.
+  // "댓글"은 눈에 보이는 섹션 제목이고 aria-label은 그 밑 목록 행의 보조기술
+  // 전용 이름이라 실제 화면에서 두 문구가 나란히 «겹쳐 읽힐» 자리가 없다.
+  'content.commentsMoreAriaLabel <-> content.commentsMoreLabel',
+  // commentsMoreLabel="더보기"(<summary> 안 눈에 보이는 낱말) <-> commentsMoreAriaLabel
+  // ("{n}번째 댓글 더보기") — AC11이 요구하는 그 자체(보이는 라벨을 aria-label이
+  // «품어야» 통과하는 부분 문자열 검산)라 겹치는 게 정상이자 필수.
+  'content.commentsConvertToTaskAriaLabel <-> content.commentsViewOnChannelAriaLabel',
+  // 두 템플릿 다 "{n}번째 댓글을 {label}"로 형태가 완전히 같다(§22-18 표가 두
+  // 컨트롤에 같은 어순을 지정) — {label} 자리에 실제로는 서로 다른 값("작업으로
+  // 전환"/"채널에서 보기")이 들어가 렌더 결과는 갈린다, 템플릿 문자열 자체의
+  // 우연한 형태 일치일 뿐.
+  'content.commentsResubmitAriaLabel <-> content.commentsRetryAriaLabel',
+  // 위와 같은 이유 — 둘 다 "{n}번째 댓글 {label}" 템플릿 공유(§22-18 표 그대로).
+  'settings.agentMember <-> settings.agentToggleAriaLabel',
+  // agentMember="에이전트"(행 안 배지 라벨, 보간 없음) <-> agentToggleAriaLabel
+  // ("{n}번째 에이전트 {label}") — 배지는 시각 요소, aria-label은 그 옆 토글
+  // 버튼의 보조기술 전용 이름이라 화면상 겹쳐 읽힐 자리가 없다.
+  'organization.eventRowActionAriaLabel <-> organization.eventsTitle',
+  // eventsTitle="이벤트"(섹션 제목) <-> eventRowActionAriaLabel("{n}번째 이벤트
+  // 정의 {label}") — 위 commentsSectionTitle류와 동형(섹션 제목 vs 행 aria-label).
   'goals.indexCountActive <-> goals.statusActive',
   'goals.indexCountDone <-> goals.statusDone',
-  'goals.outcomeLabel <-> goals.trustRailOutcomeJudged',
+  // story #3698(IA·후속) — goals.outcomeLabel <-> goals.trustRailOutcomeJudged 항목은 여기
+  // 있었으나(#2958), NON_NUMBER_PLACEHOLDER_NAMES에 'label'이 추가되며(commandPalette.
+  // goDestination 처방) trustRailOutcomeJudged("결과 확定 · {label}", {n} 없이 {label}
+  // 하나뿐)가 더는 numberAdjacent가 아니게 됐다 — 애초에 "혼동 여지 실질 0"이라고 적어
+  // 뒀던 그 판단이 이제 구조로도 맞아떨어진 것(EXEMPT였던 게 아예 후보에서 빠짐, 죽은
+  // 예외 축적 아님 — 아래 회귀가드가 "선언된 건 전부 실제로 걸린다"를 지킨다).
   'docs.indexDocCount <-> docs.title',
   'sprints.days <-> sprints.overdueBadge',
   'onboarding.projectLimitExceededError <-> settings.tabProjects',
+  // story #3758 2회차(위 docstring 정정 참고) — memberLimitExceededError가 "구성원을"로
+  // 바뀌며 add-member-modal.tsx 안에서 roleMember="구성원"(단순 라벨)과 다시 겹친다.
+  // tabProjects 짝과 완전히 동형(짧은 라벨 vs 그 라벨을 포함하는 긴 안내문) — 실제
+  // 화면에서 역할 배지("구성원")와 플랜 한도 안내문("...구성원을 5명까지...")이 헷갈릴
+  // 자리가 아니다.
   'settings.memberLimitExceededError <-> settings.roleMember',
+  // story #3758 3회차(페드루 그라운딩 지적 — 역할 select/badge가 t() 없이 "Admin"/"Member"
+  // 원문 리터럴을 그리던 미번역 자리를 settings.roleMember/roleAdmin으로 고치며 신규
+  // 사용) — 같은 파일(org-members-section.tsx) 안에서 "구성원"(역할 라벨, 짧은 단순
+  // 명사)이 그 목록의 헤더("구성원 ({count})")·행 aria-label("{n}번째 구성원 {label}")과
+  // 부분문자열로 겹친다. docs.title<->docs.indexDocCount류와 정확히 같은 클래스 — 역할
+  // 배지("구성원")와 목록 카운트/행 순번이 화면에서 실제로 헷갈릴 자리가 아니다.
+  'settings.orgMemberRowActionAriaLabel <-> settings.roleMember',
+  // story #3735(UI 점검 B·E절, 유나 定 2026-09-10) — orgMembersListHeading이 "구성원
+  // ({count})"에서 "구성원"(수는 옆 CountBadge로 이동)으로 바뀌며 numberAdjacent를
+  // 잃었다 — settings.orgMembersListHeading <-> settings.roleMember 짝은 양쪽 다
+  // numberAdjacent가 아니게 돼 이 스캔축(부분문자열+numberAdjacent 필요) 자체가 더는
+  // 안 걸린다(죽은 예외 제거, 재등재 불요 — 가드가 스스로 안 겹친다는 걸 안다).
+  //
+  // 대신 값이 짧아지며 같은 파일(org-members-section.tsx) 안 다른 numberAdjacent
+  // 문구 둘과 새로 부분문자열로 겹친다. 둘 다 docs.title<->docs.indexDocCount류(짧은
+  // 라벨이 그 라벨을 포함하는 긴 문구의 일부일 뿐인 정상 패턴) — 화면에서 실제로
+  // 헷갈릴 자리가 아니다.
+  // ① memberLimitExceededError("무료 플랜은 구성원을 {limit}명까지 초대할 수
+  //    있습니다", 플랜 한도 초과 토스트) — 섹션 제목("구성원")과 이 토스트 문장이
+  //    동시에 눈에 들어올 일이 없다(토스트는 실패 시에만·제목은 상시).
+  'settings.memberLimitExceededError <-> settings.orgMembersListHeading',
+  // ② orgMemberRowActionAriaLabel("{n}번째 구성원 {label}", 행 액션 버튼의 접근성
+  //    이름·시각적으로 안 보임) — 섹션 제목("구성원")과 스크린리더 전용 문구라
+  //    헷갈릴 표면 자체가 없다.
+  'settings.orgMemberRowActionAriaLabel <-> settings.orgMembersListHeading',
+  // story #3422(2026-09-04, ②-c FailureActionBadge) — channelPostsFailureAutoRetryAt
+  // ({time} 보간 있음) <-> channelPostsFailureRetryCta("다시 시도", 보간 없음). 겹치는
+  // 건 "다시 시도"라는 흔한 동사구 하나뿐 — auto_retry(자동, 버튼 없음)와 dead_letter
+  // (수동 재시도 버튼)는 §17-13에서 의도적으로 다른 kind로 갈라 둔 서로 다른 개념이다.
+  // #2352/#2365가 잡으려는 "같은 화면의 두 «수»가 헷갈리는" 병이 아니다.
+  'content.channelPostsFailureAutoRetryAt <-> content.channelPostsFailureRetryCta',
+  // channelPostsFailureVoided<->channelPostsFailureVoidedWithReason(옛 등재, 위 사유
+  // 그대로 여전히 안전) — story #3808(isKeyStemExtension 도입, 2026-09-12) 이후
+  // 죽은 예외로 걷어냄: 같은 네임스페이스 + "…Voided"가 "…VoidedWithReason"의
+  // 접두사라 이제 이 스캔 자체가 확장형으로 안 잡는다(재등재 불요).
+  // story #3500(doc a0da40c9 §19-5, 디자인 유나 確定 2026-09-05) —
+  // generationBudgetRemainingLabel("남음", 카드 헤더 3값 중 하나의 라벨) <->
+  // generationBudgetRemainingCompact("남음 {remaining}", 상신 표면 전용 한 줄 — §19-5
+  // "submit surface는 남음만"). 짧은 라벨이 그 라벨을 포함하는 긴 문구에 들어간
+  // 정상 패턴(docs.title<->docs.indexDocCount류) — 같은 개념("남음")을 두 표면에서
+  // 일관되게 쓰라는 게 디자인 지시 그 자체다.
+  'content.generationBudgetRemainingCompact <-> content.generationBudgetRemainingLabel',
+  // story #3808(PR5a, 2026-09-12) — apiUsageBudgetRemainingLabel("남음", 카드 헤더
+  // 라벨) <-> apiUsageBudgetRemainingCompact("남음 {remaining}", 상신 표면 전용 한
+  // 줄). generationBudgetRemainingCompact<->Label 바로 위 항목과 동형(다른 지갑의
+  // 같은 §19-5 패턴 재사용) — 짧은 라벨이 그 라벨을 포함하는 긴 문구에 들어간 정상
+  // 패턴, "남음"을 두 표면에서 일관되게 쓰라는 같은 디자인 지시.
+  'content.apiUsageBudgetRemainingCompact <-> content.apiUsageBudgetRemainingLabel',
+  // story #3808(PR5a CHANGES, 유나 04:17Z 확定) — apiUsageBudgetSuspended("X API
+  // 지출 한도 {limit} · 발행 정지")가 apiUsageBudgetLimitLabel("한도")을 부분
+  // 문자열로 포함한다. 위 두 항목과 다른 형태의 정상 사례: 이 둘은 «같은 화면에
+  // 동시에» 서지 않는다(ApiUsageBudgetIndicator는 limitMinor===0이면 Suspended
+  // 분기 하나만 그리고 즉시 return — LimitLabel이 쓰이는 "full" 3값 분기는
+  // limitMinor>0일 때만 도달, 서로 배타적 렌더 경로). #2352/#2365가 잡으려는
+  // "같은 화면의 두 «수»가 헷갈리는" 병이 성립할 자리 자체가 없다.
+  'content.apiUsageBudgetLimitLabel <-> content.apiUsageBudgetSuspended',
+  // story #3747(ⓐ 겹침 기반 충돌 배너, 2026-09-09, 3501 §20 재구조화 뒤 등재 갱신) —
+  // contentRules.versionConflictFieldWithName("{name}님이 「{field}」을(를) 먼저
+  // 저장했습니다", 행 단위 충돌 배너) <-> contentRules.saveAction("저장", 버튼 라벨)·
+  // contentRules.contentRulesRowSaveSuccessToast("저장했습니다", 성공 토스트). 겹치는
+  // 건 "저장"이라는 낱말뿐 — 하나는 "저장하다"는 동사 버튼/내 성공 결과고 하나는
+  // "(남이) 저장한" 과거 수동형 서술이라 화면에서 실제로 헷갈릴 자리가 아니다
+  // (#2352/#2365가 잡으려는 "같은 화면의 두 «수»가 헷갈리는" 병이 아니다 — {field}는
+  // 규칙 이름이지 숫자가 아니다). 옛 등재(contentRules.saveAction <->
+  // contentRules.versionConflictPriorChanged)는 그 키 자체가 이 스토리에서 걷혀 죽은
+  // 예외였다 — 같은 개념의 새 키 쌍으로 교체.
+  'contentRules.saveAction <-> contentRules.versionConflictFieldWithName',
+  'contentRules.contentRulesRowSaveSuccessToast <-> contentRules.versionConflictFieldWithName',
+  // story #3747(되돌리기 결함 fast-follow, 2026-09-09) — 유나 定으로 신설된
+  // versionConflictFieldSelfOtherTab("다른 탭에서 「{field}」을(를) 먼저 저장했습니다.")도
+  // WithName과 같은 문구 골격(«…을(를) 먼저 저장했습니다»)이라 위와 동일한 근거로
+  // "저장"이라는 낱말만 겹친다 — 동사 버튼/성공 토스트 vs 과거 수동형 서술이라
+  // 헷갈릴 자리가 아니다.
+  'contentRules.saveAction <-> contentRules.versionConflictFieldSelfOtherTab',
+  'contentRules.contentRulesRowSaveSuccessToast <-> contentRules.versionConflictFieldSelfOtherTab',
+  // story #3517(§22-②·⑨, 2026-09-05) — content.commentsSectionTitleWithCount
+  // ("댓글 {count}", 목록 얼굴 제목)·content.commentsDeletedCountLabel("지워진 댓글
+  // {count}건", 헤더 부속 줄)·content.commentsSectionTitle("댓글", 미수집/오류 얼굴
+  // 제목) 셋이 전부 "댓글"을 공유한다 — #2352/#2365가 잡으려는 "같은 화면의 두 «수»가
+  // 헷갈리는" 병이 아니라, 세 얼굴에서 같은 개념("댓글")을 일관되게 쓰는 것 자체가
+  // §22-②의 의도다(세 얼굴 문구를 서로 다른 낱말로 갈랐으면 그게 오히려 결함).
+  'content.commentsDeletedCountLabel <-> content.commentsSectionTitleWithCount',
+  // commentsSectionTitle<->commentsSectionTitleWithCount(옛 등재, 위 사유 그대로 여전히
+  // 안전) — story #3808(isKeyStemExtension, 2026-09-12) 이후 죽은 예외로 걷어냄: "…Title"이
+  // "…TitleWithCount"의 접두사인 같은 네임스페이스 확장형이라 재등재 불요.
+  'content.commentsDeletedCountLabel <-> content.commentsSectionTitle',
+  // story #3550(PR#3912, 페드루 PO 승인 2026-09-06) — content.channelPostsImageAttachmentPosition
+  // ("{position}번째", 장 위치 라벨) <-> channelPostsImageMoveUpAction/MoveDownAction/
+  // RemoveActionLabel(전부 "{position}번째 ..." 접근성 이름). 같은 이미지 슬롯의 같은
+  // position 값을 위치 라벨과 접근성 이름 두 표면에 일관되게 쓰는 의도된 반복 —
+  // #2352/#2365가 잡으려는 "다른 두 셈이 헷갈리는" 병이 아니다(짧은 라벨이 그
+  // 라벨을 포함하는 긴 문구에 들어간 정상 패턴 — story #3735(2026-09-09)에서
+  // insightsBoard.columnD1<->sortD1류 그 자체는 재워딩으로 사라졌다, 예시만 남김).
+  'content.channelPostsImageAttachmentPosition <-> content.channelPostsImageMoveDownAction',
+  'content.channelPostsImageAttachmentPosition <-> content.channelPostsImageMoveUpAction',
+  'content.channelPostsImageAttachmentPosition <-> content.channelPostsImageRemoveActionLabel',
+  // channelPostsImageRemoveAction<->channelPostsImageRemoveActionLabel(옛 등재, §17-20⑧
+  // 사유 그대로 여전히 안전) — story #3808(isKeyStemExtension, 2026-09-12) 이후 죽은
+  // 예외로 걷어냄: "…RemoveAction"이 "…RemoveActionLabel"의 접두사인 같은 네임스페이스
+  // 확장형이라 재등재 불요.
+  // story #3556(§17-23③·페드루 PO 승인 2026-09-06) — content.channelPostsImageUploading
+  // ("업로드 중…") <-> content.channelPostsVideoUploading("업로드 중… {pct}%") — 영상만
+  // {pct}. §17-23③ "퍼센트를 단계 문구 안에·이미지 쪽 문구 형을 그대로 따른다"는
+  // 지시 자체가 이 부분문자열 포함을 요구한다(docs.title<->docs.indexDocCount류
+  // 정상 패턴).
+  'content.channelPostsImageUploading <-> content.channelPostsVideoUploading',
+  // story #3560(제작 작업대 검증 시트, 페드루 PO 승인 2026-09-06) —
+  // verify.verificationSheetSummaryAllPass("{total}항목 모두 통과", 접힘 요약) <->
+  // verify.verificationSheetColumnName("항목", 펼침 표 컬럼 헤더) — 같은 검증 시트
+  // 행 안에서 동시에 뜬다. 같은 낱말=같은 뜻(검증 «항목») — 요약 문장이 열 제목
+  // 낱말을 그대로 품는 것은 두 문장이 한 세계를 말하는 정상 패턴(docs.title<->
+  // docs.indexDocCount류)이지 #2352/#2365가 잡으려는 "다른 두 셈이 헷갈리는" 병이
+  // 아니다. 유나 §17-24 원문 확定값 — 재작명 대상 아님.
+  'verify.verificationSheetColumnName <-> verify.verificationSheetSummaryAllPass',
+  // story #3586(BE #3933, 유나 §17-23 확定 2026-09-06 · PO 승인 2026-09-06) —
+  // content.channelPostsVideoCoverAspectRatioRejected(완결 오류 문장, actual/target
+  // 값 보간) <-> content.channelPostsCoverAttachLabel("커버", 첨부 버튼 라벨). 완결
+  // 오류 문장 vs 첨부 버튼 라벨 — 같은 대상("커버")을 다른 레지스터로 부르는 것이지
+  // #2352/#2365가 잡으려는 "다른 것을 세는 두 수가 헷갈리는" 병이 아니다(가드 표적
+  // 클래스 밖). actual/target을 NON_NUMBER_PLACEHOLDER_NAMES에 넣지 않는다(PO 지적
+  // — 그 이름들은 다른 자리에서 진짜 수를 실을 수 있어 자를 무디게 만든다).
+  'content.channelPostsCoverAttachLabel <-> content.channelPostsVideoCoverAspectRatioRejected',
+  // story #3596(유나 §22-16 ⑦, 페드루 PO 追加 2026-09-07) — content.commentsReplyDialogTitle
+  // ("답변", 다이얼로그 제목) <-> content.commentsReplyAlreadySentCount("이 댓글에
+  // 이미 보낸 답변 {count}건", 대상 댓글 블록의 한 줄). 겹치는 건 "답변"이라는
+  // 이 화면 전역의 공통 명사 하나뿐 — 제목 라벨과 개수 안내 문장은 서로 다른
+  // 자리(다이얼로그 헤더 vs 본문 안내)에서 다른 걸 말한다. #2352/#2365가 잡으려는
+  // "같은 화면의 두 «수»가 헷갈리는" 병이 아니다(count는 이 안내 문장에만 있다).
+  'content.commentsReplyAlreadySentCount <-> content.commentsReplyDialogTitle',
+  // story #3606(잔여, 페드루 PO 정정 2026-09-07, 유나 판정) — org-members-section.tsx가
+  // 이 스토리에서 처음으로 settings.invite("초대", 버튼 라벨)를 이 파일 안에서 다른
+  // "초대"류 문구와 같이 렌더하게 됐다. ⚠️초안 사유("초대 카드·대기 목록이 같이 안
+  // 선다")는 거짓이었다 — 초대 폼 카드(버튼 자리)와 대기 목록 카드는 실제로 같은
+  // 화면의 형제 섹션이라 대기 초대가 1건이라도 있으면 같이 선다(유나 실측 정정).
+  // 근거는 둘째 문장뿐: orgInviteRowActionAriaLabel은 항상 «순번/개수와 함께»만
+  // 서는 aria-label 문장인 반면 settings.invite는 그 자체로 완결된 짧은 버튼
+  // 라벨이다 — #2352/#2365가 잡으려는 병은 "같은 화면의 두 «수»가 헷갈리는" 것인데,
+  // invite 자체엔 수가 없어 그 축의 혼동이 성립하지 않는다(memberLimitExceededError도
+  // 동형 — 수({limit})는 있지만 문장 전체가 정책 한도 안내라 "초대" 단어 하나가
+  // 버튼과 헷갈릴 리스크가 아니다).
+  'settings.invite <-> settings.memberLimitExceededError',
+  'settings.invite <-> settings.orgInviteRowActionAriaLabel',
+  // story #3735 CHANGES(유나 재검토 2026-09-10) — settings.orgInvitesListHeading이
+  // "초대 대기 ({count})"에서 "초대 대기"(수는 옆 CountBadge로 이동, orgMembersListHeading과
+  // 같은 처방)로 바뀌며 numberAdjacent를 잃었다 — 위 짝은 양쪽 다 numberAdjacent가
+  // 아니게 돼 이 스캔축 자체가 더는 안 걸린다(죽은 예외 제거, 재등재 불요).
+  // story #3641 — 버튼 라벨(행위) ↔ 그 행위가 불가한 이유 문장. «두 셈» 혼동이 아니고
+  // 보간도 수가 아니라 상태 문자열({status})이라 AC4㉣ 근사가 성립하지 않는다.
+  // 다시 볼 때: 가드가 보간을 숫자형으로 좁히면 이 예외는 저절로 불필요해진다.
+  'common.cancel <-> content.channelPostsCommandNotCancellable',
+  // story #3723(2026-09-09, story-detail-panel.tsx 탭 라벨 i18n화) — board.tasks<->
+  // tasksCountLabel·board.comments<->commentsCountLabel(위 사유 그대로 여전히 안전,
+  // TabsTrigger 배타 상태) — story #3808(isKeyStemExtension, 2026-09-12) 이후 둘 다
+  // 죽은 예외로 걷어냄: "tasks"/"comments"가 각각 "tasksCountLabel"/"commentsCountLabel"의
+  // 접두사인 같은 네임스페이스 확장형이라 재등재 불요.
+  // story #3789(2026-09-10, settings/page.tsx 신설 키 4건) — 조직 삭제 다이얼로그·탭이
+  // 신설되며 그 안의 짧은 일반명사 라벨이 같은 파일의 긴 문장에 우연히 포함됐다. 아래
+  // 셋은 onboarding.projectLimitExceededError<->settings.tabProjects(#2485, 위 393행)와
+  // 정확히 같은 클래스 — 「프로젝트」·「플랜」·「삭제」모두 그 자체엔 수가 없는 짧은
+  // 라벨/탭 제목/버튼 동사고, 헷갈리는 건 «두 개의 서로 다른 수»가 아니라 그 라벨을
+  // 포함하는 긴 안내 문장 하나뿐이다(docs.title<->docs.indexDocCount류 정상 패턴).
+  'settings.orgDeleteImpactProjects <-> settings.tabProjects',
+  // orgPlanLabel="플랜"(조직 탭 필드 라벨) <-> onboarding.projectLimitExceededError
+  // ("무료 플랜은 프로젝트를 {limit}개까지...", 온보딩 플랜-한도 토스트) — 두 화면이
+  // 동시에 뜨는 자리가 아니고, "플랜"이라는 공통 명사 하나만 겹친다.
+  'onboarding.projectLimitExceededError <-> settings.orgPlanLabel',
+  // deleteProject="삭제"(프로젝트 관리 섹션의 다른 행 버튼) <-> orgDeleteImpactProjects
+  // ("프로젝트 {count}개 영구 삭제", 조직 삭제 영향도 문장 안의 "영구 삭제") — 서로
+  // 다른 대상(프로젝트 행 삭제 버튼 vs 조직 전체 삭제 영향도 서술)이 우연히 "삭제"
+  // 한 글자만 공유한다.
+  'settings.deleteProject <-> settings.orgDeleteImpactProjects',
+  // orgDeleteConfirmCta="영구 삭제"(다이얼로그 확인 버튼 라벨) <-> orgDeleteImpactProjects
+  // ("프로젝트 {count}개 영구 삭제", 영향도 문장 조각) — 이 스토리(#3789) 자체가 요구한
+  // 의도된 분리다: 유나 定 §5 "「영구 삭제」가 두 뜻이다 — 반드시 둘로 갈라야 한다"(버튼
+  // 라벨 vs 문장 조각, en에서 `Delete permanently` vs `deleted permanently`로 애초에
+  // 같은 문자열일 수 없다). 한국어 자연문이 "영구 삭제"라는 같은 구를 버튼과 서술 양쪽에
+  // 쓰는 것 자체가 정상이라 부분문자열 겹침은 이 설계의 결과이지 결함이 아니다.
+  'settings.orgDeleteConfirmCta <-> settings.orgDeleteImpactProjects',
+  // story #3805(Phase3·3-1 PR 3, 페드루 PO 定 2026-09-11 10:36Z) — engagement/page.tsx
+  // 한 행 안에서 답변 CTA 버튼(commentsReplyCta="답변")과 읽기전용 답변함 마커
+  // (engagementAnsweredAt="답변함 · {time}")가 부분문자열로 겹친다. #2352/#2365가
+  // 잡으려는 병은 "같은 화면의 두 «수»가 헷갈린다"(예: 막힘 28 vs 막힘 0)인데, 이 쌍은
+  // 그 모양이 아니다 — 한쪽은 동사형 버튼(눌러서 답변을 «시작»), 다른 한쪽은 이미
+  // 발송된 답글의 발송 시각을 보여주는 정적 라벨(수가 아니라 상대시각 문자열)이라
+  // «두 수를 헷갈릴» 여지 자체가 없다(테이블 컬럼도 다르다 — 상태 열 vs 액션 열).
+  'content.commentsReplyCta <-> content.engagementAnsweredAt',
+  // story #3808(Phase3·3-3 PR5b-2, 페드루 PO 確定 2026-09-12) — 스레드 상태 낱말 두
+  // 문구가 "스레드 {total}건 중 {published}건 발행"이라는 같은 골격을 공유하고
+  // (Complete가 Partial의 접두 그대로), 상세 화면 하나가 배열 마지막 세그먼트의
+  // status로 딱 한 쪽만 렌더한다(§3402 B3 배지와 같은 상호배타 렌더 축 — 실패
+  // 세그먼트 있으면 Partial, 전부 published면 Complete, 동시에 서지 않는다) —
+  // apiUsageBudgetLimitLabel<->Suspended 항목과 동형("같은 화면의 두 «수»가
+  // 헷갈리는" #2352/#2365 병이 성립할 자리 자체가 없다).
+  'content.channelPostsThreadStatusComplete <-> content.channelPostsThreadStatusPartial',
+  // 둘 다 publishCta("발행", 발행 버튼의 보이는 글자)와 "발행"이라는 낱말만 겹친다 —
+  // 하나는 누르는 동사형 버튼, 하나는 이미 벌어진 발행 결과를 세는 서술문이라
+  // contentRules.saveAction<->versionConflictFieldWithName(§20 "저장" 쌍)과 같은
+  // 근거로 헷갈릴 자리가 아니다.
+  'content.channelPostsThreadStatusComplete <-> content.publishCta',
+  'content.channelPostsThreadStatusPartial <-> content.publishCta',
+  // story #3808(PR5b-2 CHANGES, 2026-09-12 07:08Z) — channelPostsThreadContinueHint
+  // ("{fromSeq}번째부터 나머지 {remaining}건을 이어서 발행합니다.", 스레드 부분 실패
+  // 재개 안내)가 channelPostsPublishContinueCta("이어서 발행", Threads 컨테이너
+  // partialSuccess 전용 버튼 라벨)를 부분문자열로 포함한다. 두 문구는 서로 다른
+  // 채널 클래스의 서로 다른 축(partialSuccess=publicationStatus==='container_created'
+  // vs isThreadPartialFailure=X 스레드 thread_segments 미완주)이라 같은 draft에서
+  // 동시에 서지 않는다 — apiUsageBudgetLimitLabel<->Suspended와 같은 상호배타 근거.
+  'content.channelPostsPublishContinueCta <-> content.channelPostsThreadContinueHint',
+  // publishCta("발행")와는 "저장" 쌍(contentRules.saveAction<->versionConflictField
+  // WithName)과 같은 이유로 안 겹친다 — 동사형 버튼 vs 재개 안내 서술문.
+  'content.channelPostsThreadContinueHint <-> content.publishCta',
+  // channelPostsThreadSegmentRemove<->channelPostsThreadSegmentRemoveActionLabel(옛 등재,
+  // §17-20⑧ 사유 그대로 여전히 안전) — story #3808(isKeyStemExtension, 2026-09-12)
+  // 이후 죽은 예외로 걷어냄: "…Remove"가 "…RemoveActionLabel"의 접두사인 같은
+  // 네임스페이스 확장형이라 재등재 불요.
+  // story #3815(PR4, 페드루 PO 決定 2026-09-12 14:49Z) — publishSuccess("{time}에
+  // 공개됐습니다.", 발행 성공 토스트 서술문)이 channelPostsYoutubePrivacyPublic
+  // ("공개", YouTube 공개범위 select의 옵션 라벨)을 부분문자열로 포함한다. 하나는
+  // 이미 벌어진 발행 결과를 알리는 토스트, 하나는 편집 중인 select의 옵션 값이라
+  // 화면·시점·요소가 전부 달라(testid로 각각 pin) 헷갈릴 자리가 아니다.
+  'content.channelPostsYoutubePrivacyPublic <-> content.publishSuccess',
+  // story #3815(PR4, 페드루 PO 決定 2026-09-12 14:49Z) — channelYoutubeUsageLine
+  // ("오늘 사용량 {used}/{limit} · 플랫폼 공유", 연결 카드 사용량 줄)이
+  // channelExpiringToday("오늘", 만료 임박 칩 낱말)를 부분문자열로 포함한다.
+  // 하나는 사용량 수치 줄, 하나는 만료 상태 칩이라 같은 연결 행에 동시에 서도
+  // (testid 서로 다름) "오늘"이 가리키는 대상이 헷갈릴 자리가 아니다.
+  'channelConnect.channelExpiringToday <-> channelConnect.channelYoutubeUsageLine',
+  // story #3815(PR4 CHANGES 3, 페드루 PO 決定 2026-09-12 15:38Z) — 「{n}초」는
+  // 문구가 아니라 단위 서식 프리미티브라 같은 낱말이 다른 축에서 서는 게 정상.
+  // 축 다름: channelPostsVideoSpecDurationSeconds=제약 상한(60초 밑 채널만
+  // 닿는 폴백, 지금 화면 표본엔 실제로 안 뜬다 — 테스트로만 잠근다) vs
+  // channelPostsVideoMetaDuration=업로드된 실제 영상 길이.
+  'content.channelPostsVideoMetaDuration <-> content.channelPostsVideoSpecDurationSeconds',
+  // story #3815(PR4 CHANGES 3, 페드루 PO 決定 2026-09-12 15:38Z) — 「최대
+  // {maxBytes}」도 단위 서식 프리미티브(수와 함께 서는 흔한 조사형). 영상
+  // 규격 줄과 이미지(커버) 규격 줄이 실제로 같은 화면에 나란히 서지만
+  // GB/MB 단위·전체 문맥이 갈라 혼동 여지 없음(이미지 3종끼리도 이미 이
+  // 낱말을 공유 中 — 새 축 아님).
+  'content.channelPostsCoverSpecTag <-> content.channelPostsVideoSpecTagSize',
+  'content.channelPostsImageSpecTag <-> content.channelPostsVideoSpecTagSize',
+  'content.channelPostsImageSpecTagWithMin <-> content.channelPostsVideoSpecTagSize',
+  // story #3808(배포 81 라이브 회차 적기, 페드루 PO 決定 2026-09-12 16:13Z) —
+  // 「한도」는 단독 라벨(카드 헤더 "한도 {금액}") vs 복합구("한도 초과 {N}원")로
+  // 문맥이 갈리고, 같은 행에 나란히 서도 «같은 사실 같은 낱말»(둘 다 그 한도를
+  // 가리킨다)이라 충돌이 아니라 정합.
+  'content.budgetRemainingOverLimit <-> content.generationBudgetLimitLabel',
+  // story #3808 CHANGES(페드루 PO 決定 2026-09-12 16:26Z) — compact 전용 over-limit
+  // 키 분리(en "left" 어순 처방)의 자연스런 부작용 6건. 두 근거만 쓴다:
+  // (a) 같은 compact 슬롯의 isOverLimit 삼항 분기(정상/초과 상호배타 — 동시에
+  //     안 선다, channelPostsThreadStatusComplete/Partial과 같은 근거)
+  // (b) 단독 라벨 vs 복합구·같은 사실 같은 낱말(위 budgetRemainingOverLimit <->
+  //     generationBudgetLimitLabel 쌍과 같은 근거).
+  //
+  // story #3808 후속(페드루 PO 지적 2026-09-12 18:18Z) — 이 6건이 한 PR에 쌓인 게
+  // 가드의 진짜 갭이었다: (a) 두 건은 "…Compact"가 "…CompactOverLimit"의 접두사인
+  // «같은 키의 확장형»(다른 사실이 아니라 같은 상태 슬롯의 값 변형)인데, 그때는
+  // 가드가 이 클래스를 몰라 매번 EXEMPT 승인을 새로 받아야 했다. isKeyStemExtension
+  // 도입 뒤 이 (a) 두 건은 죽은 예외로 걷어냈다(재확認: 도입 전후 재스캔 — 이 2건만
+  // exemptHit에서 빠지고 newFindings는 그대로 0). (b) 네 건은 «단독 라벨 vs 그 라벨을
+  // 포함하는 복합구»(키 이름 자체는 접두 관계가 아님, 다른 stem)라 이 새 규칙 밖 —
+  // 여전히 EXEMPT_PAIRS로 남긴다.
+  'content.apiUsageBudgetRemainingCompactOverLimit <-> content.apiUsageBudgetRemainingLabel', // (b)
+  'content.budgetRemainingOverLimit <-> content.generationBudgetRemainingCompactOverLimit', // (b)
+  'content.generationBudgetLimitLabel <-> content.generationBudgetRemainingCompactOverLimit', // (b)
+  'content.generationBudgetRemainingCompactOverLimit <-> content.generationBudgetRemainingLabel', // (b)
+  // story #3880(§⑤ 낱말 드리프트, 2026-09-14) — conversationTitle="대화"(LayerLabel 4층
+  // 구획 eyebrow, uppercase 헤딩 스타일)와 conversationChatProofCount="대화 근거 {count}건
+  // 보기"(그 구획 밑 body 텍스트 링크)는 workcell.tsx의 같은 Conversation 패널 안에서
+  // 같이 서지만, 위 commentsSectionTitle류(섹션 제목 vs 그 섹션의 행 문구)와 동형 —
+  // "대화"는 짧은 섹션 헤딩, "대화 근거 N건 보기"는 그 섹션 본문의 별개 링크 문구라
+  // 시각적 위계(작은 eyebrow vs 본문 링크)로 이미 구분된다. conversationTitle은
+  // §②(채팅→대화) 기존 낱말 재사용이라 새 낱말 발명도 아님.
+  'workcell.conversationChatProofCount <-> workcell.conversationTitle',
+  // story #3880 — evidenceTitle="근거"(Evidence LayerLabel eyebrow, 서로 다른 구획)도
+  // 같은 파일의 conversationChatProofCount="대화 근거 {count}건 보기"(Conversation 구획
+  // 본문 링크)와 부분문자열로 겹친다 — 위와 동형 근거(다른 구획·다른 위계, eyebrow vs
+  // 본문 링크). evidenceTitle은 기존 proofCapsule.evidence.label의 "근거" 낱말 재사용.
+  'workcell.conversationChatProofCount <-> workcell.evidenceTitle',
+  // story #3880 CHANGES②③(PO 화면 리뷰, 2026-09-14 17:00Z 유나 §⑤ 3880-d 확定·PO 승인
+  // 2026-09-14 17:10Z) — confidenceCaption="단계 {done}/{total}"(workcell.tsx:227,
+  // 파이프라인 진행바 옆 캡션)과 runStage="단계"(workcell.tsx:430, Run 패널 필드 라벨)가
+  // 부분문자열로 겹친다. PO 정정: 구획·위계가 다르다는 근거가 아니라 «같은 개념» —
+  // 둘 다 신뢰 파이프라인의 "단계"를 가리킨다(confidenceCaption은 그 단계를 세고,
+  // runStage는 그 단계에 이름을 붙인다). 같은 사실=같은 낱말이 맞는 것이고, 다른
+  // 낱말이었다면 그게 결함이었을 것 — 위 conversationChatProofCount류(다른 구획·다른
+  // 개념이라 exempt)와는 반대 근거로 exempt.
+  'workcell.confidenceCaption <-> workcell.runStage',
+  // story #3884(대화 이벤트 카드 「대상」 참조 토큰화 + preset 고정 문구 ko/en 한 벌) —
+  // eventCard.reasonLabel="사유"(block_template 「사유」 필드 라벨, fields 행의 짧은
+  // 표제어·값은 별도 셀)가 approval-request-card.tsx에서 같은 preset.gate.verdict
+  // 템플릿을 twin 소비하며 같은 파일에 놓인 chats.approvalRequestEscalationReason=
+  // "사유: {reason}"/chats.approvalRequestResolutionNote="사유: {note}"(별개 렌더
+  // 자리 — 카드 상단 요약 줄에 쓰는 완결 문장, fields 행이 아니다)의 부분 문자열이라
+  // 걸린다. 화면에서 겹쳐 보이는 두 자리가 아니다: 전자는 fields 테이블의 한
+  // 행("사유" 표제어 | 값 셀), 후자는 그 위/아래 요약 줄에 오는 완결 문장 — 같은
+  // 개념(사유)을 두 다른 표현 형태(표제어 vs 문장)로 쓰는 정상 패턴(§②-1
+  // 스토리/문서/에픽/작업류와 동형 "같은 사실=같은 낱말" 원칙의 자연스런 결과이지,
+  // 실수로 낳은 근접 중복이 아니다).
+  'chats.approvalRequestEscalationReason <-> eventCard.reasonLabel',
+  'chats.approvalRequestResolutionNote <-> eventCard.reasonLabel',
 ]);
 
 // ⛔⭐오르테가군 지적(2026-07-31) — 이 목록에 «새로» 넣는 것은 PO 승인을 거친다. 이유 없이
@@ -329,17 +782,28 @@ export const EXEMPT_PAIRS = new Set<string>([
 // 자체(고아 컴포넌트 `SlackIntegrationSettingsSection` 전용 i18n 네임스페이스)가 그 스토리에서
 // 완전히 삭제됐다 — "판정 보류"가 아니라 "그 문자열이 이제 존재하지 않는다"라 Set에서도 뺀다
 // (#2410의 판단 유보 대상과 다름, 소스가 사라진 건 재검토할 것도 없다).
+//
+// story #3808(페드루 PO 지적, 2026-09-12 18:18Z) — isKeyStemExtension 도입 여파로 3건 제거
+// (같은 축인 #2410의 isNumberAdjacent 정밀화 선례 그대로: "판단 보류"가 아니라 "이제 이
+// 클래스가 아니라는 게 밝혀졌다"). 아래 세 쌍 전부 같은 네임스페이스 + 한쪽 키 로컬 이름이
+// 다른 쪽의 «접두사»(확장형)라 이 스캔에 더는 안 걸린다(재확認: isKeyStemExtension 도입
+// 전후로 재스캔 — 이 3건이 grandfatherHit에서 정확히 빠지고 newFindings는 그대로 0):
+//   chats.agent<->chats.agentCount · goals.spExceeded<->goals.spExceededDetail ·
+//   storage.delete<->storage.deleteImpact
+// Set 크기 20→17, GRANDFATHER_LIVE_COUNT_TEST 20→17(둘이 계속 일치).
+//
+// story #3918(2026-09-15) — 17→16. dashboard.ccQueueTruncated/dashboard.ccWaitingTitle
+// 둘 다 삭제(ActionZone(command-center) 은퇴 코드 정리 — /dashboard는 이미 /chats로
+// 리다이렉트돼 실 소비처 0, story #3179). "판단 보류"가 아니라 그 쌍 자체가 없어진 것 —
+// 재확認: 삭제 前후 재스캔, 이 1건이 grandfatherHit에서 정확히 빠지고 newFindings는 그대로 0.
 export const GRANDFATHER_BASELINE = new Set<string>([
   'cage.pendingSummary <-> cage.trustScorePending',
-  'chats.agent <-> chats.agentCount',
   'chats.agentCount <-> chats.agentSection',
   'chats.agentCount <-> chats.personCount',
   'chats.agentCount <-> chats.you',
   'chats.participantsOthers <-> chats.personCount',
-  'dashboard.ccQueueTruncated <-> dashboard.ccWaitingTitle',
   'docs.searchResultCount <-> docs.title',
   'goals.fieldPriority <-> goals.steerCappedNote',
-  'goals.spExceeded <-> goals.spExceededDetail',
   'goals.spExceededDetail <-> goals.title',
   'goals.steerCappedNote <-> goals.steerCurated',
   'hypotheses.target <-> retro.hTargetLine',
@@ -348,7 +812,6 @@ export const GRANDFATHER_BASELINE = new Set<string>([
   'retro.recConfMid <-> retro.tallyMeasuring',
   'standup.blockersRollupTitle <-> standup.today',
   'storage.capacityUpgrade <-> storage.capacityWarnDesc',
-  'storage.delete <-> storage.deleteImpact',
   'verify.chatProofCount <-> verify.chatProofSectionTitle',
 ]);
 
@@ -374,21 +837,39 @@ export interface RepositoryScanResult {
   grandfathered: Map<string, CollisionPair>;
   exemptHit: Set<string>;
   grandfatherHit: Set<string>;
+  // story #3582 — 글자·숫자 0개라 비교 쌍 자체를 안 만든 (namespace.key) 집합.
+  symbolOnlyExcluded: Set<string>;
+  // story #3758 — 「구성원」/「멤버」 동의어 충돌(파일 스코프, numberAdjacent 무관).
+  // baseline 0 — exempt/grandfather 없음, 걸리면 그 자리에서 고친다.
+  memberSynonymFindings: Map<string, CollisionPair>;
 }
 
 /** main()에서 뽑아낸 전 저장소 스캔 — story #2410, GRANDFATHER_LIVE_COUNT_TEST가 이걸 불러
  * "지금 실제로 걸리는 grandfather 수"를 고정한다(console.log 경고만으로는 다음 사람이
- * 노이즈로 읽고 넘기는 것을 막는다, PO 지적). */
-export function scanRepository(): RepositoryScanResult {
+ * 노이즈로 읽고 넘기는 것을 막는다, PO 지적).
+ *
+ * story #3758(카디르 qa:changes 2026-09-09 — findMemberSynonymCollisions 자체는 순수
+ * 함수 유닛 테스트 38건이 지키지만, 그 함수를 이 스캔 파이프라인 안에서 실제로 호출하는지
+ * (호출부 자체를 지우는 뮤테이션)는 아무 테스트도 안 쟀다 — 「함수가 있다」와 「배선이
+ * 닫혔다」는 다른 사실). 옵션 인자로 `srcRoot`/`messagesPath`를 받아 임시 픽스처 디렉터리를
+ * 겨냥할 수 있게 열어 둔다(scanRepoCounts, verify-repeated-row-action-names.ts와 동형
+ * 관례) — main()·기존 모든 그랜드파더/exempt 테스트는 인자 생략으로 실 저장소 그대로. */
+export function scanRepository(
+  overrides: { srcRoot?: string; messagesPath?: string } = {},
+): RepositoryScanResult {
+  const srcRoot = overrides.srcRoot ?? SRC_ROOT;
+  const messagesPath = overrides.messagesPath ?? MESSAGES_PATH;
   const files: string[] = [];
-  walk(SRC_ROOT, files);
-  const messages = flattenMessages(JSON.parse(readFileSync(MESSAGES_PATH, 'utf8')));
+  walk(srcRoot, files);
+  const messages = flattenMessages(JSON.parse(readFileSync(messagesPath, 'utf8')));
 
   let totalDynamicCalls = 0;
   const newFindings = new Map<string, CollisionPair>();
   const grandfathered = new Map<string, CollisionPair>();
   const exemptHit = new Set<string>();
   const grandfatherHit = new Set<string>();
+  const symbolOnlyExcluded = new Set<string>();
+  const memberSynonymFindings = new Map<string, CollisionPair>();
 
   for (const abs of files) {
     const content = readFileSync(abs, 'utf8');
@@ -401,10 +882,12 @@ export function scanRepository(): RepositoryScanResult {
     for (const qualifiedKey of usages) {
       const value = messages.get(qualifiedKey);
       if (value === undefined) continue;
+      // story #3582 — 비교 쌍을 만들기 전에 제외(글자·숫자 0개 값).
+      if (!hasLetterOrNumber(value)) { symbolOnlyExcluded.add(qualifiedKey); continue; }
       phrases.set(qualifiedKey, { value, numberAdjacent: isNumberAdjacent(value) });
     }
 
-    const rel = path.relative(SRC_ROOT, abs).split(path.sep).join('/');
+    const rel = path.relative(srcRoot, abs).split(path.sep).join('/');
     for (const c of findSubstringCollisions(phrases)) {
       const pk = pairKey(c.keyA, c.keyB);
       const pair: CollisionPair = { keyA: c.keyA, keyB: c.keyB, valueA: c.valueA, valueB: c.valueB, file: rel };
@@ -417,13 +900,29 @@ export function scanRepository(): RepositoryScanResult {
         newFindings.set(pk, pair);
       }
     }
+
+    // story #3758 — 「구성원」/「멤버」 동의어 축(baseline 0, exempt/grandfather 없음).
+    // 파일 스코프라 (file, pairKey) 조합으로 키를 삼는다 — 같은 (keyA,keyB) 쌍이라도
+    // 두 파일에서 각각 독립적으로 걸리면 둘 다 별개 finding.
+    for (const c of findMemberSynonymCollisions(phrases)) {
+      const mk = `${rel}::${pairKey(c.keyA, c.keyB)}`;
+      if (!memberSynonymFindings.has(mk)) {
+        memberSynonymFindings.set(mk, { keyA: c.keyA, keyB: c.keyB, valueA: c.valueA, valueB: c.valueB, file: rel });
+      }
+    }
   }
 
-  return { files, totalDynamicCalls, newFindings, grandfathered, exemptHit, grandfatherHit };
+  return {
+    files, totalDynamicCalls, newFindings, grandfathered, exemptHit, grandfatherHit,
+    symbolOnlyExcluded, memberSynonymFindings,
+  };
 }
 
 function main(): void {
-  const { files, totalDynamicCalls, newFindings, grandfathered, exemptHit, grandfatherHit } = scanRepository();
+  const {
+    files, totalDynamicCalls, newFindings, grandfathered, exemptHit, grandfatherHit,
+    symbolOnlyExcluded, memberSynonymFindings,
+  } = scanRepository();
 
   const staleExempt = [...EXEMPT_PAIRS].filter((pk) => !exemptHit.has(pk));
   const staleGrandfather = [...GRANDFATHER_BASELINE].filter((pk) => !grandfatherHit.has(pk));
@@ -432,6 +931,11 @@ function main(): void {
     `[AC7] i18n 문구 충돌 스캔(같은 파일·수와 함께 서는 쌍만) — 파일 ${files.length}개 · ` +
       `동적 키 호출(정적 미포착) ${totalDynamicCalls}건(AC4㉡) · grandfather(미triage 채무, 안 막음) ${grandfatherHit.size}건 · ` +
       `exempt ${EXEMPT_PAIRS.size}건 · en.json 미검사(AC4㉢)`,
+  );
+  // story #3582 — 이 가드가 «못 잡는 것»(AC4 관례와 같은 결) 선언: 글자·숫자 0개 값은
+  // «구»를 담지 않으므로 비교 쌍 자체를 안 만든다.
+  console.log(
+    `  ℹ️ 글자·숫자 없는 값이라 비교 제외(이 가드가 못 잡는 축) ${symbolOnlyExcluded.size}건: ${[...symbolOnlyExcluded].sort().join(', ')}`,
   );
   if (staleExempt.length > 0) {
     console.log(`  ⚠️ exempt로 등재됐으나 이번 스캔에서 안 걸린(죽은 문서 후보): ${staleExempt.join(', ')}`);
@@ -446,7 +950,10 @@ function main(): void {
     }
   }
 
+  let failed = false;
+
   if (newFindings.size > 0) {
+    failed = true;
     console.log(`\n❌ FAIL: 새 부분문자열 충돌 ${newFindings.size}건(grandfather 밖 — 신규):`);
     for (const c of [...newFindings.values()].sort((a, b) => a.file.localeCompare(b.file))) {
       console.log(`  - [${c.file}] ${c.keyA}="${c.valueA}" <-> ${c.keyB}="${c.valueB}"`);
@@ -455,10 +962,29 @@ function main(): void {
       '\n→ 「같은 파일이 렌더하는, 수와 함께 서는 두 문구가 부분문자열로 겹친다」 — #2352·#2365와 같은 클래스.' +
         ' 정말 안 겹치는 게 맞으면 EXEMPT_PAIRS에, 지금은 못 고치지만 알고 있는 채무면 GRANDFATHER_BASELINE에 이유와 함께 등재.',
     );
+  }
+
+  if (memberSynonymFindings.size > 0) {
+    failed = true;
+    console.log(`\n❌ FAIL: 「구성원」/「멤버」 동의어 충돌 ${memberSynonymFindings.size}건(baseline 0 — exempt/grandfather 없음):`);
+    for (const c of [...memberSynonymFindings.values()].sort((a, b) => a.file.localeCompare(b.file))) {
+      console.log(`  - [${c.file}] ${c.keyA}="${c.valueA}" <-> ${c.keyB}="${c.valueB}"`);
+    }
+    console.log(
+      '\n→ story #3758(페드루/유나 定 2026-09-09) — 「구성원」이 정본(nav.orgMembers 진입점 기준),' +
+        ' 「멤버」는 phase-out 대상. 한 파일 안에 둘이 같이 서면 그 파일에서 「구성원」으로 통일할 것' +
+        '(조사 이/가·을/를·은/는은 받침 유무에 맞춰 손으로 — 기계 치환 금지, #3758 리뷰 실사고).',
+    );
+  }
+
+  if (failed) {
     process.exit(1);
   }
 
-  console.log(`OK: 새 부분문자열 충돌 0건(grandfather ${grandfathered.size}건은 위 목록대로 남아있음 — 신규만 막는다)`);
+  console.log(
+    `OK: 새 부분문자열 충돌 0건(grandfather ${grandfathered.size}건은 위 목록대로 남아있음 — 신규만 막는다) · ` +
+      `「구성원」/「멤버」 동의어 충돌 0건`,
+  );
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

@@ -7,7 +7,6 @@ import { Plus, PanelLeftOpen } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ChatListView } from '@/components/chat/chat-list-view';
 import { useDashboardContext } from '../../dashboard/dashboard-shell';
-import { EmptyState } from '@/components/ui/empty-state';
 import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { ChatRailProvider, useChatRail } from './chat-rail-context';
 
@@ -34,6 +33,7 @@ export default function ChatsLayout({ children }: { children: React.ReactNode })
 
 function ChatsLayoutBody({ children }: { children: React.ReactNode }) {
   const t = useTranslations('chats');
+  const tc = useTranslations('common');
   const pathname = usePathname();
   const { currentTeamMemberId, projectId } = useDashboardContext();
   const [showModal, setShowModal] = useState(false);
@@ -51,9 +51,11 @@ function ChatsLayoutBody({ children }: { children: React.ReactNode }) {
   const isListRoute = pathname === '/chats';
 
   if (!currentTeamMemberId || !projectId) {
+    // story #3788(B-④, 유나 定) — 「없다」 부품(EmptyState)으로 「아직 모른다」(로딩)를 그리지
+    // 않는다(3784와 같은 축). 값은 story #3783이 common.loading을 정본화하면 자동으로 따라온다.
     return (
       <div className="flex h-64 items-center justify-center">
-        <EmptyState title="로딩 중…" description="" className="w-full max-w-xs" />
+        <p className="text-sm text-muted-foreground">{tc('loading')}</p>
       </div>
     );
   }

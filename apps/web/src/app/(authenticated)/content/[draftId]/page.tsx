@@ -1,0 +1,1714 @@
+'use client';
+
+import { useCallback, useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
+import { useParams, useRouter } from 'next/navigation';
+import { useLocale, useTranslations } from 'next-intl';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { fetchWithAuth } from '@/lib/db/client';
+import { channelLabel } from '@/lib/channel-label';
+import {
+  deriveContentPostStatus,
+  type ContentPostStatusInput,
+} from '@/components/content/post-status';
+import { deriveChannelPostView, type ChannelPublicationStatus } from '@/components/content/channel-post-status';
+import { StatusChip } from '@/components/content/status-chip';
+import { AuthorKindBadge } from '@/components/content/author-kind-badge';
+import { parseSitePostApiError } from '@/components/content/api-error';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { RawDetailsToggle } from '@/components/content/raw-details-toggle';
+// story #3483(BE 3482 계약, 3472 2부/§16-7과 동형) — 원문(site_post) 초안의 규칙
+// 위반. field는 title|summary|body_md(channel_post의 text|link_url과 다른 축이라
+// 컴포넌트는 field를 모른다 — 호출부가 이미 걸러 넘긴다).
+import {
+  ContentRuleViolationList, ContentRuleSubmitBlockedReason, type ContentRuleViolation,
+} from '@/components/content/content-rule-violation';
+import { deriveFailureAction, type CommandStatus, type FailureKind } from '@/components/content/failure-action';
+import { FailureActionBadge } from '@/components/content/failure-action-badge';
+import { InsightSnapshotBlock, type InsightSnapshot } from '@/components/content/insight-snapshot-block';
+import { GenerationBudgetIndicator, majorToMinor, type GenerationBudgetCurrency, type GenerationBudgetState } from '@/components/content/generation-budget-indicator';
+import { GenerationBudgetExceededBanner } from '@/components/content/generation-budget-exceeded-banner';
+
+/**
+ * story #3368(Phase0·마케팅운영 S4, doc phase0-post-manager-screen-design §8-1 순서 3번) —
+ * 글 편집(와이어프레임 S3·S4). slug·lang은 첫 버전 뒤 잠근다(페드루 정정 2026-09-03: 서버가
+ * (org, work_item_id, slug)로 기존 초안을 매칭하므로 slug를 바꾸면 새 초안이 생겨 이력이
+ * 갈라진다) — 편집 가능한 필드는 title·summary·tags·body_md뿐이다.
+ *
+ * ⚠️원안/수정본 대조 패널(와이어프레임 S4)은 이 슬라이스에 없다 — §8-1 명시: "4·6이 봉인
+ * 해시(BE §4-3 3번)에 걸려 있다 ... 4·6은 BE 봉인이 착지한 뒤에 시작한다." 오늘은 최신
+ * 버전 단일 폼만 그린다.
+ *
+ * 승인 요청(와이어프레임 S5) — 페드루 PO 판정(2026-09-03): FE가 generic `POST /gates`에
+ * role_id를 지어 넣지 않는다(계약 갭, gates.py::GateCreateRequest가 role_id 필수인데
+ * eligible-approvers 응답엔 없음). 대신 디디군 S2 전용 엔드포인트 계약으로 stub 배선한다
+ * (`POST .../drafts/{draft_id}/submit`, role_id 해소·게이트 pending 생성·봉인은 전부
+ * 서버 책임) — S2 착지 전까지는 404가 그대로 뜬다(정상, 계약 stub). 성공하면 gate_id로
+ * `/gates/{id}` 딥링크(§6-1 재사용 목록, 게이트 상세)한다.
+ */
+
+// story #3514(BE 신설, PO 確定 2026-09-05) — 단건 GET(site_post는 이 스토리 前엔 이
+// 엔드포인트 자체가 없었다, channel-posts/drafts/[draftId] #3445와 같은 갭). 목록
+// 항목(SitePostDraftListItem) shape에 lint-on-read `violations[]`를 얹은 응답 —
+// 이 화면이 지금 당장 쓰는 건 violations뿐이라(제목·본문 등은 여전히 /versions의
+// 최신 항목에서 온다) 그 필드만 타입에 싣는다(ChannelPostDraftDetail처럼 optional).
+interface SitePostDraftDetail {
+  draft_id: string;
+  violations?: ContentRuleViolation[];
+}
+
+interface SitePostVersion {
+  version_id: string;
+  version: number;
+  slug: string;
+  source_story_id: string;
+  title: string;
+  lang: string;
+  summary: string;
+  tags: string[];
+  body_md: string;
+  body_sha256: string;
+  author_member_id: string;
+  author_kind: 'agent' | 'human';
+  created_at: string;
+  // story 1db41045(#3457) — 이 원문이 속한 campaign. 없으면 null(정상값, 단독 글).
+  // 페드루 PO 確定(2026-09-04 17:03Z) — 디디 BE 소형 후속이 이 두 필드를
+  // SitePostVersionHistoryItem에 얹은 뒤에야(source_content_item_id 옆) 이 계약이
+  // 실물과 맞다 — 필드명 대조 없이는 조용히 버려지는 자리라 rebase 뒤 재확認 필수.
+  campaign_id?: string | null;
+  campaign_name?: string | null;
+}
+
+// story 1db41045(#3457) — GET /organizations/{org}/campaigns 응답 1건(디디 BE 소형
+// 후속, CampaignResponse 재사용·GET/{id}와 같은 권한 폭·created_at desc — 페드루 PO
+// 確定 2026-09-04 17:01Z).
+interface CampaignListItem {
+  id: string;
+  name: string;
+  starts_at: string | null;
+  ends_at: string | null;
+  status: string;
+  created_by_member_id: string;
+  created_at: string;
+}
+
+// story #3368 §8-1 4단(페드루 지시 2026-09-03) — 이 work item의 external_publish
+// 게이트. GET /api/gates?work_item_id=&work_item_type=는 기존 범용 라우트(doc-gate-
+// section.tsx와 동형 재사용, 새 엔드포인트 0). 봉인 필드는 neutral_facts가 아니라 Gate
+// 전용 컬럼 4종이다(S2, PR#3733 — GateResponse가 Gate ORM 컬럼명 그대로 top-level에
+// 얹는다, gates.py::GateResponse).
+interface GateInfo {
+  id: string;
+  status: string;
+  sealed_content_version?: number | null;
+  sealed_content_sha256?: string | null;
+  sealed_content_body?: string | null;
+  reapproval_required?: boolean;
+}
+
+// story #3386(Phase0 결함, S8 — 발행됨·URL·행위자) — GET .../drafts/{draftId}/publication.
+// 발행된 적 없으면(또는 unpublish됐으면) 서버가 전부 null을 준다(200 — 404는 draft 자체가
+// 없을 때만, "모른다"와 "발행 안 됐다"를 구별하는 서버측 신호).
+//
+// story #3479(BE #3476/#3828 실물 계약, 페드루 PO 確定 2026-09-05) — destination이
+// "hosted_site"가 아니면(wordpress·webhook·unknown) channel_publication/command가
+// 실린다. command 필드명은 미르코 FE 그라운딩대로 deriveFailureAction 입력과 정확히
+// 같다(command_status/failure_kind/next_retry_at/command_reason_code) — 새 어댑터
+// 없이 그대로 재사용.
+interface ChannelPublicationView {
+  status: string;
+  external_id: string | null;
+  permalink: string | null;
+  published_at: string | null;
+  unpublished_at: string | null;
+  last_error: string | null;
+  // story #3499(PO 確定 2026-09-05) — BE #3844 조각4(미착지, additive) 의존. 없으면
+  // (구 응답·BE 미배포) undefined — 인사이트 블록을 그리지 않는다(에이전트가 id를
+  // 추정 조립하지 않는다, PO 경계).
+  publication_id?: string | null;
+}
+
+interface PublicationCommandView {
+  id: string;
+  command_status: CommandStatus;
+  attempt_count: number;
+  failure_kind: FailureKind | null;
+  next_retry_at: string | null;
+  dead_letter_at: string | null;
+  command_reason_code: string | null;
+  last_error: string | null;
+}
+
+interface SitePostPublicationInfo {
+  published_at: string | null;
+  url: string | null;
+  published_by_member_id: string | null;
+  published_body_sha256: string | null;
+  destination: string;
+  channel_publication: ChannelPublicationView | null;
+  command: PublicationCommandView | null;
+  // story #3499(PO 確定 2026-09-05) — hosted_site 축 publication_id(SitePost.id).
+  // BE #3844 조각4 의존, 위 필드와 동일 이유로 optional.
+  publication_id?: string | null;
+}
+
+function realStr(v: unknown): string | undefined {
+  return typeof v === 'string' && v.length > 0 ? v : undefined;
+}
+
+// story #3479 PO 보정(2026-09-05, PR#3830 리뷰) — ChannelPublication.status 4종
+// (backend/app/models/channel_publication.py 그라운딩: container_created·published·
+// failed·unpublished). 모르는 값은 원문 노출 대신 제네릭 폴백(§17-4 "맵에 없는
+// 값이 오면 원시값을 그대로 노출하지 않는다"와 동형 원칙).
+function externalPublicationStatusLabelKey(status: string): string {
+  switch (status) {
+    case 'published': return 'externalPublicationStatusPublished';
+    case 'unpublished': return 'externalPublicationStatusUnpublished';
+    case 'container_created': return 'externalPublicationStatusPending';
+    case 'failed': return 'externalPublicationStatusFailed';
+    default: return 'externalPublicationStatusUnknown';
+  }
+}
+
+// story 15e481ce(#3453 AC1) — 활성 소셜 연결(어댑터가 사회형이라는 것은 애초에 connection
+// row가 존재한다는 사실 자체로 이미 참이다 — hosted_site는 requires_connection=false라
+// connection row가 없다, backend/app/services/channel_adapters.py 그라운딩). 그래서
+// channel-connections 목록을 kind로 다시 거를 필요가 없다 — status=active만 본다.
+interface ActiveConnectionOption {
+  id: string;
+  channel: string;
+  account_label: string | null;
+  status: string;
+}
+
+// story 15e481ce(#3453 AC2, 유나 §14-2) — 원문 상세의 "같은 스토리의 채널 글" 역방향
+// 목록. §14-2가 요구하는 값만(채널·상태 칩·상세 링크) — 그 이상은 목록 응답에 없다.
+interface ChannelPostVariantItem {
+  draft_id: string;
+  channel: string;
+  connection_id: string;
+  gate_status?: string | null;
+  reapproval_required?: boolean | null;
+  sealed_content_sha256?: string | null;
+  body_sha256: string;
+  publication_status?: string | null;
+  error_code?: string;
+  published_at?: string | null;
+}
+
+// Gate.status는 auto_passed/voided/held 등도 가질 수 있지만 Phase 0 external_publish는
+// 휴먼 승인만 인정(auto_passed 도달 불가, doc phase0-post-manager-screen-design §3-1
+// 각주) — pending/approved/rejected 셋 밖은 "유효한 승인 대상 없음"과 동형으로 undefined
+// 처리해 deriveContentPostStatus가 'draft'로 안전하게 떨어지게 한다.
+function toGateStatus(status: string | undefined): ContentPostStatusInput['gateStatus'] {
+  return status === 'pending' || status === 'approved' || status === 'rejected' ? status : undefined;
+}
+
+export default function ContentPostEditPage() {
+  const { draftId } = useParams<{ draftId: string }>();
+  const { orgId, role } = useDashboardContext();
+  const t = useTranslations('content');
+  const tc = useTranslations('common');
+
+  const [versions, setVersions] = useState<SitePostVersion[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  // story #3662(campaigns/[campaignId]/page.tsx:76 선례, 유나 確定) — notFound/loadError
+  // 하나였던 것에 forbidden을 더해 서버 status를 그대로 세 갈래로 가른다(추정 0). 주
+  // 데이터는 versionsRes(이 파일 자체 관례 — draftRes는 부수 데이터, 위 §16-7 주석 참고).
+  const [notFound, setNotFound] = useState(false);
+  const [forbidden, setForbidden] = useState(false);
+
+  const [title, setTitle] = useState('');
+  const [summary, setSummary] = useState('');
+  const [tagsText, setTagsText] = useState('');
+  const [bodyMd, setBodyMd] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState<
+    { type: 'success'; text: string } | { type: 'error'; text: string; raw?: string } | null
+  >(null);
+  // story #3483(BE 3482, §16-7) — 저장/상신 응답이 채우는 하나의 목록. 상신 422는
+  // 새 배너를 안 만들고 이 state를 서버 응답으로 갱신한다(channel-posts 상세와 동형).
+  const [violations, setViolations] = useState<ContentRuleViolation[]>([]);
+  // story #3514(유나 Design 변경요청 1, 2026-09-05) — 단건 GET(violations 부수 호출)
+  // 실패가 초안 열기 자체를 막으면 안 된다(주 데이터는 여전히 /versions). 실패해도
+  // violations=[]로 진행하고 이 한 줄로만 "모른다"를 알린다(§16-7 "읽기 자리를 주
+  // 데이터와 같은 급으로 묶지 않는다").
+  const [violationsLoadFailed, setViolationsLoadFailed] = useState(false);
+  // "편집 중에도 같은 강도" — severity가 없어 위반이 있으면 전부 차단(channel-posts
+  // 상세와 동형).
+  const hasBlockingViolations = violations.length > 0;
+
+  const [submitting, setSubmitting] = useState(false);
+  const [submitResult, setSubmitResult] = useState<
+    | { type: 'success'; gateId: string }
+    // story f6d14476(AC3) — SITE_POST_GATE_ALREADY_HELD는 원인 문구만이 아니라 그 게이트를
+    // 쥔 상대 초안 링크까지 보여야 한다 — heldByDraftId가 있을 때만 렌더한다.
+    | { type: 'error'; text: string; raw?: string; heldByDraftId?: string }
+    | null
+  >(null);
+  // story #3500(BE #3498, PO 確定 2026-09-05 — BE 미착지, 계약만 고정) — 생성 비용
+  // 한도(크레딧 게이트). 잔량은 별도 non-blocking 왕복, 예상 비용은 상신 시 선택
+  // 입력(빈 문자열=body에 안 실음, channel-posts 상세와 동형).
+  const [genBudget, setGenBudget] = useState<GenerationBudgetState>({ status: 'loading' });
+  const [estimatedCostInput, setEstimatedCostInput] = useState('');
+  // doc a0da40c9 §19-8 — 구조화된 4값+통화 state(generic submitResult 텍스트 배너와
+  // 다른 자리, channel-posts 상세와 동형).
+  const [genBudgetExceeded, setGenBudgetExceeded] = useState<
+    { limitMinor: number; spentMinor: number; estimatedCostMinor: number; remainingMinor: number; currency: GenerationBudgetCurrency } | null
+  >(null);
+  // PO REQUIRED②(2026-09-05, PR#3848 리뷰) — `currency ?? 'KRW'` 조립 제거. limitMinor가
+  // 있는데(정책 존재) currency나 remainingMinor가 없으면 서버 응답이 불완전한 것이지
+  // 'KRW'로 추정해 채울 값이 아니다(§19-1이 막으려던 100배 오차의 원인이 될 수 있다) —
+  // 이 경우 입력·배너 전부 숨기고 상태 표시(GenerationBudgetIndicator)만 failed와
+  // 동형으로 보인다(그 컴포넌트 내부가 이미 그렇게 처리한다).
+  const generationBudgetUsable =
+    genBudget.status === 'ok' && genBudget.limitMinor !== null && genBudget.currency !== null
+    && genBudget.remainingMinor !== null && genBudget.spentMinor !== null;
+  const generationBudgetCurrency: GenerationBudgetCurrency | null =
+    genBudget.status === 'ok' ? genBudget.currency : null;
+
+  const [gate, setGate] = useState<GateInfo | null>(null);
+  const [publishing, setPublishing] = useState(false);
+  const [publishResult, setPublishResult] = useState<
+    // S3(story #3369) 계약 — url은 항상 온다(발행 URL을 서버가 조립·보증, 화면이 지어내지
+    // 않는다). string | null이던 것은 레거시 endpoint(url 필드 자체가 없던 시절)의 흔적.
+    | { type: 'success'; url: string; publishedAt: string }
+    // reapprovalHashes — §8-3④-1(페드루 PO): 409 SITE_POST_REAPPROVAL_REQUIRED는 S10의
+    // 일반 오류가 아니라 S9와 같은 처리(문구+해시 병치)여야 한다. 서버가 해시 값 자체를
+    // 돌려주지 않아도(계약 미확정) 클라이언트가 이미 양쪽 해시를 갖고 있으니(gate 봉인
+    // 해시·latest 현재 해시) 그걸로 병치한다 — 서버 응답을 지어내지 않는다.
+    | { type: 'error'; text: string; raw?: string; reapprovalHashes?: { sealed?: string; current: string } }
+    | null
+  >(null);
+
+  // story #3386 — S8(발행됨·URL·행위자). undefined=아직 안 물어봤다(첫 렌더), null=물어봤는데
+  // 실패(best-effort — gate 조회와 동형, 화면 전체를 막지 않는다), 객체=성공(발행 안 됐어도
+  // 전부 null 필드로 옴 — 그 자체가 "안다"는 신호라 undefined와는 다르다, AC6).
+  const [publication, setPublication] = useState<SitePostPublicationInfo | null | undefined>(undefined);
+  // 페드루 PO 리뷰(2026-09-03, 유나 design verdict) — 발행자가 UUID 그대로 보이는 문제.
+  // gates/[id]/page.tsx의 memberNames 관례(id→이름, /api/team-members, 못 찾으면 앞 8자
+  // 폴백) 그대로 재사용한다 — publication 계약을 늘리지 않는다(이름 필드를 새로 추가하지
+  // 않는다).
+  const [memberNames, setMemberNames] = useState<Record<string, string>>({});
+  const [unpublishing, setUnpublishing] = useState(false);
+  const [unpublishConfirmOpen, setUnpublishConfirmOpen] = useState(false);
+  const [unpublishResult, setUnpublishResult] = useState<
+    { type: 'success' } | { type: 'error'; text: string; raw?: string } | null
+  >(null);
+  // story #3479(BE #3476) — 외부 목적지 발행 재시도. 공용 BFF(publication-commands/
+  // {id}/retry) — content_kind 무관, command_id 하나로 서버가 대상을 안다.
+  const [retryingCommand, setRetryingCommand] = useState(false);
+  // story #3369(Phase2·FE, 페드루 PO 確定 2026-09-11) — channel_posts 상세
+  // (content/channel-posts/[draftId]/page.tsx)의 needs_check 2단계 관문을 그대로
+  // 이식한다 — 「밖에 나갔는지 모르는 실패」를 곧바로 재시도로 넘기지 않고, 채널에서
+  // 확認했다는 체크가 끝나야 확認 버튼이 열린다(recheckGate 이 화면에서 켬).
+  const [retryConfirmOpen, setRetryConfirmOpen] = useState(false);
+  const [retryChecklistConfirmed, setRetryChecklistConfirmed] = useState(false);
+
+  // story 15e481ce(#3453 AC1) — 「Threads 변형 만들기」. 활성 연결 목록·이미 만든 변형
+  // 목록은 서로 다른 조회(연결=channel-connections, 변형=variants) — 같이 로드한다.
+  const [activeConnections, setActiveConnections] = useState<ActiveConnectionOption[]>([]);
+  const [variants, setVariants] = useState<ChannelPostVariantItem[]>([]);
+  const [selectedConnectionId, setSelectedConnectionId] = useState('');
+  const [creatingVariant, setCreatingVariant] = useState(false);
+  // 유나 사전 스티어(2026-09-04, PR#3799 head)④, #3801 착지분 — raw 캡처+토글
+  // (RawDetailsToggle 공용화) 둘 다 이제 여기 있다.
+  const [createVariantResult, setCreateVariantResult] = useState<{ type: 'error'; text: string; raw?: string } | null>(null);
+  const router = useRouter();
+  // 유나 사전 스티어② — 변형 행의 published_at 표시. 조직 tz 폴백 관례는 channel-posts
+  // 상세 화면과 동형(resolveDisplayTimezone()의 기본 인자 규약 그대로 재사용).
+  const displayTimezone = resolveDisplayTimezone().tz;
+  const locale = useLocale();
+
+  // story #3499 — publication_id는 hosted_site(publication.publication_id)·외부목적지
+  // (publication.channel_publication.publication_id) 어느 쪽이든 서버가 낸 값 그대로,
+  // FE가 조립하지 않는다(PO 경계).
+  const insightPublicationId = publication?.publication_id ?? publication?.channel_publication?.publication_id ?? null;
+  const [insightSnapshots, setInsightSnapshots] = useState<InsightSnapshot[]>([]);
+  useEffect(() => {
+    if (!orgId || !insightPublicationId) { setInsightSnapshots([]); return; }
+    let cancelled = false;
+    fetchWithAuth(`/api/organizations/${orgId}/publications/${insightPublicationId}/insights`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((body) => { if (!cancelled) setInsightSnapshots(Array.isArray(body?.data) ? body.data : []); })
+      .catch(() => { if (!cancelled) setInsightSnapshots([]); });
+    return () => { cancelled = true; };
+  }, [orgId, insightPublicationId]);
+
+  // story 1db41045(#3457) — 「캠페인 만들기/붙이기」. 목록(기존 선택)·새 이름(만들기)
+  // 둘 다 이 자리에서 다룬다. 둘 다 지정하면 "새로 만들기"가 우선(사람이 방금 타이핑한
+  // 것이 최신 의도 — select를 초기화 안 해도 자연스럽게 이긴다).
+  const [campaigns, setCampaigns] = useState<CampaignListItem[]>([]);
+  const [selectedCampaignId, setSelectedCampaignId] = useState('');
+  const [newCampaignName, setNewCampaignName] = useState('');
+  const [attachingCampaign, setAttachingCampaign] = useState(false);
+  const [attachCampaignResult, setAttachCampaignResult] = useState<{ type: 'error'; text: string; raw?: string } | null>(null);
+  // 페드루 PO B2(2026-09-04 17:39Z) — 붙인 뒤에도 「변경」/「해제」 표면이 있어야
+  // AC2("campaign_id 편집")가 첫 1회로 안 끝난다. changingCampaign=true면
+  // campaign_id가 있어도 붙이기 폼을 다시 연다(같은 폼 재사용, 새 컴포넌트 0).
+  const [changingCampaign, setChangingCampaign] = useState(false);
+  const [detachingCampaign, setDetachingCampaign] = useState(false);
+  const [detachCampaignResult, setDetachCampaignResult] = useState<{ type: 'error'; text: string; raw?: string } | null>(null);
+
+  const loadCampaigns = useCallback(async () => {
+    if (!orgId) return;
+    try {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/campaigns`);
+      if (!res.ok) return;
+      const json = (await res.json().catch(() => null)) as { data?: CampaignListItem[] } | null;
+      setCampaigns(json?.data ?? []);
+    } catch {
+      // 목록은 부가 정보(선택지 채우기) — 조회 실패로 "새로 만들기"까지 막지 않는다.
+    }
+  }, [orgId]);
+
+  useEffect(() => {
+    if (!orgId) return;
+    let cancelled = false;
+    async function load() {
+      setLoading(true);
+      setLoadError(false);
+      setNotFound(false);
+      setForbidden(false);
+      try {
+        // story #3514(doc a0da40c9, PO 確定 2026-09-05) — lint-on-read: 단건 GET을
+        // /versions와 병렬로 부른다(channel-posts/[draftId]/page.tsx :340-341과 동형
+        // 패턴 — site_post는 이 스토리 前까지 단건 GET 자체가 없어 /versions 하나만
+        // 불렀다). 단건 GET의 violations[]로 "저장 없이" 위반 목록·상신 비활성이
+        // 선다(§16-7을 읽기까지 넓힘).
+        //
+        // ⚠️유나 Design 변경요청 1(2026-09-05) — 단건 GET은 이 화면에선 부수 데이터다
+        // (주 데이터는 여전히 /versions). 단건 GET만 실패해도 화면 전체를 막지 않는다
+        // (§16-7 "읽기 자리를 주 데이터와 같은 급으로 묶지 않는다") — violations=[]로
+        // 진행하고 violationsLoadFailed 한 줄만 띄운다. 변형(channel_post) 화면은 단건
+        // GET이 주 데이터라 그대로 loadError 대상.
+        //
+        // ⚠️유나 실측 후속(2026-09-05, §16-7 2부 정정) — "응답은 왔는데 실패"(4xx/5xx,
+        // res.ok===false)와 "응답이 안 옴"(연결 끊김·abort, fetchWithAuth 자체가 던짐)은
+        // 다른 갈래다. 단건 GET을 Promise.all에 그대로 섞으면 후자에서 Promise.all
+        // 전체가 거절돼(§16-7이 지키려던) 부수 데이터 하나가 «나란히 부르되 같은 급으로
+        // 묶지 않는다»는 원칙을 어기고 화면 전체를 막는다 — 단건 GET만 따로
+        // .catch(() => null)로 받아 실패를 이 fetch 자리에 가둔다(/versions는 그대로
+        // Promise.all 안에 남아 실패 시 loadError).
+        const [draftRes, versionsRes] = await Promise.all([
+          fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts/${draftId}`).catch(() => null),
+          fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts/${draftId}/versions`),
+        ]);
+        if (cancelled) return;
+        if (!versionsRes.ok) {
+          if (versionsRes.status === 404) {
+            setNotFound(true);
+          } else if (versionsRes.status === 403) {
+            setForbidden(true);
+          } else {
+            setLoadError(true);
+          }
+          return;
+        }
+        if (draftRes?.ok) {
+          const draftJson = (await draftRes.json().catch(() => null)) as { data?: SitePostDraftDetail } | null;
+          setViolations(draftJson?.data?.violations ?? []);
+          setViolationsLoadFailed(false);
+        } else {
+          setViolations([]);
+          setViolationsLoadFailed(true);
+        }
+
+        const json = (await versionsRes.json().catch(() => null)) as { data?: SitePostVersion[] } | null;
+        const list = json?.data ?? [];
+        setVersions(list);
+        const latest = list[list.length - 1];
+        if (latest) {
+          setTitle(latest.title);
+          setSummary(latest.summary);
+          setTagsText(latest.tags.join(', '));
+          setBodyMd(latest.body_md);
+        }
+      } catch {
+        if (!cancelled) setLoadError(true);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [orgId, draftId]);
+
+  const latest = versions[versions.length - 1];
+  const workItemId = latest?.source_story_id;
+
+  // story 15e481ce(#3453 AC1·AC2) — 활성 연결 목록(변형 만들기 선택지)과 이미 만든
+  // 변형 목록(§14-2 "같은 스토리의 채널 글")을 같이 부른다. onRefresh 없이 draftId
+  // 로드 시 한 번(변형 생성 성공 뒤엔 loadVariants만 다시 부른다 — 아래 handleCreateVariant).
+  const loadVariants = useCallback(async () => {
+    if (!orgId) return;
+    try {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts/${draftId}/variants`);
+      if (!res.ok) return;
+      const json = (await res.json().catch(() => null)) as { data?: ChannelPostVariantItem[] } | null;
+      setVariants(json?.data ?? []);
+    } catch {
+      // §14-2 표기는 있으면 보이고 없으면 안 보이는 부가 정보 — 조회 실패로 화면
+      // 전체를 막지 않는다(gate·publication best-effort 조회와 동형 관례).
+    }
+  }, [orgId, draftId]);
+
+  useEffect(() => {
+    if (!orgId) return;
+    let cancelled = false;
+    void loadVariants();
+    void loadCampaigns();
+    fetchWithAuth(`/api/organizations/${orgId}/channel-connections`)
+      .then(async (r) => {
+        if (cancelled || !r.ok) return;
+        const json = (await r.json().catch(() => null)) as { data?: ActiveConnectionOption[] } | null;
+        setActiveConnections((json?.data ?? []).filter((c) => c.status === 'active'));
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [orgId, loadVariants, loadCampaigns]);
+
+  // story 15e481ce(#3453 AC1) — 「Threads 변형 만들기」. text는 min_length=1(BE 검증) —
+  // 빈 문자열을 보낼 수 없어 summary를 채워 넣고, summary도 비어 있으면 title로
+  // 폴백한다. link_url은 발행된 URL이 있으면 그 값(없으면 null — 지어내지 않는다).
+  //
+  // 카디르 QA 지적(2026-09-04, PR#3799) — title도 trim 없이 그대로 썼다. summary·
+  // title 둘 다 공백뿐이면 trim 전엔 공백 문자열이 BE min_length=1을 그대로 통과해
+  // 버린다(공백 1글자도 "길이 1"). 그래서 title도 trim하고, 결과가 그래도 비면
+  // 아예 POST를 안 보낸다(버튼도 비활성 — variantTextEmpty, 아래 렌더 참고).
+  const variantText = (latest?.summary.trim() || latest?.title.trim()) ?? '';
+  const variantTextEmpty = latest !== undefined && variantText === '';
+  const handleCreateVariant = useCallback(async () => {
+    if (!orgId || !workItemId || !selectedConnectionId || !latest || !variantText) return;
+    setCreatingVariant(true);
+    setCreateVariantResult(null);
+    try {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          work_item_id: workItemId,
+          connection_id: selectedConnectionId,
+          text: variantText,
+          link_url: publication?.url ?? null,
+          source_content_item_id: draftId,
+        }),
+      });
+      if (res.ok) {
+        const json = (await res.json().catch(() => null)) as { data?: { draft_id: string } } | null;
+        if (json?.data?.draft_id) {
+          router.push(`/content/channel-posts/${json.data.draft_id}`);
+          return;
+        }
+      }
+      const body = await res.json().catch(() => null);
+      const info = parseSitePostApiError(body);
+      setCreateVariantResult({
+        type: 'error',
+        text: info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('channelPostsCreateVariantFailed')),
+        raw: info.raw,
+      });
+    } catch {
+      setCreateVariantResult({ type: 'error', text: t('channelPostsCreateVariantFailed') });
+    } finally {
+      setCreatingVariant(false);
+    }
+  }, [orgId, workItemId, selectedConnectionId, latest, variantText, publication, draftId, router, t]);
+
+  // 유나 정적 판정·PO 확認(2026-09-04 17:50Z) — 처음엔 site-posts 저장 POST(새
+  // 버전 생성)로 campaign_id를 실었으나, 그 경로는 _reseal_gate_on_new_version이
+  // 본문 해시를 안 보고 approved→pending·reapproval_required로 되돌려 승인을
+  // 무른다(+본문 무변 버전이 이력에 낌). 디디 BE 소형 후속(PATCH .../campaign)은
+  // 버전을 안 만들고 게이트를 안 건드린다 — campaign_id 하나만 바꾼다. 응답이
+  // {draft_id, campaign_id, campaign_name}을 바로 주므로 별도 재조회 없이 그
+  // 값으로 versions의 마지막 항목만 국소 patch한다(단건 GET 라우트 자체가 없다
+  // — 그라운딩 확認, PATCH 응답을 신뢰하는 편이 없는 엔드포인트를 지어내는
+  // 것보다 정직하다).
+  const applyCampaignPatchResult = useCallback((result: { campaign_id: string | null; campaign_name: string | null }) => {
+    setVersions((prev) => {
+      if (prev.length === 0) return prev;
+      const next = [...prev];
+      next[next.length - 1] = { ...next[next.length - 1], campaign_id: result.campaign_id, campaign_name: result.campaign_name };
+      return next;
+    });
+  }, []);
+
+  // story 1db41045(#3457) — 「캠페인 만들기/붙이기」. 새 이름을 입력했으면 먼저
+  // POST /campaigns로 만들고(휴먼 전용, BE _require_human — 이 화면은 role을
+  // 더 좁히지 않는다, 페드루 PO 정정 2026-09-04 17:03Z), 그 campaign_id를 PATCH
+  // .../campaign으로 붙인다. 새 이름이 비어 있으면 select로 고른 기존
+  // campaign_id를 그대로 쓴다.
+  const handleAttachCampaign = useCallback(async () => {
+    if (!orgId || !latest) return;
+    const trimmedName = newCampaignName.trim();
+    if (!trimmedName && !selectedCampaignId) return;
+    setAttachingCampaign(true);
+    setAttachCampaignResult(null);
+    try {
+      let campaignId = selectedCampaignId;
+      if (trimmedName) {
+        const createRes = await fetchWithAuth(`/api/organizations/${orgId}/campaigns`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: trimmedName }),
+        });
+        if (!createRes.ok) {
+          const body = await createRes.json().catch(() => null);
+          const info = parseSitePostApiError(body);
+          setAttachCampaignResult({
+            type: 'error',
+            text: info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('campaignCreateFailed')),
+            raw: info.raw,
+          });
+          return;
+        }
+        const createJson = (await createRes.json().catch(() => null)) as { data?: { id: string } } | null;
+        if (!createJson?.data?.id) {
+          setAttachCampaignResult({ type: 'error', text: t('campaignCreateFailed') });
+          return;
+        }
+        campaignId = createJson.data.id;
+      }
+
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts/${draftId}/campaign`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ campaign_id: campaignId }),
+      });
+      if (res.ok) {
+        setNewCampaignName('');
+        setSelectedCampaignId('');
+        setChangingCampaign(false);
+        const json = (await res.json().catch(() => null)) as { data?: { campaign_id: string | null; campaign_name: string | null } } | null;
+        if (json?.data) applyCampaignPatchResult(json.data);
+        void loadCampaigns();
+      } else {
+        const body = await res.json().catch(() => null);
+        const info = parseSitePostApiError(body);
+        setAttachCampaignResult({
+          type: 'error',
+          text: info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('campaignAttachFailed')),
+          raw: info.raw,
+        });
+      }
+    } catch {
+      setAttachCampaignResult({ type: 'error', text: t('campaignAttachFailed') });
+    } finally {
+      setAttachingCampaign(false);
+    }
+  }, [orgId, latest, newCampaignName, selectedCampaignId, draftId, loadCampaigns, applyCampaignPatchResult, t]);
+
+  // 페드루 PO B2·PATCH 전환(2026-09-04 17:50Z) — 「해제」도 같은 PATCH .../campaign,
+  // campaign_id: null을 명시로 보낸다(BE 계약: null=해제). 버전 0·게이트 무접촉.
+  const handleDetachCampaign = useCallback(async () => {
+    if (!orgId || !latest) return;
+    setDetachingCampaign(true);
+    setDetachCampaignResult(null);
+    try {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts/${draftId}/campaign`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ campaign_id: null }),
+      });
+      if (res.ok) {
+        const json = (await res.json().catch(() => null)) as { data?: { campaign_id: string | null; campaign_name: string | null } } | null;
+        if (json?.data) applyCampaignPatchResult(json.data);
+      } else {
+        const body = await res.json().catch(() => null);
+        const info = parseSitePostApiError(body);
+        setDetachCampaignResult({
+          type: 'error',
+          text: info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('campaignDetachFailed')),
+          raw: info.raw,
+        });
+      }
+    } catch {
+      setDetachCampaignResult({ type: 'error', text: t('campaignDetachFailed') });
+    } finally {
+      setDetachingCampaign(false);
+    }
+  }, [orgId, latest, draftId, applyCampaignPatchResult, t]);
+
+  // story #3385(Phase0 결함) — 상신 성공 뒤 칩·안내박스·발행버튼이 리로드 전까지 이전
+  // 상태로 남던 결함. 원인: 이 조회를 useEffect 안에서만 정의해 뒀던 것 — 승인 요청·저장·
+  // 발행 핸들러의 성공 분기가 파생 입력(gate)을 다시 읽을 방법 자체가 없었다(로컬 state를
+  // 손으로 지어내는 대신 서버를 다시 물어 진짜 상태를 받는다 — no-fiction). useCallback으로
+  // 뽑아 마운트 시 useEffect와 각 핸들러 성공 분기 양쪽에서 부른다.
+  const loadGate = useCallback(async () => {
+    if (!orgId || !workItemId) return;
+    try {
+      const res = await fetchWithAuth(`/api/gates?work_item_id=${workItemId}&work_item_type=story`);
+      if (!res.ok) return;
+      const list = (await res.json().catch(() => [])) as GateInfo[];
+      const candidates = Array.isArray(list) ? list : [];
+      // doc-gate-section.tsx::load()와 동형 관례 — 반려/대기 중인 게이트를 우선(진행
+      // 상태가 있는 쪽이 사용자에게 더 중요), 없으면 최신(배열 첫 항목, 서버가
+      // created_at desc로 준다는 기존 게이트 목록 관례 그대로).
+      const picked = candidates.find((g) => g.status === 'pending' || g.status === 'rejected') ?? candidates[0] ?? null;
+      setGate(picked);
+    } catch {
+      // best-effort — 게이트 조회 실패는 상태를 'draft'로 안전하게 떨어뜨릴 뿐 화면
+      // 전체를 막지 않는다(목록/편집 자체는 게이트 유무와 무관하게 동작해야 함).
+    }
+  }, [orgId, workItemId]);
+
+  // story #3386 — 원인 진단이 지목한 그 자리(FE가 hasPublishedSitePost를 undefined로
+  // 고정해 두던 계약 갭)를 여기서 채운다. best-effort(gate 조회와 동형) — 실패해도
+  // publication=null(=모른다)로 남을 뿐 화면 전체를 막지 않는다.
+  //
+  // story #3385(PO 병합 지시 2026-09-03 13:23Z) — loadGate와 같은 이유로 useCallback화:
+  // «발행됨→재승인 필요» 전환도 저장·상신·발행 성공 뒤 리로드 없이 보여야 한다(AC1 「상태를
+  // 바꾸는 모든 액션 뒤 파생 입력을 다시 읽는다」는 gate 하나만의 규칙이 아니다).
+  const loadPublication = useCallback(async () => {
+    if (!orgId) return;
+    try {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts/${draftId}/publication`);
+      if (!res.ok) {
+        setPublication(null);
+        return;
+      }
+      const json = (await res.json().catch(() => null)) as { data?: SitePostPublicationInfo } | null;
+      setPublication(json?.data ?? null);
+    } catch {
+      setPublication(null);
+    }
+  }, [orgId, draftId]);
+
+  useEffect(() => {
+    void loadGate();
+    void loadPublication();
+  }, [loadGate, loadPublication]);
+
+  // gates/[id]/page.tsx:110-127과 동형 — published_by_member_id별로 한 번만 시도(ref로
+  // 추적, 응답 목록에 없는 id면 setMemberNames가 매번 새 객체를 만들어 무한 재실행되는
+  // 사전 버그를 그쪽에서 이미 겪었다).
+  const fetchedPublisherIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    const id = publication?.published_by_member_id;
+    if (!id || fetchedPublisherIdRef.current === id) return;
+    fetchedPublisherIdRef.current = id;
+    void fetchWithAuth('/api/team-members')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((json: { data?: { id: string; name: string }[] } | null) => {
+        if (!json?.data) return;
+        const names: Record<string, string> = {};
+        for (const m of json.data) names[m.id] = m.name;
+        setMemberNames((prev) => ({ ...prev, ...names }));
+      })
+      .catch(() => { /* non-critical — id 스니펫 폴백으로 graceful */ });
+  }, [publication?.published_by_member_id]);
+
+  // story #3500(BE #3498, PO 確定 2026-09-05 — BE 미착지, 계약만 고정) — 잔량은
+  // 규칙/게이트 로드를 막지 않는 별도 왕복(channel-posts 상세와 동형 원칙).
+  useEffect(() => {
+    if (!orgId) return;
+    let cancelled = false;
+    fetchWithAuth(`/api/organizations/${orgId}/generation-budget`)
+      .then(async (r) => {
+        if (cancelled) return;
+        if (!r.ok) { setGenBudget({ status: 'failed' }); return; }
+        const json = (await r.json().catch(() => null)) as
+          | { data?: { limit_minor: number | null; spent_minor: number | null; remaining_minor: number | null; currency: 'KRW' | 'USD' | null; period: 'month' } }
+          | null;
+        if (!json?.data) { setGenBudget({ status: 'failed' }); return; }
+        setGenBudget({
+          status: 'ok',
+          limitMinor: json.data.limit_minor,
+          spentMinor: json.data.spent_minor,
+          remainingMinor: json.data.remaining_minor,
+          currency: json.data.currency,
+          period: json.data.period,
+        });
+      })
+      .catch(() => { if (!cancelled) setGenBudget({ status: 'failed' }); });
+    return () => { cancelled = true; };
+  }, [orgId]);
+
+  // story #3368 §3-1-2(페드루 PO 정정 2026-09-03 06:42Z) — 재승인 필요는 gate.
+  // reapproval_required(서버 판정)를 그대로 읽는다. sealed_content_sha256은 이제 approved
+  // 분기의 방어망 전용(정상 경로로는 도달 불가 — gates.py 가드가 이중 차단)이다.
+  // publishable·blockedReason은 status와 다른 축: approved인데 봉인 값이 없어 "확인 불가"
+  // 인 경우도 status는 approved로 남고 publishable만 false다(SEAL_MISSING).
+  //
+  // story #3386 — hasPublishedSitePost는 이제 undefined 고정이 아니다: publication이
+  // 아직 안 왔거나(undefined) 조회가 실패했으면(null) 여전히 undefined(=모른다, AC6)로
+  // 넘기고, 실제로 온 뒤에야 published_at!=null로 판정한다. publishedBodySha256도 같은
+  // 축(재발행 가능 여부, AC2).
+  const { status: derivedStatus, publishable, isRepublish, blockedReason } = deriveContentPostStatus({
+    gateStatus: toGateStatus(gate?.status),
+    reapprovalRequired: gate?.reapproval_required,
+    sealedBodySha256: realStr(gate?.sealed_content_sha256),
+    currentBodySha256: latest?.body_sha256,
+    hasPublishedSitePost: publication ? publication.published_at != null : undefined,
+    publishedBodySha256: publication ? realStr(publication.published_body_sha256) : undefined,
+  });
+
+  const handleSave = async () => {
+    if (!orgId || !latest) return;
+    setSaving(true);
+    setSaveMessage(null);
+    try {
+      const tags = tagsText.split(',').map((s) => s.trim()).filter(Boolean);
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          work_item_id: latest.source_story_id,
+          slug: latest.slug, // 잠김 — 항상 기존 값 그대로 재전송(서버 매칭 키).
+          lang: latest.lang, // 잠김 — 동일.
+          title, summary, tags, body_md: bodyMd, media_manifest: [],
+        }),
+      });
+      if (res.ok) {
+        setSaveMessage({ type: 'success', text: t('editSaved') });
+        // story #3483 — create 응답의 violations[]로 필드 옆 목록을 갱신(§16-7 "기본
+        // 처리는 필드 옆 목록을 서버 응답으로 갱신"). 계약에 없으면(BE 미착지) 빈
+        // 배열 — 화면은 아무것도 지어내지 않는다.
+        const saveJson = (await res.json().catch(() => null)) as { data?: { violations?: ContentRuleViolation[] } } | null;
+        setViolations(saveJson?.data?.violations ?? []);
+        // story #3514(PO REQUIRED, 2026-09-05) — 저장 응답이 권위 값을 방금 채웠으니
+        // 로드-실패 안내 줄이 그 옆에 남아 모순되면 안 된다.
+        setViolationsLoadFailed(false);
+        // 새 버전이 생겼다 — 이력을 다시 읽어 새 버전 번호·"미상신" 상태를 반영한다(AC2).
+        const versionsRes = await fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts/${draftId}/versions`);
+        if (versionsRes.ok) {
+          const json = (await versionsRes.json().catch(() => null)) as { data?: SitePostVersion[] } | null;
+          if (json?.data) setVersions(json.data);
+        }
+        // story #3385(AC1)+#3386 — approved 게이트를 편집하면 서버가 즉시 pending+
+        // reapproval_required로 되돌린다(§3-1-2-1). 게이트뿐 아니라 발행 블록도 같은 훅으로
+        // 묶는다(PO 2026-09-03 13:23Z) — 저장도 "상태를 바꾸는 액션"이다.
+        void loadGate();
+        void loadPublication();
+      } else {
+        const body = await res.json().catch(() => null);
+        const info = parseSitePostApiError(body);
+        setSaveMessage({
+          type: 'error',
+          text: info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('editSaveFailed')),
+          raw: info.raw,
+        });
+      }
+    } catch {
+      setSaveMessage({ type: 'error', text: t('editSaveFailed') });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // story #3368 — 승인 요청(S5) 계약 stub(페드루 PO 판정 2026-09-03). 디디군 S2 착지 전까지
+  // 404가 정상 응답이다 — 그 경우도 다른 에러와 동일하게 "사람 말+원문 보존"으로 렌더한다
+  // (지어낸 성공 메시지로 덮지 않는다, AC7).
+  const handleSubmitForApproval = async () => {
+    if (!orgId || !latest || hasBlockingViolations) return;
+    setSubmitting(true);
+    setSubmitResult(null);
+    setGenBudgetExceeded(null);
+    try {
+      // story #3500 — estimated_cost_minor는 값을 입력했을 때만 body에 실린다(빈
+      // 문자열=선택 안 함, channel-posts 상세와 동형 조건부 포함 관례).
+      const submitBody: { version_id: string; estimated_cost_minor?: number } = { version_id: latest.version_id };
+      // §19-1 — 입력은 큰단위(major), 서버로는 분단위(minor)만 보낸다. currency가
+      // null이면(generationBudgetUsable=false) 입력 자체가 안 그려져 이 값이 채워질
+      // 수 없다 — 방어적으로만 재확認한다(추정 통화로 변환하지 않는다).
+      if (estimatedCostInput !== '' && generationBudgetCurrency !== null) {
+        submitBody.estimated_cost_minor = majorToMinor(Number(estimatedCostInput), generationBudgetCurrency);
+      }
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts/${draftId}/submit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(submitBody),
+      });
+      if (res.ok) {
+        const json = (await res.json().catch(() => null)) as { data?: { gate_id?: string } } | null;
+        const gateId = json?.data?.gate_id;
+        if (gateId) {
+          setSubmitResult({ type: 'success', gateId });
+          // story #3385(핵심 회귀)+#3386 — 서버 게이트는 이미 pending인데 화면은 리로드
+          // 전까지 이전 상태(초안·재승인 필요)를 그대로 보였다. 상신 직후 두 파생 입력을
+          // 함께 다시 읽는다(PO 2026-09-03 13:23Z — 같은 훅으로 묶는다).
+          void loadGate();
+          void loadPublication();
+        } else {
+          setSubmitResult({ type: 'error', text: t('submitFailed'), raw: JSON.stringify(json) });
+        }
+      } else {
+        const body = await res.json().catch(() => null);
+        // story #3483(§16-7) — "상신 422는 새 배너를 만들지 않는다". 위반은 이미
+        // 필드 옆에 서 있던 것이라 여기서는 그 목록을 서버 응답으로 갱신만 하고
+        // 끝낸다(submitResult 일반 오류 배너로 안 떨어뜨린다).
+        const ruleViolationBody = body as { error?: { code?: string; violations?: ContentRuleViolation[] } } | null;
+        if (ruleViolationBody?.error?.code === 'CONTENT_RULE_VIOLATION') {
+          setViolations(ruleViolationBody.error.violations ?? []);
+          // story #3514(PO REQUIRED, 2026-09-05) — 상신 422도 권위 값이다(위 저장
+          // 응답과 동형 이유).
+          setViolationsLoadFailed(false);
+          return;
+        }
+        const info = parseSitePostApiError(body);
+        // story f6d14476(AC3) — SITE_POST_GATE_ALREADY_HELD 전용 분기. 서버는 상대 초안의
+        // draft_id·lang·slug만 준다(title 없음) — 여기서 그 초안의 최신 버전을 별도
+        // 조회해 제목을 채운다(best-effort, gates/[id]/page.tsx의 memberNames 관례와 동형
+        // — 실패해도 slug/id 폴백으로 문구는 그대로 그린다, 지어내지 않되 화면을 막지도
+        // 않는다).
+        if (info.kind === 'gate_already_held' && info.heldByDraftId) {
+          let holdingTitle = info.heldBySlug ?? info.heldByDraftId.slice(0, 8);
+          try {
+            const vRes = await fetchWithAuth(
+              `/api/organizations/${orgId}/site-posts/drafts/${info.heldByDraftId}/versions`,
+            );
+            if (vRes.ok) {
+              const vJson = (await vRes.json().catch(() => null)) as { data?: SitePostVersion[] } | null;
+              const vLatest = vJson?.data?.[vJson.data.length - 1];
+              if (vLatest?.title) holdingTitle = vLatest.title;
+            }
+          } catch {
+            // best-effort — 조회 실패는 위 폴백 문구로 graceful.
+          }
+          setSubmitResult({
+            type: 'error',
+            text: t('errorGateAlreadyHeld', { title: holdingTitle, lang: info.heldByLang ?? '—' }),
+            raw: info.raw,
+            heldByDraftId: info.heldByDraftId,
+          });
+        } else if (
+          info.kind === 'generation_budget_exceeded'
+          && typeof info.limitMinor === 'number' && typeof info.spentMinor === 'number'
+          && typeof info.estimatedCostMinor === 'number' && typeof info.remainingMinor === 'number'
+          // PO REQUIRED②(2026-09-05) — 422 detail 자체엔 currency가 없다(BE 계약:
+          // limit/spent/estimated/remaining 4값뿐). 통화는 별도 non-blocking GET
+          // (genBudget)에서만 오므로, 그게 null(실패/불완전)이면 통화를 모르는 채
+          // 금액을 그릴 수 없다 — 'KRW'로 추정하지 않고 구조화 배너를 접고 아래
+          // 일반 에러 문구로 폴백한다.
+          && generationBudgetCurrency !== null
+        ) {
+          // doc a0da40c9 §19-8 — 전용 구조화 배너(channel-posts 상세와 동형). 입력값은
+          // 지우지 않는다.
+          setGenBudgetExceeded({
+            limitMinor: info.limitMinor, spentMinor: info.spentMinor,
+            estimatedCostMinor: info.estimatedCostMinor, remainingMinor: info.remainingMinor,
+            currency: generationBudgetCurrency,
+          });
+        } else {
+          setSubmitResult({
+            type: 'error',
+            text: info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('submitFailed')),
+            raw: info.raw,
+          });
+        }
+      }
+    } catch {
+      setSubmitResult({ type: 'error', text: t('submitFailed') });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // story #3368 §8-1 5단(와이어프레임 S7·S8)/#3369(S3) — 발행. canPublish===true일 때만
+  // 호출 가능하게 UI가 막지만(아래 렌더), 서버(site_posts.py::publish_site_post_from_draft)
+  // 가 최종 판정이다 — 화면 판단은 안내이지 방어가 아니다(§3-2).
+  //
+  // ⚠️페드루 PO 리뷰 정정(2026-09-03) — 레거시 `POST /organizations/{org}/site-posts`
+  // (호출자가 본문 전체를 다시 보내는 agent 스크립트 시대 API, work_item_id/title/body_md
+  // 등을 여기서 재조립)로 잘못 가고 있었다. 휴먼 발행은 draft 기반 신규 endpoint
+  // (`.../drafts/{draftId}/publish`, S3)로 가야 한다 — 서버가 draft_id 하나로 최신 버전을
+  // 직접 읽어 봉인을 재검증하므로 body가 필요 없다(화면이 본문을 다시 보낼수록 위조·구버전
+  // 발행 위험만 는다). 성공 응답 {url, published_at, version_id}의 url은 이제 항상 온다
+  // (S3 계약) — 지어내거나 옵셔널로 방어할 필요가 없다.
+  const handlePublish = async () => {
+    if (!orgId || !latest) return;
+    setPublishing(true);
+    setPublishResult(null);
+    try {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts/${draftId}/publish`, {
+        method: 'POST',
+      });
+      if (res.ok) {
+        const json = (await res.json().catch(() => null)) as
+          { data?: { url?: string; published_at?: string; version_id?: string } } | null;
+        const publishedAt = json?.data?.published_at;
+        const url = json?.data?.url;
+        if (publishedAt && url) {
+          setPublishResult({ type: 'success', publishedAt, url });
+          // story #3385(AC1)+#3386 — 발행 뒤에도 같은 규칙: 두 파생 입력을 함께 다시 읽는다
+          // (PO 병합 지시 2026-09-03 13:23Z — «발행됨→재승인 필요» 전환도 리로드 없이 보여야
+          // gate·publication이 같은 화면에서 서로 어긋나지 않는다).
+          void loadGate();
+          void loadPublication();
+        } else {
+          setPublishResult({ type: 'error', text: t('publishFailed'), raw: JSON.stringify(json) });
+        }
+      } else {
+        const body = await res.json().catch(() => null);
+        const info = parseSitePostApiError(body);
+        setPublishResult({
+          type: 'error',
+          text: info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('publishFailed')),
+          raw: info.raw,
+          reapprovalHashes: info.kind === 'reapproval_required'
+            ? { sealed: sealedHash, current: latest.body_sha256 }
+            : undefined,
+        });
+      }
+    } catch {
+      setPublishResult({ type: 'error', text: t('publishFailed') });
+    } finally {
+      setPublishing(false);
+    }
+  };
+
+  // story #3386(AC1 참고 — S8이 이 스토리와 짝인 story #3381/PR#3739의 엔드포인트를 부르는
+  // 것까지 요구) — 발행 취소. ConfirmDialog(story #2416 — native confirm() 금지)로 확인
+  // 받은 뒤에만 호출한다. 성공하면 publication을 다시 읽어 URL·버튼 상태가 즉시 반영되게
+  // 한다(페이지 새로고침 없이).
+  const handleUnpublish = async () => {
+    if (!orgId) return;
+    setUnpublishConfirmOpen(false);
+    setUnpublishing(true);
+    setUnpublishResult(null);
+    try {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts/${draftId}/unpublish`, {
+        method: 'POST',
+      });
+      if (res.ok) {
+        setUnpublishResult({ type: 'success' });
+        void loadPublication();
+      } else {
+        const body = await res.json().catch(() => null);
+        const info = parseSitePostApiError(body);
+        setUnpublishResult({
+          type: 'error',
+          text: info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('unpublishFailed')),
+          raw: info.raw,
+        });
+      }
+    } catch {
+      setUnpublishResult({ type: 'error', text: t('unpublishFailed') });
+    } finally {
+      setUnpublishing(false);
+    }
+  };
+
+  // story #3479(BE #3476) — 외부 목적지 발행 실패 재시도. 성공하면 publication을
+  // 다시 읽어(loadPublication, handleUnpublish와 동형) command_status가 즉시
+  // 반영되게 한다.
+  const handleRetryPublicationCommand = async (commandId: string) => {
+    if (!orgId || retryingCommand) return;
+    setRetryingCommand(true);
+    try {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/publication-commands/${commandId}/retry`, { method: 'POST' });
+      if (res.ok) {
+        // story #3369 — channel_posts 상세 handleRetry와 동형(성공 시 다이얼로그 닫고
+        // 체크 상태 리셋).
+        setRetryConfirmOpen(false);
+        setRetryChecklistConfirmed(false);
+        void loadPublication();
+      }
+    } finally {
+      setRetryingCommand(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="mx-auto w-full max-w-3xl space-y-4 p-6">
+        <div className="h-8 w-1/2 animate-pulse rounded-md bg-muted" />
+        <div className="h-64 animate-pulse rounded-md bg-muted" />
+      </div>
+    );
+  }
+
+  // story #3673(유나 #4016 적기만 ①) — role/aria-live/aria-atomic 문자열 복붙을
+  // 걷는다. Alert(components/ui/alert.tsx)가 variant="destructive"면 이미
+  // role="alert" aria-live="assertive" aria-atomic="true"를 기본 유도한다
+  // (getAlertRole/getAlertAriaLive) — 여기서 재선언하면 그 기본값과 화면별
+  // 재선언이 언젠가 갈라질 수 있는 여지만 남는다(AC2, "화면별 재선언 0").
+  if (notFound) {
+    return (
+      <div className="mx-auto w-full max-w-3xl space-y-3 p-6">
+        <Alert variant="destructive">
+          <AlertDescription>{t('editNotFound')}</AlertDescription>
+        </Alert>
+        {/* story #3667(3662 후속, 유나 #4016 적기만 ②) — 링크로 들어와 404/403을
+            읽은 사용자에게 «나가는 길» 하나(막다른 길 클래스, 3650과 같은 결).
+            새 낱말 0 — channel-posts/calendar 페이지가 이미 쓰는 키 재사용. */}
+        <Link href="/content" className="text-sm font-medium text-primary underline">
+          {t('channelPostsCalendarBackToListCta')}
+        </Link>
+      </div>
+    );
+  }
+  if (forbidden) {
+    return (
+      <div className="mx-auto w-full max-w-3xl space-y-3 p-6">
+        <Alert variant="destructive">
+          <AlertDescription>{t('editForbidden')}</AlertDescription>
+        </Alert>
+        <Link href="/content" className="text-sm font-medium text-primary underline">
+          {t('channelPostsCalendarBackToListCta')}
+        </Link>
+      </div>
+    );
+  }
+  if (loadError || !latest) {
+    return (
+      <div className="mx-auto w-full max-w-3xl p-6">
+        <Alert variant="destructive">
+          <AlertDescription>{t('editLoadFailed')}</AlertDescription>
+        </Alert>
+      </div>
+    );
+  }
+
+  const status = derivedStatus;
+  const canPublish = publishable;
+  const sealedHash = realStr(gate?.sealed_content_sha256);
+  // 페드루 PO 리뷰(2026-09-03) — [82d79b81] AC: "owner/admin만 활성 · member는 비활성 +
+  // 이유 문구(버튼 밖)". 서버 403(SITE_POST_UNPUBLISH_OWNER_OR_ADMIN_ONLY)은 방어이지
+  // 안내가 아니다 — settings/page.tsx:330·org-members-section.tsx:343와 같은 role 소스
+  // (useDashboardContext().role)를 재사용한다, 새 조회를 만들지 않는다.
+  const canUnpublish = role === 'owner' || role === 'admin';
+  const publisherName = publication?.published_by_member_id
+    ? memberNames[publication.published_by_member_id] ?? publication.published_by_member_id.slice(0, 8)
+    : '—';
+  // story #3479 — undefined면 "보일 실패가 없다"는 뜻(예: command_status='completed').
+  // FailureActionBadge 자체를 안 그린다(가짜 상태를 지어내지 않는다).
+  const externalFailureAction = publication?.command
+    ? deriveFailureAction({
+        commandStatus: publication.command.command_status,
+        failureKind: publication.command.failure_kind,
+        nextRetryAt: publication.command.next_retry_at,
+        reasonCode: publication.command.command_reason_code,
+      })
+    : undefined;
+  // story #3369(channel_posts 상세 isNeedsCheckGate와 동형) — dead_letter 안에서도
+  // needsRecheck면 「밖에 나갔는지 모르는 실패」다. ConfirmDialog 세 자리(문면·체크박스·
+  // confirmDisabled)가 이 값 하나로 갈린다.
+  const isExternalNeedsCheckGate = externalFailureAction?.kind === 'needs_check'
+    || (externalFailureAction?.kind === 'dead_letter' && externalFailureAction.needsRecheck);
+
+  return (
+    <div className="mx-auto w-full max-w-3xl space-y-6 p-6">
+      <div className="space-y-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <h1 className="text-lg font-semibold text-foreground">{t('editTitle')}</h1>
+          <StatusChip status={status} />
+          <Badge variant="outline">v{latest.version}</Badge>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          {t('editMeta', { slug: latest.slug, lang: latest.lang })}
+        </p>
+      </div>
+
+      {/* story 1db41045(#3457) — 캠페인. 이미 붙어 있으면(campaign_id) 이름+상세
+          링크·「변경」·「해제」(페드루 PO B2 — 붙인 뒤에도 편집 표면이 있어야
+          한다). 「변경」을 누르면 changingCampaign=true로 같은 붙이기 폼을 아래에
+          더 연다(새 컴포넌트 0) — 페드루 PO 재판정(2026-09-04 18:12Z): 변경 중에도
+          "현재 캠페인" 줄 자체는 남겨 둔다(폼으로 통째 대체하면 "무엇에서
+          무엇으로"가 사라진다 — 변경/해제 버튼만 그 사이엔 안 보인다). */}
+      {latest.campaign_id ? (
+        <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground" data-testid="content-campaign-current">
+          <span>
+            {t('campaignCurrentLabel')}{' '}
+            <Link href={`/campaigns/${latest.campaign_id}`} className="underline">
+              {/* N1(페드루 PO) — campaign_name이 없을 때 UUID를 사람 문장에 그대로
+                  보여주지 않는다(지어내지도, 식별자를 문장으로 위장하지도 않는다). */}
+              {latest.campaign_name ?? t('campaignNameUnknown')}
+            </Link>
+          </span>
+          {!changingCampaign ? (
+            <>
+              <Button
+                type="button" variant="outline" size="sm"
+                onClick={() => setChangingCampaign(true)}
+                data-testid="content-campaign-change-button"
+              >
+                {t('campaignChangeCta')}
+              </Button>
+              <Button
+                type="button" variant="outline" size="sm"
+                onClick={() => void handleDetachCampaign()}
+                disabled={detachingCampaign}
+                data-testid="content-campaign-detach-button"
+              >
+                {detachingCampaign ? t('campaignDetachPendingCta') : t('campaignDetachCta')}
+              </Button>
+            </>
+          ) : null}
+          {detachCampaignResult ? (
+            <Alert variant="destructive" role="alert" data-testid="content-campaign-detach-error">
+              <AlertDescription>{detachCampaignResult.text}</AlertDescription>
+              <RawDetailsToggle raw={detachCampaignResult.raw} label={t('errorRawDetailsToggle')} />
+            </Alert>
+          ) : null}
+        </div>
+      ) : null}
+      {!latest.campaign_id || changingCampaign ? (
+        <div className="space-y-2 rounded-md border border-border p-3 text-sm" data-testid="content-campaign-attach">
+          <p className="text-xs font-medium text-muted-foreground">{t('campaignAttachLabel')}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            {campaigns.length > 0 ? (
+              <select
+                value={selectedCampaignId}
+                onChange={(e) => { setSelectedCampaignId(e.target.value); if (e.target.value) setNewCampaignName(''); }}
+                className="rounded-md border border-border px-2 py-1.5 text-sm"
+                data-testid="content-campaign-select"
+              >
+                <option value="">{t('campaignSelectPlaceholder')}</option>
+                {campaigns.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            ) : null}
+            <input
+              type="text"
+              value={newCampaignName}
+              onChange={(e) => { setNewCampaignName(e.target.value); if (e.target.value) setSelectedCampaignId(''); }}
+              placeholder={t('campaignNewNamePlaceholder')}
+              className="rounded-md border border-border px-2 py-1.5 text-sm"
+              data-testid="content-campaign-new-name-input"
+            />
+            <Button
+              type="button" size="sm"
+              onClick={() => void handleAttachCampaign()}
+              disabled={(!newCampaignName.trim() && !selectedCampaignId) || attachingCampaign}
+              data-testid="content-campaign-attach-button"
+            >
+              {attachingCampaign ? t('campaignAttachPendingCta') : t('campaignAttachCta')}
+            </Button>
+            {changingCampaign ? (
+              <Button
+                type="button" variant="outline" size="sm"
+                onClick={() => { setChangingCampaign(false); setNewCampaignName(''); setSelectedCampaignId(''); setAttachCampaignResult(null); }}
+                data-testid="content-campaign-cancel-change-button"
+              >
+                {t('campaignCancelChangeCta')}
+              </Button>
+            ) : null}
+          </div>
+          {attachCampaignResult ? (
+            <Alert variant="destructive" role="alert" data-testid="content-campaign-attach-error">
+              <AlertDescription>{attachCampaignResult.text}</AlertDescription>
+              <RawDetailsToggle raw={attachCampaignResult.raw} label={t('errorRawDetailsToggle')} />
+            </Alert>
+          ) : null}
+        </div>
+      ) : null}
+
+      {status === 'reapproval_needed' ? (
+        // §3-2 — "판정이 아니라 관측이다. 해시 두 개를 나란히 보여주면 사람이 스스로
+        // 확인한다." 서버가 이미 게이트로 재승인을 강제한다(S3 착지 後) — 이 배너는
+        // 방어가 아니라 안내다.
+        <Alert variant="warning" role="status" aria-live="polite" aria-atomic="true">
+          <AlertDescription>
+            {t('reapprovalNeededNotice')}
+            <br />
+            <span className="font-mono text-xs">
+              {t('reapprovalSealedHash')} {sealedHash ? `${sealedHash.slice(0, 12)}…` : '—'}
+              {' · '}
+              {t('reapprovalCurrentHash')} {latest.body_sha256.slice(0, 12)}…
+            </span>
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
+      {/* story #3386 AC1·AC3 — 공개 URL·발행 시각·행위자. status와 무관하게 publication이
+          있으면 보인다(AC3 "상태와 공개 여부는 두 축" — reapproval_needed여도 옛 버전은
+          여전히 공개 중이다). */}
+      {publication?.published_at ? (
+        <div
+          data-testid="content-publication-info"
+          className="space-y-1 rounded-md border border-border bg-muted/30 p-3 text-sm"
+        >
+          <div>
+            <span className="text-xs font-medium text-muted-foreground">{t('publishedInfoUrlLabel')}</span>{' '}
+            {publication.url ? (
+              <a href={publication.url} target="_blank" rel="noopener noreferrer" className="underline">
+                {publication.url}
+              </a>
+            ) : (
+              '—'
+            )}
+          </div>
+          <div>
+            <span className="text-xs font-medium text-muted-foreground">{t('publishedInfoAtLabel')}</span>{' '}
+            {formatScheduledAt(publication.published_at, displayTimezone).display}
+          </div>
+          <div>
+            <span className="text-xs font-medium text-muted-foreground">{t('publishedInfoByLabel')}</span>{' '}
+            {publisherName}
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setUnpublishConfirmOpen(true)}
+            disabled={!canUnpublish || unpublishing}
+          >
+            {unpublishing ? t('unpublishingCta') : t('unpublishCta')}
+          </Button>
+          {!canUnpublish ? (
+            <p className="text-xs text-muted-foreground">{t('unpublishDisabledReason')}</p>
+          ) : null}
+        </div>
+      ) : null}
+
+      {/* story #3479(BE #3476, 런북 A-7) — 외부 목적지(WordPress·webhook) 발행 결과.
+          hosted_site와 병렬 분기(위 블록과 동시에 안 뜬다 — destination이 서버가 낸
+          축, FE가 재조립하지 않는다). permalink 값 없으면 그 자리 안 그린다. */}
+      {publication?.destination && publication.destination !== 'hosted_site' && (publication.channel_publication || publication.command) ? (
+        <div
+          data-testid="content-external-publication-info"
+          className="space-y-1 rounded-md border border-border bg-muted/30 p-3 text-sm"
+        >
+          <div>
+            <span className="text-xs font-medium text-muted-foreground">{t('externalPublicationDestinationLabel')}</span>{' '}
+            {channelLabel(publication.destination, t)}
+          </div>
+          {publication.channel_publication ? (
+            <>
+              {/* PO 보정(2026-09-05, PR#3830 리뷰) — status를 안 보이면 회수된 글
+                  (b1c2feba·241da9a3, status='unpublished')도 permalink+published_at만
+                  보여 "아직 실려 있다"로 읽힌다. 상태를 별도 한 줄로. */}
+              <div>
+                <span className="text-xs font-medium text-muted-foreground">{t('externalPublicationStatusLabel')}</span>{' '}
+                {t(externalPublicationStatusLabelKey(publication.channel_publication.status))}
+              </div>
+              {/* 카디르군 REQUEST_CHANGES(2026-09-05, PR#3830) — permalink null일 때
+                  <a>만 빼고 라벨+「—」 행이 남아 명세("값 없으면 그 자리 안 그린다")를
+                  어겼다. 행 전체를 조건에 넣는다(라벨도 함께 없앤다). */}
+              {publication.channel_publication.permalink ? (
+                <div>
+                  <span className="text-xs font-medium text-muted-foreground">{t('publishedInfoUrlLabel')}</span>{' '}
+                  <a href={publication.channel_publication.permalink} target="_blank" rel="noopener noreferrer" className="underline">
+                    {publication.channel_publication.permalink}
+                  </a>
+                </div>
+              ) : null}
+              {publication.channel_publication.published_at ? (
+                <div>
+                  <span className="text-xs font-medium text-muted-foreground">{t('publishedInfoAtLabel')}</span>{' '}
+                  {formatScheduledAt(publication.channel_publication.published_at, displayTimezone).display}
+                </div>
+              ) : null}
+              {publication.channel_publication.status === 'unpublished' && publication.channel_publication.unpublished_at ? (
+                <div>
+                  <span className="text-xs font-medium text-muted-foreground">{t('externalPublicationUnpublishedAtLabel')}</span>{' '}
+                  {formatScheduledAt(publication.channel_publication.unpublished_at, displayTimezone).display}
+                </div>
+              ) : null}
+            </>
+          ) : null}
+          {publication.command && externalFailureAction ? (
+            <FailureActionBadge
+              action={externalFailureAction}
+              displayTimezone={displayTimezone}
+              // story #3369 — 아래 ConfirmDialog가 실제 needs_check 관문(체크리스트·
+              // 확認버튼 disabled)을 제공한다 — recheckGate=true라 needsRecheck
+              // 문면이 「약속을 지키는」 곳(channel_posts 상세와 동형).
+              recheckGate
+              onRetryClick={() => { setRetryChecklistConfirmed(false); setRetryConfirmOpen(true); }}
+            />
+          ) : null}
+          <ConfirmDialog
+            open={retryConfirmOpen}
+            onOpenChange={(next) => { setRetryConfirmOpen(next); if (!next) setRetryChecklistConfirmed(false); }}
+            title={t('channelPostsRetryConfirmTitle')}
+            description={(
+              <>
+                <span className="block" data-testid="content-retry-confirm-what">
+                  {isExternalNeedsCheckGate ? t('channelPostsRetryConfirmWhatNeedsCheck') : t('channelPostsRetryConfirmWhatDeadLetter')}
+                </span>
+                <span className="block" data-testid="content-retry-confirm-reversible">{t('channelPostsRetryConfirmReversible')}</span>
+                {isExternalNeedsCheckGate ? (
+                  <label className="mt-2 flex items-center gap-2 text-sm text-foreground">
+                    <input
+                      type="checkbox" checked={retryChecklistConfirmed}
+                      onChange={(e) => setRetryChecklistConfirmed(e.target.checked)}
+                      data-testid="content-retry-confirm-checklist"
+                    />
+                    {t('channelPostsRetryConfirmChecklist')}
+                  </label>
+                ) : null}
+              </>
+            )}
+            cancelLabel={tc('cancel')}
+            confirmLabel={retryingCommand ? t('channelPostsRetryConfirmPendingCta') : t('channelPostsRetryConfirmAction')}
+            confirmDisabled={retryingCommand || (isExternalNeedsCheckGate && !retryChecklistConfirmed)}
+            destructive={false}
+            onConfirm={() => void handleRetryPublicationCommand(publication.command!.id)}
+          />
+        </div>
+      ) : null}
+
+      {/* story #3499(Phase2·FE, 게시물 성과 표면 1차) — publication_id가 있을 때만(BE
+          #3844 조각4 의존) 그린다. hosted_site·외부 어느 목적지든 같은 컴포넌트(값
+          조립·판정은 InsightSnapshotBlock 하나에만 있다 — 두 벌 안 만든다, PO 確定). */}
+      {insightPublicationId ? (
+        <InsightSnapshotBlock
+          snapshots={insightSnapshots} orgTimezone={displayTimezone} locale={locale}
+          channel={publication?.destination}
+        />
+      ) : null}
+
+      {/* story 15e481ce(#3453 AC1) — 「Threads 변형 만들기」. 활성 연결이 0건이면 이
+          자리 자체를 안 그린다(유나 §13-4 "없는 자리를 그리지 않는다" — 비활성 버튼은
+          "곧 됩니다"로 읽힌다). */}
+      {activeConnections.length > 0 ? (
+        <div className="space-y-2 rounded-md border border-border p-3 text-sm" data-testid="content-create-variant">
+          <p className="text-xs font-medium text-muted-foreground">{t('channelPostsCreateVariantLabel')}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={selectedConnectionId}
+              onChange={(e) => setSelectedConnectionId(e.target.value)}
+              className="rounded-md border border-border px-2 py-1.5 text-sm"
+              data-testid="content-create-variant-connection-select"
+            >
+              <option value="">{t('channelPostsCreateVariantSelectPlaceholder')}</option>
+              {activeConnections.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {channelLabel(c.channel, t)}
+                  {c.account_label ? ` · ${c.account_label}` : ''}
+                </option>
+              ))}
+            </select>
+            <Button
+              type="button" size="sm"
+              onClick={() => void handleCreateVariant()}
+              disabled={!selectedConnectionId || creatingVariant || variantTextEmpty}
+              data-testid="content-create-variant-button"
+            >
+              {creatingVariant ? tc('creating') : t('channelPostsCreateVariantCta')}
+            </Button>
+          </div>
+          {variantTextEmpty ? (
+            <p className="text-xs text-muted-foreground" data-testid="content-create-variant-text-empty-reason">
+              {t('channelPostsCreateVariantTextEmptyReason')}
+            </p>
+          ) : null}
+          {createVariantResult ? (
+            <Alert variant="destructive" role="alert" data-testid="content-create-variant-error">
+              <AlertDescription>{createVariantResult.text}</AlertDescription>
+              <RawDetailsToggle raw={createVariantResult.raw} label={t('errorRawDetailsToggle')} />
+            </Alert>
+          ) : null}
+        </div>
+      ) : null}
+
+      {/* story 15e481ce(#3453 AC2, 유나 §14-2) — "같은 스토리의 채널 글"(역방향). 비어
+          있으면 그 자리 자체를 안 그린다. */}
+      {variants.length > 0 ? (
+        <div className="space-y-2 rounded-md border border-border p-3 text-sm" data-testid="content-variants-list">
+          {/* story #3764(UI 점검 B·E절, 유나 定 재정정) — 수를 제목 문자열 안에 넣지
+              않는다. 단 이 라벨(text-xs font-medium text-muted-foreground)은 CountBadge
+              를 쓰는 자리(구성원·권한·이벤트, text-base font-semibold)보다 약한
+              위계다 — 위계가 그릇을 고른다: 약한 라벨엔 제목과 같은 대역의 수. */}
+          <p className="text-xs font-medium text-muted-foreground">
+            {t('channelPostsVariantsListLabel')}
+            <span className="ml-1.5 tabular-nums text-muted-foreground">{variants.length}</span>
+          </p>
+          <ul className="space-y-1.5">
+            {variants.map((v) => {
+              // 유나 사전 스티어③ — 같은 채널 계정이 둘이면 채널명만으론 안 갈린다.
+              // activeConnections(이미 든 값)에서 connection_id로 잇는다 — 못 이으면
+              // (연결이 회수됐거나 비활성) 채널명만(지어내지 않는다).
+              const accountLabel = activeConnections.find((c) => c.id === v.connection_id)?.account_label;
+              return (
+                <li key={v.draft_id} className="flex items-center justify-between gap-2" data-testid="content-variants-list-item">
+                  <Link href={`/content/channel-posts/${v.draft_id}`} className="underline">
+                    {channelLabel(v.channel, t)}
+                    {accountLabel ? ` · ${accountLabel}` : ''}
+                  </Link>
+                  <span className="flex items-center gap-2">
+                    {v.published_at ? (
+                      <span className="text-xs text-muted-foreground" data-testid="content-variants-list-item-published-at">
+                        {formatScheduledAt(v.published_at, displayTimezone).display}
+                      </span>
+                    ) : null}
+                    <StatusChip
+                      status={deriveChannelPostView({
+                        gateStatus: toGateStatus(v.gate_status ?? undefined),
+                        reapprovalRequired: v.reapproval_required ?? undefined,
+                        sealedBodySha256: realStr(v.sealed_content_sha256),
+                        currentBodySha256: v.body_sha256,
+                        publicationStatus: v.publication_status as ChannelPublicationStatus | null | undefined,
+                        errorCode: v.error_code,
+                        publishedAt: v.published_at,
+                      }).status}
+                    />
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ) : null}
+
+      <ConfirmDialog
+        open={unpublishConfirmOpen}
+        onOpenChange={setUnpublishConfirmOpen}
+        title={t('unpublishConfirmTitle')}
+        description={t('unpublishConfirmDescription')}
+        cancelLabel={t('unpublishConfirmCancel')}
+        confirmLabel={t('unpublishConfirmAction')}
+        onConfirm={() => void handleUnpublish()}
+      />
+
+      {unpublishResult && (
+        <Alert
+          variant={unpublishResult.type === 'success' ? 'success' : 'destructive'}
+          role={unpublishResult.type === 'success' ? 'status' : 'alert'}
+          aria-live={unpublishResult.type === 'success' ? 'polite' : 'assertive'}
+          aria-atomic="true"
+        >
+          <AlertDescription>
+            {unpublishResult.type === 'success' ? t('unpublishSuccess') : unpublishResult.text}
+          </AlertDescription>
+          {unpublishResult.type === 'error' ? <RawDetailsToggle raw={unpublishResult.raw} label={t('errorRawDetailsToggle')} /> : null}
+        </Alert>
+      )}
+
+      {saveMessage && (
+        <Alert
+          variant={saveMessage.type === 'success' ? 'success' : 'destructive'}
+          role={saveMessage.type === 'success' ? 'status' : 'alert'}
+          aria-live={saveMessage.type === 'success' ? 'polite' : 'assertive'}
+          aria-atomic="true"
+        >
+          <AlertDescription>{saveMessage.text}</AlertDescription>
+          {saveMessage.type === 'error' ? <RawDetailsToggle raw={saveMessage.raw} label={t('errorRawDetailsToggle')} /> : null}
+        </Alert>
+      )}
+
+      {submitResult && (
+        <Alert
+          variant={submitResult.type === 'success' ? 'success' : 'destructive'}
+          role={submitResult.type === 'success' ? 'status' : 'alert'}
+          aria-live={submitResult.type === 'success' ? 'polite' : 'assertive'}
+          aria-atomic="true"
+        >
+          <AlertDescription>
+            {submitResult.type === 'success' ? (
+              <>
+                {t('submitSuccess')}{' '}
+                <Link href={`/gates/${submitResult.gateId}`} className="underline">{t('submitGateLink')}</Link>
+              </>
+            ) : submitResult.heldByDraftId ? (
+              <>
+                {submitResult.text}{' '}
+                <Link href={`/content/${submitResult.heldByDraftId}`} className="underline">
+                  {t('errorGateAlreadyHeldLink')}
+                </Link>
+              </>
+            ) : (
+              submitResult.text
+            )}
+          </AlertDescription>
+          {submitResult.type === 'error' ? <RawDetailsToggle raw={submitResult.raw} label={t('errorRawDetailsToggle')} /> : null}
+        </Alert>
+      )}
+
+      <div className="space-y-4">
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-muted-foreground" htmlFor="post-title">{t('fieldTitle')}</label>
+          <input
+            id="post-title"
+            type="text"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            disabled={saving}
+            className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+          />
+          {/* story #3483(§16-7) — "그 필드 아래" 그 필드 것만 목록. */}
+          <ContentRuleViolationList violations={violations.filter((v) => v.field === 'title')} testId="content-rule-violation-title" t={t} />
+        </div>
+
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-muted-foreground" htmlFor="post-summary">{t('fieldSummary')}</label>
+          <input
+            id="post-summary"
+            type="text"
+            value={summary}
+            onChange={(e) => setSummary(e.target.value)}
+            disabled={saving}
+            className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+          />
+          <ContentRuleViolationList violations={violations.filter((v) => v.field === 'summary')} testId="content-rule-violation-summary" t={t} />
+        </div>
+
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-muted-foreground" htmlFor="post-tags">{t('fieldTags')}</label>
+          <input
+            id="post-tags"
+            type="text"
+            value={tagsText}
+            onChange={(e) => setTagsText(e.target.value)}
+            disabled={saving}
+            placeholder={t('fieldTagsPlaceholder')}
+            className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+          />
+        </div>
+
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-muted-foreground" htmlFor="post-body">{t('fieldBody')}</label>
+          <textarea
+            id="post-body"
+            value={bodyMd}
+            onChange={(e) => setBodyMd(e.target.value)}
+            disabled={saving}
+            rows={16}
+            className="w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-sm text-foreground"
+          />
+          <ContentRuleViolationList violations={violations.filter((v) => v.field === 'body_md')} testId="content-rule-violation-body-md" t={t} />
+        </div>
+
+        <div className="space-y-1">
+          <p className="text-xs font-medium text-muted-foreground">{t('fieldSlugLangLocked')}</p>
+          <p className="text-sm text-muted-foreground">{latest.slug} · {latest.lang}</p>
+          <p className="text-xs text-muted-foreground">{t('fieldSlugLangLockedHint')}</p>
+        </div>
+
+        <div className="flex flex-wrap gap-6">
+          {/* 유나 §6-3-1 지적(2026-09-03 라이브 검수) — 목록엔 원작성·최종수정 둘 다 있는데
+              편집 화면엔 최종수정만 있어 "원안이 에이전트였다"가 편집 중 안 보였다. */}
+          <div className="space-y-1">
+            <p className="text-xs font-medium text-muted-foreground">{t('fieldOriginAuthor')}</p>
+            <AuthorKindBadge kind={versions[0]?.author_kind} />
+          </div>
+          <div className="space-y-1">
+            <p className="text-xs font-medium text-muted-foreground">{t('fieldLastEditedBy')}</p>
+            <AuthorKindBadge kind={latest.author_kind} />
+          </div>
+        </div>
+
+        {/* doc a0da40c9 §19-7(디자인 유나 確定 2026-09-05) — 상신 버튼 «위» 자체 줄(옆
+            아님). channel-posts 상세와 동형. 입력/변환은 큰단위(major) — §19-1.
+            PO REQUIRED②(2026-09-05) — 입력은 generationBudgetUsable일 때만 그린다
+            (통화를 모르는 채 숫자를 입력받지 않는다). GenerationBudgetIndicator는
+            항상 그린다 — 그 컴포넌트가 loading/failed/정책없음/정상을 이미 스스로
+            갈라 보여준다(failed면 이 자리에서 자동으로 generationBudgetSubmitCheckFailed
+            한 줄만 남는다). */}
+        <div className="flex items-center gap-2">
+          {generationBudgetUsable ? (
+            <>
+              <label htmlFor="content-estimated-cost" className="text-xs text-muted-foreground">
+                {t('generationBudgetEstimatedCostLabel')}
+              </label>
+              <input
+                id="content-estimated-cost"
+                type="number"
+                min={0}
+                step={1}
+                value={estimatedCostInput}
+                onChange={(e) => setEstimatedCostInput(e.target.value)}
+                className="w-28 rounded-md border border-border bg-background px-2 py-1 text-sm"
+                data-testid="content-estimated-cost-input"
+              />
+              <span className="text-xs text-muted-foreground">{generationBudgetCurrency}</span>
+            </>
+          ) : null}
+          <GenerationBudgetIndicator state={genBudget} variant="compact" />
+        </div>
+        {genBudgetExceeded ? (
+          <GenerationBudgetExceededBanner
+            limitMinor={genBudgetExceeded.limitMinor}
+            spentMinor={genBudgetExceeded.spentMinor}
+            estimatedCostMinor={genBudgetExceeded.estimatedCostMinor}
+            remainingMinor={genBudgetExceeded.remainingMinor}
+            currency={genBudgetExceeded.currency}
+          />
+        ) : null}
+
+        <div className="space-y-1">
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" onClick={() => void handleSave()} disabled={saving}>
+              {saving ? tc('saving') : t('editSaveCta')}
+            </Button>
+            <Button type="button" variant="outline" onClick={() => void handleSubmitForApproval()} disabled={saving || submitting || hasBlockingViolations}>
+              {submitting ? t('submitPendingCta') : t('submitCta')}
+            </Button>
+            {/* story #3386 AC2 — 발행된 글은 기본 잠금(canPublish=false), 재승인된 새
+                버전이 있을 때만(isRepublish) 다시 열리고 라벨이 「재발행」으로 바뀐다. */}
+            <Button type="button" variant="outline" onClick={() => void handlePublish()} disabled={!canPublish || publishing}>
+              {publishing
+                ? (isRepublish ? t('publishRepublishingCta') : t('publishPendingCta'))
+                : (isRepublish ? t('publishRepublishCta') : t('publishCta'))}
+            </Button>
+          </div>
+          {/* story #3483(§16-7) — "그래서 못 한다"는 버튼 밖·비활성. "필드 아래"(무엇이
+              걸렸나)와 자리가 다르다 — 여기는 개수만 세고 가리킨다. */}
+          {hasBlockingViolations ? (
+            <ContentRuleSubmitBlockedReason count={violations.length} testId="content-rule-violation-blocked-reason" t={t} />
+          ) : null}
+          {/* story #3514(유나 Design 변경요청 1, 2026-09-05) — 단건 GET(violations 부수
+              데이터) 실패는 화면을 안 막되, "모른다"는 사실은 숨기지 않는다(지어내지
+              않는다 — 위반 0으로 조용히 넘어가면 실제로 위반이 있는데 못 본 것과
+              구별이 안 된다). */}
+          {violationsLoadFailed ? (
+            <p className="text-xs text-muted-foreground" data-testid="content-rule-violation-load-failed">
+              {t('contentRuleViolationsLoadFailed')}
+            </p>
+          ) : null}
+          {/* §6-2-1 — 비활성 발행 버튼 라벨 자체는 WCAG 면제 대상이지만, "눌리지 않는
+              이유"를 옆에 두는 이 문구는 실제 정보라 4.5:1 판정 대상이다(text-muted-
+              foreground on card 실측 5.92 — 통과, doc §6-2-1 그대로). */}
+          {!canPublish ? (
+            <p className="text-xs text-muted-foreground">
+              {blockedReason === 'SEAL_MISSING'
+                ? t('publishDisabledReasonSealMissing')
+                : status === 'published'
+                  ? t('publishDisabledReasonAlreadyPublished')
+                  : t('publishDisabledReason')}
+            </p>
+          ) : null}
+        </div>
+      </div>
+
+      {publishResult && (
+        <Alert
+          variant={publishResult.type === 'success' ? 'success' : 'destructive'}
+          role={publishResult.type === 'success' ? 'status' : 'alert'}
+          aria-live={publishResult.type === 'success' ? 'polite' : 'assertive'}
+          aria-atomic="true"
+        >
+          <AlertDescription>
+            {publishResult.type === 'success' ? (
+              <>
+                {t('publishSuccess', { time: formatScheduledAt(publishResult.publishedAt, displayTimezone).display })}
+                {' '}
+                <a href={publishResult.url} target="_blank" rel="noopener noreferrer" className="underline">
+                  {t('publishViewLink')}
+                </a>
+              </>
+            ) : (
+              <>
+                {publishResult.text}
+                {publishResult.reapprovalHashes ? (
+                  // §8-3④-1 — 409 SITE_POST_REAPPROVAL_REQUIRED는 S10 일반 오류가 아니라
+                  // S9와 같은 처리(문구+해시 병치)다. 판정이 아니라 관측(§3-2)이라 여기서도
+                  // 그대로 — 해시 두 개를 나란히 보여주고 사람이 스스로 확인하게 한다.
+                  <>
+                    <br />
+                    <span className="font-mono text-xs">
+                      {t('reapprovalSealedHash')} {publishResult.reapprovalHashes.sealed ? `${publishResult.reapprovalHashes.sealed.slice(0, 12)}…` : '—'}
+                      {' · '}
+                      {t('reapprovalCurrentHash')} {publishResult.reapprovalHashes.current.slice(0, 12)}…
+                    </span>
+                  </>
+                ) : null}
+              </>
+            )}
+          </AlertDescription>
+          {publishResult.type === 'error' ? <RawDetailsToggle raw={publishResult.raw} label={t('errorRawDetailsToggle')} /> : null}
+        </Alert>
+      )}
+    </div>
+  );
+}

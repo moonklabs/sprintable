@@ -34,6 +34,14 @@ def _r_scalar(val):
     return r
 
 
+def _r_scalar_or_none(val):
+    """story #3674 — get_org_timezone(org_time.py)이 쓰는 .scalar_one_or_none() 전용
+    (org 미존재/timezone 미설정 둘 다 None 가능이라 scalar_one이 아니다)."""
+    r = MagicMock()
+    r.scalar_one_or_none.return_value = val
+    return r
+
+
 def _r_all(rows):
     r = MagicMock()
     r.all.return_value = list(rows)
@@ -484,12 +492,15 @@ async def test_review_merge_excludes_blocked_by_open_dependency_query_shape():
 
 
 # ── /overview ─────────────────────────────────────────────────────────────────
-# 쿼리 순서: total_agents→epic_rows→epics→hypothesis→events→contribution→cycle→cost→blocked→failed→fleet.
+# 쿼리 순서: total_agents→epic_rows→epics→hypothesis→events→contribution→cycle→
+# org_timezone(story #3674, get_org_timezone)→cost→blocked→failed→fleet.
 def _ov_seq(*, total_agents=0, epic_rows=(), epics=(), hyp=(0, 0), events=(),
-            contrib=(), cycle=(None, 0), cost=(), blocked=0, failed=0, fleet=()):
+            contrib=(), cycle=(None, 0), org_timezone=None, cost=(), blocked=0, failed=0, fleet=()):
     return [
         _r_scalar(total_agents), _r_all(epic_rows), _r_scalars(epics), _r_one(hyp),
-        _r_scalars(events), _r_all(contrib), _r_one(cycle), _r_all(cost),
+        _r_scalars(events), _r_all(contrib), _r_one(cycle),
+        _r_scalar_or_none(org_timezone),  # story #3674 — get_org_timezone(session, org_id).
+        _r_all(cost),
         _r_scalar(blocked), _r_scalar(failed), _r_all(fleet),
     ]
 
@@ -546,4 +557,34 @@ async def test_overview_cost_trend_empty_honest_and_cycle_null():
     ps = _data(resp)["project_status"]
     assert ps["cost_trend"] == {"points": [], "total_cost_usd": 0, "delta_pct": None}
     assert ps["cycle_time"] == {"avg_days": None, "sample": 0}
+
+
+# ── story #3674(BE 確定 2026-09-07) — cost_trend 일별 그룹핑이 org 시간대로 ─────
+
+@pytest.mark.anyio
+async def test_overview_cost_trend_groups_by_org_timezone_when_set():
+    """org.timezone='Asia/Seoul'이면 cost_trend 쿼리가 func.timezone('Asia/Seoul', ...)
+    로 그룹핑한다는 것을 SQL shape로 확認(모킹 세션이라 결과 값 자체는 실PG 몫,
+    review_merge 쿼리 shape 테스트와 동형 관례). 쿼리 순서 인덱스: total_agents(0)→
+    epic_rows(1)→epics(2)→hyp(3)→events(4)→contrib(5)→cycle(6)→org_timezone(7)→
+    cost(8)."""
+    resp, session, resolver = await _get(
+        "/api/v2/command-center/overview", execute_seq=_ov_seq(org_timezone="Asia/Seoul"))
+    assert resp.status_code == 200
+    cost_sql = str(session.execute.await_args_list[8].args[0])
+    assert "timezone" in cost_sql.lower()
+    assert "Asia/Seoul" in cost_sql or ":timezone_1" in cost_sql  # literal or bound param(드라이버별 상이).
+
+
+@pytest.mark.anyio
+async def test_overview_cost_trend_defaults_to_utc_when_org_timezone_unset():
+    """⭐뮤테이션 표적1 — org.timezone=None(미설정)이면 UTC로 폴백(3665 동작 보존).
+    org_date_sql을 revert해 func.date(AgentRun.started_at)만 쓰면(org tz 무시) 이 SQL
+    shape 자체엔 timezone 함수가 아예 없어져 이 assert가 깨진다(회귀 감지)."""
+    resp, session, resolver = await _get(
+        "/api/v2/command-center/overview", execute_seq=_ov_seq(org_timezone=None))
+    assert resp.status_code == 200
+    cost_sql = str(session.execute.await_args_list[8].args[0])
+    assert "timezone" in cost_sql.lower()
+    assert "UTC" in cost_sql or ":timezone_1" in cost_sql
     # 신규 집계가 mock 가짜 수치를 내지 않음(빈 소스=정직한 empty/null).

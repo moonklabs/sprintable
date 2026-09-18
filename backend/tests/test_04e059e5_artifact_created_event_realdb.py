@@ -169,7 +169,10 @@ async def test_create_artifact_human_creator_gets_notification_self_notified():
                 id=uuid.uuid4(), project_id=seeded["project_id"], org_member_id=om.id, permission="granted",
             ))
             await s.commit()
-            creator_id = om.id
+            # resolve_member_db_verified()의 휴먼 분기는 OrgMember.user_id==raw_id로 매치한다
+            # (org_member.id 자체가 아니라 users.id 축) — auth.user_id에는 om.id가 아니라
+            # user.id를 태워야 한다(story #3370 축과 정합, member_resolver.py:194-200).
+            creator_id = user.id
 
         await _setup_app(app, Session, seeded["org_id"], seeded["project_id"], creator_id)
         client = _client_for(app)
@@ -328,7 +331,25 @@ async def test_edit_and_comment_events_still_fire_no_regression():
             await client.aclose()
         app.dependency_overrides.clear()
 
-        human_editor_id = uuid.uuid4()
+        # resolve_member_db_verified()는 fail-closed(DB 실측) — unseeded 랜덤 uuid는
+        # OrgMember도 TeamMember(agent)도 못 찾아 400. 실 User+OrgMember를 심어야 한다
+        # (story #3370, member_resolver.py:194-200).
+        async with Session() as s:
+            from app.models.project import OrgMember
+            from app.models.user import User
+            editor_user = User(id=uuid.uuid4(), email=f"editor-{uuid.uuid4().hex[:8]}@test.com", hashed_password="x")
+            s.add(editor_user)
+            await s.commit()
+            editor_om = OrgMember(id=uuid.uuid4(), org_id=seeded["org_id"], user_id=editor_user.id, role="member")
+            s.add(editor_om)
+            await s.commit()
+            from app.models.project_access import ProjectAccess
+            s.add(ProjectAccess(
+                id=uuid.uuid4(), project_id=seeded["project_id"], org_member_id=editor_om.id, permission="granted",
+            ))
+            await s.commit()
+            human_editor_id = editor_user.id
+
         await _setup_app(app, Session, seeded["org_id"], seeded["project_id"], human_editor_id)
         client = _client_for(app)
         try:

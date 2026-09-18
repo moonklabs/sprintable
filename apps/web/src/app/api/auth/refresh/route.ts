@@ -3,6 +3,7 @@ import { cookies } from 'next/headers';
 import { SP_AT_COOKIE, SP_RT_COOKIE } from '@/lib/db/server';
 import { verifyCsrfOrigin } from '@/lib/auth/csrf';
 import { cookieBase, SP_AT_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
+import { safeJsonParse } from '@/lib/api-response';
 
 const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 
@@ -23,7 +24,7 @@ export async function POST(request: Request) {
     body: JSON.stringify({ refresh_token: refreshToken }),
   });
 
-  const json = await fastapiRes.json() as { data?: { access_token: string; refresh_token: string }; error?: { code: string; message: string } };
+  const json = await safeJsonParse(fastapiRes) as { data?: { access_token: string; refresh_token: string }; error?: { code: string; message: string } };
   if (!fastapiRes.ok || !json.data) {
     // story e5225c0a(P0) 3차 재진단(산티아고 prod gcloud 실측 근본 확定): 이 route는
     // PUBLIC_PREFIX('/api/auth/')라 proxy.ts 미들웨어를 안 거쳐 별도 실패 경로다(1차 갭, #2185에서

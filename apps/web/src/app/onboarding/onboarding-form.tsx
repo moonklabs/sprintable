@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { OperatorInput, OperatorTextarea, OperatorSelect } from '@/components/ui/operator-control';
 import { useTranslations } from 'next-intl';
 import { fetchWithAuth } from '@/lib/db/client';
+import { getPublicAppHost } from '@/lib/public-app-host';
 import { ConnectStep } from './connect-step';
 import { emitOnboardingEvent } from './onboarding-telemetry';
 
@@ -72,6 +73,7 @@ interface OnboardingFormProps {
 
 export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProps = {}) {
   const t = useTranslations('onboarding');
+  const tc = useTranslations('common');
 
   const [step, setStep] = useState<Step>(initialStep ?? 'org');
   const [orgName, setOrgName] = useState('');
@@ -423,7 +425,7 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
         {error && (
           // story #2105 2차 — handleCreateOrg/handleCreateProject/handleCreateAgent 모두 재시도 전
           // setError('')를 먼저 호출해(위 정의) 매 시도마다 언마운트→리마운트된다.
-          <div role="alert" aria-live="assertive" aria-atomic="true" className="rounded-lg border border-destructive/20 bg-destructive/10 p-3 text-sm text-foreground">
+          <div role="alert" aria-live="assertive" aria-atomic="true" className="rounded-lg border border-destructive/20 bg-destructive-tint p-3 text-sm text-foreground">
             {error}
           </div>
         )}
@@ -481,7 +483,7 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
               {orgSlug && !slugValid ? (
                 // ⚠️Phase2 i18n·#2485 — 클라 측 정규식 검증 문구가 하드코딩 한국어다(t() 아님,
                 // 서버 응답과 무관 — raw 서버 누수는 아님). #2484 스코프 밖, 유나 design 확認.
-                <p className="text-xs text-destructive">영소문자, 숫자, 하이픈만 사용 가능합니다</p>
+                <p className="text-xs text-destructive">{t('slugCharsHint')}</p>
               ) : !orgSlug && orgName.trim() ? (
                 // story #2750 — 조직명이 한글 등 비-ASCII로만 이뤄지면 handleOrgNameChange의
                 // 자동 파생(로마자/숫자만 남기는 정규식)이 전부 걸러내 orgSlug가 빈 문자열로
@@ -489,7 +491,7 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
                 // 결함 — 이미 존재하는 수동 slug 입력 칸(바로 위)으로 안내해 막힘을 뚫는다.
                 <p className="text-xs text-destructive">{t('slugManualRequired')}</p>
               ) : (
-                <p className="text-xs text-muted-foreground">sprintable.app/{orgSlug || '...'}</p>
+                <p className="text-xs text-muted-foreground">{getPublicAppHost()}/{orgSlug || '...'}</p>
               )}
             </div>
             <Button
@@ -499,7 +501,7 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
               onClick={() => void handleCreateOrg()}
               disabled={!orgName.trim() || !orgSlug.trim() || !slugValid || loading}
             >
-              {loading ? t('creating') : t('createOrg')}
+              {loading ? tc('creating') : t('createOrg')}
             </Button>
           </div>
         )}
@@ -531,7 +533,7 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
               onClick={() => void handleCreateProject()}
               disabled={!projectName.trim() || loading}
             >
-              {loading ? t('creating') : t('createProjectAction')}
+              {loading ? tc('creating') : t('createProjectAction')}
             </Button>
           </div>
         )}
@@ -565,7 +567,7 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
               onClick={() => void handleCreateAgent()}
               disabled={!agentName.trim() || loading}
             >
-              {loading ? t('creating') : t('createAgentAction')}
+              {loading ? tc('creating') : t('createAgentAction')}
             </Button>
             <Button
               variant="glass"

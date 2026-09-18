@@ -1,14 +1,38 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import exists, select, text
+from sqlalchemy import exists, func, select, text, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.standup import StandupEntry, StandupEntryProject, StandupFeedback
 from app.repositories.base import BaseRepository
+
+# story #3841(customer-zero·BE·목록 상한, 페드루 PO 確定 2026-09-14) — list_standups의
+# 정렬은 (date DESC, created_at DESC)인 복합 키라 docs.py/goals.py의 단일-컬럼 cursor로는
+# 못 미러링한다(docs.py encode_doc_cursor의 "(sort_order,id) 복합 커서" 선례를 여기서
+# (date,created_at,id) 3-tuple로 확장 — id까지 넣는 이유도 동일: date+created_at만으로도
+# 동석차 tie가 이론상 가능해 경계 행 누락/중복을 막는 2차·3차 정렬키가 필요하다).
+# 구분자는 "|" — created_at의 ISO 표현 자체가 ":"를 포함해(예 04:50:00+00:00) ":" 구분자는
+# 잘못 쪼개진다(docs.py의 단일 int 필드 커서에선 없던 함정).
+def encode_standup_cursor(entry: StandupEntry) -> str:
+    return f"{entry.date.isoformat()}|{entry.created_at.isoformat()}|{entry.id}"
+
+
+def parse_standup_cursor(cursor: object) -> tuple[date, datetime, uuid.UUID] | None:
+    """docs.py parse_doc_cursor와 동일 방어(story #2540 CI 정정) — FastAPI Query(...) 경유가
+    아니라 이 함수를 직접 호출하는 자리(테스트 등)에서 인자를 생략하면 Query 센티널 객체
+    그 자체가 들어올 수 있다 — 값의 존재가 아니라 타입으로 「커서 없음」을 가른다."""
+    if not isinstance(cursor, str) or not cursor:
+        return None
+    try:
+        date_str, created_at_str, id_str = cursor.split("|", 2)
+        return date.fromisoformat(date_str), datetime.fromisoformat(created_at_str), uuid.UUID(id_str)
+    except ValueError as exc:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="Invalid cursor format") from exc
 
 # AC3-3: missing 산정 — "effective 휴먼 project access"를 canonical members.id로 열거(team_members
 # 열거 대체). has_project_access 3-branch(owner/admin org-wide ∪ project_access grant ∪ 레거시 휴먼
@@ -86,6 +110,50 @@ class StandupEntryRepository(BaseRepository[StandupEntry]):
         q = q.order_by(StandupEntry.date.desc(), StandupEntry.created_at.desc())
         result = await self.session.execute(q.limit(limit))
         return list(result.scalars().all())
+
+    async def list_paginated(
+        self, *, limit: int = 1000, cursor: tuple[date, datetime, uuid.UUID] | None = None,
+        **filters: Any,
+    ) -> tuple[list[StandupEntry], int]:
+        """story #3841 — `.list()`(위)의 조용한 1000-cap을 true cursor 페이지네이션으로
+        대체하는 신규 메서드(`.list()` 자신은 그대로 둔다 — 코드베이스 전체에서 그 메서드의
+        실호출처는 없고 이 카드가 유일한 소비처인 list_standups만 옮겨 탄다, 회귀 표면 0).
+
+        base.py::BaseRepository.list_paginated의 규약(total = 필터+**cursor** 適用 後의
+        남은 전체 개수 — cursor 前 grand total이 아니다, #2537/페드루 AC 리뷰 정정 그대로
+        이 신규 메서드에도 적용)을 그대로 따르되, 정렬이 (date,created_at) 복합키라 그
+        범용 메서드(단일 monotonic 컬럼 전제)를 상속하지 않고 GoalRepository.
+        _list_paginated_by_position과 동형으로 별도 구현한다."""
+        project_id = filters.pop("project_id", None)
+        conds = [self._org_filter()]
+        for attr, val in filters.items():
+            conds.append(getattr(StandupEntry, attr) == val)
+        if project_id is not None:
+            conds.append(
+                exists().where(
+                    StandupEntryProject.entry_id == StandupEntry.id,
+                    StandupEntryProject.project_id == project_id,
+                )
+            )
+        if cursor is not None:
+            cursor_date, cursor_created_at, cursor_id = cursor
+            conds.append(
+                tuple_(StandupEntry.date, StandupEntry.created_at, StandupEntry.id)
+                < tuple_(cursor_date, cursor_created_at, cursor_id)
+            )
+
+        count_result = await self.session.execute(
+            select(func.count()).select_from(StandupEntry).where(*conds)
+        )
+        total = int(count_result.scalar_one() or 0)
+
+        q = (
+            select(StandupEntry).where(*conds)
+            .order_by(StandupEntry.date.desc(), StandupEntry.created_at.desc(), StandupEntry.id.desc())
+            .limit(limit)
+        )
+        result = await self.session.execute(q)
+        return list(result.scalars().all()), total
 
     async def upsert(self, **data: Any) -> StandupEntry:
         """E-STANDUP 3b6b567c: org-level upsert — 키 **(org_id, author_id, date)**.

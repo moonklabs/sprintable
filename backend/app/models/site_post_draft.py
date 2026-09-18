@@ -1,0 +1,58 @@
+"""story #3365(Phase0 S1, 선생님 확定 2026-09-03) — 초안 원장. 고객 에이전트가 넣는 초안과
+휴먼이 고친 개정판을 같은 work item·slug 아래 불변 버전으로 쌓는다. `SitePost`(공개 projection,
+site_post.py)와 분리 — 승인·발행 전에는 이 테이블에만 존재하고 공개 행은 절대 안 생긴다.
+
+버전 원문·주체는 SitePostVersion(아래)이 SSOT — 이 draft 행 자체엔 원작성 주체를 중복 저장하지
+않는다(version_number=1이 원작성 버전).
+
+`campaign_id`(story #3437, 페드루 PO 確定 2026-09-04) — 이 content_item이 속하는
+Campaign(campaign.py). FK 없음(이 도메인 전체 관례). nullable — campaign 없는 단독 글도
+허용(AC3 명시).
+
+`connection_id`(story e4fc29fa, 페드루 PO 確定 2026-09-04, 조각③a) — 이 content_item이
+나가는 목적지(`channel_connections` 행). FK 없음(이 도메인 전체 관례). nullable —
+null=hosted_site(Sprintable 호스팅, 기존 기본 동작·기존 draft 전부 무변경). 승인 뒤
+바뀌면 재승인 대상(gate.sealed_destination_connection_id와 비교, site_posts.py::
+_reseal_gate_on_new_version 참고).
+
+`deleted_at`(SoftDeleteMixin, story #3734) — 「보관」(화면 낱말, 유나 定)의 저장 축.
+레포 SSOT 관례 재사용(archived_at 신설 안 함) — 목록은 기본 이 컬럼이 null인 행만,
+`include_deleted=True`로 보관함 조회. Gate·SitePost(발행 projection) 등 승인·발행
+기록은 이 컬럼과 완전히 무관 — 삭제가 아니라 목록에서만 빼는 축이라 무변."""
+from __future__ import annotations
+
+import uuid
+from datetime import datetime
+
+from sqlalchemy import DateTime, Text, UniqueConstraint, func
+from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.core.database import Base
+from app.models.base import SoftDeleteMixin
+
+
+class SitePostDraft(Base, SoftDeleteMixin):
+    __tablename__ = "site_post_drafts"
+    __table_args__ = (
+        UniqueConstraint("org_id", "work_item_id", "slug", name="uq_site_post_drafts_org_work_item_slug"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    work_item_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    slug: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="draft")
+    campaign_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    connection_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    # story #3471(페드루 PO 確定 2026-09-05) — channel_post_draft.py::lint_result와
+    # 동형(draft 축 스냅샷, 실시간 재계산 아님). site_post는 link_url 필드가 없어 UTM
+    # 필수 검사는 구조적으로 no-op — banned_terms만 title+summary+body_md 결합 텍스트에
+    # 적용(content_rules.py::lint_content 호출부 참고).
+    lint_result: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )

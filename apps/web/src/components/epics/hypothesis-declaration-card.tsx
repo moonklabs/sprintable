@@ -46,6 +46,18 @@ export function HypothesisDeclarationCard({
   const [drafting, setDrafting] = useState(false);
   const [precedents, setPrecedents] = useState<ContextPackSearchResult[] | null>(null);
   const [precedentsLoading, setPrecedentsLoading] = useState(false);
+  // story #3637(유나 silent-failure-sweep-3632) — 실패를 setPrecedents([])로 그리면
+  // "비슷한 가설 조회 중..." 로딩 문구가 조용히 사라져 "찾아봤는데 없다"로 읽힌다(모름을
+  // 없음으로 오독). precedents는 null(모름) 유지, 실패는 이 플래그로만.
+  const [precedentsFailed, setPrecedentsFailed] = useState(false);
+
+  // story #3878(§⑤ 낱말 드리프트) — linkedPreview.status(HypothesisStatus canonical slug)를
+  // t() 없이 그대로 그리던 자리 정본화. hypothesis-status-badge.tsx의 키 조립 관례
+  // 그대로 재사용(§②-1 기존 hypotheses.status* 낱말, 새 키 0).
+  const hypothesisStatusLabel = (slug: string): string => {
+    const labelKey = `status${slug.charAt(0).toUpperCase()}${slug.slice(1)}` as 'statusProposed';
+    return th(labelKey);
+  };
 
   const metric = value.metricDefinition;
   const isGa4 = metric?.source === 'ga4';
@@ -93,15 +105,16 @@ export function HypothesisDeclarationCard({
 
   async function fetchPrecedents() {
     const query = value.statement.trim();
-    if (!query || query.length < 4) { setPrecedents(null); return; }
+    if (!query || query.length < 4) { setPrecedents(null); setPrecedentsFailed(false); return; }
     setPrecedentsLoading(true);
+    setPrecedentsFailed(false);
     try {
       const res = await fetch(`/api/context-pack/search?project_id=${projectId}&query=${encodeURIComponent(query)}&limit=5`);
-      if (!res.ok) { setPrecedents([]); return; }
+      if (!res.ok) { setPrecedentsFailed(true); return; }
       const json = await res.json() as { data?: ContextPackSearchResult[] };
       setPrecedents((json.data ?? []).filter((r) => r.entity_type === 'hypothesis').slice(0, 2));
     } catch {
-      setPrecedents([]);
+      setPrecedentsFailed(true);
     } finally {
       setPrecedentsLoading(false);
     }
@@ -263,6 +276,8 @@ export function HypothesisDeclarationCard({
 
           {precedentsLoading ? (
             <p className="text-[10px] text-muted-foreground">{t('declareL1Loading')}</p>
+          ) : precedentsFailed ? (
+            <p className="text-[10px] text-muted-foreground">{t('declareL1LoadError')}</p>
           ) : precedents && precedents.length > 0 ? (
             <div className="space-y-1.5 rounded-lg border border-border bg-muted/20 p-2">
               <p className="flex items-center gap-1.5 text-[10px] font-medium text-muted-foreground">
@@ -324,7 +339,7 @@ export function HypothesisDeclarationCard({
           {value.linkedPreview ? (
             <div className="flex items-center justify-between gap-2 rounded-lg border border-primary/30 bg-primary/5 p-2 text-[11px]">
               <span className="min-w-0 flex-1 truncate text-foreground">{value.linkedPreview.statement}</span>
-              <Badge variant="chip">{value.linkedPreview.status}</Badge>
+              <Badge variant="chip">{hypothesisStatusLabel(value.linkedPreview.status)}</Badge>
             </div>
           ) : null}
         </div>

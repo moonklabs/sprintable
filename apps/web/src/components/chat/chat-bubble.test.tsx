@@ -14,6 +14,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import { ChatBubble } from './chat-bubble';
 import type { ChatMessage } from '@/hooks/use-chat-sse';
 import koMessages from '../../../messages/ko.json';
+import enMessages from '../../../messages/en.json';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -51,6 +52,16 @@ let root: Root;
 function wrap(node: React.ReactNode) {
   return (
     <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+      {node}
+    </NextIntlClientProvider>
+  );
+}
+
+// story #3884 — en 로케일 렌더 전용(targetMissing의 {type} 소문자 처방 등 en 전용 회귀).
+// 기존 wrap()은 ko 고정이라 건드리지 않는다(다른 100+ 테스트 회귀 위험 — 새 함수로 병렬).
+function wrapEn(node: React.ReactNode) {
+  return (
+    <NextIntlClientProvider locale="en" messages={enMessages} timeZone="America/Los_Angeles">
       {node}
     </NextIntlClientProvider>
   );
@@ -98,17 +109,17 @@ describe('ChatBubble — story #2263 AC6 유령 칩(stored 참조 대조)', () =
     });
     const chip = container.querySelector('button');
     expect(chip).not.toBeNull();
-    expect(container.textContent).not.toContain('대상이 없습니다');
+    expect(container.textContent).not.toContain('대상이 없어요');
   });
 
   it('references가 빈 배열(읽기 경로가 참조 0건을 확認)이면 본문 토큰이 유령으로 그려진다', async () => {
     await act(async () => {
       root.render(wrap(<ChatBubble message={{ ...baseMessage, references: [] }} isMine={false} />));
     });
-    // story #3213 — 유령이라도 미등록≠비존재라 "대상이 없습니다"를 더 이상 단정하지 않는다.
+    // story #3213 — 유령이라도 미등록≠비존재라 "대상이 없어요"를 더 이상 단정하지 않는다.
     // 클릭(EntityPreviewModal의 실 fetch)으로 진짜 존재판정을 위임 — 그래서 버튼은 있어야 한다.
     expect(container.querySelector('button')).not.toBeNull();
-    expect(container.textContent).not.toContain('대상이 없습니다');
+    expect(container.textContent).not.toContain('대상이 없어요');
     expect(container.textContent).toContain('제안서.md');
   });
 
@@ -123,7 +134,7 @@ describe('ChatBubble — story #2263 AC6 유령 칩(stored 참조 대조)', () =
     });
     const chip = container.querySelector('button');
     expect(chip).not.toBeNull();
-    expect(container.textContent).not.toContain('대상이 없습니다');
+    expect(container.textContent).not.toContain('대상이 없어요');
     expect(container.textContent).toContain('제안서.md');
   });
 
@@ -136,7 +147,7 @@ describe('ChatBubble — story #2263 AC6 유령 칩(stored 참조 대조)', () =
     await act(async () => {
       root.render(wrap(<ChatBubble message={assetMsg} isMine={false} />));
     });
-    expect(container.textContent).not.toContain('대상이 없습니다');
+    expect(container.textContent).not.toContain('대상이 없어요');
   });
 });
 
@@ -231,7 +242,7 @@ describe('ChatBubble — story #2262 AC2 PR② 2단계(chat-view.tsx 실 배치�
     });
     // story #2886(S2b) — 상태 라벨은 격납(hover/focus tooltip)으로 이동. 포커스로 열고 확認.
     await act(async () => { container.querySelector('button')!.focus(); });
-    expect(document.body.textContent).toContain('확定');
+    expect(document.body.textContent).toContain('확정');
     expect(document.body.textContent).not.toContain('아직 모름');
   });
 
@@ -283,7 +294,7 @@ describe('ChatBubble — story #2319 tombstone(메시지 삭제) 렌더', () => 
     await act(async () => {
       root.render(wrap(<ChatBubble message={deletedMsg} isMine={true} />));
     });
-    expect(container.textContent).toContain('삭제된 메시지입니다');
+    expect(container.textContent).toContain('삭제된 메시지예요');
     expect(container.textContent).not.toContain('제안서.md');
   });
 
@@ -291,7 +302,7 @@ describe('ChatBubble — story #2319 tombstone(메시지 삭제) 렌더', () => 
     await act(async () => {
       root.render(wrap(<ChatBubble message={{ ...baseMessage, deleted_at: null }} isMine={true} />));
     });
-    expect(container.textContent).not.toContain('삭제된 메시지입니다');
+    expect(container.textContent).not.toContain('삭제된 메시지예요');
   });
 
   it('본인 메시지도 이미 삭제됐으면 컨텍스트 메뉴에 「삭제」를 다시 제시하지 않는다', async () => {
@@ -435,7 +446,7 @@ describe('ChatBubble — story #2349 사용자 차단 마스킹', () => {
       root.render(wrap(<ChatBubble message={msg} isMine={false} />));
     });
     expect(container.textContent).toContain('일반 텍스트');
-    expect(container.textContent).not.toContain('차단한 사용자의 메시지입니다');
+    expect(container.textContent).not.toContain('차단한 사용자의 메시지예요');
   });
 
   it('is_blocked_sender=true면 본문 대신 마스킹 placeholder + "보기"가 뜬다', async () => {
@@ -443,7 +454,7 @@ describe('ChatBubble — story #2349 사용자 차단 마스킹', () => {
     await act(async () => {
       root.render(wrap(<ChatBubble message={msg} isMine={false} />));
     });
-    expect(container.textContent).toContain('차단한 사용자의 메시지입니다');
+    expect(container.textContent).toContain('차단한 사용자의 메시지예요');
     expect(container.textContent).toContain('보기');
     expect(container.textContent).not.toContain('숨겨야 할 내용');
   });
@@ -457,7 +468,7 @@ describe('ChatBubble — story #2349 사용자 차단 마스킹', () => {
     expect(revealBtn).not.toBeUndefined();
     await act(async () => { revealBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(container.textContent).toContain('숨겨야 할 내용');
-    expect(container.textContent).not.toContain('차단한 사용자의 메시지입니다');
+    expect(container.textContent).not.toContain('차단한 사용자의 메시지예요');
   });
 
   // 유나 design:changes(2026-08-03) — "보기"가 한 방향이면 누르는 문턱이 생긴다(되돌릴 수
@@ -474,7 +485,7 @@ describe('ChatBubble — story #2349 사용자 차단 마스킹', () => {
     const hideBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '숨기기');
     expect(hideBtn).not.toBeUndefined();
     await act(async () => { hideBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    expect(container.textContent).toContain('차단한 사용자의 메시지입니다');
+    expect(container.textContent).toContain('차단한 사용자의 메시지예요');
     expect(container.textContent).toContain('보기');
     expect(container.textContent).not.toContain('숨겨야 할 내용');
   });
@@ -493,8 +504,8 @@ describe('ChatBubble — story #2349 사용자 차단 마스킹', () => {
     await act(async () => {
       root.render(wrap(<ChatBubble message={msg} isMine={false} />));
     });
-    expect(container.textContent).toContain('삭제된 메시지입니다');
-    expect(container.textContent).not.toContain('차단한 사용자의 메시지입니다');
+    expect(container.textContent).toContain('삭제된 메시지예요');
+    expect(container.textContent).not.toContain('차단한 사용자의 메시지예요');
   });
 
   it('onBlockUser를 안 주면(기존 호출부) 우클릭 메뉴에 「사용자 차단」이 안 뜬다(회귀 0)', async () => {
@@ -739,7 +750,8 @@ describe('ChatBubble — story #2604 P2 결재 요청(approval_target) 카드', 
     await act(async () => {
       root.render(wrap(<ChatBubble message={approvalMessage} isMine={false} />));
     });
-    expect(container.textContent).toContain('승인할 권한이 없습니다');
+    // story #3899 — 리터럴 재-pin 대신 ko.json 값을 읽어 대조(어조 전환마다 깨지는 걸 막는다).
+    expect(container.textContent).toContain(koMessages.cage.gateReadonlyNotAuthorized);
     expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent?.includes('승인'))).toBe(false);
   });
 
@@ -751,7 +763,7 @@ describe('ChatBubble — story #2604 P2 결재 요청(approval_target) 카드', 
     // 링크 위임 UX는 선생님 실사용 판정으로 폐기됐다(gate 34af76dc) — 더 이상 없어야 한다.
     expect(container.querySelector(`a[href="/gates/${GATE_ID}"]`)).toBeNull();
     // GateSignatureApproval이 그대로(사본 아님) 얹힌다 — 근거 확인 체크박스+사유 textarea.
-    expect(container.textContent).toContain('위 근거를 확인했습니다');
+    expect(container.textContent).toContain('위 근거를 확인했어요');
     const signBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('승인하고 서명'))!;
     expect(signBtn).not.toBeUndefined();
     // 카디르 QA(320/375px 실측) 재발방지 — compact=true가 실제로 전달돼 버튼이 세로 스택
@@ -824,7 +836,7 @@ describe('ChatBubble — story #2604 P2 결재 요청(approval_target) 카드', 
     await act(async () => {
       root.render(wrap(<ChatBubble message={approvalMessage} isMine={false} />));
     });
-    expect(container.textContent).toContain('찾을 수 없습니다');
+    expect(container.textContent).toContain('찾을 수 없어요');
   });
 
   it('story #2627 — 카드 제목 클릭 시 doc 본문이 챗 안 모달로 열린다(기존 EntityPreviewModal 재사용)', async () => {
@@ -947,14 +959,18 @@ describe('ChatBubble — story #2604 P2 결재 요청(approval_target) 카드', 
   });
 
   describe('story #2637 AC4(PO 08-14 확定) — resolved 분기 preset.gate.verdict block_template 부분 소비', () => {
-    // 0251 마이그(develop 상륙) 실물 그대로 — 대상 필드 value가 work_item_title로 정정된 것.
+    // 0376 마이그(story #3884, develop 상륙) 실물 그대로 — 대상 필드 value가
+    // {{label.work_item_target}}(참조 토큰, approval-request-card.tsx가 twin pathway로
+    // 합성해 labels로 넘긴다)로, 본문 접속어가 {{label.gate_connective_line}}(gate_type도
+    // 라벨화 — 원시 slug "doc_approval" 노출 금지) 단일 토큰으로, 필드 라벨이
+    // {{t.X}}(eventCard 낱말)로 바뀐 것.
     const GATE_VERDICT_TEMPLATE = {
       blocks: [
-        { type: 'header', text: '게이트 판정' },
-        { type: 'text', text: '**{{payload.gate_type}}** 게이트 — **{{payload.verdict}}**' },
+        { type: 'header', text: '{{t.gateVerdictHeader}}' },
+        { type: 'text', text: '{{label.gate_connective_line}}' },
         { type: 'fields', fields: [
-          { label: '대상', value: '{{payload.work_item_title}}' },
-          { label: '사유', value: '{{payload.resolution_note}}' },
+          { label: '{{t.targetLabel}}', value: '{{label.work_item_target}}', optional: true },
+          { label: '{{t.reasonLabel}}', value: '{{payload.resolution_note}}', optional: true },
         ] },
       ],
     };
@@ -971,12 +987,29 @@ describe('ChatBubble — story #2604 P2 결재 요청(approval_target) 카드', 
       // 유지, 표현 수단만 shape+stateLabel로 옮겨갔다.
       expect(container.textContent).not.toContain('게이트 판정'); // header는 부분소비 제외.
       expect(container.textContent).not.toContain(DOC_ID); // Q2 — UUID 노출 금지.
-      expect(container.textContent).toContain('doc_approval');
+      // story #3884 — gate_type도 라벨화됐다(원시 slug "doc_approval" 노출 금지, 3881과
+      // 동일 클래스). gateTypeLabel(dashboard.ccGateTypeDocApproval) 재사용값.
+      expect(container.textContent).not.toContain('doc_approval');
+      expect(container.textContent).toContain('문서 결재');
       expect(container.textContent).toContain('승인됨'); // verdict 합성값 = 현행 한글 라벨.
       expect(container.textContent).toContain('근거가 충분합니다');
       // '제안서.md'는 카드 상단 제목(기존)과 fields 대상 값(신규) 둘 다에 나타난다 — 중복 등장 자체가
       // 정상(같은 개념 두 자리 표시), 최소 1회 이상만 확認.
       expect(container.textContent).toContain('제안서.md');
+    });
+
+    it('story #3332 — {{ref.work_item}}이 EntityChip(공유 SSOT)으로 렌더된다 — 칩 클릭 버튼·UUID 텍스트 0(PO 리뷰 PR#3714)', async () => {
+      stubGate({ status: 'approved', title: '제안서.md', resolution_note: '근거가 충분합니다' });
+      await act(async () => {
+        root.render(wrap(<ChatBubble message={approvalMessage} isMine={false} eventDefinitionsByKey={withGateVerdictCatalog} />));
+      });
+      // EntityChip은 <a href>가 아니라 클릭 트리거 <button type="button">으로 렌더된다
+      // (embed-card.tsx — readingPanel.open 또는 모달을 여는 JS 핸들러, href는 내비게이션
+      // DOM 속성이 아니라 내부 상태로만 쓰인다). "링크"가 아니라 "칩(버튼)"이 도달 기준.
+      const chipButtons = Array.from(container.querySelectorAll('button')).filter((b) => b.textContent?.includes('제안서.md'));
+      expect(chipButtons.length).toBeGreaterThan(0);
+      // Q2의 실제 요구: 화면 텍스트 어디에도 UUID가 없어야 한다(href 유무와 무관).
+      expect(container.textContent).not.toContain(DOC_ID);
     });
 
     it('PO 리뷰(head 81f7e4a7e) — resolved + 템플릿 있음 + resolution_note 없음(승인·사유 미기재) — 사유 행 자체가 안 뜬다(⟨missing⟩ 마커 노출 금지, 기존 카드와 동형 비회귀)', async () => {
@@ -1096,6 +1129,268 @@ describe('ChatBubble — story #2637 event_definitions block_template 카드', (
     expect(container.textContent).toContain('⟨missing: payload.note⟩');
   });
 
+  describe('story #3881(customer-zero) — {{label.X}} 네임스페이스 + optional 필드 줄 생략(0375 마이그 실물)', () => {
+    // migration 0375_status_changed_verdict_optional_fields.py의 preset.work.status_changed
+    // 실물 그대로. 페드루 CHANGES(2026-09-14 15:26Z, AC5 캡처 리뷰 中 실측 적출) —
+    // work_item_type도 원시 slug("story")였다(같은 클래스, 최초 그라운딩이 놓침) → label로.
+    const LABEL_TEMPLATE = {
+      blocks: [
+        { type: 'header', text: '작업 상태 변경' },
+        { type: 'text', text: '**{{label.work_item_type}}** `{{label.from_status}}` → `{{label.to_status}}`' },
+        {
+          type: 'fields',
+          fields: [
+            { label: '대상', value: '{{payload.work_item_id}}' },
+            { label: '메모', value: '{{payload.note}}', optional: true },
+          ],
+        },
+      ],
+    };
+    const LABEL_MESSAGE: ChatMessage = {
+      ...baseMessage,
+      content: '[이벤트] preset.work.status_changed',
+      sender_type: 'agent',
+      event: {
+        event_key: 'preset.work.status_changed',
+        // 실 publisher(story_status_events.py:330-335)와 동형 — work_item_type/from_status/
+        // to_status는 원시 slug, note는 키 자체가 없다(AC1 그라운딩 실측 그대로).
+        payload: { work_item_type: 'story', from_status: 'ready-for-dev', to_status: 'in-progress', work_item_id: 'S-42' },
+      },
+    };
+    const catalog = { 'preset.work.status_changed': { key: 'preset.work.status_changed', org_id: null, payload_schema: {}, routing: {}, block_template: LABEL_TEMPLATE, enabled: true, version: 2 } };
+
+    it('AC2 — work_item_type/from_status/to_status가 원시 slug가 아니라 사람 라벨(스토리·개발 대기·진행 중)로 뜬다', async () => {
+      await act(async () => {
+        root.render(wrap(<ChatBubble message={LABEL_MESSAGE} isMine={false} eventDefinitionsByKey={catalog} />));
+      });
+      expect(container.textContent).toContain('스토리');
+      expect(container.textContent).toContain('개발 대기');
+      expect(container.textContent).toContain('진행 중');
+      // 원시 slug는 화면에 전혀 없어야 한다.
+      expect(container.textContent).not.toContain('ready-for-dev');
+      expect(container.textContent).not.toContain('`in-progress`');
+      expect(container.textContent).not.toContain('**story**');
+    });
+
+    it('AC3 — note가 payload에 없으면(실 publisher와 동형) ⟨missing⟩ 플레이스홀더가 아예 안 뜬다(줄 생략)', async () => {
+      await act(async () => {
+        root.render(wrap(<ChatBubble message={LABEL_MESSAGE} isMine={false} eventDefinitionsByKey={catalog} />));
+      });
+      expect(container.textContent).not.toContain('⟨missing: payload.note⟩');
+      expect(container.textContent).not.toContain('메모');
+    });
+
+    it('⟨missing: label.X⟩도 payload/ref와 동일 마커 스타일(text-warning-strong·이탤릭)로 렌더된다(MISSING_MARKER_RE alternation 누락 회귀가드)', async () => {
+      // to_status가 payload에 아예 없으면(work_item_type만 온 방어적 케이스) EventBlockCard의
+      // labels 계산 자체가 그 키를 안 채운다(labels[key] 할당은 payload에 값이 있을 때만
+      // 실행 — typeof slug !== 'string'이면 continue) — {{label.to_status}}가 진짜 미해소로
+      // 남는 유일한 실제 경로.
+      const message: ChatMessage = {
+        ...LABEL_MESSAGE,
+        event: { ...LABEL_MESSAGE.event!, payload: { work_item_type: 'story', from_status: 'ready-for-dev', work_item_id: 'S-42' } },
+      };
+      await act(async () => {
+        root.render(wrap(<ChatBubble message={message} isMine={false} eventDefinitionsByKey={catalog} />));
+      });
+      const markerEl = Array.from(container.querySelectorAll('em')).find((e) => e.textContent === '⟨missing: label.to_status⟩');
+      expect(markerEl).not.toBeUndefined();
+      expect(markerEl!.className).toContain('text-warning-strong');
+    });
+
+    it('AC3 양성대조 — note에 실 값이 있으면 그 줄이 보인다(과잉 생략 아님)', async () => {
+      const withNote: ChatMessage = {
+        ...LABEL_MESSAGE,
+        event: { ...LABEL_MESSAGE.event!, payload: { ...LABEL_MESSAGE.event!.payload, note: '재작업 필요' } },
+      };
+      await act(async () => {
+        root.render(wrap(<ChatBubble message={withNote} isMine={false} eventDefinitionsByKey={catalog} />));
+      });
+      expect(container.textContent).toContain('메모');
+      expect(container.textContent).toContain('재작업 필요');
+    });
+
+    // 페드루 CHANGES(2026-09-14 15:26Z) — gate.verdict의 {{payload.gate_type}}도 같은
+    // 클래스(원시 slug)였다. 0375 마이그 실물(gate.verdict) 그대로 재현.
+    it('AC2(gate.verdict) — gate_type도 원시 slug가 아니라 사람 낱말(외부 발행)로 뜬다', async () => {
+      const gateVerdictTemplate = {
+        blocks: [
+          { type: 'header', text: '게이트 판정' },
+          { type: 'text', text: '**{{label.gate_type}}** 게이트 — **{{label.verdict}}**' },
+          { type: 'fields', fields: [
+            { label: '대상', value: '{{payload.work_item_id}}' },
+            { label: '사유', value: '{{payload.resolution_note}}', optional: true },
+          ] },
+        ],
+      };
+      const message: ChatMessage = {
+        ...baseMessage,
+        content: '[이벤트] preset.gate.verdict',
+        sender_type: 'agent',
+        event: {
+          event_key: 'preset.gate.verdict',
+          // gate_service.py:2169-2174 유일 publisher와 동형 — gate_type/verdict는 원시,
+          // resolution_note는 키 자체가 없다.
+          payload: { gate_type: 'external_publish', verdict: 'approved', work_item_id: 'S-1' },
+        },
+      };
+      const gateCatalog = { 'preset.gate.verdict': { key: 'preset.gate.verdict', org_id: null, payload_schema: {}, routing: {}, block_template: gateVerdictTemplate, enabled: true, version: 2 } };
+      await act(async () => {
+        root.render(wrap(<ChatBubble message={message} isMine={false} eventDefinitionsByKey={gateCatalog} />));
+      });
+      expect(container.textContent).toContain('외부 발행');
+      expect(container.textContent).toContain('승인됨');
+      expect(container.textContent).not.toContain('external_publish');
+      expect(container.textContent).not.toContain('**approved**');
+      // resolution_note가 payload에 없다 — 「사유」 줄 자체가 안 뜬다.
+      expect(container.textContent).not.toContain('사유');
+    });
+  });
+
+  describe('story #3884(customer-zero) — 대상 원시 UUID→참조 토큰(AC1) + {{t.X}} 고정 UI 카피(AC2, 0376 마이그 실물)', () => {
+    const STATUS_CHANGED_T_TEMPLATE = {
+      blocks: [
+        { type: 'header', text: '{{t.statusChangedHeader}}' },
+        { type: 'text', text: '**{{label.work_item_type}}** `{{label.from_status}}` → `{{label.to_status}}`' },
+        { type: 'fields', fields: [
+          { label: '{{t.targetLabel}}', value: '{{label.work_item_target}}', optional: true },
+          { label: '{{t.noteLabel}}', value: '{{payload.note}}', optional: true },
+        ] },
+      ],
+    };
+    const catalog = { 'preset.work.status_changed': { key: 'preset.work.status_changed', org_id: null, payload_schema: {}, routing: {}, block_template: STATUS_CHANGED_T_TEMPLATE, enabled: true, version: 3 } };
+
+    it('AC1 찾음 — refs.work_item={found:true,token}이면 대상이 클릭 참조 토큰(EntityChip)으로 렌더된다, 원시 UUID 0', async () => {
+      const message: ChatMessage = {
+        ...baseMessage,
+        content: '[이벤트] preset.work.status_changed',
+        sender_type: 'agent',
+        event: {
+          event_key: 'preset.work.status_changed',
+          payload: { work_item_type: 'story', from_status: 'ready-for-dev', to_status: 'in-progress', work_item_id: DOC_ID },
+          refs: { work_item: { found: true, token: `[결제 흐름 재설계](entity:story:${DOC_ID})` } },
+        },
+      };
+      await act(async () => {
+        root.render(wrap(<ChatBubble message={message} isMine={false} eventDefinitionsByKey={catalog} />));
+      });
+      expect(container.textContent).not.toContain(DOC_ID);
+      const chipButtons = Array.from(container.querySelectorAll('button')).filter((b) => b.textContent?.includes('결제 흐름 재설계'));
+      expect(chipButtons.length).toBeGreaterThan(0);
+      expect(container.textContent).toContain('작업 상태 변경'); // {{t.statusChangedHeader}} 해소.
+      expect(container.textContent).toContain('대상'); // {{t.targetLabel}} 해소.
+      expect(container.textContent).not.toContain('⟨missing');
+    });
+
+    it('AC1(d) 리졸버 있는데 못 찾음 — refs.work_item={found:false,type}이면 은은한 targetMissing 문구가 뜬다(fail-loud 마커 0)', async () => {
+      const message: ChatMessage = {
+        ...baseMessage,
+        content: '[이벤트] preset.work.status_changed',
+        sender_type: 'agent',
+        event: {
+          event_key: 'preset.work.status_changed',
+          payload: { work_item_type: 'story', from_status: 'ready-for-dev', to_status: 'in-progress', work_item_id: DOC_ID },
+          refs: { work_item: { found: false, type: 'story' } },
+        },
+      };
+      await act(async () => {
+        root.render(wrap(<ChatBubble message={message} isMine={false} eventDefinitionsByKey={catalog} />));
+      });
+      // eventCard.targetMissing = "(삭제된 {type})", {type}=entityTypeLabel('story', t)="스토리".
+      expect(container.textContent).toContain('(삭제된 스토리)');
+      expect(container.textContent).not.toContain('⟨missing');
+      expect(container.textContent).not.toContain(DOC_ID);
+    });
+
+    it('AC1(d) targetMissing en 로케일 — {type}이 소문자로 뜬다(entityTypeLabel en="Doc" 대문자를 이 자리만 lower — AC5 캡처 리뷰 中 실측 발견)', async () => {
+      const message: ChatMessage = {
+        ...baseMessage,
+        content: '[이벤트] preset.work.status_changed',
+        sender_type: 'agent',
+        event: {
+          event_key: 'preset.work.status_changed',
+          payload: { work_item_type: 'doc', from_status: 'ready-for-dev', to_status: 'in-progress', work_item_id: DOC_ID },
+          refs: { work_item: { found: false, type: 'doc' } },
+        },
+      };
+      await act(async () => {
+        root.render(wrapEn(<ChatBubble message={message} isMine={false} eventDefinitionsByKey={catalog} />));
+      });
+      // eventCard.targetMissing(en) = "(deleted {type})", entityTypeLabel('doc', t)="Doc"
+      // (대문자) — 이 자리에서만 소문자로 낮춰야 "(deleted doc)"이 된다.
+      expect(container.textContent).toContain('(deleted doc)');
+      expect(container.textContent).not.toContain('(deleted Doc)');
+      expect(container.textContent).not.toContain('⟨missing');
+    });
+
+    it('AC1(d) 리졸버 자체가 없음 — refs.work_item 키 자체가 없으면(agent_decision류) 대상 행이 통째로 줄 생략된다', async () => {
+      const message: ChatMessage = {
+        ...baseMessage,
+        content: '[이벤트] preset.work.status_changed',
+        sender_type: 'agent',
+        event: {
+          event_key: 'preset.work.status_changed',
+          payload: { work_item_type: 'agent_decision', from_status: 'ready-for-dev', to_status: 'in-progress', work_item_id: DOC_ID },
+          refs: {}, // 리졸버 없는 타입 — BE가 애초에 이 키를 안 심는다.
+        },
+      };
+      await act(async () => {
+        root.render(wrap(<ChatBubble message={message} isMine={false} eventDefinitionsByKey={catalog} />));
+      });
+      expect(container.textContent).not.toContain('대상'); // {{t.targetLabel}} 행 자체가 없다.
+      expect(container.textContent).not.toContain('⟨missing');
+      expect(container.textContent).not.toContain(DOC_ID);
+    });
+  });
+
+  describe('story #3332 — {{ref.X}} 네임스페이스(event.refs, publish_registry_event이 계산해 준 참조 토큰)', () => {
+    const REF_TEMPLATE = {
+      blocks: [
+        { type: 'header', text: '게이트 판정' },
+        { type: 'text', text: '**{{payload.gate_type}}** 게이트 — **{{payload.verdict}}**' },
+        { type: 'fields', fields: [
+          { label: '대상', value: '{{ref.work_item}}' },
+          { label: '사유', value: '{{payload.resolution_note}}' },
+        ] },
+      ],
+    };
+    const catalog = { 'preset.gate.verdict': { key: 'preset.gate.verdict', org_id: null, payload_schema: {}, routing: {}, block_template: REF_TEMPLATE, enabled: true, version: 1 } };
+
+    it('event.refs에 값이 있으면 EntityChip(공유 SSOT)으로 렌더된다 — 칩 클릭 버튼·UUID 텍스트 0(실제 배포 경로 — #3330 통지 카드)', async () => {
+      const message: ChatMessage = {
+        ...baseMessage,
+        content: '[이벤트] preset.gate.verdict',
+        sender_type: 'agent',
+        event: {
+          event_key: 'preset.gate.verdict',
+          payload: { gate_type: 'external_publish', verdict: 'rejected', resolution_note: '어투 정정' },
+          refs: { work_item: `[Threads 포스트 초안](entity:story:${DOC_ID})` },
+        },
+      };
+      await act(async () => {
+        root.render(wrap(<ChatBubble message={message} isMine={false} eventDefinitionsByKey={catalog} />));
+      });
+      expect(container.textContent).not.toContain(DOC_ID);
+      const chipButtons = Array.from(container.querySelectorAll('button')).filter((b) => b.textContent?.includes('Threads 포스트 초안'));
+      expect(chipButtons.length).toBeGreaterThan(0);
+    });
+
+    it('event.refs 자체가 없으면(구서버·work_item 페어 없는 payload) {{ref.work_item}}이 명시 플레이스홀더로 정직하게 드러난다(지어내지 않음)', async () => {
+      const message: ChatMessage = {
+        ...baseMessage,
+        content: '[이벤트] preset.gate.verdict',
+        sender_type: 'agent',
+        event: {
+          event_key: 'preset.gate.verdict',
+          payload: { gate_type: 'external_publish', verdict: 'approved' },
+        },
+      };
+      await act(async () => {
+        root.render(wrap(<ChatBubble message={message} isMine={false} eventDefinitionsByKey={catalog} />));
+      });
+      expect(container.textContent).toContain('⟨missing: ref.work_item⟩');
+    });
+  });
+
   it('유나 design 스티어 2차 — text 블록의 AC0-b 인라인 마크다운(**굵게**·`코드`)이 별표/백틱 리터럴이 아니라 실제 <strong>/<code>로 렌더된다', async () => {
     await act(async () => {
       root.render(wrap(
@@ -1175,7 +1470,7 @@ describe('ChatBubble — story #2637 event_definitions block_template 카드', (
     const btn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('확認'));
     expect(btn).not.toBeUndefined();
     expect(btn!.hasAttribute('disabled')).toBe(true);
-    expect(container.textContent).toContain('권한이 없습니다');
+    expect(container.textContent).toContain('권한이 없어요');
   });
 
   it('발행 버튼 클릭 시 POST /api/events/publish가 definition_key+payload로 호출되고 완료 표시로 바뀐다', async () => {
@@ -1199,7 +1494,7 @@ describe('ChatBubble — story #2637 event_definitions block_template 카드', (
       definition_key: 'preset.work.escalate',
       payload: { work_item_type: 'story', from_status: 'in-progress', to_status: 'in-review', work_item_id: 'S-42' },
     });
-    expect(container.textContent).toContain('완료했습니다');
+    expect(container.textContent).toContain('완료했어요');
   });
 });
 
@@ -1365,7 +1660,7 @@ describe('ChatBubble — story #2669(B2) doc 칩 결재 CTA', () => {
     expect(Array.from(container.querySelectorAll('a')).some((a) => a.textContent === '결재함에서 보기')).toBe(false);
   });
 
-  it('confirmed — 배지가 "확定"으로 뜨고 CTA는 없다', async () => {
+  it('confirmed — 배지가 "확정"으로 뜨고 CTA는 없다', async () => {
     await act(async () => {
       root.render(wrap(
         <ChatBubble
@@ -1378,7 +1673,7 @@ describe('ChatBubble — story #2669(B2) doc 칩 결재 CTA', () => {
     });
     // story #2886(S2b) — 상태 배지는 격납(hover/focus tooltip)으로 이동.
     await act(async () => { container.querySelectorAll('button')[0]!.focus(); });
-    expect(document.body.textContent).toContain('확定');
+    expect(document.body.textContent).toContain('확정');
     expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '결재로 올리기')).toBe(false);
   });
 
@@ -1488,7 +1783,7 @@ describe('ChatBubble — story #2671 EmbedCard 단독 참조 문단 카드 렌�
     expect(container.querySelector('button[aria-label="미리보기"]')).toBeNull(); // EmbedCard doc 전용 마커 아님
   });
 
-  it('참조가 유령(stored 참조에 없음)이면 단독 문단이어도 카드가 아니라 유령 칩이다(story #3213 — 클릭은 가능, 정적 "대상이 없습니다" 단정은 없음)', async () => {
+  it('참조가 유령(stored 참조에 없음)이면 단독 문단이어도 카드가 아니라 유령 칩이다(story #3213 — 클릭은 가능, 정적 "대상이 없어요" 단정은 없음)', async () => {
     await act(async () => {
       root.render(wrap(
         <ChatBubble
@@ -1499,7 +1794,7 @@ describe('ChatBubble — story #2671 EmbedCard 단독 참조 문단 카드 렌�
     });
     expect(container.querySelector('.rounded-md')).toBeNull();
     expect(container.querySelector('button')).not.toBeNull();
-    expect(container.textContent).not.toContain('대상이 없습니다');
+    expect(container.textContent).not.toContain('대상이 없어요');
     expect(container.textContent).toContain('제안서.md');
   });
 
@@ -1522,7 +1817,7 @@ describe('ChatBubble — story #2671 EmbedCard 단독 참조 문단 카드 렌�
     expect(container.querySelector('button[aria-label="미리보기"]')).toBeNull();
     expect(container.querySelector('.rounded-md')).not.toBeNull();
     // AssetEmbedCard의 실 렌더 마커(자산 조회 실패 폴백 문구) — EmbedCard로 샜다면 절대 안 뜬다.
-    expect(container.textContent).toContain('자산을 찾을 수 없습니다');
+    expect(container.textContent).toContain('자산을 찾을 수 없어요');
   });
 
   it('같은 문단에 참조 외 텍스트가 섞여 있으면(단독 아님) 카드가 아니라 인라인 칩이다(회귀 0)', async () => {
@@ -1718,7 +2013,7 @@ describe('ChatBubble — 로드맵 PR-B L5(Bot 배지 배경 proof-blue-soft)', 
     });
     const badge = container.querySelector('.border-proof-line');
     expect(badge).toBeTruthy();
-    expect(badge?.textContent).toBe('Bot');
+    expect(badge?.textContent).toBe('에이전트');
     expect(badge?.className).not.toContain('bg-proof-blue-soft');
     expect(badge?.className).not.toContain('accent-claim');
     expect(badge?.querySelector('.bg-proof-blue')).toBeTruthy();
@@ -1875,14 +2170,14 @@ describe('ChatBubble — story #3106 sender_runtime_type → Avatar 배선', () 
     expect(disk?.querySelector('img')?.getAttribute('src')).toBe('/connector-icons/claude-code.jpg');
   });
 
-  it('agent sender_runtime_type이 null(구서버·미배선)이면 여전히 "Agent" 텍스트 폴백이다(회귀 없음)', async () => {
+  it('agent sender_runtime_type이 null(구서버·미배선)이면 여전히 "에이전트" 텍스트 폴백이다(회귀 없음)', async () => {
     await act(async () => {
       root.render(wrap(
         <ChatBubble message={{ ...baseMessage, sender_runtime_type: null }} isMine={false} />,
       ));
     });
     expect(container.querySelector('.rounded-full.ring-2.ring-background')).toBeNull();
-    expect(container.textContent).toContain('Agent');
+    expect(container.textContent).toContain('에이전트');
   });
 });
 

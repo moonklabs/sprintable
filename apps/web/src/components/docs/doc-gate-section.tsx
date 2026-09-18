@@ -1,7 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
+import { formatRelativeTime } from '@/lib/storage/format';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import {
   Shield, ShieldCheck, ShieldX, RotateCcw, Pencil, History, User, ChevronDown,
   CheckCircle, XCircle,
@@ -59,7 +61,7 @@ const AUDIT_META: Record<AuditKind, { dot: string; Icon: typeof Shield; labelKey
   request: { dot: 'bg-info-tint text-info', Icon: Shield, labelKey: 'docGateAuditRequested' },
   resubmit: { dot: 'bg-muted text-muted-foreground', Icon: Pencil, labelKey: 'docGateAuditResubmitted' },
   approved: { dot: 'bg-success-tint text-success', Icon: CheckCircle, labelKey: 'docGateAuditApproved' },
-  rejected: { dot: 'bg-destructive/10 text-destructive', Icon: XCircle, labelKey: 'docGateAuditRejected' },
+  rejected: { dot: 'bg-destructive-tint text-destructive', Icon: XCircle, labelKey: 'docGateAuditRejected' },
 };
 
 function toState(status: string | undefined): DocGateState | null {
@@ -77,6 +79,8 @@ export function DocGateSection({
   onTransitioned: () => void;
 }) {
   const t = useTranslations('docs');
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
   const { currentTeamMemberId } = useDashboardContext();
   const [gate, setGate] = useState<GateItem | null>(null);
   const [revisions, setRevisions] = useState<DocRevision[]>([]);
@@ -134,7 +138,8 @@ export function DocGateSection({
   // 자격 = gate.can_approve(BE per-caller·rule A: human+has_project_access+not-author). FE=가시성·실 authz=BE 403.
   const isApprover = status === 'pending' && gate?.can_approve === true;
   const resolveName = (id: string | null | undefined) => (id ? (memberNames[id] ?? id.slice(0, 6)) : '—');
-  const fmtDate = (s: string | undefined) => (s ? new Date(s).toLocaleString() : '');
+  // story #3493 — gate.resolved_at·ev.at은 "기록"(정본 formatRelativeTime).
+  const fmtDate = (s: string | undefined) => (s ? formatRelativeTime(s, locale, displayTimezone) : '');
 
   // doc.status transition(draft↔pending↔denied). gate-row transition과 별개.
   // story #3004 — draft→pending(상신)은 approverMemberId가 이제 서버 필수(그 외 전이엔 무관·안 실음).
@@ -388,7 +393,7 @@ export function DocGateSection({
 
       {/* 반려 섹션: 사유 + 결재자 + 시각(현재 상태 prominent surface). */}
       {state === 'denied' ? (
-        <div className="space-y-1.5 rounded-lg border border-destructive/30 bg-destructive/5 p-2.5">
+        <div className="space-y-1.5 rounded-lg border border-destructive/30 bg-destructive-tint p-2.5">
           <p className="text-xs font-medium text-foreground">{t('docGateDeniedReason')}</p>
           <p className="whitespace-pre-wrap text-xs text-foreground">{gate?.resolution_note?.trim() || t('docGateNoReason')}</p>
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
@@ -464,7 +469,9 @@ export function DocGateSection({
                 variant="ghost"
                 size="sm"
                 className="gap-1 text-destructive hover:text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60"
-                disabled={busy}
+                // story #3334 — 반려 사유(note) 서버측 필수 강제(gates.py 422)와 짝 — 예전엔
+                // busy만 봐서 빈 textarea로도 즉시 제출됐다(서버 무검증이던 시절 그대로 방치).
+                disabled={busy || !note.trim()}
                 onClick={() => void submitReject()}
               >
                 <ShieldX className="size-3.5" />

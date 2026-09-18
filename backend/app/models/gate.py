@@ -76,6 +76,13 @@ class Gate(Base):
     # 충돌). pr_number와 짝으로 멱등 키에 편입 — find_gate_slot_with_pr_fallback.py 참조.
     # NULL=pr_number와 동형 사유(PR 컨텍스트 없음/레거시 미백필).
     repo_full_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #3478(0328) — 멱등 키 세 번째 축. 대부분의 gate_type(merge·HITL ask·doc
+    # approval 등)은 이 컬럼이 항상 ""(공유 UNIQUE 인덱스 셋에 이 컬럼을 끼워 넣어도
+    # ""뿐이라 구분력 무변, 회귀 0). `external_publish`만 site_posts.py·channel_posts.py
+    # 호출부가 목적지(`str(draft.connection_id or "")`)를 채운다 — 같은 work_item이
+    # WordPress·webhook 등 여러 목적지로 각각 독립 게이트를 갖게 된다(work_item당 1건
+    # 제약이 site_post의 dual-destination AC를 구조적으로 막던 것의 근본수정).
+    scope_key: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
     status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="pending")
     resolver_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -118,6 +125,91 @@ class Gate(Base):
     # 단조증가) 워터마크. reopen_gate_if_new_sha가 이걸로 stale/순서역전 웹훅 배달을
     # 걸러 이미 최신 SHA로 승인된 게이트를 옛 배달로 부당 재-pending시키지 않는다.
     pr_head_observed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # story #3365(Phase0 S2, 마케팅운영) — external_publish 전용 sealing. approved_head_sha
+    # (위, merge gate)와 동형 축: "이 승인이 귀속된 대상"을 서버가 상신 시점에 한 번 기록하고
+    # 그 뒤로는 **비교만** 한다(어떤 갱신 경로도 열지 않는다 — story 본문 «봉인 값 불변» AC).
+    # 최신 site_post_versions 행과 다르면(즉 승인 뒤 수정) 공개 서비스가 409로 거부하고,
+    # 그 새 버전을 만든 트랜잭션이 이 gate를 pending으로 되돌린다(site_posts.py 참고).
+    sealed_content_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    sealed_content_sha256: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sealed_content_body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #3414(Phase1·마케팅운영, 페드루 PO 確定 2026-09-04, 정정2) — external_publish
+    # 전용 두 번째 봉인 축(위 sealed_content_*와 같은 관례, 공유-nullable — 예약 개념이
+    # 없는 다른 gate_type은 항상 null). "승인 후 예약 시각 변경=재승인"(블루프린트 §3)의
+    # 비교 기준값. site_posts 등은 이 컬럼을 절대 안 씀.
+    sealed_scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # story 620beefc(Phase1·마케팅운영, 페드루 PO 決定 2026-09-04) — external_publish 전용
+    # 세 번째 봉인 축(위 두 축과 같은 공유-nullable 관례). `ChannelPostVersion.image_sha256`과
+    # 비교해 "승인 후 이미지 교체=재승인, 사유=MEDIA_CHANGED"를 sealed_content_sha256(본문)
+    # 축과 독립적으로 판정하기 위함(AC4 판정 축 세분화 content|schedule|media).
+    sealed_media_sha256: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story e4fc29fa(Phase1·마케팅운영, 페드루 PO 確定 2026-09-04, 조각③a) — external_
+    # publish 전용 네 번째 봉인 축(위 세 축과 같은 공유-nullable 관례). site_post_drafts.
+    # connection_id(null=hosted_site)와 비교해 "승인 후 목적지 변경=재승인"(블루프린트
+    # §3 "목적지·불변 버전·예약 시각·예산을 참조 — 승인 후 변경 시 무효화")을 content/
+    # schedule/media 축과 독립적으로 판정한다.
+    sealed_destination_connection_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    # story #3498(Phase2·마케팅운영, 페드루 PO 決定 2026-09-05, migration 0333) —
+    # external_publish 전용 다섯 번째 봉인 축(위 네 축과 같은 공유-nullable 관례).
+    # submit()이 실은 예상 생성비용 추정치 — "승인 후 값 변경=재승인, 사유=BUDGET_
+    # CHANGED"를 content/schedule/media/destination 축과 독립적으로 판정한다(블루프린트
+    # §2 「목적지·불변 버전·예약 시각·예산을 참조 — 승인 후 변경 시 무효화」의 "예산"
+    # 축 — gate.py 자신의 이 예고가 이 스토리 전까지 미구현이었다). `_reseal_gate_
+    # on_new_version`(편집 훅)은 이 필드를 절대 안 건드린다 — submit() 재호출만이
+    # 재봉인 권한을 갖는다(sealed_content_*와 동일 "무엇이 승인됐었나 보존" 원칙).
+    sealed_estimated_cost_minor: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # story #3561(Phase2·BE, 페드루 PO 確定 2026-09-06) — `concept_approval` 전용 봉인 축
+    # (위 sealed_* 축들과 같은 공유-nullable 관례 — 그 gate_type이 아니면 항상 null). 승인
+    # 대상 doc의 정체(sealed_doc_id)와 그 시점 본문 해시(sealed_doc_body_sha256) — doc 본문이
+    # 바뀌면(app/services/doc.py::_reseal_concept_approval_gate_on_doc_update) approved→
+    # pending+reapproval_required(external_publish의 content sha 대조와 동형 판정, work_item
+    # 자체는 doc이 아니라 그 doc이 근거로 삼는 Story/Task라는 점만 다르다).
+    sealed_doc_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    sealed_doc_body_sha256: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #3806(Phase3·3-2 PR2, 페드루 PO 確定 2026-09-11) — `ads_boost` 전용 봉인 축
+    # (위 sealed_doc_*와 같은 공유-nullable 관례 — 그 gate_type이 아니면 항상 null).
+    # external_publish의 sealed_content_*를 재사용하지 않는 이유 — 계약이 다르다(발행물
+    # 자체의 봉인이 아니라 "그 발행물을 얼마·언제까지 홍보할지"의 봉인, PO 明示). 「변경=
+    # 재승인」 판정은 external_publish/concept_approval과 동형(approved 뒤 값이 바뀌면
+    # pending+reapproval_required 재오픈) — 단 예산 «증액»만은 그 재오픈 경로 자체를 안
+    # 타고 422(app/services/ads_boost.py::AdsBudgetExceedsSealError, 자동 증액 불가가
+    # 블루프린트 §7 Phase 3 AC 본문이라 봉인 규칙보다 우선하는 별도 축).
+    sealed_ads_budget_minor: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    sealed_ads_currency: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sealed_ads_starts_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    sealed_ads_ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    sealed_ads_objective: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 페드루 PO 追加 確定(2026-09-11, PR 3 착수 직전 보완) — 광고 계정도 승인 대상의
+    # 일부다("이 예산을 이 계정에"). FK 없음(channel_connections와 동일 관례) — org의
+    # meta_ads/ads_sandbox 연결에 유일성 제약이 없어(PR 1이 복수 계정 전제) 어느
+    # 계정에 태울지를 게이트 자신이 봉인해야 PR 3(실행)가 모호함 없이 destination을
+    # 고를 수 있다. 다른 sealed_ads_* 열과 같은 「변경=재승인」 규칙(증액 예외는
+    # budget_minor에만 해당, 이 열은 값이 바뀌면 그냥 일반 재오픈 대상).
+    sealed_ads_connection_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # 페드루 PO 追加 確定(2026-09-11) — PR 3의 publication_command idempotency 키
+    # (org_id, destination, approved_version, operation)의 approved_version 축.
+    # site_posts.py/channel_posts.py는 실 *Version.id를 그대로 쓰지만(3367 동형
+    # 질문에 대한 페드루 답) ads_boost엔 그런 버전 테이블이 없다 — 매 재봉인
+    # (request_ads_boost 호출: 신규·pending 재봉인·approved 재오픈 전부)마다
+    # app/services/ads_boost.py가 새 UUID를 발급해 여기 채운다.
+    sealed_ads_boost_version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # story #3813(Phase3·3-4 PR2, 페드루 PO 確定 2026-09-12) — 뉴스레터 발송
+    # (`newsletter_send` gate_type) 봉인 3축. ads_boost의 sealed_ads_*와 완전히 같은
+    # 「변경=재승인」 기전(sealed_ads_boost_version_id 재사용 안 함 — 서로 다른
+    # gate_type이 같은 열을 공유하면 그 열의 뜻이 "이 gate_type의 재봉인 세대"에서
+    # "여러 gate_type이 뒤섞인 카운터"로 흐려진다, ads_boost가 external_publish의
+    # sealed_content_*를 재사용 안 한 것과 같은 판단).
+    sealed_newsletter_segment_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sealed_newsletter_scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # publication_commands 멱등키(org_id, destination, approved_version, operation)의
+    # approved_version 축 — sealed_ads_boost_version_id와 동형(매 재봉인마다 새 UUID,
+    # app/services/newsletter_send.py가 발급).
+    sealed_newsletter_version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # 승인 후 수정으로 시스템이 되돌린 pending인지(사람이 처음 상신한 pending과 구분 — S4가
+    # "재승인 필요" 배지를 그릴 신호) — 새 명시 submit()이 재봉인하면 False로 복귀한다.
+    reapproval_required: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

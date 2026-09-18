@@ -10,13 +10,14 @@ import { EntityAwareTextarea } from './entity-aware-textarea';
 
 // 실제 controlled input처럼 동작해야 e.target.value/selectionStart가 이어지는 입력에서
 // 최신값을 반영한다 — 바깥 let 변수만 갱신하면 리렌더가 없어 DOM value가 안 바뀐다.
-function ControlledHarness({ initial, projectId, onValueChange }: { initial: string; projectId?: string; onValueChange: (v: string) => void }) {
+function ControlledHarness({ initial, projectId, onValueChange, getEntityTypeLabel }: { initial: string; projectId?: string; onValueChange: (v: string) => void; getEntityTypeLabel?: (canonicalSlug: string) => string | undefined }) {
   const [value, setValue] = useState(initial);
   return (
     <EntityAwareTextarea
       value={value}
       onChange={(v) => { setValue(v); onValueChange(v); }}
       projectId={projectId}
+      getEntityTypeLabel={getEntityTypeLabel}
     />
   );
 }
@@ -134,6 +135,55 @@ describe('EntityAwareTextarea — story #2264', () => {
 
     expect(container.textContent).toContain('검토 중');
     expect(container.textContent).not.toContain('in-review');
+  });
+});
+
+// story #3289(도메인탈고정·축1 Phase1 FE잔여, AC2) — 참조 코어(chat-input-entity-tokens.ts)의
+// entityTypeLabel()은 diff 0 규율(#2264 AC3) 대상이라 손대지 않고, 이 소비처에서만 org
+// 오버라이드를 얹는다. getEntityTypeLabel 없으면(undefined) canonical 그대로(회귀 0).
+describe('EntityAwareTextarea — org 엔티티명 라벨 오버라이드(story #3289 AC2)', () => {
+  it('getEntityTypeLabel 없으면 canonical entityTypeLabel() 그대로("스토리")', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      data: [{ entity_type: 'story', entity_id: '11111111-1111-1111-1111-111111111111', title: '제목', status: null }],
+    }))));
+    await act(async () => {
+      root.render(<ControlledHarness initial="" projectId="p1" onValueChange={() => {}} />);
+    });
+    const el = textarea();
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setter.call(el, '#');
+      el.selectionStart = 1;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => { await new Promise((r) => setTimeout(r, 260)); });
+    expect(container.textContent).toContain('스토리');
+  });
+
+  it('getEntityTypeLabel이 값을 돌려주면 그룹 헤더가 그 오버라이드로 바뀐다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      data: [{ entity_type: 'story', entity_id: '11111111-1111-1111-1111-111111111111', title: '제목', status: null }],
+    }))));
+    await act(async () => {
+      root.render(
+        <ControlledHarness
+          initial=""
+          projectId="p1"
+          onValueChange={() => {}}
+          getEntityTypeLabel={(slug) => (slug === 'story' ? '작업건' : undefined)}
+        />,
+      );
+    });
+    const el = textarea();
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setter.call(el, '#');
+      el.selectionStart = 1;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => { await new Promise((r) => setTimeout(r, 260)); });
+    expect(container.textContent).toContain('작업건');
+    expect(container.textContent).not.toContain('스토리');
   });
 });
 

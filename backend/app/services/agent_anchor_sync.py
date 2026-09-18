@@ -13,6 +13,7 @@ owner_member_id=생성 휴먼 member, agent_project_profiles는 team_member 런�
 """
 from __future__ import annotations
 
+import logging
 import uuid
 
 from sqlalchemy import func, select
@@ -23,6 +24,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.member import AgentProjectProfile, Member
 from app.models.project import OrgMember
 from app.models.user import User
+
+logger = logging.getLogger(__name__)
 
 
 async def sync_agent_anchor_on_create(
@@ -226,7 +229,8 @@ async def ensure_agent_project_profile(
 async def ensure_human_member(session: AsyncSession, org_member_id: uuid.UUID) -> bool:
     """휴먼 org_member의 앵커 members 행을 멱등 보장(AC3-2c grant write-sync).
 
-    members.id = org_member.id (0075 휴먼 불변식). 0075 백필 동형(name=users.email/display_name).
+    members.id = org_member.id (0075 휴먼 불변식). name=users.display_name(story #3758부터
+    email/user_id 폴백 0 — 0075 당시 백필 동형은 폐기, 마이그 0359가 기존 오염 행 정리).
     project_access.member_id=org_member.id를 세팅하기 전 호출 — fk_project_access_member(NOT VALID이나
     신규 INSERT 검증)가 members 행을 요구하므로. 신규 휴먼(0075 이후)은 members 행이 없을 수 있다.
 
@@ -258,7 +262,12 @@ async def ensure_human_member(session: AsyncSession, org_member_id: uuid.UUID) -
     ).scalar_one_or_none()
     # orphan user면 user_id=NULL(members.user_id FK 위반 회피, 0084 LEFT JOIN u.id 동형)
     user_id_val = user.id if user is not None else None
-    name = (getattr(user, "display_name", None) or getattr(user, "email", None) or str(om.user_id)) if user else str(om.user_id)
+    # story #3758(페드루 PO 決 2026-09-09) — 이 앵커가 «canonical 우선 소스»(members.name)에
+    # 직접 INSERT하는 쓰기 층 자리라, 여기서 email/user_id를 지어내면 읽기 쪽 COALESCE
+    # (members.py 등 #3758 7자리)가 첫 항(m.name)에서 이미 오염된 값을 만나 무력화된다
+    # (member_resolver.py 5자리·#3755와 같은 결함 클래스). display_name 없으면 None 정직
+    # (컬럼 nullable 완화 — 마이그 0359, app/models/member.py).
+    name = user.display_name if user is not None else None
 
     await session.execute(
         pg_insert(Member.__table__)
@@ -282,7 +291,7 @@ async def sync_agent_profile_presence(session: AsyncSession, member_id: uuid.UUI
     """AC3-4 2-1 dual-write: 에이전트 presence를 agent_project_profiles에도 반영(team_members UPDATE와 동시).
 
     AC3-4 뷰가 last_seen_at/active_story_id/agent_status를 agent_project_profiles서 읽으므로 cutover 전
-    동기 유지. member_id(=agent team_member.id, 1:1)로 단일 profile 행 UPDATE. 행 없으면 0건(무해).
+    동기 유지. member_id(=agent team_member.id, 1:1)로 단일 profile 행 UPDATE.
     cutover(2-2) 후 레거시 team_members UPDATE 제거 시 이 경로가 유일 write가 된다.
 
     story #3197 — 이 함수가 "agent가 online으로 관측됐다"(last_seen_at=NOW 세팅)를 쓰는
@@ -290,7 +299,27 @@ async def sync_agent_profile_presence(session: AsyncSession, member_id: uuid.UUI
     non-None 값으로 오면(=online write, offline인 last_seen_at=None과 구분) 같은 UPDATE에
     `first_connected_at = COALESCE(first_connected_at, :그 값)`을 얹는다 — 별도 write 0,
     한 번 채워지면 이후 online 갱신에 덮이지 않는다(COALESCE가 기존 값 우선).
-    """
+
+    story #3275(2026-09-01, 선생님 prod customer-zero 실사고 그라운딩) — "행 없으면 0건(무해)"
+    가정이 실은 무해하지 않았다: profile 부재(S4급 grant-only 클래스 — `ensure_agent_project_profile`
+    이 project_access grant 경로 한 곳에만 배선돼, heartbeat 등 나머지 콜사이트는 무음 스킵)면
+    `first_connected_at`이 영원히 안 써지는데, heartbeat 엔드포인트 자체는 `team_members` 뷰의
+    grant-only 분기(런타임 컬럼 NULL)로 200 OK를 반환해 "연결은 됐는데 체크리스트만 영구
+    위음성"이 재현됐다. rowcount==0이면 self-heal: `TeamMember.project_id`(anchor project —
+    `team_members.project_id`는 DB NOT NULL 제약, `write_agent_project_placement`/
+    `create_org_level_agent`가 생성 시 항상 세팅해 이 경로에서 NULL을 만날 수 없다)로
+    `ensure_agent_project_profile`을 멱등 호출한 뒤 UPDATE를 1회만 재시도한다. 콜사이트 7곳
+    (agent_gateway.py×3·team_members.py×3·agent_auth_failure.py×1) 전부를 고치는 대신 이 함수
+    내부에서 닫는 쪽이 더 좁은 경계(PO 확定).
+
+    ⛔카디르 QA 실사고(2026-09-01, PR#3664 1차) — `agent_project_profiles.member_id`의 실 FK
+    부모는 `team_members`가 아니라 `members`다. `team_members` 행은 있는데 `members` 행이
+    없는 에이전트(정상 생성 경로라면 안 생기지만, 기존 테스트 2개가 정확히 이 모양으로
+    실 SSE 경로 agent_gateway.py를 태운다)에서 위 team_member-존재 체크만으론 못 걸러
+    `ensure_agent_project_profile`의 INSERT가 FK 위반으로 그대로 크래시했다("무해한 0-row"를
+    "즉시 500"으로 악화). `members` 존재를 먼저 확認해 그 경우도 team_member 부재와 동형으로
+    로그만 남기고 조용히 반환한다 — "무음보다 시끄러운 실패가 낫다"는 로그로 시끄럽다는
+    뜻이지 엔드포인트가 죽어도 된다는 뜻이 아니다."""
     allowed = {"last_seen_at", "active_story_id", "agent_status"}
     upd = {k: v for k, v in fields.items() if k in allowed}
     if not upd:
@@ -299,8 +328,48 @@ async def sync_agent_profile_presence(session: AsyncSession, member_id: uuid.UUI
         upd["first_connected_at"] = func.coalesce(
             AgentProjectProfile.__table__.c.first_connected_at, upd["last_seen_at"]
         )
-    await session.execute(
+    result = await session.execute(
         sa_update(AgentProjectProfile.__table__)
         .where(AgentProjectProfile.__table__.c.member_id == member_id)
         .values(**upd)
     )
+    if result.rowcount != 0:
+        return
+
+    from app.models.team import TeamMember
+
+    team_member = await session.get(TeamMember, member_id)
+    if team_member is None:
+        # team_members 행 자체가 없다(고아 member_id) — self-heal 대상 밖, 소리내어 남긴다.
+        logger.warning(
+            "sync_agent_profile_presence: no team_member row for member_id=%s — presence write skipped",
+            member_id,
+        )
+        return
+
+    member_exists = (await session.execute(select(Member.id).where(Member.id == member_id))).scalar_one_or_none()
+    if member_exists is None:
+        # agent_project_profiles.member_id의 실 FK 부모(members)가 없다 — team_members는
+        # 있는데 members가 없는 상태(정상 생성 경로에선 안 생김, 데이터 스멜 가능성은 story
+        # #3275 코멘트로 별도 기록). ensure INSERT를 시도하면 FK 위반으로 크래시하므로 먼저
+        # 걸러 조용히 반환(로그로 시끄럽게, 크래시로 시끄럽지 않게).
+        logger.warning(
+            "sync_agent_profile_presence: team_member exists but members row missing for member_id=%s "
+            "— self-heal skipped (FK parent absent)",
+            member_id,
+        )
+        return
+
+    await ensure_agent_project_profile(session, member_id=member_id, project_id=team_member.project_id)
+    retry = await session.execute(
+        sa_update(AgentProjectProfile.__table__)
+        .where(AgentProjectProfile.__table__.c.member_id == member_id)
+        .values(**upd)
+    )
+    if retry.rowcount == 0:
+        # ensure 직후인데도 0행 — 이론상 불가(project_id NOT NULL·ensure는 멱등 INSERT)이나
+        # 무음보다 시끄러운 실패가 낫다(no-fiction 원칙).
+        logger.error(
+            "sync_agent_profile_presence: self-heal failed to produce a writable profile row for member_id=%s",
+            member_id,
+        )

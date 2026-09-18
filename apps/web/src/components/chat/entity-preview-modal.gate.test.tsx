@@ -6,7 +6,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { NextIntlClientProvider } from 'next-intl';
 import { EntityPreviewModal } from './embed-card';
+import koMessages from '../../../messages/ko.json';
 
 let container: HTMLDivElement;
 let root: Root;
@@ -52,13 +54,39 @@ describe('EntityPreviewModal gate 분기 — story #2889/S2d', () => {
     });
     await act(async () => {
       root.render(
-        <EntityPreviewModal entityType="gate" entityId="g-1" title={null} status={null} href={null} onClose={() => {}} embedded />,
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <EntityPreviewModal entityType="gate" entityId="g-1" title={null} status={null} href={null} onClose={() => {}} embedded />
+        </NextIntlClientProvider>,
       );
     });
     await flush();
     expect(container.textContent).toContain('PR#42 병합 게이트');
     expect(container.textContent).toContain('merge');
-    expect(container.textContent).toContain('High risk');
+    expect(container.textContent).toContain('고위험');
+  });
+
+  // story #3888(§⑤·Chat) — risk_grade='unknown' 배지(workList.riskBadgeUnknown, 신규 키)
+  // 회귀가드. "High risk"와 마찬가지로 이전엔 "Risk unknown" 리터럴이었다.
+  it('risk_grade=unknown이면 "위험도 모름" 배지를 렌더한다', async () => {
+    stubFetchWithAuth(async () => ({
+      ok: true,
+      json: async () => ({
+        data: {
+          id: 'g-3', status: 'pending', gate_type: 'merge', risk_grade: 'unknown',
+          work_item_summary: { title: '위험도 미산정 게이트', slug: null }, work_item_id: 'wi-3',
+        },
+      }),
+    }));
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <EntityPreviewModal entityType="gate" entityId="g-3" title={null} status={null} href={null} onClose={() => {}} embedded />
+        </NextIntlClientProvider>,
+      );
+    });
+    await flush();
+    expect(container.textContent).toContain('위험도 모름');
+    expect(container.textContent).not.toContain('고위험');
   });
 
   it('전체 보기 링크가 /gates/{id}로 향한다(own-href, parity getEntityHref 무관)', async () => {
@@ -68,7 +96,9 @@ describe('EntityPreviewModal gate 분기 — story #2889/S2d', () => {
     }));
     await act(async () => {
       root.render(
-        <EntityPreviewModal entityType="gate" entityId="g-2" title={null} status={null} href={null} onClose={() => {}} embedded />,
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <EntityPreviewModal entityType="gate" entityId="g-2" title={null} status={null} href={null} onClose={() => {}} embedded />
+        </NextIntlClientProvider>,
       );
     });
     await flush();
@@ -77,14 +107,16 @@ describe('EntityPreviewModal gate 분기 — story #2889/S2d', () => {
     expect(link?.textContent).toContain('전체 보기');
   });
 
-  it('fetch 실패 시 "대상을 찾을 수 없습니다"로 정직하게 떨어진다(무한 스피너 금지)', async () => {
+  it('fetch 실패 시 "대상을 찾을 수 없어요"로 정직하게 떨어진다(무한 스피너 금지)', async () => {
     stubFetchWithAuth(async () => ({ ok: false, json: async () => ({}) }));
     await act(async () => {
       root.render(
-        <EntityPreviewModal entityType="gate" entityId="g-3" title={null} status={null} href={null} onClose={() => {}} embedded />,
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <EntityPreviewModal entityType="gate" entityId="g-3" title={null} status={null} href={null} onClose={() => {}} embedded />
+        </NextIntlClientProvider>,
       );
     });
     await flush();
-    expect(container.textContent).toContain('대상을 찾을 수 없습니다');
+    expect(container.textContent).toContain('대상을 찾을 수 없어요');
   });
 });

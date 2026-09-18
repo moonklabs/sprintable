@@ -32,6 +32,16 @@ AST 스캔으로 최초 3곳 넘어 7곳 추가 발견 후 "10곳 다 고치고 
   ②`getattr`/동적 호출로 commit 또는 model_validate 를 부르는 경우.
   ③trigger 메커니즘 자체가 미상이라, 이 lint를 통과해도 "안전이 증명된 것"은 아니다 —
     다만 "commit 後 refresh 없이 model_validate" 라는 «알려진» 실패 모양은 막는다.
+
+## 완전성 자기 확認(story #3370 후속, 페드루 PO 지시 2026-09-11 — lint_raw_auth_id_into_
+member_field.py 조건부 PASS 조건1과 동형 정정)
+1차본(story #2459)의 `scan_repo()`는 `SCAN_ROOTS` 부재를 `continue`로 삼켜, 스캔 파일이
+0개여도 "위반 0건"을 그대로 OK로 찍는 fails-silent 구멍이 있었다(「추출된 것만 순회」
+클래스 — test_no_team_members_view_dml_in_tests.py 자기 확認 관례·korean_user_strings
+MIN_EXPECTED_FILES 자기 assert와 동형 원칙 위반, lint_raw_auth_id_into_member_field.py
+가 먼저 지적·정정됨). 정정 — `SCAN_ROOTS` 3개 각각 실존을 assert하고, 스캔한 .py 파일
+수가 0이면 `ScanIncompleteError`로 즉시 실패한다(exit 2, "위반 0건"의 exit 1과 종료코드
+로 구분 — 「가드가 헛돌고 있다」와 「가드가 돌았는데 깨끗하다」는 다른 신호).
 """
 from __future__ import annotations
 
@@ -110,32 +120,59 @@ def scan_function(fn: ast.AST) -> list[tuple[int, str]]:
     return findings
 
 
-def scan_file(path: Path) -> list[tuple[str, int, str, str]]:
+def scan_file(path: Path, backend_root: Path | None = None) -> list[tuple[str, int, str, str]]:
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"))
     except SyntaxError:
         return []
+    root = backend_root if backend_root is not None else BACKEND_ROOT
     out: list[tuple[str, int, str, str]] = []
     for node in ast.walk(tree):
         if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)):
             for lineno, var in scan_function(node):
-                out.append((str(path.relative_to(BACKEND_ROOT)), lineno, node.name, var))
+                out.append((str(path.relative_to(root)), lineno, node.name, var))
     return out
 
 
-def scan_repo() -> list[tuple[str, int, str, str]]:
+class ScanIncompleteError(RuntimeError):
+    """story #3370 후속(페드루 PO 지시 2026-09-11) — scan_repo가 스캔 루트 부재를 `continue`
+    로 삼키면 파일 0개로 조용히 "0건 OK"를 거짓 보고하는 fails-silent 클래스(모듈 docstring
+    "완전성 자기 확認" 절 참고). "위반 0건"과 구분되는 "가드 자체가 헛돌고 있다"는 신호라
+    main()이 별도 종료코드(2)로 뗀다."""
+
+
+def scan_repo(
+    scan_roots: list[str] | None = None, backend_root: Path | None = None,
+) -> list[tuple[str, int, str, str]]:
+    roots = scan_roots if scan_roots is not None else SCAN_ROOTS
+    root = backend_root if backend_root is not None else BACKEND_ROOT
+
     findings: list[tuple[str, int, str, str]] = []
-    for root in SCAN_ROOTS:
-        root_path = BACKEND_ROOT / root
+    scanned_files = 0
+    for r in roots:
+        root_path = root / r
         if not root_path.exists():
-            continue
+            raise ScanIncompleteError(
+                f"스캔 루트가 없다 — {root_path}(SCAN_ROOTS={roots} 중 하나 실종). "
+                "루트 부재를 조용히 건너뛰면 파일 0개로 \"위반 0건\"을 거짓 보고한다 "
+                "— 디렉터리 구조가 바뀌었으면 SCAN_ROOTS를 갱신할 것."
+            )
         for path in sorted(root_path.rglob("*.py")):
-            findings.extend(scan_file(path))
+            scanned_files += 1
+            findings.extend(scan_file(path, backend_root=root))
+    if scanned_files == 0:
+        raise ScanIncompleteError(
+            f"스캔 대상 .py 파일이 0개(SCAN_ROOTS={roots}) — 가드가 헛돌고 있다."
+        )
     return findings
 
 
 def main() -> int:
-    findings = scan_repo()
+    try:
+        findings = scan_repo()
+    except ScanIncompleteError as e:
+        print(f"FAIL(가드 자체 결함, story #3370 후속): {e}")
+        return 2
     if findings:
         print(
             f"FAIL: commit() 後 model_validate() 前 refresh/재대입 없는 자리 {len(findings)}건 "

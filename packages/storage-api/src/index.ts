@@ -1,4 +1,4 @@
-export { fastapiCall, mapApiError } from './utils';
+export { fastapiCall, fastapiCallWithMeta, mapApiError } from './utils';
 export type { ApiCallError } from './utils';
 
 // FastAPI(/api/v2/*) 직타 레포지토리. 과거 `Supabase*Repository` 명명은 실동작(FastAPI HTTP)

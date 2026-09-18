@@ -12,6 +12,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import { FlowMapCanvas, type CreateLinkResult, type DeleteLinkResult, type RejectLinkResult } from './flow-map-canvas';
 import type { FlowMapLane, FlowMapNode, FlowMapEdge } from './derive-flow-map';
 import koMessages from '../../../messages/ko.json';
+import { pickIGaJosa } from '@/lib/korean-particle';
 
 // story #2353 v1.1 정정 — 되돌리기 다이얼로그 제목이 declaredBy와 currentTeamMemberId(로그인
 // 본인) 비교로 갈린다(resolveUndoTitle, flow-port-linking.ts). 기본은 'member-9'를 "나"로
@@ -315,15 +316,15 @@ describe('FlowMapCanvas — 확認 다이얼로그 (AC5·AC6·AC16)', () => {
     return { createLink };
   }
 
-  it('shows 3 kind buttons + "종류는 나중에" + 취소 (AC5) — no "관계가 아닙니다" option (that belongs to the confirm-candidate flow, not this one)', async () => {
+  it('shows 3 kind buttons + "종류는 나중에" + 취소 (AC5) — no "관계가 아니에요" option (that belongs to the confirm-candidate flow, not this one)', async () => {
     await openConfirmDialog();
     const buttons = Array.from(document.body.querySelectorAll('[data-slot="dialog-content"] button')).map((b) => b.textContent);
     expect(buttons).toContain('여기서 나온 일');
     expect(buttons).toContain('다음에 할 일');
     expect(buttons).toContain('대신하는 일');
-    expect(buttons).toContain('종류는 나중에 정하겠습니다');
+    expect(buttons).toContain('종류는 나중에 정하겠어요');
     expect(buttons).toContain('취소');
-    expect(buttons.some((t) => t?.includes('관계가 아닙니다'))).toBe(false);
+    expect(buttons.some((t) => t?.includes('관계가 아니에요'))).toBe(false);
   });
 
   it('picking "여기서 나온 일"(spawned) calls onCreateLink with the drag direction as-is', async () => {
@@ -342,7 +343,7 @@ describe('FlowMapCanvas — 확認 다이얼로그 (AC5·AC6·AC16)', () => {
 
   it('picking "종류는 나중에"(AC6) calls onCreateLink with relationKind=null (declare-only, matches the BE contract split)', async () => {
     const { createLink } = await openConfirmDialog();
-    const btn = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent === '종류는 나중에 정하겠습니다')!;
+    const btn = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent === '종류는 나중에 정하겠어요')!;
     await act(async () => { btn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(createLink).toHaveBeenCalledWith({ apiSourceId: 'n1', targetId: 'u1', relationKind: null });
   });
@@ -465,7 +466,7 @@ describe('FlowMapCanvas — 되돌리기 (AC7·AC8, 그 선 자체가 진입점)
     await act(async () => { line.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
     const dialogTitle = document.body.querySelector('[data-slot="dialog-title"]');
-    expect(dialogTitle?.textContent).toBe('내가 만든 연결입니다');
+    expect(dialogTitle?.textContent).toBe('내가 만든 연결이에요');
   });
 
   // 유나 가디언 리뷰(2026-07-31, issuecomment-5139439284) — 「내가 만듦」이 조건 없이 떴다
@@ -485,12 +486,17 @@ describe('FlowMapCanvas — 되돌리기 (AC7·AC8, 그 선 자체가 진입점)
     await act(async () => { line.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
     const dialogTitle = document.body.querySelector('[data-slot="dialog-title"]');
-    expect(dialogTitle?.textContent).toBe('디디이 만든 연결입니다');
+    // story #3900 — 이 테스트는 원래 「디디이 만든」(받침 없는 '디디' 뒤에 틀린 조사 '이')을 정본으로
+    // 박아 두었다. 3900이 flow.portUndoTitleOther의 조사를 {josa}(pickIGaJosa)로 뽑게 하며 '디디가'로
+    // 바로잡혔다 — ko.json 값 + 헬퍼로 대조해 회귀를 막는다.
+    expect(dialogTitle?.textContent).toBe(
+      koMessages.flow.portUndoTitleOther.replace('{name}', '디디').replace('{josa}', pickIGaJosa('디디')),
+    );
   });
 
   // doc v1.1 ㉣ — 모르는 채 「내가」로 단정하지 않는다(declaredBy가 없거나, memberMap에
   // 이름이 없으면 중립).
-  it('falls back to the neutral "사람이 만든 연결입니다" when the author is unknown (declaredBy present but not in memberMap)', async () => {
+  it('falls back to the neutral "사람이 만든 연결이에요" when the author is unknown (declaredBy present but not in memberMap)', async () => {
     const lane = makeLane({
       nowNodes: [makeNode({ id: 'n1' })],
       queueNodesByDepth: new Map([[0, [makeNode({ id: 'u1', kind: 'queue' })]]]),
@@ -504,7 +510,7 @@ describe('FlowMapCanvas — 되돌리기 (AC7·AC8, 그 선 자체가 진입점)
     await act(async () => { line.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
     const dialogTitle = document.body.querySelector('[data-slot="dialog-title"]');
-    expect(dialogTitle?.textContent).toBe('사람이 만든 연결입니다');
+    expect(dialogTitle?.textContent).toBe('사람이 만든 연결이에요');
   });
 
   it('does NOT make a group with count>1 (bundled) clickable — no data-edge-candidate-id, no hit-area', async () => {
@@ -539,7 +545,7 @@ describe('FlowMapCanvas — 되돌리기 (AC7·AC8, 그 선 자체가 진입점)
     const line = container.querySelector('line[data-edge-candidate-id="cand-bundle"]');
     expect(line).not.toBeNull();
     await act(async () => { line!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    expect(document.body.querySelector('[data-slot="dialog-title"]')?.textContent).toBe('내가 만든 연결입니다');
+    expect(document.body.querySelector('[data-slot="dialog-title"]')?.textContent).toBe('내가 만든 연결이에요');
 
     const deleteBtn = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent === '지우기')!;
     await act(async () => { deleteBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
@@ -598,9 +604,9 @@ describe('FlowMapCanvas — 기각(reject) 다이얼로그 (story #2357, confirm
     const line = container.querySelector('line[data-edge-candidate-id="cand-est"]')!;
     await act(async () => { line.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
-    expect(document.body.querySelector('[data-slot="dialog-title"]')?.textContent).toBe('기계가 찾아낸 관계입니다');
+    expect(document.body.querySelector('[data-slot="dialog-title"]')?.textContent).toBe('기계가 찾아낸 관계예요');
     // 지우기 다이얼로그의 문구(작성자 서명)는 안 뜬다 — 서로 다른 다이얼로그다.
-    expect(document.body.textContent).not.toContain('만들었습니다');
+    expect(document.body.textContent).not.toContain('만들었어요');
   });
 
   it('clicking an unconfirmed edge and confirming [기각] calls onRejectLink (not onDeleteLink) with candidateId and anchor story id', async () => {
@@ -653,14 +659,14 @@ describe('FlowMapCanvas — 기각(reject) 다이얼로그 (story #2357, confirm
     const line = container.querySelector('line[data-edge-candidate-id="cand-declared"]')!;
     await act(async () => { line.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
-    expect(document.body.querySelector('[data-slot="dialog-title"]')?.textContent).not.toBe('기계가 찾아낸 관계입니다');
+    expect(document.body.querySelector('[data-slot="dialog-title"]')?.textContent).not.toBe('기계가 찾아낸 관계예요');
     expect(Array.from(document.body.querySelectorAll('button')).some((b) => b.textContent === '지우기')).toBe(true);
     expect(Array.from(document.body.querySelectorAll('button')).some((b) => b.textContent === '기각')).toBe(false);
   });
 });
 
 describe('FlowMapCanvas — 슬롯 문구 전환 (AC9, doc ㉤)', () => {
-  it('shows "여기에 놓으면 다음이 됩니다" while linking, and the normal "아직 없습니다" text otherwise', async () => {
+  it('shows "여기에 놓으면 다음이 돼요" while linking, and the normal "아직 없습니다" text otherwise', async () => {
     // shouldShowNoDeeperReason은 depth 0 큐가 있고 depth 1 이상이 없을 때만 참이다 —
     // now 노드 하나뿐인 레인은 조건 자체가 안 걸리므로 depth 0 큐 노드를 하나 둔다.
     const lane = makeLane({
@@ -668,13 +674,13 @@ describe('FlowMapCanvas — 슬롯 문구 전환 (AC9, doc ㉤)', () => {
       queueNodesByDepth: new Map([[0, [makeNode({ id: 'u1', kind: 'queue', depth: 0 })]]]),
     });
     await renderCanvas(lane);
-    expect(container.textContent).toContain('깊이 1 이후가 없습니다');
-    expect(container.textContent).not.toContain('여기에 놓으면 다음이 됩니다');
+    expect(container.textContent).toContain('깊이 1 이후가 없어요');
+    expect(container.textContent).not.toContain('여기에 놓으면 다음이 돼요');
 
     const port = getPort('n1');
     await act(async () => { dispatchPointer(port, 'pointerdown'); });
 
-    expect(container.textContent).toContain('여기에 놓으면 다음이 됩니다');
-    expect(container.textContent).not.toContain('깊이 1 이후가 없습니다');
+    expect(container.textContent).toContain('여기에 놓으면 다음이 돼요');
+    expect(container.textContent).not.toContain('깊이 1 이후가 없어요');
   });
 });

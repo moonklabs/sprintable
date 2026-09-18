@@ -44,7 +44,7 @@ async def _session_factory():
 
 async def _seed(session):
     """org + project + 3 agents(author·assignee·mentioned) + story(assignee 배정)."""
-    from app.models.member import Member
+    from app.models.member import AgentProjectProfile, Member
     from app.models.organization import Organization
     from app.models.project import Project
     from app.models.project_access import ProjectAccess
@@ -67,6 +67,19 @@ async def _seed(session):
         for m in (author, assignee, mentioned)
     ]
     session.add_all(grants)
+    # story #3370(카디르 QA 지적 2026-09-10) — resolve_member_db_verified()가 team_members에서
+    # agent를 찾는다(site_posts.py::is_agent_caller와 동형 predicate). team_members는 0088+
+    # 부터 물리 테이블이 아니라 members⋈agent_project_profiles(+grant-only 3번째 분기,
+    # 0110)를 투영하는 VIEW다 — CI의 공유 alembic-migrated DB에서 이 VIEW는 진짜 쓰기 불가
+    # (INSERT 시 "cannot insert into view" 크래시, #4156). Member+AgentProjectProfile(+위
+    # ProjectAccess granted)만 심으면 VIEW의 agent 분기(0110 2번/3번 UNION 브랜치)가 그대로
+    # 투영하므로 TeamMember 직접 삽입은 불필요·유해(정적 가드 test_no_team_members_view_
+    # dml_in_tests.py 대상, list-comprehension 형태라 그 가드의 AST 스캔 사각을 뚫고 CI에서만
+    # 크래시했다).
+    session.add_all([
+        AgentProjectProfile(id=uuid.uuid4(), member_id=m.id, project_id=project.id)
+        for m in (author, assignee, mentioned)
+    ])
 
     story = Story(id=uuid.uuid4(), org_id=org.id, project_id=project.id, title="C0-S1 Story", status="in-progress")
     session.add(story)

@@ -43,6 +43,15 @@ class StorageProvider(abc.ABC):
         유지 — avatar/canvas 등 기존 호출부는 인자 안 넘기면 기존 동작 그대로(무회귀)."""
 
     @abc.abstractmethod
+    def required_write_headers(self, *, create_only: bool = False) -> dict[str, str]:
+        """create_only=True인 signed_write_url의 PUT에 클라이언트가 반드시 실어야 하는 헤더 —
+        조건부 쓰기를 서명에 바인딩하는 방식이 provider마다 이름이 다르다(GCS는
+        `x-goog-if-generation-match`, S3/MinIO는 `If-None-Match`). story dc3d62f4 — 호출부
+        (assets.py 등)가 이 헤더를 하드코딩하면 provider가 바뀌어도 응답이 안 바뀌어 실제완
+        다른 provider로 배포된 self-host가 FE에 틀린 헤더 계약을 내려준다(서명 불일치로
+        PUT 자체가 깨짐). 순수함수(I/O 없음) — provider 인스턴스의 정적 속성일 뿐이라 sync."""
+
+    @abc.abstractmethod
     async def delete_object(self, container: str, object_path: str) -> bool:
         """객체 hard-delete(S8 grace cron). 이미 없으면 True(멱등)·실패 시 False(best-effort·호출부 계속)."""
 

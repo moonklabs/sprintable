@@ -39,23 +39,31 @@ function getAlertRole(variant?: string | null): 'alert' | 'status' {
   return variant && POLITE_ALERT_VARIANTS.has(variant) ? 'status' : 'alert';
 }
 
-function getAlertAriaLive(variant?: string | null): 'assertive' | 'polite' {
-  return variant && POLITE_ALERT_VARIANTS.has(variant) ? 'polite' : 'assertive';
+// 카디르 QA 지적(story #3748, 2026-09-09) — aria-live 기본값은 variant가 아니라 **실제
+// role**을 따라야 한다. variant가 default/warning/destructive라도 호출부가 role="status"를
+// 명시(§WAI-ARIA — status는 그 자체로 polite 의미)하면 aria-live도 polite여야 옳다(옛
+// 손코딩 div는 aria-live 자체가 없어 암묵 polite였다 — Alert 이관이 이걸 assertive로
+// 뒤집으면 접근성 회귀). role="alert"를 명시한 호출부는 여전히 assertive.
+function getAlertAriaLive(effectiveRole: React.AriaRole | undefined): 'assertive' | 'polite' {
+  return effectiveRole === 'status' ? 'polite' : 'assertive';
 }
 
 const Alert = React.forwardRef<
   HTMLDivElement,
   React.HTMLAttributes<HTMLDivElement> & VariantProps<typeof alertVariants>
->(({ className, variant, role, 'aria-live': ariaLive, 'aria-atomic': ariaAtomic, ...props }, ref) => (
-  <div
-    ref={ref}
-    role={role ?? getAlertRole(variant)}
-    aria-live={ariaLive ?? getAlertAriaLive(variant)}
-    aria-atomic={ariaAtomic ?? 'true'}
-    className={cn(alertVariants({ variant }), className)}
-    {...props}
-  />
-));
+>(({ className, variant, role, 'aria-live': ariaLive, 'aria-atomic': ariaAtomic, ...props }, ref) => {
+  const effectiveRole = role ?? getAlertRole(variant);
+  return (
+    <div
+      ref={ref}
+      role={effectiveRole}
+      aria-live={ariaLive ?? getAlertAriaLive(effectiveRole)}
+      aria-atomic={ariaAtomic ?? 'true'}
+      className={cn(alertVariants({ variant }), className)}
+      {...props}
+    />
+  );
+});
 Alert.displayName = 'Alert';
 
 // 유나 지적(error-display 폴리시) — 공백 없는 초장문(토큰·URL·해시 등)이 grid의
@@ -74,13 +82,21 @@ const AlertTitle = React.forwardRef<
 ));
 AlertTitle.displayName = 'AlertTitle';
 
+// story #3676(유나 실측 2026-09-07, PR #4025 판정 中 발견) — 이 자리에 부모
+// 불투명도 클래스(90%)가 있었다. 부모 opacity는 자식 색과 합성돼(자식에
+// opacity-100을 줘도 안 풀림) 안의
+// text-muted-foreground를 틴트 4종 전부 라이트 AA 미달(4.15~4.34)로 떨어뜨렸다
+// — 제거 뒤에도 다크 테마 muted는 여유가 0.3~0.4뿐이라, 이 컴포넌트 안에서
+// **12px 미만 글자에는 text-muted-foreground를 쓰지 않는다**(그 자리는
+// text-foreground) — 지금 이대로도 이미 얇은 마진이라, 폰트가 더 작아지면
+// 미달로 넘어간다.
 const AlertDescription = React.forwardRef<
   HTMLParagraphElement,
   React.HTMLAttributes<HTMLParagraphElement>
 >(({ className, ...props }, ref) => (
   <p
     ref={ref}
-    className={cn('col-start-2 text-xs leading-relaxed opacity-90 [overflow-wrap:anywhere]', className)}
+    className={cn('col-start-2 text-xs leading-relaxed [overflow-wrap:anywhere]', className)}
     {...props}
   />
 ));

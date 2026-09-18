@@ -16,6 +16,13 @@ vi.mock('@/components/nav/top-bar-slot', () => ({
   ),
 }));
 
+// story #3845 §③ⓑ — 이 파일은 회고 「목록/배지」 로직 왕복이 관심사라 WorkspaceFrameTabs가
+// 끌고 오는 next/navigation 의존(useRouter)은 여기 스코프 밖 — TopBarSlot과 동형으로 스텁
+// (WorkspaceFrameTabs 자체 회귀는 workspace-frame-tabs.test.tsx가 전담).
+vi.mock('@/components/workspace/workspace-frame-tabs', () => ({
+  WorkspaceFrameTabs: () => null,
+}));
+
 const { useDashboardContextMock } = vi.hoisted(() => ({ useDashboardContextMock: vi.fn() }));
 vi.mock('@/app/dashboard/dashboard-shell', () => ({
   useDashboardContext: () => useDashboardContextMock(),

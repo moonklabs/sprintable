@@ -51,7 +51,10 @@ async def list_org_members(
     _repo: OrgMemberRepository = Depends(_require_admin),
 ) -> list[OrgMemberResponse]:
     """org_members + users JOIN — email 포함 응답. admin/owner 전용."""
-    # E-ONBOARDING S2: 실명 노출 — canonical Member.name → User.display_name → email 순.
+    # E-ONBOARDING S2: 실명 노출 — canonical Member.name → User.display_name(story #3758 —
+    # email 폴백 0, member_resolver.py 5자리·#3755와 같은 클래스의 독립 raw SQL 자리).
+    # `email` 컬럼 자체(별도 응답 필드)는 그대로 유지(페드루 판정 2026-08-30, admin/owner
+    # 전용 관리 행위 노출 — 이 스토리 범위 밖, name 슬롯만 처방).
     # members는 (org_id, user_id) 활성 휴먼으로 LEFT JOIN (없으면 display_name/email 폴백).
     result = await session.execute(
         text(
@@ -59,7 +62,7 @@ async def list_org_members(
             SELECT om.id, om.org_id, om.user_id, om.role,
                    om.created_at, om.deleted_at,
                    u.email,
-                   COALESCE(m.name, u.display_name, u.email) AS name
+                   COALESCE(NULLIF(m.name, ''), NULLIF(u.display_name, '')) AS name
             FROM org_members om
             LEFT JOIN users u ON u.id = om.user_id
             LEFT JOIN members m
@@ -115,7 +118,7 @@ async def list_eligible_approvers(
             SELECT om.id, om.org_id, om.user_id, om.role,
                    om.created_at, om.deleted_at,
                    u.email,
-                   COALESCE(m.name, u.display_name, u.email) AS name
+                   COALESCE(NULLIF(m.name, ''), NULLIF(u.display_name, '')) AS name
             FROM org_members om
             LEFT JOIN users u ON u.id = om.user_id
             LEFT JOIN members m
@@ -186,6 +189,7 @@ async def update_org_member(
     id: uuid.UUID,
     body: OrgMemberUpdate,
     repo: OrgMemberRepository = Depends(_require_admin),
+    auth: AuthContext = Depends(get_current_user),
 ) -> OrgMemberResponse:
     if body.role and body.role not in ORG_ROLES:
         raise HTTPException(status_code=400, detail=f"role must be one of: {', '.join(ORG_ROLES)}")
@@ -194,6 +198,40 @@ async def update_org_member(
         existing = await repo.get(id)
         if existing is None:
             raise HTTPException(status_code=404, detail="Org member not found")
+
+        # story #3491(페드루 PO 確定 2026-09-05, 미르코 그라운딩) — _require_admin은
+        # "owner 또는 admin"만 통과시키지만 그 안에서 admin이 owner 자리를 만들거나
+        # 건드릴 수 있는 폭까지는 안 잰다. 여기서 owner 보호를 건다(정공법 — 서버가
+        # 거부, FE 숨김에만 기대지 않는다).
+        caller = await repo.get_by_user(uuid.UUID(auth.user_id))
+        if caller is None:
+            raise HTTPException(status_code=403, detail="org admin 또는 owner 권한 필요")
+
+        if caller.role != "owner":
+            # admin caller — owner를 부여할 수 없고, owner 행을 건드릴 수 없고, 자기
+            # 자신의 role도 못 바꾼다(세 축 다 같은 이유: admin이 스스로 owner 경계를
+            # 넘나들 여지를 원천 차단).
+            if data["role"] == "owner" or existing.role == "owner" or existing.id == caller.id:
+                raise HTTPException(
+                    status_code=403,
+                    detail={
+                        "code": "ORG_MEMBER_OWNER_ONLY_ACTION",
+                        "message": "owner 권한이 필요한 작업입니다.",
+                    },
+                )
+        elif existing.role == "owner" and data["role"] != "owner":
+            # owner caller가 owner를 강등하려는 경우 — 마지막 owner면 조직이 owner
+            # 0인 상태로 떨어진다(복구 불가에 가까운 상태, 구조적으로 막는다).
+            remaining_owners = await repo.list(role="owner")
+            if len(remaining_owners) <= 1:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "ORG_LAST_OWNER",
+                        "message": "마지막 owner는 강등할 수 없습니다.",
+                    },
+                )
+
         if existing.role != data["role"]:
             await _revoke_user_refresh_tokens(repo.session, existing.user_id)
     member = await repo.update(id, **data)

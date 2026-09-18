@@ -102,6 +102,8 @@ export function useAccountSwitcher(name: string, avatarUrl?: string | null) {
       const j = (await r.json().catch(() => null)) as { data?: { redirect?: string } } | null;
       window.location.assign(j?.data?.redirect ?? '/login');
     } catch {
+      // story #3638(유나 §8 별건) — 계정 추가 실패 시 busy 스피너만 멈추고 조용했다.
+      setError(t('addAccountFailed'));
       setBusy(null);
     }
   };

@@ -6,13 +6,18 @@ doc 의 native status(0128·doc-specific 값)를 hypothesis 와 동형 패턴으
 """
 from __future__ import annotations
 
+import difflib
+import hashlib
 import logging
+import re
 import uuid
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.doc import Doc, DOC_STATUSES, DocRevision, is_valid_doc_transition
+from app.models.gate import Gate, set_gate_status
 from app.services.member_resolver import ResolvedMember
 
 logger = logging.getLogger(__name__)
@@ -20,6 +25,53 @@ logger = logging.getLogger(__name__)
 # E-DG doc-gate(48f064e5): doc 결재 인앱 게이트. work_item_type='doc'·gate_type='doc_approval'.
 DOC_GATE_WORK_ITEM_TYPE = "doc"
 DOC_GATE_TYPE = "doc_approval"
+
+# story #3561(Phase2·BE, 페드루 PO 確定 2026-09-06) — doc_approval(doc 자신의 lifecycle
+# 전이)과 별개 축: doc을 근거자료로 삼아 **다른** work_item(Story/Task)을 승인하는 게이트.
+# 이 gate_type은 doc.status를 절대 안 건드린다 — 승인 대상은 work_item이지 doc이 아니다.
+CONCEPT_APPROVAL_GATE_TYPE = "concept_approval"
+_CONCEPT_APPROVAL_WORK_ITEM_TYPES = frozenset({"story", "task"})
+
+_DOC_SUMMARY_LIMIT = 220
+# story #3258(customer-zero 2차) — 결재 카드가 채팅 밖으로 안 나가고 결정 가능하려면 본문
+# 요약이 필요하다(AC1). 마크다운 저작 원문(content_format="markdown", schemas/doc.py)에서
+# 흔한 구문만 걷어낸 거친 발췌 — 완전한 마크다운 파서가 아니다(그럴 필요 없음: 사람이
+# 한눈에 훑을 한 줄짜리 미리보기가 목적이라 과한 정확도는 낭비).
+_MD_CODE_FENCE = re.compile(r"```.*?```", re.DOTALL)
+_MD_HEADING = re.compile(r"^#{1,6}\s+", re.MULTILINE)
+_MD_LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+_MD_EMPHASIS = re.compile(r"(\*\*|__|\*|_)")
+_MD_WHITESPACE = re.compile(r"\s+")
+
+
+def _doc_excerpt(content: str, limit: int = _DOC_SUMMARY_LIMIT) -> str:
+    """카드 본문용 거친 발췌 — 마크다운 크롬(코드펜스·헤딩·링크·강조)만 벗기고 공백을
+    접는다. 빈 문서는 빈 문자열(지어내지 않음 — FE가 그 자리에서 렌더를 건너뛴다)."""
+    stripped = _MD_CODE_FENCE.sub(" ", content)
+    stripped = _MD_HEADING.sub("", stripped)
+    stripped = _MD_LINK.sub(r"\1", stripped)
+    stripped = _MD_EMPHASIS.sub("", stripped)
+    stripped = _MD_WHITESPACE.sub(" ", stripped).strip()
+    if len(stripped) <= limit:
+        return stripped
+    return stripped[:limit].rstrip() + "…"
+
+
+def _line_diff_counts(old_content: str, new_content: str) -> dict[str, int]:
+    """story #3258 AC4 — 재상신 카드에 「무엇이 바뀌었나」를 라인 add/del 카운트로 싣는다
+    (ProofCapsule의 기존 evidence.diff={add,del} 슬롯과 동일 shape — 신규 표현부 안 만듦).
+    difflib.SequenceMatcher opcodes 기반 — replace는 양쪽에 다 잡힌다(완전한 unified diff가
+    아니라 "얼마나 바뀌었는지" 규모 신호가 목적)."""
+    old_lines = old_content.splitlines()
+    new_lines = new_content.splitlines()
+    matcher = difflib.SequenceMatcher(a=old_lines, b=new_lines)
+    add = del_ = 0
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag in ("replace", "delete"):
+            del_ += i2 - i1
+        if tag in ("replace", "insert"):
+            add += j2 - j1
+    return {"add": add, "del": del_}
 
 
 async def _notify_doc_approval_requested(
@@ -57,7 +109,7 @@ async def _notify_doc_approval_requested(
             session, org_id=org_id, event_type="doc_approval_requested",
             target_member_ids=approver_ids,
             title="문서 결재 요청",
-            body=f"'{doc.title}' 문서가 결재 대기 중입니다.",
+            body=f"'{doc.title}' 문서가 결재 대기 중이에요.",
             reference_type="gate", reference_id=gate_id,
             source_project_id=doc.project_id,
             # story #2687: 동기 개인 webhook 재시도(최대 3회·1s/2s backoff)가 이 함수를 호출한
@@ -74,7 +126,7 @@ async def _notify_doc_approval_requested(
         from app.services.approval_delivery import dispatch_approval_request_cards
         await dispatch_approval_request_cards(
             session, org_id=org_id, work_item_type=DOC_GATE_WORK_ITEM_TYPE, work_item_id=doc.id,
-            project_id=doc.project_id, title=doc.title, gate_id=gate_id,
+            project_id=doc.project_id, title=doc.title, gate_id=gate_id, gate_type=DOC_GATE_TYPE,
             requester_id=requester_id, approver_ids=approver_ids,
             designated_approver_id=designated_approver_id,
         )
@@ -172,8 +224,32 @@ async def transition_doc(
         _facts = dict(gate.neutral_facts or {})
         _facts["requested_by_member_id"] = str(caller.id)
         _facts.setdefault("doc_title", doc.title)
-        # 재상신(terminal gate) re-open: 이전 결재 이력 append + 해소필드 clear(새 사이클·산티아고 audit).
-        # pending/held(admin hold)면 status 유지·requester 만 재stamp(위 forged 덮어쓰기 포함).
+        # story #3258(customer-zero 2차) AC1 — 카드가 채팅 밖으로 안 나가고 결정 가능하려면
+        # 본문 요약이 필요하다. 매 상신(신규·재상신 둘 다)마다 "지금 이 순간"의 content로
+        # 갱신 — 재상신 사이에 저자가 다시 고쳤을 수 있어(도 항상 최신값이 정직).
+        _facts["doc_summary"] = _doc_excerpt(doc.content) if isinstance(doc.content, str) else ""
+        # story #3258 AC4 — 「무엇이 바뀌었나」. 반려→개정 사이클을 거친 doc은 denied→draft
+        # 전이(위 234-241행)가 반려본 content를 DocRevision에 스냅샷해뒀다(story #3028) — 가장
+        # 최근 revision 대비 지금 content를 diff한다.
+        # ⚠️gate.status로 "재상신인지" 판별하지 않는다 — create_gate()가 rejected 슬롯을
+        # 내부에서 이미 _reopen_rejected_gate()로 pending 재오픈해 반환하므로(gate_service.py),
+        # 이 시점 gate.status는 'rejected'가 아니라 이미 'pending'이다(재현 실측 확認). 대신
+        # DocRevision 존재 자체를 "이 doc은 최소 1회 반려→개정을 거쳤다"는 정직한 신호로 쓴다
+        # — revision이 없으면(최초 상신) 지어내지 않고 스킵.
+        _latest_revision_content = (await session.execute(
+            select(DocRevision.content)
+            .where(DocRevision.doc_id == doc.id, DocRevision.org_id == org_id)
+            .order_by(DocRevision.created_at.desc())
+            .limit(1)
+        )).scalar_one_or_none()
+        if isinstance(_latest_revision_content, str) and isinstance(doc.content, str):
+            _facts["doc_diff"] = _line_diff_counts(_latest_revision_content, doc.content)
+        else:
+            _facts.pop("doc_diff", None)
+        # 그 외 terminal(approved/auto_passed/voided) re-open: create_gate()는 이 셋을 안
+        # 건드리고 그대로 반환하므로(_reopen_rejected_gate는 rejected 전용) 이력 append+해소
+        # 필드 clear는 doc.py 이 자리가 유일한 지점 — pending/held(admin hold)면 status
+        # 유지·requester만 재stamp(위 forged 덮어쓰기 포함).
         if gate.status in ("approved", "rejected", "auto_passed", "voided"):
             _prior = {
                 "status": gate.status,
@@ -251,3 +327,123 @@ async def transition_doc(
     doc.status = to_status
     await session.flush()
     return doc
+
+
+# ─── story #3561: concept_approval(doc 근거 work_item 승인, doc_approval과 별개 축) ───
+
+
+def compute_doc_body_sha256(content: str) -> str:
+    """external_publish의 `ChannelPostVersion.body_sha256`과 동형 관례 — doc 본문 변경
+    감지의 비교 기준값. 단순 sha256(다중 필드 합성 아님, doc.content 하나뿐)."""
+    return hashlib.sha256((content or "").encode()).hexdigest()
+
+
+class ConceptApprovalError(Exception):
+    """도메인 오류 — 라우터가 code/message를 HTTPException으로 매핑(DocTransitionError와
+    동형 관례)."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
+async def submit_concept_approval(
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    caller: ResolvedMember,
+    *,
+    doc_id: uuid.UUID,
+    work_item_id: uuid.UUID,
+    work_item_type: str,
+    designated_approver_id: uuid.UUID | None = None,
+) -> Gate:
+    """doc을 근거자료로 다른 work_item(Story/Task)에 `concept_approval` 게이트를 상신한다.
+
+    doc_approval(위 `transition_doc`)과 무관한 별개 경로 — 이 함수는 doc.status를 전혀
+    안 바꾼다. "doc이 그 org·work item 참조 아니면 422"(story 確定①)의 구체적 판정:
+    doc과 work_item이 **같은 project**(project_id 일치) 소속이어야 한다 — evidence.py::
+    _assert_work_item_access의 project-scope 강제와 동일 근거(cross-project 근거 자료
+    금지, [[feedback_mutation_target_resource_project_scope]] 동형)."""
+    if work_item_type not in _CONCEPT_APPROVAL_WORK_ITEM_TYPES:
+        raise ConceptApprovalError(
+            "INVALID_WORK_ITEM_TYPE",
+            f"work_item_type must be one of {sorted(_CONCEPT_APPROVAL_WORK_ITEM_TYPES)}",
+        )
+
+    doc = (await session.execute(
+        select(Doc).where(Doc.id == doc_id, Doc.org_id == org_id, Doc.deleted_at.is_(None))
+    )).scalar_one_or_none()
+    if doc is None:
+        raise ConceptApprovalError("DOC_NOT_FOUND", "문서를 찾을 수 없습니다.")
+
+    from app.services.gate_service import resolve_work_item_project_id
+    work_item_project_id = await resolve_work_item_project_id(session, org_id, work_item_type, work_item_id)
+    if work_item_project_id is None or work_item_project_id != doc.project_id:
+        raise ConceptApprovalError(
+            "CONCEPT_APPROVAL_DOC_SCOPE_MISMATCH",
+            "이 문서는 지정한 work item과 같은 프로젝트에 속하지 않습니다.",
+        )
+
+    from app.services.gate_service import create_gate
+    from app.services.workflow_line_config import _default_role_id
+    role_id = await _default_role_id(session, org_id) or doc.id
+    gate = await create_gate(
+        session, org_id, work_item_id, work_item_type, CONCEPT_APPROVAL_GATE_TYPE,
+        caller.id, role_id,
+        neutral_facts={"requested_by_member_id": str(caller.id), "doc_title": doc.title},
+        project_id=work_item_project_id,
+        designated_approver_id=designated_approver_id,
+    )
+    # story #2668/doc.py transition_doc과 동형 server-stamp — forged neutral_facts 불신,
+    # 재상신(재오픈된 rejected 슬롯 포함)마다 caller.id로 항상 덮어쓴다.
+    _facts = dict(gate.neutral_facts or {})
+    _facts["requested_by_member_id"] = str(caller.id)
+    _facts.setdefault("doc_title", doc.title)
+    gate.neutral_facts = _facts
+    gate.sealed_doc_id = doc.id
+    gate.sealed_doc_body_sha256 = compute_doc_body_sha256(doc.content)
+    await session.flush()
+    return gate
+
+
+async def _reseal_concept_approval_gate_on_doc_update(
+    session: AsyncSession, *, org_id: uuid.UUID, doc_id: uuid.UUID, new_body_sha256: str,
+) -> None:
+    """channel_posts.py::_reseal_gate_on_new_version과 동형 규칙 — doc 본문이 실제로
+    바뀌었을 때만(호출부가 `if "content" in data:`에서만 부른다) 그 doc을 근거로 삼은
+    concept_approval 게이트를 찾아: pending 中 편집이면 즉시 재봉인, approved 뒤
+    편집이면 pending 재오픈+reapproval_required=True(옛 봉인은 resolution 필드까지
+    그대로 보존 — set_gate_status만 상태를 바꾼다).
+
+    (sealed_doc_id, gate_type=concept_approval)로 찾는다 — work_item_id가 아니라 doc_id
+    축이다: 이 훅은 "이 doc을 누가 근거로 삼았나"에서 출발하지 "이 work_item에 뭐가
+    걸렸나"에서 출발하지 않는다(doc 하나가 어느 work_item에 걸렸는지는 gate 쪽에서만
+    알 수 있다 — doc 자신은 모른다).
+
+    페드루 PO 리뷰(PR#3922, 2026-09-06) — 컨셉 doc 1건이 여러 work_item(Story N)에
+    근거자료로 걸리는 것은 정상 경로다(같은 컨셉 문서로 여러 스토리를 동시에 상신할
+    수 있다 — submit_concept_approval에 "doc당 1건" 제약이 없다). `scalar_one_or_none()`
+    은 그 정상 상태에서 MultipleResultsFound(500, doc 편집 자체가 죽는다)로 죽었다 —
+    걸린 게이트 **전부**를 순회해 각자 독립적으로 재봉인/재승인 판정한다(한 게이트의
+    판정이 다른 게이트에 영향 없음 — 서로 다른 work_item의 승인 사이클이다)."""
+    gates = (await session.execute(
+        select(Gate)
+        .where(
+            Gate.org_id == org_id, Gate.sealed_doc_id == doc_id,
+            Gate.gate_type == CONCEPT_APPROVAL_GATE_TYPE, Gate.status.in_(("pending", "approved")),
+        )
+        .with_for_update()
+    )).scalars().all()
+    for gate in gates:
+        if gate.sealed_doc_body_sha256 == new_body_sha256:
+            continue
+        if gate.status == "approved":
+            set_gate_status(gate, "pending", now=datetime.now(timezone.utc))
+            gate.requires_human = True
+            gate.resolver_id = None
+            gate.resolution_note = None
+            gate.resolved_at = None
+            gate.reapproval_required = True
+            continue
+        gate.sealed_doc_body_sha256 = new_body_sha256

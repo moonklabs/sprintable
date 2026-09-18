@@ -2,13 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   ALL_RUN_STATUS_FILTER,
   DEFAULT_RUN_STATUS_FILTER,
-  canManuallyRetryRun,
   getDefaultRunDateFilters,
   getLocalDayEndIso,
   getLocalDayStartIso,
   getRunErrorDisplay,
   getRunFailureDisposition,
-  getToolAuditOutcome,
   getTriggerMemoHref,
   normalizeRunStatusFilter,
 } from './agent-run-history';
@@ -66,55 +64,6 @@ describe('agent-run-history helpers', () => {
       last_error_code: 'llm_config_missing',
       error_message: 'llm_config_missing',
     })).toBe('non_retryable');
-  });
-
-  it('allows manual retry only for retryable failed runs that are not already in flight', () => {
-    expect(canManuallyRetryRun({
-      status: 'failed',
-      retry_count: 3,
-      max_retries: 3,
-      next_retry_at: null,
-      last_error_code: 'external_mcp_timeout',
-      error_message: 'request timeout',
-      failure_disposition: 'retry_exhausted',
-    })).toBe(true);
-    expect(canManuallyRetryRun({
-      status: 'failed',
-      retry_count: 1,
-      max_retries: 3,
-      next_retry_at: null,
-      last_error_code: 'external_mcp_timeout',
-      error_message: 'request timeout',
-      failure_disposition: 'retry_launched',
-    })).toBe(false);
-    expect(canManuallyRetryRun({
-      status: 'failed',
-      retry_count: 0,
-      max_retries: 3,
-      next_retry_at: null,
-      last_error_code: 'billing_daily_cap_exceeded',
-      error_message: 'daily cap exceeded',
-      failure_disposition: 'non_retryable',
-    })).toBe(false);
-  });
-
-  it('fails closed for tool audit events without an explicit outcome payload', () => {
-    expect(getToolAuditOutcome({
-      eventType: 'agent_tool.cross_scope_blocked',
-      payload: { tool_name: 'epic_scope_check' },
-    })).toBe('denied');
-    expect(getToolAuditOutcome({
-      eventType: 'agent_tool.ambiguous_external_mapping',
-      payload: { tool_name: 'external.search_docs' },
-    })).toBe('failed');
-    expect(getToolAuditOutcome({
-      eventType: 'agent_tool.some_future_block',
-      payload: { tool_name: 'future_tool' },
-    })).toBe('failed');
-    expect(getToolAuditOutcome({
-      eventType: 'agent_tool.executed',
-      payload: { tool_name: 'create_memo' },
-    })).toBe('allowed');
   });
 
   it('returns locale-safe default date filter inputs', () => {

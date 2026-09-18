@@ -70,6 +70,11 @@ interface KanbanTrustColumnProps {
   // "지금 이 순간 못 놓는다"는 동적 신호를 얹는다(resolveTrustColumnId의 조용한 무효화만으론
   // "왜 안 되는지" 안 보여 반쪽 — PO 지적).
   isDragging?: boolean;
+  /** story #3287 AC4 — 카드 내부 상태 배지는 story.status(canonical, trust_stage와 무관)를
+   * 보여주므로 트러스트 뷰 카드에도 그대로 threading한다. 컬럼 헤더 라벨(이 컴포넌트의
+   * `label` prop) 자체는 별개 어휘(TRUST_COLUMNS)라 여긴 안 건드림 — kanban-board.tsx가
+   * TRUST_COLUMNS엔 이 override를 안 씀. */
+  getStatusLabel?: (canonicalSlug: string) => string | undefined;
 }
 
 /**
@@ -92,7 +97,7 @@ interface KanbanTrustColumnProps {
 export function KanbanTrustColumn({
   id, label, locked, stories, epicMap, memberMap, onStoryClick, onEditStory, onChangeStatus, onDeleteStory,
   projectId, onKickoffStory, executionMap, blockedByMap, storyLabelsMap, storyGatesMap, storyLineMap,
-  onCreateStory, autoComposeSignal, isDragging = false,
+  onCreateStory, autoComposeSignal, isDragging = false, getStatusLabel,
 }: KanbanTrustColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id, disabled: locked });
   const t = useTranslations('board');
@@ -233,6 +238,7 @@ export function KanbanTrustColumn({
               lineStatus={storyLineMap?.[story.id]}
               verifiedBy={story.human_verified_by ? memberMap[story.human_verified_by] : undefined}
               locked={locked}
+              getStatusLabel={getStatusLabel}
             />
           ))}
         </div>

@@ -24,6 +24,13 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+// story #3716(카디르 재현, #4062 오탐 1회) — 이 가드는 주석을 안 벗겨 «주석 속 백틱
+// fetch(`/api/…`)»도 실 호출로 셌다. i18n-key-coverage.test.ts가 이미 쓰는 공유
+// stripComments()(story #3156 통합·#3023 정규식 리터럴 백틱 픽스 포함)를 그대로
+// 재사용한다 — 복제 0. story #3731 후속 — packages/scripts/로 이관(Docker 빌드
+// 컨텍스트 밖 참조 클래스 근본 봉쇄, packages/는 builder 스테이지가 이미 COPY함).
+// moduleResolution:bundler+allowJs라 tsx/vitest 양쪽에서 그대로 해석된다.
+import { stripComments } from '../../../packages/scripts/i18n-key-parser.js';
 
 const SRC_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src');
 const EXT_RE = /\.(tsx?|ts)$/;
@@ -60,7 +67,10 @@ function stablePrefix(url: string): string {
 export function extractRawFetchApiCalls(content: string, file: string): RawFetchHit[] {
   if (EXEMPT_FILES.has(file)) return [];
   const hits: RawFetchHit[] = [];
-  for (const m of content.matchAll(RAW_FETCH_RE)) {
+  // story #3716 — 주석·문자열 리터럴 안의 fetch(`/api/…`)는 실 호출이 아니다(#4062에서
+  // 디디의 설명 주석이 정확히 이 자리에 걸려 CI가 빨개졌다). 정규식 스캔 前에 벗긴다.
+  const stripped = stripComments(content) as string;
+  for (const m of stripped.matchAll(RAW_FETCH_RE)) {
     const url = m[2] ?? '';
     if (!url.startsWith('/api/')) continue;
     // fetchWithAuth(...)/rateLimitedFetch(...) 호출은 `fetch(`로 시작하지 않으므로 이
@@ -95,8 +105,6 @@ export const GRANDFATHER_BASELINE = new Set<string>([
   'app/(authenticated)/[ws]/[proj]/docs/[slug]/page.tsx::/api/docs/',
   'app/(authenticated)/[ws]/[proj]/docs/docs-client-layout.tsx::/api/docs',
   'app/(authenticated)/[ws]/[proj]/docs/docs-client-layout.tsx::/api/docs/',
-  'app/(authenticated)/[ws]/[proj]/docs/docs-shell-client.tsx::/api/docs',
-  'app/(authenticated)/[ws]/[proj]/docs/docs-shell-client.tsx::/api/docs/',
   'app/(authenticated)/[ws]/[proj]/goals/[id]/page.tsx::/api/goals/',
   'app/(authenticated)/[ws]/[proj]/goals/goals-client.tsx::/api/goals',
   'app/(authenticated)/[ws]/[proj]/goals/goals-client.tsx::/api/goals/',
@@ -148,7 +156,6 @@ export const GRANDFATHER_BASELINE = new Set<string>([
   'app/onboarding/onboarding-telemetry.ts::/api/onboarding/events',
   'components/agents/access-matrix-tab.tsx::/api/projects/',
   'components/agents/agent-management-tab.tsx::/api/team-members/',
-  'components/agents/agent-run-detail.tsx::/api/v1/agent-runs/',
   'components/cage/gate-undo-button.tsx::/api/gates/',
   'components/cage/stuck-handoff-section.tsx::/api/stories/',
   'components/canvas/import-artifact-dialog.tsx::/api/visual-artifacts/import-image',
@@ -159,7 +166,6 @@ export const GRANDFATHER_BASELINE = new Set<string>([
   'components/chat/chat-view.tsx::/api/user-blocks',
   'components/chat/delivery-contract-modal.tsx::/api/conversations/',
   'components/chat/delivery-contract-modal.tsx::/api/notification-preferences',
-  'components/chat/embed-card.tsx::/api/docs/',
   'components/chat/embed-card.tsx::/api/docs/preview?q=',
   'components/chat/event-block-card.tsx::/api/events/publish',
   'components/chat/new-conversation-modal.tsx::/api/conversations',
@@ -196,7 +202,6 @@ export const GRANDFATHER_BASELINE = new Set<string>([
   'components/hypotheses/story-hypotheses-section.tsx::/api/hypotheses/',
   'components/inbox/approvals-queue.tsx::/api/gates/',
   'components/inbox/approvals-queue.tsx::/api/v1/hitl-requests/',
-  'components/inbox/decisions-waiting.tsx::/api/inbox/',
   'components/integrations/pr-link-section.tsx::/api/integrations/github/links',
   'components/integrations/pr-link-section.tsx::/api/integrations/github/links/',
   'components/kanban/kanban-board.tsx::/api/stories',
@@ -218,14 +223,12 @@ export const GRANDFATHER_BASELINE = new Set<string>([
   'components/nav/notification-bell.tsx::/api/event-notifications/',
   'components/nav/notification-bell.tsx::/api/event-notifications/read-all',
   'components/settings/add-member-modal.tsx::/api/organizations/',
-  'components/settings/ai-settings.tsx::/api/projects/',
   'components/settings/blocked-users-section.tsx::/api/user-blocks/',
   'components/settings/gate-level-matrix.tsx::/api/organizations/',
   'components/settings/gate-level-matrix.tsx::/api/projects/',
   'components/settings/my-notification-channel-section.tsx::/api/webhooks/config/',
   'components/settings/my-notification-channel-section.tsx::/api/webhooks/config?id=',
   'components/settings/org-members-section.tsx::/api/org-members/',
-  'components/settings/set-password-section.tsx::/api/auth/set-password',
   'components/settings/standup-deadline-section.tsx::/api/project-settings',
   'components/settings/two-factor-section.tsx::/api/auth/2fa/disable',
   'components/settings/two-factor-section.tsx::/api/auth/2fa/setup',
@@ -233,7 +236,10 @@ export const GRANDFATHER_BASELINE = new Set<string>([
   'components/settings/workflow-line-editor-section.tsx::/api/workflow-line-config/versions',
   'components/settings/workflow-line-editor-section.tsx::/api/workflow-line-config/versions/',
   'components/settings/workflow-policy-simulator-section.tsx::/api/workflow-line-config/resolve-preview',
-  'components/settings/workflow-template-gallery-section.tsx::/api/workflow-templates/',
+  // story #3295 — workflow-template-gallery-section.tsx의 grandfather 항목 제거: 축2-ⓒ
+  // (PR#3690)가 이 컴포넌트를 신세대(/api/events/definitions/...)로 이전+fetchWithAuth로
+  // 교체하며 이 raw fetch 자체가 없어졌다(재확인 grep: 0건). 죽은 채무를 목록에 남겨두지
+  // 않는다.
   'components/settings/workflow-trigger-types-section.tsx::/api/workflow-trigger-types/',
   'components/shared/rejected-relations-section.tsx::/api/stories/',
   'components/sprints/hypothesis-declaration-card.tsx::/api/context-pack/search?project_id=',
@@ -254,6 +260,13 @@ export const GRANDFATHER_BASELINE = new Set<string>([
   'services/canvas-spec-pins.ts::/api/visual-artifacts/',
   'services/canvas.ts::/api/visual-artifacts',
   'services/stt-provider.ts::/api/meetings/',
+  // story #4062 후속(2026-09-09, 페드루 PO 決) — 3건 제거: components/chat/embed-card.tsx::
+  // /api/docs/(preview?q= 갈래는 여전히 실재, 그것만 남김)·components/inbox/decisions-
+  // waiting.tsx::/api/inbox/·components/settings/set-password-section.tsx::/api/auth/set-
+  // password. 재스캔에서 셋 다 이미 안 걸림(fetchWithAuth 전환 또는 삭제로 채무 자체가
+  // 없어짐, story #3295 workflow-template-gallery-section.tsx와 동형) — 「경로/모양 키」
+  // 가드가 리팩터를 신규로 오인하는 클래스라 grandfather를 새로 등재하는 우회 대신 목록을
+  // 사실과 맞춘다.
 ]);
 
 function main(): void {

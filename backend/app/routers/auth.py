@@ -158,6 +158,18 @@ class RegisterRequest(BaseModel):
     def normalize_email(cls, v: str) -> str:
         return _normalize_email(v)
 
+    @field_validator("display_name")
+    @classmethod
+    def reject_blank_display_name(cls, v: str) -> str:
+        # story #3758 — `display_name: str`(Optional 아님)이라 필드 자체 부재는 422로
+        # 이미 막히지만, 빈 문자열/공백뿐인 값은 그 갭을 통과했다 — 그 통로로 이 라우터가
+        # (예전엔) email 로컬파트 절반을 이름 자리에 지어냈다(member_resolver.py 5자리·
+        # #3755와 같은 클래스). 원천에서 422로 거부해 그 폴백 자체를 필요 없게 만든다.
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("display_name must not be blank")
+        return stripped
+
     @field_validator("password")
     @classmethod
     def validate_password(cls, v: str) -> str:
@@ -477,12 +489,17 @@ async def _build_app_metadata(
             return await _resolve_explicit_app_metadata(user, session, explicit_pid, org_id)
 
     # 1. last_project_id 우선 → 해당 project의 active team_member (org_id 지정 시 그 org일 때만)
+    # story #3553(페드루 PO 確定, 2026-09-06) — 아래 두 조회 다 `projects` JOIN·deleted_at
+    # 필터가 없어 삭제된 project를 가리키는 옛 team_member 행이 «접근 가능」으로 잡혔다
+    # (first_accessible_project_id branch1·has_project_access는 이미 Project.deleted_at IS NULL을
+    # 본다 — 이 두 곳만 비대칭이었다). 삭제 프로젝트로 착지시키지 않는다.
     member = None
     if getattr(user, "last_project_id", None):
-        q = select(TeamMember).where(
+        q = select(TeamMember).join(Project, TeamMember.project_id == Project.id).where(
             TeamMember.project_id == user.last_project_id,
             or_(TeamMember.user_id == user.id, TeamMember.id == user.id),
             TeamMember.is_active.is_(True),
+            Project.deleted_at.is_(None),
         )
         if org_id is not None:
             q = q.where(TeamMember.org_id == org_id)
@@ -493,9 +510,10 @@ async def _build_app_metadata(
         # ⚠️0746: org_id 지정 시 그 org로 스코프(미지정이면 org 무관 → cross-org 옛 프로젝트 누수).
         # 908075db 단계2(flag-on): 이 **추측** 제거 — flag on이면 member None 유지 → 아래 deterministic
         # 경로(first_accessible/invite/Path4)로 해소. flag off면 기존 추측 그대로(거동 무변경).
-        q = select(TeamMember).where(
+        q = select(TeamMember).join(Project, TeamMember.project_id == Project.id).where(
             or_(TeamMember.user_id == user.id, TeamMember.id == user.id),
             TeamMember.is_active.is_(True),
+            Project.deleted_at.is_(None),
         )
         if org_id is not None:
             q = q.where(TeamMember.org_id == org_id)
@@ -675,7 +693,9 @@ async def register(
         email=body.email,
         hashed_password=hash_password(body.password),
         password_set_at=datetime.now(timezone.utc),
-        display_name=body.display_name.strip() or body.email.split("@")[0],
+        # story #3758 — display_name은 이제 reject_blank_display_name validator가 이미
+        # strip·비공백 보장(422로 거부 안 된 값은 그대로 실명) — email.split 폴백 제거.
+        display_name=body.display_name,
         is_active=True,
         email_verified=False,
         tos_accepted_at=datetime.now(timezone.utc),

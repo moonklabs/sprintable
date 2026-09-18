@@ -8,6 +8,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import { ArtifactSection } from './artifact-section';
+import { ToastProvider, ToastContainer, useToast } from '@/components/ui/toast';
 import koMessagesRaw from '../../../messages/ko.json';
 import enMessagesRaw from '../../../messages/en.json';
 
@@ -39,12 +40,21 @@ afterEach(async () => {
   vi.clearAllMocks();
 });
 
+// story #3759 — ArtifactSection이 useToast()로 공유 Context를 구독한다(정적 import, resetModules 무영향).
+function TestToastRenderer() {
+  const { toasts, dismissToast } = useToast();
+  return <ToastContainer toasts={toasts} onDismiss={dismissToast} />;
+}
+
 async function mount(locale: 'ko' | 'en' = 'ko') {
   const messages = locale === 'ko' ? koMessages : enMessages;
   await act(async () => {
     root.render(
       <NextIntlClientProvider locale={locale} messages={messages} timeZone="Asia/Seoul">
-        <ArtifactSection storyId="story-1" />
+        <ToastProvider>
+          <ArtifactSection storyId="story-1" />
+          <TestToastRenderer />
+        </ToastProvider>
       </NextIntlClientProvider>,
     );
   });
@@ -56,9 +66,9 @@ describe('ArtifactSection — 빈 상태 1급화 (story 9449da0e)', () => {
   it('renders a first-class empty state instead of returning null when there are 0 artifacts (ko)', async () => {
     await mount('ko');
     expect(container.textContent).toContain('산출물'); // 섹션 라벨 상시 노출
-    expect(container.textContent).toContain('아직 산출물이 없습니다');
+    expect(container.textContent).toContain('아직 산출물이 없어요');
     // story 64010b05 — 임포트 co-located 이후 카피 갱신(doc SSOT).
-    expect(container.textContent).toContain('직접 그리거나, 이미지·HTML을 임포트해 시작할 수 있습니다');
+    expect(container.textContent).toContain('직접 그리거나, 이미지·HTML을 임포트해 시작할 수 있어요');
     const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
     expect(buttons).toEqual(['산출물 그리기', '임포트']);
   });
@@ -78,7 +88,7 @@ describe('ArtifactSection — 빈 상태 1급화 (story 9449da0e)', () => {
     expect(cta).not.toBeNull();
     await act(async () => { cta!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     // 빈 상태는 사라지고 편집기(CommitBar의 "버전으로 저장" 액션)가 뜬다 — mock 0, 실 컴포넌트.
-    expect(container.textContent).not.toContain('아직 산출물이 없습니다');
+    expect(container.textContent).not.toContain('아직 산출물이 없어요');
     expect(container.textContent).toContain('버전으로 저장');
   });
 
@@ -90,6 +100,39 @@ describe('ArtifactSection — 빈 상태 1급화 (story 9449da0e)', () => {
     expect(document.body.textContent).toContain('산출물 임포트');
     expect(document.body.textContent).toContain('이미지');
     expect(document.body.textContent).toContain('HTML 붙여넣기');
+  });
+});
+
+// story #3644(3632 후속) — handleCreateCommit 실패가 console.error만 남기고 사용자에게는
+// 아무 신호가 없던 자리(onCommit={() => void handleCreateCommit(...)}가 반환값을 버려
+// 호출부 UI가 결과를 못 받는다 — createArtifact()가 POST 실패 시 null을 반환해도 편집기가
+// 그냥 열린 채로 남고 "왜"가 안 보였다).
+describe('ArtifactSection — 생성 커밋 실패 시 토스트(story #3644)', () => {
+  it('createArtifact()가 실패(POST !ok)하면 토스트로 알린다', async () => {
+    fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/visual-artifacts' && init?.method === 'POST') {
+        return { ok: false, status: 500, json: async () => ({ error: { code: 'INTERNAL_ERROR' } }) };
+      }
+      return { ok: true, status: 200, json: async () => ({ data: [] }) };
+    }) as unknown as ReturnType<typeof vi.fn>;
+    vi.stubGlobal('fetch', fetchMock);
+
+    await mount('ko');
+    const cta = [...container.querySelectorAll('button')].find((b) => b.textContent === '산출물 그리기')!;
+    await act(async () => { cta.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    const paletteButton = container.querySelectorAll('button')[0] as HTMLButtonElement;
+    await act(async () => { paletteButton.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    const commitButton = [...container.querySelectorAll('button')].find((b) => b.textContent === '버전으로 저장') as HTMLButtonElement;
+    expect(commitButton.disabled).toBe(false);
+    await act(async () => { commitButton.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    expect(container.textContent).toContain('만들지 못했어요');
+    // 편집 모드는 유지된다(재시도 가능 — 원 규율 그대로).
+    expect(container.textContent).toContain('버전으로 저장');
   });
 });
 

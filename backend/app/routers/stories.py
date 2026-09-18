@@ -3,6 +3,7 @@ import logging
 import time
 import uuid
 from datetime import datetime, timezone
+from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, field_validator
@@ -19,7 +20,7 @@ from app.models.team import TeamMember
 from app.repositories.story import StoryRepository
 from app.repositories.story_assignee import StoryAssigneeRepository
 from app.routers.agent_gateway import wake_agent
-from app.routers.gates import GateResponse
+from app.routers.gates import GateResponse, to_gate_response
 from app.services import mcp_attachment_upload
 from app.services.asset_registry import DEFAULT_CONTAINER, sync_attachment_assets
 from app.schemas.story import (
@@ -1055,6 +1056,13 @@ async def get_story_backlinks(
     id: uuid.UUID,
     limit: int = Query(default=30, ge=1, le=200),
     before: str | None = Query(default=None),
+    # story #3852(customer-zero·BE·연결 읽기, 페드루 PO 확定 2026-09-14 07:51Z) — 「스토리에
+    # 붙은 문서」(3844 행 칩·3845 문서 탭)의 데이터 소스. 새 route를 만들지 않고 이 기존
+    # backlinks route에 옵션 필터 1개만 더한다(docs.story_id FK가 없다 — entity_references
+    # 표가 유일한 연결 모델, 그라운딩 확定). Literal이라 잘못된 값은 이 함수에 도달하기
+    # «전에» FastAPI/Pydantic이 422로 거절한다(list_entity_backlinks의 방어적 두 번째
+    # 검증은 UnsupportedBacklinkSourceTypeError 참조 — target_type 형제와 동형 이유).
+    source_type: Literal["doc", "chat_message", "meeting", "story"] | None = Query(default=None),
     repo: StoryRepository = Depends(_get_repo),
     auth: AuthContext = Depends(get_current_user),
 ) -> dict:
@@ -1062,7 +1070,10 @@ async def get_story_backlinks(
     C-8 "역방향"). docs.py의 get_doc_backlinks와 동일 convention(cursor pagination, 응답
     shape) — 실제 쿼리는 `list_entity_backlinks`가 target_type만 다르게 받아 처리하는 **같은
     코드**다(중복 구현 아님). 존재하지 않는 story는 404, 있지만 project 접근 없으면 403
-    (`_assert_story_project_access` — get_story와 동일 계약, existence oracle 없음)."""
+    (`_assert_story_project_access` — get_story와 동일 계약, existence oracle 없음).
+
+    `?source_type=doc`(story #3852) — 지정 시 그 source_type의 행만(응답 item shape·cursor
+    계약 무변, 기존 소비처 회귀 0 — 파라미터 생략 시 현행 전량 그대로)."""
     story = await repo.get(id)
     if story is None:
         raise HTTPException(status_code=404, detail="Story not found")
@@ -1071,7 +1082,7 @@ async def get_story_backlinks(
     from app.services.backlinks import list_entity_backlinks
     return await list_entity_backlinks(
         repo.session, org_id=repo.org_id, target_type="story", target_id=id,
-        auth=auth, limit=limit, cursor=before,
+        auth=auth, limit=limit, cursor=before, source_type=source_type,
     )
 
 
@@ -2630,6 +2641,27 @@ async def update_story_status(
         except Exception:  # noqa: BLE001
             pass
 
+    # story #3685(Trust·customer-zero, 페드루 PO 確定 2026-09-07) — run을 "지침"이 아니라
+    # "메커니즘"으로 기록한다. 위 participation 보장과 같은 트리거(in-progress 진입)·같은
+    # fail-open 규율(agent_run_tracking.py 내부가 이미 try/except — 여기선 추가로 감싸지
+    # 않는다, 이중 삼킴 불필요). 에이전트가 착수한 것만(사람은 agent_run 개념 밖).
+    if (
+        story_before is not None and old_status != "in-progress" and body.status == "in-progress"
+        and _line_actor_id is not None and _line_actor_type == "agent"
+    ):
+        from app.services.agent_run_tracking import ensure_agent_run_started
+        await ensure_agent_run_started(
+            db, org_id=repo.org_id, project_id=story_before.project_id,
+            agent_id=_line_actor_id, story_id=id,
+        )
+
+    # story #3685 — in-review/done 전이는 "닫는 행위자"와 무관하게 그 story의 열린 run을
+    # 닫는다(사람이 PR을 머지해 done으로 옮겨도 그 안에서 일한 에이전트의 run은 끝난 게
+    # 맞다 — agent_id 미지정, close_agent_runs_for_story의 no-op 멱등이 반복 전이를 감당).
+    if story_before is not None and body.status in ("in-review", "done"):
+        from app.services.agent_run_tracking import close_agent_runs_for_story
+        await close_agent_runs_for_story(db, story_id=id, status="completed")
+
     # E-DG S7: agent-handoff relay — status 적용 후 같은 트랜잭션에서 dispatch(commit=False)·step_run
     # delivery 기록(원자). wake/CC delivery 는 commit(아래) 후 recipient_seq 확정 후 발화(P1-2 불변식).
     # relay 실패도 전이 비차단(fail-open).
@@ -2949,7 +2981,9 @@ async def request_verification(
     await db.commit()
     # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.
     await db.refresh(gate)
-    return GateResponse.model_validate(gate)
+    # story #3874 CHANGES ④(페드루 실측) — 직접 model_validate는 risk_grade를 늘 null로
+    # 냈다(gates.py 밖에서도 같은 결함 클래스). 단일 통로(to_gate_response) 재사용.
+    return await to_gate_response(db, repo.org_id, gate)
 
 
 # ─── Activities ───────────────────────────────────────────────────────────────

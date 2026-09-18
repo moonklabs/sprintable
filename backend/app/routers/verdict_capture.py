@@ -469,6 +469,18 @@ async def _process_webhook_event(
     org_id = rl.org_id  # app=입력 org·legacy=story.org_id(resolver 검증). 단일 진실원.
     delivery.org_id = org_id
 
+    # story #3685(Trust·customer-zero, 페드루 PO 確定 2026-09-07) — PR 머지도 run을 닫는
+    # 생애주기 이벤트. 이 함수의 기존 verdict/게이트 로직과 완전히 독립된 자리(별도
+    # try/except, 실패해도 아래 어떤 처리도 안 건드린다) — close_agent_runs_for_story
+    # 자체가 이미 best-effort지만, resolve_story_for_pr 이후 이 시점의 다른 side effect와
+    # 절대 안 얽히도록 한 번 더 감싼다.
+    if merged:
+        try:
+            from app.services.agent_run_tracking import close_agent_runs_for_story
+            await close_agent_runs_for_story(session, story_id=story_id, status="completed")
+        except Exception:  # noqa: BLE001
+            logger.warning("PR 머지 agent_run 자동 종료 실패(비차단) story_id=%s", story_id, exc_info=True)
+
     # story #3039(2026-08-25, PO 판정) — resolve_story_for_pr()의 SID/auto_match/text 해소는
     # 매 호출 휘발성(반환만·미영속)이다. pull_request류 이벤트는 payload에 title/body가
     # 있어(_candidate_texts) 매번 SID 텍스트로 재해소되지만, check_suite/workflow_run/status

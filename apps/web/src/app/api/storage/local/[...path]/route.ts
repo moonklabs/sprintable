@@ -56,3 +56,48 @@ export async function GET(
   };
   return new NextResponse(new Uint8Array(body), { status: 200, headers });
 }
+
+// story dc3d62f4(BE·스토리지·self-host, 부수 MEDIUM 처방) — BE `local.py::signed_write_url`가
+// PUT 서명 URL을 이미 발급하고 있었는데(`method=PUT` 쿼리·payload에 `PUT:` 접두어) 이 라우트엔
+// PUT 수신 핸들러 자체가 없어 self-host local 배포에서 업로드가 100% 실패했다. GET과 동일한
+// authz 원칙(신규 결정 0, 단기 HMAC 토큰만 검증) — method='PUT'로 검증해 GET 서명 재사용을
+// 차단한다(별개 시그니처 공간이라야 read capability로 write를 못 함).
+export async function PUT(
+  request: NextRequest,
+  { params }: { params: Promise<{ path: string[] }> },
+): Promise<Response> {
+  if (STORAGE_PROVIDER !== 'local') {
+    return NextResponse.json({ error: { message: 'not found' } }, { status: 404 });
+  }
+
+  const { path } = await params;
+  if (!path || path.length < 2) {
+    return NextResponse.json({ error: { message: 'invalid path' } }, { status: 400 });
+  }
+  const container = path[0]!;
+  const objectPath = path.slice(1).join('/');
+
+  const { searchParams } = new URL(request.url);
+  const exp = Number(searchParams.get('exp'));
+  const sig = searchParams.get('sig') ?? '';
+
+  let secret: string;
+  try {
+    secret = resolveLocalSigningSecret();
+  } catch {
+    return NextResponse.json(
+      { error: { message: 'local storage signing not configured' } },
+      { status: 503 },
+    );
+  }
+
+  if (!verifyLocalObject(secret, container, objectPath, exp, sig, 'PUT')) {
+    return NextResponse.json({ error: { message: 'invalid or expired signature' } }, { status: 403 });
+  }
+
+  const body = Buffer.from(await request.arrayBuffer());
+  const contentType = request.headers.get('content-type') ?? undefined;
+  await new LocalDiskStorageService().putObject(container, objectPath, body, contentType);
+
+  return new NextResponse(null, { status: 200 });
+}

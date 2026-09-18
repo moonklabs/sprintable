@@ -77,7 +77,7 @@ export function AddParticipantModal({
       const data = await res.json() as { conversation_id?: string; forked?: boolean };
       onAdded(data.conversation_id);
     } catch {
-      setError({ kind: 'generic', message: '참여자 추가에 실패했습니다. 다시 시도해보세요.' });
+      setError({ kind: 'generic', message: t('addParticipantFailed') });
     } finally {
       setAdding(false);
     }
@@ -103,9 +103,9 @@ export function AddParticipantModal({
           )}
           <p className="mb-2 text-xs text-muted-foreground">{t('selectMembers')}</p>
           {loading ? (
-            <div className="py-6 text-center text-sm text-muted-foreground">불러오는 중…</div>
+            <div className="py-6 text-center text-sm text-muted-foreground">{tc('loading')}</div>
           ) : available.length === 0 ? (
-            <div className="py-6 text-center text-sm text-muted-foreground">추가 가능한 팀원이 없는</div>
+            <div className="py-6 text-center text-sm text-muted-foreground">{t('noAvailableMembersToAdd')}</div>
           ) : (
             <ul className="space-y-1">
               {available.map((m) => (
@@ -156,7 +156,7 @@ export function AddParticipantModal({
             {tc('cancel')}
           </Button>
           <Button size="sm" onClick={() => void handleAdd()} disabled={!selected || adding}>
-            {adding ? t('adding') : t('addParticipants')}
+            {adding ? tc('adding') : t('addParticipants')}
           </Button>
         </div>
       </DialogContent>

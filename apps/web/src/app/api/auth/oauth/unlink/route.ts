@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { SP_AT_COOKIE } from '@/lib/db/server';
+import { safeJsonParse } from '@/lib/api-response';
 
 const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 
@@ -25,7 +26,7 @@ export async function POST(request: Request) {
     headers: { Authorization: `Bearer ${spAt}` },
   });
 
-  const json = await fastapiRes.json() as Record<string, unknown>;
+  const json = await safeJsonParse(fastapiRes);
   if (!fastapiRes.ok) {
     return NextResponse.json({ error: json['error'] ?? { code: 'FAILED', message: 'Failed to unlink' } }, { status: fastapiRes.status });
   }

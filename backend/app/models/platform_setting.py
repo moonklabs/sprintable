@@ -15,7 +15,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Integer, Text, text
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Integer, Text, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -24,6 +24,17 @@ from app.models.base import Base, TimestampMixin
 
 class PlatformSetting(Base, TimestampMixin):
     __tablename__ = "platform_settings"
+    __table_args__ = (
+        # story #3522(BE·위생, 2026-09-06) — 마이그(0270·0329) raw SQL 미러
+        # (마이그=정본·모델=미러, publication_command.py 0340 관례와 동일 사상). VAT
+        # 제약(ck_platform_settings_vat_rate_bp_range, 마이그 0282)은 prod 승격 결제
+        # 되돌림으로 컬럼 자체가 없어 이 브랜치엔 미러하지 않는다(§5-6 alembic 제외
+        # 3건과 동일 정책 — 되돌림 컬럼에 딸린 제약도 함께 되돌림).
+        CheckConstraint("dunning_grace_days > 0", name="ck_platform_settings_dunning_grace_days_positive"),
+        CheckConstraint(
+            "on_time_tolerance_seconds >= 0", name="ck_platform_settings_on_time_tolerance_seconds_nonneg",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
@@ -42,3 +53,18 @@ class PlatformSetting(Base, TimestampMixin):
     # D+dunning_grace_days, downgrade 트리거일=D+dunning_grace_days+1. 하드코딩 금지
     # 원칙(AC6)에 따라 어드민 관리값으로 — 기본 7일(마이그 0270 시드).
     dunning_grace_days: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("7"))
+    # story #3373(Phase1·마케팅운영, 페드루 PO 정정 2026-09-03 08:40Z) — SaaS 기본 제공되는
+    # «공용 Threads(Meta) 앱» 자격. 블루프린트 §8: 조직별 자격(channel_app_credentials)은
+    # 옵션이고, 공용 앱이 기본 경로다. env var(threads_app_id/secret 설정값)로 두지 않는다
+    # (이 파일 모듈 docstring의 선생님 결정③ — 코드 배포 없이 바뀌어야 하는 값은 어드민
+    # 관리, env var는 재배포가 있어야 바뀜). 둘 다 nullable — 미설정이면(NULL) 공용 앱
+    # fallback도 없다는 뜻(app/services/channel_app_credentials.py의 3단 우선순위:
+    # 조직 자격 → 이 값 → 없음=409). secret은 channel_credential_crypto.py로 암호화
+    # (channel_app_credentials.encrypted_app_secret과 동일 키·동일 함수 재사용).
+    threads_platform_app_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    threads_platform_encrypted_app_secret: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #3475(Phase1·마케팅운영, 페드루 PO 確定 2026-09-05) — 발행 계측 API
+    # 「정시」 정의(published_at - scheduled_at <= tolerance)의 허용오차(초). cron
+    # 1분 tick + 워커 처리 여유 감안 기본 120초(마이그 0329 시드) — 하드코딩 금지
+    # 원칙(dunning_grace_days/vat_rate_bp와 동일 선례).
+    on_time_tolerance_seconds: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("120"))

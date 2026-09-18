@@ -16,20 +16,40 @@ def _mock_run(status: str = "running") -> MagicMock:
     r.id = RUN_ID
     r.org_id = ORG_ID
     r.agent_id = AGENT_ID
+    # story #4725d9c0 — AgentRunResponse.model_validate(mock)이 model_copy로 덮어쓰기 전에
+    # 먼저 이 필드를 mock에서 읽는다. MagicMock은 명시 안 하면 .agent_name도 자동으로
+    # MagicMock을 만들어내(str|None 위반 → ValidationError) 반드시 여기서 세팅해야 한다.
+    r.agent_name = None
     r.story_id = None
     r.memo_id = None
     r.trigger = "manual"
     r.model = "claude-opus-4-7"
     r.status = status
     r.result_summary = None
+    # story #3707 — AgentRunResponse에 error_message 추가. MagicMock은 명시 안 하면 자동으로
+    # MagicMock을 만들어내(str|None 위반 → ValidationError) agent_name과 동형으로 세팅.
+    r.error_message = None
     r.input_tokens = None
     r.output_tokens = None
     r.cost_usd = None
     r.duration_ms = None
     r.last_error_code = None
+    # story #3725 — AgentRunResponse에 5필드 추가. MagicMock은 명시 안 하면 자동으로
+    # MagicMock을 만들어내(retry_count/max_retries는 int 필수라 ValidationError) agent_name과
+    # 동형으로 세팅.
+    r.deployment_id = None
+    r.failure_disposition = None
+    r.retry_count = 0
+    r.max_retries = 3
+    r.next_retry_at = None
     r.llm_call_count = 0
     r.run_metadata = {}
     r.created_at = datetime(2026, 4, 30, tzinfo=timezone.utc)
+    # story #3828 — AgentRunResponse에 conversation_id/triggering_message_id 추가.
+    # MagicMock은 명시 안 하면 자동으로 MagicMock을 만들어내(UUID|None 위반 →
+    # ValidationError) agent_name과 동형으로 세팅.
+    r.conversation_id = None
+    r.triggering_message_id = None
     return r
 
 
@@ -68,8 +88,16 @@ async def _client():
 async def test_list_agent_runs_200():
     client, session, app = await _client()
     try:
+        # story #4725d9c0 — list_agent_runs가 이제 _agent_name_map(team_members 조인)도
+        # 부른다. 같은 session.execute가 project 존재/has_project_access(.scalar_one_or_none)
+        # 와 name-map(.all()) 양쪽에 다 쓰이므로 한 mock에 둘 다 truthy로 세팅.
+        exec_result = MagicMock()
+        exec_result.scalar_one_or_none.return_value = PROJECT_ID
+        exec_result.all.return_value = []
+        session.execute = AsyncMock(return_value=exec_result)
         with patch("app.repositories.agent_run.AgentRunRepository.list", new_callable=AsyncMock) as mock_list:
-            mock_list.return_value = [_mock_run()]
+            # story #3851 — repo.list()가 이제 (list, total) 튜플을 반환한다(X-Total-Count 계산용).
+            mock_list.return_value = ([_mock_run()], 1)
 
             async with client as c:
                 resp = await c.get(f"/api/v2/agent-runs?project_id={PROJECT_ID}")
@@ -86,7 +114,8 @@ async def test_list_agent_runs_empty_200():
     client, session, app = await _client()
     try:
         with patch("app.repositories.agent_run.AgentRunRepository.list", new_callable=AsyncMock) as mock_list:
-            mock_list.return_value = []
+            # story #3851 — repo.list()가 이제 (list, total) 튜플을 반환한다.
+            mock_list.return_value = ([], 0)
 
             async with client as c:
                 resp = await c.get(f"/api/v2/agent-runs?project_id={PROJECT_ID}")
@@ -139,7 +168,11 @@ async def test_create_agent_run_201():
         access_mock.scalar_one_or_none.return_value = 1
         agent_mock = MagicMock()
         agent_mock.scalar_one_or_none.return_value = AGENT_ID
-        session.execute = AsyncMock(side_effect=[proj_mock, access_mock, agent_mock])
+        # story #4725d9c0 — create_agent_run이 응답 일관성을 위해 이제 _agent_name_map도
+        # 부른다(4번째 session.execute 호출, .all() 사용).
+        name_map_mock = MagicMock()
+        name_map_mock.all.return_value = []
+        session.execute = AsyncMock(side_effect=[proj_mock, access_mock, agent_mock, name_map_mock])
 
         with patch("app.repositories.agent_run.AgentRunRepository.create", new_callable=AsyncMock) as mock_create:
             mock_create.return_value = _mock_run()
@@ -191,6 +224,12 @@ async def test_update_agent_run_completed_200():
         completed.result_summary = "작업 완료"
         completed.input_tokens = 1500
         completed.output_tokens = 300
+        # story #4725d9c0 — update_agent_run도 응답 일관성을 위해 _agent_name_map을 부른다
+        # (has_project_access의 .scalar_one_or_none()와 name-map의 .all() 둘 다 truthy/빈 목록).
+        exec_result = MagicMock()
+        exec_result.scalar_one_or_none.return_value = 1
+        exec_result.all.return_value = []
+        session.execute = AsyncMock(return_value=exec_result)
 
         with patch("app.repositories.agent_run.AgentRunRepository.get", new_callable=AsyncMock, return_value=completed), \
              patch("app.repositories.agent_run.AgentRunRepository.update", new_callable=AsyncMock) as mock_update:
@@ -216,6 +255,10 @@ async def test_update_agent_run_failed_200():
     try:
         failed = _mock_run("failed")
         failed.last_error_code = "timeout"
+        exec_result = MagicMock()
+        exec_result.scalar_one_or_none.return_value = 1
+        exec_result.all.return_value = []
+        session.execute = AsyncMock(return_value=exec_result)
 
         with patch("app.repositories.agent_run.AgentRunRepository.get", new_callable=AsyncMock, return_value=failed), \
              patch("app.repositories.agent_run.AgentRunRepository.update", new_callable=AsyncMock) as mock_update:

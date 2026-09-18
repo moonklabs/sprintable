@@ -94,6 +94,7 @@ async def test_dispatch_creates_dm_and_request_card_per_approver():
             await dispatch_approval_request_cards(
                 s, org_id=org_id, work_item_type="doc", work_item_id=doc.id,
                 project_id=doc.project_id, title=doc.title, gate_id=gate_id,
+                gate_type="doc_approval",
                 requester_id=requester_id, approver_ids=[approver1, approver2],
             )
             await s.commit()
@@ -147,12 +148,14 @@ async def test_second_approval_reuses_existing_dm_not_new_room():
             await dispatch_approval_request_cards(
                 s, org_id=org_id, work_item_type="doc", work_item_id=doc1.id,
                 project_id=doc1.project_id, title=doc1.title, gate_id=uuid.uuid4(),
+                gate_type="doc_approval",
                 requester_id=requester_id, approver_ids=[approver_id],
             )
             await s.commit()
             await dispatch_approval_request_cards(
                 s, org_id=org_id, work_item_type="doc", work_item_id=doc2.id,
                 project_id=doc2.project_id, title=doc2.title, gate_id=uuid.uuid4(),
+                gate_type="doc_approval",
                 requester_id=requester_id, approver_ids=[approver_id],
             )
             await s.commit()
@@ -188,6 +191,7 @@ async def test_one_approver_failure_does_not_poison_session_for_others():
             await dispatch_approval_request_cards(
                 s, org_id=org_id, work_item_type="doc", work_item_id=doc.id,
                 project_id=doc.project_id, title=doc.title, gate_id=uuid.uuid4(),
+                gate_type="doc_approval",
                 requester_id=requester_id, approver_ids=[nonexistent_approver, good_approver],
             )
             # poison 됐다면 이 commit이나 후속 write가 즉시 실패한다.
@@ -233,6 +237,7 @@ async def test_all_approvers_failing_logs_zero_delivery_warning(caplog):
                 await dispatch_approval_request_cards(
                     s, org_id=org_id, work_item_type="doc", work_item_id=doc.id,
                     project_id=doc.project_id, title=doc.title, gate_id=uuid.uuid4(),
+                    gate_type="doc_approval",
                     requester_id=requester_id, approver_ids=[nonexistent_1, nonexistent_2],
                 )
             await s.commit()
@@ -271,6 +276,7 @@ async def test_partial_success_does_not_log_zero_delivery_warning(caplog):
                 await dispatch_approval_request_cards(
                     s, org_id=org_id, work_item_type="doc", work_item_id=doc.id,
                     project_id=doc.project_id, title=doc.title, gate_id=uuid.uuid4(),
+                    gate_type="doc_approval",
                     requester_id=requester_id, approver_ids=[nonexistent_approver, good_approver],
                 )
             await s.commit()
@@ -299,6 +305,7 @@ async def test_no_approvers_no_dm_created(caplog):
                 await dispatch_approval_request_cards(
                     s, org_id=org_id, work_item_type="doc", work_item_id=doc.id,
                     project_id=doc.project_id, title=doc.title, gate_id=uuid.uuid4(),
+                    gate_type="doc_approval",
                     requester_id=requester_id, approver_ids=[],
                 )
             await s.commit()

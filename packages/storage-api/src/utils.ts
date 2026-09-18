@@ -31,16 +31,18 @@ function getBaseUrl(): string {
   );
 }
 
-export async function fastapiCall<T>(
+interface FastapiCallOptions {
+  body?: unknown;
+  query?: Record<string, string | number | boolean | null | undefined>;
+  orgId?: string;
+}
+
+async function fastapiCallRaw<T>(
   method: 'GET' | 'POST' | 'PATCH' | 'DELETE' | 'PUT',
   path: string,
   accessToken: string,
-  options?: {
-    body?: unknown;
-    query?: Record<string, string | number | boolean | null | undefined>;
-    orgId?: string;
-  },
-): Promise<T> {
+  options?: FastapiCallOptions,
+): Promise<{ data: T; headers: Headers }> {
   const url = new URL(path, getBaseUrl());
   if (options?.query) {
     for (const [k, v] of Object.entries(options.query)) {
@@ -65,6 +67,29 @@ export async function fastapiCall<T>(
     throw mapApiError(res.status, errBody);
   }
 
-  if (res.status === 204) return undefined as T;
-  return res.json() as Promise<T>;
+  const data = res.status === 204 ? (undefined as T) : (await res.json() as T);
+  return { data, headers: res.headers };
+}
+
+export async function fastapiCall<T>(
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE' | 'PUT',
+  path: string,
+  accessToken: string,
+  options?: FastapiCallOptions,
+): Promise<T> {
+  const { data } = await fastapiCallRaw<T>(method, path, accessToken, options);
+  return data;
+}
+
+/** story #3718 — fastapiCall과 완전히 같은 요청·같은 에러 처리를 타되, 응답 헤더까지
+ * 호출부에 넘긴다(fastapiCall은 body만 반환해 X-Total-Count 같은 헤더가 소비처에
+ * 안 갔다 — ApiTaskRepository.count()가 이걸로 진짜 총계를 읽는다). 중복 구현 대신
+ * fastapiCallRaw를 공유해 fastapiCall의 기존 동작(호출부 무회귀)은 그대로 유지한다. */
+export async function fastapiCallWithMeta<T>(
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE' | 'PUT',
+  path: string,
+  accessToken: string,
+  options?: FastapiCallOptions,
+): Promise<{ data: T; headers: Headers }> {
+  return fastapiCallRaw<T>(method, path, accessToken, options);
 }

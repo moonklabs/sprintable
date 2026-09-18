@@ -82,7 +82,10 @@ async def test_fallback_prefers_display_name_when_no_member_anchor():
 
 
 @pytest.mark.anyio
-async def test_fallback_uses_email_when_no_display_name_and_no_member_anchor():
+async def test_fallback_is_none_when_no_display_name_and_no_member_anchor():
+    """story #3758 — email 폴백 제거(member_resolver.py 5자리·#3755와 같은 클래스의
+    me.py 내 독립 자리). display_name도 앵커도 없으면 None 정직(email은 별도 email
+    필드로만 노출 — name 자리에 지어내지 않음)."""
     user = MagicMock()
     user.display_name = None
     user.email = "invited@example.com"
@@ -90,7 +93,7 @@ async def test_fallback_uses_email_when_no_display_name_and_no_member_anchor():
     org_id = uuid.uuid4()
     session, _ = _fallback_session(user, member_anchor_name=None)
     res = await get_me(member_id=None, session=session, auth=_auth(org_id))
-    assert res.name == "invited@example.com"  # display_name도 앵커도 없으면 email 폴백
+    assert res.name is None
     assert res.email == "invited@example.com"
 
 

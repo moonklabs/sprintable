@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
@@ -335,8 +336,15 @@ async def test_export_excludes_grouped_children():
             await s.commit()
 
         async with Session() as s:
+            # story #3778 — export_session이 이제 로케일 인지(request.headers['accept-
+            # language'])라 " votes)"(en 형)를 그대로 검산하려면 en을 명시해야 한다(기본
+            # ko는 "표" 단위어를 쓴다) — 이 테스트의 관심사는 그룹핑 제외 여부지 로케일이
+            # 아니므로, 기존 assert 문구를 그대로 살리는 쪽으로 en 고정.
+            fake_request = SimpleNamespace(
+                headers=SimpleNamespace(get=lambda k, d=None: "en" if k.lower() == "accept-language" else d)
+            )
             resp = await export_session(
-                id=session_id, db=s, auth=_auth(), repo=RetroSessionRepository(s, ORG)
+                id=session_id, request=fake_request, db=s, auth=_auth(), repo=RetroSessionRepository(s, ORG)
             )
             body = resp.body.decode()
             # child(session_with_items가 만든 'i1'/'i0' 텍스트)는 그룹핑된 쪽만 제외돼야.

@@ -10,32 +10,42 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { ChatListView } from './chat-list-view';
+import { ChatRailProvider, useChatRailOptional } from '@/app/(authenticated)/chats/chat-rail-context';
 
 // story #3177(S3a) — ChatListView가 이제 NowStrip을 항상 마운트한다. 이 테스트의 관심사는
 // 대화 목록 자체(SSE/아바타/URL 조립)라 NowStrip의 전역 RefreshContext 폴링 배선까지
 // 실 provider로 끌고 오지 않는다(useChatSse와 동일 관례 — 교차관심사 훅은 no-op mock).
 vi.mock('@/hooks/use-auto-refresh', () => ({ useAutoRefresh: () => {} }));
 
-const { useDashboardContextMock, pushMock } = vi.hoisted(() => ({
+const { useDashboardContextMock, pushMock, replaceMock, searchParamsValueRef } = vi.hoisted(() => ({
   useDashboardContextMock: vi.fn(),
   pushMock: vi.fn(),
+  replaceMock: vi.fn(),
+  searchParamsValueRef: { current: '' as string },
 }));
 
 vi.mock('@/app/dashboard/dashboard-shell', () => ({
   useDashboardContext: () => useDashboardContextMock(),
 }));
 
+// story #3831 — 「오늘」의 지시 한 줄이 `?compose=`로 도착(chat-list-view.tsx가 직접 읽는다).
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: pushMock, replace: vi.fn() }),
+  useRouter: () => ({ push: pushMock, replace: replaceMock }),
+  useSearchParams: () => new URLSearchParams(searchParamsValueRef.current),
 }));
 
 // use-chat-sse는 EventSource(jsdom 미구현)를 쓰므로 no-op으로 목 — 단, story #1978은 정확히
 // onReconnect 배선을 검증해야 하니 마지막 호출의 옵션을 캡처해 테스트에서 직접 불러낸다
 // (SSE 백오프/타이머 전체를 재현하지 않는다 — sse-multiplexer.test.tsx가 이미 그 축은
 // "실제 재연결 타이밍은 별도"로 선언하고 옵션 배선만 고정하는 동일 관례).
-const { useChatSseMock } = vi.hoisted(() => ({ useChatSseMock: vi.fn() }));
+// story #3621 — connected/polling을 반환하는 실제 훅 shape과 맞춘다(그전엔 이 컴포넌트가
+// 반환값을 안 읽어 undefined 반환도 무해했지만, 이제 destructure한다). 기본값은 연결됨 —
+// 끊김/폴링 배너 테스트는 useChatSseMock.mockReturnValue로 개별 오버라이드한다.
+const { useChatSseMock } = vi.hoisted(() => ({
+  useChatSseMock: vi.fn((_opts?: unknown) => ({ connected: true, polling: false })),
+}));
 vi.mock('@/hooks/use-chat-sse', () => ({
-  useChatSse: (opts: unknown) => { useChatSseMock(opts); },
+  useChatSse: (opts: unknown) => useChatSseMock(opts),
 }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -56,6 +66,8 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
   pushMock.mockClear();
+  replaceMock.mockClear();
+  searchParamsValueRef.current = '';
   useChatSseMock.mockClear();
   useDashboardContextMock.mockReturnValue({ role: 'member' });
 });
@@ -277,6 +289,197 @@ describe('ChatListView — 리스트 아바타 실사진(story #2968)', () => {
   });
 });
 
+// story #3888(§⑤·Chat, PO 확定 2026-09-14 18:19Z) — 이벤트 메시지 미리보기가 raw
+// content(발행 시점에 구운 「[이벤트] preset.gate.verdict」류 slug)를 그대로 보여주던
+// 것을 막는다. composeEventPreviewLine 자체 단위테스트는 event-block-card.test.tsx —
+// 여기는 latest_message.event가 실제로 이 자리(리스트 행)까지 배선되는지의 최종 증거.
+describe('ChatListView — story #3888 이벤트 메시지 미리보기(raw slug 봉쇄)', () => {
+  it('⭐latest_message.event가 있으면 raw content 대신 헤더+요약 한 줄을 렌더한다', async () => {
+    stubFetchWithConversations([{
+      id: 'conv-event-1', type: 'dm', title: '결재봇',
+      latest_message: {
+        content: '[이벤트] preset.gate.verdict\n- gate_type: external_publish\n- verdict: approved',
+        created_at: '2026-09-14T18:00:00Z',
+        event: { event_key: 'preset.gate.verdict', payload: { gate_type: 'external_publish', verdict: 'approved' } },
+      },
+      updated_at: '2026-09-14T18:00:00Z', unread_count: 0,
+    }]);
+    await mount();
+    expect(container.textContent).toContain('게이트 판정 · 외부 발행 — 승인됨');
+    expect(container.textContent).not.toContain('[이벤트]');
+    expect(container.textContent).not.toContain('preset.gate.verdict');
+  });
+
+  it('work.status_changed 이벤트도 헤더+종류+전이 화살표로 렌더한다', async () => {
+    stubFetchWithConversations([{
+      id: 'conv-event-2', type: 'dm', title: '스토리 봇',
+      latest_message: {
+        content: '[이벤트] preset.work.status_changed',
+        created_at: '2026-09-14T18:00:00Z',
+        event: {
+          event_key: 'preset.work.status_changed',
+          payload: { work_item_type: 'story', from_status: 'ready-for-dev', to_status: 'in-progress' },
+        },
+      },
+      updated_at: '2026-09-14T18:00:00Z', unread_count: 0,
+    }]);
+    await mount();
+    expect(container.textContent).toContain('작업 상태 변경 · 스토리 개발 대기 → 진행 중');
+    expect(container.textContent).not.toContain('preset.work.status_changed');
+  });
+
+  // 무관 PR no-op — event 필드가 없는(구버전 캐시·일반 메시지) 대화는 회귀 없이 기존
+  // content 그대로 렌더한다(이 카드가 안 건드리는 자리).
+  it('음성대조 — latest_message.event가 없으면 기존 content를 그대로 쓴다(일반 메시지, 회귀 0)', async () => {
+    stubFetchWithConversations([{
+      id: 'conv-plain-1', type: 'dm', title: '평범한 대화',
+      latest_message: { content: '내일 회의 몇 시예요?', created_at: '2026-09-14T18:00:00Z', event: null },
+      updated_at: '2026-09-14T18:00:00Z', unread_count: 0,
+    }]);
+    await mount();
+    expect(container.textContent).toContain('내일 회의 몇 시예요?');
+  });
+
+  // story #3893(유나 §⑤ 확定 2026-09-14 19:47Z) — 2 preset 추가. refs.assignee는
+  // BE _event_payload()가 msg_metadata['event']를 additive로 그대로 투영해오는 값
+  // (그라운딩 확認 — 새 BE 스키마 0, latest_message.event.refs 타입만 이 스토리가
+  // 넓혔다).
+  it('work.assigned 이벤트는 헤더+종류→담당자로 렌더한다(refs.assignee 경유)', async () => {
+    stubFetchWithConversations([{
+      id: 'conv-event-3', type: 'dm', title: '배정봇',
+      latest_message: {
+        content: '[이벤트] preset.work.assigned',
+        created_at: '2026-09-14T18:00:00Z',
+        event: {
+          event_key: 'preset.work.assigned',
+          payload: { work_item_type: 'story', work_item_id: 'S-1', assignee_member_id: 'M-1' },
+          refs: { assignee: { found: true, name: '미르코' } },
+        },
+      },
+      updated_at: '2026-09-14T18:00:00Z', unread_count: 0,
+    }]);
+    await mount();
+    expect(container.textContent).toContain('작업 배정 · 스토리 → 미르코');
+    expect(container.textContent).not.toContain('[이벤트]');
+    expect(container.textContent).not.toContain('preset.work.assigned');
+  });
+
+  // story #3893 CHANGES①(PO PR#4298 리뷰 2026-09-15) — 그라운딩 정정: metric_unit은
+  // metric 이름(등재 4종은 outcomeLoop.metric_X 라벨로), «%» 리터럴이 아니다.
+  it('goal.measured 이벤트는 헤더+값+등재 metric 라벨로 렌더한다', async () => {
+    stubFetchWithConversations([{
+      id: 'conv-event-4', type: 'dm', title: '측정봇',
+      latest_message: {
+        content: '[이벤트] preset.goal.measured',
+        created_at: '2026-09-14T18:00:00Z',
+        event: {
+          event_key: 'preset.goal.measured',
+          payload: { goal_id: 'G-1', metric_value: 12, metric_unit: 'completion_pct', source: 'internal_ops' },
+        },
+      },
+      updated_at: '2026-09-14T18:00:00Z', unread_count: 0,
+    }]);
+    await mount();
+    expect(container.textContent).toContain('목표 측정 · 12 완료율 %');
+    expect(container.textContent).not.toContain('preset.goal.measured');
+  });
+
+  it('goal.measured — metric_unit이 미등재(GA4 임의값)면 값만 렌더(raw slug 0)', async () => {
+    stubFetchWithConversations([{
+      id: 'conv-event-4b', type: 'dm', title: '측정봇(GA4)',
+      latest_message: {
+        content: '[이벤트] preset.goal.measured',
+        created_at: '2026-09-14T18:00:00Z',
+        event: {
+          event_key: 'preset.goal.measured',
+          payload: { goal_id: 'G-4', metric_value: 30, metric_unit: 'sessions', source: 'ga4' },
+        },
+      },
+      updated_at: '2026-09-14T18:00:00Z', unread_count: 0,
+    }]);
+    await mount();
+    expect(container.textContent).toContain('목표 측정 · 30');
+    expect(container.textContent).not.toContain('sessions');
+  });
+
+  // 음성대조 — refs.assignee가 없으면(구버전 캐시 등) 반쪽 요약 금지 원칙에 따라 raw
+  // content로 폴백한다(과잉 일반화 금지 계약 확認, work.status_changed와 동일 패턴).
+  it('음성대조 — work.assigned인데 refs.assignee가 없으면 raw content 폴백', async () => {
+    stubFetchWithConversations([{
+      id: 'conv-event-5', type: 'dm', title: '배정봇(구버전)',
+      latest_message: {
+        content: '[이벤트] preset.work.assigned',
+        created_at: '2026-09-14T18:00:00Z',
+        event: {
+          event_key: 'preset.work.assigned',
+          payload: { work_item_type: 'story', work_item_id: 'S-1', assignee_member_id: 'M-1' },
+        },
+      },
+      updated_at: '2026-09-14T18:00:00Z', unread_count: 0,
+    }]);
+    await mount();
+    expect(container.textContent).toContain('[이벤트] preset.work.assigned');
+  });
+
+  // 양성대조 — event_key가 이 카드가 처리하는 4개 preset(story #3893으로 2개 추가) 밖
+  // (예: 미래 확장 preset)이면
+  // composeEventPreviewLine이 null을 돌려주고 기존 content 폴백으로 조용히 떨어진다
+  // (과잉 일반화 금지 계약 확認).
+  it('양성대조 — 미지원 event_key는 raw content 폴백으로 떨어진다(과잉 일반화 금지)', async () => {
+    stubFetchWithConversations([{
+      id: 'conv-event-unsupported', type: 'dm', title: '기타 이벤트',
+      latest_message: {
+        content: '[이벤트] preset.some.other',
+        created_at: '2026-09-14T18:00:00Z',
+        event: { event_key: 'preset.some.other', payload: {} },
+      },
+      updated_at: '2026-09-14T18:00:00Z', unread_count: 0,
+    }]);
+    await mount();
+    expect(container.textContent).toContain('[이벤트] preset.some.other');
+  });
+});
+
+// story #3888 CHANGES①(PO PR 코멘트, 2026-09-14 18:53Z) — useOrgDomainLabels를
+// ConversationRow(행) 안에서 부르면 행 개수만큼 같은 domain-labels 요청이 중복 발사된다
+// (훅 자체엔 캐시·dedupe가 없다, use-org-domain-labels.ts 그라운딩). ChatListView가 1회만
+// 부르고 domainLabels를 prop으로 내리는 처방 — N=3 행에서 요청이 정확히 1회만 나가는지
+// 직접 고정한다(합성 카운터, 실 데이터 아님 — 이 테스트의 목적 자체가 "몇 번 불렸나").
+describe('ChatListView — story #3888 CHANGES① domain-labels 요청 중복 제거', () => {
+  it('⭐대화 3건(행 3개)이어도 domain-labels 요청은 정확히 1회만 나간다', async () => {
+    useDashboardContextMock.mockReturnValue({ role: 'member', orgId: 'org-1' });
+    let domainLabelsCallCount = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/domain-labels')) {
+        domainLabelsCallCount += 1;
+        return { ok: true, json: async () => [] };
+      }
+      if (url.includes('/api/conversations/recent-outside-project')) {
+        return { ok: true, json: async () => ({ data: [] }) };
+      }
+      if (url.includes('/api/conversations?')) {
+        return {
+          ok: true,
+          json: async () => ({
+            data: [
+              { id: 'conv-1', type: 'dm', title: '대화 1', latest_message: null, updated_at: '2026-09-14T18:00:00Z', unread_count: 0 },
+              { id: 'conv-2', type: 'dm', title: '대화 2', latest_message: null, updated_at: '2026-09-14T18:00:00Z', unread_count: 0 },
+              { id: 'conv-3', type: 'dm', title: '대화 3', latest_message: null, updated_at: '2026-09-14T18:00:00Z', unread_count: 0 },
+            ],
+            total: 3,
+          }),
+        };
+      }
+      return { ok: false, status: 404, json: async () => null };
+    }));
+    await mount();
+    expect(container.textContent).toContain('대화 1');
+    expect(container.textContent).toContain('대화 2');
+    expect(container.textContent).toContain('대화 3');
+    expect(domainLabelsCallCount).toBe(1);
+  });
+});
+
 // story #3106(#3092 후속) — DM 상대(oneOnOneParticipant)의 runtime_type이 BE에서 이미
 // 내려와도 이 컴포넌트가 Avatar에 안 넘기면 여전히 "Agent" 폴백에 머문다.
 describe('ChatListView — story #3106 참가자 runtime_type → Avatar 배선', () => {
@@ -420,18 +623,584 @@ describe('ChatListView — 대화명 Claim 무게(story #2969 PR-5)', () => {
 // 것(member_resolver.py) — 이제 BE는 name=null을 실어보내고, FE가 그 null을 '?' 1글자가
 // 아니라 사람 언어 문구로 폴백해야 한다.
 describe('ChatListView — 참가자 이름 해석 실패 폴백(story #3203)', () => {
-  it('DM 상대의 name이 null이면(BE orphan 폴백) "알 수 없는 멤버"로 뜬다 — uuid도 물음표도 아니다', async () => {
+  it('DM 상대의 name이 null이면(BE orphan 폴백) "알 수 없는 구성원"으로 뜬다 — uuid도 물음표도 아니다', async () => {
+    // story #3758(9번째) — resolved=false가 진짜 orphan 신호(word 정 — "멤버"→"구성원").
     stubFetchWithConversations([{
       id: 'conv-dm-orphan-1', type: 'dm', title: null,
       latest_message: null, updated_at: '2026-08-29T00:00:00Z', unread_count: 0,
       participants: [
-        { member_id: 'me-1', name: '나', avatar_url: null, type: 'human' },
-        { member_id: '767988e5-df5b-48e8-9964-7062fe84d691', name: null, avatar_url: null, type: 'human' },
+        { member_id: 'me-1', name: '나', avatar_url: null, type: 'human', resolved: true },
+        { member_id: '767988e5-df5b-48e8-9964-7062fe84d691', name: null, avatar_url: null, type: 'human', resolved: false },
       ],
     }]);
     await mount();
-    const nameEl = [...container.querySelectorAll('span')].find((el) => el.textContent === '알 수 없는 멤버');
+    const nameEl = [...container.querySelectorAll('span')].find((el) => el.textContent === '알 수 없는 구성원');
     expect(nameEl).not.toBeUndefined();
     expect(container.textContent).not.toContain('767988e5');
+  });
+
+  it('참가자가 실존(resolved=true)인데 name만 null이면 "이름 없는 구성원"으로 뜬다(orphan과 다른 문구)', async () => {
+    stubFetchWithConversations([{
+      id: 'conv-dm-nameless-1', type: 'dm', title: null,
+      latest_message: null, updated_at: '2026-08-29T00:00:00Z', unread_count: 0,
+      participants: [
+        { member_id: 'me-1', name: '나', avatar_url: null, type: 'human', resolved: true },
+        { member_id: 'real-member-1', name: null, avatar_url: null, type: 'human', resolved: true },
+      ],
+    }]);
+    await mount();
+    const nameEl = [...container.querySelectorAll('span')].find((el) => el.textContent === '이름 없는 구성원');
+    expect(nameEl).not.toBeUndefined();
+  });
+});
+
+// story #3791(카디르 QA 정정 12:52Z) — oneOnOneParticipant.name이 null이 아니라 빈 문자열
+// ""인 경우(`??`는 null/undefined만 잡고 ""는 통과시켜 걸렸던 자리 — codex 재현, 일반/
+// 에이전트 탭 둘 다). Avatar의 label이 빈 문자열로 새면 아이콘 tier에서 aria-label=""가
+// 되는데, 되돌리면(?.trim() || fallback을 다시 ?? fallback으로) 이 두 테스트가 정확히
+// 그 결함을 재현해야 한다.
+describe('ChatListView — 참가자 name="" 폴백(story #3791, 카디르 재현)', () => {
+  it('일반(DM) 탭 — name=""이면 아바타 aria-label이 "DM"으로 뜬다(빈 문자열 아님)', async () => {
+    stubFetchWithConversations([{
+      id: 'conv-dm-empty-1', type: 'dm', title: null,
+      latest_message: null, updated_at: '2026-08-29T00:00:00Z', unread_count: 0,
+      participants: [
+        { member_id: 'me-1', name: '나', avatar_url: null, type: 'human', resolved: true },
+        { member_id: 'them-empty-1', name: '', avatar_url: null, type: 'human', resolved: true },
+      ],
+    }]);
+    await mount();
+    const avatarSpan = container.querySelector('span[aria-label]');
+    expect(avatarSpan).not.toBeNull();
+    expect(avatarSpan?.getAttribute('aria-label')).toBe('DM');
+  });
+
+  it('에이전트 탭 — name=""이면 아바타 aria-label이 "에이전트"로 뜬다(빈 문자열 아님)', async () => {
+    useDashboardContextMock.mockReturnValue({ role: 'admin' });
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/conversations/recent-outside-project')) {
+        return { ok: true, json: async () => ({ data: [] }) };
+      }
+      if (url.includes('include_agent_conversations=true')) {
+        return {
+          ok: true,
+          json: async () => ({
+            data: [{
+              id: 'conv-agent-dm-empty-1', type: 'dm', title: null,
+              latest_message: null, updated_at: '2026-08-23T00:00:00Z', unread_count: 0,
+              participants: [
+                { member_id: 'me-1', name: '나', avatar_url: null, type: 'human', resolved: true },
+                { member_id: 'agent-empty-1', name: '', avatar_url: null, type: 'agent', resolved: true },
+              ],
+            }],
+            total: 1,
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({ data: [], total: 0 }) };
+    }));
+    await mount();
+
+    const agentTab = [...container.querySelectorAll('[role="tab"]')].find((el) => el.textContent?.includes('에이전트'));
+    expect(agentTab).not.toBeUndefined();
+    await act(async () => { agentTab!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    const avatarSpan = container.querySelector('span[aria-label]');
+    expect(avatarSpan).not.toBeNull();
+    expect(avatarSpan?.getAttribute('aria-label')).toBe('에이전트');
+  });
+});
+
+// story #3621(유나 CHANGES, 2026-09-07) — chat-view.tsx·chat-list-view.tsx 둘 다 같은
+// ConnectionLostBanner를 쓴다(단일화, 문구 갈라짐 방지). {connected:false, polling:true}를
+// 직접 모킹해 실제로 그 배너가 서는지 확인한다 — 이전엔 두 뷰 테스트가 전부 polling:false만
+// 모킹해 어느 쪽도 이 렌더 경로를 실제로 확인한 적이 없었다.
+describe('ChatListView — 끊김+폴링 배너(story #3621, useChatSse mock 오버라이드)', () => {
+  it('connected=false·polling=true면 "자동 새로고침 중" 배너가 선다', async () => {
+    vi.useFakeTimers();
+    try {
+      useChatSseMock.mockReturnValue({ connected: false, polling: true });
+      stubFetchWithConversations([]);
+      await act(async () => { root.render(wrap(<ChatListView projectId="proj-current" currentTeamMemberId="me-1" />)); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(2_000); }); // showDisconnectedBanner 2s 지연
+      const banner = container.querySelector('[data-testid="connection-lost-banner"]');
+      expect(banner).not.toBeNull();
+      expect(container.querySelector('[data-testid="connection-lost-banner-text"]')?.textContent)
+        .toBe(koMessages.chats.connectionLostPolling);
+    } finally {
+      vi.useRealTimers();
+      useChatSseMock.mockReturnValue({ connected: true, polling: false });
+    }
+  });
+
+  it('connected=false·polling=false(아직 threshold 전)면 "연결이 끊겼어요"만 뜨고, 새로고침 버튼은 여전히 있다', async () => {
+    vi.useFakeTimers();
+    try {
+      useChatSseMock.mockReturnValue({ connected: false, polling: false });
+      stubFetchWithConversations([]);
+      await act(async () => { root.render(wrap(<ChatListView projectId="proj-current" currentTeamMemberId="me-1" />)); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(2_000); });
+      expect(container.querySelector('[data-testid="connection-lost-banner-text"]')?.textContent)
+        .toBe(koMessages.chats.connectionLost);
+      const refreshButton = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.chats.refreshNow));
+      expect(refreshButton).not.toBeUndefined(); // 배너(2s)·폴링(10s) 사이에도 조치 수단이 있다.
+    } finally {
+      vi.useRealTimers();
+      useChatSseMock.mockReturnValue({ connected: true, polling: false });
+    }
+  });
+
+  it('connected=true면 배너 자체가 안 뜬다', async () => {
+    vi.useFakeTimers();
+    try {
+      useChatSseMock.mockReturnValue({ connected: true, polling: false });
+      stubFetchWithConversations([]);
+      await act(async () => { root.render(wrap(<ChatListView projectId="proj-current" currentTeamMemberId="me-1" />)); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(2_000); });
+      expect(container.querySelector('[data-testid="connection-lost-banner"]')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+      useChatSseMock.mockReturnValue({ connected: true, polling: false });
+    }
+  });
+});
+
+// story #3788(B-③ 후속, 페드루 그라운딩 2026-09-10 10:43Z) — 「내 대화」 0건 + 에이전트 대화
+// N건 + 사용자가 「에이전트」 탭을 보고 있을 때, ChatRailContext로 끌어올리는 값은 my 탭이
+// 아니라 **지금 보이는(에이전트) 탭**의 것이어야 한다. 이게 안 되면 왼쪽엔 대화가 줄줄이
+// 있는데 우측 outlet(chats/page.tsx)이 「대화가 없습니다」를 말하는 모순이 재발한다(카드가
+// 원래 잡던 모순이 탭 하나 옆으로 옮겨 앉는 사례).
+// DOM으로 읽는다(외부 변수 재할당 대신) — data-* 속성이 곧 단언 대상이라 React 훅
+// 불변성 규칙·TS 좁히기 문제 둘 다 안 만난다.
+function RailCapture() {
+  const rail = useChatRailOptional();
+  return (
+    <div
+      data-testid="rail-capture"
+      data-active-list={rail?.activeList ?? ''}
+      data-loading={String(rail?.conversationsLoading ?? '')}
+      data-count={String(rail?.conversationCount ?? '')}
+      data-error={String(rail?.conversationsLoadError ?? '')}
+    />
+  );
+}
+
+function readRailCapture(c: HTMLElement) {
+  const el = c.querySelector('[data-testid="rail-capture"]') as HTMLElement | null;
+  return {
+    activeList: el?.dataset.activeList,
+    loading: el?.dataset.loading,
+    count: el?.dataset.count,
+    error: el?.dataset.error,
+  };
+}
+
+function stubFetchByTab(myItems: unknown[], agentItems: unknown[]) {
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (url.includes('/api/conversations/recent-outside-project')) {
+      return { ok: true, json: async () => ({ data: [] }) };
+    }
+    if (url.includes('/api/conversations?') && url.includes('include_agent_conversations=true')) {
+      return { ok: true, json: async () => ({ data: agentItems, total: agentItems.length }) };
+    }
+    if (url.includes('/api/conversations?')) {
+      return { ok: true, json: async () => ({ data: myItems, total: myItems.length }) };
+    }
+    return { ok: false, status: 404, json: async () => null };
+  }));
+}
+
+const AGENT_ITEM = {
+  id: 'conv-agent-1', type: 'dm', title: '올리베이라와의 대화',
+  latest_message: null, updated_at: '2026-09-10T00:00:00Z', unread_count: 0,
+  participants: [{ member_id: 'agent-1', name: '올리베이라', avatar_url: null, type: 'agent' }],
+};
+
+describe('ChatListView — ChatRailContext 탭 게이트(story #3788 B-③ 후속)', () => {
+  it('⭐「내 대화」 0건 + 에이전트 N건 + 에이전트 탭 활성 → conversationCount는 N(0 아님)', async () => {
+    useDashboardContextMock.mockReturnValue({ role: 'admin' }); // 탭 자체가 admin/owner 전용(677행)
+    stubFetchByTab([], [AGENT_ITEM]);
+    await act(async () => {
+      root.render(wrap(
+        <ChatRailProvider>
+          <RailCapture />
+          <ChatListView projectId="proj-current" currentTeamMemberId="me-1" />
+        </ChatRailProvider>,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    const agentTab = [...container.querySelectorAll('[role="tab"]')].find((el) => el.textContent?.includes('에이전트'));
+    expect(agentTab).not.toBeUndefined();
+    await act(async () => { agentTab!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    const rail = readRailCapture(container);
+    expect(rail.activeList).toBe('agent');
+    expect(rail.loading).toBe('false');
+    expect(rail.count).toBe('1');
+  });
+
+  it('my 탭이 활성일 때는 my 탭 카운트(0)를 민다(에이전트 N건은 안 보이므로 무시)', async () => {
+    stubFetchByTab([], [AGENT_ITEM]);
+    await act(async () => {
+      root.render(wrap(
+        <ChatRailProvider>
+          <RailCapture />
+          <ChatListView projectId="proj-current" currentTeamMemberId="me-1" />
+        </ChatRailProvider>,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    const rail = readRailCapture(container);
+    expect(rail.activeList).toBe('my');
+    expect(rail.count).toBe('0');
+  });
+
+  // 카디르 QA(#4139, 772f755e9 재현) — 세션 中 role이 admin/owner→member로 하향되면(리마운트
+  // 없이 me.role만 갱신) Tabs는 사라지는데 activeList가 'agent'에 남아 안 보이는 탭의 count를
+  // 계속 공급했었다. 뮤테이션 대표: isAdminOrOwner 게이트/리셋 effect 둘 다 지워야 RED.
+  it('⭐admin+에이전트 탭 활성 中 role이 member로 하향(리마운트 없음) → count는 my 것(0)·activeList는 my로 리셋', async () => {
+    useDashboardContextMock.mockReturnValue({ role: 'admin' });
+    stubFetchByTab([], [AGENT_ITEM]);
+    await act(async () => {
+      root.render(wrap(
+        <ChatRailProvider>
+          <RailCapture />
+          <ChatListView projectId="proj-current" currentTeamMemberId="me-1" />
+        </ChatRailProvider>,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    const agentTab = [...container.querySelectorAll('[role="tab"]')].find((el) => el.textContent?.includes('에이전트'));
+    await act(async () => { agentTab!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(readRailCapture(container).activeList).toBe('agent');
+
+    // 리마운트 없이 같은 root에 재렌더 — mock 반환값만 바뀐 채로 다음 렌더가 새 role을 읽는다
+    // (실제로는 me.role SSE/폴 갱신이 만드는 상황, 여기선 mock 스왑으로 흉내).
+    useDashboardContextMock.mockReturnValue({ role: 'member' });
+    await act(async () => {
+      root.render(wrap(
+        <ChatRailProvider>
+          <RailCapture />
+          <ChatListView projectId="proj-current" currentTeamMemberId="me-1" />
+        </ChatRailProvider>,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    const rail = readRailCapture(container);
+    expect(container.querySelectorAll('[role="tab"]')).toHaveLength(0);
+    expect(rail.activeList).toBe('my');
+    expect(rail.count).toBe('0');
+  });
+});
+
+// story #3790(유나 定) — 대화 목록 fetch 실패가 「대화가 없습니다」(0건)로 떨어지지 않는다.
+// 로딩·실패·0건 세 세계를 좌우가 같은 낱말(chats.conversationsLoadFailed)로 말한다.
+function stubFetchWithFailure(which: 'my' | 'agent') {
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (url.includes('/api/conversations/recent-outside-project')) {
+      return { ok: true, json: async () => ({ data: [] }) };
+    }
+    const isAgentUrl = url.includes('/api/conversations?') && url.includes('include_agent_conversations=true');
+    if (url.includes('/api/conversations?')) {
+      if ((which === 'my' && !isAgentUrl) || (which === 'agent' && isAgentUrl)) {
+        return { ok: false, status: 500, json: async () => null };
+      }
+      return { ok: true, json: async () => ({ data: [], total: 0 }) };
+    }
+    return { ok: false, status: 404, json: async () => null };
+  }));
+}
+
+describe('ChatListView — 목록 fetch 실패 축(story #3790)', () => {
+  it('⭐my 탭 fetch 실패 → 레일이 0건(noConversations)이 아니라 실패 문구를 말한다', async () => {
+    stubFetchWithFailure('my');
+    await act(async () => {
+      root.render(wrap(
+        <ChatRailProvider>
+          <RailCapture />
+          <ChatListView projectId="proj-current" currentTeamMemberId="me-1" />
+        </ChatRailProvider>,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    expect(container.textContent).toContain(koMessages.chats.conversationsLoadFailed);
+    expect(container.textContent).not.toContain(koMessages.chats.noConversations);
+    const rail = readRailCapture(container);
+    expect(rail.error).toBe('true');
+    expect(rail.loading).toBe('false');
+  });
+
+  it('agent 탭 fetch 실패(my는 성공) → 에이전트 탭 활성 시 좌우가 모두 실패를 말한다(my N건 무관)', async () => {
+    useDashboardContextMock.mockReturnValue({ role: 'admin' });
+    stubFetchWithFailure('agent');
+    await act(async () => {
+      root.render(wrap(
+        <ChatRailProvider>
+          <RailCapture />
+          <ChatListView projectId="proj-current" currentTeamMemberId="me-1" />
+        </ChatRailProvider>,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    const agentTab = [...container.querySelectorAll('[role="tab"]')].find((el) => el.textContent?.includes('에이전트'));
+    await act(async () => { agentTab!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    expect(container.textContent).toContain(koMessages.chats.conversationsLoadFailed);
+    expect(container.textContent).not.toContain(koMessages.chats.noAgentConversations);
+    const rail = readRailCapture(container);
+    expect(rail.activeList).toBe('agent');
+    expect(rail.error).toBe('true');
+  });
+
+  it('재시도 클릭 → 재조회 中 로딩(0건 아님)을 거쳐 성공하면 실패 문구가 사라진다', async () => {
+    let attempt = 0;
+    // 두 번째(재시도) 응답은 수동으로 붙들어 "아직 응답 전" 창을 결정적으로 관측한다
+    // (마이크로태스크가 act() 한 틱 안에서 다 풀려버리면 로딩 창을 못 잡는 레이스 방지).
+    let resolveRetry: (() => void) | undefined;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/conversations/recent-outside-project')) {
+        return { ok: true, json: async () => ({ data: [] }) };
+      }
+      if (url.includes('/api/conversations?') && !url.includes('include_agent_conversations=true')) {
+        attempt += 1;
+        if (attempt === 1) return { ok: false, status: 500, json: async () => null };
+        await new Promise<void>((resolve) => { resolveRetry = resolve; });
+        return { ok: true, json: async () => ({ data: [], total: 0 }) };
+      }
+      return { ok: false, status: 404, json: async () => null };
+    }));
+    await act(async () => {
+      root.render(wrap(
+        <ChatRailProvider>
+          <RailCapture />
+          <ChatListView projectId="proj-current" currentTeamMemberId="me-1" />
+        </ChatRailProvider>,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain(koMessages.chats.conversationsLoadFailed);
+
+    const retryBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.common.retry);
+    expect(retryBtn).not.toBeUndefined();
+    await act(async () => {
+      retryBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve(); await Promise.resolve();
+    });
+
+    // 재조회가 resolveRetry에서 멈춰 있는 동안 — 로딩(0건도 실패도 아님).
+    expect(resolveRetry).not.toBeUndefined();
+    expect(container.textContent).not.toContain(koMessages.chats.conversationsLoadFailed);
+    expect(container.textContent).not.toContain(koMessages.chats.noConversations);
+
+    await act(async () => { resolveRetry!(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).not.toContain(koMessages.chats.conversationsLoadFailed);
+    expect(container.textContent).toContain(koMessages.chats.noConversations);
+  });
+});
+
+describe('ChatListView — 실패 경로 stale-drop(story #3790 후속, 카디르 QA #4142)', () => {
+  it('⭐project A pending 中 project B로 전환 → B 성공 렌더 뒤 A의 뒤늦은 실패가 B 화면을 안 덮는다', async () => {
+    let resolveAFailure: (() => void) | undefined;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/conversations/recent-outside-project')) {
+        return { ok: true, json: async () => ({ data: [] }) };
+      }
+      if (url.includes('project_id=proj-a') && url.includes('/api/conversations?') && !url.includes('include_agent_conversations=true')) {
+        // A는 응답을 붙들어 뒀다가(아래에서 수동 해소) 실패로 떨어진다.
+        await new Promise<void>((resolve) => { resolveAFailure = resolve; });
+        return { ok: false, status: 500, json: async () => null };
+      }
+      if (url.includes('project_id=proj-b') && url.includes('/api/conversations?') && !url.includes('include_agent_conversations=true')) {
+        return { ok: true, json: async () => ({ data: [], total: 0 }) };
+      }
+      return { ok: false, status: 404, json: async () => null };
+    }));
+
+    await act(async () => {
+      root.render(wrap(
+        <ChatRailProvider>
+          <RailCapture />
+          <ChatListView projectId="proj-a" currentTeamMemberId="me-1" />
+        </ChatRailProvider>,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    // A의 fetch가 아직 resolveAFailure에서 멈춰 있는 채로 — 프로젝트를 B로 전환.
+    expect(resolveAFailure).not.toBeUndefined();
+
+    await act(async () => {
+      root.render(wrap(
+        <ChatRailProvider>
+          <RailCapture />
+          <ChatListView projectId="proj-b" currentTeamMemberId="me-1" />
+        </ChatRailProvider>,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    // B는 빠르게 성공 — 0건 화면이 정상적으로 섰다.
+    expect(container.textContent).toContain(koMessages.chats.noConversations);
+    expect(container.textContent).not.toContain(koMessages.chats.conversationsLoadFailed);
+
+    // 이제야 A의 실패가 뒤늦게 도착 — B 화면을 덮으면 안 된다.
+    await act(async () => { resolveAFailure!(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).not.toContain(koMessages.chats.conversationsLoadFailed);
+    expect(readRailCapture(container).error).toBe('false');
+  });
+});
+
+describe('ChatListView — my 탭 project 전환 즉시 클리어+로딩(story #3790 후속 2, 페드루 그라운딩 12:34Z)', () => {
+  it('⭐project A(0건) → B로 전환 직후(B 응답 前) 우측이 "0건"으로 단정하지 않고 로딩을 말한다', async () => {
+    let resolveB: (() => void) | undefined;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/conversations/recent-outside-project')) {
+        return { ok: true, json: async () => ({ data: [] }) };
+      }
+      if (url.includes('project_id=proj-a') && url.includes('/api/conversations?') && !url.includes('include_agent_conversations=true')) {
+        return { ok: true, json: async () => ({ data: [], total: 0 }) };
+      }
+      if (url.includes('project_id=proj-b') && url.includes('/api/conversations?') && !url.includes('include_agent_conversations=true')) {
+        await new Promise<void>((resolve) => { resolveB = resolve; });
+        return { ok: true, json: async () => ({ data: [{ id: 'b1', type: 'dm', title: 'B 대화', latest_message: null, updated_at: '2026-09-10T00:00:00Z' }], total: 1 }) };
+      }
+      return { ok: false, status: 404, json: async () => null };
+    }));
+
+    await act(async () => {
+      root.render(wrap(
+        <ChatRailProvider>
+          <RailCapture />
+          <ChatListView projectId="proj-a" currentTeamMemberId="me-1" />
+        </ChatRailProvider>,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(readRailCapture(container).loading).toBe('false');
+    expect(readRailCapture(container).count).toBe('0');
+
+    await act(async () => {
+      root.render(wrap(
+        <ChatRailProvider>
+          <RailCapture />
+          <ChatListView projectId="proj-b" currentTeamMemberId="me-1" />
+        </ChatRailProvider>,
+      ));
+    });
+    // B의 fetch가 아직 resolveB에서 멈춰 있는 채로 — 우측은 A의 0건을 그대로 우기면 안 된다.
+    expect(resolveB).not.toBeUndefined();
+    const midSwitch = readRailCapture(container);
+    expect(midSwitch.loading).toBe('true');
+
+    await act(async () => { resolveB!(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    const settled = readRailCapture(container);
+    expect(settled.loading).toBe('false');
+    expect(settled.count).toBe('1');
+  });
+});
+
+describe('ChatListView — my 탭 finally의 stale-drop(story #3790 후속 2, 페드루 그라운딩)', () => {
+  it('⭐A pending 中 B로 전환(B도 pending) → A가 뒤늦게 성공해도 B의 로딩을 안 끈다', async () => {
+    let resolveA: (() => void) | undefined;
+    let resolveB: (() => void) | undefined;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/conversations/recent-outside-project')) {
+        return { ok: true, json: async () => ({ data: [] }) };
+      }
+      if (url.includes('project_id=proj-a') && url.includes('/api/conversations?') && !url.includes('include_agent_conversations=true')) {
+        await new Promise<void>((resolve) => { resolveA = resolve; });
+        return { ok: true, json: async () => ({ data: [{ id: 'a1', type: 'dm', title: 'A 대화', latest_message: null, updated_at: '2026-09-10T00:00:00Z' }], total: 1 }) };
+      }
+      if (url.includes('project_id=proj-b') && url.includes('/api/conversations?') && !url.includes('include_agent_conversations=true')) {
+        await new Promise<void>((resolve) => { resolveB = resolve; });
+        return { ok: true, json: async () => ({ data: [], total: 0 }) };
+      }
+      return { ok: false, status: 404, json: async () => null };
+    }));
+
+    await act(async () => {
+      root.render(wrap(
+        <ChatRailProvider>
+          <RailCapture />
+          <ChatListView projectId="proj-a" currentTeamMemberId="me-1" />
+        </ChatRailProvider>,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(resolveA).not.toBeUndefined();
+
+    await act(async () => {
+      root.render(wrap(
+        <ChatRailProvider>
+          <RailCapture />
+          <ChatListView projectId="proj-b" currentTeamMemberId="me-1" />
+        </ChatRailProvider>,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(resolveB).not.toBeUndefined();
+    expect(readRailCapture(container).loading).toBe('true');
+
+    // A가 뒤늦게 성공 — B는 아직 pending. A의 finally가 loading을 꺼버리면 안 된다.
+    await act(async () => { resolveA!(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(readRailCapture(container).loading).toBe('true');
+
+    await act(async () => { resolveB!(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(readRailCapture(container).loading).toBe('false');
+    expect(readRailCapture(container).count).toBe('0');
+  });
+});
+
+// story #3831(UX-v3·FE 3·오늘, 페드루 PO 確定(c) 2026-09-13 14:04Z) — 「오늘」의 지시
+// 한 줄이 `/chats?compose=<text>`로 도착했을 때, 이 컴포넌트(유일한 리스트 마운트 지점)가
+// 기존 두 경로로만 위임한다(새 API 0·수신자 발명 0): 대화가 있으면 가장 최근 대화로
+// compose를 그대로 실어 보내고(router.replace), 0건이면 기존 "새 대화" 모달을 연다.
+describe('ChatListView — story #3831 지시 한 줄 compose 경유(새 API 0·수신자 발명 0)', () => {
+  it('대화가 있으면 updated_at 최신 1건으로 compose를 실어 보낸다', async () => {
+    searchParamsValueRef.current = 'compose=' + encodeURIComponent('유튜브 챕터 3개로 나눠줘');
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/conversations/recent-outside-project')) return { ok: true, json: async () => ({ data: [] }) };
+      if (url.includes('/api/conversations?')) {
+        return {
+          ok: true,
+          json: async () => ({
+            data: [
+              { id: 'conv-old', type: 'dm', title: null, latest_message: null, updated_at: '2026-09-01T00:00:00Z', unread_count: 0 },
+              { id: 'conv-recent', type: 'dm', title: null, latest_message: null, updated_at: '2026-09-13T00:00:00Z', unread_count: 0 },
+            ],
+            total: 2,
+          }),
+        };
+      }
+      return { ok: false, status: 404, json: async () => null };
+    }));
+    await mount();
+    expect(replaceMock).toHaveBeenCalledWith('/chats/conv-recent?compose=' + encodeURIComponent('유튜브 챕터 3개로 나눠줘'));
+  });
+
+  it('compose 없이 마운트되면 리다이렉트가 전혀 안 일어난다(회귀 0)', async () => {
+    stubFetch([]);
+    await mount();
+    expect(replaceMock).not.toHaveBeenCalled();
+  });
+
+  it('대화가 0건이면 리다이렉트 대신 새 대화 모달을 연다(onOpenChange 호출)', async () => {
+    searchParamsValueRef.current = 'compose=' + encodeURIComponent('유튜브 챕터 3개로 나눠줘');
+    stubFetch([]);
+    const onOpenChange = vi.fn();
+    await act(async () => {
+      root.render(wrap(<ChatListView projectId="proj-current" currentTeamMemberId="me-1" open={false} onOpenChange={onOpenChange} />));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(onOpenChange).toHaveBeenCalledWith(true);
+    expect(replaceMock).not.toHaveBeenCalled();
   });
 });

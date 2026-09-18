@@ -78,17 +78,19 @@ async def test_anchor_resolve_member_human(monkeypatch):
     member.org_role = "admin"
     member.avatar_url = "https://cdn.test/human.png"
     user = MagicMock()
+    # story #3755 — name은 display_name에서(email 폴백 0).
+    user.display_name = "휴먼 테스트"
     user.email = "human@test.com"
 
     session = AsyncMock()
-    # Member(human) → User(email)
+    # Member(human) → User(display_name)
     session.execute = AsyncMock(side_effect=[_result(scalar=member), _result(scalar=user)])
 
     resolved = await mr.resolve_member(_auth(user_id), org_id, session, project_id=None)
     assert resolved.type == "human"
     assert resolved.user_id == user_id
     assert resolved.role == "admin"   # org_role
-    assert resolved.name == "human@test.com"
+    assert resolved.name == "휴먼 테스트"
     assert resolved.avatar_url == "https://cdn.test/human.png"  # story #2901 — Member 소싱
 
 
@@ -127,14 +129,14 @@ async def test_anchor_lookup_direct_member(monkeypatch):
 
     session = AsyncMock()
     # Member.in_(ids) → [m]
-    # Member.in_ → [m]  /  User email batch(M1) → [(user_id, email)]
-    session.execute = AsyncMock(side_effect=[_result(all_=[m]), _result(rows=[(m.user_id, "h@test.com")])])
+    # Member.in_ → [m]  /  User display_name batch(M1, story #3755 — email 폴백 0) → [(user_id, display_name)]
+    session.execute = AsyncMock(side_effect=[_result(all_=[m]), _result(rows=[(m.user_id, "에이치")])])
 
     out = await mr.lookup_members_by_ids({mid}, session)
     assert out[mid].id == mid
     assert out[mid].type == "human"
     assert out[mid].role == "member"
-    assert out[mid].name == "h@test.com"  # M1: 휴먼 name=email
+    assert out[mid].name == "에이치"  # M1: 휴먼 name=display_name(story #3755)
     assert out[mid].avatar_url == "https://cdn.test/h.png"  # story #2901
 
 

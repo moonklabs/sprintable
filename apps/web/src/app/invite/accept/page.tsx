@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation';
+import { getTranslations } from 'next-intl/server';
 import { getServerSession } from '@/lib/db/server';
 import { InviteAcceptClient } from './invite-accept-client';
 
@@ -26,15 +27,20 @@ export default async function InviteAcceptPage({ searchParams }: Props) {
   }).catch(() => null);
 
   if (!inviteRes?.ok) {
+    // story #3923 — 이 페이지는 next-intl이 항상 배선돼 있었다(root layout 전역
+    // NextIntlClientProvider). Server Component라 useTranslations가 아니라
+    // next-intl/server의 getTranslations를 쓴다(이 코드베이스 첫 사용례 —
+    // useTranslations 배선 패턴의 서버측 등가물).
+    const t = await getTranslations('invite');
     return (
       <div className="flex min-h-screen items-center justify-center">
         <div className="max-w-sm text-center space-y-3">
-          <h1 className="text-xl font-semibold text-foreground">초대가 유효하지 않습니다</h1>
-          <p className="text-sm text-muted-foreground">만료됐거나 이미 사용된 초대 링크입니다.</p>
+          <h1 className="text-xl font-semibold text-foreground">{t('linkInvalidTitle')}</h1>
+          <p className="text-sm text-muted-foreground">{t('linkInvalidBody')}</p>
           {/* story #3179(S3c) — /dashboard 폐합, 홈=chat 재조준. */}
           {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- story a539c649 S2 오탐, invite-accept-client.tsx 주석 참고 */}
           <a href="/chats" className="inline-block rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90">
-            채팅으로 이동
+            {t('goToChatButton')}
           </a>
         </div>
       </div>

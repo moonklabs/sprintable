@@ -46,6 +46,7 @@ export function GoalOutcomeDialog({
   onCancel: () => void;
 }) {
   const t = useTranslations('goals');
+  const tc = useTranslations('common');
   const [step, setStep] = useState<Step>('choice');
   const [actual, setActual] = useState('');
   const [reason, setReason] = useState('');
@@ -148,7 +149,7 @@ export function GoalOutcomeDialog({
             <DialogFooter className="mt-auto shrink-0">
               <Button type="button" variant="ghost" disabled={submitting} onClick={() => setStep('choice')}>{t('cancel')}</Button>
               <Button type="submit" disabled={!canSubmitHitMiss} className="bg-brand text-brand-foreground hover:bg-brand/90">
-                {submitting ? t('saving') : t('outcomeSubmit')}
+                {submitting ? tc('saving') : t('outcomeSubmit')}
               </Button>
             </DialogFooter>
           </form>
@@ -174,7 +175,7 @@ export function GoalOutcomeDialog({
             <DialogFooter className="mt-auto shrink-0">
               <Button type="button" variant="ghost" disabled={submitting} onClick={() => setStep('choice')}>{t('cancel')}</Button>
               <Button type="submit" disabled={!canSubmitUnmeasurable} className="bg-brand text-brand-foreground hover:bg-brand/90">
-                {submitting ? t('saving') : t('outcomeSubmit')}
+                {submitting ? tc('saving') : t('outcomeSubmit')}
               </Button>
             </DialogFooter>
           </form>
@@ -187,7 +188,7 @@ export function GoalOutcomeDialog({
             <DialogFooter className="mt-auto shrink-0">
               <Button type="button" variant="ghost" disabled={submitting} onClick={() => setStep('choice')}>{t('cancel')}</Button>
               <Button type="button" disabled={submitting} onClick={() => onSubmit({ skipped: true })}>
-                {submitting ? t('saving') : t('outcomeSkipConfirm')}
+                {submitting ? tc('saving') : t('outcomeSkipConfirm')}
               </Button>
             </DialogFooter>
           </div>

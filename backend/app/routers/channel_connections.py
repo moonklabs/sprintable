@@ -1,0 +1,1915 @@
+"""story #3373(Phase1·마케팅운영, 선생님 확定 2026-09-03) — 채널 연결 서비스 API. 휴먼
+전용(에이전트 키는 목록·시작·콜백·해제 어느 것을 불러도 403 — 에이전트는 토큰 존재조차
+읽지 못한다, AC6). 권한 3단(유나 화면설계 §8⑤, PO 채택):
+  - 목록 열람: member 이상(토큰 필드는 응답 DTO 자체에 없음 — 제외가 아니라 애초에 안 실음)
+  - 연결·해제·재인증: owner
+  - (후속 스토리: 비밀 아닌 설정값 변경은 admin — 이 스토리엔 그런 엔드포인트가 없음)
+"""
+from __future__ import annotations
+
+import logging
+import uuid
+from datetime import datetime, timedelta, timezone
+from typing import Literal
+
+import httpx
+from fastapi import APIRouter, Depends, Header, HTTPException
+from pydantic import BaseModel
+
+from app.core.config import settings
+from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
+from app.dependencies.database import get_db
+from app.services.channel_adapters import can_auto_refresh, get_channel_adapter
+from app.services.channel_app_credentials import (
+    get_channel_app_credentials,
+    resolve_app_credentials,
+    resolve_app_credentials_source,
+    upsert_channel_app_credentials,
+)
+from app.services.channel_connection import (
+    ChannelConnectionNotFoundError,
+    apply_refresh_failure,
+    decrypt_for_use,
+    get_channel_connection,
+    list_channel_connections,
+    replace_channel_connection_credential,
+    revoke_channel_connection,
+    upsert_channel_connection,
+)
+from app.services.channel_oauth_state import (
+    ChannelOAuthStateNotConfigured,
+    generate_pkce_pair,
+    sign_channel_oauth_state,
+    verify_channel_oauth_state,
+)
+from app.services.member_resolver import resolve_member
+from app.services.threads_oauth import ThreadsOAuthError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/api/v2/organizations", tags=["channel-connections"])
+
+
+async def _require_human(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID):
+    """AC6 — 에이전트 키는 이 라우터의 어떤 엔드포인트도 403. resolve_member()가 agent를
+    TeamMember.type="agent"로 정확히 판정(S1의 actor_type fail-closed 원칙과 동일 축)."""
+    resolved = await resolve_member(auth, org_id, db)
+    if resolved.type != "human":
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "CHANNEL_CONNECTION_HUMAN_ONLY",
+                "message": "채널 연결은 휴먼 멤버만 가능합니다(에이전트는 토큰을 읽거나 다룰 수 없습니다).",
+            },
+        )
+    return resolved
+
+
+async def _require_owner(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID):
+    resolved = await _require_human(db, auth, org_id)
+    if resolved.role != "owner":
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "CHANNEL_CONNECTION_OWNER_ONLY", "message": "채널 연결·해제·재인증은 조직 owner만 가능합니다."},
+        )
+    return resolved
+
+
+async def _require_owner_or_admin(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID):
+    """story 5b27b32f(AC2) — 샌드박스 연결 생성은 실 OAuth 연결(_require_owner, owner
+    전용)보다 넓은 owner/admin(channel_posts.py::_require_owner_or_admin·site_posts.py와
+    동형 폭 — 테스트 인프라라 취소·회수와 같은 급으로 취급, 실제 외부 계정 자격을
+    다루는 실채널 연결보다는 덜 민감하다는 판단)."""
+    resolved = await _require_human(db, auth, org_id)
+    if resolved.role not in ("owner", "admin"):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "CHANNEL_CONNECTION_OWNER_OR_ADMIN_ONLY",
+                "message": "샌드박스 채널 연결은 조직 owner 또는 admin만 가능합니다.",
+            },
+        )
+    return resolved
+
+
+def _redirect_uri(org_id: uuid.UUID, channel: str) -> str:
+    from app.core.config import settings
+    return f"{settings.app_url}/api/oauth-channel/callback/{channel}"
+
+
+class ChannelConnectionResponse(BaseModel):
+    id: uuid.UUID
+    channel: str
+    account_id: str
+    account_label: str | None
+    credential_kind: str
+    status: str
+    token_expires_at: str | None
+    last_refreshed_at: str | None
+    last_error: str | None
+    # story #3603(Phase2·BE·소형·결함, 페드루 PO 確定 2026-09-07) — additive, last_error와
+    # 짝(원문 message는 last_error에 그대로, 이 둘은 "어느 code·언제"만 별도로).
+    last_error_code: str | None = None
+    last_error_at: str | None = None
+    can_auto_refresh: bool
+    connected_by: uuid.UUID | None
+    created_at: str
+    updated_at: str
+    # story #3394(AC4, S2c BE 선행) — 어댑터가 선언한 글자 수 한도(Threads=500). FE가
+    # 하드코딩하면 다른 채널이 붙을 때 값이 틀리는 재발(담롱군 §4-6)이 난다 — 선언 안 한
+    # 채널이면 null("한도 미확認", 지어내지 않는다).
+    max_text_length: int | None = None
+    # story #3419(AC4) — 「이 연결로 지금 발행 글을 회수할 수 있나」의 최종 판정값(어댑터
+    # `supports_unpublish` ∧ 연결 `scopes`에 필요 스코프 포함, PO 확定 산식 그대로). FE가
+    # 이 값 하나로 버튼을 그리거나 안 그린다 — scopes 원본을 노출해 FE가 다시 판정하게
+    # 만들지 않는다(판정 로직 단일 지점).
+    can_unpublish: bool = False
+    # 페드루 PO 리뷰(2026-09-04, PR#3774) — can_unpublish=false 하나로는 FE가 유나
+    # §17-11의 두 문구(「미지원」vs「재연결하면 회수 가능」)를 못 가른다. 어느 쪽인지
+    # 명시하는 판정값 — can_unpublish=true면 항상 null(막힌 이유가 없다).
+    # 'unsupported' = 어댑터가 이 채널에 회수 자체를 선언 안 함(재연결해도 안 풀림,
+    # §17-11 문구 대상 아님 — 그 절 자체가 "스코프 부족"만 다룬다) ·
+    # 'scope_insufficient' = 어댑터는 지원하는데 이 연결에 필요 스코프가 없음(재연결
+    # 하면 풀림 — §17-11 owner/member 문구가 이 값 전용).
+    unpublish_blocked_reason: str | None = None
+    # story 620beefc(AC2) — 어댑터 이미지 규격 선언 노출(§13 규격 문구 3요소 중 "무엇이·
+    # 얼마까지" 축 — FE가 하드코딩하지 않고 이 값으로 문구를 조립한다. max_text_length와
+    # 동형 관례: 이미지 미지원 채널(image_max_count=0)이면 image_max_count=0으로 그대로
+    # 노출(null이 아니다 — "0건 허용"과 "모른다"는 다르다, 이 필드는 항상 선언돼 있다).
+    image_formats: list[str] = []
+    image_max_bytes: int = 0
+    image_aspect_max: float = 0.0
+    # story #3530(BE #3872 조각①이 어댑터·검증엔 이미 선언했으나 이 응답엔 안 실었던
+    # 갭 — image_aspect_max와 동형 관례) — 0.0=하한 미선언(§17-16 "0이면 0으로 적는다"의
+    # 반대 방향: FE는 이 값이 0이면 하한 축 자체를 안 그린다, 1:∞로 뒤집지 않는다).
+    image_aspect_min: float = 0.0
+    image_width_min: int = 0
+    image_width_max: int = 0
+    image_color_space: str = ""
+    image_max_count: int = 0
+    # story #3536(AC1, PO 確定 2026-09-06) — image_max_count>0("지원")과는 다른 축:
+    # "필수"(이미지 0장이면 발행 자체가 provider에서 거부됨, 예: Instagram). FE가
+    # 「올리기 전에」 안내를 만들 수 있게 노출(max_text_length·image_max_count와 동형
+    # 관례 — 상수 하드코딩 X).
+    image_required: bool = False
+    # story #3559(Phase2·BE·소형, 페드루 PO 確定 2026-09-06) — 어댑터가 이미 선언한
+    # 영상(릴스) 규격(story #3554)을 image_* 6종과 동형 관례로 노출(additive). 미지원
+    # 채널(어댑터 None 또는 video_max_bytes=0)은 0/0.0/[](§17-16 "0이면 0으로 적는다"
+    # 그대로 — image_*와 다른 새 관례를 만들지 않는다).
+    video_max_bytes: int = 0
+    video_max_seconds: float = 0.0
+    video_min_seconds: float = 0.0
+    video_aspect_target: float = 0.0
+    video_aspect_tolerance: float = 0.0
+    video_codecs: list[str] = []
+    # story #3808(Phase3·3-3 PR5b-2, 페드루 PO 確定 2026-09-12) — 스레드(연속 게시)
+    # 이어쓰기 세그먼트 상한(image_max_count와 동형 관례 — 미선언 채널은 0="이 채널은
+    # 스레드 이어쓰기 미지원", FE가 이 값으로 편집기의 「스레드 이어쓰기」 목록 UI
+    # 노출 여부를 판단한다, 채널 이름 하드코딩 목록 금지).
+    thread_max_segments: int = 0
+    # story #3815(Phase3·3-5 PR3, 미르코 PR4 그라운딩 갭 → 페드루 PO 계약 확定
+    # 2026-09-12) — image_required와 동형 관례(영상판, 이미 어댑터엔 있었으나
+    # 이 응답엔 안 실렸던 갭). 미선언 채널(어댑터 None 포함)은 False.
+    video_required: bool = False
+    # 이 채널의 발행 편집기가 channel_payload(title/tags/categoryId/
+    # privacyStatus) 4필드를 요구하는가 — 채널 이름 하드코딩 금지 관례
+    # (thread_max_segments·image_required와 동형): FE가 "youtube"/"youtube_
+    # sandbox" 문자열을 직접 비교하지 않고 이 플래그로 편집기 폼 분기.
+    # story #3815(Phase3·3-5 PR3 근본 처방, 페드루 PO 決定 2026-09-12 16:51Z) —
+    # 한동안 이 값이 `video_required`의 대리 계산이었다(두 번째 video_required
+    # 채널이 오면 거짓이 되는 자리로 지목됨) — 이제 어댑터의 자기 필드
+    # (ChannelAdapterConfig.youtube_metadata_required)를 그대로 읽는다.
+    youtube_metadata_required: bool = False
+    # API 감사 미완 강제 비공개(`settings.youtube_api_audit_incomplete`, 페드루
+    # PO 決定②) — 플랫폼 전체 값이라 모든 youtube/youtube_sandbox 연결이 항상
+    # 같은 값을 본다(연결별 상태 아님, ChannelConnection.status 4값과 무관).
+    # story #3815(Phase3·3-5 PR3 근본 처방, 페드루 PO 決定 2026-09-12 16:51Z) —
+    # 이 축도 `video_required` 대리가 아니라 어댑터의 자기 필드
+    # (ChannelAdapterConfig.privacy_lockable)와 조합한다 — privacy_lockable=
+    # False인 채널은 이 축 자체가 없어 항상 False.
+    privacy_locked: bool = False
+    # story #3492 — 붙여넣기(pasted_secret) 재방문 표시(§2 규격 3, app_id_suffix와
+    # 동형). oauth 채널은 항상 null(secret_hint 자체를 안 씀).
+    secret_hint: str | None = None
+    # story #3547(페드루 PO 確定 2026-09-06) — 콜백 응답이 "연결 생성"과 "페이지 선택
+    # 대기"(PendingSelectionResponse) 둘 중 하나일 수 있어(Facebook Page만 해당) FE가
+    # 판별자로 가른다. additive 기본값이라 기존 threads/instagram 응답·소비자는 무변.
+    kind: Literal["connected"] = "connected"
+    # story #3650(PO Test Org 실측 2026-09-07) — additive. authorize state가 실은
+    # target_connection_id가 이 콜백이 실제로 갱신한 행(id)과 다르면 채워진다(다른
+    # 계정을 골랐다는 뜻 — 갱신 자체은 사실대로 진행, 화면이 어느 행이 실제로
+    # 갱신됐는지 침묵하지 않게 하는 신호일 뿐). 일치·state 없음(신규 연결)이면 null.
+    reconnect_mismatch_target_id: uuid.UUID | None = None
+    # story #3813(Phase3·3-4 PR5-b, 페드루 PO 確定 2026-09-12) — 실 stibee 발행
+    # (`POST /emails`)이 요구하는 발신자 정보. 비밀값이 아니라(공개 발신 주소·표시명)
+    # secret_hint류 마스킹 대상이 아니다 — 원문 그대로 노출. stibee 외 채널은 항상
+    # null(provider_config 자체를 안 씀).
+    sender_email: str | None = None
+    sender_name: str | None = None
+
+
+def _to_response(row, *, reconnect_mismatch_target_id: uuid.UUID | None = None) -> ChannelConnectionResponse:
+    adapter = get_channel_adapter(row.channel)
+    max_text_length = adapter.max_text_length if adapter is not None and adapter.max_text_length > 0 else None
+    supports_unpublish = adapter is not None and adapter.supports_unpublish
+    # story #3419(유나 실측·페드루 지적 2026-09-10) — truthy 가드 누락 결함. hosted_site·
+    # wordpress·webhook(channel_adapters.py:397·424·439)은 「회수 지원·요구 스코프
+    # 비움」을 선언한다(supports_unpublish=True·unpublish_required_scope=None) — 그런데
+    # `None in scopes`는 scopes에 실제로 None이 들어있지 않은 한 항상 False라 이 세
+    # 채널이 전부 has_required_scope=False(→can_unpublish=False·scope_insufficient)로
+    # 나갔다. 회수 구현은 실재(site_posts.py:1187 _call_blog_module_unpublish)라
+    # 「되는 것을 권한 없음이라 단정」한 거짓 값이고, scope_insufficient의 뜻(재연결하면
+    # 풀림)이 요구 스코프 자체가 None이라 영영 안 풀리는 모순까지 낳는다. 서비스 층
+    # `channel_posts.py::unpublish_channel_post`(1832)가 이미 쓰는 truthy 가드(`if
+    # adapter.unpublish_required_scope and … not in`)와 같은 모양으로 맞춘다 — 요구
+    # 스코프가 아예 없으면 스코프 검사 자체를 통과시킨다.
+    has_required_scope = bool(
+        supports_unpublish
+        and (
+            not adapter.unpublish_required_scope
+            or adapter.unpublish_required_scope in (row.scopes or [])
+        )
+    )
+    can_unpublish = supports_unpublish and has_required_scope
+    if can_unpublish:
+        unpublish_blocked_reason = None
+    elif not supports_unpublish:
+        unpublish_blocked_reason = "unsupported"
+    else:
+        unpublish_blocked_reason = "scope_insufficient"
+    return ChannelConnectionResponse(
+        id=row.id, channel=row.channel, account_id=row.account_id, account_label=row.account_label,
+        credential_kind=row.credential_kind, status=row.status,
+        token_expires_at=row.token_expires_at.isoformat() if row.token_expires_at else None,
+        last_refreshed_at=row.last_refreshed_at.isoformat() if row.last_refreshed_at else None,
+        last_error=row.last_error,
+        last_error_code=row.last_error_code,
+        last_error_at=row.last_error_at.isoformat() if row.last_error_at else None,
+        can_auto_refresh=can_auto_refresh(row.refresh_mode),
+        connected_by=row.connected_by, created_at=row.created_at.isoformat(), updated_at=row.updated_at.isoformat(),
+        unpublish_blocked_reason=unpublish_blocked_reason,
+        max_text_length=max_text_length, can_unpublish=can_unpublish,
+        image_formats=list(adapter.image_formats) if adapter is not None else [],
+        image_max_bytes=adapter.image_max_bytes if adapter is not None else 0,
+        image_aspect_max=adapter.image_aspect_max if adapter is not None else 0.0,
+        image_aspect_min=adapter.image_aspect_min if adapter is not None else 0.0,
+        image_width_min=adapter.image_width_min if adapter is not None else 0,
+        image_width_max=adapter.image_width_max if adapter is not None else 0,
+        image_color_space=adapter.image_color_space if adapter is not None else "",
+        image_max_count=adapter.image_max_count if adapter is not None else 0,
+        image_required=adapter.image_required if adapter is not None else False,
+        video_max_bytes=adapter.video_max_bytes if adapter is not None else 0,
+        video_max_seconds=adapter.video_max_seconds if adapter is not None else 0.0,
+        video_min_seconds=adapter.video_min_seconds if adapter is not None else 0.0,
+        video_aspect_target=adapter.video_aspect_target if adapter is not None else 0.0,
+        video_aspect_tolerance=adapter.video_aspect_tolerance if adapter is not None else 0.0,
+        video_codecs=list(adapter.video_codecs) if adapter is not None else [],
+        thread_max_segments=adapter.thread_max_segments if adapter is not None else 0,
+        video_required=adapter.video_required if adapter is not None else False,
+        # story #3815(PR3 근본 처방, 페드루 PO 決定 2026-09-12 16:51Z) — 어댑터의
+        # 자기 필드를 그대로 읽는다(video_required 대리 계산 걷음 — 그 계산은
+        # 두 번째 video_required 채널이 오면 거짓이 되는 자리였다).
+        youtube_metadata_required=adapter.youtube_metadata_required if adapter is not None else False,
+        privacy_locked=bool(
+            adapter is not None and adapter.privacy_lockable and settings.youtube_api_audit_incomplete
+        ),
+        secret_hint=row.secret_hint,
+        reconnect_mismatch_target_id=reconnect_mismatch_target_id,
+        sender_email=(row.provider_config or {}).get("sender_email"),
+        sender_name=(row.provider_config or {}).get("sender_name"),
+    )
+
+
+class AuthorizeRequest(BaseModel):
+    # story #3650(PO Test Org 실측 2026-09-07) — 「다시 연결」 대상 행을 authorize
+    # 단계에서 state에 실어 콜백까지 왕복시킨다. 생략(신규 연결)이면 기존 동작 그대로.
+    target_connection_id: uuid.UUID | None = None
+
+
+class AuthorizeResponse(BaseModel):
+    url: str
+    state: str
+
+
+class CallbackRequest(BaseModel):
+    code: str
+    state: str
+
+
+class PendingSelectionCandidate(BaseModel):
+    page_id: str
+    name: str
+
+
+class PendingSelectionResponse(BaseModel):
+    """story #3547(BE 계약, 페드루 PO 確定 2026-09-06) — Facebook Page 콜백이 페이지
+    2개 이상을 봤을 때만 나온다(0개=실패·1개=즉시 ChannelConnectionResponse).
+    `kind` 판별자로 FE가 모양 추측 없이 분기한다."""
+    kind: Literal["pending_selection"] = "pending_selection"
+    pending_id: uuid.UUID
+    candidates: list[PendingSelectionCandidate]
+    expires_at: str
+
+
+class FacebookSelectRequest(BaseModel):
+    pending_id: uuid.UUID
+    page_id: str
+
+
+class AdAccountCandidate(BaseModel):
+    """story #3806 — `PendingSelectionCandidate`(page_id/name)와 같은 계약 형이되
+    필드명이 계정 개념에 맞다(잘못된 이름 재사용 금지 — 광고 계정을 "페이지"로
+    부르면 FE·다음 사람 둘 다 헷갈린다). `account_status`/`disable_reason`은 Meta
+    원값 그대로(정규화 0 — meta_ads_oauth.py::list_ad_accounts 계약과 동일)."""
+    account_id: str
+    name: str
+    account_status: int | None = None
+    disable_reason: int | None = None
+
+
+class AdAccountPendingSelectionResponse(BaseModel):
+    """story #3806 — `PendingSelectionResponse`와 동형(카드 §5 「계정 2개+」 경로).
+    `kind` 판별자 값도 같은 문자열("pending_selection")로 둬 FE가 기존 facebook
+    선택 대기 처리 로직을 재사용할 수 있게(모양은 candidates 필드 타입만 다름)."""
+    kind: Literal["pending_selection"] = "pending_selection"
+    pending_id: uuid.UUID
+    candidates: list[AdAccountCandidate]
+    expires_at: str
+
+
+class MetaAdsSelectRequest(BaseModel):
+    pending_id: uuid.UUID
+    account_id: str
+
+
+class TestConnectionResponse(BaseModel):
+    ok: bool
+    account: dict | None = None
+    error: str | None = None
+
+
+class YouTubeUsageResponse(BaseModel):
+    """story #3815(Phase3·3-5 PR3, 미르코 PR4 FE 그라운딩 갭 → 페드루 PO 계약 확定
+    2026-09-12) — 연결 카드 「오늘 사용량 {used}/{limit} · 플랫폼 공유」 줄의 BE 계약.
+    `scope="platform"`이 이 값의 성격을 명시한다 — connection_id는 인가(그 채널에
+    접근 권한이 있는지)에만 쓰이고, 값 자체는 org 무관(플랫폼 전체 공유 카운터,
+    `youtube_quota.py`가 이미 그렇게 계산). evidence를 새로 쓰지 않는 순수 읽기
+    (youtube_quota.py::get_platform_youtube_quota_spent_units 재사용)."""
+    used_units: int
+    limit_units: int
+    remaining_units: int
+    reset_at: str
+    scope: Literal["platform"] = "platform"
+
+
+class AppCredentialsRequest(BaseModel):
+    app_id: str
+    app_secret: str
+
+
+class AppCredentialsPutResponse(BaseModel):
+    """PUT 응답 — secret은 절대 안 실림(페드루 PO 2026-09-03 08:29Z). app_id는 owner가 방금
+    직접 입력한 값을 그대로 되돌려줄 뿐이라 비밀이 아니다(GET과 달리 끝4자리로 자르지 않음)."""
+    configured: bool
+    app_id: str
+
+
+class AppCredentialsStatusResponse(BaseModel):
+    """GET 응답 — app_id는 끝 4자리만(페드루 PO 지시).
+
+    `effective_source`(페드루 PO 2026-09-03 11:19Z, 유나 화면설계 실측) — resolve_app_
+    credentials()의 3단 해석 결과 그대로("org"|"platform"|"none"). `configured`(=조직이
+    직접 등록했나)와는 다른 축 — configured=false라도 effective_source="platform"이면
+    화면은 「공용 앱으로 연결 가능」을 보여줄 수 있고, "none"이면 authorize가 409로 막힌다는
+    뜻이라 그 사실을 미리 알려야 한다."""
+    configured: bool
+    app_id_suffix: str | None = None
+    updated_by: uuid.UUID | None = None
+    updated_at: str | None = None
+    effective_source: str = "none"
+
+
+def _app_id_suffix(app_id: str) -> str:
+    return app_id[-4:] if len(app_id) >= 4 else app_id
+
+
+_FACEBOOK_OAUTH_MODULE_PATHS = {
+    "facebook": "app.services.facebook_oauth",
+    "facebook_sandbox": "app.services.facebook_sandbox_oauth",
+}
+
+
+def _facebook_oauth_module(channel: str):
+    """story #3547 — `channel_adapters.py::get_publish_client_module`과 동형 dispatch
+    사상(real/sandbox가 정확히 같은 함수 시그니처를 구현, 새 분기 로직 0)."""
+    import importlib
+    return importlib.import_module(_FACEBOOK_OAUTH_MODULE_PATHS[channel])
+
+
+_META_ADS_OAUTH_MODULE_PATHS = {
+    "meta_ads": "app.services.meta_ads_oauth",
+    "ads_sandbox": "app.services.ads_sandbox_oauth",
+}
+
+
+def _meta_ads_oauth_module(channel: str):
+    """story #3806 — `_facebook_oauth_module`과 동형 dispatch(별도 dict — facebook
+    계열 기존 코드 무변경, 새 채널군은 병렬 등재)."""
+    import importlib
+    return importlib.import_module(_META_ADS_OAUTH_MODULE_PATHS[channel])
+
+
+_X_OAUTH_MODULE_PATHS = {
+    "x": "app.services.x_oauth",
+    "x_sandbox": "app.services.x_sandbox_oauth",
+}
+
+
+def _x_oauth_module(channel: str):
+    """story #3808 — `_meta_ads_oauth_module`과 동형 dispatch(별도 dict — 기존
+    채널군 무변경, 새 채널군은 병렬 등재)."""
+    import importlib
+    return importlib.import_module(_X_OAUTH_MODULE_PATHS[channel])
+
+
+_YOUTUBE_OAUTH_MODULE_PATHS = {
+    "youtube": "app.services.youtube_oauth",
+    "youtube_sandbox": "app.services.youtube_sandbox_oauth",
+}
+
+
+def _youtube_oauth_module(channel: str):
+    """story #3815 — `_x_oauth_module`과 동형 dispatch(별도 dict — 기존 채널군
+    무변경, 새 채널군은 병렬 등재)."""
+    import importlib
+    return importlib.import_module(_YOUTUBE_OAUTH_MODULE_PATHS[channel])
+
+
+@router.get("/{org_id}/channel-connections", response_model=list[ChannelConnectionResponse])
+async def list_channel_connections_endpoint(
+    org_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> list[ChannelConnectionResponse]:
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    await _require_human(db, auth, org_id)
+    rows = await list_channel_connections(db, org_id=org_id)
+    return [_to_response(r) for r in rows]
+
+
+class ChannelConnectionAgentVisibleItem(BaseModel):
+    """story #3399(AC8) — 채널 포스트 초안(#3374)을 만들려면 `connection_id`가 필요한데,
+    전체 목록(`GET .../channel-connections`)은 human-only(AC6, 토큰 인접 필드까지 실린다)라
+    에이전트는 지금 그 id를 알 방법이 없다. 이 자리는 **별도 엔드포인트**로 연다(기존
+    human-only 엔드포인트를 열어젖히지 않는다 — pin된 `test_agent_gets_403_on_every_
+    endpoint` 회귀 방지) — 필드는 발행 도구가 채널을 골라 초안을 만드는 데 필요한 최소
+    (id·channel·account_label·status)뿐, 토큰·`token_expires_at`·`last_error`·
+    `connected_by` 등은 절대 안 싣는다."""
+    id: uuid.UUID
+    channel: str
+    account_label: str | None
+    status: str
+
+
+def _to_agent_visible_item(row) -> ChannelConnectionAgentVisibleItem:
+    return ChannelConnectionAgentVisibleItem(
+        id=row.id, channel=row.channel, account_label=row.account_label, status=row.status,
+    )
+
+
+@router.get(
+    "/{org_id}/channel-connections/agent-visible", response_model=list[ChannelConnectionAgentVisibleItem],
+)
+async def list_channel_connections_agent_visible_endpoint(
+    org_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> list[ChannelConnectionAgentVisibleItem]:
+    """story #3399(AC8) — 휴먼·에이전트 둘 다 호출 가능(초안 API·목록 API와 동형 —
+    actor_type 가드 없음, `get_verified_org_id`만으로 org 스코프 충분). 전체 목록
+    엔드포인트(위)와 달리 `_require_human()`을 안 부른다 — 그게 이 엔드포인트의 존재
+    이유다."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    rows = await list_channel_connections(db, org_id=org_id)
+    return [_to_agent_visible_item(r) for r in rows]
+
+
+class AvailableChannelItem(BaseModel):
+    """story f30da19a(AC1, 페드루 PO 확定 2026-09-04) — 「연결 만들기」 버튼이 FE에서
+    하드코딩/env 분기 없이 그릴 수 있게 `CHANNEL_ADAPTERS` 레지스트리를 그대로 노출.
+    sandbox는 그 레지스트리 자체가 `SANDBOX_CHANNEL_ENABLED`일 때만 항목을 갖고 있어
+    (channel_adapters.py 상단 조건부 등재) prod에서는 자동으로 빠진다 — 이 엔드포인트에
+    별도 필터링 로직이 없다.
+
+    페드루 리뷰 B2(2026-09-04) — 원래 AC의 `oauth: bool`을 `credential_kind: str`
+    그대로 노출으로 정정. `bool`이면 "oauth vs 그 외"만 구별되는데, 미래에
+    `credential_kind="pasted_secret"`인 채널이 추가되면 그것도 `oauth=false`가 돼
+    FE가 sandbox와 같은 BFF POST 분기(§경계 AC2)로 잘못 보낸다 — "oauth|pasted_secret|
+    none" 3값 자체가 FE 분기의 SSOT라 값을 지어내지 않고 그대로 넘긴다."""
+    channel: str
+    display_name: str
+    credential_kind: str
+    # story e4fc29fa(Phase1·마케팅운영, 페드루 PO 確定 2026-09-04) — "social"(짧은 글·
+    # channel_post) vs "blog"(site_post) 구분. FE가 "채널 연결" 화면과 "블로그 목적지"
+    # 화면을 이 값 하나로 분기한다(additive — 기존 필드 무변경).
+    kind: str
+
+
+@router.get(
+    "/{org_id}/channel-connections/available-channels", response_model=list[AvailableChannelItem],
+)
+async def list_available_channels_endpoint(
+    org_id: uuid.UUID,
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> list[AvailableChannelItem]:
+    """story f30da19a(AC1) — 목록 엔드포인트(`agent-visible`)와 동형: `_require_human()`을
+    안 부른다(org 멤버면 에이전트도 조회 가능 — 이 응답엔 토큰 인접 필드가 아예 없어
+    AC6의 human-only 근거가 적용되지 않는다). DB 조회 0 — 레지스트리 자체가 SSOT라
+    org마다 다른 값이 없다(org_id는 스코프 검증에만 쓴다).
+
+    story e4fc29fa(페드루 PO 리뷰 B1, 2026-09-04) — 이 목록은 "연결 만들기" 버튼 대상
+    이다(엔드포인트 자체 목적, f30da19a AC1). `requires_connection=False`인 채널
+    (hosted_site — 연결 없이 항상 사용 가능)은 목록에서 뺀다 — 안 그러면 FE(#3435
+    AC2)가 credential_kind="none"만 보고 「샌드박스 연결 만들기」 분기를 잘못 탄다.
+
+    story #4009(critical, AC4 방어 2층) — `is_test_channel` 어댑터는 `SANDBOX_
+    CHANNEL_ENABLED`가 켜져 있을 때만 이 목록에 낸다. 등록 게이트(channel_adapters.py
+    모듈 최상위 `if`)가 이미 flag OFF에서 CHANNEL_ADAPTERS에 이 채널들을 아예 안 넣지만,
+    이 필터는 "등록이 뚫려도(예: 향후 버그) 이 목록만은 독립적으로 막는다"는 2차 방어다
+    — 같은 `SANDBOX_CHANNEL_ENABLED` 상수를 재사용(새 판정 로직 발명 0)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    from app.services.channel_adapters import CHANNEL_ADAPTERS, SANDBOX_CHANNEL_ENABLED
+
+    return [
+        AvailableChannelItem(
+            channel=channel, display_name=cfg.display_name, credential_kind=cfg.credential_kind,
+            kind=cfg.kind,
+        )
+        for channel, cfg in CHANNEL_ADAPTERS.items()
+        if cfg.requires_connection and (not cfg.is_test_channel or SANDBOX_CHANNEL_ENABLED)
+    ]
+
+
+@router.post("/{org_id}/channel-connections/{channel}/authorize", response_model=AuthorizeResponse)
+async def authorize_channel_connection(
+    org_id: uuid.UUID,
+    channel: str,
+    body: AuthorizeRequest = AuthorizeRequest(),
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> AuthorizeResponse:
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    resolved = await _require_owner(db, auth, org_id)
+
+    adapter = get_channel_adapter(channel)
+    if adapter is None:
+        raise HTTPException(status_code=404, detail=f"unsupported channel: {channel}")
+
+    # story #3650 — target_connection_id가 실려 오면 이 org·채널 소유가 맞는지 먼저
+    # 검증한다(IDOR 방지 — 콜백 mismatch 판정이 믿는 값이 여기서부터 정직해야 한다).
+    if body.target_connection_id is not None:
+        target_conn = await get_channel_connection(db, org_id=org_id, connection_id=body.target_connection_id)
+        if target_conn is None or target_conn.channel != channel:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "CHANNEL_CONNECTION_NOT_FOUND", "message": "재연결 대상 연결을 찾을 수 없습니다."},
+            )
+
+    # 선생님 지적·페드루 PO 정정(2026-09-03 08:29Z) — 조직이 자기 채널 앱 자격을 등록 안
+    # 했으면(플랫폼 기본값도 없으면) authorize 진입 자체를 여기서 막는다. Meta 호출 0건.
+    app_credentials = await resolve_app_credentials(db, org_id=org_id, channel=channel)
+    if app_credentials is None:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "CHANNEL_APP_CREDENTIALS_MISSING",
+                "message": "이 조직에 등록된 채널 앱 자격이 없습니다. 먼저 앱 자격을 등록해주세요.",
+            },
+        )
+    app_id, _app_secret = app_credentials
+    del _app_secret  # authorize엔 app_id만 필요 — secret은 여기서 즉시 폐기(콜백 단계에서 다시 조회).
+
+    code_verifier, code_challenge = generate_pkce_pair()
+    try:
+        state = sign_channel_oauth_state(
+            org_id=org_id, requester_member_id=resolved.id, channel=channel, code_verifier=code_verifier,
+            connection_id=body.target_connection_id,
+        )
+    except ChannelOAuthStateNotConfigured as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    if channel == "threads":
+        from app.services.threads_oauth import build_authorize_url
+        url = build_authorize_url(
+            redirect_uri=_redirect_uri(org_id, channel), state=state, code_challenge=code_challenge, app_id=app_id,
+        )
+    elif channel == "instagram":
+        # story #3320 — Instagram Login은 PKCE 미지원(그라운딩+PO 재확認, instagram_
+        # oauth.py 상단 딱지 참고) — code_challenge를 아예 안 넘긴다.
+        from app.services.instagram_oauth import build_authorize_url as build_instagram_authorize_url
+        url = build_instagram_authorize_url(redirect_uri=_redirect_uri(org_id, channel), state=state, app_id=app_id)
+    elif channel in ("facebook", "facebook_sandbox"):
+        # story #3547 — Facebook Login도 PKCE 미지원(facebook_oauth.py 상단 딱지).
+        build_facebook_authorize_url = _facebook_oauth_module(channel).build_authorize_url
+        url = build_facebook_authorize_url(redirect_uri=_redirect_uri(org_id, channel), state=state, app_id=app_id)
+    elif channel in ("meta_ads", "ads_sandbox"):
+        # story #3806 — Meta Ads도 같은 Graph OAuth 계열이라 PKCE 미지원(facebook과
+        # 동형 판단, meta_ads_oauth.py 상단 딱지).
+        build_meta_ads_authorize_url = _meta_ads_oauth_module(channel).build_authorize_url
+        url = build_meta_ads_authorize_url(redirect_uri=_redirect_uri(org_id, channel), state=state, app_id=app_id)
+    elif channel in ("x", "x_sandbox"):
+        # story #3808 — X는 threads와 달리 PKCE가 선택이 아니라 필수(x_oauth.py 상단
+        # 딱지) — code_challenge를 항상 싣는다(threads_pkce_enabled류 우회 플래그 없음).
+        build_x_authorize_url = _x_oauth_module(channel).build_authorize_url
+        url = build_x_authorize_url(
+            redirect_uri=_redirect_uri(org_id, channel), state=state, code_challenge=code_challenge, app_id=app_id,
+        )
+    elif channel in ("youtube", "youtube_sandbox"):
+        # story #3815 — Google은 PKCE를 지원(필수도 거부도 아님, youtube_oauth.py
+        # 상단 딱지) — X와 동형으로 항상 싣는다.
+        build_youtube_authorize_url = _youtube_oauth_module(channel).build_authorize_url
+        url = build_youtube_authorize_url(
+            redirect_uri=_redirect_uri(org_id, channel), state=state, code_challenge=code_challenge, app_id=app_id,
+        )
+    else:
+        raise HTTPException(status_code=404, detail=f"unsupported channel: {channel}")
+    return AuthorizeResponse(url=url, state=state)
+
+
+@router.post(
+    "/{org_id}/channel-connections/{channel}/callback",
+    # story #3806 — AdAccountPendingSelectionResponse(meta_ads/ads_sandbox 2개+ 갈래)
+    # 추가. response_model은 함수 반환 타입 주석과 별개로 FastAPI가 실제 직렬화에
+    # 쓰는 계약이라(라우트 데코레이터 값이 SSOT) 여기서도 같이 넓혀야 한다 —
+    # 안 넓히면 ChannelConnectionResponse 필드 16개 "missing" 검증 에러로 500.
+    response_model=ChannelConnectionResponse | PendingSelectionResponse | AdAccountPendingSelectionResponse,
+)
+async def channel_connection_callback(
+    org_id: uuid.UUID,
+    channel: str,
+    body: CallbackRequest,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+    # story #3806 — additive(다른 채널 분기는 안 씀, meta_ads/ads_sandbox 사용자
+    # 문장 조립에만 필요 — i18n_catalog.py 모듈 docstring 관례, Header() DI는
+    # 이 얇은 엔드포인트에서만 받는다).
+    locale: str | None = None,
+    accept_language: str | None = Header(None, alias="Accept-Language"),
+) -> ChannelConnectionResponse | PendingSelectionResponse | AdAccountPendingSelectionResponse:
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    resolved = await _require_owner(db, auth, org_id)
+
+    # story #3373 AC3·뮤테이션 대상 — state 검증을 제거하면 위조 state가 그대로 통과한다.
+    oauth_state = verify_channel_oauth_state(body.state, expected_channel=channel)
+    if oauth_state is None:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "CHANNEL_OAUTH_STATE_INVALID", "message": "OAuth state가 위조되었거나 만료되었습니다."},
+        )
+    if oauth_state.org_id != org_id:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "CHANNEL_OAUTH_STATE_INVALID", "message": "OAuth state가 이 조직에 속하지 않습니다."},
+        )
+
+    adapter = get_channel_adapter(channel)
+    if adapter is None:
+        raise HTTPException(status_code=404, detail=f"unsupported channel: {channel}")
+
+    if channel not in (
+        "threads", "instagram", "facebook", "facebook_sandbox", "meta_ads", "ads_sandbox", "x", "x_sandbox",
+        "youtube", "youtube_sandbox",
+    ):
+        raise HTTPException(status_code=404, detail=f"unsupported channel: {channel}")
+
+    # authorize 단계와 별도로 다시 조회 — 콜백은 브라우저 왕복(수초~수분) 뒤라 그 사이 owner가
+    # 자격을 바꿨을 수 있고, authorize에서 app_secret을 굳이 이 함수 스코프까지 들고 있지
+    # 않게 한 설계(위 authorize 참고)의 자연스러운 대응.
+    app_credentials = await resolve_app_credentials(db, org_id=org_id, channel=channel)
+    if app_credentials is None:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "CHANNEL_APP_CREDENTIALS_MISSING",
+                "message": "이 조직에 등록된 채널 앱 자격이 없습니다. 먼저 앱 자격을 등록해주세요.",
+            },
+        )
+    app_id, app_secret = app_credentials
+
+    if channel in ("facebook", "facebook_sandbox"):
+        return await _facebook_channel_connection_callback(
+            db, org_id=org_id, channel=channel, code=body.code, app_id=app_id, app_secret=app_secret,
+            requester_member_id=resolved.id, target_connection_id=oauth_state.connection_id,
+        )
+
+    if channel in ("meta_ads", "ads_sandbox"):
+        from app.services.agent_onboarding_config import resolve_locale_from_request
+
+        return await _meta_ads_channel_connection_callback(
+            db, org_id=org_id, channel=channel, code=body.code, app_id=app_id, app_secret=app_secret,
+            requester_member_id=resolved.id, target_connection_id=oauth_state.connection_id,
+            resolved_locale=resolve_locale_from_request(locale, accept_language),
+        )
+
+    if channel in ("x", "x_sandbox"):
+        return await _x_channel_connection_callback(
+            db, org_id=org_id, channel=channel, code=body.code, code_verifier=oauth_state.code_verifier,
+            app_id=app_id, app_secret=app_secret, requester_member_id=resolved.id,
+            target_connection_id=oauth_state.connection_id,
+        )
+
+    if channel in ("youtube", "youtube_sandbox"):
+        return await _youtube_channel_connection_callback(
+            db, org_id=org_id, channel=channel, code=body.code, code_verifier=oauth_state.code_verifier,
+            app_id=app_id, app_secret=app_secret, requester_member_id=resolved.id,
+            target_connection_id=oauth_state.connection_id,
+        )
+
+    # story #3320 — instagram_oauth.InstagramOAuthError는 ThreadsOAuthError와 같은
+    # .code/.message 속성을 갖는 별도 클래스다(진짜 다른 provider — OAuth 예외는
+    # channel_posts.py의 ThreadsPublishError 재사용 판단과 달리 애초에 provider별
+    # 클래스가 따로 있었다, threads_oauth.py 참고). 두 분기가 3콜 순서(단기교환→
+    # 장기교환→시험)는 같지만 함수·예외 타입이 달라 그대로 나열한다(codebase 기존
+    # 관례 — 채널별 명시 분기, 억지 공통 추상화 X).
+    from app.services.instagram_oauth import InstagramOAuthError
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        try:
+            if channel == "threads":
+                from app.services.threads_oauth import (
+                    exchange_code_for_short_lived_token, exchange_for_long_lived_token, test_connection,
+                )
+
+                short_lived_token, external_account_id = await exchange_code_for_short_lived_token(
+                    client, code=body.code, redirect_uri=_redirect_uri(org_id, channel),
+                    code_verifier=oauth_state.code_verifier, app_id=app_id, app_secret=app_secret,
+                )
+                long_lived_token, expires_in = await exchange_for_long_lived_token(
+                    client, short_lived_token=short_lived_token, app_secret=app_secret,
+                )
+                account = await test_connection(client, access_token=long_lived_token)
+            else:
+                from app.services.instagram_oauth import (
+                    exchange_code_for_short_lived_token as ig_exchange_short_lived,
+                    exchange_for_long_lived_token as ig_exchange_long_lived,
+                    test_connection as ig_test_connection,
+                )
+
+                short_lived_token, external_account_id = await ig_exchange_short_lived(
+                    client, code=body.code, redirect_uri=_redirect_uri(org_id, channel),
+                    app_id=app_id, app_secret=app_secret,
+                )
+                long_lived_token, expires_in = await ig_exchange_long_lived(
+                    client, short_lived_token=short_lived_token, app_secret=app_secret,
+                )
+                account = await ig_test_connection(client, access_token=long_lived_token)
+        except (ThreadsOAuthError, InstagramOAuthError) as exc:
+            raise HTTPException(status_code=400, detail={"code": exc.code, "message": exc.message}) from exc
+        finally:
+            del app_secret  # ⛔즉시 소비 후 폐기 — 더 들고 있지 않는다.
+
+    row = await upsert_channel_connection(
+        db, org_id=org_id, channel=channel, account_id=external_account_id,
+        account_label=account.get("username"), credential_kind=adapter.credential_kind,
+        access_token=long_lived_token, refresh_token=None,
+        token_expires_at=datetime.now(timezone.utc) + timedelta(seconds=expires_in),
+        refresh_mode=adapter.refresh_mode, scopes=adapter.scope.split(","), connected_by=resolved.id,
+    )
+    # story #3650 — 대상 행(재연결 의도)과 실제 갱신된 행이 다르면(provider가 다른
+    # 계정을 돌려줬다는 뜻 — 다른 계정으로 로그인/선택) 갱신은 그대로 진행하되
+    # 화면에 알릴 신호를 싣는다. 일치·state에 target 자체가 없으면(신규 연결) null.
+    mismatch_target_id = (
+        oauth_state.connection_id
+        if oauth_state.connection_id is not None and oauth_state.connection_id != row.id
+        else None
+    )
+    return _to_response(row, reconnect_mismatch_target_id=mismatch_target_id)
+
+
+async def _facebook_channel_connection_callback(
+    db: AsyncSession, *, org_id: uuid.UUID, channel: str, code: str, app_id: str, app_secret: str,
+    requester_member_id: uuid.UUID, target_connection_id: uuid.UUID | None = None,
+) -> ChannelConnectionResponse | PendingSelectionResponse:
+    """story #3547(페드루 PO 確定 2026-09-06) — Facebook Page는 페이지 개수에 따라
+    갈래가 셋(0/1/2+)이다. `_redirect_uri`는 threads/instagram과 같은 채널별 콜백
+    URL 관례(PKCE 없음이라 code_verifier 불요)."""
+    from app.services.facebook_oauth import FacebookOAuthError
+    from app.services.channel_oauth_pending_selection import create_pending_selection
+
+    adapter = get_channel_adapter(channel)
+    oauth_module = _facebook_oauth_module(channel)
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        try:
+            short_lived_token, _ = await oauth_module.exchange_code_for_short_lived_token(
+                client, code=code, redirect_uri=_redirect_uri(org_id, channel), app_id=app_id, app_secret=app_secret,
+            )
+            long_lived_token, _expires_in = await oauth_module.exchange_for_long_lived_token(
+                client, short_lived_token=short_lived_token, app_id=app_id, app_secret=app_secret,
+            )
+            pages = await oauth_module.list_pages(client, user_access_token=long_lived_token)
+        except FacebookOAuthError as exc:
+            raise HTTPException(status_code=400, detail={"code": exc.code, "message": exc.message}) from exc
+        finally:
+            del app_secret  # ⛔즉시 소비 후 폐기 — 더 들고 있지 않는다(기존 규율과 동형).
+
+    if not pages:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHANNEL_FACEBOOK_NO_PAGES_AVAILABLE",
+                "message": "연결할 수 있는 페이지가 없습니다 — 이 계정이 관리하는 Facebook 페이지가 없거나, "
+                           "페이지 목록 권한을 허용하지 않았습니다.",
+            },
+        )
+
+    if len(pages) == 1:
+        page = pages[0]
+        row = await upsert_channel_connection(
+            db, org_id=org_id, channel=channel, account_id=page["page_id"], account_label=page["name"],
+            credential_kind=adapter.credential_kind, access_token=page["access_token"], refresh_token=None,
+            token_expires_at=None,  # 페이지 토큰은 장기 유저 토큰에서 파생 — 별도 만료 불명(⚠️미확認).
+            refresh_mode=adapter.refresh_mode, scopes=adapter.scope.split(","), connected_by=requester_member_id,
+        )
+        # story #3650(PO Test Org 실측 2026-09-07) — facebook_sandbox는 고정 계정 1개라
+        # 어느 행에서 「다시 연결」을 눌러도 이 단일-페이지 갈래가 항상 그 고정 계정으로
+        # upsert한다. target_connection_id(재연결 의도 행)와 실제 갱신된 행(row.id)이
+        # 다르면 갱신 자체는 사실대로 두되 화면에 신호를 싣는다.
+        mismatch_target_id = (
+            target_connection_id if target_connection_id is not None and target_connection_id != row.id else None
+        )
+        return _to_response(row, reconnect_mismatch_target_id=mismatch_target_id)
+
+    now = datetime.now(timezone.utc)
+    candidates = [{"page_id": p["page_id"], "name": p["name"]} for p in pages]
+    pending = await create_pending_selection(
+        db, org_id=org_id, requester_member_id=requester_member_id, channel=channel,
+        user_token=long_lived_token, candidates=candidates, now=now,
+    )
+    return PendingSelectionResponse(
+        pending_id=pending.id,
+        candidates=[PendingSelectionCandidate(**c) for c in candidates],
+        expires_at=pending.expires_at.isoformat(),
+    )
+
+
+async def _meta_ads_channel_connection_callback(
+    db: AsyncSession, *, org_id: uuid.UUID, channel: str, code: str, app_id: str, app_secret: str,
+    requester_member_id: uuid.UUID, resolved_locale: str, target_connection_id: uuid.UUID | None = None,
+) -> ChannelConnectionResponse | AdAccountPendingSelectionResponse:
+    """story #3806(Phase3·3-2 PR1) — `_facebook_channel_connection_callback`과 동형
+    구조(0/1/2+ 갈래) · 한 가지 진짜 차이: 광고 계정은 Facebook Page와 달리 계정별
+    access_token이 없다(장기 유저 토큰 하나로 `act_<id>` 경로를 스코프해 호출 —
+    meta_ads_oauth.py::list_ad_accounts docstring) — 그래서 1개/2+개 갈래 둘 다
+    **장기 유저 토큰 자체**를 저장 대상(connection.access_token 또는 pending
+    selection의 user_token)으로 쓴다, 페이지별 토큰을 꺼내 쓰지 않는다."""
+    from app.services.meta_ads_oauth import MetaAdsOAuthError
+    from app.services.channel_oauth_pending_selection import create_pending_selection
+    from app.services.i18n_catalog import t
+
+    adapter = get_channel_adapter(channel)
+    oauth_module = _meta_ads_oauth_module(channel)
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        try:
+            short_lived_token, _ = await oauth_module.exchange_code_for_short_lived_token(
+                client, code=code, redirect_uri=_redirect_uri(org_id, channel), app_id=app_id, app_secret=app_secret,
+            )
+            long_lived_token, _expires_in = await oauth_module.exchange_for_long_lived_token(
+                client, short_lived_token=short_lived_token, app_id=app_id, app_secret=app_secret,
+            )
+            accounts = await oauth_module.list_ad_accounts(client, user_access_token=long_lived_token)
+        except MetaAdsOAuthError as exc:
+            # story #3806 — code별로 사람 문장이 필요한 것만 i18n_catalog로 갈아 낀다
+            # (review-rejected). 나머지는 real facebook_oauth.py류와 동형으로 provider
+            # 원문 그대로(exc.message, 한글 아님 — #3779 가드 대상 아님).
+            message = (
+                t("ads_sandbox.review_rejected", resolved_locale)
+                if exc.code == "META_ADS_ACCOUNT_REVIEW_REJECTED" else exc.message
+            )
+            raise HTTPException(status_code=400, detail={"code": exc.code, "message": message}) from exc
+        finally:
+            del app_secret  # ⛔즉시 소비 후 폐기 — 더 들고 있지 않는다(기존 규율과 동형).
+
+    if not accounts:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHANNEL_META_ADS_NO_ACCOUNTS_AVAILABLE",
+                "message": t("channel_connections.meta_ads_no_accounts_available", resolved_locale),
+            },
+        )
+
+    if len(accounts) == 1:
+        account = accounts[0]
+        row = await upsert_channel_connection(
+            db, org_id=org_id, channel=channel, account_id=account["account_id"],
+            account_label=account["name"], credential_kind=adapter.credential_kind,
+            access_token=long_lived_token, refresh_token=None,
+            token_expires_at=None,  # facebook_channel_connection_callback과 동형 — ⚠️미확認.
+            refresh_mode=adapter.refresh_mode, scopes=adapter.scope.split(","), connected_by=requester_member_id,
+        )
+        mismatch_target_id = (
+            target_connection_id if target_connection_id is not None and target_connection_id != row.id else None
+        )
+        return _to_response(row, reconnect_mismatch_target_id=mismatch_target_id)
+
+    now = datetime.now(timezone.utc)
+    candidates = [
+        {
+            "account_id": a["account_id"], "name": a["name"],
+            "account_status": a.get("account_status"), "disable_reason": a.get("disable_reason"),
+        }
+        for a in accounts
+    ]
+    pending = await create_pending_selection(
+        db, org_id=org_id, requester_member_id=requester_member_id, channel=channel,
+        user_token=long_lived_token, candidates=candidates, now=now,
+    )
+    return AdAccountPendingSelectionResponse(
+        pending_id=pending.id,
+        candidates=[AdAccountCandidate(**c) for c in candidates],
+        expires_at=pending.expires_at.isoformat(),
+    )
+
+
+async def _x_channel_connection_callback(
+    db: AsyncSession, *, org_id: uuid.UUID, channel: str, code: str, code_verifier: str, app_id: str,
+    app_secret: str, requester_member_id: uuid.UUID, target_connection_id: uuid.UUID | None = None,
+) -> ChannelConnectionResponse:
+    """story #3808(Phase3·3-3 PR1) — threads(단기→장기 2단 교환)와 달리 X는 **단일
+    hop**(x_oauth.py 상단 딱지) — 페이지/광고계정 선택 갈래(facebook·meta_ads류)도
+    없어 가장 단순한 갈래 하나다. 반환된 refresh_token을 **그대로**(가공 0) `upsert_
+    channel_connection`에 실어 저장 — cron 1회용 회전 갱신(cron.py `_ROTATING_
+    REFRESH_FN_BY_CHANNEL`)이 이 저장값을 읽는다."""
+    from app.services.x_oauth import XOAuthError
+
+    adapter = get_channel_adapter(channel)
+    oauth_module = _x_oauth_module(channel)
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        try:
+            access_token, refresh_token, expires_in = await oauth_module.exchange_code_for_token(
+                client, code=code, redirect_uri=_redirect_uri(org_id, channel), code_verifier=code_verifier,
+                app_id=app_id, app_secret=app_secret,
+            )
+            account = await oauth_module.test_connection(client, access_token=access_token)
+        except XOAuthError as exc:
+            raise HTTPException(status_code=400, detail={"code": exc.code, "message": exc.message}) from exc
+        finally:
+            del app_secret  # ⛔즉시 소비 후 폐기 — 더 들고 있지 않는다(기존 규율과 동형).
+
+    row = await upsert_channel_connection(
+        db, org_id=org_id, channel=channel, account_id=account["id"],
+        account_label=account.get("username"), credential_kind=adapter.credential_kind,
+        access_token=access_token, refresh_token=refresh_token,
+        token_expires_at=datetime.now(timezone.utc) + timedelta(seconds=expires_in),
+        refresh_mode=adapter.refresh_mode, scopes=adapter.scope.split(" "), connected_by=requester_member_id,
+    )
+    mismatch_target_id = (
+        target_connection_id if target_connection_id is not None and target_connection_id != row.id else None
+    )
+    return _to_response(row, reconnect_mismatch_target_id=mismatch_target_id)
+
+
+async def _youtube_channel_connection_callback(
+    db: AsyncSession, *, org_id: uuid.UUID, channel: str, code: str, code_verifier: str, app_id: str,
+    app_secret: str, requester_member_id: uuid.UUID, target_connection_id: uuid.UUID | None = None,
+) -> ChannelConnectionResponse:
+    """story #3815(Phase3·3-5 PR1) — `_x_channel_connection_callback`과 동형(단일
+    hop, 페이지/광고계정류 선택 갈래 없음 — 가장 단순한 갈래 하나). 반환된
+    refresh_token을 **그대로**(가공 0) `upsert_channel_connection`에 저장 — cron
+    회전 갱신(cron.py `_ROTATING_REFRESH_FN_BY_CHANNEL`, youtube_oauth.py 상단
+    딱지 — Google은 회전하지 않지만 같은 dispatch 계약을 재사용한다)이 이 저장값을
+    읽는다."""
+    from app.services.youtube_oauth import YouTubeOAuthError
+
+    adapter = get_channel_adapter(channel)
+    oauth_module = _youtube_oauth_module(channel)
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        try:
+            access_token, refresh_token, expires_in = await oauth_module.exchange_code_for_token(
+                client, code=code, redirect_uri=_redirect_uri(org_id, channel), code_verifier=code_verifier,
+                app_id=app_id, app_secret=app_secret,
+            )
+            account = await oauth_module.test_connection(client, access_token=access_token)
+        except YouTubeOAuthError as exc:
+            raise HTTPException(status_code=400, detail={"code": exc.code, "message": exc.message}) from exc
+        finally:
+            del app_secret  # ⛔즉시 소비 후 폐기 — 더 들고 있지 않는다(기존 규율과 동형).
+
+    row = await upsert_channel_connection(
+        db, org_id=org_id, channel=channel, account_id=account["id"],
+        account_label=account.get("title"), credential_kind=adapter.credential_kind,
+        access_token=access_token, refresh_token=refresh_token,
+        token_expires_at=datetime.now(timezone.utc) + timedelta(seconds=expires_in),
+        refresh_mode=adapter.refresh_mode, scopes=adapter.scope.split(" "), connected_by=requester_member_id,
+    )
+    mismatch_target_id = (
+        target_connection_id if target_connection_id is not None and target_connection_id != row.id else None
+    )
+    return _to_response(row, reconnect_mismatch_target_id=mismatch_target_id)
+
+
+@router.post("/{org_id}/channel-connections/meta-ads/select", response_model=ChannelConnectionResponse)
+async def meta_ads_select_account_endpoint(
+    org_id: uuid.UUID,
+    body: MetaAdsSelectRequest,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+    locale: str | None = None,
+    accept_language: str | None = Header(None, alias="Accept-Language"),
+) -> ChannelConnectionResponse:
+    """story #3806 — `facebook_select_page_endpoint`와 동형(광고 계정 2개 이상
+    콜백 뒤 사람이 하나를 고르면 이 엔드포인트가 연결 행을 만든다). 광고 계정은
+    페이지와 달리 계정별 토큰이 없어(위 콜백 docstring) `/me/adaccounts` 재호출이
+    불요 — pending에 저장된 **장기 유저 토큰**을 그대로 연결에 쓴다(재호출 없이도
+    안전 — 그 토큰 자체가 이미 이 유저가 광고 계정에 접근 가능함을 증명한다,
+    facebook의 "페이지 토큰은 캐시 불신" 이유와 다른 축)."""
+    from app.services.channel_credential_crypto import decrypt_channel_credential
+    from app.services.channel_oauth_pending_selection import delete_pending_selection, get_pending_selection
+    from app.services.agent_onboarding_config import resolve_locale_from_request
+    from app.services.i18n_catalog import t
+
+    resolved_locale = resolve_locale_from_request(locale, accept_language)
+
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    resolved = await _require_owner(db, auth, org_id)
+
+    pending = await get_pending_selection(db, pending_id=body.pending_id, org_id=org_id)
+    if pending is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "CHANNEL_OAUTH_PENDING_SELECTION_NOT_FOUND",
+                # story #3806 — facebook_select_page_endpoint의 동일 문구를 그대로
+                # 재사용(같은 문자열 내용 — #3779 baseline에 이미 있어 신규 위반 아님).
+                "message": "선택 대기 상태를 찾을 수 없습니다(이미 사용됐거나 존재하지 않습니다).",
+            },
+        )
+    if pending.requester_member_id != resolved.id:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "CHANNEL_OAUTH_PENDING_SELECTION_FORBIDDEN",
+                "message": t("channel_connections.pending_selection_forbidden_ads", resolved_locale),
+            },
+        )
+    if pending.expires_at <= datetime.now(timezone.utc):
+        # 삭제는 스윕 몫(삭제 책임 단일화, facebook_select_page_endpoint와 동형 판단) —
+        # 여기서 안 지운다.
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "CHANNEL_OAUTH_PENDING_SELECTION_EXPIRED",
+                # story #3806 — facebook_select_page_endpoint와 동일 문구 재사용(#3779
+                # baseline에 이미 있음).
+                "message": "15분이 지나 선택 대기 상태가 만료됐습니다. 다시 연결해주세요.",
+            },
+        )
+    if pending.channel not in ("meta_ads", "ads_sandbox"):
+        raise HTTPException(status_code=404, detail=f"unsupported channel: {pending.channel}")
+    if not any(c.get("account_id") == body.account_id for c in pending.candidates):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "CHANNEL_OAUTH_PENDING_SELECTION_INVALID_ACCOUNT",
+                "message": t("channel_connections.pending_selection_invalid_account", resolved_locale),
+            },
+        )
+    candidate = next(c for c in pending.candidates if c["account_id"] == body.account_id)
+
+    adapter = get_channel_adapter(pending.channel)
+    long_lived_token = decrypt_channel_credential(pending.encrypted_user_token)
+    row = await upsert_channel_connection(
+        db, org_id=org_id, channel=pending.channel, account_id=candidate["account_id"],
+        account_label=candidate["name"], credential_kind=adapter.credential_kind,
+        access_token=long_lived_token, refresh_token=None, token_expires_at=None,
+        refresh_mode=adapter.refresh_mode, scopes=adapter.scope.split(","), connected_by=resolved.id,
+    )
+    await delete_pending_selection(db, pending_id=pending.id)
+    return _to_response(row)
+
+
+@router.post("/{org_id}/channel-connections/facebook/select", response_model=ChannelConnectionResponse)
+async def facebook_select_page_endpoint(
+    org_id: uuid.UUID,
+    body: FacebookSelectRequest,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> ChannelConnectionResponse:
+    """story #3547(BE 계약 確定, 페드루 PO 2026-09-06) — 페이지 2개 이상 콜백 뒤 사람이
+    하나를 고르면 이 엔드포인트가 연결 행을 만든다. `/me/accounts`를 여기서 재호출
+    (캐시된 candidates의 페이지 토큰은 안 믿는다 — 콜백 시점엔 후보 id/name만 저장,
+    토큰은 저장 안 함, pending_selection 모듈 docstring)."""
+    from app.services.channel_credential_crypto import decrypt_channel_credential
+    from app.services.channel_oauth_pending_selection import delete_pending_selection, get_pending_selection
+    from app.services.facebook_oauth import FacebookOAuthError
+
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    resolved = await _require_owner(db, auth, org_id)
+
+    pending = await get_pending_selection(db, pending_id=body.pending_id, org_id=org_id)
+    if pending is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "CHANNEL_OAUTH_PENDING_SELECTION_NOT_FOUND",
+                "message": "선택 대기 상태를 찾을 수 없습니다(이미 사용됐거나 존재하지 않습니다).",
+            },
+        )
+    if pending.requester_member_id != resolved.id:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "CHANNEL_OAUTH_PENDING_SELECTION_FORBIDDEN",
+                "message": "이 선택 대기 상태를 시작한 사람만 페이지를 고를 수 있습니다.",
+            },
+        )
+    if pending.expires_at <= datetime.now(timezone.utc):
+        # 삭제는 스윕 몫(삭제 책임 단일화, 페드루 PO 確定) — 여기서 안 지운다.
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "CHANNEL_OAUTH_PENDING_SELECTION_EXPIRED",
+                "message": "15분이 지나 선택 대기 상태가 만료됐습니다. 다시 연결해주세요.",
+            },
+        )
+    if not any(c.get("page_id") == body.page_id for c in pending.candidates):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "CHANNEL_OAUTH_PENDING_SELECTION_INVALID_PAGE",
+                "message": "선택한 페이지가 이 선택 대기 상태의 후보 목록에 없습니다.",
+            },
+        )
+
+    adapter = get_channel_adapter(pending.channel)
+    user_token = decrypt_channel_credential(pending.encrypted_user_token)
+    oauth_module = _facebook_oauth_module(pending.channel)
+    async with httpx.AsyncClient(timeout=15) as client:
+        try:
+            pages = await oauth_module.list_pages(client, user_access_token=user_token)
+        except FacebookOAuthError as exc:
+            # Meta 호출 실패 — 행 유지(페드루 PO 確定, TTL이 상한). 검증 실패와 구분되는
+            # 유일한 축(행이 살아 있어 재시도 가능 vs 검증 실패는 애초에 재시도해도 안 됨).
+            raise HTTPException(
+                status_code=503,
+                detail={"code": "CHANNEL_OAUTH_PROVIDER_UNAVAILABLE", "message": exc.message},
+            ) from exc
+
+    matched = next((p for p in pages if p["page_id"] == body.page_id), None)
+    if matched is None:
+        # 재호출 사이 그 페이지 권한이 회수된 경우 — 검증 실패와 동형으로 취급.
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "CHANNEL_OAUTH_PENDING_SELECTION_INVALID_PAGE",
+                "message": "선택한 페이지를 더는 이 계정에서 관리할 수 없습니다.",
+            },
+        )
+
+    row = await upsert_channel_connection(
+        db, org_id=org_id, channel=pending.channel, account_id=matched["page_id"], account_label=matched["name"],
+        credential_kind=adapter.credential_kind, access_token=matched["access_token"], refresh_token=None,
+        token_expires_at=None, refresh_mode=adapter.refresh_mode, scopes=adapter.scope.split(","),
+        connected_by=resolved.id,
+    )
+    # 성공에만 삭제(페드루 PO REQUIRED) — 같은 pending으로 두 번째 성공은 이 삭제가
+    # 먼저 지운 행을 get_pending_selection이 다음 호출에서 못 찾아 자연히 막힌다.
+    await delete_pending_selection(db, pending_id=pending.id)
+    return _to_response(row)
+
+
+async def _create_channel_sandbox_connection(
+    channel: str,
+    org_id: uuid.UUID,
+    db: AsyncSession,
+    verified_org_id: uuid.UUID,
+    auth: AuthContext,
+) -> ChannelConnectionResponse:
+    """story #3523(PO 실측(3523 그라운딩·page.tsx:239)·確定 2026-09-06) — story 5b27b32f
+    (`/sandbox`)와 #3320 조각①(`/instagram-sandbox`)이 사실상 동일 로직을 채널마다
+    새 라우트+하드코딩 문자열로 복제하던 것을 여기로 수렴한다. 채널이 늘 때마다
+    라우트를 새로 여는 대신 어댑터 레지스트리 하나가 fail-closed 판정의 SSOT다:
+
+    - adapter가 없으면(미등록/`SANDBOX_CHANNEL_ENABLED=false`로 아예 빠진 경우) 404.
+    - adapter는 있지만 credential_kind != "none"이거나 requires_connection=False면
+      422 — 이 엔드포인트가 뜻하는 "OAuth 없는 무자격 연결"이 그 채널엔 안 맞는
+      요청이다(예: channel="threads"로 부르면 실 OAuth 자격이 필요한 채널에 가짜
+      access_token을 심을 뻔한 조용한 오분기 — 이게 실제로 있었던 결함 클래스).
+      hosted_site도 credential_kind="none"이지만 requires_connection=False라 이
+      가드로 같이 막힌다(연결 자체가 불요한 채널에 가짜 연결을 만들면 안 된다).
+
+    account_id는 채널 문자열의 `_`를 `-`로 바꾼 것 — 기존 두 라우트가 각각
+    "sandbox"(무변환)·"instagram-sandbox"(하드코딩, channel 값 "instagram_sandbox"의
+    `_`→`-` 치환과 우연히 일치)였으므로 이 규칙이 기존 행과 계속 같은 (org, channel,
+    account_id) 키로 upsert된다(멱등 유지 — 이 리팩터로 기존 연결이 새 행으로 안
+    갈라진다)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    resolved = await _require_owner_or_admin(db, auth, org_id)
+
+    adapter = get_channel_adapter(channel)
+    if adapter is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "CHANNEL_SANDBOX_DISABLED",
+                "message": "이 환경에서 샌드박스 채널이 비활성화돼 있습니다(SANDBOX_CHANNEL_ENABLED).",
+            },
+        )
+    if adapter.credential_kind != "none" or not adapter.requires_connection:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHANNEL_SANDBOX_UNSUPPORTED",
+                "message": f"'{channel}' 채널은 샌드박스 연결을 지원하지 않습니다.",
+            },
+        )
+
+    row = await upsert_channel_connection(
+        db, org_id=org_id, channel=channel, account_id=f"{channel.replace('_', '-')}-{org_id}",
+        account_label=adapter.display_name, credential_kind=adapter.credential_kind,
+        access_token="sandbox-dummy-access-token", refresh_token=None,
+        token_expires_at=None, refresh_mode=adapter.refresh_mode,
+        scopes=adapter.scope.split(","), connected_by=resolved.id,
+    )
+    return _to_response(row)
+
+
+@router.post("/{org_id}/channel-connections/{channel}/sandbox", response_model=ChannelConnectionResponse, status_code=201)
+async def create_generic_channel_sandbox_connection(
+    org_id: uuid.UUID,
+    channel: str,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> ChannelConnectionResponse:
+    """story #3523 — 범용 샌드박스 연결 엔드포인트(FE가 `available-channels`가 내려준
+    어떤 channel 값이든 그대로 이 URL에 넣는다, 신규 채널 추가 시 BE 라우트 추가 불요).
+    판정 로직은 `_create_channel_sandbox_connection` 참조."""
+    return await _create_channel_sandbox_connection(channel, org_id, db, verified_org_id, auth)
+
+
+@router.post("/{org_id}/channel-connections/sandbox", response_model=ChannelConnectionResponse, status_code=201)
+async def create_sandbox_channel_connection(
+    org_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> ChannelConnectionResponse:
+    """story 5b27b32f(AC2) — 하위호환 라우트(구 FE 캐시·북마크 대비). story #3523부터
+    신규 로직은 위 범용 라우트에 있고, 여긴 channel="sandbox" 고정 위임뿐이다."""
+    return await _create_channel_sandbox_connection("sandbox", org_id, db, verified_org_id, auth)
+
+
+@router.post(
+    "/{org_id}/channel-connections/instagram-sandbox", response_model=ChannelConnectionResponse, status_code=201,
+)
+async def create_instagram_sandbox_channel_connection(
+    org_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> ChannelConnectionResponse:
+    """story #3320 조각①(하위호환) — story #3523부터 신규 로직은 위 범용 라우트에
+    있고, 여긴 channel="instagram_sandbox" 고정 위임뿐이다."""
+    return await _create_channel_sandbox_connection("instagram_sandbox", org_id, db, verified_org_id, auth)
+
+
+class CreatePastedSecretConnectionRequest(BaseModel):
+    """story e4fc29fa(조각⑤, 페드루 PO 確定 2026-09-04) — WordPress(site_url·username·
+    app_password)·webhook(target_url·secret) 공용 요청 바디. 채널마다 실제로 쓰는
+    필드가 다르다(WordPress 3개·webhook 2개) — 한 모델에 전부 Optional로 얹고 라우터가
+    channel별로 필수 필드를 검사한다(available-channels가 "이 채널이 뭘 요구하는지"
+    선언하지 않는 것과 같은 층위 — 연결 화면(미르코 후속)이 channel별 폼을 그린다)."""
+    site_url: str | None = None
+    username: str | None = None
+    app_password: str | None = None
+    target_url: str | None = None
+    secret: str | None = None
+    # story 3-4(PR1) — 스티비(Stibee) Auth Key. wordpress/webhook과 동형으로 이 공용
+    # 모델에 Optional로 얹는다(연결 화면이 channel별 폼을 그린다).
+    api_key: str | None = None
+    # story #3813(Phase3·3-4 PR5-a, 페드루 PO 確定 2026-09-12) — 스티비 세그먼트
+    # 열거 API가 Enterprise 요금제 전용이라(그라운딩 확認) 사람이 스티비 화면에서
+    # 직접 읽어 입력하는 「주소록 ID」(스티비 주소록 URL의 listId). 이름은 사람이
+    # 적은 세그먼트명 그대로 쓴다(gate 봉인 시점, 이 필드가 아니다) — 이 필드는
+    # POST /emails 발송 대상(listId)·수신자 수 조회(/lists/{id}/subscribers/count)
+    # 두 곳의 실 이행처(PR5-b).
+    list_id: str | None = None
+    # story #3813(Phase3·3-4 PR5-b, 페드루 PO 確定 2026-09-12) — 실 발행(POST /emails)
+    # 이 요구하는 발신자 정보. 스티비 발신자 인증 화면에서 이미 인증한 주소여야
+    # 발행이 통과한다(Errors.Authorization.PermissionDenied 대상) — 여기선 형식만
+    # 검사, 인증 여부는 발행 시점에야 확認된다(연결 저장 단계에서 auth-check처럼
+    # 실호출 왕복하지 않는다, PO 明示 "저장 시 프로브는 auth-check 1개만").
+    sender_email: str | None = None
+    sender_name: str | None = None
+    # story #3816(Phase3·3-6 PR1, 페드루 PO 確定 2026-09-12) — Ghost Admin API 키
+    # (`{id}:{hex secret}` 형). site_url은 위 wordpress 필드를 그대로 재사용한다
+    # (같은 뜻 — 목적지 사이트 주소, 채널마다 새 필드를 만들지 않는다).
+    admin_api_key: str | None = None
+
+
+@router.post("/{org_id}/channel-connections/{channel}", response_model=ChannelConnectionResponse, status_code=201)
+async def create_pasted_secret_channel_connection(
+    org_id: uuid.UUID,
+    channel: str,
+    body: CreatePastedSecretConnectionRequest,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+    locale: str | None = None,
+    accept_language: str | None = Header(None, alias="Accept-Language"),
+) -> ChannelConnectionResponse:
+    """story e4fc29fa(조각⑤, 페드루 PO 確定 2026-09-04) — WordPress·webhook 등
+    pasted_secret 어댑터의 연결 생성. AC2/AC3("휴먼이 연결 API로 등록") 실 경로 —
+    이 조각 전까지는 이 경로 자체가 없어 발행 오케스트레이션(③b·③c·④)이 테스트
+    픽스처(직접 INSERT)로만 성립했다("만들어졌는데 도는 자리 없음"의 반대쪽 갭).
+
+    owner/admin(`create_sandbox_channel_connection`과 동형 폭 — 실 고객 자격이지만
+    OAuth보다는 "붙여넣기"라 owner 전용보다 한 단계 넓게, PO 明示). 에이전트는
+    `_require_owner_or_admin`→`_require_human`에서 403(AC6과 동형 — 자격을 읽거나
+    다룰 수 없다).
+
+    등록 시점에도 `assert_destination_url_safe`를 친다(발행 시점 검사만으론 SSRF
+    목적지를 연결에 저장해 두고 나중에야 걸리는 지연 발견 갭이 남는다 — 여기서
+    먼저 막으면 애초에 저장이 안 된다). loopback은 각 모듈의 dev 스텁 플래그가
+    켜졌을 때만 예외(런북 절차용 — prod에선 항상 거부).
+
+    `upsert_channel_connection`(story #3373 AC8 기존 함수, 신규 로직 0) 재사용 —
+    같은 (org, channel, account_id) 재호출은 새 행이 아니라 기존 행 갱신(멱등)."""
+    from app.services.agent_onboarding_config import resolve_locale_from_request
+    from app.services.i18n_catalog import t
+
+    resolved_locale = resolve_locale_from_request(locale, accept_language)
+
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    resolved = await _require_owner_or_admin(db, auth, org_id)
+
+    adapter = get_channel_adapter(channel)
+    if adapter is None or adapter.credential_kind != "pasted_secret":
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "CHANNEL_NOT_PASTED_SECRET",
+                "message": f"channel={channel!r}는 붙여넣기형 연결 대상이 아닙니다.",
+            },
+        )
+
+    from app.services.destination_url_safety import DestinationURLUnsafeError, assert_destination_url_safe
+
+    if channel == "wordpress":
+        if not body.site_url or not body.username or not body.app_password:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "WORDPRESS_FIELDS_REQUIRED",
+                    "message": "site_url·username·app_password가 모두 필요합니다.",
+                },
+            )
+        from app.services.wordpress_publish import wordpress_stub_enabled
+
+        try:
+            site_url = await assert_destination_url_safe(body.site_url, allow_loopback=wordpress_stub_enabled())
+        except DestinationURLUnsafeError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "CHANNEL_CONNECTION_DESTINATION_INSECURE", "message": str(exc)},
+            ) from exc
+        row = await upsert_channel_connection(
+            db, org_id=org_id, channel="wordpress", account_id=site_url, account_label=body.username,
+            credential_kind="pasted_secret", access_token=body.app_password, refresh_token=None,
+            token_expires_at=None, refresh_mode=adapter.refresh_mode, scopes=[], connected_by=resolved.id,
+        )
+        return _to_response(row)
+
+    if channel == "webhook":
+        if not body.target_url or not body.secret:
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "WEBHOOK_FIELDS_REQUIRED", "message": "target_url·secret이 모두 필요합니다."},
+            )
+        from app.services.webhook_publish import webhook_stub_enabled
+
+        try:
+            target_url = await assert_destination_url_safe(body.target_url, allow_loopback=webhook_stub_enabled())
+        except DestinationURLUnsafeError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "CHANNEL_CONNECTION_DESTINATION_INSECURE", "message": str(exc)},
+            ) from exc
+        row = await upsert_channel_connection(
+            db, org_id=org_id, channel="webhook", account_id=target_url, account_label=None,
+            credential_kind="pasted_secret", access_token=body.secret, refresh_token=None,
+            token_expires_at=None, refresh_mode=adapter.refresh_mode, scopes=[], connected_by=resolved.id,
+        )
+        return _to_response(row)
+
+    if channel == "stibee":
+        if not body.api_key or not body.list_id or not body.sender_email or not body.sender_name:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "STIBEE_FIELDS_REQUIRED",
+                    "message": t("channel_connections.stibee_fields_required", resolved_locale),
+                },
+            )
+        # story #3813(Phase3·3-4 PR5-a, 페드루 PO 確定 2026-09-12) — 「가짜 키=초록
+        # Connected」 결함 처방. 저장 전에 auth-check 1개만 실호출(다른 엔드포인트
+        # 프로브 0) — 실패면 연결 행 자체를 저장하지 않는다(fail-closed, 성공
+        # 배지는 실제로 인증된 키에만 붙는다).
+        # CHANGES(PO 確定) — 스티비가 안 닿는 것(네트워크·타임아웃·5xx)과 키가
+        # 틀린 것(스티비가 응답해서 거절)은 사람이 할 일이 다르다 — 별도 코드·문구
+        # (StibeeAuthCheckFailed.is_key_rejected 판정, 그라운딩 정정: 실물은
+        # 401/403이 아니라 400이라 stibee_client.py 참고).
+        from app.services.stibee_client import StibeeAuthCheckFailed, verify_api_key
+
+        async with httpx.AsyncClient(timeout=10) as stibee_client:
+            try:
+                await verify_api_key(stibee_client, api_key=body.api_key)
+            except StibeeAuthCheckFailed as exc:
+                logger.warning(
+                    "stibee auth-check 실패 — org=%s status=%s key_rejected=%s",
+                    org_id, exc.status_code, exc.is_key_rejected,
+                )
+                if exc.is_key_rejected:
+                    code, message_key = "STIBEE_API_KEY_INVALID", "channel_connections.stibee_api_key_invalid"
+                else:
+                    code, message_key = "STIBEE_AUTH_CHECK_UNAVAILABLE", "channel_connections.stibee_auth_check_unavailable"
+                raise HTTPException(
+                    status_code=422,
+                    detail={"code": code, "message": t(message_key, resolved_locale)},
+                ) from exc
+        # story 3-4(PR1) — 스티비는 wordpress(site_url)·webhook(target_url)과 달리
+        # org당 목적지 URL 개념이 없다(Auth Key 하나가 그 org의 ESP 계정 전체를
+        # 가리킨다). account_id는 upsert_channel_connection의 (org, channel,
+        # account_id) 멱등 키라 반드시 채워야 하는데, 채울 실 식별자가 없어 고정
+        # 리터럴을 쓴다 — org당 stibee 연결은 1개만 가능하다는 가정(⚠️미확認·PO 확定
+        # 대상, 여러 ESP 계정이 실제로 필요해지면 재설계).
+        # story #3813(Phase3·3-4 PR5-a) — `account_label`에 사람이 입력한 주소록
+        # ID를 그대로 저장(세그먼트 열거 API가 Enterprise 전용이라 사람이 적은 값이
+        # 유일한 실 이행처 — PR5-b가 이 값으로 POST /emails·구독자 수 조회를 건다).
+        row = await upsert_channel_connection(
+            db, org_id=org_id, channel="stibee", account_id="default", account_label=body.list_id,
+            credential_kind="pasted_secret", access_token=body.api_key, refresh_token=None,
+            token_expires_at=None, refresh_mode=adapter.refresh_mode, scopes=[], connected_by=resolved.id,
+            provider_config={"sender_email": body.sender_email, "sender_name": body.sender_name},
+        )
+        return _to_response(row)
+
+    if channel == "ghost":
+        if not body.site_url or not body.admin_api_key:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "GHOST_FIELDS_REQUIRED",
+                    "message": t("channel_connections.ghost_fields_required", resolved_locale),
+                },
+            )
+        from app.services.ghost_client import ghost_stub_enabled
+
+        try:
+            # story #3816(PR1, 페드루 PO 캡처 지시 2026-09-12) — wordpress/webhook과
+            # 동형: allow_loopback은 항상 False가 아니라 dev 스텁 플래그로 게이트
+            # (GHOST_TEST_STUB_ENABLED=true일 때만 http://localhost 허용, prod는
+            # 이 플래그 자체가 없어 여전히 항상 False와 동치).
+            site_url = await assert_destination_url_safe(body.site_url, allow_loopback=ghost_stub_enabled())
+        except DestinationURLUnsafeError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "CHANNEL_CONNECTION_DESTINATION_INSECURE", "message": str(exc)},
+            ) from exc
+        # story #3816(Phase3·3-6 PR1, 페드루 PO 確定 2026-09-12) — 「가짜 키=초록
+        # Connected」 결함을 처음부터 안 만든다(stibee auth-check 동형 관례). site
+        # 검증 1개만 실호출(다른 엔드포인트 프로브 0) — 실패면 연결 행 자체를 저장하지
+        # 않는다(fail-closed). key_rejected 판정(4xx 전체=거절)은 실 사이트 왕복 前
+        # 상태라 stibee의 400 정정 선례를 따르는 보수적 기본값(⚠️미확認).
+        from app.services.ghost_client import GhostSiteVerifyFailed, verify_admin_api_key
+
+        async with httpx.AsyncClient(timeout=10) as ghost_http_client:
+            try:
+                await verify_admin_api_key(ghost_http_client, site_url=site_url, admin_api_key=body.admin_api_key)
+            except GhostSiteVerifyFailed as exc:
+                logger.warning(
+                    "ghost site 검증 실패 — org=%s status=%s key_rejected=%s site_not_found=%s",
+                    org_id, exc.status_code, exc.is_key_rejected, exc.is_site_not_found,
+                )
+                # story #3816 CHANGES 1(페드루 PO 지목 2026-09-12) — site_url은 사용자
+                # 입력이라(stibee의 고정 base URL엔 없던 축) 「주소 틀림」(오타·Ghost
+                # 아닌 사이트 → 흔히 404)이 「키 틀림」(401/403)만큼 온다. 예전처럼
+                # "4xx 전체=키 오류"로 뭉치면 주소 오류를 키 오류로 잘못 안내해 사람이
+                # 키를 다시 붙여넣어도 같은 오류가 재현되는 거짓 진입점이 된다 — 셋으로
+                # 가른다.
+                if exc.is_key_rejected:
+                    code, message_key = "GHOST_ADMIN_KEY_INVALID", "channel_connections.ghost_admin_key_invalid"
+                elif exc.is_site_not_found:
+                    code, message_key = "GHOST_SITE_NOT_FOUND", "channel_connections.ghost_site_not_found"
+                else:
+                    code, message_key = "GHOST_SITE_VERIFY_UNAVAILABLE", "channel_connections.ghost_site_verify_unavailable"
+                raise HTTPException(
+                    status_code=422,
+                    detail={"code": code, "message": t(message_key, resolved_locale)},
+                ) from exc
+        # story #3816 — wordpress와 동형으로 site_url이 (org, channel, account_id)
+        # 멱등 키다(사이트별로 별개 연결 — stibee의 "org당 1개 고정 리터럴"과 다른 축,
+        # Ghost는 고객이 사이트를 여러 개 가질 수 있다). account_label은 미사용(사이트
+        # 자체가 이미 식별자 — webhook의 target_url·account_label=None과 동형).
+        row = await upsert_channel_connection(
+            db, org_id=org_id, channel="ghost", account_id=site_url, account_label=None,
+            credential_kind="pasted_secret", access_token=body.admin_api_key, refresh_token=None,
+            token_expires_at=None, refresh_mode=adapter.refresh_mode, scopes=[], connected_by=resolved.id,
+        )
+        return _to_response(row)
+
+    # story e4fc29fa(조각⑤) — 위 credential_kind 가드가 이미 wordpress/webhook/stibee/ghost
+    # 외의 모든 채널을 걸렀다(현재 pasted_secret 채널은 이 넷뿐) — 새 pasted_secret
+    # 채널이 추가되고 여기 분기가 안 늘면 이 자리로 떨어져 fail-closed(조용히
+    # threads류로 새지 않는다).
+    raise HTTPException(
+        status_code=404,
+        detail={"code": "CHANNEL_NOT_PASTED_SECRET", "message": f"channel={channel!r}는 아직 지원하지 않습니다."},
+    )
+
+
+class ReplaceCredentialsRequest(BaseModel):
+    """story #3492 — WordPress는 `username?`(생략 시 무변)+`app_password`, webhook은
+    `secret`. create 쪽(CreatePastedSecretConnectionRequest)과 동형으로 한 모델에
+    Optional로 얹고 라우터가 channel별 필수 필드를 검사한다."""
+    username: str | None = None
+    app_password: str | None = None
+    secret: str | None = None
+    # story 3-4(PR1) — 스티비 Auth Key 회전.
+    api_key: str | None = None
+    # story #3816(Phase3·3-6 PR1) — Ghost Admin API 키 회전. site_url은 여기 없다
+    # ("id·계정 축은 불변, 자격만 바꾼다" 관례 — wordpress의 username?와 달리 Ghost는
+    # site_url이 계정 축 자체라 회전 대상이 아니다).
+    admin_api_key: str | None = None
+
+
+@router.patch(
+    "/{org_id}/channel-connections/{connection_id}/credentials", response_model=ChannelConnectionResponse,
+)
+async def replace_channel_connection_credentials(
+    org_id: uuid.UUID,
+    connection_id: uuid.UUID,
+    body: ReplaceCredentialsRequest,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+    locale: str | None = None,
+    accept_language: str | None = Header(None, alias="Accept-Language"),
+) -> ChannelConnectionResponse:
+    """story #3492(PO 決定 2026-09-05) — 붙여넣기 자격 「제자리 교체」(id 불변). 지금까지는
+    해제→새로 연결뿐이라 자격을 바꿀 때마다(예: WordPress 앱 비밀번호 정기 회전) 새
+    connection_id가 생겨 draft·발행 이력·external_publish 게이트 scope_key(story
+    #3478, connection_id 단위)가 끊겼다.
+
+    owner/admin(create_pasted_secret_channel_connection과 동형 폭). oauth 채널
+    (credential_kind != "pasted_secret")은 애초에 이 경로 대상이 아니다(404) —
+    OAuth 자격은 authorize/callback이 갱신하는 축이지 붙여넣기가 아니다."""
+    from app.services.agent_onboarding_config import resolve_locale_from_request
+    from app.services.i18n_catalog import t
+
+    resolved_locale = resolve_locale_from_request(locale, accept_language)
+
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    resolved = await _require_owner_or_admin(db, auth, org_id)
+
+    row = await get_channel_connection(db, org_id=org_id, connection_id=connection_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"channel connection을 찾을 수 없습니다: {connection_id}")
+    if row.credential_kind != "pasted_secret":
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "CHANNEL_NOT_PASTED_SECRET",
+                "message": "붙여넣기형 연결만 자격을 바꿀 수 있습니다.",
+            },
+        )
+
+    if row.channel == "wordpress":
+        if not body.app_password:
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "WORDPRESS_FIELDS_REQUIRED", "message": "app_password가 필요합니다."},
+            )
+        new_secret, account_label = body.app_password, body.username
+    elif row.channel == "webhook":
+        if not body.secret:
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "WEBHOOK_FIELDS_REQUIRED", "message": "secret이 필요합니다."},
+            )
+        new_secret, account_label = body.secret, None
+    elif row.channel == "stibee":
+        if not body.api_key:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "STIBEE_FIELDS_REQUIRED",
+                    "message": t("channel_connections.stibee_fields_required", resolved_locale),
+                },
+            )
+        # story #3813(Phase3·3-4 PR5-a) — 회전(rotate)도 저장이다, 생성과 같은
+        # auth-check 프로브를 거친다(PO "저장 시"가 생성만 뜻하지 않는다).
+        from app.services.stibee_client import StibeeAuthCheckFailed, verify_api_key
+
+        async with httpx.AsyncClient(timeout=10) as stibee_client:
+            try:
+                await verify_api_key(stibee_client, api_key=body.api_key)
+            except StibeeAuthCheckFailed as exc:
+                logger.warning(
+                    "stibee auth-check 실패(회전) — org=%s status=%s key_rejected=%s",
+                    org_id, exc.status_code, exc.is_key_rejected,
+                )
+                if exc.is_key_rejected:
+                    code, message_key = "STIBEE_API_KEY_INVALID", "channel_connections.stibee_api_key_invalid"
+                else:
+                    code, message_key = "STIBEE_AUTH_CHECK_UNAVAILABLE", "channel_connections.stibee_auth_check_unavailable"
+                raise HTTPException(
+                    status_code=422,
+                    detail={"code": code, "message": t(message_key, resolved_locale)},
+                ) from exc
+        new_secret, account_label = body.api_key, None
+    elif row.channel == "ghost":
+        if not body.admin_api_key:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "GHOST_FIELDS_REQUIRED",
+                    "message": t("channel_connections.ghost_fields_required", resolved_locale),
+                },
+            )
+        # story #3816(Phase3·3-6 PR1) — 회전(rotate)도 저장이다, 생성과 같은 site
+        # 검증 프로브를 거친다(stibee 3-4 PR5-a 선례와 동형 — "저장 시"가 생성만
+        # 뜻하지 않는다). site_url은 새로 입력받지 않고 기존 연결 행의 account_id를
+        # 그대로 쓴다(회전은 자격만 바꾼다, site_url은 계정 축).
+        from app.services.ghost_client import GhostSiteVerifyFailed, verify_admin_api_key
+
+        async with httpx.AsyncClient(timeout=10) as ghost_http_client:
+            try:
+                await verify_admin_api_key(ghost_http_client, site_url=row.account_id, admin_api_key=body.admin_api_key)
+            except GhostSiteVerifyFailed as exc:
+                logger.warning(
+                    "ghost site 검증 실패(회전) — org=%s status=%s key_rejected=%s site_not_found=%s",
+                    org_id, exc.status_code, exc.is_key_rejected, exc.is_site_not_found,
+                )
+                if exc.is_key_rejected:
+                    code, message_key = "GHOST_ADMIN_KEY_INVALID", "channel_connections.ghost_admin_key_invalid"
+                elif exc.is_site_not_found:
+                    code, message_key = "GHOST_SITE_NOT_FOUND", "channel_connections.ghost_site_not_found"
+                else:
+                    code, message_key = "GHOST_SITE_VERIFY_UNAVAILABLE", "channel_connections.ghost_site_verify_unavailable"
+                raise HTTPException(
+                    status_code=422,
+                    detail={"code": code, "message": t(message_key, resolved_locale)},
+                ) from exc
+        new_secret, account_label = body.admin_api_key, None
+    else:
+        # story e4fc29fa(조각⑤)의 fail-closed 관례 그대로 — 현재 pasted_secret 채널은
+        # wordpress/webhook/stibee/ghost 넷뿐. 새 pasted_secret 채널이 추가되고 이
+        # 분기가 안 늘면 조용히 새지 않고 여기로 떨어진다.
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "CHANNEL_NOT_PASTED_SECRET", "message": f"channel={row.channel!r}는 아직 지원하지 않습니다."},
+        )
+
+    updated = await replace_channel_connection_credential(
+        db, org_id=org_id, connection_id=connection_id, new_secret=new_secret,
+        updated_by=resolved.id, account_label=account_label,
+    )
+    return _to_response(updated)
+
+
+@router.post("/{org_id}/channel-connections/{connection_id}/disconnect", response_model=ChannelConnectionResponse)
+async def disconnect_channel_connection(
+    org_id: uuid.UUID,
+    connection_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> ChannelConnectionResponse:
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    await _require_owner(db, auth, org_id)
+    try:
+        row = await revoke_channel_connection(db, org_id=org_id, connection_id=connection_id)
+    except ChannelConnectionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return _to_response(row)
+
+
+@router.post("/{org_id}/channel-connections/{connection_id}/test", response_model=TestConnectionResponse)
+async def test_channel_connection(
+    org_id: uuid.UUID,
+    connection_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> TestConnectionResponse:
+    """유나 화면설계 §8④ — 서버가 provider 경량 호출(Threads /me류)을 대신 하고 결과만
+    반환한다. 토큰은 이 함수 스코프 밖으로 절대 안 나간다(응답 DTO에 없음)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    await _require_human(db, auth, org_id)  # member 이상이면 시험 가능 — human이면 충분(owner 제한 없음)
+
+    row = await get_channel_connection(db, org_id=org_id, connection_id=connection_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="channel connection not found")
+
+    access_token = decrypt_for_use(row)
+    if access_token is None:
+        return TestConnectionResponse(ok=False, error="연결에 저장된 토큰이 없습니다.")
+
+    if row.channel not in ("threads", "instagram"):
+        return TestConnectionResponse(ok=False, error=f"unsupported channel: {row.channel}")
+
+    # story #3320 — instagram_oauth.InstagramOAuthError는 threads_oauth.ThreadsOAuthError
+    # 와 별도 클래스(진짜 다른 provider)라 둘 다 잡는다.
+    from app.services.instagram_oauth import InstagramOAuthError
+    from app.services.instagram_oauth import test_connection as instagram_test_connection
+    from app.services.threads_oauth import test_connection as threads_test_connection
+
+    test_connection_fn = threads_test_connection if row.channel == "threads" else instagram_test_connection
+
+    async with httpx.AsyncClient(timeout=10) as client:
+        try:
+            account = await test_connection_fn(client, access_token=access_token)
+        except (ThreadsOAuthError, InstagramOAuthError) as exc:
+            await apply_refresh_failure(db, connection=row, error_message=exc.message)
+            return TestConnectionResponse(ok=False, error=exc.message)
+    del access_token  # ⛔즉시 소비 후 폐기 — 더 들고 있지 않는다.
+    return TestConnectionResponse(ok=True, account=account)
+
+
+@router.get(
+    "/{org_id}/channel-connections/{connection_id}/youtube-usage", response_model=YouTubeUsageResponse,
+)
+async def get_youtube_usage(
+    org_id: uuid.UUID,
+    connection_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> YouTubeUsageResponse:
+    """story #3815(Phase3·3-5 PR3, 미르코 PR4 그라운딩 갭 → 페드루 PO 계약 확定
+    2026-09-12) — 연결 카드 사용량 줄. `/test`와 동형 인가(member 이상, owner
+    제한 없음 — 조회뿐). connection_id는 "이 채널을 볼 권한이 있는가"만 확인하고,
+    반환값 자체는 org 무관 플랫폼 전체 카운터(`YouTubeUsageResponse.scope`
+    딱지 참고) — evidence를 새로 쓰지 않는 순수 읽기."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    await _require_human(db, auth, org_id)
+
+    row = await get_channel_connection(db, org_id=org_id, connection_id=connection_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="channel connection not found")
+    if row.channel not in ("youtube", "youtube_sandbox"):
+        raise HTTPException(status_code=422, detail=f"youtube-usage unsupported for channel: {row.channel}")
+
+    from app.services.channel_adapters import get_channel_adapter
+    from app.services.youtube_quota import _platform_quota_day_window, get_platform_youtube_quota_spent_units
+
+    now = datetime.now(timezone.utc)
+    limit_units = settings.youtube_quota_daily_limit_units
+    spent_units = await get_platform_youtube_quota_spent_units(db, channel=row.channel, now=now)
+    adapter = get_channel_adapter(row.channel)
+    tz_name = adapter.quota_reset_timezone if adapter is not None else "UTC"
+    _, reset_at = _platform_quota_day_window(now, tz_name)
+    return YouTubeUsageResponse(
+        used_units=spent_units, limit_units=limit_units,
+        remaining_units=max(0, limit_units - spent_units), reset_at=reset_at.isoformat(),
+    )
+
+
+@router.put("/{org_id}/channel-connections/{channel}/app-credentials", response_model=AppCredentialsPutResponse)
+async def set_channel_app_credentials(
+    org_id: uuid.UUID,
+    channel: str,
+    body: AppCredentialsRequest,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> AppCredentialsPutResponse:
+    """선생님 지적·페드루 PO 정정(2026-09-03 08:29Z) — 조직별 채널 앱(Meta 등) 자격 등록.
+    owner 전용(에이전트는 _require_owner→_require_human 체인에서 403). 응답에 secret은
+    절대 안 실린다(AppCredentialsPutResponse에 필드 자체가 없음)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    resolved = await _require_owner(db, auth, org_id)
+    row = await upsert_channel_app_credentials(
+        db, org_id=org_id, channel=channel, app_id=body.app_id, app_secret=body.app_secret, updated_by=resolved.id,
+    )
+    return AppCredentialsPutResponse(configured=True, app_id=row.app_id)
+
+
+@router.get("/{org_id}/channel-connections/{channel}/app-credentials", response_model=AppCredentialsStatusResponse)
+async def get_channel_app_credentials_status(
+    org_id: uuid.UUID,
+    channel: str,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> AppCredentialsStatusResponse:
+    """유나 «설정 미완» 상태의 서버 근거(페드루 PO 2026-09-03 08:29Z) — member 이상이면 조회
+    가능(list_channel_connections_endpoint와 동일 tier — 응답에 secret·app_id 전체 어느
+    것도 없다, 끝 4자리뿐이라 비밀 노출 0)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    await _require_human(db, auth, org_id)
+    row = await get_channel_app_credentials(db, org_id=org_id, channel=channel)
+    effective_source = await resolve_app_credentials_source(db, org_id=org_id, channel=channel)
+    if row is None:
+        return AppCredentialsStatusResponse(configured=False, effective_source=effective_source)
+    return AppCredentialsStatusResponse(
+        configured=True, app_id_suffix=_app_id_suffix(row.app_id),
+        updated_by=row.updated_by, updated_at=row.updated_at.isoformat(),
+        effective_source=effective_source,
+    )
+
+
+class PublishingLimitResponse(BaseModel):
+    quota_usage: int
+    quota_total: int
+    quota_duration_seconds: int
+
+
+@router.get(
+    "/{org_id}/channel-connections/{connection_id}/publishing-limit", response_model=PublishingLimitResponse,
+)
+async def get_channel_publishing_limit(
+    org_id: uuid.UUID,
+    connection_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> PublishingLimitResponse:
+    """story #f8f7cb0f(Phase1·마케팅운영) — 발행 한도 잔량(UI 표시용, provider 실조회).
+    휴먼 전용(test_channel_connection과 동형 — member 이상이면 충분, owner 제한 없음).
+    발행 직전 서버 내부 재조회(channel_posts.publish_channel_post_draft)와 같은 함수
+    (threads_publish.get_publishing_limit)를 쓴다 — 단일 조회 경로."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    await _require_human(db, auth, org_id)
+
+    row = await get_channel_connection(db, org_id=org_id, connection_id=connection_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="channel connection not found")
+
+    access_token = decrypt_for_use(row)
+    if access_token is None:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "CHANNEL_CONNECTION_NOT_ACTIVE", "message": "연결에 저장된 토큰이 없습니다."},
+        )
+
+    from app.services.channel_adapters import get_publish_client_module
+    from app.services.threads_publish import ThreadsPublishError
+
+    # story 5b27b32f — sandbox 연결이면 sandbox_publish로 우회(publish 경로와 동일 디스패치).
+    get_publishing_limit = get_publish_client_module(row.channel).get_publishing_limit
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            try:
+                quota_usage, quota_total, quota_duration = await get_publishing_limit(
+                    client, access_token=access_token, threads_user_id=row.account_id,
+                )
+            except ThreadsPublishError as exc:
+                if exc.status_code in (401, 403):
+                    await apply_refresh_failure(db, connection=row, error_message=exc.message)
+                    raise HTTPException(
+                        status_code=409,
+                        detail={"code": "CHANNEL_TOKEN_EXPIRED", "message": exc.message},
+                    ) from exc
+                # story #3632 — 진짜 상류 실패는 CF가 HTML로 가로채는 502 대신 503으로
+                # (channel_posts.py/channel_post_comments.py의 동일 코드 처리와 동형).
+                raise HTTPException(
+                    status_code=503,
+                    detail={"code": "CHANNEL_PUBLISH_PROVIDER_ERROR", "message": exc.message},
+                ) from exc
+    finally:
+        del access_token  # ⛔즉시 소비 후 폐기 — test_channel_connection과 동일 관례.
+
+    return PublishingLimitResponse(
+        quota_usage=quota_usage, quota_total=quota_total, quota_duration_seconds=quota_duration,
+    )

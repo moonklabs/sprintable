@@ -177,6 +177,15 @@ async def test_recruit_ignores_inaccessible_x_project_id_when_owner(
     monkeypatch.setattr(agents_router, "emit_onboarding_event", AsyncMock(return_value=None))
     mock_session.commit = AsyncMock(return_value=None)
 
+    # story #3370 회귀 클래스 정정(페드루 PO 지시 2026-09-11) — _recruit_agent_endpoint가
+    # 이제 actor_id를 쓰기 前 resolve_member_db_verified()로 실측한다(test_s41.py 등과 동형
+    # 사유). 이 파일의 순수 AsyncMock 세션은 그 조회를 감당 못 한다.
+    resolved_caller = MagicMock()
+    resolved_caller.id = uuid.uuid4()
+    monkeypatch.setattr(
+        agents_router, "resolve_member_db_verified", AsyncMock(return_value=resolved_caller)
+    )
+
     inaccessible_project_id = str(uuid.uuid4())
     resp = await test_client.post(
         f"/api/v2/agents/{agent_id}/recruit",

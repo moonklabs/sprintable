@@ -54,7 +54,7 @@ describe('rail orders (E-MCP-OPT S3 — transport-aware verify rail shape)', () 
 // 마운트해 DOM으로 잰다(코드베이스 마운트 패턴: jsdom + createRoot + React.act). 조건 배선이 지워지면
 // 이 assert가 실패하도록 각 문구를 직접 확認한다(양성대조 — 표시가 곧 이 fix의 값이므로 그 축을 덮는다).
 describe('ConnectStep — story #4cdad425 (검증 안내 표시 렌더)', () => {
-  const RESTART = '재시작해야 새 연결이 적용됩니다'; // restartAfterConfig
+  const RESTART = ko.onboarding.restartAfterConfig; // story #3901 — 리터럴 재-pin 대신 ko.json 값 대조
   const WAITING = '연결을 확인하는 중이에요'; // verifyWaiting
   const TIMEOUT = '아직 연결이 확인되지 않았어요'; // verifyTimeoutTitle
 
@@ -149,7 +149,7 @@ describe('ConnectStep — story #4cdad425 (검증 안내 표시 렌더)', () => 
 // 대입할 자리(renderArtifact) 자체에 도달하지 못했다.
 describe('ConnectStep — story #3192 (연결 아티팩트 shape 회귀 pin)', () => {
   const PENDING = '연결 설정 생성 중…'; // artifactPending
-  const ERROR = '설정을 불러오지 못했습니다'; // artifactError
+  const ERROR = ko.onboarding.artifactError; // story #3901 — 리터럴 재-pin 대신 ko.json 값 대조
   const REAL_KEY = 'sk_live_realkey0001';
 
   function makeArtifactFetch(kind: 'real-shape' | 'stale-shape' | 'empty-files') {
