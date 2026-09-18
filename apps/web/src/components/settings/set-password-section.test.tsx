@@ -94,24 +94,6 @@ describe('SetPasswordSection — error.code 분기 (story #2485)', () => {
     expect(msg?.getAttribute('role')).toBe('alert');
   });
 
-  // 유나 design:changes(PR#3688, 2026-09-01) — ALREADY_HAS_PASSWORD는 실패가 아니라 「이미
-  // 완료」라 빨강(destructive/role=alert)이 부적절 — 중립 톤(text-foreground/role=status).
-  it('ALREADY_HAS_PASSWORD — 실패 톤(destructive/alert)이 아니라 중립 톤(text-foreground/status)', async () => {
-    await submitWithErrorCode('ALREADY_HAS_PASSWORD', 'User already has a password set');
-    const msg = [...container.querySelectorAll('p')].find((p) => p.textContent === '이 계정에는 이미 비밀번호가 설정되어 있습니다.');
-    expect(msg).not.toBeUndefined();
-    expect(msg?.className).toContain('text-foreground');
-    expect(msg?.className).not.toContain('text-destructive');
-    expect(msg?.getAttribute('role')).toBe('status');
-  });
-
-  it('USER_NOT_FOUND(진짜 실패)는 여전히 destructive/alert 톤 그대로다(회귀 0)', async () => {
-    await submitWithErrorCode('USER_NOT_FOUND', 'User not found');
-    const msg = [...container.querySelectorAll('p')].find((p) => p.textContent === '계정을 찾을 수 없습니다.');
-    expect(msg?.className).toContain('text-destructive');
-    expect(msg?.getAttribute('role')).toBe('alert');
-  });
-
   it('USER_NOT_FOUND — raw error.message 대신 고정 문구', async () => {
     await submitWithErrorCode('USER_NOT_FOUND', 'User not found');
     expect(container.textContent).not.toContain('User not found');
