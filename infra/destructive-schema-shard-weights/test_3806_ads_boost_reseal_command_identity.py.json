@@ -1,0 +1,1 @@
+{"file": "tests/test_3806_ads_boost_reseal_command_identity.py", "sec": 3.0, "source": "story-3806(Phase3·3-2 PR 13, 페드루 PO 確定 2026-09-11 19:58Z — 감액 재봉인 뒤 명령 사슬 정체성 결함(approved_version 스코프→gate_id 스코프) 근본수정) — 신규 파일 실측(로컬, uv run pytest --durations=0 직접 1회 실행, 2건 wall time 약 3.0s — test_3766 등재 선례와 동일 방법론)"}

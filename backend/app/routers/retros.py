@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +14,9 @@ from app.services import retro_hypothesis_seed as seed_svc
 from app.services import retro_synthesis as synth_svc
 from app.services.member_resolver import canonicalize_member_id, lookup_members_by_ids, resolve_member
 from app.services.project_auth import require_project_access
+from app.services.retro_export_i18n import (
+    action_status_label, export_string, phase_label, resolve_export_locale, votes_label,
+)
 from app.repositories.retro import (
     RetroActionRepository,
     RetroItemRepository,
@@ -687,11 +690,21 @@ async def update_action(
 @router.get("/{id}/export")
 async def export_session(
     id: uuid.UUID,
+    # story #3778 CHANGES(카디르 QA 2026-09-10) — `request: Request | None = None`으로
+    # "직접 호출 하위호환"을 노렸으나 FastAPI가 `Request`를 특수 주입 타입으로 인식하는
+    # 것은 정확히 어노테이션이 `Request`(Optional/Union 아님)일 때뿐이다 — `Request | None`
+    # 으로 바꾸는 순간 FastAPI가 이걸 일반 Pydantic 필드로 취급해 스키마 생성에 실패,
+    # **라우트 등록 자체가 죽는다**(모듈 임포트 시점 에러라 이 파일을 import하는 모든
+    # 테스트가 연쇄로 깨짐 — 직접호출 테스트 1개보다 훨씬 큰 폭발반경, 실측으로 발견).
+    # 그래서 시그니처는 그대로 두고(`Request` 그대로, 기본값 없음) 직접 호출 테스트
+    # 쪽에서 request를 명시로 넘기게 고쳤다(test_retro_grouping_vote_count_realdb.py).
+    request: Request,
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
     repo: RetroSessionRepository = Depends(_get_session_repo),
 ) -> Response:
     session = await _require_retro_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
+    locale = resolve_export_locale(request.headers.get("accept-language"))
 
     item_repo = RetroItemRepository(db)
     action_repo = RetroActionRepository(db)
@@ -701,19 +714,19 @@ async def export_session(
 
     lines = [
         f"# {session.title}",
-        f"**Phase:** {session.phase}",
+        f"{export_string('phase_prefix', locale)} {phase_label(session.phase, locale)}",
         "",
-        "## 잘된 점 (Good)",
-        *[f"- {i.text} ({i.vote_count} votes)" for i in items if i.category == "good"],
+        export_string("section_good", locale),
+        *[f"- {i.text} ({votes_label(i.vote_count, locale)})" for i in items if i.category == "good"],
         "",
-        "## 아쉬운 점 (Bad)",
-        *[f"- {i.text} ({i.vote_count} votes)" for i in items if i.category == "bad"],
+        export_string("section_bad", locale),
+        *[f"- {i.text} ({votes_label(i.vote_count, locale)})" for i in items if i.category == "bad"],
         "",
-        "## 개선할 점 (Improve)",
-        *[f"- {i.text} ({i.vote_count} votes)" for i in items if i.category == "improve"],
+        export_string("section_improve", locale),
+        *[f"- {i.text} ({votes_label(i.vote_count, locale)})" for i in items if i.category == "improve"],
         "",
-        "## Action Items",
-        *[f"- [{a.status}] {a.title}" for a in actions],
+        export_string("section_actions", locale),
+        *[f"- [{action_status_label(a.status, locale)}] {a.title}" for a in actions],
     ]
 
     return Response(content="\n".join(lines), media_type="text/markdown")

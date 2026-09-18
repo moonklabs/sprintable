@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.models.gate import Gate, set_gate_evidence_status, set_gate_status
+from app.models.hitl_config import OrgGatePolicy
 from app.models.participation import ParticipationRole
 from app.services.gate_resolver import (
     SOURCE_MEMBER_OVERRIDE,
@@ -520,6 +521,15 @@ async def evaluate_merge_gate(
         gate_type=MERGE_GATE_TYPE, pr_number=db_pr_number, repo_full_name=db_repo_full_name,
     )
     _prior_status = _prior_gate.status if _prior_gate is not None else None
+    # story #3319(2026-09-02, 선생님 처방 확定) — org가 merge_gate_default_approver_member_id를
+    # 설정해 뒀으면 그 멤버로 designated_approver_id를 채운다(gates.py::_non_doc_can_approve의
+    # 새 분기가 이 값이 있으면 project/org owner 전원이 아니라 그 1인에게만 승인 자격을
+    # 좁힌다 — 실사고: QA 前 머지 게이트를 org owner가 승인 가능 상태로 봄). 미설정(기본값)이면
+    # None 그대로 — 현행 무변경(회귀 0).
+    _org_policy = (await session.execute(
+        select(OrgGatePolicy.merge_gate_default_approver_member_id)
+        .where(OrgGatePolicy.org_id == org_id)
+    )).scalar_one_or_none()
     gate = await create_gate(
         session,
         org_id,
@@ -532,6 +542,7 @@ async def evaluate_merge_gate(
         neutral_facts=facts,
         pr_number=db_pr_number,
         repo_full_name=db_repo_full_name,
+        designated_approver_id=_org_policy,
     )
 
     # 재제출 re-open(doc-gate 48f064e5 선례 이식): uq(work_item,gate_type)=1행 + terminal=immutable
@@ -576,34 +587,6 @@ async def evaluate_merge_gate(
         gate.neutral_facts = {**(gate.neutral_facts or {}), **facts}
         await session.flush()
 
-    # story #2118(E-DG-REAL ②) — doc.py의 dispatch_approval_request_cards(#2604) 패턴을 merge
-    # gate까지 확장: 이 호출에서 gate가 «방금» pending이 된 경우만(_prior_status와 비교, 위 주석
-    # 참조) 승인자별 1:1 DM에 카드를 배달한다. 승인 자격자 = project owner/admin(project_id
-    # 해소 실패 시 org owner/admin — project_auth.list_gate_approver_ids, gates.py
-    # _non_doc_gate_approvable과 동일 규칙). 카드 배달 자체는 best-effort(project_auth 조회
-    # 실패가 게이트 생성/decision을 막지 않음) — doc.py와 동일 관례.
-    if gate.status == "pending" and _prior_status != "pending":
-        try:
-            from app.models.pm import Story
-            from app.services.approval_delivery import dispatch_approval_request_cards
-            from app.services.project_auth import list_gate_approver_ids
-
-            story_title = (await session.execute(
-                select(Story.title).where(Story.id == story_id, Story.org_id == org_id)
-            )).scalar_one_or_none() or f"#{str(story_id)[:8]}"
-            approver_ids = await list_gate_approver_ids(
-                session, org_id, project_id, exclude_id=member_id,
-            )
-            await dispatch_approval_request_cards(
-                session, org_id=org_id, work_item_type="story", work_item_id=story_id,
-                project_id=project_id, title=story_title, gate_id=gate.id,
-                requester_id=member_id, approver_ids=approver_ids,
-            )
-        except Exception:  # noqa: BLE001 — 카드 배달 실패는 게이트 생성/decision을 막지 않음.
-            logger.warning(
-                "merge gate 승인요청 카드 배달 실패 story=%s gate=%s", story_id, gate.id, exc_info=True,
-            )
-
     # 4. 정책 + 증거(CI/PR) + outcome trust 합성 decision.
     decision, reason = _decide(
         ci=ci,
@@ -621,6 +604,54 @@ async def evaluate_merge_gate(
     set_gate_evidence_status(gate, _evidence_status(decision), now=datetime.now(timezone.utc))
     gate.decision_basis = reason
     gate.auto_decision_reason = decision
+
+    # story #2118(E-DG-REAL ②) — doc.py의 dispatch_approval_request_cards(#2604) 패턴을 merge
+    # gate까지 확장: 승인자별 1:1 DM에 카드를 배달한다. 승인 자격자 = project owner/admin
+    # (project_id 해소 실패 시 org owner/admin — project_auth.list_gate_approver_ids,
+    # gates.py _non_doc_gate_approvable과 동일 규칙). 카드 배달 자체는 best-effort(project_
+    # auth 조회 실패가 게이트 생성/decision을 막지 않음) — doc.py와 동일 관례.
+    #
+    # story #3821(customer-zero 실측, 페드루 PO 확定 2026-09-13) — 이 블록은 원래 `_decide()`
+    # 호출(§4) *前*에 있었다: `gate.status`(create_gate 시점 정책 disposition 스냅샷 —
+    # auto_passed|pending|rejected)만 보고 즉시 배달을 실행했는데, 그 直後(§4) `_decide()`가
+    # **CI/trust 등 실시간 증거로 별도로** decision(auto_merge|ask_human|block)을 산출한다(두
+    # 축이 다르다는 것은 카디르 QA PR#2902②·#2156이 이미 고정한 구분 — 위 anchor 주석 참고).
+    # 즉 정책 스냅샷은 "일단 사람에게 물어봐"(pending)였는데, 방금 들어온 CI 증거로 `_decide()`
+    # 가 AUTO_MERGE를 내는 경우에도 그 판정이 나오기 前에 이미 카드가 나갔다 — "물어볼 필요가
+    # 없다"고 곧 판정 날 결정에도 사람이 먼저 pinging되는 실 결함(customer-zero: 선생님 채널
+    # 하루 11건 소음의 일부, story #3821). 처방: `_decide()` 뒤로 옮기고 판단 축 자체를
+    # `gate.status`(정책 스냅샷)에서 `decision`(실 증거 판정)으로 바꾼다 — ASK_HUMAN일 때만
+    # 배달(AUTO_MERGE·BLOCK은 카드 0, 후자는 "이미 결론 난 거부"라 승인 액션 자체가 무의미).
+    # `_prior_status != "pending"` 중복방지 축은 그대로 유지(같은 슬롯 반복 평가 재배달 금지 —
+    # 이 축은 "정책이 방금 pending으로 전이했나"가 아니라 "이 gate 슬롯이 이미 열려 있었나"를
+    # 재는 것이라 판단 축 교체와 무관하게 유효).
+    if decision == ASK_HUMAN and _prior_status != "pending":
+        try:
+            from app.models.pm import Story
+            from app.services.approval_delivery import dispatch_approval_request_cards
+            from app.services.project_auth import list_gate_approver_ids
+
+            story_title = (await session.execute(
+                select(Story.title).where(Story.id == story_id, Story.org_id == org_id)
+            )).scalar_one_or_none() or f"#{str(story_id)[:8]}"
+            approver_ids = await list_gate_approver_ids(
+                session, org_id, project_id, exclude_id=member_id,
+            )
+            await dispatch_approval_request_cards(
+                session, org_id=org_id, work_item_type="story", work_item_id=story_id,
+                project_id=project_id, title=story_title, gate_id=gate.id, gate_type=MERGE_GATE_TYPE,
+                requester_id=member_id, approver_ids=approver_ids,
+                # story #3821(PR B) — 같은 스토리에 여러 소 PR이 열려 이 gate가 매번
+                # 새로 생겨도(PR마다 다른 gate_id), 최상위 카드가 이미 있으면 「다시
+                # 결재가 필요합니다 — PR #{n}」 스레드 답글로 붕괴시킨다. db_pr_number
+                # 가 None인 board-preflight/report-done 경로(PR 컨텍스트 자체가 없음)
+                # 는 사유 없이 기본 문구만.
+                reopen_reason=f"PR #{db_pr_number}" if db_pr_number else None,
+            )
+        except Exception:  # noqa: BLE001 — 카드 배달 실패는 게이트 생성/decision을 막지 않음.
+            logger.warning(
+                "merge gate 승인요청 카드 배달 실패 story=%s gate=%s", story_id, gate.id, exc_info=True,
+            )
 
     # story #2813(카디르 R3 HIGH) — anchor는 **실 판정이 AUTO_MERGE일 때만** 확定한다.
     # ⛔최초 fix는 `gate.status == "auto_passed"`(정책 disposition 축) 시점에 찍었는데, 그건

@@ -87,8 +87,8 @@ describe('CreateOrganizationDialog — PLAN_LIMIT_EXCEEDED envelope (story #2470
     await fillAndSubmit();
 
     expect(document.body.textContent).not.toContain('Free plan org limit (1) reached');
-    expect(document.body.textContent).toContain('업그레이드가 필요합니다');
-    expect(document.body.textContent).toContain('무료 플랜은 조직을 1개까지 만들 수 있습니다');
+    expect(document.body.textContent).toContain(koMessages.nav.orgLimitBannerTitle);
+    expect(document.body.textContent).toContain(koMessages.onboarding.orgLimitExceededError.replace('{limit}', '1'));
     expect(document.body.querySelector('a[href="/settings?tab=billing"]')).not.toBeNull();
   });
 
@@ -102,8 +102,8 @@ describe('CreateOrganizationDialog — PLAN_LIMIT_EXCEEDED envelope (story #2470
     await mount();
     await fillAndSubmit();
 
-    expect(document.body.textContent).toContain('업그레이드가 필요합니다');
-    expect(document.body.textContent).toContain('무료 플랜은 조직을 1개까지 만들 수 있습니다');
+    expect(document.body.textContent).toContain(koMessages.nav.orgLimitBannerTitle);
+    expect(document.body.textContent).toContain(koMessages.onboarding.orgLimitExceededError.replace('{limit}', '1'));
   });
 
   it('다른 에러는 기존 일반 배너로 간다(회귀 없음)', async () => {
@@ -119,8 +119,8 @@ describe('CreateOrganizationDialog — PLAN_LIMIT_EXCEEDED envelope (story #2470
     // story #2484 — CONFLICT(=슬러그 중복)도 이제 code로 분기해 raw 영문 대신 번역 문구를
     // 쓴다(이전엔 여기서 raw message가 그대로 노출됐음 — 회귀가드 겸함).
     expect(document.body.textContent).not.toContain('Slug already exists');
-    expect(document.body.textContent).toContain('이미 사용 중인 슬러그입니다');
-    expect(document.body.textContent).not.toContain('업그레이드가 필요합니다');
+    expect(document.body.textContent).toContain(koMessages.nav.createOrgSlugTaken);
+    expect(document.body.textContent).not.toContain(koMessages.nav.orgLimitBannerTitle);
   });
 
   it('알려지지 않은 code — 안전 폴백, raw message 미노출 (story #2484)', async () => {
@@ -134,7 +134,7 @@ describe('CreateOrganizationDialog — PLAN_LIMIT_EXCEEDED envelope (story #2470
     await fillAndSubmit();
 
     expect(document.body.textContent).not.toContain('brand new raw string');
-    expect(document.body.textContent).toContain('Organization을 만들지 못했습니다');
+    expect(document.body.textContent).toContain(koMessages.nav.createOrgGenericError);
   });
 
   it('en locale에선 영문 배너로 렌더된다(회귀 없음)', async () => {
@@ -166,15 +166,16 @@ describe('CreateOrganizationDialog — i18n (story #2482)', () => {
     vi.stubGlobal('fetch', vi.fn());
     await mount('ko');
 
-    expect(document.body.textContent).toContain('새 Organization 만들기');
-    expect(document.body.textContent).toContain('이름');
-    expect(document.body.textContent).toContain('Slug');
+    expect(document.body.textContent).toContain('새 조직 만들기');
+    // story #3910 — 리터럴 재-pin 대신 ko.json 값을 읽어 대조(온보딩 폼과 낱말 통일 후).
+    expect(document.body.textContent).toContain(koMessages.nav.createOrgNameLabel);
+    expect(document.body.textContent).toContain(koMessages.nav.createOrgSlugLabel);
     expect(document.body.textContent).toContain('취소');
     expect(document.body.textContent).toContain('만들기');
     const nameInput = document.body.querySelector('#org-name') as HTMLInputElement;
-    expect(nameInput.placeholder).toBe('예: My Company');
+    expect(nameInput.placeholder).toBe(koMessages.nav.createOrgNamePlaceholder);
     const slugInput = document.body.querySelector('#org-slug') as HTMLInputElement;
-    expect(slugInput.placeholder).toBe('my-company');
+    expect(slugInput.placeholder).toBe(koMessages.nav.createOrgSlugPlaceholder);
   });
 
   it('en locale: 제목·라벨·placeholder·버튼이 전부 영문으로 렌더된다(회귀 없음)', async () => {
@@ -182,11 +183,12 @@ describe('CreateOrganizationDialog — i18n (story #2482)', () => {
     await mount('en');
 
     expect(document.body.textContent).toContain('Create new organization');
-    expect(document.body.textContent).toContain('Name');
+    // story #3910 — 리터럴 재-pin 대신 en.json 값을 읽어 대조(온보딩 폼과 낱말 통일 후).
+    expect(document.body.textContent).toContain(enMessages.nav.createOrgNameLabel);
     expect(document.body.textContent).toContain('Cancel');
     expect(document.body.textContent).toContain('Create');
     const nameInput = document.body.querySelector('#org-name') as HTMLInputElement;
-    expect(nameInput.placeholder).toBe('e.g. My Company');
+    expect(nameInput.placeholder).toBe(enMessages.nav.createOrgNamePlaceholder);
   });
 
   it('slug 형식 에러도 로케일을 따라간다(ko/en)', async () => {
@@ -196,7 +198,7 @@ describe('CreateOrganizationDialog — i18n (story #2482)', () => {
     // handleSlugChange가 [a-z0-9-] 외 문자는 이미 걸러내므로(공백·특수문자), SLUG_REGEX를
     // 실제로 깨는 값은 "시작/끝이 하이픈"류뿐이다.
     await act(async () => { setNativeValue(slugInput, '-bad-'); });
-    expect(document.body.textContent).toContain('영소문자, 숫자, 하이픈만 사용 가능합니다');
+    expect(document.body.textContent).toContain(koMessages.nav.createOrgSlugError);
   });
 
   it('제출 실패(일반 에러, code 없음)도 i18n 문구로 뜬다', async () => {
@@ -207,7 +209,7 @@ describe('CreateOrganizationDialog — i18n (story #2482)', () => {
     })));
     await mount('ko');
     await fillAndSubmit();
-    expect(document.body.textContent).toContain('Organization을 만들지 못했습니다. 잠시 후 다시 시도해 주세요.');
+    expect(document.body.textContent).toContain(koMessages.nav.createOrgGenericError);
   });
 
   // 양성대조(AC) — 라벨 하나를 하드코딩으로 되돌리면 이 검사가 실제로 빨간불이어야 한다.
@@ -218,7 +220,37 @@ describe('CreateOrganizationDialog — i18n (story #2482)', () => {
   it('양성대조 — 하드코딩 되돌림을 가정: en에서 한국어 문구가 섞이면 실패한다', async () => {
     vi.stubGlobal('fetch', vi.fn());
     await mount('en');
-    expect(document.body.textContent).not.toContain('새 Organization 만들기');
+    expect(document.body.textContent).not.toContain('새 조직 만들기');
     expect(document.body.textContent).not.toContain('이름 *');
+  });
+});
+
+// story #3910(PO 눈 리뷰, 3905 캡처 그라운딩) — 조직 만들기 대화상자(nav.createOrg*)와
+// 온보딩 폼(onboarding.orgName/slug*)이 같은 입력(조직 이름·URL 슬러그)을 다른 낱말로
+// 부르던 것을 값 통일했다. 두 화면의 값이 다시 갈리면(한쪽만 고치는 재발) 즉시 잡는다.
+describe('CreateOrganizationDialog — 대화상자·온보딩 폼 낱말 일치(story #3910 AC2)', () => {
+  it('ko: nav.createOrg*와 onboarding.org*/slug*가 값으로 같다', () => {
+    expect(koMessages.nav.createOrgNameLabel).toBe(koMessages.onboarding.orgName);
+    expect(koMessages.nav.createOrgNamePlaceholder).toBe(koMessages.onboarding.orgNamePlaceholder);
+    expect(koMessages.nav.createOrgSlugLabel).toBe(koMessages.onboarding.slug);
+    expect(koMessages.nav.createOrgSlugPlaceholder).toBe(koMessages.onboarding.slugPlaceholder);
+  });
+
+  it('en: nav.createOrg*와 onboarding.org*/slug*가 값으로 같다', () => {
+    expect(enMessages.nav.createOrgNameLabel).toBe(enMessages.onboarding.orgName);
+    expect(enMessages.nav.createOrgNamePlaceholder).toBe(enMessages.onboarding.orgNamePlaceholder);
+    expect(enMessages.nav.createOrgSlugLabel).toBe(enMessages.onboarding.slug);
+    expect(enMessages.nav.createOrgSlugPlaceholder).toBe(enMessages.onboarding.slugPlaceholder);
+  });
+
+  // 양성대조 — 한쪽만 바꾸면(다이얼로그 재-드리프트) RED가 된다는 것을 실제로 증명한다.
+  it('양성대조 — nav.createOrgSlugLabel만 되돌리면(값 갈림) RED가 된다', () => {
+    const mutatedNav = { ...koMessages.nav, createOrgSlugLabel: 'Slug' };
+    expect(mutatedNav.createOrgSlugLabel).not.toBe(koMessages.onboarding.slug);
+  });
+
+  // 무관 PR no-op — 이 4쌍과 무관한 다른 nav/onboarding 값 불일치는 이 가드가 안 본다.
+  it('무관 PR no-op — 다른 nav/onboarding 키 쌍(switcherNewOrganization 등)은 이 가드 밖이다', () => {
+    expect(koMessages.nav.switcherNewOrganization).not.toBe(koMessages.onboarding.welcome);
   });
 });

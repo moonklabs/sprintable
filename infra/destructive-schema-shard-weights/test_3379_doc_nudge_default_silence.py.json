@@ -1,0 +1,1 @@
+{"file": "tests/test_3379_doc_nudge_default_silence.py", "sec": 14.5, "source": "story-3379-doc-nudge-default-silence(신규 파일 — 5건, PR #4011 CI \"destructive schema weights registered\" 가드가 미등재로 잡으며 출력한 평균 폴백값(14.5s) 그대로 등재, 실 CI 샤드 로그로 재확認 필요)"}

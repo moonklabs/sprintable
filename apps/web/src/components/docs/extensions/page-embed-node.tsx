@@ -3,6 +3,7 @@
 import { Node, mergeAttributes } from '@tiptap/core';
 import { ReactNodeViewRenderer, NodeViewWrapper, type ReactNodeViewProps } from '@tiptap/react';
 import { useState, useEffect, useCallback } from 'react';
+import { useTranslations } from 'next-intl';
 import { FileText, AlertCircle, RefreshCw } from 'lucide-react';
 
 import { fetchWithAuth } from '@/lib/db/client';
@@ -62,6 +63,11 @@ type NodeAttrs = {
 };
 
 function PageEmbedView({ node, updateAttributes, extension }: ReactNodeViewProps) {
+  // story #3880(§⑤ 낱말 드리프트, 유나 §⑤ 3880-c 확定) — "Embed"/"Change" 원시 영문
+  // 정본화. Embed는 chats.embedFormEmbed 기존 키 재사용, Change는 docs 네임스페이스
+  // 신규 키(이 파일이 docs 에디터 확장이라 도메인 일치).
+  const tChats = useTranslations('chats');
+  const tDocs = useTranslations('docs');
   const attrs = node.attrs as NodeAttrs;
   const { docId, title, icon, slug } = attrs;
   const { currentDocId, onNavigate } = extension.options as PageEmbedOptions;
@@ -168,7 +174,7 @@ function PageEmbedView({ node, updateAttributes, extension }: ReactNodeViewProps
             type="submit"
             className="rounded-lg bg-brand/14 px-3 py-1 text-xs font-medium text-[color:var(--brand-soft)] hover:bg-brand/24"
           >
-            Embed
+            {tChats('embedFormEmbed')}
           </button>
         </form>
       </NodeViewWrapper>
@@ -199,7 +205,7 @@ function PageEmbedView({ node, updateAttributes, extension }: ReactNodeViewProps
             onClick={handleReset}
             className="text-xs text-[color:var(--brand-soft)] hover:underline"
           >
-            Change
+            {tDocs('pageEmbedChangeAction')}
           </button>
         </div>
       </NodeViewWrapper>
@@ -238,7 +244,7 @@ function PageEmbedView({ node, updateAttributes, extension }: ReactNodeViewProps
             }}
             className="text-xs text-muted-foreground opacity-0 transition group-hover:opacity-100 hover:text-foreground"
           >
-            Change
+            {tDocs('pageEmbedChangeAction')}
           </button>
         </div>
       </NodeViewWrapper>

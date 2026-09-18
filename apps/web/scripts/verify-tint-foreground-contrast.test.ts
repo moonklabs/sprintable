@@ -188,18 +188,23 @@ describe('computeCrossFamilyBgReference — story #2575 AC4 양성대조(교차-
   // 테스트의 역할은 "그 사고가 지금도 재현되는가"가 아니라 "계산이 실 globals.css 정의로부터
   // 결정적으로 같은 값을 낸다"는 회귀가드이므로, 새 팔레트에서 실측한 값으로 갱신한다(#2960
   // 원 사고 자체는 위 첫 테스트가 합성 CSS로 이미 영구 고정해 재현 가능하다).
-  it('실 globals.css로 계산하면 light/destructive-on-warning-bg가 proof 팔레트 실측값(4.67)과 근사 일치한다', () => {
+  // story #3826(2026-09-13, doc 3dc24888) — v3 AA 조정(amber #946719)으로 값이 다시
+  // 이동: 4.67 → 4.74(실측).
+  it('실 globals.css로 계산하면 light/destructive-on-warning-bg가 proof 팔레트 실측값(4.74)과 근사 일치한다', () => {
     const css = readFileSync(GLOBALS_CSS_PATH, 'utf-8');
     const results = computeCrossFamilyBgReference(css);
     const hit = results.find((r) => r.theme === 'light' && r.textFamily === 'destructive' && r.bgFamily === 'warning')!;
-    expect(hit.ratio).toBeCloseTo(4.67, 1);
+    expect(hit.ratio).toBeCloseTo(4.74, 1);
   });
 
-  it('같은-계열 쌍(textFamily === bgFamily)도 참고표에 포함된다 — warning-on-warning-bg가 proof 팔레트 실측값(3.25)과 근사 일치', () => {
+  // story #3826(2026-09-13, doc 3dc24888) — v3 AA 조정(amber #946719, warning-bg 위
+  // 4.51:1로 조정)으로 값이 이동: 3.25 → 4.51(실측). doc §⑥가 이 정확한 숫자를 "AA
+  // 통과 조정 근거"로 명시(amber 대비표).
+  it('같은-계열 쌍(textFamily === bgFamily)도 참고표에 포함된다 — warning-on-warning-bg가 proof 팔레트 실측값(4.51)과 근사 일치', () => {
     const css = readFileSync(GLOBALS_CSS_PATH, 'utf-8');
     const results = computeCrossFamilyBgReference(css);
     const hit = results.find((r) => r.theme === 'light' && r.textFamily === 'warning' && r.bgFamily === 'warning')!;
-    expect(hit.ratio).toBeCloseTo(3.25, 1);
+    expect(hit.ratio).toBeCloseTo(4.51, 1);
   });
 });
 
@@ -220,9 +225,21 @@ describe('real repo globals.css — 실제 정의가 전 조합 AA(4.5)를 통�
     }
   });
 
-  it('regression proof — using the family color itself (the old pattern) would have failed at least one combination (this is why the rule exists)', () => {
-    const anyFamilyColorFails = results.some((r) => !Number.isNaN(r.familyColorOnBackgroundRatio) && r.familyColorOnBackgroundRatio < 4.5);
-    expect(anyFamilyColorFails).toBe(true);
+  // story #3826(2026-09-13, doc 3dc24888) 실측 발견 — v3 AA 조정(amber #946719 등, doc
+  // §⑥)이 이 규칙의 원래 반례(light/destructive family-color-ratio, 예전 4.5 미만)까지
+  // 우연히 4.5 문턱 위로 밀어 올렸다(실측 4.504 — 전 조합 중 최솟값). "family color를
+  // 텍스트로 써도 지금은 전부 AA를 통과한다"는 게 "그 패턴을 써도 된다"는 뜻은 아니다
+  // (-foreground를 쓰는 규칙 자체는 무관하게 유효 — 다음 팔레트 조정이 이 마진을 다시
+  // 깎을 수 있다는 방어). 이 테스트는 그 마진 자체를 pin — 4.5 밑으로 내려가거나(회귀 —
+  // 그때 원래 "반례 존재" 단언을 복원할 것) 마진이 눈에 띄게 넓어지면(팔레트가 크게
+  // 바뀌었다는 신호) 리뷰가 필요하다는 뜻으로 이 테스트가 깨진다.
+  it('마진 관찰(story #3826) — family color를 텍스트로 썼을 때의 최소 대비가 AA 문턱(4.5)에 바짝 붙어 있다(v3 조정의 부수효과, 규칙 자체는 여전히 유효)', () => {
+    const familyColorRatios = results
+      .map((r) => r.familyColorOnBackgroundRatio)
+      .filter((v) => !Number.isNaN(v));
+    const min = Math.min(...familyColorRatios);
+    expect(min).toBeGreaterThanOrEqual(4.5);
+    expect(min).toBeLessThan(4.6); // 문턱에서 크게 안 멀어졌는지 — 멀어지면 팔레트가 또 바뀐 것.
   });
 
   // story #2575 AC1 — -bg가 이 스토리 이전엔 아예 안 잡혔다는 것 자체가 #2960의 근본원인.
@@ -238,9 +255,10 @@ describe('real repo globals.css — 실제 정의가 전 조합 AA(4.5)를 통�
 
   // story #2575 AC4 — #2960 수치가 이 정의 검사 자체(같은-계열 참고값)에서도 재현된다.
   // story #2917: proof-amber 팔레트로 값이 이동(3.25) — 위 computeCrossFamilyBgReference
-  // 테스트 주석과 동일 이유.
-  it('AC4 양성대조 — light/warning의 familyColorOnBackgroundRatio(-bg)가 proof 팔레트 실측값(3.25)과 근사 일치한다', () => {
+  // 테스트 주석과 동일 이유. story #3826(2026-09-13, doc 3dc24888): v3 AA 조정으로
+  // 다시 이동(3.25 → 4.51, amber #946719).
+  it('AC4 양성대조 — light/warning의 familyColorOnBackgroundRatio(-bg)가 proof 팔레트 실측값(4.51)과 근사 일치한다', () => {
     const r = results.find((x) => x.theme === 'light' && x.family === 'warning' && x.kind === 'bg')!;
-    expect(r.familyColorOnBackgroundRatio).toBeCloseTo(3.25, 1);
+    expect(r.familyColorOnBackgroundRatio).toBeCloseTo(4.51, 1);
   });
 });

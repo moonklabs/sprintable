@@ -7,6 +7,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
+import enMessages from '../../../messages/en.json';
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
@@ -17,9 +18,10 @@ import type { EventNotification } from './notification-bell';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-function withIntl(node: React.ReactNode) {
+function withIntl(node: React.ReactNode, locale: 'ko' | 'en' = 'ko') {
+  const messages = locale === 'ko' ? koMessages : enMessages;
   return (
-    <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+    <NextIntlClientProvider locale={locale} messages={messages} timeZone="Asia/Seoul">
       {node}
     </NextIntlClientProvider>
   );
@@ -189,7 +191,7 @@ describe('NotificationBell — sync_status 배너(story #2201)', () => {
 
     await emitSyncStatus({ complete: false, reason: 'cursor_stale', returned: 5 });
 
-    expect(container.textContent).toContain('일부 지난 알림은 표시되지 않았습니다');
+    expect(container.textContent).toContain('일부 지난 알림은 표시되지 않았어요');
   });
 
   it('강등(cursor_not_found)이면 배너가 뜬다', async () => {
@@ -200,7 +202,7 @@ describe('NotificationBell — sync_status 배너(story #2201)', () => {
 
     await emitSyncStatus({ complete: false, reason: 'cursor_not_found', returned: 50 });
 
-    expect(container.textContent).toContain('일부 지난 알림은 표시되지 않았습니다');
+    expect(container.textContent).toContain('일부 지난 알림은 표시되지 않았어요');
   });
 
   it('음성대조 — no_cursor(최초 연결)는 배너가 안 뜬다(오르테가군 확定: 강등이 아니라 정상 최초상태)', async () => {
@@ -211,7 +213,7 @@ describe('NotificationBell — sync_status 배너(story #2201)', () => {
 
     await emitSyncStatus({ complete: false, reason: 'no_cursor', returned: 0 });
 
-    expect(container.textContent).not.toContain('일부 지난 알림은 표시되지 않았습니다');
+    expect(container.textContent).not.toContain('일부 지난 알림은 표시되지 않았어요');
   });
 
   it('음성대조 — complete:true(정상 완결)면 배너가 안 뜬다', async () => {
@@ -222,7 +224,7 @@ describe('NotificationBell — sync_status 배너(story #2201)', () => {
 
     await emitSyncStatus({ complete: true, reason: null, returned: 12 });
 
-    expect(container.textContent).not.toContain('일부 지난 알림은 표시되지 않았습니다');
+    expect(container.textContent).not.toContain('일부 지난 알림은 표시되지 않았어요');
   });
 
   it('강등 배너가 뜬 뒤 재연결로 정상 sync_status가 오면 자동으로 걷힌다(별도 dismiss 없음, 스펙 그대로)', async () => {
@@ -232,10 +234,10 @@ describe('NotificationBell — sync_status 배너(story #2201)', () => {
     await openBell();
 
     await emitSyncStatus({ complete: false, reason: 'cursor_stale', returned: 5 });
-    expect(container.textContent).toContain('일부 지난 알림은 표시되지 않았습니다');
+    expect(container.textContent).toContain('일부 지난 알림은 표시되지 않았어요');
 
     await emitSyncStatus({ complete: true, reason: null, returned: 8 });
-    expect(container.textContent).not.toContain('일부 지난 알림은 표시되지 않았습니다');
+    expect(container.textContent).not.toContain('일부 지난 알림은 표시되지 않았어요');
   });
 });
 
@@ -408,5 +410,148 @@ describe('NotificationBell — story #3074 데스크톱 브리지 notify_show', 
     });
 
     delete (window as unknown as { __sprintableBridge?: unknown }).__sprintableBridge;
+  });
+});
+
+// story 3466(위생, 유나 5~8회차 4연속 관측) — 「99+」 배지 대비 미달(라이트 3.55·다크
+// 3.00, AA 4.5 미달) 정정. text-destructive-foreground가 이 테마에 매핑 자체가 없는
+// 무효 Tailwind 유틸이라 조용히 no-op였던 것이 근본원인(실제 렌더 색은 상속된
+// --foreground). ⭐두 pin: (a) 실 렌더 className이 새 값(text-white dark:text-proof-bg)
+// 을 갖고 구 무효 유틸이 안 남았는지 (b) 그 값들의 WCAG 대비비가 실제로 두 테마 모두
+// ≥4.5인지(색 계산 자체의 양성대조 — globals.css의 --proof-red/--proof-bg 실값을
+// 읽어 codebase 공용 계산기(color-contrast.ts)로 잰다, 값이 나중에 바뀌어도 그 값
+// 기준으로 재검증).
+describe('NotificationBell — 배지 「99+」 대비(story 3466)', () => {
+  function stubUnreadCount(count: number) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/event-notifications/unread-count')) {
+        return new Response(JSON.stringify({ count }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (url.includes('/api/event-notifications?')) {
+        return new Response(JSON.stringify({ data: [], meta: { hasMore: false } }), {
+          status: 200, headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({}), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+  }
+
+  it('⭐배지가 text-white dark:text-proof-bg를 쓰고, 무효 유틸(text-destructive-foreground)이 안 남았다', async () => {
+    stubUnreadCount(150);
+    await act(async () => { root.render(withIntl(<NotificationBell />)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    const badge = Array.from(container.querySelectorAll('span')).find((s) => s.textContent === '99+');
+    expect(badge).toBeDefined();
+    expect(badge?.className).toContain('text-white');
+    expect(badge?.className).toContain('dark:text-proof-bg');
+    expect(badge?.className).not.toContain('text-destructive-foreground');
+  });
+
+  // story #3431 AC4 — 9px는 본문 최소보다 작았다. CornerCountBadge(공용) 도입으로 10px에
+  // 고정됐는지, team-presence-toggle.tsx와 같은 정의를 쓰는지(font-mono 폐기) 고정한다.
+  it('⭐크기 9px→10px(AC4) — 공용 CornerCountBadge를 쓰고 옛 font-mono가 안 남았다', async () => {
+    stubUnreadCount(5);
+    await act(async () => { root.render(withIntl(<NotificationBell />)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    const badge = Array.from(container.querySelectorAll('span')).find((s) => s.textContent === '5');
+    expect(badge?.className).toContain('text-[10px]');
+    expect(badge?.className).not.toContain('text-[9px]');
+    expect(badge?.className).not.toContain('font-mono');
+  });
+
+  // story #3518(유나 사전 스티어 G, 2026-09-05) — 벨 버튼은 아이콘 전용(보이는 텍스트
+  // 라벨이 없다)이라 aria-label로 접근성 이름 전체를 주는 것 자체는 WCAG 2.5.3 문제가
+  // 아니다(mobile-tab-bar와 다른 축 — 그쪽은 보이는 라벨이 있어서 sr-only로 «더하는»
+  // 접근이 필요했다). 여기 결함은 그 값이 badgeLabel('99+' 문자열)이라 100 이상에서
+  // "알림 99+개"처럼 문법이 깨졌던 것 — 원수(unreadCount)+전용 캡 문장으로 고친다.
+  it('⭐unreadCount=3 — aria-label "알림 3개"(원수 그대로, count=1 갈래 포함해 3으로 확인)', async () => {
+    stubUnreadCount(3);
+    await act(async () => { root.render(withIntl(<NotificationBell />)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const button = container.querySelector('button[aria-label]');
+    expect(button?.getAttribute('aria-label')).toBe('알림 3개');
+  });
+
+  it('⭐unreadCount=1 — aria-label "알림 1개"(count=1 갈래)', async () => {
+    stubUnreadCount(1);
+    await act(async () => { root.render(withIntl(<NotificationBell />)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const button = container.querySelector('button[aria-label]');
+    expect(button?.getAttribute('aria-label')).toBe('알림 1개');
+  });
+
+  it('⭐unreadCount=100(시각 표시 99+) — aria-label "알림 99개 이상"(badgeLabel 문자열이 안 새어든다)', async () => {
+    stubUnreadCount(100);
+    await act(async () => { root.render(withIntl(<NotificationBell />)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const button = container.querySelector('button[aria-label]');
+    expect(button?.getAttribute('aria-label')).toBe('알림 99개 이상');
+    expect(button?.getAttribute('aria-label')).not.toContain('99+');
+    const badge = Array.from(container.querySelectorAll('span')).find((s) => s.textContent === '99+');
+    expect(badge).toBeDefined(); // 시각 배지는 그대로 '99+'.
+  });
+
+  // story #3518(유나 사전 스티어 H) — en bellAriaLabelCount는 ICU plural(one/other)
+  // 이라 count=1 갈래가 실제로 갈린다.
+  it('⭐[en] unreadCount=1 — ICU plural one 갈래("1 notification", 단수)', async () => {
+    stubUnreadCount(1);
+    await act(async () => { root.render(withIntl(<NotificationBell />, 'en')); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const button = container.querySelector('button[aria-label]');
+    expect(button?.getAttribute('aria-label')).toBe('1 notification');
+  });
+
+  it('⭐[en] unreadCount=3 — ICU plural other 갈래("3 notifications", 복수)', async () => {
+    stubUnreadCount(3);
+    await act(async () => { root.render(withIntl(<NotificationBell />, 'en')); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const button = container.querySelector('button[aria-label]');
+    expect(button?.getAttribute('aria-label')).toBe('3 notifications');
+  });
+
+  it('⭐[en] unreadCount=100(시각 99+) — "99 or more notifications"(고정 문구, badgeLabel 문자열 안 새어듦)', async () => {
+    stubUnreadCount(100);
+    await act(async () => { root.render(withIntl(<NotificationBell />, 'en')); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const button = container.querySelector('button[aria-label]');
+    expect(button?.getAttribute('aria-label')).toBe('99 or more notifications');
+  });
+
+  it('⭐색 계산 양성대조 — globals.css 실값으로 라이트·다크 둘 다 대비비 ≥4.5(WCAG AA)', async () => {
+    const { readFileSync } = await import('node:fs');
+    const path = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const { contrastRatio } = await import('@/lib/color-contrast');
+
+    // PO 지적(2026-09-04 22:53Z) — process.cwd() 기준 상대경로는 "검사를 어디서
+    // 돌렸나"에 값이 흔들린다(로컬 apps/web cwd에선 통과, CI 레포 루트 cwd에선
+    // ENOENT). 테스트 파일 자신의 위치 기준으로 고정 — cwd 무관(verify-tint-
+    // foreground-contrast.ts와 같은 관례).
+    const cssPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../app/globals.css');
+    const css = readFileSync(cssPath, 'utf-8');
+
+    function hexToRgb(hex: string): [number, number, number] {
+      const n = hex.replace('#', '');
+      return [parseInt(n.slice(0, 2), 16), parseInt(n.slice(2, 4), 16), parseInt(n.slice(4, 6), 16)];
+    }
+
+    // :root(라이트)가 먼저, .dark가 그 뒤에 온다(이 파일의 기존 구조) — 두 번째 매치가 dark 값.
+    const proofRedMatches = [...css.matchAll(/--proof-red:\s*(#[0-9a-fA-F]{6})/g)].map((m) => m[1]!);
+    const proofBgMatches = [...css.matchAll(/--proof-bg:\s*(#[0-9a-fA-F]{6})/g)].map((m) => m[1]!);
+    expect(proofRedMatches.length).toBeGreaterThanOrEqual(2);
+    expect(proofBgMatches.length).toBeGreaterThanOrEqual(2);
+
+    const lightRed = hexToRgb(proofRedMatches[0]!);
+    const darkRed = hexToRgb(proofRedMatches[1]!);
+    const darkProofBg = hexToRgb(proofBgMatches[1]!);
+    const white: [number, number, number] = [255, 255, 255];
+
+    const lightContrast = contrastRatio(lightRed, white);
+    const darkContrast = contrastRatio(darkRed, darkProofBg);
+
+    expect(lightContrast).toBeGreaterThanOrEqual(4.5);
+    expect(darkContrast).toBeGreaterThanOrEqual(4.5);
   });
 });

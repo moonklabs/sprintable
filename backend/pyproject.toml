@@ -36,6 +36,11 @@ dependencies = [
     "boto3>=1.34.0",
     "pypdf>=5.0.0",
     "python-docx>=1.1.0",
+    # story 620beefc(Phase1·마케팅운영, PO 決定 2026-09-04) — 채널 포스트 이미지 파생본
+    # (다운스케일·재인코딩·sRGB 변환) 생성. 서버 자동 변환 원칙(온보딩 철학 — "최저
+    # 지능 에이전트도 척척") 채택으로 도입, 이 전까지 코드베이스에 이미지 처리
+    # 라이브러리 0건이었음(그라운딩 확認).
+    "pillow>=11.0.0",
     # E-LOOP-LEDGER P1-S1: pgvector SQLAlchemy Vector 타입(embeddings 테이블). extension은 baseline에 이미 활성화됨.
     "pgvector>=0.3.0",
     # E-LOOP-LEDGER P1-S2/S25: Vertex AI(gemini-embedding-001 임베딩 + generate_text 생성형) 클라이언트.
@@ -62,6 +67,21 @@ dependencies = [
     # 검증. 기존에 uv.lock 전이 의존성(4.26.0)으로만 있었고 직접 import하는 곳이 없었다 — 첫
     # 실사용처라 직접 선언.
     "jsonschema>=4.26.0",
+    # story 46da6450(페드루 리뷰 B2) — stdlib zoneinfo는 IANA tz 데이터베이스를 OS 패키지
+    # (`/usr/share/zoneinfo`, Debian `tzdata` apt 패키지)에서 찾는데, backend/Dockerfile의
+    # `python:3.12-slim`은 apt 설치를 전혀 안 해 그게 없다 — macOS 로컬(시스템에 IANA DB
+    # 있음)에서는 통과하던 테스트가 실 배포 이미지에서는 모든 IANA 이름이
+    # ZoneInfoNotFoundError로 거부되는(=organizations.timezone PATCH가 유효값도 전부
+    # 422로 되돌리는) 배포-로컬 불일치였다. `tzdata` PyPI 패키지는 순수 파이썬으로 같은
+    # IANA DB를 담아 OS 설치 없이도 zoneinfo가 그걸 찾게 한다(stdlib가 자동으로 우선
+    # 시도) — apt-get 없이 uv 의존성만으로 해소.
+    "tzdata>=2025.1",
+    # story #3816(Phase3·3-6 PR2, 페드루 PO 確定 2026-09-12) — Ghost Admin API
+    # `?source=html`은 HTML 계약이라 body_md(마크다운)를 그대로 보내면 마크다운
+    # 문법이 글에 그대로 노출된다. 표준 markdown→HTML 변환용 최소 의존성 1개
+    # 신규 도입(그라운딩 확認 — 이 전까지 코드베이스에 markdown 렌더 라이브러리
+    # 0건, pillow 도입 때와 동형 판단).
+    "markdown>=3.7",
 ]
 
 [dependency-groups]

@@ -25,6 +25,23 @@ def reset_project_override(token) -> None:
     _project_override.reset(token)
 
 
+# story #3722(Trust·PR2) — MCP=이름표만. call_tool 훅(server.py _flat wrapper)이 도구 호출
+# 스코프로 set/reset(_project_override와 동형 패턴) → request()가 X-Sprintable-Tool 헤더로
+# 실어 BE 미들웨어(tool_call_recording.py)가 기록 행의 tool 컬럼을 채운다. 미설정(REST 직접
+# 호출·구버전 클라이언트)이면 헤더 미전송 — BE는 tool=None으로 정직하게 기록(무회귀).
+_tool_name_override: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "mcp_tool_name_override", default=None
+)
+
+
+def set_tool_name_override(tool_name: str | None):
+    return _tool_name_override.set(tool_name or None)
+
+
+def reset_tool_name_override(token) -> None:
+    _tool_name_override.reset(token)
+
+
 # E-MCP-HTTP S1: per-request API 키 override(http 모드 멀티테넌트). http 미들웨어가 요청경계서
 # Authorization: Bearer <key> 를 set → request() 가 그 키로 백엔드 호출. 미설정(stdio)이면 env
 # 단일키(self._api_key) 사용(무회귀). contextvar 라 async 동시요청별 격리.
@@ -302,6 +319,16 @@ class SprintableClient:
         if _override:
             headers["X-Project-Id"] = _override
 
+        # story #3722(Trust·PR2) — X-Sprintable-Tool(call_tool 훅 ContextVar, _project_override와
+        # 동형) + X-Sprintable-Run-Id(런타임이 프로세스 env로 주입 — fleet wake 페이로드→env 관례,
+        # per-call override 불요). 둘 다 미설정이면 헤더 미전송(BE는 tool=None·run_id 미귀속으로
+        # 정직하게 기록 — 무회귀).
+        _tool = _tool_name_override.get()
+        if _tool:
+            headers["X-Sprintable-Tool"] = _tool
+        if _mcp_settings.sprintable_run_id:
+            headers["X-Sprintable-Run-Id"] = _mcp_settings.sprintable_run_id
+
         # POST/PUT/PATCH body에 context 필드 자동 주입. ee2f4e58: 프로퍼티 경유로 읽어 http per-key
         # 해소 default 까지 반영(stdio 는 self._* 우선이라 무회귀).
         if method.upper() in ("POST", "PUT", "PATCH") and json is not None:
@@ -353,6 +380,14 @@ class SprintableClient:
         엔드포인트(stories.py 계열)용. `(body, headers)` 튜플 반환 — headers는 httpx.Headers
         (대소문자 무관 접근)."""
         return await self.request("GET", path, params=params, return_headers=True)
+
+    async def get_full(self, path: str, *, params: dict | None = None) -> Any:
+        """story #3331 — get()과 동일하되 `{data: T, ...sibling}` 래핑을 풀지 않고 그대로
+        반환한다(post_full()의 GET 짝 — sibling 키(total·limit·offset 등 body 기반
+        페이지네이션 메타)가 필요한 소수 호출부(list_conversations)용). X-Total-Count 같은
+        헤더 기반 페이지네이션은 get_with_headers()가 이미 담당 — 이건 body-embedded 메타
+        전용."""
+        return await self.request("GET", path, params=params, unwrap=False)
 
     async def post(self, path: str, *, json: dict | None = None) -> Any:
         return await self.request("POST", path, json=json or {})

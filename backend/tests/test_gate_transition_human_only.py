@@ -14,7 +14,7 @@ import pytest
 from fastapi import BackgroundTasks, HTTPException
 
 from app.routers import gates as gates_mod
-from app.routers.gates import GateTransitionRequest, transition_gate_endpoint
+from app.routers.gates import GateTransitionRequest, _transition_gate_endpoint
 from app.services.member_resolver import ResolvedMember
 from tests.gate_mock_factory import make_gate
 
@@ -55,11 +55,18 @@ async def _call(status: str, member_type: str):
     # 값으로 둬 anchor 기록 분기(resolve_pr_link 추가 조회)를 건너뛴다 — 이 파일의 관심사(human-vs-
     # agent authz)와 무관.
     transition = AsyncMock(return_value=make_gate(gate_type="merge_approval", neutral_facts=None))
+    # story #3874 — 직렬화 단일 통로 도입 뒤 이 엔드포인트는 GateResponse.model_validate를
+    # 직접 안 부르고 to_gate_response()를 거친다(내부에서 risk_grade enrich까지 함께 함).
+    # 이 테스트의 관심사는 human-vs-agent authz뿐이라 그 통로 자체를 patch — 예전엔
+    # model_validate만 patch해 "OK" 리터럴을 돌려받았는데, 그러면 risk_grade enrich가
+    # 문자열에 속성을 못 얹어 AttributeError로 깨진다(risk_grade는 이 테스트의 관심사가
+    # 아니므로 새 사유-강제 가드처럼 직접 우회).
     with patch.object(gates_mod, "resolve_member", AsyncMock(return_value=_resolved(member_type))), \
          patch.object(gates_mod, "transition_gate", transition), \
          patch.object(gates_mod, "_non_doc_gate_approvable", AsyncMock(return_value=True)), \
-         patch.object(gates_mod.GateResponse, "model_validate", lambda g: "OK"):
-        result = await transition_gate_endpoint(
+         patch.object(gates_mod, "to_gate_response", AsyncMock(return_value="OK")):
+        result = await _transition_gate_endpoint(
+                resolved_locale="ko",
             id=uuid.uuid4(), body=body, background_tasks=BackgroundTasks(),
             session=session, org_id=org_id, auth=SimpleNamespace(user_id=str(uuid.uuid4())),
         )
@@ -89,7 +96,8 @@ async def test_agent_approve_does_not_call_transition():
     with patch.object(gates_mod, "resolve_member", AsyncMock(return_value=_resolved("agent"))), \
          patch.object(gates_mod, "transition_gate", transition):
         with pytest.raises(HTTPException):
-            await transition_gate_endpoint(
+            await _transition_gate_endpoint(
+                resolved_locale="ko",
                 id=uuid.uuid4(), body=GateTransitionRequest(status="approved"),
                 background_tasks=BackgroundTasks(),
                 session=AsyncMock(), org_id=uuid.uuid4(), auth=SimpleNamespace(),

@@ -1,0 +1,945 @@
+"""story #3367(Phase0 S2·마케팅 운영 블루프린트 v3, 선생님 확定 2026-09-03) — external_publish
+승인이 본 버전을 봉인하고 수정 즉시 재승인 상태로 바꾼다.
+
+AC 매핑:
+- AC1: 휴먼(또는 에이전트)이 상신하면 external_publish 게이트가 pending으로 서고 대상
+  version·content_sha256·빈 media manifest hash·목적지(hosted_site)가 봉인된다.
+- AC2: 에이전트도 상신은 허용(게이트 생성까지) — external_publish는 _ALWAYS_MANUAL_GATE_TYPES라
+  create_gate가 호출자 무관 항상 pending을 강제한다(신규 코드 없음, 기존 가드 그대로).
+- AC4·AC5: 승인 뒤 새 버전이 생기면(휴먼 수정) 그 버전 생성과 같은 트랜잭션 안에서 게이트가
+  원자적으로 pending+reapproval_required=True로 되돌아가고, **동시에 그 새 버전으로
+  재봉인**된다(페드루 PO 정정 2026-09-03 06:03Z — 봉인은 "결재자가 승인할 대상"이므로 재오픈
+  시점에 최신화돼야 그 pending을 승인했을 때 막다른 409가 안 난다). 승인 전(pending) 상태의
+  편집도 같은 방식으로 항상 최신 버전에 재봉인된다.
+- AC6: 봉인된 해시와 지금 공개하려는 내용의 해시가 다르면 공개 서비스는 409
+  SITE_POST_REAPPROVAL_REQUIRED — 기존 공개 본문은 그대로 유지된다.
+- 봉인 값 불변: 재상신해도 내용이 같으면(같은 버전) 게이트·봉인 값이 그대로 재사용된다(멱등).
+- S1 후속(페드루 PO 2026-09-03 05:33Z): 목록 GET에 origin_author_kind(버전 1의 author_kind).
+- neutral_facts에 draft_author_member_id(버전 1 작성자)·requested_by_member_id(상신자) —
+  S5(통지 수신자)가 읽는 키 이름 그대로(recipe_gate_hooks._build_approval_neutral_facts 관례).
+
+뮤테이션 3건(스토리 본문 + AC 인라인 명시 + 페드루 PO 정정 06:03Z):
+① 공개 직전 hash 비교를 제거 — 승인 후 바뀐 본문이 공개돼
+   test_publish_with_content_diverged_...가 반드시 실패해야 한다.
+② 봉인이 아예 없는(fail-closed) 승인 게이트로 공개되는 코드 경로를 열면(SEAL_MISSING 검사
+   제거) test_publish_with_approved_but_unsealed_gate_...가 반드시 실패해야 한다.
+③ 편집-훅(`_reseal_gate_on_new_version`)에서 approved→pending "상태 전이"만 제거하고
+   재봉인은 남기면(즉 승인된 게이트가 새 본문으로 조용히 재봉인되면서도 approved로 남으면)
+   test_edit_after_approval_atomically_reopens_and_reseals_gate_to_new_version의
+   `gate.status == "pending"` assert가 반드시 실패해야 한다 — 이게 "재검토 없이 새 본문이
+   승인된 것처럼 새는" 진짜 보안 축이다.
+전부 세션 중 실행·RED 확인·원복 완료(커밋엔 포함 안 함)."""
+from __future__ import annotations
+
+import os
+import uuid
+
+import pytest
+
+_REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
+
+pytestmark = [
+    pytest.mark.destructive_schema,
+    pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요"),
+]
+
+
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"
+
+
+@pytest.fixture(autouse=True)
+async def _dispose_global_engine_after_test():
+    yield
+    from app.core.database import engine as _global_engine
+    await _global_engine.dispose()
+
+
+def _async_url() -> str:
+    url = _REAL_DB_URL
+    for prefix in ("postgresql+psycopg2://", "postgresql+asyncpg://", "postgresql://"):
+        if url.startswith(prefix):
+            return "postgresql+asyncpg://" + url[len(prefix):]
+    return url
+
+
+async def _session_factory():
+    from sqlalchemy import text as sa_text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from app.core.database import Base
+    import app.models  # noqa: F401
+
+    engine = create_async_engine(_async_url())
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+        await conn.execute(sa_text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_members_org_system_publisher "
+            "ON members (org_id) WHERE (runtime_type = 'system-publisher' AND type = 'agent')"
+        ))
+    return engine, async_sessionmaker(engine, expire_on_commit=False)
+
+
+async def _seed_org(session, *, slug=None):
+    from app.models.organization import Organization
+    from app.models.project import Project
+
+    org = Organization(id=uuid.uuid4(), name="Submit Test Org", slug=slug or f"org-{uuid.uuid4().hex[:8]}")
+    session.add(org)
+    await session.commit()
+    project = Project(id=uuid.uuid4(), org_id=org.id, name="P")
+    session.add(project)
+    await session.commit()
+    return org.id, project.id
+
+
+async def _seed_agent(session, org_id, project_id, *, name="담롱"):
+    from app.models.team import TeamMember
+
+    m = TeamMember(id=uuid.uuid4(), org_id=org_id, project_id=project_id, type="agent", name=name, is_active=True)
+    session.add(m)
+    await session.commit()
+    return m.id
+
+
+async def _seed_human(session, org_id, *, role="member"):
+    from app.models.project import OrgMember
+    from app.models.user import User
+
+    user = User(id=uuid.uuid4(), email=f"human-{uuid.uuid4().hex[:8]}@test.dev", hashed_password="x")
+    session.add(user)
+    await session.commit()
+    om = OrgMember(id=uuid.uuid4(), org_id=org_id, user_id=user.id, role=role)
+    session.add(om)
+    await session.commit()
+    return user.id
+
+
+async def _seed_story(session, org_id, project_id, *, title="2호 글"):
+    from app.models.pm import Story
+
+    story = Story(id=uuid.uuid4(), org_id=org_id, project_id=project_id, title=title)
+    session.add(story)
+    await session.commit()
+    return story.id
+
+
+async def _seed_default_role(session, org_id):
+    """story #3367 — submit()이 이제 기본 역할 없으면 명시 거부한다(SITE_POST_APPROVER_ROLE_
+    MISSING, 페드루 PO 리뷰) — 이 파일의 submit() 성공 경로 테스트는 모두 이 시드가 필요."""
+    from app.models.participation import ParticipationRole
+
+    role = ParticipationRole(id=uuid.uuid4(), org_id=org_id, key="approver", label="Approver", is_default=True)
+    session.add(role)
+    await session.commit()
+    return role.id
+
+
+async def _seed_metering_key(session, org_id):
+    from app.services.pageview_counter import get_or_create_active_key
+    return await get_or_create_active_key(session, org_id=org_id)
+
+
+def _client_for(app):
+    from httpx import AsyncClient, ASGITransport
+    return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+
+
+def _setup_org_scoped_app(app, Session, org_id, *, user_id):
+    from app.dependencies.auth import AuthContext, get_current_user
+
+    async def _db():
+        async with Session() as s:
+            try:
+                yield s
+                await s.commit()
+            except Exception:
+                await s.rollback()
+                raise
+
+    async def _auth():
+        return AuthContext(
+            user_id=str(user_id), email="caller@test",
+            claims={"app_metadata": {"org_id": str(org_id)}},
+        )
+
+    from tests.conftest import override_db_and_read
+    override_db_and_read(app, _db)
+    app.dependency_overrides[get_current_user] = _auth
+
+
+def _draft_body(*, work_item_id, slug="2ho-blog", lang="ko", title="2호 글"):
+    return {
+        "work_item_id": str(work_item_id), "slug": slug, "lang": lang, "title": title,
+        "summary": "요약입니다", "tags": ["ai"], "body_md": "# 제목\n\n본문입니다.",
+        "media_manifest": [],
+    }
+
+
+async def _approve_gate_directly(session, gate_id):
+    """휴먼 결재 UI 왕복(gates.py) 없이 승인 상태만 만든다 — 이 테스트의 관심사는 site_posts.py
+    쪽 상태(sealed_content_*·reapproval_required·409)지 gates.py의 승인 authz가 아니다
+    (그건 test_rc1_body_trust_actor.py·test_3365_external_publish_gate_human_only.py 관할)."""
+    from datetime import datetime, timezone
+    from app.models.gate import Gate
+
+    from sqlalchemy import select
+    gate = (await session.execute(select(Gate).where(Gate.id == gate_id))).scalar_one()
+    gate.status = "approved"
+    gate.resolver_id = uuid.uuid4()
+    gate.resolved_at = datetime.now(timezone.utc)
+    await session.commit()
+
+
+@pytest.mark.anyio
+async def test_submit_seals_pending_gate_with_target_version():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            human_id = await _seed_human(s, org_id)
+            story_id = await _seed_story(s, org_id, project_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id)
+        async with _client_for(app) as client:
+            r_draft = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts",
+                json=_draft_body(work_item_id=story_id),
+            )
+        assert r_draft.status_code == 201, r_draft.text
+        draft_id = r_draft.json()["draft_id"]
+        version_id = r_draft.json()["version_id"]
+        content_sha256 = r_draft.json()["body_sha256"]
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        async with _client_for(app) as client:
+            r_submit = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts/{draft_id}/submit", json={},
+            )
+        assert r_submit.status_code == 200, r_submit.text
+        payload = r_submit.json()
+        assert payload["version_id"] == version_id
+        assert payload["content_sha256"] == content_sha256
+        assert payload["status"] == "pending"
+
+        async with Session() as s:
+            from app.models.gate import Gate
+            from sqlalchemy import select
+            gate = (await s.execute(select(Gate).where(Gate.id == uuid.UUID(payload["gate_id"])))).scalar_one()
+        assert gate.status == "pending"
+        assert gate.gate_type == "external_publish"
+        assert gate.work_item_id == story_id
+        assert gate.sealed_content_version == 1
+        assert gate.sealed_content_sha256 == content_sha256
+        assert gate.sealed_content_body == "# 제목\n\n본문입니다."
+        assert gate.neutral_facts["destination"] == "hosted_site"
+        assert gate.neutral_facts["draft_author_member_id"] == str(agent_id)
+        # story #3370(유나 실측·페드루 정정 2026-09-10) — human_id는 users.id(raw)다.
+        # 상신자는 org_member.id로 봉인돼야 한다(auth.py:146 계약) — users.id 그대로
+        # 봉인되던 게 3370의 실 결함이었다. 이 assert는 그 정정을 정확히 pin한다.
+        from app.models.project import OrgMember
+        async with Session() as s:
+            human_org_member_id = (await s.execute(
+                select(OrgMember.id).where(OrgMember.org_id == org_id, OrgMember.user_id == human_id)
+            )).scalar_one()
+        assert gate.neutral_facts["requested_by_member_id"] == str(human_org_member_id)
+        assert gate.neutral_facts["requested_by_member_id"] != str(human_id)
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_agent_can_submit_but_gate_stays_pending_not_approved():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            story_id = await _seed_story(s, org_id, project_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id)
+        async with _client_for(app) as client:
+            r_draft = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts",
+                json=_draft_body(work_item_id=story_id),
+            )
+            draft_id = r_draft.json()["draft_id"]
+            r_submit = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts/{draft_id}/submit", json={},
+            )
+        assert r_submit.status_code == 200, r_submit.text
+        assert r_submit.json()["status"] == "pending", "에이전트 상신인데 approved/auto_passed로 생성됐다"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_resubmit_same_content_is_idempotent():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            story_id = await _seed_story(s, org_id, project_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id)
+        async with _client_for(app) as client:
+            r_draft = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts",
+                json=_draft_body(work_item_id=story_id),
+            )
+            draft_id = r_draft.json()["draft_id"]
+            r1 = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts/{draft_id}/submit", json={},
+            )
+            r2 = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts/{draft_id}/submit", json={},
+            )
+        assert r1.json()["gate_id"] == r2.json()["gate_id"], "같은 내용 재상신인데 다른 게이트가 생겼다"
+        assert r1.json()["content_sha256"] == r2.json()["content_sha256"]
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_pending_edit_reseals_immediately_same_transaction():
+    """페드루 PO 확定(2026-09-03 06:06Z) — 아직 한 번도 승인된 적 없는 pending 게이트는
+    편집마다 즉시 재봉인된다(결재자가 볼 대상=최신본이면 되고, 아직 덮으면 안 될 승인 기록이
+    없다 — 재상신 왕복 불요)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            human_id = await _seed_human(s, org_id)
+            story_id = await _seed_story(s, org_id, project_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id)
+        async with _client_for(app) as client:
+            r_draft = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts",
+                json=_draft_body(work_item_id=story_id),
+            )
+            draft_id = r_draft.json()["draft_id"]
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        async with _client_for(app) as client:
+            r_submit = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts/{draft_id}/submit", json={},
+            )
+        gate_id = uuid.UUID(r_submit.json()["gate_id"])
+
+        # 아직 승인 전 — 편집하면 같은 게이트가 즉시 새 버전으로 재봉인돼야 한다.
+        async with _client_for(app) as client:
+            r_edit = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts",
+                json=_draft_body(work_item_id=story_id, title="2호 글(승인 전 수정)"),
+            )
+        assert r_edit.status_code == 201, r_edit.text
+        new_sha256 = r_edit.json()["body_sha256"]
+
+        async with Session() as s:
+            from app.models.gate import Gate
+            from sqlalchemy import select
+            gate = (await s.execute(select(Gate).where(Gate.id == gate_id))).scalar_one()
+        assert gate.status == "pending"
+        assert gate.reapproval_required is False, "승인된 적 없는 pending인데 재승인 플래그가 섰다"
+        assert gate.sealed_content_version == 2
+        assert gate.sealed_content_sha256 == new_sha256
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_approve_after_edit_is_blocked_until_resubmit_seals_new_version():
+    """페드루 PO 확定(2026-09-03 06:06Z) — 승인 뒤 편집은 게이트를 pending으로 되돌리되 봉인은
+    옛 버전 그대로 둔다("무엇이 승인됐었나" 기록 보존). 그 옛 봉인을 그대로 승인하는 막다른
+    길은 gates.py가 409 SITE_POST_RESUBMIT_REQUIRED로 막는다 — 빠져나가는 길은 submit()
+    재호출(새 버전으로 재봉인+플래그 해제) 뿐이다."""
+    from app.main import app
+    from app.routers.gates import GateTransitionRequest, _transition_gate_endpoint
+    from app.services.member_resolver import ResolvedMember
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            human_id = await _seed_human(s, org_id)
+            story_id = await _seed_story(s, org_id, project_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id)
+        async with _client_for(app) as client:
+            r_draft = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts",
+                json=_draft_body(work_item_id=story_id),
+            )
+            draft_id = r_draft.json()["draft_id"]
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        async with _client_for(app) as client:
+            r_submit = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts/{draft_id}/submit", json={},
+            )
+        gate_id = uuid.UUID(r_submit.json()["gate_id"])
+        sealed_before = r_submit.json()["content_sha256"]
+
+        async with Session() as s:
+            await _approve_gate_directly(s, gate_id)
+
+        # 승인 뒤 편집 — pending 재오픈, 봉인은 옛 버전 그대로.
+        async with _client_for(app) as client:
+            r_edit = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts",
+                json=_draft_body(work_item_id=story_id, title="2호 글(승인 후 수정)"),
+            )
+        assert r_edit.status_code == 201, r_edit.text
+        new_sha256 = r_edit.json()["body_sha256"]
+
+        async with Session() as s:
+            from app.models.gate import Gate
+            from sqlalchemy import select
+            gate = (await s.execute(select(Gate).where(Gate.id == gate_id))).scalar_one()
+        assert gate.status == "pending"
+        assert gate.reapproval_required is True
+        assert gate.sealed_content_sha256 == sealed_before, "봉인이 편집 훅에서 조용히 갱신됐다(승인 기록 훼손)"
+
+        # 막다른 길 — 옛 봉인 그대로 승인 시도 → 409.
+        from fastapi import BackgroundTasks, HTTPException
+        from unittest.mock import AsyncMock, patch
+        import app.routers.gates as gates_mod
+
+        approver = ResolvedMember(
+            id=uuid.uuid4(), user_id=uuid.uuid4(), name="approver", type="human",
+            role="owner", org_id=org_id,
+        )
+
+        class _FakeAuth:
+            user_id = str(approver.user_id)
+            claims: dict = {"app_metadata": {"org_id": str(org_id)}}
+
+        async with Session() as s:
+            with patch.object(gates_mod, "resolve_member", AsyncMock(return_value=approver)), \
+                 patch.object(gates_mod, "_non_doc_gate_approvable", AsyncMock(return_value=True)):
+                with pytest.raises(HTTPException) as exc_info:
+                    await _transition_gate_endpoint(
+                resolved_locale="ko",
+                        id=gate_id, body=GateTransitionRequest(status="approved"),
+                        background_tasks=BackgroundTasks(), session=s, org_id=org_id, auth=_FakeAuth(),
+                    )
+        assert exc_info.value.status_code == 409
+        assert exc_info.value.detail["code"] == "SITE_POST_RESUBMIT_REQUIRED"
+
+        # 빠져나가는 길 — submit() 재호출: 새 버전으로 재봉인 + 플래그 해제.
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        async with _client_for(app) as client:
+            r_resubmit = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts/{draft_id}/submit", json={},
+            )
+        assert r_resubmit.status_code == 200, r_resubmit.text
+        assert r_resubmit.json()["content_sha256"] == new_sha256
+
+        async with Session() as s:
+            gate = (await s.execute(select(Gate).where(Gate.id == gate_id))).scalar_one()
+        assert gate.sealed_content_sha256 == new_sha256
+        assert gate.reapproval_required is False
+
+        # 이제 승인 → 공개하면 새 본문이 나간다.
+        async with Session() as s:
+            await _approve_gate_directly(s, gate_id)
+        async with _client_for(app) as client:
+            r_publish = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts",
+                json={
+                    "work_item_id": str(story_id), "gate_id": str(gate_id),
+                    "title": "2호 글(승인 후 수정)", "slug": "2ho-blog", "lang": "ko",
+                    "summary": "요약입니다", "tags": ["ai"], "body_md": "# 제목\n\n본문입니다.",
+                },
+            )
+        assert r_publish.status_code == 201, r_publish.text
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_double_edit_without_resubmit_between_still_requires_and_allows_resubmit():
+    """story #3496(페드루 실측 2026-09-05, #3835 3ee55a847 코드 읽기 중 발견) — 승인 뒤
+    편집(v2, reapproval_required=True)까지는 위 테스트와 같지만, **submit() 없이 또
+    편집(v3)**하면 `_reseal_gate_on_new_version`의 pending 분기가 sealed_content_*·
+    sealed_destination을 v3로 동기화하면서도 reapproval_required는 그대로 True로
+    남긴다(그 필드는 그 훅의 관할이 아니다). 그 상태에서 submit()을 호출하면 sealed
+    sha·destination이 이미 target(v3)과 일치해 "이미 이 정확한 상태로 봉인돼 있다"는
+    조기 return 조건에 걸린다 — reapproval_required를 안 보던 옛 조건이면 게이트가
+    조용히 무변한 채 반환되고, 이어지는 승인 시도가 여전히(그리고 영원히) 409
+    SITE_POST_RESUBMIT_REQUIRED로 막힌다(재상신해도 다시 이 자리로 돌아오는 막다른
+    길 — 사람이 본문을 한 글자라도 또 바꿔야만 빠져나간다, 안내 없는 사고).
+
+    수정 後 기대값 — submit()이 조기 return을 안 타고 reapproval_required=False까지
+    재봉인해, 그 뒤 승인이 200으로 통과한다."""
+    from app.main import app
+    from app.routers.gates import GateTransitionRequest, _transition_gate_endpoint
+    from app.services.member_resolver import ResolvedMember
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            human_id = await _seed_human(s, org_id)
+            story_id = await _seed_story(s, org_id, project_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id)
+        async with _client_for(app) as client:
+            r_draft = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts",
+                json=_draft_body(work_item_id=story_id),
+            )
+            draft_id = r_draft.json()["draft_id"]
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        async with _client_for(app) as client:
+            r_submit = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts/{draft_id}/submit", json={},
+            )
+        gate_id = uuid.UUID(r_submit.json()["gate_id"])
+
+        async with Session() as s:
+            await _approve_gate_directly(s, gate_id)
+
+        # v2 — 승인 뒤 편집. pending+reapproval_required=True로 재오픈(위 테스트와 동일).
+        async with _client_for(app) as client:
+            r_edit_v2 = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts",
+                json=_draft_body(work_item_id=story_id, title="2호 글(수정 v2)"),
+            )
+        assert r_edit_v2.status_code == 201, r_edit_v2.text
+
+        # v3 — submit() 재호출 없이 또 편집. pending 분기가 sealed를 v3로 동기화하되
+        # reapproval_required는 손 안 댄다(True 그대로) — 이게 이 스토리의 재현 핵심.
+        async with _client_for(app) as client:
+            r_edit_v3 = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts",
+                json=_draft_body(work_item_id=story_id, title="2호 글(수정 v3, submit 안 거침)"),
+            )
+        assert r_edit_v3.status_code == 201, r_edit_v3.text
+        v3_sha256 = r_edit_v3.json()["body_sha256"]
+
+        async with Session() as s:
+            from app.models.gate import Gate
+            from sqlalchemy import select
+            gate = (await s.execute(select(Gate).where(Gate.id == gate_id))).scalar_one()
+        assert gate.status == "pending"
+        assert gate.sealed_content_sha256 == v3_sha256, "pending 재봉인 훅이 v3로 동기화되지 않았다(그라운딩 전제 확인)"
+        assert gate.reapproval_required is True, "reapproval_required가 편집 훅에서 조용히 풀렸다(그라운딩 전제 확인)"
+
+        # submit() 재호출 — v3는 이미 봉인돼 있다(sha·destination 둘 다 동일) → 옛 조건이면
+        # 조기 return으로 reapproval_required=True가 그대로 남는다.
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        async with _client_for(app) as client:
+            r_resubmit = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts/{draft_id}/submit", json={},
+            )
+        assert r_resubmit.status_code == 200, r_resubmit.text
+
+        async with Session() as s:
+            from app.models.gate import Gate
+            from sqlalchemy import select
+            gate = (await s.execute(select(Gate).where(Gate.id == gate_id))).scalar_one()
+        assert gate.reapproval_required is False, (
+            "submit() 재호출이 이미-봉인 조기 return을 타 reapproval_required가 안 풀렸다"
+            " — 승인이 영구히 409로 막히는 사고"
+        )
+
+        # 이제 승인이 통과해야 한다(막다른 길이 아니어야).
+        approver = ResolvedMember(
+            id=uuid.uuid4(), user_id=uuid.uuid4(), name="approver", type="human",
+            role="owner", org_id=org_id,
+        )
+
+        class _FakeAuth:
+            user_id = str(approver.user_id)
+            claims: dict = {"app_metadata": {"org_id": str(org_id)}}
+
+        from fastapi import BackgroundTasks
+        from unittest.mock import AsyncMock, patch
+        import app.routers.gates as gates_mod
+
+        async with Session() as s:
+            with patch.object(gates_mod, "resolve_member", AsyncMock(return_value=approver)), \
+                 patch.object(gates_mod, "_non_doc_gate_approvable", AsyncMock(return_value=True)):
+                # story #2027 고위험 게이트 사유 강제(신규 org=기본 posture=high risk_grade
+                # 추정) — 이 테스트의 관심사(SITE_POST_RESUBMIT_REQUIRED 해소)와 무관한
+                # 별도 가드라 note를 채워 지나간다(위 test_approve_after_edit_...는 그
+                # 가드 前에 409로 끝나 이 자리에 안 닿았을 뿐, 신규 요구사항이 아니다).
+                approved = await _transition_gate_endpoint(
+                resolved_locale="ko",
+                    id=gate_id, body=GateTransitionRequest(status="approved", note="재검토 완료", evidence_viewed=True),
+                    background_tasks=BackgroundTasks(), session=s, org_id=org_id, auth=_FakeAuth(),
+                )
+        assert approved.status == "approved", "재봉인이 정상 처리됐는데도 승인이 막혔다"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_publish_with_content_diverged_from_sealed_hash_returns_409_and_keeps_old_public_body():
+    """AC6의 실제 갭 — 기존 POST /site-posts는 임의 body(title/slug/body_md 등)를 그대로
+    받는다(초안/버전 시스템과 무관하게 호출 가능, S1 이전부터 있던 계약). 게이트가 approved인
+    동안 그 body만 다른 내용으로 바꿔 다시 호출하면(초안은 안 건드림 — AC4 훅이 아예 안 탄다),
+    승인된 해시와 달라 서버가 막아야 한다는 것이 이 스토리의 핵심 실사고("승인된 같은 게이트로
+    달라진 본문도 upsert한다") — AC4(초안 편집 시 재-pending)와는 별개 경로다."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            human_id = await _seed_human(s, org_id)
+            story_id = await _seed_story(s, org_id, project_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id)
+        async with _client_for(app) as client:
+            r_draft = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts",
+                json=_draft_body(work_item_id=story_id),
+            )
+            draft_id = r_draft.json()["draft_id"]
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        async with _client_for(app) as client:
+            r_submit = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts/{draft_id}/submit", json={},
+            )
+        gate_id = uuid.UUID(r_submit.json()["gate_id"])
+
+        async with Session() as s:
+            await _approve_gate_directly(s, gate_id)
+
+        # 최초 발행 — 승인된 그 내용 그대로.
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        async with _client_for(app) as client:
+            r_publish1 = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts",
+                json={
+                    "work_item_id": str(story_id), "gate_id": str(gate_id),
+                    "title": "2호 글", "slug": "2ho-blog", "lang": "ko",
+                    "summary": "요약입니다", "tags": ["ai"], "body_md": "# 제목\n\n본문입니다.",
+                },
+            )
+        assert r_publish1.status_code == 201, r_publish1.text
+
+        # 초안은 안 건드리고, 같은(여전히 approved인) 게이트로 다른 본문을 직접 공개 시도.
+        async with _client_for(app) as client:
+            r_publish2 = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts",
+                json={
+                    "work_item_id": str(story_id), "gate_id": str(gate_id),
+                    "title": "2호 글", "slug": "2ho-blog", "lang": "ko",
+                    "summary": "요약입니다", "tags": ["ai"], "body_md": "# 제목\n\n승인 안 받은 본문입니다.",
+                },
+            )
+        assert r_publish2.status_code == 409, r_publish2.text
+        assert r_publish2.json()["error"]["code"] == "SITE_POST_REAPPROVAL_REQUIRED", r_publish2.text
+
+        async with Session() as s:
+            from app.models.site_post import SitePost
+            from sqlalchemy import select
+            row = (await s.execute(
+                select(SitePost).where(SitePost.org_id == org_id, SitePost.slug == "2ho-blog")
+            )).scalar_one()
+        assert row.body_md == "# 제목\n\n본문입니다.", "409 거부인데 기존 공개 본문이 바뀌었다"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_submit_unknown_draft_returns_404():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, _project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            human_id = await _seed_human(s, org_id)
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+
+        async with _client_for(app) as client:
+            r = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts/{uuid.uuid4()}/submit", json={},
+            )
+        assert r.status_code == 404, r.text
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_submit_unknown_version_id_returns_404():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            story_id = await _seed_story(s, org_id, project_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id)
+        async with _client_for(app) as client:
+            r_draft = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts",
+                json=_draft_body(work_item_id=story_id),
+            )
+            draft_id = r_draft.json()["draft_id"]
+            r = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts/{draft_id}/submit",
+                json={"version_id": str(uuid.uuid4())},
+            )
+        assert r.status_code == 404, r.text
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_list_drafts_origin_author_kind_distinguishes_agent_origin_human_latest():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            human_id = await _seed_human(s, org_id)
+            story_id = await _seed_story(s, org_id, project_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id)
+        async with _client_for(app) as client:
+            await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts",
+                json=_draft_body(work_item_id=story_id, title="에이전트 원안"),
+            )
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        async with _client_for(app) as client:
+            await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts",
+                json=_draft_body(work_item_id=story_id, title="휴먼 개정판"),
+            )
+            r_list = await client.get(f"/api/v2/organizations/{org_id}/site-posts/drafts")
+        assert r_list.status_code == 200, r_list.text
+        item = r_list.json()[0]
+        assert item["origin_author_kind"] == "agent"
+        assert item["latest_author_kind"] == "human"
+        assert item["current_version"] == 2
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_publish_with_approved_but_unsealed_gate_fails_closed_409_seal_missing():
+    """페드루 PO 리뷰(2026-09-03 05:59Z) — S2 이전/우회 경로로 만들어진 승인 게이트(submit()을
+    한 번도 안 거쳐 sealed_content_sha256이 없음)로는 어떤 본문도 공개되면 안 된다(fail-closed
+    — "봉인 없음"과 "봉인과 다름"은 서로 다른 실패, 코드도 다르다)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id)
+            story_id = await _seed_story(s, org_id, project_id)
+
+            from app.models.gate import Gate
+            from datetime import datetime, timezone
+            gate = Gate(
+                id=uuid.uuid4(), org_id=org_id, work_item_id=story_id, work_item_type="story",
+                gate_type="external_publish", status="approved",
+                resolver_id=uuid.uuid4(), resolved_at=datetime.now(timezone.utc),
+            )
+            s.add(gate)
+            await s.commit()
+            gate_id = gate.id
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        async with _client_for(app) as client:
+            r = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts",
+                json={
+                    "work_item_id": str(story_id), "gate_id": str(gate_id),
+                    "title": "글", "slug": "unsealed-post", "lang": "ko",
+                    "summary": "요약", "tags": [], "body_md": "본문",
+                },
+            )
+        assert r.status_code == 409, r.text
+        assert r.json()["error"]["code"] == "SITE_POST_SEAL_MISSING", r.text
+
+        async with Session() as s:
+            from app.models.site_post import SitePost
+            from sqlalchemy import func, select
+            count = (await s.execute(select(func.count()).select_from(SitePost))).scalar_one()
+        assert count == 0, "봉인 없는 승인 게이트로 공개 행이 생겼다(fail-closed 회귀)"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_submit_without_default_role_returns_409_approver_role_missing():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            story_id = await _seed_story(s, org_id, project_id)
+            # 의도적으로 _seed_default_role을 안 부른다 — 이 org엔 기본 결재 역할이 없다.
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id)
+        async with _client_for(app) as client:
+            r_draft = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts",
+                json=_draft_body(work_item_id=story_id),
+            )
+            draft_id = r_draft.json()["draft_id"]
+            r_submit = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts/{draft_id}/submit", json={},
+            )
+        assert r_submit.status_code == 409, r_submit.text
+        assert r_submit.json()["error"]["code"] == "SITE_POST_APPROVER_ROLE_MISSING", r_submit.text
+
+        async with Session() as s:
+            from app.models.gate import Gate
+            from sqlalchemy import func, select
+            count = (await s.execute(
+                select(func.count()).select_from(Gate).where(Gate.org_id == org_id)
+            )).scalar_one()
+        assert count == 0, "역할 미설정인데 게이트가 생성됐다(조용한 폴백 회귀)"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_partial_failure_between_version_insert_and_gate_reopen_rolls_back_both():
+    """story #3367 AC5(부분 성공 롤백) — 디디 자기점검(2026-09-10)이 "②와 같은 함수 안
+    단일 commit이라 구조적으로 보장"이라 적어 두고 «관측하는 테스트는 없다»로 남긴 자리를
+    실제 관측으로 바꾼다(페드루 지시, 새 카드 아님·코드 변경 0·테스트만).
+
+    `create_site_post_draft_version()`은 버전 INSERT(flush만, 커밋 아님) →
+    `_reseal_gate_on_new_version()`(게이트 상태를 in-memory로만 되돌림) → 콘텐츠 규칙 lint →
+    단일 `await db.commit()` 순서다(site_posts.py:434-472). lint 단계(`_lint_site_post_fields`)
+    에서 예외를 주입해 "버전은 이미 flush됐고 게이트도 이미 pending으로 되돌아간" 그 중간
+    지점에서 트랜잭션을 끊는다 — 이 시점에 관측 가능한 상태가 «변경된 최신본+기존 승인 유지»
+    (버전만 새로 생기고 게이트는 approved로 남는, AC5가 금지하는 바로 그 상태)로 굳어지는지,
+    아니면 온전히 롤백돼 둘 다 원래대로 돌아가는지를 새 세션(같은 트랜잭션이 아닌 별도 연결)
+    으로 재조회해 직접 잰다.
+    """
+    from unittest.mock import patch
+
+    import app.services.site_posts as site_posts_mod
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            human_id = await _seed_human(s, org_id)
+            story_id = await _seed_story(s, org_id, project_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id)
+        async with _client_for(app) as client:
+            r_draft = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts",
+                json=_draft_body(work_item_id=story_id),
+            )
+            draft_id = r_draft.json()["draft_id"]
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        async with _client_for(app) as client:
+            r_submit = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts/drafts/{draft_id}/submit", json={},
+            )
+        gate_id = uuid.UUID(r_submit.json()["gate_id"])
+        sealed_before = r_submit.json()["content_sha256"]
+
+        async with Session() as s:
+            await _approve_gate_directly(s, gate_id)
+
+        async with Session() as s:
+            from app.models.site_post_version import SitePostVersion
+            from sqlalchemy import func, select
+            version_count_before = (await s.execute(
+                select(func.count()).select_from(SitePostVersion).where(
+                    SitePostVersion.draft_id == uuid.UUID(draft_id)
+                )
+            )).scalar_one()
+        assert version_count_before == 1
+
+        # 승인된 게이트를 편집 — 버전 INSERT(flush)·게이트 pending 되돌림(in-memory)까지는
+        # 정상 진행되고, 그 다음 단계(lint)에서 강제로 터뜨려 commit 전에 트랜잭션을 끊는다.
+        with patch.object(
+            site_posts_mod, "_lint_site_post_fields",
+            side_effect=RuntimeError("주입된 부분 성공 결함 — commit 전에 터진다"),
+        ):
+            async with _client_for(app) as client:
+                with pytest.raises(RuntimeError):
+                    await client.post(
+                        f"/api/v2/organizations/{org_id}/site-posts/drafts",
+                        json=_draft_body(work_item_id=story_id, title="2호 글(부분 성공 주입)"),
+                    )
+
+        # 별도 새 세션으로 재조회 — 같은 트랜잭션의 잔상이 아니라 실제로 커밋된 DB 상태.
+        async with Session() as s:
+            from app.models.gate import Gate
+            from app.models.site_post_version import SitePostVersion
+            from sqlalchemy import func, select
+
+            gate = (await s.execute(select(Gate).where(Gate.id == gate_id))).scalar_one()
+            version_count_after = (await s.execute(
+                select(func.count()).select_from(SitePostVersion).where(
+                    SitePostVersion.draft_id == uuid.UUID(draft_id)
+                )
+            )).scalar_one()
+
+        assert version_count_after == version_count_before, (
+            "부분 성공 — 버전 INSERT가 롤백되지 않고 남았다(AC5 위반: 변경된 최신본이 존재)"
+        )
+        assert gate.status == "approved", (
+            "부분 성공 — 게이트 되돌림만 커밋되고 버전은 롤백됐다(비대칭 부분 성공, AC5 위반)"
+        )
+        assert gate.reapproval_required is False, "부분 성공인데 reapproval_required가 새 상태로 남았다"
+        assert gate.sealed_content_sha256 == sealed_before, "부분 성공인데 봉인 값이 갱신된 채 남았다"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()

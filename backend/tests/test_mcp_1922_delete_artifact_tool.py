@@ -141,6 +141,23 @@ async def _seed(session):
     return {"org_id": org.id, "project_id": project.id}
 
 
+async def _seed_member(session, org_id, project_id, name):
+    """resolve_member_db_verified()는 fail-closed(DB 실측) — unseeded 랜덤 uuid로는
+    auth.user_id를 못 통과한다. 실 org 멤버를 심어 그 id를 반환(story #3370,
+    member_resolver.py:194-200)."""
+    from app.models.member import Member
+    from app.models.project_access import ProjectAccess
+
+    member = Member(id=uuid.uuid4(), org_id=org_id, type="agent", name=name, is_active=True)
+    session.add(member)
+    await session.commit()
+    session.add(ProjectAccess(
+        id=uuid.uuid4(), project_id=project_id, member_id=member.id, permission="granted", role="member",
+    ))
+    await session.commit()
+    return member.id
+
+
 def _client_for(app):
     from httpx import AsyncClient, ASGITransport
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
@@ -181,9 +198,8 @@ async def test_realdb_creator_only_403_readable_via_http():
     try:
         async with Session() as s:
             seeded = await _seed(s)
-
-        creator_id = uuid.uuid4()
-        other_id = uuid.uuid4()
+            creator_id = await _seed_member(s, seeded["org_id"], seeded["project_id"], "creator-agent")
+            other_id = await _seed_member(s, seeded["org_id"], seeded["project_id"], "other-agent")
 
         await _setup_app(app, Session, seeded["org_id"], seeded["project_id"], user_id=creator_id)
         client = _client_for(app)
@@ -228,11 +244,12 @@ async def test_realdb_mcp_create_delete_then_get_and_list_exclude():
     try:
         async with Session() as s:
             seeded = await _seed(s)
+            # 고정 caller_id — _setup_app(user_id=None)은 매 요청마다 새 랜덤 uuid를 발급해(각
+            # _auth() 클로저 호출 시점 평가) create/delete 요청이 서로 다른 사용자로 인증될 수
+            # 있다(생성자-전용 게이트가 자기 자신의 delete까지 403으로 막는 self-testing 함정)
+            # — 고정 id로 회피. resolve_member_db_verified()가 fail-closed라 실 멤버여야 한다.
+            caller_id = await _seed_member(s, seeded["org_id"], seeded["project_id"], "caller-agent")
 
-        # 고정 caller_id — _setup_app(user_id=None)은 매 요청마다 새 랜덤 uuid를 발급해(각 _auth()
-        # 클로저 호출 시점 평가) create/delete 요청이 서로 다른 사용자로 인증될 수 있다(생성자-전용
-        # 게이트가 자기 자신의 delete까지 403으로 막는 self-testing 함정) — 고정 id로 회피.
-        caller_id = uuid.uuid4()
         await _setup_app(app, Session, seeded["org_id"], seeded["project_id"], user_id=caller_id)
 
         os.environ.setdefault("SPRINTABLE_API_URL", "http://test")

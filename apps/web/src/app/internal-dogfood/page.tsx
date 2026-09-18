@@ -92,7 +92,7 @@ export default async function InternalDogfoodPage({ searchParams }: PageProps) {
                   <Button type="submit">내부 세션 시작</Button>
                 </form>
               ) : (
-                <EmptyState title="허용된 내부 계정이 아직 없음" description="INTERNAL_DOGFOOD_TEAM_MEMBER_IDS 환경 변수를 먼저 채워야 하는." />
+                <EmptyState title="허용된 내부 계정이 아직 없음" description="INTERNAL_DOGFOOD_TEAM_MEMBER_IDS 환경 변수를 먼저 채워야 합니다." />
               )}
             </SectionCardBody>
           </SectionCard>

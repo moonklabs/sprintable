@@ -3,6 +3,7 @@
 // organization/settings 등, #1958 "전체" 스텁 목록 그대로)이 전부 회색이었다. getActiveTabKey가
 // #1951 매니페스트 SSOT(상세→parentTab)를 그대로 재사용해 정확히 판정하는지 고정.
 import { describe, expect, it } from 'vitest';
+import { NAV_GROUPS, CHAT_CENTER_ITEM } from '@/lib/nav-config';
 import { getActiveTabKey, TABS } from './mobile-tab-bar';
 
 describe('getActiveTabKey', () => {
@@ -77,5 +78,60 @@ describe('TABS — story #2279 회귀가드', () => {
       const pathnameOnly = tab.href.split('?')[0]!;
       expect(getActiveTabKey(pathnameOnly)).toBe(tab.key);
     }
+  });
+});
+
+// story #3824 CHANGES②(페드루 PO 確定 2026-09-13 09:01Z, 카디르 QA 실측 09:49Z 후속) —
+// 렌더 텍스트 대조(mobile-tab-bar-badge.test.tsx)만으론 "labelKey 자체를 공유한다"는
+// 재발방지 취지를 구조적으로 못 잠근다(카디르 뮤테이션: namespace/labelKey를 옛
+// mobileTabBar.now/chat로 되돌려도 그 파일의 27개 테스트가 그대로 GREEN이었다 — 렌더
+// 텍스트 대조가 실은 이 축을 안 지나가는 경로로도 통과할 여지가 있었다는 뜻). 이 스위트는
+// TABS 데이터 자체의 namespace·labelKey 필드를 직접 잠가 "같은 키를 쓴다"를 구조로 고정한다.
+describe('TABS — story #3824 CHANGES② labelKey 공유 회귀가드(재발 방지, 카디르 QA 후속)', () => {
+  it('⭐chat 탭은 nav 네임스페이스의 chats를 그대로 공유한다(문구 값이 아니라 labelKey 자체)', () => {
+    const chatTab = TABS.find((t) => t.key === 'chat');
+    expect(chatTab?.namespace).toBe('nav');
+    expect(chatTab?.labelKey).toBe('chats');
+  });
+
+  it('approvals·more 탭은 그대로 mobileTabBar 자기 네임스페이스다(「결재」는 모바일 IA 통합 후속 카드 스코프)', () => {
+    const approvalsTab = TABS.find((t) => t.key === 'approvals');
+    const moreTab = TABS.find((t) => t.key === 'more');
+    expect(approvalsTab?.namespace).toBe('mobileTabBar');
+    expect(approvalsTab?.labelKey).toBe('approvals');
+    expect(moreTab?.namespace).toBe('mobileTabBar');
+    expect(moreTab?.labelKey).toBe('more');
+  });
+});
+
+// story #4020(페드루 PO 확定 2026-09-17) — 3824가 "탭 바 「지금」과 사이드바 「오늘」은
+// 같은 화면"이라는 틀린 전제로 now 탭의 labelKey를 zoneNow로 공유시켰다(실제 목적지는
+// /flow=사이드바 「일감」). 재발 방지는 "이 두 자리가 같은 화면이라 치고 이름을 맞춘다"가
+// 아니라 "목적지가 실제로 같은 자리끼리만 이름을 맞춘다"는 불변식이어야 한다 — 라벨을
+// 하드코딩 대조하지 않고, 목적지(href/path 정규화)가 같은 사이드바 항목을 찾아 그
+// labelKey와 대조한다.
+function normalizeResourcePath(path: string): string {
+  return path.replace(/^\//, '');
+}
+
+const SIDEBAR_STATIC_ITEMS = [...NAV_GROUPS.flatMap((g) => g.items), CHAT_CENTER_ITEM];
+
+describe('TABS — story #4020 AC2 목적지 기준 labelKey 대조(같은 화면=같은 이름, 다르면 같이 두지 않는다)', () => {
+  it.each(TABS)('$key 탭 — 사이드바에 같은 목적지 항목이 있으면 labelKey가 같다(없으면 결재·더보기만 허용)', (tab) => {
+    const tabResource = normalizeResourcePath(tab.href.split('?')[0]!);
+    const matching = SIDEBAR_STATIC_ITEMS.find((item) => {
+      const itemResource = item.kind === 'resource' ? item.path : normalizeResourcePath(item.path);
+      return itemResource === tabResource;
+    });
+    if (!matching) {
+      // 결재(/inbox?tab=gates)·더보기(/more)는 그라운딩 확認 — app-sidebar.tsx·
+      // nav-config.ts에 이 두 주소가 리터럴로도 없다(사이드바에 대응 항목 자체가 없음).
+      expect(['approvals', 'more'], `${tab.key} 탭이 사이드바 어느 항목과도 목적지가 안 겹침(예상 밖) — 그라운딩 재확認 필요`).toContain(tab.key);
+      return;
+    }
+    expect(
+      tab.labelKey,
+      `${tab.key} 탭(labelKey=${tab.labelKey})과 사이드바 「${matching.labelKey}」(같은 목적지 ${tabResource})가 이름이 다름`,
+    ).toBe(matching.labelKey);
   });
 });

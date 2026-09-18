@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -13,6 +13,11 @@ import { gateNeedsAction } from '@/components/cage/gate-evidence';
 import { GateUndoButton, UNDO_WINDOW_MS } from '@/components/cage/gate-undo-button';
 import { GateDiscussDialog } from '@/components/cage/gate-discuss-dialog';
 import { GateSignatureApproval } from '@/components/cage/gate-signature-approval';
+import { gateTypeLabel } from '@/lib/gate-type-label';
+import { gateApproveLabelKey, sigApproveAndSignLabelKey } from '@/lib/newsletter-gate-approve-label';
+import { adsBoostObjectiveLabel } from '@/lib/ads-boost-objective-label';
+import { formatMinorCurrency, type GenerationBudgetCurrency } from '@/components/content/generation-budget-indicator';
+import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import type { GateInboxItem, GateItem, HitlInboxItem } from '@/components/kanban/types';
 import { ProofCapsule, type ProofState } from '@/components/proof-capsule/proof-capsule';
@@ -43,12 +48,31 @@ import { fetchWithAuth } from '@/lib/db/client';
 // HitlRequest 항목은 상세 페이지가 없어(간단한 park 요청이라 `/gates/[id]`급 화면이 불필요)
 // 이 큐 안에서 바로 승인/반려하는 인라인 액션으로 둔다 — Gate 항목은 기존대로 클릭 시
 // `/gates/{id}` 상세로 이동.
-async function fetchGates(): Promise<GateInboxItem[]> {
-  const [pending, held] = await Promise.all([
-    fetchWithAuth('/api/gates/inbox?status=pending&sort=urgency&assigned_to_me=true').then((r) => (r.ok ? r.json() : [])),
-    fetchWithAuth('/api/gates/inbox?status=held&sort=urgency&assigned_to_me=true').then((r) => (r.ok ? r.json() : [])),
+interface FetchGatesResult {
+  items: GateInboxItem[];
+  // story #3521(유나 §22-2, PO 確定 2026-09-05) — story #3519가 두 leg를 catch(() => [])로
+  // 격리해 무한 스켈레톤은 고쳤지만, 그 결과 "leg 실패"와 "진짜 0건"이 똑같은 빈 배열로
+  // 합류해 화면이 못 갈랐다("없음"과 "못 불러옴"이 같은 빈 카드). leg별 실패를 값으로
+  // 따로 들고 나와 호출부가 셋(있음·없음·못 불러옴)을 갈리게 한다.
+  pendingFailed: boolean;
+  heldFailed: boolean;
+}
+
+async function fetchGates(): Promise<FetchGatesResult> {
+  const [pendingResult, heldResult] = await Promise.allSettled([
+    fetchWithAuth('/api/gates/inbox?status=pending&sort=urgency&assigned_to_me=true')
+      .then((r) => (r.ok ? r.json() as Promise<GateInboxItem[]> : Promise.reject(new Error(`status ${r.status}`)))),
+    fetchWithAuth('/api/gates/inbox?status=held&sort=urgency&assigned_to_me=true')
+      .then((r) => (r.ok ? r.json() as Promise<GateInboxItem[]> : Promise.reject(new Error(`status ${r.status}`)))),
   ]);
-  return [...(pending as GateInboxItem[]), ...(held as GateInboxItem[])];
+  return {
+    items: [
+      ...(pendingResult.status === 'fulfilled' ? pendingResult.value : []),
+      ...(heldResult.status === 'fulfilled' ? heldResult.value : []),
+    ],
+    pendingFailed: pendingResult.status === 'rejected',
+    heldFailed: heldResult.status === 'rejected',
+  };
 }
 
 function isHitl(item: GateInboxItem): item is HitlInboxItem {
@@ -114,6 +138,16 @@ function formatUndoRemaining(resolvedAtMs: number, t: ReturnType<typeof useTrans
 
 export function ApprovalsQueue() {
   const t = useTranslations('cage');
+  // story #3565 — ccGateType*/ccGateGeneric 키는 Command Center가 처음 세운
+  // 'dashboard' 네임스페이스에 산다(공용 헬퍼로 옮긴 것은 로직뿐, 키 위치는
+  // 그대로) — 이 화면 자체 t는 'cage'라 별도로 받는다.
+  const tDashboard = useTranslations('dashboard');
+  // story #3806(정정2, 페드루 PO 리뷰 2026-09-11 13:00Z) — 봉인 5필드 표시는 §1
+  // 「결재 카드」 그 자체(이 큐 카드)에 있어야 한다는 실측 지적. formatMinorCurrency
+  // (content ns)·formatScheduledAt 재사용 — gate-evidence.tsx와 동일 포맷터.
+  const tContent = useTranslations('content');
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
   const router = useRouter();
   // story #2103 — BE `PATCH /api/v1/hitl-requests/{id}`가 human-only 불변식이다(gates.py
   // transition_gate_endpoint와 동형, resolved.type != "human" → 403). #2091(게이트 상세)과
@@ -124,6 +158,9 @@ export function ApprovalsQueue() {
   const canResolveHitl = currentMemberType === 'human';
   const [items, setItems] = useState<GateInboxItem[]>([]);
   const [loading, setLoading] = useState(true);
+  // story #3521(유나 §22-2, PO 確定 2026-09-05) — pending/held 둘 중 하나라도 leg 실패면
+  // true. items가 비어도 이 값이 true면 "없음"이 아니라 "못 불러옴" 얼굴을 그린다.
+  const [loadFailed, setLoadFailed] = useState(false);
   // PO 리뷰(PR#2948, 2026-08-12) — 단일 string|null이면 게이트 A in-flight 중 B를 클릭 후
   // A가 먼저 끝나면 finally의 setResolving(null)이 "전역" 값을 지워 B도 아직 in-flight인데
   // B 버튼이 재활성화된다(AC3 "중복 실행 0"이 다중 게이트 동시조작에서 깨지는 창). id별로
@@ -197,16 +234,25 @@ export function ApprovalsQueue() {
     setResolvedAtMs((prev) => { const next = { ...prev }; delete next[id]; return next; });
   };
 
-  useEffect(() => {
+  // story #3521(유나 §22-2, PO 確定 2026-09-05) — 「다시 시도」 버튼이 재사용할 수 있게
+  // 마운트 로드를 함수로 뺀다. loading은 여전히 finally에서 해소(feedback-loading-finally
+  // 하우스룰) — fetchGates가 이제 Promise.allSettled라 원리적으로 안 던지지만, 방어선은
+  // 유지한다.
+  const loadGates = useCallback(() => {
     let cancelled = false;
-    void fetchGates().then((rows) => {
-      if (!cancelled) {
-        setItems(rows);
-        setLoading(false);
-      }
-    });
+    setLoading(true);
+    setLoadFailed(false);
+    void fetchGates()
+      .then((result) => {
+        if (cancelled) return;
+        setItems(result.items);
+        setLoadFailed(result.pendingFailed || result.heldFailed);
+      })
+      .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => loadGates(), [loadGates]);
 
   // story #2985 AC2(PO 계약 확定 2026-08-24) — 다른 승인자가 큐에 있는 게이트를 먼저
   // 해소하면, 이 화면도 새로고침 없이 갱신된다. resolveGate()가 본인 해소 시 이미 쓰는
@@ -351,6 +397,22 @@ export function ApprovalsQueue() {
 
   if (loading) return <p className="text-xs text-muted-foreground">{t('gateInboxLoading')}</p>;
 
+  // story #3521(유나 §22-2, PO 確定 2026-09-05) — "없음"보다 먼저 검사한다. leg가 실패했으면
+  // items가 비어 있어도 그건 진짜 0건이 아니라 못 불러온 것 — 다른 문구+다시 시도.
+  if (loadFailed) {
+    return (
+      <div
+        className="rounded-xl border border-dashed border-destructive/30 bg-destructive-tint px-4 py-5 text-center"
+        data-testid="gate-inbox-load-error"
+      >
+        <p className="text-sm text-foreground">{t('gateInboxLoadError')}</p>
+        <Button variant="outline" size="sm" className="mt-2" onClick={loadGates}>
+          {t('gateInboxRetry')}
+        </Button>
+      </div>
+    );
+  }
+
   if (items.length === 0) {
     return (
       <div className="rounded-xl border border-dashed border-border bg-muted/20 px-4 py-5 text-center">
@@ -361,7 +423,7 @@ export function ApprovalsQueue() {
 
   return (
     <div className="space-y-2">
-      {items.map((item) => {
+      {items.map((item, index) => {
         if (isHitl(item)) {
           return (
             <div key={item.id} className="flex flex-col gap-1.5 rounded-xl border border-info/30 bg-info/5 px-4 py-3">
@@ -372,6 +434,9 @@ export function ApprovalsQueue() {
               <p className="text-sm text-foreground">{item.title}</p>
               <p className="line-clamp-2 text-[11px] text-muted-foreground">{item.prompt}</p>
               {canResolveHitl ? (
+                // story #3592(§17-20 ⑧·§22-18 동형)·story #3606(잔여, 페드루 PO 確定
+                // 2026-09-07) — gateApprove도 gateReject와 같은 자리(같은 map·같은
+                // index)라 같은 기존 키(gateRowActionAriaLabel) 재사용으로 마감.
                 <div className="mt-1 flex justify-end gap-1.5">
                   <Button
                     size="sm"
@@ -379,6 +444,7 @@ export function ApprovalsQueue() {
                     className="h-7 gap-1 text-muted-foreground hover:text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60"
                     disabled={resolvingIds.has(item.id)}
                     onClick={() => void resolveHitl(item.id, 'rejected')}
+                    aria-label={t('gateRowActionAriaLabel', { n: index + 1, label: t('gateReject') })}
                   >
                     <XCircle className="size-3.5" />
                     {t('gateReject')}
@@ -393,6 +459,7 @@ export function ApprovalsQueue() {
                     className="h-7 gap-1 text-success hover:bg-success-tint hover:text-foreground"
                     disabled={resolvingIds.has(item.id)}
                     onClick={() => void resolveHitl(item.id, 'approved')}
+                    aria-label={t('gateRowActionAriaLabel', { n: index + 1, label: t('gateApprove') })}
                   >
                     <CheckCircle className="size-3.5" />
                     {t('gateApprove')}
@@ -419,7 +486,10 @@ export function ApprovalsQueue() {
         const gateBody = (
           <>
             <div className="flex w-full flex-wrap items-center gap-1.5">
-              <Badge variant="chip">{gate.gate_type}</Badge>
+              {/* story #3565(유나 §17-24 전수, 페드루 PO 確定 2026-09-06) — gate_type
+                  원시값(예: "external_publish")을 그대로 찍던 것을 사람 낱말로.
+                  미등재 값은 일반 「게이트」로(원시 snake_case 노출 경로 0). */}
+              <Badge variant="chip">{gateTypeLabel(tDashboard, gate.gate_type)}</Badge>
               {held ? (
                 <Badge variant="secondary">{t('heldBadge')}</Badge>
               ) : null}
@@ -438,6 +508,27 @@ export function ApprovalsQueue() {
             </p>
             {decisionFacts ? (
               <p className="text-[11px] text-muted-foreground">#{gate.work_item_id.slice(0, 8)}</p>
+            ) : null}
+            {/* story #3806(Phase3·3-2 PR5, 유나 §절 §1 「결재 카드 봉인 5필드」 — 정정2,
+                페드루 PO 리뷰 2026-09-11 13:00Z 실측) — 이 큐 카드 자체가 「결재 카드」다.
+                상세 페이지(GateEvidence)에만 있던 봉인 표시를 여기에도 낸다(같은 포맷터
+                재사용, 새 표시 로직 0). ads_boost가 아닌 gate_type은 sealed_ads_budget_
+                minor가 항상 null이라 이 블록이 안 그려진다. */}
+            {gate.gate_type === 'ads_boost' && gate.sealed_ads_budget_minor != null ? (
+              <p className="text-[11px] text-muted-foreground" data-testid="inbox-ads-boost-sealed">
+                {gate.sealed_ads_currency
+                  ? formatMinorCurrency(gate.sealed_ads_budget_minor, gate.sealed_ads_currency as GenerationBudgetCurrency, locale, tContent)
+                  : gate.sealed_ads_budget_minor}
+                {gate.sealed_ads_starts_at && gate.sealed_ads_ends_at ? (
+                  <>
+                    {' · '}
+                    {formatScheduledAt(gate.sealed_ads_starts_at, displayTimezone).display}
+                    {' ~ '}
+                    {formatScheduledAt(gate.sealed_ads_ends_at, displayTimezone).display}
+                  </>
+                ) : null}
+                {gate.sealed_ads_objective ? ` · ${adsBoostObjectiveLabel(gate.sealed_ads_objective, tContent)}` : ''}
+              </p>
             ) : null}
             {/* story #3038 AC4(페드루 전언, PO #3188 오서명 실사고) — 같은 work_item(스토리)의
                 merge 게이트가 여러 개(PR마다 1개, story #2893)면 제목만으론 동명 2장이 된다.
@@ -601,18 +692,28 @@ export function ApprovalsQueue() {
         // 자체를 반려"라는 뜻이라 안 선택을 요구하지 않는다.
         const requiresOptionChoice = decisionFacts !== null && decisionFacts.options.length > 0;
         const selectedOption = selectedOptionByGateId[gate.id];
-        const disabled = resolvingIds.has(gate.id);
-        const primaryLabel = isSigFlow ? t('sigApproveAndSign') : t('gateApprove');
+        // story #3369(§3-1-2-1, 페드루 PO 2026-09-03 06:56Z) — reapproval_required=true는
+        // 작성자가 재상신하기 전까지 승인 자체가 서버에서 409 SITE_POST_RESUBMIT_REQUIRED로
+        // 막힌다(gates.py). "할 일 없는 카드"를 "할 일 있는 카드"처럼 두지 않는다 — 승인·반려
+        // 둘 다 비활성.
+        const isResubmitWaiting = gate.reapproval_required === true;
+        const disabled = resolvingIds.has(gate.id) || isResubmitWaiting;
+        // story #3813(Phase3·3-4 PR4, 페드루 PO CHANGES 2026-09-12) — 같은 판별을
+        // gates/[id]/page.tsx·gate-signature-approval.tsx와 공유(newsletter-gate-
+        // approve-label.ts 한 곳).
+        const primaryLabel = isSigFlow ? t(sigApproveAndSignLabelKey(gate)) : t(gateApproveLabelKey(gate));
         const primaryOnClick = () => {
           if (isSigFlow) setSignatureTargetId(gate.id);
           // story #3113(AC3) — 선택안을 note에 실어 resolution_note로 영구 기록한다(BE 신규
           // 필드 없이 기존 자유텍스트 필드 재사용 — 결과 조회 시 "어느 안"이었는지 그대로 읽힌다).
           else void resolveGate(gate.id, 'approved', requiresOptionChoice ? t('decisionSelectedNote', { option: selectedOption }) : null);
         };
-        const rejectOnClick = () => {
-          if (isSigFlow) setSignatureTargetId(gate.id);
-          else void resolveGate(gate.id, 'rejected');
-        };
+        // story #3334(선생님 실사용 4바퀴 T1' 적출) — 반려(변경 요청)는 이제 gate_type/위험도
+        // 무관 사유 필수(서버 422, gates.py transition_gate_endpoint). 예전엔 저위험 게이트만
+        // 이 else 분기로 사유 없이 즉시 반려됐다 — 그 즉시제출 경로를 없애고 반려는 항상 이미
+        // 있는 서명 다이얼로그(GateSignatureApproval, 사유 textarea 보유)로 통일한다. 승인은
+        // 기존처럼 저위험 원탭 그대로(primaryOnClick, 변경 없음 — 이 스토리는 반려 축만 다룬다).
+        const rejectOnClick = () => setSignatureTargetId(gate.id);
 
         return (
           <div key={gate.id} className="rounded-xl border border-border bg-card px-4 py-3">
@@ -624,9 +725,19 @@ export function ApprovalsQueue() {
               {gateBody}
             </button>
             {decisionExpandSection}
+            {isResubmitWaiting ? (
+              // §3-1-2-1 — 판정이 아니라 관측(§3-2와 같은 원칙): 작성자가 손볼 차례라는
+              // 사실만 전달하고, 승인/반려 버튼은 아래에서 비활성으로 그 사실을 강제한다.
+              // story #3806(정정3, 페드루 PO 리뷰 2026-09-11 13:00Z) — 「작성자가 본문을
+              // 수정해...」는 글 게이트(doc/content) 전용 문장이다. ads_boost는 본문이
+              // 아니라 예산·기간이 바뀌는 축이라 §1 원문 그대로 별도 문장을 쓴다.
+              <p className="mt-2 rounded-lg bg-muted/40 px-2.5 py-1.5 text-[11px] text-muted-foreground">
+                {gate.gate_type === 'ads_boost' ? t('adsBoostReapprovalWaiting') : t('gateReapprovalResubmitWaiting')}
+              </p>
+            ) : null}
             {gateErrors[gate.id] ? (
               <p
-                className="mt-2 rounded-lg border border-destructive/30 bg-destructive/8 px-2.5 py-1.5 text-[11px] text-foreground"
+                className="mt-2 rounded-lg border border-destructive/30 bg-destructive-tint px-2.5 py-1.5 text-[11px] text-foreground"
                 role="alert"
                 aria-live="assertive"
               >
@@ -638,6 +749,10 @@ export function ApprovalsQueue() {
                 order 유틸+wrapper의 sm:contents로 DOM은 한 세트만 유지한다(버튼 중복 렌더
                 금지 — 테스트·접근성 트리 둘 다 단일 소스여야 함). */}
             <div className="mt-2 flex flex-col gap-1.5 border-t border-border pt-2 sm:flex-row sm:items-center sm:justify-end">
+              {/* story #3592(§17-20 ⑧·§22-18 동형)·story #3606(잔여, 페드루 PO 確定
+                  2026-09-07) — primaryLabel(승인류) 버튼도 같은 기존 키로 마감.
+                  disabled 중엔 화면이 "..."를 보이므로 label도 그 값 그대로(그때
+                  보이는 낱말 통째 — §22-18 원칙, 고정 낱말 지어내지 않음). */}
               <div className="order-2 flex gap-1.5 sm:contents">
                 <Button
                   size="sm"
@@ -645,6 +760,7 @@ export function ApprovalsQueue() {
                   className="order-1 h-8 flex-1 gap-1 text-muted-foreground hover:text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60 sm:order-1 sm:flex-none"
                   disabled={disabled}
                   onClick={rejectOnClick}
+                  aria-label={t('gateRowActionAriaLabel', { n: index + 1, label: t('sigRequestChanges') })}
                 >
                   <Pencil className="size-3.5" />
                   {t('sigRequestChanges')}
@@ -656,6 +772,7 @@ export function ApprovalsQueue() {
                   className="order-2 h-8 flex-1 text-muted-foreground sm:order-2 sm:flex-none"
                   disabled={disabled}
                   onClick={() => setDiscussTargetId(gate.id)}
+                  aria-label={t('gateRowActionAriaLabel', { n: index + 1, label: t('gateDiscussSubmit') })}
                 >
                   {t('gateDiscussSubmit')}
                 </Button>
@@ -665,9 +782,14 @@ export function ApprovalsQueue() {
                 className="order-1 h-9 w-full gap-1.5 sm:order-3 sm:h-8 sm:w-auto"
                 disabled={disabled || (requiresOptionChoice && !selectedOption)}
                 onClick={primaryOnClick}
+                aria-label={t('gateRowActionAriaLabel', { n: index + 1, label: disabled && !isSigFlow ? t('gateApproving') : primaryLabel })}
               >
                 <CheckCircle className="size-3.5" />
-                {disabled && !isSigFlow ? '...' : primaryLabel}
+                {/* story #3608(유나 §22-18 ④-2, PO 確定 2026-09-07) — "..."는 보는
+                    사람에게도 아무 말을 안 한다("3번째 항목 ..."로 접근 이름이
+                    끝나던 원인). 낱말("승인 중…")로 바꾸면 접근 이름은 §22-18
+                    ④(보이는 라벨 통째)로 저절로 따라온다 — 새 aria 장치 0. */}
+                {disabled && !isSigFlow ? t('gateApproving') : primaryLabel}
               </Button>
             </div>
             {requiresOptionChoice && !selectedOption ? (

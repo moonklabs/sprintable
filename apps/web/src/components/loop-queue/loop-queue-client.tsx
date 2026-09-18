@@ -14,9 +14,10 @@ import {
 } from './derive-loop-queue';
 import type { ViewerContext } from '../org-briefing/derive-attention-clusters';
 import { parseTeamMembers } from '../org-briefing/derive-workforce-face';
-// story #2858 — CrossProjectTag는 attention-cluster-board.tsx의 단일 정의를 재사용한다
+// story #2858 — CrossProjectTag는 단일 정의를 재사용한다(story #3870 — attention-
+// cluster-board.tsx의 AttentionClusterBoard가 은퇴 잔재로 삭제되며 cross-project-tag.tsx로 이전).
 // (페드루 PO 판정 2026-08-21, 2851 교훈 — 별개 페이지라도 로컬 재정의 금지).
-import { CrossProjectTag } from '../org-briefing/attention-cluster-board';
+import { CrossProjectTag } from '../org-briefing/cross-project-tag';
 
 // story #2858(loop-closure P2) AC1 — org 스코프: measure_after 오래된 순 전량 페이지네이션.
 // BE가 이미 정렬해서 낸다(loop_measure_due.py: items.sort(key=measure_after)) — FE 재정렬 X.

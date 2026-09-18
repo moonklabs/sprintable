@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { CircleDot, Inbox, MessageSquare, Grid2x2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { CornerCountBadge } from '@/components/ui/corner-count-badge';
 import { MOBILE_BREAKPOINT } from '@/hooks/use-mobile';
 import { fetchWithAuth } from '@/lib/db/client';
 
@@ -23,18 +24,32 @@ import { fetchWithAuth } from '@/lib/db/client';
 // 목적지를 직접 가리킨다(한 홉 절약 + 이름-목적지 일치, #2224 §④ "사람이 누르는 진입점"
 // 표면). `/flow`는 아직 모바일 전용 화면(#2225)이 없어 데스크톱과 같은 레이아웃을 그대로
 // 받는다 — 이번 판에서는 "폰에서 깨지지 않게"까지만 손대고, 본격 모바일 재설계는 #2225.
+// story #3824 CHANGES②(페드루 PO 確定, 2026-09-13 09:01Z) — "같은 사실=같은 낱말": 「채팅」
+// 탭과 데스크톱 사이드바 「대화」는 같은 화면(/chats)을 가리키는데 각자 다른 i18n 키
+// (mobileTabBar.chat vs nav.chats)를 써서 문구가 갈라져 있었다 — 값이 아니라 **labelKey
+// 자체**를 공유해 한쪽이 바뀌면 다른 쪽도 자동으로 같이 바뀌게 한다(재발 방지). 「결재」는
+// 모바일 IA 통합이 후속 카드 스코프라 자기 키(mobileTabBar.approvals) 그대로 둔다.
+//
+// story #4020(페드루 PO 확定 2026-09-17, 유나 PR 4399 design 관찰) — "now" 탭의 labelKey는
+// 원래(3824) `zoneNow`(「오늘」)였으나, 그 판정은 "탭 바 「지금」과 사이드바 「오늘」은 같은
+// 화면"이라는 **틀린 전제**에 기댔다 — 실제 목적지 `/flow`는 사이드바에서 「일감」
+// (nav-config.ts의 `board` 항목, labelKey `zoneDev`)이고, 사이드바의 진짜 「오늘」은
+// `/org-briefing`(다른 항목)이다. 목적지는 선생님 2026-07-30 결정(#2224)이라 유지하고,
+// 라벨을 그 목적지의 실제 이름(zoneDev)으로 맞춘다 — prod(main)는 이미 라벨이 「지금」
+// (mobileTabBar.now, 목적지와 이름이 어긋나지 않는 옛 낱말)이라 이 수정이 오히려 3824
+// 이전 prod와도, 사이드바 실목적지와도 동시에 맞아떨어진다.
 export const TABS = [
-  { key: 'now', href: '/flow', icon: CircleDot, labelKey: 'now' as const },
+  { key: 'now', href: '/flow', icon: CircleDot, labelKey: 'zoneDev' as const, namespace: 'nav' as const },
   // story #2279(PO 판정, 2026-07-29): 라벨("결재")·배지(게이트 대기 수)와 착지가 어긋나
   // 있던 것 — 이름=가는 곳=세는 것 셋을 한 줄로 맞춘다. #2164가 세운 "진입점 라벨은 착지
   // 탭과 일치" 규칙은 그대로 두고 착지 쪽을 게이트 탭으로 옮긴다(라벨을 규칙에 맞춘다).
   // "알림" 탭은 안 없어진다 — /inbox 페이지 내부 탭 스위처로 한 번 더 탭하면 그대로 있다.
-  { key: 'approvals', href: '/inbox?tab=gates', icon: Inbox, labelKey: 'approvals' as const },
-  { key: 'chat', href: '/chats', icon: MessageSquare, labelKey: 'chat' as const },
+  { key: 'approvals', href: '/inbox?tab=gates', icon: Inbox, labelKey: 'approvals' as const, namespace: 'mobileTabBar' as const },
+  { key: 'chat', href: '/chats', icon: MessageSquare, labelKey: 'chats' as const, namespace: 'nav' as const },
   // "전체"는 시안상 정식 목록화 대상(S9/#1965) — 기존 모바일 GNB Sheet(햄버거) 재사용은
   // blueprint §3.2 "모바일 사이드바 폐기" 방향과 충돌해 하지 않는다(오르테가군 확定). 이 스토리
   // 에서는 최소 스텁 라우트로만 연결 — S9가 정식 목록으로 교체.
-  { key: 'more', href: '/more', icon: Grid2x2, labelKey: 'more' as const },
+  { key: 'more', href: '/more', icon: Grid2x2, labelKey: 'more' as const, namespace: 'mobileTabBar' as const },
 ] as const;
 
 // story #1991(navigate 불안정 1차 근원 B, 유나 UX 감사): 기존 isTabActive는 4탭 href 자체와
@@ -74,6 +89,9 @@ export function getActiveTabKey(pathname: string): (typeof TABS)[number]['key'] 
 
 export function MobileTabBar({ chatUnreadTotal }: { chatUnreadTotal: number }) {
   const t = useTranslations('mobileTabBar');
+  // story #3824 CHANGES②(페드루 PO 確定) — "now"·"chat" 탭은 nav 네임스페이스의 zoneNow·
+  // chats 키를 그대로 공유(같은 labelKey — 위 TABS 주석 참고).
+  const tNav = useTranslations('nav');
   const pathname = usePathname();
   // story #1977(트랙B): GNB ③ 채팅 unread 총합(유나 시안 768e89b5 v2) — 데스크톱 사이드바
   // 채팅 항목(app-sidebar.tsx)과 동일 소스. story #2007(perf·서버부하): 여기서 직접
@@ -132,9 +150,12 @@ export function MobileTabBar({ chatUnreadTotal }: { chatUnreadTotal: number }) {
   return (
     <nav
       aria-label={t('navLabel')}
-      className="flex h-16 shrink-0 border-t border-border bg-card lg:hidden"
+      // story #3756 — 탭 바 높이는 이제 globals.css `.dashboard-shell-root`가 소유한
+      // `--mobile-tab-bar-h`(4rem, 기존 h-16과 동일값) 토큰을 참조한다(두 벌 상수 금지 —
+      // 이 값을 바꾸려면 globals.css 그 한 줄만 고치면 우하단 fixed 요소들의 인셋도 함께 맞다).
+      className="flex h-[var(--mobile-tab-bar-h)] shrink-0 border-t border-border bg-card lg:hidden"
     >
-      {TABS.map(({ key, href, icon: Icon, labelKey }) => {
+      {TABS.map(({ key, href, icon: Icon, labelKey, namespace }) => {
         const active = key === activeKey;
         // story #1977: "채팅" 탭 배지 = GNB unread 총합(결재함 배지와 동일 brand, 구분은
         // 색이 아니라 아이콘+탭 순서 — 유나 시안 768e89b5 v2 디자인 노트).
@@ -143,6 +164,20 @@ export function MobileTabBar({ chatUnreadTotal }: { chatUnreadTotal: number }) {
           : key === 'chat' && chatUnreadTotal > 0
             ? chatUnreadTotal
             : null;
+        // story #3518(유나 사전 스티어, 2026-09-05) — CornerCountBadge는 aria-hidden이라
+        // 그 수를 보조기술에 전하는 책임은 이 링크에 있다(계약은 corner-count-badge.tsx
+        // 주석 참고). ⚠️여기 aria-label을 쓰지 않는다 — 이 탭은 벨/프레즌스와 달리
+        // 보이는 텍스트 라벨("채팅"·"결재")이 이미 있어서, aria-label로 접근성 이름을
+        // 통째로 갈아치우면 그 보이는 라벨이 이름에서 사라진다(WCAG 2.5.3 Label in
+        // Name 위반 — 음성 입력 사용자가 화면에 보이는 말("채팅")로 이 링크를 못
+        // 부른다). 대신 시각 라벨 뒤에 sr-only 텍스트를 덧붙인다 — 보이는 라벨은
+        // 그대로 두고 수만 "더한다". 상한(9+/99+)도 이름에 반영한다(캡 값이 아니라
+        // "그 이상"이라는 사실을 문장으로 — 시각 배지의 캡과 같은 뜻).
+        const srCountText = badge === null
+          ? null
+          : key === 'chat'
+            ? (badge > 99 ? t('chatUnreadSrCapped') : t('chatUnreadSr', { count: badge }))
+            : (badge > 9 ? t('approvalsPendingSrCapped') : t('approvalsPendingSr', { count: badge }));
         return (
           <Link
             key={key}
@@ -156,16 +191,21 @@ export function MobileTabBar({ chatUnreadTotal }: { chatUnreadTotal: number }) {
             <span className="relative">
               <Icon className="size-[22px]" strokeWidth={1.8} />
               {badge !== null ? (
-                <span
-                  aria-hidden
-                  className="absolute -top-1 left-full ml-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold leading-none text-primary-foreground"
-                >
-                  {/* story #1977: 채팅 unread 총합은 99+ 상한(시안 768e89b5 v2) — 결재함은 기존 9+ 유지 */}
-                  {key === 'chat' ? (badge > 99 ? '99+' : badge) : badge > 9 ? '9+' : badge}
-                </span>
+                // story #3431 — 공용 CornerCountBadge로 통합(bell·presence와 동일 정의,
+                // 색/크기 무변경). 위치만 이 소비처 고유(아이콘 오른쪽 옆, 코너 아님).
+                <CornerCountBadge
+                  variant="primary"
+                  className="absolute -top-1 left-full ml-0.5"
+                  // story #1977: 채팅 unread 총합은 99+ 상한(시안 768e89b5 v2) — 결재함은 기존 9+ 유지
+                  value={key === 'chat' ? (badge > 99 ? '99+' : badge) : badge > 9 ? '9+' : badge}
+                />
               ) : null}
             </span>
-            {t(labelKey)}
+            {namespace === 'nav' ? tNav(labelKey) : t(labelKey)}
+            {/* story #3518 — 보이는 라벨 뒤에 이어 붙인다(라벨을 갈아치우지 않는다,
+                WCAG 2.5.3). aria-live는 안 붙인다(탭 전환 때마다 안내를 반복하지
+                않는다 — 이 링크에 포커스/진입할 때만 한 번 읽힌다). */}
+            {srCountText ? <span className="sr-only"> {srCountText}</span> : null}
           </Link>
         );
       })}

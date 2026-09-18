@@ -36,6 +36,7 @@ from app.services.asset_registry import DEFAULT_CONTAINER, sync_attachment_asset
 from app.services.command_classifier import classify_command
 from app.services.event_seq import assign_recipient_seq
 from app.services.member_resolver import (
+    UNNAMED_MEMBER_LABEL,
     ResolvedMember,
     filter_human_member_ids,
     filter_org_member_ids,
@@ -414,12 +415,18 @@ async def _fetch_conversation_participants(
         # 이 삼항은 방어적 죽은 분기. 예전엔 여기서도 uuid 앞 8자를 지어냈으나(FE로 그대로
         # 새는 표시결함 원인지 중 하나), 이제 resolved.name 자체가 orphan이면 None이라
         # (member_resolver.py 참고) FE Participant.name(`string | null`) 계약과 맞는다.
+        # story #3758(9번째, PO 決) — name=None만으로는 「실존·이름 없음」과 「orphan」을
+        # 못 가른다 — ResolvedMember.resolved 비트를 그대로 payload에 실어 FE가 두 갈래를
+        # (activity-log-view.tsx의 actor_id 유무 분기와 동형으로) 가르게 한다. orphan
+        # placeholder도 방어적으로 없는 경우(위 주석)엔 resolved=False로 맞춘다(정직 —
+        # 이 참여자가 실제로 무엇인지 하나도 모른다는 사실 그대로).
         conv_participants[r.conversation_id].append({
             "member_id": str(r.member_id),
             "name": resolved.name if resolved else None,
             "avatar_url": getattr(resolved, "avatar_url", None) if resolved else None,
             "type": resolved.type if resolved else "human",
             "runtime_type": runtime_type_map.get(r.member_id),
+            "resolved": resolved.resolved if resolved else False,
         })
     return conv_participants
 
@@ -644,14 +651,29 @@ def _activation_meta(req: "SendMessageRequest") -> dict | None:
 
 def _event_meta(req: "SendMessageRequest") -> dict | None:
     """story #2637 AC 0-a: req.event_context({"event_key","payload"}) → msg_metadata['event'].
-    없으면 None(완전 additive) — publish_registry_event만 이 필드를 채운다."""
+    story #3332 — "refs"(발행 시점에 서버가 계산한 참조 토큰, block_template의 {{ref.X}}용)도
+    같은 dict에 additive로 실린다. 없으면 None(완전 additive) — publish_registry_event만
+    이 필드를 채운다."""
     return {"event": req.event_context} if isinstance(req.event_context, dict) else None
 
 
+def _work_item_meta(req: "SendMessageRequest") -> dict | None:
+    """story #3828(UX-v3·대화·BE 1) — req.work_item({type, id}) → msg_metadata['work_item'].
+    approval_target(approval_delivery.py)과 같은 namespace 패턴이지만 그쪽은 send_message()를
+    우회해 ConversationMessage를 직접 구성하는 별도 경로(#2604 승인 카드 전용)라 이 함수와
+    실제로 만날 일이 없다 — 여긴 event_context와 동형으로 이 함수의 기존 확장 메커니즘을
+    그대로 따른다. GET /conversations?work_item_type=&work_item_id= 조회(story #3828)가
+    이 키를 읽는다. 없으면 None(완전 additive)."""
+    return (
+        {"work_item": {"type": req.work_item.type, "id": str(req.work_item.id)}}
+        if req.work_item is not None else None
+    )
+
+
 def _combined_msg_metadata(req: "SendMessageRequest") -> dict | None:
-    """_activation_meta/_event_meta 둘 다 독립 namespace라 병합 — 한쪽만 있어도, 둘 다
-    없어도(None), 이론상 둘 다 있어도 안전하게 합친다(현재 호출부는 상호배타적으로 쓰지만
-    강제하지 않음 — 필드 자체가 각자 optional이라 자연히 배타적이 된다)."""
+    """_activation_meta/_event_meta/_work_item_meta 전부 독립 namespace라 병합 — 한쪽만
+    있어도, 전부 없어도(None), 이론상 여럿 있어도 안전하게 합친다(각 필드가 optional이라
+    자연히 배타적이 되는 경우가 대부분이나 강제하지 않음)."""
     merged: dict = {}
     act = _activation_meta(req)
     if act:
@@ -659,6 +681,9 @@ def _combined_msg_metadata(req: "SendMessageRequest") -> dict | None:
     ev = _event_meta(req)
     if ev:
         merged.update(ev)
+    wi = _work_item_meta(req)
+    if wi:
+        merged.update(wi)
     return merged or None
 
 
@@ -684,6 +709,28 @@ def _approval_payload(msg: "ConversationMessage") -> dict:
     meta = (getattr(msg, "__dict__", None) or {}).get("msg_metadata")
     target = meta.get("approval_target") if isinstance(meta, dict) else None
     return {"approval_target": target if isinstance(target, dict) else None}
+
+
+def _operator_reply_target_gate_id(root_msg: "ConversationMessage | None") -> uuid.UUID | None:
+    """story #3279(지원v1·후속) — root_msg(스레드 답장의 부모, 이미 explicit SELECT로 로드된
+    값)가 support 에스컬레이션 카드(approval_delivery.py가 만드는 approval_target.work_item_type
+    =="support_escalation")면 그 gate_id를 돌려준다. 카드가 아니거나 gate_id가 없거나
+    malformed면 None(=배달 대상 아님) — send_message()가 이 값이 있을 때만 background task를
+    큐잉한다. _approval_payload와 달리 root_msg는 이 요청 안에서 방금 로드한 값이라
+    msg_metadata가 이미 채워져 있음이 보장된다(__dict__ 우회 불필요, 직접 속성 접근 안전)."""
+    if root_msg is None or not root_msg.msg_metadata:
+        return None
+    approval_target = root_msg.msg_metadata.get("approval_target")
+    if not isinstance(approval_target, dict) or approval_target.get("work_item_type") != "support_escalation":
+        return None
+    gate_id_raw = approval_target.get("gate_id")
+    if not gate_id_raw:
+        return None
+    try:
+        return uuid.UUID(str(gate_id_raw))
+    except ValueError:
+        logger.warning("operator reply skip — malformed gate_id in approval_target=%r", gate_id_raw)
+        return None
 
 
 def _event_payload(msg: "ConversationMessage") -> dict:
@@ -1217,6 +1264,14 @@ def _is_mcp_upload_object_path(url: str) -> bool:
     return mcp_attachment_upload.is_mcp_upload_object_path(url, kind="chat")
 
 
+class MessageWorkItemTag(BaseModel):
+    """story #3828(UX-v3·대화·BE 1) — SendMessageRequest.work_item 형식. type은 자유
+    문자열(gate.work_item_type/GateResponse.work_item_type과 동형 관례 — story/doc/
+    task 등, 새 값 추가에 스키마 변경 불요)."""
+    type: str
+    id: uuid.UUID
+
+
 class MessageAttachment(BaseModel):
     url: str           # FE-proxy 업로드 객체 url(https GCS 또는 canonical bare path·provider 추상)
     name: str          # 원본 파일명
@@ -1275,6 +1330,10 @@ class SendMessageRequest(BaseModel):
     # 전달 계통 금지)를 지키면서 publish_registry_event가 이 필드로 "이 메시지가 이벤트
     # 발행분임"을 msg_metadata에 실을 수 있게 한다. 공개 REST 문서에는 안 실을 내부 필드.
     event_context: dict | None = None
+    # story #3828(UX-v3·대화·BE 1) — 이 메시지가 어느 work_item(story·doc 등) 얘기인지
+    # 선택 태그. Pydantic 하위모델 자체가 형식 검증(type 누락·id가 UUID 아님 → 422) —
+    # 없으면 완전 무변(approval_target과는 별도 namespace, _work_item_meta 참고).
+    work_item: MessageWorkItemTag | None = None
 
     @field_validator("attachments")
     @classmethod
@@ -1511,11 +1570,90 @@ async def list_conversations(
             "latest_message": {
                 "content": latest_msg.content,
                 "created_at": latest_msg.created_at.isoformat(),
+                # story #3888(§⑤·Chat, PO 확定 2026-09-14 18:19Z) — FE가 이벤트 메시지를
+                # raw content(발행 시점 slug) 대신 렌더 시점 「헤더 · 요약」으로 조립하려면
+                # event_key/payload가 필요하다. _event_payload()(기존 함수, 전체 메시지
+                # 목록이 이미 씀·additive)를 그대로 재사용 — 새 스키마·새 조회 0.
+                **_event_payload(latest_msg),
             } if latest_msg else None,
             "updated_at": conv.updated_at.isoformat(),
         })
 
     return {"data": result, "total": total, "limit": limit, "offset": offset}
+
+
+class ConversationByWorkItemItem(BaseModel):
+    """story #3828(UX-v3·대화·BE 1) — list_conversations_by_work_item 응답 1행. 목록
+    화면(list_conversations)의 무거운 참여자/읽음/미리보기 계산은 스코프 밖 — 「이 일
+    얘기하는 대화가 있나·있으면 어디」만 답한다."""
+    id: uuid.UUID
+    type: str
+    title: str | None
+    last_tagged_at: datetime
+
+
+@router.get("/by-work-item", response_model=list[ConversationByWorkItemItem])
+async def list_conversations_by_work_item(
+    work_item_type: str = Query(...),
+    work_item_id: uuid.UUID = Query(...),
+    limit: int = Query(default=20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> list[ConversationByWorkItemItem]:
+    """story #3828(UX-v3·대화·BE 1, 페드루 PO 確定 2026-09-13) — 「이 work_item(story·
+    doc 등)을 얘기하는 conversation」 조회. `send_message()`의 `work_item` 태그
+    (msg_metadata['work_item'], approval_target과 동형 JSONB 패턴 — story #3821의
+    (work_item_type, work_item_id) 축 재사용)를 단 메시지가 있는 conversation을
+    최근순(그 work_item을 가리킨 가장 최근 메시지 시각)으로 반환한다. 태그된
+    메시지가 0건이면 빈 배열(지어내지 않는다).
+
+    페드루 PO 리뷰 CHANGES(PR #4253) — 최초 구현은 org 경계까지만 보고 캐폴러의
+    참여 여부를 안 봤다. 이 route의 소비처(「오늘」 행의 "관련 대화" 링크)는
+    «클릭하면 여는 대화»라 참여 안 한 대화(특히 DM)가 새면 403 죽은 링크이자
+    "이 DM이 존재한다"는 사실 자체의 노출이다 — `list_conversations`와 같은
+    참여 술어(`ConversationParticipant.member_id == 캐폴러`)로 좁힌다. org
+    전체 태그 존재 조회(참여 무관)는 다른 질문이라 이 route의 축이 아니다(필요해
+    지면 별도 이름의 route로, 이 자리에서 슬쩍 겸하지 않는다)."""
+    caller = await _resolve_member(auth, org_id, db)
+    subq = (
+        select(
+            ConversationMessage.conversation_id,
+            func.max(ConversationMessage.created_at).label("last_tagged_at"),
+        )
+        .join(Conversation, Conversation.id == ConversationMessage.conversation_id)
+        .join(
+            ConversationParticipant,
+            ConversationParticipant.conversation_id == ConversationMessage.conversation_id,
+        )
+        .where(
+            Conversation.org_id == org_id,
+            ConversationParticipant.member_id == caller.id,
+            ConversationMessage.msg_metadata["work_item"]["type"].astext == work_item_type,
+            ConversationMessage.msg_metadata["work_item"]["id"].astext == str(work_item_id),
+        )
+        .group_by(ConversationMessage.conversation_id)
+        .order_by(func.max(ConversationMessage.created_at).desc())
+        .limit(limit)
+    )
+    tagged = (await db.execute(subq)).all()
+    if not tagged:
+        return []
+
+    last_tagged_by_conv = {row.conversation_id: row.last_tagged_at for row in tagged}
+    conv_rows = (await db.execute(
+        select(Conversation).where(Conversation.id.in_(last_tagged_by_conv.keys()))
+    )).scalars().all()
+    conv_by_id = {c.id: c for c in conv_rows}
+
+    return [
+        ConversationByWorkItemItem(
+            id=conv_id, type=conv_by_id[conv_id].type, title=conv_by_id[conv_id].title,
+            last_tagged_at=last_tagged_by_conv[conv_id],
+        )
+        for conv_id, _ in sorted(last_tagged_by_conv.items(), key=lambda kv: kv[1], reverse=True)
+        if conv_id in conv_by_id
+    ]
 
 
 @router.get("/unread-count")
@@ -2634,23 +2772,39 @@ async def send_message(
     # story #2747(2026-08-25, PO 판정) — 이 메시지가 draft 상태 doc을 mention했으면 작성자에게
     # 1회성 넛지(결재 상신 여부를 묻는다). msg_references가 이미 이 메시지의 stored doc
     # 참조를 갖고 있어(위) 재파싱 불요 — target_type=="doc"인 것만 실 Doc 행 조회.
-    _mentioned_doc_ids = {
-        uuid.UUID(r["target_id"]) for r in msg_references if r.get("target_type") == "doc"
-    }
+    #
+    # story d1f4afcb(2026-09-02, 담롱 그라운딩·PO 판정) — ①이 넛지는 **사람의 대화 맥락**
+    # 전용이다. `body.event_context is not None`이면 이 메시지는 publish_registry_event가
+    # 만든 시스템 판정 카드(예: preset.gate.verdict 반려 통지)다 — 그런 메시지가 우연히
+    # draft doc을 참조해도(예: neutral_facts의 draft_doc_reference_token이 텍스트에 실려
+    # auto-mention됨) 사람이 "논의"한 게 아니므로 넛지를 내지 않는다. 반려 통지와 같은 초에
+    # 「결재 상신하시겠습니까?」가 나란히 도착해 실행자를 엉뚱한 경로(submit_for_approval)로
+    # 유인하던 실사고(3바퀴 4바퀴 측정, conv 0b0e61eb)의 처방.
+    _mentioned_doc_ids = (
+        {uuid.UUID(r["target_id"]) for r in msg_references if r.get("target_type") == "doc"}
+        if body.event_context is None
+        else set()
+    )
     if _mentioned_doc_ids and conv.project_id:
         try:
             from app.services.approval_delivery import maybe_nudge_draft_doc_shared_in_chat
 
+            # story #3379 — 「기본 침묵」 판정(최근 편집·superseded)에 doc_updated_at·
+            # superseded_by가 필요해 SELECT에 같이 얹는다(추가 쿼리 0, 기존 1회 SELECT 그대로).
             _docs = (await db.execute(
-                select(Doc.id, Doc.title, Doc.status, Doc.created_by).where(
+                select(
+                    Doc.id, Doc.title, Doc.status, Doc.created_by, Doc.updated_at, Doc.superseded_by,
+                ).where(
                     Doc.id.in_(_mentioned_doc_ids), Doc.org_id == org_id, Doc.deleted_at.is_(None),
                 )
             )).all()
-            for _doc_id, _doc_title, _doc_status, _doc_author_id in _docs:
+            for _doc_id, _doc_title, _doc_status, _doc_author_id, _doc_updated_at, _doc_superseded_by in _docs:
                 await maybe_nudge_draft_doc_shared_in_chat(
                     db, org_id=org_id, project_id=conv.project_id,
                     doc_id=_doc_id, doc_title=_doc_title, doc_status=_doc_status,
-                    doc_author_id=_doc_author_id, sender_id=sender.id,
+                    doc_author_id=_doc_author_id, doc_updated_at=_doc_updated_at,
+                    doc_superseded_by=_doc_superseded_by, sender_id=sender.id,
+                    trigger_message_content=msg.content,
                 )
         except Exception:  # noqa: BLE001 — 넛지 실패가 메시지 전송을 막지 않는다(best-effort).
             logger.warning("draft doc 넛지 배선 실패(비차단) message=%s", msg.id, exc_info=True)
@@ -2899,10 +3053,27 @@ async def send_message(
                         await dispatch_notification(
                             db, org_id=org_id, event_type="conversation.mention",
                             target_member_ids=human_mention_targets,
-                            title=f"{sender.name}님이 회원님을 멘션했습니다",
+                            # story #3758 — sender.name이 None일 수 있다(ResolvedMember/
+                            # TeamMember 둘 다 name nullable 완화 뒤) — 그대로 f-string에
+                            # 꽂으면 "None님이..."로 샌다.
+                            # story #3903 AC1 — 합니다체("멘션했습니다")→해요체. 옛 행(event
+                            # 컬럼 도입 前) 전용 폴백 문구로만 남는다(아래 event 있으면 FE가
+                            # 렌더 시점에 이 title 대신 event.sender_name으로 직접 조합).
+                            # story #3903 PO PASS 후속 — 「회원님을」→「나를」(inbox.mentionTitle과
+                            # 동일 문구·PO 2인칭 통일 지시 그대로 적용, f0083e15dc).
+                            title=f"{sender.name or UNNAMED_MEMBER_LABEL}님이 나를 멘션했어요",
                             body=(msg.content or "")[:200],
                             reference_type="conversation", reference_id=conversation_id,
                             source_project_id=conv.project_id,
+                            # story #3903(migration 0378) — sender_name(제목 렌더시 조합용)
+                            # + 이 메시지가 이벤트 발행 메시지면 event_key/payload/refs(#2637
+                            # 구조 그대로, _event_payload 재사용)까지 같이 싣는다. FE가 event
+                            # 있으면 eventCard 조합(신규 낱말 0)으로 제목·요약을 짓고, 없으면
+                            # 위 title/body로 폴백.
+                            event={
+                                "sender_name": sender.name or UNNAMED_MEMBER_LABEL,
+                                **(_event_payload(msg).get("event") or {}),
+                            },
                             # story #2460(§6 봉합②): 개인 webhook·Expo push 실배달을 요청 트랜잭션 밖으로.
                             via_outbox=True,
                         )
@@ -2937,10 +3108,18 @@ async def send_message(
                     await dispatch_notification(
                         db, org_id=org_id, event_type="conversation.message",
                         target_member_ids=message_targets,
-                        title=f"{sender.name}님의 새 메시지",
+                        # story #3758 — 위 mention 블록과 동형(sender.name None-safe).
+                        # 「새 메시지」는 명사구라 합니다체/해요체 어미 자체가 없음(AC1 대상
+                        # 아님, 3903 실측 확認) — 그대로.
+                        title=f"{sender.name or UNNAMED_MEMBER_LABEL}님의 새 메시지",
                         body=(msg.content or "")[:200],
                         reference_type="conversation", reference_id=conversation_id,
                         source_project_id=conv.project_id,
+                        # story #3903(migration 0378) — 위 mention 블록과 동형.
+                        event={
+                            "sender_name": sender.name or UNNAMED_MEMBER_LABEL,
+                            **(_event_payload(msg).get("event") or {}),
+                        },
                         # story #2460(§6 봉합②): 개인 webhook·Expo push 실배달을 요청 트랜잭션 밖으로.
                         via_outbox=True,
                     )
@@ -3057,6 +3236,25 @@ async def send_message(
         message_id=msg.id,
         org_id=org_id,
     )
+
+    # story #3279(지원v1·후속) — 운영자 회신 배달 훅. 이 메시지가 support 에스컬레이션 카드에
+    # 대한 **스레드 답장**이면, 그 내용을 support-gateway의 해당 대화로 배달한다(background
+    # task — 배달 실패가 이 챗 전송 자체를 절대 안 깨뜨린다). ⛔카드 최상위(스레드 아닌)
+    # 텍스트 답은 이 분기를 안 탄다 — approval_delivery.py의 기존 정책("챗 텍스트는 게이트를
+    # 해소하지 않는다 — 카드 액션만 유효")과 별개 트리거라 그 정책을 안 건드린다.
+    # ⚠️카디르 QA ⑥축(2026-09-01) — sender_id를 반드시 넘긴다. deliver_operator_reply_for_gate가
+    # Gate.designated_approver_id와 대조해 비승인자 답장을 소리내며 거부한다(조용한 드롭 금지
+    # — "카드가 audience 한정이라 비승인자는 애초에 답장을 못 쓴다"는 가정이 배달 층에선
+    # 틀렸었다, 프로젝트 접근권 있는 아무 휴먼이 이 DM에 스레드 답장을 쓸 수 있었다).
+    operator_reply_gate_id = _operator_reply_target_gate_id(root_msg)
+    if operator_reply_gate_id is not None:
+        from app.services.operator_reply_delivery import deliver_operator_reply_for_gate
+        background_tasks.add_task(
+            deliver_operator_reply_for_gate,
+            gate_id=operator_reply_gate_id,
+            content=body.content,
+            sender_id=sender.id,
+        )
 
     # S-COMM-12 AC1: agent 답신 시 해당 conversation의 최근 gateway_accepted delivery → agent_replied
     if sender.type == "agent":

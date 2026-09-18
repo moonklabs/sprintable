@@ -1,0 +1,1 @@
+{"file": "tests/test_3631_role_templates_content_group.py", "sec": 1.0, "source": "story-3631(2026-09-07, 로컬 실측 — test_2648과 동형 규모(role_templates 임시 테이블+마이그 upgrade/downgrade 2회 왕복), 0.21s wall — 인접 sibling(test_2635/2648)과 같은 자릿수로 등재)"}

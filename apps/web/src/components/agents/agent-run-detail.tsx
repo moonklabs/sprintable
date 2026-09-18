@@ -3,92 +3,30 @@
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { AlertTriangle, ArrowLeft, CheckCircle2, Clock3, Cpu, Hash, RefreshCw, Zap } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Clock3, Cpu, Hash, Zap } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { PageHeader } from '@/components/ui/page-header';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
-import { useToast, ToastContainer } from '@/components/ui/toast';
-import { canManuallyRetryRun, getRunErrorDisplay, getRunFailureDisposition, getToolAuditOutcome } from '@/services/agent-run-history';
+import { getRunErrorDisplay, getRunFailureDisposition } from '@/services/agent-run-history';
 import { fetchWithAuth } from '@/lib/db/client';
-
-interface ToolCallEntry {
-  type?: string;
-  name?: string;
-  tool?: string;
-  toolName?: string;
-  toolSource?: 'builtin' | 'external';
-  input?: unknown;
-  output?: unknown;
-  arguments?: unknown;
-  result?: unknown;
-  error?: string;
-  duration_ms?: number;
-  durationMs?: number;
-  timestamp?: string;
-  model?: string;
-  tokens?: { input?: number; output?: number };
-}
-
-interface ToolAuditEntry {
-  id: string;
-  run_id: string | null;
-  session_id: string | null;
-  event_type: string;
-  severity: 'debug' | 'info' | 'warn' | 'error' | 'security';
-  summary: string;
-  payload: unknown;
-  created_by: string | null;
-  created_at: string;
-  actor_name: string | null;
-}
-
-interface MemoryRetrievalBucket {
-  queriedCount: number;
-  inScopeCount: number;
-  blockedCount: number;
-  injectedIds: string[];
-}
-
-interface MemoryRetrievalDiagnostics {
-  session: MemoryRetrievalBucket;
-  longTerm: MemoryRetrievalBucket;
-  totalInjected: number;
-  droppedByTokenBudget: number;
-}
-
-interface ContinuityDebugInfo {
-  sessionId: string | null;
-  snapshotPresent: boolean;
-  snapshotMemoryCount: number;
-  restoredFromSnapshot: boolean;
-  memoryRetrievalDiagnostics: MemoryRetrievalDiagnostics | null;
-}
-
-interface MemoryCompactionPolicy {
-  keepCriteria: string[];
-  deleteCriteria: string[];
-  typeQuota: Record<string, number>;
-  thresholds: {
-    minImportance: number;
-    maxAgeDays: number;
-    duplicateSimilarity: number;
-  };
-}
+import { formatRelativeTime } from '@/lib/storage/format';
+import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { agentRunStatusBadgeVariant, type AgentRunStatus } from '@/lib/agent-run-status';
+import { AgentRunToolCallsSection } from './agent-run-tool-calls-section';
 
 interface RunDetail {
   id: string;
   agent_id: string;
   agent_name: string | null;
   deployment_id: string | null;
-  session_id: string | null;
   memo_id: string | null;
   story_id: string | null;
   trigger: string;
   model: string | null;
   llm_provider: 'managed' | 'byom' | null;
   llm_provider_key: string | null;
-  status: 'queued' | 'held' | 'running' | 'hitl_pending' | 'completed' | 'failed';
+  status: AgentRunStatus;
   duration_ms: number | null;
   llm_call_count: number;
   input_tokens: number | null;
@@ -104,25 +42,14 @@ interface RunDetail {
   max_retries: number | null;
   next_retry_at: string | null;
   failure_disposition: 'retry_scheduled' | 'retry_launched' | 'retry_exhausted' | 'non_retryable' | null;
-  tool_call_history: ToolCallEntry[] | null;
-  tool_audit_trail: ToolAuditEntry[] | null;
-  continuity_debug: ContinuityDebugInfo | null;
-  memory_compaction_policy: MemoryCompactionPolicy | null;
   started_at: string | null;
   finished_at: string | null;
   created_at: string;
 }
 
-const STATUS_BADGE_VARIANT: Record<string, 'success' | 'destructive' | 'info' | 'outline' | 'secondary'> = {
-  completed: 'success',
-  hitl_pending: 'secondary',
-  failed: 'destructive',
-  running: 'info',
-  queued: 'outline',
-  held: 'secondary',
-};
-
-function formatDuration(ms: number | null): string {
+// story #3722(Trust·PR2) — agent-run-tool-calls-section.tsx가 같은 포맷 규칙을 재사용(초 단위
+// duration_ms 표시). export해 중복 정의를 피한다.
+export function formatDuration(ms: number | null): string {
   if (ms == null) return '-';
   if (ms < 1000) return `${ms}ms`;
   const s = ms / 1000;
@@ -132,49 +59,15 @@ function formatDuration(ms: number | null): string {
   return `${m}m ${rem}s`;
 }
 
-function toLocaleStr(iso: string | null, locale: string): string {
+// story #3493 — started_at/finished_at/entry.created_at은 "기록"(정본 formatRelativeTime).
+export function toLocaleStr(iso: string | null, locale: string, displayTimezone: string): string {
   if (!iso) return '-';
-  return new Date(iso).toLocaleString(locale, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  });
+  return formatRelativeTime(iso, locale, displayTimezone);
 }
 
 function formatBillingModeLabel(t: ReturnType<typeof useTranslations>, billingMode: RunDetail['llm_provider']): string {
   if (!billingMode) return '-';
   return t(`billingMode_${billingMode}`);
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
-}
-
-function getToolCallDisplay(entry: ToolCallEntry) {
-  const result = asRecord(entry.result);
-  const error = typeof entry.error === 'string'
-    ? entry.error
-    : typeof result?.error === 'string'
-      ? result.error
-      : null;
-
-  return {
-    name: entry.toolName ?? entry.name ?? entry.tool ?? 'Step',
-    source: entry.toolSource ?? (typeof result?.source === 'string' ? result.source : null),
-    durationMs: entry.durationMs ?? entry.duration_ms ?? null,
-    error,
-    userReason: typeof result?.user_reason === 'string' ? result.user_reason : null,
-    nextAction: typeof result?.next_action === 'string' ? result.next_action : null,
-    tokens: entry.tokens,
-  };
-}
-
-function getAuditPayloadField(payload: Record<string, unknown> | null, key: string): string | null {
-  const value = payload?.[key];
-  return typeof value === 'string' && value.length > 0 ? value : null;
 }
 
 export function AgentRunDetail({
@@ -188,14 +81,13 @@ export function AgentRunDetail({
 }) {
   const t = useTranslations('agentRuns');
   const tc = useTranslations('common');
-  const { toasts, addToast, dismissToast } = useToast();
+  const displayTimezone = resolveDisplayTimezone().tz;
   const [run, setRun] = useState<RunDetail | null>(null);
   const [loading, setLoading] = useState(true);
   // story #1989: fetch 자체에 try/catch가 없어 네트워크 실패(오프라인 등) 시 fetch가 throw →
   // setLoading(false)가 영영 안 불려 스켈레톤이 무한 행("loading은 finally에서 해소" 하우스룰
   // 위반). loadError로 실패를 별도 상태화해 재시도 affordance를 노출한다.
   const [loadError, setLoadError] = useState(false);
-  const [retrying, setRetrying] = useState(false);
   const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
@@ -218,24 +110,6 @@ export function AgentRunDetail({
     void load();
     return () => { cancelled = true; };
   }, [runId, retryKey]);
-
-  const handleRetry = async () => {
-    setRetrying(true);
-    try {
-      const res = await fetch(`/api/v1/agent-runs/${runId}/retry`, { method: 'POST' });
-      if (res.ok) {
-        addToast({ title: t('retrySuccessTitle'), body: t('retrySuccessBody'), type: 'success' });
-      } else {
-        // story #2485 — 그라운딩(2026-08-06): 이 라우트(POST .../retry)는 backend에
-        // 존재하지 않아 항상 404다(BE 미구현 — 별도 이슈로 보고, FE에서 code로 갈라도
-        // 해결 안 됨). raw 서버 message 노출만 우선 제거.
-        addToast({ title: t('retryFailedTitle'), body: t('retryFailedBody'), type: 'warning' });
-      }
-    } catch {
-      addToast({ title: t('retryFailedTitle'), body: t('retryFailedBody'), type: 'warning' });
-    }
-    setRetrying(false);
-  };
 
   if (loading) {
     return (
@@ -268,13 +142,8 @@ export function AgentRunDetail({
     );
   }
 
-  const timeline: ToolCallEntry[] = Array.isArray(run.tool_call_history) ? run.tool_call_history : [];
-  const toolAuditTrail: ToolAuditEntry[] = Array.isArray(run.tool_audit_trail) ? run.tool_audit_trail : [];
   const errorDisplay = getRunErrorDisplay(run.error_message, run.last_error_code);
   const failureDisposition = getRunFailureDisposition(run);
-  const canRetry = canManuallyRetryRun(run);
-  const retrievalDiagnostics = run.continuity_debug?.memoryRetrievalDiagnostics ?? null;
-  const compactionPolicy = run.memory_compaction_policy;
 
   return (
     <>
@@ -285,12 +154,6 @@ export function AgentRunDetail({
           description={`${t('runId')}: ${run.id.slice(0, 8)}…`}
           actions={
             <div className="flex items-center gap-2">
-              {canRetry && (
-                <Button variant="hero" size="lg" onClick={handleRetry} disabled={retrying}>
-                  <RefreshCw className={`mr-2 size-4 ${retrying ? 'animate-spin' : ''}`} />
-                  {retrying ? tc('loading') : tc('retry')}
-                </Button>
-              )}
               <Button variant="glass" size="lg" onClick={onBack}>
                 <ArrowLeft className="mr-2 size-4" />
                 {t('backToList')}
@@ -311,11 +174,11 @@ export function AgentRunDetail({
         <SectionCard>
           <SectionCardHeader>
             <div className="flex flex-wrap items-center gap-3">
-              <Badge variant={STATUS_BADGE_VARIANT[run.status] ?? 'outline'}>
+              <Badge variant={agentRunStatusBadgeVariant(run.status)}>
                 {t(`status_${run.status}`)}
               </Badge>
               <span className="text-xs text-muted-foreground">
-                {t('startedAt')}: {toLocaleStr(run.started_at, locale)}
+                {t('startedAt')}: {toLocaleStr(run.started_at, locale, displayTimezone)}
               </span>
               {run.status === 'failed' && failureDisposition && (
                 <Badge variant={failureDisposition === 'retry_scheduled' ? 'info' : 'outline'}>
@@ -324,7 +187,7 @@ export function AgentRunDetail({
               )}
               {run.finished_at && (
                 <span className="text-xs text-muted-foreground">
-                  {t('finishedAt')}: {toLocaleStr(run.finished_at, locale)}
+                  {t('finishedAt')}: {toLocaleStr(run.finished_at, locale, displayTimezone)}
                 </span>
               )}
               {run.model && (
@@ -337,7 +200,6 @@ export function AgentRunDetail({
           </SectionCardHeader>
           <SectionCardBody>
             <div className="mb-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              <MetaCard label={t('sessionId')} value={run.session_id ?? '-'} />
               <MetaCard label={t('providerLabel')} value={run.llm_provider_key ?? '-'} />
               <MetaCard label={t('billingModeLabel')} value={formatBillingModeLabel(t, run.llm_provider)} />
               <MetaCard label={t('modelLabel')} value={run.model ?? '-'} />
@@ -368,8 +230,11 @@ export function AgentRunDetail({
                   {errorDisplay.code && (
                     <p className="mt-1 text-xs opacity-75">{t('errorCodeLabel')}: {errorDisplay.code}</p>
                   )}
+                  {/* story #3493 — next_retry_at은 미래 "약속"(재시도 예정 시각). record용
+                      formatRelativeTime을 쓰면 diffMs가 음수라 0으로 clamp돼 "지금"으로
+                      오표시되므로 §11-2 정본(formatScheduledAt)으로 절대 표기. */}
                   {failureDisposition === 'retry_scheduled' && run.next_retry_at && (
-                    <p className="mt-1 text-xs opacity-75">{t('nextRetryAt')}: {toLocaleStr(run.next_retry_at, locale)}</p>
+                    <p className="mt-1 text-xs opacity-75">{t('nextRetryAt')}: {formatScheduledAt(run.next_retry_at, displayTimezone).display}</p>
                   )}
                 </AlertDescription>
               </Alert>
@@ -383,230 +248,16 @@ export function AgentRunDetail({
               </div>
             )}
 
-            {retrievalDiagnostics && (
-              <div className="mb-4 rounded-xl border border-white/8 bg-white/4 px-4 py-3">
-                <p className="text-sm font-medium text-foreground">{t('memoryRetrievalTitle')}</p>
-                <div className="mt-3 grid gap-3 md:grid-cols-2">
-                  <MemoryBucketCard
-                    label={t('memoryRetrievalSession')}
-                    bucket={retrievalDiagnostics.session}
-                    queriedLabel={t('memoryRetrievalQueried')}
-                    inScopeLabel={t('memoryRetrievalInScope')}
-                    blockedLabel={t('memoryRetrievalBlocked')}
-                    injectedIdsLabel={t('memoryRetrievalInjectedIds')}
-                  />
-                  <MemoryBucketCard
-                    label={t('memoryRetrievalLongTerm')}
-                    bucket={retrievalDiagnostics.longTerm}
-                    queriedLabel={t('memoryRetrievalQueried')}
-                    inScopeLabel={t('memoryRetrievalInScope')}
-                    blockedLabel={t('memoryRetrievalBlocked')}
-                    injectedIdsLabel={t('memoryRetrievalInjectedIds')}
-                  />
-                </div>
-                <div className="mt-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
-                  <Badge variant="chip">{t('memoryRetrievalTotalInjected')}: {retrievalDiagnostics.totalInjected}</Badge>
-                  <Badge variant="chip">{t('memoryRetrievalDropped')}: {retrievalDiagnostics.droppedByTokenBudget}</Badge>
-                </div>
-              </div>
-            )}
-
-            {compactionPolicy && (
-              <div className="mb-4 rounded-xl border border-white/8 bg-white/4 px-4 py-3">
-                <p className="text-sm font-medium text-foreground">{t('memoryCompactionTitle')}</p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {t('memoryCompactionThresholds', {
-                    minImportance: compactionPolicy.thresholds.minImportance,
-                    maxAgeDays: compactionPolicy.thresholds.maxAgeDays,
-                    duplicateSimilarity: compactionPolicy.thresholds.duplicateSimilarity,
-                  })}
-                </p>
-                <div className="mt-3 grid gap-3 md:grid-cols-2">
-                  <CriteriaList title={t('memoryCompactionKeep')} items={compactionPolicy.keepCriteria} />
-                  <CriteriaList title={t('memoryCompactionDelete')} items={compactionPolicy.deleteCriteria} />
-                </div>
-                <div className="mt-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
-                  {Object.entries(compactionPolicy.typeQuota).map(([type, quota]) => (
-                    <Badge key={type} variant="chip">{type}: {quota}</Badge>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {run.continuity_debug && (
-              <div className="mb-4 rounded-xl border border-white/8 bg-white/4 px-4 py-3">
-                <p className="text-sm font-medium text-foreground">{t('continuityDebugTitle')}</p>
-                <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                  <MetaCard label={t('sessionId')} value={run.continuity_debug.sessionId ?? '-'} />
-                  <MetaCard label={t('continuitySnapshotPresent')} value={run.continuity_debug.snapshotPresent ? t('booleanYes') : t('booleanNo')} />
-                  <MetaCard label={t('continuitySnapshotCount')} value={String(run.continuity_debug.snapshotMemoryCount)} />
-                  <MetaCard label={t('continuityRestored')} value={run.continuity_debug.restoredFromSnapshot ? t('booleanYes') : t('booleanNo')} />
-                </div>
-              </div>
-            )}
-
-            {/* Timeline */}
-            <div>
-              <h3 className="mb-3 text-sm font-semibold text-foreground">
-                {t('timeline')} ({timeline.length})
-              </h3>
-              {timeline.length === 0 ? (
-                <p className="text-sm text-muted-foreground">{t('noTimelineEntries')}</p>
-              ) : (
-                <div className="relative space-y-0">
-                  {/* Vertical line */}
-                  <div className="absolute bottom-0 left-4 top-0 w-px bg-white/12" />
-                  {timeline.map((entry, idx) => {
-                    const display = getToolCallDisplay(entry);
-                    const isLlm = entry.type === 'llm_call' || entry.type === 'llm';
-                    const isTool = entry.type === 'tool_call' || entry.type === 'tool' || Boolean(entry.toolName) || Boolean(entry.tool);
-                    const hasError = Boolean(display.error);
-
-                    return (
-                      <div key={idx} className="relative flex gap-4 pb-4 pl-9">
-                        <div className={`absolute left-2.5 top-1.5 size-3 rounded-full border-2 ${
-                          hasError
-                            ? 'border-destructive bg-destructive/20'
-                            : isLlm
-                              ? 'border-info bg-info/20' /* story #2023 AC6: LLM 호출=info(기계 축), 브랜드 블루=인간 서명 전용 */
-                              : 'border-success bg-success-tint'
-                        }`} />
-                        <div className="min-w-0 flex-1 rounded-xl border border-white/8 bg-white/4 px-3 py-2">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <Badge variant={isLlm ? 'info' : isTool ? (hasError ? 'destructive' : 'success') : 'outline'} className="text-[10px]">
-                              {isLlm ? 'LLM' : isTool ? 'TOOL' : (entry.type ?? 'step')}
-                            </Badge>
-                            <span className="text-xs font-medium text-foreground">
-                              {isLlm ? (entry.model ?? 'LLM call') : display.name}
-                            </span>
-                            {display.source && (
-                              <Badge variant="chip" className="text-[10px]">{display.source}</Badge>
-                            )}
-                            {display.durationMs != null && (
-                              <span className="text-[10px] text-muted-foreground">
-                                {formatDuration(display.durationMs)}
-                              </span>
-                            )}
-                            {display.tokens && (
-                              <span className="text-[10px] text-muted-foreground">
-                                {display.tokens.input ?? 0}/{display.tokens.output ?? 0} tok
-                              </span>
-                            )}
-                            {hasError ? (
-                              <AlertTriangle className="size-3.5 text-destructive" />
-                            ) : (
-                              <CheckCircle2 className="size-3.5 text-success/60" />
-                            )}
-                          </div>
-                          {hasError && (
-                            <div className="mt-1 space-y-1 text-xs text-destructive/80">
-                              <p>{display.error}</p>
-                              {display.userReason ? <p>{display.userReason}</p> : null}
-                              {display.nextAction ? <p>{display.nextAction}</p> : null}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            <div className="mt-6">
-              <h3 className="mb-3 text-sm font-semibold text-foreground">
-                {t('toolAuditTrail')} ({toolAuditTrail.length})
-              </h3>
-              {toolAuditTrail.length === 0 ? (
-                <p className="text-sm text-muted-foreground">{t('noToolAuditEntries')}</p>
-              ) : (
-                <div className="space-y-3">
-                  {toolAuditTrail.map((entry) => {
-                    const payload = asRecord(entry.payload);
-                    const outcome = getToolAuditOutcome({ eventType: entry.event_type, payload: entry.payload });
-                    const toolName = getAuditPayloadField(payload, 'tool_name') ?? entry.summary;
-                    const toolSource = getAuditPayloadField(payload, 'tool_source');
-                    const operatorReason = getAuditPayloadField(payload, 'operator_reason');
-                    const userReason = getAuditPayloadField(payload, 'user_reason');
-                    const nextAction = getAuditPayloadField(payload, 'next_action');
-                    const reasonCode = getAuditPayloadField(payload, 'reason_code');
-                    const serverName = getAuditPayloadField(payload, 'server_name');
-                    const error = getAuditPayloadField(payload, 'error');
-                    const detailSummary = getAuditPayloadField(payload, 'summary');
-                    const durationMs = payload && typeof payload.duration_ms === 'number' ? payload.duration_ms : null;
-
-                    return (
-                      <div key={entry.id} className="rounded-xl border border-white/8 bg-white/4 px-4 py-3">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Badge variant={outcome === 'denied' ? 'destructive' : outcome === 'failed' ? 'secondary' : 'success'}>
-                            {outcome === 'denied' ? t('toolAuditOutcomeDenied') : outcome === 'failed' ? t('toolAuditOutcomeFailed') : t('toolAuditOutcomeAllowed')}
-                          </Badge>
-                          <span className="text-sm font-medium text-foreground">{toolName}</span>
-                          {toolSource ? <Badge variant="chip">{t(`toolAuditSource_${toolSource}`)}</Badge> : null}
-                          <span className="text-xs text-muted-foreground">{toLocaleStr(entry.created_at, locale)}</span>
-                        </div>
-                        <div className="mt-2 grid gap-2 text-sm text-muted-foreground md:grid-cols-2">
-                          <div>
-                            <span className="text-xs">{t('toolAuditActorLabel')}</span>
-                            <p className="mt-1 text-foreground">{entry.actor_name ?? run.agent_name ?? t('unknownAgent')}</p>
-                          </div>
-                          <div>
-                            <span className="text-xs">{t('toolAuditEventLabel')}</span>
-                            <p className="mt-1 break-all text-foreground">{entry.event_type}</p>
-                          </div>
-                          {reasonCode ? (
-                            <div>
-                              <span className="text-xs">{t('toolAuditReasonCodeLabel')}</span>
-                              <p className="mt-1 break-all text-foreground">{reasonCode}</p>
-                            </div>
-                          ) : null}
-                          {durationMs != null ? (
-                            <div>
-                              <span className="text-xs">{t('duration')}</span>
-                              <p className="mt-1 text-foreground">{formatDuration(durationMs)}</p>
-                            </div>
-                          ) : null}
-                          {serverName ? (
-                            <div>
-                              <span className="text-xs">{t('toolAuditServerLabel')}</span>
-                              <p className="mt-1 text-foreground">{serverName}</p>
-                            </div>
-                          ) : null}
-                        </div>
-                        {operatorReason ? (
-                          <div className="mt-3 rounded-xl border border-white/8 bg-white/3 px-3 py-3">
-                            <p className="text-xs font-semibold text-muted-foreground">{t('toolAuditOperatorReasonLabel')}</p>
-                            <p className="mt-1 text-sm text-foreground">{operatorReason}</p>
-                          </div>
-                        ) : null}
-                        {userReason ? (
-                          <div className="mt-3 rounded-xl border border-white/8 bg-white/3 px-3 py-3">
-                            <p className="text-xs font-semibold text-muted-foreground">{t('toolAuditUserReasonLabel')}</p>
-                            <p className="mt-1 text-sm text-foreground">{userReason}</p>
-                          </div>
-                        ) : null}
-                        {nextAction ? (
-                          <div className="mt-3 rounded-xl border border-white/8 bg-white/3 px-3 py-3">
-                            <p className="text-xs font-semibold text-muted-foreground">{t('toolAuditNextActionLabel')}</p>
-                            <p className="mt-1 text-sm text-foreground">{nextAction}</p>
-                          </div>
-                        ) : null}
-                        {error ? (
-                          <p className="mt-3 text-sm text-destructive/80">{error}</p>
-                        ) : null}
-                        {!operatorReason && !userReason && !nextAction && detailSummary ? (
-                          <p className="mt-3 text-sm text-muted-foreground">{detailSummary}</p>
-                        ) : null}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
           </SectionCardBody>
         </SectionCard>
+
+        <AgentRunToolCallsSection
+          runId={run.id}
+          runStatus={run.status}
+          locale={locale}
+          displayTimezone={displayTimezone}
+        />
       </div>
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </>
   );
 }
@@ -632,41 +283,3 @@ function MetaCard({ label, value }: { label: string; value: string }) {
   );
 }
 
-function MemoryBucketCard({
-  label,
-  bucket,
-  queriedLabel,
-  inScopeLabel,
-  blockedLabel,
-  injectedIdsLabel,
-}: {
-  label: string;
-  bucket: MemoryRetrievalBucket;
-  queriedLabel: string;
-  inScopeLabel: string;
-  blockedLabel: string;
-  injectedIdsLabel: string;
-}) {
-  return (
-    <div className="rounded-xl border border-white/8 bg-white/3 px-4 py-3 text-sm text-muted-foreground">
-      <p className="font-medium text-foreground">{label}</p>
-      <div className="mt-2 space-y-1">
-        <p>{queriedLabel}: {bucket.queriedCount}</p>
-        <p>{inScopeLabel}: {bucket.inScopeCount}</p>
-        <p>{blockedLabel}: {bucket.blockedCount}</p>
-        <p className="break-all">{injectedIdsLabel}: {bucket.injectedIds.length > 0 ? bucket.injectedIds.join(', ') : '-'}</p>
-      </div>
-    </div>
-  );
-}
-
-function CriteriaList({ title, items }: { title: string; items: string[] }) {
-  return (
-    <div className="rounded-xl border border-white/8 bg-white/3 px-4 py-3">
-      <p className="text-sm font-medium text-foreground">{title}</p>
-      <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
-        {items.map((item) => <li key={item}>{item}</li>)}
-      </ul>
-    </div>
-  );
-}

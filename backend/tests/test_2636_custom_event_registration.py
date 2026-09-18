@@ -89,7 +89,7 @@ async def test_register_rejects_schema_without_additional_properties_false():
             user_id = await _seed_org_member(s, org_id, role="admin")
 
             body = CreateEventDefinitionRequest(
-                key="org.acme.widget.made",
+                key="org.acme.widget.made", name="위젯 제작 완료",
                 payload_schema={"type": "object", "properties": {"widget_id": {"type": "string"}}},
                 routing=_NONE_ROUTING,
             )
@@ -113,7 +113,7 @@ async def test_register_accepts_schema_with_additional_properties_false():
             user_id = await _seed_org_member(s, org_id, role="admin")
 
             body = CreateEventDefinitionRequest(
-                key="org.acme.widget.made", payload_schema=_VALID_SCHEMA, routing=_NONE_ROUTING,
+                key="org.acme.widget.made", name="위젯 제작 완료", payload_schema=_VALID_SCHEMA, routing=_NONE_ROUTING,
             )
             resp = await create_event_definition(body, db=s, auth=_human_auth(user_id, org_id), org_id=org_id)
             assert resp.key == "org.acme.widget.made"
@@ -138,7 +138,7 @@ async def test_register_allows_target_none_despite_server_derived_ban():
             user_id = await _seed_org_member(s, org_id, role="owner")
 
             body = CreateEventDefinitionRequest(
-                key="org.acme.thing.done", payload_schema=_VALID_SCHEMA,
+                key="org.acme.thing.done", name="작업 완료", payload_schema=_VALID_SCHEMA,
                 routing={
                     "escalation": {"kind": "server_derived", "target": "none"},
                     "broadcast": {"kind": "payload_field", "member_id_field": "actor_member_id"},
@@ -164,7 +164,7 @@ async def test_register_still_rejects_other_server_derived_targets():
             user_id = await _seed_org_member(s, org_id, role="admin")
 
             body = CreateEventDefinitionRequest(
-                key="org.acme.thing.escalated", payload_schema=_VALID_SCHEMA,
+                key="org.acme.thing.escalated", name="작업 에스컬레이션", payload_schema=_VALID_SCHEMA,
                 routing={
                     "escalation": {"kind": "server_derived", "target": "work_item_stakeholders"},
                     "broadcast": {"kind": "server_derived", "target": "none"},
@@ -191,7 +191,7 @@ async def test_register_rejects_mismatched_org_slug_namespace():
             user_id = await _seed_org_member(s, org_id, role="admin")
 
             body = CreateEventDefinitionRequest(
-                key="org.globex.widget.made", payload_schema=_VALID_SCHEMA, routing=_NONE_ROUTING,
+                key="org.globex.widget.made", name="위젯 제작 완료", payload_schema=_VALID_SCHEMA, routing=_NONE_ROUTING,
             )
             with pytest.raises(HTTPException) as ei:
                 await create_event_definition(body, db=s, auth=_human_auth(user_id, org_id), org_id=org_id)
@@ -212,7 +212,7 @@ async def test_register_rejects_preset_prefixed_key():
             user_id = await _seed_org_member(s, org_id, role="admin")
 
             body = CreateEventDefinitionRequest(
-                key="preset.work.status_changed", payload_schema=_VALID_SCHEMA, routing=_NONE_ROUTING,
+                key="preset.work.status_changed", name="작업 상태 변경", payload_schema=_VALID_SCHEMA, routing=_NONE_ROUTING,
             )
             with pytest.raises(HTTPException) as ei:
                 await create_event_definition(body, db=s, auth=_human_auth(user_id, org_id), org_id=org_id)
@@ -235,7 +235,7 @@ async def test_register_rejects_non_admin_member():
             user_id = await _seed_org_member(s, org_id, role="member")
 
             body = CreateEventDefinitionRequest(
-                key="org.acme.widget.made", payload_schema=_VALID_SCHEMA, routing=_NONE_ROUTING,
+                key="org.acme.widget.made", name="위젯 제작 완료", payload_schema=_VALID_SCHEMA, routing=_NONE_ROUTING,
             )
             with pytest.raises(HTTPException) as ei:
                 await create_event_definition(body, db=s, auth=_human_auth(user_id, org_id), org_id=org_id)
@@ -258,7 +258,7 @@ async def test_register_duplicate_key_409():
             user_id = await _seed_org_member(s, org_id, role="admin")
 
             body = CreateEventDefinitionRequest(
-                key="org.acme.widget.made", payload_schema=_VALID_SCHEMA, routing=_NONE_ROUTING,
+                key="org.acme.widget.made", name="위젯 제작 완료", payload_schema=_VALID_SCHEMA, routing=_NONE_ROUTING,
             )
             await create_event_definition(body, db=s, auth=_human_auth(user_id, org_id), org_id=org_id)
             with pytest.raises(HTTPException) as ei:
@@ -286,7 +286,7 @@ async def test_patch_enabled_false_soft_deletes_without_version_bump():
 
             created = await create_event_definition(
                 CreateEventDefinitionRequest(
-                    key="org.acme.widget.made", payload_schema=_VALID_SCHEMA, routing=_NONE_ROUTING,
+                    key="org.acme.widget.made", name="위젯 제작 완료", payload_schema=_VALID_SCHEMA, routing=_NONE_ROUTING,
                 ),
                 db=s, auth=_human_auth(user_id, org_id), org_id=org_id,
             )
@@ -316,7 +316,7 @@ async def test_patch_payload_schema_bumps_version_and_revalidates():
 
             created = await create_event_definition(
                 CreateEventDefinitionRequest(
-                    key="org.acme.widget.made", payload_schema=_VALID_SCHEMA, routing=_NONE_ROUTING,
+                    key="org.acme.widget.made", name="위젯 제작 완료", payload_schema=_VALID_SCHEMA, routing=_NONE_ROUTING,
                 ),
                 db=s, auth=_human_auth(user_id, org_id), org_id=org_id,
             )
@@ -342,6 +342,50 @@ async def test_patch_payload_schema_bumps_version_and_revalidates():
         await engine.dispose()
 
 
+# story #3745(name===key 잔존, 페드루 PO 決 2026-09-09) — PATCH 스키마엔 key가 없어(PATCH가
+# key를 안 바꿈) Pydantic field_validator로 POST와 같은 검증을 못 건다 — 엔드포인트가 DB에서
+# 방금 읽은 definition.key와 대조해 막는다. ⭐되돌리면 RED — 이 엔드포인트 체크를 빼면
+# name=key로 PATCH가 그대로 통과해 화면 제목 자리에 코드 키가 다시 선다.
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_patch_name_equals_key_rejected_422():
+    from app.routers.events import (
+        CreateEventDefinitionRequest, UpdateEventDefinitionRequest,
+        create_event_definition, update_event_definition,
+    )
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id = await _seed_org(s)
+            user_id = await _seed_org_member(s, org_id, role="admin")
+
+            created = await create_event_definition(
+                CreateEventDefinitionRequest(
+                    key="org.acme.widget.made", name="위젯 제작 완료", payload_schema=_VALID_SCHEMA, routing=_NONE_ROUTING,
+                ),
+                db=s, auth=_human_auth(user_id, org_id), org_id=org_id,
+            )
+            with pytest.raises(HTTPException) as ei:
+                await update_event_definition(
+                    uuid.UUID(created.id),
+                    UpdateEventDefinitionRequest(name="org.acme.widget.made"),
+                    db=s, auth=_human_auth(user_id, org_id), org_id=org_id,
+                )
+            assert ei.value.status_code == 422
+            assert ei.value.detail["code"] == "definition_name_equals_key"
+
+            # 다른 필드와 함께 name만 바뀌지 않는 PATCH는 그대로 통과한다(회귀 없음).
+            updated = await update_event_definition(
+                uuid.UUID(created.id),
+                UpdateEventDefinitionRequest(name="위젯 제작 완료(개정)"),
+                db=s, auth=_human_auth(user_id, org_id), org_id=org_id,
+            )
+            assert updated.name == "위젯 제작 완료(개정)"
+    finally:
+        await engine.dispose()
+
+
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 @pytest.mark.anyio
 async def test_patch_cross_org_definition_404():
@@ -360,7 +404,7 @@ async def test_patch_cross_org_definition_404():
 
             created = await create_event_definition(
                 CreateEventDefinitionRequest(
-                    key="org.acme.widget.made", payload_schema=_VALID_SCHEMA, routing=_NONE_ROUTING,
+                    key="org.acme.widget.made", name="위젯 제작 완료", payload_schema=_VALID_SCHEMA, routing=_NONE_ROUTING,
                 ),
                 db=s, auth=_human_auth(user_a, org_a), org_id=org_a,
             )

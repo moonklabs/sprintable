@@ -24,6 +24,15 @@ DISPOSITIONS = frozenset({"allow_auto", "ask", "deny"})
 # 안 준다 — 순수히 「generic POST /api/v2/gates로 생성 허용」 관문 통과 목적.
 GATE_TYPES = frozenset({
     "pr_review", "qa", "merge", "deploy", "workflow_config_publish", "agent_decision_request",
+    # story #3291(M1·마케팅자동화) — 불가역 외부 발신(SNS/광고 게시). gate_service.py의
+    # _ALWAYS_MANUAL_GATE_TYPES에도 등재해 org posture 무관 항상 pending 강제(순수히
+    # 여기 등재만으론 disposition 자동판정에 영향 없음 — 위 agent_decision_request 주석 참고).
+    "external_publish",
+    # story #3561(Phase2·BE, 페드루 PO 確定 2026-09-06) — doc(개념/컨셉 자료)을 근거로
+    # 다른 work_item(Story/Task)을 휴먼이 승인하는 게이트. external_publish와 동일 근거로
+    # _ALWAYS_MANUAL_GATE_TYPES에도 등재(항상 pending — deliberate approval, disposition
+    # auto-pass 대상 아님).
+    "concept_approval",
 })
 
 _POSTURE_DEFAULT: dict[str, str] = {
@@ -45,6 +54,17 @@ class OrgGatePolicy(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     org_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, unique=True, index=True)
     posture: Mapped[str] = mapped_column(String(20), nullable=False, server_default="balanced")
+    # story #3319(2026-09-02, 선생님 처방 확定) — 머지 게이트가 designated_approver_id=None으로
+    # 생성돼 rule B(gates.py::_non_doc_gate_approvable)가 project owner/admin 전원(org owner
+    # 포함)에게 «승인 가능»으로 노출했다(실사고: PR#3706 머지 게이트를 QA 前에 선생님이 서명).
+    # 이 값(org 멤버·nullable)을 설정하면 머지 게이트 생성 시 designated_approver_id로 채워져
+    # rule B가 그 멤버 1인에게만 승인 자격을 좁힌다(gates.py::_non_doc_can_approve 변경 참조).
+    # 미설정(None, 기본값)은 현행 무변경(회귀 0). 사람 멤버만 허용(에이전트는 requires_human
+    # 게이트에 구조적으로 서명 불가) — 쓰기 시점(routers/hitl_config.py::upsert_org_policy)에서
+    # is_org_owner_or_admin과 동형 NOT EXISTS 패턴으로 검증(422).
+    merge_gate_default_approver_member_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

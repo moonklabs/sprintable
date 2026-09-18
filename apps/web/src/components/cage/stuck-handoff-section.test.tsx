@@ -7,15 +7,27 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
+import { ToastProvider, ToastContainer, useToast } from '@/components/ui/toast';
 import { StuckHandoffSection } from './stuck-handoff-section';
 import type { WorkflowLineStepRun } from '@/components/kanban/types';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+// story #3759 — 이 컴포넌트가 useToast()로 공유 Context를 구독한다. 정적 import된
+// 컴포넌트라(파일 상단) vi.resetModules()의 영향을 안 받는 이 파일 자체의 정적
+// ToastProvider로 감싸면 된다(동적 재-import 처방 불요, content/page.test.tsx와 동형).
+function TestToastRenderer() {
+  const { toasts, dismissToast } = useToast();
+  return <ToastContainer toasts={toasts} onDismiss={dismissToast} />;
+}
+
 function withIntl(node: React.ReactNode) {
   return (
     <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
-      {node}
+      <ToastProvider>
+        {node}
+        <TestToastRenderer />
+      </ToastProvider>
     </NextIntlClientProvider>
   );
 }
@@ -79,7 +91,7 @@ describe('StuckHandoffSection — withdraw(story #2272)', () => {
     await act(async () => { btn!.click(); });
 
     expect(withdrawSpy).not.toHaveBeenCalled();
-    expect(container.textContent).toContain('철회하면 되돌릴 수 없습니다');
+    expect(container.textContent).toContain('철회하면 되돌릴 수 없어요');
   });
 
   it('취소를 누르면 confirm이 닫히고 fetch(withdraw)는 끝내 안 불린다', async () => {
@@ -117,7 +129,18 @@ describe('StuckHandoffSection — withdraw(story #2272)', () => {
     await act(async () => { findButtonByText('요청 철회')!.click(); });
     await act(async () => { findButtonByText('철회 확인')!.click(); await Promise.resolve(); await Promise.resolve(); });
 
-    expect(container.textContent).toContain('철회에 실패했습니다');
+    expect(container.textContent).toContain('철회에 실패했어요');
     expect(findButtonByText('요청 철회')).toBeDefined();
+  });
+
+  // story 3466 후속(무효 유틸 4곳) — idle 버튼(「소유자에게 재전달」)이 no-op
+  // text-destructive-foreground 대신 실 렌더 색을 갖는지.
+  it('⭐idle 버튼(소유자에게 재전달)이 text-white dark:text-proof-bg를 쓰고 무효 유틸이 안 남았다', async () => {
+    stubFetch(stuckStep(), () => new Response('{}', { status: 200 }));
+    await renderSection();
+    const btn = findButtonByText('소유자에게 재전달');
+    expect(btn?.className).toContain('text-white');
+    expect(btn?.className).toContain('dark:text-proof-bg');
+    expect(btn?.className).not.toContain('text-destructive-foreground');
   });
 });

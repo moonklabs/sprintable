@@ -6,6 +6,7 @@ import { CheckCircle, Pencil } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { GateEvidence } from '@/components/cage/gate-evidence';
 import type { GateItem } from '@/components/kanban/types';
+import { sigApproveAndSignLabelKey } from '@/lib/newsletter-gate-approve-label';
 
 /**
  * story #1954(P1a-S4) — 고위험 게이트 서명 플로우. AC: "근거 열람+사유 없인 [승인하고 서명] 비활성".
@@ -42,11 +43,20 @@ export function GateSignatureApproval({
   compact?: boolean;
 }) {
   const t = useTranslations('cage');
+  // story #3813(Phase3·3-4 PR4, 페드루 PO CHANGES 2026-09-12, 라이브 캡처 실측) — 이
+  // 버튼이 사람이 실제로 누르는 primary(고위험 게이트는 이 서명 플로우가 뜬다,
+  // gates/[id]/page.tsx의 평문 버튼은 저위험 전용) — 처음 처방이 평문 버튼에만
+  // 붙어 정작 여기엔 「승인하고 서명」이 그대로 남아 있었다.
+  const approveAndSignLabelKey = sigApproveAndSignLabelKey(gate);
   const [evidenceViewed, setEvidenceViewed] = useState(false);
   const [reason, setReason] = useState('');
   const canSign = evidenceViewed && reason.trim().length > 0 && !resolving;
   // discuss는 근거 열람 불필요(승인이 아니므로) — 사유만 있으면 된다.
   const canDiscuss = reason.trim().length > 0 && !resolving;
+  // story #3334(선생님 실사용 4바퀴 T1' 적출) — 반려(변경 요청)는 근거 열람과 무관하게(승인이
+  // 아니므로 canSign과 다른 축) 사유만 필수. 예전엔 이 버튼이 resolving만 봐서 사유 빈 채로도
+  // 즉시 제출됐다(서버도 무검증이라 그대로 저장 — 반려 통지가 사유 없이 나감, #3330 AC2 무력화).
+  const canReject = reason.trim().length > 0 && !resolving;
 
   return (
     <div className="space-y-4">
@@ -80,7 +90,7 @@ export function GateSignatureApproval({
 
       {error ? (
         <p
-          className="rounded-lg border border-destructive/30 bg-destructive/8 px-3 py-2 text-xs text-foreground"
+          className="rounded-lg border border-destructive/30 bg-destructive-tint px-3 py-2 text-xs text-foreground"
           role="alert"
           aria-live="assertive"
           aria-atomic="true"
@@ -95,7 +105,7 @@ export function GateSignatureApproval({
           <Button
             variant="outline"
             className={compact ? 'min-h-12 w-full gap-1.5' : 'min-h-12 flex-1 gap-1.5'}
-            disabled={resolving}
+            disabled={!canReject}
             onClick={() => onReject(reason)}
           >
             <Pencil className="size-4" />
@@ -107,7 +117,7 @@ export function GateSignatureApproval({
             onClick={() => onApprove(reason)}
           >
             <CheckCircle className="size-4" />
-            {resolving ? '...' : t('sigApproveAndSign')}
+            {resolving ? '...' : t(approveAndSignLabelKey)}
           </Button>
         </div>
         {onDiscuss ? (

@@ -56,7 +56,9 @@ EXPECTED_TOOLS = {
     # core (4) — E-MCP-OPT(story ff6cb90d): list_projects/set_default_project 2종 추가.
     "sprintable_list_team_members", "sprintable_my_dashboard",
     "sprintable_list_projects", "sprintable_set_default_project",
-    # chat (4) — story 3cf50d90: get_chat_message(단건 원문 조회) 추가.
+    # chat (5) — story 3cf50d90: get_chat_message(단건 원문 조회) 추가. story #3331:
+    # list_conversations(내 참여 방 목록 — 알림 미도달 백스톱) 추가.
+    "sprintable_list_conversations",
     "sprintable_send_chat_message", "sprintable_create_conversation", "sprintable_list_chat_messages",
     "sprintable_get_chat_message",
     # meetings (6)
@@ -114,6 +116,14 @@ EXPECTED_TOOLS = {
     "sprintable_publish_event", "sprintable_list_event_definitions",
     # events registry 등록(2) — story #2636: org 커스텀 이벤트 정의 등록/수정(admin 그룹).
     "sprintable_register_event_definition", "sprintable_update_event_definition",
+    # channel post drafts (1) — story #3614: 이 도메인의 첫 MCP 도구(withdraw). org-scoped URL을
+    # client.org_id로 수동 구성하는 첫 사례(server.py 참고).
+    "sprintable_withdraw_channel_post_draft",
+    # 발행물 인사이트 (1) — story #3651: 1일·7일 스냅샷 조회 + 델타. 이 도메인 둘째 도구.
+    "sprintable_get_publication_insights",
+    # 콘텐츠 규칙 읽기 (1) — story #3769: content_rules.py docstring이 약속한 「에이전트가
+    # GET으로 읽는」 길의 MCP 표면(BE 신설 0, 기존 GET 둘 병합).
+    "sprintable_get_content_rules",
     # smoke
     "ping",
 }
@@ -139,7 +149,12 @@ def test_total_tool_count():
     # 119→121. story #2668(B3): sprintable_submit_for_approval 1종 신설(문서 결재 상신
     # REST를 MCP로 노출 — 도구 목록에 없어 에이전트가 발견 못 하던 것) — 121→122.
     # story #2709: sprintable_request_decision 1종 신설(AskUserQuestion 블로킹 대체) — 122→123.
-    assert len(_TOOLS) == 124  # story b6b9c52d(#2707 부수): sprintable_import_image_artifact 신설 123→124
+    # story #3331: sprintable_list_conversations 1종 신설(내 참여 방 목록 — 알림 미도달 백스톱) — 124→125.
+    # story #3614: sprintable_withdraw_channel_post_draft 1종 신설(채널 글 초안 폐기 — 이 도메인
+    # 첫 MCP 도구) — 125→126. story #3651: sprintable_get_publication_insights 1종 신설(발행물
+    # 1일·7일 인사이트 스냅샷+델타 — 이 도메인 둘째 도구) — 126→127. story #3769:
+    # sprintable_get_content_rules 1종 신설(조직 콘텐츠 규칙 읽기) — 127→128.
+    assert len(_TOOLS) == 128  # story b6b9c52d(#2707 부수): sprintable_import_image_artifact 신설 123→124
 
 
 def test_all_expected_tools_registered():

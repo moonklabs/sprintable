@@ -2,17 +2,18 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { DocEditor } from '@/components/docs/doc-editor';
 import { DocGateSection } from '@/components/docs/doc-gate-section';
 import { DocUrlChip } from '@/components/docs/doc-url-chip';
 import { DocUrlDialog, type SlugSubmitResult } from '@/components/docs/doc-url-dialog';
 import { slugifyDocTitle, isUntitledSlug } from '@/components/docs/lib/doc-slug';
 import { docsListUrl, docUrl } from '@/components/docs/lib/doc-project-url';
-import { useDocSync, unwrapDocResponse, type SaveStatus } from '@/components/docs/use-doc-sync';
+import { useDocSync, unwrapDocResponse } from '@/components/docs/use-doc-sync';
 import { htmlToMarkdown } from '@/components/docs/lib/content-converter';
 import Link from 'next/link';
-import { Check, Copy, Eye, Link2, Loader2, MoreHorizontal, Share2, Trash2, XCircle } from 'lucide-react';
+import { Check, Copy, Eye, Link2, MoreHorizontal, Share2, Trash2 } from 'lucide-react';
+import { InlineSaveIndicator } from './inline-save-indicator';
 import { DocShareDialog } from '@/components/docs/doc-share-dialog';
 import { DocSyncBanner } from '@/components/docs/doc-sync-banner';
 import {
@@ -29,6 +30,8 @@ import { useSyntheticParentTabHistory } from '@/hooks/use-synthetic-parent-tab-h
 import { HumanOnlyAction } from '@/components/ui/human-only-action';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { formatRelativeTime } from '@/lib/storage/format';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 
 interface DocDetail {
   id: string;
@@ -53,70 +56,6 @@ interface DocDetail {
   revisions?: { count: number; latest_at?: string | null } | null;
 }
 
-function InlineSaveIndicator({
-  status,
-  onAction,
-  t,
-}: {
-  status: SaveStatus;
-  onAction: () => void;
-  t: ReturnType<typeof useTranslations>;
-}) {
-  const [show, setShow] = useState(false);
-  const [fading, setFading] = useState(false);
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (status === 'idle') { setShow(false); setFading(false); return; }
-    setShow(true);
-    setFading(false);
-    if (status !== 'saved') return;
-    const t1 = setTimeout(() => setFading(true), 200);
-    const t2 = setTimeout(() => setShow(false), 1600);
-    return () => { clearTimeout(t1); clearTimeout(t2); };
-  }, [status]);
-
-  if (!show) return null;
-
-  if (status === 'saving') {
-    return (
-      <span aria-label={t('statusSaving')} title={t('statusSaving')} className="flex items-center">
-        <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
-      </span>
-    );
-  }
-  if (status === 'saved') {
-    return (
-      <span aria-label={t('statusSaved')} title={t('statusSaved')} className={`flex items-center transition-opacity duration-[1400ms] ${fading ? 'opacity-0' : 'opacity-100'}`}>
-        <span className="size-2 rounded-full bg-success" />
-      </span>
-    );
-  }
-  if (status === 'unsaved') {
-    return (
-      <span aria-label={t('statusUnsaved')} title={t('statusUnsaved')} className="flex items-center">
-        <span className="size-2 rounded-full bg-warning" />
-      </span>
-    );
-  }
-  if (status === 'error') {
-    return (
-      <button type="button" onClick={onAction}
-        aria-label={`${t('statusError')} · ${t('retry')}`}
-        title={`${t('statusError')} · ${t('retry')}`}
-        className="flex max-w-[120px] items-center gap-1 truncate text-xs text-destructive hover:text-destructive/80 md:max-w-none"
-      >
-        <XCircle className="size-3.5 shrink-0" />
-        <span className="truncate">{t('statusError')} · {t('retry')}</span>
-      </button>
-    );
-  }
-  // conflict / remote-changed are surfaced by DocSyncBanner (the off-ramp), not this
-  // status chip — keeping a chip here too would double-surface and re-expose the
-  // dead-end onAction. (fc4d4264 FIX-4)
-  return null;
-}
-
 export default function DocSlugPage() {
   const params = useParams();
   const slug = typeof params.slug === 'string' ? params.slug : '';
@@ -126,6 +65,8 @@ export default function DocSlugPage() {
   const router = useRouter();
   const t = useTranslations('docs');
   const tc = useTranslations('common');
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
   const ts = useTranslations('share');
   // 신규 문서 자동 포커스: URL ?new=1 파라미터를 ref로 처리 (useSearchParams Suspense 이슈 방지)
   const isNewRef = useRef(typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('new') === '1');
@@ -343,7 +284,7 @@ export default function DocSlugPage() {
 
   const docActions = (
     <>
-      <InlineSaveIndicator status={saveStatus} onAction={save} t={t} />
+      <InlineSaveIndicator status={saveStatus} onAction={save} t={t} tc={tc} />
       <button
         type="button"
         onClick={handleCopyMarkdown}
@@ -420,6 +361,12 @@ export default function DocSlugPage() {
           contentFormat={contentFormat}
           editable={selectedDoc.doc_type !== 'sprint_report'}
           currentDocId={selectedDoc.id}
+          // story #3866(발견 즉시 수정) — projectId가 DocEditor 최상위 prop으로 한 번도 안
+          // 넘어오고 있었다(dispatchSlot 안 DocAssigneeControl에만 있었음). 기존 wikiLink
+          // `[[` 검색(WikiLinkNode.configure({projectId})) 도 이 페이지에서 이미 항상
+          // projectId=undefined로 죽어 있던 잠복 결함 — 신규 `#` 스토리 검색과 같은
+          // 원인이라 같이 고친다(별 카드 0, "발견 즉시 수정" 규율).
+          projectId={projectId}
           onNavigate={handleNavigate}
           onChange={setContent}
           onContentFormatChange={setContentFormat}
@@ -450,7 +397,7 @@ export default function DocSlugPage() {
                 </>
               ) : null}
               {selectedDoc.updated_at ? (
-                <span className="tabular-nums">{new Date(selectedDoc.updated_at).toLocaleString()}</span>
+                <span className="tabular-nums">{formatRelativeTime(selectedDoc.updated_at, locale, displayTimezone)}</span>
               ) : null}
             </>
           }

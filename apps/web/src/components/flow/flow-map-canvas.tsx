@@ -1,7 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
+import { formatRelativeTime } from '@/lib/storage/format';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { Check, Circle } from 'lucide-react';
 import type { FlowMapLane, FlowMapNode, FlowMapEdgeKind, FlowMapEdgeGroup } from './derive-flow-map';
 import {
@@ -13,6 +15,7 @@ import {
   PAST_EXPANDED_ROW_HEIGHT, PAST_EXPANDED_BOX_WIDTH, isNodeStalled,
 } from './derive-flow-map';
 import { isValidPortDropTarget, PORT_LINK_KINDS, resolveUndoTitle, type PortLinkKind } from './flow-port-linking';
+import { pickIGaJosa } from '@/lib/korean-particle';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
@@ -374,6 +377,8 @@ export function FlowMapCanvas({
   onOffscreenCountChange, focusGoalId = null, stallThresholdHours,
 }: FlowMapCanvasProps) {
   const t = useTranslations('flow');
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
   // story #2224 후속(수→형, §A1) — 렌더 시각 하나를 고정해 같은 렌더 패스 안 모든 카드가
   // 같은 기준으로 판정되게 한다(Date.now()를 카드마다 따로 부르면 렌더 중 시각이 미세하게
   // 갈릴 수 있다 — 여기서만 부르고 순수함수(isNodeStalled)에 값으로 흘려보낸다).
@@ -1172,7 +1177,7 @@ export function FlowMapCanvas({
       {/* story #2353(AC15) — 실패는 토스트로 흘려보내지 않는다(㉦-2, "그 자리에 남는다") —
           여기 고정 배너가 그 "자리"다. message는 서버 원문 그대로(진단을 새로 안 짓는다). */}
       {linkDraft.phase === 'error' ? (
-        <div role="alert" className="flex items-center justify-between gap-2 border-t border-destructive/30 bg-destructive/10 px-3 py-2 text-[11px] text-foreground">
+        <div role="alert" className="flex items-center justify-between gap-2 border-t border-destructive/30 bg-destructive-tint px-3 py-2 text-[11px] text-foreground">
           <span>{linkDraft.message}</span>
           <button type="button" onClick={resetLinkDraft} className="shrink-0 underline">{t('portLinkErrorDismiss')}</button>
         </div>
@@ -1210,11 +1215,12 @@ export function FlowMapCanvas({
             <DialogHeader>
               <DialogTitle>
                 {titleResolution.key === 'portUndoTitleOther'
-                  ? t('portUndoTitleOther', { name: titleResolution.name })
+                  ? t('portUndoTitleOther', { name: titleResolution.name, josa: pickIGaJosa(titleResolution.name) })
                   : t(titleResolution.key)}
               </DialogTitle>
               <DialogDescription>
-                {undoTarget.declaredAt ? t('portUndoSignature', { at: new Date(undoTarget.declaredAt).toLocaleString() }) : t('portUndoSignatureUnknown')}
+                {/* story #3493 — 서명 선언 시각은 "기록"(정본 formatRelativeTime). */}
+                {undoTarget.declaredAt ? t('portUndoSignature', { at: formatRelativeTime(undoTarget.declaredAt, locale, displayTimezone) }) : t('portUndoSignatureUnknown')}
               </DialogDescription>
             </DialogHeader>
             {undoDeleteError ? <p role="alert" className="text-[11px] text-destructive">{undoDeleteError}</p> : null}

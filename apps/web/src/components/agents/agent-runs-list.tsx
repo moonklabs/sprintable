@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { Activity, ChevronDown, Clock3, Cpu, Hash, RotateCw, Zap } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -11,16 +11,26 @@ import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { parseCursorMeta } from '@/lib/pagination';
 import {
   ALL_RUN_STATUS_FILTER,
+  DEFAULT_RUN_LOOKBACK_DAYS,
   DEFAULT_RUN_STATUS_FILTER,
   getDefaultRunDateFilters,
   getLocalDayEndIso,
   getLocalDayStartIso,
   getRunFailureDisposition,
   getTriggerMemoHref,
+  normalizeRunStatusFilter,
 } from '@/services/agent-run-history';
 import { AgentRunDetail } from './agent-run-detail';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import {
+  AGENT_RUN_STATUS_ORDER,
+  agentRunStatusBadgeVariant,
+  type AgentRunStatus,
+} from '@/lib/agent-run-status';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { formatRelativeTime } from '@/lib/storage/format';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 
 interface AgentRun {
   id: string;
@@ -34,7 +44,7 @@ interface AgentRun {
   model: string | null;
   llm_provider: 'managed' | 'byom' | null;
   llm_provider_key: string | null;
-  status: 'queued' | 'held' | 'running' | 'hitl_pending' | 'completed' | 'failed';
+  status: AgentRunStatus;
   duration_ms: number | null;
   llm_call_count: number;
   input_tokens: number | null;
@@ -55,16 +65,7 @@ interface AgentRun {
   created_at: string;
 }
 
-const STATUS_FILTERS = [ALL_RUN_STATUS_FILTER, 'completed', 'hitl_pending', 'failed', 'running', 'queued', 'held'] as const;
-
-const STATUS_BADGE_VARIANT: Record<string, 'success' | 'destructive' | 'info' | 'outline' | 'secondary'> = {
-  completed: 'success',
-  hitl_pending: 'secondary',
-  failed: 'destructive',
-  running: 'info',
-  queued: 'outline',
-  held: 'secondary',
-};
+const STATUS_FILTERS = [ALL_RUN_STATUS_FILTER, ...AGENT_RUN_STATUS_ORDER] as const;
 
 function formatDuration(ms: number | null): string {
   if (ms == null) return '-';
@@ -87,13 +88,9 @@ function formatCost(usd: number | null): string {
   return `$${usd.toFixed(4)}`;
 }
 
-function toLocaleDateStr(iso: string, locale: string): string {
-  return new Date(iso).toLocaleDateString(locale, {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+// story #3493 — run.created_at은 "기록" — 3436 묶음 8 정본(formatRelativeTime)으로.
+function toLocaleDateStr(iso: string, locale: string, displayTimezone: string): string {
+  return formatRelativeTime(iso, locale, displayTimezone);
 }
 
 function formatBillingMode(t: ReturnType<typeof useTranslations>, billingMode: AgentRun['llm_provider']): string {
@@ -104,6 +101,12 @@ function formatBillingMode(t: ReturnType<typeof useTranslations>, billingMode: A
 export function AgentRunsList() {
   const t = useTranslations('agentRuns');
   const tc = useTranslations('common');
+  // story #3680(그라운딩 2026-09-07) — 이 컴포넌트가 project_id를 «전혀» 안 보내고
+  // 있었다(git log 전체에 이 필드가 있었던 적이 없음). BE list_agent_runs는
+  // project_id를 Query(...) 필수로 요구해 매 요청이 422였고, 아래 fetchRuns의 옛
+  // `if (!res.ok) return 빈 목록` 처리가 그 422를 조용히 「0행」으로 삼켰다 — 날짜
+  // 범위와 무관하게 항상 0행이었던 진짜 근본원인.
+  const { projectId } = useDashboardContext();
 
   const [runs, setRuns] = useState<AgentRun[]>([]);
   const [loading, setLoading] = useState(true);
@@ -116,19 +119,28 @@ export function AgentRunsList() {
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
-  const [locale] = useState(() =>
-    typeof document !== 'undefined' ? document.documentElement.lang || 'en' : 'en',
-  );
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
 
   const fetchRuns = useCallback(async (cursor?: string) => {
+    if (!projectId) throw new Error('projectId not ready');
     const params = new URLSearchParams();
-    if (statusFilter) params.set('status', statusFilter);
+    params.set('project_id', projectId);
+    // story #3680 — 'all'은 서버 필터 값이 아니라 "필터 안 함"의 FE 표현(normalizeRunStatusFilter
+    // 기존 헬퍼가 이미 그 변환을 하고 있었는데 이 호출부가 안 쓰고 있었다 — raw statusFilter를
+    // 그대로 보내면 status=all이 나가 새로 추가된 BE Literal 검증에 422로 걸린다).
+    const normalizedStatus = normalizeRunStatusFilter(statusFilter);
+    if (normalizedStatus) params.set('status', normalizedStatus);
     if (fromDate) params.set('from', getLocalDayStartIso(fromDate));
     if (toDate) params.set('to', getLocalDayEndIso(toDate));
     if (cursor) params.set('cursor', cursor);
 
     const res = await fetchWithAuth(`/api/v1/agent-runs?${params}`);
-    if (!res.ok) return { items: [], nextCursor: null };
+    // story #3680(페드루 PO 지시) — 「실패」와 「0건」은 다른 얼굴이어야 한다. 옛 코드는
+    // non-ok를 조용히 빈 목록으로 접어 project_id 누락 422를 "실행 없음"으로 위장시켰다
+    // (진짜 근본원인이었다). 여기서 throw해 아래 useEffect의 기존 loadError 경로로
+    // 넘긴다(신규 상태 0 — try/catch/loadError는 이미 있었다).
+    if (!res.ok) throw new Error(`agent-runs fetch failed: ${res.status}`);
     const json = await res.json();
     // story #2231 AC4: 이 프록시는 apiSuccess(await _r.json())로 BE의 {data,meta} 전체를
     // 다시 자기 data 필드에 얹는다(comments가 #2230 전에 그랬던 것과 동형 이중포장) — 바깥
@@ -138,11 +150,14 @@ export function AgentRunsList() {
       items: (json.data ?? []) as AgentRun[],
       nextCursor: parseCursorMeta(json.meta, 'agent-runs-list').nextCursor,
     };
-  }, [statusFilter, fromDate, toDate]);
+  }, [projectId, statusFilter, fromDate, toDate]);
 
   // story #2000: 원 raw fetch가 네트워크 단에서 throw하면(오프라인 등) try 없이 setLoading(false)가
   // 영영 안 불려 스켈레톤이 무한행 — try/catch/finally + loadError/retryKey로 봉합(D #1989 패턴).
+  // story #3680 — projectId가 아직 없으면(대시보드 컨텍스트 로드 중) 요청 자체를 미루고
+  // 로딩 상태를 유지한다(빈 목록도 에러도 아니다 — "아직 모른다").
   useEffect(() => {
+    if (!projectId) return;
     let cancelled = false;
     async function load() {
       setLoading(true);
@@ -161,7 +176,7 @@ export function AgentRunsList() {
     }
     void load();
     return () => { cancelled = true; };
-  }, [fetchRuns, retryKey]);
+  }, [projectId, fetchRuns, retryKey]);
 
   const loadMore = async () => {
     if (!nextCursor) return;
@@ -245,10 +260,19 @@ export function AgentRunsList() {
               </Button>
             </div>
           ) : runs.length === 0 ? (
-            <EmptyState title={t('emptyTitle')} description={t('emptyDescription')} />
+            // story #3680 AC3 — 기본 창(넓히지 않은 상태)의 0건은 "실행 없음"과 다른
+            // 사실이다("창 밖일 수 있다") — 날짜를 한 번이라도 건드렸으면 일반 문구로.
+            fromDate === initialFromDate && toDate === initialToDate ? (
+              <EmptyState
+                title={t('emptyTitleDefaultWindow', { days: DEFAULT_RUN_LOOKBACK_DAYS })}
+                description={t('emptyDescriptionDefaultWindow', { days: DEFAULT_RUN_LOOKBACK_DAYS })}
+              />
+            ) : (
+              <EmptyState title={t('emptyTitle')} description={t('emptyDescription')} />
+            )
           ) : (
             <div className="space-y-3">
-              {runs.map((run) => (
+              {runs.map((run, index) => (
                 <div
                   key={run.id}
                   className="rounded-md border border-border bg-muted/30 px-4 py-4 transition hover:border-primary/20 hover:bg-muted"
@@ -259,7 +283,7 @@ export function AgentRunsList() {
                         <h3 className="text-sm font-semibold text-foreground">
                           {run.agent_name ?? t('unknownAgent')}
                         </h3>
-                        <Badge variant={STATUS_BADGE_VARIANT[run.status] ?? 'outline'}>
+                        <Badge variant={agentRunStatusBadgeVariant(run.status)}>
                           {t(`status_${run.status}`)}
                         </Badge>
                         {run.model && <Badge variant="chip">{run.model}</Badge>}
@@ -301,9 +325,15 @@ export function AgentRunsList() {
                     <div className="flex flex-col items-start gap-3 lg:items-end">
                       <div className="flex items-center gap-2 text-xs text-muted-foreground">
                         <Activity className="size-3.5" />
-                        <span>{toLocaleDateStr(run.created_at, locale)}</span>
+                        <span>{toLocaleDateStr(run.created_at, locale, displayTimezone)}</span>
                       </div>
-                      <Button variant="glass" size="sm" onClick={() => setSelectedRunId(run.id)}>
+                      {/* story #3592(§17-20 ⑧·§22-18 동형) — 행마다 같은 「상세 보기」
+                          접근 이름이라 보조기술 버튼 목록에서 어느 실행 행인지 못
+                          가른다. */}
+                      <Button
+                        variant="glass" size="sm" onClick={() => setSelectedRunId(run.id)}
+                        aria-label={t('openDetailAriaLabel', { n: index + 1, label: t('openDetail') })}
+                      >
                         {t('openDetail')}
                       </Button>
                     </div>

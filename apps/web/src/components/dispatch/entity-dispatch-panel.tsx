@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { MoreHorizontal, Zap } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { ToastContainer, useToast } from '@/components/ui/toast';
+import { useToast } from '@/components/ui/toast';
 import { normalizeAssigneePatch } from '@/components/kanban/types';
 import { useOrgSyncVersion } from '@/lib/project-context-client';
 import { fetchWithAuth } from '@/lib/db/client';
@@ -38,7 +38,7 @@ export function EntityDispatchPanel({
   const [dispatching, setDispatching] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const moreRef = useRef<HTMLDivElement>(null);
-  const { toasts, addToast, dismissToast } = useToast();
+  const { addToast } = useToast();
   const t = useTranslations('board');
   // f5ae74e4: Dispatch(이벤트 전달)를 Kickoff(킥오프·워크플로우 규칙)와 라벨·툴팁으로 명확히 구분.
   const dispatchTitle = !assigneeId ? t('dispatchNeedsAssignee') : t('dispatchTooltip');
@@ -190,7 +190,6 @@ export function EntityDispatchPanel({
           )}
         </div>
       )}
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }

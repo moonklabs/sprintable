@@ -52,12 +52,15 @@ async def test_score_hypotheses_ga4_branch_runs_off_event_loop_thread():
     main_thread = threading.current_thread()
     seen_threads: list[threading.Thread] = []
 
-    def _fake_score_ga4_outcome(md):
+    def _fake_score_ga4_outcome(md, org_timezone=None):
         seen_threads.append(threading.current_thread())
         return {"outcome_status": "hit", "outcome_result": {"actual": 1, "metric": "x", "scored_at": None}}
 
     hyp = type("H", (), {})()
     hyp.id = "hyp-1"
+    # story #3674 — get_org_timezone(session, hyp.org_id) 호출용(값 자체는 이 테스트의
+    # 관심사 밖, get_org_timezone을 아래서 patch해 실제 DB 조회는 안 탄다).
+    hyp.org_id = "org-1"
     hyp.status = "active"
     hyp.metric_definition = {"source": "ga4", "metric": "signups", "target": 1, "direction": "up"}
     hyp.outcome_result = None
@@ -87,7 +90,11 @@ async def test_score_hypotheses_ga4_branch_runs_off_event_loop_thread():
     async def _async_attribute(*a, **kw):
         return {"skipped_reason": "no_measuring_loop", "attributed": []}
 
+    async def _async_get_org_timezone(*a, **kw):
+        return None
+
     with patch.object(sc, "score_ga4_outcome", side_effect=_fake_score_ga4_outcome), \
+         patch.object(sc, "get_org_timezone", new=_async_get_org_timezone), \
          patch("app.services.hypothesis_outcome_verdict.record_outcome_verdicts", new=_async_record), \
          patch("app.services.loop_outcome_attribution.attribute_loop_outcome", new=_async_attribute):
         await sc.score_hypotheses(_FakeSession())

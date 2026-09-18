@@ -1,7 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent } from 'react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
+import { formatRelativeTime } from '@/lib/storage/format';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
@@ -21,6 +23,7 @@ import { LabelChip, LABEL_PRESET_COLORS, type LabelData } from '@/components/ui/
 import { DependencyGraph } from './dependency-graph';
 import { OutcomeResultCard, type OutcomeResult } from '@/components/outcome/outcome-result-card';
 import { StoryHypothesesSection } from '@/components/hypotheses/story-hypotheses-section';
+import { StoryInsightsCompareSection } from '@/components/insights-board/story-insights-compare-section';
 import { StoryMergeGate } from '@/components/cage/story-merge-gate';
 import { EvidenceSection } from '@/components/verify/evidence-section';
 import { ChatProofSection, parseStoryProofReferences } from '@/components/verify/chat-proof-section';
@@ -33,6 +36,7 @@ import { initials, formatDate } from '@/lib/storage/format';
 import { ArtifactSection } from '@/components/canvas/artifact-section';
 import { StuckHandoffSection } from '@/components/cage/stuck-handoff-section';
 import { EntityBacklinksSection } from '@/components/shared/entity-backlinks-section';
+import { ConceptCardSection } from '@/components/kanban/concept-card-section';
 import { RejectedRelationsSection } from '@/components/shared/rejected-relations-section';
 import { StoryOriginSection } from '@/components/shared/story-origin-section';
 import { EntityAwareTextarea } from '@/components/shared/entity-aware-textarea';
@@ -47,7 +51,7 @@ import {
   Dialog, DialogContent, DialogDescription,
   DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
-import { ToastContainer, useToast } from '@/components/ui/toast';
+import { useToast } from '@/components/ui/toast';
 import { useSyntheticParentTabHistory } from '@/hooks/use-synthetic-parent-tab-history';
 import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { HumanOnlyAction } from '@/components/ui/human-only-action';
@@ -79,6 +83,16 @@ interface Activity {
 interface StoryDetailPanelProps {
   story: KanbanStory;
   tasks: Task[];
+  /** story #3703(FE 완전성-정직, 유나 § 2026-09-08) — /api/tasks의 meta.totalCount(story_id
+   * 지정 시 BE가 항상 반환, route.ts:110-119). 탭 라벨이 로드된 tasks.length가 아니라 이
+   * 진짜 총계를 말해야 「Tasks (20)」이 "총 20개"로 오독되지 않는다. 호출부가 안 넘기면
+   * (null/undefined) tasks.length로 자연 폴백 — 하위호환. */
+  tasksTotalCount?: number | null;
+  /** story #3709(FE 완전성-정직, 3704 후속) — 조회 중(응답 前)엔 tasks=[]·tasksTotalCount=null이
+   * «정말 0개»(빈 상태)와 구별이 안 갔다 — 호출부가 이 값을 true로 넘기는 동안은 빈 상태
+   * 대신 「불러오는 중」을 그린다. 기본 false — 안 넘기는 호출부는 회귀 0(항상 «조회 끝난
+   * 것»으로 취급, 기존 동작 그대로). */
+  tasksLoading?: boolean;
   nextTasksCursor?: string | null;
   loadingMoreTasks?: boolean;
   onLoadMoreTasks?: () => void;
@@ -92,6 +106,14 @@ interface StoryDetailPanelProps {
   sprintMap?: Record<string, string>;
   onNavigate?: (storyId: string) => void;
   projectId?: string;
+  /** story #3289(도메인탈고정·축1 Phase1 FE잔여) — org별 status 라벨 오버라이드 조회 함수
+   * (useOrgDomainLabels().statusLabel), story-card.tsx의 getStatusLabel과 동형. 없으면
+   * (undefined) 기존 t(...) canonical 문구 그대로(회귀 0) — localStatus 자체(판정/색상)는
+   * 안 바뀐다, 표시 텍스트만. */
+  getStatusLabel?: (canonicalSlug: string) => string | undefined;
+  /** story #3289 AC2 — org 엔티티명 라벨 오버라이드(useOrgDomainLabels().entityTypeLabel).
+   * description/AC 편집기의 `#` 피커(EntityAwareTextarea)로 그대로 물려준다. */
+  getEntityTypeLabel?: (canonicalSlug: string) => string | undefined;
   /** story #2354 — 갈래 보기의 «지도 위에 겹치는» 소형 팝오버 모드. 생략하면 기존 전체화면
    * 드로어(칸반 그대로, 회귀 없음). 값을 주면 배경 딤을 없애고(지도를 «가리지» 않는다),
    * «top+height 확정값»만 받아 그대로 스타일에 적용한다 — 위/아래 반전 판단(클릭한 노드가
@@ -331,8 +353,12 @@ export function DescriptionViewer({
   );
 }
 
-export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loadingMoreTasks = false, onLoadMoreTasks, onClose, onStoryUpdate, onDeleteSuccess, memberMap = {}, members = [], storyMap = {}, epicMap = {}, sprintMap = {}, onNavigate, projectId, overlayPosition }: StoryDetailPanelProps) {
+export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLoading = false, nextTasksCursor = null, loadingMoreTasks = false, onLoadMoreTasks, onClose, onStoryUpdate, onDeleteSuccess, memberMap = {}, members = [], storyMap = {}, epicMap = {}, sprintMap = {}, onNavigate, projectId, overlayPosition, getStatusLabel, getEntityTypeLabel }: StoryDetailPanelProps) {
   const t = useTranslations('board');
+  // story #3776(1층B) — "닫기"/"취소", common ns의 기존 close/cancel 키 재사용.
+  const tc = useTranslations('common');
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
   // story #1959(P2-S3): 딥링크 매니페스트(story_detail→parentTab=all) — 콜드 진입 시 "전체"
   // 탭 루트를 BACK 대상으로 선주입. 카드 클릭으로 연 경우(history.length>1)는 no-op.
   useSyntheticParentTabHistory('/more');
@@ -340,7 +366,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   // 위(편집모드 우선 취소) 자체 핸들러가 있어 여기선 Tab 트랩+포커스 반환만 담당한다
   // (handleEscape:false — 이중 핸들러로 편집모드 취소 로직을 건너뛰지 않도록).
   const panelTrapRef = useFocusTrap(true, onClose, { handleEscape: false });
-  const { toasts, addToast, dismissToast } = useToast();
+  const { addToast } = useToast();
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [comments, setComments] = useState<Comment[]>([]);
@@ -504,19 +530,19 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
       if (!res.ok && res.status !== 404) {
         // story #2485 — backend delete_story()는 generic HTTP상태 코드만 낸다(진짜
         // 비즈니스 code 없음, 그라운딩 확認) — raw 서버 message 노출 대신 고정 문구.
-        addToast({ type: 'error', title: '스토리 삭제에 실패했습니다.' });
+        addToast({ type: 'error', title: t('storyDeleteFailed') });
         return;
       }
       onDeleteSuccess?.(story.id);
       onClose();
     } catch {
-      addToast({ type: 'error', title: '스토리 삭제에 실패했습니다.' });
+      addToast({ type: 'error', title: t('storyDeleteFailed') });
     } finally {
       deletingRef.current = false;
       setDeleting(false);
       setShowDeleteConfirm(false);
     }
-  }, [story.id, onDeleteSuccess, onClose, addToast]);
+  }, [story.id, onDeleteSuccess, onClose, addToast, t]);
 
   const titleInputRef = useRef<HTMLInputElement>(null);
 
@@ -711,17 +737,13 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
       } else if (res.status === 409) {
         addToast({ type: 'warning', title: t('dep.duplicateConnection') });
       } else if (res.status === 422) {
-        // story #2485 — 그라운딩(2026-08-06): `json.detail`은 실 envelope에 없는 필드라
-        // 이 분기는 항상 false였다(사이클/자기참조 구분이 한 번도 실제로 안 됐다 —
-        // 항상 dep.invalidSelf로 샘). backend create_dependency()는 두 케이스 모두
-        // 동일 generic code(UNPROCESSABLE_ENTITY)를 내고 구분용 code가 따로 없다
-        // (그라운딩 확認) — 지금은 message 원문("사이클이 발생하는...")에 실제로 그
-        // 한국어 문구가 있어 올바른 필드(error.message)로 고치면 최소한 이 구분은
-        // 다시 동작한다. 다만 message 문자열 매칭은 여전히 반창고다 — backend가
-        // CYCLE_DETECTED/SELF_REFERENCE 같은 explicit code를 내도록 하는 게 근본
-        // fix(별도 이슈로 보고, backend/ 스코프).
-        const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
-        addToast({ type: 'error', title: json?.error?.message?.includes('사이클') ? t('dep.cycleDetected') : t('dep.invalidSelf') });
+        // story #3786(유나 定 §2, 근본 fix) — 이 자리는 예전에 message 원문에서 한국어
+        // "사이클" 낱말을 찾아 cycle/self-reference를 갈랐다(반창고, en 로케일이 착지하면
+        // 그 낱말 자체가 없어져 항상 거짓이 되는 결함). BE(dependencies.py)가 이제
+        // DEPENDENCY_CYCLE/DEPENDENCY_SELF_REFERENCE를 explicit code로 실어 보내므로
+        // 그 code로 가른다 — 로케일 무관, 문자열 매칭 완전 제거.
+        const json = await res.json().catch(() => null) as { error?: { code?: string } } | null;
+        addToast({ type: 'error', title: json?.error?.code === 'DEPENDENCY_CYCLE' ? t('dep.cycleDetected') : t('dep.invalidSelf') });
       } else {
         addToast({ type: 'error', title: t('dep.addFailed') });
       }
@@ -801,12 +823,18 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   }, [story.id, orgSyncVersion]);
 
   // P0-04 in-flight 신뢰 칩 — StoryMergeGate와 동형 데이터소스(work_item_id 필터, BE 추가 0).
+  // story #3584 CHANGES(유나 그라운딩·PO 確定 2026-09-06, PR#3938 비차단) — chipGates
+  // 초기값이 `[]`라 "로딩 중"과 "게이트 0건"을 값만으로 구분 못 한다. 게이트에만 doc이
+  // 있는 스토리(3573류)에서 ConceptCardSection이 이 로딩 중 `[]`를 "게이트 쪽엔 없다"로
+  // 오판하면 backlinks가 늦게 와도 이미 블록을 접어 버릴 수 있어 gatesLoaded로 분리한다.
+  const [gatesLoaded, setGatesLoaded] = useState(false);
   useEffect(() => {
     let cancelled = false;
     fetchWithAuth(`/api/gates?work_item_id=${story.id}&work_item_type=story`, { cache: 'no-store' })
       .then((r) => (r.ok ? r.json() : []))
       .then((gates) => { if (!cancelled) setChipGates(Array.isArray(gates) ? gates : []); })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setGatesLoaded(true); });
     return () => { cancelled = true; };
   }, [story.id, orgSyncVersion]);
 
@@ -823,7 +851,10 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     done: 'done',
   };
   const statusKey = statusKeyMap[localStatus];
-  const statusLabel = statusKey ? t(statusKey) : localStatus;
+  // story #3289 — org 라벨 오버라이드 우선(story-card.tsx와 동형 `?? t(...)` 폴백), 아래
+  // Workcell run.now/stage/nextNeed·배지가 전부 이 값 하나로 수렴하므로 여기 한 곳만 바꾸면
+  // 표시 텍스트가 전체 소비처에 퍼진다(localStatus 자체·판정/색상은 무변경).
+  const statusLabel = getStatusLabel?.(localStatus) ?? (statusKey ? t(statusKey) : localStatus);
 
   // E-UI-DAEGBYEON P0 — Workcell 최소 실화면 배선(story `e5310d1b`, dead-path 방지).
   // 정직한 최소 표면: 실 필드(title/status/assignee/description/acceptance_criteria/
@@ -888,9 +919,10 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   const proofHuman = proofHumanId ? memberMap[proofHumanId] : null;
   const proofAgent = proofAgentId ? memberMap[proofAgentId] : null;
 
-  // story #2922 W2 — Workcell Evidence 구획 = ProofCapsule density="full" 실배선. glance-hero.tsx
-  // (GlanceHero의 buildEvidence/buildTrustSeal, 유일한 기존 density="full" 실 호출부)와 동일 규율:
-  // 신호 없는 필드는 절대 지어내지 않는다(no-fiction). claim=story.title(GlanceHero 선례 그대로).
+  // story #2922 W2 — Workcell Evidence 구획 = ProofCapsule density="full" 실배선. 그 당시
+  // 유일한 기존 density="full" 실 호출부(GlanceHero의 buildEvidence/buildTrustSeal, 옛
+  // GlanceHero 선례 — 지금은 삭제, story #3715)와 동일 규율: 신호 없는 필드는 절대 지어내지
+  // 않는다(no-fiction). claim=story.title(그 선례 그대로).
   const EVIDENCE_STATE_LABEL_BY_STATUS: Partial<Record<string, ProofState>> = {
     'in-progress': 'blue', 'in-review': 'amber', done: 'green',
   };
@@ -902,7 +934,6 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   // pickRelevantMergeGate(미종결 우선·동순위는 최근 PR 우선)로 하나를 고른다 — 옛
   // "배열의 첫 번째"는 실사고1/2의 근본원인과 같은 축(어느 PR인지 무작위로 고정)이었다.
   const mergeGate = pickRelevantMergeGate(chipGates) ?? null;
-  const GATE_RISK_MAP: Record<'low' | 'high', '낮음' | '높음'> = { low: '낮음', high: '높음' };
   const ciResult = mergeGate?.neutral_facts?.['ci_result'];
   const evidenceAutoVerify: 'passed' | 'failed' | null = ciResult === 'pass' ? 'passed' : ciResult === 'fail' ? 'failed' : null;
   const workcellEvidenceSignal: ProofCapsuleEvidence | undefined = evidenceAutoVerify ? { autoVerify: evidenceAutoVerify } : undefined;
@@ -917,7 +948,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   // 다시 열자고 하면 no-fiction 위반(이미 끝난 결정을 대기 중처럼 보여줌).
   const workcellGate: ProofCapsuleGate | undefined =
     mergeGate && mergeGate.status === 'pending'
-      ? { risk: mergeGate.risk_grade ? GATE_RISK_MAP[mergeGate.risk_grade] : undefined, action: t('workcellGateAction'), href: `/gates/${mergeGate.id}` }
+      ? { risk: mergeGate.risk_grade ?? undefined, action: t('workcellGateAction'), href: `/gates/${mergeGate.id}` }
       : undefined;
   const workcellEvidence: ProofCapsuleProps | null =
     evidenceProofState && evidenceStateLabel && (workcellEvidenceSignal || workcellTrustSeal || workcellGate)
@@ -997,7 +1028,11 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     const { story: updated } = await patchStory({ title: titleDraft.trim() });
     setSavingTitle(false);
     setEditingTitle(false);
+    // story #3638(유나 §8 별건, 유나 자가 patchStory 층에서 잡음) — 담당자 토글 형제
+    // (handleAssigneeToggle)는 이미 실패 토스트를 냈는데, 제목 저장은 편집창만 닫히고
+    // 조용히 원래 값으로 남아 실패 신호가 없었다.
     if (updated) onStoryUpdate?.({ ...story, title: updated.title });
+    else addToast({ type: 'error', title: t('titleSaveFailed') });
   };
 
   // E-BOARD S6: 복수 assignee. assignee_ids 우선, 없으면 단일 assignee_id로 폴백(하위호환).
@@ -1033,7 +1068,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     } else {
       assigneeIdsRef.current = prev; // PATCH 실패 → 직전 값 롤백
       setLocalAssigneeIds(prev);
-      addToast({ type: 'error', title: '담당자 변경에 실패했습니다.' });
+      addToast({ type: 'error', title: t('assigneeChangeFailed') });
     }
   };
 
@@ -1048,7 +1083,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     } else {
       assigneeIdsRef.current = prev; // 롤백
       setLocalAssigneeIds(prev);
-      addToast({ type: 'error', title: '담당자 변경에 실패했습니다.' });
+      addToast({ type: 'error', title: t('assigneeChangeFailed') });
     }
   };
 
@@ -1063,6 +1098,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     setEditingDescription(false);
     setReferenceDropped(dropped);
     if (updated) onStoryUpdate?.({ ...story, description: updated.description });
+    else addToast({ type: 'error', title: t('descriptionSaveFailed') });
   };
 
   const handleSaveAC = async () => {
@@ -1076,6 +1112,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     setEditingAC(false);
     setReferenceDropped(dropped);
     if (updated) onStoryUpdate?.({ ...story, acceptance_criteria: updated.acceptance_criteria });
+    else addToast({ type: 'error', title: t('acSaveFailed') });
   };
 
   // E-FILE S4: 스토리 첨부 — GCS 업로드 후 PATCH {attachments} (전체 교체이므로 기존+신규 머지 필수).
@@ -1262,23 +1299,37 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   const epicName = (id: string | null) => (id ? (epicMap[id] ?? '—') : '—');
   const sprintName = (id: string | null) => (id ? (sprintMap[id] ?? '—') : '—');
 
+  // story #3875(§⑤ 낱말 드리프트, PO 확定 2026-09-14) — status_changed의 old/new는
+  // canonical slug("in-progress" 등)라 그대로 그리면 영문 원시 값이 새므로, 헤더의
+  // statusLabel 계산(846행 부근)과 같은 정본 경로(getStatusLabel prop 우선 → statusKeyMap
+  // 경유 t() → 최후 폴백만 원 slug)로 임의 slug 하나를 해석하는 헬퍼를 둔다.
+  const resolveStatusLabel = (slug: string): string => {
+    const key = statusKeyMap[slug];
+    return getStatusLabel?.(slug) ?? (key ? t(key) : slug);
+  };
+
   const formatActivityMessage = (activity: Activity, expand: boolean): React.ReactNode => {
     const { activity_type, old_value, new_value } = activity;
     switch (activity_type) {
       case 'created':
-        return <span className="text-foreground">Created{new_value ? <>: <span className="font-medium">{expand ? new_value : truncate(new_value)}</span></> : null}</span>;
+        return <span className="text-foreground">{t('activityCreatedLabel')}{new_value ? <>: <span className="font-medium">{expand ? new_value : truncate(new_value)}</span></> : null}</span>;
       case 'status_changed':
-        return <span className="text-foreground">Status {renderChange(old_value, new_value ?? '—', expand)}</span>;
+        return <span className="text-foreground">{t('status')} {renderChange(old_value ? resolveStatusLabel(old_value) : null, new_value ? resolveStatusLabel(new_value) : '—', expand)}</span>;
       case 'assignee_changed':
-        return <span className="text-foreground">Assignee {renderChange(old_value ? memberName(old_value) : null, memberName(new_value), expand)}</span>;
+        // story #3875 — §⑤-1 낱말 표(doc a699be00)가 이 자리를 「담당」으로 확定(기존
+        // board.assignee="담당자"와 다른 낱말·다른 키, 재사용 아님).
+        return <span className="text-foreground">{t('activityAssigneeLabel')} {renderChange(old_value ? memberName(old_value) : null, memberName(new_value), expand)}</span>;
       case 'title_changed':
-        return <span className="text-foreground">Title {renderChange(old_value, new_value ?? '—', expand)}</span>;
+        return <span className="text-foreground">{t('activityTitleLabel')} {renderChange(old_value, new_value ?? '—', expand)}</span>;
       case 'epic_changed':
-        return <span className="text-foreground">Epic {renderChange(old_value ? epicName(old_value) : null, epicName(new_value), expand)}</span>;
+        return <span className="text-foreground">{t('activityEpicLabel')} {renderChange(old_value ? epicName(old_value) : null, epicName(new_value), expand)}</span>;
       case 'sprint_changed':
-        return <span className="text-foreground">Sprint {renderChange(old_value ? sprintName(old_value) : null, sprintName(new_value), expand)}</span>;
+        return <span className="text-foreground">{t('activitySprintLabel')} {renderChange(old_value ? sprintName(old_value) : null, sprintName(new_value), expand)}</span>;
       default:
-        return <span className="text-foreground">{activity_type}</span>;
+        // story #3875(AC1) — 미분류 activity_type(내부 enum)을 그대로 그리지 않는다 — 중립
+        // 라벨 1개로 감싼다(어떤 유형이 오든 t() 경유, 원시 enum 노출 0). §⑤-1(doc
+        // a699be00)이 「알 수 없음」(오류처럼 읽힘)이 아니라 「그 밖의 변경」으로 확定.
+        return <span className="text-foreground">{t('activityOtherChangeLabel')}</span>;
     }
   };
 
@@ -1318,6 +1369,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
               <div className="space-y-2">
                 <input
                   ref={titleInputRef}
+                  data-testid="story-title-input"
                   type="text"
                   value={titleDraft}
                   onChange={(e) => setTitleDraft(e.target.value)}
@@ -1367,7 +1419,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                         onClick={() => { if (!isCurrent) void handleChangeStatus(col.id); }}
                       >
                         <Check className={`size-4 ${isCurrent ? '' : 'opacity-0'}`} />
-                        {t(statusKeyMap[col.id] ?? col.i18nKey)}
+                        {getStatusLabel?.(col.id) ?? t(statusKeyMap[col.id] ?? col.i18nKey)}
                       </DropdownMenuItem>
                     );
                   })}
@@ -1380,7 +1432,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                   색 신호 그대로 KEEP(merge_ready=green·기타=amber) — 계열색 텍스트만 헤어라인 위에서
                   라이트 AA 미달이라 text-foreground로 이전(대비표 정본). */}
               {trustChip && trustChipLabel ? (
-                <span className="inline-flex items-center gap-1.5 rounded-[7px] border border-proof-line px-2 py-0.5 text-[11px] font-semibold text-foreground">
+                <span data-testid="story-detail-trust-chip" className="inline-flex items-center gap-1.5 rounded-[7px] border border-proof-line px-2 py-0.5 text-[11px] font-semibold text-foreground">
                   <span className={`size-1.5 rounded-full ${trustChip === 'merge_ready' ? 'bg-proof-green' : 'bg-proof-amber'}`} aria-hidden="true" />
                   {trustChipLabel}
                 </span>
@@ -1428,7 +1480,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                 type="button"
                 variant="ghost"
                 onClick={() => setShowDeleteConfirm(true)}
-                className="h-auto min-h-0 min-w-0 flex items-center gap-1 rounded-md border border-destructive/40 px-2.5 py-1.5 text-xs text-foreground hover:bg-destructive/10"
+                className="h-auto min-h-0 min-w-0 flex items-center gap-1 rounded-md border border-destructive/40 px-2.5 py-1.5 text-xs text-foreground hover:bg-destructive-tint"
                 aria-label={t('deleteStory')}
               >
                 <Trash2 className="h-3.5 w-3.5" />
@@ -1539,7 +1591,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
             {/* E-BOARD S1: Dispatch — assignee 인접(킥오프=assignee 선택 후 액션). EntityDispatchPanel 마운트만(신규 디자인 0). */}
             {projectId && (
               <div className="rounded-lg border border-border bg-muted/20 p-3">
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Dispatch</p>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('dispatch')}</p>
                 <EntityDispatchPanel
                   entityType="story"
                   entityId={story.id}
@@ -1564,6 +1616,16 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                 위 필드들)와 다른 축이라 별도 섹션. EntityBacklinksSection과 나란히 두되 먼저
                 — 출처가 "이 항목이 왜 여기 있는지"에 더 가까운 질문이라 위쪽에 둔다. */}
             <StoryOriginSection storyId={story.id} />
+
+            {/* story #3560(제작 작업대 컨셉 카드, 페드루 PO 確定 2026-09-06) — 「이것을
+                가리키는 것들」(아래)과 같은 API를 재사용하되 doc만 걸러 별 블록 —
+                컨셉 승인이 무엇을 승인하는지 검증 시트보다 먼저 보인다.
+                story #3584 — gates는 새로 안 부르고 위(P0-04 in-flight 칩)가 이미
+                fetch한 chipGates를 그대로 넘긴다("새 fetch 0", PO 確定).
+                gatesLoaded도 같이 내려 backlinks·gates 둘 다 도착 前엔 판정을
+                보류한다(§3584 CHANGES — chipGates 초기값 []가 "로딩 중"과 "0건"을
+                못 가른다). */}
+            <ConceptCardSection workItemId={story.id} gates={chipGates} gatesLoaded={gatesLoaded} />
 
             {/* story #2299(E-CONNECT): 이것을 가리키는 것들 — doc/chat_message 참조 목록 첫 자리
                 (doc [slug]/view는 후속 판). */}
@@ -1602,13 +1664,16 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                       <EntityAwareTextarea>로 바꾸고 projectId만 넘기면 `#` 피커가 붙는다.
                       참조 코어(chat-input-entity-tokens.ts/use-entity-picker.ts) diff 0. */}
                   <EntityAwareTextarea
+                    data-testid="story-description-input"
                     value={descriptionDraft}
                     onChange={setDescriptionDraft}
                     onPaste={handlePasteAttach}
                     projectId={projectId}
-                    placeholder="Markdown 형식으로 작성하세요..."
+                    placeholder={t('markdownPlaceholder')}
                     className="flex field-sizing-content min-h-[160px] w-full resize-y rounded-lg border border-input bg-transparent px-2.5 py-2 font-mono text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                     autoFocus
+                    getEntityTypeLabel={getEntityTypeLabel}
+                    entityCandidatesLabel={t('entityCandidatesLabel')}
                   />
                   <div className="flex gap-2">
                     <Button size="sm" onClick={handleSaveDescription} disabled={savingDescription}>
@@ -1664,9 +1729,11 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                     value={acDraft}
                     onChange={setAcDraft}
                     projectId={projectId}
-                    placeholder="Markdown 형식으로 작성하세요..."
+                    placeholder={t('markdownPlaceholder')}
                     className="flex field-sizing-content min-h-[160px] w-full resize-y rounded-lg border border-input bg-transparent px-2.5 py-2 font-mono text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                     autoFocus
+                    getEntityTypeLabel={getEntityTypeLabel}
+                    entityCandidatesLabel={t('entityCandidatesLabel')}
                   />
                   <div className="flex gap-2">
                     <Button size="sm" onClick={handleSaveAC} disabled={savingAC}>
@@ -1713,7 +1780,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                   disabled={uploadingAttachment || (story.attachments?.length ?? 0) >= STORY_ATTACHMENT_LIMIT}
                   className="h-auto min-h-0 min-w-0 flex items-center gap-1 p-0 text-xs font-normal text-muted-foreground hover:text-foreground disabled:opacity-40"
                 >
-                  <Paperclip className="size-3" /> + 추가
+                  <Paperclip className="size-3" /> {t('addGeneric')}
                 </Button>
               </div>
               <input
@@ -1729,7 +1796,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                   {story.attachments.map((att, i) => {
                     const isImage = att.content_type?.startsWith('image/');
                     const Icon = getFileIcon(att.content_type);
-                    const label = att.name ?? '첨부파일';
+                    const label = att.name ?? t('attachmentFileFallback');
                     return (
                       <div key={att.url ?? i} className="group relative">
                         {/* a54ddc16 B1: 보드 첨부도 auth-gated 서명 라우트 경유(chat과 동일 컴포넌트·3상태). */}
@@ -1744,8 +1811,8 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                           type="button"
                           variant="ghost"
                           onClick={() => void handleRemoveAttachment(att.url)}
-                          className="h-auto min-h-0 min-w-0 absolute right-1 top-1 hidden rounded bg-destructive/20 p-0.5 text-destructive group-hover:block hover:bg-destructive/30"
-                          aria-label="첨부 삭제"
+                          className="h-auto min-h-0 min-w-0 absolute right-1 top-1 hidden rounded bg-destructive-tint p-0.5 text-destructive group-hover:block hover:brightness-95"
+                          aria-label={t('attachmentDelete')}
                         >
                           <X className="size-3" />
                         </Button>
@@ -1771,7 +1838,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
               {/* story #2105 2차 — handleAttachFiles가 재시도 전 setAttachError(false)를 먼저
                   호출해(위 정의) 매 시도마다 언마운트→리마운트된다. */}
               {attachError && (
-                <p role="alert" aria-live="assertive" aria-atomic="true" className="mt-1 text-xs text-destructive">첨부 업로드에 실패했습니다. 다시 시도해 주세요.</p>
+                <p role="alert" aria-live="assertive" aria-atomic="true" className="mt-1 text-xs text-destructive">{t('attachmentUploadFailed')}</p>
               )}
             </div>
 
@@ -1780,7 +1847,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
               <div className="mb-2 flex items-center justify-between">
                 <div className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
                   <Tag className="size-3" />
-                  <span>Labels</span>
+                  <span>{t('labelsSectionTitle')}</span>
                 </div>
                 <Button
                   type="button"
@@ -1788,7 +1855,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                   onClick={() => setShowLabelPicker((v) => !v)}
                   className="h-auto min-h-0 min-w-0 rounded px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground hover:bg-muted"
                 >
-                  {showLabelPicker ? '닫기' : '+ 추가'}
+                  {showLabelPicker ? tc('close') : t('addGeneric')}
                 </Button>
               </div>
 
@@ -1805,8 +1872,11 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                             type="button"
                             variant="ghost"
                             onClick={() => void handleDetachLabel(label.itemLabelId)}
-                            className="h-3.5 min-h-0 w-3.5 min-w-0 absolute -right-1 -top-1 hidden items-center justify-center rounded-full bg-muted-foreground/20 p-0 text-foreground hover:bg-destructive/80 hover:text-destructive-foreground group-hover:flex"
-                            aria-label={`Remove ${label.name}`}
+                            // story 3466 후속(무효 유틸 4곳) — text-destructive-foreground는
+                            // 이 테마에 매핑이 없는 no-op. trust-seal.tsx 선례로 hover 상태도
+                            // 테마별 반전(dark:hover:).
+                            className="h-3.5 min-h-0 w-3.5 min-w-0 absolute -right-1 -top-1 hidden items-center justify-center rounded-full bg-muted-foreground/20 p-0 text-foreground hover:bg-destructive/80 hover:text-white dark:hover:text-proof-bg group-hover:flex"
+                            aria-label={t('removeItemAction', { item: label.name })}
                           >
                             <X className="size-2" />
                           </Button>
@@ -1814,7 +1884,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                       ))}
                     </div>
                   ) : (
-                    <p className="mb-2 text-xs text-muted-foreground">라벨 없음</p>
+                    <p className="mb-2 text-xs text-muted-foreground">{t('noLabel')}</p>
                   )}
 
                   {showLabelPicker && (
@@ -1858,7 +1928,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                           value={newLabelName}
                           onChange={(e) => setNewLabelName(e.target.value)}
                           onKeyDown={(e) => { if (e.key === 'Enter') void handleCreateLabel(); }}
-                          placeholder="새 라벨 이름"
+                          placeholder={t('newLabelNamePlaceholder')}
                           className="min-w-0 flex-1 rounded border border-border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
                         />
                         <Button
@@ -1868,7 +1938,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                           disabled={!newLabelName.trim() || creatingLabel}
                           className="h-auto min-h-0 min-w-0 rounded bg-primary px-2 py-1 text-xs font-normal text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
                         >
-                          {creatingLabel ? '...' : '생성'}
+                          {creatingLabel ? '...' : t('createLabel')}
                         </Button>
                       </div>
                     </div>
@@ -1882,7 +1952,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
               <div className="mb-2 flex items-center justify-between">
                 <div className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
                   <GitFork className="size-3" />
-                  <span>Dependencies</span>
+                  <span>{t('dependenciesSectionTitle')}</span>
                 </div>
                 <Button
                   type="button"
@@ -1935,14 +2005,14 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                       <div key={d.id} className="group flex w-full items-center gap-2 rounded-md border border-warning-border bg-warning-tint px-2.5 py-1.5 text-xs text-foreground">
                         <Button type="button" variant="ghost" onClick={() => onNavigate?.(d.from_id)} className="h-auto min-h-0 min-w-0 flex flex-1 items-center justify-start gap-2 p-0 text-left font-normal" disabled={!onNavigate}>
                           <AlertTriangle className="size-3 shrink-0" />
-                          <span className="font-medium shrink-0">Blocked by</span>
+                          <span className="font-medium shrink-0">{t('dep.blockedByLabel')}</span>
                           <span className="min-w-0 truncate">{blocker?.title ?? `#${d.from_id.slice(0, 6)}`}</span>
-                          {blocker?.status ? <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">{blocker.status}</span> : null}
+                          {blocker?.status ? <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">{resolveStatusLabel(blocker.status)}</span> : null}
                         </Button>
                         <Button type="button" variant="ghost" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className="h-auto min-h-0 min-w-0 hidden shrink-0 rounded p-0.5 hover:bg-warning/20 group-hover:block" aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
                           <ArrowLeftRight className="size-3" />
                         </Button>
-                        <Button type="button" variant="ghost" onClick={() => void handleRemoveDep(d.id)} className="h-auto min-h-0 min-w-0 hidden shrink-0 rounded p-0.5 hover:bg-warning/20 group-hover:block" aria-label="Remove">
+                        <Button type="button" variant="ghost" onClick={() => void handleRemoveDep(d.id)} className="h-auto min-h-0 min-w-0 hidden shrink-0 rounded p-0.5 hover:bg-warning/20 group-hover:block" aria-label={t('dep.remove')}>
                           <X className="size-3" />
                         </Button>
                       </div>
@@ -1956,14 +2026,14 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                       <div key={d.id} className="group flex w-full items-center gap-2 rounded-md border border-border bg-muted/40 px-2.5 py-1.5 text-xs text-muted-foreground">
                         <Button type="button" variant="ghost" onClick={() => onNavigate?.(d.to_id)} className="h-auto min-h-0 min-w-0 flex flex-1 items-center justify-start gap-2 p-0 text-left font-normal" disabled={!onNavigate}>
                           <GitFork className="size-3 shrink-0" />
-                          <span className="font-medium shrink-0">Blocking</span>
+                          <span className="font-medium shrink-0">{t('dep.blockingLabel')}</span>
                           <span className="min-w-0 truncate">{blocked?.title ?? `#${d.to_id.slice(0, 6)}`}</span>
-                          {blocked?.status ? <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">{blocked.status}</span> : null}
+                          {blocked?.status ? <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">{resolveStatusLabel(blocked.status)}</span> : null}
                         </Button>
                         <Button type="button" variant="ghost" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className="h-auto min-h-0 min-w-0 hidden shrink-0 rounded p-0.5 hover:bg-muted group-hover:block" aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
                           <ArrowLeftRight className="size-3" />
                         </Button>
-                        <Button type="button" variant="ghost" onClick={() => void handleRemoveDep(d.id)} className="h-auto min-h-0 min-w-0 hidden shrink-0 rounded p-0.5 hover:bg-muted group-hover:block" aria-label="Remove">
+                        <Button type="button" variant="ghost" onClick={() => void handleRemoveDep(d.id)} className="h-auto min-h-0 min-w-0 hidden shrink-0 rounded p-0.5 hover:bg-muted group-hover:block" aria-label={t('dep.remove')}>
                           <X className="size-3" />
                         </Button>
                       </div>
@@ -1977,14 +2047,14 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                       <div key={d.id} className="group flex w-full items-center gap-2 rounded-md border border-border bg-muted/20 px-2.5 py-1.5 text-xs text-muted-foreground">
                         <Button type="button" variant="ghost" onClick={() => onNavigate?.(d.to_id)} className="h-auto min-h-0 min-w-0 flex flex-1 items-center justify-start gap-2 p-0 text-left font-normal" disabled={!onNavigate}>
                           <GitFork className="size-3 shrink-0 rotate-90" />
-                          <span className="font-medium shrink-0">Depends on</span>
+                          <span className="font-medium shrink-0">{t('dep.dependsOnLabel')}</span>
                           <span className="min-w-0 truncate">{target?.title ?? `#${d.to_id.slice(0, 6)}`}</span>
-                          {target?.status ? <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">{target.status}</span> : null}
+                          {target?.status ? <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">{resolveStatusLabel(target.status)}</span> : null}
                         </Button>
                         <Button type="button" variant="ghost" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className="h-auto min-h-0 min-w-0 hidden shrink-0 rounded p-0.5 hover:bg-muted group-hover:block" aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
                           <ArrowLeftRight className="size-3" />
                         </Button>
-                        <Button type="button" variant="ghost" onClick={() => void handleRemoveDep(d.id)} className="h-auto min-h-0 min-w-0 hidden shrink-0 rounded p-0.5 hover:bg-muted group-hover:block" aria-label="Remove">
+                        <Button type="button" variant="ghost" onClick={() => void handleRemoveDep(d.id)} className="h-auto min-h-0 min-w-0 hidden shrink-0 rounded p-0.5 hover:bg-muted group-hover:block" aria-label={t('dep.remove')}>
                           <X className="size-3" />
                         </Button>
                       </div>
@@ -1998,14 +2068,14 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                       <div key={d.id} className="group flex w-full items-center gap-2 rounded-md border border-border bg-muted/20 px-2.5 py-1.5 text-xs text-muted-foreground">
                         <Button type="button" variant="ghost" onClick={() => onNavigate?.(d.from_id)} className="h-auto min-h-0 min-w-0 flex flex-1 items-center justify-start gap-2 p-0 text-left font-normal" disabled={!onNavigate}>
                           <GitFork className="size-3 shrink-0 -rotate-90" />
-                          <span className="font-medium shrink-0">Depended by</span>
+                          <span className="font-medium shrink-0">{t('dep.dependedByLabel')}</span>
                           <span className="min-w-0 truncate">{source?.title ?? `#${d.from_id.slice(0, 6)}`}</span>
-                          {source?.status ? <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">{source.status}</span> : null}
+                          {source?.status ? <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">{resolveStatusLabel(source.status)}</span> : null}
                         </Button>
                         <Button type="button" variant="ghost" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className="h-auto min-h-0 min-w-0 hidden shrink-0 rounded p-0.5 hover:bg-muted group-hover:block" aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
                           <ArrowLeftRight className="size-3" />
                         </Button>
-                        <Button type="button" variant="ghost" onClick={() => void handleRemoveDep(d.id)} className="h-auto min-h-0 min-w-0 hidden shrink-0 rounded p-0.5 hover:bg-muted group-hover:block" aria-label="Remove">
+                        <Button type="button" variant="ghost" onClick={() => void handleRemoveDep(d.id)} className="h-auto min-h-0 min-w-0 hidden shrink-0 rounded p-0.5 hover:bg-muted group-hover:block" aria-label={t('dep.remove')}>
                           <X className="size-3" />
                         </Button>
                       </div>
@@ -2106,29 +2176,66 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
               <StoryMergeGate storyId={story.id} />
               {/* E-CANVAS AC2 attachment point — BE(C1-S3) 미착지 동안 404→무표시(mock 0). */}
               <ArtifactSection storyId={story.id} memberMap={memberMap} />
+              {/* story #3697(Phase2·FE) — 이 story의 blog↔social 성과 대조(#4047 work_item_id
+                  필터, 배포 55). rows 0건이면 섹션 자체 무표시(ArtifactSection과 동형 관례). */}
+              <StoryInsightsCompareSection storyId={story.id} />
             </div>
 
             {/* Tabs for Tasks, Comments, Activity */}
             <Tabs defaultValue="tasks" className="w-full">
               <TabsList className="w-full">
-                <TabsTrigger value="tasks" className="flex-1">Tasks ({tasks.length})</TabsTrigger>
-                <TabsTrigger value="comments" className="flex-1">Comments ({comments.length})</TabsTrigger>
-                <TabsTrigger value="activity" className="flex-1">Activity</TabsTrigger>
+                {/* story #3709 후속(페드루 PO 지적, 유나 PASS 뒤 한 줄 더) — 조회 中엔
+                    개수를 아예 말하지 않는다. tasksLoading인데도 「Tasks (0)」을 그리면
+                    40px 아래 본문의 「불러오는 중...」과 같은 화면 두 세계가 재발한다
+                    (탭 라벨=아는 척·본문=정직, 서로 다른 사실을 동시에 말하는 꼴). */}
+                <TabsTrigger value="tasks" className="flex-1">{tasksLoading ? t('tasks') : t('tasksCountLabel', { count: tasksTotalCount ?? tasks.length })}</TabsTrigger>
+                {/* story #3712(FE 완전성-정직, #4060/#3709 Tasks 탭과 같은 얼굴) — 조회
+                    中엔 개수를 아예 말하지 않는다. loadingComments인데도 「Comments (0)」을
+                    그리면 40px 아래 본문의 「불러오는 중...」과 같은 화면 두 세계가 된다
+                    (본문은 이미 loadingComments를 먼저 검사한다 — 라벨만 빠져 있었다). */}
+                <TabsTrigger value="comments" className="flex-1">{loadingComments ? t('comments') : t('commentsCountLabel', { count: comments.length })}</TabsTrigger>
+                <TabsTrigger value="activity" className="flex-1">{t('activityTab')}</TabsTrigger>
               </TabsList>
 
               <TabsContent value="tasks" className="mt-4 space-y-2">
-                {tasks.length === 0 ? (
+                {/* story #3703 CHANGES(카디르 QA blocker①, 2026-09-08) — 예전엔
+                    tasks.length===0을 무조건 「태스크가 없습니다」로 단정해, 로드된 첫
+                    페이지가 마침 빈 배열인데 총계(tasksTotalCount)는 0이 아닌 대표
+                    시나리오(#4049/#4052 클래스)에서 이 PR이 막으려던 바로 그 오단정이
+                    재발했다 — «정말 0개»와 «로드분만 0이고 더 있음»을 tasksTotalCount로
+                    가른다. */}
+                {tasksLoading ? (
+                  // story #3709(FE 완전성-정직) — 조회 중엔 flow-node-story-panel.tsx와 같은
+                  // 계열(둘 다 t('loading')="불러오는 중..." 사용 — 실제 문자열 키는
+                  // flow-node의 flow.nodesLoading과 다르지만 같은 뜻을 같은 낱말로 말한다)로
+                  // «아직 모름»을 그대로 드러낸다 — 이 분기가 없으면 아래 tasks.length===0
+                  // 분기가 «없음»으로 오단정한다.
+                  <p className="text-sm text-muted-foreground">{t('loading')}</p>
+                ) : tasks.length === 0 && (tasksTotalCount == null || tasksTotalCount === 0) ? (
                   <p className="text-sm text-muted-foreground">{t('noTasks')}</p>
                 ) : (
                   <>
-                    <ul className="space-y-2">
-                      {tasks.map((task) => (
-                        <li key={task.id} className="flex items-center gap-3 rounded-md border border-border bg-muted/30 px-3 py-2 text-sm">
-                          <span className={`h-2.5 w-2.5 rounded-full ${taskTone(task.status)}`} />
-                          <span className={task.status === 'done' ? 'text-muted-foreground line-through' : 'text-foreground'}>{task.title}</span>
-                        </li>
-                      ))}
-                    </ul>
+                    {tasks.length > 0 ? (
+                      <ul className="space-y-2">
+                        {tasks.map((task) => (
+                          <li key={task.id} className="flex items-center gap-3 rounded-md border border-border bg-muted/30 px-3 py-2 text-sm">
+                            <span className={`h-2.5 w-2.5 rounded-full ${taskTone(task.status)}`} />
+                            <span className={task.status === 'done' ? 'text-muted-foreground line-through' : 'text-foreground'}>{task.title}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                    {/* story #3703(FE 완전성-정직) — 「더 보기」 버튼(nextTasksCursor)과
+                        별개로, 로드분(tasks.length)이 진짜 총계(tasksTotalCount)보다 적으면
+                        그 사실 자체를 한 줄로 말한다(로드분 0건 포함 — 위 분기 재구성).
+                        onLoadMoreTasks가 없는 호출부(flow-node-story-panel.tsx — 더 보기
+                        자체가 없음)에서도 「일부만 보인다」는 정직하게 드러나야 한다(버튼
+                        유무와 무관한 축). */}
+                    {tasksTotalCount != null && tasksTotalCount > tasks.length ? (
+                      <p className="mt-2 text-center text-xs text-muted-foreground">
+                        {t('tasksPartialCount', { loaded: tasks.length, total: tasksTotalCount })}
+                      </p>
+                    ) : null}
                     {nextTasksCursor ? (
                       <div className="mt-3 text-center">
                         <Button variant="outline" size="sm" onClick={onLoadMoreTasks} disabled={loadingMoreTasks || !onLoadMoreTasks}>
@@ -2144,7 +2251,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                 {/* Comment input */}
                 <div className="space-y-2">
                   <textarea
-                    placeholder="Add a comment..."
+                    placeholder={t('commentInputPlaceholder')}
                     value={commentInput}
                     onChange={(e) => setCommentInput(e.target.value)}
                     className="flex field-sizing-content min-h-[80px] w-full resize-none rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
@@ -2160,7 +2267,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                       onClick={handleSubmitComment}
                       disabled={!commentInput.trim() || submittingComment}
                     >
-                      {submittingComment ? t('loading') : 'Comment'}
+                      {submittingComment ? t('loading') : t('commentSubmit')}
                     </Button>
                   </div>
                 </div>
@@ -2169,7 +2276,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                 {loadingComments ? (
                   <p className="text-sm text-muted-foreground">{t('loading')}</p>
                 ) : comments.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No comments yet</p>
+                  <p className="text-sm text-muted-foreground">{t('noComments')}</p>
                 ) : (
                   <>
                     <ul className="space-y-3">
@@ -2179,7 +2286,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                           <div className="mt-2 flex items-center gap-2 text-[10px] font-mono text-muted-foreground">
                             <span>{memberMap[comment.created_by]?.name ?? '—'}</span>
                             <span>·</span>
-                            <span>{new Date(comment.created_at).toLocaleString()}</span>
+                            <span>{formatRelativeTime(comment.created_at, locale, displayTimezone)}</span>
                           </div>
                         </li>
                       ))}
@@ -2199,7 +2306,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                 {loadingActivities ? (
                   <p className="text-sm text-muted-foreground">{t('loading')}</p>
                 ) : activities.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No activity yet</p>
+                  <p className="text-sm text-muted-foreground">{t('noActivity')}</p>
                 ) : (
                   <>
                     <ul className="space-y-2">
@@ -2213,7 +2320,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                             <div className="mt-1 flex items-center gap-2 text-[10px] font-mono text-muted-foreground">
                               <span>{actorName}</span>
                               <span>·</span>
-                              <span>{new Date(activity.created_at).toLocaleString()}</span>
+                              <span>{formatRelativeTime(activity.created_at, locale, displayTimezone)}</span>
                               {isLong ? (
                                 <Button
                                   type="button"
@@ -2221,7 +2328,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                                   onClick={() => setExpandedActivityId(expanded ? null : activity.id)}
                                   className="h-auto min-h-0 min-w-0 ml-auto rounded px-1.5 py-0.5 font-normal text-muted-foreground hover:bg-muted hover:text-foreground"
                                 >
-                                  {expanded ? '접기' : '펼치기'}
+                                  {expanded ? t('collapseSection') : t('expandSection')}
                                 </Button>
                               ) : null}
                             </div>
@@ -2249,14 +2356,14 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
       <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>스토리를 삭제하시겠습니까?</DialogTitle>
+            <DialogTitle>{t('deleteStoryDialogTitle')}</DialogTitle>
             <DialogDescription>
-              이 작업은 되돌릴 수 없습니다. 스토리에 연결된 태스크도 함께 삭제됩니다.
+              {t('storyDeleteIrreversible')}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="ghost" size="sm" onClick={() => setShowDeleteConfirm(false)} disabled={deleting}>
-              취소
+              {tc('cancel')}
             </Button>
             <Button
               variant="destructive"
@@ -2264,13 +2371,12 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
               onClick={() => void handleDelete()}
               disabled={deleting}
             >
-              {deleting ? '삭제 중…' : '영구 삭제'}
+              {deleting ? tc('deleting') : t('permanentDelete')}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </>
   );
 }

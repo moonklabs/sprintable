@@ -14,6 +14,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { fetchWithAuth } from '@/lib/db/client';
+import { stageRoleLabel } from '@/lib/stage-role';
 
 /** BE _GA4_SUPPORTED_METRICS(backend/app/schemas/story.py)와 동기 — 모르는 지표는 BE가 422. */
 const GA4_METRICS = ['activeUsers', 'newUsers', 'sessions', 'conversions', 'eventCount', 'screenPageViews'] as const;
@@ -42,7 +43,16 @@ export interface EventDefinitionResponse {
   name: string;
   description: string | null;
   payload_schema: { properties?: { stage?: { enum?: string[] } } };
-  stage_metadata: Record<string, { role?: string; action?: string }>;
+  // story #3316 — gate/capability는 BE validate_stage_metadata(event_definition_registry.py)
+  // 가 선택 필드로 허용하는 shape 그대로(둘 다 optional) — 카탈로그 상세 뷰가 role/action 외에
+  // 이 두 필드도 사람이 읽을 수 있게 보여줘야 해서 여기(SSOT)에 얹는다. 기존 소비처(loop-create
+  // 미리보기·gallery)는 두 필드를 안 쓰므로 하위호환(추가만, 파괴적 변경 없음).
+  stage_metadata: Record<string, {
+    role?: string;
+    action?: string;
+    gate?: { type?: string; approver?: string };
+    capability?: { kind?: string; connector_key?: string };
+  }>;
   enabled: boolean;
 }
 
@@ -78,7 +88,20 @@ export function LoopCreateDialog({
   onCreated: (loop: { id: string }) => void;
 }) {
   const t = useTranslations('loops');
+  const tc = useTranslations('common');
   const th = useTranslations('hypotheses');
+  const tf = useTranslations('flow');
+  // story #3773 — stageRoleLabel 정본 키가 organization ns에 있다(trustRoleLabel*와 같은
+  // 집, 유나 定 — 워크플로 단계 role 어휘를 org/trust 역할 어휘 옆에 둔다).
+  const to = useTranslations('organization');
+
+  // story #3878(§⑤ 낱말 드리프트) — linkedHypothesis.status(HypothesisStatus canonical
+  // slug)를 t() 없이 그대로 그리던 자리 정본화. hypothesis-status-badge.tsx의 키 조립
+  // 관례 그대로 재사용(§②-1 기존 hypotheses.status* 낱말, 새 키 0).
+  const hypothesisStatusLabel = (slug: string): string => {
+    const labelKey = `status${slug.charAt(0).toUpperCase()}${slug.slice(1)}` as 'statusProposed';
+    return th(labelKey);
+  };
 
   const [title, setTitle] = useState('');
   const [mode, setMode] = useState<Mode>('new');
@@ -88,6 +111,11 @@ export function LoopCreateDialog({
   const [tags, setTags] = useState('');
 
   const [hypotheses, setHypotheses] = useState<Hypothesis[] | null>(null);
+  // story #3637(유나 silent-failure-sweep-3632) — 조회 실패를 setHypotheses([])로
+  // 그리면 "연결 가능한 가설이 없습니다"가 실제로 뜬다(모름을 없음으로 오독시켜 판단을
+  // 바꾼다). recipesFailed와 동형(실패/빈 목록을 상태에서 가른다) — hypotheses는 null
+  // (모름) 유지, 실패는 이 플래그로만.
+  const [hypothesesFailed, setHypothesesFailed] = useState(false);
   const [hypothesisSearch, setHypothesisSearch] = useState('');
   const [linkedId, setLinkedId] = useState<string | null>(null);
 
@@ -114,6 +142,7 @@ export function LoopCreateDialog({
     setDrafted(false);
     setRecipeSlug('');
     setRecipesFailed(false);
+    setHypothesesFailed(false);
   }, []);
 
   const handleDraft = useCallback(async () => {
@@ -145,18 +174,18 @@ export function LoopCreateDialog({
 
   useEffect(() => {
     if (!open) return;
-    if (mode !== 'link' || hypotheses !== null) return;
+    if (mode !== 'link' || hypotheses !== null || hypothesesFailed) return;
     void (async () => {
       try {
         const res = await fetchWithAuth(`/api/hypotheses?project_id=${projectId}`);
-        if (!res.ok) { setHypotheses([]); return; }
+        if (!res.ok) { setHypothesesFailed(true); return; }
         const json = (await res.json()) as { data?: Hypothesis[] };
         setHypotheses((json.data ?? []).filter((h) => LINKABLE_STATUSES.has(h.status)));
       } catch {
-        setHypotheses([]);
+        setHypothesesFailed(true);
       }
     })();
-  }, [open, mode, hypotheses, projectId]);
+  }, [open, mode, hypotheses, hypothesesFailed, projectId]);
 
   // story #2792 — recipe 목록은 선택 기능이라 fetch 실패해도 select 옵션만 없어질 뿐
   // (null-safe, "직접 진행" 기본값으로 폼은 정상 동작). 실패는 recipesFailed로만 표시하고
@@ -301,7 +330,7 @@ export function LoopCreateDialog({
                       return (
                         <li key={stage} className="break-words">
                           <span className="font-medium text-foreground">{meta?.action ?? stage}</span>
-                          {meta?.role ? <> ({meta.role})</> : null}
+                          {meta?.role ? <> ({stageRoleLabel(meta.role, to)})</> : null}
                         </li>
                       );
                     })}
@@ -473,7 +502,9 @@ export function LoopCreateDialog({
                   placeholder={t('createLoopLinkSearchPlaceholder')}
                   className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                 />
-                {hypotheses === null ? (
+                {hypothesesFailed ? (
+                  <p className="py-2 text-center text-xs text-muted-foreground">{tf('earthLoadError')}</p>
+                ) : hypotheses === null ? (
                   <p className="py-2 text-center text-xs text-muted-foreground">{t('loading')}</p>
                 ) : filteredHypotheses.length === 0 ? (
                   <p className="py-2 text-center text-xs text-muted-foreground">{t('createLoopLinkEmpty')}</p>
@@ -498,7 +529,7 @@ export function LoopCreateDialog({
                   <div className="rounded-lg border border-primary/30 bg-primary/5 p-2 text-[11px] text-foreground">
                     <p className="font-medium">{linkedHypothesis.statement}</p>
                     <p className="mt-0.5 text-muted-foreground">
-                      {linkedHypothesis.metric_definition.metric} · {linkedHypothesis.status}
+                      {linkedHypothesis.metric_definition.metric} · {hypothesisStatusLabel(linkedHypothesis.status)}
                     </p>
                   </div>
                 ) : null}
@@ -524,7 +555,7 @@ export function LoopCreateDialog({
             {goalComplete ? t('createLoopGoalComplete') : t('createLoopValidationHint')}
           </span>
           <Button onClick={() => void handleSubmit()} disabled={!canSubmit}>
-            {submitting ? t('createLoopSubmitting') : t('createLoopSubmit')}
+            {submitting ? tc('creating') : t('createLoopSubmit')}
           </Button>
         </DialogFooter>
       </DialogContent>

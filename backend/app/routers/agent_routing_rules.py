@@ -9,6 +9,7 @@ from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
 from app.dependencies.project_scope import enforce_write_scope, resolve_required_project_id
 from app.repositories.agent_routing_rule import AgentRoutingRuleRepository
+from app.services.member_resolver import resolve_member_db_verified
 from app.schemas.agent_routing_rule import (
     CreateRoutingRuleRequest,
     DisableAllRequest,
@@ -74,10 +75,14 @@ async def create_rule(
     if not org_id:
         return _err("FORBIDDEN", "org_id required", 403)
     try:
+        # story #3370 회귀 클래스(페드루 PO 지시 2026-09-11) — actor_id는
+        # AgentRoutingRule.created_by로 영속된다. resolve_member_db_verified()의
+        # 영속 멤버 id로 정정(휴먼 JWT의 auth.user_id는 users.id, org 멤버 id가 아니다).
+        resolved = await resolve_member_db_verified(auth, org_id, repo.session)
         rule = await repo.create(
             org_id=org_id,
             project_id=project_id,
-            actor_id=uuid.UUID(auth.user_id),
+            actor_id=resolved.id,
             agent_id=body.agent_id,
             name=body.name,
             priority=body.priority or 100,

@@ -1,12 +1,16 @@
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   countDynamicKeyCalls,
   EXEMPT_PAIRS,
+  findMemberSynonymCollisions,
   findSubstringCollisions,
   flattenMessages,
   GRANDFATHER_BASELINE,
+  hasLetterOrNumber,
+  isKeyStemExtension,
   isNumberAdjacent,
   pairKey,
   parseKeyUsages,
@@ -218,6 +222,22 @@ describe('story #2410 — isNumberAdjacent: 이름 보간은 numberAdjacent가 �
     expect(isNumberAdjacent('{count}개 문서 일치')).toBe(true);
   });
 
+  // story #3583(2026-09-06) — {channel}=채널 표시 이름(Threads/GA4 등, ko.json 9곳
+  // 실측 전부 확認) — role·project·slug·tier와 같은 축. channelConnectAction<->
+  // channelConnectOwnerOnlyReason이 channels/page.tsx에서 처음 같은 파일에 동시
+  // 노출돼 걸렸던 신규 충돌을 이 축 등재로 닫는다(개별 EXEMPT_PAIRS 등재 대신).
+  it('{channel}(채널 표시 이름)은 false — channelConnectAction<->OwnerOnlyReason이 새 충돌로 안 걸린다', () => {
+    expect(isNumberAdjacent('{channel} 계정 연결')).toBe(false);
+    expect(isNumberAdjacent('{channel} 계정 연결은 owner만 할 수 있습니다.')).toBe(false);
+    const messagesPath = path.resolve(__dirname, '../messages/ko.json');
+    const messages = flattenMessages(JSON.parse(readFileSync(messagesPath, 'utf8')));
+    const phrases = new Map([
+      ['channelConnect.channelConnectAction', { value: messages.get('channelConnect.channelConnectAction')!, numberAdjacent: isNumberAdjacent(messages.get('channelConnect.channelConnectAction')!) }],
+      ['channelConnect.channelConnectOwnerOnlyReason', { value: messages.get('channelConnect.channelConnectOwnerOnlyReason')!, numberAdjacent: isNumberAdjacent(messages.get('channelConnect.channelConnectOwnerOnlyReason')!) }],
+    ] as const);
+    expect(findSubstringCollisions(phrases)).toHaveLength(0);
+  });
+
   it('알 수 없는 보간 이름은 «안전한 쪽»(true)으로 남는다 — 모르면 놓치지 않는다', () => {
     expect(isNumberAdjacent('{somethingBrandNew} 상태')).toBe(true);
   });
@@ -274,9 +294,13 @@ describe('GRANDFATHER_BASELINE — 기존 채무는 통과, 새 충돌만 막는
   });
 
   it('baseline에 없는 새 쌍은 여전히 진짜 충돌로 판정된다(신규 회귀는 여전히 잡힌다)', () => {
+    // story #3808(isKeyStemExtension 도입) — 키 이름을 brandNew.blocked/blockedCount에서
+    // 바꿨다: "blocked"가 "blockedCount"의 접두사라 새 규칙이 확장형으로 분류해 이 픽스처가
+    // «신규 충돌도 여전히 잡힌다»는 원래 취지를 시험 못 하게 됐다(값 축은 무변 — #2352
+    // 모양 자체는 그대로, 키 이름만 접두 관계가 아니게 갈랐다).
     const phrases = new Map([
-      ['brandNew.blocked', { value: '막힘', numberAdjacent: false }],
-      ['brandNew.blockedCount', { value: '막힘 신호 · {n}', numberAdjacent: true }],
+      ['brandNew.gateBlockedLabel', { value: '막힘', numberAdjacent: false }],
+      ['brandNew.queueBlockedSignalCount', { value: '막힘 신호 · {n}', numberAdjacent: true }],
     ]);
     const collisions = findSubstringCollisions(phrases);
     expect(collisions).toHaveLength(1);
@@ -294,9 +318,14 @@ describe('GRANDFATHER_BASELINE — 기존 채무는 통과, 새 충돌만 막는
 // 걸리던 18건(판단 유보 상태였던 것)을 이번에 GRANDFATHER_BASELINE에서 걷어냈다 — 유령
 // 채무를 "아직 판단 안 됨"으로 남겨 두는 것보다, 이미 내려진 결론(numberAdjacent 아님)을
 // Set에도 반영하는 쪽이 다음 사람에게 정확하다.
+// story #3808(isKeyStemExtension 도입, 2026-09-12) — 20→17. 같은 네임스페이스+접두
+// 확장형 3건(chats.agent<->agentCount·goals.spExceeded<->spExceededDetail·
+// storage.delete<->deleteImpact)이 이제 이 스캔 자체에 안 걸린다.
+// story #3918(ActionZone 은퇴 코드 정리, 2026-09-15) — 17→16.
+// dashboard.ccQueueTruncated/dashboard.ccWaitingTitle 둘 다 삭제돼 그 쌍 자체가 없어졌다.
 describe('GRANDFATHER_BASELINE_COUNT_TEST — 41번째부터는 PO 승인, 조용한 증감을 막는다', () => {
-  it('정리 후(#2410 후속) 크기는 정확히 20건이다', () => {
-    expect(GRANDFATHER_BASELINE.size).toBe(20);
+  it('정리 후(#3918 후속) 크기는 정확히 16건이다', () => {
+    expect(GRANDFATHER_BASELINE.size).toBe(16);
   });
 });
 
@@ -306,24 +335,274 @@ describe('GRANDFATHER_BASELINE_COUNT_TEST — 41번째부터는 PO 승인, 조�
 // 걸림 20)가 같아졌다 — 그렇다고 이 테스트가 불필요해지는 건 아니다: GRANDFATHER_BASELINE_
 // COUNT_TEST(선언 수, 조용한 항목 증감 방지)와 이 테스트(실 저장소 스캔 결과, 선언과 실제가
 // 다시 벌어지면 그 자체가 신호)는 서로 다른 것을 지키는 별개의 안전장치라 계속 둔다.
+// story #3808(isKeyStemExtension 도입, 2026-09-12) — 20→17(위 GRANDFATHER_BASELINE_
+// COUNT_TEST와 동형 갱신, 선언=실걸림 계속 일치).
+// story #3918(ActionZone 은퇴 코드 정리, 2026-09-15) — 17→16(위와 동형 갱신).
 describe('GRANDFATHER_LIVE_COUNT_TEST — 「선언된 수」와 「지금 실제로 걸리는 수」는 다른 축이다', () => {
-  it('실제 저장소 스캔에서 지금 걸리는 grandfather는 20건이다(정리 후 선언 수와 일치)', () => {
+  // story #3902 — 이 파일은 scanRepository()(실 apps/web/src 전수 스캔, 메모이즈 없음)를
+  // 여러 it()이 독립적으로 다시 호출한다 — 부하 시 vitest 기본 5000ms를 넘길 수 있어 각
+  // 호출부마다 개별 실측(동시부하 재현 5회)×3을 적용한다. 이 테스트: 89·115·77·146·108ms
+  // 중 최댓값 146ms → ×3 ≈ 438ms → 500ms로 반올림.
+  it('실제 저장소 스캔에서 지금 걸리는 grandfather는 16건이다(정리 후 선언 수와 일치)', () => {
     const { grandfatherHit } = scanRepository();
-    expect(grandfatherHit.size).toBe(20);
-  });
+    expect(grandfatherHit.size).toBe(16);
+  }, 500);
 
+  // story #3902 — 83·101·90·89·98ms 중 최댓값 101ms → ×3 ≈ 303ms → 500ms로 반올림.
   it('새 FAIL은 없다(#2410 자체가 신규 회귀를 안 냈다는 증거)', () => {
     const { newFindings } = scanRepository();
     expect(newFindings.size).toBe(0);
-  });
+  }, 500);
 
   // story #2413(2026-08-02) — #2410 직후엔 EXEMPT_PAIRS가 비어 있었지만 그게 "영구히 비어야
   // 한다"는 규칙은 아니었다(#2410은 오탐 정밀화였지 EXEMPT_PAIRS 금지가 아니다). 이 테스트는
   // "0건"이 아니라 "선언된 예외가 전부 실제로 쓰이고 있는가"(죽은 예외 없음)를 잰다 — sprints.days
   // <-> sprints.overdueBadge(#2413, PO 승인)가 첫 실사용 사례다.
+  // story #3902 — 83·163·86·151·93ms 중 최댓값 163ms → ×3 ≈ 489ms → 500ms로 반올림.
   it('EXEMPT_PAIRS에 선언된 항목은 전부 실제로 걸린다(죽은 예외가 없다)', () => {
     expect(GRANDFATHER_BASELINE.size).toBeGreaterThan(0); // sanity: baseline은 안 비었다
     const { exemptHit } = scanRepository();
     expect(exemptHit.size).toBe(EXEMPT_PAIRS.size);
+  }, 500);
+});
+
+// story #3758(BE·표시명·결함 클래스 별건④, 페드루/유나 2026-09-09 — 「구성원」/「멤버」
+// 동의어 충돌을 인스턴스 손목록이 아니라 자로 닫는다) — baseline 0 pin. 다음 사람이
+// 이 자리(8키 중 하나)를 되돌리면 이 테스트가 즉시 RED가 되어 CI가 말한다(exempt/
+// grandfather 없음 — 이 축은 발견되면 그 자리에서 고치는 게 규칙).
+describe('MEMBER_SYNONYM_BASELINE_TEST — story #3758(「구성원」/「멤버」 동의어 축)', () => {
+  // story #3902 — 87·108·100·110·67ms 중 최댓값 110ms → ×3 ≈ 330ms → 500ms로 반올림.
+  it('실제 저장소 스캔에서 지금 걸리는 동의어 충돌은 0건이다', () => {
+    const { memberSynonymFindings } = scanRepository();
+    expect(memberSynonymFindings.size).toBe(0);
+  }, 500);
+});
+
+// story #3758(카디르 qa:changes 2026-09-09) — findMemberSynonymCollisions 유닛 테스트
+// 38건은 순수 함수만 잰다. `scanRepository()` 내부에서 그 함수를 실제로 호출하는 배선
+// 자체(카디르가 직접 재현: 그 호출부를 주석 처리해도 38건이 그대로 초록이었다)는 아무
+// 테스트도 안 쟀다 — "함수가 있다"와 "파이프라인에 닫혀 있다"는 다른 사실. 임시 픽스처
+// 디렉터리로 `scanRepository()`(CLI main()이 실제로 부르는 그 함수)를 처음부터 끝까지
+// 돌려 결과에 걸리는지 확인한다 — scanRepository() 안의 호출부를 지우면(카디르가 했던
+// 그 뮤테이션) 이 테스트가 곧바로 RED가 된다(직접 확인 — 아래 참고).
+describe('scanRepository — 「구성원」/「멤버」 동의어 축 파이프라인 통합(story #3758, 카디르 qa:changes)', () => {
+  it('⭐임시 픽스처 트리를 scanRepository()로 끝까지 돌리면 동의어 충돌 파일이 실제로 잡힌다', () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'member-synonym-fixture-'));
+    try {
+      const srcDir = path.join(dir, 'src', 'components');
+      mkdirSync(srcDir, { recursive: true });
+      writeFileSync(
+        path.join(srcDir, 'fixture-widget.tsx'),
+        `
+          import { useTranslations } from 'next-intl';
+          export function FixtureWidget() {
+            const t = useTranslations('fixtureNs');
+            return <div>{t('addMember')}{t('emptyState')}</div>;
+          }
+        `,
+      );
+      const messagesPath = path.join(dir, 'ko.json');
+      writeFileSync(
+        messagesPath,
+        JSON.stringify({ fixtureNs: { addMember: '구성원 추가', emptyState: '멤버가 없습니다.' } }),
+      );
+
+      const { memberSynonymFindings } = scanRepository({ srcRoot: path.join(dir, 'src'), messagesPath });
+
+      expect(memberSynonymFindings.size).toBe(1);
+      const [finding] = [...memberSynonymFindings.values()];
+      expect(finding.file).toBe('components/fixture-widget.tsx');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
+});
+
+describe('findMemberSynonymCollisions — story #3758', () => {
+  it('⭐양성대조 — 한 파일에 「구성원」 담은 값과 「멤버」 담은 값이 같이 있으면 잡는다(수 무관)', () => {
+    const phrases = new Map([
+      ['ns.a', { value: '구성원 추가', numberAdjacent: false }],
+      ['ns.b', { value: '멤버가 없습니다.', numberAdjacent: false }],
+    ]);
+    expect(findMemberSynonymCollisions(phrases).length).toBe(1);
+  });
+
+  it('음성대조 — 「멤버」만 쓰는 파일은 짝이 안 생겨 저절로 빠진다(안 갈리면 안 따라온다)', () => {
+    const phrases = new Map([
+      ['ns.a', { value: '멤버 추가', numberAdjacent: false }],
+      ['ns.b', { value: '멤버가 없습니다.', numberAdjacent: false }],
+    ]);
+    expect(findMemberSynonymCollisions(phrases)).toEqual([]);
+  });
+
+  it('음성대조 — 「구성원」만 쓰는 파일도 짝이 안 생긴다', () => {
+    const phrases = new Map([
+      ['ns.a', { value: '구성원 추가', numberAdjacent: false }],
+      ['ns.b', { value: '구성원이 없습니다.', numberAdjacent: false }],
+    ]);
+    expect(findMemberSynonymCollisions(phrases)).toEqual([]);
+  });
+
+  it('음성대조 — 둘 다 없는 무관 값끼리는 당연히 무관', () => {
+    const phrases = new Map([
+      ['ns.a', { value: '프로젝트 추가', numberAdjacent: false }],
+      ['ns.b', { value: '삭제됐습니다.', numberAdjacent: false }],
+    ]);
+    expect(findMemberSynonymCollisions(phrases)).toEqual([]);
+  });
+});
+
+// story #3582(유나 관측 · PO 確定 2026-09-06) — 값에 유니코드 글자(L)·숫자(N)가 0개면
+// «구»(phrase)를 담지 않으므로 이 가드가 잡으려는 병(두 셈이 헷갈림)의 대상이 아니다.
+describe('hasLetterOrNumber — story #3582', () => {
+  it('제외 — 순수 구두점/기호 값(글자·숫자 0개)', () => {
+    expect(hasLetterOrNumber('—')).toBe(false);
+    expect(hasLetterOrNumber('...')).toBe(false);
+    expect(hasLetterOrNumber('↳')).toBe(false);
+    expect(hasLetterOrNumber('≥')).toBe(false);
+    expect(hasLetterOrNumber('≤')).toBe(false);
+  });
+
+  it('비제외 — 글자나 숫자가 하나라도 있으면 그대로 비교 대상(짧은 값도)', () => {
+    expect(hasLetterOrNumber('막힘')).toBe(true);
+    expect(hasLetterOrNumber('나')).toBe(true);
+    expect(hasLetterOrNumber('{n}')).toBe(true); // 보간 자리 자체가 글자를 포함
+    expect(hasLetterOrNumber('1')).toBe(true);
+  });
+});
+
+// story #3582 — 비교 쌍을 만들기 «전»에 제외되므로, 글자·숫자 0개 값과 다른 값의 짝은
+// exempt/grandfather/new 어디로도 안 잡히고(=이미 빠진 것) symbolOnlyExcluded에만 잡힌다.
+describe('scanRepository — 글자·숫자 0개 값 사전 제외(story #3582)', () => {
+  // story #3902 — 112·188·106·193·109ms 중 최댓값 193ms → ×3 ≈ 579ms → 1000ms로 반올림.
+  it('content.originAuthorUnknown("—")이 symbolOnlyExcluded에 잡힌다(인스턴스별 EXEMPT 없이도 비교 자체를 안 한다)', () => {
+    const { symbolOnlyExcluded } = scanRepository();
+    expect(symbolOnlyExcluded.has('content.originAuthorUnknown')).toBe(true);
+  }, 1000);
+
+  // story #3902 — 71·174·76·99·92ms 중 최댓값 174ms → ×3 ≈ 522ms → 1000ms로 반올림.
+  it('원래 EXEMPT였던 세 쌍(3402 2·3575 1)은 이제 EXEMPT_PAIRS 등재 없이도 새 충돌로 안 걸린다(규칙이 대신 안다)', () => {
+    expect(EXEMPT_PAIRS.has('content.channelPostsTextTooLong <-> content.originAuthorUnknown')).toBe(false);
+    expect(EXEMPT_PAIRS.has('content.channelPostsRateLimitedUntil <-> content.originAuthorUnknown')).toBe(false);
+    expect(EXEMPT_PAIRS.has('content.errorChannelVideoUploadFailedWithStatus <-> content.originAuthorUnknown')).toBe(false);
+    const { newFindings } = scanRepository();
+    expect(newFindings.has('content.channelPostsTextTooLong <-> content.originAuthorUnknown')).toBe(false);
+    expect(newFindings.has('content.channelPostsRateLimitedUntil <-> content.originAuthorUnknown')).toBe(false);
+    expect(newFindings.has('content.errorChannelVideoUploadFailedWithStatus <-> content.originAuthorUnknown')).toBe(false);
+  }, 1000);
+
+  // 유나 비차단(2026-09-06, #3931 Design review) — 위 두 테스트는 "제외가 일했다"와
+  // "애초에 그 쌍이 안 겹쳤다"를 못 가른다. 주석의 약속("제외 로직을 끄면 다시 RED")을
+  // 코드로 직접 증명한다 — scanRepository의 사전 제외를 «건너뛰고» findSubstringCollisions에
+  // 실 값 그대로(originAuthorUnknown="—" · channelPostsTextTooLong="{max}자 한도인데
+  // {current}자입니다 — 줄여서 재상신해 주세요.") 넘기면 여전히 겹친다(순수 판정 로직
+  // 자체는 살아있다는 양성대조).
+  it('제외 없이 findSubstringCollisions에 직접 넘기면 여전히 겹친다(제외가 "일한다"는 증명, 애초에 안 겹친 게 아니다)', () => {
+    const phrases = new Map([
+      ['content.originAuthorUnknown', { value: '—', numberAdjacent: false }],
+      [
+        'content.channelPostsTextTooLong',
+        { value: '{max}자 한도인데 {current}자입니다 — 줄여서 재상신해 주세요.', numberAdjacent: true },
+      ],
+    ]);
+    expect(findSubstringCollisions(phrases)).toHaveLength(1);
+  });
+});
+
+// story #3808(페드루 PO 지적, 2026-09-12 18:18Z) — 4233에서 EXEMPT 6건이 한 PR에 쌓인
+// 근본원인 처방: 「다른 사실을 같은 낱말로」(#2352/#2365)와 「같은 키의 확장형」(예:
+// generationBudgetRemainingCompact <-> …CompactOverLimit)을 가른다.
+describe('isKeyStemExtension — story #3808', () => {
+  it('⭐양성 — 같은 네임스페이스 + 한쪽 로컬 이름이 다른 쪽의 접두사면 확장형(true)', () => {
+    expect(
+      isKeyStemExtension(
+        'content.generationBudgetRemainingCompact',
+        'content.generationBudgetRemainingCompactOverLimit',
+      ),
+    ).toBe(true);
+    // 순서 무관.
+    expect(
+      isKeyStemExtension(
+        'content.generationBudgetRemainingCompactOverLimit',
+        'content.generationBudgetRemainingCompact',
+      ),
+    ).toBe(true);
+  });
+
+  it('음성 — 같은 네임스페이스지만 로컬 이름이 접두 관계가 아니면(다른 stem) false', () => {
+    // 4233 EXEMPT 6건 중 (b) 그룹 — "…CompactOverLimit"와 "…Label"은 공통 접두사
+    // "apiUsageBudgetRemaining"만 있을 뿐, 어느 쪽도 다른 쪽을 통째로 접두로 안 갖는다.
+    expect(
+      isKeyStemExtension(
+        'content.apiUsageBudgetRemainingCompactOverLimit',
+        'content.apiUsageBudgetRemainingLabel',
+      ),
+    ).toBe(false);
+  });
+
+  it('음성 — 네임스페이스가 다르면 로컬 이름이 접두 관계여도 false', () => {
+    expect(isKeyStemExtension('boardA.tasks', 'boardB.tasksCountLabel')).toBe(false);
+  });
+
+  it('음성 — 로컬 이름이 완전히 같으면(사실상 같은 키) false', () => {
+    expect(isKeyStemExtension('content.a', 'content.a')).toBe(false);
+  });
+});
+
+describe('findSubstringCollisions — isKeyStemExtension 배선(양성·음성 대조)', () => {
+  it('양성대조 — 확장형 쌍은 numberAdjacent+값 포함이어도 충돌로 안 잡는다', () => {
+    const phrases = new Map([
+      ['content.fooCompact', { value: '남음 {remaining}', numberAdjacent: true }],
+      ['content.fooCompactOverLimit', { value: '남음 {remaining} · 한도 초과 {overage}', numberAdjacent: true }],
+    ]);
+    expect(findSubstringCollisions(phrases)).toHaveLength(0);
+  });
+
+  it('⭐음성대조(진짜 충돌은 여전히 RED) — 확장형이 아닌 서로 다른 키가 같은 축으로 겹치면 여전히 잡는다', () => {
+    // #2352 모양(blockedLabel<->blockedCount, 이미 AC2에서 검증) 자체는 로컬 이름이
+    // 접두 관계가 아니라 이 새 규칙의 영향 밖 — 여기선 다른 stem의 두 키가 값만
+    // 우연히 겹치는 새 합성 표본으로 "이 규칙이 무관한 충돌까지 삼키지 않는다"를 잰다.
+    const phrases = new Map([
+      ['content.brandNewBlocked', { value: '막힘', numberAdjacent: false }],
+      ['content.otherGateSignal', { value: '게이트·막힘 신호 · {n}', numberAdjacent: true }],
+    ]);
+    expect(findSubstringCollisions(phrases)).toHaveLength(1);
+  });
+});
+
+// story #3808 — 4233 EXEMPT 6건 중 (a) 두 건(같은 compact 슬롯 isOverLimit 확장형)이
+// 이 규칙 도입 뒤 죽은 예외가 됐는지 실 저장소로 재확認한다(나머지 4건 (b)는 다른
+// stem이라 그대로 EXEMPT_PAIRS에 남아야 한다).
+describe('scanRepository — 4233 EXEMPT 6건 중 (a) 확장형 2건만 걷힌다(story #3808)', () => {
+  it('(a) 2건은 이제 EXEMPT_PAIRS에 없다(가드가 스스로 안 겹친다는 걸 안다)', () => {
+    expect(
+      EXEMPT_PAIRS.has(
+        pairKey('content.apiUsageBudgetRemainingCompact', 'content.apiUsageBudgetRemainingCompactOverLimit'),
+      ),
+    ).toBe(false);
+    expect(
+      EXEMPT_PAIRS.has(
+        pairKey('content.generationBudgetRemainingCompact', 'content.generationBudgetRemainingCompactOverLimit'),
+      ),
+    ).toBe(false);
+  });
+
+  // story #3902 — 97·96·89·88·84ms 중 최댓값 97ms → ×3 ≈ 291ms → 500ms로 반올림.
+  it('(b) 4건은 여전히 EXEMPT_PAIRS에 있고 실제로 걸린다(죽은 예외 아님)', () => {
+    const bPairs = [
+      pairKey('content.apiUsageBudgetRemainingCompactOverLimit', 'content.apiUsageBudgetRemainingLabel'),
+      pairKey('content.budgetRemainingOverLimit', 'content.generationBudgetRemainingCompactOverLimit'),
+      pairKey('content.generationBudgetLimitLabel', 'content.generationBudgetRemainingCompactOverLimit'),
+      pairKey('content.generationBudgetRemainingCompactOverLimit', 'content.generationBudgetRemainingLabel'),
+    ];
+    for (const pk of bPairs) expect(EXEMPT_PAIRS.has(pk)).toBe(true);
+    const { exemptHit } = scanRepository();
+    for (const pk of bPairs) expect(exemptHit.has(pk)).toBe(true);
+  }, 500);
+
+  // story #3902 — 83·160·119·91·78ms 중 최댓값 160ms → ×3 ≈ 480ms → 500ms로 반올림.
+  it('(a) 2건도 (b) 4건도 새 충돌로 재부상하지 않는다(newFindings 0)', () => {
+    const { newFindings } = scanRepository();
+    expect(newFindings.size).toBe(0);
+  }, 500);
 });

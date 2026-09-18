@@ -4,19 +4,54 @@ import path from 'path';
 
 const withNextIntl = createNextIntlPlugin('./src/i18n/request.ts');
 
+// story #3260 2차(유나 design 라이브 실측 FAIL, 2026-08-31) — 지원 위젯이 Support
+// Gateway를 브라우저에서 직접 호출(BFF 프록시 없음, gateway-client.ts)하는데, CORS(story
+// #3242/#3649·서버측 "누구를 받아줄지" 허용)를 열어도 이 앱 자체의 CSP connect-src("우리
+// 문서가 어디로 나갈 수 있는지" 허용)가 별개 층이라 브라우저가 fetch 자체를 보내기도
+// 전에 차단했다(콘솔 실측: "violates CSP directive: connect-src"). NEXT_PUBLIC_
+// SUPPORT_GATEWAY_URL(cloudbuild.yaml·Dockerfile 배선, story #3260 1차)이 이미 진실원
+// (dev만 실 URL·prod는 빈 문자열)이라 그대로 파생한다 — dev/prod origin을 여기 하드코딩
+// 하지 않는다(그 값 자체가 두 번째 SSOT가 되는 함정 회피).
+const _SUPPORT_GATEWAY_CSP_ORIGIN = (() => {
+  const raw = process.env['NEXT_PUBLIC_SUPPORT_GATEWAY_URL'];
+  if (!raw) return null; // 미설정(prod·위젯 미노출 빌드)이면 CSP도 그대로 안 연다.
+  try {
+    return new URL(raw).origin;
+  } catch {
+    return null; // 정직한 값 부재 취급 — CSP 문법을 깨느니 안 여는 쪽이 안전측.
+  }
+})();
+
 const _CSP = [
   "default-src 'self'",
   // story #2510 — Toss 결제위젯 SDK(js.tosspayments.com)가 script-src에 없으면 카드
   // 인증창 자체가 CSP로 막힌다(라이브 실측 중 실물 확認 — 유닛테스트는 브라우저 CSP를
   // 실행하지 않아 이 클래스를 못 잡는다).
-  "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.tosspayments.com",
+  // story #3918 — Cloudflare Zone이 Web Analytics beacon(static.cloudflareinsights.com)을
+  // 자동 주입하는데 CSP가 막아 콘솔에러가 났다. 판정은 원래 "끄기"(GA4가 정본)였으나
+  // 공유 CF API 토큰이 zone 스코프뿐이라 Web Analytics(계정 스코프 rum API) 자체를
+  // 끌 권한이 없다(PO 실측, Authentication error) — 사용자 영향 0인 콘솔 오류 하나로
+  // 선생님께 계정 권한 상신을 쌓지 않고 허용으로 닫는다(PO 결정).
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.tosspayments.com https://static.cloudflareinsights.com",
   "style-src 'self' 'unsafe-inline'",
-  // GCS 파일, Google/GitHub 아바타 이미지
-  "img-src 'self' data: blob: https://storage.googleapis.com https://*.googleusercontent.com https://avatars.githubusercontent.com",
+  // GCS 파일, Google/GitHub 아바타 이미지 + story #3532(PO 재대조 2026-09-06) —
+  // 브랜드 킷 로고는 고객이 «자기 사이트»에 올린 임의 URL이다(우리 인프라가 아니다)
+  // — exact-origin allowlist로는 애초에 못 맞힌다(GCS/아바타류 known-service와
+  // 다른 클래스). https: 전체 허용 없이는 CSP가 멀쩡한 URL을 조용히 막고, onError가
+  // 그걸 "죽은 링크"로 오판해 화면이 거짓말을 한다(#3532 PO REQUIRED — 페드루
+  // 발견·유나 검토).
+  "img-src 'self' data: blob: https:",
   "font-src 'self' data:",
   // API 호출 (self = Next.js rewrites 경유, googleapis = Cloud KMS/AI, tosspayments = 결제
-  // 위젯 SDK 자체 통신 — story #2510)
-  "connect-src 'self' https://*.googleapis.com https://*.tosspayments.com",
+  // 위젯 SDK 자체 통신 — story #2510). Support Gateway origin은 위 상수 참고 — 브라우저가
+  // 직접 호출하는 유일한 비-self API 오리진(다른 모든 데이터 fetch는 Next.js BFF 프록시
+  // 경유라 'self'로 충분, 위젯만 예외).
+  [
+    // story #3918 — beacon 스크립트 자체(script-src)뿐 아니라 그게 쏘는 리포트 호출도
+    // connect-src가 막는다(같은 콘솔 오류 클래스) — cloudflareinsights.com 추가.
+    "connect-src 'self' https://*.googleapis.com https://*.tosspayments.com https://cloudflareinsights.com",
+    _SUPPORT_GATEWAY_CSP_ORIGIN,
+  ].filter(Boolean).join(' '),
   // story #2083 — 채팅 첨부 영상(GCS 서명 URL)이 <video>로 로드될 때 media-src에
   // storage.googleapis.com이 없어 CSP가 통째로 차단하고 있었다(콘솔 실측). img-src에는
   // 이미 같은 호스트가 허용돼 있다(story #2050, 서명 URL·노출 축 동일) — 새 origin을
@@ -108,6 +143,26 @@ const nextConfig: NextConfig = {
       // Next.js redirects()가 destination에 자동 병합(문서화된 동작, dev 빌드로 curl 실측 확認
       // 완료 — 값으로 닫음).
       { source: '/:ws/:proj/board', destination: '/:ws/:proj/flow?view=list', permanent: false },
+      // story #3915 — 이 세 은퇴 주소는 전에 page.tsx 안에서 next/navigation의 redirect()를
+      // 직접 호출했는데, 셋 다 조상 디렉토리에 loading.tsx(스트리밍 Suspense 경계)가 있어
+      // React 렌더 단계까지 redirect()가 밀려 들어갔다 — 그 경계가 응답 헤더를 200으로
+      // 커밋한 뒤에야 redirect()가 실행되면 Next가 깨끗한 3xx를 못 내고 "server rendering
+      // errored→client 전환" 열화 경로(meta refresh + NEXT_REDIRECT digest)를 타는데, 그
+      // 경로가 Next.js 자체 내부 싱글턴 Router(app-router.js의 mpaNavigation 분기 — 그
+      // 소스 자신의 주석이 "violates the rules of hooks"라고 자인)의 훅 호출 수를 렌더마다
+      // 다르게 만들어 React 오류 코드 310("Rendered more hooks than during the previous
+      // render")을 던졌다(curl 실측: recruiter·hitl·membersAgentsLegacy 셋 다 200+메타
+      // 리프레시, 같은 loading.tsx 경계 밖의 다른 은퇴 주소는 깨끗한 307). 우리 애플리케이션
+      // 코드엔 조건부 훅이 없어 "훅 앞에 무조건 호출" 처방을 적용할 자리가 없다 — 대신
+      // redirect를 이 라우팅 단계로 옮기면 React 렌더/스트리밍 진입 자체가 사라져 그 경합이
+      // 원천적으로 발생할 수 없다(위 board/agents 선례와 동일 메커니즘, 새 패턴 아님).
+      // organization/workforce/loading.tsx 경계: recruiter(구 채용관, story d63d3f73)·
+      // hitl(구 HITL 승인 대기, story #2054 AC4). settings/loading.tsx 경계:
+      // members/agents/[id](구 에이전트 상세, story d63d3f73 — :id 캡처 재사용은 위
+      // /agents/:path* 선례와 동형).
+      { source: '/organization/workforce/recruiter', destination: '/organization/workforce?tab=recruit', permanent: true },
+      { source: '/organization/workforce/hitl', destination: '/inbox', permanent: true },
+      { source: '/settings/members/agents/:id', destination: '/organization/workforce/:id', permanent: true },
     ];
   },
   async rewrites() {

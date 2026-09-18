@@ -185,13 +185,16 @@ export function ArtifactViewer({
                 {isViewingAnchor ? t('editAsNewVersionAction') : t('editAction')}
               </button>
             ) : null}
+            {/* story #3378(결함·customer-zero, 선생님 실사용) — 아이콘 단독이라 못 찾았다는
+             * 지적. title(호버 툴팁)만으론 발견성이 부족해 라벨 텍스트를 상시 노출한다. */}
             <button
               type="button"
               onClick={() => setExportOpen(true)}
               title={t('exportDialogTitle')}
-              className="flex items-center gap-1 text-xs hover:text-foreground"
+              className="flex items-center gap-1 rounded-md border border-border px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
             >
               <Download className="h-3.5 w-3.5" aria-hidden />
+              {t('exportDialogTitle')}
             </button>
             {/* story #2725 — commentsComingSoon 자리표시자 폐기(미착지 트랙이 착지). onCreateThread
              * 없으면(호출부 미배선) 토글 불가한 순수 카운트 표시로 폴백 — onResolveThread/onReplyThread와
@@ -278,6 +281,14 @@ export function ArtifactViewer({
                   }
                 />
               </div>
+            ) : null}
+            {/* story #3377 — 인라인 스테이지는 pan/드래그 설계 보존을 위해 클릭을 안 받는다
+             * (htmlInteractive 기본 false). html_blob이 실제로 상호작용(버튼 클릭 등)을
+             * 요구하는 산출물일 수 있어, 그 경로가 「크게 보기」임을 명시한다. */}
+            {artifact.format === 'html' ? (
+              <p className="mt-1.5 text-[11px] text-muted-foreground">
+                {t('artifactStageInteractiveHint')}
+              </p>
             ) : null}
           </div>
           <ArtifactVersionRail

@@ -1,3 +1,6 @@
+'use client';
+
+import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 
 /**
@@ -6,6 +9,11 @@ import { cn } from '@/lib/utils';
  * 표시하던 ~9곳(아바타 배경 4·Bot 칩 5)을 헤어라인 컨테이너 + proof-blue 신호 dot/마크로
  * 통일한다 — «에이전트» 자체는 여전히 신호라 dot/마크의 색(proof-blue)은 KEEP(제거 아님,
  * §1 판별: 지우면 "에이전트임"이 안 읽히므로 신호).
+ *
+ * story #3888(§⑤·Chat, PO 확定 2026-09-14 18:19Z) — 칩 텍스트가 로케일 무관 리터럴
+ * "Bot"이었다(ko에서도 "Bot"). avatar.tsx의 코너 배지·툴팁이 이미 쓰는 "에이전트"/"Agent"
+ * (`chats.agent`, 기존 키 재사용·신규 0)로 단일화 — 시스템 발신자와 작업 에이전트 구분은
+ * 발신자 이름이 이미 나르므로 배지 낱말은 하나로 충분(PO 판단).
  *
  * 두 형태:
  * - `AgentSignalDot` — dot 자체(story-card.tsx agent dot 등 이미 dot인 자리는 그대로 KEEP,
@@ -27,6 +35,7 @@ export function AgentSignalDot({ className }: { className?: string }) {
 }
 
 export function AgentIdentity({ className }: { className?: string }) {
+  const t = useTranslations('chats');
   return (
     <span
       className={cn(
@@ -35,7 +44,7 @@ export function AgentIdentity({ className }: { className?: string }) {
       )}
     >
       <AgentSignalDot />
-      Bot
+      {t('agent')}
     </span>
   );
 }

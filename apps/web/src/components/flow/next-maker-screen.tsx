@@ -17,12 +17,15 @@ import { OrphanStoriesPanel } from './orphan-stories-panel';
 import { FlowMultiLaneCanvas } from './flow-multi-lane-canvas';
 import { parseCursorMeta } from '@/lib/pagination';
 import { useOrgSyncVersion } from '@/lib/project-context-client';
-import { ToastContainer, useToast } from '@/components/ui/toast';
+import { useToast } from '@/components/ui/toast';
 import { fetchWithAuth } from '@/lib/db/client';
 
 interface NextMakerScreenProps {
   projectId: string;
   memberMap: Record<string, MemberLite>;
+  /** story #3715(2026-09-09) — loadGlanceData `partialErrors.members`를 그대로 통과시켜
+   * NextActionsStrip이 "담당자 없음"과 "이름 못 불러옴"을 가른다. */
+  memberNamesLoadFailed?: boolean;
   onSelectStory: (storyId: string) => void;
   /** story #2354 — 순수 통과 prop(FlowMapCanvas 참고, 노드 선택 고리 강조). */
   selectedNodeId?: string | null;
@@ -135,7 +138,7 @@ type LoadState =
  *
  * ⛔done 스토리는 이 화면에서 fetch하지 않는다(goals.total_stories/done_stories로 충분).
  */
-export function NextMakerScreen({ projectId, memberMap, onSelectStory, selectedNodeId = null, focusGoalId = null, refetchToken = 0 }: NextMakerScreenProps) {
+export function NextMakerScreen({ projectId, memberMap, memberNamesLoadFailed = false, onSelectStory, selectedNodeId = null, focusGoalId = null, refetchToken = 0 }: NextMakerScreenProps) {
   const t = useTranslations('flow');
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
   // story #2545(카디르 라이브 재QA 5단계) — org 불일치 자동교정(switch-org) 성공 直後 이
@@ -146,7 +149,7 @@ export function NextMakerScreen({ projectId, memberMap, onSelectStory, selectedN
   // "실제로 다음이 생겼다"가 눈으로 보인다).
   const [promotedIds, setPromotedIds] = useState<Set<string>>(new Set());
   const [transitionedEpicIds, setTransitionedEpicIds] = useState<Set<string>>(new Set());
-  const { toasts, addToast, dismissToast } = useToast();
+  const { addToast } = useToast();
   // 「목표 정하기」(PO 판정 2026-07-31) — 배정된 스토리는 로컬에서 즉시 그 목표 소속으로
   // 반영한다. 재fetch 없이도 그 목표의 레인이 즉시 그 스토리를 받고 orphan 목록에서 즉시
   // 빠진다 — "안 보이면 잃는다"의 반대(배정하면 즉시 눈에 보이는 것).
@@ -360,6 +363,7 @@ export function NextMakerScreen({ projectId, memberMap, onSelectStory, selectedN
         backlogByEpic={backlogByEpic}
         recentlyClosedTargetIds={state.kind === 'ready' ? state.recentlyClosedTargetIds : new Set()}
         memberMap={memberMap}
+        memberNamesLoadFailed={memberNamesLoadFailed}
         onSelectStory={onSelectStory}
         onStoryPromoted={handleStoryPromoted}
         onPromoteFailed={handlePromoteFailed}
@@ -375,7 +379,6 @@ export function NextMakerScreen({ projectId, memberMap, onSelectStory, selectedN
         onAssigned={handleOrphanAssigned}
       />
 
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }

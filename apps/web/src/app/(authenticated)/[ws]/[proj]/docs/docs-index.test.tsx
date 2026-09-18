@@ -65,6 +65,43 @@ describe('DocsIndex — 빈 프로젝트(문서 0건)', () => {
   });
 });
 
+// story #3784(카디르 QA·PO 짚음) — 왼쪽 사이드바가 「불러오는 중…」인 동안 오른쪽 본문이
+// 이미 "아직 쌓인 문서가 없어요"+「새 문서」 CTA를 단정하던 결함. tree=[]는 "로딩 중"과
+// "진짜 0건"을 못 가르므로, loading/loadError를 컨텍스트에서 따로 받아 셋으로 가른다.
+describe('DocsIndex — story #3784 로딩/0건/실패 3분기', () => {
+  it('로딩 中(tree=[]·loading=true)이면 "아직 쌓인 문서가 없어요"도 「새 문서」 CTA도 안 뜬다(뮤테이션 대상 — loading 게이트 없이 tree.length===0만 보면 이 자리가 RED)', async () => {
+    useDocsLayoutMock.mockReturnValue({ ...BASE_CTX, tree: [], loading: true, loadError: false });
+    await mount();
+    expect(container.textContent).not.toContain('아직 쌓인 문서가 없어요');
+    expect(container.textContent).not.toContain('새 문서');
+  });
+
+  it('fetch 실패(loadError=true)면 「없다」가 아니라 실패 문구+다시 시도 버튼이 뜬다', async () => {
+    useDocsLayoutMock.mockReturnValue({ ...BASE_CTX, tree: [], loading: false, loadError: true });
+    await mount();
+    expect(container.textContent).not.toContain('아직 쌓인 문서가 없어요');
+    expect(container.textContent).toContain('불러오지 못했어요');
+    const retryButton = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('다시 시도'));
+    expect(retryButton).toBeTruthy();
+  });
+
+  it('실패 배너의 「다시 시도」를 누르면 fetchTree()가 호출된다', async () => {
+    const fetchTreeMock = vi.fn();
+    useDocsLayoutMock.mockReturnValue({ ...BASE_CTX, tree: [], loading: false, loadError: true, fetchTree: fetchTreeMock });
+    await mount();
+    const retryButton = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('다시 시도'))!;
+    await act(async () => { retryButton.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(fetchTreeMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('로드 완료·진짜 0건(loading=false·loadError=false·tree=[])이면 기존 빈 상태 + CTA가 그대로 뜬다(회귀 0)', async () => {
+    useDocsLayoutMock.mockReturnValue({ ...BASE_CTX, tree: [], loading: false, loadError: false });
+    await mount();
+    expect(container.textContent).toContain('아직 쌓인 문서가 없어요');
+    expect(container.textContent).toContain('새 문서');
+  });
+});
+
 describe('DocsIndex — 문서 있음(§2 마스트헤드+목록)', () => {
   const tree = [
     { id: 'f1', parent_id: null, title: '제품 스펙', slug: 'f1', icon: null, sort_order: 0, is_folder: true },
@@ -77,7 +114,8 @@ describe('DocsIndex — 문서 있음(§2 마스트헤드+목록)', () => {
     useDocsLayoutMock.mockReturnValue({ ...BASE_CTX, tree });
     await mount();
     expect(container.textContent).not.toContain('문서를 선택하세요');
-    expect(container.textContent).toContain('지식 · KNOWLEDGE BASE');
+    // story #3880(§⑤ 낱말 드리프트, 유나 확定) — kicker ko 값 안 영단어 baked-in 정본화.
+    expect(container.textContent).toContain('지식 · 문서고');
   });
 
   // story #2974 §1/§3(PR-D0) — Display 헤딩(마스트헤드 h1·리드 카드 h2)이 font-display
@@ -156,7 +194,7 @@ describe('DocsIndex — 문서 있음(§2 마스트헤드+목록)', () => {
     expect(container.textContent).toContain('결제 스펙 v2');
   });
 
-  it('필터 결과가 0건이면 "조건에 맞는 문서가 없습니다"를 보여준다(전체 0건과는 다른 문구)', async () => {
+  it('필터 결과가 0건이면 "조건에 맞는 문서가 없어요"를 보여준다(전체 0건과는 다른 문구)', async () => {
     useDocsLayoutMock.mockReturnValue({ ...BASE_CTX, tree });
     await mount();
     // confirmed+denied 둘 다 눌러 상호배타 아님을 이용해 존재 안 하는 조합(pending은 유지)이 아니라,
@@ -165,7 +203,7 @@ describe('DocsIndex — 문서 있음(§2 마스트헤드+목록)', () => {
     await act(async () => { uncategorized!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     const draftChip = [...container.querySelectorAll('button')].find((b) => b.getAttribute('aria-pressed') !== null && b.textContent?.includes('초안'));
     await act(async () => { draftChip!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    expect(container.textContent).toContain('조건에 맞는 문서가 없습니다');
+    expect(container.textContent).toContain('조건에 맞는 문서가 없어요');
   });
 
   // story #3053(2984-S5) — lead 문서 좌측 액센트가 무채(border-proof-line-strong)를 쓰고

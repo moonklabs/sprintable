@@ -70,6 +70,8 @@ _RISK_GRADE_MATRIX: list[tuple[str | None, str, str]] = [
     ("conservative", "workflow_config_publish", "high"),
     ("conservative", "doc_approval", "high"),
     ("conservative", "agent_decision_request", "high"),  # story #2709
+    ("conservative", "external_publish", "high"),  # story #3291
+    ("conservative", "concept_approval", "high"),  # story #3561
     ("conservative", _UNCLASSIFIED_GATE_TYPE, "high"),
     # posture=permissive → 항상 low(gate_type 무관, §2.1)
     ("permissive", "pr_review", "low"),
@@ -79,6 +81,8 @@ _RISK_GRADE_MATRIX: list[tuple[str | None, str, str]] = [
     ("permissive", "workflow_config_publish", "low"),
     ("permissive", "doc_approval", "low"),
     ("permissive", "agent_decision_request", "low"),  # story #2709
+    ("permissive", "external_publish", "low"),  # story #3291 — §2.1 1차 축은 gate_type 무관
+    ("permissive", "concept_approval", "low"),  # story #3561 — §2.1 1차 축은 gate_type 무관
     ("permissive", _UNCLASSIFIED_GATE_TYPE, "low"),
     # posture=balanced → 2차 축(gate_type, §2.2) + 폴백(§2.3)
     ("balanced", "pr_review", "low"),
@@ -87,6 +91,8 @@ _RISK_GRADE_MATRIX: list[tuple[str | None, str, str]] = [
     ("balanced", "deploy", "high"),
     ("balanced", "workflow_config_publish", "high"),
     ("balanced", "doc_approval", "high"),  # 2차 축 명시 등재(더 이상 폴백 아님, ⓐ')
+    ("balanced", "external_publish", "high"),  # story #3291 — _HIGH_RISK_GATE_TYPES 명시 등재
+    ("balanced", "concept_approval", "high"),  # story #3561 — _HIGH_RISK_GATE_TYPES 명시 등재
     # story #2709 — agent_decision_request는 _LOW_RISK_GATE_TYPES에 명시 등재(gate_service.py) —
     # doc_approval과 반대로 low(2차 축에서 직접, 폴백 아님). 근거: 이 gate는 되돌릴 수 없는
     # 액션을 그 자신이 트리거하지 않는다(에이전트가 이미 자기 가정대로 진행 중인 결정의
@@ -100,6 +106,8 @@ _RISK_GRADE_MATRIX: list[tuple[str | None, str, str]] = [
     (None, "deploy", "high"),
     (None, "workflow_config_publish", "high"),
     (None, "doc_approval", "high"),  # 2차 축 명시 등재(더 이상 폴백 아님, ⓐ')
+    (None, "external_publish", "high"),  # story #3291 — balanced와 동일(§2.2 2차 축)
+    (None, "concept_approval", "high"),  # story #3561 — balanced와 동일(§2.2 2차 축)
     (None, "agent_decision_request", "low"),  # story #2709 — balanced와 동일(§2.2 2차 축)
     (None, _UNCLASSIFIED_GATE_TYPE, "high"),  # 폴백: 진짜 미분류 gate_type → 보수적 고위험
 ]
@@ -195,11 +203,13 @@ def test_derive_risk_grade_is_pure_no_session_param():
 
 
 def _gate(org, work_item_id, wtype, gate_type="merge", gate_id=None):
-    return SimpleNamespace(
+    # story #3569(페드루 PO 리뷰) — SimpleNamespace 대신 gate_mock_factory.make_gate()
+    # (story #2837 "건드릴 때 이관" 관례 — 실 Gate ORM 인스턴스라 sealed_doc_id 등 새 컬럼이
+    # 늘어도 AttributeError로 재발하지 않는다, mock을 실물 스키마에 맞춰 올리는 쪽).
+    from tests.gate_mock_factory import make_gate
+    return make_gate(
         id=gate_id or uuid.uuid4(), org_id=org, work_item_id=work_item_id, work_item_type=wtype,
-        gate_type=gate_type, status="pending", resolver_id=None, resolved_at=None,
-        resolution_note=None, held_until=None, neutral_facts=None, requires_human=False,
-        evidence_status=None, decision_basis=None, auto_decision_reason=None,
+        gate_type=gate_type,
         created_at=datetime(2026, 7, 17, tzinfo=timezone.utc),
         updated_at=datetime(2026, 7, 17, tzinfo=timezone.utc),
     )

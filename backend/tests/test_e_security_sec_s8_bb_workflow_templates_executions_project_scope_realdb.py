@@ -1,10 +1,19 @@
 """E-SECURITY SEC-S8(story 83ea3d6a) BB: workflow_templates apply + workflow_executions
-story-summary project-scope 미검증 봉쇄 실증(까심 전수스윕, 실HTTP 확定).
+story-summary project-scope 미검증 봉쇄 실증(까심 전수스윕).
 
 - apply_template: body.project_id에 has_project_access 검증 자체가 없어, project_a만
   grant된 caller가 project_b로 template apply 시 실제로 AgentRoutingRule이 생성됐다(201).
 - story_execution_summary: project_id에 project 접근권 검증이 없어 남의 project 워크플로
-  실행 상태(story-level status/rule_name)가 노출됐다(200)."""
+  실행 상태(story-level status/rule_name)가 노출됐다(200).
+
+story #3295(도메인탈고정 축2 후속) — apply_template 축(아래 두 테스트)은 이 스토리에서
+HTTP 왕복 대신 **함수 직접호출**로 이관했다(라우터 은퇴로 HTTP 표면 자체가 사라짐 —
+`app/routers/workflow_templates.py`는 FE 소비처 0건 확認 후 이 스토리에서 제거, 모델/
+리포지토리/테이블은 deployment_lifecycle.py가 여전히 실사용해 존치). SEC 커버리지
+손실 0 — 같은 검증 체인(has_project_access 실 호출·AgentRoutingRule 생성 여부)을 그대로
+실증하되, 라우팅 계층(HTTPException 변환) 대신 함수를 직접 불러 assert. story_execution_
+summary 축(아래 나머지 두 테스트)은 별개 라우터(workflow_executions.py, 은퇴 대상 아님)라
+HTTP 왕복 그대로 무변경."""
 from __future__ import annotations
 
 import os
@@ -109,12 +118,20 @@ async def _setup_app(app, Session, user_id, org_id):
 
 # ── apply_template ───────────────────────────────────────────────────────────
 
+def _auth_ctx(user_id: uuid.UUID, org_id: uuid.UUID) -> "AuthContext":
+    from app.dependencies.auth import AuthContext
+    return AuthContext(user_id=str(user_id), email="caller@test", claims={"app_metadata": {"org_id": str(org_id)}})
+
+
 @pytest.mark.anyio
 async def test_apply_template_cross_project_blocked_no_rule_created():
-    """BB 재현: project_a만 grant된 caller가 project_b로 template apply → 404·룰 생성 0."""
-    from app.main import app
+    """BB 재현(story #3295 — 함수 직접호출로 이관, SEC 커버리지 손실 0): project_a만
+    grant된 caller가 project_b로 template apply → HTTPException(404)·룰 생성 0."""
+    from fastapi import HTTPException
+
     from app.models.agent_routing_rule import AgentRoutingRule
     from app.models.member import Member
+    from app.routers.workflow_templates import ApplyTemplateRequest, apply_template
 
     engine, Session = await _session_factory()
     try:
@@ -125,36 +142,29 @@ async def test_apply_template_cross_project_blocked_no_rule_created():
             await s.commit()
             agent_id = agent.id
 
-        await _setup_app(app, Session, seeded["human_user_id"], seeded["org_id"])
-        client = _client_for(app)
-        try:
-            resp = await client.post(
-                "/api/v2/workflow-templates/solo/apply",
-                json={
-                    "project_id": str(seeded["project_b_id"]),
-                    "role_mapping": {"step_1": str(agent_id)},
-                },
-            )
-            assert resp.status_code == 404, resp.text
-        finally:
-            await client.aclose()
+            with pytest.raises(HTTPException) as ei:
+                await apply_template(
+                    "solo",
+                    ApplyTemplateRequest(project_id=seeded["project_b_id"], role_mapping={"step_1": str(agent_id)}),
+                    db=s, auth=_auth_ctx(seeded["human_user_id"], seeded["org_id"]), org_id=seeded["org_id"],
+                )
+            assert ei.value.status_code == 404
 
-        async with Session() as s:
             from sqlalchemy import select
             rules = (await s.execute(
                 select(AgentRoutingRule).where(AgentRoutingRule.project_id == seeded["project_b_id"])
             )).scalars().all()
             assert rules == [], "무권한 project에 AgentRoutingRule이 생성되면 안 됨"
     finally:
-        app.dependency_overrides.clear()
         await engine.dispose()
 
 
 @pytest.mark.anyio
 async def test_apply_template_same_project_still_works():
-    from app.main import app
+    """story #3295 — 함수 직접호출로 이관(음성대조: 권한 있는 project는 무회귀로 계속 됨)."""
     from app.models.member import Member
     from app.models.project_access import ProjectAccess
+    from app.routers.workflow_templates import ApplyTemplateRequest, apply_template
 
     engine, Session = await _session_factory()
     try:
@@ -170,22 +180,13 @@ async def test_apply_template_same_project_still_works():
             await s.commit()
             agent_id = agent.id
 
-        await _setup_app(app, Session, seeded["human_user_id"], seeded["org_id"])
-        client = _client_for(app)
-        try:
-            resp = await client.post(
-                "/api/v2/workflow-templates/solo/apply",
-                json={
-                    "project_id": str(seeded["project_a_id"]),
-                    "role_mapping": {"step_1": str(agent_id)},
-                },
+            resp = await apply_template(
+                "solo",
+                ApplyTemplateRequest(project_id=seeded["project_a_id"], role_mapping={"step_1": str(agent_id)}),
+                db=s, auth=_auth_ctx(seeded["human_user_id"], seeded["org_id"]), org_id=seeded["org_id"],
             )
-            assert resp.status_code == 201, resp.text
-            assert resp.json()["rules_created"] == 1
-        finally:
-            await client.aclose()
+            assert resp.rules_created == 1
     finally:
-        app.dependency_overrides.clear()
         await engine.dispose()
 
 
@@ -257,3 +258,34 @@ async def test_story_execution_summary_same_project_still_works():
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+# ── story #3295: 라우터 은퇴 실증(retired-concept-live-surface = 0) ──────────
+
+@pytest.mark.anyio
+async def test_workflow_templates_http_routes_are_unreachable():
+    """story #3295 — main.py에서 workflow_templates.router 등록을 뺐다. 실 app 인스턴스에
+    HTTP로 왕복해 3개 엔드포인트 전부 도달 불가(404 — FastAPI가 매칭되는 라우트 자체가
+    없을 때 내는 값)임을 실증한다. 모델/리포지토리는 그대로라 import 자체는 여전히
+    되므로(위 apply_template 직접호출 테스트들이 그 증거), "코드가 없다"가 아니라
+    "그 주소로 나가는 라우터가 없다"는 걸 실 HTTP로 가른다."""
+    from app.main import app
+
+    async def _auth():
+        from app.dependencies.auth import AuthContext
+        return AuthContext(user_id=str(uuid.uuid4()), email=None, claims={"app_metadata": {"org_id": str(uuid.uuid4())}})
+
+    from app.dependencies.auth import get_current_user
+    app.dependency_overrides[get_current_user] = _auth
+    client = _client_for(app)
+    try:
+        for method, path in [
+            ("GET", "/api/v2/workflow-templates"),
+            ("GET", "/api/v2/workflow-templates/solo"),
+            ("POST", "/api/v2/workflow-templates/solo/apply"),
+        ]:
+            resp = await client.request(method, path, json={} if method == "POST" else None)
+            assert resp.status_code == 404, f"{method} {path} → {resp.status_code}(라우터 은퇴 후에도 도달 가능하면 안 됨)"
+    finally:
+        app.dependency_overrides.clear()
+        await client.aclose()

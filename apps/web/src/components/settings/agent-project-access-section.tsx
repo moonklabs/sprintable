@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { useTranslations } from 'next-intl';
 import { Shield, ShieldOff, Loader2 } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -37,6 +38,7 @@ interface AgentProjectAccessSectionProps {
 }
 
 export function AgentProjectAccessSection({ agentMemberId, projects, canEdit }: AgentProjectAccessSectionProps) {
+  const t = useTranslations('settings');
   // project_id → grant record_id (granted 프로젝트만 키 보유).
   const [grantMap, setGrantMap] = useState<Record<string, string>>({});
   // GET access 가 403 인 프로젝트(read 권한 없음) — "grant 없음(차단)"과 구분(RC③). 잘못된 '차단' 표시 방지.
@@ -130,15 +132,15 @@ export function AgentProjectAccessSection({ agentMemberId, projects, canEdit }: 
       <SectionCardHeader>
         <div className="flex items-start justify-between gap-3">
           <div className="space-y-1">
-            <h2 className="text-base font-semibold text-foreground">프로젝트 접근</h2>
+            <h2 className="text-base font-semibold text-foreground">{t('agentProjectAccessTitle')}</h2>
             <p className="text-sm text-muted-foreground">
-              이 에이전트는 API 키 1개로 아래 프로젝트들에 접근합니다. 프로젝트를 추가/제거해도 키는 그대로 유지됩니다.
+              {t('agentProjectAccessDesc')}
             </p>
           </div>
           {!loading && projects.length > 0 ? (
             <div className="shrink-0 text-right text-xs text-muted-foreground tabular-nums">
               <div className="font-medium text-foreground">{grantedCount} / {projects.length}</div>
-              <div>허용됨</div>
+              <div>{t('projectAccessGrantedLabel')}</div>
             </div>
           ) : null}
         </div>
@@ -168,7 +170,7 @@ export function AgentProjectAccessSection({ agentMemberId, projects, canEdit }: 
           </div>
         ) : projects.length === 0 ? (
           <p className="rounded-md border border-dashed border-border px-3 py-6 text-sm text-muted-foreground">
-            접근 가능한 프로젝트가 없습니다.
+            {t('noAccessibleProjects')}
           </p>
         ) : (
           <div className="focus-inset max-h-72 divide-y divide-border overflow-y-auto overflow-x-hidden rounded-md border border-border">
@@ -189,14 +191,14 @@ export function AgentProjectAccessSection({ agentMemberId, projects, canEdit }: 
                       aria-live="assertive"
                       aria-atomic="true"
                     >
-                      로드 실패 · 재시도
+                      {t('loadFailedRetry')}
                     </button>
                   ) : readDenied ? (
                     <span
                       className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground"
-                      title="이 프로젝트의 접근 상태를 조회할 권한이 없습니다."
+                      title={t('readAccessDeniedTooltip')}
                     >
-                      확인 권한 없음
+                      {t('readAccessDenied')}
                     </span>
                   ) : canEdit ? (
                     <Button
@@ -215,9 +217,9 @@ export function AgentProjectAccessSection({ agentMemberId, projects, canEdit }: 
                       {toggling ? (
                         <Loader2 className="h-3 w-3 animate-spin" />
                       ) : granted ? (
-                        <><Shield className="h-3 w-3" />허용</>
+                        <><Shield className="h-3 w-3" />{t('projectAccessAllowed')}</>
                       ) : (
-                        <><ShieldOff className="h-3 w-3" />차단</>
+                        <><ShieldOff className="h-3 w-3" />{t('projectAccessBlocked')}</>
                       )}
                     </Button>
                   ) : (
@@ -226,7 +228,7 @@ export function AgentProjectAccessSection({ agentMemberId, projects, canEdit }: 
                       granted ? 'text-success' : 'text-muted-foreground',
                     )}>
                       {granted ? <Shield className="h-3 w-3" /> : <ShieldOff className="h-3 w-3" />}
-                      {granted ? '허용' : '차단'}
+                      {granted ? t('projectAccessAllowed') : t('projectAccessBlocked')}
                     </span>
                   )}
                 </div>

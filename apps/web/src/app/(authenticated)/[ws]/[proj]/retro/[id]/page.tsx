@@ -10,7 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { OperatorInput, OperatorSelect, OperatorTextarea } from '@/components/ui/operator-control';
-import { ToastContainer, useToast } from '@/components/ui/toast';
+import { useToast } from '@/components/ui/toast';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { useTouchSafePointerSensor } from '@/hooks/use-touch-safe-pointer-sensor';
 import { cn } from '@/lib/utils';
@@ -180,6 +180,7 @@ function RetroEntrySkeleton() {
 
 export default function RetroSessionPage() {
   const t = useTranslations('retro');
+  const tc = useTranslations('common');
   const { projectId, wsSlug, projSlug } = useRetroRoute();
   const { currentTeamMemberId } = useDashboardContext();
   const params = useParams<{ id: string }>();
@@ -196,7 +197,7 @@ export default function RetroSessionPage() {
   const [advancing, setAdvancing] = useState(false);
   const [advanceError, setAdvanceError] = useState<string | null>(null);
   const [votedItemIds, setVotedItemIds] = useState<Set<string>>(new Set());
-  const { toasts, addToast, dismissToast } = useToast();
+  const { addToast } = useToast();
 
   const [sprintOutcome, setSprintOutcome] = useState<{
     status: OutcomeStatus; hypothesis: string | null; result: OutcomeResult | null; metric?: string;
@@ -438,11 +439,15 @@ export default function RetroSessionPage() {
         body: JSON.stringify({}),
       });
       if (!res.ok) {
+        // story #3637(유나 silent-failure-sweep-3632) — 체크가 조용히 해제되던 자리.
+        // voteFailed 키는 이미 카탈로그에 있었으나 어디서도 안 쓰이고 있었다(새 키 0).
+        addToast({ title: t('voteFailed'), type: 'error' });
         setVotedItemIds((prev) => { const next = new Set(prev); next.delete(itemId); return next; });
         return;
       }
       setItems((prev) => prev.map((item) => item.id === itemId ? { ...item, vote_count: item.vote_count + 1 } : item));
     } catch {
+      addToast({ title: t('voteFailed'), type: 'error' });
       setVotedItemIds((prev) => { const next = new Set(prev); next.delete(itemId); return next; });
     }
   }
@@ -542,12 +547,15 @@ export default function RetroSessionPage() {
     if (!projectId) return;
     try {
       const res = await fetchWithAuth(`/api/retro-sessions/${sessionId}/export?project_id=${projectId}`);
-      if (!res.ok) return;
+      // story #3638(유나 §8 별건 21건 — 이 문서의 v2.1 스캐너가 새로 잡은 자리) — 「내보내기」
+      // 클릭이 실패해도 아무 일도 안 일어난 것처럼 보이던 자리(문구 0). exportCopied와
+      // 동형 신규 1키.
+      if (!res.ok) { addToast({ title: t('exportFailed'), type: 'error' }); return; }
       const json = await res.json() as { data: { markdown: string } };
       await navigator.clipboard.writeText(json.data.markdown);
       addToast({ title: t('exportCopied'), type: 'success' });
     } catch {
-      // ignore
+      addToast({ title: t('exportFailed'), type: 'error' });
     }
   }
 
@@ -771,7 +779,7 @@ export default function RetroSessionPage() {
                                   disabled={!newItemText[category].trim() || addingItem === category}
                                   className="w-full"
                                 >
-                                  {addingItem === category ? t('addingItem') : t('addItem')}
+                                  {addingItem === category ? tc('adding') : t('addItem')}
                                 </Button>
                               </div>
                             ) : null}
@@ -867,7 +875,7 @@ export default function RetroSessionPage() {
                           onClick={() => void addAction()}
                           disabled={!newActionText.trim() || addingAction}
                         >
-                          {addingAction ? t('addingAction') : t('addAction')}
+                          {addingAction ? tc('adding') : t('addAction')}
                         </Button>
                       </div>
                     </div>
@@ -879,7 +887,6 @@ export default function RetroSessionPage() {
         </div>
       </div>
 
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </>
   );
 }

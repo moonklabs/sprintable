@@ -153,6 +153,76 @@ describe('ApprovalsQueue', () => {
     expect(urls).toContain('/api/gates/inbox?status=held&sort=urgency&assigned_to_me=true');
   });
 
+  // story #3565(유나 §17-24 전수, 페드루 PO 確定 2026-09-06) — gate_type 원시값
+  // (예: "external_publish")을 배지에 그대로 찍던 것을 사람 낱말로. 음성 대조.
+  it('⭐게이트 배지 — external_publish가 원시값이 아니라 「외부 발행」으로 뜬다(음성 대조)', async () => {
+    mockFetches([gate({ id: 'g1', gate_type: 'external_publish', work_item_summary: { title: '외부 발행 대상', slug: null } })], []);
+    await mount();
+    expect(container.textContent).toContain('외부 발행');
+    expect(container.textContent).not.toContain('external_publish');
+  });
+
+  // story #3519(§16-7 2부, PO 確定 2026-09-05) — fetchGates 내부에 catch가 어디에도
+  // 없어(then뿐), 하나(held)가 네트워크단 reject하면 fetchGates() 자체가 throw했고
+  // 호출부(useEffect)도 안 잡아 setLoading(false)가 영영 안 불려 무한 스켈레톤(에러
+  // 표시조차 0)이 됐다 — 최악 사례. leg별 격리+finally 이중 방어로 loading은 반드시
+  // 풀린다(무한 스켈레톤 회귀 가드는 유지).
+  //
+  // story #3521(유나 §22-2, PO 確定 2026-09-05) — #3519 직후엔 이 자리에서 "성공한 leg는
+  // 그대로 보인다"(부분 degrade)를 단언했으나, PO가 그 설계를 다시 뒤집었다: leg 하나라도
+  // 실패하면 부분 목록이 아니라 "못 불러옴" 얼굴+다시 시도를 낸다(성공한 leg의 항목이
+  // "이게 전부"로 오인되는 걸 막는다 — §22-2 "없음"과 "못 불러옴"을 절대 섞지 않는 원칙의
+  // 연장, 부분 목록도 실은 「못 불러옴」의 일종이다).
+  it('held가 네트워크 reject하면 pending이 성공해도 무한 스켈레톤 없이 "못 불러옴" 얼굴+다시 시도가 뜬다(부분 목록 아님)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string }) => {
+      if (init?.method === 'PATCH') return { ok: true, json: async () => ({}) };
+      if (url.includes('status=pending')) {
+        return { ok: true, json: async () => [gate({ id: 'g1', gate_type: 'merge_gate', work_item_summary: { title: '살아남은 항목', slug: null } })] };
+      }
+      if (url.includes('status=held')) throw new Error('network down');
+      return { ok: true, json: async () => [] };
+    }));
+    await mount();
+    expect(container.textContent).not.toContain('게이트 조회 중…');
+    expect(container.querySelector('[data-testid="gate-inbox-load-error"]')).not.toBeNull();
+    expect(container.textContent).not.toContain('살아남은 항목');
+  });
+
+  // story #3521(유나 §22-2) — 「다시 시도」 클릭이 실제로 재조회하고, 이번엔 두 leg 다
+  // 성공하면 정상 목록으로 회복된다(에러 얼굴이 영구 고착 아님).
+  it('「다시 시도」 클릭 — 재조회 성공 시 정상 목록으로 복구된다', async () => {
+    let heldShouldFail = true;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string }) => {
+      if (init?.method === 'PATCH') return { ok: true, json: async () => ({}) };
+      if (url.includes('status=held')) {
+        if (heldShouldFail) throw new Error('network down');
+        return { ok: true, json: async () => [] };
+      }
+      return { ok: true, json: async () => [gate({ id: 'g1', gate_type: 'merge_gate', work_item_summary: { title: '복구된 항목', slug: null } })] };
+    }));
+    await mount();
+    expect(container.querySelector('[data-testid="gate-inbox-load-error"]')).not.toBeNull();
+    heldShouldFail = false;
+    const retryBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '다시 시도') as HTMLButtonElement;
+    await act(async () => { retryBtn.click(); });
+    expect(container.querySelector('[data-testid="gate-inbox-load-error"]')).toBeNull();
+    expect(container.textContent).toContain('복구된 항목');
+  });
+
+  // story #3521 — "응답 실패"(non-ok status, 네트워크 자체는 살아있음) 갈래도 "응답 없음"
+  // (네트워크 reject, 위 두 테스트)과 동형으로 "못 불러옴" 얼굴을 낸다 — 두 실패 모양이
+  // 다르다고 화면 판정이 갈리면 안 된다(fetchGates의 !r.ok → reject 정규화가 이 동형을 보장).
+  it('pending이 500(응답은 왔지만 실패)이면 held가 정상이어도 "못 불러옴" 얼굴이 뜬다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string }) => {
+      if (init?.method === 'PATCH') return { ok: true, json: async () => ({}) };
+      if (url.includes('status=pending')) return { ok: false, status: 500, json: async () => ({ detail: 'boom' }) };
+      return { ok: true, json: async () => [] };
+    }));
+    await mount();
+    expect(container.querySelector('[data-testid="gate-inbox-load-error"]')).not.toBeNull();
+    expect(container.textContent).toContain(koMessages.cage.gateInboxLoadError);
+  });
+
   it('4유형(게이트·문서결재·머지게이트·보류) 모두 렌더하고 gate_type 배지를 표시한다', async () => {
     mockFetches(
       [
@@ -226,6 +296,84 @@ describe('ApprovalsQueue', () => {
     await mount();
     const text = container.textContent ?? '';
     expect(text).not.toContain('파일');
+  });
+
+  // story #3369(§3-1-2-1, 페드루 PO 2026-09-03 06:56Z) — reapproval_required=true인
+  // external_publish 게이트는 서버가 이미 approve를 409 SITE_POST_RESUBMIT_REQUIRED로
+  // 막아 둔다("할 일 없는 카드"). 승인·반려 둘 다 비활성 + 안내 문구.
+  it('⭐reapproval_required=true — 재상신 대기 안내가 뜨고 승인·반려 버튼이 비활성된다', async () => {
+    mockFetches(
+      [gate({
+        id: 'g-resubmit', gate_type: 'external_publish', can_approve: true, requires_human: true,
+        reapproval_required: true,
+      })],
+      [],
+    );
+    await mount();
+    expect(container.textContent).toContain(koMessages.cage.gateReapprovalResubmitWaiting);
+    const approveButton = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.cage.gateApprove));
+    const rejectButton = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.cage.sigRequestChanges));
+    expect(approveButton?.hasAttribute('disabled')).toBe(true);
+    expect(rejectButton?.hasAttribute('disabled')).toBe(true);
+  });
+
+  it('reapproval_required=false(정상 상신)인 external_publish 게이트는 재상신 대기 안내가 안 뜨고 버튼이 활성', async () => {
+    mockFetches(
+      [gate({
+        id: 'g-normal', gate_type: 'external_publish', can_approve: true, requires_human: true,
+        reapproval_required: false,
+      })],
+      [],
+    );
+    await mount();
+    expect(container.textContent).not.toContain(koMessages.cage.gateReapprovalResubmitWaiting);
+    const approveButton = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.cage.gateApprove));
+    expect(approveButton?.hasAttribute('disabled')).toBe(false);
+  });
+
+  // story #3806(Phase3·3-2 PR5, 정정3 — 페드루 PO 리뷰 2026-09-11 13:00Z 실측) —
+  // ads_boost의 「변경됨·재승인 필요」는 글 게이트(작성자가 본문을 수정...) 문장이
+  // 아니라 §1 원문(예산/기간이 바뀌어...)을 써야 한다.
+  it('⭐ads_boost·reapproval_required=true — §1 전용 문장이 뜨고 글 게이트 문장은 안 뜬다', async () => {
+    mockFetches(
+      [gate({
+        id: 'g-ads-resubmit', gate_type: 'ads_boost', can_approve: true, requires_human: true,
+        reapproval_required: true,
+      })],
+      [],
+    );
+    await mount();
+    expect(container.textContent).toContain(koMessages.cage.adsBoostReapprovalWaiting);
+    expect(container.textContent).not.toContain(koMessages.cage.gateReapprovalResubmitWaiting);
+  });
+
+  // story #3806(Phase3·3-2 PR5, 정정2 — 페드루 PO 리뷰 2026-09-11 13:00Z 실측) — 유나
+  // §절 §1 「결재 카드 봉인 5필드」는 이 큐 카드 자체에 있어야 한다(상세 페이지뿐이면
+  // 안 됨). 봉인값이 있으면 카드에 예산·기간·목표가 실제로 그려지는지 검증.
+  it('⭐ads_boost 게이트 카드에 봉인 총예산·기간·목표가 사람 낱말로 실제 DOM에 나타난다', async () => {
+    mockFetches(
+      [gate({
+        id: 'g-ads-sealed', gate_type: 'ads_boost', can_approve: true, requires_human: true,
+        sealed_ads_budget_minor: 50_000, sealed_ads_currency: 'KRW',
+        sealed_ads_starts_at: '2026-09-12T00:00:00Z', sealed_ads_ends_at: '2026-09-19T00:00:00Z',
+        sealed_ads_objective: 'POST_ENGAGEMENT',
+      })],
+      [],
+    );
+    await mount();
+    const text = container.textContent ?? '';
+    expect(text).toContain('50,000원');
+    expect(text).toContain('참여');
+    expect(text).not.toContain('POST_ENGAGEMENT');
+  });
+
+  it('ads_boost가 아닌 게이트 카드는 봉인 예산 블록을 안 그린다(지어내지 않는다)', async () => {
+    mockFetches(
+      [gate({ id: 'g-not-ads', gate_type: 'external_publish', can_approve: true, requires_human: true })],
+      [],
+    );
+    await mount();
+    expect(container.querySelector('[data-testid="inbox-ads-boost-sealed"]')).toBeNull();
   });
 
   it('story #3038 AC4(PO #3188 오서명 실사고) — 같은 work_item의 merge 게이트 2장이 pr_number로 서로 구분된다', async () => {
@@ -561,13 +709,59 @@ describe('ApprovalsQueue', () => {
     expect(calls.filter((c) => c.method === 'POST')).toHaveLength(1);
   });
 
-  it('변경 요청 클릭 시(저위험) status=rejected로 호출하고 반려됨 배지를 보인다', async () => {
+  // story #3608(유나 §22-18 ④-2, PO 確定 2026-09-07) — 승인 요청이 아직 안 끝난 동안
+  // "..."가 보이는 글자에 그대로 떴다(#3592 실측 발견 — 이 primaryLabel 자리는 게이트
+  // 타입별로 동적이라 #3592 자체는 순번 aria-label을 안 배선했지만, "..." 낱말화 문제는
+  // 이 자리에도 그대로 있었다). 낱말("승인 중…")로 바뀌었는지 검증.
+  it('⭐#3608 — 승인 요청 pending 中 보이는 글자에 "..." 0, "승인 중" 포함', async () => {
+    let resolveResponse: (() => void) | null = null;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string }) => {
+      if (init?.method === 'POST') {
+        return new Promise((resolve) => {
+          resolveResponse = () => resolve({ ok: true, json: async () => ({}) });
+        });
+      }
+      if (url.includes('status=pending')) return { ok: true, json: async () => [lowRiskActionable()] };
+      return { ok: true, json: async () => [] };
+    }));
+    await mount();
+
+    const approveButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateApprove)) as HTMLButtonElement;
+    await act(async () => { approveButton.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(approveButton.textContent).not.toContain('...');
+    expect(approveButton.textContent).toContain(koMessages.cage.gateApproving);
+    await act(async () => { resolveResponse?.(); await Promise.resolve(); await Promise.resolve(); });
+  });
+
+  // story #3334(선생님 실사용 4바퀴 T1' 적출, 처방 확定) — 저위험이라도 반려는 이제 사유
+  // 필수(서버 gate_type 무관 422 강제). 예전엔 이 카드의 "변경 요청" 클릭이 사유 없이 즉시
+  // POST했다(이 테스트가 그 낡은 계약을 pin하고 있었다) — 지금은 클릭 즉시 제출 대신 서명
+  // 다이얼로그(GateSignatureApproval, document.body 포탈)를 열고, 사유를 채워야만 그 안의
+  // "변경 요청" 버튼이 풀린다.
+  it('변경 요청 클릭 시(저위험) 사유 다이얼로그를 열고, 사유 입력 後에만 status=rejected로 호출한다', async () => {
     const calls = mockFetches([lowRiskActionable({ id: 'g-rej' })], []);
     await mount();
     const rejectButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.sigRequestChanges));
     await act(async () => { rejectButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    // 다이얼로그가 열렸다 — 즉시 POST는 아직 안 나갔다.
+    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(0);
+    const dialogRejectBtn = [...document.body.querySelectorAll('[data-slot="dialog-content"] button')].find((b) => b.textContent?.includes(koMessages.cage.sigRequestChanges)) as HTMLButtonElement;
+    expect(dialogRejectBtn.disabled).toBe(true); // AC — 사유 입력 前 비활성.
+
+    const textarea = document.body.querySelector('#gate-sig-reason') as HTMLTextAreaElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+      setter.call(textarea, '스키마 필드명이 기존 컨벤션과 다릅니다');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(dialogRejectBtn.disabled).toBe(false);
+
+    await act(async () => { dialogRejectBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     const postCall = calls.find((c) => c.method === 'POST');
-    expect(JSON.parse(postCall?.body ?? '{}')).toEqual({ status: 'rejected', note: null, evidence_viewed: false, reviewed_head_sha: null });
+    expect(JSON.parse(postCall?.body ?? '{}')).toEqual({
+      status: 'rejected', note: '스키마 필드명이 기존 컨벤션과 다릅니다', evidence_viewed: false, reviewed_head_sha: null,
+    });
     expect(container.textContent).toContain(koMessages.cage.queueResolvedRejected);
   });
 
@@ -707,12 +901,25 @@ describe('ApprovalsQueue', () => {
     expect(buttonsAfter.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(true);
   });
 
-  it('AC 음성대조 — 반려 직후(아직 승인/취소 안 됨)엔 취소 버튼이 즉시 뜨지 않다가, 반려 완료 후엔 뜬다', async () => {
+  // story #3334 — "반려 직후"의 의미가 바뀌었다: 클릭은 이제 다이얼로그를 열 뿐(즉시 반려
+  // 아님) — 취소 버튼은 사유 입력 後 다이얼로그 안에서 실제로 제출해야만 뜬다.
+  it('AC 음성대조 — 반려 클릭은 다이얼로그만 열고(취소 버튼 안 뜸), 사유 입력 後 제출해야 취소 버튼이 뜬다', async () => {
     mockFetches([lowRiskActionable({ id: 'g-reject-undo' })], []);
     await mount();
     const rejectButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.sigRequestChanges));
     expect([...container.querySelectorAll('button')].some((b) => b.textContent?.includes(koMessages.cage.gateUndo))).toBe(false);
     await act(async () => { rejectButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    // 다이얼로그만 열렸다 — 아직 반려되지 않았으므로 취소 버튼은 여전히 없다.
+    expect([...container.querySelectorAll('button')].some((b) => b.textContent?.includes(koMessages.cage.gateUndo))).toBe(false);
+
+    const textarea = document.body.querySelector('#gate-sig-reason') as HTMLTextAreaElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+      setter.call(textarea, '재작업 필요');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const dialogRejectBtn = [...document.body.querySelectorAll('[data-slot="dialog-content"] button')].find((b) => b.textContent?.includes(koMessages.cage.sigRequestChanges)) as HTMLButtonElement;
+    await act(async () => { dialogRejectBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect([...container.querySelectorAll('button')].some((b) => b.textContent?.includes(koMessages.cage.gateUndo))).toBe(true);
   });
 
@@ -1153,14 +1360,29 @@ describe('ApprovalsQueue — story #3113 결정 게이트(agent_decision_request
     expect(approveBtn.disabled).toBe(false);
   });
 
-  it('거절은 안 선택 없이도 즉시 가능하다(반려는 안을 고르는 행위가 아님)', async () => {
+  // story #3334 — 반려는 여전히 "안 선택" 없이 가능하다(옵션 축과 무관, 그 AC는 안 바뀜). 다만
+  // 반려 자체가 이제 사유 없이 "즉시"는 아니다(gate_type 무관 사유 필수) — 클릭은 다이얼로그를
+  // 열 뿐이고, 옵션을 고르지 않은 채로도 그 다이얼로그에 진입할 수 있음(=안 선택 무관)만 남는다.
+  it('거절 버튼은 안 선택 없이도 눌리지만(반려는 안을 고르는 행위가 아님), 사유 다이얼로그를 거쳐야 제출된다', async () => {
     const calls = mockFetches([decisionGate()], []);
     await mount();
     const rejectBtn = Array.from(container.querySelectorAll('button')).find(
       (b) => b.textContent?.includes(koMessages.cage.sigRequestChanges),
     ) as HTMLButtonElement;
-    expect(rejectBtn.disabled).toBe(false);
+    expect(rejectBtn.disabled).toBe(false); // 옵션 미선택 상태에서도 클릭 자체는 가능.
     await act(async () => { rejectBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(0); // 즉시 제출은 안 됨.
+
+    const textarea = document.body.querySelector('#gate-sig-reason') as HTMLTextAreaElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+      setter.call(textarea, '보류(C안)로 다시 검토 요청');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const dialogRejectBtn = [...document.body.querySelectorAll('[data-slot="dialog-content"] button')].find(
+      (b) => b.textContent?.includes(koMessages.cage.sigRequestChanges),
+    ) as HTMLButtonElement;
+    await act(async () => { dialogRejectBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     const postCall = calls.find((c) => c.method === 'POST' && c.url.includes('/transition'));
     expect(JSON.parse(postCall?.body ?? '{}').status).toBe('rejected');
   });

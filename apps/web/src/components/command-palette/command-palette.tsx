@@ -2,16 +2,15 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog';
 import {
   BookOpen,
-  Bot,
   CalendarRange,
   FolderKanban,
+  Gauge,
   GitPullRequest,
-  Inbox,
-  MessageSquareMore,
+  List,
   Search,
   UserPlus,
   Users,
@@ -21,12 +20,14 @@ import { cn } from '@/lib/utils';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { buildActionCommands, type ActionCommand } from './command-palette-actions';
 import { fetchWithAuth } from '@/lib/db/client';
+import { NAV_GROUPS, CHAT_CENTER_ITEM, LEGACY_NAV_ITEMS } from '@/lib/nav-config';
+import { pickEuroJosa } from '@/lib/korean-particle';
 
 interface CommandItem {
   id: string;
   group: 'navigate';
   icon: LucideIcon;
-  labelKey: string;
+  label: string;
   href: string;
   shortcut?: string[];
 }
@@ -44,28 +45,95 @@ interface StoryTitleResult {
   story_number?: number | null;
 }
 
-// story a539c649 S2: 'go-docs' 의 href 는 컴포넌트 내부에서 실 ws/proj slug 로 override 된다
-// (없으면 이 bare '/docs' 로 폴백 — 미들웨어 리다이렉트 안전망이 받는다).
-const STATIC_ITEMS: CommandItem[] = [
-  { id: 'go-inbox', group: 'navigate', icon: Inbox, labelKey: 'goInbox', href: '/inbox', shortcut: ['G', 'I'] },
-  // story #3179(S3c) 후속(추가 실측 발견) — 'go-dashboard'(/dashboard) 제거. /dashboard가
-  // 폐합돼 go-chats(아래, G M)와 같은 목적지(/chats)를 가리키는 중복 단축키였다.
-  { id: 'go-board', group: 'navigate', icon: FolderKanban, labelKey: 'goBoard', href: '/board', shortcut: ['G', 'B'] },
-  // story #2930 I3(PO 확定 2026-08-22) — nav-config.ts work 존에서 'sprints'가 'board'로
-  // 접혀 사이드바 진입점이 사라진 뒤, 이 리터럴 href가 verify-no-orphan-resource-routes
-  // (story #2376) 가드의 유일하게 «보이는» /sprints 앵커다. WorkspaceFrameTabs(flow/sprints
-  // 페이지 상단 프레임)도 실제 도달 경로지만 router.push(템플릿 리터럴)이라 그 가드의 정적
-  // 스캔 시야 밖(가드 파일 AC7㉠에 이미 그렇게 명시돼 있다) — 이 항목을 "중복이니 삭제"하면
-  // 가드가 못 보는 조용한 orphan이 된다. 지우지 말 것.
-  { id: 'go-sprints', group: 'navigate', icon: CalendarRange, labelKey: 'goSprints', href: '/sprints' },
-  // story #2931 — /sprints와 동일 사정(위 주석). /epics도 WorkspaceFrameTabs(router.push
-  // 템플릿 리터럴)로만 도달해 verify-no-orphan-resource-routes의 정적 스캔 시야 밖 —
-  // 이 항목이 그 가드의 유일한 「보이는」 /epics 앵커다.
-  { id: 'go-epics', group: 'navigate', icon: FolderKanban, labelKey: 'goEpics', href: '/epics' },
-  { id: 'go-chats', group: 'navigate', icon: MessageSquareMore, labelKey: 'goChats', href: '/chats', shortcut: ['G', 'M'] },
-  { id: 'go-agents', group: 'navigate', icon: Bot, labelKey: 'goAgents', href: '/organization/workforce', shortcut: ['G', 'A'] },
-  { id: 'go-docs', group: 'navigate', icon: BookOpen, labelKey: 'goDocs', href: '/docs', shortcut: ['G', 'S'] },
+// story #3698(IA·후속, PO 確定 2026-09-08) — 사이드바 KbdHint(app-sidebar.tsx)와 같은
+// 단축키를 파생 항목에도 이식한다(id 매칭 — NAV_GROUPS 자체엔 팔레트 전용 단축키 개념이
+// 없다, kbdHint는 사이드바 표시용 다른 축이라 재사용 안 함).
+const NAV_ITEM_SHORTCUTS: Record<string, string[]> = {
+  inbox: ['G', 'I'],
+  board: ['G', 'B'],
+  chats: ['G', 'M'],
+  'org-workforce': ['G', 'A'],
+  docs: ['G', 'S'],
+};
+
+// story #2930 I3(PO 확定 2026-08-22)·#2931 — /sprints·/epics는 nav-config.ts NAV_GROUPS에
+// 없는(S1에서 'board'가 flow+sprints를 흡수) 라우트지만, WorkspaceFrameTabs(flow/sprints
+// 페이지 상단 프레임)가 router.push(템플릿 리터럴)로만 여는지라 verify-no-orphan-resource-
+// routes(story #2376) 정적 스캔(㉠resourceLink류·㉡리터럴 href) 시야 밖이다. 이 두 리터럴이
+// 그 가드의 유일하게 «보이는» 앵커다 — story #3698 그라운딩(PO 確定)으로 NAV_GROUPS 파생
+// 대상이 «아니다»로 확定됐다. 지우지 말 것(지우면 그 가드가 조용히 눈먼다).
+// story #3845(UX-v3·FE 5·일감 2, 페드루 PO 確定 §③ⓑ 2026-09-14) — 「회고」가 LEGACY_
+// NAV_ITEMS(nav-config.ts)에서 빠지고 WorkspaceFrameTabs 전용 진입점(router.push 템플릿
+// 리터럴)으로만 남으면 verify-no-orphan-resource-routes.ts의 ㉠조합 시야 밖이라(같은
+// 파일 상단 주석 "지우지 말 것" 경고 그대로 — go-sprints 선례와 동형) go-retro 앵커가
+// 없으면 조용한 orphan이 된다. 지우면 그 가드가 못 잡는다.
+// story #4013 — export해 팔레트 정의를 직접 순회하는 가드(scripts/verify-command-
+// palette-workspaceless-href-resolves.test.ts)가 이름 목록을 손으로 다시 안 베끼게 한다.
+export const GUARD_ANCHOR_ITEMS: Array<{ id: string; icon: LucideIcon; labelKey: string; href: string }> = [
+  { id: 'go-sprints', icon: CalendarRange, labelKey: 'goSprints', href: '/sprints' },
+  { id: 'go-epics', icon: FolderKanban, labelKey: 'goEpics', href: '/epics' },
+  { id: 'go-retro', icon: Gauge, labelKey: 'goRetro', href: '/retro' },
+  // story #3844(PO 지적 2026-09-14 08:09Z, CI 「Verify no orphan resource routes(#2376)」
+  // RED) — WorkspaceFrameTabs가 얹은 탭 경로는 이 가드가 진입점으로 안 센다(4264가 retro를
+  // 여기 앵커한 선례 그대로) — work-list도 동형으로 앵커.
+  { id: 'go-work-list', icon: List, labelKey: 'goWorkList', href: '/work-list' },
 ];
+
+export interface DerivedNavItem {
+  id: string;
+  icon: LucideIcon;
+  labelKey: string;
+  href: string;
+  /** label 계산식이 갈리는 축(아래 소비부 참고) — 'anchor'는 t(labelKey) 그대로,
+   * 'nav'는 tNav(labelKey)에 goDestinationLabel("~로 이동" 접미사)을 씌운다. */
+  labelSource: 'anchor' | 'nav';
+  /** 워크스페이스 없는(작업공간·프로젝트 세그먼트가 안 붙는) 절대경로인지 — 가드가
+   * 이 값이 true인 항목만 MIGRATED_RESOURCES/RENAMED_RESOURCES/실 page.tsx 대조 대상으로 삼는다. */
+  isWorkspaceless: boolean;
+}
+
+// story #4013 CHANGES②(페드루 PO 지적 2026-09-17 12:57Z) — 최초판은 이 파생 로직을
+// 컴포넌트 useMemo 안에 두고, 가드용 getWorkspacelessStaticNavItems()가 같은 소스를
+// **따로** 다시 조립했다 — 상수만 같을 뿐 조립 코드가 둘이라 드리프트 위험이 여전했다.
+// 이제 이 함수 하나가 유일한 조립처다: 컴포넌트의 ITEMS useMemo가 이 함수를 **호출**하고
+// (아래), 가드는 이 함수의 결과에서 isWorkspaceless만 걸러 쓴다 — NAV_GROUPS.flatMap류
+// 목록 조립은 이 함수 밖 어디에도 없다(그 사실 자체를 테스트가 grep으로 고정).
+//
+// resolveResourceHref는 orgSlug/currentProjectSlug 같은 런타임 상태에 기대므로 인자로
+// 주입한다(이 파일을 순수하게 유지 — 가드 테스트가 더미 콜백으로도 부를 수 있어야 한다).
+// 워크스페이스 없는 항목(isWorkspaceless=true)은 이 콜백을 아예 안 부른다 — 그래서 어떤
+// 더미를 넣어도 실제 href(navItem.path 그대로)가 그대로 나온다.
+export function deriveNavigateItems(resolveResourceHref: (resource: string) => string): DerivedNavItem[] {
+  const navItems = [...NAV_GROUPS.flatMap((group) => group.items), ...LEGACY_NAV_ITEMS, CHAT_CENTER_ITEM];
+  const fromNav: DerivedNavItem[] = navItems.map((navItem) => {
+    // story #2224(선생님 정정 2026-07-30) — 'board'는 `/flow?view=list`로 흡수, 'docs'도
+    // resourceHref 재계산 대상(둘 다 kind='static'이어도 워크스페이스 있는 경로로 오버라이드
+    // — ⛔이 두 분기가 그 오버라이드의 유일한 정의처, 새 id를 추가하면 여기도 같이 반영할 것).
+    if (navItem.id === 'board') {
+      return {
+        id: navItem.id, icon: navItem.icon, labelKey: navItem.labelKey,
+        href: `${resolveResourceHref('flow')}?view=list`, labelSource: 'nav', isWorkspaceless: false,
+      };
+    }
+    if (navItem.id === 'docs') {
+      return {
+        id: navItem.id, icon: navItem.icon, labelKey: navItem.labelKey,
+        href: resolveResourceHref('docs'), labelSource: 'nav', isWorkspaceless: false,
+      };
+    }
+    const isResource = navItem.kind === 'resource';
+    return {
+      id: navItem.id, icon: navItem.icon, labelKey: navItem.labelKey,
+      href: isResource ? resolveResourceHref(navItem.path) : navItem.path,
+      labelSource: 'nav', isWorkspaceless: !isResource,
+    };
+  });
+  const fromAnchors: DerivedNavItem[] = GUARD_ANCHOR_ITEMS.map((anchor) => ({
+    id: anchor.id, icon: anchor.icon, labelKey: anchor.labelKey, href: anchor.href,
+    labelSource: 'anchor', isWorkspaceless: true,
+  }));
+  return [...fromNav, ...fromAnchors];
+}
 
 // 명령(action)당 아이콘 — command-palette-actions.ts는 순수 데이터만 다뤄 lucide 컴포넌트를
 // 안 들고 있으므로 여기서 labelKey로 매핑.
@@ -86,7 +154,15 @@ export interface CommandPaletteProps {
 
 export function CommandPalette({ open, onOpenChange, projectId, contextStoryId }: CommandPaletteProps) {
   const router = useRouter();
+  const locale = useLocale();
   const t = useTranslations('commandPalette');
+  const tNav = useTranslations('nav');
+  // story #3698(IA·후속) — "{label}(으)로 이동" 조사는 한글 받침 유무를 따른다(맞춤법
+  // 규칙, 어휘 판단 아님 — korean-particle.ts 참고). en 템플릿("Go to {label}")은 조사가
+  // 없어 이 값을 안 쓴다(넘겨도 무해, ICU가 미사용 파라미터를 조용히 무시).
+  function goDestinationLabel(label: string): string {
+    return t('goDestination', { label, particle: locale === 'ko' ? pickEuroJosa(label) : '' });
+  }
   const { orgId, orgMemberships, currentProjectSlug } = useDashboardContext();
   const orgSlug = orgMemberships.find((o) => o.orgId === orgId)?.orgSlug;
   function resourceHref(resource: string): string {
@@ -94,21 +170,40 @@ export function CommandPalette({ open, onOpenChange, projectId, contextStoryId }
   }
   const docsHref = resourceHref('docs');
   // story #2224(선생님 정정 2026-07-30, 진입점 전수 스윕) — `/board` 라우트가 삭제되고
-  // `/flow?view=list`로 흡수됐다(PR#2698). "보드로 이동"(goBoard) 라벨은 목적지 콘텐츠(칸반)가
+  // `/flow?view=list`로 흡수됐다(PR#2698). "보드로 이동" 라벨은 목적지 콘텐츠(칸반)가
   // 그대로라 안 바꿨지만, href는 최종 주소를 직접 가리켜야 한다(리다이렉트 경유는 "은퇴한
   // 주소가 진입점에 살아 있다"는 문제를 남긴다). 쿼리 없는 bare href로 두고 각 사용처가
-  // 자기 쿼리를 직접 이어붙인다(아래 boardHref처럼 미리 합쳐두면 story= 이어붙일 때
-  // `?`가 두 번 생긴다).
-  const flowHref = resourceHref('flow');
-  const boardHref = `${flowHref}?view=list`;
-  const ITEMS = useMemo(
-    () => STATIC_ITEMS.map((item) => {
-      if (item.id === 'go-docs') return { ...item, href: docsHref };
-      if (item.id === 'go-board') return { ...item, href: boardHref };
-      return item;
-    }),
-    [docsHref, boardHref],
-  );
+  // 자기 쿼리를 직접 이어붙인다(actionItems가 story= 이어붙일 때 `?`가 두 번 생기면 안 됨).
+  // deriveNavigateItems()도 'board' id에 이 식과 동일한 조립(resourceHref('flow')+
+  // '?view=list')을 쓴다(그 함수 안 주석 참고) — actionItems는 팔레트 navigate 목록 밖
+  // 별도 소비처라 이 변수를 그대로 유지한다(사본 아님, 서로 다른 소비처의 같은 상수).
+  const boardHref = `${resourceHref('flow')}?view=list`;
+  // story #3698(IA·후속, PO 確定 2026-09-08) — navigate 목적지를 NAV_GROUPS(+CHAT_CENTER_
+  // ITEM)에서 파생한다(하드코딩 7→전수 25). 라벨·경로는 nav-config.ts 단일 정본 재사용
+  // (사본 0) — 사이드바에 있는 목적지는 전부 ⌘K로도 도달한다(S4 AC2 실충족). go-sprints·
+  // go-epics만 위 GUARD_ANCHOR_ITEMS로 별도 유지(가드 앵커, 파생 대상 아님).
+  //
+  // story #3824(UX-v3·FE 1, 2026-09-13) — LEGACY_NAV_ITEMS(사이드바 5항목 축소로 빠진
+  // 17개)도 같은 파생 파이프라인에 얹는다 — 사이드바엔 없어도 ⌘K가 이들의 1급 진입점이라는
+  // 카드 AC2를 이 한 줄로 충족한다(전용 하드코딩 목록을 새로 만들지 않는다).
+  //
+  // story #4013 CHANGES②(페드루 PO 지적 2026-09-17 12:57Z) — 목록 조립 자체를 컴포넌트
+  // 밖 deriveNavigateItems()로 옮겨 가드 테스트와 같은 함수를 부른다(이 useMemo 안엔
+  // NAV_GROUPS.flatMap류 조립이 다시 없다 — verify-command-palette-workspaceless-href-
+  // resolves.test.ts가 grep으로 그 사실 자체를 고정).
+  const ITEMS = useMemo<CommandItem[]>(() => {
+    return deriveNavigateItems(resourceHref).map((item) => ({
+      id: item.id,
+      group: 'navigate' as const,
+      icon: item.icon,
+      label: item.labelSource === 'anchor' ? t(item.labelKey) : goDestinationLabel(tNav(item.labelKey)),
+      href: item.href,
+      shortcut: NAV_ITEM_SHORTCUTS[item.id],
+    }));
+    // resourceHref는 orgSlug·currentProjectSlug의 순수 파생(그 값들이 이미 deps에 있음) —
+    // 함수 참조 자체를 deps에 넣으면 매 렌더 새로 만들어져 메모가 무의미해진다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orgSlug, currentProjectSlug, t, tNav, locale]);
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
   const [docResults, setDocResults] = useState<DocResult[]>([]);
@@ -140,8 +235,8 @@ export function CommandPalette({ open, onOpenChange, projectId, contextStoryId }
   const filteredNavigate = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return ITEMS;
-    return ITEMS.filter((item) => t(item.labelKey).toLowerCase().includes(q));
-  }, [query, t, ITEMS]);
+    return ITEMS.filter((item) => item.label.toLowerCase().includes(q));
+  }, [query, ITEMS]);
 
   const filteredActions = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -303,7 +398,6 @@ export function CommandPalette({ open, onOpenChange, projectId, contextStoryId }
                       activeIndex={clampedActiveIndex}
                       start={section.start}
                       onSelect={handleSelectNav}
-                      t={t}
                     />
                   );
                 }
@@ -345,12 +439,11 @@ interface CommandGroupProps {
   start: number;
   activeIndex: number;
   onSelect: (item: CommandItem) => void;
-  t: (key: string) => string;
 }
 
-function CommandGroup({ label, items, start, activeIndex, onSelect, t }: CommandGroupProps) {
+function CommandGroup({ label, items, start, activeIndex, onSelect }: CommandGroupProps) {
   return (
-    <div className="flex flex-col">
+    <div className="flex flex-col" data-command-group="navigate">
       <div className="px-2 pt-1.5 pb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
         {label}
       </div>
@@ -368,9 +461,10 @@ function CommandGroup({ label, items, start, activeIndex, onSelect, t }: Command
                   active ? 'bg-accent text-accent-foreground' : 'text-foreground hover:bg-accent/60',
                 )}
                 data-active={active || undefined}
+                data-command-id={item.id}
               >
                 <Icon className="size-4 shrink-0 text-muted-foreground" />
-                <span className="flex-1 truncate">{t(item.labelKey)}</span>
+                <span className="flex-1 truncate">{item.label}</span>
                 {item.shortcut ? (
                   <span className="ml-auto flex items-center gap-1">
                     {item.shortcut.map((key) => (
@@ -427,6 +521,7 @@ function ActionGroup({ label, items, start, activeIndex, onSelect, dangerPillLab
                   active ? 'bg-accent text-accent-foreground' : 'text-foreground hover:bg-accent/60',
                 )}
                 data-active={active || undefined}
+                data-command-id={item.id}
               >
                 <Icon className="size-4 shrink-0 text-muted-foreground" />
                 <span className="flex-1 truncate">{item.label}</span>

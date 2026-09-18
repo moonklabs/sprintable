@@ -1,8 +1,10 @@
 'use client';
 
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { AlertCircle } from 'lucide-react';
 import type { WorkflowLineStepRun } from '@/components/kanban/types';
+import { formatRelativeTime } from '@/lib/storage/format';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 
 /**
  * E-DG S12 ①ⓒ — stuck handoff 디테일(display-only). detail drawer stuck 섹션 전용.
@@ -15,6 +17,8 @@ interface StuckHandoffDetailProps {
 
 export function StuckHandoffDetail({ step }: StuckHandoffDetailProps) {
   const t = useTranslations('cage');
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
   const ev = step.last_event;
 
   return (
@@ -31,13 +35,14 @@ export function StuckHandoffDetail({ step }: StuckHandoffDetailProps) {
           <p className="font-medium text-foreground/80">{t('lastEventInfo')}</p>
           <p>{ev.event_type}</p>
           <p className="font-mono">#{ev.id.slice(0, 8)}{ev.recipient_seq != null ? ` · seq ${ev.recipient_seq}` : ''}</p>
-          {ev.created_at ? <p>{new Date(ev.created_at).toLocaleString()}</p> : null}
+          {/* story #3493 — 이벤트 시각은 "기록"(정본 formatRelativeTime). */}
+          {ev.created_at ? <p>{formatRelativeTime(ev.created_at, locale, displayTimezone)}</p> : null}
         </div>
       ) : null}
 
       {/* delivery_error 박스(있을 때만) */}
       {step.delivery_error ? (
-        <div className="flex items-start gap-1.5 rounded-md border border-destructive/30 bg-destructive/5 px-2 py-1.5 text-[11px] text-foreground/85">
+        <div className="flex items-start gap-1.5 rounded-md border border-destructive/30 bg-destructive-tint px-2 py-1.5 text-[11px] text-foreground/85">
           <AlertCircle className="mt-0.5 size-3 shrink-0" />
           <span>
             <span className="text-foreground">{t('deliveryError')}: </span>

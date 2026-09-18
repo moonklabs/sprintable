@@ -4,6 +4,7 @@ from app.models.agent_gateway import AgentEventCursor, AgentGatewaySession
 from app.models.agent_deployment import AgentAuditLog, AgentDeployment, AgentPersona
 from app.models.agent_routing_rule import AgentRoutingRule
 from app.models.agent_run import AgentRun
+from app.models.agent_run_tool_call import AgentRunToolCall
 from app.models.agent_session import AgentSession
 from app.models.auth_identity import AuthIdentity, AuthMigration, AuthMigrationEvent
 from app.models.auth_native_bootstrap import AuthNativeBootstrapCode
@@ -19,6 +20,10 @@ from app.models.evidence import Evidence
 from app.models.event import Event
 from app.models.event_outbox import EventOutbox
 from app.models.delivery_job import DeliveryJob
+from app.models.channel_connection import ChannelConnection
+from app.models.channel_app_credential import ChannelAppCredentials
+from app.models.channel_oauth_pending_selection import ChannelOAuthPendingSelection
+from app.models.ga4_connection import GA4Connection
 from app.models.gate import Gate
 from app.models.gate_github_check_event import GateGithubCheckEvent
 from app.models.github_installation import GithubInstallation, GithubInstallNonce, GithubWebhookDelivery
@@ -41,6 +46,7 @@ from app.models.policy_document import PolicyDocument
 from app.models.legal_document import LegalDocumentVersion
 from app.models.audit import AuditLog
 from app.models.webhook_config import WebhookConfig
+from app.models.webhook_delivery_nonce import WebhookDeliveryNonce
 from app.models.push_device import PushDevice
 from app.models.doc import Doc, DocShareToken, DocSlugAlias
 from app.models.mention import Mention
@@ -69,6 +75,7 @@ from app.models.doc_chat_nudge_dispatch import DocChatNudgeDispatch
 from app.models.retro import RetroAction, RetroItem, RetroSession, RetroVote
 from app.models.reward import RewardLedger
 from app.models.login_audit_log import LoginAuditLog
+from app.models.unhandled_error_event import UnhandledErrorEvent
 from app.models.standup import StandupEntry, StandupFeedback
 from app.models.team import TeamMember
 from app.models.file_lock import FileLock
@@ -79,17 +86,40 @@ from app.models.activity_event import ActivityEvent
 from app.models.asset import Asset, AssetFolder, AssetLink
 from app.models.release_note import ReleaseNote
 from app.models.role_template import RoleTemplate
-# fix(2026-07-28, #2201 후속 CI 적출): app/models/*.py 파일 목록 대 이 파일의 import 목록을
-# 전수 대조해, `import app.models`만으로는 Base.metadata에 안 잡히는 모듈 11개를 찾았다
-# (2026-07-20 hitl_config/participation 건과 동일 결함 클래스). 이 PR이 실제로 필요한 것은
-# `event`(Event/"events" 테이블) 하나뿐이라 그것만 여기서 등재한다 — 나머지 10개(activity_log·
-# plan_feature·project_api_key·label·onboarding_event·verdict·workflow_execution_log·
-# workflow_line·workflow_template·workflow_trigger_type)는 등재 시 destructive_schema
-# 테스트(101개 파일 × 파일당 create_all/drop_all) 총소요가 CI 예산(25분, 기준선 16~17분)을
-# 넘겨 별도 스토리로 분리 — "[인프라·CI] 모델 하나 늘 때마다 CI가 몇 분씩 느려진다 — 집합
-# 모듈 누락 10건을 «등재할 수 없는» 상태다"(id 69d7380e-9567-47ed-9194-d9784cbf637a).
-# "등재를 미루는 것"이 아니라 "파일마다 전체 스키마를 create_all/drop_all하는 구조 자체를
-# 먼저 손보는 것"이 그 스토리의 실제 과제.
+# fix(2026-09-02, story #2255/69d7380e 완주) — #2201/PR#2554(2026-07-28)가 미룬 나머지 10개
+# 등재. 재그라운딩(당시 전제 vs 지금): #2293(2026-07-28~08, PR#2576/#2583)이 destructive_schema
+# 스위트를 4-way CI 샤드로 이미 쪼갰고, 최근 실측(story #2285 AC4, 2026-08-17)은 샤드당 4~6분·
+# 천장 25분 대비 여유 19~21분 — #2201 당시(순차 단일잡·여유 8분)와 전혀 다른 상태. 로컬 실측
+# (2026-09-02, disposable PG): 133테이블 create_all 평균 0.219s·drop_all 0.096s → 이 10개 파일
+# (16개 모델 클래스) 등재 후에도 파일당 증분은 이 자릿수(초 미만)라 178개 destructive_schema
+# 파일 전체로 곱해도 샤드당 여유(19~21분)를 갉아먹는 수준이 아니다(상세 수치는 PR 본문).
+from app.models.activity_log import ActivityLog
+from app.models.plan_feature import PlanFeature
+from app.models.project_api_key import ProjectApiKey
+from app.models.label import ItemLabel, Label
+from app.models.onboarding_event import OnboardingEvent
+from app.models.verdict import Verdict
+from app.models.workflow_execution_log import WorkflowExecutionLog
+from app.models.workflow_line import (
+    WorkflowLineDefinition,
+    WorkflowLineDefinitionVersion,
+    WorkflowLineStepApproval,
+    WorkflowLineStepRun,
+    WorkflowLineStepRunEvent,
+    WorkflowRoleAssignment,
+)
+from app.models.workflow_template import WorkflowTemplate
+from app.models.workflow_trigger_type import WorkflowTriggerType
+# fix(2026-09-02, story #2255 AC6 가드 자체 실증) — lint_model_registration_completeness.py를
+# 짓고 처음 돌려보니 위 10개와 별개로 5개가 더 새 있었다(전부 최근 며칠 새 커밋 — #2201/#2255
+# 결함 클래스가 그 사이 독립적으로 5번 더 재발한 것). 가드가 스스로를 증명한 사례라 여기서
+# 같이 정리한다(발견 즉시 수정) — FK 의존 없음(전수 확認), 등재 저위험.
+from app.models.billing_order import BillingOrder
+from app.models.connector_registry import OrgConnectorRegistry
+from app.models.domain_label import OrgDomainLabel
+from app.models.org_billing_key import OrgBillingKey
+from app.models.platform_setting import PlatformSetting
+from app.models.rejected_relation import RejectedRelation
 from app.models.trust_snapshot import OrgMemberTrustSnapshot
 from app.models.unattached_snapshot import UnattachedStorySnapshot
 from app.models.visual_artifact import ArtifactNode, ArtifactVersion, VisualArtifact
@@ -104,6 +134,27 @@ from app.models.participation import Participation, ParticipationRole
 from app.models.chain_escalation_org_config import ChainEscalationOrgConfig
 from app.models.chain_circuit_breaker import ChainCircuitBreaker
 from app.models.event_definition import EventDefinition
+from app.models.recipe_role_binding import RecipeRoleBinding
+from app.models.recipe_repeat_schedule import RecipeRepeatSchedule
+from app.models.org_metering_key import OrgMeteringKey
+from app.models.org_pageview_daily import OrgPageviewDaily
+from app.models.org_pageview_utm_daily import OrgPageviewUtmDaily
+from app.models.site_post import SitePost
+from app.models.site_post_draft import SitePostDraft
+from app.models.site_post_version import SitePostVersion
+from app.models.channel_post_draft import ChannelPostDraft
+from app.models.channel_post_comment import ChannelPostComment, ChannelPostCommentReply, CommentCollectionSchedule
+from app.models.channel_post_version import ChannelPostVersion
+from app.models.channel_publication import ChannelPublication
+from app.models.publication_command import PublicationCommand
+from app.models.channel_post_image import ChannelPostImage
+from app.models.channel_post_video import ChannelPostVideo
+from app.models.campaign import Campaign
+from app.models.org_content_rule import OrgContentRule
+from app.models.publication_attempt import PublicationAttempt
+from app.models.insight_snapshot import InsightSnapshot
+from app.models.channel_publication_reconciliation import ChannelPublicationReconciliation
+from app.models.ads_boost_run import AdsBoostRun
 
 __all__ = [
     "RoleTemplate",
@@ -161,6 +212,7 @@ __all__ = [
     "LegalDocumentVersion",
     "AuditLog",
     "WebhookConfig",
+    "WebhookDeliveryNonce",
     "PushDevice",
     "Doc",
     "Goal",
@@ -198,8 +250,31 @@ __all__ = [
     "TeamMember",
     "UnattachedStorySnapshot",
     "LoginAuditLog",
+    "UnhandledErrorEvent",
     "RefreshToken",
     "User",
     "WorkflowVersion",
     "Event",
+    "ActivityLog",
+    "PlanFeature",
+    "ProjectApiKey",
+    "Label",
+    "ItemLabel",
+    "OnboardingEvent",
+    "Verdict",
+    "WorkflowExecutionLog",
+    "WorkflowLineDefinition",
+    "WorkflowLineDefinitionVersion",
+    "WorkflowLineStepRun",
+    "WorkflowLineStepApproval",
+    "WorkflowLineStepRunEvent",
+    "WorkflowRoleAssignment",
+    "WorkflowTemplate",
+    "WorkflowTriggerType",
+    "BillingOrder",
+    "OrgDomainLabel",
+    "OrgConnectorRegistry",
+    "OrgBillingKey",
+    "PlatformSetting",
+    "RejectedRelation",
 ]

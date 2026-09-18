@@ -1,8 +1,10 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import Link from 'next/link';
+import { formatRelativeTime } from '@/lib/storage/format';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { CheckCircle, ExternalLink, RotateCcw, Shield, ShieldCheck, ShieldX, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
@@ -129,10 +131,13 @@ export function useDocGateData(docId: string, status: string | undefined) {
 
 export function DocStatusHeader({ docId, status, editHref, onTransitioned }: { docId: string; status: string | undefined; editHref: string; onTransitioned: () => void }) {
   const t = useTranslations('docs');
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
   const { currentTeamMemberId } = useDashboardContext();
   const { gate, busy, error, state, isApprover, isSigFlow, resolveName, docTransition, gateTransition } = useDocGateData(docId, status);
   const Icon = STATE_ICON[state];
-  const fmtDate = (s: string | undefined | null) => (s ? new Date(s).toLocaleString() : '');
+  // story #3493 — gate 시각은 "기록"(정본 formatRelativeTime).
+  const fmtDate = (s: string | undefined | null) => (s ? formatRelativeTime(s, locale, displayTimezone) : '');
 
   const errorBanner = error ? (
     <p className="mt-1.5 basis-full text-xs text-destructive">{error}</p>
@@ -154,7 +159,7 @@ export function DocStatusHeader({ docId, status, editHref, onTransitioned }: { d
 
   return (
     <div className={`proof-surface proof-surface-lift flex flex-wrap items-center gap-3 border px-4 py-3.5 ${
-      state === 'confirmed' ? 'border-success/30 bg-success-tint' : state === 'denied' ? 'border-destructive/30 bg-destructive/10' : 'border-warning/30 bg-warning-tint'
+      state === 'confirmed' ? 'border-success/30 bg-success-tint' : state === 'denied' ? 'border-destructive/30 bg-destructive-tint' : 'border-warning/30 bg-warning-tint'
     }`}
     >
       {/* story #2955 §4(대비 주의, 실측 대비표) — 소형 계열색은 텍스트가 아니라 아이콘
@@ -166,8 +171,13 @@ export function DocStatusHeader({ docId, status, editHref, onTransitioned }: { d
       <div className="min-w-0 flex-1">
         <div className="text-[15px] font-bold text-foreground">{t(STATE_LABEL_KEY[state])}</div>
         {/* story #2967 — resolveName은 한글 사람 이름이라 mono 걷음(동일 결함 클래스). */}
+        {/* story #3865(AC1) — 이 div의 조상(부모 wrapper)이 state==='confirmed'일 때
+            bg-success-tint를 입는다(위 return 블록 상단 삼항) — text-muted-foreground는
+            그 tint 배경 위에서 AA 미달(story #3839류). 항상 confirmed 상태에서만 렌더되므로
+            드문 상태가 아니라 상시 노출 — text-foreground로 교체(범위 축소 불요, #3865
+            AC0 PO 확定). */}
         {state === 'confirmed' && gate ? (
-          <div className="text-xs text-muted-foreground">{resolveName(gate.resolver_id)} · {fmtDate(gate.resolved_at)}</div>
+          <div className="text-xs text-foreground">{resolveName(gate.resolver_id)} · {fmtDate(gate.resolved_at)}</div>
         ) : state === 'denied' ? (
           <div className="mt-1 text-xs text-foreground">
             <span className="font-medium">{t('docGateDeniedReason')}:</span> {gate?.resolution_note?.trim() || t('docGateNoReason')}
@@ -185,10 +195,15 @@ export function DocStatusHeader({ docId, status, editHref, onTransitioned }: { d
         </Button>
       ) : isApprover ? (
         <div className="flex shrink-0 gap-2">
-          <Button size="sm" variant="ghost" disabled={busy} className="gap-1 text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60"
-            onClick={() => currentTeamMemberId && void gateTransition({ status: 'rejected', resolver_id: currentTeamMemberId }, onTransitioned)}
-          >
-            <XCircle className="size-3.5" />{t('docGateReject')}
+          {/* story #3334 — 반려(변경 요청)는 gate_type 무관 사유 필수(서버 422). 저위험이라도
+              이 리더 헤더엔 사유 입력창이 없으므로, 반려는 사유 모달을 가진 에디터
+              (doc-gate-section.tsx의 rejectOpen 다이얼로그)로 유도한다 — 위 고위험 분기와
+              같은 원칙("여기서 직행 처리 안 함, 반려는 비대칭 예외 없이 동일 취급"). 승인은
+              사유가 필요 없으므로 기존처럼 원탭 그대로. */}
+          <Button asChild size="sm" variant="ghost" className="gap-1 text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60">
+            <Link href={editHref}>
+              <XCircle className="size-3.5" />{t('docGateReject')}
+            </Link>
           </Button>
           <Button size="sm" variant="ghost" disabled={busy} className="gap-1 text-success hover:ring-1 hover:ring-inset hover:ring-success/60"
             onClick={() => currentTeamMemberId && void gateTransition({ status: 'approved', resolver_id: currentTeamMemberId }, onTransitioned)}
@@ -197,7 +212,11 @@ export function DocStatusHeader({ docId, status, editHref, onTransitioned }: { d
           </Button>
         </div>
       ) : state === 'pending' ? (
-        <span className="shrink-0 text-xs text-muted-foreground">{t('docGateAwaitingGeneric')}</span>
+        // story #3865(AC1) — 이 자리의 조상 wrapper는 state==='pending'일 때 위 return 블록
+        // 상단 삼항의 else 분기(bg-warning-tint)를 입는다 — text-muted-foreground는 그 tint
+        // 배경 위에서 AA 미달. 항상 pending 상태에서만 렌더되므로 상시 노출 — text-foreground로
+        // 교체(#3865 AC0 PO 확定).
+        <span className="shrink-0 text-xs text-foreground">{t('docGateAwaitingGeneric')}</span>
       ) : state === 'denied' ? (
         <Button size="sm" variant="ghost" disabled={busy} className="shrink-0 gap-1" onClick={() => void docTransition('draft', onTransitioned)}>
           <RotateCcw className="size-3.5" />{t('docGateEdit')}
@@ -224,6 +243,8 @@ const AUDIT_KIND_PROOF: Record<AuditKind, ProofState> = {
 
 export function DocEvidenceRail({ docId, status }: { docId: string; status: string | undefined }) {
   const t = useTranslations('docs');
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
   const { gate, revisions, resolveName } = useDocGateData(docId, status);
 
   const auditEvents: AuditEvent[] = [];
@@ -242,7 +263,8 @@ export function DocEvidenceRail({ docId, status }: { docId: string; status: stri
   }
   auditEvents.sort((a, b) => b.at.localeCompare(a.at));
 
-  const fmtDate = (s: string) => (s ? new Date(s).toLocaleDateString() : '');
+  // story #3493 — 감사 이력 항목 시각은 "기록"(정본 formatRelativeTime).
+  const fmtDate = (s: string) => (s ? formatRelativeTime(s, locale, displayTimezone) : '');
   const auditKindLabel: Record<AuditKind, string> = {
     request: t('docGateAuditRequested'), resubmit: t('docGateAuditResubmitted'),
     approved: t('docGateAuditApproved'), rejected: t('docGateAuditRejected'),

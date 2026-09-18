@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { Check, Copy } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { SectionCard } from '@/components/ui/section-card';
@@ -19,6 +19,8 @@ import { useToast } from '@/components/ui/toast';
 import { ToolPermissionPicker } from '@/components/agents/tool-permission-picker';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { formatRelativeTime } from '@/lib/storage/format';
+import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 
 interface ApiKey {
   id: string;
@@ -39,6 +41,8 @@ interface AgentApiKeyManagerProps {
 export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKeyManagerProps) {
   const t = useTranslations('settings');
   const tc = useTranslations('common');
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
   const [loading, setLoading] = useState(false);
   const [newKeyDialog, setNewKeyDialog] = useState(false);
@@ -304,24 +308,29 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
                     </span>
                   ))}
                 </div>
+                {/* story #3493 — created_at/last_used_at/revoked_at은 "기록"(정본
+                    formatRelativeTime). expires_at은 미래 만료 "약속"이라 상대시각으로
+                    decay시키면 안 됨(음수 diff가 clamp돼 "지금"으로 오표시) — §11-2
+                    정본(formatScheduledAt)으로 절대 표기. */}
                 <p className="text-xs text-muted-foreground">
-                  Created: {new Date(key.created_at).toLocaleDateString()}
+                  Created: {formatRelativeTime(key.created_at, locale, displayTimezone)}
                   {key.last_used_at &&
-                    ` • Last used: ${new Date(key.last_used_at).toLocaleDateString()}`}
-                  {key.revoked_at && ` • Revoked: ${new Date(key.revoked_at).toLocaleDateString()}`}
+                    ` • Last used: ${formatRelativeTime(key.last_used_at, locale, displayTimezone)}`}
+                  {key.revoked_at && ` • Revoked: ${formatRelativeTime(key.revoked_at, locale, displayTimezone)}`}
                 </p>
                 {key.expires_at && !key.revoked_at && (() => {
                   const expiresDate = new Date(key.expires_at);
                   const daysLeft = Math.ceil((expiresDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
                   const isExpired = daysLeft <= 0;
                   const isWarning = daysLeft > 0 && daysLeft <= 7;
+                  const expiresDisplay = formatScheduledAt(key.expires_at, displayTimezone).display;
                   return (
                     <p className={`text-xs mt-0.5 ${isExpired ? 'text-destructive font-medium' : isWarning ? 'text-warning-strong font-medium' : 'text-muted-foreground'}`}>
                       {isExpired
-                        ? `Expired ${expiresDate.toLocaleDateString()}`
+                        ? `Expired ${expiresDisplay}`
                         : isWarning
-                          ? `⚠ Expires in ${daysLeft} day${daysLeft === 1 ? '' : 's'} (${expiresDate.toLocaleDateString()})`
-                          : `Expires: ${expiresDate.toLocaleDateString()}`}
+                          ? `⚠ Expires in ${daysLeft} day${daysLeft === 1 ? '' : 's'} (${expiresDisplay})`
+                          : `Expires: ${expiresDisplay}`}
                     </p>
                   );
                 })()}

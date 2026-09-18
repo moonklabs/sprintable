@@ -1,11 +1,13 @@
 'use client';
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, RefreshCw, WifiOff, UserX } from 'lucide-react';
+import { ChevronLeft, RefreshCw, UserX } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { ChatBubble } from './chat-bubble';
+import { ConnectionLostBanner } from './connection-lost-banner';
 import type { PresenceStatus } from './presence-dot';
 import { CommandHintNotice, type BlockedHint } from './command-hint-notice';
 import { ReferenceDropNotice, parseDroppedReferences, type DroppedReference } from './reference-drop-notice';
@@ -28,7 +30,7 @@ import { useMessageRangeSelection } from '@/hooks/use-message-range-selection';
 import { CitationComposeBar, type CitationSaveState } from './citation-compose-bar';
 import { StoryPickerDialog } from '@/components/canvas/story-picker-dialog';
 import { EmptyState } from '@/components/ui/empty-state';
-import { ToastContainer, useToast } from '@/components/ui/toast';
+import { useToast } from '@/components/ui/toast';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { fetchWithAuth } from '@/lib/db/client';
 import { useChatRail } from '@/app/(authenticated)/chats/chat-rail-context';
@@ -60,6 +62,10 @@ interface ChatViewProps {
   // get_verified_map()과 같은 정의(#2751 설계②가 워크포스 "연결 안 됨" 배지에 쓰는 그 판별자,
   // 발명 0) — false=stdio verify 미완주. undefined/null/human이면 미연결 배너 미표시.
   participants?: { member_id: string; name: string | null; type?: string; verified?: boolean | null }[];
+  // story #3831(UX-v3·FE 3·오늘) — 「오늘」의 지시 한 줄이 여기까지 오면 이 값으로 컴포저를
+  // 채운다. 새 프리필 기전을 짓지 않는다 — #92f00dc4 prefillCommand(모호 명령 후보 클릭)와
+  // 동일 경로를 그대로 재사용(마운트 시 1회 시드).
+  initialComposeText?: string;
 }
 
 interface MessageGroup {
@@ -71,12 +77,20 @@ interface MessageGroup {
 // 50/page × 10 = ~500개. 그 안에 없으면 no-op(graceful).
 const MAX_SCROLL_LOAD_ATTEMPTS = 10;
 
-function groupByDate(messages: ChatMessage[]): MessageGroup[] {
+// story #3493 — 날짜 구분선(day divider)은 "기록"도 "약속"도 아니다(개별 시각이 decay하는
+// 값이 아니라, 그 날 하루 전체를 대표하는 고정 달력 라벨 — formatRelativeTime을 쓰면 그룹
+// 헤더가 시간이 지나며 "3일 전"으로 계속 바뀌어 구분선 목적과 어긋나고, formatScheduledAt은
+// 시각·TZ 접미사가 붙어 날짜 전용 헤더에 맞지 않는다). schedule-format.ts의 toDateKey와
+// 같은 방식(Intl.DateTimeFormat 직접 호출 — 새 포맷 함수 신설 아님, 기존 정본과 동형 패턴)
+// 으로 하드코딩 'ko-KR'만 실제 locale로 교정한다. PR 분류표에 "기록/약속 밖(날짜 구분선)"으로
+// 별도 표기.
+function groupByDate(messages: ChatMessage[], locale: string, displayTimezone: string): MessageGroup[] {
   const groups: Record<string, ChatMessage[]> = {};
+  const dateFmt = new Intl.DateTimeFormat(locale, {
+    year: 'numeric', month: 'long', day: 'numeric', timeZone: displayTimezone,
+  });
   for (const msg of messages) {
-    const date = new Date(msg.created_at).toLocaleDateString('ko-KR', {
-      year: 'numeric', month: 'long', day: 'numeric',
-    });
+    const date = dateFmt.format(new Date(msg.created_at));
     (groups[date] ??= []).push(msg);
   }
   return Object.entries(groups).map(([date, msgs]) => ({ date, messages: msgs }));
@@ -115,16 +129,27 @@ export function filterUnconnectedAgentParticipants(
   );
 }
 
-export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix = '/api/chats', backHref = '/chats', commandTargets, presenceById, scrollToMessageId, initialLastReadAt, participants }: ChatViewProps) {
+export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix = '/api/chats', backHref = '/chats', commandTargets, presenceById, scrollToMessageId, initialLastReadAt, participants, initialComposeText }: ChatViewProps) {
   const router = useRouter();
   const pathname = usePathname();
   const t = useTranslations('chats');
+  // story #3783 — "불러오는 중…", common ns의 기존 loading 키 재사용.
+  const tc = useTranslations('common');
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
   // story #3194 — 'agents' 네임스페이스의 viewConnectionSettings 키를 그대로 재사용(발명 0,
   // agent-management-tab.tsx의 동일 CTA와 문구 일치).
   const ta = useTranslations('agents');
   const isMobile = useIsMobile();
-  const { toasts, addToast, dismissToast } = useToast();
+  const { addToast } = useToast();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  // story #3638(유나 디자인 CHANGES 2026-09-07) — 초기 로드(:349) 실패가 messages를
+  // 빈 배열로 남겨 「대화를 시작하세요」를 그렸다 — 메시지가 있는 대화를 «없다»고
+  // 말하는 §1 클래스(모름을 없음으로 오독). ConnectionLostBanner는 handlePoll 경로
+  // 하나만 덮어(SSE 끊김에서만 뜸) 이 자리를 못 막는다. messages.length===0 렌더
+  // 분기에서만 소비되므로(성공 뒤 메시지가 있으면 이 플래그가 서 있어도 무해) 별도
+  // 호출부 분기 없이 fetchMessages() 공용 함수 레벨에서 갱신한다.
+  const [messagesLoadFailed, setMessagesLoadFailed] = useState(false);
   // story #2265(C-7) 저장 조각(2026-07-29) — write 엔드포인트(#2632)가 서서 citeAction을
   // 실제로 켠다. 선택 확定(confirming) 후 스토리 피커를 열어 골라진 스토리에 저장한다.
   const citeSelection = useMessageRangeSelection();
@@ -134,7 +159,12 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   // story #92f00dc4(doc exec-command-final-spec-92f00dc4 §🎯) — 서버 집행 커맨드 결과 카드의
   // 「모호」 후보 클릭 = 입력창을 해소된 명령으로 채움(즉시 집행 아님). nonce는 같은 텍스트를
   // 두 번 연속 눌러도 ChatInput의 effect가 반응하도록 매 클릭마다 증가시키는 카운터.
-  const [prefillCommand, setPrefillCommand] = useState<{ text: string; nonce: number } | null>(null);
+  // story #3831 — initialComposeText가 있으면 마운트 시 그 값으로 시드(nonce 0). threadId가
+  // 바뀌어도(다른 대화로 재마운트) 이 초기값 계산은 최초 렌더 1회뿐이라 재프리필되지 않는다
+  // (useState 초기화자 관례 그대로 — 의도적으로 effect가 아니라 이 자리에 둔다).
+  const [prefillCommand, setPrefillCommand] = useState<{ text: string; nonce: number } | null>(
+    () => (initialComposeText ? { text: initialComposeText, nonce: 0 } : null),
+  );
   const handleFillComposer = useCallback((text: string) => {
     setPrefillCommand((prev) => ({ text, nonce: (prev?.nonce ?? 0) + 1 }));
   }, []);
@@ -313,7 +343,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
       const params = new URLSearchParams({ limit: '50' });
       if (before) params.set('before', before);
       const res = await fetch(`${apiPrefix}/${threadId}/messages?${params.toString()}`);
-      if (!res.ok) return undefined;
+      if (!res.ok) { setMessagesLoadFailed(true); return undefined; }
       // Backend: { data: _to_chat_message[], meta: { next_cursor, has_more } }
       const raw = await res.json() as Record<string, unknown>;
       const rawData = (Array.isArray(raw) ? raw : (raw.data ?? [])) as Record<string, unknown>[];
@@ -326,7 +356,16 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
       }
       setCursor(meta?.next_cursor ?? null);
       setHasMore(meta?.has_more ?? false);
+      setMessagesLoadFailed(false);
       return merged;
+    } catch {
+      // story #3638(유나 재판정 CHANGES 2026-09-07) — fetch 자체가 던지면(오프라인·
+      // DNS·res.json() 파싱 실패) !res.ok 분기를 안 거쳐 setMessagesLoadFailed가
+      // 안 서고 finally만 돌아 messages=[]·플래그=false로 「대화를 시작하세요」가
+      // 다시 섰다. 이 함수의 계약(undefined 반환=실패, handlePoll이 그대로 소비)을
+      // 지키며 던짐도 !res.ok와 동일하게 처리한다.
+      setMessagesLoadFailed(true);
+      return undefined;
     } finally {
       setLoading(false);
       setLoadingMore(false);
@@ -444,11 +483,17 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   // story #2987 — AC2 후반(연결 끊김 표시+수동 갱신). `connected`는 훅이 이미 반환하던 값
   // (mux 경로는 getter로 최신값을 항상 읽되 참조 안정적 — story #2144)인데 이 컴포넌트가
   // 그동안 아무도 안 읽고 있었다.
-  const { connected } = useChatSse({
+  // story #3621 AC1 — connected가 끊긴 채 threshold 이상 머물면 이 대화를 폴링으로
+  // 갱신한다. fetchMessages()가 undefined를 반환하면(!res.ok·throw) 실패로 간주해
+  // 폴 간격을 넓힌다(useChatSse 내부, sse-polling-fallback.ts).
+  const handlePoll = useCallback(async () => (await fetchMessages()) !== undefined, [fetchMessages]);
+
+  const { connected, polling } = useChatSse({
     currentTeamMemberId,
     onConversationMessage: handleConversationMessage,
     onWorking: handleWorking,
     onReconnect: handleReconnect,
+    onPoll: handlePoll,
   });
   // 짧은 순단(정상 60초 재연결 사이클, sse-reconnect-backoff.ts 주석 참고)까지 매번 배너를
   // 띄우면 소음이라, 끊김이 일정 시간(2s) 이상 지속될 때만 보인다 — 자동 재연결(#2987 §1)이
@@ -819,7 +864,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
     return map;
   }, [messages]);
 
-  const groups = groupByDate(messages);
+  const groups = groupByDate(messages, locale, displayTimezone);
 
   // story #1977: "여기부터 안읽음" 마커 위치 — markerBoundary(동결된 진입 시점 last_read_at)
   // 이후·타인 발신(§4-1 BE unread 정의 sender IS DISTINCT FROM 나와 동형) 첫 메시지 앞.
@@ -863,9 +908,9 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
             className="flex min-h-[44px] items-center gap-1 px-1 text-sm text-muted-foreground hover:text-foreground"
           >
             <ChevronLeft className="h-4 w-4" />
-            대화
+            {t('title')}
           </button>
-          <span className="truncate text-sm font-medium text-foreground">스레드</span>
+          <span className="truncate text-sm font-medium text-foreground">{t('threadLabel')}</span>
         </div>
       )}
 
@@ -874,23 +919,10 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
 
         {/* Main chat — AC8: 모바일에서 스레드/리딩패널 뷰 활성 시 hidden */}
         <div className={`flex min-w-0 flex-1 flex-col overflow-hidden ${isMobileRightPanelView ? 'hidden lg:flex' : 'flex'}`}>
-          {/* story #2987 AC2 후반 — 자동 재연결(§1)이 대부분 소리 없이 복구하지만, 실패하면
-              (예: 서버가 실제로 죽음) 주소창 없는 앱에선 새로고침 우회조차 없다 — 수동 갱신
-              affordance가 유일한 탈출구. 빨강(destructive) 아님 — "네가 실패했다"가 아니라
-              "연결이 끊긴 상태"(reference-drop-notice.tsx와 동일 warning-tint 관례). */}
+          {/* story #2987 AC2 후반+#3621(유나 CHANGES, 단일화) — ConnectionLostBanner
+              (connection-lost-banner.tsx) 참고. */}
           {showDisconnectedBanner && (
-            <div className="flex flex-shrink-0 items-center gap-2 border-b border-warning-border bg-warning-tint px-3 py-2 text-xs text-foreground">
-              <WifiOff className="h-3.5 w-3.5 flex-shrink-0" />
-              <span className="flex-1">{t('connectionLost')}</span>
-              <button
-                type="button"
-                onClick={() => void fetchMessages()}
-                className="flex items-center gap-1 rounded px-1.5 py-1 font-medium hover:bg-warning-border/40"
-              >
-                <RefreshCw className="h-3 w-3" />
-                {t('refreshNow')}
-              </button>
-            </div>
+            <ConnectionLostBanner polling={polling} onRefresh={() => void fetchMessages()} />
           )}
           {/* story #3194(PO 신규 회원 친절도 실측) — 미연결 에이전트에게 첫 메시지를 보내도
               화면 어디에도 신호가 없어 "제품이 죽었다"로 읽히던 결함. 판별자(verified===false)
@@ -933,13 +965,18 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
             )}
             {loading ? (
               <div className="flex h-full items-center justify-center">
-                <p className="text-sm text-muted-foreground">불러오는 중…</p>
+                <p className="text-sm text-muted-foreground">{tc('loading')}</p>
+              </div>
+            ) : messages.length === 0 && messagesLoadFailed ? (
+              <div className="flex h-full items-center justify-center">
+                <p role="alert" aria-live="assertive" aria-atomic="true" className="text-sm text-destructive">
+                  {t('messagesLoadFailed')}
+                </p>
               </div>
             ) : messages.length === 0 ? (
               <div className="flex h-full items-center justify-center">
                 <EmptyState
-                  title="대화를 시작하세요"
-                  description="첫 메시지를 보내면 대화가 시작됩니다."
+                  title={t('messagesEmptyTitle')}
                   className="w-full max-w-xs"
                 />
               </div>
@@ -955,7 +992,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
                       disabled={loadingMore}
                       className="text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
                     >
-                      {loadingMore ? '불러오는 중…' : '이전 메시지 보기'}
+                      {loadingMore ? tc('loading') : t('viewPreviousMessages')}
                     </button>
                   </div>
                 )}
@@ -1050,7 +1087,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
                 onClick={() => { setShowNewIndicator(false); scrollToBottom(true); }}
                 className="rounded-full border border-border bg-background px-3 py-1 text-xs font-medium text-primary shadow-sm transition-colors hover:bg-muted/50"
               >
-                ↓ 새 메시지
+                {t('newMessagesIndicator')}
               </button>
             </div>
           )}
@@ -1159,7 +1196,6 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
           </div>
         )}
       </div>
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
       {/* story #2349 — 「안 바뀌는 것」을 말하는 문장이 핵심(PO 규격, 빼지 않는다). */}
       <ConfirmDialog
         open={blockConfirmTarget !== null}

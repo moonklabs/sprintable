@@ -43,6 +43,7 @@ function HypothesisDraftPreview({
   onCancel: () => void;
 }) {
   const t = useTranslations('hypotheses');
+  const tc = useTranslations('common');
   const md = draft.metric_definition;
   const dir = md.direction === 'up' ? t('dirUp') : t('dirDown');
 
@@ -81,7 +82,7 @@ function HypothesisDraftPreview({
           disabled={confirming}
           className="rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-50"
         >
-          {confirming ? t('saving') : t('draftAccept')}
+          {confirming ? tc('saving') : t('draftAccept')}
         </button>
       </div>
     </div>

@@ -18,3 +18,15 @@ export function parseEntityRef(href: string | null | undefined): ParsedEntityRef
   if (!m) return null;
   return { entityType: m[1]!, entityId: m[2]! };
 }
+
+/**
+ * story #3328(PO 리뷰, 2026-09-02) — BE `reference_token.py::_escape_title`가 라벨 안의
+ * `\ [ ] ( )`를 `\`-escape해 저장한다(마크다운 링크 문법과 라벨 원문의 대괄호/괄호가 섞이지
+ * 않도록). 이 escape를 원복하는 규칙은 원래 chat-report-density.ts(story #3080)의
+ * stripInlineMarkers 안에 한 곳뿐이었다 — SSOT로 여기에 옮겨 재사용(두 벌 유지 금지).
+ * `\X` → `X`(백슬래시만 제거, 이스케이프된 문자 자체는 보존) — 원문 라벨 그대로, 문법
+ * 기호만 벗긴다(no-fiction).
+ */
+export function unescapeReferenceLabel(label: string): string {
+  return label.replace(/\\(.)/g, '$1');
+}

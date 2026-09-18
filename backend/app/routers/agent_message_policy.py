@@ -97,7 +97,7 @@ async def list_message_policy_candidates(
             SELECT om.id, om.org_id, om.user_id, om.role,
                    om.created_at, om.deleted_at,
                    u.email,
-                   COALESCE(m.name, u.display_name, u.email) AS name
+                   COALESCE(NULLIF(m.name, ''), NULLIF(u.display_name, '')) AS name  -- story #3758: email 폴백 0(name 슬롯만·email 컬럼은 그대로)
             FROM org_members om
             LEFT JOIN users u ON u.id = om.user_id
             LEFT JOIN members m

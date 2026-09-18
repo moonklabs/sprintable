@@ -39,7 +39,9 @@ async def list_my_organizations(
     """인증된 사용자가 속한 Organization 목록 조회."""
     items = await repo.list_for_user(uuid.UUID(auth.user_id))
     return [
-        MyOrganizationResponse(id=o.id, name=o.name, slug=o.slug, plan=o.plan, role=o.role)
+        MyOrganizationResponse(
+            id=o.id, name=o.name, slug=o.slug, plan=o.plan, role=o.role, timezone=o.timezone,
+        )
         for o in items
     ]
 
@@ -130,7 +132,9 @@ async def resolve_organization_by_slug(
     role = await repo.get_member_role(org_id=org.id, user_id=uuid.UUID(auth.user_id))
     if role is None:
         raise HTTPException(status_code=404, detail="Organization not found")
-    return MyOrganizationResponse(id=org.id, name=org.name, slug=org.slug, plan=org.plan, role=role)
+    return MyOrganizationResponse(
+        id=org.id, name=org.name, slug=org.slug, plan=org.plan, role=role, timezone=org.timezone,
+    )
 
 
 @router.get("/{id}", response_model=OrganizationResponse)
@@ -157,7 +161,7 @@ async def update_organization(
     repo: OrganizationRepository = Depends(_get_repo),
     session: AsyncSession = Depends(get_db),
 ) -> OrganizationResponse:
-    """Organization 이름/슬러그 수정 — owner/admin만 가능."""
+    """Organization 이름/슬러그/타임존 수정 — owner/admin만 가능."""
     role = await repo.get_member_role(org_id=id, user_id=uuid.UUID(auth.user_id))
     if role is None:
         raise HTTPException(status_code=404, detail="Organization not found")
@@ -186,6 +190,25 @@ async def update_organization(
             old_slug=org.slug, new_slug=body.slug,
         ))
         org.slug = body.slug
+
+    # story 46da6450 — name/slug와 달리 "필드 생략=무변경"과 "명시적 null=해제"를 구별해야
+    # 한다(null로 timezone 해제를 허용하는 게 AC). `body.timezone is not None` 체크만
+    # 쓰면 null을 보내도 스킵돼 영원히 해제가 안 된다 — model_fields_set으로 실제 전송
+    # 여부를 판별.
+    if "timezone" in body.model_fields_set:
+        if body.timezone is not None:
+            from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+            try:
+                ZoneInfo(body.timezone)
+            except (ZoneInfoNotFoundError, ValueError):
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "code": "ORG_TIMEZONE_INVALID",
+                        "message": f"'{body.timezone}'은 유효한 IANA 타임존 이름이 아닙니다(예: Asia/Seoul).",
+                    },
+                )
+        org.timezone = body.timezone
 
     await session.flush()
     await session.refresh(org)

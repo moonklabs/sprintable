@@ -3,9 +3,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import { useTranslations } from 'next-intl';
 import { SprintableLogo } from '@/components/brand/sprintable-logo';
 
 export default function VerifyEmailPage() {
+  const t = useTranslations('verifyEmail');
   const searchParams = useSearchParams();
   const router = useRouter();
   const token = searchParams.get('token') ?? '';
@@ -14,7 +16,7 @@ export default function VerifyEmailPage() {
     () => (token ? 'loading' : 'error')
   );
   const [message, setMessage] = useState(
-    () => (token ? '' : '유효하지 않은 인증 링크입니다.')
+    () => (token ? '' : t('invalidLink'))
   );
 
   // story #3195 — «시작하기»가 org 유무와 무관하게 항상 /inbox로 갔다. 온보딩 도중(org
@@ -63,28 +65,27 @@ export default function VerifyEmailPage() {
           // 그대로 노출했다("Email verified successfully"/"Email already verified" 둘
           // 다 하드코딩 영문). 성공은 code가 없어 분기 불가하니 우리 자체 한국어 문구
           // 하나로 통일한다(신규/기존 인증 둘 다 "인증됨" 결과는 동일하므로 구분 불요).
-          setMessage('이메일 인증이 완료되었습니다.');
+          setMessage(t('verifiedSuccess'));
         } else {
           setStatus('error');
           // story #2484 — code로 분기(backend auth.py verify_email()이 _err()로 직접
           // 발급하는 안정 값). 알려지지 않은 code만 안전 폴백(raw message 미노출).
-          // ⚠️Phase2 i18n·#2485 — 이 페이지가 next-intl 미배선이라 아래 문구도 하드코딩
-          // 한국어다(t() 아님, raw 서버 누수는 아님). #2484는 "raw 서버 노출 제거"만
-          // 스코프라 여기서 전면 i18n 전환은 안 함 — 유나 design 확認.
+          // story #3921 — next-intl은 root layout이 전역 제공 중이라(#2485 당시의
+          // "미배선" 전제가 틀렸다) t() 키로 전환. raw 서버 노출 없음은 그대로 유지.
           if (json.error?.code === 'INVALID_TOKEN') {
-            setMessage('인증 링크가 유효하지 않거나 만료되었습니다.');
+            setMessage(t('linkExpired'));
           } else if (json.error?.code === 'USER_NOT_FOUND') {
-            setMessage('사용자를 찾을 수 없습니다.');
+            setMessage(t('userNotFound'));
           } else {
-            setMessage('인증에 실패했습니다.');
+            setMessage(t('verifyFailed'));
           }
         }
       })
       .catch(() => {
         setStatus('error');
-        setMessage('인증 중 오류가 발생했습니다.');
+        setMessage(t('verifyError'));
       });
-  }, [token]);
+  }, [token, t]);
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-muted">
@@ -94,7 +95,7 @@ export default function VerifyEmailPage() {
         </div>
 
         {status === 'loading' && (
-          <p className="text-sm text-muted-foreground">이메일 인증 중...</p>
+          <p className="text-sm text-muted-foreground">{t('verifying')}</p>
         )}
 
         {status === 'success' && (
@@ -104,7 +105,7 @@ export default function VerifyEmailPage() {
               onClick={handleStart}
               className="flex w-full min-h-[44px] items-center justify-center rounded-lg bg-brand px-4 py-3 text-sm font-medium text-brand-foreground transition hover:bg-brand/90"
             >
-              시작하기
+              {t('startButton')}
             </button>
           </div>
         )}
@@ -113,7 +114,7 @@ export default function VerifyEmailPage() {
           <div className="space-y-4">
             <p className="text-sm text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{message}</p>
             <Link href="/login" className="block text-sm font-medium text-brand hover:text-brand/80">
-              로그인으로 돌아가기
+              {t('backToLogin')}
             </Link>
           </div>
         )}

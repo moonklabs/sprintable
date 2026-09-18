@@ -1,0 +1,78 @@
+"""story #3373(Phase1·마케팅운영, 그라운딩 doc 6766a399 §7, 선생님 확定 2026-09-03) — 조직이
+연결한 외부 채널 계정의 암호화 credential 원장.
+
+`org_connector_registry`(app/models/connector_registry.py)와 의도적으로 별개 테이블이다 —
+그 레지스트리는 "시크릿/토큰은 절대 안 온다"는 명시 설계(story #3317)라, credential을 실제로
+보관해야 하는 이 테이블은 그 설계를 재사용하지 않고 새로 연다. FK로 묶지 않는다(그라운딩 §9
+확定 — 관계 형태는 블루프린트 원문이 정하지 않았고, 두 테이블의 생애주기가 다르다: 레지스트리는
+스키마 선언, 이건 개별 계정 연결).
+
+암호화는 `app/services/billing_key_crypto.py`(MultiFernet·Secret Manager 키 회전) 그대로
+미러(`channel_credential_crypto.py`) — 신규 암호화 패턴을 발명하지 않는다."""
+from __future__ import annotations
+
+import uuid
+from datetime import datetime
+
+from sqlalchemy import DateTime, Text, UniqueConstraint
+from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.core.database import Base
+from app.models.base import OrgScopedMixin, TimestampMixin
+
+
+class ChannelConnection(Base, TimestampMixin, OrgScopedMixin):
+    __tablename__ = "channel_connections"
+    __table_args__ = (
+        UniqueConstraint("org_id", "channel", "account_id", name="uq_channel_connections_org_channel_account"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    channel: Mapped[str] = mapped_column(Text, nullable=False)  # "threads" | "instagram" | ... (Phase1=threads만)
+    account_id: Mapped[str] = mapped_column(Text, nullable=False)  # 외부 플랫폼 계정/페이지 식별자
+    account_label: Mapped[str | None] = mapped_column(Text, nullable=True)  # 화면 표시용(사용자명 등)
+    # 유나 화면설계 §8③(PO 채택) — "발급 붙여넣기"형 채널(WordPress Application Password 등)도
+    # 같은 테이블 암호 컬럼을 쓴다. oauth=이 파일의 OAuth 흐름으로 채움, pasted_secret=휴먼이
+    # 직접 값을 붙여넣음(둘 다 encrypted_access_token에 저장 — 의미만 다름), none=credential
+    # 불요 채널(미래 대비, 현재 미사용).
+    credential_kind: Mapped[str] = mapped_column(Text, nullable=False, server_default="oauth")
+    encrypted_access_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    encrypted_refresh_token: Mapped[str | None] = mapped_column(Text, nullable=True)  # provider가 주는 경우만
+    token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # story 본문 명시 — refresh_token 없이 "현재 유효한 access_token으로 재발급"하는 provider
+    # (Threads 장기 토큰이 이 방식) 대응. "refresh_token"=표준 grant, "reissue_from_access_token"
+    # =Threads류, "manual"=자동 갱신 불가(재인증 유도).
+    refresh_mode: Mapped[str] = mapped_column(Text, nullable=False, server_default="manual")
+    scopes: Mapped[list] = mapped_column(JSONB, nullable=False, server_default="[]")
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="active")  # active|expired|revoked|error
+    last_refreshed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # 유나 화면설계 §8②(PO 채택) — 갱신 실패 사유를 화면이 보여줄 수 있게(토큰 자체는 절대 아님).
+    # channel_connection.py::apply_refresh_failure의 PO 확定(2026-09-03 07:09Z) 그대로
+    # provider/실패 원문을 가공 없이 담는다 — "사람이 읽을 말로 가공"은 화면(FE) 몫.
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #3603(Phase2·BE·소형·결함, 페드루 PO 確定 2026-09-07, 유나 3597 관찰) — additive.
+    # `_promote_connection_status`(댓글)·`_promote_connection_status_for_snapshot`(인사이트)가
+    # CONNECTION 실패로 expired 승격할 때 이 둘도 같이 채운다(no-op 분기=last_error 3종
+    # 전부 불변). last_error 자체는 위 원칙대로 원문 그대로 두고, «어느 code였는지»·
+    # «언제였는지»는 이 두 컬럼이 별도로 든다(last_error 문자열 안에 섞어 넣지 않음 —
+    # apply_refresh_failure가 이미 세운 "원문 그대로" 관례와 같은 컬럼을 다른 의미로
+    # 오염시키지 않는다).
+    last_error_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_error_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    connected_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # story #3492(0331) — 붙여넣기(pasted_secret) 자격 「제자리 교체」의 재방문 표시용
+    # (§2 규격 3, app_id_suffix와 동형 — 원문은 절대 저장/반환하지 않는다, 끝 4자리뿐).
+    # oauth 채널은 이 값을 안 씀(NULL 그대로).
+    secret_hint: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #3805(Phase3·3-1·PR 4 후속, 페드루 PO 確定 2026-09-11 12:29Z) — 「조용히 0」
+    # 처방. null=최근 수집에서 parent 필드 키가 응답에 있었다(답글 구분 가능).
+    # 값 有=마지막으로 그 키가 부재로 관측된 시각 — collect_comments_for_publication이
+    # 매 수집마다 이 연결의 raw 응답을 보고 갱신(자가치유: 다음 수집에 키가 다시
+    # 나타나면 null로 되돌림).
+    reply_detection_unavailable_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # story #3813(Phase3·3-4 PR5-b, 페드루 PO 確定 2026-09-12) — account_id/account_
+    # label 둘로 부족한 채널(stibee: senderEmail·senderName)의 범용 여분 슬롯.
+    # channel_post_versions.channel_payload(0370)와 동형 설계(컬럼 이름에 채널
+    # 이름 안 붙임) — stibee만 채운다, 다른 채널은 NULL 그대로.
+    provider_config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)

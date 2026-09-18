@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { Trash2, Send, Check, X, Loader2, AlertTriangle } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -10,6 +10,8 @@ import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui
 import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/components/ui/toast';
 import { cn } from '@/lib/utils';
+import { formatRelativeTime } from '@/lib/storage/format';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { fetchWithAuth } from '@/lib/db/client';
 
 interface WebhookConfig {
@@ -40,10 +42,13 @@ function isWebhookUrlAllowed(url: string): boolean {
   return /^http:\/\/(localhost|127\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)/i.test(url);
 }
 
-function formatTs(ts?: string): string {
+// story #3493 — 웹훅 테스트 핑의 "언제 확認됐나"는 방금 벌어진 기록이라 §11-2
+// 절대형이 아니라 3436 묶음 8 정본(formatRelativeTime)이 맞다. 모듈 스코프 순수
+// 함수라 locale/tz를 인자로 받는다(훅은 컴포넌트 안에서만 호출 가능).
+function formatTs(ts: string | undefined, locale: string, displayTimezone: string): string {
   if (!ts) return '';
   try {
-    return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return formatRelativeTime(ts, locale, displayTimezone);
   } catch {
     return '';
   }
@@ -52,6 +57,8 @@ function formatTs(ts?: string): string {
 export function MyNotificationChannelSection({ projectId, projectName }: MyNotificationChannelSectionProps) {
   const t = useTranslations('settings');
   const tc = useTranslations('common');
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
   const { addToast } = useToast();
 
   const [memberId, setMemberId] = useState<string | null>(null);
@@ -83,8 +90,12 @@ export function MyNotificationChannelSection({ projectId, projectName }: MyNotif
   useEffect(() => {
     async function load() {
       try {
+        // story #3519(§16-7 2부, PO 確定 2026-09-05) — projRes만 격리돼 있었다(meRes는
+        // 안 됨) — meRes가 네트워크단 reject하면 이 Promise.all 전체가 던져 이미 정상
+        // 응답한 projRes의 결과(nameMap)까지 조용히 못 씌워졌다. meRes도 격리한다(한쪽만
+        // 격리하면 나머지 격리가 무의미해진다).
         const [meRes, projRes] = await Promise.all([
-          fetchWithAuth('/api/me'),
+          fetchWithAuth('/api/me').catch(() => null),
           fetchWithAuth('/api/projects').catch(() => null),
         ]);
         if (projRes?.ok) {
@@ -93,7 +104,7 @@ export function MyNotificationChannelSection({ projectId, projectName }: MyNotif
           (pj.data ?? []).forEach((p) => { map[p.id] = p.name; });
           setNameMap(map);
         }
-        if (!meRes.ok) return;
+        if (!meRes?.ok) return;
         const json = await meRes.json() as { data?: { id?: string } };
         const mid = json.data?.id ?? null;
         if (!mid) return;
@@ -328,7 +339,7 @@ export function MyNotificationChannelSection({ projectId, projectName }: MyNotif
                           role="group"
                           aria-live="assertive"
                           aria-label={`${t('webhookDeleteConfirm')} (${ariaScope})`}
-                          className="flex items-center justify-between gap-3 bg-destructive/5 px-3 py-2.5"
+                          className="flex items-center justify-between gap-3 bg-destructive-tint px-3 py-2.5"
                         >
                           {/* story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙). */}
                           <span className="min-w-0 truncate text-sm text-foreground" title={c.url}>
@@ -400,7 +411,7 @@ export function MyNotificationChannelSection({ projectId, projectName }: MyNotif
                             aria-live={test.status === 'fail' ? 'assertive' : 'polite'}
                             aria-atomic="true"
                           >
-                            {test.status === 'ok' && <><Check className="h-3 w-3" />{t('testReached')}{test.ts ? ` · ${formatTs(test.ts)}` : ''}</>}
+                            {test.status === 'ok' && <><Check className="h-3 w-3" />{t('testReached')}{test.ts ? ` · ${formatTs(test.ts, locale, displayTimezone)}` : ''}</>}
                             {test.status === 'fail' && <><X className="h-3 w-3" />{t('testFailed')}{test.reason ? ` · ${test.reason}` : ''}</>}
                             {test.status === 'sending' && <>{t('testSending')}</>}
                             {test.status === 'unavailable' && <>{t('testUnavailable')}</>}

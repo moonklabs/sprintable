@@ -15,6 +15,8 @@ import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 import { RealtimeProvider } from '@/components/realtime-provider';
 import { SessionExpiredDialog } from '@/components/auth/session-expired-dialog';
+import { ToastProvider } from '@/components/ui/toast';
+import { BottomDock } from '@/components/nav/bottom-dock';
 import { AppSidebar } from '@/components/nav/app-sidebar';
 import { MobileTabBar } from '@/components/nav/mobile-tab-bar';
 import { TopBar } from '@/components/nav/top-bar';
@@ -39,6 +41,10 @@ export interface DashboardProjectOption {
 interface DashboardContext {
   currentTeamMemberId?: string;
   orgId?: string;
+  // story #3674 — 현재 org의 timezone(layout.tsx가 GET /api/v2/organizations 응답에서
+  // me.org_id로 찾아 흘려보낸 값, null이면 org에 미설정 — org_time.py의 UTC 폴백과 대칭).
+  // 소비부는 calendar/page.tsx(resolveDisplayTimezone 인자)가 최초.
+  orgTimezone?: string | null;
   projectId?: string;
   projectName?: string;
   // story a539c649 S2: 현재 project 의 slug(사이드바/⌘K 가 /{ws}/{proj}/docs 직접 path 를
@@ -61,9 +67,20 @@ interface DashboardContext {
   // 이걸 prop으로 넘겨야 하는 것처럼 보인다. 실제로는 DashboardShell 내부에서만 계산해
   // Provider value에 싣는 값이라 외부 prop 계약에선 없어도 된다.
   orgSyncPending?: boolean;
+  // story #3759 — 우하단 dock 컬럼(components/nav/bottom-dock.tsx)이 소유한 「배너 슬롯」
+  // DOM 노드. kanban-board.tsx 같은 먼 후손이 자기 저장오류 배너를 이 노드로 포털해 넣는다
+  // (같은 열의 toast/런처와 같은 fixed 좌표를 공유 — 각자 fixed 계산 0). 부모(BottomDock)가
+  // 자식(kanban-board)보다 먼저 마운트돼 커밋 단계에서 ref가 먼저 채워지므로 실사용 중엔
+  // 항상 채워져 있다 — null은 "포털 대상 아직 없음"(마운트 레이스의 짧은 순간)뿐이고, 그
+  // 순간엔 소비부가 배너 렌더를 건너뛴다(크래시 대신 그 프레임만 안 보임, 다음 렌더에 채워짐).
+  bottomDockBannerSlot?: HTMLDivElement | null;
+  setBottomDockBannerSlot?: (el: HTMLDivElement | null) => void;
 }
 
-const DashboardCtx = createContext<DashboardContext>({ projectMemberships: [], orgMemberships: [], orgSyncPending: false });
+const DashboardCtx = createContext<DashboardContext>({
+  projectMemberships: [], orgMemberships: [], orgSyncPending: false,
+  bottomDockBannerSlot: null, setBottomDockBannerSlot: () => {},
+});
 
 export function useDashboardContext() {
   return useContext(DashboardCtx);
@@ -284,6 +301,7 @@ function useProjectSsot(
 export function DashboardShell({
   currentTeamMemberId,
   orgId,
+  orgTimezone,
   projectId,
   projectName,
   currentProjectSlug,
@@ -379,12 +397,23 @@ export function DashboardShell({
   // 곳에서만 계산해 두 표면에 값만 prop으로 내려준다. story #2078 결함수정(위 ShellBody 주석
   // 참고) — 이 훅 호출은 <RealtimeProvider> 자식 위치(ShellBody 안)로 옮겨졌다.
 
+  // story #3759 — 우하단 배너 슬롯 DOM 노드. state(ref 아님)로 두는 이유: BottomDock이
+  // 마운트한 실제 노드를 kanban-board.tsx 같은 먼 후손이 구독해 재렌더로 받아야
+  // createPortal이 올바른 시점에 실행된다(ref였다면 .current 변경이 소비부를 재렌더시키지
+  // 않아 첫 렌더에 항상 null로 굳는다). setState 함수 자체가 그대로 `ref` 콜백 시그니처
+  // (`(el: T | null) => void`)라 <div ref={setBottomDockBannerSlot}>로 바로 꽂는다.
+  const [bottomDockBannerSlot, setBottomDockBannerSlot] = useState<HTMLDivElement | null>(null);
+
   return (
-    <DashboardCtx.Provider value={{ currentTeamMemberId, orgId: effectiveOrgId, projectId: effectiveProjectId, projectName: effectiveProjectName, currentProjectSlug, userName, role, currentMemberType, projectMemberships, orgMemberships, orgSyncPending }}>
+    <ToastProvider>
+    <DashboardCtx.Provider value={{ currentTeamMemberId, orgId: effectiveOrgId, orgTimezone, projectId: effectiveProjectId, projectName: effectiveProjectName, currentProjectSlug, userName, role, currentMemberType, projectMemberships, orgMemberships, orgSyncPending, bottomDockBannerSlot, setBottomDockBannerSlot }}>
       <RefreshProvider>
       <RealtimeProvider currentTeamMemberId={currentTeamMemberId}>
         <TopBarProvider>
-          <SidebarProvider className="h-svh">
+          {/* story #3756 — dashboard-shell-root가 --bottom-dock-inset·--mobile-tab-bar-h를
+              소유(globals.css). MobileTabBar·BottomDock 둘 다 이 아래 자손이라 상속으로 그
+              값을 읽는다. */}
+          <SidebarProvider className="h-svh dashboard-shell-root">
             <ShellBody
               currentTeamMemberId={currentTeamMemberId}
               showTopBar={showTopBar}
@@ -398,11 +427,22 @@ export function DashboardShell({
             >
               {children}
             </ShellBody>
+            {/* story #3260 — SidebarProvider 안(ShellBody와 형제)에 마운트해야
+                useSidebar()로 실 사이드바 폭을 읽어 데스크톱 겹침을 피할 수 있다(2차 finding,
+                support-widget-launcher.tsx 문서화 참고) — SidebarProvider 밖에 두면
+                "useSidebar must be used within a SidebarProvider"로 크래시한다. "로그인 후
+                화면만"은 이 자리가 (authenticated)/layout.tsx 하위 DashboardShell 안이라는
+                사실 자체로 성립(별도 클라 체크 불요).
+                story #3759 — 우하단 fixed 요소(토스트·지원 런처·칸반 배너) 전부가 이제
+                BottomDock 하나가 소유한 컬럼 안에 산다(각자 fixed 좌표 계산 0). 런처
+                가시성 플래그(isSupportWidgetEnabled)도 BottomDock이 자체 판단. */}
+            <BottomDock />
           </SidebarProvider>
         </TopBarProvider>
         <SessionExpiredDialog />
       </RealtimeProvider>
       </RefreshProvider>
     </DashboardCtx.Provider>
+    </ToastProvider>
   );
 }

@@ -1,0 +1,1 @@
+{"file": "tests/test_620beefc_channel_post_image_upload.py", "sec": 21.0, "source": "story-3579-split-620beefc-channel-post-image(2026-09-06, 원본 test_620beefc_channel_post_image.py 25건·등재 48.0s를 3-way 분할 후 로컬 raw pytest 비중(upload 11건 8.09s/총 19.86s ≈ 44%)으로 배분한 잠정값 — 원본이 러너 정규화 60초 가드 경계대역(48~57s, PR #3925/#3926에서 174s/141s까지 관측)이었던 것을 각 파일 ≤30s 목표로 분리, 실 CI 샤드 로그로 재확認 필요)"}

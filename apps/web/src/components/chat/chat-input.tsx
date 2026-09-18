@@ -3,7 +3,9 @@
 import { useEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent } from 'react';
 import Link from 'next/link';
 import { AlertTriangle, Compass, FolderOpen, Loader2, Paperclip, Send, Terminal, Type, Upload, X, Hash } from 'lucide-react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { useOrgDomainLabels } from '@/hooks/use-org-domain-labels';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -15,6 +17,8 @@ import {
 import { getFileIcon } from '@/lib/file-icon';
 import { commandName, dequoteLiteral, isCommand } from '@/lib/command-classifier';
 import { resolveRuntimeStatus, runtimeLabel } from '@/lib/runtime-capabilities';
+import { orgRoleLabel } from '@/lib/org-member-role';
+import { resolveRoleLabel } from '@/app/(authenticated)/organization/trust/trust-utils';
 import type { SendAttachment } from '@/hooks/use-chat-sse';
 import type { Asset } from '@/lib/storage/types';
 import { imageFilesFromClipboard } from '@/lib/clipboard-image';
@@ -27,6 +31,7 @@ import {
 } from './chat-input-entity-tokens';
 import { useEntityPicker } from '@/hooks/use-entity-picker';
 import { fetchWithAuth } from '@/lib/db/client';
+import { participantDisplayLabel } from '@/lib/member-display';
 import { extractBackendErrorMessage } from '@/lib/api-error-message';
 
 // story #2264(C-6): 토큰조립/그룹핑/라벨은 이제 참조 코어(chat-input-entity-tokens.ts)에
@@ -110,6 +115,24 @@ interface MentionMember {
   id: string;
   name: string;
   role?: string | null;
+  // story #3770 — 휴먼(org role: owner/admin/member)·에이전트(trust role: implementation
+  // 등) 둘 다 이 목록에 섞여 온다(/api/members). role 낱말 축은 이 둘이 서로 다른 정본을
+  // 쓰므로(orgRoleLabel vs resolveRoleLabel), 어느 쪽인지 판별할 이 필드가 필요하다.
+  type?: string;
+}
+
+// story #3770 — /api/members(backend/app/routers/members.py::MemberResponse)가 휴먼은
+// org_members.role(owner/admin/member), 에이전트는 team_members.role(participation/
+// trust role: implementation 등)을 같은 `role` 필드에 섞어 돌려준다. type으로 갈라
+// 각각 맞는 정본을 쓴다(섞지 않는다 — 미확認 type은 원문 그대로, 지어내지 않는다).
+function mentionMemberRoleLabel(
+  member: MentionMember,
+  tSettings: (key: string) => string,
+  tOrg: (key: string, values?: Record<string, string | number>) => string,
+): string {
+  if (!member.role) return '';
+  if (member.type === 'agent') return resolveRoleLabel(member.role, null, tOrg);
+  return orgRoleLabel(member.role, tSettings);
 }
 
 // story #2032 — 대화별 임시저장(localStorage). 대화 전환은 ChatView가 key={conversation_id}로
@@ -157,7 +180,9 @@ interface ChatInputProps {
   // (본인 제외) 0명이면 STEER 토글 자체를 숨긴다(대상 없이는 발행이 원천 불가 — 신규
   // 발행경로가 필요 없는 화면에 죽은 버튼을 심지 않는다, graceful).
   currentTeamMemberId?: string;
-  participants?: { member_id: string; name: string | null }[];
+  // story #3758(9번째, PO 決) — resolved optional·BE 기본값(True)과 짝 맞춰 필드 자체가
+  // 없으면 "실존"으로 읽는다(participantDisplayLabel).
+  participants?: { member_id: string; name: string | null; resolved?: boolean }[];
   /** story #92f00dc4(doc exec-command-final-spec-92f00dc4 §🎯) — 모호 후보 클릭 =
    * «입력창을 해소된 명령으로 채움(즉시 집행 아님, 사람이 Enter로 확認)». 부모(chat-view)가
    * 후보 클릭 시 이 값을 갱신하면(같은 text라도 매번 새 nonce) 아래 effect가 입력창을
@@ -170,6 +195,16 @@ interface ChatInputProps {
 
 export function ChatInput({ onSend, onUploadFile, disabled, placeholder, projectId, onMentionIdsChange, commandTargets, threadId, onEscape, currentTeamMemberId, participants, prefillCommand }: ChatInputProps) {
   const t = useTranslations('chats');
+  const tc = useTranslations('common');
+  const tSettings = useTranslations('settings');
+  const tOrg = useTranslations('organization');
+  // story #3289(도메인탈고정·축1 Phase1 FE잔여, AC2) — 「네비」 실측 결과 사이드바/브레드크럼엔
+  // entity_type 렌더지점이 없고, 실제 렌더처는 이 `#` 엔티티 피커(chat-input-entity-tokens.ts
+  // entityTypeLabel())였다. 그 코어 파일은 AC3 판정 대상(diff 0 규율, #2264)이라 손대지
+  // 않고, 소비처인 여기서 kanban-board.tsx와 동형으로 org 오버라이드를 얹는다.
+  const { orgId } = useDashboardContext();
+  const locale = useLocale();
+  const domainLabels = useOrgDomainLabels(orgId, locale);
   // story 1946(PO 실기기 발견): 터치(가상 키보드)엔 Cmd/Shift 조합이 없어 Enter=발송이면 장문
   // 지시 중 오발송이 잦다. 뷰포트가 아니라 입력 capability로 분기(물리 키보드 연결 태블릿은
   // 데스크톱 거동이 자연스러움) — artifact-stage.tsx와 동형 패턴(`(pointer: coarse)` 1회 판정,
@@ -188,6 +223,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionMembers, setMentionMembers] = useState<MentionMember[]>([]);
   const [mentionIndex, setMentionIndex] = useState(0);
+  const [mentionLoadFailed, setMentionLoadFailed] = useState(false);
 
   // story #2264(C-6): 채팅 전용이던 entityQuery/entityResults/entityIndex + 검색 effect가
   // 참조 코어 hook으로 옮겨갔다 — 이 컴포넌트는 소비자일 뿐이다.
@@ -238,18 +274,35 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
   }, [prefillCommand]);
 
   useEffect(() => {
-    if (mentionQuery === null) { setMentionMembers([]); return; }
+    if (mentionQuery === null) { setMentionMembers([]); setMentionLoadFailed(false); return; }
     let cancelled = false;
-    fetchWithAuth(`/api/members?is_active=true${projectId ? `&project_id=${projectId}` : ''}`)
-      .then((r) => r.json())
+    // story #3687(3680 클래스) — project_id 없는 대화(org-level DM 등)는 project_id를 안
+    // 보냈었다(BE 필수→422). /api/members는 canonical SSOT(grant 휴먼·owner/admin 누락
+    // 없음, /api/team-members와 다른 계약 — BFF route.ts 주석)라 project_id가 있는 대화는
+    // 계속 이 엔드포인트를 써야 한다(team-members로 바꾸면 grant 휴먼이 사라지는 회귀,
+    // PO CHANGES 지적). 대신 BE가 project_id 없으면 org 스코프(grant 판정 불요)로
+    // additive 분기했다 — FE는 project_id 있으면 그대로, 없으면 생략만 하면 된다.
+    const params = new URLSearchParams({ is_active: 'true' });
+    if (projectId) params.set('project_id', projectId);
+    fetchWithAuth(`/api/members?${params.toString()}`)
+      .then((r) => {
+        if (!r.ok) throw new Error(`mention fetch ${r.status}`);
+        return r.json();
+      })
       .then((json) => {
         if (cancelled) return;
-        const all: MentionMember[] = (json.data ?? []).map((m: { id: string; name: string; role?: string | null }) => ({ id: m.id, name: m.name, role: m.role }));
+        const all: MentionMember[] = (json.data ?? []).map((m: { id: string; name: string; role?: string | null; type?: string }) => ({ id: m.id, name: m.name, role: m.role, type: m.type }));
         const q = mentionQuery.toLowerCase();
         setMentionMembers(q ? all.filter((m) => m.name.toLowerCase().includes(q)) : all);
         setMentionIndex(0);
+        setMentionLoadFailed(false);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (cancelled) return;
+        // 실패≠0건 — 조용히 빈 목록으로 삼키지 않고 드롭다운에 실패 상태를 드러낸다(AC②).
+        setMentionMembers([]);
+        setMentionLoadFailed(true);
+      });
     return () => { cancelled = true; };
   }, [mentionQuery, projectId]);
 
@@ -435,11 +488,17 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
         }),
       });
       if (!res.ok) {
-        const body = await res.json().catch(() => null) as { detail?: { code?: string } } | null;
+        // story #3601(디디 전수 표 2026-09-07) — BE 전역 봉투는 {data,error,meta}뿐이라
+        // body?.detail?.code는 항상 undefined였다 — "참여자 아님" 친절 문구가 영구
+        // 사망하고 항상 일반 sendFailed로만 떨어졌다. .detail을 변수로 먼저 옮겨
+        // 읽는다(body 뒤에 곧장 물음표 두 번으로 detail.code를 잇는 형은 lint_fe_
+        // error_envelope_detail_mismatch.py가 잡는 그 모양이라 다시 걸린다).
+        const body = await res.json().catch(() => null) as { error?: { code?: string }; detail?: { code?: string } } | null;
+        const detail = body?.detail;
         setSteerError(
-          body?.detail?.code === 'conversation_target_mismatch'
+          (body?.error?.code ?? detail?.code) === 'conversation_target_mismatch'
             ? t('steerErrorNotParticipant')
-            : extractBackendErrorMessage(body) ?? t('sendFailed'),
+            : extractBackendErrorMessage(body, t) ?? t('sendFailed'),
         );
         return;
       }
@@ -576,7 +635,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
                   onClick={() => removePendingFile(i)}
                   disabled={sending}
                   className="text-muted-foreground hover:text-foreground disabled:opacity-40"
-                  aria-label="첨부 제거"
+                  aria-label={t('removeAttachment')}
                 >
                   <X className="h-3.5 w-3.5" />
                 </button>
@@ -588,7 +647,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
       {/* story #2105 2차 — handleSend가 재시도 전 두 상태 모두 false로 리셋해(위 정의) 매
           시도마다 언마운트→리마운트된다. */}
       {uploadFailed && (
-        <p role="alert" aria-live="assertive" aria-atomic="true" className="mb-1 text-xs text-destructive">첨부 업로드에 실패했습니다. 다시 시도해 주세요.</p>
+        <p role="alert" aria-live="assertive" aria-atomic="true" className="mb-1 text-xs text-destructive">{t('attachmentUploadFailed')}</p>
       )}
       {sendFailed && (
         <p role="alert" aria-live="assertive" aria-atomic="true" className="mb-1 text-xs text-destructive">{t('sendFailed')}</p>
@@ -602,7 +661,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
         <p role="alert" aria-live="assertive" aria-atomic="true" className="mb-1 text-xs text-destructive">{steerError}</p>
       )}
       {atMaxAttachments && (
-        <p className="mb-1 text-xs text-muted-foreground">첨부는 최대 {MAX_ATTACHMENTS}개까지 가능합니다.</p>
+        <p className="mb-1 text-xs text-muted-foreground">{t('maxAttachmentsReached', { max: MAX_ATTACHMENTS })}</p>
       )}
 
       {/* S8: command-candidate / 리터럴 escape 입력 affordance (시각 보조 — 전송 차단 아님) */}
@@ -676,8 +735,9 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
               {steerTargets.map((p) => (
                 // story #3203(카디르 QA 블로킹) — BE가 orphan participant.name을 이제 null로
                 // 실어보낸다(예전엔 uuid 앞 8자였으나 그마저 없어짐) — p.member_id 그대로 쓰면
-                // 36자 uuid 전체가 노출된다(예전보다 더 심함). 사람 언어 폴백으로 통일.
-                <option key={p.member_id} value={p.member_id}>{p.name ?? t('unknownMember')}</option>
+                // 36자 uuid 전체가 노출된다(예전보다 더 심함). 사람 언어 폴백으로 통일. story
+                // #3758(9번째) — resolved 비트로 갈라 그린다(participantDisplayLabel).
+                <option key={p.member_id} value={p.member_id}>{participantDisplayLabel(p, t, tc)}</option>
               ))}
             </select>
             <div className="relative min-w-0 flex-1">
@@ -710,7 +770,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
                         }}
                         className="flex w-full items-center gap-1.5 px-2 py-1 text-left text-xs text-foreground hover:bg-muted"
                       >
-                        <span className="shrink-0 text-muted-foreground">{entityTypeLabel(ent.entity_type)}</span>
+                        <span className="shrink-0 text-muted-foreground">{domainLabels.entityTypeLabel(ent.entity_type) ?? entityTypeLabel(ent.entity_type)}</span>
                         <span className="truncate">{ent.title}</span>
                       </button>
                     </li>
@@ -727,7 +787,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
         {/* story #92f00dc4 — w-72→w-80: 서버 카탈로그 인자 힌트(예: `<스토리#> <멤버명>`)가
             추가되며 한 줄에 명령+힌트+설명이 안 맞아 줄바꿈되던 것 보정. */}
         {commandCandidates.length > 0 && (
-          <ul role="listbox" aria-label="커맨드 후보" className="focus-inset absolute bottom-full left-8 z-50 mb-1 max-h-48 w-80 overflow-y-auto rounded-md border border-border bg-popover shadow-[var(--elev-overlay)]">
+          <ul role="listbox" aria-label={t('commandCandidatesLabel')} className="focus-inset absolute bottom-full left-8 z-50 mb-1 max-h-48 w-80 overflow-y-auto rounded-md border border-border bg-popover shadow-[var(--elev-overlay)]">
             {commandCandidates.map((cmd, idx) => (
               <li key={cmd.name}>
                 <button
@@ -752,9 +812,16 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
           </ul>
         )}
 
+        {/* Mention dropdown 실패 상태 — story #3687: 조용한 0건과 구분되는 별도 얼굴. */}
+        {mentionQuery !== null && mentionLoadFailed && (
+          <div role="status" className="focus-inset absolute bottom-full left-8 z-50 mb-1 w-56 rounded-md border border-border bg-popover px-3 py-2 text-xs text-muted-foreground shadow-[var(--elev-overlay)]">
+            {t('mentionLoadFailed')}
+          </div>
+        )}
+
         {/* Mention dropdown */}
         {mentionMembers.length > 0 && (
-          <ul role="listbox" aria-label="멘션 후보" className="focus-inset absolute bottom-full left-8 z-50 mb-1 max-h-48 w-56 overflow-y-auto rounded-md border border-border bg-popover shadow-[var(--elev-overlay)]">
+          <ul role="listbox" aria-label={t('mentionCandidatesLabel')} className="focus-inset absolute bottom-full left-8 z-50 mb-1 max-h-48 w-56 overflow-y-auto rounded-md border border-border bg-popover shadow-[var(--elev-overlay)]">
             {mentionMembers.map((member, idx) => (
               <li key={member.id}>
                 <button
@@ -766,7 +833,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
                   className={`w-full px-3 py-2 text-left text-sm transition ${idx === mentionIndex ? 'bg-accent text-foreground font-medium' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
                 >
                   <span className="font-medium text-primary">@</span>{member.name}
-                  {member.role ? <span className="ml-2 text-xs opacity-60">{member.role}</span> : null}
+                  {member.role ? <span className="ml-2 text-xs opacity-60">{mentionMemberRoleLabel(member, tSettings, tOrg)}</span> : null}
                 </button>
               </li>
             ))}
@@ -776,7 +843,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
         {/* Entity dropdown — story #2263(C-5) ㉡: 종류별 구역(머리글)으로 묶되 열은 안 나눈다
             (entityResults가 이미 groupEntitiesByType로 그룹 순서라 렌더 순서=entityIndex 순서). */}
         {entityPicker.entityResults.length > 0 && (
-          <ul role="listbox" aria-label="엔티티 후보" className="focus-inset absolute bottom-full left-8 z-50 mb-1 max-h-48 w-72 overflow-y-auto rounded-md border border-border bg-popover shadow-[var(--elev-overlay)]">
+          <ul role="listbox" aria-label={t('entityCandidatesLabel')} className="focus-inset absolute bottom-full left-8 z-50 mb-1 max-h-48 w-72 overflow-y-auto rounded-md border border-border bg-popover shadow-[var(--elev-overlay)]">
             {entityPicker.entityResults.map((entity, idx) => {
               const EntityIcon = ENTITY_ICONS[entity.entity_type] ?? Hash;
               const isNewGroup = idx === 0 || entityPicker.entityResults[idx - 1]!.entity_type !== entity.entity_type;
@@ -787,7 +854,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
               <li key={`${entity.entity_type}:${entity.entity_id}`}>
                 {isNewGroup && (
                   <div className="sticky top-0 bg-popover px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                    {entityTypeLabel(entity.entity_type)}
+                    {domainLabels.entityTypeLabel(entity.entity_type) ?? entityTypeLabel(entity.entity_type)}
                   </div>
                 )}
                 <button

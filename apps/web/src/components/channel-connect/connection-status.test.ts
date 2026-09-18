@@ -1,0 +1,156 @@
+import { describe, test, expect } from 'vitest';
+import {
+  deriveChannelConnectionStatus,
+  channelConnectionStatusLabelKey,
+  CHANNEL_CONNECTION_STATUS_TONE,
+  worstChannelConnectionStatus,
+  type ChannelConnectionStatusInput,
+  type ChannelConnectionStatusResult,
+} from './connection-status';
+
+const NOW = new Date('2026-09-03T00:00:00Z');
+const iso = (hoursFromNow: number) => new Date(NOW.getTime() + hoursFromNow * 60 * 60 * 1000).toISOString();
+
+// story #3376 — 5상태 진리표. 파생 입력은 정확히 넷(status·token_expires_at·
+// can_auto_refresh·last_error)이고, config_incomplete은 오늘 도달 불가(파일 헤더 참고).
+const CASES: Array<{ name: string; input: ChannelConnectionStatusInput; expected: ChannelConnectionStatusResult }> = [
+  { name: '연결 행 없음 → 미연결', input: {}, expected: { status: 'not_connected' } },
+  {
+    name: '⭐연결 행 없음 + effective_source=none(앱 자격 전무) → 설정 미완',
+    input: { effectiveSource: 'none', now: NOW },
+    expected: { status: 'config_incomplete' },
+  },
+  {
+    name: '연결 행 없음 + effective_source=platform(공용 앱) → 그냥 미연결(자격은 있음)',
+    input: { effectiveSource: 'platform', now: NOW },
+    expected: { status: 'not_connected' },
+  },
+  {
+    name: '연결 행 없음 + effective_source=org(조직 자격) → 그냥 미연결',
+    input: { effectiveSource: 'org', now: NOW },
+    expected: { status: 'not_connected' },
+  },
+  {
+    name: '이미 연결된 행(active)은 effective_source=none이어도 재판정하지 않는다(연결 뒤 자격 삭제 시나리오)',
+    input: { serverStatus: 'active', effectiveSource: 'none', now: NOW },
+    expected: { status: 'connected' },
+  },
+  {
+    name: 'active + 만료 없음(=WordPress 앱 비밀번호류) → 연결됨',
+    input: { serverStatus: 'active', tokenExpiresAt: null, now: NOW },
+    expected: { status: 'connected' },
+  },
+  {
+    name: 'active + 만료가 임계값(48h) 밖 → 연결됨',
+    input: { serverStatus: 'active', tokenExpiresAt: iso(72), now: NOW },
+    expected: { status: 'connected' },
+  },
+  {
+    // story #3808(페드루 PO 지적 2026-09-12 18:31Z, 배포 82 픽셀 a117f726 실측) —
+    // 연결 상태 칩은 「사람이 고쳐야 풀리는 것」에만 선다는 규율(project_connection_
+    // status_only_for_things_a_human_must_fix) — 자동 갱신 가능한 토큰의 임박 만료는
+    // 사람이 할 일이 아니므로 칩은 여전히 「연결됨」(경고 톤 아님), isAutoRefreshInfo만
+    // 그대로 채워 부제(정보 문장)가 계속 뜨게 한다.
+    name: '⭐active + 만료 임박(48h 이내) + can_auto_refresh=true → 연결됨 유지(부제만 정보)',
+    input: { serverStatus: 'active', tokenExpiresAt: iso(6), canAutoRefresh: true, now: NOW },
+    expected: { status: 'connected', isAutoRefreshInfo: true },
+  },
+  {
+    name: '⭐active + 만료 임박(48h 이내) + can_auto_refresh=false → 만료 임박(할 일)',
+    input: { serverStatus: 'active', tokenExpiresAt: iso(6), canAutoRefresh: false, now: NOW },
+    expected: { status: 'expiring_soon', isAutoRefreshInfo: false },
+  },
+  {
+    name: '⭐expired → 재인증 필요(사유: expired — 다시 연결하면 풀림)',
+    input: { serverStatus: 'expired', now: NOW },
+    expected: { status: 'reauth_required', reauthReason: 'expired' },
+  },
+  {
+    name: '⭐revoked → 재인증 필요(사유: revoked — 채널 쪽에서 권한을 뺏김)',
+    input: { serverStatus: 'revoked', now: NOW },
+    expected: { status: 'reauth_required', reauthReason: 'revoked' },
+  },
+  {
+    name: '⭐error → 재인증 필요(사유: error — 갱신 실패, 이유는 last_error가 원문으로 보존)',
+    input: { serverStatus: 'error', lastError: 'Meta API 500', now: NOW },
+    expected: { status: 'reauth_required', reauthReason: 'error' },
+  },
+  // story #3813 PR5-b CHANGES(유나 Design REQUESTED 2026-09-12) — provider_error
+  // 코드(STIBEE_PLAN_RESTRICTED·STIBEE_SENDER_NOT_VERIFIED)는 재연결로 안 풀리는
+  // 별개 축이라 reauth_required로 안 뭉친다(뮤테이션 대상 — 이 분기를 지우면
+  // 이 두 케이스가 반드시 RED여야 한다).
+  {
+    name: '⭐error + lastErrorCode=STIBEE_PLAN_RESTRICTED → provider_error(재연결로 안 풀림)',
+    input: { serverStatus: 'error', lastErrorCode: 'STIBEE_PLAN_RESTRICTED', now: NOW },
+    expected: { status: 'provider_error' },
+  },
+  {
+    name: '⭐error + lastErrorCode=STIBEE_SENDER_NOT_VERIFIED → provider_error',
+    input: { serverStatus: 'error', lastErrorCode: 'STIBEE_SENDER_NOT_VERIFIED', now: NOW },
+    expected: { status: 'provider_error' },
+  },
+  {
+    name: 'error + 미지 lastErrorCode → 기존 reauth_required 그대로(회귀 0)',
+    input: { serverStatus: 'error', lastErrorCode: 'SOME_OTHER_CODE', now: NOW },
+    expected: { status: 'reauth_required', reauthReason: 'error' },
+  },
+];
+
+describe('deriveChannelConnectionStatus (story #3376, doc phase1-channel-connect-screen-design §3-0 — 진리표)', () => {
+  for (const { name, input, expected } of CASES) {
+    test(name, () => {
+      expect(deriveChannelConnectionStatus(input)).toEqual(expected);
+    });
+  }
+
+  test('§3-0 핵심 — expired·revoked·error는 같은 reauth_required 상태여도 reauthReason으로 갈린다(한 문구로 뭉치지 않는다)', () => {
+    const reasons = (['expired', 'revoked', 'error'] as const).map(
+      (s) => deriveChannelConnectionStatus({ serverStatus: s, now: NOW }).reauthReason,
+    );
+    expect(new Set(reasons).size).toBe(3);
+  });
+
+  test('§3-0-1 핵심 — 만료 임박의 정보/할 일 갈림은 can_auto_refresh 하나로만 결정된다(토큰 컬럼 추측 없음)', () => {
+    // story #3808 이후: canAutoRefresh만 다르면 isAutoRefreshInfo뿐 아니라 status 자체도
+    // 갈린다(true=연결됨 유지·false=만료 임박 칩) — 「사람이 고칠 게 있는가」축 그대로,
+    // 다른 필드로 새는 로직이 없다는 것만 고정한다(같은 입력, canAutoRefresh만 다름).
+    const withRefresh = deriveChannelConnectionStatus({ serverStatus: 'active', tokenExpiresAt: iso(1), canAutoRefresh: true, now: NOW });
+    const withoutRefresh = deriveChannelConnectionStatus({ serverStatus: 'active', tokenExpiresAt: iso(1), canAutoRefresh: false, now: NOW });
+    expect(withRefresh.status).toBe('connected');
+    expect(withoutRefresh.status).toBe('expiring_soon');
+    expect(withRefresh.isAutoRefreshInfo).not.toBe(withoutRefresh.isAutoRefreshInfo);
+  });
+});
+
+describe('worstChannelConnectionStatus (doc §8-1 — 채널 행은 계정 중 최악으로 승격)', () => {
+  test('빈 배열 → 미연결', () => {
+    expect(worstChannelConnectionStatus([])).toBe('not_connected');
+  });
+
+  test('⭐하나라도 재인증 필요면 채널 전체가 재인증 필요(가장 급한 것이 이긴다)', () => {
+    expect(worstChannelConnectionStatus(['connected', 'expiring_soon', 'reauth_required'])).toBe('reauth_required');
+  });
+
+  test('연결됨과 미연결이 섞이면 연결됨이 이긴다(정보 없음보다 급하다)', () => {
+    expect(worstChannelConnectionStatus(['not_connected', 'connected'])).toBe('connected');
+  });
+
+  // story #3813 PR5-b CHANGES — provider_error도 reauth_required 다음으로 급하다
+  // (그 둘을 뺀 나머지보다 우선). SEVERITY_ORDER에서 빠지면 이 값이 섞인 채널이
+  // 조용히 'not_connected'로 떨어진다(뮤테이션 대상).
+  test('⭐provider_error가 섞이면 connected·expiring_soon보다 이긴다', () => {
+    expect(worstChannelConnectionStatus(['connected', 'expiring_soon', 'provider_error'])).toBe('provider_error');
+  });
+});
+
+describe('CHANNEL_CONNECTION_STATUS_TONE / channelConnectionStatusLabelKey — 여섯 상태 전부 정의', () => {
+  test('여섯 상태 모두 tone·labelKey가 존재한다', () => {
+    const statuses: Array<ChannelConnectionStatusResult['status']> = [
+      'not_connected', 'config_incomplete', 'connected', 'expiring_soon', 'reauth_required', 'provider_error',
+    ];
+    for (const status of statuses) {
+      expect(CHANNEL_CONNECTION_STATUS_TONE[status]).toBeDefined();
+      expect(channelConnectionStatusLabelKey(status)).toMatch(/^channelStatus/);
+    }
+  });
+});

@@ -737,6 +737,10 @@ export class MemoService {
           signal: AbortSignal.timeout(10_000),
         });
       } catch (error) {
+        // story #3644(3632 후속, 확認 선행) — 살아 있는 기능(메모 답장은 상시 사용 경로,
+        // :642가 매 답장마다 호출)이라 은퇴 대상이 아니다. 수신자별 best-effort(한 명
+        // 실패해도 나머지 참가자 루프는 계속) — 답장 자체는 이 호출 前에 이미 커밋돼
+        // 화면에서 정상 조회 가능하므로 조용해도 doc §1 클래스가 아니다.
         console.warn('[MemoService.dispatchOssReplyWebhooks] failed for member', participantId, error instanceof Error ? error.message : String(error));
       }
     }

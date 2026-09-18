@@ -4,6 +4,7 @@
  * kicker·리드·목록 항목은 전부 원문 substring(마크다운 기호 strip 결과)이지 생성 텍스트가
  * 아니다.
  */
+import { unescapeReferenceLabel } from '@/components/chat/entity-ref';
 
 export type MessageKind = 'request' | 'handoff' | 'result' | 'ack';
 
@@ -43,7 +44,7 @@ function stripInlineMarkers(text: string): string {
     // 원복해 라벨만 남긴다(no-fiction: 원문 라벨 그대로, 참조 문법만 벗김). 볼드/코드
     // 스트립보다 반드시 뒤에 와야 한다 — 라벨 안에 중첩된 `**`가 먼저 벗겨져 있어야
     // 정확한 라벨을 얻는다(반대 순서면 `[**title**](entity:...)`의 라벨에 `**`가 남는다).
-    .replace(/\[((?:\\.|[^[\]\\])*)\]\(entity:\w+:[0-9a-f-]+\)/gi, (_m, label: string) => label.replace(/\\(.)/g, '$1'))
+    .replace(/\[((?:\\.|[^[\]\\])*)\]\(entity:\w+:[0-9a-f-]+\)/gi, (_m, label: string) => unescapeReferenceLabel(label))
     .trim();
 }
 

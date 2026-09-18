@@ -229,7 +229,22 @@ async def add_story(args: AddStoryInput) -> list[TextContent]:
         if args.origin_type and args.origin_id:
             body["origin_type"] = args.origin_type
             body["origin_id"] = args.origin_id
-        return ok(await client.post("/api/v2/stories", json=body))
+        result = await client.post("/api/v2/stories", json=body)
+        # story 8b7e52d6(PO 재정의, 2026-09-04) — assignee_id를 생략하고 만든 스토리는
+        # claim_story를 몇 번 호출해도 assignee가 채워지지 않는다(claim_story는
+        # participation만 건드림, story 3414b6d7 결정) — 보드 배정·통지 수신자가 영구히
+        # 비는 상태로 남을 수 있다는 걸 생성 시점에 바로 알린다(사후 수동 개입 필요했던
+        # 실사례: story 0845cb03).
+        if not args.assignee_id and isinstance(result, dict):
+            result = {
+                **result,
+                "warning": (
+                    "assignee 없음 → 통지 수신자 0. claim_story는 assignee를 채우지 "
+                    "않습니다 — 필요하면 update_story의 assignee_id/assignee_ids로 "
+                    "직접 배정하세요."
+                ),
+            }
+        return ok(result)
     except Exception as exc:
         return err(str(exc))
 

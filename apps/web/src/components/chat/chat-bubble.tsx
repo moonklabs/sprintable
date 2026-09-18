@@ -130,6 +130,7 @@ function prepareMentions(content: string): string {
 // 코너 버튼. inline/block 판별은 doc-content-renderer.tsx의 기존 검증된 휴리스틱과 동일
 // (className에 language- 없음 + 개행 없음 = inline) — 팀 컨벤션 재사용.
 function CopyableCode({ raw, inline, className }: { raw: string; inline: boolean; className: string }) {
+  const t = useTranslations('chats');
   const [copied, setCopied] = useState(false);
 
   const handleCopy = useCallback(() => {
@@ -155,7 +156,7 @@ function CopyableCode({ raw, inline, className }: { raw: string; inline: boolean
         tabIndex={0}
         onClick={handleCopy}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleCopy(); } }}
-        title={copied ? '복사됨' : '클릭해 복사'}
+        title={copied ? t('copied') : t('clickToCopy')}
         className={`${className} cursor-pointer transition hover:brightness-95 active:brightness-90`}
       >
         {raw}
@@ -170,8 +171,8 @@ function CopyableCode({ raw, inline, className }: { raw: string; inline: boolean
       <button
         type="button"
         onClick={handleCopy}
-        aria-label={copied ? '복사됨' : '코드 복사'}
-        title={copied ? '복사됨' : '코드 복사'}
+        aria-label={copied ? t('copied') : t('copyCode')}
+        title={copied ? t('copied') : t('copyCode')}
         className="absolute right-1 top-1 rounded p-1 opacity-60 transition hover:bg-black/10 group-hover/code:opacity-100 dark:hover:bg-white/10"
       >
         {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
@@ -431,8 +432,8 @@ export function ChatBubble({
   const lightboxItems: LightboxItem[] = useMemo(
     () => imageAttachmentEntries
       .filter((e) => e.imageIndex !== undefined)
-      .map((e) => ({ storedUrl: e.att.url!, alt: e.att.name ?? e.att.filename ?? '첨부파일' })),
-    [imageAttachmentEntries],
+      .map((e) => ({ storedUrl: e.att.url!, alt: e.att.name ?? e.att.filename ?? t('attachmentFileAlt') })),
+    [imageAttachmentEntries, t],
   );
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const handleOpenProfilePopover = useCallback((e: { currentTarget: Element }) => {
@@ -522,7 +523,12 @@ export function ChatBubble({
                 Avatar가 정본(사본 분화 금지) — shape(에이전트=circle·human=square)·idle blue 링·
                 working citron 펄스·human 테두리는 전부 avatar.tsx 내부가 결정한다. */}
             <Avatar
-              name={displayName}
+              // story #3791(페드루 재검토 12:23Z) — name(이니셜 재료)에 표시-폴백 문구
+              // (displayName="당신"/"팀" 등)를 넘기면 그 첫 글자가 가짜 이니셜로 뜬다 —
+              // name은 원시 sender_name(빈 문자열이면 자동으로 아이콘 tier), 표시 문구는
+              // label로.
+              name={message.sender_name}
+              label={displayName}
               avatarUrl={message.sender_avatar_url ?? null}
               actorType={isAgent ? 'agent' : 'human'}
               size={28}
@@ -598,6 +604,7 @@ export function ChatBubble({
             <EventBlockCard
               template={eventBlockTemplate}
               payload={eventTarget.payload}
+              refs={eventTarget.refs}
             />
           ) : serverCommand ? (
             <ServerCommandResultCard
@@ -704,7 +711,7 @@ export function ChatBubble({
               {imageAttachmentEntries.map(({ att, imageIndex }, i) => {
                 const href = att.url;
                 if (!href) return null;
-                const label = att.name ?? att.filename ?? '첨부파일';
+                const label = att.name ?? att.filename ?? t('attachmentFileAlt');
                 if (imageIndex !== undefined) {
                   return (
                     <AttachmentImage
@@ -759,7 +766,7 @@ export function ChatBubble({
               className="mt-0.5 flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs font-medium text-primary transition-colors hover:bg-primary/8"
             >
               <MessageSquare className="h-3 w-3" />
-              {replyCount}개의 답글
+              {t('replyCount', { count: replyCount })}
               {lastReplyTime && (
                 <span className="font-normal text-muted-foreground">{lastReplyTime}</span>
               )}
@@ -790,6 +797,7 @@ export function ChatBubble({
           x={profilePopover.x}
           y={profilePopover.y}
           name={displayName}
+          rawName={message.sender_name}
           isAgent={isAgent}
           avatarUrl={message.sender_avatar_url ?? null}
           runtimeType={isAgent ? message.sender_runtime_type : null}

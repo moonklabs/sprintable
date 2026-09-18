@@ -1,12 +1,13 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useTranslations } from 'next-intl';
 import { Node, mergeAttributes } from '@tiptap/core';
 import { ReactNodeViewRenderer, NodeViewWrapper, NodeViewContent, type ReactNodeViewProps } from '@tiptap/react';
 
 // ─── KaTeX Renderer ───────────────────────────────────────────────────────────
 
-async function renderKatex(latex: string, displayMode: boolean): Promise<{ html: string; error?: string }> {
+async function renderKatex(latex: string, displayMode: boolean, fallbackError: string): Promise<{ html: string; error?: string }> {
   try {
     const katex = await import('katex');
     const html = katex.default.renderToString(latex, {
@@ -16,13 +17,14 @@ async function renderKatex(latex: string, displayMode: boolean): Promise<{ html:
     });
     return { html };
   } catch (err) {
-    return { html: '', error: err instanceof Error ? err.message : 'KaTeX 렌더링 실패' };
+    return { html: '', error: err instanceof Error ? err.message : fallbackError };
   }
 }
 
 // ─── Math Block View (display mode) ──────────────────────────────────────────
 
 function MathBlockView({ node, selected }: ReactNodeViewProps) {
+  const t = useTranslations('docs');
   const latex = node.textContent;
   const [html, setHtml] = useState('');
   const [error, setError] = useState('');
@@ -36,12 +38,12 @@ function MathBlockView({ node, selected }: ReactNodeViewProps) {
         setError('');
         return;
       }
-      const { html: rendered, error: err } = await renderKatex(latex, true);
+      const { html: rendered, error: err } = await renderKatex(latex, true, t('mathRenderFailed'));
       if (cancelled) return;
       if (err) { setError(err); setHtml(''); } else { setHtml(rendered); setError(''); }
     })();
     return () => { cancelled = true; };
-  }, [latex]);
+  }, [latex, t]);
 
   return (
     <NodeViewWrapper as="div" className="my-4 not-prose">
@@ -50,7 +52,7 @@ function MathBlockView({ node, selected }: ReactNodeViewProps) {
         <div className="flex items-center justify-between px-3 py-2" contentEditable={false}>
           <span className="text-[11px] font-medium text-muted-foreground">math</span>
           {selected && (
-            <span className="text-[11px] text-muted-foreground">LaTeX 편집 중</span>
+            <span className="text-[11px] text-muted-foreground">{t('mathEditingLatex')}</span>
           )}
         </div>
 
@@ -78,7 +80,7 @@ function MathBlockView({ node, selected }: ReactNodeViewProps) {
                 className="flex justify-center overflow-x-auto [&_.katex]:text-foreground"
               />
             ) : (
-              <p className="text-xs text-muted-foreground text-center">수식을 입력하세요 (LaTeX)</p>
+              <p className="text-xs text-muted-foreground text-center">{t('mathPlaceholder')}</p>
             )}
           </div>
         )}
@@ -90,6 +92,7 @@ function MathBlockView({ node, selected }: ReactNodeViewProps) {
 // ─── Math Inline View ────────────────────────────────────────────────────────
 
 function MathInlineView({ node }: ReactNodeViewProps) {
+  const t = useTranslations('docs');
   const latex = node.textContent;
   const [html, setHtml] = useState('');
   const [error, setError] = useState('');
@@ -97,12 +100,12 @@ function MathInlineView({ node }: ReactNodeViewProps) {
   useEffect(() => {
     if (!latex.trim()) return;
     let cancelled = false;
-    void renderKatex(latex, false).then(({ html: rendered, error: err }) => {
+    void renderKatex(latex, false, t('mathRenderFailed')).then(({ html: rendered, error: err }) => {
       if (cancelled) return;
       if (err) { setError(err); setHtml(''); } else { setHtml(rendered); setError(''); }
     });
     return () => { cancelled = true; };
-  }, [latex]);
+  }, [latex, t]);
 
   if (error) {
     return (

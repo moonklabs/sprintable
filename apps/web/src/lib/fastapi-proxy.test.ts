@@ -3,14 +3,25 @@
 // FastAPI로 그대로 전달되는지(스테일 JWT project_id로 덮이지 않는지) 증명.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { getServerSessionMock } = vi.hoisted(() => ({
+const { getServerSessionMock, getLocaleMock } = vi.hoisted(() => ({
   getServerSessionMock: vi.fn(),
+  getLocaleMock: vi.fn(),
 }));
 
 vi.mock('@/lib/db/server', () => ({ getServerSession: getServerSessionMock }));
+vi.mock('@/i18n/request', () => ({ getLocale: getLocaleMock }));
 
 import { proxyToFastapi, proxyToFastapiWithParams, proxyToFastapiWrapped, mapApiError } from './fastapi-proxy';
 import { NotFoundError, ForbiddenError } from '@sprintable/core-storage';
+
+// story #3786 후속(2026-09-10) — 이 파일의 다른 describe 블록들은 Accept-Language와
+// 무관한 축을 검증하므로, 그 블록들에서 getLocale()이 매번 'en'을 주도록 파일 전역
+// 기본값을 하나 둔다(개별 블록에서 따로 안 건드리면 이 값). 아래 전용 블록만 이
+// 기본값을 재정의/실패시켜 실제 forwarding 로직을 검증한다.
+beforeEach(() => {
+  getLocaleMock.mockReset();
+  getLocaleMock.mockResolvedValue('en');
+});
 
 // story #2488 — packages/storage-api/src/utils.ts와 완전 동일한 사본(중복 구현)이라
 // 같은 회귀가드를 여기도 둔다(합치는 consolidation은 별개, PO 확定).
@@ -86,6 +97,88 @@ describe('fastapi-proxy — X-Project-Id override passthrough (story 7d6b770b �
   });
 });
 
+// story #3778 최초본은 회고 내보내기 route 하나만 extraHeaders로 Accept-Language를
+// opt-in 하는 구조였다. story #3786 후속(유나 실측·페드루 그라운딩 2026-09-10) —
+// 그 opt-in 전제가 사고였다: 전역 forward 목록에 없어 BFF 경유 요청 484개 전부가
+// getLocale()이 실제로 아는 앱 언어를 BE에 못 실었다(BE i18n 카탈로그 en이 웹앱
+// 사용자에게 도달 0). 이제 공통 계층이 매 호출마다 getLocale()을 기본으로 싣고,
+// extraHeaders는 라우트별 override 용도로만 남는다.
+describe('fastapi-proxy — Accept-Language 공통층 기본 forwarding(story #3786 후속)', () => {
+  beforeEach(() => {
+    getServerSessionMock.mockReset();
+    getServerSessionMock.mockResolvedValue({ access_token: 'token-1', org_id: 'org-1', project_id: 'proj-1' });
+    global.fetch = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+  });
+
+  it('extraHeaders를 안 넘겨도 getLocale()의 값이 Accept-Language로 실린다(공통층 기본)', async () => {
+    getLocaleMock.mockResolvedValue('en');
+    const request = new Request('http://localhost/api/retro-sessions/abc/export');
+
+    await proxyToFastapi(request, '/api/v2/retros/abc/export');
+
+    const [, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    expect(headers['Accept-Language']).toBe('en');
+  });
+
+  it('ko 사용자는 ko가 실린다(getLocale()이 소스)', async () => {
+    getLocaleMock.mockResolvedValue('ko');
+    const request = new Request('http://localhost/api/gates/g1/toss');
+
+    await proxyToFastapi(request, '/api/v2/gates/g1/toss');
+
+    const [, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    expect(headers['Accept-Language']).toBe('ko');
+  });
+
+  it('extraHeaders로 명시 override하면 그 값이 getLocale() 기본값을 이긴다(라우트별 override 유지)', async () => {
+    getLocaleMock.mockResolvedValue('en');
+    const request = new Request('http://localhost/api/retro-sessions/abc/export');
+
+    await proxyToFastapi(request, '/api/v2/retros/abc/export', { extraHeaders: { 'Accept-Language': 'ko' } });
+
+    const [, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    expect(headers['Accept-Language']).toBe('ko');
+  });
+
+  it('getLocale()이 던지면(요청 스코프 밖 등) 원 요청의 Accept-Language 헤더로 폴백한다', async () => {
+    getLocaleMock.mockRejectedValue(new Error('next/headers 요청 스코프 밖'));
+    const request = new Request('http://localhost/api/me', { headers: { 'Accept-Language': 'ja' } });
+
+    await proxyToFastapi(request, '/api/v2/me');
+
+    const [, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    expect(headers['Accept-Language']).toBe('ja');
+  });
+
+  it('getLocale()이 던지고 원 요청에도 Accept-Language가 없으면 안 실린다(값을 지어내지 않는다)', async () => {
+    getLocaleMock.mockRejectedValue(new Error('next/headers 요청 스코프 밖'));
+    const request = new Request('http://localhost/api/me');
+
+    await proxyToFastapi(request, '/api/v2/me');
+
+    const [, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    expect(headers['Accept-Language']).toBeUndefined();
+  });
+
+  it('proxyToFastapiWithParams도 getLocale()을 기본으로 싣고 extraHeaders가 넘어오면 override한다', async () => {
+    getLocaleMock.mockResolvedValue('en');
+    const request = new Request('http://localhost/api/retro-sessions/abc/export');
+
+    await proxyToFastapiWithParams(request, '/api/v2/retros/[id]/export', { id: 'abc' }, {
+      extraHeaders: { 'Accept-Language': 'ko' },
+    });
+
+    const [, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    expect(headers['Accept-Language']).toBe('ko');
+  });
+});
+
 // story #2190 — proxyToFastapi가 응답 헤더를 Content-Type 하나만 남기고 전부 버려서, board
 // 분기(list_stories)가 X-Total-Count/X-Next-Cursor로만 내보내는 커서 페이지네이션 신호가
 // 호출부(stories/backlog route)에 도달하기 前에 사라지던 결함의 회귀가드. 허용목록만 옮기고
@@ -140,6 +233,34 @@ describe('fastapi-proxy — 응답 헤더 allowlist forward(story #2190)', () =>
     expect(res.headers.get('x-total-count')).toBeNull();
     expect(res.headers.get('x-next-cursor')).toBeNull();
     expect(res.headers.get('content-type')).toBe('application/json');
+  });
+
+  // story #3517(PO REQUIRED 1, 2026-09-05) — 429 COMMENT_REFRESH_RATE_LIMITED가
+  // Retry-After 초를 들고 오는데 허용목록에 없어 조용히 버려지던 결함의 회귀가드.
+  // proxyToFastapiWithParams를 mock한 route 테스트로는 이 프록시 통과 자체를 못
+  // 재므로, 여기서 실물 fetch stub으로 proxyToFastapi를 직접 검증한다.
+  it('Retry-After는 429 응답에 그대로 실려 나온다(comments/refresh route가 이 값을 읽는다)', async () => {
+    global.fetch = vi.fn(async () => new Response(JSON.stringify({ detail: { code: 'COMMENT_REFRESH_RATE_LIMITED', message: 'x' } }), {
+      status: 429,
+      headers: { 'retry-after': '60' },
+    }));
+    const request = new Request('http://localhost/api/organizations/org-1/publications/pub-1/comments/refresh', { method: 'POST' });
+
+    const res = await proxyToFastapi(request, '/api/v2/organizations/org-1/publications/pub-1/comments/refresh');
+
+    expect(res.status).toBe(429);
+    expect(res.headers.get('retry-after')).toBe('60');
+  });
+
+  it('Retry-After가 없으면(429인데 헤더 자체가 없는 응답) null — 초를 지어내지 않는다', async () => {
+    global.fetch = vi.fn(async () => new Response(JSON.stringify({ detail: { code: 'COMMENT_REFRESH_RATE_LIMITED', message: 'x' } }), {
+      status: 429,
+    }));
+    const request = new Request('http://localhost/api/organizations/org-1/publications/pub-1/comments/refresh', { method: 'POST' });
+
+    const res = await proxyToFastapi(request, '/api/v2/organizations/org-1/publications/pub-1/comments/refresh');
+
+    expect(res.headers.get('retry-after')).toBeNull();
   });
 });
 
@@ -218,5 +339,96 @@ describe('fastapi-proxy — dict-detail 409(error.code) passthrough(story #2975)
     const body = (await res.json()) as { error: { code: string; message: string; current_head_sha: string } };
     expect(body.error.code).toBe('gate_head_changed');
     expect(body.error.current_head_sha).toBe('sha-race-landed');
+  });
+});
+
+// story #3644(3632 후속, 「봉투가 사라지는」 자리 전수·PO 決 2026-09-07) — grep 실측:
+// `if (!_r.ok) return _r` 형이 244개 라우트 파일에 290곳. 유나 v3.1 목록의 "BFF 10곳"은
+// 이 공유 프록시를 통해 훨씬 넓은 범위(244+)와 같은 병을 앓는 최소치였다 — 라우트마다
+// 고치는 대신 이 헬퍼 한 자리에서 막아 소비 라우트 전부가 물려받는다.
+describe('fastapi-proxy — 봉투가 사라지는 자리 전수 fix(story #3644)', () => {
+  beforeEach(() => {
+    getServerSessionMock.mockReset();
+    getServerSessionMock.mockResolvedValue({ access_token: 'token-1', org_id: 'org-1', project_id: 'proj-1' });
+  });
+
+  // 표본 1 — 502 HTML: CF가 origin 502/504를 자기 HTML 오류 페이지로 바꿔치는 자리
+  // (story #3632 그라운딩). 상류 status(502)는 보존하되, 파싱 안 되는 본문은 새
+  // 봉투(UPSTREAM_NON_JSON)로 감싼다 — 화면이 봉투 없이 raw HTML을 받는 사고를 막는다.
+  it('상류가 502+비-JSON(HTML) 본문을 내면 UPSTREAM_NON_JSON 봉투로 감싸고 상류 status(502)는 보존한다', async () => {
+    global.fetch = vi.fn(async () => new Response(
+      '<html><head><title>502 Bad Gateway</title></head><body>cloudflare</body></html>',
+      { status: 502, headers: { 'content-type': 'text/html' } },
+    ));
+    const request = new Request('http://localhost/api/organizations/org-1/publications/pub-1/comments/refresh', { method: 'POST' });
+
+    const res = await proxyToFastapi(request, '/api/v2/organizations/org-1/publications/pub-1/comments/refresh');
+
+    expect(res.status).toBe(502);
+    const body = (await res.json()) as { data: null; error: { code: string; message: string } };
+    expect(body.data).toBeNull();
+    expect(body.error.code).toBe('UPSTREAM_NON_JSON');
+    expect(body.error.message.length).toBeGreaterThan(0);
+  });
+
+  // story #3998 CHANGES(카디르 codex 발견, 2026-09-07) — 3516이 한 번 고쳤던
+  // Retry-After 소실이 UPSTREAM_NON_JSON 분기에서 재발했다(resHeaders는 계산되지만
+  // apiError() 호출에 안 실려 버려짐). CF 429 HTML 오류 페이지도 Retry-After를
+  // 실어 보낼 수 있다 — 그 값이 이 봉투에도 보존돼야 한다.
+  it('상류가 429+비-JSON(HTML) 본문+Retry-After를 내면 UPSTREAM_NON_JSON 봉투에도 Retry-After가 보존된다', async () => {
+    global.fetch = vi.fn(async () => new Response(
+      '<html><body>rate limited</body></html>',
+      { status: 429, headers: { 'content-type': 'text/html', 'retry-after': '30' } },
+    ));
+    const request = new Request('http://localhost/api/organizations/org-1/publications/pub-1/comments/refresh', { method: 'POST' });
+
+    const res = await proxyToFastapi(request, '/api/v2/organizations/org-1/publications/pub-1/comments/refresh');
+
+    expect(res.status).toBe(429);
+    expect(res.headers.get('retry-after')).toBe('30');
+    const body = (await res.json()) as { data: null; error: { code: string } };
+    expect(body.error.code).toBe('UPSTREAM_NON_JSON');
+  });
+
+  // 표본 2 — 503 JSON 봉투: BE 전역 핸들러가 이미 만든 정상 JSON 오류 봉투는 파싱이
+  // 성공하니 그대로 통과(옳음 5 BFF 라우트 무변경 — 이 헬퍼가 재해석하지 않는다).
+  it('상류가 503+정상 JSON 오류 봉투를 내면 그대로 통과한다(재해석 0)', async () => {
+    global.fetch = vi.fn(async () => new Response(
+      JSON.stringify({ data: null, error: { code: 'CHANNEL_PUBLISH_PROVIDER_ERROR', message: '일시적으로 발행할 수 없습니다.' }, meta: null }),
+      { status: 503, headers: { 'content-type': 'application/json' } },
+    ));
+    const request = new Request('http://localhost/api/organizations/org-1/channel-posts/drafts/d1/publish', { method: 'POST' });
+
+    const res = await proxyToFastapi(request, '/api/v2/organizations/org-1/channel-posts/drafts/d1/publish');
+
+    expect(res.status).toBe(503);
+    const body = (await res.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe('CHANNEL_PUBLISH_PROVIDER_ERROR');
+  });
+
+  // 표본 3 — fetch 자체가 던짐(DNS·connection refused·abort): 어느 라우트도 이 아래
+  // 코드를 못 받는다 — 헬퍼 안에서 즉시 막는다. status=503(502 아님, PO 決) — CF가
+  // origin 502/504 본문을 HTML로 바꿔치는 자리와 같은 "진짜 상류 실패" 분류.
+  it('fetch 자체가 던지면(네트워크 불능) UPSTREAM_UNREACHABLE 503을 반환한다', async () => {
+    global.fetch = vi.fn(async () => { throw new Error('fetch failed: ECONNREFUSED'); });
+    const request = new Request('http://localhost/api/me');
+
+    const res = await proxyToFastapi(request, '/api/v2/me');
+
+    expect(res.status).toBe(503);
+    const body = (await res.json()) as { data: null; error: { code: string } };
+    expect(body.data).toBeNull();
+    expect(body.error.code).toBe('UPSTREAM_UNREACHABLE');
+  });
+
+  it('proxyToFastapiWrapped도 UPSTREAM_NON_JSON 봉투를 그대로 통과시킨다(재파싱 0)', async () => {
+    global.fetch = vi.fn(async () => new Response('<html>gateway error</html>', { status: 502, headers: { 'content-type': 'text/html' } }));
+    const request = new Request('http://localhost/api/me');
+
+    const res = await proxyToFastapiWrapped(request, '/api/v2/me');
+
+    expect(res.status).toBe(502);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('UPSTREAM_NON_JSON');
   });
 });

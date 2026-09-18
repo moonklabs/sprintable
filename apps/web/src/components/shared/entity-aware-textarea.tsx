@@ -17,6 +17,15 @@ interface EntityAwareTextareaProps {
   className?: string;
   autoFocus?: boolean;
   onPaste?: (e: ClipboardEvent<HTMLTextAreaElement>) => void;
+  /** story #3289(도메인탈고정·축1 Phase1 FE잔여, AC2) — org 엔티티명 라벨 오버라이드
+   * (useOrgDomainLabels().entityTypeLabel), story-card.tsx의 getStatusLabel과 동형. 없으면
+   * chat-input-entity-tokens.ts의 canonical entityTypeLabel() 그대로(회귀 0). 참조 코어
+   * 파일(chat-input-entity-tokens.ts) 자체는 diff 0 규율(#2264 AC3)이라 여기 소비처에서만 얹는다. */
+  getEntityTypeLabel?: (canonicalSlug: string) => string | undefined;
+  'data-testid'?: string;
+  /** 후보 리스트박스 aria-label — chat-input.tsx의 동형 dropdown과 같은 문구를 쓰려면
+   * 호출부가 자신의 로케일 문구를 넘긴다(story #3930, 이 공용 파일엔 도메인 ns가 없음). */
+  entityCandidatesLabel?: string;
 }
 
 /**
@@ -25,7 +34,7 @@ interface EntityAwareTextareaProps {
  * use-entity-picker.ts, 이 파일은 그 위의 얇은 렌더 래퍼 — chat-input.tsx의 entity dropdown
  * JSX를 그대로 재사용). story description/AC(story-detail-panel.tsx)가 첫 소비자.
  */
-export function EntityAwareTextarea({ value, onChange, projectId, placeholder, className, autoFocus, onPaste }: EntityAwareTextareaProps) {
+export function EntityAwareTextarea({ value, onChange, projectId, placeholder, className, autoFocus, onPaste, getEntityTypeLabel, 'data-testid': dataTestId, entityCandidatesLabel = 'Entity candidates' }: EntityAwareTextareaProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const entityPicker = useEntityPicker(projectId);
 
@@ -66,6 +75,7 @@ export function EntityAwareTextarea({ value, onChange, projectId, placeholder, c
     <div className="relative">
       <textarea
         ref={textareaRef}
+        data-testid={dataTestId}
         value={value}
         onChange={handleChange}
         onKeyDown={handleKeyDown}
@@ -77,7 +87,7 @@ export function EntityAwareTextarea({ value, onChange, projectId, placeholder, c
       {/* story #2263(C-5) ㉠㉡㉢ 그대로 재사용 — chat-input.tsx 엔티티 dropdown과 동형 렌더. */}
       {entityPicker.entityResults.length > 0 && (
         // story #3007(로드맵 P2·PR-E, L1) — 자동완성 리스트박스는 floating이라 --elev-overlay.
-        <ul role="listbox" aria-label="엔티티 후보" className="focus-inset absolute left-0 z-50 mt-1 max-h-48 w-72 overflow-y-auto rounded-md border border-border bg-popover shadow-[var(--elev-overlay)]">
+        <ul role="listbox" aria-label={entityCandidatesLabel} className="focus-inset absolute left-0 z-50 mt-1 max-h-48 w-72 overflow-y-auto rounded-md border border-border bg-popover shadow-[var(--elev-overlay)]">
           {entityPicker.entityResults.map((entity, idx) => {
             const EntityIcon = ENTITY_ICONS[entity.entity_type] ?? Hash;
             const isNewGroup = idx === 0 || entityPicker.entityResults[idx - 1]!.entity_type !== entity.entity_type;
@@ -88,7 +98,7 @@ export function EntityAwareTextarea({ value, onChange, projectId, placeholder, c
               <li key={`${entity.entity_type}:${entity.entity_id}`}>
                 {isNewGroup && (
                   <div className="sticky top-0 bg-popover px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                    {entityTypeLabel(entity.entity_type)}
+                    {getEntityTypeLabel?.(entity.entity_type) ?? entityTypeLabel(entity.entity_type)}
                   </div>
                 )}
                 {/* ⛔focus-outset을 일부러 안 붙인다(PO 확認, 2026-07-28) — 이 하이라이트(bg-accent)는

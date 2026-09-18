@@ -1,0 +1,339 @@
+"""story #3806(Phase3·3-2 PR3, 페드루 PO 確定 2026-09-11) — 승인된 ads_boost 게이트
+실행·중지·재개 API. `_require_human`은 PR 2 router(app/routers/ads_boost.py)와
+동형(호출부마다 로컬 복제 관례) — 휴먼 전용(그라운딩 AC4). i18n_catalog 스레딩
+패턴도 PR 2 router와 동형(Header() DI는 라우트 진입점에서만).
+
+story #3806 PR4(페드루 PO 確定 2026-09-11) — 지출 요약 GET 엔드포인트도 이 파일에
+동봉(같은 `/ads-boosts/{gate_id}/...` prefix 아래 자연 위치). 읽기 전용이라
+insight_snapshots.py::list_publication_insights_endpoint와 동형 권한 축(휴먼·
+에이전트 모두, human-only 아님 — start/pause/resume과 다른 판단, 조회는 실행이
+아니다)."""
+from __future__ import annotations
+
+import uuid
+
+from fastapi import APIRouter, Depends, Header, HTTPException
+from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
+from app.dependencies.database import get_db
+from app.services.agent_onboarding_config import resolve_locale_from_request
+from app.services.ads_boost_execution import (
+    AdsBoostAlreadyInStateError,
+    AdsBoostGateNotApprovedError,
+    AdsBoostGateNotFoundError,
+    AdsBoostNotPausedError,
+    AdsBoostNotStartedError,
+    request_ads_boost_pause,
+    request_ads_boost_resume,
+    request_ads_boost_start,
+)
+from app.services.ads_spend_snapshots import (
+    AdsBoostGateNotFoundForSpendError,
+    AdsSpendFetchError,
+    AdsSpendRefreshRateLimitedError,
+    get_ads_boost_spend_summary,
+    refresh_ads_boost_spend_now,
+)
+from app.services.i18n_catalog import t
+from app.services.member_resolver import resolve_member
+
+router = APIRouter(prefix="/api/v2/organizations", tags=["ads-boost-execution"])
+
+
+async def _require_human(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID, resolved_locale: str):
+    resolved = await resolve_member(auth, org_id, db)
+    if resolved.type != "human":
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "ADS_BOOST_EXECUTE_HUMAN_ONLY",
+                "message": t("ads_boost.execute_human_only", resolved_locale),
+            },
+        )
+    return resolved
+
+
+class CommandResponse(BaseModel):
+    command_id: uuid.UUID
+    operation: str
+    toggle_seq: int
+    status: str
+    # story #3806(Phase3·3-2 PR 8, 페드루 PO 確定 2026-09-11) — 0367이 만든 컬럼을
+    # 여기 직렬화하지 않아 "있어도 못 읽으면 안 닫힌 것"이었다(PR6 정정 배경).
+    # boost_start의 human 경로(이 파일 `_start_ads_boost_endpoint`)만 채우고
+    # pause/resume 커맨드는 이 축 구분이 없어(scheduler가 안 건드리는 operation)
+    # null 그대로 — 지어내지 않는다.
+    initiated_by: str | None
+
+
+def _to_response(command) -> CommandResponse:
+    return CommandResponse(
+        command_id=command.id, operation=command.operation, toggle_seq=command.toggle_seq,
+        status=command.status, initiated_by=command.initiated_by,
+    )
+
+
+def _raise_common_error(exc: Exception, resolved_locale: str) -> None:
+    if isinstance(exc, AdsBoostGateNotFoundError):
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "ADS_BOOST_GATE_NOT_FOUND", "message": t("ads_boost.gate_not_found", resolved_locale)},
+        ) from exc
+    if isinstance(exc, AdsBoostGateNotApprovedError):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "ADS_BOOST_GATE_NOT_APPROVED",
+                "message": t("ads_boost.gate_not_approved", resolved_locale),
+            },
+        ) from exc
+    raise exc
+
+
+@router.post("/{org_id}/ads-boosts/{gate_id}/start", response_model=CommandResponse, status_code=201)
+async def start_ads_boost_endpoint(
+    org_id: uuid.UUID, gate_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db), verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+    locale: str | None = None,
+    accept_language: str | None = Header(None, alias="Accept-Language"),
+) -> CommandResponse:
+    """story #3806 — 라우트 진입점, `Header()` DI 마커는 여기서만 받는다. 직접-호출
+    (realdb·유닛) 테스트는 `_start_ads_boost_endpoint`를 불러야 한다."""
+    return await _start_ads_boost_endpoint(
+        org_id, gate_id, db=db, verified_org_id=verified_org_id, auth=auth,
+        resolved_locale=resolve_locale_from_request(locale, accept_language),
+    )
+
+
+async def _start_ads_boost_endpoint(
+    org_id: uuid.UUID, gate_id: uuid.UUID, *, db: AsyncSession, verified_org_id: uuid.UUID,
+    auth: AuthContext, resolved_locale: str,
+) -> CommandResponse:
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    resolved = await _require_human(db, auth, org_id, resolved_locale)
+    try:
+        command = await request_ads_boost_start(
+            db, org_id=org_id, gate_id=gate_id, requester_member_id=resolved.id, initiated_by="human",
+        )
+    except (AdsBoostGateNotFoundError, AdsBoostGateNotApprovedError) as exc:
+        _raise_common_error(exc, resolved_locale)
+    return _to_response(command)
+
+
+@router.post("/{org_id}/ads-boosts/{gate_id}/pause", response_model=CommandResponse, status_code=201)
+async def pause_ads_boost_endpoint(
+    org_id: uuid.UUID, gate_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db), verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+    locale: str | None = None,
+    accept_language: str | None = Header(None, alias="Accept-Language"),
+) -> CommandResponse:
+    return await _pause_ads_boost_endpoint(
+        org_id, gate_id, db=db, verified_org_id=verified_org_id, auth=auth,
+        resolved_locale=resolve_locale_from_request(locale, accept_language),
+    )
+
+
+async def _pause_ads_boost_endpoint(
+    org_id: uuid.UUID, gate_id: uuid.UUID, *, db: AsyncSession, verified_org_id: uuid.UUID,
+    auth: AuthContext, resolved_locale: str,
+) -> CommandResponse:
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    resolved = await _require_human(db, auth, org_id, resolved_locale)
+    try:
+        command = await request_ads_boost_pause(
+            db, org_id=org_id, gate_id=gate_id, requester_member_id=resolved.id,
+        )
+    except (AdsBoostGateNotFoundError, AdsBoostGateNotApprovedError) as exc:
+        _raise_common_error(exc, resolved_locale)
+    except AdsBoostNotStartedError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "ADS_BOOST_NOT_STARTED", "message": t("ads_boost.not_started", resolved_locale)},
+        ) from exc
+    except AdsBoostAlreadyInStateError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "ADS_BOOST_ALREADY_PAUSED", "message": t("ads_boost.already_paused", resolved_locale)},
+        ) from exc
+    return _to_response(command)
+
+
+@router.post("/{org_id}/ads-boosts/{gate_id}/resume", response_model=CommandResponse, status_code=201)
+async def resume_ads_boost_endpoint(
+    org_id: uuid.UUID, gate_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db), verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+    locale: str | None = None,
+    accept_language: str | None = Header(None, alias="Accept-Language"),
+) -> CommandResponse:
+    return await _resume_ads_boost_endpoint(
+        org_id, gate_id, db=db, verified_org_id=verified_org_id, auth=auth,
+        resolved_locale=resolve_locale_from_request(locale, accept_language),
+    )
+
+
+async def _resume_ads_boost_endpoint(
+    org_id: uuid.UUID, gate_id: uuid.UUID, *, db: AsyncSession, verified_org_id: uuid.UUID,
+    auth: AuthContext, resolved_locale: str,
+) -> CommandResponse:
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    resolved = await _require_human(db, auth, org_id, resolved_locale)
+    try:
+        command = await request_ads_boost_resume(
+            db, org_id=org_id, gate_id=gate_id, requester_member_id=resolved.id,
+        )
+    except (AdsBoostGateNotFoundError, AdsBoostGateNotApprovedError) as exc:
+        _raise_common_error(exc, resolved_locale)
+    except AdsBoostNotPausedError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "ADS_BOOST_NOT_PAUSED", "message": t("ads_boost.not_paused", resolved_locale)},
+        ) from exc
+    except AdsBoostAlreadyInStateError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "ADS_BOOST_ALREADY_RUNNING", "message": t("ads_boost.already_running", resolved_locale)},
+        ) from exc
+    return _to_response(command)
+
+
+class SpendSnapshotView(BaseModel):
+    due_at: str
+    captured_at: str | None
+    status: str
+    spend_minor: int | None
+
+
+class SpendSummaryResponse(BaseModel):
+    gate_id: uuid.UUID
+    sealed_ads_budget_minor: int
+    sealed_ads_currency: str
+    captured_spend_minor: int
+    remaining_minor: int
+    # story #3806(Phase3·3-2 PR5, 디디 3자기점검) — AdsBoostRun.status('pending'|
+    # 'running'|'paused'|'failed') 실 관측값. run 행이 아직 없으면 None(gate 승인
+    # 직후·실행 요청 前 — "미실행"을 지어낸 상태값으로 가리지 않는다).
+    run_status: str | None
+    # story #3806(Phase3·3-2 PR 8, 페드루 PO 確定 2026-09-11) — boost_start 커맨드의
+    # `initiated_by`('scheduler'|'human'). run_status와 동형 판단(디디 3자기점검
+    # 정신 재사용) — 이 GET이 이미 gate_id 단건 조회 자리라 3번째 GET 신설 안 함.
+    # boost_start 커맨드 자체가 없으면(gate 승인 직후·실행 前) None.
+    initiated_by: str | None
+    # story #3806(Phase3·3-2 PR 11, 페드루 PO 確定 2026-09-11 16:20Z) — §7 실측 열
+    # 「상한 초과 0건」의 장치. 캡처 spend 합이 sealed_ads_budget_minor에 도달한
+    # 시각(ads_boost_runs.cap_reached_at, 0368) — run 자체가 없거나 미도달이면
+    # null(지어내지 않는다).
+    cap_reached_at: str | None
+    snapshots: list[SpendSnapshotView]
+
+
+@router.get("/{org_id}/ads-boosts/{gate_id}/spend", response_model=SpendSummaryResponse)
+async def get_ads_boost_spend_endpoint(
+    org_id: uuid.UUID, gate_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db), verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    _auth: AuthContext = Depends(get_current_user),
+    locale: str | None = None,
+    accept_language: str | None = Header(None, alias="Accept-Language"),
+) -> SpendSummaryResponse:
+    """story #3806 PR4 — 「승인 예산 대비 지출」(paid 축만, source=="paid" 분리 표시).
+    읽기 전용이라 조회 자체는 human-only가 아니다(insight_snapshots.py 동형 판단,
+    이 파일 상단 모듈 docstring 참고)."""
+    return await _get_ads_boost_spend_endpoint(
+        org_id, gate_id, db=db, verified_org_id=verified_org_id,
+        resolved_locale=resolve_locale_from_request(locale, accept_language),
+    )
+
+
+async def _get_ads_boost_spend_endpoint(
+    org_id: uuid.UUID, gate_id: uuid.UUID, *, db: AsyncSession, verified_org_id: uuid.UUID, resolved_locale: str,
+) -> SpendSummaryResponse:
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    try:
+        summary = await get_ads_boost_spend_summary(db, org_id=org_id, gate_id=gate_id)
+    except AdsBoostGateNotFoundForSpendError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "ADS_BOOST_GATE_NOT_FOUND", "message": t("ads_boost.gate_not_found", resolved_locale)},
+        ) from exc
+    return SpendSummaryResponse(
+        gate_id=summary["gate_id"], sealed_ads_budget_minor=summary["sealed_ads_budget_minor"],
+        sealed_ads_currency=summary["sealed_ads_currency"], captured_spend_minor=summary["captured_spend_minor"],
+        remaining_minor=summary["remaining_minor"], run_status=summary["run_status"],
+        initiated_by=summary["initiated_by"],
+        cap_reached_at=summary["cap_reached_at"].isoformat() if summary["cap_reached_at"] else None,
+        snapshots=[
+            SpendSnapshotView(
+                due_at=s["due_at"].isoformat(), captured_at=s["captured_at"].isoformat() if s["captured_at"] else None,
+                status=s["status"], spend_minor=s["spend_minor"],
+            )
+            for s in summary["snapshots"]
+        ],
+    )
+
+
+class SpendRefreshResponse(BaseModel):
+    spend_minor: int
+    captured_at: str
+    cap_reached: bool
+    run_status: str
+
+
+@router.post("/{org_id}/ads-boosts/{gate_id}/spend/refresh", response_model=SpendRefreshResponse, status_code=201)
+async def refresh_ads_boost_spend_endpoint(
+    org_id: uuid.UUID, gate_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db), verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+    locale: str | None = None,
+    accept_language: str | None = Header(None, alias="Accept-Language"),
+) -> SpendRefreshResponse:
+    """story #3806(Phase3·3-2 PR 12, 페드루 PO 確定 2026-09-11 17:26Z) — 「광고비
+    다시 수집」. `comments/refresh`와 동형 권한 축(휴먼 전용 — 실행류 액션이라
+    start/pause/resume과 같은 판단, 조회 전용인 /spend GET과 다르다)."""
+    return await _refresh_ads_boost_spend_endpoint(
+        org_id, gate_id, db=db, verified_org_id=verified_org_id, auth=auth,
+        resolved_locale=resolve_locale_from_request(locale, accept_language),
+    )
+
+
+async def _refresh_ads_boost_spend_endpoint(
+    org_id: uuid.UUID, gate_id: uuid.UUID, *, db: AsyncSession, verified_org_id: uuid.UUID,
+    auth: AuthContext, resolved_locale: str,
+) -> SpendRefreshResponse:
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    resolved = await _require_human(db, auth, org_id, resolved_locale)
+    try:
+        result = await refresh_ads_boost_spend_now(
+            db, org_id=org_id, gate_id=gate_id, requester_member_id=resolved.id,
+        )
+    except AdsSpendRefreshRateLimitedError as exc:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "code": "ADS_SPEND_REFRESH_RATE_LIMITED",
+                "message": t("ads_boost.spend_refresh_rate_limited", resolved_locale, seconds=exc.retry_after_seconds),
+            },
+            headers={"Retry-After": str(exc.retry_after_seconds)},
+        ) from exc
+    except (AdsBoostGateNotFoundError, AdsBoostGateNotApprovedError) as exc:
+        _raise_common_error(exc, resolved_locale)
+    except AdsSpendFetchError as exc:
+        # story #3806 PR12 — 아직 provider에 실행 자체가 안 된 상태(campaign_id
+        # 없음)에서 「다시 수집」을 누른 경우. pause-without-start와 같은 뜻(아직
+        # 시작 안 함)이라 그 기존 카탈로그 키를 그대로 재사용(새 문구 0).
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "ADS_BOOST_NOT_STARTED", "message": t("ads_boost.not_started", resolved_locale)},
+        ) from exc
+    return SpendRefreshResponse(
+        spend_minor=result["spend_minor"], captured_at=result["captured_at"].isoformat(),
+        cap_reached=result["cap_reached"], run_status=result["run_status"],
+    )

@@ -73,7 +73,25 @@ describe('SetPasswordSection — error.code 분기 (story #2485)', () => {
   it('ALREADY_HAS_PASSWORD — raw error.message 대신 고정 문구', async () => {
     await submitWithErrorCode('ALREADY_HAS_PASSWORD', 'User already has a password set');
     expect(container.textContent).not.toContain('User already has a password set');
-    expect(container.textContent).toContain('이 계정에는 이미 비밀번호가 설정되어 있습니다.');
+    expect(container.textContent).toContain('이 계정에는 이미 비밀번호가 설정되어 있어요.');
+  });
+
+  // 유나 design:changes(PR#3688, 2026-09-01) — ALREADY_HAS_PASSWORD는 실패가 아니라 「이미
+  // 완료」라 빨강(destructive/role=alert)이 부적절 — 중립 톤(text-foreground/role=status).
+  it('ALREADY_HAS_PASSWORD — 실패 톤(destructive/alert)이 아니라 중립 톤(text-foreground/status)', async () => {
+    await submitWithErrorCode('ALREADY_HAS_PASSWORD', 'User already has a password set');
+    const msg = [...container.querySelectorAll('p')].find((p) => p.textContent === '이 계정에는 이미 비밀번호가 설정되어 있어요.');
+    expect(msg).not.toBeUndefined();
+    expect(msg?.className).toContain('text-foreground');
+    expect(msg?.className).not.toContain('text-destructive');
+    expect(msg?.getAttribute('role')).toBe('status');
+  });
+
+  it('USER_NOT_FOUND(진짜 실패)는 여전히 destructive/alert 톤 그대로다(회귀 0)', async () => {
+    await submitWithErrorCode('USER_NOT_FOUND', 'User not found');
+    const msg = [...container.querySelectorAll('p')].find((p) => p.textContent === '계정을 찾을 수 없어요.');
+    expect(msg?.className).toContain('text-destructive');
+    expect(msg?.getAttribute('role')).toBe('alert');
   });
 
   // 유나 design:changes(PR#3688, 2026-09-01) — ALREADY_HAS_PASSWORD는 실패가 아니라 「이미
@@ -97,13 +115,13 @@ describe('SetPasswordSection — error.code 분기 (story #2485)', () => {
   it('USER_NOT_FOUND — raw error.message 대신 고정 문구', async () => {
     await submitWithErrorCode('USER_NOT_FOUND', 'User not found');
     expect(container.textContent).not.toContain('User not found');
-    expect(container.textContent).toContain('계정을 찾을 수 없습니다.');
+    expect(container.textContent).toContain('계정을 찾을 수 없어요.');
   });
 
   it('알려지지 않은 code — 안전 폴백, raw message 미노출', async () => {
     await submitWithErrorCode('SOME_NEW_CODE', 'brand new raw string');
     expect(container.textContent).not.toContain('brand new raw string');
-    expect(container.textContent).toContain('비밀번호 설정에 실패했습니다.');
+    expect(container.textContent).toContain('비밀번호 설정에 실패했어요.');
   });
 });
 
@@ -122,7 +140,7 @@ describe('SetPasswordSection — story #3155 i18n 배선 회귀가드', () => {
     await act(async () => { root.render(wrap(<SetPasswordSection />)); });
     await flush();
     expect(container.textContent).toContain('비밀번호 설정');
-    expect(container.textContent).toContain('이 계정은 OAuth로 생성되었습니다');
+    expect(container.textContent).toContain('이 계정은 OAuth로 생성됐어요');
     expect(container.textContent).not.toContain('Set Password');
     expect(container.textContent).not.toContain('Your account was created with OAuth');
   });
@@ -137,7 +155,7 @@ describe('SetPasswordSection — story #3155 i18n 배선 회귀가드', () => {
     await flush();
     expect(container.textContent).toContain('최소 8자 이상');
     expect(container.textContent).toContain('다음 중 3가지 이상');
-    expect(container.textContent).toContain('비밀번호가 일치하지 않습니다.');
+    expect(container.textContent).toContain('비밀번호가 일치하지 않아요.');
     expect(container.textContent).not.toContain('At least 8 characters');
     expect(container.textContent).not.toContain('Passwords do not match.');
   });
@@ -179,7 +197,7 @@ describe('SetPasswordSection — 재인증 게이트: request 성공은 "메일�
     await act(async () => { submitBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await flush();
 
-    expect(container.textContent).toContain('확인 이메일을 보냈습니다');
+    expect(container.textContent).toContain('확인 이메일을 보냈어요');
     expect(container.querySelector('input[type="password"]')).toBeNull(); // 폼이 사라졌다
   });
 
@@ -200,7 +218,7 @@ describe('SetPasswordSection — 재인증 게이트: request 성공은 "메일�
     await act(async () => { submitBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await flush();
 
-    expect(container.textContent).toContain('확인 이메일 발송에 실패했습니다');
+    expect(container.textContent).toContain('확인 이메일 발송에 실패했어요');
     expect(container.querySelector('input[type="password"]')).not.toBeNull(); // 폼 유지(재시도 가능)
   });
 
@@ -231,6 +249,24 @@ describe('SetPasswordSection — 재인증 게이트: request 성공은 "메일�
     await flush();
 
     expect(requestCallCount).toBe(2); // 실제로 새 15분 토큰이 다시 발급됐다(재발송 실증)
-    expect(container.textContent).toContain('다시 보냈습니다');
+    expect(container.textContent).toContain('다시 보냈어요');
+  });
+});
+
+// story #3772 CHANGES(페드루 PO 픽셀 지적 2026-09-10 — my-profile-section.tsx에서 실측된
+// "실패 배너 아래 로딩 문구 잔존" 클래스, 네 섹션 전부 같은 검사) — 이 섹션은 이미
+// `hasPassword !== false`(null=로딩·실패 공통) → return null이라 회귀가 아니지만, 네
+// 섹션 동형 보장 규율대로 핀을 남긴다.
+describe('SetPasswordSection — /api/me 실패 시 로딩 문구 잔존 없음(story #3772 CHANGES 핀)', () => {
+  it('⭐/api/me 실패(500) → 빈 렌더(로딩 문구 포함 0)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/me') return { ok: false, status: 500, json: async () => ({ error: { code: 'INTERNAL' } }) };
+      throw new Error('unexpected fetch: ' + url);
+    }));
+    await act(async () => { root.render(wrap(<SetPasswordSection />)); });
+    await flush();
+
+    expect(container.textContent).toBe('');
+    expect(container.textContent).not.toContain(koMessages.common.loading);
   });
 });

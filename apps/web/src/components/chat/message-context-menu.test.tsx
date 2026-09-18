@@ -2,9 +2,21 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { NextIntlClientProvider } from 'next-intl';
 import { MessageContextMenu } from './message-context-menu';
+import koMessages from '../../../messages/ko.json';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+// story #3776(1층A) — MessageContextMenu가 chats ns의 useTranslations('사용자 차단' 라벨)
+// 를 부르게 되며 next-intl 컨텍스트가 필요해졌다(blocked-users-section.test.tsx 선례 동형).
+function wrap(node: React.ReactNode) {
+  return (
+    <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+      {node}
+    </NextIntlClientProvider>
+  );
+}
 
 let container: HTMLDivElement;
 let root: Root;
@@ -25,9 +37,9 @@ const NOOP = () => {};
 describe('MessageContextMenu — story #2265(C-7) PR2 citeAction 확장', () => {
   it('citeAction을 안 주면(기존 호출부) 인용 항목이 안 그려진다(회귀 0)', async () => {
     await act(async () => {
-      root.render(
+      root.render(wrap(
         <MessageContextMenu x={0} y={0} isMine={false} onReply={NOOP} onCopy={NOOP} onDelete={NOOP} onClose={NOOP} />,
-      );
+      ));
     });
     expect(container.textContent).not.toContain('인용');
   });
@@ -36,12 +48,12 @@ describe('MessageContextMenu — story #2265(C-7) PR2 citeAction 확장', () => 
     const onSelect = vi.fn();
     const onClose = vi.fn();
     await act(async () => {
-      root.render(
+      root.render(wrap(
         <MessageContextMenu
           x={0} y={0} isMine={false} onReply={NOOP} onCopy={NOOP} onDelete={NOOP} onClose={onClose}
           citeAction={{ kind: 'start', onSelect }}
         />,
-      );
+      ));
     });
     expect(container.textContent).toContain('여기부터 인용');
     const btn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('여기부터 인용'));
@@ -53,12 +65,12 @@ describe('MessageContextMenu — story #2265(C-7) PR2 citeAction 확장', () => 
 
   it('citeAction kind="end"이면 "여기까지 인용"이 뜬다(이미 anchor가 찍힌 상태를 반영)', async () => {
     await act(async () => {
-      root.render(
+      root.render(wrap(
         <MessageContextMenu
           x={0} y={0} isMine={false} onReply={NOOP} onCopy={NOOP} onDelete={NOOP} onClose={NOOP}
           citeAction={{ kind: 'end', onSelect: NOOP }}
         />,
-      );
+      ));
     });
     expect(container.textContent).toContain('여기까지 인용');
     expect(container.textContent).not.toContain('여기부터 인용');
@@ -66,12 +78,12 @@ describe('MessageContextMenu — story #2265(C-7) PR2 citeAction 확장', () => 
 
   it('기존 메뉴 항목(답글·복사)은 citeAction 유무와 무관하게 그대로 있다', async () => {
     await act(async () => {
-      root.render(
+      root.render(wrap(
         <MessageContextMenu
           x={0} y={0} isMine={false} onReply={NOOP} onCopy={NOOP} onDelete={NOOP} onClose={NOOP}
           citeAction={{ kind: 'start', onSelect: NOOP }}
         />,
-      );
+      ));
     });
     expect(container.textContent).toContain('답글 달기');
     expect(container.textContent).toContain('복사');
@@ -81,9 +93,9 @@ describe('MessageContextMenu — story #2265(C-7) PR2 citeAction 확장', () => 
 describe('MessageContextMenu — story #2349 사용자 차단', () => {
   it('onBlock을 안 주면(기존 호출부) 「사용자 차단」 항목이 안 그려진다(회귀 0)', async () => {
     await act(async () => {
-      root.render(
+      root.render(wrap(
         <MessageContextMenu x={0} y={0} isMine={false} onReply={NOOP} onCopy={NOOP} onDelete={NOOP} onClose={NOOP} />,
-      );
+      ));
     });
     expect(container.textContent).not.toContain('사용자 차단');
   });
@@ -92,9 +104,9 @@ describe('MessageContextMenu — story #2349 사용자 차단', () => {
     const onBlock = vi.fn();
     const onClose = vi.fn();
     await act(async () => {
-      root.render(
+      root.render(wrap(
         <MessageContextMenu x={0} y={0} isMine={false} onReply={NOOP} onCopy={NOOP} onDelete={NOOP} onClose={onClose} onBlock={onBlock} />,
-      );
+      ));
     });
     expect(container.textContent).toContain('사용자 차단');
     const btn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('사용자 차단'));
@@ -108,9 +120,9 @@ describe('MessageContextMenu — story #2349 사용자 차단', () => {
   it('onBlock을 줘도 isMine=true면 「사용자 차단」이 안 뜬다(자기 자신 차단 금지)', async () => {
     const onBlock = vi.fn();
     await act(async () => {
-      root.render(
+      root.render(wrap(
         <MessageContextMenu x={0} y={0} isMine={true} onReply={NOOP} onCopy={NOOP} onDelete={NOOP} onClose={NOOP} onBlock={onBlock} />,
-      );
+      ));
     });
     expect(container.textContent).not.toContain('사용자 차단');
   });
@@ -121,9 +133,9 @@ describe('MessageContextMenu — story #2349 사용자 차단', () => {
 describe('MessageContextMenu — 로드맵 PR-B L1(floating elev-overlay)', () => {
   it('메뉴 컨테이너가 shadow-[var(--elev-overlay)]를 쓰고 shadow-md는 안 쓴다', async () => {
     await act(async () => {
-      root.render(
+      root.render(wrap(
         <MessageContextMenu x={0} y={0} isMine={false} onReply={NOOP} onCopy={NOOP} onDelete={NOOP} onClose={NOOP} />,
-      );
+      ));
     });
     const menu = container.querySelector('[role="menu"]');
     expect(menu?.className).toContain('shadow-[var(--elev-overlay)]');

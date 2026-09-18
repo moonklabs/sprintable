@@ -8,6 +8,9 @@ from app.models.hitl_config import DISPOSITIONS, GATE_TYPES, POSTURES
 
 class OrgGatePolicyCreate(BaseModel):
     posture: str = "balanced"
+    # story #3319 — 미지정(None, 기본값)은 현행 무변경(회귀 0). 사람 멤버만 허용(422) — 검증은
+    # routers/hitl_config.py::upsert_org_policy가 is_org_owner_or_admin과 동형 NOT EXISTS로.
+    merge_gate_default_approver_member_id: uuid.UUID | None = None
 
     @field_validator("posture")
     @classmethod
@@ -23,6 +26,7 @@ class OrgGatePolicyResponse(BaseModel):
     id: uuid.UUID
     org_id: uuid.UUID
     posture: str
+    merge_gate_default_approver_member_id: uuid.UUID | None = None
     created_at: datetime
     updated_at: datetime
 

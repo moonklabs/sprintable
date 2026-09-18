@@ -4,13 +4,16 @@ import uuid
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.error_envelope import human_error
 from app.dependencies.auth import get_current_user, get_scope_context, get_verified_org_id
 from app.dependencies.database import get_db
+from app.services.agent_onboarding_config import resolve_locale_from_request
+from app.services.i18n_catalog import t
 from app.models.doc import Doc
 from app.models.gate import Gate, is_valid_transition
 from app.models.gate_github_check_event import GateGithubCheckEvent
@@ -173,10 +176,18 @@ class GateResponse(BaseModel):
     # OrgGatePolicy.posture + Gate.gate_type을 순수 파생(gate_service.derive_risk_grade)한 UX
     # 힌트일 뿐(doc `gate-risk-ux-classification-criteria` §2 SSOT). "risk_level" 이름은 의도적으로
     # 피했다 — 플랫폼이 위험도를 판정한다는 오인을 부르기 때문(models/hitl_config.py:3 철학과
-    # 정면충돌). additive·nullable(project_id/work_item_summary와 동일 선례 — 이 필드를 채우지 않는
-    # 타 엔드포인트(create/transition/void/hold/unhold/override)는 Gate ORM 객체에 이 속성이 없어
-    # from_attributes 기본값 None으로 조용히 통과). list_gates·get_gate_endpoint 둘 다에서 채운다.
+    # 정면충돌). nullable(선언 자체는 유지 — Gate ORM에 이 컬럼이 없다). **정정(story #3874)**:
+    # 한때 list_gates·get_gate_endpoint·create_decision_request 3곳만 채우고 나머지 14곳은
+    # None으로 새던(같은 API가 호출 경로에 따라 거짓말하는 계약 결함) 자리였다 — 이제
+    # GateResponse를 만드는 모든 자리가 `to_gate_response()` 하나를 거쳐 예외 0으로 채운다.
     risk_grade: "RiskGrade | None" = None
+    # story #3860(customer-zero·BE·게이트 답하기) — 「일감」 우패널 주 액션 「답하기」의
+    # 데이터 소스. Gate ORM엔 이 컬럼이 없다(work_item_summary/can_approve와 동일
+    # 선례 — from_attributes 기본값 None으로 조용히 통과, list_gates·get_gate_endpoint
+    # 둘 다 배치로 채운다). **per-caller**(같은 gate라도 caller가 그 work_item을 태그한
+    # 대화의 참여자가 아니면 None — 대화 존재 자체를 비참여자에게 노출하지 않는다, PR
+    # #4253 원칙과 동형). additive·하위호환(신규 필드, 기존 소비처 무변).
+    conversation_id: uuid.UUID | None = None
     gate_type: str
     status: str
     resolver_id: uuid.UUID | None = None
@@ -216,6 +227,73 @@ class GateResponse(BaseModel):
     # 등 타 엔드포인트는 PR 링크 N+1 조회 비용 때문에 스코프 밖, risk_grade/can_approve와 동일
     # 선례 — Gate ORM에 이 속성이 없어 from_attributes 기본값으로 조용히 통과).
     github_check_enforced: bool | None = None
+    # story #3367(Phase0 S2, 페드루 PO 리뷰 2026-09-03 05:59Z) — external_publish 전용 sealing.
+    # S4 승인 카드(본문 전문·버전·해시)·재승인 배지(봉인 해시 vs 현재 해시 파생)가 이걸 읽는다.
+    # github_check_run_sha/approved_head_sha와 동일 선례 — Gate ORM 컬럼명과 일치라
+    # from_attributes로 자동 채워짐(다른 gate_type은 전부 None, additive·하위호환).
+    sealed_content_version: int | None = None
+    sealed_content_sha256: str | None = None
+    sealed_content_body: str | None = None
+    # story #3367(3자기점검, 페드루 지적 2026-09-10) — AC7("결재 카드에서... 목적지를
+    # 확認할 수 있고")의 입력. Gate ORM 컬럼명과 일치라 from_attributes로 자동 채워짐
+    # (sealed_content_*와 동일 선례). null=hosted_site(site_posts.py::_reseal_gate_on_
+    # new_version 관례 그대로), 그 외는 ChannelConnection.id.
+    sealed_destination_connection_id: uuid.UUID | None = None
+    # story #3367(유나 CHANGES, 페드루 재검토 2026-09-10) — sealed_destination_
+    # connection_id 하나만으론 FE가 uuid 원문 꼬리를 승인자에게 보여줄 수밖에 없다
+    # (확認 불가능한 값으로 서명을 요구하는 결함). 그 연결의 channel(예: "wordpress")을
+    # 같이 실어 FE가 집안 정본 lib/channel-label.ts::channelLabel()로 표시명을 낸다 —
+    # null(hosted_site)은 그 자체가 이미 목적지 신호라 이 필드도 항상 null. list_gates()
+    # 가 sealed_destination_connection_id와 같은 배치(N+1 0)로 채운다.
+    sealed_destination_channel: str | None = None
+    # story #3367(3자기점검, 페드루 지적 2026-09-10) — AC7의 나머지 축("마지막 수정
+    # 주체"). sealed_content_body의 작성자가 아니라(그건 «봉인 당시» 작성자·approved
+    # 뒤 편집이면 옛 버전에 묶여 있다) draft의 **지금** 최신 버전 author_kind — list_
+    # gates()가 neutral_facts.draft_id로 배치 enrich(N+1 0, sealed_doc_id와 동일 선례).
+    # 다른 gate_type·draft_id 없는 옛 external_publish 행은 None(지어내지 않는다).
+    latest_author_kind: str | None = None
+    # story #3569(Phase2·BE·소형, 페드루 PO 確定 2026-09-06) — concept_approval 전용
+    # sealing(story #3561/#3922). sealed_content_*와 동일 선례 — Gate ORM 컬럼명과
+    # 일치라 from_attributes로 자동 채워짐(다른 gate_type은 전부 None).
+    sealed_doc_id: uuid.UUID | None = None
+    sealed_doc_body_sha256: str | None = None
+    # story #3569 — sealed_doc_id 하나로는 FE가 «봉인 doc 링크(글자=doc 제목)»를 못
+    # 그린다(3560 FE (b), 미르코 그라운딩). Gate ORM엔 이 컬럼이 없다 — **봉인 시점이
+    # 아니라 「지금」 doc 제목**(제목은 봉인 대상이 아니다, 본문 sha만 봉인 — PO 明示)을
+    # list_gates/get_gate_endpoint가 각자 배치/단건 조회해 채운다. 삭제된 doc·
+    # sealed_doc_id 자체가 없으면 null(지어내지 않는다).
+    sealed_doc_title: str | None = None
+    # story #3806(Phase3·3-2 PR5, 3자기점검 — PR2가 Gate ORM 컬럼(models/gate.py:179-190)만
+    # 추가하고 이 응답 스키마 등재를 빠뜨려 API가 항상 None을 냈다) — ads_boost 전용 sealing.
+    # sealed_content_*/sealed_doc_*와 동일 선례 — Gate ORM 컬럼명과 일치라 from_attributes로
+    # 자동 채워짐(다른 gate_type은 전부 None, additive·하위호환). 유나 §절 §1 「결재 카드
+    # 봉인 5필드」(총예산·통화·기간·목표) + connection_id(표시는 안 하나 감사용 봉인 축).
+    sealed_ads_budget_minor: int | None = None
+    sealed_ads_currency: str | None = None
+    sealed_ads_starts_at: datetime | None = None
+    sealed_ads_ends_at: datetime | None = None
+    sealed_ads_objective: str | None = None
+    sealed_ads_connection_id: uuid.UUID | None = None
+    # story #3813(Phase3·3-4 PR4, 3자기점검 — PR2가 Gate ORM 컬럼(models/gate.py:204-205)만
+    # 추가하고 이 응답 스키마 등재를 빠뜨려 API가 항상 None을 냈다, sealed_ads_* PR2 재발
+    # 클래스와 동형) — newsletter_send 전용 sealing. Gate ORM 컬럼명과 일치라
+    # from_attributes로 자동 채워짐(다른 gate_type은 전부 None).
+    sealed_newsletter_segment_name: str | None = None
+    sealed_newsletter_scheduled_at: datetime | None = None
+    # story #3813(Phase3·3-4 PR4, 페드루 PO 確定 2026-09-12) — 승인 카드 전용 계산값
+    # (Gate ORM 컬럼 아님·봉인 안 함, 수신자는 ESP 소유라 우리가 얼리면 드리프트).
+    # get_gate_endpoint가 gate_type=="newsletter_send"일 때만 어댑터 수준 조회
+    # (describe_segment)로 채운다 — 실 stibee는 미구현이라 None(「미확인」), sandbox는
+    # 고정 4,200. 조회 실패는 카드 전체를 죽이지 않고 이 필드만 None(fail-closed,
+    # warning 로그 — get_gate_endpoint 본문 참고).
+    estimated_recipient_count: int | None = None
+    # story #3813(Phase3·3-4 PR4, 페드루 PO CHANGES 2026-09-12, 라이브 캡처 실측) —
+    # 승인 카드가 「무엇을」 보내는지(subject)를 안 보여줘 세그먼트·시각·수신수만 보고
+    # 승인하던 결함. Gate ORM 컬럼 아님(봉인 축이 아니다, PR2 설계 그대로 유지) —
+    # publication.version_id가 가리키는 ChannelPostVersion.channel_payload에서
+    # 「지금」 값을 읽는다(estimated_recipient_count와 동일 계산값 선례).
+    newsletter_subject: str | None = None
+    reapproval_required: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -259,12 +337,62 @@ async def can_approve_doc_gate_reason(
     return None
 
 
+_POSTURE_UNSET: Any = object()
+
+
+async def to_gate_response(
+    session: AsyncSession, org_id: uuid.UUID, gate: Gate, *, posture: Any = _POSTURE_UNSET,
+) -> GateResponse:
+    """story #3874 — GateResponse 직렬화 단일 통로. model_validate + risk_grade enrich
+    (story #1972 SSOT — gate_service.derive_risk_grade)를 한 자리로 묶는다.
+
+    이 헬퍼 도입 前엔 model_validate 직접 호출 15곳 中 3곳(list_gates·get_gate_endpoint·
+    create_decision_request)만 risk_grade를 채웠고 나머지 12곳(transition 포함 — 고위험
+    note 필수 검증 때문에 risk_grade를 이미 계산해 놓고도 응답엔 안 실었다)은 늘 None을
+    냈다(story #3868 AC0 실측). FE는 지금 이 필드를 transition 등 그 12곳 응답에서 직접
+    읽지 않아(3곳 다 재조회하거나 바디 자체를 안 읽음) 렌더 버그로 드러나진 않았지만,
+    API 계약 자체가 거짓이라 새 소비처(FE는 물론 MCP 에이전트 포함)가 그 바디를 그대로
+    믿으면 즉시 오판한다 — 그래서 개별 12곳 패치가 아니라 통로를 하나로 좁힌다(gates.py에
+    `GateResponse.model_validate(` 직접 호출이 이 함수 밖에 남아있으면 안 된다 — 그 불변식은
+    tests/test_3874_gate_response_serialization_guard.py의 AST 정적 스캔이 고정한다).
+
+    posture 미지정(기본, `_POSTURE_UNSET`)이면 이 호출이 org posture를 1쿼리로 직접 조회
+    한다(단건 엔드포인트 전부 이 경로 — get/create/transition/void 등, 매 호출 1쿼리는
+    기존 get_gate_endpoint/create_decision_request와 동일 비용, 새 비용 0). list_gates처럼
+    다건을 한 번에 낼 때는 호출부가 posture를 미리 1회 조회해 이 인자로 넘겨(story #1972
+    N+1 회피 선례 그대로 유지) 매 gate마다 재조회하지 않는다."""
+    resp = GateResponse.model_validate(gate)
+    if posture is _POSTURE_UNSET:
+        posture = await get_org_posture(session, org_id)
+    resp.risk_grade = derive_risk_grade(posture, gate.gate_type)
+    return resp
+
+
 @router.post("", response_model=GateResponse, status_code=201)
 async def create_gate_endpoint(
     body: GateCreateRequest,
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
     _auth=Depends(get_current_user),
+    locale: str | None = None,
+    accept_language: str | None = Header(None, alias="Accept-Language"),
+) -> GateResponse:
+    """story #3793 — 라우트 진입점, `Header()` DI 마커는 여기서만 받는다(까심 QA CI FAILURE
+    원칙, i18n_catalog.py 모듈 docstring 참조). 직접-호출(realdb·유닛) 테스트는
+    `_create_gate_endpoint`를 불러야 한다."""
+    return await _create_gate_endpoint(
+        body, session=session, org_id=org_id, _auth=_auth,
+        resolved_locale=resolve_locale_from_request(locale, accept_language),
+    )
+
+
+async def _create_gate_endpoint(
+    body: GateCreateRequest,
+    *,
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    _auth,
+    resolved_locale: str,
 ) -> GateResponse:
     # ⚠️BLOCKER(codex gpt-5.5): doc_approval 게이트는 **doc 상신 경로(doc.py transition)로만** 생성.
     # 일반 엔드포인트는 client 가 work_item_id=<자기 doc>+forged neutral_facts.requested_by_member_id 로
@@ -273,7 +401,7 @@ async def create_gate_endpoint(
     if body.gate_type == "doc_approval":
         raise HTTPException(
             status_code=403,
-            detail="doc 결재 게이트는 doc 상신 경로로만 생성됩니다 (직접 생성 불가).",
+            detail=t("gates.create_doc_gate_not_allowed", resolved_locale),
         )
     # story #1968: 제네릭 게이트 생성은 story/doc/task 등 work_item 객체를 로드하지 않으므로
     # (client가 work_item_id/work_item_type만 보냄) resolve_work_item_project_id()로 신규 조회.
@@ -308,7 +436,7 @@ async def create_gate_endpoint(
     # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh —
     # 트리거 미확定인 MissingGreenlet 클래스(unloaded attr sync 직렬화) 전체를 이 자리서 차단.
     await session.refresh(gate)
-    return GateResponse.model_validate(gate)
+    return await to_gate_response(session, org_id, gate)
 
 
 class DecisionRequestCreate(BaseModel):
@@ -361,7 +489,7 @@ async def _notify_decision_request_card(
         await dispatch_approval_request_cards(
             session, org_id=org_id, work_item_type="agent_decision", work_item_id=gate.id,
             project_id=project_id, title=gate.neutral_facts.get("question", "결정 요청") if gate.neutral_facts else "결정 요청",
-            gate_id=gate.id, requester_id=requester_id, approver_ids=approver_ids,
+            gate_id=gate.id, gate_type=gate.gate_type, requester_id=requester_id, approver_ids=approver_ids,
             designated_approver_id=designated_approver_id,
         )
     except Exception:  # noqa: BLE001 — 카드 배달 실패는 상신 비중단(Gate inbox 폴백 항상 존재).
@@ -455,7 +583,7 @@ async def create_decision_request(
     )
     await session.commit()
     await session.refresh(gate)
-    resp = GateResponse.model_validate(gate)
+    resp = await to_gate_response(session, org_id, gate)
     resp.project_id = project_id
     # story #d9c09f4b(2026-08-27) — 카드 배달(_notify_decision_request_card, best-effort)
     # 성패와 완전히 독립된 별도 조회. 카드가 조용히 성공(엉뚱한 대상)하든 실패하든 이
@@ -477,11 +605,8 @@ async def create_decision_request(
             gate.id, body.approver_member_id, exc_info=True,
         )
         resp.designated_approver_name = None
-    # story #1972 SSOT 재사용(제네릭 create_gate_endpoint가 이 필드를 아예 안 채우는 기존
-    # 갭을 여기서까지 상속하면 FE deriveRiskLevel이 null→'unknown'으로 읽어 low 등재의
-    # 목적(원탭 승인)이 생성 응답 자체에서는 무효화된다 — 자체 신규 테스트로 발견·직접 수정).
-    _posture = await get_org_posture(session, org_id)
-    resp.risk_grade = derive_risk_grade(_posture, gate.gate_type)
+    # story #1972 SSOT — risk_grade는 위 to_gate_response()가 이미 채웠다(story #3874 정리
+    # 前엔 여기서 직접 재조회+재파생했었다 — 이제 단일 통로 재사용, 중복 0).
     return resp
 
 
@@ -520,8 +645,28 @@ async def _non_doc_can_approve(
     user_id: uuid.UUID,
     org_id: uuid.UUID,
     project_id: uuid.UUID | None,
+    designated_approver_id: uuid.UUID | None = None,
+    caller_member_id: uuid.UUID | None = None,
 ) -> bool:
     """gate_type 별 규칙 dispatch.
+
+    story #3319(2026-09-02, 선생님 처방 확定) — ``designated_approver_id``가 있으면 gate_type을
+    안 가리고 그 1인에게만 승인 자격을 좁힌다(최우선 단락 — 아래 gate_type별 규칙보다 먼저
+    적용). 실사고: 머지 게이트에 org policy로 지정 승인자를 넣어도(create_gate 호출부만
+    고치면) 이 함수가 그 값을 안 봐서 project/org owner 전원이 여전히 승인 가능했다 —
+    designated_approver_id 배선과는 **별개**의 인가 로직이 필요했다. 영향 범위는 머지뿐 아니라
+    designated_approver_id가 설정된 **모든** gate_type(레시피 external_publish 등)에 미친다 —
+    "지정 승인자만 결정"이 gate_type 무관 단일 규칙이 되는 것이 맞는 의미(PO 확定). 미지정
+    (None, 기본값)은 아래 기존 규칙 그대로 — 회귀 0.
+
+    ⚠️``user_id``는 이 함수 아래쪽 규칙(``is_org_owner_or_admin``/``get_project_role``)이
+    쓰는 **user 축**(org_members.user_id)인 반면, ``Gate.designated_approver_id``는 **member
+    축**(org_members.id/team_members.id, story #2985)이다 — 두 공간이 다르므로
+    ``user_id == designated_approver_id`` 비교는 항상 거짓(다른 uuid 공간)이 되는 조용한
+    버그였다(첫 구현에서 실측으로 발견 — 지정 승인자 본인도 403이 남). 그래서 caller의
+    **member id**(호출부가 이미 ``resolve_member()``로 갖고 있는 ``resolved.id``)를 별도
+    인자로 받는다 — user_id를 여기서 다시 member_id로 해소하는 신규 쿼리를 만들지 않는다
+    (호출부 재사용, N+1 없음).
 
     - artifact_canonicalize: **휴먼 전용**(추가 role 제약 없음). E-CANVAS C4-S8(story a5118cb0)
       설계 주석(visual_artifacts.py propose_canonical_version 바로 위) — "승인/반려는 기존
@@ -532,6 +677,8 @@ async def _non_doc_can_approve(
     - 그 외(merge/pr_review/qa/deploy 등): rule B(``_non_doc_gate_approvable``, story #1974) —
       project owner/admin, project-무관 work_item 은 org owner/admin.
     """
+    if designated_approver_id is not None:
+        return caller_member_id is not None and caller_member_id == designated_approver_id
     if gate_type == "artifact_canonicalize":
         return True
     return await _non_doc_gate_approvable(session, user_id, org_id, project_id)
@@ -539,17 +686,22 @@ async def _non_doc_can_approve(
 
 async def _authorize_gate_approve_equivalent(
     session: AsyncSession, gate: Gate | None, resolved, auth, org_id: uuid.UUID,
+    resolved_locale: str,
 ) -> None:
     """story #2631 — transition_gate_endpoint 의 인가 블록(휴먼-only + doc/non-doc can_approve)을
     그대로 추출한 것. request_gate_discussion_endpoint(«보류·논의»)는 승인/반려 옆 3번째 버튼이라
     **같은 자격**을 요구한다(PO 판정 — "승인할 수 있는 사람만 논의도 요청할 수 있다", 승인 자격
     없는 제3자가 게이트를 pending에 묶어두는 건 별개 취약이 된다). 로직 자체는 신규가 아니라
     기존 transition 인가 규칙의 재사용 — 새 규칙을 만들지 않는다(DRY, 위 _non_doc_can_approve
-    표 주석과 같은 원칙)."""
+    표 주석과 같은 원칙).
+
+    story #3793 — `resolved_locale`은 호출부(라우트 진입점)가 이미
+    `resolve_locale_from_request()`로 풀어 넘기는 plain str(Header() DI 마커 없음, 까심 QA CI
+    FAILURE 원칙)."""
     if resolved.type != "human":
         raise HTTPException(
             status_code=403,
-            detail="게이트 승인/거부는 휴먼 멤버만 가능합니다 (에이전트 승인 불가).",
+            detail=t("gates.approve_human_only", resolved_locale),
         )
     if gate is None:
         return
@@ -560,24 +712,24 @@ async def _authorize_gate_approve_equivalent(
         if _reason == "self_or_unverified":
             raise HTTPException(
                 status_code=403,
-                detail="본인이 상신한 doc 결재는 본인이 승인/거부할 수 없습니다 (self-approval 금지·상신자 미검증 차단).",
+                detail=t("gates.approve_self_not_allowed", resolved_locale),
             )
         if _reason is not None:
             raise HTTPException(
                 status_code=403,
-                detail="doc 결재 권한이 없습니다 (대상 프로젝트 접근 필요).",
+                detail=t("gates.approve_no_doc_access", resolved_locale),
             )
     else:
         _project_id = await resolve_work_item_project_id(
             session, org_id, gate.work_item_type, gate.work_item_id,
         )
-        if not await _non_doc_can_approve(session, gate.gate_type, uuid.UUID(auth.user_id), org_id, _project_id):
+        if not await _non_doc_can_approve(
+            session, gate.gate_type, uuid.UUID(auth.user_id), org_id, _project_id,
+            designated_approver_id=gate.designated_approver_id, caller_member_id=resolved.id,
+        ):
             raise HTTPException(
                 status_code=403,
-                detail=(
-                    "이 게이트를 승인/거부할 권한이 없습니다 (해당 프로젝트의 owner/admin이어야 "
-                    "합니다). 프로젝트 관리자에게 권한을 요청하세요."
-                ),
+                detail=t("gates.approve_no_project_admin_access", resolved_locale),
             )
 
 
@@ -703,16 +855,93 @@ async def list_gates(
             q = q.offset(offset)
     result = await session.execute(q)
     gates = list(result.scalars().all())
-    responses = [GateResponse.model_validate(g) for g in gates]
 
     # story #1972(P1a-S4): 위험도 UX 등급 enrich — org posture는 org_id 단일값(gate당 축 없음)이라
-    # 목록 전체에 **1회**만 조회(N+1 0). gate_type은 gate별 값이라 derive_risk_grade는 gate마다 호출.
-    # ⚠️resp.gate_type이 아닌 원본 gate.gate_type을 쓴다(zip) — can_approve enrich와 동일하게 원본
-    # ORM 객체에서 읽어 GateResponse.model_validate를 대체하는 테스트 더블과도 무관하게 동작.
-    if gates:
-        _posture = await get_org_posture(session, org_id)
+    # 목록 전체에 **1회**만 조회(N+1 0). gate_type은 gate별 값이라 to_gate_response(story #3874
+    # 단일 통로)는 gate마다 호출하되 posture는 여기서 미리 조회해 주입(재조회 0).
+    _posture = await get_org_posture(session, org_id) if gates else None
+    responses = [await to_gate_response(session, org_id, g, posture=_posture) for g in gates]
+
+    # story #3569(Phase2·BE·소형, 페드루 PO 確定 2026-09-06) — concept_approval 게이트의
+    # sealed_doc_id가 가리키는 doc의 **지금** 제목(봉인 시점 값이 아니다 — 제목은 봉인
+    # 대상이 아니다, 본문 sha만 봉인). work_item_summary/doc_proj(위 doc_approval용
+    # 배치)와는 키 축이 다르다(work_item_id가 아니라 sealed_doc_id) — 별도의 독립
+    # 1회 배치(N+1 0). 삭제된 doc·sealed_doc_id 자체가 없으면 None(지어내지 않는다).
+    sealed_doc_ids = {g.sealed_doc_id for g in gates if g.sealed_doc_id is not None}
+    if sealed_doc_ids:
+        from app.models.doc import Doc as _SealedDoc
+        title_rows = (await session.execute(
+            select(_SealedDoc.id, _SealedDoc.title).where(
+                _SealedDoc.id.in_(sealed_doc_ids), _SealedDoc.org_id == org_id, _SealedDoc.deleted_at.is_(None),
+            )
+        )).all()
+        sealed_doc_title_by_id = {did: title for did, title in title_rows}
         for resp, g in zip(responses, gates):
-            resp.risk_grade = derive_risk_grade(_posture, g.gate_type)
+            if g.sealed_doc_id is not None:
+                resp.sealed_doc_title = sealed_doc_title_by_id.get(g.sealed_doc_id)
+
+    # story #3367(3자기점검, 페드루 지적 2026-09-10) — AC7("마지막 수정 주체")의 입력.
+    # sealed_content_body의 작성자(봉인 시점, approved 뒤 편집이면 옛 버전에 묶임)가
+    # 아니라 draft의 **지금** 최신 버전 author_kind다 — sealed_doc_ids 배치(위)와 동일
+    # 선례(독립 1회 배치·N+1 0). external_publish 게이트만 대상(gate_type 축) — neutral_
+    # facts.draft_id는 site_posts.py::submit_site_post_draft/_reseal_gate_on_new_version이
+    # 문자열로 심는다(_reseal_gate_on_new_version:509 그라운딩 確認).
+    latest_author_draft_ids: dict[uuid.UUID, uuid.UUID] = {}
+    for resp, g in zip(responses, gates):
+        if g.gate_type != "external_publish":
+            continue
+        raw_draft_id = (g.neutral_facts or {}).get("draft_id")
+        if not raw_draft_id:
+            continue
+        try:
+            latest_author_draft_ids[resp.id] = uuid.UUID(str(raw_draft_id))
+        except ValueError:
+            continue
+    if latest_author_draft_ids:
+        from app.models.site_post_version import SitePostVersion
+
+        latest_version_ids = (
+            select(
+                SitePostVersion.draft_id,
+                func.max(SitePostVersion.version).label("max_version"),
+            )
+            .where(SitePostVersion.draft_id.in_(set(latest_author_draft_ids.values())))
+            .group_by(SitePostVersion.draft_id)
+            .subquery()
+        )
+        author_rows = (await session.execute(
+            select(SitePostVersion.draft_id, SitePostVersion.author_kind).join(
+                latest_version_ids,
+                (SitePostVersion.draft_id == latest_version_ids.c.draft_id)
+                & (SitePostVersion.version == latest_version_ids.c.max_version),
+            )
+        )).all()
+        latest_author_kind_by_draft_id = {did: kind for did, kind in author_rows}
+        for resp in responses:
+            draft_id = latest_author_draft_ids.get(resp.id)
+            if draft_id is not None:
+                resp.latest_author_kind = latest_author_kind_by_draft_id.get(draft_id)
+
+    # story #3367(유나 CHANGES, 페드루 재검토 2026-09-10) — sealed_destination_
+    # connection_id(위, Gate 실 컬럼)가 non-null인 행의 실제 channel(예:
+    # "wordpress")을 배치 조회(org-scope·N+1 0, sealed_doc_ids와 동일 선례). null인
+    # 행(hosted_site)은 조회 대상에서 원천 제외 — 그 자체가 이미 완결된 목적지 신호라
+    # 채널 조회가 필요 없다.
+    dest_connection_ids = {
+        g.sealed_destination_connection_id for g in gates if g.sealed_destination_connection_id is not None
+    }
+    if dest_connection_ids:
+        from app.models.channel_connection import ChannelConnection
+
+        channel_rows = (await session.execute(
+            select(ChannelConnection.id, ChannelConnection.channel).where(
+                ChannelConnection.id.in_(dest_connection_ids), ChannelConnection.org_id == org_id,
+            )
+        )).all()
+        channel_by_connection_id = {cid: channel for cid, channel in channel_rows}
+        for resp, g in zip(responses, gates):
+            if g.sealed_destination_connection_id is not None:
+                resp.sealed_destination_channel = channel_by_connection_id.get(g.sealed_destination_connection_id)
 
     # doc-side enrich 2종 Doc 조회를 **한 배치**로(org-scope·soft-delete 가드·N+1 0):
     #  ⓐ work_item_summary(24f5ae18): work_item_type=='doc' gate → title/slug.
@@ -848,16 +1077,24 @@ async def list_gates(
     # #2198(PO 판정): 캐시 키가 project_id 단독에서 (gate_type, project_id) 로 바뀌었다 — 승인
     # 자격이 이제 gate_type 에도 의존한다(_non_doc_can_approve 표 참조. artifact_canonicalize
     # 는 project_id 무관 항상 True).
-    approvable_cache: dict[tuple[str, uuid.UUID | None], bool] = {}
+    # story #3319 — designated_approver_id도 키에 편입해야 한다: 같은 (gate_type, project_id)
+    # 조합이라도 게이트마다 designated_approver_id가 다를 수 있어(예: 머지 게이트 A는 정책
+    # 적용 前 생성=None, B는 적용 後 생성=특정 멤버) 이걸 빼면 먼저 계산된 캐시값을 서로 다른
+    # 게이트가 잘못 공유한다(둘 다 project owner인데 A는 승인 가능·B는 designated 아니라
+    # 불가여야 하는데, 캐시가 A의 True를 B에도 돌려주는 사고).
+    approvable_cache: dict[tuple[str, uuid.UUID | None, uuid.UUID | None], bool] = {}
     eligible_ids: set[uuid.UUID] = set()
     if non_doc_gates and resolved is not None and resolved.type == "human":
-        # N+1 방지: gate 여러 건이 같은 (gate_type, project_id) 를 가리켜도 _non_doc_can_approve 는
-        # **고유 조합당 1회**만 호출(캐시) — gate 개수와 무관.
+        # N+1 방지: gate 여러 건이 같은 (gate_type, project_id, designated_approver_id) 를
+        # 가리켜도 _non_doc_can_approve 는 **고유 조합당 1회**만 호출(캐시) — gate 개수와 무관.
         for _resp, g in non_doc_gates:
             pid = project_id_by_work_item.get(g.work_item_id)
-            key = (g.gate_type, pid)
+            key = (g.gate_type, pid, g.designated_approver_id)
             if key not in approvable_cache:
-                approvable_cache[key] = await _non_doc_can_approve(session, g.gate_type, _uid, org_id, pid)
+                approvable_cache[key] = await _non_doc_can_approve(
+                    session, g.gate_type, _uid, org_id, pid,
+                    designated_approver_id=g.designated_approver_id, caller_member_id=resolved.id,
+                )
             if approvable_cache[key]:
                 eligible_ids.add(g.id)
 
@@ -866,6 +1103,20 @@ async def list_gates(
     # caller·project 무권한 전부에서 자연히 유지된다(eligible_ids 에 없으면 False).
     for resp, g in non_doc_gates:
         resp.can_approve = g.id in eligible_ids and is_valid_transition(g.status, "approved")
+
+    # story #3860(customer-zero·BE·게이트 답하기) — 「답하기」 주 액션의 데이터 소스.
+    # today_service.py의 needs_me 배치와 동일 SSOT 함수(work_item_conversation.py) —
+    # caller가 그 work_item을 태그한 대화의 참여자일 때만 conversation_id 노출(PR #4253
+    # 원칙 그대로 — 여기서 재발명 0). resolved가 None이면(caller resolve 실패) 전부 None.
+    if resolved is not None and responses:
+        from app.services.work_item_conversation import derive_conversation_ids_for_tagged_work_items
+
+        conv_by_work_item = await derive_conversation_ids_for_tagged_work_items(
+            session, org_id=org_id, member_id=resolved.id,
+            work_item_pairs={(g.work_item_type, g.work_item_id) for g in gates},
+        )
+        for resp, g in zip(responses, gates):
+            resp.conversation_id = conv_by_work_item.get((g.work_item_type, g.work_item_id))
 
     if gate_ids is not None:
         # story #5ace2e84 — ids 배치는 work_item_id 필터가 물던 project 접근권 검사(#2042)를
@@ -1197,15 +1448,56 @@ async def get_gate_endpoint(
     elif not is_known_project_agnostic_work_item_type(gate.work_item_type):
         raise HTTPException(status_code=404, detail="Gate not found")
 
-    resp = GateResponse.model_validate(gate)
+    resp = await to_gate_response(session, org_id, gate)
     resp.project_id = project_id
     resp.work_item_summary = await _resolve_work_item_summary(
         session, org_id, gate.work_item_type, gate.work_item_id,
     )
-    # story #1972(P1a-S4): 위험도 UX 등급 — org posture(org_id 단일 쿼리·resolve_disposition()
-    # 미경유) + 이 gate의 gate_type을 derive_risk_grade()로 파생(doc §2 SSOT).
-    _posture = await get_org_posture(session, org_id)
-    resp.risk_grade = derive_risk_grade(_posture, gate.gate_type)
+    # story #3569 — list_gates와 동일 축(sealed_doc_id, work_item_id 아님)·동일 규칙
+    # (지금 제목·삭제/미존재 doc은 None).
+    if gate.sealed_doc_id is not None:
+        from app.models.doc import Doc as _SealedDoc
+        resp.sealed_doc_title = (await session.execute(
+            select(_SealedDoc.title).where(
+                _SealedDoc.id == gate.sealed_doc_id, _SealedDoc.org_id == org_id, _SealedDoc.deleted_at.is_(None),
+            )
+        )).scalar_one_or_none()
+    # story #3813(Phase3·3-4 PR4, 페드루 PO 確定 2026-09-12) — newsletter_send 게이트
+    # 승인 카드 전용 「예상 수신수」. 사람이 「이 세그먼트 N명에게 발송」을 보고 승인하는
+    # 것이 이 카드의 존재 이유라 발송 前(승인 시점) 값이 필요 — 조회 실패가 카드 전체를
+    # 죽이면 안 되니 개별 try/except로 격리(fail-closed, None만 두고 계속).
+    if gate.gate_type == "newsletter_send":
+        try:
+            from app.models.channel_connection import ChannelConnection
+            from app.models.channel_post_version import ChannelPostVersion
+            from app.models.channel_publication import ChannelPublication
+
+            publication = (await session.execute(
+                select(ChannelPublication).where(ChannelPublication.id == uuid.UUID(gate.scope_key))
+            )).scalar_one_or_none()
+            conn = (await session.execute(
+                select(ChannelConnection).where(ChannelConnection.id == publication.connection_id)
+            )).scalar_one_or_none() if publication is not None else None
+            if conn is not None and conn.channel == "stibee_sandbox":
+                from app.services.stibee_sandbox_campaign import describe_segment
+                resp.estimated_recipient_count = await describe_segment(
+                    segment_name=gate.sealed_newsletter_segment_name or "",
+                )
+            # 실 "stibee"(미구현)·연결/발행물 소실 등은 조용히 None 그대로(위 필드 docstring).
+            # 페드루 PO CHANGES(2026-09-12, 라이브 캡처 실측) — 승인 카드에 「무엇을」
+            # 보내는지(subject)가 아예 없어 사람이 세그먼트·시각·수신수만 보고 승인하던
+            # 결함. subject는 봉인 축이 아니라(PR2 설계 그대로) publication.version_id가
+            # 가리키는 ChannelPostVersion.channel_payload에서 「지금」 값을 읽는다
+            # (sealed_content_body류와 다른 결 — 뉴스레터 subject는 애초에 gate가
+            # 봉인하는 축이 아니었다, channel_posts.py의 draft-list newsletter.subject와
+            # 동일 출처).
+            if publication is not None:
+                version = (await session.execute(
+                    select(ChannelPostVersion).where(ChannelPostVersion.id == publication.version_id)
+                )).scalar_one_or_none()
+                resp.newsletter_subject = (version.channel_payload or {}).get("subject") if version else None
+        except Exception:  # noqa: BLE001 — 카드 조회 자체를 이 계산값 실패로 죽이지 않는다.
+            logger.warning("newsletter_send estimated_recipient_count/subject 조회 실패(비중단) org=%s gate=%s", org_id, id, exc_info=True)
     # story #2815(§5-④): merge 게이트만 의미 있음(다른 gate_type은 PR/repo 개념 자체가 없음).
     if gate.gate_type == MERGE_GATE_TYPE:
         _link = await resolve_pr_link(session, org_id, gate.work_item_id)
@@ -1233,8 +1525,21 @@ async def get_gate_endpoint(
             )
             resp.can_approve = _reason is None and is_valid_transition(gate.status, "approved")
         elif resolved.type == "human":  # rule B 는 human 체크가 없어 여기서 fail-closed(list_gates 와 동형).
-            _approvable = await _non_doc_can_approve(session, gate.gate_type, _uid, org_id, project_id)
+            _approvable = await _non_doc_can_approve(
+                session, gate.gate_type, _uid, org_id, project_id,
+                designated_approver_id=gate.designated_approver_id, caller_member_id=resolved.id,
+            )
             resp.can_approve = _approvable and is_valid_transition(gate.status, "approved")
+    # story #3860 — list_gates와 동일 SSOT(work_item_conversation.py)·동일 caller-scope
+    # 원칙(참여자 아니면 None). resolved는 위 can_approve enrich와 1회 공유(재resolve 0).
+    if resolved is not None:
+        from app.services.work_item_conversation import derive_conversation_ids_for_tagged_work_items
+
+        conv_by_work_item = await derive_conversation_ids_for_tagged_work_items(
+            session, org_id=org_id, member_id=resolved.id,
+            work_item_pairs={(gate.work_item_type, gate.work_item_id)},
+        )
+        resp.conversation_id = conv_by_work_item.get((gate.work_item_type, gate.work_item_id))
     return resp
 
 
@@ -1417,6 +1722,26 @@ async def transition_gate_endpoint(
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth=Depends(get_current_user),
+    locale: str | None = None,
+    accept_language: str | None = Header(None, alias="Accept-Language"),
+) -> GateResponse:
+    """story #3793 — 라우트 진입점, `Header()` DI 마커는 여기서만 받는다(까심 QA CI FAILURE
+    원칙). 직접-호출(realdb·유닛) 테스트는 `_transition_gate_endpoint`를 불러야 한다."""
+    return await _transition_gate_endpoint(
+        id, body, background_tasks, session=session, org_id=org_id, auth=auth,
+        resolved_locale=resolve_locale_from_request(locale, accept_language),
+    )
+
+
+async def _transition_gate_endpoint(
+    id: uuid.UUID,
+    body: GateTransitionRequest,
+    background_tasks: BackgroundTasks,
+    *,
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    auth,
+    resolved_locale: str,
 ) -> GateResponse:
     # authz(93fc7aeb): 게이트 approve/reject는 **휴먼 member만**. 에이전트(API key)가 사람 검증
     # 게이트를 승인하면 "agent-assisted·human-validated" 웨지 전제가 무너지므로 차단(403).
@@ -1433,7 +1758,7 @@ async def transition_gate_endpoint(
     _gate = (await session.execute(
         select(Gate).where(Gate.id == id, Gate.org_id == org_id).with_for_update()
     )).scalar_one_or_none()
-    await _authorize_gate_approve_equivalent(session, _gate, resolved, auth, org_id)
+    await _authorize_gate_approve_equivalent(session, _gate, resolved, auth, org_id, resolved_locale)
     # story #2982(선생님 실사용 리포트, PO 확定 2026-08-24) — 이미 해소된(pending 아닌) 게이트에
     # 승인/반려를 시도하면 여기까지 도달해 transition_gate()의 is_valid_transition이 ValueError를
     # 던졌고, 그게 그대로 "불법 전이: approved → rejected. pending에서만..." 개발자 문구로 화면에
@@ -1452,25 +1777,51 @@ async def transition_gate_endpoint(
                 "resolved_at": _gate.resolved_at.isoformat() if _gate.resolved_at else None,
             },
         )
+    # story #3365(Phase0 S2, 페드루 PO 재정정 2026-09-03 06:06Z) — external_publish 전용 막다른
+    # 길 차단. 승인 뒤 편집으로 pending 재오픈된 게이트는 sealed_content_*가 옛 버전 그대로다
+    # (site_posts.py `_reseal_gate_on_new_version` 참고 — 승인 기록을 조용히 덮지 않는다). 이
+    # 옛 봉인을 그대로 승인하면 site_posts.py의 409 비교 기준점만 갱신될 뿐 실제로는 아무 새
+    # 내용도 승인받지 못한 채 "승인됨"으로 보이는 막다른 길이 열린다 — 재봉인(submit() 재호출)
+    # 없이는 approve 전이 자체를 막는다.
+    # ⚠️페드루 PO 실측(2026-09-03 07:11Z, CI shard 3 실패) — gate_type 스코프 없이
+    # `_gate.reapproval_required`만 보면 bare MagicMock 기반 테스트(예:
+    # test_edg_s23_hypothesis_overlay.py — gate_type="merge"만 명시하고 이 필드는 안 건드림)의
+    # auto-attribute가 항상 truthy MagicMock이라 site-post와 무관한 gate_type까지 이 가드에
+    # 걸린다(#2975/#2982/#3319와 동형 MagicMock 함정 재발). gate_type=="external_publish"로
+    # 명시 스코프해 그 클래스의 오탐을 원천 차단한다 — 다른 gate_type은 이 필드를 절대 안 본다.
+    if (
+        body.status == "approved" and _gate is not None
+        and _gate.gate_type == "external_publish" and _gate.reapproval_required
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "SITE_POST_RESUBMIT_REQUIRED",
+                "message": "승인 뒤 내용이 바뀌었습니다. 재상신(submit)한 뒤 다시 승인해주세요.",
+            },
+        )
     # story #2027(까심 QA 적출): 고위험(risk_grade=high) 게이트의 approved 전이는 사유(note) 서버측
     # 강제 — void_gate/override_gate 기존 관례(reason 없으면 ValueError→422, void_gate 참고)에
     # 맞추는 작업이다(신규 규칙 아님). 이전엔 FE 버튼 disable(evidenceViewed && reason.trim())만
     # 있고 서버는 무검증이라 POST /transition 직접 호출 시 사유 없이 통과했다. 저위험은 기존대로
     # note 없이 통과(과도 강제 금지 — PO AC). risk_grade 는 list_gates/get_gate 와 동일 파생 경로
     # (derive_risk_grade+get_org_posture) 재사용(DRY·N+1 0 — org당 posture 1쿼리).
+    # story #3874 — 이 값을 함수 끝 to_gate_response()가 재사용한다(posture=_transition_posture
+    # 로 주입, approved 경로에서 get_org_posture 재조회 0 — sentinel 기본값이면 그쪽이 직접 1쿼리).
+    _transition_posture: Any = _POSTURE_UNSET
     if body.status == "approved" and _gate is not None:
-        _posture = await get_org_posture(session, org_id)
-        if derive_risk_grade(_posture, _gate.gate_type) == "high":
+        _transition_posture = await get_org_posture(session, org_id)
+        if derive_risk_grade(_transition_posture, _gate.gate_type) == "high":
             if not (body.note or "").strip():
                 raise HTTPException(
                     status_code=422,
-                    detail="고위험(risk_grade=high) 게이트 승인은 사유(note) 입력이 필수입니다.",
+                    detail=t("gates.transition_high_risk_note_required", resolved_locale),
                 )
             # story #2027 AC2: note와 같은 자리 — 근거 열람(evidence_viewed) 확인도 서버가 강제.
             if body.evidence_viewed is not True:
                 raise HTTPException(
                     status_code=422,
-                    detail="고위험(risk_grade=high) 게이트 승인은 근거 열람 확인(evidence_viewed=true)이 필수입니다.",
+                    detail=t("gates.transition_high_risk_evidence_required", resolved_locale),
                 )
     # story #2975(HIGH, 게이트 신선도 구멍 근본처방·페드루 PO 설계 확定 2026-08-24) — merge 게이트
     # 승인의 anchor SHA 레이스. 위 FOR UPDATE로 이 gate 행을 이미 잠근 상태이므로 여기서 읽는
@@ -1493,6 +1844,25 @@ async def transition_gate_endpoint(
                     "current_head_sha": _known_head_sha,
                 },
             )
+    # story #3516 조각②(페드루 PO 確定 2026-09-05, AC4) — 댓글 답변 게이트(scope_key=
+    # "comment:{comment_id}")의 승인은, 대상 댓글이 그새 삭제됐으면 명령을 만들지
+    # 않고 즉시 409로 거부한다(위 merge-gate SHA 체크와 동형 위치 — gate_service.py
+    # 의 자동 커맨드 생성 훅은 HTTP 에러를 못 내니 승인 요청 자체를 여기서 막는다).
+    if body.status == "approved" and _gate is not None and _gate.gate_type == "external_publish":
+        from app.services.channel_post_comment_replies import (
+            CommentReplyTargetDeletedError, check_target_comment_not_deleted_or_raise,
+        )
+
+        try:
+            await check_target_comment_not_deleted_or_raise(session, gate=_gate)
+        except CommentReplyTargetDeletedError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail=human_error(
+                    "COMMENT_REPLY_TARGET_DELETED", "답변 대상 댓글이 삭제되어 승인할 수 없어요.",
+                    user_message="답변 대상 댓글이 삭제되어 승인할 수 없어요.",
+                ),
+            ) from exc
     # ⭐S23 RC① + RC#1(방어심층): resolver_id 를 **전 status 무조건 인증 caller 로 강제**(body 무시).
     # body 조작(타인 UUID)으로 SoD(approver≠owner) 우회·confirmed_by_member_id 위조 차단.
     _resolver_id = resolved.id
@@ -1555,7 +1925,12 @@ async def transition_gate_endpoint(
             publish_gate_check, org_id, gate.id,
             repo_full_name=_nf.get("repo"), pr_number=_nf.get("pr_number"),
         )
-        return GateResponse.model_validate(gate)
+        # story #3874(원인: 이 응답이 늘 risk_grade=None이었다·story #3868 AC0 실측) — 위
+        # 고위험 note 검증이 이미 get_org_posture를 한 번 부르지만(_transition_posture) 그
+        # 결과를 응답에 안 실었었다. approved 경로면 그 값을 그대로 재사용(재조회 0, story
+        # #2027 원래 "N+1 0" 의도 그대로)하고, 그 외 상태(rejected 등, 검증 블록 자체를
+        # 안 태움)만 to_gate_response가 자체적으로 1쿼리 한다(AC1이 명시 허용하는 비용).
+        return await to_gate_response(session, org_id, gate, posture=_transition_posture)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
@@ -1567,6 +1942,25 @@ async def reevaluate_gate_endpoint(
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth=Depends(get_current_user),
+    locale: str | None = None,
+    accept_language: str | None = Header(None, alias="Accept-Language"),
+) -> GateResponse:
+    """story #3793 — 라우트 진입점, `Header()` DI 마커는 여기서만 받는다(까심 QA CI FAILURE
+    원칙). 직접-호출 테스트는 `_reevaluate_gate_endpoint`를 불러야 한다."""
+    return await _reevaluate_gate_endpoint(
+        id, background_tasks, session=session, org_id=org_id, auth=auth,
+        resolved_locale=resolve_locale_from_request(locale, accept_language),
+    )
+
+
+async def _reevaluate_gate_endpoint(
+    id: uuid.UUID,
+    background_tasks: BackgroundTasks,
+    *,
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    auth,
+    resolved_locale: str,
 ) -> GateResponse:
     """story #2893(설계안 §3 B3) — 명시적 재평가 API. reopen(PR을 실제로 close→reopen)이나
     「참여등록 후 빈 커밋 push」 같은 우회(오늘 #3324가 실제로 쓴 수동 경로)를 표준 경로로
@@ -1599,7 +1993,7 @@ async def reevaluate_gate_endpoint(
         raise HTTPException(status_code=404, detail="Gate not found")
 
     if gate.gate_type != MERGE_GATE_TYPE:
-        raise HTTPException(status_code=422, detail="merge 게이트만 재평가를 지원합니다.")
+        raise HTTPException(status_code=422, detail=t("gates.reevaluate_merge_only", resolved_locale))
     if gate.status not in ("pending", "auto_passed"):
         raise HTTPException(
             status_code=422,
@@ -1625,7 +2019,7 @@ async def reevaluate_gate_endpoint(
         pr_number = pr_number or (_link.pr_number if _link else None)
     if not repo or not pr_number:
         raise HTTPException(
-            status_code=422, detail="게이트에 연결된 PR 정보가 없어 재평가할 수 없습니다.",
+            status_code=422, detail=t("gates.reevaluate_no_pr_info", resolved_locale),
         )
 
     installation = (
@@ -1636,17 +2030,17 @@ async def reevaluate_gate_endpoint(
         )
     ).scalar_one_or_none()
     if installation is None:
-        raise HTTPException(status_code=422, detail="GitHub App 설치가 없어 재평가할 수 없습니다.")
+        raise HTTPException(status_code=422, detail=t("gates.reevaluate_no_github_app", resolved_locale))
     token = await get_installation_token(installation.installation_id)
     if not token:
-        raise HTTPException(status_code=502, detail="GitHub 인증 토큰 발급 실패 — 잠시 후 다시 시도해 주세요.")
+        raise HTTPException(status_code=502, detail=t("gates.reevaluate_token_fetch_failed", resolved_locale))
 
     pr = await get_pull_request(installation.installation_id, repo, pr_number)
     if pr is None:
-        raise HTTPException(status_code=502, detail="GitHub PR 정보 조회 실패 — 잠시 후 다시 시도해 주세요.")
+        raise HTTPException(status_code=502, detail=t("gates.reevaluate_pr_fetch_failed", resolved_locale))
     head_sha = (pr.get("head") or {}).get("sha")
     if not head_sha:
-        raise HTTPException(status_code=502, detail="GitHub PR head SHA를 확인할 수 없습니다.")
+        raise HTTPException(status_code=502, detail=t("gates.reevaluate_head_sha_unavailable", resolved_locale))
     merged = bool(pr.get("merged"))
     ci_result, _ci_reason = await fetch_status_check_rollup(repo, head_sha, token)
 
@@ -1661,7 +2055,7 @@ async def reevaluate_gate_endpoint(
         publish_gate_check, org_id, gate.id,
         repo_full_name=repo, pr_number=pr_number, head_sha=head_sha,
     )
-    return GateResponse.model_validate(gate)
+    return await to_gate_response(session, org_id, gate)
 
 
 class GateVoidRequest(BaseModel):
@@ -1746,7 +2140,7 @@ async def withdraw_gate_endpoint(
     await session.commit()
     # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.
     await session.refresh(gate)
-    return GateResponse.model_validate(gate)
+    return await to_gate_response(session, org_id, gate)
 
 
 @router.post("/{id}/void", response_model=GateResponse)
@@ -1756,6 +2150,25 @@ async def void_gate_endpoint(
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth=Depends(get_current_user),
+    locale: str | None = None,
+    accept_language: str | None = Header(None, alias="Accept-Language"),
+) -> GateResponse:
+    """story #3793 — 라우트 진입점, `Header()` DI 마커는 여기서만 받는다(까심 QA CI FAILURE
+    원칙). 직접-호출 테스트는 `_void_gate_endpoint`를 불러야 한다."""
+    return await _void_gate_endpoint(
+        id, body, session=session, org_id=org_id, auth=auth,
+        resolved_locale=resolve_locale_from_request(locale, accept_language),
+    )
+
+
+async def _void_gate_endpoint(
+    id: uuid.UUID,
+    body: GateVoidRequest,
+    *,
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    auth,
+    resolved_locale: str,
 ) -> GateResponse:
     """⭐S30 admin recovery: 잘못 생성된 pending gate 무효화(void). admin-only(project_auth canonical).
 
@@ -1764,13 +2177,13 @@ async def void_gate_endpoint(
     resolved = await resolve_member(auth, org_id, session)
     # Q4: canonical project_auth admin 게이팅(ad-hoc role 금지·S27/S29 교훈). org owner/admin 만.
     if not await is_org_owner_or_admin(session, uuid.UUID(auth.user_id), org_id):
-        raise HTTPException(status_code=403, detail="게이트 무효화는 org owner/admin 만 가능합니다.")
+        raise HTTPException(status_code=403, detail=t("gates.void_owner_admin_only", resolved_locale))
     try:
         gate = await void_gate(session, org_id, id, resolved.id, body.reason)
         await session.commit()
         # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.
         await session.refresh(gate)
-        return GateResponse.model_validate(gate)
+        return await to_gate_response(session, org_id, gate)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
@@ -1780,12 +2193,15 @@ class GateHoldRequest(BaseModel):
     held_until: datetime | None = None  # 시한부 만료(무기한이면 None)
 
 
-async def _require_gate_admin(session, auth, org_id):
+async def _require_gate_admin(session, auth, org_id, resolved_locale: str):
     """⭐S31/S30 공통: gate 파괴적/관리 액션 admin 게이팅(canonical project_auth·ad-hoc role 금지).
-    반환 resolved member(holder/voider=인증 caller 강제용·body 신뢰 0)."""
+    반환 resolved member(holder/voider=인증 caller 강제용·body 신뢰 0).
+
+    story #3793 — `resolved_locale`은 호출부(라우트 진입점)가 이미 `resolve_locale_from_request()`
+    로 풀어 넘기는 plain str(Header() DI 마커 없음, 까심 QA CI FAILURE 원칙)."""
     resolved = await resolve_member(auth, org_id, session)
     if not await is_org_owner_or_admin(session, uuid.UUID(auth.user_id), org_id):
-        raise HTTPException(status_code=403, detail="이 액션은 org owner/admin 만 가능합니다.")
+        raise HTTPException(status_code=403, detail=t("gates.require_admin_generic", resolved_locale))
     return resolved
 
 
@@ -1796,15 +2212,34 @@ async def hold_gate_endpoint(
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth=Depends(get_current_user),
+    locale: str | None = None,
+    accept_language: str | None = Header(None, alias="Accept-Language"),
+) -> GateResponse:
+    """story #3793 — 라우트 진입점, `Header()` DI 마커는 여기서만 받는다(까심 QA CI FAILURE
+    원칙). 직접-호출 테스트는 `_hold_gate_endpoint`를 불러야 한다."""
+    return await _hold_gate_endpoint(
+        id, body, session=session, org_id=org_id, auth=auth,
+        resolved_locale=resolve_locale_from_request(locale, accept_language),
+    )
+
+
+async def _hold_gate_endpoint(
+    id: uuid.UUID,
+    body: GateHoldRequest,
+    *,
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    auth,
+    resolved_locale: str,
 ) -> GateResponse:
     """⭐S31 admin hold: pending gate 일시 보류(held·SLA pause). admin-only·holder=인증 caller 강제."""
-    resolved = await _require_gate_admin(session, auth, org_id)
+    resolved = await _require_gate_admin(session, auth, org_id, resolved_locale)
     try:
         gate = await hold_gate(session, org_id, id, resolved.id, body.reason, body.held_until)
         await session.commit()
         # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.
         await session.refresh(gate)
-        return GateResponse.model_validate(gate)
+        return await to_gate_response(session, org_id, gate)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
@@ -1815,15 +2250,33 @@ async def unhold_gate_endpoint(
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth=Depends(get_current_user),
+    locale: str | None = None,
+    accept_language: str | None = Header(None, alias="Accept-Language"),
+) -> GateResponse:
+    """story #3793 — 라우트 진입점, `Header()` DI 마커는 여기서만 받는다(까심 QA CI FAILURE
+    원칙). 직접-호출 테스트는 `_unhold_gate_endpoint`를 불러야 한다."""
+    return await _unhold_gate_endpoint(
+        id, session=session, org_id=org_id, auth=auth,
+        resolved_locale=resolve_locale_from_request(locale, accept_language),
+    )
+
+
+async def _unhold_gate_endpoint(
+    id: uuid.UUID,
+    *,
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    auth,
+    resolved_locale: str,
 ) -> GateResponse:
     """⭐S31 admin unhold: held gate 재개(→pending·SLA resume). admin-only·actor=인증 caller."""
-    resolved = await _require_gate_admin(session, auth, org_id)
+    resolved = await _require_gate_admin(session, auth, org_id, resolved_locale)
     try:
         gate = await unhold_gate(session, org_id, id, resolved.id)
         await session.commit()
         # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.
         await session.refresh(gate)
-        return GateResponse.model_validate(gate)
+        return await to_gate_response(session, org_id, gate)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
@@ -1846,7 +2299,7 @@ async def undo_gate_resolution_endpoint(
         await session.commit()
         # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.
         await session.refresh(gate)
-        return GateResponse.model_validate(gate)
+        return await to_gate_response(session, org_id, gate)
     except GateUndoNotSelfError as e:
         raise HTTPException(status_code=403, detail=str(e))
     except GateUndoWindowExpiredError as e:
@@ -1866,22 +2319,42 @@ async def request_gate_discussion_endpoint(
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth=Depends(get_current_user),
+    locale: str | None = None,
+    accept_language: str | None = Header(None, alias="Accept-Language"),
 ) -> GateResponse:
     """story #2631 AC2 — 승인/거부 옆 3번째 응답: 「보류(논의 필요)」. 게이트는 pending
     그대로(전이 없음) — 순수 회신+감사 기록. 인가는 승인/거부와 **동일 자격**
     (_authorize_gate_approve_equivalent — 승인 못 하는 제3자가 게이트를 논의-보류로
-    묶어두는 것도 막아야 하므로)."""
+    묶어두는 것도 막아야 하므로).
+
+    story #3793 — `Header()` DI 마커는 여기서만 받는다(까심 QA CI FAILURE 원칙). 직접-호출
+    테스트는 `_request_gate_discussion_endpoint`를 불러야 한다."""
+    return await _request_gate_discussion_endpoint(
+        id, body, session=session, org_id=org_id, auth=auth,
+        resolved_locale=resolve_locale_from_request(locale, accept_language),
+    )
+
+
+async def _request_gate_discussion_endpoint(
+    id: uuid.UUID,
+    body: GateDiscussionRequest,
+    *,
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    auth,
+    resolved_locale: str,
+) -> GateResponse:
     resolved = await resolve_member(auth, org_id, session)
     _gate = (await session.execute(
         select(Gate).where(Gate.id == id, Gate.org_id == org_id)
     )).scalar_one_or_none()
-    await _authorize_gate_approve_equivalent(session, _gate, resolved, auth, org_id)
+    await _authorize_gate_approve_equivalent(session, _gate, resolved, auth, org_id, resolved_locale)
     try:
         gate = await request_gate_discussion(session, org_id, id, resolved.id, body.reason)
         await session.commit()
         # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.
         await session.refresh(gate)
-        return GateResponse.model_validate(gate)
+        return await to_gate_response(session, org_id, gate)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
@@ -1897,6 +2370,25 @@ async def delegate_gate_endpoint(
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth=Depends(get_current_user),
+    locale: str | None = None,
+    accept_language: str | None = Header(None, alias="Accept-Language"),
+) -> GateResponse:
+    """story #3793 — 라우트 진입점, `Header()` DI 마커는 여기서만 받는다(까심 QA CI FAILURE
+    원칙). 직접-호출 테스트는 `_delegate_gate_endpoint`를 불러야 한다."""
+    return await _delegate_gate_endpoint(
+        id, body, session=session, org_id=org_id, auth=auth,
+        resolved_locale=resolve_locale_from_request(locale, accept_language),
+    )
+
+
+async def _delegate_gate_endpoint(
+    id: uuid.UUID,
+    body: GateDelegateRequest,
+    *,
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    auth,
+    resolved_locale: str,
 ) -> GateResponse:
     """story #3001(선생님 정책 확定 2026-08-24) — 지정 결재자 본인이 다른 결재자에게
     「튕겨낸다」(위임). #2985가 만들었던 "대신 처리" 폴드의 대체 정책 — 「감사는 읽기만
@@ -1919,9 +2411,9 @@ async def delegate_gate_endpoint(
             detail={"code": "gate_already_resolved", "message": "이미 처리된 결재는 위임할 수 없습니다."},
         )
     if _gate.designated_approver_id is None or _gate.designated_approver_id != resolved.id:
-        raise HTTPException(status_code=403, detail="지정 결재자 본인만 위임할 수 있습니다.")
+        raise HTTPException(status_code=403, detail=t("gates.delegate_designated_only", resolved_locale))
     if body.new_approver_member_id == resolved.id:
-        raise HTTPException(status_code=422, detail="본인에게 위임할 수 없습니다.")
+        raise HTTPException(status_code=422, detail=t("gates.delegate_self_not_allowed", resolved_locale))
 
     # story #2985와 동일 fail-safe 축(approval_delivery.dispatch_approval_request_cards의
     # designated_approver_id 밖 값 처리와 동형) — 여기선 서버가 400으로 명시 거부한다(라우터
@@ -1965,7 +2457,7 @@ async def delegate_gate_endpoint(
         session, _gate, old_approver_id=old_approver_id, new_approver_id=body.new_approver_member_id,
     )
 
-    return GateResponse.model_validate(_gate)
+    return await to_gate_response(session, org_id, _gate)
 
 
 class GateTossRequest(BaseModel):
@@ -1987,6 +2479,25 @@ async def toss_gate_endpoint(
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth=Depends(get_current_user),
+    locale: str | None = None,
+    accept_language: str | None = Header(None, alias="Accept-Language"),
+) -> GateTossResponse:
+    """story #3793 — 라우트 진입점, `Header()` DI 마커는 여기서만 받는다(까심 QA CI FAILURE
+    원칙). 직접-호출 테스트는 `_toss_gate_endpoint`를 불러야 한다."""
+    return await _toss_gate_endpoint(
+        id, body, session=session, org_id=org_id, auth=auth,
+        resolved_locale=resolve_locale_from_request(locale, accept_language),
+    )
+
+
+async def _toss_gate_endpoint(
+    id: uuid.UUID,
+    body: GateTossRequest,
+    *,
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    auth,
+    resolved_locale: str,
 ) -> GateTossResponse:
     """story #3084(2026-08-25, 선생님 지시 — 결재 카드 «토스») — 상신자 또는 designated
     결재자 본인이, designated 본인이 참여한 다른 conversation에 카드 **사본**을 심는다
@@ -2007,22 +2518,28 @@ async def toss_gate_endpoint(
     if _gate.status != "pending":
         raise HTTPException(
             status_code=409,
-            detail={"code": "gate_already_resolved", "message": "이미 처리된 결재는 토스할 수 없습니다."},
+            detail={
+                "code": "gate_already_resolved",
+                "message": t("gates.toss_gate_already_resolved", resolved_locale),
+            },
         )
     if _gate.designated_approver_id is None:
         raise HTTPException(
             status_code=422,
-            detail={"code": "no_designated_approver", "message": "지정 결재자가 없는 게이트는 토스할 수 없습니다."},
+            detail={
+                "code": "no_designated_approver",
+                "message": t("gates.toss_no_designated_approver", resolved_locale),
+            },
         )
 
     from app.services.gate_service import resolve_designatable_gate_context
     ctx = await resolve_designatable_gate_context(session, _gate)
     if ctx is None:
-        raise HTTPException(status_code=422, detail="이 게이트 유형은 토스를 지원하지 않습니다.")
+        raise HTTPException(status_code=422, detail=t("gates.toss_unsupported_gate_type", resolved_locale))
     title, project_id, requester_id = ctx
 
     if resolved.id not in (requester_id, _gate.designated_approver_id):
-        raise HTTPException(status_code=403, detail="상신자 또는 지정 결재자 본인만 토스할 수 있습니다.")
+        raise HTTPException(status_code=403, detail=t("gates.toss_requester_or_designated_only", resolved_locale))
 
     # story #3001 정책 집행 — 대상 conversation에 designated 본인이 참여자여야 한다(카드=
     # 지정 라인 전용, 임의 방으로 액션 링크가 새는 것 방지). org 스코프도 함께 강제.
@@ -2071,7 +2588,7 @@ async def toss_gate_endpoint(
             session, _gate, target_conversation_id=body.target_conversation_id, tossed_by_id=resolved.id,
         )
 
-    return GateTossResponse(**GateResponse.model_validate(_gate).model_dump(), inserted=inserted)
+    return GateTossResponse(**(await to_gate_response(session, org_id, _gate)).model_dump(), inserted=inserted)
 
 
 class GateReassignRequest(BaseModel):
@@ -2125,10 +2642,28 @@ async def list_gate_approvers_endpoint(
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth=Depends(get_current_user),
+    locale: str | None = None,
+    accept_language: str | None = Header(None, alias="Accept-Language"),
+) -> list[GateApproverResponse]:
+    """story #3793 — 라우트 진입점, `Header()` DI 마커는 여기서만 받는다(까심 QA CI FAILURE
+    원칙). 직접-호출 테스트는 `_list_gate_approvers_endpoint`를 불러야 한다."""
+    return await _list_gate_approvers_endpoint(
+        id, session=session, org_id=org_id, auth=auth,
+        resolved_locale=resolve_locale_from_request(locale, accept_language),
+    )
+
+
+async def _list_gate_approvers_endpoint(
+    id: uuid.UUID,
+    *,
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    auth,
+    resolved_locale: str,
 ) -> list[GateApproverResponse]:
     """⭐S32 FE conditional-display: gate approver row 목록(있으면 parallel gate→reassign 노출·없으면
     단일/merge gate→reassign 미노출로 422 원천차단). admin-only. 재지정 메타(누가/언제) enrich."""
-    await _require_gate_admin(session, auth, org_id)
+    await _require_gate_admin(session, auth, org_id, resolved_locale)
     from app.services.workflow_parallel_approval import list_gate_approvers
     rows = await list_gate_approvers(session, org_id, id)
     return await _enrich_approvers(session, org_id, rows)
@@ -2141,10 +2676,29 @@ async def reassign_gate_approver_endpoint(
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth=Depends(get_current_user),
+    locale: str | None = None,
+    accept_language: str | None = Header(None, alias="Accept-Language"),
+) -> list[GateApproverResponse]:
+    """story #3793 — 라우트 진입점, `Header()` DI 마커는 여기서만 받는다(까심 QA CI FAILURE
+    원칙). 직접-호출 테스트는 `_reassign_gate_approver_endpoint`를 불러야 한다."""
+    return await _reassign_gate_approver_endpoint(
+        id, body, session=session, org_id=org_id, auth=auth,
+        resolved_locale=resolve_locale_from_request(locale, accept_language),
+    )
+
+
+async def _reassign_gate_approver_endpoint(
+    id: uuid.UUID,
+    body: GateReassignRequest,
+    *,
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    auth,
+    resolved_locale: str,
 ) -> list[GateApproverResponse]:
     """⭐S32 admin reassign: parallel gate 의 pending 결재자 교체. admin-only·reassigner=인증 caller 강제
     (body 신뢰 0·S23 RC①). gate.status 불변(pending 유지·재결정 대상). 단일 gate=422(parallel 전용)."""
-    resolved = await _require_gate_admin(session, auth, org_id)
+    resolved = await _require_gate_admin(session, auth, org_id, resolved_locale)
     from app.services.workflow_parallel_approval import list_gate_approvers, reassign_approver
     try:
         await reassign_approver(
@@ -2164,12 +2718,15 @@ class GateOverrideRequest(BaseModel):
     reason: str    # 필수 — 가장 민감한 액션이라 사유 의무
 
 
-async def _require_gate_owner(session, auth, org_id):
+async def _require_gate_owner(session, auth, org_id, resolved_locale: str):
     """⭐S33 owner-only 게이팅 — override 는 SoD 우회=가장 강력이라 admin(void/hold/reassign)보다 좁게
-    owner 만. is_org_owner(role='owner') canonical. 반환 resolved(owner_id=인증 caller 강제·body 신뢰 0)."""
+    owner 만. is_org_owner(role='owner') canonical. 반환 resolved(owner_id=인증 caller 강제·body 신뢰 0).
+
+    story #3793 — `resolved_locale`은 호출부(라우트 진입점)가 이미 `resolve_locale_from_request()`
+    로 풀어 넘기는 plain str(Header() DI 마커 없음, 까심 QA CI FAILURE 원칙)."""
     resolved = await resolve_member(auth, org_id, session)
     if not await is_org_owner(session, uuid.UUID(auth.user_id), org_id):
-        raise HTTPException(status_code=403, detail="이 액션은 org owner 만 가능합니다.")
+        raise HTTPException(status_code=403, detail=t("gates.require_owner_generic", resolved_locale))
     return resolved
 
 
@@ -2181,11 +2738,31 @@ async def override_gate_endpoint(
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth=Depends(get_current_user),
+    locale: str | None = None,
+    accept_language: str | None = Header(None, alias="Accept-Language"),
+) -> GateResponse:
+    """story #3793 — 라우트 진입점, `Header()` DI 마커는 여기서만 받는다(까심 QA CI FAILURE
+    원칙). 직접-호출 테스트는 `_override_gate_endpoint`를 불러야 한다."""
+    return await _override_gate_endpoint(
+        id, body, background_tasks, session=session, org_id=org_id, auth=auth,
+        resolved_locale=resolve_locale_from_request(locale, accept_language),
+    )
+
+
+async def _override_gate_endpoint(
+    id: uuid.UUID,
+    body: GateOverrideRequest,
+    background_tasks: BackgroundTasks,
+    *,
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    auth,
+    resolved_locale: str,
 ) -> GateResponse:
     """⭐S33 owner force-resolve: owner 가 막힌/긴급 gate 를 강제 결정(approved|rejected). owner-only·
     reason 필수·owner_id=인증 caller 강제(S23 RC①)·정상 결재(quorum/SoD) 우회. 가장 민감한 액션."""
     from app.services.gate_service import override_gate
-    resolved = await _require_gate_owner(session, auth, org_id)
+    resolved = await _require_gate_owner(session, auth, org_id, resolved_locale)
     _pending_deliveries: list[dict] = []
     try:
         gate = await override_gate(
@@ -2197,6 +2774,6 @@ async def override_gate_endpoint(
         await session.refresh(gate)
         # ccbcd9da(A-1): override 도 transition_gate 재사용 경로라 동일하게 doc/epic wake 대상.
         _schedule_pending_deliveries(background_tasks, _pending_deliveries)
-        return GateResponse.model_validate(gate)
+        return await to_gate_response(session, org_id, gate)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))

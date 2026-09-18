@@ -185,11 +185,12 @@ async def test_reassign_endpoint_non_admin_403():
     from unittest.mock import AsyncMock, patch
     from fastapi import HTTPException
     from app.routers import gates as gates_mod
-    from app.routers.gates import GateReassignRequest, reassign_gate_approver_endpoint
+    from app.routers.gates import GateReassignRequest, _reassign_gate_approver_endpoint
     with patch.object(gates_mod, "resolve_member", AsyncMock(return_value=_resolved_human())), \
          patch.object(gates_mod, "is_org_owner_or_admin", AsyncMock(return_value=False)):
         with pytest.raises(HTTPException) as ei:
-            await reassign_gate_approver_endpoint(
+            await _reassign_gate_approver_endpoint(
+                resolved_locale="ko",
                 id=uuid.uuid4(), body=GateReassignRequest(new_approver_id=uuid.uuid4()),
                 session=AsyncMock(), org_id=uuid.uuid4(),
                 auth=SimpleNamespace(user_id=str(uuid.uuid4())))

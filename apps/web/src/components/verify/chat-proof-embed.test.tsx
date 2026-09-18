@@ -33,10 +33,10 @@ describe('ChatProofEmbed — story #2265(C-7) PR1a 4상태', () => {
     expect(html).toContain('확認했는');
     expect(html).toContain('대화에서 열기');
     expect(html).not.toContain('삭제됨');
-    expect(html).not.toContain('수정되었습니다');
+    expect(html).not.toContain('수정됐어요');
   });
 
-  it('수정됨 — 박힌 시점 내용은 그대로 유지되고 «원본이 수정되었습니다»가 얹힌다(자동 교체 아님)', () => {
+  it('수정됨 — 박힌 시점 내용은 그대로 유지되고 «원본이 수정됐어요»가 얹힌다(자동 교체 아님)', () => {
     const html = renderToStaticMarkup(wrap(
       <ChatProofEmbed
         sourceLabel="채팅 · 7/26 · 오르테가군 외 2명"
@@ -49,7 +49,7 @@ describe('ChatProofEmbed — story #2265(C-7) PR1a 4상태', () => {
     ));
     // 박힌 시점 내용이 살아있다 — 조용한 교체가 아니라 "얹기"임을 확認.
     expect(html).toContain('이 방향으로 가시는');
-    expect(html).toContain('원본이 수정되었습니다');
+    expect(html).toContain('원본이 수정됐어요');
     expect(html).toContain('7/28');
     expect(html).toContain('지금 원본 보기');
   });
@@ -66,11 +66,11 @@ describe('ChatProofEmbed — story #2265(C-7) PR1a 4상태', () => {
     ));
     expect(html).not.toContain('이 방향으로 가시는');
     expect(html).toContain('삭제됨');
-    expect(html).toContain('원본이 삭제되었습니다');
+    expect(html).toContain('원본이 삭제됐어요');
     expect(html).toContain('인용 시점');
   });
 
-  it('권한없음 — 내용·출처줄 전부 안 보이고 «볼 수 없습니다 · 권한»만 선다(삭제됨과 다른 문구)', () => {
+  it('권한없음 — 내용·출처줄 전부 안 보이고 «볼 수 없어요 · 권한»만 선다(삭제됨과 다른 문구)', () => {
     const html = renderToStaticMarkup(wrap(
       <ChatProofEmbed
         sourceLabel="채팅 · 7/26 · 오르테가군 외 2명"
@@ -83,7 +83,7 @@ describe('ChatProofEmbed — story #2265(C-7) PR1a 4상태', () => {
     expect(html).not.toContain('이 방향으로 가시는');
     expect(html).not.toContain('채팅 · 7/26');
     expect(html).not.toContain('삭제됨');
-    expect(html).toContain('볼 수 없습니다');
+    expect(html).toContain('볼 수 없어요');
     expect(html).toContain('권한');
   });
 

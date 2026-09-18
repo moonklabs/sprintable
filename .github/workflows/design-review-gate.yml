@@ -57,6 +57,12 @@ concurrency:
 permissions:
   contents: read
   pull-requests: read  # AC7 개정분 — labeled 타임라인 이벤트 조회(issues/events)에 필요
+  # story #3400 — CI 워크플로 run 상태(queued/in_progress/completed)를
+  # actions/workflows/{id}/runs로 직접 읽는다(qa-review-gate.yml #3346과 공유하는
+  # .github/actions/ci-run-completion-check). branch protection required_status_checks
+  # 직접 읽기는 GITHUB_TOKEN에 권한 스코프 자체가 없어(actionlint: "administration"은
+  # 무효 permission) 채택 안 함 — 근거는 그 액션 파일 주석 참고.
+  actions: read
 
 jobs:
   design-review-gate:
@@ -274,3 +280,17 @@ jobs:
             exit 1
           fi
           echo "no incomplete non-advisory checks for ${HEAD_SHA}."
+
+      # story #3346(qa-review-gate.yml에서 최초 발견·수정, 2026-09-02 실사고 PR#3725)·
+      # #3400(이 워크플로로 확장) — 위 스텝은 "존재하는 check-runs 목록"만 본다.
+      # force-push 직후 concurrency로 큐 대기(pending) 중이던 CI는 잡이 아직 시작도 안
+      # 해 체크런 자체가 하나도 없었다 — "미완인 체크런"이 아니라 "체크런 자체가 없는"
+      # 경우라 위 스텝의 필터를 그냥 통과해(0건 매치) «미완 0건»으로 오판한다. 판정
+      # 로직·근거는 qa-review-gate.yml과 공유하는
+      # .github/actions/ci-run-completion-check/action.yml 참고.
+      - name: Enforce the CI workflow run itself is completed+success at head (not just its check-runs)
+        if: steps.scope.outputs.in_scope == 'true'
+        uses: ./.github/actions/ci-run-completion-check
+        with:
+          label-name: design:pass
+          gh-token: ${{ secrets.GITHUB_TOKEN }}

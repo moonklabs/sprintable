@@ -34,6 +34,12 @@ class EvidenceCreateRequest(BaseModel):
     # 않는다 — "그 시각의 latest"를 서버가 항상 resolve해 고정한다(③pin 시점 규칙, 클라
     # 위임 시 취지가 샌다).
     artifact_id: uuid.UUID | None = None
+    # story #3498(페드루 PO 決定 2026-09-05) — evidence API가 "지출 기록" 정본이 되려면
+    # 클라이언트가 payload를 실을 수 있어야 한다(이전엔 insight_snapshots.py 등 내부
+    # 서비스만 이 컬럼을 썼다). 스키마는 여기서 강제 안 함(content_rules.py::lint_content
+    # 관례와 동형 — type="metric"·payload.kind="generation_cost"·cost_minor 규약은
+    # generation_budget.py가 읽는 쪽에서만 본다).
+    payload: dict | None = None
 
     @field_validator("work_item_type")
     @classmethod
@@ -73,7 +79,12 @@ class EvidenceResponse(BaseModel):
     ref: str
     source: str | None
     note: str | None
-    created_by: uuid.UUID
+    # story #3497 — nullable(모델과 동형). None=행위자 없는 시스템 기록(인사이트
+    # 스냅샷 evidence 등, payload.recorded_by="platform"이 그 표식).
+    created_by: uuid.UUID | None
+    # story #3498 — 생성 시 받은 payload를 그대로 되돌려준다(모델·#3497 payload 컬럼과
+    # 동형, 이전엔 응답에 아예 없었다 — 내부 서비스만 쓰던 컬럼이라 노출 자체가 불요했음).
+    payload: dict | None = None
     created_at: Any
     resolved_story_id: uuid.UUID | None = None
     """story #2314 AC3② — embed 칩이 evidence의 «담긴 곳»으로 한 번에 건너뛸 자리.
@@ -188,6 +199,101 @@ async def _attach_artifact_denorm(
     return out
 
 
+_GENERATION_COST_KIND = "generation_cost"
+# story #3561(Phase2·BE, 페드루 PO 確定 2026-09-06) — concept_approval 게이트 승인 근거로
+# 첨부하는 검증표. type="report"와 짝을 이루는 관례(generation_cost의 type="metric" 관례와
+# 동형 — 이 관례는 여기서 강제 안 함, 소비자 쪽이 kind로만 읽는다. 3498 kind=generation_cost
+# 분기와 동일 원칙).
+_VERIFICATION_SHEET_KIND = "verification_sheet"
+_VERIFICATION_SHEET_VERDICTS = frozenset({"pass", "fail", "n_a"})
+
+
+async def _validate_and_normalize_evidence_payload(
+    session: AsyncSession, *, org_id: uuid.UUID, payload: dict | None, caller_type: str,
+    caller_id: uuid.UUID | None = None,
+) -> dict | None:
+    """story #3498(페드루 PO REQUIRED, PR#3847 리뷰) — client-writable payload를 연
+    대가로 두 가지를 서버가 강제한다.
+
+    ① `recorded_by`는 클라이언트 값을 항상 버리고 서버가 채운다(caller_type 그대로
+    — "platform" 표식은 이 경로로 절대 못 나온다, insight_snapshots.py 내부 서비스
+    호출만이 그 표식을 쓸 수 있다). evidence.py의 어떤 payload든 이 축은 위조 불가.
+
+    ② `kind="generation_cost"`(생성 비용 자기 보고, 3498 §2 spent 합산의 유일한
+    입력)면 `cost_minor`는 int·0 이상이어야 한다(음수 cost로 잔량을 부풀려 한도를
+    뚫는 걸 여기서 원천 차단 — generation_budget.py의 합산 스킵은 두 번째 겹).
+    `currency`는 조직에 generation_budget 정책이 설정돼 있으면 그 통화와 정확히
+    일치해야 한다(정책 자체가 없으면 비교 대상이 없어 통과 — «규칙 없음»과 같은
+    원칙). 위반은 422 EVIDENCE_PAYLOAD_INVALID.
+
+    ③ `kind="verification_sheet"`(story #3561, concept_approval 게이트 승인 근거) —
+    `items`는 `{name:str, verdict:"pass"|"fail"|"n_a", note?:str}` 1건 이상의 배열이어야
+    한다(위반 422 EVIDENCE_PAYLOAD_INVALID). `verified_by`는 ①의 `recorded_by`와 동일
+    원칙으로 클라이언트 값을 무시하고 서버가 caller_type+caller_id로 덮어쓴다(caller_id는
+    ①과 달리 이 kind 전용으로 추가 전달받는다 — 「누가 검증표를 작성했나」는 caller_type
+    하나로는 부족, 실 멤버까지 특정해야 한다). `verified_at`은 서버 시각(클라이언트가
+    못 주는 값, 지어내지 않는다)."""
+    if payload is None:
+        return None
+    payload = dict(payload)
+    payload["recorded_by"] = caller_type
+
+    if payload.get("kind") == _GENERATION_COST_KIND:
+        cost_minor = payload.get("cost_minor")
+        if not isinstance(cost_minor, int) or isinstance(cost_minor, bool) or cost_minor < 0:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "EVIDENCE_PAYLOAD_INVALID",
+                    "message": "generation_cost evidence의 cost_minor는 0 이상의 정수여야 합니다.",
+                },
+            )
+        from app.services.content_rules import get_org_content_rules
+
+        rule_row = await get_org_content_rules(session, org_id=org_id)
+        policy_currency = ((rule_row.rules or {}).get("generation_budget") or {}).get("currency") if rule_row else None
+        if policy_currency is not None and payload.get("currency") != policy_currency:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "EVIDENCE_PAYLOAD_INVALID",
+                    "message": f"currency는 조직 정책 통화({policy_currency})와 일치해야 합니다.",
+                },
+            )
+    elif payload.get("kind") == _VERIFICATION_SHEET_KIND:
+        items = payload.get("items")
+        if not isinstance(items, list) or not items:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "EVIDENCE_PAYLOAD_INVALID",
+                    "message": "verification_sheet evidence의 items는 1건 이상의 배열이어야 합니다.",
+                },
+            )
+        for item in items:
+            if (
+                not isinstance(item, dict)
+                or not isinstance(item.get("name"), str) or not item.get("name")
+                or item.get("verdict") not in _VERIFICATION_SHEET_VERDICTS
+                or (item.get("note") is not None and not isinstance(item.get("note"), str))
+            ):
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "code": "EVIDENCE_PAYLOAD_INVALID",
+                        "message": (
+                            "verification_sheet evidence의 각 item은 name(비어있지 않은 문자열)·"
+                            f"verdict({sorted(_VERIFICATION_SHEET_VERDICTS)} 중 하나)가 필요하고, "
+                            "note는 있으면 문자열이어야 합니다."
+                        ),
+                    },
+                )
+        from datetime import datetime, timezone
+        payload["verified_by"] = {"type": caller_type, "id": str(caller_id) if caller_id is not None else None}
+        payload["verified_at"] = datetime.now(timezone.utc).isoformat()
+    return payload
+
+
 @router.post("", response_model=EvidenceResponse, status_code=201)
 async def create_evidence(
     body: EvidenceCreateRequest,
@@ -212,6 +318,10 @@ async def create_evidence(
             session, body.artifact_id, org_id, project_id
         )
 
+    payload = await _validate_and_normalize_evidence_payload(
+        session, org_id=org_id, payload=body.payload, caller_type=caller.type, caller_id=caller.id,
+    )
+
     evidence = Evidence(
         id=uuid.uuid4(),
         org_id=org_id,
@@ -222,6 +332,7 @@ async def create_evidence(
         ref=body.ref,
         source=body.source,
         note=body.note,
+        payload=payload,
         created_by=caller.id,
     )
     session.add(evidence)
@@ -320,6 +431,9 @@ async def delete_evidence(
         raise HTTPException(status_code=404, detail="Evidence not found")
 
     caller = await resolve_member(auth, org_id, session)
+    # story #3497 — evidence.created_by가 None(행위자 없는 시스템 기록, 예: 인사이트
+    # 스냅샷)이면 이 비교가 항상 참이라 자연히 403으로 떨어진다(caller.id가 None일 수
+    # 없으므로) — 플랫폼이 만든 기록은 어떤 멤버도 "내 것"으로 철회 못 한다(의도).
     if evidence.created_by != caller.id:
         raise HTTPException(status_code=403, detail="Only the creator can retract evidence")
 

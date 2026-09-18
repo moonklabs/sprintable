@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { useTranslations } from 'next-intl';
 import { List, X } from 'lucide-react';
 import type { DocHeading } from './doc-heading-utils';
 import { cn } from '@/lib/utils';
@@ -12,6 +13,8 @@ interface DocTocProps {
 }
 
 export function DocToc({ headings, onHeadingClick, className }: DocTocProps) {
+  // story #3776(1층A) — "목차" 라벨, docs ns의 기존 tocSection 키 재사용.
+  const t = useTranslations('docs');
   const [open, setOpen] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -45,16 +48,16 @@ export function DocToc({ headings, onHeadingClick, className }: DocTocProps) {
             ? 'border-border bg-muted text-foreground'
             : 'border-border/60 bg-card text-foreground hover:border-muted-foreground/40 hover:text-foreground'
         }`}
-        title="목차"
+        title={t('tocSection')}
       >
         <List className="size-3.5" />
-        <span>목차</span>
+        <span>{t('tocSection')}</span>
       </button>
 
       {open && (
         <div className="absolute right-0 top-full z-50 mt-1.5 w-64 overflow-hidden rounded-xl border border-border bg-background">
           <div className="flex items-center justify-between border-b border-border/60 px-3 py-2">
-            <span className="text-xs font-semibold text-foreground">목차</span>
+            <span className="text-xs font-semibold text-foreground">{t('tocSection')}</span>
             <button
               type="button"
               onClick={() => setOpen(false)}

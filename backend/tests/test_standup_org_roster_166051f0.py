@@ -68,7 +68,8 @@ async def _seed(session):
         f"('{OM_GRANT}','{ORG}','{U_GRANT}','member'),"
         f"('{OM_NOACC}','{ORG}','{U_NOACC}','member')",
         f"INSERT INTO projects (id,org_id,name,violation_level) VALUES ('{P1}','{ORG}','P1',0)",
-        # anchor members: 휴먼 id=org_member.id. U_NOACC 는 name 컬럼이 NULL→픽스의 users 폴백(display_name/email) 검증용으로 members 미생성.
+        # anchor members: 휴먼 id=org_member.id. U_NOACC 는 members 미생성 + users.display_name도
+        # NULL → name=None 정직 경로(story #3758, email 폴백 제거) 검증용.
         "INSERT INTO members (id,org_id,type,user_id,name,org_role,is_active) VALUES "
         f"('{OM_OWNER}','{ORG}','human','{U_OWNER}','Owner Park','owner',true),"
         f"('{OM_GRANT}','{ORG}','human','{U_GRANT}','Grant Kim','member',true),"
@@ -122,7 +123,10 @@ async def test_org_level_human_roster_from_org_members_not_view():
         assert set(by_id) == {OM_OWNER, OM_GRANT, OM_NOACC}, f"org_members 직접 해소 휴먼 불일치: {set(by_id)}"
         assert by_id[OM_OWNER]["name"] == "Owner Park"          # members.name 우선
         assert by_id[OM_GRANT]["name"] == "Grant Kim"
-        assert by_id[OM_NOACC]["name"] == "noacc@d166.test"     # members 부재 → users.email 폴백
+        # story #3758 — email 폴백 제거. members도 users.display_name도 없으면 None 정직
+        # (예전엔 여기서 u.email을 name 자리에 지어냈다 — member_resolver.py 5자리·#3755와
+        # 같은 결함 클래스의 이 repo 내 독립 자리였다).
+        assert by_id[OM_NOACC]["name"] is None                  # members 부재 + display_name NULL → None
         # 곱연산 0: 휴먼당 정확히 1행
         assert len(rows) == 3, f"곱연산 의심(휴먼당 1행 위반): {len(rows)}"
 

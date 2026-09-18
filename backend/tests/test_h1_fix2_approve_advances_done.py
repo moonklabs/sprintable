@@ -125,7 +125,9 @@ async def test_transition_reject_does_not_advance_story_either():
 
         async with Session() as s:
             await s.execute(_text("SET session_replication_role = replica"))
-            await transition_gate(s, org, gate_id, "rejected", resolver_id=resolver)
+            # story #3334 — transition_gate("rejected")가 이제 사유 필수. 이 테스트의
+            # 관심사(story.status 미전진 확인)와 무관하므로 명시로 실어 대상 밖임을 밝힌다.
+            await transition_gate(s, org, gate_id, "rejected", resolver_id=resolver, note="양성대조용 반려")
             await s.commit()
 
         async with Session() as s:

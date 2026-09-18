@@ -30,6 +30,12 @@ def anyio_backend():
 def _hyp(status="active", source="ga4"):
     return SimpleNamespace(
         id=uuid.uuid4(), status=status, outcome_result=None,
+        # story #3674 — hypothesis_scorer.py의 GA4 분기가 get_org_timezone(session,
+        # hyp.org_id)를 부른다(org tz 인지 "어제" 계산). 아래 두 테스트가 get_org_timezone
+        # 자체를 patch해 값은 관심사 밖이지만, hyp.org_id 속성 자체는 있어야 한다(없으면
+        # AttributeError → score_hypotheses의 per-hypothesis try/except가 조용히 삼켜
+        # "verified/falsified 0건"으로 새는 게 이 파일이 실제로 겪은 결함).
+        org_id=uuid.uuid4(),
         metric_definition={"metric": "m", "source": source, "target": 100, "direction": "up"},
     )
 
@@ -59,6 +65,7 @@ async def test_resolved_calls_wiring_manual_does_not():
 
     spy = AsyncMock(return_value={"skipped_reason": None, "bet": ["b1"], "execution": ["e1"]})
     with patch.object(sc, "score_ga4_outcome", return_value={"outcome_status": "hit", "outcome_result": {"x": 1}}), \
+         patch.object(sc, "get_org_timezone", new=AsyncMock(return_value=None)), \
          patch("app.services.hypothesis_outcome_verdict.record_outcome_verdicts", new=spy), \
          patch(
              "app.services.loop_outcome_attribution.attribute_loop_outcome",
@@ -84,6 +91,7 @@ async def test_skipped_wiring_goes_to_verdicts_skipped():
     session.execute = AsyncMock(return_value=res)
     spy = AsyncMock(return_value={"skipped_reason": "no_linked_story", "bet": [], "execution": []})
     with patch.object(sc, "score_ga4_outcome", return_value={"outcome_status": "miss", "outcome_result": {}}), \
+         patch.object(sc, "get_org_timezone", new=AsyncMock(return_value=None)), \
          patch("app.services.hypothesis_outcome_verdict.record_outcome_verdicts", new=spy), \
          patch(
              "app.services.loop_outcome_attribution.attribute_loop_outcome",

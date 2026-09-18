@@ -1,21 +1,29 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { MessageSquare, Users } from 'lucide-react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { EmptyState } from '@/components/ui/empty-state';
+import { formatRelativeTime } from '@/lib/storage/format';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { NewConversationModal } from './new-conversation-modal';
+import { ConnectionLostBanner } from './connection-lost-banner';
 import { useChatSse, type SseConversationReadPayload } from '@/hooks/use-chat-sse';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { queuePendingToast } from './cross-project-toast-provider';
 import { Avatar } from '@/components/shared/avatar';
 import { Button } from '@/components/ui/button';
+import { CountBadge } from '@/components/ui/count-badge';
 import { NowStrip } from './now-strip';
 import { PulseCard } from './pulse-card';
+import { useChatRailOptional } from '@/app/(authenticated)/chats/chat-rail-context';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { participantDisplayLabel } from '@/lib/member-display';
+import { composeEventPreviewLine } from './event-block-card';
+import { useOrgDomainLabels, type OrgDomainLabels } from '@/hooks/use-org-domain-labels';
 
 interface Participant {
   member_id: string;
@@ -25,13 +33,36 @@ interface Participant {
   /** story #3106(#3092 후속) — BE `_fetch_conversation_participants`가 이미 싣던 필드(agent만
    * 값, human=null)를 이 타입이 안 받아 그동안 버려지고 있었다. */
   runtime_type?: string | null;
+  // story #3758(9번째, PO 決) — name=null이 「실존·표시명 없음」인지 「orphan(해소 실패)」
+  // 인지 가르는 비트(같은 BE 헬퍼 `_fetch_conversation_participants` 소비 — chats/
+  // [conversation_id]/page.tsx의 Participant와 동일 계약). optional — BE 기본값(True)과
+  // 짝 맞춰 필드 자체가 없으면 "실존"으로 읽는다(participantDisplayLabel).
+  resolved?: boolean;
 }
 
 interface ConversationItem {
   id: string;
   type: 'dm' | 'group';
   title: string | null;
-  latest_message: { content: string; created_at: string } | null;
+  // story #3888(§⑤·Chat) — event(event_key+payload)는 BE list_conversations가 새로
+  // 실어주는 additive 필드(msg_metadata['event'], _event_payload()와 동형 — conversations.py
+  // GET /conversations 참고). 이벤트 메시지면 미리보기를 헤더+요약으로 조립하는 데 쓴다.
+  // 없으면(구버전 캐시·일반 메시지 등) 기존 content 그대로 쓴다.
+  //
+  // story #3893 — `refs`는 이미 `_event_payload()`가 그대로 투영해오던 값(BE 스키마
+  // 변경 0, msg_metadata['event']에 애초부터 실려 있었다 — events.py
+  // `_publish_registry_event_core`의 event_context가 refs를 포함, 그라운딩 확認).
+  // 이 타입 선언에 없어 여태 FE가 못 읽었을 뿐 — preset.work.assigned 미리보기(담당자
+  // 이름)가 처음으로 이 값을 소비한다.
+  latest_message: {
+    content: string;
+    created_at: string;
+    event?: {
+      event_key: string;
+      payload: Record<string, unknown>;
+      refs?: Record<string, string | null | { found: boolean; token?: string; type?: string; name?: string }>;
+    } | null;
+  } | null;
   updated_at: string;
   unread_count?: number;
   participants?: Participant[];
@@ -58,15 +89,10 @@ interface OutsideProjectConversation {
   participants?: Participant[];
 }
 
-function formatTime(iso: string): string {
-  const d = new Date(iso);
-  const now = new Date();
-  const diffMs = now.getTime() - d.getTime();
-  const diffDays = Math.floor(diffMs / 86_400_000);
-  if (diffDays === 0) return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
-  if (diffDays === 1) return '어제';
-  if (diffDays < 7) return `${diffDays}일 전`;
-  return d.toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' });
+// story #3493 — 손으로 짠 상대시각(하드코딩 'ko-KR', locale 무시)이 3436 묶음 8
+// 정본(formatRelativeTime)과 별개로 존재하던 자리. 대화 최근시각은 "기록"이라 정본에 위임.
+function formatTime(iso: string, locale: string, displayTimezone: string): string {
+  return formatRelativeTime(iso, locale, displayTimezone);
 }
 
 function formatParticipantNames(
@@ -74,16 +100,19 @@ function formatParticipantNames(
   currentMemberId: string,
   type: 'dm' | 'group',
   t: (key: string, values?: Record<string, string | number>) => string,
+  tc: (key: string) => string,
 ): string {
   const others = participants.filter((p) => p.member_id !== currentMemberId);
   if (others.length === 0) return type === 'dm' ? 'DM' : t('groupSection');
   // story #3203 — 이름 해석 실패(orphan/삭제 멤버, BE participant.name=null) 폴백은
   // '?' 1글자가 아니라 사람 언어 문구로("uuid 노출" 실사고 재발 방지 축 — BE는 raw
-  // 식별자를 아예 안 실어 보내게 고쳤으니 FE 폴백도 그 계약과 짝을 맞춘다).
-  if (type === 'dm') return others[0]?.name ?? t('unknownMember');
+  // 식별자를 아예 안 실어 보내게 고쳤으니 FE 폴백도 그 계약과 짝을 맞춘다). story #3758
+  // (9번째) — resolved 비트로 「알 수 없는 구성원」(orphan)과 「이름 없는 구성원」(실존·
+  // 표시명 없음)을 갈라 그린다(participantDisplayLabel).
+  if (type === 'dm') return participantDisplayLabel(others[0] ?? { name: null, resolved: false }, t, tc);
   const MAX = 3;
-  if (others.length <= MAX) return others.map((p) => p.name ?? t('unknownMember')).join(', ');
-  const visible = others.slice(0, MAX).map((p) => p.name ?? t('unknownMember')).join(', ');
+  if (others.length <= MAX) return others.map((p) => participantDisplayLabel(p, t, tc)).join(', ');
+  const visible = others.slice(0, MAX).map((p) => participantDisplayLabel(p, t, tc)).join(', ');
   return `${visible} ${t('participantsOthers', { count: others.length - MAX })}`;
 }
 
@@ -99,21 +128,45 @@ function ConversationRow({
   conv,
   currentMemberId,
   isAgentConv,
+  domainLabels,
   onClick,
 }: {
   conv: ConversationItem;
   currentMemberId: string;
   isAgentConv?: boolean;
+  // story #3888 CHANGES①(PO PR 코멘트, 2026-09-14 18:53Z) — 부모(ChatListView)가 1회만
+  // 호출한 useOrgDomainLabels 결과를 prop으로 받는다(행마다 재호출 금지 — 요청 중복 방지).
+  domainLabels: OrgDomainLabels;
   onClick: () => void;
 }) {
   const t = useTranslations('chats');
+  const tc = useTranslations('common');
+  const tBoard = useTranslations('board');
+  const tCage = useTranslations('cage');
+  const tDashboard = useTranslations('dashboard');
+  const tEventCard = useTranslations('eventCard');
+  const tOutcomeLoop = useTranslations('outcomeLoop');
+  // useLocale()은 순수 Context 읽기(HTTP 요청 0)라 행마다 불러도 되는 것 — CHANGES①이
+  // 지적한 것은 useOrgDomainLabels(HTTP fetch를 매 마운트 발사)뿐이다.
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
 
   const displayName = conv.title ??
     (conv.participants && conv.participants.length > 0
-      ? formatParticipantNames(conv.participants, currentMemberId, conv.type, t)
+      ? formatParticipantNames(conv.participants, currentMemberId, conv.type, t, tc)
       : conv.type === 'dm' ? t('dmWith') : t('groupSection'));
 
-  const preview = conv.latest_message?.content ?? t('noMessages');
+  // story #3888(§⑤·Chat, PO 확定 2026-09-14 18:19Z) — 이벤트 메시지면 raw content(발행
+  // 시점에 구운 slug) 대신 「{헤더} · {요약}」로 렌더 시점 조립(composeEventPreviewLine,
+  // event-block-card.tsx — 같은 재료 재사용). 조립 실패(미지원 event_key·payload 결손)는
+  // null이라 기존 content 폴백으로 조용히 떨어진다.
+  const eventPreview = composeEventPreviewLine(
+    conv.latest_message?.event?.event_key,
+    conv.latest_message?.event?.payload,
+    { tBoard, tCage, tDashboard, tEventCard, tEntity: t, tOutcomeLoop, domainLabels },
+    conv.latest_message?.event?.refs,
+  );
+  const preview = eventPreview ?? conv.latest_message?.content ?? t('noMessages');
   const time = conv.latest_message?.created_at ?? conv.updated_at;
   const unread = conv.unread_count ?? 0;
 
@@ -138,8 +191,8 @@ function ConversationRow({
         <span>↔</span>
         <span className="max-w-[80px] truncate rounded bg-muted px-1 py-0.5 font-medium text-muted-foreground">
           {/* story #3203(카디르 QA·PO 지시) — 같은 participants 계약 소비처, formatParticipantNames와
-              동일 사람언어 폴백으로 통일('...'는 비인간어). */}
-          {others[0]?.name ?? t('unknownMember')}
+              동일 사람언어 폴백으로 통일('...'는 비인간어). story #3758(9번째) — resolved 비트. */}
+          {participantDisplayLabel(others[0] ?? { name: null, resolved: false }, t, tc)}
         </span>
         {/* story #2023 ⓑ: L5(시스템 상태), 브랜드 아님 */}
         {isAgentInConv && (
@@ -173,7 +226,7 @@ function ConversationRow({
         <span className="truncate">
           {isAgentInConv && agentCount > 0
             ? t('agentCount', { count: agentCount })
-            : `${t('personCount', { count: others.length + 1 })} · ${others.slice(0, 2).map((p) => p.name ?? t('unknownMember')).join(', ')}${others.length > 2 ? ` ${t('participantsOthers', { count: others.length - 2 })}` : ''}`
+            : `${t('personCount', { count: others.length + 1 })} · ${others.slice(0, 2).map((p) => participantDisplayLabel(p, t, tc)).join(', ')}${others.length > 2 ? ` ${t('participantsOthers', { count: others.length - 2 })}` : ''}`
           }
         </span>
       </div>
@@ -191,7 +244,14 @@ function ConversationRow({
           책임). group은 특정 1인 사진이 의미가 없어(다인원) 기존 아이콘 자리를 유지한다. */}
       {oneOnOneParticipant ? (
         <Avatar
-          name={oneOnOneParticipant.name ?? (isAgentConv ? t('agent') : 'DM')}
+          // story #3791(페드루 재검토 12:23Z) — name(이니셜 재료)에 표시-폴백 문구를 넘기면
+          // 그 문구 첫 글자가 가짜 이니셜로 뜬다(「에이전트」→「에」·"DM"→"D") — name은
+          // 원시, 표시 문구는 label로.
+          // 카디르 QA 정정(12:52Z) — `??`는 null만 잡고 빈 문자열 name("")은 안 잡아
+          // label=""로 새(아이콘 tier에서 aria-label="" 재현, 일반/에이전트 탭 둘 다).
+          // trim 후 빈 값도 포괄하는 `?.trim() || …` 형으로.
+          name={oneOnOneParticipant.name ?? null}
+          label={oneOnOneParticipant.name?.trim() || (isAgentConv ? t('agent') : 'DM')}
           avatarUrl={oneOnOneParticipant.avatar_url ?? null}
           actorType={isAgentConv || oneOnOneParticipant.type === 'agent' ? 'agent' : 'human'}
           size={36}
@@ -210,7 +270,7 @@ function ConversationRow({
               재분류(구조·크기 불변). preview는 이미 text-xs+muted+기본무게(400)라 Body-small
               규칙에 이미 부합 — 무편집. */}
           <span className="truncate text-sm font-semibold text-foreground">{displayName}</span>
-          <span className="flex-shrink-0 text-[10px] text-muted-foreground">{formatTime(time)}</span>
+          <span className="flex-shrink-0 text-[10px] text-muted-foreground">{formatTime(time, locale, displayTimezone)}</span>
         </div>
         {participantLayer}
         <div className="flex items-center justify-between gap-1">
@@ -240,13 +300,14 @@ function OutsideProjectRow({
   onClick: () => void;
 }) {
   const t = useTranslations('chats');
+  const tc = useTranslations('common');
   // story #2972 — DM 행 title은 항상 NULL(list_conversations 관례)이라 participants로
   // 조립해야만 상대 이름이 뜬다(ConversationRow와 동일 패턴). BE가 이제 participants를
   // 실어줘(delta) 여기서도 formatParticipantNames를 탈 수 있다 — participants가 비어있는
   // 진짜 무재료 상황만 no-fiction 폴백(dmWith/groupSection, 완결된 단어로 수정됨)으로 떨어진다.
   const displayName = conv.title ??
     (conv.participants && conv.participants.length > 0
-      ? formatParticipantNames(conv.participants, currentMemberId, conv.type, t)
+      ? formatParticipantNames(conv.participants, currentMemberId, conv.type, t, tc)
       : conv.type === 'dm' ? t('dmWith') : t('groupSection'));
 
   return (
@@ -298,21 +359,49 @@ const PAGE_LIMIT = 30;
 
 export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChange }: ChatListViewProps) {
   const t = useTranslations('chats');
+  // story #3783 — "불러오는 중…", common ns의 기존 loading 키 재사용.
+  const tc = useTranslations('common');
   const router = useRouter();
+  // story #3831(UX-v3·FE 3·오늘, 페드루 PO 確定(c) 2026-09-13 14:04Z) — 「오늘」 화면 하단
+  // "지시 한 줄"이 보내면 여기(`/chats?compose=<text>`)로 옮겨 온다. 새 수신자 규칙은
+  // 지어내지 않는다(전송 대상 규칙은 후속 카드) — 대신 기존 두 경로만 재사용: 대화가
+  // 있으면 가장 최근 대화의 기존 프리필 기전(chat-input.tsx의 prefillCommand, #92f00dc4
+  // 그대로)에 실어 보내고, 0건이면 기존 "새 대화" 모달을 그 값을 들고 연다(새 API 0).
+  const composeParam = useSearchParams().get('compose');
+  const consumedComposeRef = useRef(false);
   // perf(17960f86): role 은 DashboardContext(서버 /api/v2/me 투영)에서 — 채팅 진입마다 `/api/me`
   // 재호출하던 round-trip 제거. /me checkRole 과 동일한 effective role 이라 게이트 의미 보존.
-  const { role } = useDashboardContext();
+  const { role, orgId } = useDashboardContext();
   const isAdminOrOwner = role === 'admin' || role === 'owner';
+  // story #3888 CHANGES①(PO PR 코멘트, 2026-09-14 18:53Z) — useOrgDomainLabels를
+  // ConversationRow(행 컴포넌트) 안에서 부르면 목록 1회 마운트에 대화 수만큼(최대 30+
+  // 에이전트 대화) 같은 domain-labels 요청이 중복 발사된다(훅 자체엔 캐시·dedupe가 없다).
+  // 이 부모(ChatListView)에서 1회만 호출해 domainLabels를 prop으로 내린다 — 행이 몇
+  // 개든 요청은 항상 1건.
+  const locale = useLocale();
+  const domainLabels = useOrgDomainLabels(orgId, locale);
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
   const [allConversations, setAllConversations] = useState<ConversationItem[]>([]);
   // agent 탭(allConversations·include_agent_conversations) 첫 활성화 1회만 fetch 하기 위한 가드.
   const agentLoadedRef = useRef(false);
   const [loading, setLoading] = useState(true);
+  // story #3788(B-③ 후속, 유나 定·페드루 그라운딩 2026-09-10 10:43Z) — agent 탭 첫 로드
+  // 여부를 알리는 render 신호. `loading`(my 탭)과 동형 — 최초 1회 로드만 재는 얕은 신호이고
+  // (project 전환 시 재로드 직전에만 별도로 true로 되돌린다), 그 밖엔 재무장하지 않는다.
+  const [agentLoading, setAgentLoading] = useState(true);
+  // story #3790(유나 定) — "아직 로딩 中"·"fetch 실패"·"정말 0건"을 가른다(docs
+  // hasContentRef 자리와 같은 클래스, docs-client-layout.tsx:64 참고). 시도 시작 시 먼저
+  // 걷고, 실패하면 catch가 다시 켠다.
+  const [loadError, setLoadError] = useState(false);
+  const [agentLoadError, setAgentLoadError] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [myOffset, setMyOffset] = useState(0);
   const [myTotal, setMyTotal] = useState(0);
   const [agentOffset, setAgentOffset] = useState(0);
   const [agentTotal, setAgentTotal] = useState(0);
+  // story #3788(B-③ 후속) — 사용자가 지금 보고 있는 탭. ChatRailContext로 끌어올려(아래)
+  // 우측 outlet이 «보이는 목록»을 세도록 한다(안 보이는 탭의 0/N은 모순을 안 만든다).
+  const [activeList, setActiveList] = useState<'my' | 'agent'>('my');
   const [internalShowModal, setInternalShowModal] = useState(false);
   const showModal = open !== undefined ? open : internalShowModal;
   const setShowModal = onOpenChange ?? setInternalShowModal;
@@ -327,40 +416,85 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   const convsRef = useRef(conversations);
   useEffect(() => { convsRef.current = conversations; }, [conversations]);
 
+  // story #3788(B-③, 유나 定·페드루 그라운딩 2026-09-10) — 목록 로드 상태를 ChatRailContext로
+  // 끌어올린다(DocsLayoutContext 형). 실제 lift 효과는 activeList/agentOnlyConvs가 갖춰진
+  // 아래(agentOnlyConvs 정의 뒤)에 있다 — «보이는 탭»의 값만 밀어야 하기 때문(10:43Z 그라운딩:
+  // my 0건이어도 사용자가 지금 에이전트 탭을 보고 있고 거기 N건이 있으면 우측이 「없다」고
+  // 말하면 안 된다). optional이라 ChatRailProvider 밖(격리 단위테스트)에서는 조용히 no-op.
+  const chatRail = useChatRailOptional();
+
   // 전환 in-flight 경합 가드(RC): fetch 응답 적용 시점에 여전히 같은 프로젝트인지 검증해 stale 응답을
   // drop 한다. render 단계 동기라 async resolve 시 항상 최신 projectId 를 가리킨다(assignee last-write-wins 동류).
   const projectIdRef = useRef(projectId);
   projectIdRef.current = projectId;
 
-  const fetchConversations = useCallback(async (nextOffset = 0, append = false) => {
+  // story #3621 — boolean 반환(성공/실패)을 추가했다. AC1 폴링 fallback이 이 값으로
+  // 폴 간격을 좁히거나(성공) 넓힌다(실패, sse-polling-fallback.ts). 기존 호출부(`void
+  // fetchConversations(...)`)는 반환값을 안 봐 회귀 0.
+  const fetchConversations = useCallback(async (nextOffset = 0, append = false): Promise<boolean> => {
+    // story #3790 — "더 보기"(append) 실패는 이미 그려진 목록을 통째로 실패 화면으로
+    // 덮지 않는다(그 실패는 loadingMore 버튼 자리가 이미 담당). 전체/최초 로드(append=false)
+    // 실패만 loadError로 세계를 가른다. 재시도(retry)는 항상 append=false로 부른다.
+    //
+    // 카디르 QA(#4142, 9e6bd5c8d 재현) — 성공 경로는 `projectId !== projectIdRef.current`로
+    // stale 응답을 거르는데 실패 경로(!res.ok·catch)는 그 검사가 없어, 프로젝트 A pending
+    // 中 B로 전환 → B 성공 렌더 → 뒤늦게 도착한 A의 실패가 B 화면을 덮는 클래스가 있었다
+    // ("지정 경로만 막는 fix는 클래스를 남긴다"). 이 클로저가 캡처한 `projectId`(이 호출을
+    // 일으킨 시점의 프로젝트)를 응답 시점의 `projectIdRef.current`(최신)와 항상 먼저
+    // 대조 — 성공/실패 두 경로가 같은 가드를 탄다.
+    if (!append) setLoadError(false);
     try {
       const res = await fetchWithAuth(
         `/api/conversations?project_id=${projectId}&limit=${PAGE_LIMIT}&offset=${nextOffset}`
       );
-      if (!res.ok) return;
+      if (!res.ok) {
+        if (!append && projectId === projectIdRef.current) setLoadError(true);
+        return false;
+      }
       const json = await res.json() as { data: ConversationItem[]; total: number };
-      if (projectId !== projectIdRef.current) return; // 전환됨 — stale 응답 drop(현 화면 안 덮음)
+      if (projectId !== projectIdRef.current) return false; // 전환됨 — stale 응답 drop(현 화면 안 덮음)
       const items = json.data ?? [];
       setConversations((prev) => append ? [...prev, ...items] : items);
       setMyOffset(nextOffset + items.length);
       setMyTotal(json.total ?? 0);
+      return true;
+    } catch {
+      if (!append && projectId === projectIdRef.current) setLoadError(true);
+      return false;
     } finally {
-      setLoading(false);
+      // 페드루 그라운딩(2026-09-10 12:34Z) — 위 loadError와 같은 축: A의 늦은 finally가
+      // B로 전환된 뒤 B의 loading을 조용히 꺼버리면(응답 도착 前인데도 "로딩 아님"으로
+      // 보임) B가 아직 안 왔는데도 순간 잘못된 화면(0건 등)이 뜬다.
+      if (projectId === projectIdRef.current) setLoading(false);
       setLoadingMore(false);
     }
   }, [projectId]);
 
   const fetchAllConversations = useCallback(async (nextOffset = 0, append = false) => {
-    const res = await fetchWithAuth(
-      `/api/conversations?project_id=${projectId}&include_agent_conversations=true&limit=${PAGE_LIMIT}&offset=${nextOffset}`
-    );
-    if (!res.ok) return;
-    const json = await res.json() as { data: ConversationItem[]; total: number };
-    if (projectId !== projectIdRef.current) return; // 전환됨 — stale 응답 drop(B 화면 안 덮음)
-    const items = json.data ?? [];
-    setAllConversations((prev) => append ? [...prev, ...items] : items);
-    setAgentOffset(nextOffset + items.length);
-    setAgentTotal(json.total ?? 0);
+    // 카디르 QA(#4142) — 위 fetchConversations와 동형 stale-drop 가드(성공/실패 두 경로
+    // 대칭).
+    if (!append) setAgentLoadError(false);
+    try {
+      const res = await fetchWithAuth(
+        `/api/conversations?project_id=${projectId}&include_agent_conversations=true&limit=${PAGE_LIMIT}&offset=${nextOffset}`
+      );
+      if (!res.ok) {
+        if (!append && projectId === projectIdRef.current) setAgentLoadError(true);
+        return;
+      }
+      const json = await res.json() as { data: ConversationItem[]; total: number };
+      if (projectId !== projectIdRef.current) return; // 전환됨 — stale 응답 drop(B 화면 안 덮음)
+      const items = json.data ?? [];
+      setAllConversations((prev) => append ? [...prev, ...items] : items);
+      setAgentOffset(nextOffset + items.length);
+      setAgentTotal(json.total ?? 0);
+    } catch {
+      if (!append && projectId === projectIdRef.current) setAgentLoadError(true);
+    } finally {
+      // story #3788(B-③ 후속) — agentLoading을 loading(my 탭)과 동형으로 finally에서 해소.
+      // 페드루 그라운딩(2026-09-10 12:34Z) — 같은 stale-drop 가드를 loading 축에도.
+      if (projectId === projectIdRef.current) setAgentLoading(false);
+    }
   }, [projectId]);
 
   // story #2168 PR-② — 프로젝트 밖 최근 대화. BE가 이미 인가로 거른 5개만 주므로 페이지네이션
@@ -396,7 +530,31 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     router.push(`/chats/${conv.id}?${params.toString()}`);
   }, [t, router, projectId]);
 
-  useEffect(() => { void fetchConversations(0, false); }, [fetchConversations]);
+  // 카디르 QA(#4142) 뒤 페드루 그라운딩(2026-09-10 12:34Z) — 에이전트 탭의 project-switch
+  // 효과(아래)와 같은 형을 my 탭에도 미러. 예전엔 `fetchConversations`만 재호출해 새 응답이
+  // 오기 前까지 우측이 **이전 프로젝트**의 conversations.length를 그대로 단정했다(A 0건→B
+  // 있음으로 전환하면 순간 「대화가 없습니다」). 전환 즉시(fetchConversations identity가
+  // projectId 변경으로 바뀌는 매 순간) 목록을 비우고 로딩을 세운 뒤 새로 fetch한다.
+  useEffect(() => {
+    setConversations([]);
+    setLoading(true);
+    void fetchConversations(0, false);
+  }, [fetchConversations]);
+
+  // story #3831 — compose 값은 목록이 로드된 뒤 딱 한 번만 소비한다(consumedComposeRef) —
+  // 안 그러면 목록이 갱신될 때마다(새 메시지 SSE 등) 다시 리다이렉트/모달을 트리거한다.
+  // 대화가 있으면 updated_at 최신 1건(가장 최근 대화)으로 보낸다 — API 응답 배열 순서에
+  // 기대지 않고 값으로 직접 고른다.
+  useEffect(() => {
+    if (!composeParam || loading || consumedComposeRef.current) return;
+    consumedComposeRef.current = true;
+    if (conversations.length > 0) {
+      const mostRecent = conversations.reduce((a, b) => (a.updated_at > b.updated_at ? a : b));
+      router.replace(`/chats/${mostRecent.id}?compose=${encodeURIComponent(composeParam)}`);
+    } else {
+      setShowModal(true);
+    }
+  }, [composeParam, loading, conversations, router, setShowModal]);
 
   // perf(17960f86): agent 탭("전체/에이전트", include_agent_conversations=true)은 비기본 탭이라
   // mount 시 eager fetch(측정 ~663ms 낭비) 하지 않고, 사용자가 탭을 처음 열 때 1회만 lazy 로드.
@@ -415,7 +573,9 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     setAllConversations([]);
     setAgentOffset(0);
     setAgentTotal(0);
-    if (wasLoaded) loadAgentConversationsOnce();
+    // story #3788(B-③ 후속) — 재로드 직전에만 agentLoading을 되돌린다(clear 직후의 순간
+    // length===0을 「진짜 0건」으로 우측이 오독하지 않게 — 위 conversations 클리어와 같은 축).
+    if (wasLoaded) { setAgentLoading(true); loadAgentConversationsOnce(); }
   }, [projectId, loadAgentConversationsOnce]);
 
   const handleConversationMessage = useCallback((payload: { conversation_id?: string; content?: string; created_at?: string }) => {
@@ -455,12 +615,30 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     if (agentLoadedRef.current) void fetchAllConversations(0, false);
   }, [fetchConversations, fetchAllConversations]);
 
-  useChatSse({
+  // story #3621 AC1 — connected가 끊긴 채 threshold 이상 머물면 목록을 폴링으로
+  // 갱신한다(handleReconnect와 같은 재조회 대상, coalesce 가드 공유). agent 탭도
+  // handleReconnect와 동형 lazy 가드.
+  const handlePoll = useCallback(async () => {
+    const ok = await fetchConversations(0, false);
+    if (agentLoadedRef.current) void fetchAllConversations(0, false);
+    return ok;
+  }, [fetchConversations, fetchAllConversations]);
+
+  const { connected, polling } = useChatSse({
     currentTeamMemberId,
     onConversationMessage: handleConversationMessage,
     onConversationRead: handleConversationRead,
     onReconnect: handleReconnect,
+    onPoll: handlePoll,
   });
+  // story #3621 AC3 — chat-view.tsx의 끊김 배너와 같은 낱말·같은 2s 지연(그 파일 §2987
+  // 주석 참고). 목록 뷰엔 이 표시 자체가 없었다.
+  const [showDisconnectedBanner, setShowDisconnectedBanner] = useState(false);
+  useEffect(() => {
+    if (connected) { setShowDisconnectedBanner(false); return; }
+    const timer = setTimeout(() => setShowDisconnectedBanner(true), 2000);
+    return () => clearTimeout(timer);
+  }, [connected]);
 
   // story #1978(트랙C) — onReconnect(SSE 커넥션 자체의 재연결)와는 다른 축: 탭이 백그라운드에
   // 있는 동안엔 SSE가 안 끊겨도(브라우저가 살려둘 수 있음) 목록이 갱신 안 됐을 수 있다.
@@ -485,7 +663,11 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   // 그대로(발명 0, handleReconnect/새 메시지 수신 시와 동일 재조회).
   const handleCreated = (conversationId: string) => {
     setShowModal(false);
-    router.push(`/chats/${conversationId}`);
+    // story #3831 — 「오늘」에서 넘어온 지시 한 줄이 있으면(0건 대화라 새 대화 모달을
+    // 거친 경우) 그 새 대화의 컴포저에도 같은 기전으로 싣는다.
+    router.push(
+      composeParam ? `/chats/${conversationId}?compose=${encodeURIComponent(composeParam)}` : `/chats/${conversationId}`,
+    );
     void fetchConversations(0, false);
   };
 
@@ -495,9 +677,74 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   const myConvIds = new Set(conversations.map((c) => c.id));
   const agentOnlyConvs = allConversations.filter((c) => !myConvIds.has(c.id));
 
+  // 카디르 QA(#4139, 772f755e9 재현) — 세션 中 role이 admin/owner→member로 하향되면(리마운트
+  // 없이 me.role만 갱신) Tabs 자체는 isAdminOrOwner 가드로 사라지는데, activeList state는
+  // 'agent'에 남아 있어 안 보이는 탭의 count를 아웃렛에 계속 공급했다(왼쪽 「대화가
+  // 없습니다」·오른쪽 「선택하면…」 모순 재발). 처방 둘 다: ①isAgent 판정 자체에
+  // isAdminOrOwner를 게이트 ②isAdminOrOwner가 꺼지는 전환에서 activeList를 'my'로 리셋.
+  useEffect(() => {
+    if (!isAdminOrOwner) setActiveList('my');
+  }, [isAdminOrOwner]);
+
+  // story #3790(유나 定) — 재시도는 항상 append=false(전체 재조회)로 부른다. 시작 시
+  // 해당 loading을 명시적으로 다시 세운다 — 실패 뒤엔 보여줄 게 없으므로 "지금 로딩
+  // 中"이 맞다(재요청마다 무조건 세우는 게 아니라 실패 복구라는 특정 계기에서만).
+  const retryMyConversations = useCallback(() => {
+    setLoading(true);
+    void fetchConversations(0, false);
+  }, [fetchConversations]);
+
+  const retryAgentConversations = useCallback(() => {
+    setAgentLoading(true);
+    void fetchAllConversations(0, false);
+  }, [fetchAllConversations]);
+
+  const retryActiveList = useCallback(() => {
+    if (isAdminOrOwner && activeList === 'agent') retryAgentConversations();
+    else retryMyConversations();
+  }, [isAdminOrOwner, activeList, retryMyConversations, retryAgentConversations]);
+
+  // story #3788(B-③ 후속, 페드루 그라운딩 2026-09-10 10:43Z) — «보이는 목록»만 센다. my
+  // 탭 0건이어도 사용자가 지금 에이전트 탭을 보고 있고 거기 N건이 있으면 우측 outlet이
+  // 「대화가 없습니다」를 말하면 안 된다(카드가 원래 잡던 모순이 탭 하나 옆으로 옮겨 앉는
+  // 사례) — activeList로 어느 탭의 loading/count를 밀지 가른다.
+  // story #3790 후속 — 같은 원칙을 실패 축에도 적용한다: conversationsLoadError도 활성
+  // 탭 것만 민다(로딩·실패·0건 판단 순서는 이 값을 읽는 쪽 — chats/page.tsx — 이 가른다).
+  useEffect(() => {
+    const isAgent = isAdminOrOwner && activeList === 'agent';
+    chatRail?.setActiveList(isAgent ? 'agent' : 'my');
+    chatRail?.setConversationsLoading(isAgent ? agentLoading : loading);
+    chatRail?.setConversationCount(isAgent ? agentOnlyConvs.length : conversations.length);
+    chatRail?.setConversationsLoadError(isAgent ? agentLoadError : loadError);
+    chatRail?.setRetryConversations(retryActiveList);
+  }, [
+    chatRail, isAdminOrOwner, activeList, loading, agentLoading, conversations.length, agentOnlyConvs.length,
+    loadError, agentLoadError, retryActiveList,
+  ]);
+
   const myListContent = loading ? (
     <div className="flex h-full items-center justify-center">
-      <p className="text-sm text-muted-foreground">불러오는 중…</p>
+      <p className="text-sm text-muted-foreground">{tc('loading')}</p>
+    </div>
+  ) : loadError ? (
+    // story #3790(유나 定) — 오른쪽 outlet이 실패 배너로 갈라졌는데 이 레일이 「대화가
+    // 없습니다」(0건)로 남으면 한 화면이 두 말을 하는 자리가 그대로 남는다(docs
+    // indexLoadError와 같은 형 — 같은 키를 좌우가 공유). 폭이 좁아 Alert 대신 한 줄 +
+    // 텍스트 재시도.
+    <div className="px-2 py-4">
+      <p className="text-xs text-muted-foreground">{t('conversationsLoadFailed')}</p>
+      {/* raw button 요소 금지(DS 게이트 A, verify-no-new-raw-button) — variant="link"가 이
+          레일 자리의 정본(ghost는 좁은 폭에서 hover 사각형이 남음, content/page.tsx:248
+          실측). 색은 문구가 아니라 행동에만 싣는다(우측은 반대로 문구가 destructive). */}
+      <Button
+        type="button"
+        variant="link"
+        size="xs"
+        onClick={retryMyConversations}
+        className="mt-1 h-auto px-0 text-xs"
+      >
+        {tc('retry')}
+      </Button>
     </div>
   ) : conversations.length === 0 ? (
     <div className="flex h-full items-center justify-center">
@@ -511,7 +758,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
             {t('dmSection')}
           </p>
           {dmConvs.map((conv) => (
-            <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} onClick={() => router.push(`/chats/${conv.id}`)} />
+            <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} domainLabels={domainLabels} onClick={() => router.push(`/chats/${conv.id}`)} />
           ))}
         </div>
       )}
@@ -521,7 +768,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
             {t('groupSection')}
           </p>
           {groupConvs.map((conv) => (
-            <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} onClick={() => router.push(`/chats/${conv.id}`)} />
+            <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} domainLabels={domainLabels} onClick={() => router.push(`/chats/${conv.id}`)} />
           ))}
         </div>
       )}
@@ -533,7 +780,14 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
           disabled={loadingMore}
           className="h-auto w-full rounded-lg py-2 text-xs font-normal text-muted-foreground transition hover:text-foreground disabled:opacity-50"
         >
-          {loadingMore ? '불러오는 중…' : `더 보기 (${myTotal - conversations.length}건)`}
+          {loadingMore ? (
+            tc('loading')
+          ) : (
+            <span className="inline-flex items-center gap-1.5">
+              {tc('loadMore')}
+              <CountBadge count={myTotal - conversations.length} />
+            </span>
+          )}
         </Button>
       )}
     </div>
@@ -559,9 +813,28 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     </>
   );
 
-  const agentConversationList = agentOnlyConvs.length === 0 ? (
+  const agentConversationList = agentLoading ? (
+    // story #3790 — 이 탭은 여태 loading 갈래가 없어 첫 로드 中에도 0건 문구가 잠깐
+    // 스쳤다(my 탭과 형을 맞춘다, 실패 축 신설과 같은 정리 범위).
     <div className="flex h-full items-center justify-center">
-      <EmptyState title={t('noAgentConversations')} description="" className="w-full max-w-xs" />
+      <p className="text-sm text-muted-foreground">{tc('loading')}</p>
+    </div>
+  ) : agentLoadError ? (
+    <div className="px-2 py-4">
+      <p className="text-xs text-muted-foreground">{t('conversationsLoadFailed')}</p>
+      <Button
+        type="button"
+        variant="link"
+        size="xs"
+        onClick={retryAgentConversations}
+        className="mt-1 h-auto px-0 text-xs"
+      >
+        {tc('retry')}
+      </Button>
+    </div>
+  ) : agentOnlyConvs.length === 0 ? (
+    <div className="flex h-full items-center justify-center">
+      <EmptyState title={t('noAgentConversations')} className="w-full max-w-xs" />
     </div>
   ) : (
     <div>
@@ -569,7 +842,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
         {t('agentSection')}
       </p>
       {agentOnlyConvs.map((conv) => (
-        <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} isAgentConv onClick={() => router.push(`/chats/${conv.id}`)} />
+        <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} isAgentConv domainLabels={domainLabels} onClick={() => router.push(`/chats/${conv.id}`)} />
       ))}
       {allConversations.length < agentTotal && (
         <Button
@@ -578,7 +851,10 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
           onClick={() => void fetchAllConversations(agentOffset, true)}
           className="h-auto w-full rounded-lg py-2 text-xs font-normal text-muted-foreground transition hover:text-foreground"
         >
-          더 보기 ({agentTotal - allConversations.length}건)
+          <span className="inline-flex items-center gap-1.5">
+            {tc('loadMore')}
+            <CountBadge count={agentTotal - allConversations.length} />
+          </span>
         </Button>
       )}
     </div>
@@ -586,6 +862,12 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
 
   return (
     <div className="flex h-full flex-col">
+      {/* story #3621 AC3(유나 CHANGES, 단일화) — ConnectionLostBanner(connection-
+          lost-banner.tsx) 참고. 배너(2s)·폴링 시작(10s) 사이 8초 구간에도 새로고침
+          버튼을 항상 같이 그린다(조치 수단 0인 구간 제거). */}
+      {showDisconnectedBanner && (
+        <ConnectionLostBanner polling={polling} onRefresh={handlePoll} />
+      )}
       {/* story #3177(S3a)+#3178(S3b) — chat 구심점 최상단 고정 「지금」 스트립+pulse 카드
           (대화 스크롤과 분리, 훑기 밀도 보존). Tabs 밖에 둔다 — my/agent 탭 전환과 무관하게
           항상 상단 고정. AC2 합산 불변식(#3178) — expandedSurface 하나로 둘 중 최대 1개만
@@ -601,7 +883,14 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
         />
       </div>
       {isAdminOrOwner ? (
-        <Tabs defaultValue="my" onValueChange={(v) => { if (v === 'agent') loadAgentConversationsOnce(); }} className="flex min-h-0 flex-1 flex-col">
+        <Tabs
+          defaultValue="my"
+          onValueChange={(v) => {
+            if (v === 'agent') loadAgentConversationsOnce();
+            setActiveList(v as 'my' | 'agent');
+          }}
+          className="flex min-h-0 flex-1 flex-col"
+        >
           <TabsList className="mx-4 mt-2 w-auto self-start">
             <TabsTrigger value="my">{t('myChatsTab')}</TabsTrigger>
             <TabsTrigger value="agent">{t('agentChatsTab')}</TabsTrigger>

@@ -9,10 +9,13 @@ import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { GateEvidence, GateActivityHistory, gateNeedsAction, gateDecision } from '@/components/cage/gate-evidence';
+import { BoostExecutionControl } from '@/components/cage/boost-execution-control';
 import { GateSignatureApproval } from '@/components/cage/gate-signature-approval';
 import { GateUndoButton, isUndoEligible } from '@/components/cage/gate-undo-button';
 import { GateDiscussDialog } from '@/components/cage/gate-discuss-dialog';
 import { deriveRiskLevel, usesSignatureFlow, deriveGateProofState, isDecisionGate, deriveDecisionFacts } from '@/components/cage/gate-risk';
+import { gateTypeLabel } from '@/lib/gate-type-label';
+import { gateStatusLabel } from '@/lib/gate-status-label';
 import { useSyntheticParentTabHistory } from '@/hooks/use-synthetic-parent-tab-history';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import type { GateItem } from '@/components/kanban/types';
@@ -20,6 +23,7 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { EntityBacklinksSection } from '@/components/shared/entity-backlinks-section';
 import { ProofCapsule } from '@/components/proof-capsule/proof-capsule';
 import { useSseMultiplexerContext } from '@/components/realtime-provider';
+import { gateApproveLabelKey } from '@/lib/newsletter-gate-approve-label';
 
 // story #1954(P1a-S4) — Gate 3종(게이트·문서결재·머지게이트) canonical 상세. P1a·P2 공용 유일
 // per-gate 라우트(중복 빌드 봉쇄) — decision(inbox_items)은 별도 표면(오르테가군 PO 판단+
@@ -40,6 +44,9 @@ export default function GateDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const t = useTranslations('cage');
+  // story #3565 — ccGateType*/ccGateGeneric 키는 'dashboard' 네임스페이스에 산다
+  // (공용 헬퍼로 옮긴 것은 로직뿐, 키 위치는 그대로) — 이 화면 자체 t는 'cage'.
+  const tDashboard = useTranslations('dashboard');
   // 조직/프로젝트 식별(AC) — 현재 탭이 이미 로드해둔 멤버십 목록에서 이름 조회(신규 fetch 0).
   // 크로스 프로젝트 게이트(현재 탭 프로젝트가 아닌 경우)는 매칭 실패 → ID 스니펫 폴백(정직한 값).
   const { orgMemberships, projectMemberships, currentTeamMemberId } = useDashboardContext();
@@ -146,6 +153,11 @@ export default function GateDetailPage() {
   // 이건 BE(neutral_facts에 config diff 임베드) 또는 신규 FE 뷰어가 필요한 더 큰 스코프 —
   // 페드루군에 사이징 보고.
   const isLoopDecisionGate = gate?.gate_type === 'loop_decision';
+  // story #3813(Phase3·3-4 PR4, 페드루 PO 確定+CHANGES 2026-09-12) — 판별 로직은
+  // newsletter-gate-approve-label.ts 한 곳에만(gate-signature-approval.tsx·
+  // approvals-queue.tsx도 같은 헬퍼를 쓴다 — 처음엔 이 평문 버튼에만 붙여 정작
+  // 고위험 게이트가 타는 서명 버튼엔 안 붙는 결함이 났다, CHANGES 실측).
+  const approveButtonLabelKey = gateApproveLabelKey(gate);
   const targetLink = isDocGate && gate?.work_item_summary?.slug
     ? { href: `/docs/${gate.work_item_summary.slug}`, labelKey: 'gateDetailViewTargetDoc' as const }
     : isCanonicalizeGate && gate?.work_item_id
@@ -168,6 +180,13 @@ export default function GateDetailPage() {
   const decisionFacts = gate && isDecisionGate(gate) ? deriveDecisionFacts(gate) : null;
   const requiresOptionChoice = decisionFacts !== null && decisionFacts.options.length > 0;
   const isSigFlowGate = !!gate && usesSignatureFlow(deriveRiskLevel(gate));
+  // story #3334 — 저위험 게이트의 반려(변경 요청)는 예전엔 사유 입력창 자체가 없는 인라인
+  // 버튼이라 클릭 즉시 빈 사유로 제출됐다(선생님 4바퀴 T1' 실사고 재현 그 자체). 근거열람
+  // 없이도 반려 자체는 가능해야 하므로(승인만 evidence 축) 저위험 게이트를 통째로 서명
+  // 플로우로 밀어넣지 않고, "반려하려는 의도"일 때만 이 토글로 같은 GateSignatureApproval
+  // 패널을 연다 — 승인은 기존처럼 원탭 그대로(이 스토리는 반려 축만 다룬다).
+  const [rejectPanelOpen, setRejectPanelOpen] = useState(false);
+  useEffect(() => { setRejectPanelOpen(false); }, [gate?.id]);
 
   const transition = useCallback(async (status: 'approved' | 'rejected', note?: string, evidenceViewed?: boolean) => {
     if (!gate) return;
@@ -234,6 +253,11 @@ export default function GateDetailPage() {
   const [discussDialogOpen, setDiscussDialogOpen] = useState(false);
   const [discussSubmitting, setDiscussSubmitting] = useState(false);
   const [discussError, setDiscussError] = useState<string | null>(null);
+  // story #3806(Phase3·3-2 PR 12, 페드루 PO 실측 캡처 2026-09-11 18:16Z) —
+  // BoostExecutionControl(형제)의 「광고비 다시 수집」 성공을 GateActivityHistory
+  // (형제)가 스스로 알 방법이 없어 이 숫자를 부모가 다리 놓는다 — 증가할 때마다
+  // GateActivityHistory가 재조회(그 컴포넌트의 refreshKey prop 참고).
+  const [activityRefreshKey, setActivityRefreshKey] = useState(0);
   const discuss = useCallback(async (reason: string) => {
     if (!gate) return;
     setDiscussSubmitting(true);
@@ -297,7 +321,17 @@ export default function GateDetailPage() {
                   {/* story #2937(PR#3372, 2026-08-22)로 chip variant 기본 자체가
                       text-foreground로 이행 — PR#3367의 이 지점 className 오버라이드는
                       이제 중복. 클래스가 닫혔으니 지점 처방을 걷는다(PO 지시). */}
-                  <Badge variant="chip">{gate.gate_type}</Badge>
+                  {/* story #3565(유나 §17-24 전수, 페드루 PO 確定 2026-09-06) — 원시값
+                      대신 사람 낱말(미등재는 일반 「게이트」). */}
+                  <Badge variant="chip">{gateTypeLabel(tDashboard, gate.gate_type)}</Badge>
+                  {/* story #3813(Phase3·3-4 PR4, 페드루 PO CHANGES 2026-09-12, 라이브
+                      캡처 실측) — 이 상세 페이지엔 reapproval_required=true를 알리는
+                      표시가 어디에도 없었다(ads_boost 선례도 실측 결과 이 페이지엔
+                      없음 — inbox 카드(approvals-queue.tsx)에만 있었다, 실측으로
+                      정정). 게이트 종류 무관 공용 칩 하나로 처방. */}
+                  {gate.reapproval_required ? (
+                    <Badge variant="warning">{t('gateReapprovalRequiredChip')}</Badge>
+                  ) : null}
                 </div>
                 {decisionFacts ? (
                   <p className="text-xs text-muted-foreground">#{gate.work_item_id.slice(0, 8)}</p>
@@ -373,9 +407,14 @@ export default function GateDetailPage() {
                           Auto로 단정하던 게 자기모순의 절반이었다). */}
                     <p className="text-[11px] text-muted-foreground">
                       {gate.status !== 'pending'
-                        ? (gate.resolver_id
-                            ? t('gateDetailResolvedByStatus', { name: memberNames[gate.resolver_id] ?? gate.resolver_id.slice(0, 8), status: gate.status })
-                            : t('gateDetailResolvedStatus', { status: gate.status }))
+                        ? (gate.resolver_id && memberNames[gate.resolver_id]
+                            // story #3806 PR 9(페드루 PO 리뷰 2026-09-11 실측) — 이름을 아직
+                            // 모르면(비동기 조회 경합·조직 밖 등) id 스니펫을 날것으로 보여주던
+                            // 자리를 없앴다 — 이름을 확실히 알 때만 「{name}님이 처리」, 모르면
+                            // 그냥 「이미 처리됨」(gateDetailResolvedStatus)으로 조용히 물러난다
+                            // (raw id 노출 경로 자체를 제거 — 타이밍이든 진짜 미스든 둘 다 막힘).
+                            ? t('gateDetailResolvedByStatus', { name: memberNames[gate.resolver_id], status: gateStatusLabel(gate.status, t) })
+                            : t('gateDetailResolvedStatus', { status: gateStatusLabel(gate.status, t) }))
                         : gateDecision(gate) === 'block' ? t('gateReadonlyBlock')
                         : gateDecision(gate) === 'auto_merge' ? t('gateReadonlyAuto')
                         : t('gateReadonlyNoVerdict')}
@@ -404,7 +443,7 @@ export default function GateDetailPage() {
                         : t('gateReadonlyNotAuthorized')}
                     </p>
                   </div>
-                ) : isSigFlowGate ? (
+                ) : isSigFlowGate || rejectPanelOpen ? (
                   // story #2975(유나양 design 판정 2026-08-24, PO 확定) — 409(gate_head_changed)
                   // 후 fetchGate() 재조회로 gate.github_check_run_sha가 바뀌어도, key 없이는 이
                   // 컴포넌트가 그대로 살아있어 evidenceViewed/reason state가 안 리셋된다 —
@@ -413,21 +452,32 @@ export default function GateDetailPage() {
                   // key={SHA}로 SHA가 바뀔 때마다 강제 remount — 세밀한 useEffect 리셋 목록은
                   // 미래 state 추가마다 리셋 누락 사각을 만드는 구조(이번 사고와 동형 클래스)라
                   // PO가 명시 기각, remount가 미래 state까지 구조적으로 안전(최소안 채택).
-                  <GateSignatureApproval
-                    key={gate.github_check_run_sha}
-                    gate={gate}
-                    resolving={resolving}
-                    error={transitionError}
-                    onApprove={(reason) => void transition('approved', reason, true)}
-                    onReject={(reason) => void transition('rejected', reason)}
-                    onDiscuss={(reason) => void discuss(reason)}
-                  />
+                  <div className="space-y-2">
+                    <GateSignatureApproval
+                      key={gate.github_check_run_sha}
+                      gate={gate}
+                      resolving={resolving}
+                      error={transitionError}
+                      onApprove={(reason) => void transition('approved', reason, true)}
+                      onReject={(reason) => void transition('rejected', reason)}
+                      onDiscuss={(reason) => void discuss(reason)}
+                    />
+                    {/* story #3334 — 저위험 게이트는 «변경 요청» 클릭으로만 이 패널에 들어온다
+                        (원래 근거열람+사유 요구가 없는 등급) — 잘못 눌렀을 때 원탭 승인 화면으로
+                        되돌아갈 길을 남긴다. 고위험(isSigFlowGate) 게이트는 이 패널이 유일한
+                        경로라 취소 버튼 자체가 무의미(숨김).*/}
+                    {!isSigFlowGate ? (
+                      <Button type="button" variant="ghost" size="sm" className="w-full text-muted-foreground" disabled={resolving} onClick={() => setRejectPanelOpen(false)}>
+                        {t('cancel')}
+                      </Button>
+                    ) : null}
+                  </div>
                 ) : (
                   <div className="space-y-3">
                     <GateEvidence gate={gate} />
                     {transitionError ? (
                       <p
-                        className="rounded-lg border border-destructive/30 bg-destructive/8 px-3 py-2 text-xs text-foreground"
+                        className="rounded-lg border border-destructive/30 bg-destructive-tint px-3 py-2 text-xs text-foreground"
                         role="alert"
                         aria-live="assertive"
                         aria-atomic="true"
@@ -440,7 +490,7 @@ export default function GateDetailPage() {
                         variant="outline"
                         className="min-h-12 flex-1 gap-1.5"
                         disabled={resolving}
-                        onClick={() => void transition('rejected')}
+                        onClick={() => setRejectPanelOpen(true)}
                       >
                         <XCircle className="size-4" />
                         {t('gateReject')}
@@ -452,7 +502,7 @@ export default function GateDetailPage() {
                         onClick={() => void transition('approved', requiresOptionChoice ? t('decisionSelectedNote', { option: selectedOption ?? '' }) : undefined)}
                       >
                         <CheckCircle className="size-4" />
-                        {resolving ? '...' : t('gateApprove')}
+                        {resolving ? '...' : t(approveButtonLabelKey)}
                       </Button>
                     </div>
                     {requiresOptionChoice && !selectedOption ? (
@@ -471,6 +521,28 @@ export default function GateDetailPage() {
                   </div>
                 )}
 
+                {/* story #3806 PR 10(페드루 PO 실측 2026-09-11 16:18Z — 결함 1) — ads_boost
+                    실행 블록(실행 중/시작·중지)을 gate.status===`'approved'`로 게이트하면
+                    「승인됨→예산·기간 변경→pending 재오픈(reapproval_required)」 도중 실제로는
+                    아직 run_status='running'(집행 中)인데도 화면에서 통째로 사라져 중지 스위치를
+                    잃는다(재승인까지). needsAction/canAct 분기와도 무관하게 항상 마운트해(위
+                    §2902·§2975 AC4와 같은 원칙) `BoostExecutionControl` 자신의 run_status
+                    폴링이 판단한다 — gate.status가 pending이든 approved든 「결재 대기(변경
+                    재승인)」 배지와 「실행 중 · 중지」가 같은 화면에 공존(다른 메커니즘=다른
+                    낱말로, 뭉개지 않는다). sealed_ads_starts_at이 아직 없으면(진짜 미승인·최초
+                    요청) 컴포넌트 자신이 null을 반환해 지어내지 않는다. */}
+                {gate.gate_type === 'ads_boost' && gate.org_id ? (
+                  <BoostExecutionControl
+                    orgId={gate.org_id} gateId={gate.id}
+                    sealedAdsBudgetMinor={gate.sealed_ads_budget_minor ?? null}
+                    sealedAdsCurrency={gate.sealed_ads_currency ?? null}
+                    sealedAdsStartsAt={gate.sealed_ads_starts_at ?? null}
+                    sealedAdsEndsAt={gate.sealed_ads_ends_at ?? null}
+                    sealedAdsObjective={gate.sealed_ads_objective ?? null}
+                    onSpendRefreshed={() => setActivityRefreshKey((k) => k + 1)}
+                  />
+                ) : null}
+
                 {/* story #2902(후보 B, S2h①③ list_entity_backlinks 확장 소비처) — 「이 게이트를
                     언급한 대화」 역참조. 기성 EntityBacklinksSection(3곳 소비 중) 그대로 재사용 —
                     신규 뷰어 0. gate는 TARGET_ONLY라 액션 없이 조회만(§8 계약과 정합). */}
@@ -480,7 +552,7 @@ export default function GateDetailPage() {
                     needsAction/canAct 분기와 무관하게 항상 렌더 — 감사 표면은 액션 가능 여부와
                     별개로 "사람이 보는 쪽"에 항상 서 있어야 실사고 때 쓰인다(PO 요구 ㉯). */}
                 <div className="border-t border-proof-line-soft pt-3">
-                  <GateActivityHistory gateId={gate.id} />
+                  <GateActivityHistory gateId={gate.id} refreshKey={activityRefreshKey} />
                 </div>
               </div>
             }

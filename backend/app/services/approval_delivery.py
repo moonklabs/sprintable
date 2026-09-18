@@ -13,9 +13,10 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import event as sa_event
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -104,9 +105,11 @@ async def dispatch_approval_request_cards(
     project_id: uuid.UUID | None,
     title: str,
     gate_id: uuid.UUID,
+    gate_type: str,
     requester_id: uuid.UUID,
     approver_ids: list[uuid.UUID],
     designated_approver_id: uuid.UUID | None = None,
+    reopen_reason: str | None = None,
 ) -> None:
     """승인자별 DM에 message_kind="request" 카드 메시지 게시 + SSE 이벤트(AC1/AC2).
 
@@ -133,7 +136,19 @@ async def dispatch_approval_request_cards(
     project_id 없는 work_item(비정상 상태 또는 project-무관 work_item_type)은 배달 스킵
     (무대상, 조용히 반환) — project 없이는 `_get_or_create_approval_dm`의 DM project_id를
     채울 수 없다.
-    """
+
+    story #3821(customer-zero 실측, 페드루 PO 확定 2026-09-13, PR B) — 같은 (work_item_
+    id, work_item_type, gate_type) 조합으로 이 승인자 conversation에 이미 최상위 결재
+    요청 메시지가 있으면(예: 같은 스토리에 소 PR이 여러 개 열려 merge gate가 매번 새로
+    생기는 경우) 새 최상위 메시지를 또 안 만든다 — 그 메시지의 스레드 답글로 「다시
+    결재가 필요합니다」(+`reopen_reason`이 있으면 그 사유 한 줄)를 달고, 최상위 메시지의
+    `approval_target.gate_id`를 이번 gate_id로 갱신한다(사람이 최상위 카드에서 승인/거부를
+    눌러도 항상 최신 게이트가 열리게 — 스테일 gate_id 클릭 방지). `gate_type`은 이 신규
+    조회의 키에 쓰일 뿐 아니라 approval_target에도 저장한다(재조회 가능하게, 이전엔 없던
+    필드 — additive, 기존 소비처는 무시).
+
+    스키마 신규 0 — `ConversationMessage.thread_id`(기존 컬럼, conversations.py의 사람
+    스레드 답글 엔드포인트와 같은 필드)·`msg_metadata`(JSONB) 조회만으로 충분하다."""
     if not project_id or not approver_ids:
         return
 
@@ -200,30 +215,103 @@ async def dispatch_approval_request_cards(
                 )
                 if approver_id == designated_approver_id:
                     _primary_conv_id_for_designated = conv.id
-                msg = ConversationMessage(
-                    conversation_id=conv.id,
-                    sender_id=requester_id,
-                    content=f"'{title}' 결재 요청",
-                    mentioned_ids=[approver_id],
-                    msg_metadata={
-                        "activation": {
-                            "audience": [str(approver_id)],
-                            "kind": "request",
-                            "expects_response": True,
+
+                # story #3821(PR B) — 같은 조합의 최상위 결재 요청이 이 conversation에
+                # 이미 있는지 먼저 본다(스레드 붕괴 축). `thread_id IS NULL`로 최상위만
+                # 대상(conversations.py 2614행 "reply에는 reply 금지" 단일계층 규율과
+                # 같은 전제 — 최상위 후보만 찾으면 되고 답글은 애초에 후보가 아니다).
+                existing_root = (await db.execute(
+                    select(ConversationMessage)
+                    .where(
+                        ConversationMessage.conversation_id == conv.id,
+                        ConversationMessage.thread_id.is_(None),
+                        ConversationMessage.msg_metadata["approval_target"]["work_item_type"].astext
+                        == work_item_type,
+                        ConversationMessage.msg_metadata["approval_target"]["work_item_id"].astext
+                        == str(work_item_id),
+                        ConversationMessage.msg_metadata["approval_target"]["gate_type"].astext == gate_type,
+                    )
+                    .order_by(ConversationMessage.created_at.desc())
+                    .limit(1)
+                )).scalar_one_or_none()
+
+                if existing_root is not None:
+                    from app.services.i18n_catalog import t
+                    reply_content = t("approval_delivery.reopen_reply", "ko")
+                    if reopen_reason:
+                        reply_content = f"{reply_content} — {reopen_reason}"
+                    msg = ConversationMessage(
+                        conversation_id=conv.id,
+                        sender_id=requester_id,
+                        content=reply_content,
+                        mentioned_ids=[approver_id],
+                        thread_id=existing_root.id,
+                        msg_metadata={
+                            "activation": {
+                                "audience": [str(approver_id)],
+                                "kind": "request",
+                                "expects_response": True,
+                            },
+                            "approval_target": {
+                                "work_item_type": work_item_type,
+                                "work_item_id": str(work_item_id),
+                                "gate_id": str(gate_id),
+                                "gate_type": gate_type,
+                                "actions": ["approve", "reject"],
+                                "designated": True,
+                                "designated_approver_name": designated_approver_name,
+                            },
                         },
+                    )
+                    db.add(msg)
+                    # story #3821 — 최상위 카드의 approval_target.gate_id를 최신으로
+                    # 갱신(JSONB in-place 변경 미감지 — 재할당, #2832 교훈과 동형)해
+                    # 사람이 최상위에서 승인/거부를 눌러도 최신 게이트가 열리게 한다.
+                    # reply_count/last_reply_at도 conversations.py 2614행의 원자 UPDATE
+                    # 관례 그대로(ORM 속성 재대입 대신 execute — 동시 답글 레이스 안전).
+                    existing_root.msg_metadata = {
+                        **existing_root.msg_metadata,
                         "approval_target": {
-                            "work_item_type": work_item_type,
-                            "work_item_id": str(work_item_id),
+                            **existing_root.msg_metadata["approval_target"],
                             "gate_id": str(gate_id),
-                            "actions": ["approve", "reject"],
-                            "designated": True,
-                            "designated_approver_name": designated_approver_name,
                         },
-                    },
-                )
-                db.add(msg)
-                await db.flush()
-                await _dispatch_conversation_event(db, conv, msg, org_id, requester)
+                    }
+                    await db.execute(
+                        update(ConversationMessage)
+                        .where(ConversationMessage.id == existing_root.id)
+                        .values(
+                            reply_count=ConversationMessage.reply_count + 1,
+                            last_reply_at=datetime.now(timezone.utc),
+                        )
+                    )
+                    await db.flush()
+                    await _dispatch_conversation_event(db, conv, msg, org_id, requester)
+                else:
+                    msg = ConversationMessage(
+                        conversation_id=conv.id,
+                        sender_id=requester_id,
+                        content=f"'{title}' 결재 요청",
+                        mentioned_ids=[approver_id],
+                        msg_metadata={
+                            "activation": {
+                                "audience": [str(approver_id)],
+                                "kind": "request",
+                                "expects_response": True,
+                            },
+                            "approval_target": {
+                                "work_item_type": work_item_type,
+                                "work_item_id": str(work_item_id),
+                                "gate_id": str(gate_id),
+                                "gate_type": gate_type,
+                                "actions": ["approve", "reject"],
+                                "designated": True,
+                                "designated_approver_name": designated_approver_name,
+                            },
+                        },
+                    )
+                    db.add(msg)
+                    await db.flush()
+                    await _dispatch_conversation_event(db, conv, msg, org_id, requester)
             delivered_count += 1
         except Exception:  # noqa: BLE001 — best-effort, 개별 승인자 실패가 상신을 막지 않음.
             logger.warning(
@@ -571,7 +659,7 @@ async def dispatch_approval_result_reply(
                     db, org_id=org_id, event_type=event_type,
                     target_member_ids=[requester_id],
                     title=f"결재 결과: {decision_label}",
-                    body=resolution_note or f"'{title}'가 {decision_label}됐습니다.",
+                    body=resolution_note or f"'{title}'가 {decision_label}됐어요.",
                     reference_type="gate", reference_id=gate_id,
                     source_project_id=project_id,
                     # story #2696: outbox 이관(동일 결함 클래스 예방).
@@ -660,7 +748,7 @@ async def dispatch_approval_discussion_reply(
                     db, org_id=org_id, event_type="doc_approval_discussion_requested",
                     target_member_ids=[requester_id],
                     title="문서 결재 — 논의 요청",
-                    body=reason or f"'{doc.title}' 문서 결재에 대해 논의를 요청받았습니다.",
+                    body=reason or f"'{doc.title}' 문서 결재에 대해 논의를 요청받았어요.",
                     reference_type="gate", reference_id=gate_id,
                     source_project_id=doc.project_id,
                     # story #2696: outbox 이관(동일 결함 클래스 예방).
@@ -989,6 +1077,62 @@ async def notify_gate_tossed(
     return pushes
 
 
+async def _has_open_external_publish_gate_for_doc(
+    db: AsyncSession, *, org_id: uuid.UUID, doc_id: uuid.UUID,
+) -> bool:
+    """story d1f4afcb AC2 — 이 doc이 이미 열린(pending/rejected) `external_publish` 게이트의
+    대상 산출물인지. Gate는 doc을 직접 work_item으로 갖지 않는다(work_item_type/id는 그
+    게이트를 만든 레시피의 work item — 보통 story — 이고, doc은 `neutral_facts.
+    draft_doc_reference_token`에 참조 토큰으로만 실린다, `recipe_gate_hooks.py::
+    _build_approval_neutral_facts` 참조 — payload.previous_output_doc_id 우선·entity_
+    references 폴백 두 경로 모두 이 필드로 수렴하므로 여기서도 이 필드 하나만 보면
+    충분하다, 새 경로 발명 0). 토큰 포맷은 `reference_token.py::build_reference_token`이
+    고정한 `[title](entity:doc:<uuid>)` — 그 안의 `entity:doc:<uuid>` 부분 문자열로 매치
+    (UUID는 LIKE 메타문자를 포함하지 않아 이스케이프 불요)."""
+    from app.models.gate import Gate
+
+    marker = f"entity:doc:{doc_id}"
+    row = (await db.execute(
+        select(Gate.id).where(
+            Gate.org_id == org_id,
+            Gate.gate_type == "external_publish",
+            Gate.status.in_(("pending", "rejected")),
+            Gate.neutral_facts["draft_doc_reference_token"].astext.like(f"%{marker}%"),
+        ).limit(1)
+    )).first()
+    return row is not None
+
+
+# story #3379(에이전트 온보딩·오도, 페드루 PO 確定 2026-09-07, 담롱·댄 실사고 2026-09-03) —
+# 「채팅에서 논의됐다」를 상신 의사로 읽으면 안 된다: 논의는 대개 고칠 게 있어서 하는
+# 것이라 채팅 등장은 오히려 상신의 반대 신호인 자리가 많다. 트리거 메시지 자신의
+# content만 본다(PO 確定② — 대화 이력 스캔 X, 최저 비용·결정적). 잃는 것: 이 메시지
+# "전"에 오간 논의 문맥(예: 앞선 메시지에서 "이거 이제 안 맞는 것 같아요" 하고 다음
+# 메시지에서 doc을 mention)은 못 본다 — 트리거 메시지 자체에 신호가 없으면 넛지가 여전히
+# 뜬다(범위 밖으로 명시 선언, PO 채택).
+# "고치"/"바꾸"만으로는 모음축약형 활용(고쳐·바꿔 — 치+어→쳐, 꾸+어→꿔)을 못 잡는다
+# (한국어 어간 substring 매치의 알려진 한계) — 축약형을 별도 항목으로 병기.
+_DOC_REVISION_SIGNAL_WORDS: tuple[str, ...] = (
+    "수정", "정정", "교체", "폐기", "고치", "고쳐", "바꾸", "바꿔", "업데이트", "갱신",
+)
+
+
+def _message_signals_doc_still_being_revised(content: str) -> bool:
+    """순수함수 — 트리거 메시지 content에 «이 문서는 아직 고치는 중」류 신호가 있는지만
+    본다(다른 입력 없음, DB 접근 없음). `_DOC_REVISION_SIGNAL_WORDS` 중 하나라도 부분
+    일치하면 True(억제 신호)."""
+    if not content:
+        return False
+    return any(word in content for word in _DOC_REVISION_SIGNAL_WORDS)
+
+
+# story #3379 AC(a) — "최근 N분 안에 편집됐으면" 억제. 이 문서 도메인에 기존 관례가
+# 없어(grep 0건) 30분으로 잠정 고정 — 댓글수집류 백오프 상한(60분)보다 짧게 잡은 이유는
+# "편집 세션이 아직 진행 중일 가능성이 높은 창"만 억제하려는 것(PO 조정 여지, 새 설정
+# 노출 없음 — 이 스토리 범위 밖).
+_DOC_RECENTLY_EDITED_WINDOW_MINUTES = 30
+
+
 async def maybe_nudge_draft_doc_shared_in_chat(
     db: AsyncSession,
     *,
@@ -998,10 +1142,13 @@ async def maybe_nudge_draft_doc_shared_in_chat(
     doc_title: str,
     doc_status: str,
     doc_author_id: uuid.UUID | None,
+    doc_updated_at: datetime,
+    doc_superseded_by: uuid.UUID | None,
     sender_id: uuid.UUID,
+    trigger_message_content: str,
 ) -> None:
     """story #2747(2026-08-25, PO 판정) — draft 상태 문서가 채팅에서 mention(=논의)되는
-    순간, 작성자에게 「결재 상신 여부」를 묻는 1회성 넛지. 제품이 그 갈림 자체를 안
+    순간, 작성자에게 「검토 요청 여부」를 묻는 1회성 넛지. 제품이 그 갈림 자체를 안
     묻던 갭(선생님 실증 2건, 2026-08-18)의 처방 — 후보 a(설계 스케치)의 「묻기」 절반만
     이번 사이클 스코프(FE 뱃지·N회 카운트 nudge·에이전트 리마인더 격상은 각각 별도 스토리,
     PO 확定 2026-08-25).
@@ -1019,11 +1166,41 @@ async def maybe_nudge_draft_doc_shared_in_chat(
     row INSERT**로 바꾼다 — 실패(IntegrityError=이미 있음)하면 DB가 직렬화해 준
     사실 그대로 조용히 skip(app 레벨 락/텍스트비교 아닌 실 제약, PO 지시 그대로 새
     테이블 도입).
-    """
+
+    story d1f4afcb(2026-09-02, 담롱 그라운딩·PO 판정) — ③이 doc에 이미 **열린 external_
+    publish 게이트**(pending·rejected)가 있으면 넛지를 내지 않는다(`_has_open_external_
+    publish_gate_for_doc`) — 그 게이트가 이미 이 doc의 발행/반려를 관장 중인데 별도 문서
+    결재를 권하면 실행자를 다른 경로로 오도한다. ④이 함수를 트리거하는 채팅 메시지가
+    **시스템/이벤트 발신**(`msg_metadata['event']` 보유)이면 애초에 호출부(conversations.py
+    ::send_message)가 이 함수를 부르지 않는다(사람의 대화 맥락에서만 넛지가 뜬다는
+    전제 — 호출부 주석 참조).
+
+    story #3379(에이전트 온보딩·오도, 페드루 PO 確定 2026-09-07, 담롱·댄 실사고
+    2026-09-03) — 「기본 침묵」: draft doc이 채팅에서 참조됐다는 사실만으로 상신을
+    권하지 않는다("draft 제외"가 아니라 "논의 성격을 읽을 수 없으면 권하지 않는다").
+    아래 셋 중 하나면 넛지를 안 낸다: ⑤doc이 최근 `_DOC_RECENTLY_EDITED_WINDOW_MINUTES`
+    분 안에 편집됨(doc_updated_at) ⑥트리거 메시지 자신에 수정/정정/교체/폐기 계열
+    신호(`_message_signals_doc_still_being_revised`, 대화 이력 스캔 X — PO 確定) ⑦doc이
+    이미 다른 doc에 superseded 표기(doc_superseded_by). ①의 (org, doc) 전역 1회
+    reservation은 **그대로 안 건드린다**(더 엄격한 쪽이 이긴다, PO 確定 — 스토리 AC(d)
+    "같은 대화·같은 doc 최대 1회"는 이 전역 축에 자동 포함되는 상위 제약이라 새 표·새
+    인덱스 0)."""
     if doc_status != "draft" or not doc_author_id or not project_id:
         return
     if doc_author_id == sender_id:
         return  # 본인이 스스로 공유한 것 — 자기-알림 스킵(기존 관례 동형).
+    if doc_superseded_by is not None:
+        return  # story #3379 ⑦ — 이미 다른 doc으로 대체됨.
+    if datetime.now(timezone.utc) - doc_updated_at < timedelta(minutes=_DOC_RECENTLY_EDITED_WINDOW_MINUTES):
+        return  # story #3379 ⑤ — 아직 편집 세션이 진행 中일 가능성이 높은 창.
+    if _message_signals_doc_still_being_revised(trigger_message_content):
+        return  # story #3379 ⑥ — 트리거 메시지 자신이 "아직 고치는 중" 신호를 낸다.
+
+    if await _has_open_external_publish_gate_for_doc(db, org_id=org_id, doc_id=doc_id):
+        return  # story d1f4afcb AC2 — 이 doc은 이미 external_publish 게이트가 발행/반려를
+        # 관장 중이다. 별도 문서 결재(submit_for_approval) 상신을 권하면 그 게이트와
+        # 모순되는 두 번째 경로를 만들어 실행자를 오도한다(레시피 발행/재발행이 정답 경로 —
+        # #3330 preset.gate.verdict 통지가 그 길을 이미 안내한다, 새 경로 발명 0).
 
     from sqlalchemy.exc import IntegrityError
 
@@ -1049,33 +1226,81 @@ async def maybe_nudge_draft_doc_shared_in_chat(
             ))
             await db.flush()  # UNIQUE(org_id, doc_id) 위반이면 여기서 IntegrityError.
 
+            # story #3380(BE·결함·감사 신뢰, 페드루 PO 確定 2026-09-07, 담롱 실사고) — 이
+            # 메시지는 시스템이 짓는 문장이지 sender_id가 실제로 쓴 게 아니다. DM 자체
+            # (어느 1:1 스레드에 나타나는가)는 여전히 requester=트리거한 사람 축을 그대로
+            # 쓴다(_get_or_create_approval_dm — 그 축은 "이 doc을 누가 mention했나"를 DM
+            # 상대로 삼는 기존 설계 그대로, 이 스토리 범위 밖) — 바뀌는 건 오직 "이 메시지의
+            # sender 명의"뿐: `_get_or_create_system_publisher`(events.py, story #2791 —
+            # 새 개념 발명 0, recipe_repeat_scheduler.py::_notify_owner_paused와 동형 재사용)
+            # 가 반환하는 org당 1개의 「시스템 발행」 anchor member로 sender_id를 고정한다.
+            # 트리거한 사람은 sender 명의를 안 빌리는 대신 msg_metadata.triggered_by_
+            # member_id로 감사 추적을 남긴다(누가 이 넛지를 유발했는지는 여전히 기록).
+            from app.routers.events import _get_or_create_system_publisher
+
+            system_member = await _get_or_create_system_publisher(db, org_id)
+
             conv = await _get_or_create_approval_dm(
                 db, org_id=org_id, project_id=project_id,
                 requester_id=sender_id, approver_id=doc_author_id,
             )
             msg = ConversationMessage(
                 conversation_id=conv.id,
-                sender_id=sender_id,
-                content=f"'{doc_title}' 문서가 채팅에서 논의됐는데 아직 draft — 결재 상신하시겠습니까?",
+                sender_id=system_member.id,
+                # story #3379 AC — 단정형("상신하시겠습니까?") 대신 두 갈래 문구. "논의됐다"가
+                # 곧 "상신 의사"라고 단정하지 않는다(최저 지능 에이전트가 그대로 따라도 논의
+                # 중인 문서가 결재로 안 가도록). 유나 카피 판정(2026-09-07, PR #4011 게이트
+                # CHANGES 1) — "결재 상신"은 doc 도메인 카탈로그에 0건, draft 상태 문서에서
+                # 사용자가 실제로 보는 낱말은 doc-status-rail.tsx가 못 박은 「검토 요청」
+                # (docs.docGateRequestReview). "결재"는 결과/이력의 말(결재 이력)이라 작성자
+                # 행위 문구와 층이 다름 — 「검토 요청」으로 교체.
+                content=(
+                    f"'{doc_title}' 문서가 채팅에서 논의됐습니다 — 이 내용이 확정본이면 검토 "
+                    "요청을, 아직 고칠 게 있으면 편집을 진행해 주세요."
+                ),
                 mentioned_ids=[doc_author_id],
                 msg_metadata={
                     "activation": {
                         "audience": [str(doc_author_id)], "kind": "request", "expects_response": False,
                     },
                     "nudge_target": {"doc_id": str(doc_id), "kind": "draft_doc_chat_share"},
+                    "triggered_by_member_id": str(sender_id),
                 },
             )
             db.add(msg)
             await db.flush()
+            # story #3380 — 채널 릴레이(_msg_payload)가 SSE/webhook payload의 "sender" 필드를
+            # msg.sender_id(DB)가 아니라 이 인자 자체에서 조립한다. 이전엔 여기 `author`(doc
+            # 작성자)가 실려 DB의 sender_id(트리거한 사람)와 릴레이 표시가 서로 다른 두
+            # 사람을 가리키는 이중 오귀속이었다(실사고: Sprintable 원본=댄·릴레이 표시=담롱,
+            # 둘 다 문장을 안 씀) — 같은 system_member를 넘겨 두 층이 항상 일치하게 한다.
             from app.routers.conversations import _dispatch_conversation_event
-            await _dispatch_conversation_event(db, conv, msg, org_id, author)
+            await _dispatch_conversation_event(db, conv, msg, org_id, system_member)
+
+            # story #3380 AC — 감사축(activity_logs)도 채팅 sender와 같은 판정을 든다.
+            # channel_posts.py::_publish_channel_post 등 기존 platform-action 관례
+            # (actor_type="platform"·actor_id=None) 그대로 재사용 — 새 actor 유형 발명 0.
+            from app.services.activity_log import ActivityLogService
+
+            await ActivityLogService(db).record(
+                org_id=org_id, action="doc_chat_nudge_sent", actor_type="platform", actor_id=None,
+                entity_type="doc", entity_id=doc_id,
+                context={
+                    "conversation_id": str(conv.id), "message_id": str(msg.id),
+                    "triggered_by_member_id": str(sender_id), "doc_author_id": str(doc_author_id),
+                },
+            )
             if author.type == "human":
                 from app.services.notification_dispatch import dispatch_notification
                 await dispatch_notification(
                     db, org_id=org_id, event_type="doc_draft_discussed_in_chat",
                     target_member_ids=[doc_author_id],
-                    title="draft 문서가 채팅에서 논의됐습니다",
-                    body=f"'{doc_title}' — 결재 상신 여부를 확認해 주세요.",
+                    title="draft 문서가 채팅에서 논의됐어요",
+                    # 유나 CHANGES 2(2026-09-07, PR #4011) — 같은 함수가 같은 doc_author에게
+                    # 채팅 DM(위 content, 「검토 요청」)과 알림(이 body) 둘 다 보내는데,
+                    # 알림만 「결재 상신」으로 남으면 한 사람이 두 낱말을 읽는 자리라 낱말을
+                    # 맞춘다.
+                    body=f"'{doc_title}' — 검토 요청 여부를 확인해 주세요.",
                     reference_type="doc", reference_id=doc_id,
                     source_project_id=project_id, via_outbox=True,
                 )

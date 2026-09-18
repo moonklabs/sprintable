@@ -1,0 +1,61 @@
+// story #3565(유나 §17-24 전수·페드루 PO 確定 2026-09-06) — gate_type → 사람 낱말
+// 공용 헬퍼. 원래 Command Center(dashboard/command-center/derive-action-zone.ts)
+// 안에만 있던 매핑을 여기로 옮겨 결재함 카드(inbox/approvals-queue.tsx)·게이트
+// 상세(app/(authenticated)/gates/[id]/page.tsx)도 같은 표를 탄다 — 그 두 자리는
+// 이 매핑 자체가 없어 `gate.gate_type` 원시값(예: "external_publish")을 배지에
+// 그대로 찍고 있었다(더 나쁜 증상 — 일반 "게이트"보다도 못한 노출).
+//
+// ⛔이 집합은 BE 「한 곳」에 안 산다(페드루 PO 재실측 2026-09-06 — #3565 리뷰 前
+// 주석의 "두 곳"도 이미 부정확했다): GATE_TYPES(backend/app/models/hitl_config.py)·
+// doc_approval(backend/app/services/doc.py)·loop_decision·artifact_canonicalize·
+// hypothesis_outcome_confirm(backend/app/services/gate_service.py·
+// backend/app/services/hypothesis_outcome_confirm.py)·artifact_canonicalize가
+// 또(backend/app/routers/gates.py)에도 나온다 — 넷 이상의 파일에 흩어져 있고,
+// 앞으로도 늘어날 수 있다. 줄번호는 리팩터 한 번에 죽는 정보라 파일 경로만
+// 남긴다(story #3560, 페드루 PO 지적 2026-09-06). 새 gate_type을 여기 추가할
+// 땐 특정 파일 목록을 믿지 말고 backend 전체에서 `gate_type=` 리터럴을 grep해
+// 실제로 쓰이는 값을 확認한다.
+//
+export const GATE_TYPE_LABEL_KEYS: Record<string, string> = {
+  qa: 'ccGateTypeQa',
+  pr_review: 'ccGateTypePrReview',
+  merge: 'ccGateTypeMerge',
+  deploy: 'ccGateTypeDeploy',
+  workflow_config_publish: 'ccGateTypeWorkflowConfigPublish',
+  doc_approval: 'ccGateTypeDocApproval',
+  external_publish: 'ccGateTypeExternalPublish',
+  // story #3565(유나 §17-24 전수 확定 2026-09-06) — 나머지 5유형 등재.
+  loop_decision: 'ccGateTypeLoopDecision',
+  hypothesis_outcome_confirm: 'ccGateTypeHypothesisOutcomeConfirm',
+  artifact_canonicalize: 'ccGateTypeArtifactCanonicalize',
+  agent_decision_request: 'ccGateTypeAgentDecisionRequest',
+  // support_escalation_review — backend/app/routers/support_gateway_token.py가
+  // 생성, backend/app/services/gate_service.py의 _ALWAYS_MANUAL_GATE_TYPES에
+  // 있어 항상 수동(story #3263). 페드루 PO 재확認(2026-09-06 — 최초 grep 0건은
+  // 로컬 클론이 옛 브랜치에 멈춰 있던 PO 쪽 오류, origin/develop 실물엔 있음).
+  support_escalation_review: 'ccGateTypeSupportEscalationReview',
+  // story #3560(페드루 PO 確定 2026-09-06) — 제작 작업대 컨셉·구조 승인. 생성=
+  // backend/app/routers/docs.py::POST /docs/{id}/concept-approval. `qa`로
+  // 흉내내지 않는다(다른 메커니즘=다른 낱말) — doc_approval(시스템전용)과도 별개.
+  concept_approval: 'ccGateTypeConceptApproval',
+  // story #3806(Phase3·3-2 PR5, 유나 §절 2026-09-11) — 「홍보」(Meta 한국어 UI
+  // 관례, en "Boost"). backend/app/services/gate_service.py::create_gate가
+  // gate_type="ads_boost"로 생성(PR2), _ALWAYS_MANUAL_GATE_TYPES에도 등재(PR3
+  // 워커 fix 시점 확認 — 실제 지출이 걸려 external_publish보다 강한 사유).
+  ads_boost: 'ccGateTypeAdsBoost',
+};
+
+/**
+ * gate_type → i18n 키. 맵에 없는 값(미래 확장·오타 등)은 null — 호출부가 null일 때와
+ * «같은 자리»(일반 라벨)로 떨어뜨린다. 원시값을 폴백으로 내보내지 않는다(PO 지적).
+ */
+export function gateTypeLabelKey(gateType: string | null | undefined): string | null {
+  if (!gateType) return null;
+  return GATE_TYPE_LABEL_KEYS[gateType] ?? null;
+}
+
+/** gate_type → 사람 낱말(완성 문자열). 미등재 값은 일반 "게이트"(ccGateGeneric)로. */
+export function gateTypeLabel(t: (key: string) => string, gateType: string | null | undefined): string {
+  const key = gateTypeLabelKey(gateType);
+  return key ? t(key) : t('ccGateGeneric');
+}

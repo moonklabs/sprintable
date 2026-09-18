@@ -145,7 +145,9 @@ export function HypothesisGateBadge({ hypothesis, gate, resolveName = (id) => id
             size="sm"
             variant="ghost"
             className="h-7 text-destructive hover:text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60"
-            disabled={resolving}
+            // story #3334 — 반려 사유(note) 서버측 필수 강제(gates.py 422)와 짝. 예전엔
+            // resolving만 봐서 빈 입력으로도 즉시 제출됐다.
+            disabled={resolving || !rejectNote.trim()}
             onClick={() => void transition('rejected', rejectNote)}
           >
             {resolving ? '…' : t('gateRejectConfirm')}

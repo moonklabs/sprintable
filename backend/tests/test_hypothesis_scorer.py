@@ -44,6 +44,9 @@ def _hyp(status="active", source="ga4", **ov):
     md = {"metric": "signups", "source": source, "target": 100, "direction": "up"}
     base = dict(
         id=uuid.uuid4(), status=status, metric_definition=md,
+        # story #3674 — hypothesis_scorer.py의 GA4 분기가 get_org_timezone(session,
+        # hyp.org_id)를 부른다(org tz 인지 "어제" 계산).
+        org_id=uuid.uuid4(),
         measure_after=datetime(2026, 1, 1, tzinfo=timezone.utc), outcome_result=None,
     )
     base.update(ov)
@@ -78,6 +81,9 @@ async def _run(hyps, *, ga4=None, epic=None, story_statuses=None):
     patches = []
     if ga4 is not None:
         patches.append(patch.object(sc, "score_ga4_outcome", side_effect=ga4 if callable(ga4) else MagicMock(return_value=ga4)))
+        # story #3674 — get_org_timezone(session, hyp.org_id) 격리(DB 조회 없이 None 고정,
+        # 이 파일은 GA4 분기의 전이 로직만 검증 — org tz 값 자체는 test_3674_*.py 몫).
+        patches.append(patch.object(sc, "get_org_timezone", new=AsyncMock(return_value=None)))
     if epic is not None:
         patches.append(patch.object(sc, "score_epic_outcome", MagicMock(return_value=epic)))
     for p in patches:

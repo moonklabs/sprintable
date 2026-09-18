@@ -1,0 +1,1 @@
+{"file": "tests/test_3414_publication_command_edges.py", "sec": 7.0, "source": "story-3562-split-3414-publication-command(2026-09-06, 원본 22건·실측 40.0s(run 34011626732)를 3-way 분할 후 로컬 raw pytest 비중(edges 4건 4.31s/총 24.81s ≈ 17%)으로 배분한 잠정값, 실 CI 샤드 로그로 재확認 필요)"}

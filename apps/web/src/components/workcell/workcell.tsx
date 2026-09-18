@@ -340,9 +340,12 @@ export function Workcell({ title, pipelineStage, brief, run, evidence, conversat
 }
 
 function LayerLabel({ title, question, className }: { title: string; question: string; className?: string }) {
+  // PO CHANGES(2026-09-14 16:54Z, PR#4289 workcell 캡처 리뷰) — "실행"이 "실/행"으로
+  // 글자 사이 줄바꿈(설명 span이 길어 title 텍스트 노드까지 같이 꺾임). title을 전용
+  // span으로 감싸 shrink-0+whitespace-nowrap 고정 — 줄바꿈/압축 대상에서 제외.
   return (
     <div className={cn('flex items-center gap-1.5 text-[8.5px] font-bold uppercase tracking-[0.12em] text-proof-faint', className)}>
-      {title}
+      <span className="shrink-0 whitespace-nowrap">{title}</span>
       <span className="text-[9.5px] font-semibold normal-case tracking-normal text-proof-ink-3">— {question}</span>
     </div>
   );
@@ -369,7 +372,7 @@ function BriefLayer({ brief }: { brief: WorkcellBrief }) {
   const dodLead = brief.dod != null ? extractBriefLead(brief.dod) : null;
   return (
     <div className="h-full px-4.5 py-3.5">
-      <LayerLabel title="Brief" question={t('briefQuestion')} className="mb-2.5" />
+      <LayerLabel title={t('briefTitle')} question={t('briefQuestion')} className="mb-2.5" />
       <div className="flex gap-2 text-[13px] leading-[1.5] text-proof-ink-2">
         <span className="w-16 shrink-0 pt-px text-[11px] text-proof-faint">{t('briefGoal')}</span>
         {/* story 38f524e1(critical, 선생님 실사고 2026-08-24) — flex 자식 기본 min-width:auto가
@@ -421,7 +424,7 @@ function RunLayer({ run }: { run: WorkcellRun }) {
   const t = useTranslations('workcell');
   return (
     <div className="h-full px-4.5 py-3.5">
-      <LayerLabel title="Run" question={t('runQuestion')} className="mb-2.5" />
+      <LayerLabel title={t('runTitle')} question={t('runQuestion')} className="mb-2.5" />
       <div className="mb-2 text-[13.5px] font-semibold text-proof-ink">{t('runNow')}: {run.now}</div>
       <div className="mb-2.5 flex flex-wrap gap-3.5 text-[11px] text-proof-ink-3">
         <span>{t('runStage')} <b className="font-semibold text-proof-ink-2">{run.stage}</b></span>
@@ -450,7 +453,7 @@ function EvidenceLayer({ evidence }: { evidence: ProofCapsuleProps | null }) {
   const t = useTranslations('workcell');
   return (
     <div className="h-full px-4.5 py-3.5">
-      <LayerLabel title="Evidence" question={t('evidenceQuestion')} className="mb-2.5" />
+      <LayerLabel title={t('evidenceTitle')} question={t('evidenceQuestion')} className="mb-2.5" />
       {evidence ? (
         <ProofCapsule {...evidence} />
       ) : (
@@ -494,7 +497,7 @@ function ConversationLayer({ conversation }: { conversation: WorkcellConversatio
   };
   return (
     <div className="h-full px-4.5 py-3.5">
-      <LayerLabel title="Conversation" question={t('conversationQuestion')} className="mb-2.5" />
+      <LayerLabel title={t('conversationTitle')} question={t('conversationQuestion')} className="mb-2.5" />
       <ChatProofSummaryRow summary={conversation.chatProof} />
       {conversation.messages.length > 0 ? (
         <details className="mt-2.5 group">

@@ -77,7 +77,23 @@ export function applyEntity(
 const ENTITY_TYPE_LABELS: Record<string, string> = {
   story: '스토리', doc: '문서', epic: '에픽', task: '작업',
 };
-export function entityTypeLabel(type: string): string {
+
+// story #3884(AC2, PO 확定 2026-09-14) — entityTypeLabel의 ko 고정 상수는 en 로케일 사용자
+// 에게도 그대로 새 나갔다(이 파일 밖 소비처 — event-block-card.tsx work_item_type 라벨 —
+// 에서 실측 발견, 원시 slug와 같은 "발행 시점/모듈 시점 고정" 결함 클래스). `t` 인자를
+// **선택적**으로 받아 로케일 대응한다 — 값은 위 ENTITY_TYPE_LABELS와 정확히 동일(§②-1
+// 스토리/문서/에픽/작업 정합, 새 낱말 0), en은 §②-1 Title Case 관례(Story/Doc/Epic/Task).
+// `t` 생략(기존 8개 호출부 — chat-input.tsx·entity-aware-textarea.tsx·kanban/epic 계열)
+// 은 위 ko-only 상수로 완전 폴백해 회귀 0을 보장한다(이 스토리가 로케일을 실제로 배선하는
+// 자리는 event-block-card.tsx뿐 — 다른 소비처는 스코프 밖, 발견만 하고 새 착수 0).
+const ENTITY_TYPE_LABEL_KEYS: Record<string, string> = {
+  story: 'entityTypeStory', doc: 'entityTypeDoc', epic: 'entityTypeEpic', task: 'entityTypeTask',
+};
+export function entityTypeLabel(type: string, t?: (key: string) => string): string {
+  if (t) {
+    const key = ENTITY_TYPE_LABEL_KEYS[type];
+    if (key) return t(key);
+  }
   return ENTITY_TYPE_LABELS[type] ?? type;
 }
 

@@ -26,7 +26,8 @@ class WebhookConfig(Base):
     secret: Mapped[str | None] = mapped_column(Text, nullable=True)
     events: Mapped[list] = mapped_column(ARRAY(Text), nullable=False, default=list)
     channel: Mapped[str] = mapped_column(Text, nullable=False, default="generic")
-    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # story #3896 — DB has DEFAULT true, ORM lacked server_default (drift).
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

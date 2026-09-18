@@ -13,6 +13,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import { NextMakerScreen } from './next-maker-screen';
 import { bumpOrgSyncVersion } from '@/lib/project-context-client';
 import koMessages from '../../../messages/ko.json';
+import { ToastProvider, ToastContainer, useToast } from '@/components/ui/toast';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -28,10 +29,21 @@ vi.mock('./flow-multi-lane-canvas', () => ({
 let container: HTMLDivElement;
 let root: Root;
 
+// story #3759 — 이 컴포넌트가 useToast()로 공유 Context를 구독한다. 정적 import된
+// 컴포넌트라(파일 상단) vi.resetModules()의 영향을 안 받는 이 파일 자체의 정적
+// ToastProvider로 감싸면 된다(동적 재-import 처방 불요, content/page.test.tsx와 동형).
+function TestToastRenderer() {
+  const { toasts, dismissToast } = useToast();
+  return <ToastContainer toasts={toasts} onDismiss={dismissToast} />;
+}
+
 function wrap(node: React.ReactNode) {
   return (
     <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
-      {node}
+      <ToastProvider>
+        {node}
+        <TestToastRenderer />
+      </ToastProvider>
     </NextIntlClientProvider>
   );
 }
@@ -308,7 +320,7 @@ describe('NextMakerScreen — real fetch orchestration + lane grouping', () => {
       await new Promise((r) => setTimeout(r, 0));
     });
 
-    expect(container.textContent).toContain('목표에 안 붙은 일이 1건 있습니다');
+    expect(container.textContent).toContain('목표에 안 붙은 일이 1건 있어요');
 
     const summaryButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('목표에 안 붙은 일이'));
     await act(async () => {
@@ -372,7 +384,7 @@ describe('NextMakerScreen — real fetch orchestration + lane grouping', () => {
       await new Promise((r) => setTimeout(r, 0));
     });
 
-    expect(container.textContent).toContain('처리에 실패했습니다');
+    expect(container.textContent).toContain('처리에 실패했어요');
     // headline은 그대로 "목표 3개 중 3개에" — 로컬 상태가 조용히 바뀌지 않았다.
     expect(container.textContent).toContain('목표 3개 중 3개에');
   });
@@ -398,7 +410,7 @@ describe('NextMakerScreen — real fetch orchestration + lane grouping', () => {
       await new Promise((r) => setTimeout(r, 0));
     });
 
-    expect(container.textContent).toContain('처리에 실패했습니다');
+    expect(container.textContent).toContain('처리에 실패했어요');
     expect(container.textContent).toContain('목표 3개 중 3개에');
   });
 
@@ -534,7 +546,7 @@ describe('NextMakerScreen — 실패를 "0건"으로 삼키지 않는다(story #
       await new Promise((r) => setTimeout(r, 0));
     });
 
-    expect(container.textContent).toContain('다음을 불러오지 못했습니다');
+    expect(container.textContent).toContain('다음을 불러오지 못했어요');
     expect(container.textContent).not.toContain('목표 0개');
   });
 });

@@ -6,9 +6,11 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { NextIntlClientProvider } from 'next-intl';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { FileViewer } from './file-viewer';
+import koMessages from '../../../messages/ko.json';
 import type { ReadingPanelTarget } from './reading-panel';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -40,7 +42,13 @@ function mount(node: React.ReactElement) {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
-  act(() => { root.render(node); });
+  act(() => {
+    root.render(
+      <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+        {node}
+      </NextIntlClientProvider>,
+    );
+  });
 }
 
 // dynamic import('docx-preview') + JSZip 파싱은 실제 비동기 작업이라 고정 microtask 횟수로는
@@ -74,7 +82,7 @@ describe('FileViewer docx (story #2788)', () => {
     }));
 
     mount(<FileViewer target={target} onClose={() => {}} />);
-    await waitFor(() => container.querySelector('.docx-preview-container') !== null || container.textContent!.includes('표시하지 못했습니다'));
+    await waitFor(() => container.querySelector('.docx-preview-container') !== null || container.textContent!.includes('표시하지 못했어요'));
 
     const docxContainer = container.querySelector('.docx-preview-container');
     // 실패 시 콘솔에 남긴 실제 원인을 단언 메시지에 실어 CI 로그에서 바로 보이게 한다
@@ -94,11 +102,11 @@ describe('FileViewer docx (story #2788)', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(new Uint8Array([1, 2, 3, 4]), { status: 200 })));
 
     mount(<FileViewer target={target} onClose={() => {}} />);
-    await waitFor(() => container.textContent!.includes('표시하지 못했습니다'));
+    await waitFor(() => container.textContent!.includes('표시하지 못했어요'));
 
     expect(container.querySelector('.docx-preview-container')).toBeNull();
     expect(container.querySelector('.animate-pulse')).toBeNull();
-    expect(container.textContent).toContain('미리보기를 표시하지 못했습니다');
+    expect(container.textContent).toContain('미리보기를 표시하지 못했어요');
     expect(container.textContent).toContain('다운로드');
   });
 
@@ -115,7 +123,7 @@ describe('FileViewer docx (story #2788)', () => {
 
     expect(container.querySelector('.docx-preview-container')).toBeNull();
     expect(container.querySelector('.animate-pulse')).toBeNull();
-    expect(container.textContent).toContain('미리보기를 표시하지 못했습니다');
+    expect(container.textContent).toContain('미리보기를 표시하지 못했어요');
     errorSpy.mockRestore();
     vi.useRealTimers();
   });
@@ -156,7 +164,7 @@ describe('FileViewer docx (story #2788)', () => {
     // renderAsync가 pendingRender를 기다리며 멈춰 있는 도중 20초 상한 타이머가 발화 —
     // failed 확정.
     await act(async () => { await vi.advanceTimersByTimeAsync(20000); });
-    expect(container.textContent).toContain('미리보기를 표시하지 못했습니다');
+    expect(container.textContent).toContain('미리보기를 표시하지 못했어요');
     vi.useRealTimers();
 
     // 이제야 renderAsync가 뒤늦게 완료 — run 꼬리의 setStatus('ready')가 이미 확정된
@@ -166,7 +174,7 @@ describe('FileViewer docx (story #2788)', () => {
       await new Promise((r) => setTimeout(r, 300));
     });
 
-    expect(container.textContent).toContain('미리보기를 표시하지 못했습니다');
+    expect(container.textContent).toContain('미리보기를 표시하지 못했어요');
     expect(container.querySelector('.docx-preview-container')).toBeNull();
     errorSpy.mockRestore();
     vi.doUnmock('docx-preview');

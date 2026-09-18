@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { StoryDetailPanel, type Task } from '@/components/kanban/story-detail-panel';
 import type { KanbanStory } from '@/components/kanban/types';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -11,6 +11,8 @@ import { selectUnconfirmedCandidates } from './flow-relation-review';
 import { FlowRelationReviewQueue } from './flow-relation-review-queue';
 import { useOrgSyncVersion } from '@/lib/project-context-client';
 import { fetchWithAuth } from '@/lib/db/client';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { useOrgDomainLabels } from '@/hooks/use-org-domain-labels';
 
 const OVERLAY_GAP = 8; // 노드와 패널 사이 여백(px)
 const OVERLAY_EDGE_MARGIN = 16; // 뷰포트 가장자리 여백(px)
@@ -31,7 +33,11 @@ interface FlowNodeStoryPanelProps {
 type LoadState =
   | { kind: 'loading' }
   | { kind: 'error' }
-  | { kind: 'ready'; story: KanbanStory; tasks: Task[] };
+  // story #3703(FE 완전성-정직) — 이 패널은 nextTasksCursor/onLoadMoreTasks를 StoryDetailPanel
+  // 에 아예 안 넘긴다(더 보기 자체가 없는 유일한 호출부) — tasksTotalCount만이라도 실어야
+  // 「Tasks (20)」이 총 개수인 척하지 않는다(목록은 여전히 최초 limit=20 그대로, 이 스토리
+  // 스코프는 「사실을 정직하게 말하기」이지 더 보기 신설이 아니다).
+  | { kind: 'ready'; story: KanbanStory; tasks: Task[]; tasksTotalCount: number | null };
 
 /** AC4(누른 노드를 가리지 않는다)·AC5(높이≤뷰포트 절반) — 순수함수로 뺀 이유는 useEffect
  * 본문에서 직접 계산하면(무조건부 setState) react-hooks/set-state-in-effect가 걸리기
@@ -77,6 +83,12 @@ function computeOverlayPosition(rect: DOMRect | null, viewportHeight: number): {
 export function FlowNodeStoryPanel({ storyId, onClose, onDeleteSuccess }: FlowNodeStoryPanelProps) {
   const t = useTranslations('flow');
   const isMobile = useIsMobile();
+  // story #3289 — kanban-board.tsx와 동형(useOrgDomainLabels 배선). 이 컴포넌트는 자체
+  // fetch로 자립하는 얇은 래퍼(#2354 관례)라 여기서 직접 훅을 붙인다(flow-client.tsx 경유
+  // props threading 대신).
+  const { orgId } = useDashboardContext();
+  const locale = useLocale();
+  const domainLabels = useOrgDomainLabels(orgId, locale);
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
   const [overlayPosition, setOverlayPosition] = useState<{ top: number; heightPx: number } | null>(null);
   // story #2358 — 「확認하기」 훑기 큐 진입점. 이 story가 source인 미확認 후보 건수(별도
@@ -108,7 +120,8 @@ export function FlowNodeStoryPanel({ storyId, onClose, onDeleteSuccess }: FlowNo
         return;
       }
       const tasks = (tasksJson?.data ?? []) as Task[];
-      setState({ kind: 'ready', story, tasks });
+      const tasksTotalCount = typeof tasksJson?.meta?.totalCount === 'number' ? tasksJson.meta.totalCount : null;
+      setState({ kind: 'ready', story, tasks, tasksTotalCount });
     })();
     return () => { cancelled = true; };
   }, [storyId, orgSyncVersion]);
@@ -201,7 +214,7 @@ export function FlowNodeStoryPanel({ storyId, onClose, onDeleteSuccess }: FlowNo
     // StoryDetailPanel이 이미 갖고 있는 전체화면 드로어 모드로 뜬다(KanbanBoard와 동일 경로).
     return (
       <>
-        <StoryDetailPanel story={state.story} tasks={state.tasks} onClose={onClose} onDeleteSuccess={onDeleteSuccess} />
+        <StoryDetailPanel story={state.story} tasks={state.tasks} tasksTotalCount={state.tasksTotalCount} onClose={onClose} onDeleteSuccess={onDeleteSuccess} getStatusLabel={domainLabels.statusLabel} getEntityTypeLabel={domainLabels.entityTypeLabel} />
         {reviewEntry}
         {reviewDialog}
       </>
@@ -213,9 +226,12 @@ export function FlowNodeStoryPanel({ storyId, onClose, onDeleteSuccess }: FlowNo
       <StoryDetailPanel
         story={state.story}
         tasks={state.tasks}
+        tasksTotalCount={state.tasksTotalCount}
         onClose={onClose}
         onDeleteSuccess={onDeleteSuccess}
         overlayPosition={{ top: overlayPosition!.top, heightPx: overlayPosition!.heightPx }}
+        getStatusLabel={domainLabels.statusLabel}
+        getEntityTypeLabel={domainLabels.entityTypeLabel}
       />
       {reviewEntry}
       {reviewDialog}

@@ -1,0 +1,53 @@
+name: QA verdict codex session check
+description: >
+  story #3647(CI·QA 관문·소형·긴급, 페드루 PO 確定 2026-09-07, 선생님 12:17Z 지시) —
+  qa:pass의 근거가 되는 최신 「## QA verdict: approved (qa:pass)」 코멘트 본문에
+  `codex session: <uuid>`·`model: <이름>` 두 줄이 있는지 검사한다. 2026-04 선생님-
+  카디르 합의(QA 판정=Claude 대화 + codex exec 실제 실행, Claude 단독 approve 금지)를
+  기계로 강제하는 첫 관문 — 09-01~02·09-05~07 두 창에서 codex 미사용 verdict가
+  ~300건 나간 실사고(선생님 실측) 재발 방지.
+
+  ⚠️잃는 것(선언, AC3) — 이 관문은 **형식만** 본다. GitHub 러너는 이 머신의
+  `~/.codex/sessions` 로그를 볼 수 없어(다른 프로세스·다른 장비) 코멘트에 적힌
+  세션 id가 실재하는지·그 PR을 정말 그 세션으로 리뷰했는지는 검증 못 한다 —
+  UUID 모양의 문자열 아무거나 적으면 통과한다. 실재 검증은 PO 재출근 점검(세션
+  로그와 verdict 대조)이 사람 축으로 메운다(story 본문 범위 밖 — 후속 후보:
+  세션 id를 sprintable 서버에 등록).
+
+  verdict-head-check(같은 디렉터리 위)와 별도 액션으로 둔 이유도 그 액션 자체의
+  ⛔주석과 동형 — head-check는 qa/design 둘 다 쓰는 공용 로직(코멘트 규약이 리뷰어
+  마다 다름)이고, 이 축은 qa:pass 전용(codex exec 규율은 카디르 QA에만 적용, 유나
+  design 리뷰엔 없다) — 억지로 한 액션에 파라미터로 합치면 design 쪽에도 이 검사가
+  새서 무관한 요구가 강제된다.
+
+  코멘트를 찾는 것(gh api·jq)만 이 자리(bash)에서 하고, 문자열 판정 자체는
+  `infra/qa_verdict_codex_session_check.py`로 뺐다(pytest로 selftest+뮤테이션이
+  스토리 AC라 순수 함수로 분리 — verdict-head-check의 인라인-bash-only 전례를
+  그대로 안 따른 유일한 이유).
+
+inputs:
+  gh-token:
+    description: gh api 호출용 토큰.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.gh-token }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+      run: |
+        set -euo pipefail
+        # qa-review-gate.yml의 verdict-head-check 호출과 같은 header-regex(그 스텝이
+        # "찾았다"고 판정한 바로 그 코멘트를 이 축도 다시 본다 — 새 판정 로직 0, 같은
+        # 코멘트를 두 번째 잣대로만 잰다).
+        LATEST_VERDICT_BODY="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" --paginate \
+          | jq -r '.[] | select(.body | test("^## QA verdict: approved \\(qa:pass\\)")) | [.created_at, .body] | @tsv' \
+          | sort | tail -1 | cut -f2-)"
+        if [ -z "${LATEST_VERDICT_BODY}" ]; then
+          echo "::error title=qa:pass verdict comment not found::codex 세션 검사 대상 코멘트를 못 찾았다 — verdict-head-check 스텝이 먼저 잡았어야 한다(fail-closed, 방어적 재확認)."
+          exit 1
+        fi
+
+        printf '%s' "${LATEST_VERDICT_BODY}" | python3 "${GITHUB_WORKSPACE}/infra/qa_verdict_codex_session_check.py"

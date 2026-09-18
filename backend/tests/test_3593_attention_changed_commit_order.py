@@ -77,7 +77,9 @@ async def test_create_dependency_commits_before_push():
          patch("app.services.trust_pipeline.maybe_emit_trust_stage_changed", new=AsyncMock()), \
          patch("app.services.attention_events.notify_attention_changed",
                new=AsyncMock(side_effect=lambda *a, **k: order.append("push"))) as push:
-        await deps_r.create_dependency(body, session=session, org_id=org_id, auth=_auth_ctx(user_id))
+        # story #3786 — create_dependency는 이제 Header() DI 진입점만(까심 QA CI FAILURE 원칙).
+        # 직접-호출은 plain-str만 받는 _create_dependency로.
+        await deps_r._create_dependency(body, session=session, org_id=org_id, auth=_auth_ctx(user_id), resolved_locale="ko")
 
     assert order == ["commit", "push"]
     push.assert_awaited_once_with(org_id)
@@ -110,7 +112,8 @@ async def test_update_dependency_commits_before_push():
          patch("app.services.trust_pipeline.maybe_emit_trust_stage_changed", new=AsyncMock()), \
          patch("app.services.attention_events.notify_attention_changed",
                new=AsyncMock(side_effect=lambda *a, **k: order.append("push"))) as push:
-        await deps_r.update_dependency(dep.id, body, repo=fake_repo, auth=_auth_ctx(user_id))
+        # story #3786 — 직접-호출은 _update_dependency로(위 create와 동형 이유).
+        await deps_r._update_dependency(dep.id, body, repo=fake_repo, auth=_auth_ctx(user_id), resolved_locale="ko")
 
     assert order == ["commit", "push"]
     push.assert_awaited_once_with(org_id)
@@ -137,7 +140,8 @@ async def test_delete_dependency_commits_before_push():
          patch("app.services.trust_pipeline.maybe_emit_trust_stage_changed", new=AsyncMock()), \
          patch("app.services.attention_events.notify_attention_changed",
                new=AsyncMock(side_effect=lambda *a, **k: order.append("push"))) as push:
-        await deps_r.delete_dependency(dep.id, repo=fake_repo, auth=_auth_ctx(user_id))
+        # story #3786 — 직접-호출은 _delete_dependency로(위 create와 동형 이유).
+        await deps_r._delete_dependency(dep.id, repo=fake_repo, auth=_auth_ctx(user_id), resolved_locale="ko")
 
     assert order == ["commit", "push"]
     push.assert_awaited_once_with(org_id)

@@ -5,7 +5,6 @@ import React, { type RefObject } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import { BubbleMenu } from '@tiptap/react/menus';
 import StarterKit from '@tiptap/starter-kit';
-import Link from '@tiptap/extension-link';
 import { CustomImageNode } from './extensions/image-node';
 import { ImageUploadExtension, registerDocIdProvider } from './extensions/image-upload';
 import Highlight from '@tiptap/extension-highlight';
@@ -28,6 +27,7 @@ import { EmbedBlock } from './extensions/embed-node';
 import { MathBlockNode, MathInlineNode } from './extensions/math-node';
 import { ColumnsBlock, ColumnBlock } from './extensions/column-layout';
 import { WikiLinkNode, createWikiLinkSuggestion } from './extensions/wiki-link';
+import { StoryMentionExtension, EntityLinkExtension } from './extensions/story-mention';
 import { DocToc } from './doc-toc';
 import { type DocHeading, slugifyHeading } from './doc-heading-utils';
 import { markdownToHtml, htmlToMarkdown } from './lib/content-converter';
@@ -113,6 +113,10 @@ export function DocEditor({
   };
 }) {
   const tEditor = useTranslations('docs');
+  // story #3866 — 빈 검색결과 문구는 canvas ns의 기존 storyPickerEmpty 키 재사용(같은 문장을
+  // 새 키로 중복시키지 않는다). i18n-key-coverage 규율(위 119행 주석)과 동형으로 이 useTranslations
+  // 호출과 t() 호출이 "같은 파일"이어야 하므로 여기서 미리 resolve해 넘긴다.
+  const tCanvas = useTranslations('canvas');
   // story ab2fd813(#2028) — 슬래시 팝업은 React 트리 밖(body append via createRoot)에
   // 렌더돼 slash-command.tsx 안에서 useTranslations를 직접 못 쓴다. 여기서 문자열을 미리
   // resolve해 createSlashCommandExtension에 주입한다. i18n-key-coverage.test.ts는
@@ -158,10 +162,9 @@ export function DocEditor({
   const [tocHeadings, setTocHeadings] = useState<DocHeading[]>([]);
   const [isFocused, setIsFocused] = useState(false);
   const editorContentRef = useRef<HTMLDivElement>(null);
-  // S4 첨부 진입: gutter "+" 위치 / 빈 문서 힌트 / DnD active-zone.
+  // S4 첨부 진입: gutter "+" 위치 / DnD active-zone.
   const [gutterTop, setGutterTop] = useState<number | null>(null);
   const [insertMenuOpen, setInsertMenuOpen] = useState(false);
-  const [isEmpty, setIsEmpty] = useState(true);
   const [isDragging, setIsDragging] = useState(false);
   const dragDepthRef = useRef(0);
 
@@ -180,7 +183,9 @@ export function DocEditor({
     extensions: [
       StarterKit.configure({ codeBlock: false }),
       CodeBlockWithCopy,
-      Link.configure({ openOnClick: false }),
+      // story #3866 — entity:story: 프로토콜 허용+isAllowedUri 검증+칩 스타일까지 포함한
+      // Link 확장(상세는 story-mention.tsx 주석). 재구현 0 — 그 파일 하나에 설정을 모은다.
+      EntityLinkExtension,
       CustomImageNode,
       ImageUploadExtension,
       Highlight,
@@ -208,7 +213,13 @@ export function DocEditor({
       WikiLinkNode.configure({
         projectId,
         onNavigate,
-        suggestion: createWikiLinkSuggestion(projectId),
+        suggestion: createWikiLinkSuggestion(projectId, tEditor('notFound')),
+      }),
+      // story #3866 — 문서에 스토리를 "붙이는" `#` 트리거(wikiLink의 `[[`와 동형 패턴).
+      // 새 Node가 아니라 위 Link mark로 진짜 앵커를 삽입(3858 파서 요구 형식).
+      StoryMentionExtension.configure({
+        projectId,
+        emptyLabel: tCanvas('storyPickerEmpty'),
       }),
       createSlashCommandExtension(slashMenuStrings),
       PageEmbedExtension.configure({ currentDocId, onNavigate }),
@@ -239,11 +250,10 @@ export function DocEditor({
     return registerDocIdProvider(editor, () => currentDocId);
   }, [editor, currentDocId]);
 
-  // gutter "+" 위치(현재 캐럿 줄) + 빈 문서 여부 추적.
+  // gutter "+" 위치(현재 캐럿 줄) 추적.
   useEffect(() => {
     if (!editor) return;
     const sync = () => {
-      setIsEmpty(editor.isEmpty);
       const wrap = editorContentRef.current;
       if (!wrap) return;
       try {
@@ -406,7 +416,7 @@ export function DocEditor({
           <button
             type="button"
             onClick={onOpenTree}
-            aria-label="문서 트리 열기"
+            aria-label={tEditor('openDocTree')}
             className="flex size-7 shrink-0 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-accent hover:text-foreground lg:hidden"
           >
             <PanelLeft className="size-4" />
@@ -422,7 +432,7 @@ export function DocEditor({
               onTitleChange?.(e.target.value);
               autoResizeTitle(e.target);
             }}
-            placeholder={titlePlaceholder ?? 'Untitled'}
+            placeholder={titlePlaceholder ?? tEditor('titlePlaceholder')}
             autoFocus={titleAutoFocus}
             rows={1}
             className="min-w-[7rem] flex-1 resize-none overflow-hidden whitespace-nowrap bg-transparent text-lg font-bold leading-snug outline-none placeholder:text-muted-foreground"
@@ -505,28 +515,28 @@ export function DocEditor({
           <BubbleButton
             active={editor.isActive('bold')}
             onClick={() => editor.chain().focus().toggleBold().run()}
-            title="굵게 (Ctrl+B)"
+            title={`${tEditor('toolbarBold')} (Ctrl+B)`}
           >
             <Bold className="size-3.5" />
           </BubbleButton>
           <BubbleButton
             active={editor.isActive('italic')}
             onClick={() => editor.chain().focus().toggleItalic().run()}
-            title="기울임 (Ctrl+I)"
+            title={`${tEditor('toolbarItalic')} (Ctrl+I)`}
           >
             <Italic className="size-3.5" />
           </BubbleButton>
           <BubbleButton
             active={editor.isActive('strike')}
             onClick={() => editor.chain().focus().toggleStrike().run()}
-            title="취소선"
+            title={tEditor('toolbarStrikethrough')}
           >
             <Strikethrough className="size-3.5" />
           </BubbleButton>
           <BubbleButton
             active={editor.isActive('code')}
             onClick={() => editor.chain().focus().toggleCode().run()}
-            title="인라인 코드"
+            title={tEditor('toolbarInlineCode')}
           >
             <Code className="size-3.5" />
           </BubbleButton>
@@ -541,14 +551,15 @@ export function DocEditor({
                 if (url) editor.chain().focus().setLink({ href: url }).run();
               }
             }}
-            title="링크"
+            // story #3776(1층B) — "링크", docs ns의 기존 toolbarLink 키 재사용.
+            title={tEditor('toolbarLink')}
           >
             <Link2 className="size-3.5" />
           </BubbleButton>
           <BubbleButton
             active={editor.isActive('highlight')}
             onClick={() => editor.chain().focus().toggleHighlight().run()}
-            title="형광펜"
+            title={tEditor('toolbarHighlight')}
           >
             <Highlighter className="size-3.5" />
           </BubbleButton>
@@ -603,13 +614,11 @@ export function DocEditor({
           >
             <EditorContent editor={editor} className="tiptap-content h-full outline-none" />
 
-            {/* 빈 문서 힌트 — 첨부 진입 discoverability(+ · / · DnD). 콘텐츠를 따라가는 것이
-                맞다 — 안쪽 relative(스크롤 컨테이너) 기준 그대로 둔다. */}
-            {editable && isEmpty ? (
-              <p className="pointer-events-none absolute left-9 top-3 select-none text-sm text-muted-foreground">
-                {tEditor('attachEmptyHint')}
-              </p>
-            ) : null}
+            {/* story #3917 — 예전엔 여기에 별도 절대배치 <p>(attachEmptyHint)가 Tiptap
+                Placeholder 확장의 CSS ::before 문구와 같은 자리(좌상단)에 겹쳐 그려졌다
+                (빈 문서에서 두 문장이 포개짐). "이미지·파일을 끌어다 놓거나" 정보는
+                labels.placeholder(위 Placeholder.configure)로 병합해 한 상태=한 안내
+                불변식을 지킨다 — 우회(z-index·opacity) 아니라 중복 소스 제거. */}
 
             {/* gutter "+" — 현재 줄 좌측 거터·항상 표시·클릭 시 이미지/파일 삽입 메뉴. 캐럿
                 위치를 따라가는 것이 맞다 — 안쪽 relative 기준 그대로 둔다. */}

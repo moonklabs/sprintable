@@ -10,16 +10,28 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import { EntityDispatchPanel } from './entity-dispatch-panel';
 import koMessages from '../../../messages/ko.json';
+import { ToastProvider, ToastContainer, useToast } from '@/components/ui/toast';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let container: HTMLDivElement;
 let root: Root;
 
+// story #3759 — 이 컴포넌트가 useToast()로 공유 Context를 구독한다. 정적 import된
+// 컴포넌트라(파일 상단) vi.resetModules()의 영향을 안 받는 이 파일 자체의 정적
+// ToastProvider로 감싸면 된다(동적 재-import 처방 불요, content/page.test.tsx와 동형).
+function TestToastRenderer() {
+  const { toasts, dismissToast } = useToast();
+  return <ToastContainer toasts={toasts} onDismiss={dismissToast} />;
+}
+
 function wrap(node: React.ReactNode) {
   return (
     <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
-      {node}
+      <ToastProvider>
+        {node}
+        <TestToastRenderer />
+      </ToastProvider>
     </NextIntlClientProvider>
   );
 }
@@ -65,8 +77,8 @@ describe('EntityDispatchPanel — 까심군 QA 회귀 (envelope unwrap)', () => 
       await Promise.resolve();
     });
 
-    expect(document.body.textContent).not.toContain('담당자가 지정되지 않았습니다');
-    expect(document.body.textContent).toContain('전달했습니다');
+    expect(document.body.textContent).not.toContain('담당자가 지정되지 않았어요');
+    expect(document.body.textContent).toContain('전달했어요');
   });
 
   it('/api/dispatch가 {data:{dispatched:false}}면(진짜 담당자 미지정) 안내 토스트가 뜬다', async () => {
@@ -93,7 +105,7 @@ describe('EntityDispatchPanel — 까심군 QA 회귀 (envelope unwrap)', () => 
       await Promise.resolve();
     });
 
-    expect(document.body.textContent).toContain('담당자가 지정되지 않았습니다');
+    expect(document.body.textContent).toContain('담당자가 지정되지 않았어요');
   });
 });
 

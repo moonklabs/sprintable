@@ -4,6 +4,7 @@ import * as React from "react"
 import { mergeProps } from "@base-ui/react/merge-props"
 import { useRender } from "@base-ui/react/use-render"
 import { cva, type VariantProps } from "class-variance-authority"
+import { useTranslations } from "next-intl"
 
 import { useIsMobile } from "@/hooks/use-mobile"
 import { cn } from "@/lib/utils"
@@ -259,7 +260,10 @@ function SidebarTrigger({
   onClick,
   ...props
 }: React.ComponentProps<typeof Button>) {
-  const { toggleSidebar } = useSidebar()
+  const { toggleSidebar, open, openMobile, isMobile } = useSidebar()
+  // story 3436(묶음 1) — nav.toggleSidebar는 새 키(공용) — 묶음 4 #13(settings:800
+  // 「Toggle navigation」)이 같은 행동이라 같은 키로 잇는다(페드루 PO 지시).
+  const t = useTranslations("nav")
 
   return (
     <Button
@@ -267,6 +271,11 @@ function SidebarTrigger({
       data-slot="sidebar-trigger"
       variant="ghost"
       size="icon-sm"
+      // story 3436(묶음 9, PO 지적) — 접근 이름은 있었지만 펼침/접힘 상태를 스크린리더가
+      // 못 읽었다(아침 sr-only "Close"류와 같은 클래스, 다른 얼굴). toggleSidebar()가
+      // 모바일/데스크톱에서 다른 state를 토글하므로(107행) isMobile로 어느 쪽을 읽을지 갈라야
+      // 이 버튼이 실제로 제어하는 state와 aria-expanded가 일치한다.
+      aria-expanded={isMobile ? openMobile : open}
       className={cn(className)}
       onClick={(event) => {
         onClick?.(event)
@@ -275,13 +284,15 @@ function SidebarTrigger({
       {...props}
     >
       <PanelLeftIcon />
-      <span className="sr-only">Toggle Sidebar</span>
+      <span className="sr-only">{t("toggleSidebar")}</span>
     </Button>
   )
 }
 
 function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
-  const { toggleSidebar, setWidth, setIsResizing } = useSidebar()
+  const { toggleSidebar, setWidth, setIsResizing, open, openMobile, isMobile } = useSidebar()
+  // story 3436(묶음 1) — SidebarTrigger와 같은 정본 키(nav.toggleSidebar).
+  const t = useTranslations("nav")
   const didDragRef = React.useRef(false)
   const dragRef = React.useRef<{ startX: number; startWidth: number } | null>(null)
 
@@ -325,11 +336,13 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
     <button
       data-sidebar="rail"
       data-slot="sidebar-rail"
-      aria-label="Toggle Sidebar"
+      aria-label={t("toggleSidebar")}
+      // story 3436(묶음 9) — SidebarTrigger와 같은 이유·같은 처방.
+      aria-expanded={isMobile ? openMobile : open}
       tabIndex={-1}
       onClick={handleClick}
       onMouseDown={onMouseDown}
-      title="Toggle Sidebar"
+      title={t("toggleSidebar")}
       className={cn(
         "absolute inset-y-0 z-20 hidden w-4 transition-all ease-linear group-data-[side=left]:-right-4 group-data-[side=right]:left-0 after:absolute after:inset-y-0 after:start-1/2 after:w-[2px] hover:after:bg-sidebar-border sm:flex ltr:-translate-x-1/2 rtl:-translate-x-1/2",
         "in-data-[side=left]:cursor-col-resize in-data-[side=right]:cursor-col-resize",
@@ -443,7 +456,8 @@ function SidebarGroupLabel({
     props: mergeProps<"div">(
       {
         className: cn(
-          "flex h-8 shrink-0 items-center rounded-md px-2 text-xs font-medium text-sidebar-foreground/70 ring-sidebar-ring outline-hidden transition-[margin,opacity] duration-200 ease-linear group-data-[collapsible=icon]:-mt-8 group-data-[collapsible=icon]:opacity-0 focus-visible:ring-2 [&>svg]:size-4 [&>svg]:shrink-0",
+          // 3826-pre — 알파 합성(text-sidebar-foreground/70) → solid text-muted-foreground.
+          "flex h-8 shrink-0 items-center rounded-md px-2 text-xs font-medium text-muted-foreground ring-sidebar-ring outline-hidden transition-[margin,opacity] duration-200 ease-linear group-data-[collapsible=icon]:-mt-8 group-data-[collapsible=icon]:opacity-0 focus-visible:ring-2 [&>svg]:size-4 [&>svg]:shrink-0",
           className
         ),
       },

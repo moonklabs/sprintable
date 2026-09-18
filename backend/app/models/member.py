@@ -41,7 +41,11 @@ class Member(Base):
     owner_member_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("members.id", ondelete="SET NULL"), nullable=True, index=True
     )
-    name: Mapped[str] = mapped_column(Text, nullable=False)
+    # story #3758 — nullable로 완화(마이그 0359). 에이전트는 그대로 항상 실명이 채워지지만
+    # (생성 흐름이 이름을 필수로 받음), 휴먼 anchor(agent_anchor_sync.ensure_member_anchor_for_org_member)는
+    # display_name 없으면 email/user_id를 이 컬럼에 지어내는 대신 None을 정직하게 저장한다
+    # (member_resolver.py 5자리·#3755와 같은 email/id 폴백 클래스의 «쓰기 층» 자리).
+    name: Mapped[str | None] = mapped_column(Text, nullable=True)
     avatar_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     # story #2603 P0(delivery-contract-blueprint-v0-1)이 채번하던 에이전트 @멘션 핸들 — 그
     # 채번 호출부와 유일한 소비처(텍스트 @handle 파서)를 story #2646(2026-08-14)가 dev 실측

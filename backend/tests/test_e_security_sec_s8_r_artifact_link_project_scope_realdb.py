@@ -76,11 +76,25 @@ async def _seed(session):
     session.add_all([story_a, story_b, epic_a, epic_b, doc_a, doc_b])
     await session.commit()
 
+    # resolve_member_db_verified()는 fail-closed(DB 실측) — link-scope 404로 조기 반환되지
+    # 않고 실제 create_artifact 201까지 가는 케이스는 project_a의 실 멤버가 필요하다
+    # (story #3370, member_resolver.py:194-200).
+    from app.models.member import Member
+    from app.models.project_access import ProjectAccess
+    member_a = Member(id=uuid.uuid4(), org_id=org.id, type="agent", name="linker-agent", is_active=True)
+    session.add(member_a)
+    await session.commit()
+    session.add(ProjectAccess(
+        id=uuid.uuid4(), project_id=project_a.id, member_id=member_a.id, permission="granted", role="member",
+    ))
+    await session.commit()
+
     return {
         "org_id": org.id, "project_a_id": project_a.id, "project_b_id": project_b.id,
         "story_a_id": story_a.id, "story_b_id": story_b.id,
         "epic_a_id": epic_a.id, "epic_b_id": epic_b.id,
         "doc_a_id": doc_a.id, "doc_b_id": doc_b.id,
+        "member_a_id": member_a.id,
     }
 
 
@@ -89,7 +103,7 @@ def _client_for(app):
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 
-async def _setup_app(app, Session, org_id, project_id):
+async def _setup_app(app, Session, org_id, project_id, user_id=None):
     from app.dependencies.auth import AuthContext, get_current_user
     from app.dependencies.database import get_db
 
@@ -104,7 +118,7 @@ async def _setup_app(app, Session, org_id, project_id):
 
     async def _auth():
         return AuthContext(
-            user_id=str(uuid.uuid4()), email="caller@test",
+            user_id=str(user_id or uuid.uuid4()), email="caller@test",
             claims={"app_metadata": {"org_id": str(org_id), "project_id": str(project_id)}},
         )
 
@@ -203,7 +217,7 @@ async def test_create_artifact_same_project_story_link_still_works():
         async with Session() as s:
             seeded = await _seed(s)
 
-        await _setup_app(app, Session, seeded["org_id"], seeded["project_a_id"])
+        await _setup_app(app, Session, seeded["org_id"], seeded["project_a_id"], user_id=seeded["member_a_id"])
         client = _client_for(app)
         try:
             resp = await client.post(

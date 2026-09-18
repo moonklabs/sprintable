@@ -3,7 +3,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
@@ -25,6 +25,37 @@ from app.services.disposition_advisor import DEFAULT_MIN_VERDICTS, get_dispositi
 from app.services.gate_resolver import resolve_disposition
 
 router = APIRouter(prefix="/api/v2/gate-config", tags=["gate-config", "Trust"])
+
+
+async def _is_eligible_merge_gate_default_approver(
+    session: AsyncSession, org_id: uuid.UUID, member_id: uuid.UUID,
+) -> bool:
+    """story #3319 — merge_gate_default_approver_member_id 값 검증. is_org_owner_or_admin
+    (project_auth.py:424-461)의 NOT EXISTS 패턴을 그대로 재사용하되, 그 함수는 user_id 축으로
+    조회하는데 이 필드는 org_members.id(member_id) 축이라 여기서 member_id 키로 다시 짠다
+    (member_id→user_id 해소 후 재호출하는 간접보다, 같은 쿼리를 member_id로 직접 겨냥하는
+    쪽이 원자적 — 해소·검증 사이 레이스 없음). owner/admin role + 미삭제 + agent 미연동
+    (story #2058 AC5②와 동일 불변식) 전부 만족해야 True."""
+    row = await session.execute(
+        text(
+            """
+            SELECT 1 FROM org_members
+            WHERE id = :member_id
+              AND org_id = :org_id
+              AND deleted_at IS NULL
+              AND role IN ('owner', 'admin')
+              AND NOT EXISTS (
+                SELECT 1 FROM members m
+                WHERE m.user_id = org_members.user_id
+                  AND m.org_id = org_members.org_id
+                  AND m.type = 'agent'
+              )
+            LIMIT 1
+            """
+        ),
+        {"member_id": member_id, "org_id": org_id},
+    )
+    return row.scalar_one_or_none() is not None
 
 
 # ── org posture ───────────────────────────────────────────────────────────────
@@ -55,15 +86,33 @@ async def upsert_org_policy(
     전무해 org 내 임의 멤버가 org 전체 HITL gate posture를 바꿀 수 있었다."""
     if not await _is_org_admin(session, org_id, uuid.UUID(auth.user_id)):
         raise HTTPException(status_code=403, detail="org admin/owner required")
+    # story #3319 — 값이 있으면(지우는 게 아니라 채우는 PUT) 사람 owner/admin 멤버인지 검증.
+    # None(미설정 또는 명시 해제)은 검증 대상 없음 — 현행 무변경(회귀 0)으로 그대로 통과.
+    if body.merge_gate_default_approver_member_id is not None and not (
+        await _is_eligible_merge_gate_default_approver(
+            session, org_id, body.merge_gate_default_approver_member_id,
+        )
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "merge_gate_default_approver_member_id는 이 조직의 human owner/admin 멤버여야 "
+                "합니다(에이전트는 requires_human 게이트에 서명할 수 없습니다)."
+            ),
+        )
     r = await session.execute(
         select(OrgGatePolicy).where(OrgGatePolicy.org_id == org_id).limit(1)
     )
     policy = r.scalar_one_or_none()
     if policy is None:
-        policy = OrgGatePolicy(id=uuid.uuid4(), org_id=org_id, posture=body.posture)
+        policy = OrgGatePolicy(
+            id=uuid.uuid4(), org_id=org_id, posture=body.posture,
+            merge_gate_default_approver_member_id=body.merge_gate_default_approver_member_id,
+        )
         session.add(policy)
     else:
         policy.posture = body.posture
+        policy.merge_gate_default_approver_member_id = body.merge_gate_default_approver_member_id
     await session.flush()
     await session.refresh(policy)
     return OrgGatePolicyResponse.model_validate(policy)

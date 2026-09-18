@@ -2,8 +2,9 @@
 
 import type { ComponentType } from 'react';
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { Check, ChevronDown, LayoutGrid, LayoutList, Search, Workflow, Plus } from 'lucide-react';
 import { DndContext, DragEndEvent, PointerSensor, useSensor, useSensors, DragOverlay, closestCenter } from '@dnd-kit/core';
 import { Button } from '@/components/ui/button';
@@ -12,6 +13,7 @@ import { Input } from '@/components/ui/input';
 import { useRenderNonce } from '@/hooks/use-render-nonce';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useOrgSyncVersion } from '@/lib/project-context-client';
+import { useOrgDomainLabels } from '@/hooks/use-org-domain-labels';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -21,7 +23,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { useToast, ToastContainer } from '@/components/ui/toast';
+import { useToast } from '@/components/ui/toast';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useSseNotifications } from '@/hooks/use-sse-notifications';
 import { KanbanColumn } from './kanban-column';
@@ -139,7 +141,8 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   // 동일 패턴 — orgSyncVersion을 트리거 effect 의존성에 얹는다.
   const orgSyncVersion = useOrgSyncVersion();
   const t = useTranslations('board');
-  const { toasts, addToast, dismissToast } = useToast();
+  const locale = useLocale();
+  const { addToast } = useToast();
   const [transitionError, setTransitionError] = useState<string | null>(null);
   // story #2154 — 이 배너는 4초 후 자동 setTransitionError(null)로만 해소되고, 재시도 直前에
   // 명시적으로 null 리셋하지 않는다(#2400이 남긴 latent gap). 4초 내 동일 사유가 재발하면
@@ -157,9 +160,20 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [epicsNextCursor, setEpicsNextCursor] = useState<string | null>(null);
   const [storyTasksNextCursor, setStoryTasksNextCursor] = useState<string | null>(null);
+  // story #3703(FE 완전성-정직) — /api/tasks의 meta.totalCount(story_id 지정 시 BE 항상
+  // 반환). 기존에도 fetch는 하고 있었지만 nextCursor만 뽑고 이 값은 버렸다.
+  const [storyTasksTotalCount, setStoryTasksTotalCount] = useState<number | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadingMoreEpics, setLoadingMoreEpics] = useState(false);
   const [loadingMoreStoryTasks, setLoadingMoreStoryTasks] = useState(false);
+  // story #3709(FE 완전성-정직, 3704 후속) — 조회 中(응답 前)엔 tasks=[]·totalCount=null이라
+  // StoryDetailPanel이 "정말 0개"와 구별을 못 했다 — 이 플래그로 「불러오는 중」을 그린다.
+  const [storyTasksLoading, setStoryTasksLoading] = useState(false);
+  // story #3704(유나 발견+카디르 비블로커, #4054 재리뷰 中) — handleStoryClick은 이벤트
+  // 핸들러라 형제(epic-swimlane-board.tsx/flow-node-story-panel.tsx)처럼 effect cleanup의
+  // `cancelled` 클로저를 못 쓴다(재실행을 트리거할 의존성 배열이 없다) — 대신 클릭마다
+  // 증가시키는 요청 순번으로 "가장 최근 클릭의 응답만 반영"을 흉내낸다.
+  const storyTasksRequestRef = useRef(0);
 
   const selectedSprintId = searchParams.get('sprint_id') ?? '';
   const selectedEpicId = searchParams.get('epic_id') ?? '';
@@ -280,10 +294,15 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
     const res = await fetchWithAuth(`/api/stories?${params}`);
     if (!res.ok) return { stories: [], total: 0, nextCursor: null };
     // RC: 헤더 대신 JSON body meta에서 cursor/total 읽기 (proxy 헤더 strip 방지)
-    const json = await res.json() as { data?: KanbanStory[]; meta?: { nextCursor?: string | null; hasMore?: boolean; total?: number } };
+    // story #3761 후속(카디르 QA 지적, PR#4109 검수 中 발견) — 은퇴한 `total` 대신 정본
+    // `totalCount` 읽기. 이 status 기반 호출은 buildCursorPageMeta 경로(pagination.ts)를
+    // 타는데 그 meta엔 애초 total/totalCount 자체가 없다(hasMore/nextCursor만) — 이름을
+    // 무엇으로 읽든 항상 undefined라 `?? stories.length` 폴백이 그대로 걸린다(동작 무변,
+    // 순수 낱말 정본화).
+    const json = await res.json() as { data?: KanbanStory[]; meta?: { nextCursor?: string | null; hasMore?: boolean; totalCount?: number | null } };
     const stories = json.data ?? [];
     const nextCursor = json.meta?.nextCursor ?? null;
-    const total = json.meta?.total ?? stories.length;
+    const total = json.meta?.totalCount ?? stories.length;
     return { stories, total, nextCursor };
   }, [projectId, selectedSprintId, selectedAssigneeId]);
 
@@ -305,7 +324,12 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   // 이미 로드된(페이지네이션으로 fetch된) 카드만 in-place 패치 — 전체 재fetch를 하지 않으므로
   // 스크롤 위치·컬럼 순서가 흔들리지 않는다(AC3, #2050에서 배운 레이아웃 시프트 축과 동일 원리).
   // 아직 로드 안 된 카드(다른 컬럼 페이지네이션 밖)의 신규 진입은 이 스토리 스코프 밖으로 둔다.
-  const { currentTeamMemberId } = useDashboardContext();
+  const { currentTeamMemberId, orgId, bottomDockBannerSlot } = useDashboardContext();
+  // story #3287([도메인탈고정·축1 Phase1]) — org별 표시 라벨 오버라이드. canonical
+  // status(col.id, drag/전이/색상 전부 이걸로 판정)는 절대 안 바뀐다 — statusLabel()이
+  // 있으면 그 문구로 컬럼 헤더 텍스트만 치환하고, 없으면(오버라이드 미설정) 기존
+  // t(col.i18nKey) 그대로(회귀 0).
+  const domainLabels = useOrgDomainLabels(orgId, locale);
 
   // story #2137 — 카드(stories 배열)와 상세 패널(selectedStory)이 별도 state라, SSE 패치를
   // stories에만 적용하면 패널만 옛값에 고정된다(#2384·#2130과 같은 클래스의 3번째 재발 — 이번엔
@@ -385,12 +409,17 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
       const memberParams = projectId ? `?project_id=${projectId}` : '';
 
       // CB-S4: status별 5회 독립 호출
+      // story #3519(§16-7 2부, PO 確定 2026-09-05) — storyResults(보드의 실제 몸통, 주)와
+      // sprintsRes/epicsRes/membersRes(부수, ok?채움:방치)가 같은 Promise.all에 미격리로
+      // 묶여 있어, 부수 셋 중 하나가 네트워크단 reject하면 보드 주 데이터까지 조용히 텅
+      // 비었다(finally가 setLoading(false)는 걸어 무한 스켈레톤은 아니지만, 데이터 손실은
+      // 그대로). 부수 셋만 leg별로 격리한다.
       const statuses = COLUMNS.map((c) => c.id);
       const [storyResults, sprintsRes, epicsRes, membersRes] = await Promise.all([
         Promise.all(statuses.map((s) => fetchStoriesByStatus(s))),
-        fetchWithAuth(`/api/sprints${sprintParams}`),
-        fetchWithAuth(`/api/goals?${epicParams.toString()}`),
-        fetchWithAuth(`/api/members${memberParams}`),
+        fetchWithAuth(`/api/sprints${sprintParams}`).catch(() => null),
+        fetchWithAuth(`/api/goals?${epicParams.toString()}`).catch(() => null),
+        fetchWithAuth(`/api/members${memberParams}`).catch(() => null),
       ]);
 
       const allStories: KanbanStory[] = [];
@@ -406,9 +435,9 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
       setColumnCursors(newCursors);
 
       const storyIds = allStories.map((s) => s.id);
-      if (sprintsRes.ok) { const json = await sprintsRes.json(); setSprints(json.data); }
-      if (epicsRes.ok) { const json = await epicsRes.json(); setEpics(json.data); setEpicsNextCursor(json.meta?.nextCursor ?? null); }
-      if (membersRes.ok) { const json = await membersRes.json(); setMembers(json.data); }
+      if (sprintsRes?.ok) { const json = await sprintsRes.json(); setSprints(json.data); }
+      if (epicsRes?.ok) { const json = await epicsRes.json(); setEpics(json.data); setEpicsNextCursor(json.meta?.nextCursor ?? null); }
+      if (membersRes?.ok) { const json = await membersRes.json(); setMembers(json.data); }
 
       if (projectId && storyIds.length > 0) {
         try {
@@ -521,7 +550,21 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
 
   const handleStoryClick = useCallback(async (story: KanbanStory, { replace = false } = {}) => {
     setSelectedStory(story);
+    // story #3704 blocker① — storyTasks 자신도 세 값(tasks/nextCursor/totalCount)과 한 묶음으로
+    // 리셋한다. 전엔 이 줄이 빠져 있어, !res.ok(403/500 등)면 아래 if(res.ok) 블록을 통째로
+    // 건너뛰고 직전 스토리의 태스크 목록이 새 스토리 패널 밑에 그대로 남았다(catch만 비웠다).
+    setStoryTasks([]);
     setStoryTasksNextCursor(null);
+    setStoryTasksTotalCount(null);
+    // story #3709(FE 완전성-정직) — 조회 시작을 패널에 알린다(응답/실패/취소 어느 쪽이든
+    // 아래에서 이 요청 자신이 마지막에 false로 내린다).
+    setStoryTasksLoading(true);
+
+    // story #3704 blocker② — 이 함수는 클릭마다 호출되는 이벤트 핸들러라 형제 두 곳처럼
+    // effect cleanup의 `cancelled` 클로저를 못 쓴다. 요청 순번을 자기 클로저에 캡처해 두고,
+    // 응답이 도착했을 때 "지금도 내가 최신 요청인지"를 대조 — A→B 연타에서 늦게 온 A의
+    // 응답이 B 패널의 tasks/nextCursor/totalCount를 덮는 것을 막는다.
+    const requestId = ++storyTasksRequestRef.current;
 
     // URL에 스토리 ID 반영
     const params = new URLSearchParams(searchParams);
@@ -534,14 +577,29 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
 
     try {
       const res = await fetchWithAuth(`/api/tasks?story_id=${story.id}&limit=20`);
+      if (storyTasksRequestRef.current !== requestId) return; // 그 사이 더 최신 클릭이 있었다 — 이 응답은 버린다.
       if (res.ok) {
         const json = await res.json();
+        // story #3704 후속(카디르 재-QA, PR#4055) — 위 대조는 fetch 직후일 뿐, res.json()
+        // 자체가 비동기라 그 파싱 사이에 더 최신 클릭이 순번을 올릴 수 있다 — 상태 반영
+        // «직전»(파싱 뒤)에 한 번 더 대조해야 그 창을 닫는다(안 닫으면 옛 결과가 새 클릭보다
+        // 늦게 커밋될 수 있다).
+        if (storyTasksRequestRef.current !== requestId) return;
         setStoryTasks(json.data ?? []);
         setStoryTasksNextCursor(json.meta?.nextCursor ?? null);
+        setStoryTasksTotalCount(typeof json.meta?.totalCount === 'number' ? json.meta.totalCount : null);
+      } else {
+        setStoryTasks([]);
+        setStoryTasksNextCursor(null);
+        setStoryTasksTotalCount(null);
       }
+      setStoryTasksLoading(false);
     } catch {
+      if (storyTasksRequestRef.current !== requestId) return;
       setStoryTasks([]);
       setStoryTasksNextCursor(null);
+      setStoryTasksTotalCount(null);
+      setStoryTasksLoading(false);
     }
   }, [searchParams, router]);
 
@@ -793,6 +851,11 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
           bumpTransitionErrorNonce();
           setTransitionError(t('transitionDenied'));
           setTimeout(() => setTransitionError(null), 4000);
+        } else {
+          // story #3638(유나 §8·«분기 안에서 일부만 알리는» 눈멂 ③) — FORBIDDEN 외의
+          // 실 실패(500·네트워크 등)는 롤백만 하고 조용했다. epic-swimlane-board.tsx가
+          // #3637에서 이미 쓴 storyMoveFailed를 형제 자리에도.
+          addToast({ type: 'error', title: t('storyMoveFailed') });
         }
         return;
       }
@@ -819,6 +882,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
         body: JSON.stringify({ position: newPosition }),
       });
     } catch {
+      addToast({ type: 'error', title: t('storyMoveFailed') });
       setStories((prev) =>
         prev.map((s) => (s.id === storyId ? { ...s, status: story.status, position: story.position } : s)),
       );
@@ -924,6 +988,10 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
           bumpTransitionErrorNonce();
           setTransitionError(t('transitionDenied'));
           setTimeout(() => setTransitionError(null), 4000);
+        } else {
+          // story #3638(유나 §8·«분기 안에서 일부만 알리는» 눈멂 ③, kanban-board.tsx:929) —
+          // FORBIDDEN 외의 실 실패는 롤백만 하고 조용했다.
+          addToast({ type: 'error', title: t('storyMoveFailed') });
         }
         return;
       }
@@ -938,6 +1006,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
         body: JSON.stringify({ position: newPosition }),
       });
     } catch {
+      addToast({ type: 'error', title: t('storyMoveFailed') });
       // 롤백 (카운트도 원복)
       setStories((prev) =>
         prev.map((s) => (s.id === storyId ? { ...s, status: story.status, position: story.position } : s)),
@@ -984,6 +1053,11 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
           bumpTransitionErrorNonce();
           setTransitionError(t('transitionDenied'));
           setTimeout(() => setTransitionError(null), 4000);
+        } else {
+          // story #3638(유나 §8·«분기 안에서 일부만 알리는» 눈멂 ③) — handleDragEnd/
+          // handleTrustDragEnd와 동일 병(메뉴 경로 버전, 문서에는 미등재 — 3638 그라운딩
+          // 중 발견한 세 번째 쌍둥이).
+          addToast({ type: 'error', title: t('storyMoveFailed') });
         }
         return;
       }
@@ -992,6 +1066,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
       const violation = Array.isArray(okItems) ? okItems.find((x) => x?.id === storyId)?.violation : null;
       if (violation) addToast({ type: 'warning', title: t('transitionViolation') });
     } catch {
+      addToast({ type: 'error', title: t('storyMoveFailed') });
       // Rollback (카운트도 원복)
       setStories((prev) =>
         prev.map((s) => (s.id === storyId ? { ...s, status: story.status } : s)),
@@ -1024,14 +1099,14 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
       if (!res.ok) {
         // story #2485 — backend delete_story()는 generic HTTP상태 코드만 낸다(진짜
         // 비즈니스 code 없음, 그라운딩 확認) — raw 서버 message 노출 대신 고정 문구.
-        addToast({ type: 'error', title: '스토리 삭제에 실패했습니다.' });
+        addToast({ type: 'error', title: t('storyDeleteFailed') });
         await fetchData(); // 카운트/스토리 전량 재동기화 (수동 롤백 불필요)
       }
     } catch {
-      addToast({ type: 'error', title: '스토리 삭제에 실패했습니다.' });
+      addToast({ type: 'error', title: t('storyDeleteFailed') });
       await fetchData();
     }
-  }, [stories, fetchData, addToast, adjustColumnTotal]);
+  }, [stories, fetchData, addToast, adjustColumnTotal, t]);
 
   const handleKickoff = useCallback((_storyId: string, result: 'triggered' | 'no_match' | 'conflict' | 'error') => {
     const messages: Record<string, { title: string; type: 'success' | 'error' | 'info' | 'warning' }> = {
@@ -1131,15 +1206,22 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
-      {transitionError && (
+      {/* story #3759 — 예전엔 이 배너가 직접 우하단 좌표(position fixed + bottom 오프셋)를
+          계산했다(toast.tsx·지원 런처와 각자 따로). 지금은 셸의 BottomDock이 소유한 dock
+          컬럼(같은 열의 넷째 식구)으로 포털한다 — bottomDockBannerSlot이 아직 없으면(마운트
+          레이스의 짧은 순간) 그 프레임만 렌더를 건너뛴다(크래시 대신 무해한 스킵,
+          dashboard-shell.tsx 주석 참고). */}
+      {transitionError && bottomDockBannerSlot && createPortal(
         // story #2154 — handleDragEnd/handleChangeStatus/handleCreateStory가 실패 시점마다
         // bumpTransitionErrorNonce()를 함께 호출해, 4초 내 동일 사유가 재발해도 key가 바뀌어
         // 항상 새 DOM 노드로 재낭독된다(#2400이 남긴 latent gap 해소).
         // story #3007(로드맵 P2·PR-E, L1) — 토스트성 배너는 floating이라 --elev-overlay.
-        <div key={transitionErrorNonce} role="alert" aria-live="assertive" aria-atomic="true" className="fixed bottom-4 right-4 z-50 rounded-md border border-destructive bg-destructive px-4 py-3 text-sm text-destructive-foreground shadow-[var(--elev-overlay)]">
+        // story 3466 후속(무효 유틸 4곳) — text-destructive-foreground는 이 테마에
+        // 매핑이 없는 no-op(라이트 3.55·다크 3.00, AA 미달). trust-seal.tsx 선례.
+        <div key={transitionErrorNonce} role="alert" aria-live="assertive" aria-atomic="true" className="pointer-events-auto rounded-md border border-destructive bg-destructive px-4 py-3 text-sm text-white dark:text-proof-bg shadow-[var(--elev-overlay)]">
           ⚠️ {transitionError}
-        </div>
+        </div>,
+        bottomDockBannerSlot,
       )}
 
       {/* Board header */}
@@ -1477,7 +1559,8 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
               type="button"
               variant="ghost"
               onClick={() => setViewMode('board')}
-              title="Board view"
+              aria-label={t('boardViewLabel')}
+              title={t('boardViewLabel')}
               className={`size-7 min-h-0 min-w-0 rounded-none ${
                 viewMode === 'board' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/50 hover:text-muted-foreground'
               }`}
@@ -1488,7 +1571,8 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
               type="button"
               variant="ghost"
               onClick={() => setViewMode('list')}
-              title="List view"
+              aria-label={t('listViewLabel')}
+              title={t('listViewLabel')}
               className={`size-7 min-h-0 min-w-0 rounded-none ${
                 viewMode === 'list' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/50 hover:text-muted-foreground'
               }`}
@@ -1586,6 +1670,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
               storyGatesMap={storyGatesMap}
               storyLineMap={storyLineMap}
               projectId={projectId}
+              getStatusLabel={domainLabels.statusLabel}
             />
           </div>
         ) : axisMode === 'trust' ? (
@@ -1625,6 +1710,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                     isDragging={activeId != null}
                     onCreateStory={handleCreateStoryTrust}
                     autoComposeSignal={col.id === 'queued' ? autoComposeNonce : 0}
+                    getStatusLabel={domainLabels.statusLabel}
                   />
                 );
               })}
@@ -1640,6 +1726,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                     onClick={() => {}}
                     lineStatus={storyLineMap[activeStory.id]}
                     verifiedBy={activeStory.human_verified_by ? memberMap[activeStory.human_verified_by] : undefined}
+                    getStatusLabel={domainLabels.statusLabel}
                   />
                 </div>
               )}
@@ -1665,7 +1752,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                   <KanbanColumn
                     key={col.id}
                     id={col.id}
-                    label={t(col.i18nKey)}
+                    label={domainLabels.statusLabel(col.id) ?? t(col.i18nKey)}
                     stories={colStories}
                     epicMap={epicMap}
                     memberMap={memberMap}
@@ -1698,6 +1785,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                     collapsed={col.id === 'done' ? doneCollapsed : undefined}
                     onToggleCollapse={col.id === 'done' ? handleToggleDoneCollapse : undefined}
                     autoComposeSignal={col.id === 'backlog' ? autoComposeNonce : 0}
+                    getStatusLabel={domainLabels.statusLabel}
                   />
                 );
               })}
@@ -1713,6 +1801,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                     onClick={() => {}}
                     lineStatus={storyLineMap[activeStory.id]}
                     verifiedBy={activeStory.human_verified_by ? memberMap[activeStory.human_verified_by] : undefined}
+                    getStatusLabel={domainLabels.statusLabel}
                   />
                 </div>
               )}
@@ -1782,23 +1871,40 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
 
       {selectedStory && (
         <StoryDetailPanel
+          key={selectedStory.id}
           story={selectedStory}
           tasks={storyTasks}
+          tasksTotalCount={storyTasksTotalCount}
+          tasksLoading={storyTasksLoading}
           memberMap={memberMap}
           members={members}
+          getStatusLabel={domainLabels.statusLabel}
+          getEntityTypeLabel={domainLabels.entityTypeLabel}
           nextTasksCursor={storyTasksNextCursor}
           loadingMoreTasks={loadingMoreStoryTasks}
           onLoadMoreTasks={async () => {
             if (!selectedStory || !storyTasksNextCursor) return;
             setLoadingMoreStoryTasks(true);
+            // story #3704 후속(유나 design CHANGES, PR#4055 재리뷰 2026-09-09) — 「더 보기」는
+            // handleStoryClick의 새 클릭이 아니라 «지금 열려있는 스토리 이어받기»라 순번을
+            // 올리지 않고 캡처만 한다. 패널이 onNavigate로 다른 스토리(B)로 넘어가면
+            // handleStoryClick이 순번을 올리므로, 이 응답이 늦게 와도 아래 대조에서 걸러진다
+            // (안 걸렀을 때: A page2가 B 패널에 append되고 totalCount까지 A 것으로 덮인다).
+            const requestId = storyTasksRequestRef.current;
             const res = await fetch(`/api/tasks?story_id=${selectedStory.id}&limit=20&cursor=${encodeURIComponent(storyTasksNextCursor)}`);
+            if (storyTasksRequestRef.current !== requestId) { setLoadingMoreStoryTasks(false); return; }
             if (res.ok) {
               const json = await res.json();
+              // story #3704 후속(카디르 재-QA, PR#4055) — res.json() 파싱 사이에도 다른
+              // 스토리로 이동할 수 있다(handleStoryClick이 순번을 올린다) — 상태 반영 직전에
+              // 한 번 더 대조.
+              if (storyTasksRequestRef.current !== requestId) { setLoadingMoreStoryTasks(false); return; }
               setStoryTasks((prev) => {
                 const existingIds = new Set(prev.map((t) => t.id));
                 return [...prev, ...(json.data ?? []).filter((t: Task) => !existingIds.has(t.id))];
               });
               setStoryTasksNextCursor(json.meta?.nextCursor ?? null);
+              setStoryTasksTotalCount(typeof json.meta?.totalCount === 'number' ? json.meta.totalCount : null);
             }
             setLoadingMoreStoryTasks(false);
           }}

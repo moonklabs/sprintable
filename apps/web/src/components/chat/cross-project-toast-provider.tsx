@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import { usePathname } from 'next/navigation';
-import { ToastContainer, useToast } from '@/components/ui/toast';
+import { useToast } from '@/components/ui/toast';
 
 // story #2168 PR-② 후속(라이브 실측으로 발견) — chat-list-view.tsx가 "다른 프로젝트" 항목
 // 클릭 시 addToast를 호출한 바로 다음 줄에서 router.push로 상세 페이지(다른 라우트)로 이동한다.
@@ -24,7 +24,7 @@ export function queuePendingToast(title: string): void {
 
 export function CrossProjectToastProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { toasts, addToast, dismissToast } = useToast();
+  const { addToast } = useToast();
   const consumedRef = useRef<string | null>(null);
 
   // pathname이 바뀔 때마다(=네비게이션 도착마다) 대기 중인 토스트가 있는지 확인한다.
@@ -50,7 +50,6 @@ export function CrossProjectToastProvider({ children }: { children: React.ReactN
   return (
     <>
       {children}
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </>
   );
 }

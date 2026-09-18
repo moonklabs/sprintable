@@ -1181,7 +1181,11 @@ async def a2a_rpc(
     return JsonRpcResponse(id=body.id, result=result)
 
 
-_VALID_LINK_GATE_REASONS = frozenset({"auth"})
+# story #3291(M1·마케팅자동화) — "external_publish": 불가역 외부 발신 게이트 link. _advance_
+# task_state의 분기는 "auth"만 특수(TASK_STATE_AUTH_REQUIRED) — 그 외 선언값(이것 포함)은
+# 이미 기존 else 분기(TASK_STATE_INPUT_REQUIRED)로 정확히 처리되므로 그쪽 로직 변경 불요,
+# 이 검증 세트에만 추가하면 된다.
+_VALID_LINK_GATE_REASONS = frozenset({"auth", "external_publish"})
 
 
 class LinkGateBody(BaseModel):

@@ -27,6 +27,15 @@ vi.mock('@/components/workspace/workspace-frame-tabs', () => ({
   WorkspaceFrameTabs: () => null,
 }));
 
+// story #3845(§① 2026-09-14) — StandupPage(구 /standup 독립 라우트)가 이 페이지 안 「하루
+// 체크인」 절로 임베드됐다. 이 스위트는 sprint list/detail 로직만 관심사이고 StandupPage
+// 자신의 fetch 표면(/api/standup·/api/team-members 등, 이 파일이 안 모킹)까지 끌고 오면
+// 무관한 실패가 섞인다 — WorkspaceFrameTabs와 동형으로 스텁(StandupPage 자체 회귀는
+// standup-client.test.tsx가 전담).
+vi.mock('../standup/standup-client', () => ({
+  default: () => null,
+}));
+
 // story #2104 — HumanOnlyAction(스프린트 삭제 트리거를 감싼다)이 useDashboardContext를 읽는다.
 // 기본은 human(기존 first-touch 스위트는 게이팅과 무관). agent 케이스만 개별 override.
 const { useDashboardContextMock } = vi.hoisted(() => ({ useDashboardContextMock: vi.fn() }));
@@ -47,10 +56,24 @@ function wrap(node: React.ReactNode) {
   );
 }
 
-function stubFetch(sprints: unknown[]) {
+function stubFetch(sprints: unknown[], opts: {
+  burndownReject?: boolean;
+  sprintStories?: unknown[];
+  backlogStories?: unknown[];
+} = {}) {
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
     if (typeof url === 'string' && url.includes('/api/sprints?project_id=')) {
       return { ok: true, json: async () => ({ data: sprints }) };
+    }
+    if (typeof url === 'string' && url.includes('/burndown')) {
+      if (opts.burndownReject) throw new Error('network down');
+      return { ok: false, json: async () => null };
+    }
+    if (typeof url === 'string' && url.includes('/api/stories/backlog')) {
+      return { ok: true, json: async () => ({ data: opts.backlogStories ?? [] }) };
+    }
+    if (typeof url === 'string' && url.includes('/api/stories?')) {
+      return { ok: true, json: async () => ({ data: opts.sprintStories ?? [] }) };
     }
     return { ok: false, json: async () => null };
   }));
@@ -129,6 +152,28 @@ describe('SprintsClient — 스프린트 first-touch 정체성', () => {
     expect(row).not.toBeUndefined();
     await act(async () => { row!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(container.querySelector('button[aria-label="스프린트 삭제"]')).toBeNull();
+  });
+});
+
+// story #3519(§16-7 2부, PO 確定 2026-09-05) — loadSprintDetail의 burndown/sprintStories/
+// backlogStories 3legs 전부 부수인데 catch가 어디에도 없어, 하나가 네트워크단 reject하면
+// Promise.all 전체가 던져 나머지 둘도 조용히 못 채워졌다(에러 표시 0).
+describe('SprintsClient — 스프린트 상세 Promise.all 격리(story #3519)', () => {
+  it('burndown이 네트워크 reject해도 sprintStories·backlogStories는 그대로 채워진다', async () => {
+    stubFetch(
+      [{ id: 's1', title: 'Sprint 1', status: 'planning', start_date: '2026-07-01', end_date: '2026-07-14' }],
+      {
+        burndownReject: true,
+        sprintStories: [{ id: 'st1', title: '스프린트 스토리', story_points: 3 }],
+        backlogStories: [{ id: 'st2', title: '백로그 스토리' }],
+      },
+    );
+    await mount();
+    const row = [...container.querySelectorAll('li')].find((li) => li.textContent?.includes('Sprint 1'));
+    await act(async () => { row!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain('스프린트 스토리');
+    expect(container.textContent).toContain('백로그 스토리');
   });
 });
 

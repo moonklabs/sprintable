@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { History, Plus, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -10,11 +10,14 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { OperatorSelect } from '@/components/ui/operator-control';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
+import { WorkspaceFrameTabs } from '@/components/workspace/workspace-frame-tabs';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useRetroRoute } from './retro-context';
 import { RETRO_PHASE_TO_STAGE, RETRO_STAGE_VARIANTS, type RetroSessionPhase } from '@/services/retro-session';
 import { isRetroStale, daysStale } from './retro-staleness';
 import { fetchWithAuth } from '@/lib/db/client';
+import { formatRelativeTime } from '@/lib/storage/format';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 
 interface RetroSession {
   id: string;
@@ -34,6 +37,8 @@ export default function RetroPage() {
   const t = useTranslations('retro');
   const tc = useTranslations('common');
   const shellT = useTranslations('shell');
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
   // story a539c649 S3a: projectId 는 URL 경로(retro-context.tsx, layout.tsx가 헤더 경유 주입)
   // 가 SSOT — useDashboardContext()(전역 "현재 프로젝트")가 아니다. orgId 는 경로 무관 그대로.
   const { projectId, wsSlug, projSlug } = useRetroRoute();
@@ -132,6 +137,10 @@ export default function RetroPage() {
     return (
       <>
         <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} showContextChip />
+        {/* story #3845 §③ⓑ — sprints-client.tsx와 동형(board/sprints 프레임 관례 재사용). */}
+        <div className="px-6 pt-3">
+          <WorkspaceFrameTabs active="retro" />
+        </div>
         <div className="flex h-64 items-center justify-center p-6">
           <EmptyState title={shellT('projectSelectPrompt')} description={shellT('projectSelectDescription')} />
         </div>
@@ -154,6 +163,10 @@ export default function RetroPage() {
         }
         showContextChip
       />
+      {/* story #3845 §③ⓑ — sprints-client.tsx와 동형(board/sprints 프레임 관례 재사용). */}
+      <div className="px-6 pt-3">
+        <WorkspaceFrameTabs active="retro" />
+      </div>
 
       <div className="focus-inset flex min-h-0 flex-1 flex-col gap-0 overflow-y-auto">
         {/* Create new session — toggle via TopBar button */}
@@ -178,7 +191,7 @@ export default function RetroPage() {
                 </OperatorSelect>
               ) : null}
               <Button variant="default" onClick={handleCreate} disabled={!title.trim() || !orgId || creating}>
-                {creating ? t('creating') : t('create')}
+                {creating ? tc('creating') : t('create')}
               </Button>
             </div>
             {createError ? (
@@ -228,7 +241,7 @@ export default function RetroPage() {
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium text-foreground">{session.title}</p>
                     <p className="text-xs text-muted-foreground">
-                      {new Date(session.created_at).toLocaleDateString()}
+                      {formatRelativeTime(session.created_at, locale, displayTimezone)}
                     </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">

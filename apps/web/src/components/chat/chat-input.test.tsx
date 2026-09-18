@@ -10,6 +10,13 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { ChatInput } from './chat-input';
 
+// story #3289(도메인탈고정·축1 Phase1 FE잔여, AC2) — kanban-board.test.tsx와 동형 mock.
+// orgId를 안 주면(기본 beforeEach) useOrgDomainLabels가 no-op이라 기존 44개 테스트는 무회귀.
+const { useDashboardContextMock } = vi.hoisted(() => ({ useDashboardContextMock: vi.fn() }));
+vi.mock('@/app/dashboard/dashboard-shell', () => ({
+  useDashboardContext: () => useDashboardContextMock(),
+}));
+
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 function withIntl(node: React.ReactNode) {
@@ -44,6 +51,7 @@ let root: Root;
 beforeEach(() => {
   stubLocalStorage();
   stubMatchMedia(false); // 기본은 데스크톱(포인터 정밀) — AC1 대상
+  useDashboardContextMock.mockReturnValue({ currentTeamMemberId: 'me-1', projectMemberships: [], orgMemberships: [], currentMemberType: 'human' });
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -241,6 +249,77 @@ describe('ChatInput — `#` 엔티티 피커 종류별 그룹화(story #2263 ㉠
   });
 });
 
+// story #3289(도메인탈고정·축1 Phase1 FE잔여, AC2) — 「네비」 실측 결과 사이드바/브레드크럼엔
+// entity_type 렌더지점이 없고, 실제 렌더처가 이 `#` 엔티티 피커였다(kanban-board.test.tsx
+// #3287 AC4와 동형 처방 — 참조 코어 chat-input-entity-tokens.ts는 diff 0, 여기서만 얹는다).
+describe('ChatInput — org 엔티티명 라벨 오버라이드(story #3289 AC2)', () => {
+  function stubFetchWithDomainLabels(
+    entities: Array<{ entity_type: string; entity_id: string; title: string; status: string | null }>,
+    labels: Array<{ domain: string; canonical_slug: string; label_ko: string | null; label_en: string | null }>,
+  ) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (typeof url === 'string' && url.includes('/api/entities/search')) {
+        return new Response(JSON.stringify({ data: entities }));
+      }
+      if (typeof url === 'string' && url.includes('/domain-labels')) {
+        return new Response(JSON.stringify(labels));
+      }
+      return new Response(JSON.stringify({ data: [] }));
+    }));
+  }
+
+  it('오버라이드 없는 org(빈 목록)면 canonical entityTypeLabel() 그대로("스토리", 회귀 0)', async () => {
+    stubFetchWithDomainLabels(
+      [{ entity_type: 'story', entity_id: 's1', title: '스토리 하나', status: null }],
+      [],
+    );
+    useDashboardContextMock.mockReturnValue({ currentTeamMemberId: 'me-1', orgId: 'org-1', projectMemberships: [], orgMemberships: [], currentMemberType: 'human' });
+
+    await act(async () => {
+      root.render(withIntl(<ChatInput threadId="c1" projectId="p1" onSend={vi.fn()} />));
+    });
+    const el = textarea();
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setter.call(el, '#');
+      el.selectionStart = 1;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => { await new Promise((r) => setTimeout(r, 260)); });
+
+    const listbox = container.querySelector('[role="listbox"]');
+    expect(listbox!.textContent).toContain('스토리');
+  });
+
+  it('org가 story 라벨을 오버라이드하면 `#` 피커 그룹 헤더가 그 문구로 바뀐다', async () => {
+    // 제목 자체에 "스토리" 문자열이 없어야 group-header 텍스트만 정확히 잰다(entity.title은
+    // 자유 텍스트라 우연히 겹치면 assertion이 오염된다).
+    stubFetchWithDomainLabels(
+      [{ entity_type: 'story', entity_id: 's1', title: '표시용 제목', status: null }],
+      [{ domain: 'entity_type', canonical_slug: 'story', label_ko: '작업건', label_en: null }],
+    );
+    useDashboardContextMock.mockReturnValue({ currentTeamMemberId: 'me-1', orgId: 'org-1', projectMemberships: [], orgMemberships: [], currentMemberType: 'human' });
+
+    await act(async () => {
+      root.render(withIntl(<ChatInput threadId="c1" projectId="p1" onSend={vi.fn()} />));
+    });
+    const el = textarea();
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setter.call(el, '#');
+      el.selectionStart = 1;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    // domain-labels 조회(useOrgDomainLabels)와 entity 검색(useEntityPicker, 200ms 디바운스)이
+    // 둘 다 흐를 시간을 준다.
+    await act(async () => { await new Promise((r) => setTimeout(r, 260)); });
+
+    const listbox = container.querySelector('[role="listbox"]');
+    expect(listbox!.textContent).toContain('작업건');
+    expect(listbox!.textContent).not.toContain('스토리');
+  });
+});
+
 // story #2942(2921-S5, doc steer-event-axis-design-2927 §2/§4) — composer STEER 모드.
 // 본문(@/#) in-text 트리거와 완전히 분리된 별도 send path라 그쪽 기존 44개 테스트는
 // 무회귀(위 describe 블록들 그대로) — 이 블록은 STEER 전용 표면만 잰다.
@@ -251,7 +330,7 @@ describe('ChatInput — STEER 모드(story #2942)', () => {
   ];
 
   function toggleBtn(): HTMLButtonElement | null {
-    return [...container.querySelectorAll('button')].find((b) => b.getAttribute('aria-label') === '방향 전환(STEER)') as HTMLButtonElement | undefined ?? null;
+    return [...container.querySelectorAll('button')].find((b) => b.getAttribute('aria-label') === '방향 전환') as HTMLButtonElement | undefined ?? null;
   }
 
   function setValue(el: HTMLTextAreaElement | HTMLInputElement | HTMLSelectElement, value: string) {
@@ -398,16 +477,54 @@ describe('ChatInput — STEER 모드(story #2942)', () => {
 
     // BE 원문 메시지가 아니라 doc §4가 요구하는 명시 카피로 교체돼야 한다.
     expect(container.textContent).not.toContain('internal BE msg');
-    expect(container.textContent).toContain('이 스레드에 없는 사람에게는 여기서 방향 전환 지시를 보낼 수 없습니다');
+    expect(container.textContent).toContain('이 스레드에 없는 사람에게는 여기서 방향 전환 지시를 보낼 수 없어요');
     // 패널은 열린 채 유지(재시도 가능 — 대상 재선택 등).
     expect(container.textContent).toContain('방향 전환 지시');
+  });
+
+  // story #3601(디디 전수 표 2026-09-07) — 실 BE 봉투({data:null,error:{code,message},
+  // meta:null}, BE 전역 http_exception_handler 그대로)로도 같은 명시 카피가 선다.
+  // 위 테스트는 `{detail:{...}}` 모양이라 body?.detail?.code가 항상 undefined였던
+  // 예전 코드에서도(우연히) 통과했다 — 이 테스트가 실 봉투 회귀를 고정한다.
+  it('422 conversation_target_mismatch — 실 봉투({error:{code,message}})로도 명시 카피가 뜬다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string }) => {
+      if (url.includes('/api/entities/search')) {
+        return new Response(JSON.stringify({ data: [{ entity_type: 'story', entity_id: 's1', title: '대상 스토리', status: 'in-progress' }] }));
+      }
+      if (url === '/api/events/publish' && init?.method === 'POST') {
+        return new Response(JSON.stringify({ data: null, error: { code: 'conversation_target_mismatch', message: 'internal BE msg', errors: ['u1'] }, meta: null }), { status: 422 });
+      }
+      return new Response(JSON.stringify({ data: [] }));
+    }));
+    await act(async () => {
+      root.render(withIntl(
+        <ChatInput threadId="c1" onSend={vi.fn()} currentTeamMemberId="me" participants={PARTICIPANTS} projectId="p1" />,
+      ));
+    });
+    await act(async () => { toggleBtn()!.click(); });
+    await act(async () => { setValue(textarea(), '이제 A로 가자'); });
+    const select = container.querySelector('select') as HTMLSelectElement;
+    await act(async () => { setValue(select, 'u1'); });
+    const workItemInput = container.querySelectorAll('input[type="text"]')[0] as HTMLInputElement;
+    await act(async () => { setValue(workItemInput, '대상'); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 260)); });
+    const candidate = [...container.querySelectorAll('[role="listbox"] button')][0] as HTMLButtonElement;
+    await act(async () => { candidate.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true })); });
+
+    const sendBtn = [...container.querySelectorAll('button')].find((b) => b.querySelector('svg.lucide-send')) as HTMLButtonElement;
+    await act(async () => { sendBtn.click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(container.textContent).not.toContain('internal BE msg');
+    expect(container.textContent).toContain('이 스레드에 없는 사람에게는 여기서 방향 전환 지시를 보낼 수 없어요');
   });
 
   // story #3203(카디르 QA 블로킹·2026-08-29) — BE가 orphan participant.name을 이제 null로
   // 실어보낸다(예전엔 uuid 앞 8자였으나 그마저 없어짐). 대상 select가 `p.name ?? p.member_id`
   // 폴백을 쓰고 있어 36자 uuid 전체가 옵션 텍스트로 그대로 새는 회귀였다 — 이 PR의 BE 변경이
   // 처음 깨운 것이라 pin 필수.
-  it('대상 참가자의 name이 null이면(BE orphan 폴백) "알 수 없는 멤버"로 뜬다 — uuid 전체 노출 금지', async () => {
+  it('대상 참가자의 name이 null이고 resolved=false면(BE orphan 폴백) "알 수 없는 구성원"으로 뜬다 — uuid 전체 노출 금지', async () => {
+    // story #3758(9번째) — 낱말 정("멤버"→"구성원") + resolved 비트 명시.
     const orphanId = '767988e5-df5b-48e8-9964-7062fe84d691';
     await act(async () => {
       root.render(withIntl(
@@ -415,13 +532,13 @@ describe('ChatInput — STEER 모드(story #2942)', () => {
           threadId="c1"
           onSend={vi.fn()}
           currentTeamMemberId="me"
-          participants={[{ member_id: 'me', name: '나' }, { member_id: orphanId, name: null }]}
+          participants={[{ member_id: 'me', name: '나', resolved: true }, { member_id: orphanId, name: null, resolved: false }]}
         />,
       ));
     });
     await act(async () => { toggleBtn()!.click(); });
     const select = container.querySelector('select') as HTMLSelectElement;
-    expect(select.textContent).toContain('알 수 없는 멤버');
+    expect(select.textContent).toContain('알 수 없는 구성원');
     expect(select.textContent).not.toContain(orphanId);
   });
 });

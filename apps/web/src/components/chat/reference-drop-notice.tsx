@@ -48,6 +48,8 @@ export function parseDroppedReferences(raw: unknown): DroppedReference[] {
  */
 export function ReferenceDropNotice({ dropped, onDismiss }: { dropped: DroppedReference[]; onDismiss: () => void }) {
   const t = useTranslations('chats');
+  // story #3776(1층B) — "닫기", common ns의 기존 close 키 재사용.
+  const tc = useTranslations('common');
   if (dropped.length === 0) return null;
   const lead = dropped.length === 1 ? t('referenceDropNotice') : t('referenceDropNoticeCount', { count: dropped.length });
   return (
@@ -60,7 +62,7 @@ export function ReferenceDropNotice({ dropped, onDismiss }: { dropped: DroppedRe
         type="button"
         onClick={onDismiss}
         className="shrink-0 text-muted-foreground hover:text-foreground"
-        aria-label="닫기"
+        aria-label={tc('close')}
       >
         <X className="h-4 w-4" />
       </button>

@@ -1,0 +1,1 @@
+{"file": "tests/test_3813_newsletter_send_gate.py", "sec": 7.8, "source": "story-3813(Phase3·3-4 PR2, 페드루 PO 確定 2026-09-12 — 3812 AC3 표본) — 신규 파일 실측(로컬, uv run pytest --durations=0 직접 1회 실행, 12건 wall time 약 7.8s — test_3766 등재 선례와 동일 방법론)"}

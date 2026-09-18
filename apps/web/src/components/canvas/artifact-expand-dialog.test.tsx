@@ -94,6 +94,79 @@ describe('ArtifactExpandDialog — 반응형 미리보기 브레이크포인트 
   });
 });
 
+// story #3377(결함·customer-zero) — 「크게 보기」는 pan 캔버스로 안 쓰이는 컨텍스트라
+// html_blob이면 기본으로 클릭을 받는다(인라인 스테이지는 그대로 pointer-events:none 유지 —
+// artifact-stage.test.tsx/artifact-viewer.test.tsx가 그쪽을 덮는다).
+describe('ArtifactExpandDialog — 「상호작용」 토글(story #3377)', () => {
+  it('defaults to ON for html format — iframe is clickable and scripted, but never allow-same-origin', async () => {
+    await mount();
+    const iframe = document.body.querySelector('iframe') as HTMLIFrameElement;
+    expect(iframe.className).not.toContain('pointer-events-none');
+    expect(iframe.getAttribute('sandbox')).toBe('allow-scripts');
+    expect(iframe.getAttribute('sandbox')).not.toContain('allow-same-origin');
+    expect([...document.body.querySelectorAll('button')].map((b) => b.textContent)).toContain('상호작용 켬');
+  });
+
+  it('toggling off restores pointer-events:none (pan/zoom 회귀 0 — 캔버스로 되돌아간다)', async () => {
+    await mount();
+    const toggle = [...document.body.querySelectorAll('button')].find((b) => b.textContent === '상호작용 켬')!;
+    await act(async () => { toggle.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const iframe = document.body.querySelector('iframe') as HTMLIFrameElement;
+    expect(iframe.className).toContain('pointer-events-none');
+    expect([...document.body.querySelectorAll('button')].map((b) => b.textContent)).toContain('상호작용 끔');
+  });
+
+  it('does not render the toggle for non-html formats', async () => {
+    await mount({ format: 'tree', content: '[]' });
+    expect([...document.body.querySelectorAll('button')].map((b) => b.textContent)).not.toContain('상호작용 켬');
+  });
+
+  // 유나 design verdict(41e70eee7) — 오른쪽 정렬 액션이 각자 ml-auto를 가지면 flex auto
+  // 마진이 여럿으로 나뉘어 가운데로 뜬다(story #3378에서 상세 링크가 셋째 액션으로 늘며
+  // 재발 위험 — 그룹 wrapper 하나에만 ml-auto를 두는 구조로 전환). ml-auto는 그 wrapper
+  // 딱 하나만 갖고, 안의 개별 버튼/링크는 전부 갖지 않는다.
+  it('exactly the action-group wrapper carries ml-auto — individual actions never do (헤더 레이아웃 회귀 가드)', async () => {
+    await mount({ artifactId: 'art-1' }); // html — 상세 링크+토글+Close 셋 다 노출
+    const toggleBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent === '상호작용 켬')!;
+    const closeBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent === '닫기')!;
+    const detailLink = document.body.querySelector('a[href="/artifacts/art-1"]')!;
+    expect(toggleBtn.className).not.toContain('ml-auto');
+    expect(closeBtn.className).not.toContain('ml-auto');
+    expect(detailLink.className).not.toContain('ml-auto');
+    // 셋의 공통 조상(액션 그룹 wrapper)이 정확히 하나의 ml-auto를 진다.
+    const wrapper = closeBtn.parentElement!;
+    expect(wrapper).toBe(toggleBtn.parentElement);
+    expect(wrapper).toBe(detailLink.parentElement);
+    expect(wrapper.className).toContain('ml-auto');
+  });
+
+  it('does not render the detail-page link when artifactId is omitted (story-detail 뷰어 자기참조 방지)', async () => {
+    await mount(); // artifactId 없음
+    expect(document.body.querySelector('a[href^="/artifacts/"]')).toBeNull();
+  });
+
+  it('renders the detail-page link via the bare /artifacts/{id} legacy-redirect path (proxy.ts가 실 project로 해소, story #3208과 동일 메커니즘)', async () => {
+    await mount({ artifactId: 'art-42', format: 'tree' }); // non-html에서도 링크는 뜬다
+    const link = document.body.querySelector('a[href="/artifacts/art-42"]');
+    expect(link).not.toBeNull();
+    expect(link!.textContent).toBe('상세 페이지로');
+  });
+
+  it('switching to a different artifact resets the toggle to the new format default (같은 원칙 — 브레이크포인트 리셋과 동일 블록)', async () => {
+    await mount();
+    const offBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent === '상호작용 켬')!;
+    await act(async () => { offBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect([...document.body.querySelectorAll('button')].map((b) => b.textContent)).toContain('상호작용 끔');
+
+    await act(async () => {
+      root.render(wrap(
+        <ArtifactExpandDialog open onOpenChange={vi.fn()} title="t2" format="html" content={FIXED_HTML} canvasBounds={{ w: 1280, h: 800 }} />,
+      ));
+    });
+    expect([...document.body.querySelectorAll('button')].map((b) => b.textContent)).toContain('상호작용 켬');
+  });
+});
+
 // story #3007(로드맵 P2·PR-E, L1) — 다이얼로그는 floating이라 --elev-overlay.
 describe('ArtifactExpandDialog — 로드맵 P2·PR-E L1(다이얼로그 elevation 토큰)', () => {
   it('팝업이 shadow-[var(--elev-overlay)]를 쓰고 shadow-lg는 안 쓴다', async () => {

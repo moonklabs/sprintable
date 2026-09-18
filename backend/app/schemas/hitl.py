@@ -69,6 +69,11 @@ class HitlRequestResponse(BaseModel):
     requested_for_name: str | None = None
     source_memo_id: str | None = None
     hitl_memo_id: str | None = None
+    # story #3860(customer-zero·BE·게이트 답하기) — run_id가 가리키는 AgentRun의
+    # conversation_id, **caller가 그 대화 참여자일 때만**(work_item_conversation.py
+    # SSOT — today_service.py `_resolve_agent_progress`와 동일 원칙, PR #4253). run_id가
+    # 없거나 그 run에 conversation_id가 없거나 caller가 비참여자면 None(지어내지 않는다).
+    conversation_id: uuid.UUID | None = None
 
 
 class ResolveHitlRequestBody(BaseModel):

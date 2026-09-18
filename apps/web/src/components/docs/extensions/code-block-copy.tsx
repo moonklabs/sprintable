@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect, useRef, useId } from 'react';
+import { useTranslations } from 'next-intl';
 import { Node, mergeAttributes } from '@tiptap/core';
 import { ReactNodeViewRenderer, NodeViewWrapper, NodeViewContent, type ReactNodeViewProps } from '@tiptap/react';
 import { ChevronDown } from 'lucide-react';
@@ -15,6 +16,7 @@ import { renderMermaid } from '../lib/mermaid-renderer';
 // ─── Mermaid Block ───────────────────────────────────────────────────────────
 
 function MermaidBlockView({ node, editor, selected }: ReactNodeViewProps) {
+  const t = useTranslations('docs');
   const [svg, setSvg] = useState('');
   const [error, setError] = useState('');
   const id = useId();
@@ -34,11 +36,11 @@ function MermaidBlockView({ node, editor, selected }: ReactNodeViewProps) {
         const { svg: rendered } = await renderMermaid(code);
         if (!cancelled) { setSvg(rendered); setError(''); }
       } catch (err: unknown) {
-        if (!cancelled) { setError(err instanceof Error ? err.message : '렌더링 실패'); setSvg(''); }
+        if (!cancelled) { setError(err instanceof Error ? err.message : t('mermaidRenderFailed')); setSvg(''); }
       }
     })();
     return () => { cancelled = true; };
-  }, [code]);
+  }, [code, t]);
 
   const handlePreviewClick = useCallback(() => {
     if (isEditable) editor?.commands.focus();
@@ -50,7 +52,7 @@ function MermaidBlockView({ node, editor, selected }: ReactNodeViewProps) {
         <div className="flex items-center justify-between px-3 py-2" contentEditable={false}>
           <span className="text-[11px] font-medium text-muted-foreground">mermaid</span>
           {isEditable && (
-            <span className="text-[11px] text-muted-foreground">{showCode ? '코드 편집 중' : '클릭하여 편집'}</span>
+            <span className="text-[11px] text-muted-foreground">{showCode ? t('mermaidEditingCode') : t('mermaidClickToEdit')}</span>
           )}
         </div>
 
@@ -83,7 +85,7 @@ function MermaidBlockView({ node, editor, selected }: ReactNodeViewProps) {
                 className="flex justify-center [&_svg]:max-w-full [&_svg]:h-auto"
               />
             ) : (
-              <p className="text-xs text-muted-foreground">다이어그램을 입력하세요</p>
+              <p className="text-xs text-muted-foreground">{t('mermaidPlaceholder')}</p>
             )}
           </div>
         )}
@@ -95,6 +97,8 @@ function MermaidBlockView({ node, editor, selected }: ReactNodeViewProps) {
 // ─── Shiki Code Block View ────────────────────────────────────────────────────
 
 function ShikiBlockView({ node, editor, selected }: ReactNodeViewProps) {
+  // story #3776(1층B) — "복사됨"/"복사", docs ns의 기존 codeCopied/codeCopy 키 재사용.
+  const t = useTranslations('docs');
   const [copied, setCopied] = useState(false);
   const [highlightedHtml, setHighlightedHtml] = useState('');
   const [showLangMenu, setShowLangMenu] = useState(false);
@@ -194,7 +198,7 @@ function ShikiBlockView({ node, editor, selected }: ReactNodeViewProps) {
             onClick={handleCopy}
             className="rounded-md border border-border bg-card px-3 py-1.5 text-[11px] font-medium text-muted-foreground transition hover:text-foreground"
           >
-            {copied ? '복사됨' : '복사'}
+            {copied ? t('codeCopied') : t('codeCopy')}
           </button>
         </div>
 

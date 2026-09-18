@@ -1,0 +1,454 @@
+// @vitest-environment jsdom
+//
+// story #3450 FE 후속(3653a18c §2 "②발급해서 붙여넣기", PO 確定 2026-09-04 23:13Z·
+// 유나 카드 형태 판정 23:20Z) — WordPress·webhook 연결 카드. pin (a)~(e):
+// (a) 성공 제출→onConnected 호출 (b) 3개 에러 코드별 인라인 문구 (c) owner-or-admin
+// 아니면 폼 자체 비노출(버튼 없이 사유 한 줄) (d) 제출 성공 후 secret 필드 값이
+// 아무 데도 안 남는지(§2 "다시 못 봄") (e) 문구="OO 연결"("만들기" 아님)·도움말
+// 두 줄(필드 위=출처, 필드 아래=재입력 원칙).
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { NextIntlClientProvider, useTranslations } from 'next-intl';
+import koMessages from '../../../messages/ko.json';
+
+const { fetchWithAuthMock } = vi.hoisted(() => ({ fetchWithAuthMock: vi.fn() }));
+vi.mock('@/lib/db/client', () => ({ fetchWithAuth: fetchWithAuthMock }));
+
+import { focusFieldNameForError, PASTED_SECRET_FIELDS, PastedSecretConnectCard } from './pasted-secret-connect-card';
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+let container: HTMLDivElement;
+let root: Root;
+
+function wrap(node: React.ReactNode) {
+  return (
+    <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+      {node}
+    </NextIntlClientProvider>
+  );
+}
+
+beforeEach(() => {
+  container = document.createElement('div');
+  document.body.appendChild(container);
+  root = createRoot(container);
+  fetchWithAuthMock.mockReset();
+});
+
+afterEach(async () => {
+  await act(async () => { root.unmount(); });
+  container.remove();
+});
+
+async function flush() {
+  await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+}
+
+function jsonResponse(status: number, body: unknown) {
+  return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+}
+
+function TestHarness({ channel, isOwner, connectionCount = 0, onConnected }: { channel: string; isOwner: boolean; connectionCount?: number; onConnected: () => void }) {
+  const t = useTranslations('channelConnect');
+  return <PastedSecretConnectCard channel={channel} orgId="org-1" isOwner={isOwner} connectionCount={connectionCount} onConnected={onConnected} t={t} />;
+}
+
+describe('PastedSecretConnectCard(story #3450 FE 후속)', () => {
+  it('⭐(c) owner-or-admin이 아니면 폼/버튼 자체가 안 그려지고 사유 한 줄만', async () => {
+    await act(async () => { root.render(wrap(<TestHarness channel="wordpress" isOwner={false} onConnected={vi.fn()} />)); });
+    await flush();
+    expect(container.querySelector('button')).toBeNull();
+    expect(container.querySelector('[data-testid^="channel-connect-pasted-secret-form-"]')).toBeNull();
+    // story #3436 묶음10(유나 §17-21⑨) — 이 버튼 자리 전용 키로 분리(공용
+    // channelOwnerOrAdminOnlyReason은 다른 자리 그대로).
+    expect(container.textContent).toContain(
+      koMessages.channelConnect.channelConnectOwnerOrAdminOnlyReason.replace('{channel}', 'WordPress'),
+    );
+  });
+
+  it('필드를 다 채우기 전에는 제출 버튼이 비활성', async () => {
+    await act(async () => { root.render(wrap(<TestHarness channel="wordpress" isOwner onConnected={vi.fn()} />)); });
+    await flush();
+    const openBtn = container.querySelector('[data-testid="channel-connect-pasted-secret-button-wordpress"]') as HTMLButtonElement;
+    await act(async () => { openBtn.click(); });
+    await flush();
+
+    const submitBtn = container.querySelector('[data-testid="channel-connect-pasted-secret-submit-wordpress"]') as HTMLButtonElement;
+    expect(submitBtn.disabled).toBe(true);
+
+    const siteUrlInput = container.querySelector('#wordpress-site_url') as HTMLInputElement;
+    const usernameInput = container.querySelector('#wordpress-username') as HTMLInputElement;
+    const passwordInput = container.querySelector('#wordpress-app_password') as HTMLInputElement;
+    expect(passwordInput.type).toBe('password');
+
+    // React controlled input는 순수 .value 대입으론 onChange가 안 붙는다 — 네이티브
+    // setter로 값을 밀어넣고 input 이벤트를 직접 디스패치한다.
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setter.call(siteUrlInput, 'https://blog.example.com'); siteUrlInput.dispatchEvent(new Event('input', { bubbles: true }));
+      setter.call(usernameInput, 'admin'); usernameInput.dispatchEvent(new Event('input', { bubbles: true }));
+      setter.call(passwordInput, 'app-pw'); passwordInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await flush();
+    expect(submitBtn.disabled).toBe(false);
+  });
+
+  async function fillAndSubmitWordpress() {
+    const openBtn = container.querySelector('[data-testid="channel-connect-pasted-secret-button-wordpress"]') as HTMLButtonElement;
+    await act(async () => { openBtn.click(); });
+    await flush();
+
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    const siteUrlInput = container.querySelector('#wordpress-site_url') as HTMLInputElement;
+    const usernameInput = container.querySelector('#wordpress-username') as HTMLInputElement;
+    const passwordInput = container.querySelector('#wordpress-app_password') as HTMLInputElement;
+    await act(async () => {
+      setter.call(siteUrlInput, 'https://blog.example.com'); siteUrlInput.dispatchEvent(new Event('input', { bubbles: true }));
+      setter.call(usernameInput, 'admin'); usernameInput.dispatchEvent(new Event('input', { bubbles: true }));
+      setter.call(passwordInput, 'app-pw'); passwordInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await flush();
+
+    const submitBtn = container.querySelector('[data-testid="channel-connect-pasted-secret-submit-wordpress"]') as HTMLButtonElement;
+    await act(async () => { submitBtn.click(); });
+    await flush();
+    return { passwordInput };
+  }
+
+  it('⭐(a) 성공 제출 — onConnected 호출·폼이 닫힌다', async () => {
+    fetchWithAuthMock.mockResolvedValue(jsonResponse(201, { data: { id: 'c1', channel: 'wordpress' } }));
+    const onConnected = vi.fn();
+    await act(async () => { root.render(wrap(<TestHarness channel="wordpress" isOwner onConnected={onConnected} />)); });
+    await flush();
+
+    await fillAndSubmitWordpress();
+
+    expect(onConnected).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('[data-testid="channel-connect-pasted-secret-form-wordpress"]')).toBeNull();
+    expect(fetchWithAuthMock).toHaveBeenCalledWith(
+      '/api/organizations/org-1/channel-connections/wordpress',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+
+  it('⭐(d) 성공 뒤에도 실패 뒤에도 secret 필드 값이 폼에 남지 않는다("다시 못 봄")', async () => {
+    fetchWithAuthMock.mockResolvedValue(jsonResponse(201, { data: { id: 'c1' } }));
+    await act(async () => { root.render(wrap(<TestHarness channel="wordpress" isOwner onConnected={vi.fn()} />)); });
+    await flush();
+    await fillAndSubmitWordpress();
+    // 성공 뒤 폼 자체가 닫히므로(=values state가 리마운트로도 안 남는다) 재오픈해서 확인.
+    const reopenBtn = container.querySelector('[data-testid="channel-connect-pasted-secret-button-wordpress"]') as HTMLButtonElement;
+    await act(async () => { reopenBtn.click(); });
+    await flush();
+    const passwordInput = container.querySelector('#wordpress-app_password') as HTMLInputElement;
+    expect(passwordInput.value).toBe('');
+
+    // 실패 케이스 — 폼은 열린 채로 남으므로 그 자리에서 직접 값 잔존을 확인.
+    fetchWithAuthMock.mockResolvedValue(jsonResponse(422, { error: { code: 'WORDPRESS_FIELDS_REQUIRED' } }));
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    const siteUrlInput = container.querySelector('#wordpress-site_url') as HTMLInputElement;
+    const usernameInput = container.querySelector('#wordpress-username') as HTMLInputElement;
+    await act(async () => {
+      setter.call(siteUrlInput, 'https://blog.example.com'); siteUrlInput.dispatchEvent(new Event('input', { bubbles: true }));
+      setter.call(usernameInput, 'admin'); usernameInput.dispatchEvent(new Event('input', { bubbles: true }));
+      setter.call(passwordInput, 'app-pw-2'); passwordInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await flush();
+    const submitBtn = container.querySelector('[data-testid="channel-connect-pasted-secret-submit-wordpress"]') as HTMLButtonElement;
+    await act(async () => { submitBtn.click(); });
+    await flush();
+    const passwordInputAfterFail = container.querySelector('#wordpress-app_password') as HTMLInputElement;
+    expect(passwordInputAfterFail.value).toBe('');
+  });
+
+  // story #3816 CHANGES 3(유나 판정 issuecomment-5645662831·PO 確定 2026-09-12) —
+  // blanket 리셋 폐기 회귀: 주소 오류 배너("사이트 주소를 확인해 주세요")인데 그
+  // 칸 자체가 지워지는 두 세계였다. 시크릿만 비우고 비-시크릿(site_url·username)은
+  // 유지해야 한다(뮤테이션 대상 — clearSecretFieldsOnly를 blanket setValues({})로
+  // 되돌리면 이 테스트가 RED여야 한다).
+  it('⭐(f) 오류 뒤 비-시크릿 필드(site_url·username)는 값이 유지된다(시크릿만 비움)', async () => {
+    fetchWithAuthMock.mockResolvedValue(jsonResponse(422, { error: { code: 'WORDPRESS_FIELDS_REQUIRED' } }));
+    await act(async () => { root.render(wrap(<TestHarness channel="wordpress" isOwner onConnected={vi.fn()} />)); });
+    await flush();
+    const { passwordInput } = await fillAndSubmitWordpress();
+    const siteUrlInput = container.querySelector('#wordpress-site_url') as HTMLInputElement;
+    const usernameInput = container.querySelector('#wordpress-username') as HTMLInputElement;
+    expect(siteUrlInput.value).toBe('https://blog.example.com');
+    expect(usernameInput.value).toBe('admin');
+    expect(passwordInput.value).toBe('');
+  });
+
+  it('⭐(b) 422 WORDPRESS_FIELDS_REQUIRED — 인라인 문구', async () => {
+    fetchWithAuthMock.mockResolvedValue(jsonResponse(422, { error: { code: 'WORDPRESS_FIELDS_REQUIRED' } }));
+    await act(async () => { root.render(wrap(<TestHarness channel="wordpress" isOwner onConnected={vi.fn()} />)); });
+    await flush();
+    await fillAndSubmitWordpress();
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe(koMessages.channelConnect.channelConnectErrorWordpressFieldsRequired);
+  });
+
+  it('⭐(b) 422 CHANNEL_CONNECTION_DESTINATION_INSECURE — 인라인 문구(원문 노출 안 함)', async () => {
+    fetchWithAuthMock.mockResolvedValue(jsonResponse(422, { error: { code: 'CHANNEL_CONNECTION_DESTINATION_INSECURE', message: 'loopback address rejected' } }));
+    await act(async () => { root.render(wrap(<TestHarness channel="wordpress" isOwner onConnected={vi.fn()} />)); });
+    await flush();
+    await fillAndSubmitWordpress();
+    const alertText = container.querySelector('[role="alert"]')?.textContent;
+    expect(alertText).toBe(koMessages.channelConnect.channelConnectErrorDestinationInsecure);
+    expect(alertText).not.toContain('loopback');
+  });
+
+  it('⭐(e) 문구="WordPress 연결"("연결 만들기" 아님) · 도움말 두 줄(필드 위=출처, 아래=재입력 원칙)', async () => {
+    await act(async () => { root.render(wrap(<TestHarness channel="wordpress" isOwner onConnected={vi.fn()} />)); });
+    await flush();
+
+    const toggleBtn = container.querySelector('[data-testid="channel-connect-pasted-secret-button-wordpress"]') as HTMLButtonElement;
+    expect(toggleBtn.textContent).toBe(koMessages.channelConnect.channelConnectPastedSecretAction.replace('{channel}', 'WordPress'));
+    expect(toggleBtn.textContent).not.toContain('만들기');
+
+    await act(async () => { toggleBtn.click(); });
+    await flush();
+
+    const hint = container.querySelector('[data-testid="channel-connect-pasted-secret-hint-wordpress"]');
+    expect(hint?.textContent).toBe(koMessages.channelConnect.channelConnectPastedSecretHintWordpress);
+    const rewriteNote = container.querySelector('[data-testid="channel-connect-pasted-secret-rewrite-note-wordpress"]');
+    expect(rewriteNote?.textContent).toBe(koMessages.channelConnect.channelConnectPastedSecretRewriteNote);
+    // 필드 위/아래 순서 — hint가 첫 필드 label보다 앞서고, rewrite-note가 마지막 필드보다 뒤에 온다.
+    const form = container.querySelector('[data-testid="channel-connect-pasted-secret-form-wordpress"]')!;
+    const order = Array.from(form.children).map((el) => el.getAttribute('data-testid') ?? el.tagName);
+    expect(order.indexOf('channel-connect-pasted-secret-hint-wordpress')).toBeLessThan(order.indexOf('channel-connect-pasted-secret-rewrite-note-wordpress'));
+  });
+
+  it('⭐(b) webhook 채널 — 403 CHANNEL_CONNECTION_HUMAN_ONLY는 제네릭 폴백(방어적 pass-through)', async () => {
+    fetchWithAuthMock.mockResolvedValue(jsonResponse(403, { error: { code: 'CHANNEL_CONNECTION_HUMAN_ONLY' } }));
+    await act(async () => { root.render(wrap(<TestHarness channel="webhook" isOwner onConnected={vi.fn()} />)); });
+    await flush();
+
+    const openBtn = container.querySelector('[data-testid="channel-connect-pasted-secret-button-webhook"]') as HTMLButtonElement;
+    await act(async () => { openBtn.click(); });
+    await flush();
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    const targetUrlInput = container.querySelector('#webhook-target_url') as HTMLInputElement;
+    const secretInput = container.querySelector('#webhook-secret') as HTMLInputElement;
+    expect(secretInput.type).toBe('password');
+    await act(async () => {
+      setter.call(targetUrlInput, 'https://hook.example.com'); targetUrlInput.dispatchEvent(new Event('input', { bubbles: true }));
+      setter.call(secretInput, 'shh'); secretInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await flush();
+    const submitBtn = container.querySelector('[data-testid="channel-connect-pasted-secret-submit-webhook"]') as HTMLButtonElement;
+    await act(async () => { submitBtn.click(); });
+    await flush();
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe(koMessages.channelConnect.channelConnectErrorGeneric);
+    expect(fetchWithAuthMock).toHaveBeenCalledWith(
+      '/api/organizations/org-1/channel-connections/webhook',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+});
+
+// story #3436 묶음10(유나 §17-21⑧⑨, PO 確定 2026-09-06) — 0개면 「연결」(그대로)·
+// 1개 이상이면 「연결 추가」로 낱말이 갈린다(sandbox #3537과 달리 둘째 연결이
+// 유의미해 버튼은 유지). 0개일 때 "추가"가 붙으면 거짓이므로 조건이 핵심 —
+// 0/1/2 × owner/member 매트릭스로 pin한다.
+describe('PastedSecretConnectCard — 연결 수별 버튼 낱말 매트릭스(story #3436 묶음10)', () => {
+  it.each([
+    { count: 0, expectedKey: 'channelConnectPastedSecretAction' as const },
+    { count: 1, expectedKey: 'channelConnectPastedSecretAnotherAction' as const },
+    { count: 2, expectedKey: 'channelConnectPastedSecretAnotherAction' as const },
+  ])('owner·연결 $count개 — 버튼 낱말이 $expectedKey', async ({ count, expectedKey }) => {
+    await act(async () => {
+      root.render(wrap(<TestHarness channel="wordpress" isOwner connectionCount={count} onConnected={vi.fn()} />));
+    });
+    await flush();
+    const btn = container.querySelector('[data-testid="channel-connect-pasted-secret-button-wordpress"]') as HTMLButtonElement;
+    expect(btn.textContent).toBe(koMessages.channelConnect[expectedKey].replace('{channel}', 'WordPress'));
+    // 0개일 때 "추가"가 절대 안 붙는다(거짓 방지) — 문자열 자체를 대조.
+    if (count === 0) expect(btn.textContent).not.toContain('추가');
+  });
+
+  it.each([0, 1, 2])('member·연결 %i개 — 버튼 없이 사유만(연결 수 무관, owner|admin 폭)', async (count) => {
+    await act(async () => {
+      root.render(wrap(<TestHarness channel="wordpress" isOwner={false} connectionCount={count} onConnected={vi.fn()} />));
+    });
+    await flush();
+    expect(container.querySelector('button')).toBeNull();
+    expect(container.textContent).toContain(
+      koMessages.channelConnect.channelConnectOwnerOrAdminOnlyReason.replace('{channel}', 'WordPress'),
+    );
+  });
+});
+
+// story #3813 PR5-a/PR5-b(그라운딩 2026-09-12, 페드루 PO 確定) — 실 stibee 폼
+// 그라운딩 결함 처방(PASTED_SECRET_FIELDS에 항목 자체가 없어 빈 패널만 펼쳐지던
+// 결함) + PR5-b가 더한 발신자 이메일·이름 2필드(실 발행 POST /emails 요구).
+describe('PastedSecretConnectCard — stibee 필드(story #3813 PR5-a·PR5-b)', () => {
+  it('⭐4필드(api_key·주소록 ID·발신자 이메일·발신자 이름)가 렌더되고 전부 채워야 제출 가능, 전부 body에 실린다', async () => {
+    fetchWithAuthMock.mockResolvedValue(jsonResponse(201, { data: { id: 'c1', channel: 'stibee' } }));
+    const onConnected = vi.fn();
+    await act(async () => { root.render(wrap(<TestHarness channel="stibee" isOwner onConnected={onConnected} />)); });
+    const openBtn = container.querySelector('[data-testid="channel-connect-pasted-secret-button-stibee"]') as HTMLButtonElement;
+    await act(async () => { openBtn.click(); });
+    await flush();
+
+    const apiKeyInput = container.querySelector('#stibee-api_key') as HTMLInputElement;
+    const listIdInput = container.querySelector('#stibee-list_id') as HTMLInputElement;
+    const senderEmailInput = container.querySelector('#stibee-sender_email') as HTMLInputElement;
+    const senderNameInput = container.querySelector('#stibee-sender_name') as HTMLInputElement;
+    expect(apiKeyInput.type).toBe('password');
+    expect(listIdInput.type).toBe('text');
+    expect(senderEmailInput.type).toBe('text');
+    expect(senderNameInput.type).toBe('text');
+    const submitBtn = container.querySelector('[data-testid="channel-connect-pasted-secret-submit-stibee"]') as HTMLButtonElement;
+    expect(submitBtn.disabled).toBe(true);
+
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    const fill = async (input: HTMLInputElement, value: string) => {
+      await act(async () => { setter.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })); });
+    };
+
+    await fill(apiKeyInput, 'my-real-key');
+    await flush();
+    expect(submitBtn.disabled).toBe(true); // 나머지 3필드가 아직 비어 있다 — 하나만으론 안 풀린다.
+
+    await fill(listIdInput, '54321');
+    await fill(senderEmailInput, 'sender@example.com');
+    await flush();
+    expect(submitBtn.disabled).toBe(true); // 발신자 이름 하나가 아직 비었다.
+
+    await fill(senderNameInput, '발신자');
+    await flush();
+    expect(submitBtn.disabled).toBe(false);
+
+    await act(async () => { submitBtn.click(); });
+    await flush();
+
+    expect(onConnected).toHaveBeenCalledOnce();
+    const [, options] = fetchWithAuthMock.mock.calls[0]!;
+    expect(JSON.parse(options.body as string)).toEqual({
+      api_key: 'my-real-key', list_id: '54321', sender_email: 'sender@example.com', sender_name: '발신자',
+    });
+  });
+});
+
+// story #3816(Phase3·3-6 PR1, 페드루 PO 確定 2026-09-12) — Ghost 연결 폼(2필드:
+// site_url·admin_api_key). stibee 4필드 테스트와 동형 관례(신규 시나리오 발명 0).
+describe('PastedSecretConnectCard — ghost 필드(story #3816 PR1)', () => {
+  it('⭐2필드(사이트 주소·Admin API 키)가 렌더되고 전부 채워야 제출 가능, 전부 body에 실린다', async () => {
+    fetchWithAuthMock.mockResolvedValue(jsonResponse(201, { data: { id: 'c1', channel: 'ghost' } }));
+    const onConnected = vi.fn();
+    await act(async () => { root.render(wrap(<TestHarness channel="ghost" isOwner onConnected={onConnected} />)); });
+    const openBtn = container.querySelector('[data-testid="channel-connect-pasted-secret-button-ghost"]') as HTMLButtonElement;
+    await act(async () => { openBtn.click(); });
+    await flush();
+
+    const siteUrlInput = container.querySelector('#ghost-site_url') as HTMLInputElement;
+    const adminApiKeyInput = container.querySelector('#ghost-admin_api_key') as HTMLInputElement;
+    expect(siteUrlInput.type).toBe('text');
+    expect(adminApiKeyInput.type).toBe('password');
+    const submitBtn = container.querySelector('[data-testid="channel-connect-pasted-secret-submit-ghost"]') as HTMLButtonElement;
+    expect(submitBtn.disabled).toBe(true);
+
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    const fill = async (input: HTMLInputElement, value: string) => {
+      await act(async () => { setter.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })); });
+    };
+
+    await fill(siteUrlInput, 'https://blog.example.com');
+    await flush();
+    expect(submitBtn.disabled).toBe(true); // admin_api_key가 아직 비어 있다.
+
+    await fill(adminApiKeyInput, 'id:secret');
+    await flush();
+    expect(submitBtn.disabled).toBe(false);
+
+    await act(async () => { submitBtn.click(); });
+    await flush();
+
+    expect(onConnected).toHaveBeenCalledOnce();
+    const [, options] = fetchWithAuthMock.mock.calls[0]!;
+    expect(JSON.parse(options.body as string)).toEqual({
+      site_url: 'https://blog.example.com', admin_api_key: 'id:secret',
+    });
+  });
+
+  // story #3816 CHANGES 3(유나 판정·PO 確定 2026-09-12) — GHOST_SITE_NOT_FOUND는
+  // "사이트 주소를 확인해 주세요"라고 말하면서 그 칸을 지우면 두 세계다. 값 유지 +
+  // 그 칸으로 포커스.
+  it('⭐GHOST_SITE_NOT_FOUND — site_url 값은 유지·admin_api_key만 비움·포커스는 site_url로', async () => {
+    fetchWithAuthMock.mockResolvedValue(jsonResponse(422, { error: { code: 'GHOST_SITE_NOT_FOUND' } }));
+    await act(async () => { root.render(wrap(<TestHarness channel="ghost" isOwner onConnected={vi.fn()} />)); });
+    const openBtn = container.querySelector('[data-testid="channel-connect-pasted-secret-button-ghost"]') as HTMLButtonElement;
+    await act(async () => { openBtn.click(); });
+    await flush();
+
+    const siteUrlInput = container.querySelector('#ghost-site_url') as HTMLInputElement;
+    const adminApiKeyInput = container.querySelector('#ghost-admin_api_key') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    const fill = async (input: HTMLInputElement, value: string) => {
+      await act(async () => { setter.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })); });
+    };
+    await fill(siteUrlInput, 'https://not-a-ghost-site.example.com');
+    await fill(adminApiKeyInput, 'id:secret');
+
+    const submitBtn = container.querySelector('[data-testid="channel-connect-pasted-secret-submit-ghost"]') as HTMLButtonElement;
+    await act(async () => { submitBtn.click(); });
+    await flush();
+
+    expect(siteUrlInput.value).toBe('https://not-a-ghost-site.example.com');
+    expect(adminApiKeyInput.value).toBe('');
+    expect(document.activeElement).toBe(siteUrlInput);
+  });
+
+  it('⭐GHOST_ADMIN_KEY_INVALID — site_url 값은 유지·포커스는 admin_api_key로', async () => {
+    fetchWithAuthMock.mockResolvedValue(jsonResponse(422, { error: { code: 'GHOST_ADMIN_KEY_INVALID' } }));
+    await act(async () => { root.render(wrap(<TestHarness channel="ghost" isOwner onConnected={vi.fn()} />)); });
+    const openBtn = container.querySelector('[data-testid="channel-connect-pasted-secret-button-ghost"]') as HTMLButtonElement;
+    await act(async () => { openBtn.click(); });
+    await flush();
+
+    const siteUrlInput = container.querySelector('#ghost-site_url') as HTMLInputElement;
+    const adminApiKeyInput = container.querySelector('#ghost-admin_api_key') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    const fill = async (input: HTMLInputElement, value: string) => {
+      await act(async () => { setter.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })); });
+    };
+    await fill(siteUrlInput, 'https://blog.example.com');
+    await fill(adminApiKeyInput, 'fake-not-a-real-key');
+
+    const submitBtn = container.querySelector('[data-testid="channel-connect-pasted-secret-submit-ghost"]') as HTMLButtonElement;
+    await act(async () => { submitBtn.click(); });
+    await flush();
+
+    expect(siteUrlInput.value).toBe('https://blog.example.com');
+    expect(adminApiKeyInput.value).toBe('');
+    expect(document.activeElement).toBe(adminApiKeyInput);
+  });
+
+});
+
+// story #3816 CHANGES 3 — `focusFieldNameForError` 순수함수 단위 테스트(폼 레이스
+// 케이스라 실제 클릭스루로 FIELDS_REQUIRED를 만들기 어렵다 — allFilled 가드가
+// 이미 막는 상태를 서버가 뒤늦게 거절하는 경합만 이 코드에 닿는다).
+describe('focusFieldNameForError(story #3816 CHANGES 3)', () => {
+  const ghostFields = PASTED_SECRET_FIELDS['ghost']!;
+
+  it('⭐*_FIELDS_REQUIRED — 첫 빈 필드로', () => {
+    expect(focusFieldNameForError('GHOST_FIELDS_REQUIRED', ghostFields, { site_url: '' })).toBe('site_url');
+    expect(focusFieldNameForError('GHOST_FIELDS_REQUIRED', ghostFields, { site_url: 'x', admin_api_key: '' })).toBe('admin_api_key');
+  });
+
+  it('⭐키 오류(GHOST_ADMIN_KEY_INVALID·STIBEE_API_KEY_INVALID) — password 필드로', () => {
+    expect(focusFieldNameForError('GHOST_ADMIN_KEY_INVALID', ghostFields, {})).toBe('admin_api_key');
+    expect(focusFieldNameForError('STIBEE_API_KEY_INVALID', PASTED_SECRET_FIELDS['stibee']!, {})).toBe('api_key');
+  });
+
+  it('⭐GHOST_SITE_NOT_FOUND — site_url로(명시 표)', () => {
+    expect(focusFieldNameForError('GHOST_SITE_NOT_FOUND', ghostFields, {})).toBe('site_url');
+  });
+
+  it('모르는 코드·undefined — null(포커스 이동 안 함, 지어내지 않는다)', () => {
+    expect(focusFieldNameForError('SOME_UNKNOWN_CODE', ghostFields, {})).toBeNull();
+    expect(focusFieldNameForError(undefined, ghostFields, {})).toBeNull();
+  });
+});

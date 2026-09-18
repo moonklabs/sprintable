@@ -6,8 +6,9 @@ import re
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
+from pydantic import ValidationError
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,6 +17,7 @@ from app.dependencies.database import get_db
 from app.models.asset import Asset
 from app.services.artifact_image_url import _canonicalize_props, sign_image_srcs_in_nodes
 from app.services.asset_registry import DEFAULT_CONTAINER
+from app.services.image_integrity import ImageIntegrityError, validate_image_bytes
 from app.services.storage import get_storage_provider
 from app.models.visual_artifact import (
     ArtifactComment, ArtifactExport, ArtifactNode, ArtifactSpecPin, ArtifactVersion, VisualArtifact,
@@ -41,7 +43,7 @@ from app.schemas.visual_artifact import (
     VisualArtifactDetail,
     VisualArtifactSummary,
 )
-from app.services.member_resolver import filter_org_member_ids
+from app.services.member_resolver import filter_org_member_ids, resolve_member_db_verified
 from app.services.notification_dispatch import dispatch_notification
 from app.services.project_auth import assert_target_in_caller_org
 
@@ -131,7 +133,7 @@ async def _notify_artifact_created(
         session, org_id=org_id, event_type="artifact.created",
         target_member_ids=list(target_member_ids),
         title=f"새 산출물 생성됨: {artifact.title}",
-        body="새 시각 산출물이 생성됐습니다.",
+        body="새 시각 산출물이 생성됐어요.",
         reference_type="visual_artifact", reference_id=artifact.id,
         source_project_id=project_id,
         # story #2696: outbox 이관(동일 결함 클래스 예방).
@@ -152,7 +154,12 @@ async def create_artifact(
 
     await _assert_link_target_in_scope(session, org_id, project_id, body)
 
-    created_by = uuid.UUID(auth.user_id)
+    # story #3370(카디르 QA 지적, 페드루 재검토 2026-09-10 — #4156 리뷰) —
+    # VisualArtifact.created_by는 이 뒤 _notify_artifact_updated의 target_member_ids
+    # 계산(artifact.created_by - editor_id)에 그대로 쓰인다 — 영속 멤버 id 소비처라
+    # resolve_member_db_verified()로 정정(agent 판정은 DB 실측이라 이 파일의 기존
+    # 테스트 하네스와 정합, member_resolver.py 자신의 docstring 그라운딩 참고).
+    created_by = (await resolve_member_db_verified(auth, org_id, session)).id
     # 뷰어 통합 재설계(story 1948d19d): canvas_bounds SSOT=버전(아래 version.canvas_bounds).
     # artifact.canvas_bounds는 latest_version_number와 동형 denorm 캐시 — 항상 최신 버전과 동기화.
     canvas_bounds_dict = body.canvas_bounds.model_dump() if body.canvas_bounds else None
@@ -203,7 +210,7 @@ async def create_artifact(
 
 @router.post("/import-image", status_code=201)
 async def import_image_artifact(
-    body: ImportImageArtifactRequest,
+    request: Request,
     auth: AuthContext = Depends(get_current_user),
     scope: dict = Depends(get_scope_context),
     session: AsyncSession = Depends(get_db),
@@ -213,7 +220,39 @@ async def import_image_artifact(
     api/visual-artifacts/import-image/route.ts)의 서버사이드 GCS 업로드 로직을 포팅하고, 그 뒤를
     이어 `create_artifact()`를 내부 함수 호출로 그대로 재사용(DB write 로직 사본 발명 0 — 두
     갈래가 다시 어긋나면 create_artifact 한쪽만 고치고 여기를 잊는 사고가 난다는 뜻이니, 이
-    엔드포인트를 건드릴 땐 그 함수도 같이 봐야 한다)."""
+    엔드포인트를 건드릴 땐 그 함수도 같이 봐야 한다).
+
+    story #3753 — GCS 업로드(`put_object`) 直前에 `validate_image_bytes`를 통과해야 한다
+    (매직 바이트·PNG 청크 walk·PIL 디코드). 실패하면 저장 자체를 안 한다(고아 객체 0).
+
+    story #3767 — 이 입구는 JSON(base64)만 받는데, 도구 설명이 한때 멀티파트/구v1 경로를
+    가리켜 에이전트가 multipart나 raw 이미지 바이트를 그대로 body에 실어 보내는 경우가
+    있었다. `body: ImportImageArtifactRequest`(FastAPI 자동 Pydantic 파싱)로 두면 그
+    비-JSON 바이트가 파싱 실패 시 `RequestValidationError.errors()`의 `input` 필드에
+    원본 bytes 그대로 담기고, FastAPI 기본 `jsonable_encoder`가 그 bytes를 UTF-8로
+    `.decode()`하려다(PNG 매직 바이트 등은 유효한 UTF-8이 아님) **500**으로 죽는다(이
+    레포 코드가 아니라 FastAPI 자신의 기본 검증-에러 인코더 안에서 터지는 것 — 실측
+    확認, traceback이 `fastapi/encoders.py`에서 끝남). 그래서 Pydantic 자동 바디 대신
+    `Request`를 직접 받아 Content-Type을 먼저 본다 — 그 크래시 경로 자체를 안 태운다.
+    """
+    content_type_header = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
+    if content_type_header != "application/json":
+        return _err(
+            "UNSUPPORTED_MEDIA_TYPE",
+            "Content-Type must be application/json — this endpoint takes a base64-encoded "
+            "image in a JSON body ({\"title\", \"image_base64\", \"content_type\", ...}), not "
+            "multipart/form-data.",
+            415,
+        )
+    try:
+        raw_json = await request.json()
+    except Exception:
+        return _err("VALIDATION_ERROR", "Request body must be valid JSON", 422)
+    try:
+        body = ImportImageArtifactRequest.model_validate(raw_json)
+    except ValidationError as exc:
+        return _err("VALIDATION_ERROR", exc.errors()[0]["msg"] if exc.errors() else "Invalid request body", 422)
+
     if not body.content_type.startswith("image/"):
         return _err("VALIDATION_ERROR", "content_type must be an image/* type", 400)
     try:
@@ -222,6 +261,10 @@ async def import_image_artifact(
         return _err("VALIDATION_ERROR", "image_base64 is not valid base64", 400)
     if len(image_bytes) > _MAX_IMPORT_IMAGE_BYTES:
         return _err("VALIDATION_ERROR", "image too large (max 20MB)", 413)
+    try:
+        validate_image_bytes(body.content_type, image_bytes)
+    except ImageIntegrityError as exc:
+        return _err("IMAGE_CORRUPT", exc.reason, 422)
 
     org_id, project_id = scope["org_id"], scope["project_id"]
     if not org_id:
@@ -574,7 +617,11 @@ async def delete_artifact(
     artifact = await _get_artifact_or_404(session, org_id, project_id, id)
     if artifact is None:
         return _err("NOT_FOUND", "Artifact not found", 404)
-    if artifact.created_by != uuid.UUID(auth.user_id):
+    # story #3370(카디르 QA 지적 2026-09-10) — artifact.created_by는 이제(위 create_
+    # artifact 정정) 영속 멤버 id다. 이 소유권 비교도 같은 축으로 맞추지 않으면
+    # 원작성자 본인이 raw auth.user_id(≠자신의 멤버 id)와 안 맞아 자기 것도 못 지우는
+    # 회귀가 난다.
+    if artifact.created_by != (await resolve_member_db_verified(auth, org_id, session)).id:
         return _err("FORBIDDEN", "생성자만 삭제할 수 있습니다", 403)
     from datetime import datetime, timezone
     artifact.deleted_at = datetime.now(timezone.utc)
@@ -660,7 +707,9 @@ async def add_artifact_comment(
         if parent_owner != artifact.id:
             return _err("NOT_FOUND", "Parent comment not found on this artifact", 404)
 
-    created_by = uuid.UUID(auth.user_id)
+    # story #3370(카디르 QA 지적 2026-09-10) — created_by가 line 724의 target_member_ids
+    # 계산(dispatch_notification 수신자)에 직접 쓰인다 — 영속 멤버 id 소비처.
+    created_by = (await resolve_member_db_verified(auth, org_id, session)).id
     comment = ArtifactComment(
         id=uuid.uuid4(), artifact_id=artifact.id, org_id=org_id, project_id=project_id,
         node_id=body.node_id, anchor_x=body.anchor_x, anchor_y=body.anchor_y,
@@ -716,8 +765,10 @@ async def resolve_artifact_comment(
     if comment is None:
         return _err("NOT_FOUND", "Comment not found", 404)
     from datetime import datetime, timezone
+    # story #3370(카디르 QA 지적 2026-09-10) — resolved_by는 created_by와 동형 영속
+    # 「누가 했나」 필드(ArtifactComment.created_by와 같은 컬럼군) — 같은 축으로 정정.
     comment.resolved = True
-    comment.resolved_by = uuid.UUID(auth.user_id)
+    comment.resolved_by = (await resolve_member_db_verified(auth, org_id, session)).id
     comment.resolved_at = datetime.now(timezone.utc)
     await session.flush()
     await session.refresh(comment)
@@ -1010,7 +1061,10 @@ async def complete_png_export(
         from ee.plan_limits import check_storage_capacity  # type: ignore[import]
         await check_storage_capacity(session, org_id, [{"url": body.object_path}])
 
-    created_by = uuid.UUID(auth.user_id)
+    # story #3370(카디르 QA 지적 2026-09-10) — created_by가 이 함수 뒤쪽
+    # target_member_ids 계산(dispatch_notification 수신자)에 그대로 쓰인다 —
+    # 영속 멤버 id 소비처.
+    created_by = (await resolve_member_db_verified(auth, org_id, session)).id
     asset_id = await _upsert_export_asset(
         session, org_id=org_id, project_id=project_id, object_path=body.object_path,
         name=f"{artifact.title}-v{version_number}.png", content_type="image/png",
@@ -1030,7 +1084,7 @@ async def complete_png_export(
             session, org_id=org_id, event_type="artifact.exported",
             target_member_ids=target_member_ids,
             title=f"산출물 export: {artifact.title}",
-            body="PNG export가 완료됐습니다.",
+            body="PNG export가 완료됐어요.",
             reference_type="visual_artifact", reference_id=artifact.id,
             source_project_id=project_id,
             # story #2696: outbox 이관(동일 결함 클래스 예방).
@@ -1084,7 +1138,10 @@ async def create_html_export(
         from ee.plan_limits import check_storage_capacity  # type: ignore[import]
         await check_storage_capacity(session, org_id, [{"url": object_path}])
 
-    created_by = uuid.UUID(auth.user_id)
+    # story #3370(카디르 QA 지적 2026-09-10) — created_by가 이 함수 뒤쪽
+    # target_member_ids 계산(dispatch_notification 수신자)에 그대로 쓰인다 —
+    # 영속 멤버 id 소비처.
+    created_by = (await resolve_member_db_verified(auth, org_id, session)).id
     asset_id = await _upsert_export_asset(
         session, org_id=org_id, project_id=project_id, object_path=object_path,
         name=f"{artifact.title}-v{version_number}.html", content_type="text/html; charset=utf-8",
@@ -1104,7 +1161,7 @@ async def create_html_export(
             session, org_id=org_id, event_type="artifact.exported",
             target_member_ids=target_member_ids,
             title=f"산출물 export: {artifact.title}",
-            body="HTML export가 완료됐습니다.",
+            body="HTML export가 완료됐어요.",
             reference_type="visual_artifact", reference_id=artifact.id,
             source_project_id=project_id,
             # story #2696: outbox 이관(동일 결함 클래스 예방).
@@ -1299,7 +1356,7 @@ async def _notify_artifact_updated(
             session, org_id=org_id, event_type="artifact.updated",
             target_member_ids=target_member_ids,
             title=f"산출물 수정됨: {artifact.title}",
-            body="artifact가 새 버전으로 갱신됐습니다.",
+            body="artifact가 새 버전으로 갱신됐어요.",
             reference_type="visual_artifact", reference_id=artifact.id,
             source_project_id=project_id,
             # story #2696: outbox 이관(동일 결함 클래스 예방).
@@ -1333,7 +1390,10 @@ async def edit_artifact(
         if comment_owner != artifact.id:
             return _err("FORBIDDEN", "source_comment_id가 이 artifact 소속이 아닙니다", 403)
 
-    actor_id = uuid.UUID(auth.user_id)
+    # story #3370(카디르 QA 지적 2026-09-10) — actor_id가 _apply_artifact_edit 내부
+    # ArtifactVersion.created_by(영속)와 _notify_artifact_updated의 editor_id(target_
+    # member_ids 제외 축) 둘 다에 쓰인다 — 영속 멤버 id 소비처.
+    actor_id = (await resolve_member_db_verified(auth, org_id, session)).id
 
     # 뷰어 통합 재설계(story 1948d19d): canvas_bounds는 버전 단위 SSOT — 무-mutate 버전 원칙대로
     # operations 없이 canvas_bounds만 와도(model_validator가 둘 다 없는 요청은 거름) 새 버전을
@@ -1384,7 +1444,9 @@ async def propose_canonical_version(
     if version is None:
         return _err("NOT_FOUND", "Artifact version not found", 404)
 
-    proposer_id = uuid.UUID(auth.user_id)
+    # story #3370(카디르 QA 지적 2026-09-10) — proposer_id가 create_gate의 requester
+    # member_id + neutral_facts.requested_by_member_id(영속) 둘 다에 쓰인다.
+    proposer_id = (await resolve_member_db_verified(auth, org_id, session)).id
     gate = await create_gate(
         session, org_id, artifact.id, "visual_artifact", "artifact_canonicalize",
         proposer_id, uuid.uuid4(),  # role_id: always-manual이라 disposition 미사용(placeholder)

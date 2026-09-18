@@ -105,12 +105,15 @@ async def _resolve_member_by_query(
     rows = list((await db.execute(
         select(TeamMember).where(TeamMember.project_id == project_id, TeamMember.is_active.is_(True))
     )).scalars().all())
-    exact = [m for m in rows if m.name.lower() == q]
+    # story #3758 — team_members.name이 이제 휴먼 분기에서 None일 수 있다(members.name
+    # nullable 완화). 이름 없는 구성원은 이름으로 못 찾는 게 정직(검색 대상에서 제외 —
+    # None을 지어낸 문자열과 매치시키지 않는다).
+    exact = [m for m in rows if m.name is not None and m.name.lower() == q]
     if len(exact) == 1:
         return MemberMatch(exact[0], [])
     if len(exact) > 1:
         return MemberMatch(None, exact)
-    prefix = [m for m in rows if m.name.lower().startswith(q)]
+    prefix = [m for m in rows if m.name is not None and m.name.lower().startswith(q)]
     if len(prefix) == 1:
         return MemberMatch(prefix[0], [])
     return MemberMatch(None, prefix)

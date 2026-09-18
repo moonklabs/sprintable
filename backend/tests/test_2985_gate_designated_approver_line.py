@@ -99,6 +99,7 @@ async def test_dispatch_sends_only_to_designated_others_get_nothing():
             await dispatch_approval_request_cards(
                 s, org_id=org_id, work_item_type="doc", work_item_id=doc.id,
                 project_id=doc.project_id, title=doc.title, gate_id=gate_id,
+                gate_type="doc_approval",
                 requester_id=requester_id, approver_ids=[designated, other],
                 designated_approver_id=designated,
             )
@@ -137,6 +138,7 @@ async def test_dispatch_no_designation_keeps_all_actionable_no_regression():
             await dispatch_approval_request_cards(
                 s, org_id=org_id, work_item_type="doc", work_item_id=doc.id,
                 project_id=doc.project_id, title=doc.title, gate_id=uuid.uuid4(),
+                gate_type="doc_approval",
                 requester_id=requester_id, approver_ids=[a1, a2],
                 # designated_approver_id 생략 — 기본값 None.
             )
@@ -174,6 +176,7 @@ async def test_dispatch_designated_outside_approver_ids_falls_back_safely():
             await dispatch_approval_request_cards(
                 s, org_id=org_id, work_item_type="doc", work_item_id=doc.id,
                 project_id=doc.project_id, title=doc.title, gate_id=uuid.uuid4(),
+                gate_type="doc_approval",
                 requester_id=requester_id, approver_ids=[a1],
                 designated_approver_id=stray_id,
             )
@@ -288,6 +291,7 @@ async def test_notify_gate_card_recipients_resolved_reaches_designated_only():
             await dispatch_approval_request_cards(
                 s, org_id=org_id, work_item_type="doc", work_item_id=doc.id,
                 project_id=doc.project_id, title=doc.title, gate_id=gate_id,
+                gate_type="doc_approval",
                 requester_id=requester_id, approver_ids=[designated, other],
                 designated_approver_id=designated,
             )

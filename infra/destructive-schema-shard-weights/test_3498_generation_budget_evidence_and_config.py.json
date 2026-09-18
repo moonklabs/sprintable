@@ -1,0 +1,1 @@
+{"file": "tests/test_3498_generation_budget_evidence_and_config.py", "sec": 48.0, "source": "story-3619(2026-09-07) — test_3498_generation_budget.py 분리 신설분(조각①·⑤·PUT3종, 11테스트). #3971 run 34089668525 100s(25테스트)를 11/25 비율로 안분(11/25*100=44.0, 반올림 여유 48.0) — 로컬 격리측정 7.28s(무경합)와 별개로 CI 경합 배율을 그대로 반영"}

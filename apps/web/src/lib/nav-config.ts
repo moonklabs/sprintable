@@ -4,20 +4,22 @@ import {
   Bot,
   Brain,
   ClipboardList,
+  FileText,
   FlaskConical,
   GalleryVerticalEnd,
   HardDrive,
   Inbox,
   Layers,
+  ListChecks,
   MessageSquare,
   Newspaper,
   Settings,
+  Share2,
   Shield,
-  Users,
+  TrendingUp,
   Users2,
   Workflow,
   Zap,
-  Gauge,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -32,15 +34,42 @@ import {
 //                (앞 슬래시 없음 — 슬래시 유무로 kind를 오인하지 않게 값 자체로 구분).
 export type NavItemKind = 'static' | 'resource';
 
+// story #9c5e82dc(IA·S3, PO 確定 2026-09-08) — 「프로젝트를 바꿨을 때 내용이 실제로
+// 바뀌는가」로 잰 값(추정이 아니라 각 화면의 실 데이터 페칭 코드를 읽어 확認 — activity가
+// kind:'static'인데도 project_id로 실제 필터되는 것을 이렇게 잡아 8→9로 정정했다).
+// undefined(필드 자체를 안 씀) = 애매(inbox·settings — 화면 개념이 project/org 어느 한쪽으로
+// 안 떨어짐, AC2 "화면은 모르는 것을 단정하지 않는다") — 사이드바가 이 값을 몰라야 «표식을
+// 안 붙인다»는 사실 자체가 코드로 드러난다(기본값으로 org를 깔고 안 보여주는 게 아니다).
+export type NavItemScope = 'project' | 'org';
+
 export interface NavItemConfig {
   id: string;
   labelKey: string;
+  // story #fddd0e6b(IA·⑦ 전체 메뉴, 유나 시안 ⑦ 판b 036c983a) — 「무엇이 여기 있나」 한 줄.
+  // /more 허브가 소비(팔레트는 이 카드 스코프 밖). 필수 — board·inbox는 /more에서 안
+  // 렌더되지만(MOBILE_HUB_EXCLUDE_IDS) «계약상 예약»이라 이 둘도 값을 가진다(제외가
+  // 풀리는 날 설명이 조용히 비지 않게 — 완전성 테스트가 23개 전부를 잰다).
+  descriptionKey: string;
   icon: LucideIcon;
   kind: NavItemKind;
   path: string;
   kbdHint?: string;
   // 배지 소스 — 현재 카운트 자체는 컴포넌트 상태(폴링·SSE)라 여기 값이 아니라 렌더 쪽이 채운다.
   badgeKey?: 'inbox' | 'chats';
+  scope?: NavItemScope;
+}
+
+// story #3855(customer-zero·셸, 선생님 07:07Z 지적 → PO 確定) — 「더보기」/모바일 /more가
+// LEGACY_NAV_ITEMS 15개를 순서·묶음 없이 한 줄로 쏟던 결함(«서랍에 쓸어 담은 그림»)의
+// 처방 — §② 흡수 지도의 «갈 곳» 5축. 이 5값 자체가 doc a699be00 §②의 최종 목적지
+// 이름과 1:1(신규 개념 발명 0) — 흡수 화면이 착지해 항목이 LEGACY_NAV_ITEMS에서 빠지면
+// 그 항목이 속했던 머리말도 자동으로 사라진다(groupVisibleLegacyByTarget의 빈 그룹 제외).
+export type AbsorbTarget = 'work' | 'connect' | 'knowledge' | 'history' | 'settings';
+
+export interface LegacyNavItemConfig extends NavItemConfig {
+  // AC1 — 값 없으면 tsc가 LEGACY_NAV_ITEMS 배열 리터럴에서 바로 잡는다(타입 강제,
+  // 런타임 완전성 테스트와 별개 축 — 하나는 컴파일 타임, 하나는 카드 표 1:1 대조).
+  absorbTarget: AbsorbTarget;
 }
 
 export interface NavGroupConfig {
@@ -78,75 +107,98 @@ export interface NavGroupConfig {
 //   생긴 커플링 — FAB↔B3·배지↔4탭과 동형 패턴("표면이 설 때 nav서 뺀다", 오늘 세 번째
 //   사례). 그래서 standup/retro는 nav에 그대로 남긴다(work 존 6→3이 아니라 6→5 — board가
 //   flow+sprints를 흡수한 만큼만 준다).
+// story #3824(UX-v3·FE 1, 페드루 PO 確定 2026-09-13, doc a699be00 §② 흡수 지도) —
+// 5항목(오늘·대화·일감·결과·연결·규칙)으로 축소. path는 전부 불변(라우트 보존·
+// 딥링크/북마크 무손상) — 이 슬라이스는 재그룹+재라벨만. 「대화」는 이 배열에 없다
+// (기존 그대로 CHAT_CENTER_ITEM — 구역 밖 1급 챗 center, 아래 참고).
+//
+// 5항목 중 4개(오늘·일감·결과)는 목적지가 하나뿐이라 라벨 없는 헤더리스 1항목
+// 그룹(옛 'settings' 그룹과 동형 관례)으로 표현한다 — group.labelKey가 없으면
+// app-sidebar.tsx가 접기 토글·그룹 헤더 자체를 안 그리므로(isCollapsible = Boolean
+// (group.labelKey)) 화면엔 항목 라벨 하나만 보인다. 「연결·규칙」만 하위 둘(채널
+// 연결/콘텐츠 규칙)을 가진 진짜 라벨 그룹이다 — NavItemConfig가 중첩 하위메뉴를
+// 지원 안 해(app-sidebar.tsx는 group.items를 평평하게 순회) "항목 하나·하위 둘"은
+// 이 레포 관례상 "라벨 그룹 안 항목 2개"로 표현하는 것이 유일한 길이다.
+//
+// 오늘·일감의 라벨키는 새로 만들지 않고 기존 zoneNow("오늘"/"Today")·zoneDev
+// ("일감"/"Work") 그룹 라벨 값을 그대로 재사용한다(이미 정확히 그 낱말이었다 —
+// #f81657f8이 이미 "일감"/Work로 개명해 둔 값). 「결과」는 기존 orgInsightsBoard
+// ("성과 보드")를 그대로 리라벨하면 insight-snapshot-block.tsx:174의 `tNav(
+// 'orgInsightsBoard')` CTA 문장("...에서 보기")이 조용히 "결과에서 보기"로 같이
+// 바뀐다(다른 문맥·다른 문장) — 새 labelKey `navResults`로 분리해 그 CTA는 안 건드린다.
 export const NAV_GROUPS: NavGroupConfig[] = [
   {
     id: 'now',
-    labelKey: 'zoneNow',
     items: [
-      { id: 'org-briefing', labelKey: 'orgBriefing', icon: Newspaper, kind: 'static', path: '/org-briefing' },
-      { id: 'inbox', labelKey: 'inbox', icon: Inbox, kind: 'static', path: '/inbox', badgeKey: 'inbox' },
-      // story #3179(S3c) — 'dashboard'(대시보드, /dashboard) 항목 제거. attention(S3a)·
-      // pulse(S3b)가 chat으로 이전되며 /dashboard는 폐합(redirect-only 스텁)됐다 — 같은
-      // 목적지(chat)로 가는 nav 항목이 CHAT_CENTER_ITEM과 중복될 이유가 없다.
-      // chats는 이 배열에 없다 — story #2930 I2가 구역 밖 1급 챗 center로 승격했다(아래
-      // CHAT_CENTER_ITEM, app-sidebar.tsx가 NAV_GROUPS 순회와 별개로 직접 소비).
+      { id: 'org-briefing', labelKey: 'zoneNow', descriptionKey: 'descOrgBriefing', icon: Newspaper, kind: 'static', path: '/org-briefing' },
     ],
   },
   {
-    id: 'work',
-    labelKey: 'zoneWork',
+    id: 'dev',
     items: [
-      { id: 'board', labelKey: 'board', icon: Workflow, kind: 'resource', path: 'flow', kbdHint: 'B' },
-      { id: 'goals', labelKey: 'goals', icon: Layers, kind: 'resource', path: 'goals' },
-      { id: 'loops', labelKey: 'loops', icon: FlaskConical, kind: 'resource', path: 'loops' },
-      { id: 'standup', labelKey: 'standup', icon: Users, kind: 'resource', path: 'standup', kbdHint: 'S' },
-      { id: 'retro', labelKey: 'retro', icon: Gauge, kind: 'resource', path: 'retro', kbdHint: 'R' },
+      { id: 'board', labelKey: 'zoneDev', descriptionKey: 'descBoard', icon: Workflow, kind: 'resource', path: 'flow', kbdHint: 'B', scope: 'project' },
     ],
   },
   {
-    id: 'trust',
-    labelKey: 'zoneTrust',
+    id: 'results',
     items: [
-      { id: 'activity', labelKey: 'activity', icon: ClipboardList, kind: 'static', path: '/activity' },
-      // organization 흡수(시안 매핑표) — 신뢰 축의 실물이 이제 여기 있다(이전엔 organization
-      // 그룹 소속). path 불변, 그룹 소속만 이동. 라벨도 zoneTrust와 겹치던 "신뢰"→"신뢰 센터"로
-      // 정정(같은 구역 안에서 구역명과 항목명이 동어반복하지 않게, 시안 신뢰 센터 표기 그대로).
-      { id: 'org-trust', labelKey: 'orgTrust', icon: Award, kind: 'static', path: '/organization/trust' },
+      { id: 'org-insights-board', labelKey: 'navResults', descriptionKey: 'descOrgInsightsBoard', icon: TrendingUp, kind: 'static', path: '/organization/insights-board', scope: 'org' },
     ],
   },
   {
-    id: 'knowledge',
-    labelKey: 'zoneKnowledge',
+    id: 'connect-rules',
+    labelKey: 'zoneConnectRules',
     items: [
-      { id: 'docs', labelKey: 'docs', icon: BookOpen, kind: 'resource', path: 'docs' },
-      { id: 'artifacts', labelKey: 'artifacts', icon: GalleryVerticalEnd, kind: 'resource', path: 'artifacts' },
-      { id: 'storage', labelKey: 'storage', icon: HardDrive, kind: 'resource', path: 'storage' },
-      // organization 흡수(시안 매핑표) — memory는 지식 축의 실물. path 불변, 그룹 소속만 이동.
-      { id: 'org-memory', labelKey: 'orgMemory', icon: Brain, kind: 'static', path: '/organization/memory' },
+      { id: 'org-channels', labelKey: 'orgChannels', descriptionKey: 'descOrgChannels', icon: Share2, kind: 'static', path: '/organization/channels', scope: 'org' },
+      { id: 'org-content-rules', labelKey: 'orgContentRules', descriptionKey: 'descOrgContentRules', icon: ListChecks, kind: 'static', path: '/organization/content-rules', scope: 'org' },
     ],
   },
-  {
-    // story #2930 I1 — 관리 프레임(하단·1차 아님). org-trust/org-memory는 위 신뢰/지식으로
-    // 흡수돼 빠졌고, 남은 조직 항목(멤버·워크포스·권한·이벤트)+설정만 남는다. 예전엔 이 그룹이
-    // 배열 맨 앞(desktop "조직이 4구역 위 프레임")이었는데, 시안 확定으로 이제 4구역 «아래»
-    // 프레임이라 배열 위치도 맨 뒤로 옮긴다(app-sidebar.tsx는 배열 순서 그대로 렌더하므로 —
-    // MOBILE_HUB_GROUP_ORDER는 이미 예전부터 이 그룹을 knowledge 뒤에 뒀었다, 이번에 데스크톱이
-    // 그 순서를 따라잡는 것뿐).
-    id: 'organization',
-    labelKey: 'zoneOrganization',
-    items: [
-      { id: 'org-members', labelKey: 'orgMembers', icon: Users2, kind: 'static', path: '/organization/members' },
-      { id: 'org-workforce', labelKey: 'workforce', icon: Bot, kind: 'static', path: '/organization/workforce' },
-      { id: 'org-roles', labelKey: 'orgRoles', icon: Shield, kind: 'static', path: '/organization/roles' },
-      { id: 'org-events', labelKey: 'orgEvents', icon: Zap, kind: 'static', path: '/organization/events' },
-    ],
-  },
-  {
-    id: 'settings',
-    items: [
-      { id: 'settings', labelKey: 'settings', icon: Settings, kind: 'static', path: '/settings' },
-    ],
-  },
+];
+
+// story #3824 — 5항목 축소로 사이드바에서 빠지는 17개 목적지. 라우트는 전부 그대로
+// 살아있다(북마크·딥링크 무손상, path 불변) — 이 배열이 이제 이들의 1급 진입점
+// (커맨드 팔레트 ⌘K, command-palette.tsx가 NAV_GROUPS와 나란히 소비)이다.
+// kind:'resource' 항목(현재 6개)은 이 배열 자체의 `kind: 'resource', path: '...'`
+// 리터럴이 verify-no-orphan-resource-routes(story #2376)의 조합 진입점 축
+// (extractNavConfigResourceTargets, 파일 전체 스캔이라 소속 배열 무관)이라 이
+// 배열에 남아 있는 한 그 가드가 계속 그린이다 — 지우면 그 항목들이 routeWithoutEntry로
+// 즉시 RED(가드 완화 금지, 카드 AC2 명시). 라벨·설명·아이콘은 전부 기존 값 그대로
+// 재사용(뜻 무변, 자리만 이동).
+// story #3845(UX-v3·FE 5·일감 2, 페드루 PO 確定 §④ 2026-09-14) — standup·retro는 「일감」
+// 흡수 지도(doc a699be00 §②-1)로 이 배열에서 빠진다. 이 배열이 사이드바 「더보기」·⌘K
+// 팔레트(무필터)·모바일 /more 3곳의 유일한 공통 정의라(nav-config.ts VISIBLE_LEGACY_
+// NAV_ITEMS·app-sidebar.tsx·more/page.tsx 참고, story #3836 SSOT) 이 줄들을 빼는 것만으로
+// 3곳에서 동시에 사라진다(legacy-nav-ssot.test.tsx가 그 동시성을 실렌더로 고정) — 각
+// 소비처를 따로 안 고친다. retro는 WorkspaceFrameTabs 전용 탭으로 흡수(go-retro 팔레트
+// 앵커는 command-palette.tsx GUARD_ANCHOR_ITEMS로 이관 — orphan-route 가드 시야 유지).
+// standup(§①)은 「스프린트」 탭 안 「하루 체크인」 절(StandupPage embedded=true 마운트,
+// standup-client.tsx)로 흡수 — 독립 /standup 라우트(page.tsx·loading.tsx) 자체를
+// 삭제하고 legacy-resource-tables.ts RENAMED_RESOURCES에 'standup':'sprints' 301을
+// 등록했다(board→flow 선례와 동형) — 라우트가 없어져 orphan-route 가드 시야에서 standup이
+// 아예 빠지므로(listRouteDirs가 page.tsx 실존으로 파생) retro와 달리 팔레트 앵커도 불요.
+export const LEGACY_NAV_ITEMS: LegacyNavItemConfig[] = [
+  { id: 'goals', labelKey: 'goals', descriptionKey: 'descGoals', icon: Layers, kind: 'resource', path: 'goals', scope: 'project', absorbTarget: 'work' },
+  { id: 'loops', labelKey: 'loops', descriptionKey: 'descLoops', icon: FlaskConical, kind: 'resource', path: 'loops', scope: 'project', absorbTarget: 'work' },
+  { id: 'docs', labelKey: 'docs', descriptionKey: 'descDocs', icon: BookOpen, kind: 'resource', path: 'docs', scope: 'project', absorbTarget: 'work' },
+  { id: 'artifacts', labelKey: 'artifacts', descriptionKey: 'descArtifacts', icon: GalleryVerticalEnd, kind: 'resource', path: 'artifacts', scope: 'project', absorbTarget: 'work' },
+  { id: 'storage', labelKey: 'storage', descriptionKey: 'descStorage', icon: HardDrive, kind: 'resource', path: 'storage', scope: 'project', absorbTarget: 'knowledge' },
+  { id: 'activity', labelKey: 'activity', descriptionKey: 'descActivity', icon: ClipboardList, kind: 'static', path: '/activity', scope: 'project', absorbTarget: 'history' },
+  { id: 'org-trust', labelKey: 'orgTrust', descriptionKey: 'descOrgTrust', icon: Award, kind: 'static', path: '/organization/trust', scope: 'org', absorbTarget: 'connect' },
+  { id: 'org-memory', labelKey: 'orgMemory', descriptionKey: 'descOrgMemory', icon: Brain, kind: 'static', path: '/organization/memory', scope: 'org', absorbTarget: 'knowledge' },
+  { id: 'content', labelKey: 'content', descriptionKey: 'descContent', icon: FileText, kind: 'static', path: '/content', scope: 'org', absorbTarget: 'work' },
+  { id: 'channel-posts', labelKey: 'channelPosts', descriptionKey: 'descChannelPosts', icon: Share2, kind: 'static', path: '/content/channel-posts', scope: 'org', absorbTarget: 'work' },
+  { id: 'org-members', labelKey: 'orgMembers', descriptionKey: 'descOrgMembers', icon: Users2, kind: 'static', path: '/organization/members', scope: 'org', absorbTarget: 'connect' },
+  { id: 'org-workforce', labelKey: 'workforce', descriptionKey: 'descWorkforce', icon: Bot, kind: 'static', path: '/organization/workforce', absorbTarget: 'connect' },
+  { id: 'org-roles', labelKey: 'orgRoles', descriptionKey: 'descOrgRoles', icon: Shield, kind: 'static', path: '/organization/roles', scope: 'org', absorbTarget: 'connect' },
+  { id: 'org-events', labelKey: 'orgEvents', descriptionKey: 'descOrgEvents', icon: Zap, kind: 'static', path: '/organization/events', scope: 'org', absorbTarget: 'connect' },
+  // story #1981 배지 축(inboxPendingCount)은 app-sidebar.tsx에 그대로 남는다(다음
+  // 카드 #3823 「오늘」 배지가 재사용) — 이 항목 자체가 사이드바에서 빠져도 그
+  // 폴링·SSE 재조회 로직은 안 건든다(다음 카드가 그 값을 소비할 자리를 다시 연결).
+  // absorbTarget='settings'는 임의값 — inbox는 MOBILE_HUB_EXCLUDE_IDS로 VISIBLE_
+  // LEGACY_NAV_ITEMS에서 이미 걸러져 groupVisibleLegacyByTarget이 절대 안 본다
+  // (타입만 채우는 자리, 렌더 영향 0).
+  { id: 'inbox', labelKey: 'inbox', descriptionKey: 'descInbox', icon: Inbox, kind: 'static', path: '/inbox', badgeKey: 'inbox', absorbTarget: 'settings' },
+  { id: 'settings', labelKey: 'settings', descriptionKey: 'descSettings', icon: Settings, kind: 'static', path: '/settings', absorbTarget: 'settings' },
 ];
 
 // story #2682(S2)에서 more/page.tsx 로컬 상수였던 것을 story #2684(S4)에서 이리 옮긴다 —
@@ -157,7 +209,15 @@ export const NAV_GROUPS: NavGroupConfig[] = [
 // 맨 뒤로) 이제 둘이 정확히 같은 순서다(둘 다 "4구역→관리→설정"). 이 상수 자체는 그대로 두되
 // (모바일이 자기 순서를 자기 상수로 명시하는 SSOT 원칙은 무변화), 예전 "데스크톱과 다르다"는
 // 전제였던 주석은 더 이상 사실이 아니라 정정한다.
-export const MOBILE_HUB_GROUP_ORDER = ['now', 'work', 'trust', 'knowledge', 'organization', 'settings'];
+//
+// story #3824(UX-v3·FE 1, 페드루 PO 確定 2026-09-13 조건②) — NAV_GROUPS가 5항목(now·
+// dev·results·connect-rules)으로 줄며 옛 marketing·trust·knowledge·organization·
+// settings 그룹 자체가 사라졌다 — 이 순서 상수도 그 4개만 남긴다(더는 없는 그룹 id는
+// more/page.tsx의 `.find()`가 그냥 undefined로 걸러낼 뿐 에러는 아니지만, 죽은 이름을
+// 남겨 두면 다음 사람이 "이 그룹이 아직 있나" 헷갈린다). 5항목 밖으로 빠진 17개
+// (LEGACY_NAV_ITEMS)는 이 순서 상수가 아니라 more/page.tsx가 그 배열을 직접 얹는
+// «그 밖의 화면» 카드 하나로 뒤에 따라붙는다(모바일 회귀 0, PO 조건②).
+export const MOBILE_HUB_GROUP_ORDER = ['now', 'dev', 'results', 'connect-rules'];
 
 // flow·inbox·chats는 바텀 탭(지금/결재/채팅)이 이미 depth 1로 커버한다(doc §2.2 "자주" 축) —
 // 허브에 또 실으면 같은 목적지로 가는 진입점이 두 개가 되고 "몇 탭"의 의미가 흐려진다.
@@ -168,10 +228,70 @@ export const MOBILE_HUB_GROUP_ORDER = ['now', 'work', 'trust', 'knowledge', 'org
 // 의도는 그대로(빠른 접근 대상)라 exclude id도 같이 개명.
 export const MOBILE_HUB_EXCLUDE_IDS = new Set(['board', 'inbox', 'chats']);
 
+// story #3836(UX-v3·셸 후속, 선생님 지적 2026-09-14 00:47Z·PO 確定 00:49Z) — 데스크톱
+// 사이드바 「더보기」 접힘 절과 모바일 /more 「그 밖의 화면」 카드 둘 다 LEGACY_NAV_ITEMS
+// 에서 MOBILE_HUB_EXCLUDE_IDS(바텀 탭이 이미 depth 1로 커버하는 항목)를 뺀 같은
+// 부분집합을 쓴다 — 한 곳에서 필터링해 두 소비처가 각자 같은 식을 다시 쓰다 하나만
+// 갱신되는 drift를 막는다(AC2/AC3). ⌘K 팔레트(command-palette.tsx)는 폭 제약이 없어
+// 이 제외를 적용하지 않는다 — LEGACY_NAV_ITEMS 전부를 그대로 쓴다(그 결정은 story
+// #3824 조건①에서 이미 確定, command-palette.test.tsx의 3-way 대조가 그 비대칭을
+// 문서화한다).
+export const VISIBLE_LEGACY_NAV_ITEMS: LegacyNavItemConfig[] = LEGACY_NAV_ITEMS.filter(
+  (item) => !MOBILE_HUB_EXCLUDE_IDS.has(item.id),
+);
+
+// story #3855(customer-zero·셸) — 「더보기」/모바일 /more가 이 함수 하나로 묶음을
+// 얻는다(app-sidebar.tsx·more/page.tsx 둘 다 소비, 3836 SSOT 관례 그대로 확장). 머리말
+// 순서는 카드 AC1이 못박은 고정 순서 — 알파벳/등록 순이 아니라 §② 흡수 지도의 서술
+// 순서(일감→연결·규칙→지식→이력→설정) 그대로다.
+const ABSORB_TARGET_ORDER: AbsorbTarget[] = ['work', 'connect', 'knowledge', 'history', 'settings'];
+
+// 머리말 낱말은 전부 기존 키 재사용(§② 낱말 그대로, 신규 낱말 0) — zoneDev="일감"·
+// zoneConnectRules="연결·규칙"은 NAV_GROUPS가 이미 쓰는 값(같은 화면 같은 낱말),
+// zoneKnowledge="지식"은 doc a699be00 §② 초안에서 쓰였다가 소비처 없이 남아있던
+// 고아 키를 이 카드가 첫 실소비로 되살린다(그랩 확認 — 이 카드 前엔 0 콜사이트).
+// settings="설정"도 NAV_GROUPS 기존 항목 라벨과 동일 낱말 재사용. zoneHistory만
+// 대응하는 기존 키가 없어 이 카드에서 신규 1건(ko/en 한 벌, §⑤ 해요체 축 밖 — 명사
+// 머리말이라 어미 자체가 없음).
+const ABSORB_TARGET_LABEL_KEYS: Record<AbsorbTarget, string> = {
+  work: 'zoneDev',
+  connect: 'zoneConnectRules',
+  knowledge: 'zoneKnowledge',
+  history: 'zoneHistory',
+  settings: 'settings',
+};
+
+export interface LegacyNavGroup {
+  target: AbsorbTarget;
+  labelKey: string;
+  items: LegacyNavItemConfig[];
+}
+
+// AC1 — VISIBLE_LEGACY_NAV_ITEMS를 머리말별로 묶고 빈 묶음은 배열에서 아예 뺀다(길이
+// 0인 그룹을 렌더 쪽이 `.filter`로 또 거르게 하지 않는다 — «묶음째 사라짐»의 근본
+// 위치가 이 함수 하나여야 데스크톱·모바일이 매번 그 규칙을 재발명 안 한다, AC4).
+export function groupVisibleLegacyByTarget(): LegacyNavGroup[] {
+  return ABSORB_TARGET_ORDER.map((target) => ({
+    target,
+    labelKey: ABSORB_TARGET_LABEL_KEYS[target],
+    items: VISIBLE_LEGACY_NAV_ITEMS.filter((item) => item.absorbTarget === target),
+  })).filter((group) => group.items.length > 0);
+}
+
 // story #2930(P0-G) I2 — 챗은 4구역 밖 1급 「center」(중심 꽃, 선생님 확定). NAV_GROUPS
 // 배열엔 없다(구역에 묻지 않는다는 게 이 승격의 요점) — 데스크톱 사이드바 상단 고정 카드
 // (app-sidebar.tsx)와 모바일 FAB(I4가 배선)가 이 한 항목을 직접 소비한다. path/badgeKey는
 // 옛 'now' 그룹 소속이던 시절과 완전히 동일(불변) — 위치만 승격.
 export const CHAT_CENTER_ITEM: NavItemConfig = {
-  id: 'chats', labelKey: 'chats', icon: MessageSquare, kind: 'static', path: '/chats', badgeKey: 'chats',
+  // story #fddd0e6b(IA·⑦ 전체 메뉴) — chats는 NAV_GROUPS 밖(구역 없는 1급 승격)이라
+  // /more의 23개 완전성 대상은 아니지만, NavItemConfig 타입 자체는 descriptionKey를
+  // 요구한다(팔레트 등 다른 소비처가 이 항목도 같은 타입으로 다룬다) — 값은 채운다.
+  id: 'chats', labelKey: 'chats', descriptionKey: 'descChats', icon: MessageSquare, kind: 'static', path: '/chats', badgeKey: 'chats',
 };
+
+// story #d986fd6c(IA·S4)의 «뷰포트 높이 역산 접힘» 전제(필요 높이(px) = 615.5 + 32×N)는
+// 이 스토리(#f81657f8, 선생님 決 2026-09-09 01:28Z 「그냥 디폴트를 다 펼쳐두고 접을 수 있게
+// 하면 좋을 것 같다」)로 폐기됐다 — 기본값은 이제 뷰포트/활성 구역과 완전히 무관한 빈 Set
+// (전부 펼침)이다. 관계식·GroupItemCount·computeActiveZoneCollapsedGroupIds는 코드고고학이
+// 필요하면 git 이력(이 커밋 이전)에서 찾을 것 — 살아있는 추상으로 남겨두지 않는다.
+// 구역별 접기 토글+사람별 기억(app-sidebar.tsx의 collapsedOverrides)은 그대로다.

@@ -56,11 +56,32 @@ async def _resolve_work_item_stakeholders(
 ) -> set[uuid.UUID]:
     """work_item_type/work_item_id → 그 작업의 이해관계자(담당자·human owner·복수 assignee).
     타입별 필드가 제각각이라(story/task/goal 전부 다른 모델) 여기서 타입별 분기 — 코드베이스에
-    범용 헬퍼가 없어 이 스토리에서 신설(그라운딩 확認, #2620/#2617류 재사용 대상 없음)."""
+    범용 헬퍼가 없어 이 스토리에서 신설(그라운딩 확認, #2620/#2617류 재사용 대상 없음).
+
+    story #3340(선생님 4바퀴 실사고) — payload에 ``gate_requester_member_id``가 실려 있으면
+    (지금은 preset.gate.verdict 하나뿐, gate_service.py::_publish_gate_verdict_notification이
+    싣는다 — neutral_facts.requested_by_member_id 출처) work_item_type 분기와 무관하게 항상
+    이해관계자 집합에 합류시킨다. work item이 미배정이라 stakeholders가 빈 집합이어도 "이
+    게이트를 요청한 사람"에겐 도달해야 한다는 원칙 — 제네릭 키라 다른 이벤트도 같은 키를
+    실으면 별도 코드 없이 같이 커버된다.
+
+    story #3370(Phase0·마케팅운영 S5) AC1 — ``gate_draft_author_member_id``(neutral_facts.
+    draft_author_member_id 출처, recipe_gate_hooks.py::_build_approval_neutral_facts가
+    doc.created_by에서 채움)도 동일 관례로 합류시킨다 — "이 초안을 쓴 사람"도 판정 결과를
+    받아야 한다(§PO-2). ``ids``가 set이라 assignee·requester·author가 같은 사람이어도
+    구조적으로 한 번만 남는다(AC1 "동일 멤버는 한 번만 포함")."""
+    ids: set[uuid.UUID] = set()
+    _requester_raw = payload.get("gate_requester_member_id")
+    if isinstance(_requester_raw, str) and _requester_raw:
+        ids.add(_parse_uuid(_requester_raw, field_name="gate_requester_member_id"))
+    _author_raw = payload.get("gate_draft_author_member_id")
+    if isinstance(_author_raw, str) and _author_raw:
+        ids.add(_parse_uuid(_author_raw, field_name="gate_draft_author_member_id"))
+
     work_item_type = payload.get("work_item_type")
     work_item_id_raw = payload.get("work_item_id")
     if not work_item_type or not work_item_id_raw:
-        return set()
+        return ids
     work_item_id = _parse_uuid(work_item_id_raw, field_name="work_item_id")
 
     if work_item_type == "story":
@@ -72,7 +93,6 @@ async def _resolve_work_item_stakeholders(
                 Story.id == work_item_id, Story.org_id == org_id,
             )
         )).one_or_none()
-        ids: set[uuid.UUID] = set()
         if row is not None:
             ids |= {m for m in row if m is not None}
         extra = (await db.execute(
@@ -87,7 +107,9 @@ async def _resolve_work_item_stakeholders(
         assignee = (await db.execute(
             select(Task.assignee_id).where(Task.id == work_item_id, Task.org_id == org_id)
         )).scalar_one_or_none()
-        return {assignee} if assignee else set()
+        if assignee:
+            ids.add(assignee)
+        return ids
 
     if work_item_type in ("goal", "epic"):
         from app.models.pm import Goal
@@ -95,15 +117,18 @@ async def _resolve_work_item_stakeholders(
         assignee = (await db.execute(
             select(Goal.assignee_id).where(Goal.id == work_item_id, Goal.org_id == org_id)
         )).scalar_one_or_none()
-        return {assignee} if assignee else set()
+        if assignee:
+            ids.add(assignee)
+        return ids
 
-    # 미지원 work_item_type — fail-open(빈 집합)·경고 로그만. 발행 자체를 막지 않는다(전파선
-    # 해석 실패가 escalation까지 막으면 안 된다는 게 이 함수의 실패 정책 — best-effort).
+    # 미지원 work_item_type — fail-open(빈 집합·요청자만)·경고 로그만. 발행 자체를 막지
+    # 않는다(전파선 해석 실패가 escalation까지 막으면 안 된다는 게 이 함수의 실패 정책 —
+    # best-effort).
     logger.warning(
         "event_routing_resolver: unsupported work_item_type=%s for work_item_stakeholders",
         work_item_type,
     )
-    return set()
+    return ids
 
 
 async def _resolve_goal_owner(db: AsyncSession, *, org_id: uuid.UUID, payload: dict) -> set[uuid.UUID]:
@@ -123,6 +148,86 @@ async def _resolve_none(db: AsyncSession, *, org_id: uuid.UUID, payload: dict) -
     return set()
 
 
+async def _resolve_work_item_project_id(
+    db: AsyncSession, *, org_id: uuid.UUID, payload: dict,
+) -> uuid.UUID | None:
+    """story #3288 — recipe_role_binding이 project 스코프 바인딩을 찾으려면 work_item의
+    project_id가 필요하다. _resolve_work_item_stakeholders와 동일 타입 분기(중복이지만 그
+    함수는 담당자 id를, 이건 project_id를 뽑아 반환 shape이 달라 별도 함수로 유지 — 이후
+    공통화는 후속 리팩터, 이 스토리 스코프 밖)."""
+    work_item_type = payload.get("work_item_type")
+    work_item_id_raw = payload.get("work_item_id")
+    if not work_item_type or not work_item_id_raw:
+        return None
+    work_item_id = _parse_uuid(work_item_id_raw, field_name="work_item_id")
+
+    if work_item_type == "story":
+        from app.models.pm import Story
+
+        return (await db.execute(
+            select(Story.project_id).where(Story.id == work_item_id, Story.org_id == org_id)
+        )).scalar_one_or_none()
+    if work_item_type == "task":
+        from app.models.pm import Task
+
+        return (await db.execute(
+            select(Task.project_id).where(Task.id == work_item_id, Task.org_id == org_id)
+        )).scalar_one_or_none()
+    if work_item_type in ("goal", "epic"):
+        from app.models.pm import Goal
+
+        return (await db.execute(
+            select(Goal.project_id).where(Goal.id == work_item_id, Goal.org_id == org_id)
+        )).scalar_one_or_none()
+
+    logger.warning(
+        "event_routing_resolver: unsupported work_item_type=%s for recipe_role_binding project lookup",
+        work_item_type,
+    )
+    return None
+
+
+async def _resolve_recipe_role_binding(
+    db: AsyncSession, *, org_id: uuid.UUID, payload: dict, definition_key: str,
+) -> set[uuid.UUID]:
+    """story #3288(축2-ⓐ) — stage_metadata.role은 표시 텍스트뿐이라, 발행 시점에 "이 stage는
+    실제로 누구인가"를 recipe_role_bindings에서 조회한다. project 스코프 바인딩이 org 전역
+    바인딩보다 우선(project_id IS NOT NULL 행을 먼저 찾고 없으면 project_id IS NULL로 폴백).
+
+    ⛔PO 확定(2026-09-01) 「모르면 안 준다」 — 바인딩이 없으면 빈 집합을 반환한다(다른
+    server_derived류 폴백으로 조용히 대체하지 않음 — 미배정 stage가 엉뚱한 이해관계자에게
+    새는 것 자체가 방지 대상)."""
+    stage = payload.get("stage")
+    if not stage:
+        return set()
+
+    from app.models.recipe_role_binding import RecipeRoleBinding
+
+    project_id = await _resolve_work_item_project_id(db, org_id=org_id, payload=payload)
+
+    if project_id is not None:
+        agent_id = (await db.execute(
+            select(RecipeRoleBinding.agent_member_id).where(
+                RecipeRoleBinding.org_id == org_id,
+                RecipeRoleBinding.project_id == project_id,
+                RecipeRoleBinding.event_definition_key == definition_key,
+                RecipeRoleBinding.stage == stage,
+            )
+        )).scalar_one_or_none()
+        if agent_id is not None:
+            return {agent_id}
+
+    agent_id = (await db.execute(
+        select(RecipeRoleBinding.agent_member_id).where(
+            RecipeRoleBinding.org_id == org_id,
+            RecipeRoleBinding.project_id.is_(None),
+            RecipeRoleBinding.event_definition_key == definition_key,
+            RecipeRoleBinding.stage == stage,
+        )
+    )).scalar_one_or_none()
+    return {agent_id} if agent_id is not None else set()
+
+
 # SERVER_DERIVED_TARGETS(event_definition_registry.py) 전체를 커버해야 한다 — 모듈 로드
 # 시점에 어긋나면 즉시 ImportError로 드러나게(운영 중 조용한 미해석 대신).
 _SERVER_DERIVED_RESOLVERS = {
@@ -138,10 +243,21 @@ assert set(_SERVER_DERIVED_RESOLVERS) == set(SERVER_DERIVED_TARGETS), (
 
 async def resolve_routing_leg(
     leg: dict, *, payload: dict, org_id: uuid.UUID, db: AsyncSession,
+    definition_key: str | None = None,
 ) -> set[uuid.UUID]:
     """routing.escalation 또는 routing.broadcast 한 leg를 실제 member_id 집합으로. leg는
     이미 validate_event_routing()을 통과한 정의에서 온 것을 전제(등록 시점 계약 검증 완료 —
-    여기서 kind/target 모양을 다시 의심하지 않는다, 값 해석만)."""
+    여기서 kind/target 모양을 다시 의심하지 않는다, 값 해석만).
+
+    definition_key: kind="recipe_role_binding"일 때만 필수(story #3288) — 그 외 kind는 안 씀,
+    기존 호출부(#2633) 무회귀 위해 기본값 None."""
+    if leg["kind"] == "recipe_role_binding":
+        if not definition_key:
+            raise ValueError("recipe_role_binding 해석에는 definition_key가 필요합니다.")
+        return await _resolve_recipe_role_binding(
+            db, org_id=org_id, payload=payload, definition_key=definition_key,
+        )
+
     if leg["kind"] == "payload_field":
         field = leg["member_id_field"]
         value = payload.get(field)

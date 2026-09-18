@@ -8,15 +8,29 @@ on:
     # base 재타겟도 새 런을 튼다 — required 3잡(alembic-fresh-db·backend-test·ci)엔
     # changes.base skip-필터를 걸지 않는다(그 잡들의 기존 `if: always()`가 스킵-캐스케이드
     # 방지용이라, skip 조건을 더하면 그 방지를 무력화한다 — [[ci-stuck-c-d-remedy-design-20260822]]
-    # landmine 참고). title/body 편집에도 전체 재실행되지만 PR#3324의 concurrency그룹이
-    # 연속 편집 시 구run을 자동취소해 낭비를 완화한다.
+    # landmine 참고). title/body 편집에도 전체 재실행된다 — 이건 story #3636이 아래
+    # concurrency.group에서 별도 격리한다(낭비는 있지만 산 run을 더는 안 죽인다).
     types: [opened, synchronize, reopened, edited]
     branches: [main, develop]
   push:
     branches: [main, develop]
 
+# story #3636(CI·소형, 페드루 PO 確定 2026-09-07) — #3972 실사고: `edited`가 PR **본문/
+# 제목만** 편집해도 발화해(GitHub이 base 재타겟과 구분 안 함) 같은 head에 새 run이 하나
+# 더 생기고, 이 concurrency 그룹이 같아 cancel-in-progress가 **아직 돌고 있던 산 run의
+# 잡**을 즉시 죽였다(PO가 새 run을 pending 중복으로 오인해 취소 → 산 run 0 → 재가동
+# ≈15분 손실). job-level `if:`로는 이 취소 자체를 못 막는다(취소는 새 run이 이 그룹에
+# 큐잉되는 순간 발화 — job의 if 평가보다 먼저다). 그래서 group 자체를 조건부로: `edited`
+# 이벤트인데 `changes.base`가 없으면(=base 안 바뀐 본문/제목 편집) 그 run만 run_id로
+# 격리된 자기 그룹에 넣어 — 옛(진짜) run과 아예 안 겹쳐 취소가 안 걸린다. base가 실제로
+# 바뀐 재타겟(#2912/#3317 의도)·opened/synchronize/reopened·push는 전부 그대로 안정
+# 그룹을 공유해 기존 취소 동작을 그대로 유지한다.
+# ⚠️낭비 축(선언) — 본문/제목만 편집한 그 throwaway run은 격리된 자기 그룹에서 required
+# 3잡을 「전량」 돈다(job/step skip 없음 — story #2555/22436b87의 "skip=required 체크
+# 애매" landmine을 그대로 피한다). 즉 같은 head SHA를 두 번 완주하는 CI 낭비(연속 편집마다
+# 반복될 수 있다)는 그대로 남는다 — 정확성(산 run이 안 죽는다)과 맞바꾼 것.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}${{ (github.event_name == 'pull_request' && github.event.action == 'edited' && github.event.changes.base == null) && format('-edited-only-{0}', github.run_id) || '' }}
   cancel-in-progress: true
 
 jobs:
@@ -37,6 +51,7 @@ jobs:
     timeout-minutes: 3
     outputs:
       backend_relevant: ${{ steps.scope.outputs.backend_relevant }}
+      gateway_relevant: ${{ steps.scope.outputs.gateway_relevant }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -55,30 +70,45 @@ jobs:
           # 컨텍스트에서만 돈다(design-review-gate.yml의 AC8과 같은 fail-closed 원칙).
           if [ -z "${BASE_SHA}" ] || [ -z "${HEAD_SHA}" ]; then
             echo "backend_relevant=true" >> "$GITHUB_OUTPUT"
-            echo "PR 컨텍스트 아님(push 이벤트 등) — fail-closed로 백엔드 전량 실행."
+            echo "gateway_relevant=true" >> "$GITHUB_OUTPUT"
+            echo "PR 컨텍스트 아님(push 이벤트 등) — fail-closed로 백엔드·gateway 전량 실행."
             exit 0
           fi
           CHANGED="$(git diff --name-only "${BASE_SHA}...${HEAD_SHA}")"
           echo "changed files:"
           echo "${CHANGED}"
-          # 이 allowlist에 «전부» 속하는 diff만 백엔드-무관으로 본다 — 모르는 경로가 하나라도
-          # 있으면 fail-closed(백엔드 전량 실행). packages/{db,shared,core-storage,storage-api}
-          # 포함 packages/* 전부 TS-only(package.json+tsconfig뿐, .py 파일 0개 확認,
-          # 2026-08-16) — backend Python 런타임과 언어 경계로 격리돼 있다. backend/·ee/·
-          # infra/·supabase/·connectors/·scripts/(루트)·.github/는 이 allowlist 밖(모르면
-          # 포함 안 함 — 특히 .github/는 이 워크플로 자신의 안전을 위해 항상 백엔드-관련으로 본다).
-          NON_SAFE="$(printf '%s\n' "${CHANGED}" \
-            | grep -Ev '^docs/|\.md$|^apps/web/|^packages/' || true)"
-          if [ -z "${NON_SAFE}" ] && [ -n "${CHANGED}" ]; then
-            echo "backend_relevant=false" >> "$GITHUB_OUTPUT"
-            echo "전 변경 파일이 백엔드-무관 allowlist(docs/·*.md·apps/web/·packages/) 안 — 백엔드 무거운 잡 skip 대상."
-          else
+
+          # story #3897(2026-09-15, 3889 사고 처방) — 판정 로직 전체(allowlist 후보 +
+          # backend/tests/**가 «코드로» 참조하는 FE 경로 접촉 여부)는 check_backend_relevant_
+          # diff.sh로 뽑아 독립 테스트한다(check_realtime_relevant_diff.sh와 같은 이유 —
+          # 임시 git repo만으로 단위 검증). 4294(3889)가 apps/web/messages/ko.json을 바꿨는데
+          # test_3815_youtube_publish.py가 그 파일을 직접 읽어 BE i18n_catalog와 대조하는데도
+          # 이 job의 예전 판정(allowlist 후보만 봄)이 그 참조를 몰라 develop CI에서만 RED가
+          # 터졌다(PR 자체 CI는 스킵 때문에 success). exit 0=관련(전량 실행)·exit 1=무관(skip).
+          set +e
+          bash backend/scripts/check_backend_relevant_diff.sh "${BASE_SHA}" "${HEAD_SHA}"
+          SCOPE_RC=$?
+          set -e
+          if [ "${SCOPE_RC}" -eq 0 ]; then
             echo "backend_relevant=true" >> "$GITHUB_OUTPUT"
-            echo "allowlist 밖 변경 있음(또는 변경 0건) — fail-closed로 백엔드 전량 실행."
-            if [ -n "${NON_SAFE}" ]; then
-              echo "allowlist 밖 파일:"
-              echo "${NON_SAFE}"
-            fi
+          else
+            echo "backend_relevant=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          # story #3273(CI사각) — support-gateway는 backend와 반대 방향 필터가 안전하다.
+          # backend는 packages/ 등 넓은 코드베이스에 걸쳐 있어 "안전 확定" allowlist(스킵 대상)를
+          # 좁게 잡는 게 맞지만, support-gateway는 그 자체가 "0 fleet 자격"(app/config.py 상단
+          # 주석) — 자기 디렉토리 밖 어떤 코드도 import하지 않는 게 설계 불변식이다. 그래서
+          # 여기는 "관련 확定" allowlist(실행 대상)를 좁게 잡는 쪽이 더 안전하다 — 이 워크플로
+          # 파일 자체가 바뀔 때도 돈다(자기 안전).
+          GATEWAY_CHANGED="$(printf '%s\n' "${CHANGED}" \
+            | grep -E '^support-gateway/|^\.github/workflows/ci\.yml$' || true)"
+          if [ -n "${GATEWAY_CHANGED}" ] || [ -z "${CHANGED}" ]; then
+            echo "gateway_relevant=true" >> "$GITHUB_OUTPUT"
+            echo "support-gateway/ 변경 있음(또는 변경 0건) — gateway pytest 실행."
+          else
+            echo "gateway_relevant=false" >> "$GITHUB_OUTPUT"
+            echo "support-gateway/ 밖 변경만 있음 — gateway pytest skip 대상."
           fi
 
   alembic-fresh-db:
@@ -89,7 +119,14 @@ jobs:
     # 안 스텝의 fail-closed(`!= 'false'`, 아래)가 전혀 무의미해진다 — 잡 자체가 안 돈다.
     # always()로 무조건 돌게 하고, 안에서 출력이 비어 있으면(=위 job 실패) 스텝 조건이
     # fail-closed로 정상 실행된다.
-    if: always()
+    #
+    # story #3929(2026-09-15, PO 지시) — `edited`가 base 변경 없이(title/body만) 발화하면
+    # 이 잡을 명시적으로 skip한다. 이건 위 landmine과 다른 클래스다 — GitHub Actions는
+    # "job이 자신의 `if:` 조건으로 skip되면 그 체크는 Success로 보고"하지만(트러블슈팅
+    # 문서 확認, 2026-09-15), "job이 실패한 `needs` 의존성 때문에 cascade로 skip되면 성공
+    # 처리가 안 되고 머지를 막을 수 있다" — 전자(명시적 조건)만 쓰고 always()는 그대로
+    # 둔다(cascade-skip 방지는 여전히 유효, 이 조건은 그 위에 AND로 얹는다).
+    if: always() && (github.event.action != 'edited' || github.event.changes.base != null)
     runs-on: ubuntu-latest
     # story 8236bbc3(2026-07-03): 217초 실측(전체 스위트 3391개 대다수, 비파괴 real-DB 84개
     # 파일 포함) + 파괴적 54개 파일 격리 순회 오버헤드 버퍼. 규모상 샤딩 불요(설계 §1-D).
@@ -327,6 +364,72 @@ jobs:
   # story #2330 AC6 — env.py(PR#2661)의 "autocommit_block()은 이 프로젝트에서 원리적으로
   # 못 쓴다" 주석은 «읽어야» 서는 것이었다(주석만으로는 다음 사람이 또 쓸 수 있다). grep
   # 가드로 승격한다 — 마이그레이션 파일에 그 호출이 들어오면 CI가 빨개진다.
+  # story #2476(결제②-A1후속 재그라운딩, 2026-09-01) — legacy `subscriptions`·
+  # `subscription_checkout_sessions` 테이블은 OSS(이 레포)에서 참조 0건이지만 死 테이블은
+  # 아니다(docs/pk-triage-orm-unmodeled.md, story a74bdc84 — 별도 SaaS 제품이 같은 물리
+  # DB를 라이브로 쓰는 중). OSS 정본은 org_subscriptions뿐 — 이 lint는 「참조 0」을 계수
+  # 가능하게 유지한다(새 코드가 legacy 테이블을 다시 끌어오면 즉시 빨강).
+  legacy-subscriptions-reuse-lint:
+    name: legacy subscriptions reuse lint (guard, story #2476)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Scan backend/app for legacy subscriptions table reuse
+        working-directory: backend
+        run: python3 scripts/lint_legacy_subscriptions_reuse.py
+
+  # story #3674(BE 確定, 페드루 PO 確定 2026-09-07) — "오늘"(캘린더 날짜) 계산의
+  # 프로세스-로컬/무조건-UTC 직접 호출(date.today()·utcnow().date()·now(timezone.utc)
+  # .date())을 막는다. 3665(#4020)가 UTC 고정으로 한 클래스(환경마다 다른 오늘)를
+  # 닫았지만, 그 UTC 고정 자체가 "조직의 오늘"(org.timezone)을 무시하는 다음 결함
+  # 클래스였다 — org_time.py 헬퍼(org_today 등)로만 계산하도록 강제한다.
+  org-today-direct-call-lint:
+    name: org today direct call lint (guard, story #3674)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Scan backend/app for org-tz-unaware "today" calls
+        working-directory: backend
+        run: python3 scripts/lint_org_today_direct_call.py
+
+  # story #2255(69d7380e, 2026-07-28~09-02) — app/models/*.py에 __tablename__ 보유 모델이
+  # 새로 생겼는데 app/models/__init__.py에 import 안 되면 create_all()이 그 테이블을 조용히
+  # 안 만든다(#2201이 처음 적발한 결함 클래스, 11개 중 10개가 이 스토리로 뒤늦게 등재됨 —
+  # 등재 도중 이 가드로 5개가 «독립적으로 또» 새 있던 것도 같이 적발돼 함께 정리됨). 정적
+  # AST 스캔뿐(런타임 import 0회) — 정상 경로 오버헤드 없음. story #2662의 실패-시점 진단
+  # 가드와 보완 관계(겹치지 않음, 각 스크립트 docstring 참고).
+  model-registration-completeness-lint:
+    name: model registration completeness lint (guard, story #2255)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Scan app/models for unregistered __tablename__ models
+        working-directory: backend
+        run: python3 scripts/lint_model_registration_completeness.py
+
+  # story #3647(CI·QA 관문·소형·긴급, 페드루 PO 確定 2026-09-07) — qa-review-gate.yml의
+  # qa-verdict-codex-session-check 액션이 부르는 판정 로직(infra/qa_verdict_codex_
+  # session_check.py::missing_codex_session_lines)이 순수 함수라 pytest 없이도 자기
+  # 자신에 --selftest로 픽스처를 심었다(story #3592 verify-no-new-repeated-row-action-
+  # names의 --selftest 관례 그대로, 새 테스트 러너 배선 0). 이 job은 그 판정 로직
+  # 자체의 회귀를 매 PR에서 잡는다 — qa-review-gate.yml 자신은 이 로직을 "실제 qa:pass
+  # PR"에만 태우므로 회귀가 나도 그 순간까지 조용할 수 있다.
+  qa-verdict-codex-session-check-selftest:
+    name: QA verdict codex session check selftest (guard, story #3647)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Run codex session/model line check selftest fixtures
+        run: python3 infra/qa_verdict_codex_session_check.py --selftest
+
   alembic-no-autocommit-block:
     name: Alembic migrations — no autocommit_block() (guard)
     runs-on: ubuntu-latest
@@ -430,6 +533,62 @@ jobs:
             # 스킵됐나?"와 헷갈리지 않게.
             echo "baseline growth check skipped: no comparison base ($COMPARE_LABEL에 query_sentinel_baseline.txt 없음 — 이 PR이 그 파일을 «처음 도입»하는 중이면 정상이다, story #2335 자신이 그 경우다. 다음 PR부터는 develop에 파일이 있어 실제 비교가 돈다)"
           fi
+
+  # story #3779(1층, 페드루 PO 處方 2026-09-10) — BE app/ 전수의 한글 사용자 문장이 더
+  # 늘지 않게 얼린다. grandfather 베이스라인(scripts/korean_user_strings_baseline.txt):
+  # 이 lint 도입 시점 develop에 이미 있던 1308건은 실패시키지 않는다 — 베이스라인에 없는
+  # **새** 한글 문자열만 여기서 빨개진다(story #2335 query-sentinel과 동일 계약).
+  be-korean-user-strings-lint:
+    name: BE 한글 사용자 문장 재발 가드 (guard, story #3779)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Scan app/ for new hardcoded Korean user-facing strings
+        working-directory: backend
+        run: python3 scripts/verify_no_new_korean_user_strings.py
+      # story #2335와 동일 계약 — 베이스라인은 «줄기만» 허용한다. story #3924 — 순수
+      # 집합 diff(구현, comm -13)는 기존 항목의 "문구만 바뀐" rename을 신규 추가로
+      # 오판했다(실 사고, PR#4316) — 판정 자체를 verify_no_new_korean_user_strings.py의
+      # --check-growth(파일 단위+전역 비증가)로 옮겨 로컬 스캐너와 같은 코드로 판정한다.
+      - name: "Verify baseline can only shrink (story #3779/#3924 — no new grandfather entries, rename-aware)"
+        working-directory: backend
+        run: |
+          set -e
+          PR_BASE_REF="${{ github.event.pull_request.base.ref }}"
+          PUSH_BEFORE_SHA="${{ github.event.before }}"
+          COMPARE_REF=""
+          COMPARE_LABEL=""
+          if [ -n "$PR_BASE_REF" ]; then
+            git fetch origin "$PR_BASE_REF" --depth=1 2>&1 | tail -3 || true
+            COMPARE_REF="FETCH_HEAD"
+            COMPARE_LABEL="PR base:$PR_BASE_REF"
+          elif [ -n "$PUSH_BEFORE_SHA" ] && [ "$PUSH_BEFORE_SHA" != "0000000000000000000000000000000000000000" ]; then
+            git fetch origin "$PUSH_BEFORE_SHA" --depth=1 2>&1 | tail -3 || true
+            COMPARE_REF="FETCH_HEAD"
+            COMPARE_LABEL="push-before:$PUSH_BEFORE_SHA"
+          fi
+          if [ -n "$COMPARE_REF" ] && git show "$COMPARE_REF:backend/scripts/korean_user_strings_baseline.txt" > /tmp/base_baseline.txt 2>/dev/null; then
+            echo "comparing against ($COMPARE_LABEL)"
+            python3 scripts/verify_no_new_korean_user_strings.py --check-growth /tmp/base_baseline.txt scripts/korean_user_strings_baseline.txt
+          elif [ -z "$COMPARE_REF" ]; then
+            echo "baseline growth check skipped: no comparison base (PR context 아님 + push-before 미상 — 예: 새 브랜치 최초 push)"
+          else
+            echo "baseline growth check skipped: no comparison base ($COMPARE_LABEL에 korean_user_strings_baseline.txt 없음 — 이 PR이 그 파일을 «처음 도입»하는 중이면 정상이다, story #3779 자신이 그 경우다. 다음 PR부터는 develop에 파일이 있어 실제 비교가 돈다)"
+          fi
+      # story #3931(2층, 페드루 PO 處方 2026-09-15) — 1층(위 두 스텝)은 "코드에 하드코딩된
+      # 한글이 있는가"만 본다. 이 스텝은 그 중 실제로 사용자에게 닿는 4표면(알림 title/
+      # body · i18n_catalog.py ko · HUMAN_SAFE_ERROR_MESSAGE_CODES 허용목록 raise site ·
+      # email_copy.py ko)만 스코프로 좁혀 "톤이 맞는가"를 본다 — baseline 없음(전면 전환
+      # 대상, 새 위반은 즉시 RED). 기존 잡("BE 한글 사용자 문장 재발 가드")에 스텝만
+      # 추가한다(새 job 신설 금지, AC5 明示 — 1층·2층이 서로 다른 잡이면 병렬 스케줄링에
+      # 따라 "1층은 초록인데 2층 결과가 아직 안 보인다" 류 착시가 생길 수 있다).
+      - name: "Verify user-facing tone (story #3931 2층 — 4 surfaces, no baseline)"
+        working-directory: backend
+        run: python3 scripts/verify_user_facing_tone.py
 
   project-access-403-lint:
     name: has_project_access 403 lint (guard, story #2342)
@@ -560,6 +719,22 @@ jobs:
         working-directory: backend
         run: python3 scripts/lint_commit_before_validate.py
 
+  # story #3370 회귀(페드루 PO 지시 2026-09-11) — raw auth.user_id(JWT는 users.id·API키는
+  # team_member.id 그대로)가 영속 멤버-id kwarg(*_member_id·resolver_id·actor_id)에 그대로
+  # 흘러드는 클래스를 원천봉쇄. 스크립트 docstring(scripts/lint_raw_auth_id_into_member_field.py)
+  # 참조 — baseline 없음(도입 시점 사후감사로 발견된 14건 전부 정정 또는 인라인
+  # `# member-id-lint: user-id-field` 예외 처리 완료, app/routers·app/services·ee 전 스윕 후 확認).
+  raw-auth-id-into-member-field-lint:
+    name: raw auth.user_id → member-id kwarg lint (guard, story #3370)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Scan for raw auth.user_id flowing into *_member_id/resolver_id/actor_id kwargs
+        working-directory: backend
+        run: python3 scripts/lint_raw_auth_id_into_member_field.py
+
   # story #2786(2026-08-19, PR#3088 DROP SCHEMA 906건 연쇄·PR#3217 DELETE FROM 26건 연쇄
   # — 같은 클래스 3일 내 2회) — 공유 실PG를 부수는 테스트 SQL 리터럴(WHERE 없는 DELETE FROM·
   # DROP SCHEMA·DROP TABLE·TRUNCATE)을 커밋 시점에 잡는다. 스크립트 docstring(scripts/
@@ -576,6 +751,51 @@ jobs:
         working-directory: backend
         run: python3 scripts/lint_destructive_test_sql.py
 
+  # story 23bf1913(CI 후속, 2026-09-04) — 오늘 4 PR(#3769·#3773·#3774·#3775)이 신규
+  # destructive_schema 파일을 shard-weights.json에 안 넣은 채 열려, story #3392의
+  # unweighted 가드가 **샤드 완주 뒤(~20분)**에야 그 사실을 알렸다(4×20분 낭비, 기능
+  # 결함 0건 — 전부 등재 누락). 이 job은 shard 분배 前 별도로 즉시 판정한다(discover
+  # +load_weights+unweighted_files_in을 shard_destructive_tests.py에서 그대로 재사용,
+  # 신규 로직 발명 0). Postgres 불요(--collect-only는 DB 연결 없음, 스크립트 docstring
+  # 실측 확認) — uv 설치+더미 JWT_SECRET/SECRET_KEY만으로 끝난다.
+  destructive-schema-weights-registered-lint:
+    name: destructive schema weights registered (guard, story 23bf1913)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      JWT_SECRET: ci-test-secret-at-least-32-chars-long
+      SECRET_KEY: ci-test-secret-at-least-32-chars-long
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: 'latest'
+      - name: Check every destructive_schema test file is registered in shard-weights.json
+        working-directory: backend
+        run: python3 scripts/lint_destructive_schema_weights_registered.py
+
+  # story a05da51b(2026-09-02, story #3330/PR#3711 CI flake 후속) — destructive_schema
+  # 마커 파일이 publish_registry_event/publish_preset_event/transition_gate/send_message
+  # (전역 엔진 app.core.database.engine의 background task 경로를 실제로 태우는 진입점)를
+  # 호출하면서 `_dispose_global_engine_after_test` 표준 fixture가 없으면 커밋 시점에 잡는다.
+  # 스크립트 docstring(scripts/lint_destructive_publish_path_dispose_fixture.py) 참조 —
+  # baseline 없음(도입 시점 위반 17건 전부 이 스토리에서 정리 후 켰다, grandfather 목록
+  # 없음 — PO 판정: "썩는 목록"). non-destructive 파일은 이 가드 대상이 아니다(story #3330의
+  # conftest.py 전역 autouse가 이미 구조적으로 커버 — test_a05da51b_dispose_fixture_
+  # guards.py가 그 메커니즘 자체의 회귀가드).
+  destructive-publish-path-dispose-fixture-lint:
+    name: destructive publish-path dispose fixture lint (guard, story a05da51b)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Scan tests/ for destructive files that publish without the global-engine dispose fixture
+        working-directory: backend
+        run: python3 scripts/lint_destructive_publish_path_dispose_fixture.py
+
   no-script-output-artifacts-lint:
     name: no script output artifacts lint (guard, story #3008)
     runs-on: ubuntu-latest
@@ -586,6 +806,30 @@ jobs:
       - name: Scan backend/scripts/ for committed ad-hoc diagnostic output (prod IP/PII residue — fk_null_survey_result.json class)
         working-directory: backend
         run: python3 scripts/lint_no_script_output_artifacts.py
+
+  # story #4012(critical·prod 승격 준비, 페드루 PO CHANGES 2026-09-17 실사고 방지) —
+  # cloudbuild.yaml의 bash 스텝 스크립트 안 로컬 셸 변수를 대문자 `$NAME`(단일 $)로 적으면
+  # Cloud Build가 자기 substitution으로 오인해 미정의 치환 오류로 빌드 제출 자체를 거부
+  # 한다(develop 관례: `$$NAME`/`$${NAME}` 이스케이프 필수). CI는 cloudbuild.yaml을 실제로
+  # gcloud builds submit하지 않으므로(GCP 인증 없는 CI 환경) 이 정적 가드가 유일한 사전
+  # 방어선 — 이번 PR의 신규 deploy-frontend 스텝이 이 실수를 낼 뻔했다(CHANGES로 수정).
+  # CHANGES 2차(PO 실측 정정, 2026-09-17) — 첫 버전은 대소문자 구분 없이 잡아 deploy-mcp
+  # 검산부의 소문자 셸 변수(served/expected/names)를 거짓 양성으로 baseline에 올렸었다.
+  # 실 dev 배포 로그로 소문자는 Cloud Build 치환 문법과 무관함을 확認 — 대문자만 스캔하도록
+  # 정정하고 baseline은 제거(정정된 판정으로는 실 위반 0건).
+  cloudbuild-shell-var-escaping-lint:
+    name: cloudbuild.yaml shell var escaping lint (guard, story #4012)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
+      - name: Self-test (positive/negative controls, including this PR's original bug + PO's lowercase evidence)
+        run: python3 scripts/verify-cloudbuild-shell-var-escaping.py --self-test
+      - name: Scan cloudbuild.yaml for unescaped uppercase shell variables
+        run: python3 scripts/verify-cloudbuild-shell-var-escaping.py
 
   # story #3216(위생·가드, 2026-08-29 · #3206 design 리뷰 유나 비차단 기록) — 메일 셸
   # 푸터의 회사정보(email.py 수동 사본)가 FE business-info.ts(전자상거래법 §10 SSOT)와
@@ -601,6 +845,22 @@ jobs:
       - name: Compare business-info.ts SSOT fields against email.py footer constants
         working-directory: backend
         run: python3 scripts/lint_business_info_email_footer_drift.py
+
+  # story #3528(재발 가드, 페드루 PO 근본처방 2026-09-12) — sandbox_publish.py류가
+  # 댓글 timestamp를 벽시계 고정 절대일시로 박아 뒀다가, 그 날짜를 벽시계가 지나는
+  # 순간부터 _is_publication_active의 「마지막 댓글 7일」 창이 영구 False가 돼 자가
+  # 회수 재생성 전체가 죽은 실사고(develop 2026-09-12 00:00Z 전수 RED). PG 불요
+  # 정적 AST 스캔이라 독립 job으로 배선.
+  no-hardcoded-iso-timestamp-lint:
+    name: backend/app ISO 절대 일시 하드코딩 lint (guard, story #3528)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Scan backend/app for hardcoded ISO absolute timestamps
+        working-directory: backend
+        run: python3 scripts/lint_no_hardcoded_iso_timestamp.py
 
   # story #3219(카디르 3라운드, 2026-08-30) — 이 검증은 run-migrations.test.sh 시나리오
   # [9]로 먼저 만들어졌지만 그 .test.sh는 CI 어디에도 안 걸려 있어(convention 자체가
@@ -694,12 +954,26 @@ jobs:
 
   # story #2293(2026-07-28) — destructive_schema 94개 파일 순차 격리 루프(파일마다 fresh
   # throwaway DB 생성/드롭)가 25분 천장에 붙었다(PR #2576 conclusion=cancelled, 77/94까지
-  # 전부 pass하고 시간만 모자라 잘림 — 빨간 것은 0건). 개별 테스트는 안 느리다(2026-07-28
-  # 실측 최대 16.24초, `infra/destructive-schema-shard-weights.json`) — 파일마다 붙는
-  # dropdb/createdb/CREATE EXTENSION 오버헤드가 94번 누적된 것이 벽시계 대부분이었다.
-  # `backend/scripts/shard_destructive_tests.py`가 그 오버헤드를 4-way로 병렬화한다
-  # (`test_shard_destructive_tests.py::test_partition_is_lossless_for_any_input`이 무손실을
-  # 고정 — 파일이 조용히 안 도는 샤드 경계 실패를 막는다).
+  # 전부 pass하고 시간만 모자라 잘림 — 빨간 것은 0건). 개별 테스트는 안 느리다 — 파일마다
+  # 붙는 dropdb/createdb/CREATE EXTENSION/create_all() 오버헤드가 누적된 것이 벽시계
+  # 대부분이었다. `backend/scripts/shard_destructive_tests.py`가 그 오버헤드를 4-way로
+  # 병렬화한다(`test_shard_destructive_tests.py::test_partition_is_lossless_for_any_input`이
+  # 무손실을 고정 — 파일이 조용히 안 도는 샤드 경계 실패를 막는다).
+  #
+  # story #3383(2026-09-03) — 파일 수가 94→200으로 늘며(+113%, 재측정 기준 (a) 자동 위반)
+  # create_all() 반복 자체가 다시 벽시계를 지배했다. "Build destructive-schema template DB"
+  # 스텝이 스키마를 샤드당 한 번만 만들어 템플릿으로 굳히고, 이후 매 파일은 그 템플릿을
+  # `createdb -T`로 복제(파일시스템 레벨, 초 단위)한다 — 자세한 이유는 그 스텝의 주석·
+  # `scripts/build_destructive_schema_template.py` docstring. **가중치 재측정 규칙**(AC2)
+  # — `infra/destructive-schema-shard-weights/`(디렉터리)는 실시간 측정이 아니다:
+  #   (a) discover 파일 수가 스냅샷 대비 +20% 이상 늘면(`shard_destructive_tests.py`의
+  #       `check_staleness()`가 매 실행 stderr에 경고를 찍는다 — CI를 막지는 않는다),
+  #   (b) 어느 샤드의 CI 벽시계가 다른 샤드 대비 1.5배 이상 벌어지면,
+  #   (c) 25분 천장 대비 여유가 다시 좁아지면(p95 15분 초과 — story #2285 AC4 기준 계승)
+  #   — 셋 중 하나라도 해당하면 재측정한다. 방법: 이 job의 "Run pytest" 스텝이 각 파일
+  #   실행 직전/직후 `date +%s`로 잰 elapsed를 로그에 남긴다(위 루프의 `_elapsed` 변수) —
+  #   그 값을 파일별로 모아 weights.json의 `files` 배열과 `total_files`/`total_sec`/
+  #   `measured_at`을 갱신한다(사람 손으로, 또는 로그 파싱 스크립트로 — 지금은 수동).
   #
   # ⛔이 job은 develop 필수 상태 체크가 아니다(파울로군 실측, 2026-07-28: 필수 체크는
   # "Backend pytest"·"Lint, Type Check, Test, Build"·"Alembic upgrade head (fresh DB)" 셋
@@ -712,18 +986,44 @@ jobs:
     needs: [detect-changed-scope]
     # alembic-fresh-db와 동일 이유 — always() 없으면 detect-changed-scope 실패 시 이 잡이
     # (backend-test의 필수 판정 근거) cascade로 스킵된다.
-    if: always()
+    # story #3929 — 이 잡이 바로 「edited 중복 run이 부하로 8샤드 timeout/실패」 실사고의
+    # 본체(오늘 4328/4329 사고). alembic-fresh-db와 동일 근거로 명시적 skip 추가(위 참고).
+    if: always() && (github.event.action != 'edited' || github.event.changes.base != null)
     runs-on: ubuntu-latest
-    # story #2285 AC4(2026-08-17 실측, develop 최근 10런): 각 샤드 4~6분 → 천장 25분 대비
-    # 여유 19~21분. 이 값은 story #2293(destructive-schema를 이 job으로 4-way 샤딩)이 옮겨온
-    # 뒤의 실측이라, 그 전(같은 job이 94개를 순차로 다 돌던 시절, 15m58s~18m32s·여유 6.5분)과
-    # 는 다른 상태다. 재검 기준: 이 샤드의 p95가 15분을 넘으면 값을 다시 본다(⛔"자주 터지니
-    # 올린다"가 아니라 근거 먼저 — story #2285 AC4).
-    timeout-minutes: 25
+    # story #3383 AC3/AC4(2026-09-03 실측, PR CI run 33750476433, 템플릿 DB 적용 후):
+    # 4샤드 9m31s·10m8s·9m21s·8m58s — 최대 10m8s·편차 1m10s(AC3 기준 12분/3분 이내 통과).
+    #
+    # story #3393(2026-09-03, 페드루 PO 착수 결정) — 4샤드는 develop 본류에서만 이 숫자를
+    # 낸다. #3742 shard 3(run 33760329991)·#3749 shard 0(run 33765617468)가 같은 날
+    # 20분대 timeout cancel(실패 파일 0건 — 순수 시간 부족)됐고, 그 두 run의 파일별 실측을
+    # weights.json 가중치와 대조하니 러너 배율 median 4.45x·mean 4.94x·p90 8.41x·max
+    # 12.18x(n=58). 이 배율을 현재 weights.json에 곱해 4~8샤드로 LPT 재시뮬레이션한 결과:
+    # 4샤드는 median 배율 하나만으로 예상 최대 20.8분(=실측 사고 두 건과 거의 일치, 우연한
+    # 극단 표본이 아니라 "이 정도 느린 러너는 4샤드에서 이미 한도에 붙는 상태"라는 뜻).
+    # 6샤드는 median에서만 살고(13.9분) p90(8.41x)에서 26.3분으로 다시 넘는다 — 8샤드는
+    # p90에서도 19.7분으로 버틴다(median 10.4분·mean 11.6분 여유 큼). "가끔 느린 러너"까지
+    # 방어하려면 median 아니라 p90을 기준으로 골라야 한다는 게 이 선택의 근거.
+    # ⛔천장을 올리는 처방은 기각(story a47e553a의 원 원칙, #2293)했다 — mean/p90 배율
+    # (23분/39분)까지 감안하면 천장을 얼마나 올려도 다음 느린 표본에서 다시 붙는다.
+    # 가중치 재실측도 기각 — weights.json은 파일 간 *상대* 비중이라 러너 전체가 느려지는
+    # *절대* 배율 문제엔 안 듣는다. 샤드 수 확대(설정값 변경만, 로직 무변화)가 유일하게
+    # 싸고 근본적인 처방.
+    #
+    # story #3541(2026-09-06, 페드루 PO 確定) — 8샤드 첫 실측 갱신. 단독 CI run(부하
+    # 없음) 11건·88 샤드 인스턴스: p50 7.7분·p90 9.3분·p95 11.0분·max 15.1분 — "실측
+    # 2배 이내" 규율(AC4 계승, #3383와 동일 원칙)을 이번엔 max 기준으로 적용해 30분.
+    # 같은 날 동시 PR CI run 4~5개(+develop push run) 부하 사고 2건(#3884 shard 5·7·
+    # #3886 shard 2 — 전부 20:16 정각에 kill, 로그는 파일마다 정상 통과 중이었고 형제
+    # 샤드는 7~10분 완주, attempt 2는 코드 무변경으로 통과)의 실측 배율(≥1.6x)까지
+    # 30분(정상 p95의 2.7배)이 덮는다. 큐잉이 아니라 실행 자체가 고르게 느려진 것으로
+    # 확認됐다(모든 샤드 startedAt 동일·특정 파일 병목 0) — 러너/Postgres IO 동시성
+    # 부하 문제라 weights.json 재실측(파일 간 *상대* 비중이라 안 듣는다)이나 샤드 수
+    # 확대(8→12, 각 샤드 p95≈7분 예상)는 이번엔 보류하고 재발 시 착수한다(선택 남김).
+    timeout-minutes: 30
     strategy:
       fail-fast: false  # 한 샤드 실패가 다른 샤드를 취소하면 "어디까지 진짜 돌았는지"가 흐려진다
       matrix:
-        shard: [0, 1, 2, 3]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
 
     services:
       postgres:
@@ -756,20 +1056,59 @@ jobs:
         with:
           version: 'latest'
 
+      # story #3392(CI 후속) — unweighted 파일 목록·평균 가중치·초과판정선을 /tmp/shard_meta.json
+      # 으로도 내보낸다("Run pytest" 스텝이 파일 완주 즉시 대조한다). --print-summary가 이미
+      # unweighted 목록을 stderr(=이 스텝 로그)에 찍으므로 AC1의 "로그 상단에 낸다(0건이면
+      # 그 사실도)"는 별도 echo 없이 여기서 충족된다.
+      # story #3393(페드루 PO 리뷰 정정, 2026-09-03 15:01Z) — matrix.shard 배열 길이와
+      # --shard-count가 각자 리터럴이면 한쪽만 바뀌어도 조용히 안 맞을 수 있다("한 곳에서만
+      # 파생"이 아니면 나는 사고 — 애초 별도 assert 스텝을 뒀으나 그 assert 자신의 리터럴도
+      # 셋째 지점이 돼 대조가 불완전했다). matrix.shard가 유일한 원천이 되도록
+      # `strategy.job-total`(matrix가 낳은 실제 job 수)을 --shard-count에 직접 흘려보낸다 —
+      # matrix.shard 배열 길이를 바꾸면 --shard-count가 자동으로 같은 값을 받으므로 별도
+      # assert가 불요하다.
       - name: Determine this shard's file list
         if: needs.detect-changed-scope.outputs.backend_relevant != 'false'
         working-directory: backend
         run: |
           uv run python scripts/shard_destructive_tests.py \
-            --shard-index ${{ matrix.shard }} --shard-count 4 --print-summary \
+            --shard-index ${{ matrix.shard }} --shard-count ${{ strategy.job-total }} --print-summary \
+            --meta-out /tmp/shard_meta.json \
             > /tmp/shard_files.txt
           echo "이 샤드(${{ matrix.shard }}) 파일 수: $(wc -l < /tmp/shard_files.txt)"
+
+      # story #3383(AC1) — destructive_schema 파일이 94→200개로 늘며(2026-07-28→09-03)
+      # 파일마다 자기 안에서 부르는 `Base.metadata.create_all()`(전체 스키마, 161개 테이블)
+      # 반복이 벽시계를 지배하게 됐다(로컬 재현: 파일당 create_all이 setup 시간의 대부분).
+      # 이 스키마를 이 샤드에서 딱 한 번만 만들어 템플릿으로 굳혀 두면, 이후 매 파일은
+      # `createdb -T`(파일시스템 레벨 복제, 초 단위)로 이미 스키마 있는 DB를 받는다 — 파일
+      # 자신의 create_all() 호출은 SQLAlchemy 기본 checkfirst=True라 그대로 안전하게 no-op이
+      # 된다(테스트 파일은 한 줄도 안 고친다).
+      - name: Build destructive-schema template DB (story #3383)
+        if: needs.detect-changed-scope.outputs.backend_relevant != 'false'
+        working-directory: backend
+        run: |
+          PGPASSWORD=sprintable dropdb -h localhost -U sprintable --if-exists sprintable_test_tpl
+          PGPASSWORD=sprintable createdb -h localhost -U sprintable sprintable_test_tpl
+          PGPASSWORD=sprintable psql -h localhost -U sprintable -d sprintable_test_tpl \
+            -c 'CREATE EXTENSION IF NOT EXISTS vector;'
+          DATABASE_URL=postgresql+asyncpg://sprintable:sprintable@localhost:5432/sprintable_test_tpl \
+          uv run python scripts/build_destructive_schema_template.py
 
       # story 8236bbc3: destructive_schema 마커 파일(Base.metadata.create_all/drop_all로 자체
       # 스키마 직접 관리)은 alembic-migrated 공유 DB에서 절대 실행하지 않는다 — 실측대로
       # drop_all()이 DB를 오염시켜 같은 세션 후속 테스트 전부를 연쇄 실패시킬 수 있다.
       # 파일마다 독립 throwaway DB(sprintable_test_iso)로 완전 격리한다(샤딩 전과 동일 원칙 —
-      # 바뀐 것은 «몇 개를 도는가»이지 «어떻게 격리하는가»가 아니다).
+      # 바뀐 것은 «몇 개를 도는가»이지 «어떻게 격리하는가»가 아니다). story #3383: 이제 그
+      # throwaway DB를 맨바닥(createdb+CREATE EXTENSION)이 아니라 위에서 만든 템플릿에서
+      # 복제한다(sprintable_test_tpl) — 격리 보장은 그대로(파일마다 독립 DB, 끝나면 drop).
+      # story #3392(AC2) — PR #3742 run 33760329991에서 60초 가드의 ::error::가 로그에
+      # 전혀 없었다: 이전 버전은 for 루프가 "전부" 끝난 뒤에야 slow_files를 출력했는데,
+      # 그 루프 도중 shard 자체가 20분 timeout으로 cancel되면 루프 뒤 코드는 영원히
+      # 실행되지 않는다 — 가드가 있어도 말할 기회 자체가 없었다. 이제 파일 완주 «즉시»
+      # (같은 반복 안에서) ::error::를 낸다 — 그 직후 shard가 cancel되더라도 이 줄은 이미
+      # 로그에 남는다. exit 1은 여전히 루프 뒤로 미룬다(#2293 철학 그대로 — 한 파일 때문에
+      # 나머지가 "조용히 미실행"되면 안 된다, 실측 가능한 만큼은 계속 잰다).
       - name: Run pytest (destructive schema — isolated fresh DB per file, this shard)
         if: needs.detect-changed-scope.outputs.backend_relevant != 'false'
         working-directory: backend
@@ -779,24 +1118,96 @@ jobs:
           # 파일은 조용히 미실행된 것과 동일한 결과가 된다(#2293이 막으려는 바로 그 실패 유형).
           mapfile -t files < /tmp/shard_files.txt
           echo "destructive files (shard ${{ matrix.shard }}): ${#files[@]}"
+
+          # story #3392(AC1) — "Determine this shard's file list" 스텝이 써 둔 unweighted
+          # 목록·초과판정선을 읽는다. meta 파일이 없거나 못 읽으면(방어적) 초과판정은
+          # 건너뛴다(0건 취급) — 이 가드의 부재가 기존 실패/60초 가드까지 죽이면 안 된다.
+          overage_threshold=999999
+          overage_multiplier="?"
+          unweighted_files=()
+          if [ -f /tmp/shard_meta.json ]; then
+            overage_threshold=$(jq -r '(.unweighted_overage_threshold_sec // 999999) | floor' /tmp/shard_meta.json 2>/dev/null || echo 999999)
+            overage_multiplier=$(jq -r '.unweighted_overage_multiplier // "?"' /tmp/shard_meta.json 2>/dev/null || echo "?")
+            mapfile -t unweighted_files < <(jq -r '.unweighted_files[]? // empty' /tmp/shard_meta.json 2>/dev/null)
+          fi
+          echo "unweighted 초과판정선: ${overage_threshold}s(story #3392) · unweighted 파일 ${#unweighted_files[@]}개"
+
           failed_files=()
+          overage_files=()
+          # story #3396 — 60초 절대 가드(story #3383 AC5)가 story #3393이 정식화한
+          # "느린 러너 표본"(median 4.45x~max 12.18x)과 정면으로 부딪혔다: PR #3753 run
+          # 33773872963 shard 0에서 test_3373_channel_connections.py가 168s(가중치
+          # 20.1s=8.4x)로 이 가드에 걸려 fail 났는데, 같은 shard의 다른 24개 파일도 전부
+          # median 5.91x로 튀어 있었다 — 그 파일 하나가 아니라 러너 전체가 느렸다는
+          # 뜻이다. 판정선을 이제 그 run 자신의 elapsed/weight 중앙값 배율로 스케일한다
+          # (shard_destructive_tests.py::slow_files_normalized, 표본 3개 미만이면 절대
+          # 60초로 폴백) — 이 판정은 그 run의 전체 표본이 있어야 계산되므로(파일 단위
+          # 즉시 판정이 원리적으로 불가능) 루프 안에서는 elapsed만 기록해 두고 루프가
+          # 끝난 뒤 한 번에 판정한다. exit 1은 여전히 여기서만 나므로 #2293/#3392의
+          # "실측 가능한 만큼은 계속 잰다" 철학은 무변화.
+          elapsed_file=$(mktemp)
           for f in "${files[@]}"; do
             echo "::group::isolated $f"
             PGPASSWORD=sprintable dropdb -h localhost -U sprintable --if-exists sprintable_test_iso
-            PGPASSWORD=sprintable createdb -h localhost -U sprintable sprintable_test_iso
-            PGPASSWORD=sprintable psql -h localhost -U sprintable -d sprintable_test_iso \
-              -c 'CREATE EXTENSION IF NOT EXISTS vector;'
+            PGPASSWORD=sprintable createdb -h localhost -U sprintable -T sprintable_test_tpl sprintable_test_iso
+            _t0=$(date +%s)
             ALEMBIC_DATABASE_URL=postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test_iso \
             PARITY_TEST_DATABASE_URL=postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test_iso \
             DATABASE_URL=postgresql+asyncpg://sprintable:sprintable@localhost:5432/sprintable_test_iso \
             uv run pytest -q "$f" || failed_files+=("$f")
+            _elapsed=$(( $(date +%s) - _t0 ))
+            echo "elapsed: ${_elapsed}s"
+            printf '%s\t%s\n' "$f" "$_elapsed" >> "$elapsed_file"
+            # story #3392(AC1) — unweighted 파일이 평균의 배수(threshold)를 실측으로
+            # 넘으면 경고가 아니라 실패다. weights.json에 없다는 이유로 "몰랐다"가 통하면
+            # 다음 신규 파일도 같은 사고를 반복한다. (unweighted 파일은 story #3396의
+            # 정규화 표본·판정 대상 모두에서 빠진다 — 이 가드가 계속 전담한다.)
+            for uw in "${unweighted_files[@]+"${unweighted_files[@]}"}"; do
+              if [ "$uw" = "$f" ] && [ "$_elapsed" -gt "$overage_threshold" ]; then
+                overage_files+=("$f (${_elapsed}s > ${overage_threshold}s)")
+                echo "::error::unweighted 파일이 평균의 ${overage_multiplier}배를 넘었다(story #3392 AC1): $f (${_elapsed}s > ${overage_threshold}s) — infra/destructive-schema-shard-weights/에 이 파일의 json을 추가하라."
+              fi
+            done
             echo "::endgroup::"
           done
           if [ "${#failed_files[@]}" -gt 0 ]; then
             echo "FAILED files: ${failed_files[*]}"
             exit 1
           fi
+          if [ "${#overage_files[@]}" -gt 0 ]; then
+            echo "unweighted 초과 파일(story #3392 AC1, 위 ::error:: 참고): ${overage_files[*]}"
+            exit 1
+          fi
+          uv run python scripts/shard_destructive_tests.py --check-elapsed "$elapsed_file"
+          slow_exit=$?
+          # story #3558(CI·소형) AC1 — 삭제(rm -f) 前에 등재값 대조용 산출물로 변환해
+          # 둔다(DB 준비를 제외한 순수 pytest wall time, `_t0`가 dropdb/createdb 뒤에서
+          # 시작하므로 이미 그 값 — 새 타이머 불요, 기존 elapsed_file을 그대로 재사용).
+          # 이 변환은 위 60초 가드 판정과 무관하게 항상 시도한다(느린 러너여도 산출물은
+          # 남겨야 다음 잡의 대조가 그 run을 볼 수 있다).
+          uv run python scripts/shard_destructive_tests.py --elapsed-to-json "$elapsed_file" /tmp/shard-durations-${{ matrix.shard }}.json --shard ${{ matrix.shard }}
+          rm -f "$elapsed_file"
+          if [ "$slow_exit" -ne 0 ]; then
+            echo "러너 정규화 60초 가드 초과(story #3396, 위 ::error:: 참고)"
+            exit 1
+          fi
           echo "OK: all ${#files[@]} isolated destructive-schema files passed (shard ${{ matrix.shard }})"
+
+      # story #3558(CI·소형) AC1 — 다음 잡("Require all destructive-schema shards")이
+      # 8개 샤드의 산출물을 모아 weights.json과 절대 배율(2배/0.5배) 경고 대조를 한다.
+      # `if: always()`(위 pytest 스텝이 실패해도 산출물은 남긴다 — 실패 원인 진단에도
+      # "이 run에서 각 파일이 실제로 얼마나 걸렸는지"가 유용하다).
+      # story #3890(2026-09-16) — retention 7일→1일. always()라 매 run(성공 포함) 8개씩
+      # 누적되는 게 원인 그 자체(#3864의 playwright-report always() 사고와 동형 클래스,
+      # 실측 4,846개·4.6MB) — 다음 잡이 그 run 안에서 바로 소비하니 하루면 충분하다.
+      - name: Upload shard durations (story #3558)
+        if: always() && needs.detect-changed-scope.outputs.backend_relevant != 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: shard-durations-${{ matrix.shard }}
+          path: /tmp/shard-durations-${{ matrix.shard }}.json
+          retention-days: 1
+          if-no-files-found: ignore
 
       - name: Skip reason (backend-irrelevant PR)
         if: needs.detect-changed-scope.outputs.backend_relevant == 'false'
@@ -807,7 +1218,11 @@ jobs:
     name: Backend pytest
     runs-on: ubuntu-latest
     needs: [backend-test-destructive, detect-changed-scope]
-    if: always()
+    # story #3929 — required 체크("Backend pytest") 자신. edited(base 무변)면 명시적
+    # skip(alembic-fresh-db 상단 주석 참고 — cascade-skip과 달리 required 체크가
+    # Success로 보고된다). always()는 그대로(detect-changed-scope 실패 시 cascade-skip
+    # 방지 목적 유지).
+    if: always() && (github.event.action != 'edited' || github.event.changes.base != null)
     # story #1982(2026-07-17): postgres service + real-PG env 배선. 이 갭은 story #1472
     # (2026-06-21)에서 이미 발견됐고, story 8236bbc3(#1619, 2026-07-03)이 "backend-test job
     # 무변경(회귀0 최대보수)"으로 의도적으로 유보했던 트레이드오프다 — 그 결과 `_REAL_DB_SKIP`
@@ -853,12 +1268,6 @@ jobs:
       SECRET_KEY: ci-test-secret-at-least-32-chars-long
 
     steps:
-      - name: Require all destructive-schema shards to have succeeded
-        if: needs.backend-test-destructive.result != 'success'
-        run: |
-          echo "backend-test-destructive result=${{ needs.backend-test-destructive.result }} — destructive-schema 94개의 유일한 실행처가 실패했거나 안 돎"
-          exit 1
-
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -866,6 +1275,82 @@ jobs:
         uses: astral-sh/setup-uv@v5
         with:
           version: 'latest'
+
+      # story #3558(CI·소형) AC2 — 8개 샤드가 낸 shard-durations-{n} 산출물을 모아
+      # weights.json과 절대 배율(2배/0.5배) 대조 «경고만»(원칙 — story #3653이 "성공인데
+      # 산출물 누락"이라는 새 결함 클래스에 한해 예외를 둔다, 아래 Audit 스텝 참고).
+      # backend-irrelevant PR이라 샤드가 스킵됐으면 산출물 자체가 없을 수 있어 download
+      # 단계를 continue-on-error로 감싼다(찾는 패턴이 0건이면 actions/download-artifact가
+      # 에러를 낸다 — 그게 이 필수 체크 잡을 죽이면 안 된다, story #2555의
+      # backend-irrelevant 우회 규율과 동형).
+      #
+      # story #3653(CI·가드, 페드루 PO 確定 2026-09-07) — 이 Download/Audit 2스텝을
+      # "Require all destructive-schema shards"(아래) **앞으로** 옮겼다. 그라운딩 —
+      # 옛 순서(Require 먼저, exit 1 무조건)에서는 샤드 하나라도 실패/타임아웃이면
+      # (needs.backend-test-destructive.result != success) Require가 먼저 죽어 이
+      # Audit이 통째로 스킵됐다 — 다른 7개 정상 샤드의 실측조차 집계되지 못했다(가장
+      # 드리프트가 클 타임아웃 상황에 가드가 침묵하는 사각지대). 이제 이 잡의 첫
+      # 스텝들이라 Require의 결과와 무관하게 항상 돈다.
+      - name: Download shard durations (story #3558)
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          pattern: shard-durations-*
+          path: /tmp/shard-durations
+          merge-multiple: true
+
+      # story #3642(3396/3558 후속) — 「과소 등재(ratio≥2)가 3 run 연속」을 세려면 run
+      # 사이에 작은 상태(파일별 연속 카운트)가 살아남아야 한다 — actions/cache가 그
+      # 유일한 run-간 저장소다(job/run은 매번 새 환경). key를 run_id로 유니크하게 저장
+      # (매번 새로 커밋), restore-keys 접두만으로 "가장 최근 저장분"을 복원(정확히 같은
+      # key가 없으면 GH가 접두 매치 중 최신을 준다) — save 쪽은 항상 실행(if: always(),
+      # 이 잡이 실패해도 스트릭은 이어져야 다음 run이 이어 셀 수 있다).
+      - name: Restore weights-drift streak state (story #3642)
+        id: drift-cache-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: /tmp/weights-drift-streak.json
+          key: weights-drift-streak-${{ github.run_id }}
+          restore-keys: |
+            weights-drift-streak-
+
+      # story #3653 — --shard-count(matrix.shard와 동형 8, 기존 인자 재사용)+
+      # --shard-result(needs.backend-test-destructive.result 그대로)로 산출물이 8개
+      # 미만일 때를 가른다: result=success인데 미만이면 업로드 파이프라인 자체가
+      # 조용히 무산된 것(::error+exit 1, 이 스텝 자체가 실패해 아래 Require를 포함한
+      # 나머지 스텝을 건너뛴다) — result!=success(실패/타임아웃)면 그 샤드의 실측
+      # 데이터가 원천적으로 없어 "센다"가 불가능하니 ::warning만(exit 0, 원칙 그대로
+      # CI를 안 죽인다).
+      - name: Audit shard durations vs weights.json (story #3558+#3642+#3653+#3678)
+        working-directory: backend
+        run: uv run python scripts/shard_destructive_tests.py --audit-durations /tmp/shard-durations --drift-state /tmp/weights-drift-streak.json --run-id "${{ github.run_id }}" --shard-count 8 --shard-result "${{ needs.backend-test-destructive.result }}" --backend-relevant "${{ needs.detect-changed-scope.outputs.backend_relevant }}"
+
+      - name: Save weights-drift streak state (story #3642)
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: /tmp/weights-drift-streak.json
+          key: weights-drift-streak-${{ github.run_id }}
+
+      - name: Require all destructive-schema shards to have succeeded
+        # story #3929 — backend-test-destructive가 이제 edited(base 무변)에서 명시적
+        # skip되면 .result가 'skipped'다(success 아님) — 그 값만으로 이 스텝을 원래
+        # 조건대로 돌리면 매 edited마다 이 잡이 «가짜 실패»한다(이 카드가 막으려는
+        # 바로 그 클래스를 다른 자리에서 재도입하는 것). 그 skip이 내 의도적 조건과
+        # 일치할 때만 이 Require도 같이 안 돈다 — 그 밖의 모든 non-success(진짜 실패·
+        # cascade-skip 등)는 그대로 잡는다.
+        if: needs.backend-test-destructive.result != 'success' && (github.event.action != 'edited' || github.event.changes.base != null)
+        run: |
+          echo "backend-test-destructive result=${{ needs.backend-test-destructive.result }} — destructive-schema 94개의 유일한 실행처가 실패했거나 안 돎"
+          # story #3541(페드루 PO 確定) — GitHub Actions는 timeout-minutes로 죽인 잡과
+          # 사람이 수동 취소한 잡을 conclusion에서 안 가른다(둘 다 "cancelled"). result가
+          # cancelled면 코드 결함이 아니라 시간 초과였을 가능성이 있다는 걸 여기서
+          # 말해 둔다(#3884 shard 5·7·#3886 shard 2 실사고 — attempt 2는 코드 무변경으로
+          # 통과했었다) — 사람이 곧장 코드를 의심하고 파는 시간을 줄인다.
+          if [ "${{ needs.backend-test-destructive.result }}" = "cancelled" ]; then
+            echo "cancelled=시간 초과 또는 수동 취소 — 잡 소요가 timeout-minutes에 닿았는지 확認(각 샤드 job의 소요 시간을 먼저 볼 것)"
+          fi
+          exit 1
 
       # non-destructive real-PG 테스트(84개 파일, destructive_schema 마커 제외)는 alembic-migrated
       # 스키마(view·nullable·seed 포함 baseline)에 의존한다 — fresh DB를 먼저 heads까지 올린다
@@ -896,6 +1381,82 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+  # story #3273(CI사각, 2026-09-01 카디르 QA 발견) — support-gateway/ 디렉토리엔 pytest
+  # 스위트(86건 시점 발견, 이 잡 도입 시점 87건)가 있었지만 GHA 어느 워크플로에도 실행 잡이
+  # 없었다 — backend-test와 달리 그동안 이 서비스를 건드린 PR도 "required CI green"이 스위트
+  # 0건 실행으로 통과했고, 검증은 QA의 codex exec 수동 실행에만 의존했다(«CI green≠관문 전부»
+  # 클래스). support-gateway는 story #3259(지원v1·1경계)의 "0 fleet 자격" 설계로 자기
+  # 디렉토리 밖 어떤 코드도 import하지 않는다(app/config.py 상단 주석) — 그래서 이 서비스
+  # 테스트는 backend-test처럼 실PG 서비스가 필요 없다(tests/conftest.py가 sqlite+aiosqlite
+  # 인메모리로 매 테스트를 격리) — 로컬 실측(2026-09-01) 87 passed, 0.94초.
+  #
+  # ⚠️아직 develop 필수 상태 체크가 아니다(페드루 PO 지시, 2026-09-01) — 신설 잡을 곧장
+  # required에 태우면 이 잡 자체의 미지 플레이크가 전 머지를 막는 자리가 된다("게이트에
+  # 머지 뒤에만 아는 것 금지"의 사촌 원칙). develop에서 몇 사이클 돌아 플레이크 0을 확認한
+  # 뒤에만 PO가 branch protection에 수동으로 등재한다(`gh api --method PUT
+  # repos/moonklabs/sprintable/branches/develop/protection/required_status_checks/contexts`
+  # 로 "Support Gateway pytest" 추가 — 관리자 권한 필요, 이 PR이 하는 일 아님).
+  gateway-test:
+    name: Support Gateway pytest
+    needs: [detect-changed-scope]
+    # backend-test·alembic-fresh-db와 동형 이유(위 주석 반복 안 함) — 잡 자체는 항상 돌고
+    # 스텝만 조건부 스킵해 "미실행=스킵"이 "통과"로 잡히는 모호함을 피한다.
+    if: always()
+    runs-on: ubuntu-latest
+    # 실측(2026-09-01, 로컬 87 passed 0.94초) — postgres 서비스 불요·CI 콜드 uv sync 포함해도
+    # 수 분 이내로 예상. backend-test(7~8분, 실PG)·backend-test-destructive(#3269 실측
+    # 17~23분+)에 비하면 러너 비용은 무시할 수준 — 그래도 첫 CI 실주행 미지수 여유로 10분.
+    timeout-minutes: 10
+
+    # story #3285(지원v1·후속, 2026-09-01) — gateway 스위트는 SQLite 인메모리(conftest.py)라
+    # 실 Postgres 마이그레이션 제약(CHECK/FK) 드리프트를 구조적으로 못 잡는 클래스였다(실증:
+    # #3672가 role을 코드로만 넓혀 dev PG서 500). backend와 같은 pgvector 서비스 패턴을
+    # 재사용 — 비용은 미미(gateway 마이그레이션 3~4개뿐, 수 초).
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: sprintable
+          POSTGRES_PASSWORD: sprintable
+          POSTGRES_DB: sprintable_gateway_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      GATEWAY_REALDB_URL: postgresql+psycopg2://sprintable:sprintable@localhost:5433/sprintable_gateway_test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        if: needs.detect-changed-scope.outputs.gateway_relevant != 'false'
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: 'latest'
+
+      - name: Run pytest (support-gateway — sqlite in-memory + realdb 드리프트 게이트)
+        if: needs.detect-changed-scope.outputs.gateway_relevant != 'false'
+        working-directory: support-gateway
+        run: |
+          set -o pipefail
+          uv run pytest -q --durations=20 2>&1 | tee /tmp/gateway_pytest_output.log
+
+      - name: Slowest tests summary
+        if: always()
+        run: |
+          {
+            echo "## Support Gateway pytest — slowest 20"
+            echo '```'
+            awk '/slowest 20 durations/,0' /tmp/gateway_pytest_output.log 2>/dev/null || echo "(durations 출력 없음 — skip됐거나 타임아웃)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
   # story #2929 — base가 develop/main이 아닌 스택 PR(feat/* 위 feat/*)에는 이 job이 전혀
   # 안 돈다(트리거 `branches: [main, develop]`, 위). 그 갭은 `stack-pr-frontend-preview.yml`
   # (별도 파일, `branches-ignore: [main, develop]`)이 required 체크 이름을 건드리지 않고
@@ -905,6 +1466,15 @@ jobs:
     name: Lint, Type Check, Test, Build
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # story #3929(2026-09-15, PO 지시) — required 체크("Lint, Type Check, Test, Build")
+    # 자신. edited(base 무변, title/body만 편집)가 head SHA는 그대로인 채 이 무거운
+    # 잡을 매번 전량 재실행시켜(오늘 4328·4329 실사고, 러너 부하로 다른 required 잡의
+    # 8샤드가 timeout) 게이트가 «최신 run»을 잘못 판정·머지를 막았다. 이 잡은 다른
+    # job에 needs 의존이 없어(cascade-skip 대상 아님) alembic-fresh-db류의 always()
+    # 방어가 불필요 — 조건 자체만. GitHub는 "job이 자신의 if:로 skip되면 그 체크는
+    # Success로 보고"한다(required-status-check 트러블슈팅 문서 확認) — 머지를 막지
+    # 않는다.
+    if: github.event.action != 'edited' || github.event.changes.base != null
 
     steps:
       - name: Checkout
@@ -953,6 +1523,14 @@ jobs:
       - name: "Verify no hand-rolled modal without accessibility (story #2061 regression guard)"
         run: pnpm --filter web verify:no-handrolled-modal
 
+      # story #3164(DS 게이트 키스톤) 회귀가드: rounded-{lg,xl,2xl}+border+카드표면 bg(bg-card/
+      # background/muted/popover)가 같은 className에 공존하는 손코딩 카드가 새로 들어오면 이
+      # 스텝이 실패한다(Card/SectionCard/GlassPanel/cardVariants()를 쓸 것). story #3164
+      # 착지(2026-09-01) 이후 이 스텝이 ci.yml에 안 물려 있어 약 8일간 무력했다 — story
+      # #3736(⑪)이 재가동하며 baseline을 그 사이 드리프트(신규 26건)까지 흡수해 재측정했다.
+      - name: "Verify no hand-rolled card without primitive (story #3164 regression guard)"
+        run: pnpm --filter web verify:no-handrolled-card
+
       # story #1933 회귀가드: request.url을 new URL()의 base로 쓰면 Cloud Run 내부 주소가
       # 새어 나간다(플랫폼 성질). auth/native·internal-dogfood 3곳을 resolveAppUrl(null)로
       # 고쳤고, 재도입되면 이 스텝이 실패한다.
@@ -976,6 +1554,89 @@ jobs:
       # `goals` 네임스페이스)을 이 PR에서 이미 제거해 baseline은 0 — 새로 생기는 것만 막는다.
       - name: "Verify no duplicate sibling i18n keys (story #2395 regression guard)"
         run: pnpm --filter web verify:no-duplicate-i18n-keys
+
+      # story #3432 AC2 회귀가드: en.json/ko.json 값(키·주석 제외)에 한자(\p{Script=Han})가
+      # 하나라도 섞여 들어오면 실패한다 — 작업 대화 표기(`확認`·`확定`)가 정본 문구로 그대로
+      # 새는 사고가 8건 실측(2026-09-04)됐다. 예외 목록(HANJA_EXCEPTIONS)은 빈 채로 시작 —
+      # 정말 필요하면 key·char·reason·addedBy를 모두 채워야 등록된다.
+      - name: "Verify no hanja in i18n message values (story #3432 regression guard)"
+        run: pnpm --filter web verify:no-hanja-in-i18n
+
+      # story #3824 AC1 회귀가드: ko.json 값에 작업 대화·구어체 말투(붙임·붙이(다)·딸깍)가
+      # 정본 문구로 새는 새 자리를 막는다. 그라운딩 시점 기존 8건은 AGENT_TONE_EXCEPTIONS로
+      # 그랜드파더(이관은 이 카드 범위 밖) — 새로 느는 자리만 실패시킨다(can-only-shrink).
+      - name: "Verify no agent-tone Korean UI text in i18n message values (story #3824 regression guard)"
+        run: pnpm --filter web verify:no-agent-tone-korean-ui-text
+
+      # story #3877 AC3 회귀가드: 선생님 경로(오늘·일감 5탭·우패널·문서·스토리 패널+임베드)
+      # i18n 스코프 키(SCOPED_KEYS 103개 — AC1 표 94 + AC4 orgBriefing 9) 값에 합니다체
+      # (습니다·ㅂ니다·십시오)가 새로 섞여 드는 자리를 막는다. 이 스토리가 스코프 전수를
+      # 해요체로 이관해 baseline 0에서 시작 — 새로 느는 자리만 막는다(can-only-shrink).
+      - name: "Verify scoped i18n honorific tone (story #3877 regression guard)"
+        run: pnpm --filter web verify:scoped-i18n-honorific-tone
+
+      # story #5ead8723 회귀가드: 코드가 참조하는 i18n 키(useTranslations/getTranslations
+      # 바인딩별 리터럴 호출 — .rich/.raw/.has 포함)가 ko.json·en.json 둘 다에 말단 값으로
+      # 실존해야 한다 — next-intl은 못 찾은 키를 화면에 그대로 그린다(코드 낱말 노출).
+      # 동적 키(변수·템플릿·삼항)는 실패시키지 않고 수로만 센다.
+      - name: "Verify i18n keys referenced in code exist in ko/en (story #5ead8723 regression guard)"
+        run: pnpm --filter web verify:i18n-keys-exist
+
+      # story #3757 회귀가드 — messages→코드 역방향(죽은 키), 최상위 네임스페이스 단위.
+      # `check-i18n-keys.js`(#2371, 루트 정규식 스캐너)가 「여섯 표기」 중 넷을 몰라 다수를
+      # 거짓 사망으로 잡던 것 대신, verify-i18n-keys-exist.ts(위 스텝, 여섯 표기 검증됨)를
+      # 재사용해 A(리터럴)·A′(unknown-ns 낱말)·B(동적 ns 보류)·C(데이터 카탈로그)·D(비공개
+      # SaaS 오버레이 정적 스냅샷) 네 신호 중 하나도 없는 ns만 fail-closed로 잡는다(키 단위
+      # 삭제 판정은 이 가드 밖 — story #3757 AC2, 사람이 직접 읽는다).
+      - name: "Verify every top-level i18n namespace has at least one reference signal (story #3757 regression guard)"
+        run: pnpm --filter web verify:i18n-namespace-referenced
+
+      # story #3764 회귀가드: 「제목 안의 수」(「구성원 (13)」류) — 제목은 고정 문자열,
+      # 수는 옆 CountBadge로 갈라야 한다(story #3735/#4111이 조직 구성원·권한 화면에서
+      # 먼저 닫은 클래스, 이 스토리가 나머지 세 자리를 마저 닫으며 가드로 승격). JSX
+      # 조립형({t()} ({n}))과 i18n 값형(끝이 ({count})) 둘 다 잡는다.
+      - name: "Verify no count-in-title-string (story #3764 regression guard)"
+        run: pnpm --filter web verify:no-count-in-title-string
+
+      # story #3760 회귀가드: App Router 라우트 파일(page/layout/template/loading/error/
+      # not-found/default.tsx)의 named export가 Next.js 화이트리스트 밖이면 next build에서만
+      # 죽는다(tsc·vitest는 이 계약을 모른다 — 실물: #4105, publishHistorySenderLabel을
+      # page.tsx에 named export로 뒀다가 build만 빨강). route.ts는 대상 밖(HTTP 메서드 export가
+      # 정상).
+      - name: "Verify App Router route file named exports are whitelisted (story #3760 regression guard)"
+        run: pnpm --filter web verify:route-file-exports
+
+      # story #3761 회귀가드: 목록 응답 meta의 총계가 `total`/`totalCount` 두 이름으로 갈려
+      # 있었다 — 정본은 `totalCount`(number | null, null="모른다", goals/tasks 관례). API
+      # route.ts에 은퇴한 `total` 메타 프로퍼티가 다시 들어오면 이 스텝이 실패한다.
+      - name: "Verify no legacy meta.total property in API routes (story #3761 regression guard)"
+        run: pnpm --filter web verify:no-legacy-meta-total
+
+      # story #3761 후속(카디르 QA 지적, PR#4109 검수 中 발견) — 위 가드는 «내는 쪽»
+      # (route.ts)만 본다. 소비처(fetch 응답을 읽는 컴포넌트/훅)의 `meta.total` 잔재는
+      # 별도 축이라 kanban-board.tsx:300이 놓쳤었다 — apps/web/src 전수 소비처 스캔.
+      - name: "Verify no legacy meta.total reads in consumers (story #3761 regression guard, consumer side)"
+        run: pnpm --filter web verify:no-legacy-meta-total-consumer
+
+      # story #3486→#3493 회귀가드: 브라우저 로케일 의존 날짜 toLocaleString/
+      # toLocaleDateString/toLocaleTimeString이 새로 생기면 실패한다 — 3436 묶음 8
+      # 정본(formatRelativeTime/formatScheduledAt)이 있는데도 계속 새던 자리(유나
+      # 10회차 관찰) 재발 방지. 3486은 마케팅 콘텐츠·채널 연결 4 디렉터리만 걸었으나,
+      # #3493에서 그때 범위 밖이던 20+곳을 전환하며 스코프를 apps/web/src 전체로
+      # 넓히고 스크립트명도 마케팅 표면 한정 옛 이름(PR #3834)에서 지금 이름으로
+      # 개명했다(옛 이름 문자열 자체는 scripts/verify-no-date-tolocalestring.ts
+      # 상단 docstring 참조 — 이 파일엔 재도입 검산 대상이라 일부러 안 옮겨 적는다).
+      # 숫자 포맷(krw/포인트 잔액 등)은 스크립트 내 ALLOWLIST(file+line+reason+addedBy)로 예외.
+      - name: "Verify no date toLocaleString across apps/web/src (story #3493 regression guard)"
+        run: pnpm --filter web verify:no-date-tolocalestring
+
+      # story #3808(페드루 PO 지적 2026-09-12 23:50Z) — 채널 사용량 줄(used_units/limit_units/
+      # remaining_units, BFF 계약 {used_units, limit_units, remaining_units, reset_at, scope})
+      # 이 콤마 없이 나가던 결함(같은 화면 금액은 이미 formatMinorCurrency로 콤마가 있어 두
+      # 표기가 어긋났다). formatCount()(formatMinorCurrency의 카운트 자매 함수) 미경유 자리를
+      # 필드명 자체로 정적 검거 — 새 채널이 같은 계약 모양을 재사용해도 자동으로 걸린다.
+      - name: "Verify no unformatted usage count across apps/web/src (story #3808 regression guard)"
+        run: pnpm --filter web verify:no-unformatted-usage-count
 
       # story #2420 AC3 회귀가드: globals.css의 `--<family>-tint` 배경 위에서 --foreground가
       # AA(4.5)를 넘는지 «정의 시점»에 계산한다(oklch→sRGB 변환은 Yuna의 실 Chromium canvas
@@ -1019,6 +1680,35 @@ jobs:
       - name: "Verify no new cross-element tint × family-color-text (story #2590 A regression guard)"
         run: pnpm --filter web verify:cross-element-tint-text
 
+      # story #2420 AC4/AC6/AC7 — 「닫힌 계열」(subtle 알파를 0으로 만든 계열)의 순수 bg-<X>/<n<50>
+      # 재유입 가드. 자매 가드 verify:no-new-tint-color-text는 알파를 «같은 계열 글자와 함께»일 때만
+      # 잡아 순수 bg-<X>/<n>(text 없이)은 놓친다 — 이 스텝이 그 갭을 메운다(PO 지적, 2026-09-01).
+      # CLOSED_FAMILIES=[destructive](이 PR에서 0이 됨). 팬아웃 각 PR이 자기 계열을 0으로 만들 때
+      # 그 PR에서 CLOSED에 추가한다(계약 ③: 死를 계수 가능하게 — 0이 된 시점이 유일하게 옳은 자리).
+      - name: "Verify no closed-family subtle alpha bg re-entry (story #2420 AC4/AC6 — destructive)"
+        run: pnpm --filter web verify:no-subtle-alpha-bg
+
+      # story #3826-pre 회귀가드 — text-*foreground/N(알파 합성 텍스트) 재유입 0(신규만,
+      # 기존 26개 파일은 GRANDFATHER_BASELINE). 3826이 --proof-ink 재조정으로 이 패턴이
+      # 실 브라우저 axe color-contrast를 깬 것을 발견(tabs.tsx·사이드바 컴포넌트 6곳 수정).
+      - name: "Verify no new alpha-composited text-*foreground (story #3826-pre)"
+        run: pnpm --filter web verify:no-new-alpha-text-foreground
+
+      # story #3839(critical·2pt) 회귀가드 — tint 배경(destructive/info/success/warning
+      # -tint·-bg) 서브트리 안 text-muted-foreground 재유입 0(신규만, 기존 21곳은
+      # GRANDFATHER_BASELINE). --muted-foreground(ink-3)는 --muted(sunk) 배경 기준으로만
+      # AA 조정된 값이라 더 옅은 family tint 위에선 4.5 밑으로 떨어진다 — 카디르 QA(4259
+      # Contrast guard axe)가 activation-checklist-banner.tsx 3곳을 실사고로 적발(같은
+      # PR에 동봉 수정), 이 스텝이 그 클래스를 닫는다.
+      - name: "Verify no muted-foreground on tint background (story #3839)"
+        run: pnpm --filter web verify:no-muted-on-tint
+
+      # story #3826(UX-v3·FE 2) AC1 diff 가드 — globals.css 원시 토큰(--proof-*) 값 교체
+      # PR의 diff가 그 파일의 --proof-* 값·radius 값에만 있는지(alias·.dark·tsx diff 0).
+      - name: "Verify v3 raw-token PR diff scope (story #3826 AC1)"
+        run: pnpm --filter web verify:v3-token-diff-scope
+        env:
+          V3_TOKEN_DIFF_BASE: origin/${{ github.base_ref || 'develop' }}
 
       # story #2371 회귀가드: `scripts/check-i18n-keys.js`(code→messages missing-key 축)를
       # 처음으로 CI에 건다 — 이전엔 CI/husky/package.json 어디에도 안 걸려 있었고 손으로
@@ -1063,13 +1753,188 @@ jobs:
       - name: "Verify no new raw fetch('/api/*') (story #2691 regression guard)"
         run: pnpm --filter web verify:no-new-raw-fetch-api
 
+      # story #3731 회귀가드(#3729 배포 58 실사고 후속): apps/web 안 비-테스트 파일이
+      # 프런트 Docker 빌드 컨텍스트(Dockerfile builder 스테이지 COPY 집합, 손 목록 아닌
+      # 파생값) 밖을 상대 import하면 실패한다. CI(전체 체크아웃)는 이 축을 원리상 못
+      # 재는데 실 Docker 빌드는 죽는다 — 그 간극을 이 가드가 메운다.
+      - name: "Verify frontend Docker import context (story #3731 regression guard)"
+        run: pnpm --filter web verify:frontend-docker-import-context
+
+      # story #3557 회귀가드: aria-label={`Xyz...`}(영문 대문자로 시작하는 템플릿
+      # 리터럴)이 새로 들어오면 실패한다 — #3899가 TagChip 하나를 i18n 키로 옮겼는데 같은
+      # 부류(content-rules 이동 버튼 2·story-detail-panel 라벨 제거 1)가 유나 §17 #3912
+      # 리뷰 中 전수에서 뒤늦게 드러났다. ⛔평문 `aria-label="…"`(따옴표, 템플릿 리터럴
+      # 아님) 형은 이 판별식 밖 — 고유명사류 오탐(예: 브랜드명) 회피를 위해 의도적으로
+      # 좁혔다(스크립트 헤더 주석·story #3557 본문 "못 잡는 것" 참조).
+      - name: "Verify no hardcoded aria-label (story #3557 regression guard)"
+        run: pnpm --filter web verify:no-hardcoded-aria-label
+
+      # story #3905(PO 눈 리뷰, 3901 캡처 그라운딩) 회귀가드 — 온보딩 1/4·조직 만들기
+      # 대화상자의 URL 슬러그 미리보기가 리터럴 `sprintable.app`(실 도메인 아님, 실
+      # 도메인은 sprintable.ai)을 하드코딩하던 첫인상 결함. getPublicAppHost()
+      # (NEXT_PUBLIC_APP_URL 1원천)로 옮긴 뒤 clean-slate로 연다 — 새 FAIL 즉시 차단.
+      - name: "Verify no hardcoded app domain (story #3905 regression guard)"
+        run: pnpm --filter web verify:no-hardcoded-app-domain
+
+      # story #3592(§22-18 정본) 회귀가드("유나의 자") — 목록 안 반복 행 액션 버튼이
+      # 순번 없이 같은 접근 이름을 공유하면(스크린리더가 항목을 못 가름) 새로 늘 때만
+      # FAIL(baseline-freeze — verify-no-new-raw-button.ts와 동형 관례, 기존 잔존은
+      # repeated-row-action-names-baseline.json에 얼림). ⛔aria-label이 «있지만 정적
+      # 값»인 경우(pr-link-section.tsx의 unlinkAria 실사례)는 이 스캔이 못 잡는다 —
+      # 스크립트 머리 주석 ㉠~㉥ 참고, 검산은 comments-action-aria-labels.test.ts류의
+      # 부분 문자열 테스트로 별도.
+      - name: "Verify no new repeated row-action static labels (story #3592 regression guard)"
+        run: |
+          pnpm --filter web verify:no-new-repeated-row-action-names -- --selftest
+
+      # story #3688(3687→3686 그라운딩, 3680 클래스) 회귀가드 — fetchWithAuth 응답을
+      # r.ok 검사 없이 바로 .json()→데이터로 쓰는 자리(#3680 agent-runs-list.tsx·#3687
+      # chat-input.tsx가 이미 겪은 병: BE 422가 조용히 빈 목록으로 삼켜진다)가 새로 늘면
+      # FAIL. baseline-freeze(verify-no-new-raw-fetch-api.ts와 동형) — 기존 28곳은
+      # fetch-response-without-ok-check-baseline.json에 얼리되, 고쳐진 항목을 baseline에서
+      # 안 지우면(stale) 그것도 FAIL(허용목록은 줄어들기만).
+      - name: "Verify no fetch response without .ok check (story #3688 regression guard)"
+        run: |
+          pnpm --filter web verify:no-fetch-response-without-ok-check -- --selftest
+
+      # story #3305(P0 핫픽스 #3701 재발 가드, AC3) 회귀가드 — fetchWithAuth()가 BFF
+      # route(/api/...)를 건너뛰고 백엔드 /api/v2/*를 직접 겨냥하면 FAIL(grandfather
+      # baseline 없음 — 착수 시점 전수 0건 확認됨, 신규 위반 즉시 차단). story
+      # #3739(2026-09-09) — package.json엔 있었으나 ci.yml에 안 물려 있던 것을 재가동.
+      - name: "Verify no direct backend /api/v2 call (story #3305 regression guard)"
+        run: pnpm --filter web verify:no-direct-backend-v2-call
+
+      # story #3164(DS 게이트 A) 회귀가드 — raw <button>이 새로 늘면 FAIL(baseline-freeze,
+      # Button@ui/button으로 전환하거나 EXEMPT_FILES에 등재). story #3739(2026-09-09) —
+      # package.json엔 있었으나 ci.yml에 안 물려 있어 약 8일 재실행 이력이 없던 채 raw
+      # button이 실제로 늘었다(재가동 시점 실측 RED, baseline 재측정·drift grandfather 후
+      # 재가동 — raw-button-baseline.json _comment 참조).
+      - name: "Verify no new raw <button> (story #3164 regression guard)"
+        run: pnpm --filter web verify:no-new-raw-button
+
+      # story #3785(PO 실측 2026-09-10) 보조 가드 — 페이지 배경 위 「테두리만 있는 상자」
+      # (카드 표면 bg-card 미적용) 클래스가 새로 늘면 FAIL(baseline-freeze,
+      # card-surfaceless-box-baseline.json 참조). 정적 상한이지 실수가 아니다 — 실 판정
+      # authority는 e2e/card-surface-guard.spec.ts(라이브 DOM 하네스, 판정선 5조건 +
+      # 라우트별 양성대조 3종). story #3739가 겪은 「만들어졌는데 도는 자리 없음」 재발을
+      # 막기 위해 신설 즉시 여기 배선한다.
+      - name: "Verify no card-surfaceless box (story #3785 regression guard)"
+        run: pnpm --filter web verify:no-card-surfaceless-box
+
+      # story #3741(유나 전수 2026-09-09 08:46Z) 회귀가드 — 영어 로케일 화면에 한글이
+      # 그대로 서는 하드코딩 문자열(JsxText·placeholder/title/alt/aria-* 속성)이 새로
+      # 늘면 FAIL(baseline-freeze, hardcoded-korean-ui-text-baseline.json 참조 — 창건
+      # 시점 230건 grandfather, 전량 i18n 키화는 별건). #3739가 겪은 「만들어졌는데
+      # 도는 자리 없음」 재발을 막기 위해 신설 즉시 여기 배선한다.
+      - name: "Verify no hardcoded Korean UI text (story #3741 regression guard)"
+        run: pnpm --filter web verify:no-hardcoded-korean-ui-text
+
+      # story #3770(2026-09-10) — 원시 role 값(org owner/admin/member·participation/trust
+      # implementation 등)을 t() 없이 JSX 텍스트에 그리는 클래스 회귀가드(설정 프로필
+      # 「역할 admin」류 재발 방지).
+      - name: "Verify no raw role JSX text (story #3770 regression guard)"
+        run: pnpm --filter web verify:no-raw-role-jsx-text
+
+      # story #3876(§⑤ 낱말 드리프트, PO 확定 2026-09-14) — JSX 텍스트 자식에 순 ASCII
+      # 영단어/구가 t() 없이 그대로 박히는 클래스 회귀가드(스토리 패널 Dispatch/Labels/
+      # Dependencies/Blocked by 등 8곳이 ko 로케일에서도 영문 그대로 노출된 재발 방지).
+      - name: "Verify no raw ASCII JSX text (story #3876 regression guard)"
+        run: pnpm --filter web verify:no-raw-ascii-jsx-text
+
+      # story #3880(§⑤ 낱말 드리프트, PO 확定 2026-09-14) — #3876 가드의 자매 축(a): JSX
+      # 텍스트 자식이 아니라 title/label/placeholder/description/aria-label/alt 같은
+      # 텍스트 프롭 속성값에 순 ASCII 리터럴이 그대로 박히는 클래스(workcell.tsx
+      # `<LayerLabel title="Brief">`가 실 사고 — 속성값이라 #3876 가드의 JsxText walk가
+      # 구조적으로 못 봄).
+      - name: "Verify no raw ASCII JSX attribute text (story #3880 AC2(a) regression guard)"
+        run: pnpm --filter web verify:no-raw-ascii-jsx-attr
+
+      # story #3880 AC2(b) — 자매 축(b): JSX 구조가 아니라 messages/ko.json **값 콘텐츠**
+      # 안에 영단어가 baked-in되는 클래스(`docs.indexKicker`="지식 · KNOWLEDGE BASE" —
+      # t() 경유는 정상이라 어떤 JSX 구조 가드도 원리상 못 잡음, 값 자체를 봐야 함).
+      - name: "Verify no ASCII token in ko.json value (story #3880 AC2(b) regression guard)"
+        run: pnpm --filter web verify:no-ascii-token-in-ko-value
+
+      # story #3925(§⑤ 낱말 드리프트, 2026-09-15) — 두 ASCII 가드(위 축1-CAPS·축2-whole-value)
+      # 다 ko.json **원본 문자열**만 본다는 공통 맹점: CSS `uppercase` 클래스가 화면에서만
+      # 대문자로 바꿔치는 자리는 원본이 소문자/Title-Case여도 두 가드 모두 통과한다(실 사고
+      # — attentionQueue.kicker="오늘 · Attention Queue"가 uppercase 클래스로 "ATTENTION
+      # QUEUE"로 노출됐는데도 두 가드 GREEN이었다). t() 소비 JSX를 정적으로 대조해 봉쇄.
+      - name: "Verify no Latin text in CSS-uppercase eyebrow (story #3925 regression guard)"
+        run: pnpm --filter web verify:no-latin-in-uppercase-eyebrow
+
+      # story #3894 — content/organization/pricingPlans/contentRules/settings 값 안에 역할
+      # 낱말이 영어 슬러그(owner/admin)로 남는 클래스를 막는다(#3880 CAPS 가드는 소문자
+      # 슬러그를 원리상 못 봄, 자매 축). channelConnect 정본(소유자/관리자)으로 확定 — 역할
+      # 필드 입력 예시 placeholder 2키만 ALLOWLIST 예외. (settings는 #3892/#4295 착지 뒤 승격.)
+      - name: "Verify no English role slug in user copy (story #3894 regression guard)"
+        run: pnpm --filter web verify:no-role-english-in-user-copy
+
+      # story #3813(Phase3·3-4 PR5-a CHANGES, 페드루 PO 確定 2026-09-12) — pasted_secret
+      # 채널(wordpress·webhook·stibee…) 생성 BFF는 `[channel]` 동적 세그먼트가 아니라
+      # 채널마다 리터럴 route.ts라, PASTED_SECRET_FIELDS에 채널을 등재해도 대응
+      # route.ts를 안 만들면 폼 제출이 항상 404다(2026-09-12 stibee 실사고로 3번째
+      # 재발 — wordpress·webhook도 각자 별도 사고였다). 선언 목록 전수 대조 가드.
+      - name: "Verify pasted_secret BFF route registered (story #3813 regression guard)"
+        run: pnpm --filter web verify:pasted-secret-bff-route-registered
+
+      # story #3857(2026-09-14) 회귀가드 — BE 라우터가 X-Total-Count·X-Next-Cursor를 목록
+      # 페이지네이션 신호로 내는데 FE 프록시가 body만 취해 조용히 버리면(agent-runs·standup·
+      # sprints·retro-sessions가 그랬다) "한 페이지=전체"로 단정하는 결함 클래스(#4049/#4052/
+      # #4054와 동형)가 재발한다. baseline sync(stale fail-closed)+FE 소비 대조 1개로 닫는다.
+      - name: "Verify BE→FE proxy header passthrough (story #3857 regression guard)"
+        run: pnpm --filter web verify:be-proxy-header-passthrough
+
+      # story #3739(2026-09-09) 메타 가드 — package.json에 등재된 verify:* 스크립트
+      # 집합이 이 ci.yml에서 실제로 부르는 집합의 부분집합이 아니면(새 verify:* 스크립트를
+      # 만들고 여기 안 물리면) FAIL. story #3736 ⑪·이 스토리 자신(no-direct-backend-v2-call·
+      # no-new-raw-button)이 겪은 「만들어졌는데 도는 자리 없음」 클래스의 재발을 막는다.
+      - name: "Verify ci.yml wires every package.json verify:* script (story #3739 meta guard)"
+        run: pnpm --filter web verify:ci-wires-all-verify-scripts
+
       - name: Test
         # set -o pipefail so vitest's non-zero exit propagates through `| tail` instead
         # of being masked by tail's 0 — without it the unit-test gate was a no-op
         # (story 2d5c8662). GitHub's default bash runner does not enable pipefail.
+        #
+        # story #3904 — `--reporter=json --outputFile.json=...`를 default 리포터와 병행
+        # 추가(vitest는 다중 리포터를 동시에 지원 — 콘솔에 찍히는 default 출력은 그대로라
+        # 위 `| tail -80` 계약·판정/exit code 전부 무변, A/B 로컬 실측상 시간 증가도 노이즈
+        # 수준). 이 JSON이 있어야 다음 스텝들이 «성공 run에서도» 테스트별 duration을 읽을
+        # 수 있다(story #3902의 «측정치×3»이 CI 로그 실측 없이 로컬 관측으로 대체된 갭 처방).
         run: |
           set -o pipefail
-          pnpm vitest run 2>&1 | tail -80
+          pnpm vitest run --reporter=default --reporter=json --outputFile.json=/tmp/vitest-results.json 2>&1 | tail -80
+
+      # story #3904 AC1 — 위 JSON을 후처리해 «느린 테스트 상위 30» 표를 이 스텝 자신의
+      # 로그에 찍는다(별도 스텝 출력이라 위 Test 스텝의 `tail -80`에 안 잘린다). `if:
+      # always()` — 실패 run에서도(부분적으로 완주된 테스트들의) duration을 볼 수 있어야
+      # 디버깅에 쓸모가 있다. 이 스텝 자체의 실패(JSON 파싱 오류 등)가 CI 판정에 영향을
+      # 주면 안 되므로(AC3) 스크립트 내부에서 실패를 삼키고 exit 0 — 여기 워크플로 스텝도
+      # 판정에 안 걸리는 순수 계측.
+      - name: Summarize vitest test durations (story #3904)
+        if: always()
+        run: node apps/web/scripts/ci/summarize-vitest-durations.mjs /tmp/vitest-results.json /tmp/vitest-durations-summary.json 30
+
+      # story #3904 AC2 — 원본 vitest JSON 리포터 출력이 아니라 위 스텝이 다듬은 «작은»
+      # 요약(파일 상대경로·테스트명·ms만)을 올린다. story #3864(2026-09-14, 이 워크플로
+      # 파일 안 실사고)가 겪은 "매 run always() 업로드 누적이 org 단위 artifact 저장
+      # 한도를 채운" 클래스(playwright-report, 실측 7,996개·1,719MB)를 이 카드가 그대로
+      # 재현하지 않도록 payload를 미리 줄여 둔 것 — retention도 짧게.
+      # story #3890(2026-09-16) — 그 "짧게"가 여전히 7일이라 always()로 매 run 누적된
+      # 실측치(100개·49.5MB)가 남아 있었다 — 1일로 더 좁힌다(요약은 그 run 로그로도
+      # 바로 보이므로 다음날까지 남길 이유가 없다).
+      # `if-no-files-found: ignore` — 위 스텝이 JSON 파싱 실패로 요약 파일을 못 쓴
+      # 드문 경우에도 이 업로드 스텝 자체는 실패시키지 않는다(계측 실패가 판정에 안
+      # 번지는 원칙을 여기서도 유지).
+      - name: Upload vitest duration summary (story #3904)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vitest-duration-summary
+          path: /tmp/vitest-durations-summary.json
+          retention-days: 1
+          if-no-files-found: ignore
 
       - name: Build
         run: pnpm build
@@ -1214,6 +2079,30 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # story #3751(PO 실측 2026-09-09 17:31Z~) — `playwright install --with-deps`가 내부
+      # `apt-get update`를 돌리는데, GH 러너 이미지에 기본 등록된 google-chrome apt 소스
+      # (dl.google.com)가 이따금 Hash Sum mismatch로 죽어 코드와 무관하게 이 잡을 통째로
+      # 빨갛게 만든다(같은 head가 그 전엔 초록이었다 — 외부 미러 동기화 타이밍 문제).
+      # 우리는 google-chrome apt 패키지를 안 쓴다(playwright가 자체 번들 chromium을 깐다) —
+      # 그 소스 자체를 지워 이 미러 의존을 0으로 만든다.
+      # story #3751 v2(페드루 PO 실측 2026-09-09 18:14Z) — v1(`rm google-chrome*.list`)이
+      # 불발이었다: 잡이 초록이어도 apt update 로그에 `Get:* dl.google.com`이 그대로 서
+      # (미러가 그 사이 회복해 초록이었을 뿐, 처방 덕이 아니다 — "잡 초록"은 이 처방의
+      # 양성대조가 못 된다). 원인 짐작 — noble 러너 이미지는 소스가 `.list` 파일이 아니라
+      # deb822(`google-chrome.sources`) 형태이거나 `/etc/apt/sources.list` 본문에 직접 있어
+      # 이름 글롭이 빈 매치였을 수 있다. 이름이 아니라 **내용**(dl.google.com 문자열)으로
+      # 찾아 지우고, 지운 뒤에도 apt update가 그 호스트를 당기면 **fail-closed**(양성대조를
+      # 이 스텝 자체가 강제) — 미러가 멀쩡해도 소스가 안 지워졌으면 빨강이어야 한다.
+      - name: Remove google-chrome apt source (story #3751)
+        run: |
+          sudo grep -rlE 'dl\.google\.com' /etc/apt/sources.list /etc/apt/sources.list.d/ 2>/dev/null | tee /tmp/google-src.txt
+          xargs -r -a /tmp/google-src.txt sudo rm -f
+          sudo apt-get update 2>&1 | tee /tmp/apt-update.log
+          if grep -q 'dl\.google\.com' /tmp/apt-update.log; then
+            echo '::error title=google-chrome apt source still active::제거 뒤에도 apt update가 dl.google.com을 당긴다 (story #3751)'
+            exit 1
+          fi
+
       - name: Install Playwright chromium
         run: pnpm --filter web exec playwright install --with-deps chromium
 
@@ -1222,15 +2111,28 @@ jobs:
       - name: Run contrast-guard e2e (axe color-contrast)
         run: pnpm --filter web e2e:contrast
 
+      # story #3785(2026-09-10) — 이 잡이 이미 세운 풀스택(같은 storageState) 위에 얹는다.
+      # 판정선 5조건 + 라우트별 양성대조 3종(표면 있는/투명/bg-background 재도색 합성 카드
+      # 주입) — 「배경 위 무표면 상자 = 0」을 실 렌더 픽셀로 판정(주 가드, 정적 baseline은
+      # verify:no-card-surfaceless-box가 보조).
+      - name: Run card-surface e2e (background-adjacent surfaceless box)
+        run: pnpm --filter web e2e:card-surface
+
       - name: Dump backend log on failure
         if: failure()
         run: cat /tmp/backend.log || true
 
+      # story #3864(customer-zero·CI 인프라, 2026-09-14) — `if: always()`가 성공 run에도
+      # 매번 업로드해 org 단위 artifact 저장 한도(무관 레포 mobile의 진단 업로드까지 막는
+      # "한 레포의 습관이 다른 레포를 죽이는" 클래스)를 채운 원인 그 자체였다(실측: 만료
+      # 前 7,996개·1,719MB, 첫 100건 전부 playwright-report). 실패 run만 리포트가 필요하다
+      # (성공했으면 볼 이유가 없다) — `if: failure()`로. retention도 7일→3일(디버깅 창은
+      # 며칠이면 충분·누적 속도 자체를 줄인다).
       - name: Upload Playwright report
-        if: always()
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report
           path: apps/web/playwright-report/
-          retention-days: 7
+          retention-days: 3
           if-no-files-found: ignore

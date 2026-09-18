@@ -18,8 +18,10 @@ class WorkflowTriggerType(Base):
     slug: Mapped[str] = mapped_column(Text, nullable=False)
     label: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # story #3896 — DB has DEFAULT false, ORM lacked server_default (drift).
+    is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    # story #3896 — DB has DEFAULT true, ORM lacked server_default (drift).
+    is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

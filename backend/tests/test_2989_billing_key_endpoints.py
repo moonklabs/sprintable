@@ -58,6 +58,13 @@ async def test_delete_billing_key_endpoint_success(test_client, mock_session, mo
     import app.services.project_auth as project_auth
 
     monkeypatch.setattr(project_auth, "is_org_owner_or_admin", AsyncMock(return_value=True))
+    # story #3370 회귀 클래스 정정(페드루 PO 지시 2026-09-11) — delete_billing_key가 이제
+    # actor_id를 쓰기 前 resolve_member_db_verified()로 영속 멤버 id를 실측한다(진짜 DB
+    # 조회). mock_session은 순수 AsyncMock(실 PG 아님)이라 이 파일 관례(서비스 계층
+    # monkeypatch)와 동형으로 그 심볼만 목으로 갈아 우회한다.
+    resolved_member = MagicMock()
+    resolved_member.id = uuid.uuid4()
+    monkeypatch.setattr(router_module, "resolve_member_db_verified", AsyncMock(return_value=resolved_member))
     monkeypatch.setattr(
         router_module, "revoke_billing_key",
         AsyncMock(return_value={"deleted": True, "toss_revoked": True, "card_number_masked": "1234********5678"}),
@@ -82,6 +89,10 @@ async def test_delete_billing_key_endpoint_409_when_active_subscription_blocks(
     from app.services.org_billing_key import ActiveSubscriptionBlocksRevoke
 
     monkeypatch.setattr(project_auth, "is_org_owner_or_admin", AsyncMock(return_value=True))
+    # story #3370 회귀 클래스 정정(페드루 PO 지시 2026-09-11) — 위 success 테스트와 동형 사유.
+    resolved_member = MagicMock()
+    resolved_member.id = uuid.uuid4()
+    monkeypatch.setattr(router_module, "resolve_member_db_verified", AsyncMock(return_value=resolved_member))
     period_end = datetime(2026, 9, 24, tzinfo=timezone.utc)
     monkeypatch.setattr(
         router_module, "revoke_billing_key",

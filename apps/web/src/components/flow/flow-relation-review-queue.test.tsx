@@ -96,9 +96,9 @@ describe('FlowRelationReviewQueue — 진행 표시 및 되읽기 문장(§㉥)'
     stubFetch(calls);
     await renderQueue();
 
-    expect(document.body.textContent).toContain('#1에서 #101로 잇습니다');
+    expect(document.body.textContent).toContain(koMessages.flow.relationReviewPairSentence.replace('{fromNumber}', '1').replace('{toNumber}', '101'));
     expect(document.body.textContent).toContain('1 / 2');
-    expect(document.body.textContent).toContain('이 둘은 어떤 관계입니까?');
+    expect(document.body.textContent).toContain(koMessages.flow.relationReviewQuestion);
     // 일괄 확定 버튼 금지 — "전부" 류 문구가 어디에도 없어야 한다.
     expect(document.body.textContent).not.toContain('전부');
   });
@@ -129,7 +129,7 @@ describe('FlowRelationReviewQueue — 답하면 다음 후보가 같은 자리�
     expect(JSON.parse(declareCall!.init!.body as string)).toEqual({ relation_kind: 'spawned' });
     expect(onCandidateResolved).toHaveBeenCalledTimes(1);
     // 다음 후보(#102)로 자동 전진 — 다시 열지 않았다(왕복 1).
-    expect(document.body.textContent).toContain('#1에서 #102로 잇습니다');
+    expect(document.body.textContent).toContain(koMessages.flow.relationReviewPairSentence.replace('{fromNumber}', '1').replace('{toNumber}', '102'));
     expect(document.body.textContent).toContain('2 / 2');
   });
 
@@ -138,7 +138,7 @@ describe('FlowRelationReviewQueue — 답하면 다음 후보가 같은 자리�
     stubFetch(calls);
     await renderQueue();
 
-    const unknownButton = Array.from(document.querySelectorAll('button')).find((b) => b.textContent === '종류는 모르겠지만 이어진 건 맞습니다');
+    const unknownButton = Array.from(document.querySelectorAll('button')).find((b) => b.textContent === '종류는 모르겠지만 이어진 건 맞아요');
     await act(async () => {
       unknownButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       await new Promise((r) => setTimeout(r, 0));
@@ -149,12 +149,12 @@ describe('FlowRelationReviewQueue — 답하면 다음 후보가 같은 자리�
     expect(document.body.textContent).toContain('2 / 2');
   });
 
-  it('"관계가 아닙니다" calls reject, not declare', async () => {
+  it('"관계가 아니에요" calls reject, not declare', async () => {
     const calls: Array<{ url: string }> = [];
     stubFetch(calls);
     await renderQueue();
 
-    const rejectButton = Array.from(document.querySelectorAll('button')).find((b) => b.textContent === '관계가 아닙니다');
+    const rejectButton = Array.from(document.querySelectorAll('button')).find((b) => b.textContent === '관계가 아니에요');
     await act(async () => {
       rejectButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       await new Promise((r) => setTimeout(r, 0));
@@ -179,7 +179,7 @@ describe('FlowRelationReviewQueue — 답하면 다음 후보가 같은 자리�
 
     // 로드 이후로 새 네트워크 호출이 하나도 없어야 한다("서버에 아무것도 안 남는다").
     expect(calls.length).toBe(callsBeforeSkip);
-    expect(document.body.textContent).toContain('#1에서 #102로 잇습니다');
+    expect(document.body.textContent).toContain(koMessages.flow.relationReviewPairSentence.replace('{fromNumber}', '1').replace('{toNumber}', '102'));
   });
 });
 
@@ -196,7 +196,7 @@ describe('FlowRelationReviewQueue — 다 훑으면 「N건 확認함」이 남�
     });
     // 2번째: 기각(handledCount에 들어간다)
     await act(async () => {
-      Array.from(document.querySelectorAll('button')).find((b) => b.textContent === '관계가 아닙니다')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      Array.from(document.querySelectorAll('button')).find((b) => b.textContent === '관계가 아니에요')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       await new Promise((r) => setTimeout(r, 0));
     });
 
@@ -211,11 +211,11 @@ describe('FlowRelationReviewQueue — 실패 처리(고정 폴백, #2485 그라�
     await renderQueue();
 
     await act(async () => {
-      Array.from(document.querySelectorAll('button')).find((b) => b.textContent === '종류는 모르겠지만 이어진 건 맞습니다')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      Array.from(document.querySelectorAll('button')).find((b) => b.textContent === '종류는 모르겠지만 이어진 건 맞아요')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       await new Promise((r) => setTimeout(r, 0));
     });
 
-    expect(document.body.textContent).toContain('연결하지 못했습니다');
+    expect(document.body.textContent).toContain('연결하지 못했어요');
     // 실패했으니 여전히 1번째 후보 자리 그대로다.
     expect(document.body.textContent).toContain('1 / 2');
   });
@@ -230,7 +230,7 @@ describe('FlowRelationReviewQueue — target 조회 실패 방어(PR#2900 카디
 
     expect(document.body.textContent).toContain('상대 스토리 정보를 불러오지 못해');
     const buttons = Array.from(document.querySelectorAll('button'));
-    for (const label of ['여기서 나온 일', '다음에 할 일', '대신하는 일', '종류는 모르겠지만 이어진 건 맞습니다', '관계가 아닙니다']) {
+    for (const label of ['여기서 나온 일', '다음에 할 일', '대신하는 일', '종류는 모르겠지만 이어진 건 맞아요', '관계가 아니에요']) {
       const btn = buttons.find((b) => b.textContent === label);
       expect(btn?.disabled, `${label} should be disabled`).toBe(true);
     }
@@ -270,13 +270,13 @@ describe('FlowRelationReviewQueue — 묶음 상한·정렬(AC11·12, 2026-08-07
     // 상한이 걸렸으므로 진행 표시는 "N / 2"다(전체 3건이 아니라).
     expect(document.body.textContent).toContain('1 / 2');
     // 같은 갈래(epic-1)의 두 후보(#101·#102)가 먼저 오고, 다른 갈래(#999)는 이번 묶음에서 빠진다.
-    expect(document.body.textContent).toContain('#1에서 #101로 잇습니다');
+    expect(document.body.textContent).toContain(koMessages.flow.relationReviewPairSentence.replace('{fromNumber}', '1').replace('{toNumber}', '101'));
 
     await act(async () => {
       Array.from(document.querySelectorAll('button')).find((b) => b.textContent === '나중에')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       await new Promise((r) => setTimeout(r, 0));
     });
-    expect(document.body.textContent).toContain('#1에서 #102로 잇습니다');
+    expect(document.body.textContent).toContain(koMessages.flow.relationReviewPairSentence.replace('{fromNumber}', '1').replace('{toNumber}', '102'));
     expect(document.body.textContent).not.toContain('#999');
   });
 

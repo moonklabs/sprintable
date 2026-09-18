@@ -149,16 +149,86 @@ async def test_gcs_signed_write_url_binds_create_only_header(monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_s3_signed_write_url_create_only_fails_closed():
-    """story #3249 2라운드(카디르/codex) — S3는 self-host 1급 provider(dead code 아님)인데
-    create_only=True를 실제로 강제 못 하면서 조용히 URL을 내주면 "create-only 보호가 있다"는
-    거짓 보장이 된다(cap 우회 재현). 진짜 구현(If-None-Match) 전까진 URL 자체를 미발급해야
-    한다(호출부가 502로 거부 — silent 성공 금지). create_only=False(기본)는 기존 동작 무회귀."""
+async def test_s3_client_forces_sigv4(monkeypatch):
+    """story dc3d62f4 — SigV4 강제가 IfNoneMatch 바인딩의 전제(실측: SigV2 프리사인 URL은
+    조건부 헤더가 서명 밖으로 조용히 빠짐 — signature_version 미지정이면 리전에 따라 SigV2로
+    떨어질 수 있어 이 강제가 없으면 아래 테스트가 우연히 통과해도 실 배포에서 재발할 수
+    있다)."""
+    import boto3
+
+    from app.services.storage.s3 import _client
+
+    captured: dict = {}
+    real_client = boto3.client
+
+    def _spy(*args, **kwargs):
+        captured.update(kwargs)
+        return real_client(*args, **kwargs)
+
+    monkeypatch.setattr(boto3, "client", _spy)
+    _client()
+    assert captured["config"].signature_version == "s3v4"
+
+
+@pytest.mark.anyio
+async def test_s3_signed_write_url_binds_create_only_if_none_match(monkeypatch):
+    """story dc3d62f4 — create_only=True면 `IfNoneMatch: "*"`(→ `If-None-Match` 헤더)가
+    generate_presigned_url의 Params에 실제로 실려야 한다(boto3 PutObject operation model
+    실측 확認: IfNoneMatch→header `If-None-Match`, SigV4 서명에 바인딩됨 — GCS의
+    x-goog-if-generation-match:0과 동형 방어). create_only=False(기본, 무회귀)면 실리지
+    않아야 한다."""
+    captured: list[dict] = []
+
+    class _FakeClient:
+        def generate_presigned_url(self, operation, *, Params, ExpiresIn):
+            captured.append(Params)
+            return "https://signed.example/fake"
+
+    from app.services.storage import s3 as s3_module
+
+    monkeypatch.setattr(s3_module, "_client", lambda: _FakeClient())
+
     provider = S3StorageProvider()
+
     url = await provider.signed_write_url(
         "bucket", "obj/path", ttl=timedelta(minutes=10), content_type="image/png", create_only=True,
     )
-    assert url is None
+    assert url == "https://signed.example/fake"
+    assert captured[-1].get("IfNoneMatch") == "*"
+
+    captured.clear()
+    await provider.signed_write_url(
+        "bucket", "obj/path", ttl=timedelta(minutes=10), content_type="image/png",
+    )
+    assert "IfNoneMatch" not in captured[-1]  # 기본값(무회귀) — 조건 바인딩 없음.
+
+
+@pytest.mark.anyio
+async def test_s3_signed_write_url_create_only_actually_rejects_replay(monkeypatch):
+    """story dc3d62f4 통합 pin — 실 boto3(fake 자격증명, 오프라인 서명만)로 프리사인 URL을
+    실제로 생성해 `X-Amz-SignedHeaders`에 `if-none-match`가 포함되는지 확認한다(단위 mock이
+    아니라 boto3 자체의 서명 동작 — «서명은 됐는데 조건이 실제로 안 실린» 무력화 재발을
+    가장 직접적으로 잡는 층). `_client()`가 실제로 읽는 env var(S3_ACCESS_KEY_ID 계열)로
+    스코프 한정 — AWS_* 표준 env를 오염시키지 않는다."""
+    monkeypatch.setenv("S3_ACCESS_KEY_ID", "AKIAFAKE")
+    monkeypatch.setenv("S3_SECRET_ACCESS_KEY", "fakefakefakefakefakefakefakefakefakefake")
+    monkeypatch.setenv("S3_REGION", "us-east-1")
+
+    provider = S3StorageProvider()
+    url = await provider.signed_write_url(
+        "bucket", "obj/path", ttl=timedelta(minutes=10), create_only=True,
+    )
+    assert url is not None
+    assert "X-Amz-SignedHeaders=" in url
+    signed_headers = url.split("X-Amz-SignedHeaders=")[1].split("&")[0]
+    assert "if-none-match" in signed_headers.lower()
+
+    url_no_create_only = await provider.signed_write_url(
+        "bucket", "obj/path", ttl=timedelta(minutes=10),
+    )
+    assert url_no_create_only is not None
+    signed_headers_2 = url_no_create_only.split("X-Amz-SignedHeaders=")[1].split("&")[0]
+    assert "if-none-match" not in signed_headers_2.lower()
 
 
 @pytest.mark.anyio
@@ -175,6 +245,19 @@ async def test_local_signed_write_url_create_only_fails_closed(monkeypatch):
         "bucket", "obj/path", ttl=timedelta(minutes=10), content_type="image/png",
     )
     assert url2 is not None
+
+
+def test_required_write_headers_are_provider_specific_not_hardcoded():
+    """story dc3d62f4 — assets.py가 GCS 헤더를 하드코딩했었다(응답이 provider 무관하게
+    항상 x-goog-if-generation-match). provider가 바뀌면 응답도 바뀌어야 한다 — 그래야
+    self-host가 S3/MinIO로 배포됐을 때 FE가 맞는 헤더를 PUT에 실을 수 있다."""
+    assert GcsStorageProvider().required_write_headers(create_only=True) == {
+        "x-goog-if-generation-match": "0"
+    }
+    assert GcsStorageProvider().required_write_headers(create_only=False) == {}
+    assert S3StorageProvider().required_write_headers(create_only=True) == {"If-None-Match": "*"}
+    assert S3StorageProvider().required_write_headers(create_only=False) == {}
+    assert LocalStorageProvider().required_write_headers(create_only=True) == {}
 
 
 async def test_local_download_blocks_path_traversal(monkeypatch, tmp_path):

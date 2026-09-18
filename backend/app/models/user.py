@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Text, false, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -18,13 +18,15 @@ class User(Base):
     # 현재 세션 토큰보다 먼저 존재했는지 판별). NULL=제약 신설 이전 기존 유저(무제약, 0290
     # locale과 동형 논지).
     password_set_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # story #3896 — DB has DEFAULT true, ORM lacked server_default (drift).
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     login_fail_count: Mapped[int] = mapped_column(nullable=False, default=0)
     login_locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     email_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     tos_accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     totp_secret: Mapped[str | None] = mapped_column(Text, nullable=True)
-    totp_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # story #3896 — DB has DEFAULT false, ORM lacked server_default (drift).
+    totp_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     totp_last_timestep: Mapped[int | None] = mapped_column(nullable=True)
     totp_fail_count: Mapped[int] = mapped_column(nullable=False, default=0)
     totp_locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -70,7 +72,13 @@ class User(Base):
     )
     # story #3159(retention·최소층) — 미완주 리마인드 메일 중복방지(발송 이력) + 1-클릭 수신거부.
     onboarding_reminder_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    marketing_email_opt_out: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # story #3896 — migration 0286이 `server_default=sa.false()`로 컬럼을 만들었는데 이
+    # 모델은 Python-side `default=False`만 있고 server_default가 없었다(드리프트). 이
+    # 모델 메타데이터로 테이블을 다시 만드는 테스트 경로(create_all 등)에서 그 드리프트가
+    # 실제로 DB 컬럼 default를 벗겨낸다 — 0286과 동일 expression으로 정합.
+    marketing_email_opt_out: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false(),
+    )
 
 
 class RefreshToken(Base):

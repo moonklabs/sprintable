@@ -10,7 +10,7 @@ from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
 from app.routers.auth import _OAUTH_CONFIGS
 from app.models.member import Member
-from app.models.project import OrgMember
+from app.models.project import OrgMember, Project
 from app.models.team import TeamMember
 from app.models.user import User
 from app.repositories.human_api_key import HumanApiKeyRepository
@@ -206,16 +206,30 @@ async def get_me(
                         Member.deleted_at.is_(None),
                     )
                 )).scalar_one_or_none()
-                # E-ONBOARDING S2: display_name 우선, 없을 때만 email (기존 무조건 email → 실명 반영)
-                name = member_anchor or ((user.display_name or user.email) if user else str(uid))
+                # E-ONBOARDING S2: display_name 우선. story #3758 — email/uuid 폴백 제거,
+                # canonical member 앵커도 display_name도 없으면 None을 정직하게 돌린다
+                # (member_resolver.py 5자리·#3755와 같은 email/id 폴백 클래스의 독립 자리).
+                name = member_anchor or (user.display_name if user else None)
                 try:
                     proj_id = uuid.UUID(project_id_str) if project_id_str else org_member.org_id
                 except (ValueError, AttributeError):
                     proj_id = org_member.org_id
+                # story #3553(페드루 PO 라이브 재현, PO Test Org db474a4e·772609ea, 2026-09-06) —
+                # 이 폴백(team_member 행 0인 owner/admin — org 소유만으로 접근)은 project_id는
+                # 채우면서 project_name을 통째로 빼먹어 항상 null로 나갔다(일반 경로 211행의
+                # `member.project.name`은 이 분기를 안 타 무사했다). project_id_str이 실제
+                # project를 가리킬 때만 조회한다(0-project org 폴백=org_member.org_id는 project가
+                # 아니라 조회할 이유가 없다 — project_name=None 그대로가 맞다).
+                project_name: str | None = None
+                if project_id_str:
+                    project_name = (await session.execute(
+                        select(Project.name).where(Project.id == proj_id, Project.deleted_at.is_(None))
+                    )).scalar_one_or_none()
                 return MeResponse(
                     id=org_member.id,
                     org_id=org_member.org_id,
                     project_id=proj_id,
+                    project_name=project_name,
                     user_id=uid,
                     name=name,
                     email=user.email if user else None,
@@ -224,6 +238,7 @@ async def get_me(
                     is_active=True,
                     has_password=bool(user.hashed_password) if user else None,
                     linked_providers=_linked_providers(user) if user else [],
+                    totp_enabled=bool(user.totp_enabled) if user else None,
                 )
 
     if member is None:
@@ -240,6 +255,7 @@ async def get_me(
             data.has_password = bool(user.hashed_password)
             data.linked_providers = _linked_providers(user)
             data.email = user.email  # E-ONBOARDING S2: User.email 노출
+            data.totp_enabled = bool(user.totp_enabled)  # story #3768
 
     # S-MBR-03: org owner/admin → effective role 상속. /me role이 JWT role과 일치하도록.
     if not is_api_key and member.user_id:

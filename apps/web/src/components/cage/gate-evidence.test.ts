@@ -118,6 +118,45 @@ describe('gateHasEvidence — GitHub check 단독 신호도 실 증거로 친다
   });
 });
 
+// story #3328(3바퀴 라이브 결함 · db967a77) — 레시피 approve 게이트(external_publish, BE
+// recipe_gate_hooks.py::_build_approval_neutral_facts)의 neutral_facts도 실 증거다. 이 신호가
+// 하나도 안 잡혀 gate 09631e56(실사고 재현) 같은 게이트가 CI/신뢰도/사유/GitHub check/draft_target
+// 전무라는 이유만으로 State A(«근거 데이터 없음»)로 가라앉았다 — «내용으로 직접 판단» 문구
+// 자체가 승인 대상(draft doc·channel)조차 못 보여준다는 점에서 다른 신호 부재와 근본적으로
+// 다르다(사람이 뭘 승인하는지 화면 안에서 전혀 알 길이 없었다).
+describe('gateHasEvidence — 레시피 approve 게이트 neutral_facts(story #3328)', () => {
+  it('work_item_reference_token·draft_doc_reference_token·channel이 있으면 evidence 있음', () => {
+    const gate = baseGate({
+      gate_type: 'external_publish', status: 'pending',
+      neutral_facts: {
+        work_item_title: '9월 캠페인', work_item_reference_token: '[9월 캠페인](entity:story:s-1)',
+        channel: 'threads', draft_doc_reference_token: '[캠페인 초안](entity:doc:d-1)',
+        draft_doc_summary: '초안 본문', stage: 'approve',
+      },
+    });
+    expect(gateHasEvidence(gate)).toBe(true);
+  });
+
+  it('전 필드가 BE sentinel "미확認"이면 evidence 없음(지어내지 않음 — 진짜 빈 카드는 여전히 State A)', () => {
+    const gate = baseGate({
+      gate_type: 'external_publish', status: 'pending',
+      neutral_facts: {
+        work_item_title: '미확認', work_item_reference_token: '미확認', channel: '미확認',
+        draft_doc_reference_token: '미확認', draft_doc_summary: '미확認',
+      },
+    });
+    expect(gateHasEvidence(gate)).toBe(false);
+  });
+
+  it('channel 하나만 있어도(다른 필드 전부 미확認/부재) evidence 있음 — 부분증거도 실 증거', () => {
+    const gate = baseGate({
+      gate_type: 'external_publish', status: 'pending',
+      neutral_facts: { channel: 'threads' },
+    });
+    expect(gateHasEvidence(gate)).toBe(true);
+  });
+});
+
 // story #2814 2단(§5-④ 그라운딩·BE story #2815/PR#3245) — 관측모드 판별을 github_check_enforced
 // 필드 기반으로 승격. BE는 단건 조회(get_gate_endpoint)에서만 이 필드를 enrich한다.
 describe('githubCheckState — github_check_enforced 기반 승격(story #2814 2단)', () => {

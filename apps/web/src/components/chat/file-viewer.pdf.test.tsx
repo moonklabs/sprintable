@@ -7,7 +7,9 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { NextIntlClientProvider } from 'next-intl';
 import { FileViewer } from './file-viewer';
+import koMessages from '../../../messages/ko.json';
 import type { ReadingPanelTarget } from './reading-panel';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -37,7 +39,13 @@ function mount(node: React.ReactElement) {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
-  act(() => { root.render(node); });
+  act(() => {
+    root.render(
+      <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+        {node}
+      </NextIntlClientProvider>,
+    );
+  });
 }
 
 async function waitFor(check: () => boolean, timeoutMs = 5000) {
@@ -75,7 +83,7 @@ describe('FileViewer pdf (story #2807 — CSP frame-src blob 전환)', () => {
     }));
 
     mount(<FileViewer target={target} onClose={() => {}} />);
-    await waitFor(() => container.querySelector('iframe') !== null || container.textContent!.includes('표시하지 못했습니다'));
+    await waitFor(() => container.querySelector('iframe') !== null || container.textContent!.includes('표시하지 못했어요'));
 
     const iframe = container.querySelector('iframe');
     expect(iframe, `iframe 없음. text=${container.textContent}`).not.toBeNull();
@@ -89,7 +97,7 @@ describe('FileViewer pdf (story #2807 — CSP frame-src blob 전환)', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 404 })));
 
     mount(<FileViewer target={target} onClose={() => {}} />);
-    await waitFor(() => container.textContent!.includes('표시하지 못했습니다'));
+    await waitFor(() => container.textContent!.includes('표시하지 못했어요'));
 
     expect(container.querySelector('iframe')).toBeNull();
     expect(container.textContent).toContain('다운로드해 확인하세요');
@@ -107,7 +115,7 @@ describe('FileViewer pdf (story #2807 — CSP frame-src blob 전환)', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(20000); });
 
     expect(container.querySelector('iframe')).toBeNull();
-    expect(container.textContent).toContain('표시하지 못했습니다');
+    expect(container.textContent).toContain('표시하지 못했어요');
     errorSpy.mockRestore();
     vi.useRealTimers();
   });

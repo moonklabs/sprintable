@@ -61,13 +61,15 @@ def test_au_warn_copy_formats_without_error_both_locales():
 
 
 def test_ko_transactional_copy_unchanged_from_pre_3205_wording():
-    """무회귀 — #3196-⑤에서 확定된 ko 문구가 그대로인지(문자열 리터럴 그대로 이전)."""
+    """무회귀 — #3196-⑤에서 확定된 ko 문구가 그대로인지(문자열 리터럴 그대로 이전).
+    story #3931(2층 톤 전환)이 subject/reminder의 합니다체 어미를 해요체로 고쳤다 — 낱말
+    자체(어휘·구조)는 무변경, 이 pin도 어미만 갱신한다."""
     verify = TRANSACTIONAL_COPY["verify_email"]["ko"]
     assert verify["subject"] == "Sprintable 이메일 인증을 완료해 주세요"
     assert verify["cta_label"] == "이메일 인증하기"
     reset = TRANSACTIONAL_COPY["reset_password"]["ko"]
     assert reset["subject"] == "Sprintable 비밀번호 재설정 안내"
     reminder = REMINDER_COPY["ko"]
-    assert reminder["subject"] == "Sprintable — 가입 완료까지 몇 단계 남았습니다"
+    assert reminder["subject"] == "Sprintable — 가입 완료까지 몇 단계 남았어요"
     invite = INVITE_COPY["ko"]
     assert invite["heading"] == "팀에 초대됐어요!"

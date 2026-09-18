@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useTranslations } from 'next-intl';
 import { Download, Expand, File, FileCode, FileText, Film, Image as ImageIcon, Loader2, Music, X, type LucideIcon } from 'lucide-react';
 import { fetchWithAuth } from '@/lib/db/client';
 import { downloadAsset, openExternal } from '@/lib/native-shell-bridge';
@@ -47,10 +48,13 @@ export function resolveFormat(contentType: string | null | undefined, label: str
   return 'unknown';
 }
 
-const FORMAT_LABEL: Record<Format, string> = {
-  image: '이미지', video: '동영상', audio: '오디오', text: '텍스트',
-  html: 'HTML', pdf: 'PDF', docx: 'Word 문서', pptx: 'PowerPoint 문서', office: '오피스 문서', unknown: '파일',
+// 모듈 스코프 상수라 useTranslations 호출 불가 — 값이 아니라 i18n 키를 담아 렌더 시점(FileViewer,
+// tChats 바인딩)에 조회한다. html/pdf는 순 ASCII 약어라 §⑤ 대상 밖(그대로 리터럴 유지).
+const FORMAT_LABEL_KEYS: Record<Exclude<Format, 'html' | 'pdf'>, string> = {
+  image: 'formatImage', video: 'formatVideo', audio: 'formatAudio', text: 'formatText',
+  docx: 'formatWord', pptx: 'formatPowerpoint', office: 'formatOffice', unknown: 'formatUnknown',
 };
+const FORMAT_LABEL_LITERAL: Partial<Record<Format, string>> = { html: 'HTML', pdf: 'PDF' };
 
 function iconFor(format: Format): LucideIcon {
   switch (format) {
@@ -69,7 +73,9 @@ function iconFor(format: Format): LucideIcon {
 type SignState =
   | { kind: 'fetching' }
   | { kind: 'denied' }
-  | { kind: 'error'; status: number; message: string }
+  // message는 BE가 준 실 에러 문구(있으면 그대로) — 없을 때만 fallbackKey로 렌더 시점에
+  // i18n 폴백을 붙인다(signAttachment는 컴포넌트 밖 plain 함수라 useTranslations 호출 불가).
+  | { kind: 'error'; status: number; message: string | null; fallbackKey: 'unknownError' | 'networkErrorShort' }
   | { kind: 'ready'; url: string };
 
 // story #2781 — /api/attachments/sign은 BE 계약상 정확히 하나의 리소스 식별자(conversation_id|
@@ -90,10 +96,10 @@ async function signAttachment(target: AttachmentTarget, disposition: 'inline' | 
     if (res.status === 403) return { kind: 'denied' };
     const json = (await res.json().catch(() => null)) as { data?: { url?: string }; error?: { message?: string } } | null;
     const url = json?.data?.url;
-    if (!res.ok || !url) return { kind: 'error', status: res.status, message: json?.error?.message ?? '알 수 없는 오류' };
+    if (!res.ok || !url) return { kind: 'error', status: res.status, message: json?.error?.message ?? null, fallbackKey: 'unknownError' };
     return { kind: 'ready', url };
   } catch {
-    return { kind: 'error', status: 0, message: '네트워크 오류' };
+    return { kind: 'error', status: 0, message: null, fallbackKey: 'networkErrorShort' };
   }
 }
 
@@ -104,6 +110,10 @@ async function signAttachment(target: AttachmentTarget, disposition: 'inline' | 
  * 받는 편이 만료 이슈보다 낫다).
  */
 export function FileViewer({ target, onClose }: { target: AttachmentTarget; onClose: () => void }) {
+  // story #3776(1층B) — "다운로드"/"다시 시도", chats/common ns의 기존
+  // mediaDownload/retry 키 재사용.
+  const tChats = useTranslations('chats');
+  const tc = useTranslations('common');
   const format = resolveFormat(target.contentType, target.label);
   const [state, setState] = useState<SignState>({ kind: 'fetching' });
   const [downloading, setDownloading] = useState(false);
@@ -145,14 +155,14 @@ export function FileViewer({ target, onClose }: { target: AttachmentTarget; onCl
       <div className="flex flex-shrink-0 items-center gap-2 border-b border-border px-4 py-2.5">
         <Icon className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
         <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{target.label}</span>
-        <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{FORMAT_LABEL[format]}</span>
+        <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{FORMAT_LABEL_LITERAL[format] ?? tChats(FORMAT_LABEL_KEYS[format as Exclude<Format, 'html' | 'pdf'>])}</span>
         <button
           type="button"
           onClick={handleOpenFull}
           disabled={state.kind !== 'ready'}
           className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
-          aria-label="전체 화면으로 열기"
-          title="전체 화면"
+          aria-label={tChats('openFullscreen')}
+          title={tChats('fullscreen')}
         >
           <Expand className="h-4 w-4" />
         </button>
@@ -161,8 +171,8 @@ export function FileViewer({ target, onClose }: { target: AttachmentTarget; onCl
           onClick={() => void handleDownload()}
           disabled={downloading}
           className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
-          aria-label="다운로드"
-          title="다운로드"
+          aria-label={tChats('mediaDownload')}
+          title={tChats('mediaDownload')}
         >
           <Download className="h-4 w-4" />
         </button>
@@ -170,7 +180,7 @@ export function FileViewer({ target, onClose }: { target: AttachmentTarget; onCl
           type="button"
           onClick={onClose}
           className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          aria-label="패널 닫기"
+          aria-label={tChats('closePanel')}
         >
           <X className="h-4 w-4" />
         </button>
@@ -186,23 +196,23 @@ export function FileViewer({ target, onClose }: { target: AttachmentTarget; onCl
 
         {state.kind === 'denied' && (
           <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
-            <p className="text-sm text-foreground">이 첨부를 열람할 권한이 없습니다.</p>
-            <p className="text-xs text-muted-foreground">사유: 대화/스토리 참여자만 열람할 수 있습니다.</p>
+            <p className="text-sm text-foreground">{tChats('attachmentViewDenied')}</p>
+            <p className="text-xs text-muted-foreground">{tChats('attachmentViewDeniedReason')}</p>
           </div>
         )}
 
         {state.kind === 'error' && (
           <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
-            <p className="text-sm text-foreground">불러오지 못했습니다.</p>
+            <p className="text-sm text-foreground">{tChats('fileLoadFailed')}</p>
             <p className="w-fit rounded-md bg-destructive-tint px-2 py-1.5 font-mono text-[10.5px] text-foreground">
-              {state.status} {state.message}
+              {state.status} {state.message ?? tChats(state.fallbackKey)}
             </p>
             <button
               type="button"
               onClick={retry}
               className="mt-1 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
             >
-              다시 시도
+              {tc('retry')}
             </button>
           </div>
         )}
@@ -214,6 +224,7 @@ export function FileViewer({ target, onClose }: { target: AttachmentTarget; onCl
 }
 
 function FileViewerBody({ format, url, label, assetId }: { format: Format; url: string; label: string; assetId?: string }) {
+  const t = useTranslations('chats');
   switch (format) {
     case 'image':
       // eslint-disable-next-line @next/next/no-img-element -- 서명 URL은 원격 도메인이라 next/image 정적 도메인 화이트리스트 밖(기존 lightbox와 동일 제약)
@@ -251,8 +262,8 @@ function FileViewerBody({ format, url, label, assetId }: { format: Format; url: 
         return (
           <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
             <FileText className="size-8 text-muted-foreground" aria-hidden />
-            <p className="text-sm text-foreground">미리보기 준비 중입니다.</p>
-            <p className="text-xs text-muted-foreground">이 첨부는 인앱 변환 대상 식별자가 없습니다. 다운로드해 확인하세요.</p>
+            <p className="text-sm text-foreground">{t('previewPreparing')}</p>
+            <p className="text-xs text-muted-foreground">{t('attachmentNoConvertId')} {t('downloadToCheck')}</p>
           </div>
         );
       }
@@ -261,16 +272,16 @@ function FileViewerBody({ format, url, label, assetId }: { format: Format; url: 
       return (
         <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
           <FileText className="size-8 text-muted-foreground" aria-hidden />
-          <p className="text-sm text-foreground">미리보기 준비 중입니다.</p>
-          <p className="text-xs text-muted-foreground">오피스 문서(pptx/xlsx)는 아직 인앱 렌더를 지원하지 않습니다. 다운로드해 확인하세요.</p>
+          <p className="text-sm text-foreground">{t('previewPreparing')}</p>
+          <p className="text-xs text-muted-foreground">{t('officeNotSupported')} {t('downloadToCheck')}</p>
         </div>
       );
     default:
       return (
         <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
           <File className="size-8 text-muted-foreground" aria-hidden />
-          <p className="text-sm text-foreground">이 포맷은 인앱 미리보기가 아직 없습니다.</p>
-          <p className="text-xs text-muted-foreground">다운로드해 확인하세요.</p>
+          <p className="text-sm text-foreground">{t('formatNoPreview')}</p>
+          <p className="text-xs text-muted-foreground">{t('downloadToCheck')}</p>
         </div>
       );
   }
@@ -278,6 +289,7 @@ function FileViewerBody({ format, url, label, assetId }: { format: Format; url: 
 
 /** txt/md 둘 다 MdBody(react-markdown)로 — §A2 표 그대로. */
 function TextBody({ url }: { url: string }) {
+  const t = useTranslations('chats');
   const [content, setContent] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
 
@@ -293,8 +305,8 @@ function TextBody({ url }: { url: string }) {
   if (failed) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
-        <p className="text-sm text-foreground">불러오지 못했습니다.</p>
-        <p className="text-xs text-muted-foreground">텍스트 내용을 가져오는 데 실패했습니다.</p>
+        <p className="text-sm text-foreground">{t('fileLoadFailed')}</p>
+        <p className="text-xs text-muted-foreground">{t('textContentLoadFailed')}</p>
       </div>
     );
   }
@@ -320,6 +332,7 @@ function TextBody({ url }: { url: string }) {
  * office(pptx 등) 미지원 배지와 동일한 톤으로 다운로드 유도.
  */
 function DocxBody({ url, label }: { url: string; label: string }) {
+  const t = useTranslations('chats');
   const containerRef = useRef<HTMLDivElement>(null);
   const [status, setStatus] = useState<'rendering' | 'ready' | 'failed'>('rendering');
 
@@ -389,8 +402,8 @@ function DocxBody({ url, label }: { url: string; label: string }) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
         <FileText className="size-8 text-muted-foreground" aria-hidden />
-        <p className="text-sm text-foreground">미리보기를 표시하지 못했습니다.</p>
-        <p className="text-xs text-muted-foreground">이 문서는 인앱 렌더에 실패했습니다. 다운로드해 확인하세요.</p>
+        <p className="text-sm text-foreground">{t('previewRenderFailed')}</p>
+        <p className="text-xs text-muted-foreground">{t('inAppRenderFailed')} {t('downloadToCheck')}</p>
       </div>
     );
   }
@@ -423,6 +436,7 @@ function DocxBody({ url, label }: { url: string; label: string }) {
  * 그것만 iframe에 건다. DocxBody와 동형 패턴(단일 try/catch+독립 타이머).
  */
 function PdfBody({ url, label }: { url: string; label: string }) {
+  const t = useTranslations('chats');
   const [status, setStatus] = useState<'loading' | 'ready' | 'failed'>('loading');
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
 
@@ -475,8 +489,8 @@ function PdfBody({ url, label }: { url: string; label: string }) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
         <FileText className="size-8 text-muted-foreground" aria-hidden />
-        <p className="text-sm text-foreground">미리보기를 표시하지 못했습니다.</p>
-        <p className="text-xs text-muted-foreground">이 문서는 인앱 렌더에 실패했습니다. 다운로드해 확인하세요.</p>
+        <p className="text-sm text-foreground">{t('previewRenderFailed')}</p>
+        <p className="text-xs text-muted-foreground">{t('inAppRenderFailed')} {t('downloadToCheck')}</p>
       </div>
     );
   }
@@ -501,6 +515,7 @@ function PdfBody({ url, label }: { url: string; label: string }) {
  * #2808 검토 재료).
  */
 function HtmlPreviewBody({ url, label }: { url: string; label: string }) {
+  const t = useTranslations('chats');
   const [status, setStatus] = useState<'loading' | 'ready' | 'failed'>('loading');
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
 
@@ -551,8 +566,8 @@ function HtmlPreviewBody({ url, label }: { url: string; label: string }) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
         <FileText className="size-8 text-muted-foreground" aria-hidden />
-        <p className="text-sm text-foreground">미리보기를 표시하지 못했습니다.</p>
-        <p className="text-xs text-muted-foreground">이 문서는 인앱 렌더에 실패했습니다. 다운로드해 확인하세요.</p>
+        <p className="text-sm text-foreground">{t('previewRenderFailed')}</p>
+        <p className="text-xs text-muted-foreground">{t('inAppRenderFailed')} {t('downloadToCheck')}</p>
       </div>
     );
   }
@@ -582,6 +597,7 @@ function HtmlPreviewBody({ url, label }: { url: string; label: string }) {
  * Promise.race를 걷어내고 단일 try/catch+독립 타이머로 재작성 — DocxBody와 동일 패턴.
  */
 function PptxBody({ assetId, label }: { assetId: string; label: string }) {
+  const t = useTranslations('chats');
   const [status, setStatus] = useState<'converting' | 'ready' | 'failed'>('converting');
   const [failMessage, setFailMessage] = useState<string | null>(null);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
@@ -619,7 +635,7 @@ function PptxBody({ assetId, label }: { assetId: string; label: string }) {
     // (AC2·AC3, 무한 로딩 금지를 구조로 보장).
     const timeoutId = setTimeout(() => {
       console.error('pptx 변환 시간 초과(130s)');
-      markFailed('변환 시간 초과');
+      markFailed(t('pptxConvertTimeout'));
     }, 130000);
 
     (async () => {
@@ -668,14 +684,14 @@ function PptxBody({ assetId, label }: { assetId: string; label: string }) {
       clearTimeout(timeoutId);
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [assetId]);
+  }, [assetId, t]);
 
   if (status === 'failed') {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
         <FileText className="size-8 text-muted-foreground" aria-hidden />
-        <p className="text-sm text-foreground">변환에 실패했습니다.</p>
-        <p className="text-xs text-muted-foreground">이 문서를 PDF로 변환하지 못했습니다. 다운로드해 확인하세요.</p>
+        <p className="text-sm text-foreground">{t('conversionFailed')}</p>
+        <p className="text-xs text-muted-foreground">{t('pdfConversionFailedDesc')} {t('downloadToCheck')}</p>
         {failMessage && (
           <p className="w-fit rounded-md bg-destructive-tint px-2 py-1.5 font-mono text-[10.5px] text-foreground">{failMessage}</p>
         )}
@@ -687,8 +703,8 @@ function PptxBody({ assetId, label }: { assetId: string; label: string }) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
         <Loader2 className="size-6 animate-spin text-muted-foreground" aria-hidden />
-        <p className="text-sm text-foreground">변환 중입니다…</p>
-        <p className="text-xs text-muted-foreground">첫 열람은 최대 1~2분 걸릴 수 있습니다({elapsedSec}초 경과).</p>
+        <p className="text-sm text-foreground">{t('converting')}</p>
+        <p className="text-xs text-muted-foreground">{t('firstViewSlowNotice', { elapsed: elapsedSec })}</p>
       </div>
     );
   }

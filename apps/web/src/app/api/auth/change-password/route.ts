@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getAuthContext } from '@/lib/auth-helpers';
+import { safeJsonParse } from '@/lib/api-response';
 
 const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 
@@ -17,7 +18,7 @@ export async function PATCH(request: Request) {
     body: JSON.stringify({ current_password: body.current_password, new_password: body.new_password }),
   });
 
-  const json = await fastapiRes.json() as Record<string, unknown>;
+  const json = await safeJsonParse(fastapiRes);
   if (!fastapiRes.ok) {
     return NextResponse.json({ error: json['error'] ?? { code: 'FAILED', message: 'Failed' } }, { status: fastapiRes.status });
   }

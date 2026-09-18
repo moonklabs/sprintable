@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useTranslations, useLocale } from 'next-intl';
+import { useTranslations } from 'next-intl';
 import { ChevronLeft, GripVertical, Plus, Send, Trash2, X, Flag } from 'lucide-react';
 import { DndContext, type DragEndEvent, PointerSensor, useSensor, useSensors, closestCenter } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
@@ -10,6 +10,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { computeReorderPatch } from '@/lib/epic-steer';
 import { useOrgSyncVersion } from '@/lib/project-context-client';
 import { useGoalsRoute } from './goals-context';
+import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { Button } from '@/components/ui/button';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Badge } from '@/components/ui/badge';
@@ -23,6 +24,10 @@ import { EmptyState } from '@/components/ui/empty-state';
 function GoalGroupHint() {
   return (
     <svg viewBox="0 0 48 24" className="size-6 w-12 text-muted-foreground" aria-hidden="true">
+      {/* story #3232 — 점 3개와 원 사이에 연결 요소가 없어 «수렴/그룹핑»이 안 읽히고 별개
+          마크로 보였다(버그헌트 적출). 각 점에서 원으로 향하는 faint 수렴선을 더해 «여럿이
+          하나로 모인다»를 라벨 없이 읽히게 한다(과설명 금지 유지 — 선은 라벨 아님). */}
+      <path d="M4 12 L25 12 M10 8 L25 12 M10 16 L25 12" stroke="currentColor" strokeWidth="1" opacity="0.35" fill="none" />
       <circle cx="10" cy="8" r="2" fill="currentColor" opacity="0.5" />
       <circle cx="10" cy="16" r="2" fill="currentColor" opacity="0.5" />
       <circle cx="4" cy="12" r="2" fill="currentColor" opacity="0.5" />
@@ -34,7 +39,7 @@ import {
   Dialog, DialogContent, DialogDescription,
   DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
-import { ToastContainer, useToast } from '@/components/ui/toast';
+import { useToast } from '@/components/ui/toast';
 import { OutcomeStatusBadge } from '@/components/outcome/outcome-status-badge';
 import { HypothesesSummary } from '@/components/hypotheses/hypotheses-summary';
 import { EpicHypothesisDeclarationSection } from '@/components/epics/hypothesis-declaration-section';
@@ -176,11 +181,13 @@ function calcSpProgress(stories: Story[]): { done: number; total: number } {
   return { done, total };
 }
 
-// story #2084 근본: 'ko-KR' 하드코딩이었다 — locale=en에서도 날짜가 한국어 형식으로
-// 렌더되던 원인 중 하나(dashboard-activity-timeline.tsx와 동일하게 useLocale() 값을 받는다).
-function formatDate(dateStr: string | undefined, locale: string): string {
+// story #3493 — measure_after/target_date는 둘 다 "약속"(측정 예정일·목표 완료일,
+// 아직 안 온 미래 시점) — §11-2 정본(formatScheduledAt)으로 통일한다. locale
+// 하드코딩(구 #2084 근본원인) 자체가 사라진다 — 이 정본은 tz만 받고 로케일 무관
+// 고정 포맷이라 en/ko 분기가 원천적으로 없다.
+function formatDate(dateStr: string | undefined, displayTimezone: string): string {
   if (!dateStr) return '—';
-  return new Date(dateStr).toLocaleDateString(locale, { year: 'numeric', month: '2-digit', day: '2-digit' });
+  return formatScheduledAt(dateStr, displayTimezone).display;
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -310,7 +317,7 @@ function GoalCreateForm({ projectId, orgId, onCreated, onCancel }: GoalCreateFor
           onChange={(e) => setTitle(e.target.value)}
           placeholder={t('fieldTitlePlaceholder')}
           required
-          className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+          className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none focus-visible:border-proof-citron focus-visible:ring-3 focus-visible:ring-proof-citron"
         />
       </div>
 
@@ -321,7 +328,7 @@ function GoalCreateForm({ projectId, orgId, onCreated, onCancel }: GoalCreateFor
           onChange={(e) => setDescription(e.target.value)}
           placeholder={t('fieldDescriptionPlaceholder')}
           rows={3}
-          className="w-full resize-none rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+          className="w-full resize-none rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none focus-visible:border-proof-citron focus-visible:ring-3 focus-visible:ring-proof-citron"
         />
       </div>
 
@@ -331,7 +338,7 @@ function GoalCreateForm({ projectId, orgId, onCreated, onCancel }: GoalCreateFor
           <select
             value={priority}
             onChange={(e) => setPriority(e.target.value as GoalPriority)}
-            className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+            className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground outline-none focus-visible:border-proof-citron focus-visible:ring-3 focus-visible:ring-proof-citron"
           >
             <option value="critical">{t('priorityCritical')}</option>
             <option value="high">{t('priorityHigh')}</option>
@@ -348,7 +355,7 @@ function GoalCreateForm({ projectId, orgId, onCreated, onCancel }: GoalCreateFor
             value={targetSp}
             onChange={(e) => setTargetSp(e.target.value)}
             placeholder="0"
-            className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+            className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none focus-visible:border-proof-citron focus-visible:ring-3 focus-visible:ring-proof-citron"
           />
         </div>
       </div>
@@ -359,7 +366,7 @@ function GoalCreateForm({ projectId, orgId, onCreated, onCancel }: GoalCreateFor
           type="date"
           value={targetDate}
           onChange={(e) => setTargetDate(e.target.value)}
-          className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+          className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground outline-none focus-visible:border-proof-citron focus-visible:ring-3 focus-visible:ring-proof-citron"
         />
       </div>
 
@@ -446,7 +453,7 @@ function GoalEditForm({ epic, onSaved, onCancel }: GoalEditFormProps) {
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           required
-          className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+          className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none focus-visible:border-proof-citron focus-visible:ring-3 focus-visible:ring-proof-citron"
         />
       </div>
 
@@ -456,7 +463,7 @@ function GoalEditForm({ epic, onSaved, onCancel }: GoalEditFormProps) {
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           rows={3}
-          className="w-full resize-none rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+          className="w-full resize-none rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none focus-visible:border-proof-citron focus-visible:ring-3 focus-visible:ring-proof-citron"
         />
       </div>
 
@@ -466,7 +473,7 @@ function GoalEditForm({ epic, onSaved, onCancel }: GoalEditFormProps) {
         <select
           value={priority}
           onChange={(e) => setPriority(e.target.value as GoalPriority)}
-          className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+          className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground outline-none focus-visible:border-proof-citron focus-visible:ring-3 focus-visible:ring-proof-citron"
         >
           <option value="critical">{t('priorityCritical')}</option>
           <option value="high">{t('priorityHigh')}</option>
@@ -482,7 +489,7 @@ function GoalEditForm({ epic, onSaved, onCancel }: GoalEditFormProps) {
             type="date"
             value={targetDate}
             onChange={(e) => setTargetDate(e.target.value)}
-            className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+            className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground outline-none focus-visible:border-proof-citron focus-visible:ring-3 focus-visible:ring-proof-citron"
           />
         </div>
 
@@ -494,7 +501,7 @@ function GoalEditForm({ epic, onSaved, onCancel }: GoalEditFormProps) {
             value={targetSp}
             onChange={(e) => setTargetSp(e.target.value)}
             placeholder="0"
-            className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+            className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none focus-visible:border-proof-citron focus-visible:ring-3 focus-visible:ring-proof-citron"
           />
         </div>
       </div>
@@ -532,21 +539,21 @@ function outcomeLineText(
   tOutcome: ReturnType<typeof useTranslations<'outcomeLoop'>>,
   status: Goal['outcome_status'],
   measureAfter: string | null | undefined,
-  locale: string,
+  displayTimezone: string,
 ): { text: string; tone: 'green' | 'blue' | 'neutral' } {
   if (status === 'hit') return { text: tOutcome('statusHit'), tone: 'green' };
   if (status === 'miss') return { text: tOutcome('statusMiss'), tone: 'neutral' };
   if (status === 'unmeasured') return { text: tOutcome('statusUnmeasured'), tone: 'neutral' };
   if (status === 'unmeasurable') return { text: tOutcome('statusUnmeasurable'), tone: 'neutral' };
   // pending/n_a/null — 아직 결과 없음. measure_after가 있으면 "측정 예정 · 날짜"까지만(추측 금지).
-  if (measureAfter) return { text: `${t('outcomeAwaitingMeasure')} · ${formatDate(measureAfter, locale)}`, tone: 'blue' };
+  if (measureAfter) return { text: `${t('outcomeAwaitingMeasure')} · ${formatDate(measureAfter, displayTimezone)}`, tone: 'blue' };
   return { text: tOutcome('statusPending'), tone: 'neutral' };
 }
 
 function GoalRow({ epic, isSelected, onClick, onDeleteRequest, sortable }: GoalRowProps) {
   const t = useTranslations('goals');
   const tOutcome = useTranslations('outcomeLoop');
-  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: epic.id,
     disabled: !sortable,
@@ -566,7 +573,7 @@ function GoalRow({ epic, isSelected, onClick, onDeleteRequest, sortable }: GoalR
   const pct = total > 0 ? Math.round((done / total) * 100) : 0;
   const spProgress = calcSpProgress(stories);
   const spExceeded = typeof epic.target_sp === 'number' && epic.target_sp > 0 && spProgress.total > epic.target_sp;
-  const outcomeLine = outcomeLineText(t, tOutcome, epic.outcome_status, epic.measure_after, locale);
+  const outcomeLine = outcomeLineText(t, tOutcome, epic.outcome_status, epic.measure_after, displayTimezone);
 
   const statusLabel: Record<GoalStatus, string> = {
     draft: t('statusDraft'),
@@ -709,11 +716,11 @@ function GoalRow({ epic, isSelected, onClick, onDeleteRequest, sortable }: GoalR
             가로 오버플로 잠재 → flex-wrap 헤지(가디언 라이브게이트 선제·기존 행 robustness↑). */}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
           {epic.target_date ? (
-            <span>{t('targetDate')}: {formatDate(epic.target_date, locale)}</span>
+            <span>{t('targetDate')}: {formatDate(epic.target_date, displayTimezone)}</span>
           ) : null}
           <HypothesesSummary count={epic.hypothesis_count ?? 0} riskyStatus={epic.risky_status ?? null} />
           {spExceeded ? (
-            <span className="rounded-full bg-destructive/10 px-1.5 py-0.5 text-xs font-semibold text-foreground">
+            <span className="rounded-full bg-destructive-tint px-1.5 py-0.5 text-xs font-semibold text-foreground">
               {t('spExceeded')}
             </span>
           ) : null}
@@ -733,7 +740,11 @@ interface GoalDetailPanelProps {
 
 function GoalDetailPanel({ epic, onUpdate, onClose }: GoalDetailPanelProps) {
   const t = useTranslations('goals');
-  const locale = useLocale();
+  // story #3878(§⑤ 낱말 드리프트) — 스토리 목록 배지의 story.status(canonical slug)를
+  // t() 없이 그대로 그리던 자리 정본화. story-detail-panel.tsx의 statusKeyMap→t() 관례
+  // 그대로 재사용(§②-1 기존 상태 낱말, 새 키 0).
+  const tBoard = useTranslations('board');
+  const displayTimezone = resolveDisplayTimezone().tz;
   const router = useRouter();
   const { wsSlug, projSlug } = useGoalsRoute();
   const [isEditing, setIsEditing] = useState(false);
@@ -748,6 +759,18 @@ function GoalDetailPanel({ epic, onUpdate, onClose }: GoalDetailPanelProps) {
     active: t('statusActive'),
     done: t('statusDone'),
     archived: t('statusArchived'),
+  };
+
+  const storyStatusKeyMap: Record<string, 'backlog' | 'readyForDev' | 'inProgress' | 'inReview' | 'done'> = {
+    backlog: 'backlog',
+    'ready-for-dev': 'readyForDev',
+    'in-progress': 'inProgress',
+    'in-review': 'inReview',
+    done: 'done',
+  };
+  const storyStatusLabel = (slug: string): string => {
+    const key = storyStatusKeyMap[slug];
+    return key ? tBoard(key) : slug;
   };
 
   const priorityLabel: Record<GoalPriority, string> = {
@@ -815,14 +838,14 @@ function GoalDetailPanel({ epic, onUpdate, onClose }: GoalDetailPanelProps) {
             <div className="grid grid-cols-2 gap-3">
               <div className="rounded-xl bg-muted px-3 py-2.5">
                 <p className="text-xs font-medium text-muted-foreground">{t('targetDate')}</p>
-                <p className="mt-1 text-sm font-medium text-foreground">{formatDate(epic.target_date, locale)}</p>
+                <p className="mt-1 text-sm font-medium text-foreground">{formatDate(epic.target_date, displayTimezone)}</p>
               </div>
               <div className="rounded-xl bg-muted px-3 py-2.5">
                 <p className="text-xs font-medium text-muted-foreground">{t('targetSp')}</p>
                 <div className="mt-1 flex items-center gap-1.5">
                   <p className="text-sm font-medium text-foreground">{epic.target_sp !== undefined ? epic.target_sp : '—'}</p>
                   {spExceeded ? (
-                    <span className="rounded-full bg-destructive/10 px-1.5 py-0.5 text-xs font-semibold text-foreground">{t('spExceeded')}</span>
+                    <span className="rounded-full bg-destructive-tint px-1.5 py-0.5 text-xs font-semibold text-foreground">{t('spExceeded')}</span>
                   ) : null}
                 </div>
               </div>
@@ -845,7 +868,7 @@ function GoalDetailPanel({ epic, onUpdate, onClose }: GoalDetailPanelProps) {
                   <div className="flex items-center gap-2">
                     <p className="text-xs font-medium text-muted-foreground">{t('spProgress')}</p>
                     {spExceeded ? (
-                      <span className="rounded-full bg-destructive/10 px-1.5 py-0.5 text-xs font-semibold text-foreground">
+                      <span className="rounded-full bg-destructive-tint px-1.5 py-0.5 text-xs font-semibold text-foreground">
                         {t('spExceededDetail', { total: spProgress.total, target: epic.target_sp ?? 0 })}
                       </span>
                     ) : null}
@@ -873,7 +896,7 @@ function GoalDetailPanel({ epic, onUpdate, onClose }: GoalDetailPanelProps) {
                           <span className="text-xs text-muted-foreground">{story.story_points} SP</span>
                         ) : null}
                         <Badge variant={story.status === 'done' ? 'success' : 'secondary'} className="text-[10px]">
-                          {story.status}
+                          {storyStatusLabel(story.status)}
                         </Badge>
                       </div>
                     </button>
@@ -939,9 +962,10 @@ interface GoalsClientProps {
 
 export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
   const t = useTranslations('goals');
+  const tc = useTranslations('common');
   const router = useRouter();
   const { wsSlug, projSlug } = useGoalsRoute();
-  const { toasts, addToast, dismissToast } = useToast();
+  const { addToast } = useToast();
   const [epics, setGoals] = useState<Goal[]>([]);
   const [selectedEpic, setSelectedEpic] = useState<Goal | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1047,17 +1071,17 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
       if (!res.ok) {
         // story #2485 — backend delete_goal()은 generic HTTP상태 코드만 낸다
         // (진짜 비즈니스 code 없음, 그라운딩 확認) — raw 서버 message 노출 대신 고정 문구.
-        addToast({ type: 'error', title: '목표 삭제에 실패했습니다.' });
+        addToast({ type: 'error', title: t('goalDeleteFailed') });
         void fetchGoals();
       }
     } catch {
-      addToast({ type: 'error', title: '목표 삭제에 실패했습니다.' });
+      addToast({ type: 'error', title: t('goalDeleteFailed') });
       void fetchGoals();
     } finally {
       setDeleting(false);
       setDeleteConfirmId(null);
     }
-  }, [fetchGoals, addToast]);
+  }, [fetchGoals, addToast, t]);
 
   const handleCreated = useCallback((epic: Goal) => {
     setGoals((prev) => [epic, ...prev]);
@@ -1334,13 +1358,12 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
               onClick={() => { if (deleteConfirmId) void handleDeleteEpic(deleteConfirmId); }}
               disabled={deleting}
             >
-              {deleting ? t('deleting') : t('deleteConfirmButton')}
+              {deleting ? tc('deleting') : t('deleteConfirmButton')}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </>
   );
 }

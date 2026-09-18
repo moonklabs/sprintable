@@ -17,6 +17,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { fetchWithAuth } from '@/lib/db/client';
+import { resolveRoleLabel } from '@/app/(authenticated)/organization/trust/trust-utils';
 
 interface OrgAgent {
   id: string;
@@ -64,6 +65,7 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
   const t = useTranslations('settings');
   const ta = useTranslations('agents');
   const tc = useTranslations('common');
+  const to = useTranslations('organization');
   const [agents, setAgents] = useState<OrgAgent[]>([]);
   const [grantCounts, setGrantCounts] = useState<Record<string, number>>({});
   const [isAdmin, setIsAdmin] = useState(false);
@@ -112,17 +114,21 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
       setLoading(true);
       setLoadError(false);
       try {
+        // story #3519(§16-7 2부, PO 確定 2026-09-05) — 둘 다 부수(ok?채움:방치, 예를 들어
+        // meRes는 isAdmin 판정만 바꾼다)인데 격리가 없어, meRes가 네트워크단 reject하면
+        // 이 try/catch 바깥 catch가 setLoadError(true)로 «승격»시켜 에이전트 목록(이
+        // 탭의 실제 주 콘텐츠, refreshAgents가 따로 그린다)까지 통째로 못 뜨게 했다.
         const [meRes, projectsRes] = await Promise.all([
-          fetchWithAuth('/api/me'),
-          fetchWithAuth('/api/projects'),
+          fetchWithAuth('/api/me').catch(() => null),
+          fetchWithAuth('/api/projects').catch(() => null),
         ]);
-        if (meRes.ok) {
+        if (meRes?.ok) {
           const meJson = await meRes.json() as { data?: { role?: string } };
           const role = meJson.data?.role ?? 'member';
           setIsAdmin(role === 'admin' || role === 'owner');
         }
         let projectList: ProjectOption[] = [];
-        if (projectsRes.ok) {
+        if (projectsRes?.ok) {
           const json = await projectsRes.json() as { data?: ProjectOption[] };
           projectList = (json.data ?? []).slice().sort((a, b) => a.name.localeCompare(b.name));
         }
@@ -213,7 +219,7 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
             </div>
           ) : (
             <div className="space-y-2">
-              {agents.map((agent) => (
+              {agents.map((agent, index) => (
                 <div key={agent.id} className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/30 px-3 py-3 text-sm">
                   <Link href={`/organization/workforce/${agent.id}`} className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
@@ -222,7 +228,7 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
                     </div>
                     <div className="mt-1 flex flex-wrap items-center gap-2">
                       <Badge variant="secondary">{t('agentMember')}</Badge>
-                      <Badge variant="outline">{agent.role}</Badge>
+                      <Badge variant="outline">{resolveRoleLabel(agent.role, null, to)}</Badge>
                       <Badge variant="info">{ta('manageProjectsGranted', { count: grantCounts[agent.id] ?? 0 })}</Badge>
                       {agent.verified === false ? (
                         <Badge variant="warning">{ta('agentNotConnected')}</Badge>
@@ -238,16 +244,25 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
                         {ta('viewConnectionSettings')}
                       </Link>
                     ) : null}
-                    {isAdmin ? (
-                      <Button
-                        variant="glass"
-                        size="sm"
-                        onClick={() => requestToggle(agent)}
-                        disabled={togglingId === agent.id}
-                      >
-                        {togglingId === agent.id ? '...' : agent.is_active ? t('deactivateAgent') : t('activateAgent')}
-                      </Button>
-                    ) : null}
+                    {isAdmin ? (() => {
+                      // story #3592(§17-20 ⑧·§22-18 동형) — 행마다 같은 「비활성화」/
+                      // 「활성화」 접근 이름이라 보조기술 버튼 목록에서 어느 에이전트
+                      // 행인지 못 가른다. 순번+현재 보이는 라벨을 그대로 품는다.
+                      // story #3608(유나 §22-18 ④-2) — "..."는 아래 aria-label
+                      // 안에도 그대로 들어간다(발견 시점 실측). 낱말("변경 중…")로.
+                      const visibleLabel = togglingId === agent.id ? t('agentToggling') : agent.is_active ? t('deactivateAgent') : t('activateAgent');
+                      return (
+                        <Button
+                          variant="glass"
+                          size="sm"
+                          onClick={() => requestToggle(agent)}
+                          disabled={togglingId === agent.id}
+                          aria-label={t('agentToggleAriaLabel', { n: index + 1, label: visibleLabel })}
+                        >
+                          {visibleLabel}
+                        </Button>
+                      );
+                    })() : null}
                     <Link href={`/organization/workforce/${agent.id}`} className="text-muted-foreground hover:text-foreground">
                       <ChevronRight className="size-4" />
                     </Link>

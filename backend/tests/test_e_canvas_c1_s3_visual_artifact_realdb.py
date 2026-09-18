@@ -76,6 +76,23 @@ async def _setup_app(app, Session, org_id, project_id, user_id=None):
     from app.dependencies.auth import AuthContext, get_current_user
     from app.dependencies.database import get_db
 
+    if user_id is None:
+        # story #3370(카디르 QA 지적 2026-09-10) — resolve_member_db_verified()는 실
+        # DB 조회라, 예전처럼 "신원 무관, 무작위 uuid 하나면 충분"했던 관례가 더 이상
+        # 안 통한다(400 Organization member not found). 이 파일의 관심사는 caller
+        # 신원 자체가 아니라 다른 축이라 실 OrgMember 하나를 여기서 대신 심는다
+        # (개별 테스트 수정 없이 이 헬퍼 한 곳만 — 기존 명시 user_id 호출부는 그대로).
+        from app.models.project import OrgMember
+        from app.models.user import User
+        async with Session() as s:
+            u = User(id=uuid.uuid4(), email=f"phantom-{uuid.uuid4().hex[:8]}@test.dev", hashed_password="x")
+            s.add(u)
+            await s.commit()
+            om = OrgMember(id=uuid.uuid4(), org_id=org_id, user_id=u.id, role="owner")
+            s.add(om)
+            await s.commit()
+            user_id = u.id
+
     async def _db():
         async with Session() as s:
             try:
@@ -246,8 +263,22 @@ async def test_delete_artifact_creator_only():
         async with Session() as s:
             seeded = await _seed(s)
 
-        creator_id = uuid.uuid4()
-        other_id = uuid.uuid4()
+        # story #3370(카디르 QA 지적 2026-09-10) — resolve_member_db_verified()가 실
+        # OrgMember 행을 찾는다 — creator/other 둘 다 실 휴먼으로 심는다(신원 자체를
+        # 재는 이 테스트의 관심사엔 role/이름이 무관해 owner로 통일).
+        from app.models.project import OrgMember
+        from app.models.user import User
+        async with Session() as s:
+            creator_user = User(id=uuid.uuid4(), email=f"creator-{uuid.uuid4().hex[:8]}@test.dev", hashed_password="x")
+            other_user = User(id=uuid.uuid4(), email=f"other-{uuid.uuid4().hex[:8]}@test.dev", hashed_password="x")
+            s.add_all([creator_user, other_user])
+            await s.commit()
+            s.add_all([
+                OrgMember(id=uuid.uuid4(), org_id=seeded["org_a_id"], user_id=creator_user.id, role="owner"),
+                OrgMember(id=uuid.uuid4(), org_id=seeded["org_a_id"], user_id=other_user.id, role="owner"),
+            ])
+            await s.commit()
+            creator_id, other_id = creator_user.id, other_user.id
 
         await _setup_app(app, Session, seeded["org_a_id"], seeded["project_a_id"], user_id=creator_id)
         client = _client_for(app)

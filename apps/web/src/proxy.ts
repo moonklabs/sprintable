@@ -82,6 +82,12 @@ const PUBLIC_PREFIX = [
   // story #ab2a503f — 이메일 확인 링크가 여는 착지 페이지. 클릭 시점엔 세션이 없는 게
   // 정상(위 /verify-email·/reset-password와 동일 이유).
   '/set-password/confirm',
+  // story #3923 — onboarding_activation.py가 실 온보딩 메일에 심는 실 구독해지 링크
+  // (`{app_url}/unsubscribe?token=...`)의 착지 페이지. unsubscribe/page.tsx 자체 주석이
+  // "이메일 링크 클릭이 진입점이라 세션이 없을 수 있다"고 명시(verify-email과 동형)하는데
+  // 이 목록에 없어 실제로는 비로그인 방문자가 /login 307로 튕겨 나갔다(#3923 캡처 中 실측
+  // 발견 — 「이 화면은 pre-auth」라는 코드 주석 전제가 실제 라우팅과 어긋난 사각).
+  '/unsubscribe',
   '/auth/callback',
   '/auth/login',
   // story 26170479: 세션을 만드는 공개 엔드포인트(호출 시점엔 세션이 없는 게 정상) — 누락

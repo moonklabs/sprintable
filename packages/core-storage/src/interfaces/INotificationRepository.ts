@@ -10,6 +10,15 @@ export interface Notification {
   is_read: boolean;
   reference_type: string | null;
   reference_id: string | null;
+  // story #3903(migration 0378, additive) — conversation.mention/conversation.message만
+  // 채움(sender_name + 이벤트 발행 메시지면 event_key/payload/refs). FE가 렌더 시점에
+  // eventCard 조합·제목 조합 재료로 쓴다. 없으면(옛 행·다른 발행 경로) title/body 폴백.
+  event?: {
+    sender_name?: string;
+    event_key?: string;
+    payload?: Record<string, unknown>;
+    refs?: Record<string, string | null | { found: boolean; token?: string; type?: string; name?: string }>;
+  } | null;
   created_at: string;
 }
 

@@ -112,3 +112,48 @@ describe('OrganizationRolesPage — Member 신분엔 관리자 전용 안내(sto
     expect(fetchMock).toHaveBeenCalled();
   });
 });
+
+// story #3491(페드루 PO 確定) — FE 게이트를 BE 인가 폭(owner·admin)과 맞춘다.
+describe('OrganizationRolesPage — 역할 변경 게이트가 BE 인가 폭과 같다(story #3491)', () => {
+  it('⭐admin caller — owner도 자기 자신도 아닌 member 행엔 <select>가 뜬다(FE=BE 폭 정정의 핵심)', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === '/api/org-members') {
+        return {
+          ok: true,
+          json: async () => ({
+            data: [
+              { id: 'row-owner', user_id: 'u-owner', name: '오너', role: 'owner' },
+              { id: 'row-self', user_id: 'u-admin-self', name: '나', role: 'admin' },
+              { id: 'row-other', user_id: 'u-member', name: '멤버', role: 'member' },
+            ],
+          }),
+        };
+      }
+      if (url === '/api/me') return { ok: true, json: async () => ({ data: { user_id: 'u-admin-self' } }) };
+      throw new Error('unexpected fetch: ' + url);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await mount();
+
+    const selects = container.querySelectorAll('select');
+    expect(selects.length).toBe(1); // owner 행·자기 자신 행은 select가 없다.
+  });
+
+  it('⭐<select>엔 owner 옵션이 없다', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === '/api/org-members') {
+        return { ok: true, json: async () => ({ data: [{ id: 'row-other', user_id: 'u-member', name: '멤버', role: 'member' }] }) };
+      }
+      if (url === '/api/me') return { ok: true, json: async () => ({ data: { user_id: 'u-admin-self' } }) };
+      throw new Error('unexpected fetch: ' + url);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await mount();
+
+    const select = container.querySelector('select')!;
+    const optionValues = Array.from(select.querySelectorAll('option')).map((o) => o.getAttribute('value'));
+    expect(optionValues).toEqual(['admin', 'member']);
+  });
+});

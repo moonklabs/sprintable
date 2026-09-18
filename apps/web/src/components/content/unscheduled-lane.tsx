@@ -1,0 +1,38 @@
+import { useTranslations } from 'next-intl';
+import { ChannelPostCard } from '@/components/content/channel-post-card';
+import type { ChannelPostCalendarItem } from '@/components/content/use-channel-post-calendar-data';
+
+// story #3422(doc §11-1) — 「날짜 미정」 레인. 격자에 놓을 날짜가 없는 초안(scheduled_at
+// null·게이트 자체가 없는 순수 초안 포함, BE #3423가 이 둘을 같은 unscheduled=true로
+// 묶어 준다)이 "없는 것"으로 보이면 안 된다는 설계 규율 그대로.
+export interface UnscheduledLaneProps {
+  items: ChannelPostCalendarItem[];
+  displayTimezone: string;
+}
+
+export function UnscheduledLane({ items, displayTimezone }: UnscheduledLaneProps) {
+  const t = useTranslations('content');
+  // 빈 레인은 아예 안 그린다(§11-1 "빈 레인이 상시로 자리를 먹으면 격자가 좁아진다") —
+  // null을 렌더해 부모가 gap 등으로 자리를 안 먹게 한다.
+  if (items.length === 0) return null;
+  return (
+    <section aria-label={t('channelPostsCalendarUnscheduledLaneLabel')} data-testid="channel-post-unscheduled-lane" className="space-y-2 rounded-md border border-border p-3">
+      {/* story #3764(UI 점검 B·E절, 유나 定 재정정) — 수를 제목 문자열 안에 넣지
+          않는다. 이 제목(text-sm font-medium)도 CountBadge를 쓰는 강한 제목
+          (text-base font-semibold)보다 약해 CountBadge(font-bold+테두리+엠보스)를
+          얹으면 수가 제목을 이긴다 — 위계가 그릇을 고른다: 약한 제목엔 제목과 같은
+          대역의 수. */}
+      <h2 className="text-sm font-medium text-foreground">
+        {t('channelPostsCalendarUnscheduledLaneTitle')}
+        <span className="ml-1.5 tabular-nums text-muted-foreground">{items.length}</span>
+      </h2>
+      <div className="flex flex-wrap gap-2">
+        {items.map((item) => (
+          <div key={item.draft_id} className="w-56">
+            <ChannelPostCard item={item} displayTimezone={displayTimezone} />
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}

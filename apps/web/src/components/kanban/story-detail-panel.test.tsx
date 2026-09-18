@@ -9,9 +9,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
-import { StoryDetailPanel } from './story-detail-panel';
+import { StoryDetailPanel, type Task } from './story-detail-panel';
 import type { KanbanStory } from './types';
 import koMessages from '../../../messages/ko.json';
+import { ToastProvider, ToastContainer, useToast } from '@/components/ui/toast';
 import { bumpOrgSyncVersion } from '@/lib/project-context-client';
 
 const { useDashboardContextMock } = vi.hoisted(() => ({ useDashboardContextMock: vi.fn() }));
@@ -30,10 +31,21 @@ vi.mock('@/hooks/use-sse-notifications', () => ({
 let container: HTMLDivElement;
 let root: Root;
 
+// story #3759 — 이 컴포넌트가 useToast()로 공유 Context를 구독한다. 정적 import된
+// 컴포넌트라(파일 상단) vi.resetModules()의 영향을 안 받는 이 파일 자체의 정적
+// ToastProvider로 감싸면 된다(동적 재-import 처방 불요, content/page.test.tsx와 동형).
+function TestToastRenderer() {
+  const { toasts, dismissToast } = useToast();
+  return <ToastContainer toasts={toasts} onDismiss={dismissToast} />;
+}
+
 function wrap(node: React.ReactNode) {
   return (
     <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
-      {node}
+      <ToastProvider>
+        {node}
+        <TestToastRenderer />
+      </ToastProvider>
     </NextIntlClientProvider>
   );
 }
@@ -129,6 +141,45 @@ describe('StoryDetailPanel — overlayPosition (story #2354, 지도 위에 겹�
   });
 });
 
+// story #3289(도메인탈고정·축1 Phase1 FE잔여, AC1) — getStatusLabel 없으면(undefined) 기존
+// canonical t(...) 그대로(회귀 0, 3687과 동형 폴백), 있으면 그 오버라이드가 배지 텍스트를
+// 대체한다(localStatus 자체·색상 판정은 story-card.tsx와 동일하게 무변경).
+describe('StoryDetailPanel — org 상태 라벨 오버라이드(story #3289 AC1)', () => {
+  it('getStatusLabel 없으면 canonical t(...) 문구 그대로(회귀 0)', async () => {
+    await act(async () => {
+      root.render(wrap(<StoryDetailPanel story={makeStory({ status: 'backlog' })} tasks={[]} onClose={() => {}} />));
+    });
+    const badgeButton = container.querySelector('[aria-label="상태"]');
+    expect(badgeButton?.textContent).toContain('백로그');
+  });
+
+  it('getStatusLabel이 undefined를 돌려주면(org 미설정) canonical 그대로 폴백', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <StoryDetailPanel story={makeStory({ status: 'backlog' })} tasks={[]} onClose={() => {}} getStatusLabel={() => undefined} />,
+      ));
+    });
+    const badgeButton = container.querySelector('[aria-label="상태"]');
+    expect(badgeButton?.textContent).toContain('백로그');
+  });
+
+  it('getStatusLabel이 값을 돌려주면 배지 텍스트가 그 오버라이드로 바뀐다', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <StoryDetailPanel
+          story={makeStory({ status: 'backlog' })}
+          tasks={[]}
+          onClose={() => {}}
+          getStatusLabel={(slug) => (slug === 'backlog' ? '대기열' : undefined)}
+        />,
+      ));
+    });
+    const badgeButton = container.querySelector('[aria-label="상태"]');
+    expect(badgeButton?.textContent).toContain('대기열');
+    expect(badgeButton?.textContent).not.toContain('백로그');
+  });
+});
+
 // story #2528 — 전역 스크롤바 숨김(#2165) 하에 상세패널 본문 스크롤 컨테이너가 예외 목록에
 // 없어 스크롤바가 안 보이던 결함. globals.css 범용 옵트인 `.scrollbar-visible` 클래스 적용
 // 계약을 고정한다. jsdom은 실 스크롤바 렌더를 계산하지 않으므로 실제 가시성은 라이브 QA 몫
@@ -186,14 +237,41 @@ describe('StoryDetailPanel — org-switch 잔여 레이스 stale-guard (story #2
     await act(async () => {
       resolveSecond?.({ ok: true, json: async () => ({ data: [{ id: 'fresh', content: 'FRESH_ORG_COMMENT', created_by: 'u', created_at: '2026-01-01' }] }) });
     });
-    const trigger = () => Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.startsWith('Comments'));
-    expect(trigger()?.textContent).toBe('Comments (1)');
+    const trigger = () => Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.startsWith('댓글'));
+    expect(trigger()?.textContent).toBe('댓글 (1)');
 
     // 구 org 응답(1st)이 뒤늦게 도착 — cancelled라 무시돼야 fresh 상태가 안 덮인다.
     await act(async () => {
       resolveFirst?.({ ok: true, json: async () => ({ data: [{ id: 'stale', content: 'STALE_ORG_COMMENT', created_by: 'u', created_at: '2026-01-01' }] }) });
     });
-    expect(trigger()?.textContent).toBe('Comments (1)'); // 여전히 1 — stale 응답이 2번째로 덮어쓰지 않았다
+    expect(trigger()?.textContent).toBe('댓글 (1)'); // 여전히 1 — stale 응답이 2번째로 덮어쓰지 않았다
+  });
+});
+
+// story #3712(FE 완전성-정직, #3709/#4060 Tasks 탭과 같은 얼굴) — 조회 中(응답 前)엔
+// comments=[]인데 탭 라벨이 loadingComments를 안 봐서 "Comments (0)"을 그렸다 — 본문은
+// 이미 loadingComments를 먼저 검사해 「불러오는 중」을 보이는데 라벨만 뒤처져 같은 화면
+// 두 세계였다.
+describe('StoryDetailPanel — Comments 탭 라벨 loadingComments(story #3712, 완전성-정직)', () => {
+  it('조회 中엔 탭 라벨이 개수를 안 보인다 — 응답 뒤엔 다시 보인다', async () => {
+    let resolveComments: ((v: unknown) => void) | undefined;
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      if (typeof url === 'string' && url.includes('/comments?limit=20')) {
+        return new Promise((resolve) => { resolveComments = resolve; });
+      }
+      return Promise.resolve({ ok: false, json: async () => null });
+    }));
+
+    await act(async () => {
+      root.render(wrap(<StoryDetailPanel story={makeStory()} tasks={[]} onClose={() => {}} />));
+    });
+    const trigger = () => Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.startsWith('댓글'));
+    expect(trigger()?.textContent).toBe('댓글'); // "(0)" 없음 — 아직 조회 中이라 모른다.
+
+    await act(async () => {
+      resolveComments?.({ ok: true, json: async () => ({ data: [{ id: 'c1', content: 'hi', created_by: 'u', created_at: '2026-01-01' }] }) });
+    });
+    expect(trigger()?.textContent).toBe('댓글 (1)'); // 응답 뒤엔 지금처럼 수 표시.
   });
 });
 
@@ -233,12 +311,12 @@ describe('StoryDetailPanel — Workcell pipelineStage = story.trust_stage 직결
 
   it('trust_stage="verified" → Verified(gate fetch 응답과 무관 — BE 판정값 그대로)', async () => {
     await mountWithTrustStage('verified');
-    expect(currentStageLabel()).toBe('Verified');
+    expect(currentStageLabel()).toBe('검증됨');
   });
 
   it('trust_stage="needs_input" → Needs input', async () => {
     await mountWithTrustStage('needs_input');
-    expect(currentStageLabel()).toBe('Needs input');
+    expect(currentStageLabel()).toBe('입력 필요');
   });
 
   it('trust_stage=null(done/미지 status 또는 필드 미채움) → 스테퍼 자체가 안 뜬다(no-fiction, 지어낸 단계 0)', async () => {
@@ -387,7 +465,10 @@ describe('StoryDetailPanel — trustChip도 story.trust_stage로 수렴(story #2
       ));
     });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
-    expect(container.textContent).toContain('입력 필요'); // 전이 前 — 기존 칩 정상 표시.
+    // story #3880(§⑤ 낱말 드리프트) — workcell pipeline 스테퍼도 같은 낱말("입력 필요")을
+    // 쓰게 돼(board.trustChipNeedsInput과 동형 재사용) 순수 텍스트 서치로는 칩과 스테퍼를
+    // 못 가른다 — data-testid로 칩 자체를 특정해서 본다.
+    expect(container.querySelector('[data-testid="story-detail-trust-chip"]')).toBeTruthy(); // 전이 前 — 기존 칩 정상 표시.
 
     const statusTrigger = document.body.querySelector('button[aria-label="Status"], button[aria-label="상태"]') as HTMLButtonElement | null;
     expect(statusTrigger).toBeTruthy();
@@ -399,14 +480,13 @@ describe('StoryDetailPanel — trustChip도 story.trust_stage로 수렴(story #2
 
     // 낙관 전이 직후 — story.trust_stage(=pipelineStage)는 여전히 'needs_input'이지만
     // localStatus는 이미 'done'. 칩이 남아있으면 회귀.
-    expect(container.textContent).not.toContain('입력 필요');
-    expect(container.textContent).not.toContain('병합 대기');
+    expect(container.querySelector('[data-testid="story-detail-trust-chip"]')).toBeFalsy();
 
     await act(async () => {
       resolveStatusPatch!({ ok: true, json: async () => ({ data: { violation: null } }) });
       await Promise.resolve(); await Promise.resolve();
     });
-    expect(container.textContent).not.toContain('입력 필요'); // PATCH 완료 後에도 계속 미표시.
+    expect(container.querySelector('[data-testid="story-detail-trust-chip"]')).toBeFalsy(); // PATCH 완료 後에도 계속 미표시.
   });
 });
 
@@ -452,13 +532,13 @@ describe('StoryDetailPanel — Workcell pipelineStage SSE 라이브 갱신(story
       root.render(wrap(<StoryDetailPanel story={story} tasks={[]} onClose={() => {}} memberMap={memberMap} />));
     });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
-    expect(currentStageLabel()).toBe('Running');
+    expect(currentStageLabel()).toBe('진행 중');
 
     expect(capturedOnExtraEvent).toBeDefined();
     await act(async () => { capturedOnExtraEvent!('story.trust_stage_changed', { story_id: 's-live', new_stage: 'needs_input' }); });
     await act(async () => { vi.advanceTimersByTime(500); await Promise.resolve(); await Promise.resolve(); });
 
-    expect(currentStageLabel()).toBe('Needs input');
+    expect(currentStageLabel()).toBe('입력 필요');
   });
 
   it('다른 story_id의 이벤트는 무시한다(이 패널이 보는 story 밖 전이)', async () => {
@@ -481,7 +561,7 @@ describe('StoryDetailPanel — Workcell pipelineStage SSE 라이브 갱신(story
     await act(async () => { vi.advanceTimersByTime(500); await Promise.resolve(); });
 
     expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining('/api/stories/s-live'), expect.anything());
-    expect(currentStageLabel()).toBe('Running');
+    expect(currentStageLabel()).toBe('진행 중');
   });
 
   // PO 리뷰 MEDIUM(PR#3363, 2026-08-22) — story.id 변경 시 「대기 중 타이머」는 지워져도
@@ -512,7 +592,7 @@ describe('StoryDetailPanel — Workcell pipelineStage SSE 라이브 갱신(story
       root.render(wrap(<StoryDetailPanel story={storyA} tasks={[]} onClose={() => {}} memberMap={memberMap} />));
     });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
-    expect(currentStageLabel()).toBe('Running');
+    expect(currentStageLabel()).toBe('진행 중');
 
     // story-a SSE 발화 → 디바운스 500ms 소진 → fetch 발사(아직 안 끝남, deferred).
     await act(async () => { capturedOnExtraEvent!('story.trust_stage_changed', { story_id: 'story-a', new_stage: 'merge_ready' }); });
@@ -523,7 +603,7 @@ describe('StoryDetailPanel — Workcell pipelineStage SSE 라이브 갱신(story
       root.render(wrap(<StoryDetailPanel story={storyB} tasks={[]} onClose={() => {}} memberMap={memberMap} />));
     });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
-    expect(currentStageLabel()).toBe('Claimed done');
+    expect(currentStageLabel()).toBe('완료 주장');
 
     // 이제야 story-a의 응답이 늦게 도착 — story-b 패널에 새면 안 된다.
     await act(async () => {
@@ -531,7 +611,7 @@ describe('StoryDetailPanel — Workcell pipelineStage SSE 라이브 갱신(story
       await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
     });
 
-    expect(currentStageLabel()).toBe('Claimed done');
+    expect(currentStageLabel()).toBe('완료 주장');
   });
 
   // PO 리뷰 확장(PR#3363 codex 교차모델, 2026-08-22) — 위 두 테스트가 덮는 "다른 story로
@@ -581,7 +661,7 @@ describe('StoryDetailPanel — Workcell pipelineStage SSE 라이브 갱신(story
       root.render(wrap(<StoryDetailPanel story={story} tasks={[]} onClose={() => {}} memberMap={memberMap} />));
     });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
-    expect(currentStageLabel()).toBe('Running');
+    expect(currentStageLabel()).toBe('진행 중');
 
     // E1 — 디바운스 소진 → fetchA 발사(deferred, 아직 안 끝남).
     await act(async () => { capturedOnExtraEvent!('story.trust_stage_changed', { story_id: 'story-x', new_stage: 'needs_input' }); });
@@ -602,7 +682,7 @@ describe('StoryDetailPanel — Workcell pipelineStage SSE 라이브 갱신(story
       resolveSecondCall!({ ok: true, json: async () => ({ data: { ...story, trust_stage: 'verified' } }) });
       await Promise.resolve(); await Promise.resolve();
     });
-    expect(currentStageLabel()).toBe('Verified');
+    expect(currentStageLabel()).toBe('검증됨');
 
     // ③fetchA(먼저 쏜 옛 fetch)를 성공 응답으로 resolve — 진짜 역순 «성공» 도착 재현(수동
     // reject 없음). 진짜 abort됐다면(firstSignal.aborted===true, 위에서 이미 확認) 이
@@ -612,7 +692,7 @@ describe('StoryDetailPanel — Workcell pipelineStage SSE 라이브 갱신(story
       await Promise.resolve(); await Promise.resolve();
     });
     // ②늦은 «성공» 응답이 부당 반영되지 않았는지 — Verified 유지.
-    expect(currentStageLabel()).toBe('Verified');
+    expect(currentStageLabel()).toBe('검증됨');
   });
 });
 
@@ -647,7 +727,7 @@ describe('StoryDetailPanel — Workcell Evidence 구획 실배선(story #2922 W2
     await mountEvidence({}, [{ id: 'gate-1', gate_type: 'merge', status: 'pending', risk_grade: 'high', neutral_facts: {} }]);
     const link = Array.from(container.querySelectorAll('a')).find((a) => a.getAttribute('href') === '/gates/gate-1');
     expect(link).toBeTruthy();
-    expect(link?.textContent).toContain('Merge gate');
+    expect(link?.textContent).toContain('병합 게이트');
   });
 
   it('merge 게이트가 이미 resolved면 게이트 버튼을 다시 안 띄운다(no-fiction — 끝난 결정을 대기 중처럼 보이면 안 됨)', async () => {
@@ -789,7 +869,7 @@ describe('StoryDetailPanel — 삭제 404/이중발사 처방(story #3169)', () 
     await act(async () => { confirmButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 
-    expect(container.textContent).toContain('스토리 삭제에 실패했습니다.');
+    expect(container.textContent).toContain('스토리 삭제에 실패했어요.');
     expect(onDeleteSuccess).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
   });
@@ -824,5 +904,249 @@ describe('StoryDetailPanel — 삭제 404/이중발사 처방(story #3169)', () 
 
     resolveDelete!();
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+  });
+});
+
+// story #3557(유나 §17-20류 낱말, 페드루 PO 確定 2026-09-06) — 라벨 제거 버튼 접근성
+// 이름이 하드코딩 영문(`Remove ${label.name}`)이라 한국어 화면에서도 스크린리더가
+// 영어로 읽었다 — board.removeItemAction(contentRules.removeItemAction과 같은 문구,
+// 네임스페이스가 안 닿아 형제 키)으로 교체.
+describe('StoryDetailPanel — 라벨 제거 버튼 접근성 이름 i18n(story #3557)', () => {
+  it('라벨 제거 버튼 aria-label이 한국어 화면에서 한국어로 뜬다("{item} 제거")', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (typeof url === 'string' && url.startsWith('/api/item-labels')) {
+        return { ok: true, json: async () => [{ id: 'il1', label_id: 'l1' }] };
+      }
+      if (url === '/api/labels') {
+        return { ok: true, json: async () => [{ id: 'l1', name: 'bug', color: null }] };
+      }
+      return { ok: false, json: async () => null };
+    }));
+    await act(async () => {
+      root.render(wrap(<StoryDetailPanel story={makeStory()} tasks={[]} onClose={() => {}} />));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    const removeBtn = container.querySelector('button[aria-label="bug 제거"]');
+    expect(removeBtn).toBeTruthy();
+  });
+});
+
+// story #3638(유나 §8 별건, patchStory 층에서 발견) — handleAssigneeToggle 형제는 이미
+// 실패 토스트를 냈는데(else 분기), 제목/설명/완료기준 저장은 편집창만 닫히고 조용히
+// 원래 값으로 남아 실패 신호가 없었다. 기본 stubFetch(모든 fetch → ok:false)가 이미
+// PATCH 실패를 재현하므로 별도 스텁 없이 그대로 실패 경로를 탄다.
+describe('StoryDetailPanel — 제목/설명/완료기준 저장 실패 시 문장(story #3638)', () => {
+  function setNativeValue(el: HTMLInputElement | HTMLTextAreaElement, value: string) {
+    const proto = el instanceof HTMLTextAreaElement ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+    const setter = Object.getOwnPropertyDescriptor(proto, 'value')!.set!;
+    setter.call(el, value);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  it('제목 저장 실패 시 titleSaveFailed 토스트가 뜬다(구 조용히 닫히는 편집창)', async () => {
+    await act(async () => {
+      root.render(wrap(<StoryDetailPanel story={makeStory({ title: '원래 제목' })} tasks={[]} onClose={() => {}} />));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    const titleBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('원래 제목'));
+    await act(async () => { titleBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const input = container.querySelector('[data-testid="story-title-input"]') as HTMLInputElement;
+    await act(async () => { setNativeValue(input, '새 제목'); });
+    const saveBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '저장');
+    await act(async () => { saveBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); await Promise.resolve(); });
+
+    expect(container.textContent).toContain('제목 저장에 실패했어요.');
+  });
+});
+
+// story #3703(FE 완전성-정직, 유나 § 2026-09-08) — Tasks 탭 라벨이 로드된 tasks.length가
+// 아니라 진짜 총계(tasksTotalCount)를 말해야 「Tasks (20)」이 "총 20개"로 오독되지 않는다.
+// 로드분<총계면 목록 아래에 그 사실을 한 줄로 드러낸다(더 보기 버튼 유무와 무관한 축).
+describe('StoryDetailPanel — tasksTotalCount(story #3703, 완전성-정직)', () => {
+  function makeTask(id: string): Task {
+    return { id, title: `task-${id}`, status: 'todo' };
+  }
+
+  it('tasksTotalCount 미제공(하위호환) — tasks.length를 그대로 라벨에 쓴다(회귀 0)', async () => {
+    await act(async () => {
+      root.render(wrap(<StoryDetailPanel story={makeStory()} tasks={[makeTask('1'), makeTask('2')]} onClose={() => {}} />));
+    });
+    const tasksTab = [...container.querySelectorAll('button')].find((b) => b.textContent?.startsWith('태스크'));
+    expect(tasksTab?.textContent).toBe('태스크 (2)');
+  });
+
+  it('tasksTotalCount가 로드분보다 크면 라벨=총계이고, 목록 아래에 "로드분/총계" 정직 문구가 뜬다', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <StoryDetailPanel story={makeStory()} tasks={[makeTask('1'), makeTask('2')]} tasksTotalCount={25} onClose={() => {}} />,
+      ));
+    });
+    const tasksTab = [...container.querySelectorAll('button')].find((b) => b.textContent?.startsWith('태스크'));
+    expect(tasksTab?.textContent).toBe('태스크 (25)'); // 20개만 로드됐어도 탭은 총계를 말한다.
+    expect(container.textContent).toContain(koMessages.board.tasksPartialCount.replace('{total}', '25').replace('{loaded}', '2'));
+  });
+
+  it('tasksTotalCount === tasks.length(완결)면 정직 문구가 안 뜬다(과잉 경고 방지)', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <StoryDetailPanel story={makeStory()} tasks={[makeTask('1'), makeTask('2')]} tasksTotalCount={2} onClose={() => {}} />,
+      ));
+    });
+    const tasksTab = [...container.querySelectorAll('button')].find((b) => b.textContent?.startsWith('태스크'));
+    expect(tasksTab?.textContent).toBe('태스크 (2)');
+    expect(container.textContent).not.toContain('표시 중');
+  });
+
+  it('nextTasksCursor가 없는 호출부(flow-node-story-panel류, 더 보기 버튼 자체가 없음)여도 정직 문구는 뜬다', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <StoryDetailPanel story={makeStory()} tasks={[makeTask('1')]} tasksTotalCount={5} nextTasksCursor={null} onClose={() => {}} />,
+      ));
+    });
+    expect(container.textContent).toContain('5개 중 1개 표시 중');
+    // 더 보기 버튼은 nextTasksCursor 축이라 안 뜬다(별개 — 이 테스트가 둘을 명시적으로 가른다).
+    const loadMoreBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '더 보기');
+    expect(loadMoreBtn).toBeUndefined();
+  });
+
+  // story #3703 CHANGES(카디르 QA blocker①, 2026-09-08) — tasks.length===0인데
+  // tasksTotalCount>0(첫 페이지가 마침 빈 배열인 대표 시나리오)이면 「태스크가 없어요」로
+  // 단정하지 않고 정직 문구가 떠야 한다 — 이 PR이 막으려던 바로 그 오단정이 재발했었다.
+  it('로드분 0건이어도 tasksTotalCount>0이면 "태스크가 없어요"가 아니라 정직 문구가 뜬다', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <StoryDetailPanel story={makeStory()} tasks={[]} tasksTotalCount={57} onClose={() => {}} />,
+      ));
+    });
+    expect(container.textContent).not.toContain('태스크가 없어요');
+    expect(container.textContent).toContain('57개 중 0개 표시 중');
+  });
+
+  it('로드분 0건이고 tasksTotalCount도 0(또는 미제공)이면 "태스크가 없어요"가 정당하게 뜬다(무회귀)', async () => {
+    await act(async () => {
+      root.render(wrap(<StoryDetailPanel story={makeStory()} tasks={[]} tasksTotalCount={0} onClose={() => {}} />));
+    });
+    expect(container.textContent).toContain('태스크가 없어요');
+
+    await act(async () => { root.unmount(); });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root.render(wrap(<StoryDetailPanel story={makeStory()} tasks={[]} onClose={() => {}} />)); // tasksTotalCount 미제공
+    });
+    expect(container.textContent).toContain('태스크가 없어요');
+  });
+});
+
+// story #3709(FE 완전성-정직, 3704 후속) — 조회 中(응답 前)엔 tasks=[]·tasksTotalCount=null
+// 상태가 tasksLoading 없이는 "정말 0개"와 구별이 안 갔다. flow-node-story-panel.tsx와
+// 같은 낱말(t('loading')="불러오는 중...")로 조회 중임을 그대로 드러낸다.
+describe('StoryDetailPanel — tasksLoading(story #3709, 완전성-정직)', () => {
+  function makeTask(id: string): Task {
+    return { id, title: `task-${id}`, status: 'todo' };
+  }
+
+  it('tasksLoading=true면 tasks=[]·tasksTotalCount=null이어도 "태스크가 없어요" 대신 "불러오는 중"이 뜬다', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <StoryDetailPanel story={makeStory()} tasks={[]} tasksTotalCount={null} tasksLoading onClose={() => {}} />,
+      ));
+    });
+    expect(container.textContent).not.toContain(koMessages.board.noTasks);
+    expect(container.textContent).toContain(koMessages.board.loading);
+  });
+
+  it('tasksLoading=false(기본값, 미제공)면 기존 동작 그대로 — 회귀 0', async () => {
+    await act(async () => {
+      root.render(wrap(<StoryDetailPanel story={makeStory()} tasks={[]} tasksTotalCount={0} onClose={() => {}} />)); // tasksLoading 미제공
+    });
+    expect(container.textContent).toContain(koMessages.board.noTasks);
+    expect(container.textContent).not.toContain(koMessages.board.loading);
+  });
+
+  it('tasksLoading=true는 실제 태스크가 이미 있어도(예: 낙관적 이전 값 잔존) 우선한다 — 조회 中 신호가 최우선', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <StoryDetailPanel story={makeStory()} tasks={[makeTask('1')]} tasksTotalCount={1} tasksLoading onClose={() => {}} />,
+      ));
+    });
+    expect(container.textContent).toContain(koMessages.board.loading);
+    expect(container.textContent).not.toContain('task-1');
+  });
+
+  // story #3709 후속(페드루 PO 지적, 유나 PASS 뒤 한 줄 더, 2026-09-09) — 탭 라벨
+  // 「Tasks (0)」이 조회 中에도 개수를 말해, 40px 아래 본문의 「불러오는 중...」과
+  // 같은 화면 두 세계였다(탭=아는 척, 본문=정직).
+  it('조회 中엔 탭 라벨이 개수를 안 보인다 — 응답 뒤엔 다시 보인다', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <StoryDetailPanel story={makeStory()} tasks={[]} tasksTotalCount={null} tasksLoading onClose={() => {}} />,
+      ));
+    });
+    const tasksTab = () => [...container.querySelectorAll('button')].find((b) => b.textContent?.startsWith('태스크'));
+    expect(tasksTab()?.textContent).toBe('태스크'); // "(0)" 없음 — 조회 中이라 아직 모른다.
+
+    await act(async () => { root.unmount(); });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root.render(wrap(
+        <StoryDetailPanel story={makeStory()} tasks={[makeTask('1')]} tasksTotalCount={1} onClose={() => {}} />,
+      ));
+    });
+    expect(tasksTab()?.textContent).toBe('태스크 (1)'); // 응답 뒤엔 지금처럼 수 표시.
+  });
+});
+
+// story #3786(유나 定 §2·확인 축2) — 의존성 추가 422 응답에서 cycle/self-reference를
+// error.code로 가른다(예전엔 message 문자열에서 한글 "사이클"을 찾는 반창고였다 — en
+// 로케일 착지 순간 항상 거짓이 됐을 자리). 아래 두 테스트는 message에 "사이클"이 **없는**
+// 상태(en을 흉내)에서도 code만으로 정확히 갈리는지 고정한다.
+describe('StoryDetailPanel — 의존성 추가 422 cycle/self-reference 판정(story #3786)', () => {
+  function stubDepFlow(errorPayload: { code: string; message: string }) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith('/api/stories?')) {
+        return { ok: true, json: async () => ({ data: [{ id: 'cand-1', title: 'Candidate Story', story_number: 9, is_reference_candidate: true }] }) };
+      }
+      if (url === '/api/dependencies' && init?.method === 'POST') {
+        return { ok: false, status: 422, json: async () => ({ error: errorPayload }) };
+      }
+      return { ok: false, json: async () => null };
+    }));
+  }
+
+  async function openAddDepAndClickCandidate() {
+    await act(async () => {
+      root.render(wrap(
+        <StoryDetailPanel story={makeStory()} tasks={[]} onClose={() => {}} projectId="proj-1" />,
+      ));
+    });
+    const addBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.trim() === koMessages.board.dep.add);
+    expect(addBtn).not.toBeUndefined();
+    await act(async () => { addBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    const candidateBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('Candidate Story'));
+    expect(candidateBtn).not.toBeUndefined();
+    await act(async () => { candidateBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+  }
+
+  it('⭐code=DEPENDENCY_CYCLE(en message, "사이클" 없음) → cycleDetected 토스트(message 문자열과 무관)', async () => {
+    stubDepFlow({ code: 'DEPENDENCY_CYCLE', message: 'This dependency would create a cycle' });
+    await openAddDepAndClickCandidate();
+    expect(container.textContent).toContain(koMessages.board.dep.cycleDetected);
+    expect(container.textContent).not.toContain(koMessages.board.dep.invalidSelf);
+  });
+
+  it('code=DEPENDENCY_SELF_REFERENCE(en message) → invalidSelf 토스트', async () => {
+    stubDepFlow({ code: 'DEPENDENCY_SELF_REFERENCE', message: 'An item cannot depend on itself' });
+    await openAddDepAndClickCandidate();
+    expect(container.textContent).toContain(koMessages.board.dep.invalidSelf);
+    expect(container.textContent).not.toContain(koMessages.board.dep.cycleDetected);
   });
 });

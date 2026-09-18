@@ -112,6 +112,9 @@ class LocalStorageProvider(StorageProvider):
             logger.warning("local storage: signed write url 생성 실패 path=%s", object_path, exc_info=True)
             return None
 
+    def required_write_headers(self, *, create_only: bool = False) -> dict[str, str]:
+        return {}  # local PUT 수신 자체가 미구현(story dc3d62f4 부수 MEDIUM, 별도 후속) — 헤더 계약 없음.
+
     async def delete_object(self, container: str, object_path: str) -> bool:
         def _blocking() -> bool:
             _resolve_safe(container, object_path).unlink(missing_ok=True)  # 없어도 OK = 멱등

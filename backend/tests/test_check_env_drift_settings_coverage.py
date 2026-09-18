@@ -201,4 +201,82 @@ def test_settings_field_env_keys_works_without_pydantic_settings_importable(monk
     # 가드가 신규 필드를 설계대로 잡은 것.
     assert "APPLE_TEAM_ID" in keys and "APPLE_SERVICES_ID" in keys
     assert "APPLE_KEY_ID" in keys and "APPLE_PRIVATE_KEY" in keys
-    assert len(keys) == 107
+    # story #3259(지원v1·1경계, 2026-08-31): support_gateway_token_secret·
+    # support_gateway_token_ttl_seconds 2필드 신설(Support Gateway 위임 토큰 발급용,
+    # backend의 jwt_secret과 의도적으로 분리된 별도 시크릿 — support-gateway/README.md
+    # 참고)로 107→109. 가드가 신규 필드를 설계대로 잡은 것.
+    assert "SUPPORT_GATEWAY_TOKEN_SECRET" in keys and "SUPPORT_GATEWAY_TOKEN_TTL_SECONDS" in keys
+    # story #3263(지원v1·5에스컬레이션, 2026-08-31): support_contact_surface_widget 1필드
+    # 신설(메일 «고객센터» fiction 정정 — 위젯 prod 승격과 같은 커밋으로 묶는 env 분기)로
+    # 109→110. 가드가 신규 필드를 설계대로 잡은 것.
+    assert "SUPPORT_CONTACT_SURFACE_WIDGET" in keys
+    # story #3263(지원v1·5에스컬레이션, 2026-08-31, 같은 스토리 AC1/2): support_escalation_
+    # requester_member_id·support_escalation_target_org_slug·support_escalation_target_
+    # project_slug·support_escalation_approver_member_id 4필드 추가 신설(에스컬레이션 게이트/
+    # DM 배선 — 이 파일 상단 config.py 주석 참고)로 110→114. 가드가 신규 필드를 설계대로 잡은 것.
+    assert "SUPPORT_ESCALATION_REQUESTER_MEMBER_ID" in keys and "SUPPORT_ESCALATION_APPROVER_MEMBER_ID" in keys
+    assert "SUPPORT_ESCALATION_TARGET_ORG_SLUG" in keys and "SUPPORT_ESCALATION_TARGET_PROJECT_SLUG" in keys
+    # story #3279(지원v1·후속, 2026-09-01): support_gateway_operator_reply_url 1필드 신설
+    # (운영자 회신 배달 — backend→support-gateway, escalation_delivery.py 반대 방향의
+    # 착지 URL. cloudbuild.yaml deploy-backend 스텝에서 기존 _NEXT_PUBLIC_SUPPORT_GATEWAY_URL
+    # substitution을 재사용해 배선, 시크릿은 이미 바인딩된 SUPPORT_GATEWAY_TOKEN_SECRET
+    # 재사용이라 신규 시크릿 불요)로 114→115. 가드가 신규 필드를 설계대로 잡은 것.
+    assert "SUPPORT_GATEWAY_OPERATOR_REPLY_URL" in keys
+    # story #183fe7a5(지원v1·후속, 2026-09-01): support_gateway_escalation_resolution_url
+    # 1필드 신설(게이트 해소→gateway SupportEscalation.status 동기화 콜백 착지 URL —
+    # operator_reply_url과 동일 게이팅 원칙·같은 시크릿 재사용, aud만 분리)로 115→116.
+    assert "SUPPORT_GATEWAY_ESCALATION_RESOLUTION_URL" in keys
+    # story #3373(Phase1·마케팅운영, 2026-09-03): channel_credential_encryption_key·
+    # channel_oauth_state_secret·threads_app_id·threads_app_secret 4필드 신설(채널 연결
+    # 서비스 — MultiFernet 암호화 키·OAuth state 서명 키·Threads 공용 앱 자격증명, 전부
+    # infra/manual-env-allowlist.yml에도 등재)로 116→120. 가드가 신규 필드를 설계대로 잡은 것.
+    assert "CHANNEL_CREDENTIAL_ENCRYPTION_KEY" in keys and "CHANNEL_OAUTH_STATE_SECRET" in keys
+    # story #3373(Phase1·마케팅운영, 2026-09-03 07:56Z 페드루 PO 리뷰): threads_pkce_enabled
+    # 1필드 추가 신설(PKCE code_challenge를 Meta가 거부할 때 재배포 없이 끄는 런타임
+    # 플래그, threads_oauth.py 참고)로 120→121. manual-env-allowlist.yml엔 미등재(시크릿이
+    # 아닌 bool 플래그라 cloudbuild.yaml --update-env-vars로 직접 배선 예정).
+    assert "THREADS_PKCE_ENABLED" in keys
+    # story #3373(Phase1·마케팅운영, 2026-09-03 08:40Z 페드루 PO 정정, 블루프린트 §8) —
+    # threads_app_id·threads_app_secret 2필드 **제거**(121→119). "Sprintable 공용 앱
+    # 1개"였던 전제가 틀렸다는 08:29Z 정정에 이어, 08:40Z 재정정으로 SaaS 기본 공용 앱
+    # 자격 자체가 env var가 아니라 platform_settings(어드민 관리 싱글턴, DB 암호화 컬럼
+    # threads_platform_app_id/encrypted_app_secret) 몫으로 옮겨갔다 — 이 두 env var
+    # 경로는 이제 아예 없다(infra/manual-env-allowlist.yml에서도 두 줄 제거).
+    assert "THREADS_APP_ID" not in keys and "THREADS_APP_SECRET" not in keys
+    # story 194acb63(Phase0 결함·S8 후속, 2026-09-03) — public_site_base_url 1필드 신설
+    # (발행 글 상세의 "공개 URL"이 백엔드 API 주소로 새던 결함 — 랜딩 베이스 deploy SSOT
+    # 배선. 시크릿 아님, cloudbuild.yaml _PUBLIC_SITE_BASE_URL substitution으로 직접
+    # 배선·manual-env-allowlist.yml 미등재)로 119→120. 가드가 신규 필드를 설계대로 잡은 것.
+    assert "PUBLIC_SITE_BASE_URL" in keys
+    # story #3583-BE(GA4 «고객 소유» 연결, 페드루 PO 確定 2026-09-06) — backend_url 1필드
+    # 신설(GA4 OAuth 콜백 redirect_uri 구성용, 백엔드 자기 자신 URL)로 120→121.
+    # cloudbuild.yaml `_BACKEND_URL` substitution으로 직접 배선·manual-env-allowlist.yml
+    # 미등재(PUBLIC_SITE_BASE_URL과 동형).
+    assert "BACKEND_URL" in keys
+    # story #3815(Phase3·3-5 PR2, 페드루 PO 確定 2026-09-12): youtube_quota_
+    # daily_limit_units·youtube_quota_cost_insert_units·youtube_quota_cost_
+    # list_units·youtube_api_audit_incomplete 4필드 신설(플랫폼 공유 YouTube
+    # quota 한도/단가+API 감사 미완 강제 비공개 플래그, config.py 상단 딱지
+    # 참고)로 121→125. 밑줄 구분 int 리터럴(10_000·1_600)·bool = True 형·
+    # 같은 줄 뒤 주석 3가지 축 전부 정규식 재현으로 실측 확認(로컬 `python3 -c`
+    # 로 `_SETTINGS_FIELD_RE`만 단독 실행 — 4개 다 정상 매칭, 총 125). 가드가
+    # 신규 필드를 설계대로 잡은 것(파서 결함 아님, 이 assert만 stale이었다).
+    assert "YOUTUBE_QUOTA_DAILY_LIMIT_UNITS" in keys and "YOUTUBE_QUOTA_COST_INSERT_UNITS" in keys
+    assert "YOUTUBE_QUOTA_COST_LIST_UNITS" in keys and "YOUTUBE_API_AUDIT_INCOMPLETE" in keys
+    assert len(keys) == 125
+
+
+def test_settings_field_regex_handles_underscore_int_literal_bool_and_trailing_comment():
+    """⭐양성대조(페드루 PO 지적 2026-09-12 12:37Z, 재검증 결과 파서 결함은 아니었으나
+    — 그 우려 자체는 재발가능성이 있어 pin으로 고정) — `_SETTINGS_FIELD_RE`가 밑줄
+    구분 int 리터럴(`10_000`)·`bool = True`·같은 줄 뒤 주석까지 정확히 다 세는지
+    합성 스니펫으로 직접 확認한다(실 config.py 전체를 다시 읽는 위 테스트와 달리,
+    이 정규식 자체의 계약만 pin — 정규식을 손대면 이 테스트가 바로 반응한다)."""
+    mod = _load_check_env_drift()
+    snippet = (
+        "class Settings(BaseSettings):\n"
+        "    youtube_quota_daily_limit_units: int = 10_000\n"
+        "    youtube_api_audit_incomplete: bool = True  # 밑줄·bool·같은 줄 주석 3축 동시 재현\n"
+    )
+    names = {name.upper() for name in mod._SETTINGS_FIELD_RE.findall(snippet)}
+    assert names == {"YOUTUBE_QUOTA_DAILY_LIMIT_UNITS", "YOUTUBE_API_AUDIT_INCOMPLETE"}

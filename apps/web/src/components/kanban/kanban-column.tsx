@@ -70,6 +70,8 @@ interface KanbanColumnProps {
   onToggleCollapse?: () => void;
   // f1910a31: ?view=new → 인라인 컴포저 auto-open. nonce가 바뀔 때마다(0→1, 1→2…) 재오픈.
   autoComposeSignal?: number;
+  /** story #3287 AC4 — StoryCard로 그대로 threading(설명은 story-card.tsx 참고). */
+  getStatusLabel?: (canonicalSlug: string) => string | undefined;
 }
 
 export function KanbanColumn({
@@ -80,7 +82,7 @@ export function KanbanColumn({
   onCreateStory, projectId, onKickoffStory, executionMap, blockedByMap, storyLabelsMap, storyGatesMap, storyLineMap,
   totalCount, hasMore, loadingMore, onLoadMore,
   collapsed, onToggleCollapse,
-  autoComposeSignal,
+  autoComposeSignal, getStatusLabel,
 }: KanbanColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id });
   const t = useTranslations('board');
@@ -122,7 +124,7 @@ export function KanbanColumn({
   const statusColor = STATUS_COLOR[id] ?? STATUS_COLOR['backlog'];
   // AC1: WIP 초과 시 빨간 강조
   const colClass = wipExceeded
-    ? 'bg-destructive/5 ring-1 ring-destructive/30'
+    ? 'bg-destructive-tint ring-1 ring-destructive/30'
     : isOver && isValidTarget
       ? 'bg-primary/5 ring-1 ring-primary/20'
       : isValidTarget
@@ -150,12 +152,16 @@ export function KanbanColumn({
             <>
               <button
                 type="button"
-                aria-label="Expand done column"
+                aria-label={t('expandDoneColumn')}
                 onClick={onToggleCollapse}
-                className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground transition hover:text-foreground"
+                className={`flex h-5 w-5 items-center justify-center rounded transition ${wipExceeded ? 'text-foreground' : 'text-muted-foreground'}`}
               >
                 <ChevronDown className="h-3.5 w-3.5" />
               </button>
+              {/* story #3865(AC1, PO CHANGES 2026-09-14 11:40Z 정정) — 이 컬럼 wrapper는
+                  wipExceeded일 때만 bg-destructive-tint를 입는다(colClass) — 평시(미초과)엔
+                  tint 자체가 없어 muted-foreground가 원래 대비 그대로 안전하다. wipExceeded일
+                  때만 ink로 올리는 조건부 교체(평시 시안 변경 0, PO CHANGES 처방①). */}
               <span className={`text-[11px] tabular-nums ${wipExceeded ? 'text-destructive' : 'text-muted-foreground'}`}>
                 {totalCount !== undefined ? (hasMore ? `${totalCount}+` : totalCount) : stories.length}
               </span>
@@ -164,11 +170,15 @@ export function KanbanColumn({
             <>
               {/* story #2969 §1.3-b(doc proofline-system-layer-2969, PR-5) — 컬럼헤더=소헤딩
                   (Heading 무게, sans 유지 — 한글이라 caps/mono 금지). 크기(text-xs)는 불변. */}
-              <h3 className="flex items-center gap-2 text-xs font-extrabold text-foreground">
+              {/* 유나 design:changes(PR#3687, 2026-09-01) — org 커스텀 라벨은 길이가
+                  자유(«아이디어 검토 대기열»)라 고정폭 컬럼(w-[280px])에서 wip 카운트·
+                  버튼을 밀어낼 수 있었다. h3에 min-w-0(flex item이 컨텐츠 크기로
+                  안 밀어붙이게)+텍스트 자체에 truncate, 잘려도 title로 전체 문구 확인. */}
+              <h3 className="flex min-w-0 items-center gap-2 text-xs font-extrabold text-foreground">
                 <span className={`size-1.5 shrink-0 rounded-full ${statusColor.dot}`} aria-hidden="true" />
-                {label}
+                <span className="truncate" title={label}>{label}</span>
               </h3>
-              <div className="flex items-center gap-1.5">
+              <div className="flex shrink-0 items-center gap-1.5">
                 {/* AC1: WIP 초과 배지 */}
                 {wipExceeded && (
                   <Badge variant="destructive" className="text-[10px]">
@@ -177,11 +187,13 @@ export function KanbanColumn({
                 )}
                 {/* AC1: WIP limit 배지 (설정된 경우) */}
                 {wipLimit !== null && wipLimit !== undefined && !wipExceeded && (
-                  <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                  <Badge variant="outline" className={`text-[10px] ${wipExceeded ? 'text-foreground' : 'text-muted-foreground'}`}>
                     {t('wipLimitLabel')}: {wipLimit}
                   </Badge>
                 )}
-                {/* 카드 수 — pill/shadow/mono 제거·tabular(정렬 유지·결 정갈) */}
+                {/* 카드 수 — pill/shadow/mono 제거·tabular(정렬 유지·결 정갈). story #3865(AC1,
+                    PO CHANGES 2026-09-14 11:40Z 정정) — wipExceeded일 때만 ink, 평시엔
+                    muted-foreground 유지(평시 시안 변경 0). */}
                 <span className={`text-xs tabular-nums ${wipExceeded ? 'text-destructive' : 'text-muted-foreground'}`}>
                   {totalCount !== undefined ? (hasMore ? `${totalCount}+` : totalCount) : stories.length}
                 </span>
@@ -191,7 +203,7 @@ export function KanbanColumn({
                   aria-label={t('wipLimitSet')}
                   title={t('wipLimitSet')}
                   onClick={onWipLimitEdit}
-                  className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground transition hover:text-foreground"
+                  className={`flex h-5 w-5 items-center justify-center rounded transition ${wipExceeded ? 'text-foreground' : 'text-muted-foreground'}`}
                 >
                   <svg width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
                     <path d="M11.013 1.427a1.75 1.75 0 012.474 2.474L4.92 12.47l-3.265.905.905-3.265 8.453-8.683z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
@@ -201,9 +213,9 @@ export function KanbanColumn({
                 {onToggleCollapse && (
                   <button
                     type="button"
-                    aria-label="Collapse done column"
+                    aria-label={t('collapseDoneColumn')}
                     onClick={onToggleCollapse}
-                    className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground transition hover:text-foreground"
+                    className={`flex h-5 w-5 items-center justify-center rounded transition ${wipExceeded ? 'text-foreground' : 'text-muted-foreground'}`}
                   >
                     <ChevronUp className="h-3.5 w-3.5" />
                   </button>
@@ -214,7 +226,7 @@ export function KanbanColumn({
                     aria-label={t('addStory')}
                     title={t('addStory')}
                     onClick={startCompose}
-                    className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                    className={`flex h-5 w-5 items-center justify-center rounded transition hover:bg-muted ${wipExceeded ? 'text-foreground' : 'text-muted-foreground'}`}
                   >
                     <Plus className="h-3.5 w-3.5" />
                   </button>
@@ -244,7 +256,7 @@ export function KanbanColumn({
             <Button size="sm" variant="default" className="h-7 px-2 text-xs" onClick={onWipLimitSave}>
               {t('wipLimitSave')}
             </Button>
-            <Button size="sm" variant="ghost" className="h-7 px-2 text-xs text-muted-foreground" onClick={onWipLimitRemove}>
+            <Button size="sm" variant="ghost" className={`h-7 px-2 text-xs ${wipExceeded ? 'text-foreground' : 'text-muted-foreground'}`} onClick={onWipLimitRemove}>
               {t('wipLimitRemove')}
             </Button>
           </div>
@@ -281,7 +293,7 @@ export function KanbanColumn({
             <Button
               size="sm"
               variant="ghost"
-              className="h-7 px-2 text-xs text-muted-foreground"
+              className={`h-7 px-2 text-xs ${wipExceeded ? 'text-foreground' : 'text-muted-foreground'}`}
               onClick={cancelCompose}
             >
               {t('addStoryCancel')}
@@ -300,7 +312,7 @@ export function KanbanColumn({
             <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-y-auto p-1.5 [&>*]:shrink-0">
               {stories.length === 0 && !composing ? (
                 <div className="flex min-h-[100px] items-center justify-center px-4 text-center">
-                  <p className="text-xs text-muted-foreground">{t('noStories')}</p>
+                  <p className={`text-xs ${wipExceeded ? 'text-foreground' : 'text-muted-foreground'}`}>{t('noStories')}</p>
                 </div>
               ) : null}
               {stories.map((story) => (
@@ -323,6 +335,7 @@ export function KanbanColumn({
                   gates={storyGatesMap?.[story.id] ?? []}
                   lineStatus={storyLineMap?.[story.id]}
                   verifiedBy={story.human_verified_by ? memberMap[story.human_verified_by] : undefined}
+                  getStatusLabel={getStatusLabel}
                 />
               ))}
             </div>
@@ -335,9 +348,10 @@ export function KanbanColumn({
                 type="button"
                 onClick={onLoadMore}
                 disabled={loadingMore}
-                className="w-full rounded-md px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted/50 disabled:opacity-50"
+                className={`w-full rounded-md px-3 py-1.5 text-xs hover:bg-muted/50 disabled:opacity-50 ${wipExceeded ? 'text-foreground' : 'text-muted-foreground'}`}
               >
-                {loadingMore ? '불러오는 중...' : '더 보기'}
+                {/* story #3776(1층B) — "불러오는 중..."/"더 보기", board ns의 기존 loading/loadMore 키 재사용. */}
+                {loadingMore ? t('loading') : t('loadMore')}
               </button>
             </div>
           )}

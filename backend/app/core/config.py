@@ -86,6 +86,57 @@ class Settings(BaseSettings):
     # JWT
     jwt_secret: str = ""
 
+    # story #3259(지원v1·1경계) — Support Gateway 위임 토큰 서명 시크릿. jwt_secret과 **의도적으로
+    # 분리**(별도 값) — 이 시크릿이 유출돼도 fleet JWT_SECRET과는 무관(반대도 동일). Support
+    # Gateway는 이 시크릿의 검증만 하고 jwt_secret은 아예 모른다(support-gateway/app/config.py).
+    support_gateway_token_secret: str = ""
+    support_gateway_token_ttl_seconds: int = 300
+
+    # story #3279(지원v1·후속) — 운영자 회신 배달(backend→support-gateway). escalation_events
+    # 배달(gateway→backend, backend_escalation_events_url은 support-gateway 쪽 설정)의 반대
+    # 방향 — support-gateway/app/routers/operator_replies.py의 절대 URL. 미설정 시 배달을
+    # 정직하게 skip한다(app/services/operator_reply_delivery.py).
+    support_gateway_operator_reply_url: str = ""
+
+    # story #183fe7a5(지원v1·후속) — 게이트 해소(approve/reject) → gateway
+    # SupportEscalation.status 동기화(콜백, backend→support-gateway, operator_reply_url과
+    # 같은 방향·다른 aud). support-gateway/app/routers/escalation_resolution.py의 절대 URL.
+    # 미설정 시 동기화를 정직하게 skip(app/services/escalation_resolution_delivery.py) — 이
+    # 자체가 approve/reject 자체를 막지 않는다(best-effort, AC3).
+    support_gateway_escalation_resolution_url: str = ""
+
+    # story #3263(지원v1·5에스컬레이션) — 트랜잭셔널 메일의 "즉시 고객센터로 문의" 문구가
+    # 실재하지 않는 표면(고객센터)을 가리키던 fiction 정정. 위젯(story #3260)이 dev에만 떠
+    # 있고 prod는 아직 미노출(NEXT_PUBLIC_SUPPORT_WIDGET_ENABLED)이라, 메일 카피가 위젯
+    # 승격보다 먼저 prod에 나가면 "가리키는 표면이 고객 화면엔 없는" 새 fiction이 재발한다.
+    # 이 플래그를 위젯 플래그와 **같은 cloudbuild SSOT·같은 승격 커밋**으로 묶어 순서를
+    # 사람 기억이 아니라 구조로 보장한다(페드루 PO 확定, 2026-08-31) — false(기본값·prod)면
+    # 지시문 자체를 지운다("발신 전용" 안내로 대체), true(dev·prod 승격 시)면 위젯을 가리킨다.
+    support_contact_surface_widget: bool = False
+
+    # story #3263(지원v1·5에스컬레이션, 페드루 PO 확定 2026-08-31) — 에스컬레이션 게이트/DM의
+    # requester. 고객 org_member를 moonklabs 스코프 Gate/Conversation에 그대로 꽂으면 org
+    # 경계 위반(신원 오염)이라 기각됐다(Gate·ConversationParticipant는 단일 org 스코프).
+    # approver(PO) 겸용도 "요청자를 잘못 기록"이라 기각. 정본=moonklabs org 안의 "Sprintable
+    # 지원" 에이전트 멤버(제품이 실제로 티켓을 상신하는 실체 — 거짓 없는 서사, PO와 별개라
+    # 자기승인도 아님). PO가 운영 액션(POST /api/v2/team-members)으로 이미 생성(dev,
+    # 2026-08-31) — 값은 그 **team_members.id**(agent 멤버는 org_members 행이 아예 없다 —
+    # member_resolver.py::resolve_member의 "휴먼=org_member.id / 에이전트=team_member.id"
+    # 통합 신원 계약 그대로, 별도 변환 불요). 미설정이면 에스컬레이션 배달을 정직하게
+    # skip한다(SupportEscalation 행 자체는 그대로 보존 — support-gateway 쪽과 동일한
+    # "배달 실패는 원본 기록을 막지 않는다" 원칙).
+    support_escalation_requester_member_id: str = ""
+    # story #3263 — 게이트/DM이 실릴 moonklabs org/project. slug로 참조(환경별 UUID가 달라도
+    # 안정적 — organizations.slug/projects.slug가 전역·org-scope 유일 SSOT).
+    support_escalation_target_org_slug: str = "moonklabs"
+    support_escalation_target_project_slug: str = "sprintable"
+    # story #3263 — 지정 결재자(designated_approver_id). v1은 PO(페드루) 1인 — "고객 문의
+    # 에스컬 카드가 전부 선생님 결재함에 꽂히면 안 된다"(PO 확定) — org owner/admin은 결재
+    # 자격 자체는 그대로 있되(dispatch_approval_request_cards 기존 관례) 액션 카드는 이
+    # 1인에게만. 페드루군도 agent 멤버(email 축 없음)라 이메일 해소 대신 team_members.id를
+    # 직접 주입(PO 본인 지시, 2026-08-31 — email 방식보다 견고).
+    support_escalation_approver_member_id: str = ""
+
     # CORS (쉼표 구분 origins, Cloud Run 환경변수 CORS_ORIGINS로 주입)
     cors_origins: str = "http://localhost:3000,http://localhost:3108,https://app.sprintable.ai"
 
@@ -107,6 +158,14 @@ class Settings(BaseSettings):
     apple_private_key: str = ""  # SIWA Key .p8 파일 내용 그대로(PEM, ES256 개인키).
     # Next.js 프론트엔드 URL (OAuth redirect_uri 조합용)
     app_url: str = "http://localhost:3000"
+    # story #3583-BE(Phase2·마케팅운영, 페드루 PO 確定 2026-09-06) — GA4 측정 연결
+    # OAuth. 이 백엔드 자신의 URL(Cloud Run 서비스 URL 등) — Google이 이 값+
+    # "/api/v2/measurement-connections/ga4/callback"으로 직접 리다이렉트한다
+    # (github_integration.py::install_callback과 동형 — FE BFF 콜백 라우트 0,
+    # `app_url`은 프론트 도메인이라 이 자리에 못 쓴다). Google Cloud Console에
+    # 이 정확한 콜백 URL을 리다이렉트 URI로 등록하는 것은 이 스토리 밖(analytics.
+    # readonly 스코프 동의화면 검수와 같은 PO/사람 항목).
+    backend_url: str = ""
 
     # EE / SaaS gating
     license_consent: str = ""
@@ -299,6 +358,33 @@ class Settings(BaseSettings):
     # 존재해야 한다 — 로그·API 응답·DB 어디에도 남기지 않는다(app/services/billing_key_crypto.py).
     org_billing_key_encryption_key: str = ""
 
+    # story #3373(Phase1·마케팅운영) — channel_connections.encrypted_*(OAuth 토큰) 암호화
+    # 키(들). org_billing_key_encryption_key와 동일 패턴(MultiFernet 회전, 콤마구분)이지만
+    # 독립 시크릿 — 결제 키 회전이 채널 토큰에 영향 주지 않는다(도메인 분리, PO 확定).
+    channel_credential_encryption_key: str = ""
+    # OAuth state(CSRF+org 바인딩+PKCE verifier+nonce+TTL) 서명 키 — github_app_state_secret과
+    # 동형(별도 시크릿, auth.py의 로그인용 OAuth state 키와 분리·그라운딩 §9 "기본=분리" 확定).
+    channel_oauth_state_secret: str = ""
+    # Threads(Meta) 서버 OAuth의 앱 id/secret은 env var가 **아니다**(페드루 PO 정정
+    # 2026-09-03 08:40Z, 블루프린트 §8) — 조직별 자격은 channel_app_credentials 테이블,
+    # SaaS 기본 공용 앱 자격은 platform_settings.threads_platform_app_id/
+    # encrypted_app_secret(어드민 관리, app/services/channel_app_credentials.py의 3단
+    # 우선순위 참고). 여기 Settings에는 대응 필드가 없다 — 만들지 않는다(선생님 결정③,
+    # "코드 배포 없이 바뀌어야 하는 값은 env var 금지" 원칙 그대로 적용).
+    # 페드루 PO 리뷰(2026-09-03 07:26Z·07:56Z) — Threads의 PKCE(code_challenge) 수용 여부가
+    # 문헌상 미확認이라, 실왕복에서 Meta가 거부하면(threads_oauth.py 참고) 재배포 없이 끄는
+    # 자리. 기본 True(PKCE 시도) — dev 실왕복 검증에서 거부되면 False로.
+    threads_pkce_enabled: bool = True
+
+    # story 194acb63(Phase0 결함·S8 후속, 배포 11 실측) — 발행된 글의 "공개 URL"(S8 상세
+    # 화면)이 백엔드 자기 주소(+public_key 쿼리)로 새던 결함의 근본 원인: 랜딩 베이스가
+    # env가 아니라 org별 site 커넥터 설정에만 있어(오늘은 어느 org도 등록 안 함) 항상
+    # API 주소로 폴백했다. deploy SSOT(cloudbuild.yaml)로 배선하는 전역 기본값 — 미설정
+    # 이면 이 URL을 아예 안 만든다(null, 화면은 「—」·지어내지 않는다, AC1). site 커넥터
+    # (조직별 재정의)는 `_resolve_public_url`(발행 액션 자체의 URL, 이 결함 범위 밖)이
+    # 여전히 우선한다 — 이 설정은 S8 표시 전용의 별도 해소 경로다.
+    public_site_base_url: str = ""
+
     # E-H1-S6: GitHub webhook(PR/CI verdict 캡처) HMAC 검증 시크릿. 미설정이면 webhook 거부(inert).
     github_webhook_secret: str = ""
 
@@ -317,6 +403,23 @@ class Settings(BaseSettings):
 
     # S-COMM-07: 에이전트 inbox webhook HMAC 검증 시크릿
     agent_inbox_webhook_secret: str = ""
+
+    # story #3815(Phase3·3-5 PR2, 페드루 PO 確定 2026-09-12) — YouTube 종량 quota는
+    # 조직별이 아니라 **플랫폼 전체**(우리 GCP 프로젝트가 Google에 공유하는 단일
+    # 일일 예산) 축이라 org_content_rules(조직별 규칙) 재사용 대상이 아니다. 정식
+    # 정착지는 platform_settings(어드민 관리, 하드코딩·env 금지 원칙)이지만 그
+    # 테이블은 sprintable-admin(별도 레포)의 write UI가 있어야 실제로 조정 가능—
+    # 이 PR은 백엔드 단독이라 페드루 PO 明示("env/규칙 조정 가능")대로 env로 연다.
+    # ⚠️미확認 — 실제 YouTube Data API v3 quota 비용표(지식 컷오프 2026-01 기준
+    # 최선 추정: 일일 10,000 unit·videos.insert=1,600·videos.list=1)는 재확認 대상.
+    youtube_quota_daily_limit_units: int = 10_000
+    youtube_quota_cost_insert_units: int = 1_600
+    youtube_quota_cost_list_units: int = 1
+    # API 규정 감사 미완=업로드 강제 비공개(페드루 PO 決定②) — 우리 앱의 등급
+    # 자체(고객 자격 아님)라 이 값도 플랫폼 축. True(기본, fail-closed)=감사 미완
+    # 가정 — 실 감사 통과 뒤 이 env를 False로 바꾼다(재배포 필요, platform_settings
+    # 이관 전까지의 임시 조치임을 명시).
+    youtube_api_audit_incomplete: bool = True
 
     # Rate limiting (E-OA1:S5)
     rate_limit_backend: str = "memory"  # "memory" | "redis"

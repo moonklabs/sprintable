@@ -58,6 +58,12 @@ def make_gate(**overrides) -> Gate:
         github_check_run_id=None,
         github_check_run_sha=None,
         approved_head_sha=None,
+        # story #3365(Phase0 S2) — reapproval_required는 requires_human과 동형(server_default
+        # false·nullable=False 컬럼): transient 인스턴스는 서버 기본값이 아직 안 채워져 None으로
+        # 읽히는데, GateResponse가 `bool`(Optional 아님)로 선언돼 있어 그대로 두면 422로 죽는다
+        # (실제로 test_rc1_body_trust_actor.py에서 재현). sealed_content_*는 진짜 nullable이라
+        # GateResponse도 Optional로 받으므로 기본값 불요.
+        reapproval_required=False,
         created_at=now,
         updated_at=now,
     )

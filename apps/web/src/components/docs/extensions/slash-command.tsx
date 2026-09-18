@@ -60,233 +60,9 @@ export interface SlashMenuCategory {
   items: SlashMenuItem[];
 }
 
-export const slashMenuCategories: SlashMenuCategory[] = [
-  {
-    label: '텍스트',
-    items: [
-      {
-        title: 'Heading 1',
-        description: '큰 제목',
-        icon: Heading1,
-        command: (editor, range) =>
-          editor.chain().focus().deleteRange(range).toggleHeading({ level: 1 }).run(),
-      },
-      {
-        title: 'Heading 2',
-        description: '중간 제목',
-        icon: Heading2,
-        command: (editor, range) =>
-          editor.chain().focus().deleteRange(range).toggleHeading({ level: 2 }).run(),
-      },
-      {
-        title: 'Heading 3',
-        description: '작은 제목',
-        icon: Heading3,
-        command: (editor, range) =>
-          editor.chain().focus().deleteRange(range).toggleHeading({ level: 3 }).run(),
-      },
-    ],
-  },
-  {
-    label: '리스트',
-    items: [
-      {
-        title: 'Bullet List',
-        description: '순서 없는 목록',
-        icon: List,
-        command: (editor, range) =>
-          editor.chain().focus().deleteRange(range).toggleBulletList().run(),
-      },
-      {
-        title: 'Ordered List',
-        description: '순서 있는 목록',
-        icon: ListOrdered,
-        command: (editor, range) =>
-          editor.chain().focus().deleteRange(range).toggleOrderedList().run(),
-      },
-      {
-        title: 'Checklist',
-        description: '체크리스트',
-        icon: ListTodo,
-        command: (editor, range) =>
-          editor.chain().focus().deleteRange(range).toggleTaskList().run(),
-      },
-    ],
-  },
-  {
-    label: '블록',
-    items: [
-      {
-        title: 'Code Block',
-        description: '코드 블록',
-        icon: Code,
-        command: (editor, range) =>
-          editor.chain().focus().deleteRange(range).toggleCodeBlock().run(),
-      },
-      {
-        title: 'Blockquote',
-        description: '인용구',
-        icon: Quote,
-        command: (editor, range) =>
-          editor.chain().focus().deleteRange(range).toggleBlockquote().run(),
-      },
-      {
-        title: 'Callout',
-        description: '강조 박스',
-        icon: Lightbulb,
-        command: (editor, range) =>
-          editor
-            .chain()
-            .focus()
-            .deleteRange(range)
-            .insertContent({ type: 'callout', content: [{ type: 'paragraph' }] })
-            .run(),
-      },
-      {
-        title: 'Table',
-        description: '표 삽입',
-        icon: Table,
-        command: (editor, range) =>
-          editor
-            .chain()
-            .focus()
-            .deleteRange(range)
-            .insertTable({ rows: 3, cols: 3, withHeaderRow: true })
-            .run(),
-      },
-    ],
-  },
-  {
-    label: '미디어',
-    items: [
-      {
-        title: 'Image',
-        description: '이미지 삽입',
-        icon: ImageIcon,
-        // S4: URL prompt → 파일 피커 + Storage 업로드(asset ref). 다른 진입(gutter +·DnD·paste)과 동일 플로우.
-        command: (editor, range) => {
-          editor.chain().focus().deleteRange(range).run();
-          pickAndUpload(editor, 'image/*');
-        },
-      },
-      {
-        title: 'File',
-        description: '파일 첨부',
-        icon: Paperclip,
-        // S4: base64 인라인 → Storage 업로드(asset ref).
-        command: (editor, range) => {
-          editor.chain().focus().deleteRange(range).run();
-          pickAndUpload(editor);
-        },
-      },
-      {
-        title: 'Embed',
-        description: '외부 URL 임베드',
-        icon: Globe,
-        command: (editor, range) => {
-          const url = window.prompt('임베드할 URL을 입력하세요 (YouTube, Figma 등):');
-          editor.chain().focus().deleteRange(range).run();
-          if (url?.trim()) {
-            editor.commands.insertContent({ type: 'embedBlock', attrs: { url: url.trim() } });
-          }
-        },
-      },
-      {
-        title: 'Mermaid Diagram',
-        description: '다이어그램 삽입',
-        icon: GitBranch,
-        command: (editor, range) =>
-          editor
-            .chain()
-            .focus()
-            .deleteRange(range)
-            .insertContent({
-              type: 'codeBlock',
-              attrs: { language: 'mermaid' },
-              content: [{ type: 'text', text: 'flowchart TD\n    A[시작] --> B[끝]' }],
-            })
-            .run(),
-      },
-    ],
-  },
-  {
-    label: '고급',
-    items: [
-      {
-        title: 'Columns',
-        description: '2단/3단 컬럼 레이아웃',
-        icon: Columns2,
-        command: (editor, range) =>
-          editor.chain().focus().deleteRange(range).insertContent({
-            type: 'columnsBlock',
-            attrs: { columns: 2 },
-            content: [
-              { type: 'columnBlock', content: [{ type: 'paragraph' }] },
-              { type: 'columnBlock', content: [{ type: 'paragraph' }] },
-            ],
-          }).run(),
-      },
-      {
-        title: 'Math Block',
-        description: 'LaTeX 블록 수식',
-        icon: Sigma,
-        command: (editor, range) =>
-          editor.chain().focus().deleteRange(range).insertContent({
-            type: 'mathBlock',
-            content: [{ type: 'text', text: 'E = mc^2' }],
-          }).run(),
-      },
-      {
-        title: 'Math Inline',
-        description: 'LaTeX 인라인 수식',
-        icon: Sigma,
-        command: (editor, range) =>
-          editor.chain().focus().deleteRange(range).insertContent({
-            type: 'mathInline',
-            content: [{ type: 'text', text: 'x^2' }],
-          }).run(),
-      },
-      {
-        title: 'Toggle',
-        description: '접기/펼치기 블록',
-        icon: ChevronRight,
-        command: (editor, range) =>
-          editor.chain().focus().deleteRange(range).insertContent({
-            type: 'toggleBlock',
-            attrs: { open: false },
-            content: [
-              { type: 'toggleSummary', content: [{ type: 'text', text: '토글 제목' }] },
-              { type: 'toggleContent', content: [{ type: 'paragraph' }] },
-            ],
-          }).run(),
-      },
-      {
-        title: 'Page Embed',
-        description: '다른 문서 임베드',
-        icon: FileText,
-        command: (editor, range) =>
-          editor.chain().focus().deleteRange(range).insertPageEmbed().run(),
-      },
-      {
-        title: 'Horizontal Rule',
-        description: '구분선',
-        icon: Minus,
-        command: (editor, range) =>
-          editor.chain().focus().deleteRange(range).setHorizontalRule().run(),
-      },
-    ],
-  },
-];
-
-export const defaultSlashItems: SlashMenuItem[] =
-  slashMenuCategories.flatMap((c) => c.items);
-
 // story ab2fd813(#2028) — 이 파일의 슬래시 팝업은 `createRoot(popup)`로 React 트리 밖(body
 // append)에 렌더돼 `useTranslations`를 여기서 직접 못 쓴다. 그래서 로케일 문자열은 소비처
 // (doc-editor.tsx, 이미 useTranslations 보유)가 빌드해 이 팩토리에 주입하는 형태로 뒤집는다.
-// `slashMenuCategories`/`defaultSlashItems`(위, 한글 고정)는 그대로 둔다 — 기존
-// `slash-command.test.tsx`의 `defaultSlashItems` 단언(영문 title)이 안 깨지게 하기 위한
-// fallback 겸 하위호환 export다.
 export interface SlashMenuStrings {
   categories: {
     text: string;
@@ -318,18 +94,19 @@ export interface SlashMenuStrings {
     horizontalRule: string;
   };
   embedPrompt: string;
-  /** 선택 — 없으면 한글 기본값(시작/끝) 유지. 삽입되는 문서 콘텐츠라 UI chrome이 아님. */
-  mermaidDefault?: { start: string; end: string };
-  /** 선택 — 없으면 한글 기본값('토글 제목') 유지. */
-  toggleDefaultTitle?: string;
+  /** 삽입되는 문서 콘텐츠 기본값(mermaid 템플릿의 시작/끝 라벨) — 유일한 실 호출부
+   * (doc-editor.tsx)가 항상 채워 넘긴다(story #3930, 미사용 옵셔널 한글 폴백 제거). */
+  mermaidDefault: { start: string; end: string };
+  /** 삽입되는 문서 콘텐츠 기본값(새 토글 블록 제목) — 유일한 실 호출부가 항상 채워 넘긴다. */
+  toggleDefaultTitle: string;
 }
 
-/** `slashMenuCategories`와 구조는 동일, label/description/embed prompt/삽입 기본값만
- * `strings`에서 resolve한다 — icon·command 로직은 그대로 재사용. */
+/** title/icon/command은 리터럴로 고정(로케일 무관 검색 키), label/description/embed
+ * prompt/삽입 기본값만 `strings`에서 resolve한다. */
 export function buildSlashMenuCategories(strings: SlashMenuStrings): SlashMenuCategory[] {
-  const mermaidStart = strings.mermaidDefault?.start ?? '시작';
-  const mermaidEnd = strings.mermaidDefault?.end ?? '끝';
-  const toggleTitle = strings.toggleDefaultTitle ?? '토글 제목';
+  const mermaidStart = strings.mermaidDefault.start;
+  const mermaidEnd = strings.mermaidDefault.end;
+  const toggleTitle = strings.toggleDefaultTitle;
 
   return [
     {
@@ -788,33 +565,6 @@ function createSuggestionRenderer(categories: SlashMenuCategory[]) {
     },
   };
 }
-
-/** 하위호환 fallback(한글 고정) — 로케일 인지 소비처는 `createSlashCommandExtension`을 쓴다. */
-export const SlashCommandExtension = Extension.create({
-  name: 'slashCommand',
-
-  addOptions() {
-    return {
-      suggestion: {
-        char: '/',
-        items: ({ query }: { query: string }) =>
-          defaultSlashItems.filter((item) =>
-            item.title.toLowerCase().includes(query.toLowerCase()),
-          ),
-        render: () => createSuggestionRenderer(slashMenuCategories),
-      } satisfies Partial<SuggestionOptions<SlashMenuItem>>,
-    };
-  },
-
-  addProseMirrorPlugins() {
-    return [
-      Suggestion({
-        editor: this.editor,
-        ...this.options.suggestion,
-      }),
-    ];
-  },
-});
 
 // story ab2fd813(#2028) — 로케일 문자열을 주입받는 팩토리. doc-editor.tsx가
 // useTranslations('docs.slashMenu')로 빌드한 SlashMenuStrings를 여기 넘긴다.

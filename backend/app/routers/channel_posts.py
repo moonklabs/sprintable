@@ -1,0 +1,2549 @@
+"""story #3374(Phase1·마케팅운영, 페드루 PO 확定 2026-09-03) — 채널 포스트 초안·버전·상신
+API. `app/routers/site_posts.py`(story #3365) 형태를 그대로 미러 — 새 패턴 발명 0."""
+from __future__ import annotations
+
+import base64
+import binascii
+import re
+import uuid
+from datetime import datetime, timedelta, timezone
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
+from pydantic import BaseModel, Field, field_validator
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.error_envelope import human_error
+from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
+from app.dependencies.database import get_db
+from app.models.channel_post_image import ChannelPostImage
+from app.models.channel_post_version import ChannelPostVersion
+from app.models.pm import Story
+from app.services.content_rules import get_org_content_rules, lint_content
+from app.services.image_integrity import ImageIntegrityError, validate_image_bytes
+from app.services.project_auth import require_project_access
+from app.services.channel_posts import (
+    _NEWSLETTER_CHANNELS,
+    ChannelConnectionAuthError,
+    ChannelConnectionNotActiveError,
+    ChannelConnectionRevokedError,
+    ChannelImageContainerFailedError,
+    ChannelImageRequiredError,
+    ChannelPostApproverRoleMissingError,
+    ChannelPostDraftAlreadyPublishedError,
+    ChannelPostDraftArchiveForbiddenError,
+    ChannelPostDraftForbiddenError,
+    ChannelPostDraftNotFoundError,
+    ChannelPostDraftWithdrawnError,
+    ChannelPostGateAlreadyHeldError,
+    ChannelPostGateNotFoundError,
+    ConceptApprovalNotApprovedError,
+    ChannelPostNotPublishedError,
+    ChannelPostReapprovalRequiredError,
+    ChannelPostSealMissingError,
+    ChannelPostSourceContentItemNotFoundError,
+    ChannelPostVersionNotFoundError,
+    ChannelPublishInProgressError,
+    ChannelPublishProviderError,
+    ChannelRateLimitedError,
+    ChannelScopeInsufficientError,
+    ChannelTextTooLongError,
+    ChannelTokenExpiredError,
+    ChannelUnpublishUnsupportedError,
+    ChannelVideoRequiredError,
+    ChannelYouTubeMetadataError,
+    ContentRuleViolationError,
+    ExternalPublishGateNotApprovedError,
+    PublicationCommandNotCancellableError,
+    PublicationCommandNotFoundError,
+    archive_channel_post_draft,
+    build_tagged_link,
+    build_text_preview,
+    cancel_scheduled_publication,
+    create_channel_post_draft_version,
+    get_channel_post_draft,
+    get_site_post_draft,
+    get_source_titles_and_latest_versions,
+    list_channel_post_draft_versions,
+    count_channel_post_drafts,
+    list_channel_post_drafts,
+    publish_channel_post_draft,
+    restore_channel_post_draft,
+    submit_channel_post_draft,
+    text_char_count,
+    unpublish_channel_post,
+    withdraw_channel_post_draft,
+)
+from app.services.channel_post_images import (
+    ChannelCoverAspectRatioRejectedError,
+    ChannelImageAnimatedUnsupportedError,
+    ChannelImageAspectRatioExceededError,
+    ChannelImageAspectRatioTooNarrowError,
+    ChannelImageConversionFailedError,
+    ChannelImageObjectNotFoundError,
+    ChannelImagePathNotScopedError,
+    ChannelImageStorageNotConfiguredError,
+    ChannelImageTooLargeError,
+    ChannelImageUnsupportedError,
+    ChannelImageUnsupportedFormatError,
+    ChannelImageUndecodableError,
+    ChannelImageUploadFailedError,
+    ChannelPostImageCountExceededError,
+    ChannelPostImageNotFoundError,
+    ChannelPostImageReorderInvalidSetError,
+    confirm_channel_post_image_upload,
+    create_channel_post_image_upload_url,
+    delete_channel_post_image,
+    get_channel_post_image_for_version,
+    import_channel_post_image,
+    list_channel_post_images_for_version,
+    public_url_for_object_path,
+    reorder_channel_post_images,
+)
+from app.services.channel_post_videos import (
+    ChannelVideoAspectRatioError,
+    ChannelVideoCodecUnsupportedError,
+    ChannelVideoDurationExceededError,
+    ChannelVideoDurationTooShortError,
+    ChannelVideoObjectNotFoundError,
+    ChannelVideoPathNotScopedError,
+    ChannelVideoRequiresSingleCoverError,
+    ChannelVideoTooLargeError,
+    ChannelVideoUnparsableError,
+    ChannelVideoUnsupportedError,
+    ChannelVideoUnsupportedFormatError,
+    ChannelVideoUploadFailedError,
+    confirm_channel_post_video_upload,
+    create_channel_post_video_upload_url,
+    get_channel_post_video_for_version,
+)
+from app.services.agent_onboarding_config import resolve_locale_from_request
+from app.services.generation_budget import GenerationBudgetExceededError
+from app.services.x_publish_budget import API_USAGE_BUDGET_RULE_KEY
+from app.services.youtube_quota import YouTubeQuotaExceededError
+from app.services.i18n_catalog import t
+from app.services.member_resolver import resolve_member, resolve_member_db_verified
+
+router = APIRouter(prefix="/api/v2/organizations", tags=["channel-posts"])
+
+
+async def _require_human(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID):
+    """AC1(발행 human-only) — channel_connections.py::_require_human과 동형(별도 role
+    제한 없음, publish보다 좁은 owner/admin 축이 아니다 — site_posts.py의 publish
+    엔드포인트와 같은 권한 폭: org 멤버인 휴먼이면 누구나)."""
+    resolved = await resolve_member(auth, org_id, db)
+    if resolved.type != "human":
+        # story #3615 — 이미 사람 문장(3601 allowlist 등재분)이라 그대로 user_message로.
+        raise HTTPException(
+            status_code=403,
+            detail=human_error(
+                "CHANNEL_POST_PUBLISH_HUMAN_ONLY",
+                "채널 포스트 발행은 휴먼 멤버만 가능해요(에이전트는 초안·상신까지).",
+                user_message="채널 포스트 발행은 휴먼 멤버만 가능해요(에이전트는 초안·상신까지).",
+            ),
+        )
+    return resolved
+
+
+async def _require_owner_or_admin(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID):
+    """story #3419 AC3 — 취소·회수는 site_posts.py::_require_owner_or_admin과 동형(발행
+    보다 좁은 권한 — 되돌릴 수 있는 파괴적 상태전환이라 owner/admin 한 단계 더)."""
+    resolved = await resolve_member(auth, org_id, db)
+    if resolved.type != "human":
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "CHANNEL_POST_CANCEL_UNPUBLISH_HUMAN_ONLY",
+                "message": "발행 취소·회수는 휴먼 멤버만 가능합니다(에이전트는 초안·상신까지).",
+            },
+        )
+    if resolved.role not in ("owner", "admin"):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "CHANNEL_POST_CANCEL_UNPUBLISH_OWNER_OR_ADMIN_ONLY",
+                "message": "발행 취소·회수는 조직 owner 또는 admin만 가능합니다.",
+            },
+        )
+    return resolved
+
+
+# story #3645(Phase2·BE, 페드루 PO 確定 2026-09-07).
+_HOOK_KEY_PATTERN = re.compile(r"[A-Za-z0-9_-]+")
+
+
+class CreateChannelPostDraftVersionRequest(BaseModel):
+    work_item_id: uuid.UUID
+    connection_id: uuid.UUID
+    text: str = Field(..., min_length=1)
+    link_url: str | None = None
+
+    # story #3437(후속 묶음, 페드루 PO 確定 2026-09-05) — conversations.py:1259-1265 정본
+    # 미러(새 패턴 발명 0). 채널별 글자수 한도(_validate_text_length, 서비스 계층)는 이
+    # strip 뒤 값을 그대로 잰다 — 공백 패딩이 한도 판정을 왜곡하지 않게 된다(부수 개선).
+    @field_validator("text")
+    @classmethod
+    def _non_empty(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("must not be empty")
+        return v
+    # story #3437(AC2·AC5, 페드루 PO 確定 2026-09-04) — 이 채널 변형이 파생된 원문
+    # (content_item=site_post_drafts.id). 휴먼·에이전트 동형(둘 다 받는다) — 초안 생성
+    # 시에만 반영, 편집(기존 draft) 호출은 무시된다(서비스 계층 docstring 참고).
+    source_content_item_id: uuid.UUID | None = None
+
+    # story #3645(Phase2·BE, 페드루 PO 確定 2026-09-07) — 훅(캡션 도입부) A/B 태깅용
+    # 분석 라벨. link_url과 동형(캐리포워드 없음, 이 요청의 값이 현재 값). 생략/null=
+    # 라벨 없음.
+    hook_key: str | None = None
+
+    # story #3813(Phase3·3-4 PR2, 페드루 PO 確定 2026-09-12) — 채널별 변형
+    # payload 공유 슬롯(스티비 subject 등, 컬럼 이름에 채널 이름 안 붙임 — gate.py/
+    # channel_post_version.py 모델 주석 참고).
+    # story #3815(이미지 carry-forward 통합, 페드루 PO 確定 2026-09-12) — 이 필드를
+    # 요청에서 생략(null)하면 이제 create_channel_post_draft_version()의 기본값이
+    # 직전 버전 값을 그대로 캐리포워드한다(services/channel_posts.py §docstring).
+    # 명시적으로 비우려면(예: YouTube 메타를 전부 지운 저장) `{}`를 보낸다.
+    channel_payload: dict | None = None
+
+    @field_validator("hook_key")
+    @classmethod
+    def _hook_key_format(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        if len(v) > 64 or not _HOOK_KEY_PATTERN.fullmatch(v):
+            raise ValueError("hook_key는 64자 이하의 영문·숫자·-·_ 조합이어야 합니다")
+        return v
+
+
+class ChannelPostDraftVersionResponse(BaseModel):
+    draft_id: uuid.UUID
+    version_id: uuid.UUID
+    version: int
+    author_kind: str
+    body_sha256: str
+    # story #3394(AC5) — link_url이 있을 때만 채워진다(없으면 null, 지어내지 않는다).
+    # publish_channel_post_draft가 실제 발행에 쓰는 것과 같은 값(build_tagged_link 공용).
+    tagged_link_preview: str | None = None
+    # story #3471(페드루 PO 確定 2026-09-05) — 비차단 lint 결과(create/update 시점).
+    # 빈 배열=위반 없음(지어내지 않는다 — organization이 규칙을 아예 안 정했으면 항상
+    # 빈 배열).
+    violations: list[dict] = []
+    # story #3645(Phase2·BE, 페드루 PO 確定 2026-09-07).
+    hook_key: str | None = None
+
+
+class ChannelPostVideoMeta(BaseModel):
+    """story #3590(Phase2·BE→FE·소형, 페드루 PO 確定 2026-09-06) — 유나 §17-23 ⑤-1
+    정정: 업로드 직후에만 서던 메타 줄(길이·해상도·코덱·용량)이 재진입(draft 상세
+    재조회)에서 사라지던 결함의 BE 몫. `ChannelPostVideoResponse`(confirm 응답)와
+    정확히 같은 필드명·타입(FE `formatVideoMetaLine`이 두 응답을 같은 코드로
+    처리할 수 있게 — 새 문구 조립 규칙 0)."""
+    duration_seconds: float
+    width: int
+    height: int
+    codec: str
+    original_bytes: int
+
+
+class ThreadSegmentStatusView(BaseModel):
+    """story #3808(Phase3·3-3 PR5b-2, 페드루 PO 確定 2026-09-12) — X 스레드
+    (N세그먼트) 개별 행 상태. sequence=1이 헤드(기존 단일값 4필드의 출처와 동일
+    행) — k+1..N(아직 시도 안 한 세그먼트)은 배열에 아예 없다(지어내지 않는다)."""
+
+    sequence: int
+    status: str
+    external_id: str | None = None
+    permalink: str | None = None
+    error_code: str | None = None
+
+
+class NewsletterDraftInfo(BaseModel):
+    """story #3813(Phase3·3-4 PR4, 페드루 PO 確定 2026-09-12) — 뉴스레터 채널(stibee·
+    stibee_sandbox) draft에서만 채워지는 하위 객체(그 외 채널은 이 필드 자체가
+    null — FE가 channel∈{stibee,stibee_sandbox}로 직접 분기하지 않고 «객체 있음/
+    없음»만 본다, insight_metrics의 declare-to-populate와 같은 결). segment_name/
+    send_scheduled_at은 아직 발송 요청 前이면 null(지어내지 않는다)."""
+
+    subject: str | None = None
+    segment_name: str | None = None
+    send_scheduled_at: str | None = None
+    # story #3813(Phase3·3-4 PR4, 자체발견 — 라이브 데모 실측 2026-09-12) — 위
+    # 최상위 `scheduled_at`(COALESCE)이 newsletter_send 게이트 봉인 뒤엔 발송
+    # 예정 시각만 노출해, 「캠페인 만들기 예정」 시각(external_publish 게이트
+    # 자신의 sealed_scheduled_at)이 어떤 응답 필드에도 안 남는 갭이 있었다 —
+    # 캘린더가 두 시각을 동시에 보여줘야 하는데(PO 明示) 그 원천이 사라지는
+    # 결함. 이 필드는 newsletter_send 게이트 존재 여부와 무관하게 항상 그
+    # external_publish 게이트 자신의 값을 싣는다(둘 다 있으면 두 값이 다를 수
+    # 있다 — 그게 정상, 다른 두 사건의 다른 두 시각이다).
+    campaign_scheduled_at: str | None = None
+
+
+class ChannelPostDraftListItem(BaseModel):
+    draft_id: uuid.UUID
+    work_item_id: uuid.UUID
+    channel: str
+    connection_id: uuid.UUID
+    # story #3614 — `ChannelPostDraft.status`(draft|withdrawn) 그대로 노출. 「폐기됨」
+    # 배지 판정에 쓴다(단건 조회는 폐기돼도 항상 보이므로 이 필드로 화면이 그 상태를
+    # 반영해야 한다).
+    draft_status: str
+    # story #3614 CHANGES(유나 재판정, 페드루 PO 채택 2026-09-07) — 이웃 필드
+    # `can_unpublish`(channel_connections.py)와 같은 정책: 서버가 (원저자 또는
+    # org owner/admin) ∧ 미발행 ∧ 미폐기를 전부 계산해 bool 하나로 낸다. FE는
+    # 이 값이 true일 때만 「폐기」 버튼을 그린다 — org_id/author 비교를 FE가 직접
+    # 하지 않는다(그리고 403을 내는 "그렸다가 막는" 이중 정책 금지, 이웃과 같은 규칙).
+    can_withdraw: bool = False
+    # story #3734 — 「보관」 배지·행 액션 판정. can_withdraw와 동형 정책·같은 인가 축
+    # (origin author 또는 org owner/admin) — status(draft|withdrawn)와 독립. is_deleted는
+    # SoftDeleteMixin.deleted_at의 존재 여부만(값 자체는 이 스토리 스코프 밖).
+    is_deleted: bool = False
+    can_archive: bool = False
+    current_version: int
+    latest_author_kind: str
+    origin_author_kind: str
+    updated_at: str
+    # story #3411 — 최신 버전 text에서 파생(추가 쿼리 0, latest는 이미 조인돼 있음).
+    # text_length는 text_char_count()(=len(text), 코드포인트 수)와 반드시 같은 셈법 —
+    # _validate_text_length(422 검증)와 두 곳이 갈리지 않게 헬퍼 하나를 공유한다.
+    text_preview: str
+    text_length: int
+    # story #3679(3656 후속, 페드루 PO 確定 2026-09-07) — 최신 버전 hook_key(3645가 쓰기
+    # 경로에만 심어 두고 읽기 경로가 없었던 갭). additive — 없으면 null(3645 착지 前
+    # 초안·훅 미태깅 둘 다 이 값과 구별 안 됨, "모른다≠다르다" 원칙과 달리 여긴 순수
+    # "값 없음"만 표현한다).
+    hook_key: str | None = None
+    # story #3394(AC1·AC3) — site_posts.SitePostDraftListItem(#3742)과 같은 이름·의미로
+    # 미러. gate 없으면 전부 None("모른다≠다르다" — 아직 상신 전이라는 뜻).
+    gate_status: str | None = None
+    reapproval_required: bool | None = None
+    sealed_content_sha256: str | None = None
+    body_sha256: str
+    published_at: str | None = None
+    published_body_sha256: str | None = None
+    # story #3394(AC2) — 채널 고유. publication_status·error_code는 "최신 버전"의
+    # publication 행 기준(T9 이어서 발행), published_at·permalink·external_id는 "가장 최근
+    # published" 기준(버전 무관) — 두 축이 다른 이유는 서비스 docstring 참고.
+    publication_status: str | None = None
+    permalink: str | None = None
+    external_id: str | None = None
+    error_code: str | None = None
+    # story #3815(Phase3·3-5, 미르코 시드 中 발견 → 페드루 PO 지적 2026-09-13) —
+    # migration 0372가 신설했지만 어느 응답에도 안 실려 온 실 결함. FE가 이
+    # 값을 못 읽으면 연결 레벨의 "지금" 감사-미완 플래그(ChannelConnectionResponse.
+    # privacy_locked)로 대리 판정할 수밖에 없는데, 그건 감사가 끝나 플래그가
+    # 꺼지면 "그때 잠겼던 과거 발행물"이 안 잠겼던 것처럼 보이는 — 정확히 0372가
+    # 막으려던 사고. `published_pub`(이 행 자체, "가장 최근 published" 기준)의
+    # 값을 그대로 노출 — publication_status와 같은 소스(다른 채널은 항상 False,
+    # server_default 그대로).
+    privacy_locked: bool = False
+    # story #3415(#3414 범위 절단 후속) — publication_commands(story #3414)의 예약·재시도
+    # 상태를 목록/단건에 노출. 필드명은 유나 §17-2·§11-5(공통 어휘 정본) 그대로:
+    # `next_retry_at`은 DB 컬럼명(`PublicationCommand.next_attempt_at`)과 다르다 — 화면
+    # 계약(§17)이 이긴다, 응답 직렬화 지점에서만 이름을 맞춘다(DB 컬럼 리네임 아님).
+    # 이 gate에 발행/예약 요청이 아직 없으면(command 자체가 없음) 전부 None.
+    failure_kind: str | None = None
+    next_retry_at: str | None = None
+    dead_letter_at: str | None = None
+    # 페드루 PO 리뷰(2026-09-04, PR#3773) — voided(재승인으로 무효)·pending(예약 대기)·
+    # blocked가 위 세 필드만으로는 전부 None/None/None로 구별이 안 됐다. 유나 §17-10
+    # 정본(command_status 값+라벨 표) 그대로 노출 — 이름은 PR#3769 즉시발행 실패 응답
+    # body의 `command_status`와 동일(같은 latest_command 행, 같은 뜻).
+    command_status: str | None = None
+    command_reason_code: str | None = None
+    # story #3815(배포 82 라이브 회차 실 결함, 페드루 PO 確定 2026-09-12) —
+    # command_reason_code==='YOUTUBE_QUOTA_EXCEEDED'일 때만 채워진다(그 외
+    # reason_code는 "언제 풀리는지" 계산 근거가 없어 계속 null). FE가 이 값으로
+    # 정적 사용량-초과 문구를 고르고, 필요하면 재시도 버튼의 활성 시점을 판단한다.
+    command_reason_reset_at: str | None = None
+    # story 0e960006(#3448, 페드루 PO 확定 2026-09-04) — dead_letter 수동 재시도
+    # (POST .../publication-commands/{command_id}/retry)를 화면이 부르려면 어느 명령
+    # 행인지 알아야 한다 — command_status와 같은 latest_command 행에서 id만 additive로
+    # 꺼낸다(신규 조회 0, N+1 없음).
+    command_id: uuid.UUID | None = None
+    # gate.sealed_scheduled_at — publication_command.scheduled_at이 아니다(그 값은 요청
+    # 시점 스냅샷이라 재승인 뒤 갱신 안 됨, story #3414). 화면 캘린더(§11-1)가 보는 "지금
+    # 승인된 예약 시각"은 이 값.
+    scheduled_at: str | None = None
+    # story 620beefc(AC6·§17-14) — 최신 버전에 이미지가 붙어 있으면 그 「나가는 파생본」
+    # 공개 URL(카드 썸네일). 없으면 null. 원본/최종 width·bytes 둘 다 실어야 화면이
+    # "너비 4000px → 1440px · 용량 12.4MB → 3.1MB" 배지 문구를 조립할 수 있다(서버는
+    # 문구를 짓지 않고 값만 낸다 — was_converted=false면 원본=최종이라 배지 자체를 안
+    # 그린다는 판단은 화면 몫).
+    thumbnail_url: str | None = None
+    image_original_width: int | None = None
+    image_original_bytes: int | None = None
+    image_final_width: int | None = None
+    image_final_bytes: int | None = None
+    image_was_converted: bool | None = None
+    # story 620beefc(AC5·§17-15, 페드루 PO 決定) — command_status=pending ∧
+    # publication_status=container_created를 서버가 이 값 하나로 파생(판정식은 여기
+    # 한 곳에만 — 화면마다 두 필드를 조합판정하지 않는다). 'awaiting_container'=
+    # IMAGE 컨테이너가 비동기로 이어서 처리 中(§17-15 "자동으로 이어서 처리 중입니다").
+    # 그 외에는 항상 null.
+    processing_kind: str | None = None
+    # story #3437(ⓒ, 페드루 PO 確定 2026-09-04) — 단건/목록 응답에 파생 원문 노출.
+    # 없으면 null(소스 없는 단독 채널 초안, 기존 회귀 그대로).
+    source_content_item_id: uuid.UUID | None = None
+    # story #3437(후속 묶음, 페드루 PO 確定 2026-09-05) — 원문 제목(배치조회, campaign_name과
+    # 동일 클래스 갭 처방). source_content_item_id가 null이면 이것도 항상 null.
+    source_title: str | None = None
+    # 이 변형이 파생된 시점의 원문 latest version.id(버전 축, 초안 생성 시 고정 — 편집으로는
+    # 안 바뀐다).
+    source_site_post_version_id: uuid.UUID | None = None
+    # 원문의 **지금** latest version.id(배치조회, 매 응답마다 최신값).
+    source_current_site_post_version_id: uuid.UUID | None = None
+    # story #3453 AC3 후속(유나 §14-4/§14-5, 페드루 PO 確定 2026-09-05) — source_site_
+    # post_version_id/source_current_site_post_version_id 비교 판정을 서버가 한 곳에서
+    # 낸다(FE 4곳이 각자 비교식을 들고 있으면 어긋날 표면이라 위 "비교는 FE 몫" 결정을
+    # 뒤집는다). true=둘 다 non-null이고 서로 다름(원문이 파생 이후 개정됨) · false=둘 다
+    # non-null이고 같음 · None=하나라도 null("모른다" — 레거시 파생분).
+    source_changed: bool | None = None
+    # story #3808(Phase3·3-3 PR5b-2, 페드루 PO 確定 2026-09-12) — X 스레드(N세그먼트)
+    # 부분 실패 상태. 세그먼트 2개 미만(스레드 아님)이면 null(빈 배열 아님 — "스레드"
+    # 라는 사실 자체가 없다는 신호). 있으면 sequence 오름차순, 시도 안 한 세그먼트
+    # (k+1..N)는 배열에 아예 없다. 기존 publication_status/permalink/external_id/
+    # error_code 4필드는 하위호환으로 무변(헤드=sequence 1 값 그대로).
+    thread_segments: list[ThreadSegmentStatusView] | None = None
+    # story #3497 조각4(페드루 PO 決定 — 미르코 #3499 그라운딩 갭)·**story #3525 재정의
+    # (2026-09-06, 페드루 PO 確定, 유나 §22-12)** — 3497 조회 API(`/publications/
+    # {publication_id}/insights`)·3516 댓글 API(`/publications/{publication_id}/
+    # comments`)의 path 파라미터와 같은 값. **«마지막 발행»(published_pub.id) 기준 —
+    # 버전 무관**: `published_at`/`permalink`/`external_id`와 정확히 같은 publication
+    # 행(같은 status='published' 최신 1건)에서 온다. 발행 済 draft에 새 버전이 생겨
+    # 그 버전이 아직 재승인 대기(gate pending)여도 이 필드는 null이 되지 않는다(밖에
+    # 나가 있는 게시물은 새 버전과 무관하게 살아 있다 — 그 실물의 댓글·인사이트가
+    # 상세에서 사라지던 결함의 처방). "지금 버전 자체의 발행 시도 상태"는
+    # `publication_status`/`error_code`(아래, 여전히 latest_pub 축)가 별도로 담당 —
+    # 이 필드와 헷갈리지 말 것. 한 번도 발행된 적 없으면 null.
+    publication_id: uuid.UUID | None = Field(
+        default=None,
+        description=(
+            "«마지막 발행» publication의 id(버전 무관) — published_at/permalink/"
+            "external_id와 같은 publication 행에서 온다. 발행 済 게시물에 새 버전이 "
+            "생겨 재승인 대기(gate pending) 中이어도 null이 되지 않는다: 밖에 나가 "
+            "있는 게시물은 새 버전과 무관하게 살아 있다(story #3525). 댓글·인사이트 "
+            "조회 API(/publications/{publication_id}/comments·insights)의 path "
+            "파라미터가 이 값이다. \"지금 버전 자체\"의 발행 시도 상태는 "
+            "publication_status/error_code가 별도로 담당(다른 축)."
+        ),
+    )
+    # story #3829(customer-zero 실측, 페드루 PO 確定 2026-09-13) — X 스레드는
+    # ChannelPublication 1행=세그먼트 1개라 위 publication_id(마지막 발행 축)와
+    # 인사이트가 실제로 붙는 행(항상 헤드=seq 1)이 N≥2 세그먼트일 때 다를 수
+    # 있다(비스레드는 두 값이 항상 같다). `/publications/{id}/insights`·
+    # `/comments`는 이제 어느 세그먼트 id로 물어도 헤드로 해석해 답하므로 이
+    # 필드 없이 기존 publication_id를 그대로 써도 되지만, FE가 "어차피 헤드"임을
+    # 명시적으로 알고 싶을 때 이 값을 쓸 수 있게 additive로 얹는다. 발행 이력이
+    # 아예 없으면(publication_id도 null) 이 값도 null.
+    head_publication_id: uuid.UUID | None = Field(
+        default=None,
+        description=(
+            "Head (sequence 1) row id of the same (gate_id, version_id) group as "
+            "publication_id — equals publication_id for non-thread posts."
+        ),
+    )
+    # story #3514(Phase1·BE+FE·소형, 페드루 PO 確定 2026-09-05) — 단건 조회(lint-on-read)
+    # 전용. 목록 응답에선 항상 None(행마다 lint하면 비용 N배, PO 明示 "단건만"). None=
+    # "이 응답에선 안 쟀다"·[]="쟀는데 위반 0"(null≠0 원칙 그대로, site_posts.py::
+    # SitePostDraftListItem.violations와 동형).
+    violations: list[dict] | None = None
+    # story #3559(Phase2·BE·소형, 페드루 PO 確定 2026-09-06) — violations와 동형 관례
+    # (단건 조회 전용, `_to_draft_list_item()`은 항상 None을 남기고 단건 엔드포인트가
+    # 이 필드를 나중에 채운다 — N+1 방지, 목록에서 매 행마다 영상 조회를 안 돈다).
+    # 최신 버전에 영상(릴스) 행이 있으면 그 원본 공개 URL(asset 단건 응답과 같은 값),
+    # 없으면(이미지만 있거나 아무것도 없는 draft) null. 커버는 기존 thumbnail_url 그대로.
+    video_url: str | None = None
+    # story #3590(Phase2·BE→FE·소형, 페드루 PO 確定 2026-09-06) — video_url과 동형
+    # 관례(단건 전용·N+1 방지, 같은 video_row 재사용·추가 쿼리 0). 재진입 시 메타
+    # 줄(길이·해상도·코덱·용량)이 사라지던 결함의 BE 몫 — video_row 없으면 null.
+    video_meta: ChannelPostVideoMeta | None = None
+    # story #3813(Phase3·3-4 PR4, 페드루 PO 確定 2026-09-12) — 뉴스레터 채널이 아니면
+    # null(content_kind 유사 discriminator를 새로 안 만든다 — 이미 있는 `channel`
+    # 필드로 BE가 판별해 이 객체 존재 자체로 FE에 신호를 보낸다).
+    newsletter: NewsletterDraftInfo | None = None
+
+
+class ChannelPostVersionHistoryItem(BaseModel):
+    version_id: uuid.UUID
+    version: int
+    draft_id: uuid.UUID
+    text: str
+    link_url: str | None
+    body_sha256: str
+    author_member_id: uuid.UUID
+    author_kind: str
+    created_at: str
+    tagged_link_preview: str | None = None
+    # story #3679(3656 후속, 페드루 PO 確定 2026-09-07) — 이 버전 자체의 hook_key(값은
+    # 버전별, ChannelPostDraftListItem.hook_key=최신 버전과 동일 소스).
+    hook_key: str | None = None
+    # story #3808(Phase3·3-3 PR5b-2, 페드루 PO 確定 2026-09-12) — 편집기가 새로
+    # 불러올 때 스레드 이어쓰기 목록(channel_payload.thread)을 다시 채워야 하므로
+    # 이 버전 자체의 channel_payload를 그대로 낸다(3813 subject 등 다른 채널의
+    # 페이로드와 같은 축, 새 필드 발명 0).
+    channel_payload: dict | None = None
+
+
+class CreateChannelPostImageUploadUrlRequest(BaseModel):
+    content_type: str
+
+
+class ChannelPostImageUploadUrlResponse(BaseModel):
+    upload_url: str
+    object_path: str
+    expires_at: str
+    max_bytes: int
+    # story 620beefc(페드루 리뷰 블로커 B4) — create_only 서명(GCS:
+    # x-goog-if-generation-match)이 PUT 요청에도 정확히 실려야 서명이 valid하다 — FE는
+    # 이 헤더를 그대로 PUT에 붙여야 한다(assets.py AssetUploadUrlResponse와 동형 계약).
+    required_put_headers: dict[str, str] = {}
+
+
+class ConfirmChannelPostImageUploadRequest(BaseModel):
+    object_path: str
+
+
+class ImportChannelPostImageRequest(BaseModel):
+    """story #3666(Phase2·마케팅운영, 페드루 PO 確定 2026-09-07) — MCP/플러그인 에이전트
+    전용 원콜 입구. `visual_artifacts.py::ImportImageArtifactRequest`(story b6b9c52d)와
+    같은 모양(title 없음 — 채널 포스트 이미지엔 그 개념이 없다)."""
+    image_base64: str
+    content_type: str
+
+
+class CreateChannelPostVideoUploadUrlRequest(BaseModel):
+    content_type: str
+
+
+class ChannelPostVideoUploadUrlResponse(BaseModel):
+    upload_url: str
+    object_path: str
+    expires_at: str
+    max_bytes: int
+    required_put_headers: dict[str, str] = {}
+
+
+class ConfirmChannelPostVideoUploadRequest(BaseModel):
+    object_path: str
+
+
+class ChannelPostVideoResponse(BaseModel):
+    # story #3554(Phase2, 페드루 PO 確定 2026-09-06) — 릴스 영상 마스터. 규격
+    # 검증에 실제로 쓰인 값(duration_seconds·width/height·codec)을 그대로 실어
+    # FE가 "무엇이·얼마까지·지금 얼마"(§13 규격 문구 3요소) 배지를 조립할 수 있게
+    # 한다(image_row와 동형 원칙 — 서버가 문구를 짓지 않고 값만 낸다).
+    video_id: uuid.UUID
+    draft_id: uuid.UUID
+    version_id: uuid.UUID
+    version: int
+    duration_seconds: float
+    width: int
+    height: int
+    codec: str
+    original_bytes: int
+    video_url: str | None = None
+
+
+class ReorderChannelPostImagesRequest(BaseModel):
+    # story #3550(Phase2 BE 2/2, 페드루 PO 確定 2026-09-06) — 부분 재정렬 불허·항상
+    # 전체 집합(현재 버전 이미지 id 전부, 새 순서 그대로)을 명시로 받는다.
+    image_ids: list[uuid.UUID]
+
+
+class ChannelPostImageResponse(BaseModel):
+    # story #3550(Phase2 BE 2/2, 페드루 PO 確定 2026-09-06) — additive. 목록 응답이
+    # 이 id를 안 실으면 FE가 삭제(`DELETE .../assets/{image_id}`)·재정렬(`POST
+    # .../assets/reorder`의 image_ids)을 부를 대상을 아예 못 얻는다(대표 1장 단건
+    # 조회 계약은 무변경 — 이 필드가 추가돼도 그 엔드포인트 응답 모양은 그대로).
+    image_id: uuid.UUID
+    draft_id: uuid.UUID
+    version_id: uuid.UUID
+    version: int
+    # story 620beefc(AC6/§17-14) — 원본·최종(파생본 있으면 그것, 없으면 원본) 둘 다
+    # 실어야 화면이 배지 문구("너비 4000px → 1440px · 용량 12.4MB → 3.1MB")를 조립할
+    # 수 있다(페드루 PO §17-14 요구, 서버가 문구를 짓지 않고 값만 낸다).
+    original_width: int
+    original_height: int
+    original_bytes: int
+    final_width: int
+    final_height: int
+    final_bytes: int
+    was_converted: bool
+    image_url: str | None = None
+    # story #3550(Phase2, 페드루 PO 確定 2026-09-06) — 캐러셀 순서(0-indexed). FE
+    # 다중 슬롯 UI(별도 스토리)가 이 값으로 정렬·삭제 대상을 가른다.
+    position: int = 0
+
+
+class SubmitChannelPostDraftRequest(BaseModel):
+    version_id: uuid.UUID | None = None
+    # story #3414(PO 確定, 2026-09-04) — 예약 발행 시각도 게이트 봉인 범위(블루프린트
+    # v3 §3). 생략/null=즉시. 승인 뒤 이 값만 바꿔도(본문은 그대로) 재승인이 필요하다 —
+    # submit_channel_post_draft가 그 판정을 한다(신규 엔드포인트 없음).
+    scheduled_at: datetime | None = None
+    # story #3498(페드루 PO 決定 2026-09-05) — site_posts.py와 동형(submit 전용, draft
+    # 컬럼 아님). 생략/null=검사 없음(AC2).
+    estimated_cost_minor: int | None = None
+
+    @field_validator("scheduled_at")
+    @classmethod
+    def _scheduled_at_must_be_tz_aware_future(cls, v: datetime | None) -> datetime | None:
+        """페드루 리뷰 nit J — naive datetime을 그대로 받으면
+        `submit_channel_post_draft`의 `existing.sealed_scheduled_at != scheduled_at`
+        비교가 aware(기존 봉인값)와 naive(이번 요청) 사이에서 값이 실제로 같아도 항상
+        "다르다"로 나온다(Python은 naive/aware `!=` 비교를 예외 없이 그냥 다르다고
+        본다 — 순서 비교(`<`)만 TypeError) → 헛 재승인·대기 명령 誤void. 422로 앞단에서
+        막는다. 과거 시각도 거부(예약이 즉시 도래해 버려 "예약"이라는 사용자 의도와
+        어긋난다 — cron이 자가치유로 집기야 하겠지만 애초에 요청을 받지 않는 편이
+        정직하다)."""
+        if v is None:
+            return v
+        if v.tzinfo is None:
+            raise ValueError("scheduled_at은 timezone 정보가 있어야 합니다(예: Z 또는 +09:00)")
+        if v <= datetime.now(timezone.utc):
+            raise ValueError("scheduled_at은 현재 시각 이후여야 합니다")
+        return v
+
+
+class SubmitChannelPostDraftResponse(BaseModel):
+    gate_id: uuid.UUID
+    version_id: uuid.UUID
+    content_sha256: str
+    status: str
+    scheduled_at: str | None = None
+
+
+@router.post(
+    "/{org_id}/channel-posts/drafts", response_model=ChannelPostDraftVersionResponse, status_code=201,
+)
+async def post_channel_post_draft_version(
+    org_id: uuid.UUID,
+    body: CreateChannelPostDraftVersionRequest,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+    # story #3815(Phase3·3-5, 미르코 PR4 그라운딩 발견 2026-09-12) —
+    # YOUTUBE_METADATA_INVALID 사용자 문장을 i18n_catalog로 조립하기 위한
+    # 최소 추가(publish 엔드포인트의 locale DI 관례 그대로).
+    locale: str | None = None,
+    accept_language: str | None = Header(None, alias="Accept-Language"),
+) -> ChannelPostDraftVersionResponse:
+    """AC1 — 고객 에이전트·휴먼 공용 초안 제출/수정 API. `channel`은 요청 본문에 없다 —
+    `connection_id`에서 서버가 조회해 derive한다(클라이언트가 실제와 다른 channel을 주장할
+    표면 자체를 없앤다, PO 정정: channel은 connection_id의 파생값이지 독립 축이 아니다)."""
+    resolved_locale = resolve_locale_from_request(locale, accept_language)
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+
+    # story #3370(페드루 지적, 유나 실측 2026-09-10 — site_posts.py:671과 동형 클래스) —
+    # auth.user_id는 휴먼(JWT)이면 users.id다(auth.py 계약) — org 멤버 id가 아니다.
+    # 원시로 author_member_id에 넣으면 휴먼 작성자가 org_member.id로 안 풀린다(FE
+    # 표시·알림 라우팅 등 멤버 id 소비처 전부 깨짐). `resolve_member_db_verified()`
+    # (member_resolver.py, 이 스토리에서 신설)가 API키(에이전트)는 team_member.id,
+    # JWT(휴먼)는 org_member.id로 갈라 돌려준다 — actor_type도 같은 호출에서 나와
+    # (is_agent_caller 별도 조회 불요) 쿼리 1회 절감. `resolve_member()`(클레임 기반)
+    # 대신 이 변형을 쓰는 이유는 이 파일의 기존 테스트 하네스가 agent 호출자를 api_key_id
+    # 클레임 없이 team_member.id만 넘기는 관례로 짜여 있어서다(resolve_member_db_verified
+    # 자신의 docstring에 그라운딩 기록 — 이 스토리에서 실측).
+    resolved = await resolve_member_db_verified(auth, org_id, db)
+    member_id, actor_type = resolved.id, resolved.type
+
+    try:
+        version, channel, violations = await create_channel_post_draft_version(
+            db, org_id=org_id, work_item_id=body.work_item_id, connection_id=body.connection_id,
+            text=body.text, link_url=body.link_url, author_member_id=member_id, author_kind=actor_type,
+            source_content_item_id=body.source_content_item_id, hook_key=body.hook_key,
+            channel_payload=body.channel_payload,
+        )
+    except ChannelPostSourceContentItemNotFoundError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "CHANNEL_POST_SOURCE_CONTENT_ITEM_NOT_FOUND", "message": str(exc)},
+        ) from exc
+    except ChannelConnectionNotActiveError as exc:
+        # 페드루 PO 리뷰(2026-09-03) — 발행 스토리(f8f7cb0f) 결정표가 이 코드를 409(상태
+        # 충돌·재연결 필요)로 정했다 — 같은 코드에 HTTP status가 갈리면 FE 매핑이 두 벌이
+        # 된다. 422는 입력 형태 오류에만 남긴다(CHANNEL_TEXT_TOO_LONG처럼).
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "CHANNEL_CONNECTION_NOT_ACTIVE", "message": str(exc)},
+        ) from exc
+    except ChannelTextTooLongError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHANNEL_TEXT_TOO_LONG", "message": str(exc),
+                "max_length": exc.max_length, "current_length": exc.current_length,
+            },
+        ) from exc
+    except ChannelYouTubeMetadataError as exc:
+        # story #3815(Phase3·3-5, 미르코 PR4 그라운딩 발견 → 페드루 PO 지적 2026-09-12
+        # 14:37Z) — 실 결함 처방: 이 예외가 라우터 어디서도 안 잡혀 사용자에게
+        # 코드 없는 500이 나갔다(4225 리뷰 miss). ChannelTextTooLongError와 동형
+        # 위치·모양(field/reason 추가) — 저장 시점 checkpoint.
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "YOUTUBE_METADATA_INVALID",
+                "message": t("channel_posts.youtube_metadata_invalid", resolved_locale),
+                "field": exc.field, "reason": exc.reason,
+            },
+        ) from exc
+
+    utm_rule_row = await get_org_content_rules(db, org_id=org_id)
+    utm_rules = (utm_rule_row.rules or {}).get("utm_rules") if utm_rule_row else None
+    tagged_link_preview = (
+        build_tagged_link(channel=channel, link_url=body.link_url, draft_id=version.draft_id, utm_rules=utm_rules)
+        if body.link_url else None
+    )
+    return ChannelPostDraftVersionResponse(
+        draft_id=version.draft_id, version_id=version.id, version=version.version,
+        author_kind=version.author_kind, body_sha256=version.body_sha256,
+        tagged_link_preview=tagged_link_preview, violations=violations,
+        hook_key=version.hook_key,
+    )
+
+
+def _image_response(version, image_row) -> ChannelPostImageResponse:
+    return ChannelPostImageResponse(
+        image_id=image_row.id,
+        draft_id=version.draft_id, version_id=version.id, version=version.version,
+        original_width=image_row.original_width, original_height=image_row.original_height,
+        original_bytes=image_row.original_bytes,
+        final_width=image_row.final_width, final_height=image_row.final_height,
+        final_bytes=image_row.final_bytes, was_converted=image_row.was_converted,
+        image_url=public_url_for_object_path(image_row.final_object_path),
+        position=image_row.position,
+    )
+
+
+@router.post(
+    "/{org_id}/channel-posts/drafts/{draft_id}/assets/upload-url",
+    response_model=ChannelPostImageUploadUrlResponse,
+)
+async def post_channel_post_image_upload_url(
+    org_id: uuid.UUID, draft_id: uuid.UUID, body: CreateChannelPostImageUploadUrlRequest,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> ChannelPostImageUploadUrlResponse:
+    """AC1 — 고객 에이전트·휴먼 공용(초안 제출 엔드포인트와 동형 폭). avatar_upload.py와
+    같은 2단계(signed URL 발급→FE 직접 PUT→confirm) — 대용량 바이너리가 이 서버를
+    경유하지 않는다(storage/base.py D3 원칙)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+
+    draft = await get_channel_post_draft(db, org_id=org_id, draft_id=draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail={"code": "CHANNEL_POST_DRAFT_NOT_FOUND", "message": str(draft_id)})
+
+    try:
+        result = await create_channel_post_image_upload_url(
+            org_id=org_id, draft_id=draft_id, channel=draft.channel, content_type=body.content_type,
+        )
+    except ChannelImageStorageNotConfiguredError as exc:
+        # story 620beefc(페드루 리뷰 B5) — avatar_upload.py 503(AVATAR_UPLOAD_NOT_
+        # CONFIGURED)과 동형 축. 채널이 이미지를 지원 안 하는 것(422)과 다른 실패 —
+        # 이 환경(dev/prod)에 GCS_CHANNEL_MEDIA_BUCKET 배선이 아직 안 됐을 뿐(배포 갭).
+        raise HTTPException(
+            status_code=503, detail={"code": "CHANNEL_IMAGE_STORAGE_NOT_CONFIGURED", "message": str(exc)},
+        ) from exc
+    except ChannelImageUnsupportedError as exc:
+        raise HTTPException(
+            status_code=422, detail={"code": "CHANNEL_IMAGE_UNSUPPORTED", "message": str(exc), "channel": exc.channel},
+        ) from exc
+    except ChannelImageUnsupportedFormatError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHANNEL_IMAGE_UNSUPPORTED_FORMAT", "message": str(exc),
+                "content_type": exc.content_type, "allowed_formats": list(exc.allowed),
+            },
+        ) from exc
+    except ChannelImageUploadFailedError as exc:
+        raise HTTPException(status_code=503, detail={"code": "CHANNEL_IMAGE_UPLOAD_FAILED", "message": str(exc)}) from exc
+    return ChannelPostImageUploadUrlResponse(**result)
+
+
+def _video_response(version, video_row) -> ChannelPostVideoResponse:
+    return ChannelPostVideoResponse(
+        video_id=video_row.id,
+        draft_id=version.draft_id, version_id=version.id, version=version.version,
+        duration_seconds=video_row.duration_seconds, width=video_row.width, height=video_row.height,
+        codec=video_row.codec, original_bytes=video_row.original_bytes,
+        video_url=public_url_for_object_path(video_row.original_object_path),
+    )
+
+
+@router.post(
+    "/{org_id}/channel-posts/drafts/{draft_id}/assets/video/upload-url",
+    response_model=ChannelPostVideoUploadUrlResponse,
+)
+async def post_channel_post_video_upload_url(
+    org_id: uuid.UUID, draft_id: uuid.UUID, body: CreateChannelPostVideoUploadUrlRequest,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> ChannelPostVideoUploadUrlResponse:
+    """story #3554(Phase2, 페드루 PO 確定 2026-09-06) — 이미지 업로드-url 엔드포인트와
+    동형 2단계(signed URL 발급→FE 직접 PUT→confirm)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+
+    draft = await get_channel_post_draft(db, org_id=org_id, draft_id=draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail={"code": "CHANNEL_POST_DRAFT_NOT_FOUND", "message": str(draft_id)})
+
+    try:
+        result = await create_channel_post_video_upload_url(
+            org_id=org_id, draft_id=draft_id, channel=draft.channel, content_type=body.content_type,
+        )
+    except ChannelImageStorageNotConfiguredError as exc:
+        raise HTTPException(
+            status_code=503, detail={"code": "CHANNEL_IMAGE_STORAGE_NOT_CONFIGURED", "message": str(exc)},
+        ) from exc
+    except ChannelVideoUnsupportedError as exc:
+        raise HTTPException(
+            status_code=422, detail={"code": "CHANNEL_VIDEO_UNSUPPORTED", "message": str(exc), "channel": exc.channel},
+        ) from exc
+    except ChannelVideoUnsupportedFormatError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHANNEL_VIDEO_UNSUPPORTED_FORMAT", "message": str(exc),
+                "content_type": exc.content_type, "allowed_formats": list(exc.allowed),
+            },
+        ) from exc
+    except ChannelVideoUploadFailedError as exc:
+        raise HTTPException(status_code=503, detail={"code": "CHANNEL_VIDEO_UPLOAD_FAILED", "message": str(exc)}) from exc
+    return ChannelPostVideoUploadUrlResponse(**result)
+
+
+@router.post(
+    "/{org_id}/channel-posts/drafts/{draft_id}/assets/video/confirm",
+    response_model=ChannelPostVideoResponse, status_code=201,
+)
+async def post_channel_post_video_confirm(
+    org_id: uuid.UUID, draft_id: uuid.UUID, body: ConfirmChannelPostVideoUploadRequest,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> ChannelPostVideoResponse:
+    """story #3554(Phase2, 페드루 PO 確定 2026-09-06①~④) — 업로드 확인+MP4 규격
+    검증(순수 파이썬 박스 파서, ffmpeg 없음)+계보. 이 호출도 새 버전을 만든다
+    (이미지 confirm과 동형 — 텍스트 편집과 같은 불변 버전 축)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+
+    # story #3370(페드루 지적 2026-09-10 — 같은 클래스, post_channel_post_draft_version과 동형).
+    resolved = await resolve_member_db_verified(auth, org_id, db)
+    member_id, actor_type = resolved.id, resolved.type
+
+    try:
+        version, video_row = await confirm_channel_post_video_upload(
+            db, org_id=org_id, draft_id=draft_id, object_path=body.object_path,
+            member_id=member_id, member_kind=actor_type,
+        )
+    except ChannelPostDraftNotFoundError as exc:
+        raise HTTPException(status_code=404, detail={"code": "CHANNEL_POST_DRAFT_NOT_FOUND", "message": str(exc)}) from exc
+    except ChannelVideoUnsupportedError as exc:
+        raise HTTPException(
+            status_code=422, detail={"code": "CHANNEL_VIDEO_UNSUPPORTED", "message": str(exc), "channel": exc.channel},
+        ) from exc
+    except ChannelVideoPathNotScopedError as exc:
+        raise HTTPException(status_code=403, detail={"code": "CHANNEL_VIDEO_PATH_NOT_SCOPED", "message": str(exc)}) from exc
+    except ChannelVideoObjectNotFoundError as exc:
+        raise HTTPException(status_code=404, detail={"code": "CHANNEL_VIDEO_OBJECT_NOT_FOUND", "message": str(exc)}) from exc
+    except ChannelVideoTooLargeError as exc:
+        raise HTTPException(
+            status_code=413,
+            detail={
+                "code": "CHANNEL_VIDEO_TOO_LARGE", "message": str(exc),
+                "size_bytes": exc.size_bytes, "max_bytes": exc.max_bytes,
+            },
+        ) from exc
+    except ChannelVideoUnparsableError as exc:
+        raise HTTPException(status_code=422, detail={"code": "CHANNEL_VIDEO_UNPARSABLE", "message": str(exc)}) from exc
+    except ChannelVideoDurationExceededError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHANNEL_VIDEO_DURATION_EXCEEDED", "message": str(exc),
+                "duration_seconds": exc.duration_seconds, "max_seconds": exc.max_seconds,
+            },
+        ) from exc
+    except ChannelVideoDurationTooShortError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHANNEL_VIDEO_DURATION_TOO_SHORT", "message": str(exc),
+                "duration_seconds": exc.duration_seconds, "min_seconds": exc.min_seconds,
+            },
+        ) from exc
+    except ChannelVideoAspectRatioError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHANNEL_VIDEO_ASPECT_RATIO_REJECTED", "message": str(exc),
+                "aspect_ratio": exc.aspect_ratio, "target": exc.target, "tolerance": exc.tolerance,
+            },
+        ) from exc
+    except ChannelVideoCodecUnsupportedError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHANNEL_VIDEO_CODEC_UNSUPPORTED", "message": str(exc),
+                "codec": exc.codec, "allowed_codecs": list(exc.allowed),
+            },
+        ) from exc
+    except ChannelVideoUploadFailedError as exc:
+        raise HTTPException(status_code=503, detail={"code": "CHANNEL_VIDEO_UPLOAD_FAILED", "message": str(exc)}) from exc
+    except ChannelVideoRequiresSingleCoverError as exc:
+        raise HTTPException(
+            status_code=422, detail={"code": "CHANNEL_VIDEO_REQUIRES_SINGLE_COVER", "message": str(exc)},
+        ) from exc
+    return _video_response(version, video_row)
+
+
+async def _confirm_image_upload_or_raise(
+    coro,
+) -> tuple[ChannelPostVersion, ChannelPostImage]:
+    """story #3666 리팩터 — `post_channel_post_image_confirm`(기존 3단계 업로드-URL 플로우의
+    마지막 걸음)과 `post_channel_post_image_import`(#3666 신규, 에이전트 원콜 base64 입구)
+    둘 다 `confirm_channel_post_image_upload`가 던지는 같은 예외 집합을 같은 HTTP 코드/
+    바디로 매핑해야 한다 — 그 매핑을 한 곳에만 두고(들쭉날쭉 금지 원칙) 호출부는 아직
+    await 안 된 코루틴만 넘긴다."""
+    try:
+        return await coro
+    except ChannelPostDraftNotFoundError as exc:
+        raise HTTPException(status_code=404, detail={"code": "CHANNEL_POST_DRAFT_NOT_FOUND", "message": str(exc)}) from exc
+    except ChannelImageStorageNotConfiguredError as exc:
+        # story 620beefc(페드루 리뷰 B5) — avatar_upload.py 503(AVATAR_UPLOAD_NOT_
+        # CONFIGURED)과 동형 축. 채널이 이미지를 지원 안 하는 것(422)과 다른 실패 —
+        # 이 환경(dev/prod)에 GCS_CHANNEL_MEDIA_BUCKET 배선이 아직 안 됐을 뿐(배포 갭).
+        raise HTTPException(
+            status_code=503, detail={"code": "CHANNEL_IMAGE_STORAGE_NOT_CONFIGURED", "message": str(exc)},
+        ) from exc
+    except ChannelImageUnsupportedError as exc:
+        raise HTTPException(
+            status_code=422, detail={"code": "CHANNEL_IMAGE_UNSUPPORTED", "message": str(exc), "channel": exc.channel},
+        ) from exc
+    except ChannelPostImageCountExceededError as exc:
+        # story #3550(PO 確定 ③) — 어댑터 image_max_count 초과(예: Threads/Facebook
+        # 2번째 이미지, Instagram 11번째 이미지). 변환으로 못 고치는 축(ASPECT_RATIO_
+        # EXCEEDED·UNDECODABLE과 동형 판단) — 서버 거부.
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHANNEL_POST_IMAGE_COUNT_EXCEEDED", "message": str(exc),
+                "image_max_count": exc.image_max_count,
+            },
+        ) from exc
+    except ChannelImagePathNotScopedError as exc:
+        raise HTTPException(status_code=403, detail={"code": "CHANNEL_IMAGE_PATH_NOT_SCOPED", "message": str(exc)}) from exc
+    except ChannelImageObjectNotFoundError as exc:
+        raise HTTPException(status_code=404, detail={"code": "CHANNEL_IMAGE_OBJECT_NOT_FOUND", "message": str(exc)}) from exc
+    except ChannelImageTooLargeError as exc:
+        raise HTTPException(
+            status_code=413,
+            detail={
+                "code": "CHANNEL_IMAGE_TOO_LARGE", "message": str(exc),
+                "size_bytes": exc.size_bytes, "max_bytes": exc.max_bytes,
+            },
+        ) from exc
+    except ChannelImageUndecodableError as exc:
+        raise HTTPException(status_code=422, detail={"code": "CHANNEL_IMAGE_UNDECODABLE", "message": str(exc)}) from exc
+    except ChannelImageAnimatedUnsupportedError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "CHANNEL_IMAGE_ANIMATED_UNSUPPORTED", "message": str(exc), "frame_count": exc.frame_count},
+        ) from exc
+    except ChannelImageAspectRatioExceededError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHANNEL_IMAGE_ASPECT_RATIO_EXCEEDED", "message": str(exc),
+                "aspect_ratio": exc.aspect_ratio, "max_aspect_ratio": exc.max_aspect_ratio,
+            },
+        ) from exc
+    except ChannelImageAspectRatioTooNarrowError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHANNEL_IMAGE_ASPECT_RATIO_TOO_NARROW", "message": str(exc),
+                "width_height_ratio": exc.width_height_ratio, "min_width_height_ratio": exc.min_width_height_ratio,
+            },
+        ) from exc
+    except ChannelCoverAspectRatioRejectedError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHANNEL_COVER_ASPECT_RATIO_REJECTED", "message": str(exc),
+                "aspect_ratio": exc.aspect_ratio, "target": exc.target, "tolerance": exc.tolerance,
+            },
+        ) from exc
+    except ChannelImageConversionFailedError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHANNEL_IMAGE_CONVERSION_FAILED", "message": str(exc),
+                "final_bytes": exc.final_bytes, "max_bytes": exc.max_bytes,
+            },
+        ) from exc
+    except ChannelImageUploadFailedError as exc:
+        raise HTTPException(status_code=503, detail={"code": "CHANNEL_IMAGE_UPLOAD_FAILED", "message": str(exc)}) from exc
+
+
+@router.post(
+    "/{org_id}/channel-posts/drafts/{draft_id}/assets/confirm",
+    response_model=ChannelPostImageResponse, status_code=201,
+)
+async def post_channel_post_image_confirm(
+    org_id: uuid.UUID, draft_id: uuid.UUID, body: ConfirmChannelPostImageUploadRequest,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> ChannelPostImageResponse:
+    """AC1/AC3 — 업로드 확인+자동 변환(필요 시)+계보 기록. 이 호출 자체가 새
+    `ChannelPostVersion`을 만든다(text/link_url은 직전 버전에서 캐리포워드, image_sha256만
+    갱신) — 텍스트 편집과 동형 축(재승인 판정은 create_channel_post_draft_version의
+    기존 재봉인 훅이 그대로 처리, 신규 메커니즘 0)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+
+    # story #3370(페드루 지적 2026-09-10 — 같은 클래스, post_channel_post_draft_version과 동형).
+    resolved = await resolve_member_db_verified(auth, org_id, db)
+    member_id, actor_type = resolved.id, resolved.type
+
+    version, image_row = await _confirm_image_upload_or_raise(
+        confirm_channel_post_image_upload(
+            db, org_id=org_id, draft_id=draft_id, object_path=body.object_path,
+            member_id=member_id, member_kind=actor_type,
+        )
+    )
+    return _image_response(version, image_row)
+
+
+@router.post(
+    "/{org_id}/channel-posts/drafts/{draft_id}/assets/import-image",
+    response_model=ChannelPostImageResponse, status_code=201,
+)
+async def post_channel_post_image_import(
+    org_id: uuid.UUID, draft_id: uuid.UUID, body: ImportChannelPostImageRequest,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> ChannelPostImageResponse:
+    """story #3666(Phase2·마케팅운영, 페드루 PO 確定 2026-09-07) — MCP/플러그인 에이전트
+    전용 원콜 입구. 미르코 배포 52 표본 준비 중 실측 갭: `create_channel_post_draft`가
+    image(산출물 첨부)를 안 받아, 기존 3단계(upload-url 발급→서명 PUT→confirm) 플로우를
+    Bash/HTTP 클라이언트가 없는 에이전트가 스스로 못 탔다. `visual_artifacts.py::
+    import_image_artifact`(story b6b9c52d)와 동일 정신(base64 원콜)이지만 다른 테이블
+    (VisualArtifact가 아니라 ChannelPostImage) — 새 연결 개념(두 시스템 사이 참조)을
+    만드는 대신 서버가 직접 GCS에 쓴 뒤 기존 confirm_channel_post_image_upload를 그대로
+    재사용한다(검증/변환/해시/봉인 로직 사본 0, `_confirm_image_upload_or_raise`로 에러
+    매핑도 confirm과 공유).
+
+    story #3753 — `import_channel_post_image`(내부에서 `put_object`로 GCS에 쓴다) 호출
+    前에 `validate_image_bytes`를 통과해야 한다(visual_artifacts.py::import_image_artifact와
+    동일 관문 — 매직 바이트·PNG 청크 walk·PIL 디코드). 실패하면 422 `IMAGE_CORRUPT`로
+    즉시 거부하고 저장 자체를 안 한다(confirm 内부의 사후 PIL 디코드-then-delete-orphan
+    경로보다 앞에서 막는다 — 깨진 바이트가 GCS에 닿는 순간 자체가 아예 없다)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    if not body.content_type.startswith("image/"):
+        raise HTTPException(
+            status_code=400, detail={"code": "VALIDATION_ERROR", "message": "content_type must be an image/* type"},
+        )
+    try:
+        image_bytes = base64.b64decode(body.image_base64, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise HTTPException(
+            status_code=400, detail={"code": "VALIDATION_ERROR", "message": "image_base64 is not valid base64"},
+        ) from exc
+    try:
+        validate_image_bytes(body.content_type, image_bytes)
+    except ImageIntegrityError as exc:
+        raise HTTPException(
+            status_code=422, detail={"code": "IMAGE_CORRUPT", "message": exc.reason},
+        ) from exc
+
+    # story #3370(페드루 지적 2026-09-10 — 같은 클래스, post_channel_post_draft_version과 동형).
+    resolved = await resolve_member_db_verified(auth, org_id, db)
+    member_id, actor_type = resolved.id, resolved.type
+
+    version, image_row = await _confirm_image_upload_or_raise(
+        import_channel_post_image(
+            db, org_id=org_id, draft_id=draft_id, image_bytes=image_bytes, content_type=body.content_type,
+            member_id=member_id, member_kind=actor_type,
+        )
+    )
+    return _image_response(version, image_row)
+
+
+@router.get(
+    "/{org_id}/channel-posts/drafts/{draft_id}/versions/{version_id}/asset",
+    response_model=ChannelPostImageResponse,
+)
+async def get_channel_post_image_for_version_endpoint(
+    org_id: uuid.UUID, draft_id: uuid.UUID, version_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> ChannelPostImageResponse:
+    """AC6 — 목록/단건 위젯이 썸네일을 그리려면 어느 버전에 무슨 이미지가 붙었는지가
+    필요하다. 조직 멤버(휴먼·에이전트 모두) 읽기 가능 — 목록 엔드포인트와 동형 권한 폭."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+
+    version = (await db.execute(
+        select(ChannelPostVersion).where(
+            ChannelPostVersion.id == version_id, ChannelPostVersion.draft_id == draft_id,
+        )
+    )).scalar_one_or_none()
+    if version is None:
+        raise HTTPException(status_code=404, detail={"code": "CHANNEL_POST_VERSION_NOT_FOUND", "message": str(version_id)})
+
+    image_row = await get_channel_post_image_for_version(db, version_id=version_id)
+    if image_row is None:
+        raise HTTPException(status_code=404, detail={"code": "CHANNEL_POST_IMAGE_NOT_FOUND", "message": str(version_id)})
+    return _image_response(version, image_row)
+
+
+@router.get(
+    "/{org_id}/channel-posts/drafts/{draft_id}/versions/{version_id}/assets",
+    response_model=list[ChannelPostImageResponse],
+)
+async def list_channel_post_images_for_version_endpoint(
+    org_id: uuid.UUID, draft_id: uuid.UUID, version_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> list[ChannelPostImageResponse]:
+    """story #3550(Phase2 BE 2/2, 페드루 PO 確定 2026-09-06) — 캐러셀 N장 전체를
+    position 순으로. 위 `.../asset`(단수, 대표 1장만 — 기존 FE 계약 무변경)과 별도
+    엔드포인트로 신설(FE N장 슬롯 UI가 이 목록으로 썸네일을 그리고 삭제·재정렬 대상
+    image_id를 얻는다, `list_channel_post_images_for_version` 서비스 함수 그대로 노출)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+
+    version = (await db.execute(
+        select(ChannelPostVersion).where(
+            ChannelPostVersion.id == version_id, ChannelPostVersion.draft_id == draft_id,
+        )
+    )).scalar_one_or_none()
+    if version is None:
+        raise HTTPException(status_code=404, detail={"code": "CHANNEL_POST_VERSION_NOT_FOUND", "message": str(version_id)})
+
+    image_rows = await list_channel_post_images_for_version(db, version_id=version_id)
+    return [_image_response(version, row) for row in image_rows]
+
+
+async def _require_channel_post_draft_project_access(
+    db: AsyncSession, *, org_id: uuid.UUID, draft_id: uuid.UUID, member_id: uuid.UUID,
+):
+    """story #3550 BE 2/2 authz 가드 후속(#3910 CI, test_authz_project_scope_coverage.py
+    ::test_no_new_unguarded_id_mutation_routes) — draft는 project-소속 리소스
+    (work_item_id→Story.project_id)라 org_id 일치만으로는 same-org cross-project
+    IDOR가 남는다(리소스 fetch가 project를 안 좁힘). 삭제·재정렬 둘 다 이 헬퍼로
+    통일(같은 리소스 축, 페드루 PO 明示) — `require_project_access`(project_auth.py
+    SSOT)가 실패 시 404(존재-비노출 관례). 반환값은 이후 서비스 호출이 재조회
+    없이 쓸 수 있게 draft 자체."""
+    not_found = HTTPException(
+        status_code=404, detail={"code": "CHANNEL_POST_DRAFT_NOT_FOUND", "message": str(draft_id)},
+    )
+    draft = await get_channel_post_draft(db, org_id=org_id, draft_id=draft_id)
+    if draft is None:
+        raise not_found
+    story = (await db.execute(
+        select(Story).where(Story.id == draft.work_item_id, Story.org_id == org_id)
+    )).scalar_one_or_none()
+    if story is None:
+        raise not_found
+    await require_project_access(
+        db, user_id=member_id, project_id=story.project_id, org_id=org_id,
+        not_found_detail={"code": "CHANNEL_POST_DRAFT_NOT_FOUND", "message": str(draft_id)},
+    )
+    return draft
+
+
+@router.delete(
+    "/{org_id}/channel-posts/drafts/{draft_id}/assets/{image_id}",
+    response_model=list[ChannelPostImageResponse],
+)
+async def delete_channel_post_image_endpoint(
+    org_id: uuid.UUID, draft_id: uuid.UUID, image_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> list[ChannelPostImageResponse]:
+    """story #3550(Phase2 BE 2/2, 페드루 PO 確定 2026-09-06) — 이미지 1장 삭제.
+    attach(confirm)와 대칭축: 새 불변 버전을 만들어 반영한다(원본 행 삭제 X) —
+    #3291 승인 불변화 규율대로 이미지 집합 변화 자체가 재승인 트리거. 응답은
+    새 버전에 남은 이미지 전체(0장이면 빈 배열)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+
+    # story #3370(페드루 지적 2026-09-10) — 이 access 체크(_require_channel_post_draft_
+    # project_access → require_project_access)는 raw auth.user_id(users.id)를 받게 설계돼
+    # 있다(project_auth.py::_project_access_predicate가 OrgMember.user_id==user_id로 휴먼을
+    # 판정 — org_member.id를 넘기면 오히려 깨진다). 그래서 access 체크엔 raw id를 그대로
+    # 쓰고, author_member_id로 **영속되는** 값만 resolve_member()의 멤버 id로 분리한다
+    # (한 변수를 access축·저장축 둘 다에 쓰면 어느 한쪽이 깨진다 — 축 혼용 금지).
+    await _require_channel_post_draft_project_access(
+        db, org_id=org_id, draft_id=draft_id, member_id=uuid.UUID(auth.user_id),
+    )
+    resolved = await resolve_member_db_verified(auth, org_id, db)
+    member_id, actor_type = resolved.id, resolved.type
+
+    try:
+        new_version, remaining = await delete_channel_post_image(
+            db, org_id=org_id, draft_id=draft_id, image_id=image_id,
+            member_id=member_id, member_kind=actor_type,
+        )
+    except ChannelPostDraftNotFoundError as exc:
+        raise HTTPException(status_code=404, detail={"code": "CHANNEL_POST_DRAFT_NOT_FOUND", "message": str(exc)}) from exc
+    except ChannelPostImageNotFoundError as exc:
+        raise HTTPException(
+            status_code=404, detail={"code": "CHANNEL_POST_IMAGE_NOT_FOUND", "message": str(exc)},
+        ) from exc
+    return [_image_response(new_version, row) for row in remaining]
+
+
+@router.post(
+    "/{org_id}/channel-posts/drafts/{draft_id}/assets/reorder",
+    response_model=list[ChannelPostImageResponse],
+)
+async def reorder_channel_post_images_endpoint(
+    org_id: uuid.UUID, draft_id: uuid.UUID, body: ReorderChannelPostImagesRequest,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> list[ChannelPostImageResponse]:
+    """story #3550(Phase2 BE 2/2, 페드루 PO 確定 2026-09-06) — 이미지 순서 재배열.
+    `image_ids`는 새 순서 그대로 **전체 집합**(부분 재정렬 불허). delete와 동형으로
+    새 불변 버전을 만들어 반영 — 순서 자체가 합성 해시 입력이라 재정렬도 재승인
+    트리거(#3291 규율)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+
+    # story #3370(페드루 지적 2026-09-10) — delete_channel_post_image_endpoint와 동형 축
+    # 분리(access 체크=raw auth.user_id, author_member_id 영속=resolve_member() 멤버 id).
+    await _require_channel_post_draft_project_access(
+        db, org_id=org_id, draft_id=draft_id, member_id=uuid.UUID(auth.user_id),
+    )
+    resolved = await resolve_member_db_verified(auth, org_id, db)
+    member_id, actor_type = resolved.id, resolved.type
+
+    try:
+        new_version, ordered = await reorder_channel_post_images(
+            db, org_id=org_id, draft_id=draft_id, image_ids=body.image_ids,
+            member_id=member_id, member_kind=actor_type,
+        )
+    except ChannelPostDraftNotFoundError as exc:
+        raise HTTPException(status_code=404, detail={"code": "CHANNEL_POST_DRAFT_NOT_FOUND", "message": str(exc)}) from exc
+    except ChannelPostImageReorderInvalidSetError as exc:
+        raise HTTPException(
+            status_code=422, detail={"code": "CHANNEL_POST_IMAGE_REORDER_INVALID_SET", "message": str(exc)},
+        ) from exc
+    return [_image_response(new_version, row) for row in ordered]
+
+
+def _to_draft_list_item(
+    row: tuple,
+    source_titles: dict[uuid.UUID, tuple[str, uuid.UUID]] | None = None,
+    *,
+    requester_member_id: uuid.UUID | None = None,
+    is_org_admin: bool = False,
+) -> ChannelPostDraftListItem:
+    """story #3403 — 목록·단건 두 엔드포인트가 공유하는 유일한 직렬화 지점. 손으로 두
+    번 짜지 않는다(드리프트 원천 차단, list_channel_post_drafts()가 draft_id 필터를
+    똑같이 지원하는 것과 동형 사상).
+
+    story #3437(후속 묶음) — `source_titles`는 {content_item_id: (title, latest_
+    version_id)} 배치조회 결과(호출부가 미리 구해 넘긴다 — 이 함수 자체는 쿼리를
+    안 돈다, N+1 방지 원칙 유지). None/미스=소스 없거나 조회 결과에 없음(둘 다 null로
+    떨어진다 — "모른다≠다르다" 원칙과 달리 여긴 순수 배치 미스 표현).
+
+    story #3614 CHANGES(유나 재판정, 페드루 PO 채택 2026-09-07) — `can_withdraw`는
+    이웃 `can_unpublish`(channel_connections.py)와 같은 정책: 권한 없으면 버튼
+    자체를 안 그린다(그렸다가 403을 내는 두 정책 공존 금지, 한 화면 한 규칙).
+    판정은 여기 한 곳에서만(FE가 origin author/role을 직접 비교하지 않는다 —
+    project_auth·can_unpublish류와 동일 "서버가 판단해 bool 하나로 낸다" 원칙).
+    `requester_member_id`/`is_org_admin` 생략(None/False 기본값)은 이 함수를
+    caller 컨텍스트 없이 쓰는 극소수 호출부 대비 — 그 경우 can_withdraw는 항상
+    False(안전 쪽으로 fail, "모른다=버튼 안 보임")."""
+    (
+        draft, latest, origin, gate, published_pub, latest_pub, published_body_sha256,
+        latest_command, latest_image, latest_thread_pubs, newsletter_gate, head_pub_id,
+    ) = row
+    source_title: str | None = None
+    source_current_site_post_version_id: uuid.UUID | None = None
+    if draft.source_content_item_id is not None and source_titles is not None:
+        entry = source_titles.get(draft.source_content_item_id)
+        if entry is not None:
+            source_title, source_current_site_post_version_id = entry
+    # story #3453 AC3 후속 — 판정은 여기 한 곳에서만(FE 4곳이 각자 비교식을 안 들고
+    # 다니게). 하나라도 null이면 "모른다"(레거시 파생분 — source_site_post_version_id가
+    # #3437 후속 착지 前에 만들어진 초안은 항상 null).
+    source_changed: bool | None = None
+    if draft.source_site_post_version_id is not None and source_current_site_post_version_id is not None:
+        source_changed = draft.source_site_post_version_id != source_current_site_post_version_id
+    # story #3614 CHANGES — can_unpublish와 동형 판정: 미폐기 ∧ 미발행(published_pub
+    # 없음, withdraw_channel_post_draft의 409 조건과 정확히 같은 축) ∧ (원저자 또는
+    # org owner/admin). requester_member_id가 None이면(caller 컨텍스트 없는 호출부)
+    # 안전 쪽으로 항상 False.
+    can_withdraw = (
+        draft.status != "withdrawn"
+        and published_pub is None
+        and requester_member_id is not None
+        and (is_org_admin or str(origin.author_member_id) == str(requester_member_id))
+    )
+    # story #3734 — can_archive는 can_withdraw와 달리 status·발행 여부와 무관하다(보관은
+    # 순수 가시성 축, 발행된 draft도 보관 가능 — #3291 정합).
+    can_archive = requester_member_id is not None and (
+        is_org_admin or str(origin.author_member_id) == str(requester_member_id)
+    )
+    # story #3808(PR5b-2, 페드루 PO 確定 2026-09-12) — 세그먼트가 2개 미만이면
+    # "스레드"라는 사실 자체가 없다 — 빈 배열이 아니라 null(신호 축소, 단일-발행
+    # 채널의 기존 화면은 이 필드를 아예 안 봐도 되게).
+    thread_segments = (
+        [
+            ThreadSegmentStatusView(
+                sequence=p.sequence, status=p.status, external_id=p.external_id,
+                permalink=p.permalink, error_code=p.error_code,
+            )
+            for p in latest_thread_pubs
+        ]
+        if len(latest_thread_pubs) >= 2 else None
+    )
+    command_status = latest_command.status if latest_command else None
+    # story #3525 — publication_status/error_code는 의도적으로 latest_pub(현재
+    # 최신 버전의 발행 시도) 축 그대로 둔다 — "지금 버전이 발행 中/실패인지"는
+    # published_pub(마지막으로 실제 나간 것)과는 다른 질문이라 건드리면 컨테이너
+    # 생성 진행 배지(processing_kind, 바로 아래)가 깨진다.
+    publication_status = latest_pub.status if latest_pub else None
+    # story 620beefc(AC5·§17-15, 페드루 PO 決定) — 판정식은 이 자리 한 곳에서만.
+    processing_kind = (
+        "awaiting_container"
+        if command_status == "pending" and publication_status == "container_created"
+        else None
+    )
+    # story #3813(Phase3·3-4 PR4, 페드루 PO 確定 2026-09-12) — 뉴스레터 채널만 이 객체를
+    # 낸다(discriminator=이미 있는 channel, content_kind류 신규 필드 0). subject는
+    # 최신 버전의 channel_payload(PR2 신설 공유 슬롯)에서, segment_name/send_scheduled_at은
+    # newsletter_send 게이트(아직 발송 요청 前이면 게이트 자체가 없어 둘 다 null)에서.
+    newsletter = None
+    if draft.channel in _NEWSLETTER_CHANNELS:
+        newsletter = NewsletterDraftInfo(
+            subject=(latest.channel_payload or {}).get("subject"),
+            segment_name=newsletter_gate.sealed_newsletter_segment_name if newsletter_gate else None,
+            send_scheduled_at=(
+                newsletter_gate.sealed_newsletter_scheduled_at.isoformat()
+                if newsletter_gate and newsletter_gate.sealed_newsletter_scheduled_at else None
+            ),
+            campaign_scheduled_at=gate.sealed_scheduled_at.isoformat() if gate and gate.sealed_scheduled_at else None,
+        )
+    # story #3813(Phase3·3-4 PR4) — 「발행」(캠페인 생성)과 「발송」이 갈리는 뉴스레터는
+    # 캘린더가 읽는 단일 scheduled_at도 갈라야 뜻이 맞는다: newsletter_send 게이트가
+    # 봉인되기 前엔 캠페인 만들기 예정(external_publish gate.sealed_scheduled_at)이
+    # 화면의 뜻이고, 봉인된 뒤엔 발송 예정(newsletter_gate.sealed_newsletter_scheduled_at)
+    # 이 그 자리를 대신한다 — 서비스층 필터 쿼리의 effective_scheduled_at(COALESCE)와
+    # 정확히 같은 우선순위(list_channel_post_drafts 그 블록 주석 참고).
+    _effective_scheduled_at = (
+        (newsletter_gate.sealed_newsletter_scheduled_at if newsletter_gate else None)
+        or (gate.sealed_scheduled_at if gate else None)
+    )
+    return ChannelPostDraftListItem(
+        draft_id=draft.id, work_item_id=draft.work_item_id, channel=draft.channel,
+        connection_id=draft.connection_id, draft_status=draft.status, can_withdraw=can_withdraw,
+        is_deleted=draft.deleted_at is not None, can_archive=can_archive, current_version=latest.version,
+        latest_author_kind=latest.author_kind, origin_author_kind=origin.author_kind,
+        updated_at=latest.created_at.isoformat(),
+        text_preview=build_text_preview(latest.text), text_length=text_char_count(latest.text),
+        hook_key=latest.hook_key,
+        body_sha256=latest.body_sha256,
+        gate_status=gate.status if gate else None,
+        reapproval_required=gate.reapproval_required if gate else None,
+        sealed_content_sha256=gate.sealed_content_sha256 if gate else None,
+        published_at=published_pub.published_at.isoformat() if published_pub else None,
+        published_body_sha256=published_body_sha256,
+        publication_status=publication_status,
+        permalink=published_pub.permalink if published_pub else None,
+        external_id=published_pub.external_id if published_pub else None,
+        error_code=latest_pub.error_code if latest_pub else None,
+        privacy_locked=bool(published_pub.privacy_locked) if published_pub else False,
+        failure_kind=latest_command.failure_kind if latest_command else None,
+        next_retry_at=(
+            latest_command.next_attempt_at.isoformat()
+            if latest_command and latest_command.next_attempt_at else None
+        ),
+        dead_letter_at=(
+            latest_command.dead_letter_at.isoformat()
+            if latest_command and latest_command.dead_letter_at else None
+        ),
+        scheduled_at=_effective_scheduled_at.isoformat() if _effective_scheduled_at else None,
+        newsletter=newsletter,
+        command_status=command_status,
+        command_reason_code=latest_command.reason_code if latest_command else None,
+        command_reason_reset_at=(
+            latest_command.reason_reset_at.isoformat()
+            if latest_command and latest_command.reason_reset_at else None
+        ),
+        command_id=latest_command.id if latest_command else None,
+        thumbnail_url=public_url_for_object_path(latest_image.final_object_path) if latest_image else None,
+        image_original_width=latest_image.original_width if latest_image else None,
+        image_original_bytes=latest_image.original_bytes if latest_image else None,
+        image_final_width=latest_image.final_width if latest_image else None,
+        image_final_bytes=latest_image.final_bytes if latest_image else None,
+        image_was_converted=latest_image.was_converted if latest_image else None,
+        processing_kind=processing_kind,
+        # story #3525(재정의) — published_pub 사용(latest_pub 아님). published_at/
+        # permalink/external_id와 정확히 같은 객체라 이 셋과 publication_id가
+        # 절대 어긋날 수 없다(§22-12 계약이 구조적으로 성립).
+        publication_id=published_pub.id if published_pub else None,
+        head_publication_id=head_pub_id,
+        source_content_item_id=draft.source_content_item_id,
+        source_title=source_title,
+        source_site_post_version_id=draft.source_site_post_version_id,
+        source_current_site_post_version_id=source_current_site_post_version_id,
+        source_changed=source_changed,
+        thread_segments=thread_segments,
+    )
+
+
+@router.get("/{org_id}/channel-posts/drafts", response_model=list[ChannelPostDraftListItem])
+async def list_channel_post_drafts_endpoint(
+    org_id: uuid.UUID,
+    response: Response,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    scheduled_from: datetime | None = Query(
+        default=None,
+        description="예약 시각 범위 시작(tz-aware ISO, gate.sealed_scheduled_at 기준 — "
+        "publication_command의 스냅샷 값이 아니다). unscheduled와 함께 줄 수 없다.",
+    ),
+    scheduled_to: datetime | None = Query(
+        default=None,
+        description="예약 시각 범위 끝(tz-aware ISO, gate.sealed_scheduled_at 기준). "
+        "unscheduled와 함께 줄 수 없다.",
+    ),
+    unscheduled: bool = Query(
+        default=False,
+        description="true면 gate.sealed_scheduled_at이 null인 draft만(캘린더 「날짜 미정」 "
+        "레인). scheduled_from/scheduled_to와 상호 배타. 게이트 자체가 없는(아직 상신 "
+        "안 한) 순수 초안도 포함한다 — 둘 다 「날짜 미정」이라는 점에서 같은 부류다(유나 §11-1).",
+    ),
+    include_withdrawn: bool = Query(
+        default=False,
+        description="story #3614(AC2) — true면 폐기된(status='withdrawn') 초안도 목록에 "
+        "포함한다(「폐기됨 보기」 필터). 기본은 제외 — 폐기는 결재함·목록 양쪽에서 사라진다.",
+    ),
+    include_deleted: bool = Query(
+        default=False,
+        description="story #3734 — true면 보관된(deleted_at not null) 초안도 목록에 "
+        "포함한다(「보관됨 보기」 필터). include_withdrawn과 독립 축. 기본은 제외.",
+    ),
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> list[ChannelPostDraftListItem]:
+    """조직 멤버(휴먼·에이전트 모두) 읽기 가능 — site_posts 목록과 동형(승인·발행 경계
+    밖이라 human-only 제약 없음).
+
+    story #3423(캘린더 #3422 선행) — 날짜 필터 셋(scheduled_from/scheduled_to/
+    unscheduled)이 없으면 기존 응답과 완전히 동일(회귀 0). 있으면 tz-aware를
+    강제(naive는 비교 결과가 항상 어긋나는 #3414 nit J와 동일 함정)하고, unscheduled는
+    범위 파라미터와 상호 배타(둘 다 주면 "무엇을 원하는지" 모호해진다).
+
+    story #3744 — X-Total-Count 헤더 추가(site_posts.py와 동형 관례). 목록 화면(캘린더
+    아님)의 「N개 중 M개 표시 중」 부분 상태용 — org_id/include_withdrawn/include_deleted만
+    반영하고 캘린더 전용 축(scheduled_from/to/unscheduled)은 안 본다(목록 화면은 그 축을
+    안 쓰므로 무해 — 캘린더 화면은 이 헤더를 소비하지 않는다)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+
+    if unscheduled and (scheduled_from is not None or scheduled_to is not None):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHANNEL_POST_LIST_FILTER_CONFLICT",
+                "message": "unscheduled는 scheduled_from/scheduled_to와 함께 줄 수 없습니다.",
+            },
+        )
+    for _label, _value in (("scheduled_from", scheduled_from), ("scheduled_to", scheduled_to)):
+        if _value is not None and _value.tzinfo is None:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "CHANNEL_POST_LIST_FILTER_NAIVE_DATETIME",
+                    "message": f"{_label}은 timezone 정보가 있어야 합니다(예: Z 또는 +09:00).",
+                },
+            )
+    if scheduled_from is not None and scheduled_to is not None and scheduled_from > scheduled_to:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHANNEL_POST_LIST_FILTER_RANGE_INVALID",
+                "message": "scheduled_from은 scheduled_to보다 늦을 수 없습니다.",
+            },
+        )
+
+    rows = await list_channel_post_drafts(
+        db, org_id=org_id, limit=limit, offset=offset,
+        scheduled_from=scheduled_from, scheduled_to=scheduled_to, unscheduled=unscheduled,
+        include_withdrawn=include_withdrawn, include_deleted=include_deleted,
+    )
+    total = await count_channel_post_drafts(
+        db, org_id=org_id, include_withdrawn=include_withdrawn, include_deleted=include_deleted,
+    )
+    response.headers["X-Total-Count"] = str(total)
+    source_titles = await get_source_titles_and_latest_versions(
+        db, org_id=org_id,
+        content_item_ids={row[0].source_content_item_id for row in rows if row[0].source_content_item_id},
+    )
+    # story #3614 CHANGES — can_withdraw 계산에 필요(이웃 can_unpublish와 동형).
+    resolved = await resolve_member(auth, org_id, db)
+    is_org_admin = resolved.role in ("owner", "admin")
+    return [
+        _to_draft_list_item(row, source_titles, requester_member_id=resolved.id, is_org_admin=is_org_admin)
+        for row in rows
+    ]
+
+
+@router.get(
+    "/{org_id}/channel-posts/drafts/{draft_id}", response_model=ChannelPostDraftListItem,
+)
+async def get_channel_post_draft_detail_endpoint(
+    org_id: uuid.UUID,
+    draft_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> ChannelPostDraftListItem:
+    """story #3403 — 단건 조회. 목록 항목(`ChannelPostDraftListItem`)과 완전히 같은
+    shape·같은 직렬화 경로(`_to_draft_list_item`) — `list_channel_post_drafts()`를
+    draft_id 필터로 그대로 재사용해 조인 축 드리프트가 구조적으로 없다. 권한도 목록과
+    동일(휴먼·에이전트 둘 다, `_require_human()` 안 부름). org 스코프 밖이거나 존재하지
+    않으면 404("존재 비노출" 관례, site_posts detail과 동형).
+
+    story #3514(Phase1·BE+FE·소형, 페드루 PO 確定 2026-09-05) — lint-on-read(유나 13회차
+    ③ 관찰). 저장 시점 스냅샷(`draft.lint_result`)이 아니라 **지금** org 규칙으로 최신
+    버전을 다시 lint한다 — 목록 응답엔 안 실음(단건만, 비용 N배 방지)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+
+    # story #3614/#3734 — 단건 조회는 폐기·보관 여부와 무관하게 항상 보인다(목록 기본
+    # 필터가 특정 URL로 들어온 초안을 조용히 404 취급하면 안 된다).
+    rows = await list_channel_post_drafts(
+        db, org_id=org_id, draft_id=draft_id, limit=1, include_withdrawn=True, include_deleted=True,
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail=f"draft를 찾을 수 없습니다: {draft_id}")
+    source_titles = await get_source_titles_and_latest_versions(
+        db, org_id=org_id,
+        content_item_ids={rows[0][0].source_content_item_id} if rows[0][0].source_content_item_id else set(),
+    )
+    # story #3614 CHANGES — can_withdraw 계산에 필요(이웃 can_unpublish와 동형).
+    resolved = await resolve_member(auth, org_id, db)
+    is_org_admin = resolved.role in ("owner", "admin")
+    item = _to_draft_list_item(rows[0], source_titles, requester_member_id=resolved.id, is_org_admin=is_org_admin)
+
+    latest_version = rows[0][1]
+    rule_row = await get_org_content_rules(db, org_id=org_id)
+    item.violations = lint_content(
+        rule_row.rules if rule_row else None, text=latest_version.text, link_url=latest_version.link_url,
+    )
+
+    # story #3559 — video_url도 violations와 동형(단건 전용, N+1 방지로 목록 쿼리에는
+    # 안 실림). asset 단건 응답(get_channel_post_video_for_version_endpoint)과 정확히
+    # 같은 값(같은 서비스 함수+같은 public_url_for_object_path 호출).
+    video_row = await get_channel_post_video_for_version(db, version_id=latest_version.id)
+    item.video_url = public_url_for_object_path(video_row.original_object_path) if video_row else None
+    # story #3590 — video_url과 같은 video_row 재사용(추가 쿼리 0).
+    item.video_meta = ChannelPostVideoMeta(
+        duration_seconds=video_row.duration_seconds, width=video_row.width,
+        height=video_row.height, codec=video_row.codec, original_bytes=video_row.original_bytes,
+    ) if video_row else None
+    return item
+
+
+@router.get(
+    "/{org_id}/site-posts/drafts/{content_item_id}/variants", response_model=list[ChannelPostDraftListItem],
+)
+async def list_content_item_variants_endpoint(
+    org_id: uuid.UUID,
+    content_item_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> list[ChannelPostDraftListItem]:
+    """story #3437(AC2) — 원문(content_item=site_post_drafts.id) 쪽에서 그 원문에서
+    파생된 채널 변형 목록(채널·상태)을 조회한다. `list_channel_post_drafts()`를
+    `source_content_item_id` 필터로 그대로 재사용(`_to_draft_list_item`과 함께 —
+    단건/목록 조회와 조인·직렬화 축 드리프트 0). 조직 멤버(휴먼·에이전트 모두) 읽기
+    가능 — 목록/단건 조회와 동형 권한 폭(승인·발행 경계 밖)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+
+    content_item = await get_site_post_draft(db, org_id=org_id, draft_id=content_item_id)
+    if content_item is None:
+        raise HTTPException(status_code=404, detail=f"원문을 찾을 수 없습니다: {content_item_id}")
+
+    rows = await list_channel_post_drafts(
+        db, org_id=org_id, source_content_item_id=content_item_id, limit=200,
+    )
+    # story #3437(후속 묶음) — 이 엔드포인트는 filter 자체가 content_item_id 단건이라
+    # source_content_item_id가 전부 이 값 하나 — 배치라 해도 실질 단건 조회.
+    source_titles = await get_source_titles_and_latest_versions(
+        db, org_id=org_id, content_item_ids={content_item_id},
+    )
+    # story #3614 CHANGES — can_withdraw 계산에 필요(이웃 can_unpublish와 동형).
+    resolved = await resolve_member(auth, org_id, db)
+    is_org_admin = resolved.role in ("owner", "admin")
+    return [
+        _to_draft_list_item(row, source_titles, requester_member_id=resolved.id, is_org_admin=is_org_admin)
+        for row in rows
+    ]
+
+
+@router.get(
+    "/{org_id}/channel-posts/drafts/{draft_id}/versions", response_model=list[ChannelPostVersionHistoryItem],
+)
+async def list_channel_post_draft_version_history(
+    org_id: uuid.UUID,
+    draft_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> list[ChannelPostVersionHistoryItem]:
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+
+    draft = await get_channel_post_draft(db, org_id=org_id, draft_id=draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail=f"draft를 찾을 수 없습니다: {draft_id}")
+
+    versions = await list_channel_post_draft_versions(db, draft_id=draft_id)
+    utm_rule_row = await get_org_content_rules(db, org_id=org_id)
+    utm_rules = (utm_rule_row.rules or {}).get("utm_rules") if utm_rule_row else None
+    return [
+        ChannelPostVersionHistoryItem(
+            version_id=v.id, version=v.version, draft_id=draft.id, text=v.text, link_url=v.link_url,
+            body_sha256=v.body_sha256, author_member_id=v.author_member_id, author_kind=v.author_kind,
+            created_at=v.created_at.isoformat(),
+            tagged_link_preview=(
+                build_tagged_link(channel=draft.channel, link_url=v.link_url, draft_id=draft.id, utm_rules=utm_rules)
+                if v.link_url else None
+            ),
+            hook_key=v.hook_key,
+            channel_payload=v.channel_payload,
+        )
+        for v in versions
+    ]
+
+
+@router.post(
+    "/{org_id}/channel-posts/drafts/{draft_id}/submit", response_model=SubmitChannelPostDraftResponse,
+)
+async def submit_channel_post_draft_endpoint(
+    org_id: uuid.UUID,
+    draft_id: uuid.UUID,
+    body: SubmitChannelPostDraftRequest,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+    locale: str | None = None,
+    accept_language: str | None = Header(None, alias="Accept-Language"),
+) -> SubmitChannelPostDraftResponse:
+    """story #3614 갭(3796과 동형) — 라우트 진입점, `Header()` DI 마커는 여기서만 받는다
+    (까심 QA CI FAILURE 원칙, i18n_catalog.py 모듈 docstring 참조). 직접-호출(realdb·
+    유닛) 테스트는 `_submit_channel_post_draft_endpoint`를 불러야 한다."""
+    return await _submit_channel_post_draft_endpoint(
+        org_id, draft_id, body, db=db, verified_org_id=verified_org_id, auth=auth,
+        resolved_locale=resolve_locale_from_request(locale, accept_language),
+    )
+
+
+async def _submit_channel_post_draft_endpoint(
+    org_id: uuid.UUID,
+    draft_id: uuid.UUID,
+    body: SubmitChannelPostDraftRequest,
+    *,
+    db: AsyncSession,
+    verified_org_id: uuid.UUID,
+    auth: AuthContext,
+    resolved_locale: str,
+) -> SubmitChannelPostDraftResponse:
+    """AC1·AC3 — 초안 버전을 external_publish 게이트에 상신. body.version_id 생략 시 최신
+    버전. **에이전트 키도 호출 가능**(2026-09-03 dev 실측 정정 — site S2와 동일 실동작,
+    승인·발행만 human-only이고 상신 자체는 actor_type 가드가 없다)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+
+    # story #3370(유나 실측·페드루 정정 2026-09-10) — site_posts.py::submit_site_post_
+    # draft_endpoint와 동형 결함(같은 클래스, 형제 엔드포인트) — auth.user_id는 휴먼(JWT)
+    # 이면 users.id다, org 멤버 id가 아니다. resolve_member()로 정정.
+    resolved_requester = await resolve_member_db_verified(auth, org_id, db)
+    try:
+        gate, version_id = await submit_channel_post_draft(
+            db, org_id=org_id, draft_id=draft_id, version_id=body.version_id,
+            requester_member_id=resolved_requester.id, scheduled_at=body.scheduled_at,
+            estimated_cost_minor=body.estimated_cost_minor,
+        )
+    except GenerationBudgetExceededError as exc:
+        # story #3498(AC2) — site_posts.py와 동형 4값 detail.
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "GENERATION_BUDGET_EXCEEDED",
+                "limit_minor": exc.limit_minor, "spent_minor": exc.spent_minor,
+                "estimated_cost_minor": exc.estimated_cost_minor, "remaining_minor": exc.remaining_minor,
+            },
+        ) from exc
+    except ChannelPostDraftNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ChannelPostDraftWithdrawnError as exc:
+        # story #3614 갭(PO 確定 2026-09-11) — 폐기(withdrawn)된 초안은 종결 상태다.
+        # 409(상태 충돌) — 재상신은 새 초안을 만드는 것으로만 가능하다. CI 발견(BE
+        # 한글 사용자 문장 재발 가드 RED) — 새 한글 문장은 baseline이 아니라 3796과
+        # 같은 형으로 i18n_catalog 이관(PO 確定 2026-09-11).
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "CHANNEL_POST_DRAFT_WITHDRAWN", "message": t("channel_posts.draft_withdrawn", resolved_locale)},
+        ) from exc
+    except ChannelPostVersionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ChannelConnectionNotActiveError as exc:
+        # 페드루 PO 리뷰(2026-09-03) — 발행 스토리(f8f7cb0f) 결정표가 이 코드를 409(상태
+        # 충돌·재연결 필요)로 정했다 — 같은 코드에 HTTP status가 갈리면 FE 매핑이 두 벌이
+        # 된다. 422는 입력 형태 오류에만 남긴다(CHANNEL_TEXT_TOO_LONG처럼).
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "CHANNEL_CONNECTION_NOT_ACTIVE", "message": str(exc)},
+        ) from exc
+    except ChannelPostApproverRoleMissingError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "CHANNEL_POST_APPROVER_ROLE_MISSING", "message": str(exc)},
+        ) from exc
+    except ChannelPostGateAlreadyHeldError as exc:
+        # story #3404 — site_posts.py의 SITE_POST_GATE_ALREADY_HELD와 동형 상태코드·모양.
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "CHANNEL_POST_GATE_ALREADY_HELD",
+                "message": str(exc),
+                "holding_draft_id": str(exc.holding_draft_id),
+                "holding_channel": exc.holding_channel,
+                "holding_connection_id": str(exc.holding_connection_id),
+            },
+        ) from exc
+    except ContentRuleViolationError as exc:
+        # story #3471(페드루 PO 確定 2026-09-05) — 금지 AC=서버 거부. 422 body는
+        # {code, rules_version, violations[]}(3343 구조화 형 준용, story #3471 확定).
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "CONTENT_RULE_VIOLATION", "rules_version": exc.rules_version,
+                "violations": exc.violations,
+            },
+        ) from exc
+    except ChannelVideoRequiredError as exc:
+        # story #3815(Phase3·3-5 PR2, 페드루 PO 確定 2026-09-12) — ChannelImage
+        # RequiredError와 동형 위치·모양(영상판).
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "CHANNEL_VIDEO_REQUIRED", "message": str(exc)},
+        ) from exc
+    except ChannelImageRequiredError as exc:
+        # story #3536(PO 確定 2026-09-06) — 필드 완결성 422(CHANNEL_TEXT_TOO_LONG류와
+        # 동형). 승인 게이트 낭비를 상신 단계에서 미리 막는다.
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "CHANNEL_IMAGE_REQUIRED", "message": str(exc)},
+        ) from exc
+    except ConceptApprovalNotApprovedError as exc:
+        # story #3561(Phase2·BE, 페드루 PO 確定 2026-09-06) — opt-in 서버 거부.
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "CONCEPT_NOT_APPROVED", "gate_id": str(exc.gate_id), "status": exc.status},
+        ) from exc
+
+    return SubmitChannelPostDraftResponse(
+        gate_id=gate.id, version_id=version_id, content_sha256=gate.sealed_content_sha256,
+        status=gate.status,
+        scheduled_at=gate.sealed_scheduled_at.isoformat() if gate.sealed_scheduled_at else None,
+    )
+
+
+class WithdrawChannelPostDraftResponse(BaseModel):
+    status: str
+    gate_id: uuid.UUID | None = None
+    gate_status: str | None = None
+
+
+@router.post("/{org_id}/channel-posts/drafts/{draft_id}/withdraw", response_model=WithdrawChannelPostDraftResponse)
+async def withdraw_channel_post_draft_endpoint(
+    org_id: uuid.UUID,
+    draft_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> WithdrawChannelPostDraftResponse:
+    """story #3614(AC1) — 작성자(에이전트 포함) 또는 org owner/admin이 초안을 닫는다.
+    「변경 요청 뒤 재상신」만 있던 갭(3602가 닫은 재작성 경로와 대칭인 «폐기» 축)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+
+    resolved = await resolve_member(auth, org_id, db)
+    is_org_admin = resolved.role in ("owner", "admin")
+
+    try:
+        draft, gate = await withdraw_channel_post_draft(
+            db, org_id=org_id, draft_id=draft_id,
+            requester_member_id=resolved.id, is_org_admin=is_org_admin,
+        )
+    except ChannelPostDraftNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ChannelPostDraftForbiddenError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "CHANNEL_POST_WITHDRAW_FORBIDDEN", "message": str(exc)},
+        ) from exc
+    except ChannelPostDraftAlreadyPublishedError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "CHANNEL_POST_DRAFT_ALREADY_PUBLISHED", "message": str(exc)},
+        ) from exc
+
+    return WithdrawChannelPostDraftResponse(
+        status=draft.status, gate_id=gate.id if gate else None, gate_status=gate.status if gate else None,
+    )
+
+
+class ArchiveChannelPostDraftResponse(BaseModel):
+    draft_id: uuid.UUID
+    is_deleted: bool
+
+
+@router.post(
+    "/{org_id}/channel-posts/drafts/{draft_id}/archive", response_model=ArchiveChannelPostDraftResponse,
+)
+async def archive_channel_post_draft_endpoint(
+    org_id: uuid.UUID,
+    draft_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> ArchiveChannelPostDraftResponse:
+    """story #3734 — 「보관」(화면 낱말, 유나 定). withdraw_channel_post_draft_endpoint
+    (#3614)와 인가 축은 같지만 게이트·커맨드는 전혀 안 건드리는 순수 가시성 축 —
+    발행된 draft도 보관 가능(withdraw는 발행되면 409로 막힌다)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+
+    resolved = await resolve_member(auth, org_id, db)
+    is_org_admin = resolved.role in ("owner", "admin")
+    try:
+        draft = await archive_channel_post_draft(
+            db, org_id=org_id, draft_id=draft_id,
+            requester_member_id=resolved.id, is_org_admin=is_org_admin,
+        )
+    except ChannelPostDraftNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ChannelPostDraftArchiveForbiddenError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "CHANNEL_POST_ARCHIVE_FORBIDDEN", "message": str(exc)},
+        ) from exc
+    return ArchiveChannelPostDraftResponse(draft_id=draft.id, is_deleted=draft.deleted_at is not None)
+
+
+@router.post(
+    "/{org_id}/channel-posts/drafts/{draft_id}/restore", response_model=ArchiveChannelPostDraftResponse,
+)
+async def restore_channel_post_draft_endpoint(
+    org_id: uuid.UUID,
+    draft_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> ArchiveChannelPostDraftResponse:
+    """story #3734 — 「보관 해제」. archive_channel_post_draft_endpoint의 정확한 역."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+
+    resolved = await resolve_member(auth, org_id, db)
+    is_org_admin = resolved.role in ("owner", "admin")
+    try:
+        draft = await restore_channel_post_draft(
+            db, org_id=org_id, draft_id=draft_id,
+            requester_member_id=resolved.id, is_org_admin=is_org_admin,
+        )
+    except ChannelPostDraftNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ChannelPostDraftArchiveForbiddenError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "CHANNEL_POST_ARCHIVE_FORBIDDEN", "message": str(exc)},
+        ) from exc
+    return ArchiveChannelPostDraftResponse(draft_id=draft.id, is_deleted=draft.deleted_at is not None)
+
+
+class PublishChannelPostResponse(BaseModel):
+    permalink: str | None = None
+    external_id: str | None = None
+    published_at: str | None = None
+    version_id: uuid.UUID
+    # story #3414 — 예약(scheduled_at 봉인됨)이면 이 요청은 command만 만들고 실제
+    # 발행은 워커가 나중에 한다. 기존 필드(permalink 등)는 즉시 경로에서만 채워진다
+    # (회귀 0 — 기존 FE는 이 셋을 그대로 읽는다, scheduled 필드는 새로 봐야 안다).
+    scheduled: bool = False
+    command_id: uuid.UUID | None = None
+    scheduled_at: str | None = None
+    # story 620beefc(AC5·§17-15) — IMAGE 컨테이너는 비동기라, 예약이 아닌 "즉시" 요청도
+    # 이 응답 시점엔 아직 발행이 안 끝났을 수 있다(`scheduled`=사용자가 미래 시각을
+    # 지정했다는 뜻과는 다른 축 — 이건 "지금 요청했는데 서버가 자동으로 이어서
+    # 처리 중"). true면 permalink/external_id/published_at은 전부 null(아직 없다).
+    processing: bool = False
+    # story #3525(PO 確定 2026-09-06) — permalink/external_id/published_at과 같은
+    # 시점에 생기는 값(publish_channel_post_draft가 반환하는 ChannelPublication.id
+    # 그대로). FE handlePublish의 로컬 병합이 이 필드도 draft에 얹어야 §22-12(발행됨
+    # 카드가 draft.publication_id 하나로 즉시 열림)가 재로드 없이 성립한다.
+    # processing=True(컨테이너 비동기 대기)면 아직 최종 published 행이 없어 그 세
+    # 필드처럼 null 그대로.
+    publication_id: uuid.UUID | None = None
+    # story #3815(Phase3·3-5, 페드루 PO 지적 2026-09-13) — ChannelPostDraftListItem
+    # 과 동형 이유·같은 소스(row.privacy_locked, "지금 이 발행 그 순간"의 사실).
+    privacy_locked: bool = False
+
+
+@router.post(
+    "/{org_id}/channel-posts/drafts/{draft_id}/publish", response_model=PublishChannelPostResponse,
+)
+async def publish_channel_post_draft_endpoint(
+    org_id: uuid.UUID,
+    draft_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+    # story #3815(Phase3·3-5 PR2) — YOUTUBE_QUOTA_EXCEEDED 사용자 문장을
+    # i18n_catalog로 조립하기 위한 최소 추가(다른 채널 분기는 안 씀 — meta_ads
+    # select 엔드포인트의 Header DI 관례 그대로, 라우트 경계에서만 해석).
+    locale: str | None = None,
+    accept_language: str | None = Header(None, alias="Accept-Language"),
+) -> PublishChannelPostResponse:
+    """story #f8f7cb0f·#3414 — 휴먼 전용(AC1). 발행/예약 요청 둘 다 이 엔드포인트 하나
+    (블루프린트 §3 "즉시 발행=scheduled_at 없음인 같은 명령", PO 確定). 게이트가 승인한
+    scheduled_at(gate.sealed_scheduled_at)이 없으면 즉시 — 기존처럼 3중 재검증 뒤
+    동기로 Threads 2-호출까지 완료한다. 있으면 `publication_commands` 행만 만들고
+    반환 — 실제 발행은 cron 워커(AC3)가 그 시각에 처리한다.
+
+    두 경로 다 `publication_command`를 감사·재시도 원장으로 upsert한다(멱등 —
+    같은 draft/version 재요청은 새 행을 안 만든다).
+
+    페드루 리뷰 F(제품 의미 확定) — command upsert는 **3중 재검증 앞이 아니라**
+    `resolve_command_target`의 게이트-승인 확인 **뒤**에 온다(카디르 QA⑥, 재검증
+    실패로 요청 자체가 거부되면 command 행이 안 생겨 고아 pending을 막는다). 다만
+    나머지 두 재검증(seal 일치·connection 활성)은 `publish_channel_post_draft` 호출
+    **안에서** 일어난다 — 즉 command가 이미 만들어진 뒤에 그 두 검증이 실패할 수
+    있다는 뜻이고, 그러면 이 command는 (고아가 아니라) "사람이 실제로 요청한
+    명령"으로 pending에 남는다. 그 실패가 결정적(needs_check — 예:
+    SITE_POST_REAPPROVAL_REQUIRED류)이면 즉시 dead_letter로 멈추고(자동 재시도
+    없음), 일시적(transient/quota)이면 백오프 재시도, connection이면 blocked로
+    넘어간다 — 사람이 모르게 방치되지 않도록 실패 응답 body에 `command_status`·
+    `next_attempt_at`을 함께 낸다(화면 문구는 후속)."""
+    resolved_locale = resolve_locale_from_request(locale, accept_language)
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+
+    resolved = await _require_human(db, auth, org_id)
+
+    from app.services.channel_posts import resolve_command_target
+    from app.services.publication_command import record_publication_attempt, apply_command_failure, create_or_get_publication_command
+
+    try:
+        draft, latest, gate = await resolve_command_target(db, org_id=org_id, draft_id=draft_id)
+    except ChannelPostDraftNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ExternalPublishGateNotApprovedError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "EXTERNAL_PUBLISH_APPROVAL_REQUIRED", "message": str(exc)},
+        ) from exc
+
+    if gate.sealed_scheduled_at is not None:
+        # 예약 — command만 만들고 여기서 끝(워커가 나중에 처리, AC3).
+        command, _created = await create_or_get_publication_command(
+            db, org_id=org_id, gate_id=gate.id, destination=draft.connection_id,
+            approved_version=latest.id, requested_by_member_id=resolved.id,
+            scheduled_at=gate.sealed_scheduled_at,
+        )
+        await db.commit()
+        #
+        # story #3808(배포 81 라이브 회차, 페드루 PO 정정 決定 2026-09-12 19:28Z) —
+        # 초안 처방은 이 재요청(created=False)을 409로 거절했으나, 그건 story
+        # cfc1a55a AC4(2026-09-04 PO 確定)의 기존 계약을 깼다 — 게이트가 approved로
+        # 바뀌는 순간 이미 이 command가 자동 생성되므로(gate_service.py, /publish
+        # 호출과 무관), 사람이 처음이자 유일하게 여기 오는 경우도 라우터 관점에선
+        # 항상 created=False다. 즉 "첫 확인"과 "재요청"을 서버가 구별할 신호 자체가
+        # 없다(구별할 «이유»도 없다 — 같은 상태면 같은 응답). PO 판정: 이 요청은
+        # 그대로 멱등 200(같은 command_id·행 수 불변·scheduled_at 불변)을 낸다 —
+        # FE 잠금(scheduled_at 미래)과 이 200이 "아무것도 안 바뀐다"는 같은 사실의
+        # 두 표현일 뿐, 모순이 아니다.
+        return PublishChannelPostResponse(
+            version_id=latest.id, scheduled=True, command_id=command.id,
+            scheduled_at=gate.sealed_scheduled_at.isoformat(),
+        )
+
+    # 즉시 — command를 pending으로 upsert한 뒤 기존처럼 동기 실행(AC2, 동기 유지).
+    command, _ = await create_or_get_publication_command(
+        db, org_id=org_id, gate_id=gate.id, destination=draft.connection_id,
+        approved_version=latest.id, requested_by_member_id=resolved.id, scheduled_at=None,
+    )
+    await db.commit()
+    now = datetime.now(timezone.utc)
+
+    # story #3808(배포 81 라이브 회차 실 결함, 페드루 PO 정정 決定) — 이 upsert는
+    # 항상 scheduled_at=None으로 호출하므로 반환된 기존 행도 scheduled_at=None
+    # 고정(스케줄 변경은 재승인→새 approved_version→다른 idempotency key라 이
+    # 즉시 분기가 예약 command와 충돌할 일이 없다). 이 기존 행이 가질 수 있는
+    # 건 시스템이 정한 `next_attempt_at`
+    # (transient 실패 뒤 백오프)뿐 — 이건 사람의 즉시 재시도를 막지 않는다(AC3
+    # 「부분 성공 뒤 즉시 재시도」 계약 그대로, 여기서 깨면 안 된다는 것이 PO
+    # 정정의 요점). 이중 시도는 이미 안전 — 아래 성공/실패 분기가 이 같은 행을
+    # 동기 트랜잭션 안에서 즉시 completed/dead_letter/pending(새
+    # next_attempt_at)로 갱신하므로 워커가 옛 상태를 다시 집을 여지가 없다
+    # (별도 supersede 로직 불요, pin 테스트로 증명).
+    attempt_started_at = now
+
+    async def _record_this_attempt(*, approval_check: str, adapter_called: bool, result_code: str | None) -> None:
+        # story #3474(페드루 보정, 2026-09-05) — 즉시 발행은 `_process_one_command`
+        # (cron 워커)를 안 거치는 별도 동기 경로라, 그쪽에 심은 원장 기록이 이 경로엔
+        # 하나도 안 닿는다. 실제 채널 발행 트래픽 대부분이 이 경로(즉시)를 타므로
+        # 여기서 빠지면 원장이 소수(예약분)만 세는 반쪽 계측이 된다 — 워커와 같은
+        # 지점(publish_channel_post_draft 호출 전후)에 동일하게 심는다.
+        await record_publication_attempt(
+            db, command=command, approval_check=approval_check, adapter_called=adapter_called,
+            started_at=attempt_started_at, finished_at=datetime.now(timezone.utc), result_code=result_code,
+        )
+
+    def _with_command_state(detail: dict) -> dict:
+        # 페드루 리뷰 F(제품 의미 확定) — 즉시 발행 실패로 command가 pending(자동
+        # 재시도 대기)/dead_letter(재시도 없음)/blocked(연결 복구 대기)/voided로 남을
+        # 수 있다. 사람이 요청한 명령이 사람 모르게 방치되지 않도록 실패 응답에 그
+        # 상태와 다음 자동 재시도 시각을 함께 낸다(화면 문구는 후속 스토리).
+        return {
+            **detail,
+            "command_status": command.status,
+            "next_attempt_at": command.next_attempt_at.isoformat() if command.next_attempt_at else None,
+        }
+
+    try:
+        row = await publish_channel_post_draft(
+            db, org_id=org_id, draft_id=draft_id, published_by_member_id=resolved.id,
+        )
+    except ChannelPostDraftNotFoundError as exc:
+        await _record_this_attempt(approval_check="ok", adapter_called=False, result_code="CHANNEL_POST_DRAFT_NOT_FOUND")
+        await apply_command_failure(
+            db, command, error_code="CHANNEL_POST_DRAFT_NOT_FOUND", last_error=str(exc), now=now,
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=404,
+            detail=_with_command_state({"code": "CHANNEL_POST_DRAFT_NOT_FOUND", "message": str(exc)}),
+        ) from exc
+    except ExternalPublishGateNotApprovedError as exc:
+        # story #3474 — publish_channel_post_draft 내부 게이트 재검증이 여기서 막았다
+        # (adapter 미호출). 워커의 blocked_unapproved와 같은 결이지만, 이 즉시-발행
+        # 경로는 사람이 그 자리에서 받는 HTTP 실패라 command 종결 정책은 기존
+        # apply_command_failure(needs_check→dead_letter) 그대로 둔다(페드루 확定 —
+        # 이 코드 경로 자체의 재시도/종결 정책 변경은 이 스토리 스코프 밖, 원장
+        # 기록만 추가).
+        await _record_this_attempt(approval_check="missing", adapter_called=False, result_code=None)
+        await apply_command_failure(
+            db, command, error_code="EXTERNAL_PUBLISH_APPROVAL_REQUIRED", last_error=str(exc), now=now,
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=403,
+            detail=_with_command_state({"code": "EXTERNAL_PUBLISH_APPROVAL_REQUIRED", "message": str(exc)}),
+        ) from exc
+    except GenerationBudgetExceededError as exc:
+        # story #3498(AC4) — 위 EXTERNAL_PUBLISH_APPROVAL_REQUIRED와 동형 처리(adapter
+        # 미호출, 원장 기록만 추가·재시도/종결 정책 변경 없음).
+        #
+        # story #3808(PR5c, 페드루 PO 確定 2026-09-12 — 라이브 회차 결함 처방) — 이
+        # 예외는 3498 생성 비용 축과 X api_usage_budget 축 둘 다에서 올라온다(같은
+        # 계산 프리미티브 재사용, `rule_key`로만 구분 — generation_budget.py 참고).
+        # 코드를 항상 "GENERATION_BUDGET_EXCEEDED"로 뭉개면 X 상한 초과인데 화면이
+        # "생성 비용 한도를 넘습니다"를 보여주는 축 오라벨 결함이 난다(실측, 배포79
+        # 라이브 회차). rule_key로 갈라 별도 코드를 낸다.
+        budget_exceeded_code = (
+            "API_USAGE_BUDGET_EXCEEDED" if exc.rule_key == API_USAGE_BUDGET_RULE_KEY
+            else "GENERATION_BUDGET_EXCEEDED"
+        )
+        await _record_this_attempt(approval_check="budget_exceeded", adapter_called=False, result_code=None)
+        await apply_command_failure(
+            db, command, error_code=budget_exceeded_code, last_error=str(exc), now=now,
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=422,
+            detail=_with_command_state({
+                "code": budget_exceeded_code,
+                "limit_minor": exc.limit_minor, "spent_minor": exc.spent_minor,
+                "estimated_cost_minor": exc.estimated_cost_minor, "remaining_minor": exc.remaining_minor,
+            }),
+        ) from exc
+    except YouTubeQuotaExceededError as exc:
+        # story #3815(Phase3·3-5 PR2, 페드루 PO 確定 2026-09-12) — 위 GenerationBudget
+        # ExceededError와 동형 처리(사전 재검사가 provider 호출 直前에 막는다 —
+        # adapter_called=False, row는 이미 failed로 남겨진 상태 — 오케스트레이션
+        # 안에서 처리, 여기선 command 원장만 마저 채운다). 사용자 문장은
+        # i18n_catalog 경유(페드루 낱말 確定 — "quota" 낱말 배제).
+        #
+        # story #3815(배포 83 픽셀 결함, 페드루 PO 지적 2026-09-12 23:50Z) — 문구의
+        # 시간대 표기를 `exc.reset_timezone`(채널 어댑터 선언값, `reset_at` 계산과
+        # 같은 소스)에서 파생 — TIMEZONE_DISPLAY_NAMES에 없는 값이면 KeyError로
+        # 죽는다(지어낸 표기 0, fail-closed).
+        from app.services.i18n_catalog import TIMEZONE_DISPLAY_NAMES
+        tz_display = TIMEZONE_DISPLAY_NAMES[exc.reset_timezone][resolved_locale]
+        await _record_this_attempt(approval_check="ok", adapter_called=False, result_code="YOUTUBE_QUOTA_EXCEEDED")
+        await apply_command_failure(
+            db, command, error_code="YOUTUBE_QUOTA_EXCEEDED", last_error=str(exc), now=now,
+            reason_reset_at=exc.reset_at,
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=422,
+            detail=_with_command_state({
+                "code": "YOUTUBE_QUOTA_EXCEEDED",
+                "message": t("channel_posts.youtube_usage_exceeded", resolved_locale, tz_display=tz_display),
+                "limit_units": exc.limit_units, "spent_units": exc.spent_units,
+                "estimated_units": exc.estimated_units, "remaining_units": exc.remaining_units,
+                "reset_at": exc.reset_at.isoformat(),
+            }),
+        ) from exc
+    except ChannelTextTooLongError as exc:
+        # 페드루 PO 확定(2026-09-03) — 발행 시점 재검사(UTM 태그된 링크가 붙은 실제 전송
+        # 문자열 기준). draft 생성 시점의 매핑(422·max_length·current_length)과 동형 —
+        # 코드 하나가 두 HTTP status를 갖지 않게 유지. story #3474(페드루 리뷰 보정①,
+        # 2026-09-05) — `_validate_text_length`는 channel_posts.py:1158, httpx 클라이언트
+        # 블록(1160) *앞* — Threads에 아무 HTTP도 안 나간 시점(adapter_called=False).
+        await _record_this_attempt(approval_check="ok", adapter_called=False, result_code="CHANNEL_TEXT_TOO_LONG")
+        await apply_command_failure(
+            db, command, error_code="CHANNEL_TEXT_TOO_LONG", last_error=str(exc), now=now,
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=422,
+            detail=_with_command_state({
+                "code": "CHANNEL_TEXT_TOO_LONG", "message": str(exc),
+                "max_length": exc.max_length, "current_length": exc.current_length,
+            }),
+        ) from exc
+    except ChannelYouTubeMetadataError as exc:
+        # story #3815(Phase3·3-5, 미르코 PR4 그라운딩 발견 → 페드루 PO 지적 2026-09-12
+        # 14:37Z) — 실 결함 처방(발행 시점 checkpoint, 저장 시점 checkpoint는 위
+        # post_channel_post_draft_version에 동형으로 배선). `_validate_youtube_
+        # metadata`는 channel_posts.py:1643 부근 `_validate_text_length` 直後
+        # 호출(Threads에 아무 HTTP도 안 나간 시점) — ChannelTextTooLongError와
+        # 같은 adapter_called=False 축.
+        await _record_this_attempt(approval_check="ok", adapter_called=False, result_code="YOUTUBE_METADATA_INVALID")
+        await apply_command_failure(
+            db, command, error_code="YOUTUBE_METADATA_INVALID", last_error=str(exc), now=now,
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=422,
+            detail=_with_command_state({
+                "code": "YOUTUBE_METADATA_INVALID",
+                "message": t("channel_posts.youtube_metadata_invalid", resolved_locale),
+                "field": exc.field, "reason": exc.reason,
+            }),
+        ) from exc
+    except ChannelPostSealMissingError as exc:
+        # story #3474(페드루 리뷰 보정①) — channel_posts.py:1095, httpx 클라이언트 블록
+        # 앞(같은 이유로 adapter_called=False).
+        await _record_this_attempt(approval_check="ok", adapter_called=False, result_code="SITE_POST_SEAL_MISSING")
+        await apply_command_failure(
+            db, command, error_code="SITE_POST_SEAL_MISSING", last_error=str(exc), now=now,
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=409,
+            detail=_with_command_state({"code": "SITE_POST_SEAL_MISSING", "message": str(exc)}),
+        ) from exc
+    except ChannelPostReapprovalRequiredError as exc:
+        # story #3414 — 추가② 훅이 대개 이 상황 전에 command를 이미 voided로 무효화해
+        # 두지만, 놓친 경합 창은 여기서도 잡는다(이중 방어). story #3474 — 봉인 sha256
+        # 불일치라 adapter 미호출(워커의 version_mismatch와 동형).
+        await _record_this_attempt(approval_check="version_mismatch", adapter_called=False, result_code=None)
+        command.status = "voided"
+        command.reason_code = "CONTENT_CHANGED"
+        command.last_error = str(exc)[:2000]
+        await db.commit()
+        raise HTTPException(
+            status_code=409,
+            detail=_with_command_state({"code": "SITE_POST_REAPPROVAL_REQUIRED", "message": str(exc)}),
+        ) from exc
+    except ChannelConnectionNotActiveError as exc:
+        # story #3474(페드루 리뷰 보정①) — channel_posts.py:1129, `create_container`
+        # 호출(1255) 전이라 adapter_called=False.
+        await _record_this_attempt(approval_check="ok", adapter_called=False, result_code="CHANNEL_CONNECTION_NOT_ACTIVE")
+        await apply_command_failure(
+            db, command, error_code="CHANNEL_CONNECTION_NOT_ACTIVE", last_error=str(exc), now=now,
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=409,
+            detail=_with_command_state({"code": "CHANNEL_CONNECTION_NOT_ACTIVE", "message": str(exc)}),
+        ) from exc
+    # story #3605(실측 정정) — ChannelConnectionRevokedError·ChannelConnectionAuthError
+    # 둘 다 ChannelTokenExpiredError의 서브클래스라 부모보다 먼저 잡아야 한다. 안 그러면
+    # channel_posts.py::publish_channel_post_draft가 이미 inline으로 정확히 승격해 둔
+    # connection.status(revoked/error)를, 이 핸들러가 apply_command_failure를
+    # error_code="CHANNEL_TOKEN_EXPIRED"로 다시 호출해 "expired"로 덮어써 버리는
+    # 실사고가 났다(_process_one_command 워커의 동형 함정과 같은 근본원인, 3605
+    # 그라운딩) — publish_channel_post_draft가 이미 apply_connection_failure로
+    # connection은 처리해 뒀으므로 여기선 command 상태·HTTP 응답 코드만 그 사유에
+    # 맞게 정확히 남긴다(connection.status 재승격 없음, 이중 기록 방지).
+    except ChannelConnectionRevokedError as exc:
+        await _record_this_attempt(approval_check="ok", adapter_called=True, result_code="CHANNEL_CONNECTION_REVOKED")
+        await apply_command_failure(
+            db, command, error_code="CHANNEL_CONNECTION_REVOKED", last_error=str(exc), now=now,
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=409,
+            detail=_with_command_state({"code": "CHANNEL_CONNECTION_REVOKED", "message": str(exc)}),
+        ) from exc
+    except ChannelConnectionAuthError as exc:
+        await _record_this_attempt(approval_check="ok", adapter_called=True, result_code="CHANNEL_CONNECTION_AUTH_ERROR")
+        await apply_command_failure(
+            db, command, error_code="CHANNEL_CONNECTION_AUTH_ERROR", last_error=str(exc), now=now,
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=409,
+            detail=_with_command_state({"code": "CHANNEL_CONNECTION_AUTH_ERROR", "message": str(exc)}),
+        ) from exc
+    except ChannelTokenExpiredError as exc:
+        await _record_this_attempt(approval_check="ok", adapter_called=True, result_code="CHANNEL_TOKEN_EXPIRED")
+        await apply_command_failure(
+            db, command, error_code="CHANNEL_TOKEN_EXPIRED", last_error=str(exc), now=now,
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=409,
+            detail=_with_command_state({"code": "CHANNEL_TOKEN_EXPIRED", "message": str(exc)}),
+        ) from exc
+    except ChannelRateLimitedError as exc:
+        retry_after_seconds = max(0, int((exc.reset_at - now).total_seconds()))
+        await _record_this_attempt(approval_check="ok", adapter_called=True, result_code="CHANNEL_RATE_LIMITED")
+        await apply_command_failure(
+            db, command, error_code="CHANNEL_RATE_LIMITED", last_error=str(exc), now=now,
+            retry_after_seconds=retry_after_seconds,
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=429,
+            detail=_with_command_state({
+                "code": "CHANNEL_RATE_LIMITED", "message": str(exc), "reset_at": exc.reset_at.isoformat(),
+            }),
+            # 페드루 리뷰 블로커E — Retry-After 헤더가 빠져 있었다(main.py의 헤더
+            # 처리기는 slowapi 429 경로만 커버, 이 429는 그 경로가 아니다). 실값
+            # (retry_after_seconds)은 바로 위에서 이미 계산했다 — 그대로 싣는다.
+            headers={"Retry-After": str(retry_after_seconds)},
+        ) from exc
+    except ChannelPublishProviderError as exc:
+        await _record_this_attempt(approval_check="ok", adapter_called=True, result_code="CHANNEL_PUBLISH_PROVIDER_ERROR")
+        await apply_command_failure(
+            db, command, error_code="CHANNEL_PUBLISH_PROVIDER_ERROR", last_error=str(exc), now=now,
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=503,
+            detail=_with_command_state({"code": "CHANNEL_PUBLISH_PROVIDER_ERROR", "message": str(exc)}),
+        ) from exc
+    except ChannelPublishInProgressError as exc:
+        # story #3395 — 같은 (gate_id, version_id) 동시 요청 경합에서 진 쪽이 이긴 쪽의
+        # 완료를 기다렸는데도 못 끝났다(약 3초). 거짓 200도 무단 500도 아닌 정직한
+        # "잠시 후 다시" — 클라이언트 재시도는 그때 남은 container_created 행으로 기존
+        # 부분성공 재시도 경로를 그대로 탄다. 페드루 리뷰 nit I — command는 여기서
+        # 손대지 않는다(apply_command_failure를 안 부른다) — 생성 시점 그대로
+        # `pending`이다("in_progress로 남긴다"던 원래 주석이 틀렸다 — in_progress는
+        # 워커·이 함수의 성공 직전에만 대입되는 값이지 여기선 대입한 적이 없다). 다음
+        # 요청(재시도)이 같은 멱등키로 이 pending command를 그대로 재사용한다.
+        raise HTTPException(
+            status_code=409,
+            detail=_with_command_state({"code": "CHANNEL_PUBLISH_IN_PROGRESS", "message": str(exc)}),
+        ) from exc
+    except ChannelImageContainerFailedError as exc:
+        # story 620beefc(AC5) — Threads가 IMAGE 컨테이너를 ERROR/EXPIRED로 끝냈다(결정적,
+        # 재시도해도 안 바뀐다). needs_check 분류라 자동 재시도 없이 사람 재시도(retry
+        # 엔드포인트, AC5)만 남긴다.
+        await _record_this_attempt(approval_check="ok", adapter_called=True, result_code="CHANNEL_IMAGE_CONTAINER_FAILED")
+        await apply_command_failure(
+            db, command, error_code="CHANNEL_IMAGE_CONTAINER_FAILED", last_error=str(exc), now=now,
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=503,
+            detail=_with_command_state({
+                "code": "CHANNEL_IMAGE_CONTAINER_FAILED", "message": str(exc),
+                "container_status": exc.container_status,
+            }),
+        ) from exc
+
+    if row.status != "published":
+        # story 620beefc(AC5) — IMAGE 컨테이너가 아직 처리 中. 예외가 안 났다는 것
+        # 자체가 "지금까지는 정상, 아직 안 끝났다"는 뜻 — command는 pending에
+        # 남기고(다음 cron tick이 이어 폴링) 사람에게는 "처리 中"임을 그대로 알린다.
+        await _record_this_attempt(approval_check="ok", adapter_called=True, result_code=row.status)
+        command.status = "pending"
+        command.next_attempt_at = now + timedelta(seconds=30)
+        command.last_error = None
+        command.failure_kind = None
+        await db.commit()
+        return PublishChannelPostResponse(
+            version_id=row.version_id, scheduled=False, processing=True,
+            command_id=command.id, scheduled_at=None,
+        )
+
+    await _record_this_attempt(approval_check="ok", adapter_called=True, result_code="published")
+    command.status = "completed"
+    command.last_error = None
+    command.failure_kind = None
+    await db.commit()
+
+    return PublishChannelPostResponse(
+        permalink=row.permalink, external_id=row.external_id,
+        published_at=row.published_at.isoformat(), version_id=row.version_id,
+        scheduled=False, command_id=command.id, publication_id=row.id,
+        privacy_locked=bool(row.privacy_locked),
+    )
+
+
+class RetryPublicationCommandResponse(BaseModel):
+    id: uuid.UUID
+    status: str
+
+
+async def _retry_publication_command(
+    db: AsyncSession, *, org_id: uuid.UUID, command_id: uuid.UUID, auth: AuthContext,
+) -> RetryPublicationCommandResponse:
+    """story #3414 AC5·#3476(페드루 보정②, 미르코 FE 그라운딩 2026-09-05) — 휴먼
+    전용, `dead_letter`/`blocked` 상태인 command만 `pending`으로 되돌린다(그 외는
+    404로 존재 비노출). `retry_dead_letter_command` 자체가 `content_kind`를 안
+    본다(org_id+command_id로만 조회) — channel_post·site_post 양쪽 어느 경로에서
+    호출돼도 그대로 맞는다, 이 함수 자체엔 분기 코드가 없다(불필요)."""
+    await _require_human(db, auth, org_id)
+
+    from app.services.publication_command import retry_dead_letter_command
+
+    command = await retry_dead_letter_command(db, org_id=org_id, command_id=command_id)
+    if command is None:
+        raise HTTPException(status_code=404, detail="command를 찾을 수 없거나 재시도 대상이 아닙니다")
+    await db.commit()
+    return RetryPublicationCommandResponse(id=command.id, status=command.status)
+
+
+@router.post(
+    "/{org_id}/publication-commands/{command_id}/retry",
+    response_model=RetryPublicationCommandResponse,
+)
+async def retry_publication_command_shared_endpoint(
+    org_id: uuid.UUID,
+    command_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> RetryPublicationCommandResponse:
+    """story #3476(페드루 보정②) — content_kind 무관 공용 경로. 기존
+    `/channel-posts/publication-commands/{id}/retry`는 경로 자체에 channel-posts가
+    박혀 있어 site_post 화면이 재사용할 수 없었다(미르코 FE 그라운딩). FE의
+    새 호출은 전부 이 경로로 옮긴다 — 구 경로는 하위호환으로 이 함수에 위임만."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    return await _retry_publication_command(db, org_id=org_id, command_id=command_id, auth=auth)
+
+
+@router.post(
+    "/{org_id}/channel-posts/publication-commands/{command_id}/retry",
+    response_model=RetryPublicationCommandResponse,
+)
+async def retry_publication_command_endpoint(
+    org_id: uuid.UUID,
+    command_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> RetryPublicationCommandResponse:
+    """story #3414 AC5 — 휴먼 전용(발행 자체가 human-only인 것과 동형). `dead_letter`
+    **또는 `blocked`**(연결 복구 대기 — 페드루 리뷰 블로커B: 원래 dead_letter만
+    받아 owner 재인증 뒤 blocked 예약 명령이 갈 길이 없었다) 상태인 command만 다시
+    큐(`pending`)에 올린다 — 그 외 상태(completed·voided 등)는 404로 존재 비노출
+    (카디르 QA와 동형 관례, 상태를 굳이 구별해 알려주지 않는다).
+    `next_attempt_at`을 null로 되돌려야 다음 cron tick이 이 행을 실제로 다시 집는다
+    (status만 바뀌고 next_attempt_at이 미래에 멈춰 있으면 WHERE절에서 계속 빠지는
+    결함 — 카디르 QA⑤ 지적 그대로 반영).
+
+    story #3476 — 공용 엔드포인트(`retry_publication_command_shared_endpoint`)로
+    위임만(동작 무변, 구 경로 호환 유지 — FE 마이그레이션 전까지 죽이지 않는다)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    return await _retry_publication_command(db, org_id=org_id, command_id=command_id, auth=auth)
+
+
+class CancelScheduledCommandResponse(BaseModel):
+    command_id: uuid.UUID
+    status: str
+    reason_code: str | None = None
+
+
+@router.post(
+    "/{org_id}/channel-posts/drafts/{draft_id}/cancel-scheduled",
+    response_model=CancelScheduledCommandResponse,
+)
+async def cancel_scheduled_command_endpoint(
+    org_id: uuid.UUID,
+    draft_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> CancelScheduledCommandResponse:
+    """story #3419 AC1 — owner/admin 전용(휴먼 전용 안의 좁은 축, `_require_owner_or_admin`
+    — 되돌릴 수 있는 파괴적 상태전환이라 발행 자체보다 한 단계 더). 이 draft의 gate에
+    걸린 **가장 최근** publication_command가 pending·blocked·dead_letter면 `cancelled`로
+    전이한다. 그 외 상태는 409(코드 명시) — «이미 실행 중/끝난 것을 취소하려 했다»를
+    정직하게 알린다."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    resolved = await _require_owner_or_admin(db, auth, org_id)
+
+    try:
+        command = await cancel_scheduled_publication(
+            db, org_id=org_id, draft_id=draft_id, cancelled_by_member_id=resolved.id,
+        )
+    except ChannelPostDraftNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ChannelPostGateNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PublicationCommandNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "PUBLICATION_COMMAND_NOT_FOUND", "message": str(exc)},
+        ) from exc
+    except PublicationCommandNotCancellableError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "PUBLICATION_COMMAND_NOT_CANCELLABLE", "message": str(exc),
+                "current_status": exc.current_status,
+            },
+        ) from exc
+
+    return CancelScheduledCommandResponse(
+        command_id=command.id, status=command.status, reason_code=command.reason_code,
+    )
+
+
+class UnpublishChannelPostResponse(BaseModel):
+    publication_id: uuid.UUID
+    status: str
+    external_id: str | None = None
+    unpublished_at: str
+
+
+@router.post(
+    "/{org_id}/channel-posts/drafts/{draft_id}/unpublish", response_model=UnpublishChannelPostResponse,
+)
+async def unpublish_channel_post_endpoint(
+    org_id: uuid.UUID,
+    draft_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> UnpublishChannelPostResponse:
+    """story #3419 AC2 — owner/admin 전용(site_posts.py unpublish 관례와 동형). 이
+    draft의 gate에서 가장 최근 발행된(status='published') 글을 Threads 공식 삭제
+    API로 회수한다. 어댑터 미지원(422)·연결 스코프 부족(422, required_scopes 실림 —
+    기존 연결은 threads_delete 스코프 없이 저장돼 있어 재인증 前까지 여기 걸린다,
+    PO 確定 ②-a)·연결 비활성(409)·이미 회수/미발행(409)·provider 오류(401/403→토큰
+    만료 409, 그 외→502)를 각각 명시 코드로 구분한다."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    resolved = await _require_owner_or_admin(db, auth, org_id)
+
+    try:
+        pub = await unpublish_channel_post(
+            db, org_id=org_id, draft_id=draft_id, unpublished_by_member_id=resolved.id,
+        )
+    except ChannelPostDraftNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ChannelPostGateNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ChannelPostNotPublishedError as exc:
+        raise HTTPException(
+            status_code=409, detail={"code": "CHANNEL_POST_NOT_PUBLISHED", "message": str(exc)},
+        ) from exc
+    except ChannelUnpublishUnsupportedError as exc:
+        raise HTTPException(
+            status_code=422, detail={"code": "CHANNEL_UNPUBLISH_UNSUPPORTED", "message": str(exc)},
+        ) from exc
+    except ChannelScopeInsufficientError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHANNEL_SCOPE_INSUFFICIENT", "message": str(exc),
+                "required_scopes": exc.required_scopes,
+            },
+        ) from exc
+    except ChannelConnectionNotActiveError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "CHANNEL_CONNECTION_NOT_ACTIVE", "message": str(exc)},
+        ) from exc
+    # story #3605 — 회수/사유불명 예외도 부모(ChannelTokenExpiredError)보다 먼저 잡아
+    # HTTP 응답 code가 정확한 사유를 말하게 한다(unpublish는 command가 없어 connection
+    # 승격 자체는 이미 publish 경로에서 끝났다는 전제 — 여긴 응답 코드만의 문제).
+    except ChannelConnectionRevokedError as exc:
+        raise HTTPException(
+            status_code=409, detail={"code": "CHANNEL_CONNECTION_REVOKED", "message": str(exc)},
+        ) from exc
+    except ChannelConnectionAuthError as exc:
+        raise HTTPException(
+            status_code=409, detail={"code": "CHANNEL_CONNECTION_AUTH_ERROR", "message": str(exc)},
+        ) from exc
+    except ChannelTokenExpiredError as exc:
+        raise HTTPException(
+            status_code=409, detail={"code": "CHANNEL_TOKEN_EXPIRED", "message": str(exc)},
+        ) from exc
+    except ChannelRateLimitedError as exc:
+        # story 5b27b32f — 이 핸들러가 원래 빠져 있었다(gap 발견: _classify_threads_error에
+        # 429 분기를 추가하니 delete_media 실패도 이제 이 예외를 낼 수 있는데 unpublish
+        # 엔드포인트만 못 잡고 있었다 — 발행(publish) 엔드포인트의 기존 핸들러와 동형,
+        # 다만 unpublish엔 publication_command가 없어 apply_command_failure 호출은 없다).
+        retry_after_seconds = max(0, int((exc.reset_at - datetime.now(timezone.utc)).total_seconds()))
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "code": "CHANNEL_RATE_LIMITED", "message": str(exc), "reset_at": exc.reset_at.isoformat(),
+            },
+            headers={"Retry-After": str(retry_after_seconds)},
+        ) from exc
+    except ChannelPublishProviderError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "CHANNEL_PUBLISH_PROVIDER_ERROR", "message": str(exc)},
+        ) from exc
+
+    return UnpublishChannelPostResponse(
+        publication_id=pub.id, status=pub.status, external_id=pub.external_id,
+        unpublished_at=pub.updated_at.isoformat(),
+    )

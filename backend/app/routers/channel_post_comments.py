@@ -1,0 +1,320 @@
+"""story #3516(Phase2·마케팅운영, 페드루 PO 確定 2026-09-05) — 댓글 목록+수동 재수집.
+블루프린트 v3 §2 「댓글·반응 대응」 MVP 조각①. 답변(reply) 경로는 조각②."""
+from __future__ import annotations
+
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.error_envelope import human_error
+from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
+from app.dependencies.database import get_db
+from app.services.channel_post_comments import (
+    CommentCollectionUnsupportedError,
+    CommentFetchError,
+    CommentPublicationNotFoundError,
+    CommentRefreshRateLimitedError,
+    list_comments_for_publication,
+    refresh_comments_now,
+)
+from app.services.member_resolver import resolve_member
+
+router = APIRouter(prefix="/api/v2/organizations", tags=["channel-post-comments"])
+
+
+async def _require_human(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID):
+    """story #3516 AC4 — 목록 GET은 에이전트도 가능(읽기), 수동 재수집은 휴먼 전용
+    (channel_posts.py::_require_human과 동형 권한 폭 — 발행류 액션은 항상 휴먼)."""
+    resolved = await resolve_member(auth, org_id, db)
+    if resolved.type != "human":
+        raise HTTPException(
+            status_code=403,
+            detail=human_error(
+                "COMMENT_REFRESH_HUMAN_ONLY", "댓글 재수집은 휴먼 멤버만 가능해요.",
+                user_message="댓글 재수집은 휴먼 멤버만 가능해요.",
+            ),
+        )
+    return resolved
+
+
+class CommentReplySummary(BaseModel):
+    """조각②-b(additive) — 댓글당 최신 답변 1건 요약(배치 조인, N+1 X). FE 칩
+    (무응답/초안/상신/발송 대기/발행/실패)은 이 필드 하나에서 파생 — null=무응답."""
+    id: uuid.UUID
+    status: str
+    external_reply_url: str | None
+    command_id: uuid.UUID | None
+    # story #3593(Phase2·BE, 페드루 PO 確定 2026-09-06) — 유나 실측: 답변 sent
+    # 뒤에도 행에 답변 텍스트가 어디에도 없어(comments-section.tsx grep 0건)
+    # 「내가 무엇을 답했는지」가 화면에서 안 보였다. DB엔 이미 저장돼 있던
+    # 값(ChannelPostCommentReply.text)의 투영만 빠진 자리 — 이 요약이 이미
+    # 「최신 답변」이므로 그 답변의 실제 본문을 그대로 싣는다.
+    text: str
+    # story #3529(additive, 유나 §22-15 채택) — PublicationCommand 4필드 그대로
+    # (새 이름/새 값 0). command_id가 null이면 넷 다 null.
+    command_status: str | None = Field(
+        default=None,
+        description=(
+            "PublicationCommand.status 그대로 — 다음 할 일이 갈리는 네 값(유나 §22-15): "
+            "\"pending\"(백오프 대기 중, 기다리면 자동 재시도) · \"blocked\"(연결 복구 "
+            "필요, 사람이 재인증해야 함) · \"dead_letter\"(자동 재시도 포기, 사람 판단 "
+            "필요) · \"voided\"(전제가 바뀌어 종결, 재시도 개념 자체가 안 맞음). "
+            "그 외 \"completed\" 등은 성공/진행 중."
+        ),
+    )
+    failure_kind: str | None = Field(
+        default=None,
+        description="유나 design §11-5 세 값(connection|needs_check|transient) — 실패 없었으면 null.",
+    )
+    next_attempt_at: str | None = Field(
+        default=None, description="transient 백오프 다음 시도 시각(ISO) — 없으면 null.",
+    )
+    reason_code: str | None = Field(
+        default=None,
+        description=(
+            "voided 사유(PublicationCommand.reason_code 그대로, 새 이름 짓지 않음 — "
+            "이 컬럼은 channel_post 발행류(publication_command.py)와 공유라 열거를 "
+            "닫지 않는다). 페드루 PO 대조(2026-09-06) — **현재 관측 값**: "
+            "\"GATE_NOT_APPROVED_OR_RESEALED\"(게이트 재검증 실패) · "
+            "\"TARGET_COMMENT_DELETED\"(승인 뒤 워커 도달 前 대상 댓글 삭제 레이스) · "
+            "\"CONTENT_CHANGED\"(channel_posts.py 재승인 필요 전이 축, 댓글 답변 "
+            "경로가 아니어도 같은 컬럼에 실린다). 이 외에도 미래 값이 더 생길 수 "
+            "있다 — 화면은 아는 값만 문구로 대응하고 모르는 값은 원문 그대로/일반 "
+            "문구로 안전히 처리해야 한다. voided 아니면 null."
+        ),
+    )
+
+
+def _comment_reply_summary(reply, command_by_id: dict) -> CommentReplySummary:
+    """story #3529 — command_id가 있으면 배치 조회된 PublicationCommand에서 4필드를
+    그대로 옮긴다(command 행 자체가 없으면(레이스·오탐) 4필드 전부 null — fail-closed,
+    지어내지 않는다)."""
+    command = command_by_id.get(reply.command_id) if reply.command_id is not None else None
+    return CommentReplySummary(
+        id=reply.id, status=reply.status, external_reply_url=reply.external_reply_url,
+        command_id=reply.command_id, text=reply.text,
+        command_status=command.status if command is not None else None,
+        failure_kind=command.failure_kind if command is not None else None,
+        next_attempt_at=(
+            command.next_attempt_at.isoformat() if command is not None and command.next_attempt_at else None
+        ),
+        reason_code=command.reason_code if command is not None else None,
+    )
+
+
+class CommentOpenReplyDraft(BaseModel):
+    """story #3596(Phase2·BE, 페드루 PO 確定 2026-09-06) — 안 보낸(status draft/
+    pending) 최신 답변 1건. FE는 이 존재만으로 버튼을 「이어서 답변」으로 갈라
+    (답변 더하기 대신) 이 text로 다이얼로그를 채운다."""
+    id: uuid.UUID
+    status: str
+    text: str
+
+
+class CommentItem(BaseModel):
+    id: uuid.UUID
+    external_comment_id: str
+    author_display_name: str | None
+    text: str
+    external_created_at: str | None
+    captured_at: str
+    deleted_at: str | None
+    reply: CommentReplySummary | None = None
+    # story #3593(Phase2·BE, 페드루 PO 確定 2026-09-06) — `reply`는 이미 「최신
+    # 답변」이지만(_latest_reply_by_comment_ids), 답변이 2건 이상(재상신 이력)
+    # 이면 배지 하나(=이 최신 status)만으로는 "이 발행됨이 어느 답변의 상태인가"
+    # 가 안 선다(유나 실측). 전체 개수를 additive로 얹어 FE가 "답변 N · 최신
+    # {상태}" 형을 조립할 수 있게 한다. 답변 0건이면 0(reply가 null인 것과
+    # 논리적으로 항상 같이 간다 — 0이면 reply도 반드시 null, 그 역도 성립).
+    replies_count: int = 0
+    # story #3596(Phase2·BE, 페드루 PO 確定 2026-09-06) — 3593의 「답변 없음/이미
+    # 있음」 2갈래가 «보낸 답변»과 «안 보낸 초안»을 안 갈라 빈 다이얼로그로 2차
+    # 초안이 생기던 결함(#3947 카디르 비차단①)의 additive 처방. open_reply_draft
+    # null이면 안 보낸 초안 0건(replies_count>=sent_replies_count 항상 성립).
+    open_reply_draft: CommentOpenReplyDraft | None = None
+    sent_replies_count: int = 0
+
+
+class CommentListResponse(BaseModel):
+    # story #3516 — null="미수집"(한 번도 captured 없음)·값="가장 최근 수집 시각"
+    # (그 시각의 댓글 수가 0이어도 이 필드는 채워진다 — null≠0 원칙 그대로).
+    last_collected_at: str | None
+    comments: list[CommentItem]
+    # 페드루 PO REQUIRED(2026-09-05, PR#3865 리뷰, 유나 §22-9) — 페이지(limit/offset)
+    # 무관 서버 전체 수. active_count는 insights_board.py comments_count와 정의가
+    # 완전히 같다(deleted_at IS NULL, count_comments_by_publication_ids 재사용).
+    active_count: int
+    deleted_count: int
+    # 조각②-b 추가(유나 16회차, additive) — publication당 refresh 5분 창의 다음
+    # 허용 시각. null=지금 바로 재수집 가능. last_collected_at과 같은 계산 자리
+    # (다른 세션이 누른 429 창을 로드 시점에 화면이 미리 알게 — 버튼 비활성+사유).
+    comments_next_allowed_at: str | None = None
+
+
+class CommentRefreshResponse(BaseModel):
+    fetched: int
+    deleted: int
+    captured_at: str
+
+
+@router.get(
+    "/{org_id}/publications/{publication_id}/comments", response_model=CommentListResponse,
+)
+async def list_publication_comments_endpoint(
+    org_id: uuid.UUID,
+    publication_id: uuid.UUID,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> CommentListResponse:
+    """조직 멤버(휴먼·에이전트 모두) 읽기 가능 — 댓글 열람은 승인·발행 경계 밖(story
+    #3516 AC4, 목록/단건 조회 관례와 동형)."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+
+    # story #3829 — /insights와 동일 해석: 어느 세그먼트 id로 물어도 그 스레드의
+    # 헤드(seq 1) 행으로(스레드가 아니면 무변).
+    from app.services.insight_snapshots import resolve_head_publication_id
+
+    publication_id = await resolve_head_publication_id(db, publication_id=publication_id)
+
+    try:
+        result = await list_comments_for_publication(
+            db, org_id=org_id, publication_id=publication_id, limit=limit, offset=offset,
+        )
+    except CommentPublicationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=f"발행 기록을 찾을 수 없습니다: {publication_id}") from exc
+
+    reply_by_comment_id = result["reply_by_comment_id"]
+    command_by_id = result["command_by_id"]
+    reply_counts_by_comment_id = result["reply_counts_by_comment_id"]
+    open_reply_draft_by_comment_id = result["open_reply_draft_by_comment_id"]
+    sent_reply_counts_by_comment_id = result["sent_reply_counts_by_comment_id"]
+    return CommentListResponse(
+        last_collected_at=result["last_collected_at"].isoformat() if result["last_collected_at"] else None,
+        comments=[
+            CommentItem(
+                id=c.id, external_comment_id=c.external_comment_id, author_display_name=c.author_display_name,
+                text=c.text, external_created_at=c.external_created_at.isoformat() if c.external_created_at else None,
+                captured_at=c.captured_at.isoformat(), deleted_at=c.deleted_at.isoformat() if c.deleted_at else None,
+                reply=(
+                    _comment_reply_summary(reply_by_comment_id[c.id], command_by_id)
+                    if c.id in reply_by_comment_id else None
+                ),
+                replies_count=reply_counts_by_comment_id.get(c.id, 0),
+                open_reply_draft=(
+                    CommentOpenReplyDraft(
+                        id=open_reply_draft_by_comment_id[c.id].id,
+                        status=open_reply_draft_by_comment_id[c.id].status,
+                        text=open_reply_draft_by_comment_id[c.id].text,
+                    )
+                    if c.id in open_reply_draft_by_comment_id else None
+                ),
+                sent_replies_count=sent_reply_counts_by_comment_id.get(c.id, 0),
+            )
+            for c in result["comments"]
+        ],
+        active_count=result["active_count"], deleted_count=result["deleted_count"],
+        comments_next_allowed_at=(
+            result["comments_next_allowed_at"].isoformat() if result["comments_next_allowed_at"] else None
+        ),
+    )
+
+
+@router.post(
+    "/{org_id}/publications/{publication_id}/comments/refresh", response_model=CommentRefreshResponse,
+)
+async def refresh_publication_comments_endpoint(
+    org_id: uuid.UUID,
+    publication_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> CommentRefreshResponse:
+    """PO 決定 — publication당 5분에 1회(그 이내 재요청은 429). 지속 폴링/커서는
+    후속 스코프."""
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    await _require_human(db, auth, org_id)
+
+    try:
+        result = await refresh_comments_now(db, org_id=org_id, publication_id=publication_id)
+    except CommentRefreshRateLimitedError as exc:
+        raise HTTPException(
+            status_code=429,
+            detail={"code": "COMMENT_REFRESH_RATE_LIMITED", "message": str(exc)},
+            headers={"Retry-After": str(exc.retry_after_seconds)},
+        ) from exc
+    except CommentCollectionUnsupportedError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=human_error(
+                "COMMENT_COLLECTION_UNSUPPORTED", "이 채널은 댓글 수집을 지원하지 않아요.",
+                user_message="이 채널은 댓글 수집을 지원하지 않아요.",
+            ),
+        ) from exc
+    except CommentFetchError as exc:
+        # story #3632(PO 실측, 2026-09-07) — Cloudflare 에지가 origin의 502/504만 자체
+        # HTML 에러 페이지로 대체한다(Enterprise 미만 플랜, Origin Error Page Pass-thru
+        # 없음) — 봉투(error.code·user_message)가 브라우저에 아예 도달하지 않아 화면이
+        # 침묵했다. 규칙: 「우리 상태」로 인한 거절(연결 비활성·발행 기록 없음·채널
+        # 미구현·필수 데이터 없음)은 CF가 그대로 통과시키는 4xx로, 「진짜 상류 실패」
+        # (채널 API가 실제로 오류/타임아웃 응답)만 503(재시도 의미 있음, CF 통과)으로 —
+        # 502는 이제 이 분기 어디에서도 내지 않는다.
+        if exc.error_code == "COMMENT_PUBLICATION_NOT_FOUND":
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        if exc.error_code == "CHANNEL_RATE_LIMITED":
+            # 우리 쪽 5분 쿨다운(CommentRefreshRateLimitedError, 위)과는 다른 축 —
+            # 채널(Graph API) 자체가 이 호출을 rate-limit한 경우. HTTP 의미상 429 그대로
+            # (channel_posts.py 발행 경로의 CHANNEL_RATE_LIMITED 처리와 동형).
+            raise HTTPException(
+                status_code=429,
+                detail=human_error(
+                    exc.error_code, str(exc),
+                    user_message="채널 쪽 호출이 많아 지금은 다시 수집할 수 없습니다 — 잠시 후 다시 시도해 주세요.",
+                ),
+            ) from exc
+        from app.services.publication_command import classify_failure_kind, FAILURE_KIND_TRANSIENT
+
+        if classify_failure_kind(exc.error_code) == FAILURE_KIND_TRANSIENT:
+            # CHANNEL_PUBLISH_PROVIDER_ERROR류 — 채널 API가 실제로 실패 응답을 준 경우
+            # (SSOT 분류는 publication_command.py, channel_posts.py 발행 경로와 동일
+            # 어휘 재사용 — 새 판정 로직 0).
+            raise HTTPException(
+                status_code=503,
+                detail=human_error(
+                    exc.error_code, str(exc),
+                    user_message="채널에서 일시적인 오류가 발생해 다시 수집하지 못했습니다 — 잠시 후 다시 시도해 주세요.",
+                ),
+            ) from exc
+        # 그 외(CHANNEL_CONNECTION_NOT_ACTIVE·CHANNEL_TOKEN_EXPIRED·CHANNEL_CONNECTION_
+        # REVOKED·CHANNEL_CONNECTION_AUTH_ERROR·COMMENT_CHANNEL_NOT_IMPLEMENTED·
+        # COMMENT_EXTERNAL_ID_MISSING) — 전부 "우리 상태"(연결·설정·데이터) 문제라 409.
+        # CHANNEL_TOKEN_EXPIRED/REVOKED/AUTH_ERROR는 channel_posts.py 발행 경로가 이미
+        # 409로 내는 것과 동형(다른 메커니즘은 다른 낱말이되 같은 축은 같은 코드).
+        # story #3615(페드루 PO 정정 2026-09-07) — CHANNEL_CONNECTION_NOT_ACTIVE 등은
+        # `str(exc)`에 connection_id/publication_id uuid가 그대로 담겨(HUMAN_SAFE_ERROR_
+        # MESSAGE_CODES allowlist 등재 금지 사유) FE가 그 원문을 보일 수 없다 — 여기서
+        # human_error()로 안전한 손글 문장을 직접 채운다(그 자리 raise 20곳+ 전수 확認
+        # 대신, 이 엔드포인트가 새로 내는 자리만 사람 문장 보장 — 기존 다른 raise 자리는
+        # 이 스토리 범위 밖).
+        _CONNECTION_STATE_MESSAGES = {
+            "CHANNEL_CONNECTION_NOT_ACTIVE": "연결이 활성 상태가 아니라 댓글을 대조/수집할 수 없습니다 — 연결 화면에서 확인해 주세요.",
+            "CHANNEL_TOKEN_EXPIRED": "채널 연결이 만료되어 댓글을 수집할 수 없습니다 — 연결 화면에서 다시 연결해 주세요.",
+            "CHANNEL_CONNECTION_REVOKED": "채널 연결이 해지되어 댓글을 수집할 수 없습니다 — 연결 화면에서 다시 연결해 주세요.",
+            "CHANNEL_CONNECTION_AUTH_ERROR": "채널 인증에 문제가 있어 댓글을 수집할 수 없습니다 — 연결 화면에서 확인해 주세요.",
+        }
+        user_message = _CONNECTION_STATE_MESSAGES.get(
+            exc.error_code, "지금은 댓글을 다시 수집할 수 없습니다 — 잠시 후 다시 시도해 주세요.",
+        )
+        raise HTTPException(
+            status_code=409, detail=human_error(exc.error_code, str(exc), user_message=user_message),
+        ) from exc
+
+    return CommentRefreshResponse(
+        fetched=result["fetched"], deleted=result["deleted"], captured_at=result["captured_at"].isoformat(),
+    )

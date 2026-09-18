@@ -1,0 +1,10 @@
+{
+  "_comment": [
+    "story #3922(§⑤ 낱말 드리프트 전량 정리, 2026-09-15) — 위 69건 전량 처리 완료:",
+    "브랜드·채널명·고정 식별자·UTM·티어명·역할 약어(54건)는 WHOLE_VALUE_ALLOWLIST로,",
+    "화면 문구(12건)는 한국어 전환, 죽은 키(agents.statusEyebrow·",
+    "settings.membersTabAgents·usage.eyebrow, 3건)는 삭제.",
+    "0건 — fail-closed: 새 드리프트는 이 baseline 없이 즉시 RED."
+  ],
+  "keys": []
+}

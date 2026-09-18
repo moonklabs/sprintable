@@ -35,7 +35,11 @@ def _agent(mid: uuid.UUID) -> ResolvedMember:
 
 
 def _gate(requester_id, *, work_item_id=None, status="pending", gate_id=None):
-    return SimpleNamespace(
+    # story #3569(페드루 PO 리뷰) — SimpleNamespace 대신 gate_mock_factory.make_gate()
+    # (story #2837 "건드릴 때 이관" 관례 — 실 Gate ORM 인스턴스라 sealed_doc_id 등 새 컬럼이
+    # 늘어도 AttributeError로 재발하지 않는다, mock을 실물 스키마에 맞춰 올리는 쪽).
+    from tests.gate_mock_factory import make_gate
+    return make_gate(
         id=gate_id or uuid.uuid4(),
         gate_type="doc_approval",
         neutral_facts={"requested_by_member_id": str(requester_id)} if requester_id else {},
@@ -157,8 +161,14 @@ async def _list_gates(gate, *, has_access, resolved=None, resolve_raises=False):
     gates_result.scalars.return_value.all.return_value = [gate]
     doc_batch = MagicMock()
     doc_batch.all.return_value = [(gate.work_item_id, "T", "slug", pid)]
+    # story #3860 — list_gates가 이제 세 번째 쿼리(work_item→conversation 태그 배치,
+    # work_item_conversation.py)를 던진다. 이 파일의 관심사(can_approve)와 무관하므로
+    # 빈 결과(대화 태그 없음)로 고정 — 그 3번째 execute()에 프로그램된 응답이 없으면
+    # AsyncMock side_effect가 소진돼 StopAsyncIteration으로 터진다.
+    conv_batch = MagicMock()
+    conv_batch.all.return_value = []
     session = AsyncMock()
-    session.execute = AsyncMock(side_effect=[gates_result, doc_batch])
+    session.execute = AsyncMock(side_effect=[gates_result, doc_batch, conv_batch])
     auth = SimpleNamespace(user_id=str(uuid.uuid4()))
     rm = (
         AsyncMock(side_effect=Exception("boom")) if resolve_raises
@@ -200,17 +210,22 @@ async def test_list_gates_can_approve_false_for_agent():
 
 
 async def _run_non_doc_can_approve(project_role):
+    from tests.gate_mock_factory import make_gate
+
     org = uuid.uuid4()
-    merge = SimpleNamespace(
+    merge = make_gate(
         id=uuid.uuid4(), gate_type="merge", work_item_type="story", work_item_id=uuid.uuid4(),
-        neutral_facts={}, status="pending",
+        neutral_facts={}, status="pending", designated_approver_id=None,
     )
     gates_result = MagicMock()
     gates_result.scalars.return_value.all.return_value = [merge]
     story_batch = MagicMock()
     story_batch.all.return_value = [(merge.work_item_id, uuid.uuid4(), "T")]
+    # story #3860 — 3번째 쿼리(work_item→conversation 태그 배치) 자리, 빈 결과로 고정.
+    conv_batch = MagicMock()
+    conv_batch.all.return_value = []
     session = AsyncMock()
-    session.execute = AsyncMock(side_effect=[gates_result, story_batch])
+    session.execute = AsyncMock(side_effect=[gates_result, story_batch, conv_batch])
     auth = SimpleNamespace(user_id=str(uuid.uuid4()))
     rm = AsyncMock(return_value=_human(uuid.uuid4()))
     with patch.object(gates_mod.GateResponse, "model_validate", _resp), \
@@ -253,8 +268,13 @@ async def test_list_gates_can_approve_uses_doc_approval_predicate_not_work_item_
     """② DRY: doc_approval 인데 work_item_type≠doc 인 이상 게이트도 project_id 를 doc_approval predicate
     (work_item_id→Doc·transition 과 동일)로 조회 → can_approve 가 transition 강제와 정합. work_item_type 으로
     키잉하면 project_id=None→can_approve False 로 갈림(이 테스트가 그 회귀를 잠금)."""
+    # story #3569(페드루 PO 리뷰) — SimpleNamespace 대신 gate_mock_factory.make_gate()
+    # (story #2837 "건드릴 때 이관" 관례 — 실 Gate ORM 인스턴스라 sealed_doc_id 등 새 컬럼이
+    # 늘어도 AttributeError로 재발하지 않는다).
+    from tests.gate_mock_factory import make_gate
+
     org, doc_id, pid = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
-    g = SimpleNamespace(  # 이상: gate_type=doc_approval 이나 work_item_type≠doc
+    g = make_gate(  # 이상: gate_type=doc_approval 이나 work_item_type≠doc
         id=uuid.uuid4(), gate_type="doc_approval", work_item_type="story", work_item_id=doc_id,
         neutral_facts={"requested_by_member_id": str(uuid.uuid4())}, status="pending",
     )
@@ -262,8 +282,11 @@ async def test_list_gates_can_approve_uses_doc_approval_predicate_not_work_item_
     gates_result.scalars.return_value.all.return_value = [g]
     doc_batch = MagicMock()
     doc_batch.all.return_value = [(doc_id, "T", "slug", pid)]  # approval predicate 로 조회돼야 채워짐
+    # story #3860 — 3번째 쿼리(work_item→conversation 태그 배치) 자리, 빈 결과로 고정.
+    conv_batch = MagicMock()
+    conv_batch.all.return_value = []
     session = AsyncMock()
-    session.execute = AsyncMock(side_effect=[gates_result, doc_batch])
+    session.execute = AsyncMock(side_effect=[gates_result, doc_batch, conv_batch])
     auth = SimpleNamespace(user_id=str(uuid.uuid4()))
     with patch.object(gates_mod.GateResponse, "model_validate", _resp), \
          patch.object(gates_mod, "resolve_member", AsyncMock(return_value=_human(uuid.uuid4()))), \

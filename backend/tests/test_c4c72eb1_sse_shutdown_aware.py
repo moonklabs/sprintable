@@ -141,6 +141,12 @@ async def test_sse_stream_reacts_to_shutdown_signal_immediately_and_closes_clean
         await asyncio.sleep(0.1)
         assert ev_module._sse_connection_count == count_before, "shutdown 후 카운터 정리 안 됨"
     finally:
-        ev_module._agent_connections.pop(str(member_id), None)
-        ev_module._sse_connection_count = count_before
-        shutdown_module.reset_shutdown_event()
+        # story #3580(페드루 PO 確定 2026-09-06, #3942 CI 실사고) — 이 reset을
+        # finally 블록 맨 앞·독립 try로 둔다(다른 cleanup 문장이 예외를 던지면
+        # 뒤에 있던 reset이 안 도는 잠복 경로 방지 — test_eventbus_s3.py/test_s20.py
+        # 와 동형 처방, 이 파일은 원래도 순서가 옳았으나 방어적으로 통일).
+        try:
+            shutdown_module.reset_shutdown_event()
+        finally:
+            ev_module._agent_connections.pop(str(member_id), None)
+            ev_module._sse_connection_count = count_before

@@ -53,17 +53,18 @@ function useResize(updateAttributes: (a: Record<string, unknown>) => void) {
 }
 
 function ResizeHandles({ onStart }: { onStart: (e: React.MouseEvent, side: 'left' | 'right') => void }) {
+  const t = useTranslations('docs');
   return (
     <>
       <div
         role="separator"
-        aria-label="왼쪽 리사이즈 핸들"
+        aria-label={t('imageResizeHandleLeft')}
         onMouseDown={(e) => onStart(e, 'left')}
         className="absolute left-0 top-1/2 -translate-x-1/2 -translate-y-1/2 h-8 w-3 cursor-ew-resize rounded-sm border border-border bg-background shadow-md hover:bg-muted"
       />
       <div
         role="separator"
-        aria-label="오른쪽 리사이즈 핸들"
+        aria-label={t('imageResizeHandleRight')}
         onMouseDown={(e) => onStart(e, 'right')}
         className="absolute right-0 top-1/2 translate-x-1/2 -translate-y-1/2 h-8 w-3 cursor-ew-resize rounded-sm border border-border bg-background shadow-md hover:bg-muted"
       />
@@ -76,7 +77,7 @@ function StateBox({ tone, children }: { tone: 'muted' | 'error'; children: React
   return (
     <div
       className={`relative grid aspect-[4/3] w-full max-w-sm place-items-center overflow-hidden rounded-xl border border-border ${
-        tone === 'error' ? 'bg-destructive/10' : 'bg-muted'
+        tone === 'error' ? 'bg-destructive-tint' : 'bg-muted'
       }`}
     >
       {children}

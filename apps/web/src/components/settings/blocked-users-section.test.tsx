@@ -93,6 +93,76 @@ describe('BlockedUsersSection', () => {
     expect(container.textContent).toBe('');
   });
 
+  // story #3592(§17-20 ⑧·§22-18 동형) — 두 행이 실제로 다른 접근 이름을 낸다(보이는
+  // 글자 「차단 해제」는 둘 다 같아도, 접근성 트리에서는 순번으로 갈린다).
+  it('⭐#3592 — 2건이면 두 「차단 해제」 버튼의 접근 이름이 서로 다르고 각자 순번을 품는다', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === '/api/user-blocks') {
+        return {
+          ok: true,
+          json: async () => ({
+            data: [
+              { blocked_member_id: 'member-1', created_at: '2026-08-02T00:00:00Z' },
+              { blocked_member_id: 'member-2', created_at: '2026-08-02T00:00:00Z' },
+            ],
+          }),
+        };
+      }
+      if (url === '/api/team-members/member-1') return { ok: true, json: async () => ({ data: { name: '까심' } }) };
+      if (url === '/api/team-members/member-2') return { ok: true, json: async () => ({ data: { name: '유나' } }) };
+      return { ok: false, json: async () => ({}) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await act(async () => { root.render(wrap(<BlockedUsersSection />)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    const buttons = Array.from(container.querySelectorAll('button')).filter((b) => b.textContent === '차단 해제');
+    expect(buttons).toHaveLength(2);
+    const names = buttons.map((b) => b.getAttribute('aria-label'));
+    expect(names[0]).not.toBe(names[1]);
+    expect(names[0]).toContain('1번째');
+    expect(names[0]).toContain('차단 해제');
+    expect(names[1]).toContain('2번째');
+    expect(names[1]).toContain('차단 해제');
+  });
+
+  // story #3608(유나 §22-18 ④-2, PO 確定 2026-09-07) — pending 中 "..."는 접근
+  // 이름에도 그대로 들어가 "1번째 ..."가 됐다(#3592 발견분). 낱말("해제 중…")로
+  // 바뀌었는지 검증 — aria-label이 있는가가 아니라 그 안에 "..." 0·"해제 중" 포함.
+  it('⭐#3608 — 차단 해제 pending 中 접근 이름·보이는 글자에 "..." 0, "해제 중" 포함', async () => {
+    let resolveDelete!: () => void;
+    const deletePending = new Promise<void>((resolve) => { resolveDelete = resolve; });
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/user-blocks') {
+        return { ok: true, json: async () => ({ data: [{ blocked_member_id: 'member-9', created_at: '2026-08-02T00:00:00Z' }] }) };
+      }
+      if (url === '/api/team-members/member-9') {
+        return { ok: true, json: async () => ({ data: { name: '까심' } }) };
+      }
+      if (url === '/api/user-blocks/member-9' && init?.method === 'DELETE') {
+        await deletePending;
+        return { ok: true, json: async () => ({}) };
+      }
+      return { ok: false, json: async () => ({}) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await act(async () => { root.render(wrap(<BlockedUsersSection />)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    const unblockBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '차단 해제');
+    await act(async () => {
+      unblockBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(unblockBtn!.textContent).not.toContain('...');
+    expect(unblockBtn!.textContent).toContain('해제 중');
+    const ariaLabel = unblockBtn!.getAttribute('aria-label');
+    expect(ariaLabel).not.toContain('...');
+    expect(ariaLabel).toContain('해제 중');
+    resolveDelete();
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+  });
+
   it('차단 해제 실패면 목록에 그대로 남고 에러 토스트가 뜬다', async () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (url === '/api/user-blocks') {

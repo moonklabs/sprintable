@@ -24,7 +24,14 @@ from mcp.types import Tool as MCPTool
 from pydantic import BaseModel, ConfigDict, model_validator
 from pydantic.fields import PydanticUndefined
 
-from .api_client import _api_key_override, client, reset_project_override, set_project_override
+from .api_client import (
+    _api_key_override,
+    client,
+    reset_project_override,
+    reset_tool_name_override,
+    set_project_override,
+    set_tool_name_override,
+)
 from .config import settings
 from .response import ok
 from .schemas import SprintableInput
@@ -36,6 +43,11 @@ from .toolset import is_tool_allowed
 from .tools.a2a import (
     LinkGateToTaskInput, ListAgentCardsInput, link_gate_to_task, list_agent_cards,
 )
+from .tools.channel_posts import (
+    GetPublicationInsightsInput, WithdrawChannelPostDraftInput,
+    get_publication_insights, withdraw_channel_post_draft,
+)
+from .tools.content_rules import GetContentRulesInput, get_content_rules
 from .tools.decisions import RequestDecisionInput, request_decision
 from .tools.evidence import AddEvidenceInput, add_evidence
 from .tools.judgments import AddJudgmentInput, ListJudgmentsInput, add_judgment, list_judgments
@@ -97,8 +109,9 @@ from .tools.meetings import (
     trigger_ai_summary, update_meeting,
 )
 from .tools.chat import (
-    CreateConversationInput, GetChatMessageInput, ListChatMessagesInput, SendChatInput,
-    create_conversation, get_chat_message, list_chat_messages, send_chat_message,
+    CreateConversationInput, GetChatMessageInput, ListChatMessagesInput, ListConversationsInput,
+    SendChatInput, create_conversation, get_chat_message, list_chat_messages,
+    list_conversations, send_chat_message,
 )
 from .tools.notifications import (
     CheckNotificationsInput, MarkAllNotificationsReadInput, MarkNotificationReadInput,
@@ -257,10 +270,16 @@ def _flat(name: str, doc: str, input_cls: type[BaseModel], fn):
         # 85429ee0: per-call project_id override → contextvar(tool 호출 스코프). client.project_id +
         # X-Project-Id 헤더에 반영(org-agent 멀티프로젝트 grant). 미지정이면 키 default(무회귀).
         _tok = set_project_override(kwargs.get("project_id"))
+        # story #3722(Trust·PR2) — 이 도구 이름(레지스트리 name, 118 도구 전부의 단일 지점)을
+        # 호출 스코프 contextvar에 실어 request()가 X-Sprintable-Tool 헤더로 BE에 전달(_project_
+        # override와 동형 set/reset 패턴). BE tool_call_recording 미들웨어가 기록 행의 tool
+        # 컬럼을 채우는 유일한 경로 — 도구 함수(fn)마다 손으로 태그하지 않는다.
+        _tool_tok = set_tool_name_override(name)
         try:
             result = await fn(input_cls(**kwargs))
         finally:
             reset_project_override(_tok)
+            reset_tool_name_override(_tool_tok)
         asyncio.create_task(_heartbeat_fire_forget())
         return result
 
@@ -449,7 +468,10 @@ _TOOL_DEFS: list[tuple] = [
      "같이 보내라. 다른 스토리를 쪼개거나 복제한 것이면 origin_type=\"story\"·"
      "origin_id=<원본 스토리 id>. 회의에서 나온 것이면 origin_type=\"meeting\". "
      "둘 다 줘야 유효(하나만 있으면 조용히 무시된다) — 안 채우면 이 스토리의 출처는 "
-     "영원히 «미수집」으로 남는다(소급 안 됨, story #2267 AC5).",
+     "영원히 «미수집」으로 남는다(소급 안 됨, story #2267 AC5). ⚠️story 8b7e52d6: "
+     "assignee_id를 생략하면 claim_story를 나중에 아무리 호출해도 채워지지 않습니다"
+     "(claim_story는 assignee/board를 안 건드림, participation만) — 생략 시 응답에 "
+     "「통지 수신자 0」 warning이 실립니다.",
      AddStoryInput, add_story),
     ("sprintable_update_story",
      "[일감] 스토리 수정. 응답 reference_token은 sprintable_add_story와 동일.",
@@ -572,8 +594,11 @@ _TOOL_DEFS: list[tuple] = [
      " 생긴다(story #2282).",
      ListDocsInput, list_docs),
     ("sprintable_get_doc",
-     "[지식] slug로 문서 단건 조회. 응답 reference_token 필드가 이 문서를 가리키는 참조 토큰"
-     "([제목](entity:doc:id))을 준다 — 채팅 등에 그대로 쓰면 참조가 생긴다(story #2282).",
+     "[지식] slug 또는 doc_id로 문서 단건 조회(둘 중 하나 필수, story #3324) — 이벤트 payload·"
+     "참조 토큰(entity:doc:id)·게이트 neutral_facts가 주는 id를 doc_id에 그대로 넣으면 열린다"
+     "(예전엔 slug만 받아 그 id들로 «Doc not found»가 났다). 응답 reference_token 필드가 이"
+     " 문서를 가리키는 참조 토큰([제목](entity:doc:id))을 준다 — 채팅 등에 그대로 쓰면 참조가"
+     " 생긴다(story #2282).",
      GetDocInput, get_doc),
     ("sprintable_search_docs",
      "[지식] 문서 제목/본문 검색.",
@@ -645,7 +670,10 @@ _TOOL_DEFS: list[tuple] = [
      " 해소됨. 지정 project_id에 접근권 없으면 403.",
      SetDefaultProjectInput, set_default_project),
     ("sprintable_claim_story",
-     "[일감] 현재 작업 중인 스토리를 claim — active_story_id 갱신, 중복 배정 방지.",
+     "[일감] 현재 작업 중인 스토리를 claim — active_story_id 갱신, 중복 배정 방지. "
+     "⚠️story 8b7e52d6: assignee/board는 안 건드립니다(participation만 생성) — "
+     "보드 배정 표시·통지 수신자는 이 호출이 아니라 assignee 기준입니다(update_story의 "
+     "assignee_id/assignee_ids). 응답의 assignee_ids/hint로 현재 상태를 확인하세요.",
      ClaimStoryInput, claim_story),
     ("sprintable_unclaim_story",
      "[일감] 작업 중인 스토리 claim 해제 — active_story_id = NULL.",
@@ -686,7 +714,11 @@ _TOOL_DEFS: list[tuple] = [
      "done을 스스로 증명하는 자기 서명 첨부(PR·배포·지표·발행물 링크 등) — story/task에 evidence"
      " 남김. 선택제(첨부 안 해도 무불이익). 아티팩트를 근거로 삼을 땐 artifact_id를 같이 주면"
      " 그 시각의 버전이 자동 고정된다(그 뒤 아티팩트가 새 버전으로 바뀌어도 이 evidence의"
-     " 근거는 안 흔들림).",
+     " 근거는 안 흔들림). 구조화 페이로드가 필요한 경우(예: 검증 시트) type=\"report\"와"
+     " payload를 같이 준다 — payload 예시: {\"kind\": \"verification_sheet\", \"items\":"
+     " [{\"name\": \"로그인 흐름\", \"verdict\": \"pass\"}, {\"name\": \"결제 흐름\","
+     " \"verdict\": \"fail\", \"note\": \"타임아웃\"}]} (verdict는 pass/fail/n_a 중 하나,"
+     " verified_by/verified_at은 서버가 호출자 정보로 자동 채운다).",
      AddEvidenceInput, add_evidence),
     # 판단 칸 (2) — story #2268(D단계, E-CONNECT)
     ("sprintable_add_judgment",
@@ -719,27 +751,41 @@ _TOOL_DEFS: list[tuple] = [
      " 산출물인지 붙어야 검색·backlink·evidence로 나중에 다시 찾긴다). standalone(둘 다 생략)도"
      " 정당한 사용이다 — 강제 아님, 지금 맥락에 붙일 story/doc이 실제로 없으면 그냥 생략."
      " ⭐스크린샷/이미지 증거(story #2707) — base64를 이 도구 호출에 직접 싣지 말 것(토큰 폭증)."
-     " Bash/HTTP 클라이언트 접근이 있는 에이전트는 2단계로: ①먼저"
-     " `POST $SPRINTABLE_API_URL/api/visual-artifacts/import-image`를 curl 등으로"
-     " 직접 호출(multipart/form-data, 필드명 `file`, 헤더 `Authorization: Bearer $AGENT_API_KEY`)해"
-     " GCS url을 받는다(예: `curl -F file=@screenshot.png -H \"Authorization: Bearer $AGENT_API_KEY\""
-     " $SPRINTABLE_API_URL/api/visual-artifacts/import-image`) ②그 url을 이 도구의"
-     " `nodes=[{\"type\": \"html_blob\", \"props\": {\"src\": \"<①의 url>\"}}]`로 넣어 호출하면"
-     " FE가 자동으로 image 포맷으로 렌더한다. Bash/HTTP 클라이언트 접근이 없는 에이전트는 그 ①을"
-     " 스스로 못 타므로 대신 sprintable_import_image_artifact(작은 이미지 전용, 원콜)를 쓴다."
+     " 이미지는 이 도구가 아니라 sprintable_import_image_artifact를 쓴다(업로드+artifact 생성을"
+     " 한 번에 끝내는 전용 입구 — 이 도구의 nodes[]에 \"미리 올린 이미지 url\"을 손으로 넣는"
+     " 2단계 흐름은 없다, story #3767: 그런 «업로드만 하고 url을 돌려주는» 별도 에이전트용 입구가"
+     " 백엔드에 없다). 파일이 로컬에 있으면 그 도구의 image_path를, Bash/HTTP 클라이언트가 있는"
+     " 에이전트가 원콜 대신 직접 curl하고 싶으면 같은 계약의 원시 엔드포인트를 써도 된다:"
+     " `POST $SPRINTABLE_API_URL/api/v2/visual-artifacts/import-image`"
+     "(JSON body, **multipart 아님** — `{\"title\":..,\"image_base64\":..,\"content_type\":\"image/png\"}`,"
+     " base64는 `base64 -i screenshot.png`처럼 파일에서 셸로 인코딩하고 모델이 손으로 재입력하지"
+     " 않는다 — 재입력 오탈자로 이미지가 깨진 사고 실측, sprintable_import_image_artifact"
+     " 문서와 동일 경고). 헤더 `Authorization: Bearer $AGENT_API_KEY`. 이 한 번의 호출이 업로드"
+     "+artifact 생성까지 끝내 응답 자체가 완성된 artifact다(get_artifact와 동형) — 그 뒤"
+     " 이 도구(sprintable_create_artifact)를 따로 또 부를 필요가 없다."
      " source는 \"created\"(기본) 또는 \"imported\"만 허용(다른 값은 422).",
      CreateArtifactInput, create_artifact),
     ("sprintable_import_image_artifact",
-     "[일감] base64 이미지 한 번으로 업로드+artifact 생성을 원콜로 처리(story b6b9c52d) —"
-     " Bash/HTTP 클라이언트 접근이 없어 sprintable_create_artifact의 2단계 curl 플로우를 스스로"
-     " 못 타는 에이전트 전용 대안. ⭐스크린샷/시안/아이콘 등 **작은** 이미지 증거를 산출물로 남길"
-     " 때 이 도구로 — 단, image_base64는 도구 호출 인자 텍스트로 그대로 실리므로 호출하는 에이전트"
-     " 자신의 최대 출력 토큰 한도가 실질 상한이다(대략 수백 KB 이하 이미지 권장). BE 자체는"
-     " 최대 20MB까지 받지만, 그보다 큰 이미지는 이 도구로 못 보내니 Bash/HTTP 클라이언트가 있는"
-     " 에이전트라면 sprintable_create_artifact의 2단계 curl 플로우를 대신 쓴다."
-     " content_type은 image/*여야 함(아니면 422). story_id/doc_id(선택, sprintable_create_artifact와"
-     " 동형) — 맥락이 있으면 잇는 것을 권장, standalone도 정당. 반환은 get_artifact와 동형"
-     " artifact 상세(FE-import와 동일하게 렌더).",
+     "[일감] 이미지 한 번으로 업로드+artifact 생성을 원콜로 처리(story b6b9c52d·#3753) —"
+     " MCP 도구 호출만 가능하고 Bash/HTTP 클라이언트가 없는 에이전트를 위한 입구. story #3767:"
+     " sprintable_create_artifact 쪽엔 «미리 올린 url을 받는 2단계 흐름»이 없다(그런 별도"
+     " 업로드-전용 백엔드 입구 자체가 없음) — 이 도구가 유일한 MCP 경로다."
+     " ⭐파일이 로컬에 있으면 image_path를 써라(서버가 직접 읽어 바이트 정확 전송 — 모델 출력을"
+     " 안 거친다). image_base64는 파일시스템이 없는 에이전트 전용 대안이다 — 도구 호출 인자"
+     " 텍스트로 그대로 실리므로 호출하는 에이전트 자신이 그 base64 문자열을 «다시 타이핑»해야"
+     " 하고, 그 재타이핑 과정에서 오탈자 몇 자만 생겨도 이미지가 깨진 채로 저장된다(실사고"
+     " 확認·story #3753) — 대략 수백 KB 이하의 작은 이미지에만 쓰고, 그보다 크면 image_path를"
+     " 쓰거나, Bash/HTTP 클라이언트가 있는 에이전트는 이 원콜과 같은 계약의 원시 엔드포인트"
+     " `POST $SPRINTABLE_API_URL/api/v2/visual-artifacts/import-image`를 직접 curl해도 된다"
+     "(JSON body, 헤더 Authorization: Bearer $AGENT_API_KEY, BE 자체 상한 20MB)."
+     " image_base64/image_path는 상호 배타(정확히 하나)."
+     " content_type은 image_base64 사용 시 필수(image/*여야 함, 아니면 422) — image_path는"
+     " 생략하면 확장자/매직 바이트로 자동 추정(판별 실패 시 오류, 직접 지정도 가능)."
+     " 저장 직전 이미지 구조를 서버가 검증한다(매직 바이트·PNG 청크·디코드) — 깨진 이미지는"
+     " 422 IMAGE_CORRUPT+사유로 거절되고 저장되지 않는다(사유를 그대로 돌려주니 다시 시도)."
+     " story_id/doc_id(선택, sprintable_create_artifact와 동형) — 맥락이 있으면 잇는 것을"
+     " 권장, standalone도 정당. 반환은 get_artifact와 동형 artifact 상세(FE-import와 동일하게"
+     " 렌더).",
      ImportImageArtifactInput, import_image_artifact),
     ("sprintable_get_artifact",
      "[일감] 시각 산출물 단건 조회(latest 버전 + nodes). ⭐편집/코멘트/핀 작업 전 먼저 현재 상태(노드"
@@ -792,10 +838,22 @@ _TOOL_DEFS: list[tuple] = [
      " 만들었거나 빈/중복 산출물을 치울 때(재발행 대신 이걸로 정리).",
      DeleteArtifactInput, delete_artifact),
     ("sprintable_propose_canonical_version",
-     "[신뢰] 이 버전을 정본으로 제안(게이트 생성) — 제안만, 승인/반려는 항상 휴먼. ⭐이 버전이 확定될"
+     "[신뢰] 이 버전을 정본으로 제안(게이트 생성) — 제안만, 승인/반려는 항상 휴먼. ⭐이 버전이 확정될"
      " 준비가 됐다고 판단될 때 휴먼 승인을 요청.",
      ProposeCanonicalInput, propose_canonical_version),
-    # Chat (4)
+    # Chat (5)
+    ("sprintable_list_conversations",
+     "[조직] 내가 참여한 방 목록 — 알림이 안 왔어도 스스로 점검하는 백스톱(story #3331)."
+     " id를 몰라도 되는 유일한 대화 발견 경로다(단, project_id 단위 목록 — API 자체가"
+     " project_id 필수라 «기본 프로젝트 안의 내 방»만 보인다, 여러 프로젝트를 훑으려면"
+     " project_id를 바꿔 반복 호출할 것) — send/list_chat_messages/get_chat_message는"
+     " conversation_id를 이미 알아야 하는데, 그 id를 얻을 방법이 이 도구뿐이었다(채널로"
+     " 밀려오지 않은 방은 존재 자체를 몰랐다). 세션 시작 시·긴 정지 후 재기동 시 «내 앞으로"
+     " 뭐가 왔는지» 먼저 이걸로 훑을 것. id·type·title·participants·last_read_at·"
+     " unread_count·latest_message를 준다. ⛔`create_conversation`은 조회가 아니라 매번"
+     " 새 방을 만드는 도구다(dedup 없음) — 기존 방이 있는지 확인할 땐 이걸 먼저 쓸 것,"
+     " create_conversation을 조회 우회로 쓰면 빈 방만 하나 더 생긴다.",
+     ListConversationsInput, list_conversations),
     ("sprintable_send_chat_message",
      "[조직] conversation thread에 채팅 메시지 발송. conversation_id로 대화를 지정(thread_id는"
      " 폐기 예정 별칭 — story #2427: 이 도구들의 «응답» thread_id는 대화 ID가 아니라 회신 스레드"
@@ -807,7 +865,9 @@ _TOOL_DEFS: list[tuple] = [
      " 메시지에서도 링크/backlink가 동작하게 한다.",
      SendChatInput, send_chat_message),
     ("sprintable_create_conversation",
-     "[조직] 새 conversation thread 생성.",
+     "[조직] 새 conversation thread **생성**(조회 아님 — dedup 없이 매 호출 신규 방을 만든다,"
+     " story #3331). 이 방이 이미 있는지 확인하고 싶으면 먼저 `sprintable_list_conversations`를"
+     " 쓸 것 — 이 도구를 조회 우회로 쓰면 빈 방만 하나 더 생긴다.",
      CreateConversationInput, create_conversation),
     ("sprintable_list_chat_messages",
      "[조직] conversation thread 메시지 목록 조회. conversation_id로 대화를 지정(thread_id는"
@@ -949,6 +1009,34 @@ _TOOL_DEFS: list[tuple] = [
      "[조직] org 커스텀 이벤트 정의 수정/비활성화(admin/owner 전용). enabled=false가 삭제 "
      "수단(soft). payload_schema/routing 변경 시 재검증+version 범프.",
      UpdateEventDefinitionInput, update_event_definition),
+    # 채널 글 초안 폐기 — story #3614(2026-09-07)
+    ("sprintable_withdraw_channel_post_draft",
+     "[일감] 채널 글 초안을 폐기(withdraw)한다 — 작성자(에이전트 포함) 또는 org owner/"
+     "admin만. 변경 요청을 받아들일 수 없을 때 재상신 대신 스스로 닫는 길. 열린(pending) "
+     "게이트는 사유 「작성자가 폐기」로 rejected 종결, 이미 발행된 초안은 409(발행 취소는 "
+     "별도 unpublish 경로). 이미 폐기된 초안 재호출은 멱등.",
+     WithdrawChannelPostDraftInput, withdraw_channel_post_draft),
+    # 발행물 1일·7일 인사이트 — story #3651(2026-09-07). 블루프린트 §7 Phase 2 AC
+    # 「1일·7일 성과를 비교해 후속 스토리를 만든다」의 에이전트 몫(스토리 생성 자체는
+    # 기존 sprintable_add_story).
+    ("sprintable_get_publication_insights",
+     "[일감] 발행물의 1일·7일 인사이트 스냅샷 목록 + 둘 사이 키별 델타(v7-v1)를 준다 — "
+     "publication_id 직접 지정 또는 draft_id로 「마지막 발행」을 대신 찾음(초안 미발행 "
+     "시 그 사실을 알림). delta_1d_to_7d는 두 스냅샷 모두 captured일 때만 채워지고, "
+     "미도래(pending)·실패(failed)면 null+사유. 한쪽이라도 미제공(null)인 지표는 델타도 "
+     "null(0과 섞지 않음). 후속 스토리는 이 도구가 대신 안 만든다 — sprintable_add_story를 쓸 것.",
+     GetPublicationInsightsInput, get_publication_insights),
+    # 조직 콘텐츠 규칙 읽기 — story #3769(2026-09-10). content_rules.py docstring(story
+    # #3471)이 약속한 「에이전트가 GET으로 읽는」 길의 MCP 표면. BE 신설 0(기존 GET 둘
+    # 병합). 초안 작성 전 먼저 호출하는 도구(create_channel_post_draft 계열)와 짝.
+    ("sprintable_get_content_rules",
+     "[조직] 조직 콘텐츠 규칙(참고 넷: tone·taxonomy·channel_priority·brand_kit + 기계검사 "
+     "둘: banned_terms·utm_rules/require_utm)과 생성 예산 상태(generation_budget_status)를 "
+     "함께 읽는다. 채널·사이트 글 초안을 쓰기 전에 먼저 이 도구를 불러 톤·택소노미·브랜드 "
+     "킷을 반영할 것 — 금칙어·UTM은 제출 시점에 서버가 기계로도 재검사하지만, 톤·택소노미· "
+     "채널 우선순위·브랜드 킷은 서버가 강제하지 않는 선언값이라 에이전트가 스스로 지켜야 "
+     "한다. 규칙을 한 번도 설정 안 한 조직은 rules:{}·version:0(빈 상태 그대로, 위반 아님).",
+     GetContentRulesInput, get_content_rules),
 ]
 
 for _name, _doc, _cls, _fn in _TOOL_DEFS:

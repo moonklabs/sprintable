@@ -87,6 +87,15 @@ describe('proxy', () => {
     expect(response.status).toBe(307);
   });
 
+  it('treats /unsubscribe as public — no 307-to-login (story #3923, #3923 캡처 中 실측 발견)', async () => {
+    // onboarding_activation.py가 실 온보딩 메일에 심는 실 구독해지 링크의 착지 페이지.
+    // unsubscribe/page.tsx 자체가 "이메일 링크 클릭이 진입점이라 세션이 없을 수 있다"고
+    // 명시(verify-email과 동형)하는데 이 목록 누락 시 비로그인 방문자가 보호 라우트로
+    // 오인돼 /login 307로 튕긴다 — no-cookie 요청으로 그 정확한 실패 모드를 재현·가드.
+    const response = await middleware(makeRequest('/unsubscribe?token=abc123'));
+    expect(response.status).toBe(200);
+  });
+
   it('treats /auth/oauth-handoff as public — no 307-to-login (e-mobile-oauth-native-handoff-contract §5, same class of gap as story 26170479)', async () => {
     // 세션을 만드는 공개 엔드포인트라 호출 시점엔 세션이 없는 게 정상 — /auth/native와 동일
     // 이유로 PUBLIC 목록에 있어야 한다(#2224 교훈 선제 적용, 실제 사고 재발 전에 가드).
@@ -1000,6 +1009,20 @@ describe('proxy — 경로 리터럴 rename 301(story 8fc51517): [ws]/[proj]/boa
     }));
     expect(response.status).toBe(301);
     expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/flow');
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  // story #3845(§① 2026-09-14) — 스탠드업(하루 체크인)이 「스프린트」 탭 안 절로 흡수되며
+  // 독립 /standup 라우트(page.tsx·loading.tsx)가 삭제됐다. board→flow와 동형 회귀가드 —
+  // 옛 북마크/딥링크가 404 대신 그 기능의 새 거처로 301.
+  it('story #3845: /{ws}/{proj}/standup → 301 /{ws}/{proj}/sprints(standup도 RENAMED_RESOURCES 대상 — 독립 라우트 은퇴 회귀가드)', async () => {
+    const token = await makeAccessToken({ orgId: 'org-1' });
+    const response = await middleware(makeRequest('/moonklabs/sprintable/standup', {
+      sp_at: token, sprintable_current_project_id: 'proj-1',
+    }));
+    expect(response.status).toBe(301);
+    expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/sprints');
+    // 3번째 세그먼트만 교체하는 순수 문자열 치환이라 org/project fetch가 전혀 없어야 한다.
     expect(mockFetch).not.toHaveBeenCalled();
   });
 

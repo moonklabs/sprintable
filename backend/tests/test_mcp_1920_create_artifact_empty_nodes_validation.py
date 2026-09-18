@@ -189,6 +189,8 @@ async def _session_factory():
 async def _seed(session):
     from app.models.organization import Organization
     from app.models.project import Project
+    from app.models.member import Member
+    from app.models.project_access import ProjectAccess
 
     org = Organization(id=uuid.uuid4(), name="Org", slug=f"org-{uuid.uuid4().hex[:8]}")
     session.add(org)
@@ -198,7 +200,17 @@ async def _seed(session):
     session.add(project)
     await session.commit()
 
-    return {"org_id": org.id, "project_id": project.id}
+    # resolve_member_db_verified()는 fail-closed(DB 실측) — 201까지 가는 케이스는 실 멤버가
+    # 필요하다(story #3370, member_resolver.py:194-200).
+    member = Member(id=uuid.uuid4(), org_id=org.id, type="agent", name="creator-agent", is_active=True)
+    session.add(member)
+    await session.commit()
+    session.add(ProjectAccess(
+        id=uuid.uuid4(), project_id=project.id, member_id=member.id, permission="granted", role="member",
+    ))
+    await session.commit()
+
+    return {"org_id": org.id, "project_id": project.id, "member_id": member.id}
 
 
 def _client_for(app):
@@ -290,7 +302,7 @@ async def test_realdb_create_artifact_with_nodes_still_succeeds_201():
         async with Session() as s:
             seeded = await _seed(s)
 
-        await _setup_app(app, Session, seeded["org_id"], seeded["project_id"])
+        await _setup_app(app, Session, seeded["org_id"], seeded["project_id"], user_id=seeded["member_id"])
         client = _client_for(app)
         try:
             resp = await client.post(

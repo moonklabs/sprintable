@@ -284,6 +284,18 @@ def test_list_docs_ids_branch_closed_the_two_hop_known_gap():
 # ── false positive: 실제로는 안전 — org/user-level(project 축 없음)·self-derived·
 #    JWT-project 스코프·인라인/1-hop 가드(v1 정적스캔 미인식). 영구 allowlist(이유 필수). ──
 _ID_MUTATION_FALSE_POSITIVE_ALLOWLIST: dict[str, str] = {
+    # story #3786 — dependencies.py의 update/delete는 까심 QA CI FAILURE 원칙(2026-07-08,
+    # agents.py::get_agent_connection_artifact/_connection_artifact 선례)에 따라 Header() DI
+    # 마커를 라우트 진입점(update_dependency/delete_dependency)에서만 받고, 실 로직(가드 호출
+    # `_assert_item_project_access` 포함)은 `_update_dependency`/`_delete_dependency`로
+    # 위임했다 — 스캐너의 `_called_names(target.endpoint)`는 진입점 자기 body만 보고
+    # 위임 호출은 재귀 안 함(v1 제약, 이 파일 docstring에 이미 명시된 한계와 동종). 실 가드는
+    # 살아 있다 — test_e_sec_dependencies_subsystem_project_scope_realdb.py::
+    # test_update_dependency_cross_project_blocked_404_not_changed/
+    # test_delete_dependency_cross_project_blocked_404_not_deleted가 실 404를 증명한다. 그
+    # 테스트를 지우거나 약화시키면 이 면제의 근거도 함께 사라진다.
+    "app.routers.dependencies:update_dependency": "1-hop 위임(_update_dependency)의 _assert_item_project_access — v1 스캔 미인식, realdb로 실증",
+    "app.routers.dependencies:delete_dependency": "동일 위임 패턴 — realdb로 실증(위 항목과 동일 근거)",
     # JWT project_id로 리소스 fetch 스코프(비-스푸퍼블) — SELF_DERIVED
     "app.routers.agent_deployments:delete_deployment": "JWT project_id 스코프로 deployment fetch(비-스푸퍼블)",
     "app.routers.agent_deployments:patch_deployment": "동일 JWT project_id 스코프",
@@ -343,6 +355,19 @@ _ID_MUTATION_FALSE_POSITIVE_ALLOWLIST: dict[str, str] = {
     "app.routers.org_invites:revoke_org_invite": "org owner/admin 게이트·project 축 없음",
     "app.routers.workflow_trigger_types:delete_trigger_type": "_is_org_admin/require_admin·project 축 없음",
     "app.routers.workflow_trigger_types:update_trigger_type": "동일 org-admin 게이트·project 축 없음",
+    "app.routers.channel_connections:set_channel_app_credentials": (
+        "story #3373 — path의 {channel}은 project 축이 없는 org-level 리소스(channel_app_"
+        "credentials, org_id+channel UNIQUE·project_id 컬럼 자체가 없음). _require_owner"
+        "(→_require_human)가 org 멤버십+role(owner)을 검증한다 — project 스코프 검증이 "
+        "애초에 무의미(labels/organizations/org_members류와 동일 ORG_ONLY 결)."
+    ),
+    "app.routers.channel_connections:replace_channel_connection_credentials": (
+        "story #3492 — 바로 위 set_channel_app_credentials와 자구 동형. path의 "
+        "{connection_id}는 channel_connections 행(org_id+channel+account_id UNIQUE·"
+        "project_id 컬럼 자체가 없음, org-level 리소스). _require_owner_or_admin이 org "
+        "멤버십+role(owner|admin)을 검증하고 get_channel_connection(org_id, connection_id) "
+        "선조회로 org 스코프를 이미 강제한다 — project 스코프 검증이 애초에 무의미."
+    ),
     # 실 가드가 있으나 v1 정적스캔이 인라인/1-hop 헬퍼를 미인식(guarded 확認)
     "app.routers.open_api_keys:revoke_project_api_key": "resolves ProjectApiKey→key.project_id!=path project_id 인라인 체크(v1 스캔 miss)",
     "app.routers.project_access:delete_project_access": "_require_owner_or_admin→has_project_role(admin) on path project_id(1-hop miss)",
@@ -355,6 +380,16 @@ _ID_MUTATION_FALSE_POSITIVE_ALLOWLIST: dict[str, str] = {
     # 스캔이 이 커스텀 헬퍼명을 인식 못함). POST 발급/confirm 두 곳도 같은 헬퍼를 쓰지만
     # 이 스캐너는 DELETE/PATCH/PUT만 대상이라 여기 한 건만 잡힌다.
     "app.routers.team_members:delete_avatar_endpoint": "_assert_can_edit_avatar(에이전트 owner/admin·휴먼 self/admin — avatar_url PATCH와 동일 게이트 재사용, v1 스캔 미인식 커스텀 헬퍼)",
+    # story #3583-BE — GA4 «고객 소유» 측정 연결. path의 {org_id}는 ga4_connections
+    # 행(org_id UNIQUE·project_id 컬럼 자체가 없음, channel_connections/channel_app_
+    # credentials와 동형 ORG_ONLY 리소스 — 그라운딩 §9). _require_owner(channel_
+    # connections.py에서 그대로 재사용, 새 헬퍼 0)가 org 멤버십+role(owner)을 검증한다
+    # — project 스코프 검증이 애초에 무의미. authorize/select는 POST라 이 스캐너(DELETE/
+    # PATCH/PUT만 대상)의 후보 자체가 아니다 — DELETE인 disconnect만 여기 등재.
+    "app.routers.measurement_connections:ga4_disconnect_endpoint": (
+        "_require_owner(→org owner) — ga4_connections는 project 축이 없는 org-level "
+        "리소스(channel_connections:set_channel_app_credentials와 동형 ORG_ONLY 결)."
+    ),
 }
 
 # ── known-debt: 실 project-scoped IDOR — 후속 라운드 상환(6후보·story 5285888c 감사). ──

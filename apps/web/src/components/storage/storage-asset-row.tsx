@@ -1,11 +1,12 @@
 'use client';
 
 import { Download, Link2, MoreVertical, Trash2 } from 'lucide-react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 import { getFileIcon } from '@/lib/file-icon';
 import { formatFileSize } from '@/components/docs/extensions/file-node';
 import { fileTypeTint, FILE_TINT_CLASS, fileExtLabel, formatRelativeTime } from '@/lib/storage/format';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -29,6 +30,8 @@ interface StorageAssetRowProps {
 
 export function StorageAssetRow({ asset, selected, folderLabel, onSelect, onDelete, onDownload }: StorageAssetRowProps) {
   const t = useTranslations('storage');
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
   const ext = fileExtLabel(asset.content_type, asset.name);
   const usageCount = asset.source_links.length;
   const meta = folderLabel ? `${folderLabel} · ${ext}` : ext;
@@ -81,7 +84,7 @@ export function StorageAssetRow({ asset, selected, folderLabel, onSelect, onDele
         <StorageUploaderAvatar createdBy={asset.created_by} size={22} />
         <span className="truncate">
           {asset.created_by ? `${asset.created_by.name} · ` : '· '}
-          {formatRelativeTime(asset.updated_at)}
+          {formatRelativeTime(asset.updated_at, locale, displayTimezone)}
         </span>
       </div>
 

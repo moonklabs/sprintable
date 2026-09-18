@@ -45,6 +45,15 @@ def _non_doc_gate_session():
         # story #2982 — 이미해소 가드(status!='pending'이면 409)도 이 값을 읽는다. SimpleNamespace는
         # 미선언 속성이 AttributeError라 명시 필요 — "pending"으로 그 가드가 대상 밖임을 분명히 한다.
         status="pending", resolver_id=None, resolved_at=None,
+        # story #3319 — _authorize_gate_approve_equivalent(비-doc 분기)가 이제 이 필드를
+        # _non_doc_can_approve 호출부 kwarg로 읽는다(위 다른 None 필드들과 동일 이유로 명시
+        # 필요 — 이 파일의 관심사는 resolver_id 강제이지 designated 정책 판정이 아니므로
+        # None="정책 미설정"으로 그 축을 대상 밖임을 분명히 한다).
+        designated_approver_id=None,
+        # story #3365(Phase0 S2) — external_publish 전용 막다른 길 가드(gates.py)가 이제 이
+        # 필드를 읽는다(위 다른 None 필드들과 동일 이유 — 이 파일의 관심사는 resolver_id 강제,
+        # site-post 재승인 판정이 아니므로 False="일반 게이트, 그 축 대상 밖"으로 명시한다).
+        reapproval_required=False,
     )
     s.execute = AsyncMock(return_value=gr)
     return s
@@ -77,7 +86,7 @@ def test_transition_rejects_non_review_status():
 async def test_transition_forces_resolver_ignoring_body():
     """⭐resolver_id = 인증 caller 강제(body.resolver_id[타인 UUID] 무시)."""
     from app.routers import gates as mod
-    from app.routers.gates import GateTransitionRequest, transition_gate_endpoint
+    from app.routers.gates import GateTransitionRequest, _transition_gate_endpoint
     caller = _human()
     forged = uuid.uuid4()  # 타인 UUID
     captured = {}
@@ -95,7 +104,8 @@ async def test_transition_forces_resolver_ignoring_body():
          patch.object(mod, "_non_doc_gate_approvable", AsyncMock(return_value=True)):
         # story #2027: _non_doc_gate_session()의 gate_type="merge"는 고위험(_HIGH_RISK_GATE_TYPES)이라
         # 이 파일의 관심사(resolver_id 강제)와 무관한 사유-강제 가드를 note+evidence_viewed로 우회.
-        await transition_gate_endpoint(
+        await _transition_gate_endpoint(
+                resolved_locale="ko",
             id=uuid.uuid4(), body=GateTransitionRequest(status="approved", resolver_id=forged, note="테스트 사유", evidence_viewed=True),
             background_tasks=BackgroundTasks(),
             session=_non_doc_gate_session(), org_id=uuid.uuid4(),
@@ -108,7 +118,7 @@ async def test_transition_forces_resolver_ignoring_body():
 async def test_transition_agent_rejected_403():
     """agent caller 는 approve/reject 403(휴먼 전용)."""
     from app.routers import gates as mod
-    from app.routers.gates import GateTransitionRequest, transition_gate_endpoint
+    from app.routers.gates import GateTransitionRequest, _transition_gate_endpoint
     from app.services.member_resolver import ResolvedMember
     from fastapi import HTTPException
     agent = ResolvedMember(id=uuid.uuid4(), user_id=None, name="a", type="agent",
@@ -116,7 +126,8 @@ async def test_transition_agent_rejected_403():
     from fastapi import BackgroundTasks
     with patch.object(mod, "resolve_member", AsyncMock(return_value=agent)):
         with pytest.raises(HTTPException) as ei:
-            await transition_gate_endpoint(
+            await _transition_gate_endpoint(
+                resolved_locale="ko",
                 id=uuid.uuid4(), body=GateTransitionRequest(status="approved"),
                 background_tasks=BackgroundTasks(),
                 session=AsyncMock(), org_id=uuid.uuid4(),

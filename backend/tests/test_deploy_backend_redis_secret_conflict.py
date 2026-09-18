@@ -109,6 +109,157 @@ Cloud Build 에러 그대로)를 넘겨 dev 배포가 2연속 실패했다. depl
   「수동 바인딩」이라 배포 SSOT 어디에도 선언이 없어 env-drift-guard 축①이 매일 빨강이었다
   (additive `--update-secrets`라 값은 보존됐으나 미선언=fragile: `--set-secrets` 리팩터·서비스
   재생성 時 조용히 소실→reads가 primary로 새 병목 악화). 여기 편입해 durable화.
+
+## deploy-backend 인라인 주석 2차 아카이브 (story #3433, 2026-09-04)
+
+story #3124 이후에도 매 story마다 인라인 주석이 다시 자라(story #3118·620beefc 등) 89%
+(8,988B)까지 재소진됐다 — 원인이 된 서사를 다시 여기로 옮기고 cloudbuild.yaml엔 story
+번호+한 줄 포인터만 남긴다(값/로직 무변경, 순수 주석 재배치 — #3124와 동일 스코프). 원문
+(요약 없이 옮김):
+
+- **story #2141**: `REDIS_URL`은 prod에서 Secret Manager 바인딩과 동명 키 충돌 방지로 여기서
+  안 넘긴다(위 본문 ⛔#2423 핫픽스 서사와 동일 사고).
+- **⛔story #2423(2026-07-23, 배포 실패 핫픽스)**: 셸 변수는 반드시 `$$`로 이스케이프 —
+  단일 `$`는 Cloud Build 자신의 substitution 파서가 args 전체를 먼저 훑어 build submit
+  자체를 INVALID_ARGUMENT로 거부한다(설명 예시로 적어도 마찬가지 — 위 본문 §2차 사고
+  서사 참고).
+- **story #3418(카디르 실측 2026-09-04)**: `RATE_LIMIT_BACKEND=redis`를 `REDIS_URL`과 같은
+  dev 분기에 묶는다(`rate_limiter.py::get_rate_limiter`가 이 값 있어야 `RedisRateLimiter`로
+  감 — `REDIS_URL`만 있고 이게 없으면 기본값 memory라 인스턴스별로 계속 갈라진다). prod는
+  PO가 선생님 결재 뒤 별도로.
+- **story #2777**: `ADMIN_OPERATOR_AUDIENCE`/`ALLOWLIST`는 prod에 키 자체가 없어야 안전
+  (`require_admin_operator`가 fail-closed 503, 대표승인 前 prod 결제개입 전면금지 태세와
+  정합).
+- **story #3117**: `GCS_AVATARS_BUCKET`은 `REDIS_URL`/`ADMIN_OPERATOR_*`와 달리 dev/prod
+  둘 다 싣는다(prod 버킷 프로비저닝 완료로 #2887의 「prod엔 키 자체가 없어야 안전」 유보
+  해소).
+- **story 620beefc(페드루 리뷰 B5)**: `GCS_CHANNEL_MEDIA_BUCKET`은 `ADMIN_OPERATOR_*`와
+  동형(avatar #2887 원래 형태, #3117 이전) — prod 버킷 미프로비저닝이라 prod엔 이 키
+  자체가 없어야 안전(미설정 시 `channel_post_images.py::ChannelImageStorageNotConfiguredError`
+  →503 fail-closed).
+- **story 5b27b32f**: `SANDBOX_CHANNEL_ENABLED`는 `RATE_LIMIT_BACKEND`와 동형(리터럴,
+  substitution 불요) — prod는 키 자체가 없어야 안전(`channel_adapters.py` env 게이트가
+  그래서 미등재 → sandbox 어댑터 자체가 등록 안 됨, AC5 fail-closed 가드가 그래도
+  등재됐을 경우까지 이중 방어).
+- **story #2141 원칙 재사용(카디르 QA 2026-08-19)**: `GOTENBERG_SERVICE_URL`도 prod엔 키
+  자체가 없어야 안전(dev 전용 office-converter 하드게이트).
+- **story #3279(지원v1·후속)**: 운영자 회신 배달(backend→support-gateway) 착지 URL
+  (`SUPPORT_GATEWAY_OPERATOR_REPLY_URL`). support-gateway 자체가 아직 dev 전용
+  프로비저닝(`_NEXT_PUBLIC_SUPPORT_GATEWAY_URL`이 prod엔 빈 문자열)이라 같은 조건으로
+  게이트 — 빈 값이면 아예 안 싣는다(GOTENBERG_SERVICE_URL과 동일 원칙, 안 실으면 코드
+  쪽 `settings.support_gateway_operator_reply_url=""`가 fail-closed로 배달을 정직하게
+  skip한다 — `operator_reply_delivery.py`). `SUPPORT_GATEWAY_TOKEN_SECRET`은 이미 이
+  스텝의 `SECRETS_FLAG`(dev 분기)에 바인딩돼 있어 별도 시크릿 추가 불요(같은 대칭키
+  재사용 — aud로만 구조적 분리, `escalation_delivery.py` 반대 방향과 동형).
+- **story #183fe7a5(지원v1·후속)**: 게이트 해소(approve/reject)→gateway
+  `SupportEscalation.status` 동기화 착지 URL(`SUPPORT_GATEWAY_ESCALATION_RESOLUTION_URL`).
+  위 operator-reply URL과 완전히 같은 게이팅 원칙(dev 전용, 빈 값이면 안 싣는다 —
+  GOTENBERG_SERVICE_URL 선례 재사용) 재사용 — 같은 `SUPPORT_GATEWAY_TOKEN_SECRET`, aud만
+  다름(`escalation_resolution_delivery.py` 모듈 docstring 참고).
+- **story #2445/#3110/#3118(SECRETS_FLAG)**: `DATABASE_URL`(PgBouncer, dev/prod 둘 다
+  sprintable 앱유저)·`DATABASE_URL_DIRECT`(dev=sprintable 앱유저·prod=postgres 직결)·
+  `DATABASE_URL_READ`(prod만)·`APPLE_PRIVATE_KEY` 시크릿 바인딩. dev pgbouncer 경유분은
+  #3110 2보(userlist에 sprintable 유저 등재+`DATABASE_URL_DEV_PGBOUNCER_SPRINTABLE` 시크릿
+  신설, PO 집행)로 sprintable 유저 전환 완료 — dev 서빙이 postgres 수퍼유저 DSN을 쓰는
+  자리가 이제 0개.
+- **story #f2a27d2a(지원v1·1경계) flip PR**: `SUPPORT_GATEWAY_TOKEN_SECRET`을 **dev
+  분기에만** 추가한다. prod용 시크릿(`SUPPORT_GATEWAY_TOKEN_SECRET_PROD`)은 아직 Secret
+  Manager에 없다(prod 자원 미프로비저닝) — prod `SECRETS_FLAG`에 넣으면 이미 live인 backend
+  prod 배포 자체가 "secret not found"로 깨진다. backend 코드 쪽은 이미 이 값 미설정 시
+  fail-closed 503(`support_gateway_token.py`)이라 시크릿을 아예 안 실어도 안전 — prod가
+  그 상태다.
+- **story f56bd418(#3390, Phase1·인프라)**: `CHANNEL_CREDENTIAL_ENCRYPTION_KEY`·
+  `CHANNEL_OAUTH_STATE_SECRET`(story #3373 채널 연결 골격, `config.py`의
+  `channel_credential_encryption_key`·`channel_oauth_state_secret`)을 **dev 분기에만**
+  추가한다. prod는 별도 결정(prod 시크릿 미생성 — `SUPPORT_GATEWAY_TOKEN_SECRET`과 동일
+  선례: 값 미설정 시 fail-closed라 시크릿을 아예 안 실어도 안전, prod `SECRETS_FLAG`에
+  넣으면 존재하지 않는 시크릿으로 배포 자체가 깨진다).
+- **story e4fc29fa(조각③c/④, 카디르 QA 실측 2026-09-04)**: `WORDPRESS_TEST_STUB_ENABLED`·
+  `WEBHOOK_TEST_STUB_ENABLED`는 `SANDBOX_CHANNEL_ENABLED`와 동형(리터럴, dev만) — 이
+  배선이 없으면 `dev_wordpress_stub.py`/`dev_webhook_stub.py` 라우터가 등재 안 돼
+  (`app/main.py` 조건부 `include_router`) ③c/④/⑤ 라이브 QA가 통째로 못 돈다.
+  `WEBHOOK_TEST_STUB_SECRET`은 여기 안 실음(yaml 평문 secret 금지 관례 — 스텁 파일
+  기본값으로 동작, 런북 2bbafa37에 그 경로 명시).
+
+## deploy-realtime 인라인 주석 아카이브 (story #3433, 2026-09-04)
+
+deploy-backend와 같은 이유로 deploy-realtime도 86%(8,640B)까지 자랐다 — 같은 처방
+(서사 외부화, 값/로직 무변경). 원문(요약 없이 옮김):
+
+- **⛔fail-fast(오르테가군 PO 2026-07-23)**: `_REALTIME_URL` 기본값을 dev URL에서 빈
+  문자열로 내렸다(substitutions 주석 — prod 프론트가 dev realtime을 가리킬 여지 제거).
+  frontend 쪽은 빈 값이 곧 "FASTAPI_URL로 폴백"이라 안전하지만, **여기서는 빈 값이
+  안전하지 않다** — `FASTAPI_URL=${_REALTIME_URL}`이 빈 문자열로 나가면 realtime-dev의
+  self URL이 지워진다. 조용히 깨지는 대신 여기서 멈춘다. 자동 경로(GHA dev 분기)는
+  항상 명시값을 넘기므로 이 가드에 걸릴 일이 없다 — 걸린다면 substitution 없이 수동
+  `gcloud builds submit`한 경우이고, 그건 정말로 멈춰야 하는 상황이다.
+- **story #3079(2026-08-25) 근본수정**: #3031이 여기 심었던 git-diff 기반 path-filter는
+  Cloud Build 워크스페이스에 `.git`이 없어(로컬소스 tarball 업로드, `.gcloudignore`
+  미비로 gcloud 기본 규칙이 `.git` 항상 제외) 단 한 번도 실제로 스킵하지 못했다 — 매번
+  "판별 불가" fail-safe로 떨어져 상시 배포였다(실 로그로 확定). 판정을 Cloud Build 밖
+  (GHA, 실 `.git` 보유 — cloud-build.yml "Resolve realtime deploy path-filter" 스텝)
+  으로 옮기고 결과만 이 substitution으로 받는다.
+- **⚠️story #2078 긴급수정(2026-07-21)**: `PG_LISTEN_ENABLED`가 여기 true로 하드코딩돼
+  있었다 — PO가 라이브에서 손으로 false로 전환(LISTEN 제거·Redis 단독 dispatch 확認
+  완료)했는데, 이 스텝이 명시적으로 true를 다시 밀어넣어 **다음 배포마다 LISTEN이
+  부활**하는 시한폭탄이었다("손 값은 배포가 덮는다" 규율의 역방향 재발 — 이번엔 배포가
+  고침을 지우는 쪽). realtime은 이제 LISTEN이 구조적으로 불필요(Redis가 authoritative
+  dispatch) — false로 durable 고정. `EVENT_BROKER_REDIS_CONSUME_ENABLED=true`도 명시.
+- **⚠️#2123 정정(2026-07-23)**: "api는 구독 불필요"라 여기 적었었으나 틀렸다 — 에이전트
+  SSE가 backend-dev를 직접 서빙해(`agent_onboarding_config.py` 설계) api도 이제
+  consume+dispatch=true다(deploy-backend 스텝 참조). 브라우저(여기, realtime-dev)와
+  에이전트(backend-dev)가 서로 다른 프로세스-로컬 큐만 보므로 중복배달은 없다.
+- **⚠️story #2135(2026-07-23)**: 이 키 이름이 여태 `REDIS_CONSUME_ENABLED`였다 —
+  Settings 필드(`event_broker_redis_consume_enabled`)와 안 맞아 pydantic이 조용히
+  무시했다(여기서는 필드 기본값이 우연히 True라 결과만 의도와 같았음). 실제 필드가
+  기대하는 키로 정정 — 구 키는 `--remove-env-vars`로 명시 제거.
+- **⛔story cd10e123 긴급수정(2026-07-21, codex 리서치 검증 중 적발)**: `REDIS_URL`·
+  `EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED`·`EVENT_BROKER_REDIS_DISPATCH_ENABLED` 셋
+  다 여태 여기 없는 순수 수동 Cloud Run env였다 — realtime은 이미 LISTEN이 꺼져있고
+  Redis가 유일한 dispatch 경로라, 이 서비스가 재배포/재생성될 때 이 셋이 기본값
+  (false/None)으로 되돌아가면 두 전송경로 동시 무효화(실시간 전면정지)가 된다. 이
+  스텝은 이미 dev 전용 가드 안이라 true를 직접 명시해도 안전(`PG_LISTEN_ENABLED=false`
+  와 동일 컨벤션) — `REDIS_URL`만 변수(연결문자열은 환경별로 다르므로).
+- **story #2178(2026-07-24, 까심 #2158 회귀검증에서 적발 → PO가 전수로 넓힘)**:
+  deploy-backend는 12키를 넘기는데 이 스텝은 8키뿐이라 backend·realtime 두 서비스가
+  다른 플래그 세트로 돌고 있었다 — 그 차이 자체가 어디에도 선언된 적이 없어 "켰다"고
+  믿는 사고가 반복됐다(#2158 `SSE_TRANSIENT_REPLAY_ENABLED`가 정확히 그 사고:
+  `record()`는 backend-dev에서 돌아 정상이었는데, 실제 브라우저 SSE를 서빙하는 건 이
+  realtime-dev라 `replay()`가 이 서비스에서 한 번도 안 돌고 있었다). 5종 전수 판정
+  (코드 경로 실증, 값보다 "왜 다른지" 선언이 본체):
+  - ⭐`SSE_TRANSIENT_REPLAY_ENABLED` 진짜 누락 — replay 대상 연결이 실제로 여기
+    (realtime-dev의 `agent_event_stream`)에 있다. 즉시 배선.
+  - ⭐`SSE_LEASE_REDIS_ENABLED` 진짜 누락 — `events.py`의 `sse_lease.acquire/refresh/
+    release`가 바로 이 파일의 `agent_event_stream` 안에서 직접 호출된다(연결 시점·30초
+    하트비트마다·해제 시). realtime-dev가 다인스턴스(`_REALTIME_MIN/MAX_INSTANCES`=2~8)
+    라 이게 꺼져 있으면 #2121이 고치려던 전역 429/503 캡이 인스턴스별로 쪼개져 그 결함이
+    이 서비스에서 그대로 재현된다. 즉시 배선.
+  - `PRESENCE_REDIS_ENABLED` 의도적 off(무해) — `chat_presence`는 이 파일(`events.py`)
+    어디에도 import/호출이 없다. 쓰기·읽기 전부 `conversations.py`/`team_presence.py`
+    (REST 라우트)에만 있어 backend-dev에서만 실행된다.
+  - `PRESENCE_ONLINE_REDIS_ENABLED` 의도적 off(무해) — 30초 SSE-틱 hot-path 기록은
+    `agent_gateway.py`의 `/agent/stream`(에이전트 전용, backend-dev가 직접 서빙)에만
+    있다. 이 파일의 `agent_event_stream`(브라우저 전용)엔 presence_online 참조가
+    전혀 없다.
+  - `FANOUT_WAKE_REDIS_ENABLED` 의도적 off(무해) — `wake_agent()`는 REST 뮤테이션
+    라우트에서만 호출되고, 대상 큐(`_agent_connections`)도 에이전트 키인데 에이전트는
+    backend-dev에만 붙는다 — realtime-dev엔 그 큐 자체가 존재한 적이 없다.
+
+  위 두 건(누락)만 배선하고 나머지 셋은 의도적으로 그대로 둔다 — 한 덩어리로 "다 켜자"
+  하지 않는다(PO 지시).
+  - ⚠️이 판정이 딛고 선 전제(오르테가군 PR 리뷰 지적, 2026-07-24) — 위 세 건의 "의도적
+    off" 판정은 **"realtime-dev에는 브라우저만 붙는다"**는 현재 라우팅 전제 위에 서
+    있다. 이 서비스는 backend와 **같은 풀 이미지**를 돌리므로 `/agent/stream`
+    (`agent_gateway.py`) 라우트 자체는 살아 있다 — 지금은 에이전트가 항상 backend-dev
+    로 붙도록 배선돼 있어(`agent_onboarding_config.py::resolve_backend_direct_url`)
+    무해할 뿐이다. **그 라우팅이 바뀌어 에이전트가 realtime-dev에도 붙게 되면 이 판정
+    전체를 재검토할 것** — 오늘 이 사달(#2178)의 근본원인이 정확히 "전제가 어디에도
+    안 적혀 있었던 것"이라, 판정 근거뿐 아니라 판정이 무너지는 조건까지 여기 남긴다.
+- **story #2442(P0)**: 이 스텝은 위에서 이미 dev 아니면 skip하므로 prod 값(20/10)은
+  여기 닿지 않는다(`_DEPLOY_ENV=prod`면 함수 진입 전에 exit 0). 그래도 하드코딩
+  `DB_POOL_SIZE=3,DB_MAX_OVERFLOW=1`을 그대로 뒀었다(PO forensic 적발 — 3곳 하드코딩
+  중 하나) — SSOT 원칙상 "우연히 같은 값"과 "명시로 같은 값"은 다르다. deploy-backend와
+  동일한 substitution으로 교체(dev 기본값 3/1 그대로 — 값 변경 아님, 배선만 정정).
 """
 from __future__ import annotations
 
@@ -125,7 +276,12 @@ _CLOUDBUILD_YAML = _REPO_ROOT / "cloudbuild.yaml"
 # cloudbuild.yaml 최상위 substitutions: 블록에 선언된 키 + GCP 내장 substitution.
 # story #2421 핫픽스 테스트가 이 목록 밖의 `${...}` 참조를 전부 "이스케이프 안 된 셸 변수"로 간주한다.
 _DECLARED_SUBSTITUTIONS = {
-    "_AR_REGION", "_AR_REPO", "_DEPLOY_ENV", "_FASTAPI_URL", "_BACKEND_MIN_INSTANCES",
+    "_AR_REGION", "_AR_REPO", "_DEPLOY_ENV", "_FASTAPI_URL",
+    # story #3583-BE(GA4 «고객 소유» 연결) — GA4 OAuth 콜백 redirect_uri 구성용.
+    # deploy-backend ENV_VARS가 이제 이 값을 직접 참조(_FASTAPI_URL과 값은 같지만 prod에서
+    # GHA가 빈 값으로 override해야 해 별도 substitution으로 둔다).
+    "_BACKEND_URL",
+    "_BACKEND_MIN_INSTANCES",
     "_BACKEND_MAX_INSTANCES", "_DB_POOL_SIZE", "_DB_MAX_OVERFLOW", "_BACKEND_DB_PGBOUNCER", "_BACKEND_TIMEOUT", "_REALTIME_MIN_INSTANCES",
     "_REALTIME_MAX_INSTANCES", "_REALTIME_TIMEOUT", "_REALTIME_URL", "_FRONTEND_TIMEOUT",
     "_BACKEND_PG_LISTEN_ENABLED", "_BACKEND_REDIS_CONSUME_ENABLED",
@@ -141,6 +297,10 @@ _DECLARED_SUBSTITUTIONS = {
     "_GOTENBERG_SERVICE_URL", "_OFFICE_CONVERTER_MAX_INSTANCES",
     # story #2887 — avatar 전용 GCS 버킷, deploy-backend dev 분기(ADMIN_OPERATOR_*와 동일 패턴).
     "_GCS_AVATARS_BUCKET",
+    # story 620beefc(Threads 이미지 발행) — 채널 미디어 전용 GCS 버킷, deploy-backend dev
+    # 분기(ADMIN_OPERATOR_*와 동일 패턴 — prod 버킷 미프로비저닝이라 avatar #3117 이전
+    # 형태 그대로 dev 전용).
+    "_GCS_CHANNEL_MEDIA_BUCKET",
     # story #3079 — realtime path-filter 판정을 GHA에서 계산해 넘기는 skip 플래그(GCE·Cloud Run).
     "_REALTIME_GCE_SKIP", "_REALTIME_CLOUDRUN_SKIP",
     # story #3118(Sign in with Apple) — deploy-backend(bash entrypoint)가 이제 이 3개를
@@ -148,6 +308,22 @@ _DECLARED_SUBSTITUTIONS = {
     # 이 가드가 스캔하는 4개 bash 스텝 밖)에서만 쓰여 이 목록에 없어도 무해했으나, backend
     # 쪽으로도 재사용하며 처음 걸린다.
     "_APPLE_SERVICES_ID", "_APPLE_KEY_ID", "_APPLE_TEAM_ID",
+    # story #3263(지원v1·5에스컬레이션) — 메일 «고객센터» fiction 정정, 위젯 prod 승격과
+    # 같은 커밋으로 묶는 env 분기. deploy-backend ENV_VARS가 이제 이 값을 직접 참조.
+    "_SUPPORT_CONTACT_SURFACE_WIDGET",
+    # story #3263(같은 스토리 AC1/2) — 에스컬레이션 게이트/DM 배선(requester·approver
+    # team_members.id·moonklabs org/project slug). deploy-backend ENV_VARS가 이제 이 4개를
+    # 직접 참조.
+    "_SUPPORT_ESCALATION_REQUESTER_MEMBER_ID", "_SUPPORT_ESCALATION_APPROVER_MEMBER_ID",
+    "_SUPPORT_ESCALATION_TARGET_ORG_SLUG", "_SUPPORT_ESCALATION_TARGET_PROJECT_SLUG",
+    # story #3279(지원v1·후속) — 운영자 회신 배달 착지 URL. _NEXT_PUBLIC_SUPPORT_GATEWAY_URL은
+    # 이전엔 deploy-frontend(순수 gcloud args 리스트 — 이 가드가 스캔하는 4개 bash 스텝 밖)
+    # 에서만 쓰여 이 목록에 없어도 무해했으나(_APPLE_TEAM_ID와 동형 선례), deploy-backend
+    # 쪽으로도 재사용하며 처음 걸린다.
+    "_NEXT_PUBLIC_SUPPORT_GATEWAY_URL",
+    # story 194acb63(Phase0 결함·S8 후속) — 발행 글 공개 URL의 랜딩 베이스(dev/prod 동일값,
+    # 별개 마케팅 사이트 도메인). deploy-backend ENV_VARS가 이제 이 값을 직접 참조.
+    "_PUBLIC_SITE_BASE_URL",
     "PROJECT_ID", "PROJECT_NUMBER", "BUILD_ID", "COMMIT_SHA", "SHORT_SHA",
     "REPO_NAME", "BRANCH_NAME", "TAG_NAME", "REVISION_ID", "LOCATION",
 }
@@ -163,6 +339,10 @@ _DECLARED_SUBSTITUTIONS = {
 # 쓰는 bash entrypoint라 포함.
 _BASH_ENTRYPOINT_STEP_IDS = (
     "deploy-backend", "deploy-realtime", "deploy-office-converter", "apply-gcs-attachments-cors",
+    # story 620beefc — 신규 bash entrypoint 스텝(위 docstring 지시: 새로 생기면 이 목록에
+    # 추가할 것). ${_DEPLOY_ENV}/${_GCS_CHANNEL_MEDIA_BUCKET} 둘 다 이미 _DECLARED_
+    # SUBSTITUTIONS에 있어 스캔 대상에 넣어도 오탐 없음(사전 확認).
+    "apply-gcs-channel-media-cors",
 )
 
 
@@ -188,7 +368,9 @@ def _apply_cloudbuild_escaping(script: str) -> str:
     return script.replace("$$", "$")
 
 
-def _run_env_vars_assembly(deploy_env: str, redis_url: str, gotenberg_url: str = "") -> str:
+def _run_env_vars_assembly(
+    deploy_env: str, redis_url: str, gotenberg_url: str = "", support_gateway_url: str = ""
+) -> str:
     """실제 gcloud 호출부만 잘라내고 ENV_VARS 조립 로직까지만 실행 — 실제 배포 없이 결과 문자열만 얻는다."""
     script = _apply_cloudbuild_escaping(_extract_deploy_backend_script())
     # 실제 gcloud run deploy 호출 라인 이후는 잘라내고 ENV_VARS를 echo하도록 붙인다.
@@ -202,6 +384,8 @@ def _run_env_vars_assembly(deploy_env: str, redis_url: str, gotenberg_url: str =
         **os.environ,
         "_DEPLOY_ENV": deploy_env,
         "_FASTAPI_URL": "https://example.run.app",
+        # story #3583-BE — set -u라 미설정이면 스크립트가 죽는다(_FASTAPI_URL과 동일 이유).
+        "_BACKEND_URL": "https://example.run.app",
         "_DB_POOL_SIZE": "3",
         "_DB_MAX_OVERFLOW": "1",
         "_BACKEND_DB_PGBOUNCER": "false",
@@ -223,6 +407,8 @@ def _run_env_vars_assembly(deploy_env: str, redis_url: str, gotenberg_url: str =
         "_ADMIN_OPERATOR_ALLOWLIST": "operator@example.iam.gserviceaccount.com",
         # story #2887 — set -u라 미설정이면 스크립트가 죽는다(ADMIN_OPERATOR_*와 동일 이유).
         "_GCS_AVATARS_BUCKET": "sprintable-avatars-dev",
+        # story 620beefc — set -u라 미설정이면 스크립트가 죽는다(GCS_AVATARS_BUCKET과 동일 이유).
+        "_GCS_CHANNEL_MEDIA_BUCKET": "sprintable-channel-media-dev",
         # story #2771 — 기본 빈 문자열(substitutions 기본값과 정합, set -u라 미설정이면 스크립트가
         # 죽는다 — 여기 없으면 이 테스트 전체가 붕괴).
         "_GOTENBERG_SERVICE_URL": gotenberg_url,
@@ -231,6 +417,23 @@ def _run_env_vars_assembly(deploy_env: str, redis_url: str, gotenberg_url: str =
         "_APPLE_SERVICES_ID": "ai.sprintable.web",
         "_APPLE_KEY_ID": "DF2G3UV649",
         "_APPLE_TEAM_ID": "JN798BC4KC",
+        # story #3263 — set -u라 미설정이면 스크립트가 죽는다(APPLE_TEAM_ID 등과 동일 이유).
+        # 값은 cloudbuild.yaml substitutions 기본값과 정합(prod 현재값 — 위젯 미승격 상태).
+        "_SUPPORT_CONTACT_SURFACE_WIDGET": "false",
+        # story #3263(같은 스토리 AC1/2) — 값은 cloudbuild.yaml substitutions 기본값과 정합
+        # (빈 문자열 — PO가 dev 배선 시 채움).
+        "_SUPPORT_ESCALATION_REQUESTER_MEMBER_ID": "",
+        "_SUPPORT_ESCALATION_APPROVER_MEMBER_ID": "",
+        "_SUPPORT_ESCALATION_TARGET_ORG_SLUG": "moonklabs",
+        "_SUPPORT_ESCALATION_TARGET_PROJECT_SLUG": "sprintable",
+        # story #3279 — GOTENBERG_SERVICE_URL과 동일 이유(set -u라 미설정이면 스크립트가
+        # 죽는다). 기본 빈 문자열(substitutions 기본값과 정합 — gateway 자체가 아직
+        # dev 전용 프로비저닝이라 prod엔 이 값이 없다).
+        "_NEXT_PUBLIC_SUPPORT_GATEWAY_URL": support_gateway_url,
+        # story 194acb63 — set -u라 미설정이면 스크립트가 죽는다(다른 신규 substitution들과
+        # 동일 이유). 값은 cloudbuild.yaml substitutions 기본값과 정합(dev/prod 동일,
+        # 시크릿 아님).
+        "_PUBLIC_SITE_BASE_URL": "https://sprintable.ai",
     }
     proc = subprocess.run(
         ["bash", "-c", assembly_only],
@@ -324,16 +527,28 @@ def test_bash_entrypoint_steps_under_cloudbuild_arg_byte_limit():
 # under_cloudbuild_arg_byte_limit()의 <10,000 하드 컷은 "이미 넘은 뒤"에만 CI를 빨갛게
 # 한다 — submit 시점까지 아무도 재지 않는 사각과 본질적으로 같은 모양(닥쳐서야 아는 것).
 # 90%(9,000B)를 넘는 순간 CI를 미리 빨갛게 해 "다음 PR이 그냥 넘겨버리는" 걸 막는다.
-_CLOUDBUILD_STEP_ARG_BYTE_WARN_RATIO = 0.9
+#
+# story #3433(2026-09-04, 페드루 PO 決定) — 90% 임계를 통과했던 deploy-backend(89%)·
+# deploy-realtime(86%)이 그새 다시 임계 밑에서 자라 있었다(story #3118·620beefc·
+# 5b27b32f 등 매 story의 "1~2줄"이 누적) — 90%는 "이미 벼랑 끝"에서야 걸려 예방 효과가
+# 없었다. 60%로 낮춰 훨씬 이른 시점에 CI를 빨갛게 한다(이 스토리에서 deploy-backend
+# 51%·deploy-realtime 17%까지 낮춘 뒤에도 여전히 통과하는 값 — 임계를 낮추는 것 자체가
+# 목적이라 실제로 걸리는 지점이어야 의미가 있다).
+_CLOUDBUILD_STEP_ARG_BYTE_WARN_RATIO = 0.6
 
 
 def test_bash_entrypoint_steps_have_byte_headroom():
-    """⭐story #3124 — 바이트 한도의 90%(9,000B)를 넘는 bash 스텝이 있으면 실패. 하드 한도
-    (10,000B, 위 테스트)와 별개 축 — 그 테스트는 "이미 넘었다"만 잡고, 이 테스트는 "곧 넘긴다"를
-    미리 잡는다(구조적 여유 확保가 이 스토리의 핵심 AC, 그 여유가 실제로 있는지를 이 테스트가
-    영구히 재확인한다). deploy-backend는 이 스토리에서 9,829→4,391B로 낮췄다(여유
-    5,609B, AC1의 ≥2,000B 목표 초과 달성) — 다른 bash 스텝이 이 임계를 넘으면 그 스텝도
-    같은 방식(서사 주석 외부화)으로 손볼 시점이라는 신호."""
+    """⭐story #3124(90% 최초 도입)·#3433(2026-09-04, 60%로 하향) — 바이트 한도의 60%
+    (6,000B)를 넘는 bash 스텝이 있으면 실패. 하드 한도(10,000B, 위 테스트)와 별개 축 —
+    그 테스트는 "이미 넘었다"만 잡고, 이 테스트는 "곧 넘긴다"를 미리 잡는다(구조적 여유
+    확保가 이 스토리의 핵심 AC, 그 여유가 실제로 있는지를 이 테스트가 영구히 재확인한다).
+
+    ⛔story #3433 재발 교훈 — 90% 임계였을 때 deploy-backend·deploy-realtime 둘 다 이미
+    한 번씩 통과했던(story #3124·이 스토리 직전 상태) 뒤에도 story마다 쌓인 짧은 인라인
+    주석 1~2줄이 다시 89%·86%까지 재소진시켰다 — "통과했으니 안전"이 아니라 "임계에
+    얼마나 가까운가"가 계속 재측정돼야 한다는 뜻. 60%는 이 스토리가 deploy-backend를
+    51%·deploy-realtime을 17%까지 낮춘 뒤 기준으로 고른 값(둘 다 통과하되, 다음 몇 story의
+    짧은 추가 정도로는 다시 안 걸리는 여유)."""
     doc = yaml.safe_load(_CLOUDBUILD_YAML.read_text())
     bash_steps = [s for s in doc["steps"] if s.get("entrypoint") == "bash"]
     warn_threshold = int(_CLOUDBUILD_STEP_ARG_BYTE_LIMIT * _CLOUDBUILD_STEP_ARG_BYTE_WARN_RATIO)
@@ -343,13 +558,16 @@ def test_bash_entrypoint_steps_have_byte_headroom():
         if byte_len >= warn_threshold:
             over_threshold.append(
                 f"{step['id']}: {byte_len}B/{_CLOUDBUILD_STEP_ARG_BYTE_LIMIT}B "
-                f"({byte_len * 100 // _CLOUDBUILD_STEP_ARG_BYTE_LIMIT}%)"
+                f"({byte_len * 100 // _CLOUDBUILD_STEP_ARG_BYTE_LIMIT}%, 임계 "
+                f"{int(_CLOUDBUILD_STEP_ARG_BYTE_WARN_RATIO * 100)}%) — 처방: 서사 주석을 "
+                f"이 파일의 '{step['id']} 인라인 주석 아카이브' 절(없으면 새로 만들 것)로 "
+                "옮기고 cloudbuild.yaml엔 story번호+한줄 포인터만 남길 것(deploy-backend/"
+                "deploy-realtime이 story #3124/#3433에서 이 패턴을 이미 적용)."
             )
     assert not over_threshold, (
         f"bash 스텝이 바이트 한도의 {int(_CLOUDBUILD_STEP_ARG_BYTE_WARN_RATIO * 100)}%"
         f"({warn_threshold}B)를 넘었다 — 다음 env/secret 1~2개 추가로 #3031급 submit 실패가 "
-        f"재발할 수 있는 구조: {over_threshold}. 서사 주석을 관련 테스트 파일 docstring으로 "
-        "외부화하거나 스텝을 분할해 여유를 만들 것(story #3124가 deploy-backend에 적용한 패턴)."
+        f"재발할 수 있는 구조:\n" + "\n".join(f"  - {line}" for line in over_threshold)
     )
 
 
@@ -374,6 +592,21 @@ def test_deploy_backend_prod_excludes_plain_redis_url():
     assert "REDIS_URL" not in result
 
 
+def test_deploy_backend_dev_includes_rate_limit_backend_redis():
+    """story #3418(카디르 실측 2026-09-04) — dev는 REDIS_URL과 같은 분기로
+    RATE_LIMIT_BACKEND=redis도 싣는다(REDIS_URL만 있고 이게 없으면 rate_limiter.py::
+    get_rate_limiter가 기본값 memory로 계속 남는다)."""
+    result = _run_env_vars_assembly("dev", "redis://10.164.120.243:6379")
+    assert "RATE_LIMIT_BACKEND=redis" in result
+
+
+def test_deploy_backend_prod_excludes_rate_limit_backend():
+    """AC1 — prod는 선생님 결재 전까지 손대지 않는다(REDIS_URL과 동일 게이트에 묶었으니
+    자동으로 같이 빠진다 — 그 사실을 이 테스트가 고정)."""
+    result = _run_env_vars_assembly("prod", "")
+    assert "RATE_LIMIT_BACKEND" not in result
+
+
 def test_deploy_backend_dev_includes_admin_operator_env_vars():
     """story #2777 — dev는 ADMIN_OPERATOR_AUDIENCE/ALLOWLIST를 plain env로 넘긴다."""
     result = _run_env_vars_assembly("dev", "redis://10.164.120.243:6379")
@@ -390,6 +623,33 @@ def test_deploy_backend_prod_excludes_admin_operator_env_vars():
     assert "ADMIN_OPERATOR_ALLOWLIST" not in result
 
 
+def test_deploy_backend_dev_includes_sandbox_channel_enabled():
+    """story 5b27b32f — dev는 SANDBOX_CHANNEL_ENABLED=true를 RATE_LIMIT_BACKEND와 동일하게
+    리터럴 plain env로 넘긴다(channel_adapters.py의 env 게이트가 이 값 있어야 sandbox
+    어댑터를 CHANNEL_ADAPTERS에 등재)."""
+    result = _run_env_vars_assembly("dev", "redis://10.164.120.243:6379")
+    assert "SANDBOX_CHANNEL_ENABLED=true" in result
+
+
+def test_deploy_backend_prod_excludes_sandbox_channel_enabled():
+    """⭐story 5b27b32f AC5 핵심 전제 — prod는 이 키 자체가 없어야 안전(RATE_LIMIT_BACKEND와
+    동일 게이트). 이 키가 prod에 실리면 sandbox 어댑터가 CHANNEL_ADAPTERS에 등재돼
+    assert_sandbox_channel_not_registered_in_prod()가 기동 자체를 죽인다 — 이 테스트가
+    그 전제(prod엔 애초에 이 키가 없다)를 여기서 먼저 고정한다."""
+    result = _run_env_vars_assembly("prod", "")
+    assert "SANDBOX_CHANNEL_ENABLED" not in result
+
+
+def test_deploy_backend_dev_and_prod_both_include_public_site_base_url():
+    """story 194acb63 — PUBLIC_SITE_BASE_URL은 REDIS_URL/ADMIN_OPERATOR_*와 달리 dev·prod
+    분기 없이 베이스 문자열에 무조건 실린다(별개 마케팅 사이트 도메인, dev/prod 백엔드 어느
+    쪽이든 같은 랜딩이 공개 API를 읽는다 — 이 스토리의 계약)."""
+    dev_result = _run_env_vars_assembly("dev", "redis://10.164.120.243:6379")
+    prod_result = _run_env_vars_assembly("prod", "")
+    assert "PUBLIC_SITE_BASE_URL=https://sprintable.ai" in dev_result
+    assert "PUBLIC_SITE_BASE_URL=https://sprintable.ai" in prod_result
+
+
 def test_deploy_backend_dev_includes_avatars_bucket_env_var():
     """story #2887 — dev는 GCS_AVATARS_BUCKET을 plain env로 넘긴다(ADMIN_OPERATOR_*와 동일 배선)."""
     result = _run_env_vars_assembly("dev", "redis://10.164.120.243:6379")
@@ -404,6 +664,22 @@ def test_deploy_backend_prod_includes_avatars_bucket_env_var():
     혼동 방지 위해 하드코딩 확인)."""
     result = _run_env_vars_assembly("prod", "")
     assert "GCS_AVATARS_BUCKET=sprintable-avatars-prod" in result
+
+
+def test_deploy_backend_dev_includes_channel_media_bucket_env_var():
+    """story 620beefc — dev는 GCS_CHANNEL_MEDIA_BUCKET을 plain env로 넘긴다
+    (ADMIN_OPERATOR_*와 동일 배선 — avatar #3117 이전 형태, prod 버킷 미프로비저닝)."""
+    result = _run_env_vars_assembly("dev", "redis://10.164.120.243:6379")
+    assert "GCS_CHANNEL_MEDIA_BUCKET=sprintable-channel-media-dev" in result
+
+
+def test_deploy_backend_prod_excludes_channel_media_bucket_env_var():
+    """story 620beefc — GCS_AVATARS_BUCKET과 달리(#3117로 prod 버킷 프로비저닝 완료) 채널
+    미디어 버킷은 아직 prod가 없다 — ADMIN_OPERATOR_*/GOTENBERG_SERVICE_URL과 동일 원칙으로
+    prod엔 이 키 자체가 없어야 안전(channel_post_images.py::
+    ChannelImageStorageNotConfiguredError→503 fail-closed)."""
+    result = _run_env_vars_assembly("prod", "")
+    assert "GCS_CHANNEL_MEDIA_BUCKET" not in result
 
 
 def test_deploy_backend_includes_gotenberg_service_url_when_set():
@@ -433,11 +709,64 @@ def test_deploy_backend_prod_excludes_gotenberg_service_url_even_when_set():
     assert "GOTENBERG_SERVICE_URL" not in result
 
 
+def test_deploy_backend_includes_support_gateway_operator_reply_url_when_set():
+    """story #3279 — support-gateway가 프로비저닝된 뒤(_NEXT_PUBLIC_SUPPORT_GATEWAY_URL
+    채워짐) 운영자 회신 착지 URL이 실린다(기존 값에 경로만 이어붙임)."""
+    result = _run_env_vars_assembly(
+        "dev", "redis://10.164.120.243:6379", support_gateway_url="https://support-gateway-dev.example.run.app"
+    )
+    assert (
+        "SUPPORT_GATEWAY_OPERATOR_REPLY_URL="
+        "https://support-gateway-dev.example.run.app/api/v1/internal/operator-replies"
+    ) in result
+
+
+def test_deploy_backend_excludes_support_gateway_operator_reply_url_when_unset():
+    """빈 값이면 키 자체를 안 싣는다(operator_reply_delivery.py가 미설정을 fail-closed로
+    처리하므로 이게 안전한 기본 상태 — GOTENBERG_SERVICE_URL과 동일 원칙)."""
+    result = _run_env_vars_assembly("dev", "redis://10.164.120.243:6379", support_gateway_url="")
+    assert "SUPPORT_GATEWAY_OPERATOR_REPLY_URL" not in result
+
+
+def test_deploy_backend_prod_excludes_support_gateway_operator_reply_url_even_when_set():
+    """GOTENBERG_SERVICE_URL의 prod 게이트 회귀(카디르 QA 2026-08-19)와 동일 클래스를
+    처음부터 막는다 — 값이 채워져 있어도 prod에서는 키 자체가 없어야 한다(support-gateway
+    자체가 아직 dev 전용 프로비저닝)."""
+    result = _run_env_vars_assembly(
+        "prod", "", support_gateway_url="https://support-gateway-dev.example.run.app"
+    )
+    assert "SUPPORT_GATEWAY_OPERATOR_REPLY_URL" not in result
+
+
+def test_deploy_backend_includes_support_gateway_escalation_resolution_url_when_set():
+    """story #183fe7a5 — operator-reply URL과 같은 게이트(위 세 테스트와 동형 트리플릿)."""
+    result = _run_env_vars_assembly(
+        "dev", "redis://10.164.120.243:6379", support_gateway_url="https://support-gateway-dev.example.run.app"
+    )
+    assert (
+        "SUPPORT_GATEWAY_ESCALATION_RESOLUTION_URL="
+        "https://support-gateway-dev.example.run.app/api/v1/internal/escalation-resolution"
+    ) in result
+
+
+def test_deploy_backend_excludes_support_gateway_escalation_resolution_url_when_unset():
+    result = _run_env_vars_assembly("dev", "redis://10.164.120.243:6379", support_gateway_url="")
+    assert "SUPPORT_GATEWAY_ESCALATION_RESOLUTION_URL" not in result
+
+
+def test_deploy_backend_prod_excludes_support_gateway_escalation_resolution_url_even_when_set():
+    result = _run_env_vars_assembly(
+        "prod", "", support_gateway_url="https://support-gateway-dev.example.run.app"
+    )
+    assert "SUPPORT_GATEWAY_ESCALATION_RESOLUTION_URL" not in result
+
+
 def test_deploy_backend_dev_env_vars_unchanged_by_prod_branch():
     """dev 경로 무회귀 — prod 분기 추가가 dev의 다른 필드에 영향을 주지 않는다."""
     result = _run_env_vars_assembly("dev", "redis://10.164.120.243:6379")
     assert result == (
-        "FASTAPI_URL=https://example.run.app,DB_POOL_SIZE=3,DB_MAX_OVERFLOW=1,"
+        "FASTAPI_URL=https://example.run.app,BACKEND_URL=https://example.run.app,"
+        "DB_POOL_SIZE=3,DB_MAX_OVERFLOW=1,"
         "DB_PGBOUNCER=false,"
         "PG_LISTEN_ENABLED=true,EVENT_BROKER_REDIS_CONSUME_ENABLED=false,"
         "EVENT_BROKER_REDIS_DISPATCH_ENABLED=false,EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED=false,"
@@ -448,10 +777,27 @@ def test_deploy_backend_dev_env_vars_unchanged_by_prod_branch():
         "FIREBASE_OAUTH_HANDOFF_ENABLED=false,"
         # story #3118 — 베이스 ENV_VARS 조립 문자열의 맨 끝(FIREBASE_OAUTH_HANDOFF_ENABLED
         # 다음)에 이어붙는다 — REDIS_URL/ADMIN_OPERATOR_*/GCS_AVATARS_BUCKET은 그 뒤에
-        # 조건부로 append되는 후속 라인이라 실제 순서상 APPLE_*가 먼저 온다.
+        # 조건부로 append되는 후속 라인이라 실제 순서상 APPLE_*·SUPPORT_CONTACT_SURFACE_
+        # WIDGET(story #3263 AC3)·SUPPORT_ESCALATION_*(같은 스토리 AC1/2, 베이스 문자열
+        # 맨 끝에 순서대로 추가)가 먼저 온다.
         "APPLE_SERVICES_ID=ai.sprintable.web,APPLE_KEY_ID=DF2G3UV649,APPLE_TEAM_ID=JN798BC4KC,"
-        "REDIS_URL=redis://10.164.120.243:6379,"
+        "SUPPORT_CONTACT_SURFACE_WIDGET=false,"
+        "SUPPORT_ESCALATION_REQUESTER_MEMBER_ID=,SUPPORT_ESCALATION_APPROVER_MEMBER_ID=,"
+        "SUPPORT_ESCALATION_TARGET_ORG_SLUG=moonklabs,SUPPORT_ESCALATION_TARGET_PROJECT_SLUG=sprintable,"
+        # story 194acb63 — 베이스 문자열 맨 끝(SUPPORT_ESCALATION_TARGET_PROJECT_SLUG 다음)에
+        # 이어붙는다 — REDIS_URL 등 조건부 append는 그 뒤.
+        "PUBLIC_SITE_BASE_URL=https://sprintable.ai,"
+        "REDIS_URL=redis://10.164.120.243:6379,RATE_LIMIT_BACKEND=redis,"
         "ADMIN_OPERATOR_AUDIENCE=https://example-audience.run.app,"
         "ADMIN_OPERATOR_ALLOWLIST=operator@example.iam.gserviceaccount.com,"
-        "GCS_AVATARS_BUCKET=sprintable-avatars-dev"
+        "GCS_AVATARS_BUCKET=sprintable-avatars-dev,"
+        # story 620beefc — GCS_AVATARS_BUCKET 조건부 append 바로 뒤에 이어붙는다(cloudbuild.yaml
+        # 삽입 순서 그대로).
+        "GCS_CHANNEL_MEDIA_BUCKET=sprintable-channel-media-dev,"
+        # story 5b27b32f — GCS_CHANNEL_MEDIA_BUCKET 조건부 append 바로 뒤(cloudbuild.yaml
+        # 삽입 순서 그대로).
+        "SANDBOX_CHANNEL_ENABLED=true,"
+        # story e4fc29fa — SANDBOX_CHANNEL_ENABLED 조건부 append 바로 뒤(cloudbuild.yaml
+        # 삽입 순서 그대로).
+        "WORDPRESS_TEST_STUB_ENABLED=true,WEBHOOK_TEST_STUB_ENABLED=true"
     )

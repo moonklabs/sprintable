@@ -1,0 +1,1 @@
+{"file": "tests/test_3620_publication_reconciliation.py", "sec": 30.0, "source": "story-3620-publication-reconciliation(PR 개설 前 선제 등재 — 로컬 raw pytest 11건 4.69s 실측치를 CI 배율(~6x, story #3383) 보수적으로 반영한 30s 잠정값, 실 CI 샤드 로그로 재확認 필요)"}

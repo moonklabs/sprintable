@@ -11,6 +11,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { HypothesisNarrativePanel } from './hypothesis-narrative-panel';
 import { bumpOrgSyncVersion } from '@/lib/project-context-client';
+import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -204,12 +205,20 @@ describe('HypothesisNarrativePanel — story #2533, lifecycle 단일 응답 소�
     expect(document.body.textContent).toContain(koMessages.flow.narrativeTimelineCaption);
   });
 
-  it('시간선 3점이 렌더되고, 로케일에 맞춰 날짜가 포맷된다(PR#2930 리뷰④ — 하드코딩 ko-KR 제거)', async () => {
+  // story #3493 — created_at/updated_at은 "기록"(정본 formatRelativeTime, 7일 초과라
+  // §11-2 절대 표기로 폴백)·measure_after는 미래 "약속"(정본 formatScheduledAt 그대로).
+  // 하드코딩 'ko-KR'/toLocaleDateString 대신 실제 소비 정본 함수로 기대값을 계산해
+  // 테스트 실행 환경의 타임존에 관계없이 결정적이게 한다.
+  it('시간선 3점이 렌더되고, 자리별 정본(기록=formatRelativeTime·약속=formatScheduledAt)으로 포맷된다(PR#2930 리뷰④ 계승 + story #3493)', async () => {
     await renderPanel(rawFetch(makeLifecycle({
       timeline: { created_at: '2026-07-01T00:00:00Z', measure_after: '2026-08-01T00:00:00Z', updated_at: '2026-07-15T00:00:00Z' },
     })));
-    const expected = new Date('2026-07-01T00:00:00Z').toLocaleDateString('ko');
-    expect(document.body.textContent).toContain(expected);
+    const displayTimezone = resolveDisplayTimezone().tz;
+    // 셋 다 "now"(2026-09-05 기준 테스트 실행 시각) 대비 7일을 훌쩍 넘긴 과거라
+    // formatRelativeTime도 formatScheduledAt과 동일한 절대 표기로 폴백한다.
+    expect(document.body.textContent).toContain(formatScheduledAt('2026-07-01T00:00:00Z', displayTimezone).display);
+    expect(document.body.textContent).toContain(formatScheduledAt('2026-08-01T00:00:00Z', displayTimezone).display);
+    expect(document.body.textContent).toContain(formatScheduledAt('2026-07-15T00:00:00Z', displayTimezone).display);
   });
 
   it('fetch 실패 시 에러 문구를 보이고 크래시하지 않는다', async () => {

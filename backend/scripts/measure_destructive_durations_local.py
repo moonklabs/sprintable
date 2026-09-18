@@ -1,0 +1,110 @@
+#!/usr/bin/env python3
+"""story #3383 — 로컬 사전점검용 재측정 도구. 템플릿 DB(sprintable_test_tpl, 미리
+`build_destructive_schema_template.py`로 만들어져 있어야 한다)에서 매 destructive_schema
+파일을 클론해 돌리고 실 소요를 `infra/destructive-schema-shard-weights/`(디렉터리)에 쓴다.
+
+⚠️ 이 로컬 절대시간은 CI 절대시간이 아니다(로컬이 CI보다 ~6배 빠르다, story #3383 실측 —
+GH Actions 공유 러너 특성) — **PR 머지 전 최종 커밋 스냅샷은 항상 실 CI 로그(각 샤드
+job의 파일별 elapsed 출력)로 다시 검증해야 한다**(AC2 재측정 규칙, ci.yml 워크플로
+주석 참고). 이 스크립트는 "새 destructive 파일을 추가한 뒤 극단적으로 느린 것부터
+잡아내는" 빠른 사전점검 용도로 쓴다 — 파일 간 *상대* 비중은 로컬에서도 LPT 배분에
+바로 쓸 수 있을 만큼 유효하다(실측 확認).
+
+사용법:
+    psql -c 'CREATE DATABASE sprintable_test_tpl'
+    psql -d sprintable_test_tpl -c 'CREATE EXTENSION IF NOT EXISTS vector;'
+    DATABASE_URL=postgresql+asyncpg://sprintable:sprintable@localhost:5432/sprintable_test_tpl \\
+      uv run python scripts/build_destructive_schema_template.py
+    uv run python scripts/measure_destructive_durations_local.py
+"""
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+REPO_ROOT = BACKEND_DIR.parent
+# story #3812 CHANGES(재설계, 2026-09-12) — 디렉터리(파일마다 정확히 하나의
+# `<test_file>.json`) + 별도 meta.json(드물게 바뀌는 메타). 이 도구는 "전체 재측정"
+# (사람이 드물게 손으로 돌리는 유지보수 도구, 매 PR이 건드리는 append-hot-path가
+# 아니다)이라 전체 덮어쓰기가 여전히 맞는 동작 — 다만 그 결과물의 «형식»은 상시
+# 소비처(shard_destructive_tests.py)와 맞춰야 하므로 여기도 새 포맷으로 쓴다.
+WEIGHTS_DIR = REPO_ROOT / "infra" / "destructive-schema-shard-weights"
+WEIGHTS_META_PATH = REPO_ROOT / "infra" / "destructive-schema-shard-weights.meta.json"
+
+# story #3465 — 이 전체 재측정 실행은 모든 파일을 같은 배치로 잰다(개별 파일마다 다른
+# provenance를 붙일 근거가 없다 — 실행 시각을 SOURCE_LABEL에 박아 최소한 "언제 이
+# 배치가 돌았나"는 항목마다 남긴다). files[]의 개별 source_run 세그먼트를 없애고 항목별
+# source 필드로 바꾼 구조 전환(story #3465) 후 이 전체-재측정 도구의 유일한 provenance
+# 생성 지점 — 실행할 때마다 여기 갱신하면 된다(하드코딩 날짜, 자동 today() 안 씀 —
+# 재현 가능한 값을 스크립트 실행자가 명시로 남기게).
+SOURCE_LABEL = "local-full-remeasure(2026-09-04, story #3465 구조전환 후 최초 재측정)"
+
+sys.path.insert(0, str(BACKEND_DIR / "scripts"))
+from shard_destructive_tests import discover_files
+
+
+def run(cmd: list[str]) -> None:
+    subprocess.run(cmd, check=True, capture_output=True)
+
+
+def main() -> int:
+    files = discover_files(BACKEND_DIR)
+    print(f"측정 대상: {len(files)}개 파일", file=sys.stderr)
+    results: list[dict[str, object]] = []
+    for i, f in enumerate(files):
+        run(["dropdb", "-h", "localhost", "-U", "sprintable", "--if-exists", "sprintable_test_iso_bench"])
+        run(["createdb", "-h", "localhost", "-U", "sprintable", "-T", "sprintable_test_tpl", "sprintable_test_iso_bench"])
+        env = {
+            "ALEMBIC_DATABASE_URL": "postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test_iso_bench",
+            "PARITY_TEST_DATABASE_URL": "postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test_iso_bench",
+            "DATABASE_URL": "postgresql+asyncpg://sprintable:sprintable@localhost:5432/sprintable_test_iso_bench",
+            "PGPASSWORD": "sprintable",
+        }
+        full_env = {**os.environ, **env}
+        t0 = time.monotonic()
+        proc = subprocess.run(
+            ["uv", "run", "pytest", "-q", f], cwd=BACKEND_DIR, env=full_env,
+            capture_output=True, text=True, check=False,
+        )
+        elapsed = time.monotonic() - t0
+        ok = proc.returncode == 0
+        results.append({"file": f, "sec": round(elapsed, 2), "source": SOURCE_LABEL})
+        print(f"[{i+1}/{len(files)}] {elapsed:6.2f}s {'OK' if ok else 'FAIL'} {f}", file=sys.stderr)
+        if not ok:
+            print(proc.stdout[-2000:], file=sys.stderr)
+            print(proc.stderr[-2000:], file=sys.stderr)
+
+    total_sec = sum(r["sec"] for r in results)
+    # story #3397 — total_files/total_sec는 더 이상 기록하지 않는다(files 배열에서
+    # 파생 가능한 값을 별도로 저장했던 것이 매 PR 병합마다 git 충돌을 냈다 — #3742·
+    # #3752 실사고). check_staleness()는 이제 len(files)로 직접 판정한다.
+    meta_payload = {
+        "_snapshot_policy": (
+            "story #3383(2026-09-03) — 로컬 재측정(템플릿 DB 적용 후). 로컬 절대시간은 CI의 "
+            "~1/6이지만(실측), 파일 간 상대 비중은 LPT 배분에 유효하다. 재측정 기준은 이전과 "
+            "동일: (a) discover 파일 수가 이 스냅샷 대비 +20% 이상, (b) 샤드 간 CI 벽시계가 "
+            "1.5배 이상 벌어짐, (c) 25분 천장 대비 여유가 다시 좁아짐."
+        ),
+        "measured_at": "2026-09-03",
+    }
+    WEIGHTS_META_PATH.write_text(json.dumps(meta_payload, ensure_ascii=False, indent=2) + "\n")
+    # story #3812 CHANGES — 전체 재측정은 디렉터리를 통째로 다시 채운다(기존 파일이
+    # discover에서 없어졌으면 그 파일의 json도 지워야 죽은 항목이 안 남는다 — "전체
+    # 덮어쓰기" 의미론 그대로, append-hot-path 도구가 아니므로 안전).
+    WEIGHTS_DIR.mkdir(parents=True, exist_ok=True)
+    for old in WEIGHTS_DIR.glob("*.json"):
+        old.unlink()
+    for r in results:
+        entry_name = Path(str(r["file"])).name + ".json"
+        (WEIGHTS_DIR / entry_name).write_text(json.dumps(r, ensure_ascii=False, sort_keys=True) + "\n")
+    print(f"OK: {WEIGHTS_DIR} 갱신 완료 — {len(results)}개 파일, 합계 {total_sec:.1f}s", file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

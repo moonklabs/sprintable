@@ -1,0 +1,1 @@
+{"file": "tests/test_620beefc_channel_post_image_lifecycle.py", "sec": 19.0, "source": "story-3579-split-620beefc-channel-post-image(2026-09-06, 원본 25건·등재 48.0s를 3-way 분할 후 로컬 raw pytest 비중(lifecycle 10건 7.79s/총 19.86s ≈ 39%)으로 배분한 잠정값, 실 CI 샤드 로그로 재확認 필요)"}

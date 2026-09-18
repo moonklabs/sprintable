@@ -33,11 +33,27 @@ list_stories(...)`처럼 **직접 호출**하는 테스트가 흔한데(HTTP 왕
 시점에 거치는 자리라, 여기 적어야 «다음 사람도» 읽는다.
 """
 import ast
+import functools
+import inspect
+import json
 import os
 import re
 import uuid
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
+
+# story #4009(critical, 페드루 PO 確定 2026-09-17) — channel_adapters.py의 8개
+# 테스트용 채널(sandbox·instagram_sandbox·facebook_sandbox·ads_sandbox·x_sandbox·
+# youtube_sandbox·stibee_sandbox·ghost_sandbox)이 전부 `SANDBOX_CHANNEL_ENABLED`
+# 플래그 뒤에 등록되게 통일됐다(이전엔 뒤 4개가 무조건 등록·prod 노출 사고의 뿌리,
+# AC2). pytest 스위트는 "dev" 취급(AC6 "dev 무회귀") — conftest.py는 모든 테스트
+# 모듈이 import되기 前에 로드되므로, 여기서 조기에(모듈 최상위 실행 시점) env를
+# 세팅해야 channel_adapters.py의 모듈 최상위 `if` 블록이 이 값을 보고 8개 채널을
+# 전부 등록한다(그래야 이 채널을 직접 참조하는 기존 테스트 파일들이 파일별
+# monkeypatch 없이도 그대로 통과한다). subprocess로 env를 명시 제어하는 개별
+# 테스트(예: test_sandbox_env_flag_gates_registration_via_subprocess)는 자기
+# 환경을 따로 넘기므로 이 기본값의 영향을 안 받는다.
+os.environ.setdefault("SANDBOX_CHANNEL_ENABLED", "true")
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -83,8 +99,9 @@ _TEST_DB_SIGNAL_RE = re.compile(
 # 사람/에이전트 여럿이 같은 로컬 postgres 서버의 같은 DB명을 동시에 가리키는 일이 흔하다. CI에서는
 # 안전하다(job마다 완전히 새로운 격리 postgres 서비스 컨테이너를 매번 띄우고 그 안에서만
 # `sprintable_test`라는 이름을 쓰므로 "공유"가 구조적으로 불가능 — GitHub Actions가 항상
-# `CI=true`를 심어주는 것을 신호로 구분한다, 이 conftest 밖에서도 이미 쓰는 관례:
-# test_s6_4_dod.py·test_s7_2_epic_dod.py 참조). CI 밖에서 이 이름을 향한 파괴적 리셋은 —
+# `CI=true`를 심어주는 것을 신호로 구분한다, 이 conftest 밖에서도 이미 쓰는 관례(story
+# #3657로 은퇴한 test_s6_4_dod.py·test_s7_2_epic_dod.py가 원 선례였다 — `os.environ.get
+# ("CI")` 자체는 이 파일 아래에서 여전히 유효한 패턴). CI 밖에서 이 이름을 향한 파괴적 리셋은 —
 # 격리를 사람이 «기억」해야 하는 바로 그 자리라 opt-in을 강제한다.
 _SHARED_CONVENTION_DB_NAMES = frozenset({"sprintable_test"})
 
@@ -154,6 +171,187 @@ def _reset_schema_for_destructive_tests(request):
     if url:
         _reset_public_schema(url)
     yield
+
+
+# story #3896(customer-zero·BE·테스트 위생, 카디르 재QA 2026-09-14) — non-destructive
+# 스윕을 단일 프로세스로 돌리면 도중에 `users.marketing_email_opt_out`의 server_default가
+# 벗겨져(information_schema.columns 직접 대조로 실측) 그 컬럼에 의존하는 raw INSERT 패턴
+# 테스트 73파일이 968건 연쇄 FAIL한다 — 같은 파일 단독 격리·CI 샤딩 실행은 항상 clean(즉
+# "그 파일이 문제"가 아니라 "그 파일보다 먼저 실행된 어떤 파일이 스키마를 건드렸다"는
+# 신호). 원인 파일을 수동으로 찾는 대신(968건이 다 터진 뒤에야 보이는 소음), 모듈(파일)
+# 단위로 스키마 스냅샷을 앞뒤 대조해 **드리프트가 실제로 일어난 바로 그 모듈**에서 즉시
+# RED로 표면화한다 — 968건 대신 1건, 그것도 원인 파일 이름이 찍힌 채로.
+#
+# `users` 1개 테이블만 본다(카디르 실측 재현 대상이 정확히 이 테이블 — "전 테이블"로
+# 넓히면 쿼리 비용이 테이블 수만큼 늘고, 이 사고 클래스 자체가 "어떤 모델이든 ORM
+# server_default가 비면 같은 방식으로 터질 수 있다"는 일반론이라 users 하나로도 충분히
+# 회귀를 잡는다 — 다른 테이블에서 같은 클래스가 재발하면 이 감시 대상을 넓히면 된다,
+# story #3175 usage_meter 선례와 같은 "발견되면 넓힌다" 원칙).
+#
+# destructive_schema로 등록된 모듈은 스코프 밖(no-op) — 그 파일들은 파일별 프로세스
+# 격리 + 자체 스키마 리셋(위 `_reset_schema_for_destructive_tests`)을 전제로 스스로
+# 스키마를 바꾸는 게 정상 동작이지 버그가 아니다. PO PR#4304 리뷰(2026-09-15)로 실사고
+# 발견: `request.module.pytestmark` 기반 판정은 **모듈 레벨** 마커만 보여
+# `test_f6d1bbaa_stamp_integrity_guard.py`처럼 destructive_schema를 **함수별**
+# `@pytest.mark.destructive_schema`로만 붙이는 파일을 놓쳐 destructive 샤드에서도
+# 오탐 FAIL을 냈다 — `_is_registered_destructive_file()`로 교체, 마커 도출이 아니라
+# `infra/destructive-schema-shard-weights/`(story 23bf1913 가드가 보는 단일 정본 등록
+# 집합)에 파일 상대경로가 등재돼 있는지로 판정한다(마커 부여 방식과 무관).
+_SCHEMA_DRIFT_WATCH_TABLES = ("users",)
+
+
+def _snapshot_columns(url: str, table: str) -> tuple[tuple[str, str | None, str, str], ...] | None:
+    """(column_name, column_default, is_nullable, data_type) 정렬 튜플 — 순서 무관 비교용.
+    테이블 자체가 없으면 None(존재 여부는 이 자의 관심사 밖, 다른 가드 몫)."""
+    engine = create_engine(_sync_url(url))
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(
+                text(
+                    "SELECT column_name, column_default, is_nullable, data_type "
+                    "FROM information_schema.columns WHERE table_schema='public' AND table_name=:t"
+                ),
+                {"t": table},
+            ).all()
+    finally:
+        engine.dispose()
+    if not rows:
+        return None
+    return tuple(sorted((r[0], r[1], r[2], r[3]) for r in rows))
+
+
+def _is_registered_destructive_file(module) -> bool:
+    """story #3896 CHANGES(PO PR#4304 리뷰 2026-09-15) — 실사고로 발견: module-scope
+    fixture 시점의 `request.module.pytestmark`(또는 `request.node.get_closest_marker`)는
+    **모듈 레벨** 마커만 본다. `test_f6d1bbaa_stamp_integrity_guard.py`처럼 destructive_
+    schema를 **함수별** `@pytest.mark.destructive_schema` 데코레이터로만 붙이는 파일(이
+    저장소의 두 번째 관례, `pytestmark = pytest.mark.skipif(...)`가 모듈 레벨을 이미 차지한
+    경우 흔함)은 그 방식으로 못 걸러져 destructive 샤드(파일별 격리 fresh DB·스키마 변이가
+    정상 동작)에서도 이 감시 fixture가 돌아 오탐 FAIL을 냈다.
+
+    처방: 마커 재도출을 그만두고, `infra/destructive-schema-shard-weights/`(story
+    23bf1913 가드가 보는 그 SSOT — destructive_schema 파일은 전부 여기 등재돼야 한다)를
+    직접 읽어 "이 모듈이 destructive로 등록된 파일인가"를 판정한다 — 마커 부여 방식(모듈
+    전체 vs 함수별)과 완전히 무관해진다.
+
+    ⛔fix(2026-09-15, PO PR#4304 CI RED 재발견) — 처음엔 `sys.path.insert` 뒤
+    `scripts.shard_destructive_tests`를 import해 `load_weights()`를 재사용했는데,
+    `test_2662_missing_model_import_guard.py`가 서브프로세스로 pytest를 다시 띄우는
+    맥락(rootdir/cwd가 다름)에서 그 sys.path 조작이 안 서서
+    `ModuleNotFoundError: No module named 'shard_destructive_tests'`로 fixture 자체가
+    죽어 2662의 진단 단언이 깨졌다 — import 의존을 완전히 걷어내고 JSON을 직접
+    glob+파싱한다(sys.path 무변경)."""
+    module_file = getattr(module, "__file__", None)
+    if not module_file:
+        return False
+    try:
+        rel_path = Path(module_file).resolve().relative_to(_BACKEND_DIR_FOR_WEIGHTS).as_posix()
+    except ValueError:
+        return False
+    return rel_path in _registered_destructive_files()
+
+
+@functools.lru_cache(maxsize=1)
+def _registered_destructive_files() -> frozenset[str]:
+    """`infra/destructive-schema-shard-weights/*.json`의 `file` 필드 전수(story 23bf1913
+    SSOT) — 세션당 1회만 디스크 읽기(다수 모듈이 매번 재계산할 필요 없음, 파일 목록은
+    같은 pytest 프로세스 안에서 안 바뀐다). `scripts/shard_destructive_tests.py`를
+    import하지 않는다(서브프로세스 pytest 맥락에서 sys.path 조작이 깨진 실사고, 위
+    docstring 참고) — 같은 디렉터리(파일마다 정확히 하나의 `<test_file>.json`, 항상
+    `{"file": ..., "sec": ..., "source": ...}` 평평한 객체 하나) 계약을 JSON으로 직접
+    읽는다. 디렉터리 레벨 메타는 형제 파일(`<dirname>.meta.json`, 이 디렉터리 밖)이라
+    이 glob엔 안 걸린다."""
+    weights_dir = _BACKEND_DIR_FOR_WEIGHTS.parent / "infra" / "destructive-schema-shard-weights"
+    files = set()
+    for path in weights_dir.glob("*.json"):
+        with path.open(encoding="utf-8") as f:
+            entry = json.load(f)
+        files.add(entry["file"])
+    return frozenset(files)
+
+
+_BACKEND_DIR_FOR_WEIGHTS = Path(__file__).resolve().parent.parent
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _detect_schema_drift_in_non_destructive_module(request):
+    """모듈(파일) 단위 전/후 스냅샷 대조 — 로우 데이터가 아니라 컬럼 메타데이터만 보므로
+    (create_all/drop_all/ALTER 등으로만 바뀌는 것) 정상적인 매 테스트 데이터 변경엔
+    false-positive 0. realdb URL(PARITY/ALEMBIC) 미설정 시(=순수 mock 세션) no-op."""
+    if _is_registered_destructive_file(request.module):
+        yield
+        return
+
+    url = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
+    if not url:
+        yield
+        return
+
+    before = {t: _snapshot_columns(url, t) for t in _SCHEMA_DRIFT_WATCH_TABLES}
+    yield
+    after = {t: _snapshot_columns(url, t) for t in _SCHEMA_DRIFT_WATCH_TABLES}
+
+    drifted = {t: (before[t], after[t]) for t in _SCHEMA_DRIFT_WATCH_TABLES if before[t] != after[t]}
+    if drifted:
+        details = []
+        for table, (b, a) in drifted.items():
+            b_set = set(b or ())
+            a_set = set(a or ())
+            changed = sorted(map(str, (b_set - a_set) | (a_set - b_set)))
+            details.append(f"{table}: {changed}")
+        pytest.fail(
+            f"story #3896 스키마 드리프트 자 — 모듈 {request.module.__name__} 실행 前後로 "
+            "공유 alembic-migrated DB의 스키마(information_schema.columns)가 바뀌었습니다"
+            "(로우 데이터가 아니라 컬럼 메타데이터 — create_all/drop_all/ALTER 등 이 파일이나 "
+            "이 파일이 부르는 헬퍼가 스키마를 건드렸다는 뜻). 변경분: " + "; ".join(details)
+        )
+
+
+# story #3330(PR#3711) CI 재현 — `_MARKER_NAME`(destructive_schema) 미부여 테스트 전체(=
+# non-destructive realdb 스위트, "Backend pytest" job) 대상 conftest autouse 승격. 근본원인
+# (실측 확認, CI와 동일 스택트레이스로 로컬 재현): `app.core.database.engine`(전역·프로세스
+# 수명)을 거치는 어떤 경로든(예: send_message의 background task `mark_agent_replied`, GET
+# /auth/me 등 실 HTTP 경유 라우터) 그 커넥션 풀에 "이전 pytest-anyio 이벤트 루프에 묶인"
+# 커넥션이 dispose 없이 남을 수 있다. pytest-anyio가 테스트마다 새 이벤트 루프를 만들기
+# 때문에, 다음 테스트가 pool_pre_ping으로 그 죽은 루프의 커넥션을 검사하려는 순간
+# `RuntimeError: ... got Future ... attached to a different loop`(asyncpg 취소 경로가
+# 이미 닫힌 루프에 task를 만들려다 남)로 죽는다.
+#
+# ⛔어느 특정 테스트 파일이 "범인"인지는 구조적으로 예측 불가능하다 — 전역 엔진 경로를
+# 타는지 여부는 그 테스트가 호출하는 프로덕션 코드의 내부 구현(예: transition_gate가
+# 어떤 gate_type에서 알림을 발행하는지)에 달려 있고, 그 프로덕션 코드는 테스트 작성자가
+# 매번 추적할 수 있는 게 아니다 — 파일 단위 opt-in fixture(`_dispose_global_engine_
+# after_test`, 246개 파일이 개별로 붙여 옴)는 "그 파일 작성자가 이 위험을 알고 있었는가"에
+# 의존하는 구조적 구멍이다(story #3330 PR#3711 CI flake가 정확히 이 구멍으로 재현 — 무관한
+# 다른 non-destructive 테스트가 새 프로덕션 코드 경로를 처음 타면서 dispose 없이 커넥션을
+# 남기고, 알파벳 순 다음 테스트가 그 죽은 커넥션을 집어 죽었다). 파일 단위 fixture를 계속
+# 개별 추가하는 대신, **모든** non-destructive 테스트 뒤에 무조건 dispose하는 쪽이 근본
+# 처방이다 — "이 테스트가 전역 엔진을 쓰는지"를 작성자가 몰라도 안전하다.
+#
+# destructive_schema 마커 테스트(별도 job, 파일별 완전 격리 프로세스)는 스코프 밖 — 이미
+# 프로세스 경계로 격리돼 있어 이 문제 자체가 발생하지 않는다(no-op으로 남겨 그 job의 기존
+# 동작을 그대로 유지).
+#
+# 246개 파일에 이미 있는 개별 `_dispose_global_engine_after_test`는 지금 걷어내지 않는다
+# (중복 dispose는 완전히 무해 — 이미 빈 풀을 한 번 더 비우는 것뿐) — 대량 편집은 별도
+# 스토리(a05da51b, 카디르 QA 지적)에서 그 fixture 자체를 걷어내는 정리와 함께.
+@pytest.fixture
+async def _dispose_global_engine_for_non_destructive_tests():
+    """story #3330(PR#3711) — 이 fixture 자체는 **autouse가 아니다**(의도적). 아래
+    `pytest_collection_modifyitems`가 non-destructive **async** 테스트에만 collection
+    시점에 `item.fixturenames`로 주입한다.
+
+    ⛔`autouse=True`를 직접 걸었던 초판은 story #2662의 서브프로세스 메타테스트
+    (`test_setup_phase_failure_also_gets_diagnosed`)를 깼다 — pytest-asyncio strict
+    모드가 "async fixture가 autouse로 걸려 있는데 그 테스트가 async 참여를 선언 안
+    했다"를 **fixture 본문 진입 전에**(dispatch 시점) 감지해 `PytestRemovedIn9Warning`을
+    던진다. 본문 안에서 `inspect.iscoroutinefunction` 등으로 걸러도 이미 늦다(본문
+    자체가 실행되기 전에 경고가 남) — sync 테스트엔 이 fixture가 **애초에 요청되지
+    않아야** 한다. autouse를 버리고 collection 시점에 "async 테스트에만" 조건부로
+    끼워 넣는 것으로 근본 해결."""
+    yield
+    from app.core.database import engine as _global_engine
+    await _global_engine.dispose()
 
 
 # story 8236bbc3: destructive_schema 마커 drift 자기표면화 가드(PO crux 게이트②, 2026-07-03).
@@ -290,6 +488,19 @@ def pytest_collection_modifyitems(items: list) -> None:
             f"이번 수집에 섞인 destructive 파일{more}:\n" + "\n".join(preview)
         )
 
+    # story #3330(PR#3711) — `_dispose_global_engine_for_non_destructive_tests`(위)를
+    # non-destructive **async** 테스트에만 collection 시점에 주입한다. `autouse=True`로
+    # 직접 걸면 sync 테스트도 이 async fixture를 "요청"한 것으로 잡혀 pytest-asyncio
+    # strict 모드가 fixture 본문 진입 前에 `PytestRemovedIn9Warning`을 던진다(story
+    # #2662의 서브프로세스 메타테스트가 이 경고로 진단 출력 형태가 깨져 실측 발견) —
+    # sync 테스트는 이 fixture를 아예 몰라야 한다. `inspect.iscoroutinefunction`으로
+    # "실행 시점에 걸러도" 이미 늦으므로(경고는 dispatch 시점에 남), collection
+    # 시점의 `item.fixturenames` 주입만이 sync 테스트를 완전히 비켜간다.
+    for item in non_destructive_items:
+        test_func = getattr(item, "function", None)
+        if inspect.iscoroutinefunction(test_func):
+            item.fixturenames.append("_dispose_global_engine_for_non_destructive_tests")
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # story #2662 — create_all() 격리 테스트의 "model 미등재" 실패는 원인을 안 가리킨다
@@ -420,6 +631,51 @@ def pytest_runtest_makereport(item, call):
         report.sections.append(("story #2662: missing model import 진단", diagnosis))
 
 
+@pytest.fixture(autouse=True)
+def _guard_global_shutdown_event_leak(request):
+    """story #3580(페드루 PO 確定 2026-09-06, #3942 CI 실사고 근본원인) —
+    `app.core.shutdown.shutdown_event`는 프로세스 전역 asyncio.Event다. SSE 스트림
+    테스트가 이걸 set()해 즉시-종료를 실측한 뒤 자기 정리(reset_shutdown_event())를
+    모든 경로(예외·타임아웃 포함)에서 못 돌리고 끝나면, 같은 pytest 프로세스에서
+    이어 도는 «무관한» 다음 SSE 스트림 테스트가 시작하자마자 shutdown_reconnect로
+    오판된다 — 실제 CI 원본 실측(run 34037169656): 피해자 테스트의 타임라인이
+    `heartbeat@+0.006s, sync_status@+0.006s, shutdown_reconnect@+0.006s`(시작하자마자
+    셧다운) — 원인은 그 앞에 돈 테스트가 남긴 오염이지 피해자 자신의 결함이 아니었다.
+
+    처방 — 설정(이 테스트 시작 前) 한 시점만 지킨다: 이미 set돼 있으면(이전 테스트의
+    오염 상속) 조용히 reset해 이 테스트를 깨끗한 상태에서 시작시킨다(피해자를 만들지
+    않는다). 상속받은 오염이었다는 사실은 경고 로그로만 남긴다.
+
+    ⛔종료 시점(teardown) 검사 — "테스트가 끝났는데 여전히 set이면 그 테스트가
+    범인" — 은 **처음엔 넣었다가 실측으로 되돌렸다**: `app/main.py:61,163`(lifespan
+    startup=reset·shutdown=set) 그대로, `with TestClient(app) as c:` 블록을 정상
+    종료하는 **모든** 테스트가 그 자체로 실 lifespan shutdown을 타 이 이벤트를
+    "정상적으로" set한 채 끝난다(다음 lifespan startup의 reset을 기다리는 게 설계
+    그대로 — 실 프로덕션 그래스풀 셧다운과 동일 신호). 이건 버그가 전혀 아닌데,
+    teardown 검사를 넣었더니 그런 완전히 무고한 테스트(`test_heartbeat_disconnect_
+    check_clears_connection` 등)가 새로 FAIL/ERROR 나는 걸 로컬에서 직접 재현했다
+    (이 fixture를 no-op으로 바꾸면 사라짐 — 원인 이 fixture로 특정 확認). "여전히
+    set"이라는 신호 하나로는 «이 테스트가 수동 set()을 잊고 안 지웠다»와 «이 테스트의
+    TestClient(app) lifespan이 정상적으로 셧다운을 신호했다»를 구조적으로 구분할
+    수 없다 — 그래서 teardown-시점 자동 「범인 지목」은 안전하게 구현이 안 된다고
+    판단, 설정-시점 방어(피해자 보호)만 남긴다. 수동 set() 4자리(test_c4c72eb1_sse_
+    shutdown_aware.py·test_eventbus_s2.py·test_eventbus_s3.py·test_s20.py)는 각
+    파일에서 개별로 finally 순서를 하드닝했다(그 reset이 다른 cleanup 코드보다
+    먼저/독립적으로 돌게)."""
+    import logging
+
+    from app.core import shutdown as shutdown_module
+
+    if shutdown_module.shutdown_event.is_set():
+        logging.getLogger(__name__).warning(
+            "%s 시작 前 app.core.shutdown.shutdown_event가 이미 set — 이전 테스트가 "
+            "남긴 오염으로 판단해 reset 후 진행(이 테스트는 피해자로 취급, 실패 처리 안 함)",
+            request.node.nodeid,
+        )
+        shutdown_module.reset_shutdown_event()
+    yield
+
+
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
@@ -428,6 +684,42 @@ def anyio_backend() -> str:
 @pytest.fixture
 def org_id() -> uuid.UUID:
     return uuid.uuid4()
+
+
+@pytest.fixture
+def dns_stub(monkeypatch):
+    """story e4fc29fa(조각④·⑤ 발견·즉시수정) — `destination_url_safety.py::
+    assert_destination_url_safe`가 실 DNS를 해석한다(SSRF 방지 "해석 시점" 검사) —
+    그래서 이 헬퍼를 쓰는 wordpress/webhook 어댑터·connection-creation 단위 테스트는
+    가짜 도메인(예: customer-blog.example.com)을 실 네트워크 없이 결정적으로 다뤄야
+    한다.
+
+    `socket.getaddrinfo` 자체가 아니라 `destination_url_safety.py::_resolve_host`
+    (그 모듈만의 얇은 간접 참조)를 patch한다 — 처음엔 `socket.getaddrinfo`를 바로
+    patch했었는데, 그건 **프로세스 전역**이라 같은 테스트가 real Postgres도 함께
+    쓰면(connection-creation 테스트가 그렇다) asyncpg의 내부 호스트 해석까지 오작동해
+    DB 커넥션 타임아웃으로 죽었다(실측 확認, 조각⑤에서 발견).
+
+    기본은 모든 호스트를 안전한 공인 IP(8.8.8.8 — private/reserved/loopback/link-local
+    전부 아님, Google DNS)로 매핑한다. `dns_stub.map("host", "10.0.0.1")`로 특정
+    호스트만 사설/loopback 등 위험 IP로 오버라이드해 차단 경로를 테스트할 수 있다."""
+    import socket as socket_mod
+
+    from app.services import destination_url_safety as _url_safety_mod
+
+    mapping: dict[str, str] = {}
+
+    def _fake_resolve_host(host, port):
+        ip = mapping.get(host, "8.8.8.8")
+        return [(socket_mod.AF_INET, socket_mod.SOCK_STREAM, 6, "", (ip, port or 0))]
+
+    monkeypatch.setattr(_url_safety_mod, "_resolve_host", _fake_resolve_host)
+
+    class _DNSStubController:
+        def map(self, host: str, ip: str) -> None:
+            mapping[host] = ip
+
+    return _DNSStubController()
 
 
 def override_db_and_read(app, provider) -> None:

@@ -31,28 +31,40 @@ export function isGhostReference(
   return !references.some((r) => r.target_type.toLowerCase() === type && r.target_id.toLowerCase() === id);
 }
 
+// story #2262 AC1 — backend FORMS(reference.py)와 대응하는 닫힌 3값 열거. story #3776
+// (1층B, 페드루 재검토 10:14Z) — 화면 표기(embed-card.tsx formLabel)가 이 열거를
+// `Record<ReferenceForm, string>`로 exhaustive하게 처방하려면 이 시점(백엔드 값이 FE 타입
+// 경계를 건너는 자리)에서 먼저 좁혀야 한다 — 미지 값은 null로 걷어(칩에 표기 안 함) 화면에
+// 원시 문자열이 새는 통로 자체를 없앤다(story #3770 클래스 — 화면에 원시 역할값이 뜨던
+// 재발을 새로 심지 않는다).
+export type ReferenceForm = 'mention' | 'embed' | 'proof';
+function isReferenceForm(value: string): value is ReferenceForm {
+  return value === 'mention' || value === 'embed' || value === 'proof';
+}
+
 // story #2262 AC1(2026-08-08) — doc `flow-map-blueprint-v1` §2-3 「사실성 · 표면 · 지점」의
 // «표면·지점» 재료. isGhostReference와 같은 대조를 한 번 더 해 form·referenced_at까지
 // 끌어온다(스토리 자신의 AC1 정의: 표면=form('mention'|'embed'|'proof'), 지점=referenced_at —
 // "이 참조가 «언제 생겼나»"이지 대상이 「언제 만들어졌나」가 아니다). 매칭 없으면(유령이거나
 // references 자체가 없으면) null — 그때는 칩에 표기하지 않는다(모르는 것을 지어내지 않는다).
+// form이 위 3값 밖이면(BE 계약 어긋남·아직 FE가 모르는 신규 값) 같은 이유로 null.
 export function findReferenceMeta(
   references: ChatMessage['references'],
   targetType: string,
   targetId: string,
-): { form: string; referencedAt: string } | null {
+): { form: ReferenceForm; referencedAt: string } | null {
   if (!references) return null;
   const type = targetType.toLowerCase();
   const id = targetId.toLowerCase();
   const match = references.find((r) => r.target_type.toLowerCase() === type && r.target_id.toLowerCase() === id);
-  if (!match || !match.form || !match.referenced_at) return null;
+  if (!match || !match.form || !match.referenced_at || !isReferenceForm(match.form)) return null;
   return { form: match.form, referencedAt: match.referenced_at };
 }
 
 export type EmbedDecision =
   | { kind: 'asset' }
   | { kind: 'card' }
-  | { kind: 'chip'; ghost: boolean; referenceMeta: { form: string; referencedAt: string } | null };
+  | { kind: 'chip'; ghost: boolean; referenceMeta: { form: ReferenceForm; referencedAt: string } | null };
 
 /**
  * 결정 트리(AC2): asset→'asset'(AssetEmbedCard) / sole-link(& allowCard·비유령)→'card'
