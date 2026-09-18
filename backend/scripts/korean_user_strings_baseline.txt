@@ -554,9 +554,13 @@ app/services/billing_pack.py::에서 판매하지 않음(판매 자원:
 app/services/billing_pack.py::의 current_period가 세팅되지 않아 max_packs 판정 불가
 app/services/billing_pack.py::초과 — 이번 주기 이미
 app/services/billing_pack.py::팩
-app/services/billing_receipt_email.py::원
+app/services/billing_scheduler.py::">결제 정보 확인하러 가기</a></p><p>문의사항이 있으시면 언제든 회신해 주세요.</p>
+app/services/billing_scheduler.py::)으로 복귀합니다.</p><p><a href="
+app/services/billing_scheduler.py::</b>까지 결제가 완료되지 않으면 조직의 플랜이 자동으로 Free로 전환됩니다. Free로 전환되어도 <b>기존 데이터는 삭제되지 않으며</b>, 신규 업로드만 제한됩니다. 이후 결제를 완료하시면 즉시 원래 플랜(
+app/services/billing_scheduler.py::<p>안녕하세요, Sprintable입니다.</p><p>정기결제 시도가 처리되지 않았습니다. 저희 쪽에서 매일 자동으로 재시도하고 있으니, 등록하신 카드 정보를 확인해 주시면 감사하겠습니다.</p><p><b>
 app/services/billing_scheduler.py::Sprintable 정기결제(갱신)
 app/services/billing_scheduler.py::WITH absolute_latest_grants AS (\n                    -- companion 유무와 무관하게, org별 «절대 최신» grant 정확히 1건을\n                    -- 먼저 확定(위 불변식 ⓐ 이전 단계 — superseded 판정의 유일한 축).\n                    SELECT DISTINCT ON (org_id) id, org_id, amount_minor, currency,\n                           metadata AS entry_metadata\n                    FROM billing_ledger_entries\n                    WHERE entry_type = 'credit_grant' AND metadata->>'kind' = 'tier_grant'\n                    ORDER BY org_id, ts DESC\n                )\n                SELECT lg.id, lg.org_id, lg.amount_minor, lg.currency, lg.entry_metadata\n                FROM absolute_latest_grants lg\n                WHERE NOT EXISTS (\n                    -- «그 특정 절대-최신 행 하나»에만 companion 유무를 검사(불변식 ⓐ).\n                    -- companion이 있으면 이 org는 이번 스윕에서 후보가 아예 없음(구\n                    -- grant로 되돌아가지 않는다 — superseded는 영구 제외).\n                    SELECT 1 FROM billing_ledger_entries r\n                    WHERE r.entry_type = 'adjustment'\n                      AND r.metadata->>'kind' = 'tier_grant_revert'\n                      AND r.metadata->>'reverted_entry_id' = lg.id::text\n                )
+app/services/billing_scheduler.py::[Sprintable] 결제가 처리되지 않았습니다 — 확인해 주세요
 app/services/blog_destinations.py::블로그 목적지는 아직 배선되지 않았습니다(wordpress=조각③b·webhook=조각④에서 배선 예정).
 app/services/campaigns.py::campaign을 찾을 수 없습니다:
 app/services/chain_escalation.py::)이 발생해 agent 발신이 일시 차단됐어요. 이 알림의 «차단 해제»로 즉시 풀 수 있어요.
@@ -772,43 +776,20 @@ app/services/email.py::· 사업자등록번호
 app/services/email.py::경기도 고양시 일산동구 무궁화로 20-38, 5층 502호
 app/services/email.py::윤도선
 app/services/email.py::주식회사 뭉클랩
-app/services/email_copy.py::<b>{grace_date}</b>까지 결제가 완료되지 않으면 조직의 플랜이 자동으로 Free로 전환돼요. Free로 전환되어도 <b>기존 데이터는 삭제되지 않으며</b>, 신규 업로드만 제한돼요. 이후 결제를 완료하시면 즉시 원래 플랜({tier_display})으로 복귀해요.
 app/services/email_copy.py::<p>안녕하세요, Sprintable이에요.</p><p>조직의 스토리지 사용량이 <b>{pct}%</b>({used_mb}MB / {cap_mb}MB)에 도달했어요.</p><p>업로드 제한을 피하려면 사용하지 않는 파일을 정리하거나 플랜을 업그레이드해 주세요.</p>
 app/services/email_copy.py::<p>안녕하세요, Sprintable이에요.</p><p>조직의 이번 달 자동화 사용량(AU)이 <b>{pct}%</b>({current} / {au_limit} AU)에 도달했어요.</p><p>100%에 도달하면 MCP/API 쓰기 및 자동화가 일시 중지돼요(읽기와 사람 UI는 계속 사용 가능해요). 한도에 도달하기 전 플랜 업그레이드를 검토해 주세요.</p>
 app/services/email_copy.py::<strong>{inviter_name}</strong>님이 <strong>{org_name}</strong> 조직에 <strong>{role}</strong>로 초대했어요.
 app/services/email_copy.py::Sprintable — 가입 완료까지 몇 단계 남았어요
 app/services/email_copy.py::Sprintable 가입을 환영해요. 아직 에이전트 연결이나 첫 지시를 완료하지 않으셨네요 — 몇 분이면 끝나는 남은 단계를 마무리하면 Sprintable의 진짜 가치를 바로 확인하실 수 있어요.
-app/services/email_copy.py::Sprintable 결제가 완료됐어요
 app/services/email_copy.py::Sprintable 비밀번호 설정을 완료해 주세요
 app/services/email_copy.py::Sprintable 비밀번호 재설정 안내
 app/services/email_copy.py::Sprintable 이메일 인증을 완료해 주세요
 app/services/email_copy.py::Sprintable에 가입해 주셔서 감사해요.
 app/services/email_copy.py::[Sprintable] {org_name} 조직에 초대됐어요
-app/services/email_copy.py::[Sprintable] {tier} 플랜으로 변경이 예약됐어요
-app/services/email_copy.py::[Sprintable] {tier} 플랜으로 전환이 완료됐어요
-app/services/email_copy.py::[Sprintable] 결제가 처리되지 않았어요 — 확인해 주세요
-app/services/email_copy.py::[Sprintable] 구독 해지가 예약됐어요
-app/services/email_copy.py::[Sprintable] 구독이 해지되어 Free 플랜으로 전환됐어요
 app/services/email_copy.py::[Sprintable] 스토리지 사용량 {pct}% 도달
-app/services/email_copy.py::[Sprintable] 예약된 하향 전환이 취소됐어요 — 좌석 한도 초과
 app/services/email_copy.py::[Sprintable] 자동화 사용량(AU) {pct}% 도달
-app/services/email_copy.py::{apply_date}까지는 현재 플랜을 그대로 이용하실 수 있고, 그 이후 Free 플랜으로 전환돼요.
-app/services/email_copy.py::{apply_date}부터 {tier} 플랜으로 전환돼요.
-app/services/email_copy.py::결제 금액: {amount}
-app/services/email_copy.py::결제 정보 확인하러 가기
-app/services/email_copy.py::결제가 정상적으로 완료됐어요.
-app/services/email_copy.py::구독 해지가 예약됐어요.
-app/services/email_copy.py::기존 데이터는 삭제되지 않고 그대로 보존되며, 변경된 플랜 한도 내에서 계속 이용하실 수 있어요.
-app/services/email_copy.py::기존 데이터와 콘텐츠는 삭제되지 않고 그대로 보존돼요 — 언제든 다시 업그레이드해 이어서 이용하실 수 있어요.
-app/services/email_copy.py::기존 멤버는 제거되지 않았어요. 팀 규모를 줄이거나 현재 플랜을 유지하신 뒤, 하향 전환이 여전히 필요하시면 다시 예약해 주세요.
-app/services/email_copy.py::문의사항이 있으시면 언제든 회신해 주세요.
 app/services/email_copy.py::버튼이 보이지 않으면 아래 주소를 브라우저에 붙여 넣으세요:
 app/services/email_copy.py::버튼이 열리지 않으면 아래 주소를 브라우저에 붙여넣어 주세요:
-app/services/email_copy.py::본인이 결제하지 않으셨다면 Sprintable에 로그인해 결제 내역을 확인해 주세요. 이 메일은 발신 전용이에요.
-app/services/email_copy.py::본인이 결제하지 않으셨다면 Sprintable에 로그인해 화면 하단의 지원 채팅으로 즉시 문의해 주세요.
-app/services/email_copy.py::본인이 요청하지 않으셨다면 Sprintable에 로그인해 구독 설정을 확인해 주세요. 이 메일은 발신 전용이에요.
-app/services/email_copy.py::본인이 요청하지 않으셨다면 Sprintable에 로그인해 플랜 설정을 확인해 주세요. 이 메일은 발신 전용이에요.
-app/services/email_copy.py::본인이 요청하지 않으셨다면 Sprintable에 로그인해 화면 하단의 지원 채팅으로 즉시 문의해 주세요.
 app/services/email_copy.py::본인이 요청하지 않으셨다면 이 메일을 무시하셔도 돼요 — 비밀번호는 변경되지 않아요.
 app/services/email_copy.py::본인이 요청하지 않으셨다면 이 메일을 무시하셔도 돼요 — 비밀번호는 설정되지 않아요.
 app/services/email_copy.py::본인이 요청한 가입이 아니라면 이 메일을 무시하셔도 돼요.
@@ -820,13 +801,6 @@ app/services/email_copy.py::아래 버튼을 눌러 새 비밀번호를 설정�
 app/services/email_copy.py::아래 버튼을 눌러 설정을 완료해 주세요.
 app/services/email_copy.py::아래 버튼을 눌러 이메일 인증을 완료하시면 바로 시작하실 수 있어요.
 app/services/email_copy.py::아래 버튼을 클릭하면 초대를 수락할 수 있어요. 링크는 7일간 유효해요.
-app/services/email_copy.py::안녕하세요, Sprintable이에요.
-app/services/email_copy.py::영수증 보기
-app/services/email_copy.py::영수증은 결제사(Toss)가 제공하며, 이 링크로 언제든 다시 확인하실 수 있어요.
-app/services/email_copy.py::예약 확인·철회하기
-app/services/email_copy.py::예약하신 {tier} 플랜으로 전환이 완료됐어요.
-app/services/email_copy.py::예약하신 {tier} 플랜으로의 하향 전환이 자동으로 취소됐어요. 현재 조직 멤버가 {seat_count}명으로, 해당 플랜의 포함 좌석({included_seats}석)을 초과하기 때문이에요.
-app/services/email_copy.py::예약하신 구독 해지가 적용되어 Free 플랜으로 전환됐어요.
 app/services/email_copy.py::이 링크는 15분 동안 유효해요.
 app/services/email_copy.py::이 링크는 24시간 동안 유효해요.
 app/services/email_copy.py::이 링크는 30분 동안 유효해요.
@@ -834,13 +808,9 @@ app/services/email_copy.py::이 이메일은 초대 발송으로 자동 생성�
 app/services/email_copy.py::이런 안내를 더 이상 받고 싶지 않다면 여기를 눌러 주세요
 app/services/email_copy.py::이메일 인증하기
 app/services/email_copy.py::이어서 진행하기
-app/services/email_copy.py::적용 전까지 언제든 예약을 철회하고 구독을 유지하실 수 있어요.
-app/services/email_copy.py::적용 전까지 언제든 예약을 철회하고 현재 플랜을 유지하실 수 있어요.
-app/services/email_copy.py::정기결제 시도가 처리되지 않았어요. 저희 쪽에서 매일 자동으로 재시도하고 있으니, 등록하신 카드 정보를 확인해 주시면 감사하겠어요.
 app/services/email_copy.py::초대 수락하기
 app/services/email_copy.py::팀 관리자
 app/services/email_copy.py::팀에 초대됐어요!
-app/services/email_copy.py::플랜 변경이 예약됐어요.
 app/services/embedding_backlog.py::(반복 실패
 app/services/embedding_backlog.py::embed_text 반복 실패(
 app/services/embedding_backlog.py::회 연속 — 재시도 중단)
@@ -1141,12 +1111,17 @@ app/services/org_subscription_checkout.py::에 다른 checkout이 이미 진행 
 app/services/org_subscription_checkout.py::의 활성 offering_version(krw)을 찾을 수 없음
 app/services/org_subscription_checkout.py::조직을 찾을 수 없음
 app/services/org_subscription_downgrade.py::)을 찾을 수 없음
+app/services/org_subscription_downgrade.py::<p>안녕하세요, Sprintable입니다.</p><p>예약하신
+app/services/org_subscription_downgrade.py::[Sprintable] 예약된 하향 전환이 취소되었습니다 — 좌석 한도 초과
 app/services/org_subscription_downgrade.py::current_period_end 없음 — 적용일을 정할 수 없음
 app/services/org_subscription_downgrade.py::구독 없음
 app/services/org_subscription_downgrade.py::는 유료 티어만(starter/team/business) — free 전환은 구독 취소(story #2882)
 app/services/org_subscription_downgrade.py::는 하향이 아님(상향/동일) — 상향은 story #2880(change-tier)
+app/services/org_subscription_downgrade.py::명으로, 해당 플랜의 포함 좌석(
+app/services/org_subscription_downgrade.py::석)을 초과하기 때문입니다.</p><p>기존 멤버는 제거되지 않았습니다. 팀 규모를 줄이거나 현재 플랜을 유지하신 뒤, 하향 전환이 여전히 필요하시면 다시 예약해 주세요.</p><p>문의사항이 있으시면 언제든 회신해 주세요.</p>
 app/services/org_subscription_downgrade.py::의 활성 offering_version(
 app/services/org_subscription_downgrade.py::철회할 예약된 하향이 없음
+app/services/org_subscription_downgrade.py::플랜으로의 하향 전환이 자동으로 취소되었습니다. 현재 조직 멤버가
 app/services/org_subscription_downgrade.py::활성 유료 구독이 아님 — 하향/취소 예약 대상 아님
 app/services/org_subscription_tier_change.py::) — 상향 아님
 app/services/org_subscription_tier_change.py::)에 offering_version_id가 바인딩되지 않음
