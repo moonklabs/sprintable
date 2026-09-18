@@ -67,7 +67,9 @@ const NAV_ITEM_SHORTCUTS: Record<string, string[]> = {
 // 리터럴)으로만 남으면 verify-no-orphan-resource-routes.ts의 ㉠조합 시야 밖이라(같은
 // 파일 상단 주석 "지우지 말 것" 경고 그대로 — go-sprints 선례와 동형) go-retro 앵커가
 // 없으면 조용한 orphan이 된다. 지우면 그 가드가 못 잡는다.
-const GUARD_ANCHOR_ITEMS: Array<{ id: string; icon: LucideIcon; labelKey: string; href: string }> = [
+// story #4013 — export해 팔레트 정의를 직접 순회하는 가드(scripts/verify-command-
+// palette-workspaceless-href-resolves.test.ts)가 이름 목록을 손으로 다시 안 베끼게 한다.
+export const GUARD_ANCHOR_ITEMS: Array<{ id: string; icon: LucideIcon; labelKey: string; href: string }> = [
   { id: 'go-sprints', icon: CalendarRange, labelKey: 'goSprints', href: '/sprints' },
   { id: 'go-epics', icon: FolderKanban, labelKey: 'goEpics', href: '/epics' },
   { id: 'go-retro', icon: Gauge, labelKey: 'goRetro', href: '/retro' },
@@ -76,6 +78,62 @@ const GUARD_ANCHOR_ITEMS: Array<{ id: string; icon: LucideIcon; labelKey: string
   // 여기 앵커한 선례 그대로) — work-list도 동형으로 앵커.
   { id: 'go-work-list', icon: List, labelKey: 'goWorkList', href: '/work-list' },
 ];
+
+export interface DerivedNavItem {
+  id: string;
+  icon: LucideIcon;
+  labelKey: string;
+  href: string;
+  /** label 계산식이 갈리는 축(아래 소비부 참고) — 'anchor'는 t(labelKey) 그대로,
+   * 'nav'는 tNav(labelKey)에 goDestinationLabel("~로 이동" 접미사)을 씌운다. */
+  labelSource: 'anchor' | 'nav';
+  /** 워크스페이스 없는(작업공간·프로젝트 세그먼트가 안 붙는) 절대경로인지 — 가드가
+   * 이 값이 true인 항목만 MIGRATED_RESOURCES/RENAMED_RESOURCES/실 page.tsx 대조 대상으로 삼는다. */
+  isWorkspaceless: boolean;
+}
+
+// story #4013 CHANGES②(페드루 PO 지적 2026-09-17 12:57Z) — 최초판은 이 파생 로직을
+// 컴포넌트 useMemo 안에 두고, 가드용 getWorkspacelessStaticNavItems()가 같은 소스를
+// **따로** 다시 조립했다 — 상수만 같을 뿐 조립 코드가 둘이라 드리프트 위험이 여전했다.
+// 이제 이 함수 하나가 유일한 조립처다: 컴포넌트의 ITEMS useMemo가 이 함수를 **호출**하고
+// (아래), 가드는 이 함수의 결과에서 isWorkspaceless만 걸러 쓴다 — NAV_GROUPS.flatMap류
+// 목록 조립은 이 함수 밖 어디에도 없다(그 사실 자체를 테스트가 grep으로 고정).
+//
+// resolveResourceHref는 orgSlug/currentProjectSlug 같은 런타임 상태에 기대므로 인자로
+// 주입한다(이 파일을 순수하게 유지 — 가드 테스트가 더미 콜백으로도 부를 수 있어야 한다).
+// 워크스페이스 없는 항목(isWorkspaceless=true)은 이 콜백을 아예 안 부른다 — 그래서 어떤
+// 더미를 넣어도 실제 href(navItem.path 그대로)가 그대로 나온다.
+export function deriveNavigateItems(resolveResourceHref: (resource: string) => string): DerivedNavItem[] {
+  const navItems = [...NAV_GROUPS.flatMap((group) => group.items), ...LEGACY_NAV_ITEMS, CHAT_CENTER_ITEM];
+  const fromNav: DerivedNavItem[] = navItems.map((navItem) => {
+    // story #2224(선생님 정정 2026-07-30) — 'board'는 `/flow?view=list`로 흡수, 'docs'도
+    // resourceHref 재계산 대상(둘 다 kind='static'이어도 워크스페이스 있는 경로로 오버라이드
+    // — ⛔이 두 분기가 그 오버라이드의 유일한 정의처, 새 id를 추가하면 여기도 같이 반영할 것).
+    if (navItem.id === 'board') {
+      return {
+        id: navItem.id, icon: navItem.icon, labelKey: navItem.labelKey,
+        href: `${resolveResourceHref('flow')}?view=list`, labelSource: 'nav', isWorkspaceless: false,
+      };
+    }
+    if (navItem.id === 'docs') {
+      return {
+        id: navItem.id, icon: navItem.icon, labelKey: navItem.labelKey,
+        href: resolveResourceHref('docs'), labelSource: 'nav', isWorkspaceless: false,
+      };
+    }
+    const isResource = navItem.kind === 'resource';
+    return {
+      id: navItem.id, icon: navItem.icon, labelKey: navItem.labelKey,
+      href: isResource ? resolveResourceHref(navItem.path) : navItem.path,
+      labelSource: 'nav', isWorkspaceless: !isResource,
+    };
+  });
+  const fromAnchors: DerivedNavItem[] = GUARD_ANCHOR_ITEMS.map((anchor) => ({
+    id: anchor.id, icon: anchor.icon, labelKey: anchor.labelKey, href: anchor.href,
+    labelSource: 'anchor', isWorkspaceless: true,
+  }));
+  return [...fromNav, ...fromAnchors];
+}
 
 // 명령(action)당 아이콘 — command-palette-actions.ts는 순수 데이터만 다뤄 lucide 컴포넌트를
 // 안 들고 있으므로 여기서 labelKey로 매핑.
@@ -116,8 +174,10 @@ export function CommandPalette({ open, onOpenChange, projectId, contextStoryId }
   // 그대로라 안 바꿨지만, href는 최종 주소를 직접 가리켜야 한다(리다이렉트 경유는 "은퇴한
   // 주소가 진입점에 살아 있다"는 문제를 남긴다). 쿼리 없는 bare href로 두고 각 사용처가
   // 자기 쿼리를 직접 이어붙인다(actionItems가 story= 이어붙일 때 `?`가 두 번 생기면 안 됨).
-  const flowHref = resourceHref('flow');
-  const boardHref = `${flowHref}?view=list`;
+  // deriveNavigateItems()도 'board' id에 이 식과 동일한 조립(resourceHref('flow')+
+  // '?view=list')을 쓴다(그 함수 안 주석 참고) — actionItems는 팔레트 navigate 목록 밖
+  // 별도 소비처라 이 변수를 그대로 유지한다(사본 아님, 서로 다른 소비처의 같은 상수).
+  const boardHref = `${resourceHref('flow')}?view=list`;
   // story #3698(IA·후속, PO 確定 2026-09-08) — navigate 목적지를 NAV_GROUPS(+CHAT_CENTER_
   // ITEM)에서 파생한다(하드코딩 7→전수 25). 라벨·경로는 nav-config.ts 단일 정본 재사용
   // (사본 0) — 사이드바에 있는 목적지는 전부 ⌘K로도 도달한다(S4 AC2 실충족). go-sprints·
@@ -126,30 +186,24 @@ export function CommandPalette({ open, onOpenChange, projectId, contextStoryId }
   // story #3824(UX-v3·FE 1, 2026-09-13) — LEGACY_NAV_ITEMS(사이드바 5항목 축소로 빠진
   // 17개)도 같은 파생 파이프라인에 얹는다 — 사이드바엔 없어도 ⌘K가 이들의 1급 진입점이라는
   // 카드 AC2를 이 한 줄로 충족한다(전용 하드코딩 목록을 새로 만들지 않는다).
+  //
+  // story #4013 CHANGES②(페드루 PO 지적 2026-09-17 12:57Z) — 목록 조립 자체를 컴포넌트
+  // 밖 deriveNavigateItems()로 옮겨 가드 테스트와 같은 함수를 부른다(이 useMemo 안엔
+  // NAV_GROUPS.flatMap류 조립이 다시 없다 — verify-command-palette-workspaceless-href-
+  // resolves.test.ts가 grep으로 그 사실 자체를 고정).
   const ITEMS = useMemo<CommandItem[]>(() => {
-    const navItems = [...NAV_GROUPS.flatMap((group) => group.items), ...LEGACY_NAV_ITEMS, CHAT_CENTER_ITEM];
-    const derived: CommandItem[] = navItems.map((navItem) => {
-      let href = navItem.kind === 'resource' ? resourceHref(navItem.path) : navItem.path;
-      if (navItem.id === 'board') href = boardHref;
-      else if (navItem.id === 'docs') href = docsHref;
-      return {
-        id: navItem.id,
-        group: 'navigate' as const,
-        icon: navItem.icon,
-        label: goDestinationLabel(tNav(navItem.labelKey)),
-        href,
-        shortcut: NAV_ITEM_SHORTCUTS[navItem.id],
-      };
-    });
-    const anchors: CommandItem[] = GUARD_ANCHOR_ITEMS.map((anchor) => ({
-      id: anchor.id, group: 'navigate' as const, icon: anchor.icon, label: t(anchor.labelKey), href: anchor.href,
+    return deriveNavigateItems(resourceHref).map((item) => ({
+      id: item.id,
+      group: 'navigate' as const,
+      icon: item.icon,
+      label: item.labelSource === 'anchor' ? t(item.labelKey) : goDestinationLabel(tNav(item.labelKey)),
+      href: item.href,
+      shortcut: NAV_ITEM_SHORTCUTS[item.id],
     }));
-    return [...derived, ...anchors];
-    // resourceHref는 orgSlug·currentProjectSlug의 순수 파생(그 값들이 이미 deps에 있음),
-    // docsHref/boardHref도 동형(resourceHref 파생) — 함수 참조 자체를 deps에 넣으면 매
-    // 렌더 새로 만들어져 메모가 무의미해진다.
+    // resourceHref는 orgSlug·currentProjectSlug의 순수 파생(그 값들이 이미 deps에 있음) —
+    // 함수 참조 자체를 deps에 넣으면 매 렌더 새로 만들어져 메모가 무의미해진다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orgSlug, currentProjectSlug, docsHref, boardHref, t, tNav, locale]);
+  }, [orgSlug, currentProjectSlug, t, tNav, locale]);
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
   const [docResults, setDocResults] = useState<DocResult[]>([]);

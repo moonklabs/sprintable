@@ -33,6 +33,11 @@ export const MIGRATED_RESOURCES: Record<string, string[]> = {
   // 안 보였는데, mobile-tab-bar.tsx의 "지금" 탭 href를 bare `/flow`로 바꾸며(옛 `/glance`
   // 대체) 처음으로 실사용 경로가 생겼다 — 등록 없이 나갔으면 즉시 404였을 것.
   flow: [],
+  // story #4013(2026-09-17, 유나 승격 감사 2탄 → PO 코드 확認) — command-palette.tsx의
+  // GUARD_ANCHOR_ITEMS 'go-work-list'가 작업 공간 없는 `/work-list`를 여는데 이 표에
+  // 키가 없어 404였다. 페이지 자체는 `[ws]/[proj]/work-list/page.tsx`에 실재 —
+  // go-sprints/go-epics/go-retro와 동형으로 등록.
+  'work-list': [],
   // story #2016: 당시 8fc51517(B1 리네이밍)이 epics→goals 경로 리터럴을 RENAMED_RESOURCES에만
   // 반영하고 여기(MIGRATED_RESOURCES)엔 신 이름 'goals'를 안 넣어, bare `/goals`(신 이름 그대로
   // 오는 딥링크·북마크·검색결과)가 이 표에 키가 없어 즉시 404였다(호스트/쿠키 무관 실측 확認).
