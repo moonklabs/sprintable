@@ -71,9 +71,9 @@ describe('MorePage — story #2682 GNB 미러 그룹형 허브(AC1·AC3)', () =>
     expect(legacyH2?.querySelector('[data-testid="legacy-moving-caption"]')?.textContent).toBe('새 자리로 옮기는 중이에요');
   });
 
-  it('「그 밖의 화면」 묶음(이벤트·구성원·에이전트)과 오늘(=옛 조직브리핑)이 포함된다(AC1 — 기존 stub의 핵심 결함 수복)', async () => {
+  it('「그 밖의 화면」 묶음(레시피·구성원·에이전트)과 오늘(=옛 조직브리핑)이 포함된다(AC1 — 기존 stub의 핵심 결함 수복)', async () => {
     await mount();
-    expect(container.textContent).toContain('이벤트');
+    expect(container.textContent).toContain('레시피');
     expect(container.textContent).toContain('구성원');
     expect(container.textContent).toContain('에이전트');
     const todayLink = [...container.querySelectorAll('a')].find((a) => a.getAttribute('href') === '/org-briefing');
@@ -99,8 +99,10 @@ describe('MorePage — story #2682 GNB 미러 그룹형 허브(AC1·AC3)', () =>
     // <button aria-expanded>류 접이식 컨트롤이 그룹 헤더에 없다 — h2는 순수 텍스트.
     const toggles = [...container.querySelectorAll('[aria-expanded]')];
     expect(toggles.length).toBe(0);
-    // 이벤트(조직 그룹, 목록 순서상 뒤쪽 섹션)가 별도 조작 없이 이미 렌더돼 있다.
-    const eventsLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.includes('이벤트'));
+    // story #4043(«이벤트»→«레시피» 낱말 통일) — 조직 그룹, 목록 순서상 뒤쪽 섹션이
+    // 별도 조작 없이 이미 렌더돼 있다. 텍스트는 orgEvents 값을 따라 레시피로 바뀌었지만
+    // href/route(/organization/events)는 이 카드 범위 밖(Tier2)이라 그대로.
+    const eventsLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.includes('레시피'));
     expect(eventsLink?.getAttribute('href')).toBe('/organization/events');
   });
 
