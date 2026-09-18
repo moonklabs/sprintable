@@ -6,7 +6,6 @@ import { useLocale, useTranslations } from 'next-intl';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
 import { PageHeader } from '@/components/ui/page-header';
 import {
@@ -32,6 +31,9 @@ import { OrgCostSummaryCard } from '@/components/insights-board/org-cost-summary
 import { PaidSpendDailySeriesCard } from '@/components/insights-board/paid-spend-daily-series-card';
 import { deriveFailureAction, type CommandStatus } from '@/components/content/failure-action';
 import { FailureActionBadge } from '@/components/content/failure-action-badge';
+import {
+  ResponsiveDataTable, type ResponsiveDataTableColumn, type ResponsiveDataTableRenderedPair,
+} from '@/components/shared/responsive-data-table';
 
 /**
  * story #3503 — 성과 보드 화면. BE #3502 의존(PR 브리프 헤더 참고, 이 파일 작성 시점
@@ -260,12 +262,19 @@ export default function InsightsBoardPage() {
   // (loading 中·다음 페이지에 있음 등) 조용히 스킵 — 없으면 보드 최상단으로
   // 끝내는 것이 AC의 명시 대체 경로다(새 로딩/재조회 로직 0).
   const [highlightedRowId, setHighlightedRowId] = useState<string | null>(null);
-  const rowRefs = useRef<Map<string, HTMLTableRowElement>>(new Map());
+  // story #4014 — ResponsiveDataTable은 표 <tr>·카드 <div> 둘 다 항상 DOM에 두므로(AC5/6,
+  // CSS class로만 토글) 같은 publication_id에 두 실 노드가 등록된다. 폭에 따라 하나는
+  // `display:none`이라 scrollIntoView가 그 노드를 잡으면 조용히 실패한다 — 표·카드 참조를
+  // 별도 Map으로 쥐고(getRowProps의 mode 인자로 구분), 스크롤 시점에 실제로 보이는
+  // (offsetParent!==null) 쪽만 고른다.
+  const tableRowRefs = useRef<Map<string, HTMLElement>>(new Map());
+  const cardRowRefs = useRef<Map<string, HTMLElement>>(new Map());
   useEffect(() => {
     if (!highlightParam || loading || rows.length === 0) return;
-    const el = rowRefs.current.get(highlightParam);
-    if (!el) return;
-    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const candidates = [tableRowRefs.current.get(highlightParam), cardRowRefs.current.get(highlightParam)];
+    const visibleEl = candidates.find((el): el is HTMLElement => !!el && el.offsetParent !== null);
+    if (!visibleEl) return;
+    visibleEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
     setHighlightedRowId(highlightParam);
     const timer = setTimeout(() => setHighlightedRowId(null), 3000);
     return () => clearTimeout(timer);
@@ -361,6 +370,214 @@ export default function InsightsBoardPage() {
       </DropdownMenuContent>
     </DropdownMenu>
   );
+
+  // story #4014 — ResponsiveDataTable 배선. groupInsightsBoardRows()는 이미 그룹 순서로
+  // 묶어 낸다 — 그 순서를 평탄화한 목록을 rows로 넘기고, 행→그룹 역참조 맵으로
+  // groupKey/renderGroupHeader를 구성한다(재정렬 0, 기존 group.rows.map(...) 순서 그대로).
+  const groupedInsightsRows = groupInsightsBoardRows(rows, groupByParam);
+  const flatInsightsRows: InsightsBoardRow[] = groupedInsightsRows.flatMap((g) => g.rows);
+  const rowToGroup = new Map<string, typeof groupedInsightsRows[number]>();
+  for (const g of groupedInsightsRows) {
+    for (const r of g.rows) rowToGroup.set(r.publication_id, g);
+  }
+
+  const insightsColumns: ResponsiveDataTableColumn<InsightsBoardRow>[] = [
+    {
+      key: 'title', header: t('columnTitle'), cardSlot: 'title',
+      cellClassName: 'max-w-xs truncate px-3 py-2.5 font-medium text-foreground',
+      renderCell: (row) => (
+        row.external_url ? (
+          <a href={row.external_url} target="_blank" rel="noopener noreferrer" className="hover:underline">
+            {row.title}
+          </a>
+        ) : (
+          row.title
+        )
+      ),
+    },
+    {
+      key: 'channel', header: t('columnChannel'), cardSlot: 'meta',
+      cellClassName: 'px-3 py-2.5 text-muted-foreground',
+      renderCell: (row) => channelLabel(row.channel, tContent),
+    },
+    {
+      key: 'publishedAt',
+      header: t('columnPublishedAt'),
+      // doc a0da40c9 §21-4 — aria-sort는 columnheader role인 <th> 자신에 있어야
+      // 보조기술이 읽는다(headerProps로 <th>에 직접, 안쪽 span에 달지 않는다).
+      headerProps: { 'aria-sort': sortRoleParam === 'published_at' ? (sortDirParam === 'asc' ? 'ascending' : 'descending') : 'none' },
+      cardSlot: 'meta',
+      cellClassName: 'px-3 py-2.5 text-muted-foreground',
+      renderCell: (row) => (
+        <span data-testid="insights-board-published-at">
+          {formatScheduledAt(row.published_at, displayTimezone).display}
+        </span>
+      ),
+    },
+    {
+      key: 'd1', header: `${t('columnD1')} ${metricLabel}`, cardSlot: 'metric',
+      headerProps: { 'aria-sort': sortRoleParam === 'd1' ? (sortDirParam === 'asc' ? 'ascending' : 'descending') : 'none' },
+      cellClassName: 'px-3 py-2.5 text-muted-foreground',
+      renderCell: (row) => (
+        <InsightsBoardMetricCell
+          bucket={row.d1} metric={metricParam} tContent={tContent} tBoard={t}
+          tChannelConnect={tChannelConnect} ga4ConnectionStatus={ga4ConnectionStatus}
+        />
+      ),
+    },
+    {
+      key: 'd7', header: `${t('columnD7')} ${metricLabel}`, cardSlot: 'metric',
+      headerProps: { 'aria-sort': sortRoleParam === 'd7' ? (sortDirParam === 'asc' ? 'ascending' : 'descending') : 'none' },
+      cellClassName: 'px-3 py-2.5 text-muted-foreground',
+      renderCell: (row) => (
+        <InsightsBoardMetricCell
+          bucket={row.d7} metric={metricParam} tContent={tContent} tBoard={t}
+          tChannelConnect={tChannelConnect} ga4ConnectionStatus={ga4ConnectionStatus}
+        />
+      ),
+    },
+    {
+      key: 'comments', header: t('columnComments'), cardSlot: 'metric',
+      cellClassName: 'px-3 py-2.5 text-muted-foreground',
+      renderCell: (row) => (
+        <span data-testid="insights-board-comments-cell"><InsightsBoardCommentsCell row={row} t={t} /></span>
+      ),
+    },
+    {
+      key: 'adsSpend', header: t('columnAdsSpend'), cardSlot: 'metric',
+      renderCell: (row) => (
+        <span data-testid="insights-board-ads-spend-cell">
+          <AdsSpendCell adsBoost={row.ads_boost} tBoard={t} tContent={tContent} locale={locale} />
+        </span>
+      ),
+    },
+    {
+      key: 'actions', header: t('columnActions'), cardSlot: 'action',
+      renderCell: (row) => {
+        const index = rows.findIndex((r) => r.publication_id === row.publication_id);
+        const reconcile = reconcileState[row.publication_id];
+        const canReconcile = row.kind === 'channel_publication';
+        const rowFailureAction = deriveFailureAction({ commandStatus: row.command_status as CommandStatus | null });
+        const showFailureBadge = rowFailureAction?.kind === 'dead_letter' || rowFailureAction?.kind === 'blocked';
+        const hasRowActions = canCreateFollowUp || canReconcile;
+        return (
+          <>
+            {showFailureBadge && rowFailureAction ? (
+              <div className="mb-1.5 leading-tight">
+                <FailureActionBadge action={rowFailureAction} displayTimezone={displayTimezone} compact />
+              </div>
+            ) : null}
+            {hasRowActions ? (
+              <div className="flex flex-wrap gap-1.5">
+                {canCreateFollowUp ? (
+                  <Button
+                    size="sm" variant="outline" onClick={() => setFollowUpRow(row)}
+                    data-testid="insights-board-follow-up-button"
+                    aria-label={t('rowActionAriaLabel', { n: index + 1, label: t('followUpAction') })}
+                  >
+                    {t('followUpAction')}
+                  </Button>
+                ) : null}
+                {canReconcile ? (
+                  <Button
+                    size="sm" variant="outline" onClick={() => void handleReconcile(row)}
+                    disabled={reconcile?.status === 'loading'}
+                    data-testid="insights-board-reconcile-button"
+                    aria-label={t('rowActionAriaLabel', { n: index + 1, label: t('reconcileAction') })}
+                  >
+                    {reconcile?.status === 'loading' ? t('reconcileInProgress') : t('reconcileAction')}
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
+          </>
+        );
+      },
+    },
+  ];
+
+  // 유나 CHANGES(2026-09-17) (가) — 그룹 헤더: 표=그 그룹 첫 데이터 행 앞 <tr>(기존
+  // 마크업 무변)·카드=카드 묶음 위 섹션 헤더(border-t+bg-muted/30·1행 라벨+구성원 수·
+  // 2행 d1/d7 집계). d1/d7 라벨은 하드코딩하지 않고 insightsColumns의 같은 열 header를
+  // 그대로 재사용(단일 정본 — 지표 선택기로 라벨이 바뀌어도 표·카드가 같이 바뀐다).
+  const d1ColumnHeader = insightsColumns.find((c) => c.key === 'd1')!.header;
+  const d7ColumnHeader = insightsColumns.find((c) => c.key === 'd7')!.header;
+  function renderInsightsGroupHeader(row: InsightsBoardRow): ResponsiveDataTableRenderedPair {
+    const group = rowToGroup.get(row.publication_id)!;
+    const label = groupRepresentativeLabel(groupByParam, group.rawKey);
+    return {
+      table: (
+        <tr className="bg-muted/30 text-xs" data-testid="insights-board-group-header">
+          <td colSpan={3} className="px-3 py-2 font-medium text-foreground">
+            <span data-testid="insights-board-group-label">{label}</span>
+            <span className="ml-2 text-muted-foreground">{t('groupMemberCount', { n: group.rows.length })}</span>
+          </td>
+          <td className="px-3 py-2 text-muted-foreground">
+            <InsightsBoardMetricCell
+              bucket={aggregateGroupBucket(group.rows, 'd1')} metric={metricParam}
+              tContent={tContent} tBoard={t} tChannelConnect={tChannelConnect} ga4ConnectionStatus={ga4ConnectionStatus}
+            />
+          </td>
+          <td className="px-3 py-2 text-muted-foreground">
+            <InsightsBoardMetricCell
+              bucket={aggregateGroupBucket(group.rows, 'd7')} metric={metricParam}
+              tContent={tContent} tBoard={t} tChannelConnect={tChannelConnect} ga4ConnectionStatus={ga4ConnectionStatus}
+            />
+          </td>
+          <td colSpan={3} />
+        </tr>
+      ),
+      card: (
+        <div className="border-t border-border bg-muted/30 px-1 py-1.5 text-xs" data-testid="insights-board-group-header">
+          <p className="font-medium text-foreground">
+            <span data-testid="insights-board-group-label">{label}</span>
+            <span className="ml-2 font-normal text-muted-foreground">{t('groupMemberCount', { n: group.rows.length })}</span>
+          </p>
+          <div className="mt-1 grid grid-cols-2 gap-x-3">
+            <div>
+              <p className="text-[11px] text-muted-foreground">{d1ColumnHeader}</p>
+              <InsightsBoardMetricCell
+                bucket={aggregateGroupBucket(group.rows, 'd1')} metric={metricParam}
+                tContent={tContent} tBoard={t} tChannelConnect={tChannelConnect} ga4ConnectionStatus={ga4ConnectionStatus}
+              />
+            </div>
+            <div>
+              <p className="text-[11px] text-muted-foreground">{d7ColumnHeader}</p>
+              <InsightsBoardMetricCell
+                bucket={aggregateGroupBucket(group.rows, 'd7')} metric={metricParam}
+                tContent={tContent} tBoard={t} tChannelConnect={tChannelConnect} ga4ConnectionStatus={ga4ConnectionStatus}
+              />
+            </div>
+          </div>
+        </div>
+      ),
+    };
+  }
+
+  // 유나 CHANGES (나) — 재조정 결과: 표=별도 <tr>(콜스팬, 기존 마크업 무변)·카드=그
+  // 카드 안쪽 맨 아래 footer(border-t mt-2 pt-2 text-xs). loading 중엔 안 그림(기존과
+  // 동일). testid는 표·카드 둘 다 유지(기존 테스트·가드 소비처, 페드루 지시).
+  function renderInsightsRowFooter(row: InsightsBoardRow): ResponsiveDataTableRenderedPair | null {
+    const reconcile = reconcileState[row.publication_id];
+    if (!reconcile || reconcile.status === 'loading') return null;
+    const content = reconcile.status === 'error' ? (
+      <span className="text-destructive" data-testid="insights-board-reconcile-error">{reconcile.message}</span>
+    ) : (
+      <ReconcileResultLine verdicts={reconcile.verdicts} />
+    );
+    return {
+      table: (
+        <tr data-testid="insights-board-reconcile-result-row">
+          <td colSpan={8} className="px-3 py-1.5 text-xs">{content}</td>
+        </tr>
+      ),
+      card: (
+        <div className="border-t border-border mt-2 pt-2 text-xs" data-testid="insights-board-reconcile-result-row">
+          {content}
+        </div>
+      ),
+    };
+  }
 
   return (
     <div className="mx-auto w-full max-w-6xl space-y-6 p-6">
@@ -521,213 +738,24 @@ export default function InsightsBoardPage() {
         ) : null
       ) : (
         <>
-          <Card className="overflow-hidden p-0">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50 text-xs text-muted-foreground">
-                <tr>
-                  <th className="px-3 py-2 text-left font-medium">{t('columnTitle')}</th>
-                  <th className="px-3 py-2 text-left font-medium">{t('columnChannel')}</th>
-                  {/* doc a0da40c9 §21-4(유나 권장, 값싼 것) — 정렬 드롭다운 라벨이 이미
-                      글자로 「지금 무엇으로」를 말하므로 필수는 아니지만, 정렬 중인
-                      열의 <th>에 aria-sort를 붙이면 보조기술이 표 안에서도 그 사실을
-                      안다. 헤더 클릭 정렬은 도입하지 않는다(§21-4 명시 금지). */}
-                  <th
-                    className="px-3 py-2 text-left font-medium"
-                    aria-sort={sortRoleParam === 'published_at' ? (sortDirParam === 'asc' ? 'ascending' : 'descending') : 'none'}
-                  >
-                    {t('columnPublishedAt')}
-                  </th>
-                  <th
-                    className="px-3 py-2 text-left font-medium"
-                    aria-sort={sortRoleParam === 'd1' ? (sortDirParam === 'asc' ? 'ascending' : 'descending') : 'none'}
-                  >
-                    {t('columnD1')} {metricLabel}
-                  </th>
-                  <th
-                    className="px-3 py-2 text-left font-medium"
-                    aria-sort={sortRoleParam === 'd7' ? (sortDirParam === 'asc' ? 'ascending' : 'descending') : 'none'}
-                  >
-                    {t('columnD7')} {metricLabel}
-                  </th>
-                  <th className="px-3 py-2 text-left font-medium">{t('columnComments')}</th>
-                  {/* story #3806(Phase3·3-2 PR5 조각⑥, 유나 §절 §3) — 「광고비」 분리 칸.
-                      정렬 대상 아님(§3에 정렬 언급 0 — d1/d7 정렬 축과 별개 개념, 헤더
-                      클릭 정렬은 애초 이 화면 전체에서 금지·§21-4). */}
-                  <th className="px-3 py-2 text-left font-medium">{t('columnAdsSpend')}</th>
-                  <th className="px-3 py-2 text-left font-medium">{t('columnActions')}</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {groupInsightsBoardRows(rows, groupByParam).map((group) => (
-                <Fragment key={group.groupKey}>
-                {/* story #3656 — 묶음 헤더(groupByParam='none'이면 그룹마다 행 1개라
-                    안 그린다, 기존 무회귀). 대표 라벨+구성원 수·1d/7d 합계(전부
-                    captured일 때만, 아니면 대기 중 재사용 — aggregateGroupBucket). */}
-                {groupByParam !== 'none' ? (
-                  <tr className="bg-muted/30 text-xs" data-testid="insights-board-group-header">
-                    <td colSpan={3} className="px-3 py-2 font-medium text-foreground">
-                      <span data-testid="insights-board-group-label">
-                        {groupRepresentativeLabel(groupByParam, group.rawKey)}
-                      </span>
-                      <span className="ml-2 text-muted-foreground">
-                        {t('groupMemberCount', { n: group.rows.length })}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2 text-muted-foreground">
-                      <InsightsBoardMetricCell
-                        bucket={aggregateGroupBucket(group.rows, 'd1')} metric={metricParam}
-                        tContent={tContent} tBoard={t} tChannelConnect={tChannelConnect}
-                        ga4ConnectionStatus={ga4ConnectionStatus}
-                      />
-                    </td>
-                    <td className="px-3 py-2 text-muted-foreground">
-                      <InsightsBoardMetricCell
-                        bucket={aggregateGroupBucket(group.rows, 'd7')} metric={metricParam}
-                        tContent={tContent} tBoard={t} tChannelConnect={tChannelConnect}
-                        ga4ConnectionStatus={ga4ConnectionStatus}
-                      />
-                    </td>
-                    <td colSpan={3} />
-                  </tr>
-                ) : null}
-                {group.rows.map((row) => {
-                  const index = rows.findIndex((r) => r.publication_id === row.publication_id);
-                  const reconcile = reconcileState[row.publication_id];
-                  // story #3620 AC3 — 「발행 後 행에만」. hosted_site(site_post)는
-                  // channel_publication이 없어 BE가 항상 INSIGHT_PUBLICATION_NOT_FOUND
-                  // 를 낸다 — 버튼 자체를 그 행엔 안 보여준다(follow-up 사람전용 게이트와
-                  // 동형: 실패로 알리는 대신 애초에 숨긴다).
-                  const canReconcile = row.kind === 'channel_publication';
-                  // story #3766(별건 ⑩, 3746 §3 유나 定) — 「사람 차례」 발행 명령 축은
-                  // 필터가 아니라 행 배지로만 선다. deriveFailureAction(단일 판정
-                  // 출처, failure-action.ts)을 그대로 재사용하되 이 배지는 command
-                  // Status 하나만 먹인다(failure_kind/next_retry_at/reason_code는
-                  // 이 보드에 안 실려 있다 — voided/needs_check/auto_retry/processing
-                  // 은 그 필드들이 있어야 판정되므로 여기선 애초에 안 뜬다). dead_letter·
-                  // blocked 둘만 그 판정에 필요한 입력이 commandStatus 하나뿐이라
-                  // 이 좁은 조인으로도 정확히 그 둘만 걸린다.
-                  const rowFailureAction = deriveFailureAction({ commandStatus: row.command_status as CommandStatus | null });
-                  const showFailureBadge = rowFailureAction?.kind === 'dead_letter' || rowFailureAction?.kind === 'blocked';
-                  const hasRowActions = canCreateFollowUp || canReconcile;
-                  return (
-                    <Fragment key={row.publication_id}>
-                  <tr
-                    ref={(el) => {
-                      if (el) rowRefs.current.set(row.publication_id, el);
-                      else rowRefs.current.delete(row.publication_id);
-                    }}
-                    data-testid="insights-board-row"
-                    data-highlighted={highlightedRowId === row.publication_id ? 'true' : undefined}
-                    className={highlightedRowId === row.publication_id ? 'bg-primary/10 motion-safe:transition-colors' : undefined}
-                  >
-                    <td className="max-w-xs truncate px-3 py-2.5 font-medium text-foreground">
-                      {row.external_url ? (
-                        <a href={row.external_url} target="_blank" rel="noopener noreferrer" className="hover:underline">
-                          {row.title}
-                        </a>
-                      ) : (
-                        row.title
-                      )}
-                    </td>
-                    <td className="px-3 py-2.5 text-muted-foreground">{channelLabel(row.channel, tContent)}</td>
-                    {/* story #3746(유나 픽셀 PASS 곁들임, 2026-09-09) — 「발행」 칸은
-                        merge-base부터 상대 시각(formatRelativeTime)이었다. 이 화면
-                        정정 판에서 같이 잡는다: 「그저께」류가 서로 다른 날을 겹쳐
-                        가리고(정렬 축인데 눈으로 안 보임)·d1/d7 앵커 기준인데 ±12h가
-                        뭉개지고·7일이 지나면 절대 표기로 넘어가 30d/90d 기간에선
-                        한 열에 상대·절대 표기가 섞인다. `formatScheduledAt(...)
-                        .display`(절대 날짜)로 고정 — 이 화면의 다른 절대-시각
-                        칸(computed_at 등)과도 형이 맞는다. */}
-                    <td className="px-3 py-2.5 text-muted-foreground" data-testid="insights-board-published-at">
-                      {formatScheduledAt(row.published_at, displayTimezone).display}
-                    </td>
-                    <td className="px-3 py-2.5 text-muted-foreground">
-                      <InsightsBoardMetricCell
-                        bucket={row.d1} metric={metricParam} tContent={tContent} tBoard={t}
-                        tChannelConnect={tChannelConnect} ga4ConnectionStatus={ga4ConnectionStatus}
-                      />
-                    </td>
-                    <td className="px-3 py-2.5 text-muted-foreground">
-                      <InsightsBoardMetricCell
-                        bucket={row.d7} metric={metricParam} tContent={tContent} tBoard={t}
-                        tChannelConnect={tChannelConnect} ga4ConnectionStatus={ga4ConnectionStatus}
-                      />
-                    </td>
-                    <td className="px-3 py-2.5 text-muted-foreground" data-testid="insights-board-comments-cell">
-                      <InsightsBoardCommentsCell row={row} t={t} />
-                    </td>
-                    <td className="px-3 py-2.5" data-testid="insights-board-ads-spend-cell">
-                      <AdsSpendCell adsBoost={row.ads_boost} tBoard={t} tContent={tContent} locale={locale} />
-                    </td>
-                    <td className="px-3 py-2.5">
-                      {/* story #3766(별건 ⑩, 유나 定 — issuecomment 2026-09-10 02:11Z)
-                          — 상태 딱지(FailureActionBadge)는 행동 자리(아래 버튼 div)와
-                          다른 자리를 쓴다: 행동칸에 섞으면 「자리가 뜻을 바꾼다」(PR#4107
-                          별건 ㉓과 동형 클래스 — 소유자 배지가 제거 열에 얹혀 세로로
-                          「소유자/제거/제거」로 읽히던 결함). 물음(왜 막혔나)이 생긴
-                          자리에 답이 있도록 배지가 버튼 줄 «위». 배지 없으면 그 줄
-                          노드 자체가 없다(①, 빈 줄이 gap만 먹지 않게). */}
-                      {showFailureBadge && rowFailureAction ? (
-                        <div className="mb-1.5 leading-tight">
-                          <FailureActionBadge action={rowFailureAction} displayTimezone={displayTimezone} compact />
-                        </div>
-                      ) : null}
-                      {/* story #3592(§17-20 ⑧·§22-18 동형) — 행마다 같은 「후속 조치」
-                          접근 이름이라 보조기술 버튼 목록에서 어느 행인지 못 가른다.
-                          story #3766 — 버튼 div도 조건부(②, canCreateFollowUp·
-                          canReconcile 둘 다 false면 빈 flex div 자체를 안 남긴다 —
-                          배지가 뜬 행에서 그 빈 자리가 특히 눈에 띄는 걸 막는다). */}
-                      {hasRowActions ? (
-                        <div className="flex flex-wrap gap-1.5">
-                          {canCreateFollowUp ? (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => setFollowUpRow(row)}
-                              data-testid="insights-board-follow-up-button"
-                              aria-label={t('rowActionAriaLabel', { n: index + 1, label: t('followUpAction') })}
-                            >
-                              {t('followUpAction')}
-                            </Button>
-                          ) : null}
-                          {/* story #3620 AC3 — 「원본과 대조」, 진행 中 비활성. */}
-                          {canReconcile ? (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => void handleReconcile(row)}
-                              disabled={reconcile?.status === 'loading'}
-                              data-testid="insights-board-reconcile-button"
-                              aria-label={t('rowActionAriaLabel', { n: index + 1, label: t('reconcileAction') })}
-                            >
-                              {reconcile?.status === 'loading' ? t('reconcileInProgress') : t('reconcileAction')}
-                            </Button>
-                          ) : null}
-                        </div>
-                      ) : null}
-                    </td>
-                  </tr>
-                  {reconcile && reconcile.status !== 'loading' ? (
-                    <tr data-testid="insights-board-reconcile-result-row">
-                      <td colSpan={8} className="px-3 py-1.5 text-xs">
-                        {reconcile.status === 'error' ? (
-                          <span className="text-destructive" data-testid="insights-board-reconcile-error">
-                            {reconcile.message}
-                          </span>
-                        ) : (
-                          <ReconcileResultLine verdicts={reconcile.verdicts} />
-                        )}
-                      </td>
-                    </tr>
-                  ) : null}
-                    </Fragment>
-                  );
-                })}
-                </Fragment>
-                ))}
-              </tbody>
-            </table>
-          </Card>
+          <ResponsiveDataTable
+            columns={insightsColumns}
+            rows={flatInsightsRows}
+            rowKey={(row) => row.publication_id}
+            rowTestId="insights-board-row"
+            groupKey={(row) => (groupByParam === 'none' ? null : rowToGroup.get(row.publication_id)?.groupKey ?? null)}
+            renderGroupHeader={renderInsightsGroupHeader}
+            renderRowFooter={renderInsightsRowFooter}
+            getRowProps={(row, _index, mode) => ({
+              ref: (el: HTMLElement | null) => {
+                const map = mode === 'table' ? tableRowRefs.current : cardRowRefs.current;
+                if (el) map.set(row.publication_id, el);
+                else map.delete(row.publication_id);
+              },
+              'data-highlighted': highlightedRowId === row.publication_id ? 'true' : undefined,
+              className: highlightedRowId === row.publication_id ? 'bg-primary/10 motion-safe:transition-colors' : undefined,
+            })}
+          />
 
           {hasMore ? (
             <div className="flex justify-center">

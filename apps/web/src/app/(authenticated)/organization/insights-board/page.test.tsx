@@ -192,7 +192,7 @@ describe('InsightsBoardPage — d1/d7 셀 3겹 null 축(story #3503)', () => {
     stubFetch({});
     await mount();
 
-    const rows = [...container.querySelectorAll('[data-testid="insights-board-row"]')];
+    const rows = [...container.querySelectorAll('table [data-testid="insights-board-row"]')];
     expect(rows).toHaveLength(3);
 
     // Row A: d1=null(미스케줄) · d7=captured, 기본 지표(views)=0(정상 캡처값 — null 아님).
@@ -246,7 +246,7 @@ describe('InsightsBoardPage — d1/d7 셀 3겹 null 축(story #3503)', () => {
     stubFetch({ page1: [{ ...ROW_A, published_at: recentPublishedAt }] });
     await mount();
 
-    const rows = [...container.querySelectorAll('[data-testid="insights-board-row"]')];
+    const rows = [...container.querySelectorAll('table [data-testid="insights-board-row"]')];
     const publishedCell = rows[0]!.querySelector('[data-testid="insights-board-published-at"]');
     expect(publishedCell?.textContent).toMatch(/^\d{2}-\d{2} \d{2}:\d{2} /);
     expect(publishedCell?.textContent).not.toMatch(/전|그저께|어제|오늘/);
@@ -368,6 +368,41 @@ describe('InsightsBoardPage — 쿼리 파라미터(story #3503)', () => {
     expect(lastUrl).toContain('metric=inflow_sessions');
   });
 
+  // story #4014 CHANGES(페드루 PO 지적, 2026-09-17) — d1/d7 카드 라벨(<1024)이 표
+  // <th>와 다른 문구를 쓰면(하드코딩 등) 지표를 바꿨을 때 한쪽만 갱신되는 드리프트가
+  // 생긴다. 두 값(views→clicks)으로 갈아끼우며 표·카드 라벨이 매번 같이 바뀌는지 직접
+  // 단언(ResponsiveDataTable 자체는 이미 "header 재사용"을 pin했지만, 이 화면이 실제로
+  // 그 header에 동적 라벨을 올바로 실어 보내는지는 페이지 단에서 별도로 확認해야 한다).
+  it('⭐지표를 바꾸면 표 <th>와 카드 라벨(d1/d7)이 항상 같이 바뀐다(단일 정본 — header 재사용)', async () => {
+    useSearchParamsMock.mockReturnValue(new URLSearchParams('metric=views'));
+    stubFetch({});
+    await mount();
+
+    const viewsLabel = koMessages.content.insightMetricViews;
+    const clicksLabel = koMessages.content.insightMetricClicks;
+
+    const tableD1Th = [...container.querySelectorAll('table th')].find((th) => th.textContent?.includes(viewsLabel));
+    expect(tableD1Th, '표 D1 <th>가 views 라벨을 포함해야 함').not.toBeUndefined();
+    const cardD1Label = [...container.querySelectorAll('[data-testid="responsive-data-table-cards"] p')]
+      .find((p) => p.textContent?.includes(viewsLabel));
+    expect(cardD1Label, '카드 D1 라벨이 views 라벨을 포함해야 함').not.toBeUndefined();
+
+    useSearchParamsMock.mockReturnValue(new URLSearchParams('metric=clicks'));
+    await act(async () => { root.render(wrap(<InsightsBoardPage />)); });
+    await flush();
+
+    // 옛 라벨(views)은 이제 D1/D7 열 자리(표·카드 둘 다)에서 사라지고 clicks로 대체돼야
+    // 한다 — 한쪽만 갱신되면(카드가 하드코딩이었다면) 여기서 잡힌다.
+    const tableD1ThAfter = [...container.querySelectorAll('table th')].find((th) => th.textContent?.includes(clicksLabel));
+    expect(tableD1ThAfter, '지표 전환 뒤 표 D1 <th>가 clicks 라벨로 바뀌어야 함').not.toBeUndefined();
+    const cardD1LabelAfter = [...container.querySelectorAll('[data-testid="responsive-data-table-cards"] p')]
+      .find((p) => p.textContent?.includes(clicksLabel));
+    expect(cardD1LabelAfter, '지표 전환 뒤 카드 D1 라벨이 clicks 라벨로 바뀌어야 함').not.toBeUndefined();
+    const staleCardLabel = [...container.querySelectorAll('[data-testid="responsive-data-table-cards"] p')]
+      .find((p) => p.textContent?.includes(viewsLabel));
+    expect(staleCardLabel, '지표 전환 뒤에도 카드에 옛(views) 라벨이 남아있으면 드리프트').toBeUndefined();
+  });
+
   it('필터/정렬/방향이 이미 걸린 URL로 진입하면 그 값 그대로(+window 항상 포함) fetch 쿼리에 실린다', async () => {
     useSearchParamsMock.mockReturnValue(new URLSearchParams('channel=threads&status=failed&sort=d7&metric=clicks&sort_dir=asc&window=30d'));
     const calls = stubFetch({});
@@ -447,14 +482,14 @@ describe('InsightsBoardPage — 더 보기 누적(story #3503)', () => {
   it('has_more면 더 보기 버튼이 뜨고, 누르면 새 행이 «교체»가 아니라 «추가»된다', async () => {
     stubFetch({ page1: [ROW_A], page1HasMore: true, page1NextCursor: 'cursor-1', page2: [ROW_B] });
     await mount();
-    expect(container.querySelectorAll('[data-testid="insights-board-row"]')).toHaveLength(1);
+    expect(container.querySelectorAll('table [data-testid="insights-board-row"]')).toHaveLength(1);
 
     const loadMoreBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.insightsBoard.loadMore) as HTMLButtonElement;
     expect(loadMoreBtn).not.toBeUndefined();
     await act(async () => { loadMoreBtn.click(); });
     await flush();
 
-    const rows = container.querySelectorAll('[data-testid="insights-board-row"]');
+    const rows = container.querySelectorAll('table [data-testid="insights-board-row"]');
     expect(rows).toHaveLength(2);
     expect(container.textContent).toContain('글 A');
     expect(container.textContent).toContain('글 B');
@@ -613,11 +648,19 @@ describe('InsightsBoardPage — ?highlight로 들어온 행 강조(story #3617)'
   it('?highlight=pub-b — 그 행에 scrollIntoView가 불리고 강조 클래스가 붙는다', async () => {
     const scrollIntoViewMock = vi.fn();
     Element.prototype.scrollIntoView = scrollIntoViewMock;
+    // story #4014 — ResponsiveDataTable이 표 <tr>·카드 <div> 둘 다 항상 DOM에 두므로
+    // (AC5/6) 실 브라우저에선 offsetParent로 "지금 보이는 쪽"만 스크롤 대상으로 고른다
+    // (production 코드 참고). jsdom은 레이아웃을 계산하지 않아 offsetParent가 항상
+    // null이라 실측을 흉내낸다(둘 다 "보인다"로 — 어느 쪽이 골라지든 이 테스트의
+    // 단언(강조 표시+scrollIntoView 호출 여부)엔 무관).
+    Object.defineProperty(HTMLElement.prototype, 'offsetParent', {
+      configurable: true, get: () => document.body,
+    });
     useSearchParamsMock.mockReturnValue(new URLSearchParams('highlight=pub-b'));
     stubFetch({});
     await mount();
 
-    const rows = container.querySelectorAll('[data-testid="insights-board-row"]');
+    const rows = container.querySelectorAll('table [data-testid="insights-board-row"]');
     const highlighted = [...rows].find((r) => r.getAttribute('data-highlighted') === 'true');
     expect(highlighted).not.toBeUndefined();
     expect(scrollIntoViewMock).toHaveBeenCalled();
@@ -627,7 +670,7 @@ describe('InsightsBoardPage — ?highlight로 들어온 행 강조(story #3617)'
     useSearchParamsMock.mockReturnValue(new URLSearchParams());
     stubFetch({});
     await mount();
-    const rows = container.querySelectorAll('[data-testid="insights-board-row"]');
+    const rows = container.querySelectorAll('table [data-testid="insights-board-row"]');
     expect([...rows].some((r) => r.getAttribute('data-highlighted') === 'true')).toBe(false);
   });
 
@@ -647,7 +690,7 @@ describe('InsightsBoardPage — 원본과 대조 행 액션(story #3620)', () =>
   it('channel_publication 행(A·C)에만 버튼이 있고, site_post 행(B)엔 없다', async () => {
     stubFetch({});
     await mount();
-    const rows = [...container.querySelectorAll('[data-testid="insights-board-row"]')];
+    const rows = [...container.querySelectorAll('table [data-testid="insights-board-row"]')];
     expect(rows[0]!.querySelector('[data-testid="insights-board-reconcile-button"]')).not.toBeNull();
     expect(rows[1]!.querySelector('[data-testid="insights-board-reconcile-button"]')).toBeNull();
     expect(rows[2]!.querySelector('[data-testid="insights-board-reconcile-button"]')).not.toBeNull();
@@ -665,7 +708,7 @@ describe('InsightsBoardPage — 원본과 대조 행 액션(story #3620)', () =>
       }),
     });
     await mount();
-    const rows = [...container.querySelectorAll('[data-testid="insights-board-row"]')];
+    const rows = [...container.querySelectorAll('table [data-testid="insights-board-row"]')];
     const btn = rows[0]!.querySelector('[data-testid="insights-board-reconcile-button"]') as HTMLButtonElement;
     expect(btn.disabled).toBe(false);
 
@@ -686,7 +729,7 @@ describe('InsightsBoardPage — 원본과 대조 행 액션(story #3620)', () =>
       reconcile: () => ({ status: 409, body: { detail: { code: 'CHANNEL_CONNECTION_NOT_ACTIVE', message: 'raw' } } }),
     });
     await mount();
-    const rows = [...container.querySelectorAll('[data-testid="insights-board-row"]')];
+    const rows = [...container.querySelectorAll('table [data-testid="insights-board-row"]')];
     const btn = rows[0]!.querySelector('[data-testid="insights-board-reconcile-button"]') as HTMLButtonElement;
     await act(async () => { btn.click(); });
     await flush();
@@ -757,7 +800,7 @@ describe('InsightsBoardPage — 「사람 차례」 행 배지(story #3766)', ()
   it('pending·voided는 배지가 안 뜬다(이 보드엔 failure_kind/reasonCode가 없어 그 갈래는 애초에 판정 불가)', async () => {
     stubFetch({ page1: [ROW_PENDING, ROW_VOIDED] });
     await mount();
-    const rows = [...container.querySelectorAll('[data-testid="insights-board-row"]')];
+    const rows = [...container.querySelectorAll('table [data-testid="insights-board-row"]')];
     expect(rows[0]!.querySelector('[data-testid="channel-post-failure-badge"]')).toBeNull();
     expect(rows[1]!.querySelector('[data-testid="channel-post-failure-badge"]')).toBeNull();
   });
@@ -818,8 +861,8 @@ describe('InsightsBoardPage — 소재/훅 묶음 토글(story #3656, 목 데이
   it('기본값(묶음=없음)은 무회귀 — 그룹 헤더 행이 안 뜨고 기존처럼 행마다 하나씩', async () => {
     stubFetch({ page1: [GROUPABLE_ROW_IG, GROUPABLE_ROW_FB, GROUPABLE_ROW_THREADS] });
     await mount();
-    expect(container.querySelectorAll('[data-testid="insights-board-group-header"]').length).toBe(0);
-    expect(container.querySelectorAll('[data-testid="insights-board-row"]').length).toBe(3);
+    expect(container.querySelectorAll('table [data-testid="insights-board-group-header"]').length).toBe(0);
+    expect(container.querySelectorAll('table [data-testid="insights-board-row"]').length).toBe(3);
   });
 
   it('묶음=소재 — 같은 asset_sha256s[0]을 공유하는 IG·FB가 한 그룹(대표=sha256 앞 8자)으로, 단일 소재(threads)는 별도 그룹으로 묶인다', async () => {
@@ -835,10 +878,10 @@ describe('InsightsBoardPage — 소재/훅 묶음 토글(story #3656, 목 데이
     await act(async () => { root.render(wrap(<InsightsBoardPage />)); });
     await flush();
 
-    const headers = [...container.querySelectorAll('[data-testid="insights-board-group-header"]')];
+    const headers = [...container.querySelectorAll('table [data-testid="insights-board-group-header"]')];
     expect(headers).toHaveLength(2);
     expect(headers[0]!.querySelector('[data-testid="insights-board-group-label"]')?.textContent).toBe('abcdefab');
-    expect(container.querySelectorAll('[data-testid="insights-board-row"]').length).toBe(3);
+    expect(container.querySelectorAll('table [data-testid="insights-board-row"]').length).toBe(3);
   });
 
   it('묶음=훅 — hook_key가 null인 FB는 「미분류」(docs 재사용) 그룹으로, IG·threads는 hook-A 그룹으로 합쳐진다', async () => {
@@ -852,7 +895,7 @@ describe('InsightsBoardPage — 소재/훅 묶음 토글(story #3656, 목 데이
     await act(async () => { root.render(wrap(<InsightsBoardPage />)); });
     await flush();
 
-    const headers = [...container.querySelectorAll('[data-testid="insights-board-group-header"]')];
+    const headers = [...container.querySelectorAll('table [data-testid="insights-board-group-header"]')];
     const labels = headers.map((h) => h.querySelector('[data-testid="insights-board-group-label"]')?.textContent);
     expect(labels).toEqual(['hook-A', koMessages.docs.indexCategoryUncategorized]);
     const hookAHeader = headers[0]!;
