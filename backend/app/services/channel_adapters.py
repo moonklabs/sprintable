@@ -179,6 +179,16 @@ class ChannelAdapterConfig:
     # 업로드(quota 1,600 재소모)하는 같은 사고가 24h 축에서 한 번 더 난다.
     # False(기본)=기존 Meta류 그대로(회귀 0), youtube/youtube_sandbox만 True.
     keep_container_on_poll_timeout: bool = False
+    # story #4009(critical, 페드루 PO 確定 2026-09-17) — 이 채널이 dev 전용 테스트/
+    # 샌드박스 채널인지 단일 선언. 등록 게이트(아래 `SANDBOX_CHANNEL_ENABLED` 블록)·
+    # 기동 fail-closed 가드(`assert_sandbox_channel_not_registered_in_prod`)·연결
+    # 가능 목록 필터(channel_connections.py)·광고 부스트 허용 채널(ads_boost.py)·FE
+    # 배지(sandbox-test-badge.tsx)가 전부 이 속성 하나만 읽는다 — "어느 채널이
+    # 테스트용인가"를 이름 리터럴로 여러 곳에 손으로 적은 것이 서로 어긋난 게 이
+    # 사고의 뿌리(facebook_sandbox/ads_sandbox/x_sandbox/youtube_sandbox가 이 블록
+    # 밖에 등록돼 있던 것)였다 — 이름을 한 곳 더 추가하는 처방은 다음 sandbox 채널
+    # 에서 같은 사고를 반복한다.
+    is_test_channel: bool = False
 
 
 CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
@@ -383,54 +393,6 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         # conversions=광고 축(Phase 3) — 대응 후보 자체가 없어 아예 미선언.
         insight_metrics=("impressions", "reach", "engagements", "clicks", "views"),
     ),
-    "facebook_sandbox": ChannelAdapterConfig(
-        authorize_url="https://www.facebook.com/v21.0/dialog/oauth",
-        token_url="https://graph.facebook.com/v21.0/oauth/access_token",
-        scope="pages_show_list,pages_manage_posts,pages_read_engagement,pages_manage_engagement",
-        refresh_mode="reissue_from_access_token",
-        # 페드루 PO 確定(2026-09-06) — instagram_sandbox와 달리 credential_kind=
-        # "oauth"(=none이 아님). 페이지 수 마커(:pages-0/:pages-1)를 sandbox 앱
-        # 자격의 app_id 접미로 나르므로, org가 실제로 channel_app_credentials PUT을
-        # 거쳐 그 마커를 등록해야 한다 — 그래서 이 채널은 범용 「/sandbox」 엔드포인트
-        # (credential_kind=="none"만 받음)가 아니라 진짜 authorize→callback 라우터를
-        # 탄다(facebook_sandbox_oauth.py가 Meta 호출부만 페이크로 스왑).
-        credential_kind="oauth",
-        display_name="Facebook Page Sandbox",
-        max_text_length=63206,
-        utm_source="facebook_sandbox",
-        utm_medium="test",
-        supports_unpublish=True,
-        unpublish_required_scope="pages_manage_posts",
-        # story #3571 — 실 facebook과 동형(댓글/답변, facebook_sandbox_publish.py::
-        # fetch_replies/reply).
-        supports_fetch_replies=True,
-        supports_reply=True,
-        reply_required_scope="pages_manage_engagement",
-        image_formats=("image/jpeg", "image/png"),
-        image_max_bytes=10 * 1024 * 1024,
-        image_width_min=320,
-        image_width_max=1440,
-        image_color_space="sRGB",
-        # story #3567 발견 즉시 수정(페드루 PO 리뷰 정정 2026-09-06) — 실 facebook과
-        # 동일 이유(위 주석 참고 — 미선언 시 기본값 0.0은 정사각형 포함 모든 이미지를
-        # 거부, "정사각형만 통과"는 부정확한 서술이었다).
-        image_aspect_max=10.0,
-        # story #3567 — 실 facebook과 동일 제품 상한(10). sandbox가 실계정보다
-        # 관대하면 「sandbox는 됐는데 실계정은 막힘」류 격차가 생긴다(instagram_
-        # sandbox_publish.py 상단 원칙과 동형).
-        image_max_count=10,
-        image_required=False,
-        video_max_bytes=100 * 1024 * 1024,
-        video_max_seconds=90.0,
-        video_min_seconds=3.0,
-        video_aspect_target=9 / 16,
-        video_aspect_tolerance=0.05,
-        video_codecs=("avc1", "hvc1", "hev1"),
-        # story #3571 — 실 facebook과 동일 5키 선언(sandbox가 실계정보다 관대하면
-        # 안 된다는 기존 관례 그대로, instagram_sandbox가 instagram과 동형 선언하는
-        # 것과 같은 원칙 — 일반 "sandbox"의 7키 전부와는 다르다).
-        insight_metrics=("impressions", "reach", "engagements", "clicks", "views"),
-    ),
     # story e4fc29fa(Phase1·마케팅운영, 페드루 PO 確定 2026-09-04, 조각①) — Sprintable
     # 호스팅 블로그를 blog kind 어댑터 1호로 등재한다. **동작 무변경** — site_posts.py의
     # 발행 흐름(`publish_site_post_from_draft` 등)은 지금처럼 내부 `site_posts` 테이블에
@@ -569,20 +531,6 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         kind="ads",
         requires_connection=True,
     ),
-    "ads_sandbox": ChannelAdapterConfig(
-        authorize_url="https://www.facebook.com/v21.0/dialog/oauth",
-        token_url="https://graph.facebook.com/v21.0/oauth/access_token",
-        scope="ads_management",
-        refresh_mode="reissue_from_access_token",
-        # facebook_sandbox와 동형 이유(channel_adapters.py:328 근방 주석 참고) —
-        # 계정 수·상태 마커를 sandbox 앱 자격의 app_id 접미로 나르므로 credential_
-        # kind="none"(범용 `/sandbox` 엔드포인트)이 아니라 진짜 authorize→callback
-        # 라우터를 태워야 한다(ads_sandbox_oauth.py가 Meta 호출부만 페이크로 스왑).
-        credential_kind="oauth",
-        display_name="Meta Ads Sandbox",
-        kind="ads",
-        requires_connection=True,
-    ),
     # story #3808(Phase3·3-3 PR1, 페드루 PO 確定 2026-09-11) — X(트위터) 서버 OAuth
     # 2.0(PKCE 필수, threads_oauth.py와 달리 X는 PKCE 없이 authorization_code grant
     # 자체를 거부한다 — 공개 문서 안정 사실, ⚠️미확認 표기 대상 아님). refresh_mode=
@@ -613,25 +561,6 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         # user-context 토큰만 쓰므로(그라운딩상) 저촉 없을 것으로 추정 — 실 앱 왕복
         # 재확認 대상.
         insight_metrics=("impressions", "engagements"),
-        thread_max_segments=10,
-    ),
-    "x_sandbox": ChannelAdapterConfig(
-        authorize_url="https://x.com/i/oauth2/authorize",
-        token_url="https://api.x.com/2/oauth2/token",
-        scope="tweet.read tweet.write users.read offline.access",
-        refresh_mode="refresh_token",
-        # ads_sandbox와 동형 이유 — 회전 마커를 sandbox 토큰 문자열 자체로 나르므로
-        # credential_kind="none"이 아니라 진짜 authorize→callback 라우터를 태운다
-        # (x_sandbox_oauth.py가 X 호출부만 페이크로 스왑).
-        credential_kind="oauth",
-        display_name="X Sandbox",
-        kind="social",
-        # story #3808 PR4 — 실 "x"와 동일 선언(제네릭 _fetch_sandbox()가 7키를 전부
-        # 갖고 있고 이 선언이 그중 2개만 통과시킨다 — facebook_sandbox/instagram_
-        # sandbox와 동형 축, insight_snapshots.py::_fetch_for_snapshot 참고).
-        insight_metrics=("impressions", "engagements"),
-        requires_connection=True,
-        max_text_length=280,
         thread_max_segments=10,
     ),
     # story #3815(Phase3·3-5 PR1, 페드루 PO 確定 2026-09-12) — YouTube 첫 출시.
@@ -689,38 +618,6 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
         # 태평양 시간 자정 리셋, 위 quota_reset_timezone 필드 주석 참고).
         quota_reset_timezone="America/Los_Angeles",
     ),
-    "youtube_sandbox": ChannelAdapterConfig(
-        authorize_url="https://accounts.google.com/o/oauth2/v2/auth",
-        token_url="https://oauth2.googleapis.com/token",
-        scope="https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly",
-        refresh_mode="refresh_token",
-        # x_sandbox와 동형 이유 — 결정적 가짜 토큰을 문자열로 나르므로
-        # credential_kind="none"이 아니라 진짜 authorize→callback 라우터를 태운다
-        # (youtube_sandbox_oauth.py가 Google 호출부만 페이크로 스왑).
-        credential_kind="oauth",
-        display_name="YouTube Sandbox",
-        kind="social",
-        requires_connection=True,
-        max_text_length=5000,
-        video_required=True,
-        youtube_metadata_required=True,
-        privacy_lockable=True,
-        video_max_bytes=2 * 1024 * 1024 * 1024,
-        # 발견 즉시 수정 — 위 "youtube" 항목과 동형 이유(video_max_seconds
-        # 기본값 0.0 방치 시 모든 영상 업로드 거부).
-        video_max_seconds=12 * 3600,
-        video_min_seconds=1.0,
-        video_codecs=("avc1", "hvc1", "hev1"),
-        container_poll_timeout_seconds=86_400,  # 24h — 페드루 PO 지적 2026-09-12 11:34Z.
-        keep_container_on_poll_timeout=True,  # CHANGES③ — 페드루 PO 지적 2026-09-12 11:55Z.
-        # story #3815(PR3) — x_sandbox와 동형(실 API 호출 0, 위 "youtube" 선언과
-        # 짝 맞춤 — declared_metrics 필터가 제네릭 _fetch_sandbox의 7키 중
-        # 2키만 통과시킨다).
-        insight_metrics=("views", "engagements"),
-        # story #3815 — "youtube"와 같은 플랫폼 공유 카운터를 흉내(sandbox도
-        # 결정적 quota-exceeded 마커 재현에 같은 리셋 경계를 쓴다).
-        quota_reset_timezone="America/Los_Angeles",
-    ),
 }
 
 # story 5b27b32f(Phase1·BE·테스트 인프라, 페드루 PO 확定 2026-09-04) — dev 전용 샌드박스
@@ -735,7 +632,15 @@ CHANNEL_ADAPTERS: dict[str, ChannelAdapterConfig] = {
 # (수동 오조작 등)를 대비해 `assert_sandbox_channel_not_registered_in_prod()`가 기동
 # 시점에 `settings.is_prod_deploy`와 대조해 있으면 안 되는데 있으면 즉시 RuntimeError로
 # 기동 자체를 죽인다(app/main.py lifespan에서 호출).
-if os.environ.get("SANDBOX_CHANNEL_ENABLED", "").strip().lower() == "true":
+#
+# story #4009(critical) — 이 블록 안의 8개 등록 전부가 `is_test_channel=True`를 든다
+# (facebook_sandbox/ads_sandbox/x_sandbox/youtube_sandbox도 이전엔 이 블록 밖에
+# 무조건 등록돼 있었다 — prod 노출 사고의 뿌리, AC2). `SANDBOX_CHANNEL_ENABLED`는
+# 모듈 상수로 한 번만 읽어(channel_connections.py 등 다른 모듈의 2차 방어 필터가
+# 같은 값을 재사용하도록) export한다.
+SANDBOX_CHANNEL_ENABLED: bool = os.environ.get("SANDBOX_CHANNEL_ENABLED", "").strip().lower() == "true"
+
+if SANDBOX_CHANNEL_ENABLED:
     CHANNEL_ADAPTERS["sandbox"] = ChannelAdapterConfig(
         authorize_url="",  # OAuth 없음(AC2) — 연결은 POST .../channel-connections/sandbox 전용.
         token_url="",
@@ -769,6 +674,7 @@ if os.environ.get("SANDBOX_CHANNEL_ENABLED", "").strip().lower() == "true":
         insight_metrics=(
             "impressions", "reach", "views", "engagements", "clicks", "spend", "conversions",
         ),
+        is_test_channel=True,
     )
     # story #3320 조각① — Instagram 전용 sandbox. 기존 "sandbox"(Threads류 TEXT-
     # optional)와 같은 값을 재사용하지 않는 이유는 위 instagram_sandbox_publish.py
@@ -812,6 +718,7 @@ if os.environ.get("SANDBOX_CHANNEL_ENABLED", "").strip().lower() == "true":
         insight_metrics=("views", "reach", "engagements"),
         # story #3536(PO 確定 2026-09-06) — 위 "instagram"과 동형(이미지 필수).
         image_required=True,
+        is_test_channel=True,
     )
     # story 3-4(Phase3·마케팅운영, PR1) — 뉴스레터 dev 전용 샌드박스. wordpress/webhook
     # 은 pasted_secret이라 「credential_kind=none 진짜 사용가능한지」 테스트 인프라가
@@ -837,6 +744,7 @@ if os.environ.get("SANDBOX_CHANNEL_ENABLED", "").strip().lower() == "true":
         # RED로 잡는다 — wordpress/webhook이 실 fetch 배선 前엔 insight_metrics를
         # 미선언 상태로 두는 것과 동형 판단.
         insight_metrics=("opens", "delivered", "clicks"),
+        is_test_channel=True,
     )
     # story #3816(Phase3·3-6, 페드루 PO 確定 2026-09-12) — Ghost dev 전용 샌드박스.
     # wordpress/webhook은 실 사이트/서버 없이도 각자 모듈의 dev 스텁 플래그(loopback
@@ -852,6 +760,127 @@ if os.environ.get("SANDBOX_CHANNEL_ENABLED", "").strip().lower() == "true":
         credential_kind="none",
         display_name="Ghost Sandbox",  # story #3779 가드 회피 — "ghost" 어댑터와 동형 판단.
         kind="blog",  # "ghost"와 동형(위 주석 참고) — stibee의 social 정정 사유는 적용 안 됨.
+        is_test_channel=True,
+    )
+    # story #4009(critical, 페드루 PO 確定 2026-09-17) — 아래 4개는 이전에 이 블록
+    # **밖**(모듈 최상위 dict 리터럴)에 무조건 등록돼 있었다(prod 노출 사고의 뿌리,
+    # AC2) — 값 자체는 무변경으로 여기로 옮기고 `is_test_channel=True`만 추가한다.
+    CHANNEL_ADAPTERS["facebook_sandbox"] = ChannelAdapterConfig(
+        authorize_url="https://www.facebook.com/v21.0/dialog/oauth",
+        token_url="https://graph.facebook.com/v21.0/oauth/access_token",
+        scope="pages_show_list,pages_manage_posts,pages_read_engagement,pages_manage_engagement",
+        refresh_mode="reissue_from_access_token",
+        # 페드루 PO 確定(2026-09-06) — instagram_sandbox와 달리 credential_kind=
+        # "oauth"(=none이 아님). 페이지 수 마커(:pages-0/:pages-1)를 sandbox 앱
+        # 자격의 app_id 접미로 나르므로, org가 실제로 channel_app_credentials PUT을
+        # 거쳐 그 마커를 등록해야 한다 — 그래서 이 채널은 범용 「/sandbox」 엔드포인트
+        # (credential_kind=="none"만 받음)가 아니라 진짜 authorize→callback 라우터를
+        # 탄다(facebook_sandbox_oauth.py가 Meta 호출부만 페이크로 스왑).
+        credential_kind="oauth",
+        display_name="Facebook Page Sandbox",
+        max_text_length=63206,
+        utm_source="facebook_sandbox",
+        utm_medium="test",
+        supports_unpublish=True,
+        unpublish_required_scope="pages_manage_posts",
+        # story #3571 — 실 facebook과 동형(댓글/답변, facebook_sandbox_publish.py::
+        # fetch_replies/reply).
+        supports_fetch_replies=True,
+        supports_reply=True,
+        reply_required_scope="pages_manage_engagement",
+        image_formats=("image/jpeg", "image/png"),
+        image_max_bytes=10 * 1024 * 1024,
+        image_width_min=320,
+        image_width_max=1440,
+        image_color_space="sRGB",
+        # story #3567 발견 즉시 수정(페드루 PO 리뷰 정정 2026-09-06) — 실 facebook과
+        # 동일 이유(위 주석 참고 — 미선언 시 기본값 0.0은 정사각형 포함 모든 이미지를
+        # 거부, "정사각형만 통과"는 부정확한 서술이었다).
+        image_aspect_max=10.0,
+        # story #3567 — 실 facebook과 동일 제품 상한(10). sandbox가 실계정보다
+        # 관대하면 「sandbox는 됐는데 실계정은 막힘」류 격차가 생긴다(instagram_
+        # sandbox_publish.py 상단 원칙과 동형).
+        image_max_count=10,
+        image_required=False,
+        video_max_bytes=100 * 1024 * 1024,
+        video_max_seconds=90.0,
+        video_min_seconds=3.0,
+        video_aspect_target=9 / 16,
+        video_aspect_tolerance=0.05,
+        video_codecs=("avc1", "hvc1", "hev1"),
+        # story #3571 — 실 facebook과 동일 5키 선언(sandbox가 실계정보다 관대하면
+        # 안 된다는 기존 관례 그대로, instagram_sandbox가 instagram과 동형 선언하는
+        # 것과 같은 원칙 — 일반 "sandbox"의 7키 전부와는 다르다).
+        insight_metrics=("impressions", "reach", "engagements", "clicks", "views"),
+        is_test_channel=True,
+    )
+    CHANNEL_ADAPTERS["ads_sandbox"] = ChannelAdapterConfig(
+        authorize_url="https://www.facebook.com/v21.0/dialog/oauth",
+        token_url="https://graph.facebook.com/v21.0/oauth/access_token",
+        scope="ads_management",
+        refresh_mode="reissue_from_access_token",
+        # facebook_sandbox와 동형 이유(바로 위 주석 참고) — 계정 수·상태 마커를
+        # sandbox 앱 자격의 app_id 접미로 나르므로 credential_kind="none"(범용
+        # `/sandbox` 엔드포인트)이 아니라 진짜 authorize→callback 라우터를 태워야
+        # 한다(ads_sandbox_oauth.py가 Meta 호출부만 페이크로 스왑).
+        credential_kind="oauth",
+        display_name="Meta Ads Sandbox",
+        kind="ads",
+        requires_connection=True,
+        is_test_channel=True,
+    )
+    CHANNEL_ADAPTERS["x_sandbox"] = ChannelAdapterConfig(
+        authorize_url="https://x.com/i/oauth2/authorize",
+        token_url="https://api.x.com/2/oauth2/token",
+        scope="tweet.read tweet.write users.read offline.access",
+        refresh_mode="refresh_token",
+        # ads_sandbox와 동형 이유 — 회전 마커를 sandbox 토큰 문자열 자체로 나르므로
+        # credential_kind="none"이 아니라 진짜 authorize→callback 라우터를 태운다
+        # (x_sandbox_oauth.py가 X 호출부만 페이크로 스왑).
+        credential_kind="oauth",
+        display_name="X Sandbox",
+        kind="social",
+        # story #3808 PR4 — 실 "x"와 동일 선언(제네릭 _fetch_sandbox()가 7키를 전부
+        # 갖고 있고 이 선언이 그중 2개만 통과시킨다 — facebook_sandbox/instagram_
+        # sandbox와 동형 축, insight_snapshots.py::_fetch_for_snapshot 참고).
+        insight_metrics=("impressions", "engagements"),
+        requires_connection=True,
+        max_text_length=280,
+        thread_max_segments=10,
+        is_test_channel=True,
+    )
+    CHANNEL_ADAPTERS["youtube_sandbox"] = ChannelAdapterConfig(
+        authorize_url="https://accounts.google.com/o/oauth2/v2/auth",
+        token_url="https://oauth2.googleapis.com/token",
+        scope="https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly",
+        refresh_mode="refresh_token",
+        # x_sandbox와 동형 이유 — 결정적 가짜 토큰을 문자열로 나르므로
+        # credential_kind="none"이 아니라 진짜 authorize→callback 라우터를 태운다
+        # (youtube_sandbox_oauth.py가 Google 호출부만 페이크로 스왑).
+        credential_kind="oauth",
+        display_name="YouTube Sandbox",
+        kind="social",
+        requires_connection=True,
+        max_text_length=5000,
+        video_required=True,
+        youtube_metadata_required=True,
+        privacy_lockable=True,
+        video_max_bytes=2 * 1024 * 1024 * 1024,
+        # 발견 즉시 수정 — 위 "youtube" 항목과 동형 이유(video_max_seconds
+        # 기본값 0.0 방치 시 모든 영상 업로드 거부).
+        video_max_seconds=12 * 3600,
+        video_min_seconds=1.0,
+        video_codecs=("avc1", "hvc1", "hev1"),
+        container_poll_timeout_seconds=86_400,  # 24h — 페드루 PO 지적 2026-09-12 11:34Z.
+        keep_container_on_poll_timeout=True,  # CHANGES③ — 페드루 PO 지적 2026-09-12 11:55Z.
+        # story #3815(PR3) — x_sandbox와 동형(실 API 호출 0, 위 "youtube" 선언과
+        # 짝 맞춤 — declared_metrics 필터가 제네릭 _fetch_sandbox의 7키 중
+        # 2키만 통과시킨다).
+        insight_metrics=("views", "engagements"),
+        # story #3815 — "youtube"와 같은 플랫폼 공유 카운터를 흉내(sandbox도
+        # 결정적 quota-exceeded 마커 재현에 같은 리셋 경계를 쓴다).
+        quota_reset_timezone="America/Los_Angeles",
+        is_test_channel=True,
     )
 
 
@@ -945,14 +974,26 @@ def get_publish_client_module(channel: str):
 
 
 def assert_sandbox_channel_not_registered_in_prod() -> None:
-    """story 5b27b32f(AC5) — 기동 시점 fail-closed 방어. env 플래그 게이트(위)가 이미
-    prod cloudbuild.yaml에 `SANDBOX_CHANNEL_ENABLED` 키 자체를 안 실어 정상 배포에서는
-    이 함수가 항상 no-op이다 — 그래도 수동 오조작(예: gcloud run services update로 누가
-    직접 env를 붙임)까지 방어하는 두 번째 층. `app/main.py` lifespan이 기동마다 호출."""
+    """story 5b27b32f(AC5)·story #4009(critical, AC3 정정) — 기동 시점 fail-closed
+    방어. env 플래그 게이트(위)가 이미 prod cloudbuild.yaml에 `SANDBOX_CHANNEL_ENABLED`
+    키 자체를 안 실어 정상 배포에서는 이 함수가 항상 no-op이다 — 그래도 수동 오조작
+    (예: gcloud run services update로 누가 직접 env를 붙임)까지 방어하는 두 번째 층.
+    `app/main.py` lifespan이 기동마다 호출.
+
+    #4009 정정 — 이전엔 `"sandbox" in CHANNEL_ADAPTERS` 한 키만 봐서 facebook_sandbox/
+    ads_sandbox/x_sandbox/youtube_sandbox가 등재돼 있어도 이 가드를 통과했다(2차 방어가
+    사실상 뚫려 있던 상태). 이제 `is_test_channel=True`인 어댑터가 하나라도 있으면
+    잡는다 — 등록 게이트·이 가드가 동일 기준(is_test_channel)을 읽어 앞으로 새 sandbox
+    채널이 추가돼도 이름을 여기 다시 적을 필요가 없다."""
     from app.core.config import settings
 
-    if settings.is_prod_deploy and "sandbox" in CHANNEL_ADAPTERS:
+    test_channels = [ch for ch, cfg in CHANNEL_ADAPTERS.items() if cfg.is_test_channel]
+    if settings.is_prod_deploy and test_channels:
+        # story #3779 가드(AST Constant 단위 스캔) — 변수 보간({test_channels})을 문장 중간에
+        # 두면 그 앞뒤 정적 한글 구간이 Constant 노드 2개로 갈라져 baseline이 헛순증한다
+        # (실사고, PO CHANGES 2026-09-17). 보간을 맨 끝에 둬 앞의 두 인접 리터럴이 파서
+        # 단계에서 병합돼 Constant 1개로 유지되게 한다.
         raise RuntimeError(
-            "fail-closed: prod 배포에 sandbox 채널 어댑터가 등재돼 있습니다"
-            "(SANDBOX_CHANNEL_ENABLED가 prod에 잘못 설정됐을 가능성 — story 5b27b32f AC5)."
+            f"fail-closed: prod 배포에 테스트용 채널 어댑터가 등재돼 있습니다"
+            f"(SANDBOX_CHANNEL_ENABLED가 prod에 잘못 설정됐을 가능성 — story #4009 AC3): {test_channels}"
         )

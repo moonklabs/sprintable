@@ -2,9 +2,16 @@
 available-channels`가 `CHANNEL_ADAPTERS` 레지스트리를 그대로 파생 노출한다. FE가
 「연결 만들기」 버튼을 하드코딩/env 분기 없이 이 목록만으로 그리게(story 본문 §경계) —
 sandbox는 `SANDBOX_CHANNEL_ENABLED`일 때만 레지스트리 자체에 항목이 있어(channel_adapters.py
-상단 조건부 등재, 이 엔드포인트에 별도 필터링 로직 0) prod에서 자동으로 빠진다.
+상단 조건부 등재) prod에서 자동으로 빠진다.
 목록(agent-visible, story #3399)과 동형: org 멤버면 에이전트도 조회 가능(`_require_human`
-안 부름) — 이 응답엔 토큰 인접 필드가 아예 없어 AC6 human-only 근거가 적용되지 않는다."""
+안 부름) — 이 응답엔 토큰 인접 필드가 아예 없어 AC6 human-only 근거가 적용되지 않는다.
+
+story #4009(critical, AC4 방어 2층 정정) — 이 엔드포인트는 이제 `is_test_channel`+
+`SANDBOX_CHANNEL_ENABLED`를 독립적으로 한 번 더 확認한다(등록이 뚫려도 이 목록만은
+막는 2차 방어). pytest 세션은 conftest.py가 `SANDBOX_CHANNEL_ENABLED=true`를 기본값
+으로 세팅해(8개 테스트용 채널을 참조하는 다른 기존 테스트 다수가 이 전제라 회귀 0) —
+"flag off" 갈래를 재현하려는 테스트는 이제 ambient env가 아니라 `monkeypatch`로
+레지스트리·`SANDBOX_CHANNEL_ENABLED` 상수를 직접 조작한다."""
 from __future__ import annotations
 
 import os
@@ -102,10 +109,19 @@ def _setup_org_scoped_app(app, Session, org_id, *, user_id, agent: bool = False)
 
 
 @pytest.mark.anyio
-async def test_sandbox_absent_when_flag_off():
-    """플래그 off 갈래(AC1) — SANDBOX_CHANNEL_ENABLED 미설정이면 레지스트리 자체에 sandbox가
-    없어(channel_adapters.py 조건부 등재) 응답에도 없다. threads는 항상 있다."""
+async def test_sandbox_absent_when_flag_off(monkeypatch):
+    """플래그 off 갈래(AC1·#4009 AC4) — pytest 세션은 conftest.py 기본값으로
+    SANDBOX_CHANNEL_ENABLED=true를 이미 깔고 있어(8개 테스트용 채널을 직접 참조하는
+    다른 파일들의 회귀 0을 위함) 여기서 "off"를 재현하려면 레지스트리에서 is_test_channel
+    항목을 전부 지우고 이 엔드포인트가 읽는 `SANDBOX_CHANNEL_ENABLED` 모듈 상수도
+    False로 몽키패치해야 한다(2차 방어 필터가 이 상수를 직접 읽는다, AC4)."""
+    import app.services.channel_adapters as adapters_mod
     from app.main import app
+
+    for ch, cfg in list(adapters_mod.CHANNEL_ADAPTERS.items()):
+        if cfg.is_test_channel:
+            monkeypatch.delitem(adapters_mod.CHANNEL_ADAPTERS, ch, raising=False)
+    monkeypatch.setattr(adapters_mod, "SANDBOX_CHANNEL_ENABLED", False)
 
     engine, Session = await _session_factory()
     try:
@@ -146,6 +162,41 @@ async def test_sandbox_absent_when_flag_off():
 
 
 @pytest.mark.anyio
+async def test_sandbox_hidden_even_if_registration_leaks_through_when_flag_off(monkeypatch):
+    """story #4009(critical, AC4 방어 2층) — 등록 게이트가 어떤 이유로든 뚫려 test
+    채널이 CHANNEL_ADAPTERS에 남아 있어도(예: 미래의 회귀), 이 목록은 `SANDBOX_
+    CHANNEL_ENABLED` 상수를 독립적으로 다시 확認해 여전히 숨긴다 — 등록 상태만
+    믿지 않는다는 것이 이 필터의 존재 이유(단순히 등록에서 파생되는 목록이라면
+    이 테스트는 무의미하다)."""
+    import app.services.channel_adapters as adapters_mod
+    from app.main import app
+
+    leaked_sandbox = adapters_mod.ChannelAdapterConfig(
+        authorize_url="", token_url="", scope="sandbox_publish,sandbox_delete",
+        refresh_mode="manual", credential_kind="none", display_name="Sandbox",
+        is_test_channel=True,
+    )
+    monkeypatch.setitem(adapters_mod.CHANNEL_ADAPTERS, "sandbox", leaked_sandbox)
+    monkeypatch.setattr(adapters_mod, "SANDBOX_CHANNEL_ENABLED", False)
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            agent_id = await _seed_agent(s, org_id, project_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client:
+            r = await client.get(f"/api/v2/organizations/{org_id}/channel-connections/available-channels")
+        assert r.status_code == 200, r.text
+        channels = {row["channel"] for row in r.json()}
+        assert "sandbox" not in channels, "등록이 뚫려도 SANDBOX_CHANNEL_ENABLED=False면 목록에서 빠져야 한다"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_sandbox_present_when_flag_on():
     """플래그 on 갈래(AC1) — 실 env 파싱(SANDBOX_CHANNEL_ENABLED 문자열 처리)이 아니라
     story 5b27b32f 선례(test_5b27b32f_sandbox_channel.py::_enable_sandbox_adapter) 그대로
@@ -159,6 +210,7 @@ async def test_sandbox_present_when_flag_on():
     sandbox_config = adapters_mod.ChannelAdapterConfig(
         authorize_url="", token_url="", scope="sandbox_publish,sandbox_delete",
         refresh_mode="manual", credential_kind="none", display_name="Sandbox",
+        is_test_channel=True,  # story #4009 — 실 모듈 등록과 같은 기준(is_test_channel).
     )
 
     engine, Session = await _session_factory()

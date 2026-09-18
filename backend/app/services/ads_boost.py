@@ -33,13 +33,19 @@ from app.models.channel_post_draft import ChannelPostDraft
 from app.models.channel_post_version import ChannelPostVersion
 from app.models.channel_publication import ChannelPublication
 from app.models.gate import Gate, set_gate_status
+from app.services.channel_adapters import CHANNEL_ADAPTERS
 from app.services.gate_service import create_gate
 from app.services.publication_command import void_pending_commands_for_gate
 from app.services.workflow_line_config import _default_role_id
 
 _ADS_BOOST_GATE_TYPE = "ads_boost"
 _VOID_REASON_ADS_BOOST_CHANGED = "ADS_BOOST_TERMS_CHANGED"
-_AD_CONNECTION_CHANNELS = ("meta_ads", "ads_sandbox")
+# story #4009(critical, AC4 방어 2층) — 하드코딩 튜플("meta_ads","ads_sandbox") 대신
+# kind="ads"로 선언된 어댑터를 그대로 읽는다(meta_ads/ads_sandbox 둘 다 이미 kind="ads"
+# 선언 보유, channel_adapters.py). ads_sandbox는 is_test_channel=True라 SANDBOX_
+# CHANNEL_ENABLED가 꺼져 있으면 CHANNEL_ADAPTERS에 아예 없다 — 이 튜플도 자동으로 그
+# 채널을 빼 boost 요청이 flag OFF에서 거부된다(새 판정 로직 발명 0, 등록 게이트 재사용).
+_AD_CONNECTION_CHANNELS = tuple(ch for ch, cfg in CHANNEL_ADAPTERS.items() if cfg.kind == "ads")
 
 
 class AdsBoostPublicationNotFoundError(Exception):
@@ -124,13 +130,23 @@ async def _resolve_publication_and_work_item(
 
 
 async def _validate_ad_connection(db: AsyncSession, *, org_id: uuid.UUID, ad_connection_id: uuid.UUID) -> None:
+    # story #4009(critical, AC4 방어 2층) — `_AD_CONNECTION_CHANNELS`는 이 모듈이
+    # import될 때 한 번만 계산돼(CHANNEL_ADAPTERS 상태 스냅샷) 요청마다 플래그
+    # 재확認이 안 된다. `is_test_channel` 어댑터는 여기서 라이브로 한 번 더
+    # `SANDBOX_CHANNEL_ENABLED`를 재확認한다 — 등록이 뚫려도(예: 미래 회귀) 이
+    # 경로만은 독립적으로 막는다(available-channels 목록 필터와 동형 2차 방어).
+    from app.services.channel_adapters import CHANNEL_ADAPTERS as _live_adapters
+    from app.services.channel_adapters import SANDBOX_CHANNEL_ENABLED as _sandbox_enabled
+
     conn = (await db.execute(
         select(ChannelConnection).where(ChannelConnection.id == ad_connection_id)
     )).scalar_one_or_none()
+    adapter_cfg = _live_adapters.get(conn.channel) if conn is not None else None
     if (
         conn is None
         or conn.org_id != org_id
         or conn.channel not in _AD_CONNECTION_CHANNELS
+        or (adapter_cfg is not None and adapter_cfg.is_test_channel and not _sandbox_enabled)
         or conn.status != "active"
     ):
         raise AdsBoostInvalidAdConnectionError(ad_connection_id)

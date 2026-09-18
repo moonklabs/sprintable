@@ -54,7 +54,11 @@ def _configure_secrets(monkeypatch):
 @pytest.fixture(autouse=True)
 def _enable_sandbox_adapter(monkeypatch):
     """dict 항목 직접 주입 — SANDBOX_CHANNEL_ENABLED env 파싱 자체는 별도
-    test_sandbox_env_flag_gates_registration_via_subprocess가 독립 검증한다."""
+    test_sandbox_env_flag_gates_registration_via_subprocess가 독립 검증한다.
+
+    story #4009 — `is_test_channel=True`를 명시로 넣는다(기본값 False 그대로 두면
+    assert_sandbox_channel_not_registered_in_prod()가 이 주입을 더 이상 sandbox
+    채널로 못 알아본다 — 실 모듈 등록 코드와 같은 기준을 이 픽스처도 지켜야 한다)."""
     import app.services.channel_adapters as adapters_mod
 
     sandbox_config = adapters_mod.ChannelAdapterConfig(
@@ -65,6 +69,7 @@ def _enable_sandbox_adapter(monkeypatch):
         image_formats=("image/jpeg", "image/png"), image_max_bytes=8 * 1024 * 1024,
         image_aspect_max=10.0, image_width_min=320, image_width_max=1440,
         image_color_space="sRGB", image_max_count=1,
+        is_test_channel=True,
     )
     monkeypatch.setitem(adapters_mod.CHANNEL_ADAPTERS, "sandbox", sandbox_config)
     yield
@@ -211,16 +216,30 @@ async def _create_draft_submit_approve(client, s, *, org_id, connection_id, stor
 
 # ─── AC1 — env 게이트 실측(subprocess, monkeypatch 아님) ─────────────────────
 
+_ALL_TEST_CHANNELS = (
+    "sandbox", "instagram_sandbox", "facebook_sandbox", "ads_sandbox",
+    "x_sandbox", "youtube_sandbox", "stibee_sandbox", "ghost_sandbox",
+)
+
+
 def test_sandbox_env_flag_gates_registration_via_subprocess():
     """subprocess로 실제 프로세스 기동+import 순서를 그대로 재현 — dict 직접주입이
-    아니라 진짜 env var 파싱 경로 자체를 검증한다(AC1)."""
+    아니라 진짜 env var 파싱 경로 자체를 검증한다(AC1).
+
+    story #4009(critical, AC2) — 8개 테스트용 채널 전수. facebook_sandbox/
+    ads_sandbox/x_sandbox/youtube_sandbox는 이전엔 이 게이트 밖(모듈 최상위)에
+    무조건 등록돼 있었다(prod 노출 사고의 뿌리) — 이제 나머지 4개와 동형으로
+    같은 env 게이트를 통과해야만 등재된다."""
     import subprocess
     import sys
 
     backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    channels_repr = repr(_ALL_TEST_CHANNELS)
     script = (
         "from app.services.channel_adapters import CHANNEL_ADAPTERS\n"
-        "assert 'sandbox' in CHANNEL_ADAPTERS, 'enabled인데 미등재'\n"
+        f"for ch in {channels_repr}:\n"
+        "    assert ch in CHANNEL_ADAPTERS, f'enabled인데 미등재: {ch}'\n"
+        "    assert CHANNEL_ADAPTERS[ch].is_test_channel, f'is_test_channel 미선언: {ch}'\n"
     )
     r_on = subprocess.run(
         [sys.executable, "-c", script], cwd=backend_dir, capture_output=True, text=True,
@@ -230,13 +249,165 @@ def test_sandbox_env_flag_gates_registration_via_subprocess():
 
     script_off = (
         "from app.services.channel_adapters import CHANNEL_ADAPTERS\n"
-        "assert 'sandbox' not in CHANNEL_ADAPTERS, 'unset인데 등재됨(prod 사고 위험)'\n"
+        f"for ch in {channels_repr}:\n"
+        "    assert ch not in CHANNEL_ADAPTERS, f'unset인데 등재됨(prod 사고 위험): {ch}'\n"
+        "assert not any(cfg.is_test_channel for cfg in CHANNEL_ADAPTERS.values()), "
+        "'unset인데 is_test_channel 어댑터가 남아있음'\n"
     )
     env_off = {k: v for k, v in os.environ.items() if k != "SANDBOX_CHANNEL_ENABLED"}
     r_off = subprocess.run(
         [sys.executable, "-c", script_off], cwd=backend_dir, capture_output=True, text=True, env=env_off,
     )
     assert r_off.returncode == 0, r_off.stderr
+
+
+_LOOKS_SANDBOX_NAMED_SNIPPET = (
+    "def looks_sandbox_named(ch):\n"
+    "    return ch == 'sandbox' or ch.endswith('_sandbox')\n"
+)
+
+# story #4009 CHANGES(페드루 PO 지적 2026-09-17 1차) — 이전 subprocess 테스트는
+# `_ALL_TEST_CHANNELS`(이름 8개 하드코딩)만 순회했다. 9번째 sandbox 채널이 이번
+# 사고와 같은 모양(모듈 최상위 등록·`is_test_channel` 미선언)으로 추가되면 그
+# 하드코딩 목록엔 원래 없으니 그린 그대로였을 것 — `CHANNEL_ADAPTERS` 자체를
+# 순회해 양방향 대조한다(이름 목록 없이): `is_test_channel` 선언과 `_sandbox`
+# 접미(또는 단독 `sandbox`) 명명 관례가 모든 키에서 항상 같은 값이어야 한다.
+#
+# 2차 지적(같은 날) — 아래 두 문자열을 **판정식의 유일한 사본**으로 모듈
+# 상수로 뽑는다. 양성 대조(아래 test_check_script_*)가 이 문자열을 "다시 짜서"
+# 재는 게 아니라 **그대로 실행**해야, 이 문자열 자체에 오타가 생겨도(예:
+# `!=`를 `==`로 잘못 침) 양성 대조가 그걸 잡는다 — 서로 다른 코드를 재는
+# 대조는 가드가 아니다.
+_CHECK_SCRIPT = (
+    "from app.services.channel_adapters import CHANNEL_ADAPTERS\n"
+    + _LOOKS_SANDBOX_NAMED_SNIPPET
+    + "mismatches = [ch for ch, cfg in CHANNEL_ADAPTERS.items() "
+    "if cfg.is_test_channel != looks_sandbox_named(ch)]\n"
+    "assert not mismatches, f'is_test_channel과 명명 관례 불일치: {mismatches}'\n"
+)
+
+_OFF_SCRIPT = _CHECK_SCRIPT + (
+    "assert not any(cfg.is_test_channel for cfg in CHANNEL_ADAPTERS.values()), "
+    "'flag off인데 is_test_channel 어댑터가 남음'\n"
+    "assert not any(looks_sandbox_named(ch) for ch in CHANNEL_ADAPTERS), "
+    "'flag off인데 sandbox 명명 채널이 남음'\n"
+)
+
+# 합성 결함 주입 줄 ①(ON 갈래 A) — 이름은 관례를 따르는데(_sandbox 접미)
+# is_test_channel 선언이 빠짐(이번 실제 사고 — facebook_sandbox 등 4개와
+# 정확히 같은 모양). `_CHECK_SCRIPT` 자체의 명명-불일치 단언에서 잡힌다.
+_INJECT_UNMARKED_SANDBOX_NAMED = (
+    "from app.services.channel_adapters import ChannelAdapterConfig, CHANNEL_ADAPTERS\n"
+    "CHANNEL_ADAPTERS['foo_sandbox'] = ChannelAdapterConfig(\n"
+    "    authorize_url='', token_url='', scope='', refresh_mode='manual',\n"
+    "    credential_kind='none', display_name='Foo Sandbox',\n"
+    ")\n"
+)
+
+# 합성 결함 주입 줄 ②(ON 갈래 B, 반대 방향·페드루 PO 「선택」 완성) —
+# is_test_channel=True인데 이름은 sandbox 관례를 안 따름. `_CHECK_SCRIPT`의
+# 같은 명명-불일치 단언이 반대 방향(속성 True·이름 불일치)도 잡는지 확認.
+_INJECT_MARKED_NON_SANDBOX_NAMED = (
+    "from app.services.channel_adapters import ChannelAdapterConfig, CHANNEL_ADAPTERS\n"
+    "CHANNEL_ADAPTERS['bad_test_channel'] = ChannelAdapterConfig(\n"
+    "    authorize_url='', token_url='', scope='', refresh_mode='manual',\n"
+    "    credential_kind='none', display_name='Bad Test Channel', is_test_channel=True,\n"
+    ")\n"
+)
+
+# 합성 결함 주입 줄 ③(OFF 갈래 전용, 페드루 PO 2차 지적 정정) — 이름·속성이
+# 서로 «맞는» 테스트 채널(foo_sandbox + is_test_channel=True)이라 `_CHECK_SCRIPT`
+# 자체의 명명-불일치 단언은 통과한다 — flag OFF 세션에 이 채널이 남아 있으면
+# `_OFF_SCRIPT` **뒤쪽 OFF 전용 단언**(「flag off인데 is_test_channel 어댑터가
+# 남음」)에서만 잡혀야 한다. 앞쪽 공유 단언에서 먼저 걸리면 OFF 전용 단언 자체가
+# 오타 나도 이 대조가 못 잡는 셈이라 무의미하다(1차 정정에서 이 함정에 걸렸음).
+_INJECT_MATCHED_TEST_CHANNEL = (
+    "from app.services.channel_adapters import ChannelAdapterConfig, CHANNEL_ADAPTERS\n"
+    "CHANNEL_ADAPTERS['foo_sandbox'] = ChannelAdapterConfig(\n"
+    "    authorize_url='', token_url='', scope='', refresh_mode='manual',\n"
+    "    credential_kind='none', display_name='Foo Sandbox', is_test_channel=True,\n"
+    ")\n"
+)
+
+
+def test_test_channel_registration_matches_naming_convention_both_directions():
+    """`_CHECK_SCRIPT`/`_OFF_SCRIPT`를 실제 프로세스(import 시점 그대로)로
+    돌려 flag ON/OFF 둘 다 현재 등록 상태가 명명 관례와 일치하는지 확認."""
+    import subprocess
+    import sys
+
+    backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    r_on = subprocess.run(
+        [sys.executable, "-c", _CHECK_SCRIPT], cwd=backend_dir, capture_output=True, text=True,
+        env={**os.environ, "SANDBOX_CHANNEL_ENABLED": "true"},
+    )
+    assert r_on.returncode == 0, r_on.stderr
+
+    env_off = {k: v for k, v in os.environ.items() if k != "SANDBOX_CHANNEL_ENABLED"}
+    r_off = subprocess.run(
+        [sys.executable, "-c", _OFF_SCRIPT], cwd=backend_dir, capture_output=True, text=True, env=env_off,
+    )
+    assert r_off.returncode == 0, r_off.stderr
+
+
+def test_check_script_fails_on_name_without_property_when_flag_on():
+    """양성 대조(페드루 PO 2차 지적, 2026-09-17) — 판정식을 테스트 안에 따로
+    적어 재지 않는다: 실제 `_CHECK_SCRIPT` 문자열을 그대로 subprocess로 돌리되,
+    import 직후 `foo_sandbox`를 `is_test_channel` 없이 주입하는 한 줄만 앞에
+    붙인다(이번 실제 사고와 동형: 이름은 관례를 따르는데 속성이 빠짐) —
+    `_CHECK_SCRIPT` 자체에 오타가 생겨 늘 통과하게 돼도 이 대조가 잡는다."""
+    import subprocess
+    import sys
+
+    backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    r = subprocess.run(
+        [sys.executable, "-c", _INJECT_UNMARKED_SANDBOX_NAMED + _CHECK_SCRIPT],
+        cwd=backend_dir, capture_output=True, text=True,
+        env={**os.environ, "SANDBOX_CHANNEL_ENABLED": "true"},
+    )
+    assert r.returncode != 0, "합성 결함(이름 sandbox·속성 없음)을 못 잡음 — 대조 로직 자체가 무의미"
+    assert "foo_sandbox" in r.stderr, r.stderr
+
+
+def test_check_script_fails_on_property_without_name_when_flag_on():
+    """양성 대조(반대 방향, 페드루 PO 「선택」 완성) — `bad_test_channel`
+    (is_test_channel=True인데 이름은 sandbox 관례를 안 따름)을 주입하는 줄만
+    앞에 붙여 같은 `_CHECK_SCRIPT`를 돌린다. 이름 쪽만 보는 대조였다면 이
+    방향은 놓쳤을 것 — 속성 쪽도 독립적으로 강제됨을 증명."""
+    import subprocess
+    import sys
+
+    backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    r = subprocess.run(
+        [sys.executable, "-c", _INJECT_MARKED_NON_SANDBOX_NAMED + _CHECK_SCRIPT],
+        cwd=backend_dir, capture_output=True, text=True,
+        env={**os.environ, "SANDBOX_CHANNEL_ENABLED": "true"},
+    )
+    assert r.returncode != 0, "합성 결함(속성 True·이름 불일치)을 못 잡음 — 대조 로직 자체가 무의미"
+    assert "bad_test_channel" in r.stderr, r.stderr
+
+
+def test_off_script_fails_when_matched_test_channel_leaks_through_flag_off():
+    """양성 대조(페드루 PO 2차 지적 정정, 2026-09-17) — 이전 버전은 이름·속성이
+    서로 «안 맞는» 채널을 주입해, `_OFF_SCRIPT`의 앞쪽 공유 단언(명명 불일치)
+    에서 먼저 걸렸다 — 뒤쪽 OFF 전용 단언(「flag off인데 is_test_channel
+    어댑터가 남음」)은 실제로 안 돈 채 초록이었다(그 단언 자체에 오타가 나도
+    이 대조가 못 잡는 셈이라 무의미).
+
+    `_INJECT_MATCHED_TEST_CHANNEL`(foo_sandbox, is_test_channel=True — 이름·
+    속성이 서로 맞음)을 주입하면 공유 단언은 통과하고, OFF 전용 단언이 실제로
+    이 채널을 잡아야만 이 테스트가 초록이다."""
+    import subprocess
+    import sys
+
+    backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    env_off = {k: v for k, v in os.environ.items() if k != "SANDBOX_CHANNEL_ENABLED"}
+    r = subprocess.run(
+        [sys.executable, "-c", _INJECT_MATCHED_TEST_CHANNEL + _OFF_SCRIPT],
+        cwd=backend_dir, capture_output=True, text=True, env=env_off,
+    )
+    assert r.returncode != 0, "flag off인데 is_test_channel 어댑터가 남아도 못 잡음 — 대조 로직 자체가 무의미"
+    assert "flag off인데" in r.stderr, r.stderr
 
 
 def test_get_publish_client_module_dispatches_by_channel():
@@ -272,12 +443,42 @@ def test_dev_with_sandbox_registered_does_not_raise(monkeypatch):
 
 
 def test_prod_without_sandbox_registered_does_not_raise(monkeypatch):
+    """story #4009 — 가드가 이제 is_test_channel=True 전부를 보므로("sandbox" 한
+    키만 보던 예전과 다름), pytest 세션(conftest.py 기본값)이 이미 등록해 둔
+    나머지 7개(instagram_sandbox 등)도 같이 지워야 "테스트 채널 0건" 상태를
+    정확히 재현한다."""
     import app.services.channel_adapters as adapters_mod
     from app.core.config import settings
 
     monkeypatch.setattr(settings, "deploy_env", "prod")
-    monkeypatch.delitem(adapters_mod.CHANNEL_ADAPTERS, "sandbox", raising=False)
+    for ch, cfg in list(adapters_mod.CHANNEL_ADAPTERS.items()):
+        if cfg.is_test_channel:
+            monkeypatch.delitem(adapters_mod.CHANNEL_ADAPTERS, ch, raising=False)
     adapters_mod.assert_sandbox_channel_not_registered_in_prod()  # no raise
+
+
+def test_prod_with_only_one_of_four_previously_ungated_channels_raises(monkeypatch):
+    """story #4009(critical, AC3) — 가드가 리터럴 "sandbox" 하나만 보던 이전 결함을
+    정정한다: facebook_sandbox/ads_sandbox/x_sandbox/youtube_sandbox 中 아무거나
+    하나만 등록돼 있어도(다른 7개는 없어도) 잡혀야 한다("sandbox" 키가 아예 없는
+    조합으로 이전 가드가 실제로 뚫렸던 상태를 정확히 재현)."""
+    import app.services.channel_adapters as adapters_mod
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "deploy_env", "prod")
+    for ch, cfg in list(adapters_mod.CHANNEL_ADAPTERS.items()):
+        if cfg.is_test_channel:
+            monkeypatch.delitem(adapters_mod.CHANNEL_ADAPTERS, ch, raising=False)
+    only_ads_sandbox = adapters_mod.ChannelAdapterConfig(
+        authorize_url="https://www.facebook.com/v21.0/dialog/oauth",
+        token_url="https://graph.facebook.com/v21.0/oauth/access_token",
+        scope="ads_management", refresh_mode="reissue_from_access_token",
+        credential_kind="oauth", display_name="Meta Ads Sandbox", kind="ads",
+        requires_connection=True, is_test_channel=True,
+    )
+    monkeypatch.setitem(adapters_mod.CHANNEL_ADAPTERS, "ads_sandbox", only_ads_sandbox)
+    with pytest.raises(RuntimeError, match="fail-closed"):
+        adapters_mod.assert_sandbox_channel_not_registered_in_prod()
 
 
 # ─── AC2 — 연결 생성 endpoint ─────────────────────────────────────────────

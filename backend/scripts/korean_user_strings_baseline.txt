@@ -567,7 +567,7 @@ app/services/chain_escalation.py::무인간 대화 무감독 연쇄 감지
 app/services/chain_escalation.py::무인간 대화 자동 차단(서킷브레이커)
 app/services/chain_escalation.py::초간 메시지
 app/services/channel_adapters.py::Sprintable 호스팅 블로그
-app/services/channel_adapters.py::fail-closed: prod 배포에 sandbox 채널 어댑터가 등재돼 있습니다(SANDBOX_CHANNEL_ENABLED가 prod에 잘못 설정됐을 가능성 — story 5b27b32f AC5).
+app/services/channel_adapters.py::fail-closed: prod 배포에 테스트용 채널 어댑터가 등재돼 있습니다(SANDBOX_CHANNEL_ENABLED가 prod에 잘못 설정됐을 가능성 — story #4009 AC3):
 app/services/channel_adapters.py::고객 웹훅(signed)
 app/services/channel_adapters.py::는 kind='blog'라 get_publish_client_module 디스패치 대상이 아닙니다(hosted_site=site_posts.py 직접 처리, wordpress/webhook=조각② 배선 예정).
 app/services/channel_adapters.py::발행 클라이언트 디스패치가 없는 채널입니다:

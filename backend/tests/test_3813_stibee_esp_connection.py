@@ -87,6 +87,7 @@ def _register_stibee_sandbox(monkeypatch):
     stibee_sandbox_cfg = adapters_mod.ChannelAdapterConfig(
         authorize_url="", token_url="", scope="",
         refresh_mode="manual", credential_kind="none", display_name="스티비 샌드박스", kind="social",
+        is_test_channel=True,  # story #4009 — 실 모듈 등록과 같은 기준(is_test_channel).
     )
     monkeypatch.setitem(adapters_mod.CHANNEL_ADAPTERS, "stibee_sandbox", stibee_sandbox_cfg)
     yield
