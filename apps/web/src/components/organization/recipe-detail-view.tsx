@@ -83,7 +83,10 @@ export function RecipeDetailView({ recipe, onApply, onDuplicate }: RecipeDetailV
         </div>
         <span className="text-muted-foreground text-[11.5px]">→</span>
         <div className="bg-info-tint border border-brand rounded-lg px-2.5 py-1">
-          <span className="text-brand text-[10px] font-bold block">{t('recipeFlowWorkflowLabel')}</span>
+          {/* text-brand(#0.56L) on bg-info-tint 소형 텍스트=AA 4.0(<4.5, 실측) — 라벨은
+              text-foreground(고대비 14.5+)로, 강조는 border-brand(비텍스트 3:1 기준 4.0+로
+              충분)에만 맡긴다. */}
+          <span className="text-foreground text-[10px] font-bold block">{t('recipeFlowWorkflowLabel')}</span>
           <span className="text-foreground text-xs font-semibold">{recipe.name || recipe.key}</span>
         </div>
         <span className="text-muted-foreground text-[11.5px]">→</span>
