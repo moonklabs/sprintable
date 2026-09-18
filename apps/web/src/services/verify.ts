@@ -43,6 +43,112 @@ export function asVerificationSheet(payload: Record<string, unknown> | null | un
 }
 
 /**
+ * story #4041(제작 작업대 — 크리에이터 에이전트 stage 산출물 계약 v0.5, doc 3cca821b §4) —
+ * verification_sheet와 형제인 나머지 4개 kind. 전부 `type='report'` 재사용 + `payload.kind`
+ * 서브타이핑(#4042 서버 강제 검증은 이 카드 범위 밖 — FE는 §4 확定 shape을 그대로 미러하고
+ * asVerificationSheet와 동형으로 최소 구조 narrowing만 한다, 항목별 깊은 검증은 서버 책임).
+ */
+export interface MaterialCollectionItem {
+  ref: string;
+  label: string;
+  tag: string;
+}
+
+export function asMaterialCollectionSheet(payload: Record<string, unknown> | null | undefined): MaterialCollectionItem[] | null {
+  if (!payload || payload['kind'] !== 'material_collection_sheet') return null;
+  const items = payload['items'];
+  if (!Array.isArray(items)) return null;
+  return items as MaterialCollectionItem[];
+}
+
+export interface ConceptBrief {
+  concept: string;
+  rationale: string;
+  /** optional — 없으면 undefined(지어내지 않음, mood_refs 부재≠빈 배열). */
+  mood_refs?: string[];
+}
+
+export function asConceptBrief(payload: Record<string, unknown> | null | undefined): ConceptBrief | null {
+  if (!payload || payload['kind'] !== 'concept_brief') return null;
+  const concept = payload['concept'];
+  const rationale = payload['rationale'];
+  if (typeof concept !== 'string' || typeof rationale !== 'string') return null;
+  const moodRefs = payload['mood_refs'];
+  return {
+    concept,
+    rationale,
+    ...(Array.isArray(moodRefs) ? { mood_refs: moodRefs as string[] } : {}),
+  };
+}
+
+export interface StoryboardShot {
+  shot_no: number;
+  angle: string;
+  duration_sec: number;
+  desc: string;
+}
+
+export interface StoryboardEmotionBeat {
+  beat_no: number;
+  shot_no: number;
+  emotion: string;
+}
+
+export interface Storyboard {
+  /** optional — 평면도 이미지 아티팩트(없으면 undefined). */
+  layout_artifact_id?: string;
+  shot_list: StoryboardShot[];
+  emotion_beats: StoryboardEmotionBeat[];
+}
+
+export function asStoryboard(payload: Record<string, unknown> | null | undefined): Storyboard | null {
+  if (!payload || payload['kind'] !== 'storyboard') return null;
+  const shotList = payload['shot_list'];
+  const emotionBeats = payload['emotion_beats'];
+  if (!Array.isArray(shotList) || !Array.isArray(emotionBeats)) return null;
+  const layoutArtifactId = payload['layout_artifact_id'];
+  return {
+    ...(typeof layoutArtifactId === 'string' ? { layout_artifact_id: layoutArtifactId } : {}),
+    shot_list: shotList as StoryboardShot[],
+    emotion_beats: emotionBeats as StoryboardEmotionBeat[],
+  };
+}
+
+export type AnimaticCostTier = 'no_charge' | 'paid';
+
+export interface Animatic {
+  artifact_id: string;
+  cost_tier: AnimaticCostTier;
+  duration_sec: number;
+}
+
+export function asAnimatic(payload: Record<string, unknown> | null | undefined): Animatic | null {
+  if (!payload || payload['kind'] !== 'animatic') return null;
+  const artifactId = payload['artifact_id'];
+  const costTier = payload['cost_tier'];
+  const durationSec = payload['duration_sec'];
+  if (typeof artifactId !== 'string') return null;
+  if (costTier !== 'no_charge' && costTier !== 'paid') return null;
+  if (typeof durationSec !== 'number') return null;
+  return { artifact_id: artifactId, cost_tier: costTier, duration_sec: durationSec };
+}
+
+/** #4041 §3 stage→kind 매핑 순서(소재 수집→컨셉→스토리보드→애니매틱→발행 前 검증) 그대로 —
+ * 제작 작업대 화면이 이 순서로 정렬해 보여줄 때 재사용(정의 시점 SSOT, 하드코딩 재사용 방지). */
+export const PRODUCTION_WORKBENCH_KIND_ORDER = [
+  'material_collection_sheet', 'concept_brief', 'storyboard', 'animatic', 'verification_sheet',
+] as const;
+
+export type ProductionWorkbenchKind = (typeof PRODUCTION_WORKBENCH_KIND_ORDER)[number];
+
+/** payload.kind 문자열만으로 이 evidence가 제작 작업대 산출물인지 판별(narrowing 없이 빠른
+ * 필터용 — 실제 shape 확認은 위 asXxx로). 미등재 kind는 #4042 서버 방어선 대기 상태라
+ * false(이 축이 아직 다루는 5종 밖은 여기서 안 챙긴다, 지어내지 않음). */
+export function isProductionWorkbenchKind(kind: unknown): kind is ProductionWorkbenchKind {
+  return typeof kind === 'string' && (PRODUCTION_WORKBENCH_KIND_ORDER as readonly string[]).includes(kind);
+}
+
+/**
  * E-VERIFY P0-04 — claimed-vs-verified-spec-handoff §3 BE 계약(PR #2069) 미러. `has_evidence`
  * (1 boolean, self-report와 human-verified를 뭉갬)를 대체하는 2신호 — story/task 응답에 그대로
  * 동봉. null=미측정(0건), false는 오지 않음(BE 계약).
