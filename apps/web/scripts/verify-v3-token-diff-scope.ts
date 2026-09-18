@@ -178,11 +178,26 @@ export type DiffScopeVerdict =
   | { kind: 'fail'; reason: string };
 
 /** 순수 함수(changedFiles·globals.css의 --proof-* 값줄 변경 개수 → verdict) — 핫픽스
- * 본체. IO(git 호출) 0, main()이 이 함수 앞뒤로 실 git 데이터를 넣고 분기만 옮긴다. */
+ * 본체. IO(git 호출) 0, main()이 이 함수 앞뒤로 실 git 데이터를 넣고 분기만 옮긴다.
+ *
+ * story #4011(critical, 페드루 PO 確定 2026-09-17) AC1 — 이 가드는 스토리 PR 하나의
+ * diff 범위를 재는 가드인데 그 전제(«PR = 스토리 하나»)를 base 브랜치로 확인하지
+ * 않았다. prod 승격 PR(base=main)은 develop에 이미 병합된 여러 스토리의 누적이라
+ * globals.css의 --proof-* 값 변경이 diff에 « 다시 » 나타나는 게 정상인데, 그 diff에
+ * 다른 파일도 당연히 섞여 있다는 이유로 AC1 위반으로 오판했다(PR #4389 CI 실사고,
+ * 뒤 43단계가 한 번도 안 돎). 처방은 판정 로직 자체가 아니라 적용 범위 — base=main
+ * PR에서는 이 가드 전체가 no-op(스토리 단위 diff 범위 검사 대상 밖). */
 export function classifyDiffScope(
   changedFiles: string[],
   proofTokenLineChangeCount: number,
+  isPromotionBase: boolean = false,
 ): DiffScopeVerdict {
+  if (isPromotionBase) {
+    return {
+      kind: 'not_applicable',
+      reason: '승격 PR — 스토리 단위 diff 범위 검사 대상 아님(base=main, 3826 AC1은 develop/스택 브랜치 대상 PR 전용).',
+    };
+  }
   if (!changedFiles.includes(TARGET_FILE)) {
     return {
       kind: 'not_applicable',
@@ -209,7 +224,25 @@ export function countProofTokenLineChanges(contentLines: string[]): number {
   return contentLines.filter((l) => RAW_TOKEN_LINE_RE.test(l)).length;
 }
 
+// story #4011 AC1 — base ref가 `main`(bare 또는 `origin/main`)이면 승격 PR로 본다.
+// ci.yml이 `V3_TOKEN_DIFF_BASE: origin/${{ github.base_ref || 'develop' }}`로 배선해
+// PR의 실 base 브랜치명이 그대로 이 값에 실린다(develop·스택 부모 브랜치는 이 정규식에
+// 안 걸림 — main이라는 이름 자체가 "승격 대상" 신호, doc 93ef2896 §배포 파이프라인).
+export function isPromotionBaseRef(baseRef: string): boolean {
+  return baseRef === 'main' || /\/main$/.test(baseRef);
+}
+
 function main(): number {
+  const isPromotionBase = isPromotionBaseRef(BASE_REF);
+  if (isPromotionBase) {
+    // AC1 — 승격 PR은 이 가드의 전제(«PR = 스토리 하나») 밖이라 base ref 해석·git
+    // diff 계산 자체를 시도하지 않는다(AC3 — 얕은 clone/ref 해석 실패 경로를 이
+    // 케이스에서 아예 건드리지 않음으로써 처방).
+    const verdict = classifyDiffScope([], 0, true);
+    if (verdict.kind === 'not_applicable') console.log(verdict.reason);
+    return 0;
+  }
+
   ensureBaseRefAvailable(BASE_REF);
 
   const changedFiles = parseChangedFiles(sh(`git diff --name-only ${BASE_REF}...HEAD`));
