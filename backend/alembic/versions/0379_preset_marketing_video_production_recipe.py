@@ -27,20 +27,35 @@
     재사용 가능, gate_service.create_gate()가 gate_type을 안 가리는 공용 chokepoint).
   ⓓ`pending_approval` stage만 `gate={"type":"external_publish","approver":"org_owner"}`
     (기존 channel_posts.py/site_posts.py가 이미 쓰는 전역 gate_type 재사용).
-  ⓑ`structure_passed`·ⓒ`live_generation` 두 stage는 role/action/capability는 그대로 두되
-    **`gate` 키를 아직 안 싣는다** — #4044가 gate_type을 確定하는 대로 그 카드의 자체
-    마이그(§AC3 "①과 정합")가 이 두 stage_metadata에 `gate`를 얹는 후속 UPDATE를 낸다.
+  ⓑⓒ는 role/action/capability는 그대로 두되 **`gate` 키를 아직 안 싣는다** — #4044가
+    gate_type을 確定하는 대로 그 카드의 자체 마이그(§AC3 "①과 정합")가 얹는 후속 UPDATE를
+    낸다. ⚠️ⓑⓒ가 실제로 어느 stage에 앉는지는 #4044(0380) 확定 후 사실이다 — 유나 디자인
+    핸드셰이크(2026-09-18 06:32Z)는 ⓑ구조를 `animatic`에, ⓒ예산을 `structure_passed`에
+    건다("이미 지난 stage가 다음 진입을 게이트한다" 관례 — ⓐ가 `concept_confirmed`
+    자신을 게이트하는 것과는 다른 배치다, 0380 docstring 참조). 이 파일은 그 두 stage에
+    `gate`를 아직 안 실어 어느 쪽으로도 앞서가지 않는다.
 
-역할 슬롯 4종(카드 §AC2) — 디렉터(사람, 4게이트 전부의 approver="org_owner")·크리에이터
-(에이전트, stage_metadata.role 표시+recipe_role_bindings로 stage→agent 바인딩)·연산(모델
+역할 슬롯 4종(카드 §AC2) — Director(사람, 4게이트 전부의 approver="org_owner")·Creator
+(에이전트, stage_metadata.role 표시+recipe_role_bindings로 stage→agent 바인딩)·Compute(모델
 임대, stage_metadata.capability로만 선언 — org member가 아니라 커넥터/모델이라
-recipe_role_bindings 대상이 아님)·발행자(에이전트, 크리에이터와 동형으로 바인딩+capability
-둘 다).
+recipe_role_bindings 대상이 아님)·Publisher(에이전트, Creator와 동형으로 바인딩+capability
+둘 다). role 값은 0260 builtin 프리셋(PO/Dev/QA/Agent/Human 등) 관례 그대로 **영어 PascalCase
+토큰**을 쓴다(발명이 아니라 기존 어휘 확장) — 화면 노출은 `apps/web/src/lib/stage-role.ts`의
+`STAGE_ROLE_KEY`+`messages/{ko,en}.json`이 i18n 정본으로 거른다(story #3773, "화면 원어
+누출 0" — 유나 핸드셰이크 2026-09-18 06:32Z 요청대로 이 마이그와 같은 커밋에서 등재).
 
-상태 9(카드 §AC2, 도크 19caa3f7 §1 그대로 슬러그화) — draft(초안)→concept_confirmed(컨셉確定,
-ⓐ)→animatic(애니매틱)→structure_passed(구조통과, ⓑ)→live_generation(실탄생성, ⓒ)→
-verification(검증)→editing(편집)→pending_approval(승인대기, ⓓ)→published(발행). "+분석"은
-도크에서도 9개 밖 보너스 상태라 이번 시드엔 안 넣는다(비고 그대로 후속).
+상태 9(카드 §AC2, 도크 19caa3f7 §1 슬러그화 + 유나 디자인 정본 핸드셰이크 2026-09-18 06:32Z
+role/게이트 확定) — draft(초안, Creator)→concept_confirmed(컨셉確定, Director, ⓐ)→
+animatic(애니매틱, Creator)→structure_passed(구조통과, Director)→live_generation(유료생성,
+Compute)→verification(검증, Creator)→editing(편집, Creator)→pending_approval(승인대기,
+Director, ⓓ)→published(발행, Publisher). "+분석"은 도크에서도 9개 밖 보너스 상태라 이번
+시드엔 안 넣는다(비고 그대로 후속).
+
+⚠️role 재배정(유나 핸드셰이크 반영, 최초 초안 대비 정정) — `live_generation`은 Director가
+아니라 **Compute**(그 stage에서 실제로 도는 건 모델 임대 연산, 승인은 그 앞 stage인
+`structure_passed`에서 이미 끝났다는 게 유나 설계)·`pending_approval`은 Publisher가 아니라
+**Director**(승인은 사람이 하고, 실제 게시 실행은 다음 stage `published`에서 Publisher가
+한다 — "승인"과 "집행"을 같은 stage에 섞지 않는다).
 
 «마케팅» 분류(AC3) — 신규 컬럼을 추가하지 않고 기존 `key` 네임스페이스 축(`preset.{domain}.
 {slug}`, 0245/0260/0274 선례 — 둘째 세그먼트가 도메인)을 그대로 재사용한다: 기존 개발
@@ -108,36 +123,36 @@ _ROUTING = {
 
 _STAGE_METADATA = {
     "draft": {
-        "role": "크리에이터", "action": "로그라인·매핑표·컨셉 초안 작성",
+        "role": "Creator", "action": "로그라인·매핑표·컨셉 초안 작성",
     },
     "concept_confirmed": {
-        "role": "디렉터", "action": "우화 비트↔제품 가치 매핑 + 미션 정합 확定 승인",
+        "role": "Director", "action": "우화 비트↔제품 가치 매핑 + 미션 정합 확定 승인",
         "gate": {"type": "concept_approval", "approver": "org_owner"},
     },
     "animatic": {
-        "role": "크리에이터", "action": "무과금 스틸+텍스트+VO 애니매틱 제작",
+        # ⚠️gate 미선언(#4044/0380이 ⓑ structure_approval을 얹는다 — 이 stage 자리).
+        "role": "Creator", "action": "무과금 스틸+텍스트+VO 애니매틱 제작 후 구조 판정 요청",
     },
     "structure_passed": {
-        # ⚠️gate 미선언(#4044가 gate_type 確定 후 후속 UPDATE로 얹는다 — 마이그 docstring 참조).
-        "role": "디렉터", "action": "무과금 애니매틱으로 구조 판정 승인",
+        # ⚠️gate 미선언(#4044/0380이 ⓒ generation_budget을 얹는다 — 이 stage 자리).
+        "role": "Director", "action": "구조 판정 통과 확인 + 표적·예산 명시해 실탄 발사 승인",
     },
     "live_generation": {
-        # ⚠️gate 미선언(#4044가 gate_type 確定 후 후속 UPDATE로 얹는다 — 마이그 docstring 참조).
-        "role": "디렉터", "action": "표적·예산을 명시해 실탄(유료 생성) 발사 승인",
+        "role": "Compute", "action": "실탄(유료 생성) 모델(키컷·i2v·음성·립싱크) 호출",
         "capability": {"kind": "generate"},
     },
     "verification": {
-        "role": "크리에이터", "action": "프레임8+받아쓰기 등 눈·귀 검증 시트 작성",
+        "role": "Creator", "action": "프레임8+받아쓰기 등 눈·귀 검증 시트 작성",
     },
     "editing": {
-        "role": "크리에이터", "action": "편집 통일 패스(그레이드·룸톤·자막 레벨 통일)",
+        "role": "Creator", "action": "편집 통일 패스(그레이드·룸톤·자막 레벨 통일)",
     },
     "pending_approval": {
-        "role": "발행자", "action": "최종 발행 승인 대기(외부 발행 직전)",
+        "role": "Director", "action": "최종 발행 승인(외부 발행 직전)",
         "gate": {"type": "external_publish", "approver": "org_owner"},
     },
     "published": {
-        "role": "발행자", "action": "승인된 채널에 실 게시",
+        "role": "Publisher", "action": "승인된 채널에 실 게시",
         "capability": {"kind": "publish"},
     },
 }
