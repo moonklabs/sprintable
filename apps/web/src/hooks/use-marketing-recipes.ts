@@ -13,13 +13,14 @@ import { recipeKeyDomain } from '@/lib/recipe-role-slots';
 // 걸러 workflow-template-gallery-section.tsx·organization/events/page.tsx가 이미 하는 일과
 // 안 겹친다.
 //
-// 프레젠테이션(레이아웃·픽셀)은 유나 시안(#4038) 확定 후 후속 카드 — 이 훅은 타입·목록·로딩/
-// 에러 상태까지만 내준다.
+// story #4048(E-RECIPE-1 ①) — 갤러리 컴포넌트가 마케팅 탭·개발 워크플로 탭 둘 다 같은
+// GET /api/events/definitions 응답에서 도메인만 갈라 보여줘야 해서(유나 v2 AC1), fetch+필터
+// 로직을 useRecipesByDomain(domain)으로 일반화했다 — useMarketingRecipes는 그 얇은 래퍼로
+// 남아(#4046 소비처 무회귀) domain='marketing' 고정 호출.
 
-const MARKETING_DOMAIN = 'marketing';
 const EVENTS_DEFINITIONS_API_PATH = '/api/events/definitions';
 
-export interface UseMarketingRecipesResult {
+export interface UseRecipesByDomainResult {
   recipes: EventDefinitionResponse[];
   loading: boolean;
   error: string | null;
@@ -27,10 +28,13 @@ export interface UseMarketingRecipesResult {
 }
 
 export function isMarketingRecipeKey(key: string): boolean {
-  return recipeKeyDomain(key) === MARKETING_DOMAIN;
+  return recipeKeyDomain(key) === 'marketing';
 }
 
-export function useMarketingRecipes(): UseMarketingRecipesResult {
+/** key.split('.')[1]===domain인 정의만 남긴다(recipeKeyDomain 재사용). domain='workflow'로
+ * 부르면 개발 워크플로 프리셋만, 'marketing'이면 마케팅 레시피만 — 둘 다 같은 엔드포인트 한
+ * 번 호출로 클라측 분리(서버에 새 필터 파라미터 요구 안 함, #4046 설계 그대로). */
+export function useRecipesByDomain(domain: string): UseRecipesByDomainResult {
   const [recipes, setRecipes] = useState<EventDefinitionResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -52,7 +56,7 @@ export function useMarketingRecipes(): UseMarketingRecipesResult {
         const json = (await res.json()) as EventDefinitionResponse[] | { data?: EventDefinitionResponse[] };
         const all = Array.isArray(json) ? json : (json.data ?? []);
         if (cancelled) return;
-        setRecipes(all.filter((d) => isMarketingRecipeKey(d.key)));
+        setRecipes(all.filter((d) => recipeKeyDomain(d.key) === domain));
       } catch (e) {
         if (cancelled) return;
         setError(e instanceof Error ? e.message : 'failed to load recipes');
@@ -62,7 +66,13 @@ export function useMarketingRecipes(): UseMarketingRecipesResult {
       }
     })();
     return () => { cancelled = true; };
-  }, [nonce]);
+  }, [domain, nonce]);
 
   return { recipes, loading, error, refresh };
+}
+
+export type UseMarketingRecipesResult = UseRecipesByDomainResult;
+
+export function useMarketingRecipes(): UseMarketingRecipesResult {
+  return useRecipesByDomain('marketing');
 }
