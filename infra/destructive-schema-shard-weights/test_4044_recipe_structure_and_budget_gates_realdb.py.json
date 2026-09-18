@@ -1,0 +1,1 @@
+{"file": "tests/test_4044_recipe_structure_and_budget_gates_realdb.py", "sec": 9.3, "source": "story-4044(2026-09-18) — 로컬 실측(throwaway pgvector/pgvector:pg16 컨테이너, test_4039와 같은 파일에서 `uv run pytest` 동시실행, 18 passed in 9.28s 전체 중 이 파일 7건 비중 추정치). CI 값은 달라질 수 있어 잠정값."}
