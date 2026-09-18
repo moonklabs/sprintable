@@ -119,3 +119,11 @@ export function recipeKeyDomain(key: string): string | null {
   if (!key.startsWith('preset.')) return null;
   return key.split('.')[1] ?? null;
 }
+
+// story #4049(E-RECIPE-1 ①) — bindableRoles에 넘길 role 라벨 상수를 여기 둔다(.ts 파일 —
+// verify-no-hardcoded-korean-ui-text.ts는 .tsx만 훑는다, story #3741). 이 값은 화면에
+// 렌더되는 사용자 카피가 아니라 stage_metadata.role과 대조하는 내부 데이터 키다(표시 문구는
+// t('recipeApplyV2CreatorRole')이 따로 맡는다) — .tsx로 옮겨 i18n 키로 감싸면 오히려
+// «번역 대상이 아닌 값을 번역 가능한 척» 하는 오분류가 된다. #4039 seed(preset.marketing.
+// video_production) 실측 값 — 마케팅 레시피가 여러 종류로 늘면 key→라벨 lookup으로 확장.
+export const MARKETING_CREATOR_ROLE_LABEL = '크리에이터';
