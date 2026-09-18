@@ -1,0 +1,1 @@
+{"file": "tests/test_4039_marketing_recipe_video_production_realdb.py", "sec": 6.1, "source": "story-4039(2026-09-18) — 로컬 실측(throwaway pgvector/pgvector:pg16 컨테이너, `uv run pytest` 단독실행, 11 passed in 6.13s). CI 러너 부하·병렬 스케줄링에 따라 실 CI 값은 달라질 수 있어 잠정값으로 표시 — story #3392 unweighted 가드가 재측정 필요 여부를 첫 CI run 후 알려줄 것."}
