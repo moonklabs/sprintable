@@ -104,7 +104,9 @@ test.describe('Sprint Retro - Corrected E2E Tests', () => {
       console.log(`Navigating to: ${href}`);
       
       await sessionLink.click();
-      await page.waitForLoadState('networkidle');
+      // CHANGES(페드루 PO, 2026-09-18) — networkidle 제거(SSE가 계속 붙어 있어 네트워크가
+      // 안 조용해질 수 있음). h1/h2(목록·상세 둘 다 항상 렌더)로 대체.
+      await page.locator('h1, h2').first().waitFor({ state: 'visible' });
       
       const currentUrl = page.url();
       if (currentUrl.includes('/retro/')) {
@@ -126,7 +128,9 @@ test.describe('Sprint Retro - Corrected E2E Tests', () => {
     
     if (await sessionLink.isVisible().catch(() => false)) {
       await sessionLink.click();
-      await page.waitForLoadState('networkidle');
+      // CHANGES(페드루 PO, 2026-09-18) — networkidle 제거(SSE가 계속 붙어 있어 네트워크가
+      // 안 조용해질 수 있음). h1/h2(목록·상세 둘 다 항상 렌더)로 대체.
+      await page.locator('h1, h2').first().waitFor({ state: 'visible' });
       
       // Check for phase indicators
       const collectPhase = page.locator('text=Collect, text=collect').first();
@@ -162,7 +166,9 @@ test.describe('Sprint Retro - Corrected E2E Tests', () => {
     
     if (await sessionLink.isVisible().catch(() => false)) {
       await sessionLink.click();
-      await page.waitForLoadState('networkidle');
+      // CHANGES(페드루 PO, 2026-09-18) — networkidle 제거(SSE가 계속 붙어 있어 네트워크가
+      // 안 조용해질 수 있음). h1/h2(목록·상세 둘 다 항상 렌더)로 대체.
+      await page.locator('h1, h2').first().waitFor({ state: 'visible' });
       
       const inputs = page.locator('textarea, input[type="text"]:not([placeholder*="Retro"])');
       const count = await inputs.count();
@@ -199,7 +205,8 @@ test.describe('Sprint Retro - Corrected E2E Tests', () => {
     });
     
     await page.goto(`${BASE_URL}/retro`);
-    await page.waitForLoadState('networkidle');
+    // CHANGES(페드루 PO, 2026-09-18) — networkidle 제거, h1/h2(목록 항상 렌더)로 대체.
+    await page.locator('h1, h2').first().waitFor({ state: 'visible' });
     
     console.log(`✓ Console errors (excluding 400): ${errors.length}`);
     if (errors.length > 0) {
@@ -245,7 +252,9 @@ test.describe('Sprint Retro - Corrected E2E Tests', () => {
     // 3. If sessions exist, navigate to one
     if (sessionCount > 0) {
       await sessionLinks.first().click();
-      await page.waitForLoadState('networkidle');
+      // CHANGES(페드루 PO, 2026-09-18) — networkidle 제거(SSE가 계속 붙어 있어 네트워크가
+      // 안 조용해질 수 있음). h1/h2(목록·상세 둘 다 항상 렌더)로 대체.
+      await page.locator('h1, h2').first().waitFor({ state: 'visible' });
       
       const url = page.url();
       console.log(`3. Navigated to: ${url}`);

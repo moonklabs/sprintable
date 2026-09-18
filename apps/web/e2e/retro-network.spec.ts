@@ -22,9 +22,14 @@ test('Network: Capture all network requests on /retro', async ({ page }) => {
     });
   });
   
-  // Navigate to retro page
-  await page.goto(`${BASE_URL}/retro`, { waitUntil: 'networkidle' });
-  
+  // Navigate to retro page.
+  // CHANGES(페드루 PO, 2026-09-18) — networkidle 제거: 이 앱은 인증 화면에서 실시간
+  // 연결(SSE)을 계속 붙잡아 "네트워크가 조용해지는 순간"이 안 올 수 있다. 이 테스트가
+  // 실제로 필요로 하는 신호(화면이 렌더됐다는 것)로 대체 — h1/h2는 목록 화면에서 항상
+  // 렌더된다(page.tsx TopBarSlot title).
+  await page.goto(`${BASE_URL}/retro`);
+  await page.locator('h1, h2').first().waitFor({ state: 'visible' });
+
   // Get all failing requests (4xx, 5xx)
   const failing = responses.filter(r => r.status >= 400);
   console.log(`Total requests: ${responses.length}`);
@@ -48,8 +53,9 @@ test('Network: Capture all network requests on /retro', async ({ page }) => {
 test('Page Structure: Inspect DOM elements on /retro', async ({ page }) => {
   console.log('\n=== DOM Structure Analysis ===');
   
-  await page.goto(`${BASE_URL}/retro`, { waitUntil: 'networkidle' });
-  
+  await page.goto(`${BASE_URL}/retro`);
+  await page.locator('h1, h2').first().waitFor({ state: 'visible' });
+
   // Get the page content
   const html = await page.content();
   
@@ -82,8 +88,10 @@ test('Page Structure: Inspect DOM elements on /retro', async ({ page }) => {
 test('Interaction: Create a new retro session', async ({ page }) => {
   console.log('\n=== Create Retro Session Test ===');
   
-  await page.goto(`${BASE_URL}/retro`, { waitUntil: 'networkidle' });
-  
+  await page.goto(`${BASE_URL}/retro`);
+  // 이 테스트는 곧바로 input을 조작하므로 그 가시성 자체를 결정적 신호로 쓴다.
+  await page.locator('input').first().waitFor({ state: 'visible' });
+
   // Get the session count before
   const sessionsBefore = await page.locator('[data-testid*="session"], [data-testid*="retro"], a[href*="/retro/"]').count();
   console.log(`Sessions before: ${sessionsBefore}`);

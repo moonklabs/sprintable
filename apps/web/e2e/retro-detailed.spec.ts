@@ -7,8 +7,11 @@ test.describe('Sprint Retro - Detailed E2E Tests', () => {
   test('Detailed: Load retro page and capture structure', async ({ page }) => {
     console.log('\n=== Test: Load /retro page ===');
     
-    // Navigate to retro
-    const response = await page.goto(`${BASE_URL}/retro`, { waitUntil: 'networkidle' });
+    // Navigate to retro.
+    // CHANGES(페드루 PO, 2026-09-18) — networkidle 제거(이 앱은 인증 화면에서 SSE를
+    // 붙잡아 네트워크가 안 조용해질 수 있다). h1/h2(목록 제목, 항상 렌더)로 대체.
+    const response = await page.goto(`${BASE_URL}/retro`);
+    await page.locator('h1, h2').first().waitFor({ state: 'visible' });
     console.log('Status:', response?.status());
     
     // Check page title
@@ -46,7 +49,8 @@ test.describe('Sprint Retro - Detailed E2E Tests', () => {
   test('Detailed: Session list interaction', async ({ page }) => {
     console.log('\n=== Test: Session list interaction ===');
     
-    await page.goto(`${BASE_URL}/retro`, { waitUntil: 'networkidle' });
+    await page.goto(`${BASE_URL}/retro`);
+    await page.locator('h1, h2').first().waitFor({ state: 'visible' });
     
     // Look for session cards/links
     const allLinks = await page.locator('a').allTextContents();
@@ -73,7 +77,8 @@ test.describe('Sprint Retro - Detailed E2E Tests', () => {
   test('Detailed: Retro session detail page', async ({ page }) => {
     console.log('\n=== Test: Retro session detail page ===');
     
-    await page.goto(`${BASE_URL}/retro`, { waitUntil: 'networkidle' });
+    await page.goto(`${BASE_URL}/retro`);
+    await page.locator('h1, h2').first().waitFor({ state: 'visible' });
     
     // Try to find and click first session
     const firstSession = page.locator('a[href*="/retro/"]').first();
@@ -81,7 +86,8 @@ test.describe('Sprint Retro - Detailed E2E Tests', () => {
       const href = await firstSession.getAttribute('href');
       console.log(`Navigating to: ${href}`);
       
-      await page.goto(`${BASE_URL}${href}`, { waitUntil: 'networkidle' });
+      await page.goto(`${BASE_URL}${href}`);
+      await page.locator('h1, h2').first().waitFor({ state: 'visible' });
       console.log(`✓ Navigated to detail page`);
       
       // Check URL
@@ -121,12 +127,14 @@ test.describe('Sprint Retro - Detailed E2E Tests', () => {
   test('Detailed: Add item to retro session', async ({ page }) => {
     console.log('\n=== Test: Add item to retro session ===');
     
-    await page.goto(`${BASE_URL}/retro`, { waitUntil: 'networkidle' });
+    await page.goto(`${BASE_URL}/retro`);
+    await page.locator('h1, h2').first().waitFor({ state: 'visible' });
     
     const firstSession = page.locator('a[href*="/retro/"]').first();
     if (await firstSession.isVisible()) {
       const href = await firstSession.getAttribute('href');
-      await page.goto(`${BASE_URL}${href}`, { waitUntil: 'networkidle' });
+      await page.goto(`${BASE_URL}${href}`);
+      await page.locator('h1, h2').first().waitFor({ state: 'visible' });
       
       // Try to find input and add item
       const inputs = page.locator('input[type="text"], textarea');
@@ -172,12 +180,14 @@ test.describe('Sprint Retro - Detailed E2E Tests', () => {
   test('Detailed: Phase transition', async ({ page }) => {
     console.log('\n=== Test: Phase transition ===');
     
-    await page.goto(`${BASE_URL}/retro`, { waitUntil: 'networkidle' });
+    await page.goto(`${BASE_URL}/retro`);
+    await page.locator('h1, h2').first().waitFor({ state: 'visible' });
     
     const firstSession = page.locator('a[href*="/retro/"]').first();
     if (await firstSession.isVisible()) {
       const href = await firstSession.getAttribute('href');
-      await page.goto(`${BASE_URL}${href}`, { waitUntil: 'networkidle' });
+      await page.goto(`${BASE_URL}${href}`);
+      await page.locator('h1, h2').first().waitFor({ state: 'visible' });
       
       // Check current phase
       let currentPhase = 'Unknown';
@@ -231,7 +241,8 @@ test.describe('Sprint Retro - Detailed E2E Tests', () => {
       }
     });
     
-    await page.goto(`${BASE_URL}/retro`, { waitUntil: 'networkidle' });
+    await page.goto(`${BASE_URL}/retro`);
+    await page.locator('h1, h2').first().waitFor({ state: 'visible' });
     
     console.log(`Console errors: ${errors.length}`);
     errors.slice(0, 5).forEach(e => console.log(`  - ${e}`));
