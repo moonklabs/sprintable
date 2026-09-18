@@ -413,17 +413,6 @@ export const EXEMPT_PAIRS = new Set<string>([
   // agentMember="에이전트"(행 안 배지 라벨, 보간 없음) <-> agentToggleAriaLabel
   // ("{n}번째 에이전트 {label}") — 배지는 시각 요소, aria-label은 그 옆 토글
   // 버튼의 보조기술 전용 이름이라 화면상 겹쳐 읽힐 자리가 없다.
-  'organization.eventRowActionAriaLabel <-> organization.eventsTitle',
-  // eventsTitle="레시피"(섹션 제목) <-> eventRowActionAriaLabel("{n}번째 레시피
-  // {label}") — 위 commentsSectionTitle류와 동형(섹션 제목 vs 행 aria-label).
-  'organization.eventDeactivateDialogBody <-> organization.eventsTitle',
-  // story #4043(«이벤트/정의»→«레시피» 낱말 통일) — eventsTitle="레시피"(페이지
-  // h1, 보간 없음) <-> eventDeactivateDialogBody("\"{key}\"를 꺼요. 이력이 이
-  // 레시피를 참조하므로...", {key} 보간) 신규 충돌. docs.indexDocCount<->docs.title·
-  // onboarding.projectLimitExceededError<->settings.tabProjects류와 동형(짧은
-  // 페이지 제목이 그 제품 명사를 쓰는 다른 문장 속에 자연스럽게 재등장하는 정상
-  // 패턴) — h1 제목과 비활성화 확認 다이얼로그 본문은 서로 다른 역할의 서로 다른
-  // 요소라 실제로 헷갈려 클릭/검증될 자리가 아니다.
   'goals.indexCountActive <-> goals.statusActive',
   'goals.indexCountDone <-> goals.statusDone',
   // story #3698(IA·후속) — goals.outcomeLabel <-> goals.trustRailOutcomeJudged 항목은 여기
