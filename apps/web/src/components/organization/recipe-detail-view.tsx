@@ -75,6 +75,30 @@ export function RecipeDetailView({ recipe, onApply, onDuplicate }: RecipeDetailV
         ))}
       </div>
 
+      {/* story #4054 후속 — 유나 흐름 밴드 스펙(PO 確定, «정의 vs 실행» 혼동 예방). 정적·논리 0. */}
+      <div className="bg-muted border border-border rounded-xl px-[15px] py-3 flex items-center gap-2.5 flex-wrap" data-testid="recipe-flow-band">
+        <div className="flex flex-col">
+          <span className="text-[10px] font-bold text-muted-foreground">{t('recipeFlowRecipeLabel')}</span>
+          <span className="text-xs text-muted-foreground">{t('recipeFlowRecipeValue')}</span>
+        </div>
+        <span className="text-muted-foreground text-[11.5px]">→</span>
+        <div className="bg-info-tint border border-brand rounded-lg px-2.5 py-1">
+          <span className="text-brand text-[10px] font-bold block">{t('recipeFlowWorkflowLabel')}</span>
+          <span className="text-foreground text-xs font-semibold">{recipe.name || recipe.key}</span>
+        </div>
+        <span className="text-muted-foreground text-[11.5px]">→</span>
+        <div className="flex flex-col">
+          <span className="text-[10px] font-bold text-muted-foreground">{t('recipeFlowEventLabel')}</span>
+          <span className="text-xs text-muted-foreground">{t('recipeFlowEventValue')}</span>
+        </div>
+        <span className="text-muted-foreground text-[11.5px]">→</span>
+        <div className="flex flex-col">
+          <span className="text-[10px] font-bold text-muted-foreground">{t('recipeFlowRunLabel')}</span>
+          <span className="text-xs text-muted-foreground">{t('recipeFlowRunValue')}</span>
+        </div>
+        <span className="ml-auto text-right max-w-[205px] text-[10.5px] text-muted-foreground">{t('recipeFlowCaption')}</span>
+      </div>
+
       <div className="flex items-stretch gap-0 overflow-x-auto pt-6" data-testid="recipe-stepper">
         {stages.map((stage, i) => {
           const meta = recipe.stage_metadata[stage];

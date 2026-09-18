@@ -92,4 +92,16 @@ describe('RecipeDetailView — 9단계 스텝퍼·게이트 4(live/building 실�
     expect(liveCards).toHaveLength(2);
     expect(buildingCards).toHaveLength(1);
   });
+
+  it('흐름 밴드(story #4054 후속) — 4칩 레시피→워크플로우→이벤트→실행 순, 현재 칩만 워크플로우+recipe.name', async () => {
+    await act(async () => { root.render(wrap(<RecipeDetailView recipe={RECIPE} />)); });
+    const band = container.querySelector('[data-testid="recipe-flow-band"]')!;
+    expect(band).not.toBeNull();
+    const text = band.textContent ?? '';
+    expect(text.indexOf('레시피')).toBeLessThan(text.indexOf('워크플로우'));
+    expect(text.indexOf('워크플로우')).toBeLessThan(text.indexOf('이벤트'));
+    expect(text.indexOf('이벤트')).toBeLessThan(text.indexOf('실행'));
+    expect(text).toContain('영상 제작 (릴스·쇼츠)');
+    expect(text).toContain('현재 위치 없음');
+  });
 });
