@@ -61,7 +61,7 @@ describe('RecipeGallery — 마케팅/워크플로 탭 분리(AC1)', () => {
       ));
     });
     expect(container.textContent).toContain('영상 제작 (릴스·쇼츠)');
-    expect(container.textContent).toContain('마케팅 레시피');
+    expect(container.textContent).toContain('마케팅 워크플로우');
     expect(container.textContent).toContain('개발 워크플로');
     // 단계 3·게이트 1·역할 2(디렉터·크리에이터·발행자 3종이지만 표시는 recipeGalleryRoleCountBadge 값)
     expect(container.textContent).toMatch(/단계\s*3/);
@@ -94,9 +94,9 @@ describe('RecipeGallery — 마케팅/워크플로 탭 분리(AC1)', () => {
     expect(container.textContent).toContain('불러오는 중');
 
     await act(async () => { root.render(wrap(<RecipeGallery marketingRecipes={[]} workflowRecipes={[]} loading={false} error="boom" />)); });
-    expect(container.textContent).toContain('레시피를 불러오지 못했어요');
+    expect(container.textContent).toContain('워크플로우를 불러오지 못했어요');
 
     await act(async () => { root.render(wrap(<RecipeGallery marketingRecipes={[]} workflowRecipes={[]} loading={false} error={null} />)); });
-    expect(container.textContent).toContain('표시할 레시피가 없어요');
+    expect(container.textContent).toContain('표시할 워크플로우가 없어요');
   });
 });
