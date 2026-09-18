@@ -64,10 +64,10 @@ async function mount() {
   await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 }
 
-describe('LoopsClient — 실험실 first-touch 정체성', () => {
-  it('페이지 타이틀이 nav 라벨과 일치하는 "실험실"이다(구 "Loop 보드" 아님)', async () => {
+describe('LoopsClient — 실행 first-touch 정체성', () => {
+  it('페이지 타이틀이 nav 라벨과 일치하는 "실행"이다(구 "Loop 보드" 아님) — story #4054(3층 모델) 정합', async () => {
     await mount();
-    expect(container.textContent).toContain('실험실');
+    expect(container.textContent).toContain('실행');
     expect(container.textContent).not.toContain('Loop 보드');
   });
 
@@ -78,16 +78,16 @@ describe('LoopsClient — 실험실 first-touch 정체성', () => {
     // (surface명 "실험실"과 단위명 "Loop" 분리, "실험"↔"Loop" 혼용 제거).
     // story #3643(2026-09-07, PO 決) — 그 "Loop" 단위명이 이번엔 「루프」로 통일됐다(로그인
     // 부제 「열린 루프를 닫는 조직 OS」 등 한글이 이미 제품 어휘라는 판단).
-    expect(html).toContain('아직 시작한 루프가 없어요');
-    expect(html).toContain('루프는 가설에서 시작해 실행·검증·학습으로 이어지는 하나의 사이클이에요');
-    // 4노드(가설→실행→검증→학습)+↻다음 루프 라벨이 아이콘과 함께 렌더.
+    expect(html).toContain('아직 시작한 실행이 없어요');
+    expect(html).toContain('워크플로우 실행은 가설에서 시작해 실행·검증·학습으로 이어지는 하나의 흐름이에요');
+    // 4노드(가설→실행→검증→학습)+↻다음 실행 라벨이 아이콘과 함께 렌더.
     expect(html).toContain('가설');
     expect(html).toContain('실행');
     expect(html).toContain('검증');
     expect(html).toContain('학습');
-    expect(html).toContain('다음 루프');
-    expect(container.querySelectorAll('svg').length).toBeGreaterThanOrEqual(5); // headline icon + 4노드 icon + next-loop icon
-    expect(html).toContain('첫 루프 시작하기');
+    expect(html).toContain('다음 실행');
+    expect(container.querySelectorAll('svg').length).toBeGreaterThanOrEqual(5); // headline icon + 4노드 icon + next-run icon
+    expect(html).toContain('첫 실행 시작하기');
     expect(html).toContain('가설 하나로 충분해요');
     expect(html).toContain('AI가 초안을 도와요');
     // story #3643(2026-09-07, 유나 제안·PO 決) — 두 세대 낡은 부정 단언("Loop이 없습니다"
@@ -104,7 +104,7 @@ describe('LoopsClient — 실험실 first-touch 정체성', () => {
     expect(loopCreateDialogOpenSpy).toHaveBeenCalledWith(false);
     loopCreateDialogOpenSpy.mockClear();
 
-    const ctaButton = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('첫 루프 시작하기'));
+    const ctaButton = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('첫 실행 시작하기'));
     expect(ctaButton).not.toBeUndefined();
     await act(async () => { ctaButton!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
