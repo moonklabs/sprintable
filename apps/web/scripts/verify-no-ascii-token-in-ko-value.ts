@@ -72,6 +72,11 @@ export const ALLOWLIST: ReadonlySet<string> = new Set<string>([
   'goals.outcomeCapsuleTitle::VERIFIED',
   'goals.trustRailTitle::TRUST',
   'goals.indexKicker::OUTCOMES',
+  // prod 승격 준비 문서 §5-7(2026-09-17) — 되돌림 커밋(87d44febf, "«VAT 별도»→
+  // «VAT 포함»" 정정을 되돌림)이 만든 값 그대로. develop은 이후 §⑤ 낱말 정리(story
+  // #3926)로 "부가세"로 옮겨졌지만, 이 프로모션 브랜치는 결제 되돌림 유지가 원칙이라
+  // main의 이 문구를 그대로 둔다(«main만 퇴행한 문구»처럼 보여도 지시 되돌림).
+  'pricingPlans.checkoutDialogChargeValue::VAT',
 ]);
 
 // story #3880 CHANGES③(PO PR 코멘트, 2026-09-14 16:13Z) — 기존 baseline 242건이 영구
@@ -114,8 +119,11 @@ export const ALLOWLIST: ReadonlySet<string> = new Set<string>([
 export const TOKEN_ALLOWLIST: ReadonlySet<string> = new Set<string>([
   'API', 'AI', 'URL', 'MCP', 'ID', 'SSE', 'UTM', 'HTML', 'JSON', 'LLM', 'CI', 'SHA', 'DM',
   'BYOA', 'STT', 'CSV', 'SLA', 'PDF', 'HTTP', 'SDK', 'HTTPS', 'POST', 'BYOM', 'PC',
-  'UI', 'SID', 'XXX', 'PNG', 'OS', 'CTA', 'SNS', 'GB', 'SSO', 'BYO', 'TOTP', 'QR', 'MB', 'PR',
-  'QA', 'PO', 'PM', 'AU',
+  'SID', 'XXX', 'PNG', 'OS', 'CTA', 'SNS', 'GB', 'SSO', 'BYO', 'TOTP', 'QR', 'MB', 'PR',
+  'QA', 'PO', 'PM',
+  // prod 승격(결제 되돌림)으로 AU/UI 유일 소비처(automation-usage 경고 배너 문구)가
+  // ko.json에서 사라져 죽은 토큰 — 여기 남겨두면 이 가드 자체가 "죽은 항목 방치"를
+  // 자기모순으로 만든다(위 stale 자가검출과 동일 규율).
 ]);
 
 // ---------------------------------------------------------------------------

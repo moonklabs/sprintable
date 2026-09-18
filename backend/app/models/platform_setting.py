@@ -25,12 +25,12 @@ from app.models.base import Base, TimestampMixin
 class PlatformSetting(Base, TimestampMixin):
     __tablename__ = "platform_settings"
     __table_args__ = (
-        # story #3522(BE·위생, 2026-09-06) — 마이그(0270·0282·0329) raw SQL 미러
-        # (마이그=정본·모델=미러, publication_command.py 0340 관례와 동일 사상).
+        # story #3522(BE·위생, 2026-09-06) — 마이그(0270·0329) raw SQL 미러
+        # (마이그=정본·모델=미러, publication_command.py 0340 관례와 동일 사상). VAT
+        # 제약(ck_platform_settings_vat_rate_bp_range, 마이그 0282)은 prod 승격 결제
+        # 되돌림으로 컬럼 자체가 없어 이 브랜치엔 미러하지 않는다(§5-6 alembic 제외
+        # 3건과 동일 정책 — 되돌림 컬럼에 딸린 제약도 함께 되돌림).
         CheckConstraint("dunning_grace_days > 0", name="ck_platform_settings_dunning_grace_days_positive"),
-        CheckConstraint(
-            "vat_rate_bp >= 0 AND vat_rate_bp <= 10000", name="ck_platform_settings_vat_rate_bp_range",
-        ),
         CheckConstraint(
             "on_time_tolerance_seconds >= 0", name="ck_platform_settings_on_time_tolerance_seconds_nonneg",
         ),

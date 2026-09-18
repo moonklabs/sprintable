@@ -64,12 +64,15 @@ _BACKEND_DIR = Path(__file__).parent.parent
 # 김에 같은 테이블에 있던 이름-패턴이 다른(raw sa.CheckConstraint 인라인) 4개도
 # 같이 미러했다(billing_orders 3개·evidence 1개, psql 실측으로 이 5개 테이블
 # 안에서는 이제 완전 대조 — 다른 테이블의 동종 드리프트는 스코프 밖).
+#
+# prod 승격(결제 되돌림) — `ck_platform_settings_vat_rate_bp_range`(마이그 0282)는
+# 이 브랜치에서 마이그·모델 양쪽 다 없다(컬럼 자체가 되돌려짐) — 11개로 조정.
 _EXPECTED_MIRRORED = frozenset({
     "ck_evidence_type", "ck_evidence_work_item_type",
     "ck_visual_artifacts_source", "ck_artifact_exports_format",
     "ck_billing_orders_refund_status", "ck_billing_orders_purpose",
     "billing_orders_status_check", "billing_orders_currency_check", "billing_orders_amount_positive_check",
-    "ck_platform_settings_dunning_grace_days_positive", "ck_platform_settings_vat_rate_bp_range",
+    "ck_platform_settings_dunning_grace_days_positive",
     "ck_platform_settings_on_time_tolerance_seconds_nonneg",
 })
 _CONFIRMED_GHOST = "ck_judgments_target_required_for_meta_kinds"
