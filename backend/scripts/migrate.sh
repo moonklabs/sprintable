@@ -148,6 +148,15 @@ else
   echo "[migrate] prod-fork precheck: no action needed."
 fi
 
+# story #4010(2026-09-17) — **처방 C 판별 게이트**: prod 승격이 main 전용 0354(down_revision
+# 재작성)를 develop 원본 0354(down_revision=0353)로 교체하면서, `alembic upgrade heads`가
+# 0282·0288·0291·0296~0353(60개)을 "이미 지난 조상"으로 오판해 조용히 건너뛰는 문제를
+# 처방한다. 반드시 아래 stamp-chain-integrity precheck **앞**에 둔다 — 처방 C가 먼저
+# 스키마를 따라잡아야 그 정합 가드가 사후 조건으로 의미가 있다(순서를 바꾸면 정합 가드가
+# 60개 누락 그대로에 FAIL해 처방 C가 실행되기도 전에 배포가 막힌다).
+echo "[migrate] prescription-c gate: checking main-anchor(0354) vs develop fileset..."
+python3 scripts/jobs/check_and_apply_prescription_c.py
+
 # story #70bc4bc3 후속(2026-08-18) — **재봉합 stamp 정합 가드**: 마이그 개발 中 일부
 # 리비전을 임시 제외하려 뒤쪽 리비전의 down_revision을 재봉합했다가 나중에 정본 체인을
 # 복원하면, 그 임시 재봉합 이미지로 이미 실행된 prod의 alembic_version은 "복원된 정본
