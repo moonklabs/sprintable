@@ -80,7 +80,20 @@ test.describe('story #4014 — 반응형 마케팅 목록 표', () => {
         await page.setViewportSize({ width, height: 900 });
         const response = await page.goto(route.path);
         expect(response?.status(), `${route.label}@${width}: HTTP status`).toBe(200);
-        await page.waitForLoadState('networkidle');
+
+        // CHANGES(페드루 PO 지적, 2026-09-18) — `networkidle`을 뺀다. 이 앱은 화면을
+        // 연 뒤에도 실시간 연결(SSE 등)을 붙잡아 「네트워크가 조용해지는 순간」이 영영
+        // 안 올 수 있다(카디르가 로컬 재현에서 3회 동일하게 30초 타임아웃, 4029
+        // Lighthouse의 인증 화면 run당 12→59초도 같은 자리). 대신 이 테스트가 실제로
+        // 필요로 하는 신호 — 재려는 대상(행)이 눈에 보이는 것 — 로 대기한다. 시드가
+        // 부족해 행이 끝내 안 뜨면 여기서 조용히 넘어가고(catch), 아래 명시적
+        // `rowCount ≥1` 단언이 「시드 부족」 메시지로 실패한다(타임아웃 스택트레이스
+        // 대신 원인이 분명한 메시지 — CHANGES 이전 설계 의도 유지).
+        const activeContainerSelector = width < 1024
+          ? '[data-testid="responsive-data-table-cards"]'
+          : 'table';
+        await page.locator(`${activeContainerSelector} [data-testid="${route.rowTestId}"]`).first()
+          .waitFor({ state: 'visible' }).catch(() => {});
 
         // ⓐ 페이지 가로 넘침 0(모든 폭·행 유무 무관).
         const overflow = await page.evaluate(
@@ -118,10 +131,8 @@ test.describe('story #4014 — 반응형 마케팅 목록 표', () => {
 
         // CHANGES — 좁은 폭에선 카드 wrapper 안쪽만(표는 hidden이라 숨은 사본), 넓은
         // 폭에선 표 안쪽만 스코프한다(같은 testid가 표·카드 두 벌이라 안 좁히면 숨은
-        // 쪽까지 같이 잡혀 판정이 흐려진다, 페드루 지적).
-        const activeContainerSelector = width < 1024
-          ? '[data-testid="responsive-data-table-cards"]'
-          : 'table';
+        // 쪽까지 같이 잡혀 판정이 흐려진다, 페드루 지적) — `activeContainerSelector`는
+        // 위 가시성 대기에서 이미 계산해 둠(재계산 0).
 
         // CHANGES — 시드 최소 요건을 먼저 단언(공허 통과 방지). 모자라면 여기서 명시
         // 실패 — 위 SEED_REQUIREMENTS 주석이 필요한 시드 모양을 적어둔다.
