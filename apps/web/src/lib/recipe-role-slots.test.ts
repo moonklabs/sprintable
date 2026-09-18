@@ -1,8 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
-  expandRoleSlotBindings, groupStagesByRole, recipeKeyDomain, stagesWithCapability,
+  expandRoleSlotBindings, groupStagesByRole, recipeKeyDomain, stagesWithCapability, stagesWithGate,
   type RecipeStageMetadata,
 } from './recipe-role-slots';
+
+// PO 判定(2026-09-18, story #4046 AC 업데이트 — 이 카드 착수 도중 반영) — 마케팅 레시피의
+// role_mapping(recipe_role_bindings) 바인딩 대상은 «크리에이터» 하나뿐. 디렉터=게이트
+// 승인 주체(stagesWithGate)·연산=capability(stagesWithCapability)·발행자=채널 타깃(후속
+// 카드, 이 파일 밖) — 셋 다 role_mapping 축이 아니다. 아래 테스트는 이 화이트리스트가 실제로
+// 그 3개를 막는지 고정한다.
+const BINDABLE_ROLES = ['크리에이터'] as const;
 
 // #4039(PR #4419, backend/alembic/versions/0379_preset_marketing_video_production_recipe.py)
 // _STAGE_METADATA를 그대로 옮긴 고정물 — 이 카드(#4046) 작성 시점 그 PR이 아직 안 착지해
@@ -50,32 +57,39 @@ describe('groupStagesByRole — #4039 마케팅 레시피 1호 stage_metadata �
   });
 });
 
-describe('expandRoleSlotBindings — role 슬롯 선택 → 전체 stage role_mapping 펼침', () => {
-  it('디렉터·크리에이터·발행자 3명 선택이 9 stage 전부를 채운다', () => {
-    const roleMapping = expandRoleSlotBindings(MARKETING_VIDEO_PRODUCTION_STAGE_METADATA, {
-      '디렉터': 'member-director', '크리에이터': 'member-creator', '발행자': 'member-publisher',
+describe('expandRoleSlotBindings — bindableRoles 화이트리스트 밖 role은 강제로 걸러진다', () => {
+  it('크리에이터 선택만 그 role의 4 stage를 채운다(유일한 role_mapping-eligible 축)', () => {
+    const roleMapping = expandRoleSlotBindings(
+      MARKETING_VIDEO_PRODUCTION_STAGE_METADATA, BINDABLE_ROLES, { '크리에이터': 'member-creator' },
+    );
+    expect(roleMapping).toEqual({
+      draft: 'member-creator', animatic: 'member-creator',
+      verification: 'member-creator', editing: 'member-creator',
     });
-    expect(Object.keys(roleMapping).sort()).toEqual([
-      'animatic', 'concept_confirmed', 'draft', 'editing', 'live_generation',
-      'pending_approval', 'published', 'structure_passed', 'verification',
-    ]);
-    expect(roleMapping.concept_confirmed).toBe('member-director');
-    expect(roleMapping.structure_passed).toBe('member-director');
-    expect(roleMapping.live_generation).toBe('member-director');
-    expect(roleMapping.draft).toBe('member-creator');
-    expect(roleMapping.pending_approval).toBe('member-publisher');
   });
 
-  it('일부 role만 선택하면 그 stage들만 채워진다(부분 apply — 백엔드가 subset을 허용)', () => {
-    const roleMapping = expandRoleSlotBindings(MARKETING_VIDEO_PRODUCTION_STAGE_METADATA, {
-      '디렉터': 'member-director',
+  it('디렉터·발행자 선택은 bindableRoles에 없으면 조용히 무시된다(PO 判定 2026-09-18 — 실수로 전달해도 role_mapping에 안 실린다)', () => {
+    const roleMapping = expandRoleSlotBindings(MARKETING_VIDEO_PRODUCTION_STAGE_METADATA, BINDABLE_ROLES, {
+      '디렉터': 'member-director', '크리에이터': 'member-creator', '발행자': 'member-publisher',
     });
-    expect(Object.keys(roleMapping).sort()).toEqual(['concept_confirmed', 'live_generation', 'structure_passed']);
+    expect(Object.keys(roleMapping).sort()).toEqual(['animatic', 'draft', 'editing', 'verification']);
+    expect(roleMapping.concept_confirmed).toBeUndefined();
+    expect(roleMapping.pending_approval).toBeUndefined();
+  });
+
+  it('bindableRoles를 넓히면(호출부가 명시적으로 그렇게 하지 않는 한) 그 role도 펼쳐진다 — 화이트리스트가 유일한 관문', () => {
+    const roleMapping = expandRoleSlotBindings(
+      MARKETING_VIDEO_PRODUCTION_STAGE_METADATA, ['크리에이터', '디렉터'], {
+        '크리에이터': 'member-creator', '디렉터': 'member-director',
+      },
+    );
+    expect(roleMapping.concept_confirmed).toBe('member-director');
+    expect(roleMapping.draft).toBe('member-creator');
   });
 
   it('빈 문자열 선택·존재하지 않는 role 라벨은 무시된다(연산 슬롯을 selections에 줘도 안전)', () => {
-    const roleMapping = expandRoleSlotBindings(MARKETING_VIDEO_PRODUCTION_STAGE_METADATA, {
-      '디렉터': '', '연산': 'member-compute',
+    const roleMapping = expandRoleSlotBindings(MARKETING_VIDEO_PRODUCTION_STAGE_METADATA, BINDABLE_ROLES, {
+      '크리에이터': '', '연산': 'member-compute',
     });
     expect(roleMapping).toEqual({});
   });
@@ -87,6 +101,16 @@ describe('stagesWithCapability — role과 독립인 인프라/커넥터 축', (
     expect(stages).toEqual([
       { stage: 'live_generation', role: '디렉터', capability: { kind: 'generate' } },
       { stage: 'published', role: '발행자', capability: { kind: 'publish' } },
+    ]);
+  });
+});
+
+describe('stagesWithGate — 디렉터(사람) 게이트 승인 주체 축(role_mapping과 분리, PO 判定 2026-09-18)', () => {
+  it('gate를 선언한 stage 2곳(concept_confirmed·pending_approval)만 뽑고 approver를 그대로 노출한다', () => {
+    const stages = stagesWithGate(MARKETING_VIDEO_PRODUCTION_STAGE_METADATA);
+    expect(stages).toEqual([
+      { stage: 'concept_confirmed', role: '디렉터', gate: { type: 'concept_approval', approver: 'org_owner' } },
+      { stage: 'pending_approval', role: '발행자', gate: { type: 'external_publish', approver: 'org_owner' } },
     ]);
   });
 });
