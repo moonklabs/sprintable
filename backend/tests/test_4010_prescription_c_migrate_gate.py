@@ -2,21 +2,25 @@
 
 prod 승격이 main 전용 0354(down_revision="0295")를 develop 원본 0354(down_revision=
 "0353")로 교체하면, prod DB(alembic_version="0354")에 `alembic upgrade heads`를 그대로
-돌리면 0282·0288·0291·0296~0353(60개)이 "이미 지난 조상"으로 오판돼 조용히 스킵된다
-(doc a4fe633e "처방 C 게이트 스크립트" 리허설이 확인한 사고 클래스). 이 파일은 그
-처방을 migrate.sh 안에 판별형으로 통합한 게이트 스크립트를 실측 검증한다.
+돌리면 0296~0353(57개)이 "이미 지난 조상"으로 오판돼 조용히 스킵된다(doc a4fe633e
+"처방 C 게이트 스크립트" 리허설이 확인한 사고 클래스). 이 파일은 그 처방을 migrate.sh
+안에 판별형으로 통합한 게이트 스크립트를 실측 검증한다.
+
+⛔결제 축(VAT·AU 집행/경고·영수증, 0282/0288/0291)은 선생님 정책(2026-09-18)에 따라
+이 승격 브랜치 자체에 파일이 없다 — REPLAY 대상 밖(gate.PHYSICAL_SIGNAL_TABLE/COLUMN도
+결제와 무관한 0296(org_domain_label)로 판별한다).
 
 ## main 역사적 상태를 재현하는 방법(AC3ⓐ 픽스처)
 main의 옛 재봉합 파일(0283 down=0281·0289 down=0287·0292 down=0290·0354 down=0295)은
 이번 승격에서 develop 원본으로 전부 교체돼 이 코드베이스 어디에도 남아있지 않다 —
 그래서 "main 파일셋 스냅샷"을 별도로 레포에 넣는 대신(AC3 본문이 허용하는 대안),
 **현재 codebase의 리비전 모듈을 직접 순서대로 invoke**해서 그 역사적 상태를 재현한다:
-0001~0281은 정상 `alembic upgrade 0281`(이 구간은 main/develop 분기 이전이라 안전),
-그 뒤 0283~0295를 ORPHAN_SKIPS(0282·0288·0291) 3개만 건너뛰고 하나씩 직접 invoke,
-마지막에 0354를 직접 invoke(0354는 org_members/users/members만 읽어 60개 스킵분에
-의존하지 않는다 — 그라운딩 확認), `alembic_version`을 "0354"로 직접 UPDATE. 이 절차
-자체가 이 파일의 첫 픽스처 테스트(`test_fixture_reproduces_main_historical_state`)로
-스스로 검증된다.
+0001~0295는 정상 `alembic upgrade 0295`(결제 3개(0282/0288/0291)는 이 브랜치에 파일이
+없어 체인이 이미 0281→0283/0287→0289/0290→0292로 재봉합돼 있으므로 일반 upgrade
+경로가 자동으로 정확한 상태를 만든다 — 개별 invoke 불필요), 마지막에 0354를 직접
+invoke(0354는 org_members/users/members만 읽어 57개 스킵분에 의존하지 않는다 —
+그라운딩 확認), `alembic_version`을 "0354"로 직접 UPDATE. 이 절차 자체가 이 파일의
+첫 픽스처 테스트(`test_fixture_reproduces_main_historical_state`)로 스스로 검증된다.
 
 `PARITY_TEST_DATABASE_URL`/`ALEMBIC_DATABASE_URL` 미설정 시 skip. `destructive_schema`
 마커 — 전용 임시 DB를 만들어 쓰고 끝나면 지운다(공용 realdb 오염 방지, test_3522/
@@ -92,9 +96,9 @@ def _run_gate(db_url: str) -> subprocess.CompletedProcess:
 
 
 def _build_main_historical_fixture(db_url: str) -> None:
-    """AC3ⓐ 픽스처 — main이 실제로 도달해 있던 상태(alembic_version="0354", 60개
+    """AC3ⓐ 픽스처 — main이 실제로 도달해 있던 상태(alembic_version="0354", 57개
     스킵분 물리 미적용)를 이 codebase만으로 재현. 모듈 docstring 참고."""
-    r = _run_alembic(db_url, "upgrade", "0281")
+    r = _run_alembic(db_url, "upgrade", "0295")
     assert r.returncode == 0, r.stderr
 
     from alembic.config import Config
@@ -104,16 +108,13 @@ def _build_main_historical_fixture(db_url: str) -> None:
 
     cfg = Config(str(_BACKEND_DIR / "alembic.ini"))
     script = ScriptDirectory.from_config(cfg)
-    sequence = [rev for rev in (f"{i:04d}" for i in range(283, 296)) if rev not in gate.ORPHAN_SKIPS]
-    sequence.append(gate.ANCHOR_VERSION)
 
     engine = create_engine(db_url)
     with engine.begin() as conn:
         ctx = MigrationContext.configure(conn)
         with Operations.context(ctx):
-            for rev_id in sequence:
-                rev = script.get_revision(rev_id)
-                rev.module.upgrade()
+            rev = script.get_revision(gate.ANCHOR_VERSION)
+            rev.module.upgrade()
         conn.execute(text("UPDATE alembic_version SET version_num = :v"), {"v": gate.ANCHOR_VERSION})
     engine.dispose()
 
@@ -166,11 +167,11 @@ def scratch_db():
 # REPLAY_SET 구성 근거 — 그래프에서 재계산해 대조(페드루 PO 검토, 2026-09-17 12:01Z).
 # ============================================================================
 
-def test_replay_set_is_exactly_60():
-    assert len(gate.REPLAY_SET) == 60
+def test_replay_set_is_exactly_57():
+    assert len(gate.REPLAY_SET) == 57
 
 
-def test_replay_set_contiguous_part_matches_graph_computed_value():
+def test_replay_set_matches_graph_computed_value():
     """0296~0353(57개, 0352는 결번)은 develop 그래프에서 STAMP_TARGET(0353)의 조상을
     CONTIGUOUS_LOWER_BOUND(0295) 미포함으로 walk한 값과 정확히 같아야 한다 — 하드코딩
     값이 그래프와 따로 놀면(리비전 재넘버·삽입 등) 이 테스트가 잡는다."""
@@ -182,32 +183,21 @@ def test_replay_set_contiguous_part_matches_graph_computed_value():
     computed = sorted(
         rev.revision for rev in script.iterate_revisions(gate.STAMP_TARGET, gate.CONTIGUOUS_LOWER_BOUND)
     )
-    expected_contiguous = sorted(set(gate.REPLAY_SET) - set(gate.ORPHAN_SKIPS))
-    assert computed == expected_contiguous
+    assert computed == sorted(gate.REPLAY_SET)
 
 
-def test_replay_set_orphans_are_real_ancestors_of_contiguous_lower_bound():
-    """ORPHAN_SKIPS(0282·0288·0291)는 "main이 실제로 건너뛴 값"이라는 역사적 사실
-    자체는 그래프만으론 복원 불가(main의 옛 재봉합 파일이 이제 없음)하지만, 적어도
-    "develop 그래프상 유효한 자리"(CONTIGUOUS_LOWER_BOUND의 조상)인지는 검증 가능 —
-    오타·조작 리비전 id가 아님을 고정."""
-    from alembic.config import Config
-    from alembic.script import ScriptDirectory
-
-    cfg = Config(str(_BACKEND_DIR / "alembic.ini"))
-    script = ScriptDirectory.from_config(cfg)
-    ancestors_of_bound = {
-        rev.revision for rev in script.iterate_revisions(gate.CONTIGUOUS_LOWER_BOUND, "base")
-    }
-    for orphan in gate.ORPHAN_SKIPS:
-        assert orphan in ancestors_of_bound, (
-            f"{orphan}이 CONTIGUOUS_LOWER_BOUND({gate.CONTIGUOUS_LOWER_BOUND})의 develop "
-            "그래프상 조상이 아니다 — REPLAY_SET 구성이 깨졌다."
+def test_replay_set_has_no_payment_migrations():
+    """선생님 정책(2026-09-18) — 결제 축(VAT·AU 집행/경고·영수증) 마이그 0282/0288/0291은
+    이 브랜치에 파일 자체가 없다(승격 대상 밖) — REPLAY_SET에 절대 섞이면 안 된다."""
+    assert set(gate.REPLAY_SET).isdisjoint({"0282", "0288", "0291"})
+    for excluded in ("0282", "0288", "0291"):
+        assert not list((_BACKEND_DIR / "alembic" / "versions").glob(f"{excluded}_*.py")), (
+            f"{excluded} 마이그 파일이 존재한다 — 결제 되돌림 위반"
         )
 
 
 def test_replay_set_has_zero_non_transactional_ddl_operations():
-    """페드루 PO 검토②(2026-09-17) — REPLAY_SET 60개 파일에 CONCURRENTLY·autocommit_block·
+    """페드루 PO 검토②(2026-09-17) — REPLAY_SET 57개 파일에 CONCURRENTLY·autocommit_block·
     isolation_level 변경이 0건이어야 한 트랜잭션으로 전부 묶어도 안전하다."""
     forbidden = ("CONCURRENTLY", "autocommit_block", "isolation_level")
     offenders = []
@@ -222,13 +212,13 @@ def test_replay_set_has_zero_non_transactional_ddl_operations():
 
 
 def test_physical_signal_revision_is_in_replay_set_and_creates_that_column():
-    """페드루 PO 검토(2026-09-17 12:33Z) — PHYSICAL_SIGNAL_TABLE.PHYSICAL_SIGNAL_COLUMN이
-    실제로 REPLAY_SET 안의 리비전이 만드는 컬럼이 맞는지(그래야 "물리 신호 있음 ⟺ 60개
-    이미 적용됨"이 성립) 소스 grep으로 고정 — 0282가 옮겨지거나 컬럼명이 바뀌면 이
-    테스트가 먼저 깨진다."""
-    matches = list((_BACKEND_DIR / "alembic" / "versions").glob("0282_*.py"))
+    """페드루 PO 검토(2026-09-17 12:33Z, 09-18 결제 축 제외로 0296 갱신) —
+    PHYSICAL_SIGNAL_TABLE.PHYSICAL_SIGNAL_COLUMN이 실제로 REPLAY_SET 안의 리비전이
+    만드는 컬럼이 맞는지(그래야 "물리 신호 있음 ⟺ 57개 이미 적용됨"이 성립) 소스
+    grep으로 고정 — 0296이 옮겨지거나 컬럼명이 바뀌면 이 테스트가 먼저 깨진다."""
+    matches = list((_BACKEND_DIR / "alembic" / "versions").glob("0296_*.py"))
     assert len(matches) == 1
-    assert "0282" in gate.REPLAY_SET
+    assert "0296" in gate.REPLAY_SET
     content = matches[0].read_text(encoding="utf-8")
     assert gate.PHYSICAL_SIGNAL_TABLE in content
     assert gate.PHYSICAL_SIGNAL_COLUMN in content
@@ -245,7 +235,7 @@ def test_migrate_sh_places_prescription_c_between_fork_precheck_and_integrity_gu
     integrity_idx = content.index("check_stamp_chain_integrity.py")
     assert fork_idx < gate_idx < integrity_idx, (
         "처방 C 게이트는 0183a fork precheck 뒤·stamp-chain-integrity 정합 가드 앞에 "
-        "있어야 한다(정합 가드가 처방 C보다 먼저 돌면 60개 누락 그대로 FAIL한다)."
+        "있어야 한다(정합 가드가 처방 C보다 먼저 돌면 57개 누락 그대로 FAIL한다)."
     )
 
 
@@ -265,19 +255,19 @@ def test_migrate_sh_has_no_secrets_or_db_url_echo():
 # ============================================================================
 
 def test_fixture_reproduces_main_historical_state(scratch_db):
-    """픽스처 자체의 자기검증 — main 역사적 상태(alembic_version="0354", 60개 스킵분
+    """픽스처 자체의 자기검증 — main 역사적 상태(alembic_version="0354", 57개 스킵분
     물리 미적용)를 정확히 재현했는지, 처방 C를 아직 안 돌린 시점에 확인."""
     _build_main_historical_fixture(scratch_db)
     engine = create_engine(scratch_db)
     with engine.connect() as conn:
         current = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
         assert current == "0354"
-        # ORPHAN_SKIPS 중 하나(vat_rate_bp)의 컬럼이 아직 없어야 한다 — 물리 미적용 확認.
+        # 물리 신호(REPLAY_SET 첫 항목 0296의 컬럼)가 아직 없어야 한다 — 물리 미적용 확認.
         has_col = conn.execute(text(
             "SELECT 1 FROM information_schema.columns "
-            "WHERE table_name='platform_settings' AND column_name='vat_rate_bp'"
-        )).scalar()
-        assert has_col is None, "픽스처가 이미 vat_rate_bp를 갖고 있다 — 재현 실패"
+            "WHERE table_name = :t AND column_name = :c"
+        ), {"t": gate.PHYSICAL_SIGNAL_TABLE, "c": gate.PHYSICAL_SIGNAL_COLUMN}).scalar()
+        assert has_col is None, "픽스처가 이미 물리 신호를 갖고 있다 — 재현 실패"
     engine.dispose()
 
 
@@ -336,9 +326,9 @@ def test_ac3b_develop_fresh_db_is_noop(scratch_db):
 def test_ac_develop_lineage_db_stopped_exactly_at_0354_is_noop_not_replay(scratch_db):
     """페드루 PO 검토(2026-09-17 12:33Z) — «alembic_version == "0354"» 문자열만으로는
     main 앵커(0295에서 재봉합)와 "develop 계보로 0353까지 정상 적용된 뒤 우연히 0354에
-    멈춘 DB"를 구분할 수 없다. 후자는 60개가 이미 물리 적용돼 있으므로 재생을 시도하면
-    안 된다(0282 vat_rate_bp 중복 컬럼으로 죽는다) — 물리 신호로 이 오판을 막는지 직접
-    실측."""
+    멈춘 DB"를 구분할 수 없다. 후자는 57개가 이미 물리 적용돼 있으므로 재생을 시도하면
+    안 된다(0296 org_domain_label 중복 테이블로 죽는다) — 물리 신호로 이 오판을 막는지
+    직접 실측."""
     r = _run_alembic(scratch_db, "upgrade", gate.ANCHOR_VERSION)
     assert r.returncode == 0, r.stderr
 
@@ -411,11 +401,11 @@ def test_ac2_partial_failure_rolls_back_and_does_not_stamp(scratch_db, monkeypat
     with engine.connect() as conn:
         current = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
         assert current == gate.ANCHOR_VERSION, "실패했는데 stamp가 진행됨 — 부분 적용 위험"
-        # 앞쪽 30개 중 하나(0282, vat_rate_bp)도 롤백돼 있어야 한다(부분 적용 0건).
+        # 앞쪽 30개 중 하나(0296, 물리 신호)도 롤백돼 있어야 한다(부분 적용 0건).
         has_col = conn.execute(text(
             "SELECT 1 FROM information_schema.columns "
-            "WHERE table_name='platform_settings' AND column_name='vat_rate_bp'"
-        )).scalar()
+            "WHERE table_name = :t AND column_name = :c"
+        ), {"t": gate.PHYSICAL_SIGNAL_TABLE, "c": gate.PHYSICAL_SIGNAL_COLUMN}).scalar()
         assert has_col is None, "실패했는데 앞쪽 revision의 DDL이 남아있다 — 트랜잭션 롤백 실패"
     engine.dispose()
 
