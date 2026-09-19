@@ -375,7 +375,25 @@ async def create_evidence(
     locale: str | None = None,
     accept_language: str | None = Header(None, alias="Accept-Language"),
 ) -> EvidenceResponse:
-    resolved_locale = resolve_locale_from_request(locale, accept_language)
+    """story #4042(카디르 QA CI FAILURE 원칙, i18n_catalog.py 모듈 docstring 참조) —
+    라우트 진입점, `Header()` DI 마커는 여기서만 받는다. 직접-호출(realdb·유닛) 테스트는
+    `_create_evidence`를 불러야 한다(#4425 CI 실사고 — #4045 테스트가 이 함수를 직접
+    호출하며 `accept_language`를 안 넘겨 미해소 `Header` 객체가 그대로 내려가
+    `AttributeError: 'Header' object has no attribute 'split'`로 죽었다)."""
+    return await _create_evidence(
+        body, session=session, org_id=org_id, auth=auth,
+        resolved_locale=resolve_locale_from_request(locale, accept_language),
+    )
+
+
+async def _create_evidence(
+    body: EvidenceCreateRequest,
+    *,
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    auth: AuthContext,
+    resolved_locale: str,
+) -> EvidenceResponse:
     caller = await resolve_member(auth, org_id, session)
     # story #2042/#1936(같은 결함 클래스, 실측으로 확定): resolve_member().id는 휴먼일 때
     # org_member.id인데 has_project_access가 기대하는 축은 raw auth.user_id(users.id) —
