@@ -193,6 +193,85 @@ export function computeFamilyContrasts(css: string): FamilyContrastResult[] {
   return results;
 }
 
+/** story #4055 — «-tint/-bg 배경 위 non-status 강조색(예: text-brand)」이 이 파일의 전신인
+ * status-family 중심 검사(foreground·같은-계열-색만 게이트)에서 빠져 있던 사각지대다.
+ * #4048 흐름 밴드 자기감사(2026-09-18)에서 `text-brand on bg-info-tint`(10px bold)가
+ * 라이트 테마 4.0(<4.5)으로 실 미달이었는데 이 파일의 기존 게이트 어느 것도 안 걸렸다
+ * — foreground 검사는 --foreground만 보고, familyColorOnBackgroundRatio는 «같은» 계열색만
+ * (예: text-info on bg-info-tint) 보기 때문이다. brand는 discoverTintFamilies/discoverBgFamilies가
+ * 못 찾는다(자기 -tint/-bg가 없다) — 그래서 아예 후보에도 안 들었다.
+ *
+ * 고치는 법 — brand처럼 "자기 tint/bg는 없지만 다른 계열의 tint/bg 위에 얹혀 쓰이는" 강조색을
+ * 명시적으로 등록해(CROSS_CHECK_TEXT_VARS), 전 tint/bg 계열 × 양쪽 테마에 대해 게이트한다.
+ * discoverTintFamilies류처럼 CSS에서 자동 발견은 못 한다(이런 강조색엔 이름 규칙이 없다) —
+ * 그래서 새 강조색이 status 배경 위에 쓰이기 시작하면 여기 추가해야 한다는 게 이 접근의
+ * 알려진 한계다(전수벤치·못틀리는대조 둘 다 이 파일의 테스트가 진다). */
+const CROSS_CHECK_TEXT_VARS = ['brand'];
+
+/** story #4055 AC2(전수벤치) — CROSS_CHECK_TEXT_VARS를 처음 켠 실측(2026-09-18)에서 나온
+ * 미달 10건 전부. ⚠️#4048의 흐름 밴드 컴포넌트 수정(text-brand→text-foreground)은 이 표의
+ * light/brand/info 행을 안 지운다 — 그건 "이 조합을 쓰는 자리 1건을 없앤" 것이지 --brand·
+ * --info-tint 토큰 값 자체를 안 바꿔서, 토큰 정의 수준 조합은 여전히 수학적으로 미달이다
+ * (아무도 안 쓴다는 것과 조합이 안전해졌다는 것은 다른 말 — 이 표가 재는 건 후자).
+ * 이 스토리가 새로 만든 빚이 아니라 발견만 한 빚이라 — 다 고치면 벌룬(PO 지시 그대로),
+ * 그렇다고 게이트를 그냥 켜면 이 커밋 자체가 CI를 깬다. grandfather로 얼려 "원래 그런 것"
+ * 으로 안 묻히게 로그엔 계속 찍되 FAIL은 «이 목록 밖 신규»만. PO 판단(브랜드를 이 자리들에
+ * 실제로 쓸지·색을 바꿀지)이 서면 여기서 항목을 지우고 실 코드/토큰을 고치는 게 이 목록의
+ * 유일한 정상 소멸 경로.
+ */
+const GRANDFATHER_BASELINE = new Set([
+  'light|brand|destructive|tint', 'light|brand|destructive|bg',
+  'light|brand|info|tint', 'light|brand|info|bg',
+  'light|brand|primary|tint',
+  'light|brand|success|tint', 'light|brand|success|bg',
+  'light|brand|warning|tint', 'light|brand|warning|bg',
+  'dark|brand|primary|tint',
+]);
+
+function crossCheckKey(r: { theme: string; textVar: string; family: string; kind: string }): string {
+  return `${r.theme}|${r.textVar}|${r.family}|${r.kind}`;
+}
+
+export interface CrossCheckTextResult {
+  theme: 'light' | 'dark';
+  textVar: string;
+  family: string;
+  kind: 'tint' | 'bg';
+  ratio: number;
+}
+
+/** CROSS_CHECK_TEXT_VARS의 각 강조색을 전 tint/bg 계열 배경 위에 올렸을 때의 대비 — AA(4.5)
+ * 게이트 대상(computeCrossFamilyBgReference의 -bg 전용·참고용 표와 달리 이건 -tint까지
+ * 포함해 실제로 막는다). */
+export function computeCrossCheckContrasts(css: string): CrossCheckTextResult[] {
+  const results: CrossCheckTextResult[] = [];
+  for (const [theme, selector] of [['light', ':root'], ['dark', '.dark']] as const) {
+    const { vars } = extractCssVarBlock(css, selector);
+    const pageBg = resolveOklchVar(vars, 'background');
+    const pageBgRgb: [number, number, number] = [pageBg.r, pageBg.g, pageBg.b];
+
+    for (const textVar of CROSS_CHECK_TEXT_VARS) {
+      const textRaw = vars.get(textVar);
+      if (!textRaw) continue;
+      const textParsed = parseOklchToRgba(resolveCssVarValue(vars, textRaw));
+      if (!textParsed) continue;
+      const textRgb: [number, number, number] = [textParsed.r, textParsed.g, textParsed.b];
+
+      for (const family of discoverTintFamilies(vars)) {
+        const r = computeOneFamilyBackground(vars, pageBgRgb, textRgb, family, 'tint');
+        if (!r) continue;
+        results.push({ theme, textVar, family, kind: 'tint', ratio: r.foregroundOnBackgroundRatio });
+      }
+      for (const family of discoverBgFamilies(vars)) {
+        const r = computeOneFamilyBackground(vars, pageBgRgb, textRgb, family, 'bg');
+        if (!r) continue;
+        results.push({ theme, textVar, family, kind: 'bg', ratio: r.foregroundOnBackgroundRatio });
+      }
+    }
+  }
+  return results;
+}
+
 /** story #2575 AC4 — 교차-계열 참고표(게이트 대상 아님, AC3 인간관문의 근거자료). #2960의
  * 실제 위반(`text-destructive` on `bg-warning-bg`)은 "A 계열 글자가 B 계열의 -bg 위"라는
  * 교차-계열 조합이라 위 foregroundOnBackgroundRatio(항상 --foreground 대상)도, 위
@@ -268,6 +347,28 @@ function main(): number {
       ? ''
       : ` (참고: 계열색 글자였다면 ${r.familyColorOnBackgroundRatio.toFixed(2)}${isWarningPositiveControl ? ' — AC4 양성대조: #2960 실측 2.06과 근사 일치' : ''})`;
     console.log(`  ${status === 'OK' ? '✅' : '❌'} ${r.theme}/${r.family}: foreground on bg = ${r.foregroundOnBackgroundRatio.toFixed(2)}${familyColorNote}`);
+  }
+
+  console.log(`\n[story #4055] non-status 강조색 × 전 tint/bg 계열 교차 게이트 — 강조색 ${CROSS_CHECK_TEXT_VARS.length}개(${CROSS_CHECK_TEXT_VARS.join('·')}) · grandfather(발견만, 안 막음) ${GRANDFATHER_BASELINE.size}건`);
+  const crossCheck = computeCrossCheckContrasts(css);
+  const grandfatherSeen = new Set<string>();
+  let newCrossCheckFailures = 0;
+  for (const r of crossCheck) {
+    const key = crossCheckKey(r);
+    const isFail = r.ratio < AA_THRESHOLD;
+    const isGrandfathered = isFail && GRANDFATHER_BASELINE.has(key);
+    if (isGrandfathered) grandfatherSeen.add(key);
+    if (isFail && !isGrandfathered) { failed += 1; newCrossCheckFailures += 1; }
+    const label = isGrandfathered ? 'GRANDFATHER' : isFail ? 'FAIL' : 'OK';
+    const icon = label === 'OK' ? '✅' : label === 'GRANDFATHER' ? '📋' : '❌';
+    console.log(`  ${icon} ${r.theme}/text-${r.textVar} on ${r.family}-${r.kind} = ${r.ratio.toFixed(2)}${label === 'GRANDFATHER' ? ' (grandfather)' : ''}`);
+  }
+  const staleGrandfather = [...GRANDFATHER_BASELINE].filter((k) => !grandfatherSeen.has(k));
+  if (staleGrandfather.length > 0) {
+    console.log(`  ℹ️ grandfather로 등재됐으나 이번 스캔에서 안 걸린(죽은 항목 후보, 목록에서 지워도 됨): ${staleGrandfather.join(', ')}`);
+  }
+  if (newCrossCheckFailures > 0) {
+    console.error(`  ❌ grandfather 밖 신규 교차 미달 ${newCrossCheckFailures}건 — 이 스토리 범위(발견만) 밖이니 baseline에 추가하지 말고 원인(새 조합을 실제로 썼는지)부터 본다.`);
   }
 
   console.log(`\n[AC4(#2575) 참고 — 교차-계열, 게이트 대상 아님·AC3 인간관문 근거] textFamily 색이 다른 bgFamily의 -bg 위에 있을 때:`);
