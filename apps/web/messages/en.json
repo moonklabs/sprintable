@@ -5353,7 +5353,7 @@
     "rankedHooksVariantCount": "{n} matched",
     "rankedHooksNoData": "No published variants for this hook yet.",
     "hookPerformanceSummaryTitle": "Hook performance summary",
-    "hookPerformanceSummaryScopeNote": "◍ Only variants tagged with a hook are summed — variants without a hook_key (pure platform cuts, etc.) aren't in this summary.",
+    "hookPerformanceSummaryScopeNote": "◍ Only variants tagged with a hook are summed — variants without a hook (pure platform cuts, etc.) aren't in this summary.",
     "hookPerformanceSummaryHooks": "{n} hooks",
     "hookPerformanceSummaryVariants": "{n} variants",
     "hookPerformanceSummarySnapshots": "{n} snapshots",

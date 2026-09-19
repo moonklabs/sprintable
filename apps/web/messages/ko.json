@@ -5353,7 +5353,7 @@
     "rankedHooksVariantCount": "매치 {n}건",
     "rankedHooksNoData": "이 훅은 아직 발행된 변주가 없어요.",
     "hookPerformanceSummaryTitle": "훅 성과 요약",
-    "hookPerformanceSummaryScopeNote": "◍ 훅이 지정된 변주만 합산돼요 — hook_key가 없는 변주(순수 플랫폼컷 등)는 이 요약에 안 잡혀요.",
+    "hookPerformanceSummaryScopeNote": "◍ 훅이 지정된 변주만 합산돼요 — 훅이 지정되지 않은 변주(순수 플랫폼컷 등)는 이 요약에 안 잡혀요.",
     "hookPerformanceSummaryHooks": "훅 {n}종",
     "hookPerformanceSummaryVariants": "변주 {n}건",
     "hookPerformanceSummarySnapshots": "스냅샷 {n}건",
