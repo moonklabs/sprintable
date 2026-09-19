@@ -112,4 +112,37 @@ describe('useRecipeMemberOptions — agent+human 혼합 조회(type 파라미터
     await flush();
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
+
+  it('조회 中 projectId가 null로 바뀌면 loading이 고착되지 않는다(카디르 QA #4421 qa:changes 재현)', async () => {
+    let resolveFetch: (() => void) | null = null;
+    const fetchMock = vi.fn(() => new Promise((resolve) => {
+      resolveFetch = () => resolve({ ok: true, json: async () => [] });
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    function Switcher() {
+      const [pid, setPid] = useState<string | null>('proj-1');
+      return (
+        <>
+          <button data-testid="clear" onClick={() => setPid(null)}>clear</button>
+          <Harness projectId={pid} />
+        </>
+      );
+    }
+
+    await act(async () => { root.render(<Switcher />); });
+    await flush();
+    expect(dump().loading).toBe(true); // 응답 도착 前 — 조회 中.
+
+    // projectId가 조회 中에 null로 바뀐다(프로젝트 전환) — 이전 effect는 cleanup으로
+    // cancelled=true, 새 effect는 !projectId 분기.
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="clear"]')!.click(); });
+    await flush();
+    expect(dump().loading).toBe(false); // 고착 안 됨(수정 前엔 true로 남아 FAIL).
+
+    // 이전 in-flight 응답이 뒤늦게 와도(cancelled) loading을 다시 안 켠다.
+    await act(async () => { resolveFetch?.(); });
+    await flush();
+    expect(dump().loading).toBe(false);
+  });
 });

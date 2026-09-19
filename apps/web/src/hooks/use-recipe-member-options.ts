@@ -48,8 +48,13 @@ export function useRecipeMemberOptions(projectId: string | null): UseRecipeMembe
 
   useEffect(() => {
     if (!projectId) {
+      // 카디르 QA(#4421 qa:changes, 2026-09-19) — 조회 中 projectId가 null로 바뀌면
+      // 이전 effect의 cleanup(cancelled=true)이 그 effect의 finally{setLoading(false)}를
+      // 막고, 이 분기도 loading을 안 꺼서 loading=true가 영구 고착됐다(vitest로 실측
+      // 재현). 두 effect 모두가 각자 own loading을 책임지게 여기서도 명시적으로 끈다.
       setOptions([]);
       setLoadFailed(false);
+      setLoading(false);
       return;
     }
     let cancelled = false;
