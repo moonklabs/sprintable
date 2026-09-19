@@ -28,6 +28,14 @@ export interface UseWorkItemProductionEvidenceResult {
 // key 하나만 받으므로 둘을 `"${workItemId}:${workItemType}"` 복합 문자열로 합쳐 하나가
 // 없으면 key 자체가 null이 되게 한다(원본 skip 의미 그대로 보존) — fetcher 안에서 다시
 // 분리해 쓴다. 문자열 key라 매 렌더 새 객체를 안 만들어 불필요한 재조회도 안 생긴다.
+//
+// ⚠️카디르 재QA(#4447, 2026-09-19) — `:` 구분자 join+split은 workItemId가 콜론을 실제로
+// 포함하면 오분할된다(#4436 hookKey 공백충돌과 같은 판단축). 실측: workItemId는 이
+// 값의 원천인 gate.work_item_id가 backend/app/models/gate.py:64·evidence.py:43 둘 다
+// `Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ...)` — Postgres UUID 컬럼이라
+// 콜론을 포함하는 값 자체가 DB 계층에서 불가능하다. workItemType도 `'story' | 'task'`
+// 고정 2값 리터럴 유니온이라 마찬가지로 안전. #4437(derivedIds가 UUID라 안전 확認)과
+// 동일 판단으로 이 구분자는 이 도메인에서 안전 — 근본fix(JSON 직렬화 key) 불필요.
 export function useWorkItemProductionEvidence(
   workItemId: string | null,
   workItemType: 'story' | 'task' | null,
