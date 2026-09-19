@@ -27,6 +27,7 @@ import { connectErrorLabelKey } from '@/components/channel-connect/connect-error
 import { FacebookPageSelectCard, type SelectCandidate } from '@/components/channel-connect/facebook-page-select-card';
 import type { AppCredentialsStatusResponse, ChannelConnectionResponse, TestConnectionResponse } from '@/components/channel-connect/types';
 import { AgentSetupSection } from '@/components/channel-connect/agent-setup-section';
+import { ExternalPublishPauseCard } from '@/components/channel-connect/external-publish-pause-card';
 
 /**
  * story #3376(Phase1·마케팅운영) — 소셜 채널 OAuth 연결 화면. org-connectors(/organization/
@@ -1336,6 +1337,10 @@ export default function OrganizationChannelsPage() {
           )
         }
       />
+
+      {/* story #3953(블루프린트 §1-5) — 조직 전체 외부 발행 일시 중지 스위치.
+          owner만 조작·member 이상 열람(GET이 비밀 아님). */}
+      {orgId ? <ExternalPublishPauseCard orgId={orgId} isOwnerStrict={isOwnerStrict} /> : null}
 
       {/* story #3743(시안 그대로, 비-소유자 판) — 권한(할 수 없다)은 안 그림+사유
           한 줄(3733 키 재사용, 새 낱말 0). */}

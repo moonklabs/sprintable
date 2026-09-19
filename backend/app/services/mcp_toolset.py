@@ -378,6 +378,12 @@ _ORG_SCOPED_UNMAPPED_SEGMENTS_WITH_REASON: dict[str, str] = {
     # 의도. engagement(#3805)와 반대 방향.
     "ads-boosts": "human-only (3806 AC4: agents propose only, no execution/budget API access); "
                   "no MCP tool exposes it",
+    # story #3953 — org owner-only kill switch (channel_connections.py::
+    # put_external_publish_pause/get). English reason (story #3779 BE Korean
+    # user-string guard — new dict entries go in English instead of grandfather).
+    # No MCP tool exposes this segment (org-wide admin toggle, not a content
+    # read/write surface an agent would call).
+    "external-publish-pause": "no MCP tool/keyword (org owner-only kill switch, admin-type, story 3953)",
 }
 
 
