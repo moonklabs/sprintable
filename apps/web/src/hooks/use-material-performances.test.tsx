@@ -118,4 +118,28 @@ describe('useMaterialPerformances — derivedIds만큼 병렬 GET .../material-p
     await flush();
     expect(dump().loading).toBe(false);
   });
+
+  // story #4071 마이그 부수 fix(핵심 회귀) — 원본은 depsKey를 `[...ids].sort().join(' ')`
+  // 로 만든 뒤 effect 안에서 `depsKey.split(' ')`로 되돌려 실제 조회 id 배열을 복원했다.
+  // derived_id는 FK 없는 서버 원문 필드(hook_key와 동형 축, #4436/#4437 round-2에서
+  // 정확히 이 구분자 클래스가 재현됐던 자리)라 공백을 포함할 수 있다 — derivedIds가
+  // 정확히 1개(`['id a']`, 공백 포함 단일 id)여도 join·split 왕복이 이를 2개로
+  // 오분할('id'·'a')해 엉뚱한 2개 id를 따로 조회했을 것이다. 헬퍼(JSON.stringify 기반
+  // keysDepsKey, split 없이 원본 배열 그대로 파싱)로 그 클래스가 사라졌음을 pin.
+  it('derived_id 하나가 공백을 포함해도 그 하나를 그대로 조회한다(join·split 오분할 없음, #4071 부수 fix 핵심 회귀)', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      const id = new URL(url, 'http://x').searchParams.get('derived_id')!;
+      return { ok: true, json: async () => (id === 'id a' ? [SNAPSHOT()] : []) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await act(async () => { root.render(<Harness derivedIds={['id a']} />); });
+    await flush();
+
+    // 오분할됐다면 fetch가 2번(derived_id=id, derived_id=a) 나갔을 것 — 실제론 원본
+    // 배열 그대로 1개 id에 1번만 나가야 한다.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]![0]).toContain('derived_id=id+a');
+    expect(dump()).toEqual({ keys: ['id a'], counts: [1], loading: false, loadFailed: false });
+  });
 });
