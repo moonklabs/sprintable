@@ -1,0 +1,1 @@
+{"file": "tests/test_4050_ac5_backend_integration_walkthrough_realdb.py", "sec": 2.2, "source": "story-4050(2026-09-18) — 로컬 실측(throwaway pgvector/pgvector:pg16 컨테이너, `uv run pytest` 단독실행, 2 passed in 2.20s). CI 값은 달라질 수 있어 잠정값."}
