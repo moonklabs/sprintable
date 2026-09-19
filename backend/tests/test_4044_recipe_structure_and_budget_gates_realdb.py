@@ -52,7 +52,7 @@ def _load_migration_module(filename: str, alias: str):
     return m
 
 
-_MIG = _load_migration_module("0380_recipe_video_production_structure_and_budget_gates.py", "_m0380")
+_MIG = _load_migration_module("0382_recipe_video_production_structure_and_budget_gates.py", "_m0380")
 
 
 # ─── 단위 축 — 등록 시점 검증기 통과(seed 자체의 계약 유효성) ────────────────────
