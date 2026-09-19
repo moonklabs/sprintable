@@ -1,8 +1,11 @@
 'use client';
 
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { Play } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { Card } from '@/components/ui/card';
+import { formatRelativeTime } from '@/lib/storage/format';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { isLinkableRef } from '@/components/verify/evidence-section';
 import { useWorkItemProductionEvidence } from '@/hooks/use-work-item-production-evidence';
 import {
@@ -41,6 +44,8 @@ const KIND_TITLE_KEY: Record<ProductionWorkbenchKind, string> = {
 // 시안 .ocard 공용 헤더 — okind(제목)+attr(AI 귀속, info만)+ver(mono)+when(우측).
 function OutputCardHeader({ kindTitle, evidence }: { kindTitle: string; evidence: EvidenceItem }) {
   const t = useTranslations('cage');
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
   return (
     <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2">
       <span className="text-[12.5px] font-bold text-foreground">{kindTitle}</span>
@@ -50,15 +55,19 @@ function OutputCardHeader({ kindTitle, evidence }: { kindTitle: string; evidence
           {t('productionWorkbenchVersionRef', { v: evidence.artifact_version_number })}
         </span>
       ) : null}
+      {/* story #3493 정본 — 게이트 evidence 카드는 "기록" 표기라 toLocaleString류가 아니라
+          formatRelativeTime(gate-evidence.tsx GateActivityHistory와 동형 관례). */}
       <span className="ml-auto text-[10.5px] text-muted-foreground">
-        {new Date(evidence.created_at).toLocaleTimeString()}
+        {formatRelativeTime(evidence.created_at, locale, displayTimezone)}
       </span>
     </div>
   );
 }
 
+// story #3164/#3785 회귀가드 — rounded+border+카드표면 bg 조합은 손코딩 카드라 Card 프리미티브를
+// 쓴다(surface='solid'가 border-border/80+bg-card를 이미 낸다).
 function OutputCard({ children }: { children: React.ReactNode }) {
-  return <div className="overflow-hidden rounded-xl border border-border bg-card">{children}</div>;
+  return <Card className="overflow-hidden">{children}</Card>;
 }
 
 function MaterialCollectionSheetCard({ evidence }: { evidence: EvidenceItem }) {
@@ -118,8 +127,10 @@ function StoryboardCard({ evidence }: { evidence: EvidenceItem }) {
       <OutputCardHeader kindTitle={t(KIND_TITLE_KEY.storyboard)} evidence={evidence} />
       <div className="space-y-3 p-3">
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {/* story #3164 가드 — rounded+border+카드표면 bg 트리오는 손코딩 카드로 잡힌다. 이미
+              위 Card(OutputCard) 안의 2층 썸네일이라 개별 border는 안 필요(뺀다). */}
           {storyboard.shot_list.map((shot) => (
-            <div key={shot.shot_no} className="overflow-hidden rounded-lg border border-border bg-muted">
+            <div key={shot.shot_no} className="overflow-hidden rounded-lg bg-muted">
               <div className="relative flex h-[74px] items-center justify-center bg-gradient-to-br from-info-tint to-muted text-muted-foreground">
                 <span className="absolute left-1.5 top-1.5 rounded bg-card px-1 text-[9.5px] font-bold text-foreground">
                   {String(shot.shot_no).padStart(2, '0')}
@@ -198,11 +209,19 @@ function VerificationSheetCard({ evidence }: { evidence: EvidenceItem }) {
       <OutputCardHeader kindTitle={t(KIND_TITLE_KEY.verification_sheet)} evidence={evidence} />
       <ul className="space-y-1.5 p-3">
         {items.map((item, i) => {
-          const dotClass = item.verdict === 'pass' ? 'bg-success-tint text-success'
-            : item.verdict === 'fail' ? 'bg-warning-tint text-warning' : 'bg-muted text-muted-foreground';
+          // story #4057 CI 실측(2026-09-18, 페드루 지적) — verify-no-new-tint-color-text
+          // 가드가 bg-{family}-tint + text-{family}(같은 리터럴)를 막는다(#2420/#4055와 동일
+          // 안티패턴 — 소형 텍스트 vs tint 대비 마진이 얇다). 상태 신호는 배경 tint는 유지하되
+          // 글자색은 text-foreground(고대비)로, 구분은 border-{family}가 짊어진다(유나 제안
+          // "border/icon" 그대로 — 흐름 밴드 AA 하드닝과 같은 결).
+          const dotClass = item.verdict === 'pass' ? 'bg-success-tint border border-success'
+            : item.verdict === 'fail' ? 'bg-warning-tint border border-warning' : 'bg-muted border border-border';
+          // bg-transparent — no-card-surfaceless-box(#3785)가 요구하는 명시적 surface 선언
+          // (rounded+border엔 bg- 필요)이면서, no-handrolled-card(#3164)의 카드-표면 bg 목록
+          // (card/background/muted/popover)엔 안 걸리게(이미 OutputCard 안 2층).
           return (
-            <li key={i} className="flex items-center gap-2 rounded-lg border border-border px-2.5 py-1.5 text-[12px]">
-              <span className={`flex size-[15px] shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${dotClass}`}>
+            <li key={i} className="flex items-center gap-2 rounded-lg border border-border bg-transparent px-2.5 py-1.5 text-[12px]">
+              <span className={`flex size-[15px] shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-foreground ${dotClass}`}>
                 {item.verdict === 'pass' ? '✓' : item.verdict === 'fail' ? '!' : '·'}
               </span>
               <span className="flex-1 text-foreground">{item.name}</span>
