@@ -63,6 +63,7 @@ export const ALLOWLIST: AllowlistEntry[] = [
   { file: 'ee/components/billing/billing-tab.tsx', lineContent: "? t('packDialogAutomationAmount', { amount: (AUTOMATION_PACK.auPerPack * target.quantity).toLocaleString('ko-KR') })", reason: '자동화 크레딧(AU) 수량 숫자 포맷 — 날짜 아님', addedBy: 'story #3493' },
   { file: 'components/cage/lineage-performance.tsx', lineContent: "{value !== null ? value.toLocaleString() : <span className=\"text-[11px] font-normal text-muted-foreground\">{t('rankedHooksPending')}</span>}", reason: '훅 성과 수치(조회수 등) 천단위 구분 숫자 포맷 — 날짜 아님', addedBy: 'story #4063' },
   { file: 'components/cage/lineage-performance.tsx', lineContent: "{totalViews !== null ? <Badge variant=\"info\">{t('hookPerformanceSummaryViews', { n: totalViews.toLocaleString() })}</Badge> : null}", reason: '훅 성과 요약 조회수 합계 숫자 포맷 — 날짜 아님', addedBy: 'story #4063' },
+  { file: 'components/cage/lineage-performance.tsx', lineContent: '? primaryValue.toLocaleString()', reason: '계보 트리 노드 성과 수치(조회수 등) 천단위 구분 숫자 포맷 — 날짜 아님', addedBy: 'story #4063 후속(PR 9dd179582)' },
 ];
 
 function isAllowed(file: string, lineText: string): boolean {

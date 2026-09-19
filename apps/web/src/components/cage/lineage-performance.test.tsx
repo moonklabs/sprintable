@@ -40,16 +40,25 @@ async function flush(times = 6) {
 const EDGE = (overrides: Record<string, unknown>) => ({
   id: 'e1', source_evidence_id: 'ev-master-1', derived_kind: 'channel_post_draft', derived_id: 'draft-1',
   relation_kind: 'platform_cut', variant_axis: 'reels', hook_key: null, work_item_id: 'story-1',
+  master_title: null, channel: null,
   ...overrides,
 });
 
-function stubLineageAndHooks(edges: unknown[], hookPerformanceByKey: Record<string, unknown> = {}) {
+function stubLineageAndHooks(
+  edges: unknown[],
+  hookPerformanceByKey: Record<string, unknown> = {},
+  materialPerformanceByDerivedId: Record<string, unknown[]> = {},
+) {
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
     if (url.startsWith('/api/v2/material-lineage/hook-performance')) {
       const key = new URL(url, 'http://x').searchParams.get('hook_key')!;
       const summary = hookPerformanceByKey[key];
       if (!summary) return { ok: false, status: 404, json: async () => ({}) };
       return { ok: true, json: async () => summary };
+    }
+    if (url.startsWith('/api/v2/material-lineage/material-performance')) {
+      const derivedId = new URL(url, 'http://x').searchParams.get('derived_id')!;
+      return { ok: true, json: async () => (materialPerformanceByDerivedId[derivedId] ?? []) };
     }
     return { ok: true, json: async () => edges };
   }));
@@ -136,5 +145,62 @@ describe('LineagePerformancePanel', () => {
 
     const panel = container.querySelector('[data-testid="lineage-performance-panel"]')!;
     expect(panel.textContent).not.toContain('훅 단위 성과');
+  });
+
+  it('master_title·channel이 있으면 uuid 대신 읽을 이름을 낸다(#4063 후속 갭2)', async () => {
+    stubLineageAndHooks([
+      EDGE({ id: 'e1', derived_kind: 'channel_publication', derived_id: 'pub-1', master_title: '가을 신상 15초 컷', channel: 'instagram' }),
+    ]);
+    await act(async () => { root.render(wrap(<LineagePerformancePanel workItemId="story-1" />)); });
+    await flush();
+
+    const panel = container.querySelector('[data-testid="lineage-performance-panel"]')!;
+    expect(panel.textContent).toContain('가을 신상 15초 컷');
+    expect(panel.textContent).toContain('Instagram');
+    expect(panel.textContent).not.toContain('ev-master'); // shortId 폴백이 안 쓰였다
+  });
+
+  it('master_title·channel이 null이면 여전히 {kind} #{짧은id} 폴백을 쓴다(지어내지 않음)', async () => {
+    stubLineageAndHooks([EDGE({ id: 'e1', master_title: null, channel: null })]);
+    await act(async () => { root.render(wrap(<LineagePerformancePanel workItemId="story-1" />)); });
+    await flush();
+
+    const panel = container.querySelector('[data-testid="lineage-performance-panel"]')!;
+    expect(panel.textContent).toContain('channel_post_draft');
+  });
+
+  it('발행된(channel_publication) 변주는 성과 막대·1위 대비 값을 낸다, 미발행(draft)은 "미발행"만', async () => {
+    stubLineageAndHooks(
+      [
+        EDGE({ id: 'e1', derived_kind: 'channel_publication', derived_id: 'pub-1' }),
+        EDGE({ id: 'e2', derived_kind: 'channel_publication', derived_id: 'pub-2' }),
+        EDGE({ id: 'e3', derived_kind: 'channel_post_draft', derived_id: 'draft-1' }),
+      ],
+      {},
+      {
+        'pub-1': [{ id: 's1', channel: 'instagram', due_at: '2026-09-01T00:00:00Z', captured_at: '2026-09-01T00:00:00Z', status: 'captured', normalized: { views: 100 }, source: 'organic', error_code: null, offset_label: 'd1' }],
+        'pub-2': [{ id: 's2', channel: 'instagram', due_at: '2026-09-07T00:00:00Z', captured_at: '2026-09-07T00:00:00Z', status: 'captured', normalized: { views: 400 }, source: 'organic', error_code: null, offset_label: 'd7' }],
+      },
+    );
+    await act(async () => { root.render(wrap(<LineagePerformancePanel workItemId="story-1" />)); });
+    await flush();
+
+    const panel = container.querySelector('[data-testid="lineage-performance-panel"]')!;
+    expect(panel.textContent).toContain('100');
+    expect(panel.textContent).toContain('400');
+    expect(panel.textContent).toContain('미발행');
+  });
+
+  it('발행됐지만 아직 captured snapshot이 없으면 "집계 대기"(0으로 위장 안 함)', async () => {
+    stubLineageAndHooks(
+      [EDGE({ id: 'e1', derived_kind: 'channel_publication', derived_id: 'pub-1' })],
+      {},
+      { 'pub-1': [] },
+    );
+    await act(async () => { root.render(wrap(<LineagePerformancePanel workItemId="story-1" />)); });
+    await flush();
+
+    const panel = container.querySelector('[data-testid="lineage-performance-panel"]')!;
+    expect(panel.textContent).toContain('집계 대기');
   });
 });
