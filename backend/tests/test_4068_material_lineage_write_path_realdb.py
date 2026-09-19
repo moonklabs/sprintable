@@ -10,9 +10,11 @@
     evidence(#4051 계약, 1:1 앵커) 최신 1건. 없으면 row를 만들지 않는다(fail-soft).
   - hook_key: story #3645로 이미 `ChannelPostVersion.hook_key`에 존재(신설 스키마 0) —
     `latest.hook_key`를 그대로 읽는다.
-  - relation_kind/variant_axis: hook_key 有 → "hook_variant"(variant_axis=None, 모델
-    docstring 관례대로 platform_cut에서만 채운다). hook_key 無 → "platform_cut"
-    (variant_axis=connection.channel)."""
+  - relation_kind/variant_axis: **초안 제안 단계**에서는 hook_key 有→"hook_variant"·
+    無→"platform_cut"으로 갈랐으나, 구현 직전 doc c7991109 §4③(v4, 디디 [SID:4061]
+    확定 — "hook_key는 relation_kind와 무관하게 독립적으로 채워진다")과 어긋남을 발견해
+    정정 — relation_kind는 **항상 "platform_cut"**(variant_axis=connection.channel),
+    hook_key는 그 위에 독립적으로 함께 싣는다(doc v5 반영, 아래 테스트가 실제 계약)."""
 from __future__ import annotations
 
 import os
