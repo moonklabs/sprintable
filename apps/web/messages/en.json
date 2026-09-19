@@ -4324,7 +4324,7 @@
     "decisionError": "Failed to confirm the slot.",
     "decisionErrorLoopNotFound": "The run could not be found.",
     "decisionErrorHumanOnly": "Only human members can decide a slot.",
-    "decisionErrorNotDeciding": "This loop is not in the deciding stage right now.",
+    "decisionErrorNotDeciding": "This run is not in the deciding stage right now.",
     "decisionErrorGateResolved": "This gate has already been resolved.",
     "decisionErrorNoPendingArtifacts": "There are no pending artifacts in this group.",
     "decisionErrorArtifactSetMismatch": "The artifact set has changed — please review again.",
