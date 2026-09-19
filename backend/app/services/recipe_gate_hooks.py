@@ -279,6 +279,13 @@ async def maybe_create_stage_gate(
     # 이 값을 읽어 반려/승인 통지 수신자에 합류시킨다(work_item 미배정 시 그 통지가
     # «시스템 발행 혼자 있는 방»에 갇히던 결함의 근본 처방).
     neutral_facts["requested_by_member_id"] = str(requester_member_id)
+    # story #4058(②③ 정합, 페드루 PO 経由 유나 2026-09-19) — gates/[id]가 "이 stage
+    # 산출물" evidence만 걸러 부르는 접점. 이 함수가 게이트 생성 시점에 이미 쥐고 있는
+    # stage 값을 denorm으로 얹는다(새 컬럼 0, 기존 neutral_facts JSONB 관례 재사용) —
+    # FE는 GET /api/v2/evidence?work_item_id=...로 받은 전체 목록을 payload.stage==
+    # gate.neutral_facts.stage로 client-side 필터한다(evidence.py 쪽 새 쿼리 파라미터
+    # 불요, 최소 침습 원칙 그대로).
+    neutral_facts["stage"] = stage
 
     # story #4044 — gate_type="generation_budget"은 create_gate() 호출 *전*에 하드체크한다
     # (channel_posts.py/site_posts.py의 submit-시점 422와 동일 판정 지점 — 반쪽 봉인 없이

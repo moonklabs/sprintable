@@ -190,6 +190,9 @@ async def test_concept_and_structure_gates_stay_independent_on_same_story():
             concept_gate = (await s.execute(
                 select(Gate).where(Gate.work_item_id == story_id, Gate.gate_type == "concept_approval")
             )).scalar_one()
+            # story #4058(②③ 정합) — gates/[id] evidence 필터 접점: 게이트가 자기
+            # stage를 neutral_facts에 denorm으로 싣는다(recipe_gate_hooks.py).
+            assert concept_gate.neutral_facts["stage"] == "concept_confirmed"
             set_gate_status(concept_gate, "approved", now=datetime.now(timezone.utc))
             concept_gate.resolver_id = owner_member_id
             await s.commit()
@@ -207,6 +210,7 @@ async def test_concept_and_structure_gates_stay_independent_on_same_story():
             assert len(structure_gates) == 1
             assert structure_gates[0].status == "pending"
             assert structure_gates[0].designated_approver_id == owner_member_id
+            assert structure_gates[0].neutral_facts["stage"] == "animatic"
 
             # concept 게이트는 그대로 approved로 남아있다(구조 게이트가 그걸 건드리지 않음).
             reloaded_concept = (await s.execute(
