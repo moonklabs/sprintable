@@ -1,0 +1,1 @@
+{"file": "tests/test_4068_material_lineage_write_path_realdb.py", "sec": 8.0, "source": "story-4068(2026-09-19) — 로컬 실측(throwaway pgvector/pgvector:pg15 컨테이너, `uv run pytest` 단독실행). CI 값은 달라질 수 있어 잠정값."}

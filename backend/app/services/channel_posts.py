@@ -1575,6 +1575,44 @@ async def resolve_command_target(
     return draft, versions[-1], gate
 
 
+async def _maybe_record_material_lineage_for_publication(
+    db: AsyncSession, *, org_id: uuid.UUID, work_item_id: uuid.UUID, publication_id: uuid.UUID,
+    channel: str, hook_key: str | None,
+) -> None:
+    """story #4068(E-RECIPE-1, 페드루 PO 確定 2026-09-19) — 발행 성공을 material_lineage로
+    엮는다(#4058이 write 경로를 처음부터 스코프 밖으로 明시했던 그 갭). 마스터 앵커는
+    #4051 emit 계약의 `live-run:master-cut` evidence(1:1, 크리에이터가 생성) — 이
+    work_item에 그게 없으면(비레시피 수동 발행 등) 지어낼 앵커가 없다는 뜻이라 row를
+    만들지 않는다(fail-soft, 에러 아님 — doc c7991109 §3④ 그대로). 단일/X스레드 발행
+    두 tail이 공유(각자 헤드 publication 1건에 한 번만 호출 — X는 last_published_seq==0
+    가드로 이미 그렇게 되어 있다, insight_snapshots 스케줄과 동일 호출 규율)."""
+    from app.models.evidence import Evidence
+    from app.models.material_lineage import MaterialLineage
+
+    master_evidence_id = (await db.execute(
+        select(Evidence.id).where(
+            Evidence.org_id == org_id, Evidence.work_item_id == work_item_id,
+            Evidence.work_item_type == "story", Evidence.type == "url",
+            Evidence.ref == "live-run:master-cut",
+        ).order_by(Evidence.created_at.desc()).limit(1)
+    )).scalar_one_or_none()
+    if master_evidence_id is None:
+        return
+    # doc c7991109 §4③(v4, 디디 [SID:4061] 확認) — hook_key는 relation_kind와 무관하게
+    # 독립적으로 채워진다("hook_variant 전용 필드가 아니다", 한 row가 platform_cut+
+    # variant_axis='reels'+hook_key='hook_a'를 동시에 가질 수 있다는 게 그 확定의 핵심).
+    # 이 write 경로가 다루는 변주는 항상 "어느 channel_connection으로 나간 컷"이라
+    # relation_kind는 언제나 platform_cut(variant_axis=channel) — hook_key는 draft가
+    # 실었으면(story #3645) 그대로 함께 싣는다. aspect_adapt/명시적 hook_variant 축은
+    # 이 write 경로가 아직 만들지 않는 변주 유형(디디 계보 UI 쪽 후속 몫).
+    db.add(MaterialLineage(
+        org_id=org_id, source_evidence_id=master_evidence_id,
+        derived_kind="channel_publication", derived_id=publication_id,
+        relation_kind="platform_cut", variant_axis=channel, hook_key=hook_key,
+        work_item_id=work_item_id,
+    ))
+
+
 async def publish_channel_post_draft(
     db: AsyncSession, *, org_id: uuid.UUID, draft_id: uuid.UUID, published_by_member_id: uuid.UUID,
 ) -> ChannelPublication:
@@ -2197,6 +2235,12 @@ async def publish_channel_post_draft(
         db, org_id=org_id, publication_id=row.id, channel=connection.channel,
         external_id=row.external_id, anchor_at=row.published_at,
     )
+
+    await _maybe_record_material_lineage_for_publication(
+        db, org_id=org_id, work_item_id=draft.work_item_id, publication_id=row.id,
+        channel=connection.channel, hook_key=latest.hook_key,
+    )
+
     await db.commit()
 
     # story #3808(Phase3·3-3 PR3) — 발행 성공 뒤 X 종량 API 지출 evidence 기록(위
@@ -2377,6 +2421,10 @@ async def _publish_x_thread_draft(
             db, org_id=org_id, work_item_id=draft.work_item_id, publication_id=head_row.id,
             publication_kind="channel_publication", channel=connection.channel,
             external_id=head_row.external_id, anchor_at=head_row.published_at,
+        )
+        await _maybe_record_material_lineage_for_publication(
+            db, org_id=org_id, work_item_id=draft.work_item_id, publication_id=head_row.id,
+            channel=connection.channel, hook_key=latest.hook_key,
         )
 
     from app.services.activity_log import ActivityLogService
