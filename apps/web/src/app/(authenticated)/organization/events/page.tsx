@@ -172,7 +172,10 @@ export default function OrganizationEventsPage() {
       {/* story #4049(E-RECIPE-1 ①) — 마케팅/개발 워크플로 탭 분리(AC1). 「개발 워크플로」
           탭 안은 기존 커스텀/프리셋 CRUD 전부 그대로(제거 0, AC3) — 마케팅 탭만 신규
           #4046/#4048 위에 얹은 것. */}
-      <Tabs defaultValue="workflow">
+      {/* story #4049 후속(페드루 PO, 2026-09-19, [시안이탈첫노출]) — 이 표면은 E-RECIPE-1
+          레시피-first 의도(customer-zero가 레시피 적용하러 오는 자리)라 기본 탭을
+          marketing으로. workflow-default는 구 events 페이지 보존 논리였다. */}
+      <Tabs defaultValue="marketing">
         <TabsList>
           <TabsTrigger value="marketing">
             {t('recipeGalleryTabMarketing')} <span className="text-muted-foreground">{marketingRecipes.length}</span>
