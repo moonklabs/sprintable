@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
 import { fetchWithAuth } from '@/lib/db/client';
+import { useAsyncResource } from './use-async-resource';
 
 /**
  * story #3287([도메인탈고정·축1 Phase1] org 표시 라벨 레이어) FE 소비 — BFF
@@ -49,51 +49,41 @@ function pickLocaleLabel(entry: DomainLabelEntry, locale: string): string | unde
 }
 
 /** orgId가 없으면(아직 로딩 중 등) 빈 오버라이드 — 전부 폴백(회귀 0). locale은 next-intl의
- * useLocale()을 호출부가 넘긴다(이 훅 자체는 next-intl 의존을 안 늘리려고 순수 string으로 받음). */
+ * useLocale()을 호출부가 넘긴다(이 훅 자체는 next-intl 의존을 안 늘리려고 순수 string으로 받음).
+ *
+ * story #4066 마이그(useAsyncResource 위) — 스킵/성공/실패 세 경로 전부 헬퍼가 같은
+ * 종료점에서 loading=false로 닫는다(#4431 카디르 QA가 잡았던 orgId→undefined 영구고착
+ * 클래스가 이제 이 훅 코드에 다시 등장할 여지 자체가 없다). `!res.ok`와 네트워크 예외를
+ * 원래처럼 동일하게(둘 다 조용히 빈 배열 폴백) 취급 — `loadFailed`는 이 훅의 공개 계약
+ * (`OrgDomainLabels`)에 없으니 그대로 노출 안 함(장식 계층, "무설정=기본값" 원칙 그대로).
+ *
+ * ⚠️카디르 재QA(2026-09-19) — 원본 skip 조건 `if (!orgId)`는 falsy 전부(빈 문자열 포함)를
+ * 스킵으로 봤는데, `useAsyncResource`의 skip 판정은 `null`/`undefined`만 인식한다.
+ * `orgId=''`를 그대로 넘기면 `/api/organizations//domain-labels`로 실제 fetch가 나가
+ * "기존동작 무변" 계약이 깨진다(원본·신규 나란히 실행비교로 실증) — `orgId || undefined`로
+ * 정규화해 falsy 전부가 스킵되게 원본 semantics를 보존한다. */
 export function useOrgDomainLabels(orgId: string | undefined, locale: string): OrgDomainLabels {
-  const [entries, setEntries] = useState<DomainLabelEntry[]>([]);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    if (!orgId) {
-      // 카디르 QA 클래스 sweep(#4431, 2026-09-19) — #4421/#4431과 같은 패턴: 조회 中
-      // orgId가 undefined로 바뀌면 이전 effect의 cleanup(cancelled=true)이 그
-      // finally{setLoading(false)}를 막고, 이 분기도 loading을 안 꺼서 영구 고착된다.
-      setEntries([]);
-      setLoading(false);
-      return;
-    }
-    let cancelled = false;
-    setLoading(true);
-    void (async () => {
-      try {
-        const res = await fetchWithAuth(`/api/organizations/${orgId}/domain-labels`);
-        if (!res.ok) {
-          if (!cancelled) setEntries([]);
-          return;
-        }
-        const data = (await res.json()) as unknown;
-        // story #3881(customer-zero) 실측 — 이 `as` 단언은 런타임 검증이 아니라 컴파일 타임
-        // 힌트일 뿐이었다. 응답 body가 배열이 아닌 모양(예: 다른 엔드포인트 mock에 걸린
-        // 테스트·BE 계약 드리프트·프록시 중간 오류 페이지)이면 `setEntries(data)`가 비배열
-        // 값을 그대로 state에 싣고, 다음 렌더의 `for (const e of entries)`가 즉시 TypeError로
-        // 터진다(EventBlockCard가 이 훅을 새로 쓰기 시작하면서 실측 발견 — organization/
-        // events/page.test.tsx의 범용 fetch mock이 이 엔드포인트를 못 알아보는 모양을
-        // 돌려줌). 네트워크 실패와 동일하게(위 catch) 빈 배열로 방어한다 — "무설정=기본값"
-        // 원칙 그대로, 응답 모양이 이상해도 이 장식 계층이 화면 전체를 깨면 안 된다.
-        if (!cancelled) setEntries(Array.isArray(data) ? data : []);
-      } catch {
-        // 네트워크 실패 등 — 조용히 폴백(라벨 오버라이드는 장식 계층, 실패가 보드 자체를
-        // 막으면 안 된다·설계 doc의 "무설정=기본값" 원칙과 동일 정신).
-        if (!cancelled) setEntries([]);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [orgId]);
+  const { data: entries, loading } = useAsyncResource<string, DomainLabelEntry[]>(
+    orgId || undefined, [],
+    async (id) => {
+      const res = await fetchWithAuth(`/api/organizations/${id}/domain-labels`);
+      // 카디르 재QA — 이 !res.ok 체크가 없어도 대개 결과가 같아서(에러 응답이 보통
+      // 배열이 아니라 아래 Array.isArray 방어가 같은 []를 낸다) 이 체크 자체를 지워도
+      // 기존 테스트가 안 틀렸다([못틀리는대조미자]). !res.ok는 응답 *모양*이 아니라
+      // *상태*를 보는 별개 방어라 명시적으로 먼저 걸러야 한다(회귀테스트가 배열 모양
+      // 에러 바디로 이 둘을 갈라 pin).
+      if (!res.ok) return [];
+      const data = (await res.json()) as unknown;
+      // story #3881(customer-zero) 실측 — 이 `as` 단언은 런타임 검증이 아니라 컴파일 타임
+      // 힌트일 뿐이었다. 응답 body가 배열이 아닌 모양(예: 다른 엔드포인트 mock에 걸린
+      // 테스트·BE 계약 드리프트·프록시 중간 오류 페이지)이면 비배열 값을 그대로 state에
+      // 싣고, 다음 렌더의 `for (const e of entries)`가 즉시 TypeError로 터진다
+      // (EventBlockCard가 이 훅을 새로 쓰기 시작하면서 실측 발견). 네트워크 실패와
+      // 동일하게 빈 배열로 방어한다 — "무설정=기본값" 원칙 그대로, 응답 모양이 이상해도
+      // 이 장식 계층이 화면 전체를 깨면 안 된다.
+      return Array.isArray(data) ? data : [];
+    },
+  );
 
   const byKey = new Map<string, DomainLabelEntry>();
   for (const e of entries) byKey.set(`${e.domain}:${e.canonical_slug}`, e);
