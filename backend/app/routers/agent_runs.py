@@ -1,3 +1,4 @@
+import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Literal
@@ -9,26 +10,75 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.agent_run_tool_call import AgentRunToolCall
+from app.models.pm import Story
 from app.models.project import Project
 from app.models.team import TeamMember
 from app.repositories.agent_run import AgentRunRepository
-from app.schemas.agent_run import AgentRunResponse, CreateAgentRun, UpdateAgentRun
+from app.schemas.agent_run import AgentRunResponse, CancelAgentRun, CreateAgentRun, UpdateAgentRun
 from app.schemas.agent_run_tool_call import AgentRunToolCallResponse
 from app.services.agent_run_lifecycle import AGENT_RUN_TIMEOUT_HOURS
 
 router = APIRouter(prefix="/api/v2/agent-runs", tags=["agent-runs", "Work"])
+logger = logging.getLogger(__name__)
 
-# story #2161: PATCH가 이 세 상태로 전이시키는데 클라가 finished_at을 안 보내면 서버가 채운다
-# (server-authority — MCP는 이미 finished_at을 보낼 수 있지만 항상 보낸다고 신뢰하지 않는다).
-_TERMINAL_STATUSES = {"completed", "failed", "abandoned"}
+# story #2161(원 3값) + story #3961(「정지」 액션, PO 확定 2026-09-16) — cancelled·
+# cancelled_unacknowledged도 종결(그 run은 더 이상 진행 중이 아니다·finished_at 채움).
+# cancel_requested는 **종결이 아니다**(아직 ack/타임아웃 대기 中 — _CANCELLABLE_STATUSES
+# 참조) — PATCH가 이 상태들로 전이시키는데 클라가 finished_at을 안 보내면 서버가 채운다.
+_TERMINAL_STATUSES = {"completed", "failed", "abandoned", "cancelled", "cancelled_unacknowledged"}
 
 # story #3680 — list_agent_runs `status=` 필터의 유효값 집합. DB CHECK 제약
-# (agent_runs_status_check, alembic/versions/0207_agent_runs_status_check_widen.py)이
-# 이미 정본으로 갖고 있는 7값 그대로(신규 정의 0) — Literal이라 FastAPI가 불명값을
-# 자동 422(코드 발명 없이, 이 스토리의 「불명값 422」 AC를 그대로 만족).
+# (agent_runs_status_check, alembic/versions/0207_agent_runs_status_check_widen.py·
+# 0379_agent_run_cancel_protocol.py가 3961의 cancel_requested/cancelled/
+# cancelled_unacknowledged로 확장)이 이미 정본으로 갖고 있는 10값 그대로(신규 정의 0) —
+# Literal이라 FastAPI가 불명값을 자동 422(코드 발명 없이, 이 스토리의 「불명값 422」 AC를
+# 그대로 만족).
 _AGENT_RUN_STATUS_VALUES = Literal[
     "queued", "held", "running", "hitl_pending", "completed", "failed", "abandoned",
+    "cancel_requested", "cancelled", "cancelled_unacknowledged",
 ]
+
+# story #3961 — 중단 요청이 가능한 "아직 살아있는" 상태(cancel_requested 자신은 제외 —
+# 이미 요청 中인 run에 또 요청하면 requested_at/reason이 조용히 덮이는 혼란을 막는다,
+# 409로 명시 거부).
+_CANCELLABLE_STATUSES = {"queued", "held", "running", "hitl_pending"}
+
+# story #3961(PO 확定 2026-09-16) — 자기보고 타이밍이 무보장(이 저장소에 고정 폴링 계약
+# 0, AC1 그라운딩)이라 5분은 너무 짧아 "정상 진행 중인데 미응답으로 오판"이 흔해질 것 —
+# 15분 지나면 "사람이 다른 손을 써야 한다"는 뜻으로 승격. PO 정의: unacknowledged는
+# 드문 실패가 아니라 정상 결과(후속 자동화 0) — 화면 낱말도 「멈춤 요청함 · 아직 응답
+# 없음」(실패 낱말 금지).
+_CANCEL_ACK_TIMEOUT_MINUTES = 15
+
+
+def _effective_cancel_outcome(
+    status: str, cancel_requested_at: datetime | None, *, now: datetime | None = None,
+) -> str | None:
+    """story #3961 — status/cancel_requested_at만으로 "지금 시점 기준 만료됐는가"를 순수
+    계산(부작용 0, DB 쓰기 없음). today_service.py의 read-only 집계(1콜·N+1 0 유지)와
+    단건 엔드포인트의 lazy 확定(_expire_cancel_request_if_due, 실제 UPDATE)이 이 함수
+    하나를 공유한다 — 판정 기준이 두 곳에서 갈릴 수 없다."""
+    if status != "cancel_requested" or cancel_requested_at is None:
+        return None
+    _now = now or datetime.now(timezone.utc)
+    elapsed = _now - cancel_requested_at
+    if elapsed >= timedelta(minutes=_CANCEL_ACK_TIMEOUT_MINUTES):
+        return "unacknowledged"
+    return "requested"
+
+
+async def _expire_cancel_request_if_due(repo: AgentRunRepository, run):
+    """story #3961 AC1 처방("만료 판정 — 워커 tick 또는 읽기 시점 lazy") — 신규 워커 0,
+    단건 조회/수정 경로(get_agent_run·update_agent_run·cancel_agent_run)에서 읽을 때마다
+    확認. 만료면 실제로 cancelled_unacknowledged로 확定(PO 「서버가 확定한다」 표현 그대로 —
+    계산값만 보여주고 DB는 그대로 두지 않는다) + finished_at·cancel_outcome 기록."""
+    if _effective_cancel_outcome(run.status, run.cancel_requested_at) != "unacknowledged":
+        return run
+    now = datetime.now(timezone.utc)
+    updated = await repo.update(
+        run.id, status="cancelled_unacknowledged", finished_at=now, cancel_outcome="unacknowledged",
+    )
+    return updated or run
 
 # story #2346 AC3(범위: 기록만) — 「긴 텍스트 필드」 정의, stories.py/docs.py와 동형.
 _LENGTH_TRACKED_FIELDS = ("result_summary", "last_error_code")
@@ -152,6 +202,7 @@ async def get_agent_run(
         raise HTTPException(status_code=404, detail="Agent run not found")
     if not await has_project_access(session, uuid.UUID(auth.user_id), run.project_id, org_id):
         raise HTTPException(status_code=404, detail="Agent run not found")
+    run = await _expire_cancel_request_if_due(repo, run)
     name_map = await _agent_name_map(session, {run.agent_id})
     return AgentRunResponse.model_validate(run).model_copy(update={"agent_name": name_map.get(run.agent_id)})
 
@@ -344,6 +395,30 @@ async def update_agent_run(
     # 덮어쓸 수 있었다(형제 list/create는 이미 has_project_access 有·불일치 시그널이 지목). 404·body-claimed 금지.
     if not await has_project_access(repo.session, uuid.UUID(auth.user_id), existing.project_id, org_id):
         raise HTTPException(status_code=404, detail="Agent run not found")
+    # story #3961 — lazy 만료 확認이 PATCH 평가보다 먼저다: 이미 15분이 지난 cancel_requested를
+    # 이 PATCH가 "지금 막 ack" 하려 해도, 서버 시각 기준 이미 cancelled_unacknowledged로
+    # 確定됐어야 하는 자리라 그 확定을 먼저 반영한 뒤(existing 갱신) 아래 ack 검증을 그
+    # 새 상태로 판정한다 — "만료 직전에 아슬아슬하게 ack"라는 경합을 서버 시각 하나로만 가른다.
+    existing = await _expire_cancel_request_if_due(repo, existing)
+    # story #3961 — 에이전트 자기보고 PATCH는 cancel_requested·cancelled_unacknowledged를
+    # 직접 세팅 못 한다(둘 다 사람의 POST /cancel 또는 서버의 lazy 만료만의 전용 전이 —
+    # "정지 요청"과 "타임아웃 확定"은 자기보고가 아니라 그 자체가 서버/사람 권위다).
+    # cancelled 하나만 예외 허용(ack) — 단 existing.status가 이미 cancel_requested일 때만
+    # (요청받은 적 없는데 스스로 "취소됐다"고 선언하는 위조 방지).
+    if body.status in ("cancel_requested", "cancelled_unacknowledged"):
+        raise HTTPException(
+            status_code=422,
+            detail=f"status={body.status!r} cannot be set via self-report (server/human-only transition).",
+        )
+    if body.status == "cancelled" and existing.status != "cancel_requested":
+        raise HTTPException(
+            status_code=409,
+            detail=f"ack (status=cancelled) is only valid when the run is cancel_requested "
+            f"(current status={existing.status!r}).",
+        )
+    _cancel_ack_fields: dict = {}
+    if body.status == "cancelled":
+        _cancel_ack_fields = {"cancel_ack_at": datetime.now(timezone.utc), "cancel_outcome": "acknowledged"}
     # story #2161: finished_at 갭 — MCP는 이미 보낼 수 있으나(sprintable_mcp update_run_status)
     # 항상 보낸다고 신뢰하지 않는다. 종단 상태로 전이인데 클라 미제공이면 서버가 now()로 채운다
     # (duration_ms GENERATED가 살아나는 유일한 경로 — 안 채우면 정상 종료도 영구 NULL).
@@ -371,6 +446,7 @@ async def update_agent_run(
         id,
         status=body.status,
         finished_at=_finished_at,
+        **_cancel_ack_fields,
         **_explicit_fields,
     )
     if run is None:
@@ -396,5 +472,104 @@ async def update_agent_run(
                 entity_id=id,
                 context={"length_changes": _length_changes},
             )
+    name_map = await _agent_name_map(repo.session, {run.agent_id})
+    return AgentRunResponse.model_validate(run).model_copy(update={"agent_name": name_map.get(run.agent_id)})
+
+
+@router.post("/{id}/cancel", response_model=AgentRunResponse)
+async def cancel_agent_run(
+    id: uuid.UUID,
+    body: CancelAgentRun,
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+    repo: AgentRunRepository = Depends(_get_repo),
+) -> AgentRunResponse:
+    """story #3961(「정지」 액션 — 중단 요청 프로토콜, PO 확定 2026-09-16) — 프로세스를
+    죽이지 않는다. status를 ``cancel_requested``로 전이 + 감사 3필드(requested_by/at/reason)
+    기록 + `preset.agent_run.cancel_requested` 이벤트 발행(대상 에이전트가 poll_events로
+    자기보고보다 먼저 볼 수 있는 신호 자리 — AC1 그라운딩: 이 저장소엔 고정 폴링 계약이
+    없어 자기보고 PATCH 응답 하나에만 기대면 장기 실행 run은 못 볼 수 있다).
+
+    권한(PO 확定) = org owner/admin **또는** 그 run이 붙은 story의 assignee(사람, Story.
+    assignee_id) **또는** 그 story를 위임한 사람(Story.human_owner_member_id) — 3959/
+    today_service.py의 "위임/참여" 판정과 동일 두 컬럼(새 인가 축 발명 0). story_id가
+    없는 run(체험/1회성)은 org owner/admin만 가능(대상 지정할 사람이 없다).
+    """
+    from app.services.member_resolver import resolve_member
+    from app.services.project_auth import has_project_access, is_org_owner_or_admin
+
+    existing = await repo.get(id)
+    if existing is None or existing.org_id != org_id:
+        raise HTTPException(status_code=404, detail="Agent run not found")
+    if not await has_project_access(repo.session, uuid.UUID(auth.user_id), existing.project_id, org_id):
+        raise HTTPException(status_code=404, detail="Agent run not found")
+
+    existing = await _expire_cancel_request_if_due(repo, existing)
+
+    caller = await resolve_member(auth, org_id, repo.session, project_id=existing.project_id)
+    # PO 확定 문구 그대로("사람이... 인가된 절차로 멈춘다") — 이 액션의 주체는 항상 사람이다.
+    # story.assignee_id가 에이전트를 가리키는 경우(위임 대상 컬럼은 human/agent 혼용, 3821
+    # 그라운딩 근거)까지 "그 일의 assignee"로 인정하면 에이전트가 자기 자신·다른 에이전트의
+    # run을 인가 없이 멈추게 허용하는 셈이라 명시로 막는다.
+    if caller.type != "human":
+        raise HTTPException(status_code=403, detail="Only a human can request this action.")
+    is_admin = await is_org_owner_or_admin(repo.session, uuid.UUID(auth.user_id), org_id)
+    is_story_owner = False
+    if existing.story_id is not None:
+        story_r = await repo.session.execute(
+            select(Story.assignee_id, Story.human_owner_member_id).where(Story.id == existing.story_id)
+        )
+        story_row = story_r.first()
+        if story_row is not None:
+            assignee_id, human_owner_member_id = story_row
+            is_story_owner = caller.id in (assignee_id, human_owner_member_id)
+    if not (is_admin or is_story_owner):
+        raise HTTPException(
+            status_code=403,
+            detail="Only org owner/admin or this work item's assignee can request cancellation.",
+        )
+
+    if existing.status not in _CANCELLABLE_STATUSES:
+        raise HTTPException(
+            status_code=409,
+            detail=f"status={existing.status!r} runs cannot be cancel-requested "
+            f"(cancellable statuses: {sorted(_CANCELLABLE_STATUSES)}).",
+        )
+
+    now = datetime.now(timezone.utc)
+    run = await repo.update(
+        id,
+        status="cancel_requested",
+        cancel_requested_by=caller.id,
+        cancel_requested_at=now,
+        cancel_reason=body.reason,
+    )
+    if run is None:
+        raise HTTPException(status_code=404, detail="Agent run not found")
+
+    # story #3961(페드루 PO CHANGES①, PR#4364 16:02Z) — best-effort 격리(story_status_events.py::
+    # emit_story_status_changed와 동형 계약): 이벤트 발행 실패가 이미 확定된 cancel_requested
+    # 전이 자체를 롤백하면 안 된다(발행은 부가 신호, 상태 전이가 1차 사실).
+    # timeout_at(now+15분) — 수신 런타임이 "언제까지 ack해야 unacknowledged로 確定되는지"를
+    # 자기 로컬 시계로 다시 계산할 필요 없게(_CANCEL_ACK_TIMEOUT_MINUTES SSOT는 서버 쪽에만
+    # 있다 — 값을 페이로드에 실어 그대로 전달, 클라가 상수를 따로 하드코딩할 필요 0).
+    try:
+        from app.routers.events import publish_preset_event
+
+        await publish_preset_event(
+            repo.session, org_id, "preset.agent_run.cancel_requested",
+            {
+                "run_id": str(run.id),
+                "agent_id": str(run.agent_id),
+                "requested_by_member_id": str(caller.id),
+                "reason": body.reason,
+                "timeout_at": (now + timedelta(minutes=_CANCEL_ACK_TIMEOUT_MINUTES)).isoformat(),
+            },
+        )
+    except Exception:
+        logger.warning(
+            "agent_run.cancel_requested 이벤트 발행 실패(run=%s org=%s)", run.id, org_id, exc_info=True,
+        )
+
     name_map = await _agent_name_map(repo.session, {run.agent_id})
     return AgentRunResponse.model_validate(run).model_copy(update={"agent_name": name_map.get(run.agent_id)})
