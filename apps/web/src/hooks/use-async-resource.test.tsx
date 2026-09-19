@@ -6,6 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { useAsyncResource, useAsyncResourceBatch } from './use-async-resource';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -28,6 +29,13 @@ async function flush(times = 4) {
   await act(async () => {
     for (let i = 0; i < times; i++) await Promise.resolve();
   });
+}
+
+// renderToStaticMarkup은 effect를 안 돌려 useState 초기값(=실 첫 페인트가 낼 값) 그대로를
+// 관측한다 — 단, JSX 텍스트 노드의 `"`를 `&quot;`로 이스케이프하므로 JSON.parse 前에 되돌린다.
+function dumpFromStaticMarkup(html: string) {
+  const raw = html.match(/data-testid="dump">(.*?)<\/div>/)![1];
+  return JSON.parse(raw.replace(/&quot;/g, '"'));
 }
 
 function dump() {
@@ -225,6 +233,38 @@ describe('useAsyncResource', () => {
     await flush();
     // data는 그대로, loadFailed만 true — 이전 성공 데이터가 실패 화면으로 안 지워진다.
     expect(dump3()).toEqual({ data: 'first-success', loading: false, loadFailed: true });
+  });
+
+  // story #4071 qa:changes(유나 design, 2026-09-19, #4445 재작업 계기, 마운트 flash) —
+  // act() 기반 렌더는 effect의 동기 부분(setLoading(true))까지 act()가 자체적으로
+  // 플러시해버려 "첫 페인트" 순간을 관측 못 한다(실 브라우저는 effect가 paint 後 실행돼
+  // 그 사이 한 프레임이 보인다). renderToStaticMarkup은 effect를 아예 안 돌리므로
+  // useState 초기값 그 자체(=실제 첫 페인트가 낼 값)를 정확히 관측한다.
+  it('initialLoading 미지정(기본값)이면 첫 페인트에서 loading이 false다', () => {
+    function Harness() {
+      const { loading } = useAsyncResource<string, null>('a', null, async () => null, []);
+      return <div data-testid="dump">{JSON.stringify({ loading })}</div>;
+    }
+    const html = renderToStaticMarkup(<Harness />);
+    expect(dumpFromStaticMarkup(html)).toEqual({ loading: false });
+  });
+
+  // 핵심 회귀 — initialLoading:true면 key가 있을 때 첫 페인트부터 이미 loading:true다
+  // (빈 그리드/EmptyState가 한 프레임도 안 보인다).
+  it('initialLoading:true면 key가 있을 때 첫 페인트부터 이미 loading:true다(마운트 flash 방지, 핵심 회귀)', () => {
+    function Harness({ resourceKey }: { resourceKey: string | null }) {
+      const { loading } = useAsyncResource<string, null>(resourceKey, null, async () => null, [], { initialLoading: true });
+      return <div data-testid="dump">{JSON.stringify({ loading })}</div>;
+    }
+    const htmlWithKey = renderToStaticMarkup(<Harness resourceKey="a" />);
+    expect(dumpFromStaticMarkup(htmlWithKey)).toEqual({ loading: true });
+
+    // 원본(use-channel-post-calendar-data.ts 구판)의 `useState(true)`도 orgId 값과 무관한
+    // 무조건 초기화였다 — key 유무를 안 가린다(effect의 skip 분기가 뒤이어 false로
+    // 되돌릴 뿐). initialLoading은 그 원본 동작을 그대로 재현하는 옵션이라 key=null이어도
+    // 마찬가지로 true — "더 똑똑하게" 스킵을 미리 아는 신규 계약을 만들지 않는다.
+    const htmlNoKey = renderToStaticMarkup(<Harness resourceKey={null} />);
+    expect(dumpFromStaticMarkup(htmlNoKey)).toEqual({ loading: true });
   });
 });
 

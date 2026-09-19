@@ -37,6 +37,15 @@ export interface UseAsyncResourceOptions {
    * 훅(#4444/#4446 등, 원본도 실패 시 리셋이었음) 전부가 영향받으니
    * (계약변경소비처전수 위험) 옵션으로 분리 — true를 넘긴 훅만 이전 데이터를 보존한다. */
   keepPreviousDataOnError?: boolean;
+  /** story #4071 qa:changes(유나 design, 2026-09-19, #4445 재작업 계기) — 기본값(false)은
+   * `loading`을 false로 초기화한다. 마이그 대상 훅 중 일부(예:
+   * use-channel-post-calendar-data.ts)는 원본이 `useState(true)`로 초기화해 마운트
+   * 즉시(첫 페인트부터) 로딩 상태였다 — 헬퍼 기본값(false)을 그대로 쓰면 첫 페인트가
+   * "빈 그리드/EmptyState"였다가 effect가 뒤늦게 loading=true로 뒤집는 <1프레임 flash가
+   * 난다("채널 없음" 등 잘못된 상태가 한 프레임이라도 보이면 "무변" 계약 위반).
+   * keepPreviousDataOnError와 같은 패턴 — 옵션으로 분리해 다른 소비처(원본도 false
+   * 초기화였던 훅들)는 무영향으로 둔다. */
+  initialLoading?: boolean;
 }
 
 /**
@@ -58,9 +67,9 @@ export function useAsyncResource<Key, T>(
   deps: React.DependencyList = [],
   options: UseAsyncResourceOptions = {},
 ): UseAsyncResourceResult<T> {
-  const { keepPreviousDataOnError = false } = options;
+  const { keepPreviousDataOnError = false, initialLoading = false } = options;
   const [data, setData] = useState<T>(initial);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(initialLoading);
   const [loadFailed, setLoadFailed] = useState(false);
   const [nonce, setNonce] = useState(0);
   const refresh = useCallback(() => setNonce((n) => n + 1), []);

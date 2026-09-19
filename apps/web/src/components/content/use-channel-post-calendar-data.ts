@@ -101,6 +101,12 @@ export function useChannelPostCalendarData(
   // setError(true)만 호출). useAsyncResource 기본값(실패 시 initial로 리셋)을 그대로
   // 썼으면 캘린더가 이미 그려둔 일정을 실패 화면으로 지우는 회귀가 났다 —
   // keepPreviousDataOnError:true로 원본 계약 복원.
+  //
+  // ⚠️유나 design QA(#4445, 2026-09-19, 마운트 flash) — 원본은 `useState(true)`로
+  // loading을 초기화해 마운트 즉시(첫 페인트부터) 로딩 상태였다. 헬퍼 기본값(false)을
+  // 그대로 쓰면 첫 페인트가 "빈 그리드/채널 없음" EmptyState였다가 effect가 뒤늦게
+  // loading=true로 뒤집는 <1프레임 flash가 나 "무변" 계약 위반 — initialLoading:true로
+  // 원본 마운트 즉시 로딩 복원.
   const { data, loading, loadFailed } = useAsyncResource<string, CalendarFetchResult>(
     orgId || undefined, EMPTY_RESULT,
     async (id) => {
@@ -142,7 +148,7 @@ export function useChannelPostCalendarData(
       return { scheduled: grouped, unscheduled: unscheduledJson?.data ?? [] };
     },
     [range.from, range.to, connectionId, displayTimezone.tz],
-    { keepPreviousDataOnError: true },
+    { keepPreviousDataOnError: true, initialLoading: true },
   );
 
   return { scheduled: data.scheduled, unscheduled: data.unscheduled, loading, error: loadFailed, displayTimezone };

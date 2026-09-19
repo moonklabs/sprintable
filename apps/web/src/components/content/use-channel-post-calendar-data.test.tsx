@@ -5,6 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { useChannelPostCalendarData } from './use-channel-post-calendar-data';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -218,5 +219,16 @@ describe('useChannelPostCalendarData', () => {
     // 이전 데이터가 실패 화면으로 안 지워진다 — 원본 계약.
     expect(container.querySelector('[data-testid="scheduled-count"]')?.textContent).toBe('1');
     expect(container.querySelector('[data-testid="unscheduled-count"]')?.textContent).toBe('1');
+  });
+
+  // story #4071 qa:changes(유나 design, 2026-09-19, 마운트 flash) — 원본은
+  // `useState(true)`로 loading을 초기화해 마운트 즉시(첫 페인트부터) 로딩 상태였다.
+  // renderToStaticMarkup은 effect를 안 돌려 useState 초기값(=실 첫 페인트가 낼 값) 그대로를
+  // 관측한다 — act() 기반 렌더는 effect의 동기 부분까지 자체 플러시해버려 이 차이를
+  // 못 잡는다(핵심 회귀, initialLoading:true 없으면 FAIL).
+  it('마운트 첫 페인트부터 loading이 이미 true다(EmptyState가 한 프레임도 안 보임, 핵심 회귀)', () => {
+    const html = renderToStaticMarkup(<Harness orgId={ORG_ID} />);
+    const loadingText = html.match(/data-testid="loading">(.*?)<\/span>/)![1];
+    expect(loadingText).toBe('true');
   });
 });
