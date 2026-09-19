@@ -100,11 +100,18 @@ function keysDepsKey(keys: string[]): string {
 }
 
 /**
- * `keys` 배열만큼 `fetchOne`을 병렬 호출(Promise.all)한다 — BE가 배치 엔드포인트를 안 여는
- * 한 훅마다 개별 호출이 이 레포의 관례(useHookPerformances/useMaterialPerformances와 동형).
- * `keys`가 빈 배열이면 스킵 경로도 `useAsyncResource`와 동일하게 같은 종료점에서
+ * `keys` 배열만큼 `fetchOne`을 병렬 호출(Promise.all 계열)한다 — BE가 배치 엔드포인트를
+ * 안 여는 한 훅마다 개별 호출이 이 레포의 관례(useHookPerformances/useMaterialPerformances
+ * 와 동형). `keys`가 빈 배열이면 스킵 경로도 `useAsyncResource`와 동일하게 같은 종료점에서
  * `loading=false`로 끝난다.
- */
+ *
+ * ⚠️story #4440 qa:changes(카디르, 2026-09-19) — 이 카드가 막으려던 바로 그 "loading
+ * 영구고착" 버그가 배치 경로 자신의 `Promise.all`에서 재현됐다: `fetchOne`이 하나라도
+ * reject하면(내부에서 catch 안 하는 호출부도 있을 수 있다 — 그 전제를 이 헬퍼가 강제할 수
+ * 없다) `Promise.all`이 즉시 reject하고, `void (async () => {...})()`엔 `.catch`가 없어
+ * `setLoading(false)`에 영영 못 도달 + unhandled rejection이 났다. `Promise.allSettled`로
+ * 교체 — reject한 항목도 `fetchOne`이 null을 반환한 것과 동일하게(그 key만 실패, 전체를
+ * 안 죽임) 수렴시켜 이 async 블록이 항상 정상 종료하게 만든다. */
 export function useAsyncResourceBatch<T>(
   keys: string[],
   fetchOne: (key: string) => Promise<T | null>,
@@ -126,11 +133,16 @@ export function useAsyncResourceBatch<T>(
     setLoading(true);
     setLoadFailed(false);
     void (async () => {
-      const results = await Promise.all(resolvedKeys.map((k) => fetchOne(k)));
+      const settled = await Promise.allSettled(resolvedKeys.map((k) => fetchOne(k)));
       if (cancelled) return;
-      const next: Record<string, T> = {};
+      // story #4440 P2(카디르) — key가 "__proto__" 등 특수 프로퍼티명이면 plain object에
+      // 직접 대입(`next[key] = item`) 시 own property가 아니라 프로토타입 체인을 건드릴
+      // 수 있다(그 key만 조용히 소실). 이 도메인(uuid/hook_key)에선 저위험이지만 범용
+      // 헬퍼라 Object.create(null)로 프로토타입 자체를 없애 그 클래스를 구조로 막는다.
+      const next: Record<string, T> = Object.create(null) as Record<string, T>;
       let anyFailed = false;
-      results.forEach((item, i) => {
+      settled.forEach((result, i) => {
+        const item = result.status === 'fulfilled' ? result.value : null;
         if (item !== null) next[resolvedKeys[i]!] = item;
         else anyFailed = true;
       });

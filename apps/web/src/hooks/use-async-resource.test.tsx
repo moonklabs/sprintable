@@ -280,4 +280,35 @@ describe('useAsyncResourceBatch', () => {
     expect(fetchOne).toHaveBeenCalledTimes(4);
     expect(dump().keys.sort()).toEqual(['a', 'b c']);
   });
+
+  // story #4440 qa:changes P1(카디르, 2026-09-19) — 이 헬퍼가 막으려던 바로 그 버그가
+  // 배치 자신의 Promise.all에서 재현됐다: fetchOne이 하나라도 reject하면 Promise.all이
+  // 즉시 reject하고, 뒤따르는 setLoading(false)에 영영 못 도달했다(+unhandled rejection).
+  // Promise.allSettled로 그 reject를 그 key만의 실패로 수렴시키는지 pin.
+  it('fetchOne 중 하나가 reject해도 loading이 고착되지 않고, 그 key만 결과에서 빠진다(#4440 핵심 회귀)', async () => {
+    const fetchOne = vi.fn(async (k: string) => {
+      if (k === 'bad') throw new Error('boom');
+      return `v:${k}`;
+    });
+    await act(async () => { root.render(<Harness keys={['a', 'bad']} fetchOne={fetchOne} />); });
+    await flush();
+    expect(dump()).toEqual({ keys: ['a'], loading: false, loadFailed: false });
+  });
+
+  it('전부 reject하면 loading이 고착되지 않고 loadFailed=true다', async () => {
+    const fetchOne = vi.fn(async () => { throw new Error('boom'); });
+    await act(async () => { root.render(<Harness keys={['a']} fetchOne={fetchOne} />); });
+    await flush();
+    expect(dump()).toEqual({ keys: [], loading: false, loadFailed: true });
+  });
+
+  // story #4440 qa:changes P2(카디르) — key가 "__proto__"면 plain object 직접대입이
+  // own property가 아니라 프로토타입 체인을 오염시켜 그 key가 조용히 사라질 수 있다
+  // (Object.create(null) 사용으로 구조 방지).
+  it('key가 "__proto__"여도 그 결과가 own property로 정상 보존된다(프로토타입 오염 방지, P2)', async () => {
+    const fetchOne = vi.fn(async (k: string) => `v:${k}`);
+    await act(async () => { root.render(<Harness keys={['__proto__']} fetchOne={fetchOne} />); });
+    await flush();
+    expect(dump()).toEqual({ keys: ['__proto__'], loading: false, loadFailed: false });
+  });
 });
