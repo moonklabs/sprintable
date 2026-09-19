@@ -1845,11 +1845,24 @@ async def _publish_registry_event_core(
     # story #3312(M1→M3·마케팅자동화) — routing 해석 직후, 메시지 발송 이전에 게이트 부수효과를
     # 먼저 정착시킨다(routing_resolver 호출과 동일 컴포지션 스타일 — 인라인 분기 아님).
     # definition에 이 stage의 gate 선언이 없으면 완전 no-op(AC3 회귀 0).
+    from app.services.generation_budget import GenerationBudgetExceededError
     from app.services.recipe_gate_hooks import maybe_create_stage_gate
 
-    await maybe_create_stage_gate(
-        db, org_id=org_id, definition=definition, payload=payload, requester_member_id=sender.id,
-    )
+    try:
+        await maybe_create_stage_gate(
+            db, org_id=org_id, definition=definition, payload=payload, requester_member_id=sender.id,
+        )
+    except GenerationBudgetExceededError as e:
+        # story #4044 — channel_posts.py/site_posts.py의 submit 경로(#3498 AC2)와 동일
+        # 4값 detail shape 재사용(신규 에러 계약 발명 0).
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "GENERATION_BUDGET_EXCEEDED",
+                "limit_minor": e.limit_minor, "spent_minor": e.spent_minor,
+                "estimated_cost_minor": e.estimated_cost_minor, "remaining_minor": e.remaining_minor,
+            },
+        ) from e
 
     # story #3337(선생님 4바퀴 실사고) — 위 게이트 훅과 같은 컴포지션 지점, 같은 원칙(정의에
     # 해당 없으면 완전 no-op). 첫 stage가 payload.repeat를 실었으면 반복 스케줄을 세우고,

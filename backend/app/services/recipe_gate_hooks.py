@@ -29,6 +29,18 @@ logger = logging.getLogger(__name__)
 # 사실 자체를 정직하게 드러낸다).
 _UNCONFIRMED = "미확認"
 
+# story #4044(E-RECIPE-1 ①, 페드루 PO 確定 2026-09-18 — "기존 generation_budget.py+0333
+# sealed_estimated_cost_minor 재사용, 새 축 만들지 말 것") — 레시피 stage 게이트 중 "실탄
+# 발사" 부류. concept_approval(story #3561)이 doc 봉인 특수분기를 갖는 것과 동형으로, 이
+# gate_type만 예산 특수분기(사전 하드체크+사후 sealed_estimated_cost_minor 봉인)를 갖는다.
+# ⚠️channel_posts.py/site_posts.py의 budget-check는 "external_publish 게이트 그 자신"에
+# 얹혀 있다(발행 신청 시점=생성 시점이 같은 도메인이라 한 게이트로 충분) — 이 레시피는 실탄
+# 발사(생성 착수)와 최종 발행이 여러 stage 떨어진 별개 시점이라 그 패턴을 literal로 재사용할
+# 수 없다(같은 work_item에 gate_type="external_publish"를 또 만들면 create_gate 멱등 키가
+# 충돌한다). 그래서 새 gate_type 문자열 하나만 열고, 기존 판정 프리미티브(check_generation_
+# budget_or_raise)와 기존 컬럼(gate.sealed_estimated_cost_minor, 0333)만 재사용한다.
+_GENERATION_BUDGET_GATE_TYPE = "generation_budget"
+
 
 class UnknownApproverRoleError(ValueError):
     """approver 역할참조를 실 member_id로 못 풀었음 — 어휘는 등록 시점에 이미 검증됐으므로,
@@ -267,6 +279,36 @@ async def maybe_create_stage_gate(
     # 이 값을 읽어 반려/승인 통지 수신자에 합류시킨다(work_item 미배정 시 그 통지가
     # «시스템 발행 혼자 있는 방»에 갇히던 결함의 근본 처방).
     neutral_facts["requested_by_member_id"] = str(requester_member_id)
+    # story #4058(②③ 정합, 페드루 PO 経由 유나 2026-09-19) — gates/[id]가 "이 stage
+    # 산출물" evidence만 걸러 부르는 접점. 이 함수가 게이트 생성 시점에 이미 쥐고 있는
+    # stage 값을 denorm으로 얹는다(새 컬럼 0, 기존 neutral_facts JSONB 관례 재사용) —
+    # FE는 GET /api/v2/evidence?work_item_id=...로 받은 전체 목록을 payload.stage==
+    # gate.neutral_facts.stage로 client-side 필터한다(evidence.py 쪽 새 쿼리 파라미터
+    # 불요, 최소 침습 원칙 그대로).
+    neutral_facts["stage"] = stage
+
+    # story #4044 — gate_type="generation_budget"은 create_gate() 호출 *전*에 하드체크한다
+    # (channel_posts.py/site_posts.py의 submit-시점 422와 동일 판정 지점 — 반쪽 봉인 없이
+    # 잔량 초과면 게이트 자체를 만들지 않는다). estimated_cost_minor는 payload의 선택
+    # 필드(정의 저자가 이 stage의 payload_schema에 열어야 발행 시 실릴 수 있다) — 없으면
+    # check_generation_budget_or_raise 자신의 기존 규약대로 검사를 스킵한다(AC2 "미설정이면
+    # 통과"). 통과분은 neutral_facts에 실어 결재 카드가 "편당 예상 비용"·잔여 예산을
+    # 실물로 보여준다(story #3312 처방 3, "가서 보라" 금지와 동형).
+    if gate_decl["type"] == _GENERATION_BUDGET_GATE_TYPE:
+        estimated_cost_minor = payload.get("estimated_cost_minor")
+        if isinstance(estimated_cost_minor, int) and not isinstance(estimated_cost_minor, bool):
+            from app.services.generation_budget import (
+                check_generation_budget_or_raise,
+                compute_generation_budget_status,
+            )
+
+            await check_generation_budget_or_raise(db, org_id=org_id, estimated_cost_minor=estimated_cost_minor)
+            neutral_facts["estimated_cost_minor"] = estimated_cost_minor
+            budget_status = await compute_generation_budget_status(db, org_id=org_id)
+            if budget_status is not None:
+                neutral_facts["budget_limit_minor"] = budget_status["limit_minor"]
+                neutral_facts["budget_spent_minor"] = budget_status["spent_minor"]
+                neutral_facts["budget_remaining_minor"] = budget_status["remaining_minor"]
 
     from app.services.approval_delivery import dispatch_approval_request_cards
     from app.services.gate_service import (
@@ -302,6 +344,14 @@ async def maybe_create_stage_gate(
     # 못 찾으면(doc_ref 없음·해소 실패) 조용히 스킵(지어내지 않는다 — sealed_doc_id는
     # null로 남고, doc.py::_reseal_concept_approval_gate_on_doc_update가 애초에 그
     # 게이트를 못 찾아 재승인 훅이 무동작이 될 뿐, 게이트 생성 자체는 막지 않는다).
+    # story #4044 — gate_type="generation_budget"의 sealed_estimated_cost_minor 봉인(0333
+    # 컬럼 재사용, 신규 컬럼 0). concept_approval의 sealed_doc_* 봉인과 동일 자리·동일
+    # 원칙(create_gate()는 gate_type을 안 가리는 공용 chokepoint라 이 훅에서만 채운다).
+    if gate_type == _GENERATION_BUDGET_GATE_TYPE:
+        estimated_cost_minor = payload.get("estimated_cost_minor")
+        if isinstance(estimated_cost_minor, int) and not isinstance(estimated_cost_minor, bool):
+            gate.sealed_estimated_cost_minor = estimated_cost_minor
+
     if gate_type == "concept_approval":
         doc_ref = await _resolve_doc_by_id(db, org_id=org_id, doc_id_raw=payload.get("doc_ref"))
         if doc_ref is not None:
