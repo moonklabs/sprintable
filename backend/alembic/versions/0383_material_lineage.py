@@ -3,18 +3,18 @@
 기존 엔티티 참조(blob 신규 저장 0, SaaS 경계) — app/models/material_lineage.py 모듈
 docstring 참조.
 
-down_revision=0378 — 이 스토리 착수 시점 실물 head(`alembic heads` 확인, 2026-09-19).
-0379는 열린 형제 PR 3건(#4039/#4363/#4364)이 동시에 점유해 이미 확定 충돌 상태라(#4419
-가드 로그 실측) 그 번호를 또 쓰지 않는다 — 머지 순서가 정해지는 시점에 이 레포 관례대로
-renumber로 해소되는 자리(코드 결함 아님, 신규 충돌을 안 늘리려 0380을 선택)."""
+revision=0383·down_revision=0382 — 17:12 배치 renumber(PO 확定, 2026-09-19). 0379/0380은
+열린 형제 PR(#4363/#4364)이 점유해 충돌 존이라(#4419 가드 로그 실측) 그 위 free 블록에
+얹었다: #4419(0381)→#4423(0382)→이 파일(0383) 배치 체인 세 번째 장. 최초 리비전 번호는
+0380(down_revision=0378)이었다 — 이 갱신본이 그 위에 정정."""
 from __future__ import annotations
 
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision = "0380"
-down_revision = "0378"
+revision = "0383"
+down_revision = "0382"
 branch_labels = None
 depends_on = None
 
