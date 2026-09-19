@@ -50,25 +50,41 @@ export function orderedPresentKinds(
 }
 
 export interface CurrentAndHistory {
-  /** 이 kind의 가장 최근(created_at 최댓값) evidence — "지금 승인 대상"으로 그린다.
-   * 그룹이 비어 있을 리 없다(groupProductionWorkbenchEvidenceByKind가 빈 배열 키를 안
-   * 만든다), 그래도 null을 열어 호출부가 방어적으로 다루게 한다. */
+  /** "지금 승인 대상"으로 그릴 1건 — 판별 못 하면(아래 no-fiction 분기) null. 호출부는
+   * null을 "승격 대상 없음"(전부 중립 표시)으로 다뤄야지, 첫/마지막 항목을 대신 승격하면
+   * 안 된다(그게 이 함수가 고치는 바로 그 결함이다). */
   current: ProductionWorkbenchEvidenceItem | null;
-  /** current를 제외한 나머지 — 오래된 순(created_at 오름차순, 읽는 순서 그대로). */
+  /** current를 제외한 나머지 — created_at 오름차순. current가 null이면 items 전체(정렬만
+   * 됨)가 여기 담긴다 — 호출부가 "전부 중립 나열"로 렌더할 원자료. */
   history: ProductionWorkbenchEvidenceItem[];
 }
 
-/** story #4433 qa:changes(카디르, 2026-09-19) — 같은 kind에 evidence가 여러 건이면
- * (컨셉 반려 후 재제출 등, 이 파일 상단 코멘트) "지금 승인 대상"과 "지난 기록"을 시각으로
- * 갈라야 한다는 지적. created_at 정렬 기준은 이 함수가 짓는다(호출부가 새로 안 만들게).
- * stage/컨셉 라벨 필드 자체가 아직 없어(PR #4044 stage denorm 미착지, no-fiction) "컨셉 A/B"
- * 같은 이름은 지어내지 않고, 실제로 있는 시간 축(created_at)만으로 최신/과거를 가른다. */
-export function partitionCurrentAndHistory(items: ProductionWorkbenchEvidenceItem[]): CurrentAndHistory {
+/** story #4433 qa:changes round-3(카디르+페드루, 2026-09-19) — round-2의 "created_at
+ * 최신=현재" 추정은 근본적으로 틀렸다: 새 컨셉이 막 등록돼 아직 검증 前이면, 시간상 최신인
+ * evidence가 실은 새 컨셉의 것이 아니라 **구 컨셉의 pass**일 수 있어 그걸 "현재 승인 대상"
+ * 으로 오도한다. #4423이 심은 `gate.neutral_facts.stage` denorm(recipe_gate_hooks.py
+ * 주석의 FE 계약)을 evidence의 `payload.stage`와 **매칭**해 진짜 "지금 이 게이트가 보는
+ * stage"의 산출물만 current로 승격한다 — 시간은 그 stage 안에서 재시도가 여러 건일 때만
+ * (같은 stage, 다른 시각) 타이브레이커로 쓴다.
+ *
+ * currentStage가 없거나(비-레시피 게이트 등) 어떤 evidence도 payload.stage를 안 실었으면
+ * (구 데이터·계약 미착지 구간) 매칭 신호 자체가 없다 — 이럴 땐 "그래도 뭔가 승격"하지 않고
+ * current=null로 정직하게 답한다(no-fiction — 판별 못 하면 안다고 안 한다). 호출부가 이
+ * 경우 전부를 중립으로 나열한다. */
+export function partitionCurrentAndHistory(
+  items: ProductionWorkbenchEvidenceItem[], currentStage: string | null,
+): CurrentAndHistory {
   if (items.length === 0) return { current: null, history: [] };
   const sorted = [...items].sort(
     (a, b) => new Date(a.evidence.created_at).getTime() - new Date(b.evidence.created_at).getTime(),
   );
-  const current = sorted[sorted.length - 1]!;
-  const history = sorted.slice(0, -1);
-  return { current, history };
+  if (currentStage) {
+    const matching = sorted.filter((item) => item.evidence.payload?.['stage'] === currentStage);
+    if (matching.length > 0) {
+      const current = matching[matching.length - 1]!; // 같은 stage 안 재시도면 최신.
+      const history = sorted.filter((item) => item !== current);
+      return { current, history };
+    }
+  }
+  return { current: null, history: sorted };
 }

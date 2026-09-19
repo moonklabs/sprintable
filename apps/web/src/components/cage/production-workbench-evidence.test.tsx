@@ -45,14 +45,14 @@ const BASE_EVIDENCE = {
 describe('ProductionWorkbenchEvidencePanel', () => {
   it('산출물이 0건이면 패널 자체를 안 그린다(없으면 비운다 — gate-evidence.tsx 규율)', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => [] })));
-    await act(async () => { root.render(wrap(<ProductionWorkbenchEvidencePanel workItemId="story-1" workItemType="story" />)); });
+    await act(async () => { root.render(wrap(<ProductionWorkbenchEvidencePanel workItemId="story-1" workItemType="story" currentStage={null} />)); });
     await flush();
     expect(container.querySelector('[data-testid="production-workbench-evidence"]')).toBeNull();
   });
 
   it('실패 시에도 조용히 비운다(카드 붕괴 방지, GithubRependingReason과 동형)', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) })));
-    await act(async () => { root.render(wrap(<ProductionWorkbenchEvidencePanel workItemId="story-1" workItemType="story" />)); });
+    await act(async () => { root.render(wrap(<ProductionWorkbenchEvidencePanel workItemId="story-1" workItemType="story" currentStage={null} />)); });
     await flush();
     expect(container.querySelector('[data-testid="production-workbench-evidence"]')).toBeNull();
   });
@@ -78,7 +78,7 @@ describe('ProductionWorkbenchEvidencePanel', () => {
     ];
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => evidenceRows })));
 
-    await act(async () => { root.render(wrap(<ProductionWorkbenchEvidencePanel workItemId="story-1" workItemType="story" />)); });
+    await act(async () => { root.render(wrap(<ProductionWorkbenchEvidencePanel workItemId="story-1" workItemType="story" currentStage={null} />)); });
     await flush();
 
     const panel = container.querySelector('[data-testid="production-workbench-evidence"]')!;
@@ -100,7 +100,7 @@ describe('ProductionWorkbenchEvidencePanel', () => {
       { id: 'e1', type: 'report', ref: 'r', ...BASE_EVIDENCE, payload: { kind: 'generation_cost', amount: 100 } },
     ];
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => evidenceRows })));
-    await act(async () => { root.render(wrap(<ProductionWorkbenchEvidencePanel workItemId="story-1" workItemType="story" />)); });
+    await act(async () => { root.render(wrap(<ProductionWorkbenchEvidencePanel workItemId="story-1" workItemType="story" currentStage={null} />)); });
     await flush();
     expect(container.querySelector('[data-testid="production-workbench-evidence"]')).toBeNull();
   });
@@ -110,7 +110,7 @@ describe('ProductionWorkbenchEvidencePanel', () => {
       { id: 'e-paid', type: 'report', ref: 'animatic', ...BASE_EVIDENCE, payload: { kind: 'animatic', artifact_id: 'artifact-uuid-3', cost_tier: 'paid', duration_sec: 6 } },
     ];
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => evidenceRows })));
-    await act(async () => { root.render(wrap(<ProductionWorkbenchEvidencePanel workItemId="story-1" workItemType="story" />)); });
+    await act(async () => { root.render(wrap(<ProductionWorkbenchEvidencePanel workItemId="story-1" workItemType="story" currentStage={null} />)); });
     await flush();
 
     const panel = container.querySelector('[data-testid="production-workbench-evidence"]')!;
@@ -126,7 +126,7 @@ describe('ProductionWorkbenchEvidencePanel', () => {
       { id: 'e1', type: 'report', ref: 'r', ...BASE_EVIDENCE, payload: { kind: 'verification_sheet', items: [{ name: '자막 싱크', verdict: 'pass' }] } },
     ];
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => evidenceRows })));
-    await act(async () => { root.render(wrap(<ProductionWorkbenchEvidencePanel workItemId="story-1" workItemType="story" />)); });
+    await act(async () => { root.render(wrap(<ProductionWorkbenchEvidencePanel workItemId="story-1" workItemType="story" currentStage={null} />)); });
     await flush();
 
     const panel = container.querySelector('[data-testid="production-workbench-evidence"]')!;
@@ -134,23 +134,46 @@ describe('ProductionWorkbenchEvidencePanel', () => {
     expect(panel.textContent).not.toContain('이전 기록');
   });
 
-  it('story #4433 qa:changes 2차 — 같은 kind에 재시도 evidence가 여러 건이면 최신만 "현재"로 노출, 나머지는 접힌 「이전 기록」 섹션에 분리된다', async () => {
+  it('story #4433 qa:changes round-3 — payload.stage가 gate.neutral_facts.stage와 일치하는 evidence만 "현재"로, 나머지는 접힌 「이전 기록」 섹션에 분리된다', async () => {
     const evidenceRows = [
-      { id: 'e-old', type: 'report', ref: 'r', ...BASE_EVIDENCE, created_at: '2026-09-18T00:00:00Z', payload: { kind: 'verification_sheet', items: [{ name: '자막 싱크', verdict: 'fail' }] } },
-      { id: 'e-new', type: 'report', ref: 'r', ...BASE_EVIDENCE, created_at: '2026-09-19T00:00:00Z', payload: { kind: 'verification_sheet', items: [{ name: '자막 싱크', verdict: 'pass' }] } },
+      { id: 'e-old-stage', type: 'report', ref: 'r', ...BASE_EVIDENCE, created_at: '2026-09-18T00:00:00Z', payload: { kind: 'verification_sheet', stage: 'concept_confirmed', items: [{ name: '자막 싱크', verdict: 'fail' }] } },
+      { id: 'e-new-stage', type: 'report', ref: 'r', ...BASE_EVIDENCE, created_at: '2026-09-19T00:00:00Z', payload: { kind: 'verification_sheet', stage: 'structure_approval', items: [{ name: '자막 싱크', verdict: 'pass' }] } },
     ];
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => evidenceRows })));
-    await act(async () => { root.render(wrap(<ProductionWorkbenchEvidencePanel workItemId="story-1" workItemType="story" />)); });
+    await act(async () => { root.render(wrap(<ProductionWorkbenchEvidencePanel workItemId="story-1" workItemType="story" currentStage="structure_approval" />)); });
     await flush();
 
     const panel = container.querySelector('[data-testid="production-workbench-evidence"]')!;
-    // 최신(e-new, pass)이 열린 카드로, 「현재」 배지가 뜬다.
+    // 지금 게이트가 보는 stage(structure_approval)와 일치하는 e-new-stage가 열린 카드로, 「현재」 배지가 뜬다.
     expect(panel.textContent).toContain('현재');
-    // 과거(e-old, fail)는 <details> 안(닫힌 상태 기본)에 있다 — summary 텍스트는 항상 보인다.
+    // 다른 stage의 e-old-stage는 <details> 안(닫힌 상태 기본)에 있다.
     expect(panel.textContent).toContain('이전 기록 · 1건');
     const details = panel.querySelector('details')!;
     expect(details).not.toBeNull();
     expect(details.open).toBe(false);
-    expect(details.textContent).toContain('실패'); // e-old(fail)의 verdict 라벨도 접힌 안에 존재.
+    expect(details.textContent).toContain('실패'); // e-old-stage(fail)의 verdict 라벨도 접힌 안에 존재.
+  });
+
+  it('story #4433 qa:changes round-3 — 새 컨셉 등록 직후(신규 stage에 검증 없음) 구 컨셉의 pass가 «현재»로 오도되지 않는다(핵심 회귀)', async () => {
+    // 카디르 지적 그대로 재현: 시간상 가장 최신인 evidence가 «구 컨셉»의 pass다(새 컨셉은
+    // 아직 검증 자체가 없다) — 둘 다 지금 게이트가 보는 stage(structure_approval)가 아니다.
+    // round-2(시간축 최신=현재)였다면 e-old-concept-pass를 현재로 잘못 승격했을 자리 — 그
+    // 결함을 관측 가능하게 하려면 evidence가 2건 이상이어야 한다(1건뿐이면 "현재" 배지
+    // 자체를 안 다는 게 이 화면의 기존 규율이라 신구 로직이 우연히 같은 결과를 낸다).
+    const evidenceRows = [
+      { id: 'e-even-older', type: 'report', ref: 'r', ...BASE_EVIDENCE, created_at: '2026-09-17T00:00:00Z', payload: { kind: 'verification_sheet', stage: 'material_collection', items: [{ name: '자막 싱크', verdict: 'pass' }] } },
+      { id: 'e-old-concept-pass', type: 'report', ref: 'r', ...BASE_EVIDENCE, created_at: '2026-09-19T00:00:00Z', payload: { kind: 'verification_sheet', stage: 'concept_confirmed', items: [{ name: '자막 싱크', verdict: 'pass' }] } },
+    ];
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => evidenceRows })));
+    // 게이트는 이미 다음 stage(structure_approval)로 넘어갔다 — 새 컨셉엔 아직 evidence가 없다.
+    await act(async () => { root.render(wrap(<ProductionWorkbenchEvidencePanel workItemId="story-1" workItemType="story" currentStage="structure_approval" />)); });
+    await flush();
+
+    const panel = container.querySelector('[data-testid="production-workbench-evidence"]')!;
+    // 구 컨셉의 pass가 "현재"로 뜨면 안 된다 — 매칭 신호가 없으니 아무것도 승격하지 않는다.
+    expect(panel.textContent).not.toContain('현재');
+    // 그래도 그 evidence 둘 다 숨기지 않는다(정직하게 중립 나열, 접힌 이전 기록도 아니다).
+    expect(panel.textContent).toContain('자막 싱크');
+    expect(panel.querySelector('details')).toBeNull();
   });
 });

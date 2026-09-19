@@ -257,12 +257,15 @@ const KIND_CARD: Record<ProductionWorkbenchKind, (props: { evidence: EvidenceIte
 export interface ProductionWorkbenchEvidencePanelProps {
   workItemId: string;
   workItemType: 'story' | 'task';
+  /** story #4433 qa:changes round-3 — gate.neutral_facts.stage(호출부가 뽑아 넘김). null이면
+   * (비-레시피 게이트 등) stage 매칭 자체를 못 해 이 패널은 아무것도 "현재"로 승격하지 않는다. */
+  currentStage: string | null;
 }
 
 /** work_item_type이 story/task가 아니면(doc·loop·artifact 등) 호출부가 아예 마운트하지 않는다
  * — 이 컴포넌트는 그 분기를 스스로 하지 않는다(gates/[id]/page.tsx가 이미 gate_type별
  * 분기를 갖고 있어 그 근처에서 결정하는 게 자연스럽다, 중복 판별축 방지). */
-export function ProductionWorkbenchEvidencePanel({ workItemId, workItemType }: ProductionWorkbenchEvidencePanelProps) {
+export function ProductionWorkbenchEvidencePanel({ workItemId, workItemType, currentStage }: ProductionWorkbenchEvidencePanelProps) {
   const t = useTranslations('cage');
   const { items: rawItems, loading, loadFailed } = useWorkItemProductionEvidence(workItemId, workItemType);
   if (loading || loadFailed) return null; // 다른 보조 신호(GithubRependingReason 등)와 동형 — 실패/로딩 중엔 조용히.
@@ -277,13 +280,20 @@ export function ProductionWorkbenchEvidencePanel({ workItemId, workItemType }: P
       {kinds.map((kind) => {
         const Card = KIND_CARD[kind];
         const groupItems = grouped[kind] ?? [];
-        // story #4433 qa:changes 2차(카디르, 2026-09-19) — 캡션 경고문만으론 "구/신 컨셉의
-        // 같은 검증항목이 나란히 뜨는" 문제가 안 풀린다는 지적. 같은 kind에 evidence가 여러
-        // 건이면(재시도·재제출) created_at 최신 1건만 "현재 승인 근거"로, 나머지는 시각적으로
-        // 분리된 "이전 기록" 섹션(축소 표시)에 둔다 — stage/컨셉 라벨 필드가 아직 없어(PR
-        // #4044 미착지) "컨셉 A/B" 이름은 지어내지 않고, 실제 있는 시간 축만 쓴다.
-        const { current, history } = partitionCurrentAndHistory(groupItems);
-        if (!current) return null;
+        // story #4433 qa:changes round-3(카디르+페드루, 2026-09-19) — round-2의 "최신
+        // created_at=현재" 추정이 새 컨셉 등록 직후 구 컨셉 pass를 현재로 오도한다는 지적 —
+        // gate.neutral_facts.stage ↔ evidence.payload.stage 매칭으로 교체(lib 함수 주석 참고).
+        // 매칭 신호 자체가 없으면(currentStage null·payload.stage 미기재) 아무것도 승격하지
+        // 않고 전부 중립(배지 없음·안 접힘)으로 나열한다 — "모르면 안다고 안 한다".
+        const { current, history } = partitionCurrentAndHistory(groupItems, currentStage);
+        if (!current) {
+          if (history.length === 0) return null;
+          return (
+            <div key={kind} className="space-y-2">
+              {history.map((item) => <Card key={item.evidence.id} evidence={item.evidence} />)}
+            </div>
+          );
+        }
         return (
           <div key={kind} className="space-y-2">
             <Card key={current.evidence.id} evidence={current.evidence} isCurrent={history.length > 0} />

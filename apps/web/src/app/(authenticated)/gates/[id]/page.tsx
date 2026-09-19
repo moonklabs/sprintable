@@ -47,7 +47,12 @@ interface GateDetail extends GateItem {
 // 여기서 좁힌다(가짜 상태로 마운트하지 않는다).
 function GateProductionWorkbenchEvidence({ gate }: { gate: GateDetail }) {
   if (gate.work_item_type !== 'story' && gate.work_item_type !== 'task') return null;
-  return <ProductionWorkbenchEvidencePanel workItemId={gate.work_item_id} workItemType={gate.work_item_type} />;
+  // story #4433 qa:changes round-3(카디르+페드루, 2026-09-19) — #4423가 심은
+  // gate.neutral_facts.stage denorm(recipe_gate_hooks.py 주석의 FE 계약 그대로) — evidence
+  // payload.stage와 매칭해 "지금 승인 대상 stage"의 산출물만 current로 판별한다(시간축
+  // 최신 추정은 새 컨셉 등록 직후 구 pass를 현재로 오도할 수 있어 폐기).
+  const currentStage = typeof gate.neutral_facts?.['stage'] === 'string' ? gate.neutral_facts['stage'] : null;
+  return <ProductionWorkbenchEvidencePanel workItemId={gate.work_item_id} workItemType={gate.work_item_type} currentStage={currentStage} />;
 }
 
 export default function GateDetailPage() {
