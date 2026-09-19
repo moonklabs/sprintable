@@ -66,15 +66,16 @@ def _load_migration_module(filename: str, alias: str):
     return m
 
 
-_MIG_0379 = _load_migration_module("0379_preset_marketing_video_production_recipe.py", "_m0379_4050")
-_MIG_0380 = _load_migration_module("0380_recipe_video_production_structure_and_budget_gates.py", "_m0380_4050")
+_MIG_0381 = _load_migration_module("0381_preset_marketing_video_production_recipe.py", "_m0381_4050")
+_MIG_0382 = _load_migration_module("0382_recipe_video_production_structure_and_budget_gates.py", "_m0382_4050")
 
-# 0379+0380 누적 결과(=develop 착지 후의 실제 최종 shape) — 0380._NEW_*가 이미 0379 위에
-# 얹은 최종값이다(migration 자체의 dict.update 관례, 0380 소스 참조).
-_KEY = _MIG_0380._KEY
-_STAGE_METADATA = _MIG_0380._NEW_STAGE_METADATA
-_PAYLOAD_SCHEMA = _MIG_0380._NEW_PAYLOAD_SCHEMA
-_ROUTING = _MIG_0379._ROUTING
+# 0381+0382 누적 결과(=develop 착지 후의 실제 최종 shape, 17:12 배치 renumber 반영 —
+# 최초 번호는 0379/0380이었다) — 0382._NEW_*가 이미 0381 위에 얹은 최종값이다(migration
+# 자체의 dict.update 관례, 0382 소스 참조).
+_KEY = _MIG_0382._KEY
+_STAGE_METADATA = _MIG_0382._NEW_STAGE_METADATA
+_PAYLOAD_SCHEMA = _MIG_0382._NEW_PAYLOAD_SCHEMA
+_ROUTING = _MIG_0381._ROUTING
 
 _GATE_ORDER = [
     ("concept_confirmed", "concept_approval"),
@@ -214,37 +215,31 @@ def _fake_request() -> "StarletteRequest":
     return StarletteRequest(scope={"type": "http", "headers": []})
 
 
-async def test_full_nine_stage_walkthrough_apply_gates4_budget_publish_with_exactly_four_human_approvals(monkeypatch):
+async def test_full_nine_stage_walkthrough_apply_gates4_budget_publish_with_exactly_four_human_approvals():
     """⭐AC1 핵심 — apply(2슬롯 바인딩)→9 stage 순서대로 발행→게이트4가 정확히 그 4개
     stage에서만 자동 생성→각 게이트를 사람이 승인(정확히 4회, 그 밖의 5개 stage는 PO
     스크립트나 사람 개입 없이 에이전트가 그냥 지나간다)→마지막 published까지 완주.
-    AC5("PO 스크립트 0회·사람 개입 ≤4")를 코드로 못박는다."""
+    AC5("PO 스크립트 0회·사람 개입 ≤4")를 코드로 못박는다.
+
+    story #4051(#4428 착지) — mention_parser의 partial-index 파라미터화 결함이 근본
+    수정돼 recipe_role_binding broadcast 알림 경로의 entity_references 반영이 실제로
+    안전해졌다 — 이전엔 이 경로를 no-op으로 격리했으나(이 카드 스코프 밖 사전 확인된
+    버그였음), fix 着地 후 그 격리를 걷어내고 실 경로 그대로 관통시킨다.
+
+    PO 지적(2026-09-19) — 사람 개입 4회 중 3회가 `set_gate_status` DB 직접조작이었다
+    (실제 라우트가 타는 `transition_gate` 경로 아님 — AC5가 검증하려는 "백엔드 경로가
+    실제로 서는지"를 못 본다). 4회 전부 `transition_gate`(gates 라우터가 부르는 그
+    서비스 함수)로 정정 — DB shortcut 0."""
     from app.routers.events import (
         ApplyRecipeRoleBindingsRequest, EventPublishRequest,
         apply_recipe_role_bindings, publish_registry_event,
     )
     from app.services.content_rules import put_org_content_rules
     from app.services.gate_service import transition_gate
-    from app.models.gate import Gate, set_gate_status
+    from app.models.gate import Gate
     from app.models.publication_command import PublicationCommand
     from datetime import datetime, timezone
     from sqlalchemy import select
-
-    # 실측 격리(이 카드 스코프 밖) — recipe_role_binding 라우팅이 bound stage(draft/
-    # animatic/published 등)에서 실제로 broadcast 알림 메시지를 만들면, 그 메시지 본문의
-    # 참조 토큰을 entity_references로 반영하는 mention_parser.reconcile_entity_references가
-    # `on_conflict_do_nothing(index_where=...)` + insertmanyvalues 배치 조합에서 그 predicate
-    # 를 파라미터로 내보내(리터럴 아님) partial unique index(uq_entity_references_non_proof)
-    # 매칭에 실패하는 사전 확인된 SQLAlchemy/asyncpg 조합 버그를 만난다(AC5=apply/게이트/
-    # 예산/발행 관통과 무관한 축·mention_parser 자신의 테스트가 이미 이 경로를 별도로
-    # 커버 — 이 카드에서 새로 검증할 대상이 아니다). no-op으로 격리.
-    import app.services.mention_parser as mention_parser_module
-
-    async def _noop_reconcile(*args, **kwargs):
-        from app.services.mention_parser import ReconcileResult
-        return ReconcileResult(stored=0, removed=0, dropped=[])
-
-    monkeypatch.setattr(mention_parser_module, "reconcile_entity_references", _noop_reconcile)
 
     engine, Session = await _realdb_session()
     try:
@@ -298,8 +293,7 @@ async def test_full_nine_stage_walkthrough_apply_gates4_budget_publish_with_exac
                 select(Gate).where(Gate.work_item_id == story_id, Gate.gate_type == "concept_approval")
             )).scalar_one()
             assert gate_a.status == "pending"
-            set_gate_status(gate_a, "approved", now=datetime.now(timezone.utc))
-            gate_a.resolver_id = owner_member_id
+            await transition_gate(s, org_id, gate_a.id, "approved", owner_member_id, None)
             await s.commit()
             human_approvals += 1
 
@@ -308,8 +302,7 @@ async def test_full_nine_stage_walkthrough_apply_gates4_budget_publish_with_exac
                 select(Gate).where(Gate.work_item_id == story_id, Gate.gate_type == "structure_approval")
             )).scalar_one()
             assert gate_b.status == "pending"
-            set_gate_status(gate_b, "approved", now=datetime.now(timezone.utc))
-            gate_b.resolver_id = owner_member_id
+            await transition_gate(s, org_id, gate_b.id, "approved", owner_member_id, None)
             await s.commit()
             human_approvals += 1
 
@@ -325,8 +318,7 @@ async def test_full_nine_stage_walkthrough_apply_gates4_budget_publish_with_exac
             assert gate_c.status == "pending"
             assert gate_c.sealed_estimated_cost_minor == 80_000
             assert gate_c.neutral_facts["budget_remaining_minor"] == 500_000
-            set_gate_status(gate_c, "approved", now=datetime.now(timezone.utc))
-            gate_c.resolver_id = owner_member_id
+            await transition_gate(s, org_id, gate_c.id, "approved", owner_member_id, None)
             await s.commit()
             human_approvals += 1
 

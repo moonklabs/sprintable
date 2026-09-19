@@ -58,8 +58,8 @@ payload_schema에 `estimated_cost_minor`(선택, `["integer","null"]`) 신설 �
 카드에 뜨고 사전 하드체크(잔량 초과 422)가 걸린다. 생략하면 `check_generation_budget_or_
 raise`의 기존 규약대로 검사 자체가 스킵(AC2 "미설정이면 통과", 신규 규칙 0).
 
-Revision ID: 0380
-Revises: 0379
+Revision ID: 0382(17:12 배치 renumber 반영 — 최초 번호는 0380이었다)
+Revises: 0381(최초 번호는 0379였다)
 Create Date: 2026-09-18
 """
 from __future__ import annotations
