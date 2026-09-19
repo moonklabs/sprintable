@@ -118,4 +118,36 @@ describe('useHookPerformances — hookKeys만큼 병렬 GET .../hook-performance
     await flush();
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
+
+  // story #4436 qa:changes(카디르, 2026-09-19) — hookKeys가 값→빈 배열로 바뀌면 그 guard가
+  // setLoading(false)를 빼먹어 loading이 영구 true로 고착됐다(use-material-lineage.ts와
+  // 동일 클래스).
+  it('fetch 진행 중 hookKeys가 빈 배열로 바뀌면 loading이 고착되지 않는다(#4436 회귀)', async () => {
+    let resolveFetch: (() => void) | null = null;
+    vi.stubGlobal('fetch', vi.fn(async () => new Promise((resolve) => {
+      resolveFetch = () => resolve({ ok: true, json: async () => SUMMARY('hook_a') });
+    })));
+
+    function Clearer() {
+      const [keys, setKeys] = useState<string[]>(['hook_a']);
+      return (
+        <>
+          <button data-testid="clear" onClick={() => setKeys([])}>clear</button>
+          <Harness hookKeys={keys} />
+        </>
+      );
+    }
+
+    await act(async () => { root.render(<Clearer />); });
+    await flush();
+    expect(dump().loading).toBe(true); // fetch 아직 미해결.
+
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="clear"]')!.click(); });
+    await flush();
+    expect(dump().loading).toBe(false); // 빈 배열 전환 즉시 loading이 풀려야 한다.
+
+    await act(async () => { resolveFetch?.(); });
+    await flush();
+    expect(dump().loading).toBe(false);
+  });
 });

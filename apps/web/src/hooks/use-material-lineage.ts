@@ -27,6 +27,10 @@ export function useMaterialLineage(workItemId: string | null): UseMaterialLineag
     if (!workItemId) {
       setEdges([]);
       setLoadFailed(false);
+      // story #4436 qa:changes(카디르, 2026-09-19) — 이 guard가 setLoading(false)를 빼먹어
+      // workItemId가 값→null로 바뀌는 순간(예: 상위가 아직 로딩 중인 게이트) loading이
+      // true로 영구고착(다른 훅 3+건과 동일 클래스, use-work-item-production-evidence.ts 등).
+      setLoading(false);
       return;
     }
     let cancelled = false;
