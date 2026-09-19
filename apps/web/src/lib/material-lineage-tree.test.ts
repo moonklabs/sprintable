@@ -10,10 +10,10 @@ import {
 
 function edge(overrides: Partial<MaterialLineageEdge>): MaterialLineageEdge {
   return {
-    id: 'edge-1', org_id: 'org-1', project_id: null,
+    id: 'edge-1',
     source_evidence_id: 'master-1', derived_kind: 'channel_post_draft', derived_id: 'draft-1',
     relation_kind: 'platform_cut', variant_axis: null, hook_key: null,
-    work_item_id: 'story-1', created_by: null, created_at: '2026-09-19T00:00:00Z',
+    work_item_id: 'story-1',
     ...overrides,
   };
 }
