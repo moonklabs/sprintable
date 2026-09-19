@@ -61,6 +61,24 @@ export function asMaterialCollectionSheet(payload: Record<string, unknown> | nul
   return items as MaterialCollectionItem[];
 }
 
+/** story #4058(doc c7991109 §3②) — material_collection_sheet payload 확장. 훅 후보를
+ * `material_lineage.hook_key`가 가리키는 별도 필드(items와 공존, story #4061 AC2 — 기존
+ * asMaterialCollectionSheet의 반환 shape은 안 건드린다, #4057/#4059 소비처 회귀 0). */
+export interface MaterialCollectionSheetHook {
+  key: string;
+  text: string;
+  target: string;
+}
+
+export function asMaterialCollectionSheetHooks(
+  payload: Record<string, unknown> | null | undefined,
+): MaterialCollectionSheetHook[] | null {
+  if (!payload || payload['kind'] !== 'material_collection_sheet') return null;
+  const hooks = payload['hooks'];
+  if (!Array.isArray(hooks)) return null;
+  return hooks as MaterialCollectionSheetHook[];
+}
+
 export interface ConceptBrief {
   concept: string;
   rationale: string;

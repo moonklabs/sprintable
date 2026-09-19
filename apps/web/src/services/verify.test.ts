@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   deriveTrustStage, pickRelevantMergeGate,
-  asMaterialCollectionSheet, asConceptBrief, asStoryboard, asAnimatic,
+  asMaterialCollectionSheet, asMaterialCollectionSheetHooks, asConceptBrief, asStoryboard, asAnimatic,
   isProductionWorkbenchKind, PRODUCTION_WORKBENCH_KIND_ORDER,
 } from './verify';
 
@@ -145,5 +145,30 @@ describe('isProductionWorkbenchKind / PRODUCTION_WORKBENCH_KIND_ORDER (story #40
     expect(isProductionWorkbenchKind('generation_cost')).toBe(false);
     expect(isProductionWorkbenchKind(undefined)).toBe(false);
     expect(isProductionWorkbenchKind(123)).toBe(false);
+  });
+});
+
+// story #4058(doc c7991109 §3②)/#4061 — material_collection_sheet payload 확장(hooks[]).
+// 기존 asMaterialCollectionSheet(items)와 공존 — 서로 다른 필드를 각자 좁힌다.
+describe('asMaterialCollectionSheetHooks (story #4058 §3②)', () => {
+  it('hooks가 배열이면 그대로 narrowing한다(items와 공존)', () => {
+    const payload = {
+      kind: 'material_collection_sheet',
+      items: [{ ref: 'https://x', label: 'ref', tag: 'mood' }],
+      hooks: [{ key: 'hook_a', text: '이거 안 써봤죠?', target: '20대 초반' }],
+    };
+    expect(asMaterialCollectionSheetHooks(payload)).toEqual(payload.hooks);
+    // items 쪽 함수는 이 확장과 무관하게 그대로 동작(회귀 0).
+    expect(asMaterialCollectionSheet(payload)).toEqual(payload.items);
+  });
+
+  it('hooks 필드가 없는 기존(#4059 이전) payload는 null — 지어내지 않음', () => {
+    const payload = { kind: 'material_collection_sheet', items: [] };
+    expect(asMaterialCollectionSheetHooks(payload)).toBeNull();
+  });
+
+  it('kind가 다르거나 payload가 없으면 null', () => {
+    expect(asMaterialCollectionSheetHooks({ kind: 'concept_brief', hooks: [] })).toBeNull();
+    expect(asMaterialCollectionSheetHooks(null)).toBeNull();
   });
 });
