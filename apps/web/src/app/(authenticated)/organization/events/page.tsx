@@ -336,7 +336,13 @@ export default function OrganizationEventsPage() {
         projects={marketingProjects}
         onSubmit={async (args) => {
           const result = await submitMarketingRecipeApply(args);
-          if (result.ok) {
+          // story #4426 P1 잔여(카디르 재QA, 2026-09-19) — result.ok는 요청 성공 여부일 뿐
+          // 실 배정 건수와 무관(백엔드 ApplyRecipeRoleBindingsResponse.ok 계약 그대로) —
+          // bindingsUpserted가 0이면 이 서브밋은 no-op이라 다이얼로그가 이미 no-op 에러를
+          // 표면화한다(marketing-recipe-apply-dialog.tsx). 그런데 그 경우까지 여기서 성공
+          // 토스트+상세이동을 같이 태우면 "성공"과 "no-op 오류"가 한 화면에 공존하는
+          // [두문장 다른세계] — 실 배정이 1건이라도 있을 때만 성공 경로를 태운다.
+          if (result.ok && (result.bindingsUpserted ?? 0) > 0) {
             addToast({ type: 'success', title: t('eventApplySuccessToast', { count: 1 }) });
             // 적용 성공 → 그 자리서 상세 뷰로 이어간다(AC2 "적용→상세 도달").
             setMarketingDetailTarget(marketingApplyTarget);

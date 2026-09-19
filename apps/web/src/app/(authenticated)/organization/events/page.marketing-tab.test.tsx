@@ -142,6 +142,45 @@ describe('/organization/events — 마케팅 탭(AC1·AC2)', () => {
     expect(document.body.textContent).toContain('영상 제작 (릴스·쇼츠)');
   });
 
+  // story #4426 P1 잔여(카디르 재QA, 2026-09-19) — 서버가 result.ok=true·bindings_upserted:0을
+  // 반환하면(성공했지만 실은 아무것도 안 바뀐 no-op) 이전엔 page.tsx가 result.ok만 보고
+  // 성공 토스트+상세이동을 같이 태워서, 다이얼로그의 no-op 에러와 페이지의 "성공" 내비가
+  // 한 화면에 공존했다([두문장 다른세계]) — 이 케이스에서 상세 뷰로 안 넘어가는지 pin.
+  it('bindings_upserted:0(성공 응답이지만 no-op)이면 상세 뷰로 안 넘어간다(거짓성공표시 잔여 회귀)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/events/definitions') return { ok: true, json: async () => [MARKETING_RECIPE] };
+      if (url === '/api/projects') return { ok: true, json: async () => ({ data: [{ id: 'proj-1', name: '9월 영상 캠페인' }] }) };
+      if (url.startsWith('/api/team-members')) {
+        return { ok: true, json: async () => [{ id: 'agent-1', name: '댄', type: 'agent' }] };
+      }
+      if (url === `/api/events/definitions/${MARKETING_RECIPE.id}/apply` && init?.method === 'POST') {
+        return { ok: true, json: async () => ({ ok: true, bindings_upserted: 0, warnings: [] }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    }));
+    await mount();
+    await switchToMarketingTab();
+
+    const applyBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent === '프로젝트에 적용');
+    await act(async () => { applyBtn!.click(); });
+    await flush();
+
+    const projectSelect = document.body.querySelector<HTMLSelectElement>('#marketing-recipe-apply-project')!;
+    await act(async () => { projectSelect.value = 'proj-1'; projectSelect.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+
+    const creatorSelect = document.body.querySelector<HTMLSelectElement>('[data-testid="creator-agent-select"]')!;
+    await act(async () => { creatorSelect.value = 'agent-1'; creatorSelect.dispatchEvent(new Event('change', { bubbles: true })); });
+
+    const submitBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent === '적용하기')!;
+    await act(async () => { submitBtn.click(); });
+    await flush();
+
+    // 상세 뷰(9단계 스텝퍼)로 안 넘어간다 — 다이얼로그가 열린 채 no-op 에러를 보여준다.
+    expect(document.body.querySelector('[data-testid="recipe-stepper"]')).toBeNull();
+    expect(document.body.textContent).toContain('저장된 배정이 없어요');
+  });
+
   it('상세 뷰가 stage 원시 slug 대신 표시 라벨을 렌더한다(PO 추가 AC, 2026-09-18)', async () => {
     mockFetches();
     await mount();
