@@ -163,6 +163,69 @@ describe('useAsyncResource', () => {
     await flush();
     expect(dump().data).toBe('resolved:b');
   });
+
+  // story #4071 qa:changes(카디르, 2026-09-19, #4445 재작업 계기) — 기본값(옵션 미지정)은
+  // 실패 시 data를 initial로 되돌린다(기존 동작 그대로 — #4444/#4446류 원본도 실패 시
+  // 리셋이었으므로 회귀 아님).
+  it('keepPreviousDataOnError 미지정(기본값)이면 실패 시 data가 initial로 되돌아간다', async () => {
+    function DefaultHarness({ resourceKey, fetcher }: { resourceKey: string | null; fetcher: (k: string) => Promise<string> }) {
+      const { data, loading, loadFailed } = useAsyncResource<string, string | null>(resourceKey, null, fetcher, []);
+      return <div data-testid="dump">{JSON.stringify({ data, loading, loadFailed })}</div>;
+    }
+    function dump2() { return JSON.parse(container.querySelector('[data-testid="dump"]')!.textContent!); }
+
+    let call = 0;
+    const fetcher = vi.fn(async () => { call += 1; if (call === 1) return 'first-success'; throw new Error('boom'); });
+    function Switcher() {
+      const [k, setK] = useState('a');
+      return (
+        <>
+          <button data-testid="refresh" onClick={() => setK('b')}>refresh</button>
+          <DefaultHarness resourceKey={k} fetcher={fetcher} />
+        </>
+      );
+    }
+    await act(async () => { root.render(<Switcher />); });
+    await flush();
+    expect(dump2().data).toBe('first-success');
+
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="refresh"]')!.click(); });
+    await flush();
+    expect(dump2()).toEqual({ data: null, loading: false, loadFailed: true });
+  });
+
+  // story #4071 qa:changes 핵심 — keepPreviousDataOnError:true면 재조회 실패 후에도
+  // 마지막 성공 데이터가 그대로 남는다(use-channel-post-calendar-data.ts가 요구하는
+  // "이전 데이터 유지 + error만 세움" 원본 계약을 이 옵션으로 복원).
+  it('keepPreviousDataOnError:true면 재조회가 실패해도 마지막 성공 데이터를 유지한다(핵심 회귀)', async () => {
+    function KeepHarness({ resourceKey, fetcher }: { resourceKey: string | null; fetcher: (k: string) => Promise<string> }) {
+      const { data, loading, loadFailed } = useAsyncResource<string, string | null>(
+        resourceKey, null, fetcher, [], { keepPreviousDataOnError: true },
+      );
+      return <div data-testid="dump">{JSON.stringify({ data, loading, loadFailed })}</div>;
+    }
+    function dump3() { return JSON.parse(container.querySelector('[data-testid="dump"]')!.textContent!); }
+
+    let call = 0;
+    const fetcher = vi.fn(async () => { call += 1; if (call === 1) return 'first-success'; throw new Error('boom'); });
+    function Switcher() {
+      const [k, setK] = useState('a');
+      return (
+        <>
+          <button data-testid="refresh" onClick={() => setK('b')}>refresh</button>
+          <KeepHarness resourceKey={k} fetcher={fetcher} />
+        </>
+      );
+    }
+    await act(async () => { root.render(<Switcher />); });
+    await flush();
+    expect(dump3().data).toBe('first-success');
+
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="refresh"]')!.click(); });
+    await flush();
+    // data는 그대로, loadFailed만 true — 이전 성공 데이터가 실패 화면으로 안 지워진다.
+    expect(dump3()).toEqual({ data: 'first-success', loading: false, loadFailed: true });
+  });
 });
 
 describe('useAsyncResourceBatch', () => {
