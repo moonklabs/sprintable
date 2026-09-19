@@ -13,7 +13,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
+from app.models.channel_post_draft import ChannelPostDraft
+from app.models.channel_publication import ChannelPublication
 from app.models.material_lineage import MaterialLineage
+from app.routers.gates import _resolve_work_item_summary
 from app.routers.insight_snapshots import InsightSnapshotView
 from app.services.insight_snapshots import (
     list_insight_snapshots_for_publication,
@@ -33,6 +36,12 @@ class MaterialLineageEdgeView(BaseModel):
     variant_axis: str | None
     hook_key: str | None
     work_item_id: uuid.UUID
+    # story #4058(디디 갭2, 페드루 PO 経由 2026-09-19) — uuid 표시("storyboard #a3f2")
+    # 대신 사람이 읽는 표시명. 새 join/테이블 0 — 둘 다 기존 값 재사용. 목록 안 모든
+    # edge가 같은 work_item_id(쿼리 파라미터)를 공유하므로 master_title은 매 edge에
+    # 같은 값이 중복 실린다(트리 렌더가 edge 단위로 독립 렌더할 때 교차조회 없이 쓰게).
+    master_title: str | None = None
+    channel: str | None = None
 
 
 class HookPerformanceView(BaseModel):
@@ -67,7 +76,45 @@ async def list_material_lineage(
             MaterialLineage.work_item_id == work_item_id,
         ).order_by(MaterialLineage.created_at.asc())
     )).scalars().all()
-    return [MaterialLineageEdgeView.model_validate(r, from_attributes=True) for r in rows]
+    if not rows:
+        return []
+
+    # ① master_title — gates.py::_resolve_work_item_summary 그대로 재사용(fail-soft,
+    # story 4058 doc이 확定한 material_lineage.work_item_id는 항상 story). 목록 전체가
+    # 같은 work_item_id를 공유하므로 1회만 조회.
+    summary = await _resolve_work_item_summary(session, org_id, "story", work_item_id)
+    master_title = summary.title if summary is not None else None
+
+    # ② channel — derived_kind별로 batch IN 조회(N+1 회피). channel_post_draft/
+    # channel_publication 둘 다 이미 갖고 있는 denorm 컬럼을 그대로 반사할 뿐, 새 join
+    # 대상 테이블·새 컬럼 0.
+    draft_ids = [r.derived_id for r in rows if r.derived_kind == "channel_post_draft"]
+    publication_ids = [r.derived_id for r in rows if r.derived_kind == "channel_publication"]
+    channel_by_derived_id: dict[uuid.UUID, str] = {}
+    if draft_ids:
+        for did, ch in (await session.execute(
+            select(ChannelPostDraft.id, ChannelPostDraft.channel).where(
+                ChannelPostDraft.org_id == org_id, ChannelPostDraft.id.in_(draft_ids),
+            )
+        )).all():
+            channel_by_derived_id[did] = ch
+    if publication_ids:
+        for pid, ch in (await session.execute(
+            select(ChannelPublication.id, ChannelPublication.channel).where(
+                ChannelPublication.org_id == org_id, ChannelPublication.id.in_(publication_ids),
+            )
+        )).all():
+            channel_by_derived_id[pid] = ch
+
+    return [
+        MaterialLineageEdgeView(
+            id=r.id, source_evidence_id=r.source_evidence_id, derived_kind=r.derived_kind,
+            derived_id=r.derived_id, relation_kind=r.relation_kind, variant_axis=r.variant_axis,
+            hook_key=r.hook_key, work_item_id=r.work_item_id, master_title=master_title,
+            channel=channel_by_derived_id.get(r.derived_id),
+        )
+        for r in rows
+    ]
 
 
 @router.get("/hook-performance", response_model=HookPerformanceView)

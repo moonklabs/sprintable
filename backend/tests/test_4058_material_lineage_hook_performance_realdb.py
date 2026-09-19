@@ -299,6 +299,48 @@ async def test_list_material_lineage_endpoint_scoped_to_work_item_and_org():
             edges = await list_material_lineage(work_item_id=story_a, session=session, org_id=org_id, _auth=None)
             assert {e.hook_key for e in edges} == {"hook_a", "hook_b"}
             assert all(e.work_item_id == story_a for e in edges)
+            assert all(e.master_title == "A" for e in edges)  # 디디 갭2 ① — uuid 대신 표시명
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_list_material_lineage_endpoint_exposes_channel_display_name():
+    """디디 갭2 ②(2026-09-19) — 변주의 channel을 denorm으로 노출. draft/publication
+    양쪽 다·매칭 안 되는 derived_id는 fail-soft(None, 에러 아님)."""
+    from app.models.channel_post_draft import ChannelPostDraft
+    from app.models.channel_publication import ChannelPublication
+    from app.routers.material_lineage import list_material_lineage
+
+    engine, factory = await _session_factory()
+    try:
+        async with factory() as session:
+            org_id, project_id = await _seed_org(session)
+            story = await _seed_story(session, org_id, project_id, title="채널 표시명 테스트")
+            ev = await _seed_master_evidence(session, org_id=org_id, work_item_id=story)
+
+            draft_id = uuid.uuid4()
+            session.add(ChannelPostDraft(
+                id=draft_id, org_id=org_id, work_item_id=story, channel="instagram_sandbox",
+                connection_id=uuid.uuid4(),
+            ))
+            pub_id = uuid.uuid4()
+            session.add(ChannelPublication(
+                id=pub_id, org_id=org_id, gate_id=uuid.uuid4(), version_id=uuid.uuid4(),
+                connection_id=uuid.uuid4(), channel="threads",
+            ))
+            await session.commit()
+
+            await _seed_lineage(session, org_id=org_id, source_evidence_id=ev, work_item_id=story, derived_id=draft_id, derived_kind="channel_post_draft", hook_key="hook_draft")
+            await _seed_lineage(session, org_id=org_id, source_evidence_id=ev, work_item_id=story, derived_id=pub_id, derived_kind="channel_publication", hook_key="hook_pub")
+            # 매칭 row가 아예 없는 derived_id — fail-soft None(에러 아님).
+            await _seed_lineage(session, org_id=org_id, source_evidence_id=ev, work_item_id=story, derived_id=uuid.uuid4(), hook_key="hook_orphan")
+
+            edges = await list_material_lineage(work_item_id=story, session=session, org_id=org_id, _auth=None)
+            by_hook = {e.hook_key: e.channel for e in edges}
+            assert by_hook["hook_draft"] == "instagram_sandbox"
+            assert by_hook["hook_pub"] == "threads"
+            assert by_hook["hook_orphan"] is None
     finally:
         await engine.dispose()
 
