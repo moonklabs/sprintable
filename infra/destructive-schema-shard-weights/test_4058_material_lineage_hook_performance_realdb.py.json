@@ -1,1 +1,1 @@
-{"file": "tests/test_4058_material_lineage_hook_performance_realdb.py", "sec": 52.0, "source": "story-4058-material-lineage-hook-performance(API route 추가로 8건 재측정 — 로컬 raw pytest 8건 8.69s 실측치를 CI 배율(~6x, story #3383) 반영한 52s 잠정값, 실 CI 샤드 로그로 재확認 필요)"}
+{"file": "tests/test_4058_material_lineage_hook_performance_realdb.py", "sec": 66.0, "source": "story-4058-material-lineage-hook-performance(소재 단위 성과 API 3건 추가로 11건 재측정 — 로컬 raw pytest 11건 11.00s 실측치를 CI 배율(~6x, story #3383) 반영한 66s 잠정값, 실 CI 샤드 로그로 재확認 필요)"}

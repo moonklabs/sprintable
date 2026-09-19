@@ -330,3 +330,75 @@ async def test_hook_performance_endpoint_matches_service_and_handles_unknown_key
             assert empty_view.snapshot_count == 0
     finally:
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_material_performance_endpoint_returns_snapshots_for_owned_publication():
+    """PO 지적(2026-09-19) — 소재(변주) 단위 성과 노출. derived_id(=publication_id)로
+    기존 insight_snapshots.py 조회 축을 그대로 재사용하는지."""
+    from app.routers.material_lineage import get_material_performance
+
+    engine, factory = await _session_factory()
+    try:
+        async with factory() as session:
+            org_id, project_id = await _seed_org(session)
+            story = await _seed_story(session, org_id, project_id)
+            ev = await _seed_master_evidence(session, org_id=org_id, work_item_id=story)
+            pub = uuid.uuid4()
+            await _seed_lineage(session, org_id=org_id, source_evidence_id=ev, work_item_id=story, derived_id=pub, hook_key="hook_x")
+            await _seed_snapshot(session, org_id=org_id, work_item_id=story, publication_id=pub, status="captured", normalized={"impressions": 100})
+            await _seed_snapshot(session, org_id=org_id, work_item_id=story, publication_id=pub, status="pending", normalized=None)
+
+            views = await get_material_performance(derived_id=pub, session=session, org_id=org_id, _auth=None)
+            assert len(views) == 2  # organic_snapshots_only는 paid만 거른다 — pending도 목록엔 포함(상태는 소비부 판단)
+            captured = [v for v in views if v.status == "captured"]
+            assert len(captured) == 1
+            assert captured[0].normalized["impressions"] == 100
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_material_performance_endpoint_draft_variant_returns_empty_not_error():
+    """channel_post_draft(발행 前) 변주 — derived_id가 publication이 아니므로 빈 목록,
+    에러 아님(지어내지 않는다)."""
+    from app.routers.material_lineage import get_material_performance
+
+    engine, factory = await _session_factory()
+    try:
+        async with factory() as session:
+            org_id, project_id = await _seed_org(session)
+            story = await _seed_story(session, org_id, project_id)
+            ev = await _seed_master_evidence(session, org_id=org_id, work_item_id=story)
+            draft_id = uuid.uuid4()
+            await _seed_lineage(
+                session, org_id=org_id, source_evidence_id=ev, work_item_id=story,
+                derived_id=draft_id, derived_kind="channel_post_draft", hook_key="hook_draft",
+            )
+            views = await get_material_performance(derived_id=draft_id, session=session, org_id=org_id, _auth=None)
+            assert views == []
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_material_performance_endpoint_cross_org_id_returns_empty_not_leak():
+    """다른 org 소유 derived_id를 org_id 바꿔 조회 — 존재 비노출(빈 목록), 타 org
+    스냅샷이 새지 않는다."""
+    from app.routers.material_lineage import get_material_performance
+
+    engine, factory = await _session_factory()
+    try:
+        async with factory() as session:
+            org_a, proj_a = await _seed_org(session)
+            org_b, proj_b = await _seed_org(session)
+            story_a = await _seed_story(session, org_a, proj_a)
+            ev_a = await _seed_master_evidence(session, org_id=org_a, work_item_id=story_a)
+            pub_a = uuid.uuid4()
+            await _seed_lineage(session, org_id=org_a, source_evidence_id=ev_a, work_item_id=story_a, derived_id=pub_a, hook_key="hook_a")
+            await _seed_snapshot(session, org_id=org_a, work_item_id=story_a, publication_id=pub_a, normalized={"impressions": 999})
+
+            views = await get_material_performance(derived_id=pub_a, session=session, org_id=org_b, _auth=None)
+            assert views == []
+    finally:
+        await engine.dispose()

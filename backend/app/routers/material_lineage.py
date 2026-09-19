@@ -1,6 +1,6 @@
 """story #4058(E-RECIPE-1 성공기준 4) — material_lineage 조회 API. write 엔드포인트는
 이 카드 범위 밖(lineage row insert는 apply-time 후속 스토리 몫, doc c7991109 §3④) — 이
-파일은 디디 #4061 web 데이터층(use-material-lineage 훅)이 소비할 GET 2종만 연다.
+파일은 디디 #4061 web 데이터층(use-material-lineage 훅)이 소비할 GET 3종을 연다.
 evidence.py::list_evidence와 동형 권한 축(org 멤버 누구나 GET, write 없음)."""
 from __future__ import annotations
 
@@ -14,6 +14,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.auth import get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.material_lineage import MaterialLineage
+from app.routers.insight_snapshots import InsightSnapshotView
+from app.services.insight_snapshots import (
+    list_insight_snapshots_for_publication,
+    resolve_head_publication_id,
+)
 from app.services.material_lineage import HookPerformanceSummary, compute_hook_performance
 
 router = APIRouter(prefix="/api/v2/material-lineage", tags=["material-lineage"])
@@ -76,3 +81,42 @@ async def get_hook_performance(
     빈 요약(전부 None/0)을 낸다(compute_hook_performance 자체 계약, 지어내지 않는다)."""
     summary = await compute_hook_performance(session, org_id=org_id, hook_key=hook_key)
     return HookPerformanceView.from_summary(summary)
+
+
+@router.get("/material-performance", response_model=list[InsightSnapshotView])
+async def get_material_performance(
+    derived_id: uuid.UUID = Query(...),
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    _auth=Depends(get_current_user),
+) -> list[InsightSnapshotView]:
+    """PO 지적(2026-09-19) — #4058 계약은 "소재·**훅**"인데 hook-performance만 노출하고
+    소재(변주) 단위 성과가 없어 디디 트리 노드별 성과 막대를 못 그렸다. 새 집계 기전을
+    발명하지 않는다 — `derived_id`(channel_publication.id)로 기존 insight_snapshots.py
+    조회 축(`list_insight_snapshots_for_publication`·`resolve_head_publication_id`,
+    story #3497/#3829, organic-only 필터·재발행 헤드 해석 이미 내장)을 그대로 재사용한다.
+
+    `channel_post_draft`(발행 前) 변주나, 이 org 소속이 아닌 derived_id는 **빈 목록**으로
+    답한다(에러 아님·존재 비노출 — insight_snapshots.py::_list_publication_insights_
+    endpoint의 "소유 아니면 404"와 같은 정신을 GET-목록 축에 맞게 적용한 것: 여긴 단건
+    404가 아니라 목록이라 "그 소재는 아직 성과가 없다"와 "org 밖 id"를 굳이 안 갈라도
+    지어내는 값이 없다 — 둘 다 정직하게 빈 배열)."""
+    owns = (await session.execute(
+        select(MaterialLineage.id).where(
+            MaterialLineage.org_id == org_id,
+            MaterialLineage.derived_id == derived_id,
+            MaterialLineage.derived_kind == "channel_publication",
+        ).limit(1)
+    )).scalar_one_or_none()
+    if owns is None:
+        return []
+
+    publication_id = await resolve_head_publication_id(session, publication_id=derived_id)
+    rows = await list_insight_snapshots_for_publication(session, org_id=org_id, publication_id=publication_id)
+    return [
+        InsightSnapshotView(
+            id=r.id, channel=r.channel, due_at=r.due_at, captured_at=r.captured_at,
+            status=r.status, normalized=r.normalized, source=r.source, error_code=r.error_code,
+        )
+        for r in rows
+    ]
