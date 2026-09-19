@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { GateEvidence, GateActivityHistory, gateNeedsAction, gateDecision } from '@/components/cage/gate-evidence';
 import { ProductionWorkbenchEvidencePanel } from '@/components/cage/production-workbench-evidence';
+import { LineagePerformancePanel } from '@/components/cage/lineage-performance';
 import { BoostExecutionControl } from '@/components/cage/boost-execution-control';
 import { GateSignatureApproval } from '@/components/cage/gate-signature-approval';
 import { GateUndoButton, isUndoEligible } from '@/components/cage/gate-undo-button';
@@ -48,6 +49,15 @@ interface GateDetail extends GateItem {
 function GateProductionWorkbenchEvidence({ gate }: { gate: GateDetail }) {
   if (gate.work_item_type !== 'story' && gate.work_item_type !== 'task') return null;
   return <ProductionWorkbenchEvidencePanel workItemId={gate.work_item_id} workItemType={gate.work_item_type} />;
+}
+
+// story #4063(E-RECIPE-1 ④, PR #4434+#4061 위) — material_lineage는 work_item_id 축 하나로만
+// 조회되므로(story/task 구분 불요, material_lineage.py 라우터 참고) 위 형제와 달리
+// work_item_type 가드가 없다 — 대신 이 스토리가 애초에 story 종류(레시피 apply)일 때만
+// row가 존재하므로 패널 자체가 omit-when-empty로 자연 필터링한다.
+function GateLineagePerformance({ gate }: { gate: GateDetail }) {
+  if (gate.work_item_type !== 'story' && gate.work_item_type !== 'task') return null;
+  return <LineagePerformancePanel workItemId={gate.work_item_id} />;
 }
 
 export default function GateDetailPage() {
@@ -407,6 +417,7 @@ export default function GateDetailPage() {
                   <div className="space-y-3">
                     <GateEvidence gate={gate} />
                     <GateProductionWorkbenchEvidence gate={gate} />
+                    <GateLineagePerformance gate={gate} />
                     {/* story #2043 AC1: status·requires_human·evidence_status 조합별 단일 문장 —
                         조합표(코드 근거):
                         - status≠pending → 이미 해소됨(무엇으로 닫혔는지)
@@ -449,6 +460,7 @@ export default function GateDetailPage() {
                   <div className="space-y-3">
                     <GateEvidence gate={gate} />
                     <GateProductionWorkbenchEvidence gate={gate} />
+                    <GateLineagePerformance gate={gate} />
                     <p className="text-[11px] text-muted-foreground">
                       {gate.designated_approver_id && gate.designated_approver_id !== currentTeamMemberId
                         ? t('gateReadonlyDesignatedElsewhere')
@@ -488,6 +500,7 @@ export default function GateDetailPage() {
                   <div className="space-y-3">
                     <GateEvidence gate={gate} />
                     <GateProductionWorkbenchEvidence gate={gate} />
+                    <GateLineagePerformance gate={gate} />
                     {transitionError ? (
                       <p
                         className="rounded-lg border border-destructive/30 bg-destructive-tint px-3 py-2 text-xs text-foreground"
