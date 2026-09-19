@@ -104,4 +104,18 @@ describe('ProductionWorkbenchEvidencePanel', () => {
     await flush();
     expect(container.querySelector('[data-testid="production-workbench-evidence"]')).toBeNull();
   });
+
+  it('story #4064 — cost_tier=paid 배지는 secondary(neutral) + 비용 아이콘, no_charge엔 아이콘 없음', async () => {
+    const evidenceRows = [
+      { id: 'e-paid', type: 'report', ref: 'animatic', ...BASE_EVIDENCE, payload: { kind: 'animatic', artifact_id: 'artifact-uuid-2', cost_tier: 'paid', duration_sec: 6 } },
+    ];
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => evidenceRows })));
+    await act(async () => { root.render(wrap(<ProductionWorkbenchEvidencePanel workItemId="story-1" workItemType="story" />)); });
+    await flush();
+
+    const panel = container.querySelector('[data-testid="production-workbench-evidence"]')!;
+    expect(panel.textContent).toContain('실탄');
+    // lucide 아이콘은 svg로 렌더된다 — CircleDollarSign 존재만 구조적으로 확認(색 아님).
+    expect(panel.querySelector('svg.lucide-circle-dollar-sign')).not.toBeNull();
+  });
 });

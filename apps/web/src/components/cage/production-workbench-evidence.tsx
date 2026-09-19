@@ -1,7 +1,7 @@
 'use client';
 
 import { useLocale, useTranslations } from 'next-intl';
-import { Play } from 'lucide-react';
+import { CircleDollarSign, Play } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { formatRelativeTime } from '@/lib/storage/format';
@@ -188,7 +188,11 @@ function AnimaticCard({ evidence }: { evidence: EvidenceItem }) {
           </span>
         </div>
         <div className="flex flex-1 flex-col gap-1.5 text-[12px]">
-          <Badge variant={animatic.cost_tier === 'no_charge' ? 'secondary' : 'warning'} className="w-fit">
+          {/* story #4064(유나 design PASS 후속, 2026-09-19) — cost_tier는 categorical
+              값(no_charge/paid)이지 상태(성공/경고)가 아니다. 둘 다 secondary(neutral)로
+              걷고, salience는 색 대신 paid 전용 비용 아이콘으로 전한다. */}
+          <Badge variant="secondary" className="w-fit gap-1">
+            {animatic.cost_tier === 'paid' ? <CircleDollarSign className="size-3" /> : null}
             {animatic.cost_tier === 'no_charge' ? t('productionWorkbenchCostTierNoCharge') : t('productionWorkbenchCostTierPaid')}
           </Badge>
           <span className="text-muted-foreground">{t('productionWorkbenchDurationSeconds', { sec: animatic.duration_sec })}</span>
