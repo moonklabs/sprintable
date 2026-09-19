@@ -109,4 +109,28 @@ describe('RecipeDetailView — 9단계 스텝퍼·게이트 4(live/building 실�
     // 4번째 칩 라벨이 실행(run 화면과 층 겹침, PO B안)이 아니라 에이전트인지 직접 확認.
     expect(text).toContain('에이전트');
   });
+
+  // story #4067(유나 design-QA, 2026-09-19) — role dot이 status 토큰(bg-info/success/
+  // warning/muted-fg/primary/destructive)을 더는 안 쓰고, role KEY 기반 role-accent CSS
+  // 변수를 인라인 style로 받는지 pin(className에 status bg-* 없음 + 서로 다른 role이 서로
+  // 다른 --role-accent-N을 받는지).
+  it('범례·스텝퍼 role dot이 status bg-* 클래스 대신 role-accent CSS 변수를 인라인 style로 쓴다(회귀)', async () => {
+    await act(async () => { root.render(wrap(<RecipeDetailView recipe={RECIPE} />)); });
+
+    const legend = container.querySelector('[data-testid="recipe-legend"]')!;
+    const legendDots = [...legend.querySelectorAll('span > span.rounded-full')];
+    expect(legendDots.length).toBeGreaterThan(0);
+    for (const dot of legendDots) {
+      const el = dot as HTMLElement;
+      // 구 ROLE_DOT_PALETTE 클래스가 하나도 안 남아있다.
+      expect(el.className).not.toMatch(/bg-(info|success|warning|muted-foreground|primary|destructive)\b/);
+      // 대신 role-accent CSS 변수를 인라인으로 받는다.
+      expect(el.style.backgroundColor).toMatch(/^var\(--role-accent-[1-6]\)$/);
+    }
+
+    // 3개 role(크리에이터·디렉터·발행자)이 서로 다른 accent를 받는다(전부 같은 색으로
+    // 뭉개지지 않음 — 폴백이 role KEY별로 다르게 동작하는지의 관측 가능한 신호).
+    const accents = new Set(legendDots.map((d) => (d as HTMLElement).style.backgroundColor));
+    expect(accents.size).toBeGreaterThan(1);
+  });
 });

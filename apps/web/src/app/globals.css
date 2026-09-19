@@ -359,6 +359,20 @@
   --info-foreground: oklch(0.985 0 0);
   --priority: oklch(0.65 0.18 50);
 
+  /* story #4067(유나 design-QA, 2026-09-19) — 역할(role) categorical 팔레트. cost_tier
+     (#4438/#4433)와 동일 원칙: role은 상태(좋음/주의/kill)가 아니니 --success/--warning/
+     --destructive 재사용 금지 — 역할이 그 상태색으로 오독된다(예: Publisher가 --success를
+     받으면 "좋음"으로 읽힘). CVD-safe 순서(유나 검증) — 상태연상 적은 hue(blue/orange/
+     purple/cyan)를 앞에 둬 역할 4종(Creator/Director/Compute/Publisher, role-accent.ts
+     ORDER)이 green/amber/red를 안 물게 한다. lib/role-accent.ts가 role KEY→변수명을
+     positional 아니게 안정 매핑. */
+  --role-accent-1: oklch(0.50 0.13 255); /* blue */
+  --role-accent-2: oklch(0.62 0.13 60);  /* orange */
+  --role-accent-3: oklch(0.44 0.16 320); /* purple */
+  --role-accent-4: oklch(0.60 0.10 195); /* cyan */
+  --role-accent-5: oklch(0.54 0.13 150); /* green */
+  --role-accent-6: oklch(0.52 0.17 25);  /* red */
+
   /* Scrollbar — story #2601: 10%/18% 알파는 실측(Chromium canvas 2d fillRect+getImageData,
      color-contrast.test.ts와 동일 규격) 대비 1.26:1(WCAG 비텍스트 UI 컴포넌트 3:1 문턱의
      절반 이하)이라 사실상 안 보였다. 45%로 올려 3.36:1 확보 — 회귀 가드는
@@ -617,6 +631,14 @@
      텍스트로는 AA 미달(실측 3.24:1). --primary-foreground 다크와 동일 보정 패턴. */
   --info-foreground: oklch(0.16 0.038 250);
   --priority: oklch(0.70 0.18 50);
+
+  /* story #4067 — 라이트 쪽 주석 근거 그대로(유나 검증치, 대비 4.72~9.84 전부 ≥3:1). */
+  --role-accent-1: oklch(0.70 0.12 255); /* blue */
+  --role-accent-2: oklch(0.80 0.13 60);  /* orange */
+  --role-accent-3: oklch(0.63 0.15 320); /* purple */
+  --role-accent-4: oklch(0.80 0.09 195); /* cyan */
+  --role-accent-5: oklch(0.73 0.13 150); /* green */
+  --role-accent-6: oklch(0.67 0.16 25);  /* red */
 
   /* Scrollbar — story #2601, 라이트 쪽 주석 근거 그대로. 원래 8% 알파는 실측 대비 1.22:1 —
      --background(다크)이 실측 rgb(17,17,20)로 거의 순흑에 가까워 흰 알파가 라이트보다도
