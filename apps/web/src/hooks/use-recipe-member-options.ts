@@ -1,7 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
 import { fetchWithAuth } from '@/lib/db/client';
+import { useAsyncResource } from './use-async-resource';
 
 // story #4046(E-RECIPE-1 ①) — 프로젝트 team member(agent+human 혼합) 조회. 기존
 // apply-recipe-dialog.tsx는 `?type=agent`로 고정해 에이전트만 받는다(개발 워크플로 레시피는
@@ -38,46 +38,19 @@ export interface UseRecipeMemberOptionsResult {
   refresh: () => void;
 }
 
+// story #4071 마이그(useAsyncResource 위) — 카디르 QA(#4421 qa:changes, 2026-09-19)가 잡은
+// "조회 中 projectId→null 전환 시 loading 영구고착" 클래스가 헬퍼의 구조(스킵/성공/실패
+// 세 경로가 같은 종료점에서 loading=false로 닫힘)로 다시 등장할 여지 자체가 없어졌다.
 export function useRecipeMemberOptions(projectId: string | null): UseRecipeMemberOptionsResult {
-  const [options, setOptions] = useState<RecipeMemberOption[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [loadFailed, setLoadFailed] = useState(false);
-  const [nonce, setNonce] = useState(0);
-
-  const refresh = useCallback(() => setNonce((n) => n + 1), []);
-
-  useEffect(() => {
-    if (!projectId) {
-      // 카디르 QA(#4421 qa:changes, 2026-09-19) — 조회 中 projectId가 null로 바뀌면
-      // 이전 effect의 cleanup(cancelled=true)이 그 effect의 finally{setLoading(false)}를
-      // 막고, 이 분기도 loading을 안 꺼서 loading=true가 영구 고착됐다(vitest로 실측
-      // 재현). 두 effect 모두가 각자 own loading을 책임지게 여기서도 명시적으로 끈다.
-      setOptions([]);
-      setLoadFailed(false);
-      setLoading(false);
-      return;
-    }
-    let cancelled = false;
-    setLoading(true);
-    setLoadFailed(false);
-    void (async () => {
-      try {
-        const res = await fetchWithAuth(`${TEAM_MEMBERS_API_PATH}?project_id=${projectId}`);
-        if (!res.ok) throw new Error(`status ${res.status}`);
-        const json = (await res.json()) as RecipeMemberOption[] | { data?: RecipeMemberOption[] };
-        const all = Array.isArray(json) ? json : (json.data ?? []);
-        if (cancelled) return;
-        setOptions(all);
-      } catch {
-        if (cancelled) return;
-        setOptions([]);
-        setLoadFailed(true);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [projectId, nonce]);
+  const { data: options, loading, loadFailed, refresh } = useAsyncResource<string, RecipeMemberOption[]>(
+    projectId, [],
+    async (id) => {
+      const res = await fetchWithAuth(`${TEAM_MEMBERS_API_PATH}?project_id=${id}`);
+      if (!res.ok) throw new Error(`status ${res.status}`);
+      const json = (await res.json()) as RecipeMemberOption[] | { data?: RecipeMemberOption[] };
+      return Array.isArray(json) ? json : (json.data ?? []);
+    },
+  );
 
   return { options, loading, loadFailed, refresh };
 }
