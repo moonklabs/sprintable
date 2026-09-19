@@ -1,0 +1,78 @@
+"""story #4058(E-RECIPE-1 성공기준 4) — material_lineage 조회 API. write 엔드포인트는
+이 카드 범위 밖(lineage row insert는 apply-time 후속 스토리 몫, doc c7991109 §3④) — 이
+파일은 디디 #4061 web 데이터층(use-material-lineage 훅)이 소비할 GET 2종만 연다.
+evidence.py::list_evidence와 동형 권한 축(org 멤버 누구나 GET, write 없음)."""
+from __future__ import annotations
+
+import uuid
+
+from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.dependencies.auth import get_current_user, get_verified_org_id
+from app.dependencies.database import get_db
+from app.models.material_lineage import MaterialLineage
+from app.services.material_lineage import HookPerformanceSummary, compute_hook_performance
+
+router = APIRouter(prefix="/api/v2/material-lineage", tags=["material-lineage"])
+
+
+class MaterialLineageEdgeView(BaseModel):
+    id: uuid.UUID
+    source_evidence_id: uuid.UUID
+    derived_kind: str
+    derived_id: uuid.UUID
+    relation_kind: str
+    variant_axis: str | None
+    hook_key: str | None
+    work_item_id: uuid.UUID
+
+
+class HookPerformanceView(BaseModel):
+    hook_key: str
+    variant_count: int
+    snapshot_count: int
+    totals: dict[str, int | None]
+
+    @classmethod
+    def from_summary(cls, summary: HookPerformanceSummary) -> "HookPerformanceView":
+        return cls(
+            hook_key=summary.hook_key, variant_count=summary.variant_count,
+            snapshot_count=summary.snapshot_count, totals=summary.totals,
+        )
+
+
+@router.get("", response_model=list[MaterialLineageEdgeView])
+async def list_material_lineage(
+    work_item_id: uuid.UUID = Query(...),
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    _auth=Depends(get_current_user),
+) -> list[MaterialLineageEdgeView]:
+    """디디 #4061 buildLineageTree(edges)가 소비할 원자료 — 마스터(work_item_id)당
+    계보 edge 전부(변주 여러 개 가능). org access 검증은 work_item 소유 확認 없이
+    org_id 스코프만 건다(evidence.py의 project-단위 has_project_access와 달리, 이
+    edge 자체는 project 소속 콘텐츠가 아니라 org 내부 계보 그래프라 org 스코프면
+    충분 — 노출 위험 낮음, read-only)."""
+    rows = (await session.execute(
+        select(MaterialLineage).where(
+            MaterialLineage.org_id == org_id,
+            MaterialLineage.work_item_id == work_item_id,
+        ).order_by(MaterialLineage.created_at.asc())
+    )).scalars().all()
+    return [MaterialLineageEdgeView.model_validate(r, from_attributes=True) for r in rows]
+
+
+@router.get("/hook-performance", response_model=HookPerformanceView)
+async def get_hook_performance(
+    hook_key: str = Query(...),
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    _auth=Depends(get_current_user),
+) -> HookPerformanceView:
+    """유나 성과 화면이 소비할 축 — doc c7991109 §3③. 미등록 hook_key도 에러 없이
+    빈 요약(전부 None/0)을 낸다(compute_hook_performance 자체 계약, 지어내지 않는다)."""
+    summary = await compute_hook_performance(session, org_id=org_id, hook_key=hook_key)
+    return HookPerformanceView.from_summary(summary)

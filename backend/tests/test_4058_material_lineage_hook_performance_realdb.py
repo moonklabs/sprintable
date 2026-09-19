@@ -268,3 +268,65 @@ async def test_compute_hook_performance_is_org_scoped():
             assert result_a.totals["impressions"] == 10
     finally:
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_list_material_lineage_endpoint_scoped_to_work_item_and_org():
+    """라우터 함수 직접 호출(evidence.py list_evidence 관례 — Header() DI가 없는 이
+    엔드포인트는 ASGI 없이도 안전) — 디디 #4061 buildLineageTree(edges)가 소비할
+    원자료가 work_item_id·org_id로 정확히 스코프되는지."""
+    from app.routers.material_lineage import list_material_lineage
+
+    engine, factory = await _session_factory()
+    try:
+        async with factory() as session:
+            org_id, project_id = await _seed_org(session)
+            story_a = await _seed_story(session, org_id, project_id, title="A")
+            story_b = await _seed_story(session, org_id, project_id, title="B")
+            other_org, other_project = await _seed_org(session)
+            other_story = await _seed_story(session, other_org, other_project)
+
+            ev_a = await _seed_master_evidence(session, org_id=org_id, work_item_id=story_a)
+            ev_other = await _seed_master_evidence(session, org_id=other_org, work_item_id=other_story)
+            await _seed_lineage(session, org_id=org_id, source_evidence_id=ev_a, work_item_id=story_a, derived_id=uuid.uuid4(), hook_key="hook_a")
+            await _seed_lineage(session, org_id=org_id, source_evidence_id=ev_a, work_item_id=story_a, derived_id=uuid.uuid4(), hook_key="hook_b")
+            # 다른 스토리(같은 org) — 안 섞여야 함.
+            ev_b = await _seed_master_evidence(session, org_id=org_id, work_item_id=story_b)
+            await _seed_lineage(session, org_id=org_id, source_evidence_id=ev_b, work_item_id=story_b, derived_id=uuid.uuid4(), hook_key="hook_c")
+            # 다른 org — 안 섞여야 함(org_id 스코프 회귀 방지).
+            await _seed_lineage(session, org_id=other_org, source_evidence_id=ev_other, work_item_id=story_a, derived_id=uuid.uuid4(), hook_key="hook_leak")
+
+            edges = await list_material_lineage(work_item_id=story_a, session=session, org_id=org_id, _auth=None)
+            assert {e.hook_key for e in edges} == {"hook_a", "hook_b"}
+            assert all(e.work_item_id == story_a for e in edges)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_hook_performance_endpoint_matches_service_and_handles_unknown_key():
+    """라우터 함수 직접 호출 — HookPerformanceView가 compute_hook_performance 값을
+    그대로 실어 나르는지(변환 손실 0), 미등록 hook_key도 에러 없이 빈 요약."""
+    from app.routers.material_lineage import get_hook_performance
+
+    engine, factory = await _session_factory()
+    try:
+        async with factory() as session:
+            org_id, project_id = await _seed_org(session)
+            story = await _seed_story(session, org_id, project_id)
+            ev = await _seed_master_evidence(session, org_id=org_id, work_item_id=story)
+            pub = uuid.uuid4()
+            await _seed_lineage(session, org_id=org_id, source_evidence_id=ev, work_item_id=story, derived_id=pub, hook_key="hook_x")
+            await _seed_snapshot(session, org_id=org_id, work_item_id=story, publication_id=pub, normalized={"impressions": 42})
+
+            view = await get_hook_performance(hook_key="hook_x", session=session, org_id=org_id, _auth=None)
+            assert view.hook_key == "hook_x"
+            assert view.variant_count == 1
+            assert view.snapshot_count == 1
+            assert view.totals["impressions"] == 42
+
+            empty_view = await get_hook_performance(hook_key="never_seen", session=session, org_id=org_id, _auth=None)
+            assert empty_view.variant_count == 0
+            assert empty_view.snapshot_count == 0
+    finally:
+        await engine.dispose()
