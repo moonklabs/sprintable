@@ -28,11 +28,33 @@ export interface UseAsyncResourceResult<T> extends AsyncResourceState<T> {
   refresh: () => void;
 }
 
+export interface UseAsyncResourceOptions {
+  /** story #4071 qa:changes(카디르, 2026-09-19, #4445 재작업 계기) — 기본값(false)은
+   * 실패 시 `data`를 `initial`로 되돌린다(스킵과 동일 취급). 그런데 마이그 대상 훅 중
+   * 일부(예: use-channel-post-calendar-data.ts)는 원본이 "재조회 실패 시 이전 성공
+   * 데이터를 그대로 유지 + error만 세움"이었다 — 캘린더가 이미 그린 일정을 실패
+   * 화면으로 안 지우는 게 원래 계약이었던 것. 헬퍼 기본값을 바꾸면 이미 마이그된
+   * 훅(#4444/#4446 등, 원본도 실패 시 리셋이었음) 전부가 영향받으니
+   * (계약변경소비처전수 위험) 옵션으로 분리 — true를 넘긴 훅만 이전 데이터를 보존한다. */
+  keepPreviousDataOnError?: boolean;
+  /** story #4071 qa:changes(유나 design, 2026-09-19, #4445 재작업 계기) — 기본값(false)은
+   * `loading`을 false로 초기화한다. 마이그 대상 훅 중 일부(예:
+   * use-channel-post-calendar-data.ts)는 원본이 `useState(true)`로 초기화해 마운트
+   * 즉시(첫 페인트부터) 로딩 상태였다 — 헬퍼 기본값(false)을 그대로 쓰면 첫 페인트가
+   * "빈 그리드/EmptyState"였다가 effect가 뒤늦게 loading=true로 뒤집는 <1프레임 flash가
+   * 난다("채널 없음" 등 잘못된 상태가 한 프레임이라도 보이면 "무변" 계약 위반).
+   * keepPreviousDataOnError와 같은 패턴 — 옵션으로 분리해 다른 소비처(원본도 false
+   * 초기화였던 훅들)는 무영향으로 둔다. */
+  initialLoading?: boolean;
+}
+
 /**
  * `key`가 null/undefined면 fetch 자체를 스킵하고 `initial`로 되돌린다(그 무엇도 "모른다"를
  * 지어내지 않는다 — no-fiction). `key`가 있으면 `fetcher(key, signal)`을 호출해 성공 시
- * `data`를, 실패 시 `loadFailed=true`+`data=initial`을 낸다. 스킵/성공/실패 세 경로 전부
- * 이 함수 안에서 반드시 `loading=false`로 끝난다 — 호출부가 그걸 빼먹을 여지 자체가 없다.
+ * `data`를, 실패 시 `loadFailed=true`를 낸다(`data`는 `options.keepPreviousDataOnError`가
+ * true가 아닌 한 `initial`로 되돌아간다 — 기본값은 기존 동작 그대로). 스킵/성공/실패 세
+ * 경로 전부 이 함수 안에서 반드시 `loading=false`로 끝난다 — 호출부가 그걸 빼먹을 여지
+ * 자체가 없다.
  *
  * `deps`는 `key` 자체가 바뀌지 않아도 `fetcher` 클로저가 참조하는 다른 값(예: orgId)이
  * 바뀌면 재조회해야 하는 경우를 위한 추가 의존성 배열이다(use-channel-post-calendar-data.ts
@@ -43,9 +65,11 @@ export function useAsyncResource<Key, T>(
   initial: T,
   fetcher: (key: Key, signal: AsyncResourceSignal) => Promise<T>,
   deps: React.DependencyList = [],
+  options: UseAsyncResourceOptions = {},
 ): UseAsyncResourceResult<T> {
+  const { keepPreviousDataOnError = false, initialLoading = false } = options;
   const [data, setData] = useState<T>(initial);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(initialLoading);
   const [loadFailed, setLoadFailed] = useState(false);
   const [nonce, setNonce] = useState(0);
   const refresh = useCallback(() => setNonce((n) => n + 1), []);
@@ -67,7 +91,7 @@ export function useAsyncResource<Key, T>(
         setData(result);
       } catch {
         if (cancelled) return;
-        setData(initial);
+        if (!keepPreviousDataOnError) setData(initial);
         setLoadFailed(true);
       } finally {
         if (!cancelled) setLoading(false);
