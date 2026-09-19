@@ -66,6 +66,31 @@ describe('useRecipeMemberOptions — agent+human 혼합 조회(type 파라미터
     expect(state.loadFailed).toBe(false);
   });
 
+  // story #4071 qa:changes 부수(카디르, 2026-09-19) — 기존 스위트는 성공 응답을 전부
+  // 원시 배열로만 mock해 `Array.isArray(json) ? json : (json.data ?? [])`의 else 분기
+  // (BFF가 `{data:[...]}` envelope로 감싸 낼 때)가 한 번도 실행되지 않았다 —
+  // `?? []`를 지워도(=json.data가 undefined일 때 크래시) 기존 5건이 그대로 통과했을
+  // 것([못틀리는대조미자]). envelope 모양 응답으로 그 분기 자체를 pin.
+  it('응답이 {data:[...]} envelope 모양이어도(원시 배열 아님) data를 그대로 낸다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true, json: async () => ({ data: [{ id: 'agent-2', name: '봇', type: 'agent' }] }),
+    })));
+
+    await act(async () => { root.render(<Harness projectId="proj-1" />); });
+    await flush();
+
+    expect(dump().options).toEqual([{ id: 'agent-2', name: '봇', type: 'agent' }]);
+  });
+
+  it('응답이 {data:[...]} envelope인데 data 필드 자체가 없으면 빈 배열로 방어한다(핵심 회귀 — ?? [] 제거 시 크래시)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({}) })));
+
+    await act(async () => { root.render(<Harness projectId="proj-1" />); });
+    await flush();
+
+    expect(dump()).toEqual({ options: [], loading: false, loadFailed: false });
+  });
+
   it('projectId가 null이면 fetch 자체를 안 태우고 빈 옵션', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
@@ -144,5 +169,20 @@ describe('useRecipeMemberOptions — agent+human 혼합 조회(type 파라미터
     await act(async () => { resolveFetch?.(); });
     await flush();
     expect(dump().loading).toBe(false);
+  });
+
+  // story #4071 qa:changes(카디르, #4444와 동일 클래스, 2026-09-19) — 원본 skip 조건
+  // `if (!projectId)`는 falsy 전부(빈 문자열 포함)를 스킵으로 봤다. useAsyncResource의
+  // skip 판정은 null/undefined만 인식하므로, projectId=''를 정규화 없이 넘기면 실제
+  // fetch가 나가 "기존동작 무변" 계약이 깨진다 — 핵심 회귀.
+  it('projectId가 빈 문자열이어도(falsy) fetch 자체를 호출하지 않는다(#4071 재QA 핵심 회귀)', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await act(async () => { root.render(<Harness projectId="" />); });
+    await flush();
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(dump()).toEqual({ options: [], loading: false, loadFailed: false });
   });
 });
