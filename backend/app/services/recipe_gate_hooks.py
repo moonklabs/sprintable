@@ -309,6 +309,13 @@ async def maybe_create_stage_gate(
                 neutral_facts["budget_limit_minor"] = budget_status["limit_minor"]
                 neutral_facts["budget_spent_minor"] = budget_status["spent_minor"]
                 neutral_facts["budget_remaining_minor"] = budget_status["remaining_minor"]
+                # story #4072(카디르 QA③, 2026-09-19) — sealed_estimated_cost_minor를
+                # FE가 라벨과 함께 보이려면 통화가 있어야 한다(org별 KRW|USD 정책,
+                # content_rules.py::GenerationBudgetRule.currency). compute_generation_
+                # budget_status가 이미 이 값을 돌려주는데 여기서 안 옮겨 담아 neutral_
+                # facts에 currency 축 자체가 없었다 — "currency 지어내지 않는다" 원칙상
+                # FE가 formatMinorCurrency를 못 쓰고 있었다(라벨 없는 맨 숫자).
+                neutral_facts["currency"] = budget_status["currency"]
 
     from app.services.approval_delivery import dispatch_approval_request_cards
     from app.services.gate_service import (
