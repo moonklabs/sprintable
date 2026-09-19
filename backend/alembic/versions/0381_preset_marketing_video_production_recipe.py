@@ -83,7 +83,7 @@ import uuid
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0379"
+revision = "0381"
 down_revision = "0378"
 branch_labels = None
 depends_on = None

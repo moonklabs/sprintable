@@ -1,5 +1,5 @@
 """story #4039(E-RECIPE-1 ①) — 마케팅 레시피 1호(«영상 제작») 프리셋 시드
-(alembic/versions/0379_preset_marketing_video_production_recipe.py) 실증.
+(alembic/versions/0381_preset_marketing_video_production_recipe.py) 실증.
 
 단위 축(DB 불요) — 마이그 상수를 event_definition_registry의 등록 시점 검증기 그대로에
 통과시켜 seed 자체가 유효한 계약인지 고정한다. 실행 축(realdb) — AC1(«dev 조직에서 apply
@@ -49,7 +49,7 @@ def _load_migration_module():
         "_m0379",
         os.path.join(
             os.path.dirname(__file__), "..", "alembic", "versions",
-            "0379_preset_marketing_video_production_recipe.py",
+            "0381_preset_marketing_video_production_recipe.py",
         ),
     )
     m = importlib.util.module_from_spec(spec)
