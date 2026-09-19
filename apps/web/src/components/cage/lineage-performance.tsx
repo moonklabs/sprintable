@@ -3,26 +3,29 @@
 import { useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
+import { channelLabel } from '@/lib/channel-label';
 import { useMaterialLineage } from '@/hooks/use-material-lineage';
 import { useHookPerformances } from '@/hooks/use-hook-performances';
-import { buildLineageTree } from '@/lib/material-lineage-tree';
-import type { MaterialLineageEdge, RelationKind, HookPerformanceSummary } from '@/services/material-lineage';
+import { useMaterialPerformances } from '@/hooks/use-material-performances';
+import { buildLineageTree, pickPrimaryMetricValue } from '@/lib/material-lineage-tree';
+import type { MaterialLineageEdge, RelationKind, HookPerformanceSummary, MaterialPerformanceSnapshot } from '@/services/material-lineage';
 
 // story #4063(E-RECIPE-1 ④ 렌더, 유나 성과 시안 v2·artifact 18fc7937 위) — 미르코 #4434
 // 실 API(GET /api/v2/material-lineage·/hook-performance) + 디디 #4061 데이터층
 // (buildLineageTree 등) 위. gates/[id]에 #4057 ProductionWorkbenchEvidencePanel과 나란히
 // 독립 패널로 배선(PO 확認, 2026-09-19 — 전용 런페이지는 이 카드 스코프 밖).
 //
-// **시안 대비 스코프 축소 3건(실 API에 없는 값은 지어내지 않는다 — no-fiction, 유나에 플래그)**:
-//  ① 트리 노드별 성과 막대(시안 "142,800"류) — MaterialLineageEdgeView엔 구조 필드뿐이고
-//     변주(derived_id) 단위 성과를 조회하는 API가 없다(오직 hook_key 단위 집계만 존재).
-//     그래서 트리는 구조만 그린다 — 훅이 걸린 변주엔 훅 배지만 달아 아래 랭킹과 연결한다.
-//  ② 노드 이름(시안 "가을 신상 15초 컷") — evidence/변주 어느 쪽도 사람이 읽을 제목을 이
-//     응답에 안 담아(source_evidence_id/derived_id는 uuid뿐) "{kind} #{짧은id}"로 대체.
-//  ③ 소재(마스터) 단위 roll-up 테이블(NORMALIZED_KEYS × D1/D7) — 마스터 전체 합산 API가
-//     없다(훅 단위 집계뿐이며 D1/D7 윈도우 구분도 응답에 없음). 그 대신 「훅 성과 요약」
-//     스트립(훅 수·변주 수·스냅샷 수·조회수 합계)만 제공 — hook_key 없는 변주는 커버 밖임을
-//     명시(hookPerformanceSummaryScopeNote).
+// **후속(PR 9dd179582·6b7b33ebf 위, 2026-09-19) — 아래 ①②는 API가 서서 해소**:
+//  ① 트리 노드별 성과 막대 — `GET .../material-performance?derived_id=`(per-variant,
+//     channel_publication만) 착지, `pickPrimaryMetricValue`로 대표값 뽑아 그린다.
+//     `channel_post_draft`(미발행)는 API가 항상 빈 배열이라 애초에 막대 없이 "미발행".
+//  ② 노드 이름 — `master_title`(Story.title)·`channel`(denorm 컬럼) 필드 착지, 둘 다
+//     null이면(fail-soft) "{kind} #{짧은id}"로 폴백(지어내지 않음, no-fiction 그대로).
+//
+// **③ 남은 스코프 축소(그대로 유지)**: 소재(마스터) 단위 roll-up 테이블(NORMALIZED_KEYS ×
+//     D1/D7) — 마스터 전체 합산 API가 없다(훅 단위 집계뿐, D1/D7 윈도우 구분도 응답에
+//     없음). 「훅 성과 요약」 스트립(훅 수·변주 수·스냅샷 수·조회수 합계)만 제공 —
+//     hook_key 없는 변주는 커버 밖임을 명시(hookPerformanceSummaryScopeNote).
 const RELATION_KIND_LABEL_KEY: Record<RelationKind, string> = {
   platform_cut: 'lineageRelationKindPlatformCut',
   aspect_adapt: 'lineageRelationKindAspectAdapt',
@@ -49,37 +52,76 @@ function DerivedRef({ edge }: { edge: MaterialLineageEdge }) {
   );
 }
 
-function LineageVariantRow({ edge }: { edge: MaterialLineageEdge }) {
+function VariantDisplayName({ edge }: { edge: MaterialLineageEdge }) {
+  const tContent = useTranslations('content');
+  if (edge.channel) return <span className="text-[11.5px] font-medium text-foreground">{channelLabel(edge.channel, tContent)}</span>;
+  return <DerivedRef edge={edge} />;
+}
+
+function LineageVariantRow({ edge, primaryValue, maxValue }: {
+  edge: MaterialLineageEdge; primaryValue: number | null; maxValue: number;
+}) {
   const t = useTranslations('cage');
+  const isPublished = edge.derived_kind === 'channel_publication';
+  const widthPct = primaryValue !== null && maxValue > 0 ? Math.round((primaryValue / maxValue) * 100) : 0;
   return (
     <div className="flex flex-wrap items-center gap-1.5 rounded-lg px-2 py-1.5 hover:bg-muted">
       <Badge variant="secondary">{t(RELATION_KIND_LABEL_KEY[edge.relation_kind])}</Badge>
       {edge.variant_axis ? <span className="text-[11px] text-muted-foreground">{edge.variant_axis}</span> : null}
       {edge.hook_key ? <Badge variant="info">{t('lineageHookKeyRef', { key: edge.hook_key })}</Badge> : null}
-      <DerivedRef edge={edge} />
+      <VariantDisplayName edge={edge} />
+      {isPublished ? (
+        <>
+          <div className="h-1.5 w-[70px] shrink-0 overflow-hidden rounded-full bg-muted">
+            <div className="h-full rounded-full bg-info" style={{ width: `${widthPct}%` }} />
+          </div>
+          <span className="w-[70px] shrink-0 text-right text-[11px] font-semibold tabular-nums text-foreground">
+            {primaryValue !== null
+              ? primaryValue.toLocaleString()
+              : <span className="font-normal text-muted-foreground">{t('rankedHooksPending')}</span>}
+          </span>
+        </>
+      ) : (
+        <span className="text-[11px] text-muted-foreground">{t('lineageVariantUnpublished')}</span>
+      )}
     </div>
   );
 }
 
-function LineageTree({ edges }: { edges: MaterialLineageEdge[] }) {
+function LineageTree({ edges, snapshotsByDerivedId }: {
+  edges: MaterialLineageEdge[]; snapshotsByDerivedId: Record<string, MaterialPerformanceSnapshot[]>;
+}) {
   const t = useTranslations('cage');
   const nodes = buildLineageTree(edges);
+  const valueByDerivedId = new Map<string, number | null>();
+  for (const edge of edges) {
+    if (edge.derived_kind !== 'channel_publication') continue;
+    const snapshots = snapshotsByDerivedId[edge.derived_id];
+    valueByDerivedId.set(edge.derived_id, snapshots ? pickPrimaryMetricValue(snapshots) : null);
+  }
+  const maxValue = Math.max(0, ...[...valueByDerivedId.values()].filter((v): v is number => v !== null));
+
   return (
     <div className="space-y-3">
       {nodes.map((node) => {
-        const variantCount = RELATION_KIND_ORDER.reduce(
-          (sum, kind) => sum + (node.variantsByRelationKind[kind]?.length ?? 0), 0,
-        );
+        const variants = RELATION_KIND_ORDER.flatMap((kind) => node.variantsByRelationKind[kind] ?? []);
+        const masterTitle = variants.find((e) => e.master_title)?.master_title ?? null;
         return (
           <div key={node.sourceEvidenceId} className="space-y-1">
             <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-brand bg-transparent px-2 py-1.5">
               <Badge className="bg-brand/15 text-brand">{t('lineageTreeMasterBadge')}</Badge>
-              <span className="font-mono text-[11px] text-muted-foreground">{shortId(node.sourceEvidenceId)}</span>
-              <span className="text-[11px] text-muted-foreground">{t('lineageVariantCountSuffix', { n: variantCount })}</span>
+              {masterTitle
+                ? <span className="text-[12px] font-semibold text-foreground">{masterTitle}</span>
+                : <span className="font-mono text-[11px] text-muted-foreground">{shortId(node.sourceEvidenceId)}</span>}
+              <span className="text-[11px] text-muted-foreground">{t('lineageVariantCountSuffix', { n: variants.length })}</span>
             </div>
             <div className="space-y-0.5 pl-3">
-              {RELATION_KIND_ORDER.flatMap((kind) => node.variantsByRelationKind[kind] ?? []).map((edge) => (
-                <LineageVariantRow key={edge.id} edge={edge} />
+              {variants.map((edge) => (
+                <LineageVariantRow
+                  key={edge.id} edge={edge}
+                  primaryValue={valueByDerivedId.get(edge.derived_id) ?? null}
+                  maxValue={maxValue}
+                />
               ))}
             </div>
           </div>
@@ -169,6 +211,10 @@ export function LineagePerformancePanel({ workItemId }: LineagePerformancePanelP
   const { edges, loading, loadFailed } = useMaterialLineage(workItemId);
   const hookKeys = [...new Set(edges.map((e) => e.hook_key).filter((k): k is string => k !== null))].sort();
   const { summaries } = useHookPerformances(hookKeys);
+  const publicationDerivedIds = [...new Set(
+    edges.filter((e) => e.derived_kind === 'channel_publication').map((e) => e.derived_id),
+  )].sort();
+  const { snapshotsByDerivedId } = useMaterialPerformances(publicationDerivedIds);
 
   if (loading || loadFailed) return null;
   if (edges.length === 0) return null;
@@ -178,7 +224,7 @@ export function LineagePerformancePanel({ workItemId }: LineagePerformancePanelP
       <p className="text-[11px] font-semibold text-muted-foreground">{t('lineagePerformanceSectionTitle')}</p>
       <Card className="space-y-2 p-3">
         <p className="text-[11px] font-semibold text-muted-foreground">{t('lineageTreeTitle')}</p>
-        <LineageTree edges={edges} />
+        <LineageTree edges={edges} snapshotsByDerivedId={snapshotsByDerivedId} />
       </Card>
       {hookKeys.length > 0 ? (
         <Card className="space-y-2 p-3">

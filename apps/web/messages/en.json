@@ -5276,6 +5276,7 @@
     "lineageVariantCountSuffix": "· {n} below",
     "lineageHookKeyRef": "Hook {key}",
     "lineageDerivedRef": "{kind} #{id}",
+    "lineageVariantUnpublished": "Unpublished",
     "rankedHooksTitle": "Hook performance",
     "rankedHooksMetricLabel": "Views",
     "rankedHooksPending": "Pending",

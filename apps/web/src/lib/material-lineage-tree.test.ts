@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import type { MaterialLineageEdge } from '@/services/material-lineage';
+import type { MaterialLineageEdge, MaterialPerformanceSnapshot } from '@/services/material-lineage';
 import type { MaterialCollectionSheetHook } from '@/services/verify';
 import {
   buildLineageTree, findLineageEdgeForDerived, filterLineageByHookKey, indexHooksByKey,
+  pickPrimaryMetricValue,
 } from './material-lineage-tree';
 
 // story #4058(doc c7991109 v3)/#4061 — #4046(recipe-role-slots.ts) 방식 순수 함수 테스트.
@@ -13,7 +14,7 @@ function edge(overrides: Partial<MaterialLineageEdge>): MaterialLineageEdge {
     id: 'edge-1',
     source_evidence_id: 'master-1', derived_kind: 'channel_post_draft', derived_id: 'draft-1',
     relation_kind: 'platform_cut', variant_axis: null, hook_key: null,
-    work_item_id: 'story-1',
+    work_item_id: 'story-1', master_title: null, channel: null,
     ...overrides,
   };
 }
@@ -77,5 +78,38 @@ describe('indexHooksByKey', () => {
     const indexed = indexHooksByKey(hooks);
     expect(indexed.get('hook_a')?.text).toBe('이거 안 써봤죠?');
     expect(indexed.get('missing')).toBeUndefined();
+  });
+});
+
+function snapshot(overrides: Partial<MaterialPerformanceSnapshot>): MaterialPerformanceSnapshot {
+  return {
+    id: 's1', channel: 'instagram', due_at: '2026-09-01T00:00:00Z', captured_at: '2026-09-01T00:00:00Z',
+    status: 'captured', normalized: { impressions: null, reach: null, views: 100, engagements: null, clicks: null, spend: null, conversions: null, inflow_sessions: null, inflow_users: null, opens: null, delivered: null },
+    source: 'organic', error_code: null, offset_label: 'd1',
+    ...overrides,
+  };
+}
+
+describe('pickPrimaryMetricValue (story #4063 후속, PR 9dd179582 위)', () => {
+  it('status=captured 스냅샷 중 due_at이 가장 늦은 것의 metricKey 값을 낸다', () => {
+    const snapshots = [
+      snapshot({ id: 's1', due_at: '2026-09-01T00:00:00Z', normalized: { ...snapshot({}).normalized!, views: 100 } }),
+      snapshot({ id: 's2', due_at: '2026-09-07T00:00:00Z', normalized: { ...snapshot({}).normalized!, views: 400 } }),
+    ];
+    expect(pickPrimaryMetricValue(snapshots)).toBe(400);
+  });
+
+  it('captured가 하나도 없으면 null(0으로 위장 안 함)', () => {
+    const snapshots = [snapshot({ status: 'pending', normalized: null })];
+    expect(pickPrimaryMetricValue(snapshots)).toBeNull();
+  });
+
+  it('빈 배열도 null', () => {
+    expect(pickPrimaryMetricValue([])).toBeNull();
+  });
+
+  it('metricKey를 지정하면 그 키를 읽는다(기본값은 views)', () => {
+    const snapshots = [snapshot({ normalized: { ...snapshot({}).normalized!, views: 100, clicks: 7 } })];
+    expect(pickPrimaryMetricValue(snapshots, 'clicks')).toBe(7);
   });
 });

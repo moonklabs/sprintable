@@ -42,6 +42,7 @@ function dump() {
 const EDGE = (id: string) => ({
   id, source_evidence_id: 'ev-1', derived_kind: 'channel_post_draft', derived_id: `d-${id}`,
   relation_kind: 'platform_cut', variant_axis: 'reels', hook_key: null, work_item_id: 'story-1',
+  master_title: null, channel: null,
 });
 
 describe('useMaterialLineage — GET /api/v2/material-lineage?work_item_id=', () => {

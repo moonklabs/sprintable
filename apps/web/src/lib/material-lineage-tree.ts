@@ -3,7 +3,10 @@
 // 성과 화면 확定 뒤 별 카드). material_lineage API 자체가 미착지라 여기 함수들은 전부
 // 「edges 배열을 받으면」으로 시작한다 — 어디서 그 배열을 fetch할지는 이 파일의 관심사가
 // 아니다(fetching 훅은 story #4061 AC5로 이 카드가 명시적으로 안 만든다).
-import type { DerivedKind, MaterialLineageEdge, RelationKind } from '@/services/material-lineage';
+import type {
+  DerivedKind, MaterialLineageEdge, MaterialPerformanceSnapshot, RelationKind,
+} from '@/services/material-lineage';
+import type { InsightNormalizedMetrics } from '@/components/insights-board/types';
 import type { MaterialCollectionSheetHook } from '@/services/verify';
 
 export interface LineageTreeNode {
@@ -58,4 +61,19 @@ export function indexHooksByKey(hooks: MaterialCollectionSheetHook[]): Map<strin
   const map = new Map<string, MaterialCollectionSheetHook>();
   for (const hook of hooks) map.set(hook.key, hook);
   return map;
+}
+
+/** story #4063 후속(PR 9dd179582 위) — 한 변주(derived_id)의 스냅샷 배열에서 트리 노드
+ * 막대에 쓸 대표값 하나를 고른다. `status !== 'captured'`(집계 대기·미발행 등) snapshot은
+ * 전부 제외 — captured가 하나도 없으면 null(집계 대기, 0으로 위장 안 함). 여러 건이
+ * captured면(재발행·D1/D7 등 복수 사이클) due_at이 가장 늦은(가장 성숙한) 것을 쓴다 —
+ * #4063 훅 랭킹이 D1/D7을 안 나누고 단일 대표값을 보여주는 것과 같은 결. */
+export function pickPrimaryMetricValue(
+  snapshots: MaterialPerformanceSnapshot[],
+  metricKey: keyof InsightNormalizedMetrics = 'views',
+): number | null {
+  const captured = snapshots.filter((s) => s.status === 'captured' && s.normalized !== null);
+  if (captured.length === 0) return null;
+  const latest = captured.reduce((a, b) => (new Date(b.due_at) > new Date(a.due_at) ? b : a));
+  return latest.normalized?.[metricKey] ?? null;
 }

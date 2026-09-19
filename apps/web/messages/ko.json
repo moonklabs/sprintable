@@ -5276,6 +5276,7 @@
     "lineageVariantCountSuffix": "· 하위 {n}건",
     "lineageHookKeyRef": "훅 {key}",
     "lineageDerivedRef": "{kind} #{id}",
+    "lineageVariantUnpublished": "미발행",
     "rankedHooksTitle": "훅 단위 성과",
     "rankedHooksMetricLabel": "조회수",
     "rankedHooksPending": "집계 대기",

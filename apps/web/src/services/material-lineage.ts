@@ -4,6 +4,7 @@
  * 컬럼 전체가 아니라 그 라우터의 response_model(MaterialLineageEdgeView/HookPerformanceView)
  * 만 미러한다(org_id/project_id/created_by/created_at은 API가 안 내려줌, 지어내지 않음).
  */
+import type { InsightNormalizedMetrics, InsightSnapshotStatus } from '@/components/insights-board/types';
 
 // doc §3① — insight_snapshots.publication_kind와 동형인 다형 축(derived_kind+derived_id).
 export type DerivedKind = 'channel_post_draft' | 'channel_publication';
@@ -29,6 +30,13 @@ export interface MaterialLineageEdge {
   /** doc §3② material_collection_sheet payload의 hooks[].key를 가리킨다(FK 아님). */
   hook_key: string | null;
   work_item_id: string;
+  /** story #4063 갭2 후속(PR `6b7b33ebf`) — Story.title(gates.py::_resolve_work_item_summary
+   * 재사용, fail-soft) 미러. 한 목록 안 모든 edge가 같은 work_item_id를 공유해 같은 값이
+   * 중복 실린다(서버 코멘트 그대로) — 조회 실패 시 null(지어내지 않음, uuid로 폴백). */
+  master_title: string | null;
+  /** story #4063 갭2 후속 — channel_post_draft/channel_publication의 denorm `channel`
+   * 컬럼 반사(새 join 0). null=그 derived_id 조회 실패(교차조직 등, fail-soft). */
+  channel: string | null;
 }
 
 /** `GET /api/v2/material-lineage/hook-performance?hook_key=` 응답(`HookPerformanceView`,
@@ -45,4 +53,24 @@ export interface HookPerformanceSummary {
    * 작을 수 있다(미발행 변주·미집계 snapshot 존재). */
   snapshot_count: number;
   totals: Record<string, number | null>;
+}
+
+/** `GET /api/v2/material-lineage/material-performance?derived_id=` 응답 항목
+ * (`InsightSnapshotView`, backend/app/routers/insight_snapshots.py 그대로 미러 — PR
+ * `9dd179582`). `normalized`/`status`는 이미 이 레포의 정본 유니온이 있어(insights-board/
+ * types.ts 자체 코멘트 — "이 유니온의 «유일한» 정본이다") 여기서 재정의하지 않고 그대로
+ * 재사용한다. `channel_post_draft`(발행 前) 변주나 org 밖 derived_id는 API가 빈 배열로
+ * 답한다(에러 아님·존재 비노출, no-fiction) — 이 타입 자체는 배열 원소 shape만 다룬다. */
+export interface MaterialPerformanceSnapshot {
+  id: string;
+  channel: string;
+  due_at: string;
+  captured_at: string | null;
+  status: InsightSnapshotStatus;
+  normalized: InsightNormalizedMetrics | null;
+  source: string | null;
+  error_code: string | null;
+  /** story #3651 관례 — null=재발행 이전 사이클의 잔존 스냅샷(현재 사이클의 D1/D7
+   * 어느 쪽도 아님). 서버가 내는 정본 라벨, FE가 due_at 차로 재계산하지 않는다. */
+  offset_label: string | null;
 }
