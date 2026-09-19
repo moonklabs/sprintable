@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { EvidenceItem } from '@/services/verify';
 import {
   filterProductionWorkbenchEvidence, groupProductionWorkbenchEvidenceByKind, orderedPresentKinds,
+  partitionCurrentAndHistory,
 } from './production-workbench-evidence';
 
 // story #4041(제작 작업대 stage 산출물 계약 v0.5, doc 3cca821b) — #4046(recipe-role-slots.ts)
@@ -74,5 +75,56 @@ describe('orderedPresentKinds', () => {
 
   it('아무것도 없으면 빈 배열', () => {
     expect(orderedPresentKinds({})).toEqual([]);
+  });
+});
+
+describe('partitionCurrentAndHistory (story #4433 qa:changes round-3 — stage 매칭, 시간축 폐기)', () => {
+  it('gate.neutral_facts.stage와 payload.stage가 일치하는 evidence만 current로 승격한다', () => {
+    const items = filterProductionWorkbenchEvidence([
+      evidence({ id: 'e-old-concept', created_at: '2026-09-19T00:00:00Z', payload: { kind: 'verification_sheet', stage: 'concept_confirmed' } }),
+      evidence({ id: 'e-new-concept', created_at: '2026-09-18T00:00:00Z', payload: { kind: 'verification_sheet', stage: 'structure_approval' } }),
+    ]);
+    // 시간상으론 e-old-concept가 더 최신이지만, 게이트가 지금 보는 stage는 structure_approval
+    // — round-2의 "최신=현재" 추정이었다면 e-old-concept(구 컨셉 pass)가 잘못 승격됐을 자리.
+    const { current, history } = partitionCurrentAndHistory(items, 'structure_approval');
+    expect(current?.evidence.id).toBe('e-new-concept');
+    expect(history.map((i) => i.evidence.id)).toEqual(['e-old-concept']);
+  });
+
+  it('같은 stage 안에 재시도가 여러 건이면 그 안에서만 created_at 최신을 current로(타이브레이커)', () => {
+    const items = filterProductionWorkbenchEvidence([
+      evidence({ id: 'e-retry-1', created_at: '2026-09-18T00:00:00Z', payload: { kind: 'verification_sheet', stage: 'concept_confirmed' } }),
+      evidence({ id: 'e-retry-2', created_at: '2026-09-19T00:00:00Z', payload: { kind: 'verification_sheet', stage: 'concept_confirmed' } }),
+    ]);
+    const { current, history } = partitionCurrentAndHistory(items, 'concept_confirmed');
+    expect(current?.evidence.id).toBe('e-retry-2');
+    expect(history.map((i) => i.evidence.id)).toEqual(['e-retry-1']);
+  });
+
+  it('currentStage와 일치하는 evidence가 하나도 없으면 아무것도 승격하지 않는다(no-fiction — 모르면 안다고 안 함)', () => {
+    const items = filterProductionWorkbenchEvidence([
+      evidence({ id: 'e1', created_at: '2026-09-19T00:00:00Z', payload: { kind: 'verification_sheet', stage: 'concept_confirmed' } }),
+    ]);
+    const { current, history } = partitionCurrentAndHistory(items, 'structure_approval');
+    expect(current).toBeNull();
+    expect(history.map((i) => i.evidence.id)).toEqual(['e1']);
+  });
+
+  it('currentStage가 null이면(비-레시피 게이트 등) 매칭을 시도하지 않고 전부 history', () => {
+    const items = filterProductionWorkbenchEvidence([evidence({ id: 'e1', payload: { kind: 'animatic', stage: 'animatic' } })]);
+    const { current, history } = partitionCurrentAndHistory(items, null);
+    expect(current).toBeNull();
+    expect(history.map((i) => i.evidence.id)).toEqual(['e1']);
+  });
+
+  it('evidence에 payload.stage 자체가 없으면(구 데이터·계약 미착지) 매칭 불가 — 전부 history', () => {
+    const items = filterProductionWorkbenchEvidence([evidence({ id: 'e1', payload: { kind: 'animatic' } })]);
+    const { current, history } = partitionCurrentAndHistory(items, 'concept_confirmed');
+    expect(current).toBeNull();
+    expect(history.map((i) => i.evidence.id)).toEqual(['e1']);
+  });
+
+  it('빈 배열이면 current=null·history=빈 배열(지어내지 않음)', () => {
+    expect(partitionCurrentAndHistory([], 'concept_confirmed')).toEqual({ current: null, history: [] });
   });
 });
