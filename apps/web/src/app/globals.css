@@ -365,7 +365,12 @@
      받으면 "좋음"으로 읽힘). CVD-safe 순서(유나 검증) — 상태연상 적은 hue(blue/orange/
      purple/cyan)를 앞에 둬 역할 4종(Creator/Director/Compute/Publisher, role-accent.ts
      ORDER)이 green/amber/red를 안 물게 한다. lib/role-accent.ts가 role KEY→변수명을
-     positional 아니게 안정 매핑. */
+     positional 아니게 안정 매핑.
+     카디르 재QA(2026-09-19) — 최초 PR의 대비 수치(4.72~9.84)가 독립재계산과 안 맞아
+     scripts/verify-muted-foreground-contrast.ts와 동일 검증된 oklch→sRGB 유틸(oklch-
+     contrast.ts+color-contrast.ts)로 --background 위 직접 재계산: 라이트 3.48~7.86,
+     다크 5.22~10.86 — 6개 전부 비텍스트 UI 3:1 문턱 통과(가장 낮은 라이트 accent-2/4가
+     3.48/3.50로 근소하지만 통과). */
   --role-accent-1: oklch(0.50 0.13 255); /* blue */
   --role-accent-2: oklch(0.62 0.13 60);  /* orange */
   --role-accent-3: oklch(0.44 0.16 320); /* purple */
@@ -632,7 +637,7 @@
   --info-foreground: oklch(0.16 0.038 250);
   --priority: oklch(0.70 0.18 50);
 
-  /* story #4067 — 라이트 쪽 주석 근거 그대로(유나 검증치, 대비 4.72~9.84 전부 ≥3:1). */
+  /* story #4067 — 라이트 쪽 주석 근거 그대로. 다크 재계산치 5.22~10.86, 전부 ≥3:1. */
   --role-accent-1: oklch(0.70 0.12 255); /* blue */
   --role-accent-2: oklch(0.80 0.13 60);  /* orange */
   --role-accent-3: oklch(0.63 0.15 320); /* purple */
