@@ -234,6 +234,14 @@ class GateResponse(BaseModel):
     sealed_content_version: int | None = None
     sealed_content_sha256: str | None = None
     sealed_content_body: str | None = None
+    # story #3414(Phase1·마케팅운영, 페드루 PO 確定 2026-09-04) — external_publish 예약
+    # 발행 두 번째 봉인 축(sealed_content_*와 같은 관례, 예약 없는 다른 gate_type은
+    # 항상 null). story #4073(카디르 QA④ 실측, 2026-09-19) — 이 컬럼(models/gate.py)은
+    # channel_posts.py 발행 실행 경로엔 이미 쓰이는데(gate_service.py:1097/1137)
+    # 이 응답 스키마 등재를 빠뜨려 승인카드에서 예약시각이 안 보였다 — sealed_ads_*·
+    # sealed_newsletter_*·sealed_estimated_cost_minor(#4072)에 이어 같은 클래스의
+    # 마지막 인스턴스. Gate ORM 컬럼명과 일치라 from_attributes로 자동 채워짐.
+    sealed_scheduled_at: datetime | None = None
     # story #3367(3자기점검, 페드루 지적 2026-09-10) — AC7("결재 카드에서... 목적지를
     # 확認할 수 있고")의 입력. Gate ORM 컬럼명과 일치라 from_attributes로 자동 채워짐
     # (sealed_content_*와 동일 선례). null=hosted_site(site_posts.py::_reseal_gate_on_

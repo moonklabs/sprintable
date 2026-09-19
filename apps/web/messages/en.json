@@ -5246,6 +5246,7 @@
     "recipeApprovalLatestAuthorLabel": "Last edited by",
     "recipeApprovalDestinationLabel": "Destination",
     "recipeApprovalDestinationHostedSite": "Hosted blog",
+    "recipeApprovalScheduledAtLabel": "Scheduled to publish",
     "adsBoostBudgetLabel": "Total budget",
     "adsBoostScheduleLabel": "Schedule",
     "adsBoostScheduleDays": "{days}d",
