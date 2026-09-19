@@ -13,7 +13,7 @@ function edge(overrides: Partial<MaterialLineageEdge>): MaterialLineageEdge {
     id: 'edge-1',
     source_evidence_id: 'master-1', derived_kind: 'channel_post_draft', derived_id: 'draft-1',
     relation_kind: 'platform_cut', variant_axis: null, hook_key: null,
-    work_item_id: 'story-1',
+    work_item_id: 'story-1', master_title: null, channel: null,
     ...overrides,
   };
 }

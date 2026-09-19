@@ -29,6 +29,14 @@ export interface MaterialLineageEdge {
   /** doc §3② material_collection_sheet payload의 hooks[].key를 가리킨다(FK 아님). */
   hook_key: string | null;
   work_item_id: string;
+  /** story #4435 갭2 후속(PR #4434, backend/app/routers/material_lineage.py 실 착지 필드) —
+   * Story.title(gates.py::_resolve_work_item_summary 재사용, fail-soft) 미러. 한 목록 안
+   * 모든 edge가 같은 work_item_id를 공유해 같은 값이 중복 실린다(서버 코멘트 그대로) —
+   * 조회 실패 시 null(지어내지 않음, uuid로 폴백은 렌더층 책임). */
+  master_title: string | null;
+  /** story #4435 갭2 후속 — channel_post_draft/channel_publication의 denorm `channel`
+   * 컬럼 반사(새 join 0). null=그 derived_id 조회 실패(교차조직 등, fail-soft). */
+  channel: string | null;
 }
 
 /** `GET /api/v2/material-lineage/hook-performance?hook_key=` 응답(`HookPerformanceView`,
