@@ -29,8 +29,16 @@ async function fetchOne(hookKey: string): Promise<HookPerformanceSummary | null>
 
 // story #4046/#4059 관례 — 배열 identity가 아니라 정렬된 join으로 deps를 비교한다(호출부가
 // 매 렌더 새 배열 리터럴을 넘겨도 불필요한 재요청이 안 돌게).
+// ⚠️story #4436 qa:changes round-2(카디르, 2026-09-19) — hook_key는 material_lineage
+// 응답 필드라 채널 API처럼 문자 제약이 없다(공백 포함 가능, doc §3① 그대로 "임의 문자열").
+// 공백 구분자였을 때: ['hook a']→split(' ')이 2개로 오분할되거나, ['a b','c']와
+// ['a','b c']가 우연히 같은 join 결과를 내 서로 다른 키 집합인데 재요청을 스킵하는 실버그가
+// 났다(카디르 실 훅 테스트로 재현). NUL 바이트 구분자로 "고쳤던" 이전 시도도 틀렸다 — 그건
+// 우연히 안전한 게 아니라 "hook_key가 절대 못 갖는 문자라 의도적으로 고른 안전 구분자"였던
+// 걸 이번 사고로 알았다. JSON.stringify는 배열 구분을 이스케이프로 보장해 이 클래스
+// 자체를 막고, printable이라 git이 파일을 binary로 오분류하는 부작용도 같이 없앤다.
 function hookKeysDepsKey(hookKeys: string[]): string {
-  return [...hookKeys].sort().join(' ');
+  return JSON.stringify([...hookKeys].sort());
 }
 
 export function useHookPerformances(hookKeys: string[]): UseHookPerformancesResult {
@@ -40,7 +48,7 @@ export function useHookPerformances(hookKeys: string[]): UseHookPerformancesResu
   const depsKey = hookKeysDepsKey(hookKeys);
 
   useEffect(() => {
-    const keys = depsKey ? depsKey.split(' ') : [];
+    const keys = JSON.parse(depsKey) as string[];
     if (keys.length === 0) {
       // app-sidebar.tsx 관례 — 객체 리터럴 setState는 배열/원시값과 달리
       // set-state-in-effect가 걸린다(단일 setState라도).

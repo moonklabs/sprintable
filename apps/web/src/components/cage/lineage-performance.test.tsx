@@ -107,6 +107,28 @@ describe('LineagePerformancePanel', () => {
     expect(panel.textContent).toContain('집계 대기'); // hook_b totals.views===null
   });
 
+  // story #4063 design 재QA(유나, 2026-09-19) — 트리 변주 행의 훅 배지가 내부 식별자
+  // hook_key 원문을 그대로 "훅 {key}"로 이어붙여 보여줬다(사용자 스코프 문구에 내부어 노출).
+  // 배지는 plain "훅"만 — 훅 랭킹 섹션(카드 라벨, 원문 키를 그대로 보여주는 게 그 카드의
+  // 의도된 계약)은 이 fix 범위 밖이라 그대로 유지되는지도 함께 pin.
+  it('트리 변주 행의 훅 배지는 "훅 {원문키}"로 이어붙이지 않고 plain "훅"만 보여준다(design 재QA pin)', async () => {
+    stubLineageAndHooks(
+      [EDGE({ id: 'e1', hook_key: 'hook_internal_slug_xyz', relation_kind: 'hook_variant' })],
+      { hook_internal_slug_xyz: { hook_key: 'hook_internal_slug_xyz', variant_count: 1, snapshot_count: 0, totals: { views: null } } },
+    );
+    await act(async () => { root.render(wrap(<LineagePerformancePanel workItemId="story-1" />)); });
+    await flush();
+
+    const panel = container.querySelector('[data-testid="lineage-performance-panel"]')!;
+    // 수정 前 버그 형태(내부 키가 그대로 이어붙어 뜨는 문구)가 더는 없다.
+    expect(panel.textContent).not.toContain('훅 hook_internal_slug_xyz');
+    // 배지 자체는 정확히 "훅 연결" 텍스트만 담은 요소로 존재한다(트리 행 안, 내부 키 미노출).
+    const exactHookBadge = [...panel.querySelectorAll('span, div')].find((el) => el.textContent?.trim() === '훅 연결');
+    expect(exactHookBadge).toBeDefined();
+    // 훅 랭킹 섹션(별도 카드, 원문 키를 라벨로 보여주는 게 그 카드의 의도된 계약)은 안 건드렸다.
+    expect(panel.textContent).toContain('hook_internal_slug_xyz');
+  });
+
   it('hook_key가 하나도 없으면 훅 랭킹 섹션 자체를 안 그린다', async () => {
     stubLineageAndHooks([EDGE({ id: 'e1', hook_key: null })]);
     await act(async () => { root.render(wrap(<LineagePerformancePanel workItemId="story-1" />)); });

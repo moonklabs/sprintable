@@ -5345,7 +5345,7 @@
     "lineageRelationKindAspectAdapt": "비율 변형",
     "lineageRelationKindHookVariant": "훅 변주",
     "lineageVariantCountSuffix": "· 하위 {n}건",
-    "lineageHookKeyRef": "훅 {key}",
+    "lineageHookKeyRef": "훅 연결",
     "lineageDerivedRef": "{kind} #{id}",
     "rankedHooksTitle": "훅 단위 성과",
     "rankedHooksMetricLabel": "조회수",

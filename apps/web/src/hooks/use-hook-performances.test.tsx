@@ -150,4 +150,56 @@ describe('useHookPerformances — hookKeys만큼 병렬 GET .../hook-performance
     await flush();
     expect(dump().loading).toBe(false);
   });
+
+  // story #4436 qa:changes round-2(카디르, 2026-09-19) — hook_key는 문자 제약이 없어 공백을
+  // 포함할 수 있다(doc §3① "임의 문자열"). 공백 구분자였을 때 ['hook a']가 split(' ')로
+  // ['hook','a'] 2개로 잘못 갈라져 실제로 부른 fetch 수가 어긋났다(핵심 회귀).
+  it('hook_key에 공백이 섞여 있어도 오분할되지 않고 딱 그 키 하나로 fetch한다(#4436 round-2 회귀)', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      const key = new URL(url, 'http://x').searchParams.get('hook_key')!;
+      return { ok: true, json: async () => SUMMARY(key) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await act(async () => { root.render(<Harness hookKeys={['hook a']} />); });
+    await flush();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith('/api/v2/material-lineage/hook-performance?hook_key=hook+a', undefined);
+    expect(dump().keys).toEqual(['hook a']);
+  });
+
+  // 공백 구분자였을 때 ['a b','c']와 ['a','b c']가 우연히 같은 join 결과("a b c")를 내
+  // 서로 다른 키 집합인데 재요청을 스킵하는 더 심한 사고도 났다(카디르 지적) — 서로 다른
+  // 두 집합이 서로 다른 fetch 횟수를 내는지로 pin.
+  it('서로 다른 hook_key 집합이 공백 join 시 우연히 같은 문자열을 내도(예: ["a b","c"] vs ["a","b c"]) depsKey가 다르게 구분된다', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      const key = new URL(url, 'http://x').searchParams.get('hook_key')!;
+      return { ok: true, json: async () => SUMMARY(key) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    function Switcher() {
+      const [which, setWhich] = useState<'first' | 'second'>('first');
+      const keys = which === 'first' ? ['a b', 'c'] : ['a', 'b c'];
+      return (
+        <>
+          <button data-testid="switch" onClick={() => setWhich('second')}>switch</button>
+          <Harness hookKeys={keys} />
+        </>
+      );
+    }
+
+    await act(async () => { root.render(<Switcher />); });
+    await flush();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(dump().keys.sort()).toEqual(['a b', 'c']);
+
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="switch"]')!.click(); });
+    await flush();
+    // 집합이 실제로 바뀌었으니 재요청이 일어나야 한다(합쳐서 4회) — 수정 前엔 depsKey가
+    // 우연히 같아 여기서 재요청이 스킵되고 keys도 옛 집합("a b","c")에 고착됐을 자리.
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(dump().keys.sort()).toEqual(['a', 'b c']);
+  });
 });

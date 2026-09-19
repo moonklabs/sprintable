@@ -5345,7 +5345,7 @@
     "lineageRelationKindAspectAdapt": "Aspect adapt",
     "lineageRelationKindHookVariant": "Hook variant",
     "lineageVariantCountSuffix": "· {n} below",
-    "lineageHookKeyRef": "Hook {key}",
+    "lineageHookKeyRef": "Hooked",
     "lineageDerivedRef": "{kind} #{id}",
     "rankedHooksTitle": "Hook performance",
     "rankedHooksMetricLabel": "Views",

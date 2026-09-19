@@ -55,7 +55,7 @@ function LineageVariantRow({ edge }: { edge: MaterialLineageEdge }) {
     <div className="flex flex-wrap items-center gap-1.5 rounded-lg px-2 py-1.5 hover:bg-muted">
       <Badge variant="secondary">{t(RELATION_KIND_LABEL_KEY[edge.relation_kind])}</Badge>
       {edge.variant_axis ? <span className="text-[11px] text-muted-foreground">{edge.variant_axis}</span> : null}
-      {edge.hook_key ? <Badge variant="info">{t('lineageHookKeyRef', { key: edge.hook_key })}</Badge> : null}
+      {edge.hook_key ? <Badge variant="info">{t('lineageHookKeyRef')}</Badge> : null}
       <DerivedRef edge={edge} />
     </div>
   );
@@ -73,7 +73,7 @@ function LineageTree({ edges }: { edges: MaterialLineageEdge[] }) {
         return (
           <div key={node.sourceEvidenceId} className="space-y-1">
             <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-brand bg-transparent px-2 py-1.5">
-              <Badge className="bg-brand/15 text-brand">{t('lineageTreeMasterBadge')}</Badge>
+              <Badge className="bg-brand/15 text-foreground">{t('lineageTreeMasterBadge')}</Badge>
               <span className="font-mono text-[11px] text-muted-foreground">{shortId(node.sourceEvidenceId)}</span>
               <span className="text-[11px] text-muted-foreground">{t('lineageVariantCountSuffix', { n: variantCount })}</span>
             </div>
@@ -118,7 +118,7 @@ function RankedHookList({ hookKeys, summaries }: { hookKeys: string[]; summaries
             </span>
             <span className="flex-1 truncate text-[12.5px] font-medium text-foreground">{hookKey}</span>
             <div className="h-2 w-[120px] shrink-0 overflow-hidden rounded-full bg-muted">
-              <div className="h-full rounded-full bg-brand" style={{ width: `${widthPct}%` }} />
+              <div className="h-full rounded-full bg-info" style={{ width: `${widthPct}%` }} />
             </div>
             <span className="w-[90px] shrink-0 text-right text-[12.5px] font-semibold tabular-nums text-foreground">
               {value !== null ? value.toLocaleString() : <span className="text-[11px] font-normal text-muted-foreground">{t('rankedHooksPending')}</span>}
