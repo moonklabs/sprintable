@@ -806,6 +806,9 @@ def main(only_env: str | None = None) -> int:
         f"⑤㉠ baseline(known, self-expiring): {code_read_baseline_ok_count}건 "
         f"— infra/manual-env-allowlist.yml의 code_read_high_baseline 참고"
     )
+    # story #4023 AC3 — 만료 임박 경고는 이 스케줄 전용 워크플로우(새벽 로그) 대신
+    # infra/check_expiring_declarations.py(PR CI에서 매번 도는 별도 경량 축, GCP 불요)가
+    # 담당한다. PO CHANGES 1 지적 — 여기 찍으면 아무도 못 보는 곳에만 남는다.
 
     if has_fail or has_report_only:
         print(
