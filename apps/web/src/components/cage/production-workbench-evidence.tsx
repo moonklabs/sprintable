@@ -302,7 +302,11 @@ export function ProductionWorkbenchEvidencePanel({ workItemId, workItemType, cur
                 <summary className="cursor-pointer px-2.5 py-1.5 text-[10.5px] font-semibold text-muted-foreground">
                   {t('productionWorkbenchHistorySectionTitle', { n: history.length })}
                 </summary>
-                <div className="space-y-2 p-2 pt-0 opacity-70">
+                {/* story #4433 design 재QA(유나, 2026-09-19) — opacity-70이 muted-foreground
+                    텍스트를 AA 미만으로 흐렸다(light 2.92·dark 3.24 실측). 접힘(<details>
+                    기본 닫힘)+dashed 테두리로 이미 "이전 기록"임이 충분히 약화 신호되니
+                    텍스트 자체 대비는 낮추지 않는다. */}
+                <div className="space-y-2 p-2 pt-0">
                   {history.map((item) => <Card key={item.evidence.id} evidence={item.evidence} />)}
                 </div>
               </details>
