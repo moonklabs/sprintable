@@ -9,6 +9,7 @@ import { cyclicStages } from '@/components/loops/loop-create-dialog';
 import { groupStagesByRole, stagesWithGate } from '@/lib/recipe-role-slots';
 import { gateTypeLabel, gateTypeLabelKey } from '@/lib/gate-type-label';
 import { stageRoleLabel } from '@/lib/stage-role';
+import { recipeStageLabel } from '@/lib/recipe-stage-label';
 
 // story #4048(E-RECIPE-1 ①) — 유나 v2 시안(artifact be718c0a §3) 상세 뷰. 이 화면은 레시피
 // «정의»(카탈로그 항목)를 보여주는 것이지 레시피를 적용한 특정 loop 인스턴스의 진행 상태가
@@ -115,7 +116,7 @@ export function RecipeDetailView({ recipe, onApply, onDuplicate }: RecipeDetailV
                 <div className="flex size-8 items-center justify-center rounded-full border-2 border-border bg-card text-xs font-bold text-muted-foreground">
                   {i + 1}
                 </div>
-                <div className="mt-2 text-xs font-semibold text-foreground">{stage}</div>
+                <div className="mt-2 text-xs font-semibold text-foreground">{recipeStageLabel(stage, t)}</div>
                 {meta?.role ? (
                   <div className="mt-1 flex items-center gap-1 text-[10.5px] text-muted-foreground">
                     <span className={`inline-block size-1.5 rounded-full ${roleColors.get(meta.role)}`} /> {stageRoleLabel(meta.role, t)}

@@ -10,6 +10,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import { MarketingRecipeApplyDialog } from './marketing-recipe-apply-dialog';
 import type { EventDefinitionResponse } from '@/components/loops/loop-create-dialog';
+import { MARKETING_CREATOR_ROLE_KEY } from '@/lib/recipe-role-slots';
 import koMessages from '../../../messages/ko.json';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -121,7 +122,7 @@ describe('MarketingRecipeApplyDialog — 4슬롯 다른 메커니즘', () => {
 
   it('제출은 크리에이터 role_mapping만 담아 onSubmit을 부른다(디렉터·발행자 stage는 안 실림)', async () => {
     stubMemberFetch();
-    const onSubmit = vi.fn(async () => ({ ok: true }));
+    const onSubmit = vi.fn(async () => ({ ok: true, bindingsUpserted: 2 }));
     const onOpenChange = vi.fn();
     await act(async () => {
       root.render(wrap(
@@ -167,7 +168,7 @@ describe('MarketingRecipeApplyDialog — 4슬롯 다른 메커니즘', () => {
       }
       throw new Error(`unexpected fetch ${url}`);
     }));
-    const onSubmit = vi.fn(async () => ({ ok: true }));
+    const onSubmit = vi.fn(async () => ({ ok: true, bindingsUpserted: 2 }));
     await act(async () => {
       root.render(wrap(
         <MarketingRecipeApplyDialog
@@ -203,5 +204,103 @@ describe('MarketingRecipeApplyDialog — 4슬롯 다른 메커니즘', () => {
     expect(onSubmit).toHaveBeenCalledWith({
       recipeId: 'mkt-1', projectId: 'proj-2', roleMapping: { draft: 'agent-2', animatic: 'agent-2' },
     });
+  });
+
+  // story #4426 P1(카디르 실 시드 E2E 재현, 2026-09-19) — 위 테스트들은 stage_metadata.role과
+  // creatorRoleLabel 둘 다 이 파일이 만든 한글 값("크리에이터")이라 서로 항상 맞는다 —
+  // 실제 앱 배선(events/page.tsx가 MARKETING_CREATOR_ROLE_KEY 상수를 넘김)이 seed의 실제
+  // role 키와 어긋나도 이 파일만으론 못 잡는다([합성표본=구조숨김]). 아래는 실 상수+실
+  // seed 모양(영어 role 키)으로 전체 제출 경로를 관통시켜 그 클래스를 pin한다.
+  const REAL_SEED_RECIPE: EventDefinitionResponse & { id: string } = {
+    id: 'mkt-real', key: 'preset.marketing.video_production', org_id: null,
+    name: '영상 제작 (릴스·쇼츠)', description: null,
+    payload_schema: { properties: { stage: { enum: ['draft', 'animatic'] } } },
+    // backend/alembic/versions/0381_preset_marketing_video_production_recipe.py
+    // _STAGE_METADATA 그대로(축소판) — role 값이 실제로 영어 키다.
+    stage_metadata: {
+      draft: { role: 'Creator' },
+      animatic: { role: 'Creator' },
+      concept_confirmed: { role: 'Director', gate: { type: 'concept_approval', approver: 'org_owner' } },
+    },
+    enabled: true,
+  };
+
+  it('실 상수(MARKETING_CREATOR_ROLE_KEY)+실 seed 모양(영어 role 키)으로 제출하면 roleMapping이 채워진다(#4426 핵심 회귀)', async () => {
+    stubMemberFetch();
+    const onSubmit = vi.fn(async () => ({ ok: true, bindingsUpserted: 2 }));
+    await act(async () => {
+      root.render(wrap(
+        <MarketingRecipeApplyDialog
+          recipe={REAL_SEED_RECIPE} open onOpenChange={() => {}} creatorRoleLabel={MARKETING_CREATOR_ROLE_KEY}
+          projects={[{ id: 'proj-1', name: 'Proj' }]} onSubmit={onSubmit}
+        />,
+      ));
+    });
+    const projectSelect = document.body.querySelector<HTMLSelectElement>('#marketing-recipe-apply-project')!;
+    await act(async () => { projectSelect.value = 'proj-1'; projectSelect.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+    const creatorSelect = document.body.querySelector<HTMLSelectElement>('[data-testid="creator-agent-select"]')!;
+    await act(async () => { creatorSelect.value = 'agent-1'; creatorSelect.dispatchEvent(new Event('change', { bubbles: true })); });
+    const submitBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent === '적용하기')!;
+    await act(async () => { submitBtn.click(); });
+    await flush();
+
+    // 수정 前(구 상수='크리에이터')이었다면 roleMapping이 항상 {}였다 — 실제로 채워지는지가
+    // 이 P1의 근본 pin이다.
+    expect(onSubmit).toHaveBeenCalledWith({
+      recipeId: 'mkt-real', projectId: 'proj-1', roleMapping: { draft: 'agent-1', animatic: 'agent-1' },
+    });
+  });
+
+  it('bindingsUpserted=0(서버가 실제로 0건 저장)이면 성공 화면 대신 no-op 에러를 낸다(거짓성공표시 방지)', async () => {
+    stubMemberFetch();
+    const onSubmit = vi.fn(async () => ({ ok: true, bindingsUpserted: 0 }));
+    const onOpenChange = vi.fn();
+    await act(async () => {
+      root.render(wrap(
+        <MarketingRecipeApplyDialog
+          recipe={REAL_SEED_RECIPE} open onOpenChange={onOpenChange} creatorRoleLabel={MARKETING_CREATOR_ROLE_KEY}
+          projects={[{ id: 'proj-1', name: 'Proj' }]} onSubmit={onSubmit}
+        />,
+      ));
+    });
+    const projectSelect = document.body.querySelector<HTMLSelectElement>('#marketing-recipe-apply-project')!;
+    await act(async () => { projectSelect.value = 'proj-1'; projectSelect.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+    const creatorSelect = document.body.querySelector<HTMLSelectElement>('[data-testid="creator-agent-select"]')!;
+    await act(async () => { creatorSelect.value = 'agent-1'; creatorSelect.dispatchEvent(new Event('change', { bubbles: true })); });
+    const submitBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent === '적용하기')!;
+    await act(async () => { submitBtn.click(); });
+    await flush();
+
+    expect(onOpenChange).not.toHaveBeenCalledWith(false); // 다이얼로그가 "성공"으로 안 닫힌다.
+    expect(document.body.textContent).toContain('저장된 배정이 없어요');
+  });
+
+  it('creatorRoleLabel이 seed의 실제 role 키와 안 맞으면(예: 재발) 제출 자체를 로컬에서 막는다(네트워크 왕복 0)', async () => {
+    stubMemberFetch();
+    const onSubmit = vi.fn(async () => ({ ok: true, bindingsUpserted: 5 }));
+    await act(async () => {
+      root.render(wrap(
+        // 일부러 잘못된 라벨(표시 문구를 실수로 다시 넘기는 재발 시나리오).
+        <MarketingRecipeApplyDialog
+          recipe={REAL_SEED_RECIPE} open onOpenChange={() => {}} creatorRoleLabel="크리에이터"
+          projects={[{ id: 'proj-1', name: 'Proj' }]} onSubmit={onSubmit}
+        />,
+      ));
+    });
+    const projectSelect = document.body.querySelector<HTMLSelectElement>('#marketing-recipe-apply-project')!;
+    await act(async () => { projectSelect.value = 'proj-1'; projectSelect.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+    // creatorRoleLabel이 어긋나면 agentOptions 자체는 정상 조회되지만(팀원 API는 role_mapping과
+    // 무관) role_mapping 계산이 빈 값이 된다 — 그래도 select는 채워지므로 값을 고른다.
+    const creatorSelect = document.body.querySelector<HTMLSelectElement>('[data-testid="creator-agent-select"]')!;
+    await act(async () => { creatorSelect.value = 'agent-1'; creatorSelect.dispatchEvent(new Event('change', { bubbles: true })); });
+    const submitBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent === '적용하기')!;
+    await act(async () => { submitBtn.click(); });
+    await flush();
+
+    expect(onSubmit).not.toHaveBeenCalled(); // 로컬 방어선에서 막혀 API 자체를 안 부른다.
+    expect(document.body.textContent).toContain('저장된 배정이 없어요');
   });
 });

@@ -65,8 +65,11 @@ describe('RecipeDetailView — 9단계 스텝퍼·게이트 4(live/building 실�
   it('9단계가 payload_schema.stage.enum 순서로 전부 뜨고, 요약에 단계/게이트/역할 수가 맞는다', async () => {
     await act(async () => { root.render(wrap(<RecipeDetailView recipe={RECIPE} />)); });
     const stepper = container.querySelector('[data-testid="recipe-stepper"]')!;
-    expect(stepper.textContent).toContain('draft');
-    expect(stepper.textContent).toContain('published');
+    // story #4049(PO 추가 AC, 유나 정본 라벨) — stage는 이제 원시 slug가 아니라 표시
+    // 라벨로 렌더된다(recipe-stage-label.ts).
+    expect(stepper.textContent).toContain('초안');
+    expect(stepper.textContent).toContain('발행');
+    expect(stepper.textContent).not.toContain('draft');
     // 요약: 단계 9 · 게이트 3(concept_confirmed·structure_passed·pending_approval) · 역할 3.
     expect(container.textContent).toMatch(/단계\s*9/);
     expect(container.textContent).toMatch(/게이트\s*3/);

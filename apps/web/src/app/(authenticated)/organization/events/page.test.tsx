@@ -136,6 +136,15 @@ async function mount() {
   const { default: OrganizationEventsPage } = await import('./page');
   await act(async () => { root.render(wrap(<OrganizationEventsPage />)); });
   await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+  // story #4049 후속(페드루 PO, 2026-09-19, [시안이탈첫노출]) — 기본 탭이 marketing으로
+  // 바뀌어(레시피-first 의도) 이 스위트(개발 워크플로우 CRUD)는 워크플로우 탭으로 명시
+  // 전환해야 기존 콘텐츠가 보인다. 이 파일 44개 테스트 전부가 워크플로우 탭 대상이라
+  // 공유 mount() 안에서 한 번만 처리한다(개별 테스트마다 반복 안 함).
+  const workflowTab = [...document.body.querySelectorAll('[role="tab"], button')].find((el) => el.textContent?.startsWith(koMessages.organization.recipeGalleryTabWorkflow)) as HTMLElement | undefined;
+  if (workflowTab) {
+    await act(async () => { workflowTab.click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+  }
 }
 
 // story #2670 — create는 「기본」(3서식 폼) 탭이 기본으로 열린다. 「고급」 탭 경로를 재는

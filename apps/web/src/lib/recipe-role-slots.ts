@@ -119,3 +119,14 @@ export function recipeKeyDomain(key: string): string | null {
   if (!key.startsWith('preset.')) return null;
   return key.split('.')[1] ?? null;
 }
+
+// story #4426 P1(카디르 실 시드 E2E 재현, 2026-09-19) — 이 상수는 stage_metadata.role과
+// 대조하는 내부 데이터 키인데, #4419 실 seed(0381_preset_marketing_video_production_
+// recipe.py)의 실제 role 값은 영어 키("Creator"/"Director"/"Compute"/"Publisher")다 —
+// 이전 값 '크리에이터'(한글 표시라벨)는 그 어떤 stage_metadata.role과도 매칭되지 않아
+// groupStagesByRole(...)['크리에이터']가 항상 undefined → expandRoleSlotBindings가
+// 항상 빈 role_mapping을 냈다(크리에이터 배정이 조용히 완전 no-op, [거짓성공표시] 클래스
+// — 고립fixture 테스트는 role 값을 자유롭게 지어써서 이 불일치를 못 잡았다, [합성표본=
+// 구조숨김]). 표시 문구(t('recipeApplyV2CreatorRole')="크리에이터")와는 별개 축이다 —
+// 이 상수는 절대 화면에 안 뜨고 오직 seed의 role 키와 문자열 대조에만 쓰인다.
+export const MARKETING_CREATOR_ROLE_KEY = 'Creator';

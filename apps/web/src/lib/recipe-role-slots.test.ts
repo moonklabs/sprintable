@@ -1,49 +1,53 @@
 import { describe, expect, it } from 'vitest';
 import {
-  expandRoleSlotBindings, groupStagesByRole, recipeKeyDomain, stagesWithCapability, stagesWithGate,
-  type RecipeStageMetadata,
+  expandRoleSlotBindings, groupStagesByRole, MARKETING_CREATOR_ROLE_KEY, recipeKeyDomain,
+  stagesWithCapability, stagesWithGate, type RecipeStageMetadata,
 } from './recipe-role-slots';
 
-// PO 判定(2026-09-18, story #4046 AC 업데이트 — 이 카드 착수 도중 반영) — 마케팅 레시피의
-// role_mapping(recipe_role_bindings) 바인딩 대상은 «크리에이터» 하나뿐. 디렉터=게이트
-// 승인 주체(stagesWithGate)·연산=capability(stagesWithCapability)·발행자=채널 타깃(후속
-// 카드, 이 파일 밖) — 셋 다 role_mapping 축이 아니다. 아래 테스트는 이 화이트리스트가 실제로
-// 그 3개를 막는지 고정한다.
-const BINDABLE_ROLES = ['크리에이터'] as const;
+// PO 判定(2026-09-18, story #4046 AC 업데이트) — 마케팅 레시피의 role_mapping
+// (recipe_role_bindings) 바인딩 대상은 «크리에이터» 하나뿐(표시 문구 — 내부 데이터 키는
+// 아래 참고). 디렉터=게이트 승인 주체(stagesWithGate)·연산=capability(stagesWithCapability)·
+// 발행자=채널 타깃(후속 카드, 이 파일 밖) — 셋 다 role_mapping 축이 아니다.
+const BINDABLE_ROLES = [MARKETING_CREATOR_ROLE_KEY] as const;
 
-// #4039(PR #4419, backend/alembic/versions/0379_preset_marketing_video_production_recipe.py)
-// _STAGE_METADATA를 그대로 옮긴 고정물 — 이 카드(#4046) 작성 시점 그 PR이 아직 안 착지해
-// (base=develop OPEN) dev에서 직접 실증은 못 하지만(AC4 "seed shape 위에서 배선"), 그 마이그의
-// 실제 값을 문자 그대로 베껴 이 순수 함수들이 착지 후 그 데이터를 정확히 다룬다는 걸 지금
-// 고정한다 — 착지 후에는 이 fixture를 실 API 응답으로 교체해 회귀 여부를 바로 알 수 있다.
+// story #4426 P1(카디르 실 시드 E2E 재현, 2026-09-19) — 이 fixture는 이전엔 한글 role
+// 라벨("크리에이터"/"디렉터"/"발행자")을 썼다. #4039(PR #4419)가 착지하기 前 작성된 추측
+// 값이었는데, 실제 착지한 backend/alembic/versions/0381_preset_marketing_video_production_
+// recipe.py의 _STAGE_METADATA는 **영어 role 키**("Creator"/"Director"/"Compute"/
+// "Publisher")를 쓴다 — 이 드리프트를 아무 테스트도 못 잡아(고립fixture가 스스로 만든
+// 값과만 대조했으므로, [합성표본=구조숨김]) MARKETING_CREATOR_ROLE_KEY가 실 seed와 어긋난
+// 채(구 이름 MARKETING_CREATOR_ROLE_LABEL='크리에이터') 크리에이터 배정이 전부 조용히
+// no-op이 되는 P1 결함으로 이어졌다(#4426 qa:changes). 아래는 그 실제 seed 값을 문자
+// 그대로 옮긴 것 — 이제부터 이 fixture가 곧 "실 시드 계약 위반 감지기"다.
 const MARKETING_VIDEO_PRODUCTION_STAGE_METADATA: RecipeStageMetadata = {
-  draft: { role: '크리에이터', action: '로그라인·매핑표·컨셉 초안 작성' },
+  draft: { role: 'Creator', action: '로그라인·매핑표·컨셉 초안 작성' },
   concept_confirmed: {
-    role: '디렉터', action: '우화 비트↔제품 가치 매핑 + 미션 정합 확定 승인',
+    role: 'Director', action: '우화 비트↔제품 가치 매핑 + 미션 정합 확定 승인',
     gate: { type: 'concept_approval', approver: 'org_owner' },
   },
-  animatic: { role: '크리에이터', action: '무과금 스틸+텍스트+VO 애니매틱 제작' },
-  structure_passed: { role: '디렉터', action: '무과금 애니매틱으로 구조 판정 승인' },
+  animatic: { role: 'Creator', action: '무과금 스틸+텍스트+VO 애니매틱 제작 후 구조 판정 요청' },
+  structure_passed: { role: 'Director', action: '구조 판정 통과 확인 + 표적·예산 명시해 실탄 발사 승인' },
   live_generation: {
-    role: '디렉터', action: '표적·예산을 명시해 실탄(유료 생성) 발사 승인',
+    role: 'Compute', action: '실탄(유료 생성) 모델(키컷·i2v·음성·립싱크) 호출',
     capability: { kind: 'generate' },
   },
-  verification: { role: '크리에이터', action: '프레임8+받아쓰기 등 눈·귀 검증 시트 작성' },
-  editing: { role: '크리에이터', action: '편집 통일 패스(그레이드·룸톤·자막 레벨 통일)' },
+  verification: { role: 'Creator', action: '프레임8+받아쓰기 등 눈·귀 검증 시트 작성' },
+  editing: { role: 'Creator', action: '편집 통일 패스(그레이드·룸톤·자막 레벨 통일)' },
   pending_approval: {
-    role: '발행자', action: '최종 발행 승인 대기(외부 발행 직전)',
+    role: 'Director', action: '최종 발행 승인(외부 발행 직전)',
     gate: { type: 'external_publish', approver: 'org_owner' },
   },
-  published: { role: '발행자', action: '승인된 채널에 실 게시', capability: { kind: 'publish' } },
+  published: { role: 'Publisher', action: '승인된 채널에 실 게시', capability: { kind: 'publish' } },
 };
 
-describe('groupStagesByRole — #4039 마케팅 레시피 1호 stage_metadata 실측 기준', () => {
-  it('9 stage가 role 라벨 3종(디렉터·크리에이터·발행자)으로 정확히 갈린다', () => {
+describe('groupStagesByRole — #4039/#4419 실 착지 seed(0381) stage_metadata 기준', () => {
+  it('9 stage가 role 키 4종(Creator·Director·Compute·Publisher)으로 정확히 갈린다', () => {
     const groups = groupStagesByRole(MARKETING_VIDEO_PRODUCTION_STAGE_METADATA);
-    expect(Object.keys(groups).sort()).toEqual(['디렉터', '발행자', '크리에이터']);
-    expect(groups['디렉터']).toEqual(['concept_confirmed', 'structure_passed', 'live_generation']);
-    expect(groups['크리에이터']).toEqual(['draft', 'animatic', 'verification', 'editing']);
-    expect(groups['발행자']).toEqual(['pending_approval', 'published']);
+    expect(Object.keys(groups).sort()).toEqual(['Compute', 'Creator', 'Director', 'Publisher']);
+    expect(groups['Director']).toEqual(['concept_confirmed', 'structure_passed', 'pending_approval']);
+    expect(groups['Creator']).toEqual(['draft', 'animatic', 'verification', 'editing']);
+    expect(groups['Compute']).toEqual(['live_generation']);
+    expect(groups['Publisher']).toEqual(['published']);
   });
 
   it('role 없는 stage는 그룹에서 빠진다(신호형/측정형 정의의 빈 stage_metadata 등)', () => {
@@ -51,26 +55,35 @@ describe('groupStagesByRole — #4039 마케팅 레시피 1호 stage_metadata �
     expect(groups).toEqual({});
   });
 
-  it('"연산" 같은 role 값은 이 fixture에 없다 — capability로만 선언되는 축이라 groupStagesByRole 밖', () => {
+  it('한글 표시라벨("크리에이터" 등)은 이 fixture의 어떤 role 키와도 안 맞는다 — #4426 결함이 정확히 이 자리(회귀 pin)', () => {
     const groups = groupStagesByRole(MARKETING_VIDEO_PRODUCTION_STAGE_METADATA);
-    expect(groups['연산']).toBeUndefined();
+    expect(groups['크리에이터']).toBeUndefined();
+  });
+});
+
+describe('MARKETING_CREATOR_ROLE_KEY — 실 seed와의 계약(#4426 P1 pin)', () => {
+  it('상수 값이 실 seed의 role 키와 정확히 일치한다("크리에이터" 표시라벨이 아니다)', () => {
+    expect(MARKETING_CREATOR_ROLE_KEY).toBe('Creator');
+    expect(Object.keys(groupStagesByRole(MARKETING_VIDEO_PRODUCTION_STAGE_METADATA))).toContain(MARKETING_CREATOR_ROLE_KEY);
   });
 });
 
 describe('expandRoleSlotBindings — bindableRoles 화이트리스트 밖 role은 강제로 걸러진다', () => {
-  it('크리에이터 선택만 그 role의 4 stage를 채운다(유일한 role_mapping-eligible 축)', () => {
+  it('MARKETING_CREATOR_ROLE_KEY 선택만 그 role의 4 stage를 채운다(유일한 role_mapping-eligible 축) — #4426 핵심 회귀', () => {
     const roleMapping = expandRoleSlotBindings(
-      MARKETING_VIDEO_PRODUCTION_STAGE_METADATA, BINDABLE_ROLES, { '크리에이터': 'member-creator' },
+      MARKETING_VIDEO_PRODUCTION_STAGE_METADATA, BINDABLE_ROLES, { [MARKETING_CREATOR_ROLE_KEY]: 'member-creator' },
     );
+    // 수정 前(한글 라벨)이었다면 이 결과가 항상 {}였다 — role_mapping이 실제로 채워지는지가
+    // 이 P1의 근본 pin이다.
     expect(roleMapping).toEqual({
       draft: 'member-creator', animatic: 'member-creator',
       verification: 'member-creator', editing: 'member-creator',
     });
   });
 
-  it('디렉터·발행자 선택은 bindableRoles에 없으면 조용히 무시된다(PO 判定 2026-09-18 — 실수로 전달해도 role_mapping에 안 실린다)', () => {
+  it('Director·Publisher 선택은 bindableRoles에 없으면 조용히 무시된다(PO 判定 2026-09-18)', () => {
     const roleMapping = expandRoleSlotBindings(MARKETING_VIDEO_PRODUCTION_STAGE_METADATA, BINDABLE_ROLES, {
-      '디렉터': 'member-director', '크리에이터': 'member-creator', '발행자': 'member-publisher',
+      Director: 'member-director', [MARKETING_CREATOR_ROLE_KEY]: 'member-creator', Publisher: 'member-publisher',
     });
     expect(Object.keys(roleMapping).sort()).toEqual(['animatic', 'draft', 'editing', 'verification']);
     expect(roleMapping.concept_confirmed).toBeUndefined();
@@ -79,17 +92,17 @@ describe('expandRoleSlotBindings — bindableRoles 화이트리스트 밖 role�
 
   it('bindableRoles를 넓히면(호출부가 명시적으로 그렇게 하지 않는 한) 그 role도 펼쳐진다 — 화이트리스트가 유일한 관문', () => {
     const roleMapping = expandRoleSlotBindings(
-      MARKETING_VIDEO_PRODUCTION_STAGE_METADATA, ['크리에이터', '디렉터'], {
-        '크리에이터': 'member-creator', '디렉터': 'member-director',
+      MARKETING_VIDEO_PRODUCTION_STAGE_METADATA, [MARKETING_CREATOR_ROLE_KEY, 'Director'], {
+        [MARKETING_CREATOR_ROLE_KEY]: 'member-creator', Director: 'member-director',
       },
     );
     expect(roleMapping.concept_confirmed).toBe('member-director');
     expect(roleMapping.draft).toBe('member-creator');
   });
 
-  it('빈 문자열 선택·존재하지 않는 role 라벨은 무시된다(연산 슬롯을 selections에 줘도 안전)', () => {
+  it('빈 문자열 선택·존재하지 않는 role 키는 무시된다(연산 슬롯을 selections에 줘도 안전)', () => {
     const roleMapping = expandRoleSlotBindings(MARKETING_VIDEO_PRODUCTION_STAGE_METADATA, BINDABLE_ROLES, {
-      '크리에이터': '', '연산': 'member-compute',
+      [MARKETING_CREATOR_ROLE_KEY]: '', Compute: 'member-compute',
     });
     expect(roleMapping).toEqual({});
   });
@@ -99,18 +112,18 @@ describe('stagesWithCapability — role과 독립인 인프라/커넥터 축', (
   it('capability를 선언한 stage 2곳(live_generation·published)만 뽑는다', () => {
     const stages = stagesWithCapability(MARKETING_VIDEO_PRODUCTION_STAGE_METADATA);
     expect(stages).toEqual([
-      { stage: 'live_generation', role: '디렉터', capability: { kind: 'generate' } },
-      { stage: 'published', role: '발행자', capability: { kind: 'publish' } },
+      { stage: 'live_generation', role: 'Compute', capability: { kind: 'generate' } },
+      { stage: 'published', role: 'Publisher', capability: { kind: 'publish' } },
     ]);
   });
 });
 
-describe('stagesWithGate — 디렉터(사람) 게이트 승인 주체 축(role_mapping과 분리, PO 判定 2026-09-18)', () => {
+describe('stagesWithGate — Director(사람) 게이트 승인 주체 축(role_mapping과 분리, PO 判定 2026-09-18)', () => {
   it('gate를 선언한 stage 2곳(concept_confirmed·pending_approval)만 뽑고 approver를 그대로 노출한다', () => {
     const stages = stagesWithGate(MARKETING_VIDEO_PRODUCTION_STAGE_METADATA);
     expect(stages).toEqual([
-      { stage: 'concept_confirmed', role: '디렉터', gate: { type: 'concept_approval', approver: 'org_owner' } },
-      { stage: 'pending_approval', role: '발행자', gate: { type: 'external_publish', approver: 'org_owner' } },
+      { stage: 'concept_confirmed', role: 'Director', gate: { type: 'concept_approval', approver: 'org_owner' } },
+      { stage: 'pending_approval', role: 'Director', gate: { type: 'external_publish', approver: 'org_owner' } },
     ]);
   });
 });

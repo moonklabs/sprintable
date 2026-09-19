@@ -54,6 +54,34 @@ function RecipeCard({
   );
 }
 
+export interface RecipeCardGridProps {
+  recipes: EventDefinitionResponse[];
+  loading: boolean;
+  error: string | null;
+  emptyMessage: string;
+  onApply?: (recipe: EventDefinitionResponse) => void;
+  onViewDetail?: (recipe: EventDefinitionResponse) => void;
+}
+
+// story #4049(E-RECIPE-1 ①) — events/page.tsx가 «마케팅» 탭 자리를 자기 바깥 탭 체계
+// (기존 CRUD 화면의 「개발 워크플로」 탭과 형제)로 이미 갖고 있어, RecipeGallery 자신의
+// 내부 탭 chrome을 다시 씌우면 탭 안에 탭이 뜨는 중복이 난다 — 그 페이지가 바로 쓸 수
+// 있게 카드 그리드만 떼어 export한다. RecipeGallery 자신은 이걸 안 쓰고 그대로 유지
+// (develop 기존 검증된 동작 무변경 — #4424 qa:pass된 loading/error 3분기 그대로).
+export function RecipeCardGrid({ recipes, loading, error, emptyMessage, onApply, onViewDetail }: RecipeCardGridProps) {
+  const t = useTranslations('organization');
+  if (loading) return <p className="text-sm text-muted-foreground">{t('recipeGalleryLoading')}</p>;
+  if (error) return <p role="alert" className="text-sm text-destructive">{t('recipeGalleryLoadError')}</p>;
+  if (recipes.length === 0) return <p className="text-sm text-muted-foreground">{emptyMessage}</p>;
+  return (
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      {recipes.map((recipe) => (
+        <RecipeCard key={recipe.id} recipe={recipe} onApply={onApply} onViewDetail={onViewDetail} />
+      ))}
+    </div>
+  );
+}
+
 export interface RecipeGalleryProps {
   marketingRecipes: EventDefinitionResponse[];
   workflowRecipes: EventDefinitionResponse[];

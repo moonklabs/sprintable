@@ -413,6 +413,17 @@ export const EXEMPT_PAIRS = new Set<string>([
   // agentMember="에이전트"(행 안 배지 라벨, 보간 없음) <-> agentToggleAriaLabel
   // ("{n}번째 에이전트 {label}") — 배지는 시각 요소, aria-label은 그 옆 토글
   // 버튼의 보조기술 전용 이름이라 화면상 겹쳐 읽힐 자리가 없다.
+  // story #4049(E-RECIPE-1 ①) — events/page.tsx가 마케팅 적용 성공 토스트에
+  // eventApplySuccessToast("배정 {count}건 저장 완료")를 새로 쓰면서 같은 파일 안
+  // eventEditSubmit("저장", 기존 EventFormDialog 저장 버튼)과 부분문자열로 겹친다.
+  // 토스트(적용 다이얼로그 제출 뒤 비동기로 잠깐 뜸)와 정의 수정 다이얼로그의 저장
+  // 버튼(별개 다이얼로그, 별개 트리거)은 화면에 동시에 설 자리가 없다 — docs.title
+  // <-> docs.indexDocCount류와 동형(짧은 낱말이 다른 문장 속에 자연스럽게 재등장).
+  'organization.eventApplySuccessToast <-> organization.eventEditSubmit',
+  // story #4043 Tier1(2026-09-19) — eventsTitle/eventRowActionAriaLabel이 "이벤트"→
+  // "레시피"/"워크플로우"로 낱말 정정되며 원래의 부분문자열 충돌이 사라졌다(죽은 예외,
+  // scanRepository 실측 확認 — organization.eventRowActionAriaLabel <->
+  // organization.eventsTitle 항목 자체를 제거).
   'goals.indexCountActive <-> goals.statusActive',
   'goals.indexCountDone <-> goals.statusDone',
   // story #3698(IA·후속) — goals.outcomeLabel <-> goals.trustRailOutcomeJudged 항목은 여기

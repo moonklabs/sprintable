@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/components/ui/toast';
 import { EventDefinerForm } from '@/components/organization/event-definer-form';
 import {
@@ -18,12 +19,17 @@ import {
 } from '@/components/organization/event-definer-logic';
 import { EventDefinitionSummary } from '@/components/organization/event-definition-summary';
 import { ApplyRecipeDialog } from '@/components/organization/apply-recipe-dialog';
+import { RecipeCardGrid } from '@/components/organization/recipe-gallery';
+import { MarketingRecipeApplyDialog, submitMarketingRecipeApply } from '@/components/organization/marketing-recipe-apply-dialog';
+import { RecipeDetailView } from '@/components/organization/recipe-detail-view';
 import { stageRoleLabel } from '@/lib/stage-role';
 import { cyclicStages, isCyclicDefinition, type EventDefinitionResponse } from '@/components/loops/loop-create-dialog';
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { publishHistorySenderLabel } from '@/lib/member-display';
+import { useMarketingRecipes } from '@/hooks/use-marketing-recipes';
+import { MARKETING_CREATOR_ROLE_KEY, recipeKeyDomain } from '@/lib/recipe-role-slots';
 
 // story #2664 — 목록(GET) 응답 모델(events.py EventDefinitionResponse)엔 아직 id가 없다
 // (BE #2663, PR#3069 재QA 중). id가 없는 항목은 수정/비활성 버튼을 아예 안 그린다 — #2663가
@@ -86,6 +92,24 @@ export default function OrganizationEventsPage() {
   const [publishTarget, setPublishTarget] = useState<EventDefinition | null>(null);
   const [applyTarget, setApplyTarget] = useState<EventDefinition | null>(null);
 
+  // story #4049 — 마케팅 레시피 탭(#4046 데이터층 + #4048 컴포넌트). 기존 defs/customDefs/
+  // presetDefs·위 5개 state와 완전히 독립 — 이 탭이 잘못돼도 개발 워크플로 탭(기존 CRUD)은
+  // 무영향(회귀 0 보장 축).
+  const { recipes: marketingRecipes, loading: marketingLoading, error: marketingError } = useMarketingRecipes();
+  const [marketingApplyTarget, setMarketingApplyTarget] = useState<(EventDefinitionResponse & { id: string }) | null>(null);
+  const [marketingDetailTarget, setMarketingDetailTarget] = useState<EventDefinitionResponse | null>(null);
+  const [marketingProjects, setMarketingProjects] = useState<{ id: string; name: string }[]>([]);
+
+  useEffect(() => {
+    if (!marketingApplyTarget) return;
+    void (async () => {
+      const res = await fetchWithAuth('/api/projects');
+      if (!res.ok) return;
+      const json = await res.json() as { data?: { id: string; name: string }[] };
+      setMarketingProjects((json.data ?? []).slice().sort((a, b) => a.name.localeCompare(b.name)));
+    })();
+  }, [marketingApplyTarget]);
+
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
@@ -104,6 +128,10 @@ export default function OrganizationEventsPage() {
 
   const presetDefs = defs.filter((d) => d.org_id === null);
   const customDefs = defs.filter((d) => d.org_id !== null);
+  // story #4049 — 개발 워크플로 탭은 마케팅 도메인 프리셋만 뺀다(중복 카드 방지) — org
+  // 커스텀 정의는 recipeKeyDomain이 항상 null이라(org.{slug}.* 접두, preset. 아님) 이
+  // 필터에 안 걸린다, customDefs는 무영향.
+  const workflowPresetDefs = presetDefs.filter((d) => recipeKeyDomain(d.key) !== 'marketing');
 
   const deactivate = async (def: EventDefinition) => {
     if (!def.id) return;
@@ -141,83 +169,113 @@ export default function OrganizationEventsPage() {
         <p className="text-sm text-muted-foreground">{t('eventReadonlyNotAdmin')}</p>
       ) : null}
 
-      {loading ? (
-        <div className="space-y-3">
-          {[1, 2, 3].map((i) => <div key={i} className="h-12 animate-pulse rounded-md bg-muted" />)}
-        </div>
-      ) : (
-        <>
-          <SectionCard>
-            <SectionCardHeader>
-              {/* story #3737(E절, 유나 定) — 수를 제목 문자열 안에 넣지 않는다.
-                  제목 고정 + 수는 옆 배지로(구현 (4)류와 같은 형 문제). */}
-              <h2 className="flex items-center gap-2 text-base font-semibold text-foreground">
-                {t('eventsCustomGroupTitle')}
-                {/* 페드루 PO 적기만(#4082 리뷰) — CountBadge(trust/page.tsx와 동형). */}
-                <CountBadge count={customDefs.length} />
-              </h2>
-            </SectionCardHeader>
-            <SectionCardBody>
-              {customDefs.length > 0 ? (
-                <div className="divide-y divide-border overflow-hidden rounded-md border border-border">
-                  {customDefs.map((def, index) => (
-                    <EventDefRow
-                      key={def.key}
-                      def={def}
-                      index={index}
-                      expanded={expandedKey === def.key}
-                      onToggleExpand={() => setExpandedKey((k) => (k === def.key ? null : def.key))}
-                      readonly={false}
-                      isAdmin={isAdmin}
-                      onEdit={() => setEditTarget(def)}
-                      onDeactivate={() => setDeactivateTarget(def)}
-                      onTestPublish={() => setPublishTarget(def)}
-                      onApply={() => setApplyTarget(def)}
-                      t={t}
-                    />
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm text-muted-foreground">{t('eventsEmpty')}</p>
-              )}
-            </SectionCardBody>
-          </SectionCard>
+      {/* story #4049(E-RECIPE-1 ①) — 마케팅/개발 워크플로 탭 분리(AC1). 「개발 워크플로」
+          탭 안은 기존 커스텀/프리셋 CRUD 전부 그대로(제거 0, AC3) — 마케팅 탭만 신규
+          #4046/#4048 위에 얹은 것. */}
+      {/* story #4049 후속(페드루 PO, 2026-09-19, [시안이탈첫노출]) — 이 표면은 E-RECIPE-1
+          레시피-first 의도(customer-zero가 레시피 적용하러 오는 자리)라 기본 탭을
+          marketing으로. workflow-default는 구 events 페이지 보존 논리였다. */}
+      <Tabs defaultValue="marketing">
+        <TabsList>
+          <TabsTrigger value="marketing">
+            {t('recipeGalleryTabMarketing')} <span className="text-muted-foreground">{marketingRecipes.length}</span>
+          </TabsTrigger>
+          <TabsTrigger value="workflow">
+            {t('recipeGalleryTabWorkflow')} <span className="text-muted-foreground">{workflowPresetDefs.length + customDefs.length}</span>
+          </TabsTrigger>
+        </TabsList>
 
-          <SectionCard>
-            <SectionCardHeader>
-              <h2 className="flex items-center gap-2 text-base font-semibold text-foreground">
-                {t('eventsPresetGroupTitle')}
-                <CountBadge count={presetDefs.length} />
-              </h2>
-              <p className="mt-1 text-xs text-muted-foreground">{t('eventsPresetReadonlyNote')}</p>
-            </SectionCardHeader>
-            <SectionCardBody>
-              {presetDefs.length > 0 ? (
-                <div className="divide-y divide-border overflow-hidden rounded-md border border-border">
-                  {presetDefs.map((def, index) => (
-                    <EventDefRow
-                      key={def.key}
-                      def={def}
-                      index={index}
-                      expanded={expandedKey === def.key}
-                      onToggleExpand={() => setExpandedKey((k) => (k === def.key ? null : def.key))}
-                      readonly
-                      isAdmin={isAdmin}
-                      // story #3316 — 프리셋도 사이클형이면 gallery와 동형으로 "프로젝트에
-                      // 적용" 가능(프리셋=읽기전용은 "정의 자체 수정 불가"만 뜻함, 프로젝트
-                      // 바인딩 적용은 별개 축).
-                      onApply={() => setApplyTarget(def)}
-                      t={t}
-                    />
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm text-muted-foreground">{t('eventsEmpty')}</p>
-              )}
-            </SectionCardBody>
-          </SectionCard>
-        </>
-      )}
+        <TabsContent value="marketing">
+          <RecipeCardGrid
+            recipes={marketingRecipes}
+            loading={marketingLoading}
+            error={marketingError}
+            emptyMessage={t('recipeGalleryEmpty')}
+            onApply={(recipe) => setMarketingApplyTarget(recipe)}
+            onViewDetail={(recipe) => setMarketingDetailTarget(recipe)}
+          />
+        </TabsContent>
+
+        <TabsContent value="workflow">
+          {loading ? (
+            <div className="space-y-3">
+              {[1, 2, 3].map((i) => <div key={i} className="h-12 animate-pulse rounded-md bg-muted" />)}
+            </div>
+          ) : (
+            <div className="space-y-6">
+              <SectionCard>
+                <SectionCardHeader>
+                  {/* story #3737(E절, 유나 定) — 수를 제목 문자열 안에 넣지 않는다.
+                      제목 고정 + 수는 옆 배지로(구현 (4)류와 같은 형 문제). */}
+                  <h2 className="flex items-center gap-2 text-base font-semibold text-foreground">
+                    {t('eventsCustomGroupTitle')}
+                    {/* 페드루 PO 적기만(#4082 리뷰) — CountBadge(trust/page.tsx와 동형). */}
+                    <CountBadge count={customDefs.length} />
+                  </h2>
+                </SectionCardHeader>
+                <SectionCardBody>
+                  {customDefs.length > 0 ? (
+                    <div className="divide-y divide-border overflow-hidden rounded-md border border-border">
+                      {customDefs.map((def, index) => (
+                        <EventDefRow
+                          key={def.key}
+                          def={def}
+                          index={index}
+                          expanded={expandedKey === def.key}
+                          onToggleExpand={() => setExpandedKey((k) => (k === def.key ? null : def.key))}
+                          readonly={false}
+                          isAdmin={isAdmin}
+                          onEdit={() => setEditTarget(def)}
+                          onDeactivate={() => setDeactivateTarget(def)}
+                          onTestPublish={() => setPublishTarget(def)}
+                          onApply={() => setApplyTarget(def)}
+                          t={t}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">{t('eventsEmpty')}</p>
+                  )}
+                </SectionCardBody>
+              </SectionCard>
+
+              <SectionCard>
+                <SectionCardHeader>
+                  <h2 className="flex items-center gap-2 text-base font-semibold text-foreground">
+                    {t('eventsPresetGroupTitle')}
+                    <CountBadge count={workflowPresetDefs.length} />
+                  </h2>
+                  <p className="mt-1 text-xs text-muted-foreground">{t('eventsPresetReadonlyNote')}</p>
+                </SectionCardHeader>
+                <SectionCardBody>
+                  {workflowPresetDefs.length > 0 ? (
+                    <div className="divide-y divide-border overflow-hidden rounded-md border border-border">
+                      {workflowPresetDefs.map((def, index) => (
+                        <EventDefRow
+                          key={def.key}
+                          def={def}
+                          index={index}
+                          expanded={expandedKey === def.key}
+                          onToggleExpand={() => setExpandedKey((k) => (k === def.key ? null : def.key))}
+                          readonly
+                          isAdmin={isAdmin}
+                          // story #3316 — 프리셋도 사이클형이면 gallery와 동형으로 "프로젝트에
+                          // 적용" 가능(프리셋=읽기전용은 "정의 자체 수정 불가"만 뜻함, 프로젝트
+                          // 바인딩 적용은 별개 축).
+                          onApply={() => setApplyTarget(def)}
+                          t={t}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">{t('eventsEmpty')}</p>
+                  )}
+                </SectionCardBody>
+              </SectionCard>
+            </div>
+          )}
+        </TabsContent>
+      </Tabs>
 
       <EventFormDialog
         mode="create"
@@ -268,6 +326,41 @@ export default function OrganizationEventsPage() {
         tc={tc}
         addToast={addToast}
       />
+
+      {/* story #4049 AC2 — 카드 → 적용(크리에이터 슬롯) → 상세 뷰 도달까지 흐름 연결. */}
+      <MarketingRecipeApplyDialog
+        recipe={marketingApplyTarget}
+        open={marketingApplyTarget !== null}
+        onOpenChange={(open) => { if (!open) setMarketingApplyTarget(null); }}
+        creatorRoleLabel={MARKETING_CREATOR_ROLE_KEY}
+        projects={marketingProjects}
+        onSubmit={async (args) => {
+          const result = await submitMarketingRecipeApply(args);
+          // story #4426 P1 잔여(카디르 재QA, 2026-09-19) — result.ok는 요청 성공 여부일 뿐
+          // 실 배정 건수와 무관(백엔드 ApplyRecipeRoleBindingsResponse.ok 계약 그대로) —
+          // bindingsUpserted가 0이면 이 서브밋은 no-op이라 다이얼로그가 이미 no-op 에러를
+          // 표면화한다(marketing-recipe-apply-dialog.tsx). 그런데 그 경우까지 여기서 성공
+          // 토스트+상세이동을 같이 태우면 "성공"과 "no-op 오류"가 한 화면에 공존하는
+          // [두문장 다른세계] — 실 배정이 1건이라도 있을 때만 성공 경로를 태운다.
+          if (result.ok && (result.bindingsUpserted ?? 0) > 0) {
+            addToast({ type: 'success', title: t('eventApplySuccessToast', { count: 1 }) });
+            // 적용 성공 → 그 자리서 상세 뷰로 이어간다(AC2 "적용→상세 도달").
+            setMarketingDetailTarget(marketingApplyTarget);
+          }
+          return result;
+        }}
+      />
+
+      <Dialog open={marketingDetailTarget !== null} onOpenChange={(open) => { if (!open) setMarketingDetailTarget(null); }}>
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-3xl">
+          {marketingDetailTarget ? (
+            <RecipeDetailView
+              recipe={marketingDetailTarget}
+              onApply={() => setMarketingApplyTarget(marketingDetailTarget)}
+            />
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
