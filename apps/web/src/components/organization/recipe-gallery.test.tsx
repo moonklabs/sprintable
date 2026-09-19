@@ -99,4 +99,25 @@ describe('RecipeGallery — 마케팅/워크플로 탭 분리(AC1)', () => {
     await act(async () => { root.render(wrap(<RecipeGallery marketingRecipes={[]} workflowRecipes={[]} loading={false} error={null} />)); });
     expect(container.textContent).toContain('표시할 워크플로우가 없어요');
   });
+
+  it('개발 워크플로 탭도 로딩·에러 상태를 처리한다(페드루 QA #4424 qa:changes 재현 — 수정 前엔 바로 빈목록 문구)', async () => {
+    async function switchToWorkflowTab() {
+      const trigger = [...container.querySelectorAll('[role="tab"]')].find((el) => el.textContent?.includes('개발 워크플로'))!;
+      await act(async () => { trigger.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    }
+
+    await act(async () => { root.render(wrap(<RecipeGallery marketingRecipes={[]} workflowRecipes={[]} loading error={null} />)); });
+    await switchToWorkflowTab();
+    expect(container.textContent).toContain('불러오는 중');
+    expect(container.textContent).not.toContain('표시할 개발 워크플로우가 없어요');
+
+    await act(async () => { root.render(wrap(<RecipeGallery marketingRecipes={[]} workflowRecipes={[]} loading={false} error="boom" />)); });
+    await switchToWorkflowTab();
+    expect(container.textContent).toContain('워크플로우를 불러오지 못했어요');
+    expect(container.textContent).not.toContain('표시할 개발 워크플로우가 없어요');
+
+    await act(async () => { root.render(wrap(<RecipeGallery marketingRecipes={[]} workflowRecipes={[]} loading={false} error={null} />)); });
+    await switchToWorkflowTab();
+    expect(container.textContent).toContain('표시할 개발 워크플로우가 없어요');
+  });
 });

@@ -102,7 +102,11 @@ export function RecipeGallery({
         </TabsContent>
 
         <TabsContent value="workflow">
-          {workflowRecipes.length === 0 ? (
+          {loading ? (
+            <p className="text-sm text-muted-foreground">{t('recipeGalleryLoading')}</p>
+          ) : error ? (
+            <p role="alert" className="text-sm text-destructive">{t('recipeGalleryLoadError')}</p>
+          ) : workflowRecipes.length === 0 ? (
             <p className="text-sm text-muted-foreground">{t('recipeGalleryWorkflowEmpty')}</p>
           ) : (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">

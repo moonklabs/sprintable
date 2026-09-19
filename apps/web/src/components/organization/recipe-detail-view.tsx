@@ -75,8 +75,10 @@ export function RecipeDetailView({ recipe, onApply, onDuplicate }: RecipeDetailV
         ))}
       </div>
 
-      {/* story #4054 후속 — 유나 흐름 밴드 스펙(PO 確定, «정의 vs 실행» 혼동 예방). 정적·논리 0. */}
-      <div className="bg-muted border border-border rounded-xl px-[15px] py-3 flex items-center gap-2.5 flex-wrap" data-testid="recipe-flow-band">
+      {/* story #4054 후속 — 유나 흐름 밴드 스펙(PO 確定, «정의 vs 실행» 혼동 예방). 정적·논리 0.
+          story #4424 CI 실측(no-handrolled-card, 2026-09-19) — rounded-xl+border+bg-muted
+          트리오가 손코딩 카드로 잡혀 Card 프리미티브(surface="subtle")로 교체. */}
+      <Card surface="subtle" radius="compact" className="px-[15px] py-3 flex items-center gap-2.5 flex-wrap" data-testid="recipe-flow-band">
         <div className="flex flex-col">
           <span className="text-[10px] font-bold text-muted-foreground">{t('recipeFlowRecipeLabel')}</span>
           <span className="text-xs text-muted-foreground">{t('recipeFlowRecipeValue')}</span>
@@ -100,7 +102,7 @@ export function RecipeDetailView({ recipe, onApply, onDuplicate }: RecipeDetailV
           <span className="text-xs text-muted-foreground">{t('recipeFlowRunValue')}</span>
         </div>
         <span className="ml-auto text-right max-w-[205px] text-[10.5px] text-muted-foreground">{t('recipeFlowCaption')}</span>
-      </div>
+      </Card>
 
       <div className="flex items-stretch gap-0 overflow-x-auto pt-6" data-testid="recipe-stepper">
         {stages.map((stage, i) => {

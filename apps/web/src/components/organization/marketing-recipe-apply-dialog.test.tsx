@@ -156,4 +156,52 @@ describe('MarketingRecipeApplyDialog — 4슬롯 다른 메커니즘', () => {
     });
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
+
+  it('프로젝트 전환 시 이전 크리에이터 선택이 리셋되고, 이전 프로젝트 agent가 새 role_mapping에 안 실린다(페드루 QA #4424 qa:changes 재현)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('project_id=proj-1')) {
+        return { ok: true, json: async () => [{ id: 'agent-1', name: '댄(A)', type: 'agent' }] };
+      }
+      if (url.includes('project_id=proj-2')) {
+        return { ok: true, json: async () => [{ id: 'agent-2', name: '리아(B)', type: 'agent' }] };
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    }));
+    const onSubmit = vi.fn(async () => ({ ok: true }));
+    await act(async () => {
+      root.render(wrap(
+        <MarketingRecipeApplyDialog
+          recipe={RECIPE} open onOpenChange={() => {}} creatorRoleLabel="크리에이터"
+          projects={[{ id: 'proj-1', name: 'A' }, { id: 'proj-2', name: 'B' }]} onSubmit={onSubmit}
+        />,
+      ));
+    });
+    const projectSelect = document.body.querySelector<HTMLSelectElement>('#marketing-recipe-apply-project')!;
+    const creatorSelect = document.body.querySelector<HTMLSelectElement>('[data-testid="creator-agent-select"]')!;
+
+    // A 프로젝트에서 agent-1 선택.
+    await act(async () => { projectSelect.value = 'proj-1'; projectSelect.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+    await act(async () => { creatorSelect.value = 'agent-1'; creatorSelect.dispatchEvent(new Event('change', { bubbles: true })); });
+    expect(creatorSelect.value).toBe('agent-1');
+
+    // B로 전환 — 이전 선택이 리셋돼야 한다(수정 前엔 'agent-1'로 고착).
+    await act(async () => { projectSelect.value = 'proj-2'; projectSelect.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+    expect(creatorSelect.value).toBe('');
+
+    const submitBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent === '적용하기')!;
+    expect(submitBtn.hasAttribute('disabled')).toBe(true); // 재선택 前엔 제출 불가.
+
+    // B 소속 agent-2를 다시 골라야 제출 가능 — agent-1은 옵션에 없다(소속 아님).
+    const optionValues = [...creatorSelect.options].map((o) => o.value);
+    expect(optionValues).not.toContain('agent-1');
+    await act(async () => { creatorSelect.value = 'agent-2'; creatorSelect.dispatchEvent(new Event('change', { bubbles: true })); });
+    await act(async () => { submitBtn.click(); });
+    await flush();
+
+    expect(onSubmit).toHaveBeenCalledWith({
+      recipeId: 'mkt-1', projectId: 'proj-2', roleMapping: { draft: 'agent-2', animatic: 'agent-2' },
+    });
+  });
 });

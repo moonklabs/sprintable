@@ -53,6 +53,14 @@ export function MarketingRecipeApplyDialog({
     setError(null);
   }, [open]);
 
+  // 페드루 QA 지적(#4424 qa:changes, 2026-09-19) — 프로젝트 전환 시 이전 선택이 그대로
+  // 남아 있으면(agentOptions가 새 프로젝트 것으로 바뀌어도 creatorAgentId state는 그대로)
+  // <select>는 화면상 빈칸으로 보이지만 state는 옛 project의 agent id를 쥐고 있어 제출
+  // 시 그대로 실린다. 프로젝트가 바뀔 때마다 선택을 명시적으로 비운다.
+  useEffect(() => {
+    setCreatorAgentId('');
+  }, [projectId]);
+
   if (!recipe) return null;
 
   const roleGroups = groupStagesByRole(recipe.stage_metadata);
@@ -63,6 +71,13 @@ export function MarketingRecipeApplyDialog({
 
   const submit = async () => {
     if (!projectId || !creatorAgentId) return;
+    // 페드루 QA 지적(#4424 qa:changes) — 위 useEffect가 전환 시 선택을 비우지만, 그
+    // 방어 하나에만 기대지 않고 제출 시점에도 소속(멤버십)을 다시 확認한다(fetch race 등
+    // 어떤 경로로든 project와 어긋난 agentId가 실리지 않게 하는 마지막 문).
+    if (!agentOptions.some((a) => a.id === creatorAgentId)) {
+      setError(t('recipeApplyV2CreatorMembershipError'));
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
@@ -197,7 +212,14 @@ export async function submitMarketingRecipeApply(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ project_id: projectId, role_mapping: roleMapping }),
   });
+  // story #4424 CI 실측(no-fetch-response-without-ok-check, 2026-09-19) — res.ok 검사를
+  // .json() 앞으로 옮긴다(가드 300자 윈도우 근접 미스가 아니라, 실패 바디도 에러 메시지
+  // 추출을 위해 파싱은 하되 그 판단이 res.ok 분기 안에서 먼저 이뤄지게 명시).
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({})) as { error?: { message?: string } };
+    return { ok: false, error: errBody.error?.message };
+  }
   const data = await res.json().catch(() => ({})) as { ok?: boolean; error?: { message?: string } };
-  if (!res.ok || !data.ok) return { ok: false, error: data.error?.message };
+  if (!data.ok) return { ok: false, error: data.error?.message };
   return { ok: true };
 }
