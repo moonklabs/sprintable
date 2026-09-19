@@ -19,7 +19,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 
-from sqlalchemy import func, select
+from sqlalchemy import func, literal, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -66,7 +66,11 @@ async def backfill_mentions_to_references(session: AsyncSession, *, org_id: uuid
             Reference.source_type, Reference.source_field, Reference.source_id,
             Reference.target_type, Reference.target_id, Reference.form, Reference.relation,
         ],
-        index_where=Reference.form != "proof",
+        # story #4051 — `literal(..., literal_execute=True)` 필수(mention_parser.py::
+        # reconcile_entity_references docstring 참조) — bind parameter로 두면 같은
+        # prepared statement가 5회 넘게 실행돼 PostgreSQL이 제네릭 플랜으로 전환하는 순간
+        # 이 partial index와 매치가 깨진다(실측 확認).
+        index_where=Reference.form != literal("proof", literal_execute=True),
     )
     await session.execute(insert_stmt)
     return len(mentions)

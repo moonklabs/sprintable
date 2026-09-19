@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { extractCssVarBlock, discoverTintFamilies, discoverBgFamilies, computeFamilyContrasts, computeCrossFamilyBgReference } from './verify-tint-foreground-contrast';
+import { extractCssVarBlock, discoverTintFamilies, discoverBgFamilies, computeFamilyContrasts, computeCrossFamilyBgReference, computeCrossCheckContrasts } from './verify-tint-foreground-contrast';
 
 const GLOBALS_CSS_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src/app/globals.css');
 
@@ -208,6 +208,76 @@ describe('computeCrossFamilyBgReference — story #2575 AC4 양성대조(교차-
   });
 });
 
+// story #4055 — computeCrossCheckContrasts(non-status 강조색 × 전 tint/bg 계열)의 못 틀리는
+// 대조. #4048 흐름 밴드 자기감사가 실물로 걸린 조합(text-brand on bg-info-tint, 라이트
+// 10px bold, 4.0<4.5)을 합성 CSS로 재현해 RED를, 안전하게 고친 조합(text-foreground)은
+// 별도 함수(computeFamilyContrasts)가 이미 GREEN으로 pin한다(위 real-repo 스위트).
+describe('computeCrossCheckContrasts — story #4055 못 틀리는 대조(AC3)', () => {
+  it('#4048 원 사고 재현 — text-brand on bg-info-tint(라이트)를 합성 CSS로 넣으면 RED(<4.5)', () => {
+    const css = `
+:root {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.141 0.005 285.823);
+  --brand: oklch(0.56 0.17 254);
+  --info: oklch(0.55 0.18 250);
+  --info-tint: oklch(0.55 0.18 250 / 10%);
+}
+.dark {
+  --background: oklch(0.18 0.005 285.823);
+  --foreground: oklch(0.985 0 0);
+  --brand: oklch(0.64 0.17 254);
+  --info: oklch(0.65 0.18 250);
+  --info-tint: oklch(0.65 0.18 250 / 12%);
+}
+`;
+    const results = computeCrossCheckContrasts(css);
+    const hit = results.find((r) => r.theme === 'light' && r.textVar === 'brand' && r.family === 'info' && r.kind === 'tint');
+    expect(hit).toBeDefined();
+    expect(hit!.ratio).toBeLessThan(4.5);
+  });
+
+  it('음성대조 — 채도 낮고 어두운 강조색은 같은 tint 위에서 통과한다(계산 자체가 항상 FAIL을 내지 않는다는 증거)', () => {
+    const css = `
+:root {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.141 0.005 285.823);
+  --brand: oklch(0.25 0.05 254);
+  --info: oklch(0.55 0.18 250);
+  --info-tint: oklch(0.55 0.18 250 / 10%);
+}
+.dark {
+  --background: oklch(0.18 0.005 285.823);
+  --foreground: oklch(0.985 0 0);
+  --brand: oklch(0.25 0.05 254);
+  --info: oklch(0.65 0.18 250);
+  --info-tint: oklch(0.65 0.18 250 / 12%);
+}
+`;
+    const results = computeCrossCheckContrasts(css);
+    const hit = results.find((r) => r.theme === 'light' && r.textVar === 'brand' && r.family === 'info' && r.kind === 'tint');
+    expect(hit).toBeDefined();
+    expect(hit!.ratio).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it('brand 변수가 없는 CSS에서도 죽지 않고 그냥 빈 배열을 낸다(옵셔널 강조색 — 조용히 스킵)', () => {
+    const css = `
+:root {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.141 0.005 285.823);
+  --info: oklch(0.55 0.18 250);
+  --info-tint: oklch(0.55 0.18 250 / 10%);
+}
+.dark {
+  --background: oklch(0.18 0.005 285.823);
+  --foreground: oklch(0.985 0 0);
+  --info: oklch(0.65 0.18 250);
+  --info-tint: oklch(0.65 0.18 250 / 12%);
+}
+`;
+    expect(computeCrossCheckContrasts(css)).toEqual([]);
+  });
+});
+
 describe('real repo globals.css — 실제 정의가 전 조합 AA(4.5)를 통과한다(story #2420 AC1/AC5 · #2575 AC1)', () => {
   const css = readFileSync(GLOBALS_CSS_PATH, 'utf-8');
   const results = computeFamilyContrasts(css);
@@ -260,5 +330,16 @@ describe('real repo globals.css — 실제 정의가 전 조합 AA(4.5)를 통�
   it('AC4 양성대조 — light/warning의 familyColorOnBackgroundRatio(-bg)가 proof 팔레트 실측값(4.51)과 근사 일치한다', () => {
     const r = results.find((x) => x.theme === 'light' && x.family === 'warning' && x.kind === 'bg')!;
     expect(r.familyColorOnBackgroundRatio).toBeCloseTo(4.51, 1);
+  });
+
+  // story #4055 AC2(전수벤치) — 실 globals.css의 non-status 강조색(brand) 교차 미달이
+  // GRANDFATHER_BASELINE(스크립트 내부, 발견 시점 10건) 밖으로 안 새는지 pin한다. 이 표가
+  // 늘면(새 미달) 이 테스트가 깨져 리뷰를 강제하고, 줄면(누가 고쳤으면) 실패하지 않되
+  // main()의 stale-grandfather 안내로 정리를 유도한다(강한 등호가 아니라 상한만 거는 이유
+  // — grandfather 소멸은 축하할 일이지 막을 일이 아니다).
+  it('brand 교차 미달 — 실 globals.css가 지금 딱 10건이고(발견 당시 그대로), 더 늘지 않았다', () => {
+    const crossCheck = computeCrossCheckContrasts(css);
+    const failing = crossCheck.filter((r) => r.ratio < 4.5);
+    expect(failing.length).toBeLessThanOrEqual(10);
   });
 });

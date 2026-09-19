@@ -92,6 +92,67 @@ async def client(mock_session, auth_ctx, org_id):
     app.dependency_overrides.clear()
 
 
+async def _wait_until(predicate, *, timeout: float = 15.0, interval: float = 0.005) -> bool:
+    """story #3580/#3494(test_eventbus_s2.py에서 근본원인 확定, 이 파일엔 미이식 상태였던
+    걸 이번에 이식) — OS threading.Thread injector가 asyncio 프리미티브(Queue.put_nowait·
+    Event.set())를 이벤트 루프 밖 스레드에서 건드리는 것 자체가 CI 부하 시 통지 유실의
+    원인이었다(로컬 저부하에선 우연히 통과). 이 코루틴은 같은 이벤트 루프 위에서 돈다 —
+    스레드도 락도 필요 없다. 타임아웃 15.0s는 새 추측이 아니라 s2가 실제 CI durations
+    로그로 확定한 값을 그대로 재사용(1.0s→5.0s→15.0s, GitHub Actions 러너가 로컬보다
+    느리다는 실측 근거)."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        await asyncio.sleep(interval)
+    return predicate()
+
+
+class _SSEObserver:
+    """test_eventbus_s2.py::_SSEObserver 그대로 이식(새 기전 발명 금지) — ASGI 자신의
+    `send()`을 감싸 바이트열이 실제로 응답 바디에 실리는 순간을 직접 관찰한다. sentinel은
+    등록 직후가 아니라 `event: sync_status`(백필 완료·라이브 루프 진입) 관찰 後에 큐에
+    넣어야 "write 예산"이 백필 시간까지 재는 오차를 피한다."""
+
+    def __init__(self) -> None:
+        self.events: list[tuple[float, str]] = []
+        self._waiters: dict[str, asyncio.Event] = {}
+
+    def _mark(self, event_type: str) -> None:
+        self.events.append((time.monotonic(), event_type))
+        self._waiters.setdefault(event_type, asyncio.Event()).set()
+
+    def waiter_for(self, event_type: str) -> asyncio.Event:
+        return self._waiters.setdefault(event_type, asyncio.Event())
+
+    def timeline(self, t0: float) -> str:
+        return ", ".join(f"{name}@+{ts - t0:.3f}s" for ts, name in self.events) or "(no events observed)"
+
+
+def _asgi_transport_with_observer(app) -> tuple[ASGITransport, _SSEObserver]:
+    observer = _SSEObserver()
+
+    async def _wrapped_app(scope, receive, send):
+        async def _send(message):
+            if message.get("type") == "http.response.body":
+                for line in message.get("body", b"").split(b"\n"):
+                    if line.startswith(b"event: "):
+                        observer._mark(line[len(b"event: "):].decode())
+            await send(message)
+
+        await app(scope, receive, _send)
+
+    return ASGITransport(app=_wrapped_app), observer
+
+
+async def _wait_for_event(observer: _SSEObserver, event_type: str, *, timeout: float) -> bool:
+    try:
+        await asyncio.wait_for(observer.waiter_for(event_type).wait(), timeout=timeout)
+        return True
+    except asyncio.TimeoutError:
+        return False
+
+
 # ─── 이슈 3: 중복 연결 race 수정 확인 ────────────────────────────────────────
 
 @pytest.mark.anyio
@@ -209,19 +270,21 @@ async def test_batch_size_constant():
     assert _SSE_BATCH_SIZE == 10
 
 
-def test_stream_batch_delivers_over_100_events(mock_session, org_id):
+@pytest.mark.anyio
+async def test_stream_batch_delivers_over_100_events(mock_session, org_id):
     """110건 pending 이벤트를 배치(10건 청크)로 전달 + commit 횟수 확인.
 
-    story #3494(근본원인, 2026-09-05 PO 確定) — test_eventbus_s2.py::
-    test_agent_stream_registers_connection의 docstring 참조. 동기 TestClient는
-    앱 콜러블이 완전히 끝날 때까지 응답을 안 돌려준다 — injector가 앱 생존 중에
-    상태 기반으로 등록 관찰→sentinel 주입→소비확認한 뒤 shutdown_event로 정상
-    종료시킨다(하드코딩 sleep(0.3) 제거 — 110건 백필이 끝나기 전에 주입해도
-    무해하다, 큐에 그냥 쌓여 있다가 메인 루프가 백필을 마친 뒤 소비한다)."""
-    from starlette.testclient import TestClient
-    import threading
-    from app.core import shutdown as shutdown_module
-
+    forward(SSE 플레이키 근본 de-flake, 2026-09-19 페드루 PO 지시) — #4418/#4429
+    CI 재발 로그 실측: "injector never observed the connection" — OS threading.
+    Thread injector가 단 1.0s만 폴링하고 포기하던 게 원인. 그런데 이 파일 자신의
+    class(threading.Thread + time.sleep로 asyncio 프리미티브를 이벤트 루프 밖에서
+    건드리는 것)는 test_eventbus_s2.py가 story #3580/#3494에서 **이미 근본원인까지
+    확定하고 폐기한 패턴**이다(그 파일 docstring 참조) — 이 테스트만 그 이식이
+    누락돼 있었다(#3494 카드 자신이 "test_eventbus_s3 포함" 명시했었음). 새 기전
+    발명 금지 원칙대로 s2가 이미 검증한 `_wait_until`/`_SSEObserver`(같은 파일
+    상단, 이번에 이식) 패턴을 그대로 재사용 — 스레드 0개, 같은 이벤트 루프 위
+    코루틴으로 등록 관찰→sync_status(라이브 루프 진입) 관찰→sentinel 주입→
+    write 관찰까지 전부 상태 기반."""
     member_id = uuid.uuid4()
     member_id_str = str(member_id)
     events = [
@@ -245,6 +308,7 @@ def test_stream_batch_delivers_over_100_events(mock_session, org_id):
 
     mock_session.execute.side_effect = [membership_result, pending_result]
 
+    from app.core import shutdown as shutdown_module
     from app.dependencies.auth import get_current_user, get_verified_org_id, get_current_user_streaming, get_verified_org_id_streaming
     from app.dependencies.database import get_db
     from app.main import app
@@ -271,55 +335,46 @@ def test_stream_batch_delivers_over_100_events(mock_session, org_id):
     async def _session_factory():
         yield mock_session
 
-    registered_observed = threading.Event()
-    consumed_observed = threading.Event()
-
-    def _inject():
-        deadline = time.monotonic() + 1.0
-        while time.monotonic() < deadline:
-            if member_id_str in _agent_connections:
-                registered_observed.set()
-                break
-            time.sleep(0.005)
-        if not registered_observed.is_set():
-            return
-        queues = list(_agent_connections.get(member_id_str, set()))
-        for q in queues:
-            q.put_nowait({"event_type": "__test_sentinel__"})
-        # 110건 백필(11배치 commit)이 끝나야 메인 루프가 이 큐를 소비한다 — 상한을 넉넉히.
-        deadline = time.monotonic() + 5.0
-        while time.monotonic() < deadline:
-            if all(q.empty() for q in queues):
-                consumed_observed.set()
-                break
-            time.sleep(0.005)
-        shutdown_module.shutdown_event.set()
-
-    t = threading.Thread(target=_inject)
-    t.start()
+    t0 = time.monotonic()
+    registered_observed = False
+    sync_status_observed = False
+    written_observed = False
+    transport, observer = _asgi_transport_with_observer(app)
     try:
         with patch("app.core.database.async_session_factory", _session_factory):
             with patch("app.routers.events._SSE_HEARTBEAT_TIMEOUT", 0.1):
-                with TestClient(app, raise_server_exceptions=False) as c:
-                    with c.stream("GET", f"/api/v2/events/stream?member_id={member_id}") as resp:
-                        assert resp.status_code == 200
+                async with AsyncClient(transport=transport, base_url="http://test") as c:
+                    stream_task = asyncio.create_task(
+                        c.get(f"/api/v2/events/stream?member_id={member_id}")
+                    )
+                    registered_observed = await _wait_until(lambda: member_id_str in _agent_connections)
+                    queues = list(_agent_connections.get(member_id_str, set())) if registered_observed else []
+                    # 110건 백필(11배치 commit)이 sync_status(라이브 루프 진입)보다
+                    # 먼저 끝나므로, sentinel을 그 관찰 後에 넣어야 "write 예산"이
+                    # 백필 시간까지 재는 오차를 피한다(s2 2차 리뷰와 동일 원칙).
+                    if queues:
+                        sync_status_observed = await _wait_for_event(observer, "sync_status", timeout=15.0)
+                    for q in queues:
+                        q.put_nowait({"event_type": "__test_sentinel__"})
+                    if queues and sync_status_observed:
+                        written_observed = await _wait_for_event(observer, "__test_sentinel__", timeout=5.0)
+                    shutdown_module.shutdown_event.set()
+                    resp = await asyncio.wait_for(stream_task, timeout=15.0)
+                    assert resp.status_code == 200
     finally:
-        # story #3580(페드루 PO 確定 2026-09-06, #3942 CI 실사고) — 이 reset을 이
-        # finally 블록 맨 앞·독립 try로 둔다. 예전엔 t.join()/dependency_overrides.
-        # clear()/_agent_connections.pop() 뒤(마지막)에 있었는데, 그 중 하나라도
-        # 예외를 던지면(예: t.join 타임아웃) 뒤에 있던 이 reset이 아예 안 돈다 —
-        # 이 테스트가 다음 SSE 스트림 테스트를 오염시키는 잠복 경로였다(전역
-        # conftest.py::_guard_global_shutdown_event_leak이 이제 이런 누락을 그
-        # 자리에서 FAIL로 잡아낸다).
+        # story #3580(페드루 PO 確定, #3942 CI 실사고 근본원인) — 이 reset을 finally
+        # 블록 맨 앞·독립 try로 둔다(뒤 정리가 예외를 던져도 이건 반드시 돈다 —
+        # 안 그러면 다음 SSE 스트림 테스트를 오염시킨다).
         try:
             shutdown_module.reset_shutdown_event()
         finally:
-            t.join(timeout=6.0)
             app.dependency_overrides.clear()
             _agent_connections.pop(member_id_str, None)
 
-    assert registered_observed.is_set(), "injector never observed the connection in _agent_connections"
-    assert consumed_observed.is_set(), "generator never consumed the injected sentinel from its queue"
+    _timeline = observer.timeline(t0)
+    assert registered_observed, f"injector never observed the connection in _agent_connections — timeline: {_timeline}"
+    assert sync_status_observed, f"generator never reached the live loop (no sync_status observed) — timeline: {_timeline}"
+    assert written_observed, f"generator never actually wrote the sentinel line to the ASGI send() callable — timeline: {_timeline}"
 
     # 110건 = 11배치 → commit 11번 (backfill 배치 처리 확인)
     assert mock_session.commit.call_count >= 11
