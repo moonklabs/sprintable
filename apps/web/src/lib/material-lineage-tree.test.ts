@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import type { MaterialLineageEdge } from '@/services/material-lineage';
+import type { MaterialLineageEdge, MaterialPerformanceSnapshot } from '@/services/material-lineage';
 import type { MaterialCollectionSheetHook } from '@/services/verify';
 import {
   buildLineageTree, findLineageEdgeForDerived, filterLineageByHookKey, indexHooksByKey,
+  pickPrimaryMetricValue,
 } from './material-lineage-tree';
 
 // story #4058(doc c7991109 v3)/#4061 — #4046(recipe-role-slots.ts) 방식 순수 함수 테스트.
@@ -77,5 +78,57 @@ describe('indexHooksByKey', () => {
     const indexed = indexHooksByKey(hooks);
     expect(indexed.get('hook_a')?.text).toBe('이거 안 써봤죠?');
     expect(indexed.get('missing')).toBeUndefined();
+  });
+});
+
+function snapshot(overrides: Partial<MaterialPerformanceSnapshot>): MaterialPerformanceSnapshot {
+  return {
+    id: 's1', channel: 'instagram', due_at: '2026-09-01T00:00:00Z', captured_at: '2026-09-01T00:00:00Z',
+    status: 'captured', normalized: { impressions: null, reach: null, views: 100, engagements: null, clicks: null, spend: null, conversions: null, inflow_sessions: null, inflow_users: null, opens: null, delivered: null },
+    source: 'organic', error_code: null, offset_label: 'd1',
+    ...overrides,
+  };
+}
+
+describe('pickPrimaryMetricValue (story #4063 후속, PR 9dd179582 위)', () => {
+  it('status=captured 스냅샷 중 due_at이 가장 늦은 것의 metricKey 값을 낸다', () => {
+    const snapshots = [
+      snapshot({ id: 's1', due_at: '2026-09-01T00:00:00Z', normalized: { ...snapshot({}).normalized!, views: 100 } }),
+      snapshot({ id: 's2', due_at: '2026-09-07T00:00:00Z', normalized: { ...snapshot({}).normalized!, views: 400 } }),
+    ];
+    expect(pickPrimaryMetricValue(snapshots)).toBe(400);
+  });
+
+  it('captured가 하나도 없으면 null(0으로 위장 안 함)', () => {
+    const snapshots = [snapshot({ status: 'pending', normalized: null })];
+    expect(pickPrimaryMetricValue(snapshots)).toBeNull();
+  });
+
+  it('빈 배열도 null', () => {
+    expect(pickPrimaryMetricValue([])).toBeNull();
+  });
+
+  it('metricKey를 지정하면 그 키를 읽는다(기본값은 views)', () => {
+    const snapshots = [snapshot({ normalized: { ...snapshot({}).normalized!, views: 100, clicks: 7 } })];
+    expect(pickPrimaryMetricValue(snapshots, 'clicks')).toBe(7);
+  });
+
+  // story #4437 qa:changes(카디르, 2026-09-19) — 가장 늦은 captured가 그 metricKey를
+  // 아직 못 재서(normalized 자체가 null, 측정 진행 중) 옛 captured의 non-null 값으로
+  // 대체하면 안 된다("최신 성과"라며 사실 옛 수치를 보여주는 오도, #4063 결함 pin).
+  it('가장 늦은 captured의 normalized가 null이면(측정 미완) 옛 non-null 값으로 대체하지 않고 null을 낸다(핵심 회귀)', () => {
+    const snapshots = [
+      snapshot({ id: 's-old', due_at: '2026-09-01T00:00:00Z', normalized: { ...snapshot({}).normalized!, views: 100 } }),
+      snapshot({ id: 's-newest', due_at: '2026-09-07T00:00:00Z', normalized: null }),
+    ];
+    expect(pickPrimaryMetricValue(snapshots)).toBeNull();
+  });
+
+  it('가장 늦은 captured가 normalized는 있는데 그 metricKey만 null이면(다른 채널 지표만 측정) 역시 null', () => {
+    const snapshots = [
+      snapshot({ id: 's-old', due_at: '2026-09-01T00:00:00Z', normalized: { ...snapshot({}).normalized!, views: 100 } }),
+      snapshot({ id: 's-newest', due_at: '2026-09-07T00:00:00Z', normalized: { ...snapshot({}).normalized!, views: null } }),
+    ];
+    expect(pickPrimaryMetricValue(snapshots)).toBeNull();
   });
 });

@@ -1,0 +1,77 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import { fetchWithAuth } from '@/lib/db/client';
+import type { MaterialPerformanceSnapshot } from '@/services/material-lineage';
+
+// story #4063 후속(PR 9dd179582 위) — GET /api/v2/material-lineage/material-performance
+// ?derived_id= 를 derivedIds 배열만큼 병렬 조회(useHookPerformances와 동형 — BE가 배치
+// 엔드포인트를 안 열었다). channel_post_draft(발행 前) 변주·org 밖 id는 API가 빈 배열로
+// 답한다(에러 아님) — 그 케이스는 실패가 아니라 "정직하게 0건"이라 맵에 빈 배열로 남는다.
+const MATERIAL_PERFORMANCE_API_PATH = '/api/v2/material-lineage/material-performance';
+
+export interface UseMaterialPerformancesResult {
+  // derived_id → snapshots(성공 시 빈 배열도 포함 — 미발행/무성과와 실패를 구분).
+  snapshotsByDerivedId: Record<string, MaterialPerformanceSnapshot[]>;
+  loading: boolean;
+  loadFailed: boolean;
+}
+
+async function fetchOne(derivedId: string): Promise<MaterialPerformanceSnapshot[] | null> {
+  try {
+    const params = new URLSearchParams({ derived_id: derivedId });
+    const res = await fetchWithAuth(`${MATERIAL_PERFORMANCE_API_PATH}?${params.toString()}`);
+    if (!res.ok) return null;
+    return (await res.json()) as MaterialPerformanceSnapshot[];
+  } catch {
+    return null;
+  }
+}
+
+// story #4046/#4059/#4063 관례 — 배열 identity가 아니라 정렬된 join으로 deps를 비교.
+function derivedIdsDepsKey(derivedIds: string[]): string {
+  return [...derivedIds].sort().join(' ');
+}
+
+export function useMaterialPerformances(derivedIds: string[]): UseMaterialPerformancesResult {
+  const [snapshotsByDerivedId, setSnapshotsByDerivedId] = useState<Record<string, MaterialPerformanceSnapshot[]>>({});
+  const [loading, setLoading] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const depsKey = derivedIdsDepsKey(derivedIds);
+
+  useEffect(() => {
+    const ids = depsKey ? depsKey.split(' ') : [];
+    if (ids.length === 0) {
+      // app-sidebar.tsx 관례 — 객체 리터럴 setState는 set-state-in-effect가 걸린다.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSnapshotsByDerivedId({});
+      setLoadFailed(false);
+      // story #4437 qa:changes(카디르, 2026-09-19) — 이 guard가 setLoading(false)를 빼먹어
+      // derivedIds가 값→빈 배열로 바뀌는 순간 loading이 영구고착(#4436 use-material-lineage.ts·
+      // use-hook-performances.ts와 동일 클래스, 4번째 인스턴스).
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setLoadFailed(false);
+    void (async () => {
+      const results = await Promise.all(ids.map((id) => fetchOne(id)));
+      if (cancelled) return;
+      const next: Record<string, MaterialPerformanceSnapshot[]> = {};
+      let anyFailed = false;
+      results.forEach((snapshots, i) => {
+        if (snapshots) next[ids[i]] = snapshots;
+        else anyFailed = true;
+      });
+      setSnapshotsByDerivedId(next);
+      // 전부 실패한 경우만 loadFailed — 일부 실패는 그 키가 맵에서 빠진 것으로
+      // 이미 정직하게 드러난다.
+      setLoadFailed(anyFailed && Object.keys(next).length === 0);
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [depsKey]);
+
+  return { snapshotsByDerivedId, loading, loadFailed };
+}
