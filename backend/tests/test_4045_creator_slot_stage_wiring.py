@@ -72,36 +72,39 @@ _ROUTING = {
 
 _STAGE_METADATA = {
     "draft": {
-        "role": "크리에이터", "action": "로그라인·매핑표·컨셉 초안 작성",
+        "role": "Creator", "action": "로그라인·매핑표·컨셉 초안 작성",
     },
     "concept_confirmed": {
-        "role": "디렉터", "action": "우화 비트↔제품 가치 매핑 + 미션 정합 확定 승인",
+        "role": "Director", "action": "우화 비트↔제품 가치 매핑 + 미션 정합 확定 승인",
         "gate": {"type": "concept_approval", "approver": "org_owner"},
     },
     "animatic": {
-        "role": "크리에이터", "action": "무과금 스틸+텍스트+VO 애니매틱 제작",
+        # ⚠️gate 미선언 — #4044(PR #4423)가 ⓑstructure_approval을 얹는다(0379/PR#4419 최신 선례).
+        "role": "Creator", "action": "무과금 스틸+텍스트+VO 애니매틱 제작 후 구조 판정 요청",
     },
     "structure_passed": {
-        # ⚠️gate 미선언 — #4044가 gate_type 確定 후 후속 UPDATE(0379 선례 그대로).
-        "role": "디렉터", "action": "무과금 애니매틱으로 구조 판정 승인",
+        # ⚠️gate 미선언 — #4044(PR #4423)가 ⓒgeneration_budget을 얹는다.
+        "role": "Director", "action": "구조 판정 통과 확인 + 표적·예산 명시해 실탄 발사 승인",
     },
     "live_generation": {
-        # ⚠️gate 미선언 — #4044 대기.
-        "role": "디렉터", "action": "표적·예산을 명시해 실탄(유료 생성) 발사 승인",
+        # ⚠️gate 미선언 — #4044 대기. role=Compute(연산=모델 임대 슬롯, RecipeRoleBinding 대상
+        # 아님 — org member가 아니라 커넥터/모델이라 §AC1 바인딩 표에 안 걸림, PR#4419 확認).
+        "role": "Compute", "action": "실탄(유료 생성) 모델(키컷·i2v·음성·립싱크) 호출",
         "capability": {"kind": "generate"},
     },
     "verification": {
-        "role": "크리에이터", "action": "프레임8+받아쓰기 등 눈·귀 검증 시트 작성",
+        "role": "Creator", "action": "프레임8+받아쓰기 등 눈·귀 검증 시트 작성",
     },
     "editing": {
-        "role": "크리에이터", "action": "편집 통일 패스(그레이드·룸톤·자막 레벨 통일)",
+        "role": "Creator", "action": "편집 통일 패스(그레이드·룸톤·자막 레벨 통일)",
     },
     "pending_approval": {
-        "role": "발행자", "action": "최종 발행 승인 대기(외부 발행 직전)",
+        # role=Director(발행 직전 최종 승인자) — Publisher는 published(실 게시) 전용, 혼동 금지.
+        "role": "Director", "action": "최종 발행 승인(외부 발행 직전)",
         "gate": {"type": "external_publish", "approver": "org_owner"},
     },
     "published": {
-        "role": "발행자", "action": "승인된 채널에 실 게시",
+        "role": "Publisher", "action": "승인된 채널에 실 게시",
         "capability": {"kind": "publish"},
     },
 }
@@ -349,7 +352,15 @@ async def test_creator_emits_contract_kind_per_stage_sequentially():
 async def test_gate_created_only_where_stage_metadata_declares_it():
     """concept_confirmed·pending_approval(gate 선언 O)은 stage 발행만으로 pending Gate가
     자동 생성 — structure_passed·live_generation(gate 선언 X, #4044 대기)·크리에이터
-    stage(draft 등)는 게이트 0. 이게 "지금 실제로 멈추는 자리"의 정직한 경계선(AC3)."""
+    stage(draft 등)는 게이트 0. 이게 "지금 실제로 멈추는 자리"의 정직한 경계선(AC3).
+
+    카디르군 QA 지적(②, 2026-09-19) — 미선언 stage 루프가 두 known gate_type의 부재만
+    음성확인하고 실제 게이트 행 자체의 status(개수)를 안 세고 있었다 — `maybe_create_stage_gate`가
+    엉뚱한 gate_type으로 뭔가 만들어도 그 버그를 못 잡는 구멍. `Gate` 테이블을 직접 카운트해
+    루프 前後가 정확히 동일한지(신규 gate 0건) 세는 걸로 봉합."""
+    from sqlalchemy import select
+
+    from app.models.gate import Gate
     from app.services.gate_service import find_gate_slot_with_pr_fallback
     from app.services.recipe_gate_hooks import maybe_create_stage_gate
 
@@ -372,6 +383,12 @@ async def test_gate_created_only_where_stage_metadata_declares_it():
                 )
                 return g is not None
 
+            async def _gate_row_count() -> int:
+                rows = (await s.execute(
+                    select(Gate.id).where(Gate.work_item_id == story_id, Gate.work_item_type == "story")
+                )).scalars().all()
+                return len(rows)
+
             # 게이트 선언 있는 stage — pending Gate 생성.
             await maybe_create_stage_gate(
                 s, org_id=org_id, definition=definition,
@@ -387,6 +404,9 @@ async def test_gate_created_only_where_stage_metadata_declares_it():
             )
             assert await _gate_exists("external_publish") is True
 
+            count_before_noop_loop = await _gate_row_count()
+            assert count_before_noop_loop == 2, "concept_approval·external_publish 2건만 있어야 한다"
+
             # 게이트 미선언 stage — no-op(#4044 대기 경계 그대로).
             for stage in ("structure_passed", "live_generation", "draft", "animatic", "verification", "editing"):
                 await maybe_create_stage_gate(
@@ -394,8 +414,15 @@ async def test_gate_created_only_where_stage_metadata_declares_it():
                     payload={"stage": stage, "work_item_type": "story", "work_item_id": str(story_id)},
                     requester_member_id=publisher_id,
                 )
-            # 위 두 gate_type 외에는 어떤 gate_type도 안 생겼어야 한다 — structure/budget용
-            # gate_type이 아직 없으므로 "그런 게 없다"만 확認 가능(#4044가 정하면 이 테스트가
-            # 그 새 타입을 알아야 갱신된다 — 지금은 부재 확認이 맞는 판정).
+
+            # ⭐카디르군 ② 봉합 — 미선언 6개 stage를 전부 돌려도 Gate 행 개수가 그대로여야
+            # 한다(신규 0건). 특정 gate_type의 부재만 보는 게 아니라 "무엇이든 새로 안
+            # 생겼다"는 실제 status를 직접 세서 확認 — #4044가 새 gate_type을 도입해도
+            # 그 이름을 몰라도 되는 구조(미래 gate_type명 의존 0).
+            count_after_noop_loop = await _gate_row_count()
+            assert count_after_noop_loop == count_before_noop_loop, (
+                f"미선언 stage 6개 발행 후 Gate 행이 늘면 안 된다(before={count_before_noop_loop}, "
+                f"after={count_after_noop_loop})"
+            )
     finally:
         await engine.dispose()
