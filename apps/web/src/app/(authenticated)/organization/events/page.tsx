@@ -29,7 +29,7 @@ import { formatRelativeTime } from '@/lib/storage/format';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { publishHistorySenderLabel } from '@/lib/member-display';
 import { useMarketingRecipes } from '@/hooks/use-marketing-recipes';
-import { MARKETING_CREATOR_ROLE_LABEL, recipeKeyDomain } from '@/lib/recipe-role-slots';
+import { MARKETING_CREATOR_ROLE_KEY, recipeKeyDomain } from '@/lib/recipe-role-slots';
 
 // story #2664 — 목록(GET) 응답 모델(events.py EventDefinitionResponse)엔 아직 id가 없다
 // (BE #2663, PR#3069 재QA 중). id가 없는 항목은 수정/비활성 버튼을 아예 안 그린다 — #2663가
@@ -332,7 +332,7 @@ export default function OrganizationEventsPage() {
         recipe={marketingApplyTarget}
         open={marketingApplyTarget !== null}
         onOpenChange={(open) => { if (!open) setMarketingApplyTarget(null); }}
-        creatorRoleLabel={MARKETING_CREATOR_ROLE_LABEL}
+        creatorRoleLabel={MARKETING_CREATOR_ROLE_KEY}
         projects={marketingProjects}
         onSubmit={async (args) => {
           const result = await submitMarketingRecipeApply(args);

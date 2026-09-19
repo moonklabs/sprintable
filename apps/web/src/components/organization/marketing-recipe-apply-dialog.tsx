@@ -30,7 +30,7 @@ export interface MarketingRecipeApplyDialogProps {
   onOpenChange: (open: boolean) => void;
   creatorRoleLabel: string;
   projects: { id: string; name: string }[];
-  onSubmit: (args: { recipeId: string; projectId: string; roleMapping: Record<string, string> }) => Promise<{ ok: boolean; error?: string }>;
+  onSubmit: (args: { recipeId: string; projectId: string; roleMapping: Record<string, string> }) => Promise<{ ok: boolean; error?: string; bindingsUpserted?: number }>;
 }
 
 export function MarketingRecipeApplyDialog({
@@ -84,9 +84,25 @@ export function MarketingRecipeApplyDialog({
       const roleMapping = expandRoleSlotBindings(recipe.stage_metadata, [creatorRoleLabel], {
         [creatorRoleLabel]: creatorAgentId,
       });
+      // 카디르 P1 재현(#4426, 2026-09-19) — creatorRoleLabel이 이 레시피의 실제
+      // stage_metadata.role 키와 하나도 안 맞으면(예: 표시라벨 vs seed 실제 role 키 불일치
+      // 재발) expandRoleSlotBindings가 빈 매핑을 낸다 — 그 상태로 서버까지 보내지 않고
+      // 여기서 즉시 막는다(네트워크 왕복 없이 로컬에서 잡는 방어선, [거짓성공표시] 재발 방지).
+      if (Object.keys(roleMapping).length === 0) {
+        setError(t('recipeApplyV2NoOpError'));
+        return;
+      }
       const result = await onSubmit({ recipeId: recipe.id, projectId, roleMapping });
       if (!result.ok) {
         setError(result.error ?? t('eventApplyErrorGeneric'));
+        return;
+      }
+      // 위 로컬 방어를 통과했어도 서버가 실제로 0건 upsert했으면(예: 동시성으로 stage가
+      // 사라짐 등) 여전히 no-op다 — result.ok만 믿지 않고 bindingsUpserted도 확認한다
+      // (백엔드 ApplyRecipeRoleBindingsResponse.ok는 요청 성공 여부일 뿐 실제 배정 건수와
+      // 무관 — ok=true·bindings_upserted=0이 동시에 성립할 수 있다).
+      if ((result.bindingsUpserted ?? 0) === 0) {
+        setError(t('recipeApplyV2NoOpError'));
         return;
       }
       onOpenChange(false);
@@ -206,7 +222,7 @@ export function MarketingRecipeApplyDialog({
  * 동일 엔드포인트·바디 shape, 신규 백엔드 없음). */
 export async function submitMarketingRecipeApply(
   { recipeId, projectId, roleMapping }: { recipeId: string; projectId: string; roleMapping: Record<string, string> },
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: string; bindingsUpserted?: number }> {
   const res = await fetchWithAuth(`/api/events/definitions/${recipeId}/apply`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -219,7 +235,10 @@ export async function submitMarketingRecipeApply(
     const errBody = await res.json().catch(() => ({})) as { error?: { message?: string } };
     return { ok: false, error: errBody.error?.message };
   }
-  const data = await res.json().catch(() => ({})) as { ok?: boolean; error?: { message?: string } };
+  // 카디르 P1(#4426, 2026-09-19) — ApplyRecipeRoleBindingsResponse(events.py)는
+  // bindings_upserted(int)를 실 필드로 낸다. ok=true는 요청 자체가 성공했다는 뜻일 뿐
+  // 실제 배정 건수와 무관해 그대로 통과시키지 않고 호출부에 넘겨 판단하게 한다.
+  const data = await res.json().catch(() => ({})) as { ok?: boolean; bindings_upserted?: number; error?: { message?: string } };
   if (!data.ok) return { ok: false, error: data.error?.message };
-  return { ok: true };
+  return { ok: true, bindingsUpserted: data.bindings_upserted };
 }

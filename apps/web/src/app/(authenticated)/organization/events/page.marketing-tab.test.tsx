@@ -45,16 +45,21 @@ afterEach(async () => {
   vi.resetModules();
 });
 
-// #4039 seed 축소판(recipe-role-slots.test.ts와 동일 role/gate 축) — id 있는 마케팅 프리셋 1건.
+// #4039/#4419 실 seed 축소판(recipe-role-slots.test.ts와 동일 role/gate 축, 0381_preset_
+// marketing_video_production_recipe.py 실측) — id 있는 마케팅 프리셋 1건.
+// story #4426 P1(카디르 실 시드 E2E 재현, 2026-09-19) — 이전엔 role 값이 한글 표시라벨
+// ("크리에이터" 등)이었다 — 실 seed는 영어 role 키("Creator" 등)를 쓴다. 이 드리프트가
+// MARKETING_CREATOR_ROLE_KEY의 실 seed 불일치(크리에이터 배정 항상 no-op)를 이 스위트
+// 에서도 숨기고 있었다([합성표본=구조숨김]) — 실 값으로 교정.
 const MARKETING_RECIPE = {
   id: 'mkt-1', key: 'preset.marketing.video_production', org_id: null,
   name: '영상 제작 (릴스·쇼츠)', description: '소재 확정부터 발행까지.',
   payload_schema: { properties: { stage: { enum: ['draft', 'concept_confirmed', 'published'] } } },
   routing: {}, block_template: null,
   stage_metadata: {
-    draft: { role: '크리에이터' },
-    concept_confirmed: { role: '디렉터', gate: { type: 'concept_approval', approver: 'org_owner' } },
-    published: { role: '발행자' },
+    draft: { role: 'Creator' },
+    concept_confirmed: { role: 'Director', gate: { type: 'concept_approval', approver: 'org_owner' } },
+    published: { role: 'Publisher' },
   },
   enabled: true, version: 1,
 };

@@ -700,6 +700,7 @@
     "recipeApplyV2PublisherDesc": "승인된 소재를 채널에 게시",
     "recipeApplyV2StageCoverage": "{count}개 단계 실행",
     "recipeApplyV2CreatorMembershipError": "선택한 에이전트가 이 프로젝트 소속이 아니에요. 다시 선택해 주세요.",
+    "recipeApplyV2NoOpError": "저장된 배정이 없어요(0건). 크리에이터 배정이 실제로 반영되지 않았어요 — 다시 시도하거나 관리자에게 알려주세요.",
     "recipeApplyV2PersonPlaceholder": "사람 선택…",
     "recipeApplyV2ModelSetPlaceholder": "모델 세트 선택…",
     "recipeApplyV2ChannelPlaceholder": "담당 선택…",
