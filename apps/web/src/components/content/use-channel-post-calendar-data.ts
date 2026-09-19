@@ -94,6 +94,13 @@ export function useChannelPostCalendarData(
   // `if (!orgId)`는 falsy 전부(빈 문자열 포함)를 스킵으로 봤는데, useAsyncResource의
   // skip 판정은 null/undefined만 인식한다. orgId=''를 정규화 없이 넘기면 실제 fetch가
   // 나가 "기존동작 무변" 계약이 깨진다 — orgId || undefined로 정규화.
+  //
+  // ⚠️카디르 재QA(#4445, 2026-09-19, 헬퍼 설계갭) — 원본은 재조회 실패(!ok/네트워크
+  // 예외) 시 setScheduled/setUnscheduled를 아예 안 불러 "이전 성공 데이터 유지 +
+  // error만 세움" 계약이었다(develop 원본 실측 확認, 102·119행 — 두 실패 경로 모두
+  // setError(true)만 호출). useAsyncResource 기본값(실패 시 initial로 리셋)을 그대로
+  // 썼으면 캘린더가 이미 그려둔 일정을 실패 화면으로 지우는 회귀가 났다 —
+  // keepPreviousDataOnError:true로 원본 계약 복원.
   const { data, loading, loadFailed } = useAsyncResource<string, CalendarFetchResult>(
     orgId || undefined, EMPTY_RESULT,
     async (id) => {
@@ -135,6 +142,7 @@ export function useChannelPostCalendarData(
       return { scheduled: grouped, unscheduled: unscheduledJson?.data ?? [] };
     },
     [range.from, range.to, connectionId, displayTimezone.tz],
+    { keepPreviousDataOnError: true },
   );
 
   return { scheduled: data.scheduled, unscheduled: data.unscheduled, loading, error: loadFailed, displayTimezone };
