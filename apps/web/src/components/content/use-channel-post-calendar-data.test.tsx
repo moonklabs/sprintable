@@ -138,4 +138,32 @@ describe('useChannelPostCalendarData', () => {
     expect(scheduledUrl).toContain('connection_id=c-42');
     expect(unscheduledUrl).toContain('connection_id=c-42');
   });
+
+  // story #4071 마이그 핵심 회귀 — 사전조사 doc §2가 잡은 클래스: 원본은 loading을
+  // useState(true)로 초기화해, orgId가 처음부터 undefined면(조직 미확定 등) 그 값을
+  // 되돌릴 분기 자체가 없어 loading이 영구 true였다. useAsyncResource 마이그 후엔 스킵
+  // 경로도 구조적으로 loading=false로 닫힌다.
+  function UndefinedOrgHarness({ orgId }: { orgId: string | undefined }) {
+    const { loading, error } = useChannelPostCalendarData(
+      orgId, { from: '2026-09-01T00:00:00Z', to: '2026-09-30T23:59:59Z' },
+    );
+    return (
+      <div>
+        <span data-testid="loading">{String(loading)}</span>
+        <span data-testid="error">{String(error)}</span>
+      </div>
+    );
+  }
+
+  it('orgId가 처음부터 undefined면(마운트 시점) loading이 고착되지 않고 false다(#4071 핵심 회귀)', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    await act(async () => {
+      root.render(<UndefinedOrgHarness orgId={undefined} />);
+    });
+    await flush();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(container.querySelector('[data-testid="loading"]')?.textContent).toBe('false');
+    expect(container.querySelector('[data-testid="error"]')?.textContent).toBe('false');
+  });
 });
