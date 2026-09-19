@@ -70,6 +70,31 @@ describe('useWorkItemProductionEvidence — GET /api/evidence를 제작 작업�
     expect(state.loadFailed).toBe(false);
   });
 
+  // story #4071 qa:changes 부수(카디르 #4446 재발견, 2026-09-19, 동일 클래스 자기점검) —
+  // 기존 스위트는 성공 응답을 전부 원시 배열로만 mock해
+  // `Array.isArray(json) ? json : (json.data ?? [])`의 else 분기(BFF envelope)가
+  // 한 번도 실행되지 않았다 — `?? []`를 지워도 기존 테스트가 통과했을 것
+  // ([못틀리는대조미자]). envelope 모양 응답으로 그 분기 자체를 pin.
+  it('응답이 {data:[...]} envelope 모양이어도(원시 배열 아님) data를 그대로 낸다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true, json: async () => ({ data: [REPORT_EVIDENCE('storyboard', 'e1')] }),
+    })));
+
+    await act(async () => { root.render(<Harness workItemId="story-1" workItemType="story" />); });
+    await flush();
+
+    expect(dump().kinds).toEqual(['storyboard']);
+  });
+
+  it('응답이 {data:[...]} envelope인데 data 필드 자체가 없으면 빈 배열로 방어한다(핵심 회귀 — ?? [] 제거 시 크래시)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({}) })));
+
+    await act(async () => { root.render(<Harness workItemId="story-1" workItemType="story" />); });
+    await flush();
+
+    expect(dump()).toEqual({ kinds: [], loading: false, loadFailed: false });
+  });
+
   it('workItemId가 null이면 fetch 자체를 안 태운다', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
@@ -143,5 +168,22 @@ describe('useWorkItemProductionEvidence — GET /api/evidence를 제작 작업�
     await act(async () => { resolveFetch?.(); });
     await flush();
     expect(dump().loading).toBe(false);
+  });
+
+  // story #4071 qa:changes(카디르, #4444와 동일 클래스, 2026-09-19) — 원본 skip 조건은
+  // `!workItemId || !workItemType`로 falsy 전부(빈 문자열 포함)를 스킵했다. 이 마이그는
+  // 복합 key(`workItemId && workItemType ? \`${workItemId}:${workItemType}\` : null`)를
+  // `&&`로 만들어 workItemId=''면 그 자체로 이미 falsy라 key가 null이 된다(useAsyncResource
+  // 전달 前에 정규화 완료) — 다른 3훅(org-domain-labels·channel-calendar·recipe-member-
+  // options)처럼 원본 값을 그대로 넘기지 않아 이 클래스에 애초에 안 걸림을 확認.
+  it('workItemId가 빈 문자열이어도(falsy) fetch 자체를 호출하지 않는다(#4071 재QA 클래스 자기점검)', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await act(async () => { root.render(<Harness workItemId="" workItemType="story" />); });
+    await flush();
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(dump()).toEqual({ kinds: [], loading: false, loadFailed: false });
   });
 });
