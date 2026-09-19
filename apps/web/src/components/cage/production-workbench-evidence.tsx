@@ -1,7 +1,7 @@
 'use client';
 
 import { useLocale, useTranslations } from 'next-intl';
-import { Play } from 'lucide-react';
+import { CircleDollarSign, Play } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { formatRelativeTime } from '@/lib/storage/format';
@@ -188,7 +188,12 @@ function AnimaticCard({ evidence }: { evidence: EvidenceItem }) {
           </span>
         </div>
         <div className="flex flex-1 flex-col gap-1.5 text-[12px]">
-          <Badge variant={animatic.cost_tier === 'no_charge' ? 'secondary' : 'warning'} className="w-fit">
+          {/* story #4433 qa:changes(카디르, 2026-09-19) — cost_tier는 categorical
+              값(no_charge/paid)이지 상태(성공/경고)가 아니다(§3 PR 설명이 "상태색은
+              verification_sheet만"이라 해놓고 여기 warning을 쓴 자기모순). 둘 다
+              secondary(neutral)로 걷고, salience는 색 대신 paid 전용 비용 아이콘으로. */}
+          <Badge variant="secondary" className="w-fit gap-1">
+            {animatic.cost_tier === 'paid' ? <CircleDollarSign className="size-3" /> : null}
             {animatic.cost_tier === 'no_charge' ? t('productionWorkbenchCostTierNoCharge') : t('productionWorkbenchCostTierPaid')}
           </Badge>
           <span className="text-muted-foreground">{t('productionWorkbenchDurationSeconds', { sec: animatic.duration_sec })}</span>
@@ -264,7 +269,14 @@ export function ProductionWorkbenchEvidencePanel({ workItemId, workItemType }: P
 
   return (
     <div className="space-y-2.5" data-testid="production-workbench-evidence">
-      <p className="text-[11px] font-semibold text-muted-foreground">{t('productionWorkbenchSectionTitle')}</p>
+      <div>
+        <p className="text-[11px] font-semibold text-muted-foreground">{t('productionWorkbenchSectionTitle')}</p>
+        {/* story #4433 qa:changes(카디르, 2026-09-19) — PR #4044(stage denorm 필터)가
+            아직 안 서서 이 패널은 work_item의 5종 evidence를 stage 무필터로 전부 보여준다.
+            구/신 컨셉의 같은 검증항목이 fail/pass로 동시에 뜰 수 있어("제작 산출물"만으로는
+            전체이력인지 현재승인근거인지 안 갈림) 캡션으로 명시한다. */}
+        <p className="text-[10.5px] text-muted-foreground">{t('productionWorkbenchSectionCaption')}</p>
+      </div>
       {kinds.map((kind) => {
         const Card = KIND_CARD[kind];
         const groupItems = grouped[kind] ?? [];

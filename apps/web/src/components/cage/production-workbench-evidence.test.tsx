@@ -104,4 +104,33 @@ describe('ProductionWorkbenchEvidencePanel', () => {
     await flush();
     expect(container.querySelector('[data-testid="production-workbench-evidence"]')).toBeNull();
   });
+
+  it('story #4433 qa:changes — cost_tier=paid 배지는 secondary(neutral)+비용 아이콘, warning 색 아님', async () => {
+    const evidenceRows = [
+      { id: 'e-paid', type: 'report', ref: 'animatic', ...BASE_EVIDENCE, payload: { kind: 'animatic', artifact_id: 'artifact-uuid-3', cost_tier: 'paid', duration_sec: 6 } },
+    ];
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => evidenceRows })));
+    await act(async () => { root.render(wrap(<ProductionWorkbenchEvidencePanel workItemId="story-1" workItemType="story" />)); });
+    await flush();
+
+    const panel = container.querySelector('[data-testid="production-workbench-evidence"]')!;
+    expect(panel.textContent).toContain('실탄');
+    expect(panel.querySelector('svg.lucide-circle-dollar-sign')).not.toBeNull();
+    // warning variant는 bg-warning-tint 클래스를 낸다 — 그 클래스가 이 배지엔 없어야 한다.
+    const badges = [...panel.querySelectorAll('[class*="bg-warning-tint"]')];
+    expect(badges).toHaveLength(0);
+  });
+
+  it('story #4433 qa:changes — 섹션 캡션이 «전체 이력»임을 명시한다(현재 승인근거와 혼동 방지)', async () => {
+    const evidenceRows = [
+      { id: 'e1', type: 'report', ref: 'r', ...BASE_EVIDENCE, payload: { kind: 'verification_sheet', items: [{ name: '자막 싱크', verdict: 'pass' }] } },
+    ];
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => evidenceRows })));
+    await act(async () => { root.render(wrap(<ProductionWorkbenchEvidencePanel workItemId="story-1" workItemType="story" />)); });
+    await flush();
+
+    const panel = container.querySelector('[data-testid="production-workbench-evidence"]')!;
+    expect(panel.textContent).toContain('전체 이력');
+    expect(panel.textContent).toContain('지난 컨셉의 기록도 포함');
+  });
 });
