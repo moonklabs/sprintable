@@ -455,6 +455,17 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "다시 결재가 필요해요",
         "en": "Re-approval is needed",
     },
+    # story #4042(evidence.py::_validate_and_normalize_evidence_payload, kind fail-closed
+    # 화이트리스트) — 신규 코드라 verify_no_new_korean_user_strings.py 대상, EXEMPT_FILES가
+    # 아닌 evidence.py 자신에 리터럴로 못 심어 이 카탈로그를 경유한다.
+    "evidence.kind_unregistered": {
+        "ko": "payload.kind={kind}는 등재되지 않은 kind예요 — 허용: {allowed}.",
+        "en": "payload.kind={kind} is not a registered kind — allowed: {allowed}.",
+    },
+    "evidence.kind_type_mismatch": {
+        "ko": "payload.kind={kind}는 type={expected_type}로 실려야 해요 (받은 type={received_type}).",
+        "en": "payload.kind={kind} must be sent with type={expected_type} (received type={received_type}).",
+    },
 }
 
 

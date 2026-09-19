@@ -238,14 +238,19 @@ async def _publish_stage(session, *, org_id, publisher_id, story_id, stage):
 
 
 async def _emit_evidence(session, *, org_id, agent_id, story_id, kind, extra_payload):
-    from app.routers.evidence import EvidenceCreateRequest, create_evidence
+    from app.routers.evidence import EvidenceCreateRequest, _create_evidence
 
     body = EvidenceCreateRequest(
         work_item_id=story_id, work_item_type="story", type="report",
         ref=f"creator-slot-wiring-stub:{kind}",
         payload={"kind": kind, **extra_payload},
     )
-    return await create_evidence(body, session=session, org_id=org_id, auth=_auth(agent_id, org_id))
+    # story #4042(i18n_catalog.py 모듈 docstring 원칙) — Header() DI 마커는 라우트 경계
+    # 에서만 풀린다. 직접-호출 테스트는 route가 아닌 `_create_evidence`를 부르고
+    # resolved_locale을 plain str로 직접 준다(#4425 CI 실사고로 확認된 결함 클래스).
+    return await _create_evidence(
+        body, session=session, org_id=org_id, auth=_auth(agent_id, org_id), resolved_locale="ko",
+    )
 
 
 # ── AC1 — 크리에이터 슬롯이 자기 stage에서만 통지 대상이 된다 ──────────────────────────

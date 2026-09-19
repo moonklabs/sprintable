@@ -206,14 +206,19 @@ async def _publish_stage(session, *, org_id, publisher_id, story_id, stage):
 
 
 async def _emit_generation_cost(session, *, org_id, agent_id, story_id, cost_minor, currency, target, type_="metric"):
-    from app.routers.evidence import EvidenceCreateRequest, create_evidence
+    from app.routers.evidence import EvidenceCreateRequest, _create_evidence
 
     body = EvidenceCreateRequest(
         work_item_id=story_id, work_item_type="story", type=type_,
         ref="creator-budget-estimate:generation_cost",
         payload={"kind": "generation_cost", "cost_minor": cost_minor, "currency": currency, "target": target},
     )
-    return await create_evidence(body, session=session, org_id=org_id, auth=_auth(agent_id, org_id))
+    # story #4042(i18n_catalog.py 모듈 docstring 원칙) — Header() DI 마커는 라우트 경계
+    # 에서만 풀린다. 직접-호출 테스트는 route가 아닌 `_create_evidence`를 부르고
+    # resolved_locale을 plain str로 직접 준다(#4425 CI 실사고로 확認된 결함 클래스).
+    return await _create_evidence(
+        body, session=session, org_id=org_id, auth=_auth(agent_id, org_id), resolved_locale="ko",
+    )
 
 
 # ── AC1 — 크리에이터가 유료 생성 前 generation_cost 추정을 emit ───────────────────────
@@ -292,9 +297,18 @@ async def test_negative_cost_and_currency_mismatch_rejected():
 @pytest.mark.anyio
 async def test_generation_cost_counted_only_when_type_is_metric():
     """양성: type="metric"으로 emit → compute_generation_budget_status가 spent_minor에
-    정확히 반영. 음성(뮤테이션): 같은 payload를 type="report"로 emit(다른 kind들의 관례를
-    실수로 따라간 경우 재현) → 검증은 통과하지만 집계엔 0으로 안 잡힌다 — #4044가 이
-    함정을 그대로 밟지 않도록 실측으로 남겨둔다."""
+    정확히 반영. 음성(뮤테이션): 같은 payload가 type="report"로 잘못 실린 경우(다른
+    kind들의 관례를 실수로 따라간 경우 재현) → 집계엔 0으로 안 잡힌다 — #4044가 이
+    함정을 그대로 밟지 않도록 실측으로 남겨둔다.
+
+    story #4042(카디르 QA CI FAILURE, 2026-09-19) — 이 mismatch는 이제 API 경로
+    (`_create_evidence`)에서 fail-closed 422로 원천 거부된다(kind=generation_cost는
+    type=metric로만 실려야 함, evidence.py::_EVIDENCE_KIND_TYPE_REGISTRY). 즉 음성
+    조작을 더는 `_emit_generation_cost` helper로 재현할 수 없다 — 이 테스트의 진짜
+    의도(집계 쿼리 자체가 type=="metric"만 본다는 defense-in-depth, API 검증 하나에만
+    기대지 않는다)는 그대로 유효하므로, 그 mismatch 행을 API를 우회해 세션에 직접
+    심어 재현한다."""
+    from app.models.evidence import Evidence
     from app.services.generation_budget import compute_generation_budget_status
 
     engine, Session = await _realdb_session()
@@ -314,11 +328,18 @@ async def test_generation_cost_counted_only_when_type_is_metric():
             assert status["spent_minor"] == 50_000
             assert status["remaining_minor"] == 950_000
 
-            # 음성(뮤테이션) — type="report"로 같은 kind emit.
-            await _emit_generation_cost(
-                s, org_id=org_id, agent_id=creator_id, story_id=story_id,
-                cost_minor=999_000, currency="KRW", target="음성 대조(type 오류 재현)", type_="report",
-            )
+            # 음성(뮤테이션) — type="report"로 같은 kind가 실린 행(API는 이제 이 조합을
+            # 422로 거부하므로 세션에 직접 심어 재현 — docstring 참조).
+            s.add(Evidence(
+                id=uuid.uuid4(), org_id=org_id, work_item_id=story_id, work_item_type="story",
+                type="report", ref="creator-budget-estimate:generation_cost-mismatch",
+                payload={
+                    "kind": "generation_cost", "cost_minor": 999_000, "currency": "KRW",
+                    "target": "음성 대조(type 오류 재현)", "recorded_by": "agent",
+                },
+                created_by=creator_id,
+            ))
+            await s.commit()
             status_after = await compute_generation_budget_status(s, org_id=org_id)
             assert status_after["spent_minor"] == 50_000, (
                 "type=\"report\"로 emit된 generation_cost가 집계에 새면 안 된다"
