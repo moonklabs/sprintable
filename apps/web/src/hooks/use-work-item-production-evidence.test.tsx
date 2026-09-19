@@ -114,4 +114,34 @@ describe('useWorkItemProductionEvidence — GET /api/evidence를 제작 작업�
     await flush();
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
+
+  it('조회 中 workItemId가 null로 바뀌면 loading이 고착되지 않는다(카디르 QA #4431 qa:changes 재현 — #4421과 같은 클래스)', async () => {
+    let resolveFetch: (() => void) | null = null;
+    const fetchMock = vi.fn(() => new Promise((resolve) => {
+      resolveFetch = () => resolve({ ok: true, json: async () => [] });
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    function Switcher() {
+      const [id, setId] = useState<string | null>('story-1');
+      return (
+        <>
+          <button data-testid="clear" onClick={() => setId(null)}>clear</button>
+          <Harness workItemId={id} workItemType="story" />
+        </>
+      );
+    }
+
+    await act(async () => { root.render(<Switcher />); });
+    await flush();
+    expect(dump().loading).toBe(true); // 응답 도착 前 — 조회 中.
+
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="clear"]')!.click(); });
+    await flush();
+    expect(dump().loading).toBe(false); // 고착 안 됨(수정 前엔 true로 남아 FAIL).
+
+    await act(async () => { resolveFetch?.(); });
+    await flush();
+    expect(dump().loading).toBe(false);
+  });
 });

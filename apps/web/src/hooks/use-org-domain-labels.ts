@@ -56,7 +56,11 @@ export function useOrgDomainLabels(orgId: string | undefined, locale: string): O
 
   useEffect(() => {
     if (!orgId) {
+      // 카디르 QA 클래스 sweep(#4431, 2026-09-19) — #4421/#4431과 같은 패턴: 조회 中
+      // orgId가 undefined로 바뀌면 이전 effect의 cleanup(cancelled=true)이 그
+      // finally{setLoading(false)}를 막고, 이 분기도 loading을 안 꺼서 영구 고착된다.
       setEntries([]);
+      setLoading(false);
       return;
     }
     let cancelled = false;

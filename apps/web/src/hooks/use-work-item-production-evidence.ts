@@ -36,8 +36,13 @@ export function useWorkItemProductionEvidence(
 
   useEffect(() => {
     if (!workItemId || !workItemType) {
+      // 카디르 QA(#4431 qa:changes, 2026-09-19) — #4421(use-recipe-member-options)과
+      // 같은 클래스: 조회 中 workItemId/workItemType이 null로 바뀌면 이전 effect의
+      // cleanup(cancelled=true)이 그 finally{setLoading(false)}를 막고, 이 분기도
+      // loading을 안 꺼서 영구 고착됐다. 명시적으로 끈다.
       setItems([]);
       setLoadFailed(false);
+      setLoading(false);
       return;
     }
     let cancelled = false;
