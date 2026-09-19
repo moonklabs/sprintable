@@ -1,0 +1,1 @@
+{"file": "tests/test_4069_recipe_single_destination_auto_satisfy_realdb.py", "sec": 7.0, "source": "story-4069(2026-09-19) — 로컬 실측(throwaway pgvector/pgvector:pg15 컨테이너, `uv run pytest` 단독실행, 4 passed in 6.9s). CI 값은 달라질 수 있어 잠정값."}

@@ -1436,7 +1436,40 @@ async def submit_channel_post_draft(
         requester_member_id, role_id, neutral_facts=neutral_facts, scope_key=scope_key,
     )
     gate.neutral_facts = neutral_facts
-    if gate.status != "pending":
+
+    # story #4069(훅A, 페드루 PO 確定 2026-09-19) — 레시피 ⓓ(pending_approval stage,
+    # scope_key="" unscoped external_publish 게이트)가 이미 approved이고, 이 work_item에
+    # 지금까지 상신된 draft의 connection_id가 이 draft 것 하나뿐이면("처음이자 유일한
+    # 목적지") ⓓ의 사람승인을 이 draft-scoped(scope_key=connection_id) 게이트가 승계한다.
+    # #3478 멀티목적지 축(scope_key) 자체는 안 건드린다 — 2번째 이상 목적지는 여전히
+    # 각자 사람 승인이 필요(아래 조회가 그 순간 False로 갈린다). AC5 "사람개입≤4"의
+    # 하드 클로즈 — «중복 딸깍 제거»이지 «목적지 우회»가 아니므로, 실제 발행 목적지
+    # 자체(draft.connection_id)는 이 자동충족 전후로 절대 안 바뀐다.
+    auto_satisfied_by: Gate | None = None
+    if gate.status != "approved":
+        recipe_gate = await find_gate_slot_with_pr_fallback(
+            db, org_id=org_id, work_item_id=draft.work_item_id, work_item_type="story",
+            gate_type=_EXTERNAL_PUBLISH_GATE_TYPE, pr_number=None, repo_full_name=None, scope_key="",
+        )
+        if recipe_gate is not None and recipe_gate.status == "approved":
+            other_destination = (await db.execute(
+                select(ChannelPostDraft.id).where(
+                    ChannelPostDraft.org_id == org_id,
+                    ChannelPostDraft.work_item_id == draft.work_item_id,
+                    ChannelPostDraft.connection_id != draft.connection_id,
+                    ChannelPostDraft.status != "withdrawn",
+                ).limit(1)
+            )).scalar_one_or_none()
+            if other_destination is None:
+                auto_satisfied_by = recipe_gate
+
+    if auto_satisfied_by is not None:
+        set_gate_status(gate, "approved", now=datetime.now(timezone.utc))
+        gate.requires_human = False
+        gate.resolver_id = auto_satisfied_by.resolver_id
+        gate.resolved_at = auto_satisfied_by.resolved_at
+        gate.resolution_note = "ⓓ(레시피 발행승인) 자동충족 — 단일 목적지"
+    elif gate.status != "pending":
         set_gate_status(gate, "pending", now=datetime.now(timezone.utc))
         gate.requires_human = True
         gate.resolver_id = None
