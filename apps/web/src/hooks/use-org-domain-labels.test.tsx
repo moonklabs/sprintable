@@ -7,7 +7,7 @@
 // canonical 문구로 폴백)를 실 렌더로 고정한다.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act } from 'react';
+import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { useOrgDomainLabels } from './use-org-domain-labels';
 
@@ -172,5 +172,35 @@ describe('useOrgDomainLabels — 라벨 API 인덱싱+로케일 선택(#3287 AC4
 
     const el = container.querySelector('[data-testid="dump"]') as HTMLElement;
     expect(el.dataset.statusBacklog).toBe('');
+  });
+
+  it('조회 中 orgId가 undefined로 바뀌면 loading이 고착되지 않는다(카디르 QA #4431 클래스 sweep 재현)', async () => {
+    let resolveFetch: (() => void) | null = null;
+    fetchWithAuthMock.mockImplementation(() => new Promise((resolve) => {
+      resolveFetch = () => resolve({ ok: true, json: async () => [] });
+    }));
+
+    function Switcher() {
+      const [orgId, setOrgId] = useState<string | undefined>('org-1');
+      return (
+        <>
+          <button data-testid="clear" onClick={() => setOrgId(undefined)}>clear</button>
+          <Harness orgId={orgId} locale="ko" />
+        </>
+      );
+    }
+
+    await act(async () => { root.render(<Switcher />); });
+    await flush();
+    const el = () => container.querySelector('[data-testid="dump"]') as HTMLElement;
+    expect(el().dataset.loading).toBe('true'); // 응답 도착 前 — 조회 中.
+
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="clear"]')!.click(); });
+    await flush();
+    expect(el().dataset.loading).toBe('false'); // 고착 안 됨(수정 前엔 true로 남아 FAIL).
+
+    await act(async () => { resolveFetch?.(); });
+    await flush();
+    expect(el().dataset.loading).toBe('false');
   });
 });
