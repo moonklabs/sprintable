@@ -5,6 +5,12 @@ hook_key로 매치 → 그 변주가 걸린 work_item_id 집합 → insight_snap
 (...), status='captured') 합산. insight_snapshots.py의 NORMALIZED_KEYS(기존 7+3키) 그대로
 재사용 — 새 성과 키 발명 안 함. insight_snapshots 자체엔 컬럼을 안 늘린다(스키마 변경
 반경을 material_lineage 신설 1건으로 좁힌다).
+
+카디르 QA 지적(#4434, 2026-09-19, PO 확定) — `organic_snapshots_only()`(story #3806) 없이
+InsightSnapshot을 직접 쿼리하면 부스트(paid) 발행분 수치가 훅 성과에 섞인다. 소재/훅
+성과의 목적은 "어느 크리에이티브가 실제로 resonate하나"를 재는 것이라(광고비 투입과
+독립) — #3806이 insights_board/measured_metrics에 이미 세운 「크리에이티브 지표=organic」
+원칙 그대로 이 축에도 적용한다(exempt 아님, PO 확定).
 """
 from __future__ import annotations
 
@@ -16,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.insight_snapshot import InsightSnapshot
 from app.models.material_lineage import MaterialLineage
+from app.services.ads_spend_snapshots import organic_snapshots_only
 from app.services.insight_snapshots import NORMALIZED_KEYS
 
 
@@ -53,10 +60,12 @@ async def compute_hook_performance(
         )
 
     snapshots = (await session.execute(
-        select(InsightSnapshot).where(
-            InsightSnapshot.org_id == org_id,
-            InsightSnapshot.publication_id.in_(publication_ids),
-            InsightSnapshot.status == "captured",
+        organic_snapshots_only(
+            select(InsightSnapshot).where(
+                InsightSnapshot.org_id == org_id,
+                InsightSnapshot.publication_id.in_(publication_ids),
+                InsightSnapshot.status == "captured",
+            )
         )
     )).scalars().all()
 

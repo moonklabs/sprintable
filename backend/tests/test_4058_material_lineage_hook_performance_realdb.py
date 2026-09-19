@@ -73,13 +73,13 @@ async def _seed_lineage(
 
 async def _seed_snapshot(
     session, *, org_id, work_item_id, publication_id, status="captured", normalized=None,
-    publication_kind="channel_publication",
+    publication_kind="channel_publication", channel="threads",
 ):
     from app.models.insight_snapshot import InsightSnapshot
 
     snap = InsightSnapshot(
         id=uuid.uuid4(), org_id=org_id, publication_id=publication_id, publication_kind=publication_kind,
-        work_item_id=work_item_id, channel="threads", due_at=datetime.now(timezone.utc) + timedelta(days=1),
+        work_item_id=work_item_id, channel=channel, due_at=datetime.now(timezone.utc) + timedelta(days=1),
         status=status, normalized=normalized,
     )
     session.add(snap)
@@ -196,6 +196,39 @@ async def test_compute_hook_performance_sums_across_variants_and_preserves_null(
             assert hook_b_result.snapshot_count == 1
             assert hook_b_result.totals["impressions"] == 9999
             assert hook_b_result.totals["clicks"] == 7
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_compute_hook_performance_excludes_paid_boosted_snapshots():
+    """카디르 QA 지적(#4434, 2026-09-19, PO 확定) — organic_snapshots_only() 없이 직접
+    쿼리하면 부스트(paid) 발행분 수치가 훅 성과에 섞인다(story #3806 원칙 위반). 같은
+    hook을 쓴 변주 2건 중 하나가 paid 채널(meta_ads)로 집계됐으면, 그 수치는 훅 성과
+    합산에서 완전히 빠져야 한다(0으로 섞이는 게 아니라 애초에 안 보임)."""
+    from app.services.material_lineage import compute_hook_performance
+
+    engine, factory = await _session_factory()
+    try:
+        async with factory() as session:
+            org_id, project_id = await _seed_org(session)
+            story = await _seed_story(session, org_id, project_id)
+            ev = await _seed_master_evidence(session, org_id=org_id, work_item_id=story)
+
+            pub_organic = uuid.uuid4()
+            pub_paid = uuid.uuid4()
+            await _seed_lineage(session, org_id=org_id, source_evidence_id=ev, work_item_id=story, derived_id=pub_organic, hook_key="hook_boost_test")
+            await _seed_lineage(session, org_id=org_id, source_evidence_id=ev, work_item_id=story, derived_id=pub_paid, hook_key="hook_boost_test")
+
+            await _seed_snapshot(session, org_id=org_id, work_item_id=story, publication_id=pub_organic, normalized={"impressions": 100}, channel="threads")
+            # paid(부스트) 채널 — story #3806의 _PAID_CHANNELS 중 하나. 이 수치는 훅
+            # 성과에 절대 섞이면 안 된다.
+            await _seed_snapshot(session, org_id=org_id, work_item_id=story, publication_id=pub_paid, normalized={"impressions": 9_000_000}, channel="meta_ads")
+
+            result = await compute_hook_performance(session, org_id=org_id, hook_key="hook_boost_test")
+            assert result.variant_count == 2  # 계보 edge 자체는 둘 다 잡힘(발행 여부만 봄)
+            assert result.snapshot_count == 1, "paid snapshot이 섞이면 회귀"
+            assert result.totals["impressions"] == 100, "paid 9,000,000이 섞이면 회귀"
     finally:
         await engine.dispose()
 
