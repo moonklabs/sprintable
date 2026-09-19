@@ -89,8 +89,13 @@ export function useChannelPostCalendarData(
   // loading 영구 true 클래스가 이 훅에서 다시 등장할 여지 자체가 없다). 두 축(그리드용
   // 기간 조회·미예약 조회) 병렬 fetch·displayTimezone.tz 기준 그룹핑 로직은 원본 그대로
   // fetcher 안으로 이동 — !ok는 throw로 승격해 loadFailed(→error)로 수렴시킨다.
+  //
+  // ⚠️카디르 재QA(#4444, 2026-09-19, 같은 클래스로 자기점검) — 원본 skip 조건
+  // `if (!orgId)`는 falsy 전부(빈 문자열 포함)를 스킵으로 봤는데, useAsyncResource의
+  // skip 판정은 null/undefined만 인식한다. orgId=''를 정규화 없이 넘기면 실제 fetch가
+  // 나가 "기존동작 무변" 계약이 깨진다 — orgId || undefined로 정규화.
   const { data, loading, loadFailed } = useAsyncResource<string, CalendarFetchResult>(
-    orgId, EMPTY_RESULT,
+    orgId || undefined, EMPTY_RESULT,
     async (id) => {
       const scheduledParams = new URLSearchParams({ scheduled_from: range.from, scheduled_to: range.to, limit: '200' });
       const unscheduledParams = new URLSearchParams({ unscheduled: 'true', limit: '200' });
