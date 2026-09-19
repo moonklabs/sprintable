@@ -302,6 +302,29 @@ describe('useAsyncResourceBatch', () => {
     expect(dump()).toEqual({ keys: [], loading: false, loadFailed: true });
   });
 
+  // story #4440 qa:changes round-2(카디르, 2026-09-19) — 위 두 테스트는 fetchOne이 async라
+  // 항상 "비동기" reject였다. fetchOne이 async 없이 선언돼(호출부 실수) await 前에 **동기**
+  // throw하면 다른 실패 경로다 — resolvedKeys.map((k) => fetchOne(k)) 자체가 .map() 안에서
+  // 동기 throw해 Promise.allSettled에 배열이 넘어가기도 전에 async 블록 전체가 죽는다.
+  it('fetchOne이 async 없이 호출 즉시(동기) throw해도 loading이 고착되지 않는다(round-2 핵심 회귀 — 비동기 reject와 다른 경로)', async () => {
+    // 의도적으로 async 없는 함수 — 반환 전에 동기적으로 throw한다(타입상 Promise를
+    // 반환해야 하지만, 실전에서 호출부가 이 계약을 어기는 걸 이 헬퍼가 막아야 한다).
+    const fetchOne = vi.fn((): Promise<string | null> => { throw new Error('sync boom'); });
+    await act(async () => { root.render(<Harness keys={['a', 'b']} fetchOne={fetchOne} />); });
+    await flush();
+    expect(dump()).toEqual({ keys: [], loading: false, loadFailed: true });
+  });
+
+  it('일부만 동기 throw해도(나머지는 정상) 그 key만 빠지고 loading은 고착되지 않는다(round-2)', async () => {
+    const fetchOne = vi.fn((k: string): Promise<string | null> => {
+      if (k === 'bad') throw new Error('sync boom');
+      return Promise.resolve(`v:${k}`);
+    });
+    await act(async () => { root.render(<Harness keys={['a', 'bad']} fetchOne={fetchOne} />); });
+    await flush();
+    expect(dump()).toEqual({ keys: ['a'], loading: false, loadFailed: false });
+  });
+
   // story #4440 qa:changes P2(카디르) — key가 "__proto__"면 plain object 직접대입이
   // own property가 아니라 프로토타입 체인을 오염시켜 그 key가 조용히 사라질 수 있다
   // (Object.create(null) 사용으로 구조 방지).

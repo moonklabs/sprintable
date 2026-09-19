@@ -111,7 +111,15 @@ function keysDepsKey(keys: string[]): string {
  * 없다) `Promise.all`이 즉시 reject하고, `void (async () => {...})()`엔 `.catch`가 없어
  * `setLoading(false)`에 영영 못 도달 + unhandled rejection이 났다. `Promise.allSettled`로
  * 교체 — reject한 항목도 `fetchOne`이 null을 반환한 것과 동일하게(그 key만 실패, 전체를
- * 안 죽임) 수렴시켜 이 async 블록이 항상 정상 종료하게 만든다. */
+ * 안 죽임) 수렴시켜 이 async 블록이 항상 정상 종료하게 만든다.
+ *
+ * ⚠️round-2(카디르, 2026-09-19) — 위 fix는 `fetchOne`이 **비동기** reject하는 경우만
+ * 막았다. `fetchOne`이 `async` 없이 선언돼 호출 즉시(await 前) **동기** throw하면
+ * `resolvedKeys.map((k) => fetchOne(k))` 자체가 `.map()` 안에서 동기 throw해
+ * `Promise.allSettled`에 배열이 넘어가기도 전에 이 async 블록 전체가 죽는다 — 같은 결과
+ * (고착+unhandled)를 다른 경로로 낸다. 각 호출을 `Promise.resolve().then(() =>
+ * fetchOne(k))`로 감싸 동기 throw도 그 `.then` 콜백 안에서 나게 만든다 — 동기/비동기
+ * 예외 둘 다 Promise 세계로 들어와 allSettled가 개별 rejection으로 흡수한다. */
 export function useAsyncResourceBatch<T>(
   keys: string[],
   fetchOne: (key: string) => Promise<T | null>,
@@ -133,7 +141,9 @@ export function useAsyncResourceBatch<T>(
     setLoading(true);
     setLoadFailed(false);
     void (async () => {
-      const settled = await Promise.allSettled(resolvedKeys.map((k) => fetchOne(k)));
+      const settled = await Promise.allSettled(
+        resolvedKeys.map((k) => Promise.resolve().then(() => fetchOne(k))),
+      );
       if (cancelled) return;
       // story #4440 P2(카디르) — key가 "__proto__" 등 특수 프로퍼티명이면 plain object에
       // 직접 대입(`next[key] = item`) 시 own property가 아니라 프로토타입 체인을 건드릴
