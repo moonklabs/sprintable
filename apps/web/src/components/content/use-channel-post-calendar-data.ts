@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { fetchWithAuth } from '@/lib/db/client';
+import { useAsyncResource } from '@/hooks/use-async-resource';
 import { resolveDisplayTimezone, toDateKey } from './schedule-format';
 
 // story #3422(Phase1·마케팅운영, doc §11 T8) — 캘린더가 필요로 하는 두 축(그리드용 기간
@@ -63,6 +64,13 @@ export interface ChannelPostCalendarData {
   displayTimezone: { tz: string; isOrgTimezone: boolean };
 }
 
+interface CalendarFetchResult {
+  scheduled: Map<string, ChannelPostCalendarItem[]>;
+  unscheduled: ChannelPostCalendarItem[];
+}
+
+const EMPTY_RESULT: CalendarFetchResult = { scheduled: new Map(), unscheduled: [] };
+
 export function useChannelPostCalendarData(
   orgId: string | undefined,
   range: { from: string; to: string },
@@ -72,59 +80,57 @@ export function useChannelPostCalendarData(
   // chaining으로 undefined를 넘긴다(undefined===null 취급, resolveDisplayTimezone 참고).
   orgTimezone?: string | null,
 ): ChannelPostCalendarData {
-  const [scheduled, setScheduled] = useState<Map<string, ChannelPostCalendarItem[]>>(new Map());
-  const [unscheduled, setUnscheduled] = useState<ChannelPostCalendarItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
   // orgTimezone이 바뀌면(조직 설정 로드 완료 등) 재계산 — 매 렌더 새 객체를 만들진
   // 않는다(effect 의존 배열에 걸려 재조회가 안 되게).
   const displayTimezone = useMemo(() => resolveDisplayTimezone(orgTimezone), [orgTimezone]);
 
-  useEffect(() => {
-    if (!orgId) return;
-    let cancelled = false;
-    async function load() {
-      setLoading(true);
-      setError(false);
-      try {
-        const scheduledParams = new URLSearchParams({ scheduled_from: range.from, scheduled_to: range.to, limit: '200' });
-        const unscheduledParams = new URLSearchParams({ unscheduled: 'true', limit: '200' });
-        if (connectionId) {
-          scheduledParams.set('connection_id', connectionId);
-          unscheduledParams.set('connection_id', connectionId);
-        }
-        const [scheduledRes, unscheduledRes] = await Promise.all([
-          fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts?${scheduledParams}`),
-          fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts?${unscheduledParams}`),
-        ]);
-        if (cancelled) return;
-        if (!scheduledRes.ok || !unscheduledRes.ok) {
-          setError(true);
-          return;
-        }
-        const scheduledJson = (await scheduledRes.json().catch(() => null)) as { data?: ChannelPostCalendarItem[] } | null;
-        const unscheduledJson = (await unscheduledRes.json().catch(() => null)) as { data?: ChannelPostCalendarItem[] } | null;
-        const grouped = new Map<string, ChannelPostCalendarItem[]>();
-        for (const item of scheduledJson?.data ?? []) {
-          // scheduled_at 자체가 없는 항목은 그리드에 놓을 날짜가 없다 — 조용히 건너뛴다
-          // (필터가 정확했다면 안 와야 하지만, 계약이 흔들려도 화면이 죽지 않게 방어).
-          if (!item.scheduled_at) continue;
-          const key = toDateKey(item.scheduled_at, displayTimezone.tz);
-          const bucket = grouped.get(key) ?? [];
-          bucket.push(item);
-          grouped.set(key, bucket);
-        }
-        setScheduled(grouped);
-        setUnscheduled(unscheduledJson?.data ?? []);
-      } catch {
-        if (!cancelled) setError(true);
-      } finally {
-        if (!cancelled) setLoading(false);
+  // story #4071 마이그(useAsyncResource 위) — 스킵/성공/실패 세 경로 전부 헬퍼가 같은
+  // 종료점에서 loading=false로 닫는다(§2 사전조사가 잡았던 orgId undefined 마운트 시
+  // loading 영구 true 클래스가 이 훅에서 다시 등장할 여지 자체가 없다). 두 축(그리드용
+  // 기간 조회·미예약 조회) 병렬 fetch·displayTimezone.tz 기준 그룹핑 로직은 원본 그대로
+  // fetcher 안으로 이동 — !ok는 throw로 승격해 loadFailed(→error)로 수렴시킨다.
+  const { data, loading, loadFailed } = useAsyncResource<string, CalendarFetchResult>(
+    orgId, EMPTY_RESULT,
+    async (id) => {
+      const scheduledParams = new URLSearchParams({ scheduled_from: range.from, scheduled_to: range.to, limit: '200' });
+      const unscheduledParams = new URLSearchParams({ unscheduled: 'true', limit: '200' });
+      if (connectionId) {
+        scheduledParams.set('connection_id', connectionId);
+        unscheduledParams.set('connection_id', connectionId);
       }
-    }
-    void load();
-    return () => { cancelled = true; };
-  }, [orgId, range.from, range.to, connectionId, displayTimezone.tz]);
+      // story #3519(§16-7 2부) guard(promise-all-isolation) — 2 leg 이상 fetchWithAuth
+      // Promise.all은 이 파일 안에 격리(try/catch·leg별 catch·전체체인 catch) 표기가
+      // 있어야 한다(정적 AST 검사, useAsyncResource의 바깥 try/catch까지는 못 봄). 이
+      // try/catch는 재throw만 한다 — 실 에러 처리는 useAsyncResource가 이미 한다
+      // (throw→loadFailed→error 수렴), 이건 그 가드의 요구를 이 파일 안에서 가시화하는
+      // 표기일 뿐 동작을 안 바꾼다.
+      let scheduledRes: Awaited<ReturnType<typeof fetchWithAuth>>;
+      let unscheduledRes: Awaited<ReturnType<typeof fetchWithAuth>>;
+      try {
+        [scheduledRes, unscheduledRes] = await Promise.all([
+          fetchWithAuth(`/api/organizations/${id}/channel-posts/drafts?${scheduledParams}`),
+          fetchWithAuth(`/api/organizations/${id}/channel-posts/drafts?${unscheduledParams}`),
+        ]);
+      } catch (err) {
+        throw err;
+      }
+      if (!scheduledRes.ok || !unscheduledRes.ok) throw new Error('channel-post-calendar-data fetch failed');
+      const scheduledJson = (await scheduledRes.json().catch(() => null)) as { data?: ChannelPostCalendarItem[] } | null;
+      const unscheduledJson = (await unscheduledRes.json().catch(() => null)) as { data?: ChannelPostCalendarItem[] } | null;
+      const grouped = new Map<string, ChannelPostCalendarItem[]>();
+      for (const item of scheduledJson?.data ?? []) {
+        // scheduled_at 자체가 없는 항목은 그리드에 놓을 날짜가 없다 — 조용히 건너뛴다
+        // (필터가 정확했다면 안 와야 하지만, 계약이 흔들려도 화면이 죽지 않게 방어).
+        if (!item.scheduled_at) continue;
+        const key = toDateKey(item.scheduled_at, displayTimezone.tz);
+        const bucket = grouped.get(key) ?? [];
+        bucket.push(item);
+        grouped.set(key, bucket);
+      }
+      return { scheduled: grouped, unscheduled: unscheduledJson?.data ?? [] };
+    },
+    [range.from, range.to, connectionId, displayTimezone.tz],
+  );
 
-  return { scheduled, unscheduled, loading, error, displayTimezone };
+  return { scheduled: data.scheduled, unscheduled: data.unscheduled, loading, error: loadFailed, displayTimezone };
 }
