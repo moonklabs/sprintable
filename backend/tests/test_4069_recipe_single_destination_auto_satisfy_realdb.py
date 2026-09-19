@@ -8,8 +8,11 @@
 착지조건 4개:
   1. 자동충족된 발행이 실제로 sandbox(sandbox.invalid, 실 HTTP 0)로만 나가는지 직접 단언
      — [test_single_destination_gate_approved_before_draft_hook_a_auto_satisfies].
-  2. resolution_note가 "ⓓ 자동충족·단일목적지"로 남아 감사이력상 "ⓓ의 사람승인 승계"로
-     읽히는지 — 아래 각 테스트의 assert가 이 문구를 직접 확認.
+  2. resolution_note가 "auto_satisfied_by_recipe_external_publish_gate: single
+     destination"으로 남아 감사이력상 "ⓓ의 사람승인 승계"로 읽히는지 — 아래 각 테스트의
+     assert가 이 문구를 직접 확認. (story #3779 BE 한글 사용자 문장 가드 red 정정,
+     카디르 QA 2026-09-19 — 시스템 생성 감사 문자열은 기존 관례(gate_self_reclamation.py
+     RECLAIM_RESOLUTION_NOTE 등)대로 영문 중립으로.)
   3. (belt-and-suspenders, 비싸면 생략 가능 — 이 구현은 "단일목적지" 조건만으로 족하다고
      판단해 생략했다. 레시피 발행자 슬롯 자체가 role_mapping의 "member 배정"이지 "channel
      connection 지정"이 아니라 — 이 축을 추가로 엮으려면 새 개념(레시피별 목적지 채널
@@ -341,7 +344,7 @@ async def test_single_destination_gate_approved_before_draft_hook_a_auto_satisfi
             scoped_gate = (await s.execute(select(Gate).where(Gate.id == uuid.UUID(scoped_gate_id)))).scalar_one()
             assert scoped_gate.status == "approved"
             assert scoped_gate.requires_human is False
-            assert "자동충족" in (scoped_gate.resolution_note or "")
+            assert "auto_satisfied_by_recipe_external_publish_gate" in (scoped_gate.resolution_note or "")
             assert str(scoped_gate.resolver_id) == gate_d_resolver_id, (
                 "자동충족 게이트의 resolver_id가 ⓓ의 사람승인을 승계하지 않았다 — 감사추적 끊김"
             )
@@ -417,7 +420,7 @@ async def test_draft_submitted_before_gate_approval_hook_b_auto_satisfies():
             scoped_gate = (await s.execute(select(Gate).where(Gate.id == scoped_gate_id))).scalar_one()
             assert scoped_gate.status == "approved", "훅B가 draft 선제출 pending 게이트를 안 건드렸다"
             assert scoped_gate.requires_human is False
-            assert "자동충족" in (scoped_gate.resolution_note or "")
+            assert "auto_satisfied_by_recipe_external_publish_gate" in (scoped_gate.resolution_note or "")
             assert str(scoped_gate.resolver_id) == gate_d_resolver_id
     finally:
         app.dependency_overrides.clear()

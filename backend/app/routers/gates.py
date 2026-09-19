@@ -1929,7 +1929,7 @@ async def _transition_gate_endpoint(
                 _scoped_gate.requires_human = False
                 _scoped_gate.resolver_id = gate.resolver_id
                 _scoped_gate.resolved_at = gate.resolved_at
-                _scoped_gate.resolution_note = "ⓓ(레시피 발행승인) 자동충족 — 단일 목적지"
+                _scoped_gate.resolution_note = "auto_satisfied_by_recipe_external_publish_gate: single destination (story #4069)"
         await session.commit()
         # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.
         await session.refresh(gate)

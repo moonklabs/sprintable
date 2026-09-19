@@ -1468,7 +1468,7 @@ async def submit_channel_post_draft(
         gate.requires_human = False
         gate.resolver_id = auto_satisfied_by.resolver_id
         gate.resolved_at = auto_satisfied_by.resolved_at
-        gate.resolution_note = "ⓓ(레시피 발행승인) 자동충족 — 단일 목적지"
+        gate.resolution_note = "auto_satisfied_by_recipe_external_publish_gate: single destination (story #4069)"
     elif gate.status != "pending":
         set_gate_status(gate, "pending", now=datetime.now(timezone.utc))
         gate.requires_human = True
