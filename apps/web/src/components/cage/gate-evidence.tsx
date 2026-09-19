@@ -166,6 +166,10 @@ interface RecipeApprovalFacts {
   contentBody: string | null;
   contentVersion: number | null;
   contentSha256: string | null;
+  // story #3414(Phase1·마케팅운영, 페드루 PO 確定 2026-09-04)/#4073(카디르 QA④ 실측,
+  // 2026-09-19) — external_publish 예약 발행 봉인 축(contentBody 등과 동일 선례). #4073
+  // 前엔 BE GateResponse에 이 필드가 없어 승인카드에서 예약시각이 항상 null이었다.
+  scheduledAt: string | null;
   // §3-1-2(페드루 PO 정정 2026-09-03 06:42Z) — 승인 뒤 편집으로 pending 재오픈된 게이트인지.
   // true면 이 카드는 "승인 가능한 카드"가 아니라 "재상신 대기" 카드로 그린다(§3-1-2-1).
   reapprovalRequired: boolean;
@@ -263,6 +267,7 @@ function recipeApprovalFacts(gate: GateItem): RecipeApprovalFacts | null {
     contentBody,
     contentVersion,
     contentSha256,
+    scheduledAt: realString(gate.sealed_scheduled_at),
     reapprovalRequired: gate.reapproval_required === true,
     targetExternalCommentId: isCommentReply ? realString(f?.['target_external_comment_id']) : null,
     targetText: isCommentReply ? realString(f?.['target_text']) : null,
@@ -296,7 +301,7 @@ function recipeApprovalFacts(gate: GateItem): RecipeApprovalFacts | null {
   };
   const hasAny = isCommentReply ||
     facts.workItemRef || facts.draftDocRef || facts.draftDocSummary || facts.channel || facts.stage ||
-    facts.contentBody || facts.contentVersion !== null || facts.contentSha256 ||
+    facts.contentBody || facts.contentVersion !== null || facts.contentSha256 || facts.scheduledAt !== null ||
     facts.sealedDocRef || facts.sealedDocBodySha256 || facts.adsBudgetMinor !== null ||
     facts.newsletterSegmentName !== null || facts.newsletterSendScheduledAt !== null || facts.newsletterSubject !== null ||
     facts.estimatedCostMinor !== null;
@@ -835,6 +840,18 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
           {facts.contentVersion !== null ? `${t('recipeApprovalVersionLabel')} v${facts.contentVersion}` : null}
           {facts.contentVersion !== null && facts.contentSha256 ? ' · ' : null}
           {facts.contentSha256 ? `${t('recipeApprovalSealedHashLabel')} ${facts.contentSha256.slice(0, 12)}…` : null}
+        </p>
+      ) : null}
+      {/* story #3414(Phase1·마케팅운영, 페드루 PO 確定 2026-09-04)/#4073(카디르 #4450
+          QA④ 실측, 페드루 PO 確定 2026-09-19) — external_publish 예약 발행 봉인 축
+          (contentVersion/contentSha256과 같은 선례 — 예약 없는 다른 gate_type은
+          항상 null이라 이 줄 자체가 안 그려진다). newsletter_send의 동형 필드
+          (newsletterSendScheduleLabel)는 이미 승인카드에 떴는데 external_publish만
+          #4073 前엔 BE 응답스키마에 이 필드가 없어 항상 null이었다. */}
+      {facts.scheduledAt ? (
+        <p>
+          <span className="text-muted-foreground">{t('recipeApprovalScheduledAtLabel')} · </span>
+          <span className="text-foreground">{formatScheduledAt(facts.scheduledAt, displayTimezone).display}</span>
         </p>
       ) : null}
       {/* story #3367(3자기점검, 페드루 지적 2026-09-10·유나 CHANGES 정정) — AC7

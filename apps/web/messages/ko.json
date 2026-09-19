@@ -5246,6 +5246,7 @@
     "recipeApprovalLatestAuthorLabel": "마지막 수정 주체",
     "recipeApprovalDestinationLabel": "목적지",
     "recipeApprovalDestinationHostedSite": "호스팅 블로그",
+    "recipeApprovalScheduledAtLabel": "예약 발행",
     "adsBoostBudgetLabel": "총예산",
     "adsBoostScheduleLabel": "기간",
     "adsBoostScheduleDays": "{days}일",

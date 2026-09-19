@@ -127,6 +127,12 @@ export interface GateItem {
   sealed_content_version?: number | null;
   sealed_content_sha256?: string | null;
   sealed_content_body?: string | null;
+  // story #3414(Phase1·마케팅운영, 페드루 PO 確定 2026-09-04) — external_publish 예약
+  // 발행 두 번째 봉인 축(sealed_content_*와 동일 선례). story #4073(카디르 #4450 QA④
+  // 실측) — BE GateResponse에 이 필드가 아예 없어 승인카드에서 예약시각이 항상 안
+  // 보였다(sealed_ads_*/sealed_newsletter_*/sealed_estimated_cost_minor에 이어 4번째
+  // 재발 — #4073으로 클래스 완전 봉인). 다른 gate_type은 전부 undefined/null.
+  sealed_scheduled_at?: string | null;
   // 승인 뒤 편집으로 pending 재오픈된 게이트인지(사람이 처음 상신한 pending과 구분) — S4가
   // "재승인 필요" 배지·재상신 대기 카드를 그릴 신호. 다른 gate_type은 항상 false.
   reapproval_required?: boolean;
