@@ -264,6 +264,11 @@ async def test_generation_budget_gate_seals_cost_and_surfaces_remaining_budget()
             assert facts["budget_limit_minor"] == 100_000
             assert facts["budget_spent_minor"] == 0
             assert facts["budget_remaining_minor"] == 100_000
+            # story #4072(카디르 QA③) — FE가 formatMinorCurrency로 라벨을 붙이려면
+            # 통화가 neutral_facts에 있어야 한다(org 정책 KRW|USD, currency 지어내지
+            # 않는다 원칙). 이 테스트는 currency를 안 넘겼으니 GenerationBudgetRule
+            # 기본값(KRW)이 그대로 echo돼야 한다.
+            assert facts["currency"] == "KRW"
     finally:
         await engine.dispose()
 

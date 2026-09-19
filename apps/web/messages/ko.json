@@ -343,7 +343,8 @@
     "ccGateTypeAgentDecisionRequest": "판단 요청",
     "ccGateTypeSupportEscalationReview": "고객지원 검토",
     "ccGateTypeConceptApproval": "컨셉 결재",
-    "ccGateTypeAdsBoost": "홍보"
+    "ccGateTypeAdsBoost": "홍보",
+    "ccGateTypeGenerationBudget": "예산 승인"
   },
   "proofCapsule": {
     "claim": {
@@ -5253,6 +5254,7 @@
     "newsletterSubjectUnknown": "제목 미확인",
     "newsletterSegmentLabel": "세그먼트",
     "newsletterSendScheduleLabel": "발송 예정",
+    "generationBudgetSealedCostLabel": "예상 비용",
     "newsletterEstimatedRecipientLabel": "예상 수신",
     "newsletterEstimatedRecipientCount": "{count}명",
     "newsletterRecipientUnknown": "미확인",

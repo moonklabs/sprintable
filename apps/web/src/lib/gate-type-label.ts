@@ -43,6 +43,11 @@ export const GATE_TYPE_LABEL_KEYS: Record<string, string> = {
   // gate_type="ads_boost"로 생성(PR2), _ALWAYS_MANUAL_GATE_TYPES에도 등재(PR3
   // 워커 fix 시점 확認 — 실제 지출이 걸려 external_publish보다 강한 사유).
   ads_boost: 'ccGateTypeAdsBoost',
+  // story #4044(E-RECIPE-1 ①) — 레시피 ⓒ 실탄(예산) 게이트. backend/app/services/
+  // recipe_gate_hooks.py가 gate_type="generation_budget"으로 생성. #4072 前까진
+  // GateResponse에 sealed_estimated_cost_minor 자체가 없어 값도 못 봤지만(BE fix),
+  // 라벨도 이 표에 없어 배지가 일반 "게이트"로 떨어지고 있었다 — 같이 등재.
+  generation_budget: 'ccGateTypeGenerationBudget',
 };
 
 /**

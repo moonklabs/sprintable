@@ -169,6 +169,11 @@ export interface GateItem {
   // story #3813(Phase3·3-4 PR4, 페드루 PO CHANGES 2026-09-12) — 봉인 축 아님(gate
   // ORM 컬럼 아님), publication의 최신 channel_payload.subject를 「지금」 값으로 읽음.
   newsletter_subject?: string | null;
+  // story #4044(0333)/#4072(BE 응답스키마 누락 fix, 페드루 PO 確定 2026-09-19) —
+  // generation_budget 전용 sealing(sealed_ads_*/sealed_newsletter_*와 동일 선례).
+  // 다른 gate_type은 전부 undefined/null. #4072 前엔 BE GateResponse에 이 필드가
+  // 아예 없어 API가 항상 None을 냈다(sealed_ads_* PR2 재발 클래스 3번째).
+  sealed_estimated_cost_minor?: number | null;
 }
 
 // story #2054: 결재함 통합 인박스에서 HitlRequest(gate_approval park) 항목 최소 스키마(BE

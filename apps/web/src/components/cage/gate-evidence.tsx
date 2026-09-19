@@ -228,6 +228,14 @@ interface RecipeApprovalFacts {
   // 「무엇을」 보내는지 없이 승인하던 결함. estimatedRecipientCount와 동형(봉인값
   // 아님, 어댑터/버전 조회).
   newsletterSubject: string | null;
+  // story #4072(E-RECIPE-1, 페드루 PO 確定 2026-09-19·카디르 QA③ CHANGES) —
+  // generation_budget(ⓒ 실탄 게이트) 전용 sealing. adsBudgetMinor와 동일 선례.
+  // 통화는 sealed 컬럼이 아니라 neutral_facts.currency에서 온다(recipe_gate_hooks.py
+  // 가 org content_rules.generation_budget.currency를 그대로 echo, KRW|USD만
+  // 존재 — 그 필드가 없으면(구버전 gate 등) 지어내지 않고 null, formatMinorCurrency
+  // 안 씀·최소단위 원값만).
+  estimatedCostMinor: number | null;
+  estimatedCostCurrency: 'KRW' | 'USD' | null;
 }
 
 function recipeApprovalFacts(gate: GateItem): RecipeApprovalFacts | null {
@@ -282,12 +290,16 @@ function recipeApprovalFacts(gate: GateItem): RecipeApprovalFacts | null {
     newsletterEstimatedRecipientCount:
       typeof gate.estimated_recipient_count === 'number' ? gate.estimated_recipient_count : null,
     newsletterSubject: realString(gate.newsletter_subject),
+    estimatedCostMinor:
+      typeof gate.sealed_estimated_cost_minor === 'number' ? gate.sealed_estimated_cost_minor : null,
+    estimatedCostCurrency: f?.['currency'] === 'KRW' || f?.['currency'] === 'USD' ? f['currency'] : null,
   };
   const hasAny = isCommentReply ||
     facts.workItemRef || facts.draftDocRef || facts.draftDocSummary || facts.channel || facts.stage ||
     facts.contentBody || facts.contentVersion !== null || facts.contentSha256 ||
     facts.sealedDocRef || facts.sealedDocBodySha256 || facts.adsBudgetMinor !== null ||
-    facts.newsletterSegmentName !== null || facts.newsletterSendScheduledAt !== null || facts.newsletterSubject !== null;
+    facts.newsletterSegmentName !== null || facts.newsletterSendScheduledAt !== null || facts.newsletterSubject !== null ||
+    facts.estimatedCostMinor !== null;
   return hasAny ? facts : null;
 }
 
@@ -694,6 +706,23 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
               <span className="text-foreground">{adsBoostObjectiveLabel(facts.adsObjective, tContent)}</span>
             </p>
           ) : null}
+        </div>
+      ) : null}
+      {/* story #4072(E-RECIPE-1, 페드루 PO 確定 2026-09-19·카디르 QA③ CHANGES) —
+          generation_budget 전용 sealing. ads_boost 블록과 동일 선례(이 gate_type이
+          아니면 estimatedCostMinor는 항상 null). 통화는 neutral_facts.currency가
+          실 있을 때만 formatMinorCurrency로 라벨(위 facts 타입 주석) — 구버전 gate처럼
+          currency가 없으면 지어내지 않고 최소단위 원값만. */}
+      {facts.estimatedCostMinor !== null ? (
+        <div className="space-y-0.5">
+          <p>
+            <span className="text-muted-foreground">{t('generationBudgetSealedCostLabel')} · </span>
+            <span className="text-foreground font-medium">
+              {facts.estimatedCostCurrency
+                ? formatMinorCurrency(facts.estimatedCostMinor, facts.estimatedCostCurrency, locale, tContent)
+                : facts.estimatedCostMinor}
+            </span>
+          </p>
         </div>
       ) : null}
       {/* story #3813(Phase3·3-4 PR4, 페드루 PO 確定 2026-09-12) — newsletter_send 전용

@@ -343,7 +343,8 @@
     "ccGateTypeAgentDecisionRequest": "decision request",
     "ccGateTypeSupportEscalationReview": "support review",
     "ccGateTypeConceptApproval": "concept approval",
-    "ccGateTypeAdsBoost": "boost"
+    "ccGateTypeAdsBoost": "boost",
+    "ccGateTypeGenerationBudget": "budget approval"
   },
   "proofCapsule": {
     "claim": {
@@ -5253,6 +5254,7 @@
     "newsletterSubjectUnknown": "Subject unknown",
     "newsletterSegmentLabel": "Segment",
     "newsletterSendScheduleLabel": "Send scheduled",
+    "generationBudgetSealedCostLabel": "Estimated cost",
     "newsletterEstimatedRecipientLabel": "Estimated recipients",
     "newsletterEstimatedRecipientCount": "{count} recipients",
     "newsletterRecipientUnknown": "Unknown",

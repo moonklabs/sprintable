@@ -293,6 +293,11 @@ class GateResponse(BaseModel):
     # publication.version_id가 가리키는 ChannelPostVersion.channel_payload에서
     # 「지금」 값을 읽는다(estimated_recipient_count와 동일 계산값 선례).
     newsletter_subject: str | None = None
+    # story #4044(0333)가 Gate ORM 컬럼(models/gate.py)만 추가하고 이 응답 스키마 등재를
+    # 빠뜨려 API가 항상 None을 냈다 — sealed_ads_*/sealed_newsletter_* PR2 재발 클래스와
+    # 동형(story #4072가 그 클래스 자체를 회귀가드로 봉인). generation_budget 전용 sealing —
+    # Gate ORM 컬럼명과 일치라 from_attributes로 자동 채워짐(다른 gate_type은 전부 None).
+    sealed_estimated_cost_minor: int | None = None
     reapproval_required: bool = False
     created_at: datetime
     updated_at: datetime
