@@ -144,6 +144,40 @@ describe('useOrgDomainLabels — 라벨 API 인덱싱+로케일 선택(#3287 AC4
     expect(el.dataset.statusBacklog).toBe('');
   });
 
+  // story #4071 마이그 재QA(카디르, 2026-09-19) — !res.ok 응답 바디가 우연히 배열 모양이면
+  // (예: 프록시 중간 오류 페이지가 []를 반환) Array.isArray 방어만으론 못 잡는다 — !res.ok
+  // 체크 자체가 별도로 필요함을 이 케이스로 pin(체크를 지우면 실제로 그 배열을 그대로
+  // 라벨로 써버려 FAIL해야 한다).
+  it('응답이 !ok인데 바디가 우연히 배열 모양이어도(프록시 오류 페이지 등) 그 값을 라벨로 쓰지 않는다(핵심 회귀)', async () => {
+    fetchWithAuthMock.mockResolvedValue({
+      ok: false,
+      json: async () => [{ domain: 'status', canonical_slug: 'done', label_ko: '해킹된라벨', label_en: null }],
+    });
+
+    await act(async () => {
+      root.render(<Harness orgId="org-1" locale="ko" />);
+    });
+    await flush();
+
+    const el = container.querySelector('[data-testid="dump"]') as HTMLElement;
+    expect(el.dataset.statusDone).toBe('');
+  });
+
+  // story #4071 마이그 재QA(카디르, 2026-09-19) — 원본 skip 조건 `if (!orgId)`는 falsy
+  // 전부(빈 문자열 포함)를 스킵으로 봤다. useAsyncResource의 skip 판정은 null/undefined만
+  // 인식하므로, orgId=''를 정규화 없이 그대로 넘기면 `/api/organizations//domain-labels`
+  // 로 실제 fetch가 나가 "기존동작 무변" 계약이 깨진다 — 핵심 회귀.
+  it('orgId가 빈 문자열이어도(falsy) fetch 자체를 호출하지 않는다(#4071 재QA 핵심 회귀)', async () => {
+    await act(async () => {
+      root.render(<Harness orgId="" locale="ko" />);
+    });
+    await flush();
+
+    expect(fetchWithAuthMock).not.toHaveBeenCalled();
+    const el = container.querySelector('[data-testid="dump"]') as HTMLElement;
+    expect(el.dataset.loading).toBe('false');
+  });
+
   // story #3881(customer-zero) 실측 — ok:true인데 body가 배열이 아닌 모양이면(다른 엔드포인트용
   // mock에 우연히 걸리는 등, organization/events/page.test.tsx에서 EventBlockCard가 이 훅을
   // 새로 쓰기 시작하며 실제로 재현) 예전 코드는 `as DomainLabelEntry[]` 단언만 믿고 그 값을

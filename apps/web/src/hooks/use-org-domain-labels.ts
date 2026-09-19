@@ -55,12 +55,23 @@ function pickLocaleLabel(entry: DomainLabelEntry, locale: string): string | unde
  * 종료점에서 loading=false로 닫는다(#4431 카디르 QA가 잡았던 orgId→undefined 영구고착
  * 클래스가 이제 이 훅 코드에 다시 등장할 여지 자체가 없다). `!res.ok`와 네트워크 예외를
  * 원래처럼 동일하게(둘 다 조용히 빈 배열 폴백) 취급 — `loadFailed`는 이 훅의 공개 계약
- * (`OrgDomainLabels`)에 없으니 그대로 노출 안 함(장식 계층, "무설정=기본값" 원칙 그대로). */
+ * (`OrgDomainLabels`)에 없으니 그대로 노출 안 함(장식 계층, "무설정=기본값" 원칙 그대로).
+ *
+ * ⚠️카디르 재QA(2026-09-19) — 원본 skip 조건 `if (!orgId)`는 falsy 전부(빈 문자열 포함)를
+ * 스킵으로 봤는데, `useAsyncResource`의 skip 판정은 `null`/`undefined`만 인식한다.
+ * `orgId=''`를 그대로 넘기면 `/api/organizations//domain-labels`로 실제 fetch가 나가
+ * "기존동작 무변" 계약이 깨진다(원본·신규 나란히 실행비교로 실증) — `orgId || undefined`로
+ * 정규화해 falsy 전부가 스킵되게 원본 semantics를 보존한다. */
 export function useOrgDomainLabels(orgId: string | undefined, locale: string): OrgDomainLabels {
   const { data: entries, loading } = useAsyncResource<string, DomainLabelEntry[]>(
-    orgId, [],
+    orgId || undefined, [],
     async (id) => {
       const res = await fetchWithAuth(`/api/organizations/${id}/domain-labels`);
+      // 카디르 재QA — 이 !res.ok 체크가 없어도 대개 결과가 같아서(에러 응답이 보통
+      // 배열이 아니라 아래 Array.isArray 방어가 같은 []를 낸다) 이 체크 자체를 지워도
+      // 기존 테스트가 안 틀렸다([못틀리는대조미자]). !res.ok는 응답 *모양*이 아니라
+      // *상태*를 보는 별개 방어라 명시적으로 먼저 걸러야 한다(회귀테스트가 배열 모양
+      // 에러 바디로 이 둘을 갈라 pin).
       if (!res.ok) return [];
       const data = (await res.json()) as unknown;
       // story #3881(customer-zero) 실측 — 이 `as` 단언은 런타임 검증이 아니라 컴파일 타임
