@@ -87,7 +87,7 @@ async function flush() {
 }
 
 async function switchToMarketingTab() {
-  const tab = [...document.body.querySelectorAll('[role="tab"], button')].find((el) => el.textContent?.startsWith('마케팅 레시피'));
+  const tab = [...document.body.querySelectorAll('[role="tab"], button')].find((el) => el.textContent?.startsWith('마케팅 워크플로우'));
   await act(async () => { (tab as HTMLElement).click(); });
   await flush();
 }
