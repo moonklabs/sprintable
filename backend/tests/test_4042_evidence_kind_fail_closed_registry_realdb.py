@@ -108,6 +108,34 @@ async def test_unregistered_kind_rejected_422_where_it_used_to_pass_201():
         await engine.dispose()
 
 
+@pytest.mark.parametrize("bad_kind", [["a", "b"], {"x": 1}, 123, True, 1.5])
+@pytest.mark.anyio
+async def test_non_string_kind_rejected_422_not_crashed(bad_kind):
+    """카디르 QA 지적(2026-09-19) — payload.kind가 list/dict 등 unhashable이면
+    `_EVIDENCE_KIND_TYPE_REGISTRY.get(kind)`가 TypeError를 던져 fail-closed 422
+    대신 미처리 크래시(fail-crash)로 샜다. 문자열이 아닌 kind는 전부 "등재되지
+    않은 kind" 422로 fail-closed 되어야 한다(500/크래시 절대 금지)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id)
+            story_id = await _seed_story(s, org_id, project_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        async with _client_for(app) as client:
+            r = await _create_evidence(
+                client, work_item_id=story_id, evidence_type="report",
+                payload={"kind": bad_kind},
+            )
+        assert r.status_code == 422, r.text
+        assert r.json()["error"]["code"] == "EVIDENCE_PAYLOAD_INVALID"
+    finally:
+        await engine.dispose()
+
+
 @pytest.mark.anyio
 async def test_kind_registered_but_wrong_type_rejected_422_data_loss_class():
     """⭐페드루 PO 후속 제안 — kind는 맞는데 type을 틀리면(여기선 generation_cost를

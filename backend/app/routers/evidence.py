@@ -282,7 +282,11 @@ async def _validate_and_normalize_evidence_payload(
 
     kind = payload.get("kind")
     if kind is not None:
-        expected_type = _EVIDENCE_KIND_TYPE_REGISTRY.get(kind)
+        # 카디르 QA 지적(2026-09-19) — kind가 list/dict 등 unhashable이면 dict.get()
+        # 자체가 TypeError를 던져 fail-closed 422 대신 미처리 크래시(fail-crash)로
+        # 샜다. 문자열이 아니면 애초에 registry에 등재될 수 없는 값이므로 그대로
+        # "등재되지 않은 kind" 422 분기로 합류시킨다(새 registry/메시지 발명 없이).
+        expected_type = _EVIDENCE_KIND_TYPE_REGISTRY.get(kind) if isinstance(kind, str) else None
         if expected_type is None:
             raise HTTPException(
                 status_code=422,
