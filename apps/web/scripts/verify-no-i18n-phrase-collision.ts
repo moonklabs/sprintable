@@ -413,9 +413,6 @@ export const EXEMPT_PAIRS = new Set<string>([
   // agentMember="에이전트"(행 안 배지 라벨, 보간 없음) <-> agentToggleAriaLabel
   // ("{n}번째 에이전트 {label}") — 배지는 시각 요소, aria-label은 그 옆 토글
   // 버튼의 보조기술 전용 이름이라 화면상 겹쳐 읽힐 자리가 없다.
-  'organization.eventRowActionAriaLabel <-> organization.eventsTitle',
-  // eventsTitle="이벤트"(섹션 제목) <-> eventRowActionAriaLabel("{n}번째 이벤트
-  // 정의 {label}") — 위 commentsSectionTitle류와 동형(섹션 제목 vs 행 aria-label).
   'goals.indexCountActive <-> goals.statusActive',
   'goals.indexCountDone <-> goals.statusDone',
   // story #3698(IA·후속) — goals.outcomeLabel <-> goals.trustRailOutcomeJudged 항목은 여기
