@@ -41,9 +41,14 @@ export interface UseRecipeMemberOptionsResult {
 // story #4071 마이그(useAsyncResource 위) — 카디르 QA(#4421 qa:changes, 2026-09-19)가 잡은
 // "조회 中 projectId→null 전환 시 loading 영구고착" 클래스가 헬퍼의 구조(스킵/성공/실패
 // 세 경로가 같은 종료점에서 loading=false로 닫힘)로 다시 등장할 여지 자체가 없어졌다.
+//
+// ⚠️카디르 재QA(#4444, 2026-09-19, 같은 클래스로 자기점검) — 원본 skip 조건 `if
+// (!projectId)`는 falsy 전부(빈 문자열 포함)를 스킵으로 봤는데, useAsyncResource의 skip
+// 판정은 null/undefined만 인식한다. projectId=''를 정규화 없이 넘기면 실제 fetch가 나가
+// "기존동작 무변" 계약이 깨진다 — projectId || null로 정규화.
 export function useRecipeMemberOptions(projectId: string | null): UseRecipeMemberOptionsResult {
   const { data: options, loading, loadFailed, refresh } = useAsyncResource<string, RecipeMemberOption[]>(
-    projectId, [],
+    projectId || null, [],
     async (id) => {
       const res = await fetchWithAuth(`${TEAM_MEMBERS_API_PATH}?project_id=${id}`);
       if (!res.ok) throw new Error(`status ${res.status}`);
