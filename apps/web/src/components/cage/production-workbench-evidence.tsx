@@ -10,6 +10,7 @@ import { isLinkableRef } from '@/components/verify/evidence-section';
 import { useWorkItemProductionEvidence } from '@/hooks/use-work-item-production-evidence';
 import {
   filterProductionWorkbenchEvidence, groupProductionWorkbenchEvidenceByKind, orderedPresentKinds,
+  partitionCurrentAndHistory,
 } from '@/lib/production-workbench-evidence';
 import {
   asMaterialCollectionSheet, asConceptBrief, asStoryboard, asAnimatic, asVerificationSheet,
@@ -42,13 +43,16 @@ const KIND_TITLE_KEY: Record<ProductionWorkbenchKind, string> = {
 };
 
 // 시안 .ocard 공용 헤더 — okind(제목)+attr(AI 귀속, info만)+ver(mono)+when(우측).
-function OutputCardHeader({ kindTitle, evidence }: { kindTitle: string; evidence: EvidenceItem }) {
+function OutputCardHeader({ kindTitle, evidence, isCurrent }: { kindTitle: string; evidence: EvidenceItem; isCurrent?: boolean }) {
   const t = useTranslations('cage');
   const locale = useLocale();
   const displayTimezone = resolveDisplayTimezone().tz;
   return (
     <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2">
       <span className="text-[12.5px] font-bold text-foreground">{kindTitle}</span>
+      {/* story #4433 qa:changes 2차(카디르 ⓑ) — 같은 kind가 여러 건일 때만(재시도·재제출
+          존재) "현재" 라벨을 얹는다. 유일한 버전이면 굳이 안 단다(잡음). */}
+      {isCurrent ? <Badge variant="secondary" className="shrink-0">{t('productionWorkbenchCurrentBadge')}</Badge> : null}
       <Badge variant="info" className="shrink-0">{t('productionWorkbenchAiAttribution')}</Badge>
       {evidence.artifact_version_number !== null ? (
         <span className="font-mono text-[10.5px] text-muted-foreground">
@@ -70,13 +74,13 @@ function OutputCard({ children }: { children: React.ReactNode }) {
   return <Card className="overflow-hidden">{children}</Card>;
 }
 
-function MaterialCollectionSheetCard({ evidence }: { evidence: EvidenceItem }) {
+function MaterialCollectionSheetCard({ evidence, isCurrent }: { evidence: EvidenceItem; isCurrent?: boolean }) {
   const t = useTranslations('cage');
   const items = asMaterialCollectionSheet(evidence.payload);
   if (!items) return null;
   return (
     <OutputCard>
-      <OutputCardHeader kindTitle={t(KIND_TITLE_KEY.material_collection_sheet)} evidence={evidence} />
+      <OutputCardHeader kindTitle={t(KIND_TITLE_KEY.material_collection_sheet)} evidence={evidence} isCurrent={isCurrent} />
       <ul className="space-y-1 p-3">
         {items.map((item, i) => (
           <li key={i} className="flex flex-wrap items-center gap-1.5 text-[11.5px]">
@@ -94,13 +98,13 @@ function MaterialCollectionSheetCard({ evidence }: { evidence: EvidenceItem }) {
   );
 }
 
-function ConceptBriefCard({ evidence }: { evidence: EvidenceItem }) {
+function ConceptBriefCard({ evidence, isCurrent }: { evidence: EvidenceItem; isCurrent?: boolean }) {
   const t = useTranslations('cage');
   const brief = asConceptBrief(evidence.payload);
   if (!brief) return null;
   return (
     <OutputCard>
-      <OutputCardHeader kindTitle={t(KIND_TITLE_KEY.concept_brief)} evidence={evidence} />
+      <OutputCardHeader kindTitle={t(KIND_TITLE_KEY.concept_brief)} evidence={evidence} isCurrent={isCurrent} />
       <div className="space-y-1.5 p-3 text-[11.5px]">
         <p className="font-medium text-foreground">{brief.concept}</p>
         <p className="text-muted-foreground">{brief.rationale}</p>
@@ -118,13 +122,13 @@ function ConceptBriefCard({ evidence }: { evidence: EvidenceItem }) {
 
 // 시안 .sbgrid(4열) — 실 artifact_version 이미지 없이는 그라디언트 자리(장식 chrome, 데이터
 // 아님)만 두고 샷 번호·설명만 실값으로 채운다.
-function StoryboardCard({ evidence }: { evidence: EvidenceItem }) {
+function StoryboardCard({ evidence, isCurrent }: { evidence: EvidenceItem; isCurrent?: boolean }) {
   const t = useTranslations('cage');
   const storyboard = asStoryboard(evidence.payload);
   if (!storyboard) return null;
   return (
     <OutputCard>
-      <OutputCardHeader kindTitle={t(KIND_TITLE_KEY.storyboard)} evidence={evidence} />
+      <OutputCardHeader kindTitle={t(KIND_TITLE_KEY.storyboard)} evidence={evidence} isCurrent={isCurrent} />
       <div className="space-y-3 p-3">
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           {/* story #3164 가드 — rounded+border+카드표면 bg 트리오는 손코딩 카드로 잡힌다. 이미
@@ -174,13 +178,13 @@ function StoryboardCard({ evidence }: { evidence: EvidenceItem }) {
 
 // 시안 .anim — 9:16 화면 chrome(장식)+play 아이콘. 컷별 타임라인 세그먼트는 계약에 세그먼트
 // 데이터가 없어 생략(위 파일 상단 주석 ②).
-function AnimaticCard({ evidence }: { evidence: EvidenceItem }) {
+function AnimaticCard({ evidence, isCurrent }: { evidence: EvidenceItem; isCurrent?: boolean }) {
   const t = useTranslations('cage');
   const animatic = asAnimatic(evidence.payload);
   if (!animatic) return null;
   return (
     <OutputCard>
-      <OutputCardHeader kindTitle={t(KIND_TITLE_KEY.animatic)} evidence={evidence} />
+      <OutputCardHeader kindTitle={t(KIND_TITLE_KEY.animatic)} evidence={evidence} isCurrent={isCurrent} />
       <div className="flex items-stretch gap-3 p-3">
         <div className="flex aspect-[9/16] w-[110px] shrink-0 items-center justify-center rounded-lg border border-border bg-gradient-to-b from-info-tint to-muted">
           <span className="flex size-8 items-center justify-center rounded-full bg-card/90 text-brand shadow">
@@ -205,13 +209,13 @@ function AnimaticCard({ evidence }: { evidence: EvidenceItem }) {
 }
 
 // 시안 .vsheet/.vrow — 여기만 상태색 허용(진짜 pass/fail, 성공/경고 아니라 검증 판정).
-function VerificationSheetCard({ evidence }: { evidence: EvidenceItem }) {
+function VerificationSheetCard({ evidence, isCurrent }: { evidence: EvidenceItem; isCurrent?: boolean }) {
   const t = useTranslations('cage');
   const items = asVerificationSheet(evidence.payload);
   if (!items) return null;
   return (
     <OutputCard>
-      <OutputCardHeader kindTitle={t(KIND_TITLE_KEY.verification_sheet)} evidence={evidence} />
+      <OutputCardHeader kindTitle={t(KIND_TITLE_KEY.verification_sheet)} evidence={evidence} isCurrent={isCurrent} />
       <ul className="space-y-1.5 p-3">
         {items.map((item, i) => {
           // story #4057 CI 실측(2026-09-18, 페드루 지적) — verify-no-new-tint-color-text
@@ -242,7 +246,7 @@ function VerificationSheetCard({ evidence }: { evidence: EvidenceItem }) {
   );
 }
 
-const KIND_CARD: Record<ProductionWorkbenchKind, (props: { evidence: EvidenceItem }) => React.ReactElement | null> = {
+const KIND_CARD: Record<ProductionWorkbenchKind, (props: { evidence: EvidenceItem; isCurrent?: boolean }) => React.ReactElement | null> = {
   material_collection_sheet: MaterialCollectionSheetCard,
   concept_brief: ConceptBriefCard,
   storyboard: StoryboardCard,
@@ -269,20 +273,30 @@ export function ProductionWorkbenchEvidencePanel({ workItemId, workItemType }: P
 
   return (
     <div className="space-y-2.5" data-testid="production-workbench-evidence">
-      <div>
-        <p className="text-[11px] font-semibold text-muted-foreground">{t('productionWorkbenchSectionTitle')}</p>
-        {/* story #4433 qa:changes(카디르, 2026-09-19) — PR #4044(stage denorm 필터)가
-            아직 안 서서 이 패널은 work_item의 5종 evidence를 stage 무필터로 전부 보여준다.
-            구/신 컨셉의 같은 검증항목이 fail/pass로 동시에 뜰 수 있어("제작 산출물"만으로는
-            전체이력인지 현재승인근거인지 안 갈림) 캡션으로 명시한다. */}
-        <p className="text-[10.5px] text-muted-foreground">{t('productionWorkbenchSectionCaption')}</p>
-      </div>
+      <p className="text-[11px] font-semibold text-muted-foreground">{t('productionWorkbenchSectionTitle')}</p>
       {kinds.map((kind) => {
         const Card = KIND_CARD[kind];
         const groupItems = grouped[kind] ?? [];
+        // story #4433 qa:changes 2차(카디르, 2026-09-19) — 캡션 경고문만으론 "구/신 컨셉의
+        // 같은 검증항목이 나란히 뜨는" 문제가 안 풀린다는 지적. 같은 kind에 evidence가 여러
+        // 건이면(재시도·재제출) created_at 최신 1건만 "현재 승인 근거"로, 나머지는 시각적으로
+        // 분리된 "이전 기록" 섹션(축소 표시)에 둔다 — stage/컨셉 라벨 필드가 아직 없어(PR
+        // #4044 미착지) "컨셉 A/B" 이름은 지어내지 않고, 실제 있는 시간 축만 쓴다.
+        const { current, history } = partitionCurrentAndHistory(groupItems);
+        if (!current) return null;
         return (
           <div key={kind} className="space-y-2">
-            {groupItems.map((item) => <Card key={item.evidence.id} evidence={item.evidence} />)}
+            <Card key={current.evidence.id} evidence={current.evidence} isCurrent={history.length > 0} />
+            {history.length > 0 ? (
+              <details className="rounded-lg border border-dashed border-border bg-transparent">
+                <summary className="cursor-pointer px-2.5 py-1.5 text-[10.5px] font-semibold text-muted-foreground">
+                  {t('productionWorkbenchHistorySectionTitle', { n: history.length })}
+                </summary>
+                <div className="space-y-2 p-2 pt-0 opacity-70">
+                  {history.map((item) => <Card key={item.evidence.id} evidence={item.evidence} />)}
+                </div>
+              </details>
+            ) : null}
           </div>
         );
       })}

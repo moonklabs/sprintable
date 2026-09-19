@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { EvidenceItem } from '@/services/verify';
 import {
   filterProductionWorkbenchEvidence, groupProductionWorkbenchEvidenceByKind, orderedPresentKinds,
+  partitionCurrentAndHistory,
 } from './production-workbench-evidence';
 
 // story #4041(제작 작업대 stage 산출물 계약 v0.5, doc 3cca821b) — #4046(recipe-role-slots.ts)
@@ -74,5 +75,29 @@ describe('orderedPresentKinds', () => {
 
   it('아무것도 없으면 빈 배열', () => {
     expect(orderedPresentKinds({})).toEqual([]);
+  });
+});
+
+describe('partitionCurrentAndHistory (story #4433 qa:changes 2차)', () => {
+  it('created_at이 가장 늦은 1건을 current로, 나머지는 오름차순 history로 가른다', () => {
+    const items = filterProductionWorkbenchEvidence([
+      evidence({ id: 'e-mid', created_at: '2026-09-18T12:00:00Z', payload: { kind: 'verification_sheet' } }),
+      evidence({ id: 'e-oldest', created_at: '2026-09-17T00:00:00Z', payload: { kind: 'verification_sheet' } }),
+      evidence({ id: 'e-newest', created_at: '2026-09-19T00:00:00Z', payload: { kind: 'verification_sheet' } }),
+    ]);
+    const { current, history } = partitionCurrentAndHistory(items);
+    expect(current?.evidence.id).toBe('e-newest');
+    expect(history.map((i) => i.evidence.id)).toEqual(['e-oldest', 'e-mid']);
+  });
+
+  it('1건뿐이면 current만 있고 history는 빈 배열', () => {
+    const items = filterProductionWorkbenchEvidence([evidence({ id: 'e1', payload: { kind: 'animatic' } })]);
+    const { current, history } = partitionCurrentAndHistory(items);
+    expect(current?.evidence.id).toBe('e1');
+    expect(history).toEqual([]);
+  });
+
+  it('빈 배열이면 current=null·history=빈 배열(지어내지 않음)', () => {
+    expect(partitionCurrentAndHistory([])).toEqual({ current: null, history: [] });
   });
 });

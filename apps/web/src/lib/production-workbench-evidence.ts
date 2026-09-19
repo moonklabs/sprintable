@@ -48,3 +48,27 @@ export function orderedPresentKinds(
 ): ProductionWorkbenchKind[] {
   return PRODUCTION_WORKBENCH_KIND_ORDER.filter((kind) => (grouped[kind]?.length ?? 0) > 0);
 }
+
+export interface CurrentAndHistory {
+  /** 이 kind의 가장 최근(created_at 최댓값) evidence — "지금 승인 대상"으로 그린다.
+   * 그룹이 비어 있을 리 없다(groupProductionWorkbenchEvidenceByKind가 빈 배열 키를 안
+   * 만든다), 그래도 null을 열어 호출부가 방어적으로 다루게 한다. */
+  current: ProductionWorkbenchEvidenceItem | null;
+  /** current를 제외한 나머지 — 오래된 순(created_at 오름차순, 읽는 순서 그대로). */
+  history: ProductionWorkbenchEvidenceItem[];
+}
+
+/** story #4433 qa:changes(카디르, 2026-09-19) — 같은 kind에 evidence가 여러 건이면
+ * (컨셉 반려 후 재제출 등, 이 파일 상단 코멘트) "지금 승인 대상"과 "지난 기록"을 시각으로
+ * 갈라야 한다는 지적. created_at 정렬 기준은 이 함수가 짓는다(호출부가 새로 안 만들게).
+ * stage/컨셉 라벨 필드 자체가 아직 없어(PR #4044 stage denorm 미착지, no-fiction) "컨셉 A/B"
+ * 같은 이름은 지어내지 않고, 실제로 있는 시간 축(created_at)만으로 최신/과거를 가른다. */
+export function partitionCurrentAndHistory(items: ProductionWorkbenchEvidenceItem[]): CurrentAndHistory {
+  if (items.length === 0) return { current: null, history: [] };
+  const sorted = [...items].sort(
+    (a, b) => new Date(a.evidence.created_at).getTime() - new Date(b.evidence.created_at).getTime(),
+  );
+  const current = sorted[sorted.length - 1]!;
+  const history = sorted.slice(0, -1);
+  return { current, history };
+}

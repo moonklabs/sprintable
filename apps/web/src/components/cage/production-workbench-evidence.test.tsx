@@ -121,7 +121,7 @@ describe('ProductionWorkbenchEvidencePanel', () => {
     expect(badges).toHaveLength(0);
   });
 
-  it('story #4433 qa:changes — 섹션 캡션이 «전체 이력»임을 명시한다(현재 승인근거와 혼동 방지)', async () => {
+  it('story #4433 qa:changes 2차 — 같은 kind가 1건뿐이면 "현재" 배지·이전 기록 섹션 둘 다 없다', async () => {
     const evidenceRows = [
       { id: 'e1', type: 'report', ref: 'r', ...BASE_EVIDENCE, payload: { kind: 'verification_sheet', items: [{ name: '자막 싱크', verdict: 'pass' }] } },
     ];
@@ -130,7 +130,27 @@ describe('ProductionWorkbenchEvidencePanel', () => {
     await flush();
 
     const panel = container.querySelector('[data-testid="production-workbench-evidence"]')!;
-    expect(panel.textContent).toContain('전체 이력');
-    expect(panel.textContent).toContain('지난 컨셉의 기록도 포함');
+    expect(panel.textContent).not.toContain('현재');
+    expect(panel.textContent).not.toContain('이전 기록');
+  });
+
+  it('story #4433 qa:changes 2차 — 같은 kind에 재시도 evidence가 여러 건이면 최신만 "현재"로 노출, 나머지는 접힌 「이전 기록」 섹션에 분리된다', async () => {
+    const evidenceRows = [
+      { id: 'e-old', type: 'report', ref: 'r', ...BASE_EVIDENCE, created_at: '2026-09-18T00:00:00Z', payload: { kind: 'verification_sheet', items: [{ name: '자막 싱크', verdict: 'fail' }] } },
+      { id: 'e-new', type: 'report', ref: 'r', ...BASE_EVIDENCE, created_at: '2026-09-19T00:00:00Z', payload: { kind: 'verification_sheet', items: [{ name: '자막 싱크', verdict: 'pass' }] } },
+    ];
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => evidenceRows })));
+    await act(async () => { root.render(wrap(<ProductionWorkbenchEvidencePanel workItemId="story-1" workItemType="story" />)); });
+    await flush();
+
+    const panel = container.querySelector('[data-testid="production-workbench-evidence"]')!;
+    // 최신(e-new, pass)이 열린 카드로, 「현재」 배지가 뜬다.
+    expect(panel.textContent).toContain('현재');
+    // 과거(e-old, fail)는 <details> 안(닫힌 상태 기본)에 있다 — summary 텍스트는 항상 보인다.
+    expect(panel.textContent).toContain('이전 기록 · 1건');
+    const details = panel.querySelector('details')!;
+    expect(details).not.toBeNull();
+    expect(details.open).toBe(false);
+    expect(details.textContent).toContain('실패'); // e-old(fail)의 verdict 라벨도 접힌 안에 존재.
   });
 });
