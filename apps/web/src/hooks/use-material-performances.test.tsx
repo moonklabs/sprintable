@@ -3,7 +3,7 @@
 // story #4063 후속(PR 9dd179582 위) — use-hook-performances.test.tsx와 동일 하네스.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act } from 'react';
+import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { useMaterialPerformances } from './use-material-performances';
 
@@ -86,5 +86,36 @@ describe('useMaterialPerformances — derivedIds만큼 병렬 GET .../material-p
     await flush();
 
     expect(dump()).toEqual({ keys: [], counts: [], loading: false, loadFailed: true });
+  });
+
+  // story #4437 qa:changes(카디르, 2026-09-19) — derivedIds가 값→빈 배열로 바뀌면 그 guard가
+  // setLoading(false)를 빼먹어 loading이 영구 true로 고착됐다(#4436 두 훅과 동일 클래스).
+  it('fetch 진행 중 derivedIds가 빈 배열로 바뀌면 loading이 고착되지 않는다(#4437 회귀)', async () => {
+    let resolveFetch: (() => void) | null = null;
+    vi.stubGlobal('fetch', vi.fn(async () => new Promise((resolve) => {
+      resolveFetch = () => resolve({ ok: true, json: async () => [SNAPSHOT()] });
+    })));
+
+    function Clearer() {
+      const [ids, setIds] = useState<string[]>(['d1']);
+      return (
+        <>
+          <button data-testid="clear" onClick={() => setIds([])}>clear</button>
+          <Harness derivedIds={ids} />
+        </>
+      );
+    }
+
+    await act(async () => { root.render(<Clearer />); });
+    await flush();
+    expect(dump().loading).toBe(true); // fetch 아직 미해결.
+
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="clear"]')!.click(); });
+    await flush();
+    expect(dump().loading).toBe(false); // 빈 배열 전환 즉시 loading이 풀려야 한다.
+
+    await act(async () => { resolveFetch?.(); });
+    await flush();
+    expect(dump().loading).toBe(false);
   });
 });

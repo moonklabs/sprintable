@@ -67,12 +67,19 @@ export function indexHooksByKey(hooks: MaterialCollectionSheetHook[]): Map<strin
  * 막대에 쓸 대표값 하나를 고른다. `status !== 'captured'`(집계 대기·미발행 등) snapshot은
  * 전부 제외 — captured가 하나도 없으면 null(집계 대기, 0으로 위장 안 함). 여러 건이
  * captured면(재발행·D1/D7 등 복수 사이클) due_at이 가장 늦은(가장 성숙한) 것을 쓴다 —
- * #4063 훅 랭킹이 D1/D7을 안 나누고 단일 대표값을 보여주는 것과 같은 결. */
+ * #4063 훅 랭킹이 D1/D7을 안 나누고 단일 대표값을 보여주는 것과 같은 결.
+ *
+ * ⚠️story #4437 qa:changes(카디르, 2026-09-19) — "가장 늦은 것"을 고르기 前에
+ * normalized!==null로 먼저 걸러내면 안 된다: 그 최신 captured가 그 metricKey를 아직
+ * 못 재서 null이면(측정 진행 중), 걸러낸 뒤 그보다 옛 captured의 non-null 값을 대신
+ * 돌려주는 게 됐다 — 화면엔 "최신 성과"라며 사실 옛 수치를 보여주는 오도(계약 위반).
+ * due_at 최신 판정은 status='captured' 전체를 대상으로 먼저 하고, 그 최신 건의
+ * metricKey 값이 null이면 그대로 null을 반환한다(옛 값으로 대체하지 않는다). */
 export function pickPrimaryMetricValue(
   snapshots: MaterialPerformanceSnapshot[],
   metricKey: keyof InsightNormalizedMetrics = 'views',
 ): number | null {
-  const captured = snapshots.filter((s) => s.status === 'captured' && s.normalized !== null);
+  const captured = snapshots.filter((s) => s.status === 'captured');
   if (captured.length === 0) return null;
   const latest = captured.reduce((a, b) => (new Date(b.due_at) > new Date(a.due_at) ? b : a));
   return latest.normalized?.[metricKey] ?? null;

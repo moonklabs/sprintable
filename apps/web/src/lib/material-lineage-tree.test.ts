@@ -112,4 +112,23 @@ describe('pickPrimaryMetricValue (story #4063 후속, PR 9dd179582 위)', () => 
     const snapshots = [snapshot({ normalized: { ...snapshot({}).normalized!, views: 100, clicks: 7 } })];
     expect(pickPrimaryMetricValue(snapshots, 'clicks')).toBe(7);
   });
+
+  // story #4437 qa:changes(카디르, 2026-09-19) — 가장 늦은 captured가 그 metricKey를
+  // 아직 못 재서(normalized 자체가 null, 측정 진행 중) 옛 captured의 non-null 값으로
+  // 대체하면 안 된다("최신 성과"라며 사실 옛 수치를 보여주는 오도, #4063 결함 pin).
+  it('가장 늦은 captured의 normalized가 null이면(측정 미완) 옛 non-null 값으로 대체하지 않고 null을 낸다(핵심 회귀)', () => {
+    const snapshots = [
+      snapshot({ id: 's-old', due_at: '2026-09-01T00:00:00Z', normalized: { ...snapshot({}).normalized!, views: 100 } }),
+      snapshot({ id: 's-newest', due_at: '2026-09-07T00:00:00Z', normalized: null }),
+    ];
+    expect(pickPrimaryMetricValue(snapshots)).toBeNull();
+  });
+
+  it('가장 늦은 captured가 normalized는 있는데 그 metricKey만 null이면(다른 채널 지표만 측정) 역시 null', () => {
+    const snapshots = [
+      snapshot({ id: 's-old', due_at: '2026-09-01T00:00:00Z', normalized: { ...snapshot({}).normalized!, views: 100 } }),
+      snapshot({ id: 's-newest', due_at: '2026-09-07T00:00:00Z', normalized: { ...snapshot({}).normalized!, views: null } }),
+    ];
+    expect(pickPrimaryMetricValue(snapshots)).toBeNull();
+  });
 });
