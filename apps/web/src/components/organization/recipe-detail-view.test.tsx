@@ -109,4 +109,90 @@ describe('RecipeDetailView — 9단계 스텝퍼·게이트 4(live/building 실�
     // 4번째 칩 라벨이 실행(run 화면과 층 겹침, PO B안)이 아니라 에이전트인지 직접 확認.
     expect(text).toContain('에이전트');
   });
+
+  // story #4067(유나 design-QA, 2026-09-19) — role dot이 status 토큰(bg-info/success/
+  // warning/muted-fg/primary/destructive)을 더는 안 쓰고, role KEY 기반 role-accent CSS
+  // 변수를 인라인 style로 받는지 pin(className에 status bg-* 없음 + 서로 다른 role이 서로
+  // 다른 --role-accent-N을 받는지).
+  //
+  // ⚠️카디르 재QA(2026-09-19) — 최초 버전은 범례(L74)만 검사해 스텝퍼(L122) 소비부가
+  // 되돌아가도(bg-success 복원 등) 이 스위트가 안 틀렸다([못틀리는대조미자]). 범례·스텝퍼
+  // 둘 다 같은 assertion을 거치게 헬퍼로 통합 — 어느 한쪽만 되돌려도 이 테스트가 FAIL해야
+  // "대조"로서 의미가 있다.
+  function assertNoStatusBgAndHasAccentVar(dots: Element[]) {
+    expect(dots.length).toBeGreaterThan(0);
+    for (const dot of dots) {
+      const el = dot as HTMLElement;
+      expect(el.className).not.toMatch(/bg-(info|success|warning|muted-foreground|primary|destructive)\b/);
+      expect(el.style.backgroundColor).toMatch(/^var\(--role-accent-[1-6]\)$/);
+    }
+  }
+
+  function roleDots(root: Element, testId: string): Element[] {
+    return [...root.querySelector(`[data-testid="${testId}"]`)!.querySelectorAll('span.size-1\\.5.rounded-full')];
+  }
+
+  it('범례(L74) role dot이 status bg-* 클래스 대신 role-accent CSS 변수를 인라인 style로 쓴다(회귀)', async () => {
+    await act(async () => { root.render(wrap(<RecipeDetailView recipe={RECIPE} />)); });
+    const legendDots = roleDots(container, 'recipe-legend');
+    assertNoStatusBgAndHasAccentVar(legendDots);
+    // 3개 role(크리에이터·디렉터·발행자)이 서로 다른 accent를 받는다(전부 같은 색으로
+    // 뭉개지지 않음 — 폴백이 role KEY별로 다르게 동작하는지의 관측 가능한 신호).
+    const accents = new Set(legendDots.map((d) => (d as HTMLElement).style.backgroundColor));
+    expect(accents.size).toBeGreaterThan(1);
+  });
+
+  // 카디르 재QA 핵심 pin — 스텝퍼(L122) 소비부를 직접 검사(범례만으론 못 잡는 자리).
+  it('스텝퍼(L122) role dot도 status bg-* 클래스 대신 role-accent CSS 변수를 인라인 style로 쓴다(회귀, 범례와 별개 소비부)', async () => {
+    await act(async () => { root.render(wrap(<RecipeDetailView recipe={RECIPE} />)); });
+    const stepperDots = roleDots(container, 'recipe-stepper');
+    // 9 stage 전부 role이 있으니(RECIPE 픽스처) dot도 9개.
+    expect(stepperDots).toHaveLength(9);
+    assertNoStatusBgAndHasAccentVar(stepperDots);
+  });
+
+  // 카디르 재QA 핵심 pin ② — positional(Object.keys 삽입순서) 매핑이 되돌아가면 같은 role이
+  // recipe마다 다른 색을 받는다. stage_metadata 키 삽입 순서만 다르고 role 집합은 동일한
+  // 두 recipe(A: 크리에이터→디렉터→발행자, B: 발행자→디렉터→크리에이터)를 각각 렌더해
+  // "크리에이터"의 accent가 A·B에서 같은지로 이 회귀를 pin한다(positional이면 다름).
+  it('role 집합이 같아도 stage_metadata 삽입 순서가 다른 두 recipe에서 같은 role은 같은 accent를 받는다(positional 복원 시 FAIL)', async () => {
+    const RECIPE_A: EventDefinitionResponse = {
+      ...RECIPE,
+      id: 'recipe-a',
+      stage_metadata: {
+        draft: { role: '크리에이터' },
+        concept_confirmed: { role: '디렉터' },
+        published: { role: '발행자' },
+      },
+    };
+    const RECIPE_B: EventDefinitionResponse = {
+      ...RECIPE,
+      id: 'recipe-b',
+      stage_metadata: {
+        published: { role: '발행자' },
+        concept_confirmed: { role: '디렉터' },
+        draft: { role: '크리에이터' },
+      },
+    };
+
+    await act(async () => { root.render(wrap(<RecipeDetailView recipe={RECIPE_A} />)); });
+    const legendA = new Map(
+      [...container.querySelector('[data-testid="recipe-legend"]')!.querySelectorAll('span')]
+        .map((s) => [s.textContent?.trim(), (s.querySelector('span.size-1\\.5.rounded-full') as HTMLElement | null)?.style.backgroundColor])
+        .filter((pair): pair is [string, string] => pair[1] !== undefined),
+    );
+
+    await act(async () => { root.render(wrap(<RecipeDetailView recipe={RECIPE_B} />)); });
+    const legendB = new Map(
+      [...container.querySelector('[data-testid="recipe-legend"]')!.querySelectorAll('span')]
+        .map((s) => [s.textContent?.trim(), (s.querySelector('span.size-1\\.5.rounded-full') as HTMLElement | null)?.style.backgroundColor])
+        .filter((pair): pair is [string, string] => pair[1] !== undefined),
+    );
+
+    expect(legendA.size).toBeGreaterThan(0);
+    expect(legendA.size).toBe(legendB.size);
+    for (const [role, accentA] of legendA) {
+      expect(legendB.get(role)).toBe(accentA);
+    }
+  });
 });

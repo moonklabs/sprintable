@@ -10,6 +10,7 @@ import { groupStagesByRole, stagesWithGate } from '@/lib/recipe-role-slots';
 import { gateTypeLabel, gateTypeLabelKey } from '@/lib/gate-type-label';
 import { stageRoleLabel } from '@/lib/stage-role';
 import { recipeStageLabel } from '@/lib/recipe-stage-label';
+import { roleAccentVar } from '@/lib/role-accent';
 
 // story #4048(E-RECIPE-1 ①) — 유나 v2 시안(artifact be718c0a §3) 상세 뷰. 이 화면은 레시피
 // «정의»(카탈로그 항목)를 보여주는 것이지 레시피를 적용한 특정 loop 인스턴스의 진행 상태가
@@ -23,13 +24,6 @@ import { recipeStageLabel } from '@/lib/recipe-stage-label';
 // "미등재"(building)다. 특정 gate_type 문자열을 이 파일에 다시 적지 않는다 — 레지스트리가
 // 늘어나면 이 판별도 자동으로 따라간다.
 
-const ROLE_DOT_PALETTE = ['bg-info', 'bg-success', 'bg-warning', 'bg-muted-foreground', 'bg-primary', 'bg-destructive'];
-
-function roleColorMap(stageMetadata: EventDefinitionResponse['stage_metadata']): Map<string, string> {
-  const roles = Object.keys(groupStagesByRole(stageMetadata));
-  return new Map(roles.map((role, i) => [role, ROLE_DOT_PALETTE[i % ROLE_DOT_PALETTE.length]]));
-}
-
 export interface RecipeDetailViewProps {
   recipe: EventDefinitionResponse;
   onApply?: () => void;
@@ -42,7 +36,6 @@ export function RecipeDetailView({ recipe, onApply, onDuplicate }: RecipeDetailV
 
   const stages = cyclicStages(recipe);
   const roleGroups = groupStagesByRole(recipe.stage_metadata);
-  const roleColors = roleColorMap(recipe.stage_metadata);
   const gates = stagesWithGate(recipe.stage_metadata);
   const gateByStage = new Map(gates.map((g) => [g.stage, g]));
 
@@ -71,7 +64,7 @@ export function RecipeDetailView({ recipe, onApply, onDuplicate }: RecipeDetailV
         </span>
         {Object.keys(roleGroups).map((role) => (
           <span key={role} className="flex items-center gap-1.5">
-            <span className={`inline-block size-1.5 rounded-full ${roleColors.get(role)}`} /> {stageRoleLabel(role, t)}
+            <span className="inline-block size-1.5 rounded-full" style={{ backgroundColor: roleAccentVar(role) }} /> {stageRoleLabel(role, t)}
           </span>
         ))}
       </div>
@@ -119,7 +112,7 @@ export function RecipeDetailView({ recipe, onApply, onDuplicate }: RecipeDetailV
                 <div className="mt-2 text-xs font-semibold text-foreground">{recipeStageLabel(stage, t)}</div>
                 {meta?.role ? (
                   <div className="mt-1 flex items-center gap-1 text-[10.5px] text-muted-foreground">
-                    <span className={`inline-block size-1.5 rounded-full ${roleColors.get(meta.role)}`} /> {stageRoleLabel(meta.role, t)}
+                    <span className="inline-block size-1.5 rounded-full" style={{ backgroundColor: roleAccentVar(meta.role) }} /> {stageRoleLabel(meta.role, t)}
                   </div>
                 ) : null}
               </div>
