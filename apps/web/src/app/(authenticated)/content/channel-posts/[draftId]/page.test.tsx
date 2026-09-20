@@ -2477,6 +2477,26 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
   // 상신을 막는다(이미 진행 중이거나 고쳐야 할 게 따로 있음). dead_letter는 예외
   // (f061c1a3 前까지 발행이 유일한 수동 재시도 경로) — 아래에서 활성 그대로임을 pin한다.
   describe('⭐B4 — command_status가 pending/blocked면 발행·예약 상신을 막는다(dead_letter는 예외)', () => {
+    // story #78ecd9e5(2026-09-20, [절대일시리터럴=자정RED] 클래스) — 아래 두 테스트
+    // (미래/과거 대칭 쌍)가 예전엔 '2026-09-20T00:00:00Z'를 "항상 미래"로 하드코드
+    // 했는데, 실제 벽시계가 그 시각을 지나는 순간(오늘 UTC 자정) "과거"로 뒤집혀
+    // develop CI가 영구 red가 됐다(use-reset-passed.ts의 `Date.now()` 비교가 실제
+    // 시계를 쓰므로). `Date.now()`를 고정 시각으로 스텁해 벽시계와 완전히 무관하게
+    // 만들고, 두 리터럴도 그 고정 시각 기준 상대 계산(±1일)으로 바꿔 대칭을 유지한다
+    // — "더 먼 미래 리터럴"은 그 미래가 지나면 또 재발하는 시한폭탄이라 채택 안 함.
+    const FIXED_NOW = new Date('2026-06-01T00:00:00Z').getTime();
+    const RELATIVE_FUTURE = new Date(FIXED_NOW + 24 * 60 * 60 * 1000).toISOString();
+    const RELATIVE_PAST = new Date(FIXED_NOW - 24 * 60 * 60 * 1000).toISOString();
+    let dateNowSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      dateNowSpy = vi.spyOn(Date, 'now').mockReturnValue(FIXED_NOW);
+    });
+
+    afterEach(() => {
+      dateNowSpy.mockRestore();
+    });
+
     // story #3808(배포 81 라이브 회차 실 결함, 페드루 PO 정정 決定 — 「누가 정한
     // 시각인가」 축) — pending 하나로는 예약(사람이 정한 시각)인지 backoff(시스템이
     // 정한 시각)인지 구별이 안 된다. scheduled_at 유무로 갈라 각각 pin한다.
@@ -2500,7 +2520,7 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
       stubFetch({
         draftDetail: {
           gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
-          command_status: 'pending', scheduled_at: '2026-09-20T00:00:00Z',
+          command_status: 'pending', scheduled_at: RELATIVE_FUTURE,
         },
       });
       await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
@@ -2522,7 +2542,7 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
       stubFetch({
         draftDetail: {
           gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
-          command_status: 'pending', scheduled_at: '2020-01-01T00:00:00Z',
+          command_status: 'pending', scheduled_at: RELATIVE_PAST,
         },
       });
       await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
