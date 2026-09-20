@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
 import { fetchWithAuth } from '@/lib/db/client';
 import type { MaterialPerformanceSnapshot } from '@/services/material-lineage';
+import { useAsyncResourceBatch } from './use-async-resource';
 
 // story #4063 후속(PR 9dd179582 위) — GET /api/v2/material-lineage/material-performance
 // ?derived_id= 를 derivedIds 배열만큼 병렬 조회(useHookPerformances와 동형 — BE가 배치
@@ -28,50 +28,22 @@ async function fetchOne(derivedId: string): Promise<MaterialPerformanceSnapshot[
   }
 }
 
-// story #4046/#4059/#4063 관례 — 배열 identity가 아니라 정렬된 join으로 deps를 비교.
-function derivedIdsDepsKey(derivedIds: string[]): string {
-  return [...derivedIds].sort().join(' ');
-}
-
+// story #4071 마이그(useAsyncResourceBatch 위) — 원본 skip 조건은 `ids.length === 0`
+// (배열 길이 기준)이라 헬퍼의 skip 판정(동일하게 length===0)과 처음부터 일치 —
+// #4444/#4446류 null/undefined-only vs falsy 불일치 클래스 대상 아님(확認).
+//
+// ⚠️부수 fix — 원본 depsKey는 `[...ids].sort().join(' ')`(공백 구분자)였다.
+// derived_id는 FK 없는 서버 원문 필드(hook_key와 동형 축, services/material-lineage.ts
+// §3① 주석)라 임의 문자열(공백 포함 가능)일 수 있다 — #4436/#4437 round-2에서
+// hookKeysDepsKey가 같은 구분자로 겪은 정확히 그 클래스(join·split 왕복 오분할)가 이
+// 훅에도 있었다(revert-confirm으로 실제 재현 — derivedIds=['id a'](공백 포함 단일
+// id)를 원본 방식대로 넣으면 fetch가 2번(엉뚱한 'id'·'a'로 오분할) 나감을 확認 후
+// 헬퍼 적용으로 1번만 나가는 것으로 복원). 헬퍼의 keysDepsKey(JSON.stringify 기반,
+// split 없이 원본 배열 그대로 파싱)로 그 클래스 자체가 사라진다.
 export function useMaterialPerformances(derivedIds: string[]): UseMaterialPerformancesResult {
-  const [snapshotsByDerivedId, setSnapshotsByDerivedId] = useState<Record<string, MaterialPerformanceSnapshot[]>>({});
-  const [loading, setLoading] = useState(false);
-  const [loadFailed, setLoadFailed] = useState(false);
-  const depsKey = derivedIdsDepsKey(derivedIds);
-
-  useEffect(() => {
-    const ids = depsKey ? depsKey.split(' ') : [];
-    if (ids.length === 0) {
-      // app-sidebar.tsx 관례 — 객체 리터럴 setState는 set-state-in-effect가 걸린다.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setSnapshotsByDerivedId({});
-      setLoadFailed(false);
-      // story #4437 qa:changes(카디르, 2026-09-19) — 이 guard가 setLoading(false)를 빼먹어
-      // derivedIds가 값→빈 배열로 바뀌는 순간 loading이 영구고착(#4436 use-material-lineage.ts·
-      // use-hook-performances.ts와 동일 클래스, 4번째 인스턴스).
-      setLoading(false);
-      return;
-    }
-    let cancelled = false;
-    setLoading(true);
-    setLoadFailed(false);
-    void (async () => {
-      const results = await Promise.all(ids.map((id) => fetchOne(id)));
-      if (cancelled) return;
-      const next: Record<string, MaterialPerformanceSnapshot[]> = {};
-      let anyFailed = false;
-      results.forEach((snapshots, i) => {
-        if (snapshots) next[ids[i]] = snapshots;
-        else anyFailed = true;
-      });
-      setSnapshotsByDerivedId(next);
-      // 전부 실패한 경우만 loadFailed — 일부 실패는 그 키가 맵에서 빠진 것으로
-      // 이미 정직하게 드러난다.
-      setLoadFailed(anyFailed && Object.keys(next).length === 0);
-      setLoading(false);
-    })();
-    return () => { cancelled = true; };
-  }, [depsKey]);
+  const { itemsByKey: snapshotsByDerivedId, loading, loadFailed } = useAsyncResourceBatch<MaterialPerformanceSnapshot[]>(
+    derivedIds, fetchOne,
+  );
 
   return { snapshotsByDerivedId, loading, loadFailed };
 }
