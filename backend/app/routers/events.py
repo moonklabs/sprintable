@@ -1716,6 +1716,11 @@ _CAPABILITY_KIND_HINTS: dict[str, str] = {
     "attach_video": "events.capability_hint_attach_video",
     "generate": "events.capability_hint_master_cut_evidence",
 }
+# story #4104(페드루 PO 리뷰, 2026-09-21) — 준비 경고 루프(apply_recipe_role_bindings)가
+# 같은 딕셔너리를 "이 kind는 에이전트 자기 도구로 처리(org 커넥터 무관)"라는 다른 목적으로
+# 재사용한다 — 이름을 붙여 그 의도를 다음 사람이 안 물어도 되게 한다(값은 여전히 하나뿐,
+# 새 원천 아님).
+_AGENT_TOOL_CAPABILITY_KINDS = _CAPABILITY_KIND_HINTS
 
 
 async def _render_event_message_content(
@@ -3271,6 +3276,15 @@ async def apply_recipe_role_bindings(
         if not capability:
             continue
         kind = capability["kind"]
+        # story #4104(페드루 PO 라이브 실측·판단, 2026-09-21) — 준비 경고는 «org 커넥터로
+        # 채워지는 kind»만 대상이다. target 필드(#4090)로는 못 가른다 — collect/publish
+        # 같은 커넥터-백드 kind도 target 기본값이 "agent"라 attach_video/generate(에이전트
+        # 자기 도구 힌트)와 구분이 안 된다. 새 필드를 만드는 대신 이미 있는 닫힌 선언
+        # (`_CAPABILITY_KIND_HINTS` — 자기설명 멘션이 "이 kind는 에이전트가 자기 도구로
+        # 처리"라고 말하는 바로 그 자리)을 재사용한다 — 같은 원천, 새 kind는 거기 한 줄만
+        # 늘리면 이 스킵도 자동으로 맞는다(발명 0·하드코딩 0).
+        if kind in _AGENT_TOOL_CAPABILITY_KINDS:
+            continue
         # story #3359 — capability.connector_key는 정의 저자가 적은 채널 라벨(예:
         # "threads"·"blog")이지 반드시 실 connector_key는 아니다. 리졸버(진리원천 하나,
         # publish 다음-행동 문구와 동일 함수)로 해소한다 — 매핑 없으면 옛처럼 "그 커넥터가
@@ -3281,37 +3295,22 @@ async def apply_recipe_role_bindings(
             if declared_channel else None
         )
         if declared_channel and not connector_key:
-            warnings.append(
-                f"stage={stage!r}: channel={declared_channel!r}에 대한 커넥터 매핑이 없습니다 — "
-                f"조직 설정에 channel_connector_map을 등록하세요."
-            )
+            warnings.append(t("events.apply_channel_connector_map_missing", "ko", stage=stage, channel=declared_channel))
             continue
         if connector_key:
             row = await get_org_connector(db, org_id=org_id, connector_key=connector_key)
             if row is None:
-                warnings.append(
-                    f"stage={stage!r}: connector_key={connector_key!r} 커넥터가 등록돼 있지 "
-                    f"않습니다 — 설정 스킬을 먼저 실행하세요."
-                )
+                warnings.append(t("events.apply_connector_registered_missing", "ko", stage=stage, connector_key=connector_key))
                 continue
             missing = missing_required_org_config(row)
             if missing:
-                warnings.append(
-                    f"stage={stage!r}: connector_key={connector_key!r}의 필수 설정값이 비어 "
-                    f"있습니다 — {missing} (설정 화면에서 등록하세요)."
-                )
+                warnings.append(t("events.apply_connector_config_incomplete", "ko", stage=stage, connector_key=connector_key, missing=missing))
         else:
             candidates = await find_org_connectors_by_kind(db, org_id=org_id, kind=kind)
             if not candidates:
-                warnings.append(
-                    f"stage={stage!r}: kind={kind!r}을 지원하는 커넥터가 이 org에 등록돼 있지 "
-                    f"않습니다 — 설정 스킬을 먼저 실행하세요."
-                )
+                warnings.append(t("events.apply_kind_connector_not_registered", "ko", stage=stage, kind=kind))
             elif not any(not missing_required_org_config(c) for c in candidates):
-                warnings.append(
-                    f"stage={stage!r}: kind={kind!r} 커넥터는 등록돼 있지만 필수 설정값이 "
-                    f"아직 비어 있습니다 — 설정 화면에서 등록하세요."
-                )
+                warnings.append(t("events.apply_kind_connector_config_incomplete", "ko", stage=stage, kind=kind))
 
     actor_id: uuid.UUID | None = None
     try:
