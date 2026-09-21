@@ -373,6 +373,18 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "같은 스토리에 채널 초안을 만들어 제출해 두면 사람 승인 한 번으로 자동 발행까지 이어져요.",
         "en": "Create and submit a channel draft for the same story; one human approval then publishes it automatically.",
     },
+    # story #4104(페드루 PO 라이브 실측, 2026-09-21) — apply 준비 경고 루프(story #3317 PR B)
+    # 두 문구가 "설정 스킬을 먼저 실행하세요"라는 내부어(고객이 뭘 해야 할지 모르는 표현)를
+    # 담고 있었다 — apply 다이얼로그가 warnings를 화면에 그대로 보여주므로 사용자 문장이어야
+    # 한다. 합니다체 → 해요체 전환 겸.
+    "events.apply_connector_registered_missing": {
+        "ko": "stage={stage!r}: connector_key={connector_key!r} 커넥터가 아직 등록돼 있지 않아요 — 조직 설정에서 채널을 먼저 연결하세요.",
+        "en": "stage={stage!r}: connector_key={connector_key!r} is not registered yet — connect the channel in organization settings first",
+    },
+    "events.apply_kind_connector_not_registered": {
+        "ko": "stage={stage!r}: kind={kind!r}을 지원하는 커넥터가 이 조직에 등록돼 있지 않아요 — 조직 설정에서 채널을 먼저 연결하세요.",
+        "en": "stage={stage!r}: no connector supporting kind={kind!r} is registered for this organization — connect the channel in organization settings first",
+    },
     # story #3614 갭(BE, 페드루 PO 確定 2026-09-11) — 폐기(withdrawn, 종결)된 초안
     # submit 거부(409). 새 한글 사용자 문장이라 3796(insight_snapshots.py)과 같은
     # 형으로 처음부터 카탈로그에 등재(BE 한글 사용자 문장 가드 신규 위반 대응).
