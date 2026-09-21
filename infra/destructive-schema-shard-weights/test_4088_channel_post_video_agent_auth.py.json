@@ -1,0 +1,1 @@
+{"file": "tests/test_4088_channel_post_video_agent_auth.py", "sec": 25.0, "source": "story #4088(2026-09-21) 신규 추가 — 로컬 실측 4.1s(uv run pytest -q, disposable DB backend_test_4088_video_auth, 4건: agent 권한 2건+AC4 cross-org 403·413 2건 추가) × 로컬/CI ~6배 비율(measure_destructive_durations_local.py 주석, story #3383) 추정. CI 실측 전 잠정값 — 다음 전수 재측정(story #3558 절차)에서 실 CI 값으로 교체 권장."}
