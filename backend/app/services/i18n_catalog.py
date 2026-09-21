@@ -385,6 +385,22 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "stage={stage!r}: kind={kind!r}을 지원하는 커넥터가 이 조직에 등록돼 있지 않아요 — 조직 설정에서 채널을 먼저 연결하세요.",
         "en": "stage={stage!r}: no connector supporting kind={kind!r} is registered for this organization — connect the channel in organization settings first",
     },
+    # story #4104 CHANGES(페드루 PO 리뷰, 2026-09-21) — 같은 루프의 나머지 3줄도 같은
+    # 클래스(합니다체·내부 용어)였다. "channel_connector_map"은 내부 테이블/설정 키 이름
+    # (화면에 노출하면 고객이 그 이름으로 뭘 찾아야 할지 모름) — 목적지 문장("그 채널을
+    # 먼저 연결하세요")으로 교체.
+    "events.apply_channel_connector_map_missing": {
+        "ko": "stage={stage!r}: channel={channel!r}에 대한 커넥터 연결이 없어요 — 조직 설정에서 그 채널을 먼저 연결하세요.",
+        "en": "stage={stage!r}: no connector is mapped for channel={channel!r} — connect that channel in organization settings first",
+    },
+    "events.apply_connector_config_incomplete": {
+        "ko": "stage={stage!r}: connector_key={connector_key!r}의 필수 설정값이 비어 있어요 — {missing}. 조직 설정 화면에서 채워주세요.",
+        "en": "stage={stage!r}: connector_key={connector_key!r} is missing required configuration — {missing}. Fill it in from organization settings",
+    },
+    "events.apply_kind_connector_config_incomplete": {
+        "ko": "stage={stage!r}: kind={kind!r} 커넥터는 등록돼 있지만 필수 설정값이 아직 비어 있어요 — 조직 설정 화면에서 등록하세요.",
+        "en": "stage={stage!r}: a connector supporting kind={kind!r} is registered but its required configuration is incomplete — register it from organization settings",
+    },
     # story #3614 갭(BE, 페드루 PO 確定 2026-09-11) — 폐기(withdrawn, 종결)된 초안
     # submit 거부(409). 새 한글 사용자 문장이라 3796(insight_snapshots.py)과 같은
     # 형으로 처음부터 카탈로그에 등재(BE 한글 사용자 문장 가드 신규 위반 대응).
