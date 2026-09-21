@@ -932,17 +932,21 @@ describe('GateDetailPage — 단계(역할) 표시(story #4082, #4091로 렌더 
 // matchMedia mock이 아니라 「단일열/2열 grid 클래스 존재」+「우 열 lg:sticky 클래스 존재」만
 // 단언한다(AC2 유나 정정). 실 브레이크포인트 전환 시각 검증은 유나 design:pass(픽셀 캡처)의
 // 몫 — 이 테스트는 «올바른 유틸리티 클래스가 배선됐는가»만 고정.
+//
+// ⚠️정정(페드루 PO CHANGES-1, 2026-09-21 18:14Z) — 최초 구현은 2열 grid를 ProofCapsule의
+// footer «안»에 뒀다. ProofCapsule 셸(CutCornerShell, story #2978 사유로 overflow-hidden이
+// 의도된 값)이 CSS 스펙상 sticky의 스크롤 컨테이너가 되어 우 열이 캡슐 박스 기준으로만
+// 붙고 실제 페이지 스크롤엔 안 반응했다(jsdom 클래스 단언으론 못 잡히는 클래스 — dev-app
+// 실측에서만 드러남). grid를 gate-detail-container(페이지 레벨, ProofCapsule 밖)로 끌어올려
+// ProofCapsule과 우 열 액션 카드를 형제로 둔다 — 아래는 그 새 구조에 맞춘 재작성.
 describe('GateDetailPage — 2열+sticky 레이아웃(story #4121)', () => {
-  it('우 열에 액션이 있을 때(needsAction&&canAct, 평문 버튼 갈래)만 2열 grid+sticky 클래스가 붙는다', async () => {
+  it('우 열에 액션이 있을 때(needsAction&&canAct, 평문 버튼 갈래)만 컨테이너 자체가 2열 grid다', async () => {
     await mount(gate({ can_approve: true, risk_grade: 'low' }));
-    const outer = container.querySelector('[data-testid="gate-detail-container"]');
-    expect(outer?.className).toContain('max-w-2xl');
-    expect(outer?.className).toContain('lg:max-w-6xl');
-
-    const twoCol = container.querySelector('[data-testid="gate-detail-two-col"]');
-    expect(twoCol).toBeTruthy();
-    expect(twoCol?.className).toContain('lg:grid');
-    expect(twoCol?.className).toContain('lg:grid-cols-[minmax(0,1fr)_360px]');
+    const outer = container.querySelector('[data-testid="gate-detail-container"]')!;
+    expect(outer.className).toContain('max-w-2xl');
+    expect(outer.className).toContain('lg:max-w-6xl');
+    expect(outer.className).toContain('lg:grid');
+    expect(outer.className).toContain('lg:grid-cols-[minmax(0,1fr)_360px]');
 
     const actionCol = container.querySelector('[data-testid="gate-detail-action-column"]');
     expect(actionCol).toBeTruthy();
@@ -954,9 +958,26 @@ describe('GateDetailPage — 2열+sticky 레이아웃(story #4121)', () => {
     expect(container.querySelector('[data-testid="gate-detail-single-col"]')).toBeNull();
   });
 
-  it('서명 플로우 갈래(risk_grade=high)도 같은 2열 grid+sticky 클래스를 쓴다(우 열 콘텐츠만 GateSignatureApproval로 갈림)', async () => {
+  // 페드루 PO CHANGES-1 처방의 핵심 회귀 가드 — 우 열 액션 카드가 ProofCapsule의 자손이면
+  // (즉 그 overflow-hidden 셸 안에 있으면) sticky의 실제 스크롤 컨테이너가 페이지가 아니라
+  // 캡슐 박스가 되어버린다. `.proof-surface`(CutCornerShell 자신의 클래스)의 가장 가까운
+  // 조상이 action-column 자기 자신이어야 한다(=캡슐 밖 형제) — 캡슐 «안»이었다면
+  // closest('.proof-surface')가 캡슐 셸(자기 자신이 아닌 조상)을 잡아 이 단언이 깨진다.
+  it('⭐우 열 액션 카드는 ProofCapsule 셸(.proof-surface, overflow-hidden) 밖의 형제다(CHANGES-1 회귀 가드)', async () => {
+    await mount(gate({ can_approve: true, risk_grade: 'low' }));
+    const outer = container.querySelector('[data-testid="gate-detail-container"]')!;
+    const actionCol = container.querySelector('[data-testid="gate-detail-action-column"]')!;
+    // action-column 자신도 재질상 proof-surface지만, 그 "가장 가까운 proof-surface 조상"이
+    // 자기 자신이어야 한다 — 부모 방향으로 올라가며 또 다른 proof-surface(=캡슐 셸)를
+    // 먼저 만나면 안 된다(캡슐 안에 중첩됐다는 뜻).
+    expect(actionCol.closest('.proof-surface')).toBe(actionCol);
+    // 구조적으로도 컨테이너의 직계 자식(그리드 아이템)이어야 한다 — 캡슐 자손이면 중첩
+    // 깊이가 2 이상이라 직계 자식일 수 없다.
+    expect(Array.from(outer.children)).toContain(actionCol);
+  });
+
+  it('서명 플로우 갈래(risk_grade=high)도 같은 형제 카드 구조·sticky 클래스를 쓴다(우 열 콘텐츠만 GateSignatureApproval로 갈림)', async () => {
     await mount(gate({ can_approve: true, risk_grade: 'high' }));
-    expect(container.querySelector('[data-testid="gate-detail-two-col"]')).toBeTruthy();
     const actionCol = container.querySelector('[data-testid="gate-detail-action-column"]');
     expect(actionCol?.className).toContain('lg:sticky');
     // 서명 플로우는 evidenceViewed 체크박스가 우 열 안에 있어야 한다(액션 콘텐츠가 실제로 거기).
@@ -967,7 +988,8 @@ describe('GateDetailPage — 2열+sticky 레이아웃(story #4121)', () => {
     await mount(gate({ can_approve: false }));
     const outer = container.querySelector('[data-testid="gate-detail-container"]');
     expect(outer?.className).not.toContain('lg:max-w-6xl');
-    expect(container.querySelector('[data-testid="gate-detail-two-col"]')).toBeNull();
+    expect(outer?.className).not.toContain('lg:grid');
+    expect(container.querySelector('[data-testid="gate-detail-action-column"]')).toBeNull();
     expect(container.querySelector('[data-testid="gate-detail-single-col"]')).toBeTruthy();
   });
 
@@ -975,26 +997,19 @@ describe('GateDetailPage — 2열+sticky 레이아웃(story #4121)', () => {
     await mount(gate({ status: 'approved', resolver_id: 'someone', resolved_at: new Date().toISOString() }));
     const outer = container.querySelector('[data-testid="gate-detail-container"]');
     expect(outer?.className).not.toContain('lg:max-w-6xl');
-    expect(container.querySelector('[data-testid="gate-detail-two-col"]')).toBeNull();
+    expect(outer?.className).not.toContain('lg:grid');
+    expect(container.querySelector('[data-testid="gate-detail-action-column"]')).toBeNull();
     expect(container.querySelector('[data-testid="gate-detail-single-col"]')).toBeTruthy();
   });
 
-  it('2열일 때 좌 열(산출물·초안)과 우 열(액션)이 구조적으로 분리된 형제 컨테이너다(중복 마운트 없음 — 컴포넌트 내부 diff 0)', async () => {
-    await mount(gate({ can_approve: true, risk_grade: 'low' }));
-    const twoCol = container.querySelector('[data-testid="gate-detail-two-col"]')!;
-    const actionCol = container.querySelector('[data-testid="gate-detail-action-column"]')!;
-    // twoCol의 직계 자식은 정확히 좌 열 1개 + 우 열(action-column) 1개(같은 컴포넌트 트리가
-    // 두 번 마운트되는 게 아니라 하나의 렌더 결과가 좌/우로 «배치»만 됐다는 구조적 증거).
-    expect(twoCol.children).toHaveLength(2);
-    expect(twoCol.children[1]).toBe(actionCol);
-  });
-
-  it('2열일 때 게이트 메타(배지·컨텍스트)는 우 열(sticky)에서만 뜬다', async () => {
+  it('2열일 때 게이트 메타(배지·컨텍스트)는 우 열(sticky 액션 카드)에서만 뜬다', async () => {
     await mount(gate({ can_approve: true, risk_grade: 'low', reapproval_required: true }));
     const actionCol = container.querySelector('[data-testid="gate-detail-action-column"]')!;
     expect(actionCol.textContent).toContain(koMessages.cage.gateReapprovalRequiredChip);
-    const leftCol = container.querySelector('[data-testid="gate-detail-two-col"] > div:first-child')!;
-    expect(leftCol.textContent).not.toContain(koMessages.cage.gateReapprovalRequiredChip);
+    // ProofCapsule 쪽(캡슐 셸)에는 그 메타가 없어야 한다 — 배지·컨텍스트는 전부 우 열로
+    // 옮겨졌다.
+    const capsuleShell = container.querySelector('.proof-surface:not([data-testid="gate-detail-action-column"])')!;
+    expect(capsuleShell.textContent).not.toContain(koMessages.cage.gateReapprovalRequiredChip);
   });
 
   it('단일열(무권한)에서도 평문 승인/거부 버튼이 안 뜨는 대신 무권한 문구는 그대로 뜬다(기존 pin과 정합)', async () => {

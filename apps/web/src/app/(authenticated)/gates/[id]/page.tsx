@@ -331,10 +331,17 @@ export default function GateDetailPage() {
       />
       {/* story #4121 — 컨테이너 폭은 우 열(sticky 승인 패널)이 실제로 그려질 때만 lg:에서
           max-w-6xl로 넓어진다(2열 grid가 필요로 하는 여백). <lg 및 우 열 없는 상태는 기존
-          max-w-2xl 그대로(회귀 0 — 유나 시안 §2 "≤1024는 현 순서·폭 그대로"). */}
+          max-w-2xl 그대로(회귀 0 — 유나 시안 §2 "≤1024는 현 순서·폭 그대로").
+          ⚠️정정(페드루 PO CHANGES-1, 2026-09-21 18:14Z) — 2열 grid는 ProofCapsule
+          «밖»(페이지 레벨)이어야 한다. ProofCapsule의 셸(CutCornerShell, proof-capsule.tsx:152)
+          은 story #2978 사유로 overflow-hidden이 의도된 값인데, CSS 스펙상 position:sticky의
+          스크롤 컨테이너는 «overflow≠visible인 가장 가까운 조상»이라 grid를 그 footer 안에
+          두면 우 열이 캡슐 박스 기준으로만 붙고 실제 페이지 스크롤(dashboard-shell
+          overflow-y-auto)엔 안 반응한다(jsdom 클래스 단언으론 못 잡히고 dev-app 실측에서만
+          보임). grid를 이 컨테이너로 끌어올려 ProofCapsule과 액션 카드를 형제로 둔다. */}
       <div
         data-testid="gate-detail-container"
-        className={`mx-auto flex min-h-full w-full max-w-2xl flex-1 flex-col gap-5 px-4 py-5 ${showActionColumn ? 'lg:max-w-6xl' : ''}`}
+        className={`mx-auto flex min-h-full w-full max-w-2xl flex-1 flex-col gap-5 px-4 py-5 ${showActionColumn ? 'lg:max-w-6xl lg:grid lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start lg:gap-6' : ''}`}
       >
         {loading ? (
           <p className="text-sm text-muted-foreground">{t('gateInboxLoading')}</p>
@@ -632,7 +639,7 @@ export default function GateDetailPage() {
               </>
             );
 
-            return (
+            const proofCapsuleEl = (
               <ProofCapsule
                 density="full"
                 proofState={deriveGateProofState(gate.status).proofState}
@@ -644,24 +651,14 @@ export default function GateDetailPage() {
                 className="max-w-none"
                 footer={
                   showActionColumn ? (
-                    // story #4121 — 우 열(facts+액션)에 실제 콘텐츠가 있을 때만(needsAction&&
-                    // canAct, 즉 4갈래 c·d) 2열 grid. <lg는 grid-cols 자체가 1열(암묵)·
-                    // lg:sticky도 해제 — CSS lg:만 사용(JS useIsMobile 신규 분기 0, PO/유나
-                    // canon: hydration flash·CLS 회피). sticky top 오프셋은 시안 mock의
-                    // top-4가 아니라 셸 상단바(top-bar.tsx h-12) sticky 선례(docs-client-
-                    // layout.tsx sticky top-12)와 동형인 top-12(가려짐 0, 페드루 PO 정정).
-                    <div
-                      data-testid="gate-detail-two-col"
-                      className="mt-3.5 border-t border-proof-line-soft pt-3 lg:grid lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start lg:gap-6"
-                    >
-                      <div className="space-y-3">
-                        {evidencePanels}
-                        {asideExtras}
-                      </div>
-                      <div data-testid="gate-detail-action-column" className="mt-3 space-y-3 lg:mt-0 lg:sticky lg:top-12 lg:self-start">
-                        {gateMetaFacts}
-                        {isSigFlowGate || rejectPanelOpen ? signatureBlock : <div className="space-y-3">{plainActionExtra}</div>}
-                      </div>
+                    // story #4121(페드루 PO CHANGES-1 정정, 2026-09-21 18:14Z) — 우 열이
+                    // 실제로 그려지는 갈래(c·d)에선 이 캡슐 footer엔 좌 열 콘텐츠(산출물·초안·
+                    // 역참조·이력)만 남는다 — 우 열(facts+액션)은 이제 캡슐 밖 형제 카드로
+                    // 옮겨졌다(sticky 스크롤 컨테이너 버그, 아래 gate-detail-container 주석
+                    // 참조).
+                    <div className="mt-3.5 space-y-3 border-t border-proof-line-soft pt-3">
+                      {evidencePanels}
+                      {asideExtras}
                     </div>
                   ) : (
                     // story #4121 — 우 열이 빌 자리(이미 해소·무권한, 4갈래 a·b)는 기존
@@ -684,6 +681,29 @@ export default function GateDetailPage() {
                   )
                 }
               />
+            );
+
+            if (!showActionColumn) return proofCapsuleEl;
+
+            // story #4121(페드루 PO CHANGES-1, 2026-09-21 18:14Z) — 2열 grid는
+            // gate-detail-container(페이지 레벨, ProofCapsule 밖)에서 걸린다(위 컨테이너
+            // className 주석 참조) — 여기선 ProofCapsule과 우 열 액션 카드를 «형제»로만
+            // 반환한다(Fragment — 감싸는 DOM 없이 그리드 아이템 2개가 그대로 노출).
+            // 우 열은 캡슐과 같은 재질(proof-surface, doc ea94dac4 정본)이지만
+            // proof-surface-lift만 쓰고 overflow-hidden은 뺀다(그게 sticky를 깨는
+            // 원인이었다 — CutCornerShell 주석 §2978 참조, shrink-0도 overflow-hidden의
+            // 부작용 상쇄용이라 같이 불요해짐).
+            return (
+              <>
+                {proofCapsuleEl}
+                <div
+                  data-testid="gate-detail-action-column"
+                  className="proof-surface proof-surface-lift mt-3 space-y-3 border border-proof-line bg-proof-panel p-4 lg:mt-0 lg:sticky lg:top-12 lg:self-start"
+                >
+                  {gateMetaFacts}
+                  {isSigFlowGate || rejectPanelOpen ? signatureBlock : <div className="space-y-3">{plainActionExtra}</div>}
+                </div>
+              </>
             );
           })()
         )}
