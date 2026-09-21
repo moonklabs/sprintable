@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { extractCssVarBlock, discoverTintFamilies, discoverBgFamilies, discoverBorderFamilies, computeFamilyContrasts, computeCrossFamilyBgReference, computeCrossCheckContrasts, computeNonTextCrossCheckContrasts, deriveCrossCheckTextVars } from './verify-tint-foreground-contrast';
+import { extractCssVarBlock, discoverTintFamilies, discoverBgFamilies, discoverBorderFamilies, computeFamilyContrasts, computeCrossFamilyBgReference, computeCrossCheckContrasts, computeNonTextCrossCheckContrasts, deriveCrossCheckTextVars, GRANDFATHER_BASELINE } from './verify-tint-foreground-contrast';
 
 const GLOBALS_CSS_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src/app/globals.css');
 
@@ -512,24 +512,30 @@ describe('real repo globals.css — 실제 정의가 전 조합 AA(4.5)를 통�
     expect(r.familyColorOnBackgroundRatio).toBeCloseTo(4.51, 1);
   });
 
-  // story #4055 AC2(전수벤치) — 실 globals.css의 non-status 강조색(brand) 교차 미달이
-  // GRANDFATHER_BASELINE(스크립트 내부, 발견 시점 10건) 밖으로 안 새는지 pin한다. 이 표가
-  // 늘면(새 미달) 이 테스트가 깨져 리뷰를 강제하고, 줄면(누가 고쳤으면) 실패하지 않되
-  // main()의 stale-grandfather 안내로 정리를 유도한다(강한 등호가 아니라 상한만 거는 이유
-  // — grandfather 소멸은 축하할 일이지 막을 일이 아니다).
-  it('brand 교차 미달 — 실 globals.css가 지금 딱 10건이고(발견 당시 그대로), 더 늘지 않았다', () => {
+  // story #4102(#4100 유나 定 A안) — 이 이론적 미달(brand 교차 10건)은 더 이상 CI 게이트가
+  // 아니다(main()의 [story #4102] 섹션은 참고 로그만 찍는다, GRANDFATHER_BASELINE도
+  // 빈 집합) — 진짜 방어는 usage 층(verify-cross-element-tint-text.ts·
+  // verify-no-new-tint-color-text.ts)으로 옮겼다. 이 테스트는 «토큰 정의 수준에서는
+  // 여전히 수학적으로 미달»이라는 순수 참고 수치가 계속 이 값(≤10)으로 안정적임을 pin —
+  // computeCrossCheckContrasts 자체는 안 지웠으니(참고 자료로 유용) 값이 흔들리면 안 된다.
+  it('brand 교차 미달(참고 전용, 게이트 아님) — 실 globals.css가 지금 딱 10건이고(발견 당시 그대로), 더 늘지 않았다', () => {
     const crossCheck = computeCrossCheckContrasts(css);
     const failing = crossCheck.filter((r) => r.ratio < 4.5 && r.textVar === 'brand');
     expect(failing.length).toBeLessThanOrEqual(10);
   });
 
-  // story #4094 AC1/AC3(전수벤치) — deriveCrossCheckTextVars가 상태색 자신을 처음 편입하며
-  // 이 스토리가 실측으로 발견한 신규 미달(전부 4.24~4.46, brand와 별개 원인) — 같은 계약
-  // (상한만·«늘지 않음»), PR 본문 수치 = 11건(발견 당시 그대로).
-  it('상태색-자신 교차 미달 — 실 globals.css가 지금 딱 11건이고(#4094 발견 당시 그대로), 더 늘지 않았다', () => {
+  // story #4102 — 위와 같은 이유로 참고 전용(게이트 아님). 값(≤11) 자체는 무변.
+  it('상태색-자신 교차 미달(참고 전용, 게이트 아님) — 실 globals.css가 지금 딱 11건이고(#4094 발견 당시 그대로), 더 늘지 않았다', () => {
     const crossCheck = computeCrossCheckContrasts(css);
     const failing = crossCheck.filter((r) => r.ratio < 4.5 && r.textVar !== 'brand');
     expect(failing.length).toBeLessThanOrEqual(11);
+  });
+
+  // story #4102 AC2 — «정확히 0» 단언. GRANDFATHER_BASELINE은 usage 층 위임 후 항상
+  // 빈 집합이어야 한다 — 누가 다시 채우면 이 테스트가 즉시 깨진다(토큰 값 조정을 다시
+  // 시도하는 대신 usage 가드를 고치라는 신호).
+  it('GRANDFATHER_BASELINE은 정확히 0건이다(story #4102 AC2 — usage 층 위임 후 늘지 않음)', () => {
+    expect(GRANDFATHER_BASELINE.size).toBe(0);
   });
 
   // story #4094 AC2 — 비텍스트(border·ring) 3:1 게이트는 실 globals.css에서 신규 미달 0건

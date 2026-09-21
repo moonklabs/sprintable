@@ -16,6 +16,12 @@
  * ②컴포넌트 경계 넘는 bg(<Alert>·SectionCard 헤더·Button hover-variant) — 다른 파일이라 원리적 불가.
  * 그 자리는 (B) axe가 실 픽셀로 authoritative하게 잡는다. (A)↔(B) 충돌 시 (B) 승.
  * 잔여 오탐의 밸브 = `// tint-guard-ok: <이유>`(이유 필수·grep 가능·안 썩게). 이유 없으면 통과 안 됨.
+ *
+ * 색 규율(story #4100·#4102, PO 결정 2026-09-21 10:45Z — [UX-v3] 토큰 표 §⑥-3):
+ * 「상태색·브랜드 색을 다른 계열의 tint/bg 위 «텍스트»로 쓰지 않는다. tint/bg 위 글자는
+ * 언제나 text-foreground — 계열 정체성은 border·bg·아이콘으로 전한다.」 brand·primary도
+ * 이 가드의 텍스트 축이다(EXTRA_TEXT_COLORS, #4102 AC1 — #4048 text-brand on
+ * bg-info-tint 실사고 재현).
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
@@ -23,6 +29,15 @@ import ts from 'typescript';
 
 export const FAMILIES = ['destructive', 'info', 'success', 'warning'] as const;
 export type Family = (typeof FAMILIES)[number];
+
+/** story #4102(#4100 유나 定 A안) — brand·primary는 상태색과 달리 자기 pale-bg 계열을
+ * ancestor로 흔히 쓰지 않는다(brand·primary는 «강조 텍스트색»으로 주로 쓰임) — 그래서
+ * paleBgsIn(조상 pale-bg 탐지)은 FAMILIES 그대로 두고, 이 자리는 TEXT 축만 넓힌다
+ * (#4048 text-brand on bg-info-tint 실사고 — 조상은 여전히 기존 4계열, 새로 넓히는 건
+ * "그 위에 놓이는 글자색"이 brand·primary여도 잡는지). ancestors.some(strong)이 이미
+ * 계열 무관(cross-family)으로 판정하므로 이 배열에 추가하는 것만으로 교차 판정이 켜진다. */
+export const EXTRA_TEXT_COLORS = ['brand', 'primary'] as const;
+export type TextColor = Family | (typeof EXTRA_TEXT_COLORS)[number];
 
 interface PaleBg { family: Family | 'muted'; strength: 'strong' | 'weak'; }
 
@@ -40,8 +55,9 @@ function paleBgsIn(cls: string): PaleBg[] {
   return out;
 }
 
-function textFamiliesIn(cls: string): Family[] {
-  return FAMILIES.filter(
+function textFamiliesIn(cls: string): TextColor[] {
+  const all: readonly TextColor[] = [...FAMILIES, ...EXTRA_TEXT_COLORS];
+  return all.filter(
     (fam) =>
       new RegExp(`(?<![\\w-])text-${fam}(?:/\\d+)?(?![\\w-])`).test(cls) &&
       !new RegExp(`text-${fam}-foreground`).test(cls),
@@ -89,7 +105,7 @@ function classNameStringsOf(opening: ts.JsxOpeningLikeElement): string[] {
   return [];
 }
 
-export interface Violation { file: string; line: number; family: Family; className: string; }
+export interface Violation { file: string; line: number; family: TextColor; className: string; }
 
 export function violationKey(v: Pick<Violation, 'file' | 'family' | 'className'>): string {
   return `${v.file}::${v.family}::${v.className}`;
