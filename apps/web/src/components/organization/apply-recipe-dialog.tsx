@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -257,7 +258,13 @@ export function ApplyRecipeDialog({
                 <Button variant="outline" size="sm" onClick={loadGenerationConnectors}>{t('eventApplyAgentsRetry')}</Button>
               </div>
             ) : hasGenerationStage && generationConnectorsStatus === 'loaded' && generationConnectors.filter((c) => c.status === 'active').length === 0 ? (
-              <p className="text-xs text-muted-foreground" data-testid="apply-recipe-generation-connectors-empty">{t('eventApplyGenerationConnectorsEmpty')}</p>
+              <p className="text-xs text-muted-foreground" data-testid="apply-recipe-generation-connectors-empty">
+                {t('eventApplyGenerationConnectorsEmpty')}{' '}
+                {/* story #4116(#4112 시안 §6) — 빈 상태 문장 끝에 목적지 링크. */}
+                <Link href="/organization/generation-connectors" className="text-primary underline">
+                  {t('eventApplyGenerationConnectorsEmptyLinkAction')}
+                </Link>
+              </p>
             ) : null}
             <RecipeRoleMappingFields
               stages={stages}

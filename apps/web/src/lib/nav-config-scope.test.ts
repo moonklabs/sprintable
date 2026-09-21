@@ -38,8 +38,10 @@ describe('NAV_GROUPS scope — story #9c5e82dc(IA·S3 AC1)', () => {
   // story #3743(UI 재설계 ③, 페드루 PO 決) — org-connectors 항목이 organization/channels로
   // 흡수·리다이렉트되며 nav에서 걷혔다(⑦ IA 25→24 실물, 이 파일 축으로는 24→23).
   // story #3845 §①④ — retro·standup이 「일감」 탭으로 흡수되며 23→21.
-  it('항목 21개 전부가 scope 분류 대상이다(회귀 시 이 수부터 어긋난다)', () => {
-    expect(allItems()).toHaveLength(21);
+  // story #4116(2026-09-21) — org-generation-connectors 신설(연결·규칙, 채널 연결의
+  // 형제 화면)로 21→22.
+  it('항목 22개 전부가 scope 분류 대상이다(회귀 시 이 수부터 어긋난다)', () => {
+    expect(allItems()).toHaveLength(22);
   });
 
   it('project 스코프 7항목이 정확히 이 집합이다(story #3845로 9→7, retro·standup 제외)', () => {
@@ -48,14 +50,15 @@ describe('NAV_GROUPS scope — story #9c5e82dc(IA·S3 AC1)', () => {
   });
 
   // story #3743 — org-connectors 걷힘으로 13→11→10(이 스토리에서 -1).
-  it('org 스코프 10항목 — project·애매를 뺀 나머지 전부(카디르 QA 재감사로 13→11·#3743으로 11→10)', () => {
+  // story #4116 — org-generation-connectors 신설로 10→11.
+  it('org 스코프 11항목 — project·애매를 뺀 나머지 전부(카디르 QA 재감사로 13→11·#3743으로 11→10·#4116으로 10→11)', () => {
     const orgIds = allItems().filter((i) => i.scope === 'org').map((i) => i.id).sort();
     const expected = allItems()
       .map((i) => i.id)
       .filter((id) => !PROJECT_SCOPED_IDS.includes(id) && !AMBIGUOUS_IDS.includes(id))
       .sort();
     expect(orgIds).toEqual(expected);
-    expect(orgIds).toHaveLength(10);
+    expect(orgIds).toHaveLength(11);
   });
 
   it('애매 4항목(inbox·settings·org-briefing·org-workforce)은 scope 필드 자체가 없다(undefined — org로 기본값 안 깖)', () => {

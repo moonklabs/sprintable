@@ -4,6 +4,7 @@ import {
   Bot,
   Brain,
   ClipboardList,
+  Cpu,
   FileText,
   FlaskConical,
   GalleryVerticalEnd,
@@ -150,6 +151,9 @@ export const NAV_GROUPS: NavGroupConfig[] = [
     labelKey: 'zoneConnectRules',
     items: [
       { id: 'org-channels', labelKey: 'orgChannels', descriptionKey: 'descOrgChannels', icon: Share2, kind: 'static', path: '/organization/channels', scope: 'org' },
+      // story #4116(#4112 유나 시안 55a04e8d) — 채널 연결의 형제 화면. «연결»(계정 링크)과
+      // «커넥터»(자격 등록)는 용어 구분이 곧 메커니즘 구분(유나 canon, §8) — 통일 대신 병치.
+      { id: 'org-generation-connectors', labelKey: 'orgGenerationConnectors', descriptionKey: 'descOrgGenerationConnectors', icon: Cpu, kind: 'static', path: '/organization/generation-connectors', scope: 'org' },
       { id: 'org-content-rules', labelKey: 'orgContentRules', descriptionKey: 'descOrgContentRules', icon: ListChecks, kind: 'static', path: '/organization/content-rules', scope: 'org' },
     ],
   },

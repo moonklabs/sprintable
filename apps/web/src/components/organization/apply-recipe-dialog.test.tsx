@@ -442,6 +442,38 @@ describe('ApplyRecipeDialog', () => {
     expect(document.body.querySelector('[data-testid="apply-recipe-generation-connectors-load-error"]')).toBeNull();
   });
 
+  // story #4116(#4112 시안 §6) — 연산 커넥터 빈 상태 문장 끝에 /organization/
+  // generation-connectors로 가는 목적지 링크가 있다(#4479 비차단① 닫기).
+  it('연산 커넥터 빈 상태 문장에 /organization/generation-connectors 목적지 링크가 있다', async () => {
+    useDashboardContextMock.mockReturnValue({ orgId: 'org-1' });
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/projects') return { ok: true, json: async () => ({ data: [{ id: 'proj-1', name: 'Proj One' }] }) };
+      if (url.includes('/api/team-members')) return { ok: true, json: async () => ({ data: [{ id: 'agent-1', name: '디디군' }] }) };
+      if (url.includes('/api/events/definitions/def-1/bindings')) return { ok: true, json: async () => ({ bindings: {} }) };
+      if (url.includes('/channel-connections')) return { ok: true, json: async () => ({ data: [] }) };
+      if (url.includes('/generation-connectors')) return { ok: true, json: async () => ({ data: { connectors: [] } }) };
+      throw new Error('unexpected fetch: ' + url);
+    }));
+
+    await act(async () => {
+      root.render(wrap(
+        <ApplyRecipeDialog
+          target={TARGET_WITH_CHANNEL_AND_GENERATION} open onOpenChange={() => {}}
+          t={((k: string) => k) as never} tc={((k: string) => k) as never} addToast={() => {}}
+        />,
+      ));
+    });
+    await flush();
+    const projectSelect4 = document.body.querySelector('select') as HTMLSelectElement;
+    await act(async () => { projectSelect4.value = 'proj-1'; projectSelect4.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+
+    const emptyBlock = document.body.querySelector('[data-testid="apply-recipe-generation-connectors-empty"]')!;
+    const link = emptyBlock.querySelector('a')!;
+    expect(link).toBeTruthy();
+    expect(link.getAttribute('href')).toBe('/organization/generation-connectors');
+  });
+
   it('로딩 中(fetch 미완)엔 두 leg 다 «없어요»·실패 문구 둘 다 안 뜬다(먼저 보이면 오독)', async () => {
     useDashboardContextMock.mockReturnValue({ orgId: 'org-1' });
     let resolveChannels: (() => void) | null = null;

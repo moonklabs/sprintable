@@ -741,6 +741,18 @@ export const EXEMPT_PAIRS = new Set<string>([
   // 실수로 낳은 근접 중복이 아니다).
   'chats.approvalRequestEscalationReason <-> eventCard.reasonLabel',
   'chats.approvalRequestResolutionNote <-> eventCard.reasonLabel',
+  // story #4116(CI RED, 페드루 PO 지적 2026-09-21) — organization.gcRevokeAriaLabel
+  // ("{n}번째 연산 커넥터 {label} 해지", 해지 버튼 접근 이름, story #3592 §22-18 정본 —
+  // channels/page.tsx::channelRowActionAriaLabel과 동형)이 같은 파일의 gcTitle("연산
+  // 커넥터", 화면 제목)·gcRevokeAction("해지", 그 버튼의 보이는 라벨)을 부분문자열로
+  // 품는다. 위 comments*AriaLabel 6건(2026-09-07 등재)과 정확히 같은 클래스 — aria-label은
+  // 스크린리더 전용이라 사람 눈에는 항상 시각적 라벨(gcTitle·gcRevokeAction) 아니면
+  // 보조기술 이름(gcRevokeAriaLabel) 중 하나만 보인다("화면에서 겹쳐 보인다"가 구조적으로
+  // 성립하지 않음). gcRevokeAriaLabel이 그 행의 보이는 라벨("해지")과 화면 제목("연산
+  // 커넥터")을 그대로 품는 건 AC11이 요구하는 그 자체(보조기술 이름이 실제로 무엇을
+  // 가리키는지 전달)라 겹치는 게 정상.
+  'organization.gcRevokeAriaLabel <-> organization.gcTitle',
+  'organization.gcRevokeAction <-> organization.gcRevokeAriaLabel',
 ]);
 
 // ⛔⭐오르테가군 지적(2026-07-31) — 이 목록에 «새로» 넣는 것은 PO 승인을 거친다. 이유 없이
