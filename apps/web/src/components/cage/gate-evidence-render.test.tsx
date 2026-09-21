@@ -428,6 +428,29 @@ describe('GateEvidence — 레시피 approve 게이트 승인 대상 실물 렌�
       expect(container.textContent).not.toContain(koMessages.cage.linkedChannelDraftNone);
     });
 
+    it('레시피 무관 unscoped external_publish 게이트(facts에 stage/triggered_by_event 없음)엔 카드 자체가 안 뜬다', async () => {
+      // 페드루 PO REQUIRED(2026-09-21, PR #4475 리뷰) — BE가 이미 같은 전제(neutral_
+      // facts.triggered_by_event·stage)로 가드를 좁혀 이런 게이트엔 linked_channel_
+      // draft/_pending을 항상 기본값(null/false)으로 둔다. FE도 recipeFacts(레시피
+      // 게이트 판별)를 AND로 걸지 않으면 그 기본값을 «제출된 초안 없음» 문구로
+      // 오독해 렌더한다 — 다른 세계의 문장이 새는 자리(state B 진입은 sealed_
+      // content_*로, stage/channel 없이).
+      const gate = recipeApprovalGate(
+        {},
+        {
+          scope_key: '', linked_channel_draft: null, linked_channel_draft_pending: false,
+          sealed_content_body: '레시피 무관 본문', sealed_content_version: 1,
+        },
+      );
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+      expect(container.textContent).not.toContain(koMessages.cage.linkedChannelDraftNone);
+      expect(container.textContent).not.toContain(koMessages.cage.linkedChannelDraftPending);
+    });
+
     it('scoped(초안 자체) 게이트(scope_key≠"")에는 카드 자체가 안 뜬다', async () => {
       // 실 scoped external_publish 게이트 형상(submit_channel_post_draft가 채우는 sealed_
       // content_* — State B 렌더 진입 조건, «근거 데이터 없음»으로 조기 return되면 이 케이스

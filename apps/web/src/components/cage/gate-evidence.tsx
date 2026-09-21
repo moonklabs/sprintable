@@ -1158,7 +1158,15 @@ export function GateEvidence({ gate, className }: { gate: GateItem; className?: 
       {showRepending ? <GithubRependingReason gateId={gate.id} /> : null}
       {draft ? <HypothesisOutcomeDraft draft={draft} /> : null}
       {recipeFacts ? <RecipeApprovalFactsBlock facts={recipeFacts} /> : null}
-      {gate.gate_type === 'external_publish' && (gate.scope_key ?? '') === '' ? (
+      {/* 페드루 PO REQUIRED(PR #4475 리뷰) — BE와 같은 전제(레시피 게이트, neutral_
+          facts.stage 실림 — BE 가드는 stage·triggered_by_event 둘 다 보지만 FE엔
+          stage만 노출돼 있고 둘은 _build_approval_neutral_facts에서 항상 같이
+          찍힌다)로 좁힌다. recipeFacts !== null만으로는 부족(sealed_content_* 등
+          다른 축으로도 non-null이 될 수 있다 — 뮤테이션 실측으로 확認) — 비레시피
+          unscoped external_publish 게이트에도 "승인해도 발행되지 않아요" 카드가
+          새 다른 세계의 문장이 붙는다. BE가 두 필드를 기본값(null/false)으로 둘
+          때 FE도 렌더 자체를 0으로. */}
+      {gate.gate_type === 'external_publish' && (gate.scope_key ?? '') === '' && recipeFacts?.stage ? (
         <LinkedChannelDraftCard gate={gate} />
       ) : null}
       {reason ? (
