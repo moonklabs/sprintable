@@ -12,6 +12,7 @@ import { parseEntityRef, unescapeReferenceLabel } from '@/components/chat/entity
 import { useOrgDomainLabels } from '@/hooks/use-org-domain-labels';
 import { gateStatusLabel } from '@/lib/gate-status-label';
 import { gateTypeLabel } from '@/lib/gate-type-label';
+import { recipeStageLabel } from '@/lib/recipe-stage-label';
 import { entityTypeLabel } from '@/components/chat/chat-input-entity-tokens';
 import { formatLocaleDateTime } from '@/lib/i18n';
 
@@ -194,6 +195,7 @@ export function EventBlockCard({ template, payload, refs }: EventBlockCardProps)
   const tBoard = useTranslations('board');
   const tCage = useTranslations('cage');
   const tDashboard = useTranslations('dashboard');
+  const tOrg = useTranslations('organization');
   const tEventCard = useTranslations('eventCard');
   const tOutcomeLoop = useTranslations('outcomeLoop');
   const tHypotheses = useTranslations('hypotheses');
@@ -233,6 +235,15 @@ export function EventBlockCard({ template, payload, refs }: EventBlockCardProps)
   const gateType = payload['gate_type'];
   if (typeof gateType === 'string') {
     labels['gate_type'] = gateTypeLabel(tDashboard, gateType);
+  }
+  // story #4086 — 레시피 사이클형 정의(preset.marketing.video_production 등)의 단계
+  // 알림이 raw stage slug("draft" 등)를 그대로 노출했다. recipe-stage-label.ts(story
+  // #4049/#4082, 스토리 패널·결재함·게이트 상세 3표면이 이미 쓰는 그 SSOT — 두 번째
+  // 사전 0)로 해소 — 미등재 slug는 원시값 그대로(지어내지 않음, 기존 recipeStageLabel
+  // pass-through 계약 그대로).
+  const stage = payload['stage'];
+  if (typeof stage === 'string') {
+    labels['stage'] = recipeStageLabel(stage, tOrg);
   }
 
   // story #3884 AC1 — refs.work_item(events.py의 세 모양)을 labels.work_item_target으로
