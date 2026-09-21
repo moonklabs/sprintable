@@ -2,7 +2,10 @@
 //
 // story #4048(E-RECIPE-1 ①) — 4슬롯 적용 다이얼로그 계약 핀 고정(PO 判定 2026-09-18,
 // story #4046): 크리에이터만 실제 role_mapping으로 제출되고, 디렉터는 게이트 approver를
-// 읽기 전용으로 보여주며, 연산·발행자 picker는 비활성(이 카드 범위 밖)이다.
+// 읽기 전용으로 보여주며, 연산 picker는 비활성(이 카드 범위 밖·#4101이 3번째 소비처로
+// 배선 예정)이다. 발행자(채널 연결)는 story #4103(#4090 AC1 잔여, 페드루 PO 실측
+// 2026-09-21)로 실 배선됐다 — capability.target=channel_connection 선언 stage가 있을
+// 때만 active 채널 연결 select가 뜨고, 그 값이 role_mapping[published]로 제출된다.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
@@ -327,5 +330,151 @@ describe('MarketingRecipeApplyDialog — 4슬롯 다른 메커니즘', () => {
 
     expect(onSubmit).not.toHaveBeenCalled(); // 로컬 방어선에서 막혀 API 자체를 안 부른다.
     expect(document.body.textContent).toContain('저장된 배정이 없어요');
+  });
+
+  // story #4103(#4090 AC1 잔여) — 발행자(채널 연결) 실 배선. capability.target=
+  // channel_connection이 선언된 real-shape 레시피로만 재현(위 RECIPE는 무선언이라
+  // publisherRequired 자체가 안 걸려 이 축을 검증 못 한다).
+  const RECIPE_WITH_PUBLISHER_TARGET: EventDefinitionResponse & { id: string } = {
+    ...RECIPE,
+    stage_metadata: {
+      ...RECIPE.stage_metadata,
+      published: { role: '발행자', capability: { kind: 'publish', target: 'channel_connection' } },
+    },
+  };
+
+  function stubMemberAndChannelFetch(channels: { id: string; channel: string; account_label: string | null; account_id: string; status: string }[]) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/api/team-members')) {
+        return { ok: true, json: async () => [{ id: 'agent-1', name: '댄', type: 'agent' }] };
+      }
+      if (url.startsWith('/api/organizations/org-1/channel-connections')) {
+        return { ok: true, json: async () => ({ data: channels }) };
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    }));
+  }
+
+  it('있음 — active 채널 연결이 발행자 select 옵션으로 렌더되고(revoked/disconnected 등 비active는 제외)', async () => {
+    stubMemberAndChannelFetch([
+      { id: 'conn-1', channel: 'instagram', account_label: '메인 인스타', account_id: 'a1', status: 'active' },
+      { id: 'conn-2', channel: 'threads', account_label: null, account_id: 'a2', status: 'disconnected' },
+    ]);
+    await act(async () => {
+      root.render(wrap(
+        <MarketingRecipeApplyDialog
+          recipe={RECIPE_WITH_PUBLISHER_TARGET} open onOpenChange={() => {}} creatorRoleLabel="크리에이터"
+          projects={[{ id: 'proj-1', name: 'Proj' }]} orgId="org-1" onSubmit={async () => ({ ok: true })}
+        />,
+      ));
+    });
+    await flush();
+
+    const publisherSelect = document.body.querySelector<HTMLSelectElement>('[data-testid="publisher-connection-select"]')!;
+    expect(publisherSelect.disabled).toBe(false);
+    const optionTexts = Array.from(publisherSelect.querySelectorAll('option')).map((o) => o.textContent);
+    expect(optionTexts).toContain('메인 인스타');
+    expect(optionTexts).not.toContain('threads(a2)');
+  });
+
+  it('없음 — active 채널 연결 0건이면 안내 문구가 뜨고 제출 버튼이 비활성', async () => {
+    stubMemberAndChannelFetch([]);
+    await act(async () => {
+      root.render(wrap(
+        <MarketingRecipeApplyDialog
+          recipe={RECIPE_WITH_PUBLISHER_TARGET} open onOpenChange={() => {}} creatorRoleLabel="크리에이터"
+          projects={[{ id: 'proj-1', name: 'Proj' }]} orgId="org-1" onSubmit={async () => ({ ok: true })}
+        />,
+      ));
+    });
+    await flush();
+
+    const projectSelect = document.body.querySelector<HTMLSelectElement>('#marketing-recipe-apply-project')!;
+    await act(async () => { projectSelect.value = 'proj-1'; projectSelect.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+    const creatorSelect = document.body.querySelector<HTMLSelectElement>('[data-testid="creator-agent-select"]')!;
+    await act(async () => { creatorSelect.value = 'agent-1'; creatorSelect.dispatchEvent(new Event('change', { bubbles: true })); });
+
+    const emptyHint = document.body.querySelector('[data-testid="marketing-apply-channels-empty"]');
+    expect(emptyHint?.textContent).toBe(koMessages.organization.eventApplyChannelsEmpty);
+    const submitBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent === '적용하기')!;
+    expect(submitBtn.hasAttribute('disabled')).toBe(true);
+  });
+
+  it('선택 제출 — 발행자로 고른 채널 연결 id가 role_mapping[published]로 실려 onSubmit이 불린다', async () => {
+    stubMemberAndChannelFetch([
+      { id: 'conn-1', channel: 'instagram', account_label: '메인 인스타', account_id: 'a1', status: 'active' },
+    ]);
+    const onSubmit = vi.fn(async () => ({ ok: true, bindingsUpserted: 3 }));
+    await act(async () => {
+      root.render(wrap(
+        <MarketingRecipeApplyDialog
+          recipe={RECIPE_WITH_PUBLISHER_TARGET} open onOpenChange={() => {}} creatorRoleLabel="크리에이터"
+          projects={[{ id: 'proj-1', name: 'Proj' }]} orgId="org-1" onSubmit={onSubmit}
+        />,
+      ));
+    });
+    await flush();
+
+    const projectSelect = document.body.querySelector<HTMLSelectElement>('#marketing-recipe-apply-project')!;
+    await act(async () => { projectSelect.value = 'proj-1'; projectSelect.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+    const creatorSelect = document.body.querySelector<HTMLSelectElement>('[data-testid="creator-agent-select"]')!;
+    await act(async () => { creatorSelect.value = 'agent-1'; creatorSelect.dispatchEvent(new Event('change', { bubbles: true })); });
+    const publisherSelect = document.body.querySelector<HTMLSelectElement>('[data-testid="publisher-connection-select"]')!;
+    await act(async () => { publisherSelect.value = 'conn-1'; publisherSelect.dispatchEvent(new Event('change', { bubbles: true })); });
+
+    const submitBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent === '적용하기')!;
+    expect(submitBtn.hasAttribute('disabled')).toBe(false);
+    await act(async () => { submitBtn.click(); });
+    await flush();
+
+    expect(onSubmit).toHaveBeenCalledWith({
+      recipeId: 'mkt-1',
+      projectId: 'proj-1',
+      roleMapping: { draft: 'agent-1', animatic: 'agent-1', published: 'conn-1' },
+    });
+  });
+
+  // story #4103 CHANGES-1(페드루 PO 리뷰, 2026-09-21) — 채널 목록 fetch 실패를 "0건"과
+  // 구분한다(#3521 agentsLoadFailed와 동형 축). 실패면 «없어요»(진짜 0건 문구) 대신
+  // channelConnect.channelLoadFailed + 재시도 버튼 — 재시도 성공 시 옵션이 채워진다.
+  it('채널 목록 fetch 실패 — «없어요» 대신 로드 실패 문구+재시도, 재시도 성공하면 옵션이 채워진다', async () => {
+    let shouldFail = true;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/api/team-members')) {
+        return { ok: true, json: async () => [{ id: 'agent-1', name: '댄', type: 'agent' }] };
+      }
+      if (url.startsWith('/api/organizations/org-1/channel-connections')) {
+        if (shouldFail) return { ok: false, json: async () => ({}) };
+        return { ok: true, json: async () => ({ data: [{ id: 'conn-1', channel: 'instagram', account_label: '메인 인스타', account_id: 'a1', status: 'active' }] }) };
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    }));
+
+    await act(async () => {
+      root.render(wrap(
+        <MarketingRecipeApplyDialog
+          recipe={RECIPE_WITH_PUBLISHER_TARGET} open onOpenChange={() => {}} creatorRoleLabel="크리에이터"
+          projects={[{ id: 'proj-1', name: 'Proj' }]} orgId="org-1" onSubmit={async () => ({ ok: true })}
+        />,
+      ));
+    });
+    await flush();
+
+    expect(document.body.querySelector('[data-testid="marketing-apply-channels-load-error"]')).toBeTruthy();
+    expect(document.body.querySelector('[data-testid="marketing-apply-channels-empty"]')).toBeNull();
+    const publisherSelect = document.body.querySelector<HTMLSelectElement>('[data-testid="publisher-connection-select"]')!;
+    expect(publisherSelect.disabled).toBe(true);
+
+    shouldFail = false;
+    const retryBtn = [...document.body.querySelectorAll('[data-testid="marketing-apply-channels-load-error"] button')][0] as HTMLButtonElement;
+    await act(async () => { retryBtn.click(); });
+    await flush();
+
+    expect(document.body.querySelector('[data-testid="marketing-apply-channels-load-error"]')).toBeNull();
+    expect(publisherSelect.disabled).toBe(false);
+    const optionTexts = Array.from(publisherSelect.querySelectorAll('option')).map((o) => o.textContent);
+    expect(optionTexts).toContain('메인 인스타');
   });
 });

@@ -706,7 +706,6 @@
     "recipeApplyV2NoOpError": "저장된 배정이 없어요(0건). 크리에이터 배정이 실제로 반영되지 않았어요 — 다시 시도하거나 관리자에게 알려주세요.",
     "recipeApplyV2PersonPlaceholder": "사람 선택…",
     "recipeApplyV2ModelSetPlaceholder": "모델 세트 선택…",
-    "recipeApplyV2ChannelPlaceholder": "담당 선택…",
     "recipeApplyV2ContractNote": "네 슬롯은 각자 제 메커니즘에 꽂혀요 — 크리에이터=역할 바인딩(에이전트)·디렉터=승인 주체(조직 구성원)·연산=모델·예산 설정·발행자=발행 채널. 하나의 역할 배정으로 안 넓혀요.",
     "recipeApplyV2NotConfiguredNote": "이 자리는 아직 연결할 수 없어요 — 후속 카드에서 배선돼요.",
     "recipeDetailSummary": "단계 {stageCount} · 게이트 {gateCount} · 역할 {roleCount}",

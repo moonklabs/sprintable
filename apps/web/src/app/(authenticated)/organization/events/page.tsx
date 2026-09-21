@@ -334,6 +334,7 @@ export default function OrganizationEventsPage() {
         onOpenChange={(open) => { if (!open) setMarketingApplyTarget(null); }}
         creatorRoleLabel={MARKETING_CREATOR_ROLE_KEY}
         projects={marketingProjects}
+        orgId={orgId}
         onSubmit={async (args) => {
           const result = await submitMarketingRecipeApply(args);
           // story #4426 P1 잔여(카디르 재QA, 2026-09-19) — result.ok는 요청 성공 여부일 뿐
