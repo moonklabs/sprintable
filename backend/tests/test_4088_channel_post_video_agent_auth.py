@@ -186,3 +186,81 @@ async def test_agent_api_key_can_confirm_video_upload_and_is_recorded_as_agent_a
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_agent_from_other_org_gets_403_on_video_confirm():
+    """AC4 — 타 org 키 403. agent의 실 소속(claims org_id)은 org B인데 org A의 draft를
+    가리키는 URL로 confirm을 호출하면, `post_channel_post_video_confirm`의 첫 줄
+    `if org_id != verified_org_id: raise 403`(org_id mismatch)에서 걸린다 — 이 가드는
+    caller kind와 무관하게 모든 호출자에 적용되는 1차 경계라, video 엔드포인트에도
+    새로 심을 코드가 없다는 이 스토리의 핵심 주장과 같은 증거."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_a_id, project_a_id = await _seed_org(s, slug=f"org-a-{uuid.uuid4().hex[:8]}")
+            org_b_id, project_b_id = await _seed_org(s, slug=f"org-b-{uuid.uuid4().hex[:8]}")
+            human_a_id = await _seed_human(s, org_a_id, project_a_id)
+            agent_b_id = await _seed_agent(s, org_b_id, project_b_id)
+            connection_a_id = await _seed_connection(s, org_a_id, channel="instagram_sandbox")
+            story_a_id = await _seed_story(s, org_a_id, project_a_id)
+
+        _setup_org_scoped_app(app, Session, org_a_id, user_id=human_a_id, agent=False)
+        async with _client_for(app) as client:
+            draft_a_id = await _create_draft(client, org_id=org_a_id, connection_id=connection_a_id, story_id=story_a_id)
+
+        # agent_b_id의 claims org_id는 org_b_id(자기 소속 그대로) — org_a_id의 draft를
+        # URL로 가리킨다(도용 아님, "남의 조직 것을 잘못/악의로 겨냥"의 최소 재현).
+        _setup_org_scoped_app(app, Session, org_b_id, user_id=agent_b_id, agent=True)
+        object_path = _object_path_for_video(org_a_id, draft_a_id)
+        async with _client_for(app) as client:
+            r_upload_url = await client.post(
+                f"/api/v2/organizations/{org_a_id}/channel-posts/drafts/{draft_a_id}/assets/video/upload-url",
+                json={"content_type": "video/mp4"},
+            )
+            r_confirm = await client.post(
+                f"/api/v2/organizations/{org_a_id}/channel-posts/drafts/{draft_a_id}/assets/video/confirm",
+                json={"object_path": object_path},
+            )
+        assert r_upload_url.status_code == 403, r_upload_url.text
+        assert r_confirm.status_code == 403, r_confirm.text
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_agent_video_over_size_limit_rejected_413():
+    """AC4 — 한도 초과 413. instagram_sandbox video_max_bytes=100MB(channel_adapters.py)
+    보다 1바이트 큰 payload — `confirm_channel_post_video_upload`의 크기 검사가
+    `parse_mp4_metadata`(MP4 박스 파싱) *前*이라 유효 MP4가 아니어도 이 갈래를 그대로
+    탄다(라인 순서 그대로, 새 픽스처 불요 — 순수 바이트열)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id, channel="instagram_sandbox")
+            story_id = await _seed_story(s, org_id, project_id)
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=False)
+        async with _client_for(app) as client:
+            draft_id = await _create_draft(client, org_id=org_id, connection_id=connection_id, story_id=story_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        oversized = b"\x00" * (100 * 1024 * 1024 + 1)
+        object_path = _object_path_for_video(org_id, draft_id)
+        await _put_raw_object(object_path, oversized, content_type="video/mp4")
+        async with _client_for(app) as client:
+            r = await client.post(
+                f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/assets/video/confirm",
+                json={"object_path": object_path},
+            )
+        assert r.status_code == 413, r.text
+        assert r.json()["error"]["code"] == "CHANNEL_VIDEO_TOO_LARGE", r.text
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
