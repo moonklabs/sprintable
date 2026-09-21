@@ -642,7 +642,9 @@ export default function RetroSessionPage() {
         }
       />
 
-      <div className="focus-inset flex min-h-0 flex-1 flex-col overflow-y-auto">
+      {/* story #4130 — 고정 툴바 없음(TopBarSlot은 포털) — 로컬 스크롤 경계를 걷어내고
+          셸의 단일 스크롤러(:199)가 스크롤하게 둔다. */}
+      <div className="focus-inset flex flex-col">
         {/* E-SPRINT-LOOP FE(5feac498) — 셸(stepper 프레임)은 항상 렌더(핸드오프 §4①). session
             도착 전엔 중립 skeleton 칩(어느 단계인지 아직 모름)·도착 후 실제 상태로 hydrate. */}
         {session && currentStage ? (

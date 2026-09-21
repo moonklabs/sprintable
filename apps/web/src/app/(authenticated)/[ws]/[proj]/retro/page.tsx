@@ -163,12 +163,16 @@ export default function RetroPage() {
         }
         showContextChip
       />
-      {/* story #3845 §③ⓑ — sprints-client.tsx와 동형(board/sprints 프레임 관례 재사용). */}
-      <div className="px-6 pt-3">
+      {/* story #3845 §③ⓑ — sprints-client.tsx와 동형(board/sprints 프레임 관례 재사용).
+          story #4130 — 셸이 더 이상 뷰포트 높이 캡을 안 주므로(min-h-0 제거, #4121 픽스)
+          아래 목록의 로컬 min-h-0/flex-1/overflow-y-auto 경계를 걷어내고 이 탭 바를
+          sticky top-0로 바꿨다(#4125가 이미 증명한 sticky 메커니즘 재사용) — 이전과 같이
+          스크롤해도 탭 바가 항상 보인다. */}
+      <div className="sticky top-0 z-10 bg-background px-6 pt-3">
         <WorkspaceFrameTabs active="retro" />
       </div>
 
-      <div className="focus-inset flex min-h-0 flex-1 flex-col gap-0 overflow-y-auto">
+      <div className="focus-inset flex flex-col gap-0">
         {/* Create new session — toggle via TopBar button */}
         {showCreateForm && (
           <div className="flex-shrink-0 border-b border-border/80 px-6 py-4">

@@ -209,6 +209,17 @@ function ScrollShell({
         <div className="px-3 pt-3 empty:hidden">
           <ActivationChecklistBanner />
         </div>
+        {/* story #4130(PO 라이브 실측, 2026-09-21 23:23~23:31Z) — 이 아래 `min-h-0`를 뺐다.
+            바깥 스크롤러(위 :199 `overflow-y-auto`) 「안」에서 다시 `min-h-0`+`flex-1`을 쓰면
+            이 그리드/콘텐츠 열이 뷰포트 남은 높이에 캡돼(scrollHeight가 박스 높이를 넘쳐도
+            박스 자체는 안 자란다) 그 안의 `position: sticky` 요소가 포함 블록을 벗어날 자리가
+            없어진다 — #4121 게이트 상세 액션 열이 `position: sticky`·`top: 48px`까지는
+            정상 계산되면서도(story #4125가 고침) 스크롤에 전혀 안 움직인 2차 근본원인이
+            이것이었다(라이브 실측: 컨테이너 박스 496px·scrollHeight 1422px). `min-h-0`+
+            `flex-1`은 "이 박스 자신이 내부 스크롤러가 되는" 패턴인데 여기는 이미 바깥
+            스크롤러 안이므로 열이 내용 높이로 그냥 자라야 한다(flex-1 기본 min-height:auto로
+            충분). 2xl 인라인 프레즌스 패널의 `2xl:sticky 2xl:top-0 2xl:h-svh`(위 renderPanel)
+            은 그리드 행이 이제 내용 높이로 자라면서 오히려 정상 동작한다(실측 확認). */}
         <ContextualPanelLayout
           renderPanel={({ mode, closePanel }) => (
             <div className={mode === 'inline' ? '2xl:sticky 2xl:top-0 2xl:h-svh 2xl:p-2' : 'h-full'}>
@@ -225,11 +236,11 @@ function ScrollShell({
           drawerAriaLabel={t('panelTitle')}
           drawerSide="right"
           drawerWidthClassName="w-[min(92vw,24rem)]"
-          className="min-h-0 flex-1"
+          className="flex-1"
           inlineColumnsClassName="2xl:grid-cols-[minmax(0,1fr)_320px]"
           panelClassName="2xl:col-start-2 2xl:row-start-1"
           contentClassName={cn(
-            'flex min-h-0 min-w-0 flex-col 2xl:col-start-1 2xl:row-start-1',
+            'flex min-w-0 flex-col 2xl:col-start-1 2xl:row-start-1',
             tabletCentered && 'min-[768px]:mx-auto min-[768px]:w-full min-[768px]:max-w-[640px] lg:max-w-none lg:mx-0',
           )}
         >

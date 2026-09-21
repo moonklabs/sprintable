@@ -620,8 +620,14 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
         showContextChip={!currentSlug}
       />
 
-      {/* Unified: children rendered exactly once — sidebar responsive via breakpoint classes */}
-      <div className="flex min-h-0 flex-1 overflow-hidden">
+      {/* Unified: children rendered exactly once — sidebar responsive via breakpoint classes.
+          story #4130 — 셸(dashboard-shell.tsx)의 ContextualPanelLayout 열이 이제 내용 높이로
+          자란다(min-h-0 제거, #4121 게이트 상세 sticky 픽스). 이 split(사이드바 aside +
+          section)은 각자 독립 overflow-y-auto라 뷰포트 기준 고정 높이가 있어야 한다 — 셸이
+          더 이상 그 캡을 주지 않으므로 여기서 직접 앵커(h-[calc(100svh-3rem)], 3rem=셸
+          TopBar h-12). ActivationChecklistBanner가 뜬 상태에서는 그만큼 못 미쳐(페이지
+          스크롤로 보정되는 수준, 기능 파손 아님) — PO 라이브에서 그 상태 육안 확認 요청. */}
+      <div className="flex h-[calc(100svh-3rem)] min-h-0 overflow-hidden">
         {/* Desktop sidebar — hidden on mobile */}
         {/* PR#3391 QA(카디르, codex 교차검증) — overflow-y만 있고 overflow-x 처리가
             없어 긴 로케일 문자열(영문 정렬 라벨 등)이 넘칠 구조였다. 소스(정렬 토글 row)를

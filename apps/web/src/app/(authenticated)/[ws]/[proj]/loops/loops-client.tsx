@@ -158,8 +158,11 @@ export function LoopsClient({ projectId, wsSlug, projSlug }: { projectId: string
         onOpenChange={setCreateOpen}
         onCreated={(loop) => router.push(`/${wsSlug}/${projSlug}/loops/${loop.id}`)}
       />
-      <div className="flex h-full min-h-0 flex-col overflow-hidden">
-        <div className="flex shrink-0 flex-wrap gap-1 px-4 pt-3 pb-1">
+      {/* story #4130 — 셸이 더 이상 뷰포트 높이 캡을 안 주므로(min-h-0 제거, #4121 픽스)
+          h-full이 더는 정의된 조상 높이를 못 받는다 — 로컬 경계를 걷어내고 필터 행을
+          sticky top-0로 바꿨다(#4125가 이미 증명한 sticky 메커니즘 재사용). */}
+      <div className="flex flex-col">
+        <div className="sticky top-0 z-10 flex flex-wrap gap-1 bg-background px-4 pt-3 pb-1">
           {STATUS_FILTERS.map((s) => (
             <button
               key={s}
@@ -176,7 +179,7 @@ export function LoopsClient({ projectId, wsSlug, projSlug }: { projectId: string
           ))}
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4">
+        <div className="p-4">
           {loops.length === 0 ? (
             <EmptyState
               icon={<Lightbulb className="size-8" />}

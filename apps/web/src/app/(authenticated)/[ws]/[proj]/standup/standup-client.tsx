@@ -471,11 +471,17 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
 
   return (
     <>
+      {/* story #4130 — 셸이 더 이상 뷰포트 높이 캡을 안 주므로(min-h-0 제거, #4121 픽스)
+          아래 목록의 로컬 min-h-0/flex-1/overflow-y-auto 경계를 걷어냈다 — 그 대신 이
+          헤더 블록들(두 분기 다)을 sticky top-0로 고정해 이전과 같이 스크롤해도 항상
+          보이게 한다(#4125가 이미 증명한 sticky 메커니즘 재사용 — embedded 분기는 가장
+          가까운 스크롤 조상이 sprints-client.tsx의 자기 h-[calc(100svh-3rem)] 래퍼가
+          되므로 sticky가 그 기준으로 자연히 맞는다). */}
       {embedded ? (
         // story #3845(§①⑤) — sprints-client.tsx가 자기 TopBarSlot(제목 "스프린트")을 이미
         // 소유하므로 여기서 또 TopBarSlot을 마운트하면 싱글톤 컨텍스트를 뺏어 제목이
         // 뒤바뀐다(top-bar-slot.tsx 싱글톤 주석 참고) — 절 헤딩+날짜 네비 한 줄로 대체.
-        <div className="space-y-1 border-b border-border/80 px-6 py-3">
+        <div className="sticky top-0 z-10 space-y-1 border-b border-border/80 bg-background px-6 py-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="text-sm font-semibold text-foreground">{t('embeddedHeading')}</h2>
             <div className="flex flex-wrap items-center gap-1.5">{dateNavControls}</div>
@@ -495,13 +501,13 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
           />
 
           {/* S4: mobile date nav as its own full-width row (keeps the header title readable). */}
-          <div className="flex flex-wrap items-center gap-1.5 border-b border-border/80 px-4 py-2 lg:hidden">
+          <div className="sticky top-0 z-10 flex flex-wrap items-center gap-1.5 border-b border-border/80 bg-background px-4 py-2 lg:hidden">
             {dateNavControls}
           </div>
         </>
       )}
 
-      <div className="focus-inset flex min-h-0 flex-1 flex-col overflow-y-auto">
+      <div className="focus-inset flex flex-col">
         {headerBadges.length > 0 ? (
           <div className="flex flex-wrap items-center gap-2 border-b border-border/80 px-6 py-3">
             {headerBadges.map((badge) => (

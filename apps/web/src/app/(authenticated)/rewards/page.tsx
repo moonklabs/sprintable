@@ -111,7 +111,9 @@ export default function RewardsPage() {
     <>
       <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} showContextChip />
 
-      <div className="focus-inset flex min-h-0 flex-1 flex-col overflow-y-auto">
+      {/* story #4130 — 고정 툴바 없음(TopBarSlot은 포털) — 로컬 스크롤 경계를 걷어내고
+          셸의 단일 스크롤러(:199)가 스크롤하게 둔다. */}
+      <div className="focus-inset flex flex-col">
         <div className="mx-auto w-full max-w-3xl space-y-5 p-6">
 
           {/* 리더보드 */}
