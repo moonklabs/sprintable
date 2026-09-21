@@ -67,6 +67,11 @@ export interface GateItem {
   designated_approver_id?: string | null;
   resolved_at: string | null;
   resolution_note: string | null;
+  // story #4090([E-RECIPE-1] Publisher 슬롯) AC2, migration 0388 — 레시피 자동발행
+  // 훅의 기계 소유 결과(스킵 사유|"published"|"scheduled"). resolution_note(승인자
+  // 본인 문장)와 절대 안 섞는다(BE 페드루 PO 確定). external_publish(scope_key="")
+  // 게이트가 아니면 항상 null.
+  publish_outcome?: string | null;
   held_until?: string | null; // E-DG S31: 보류(hold) 만료(무기한=null·시한부=ISO). 디디 BE 병렬·additive.
   // E-DG S33: owner 결재 강제(override) 메타(gate_overridden 이벤트 enrich·S32 reassign 패턴 동형). 디디 BE #1645 design-first·additive·머지 후 정합.
   overridden_by_member_id?: string | null;

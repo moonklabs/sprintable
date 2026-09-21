@@ -246,6 +246,11 @@ interface RecipeApprovalFacts {
   // 안 씀·최소단위 원값만).
   estimatedCostMinor: number | null;
   estimatedCostCurrency: 'KRW' | 'USD' | null;
+  // story #4090([E-RECIPE-1] Publisher 슬롯) AC2·AC3(2026-09-21) — 레시피 자동발행
+  // 훅의 기계 소유 결과(gate.publish_outcome, sealed 계열과 달리 승인 *후* 갱신될
+  // 수 있는 값 — 그래도 이 카드가 승인자가 자동발행 여부를 보는 유일한 자리라
+  // 여기 싣는다). external_publish(scope_key="") 게이트가 아니면 항상 null.
+  publishOutcome: string | null;
 }
 
 function recipeApprovalFacts(gate: GateItem): RecipeApprovalFacts | null {
@@ -305,13 +310,14 @@ function recipeApprovalFacts(gate: GateItem): RecipeApprovalFacts | null {
     estimatedCostMinor:
       typeof gate.sealed_estimated_cost_minor === 'number' ? gate.sealed_estimated_cost_minor : null,
     estimatedCostCurrency: f?.['currency'] === 'KRW' || f?.['currency'] === 'USD' ? f['currency'] : null,
+    publishOutcome: realString(gate.publish_outcome),
   };
   const hasAny = isCommentReply ||
     facts.workItemRef || facts.draftDocRef || facts.draftDocSummary || facts.channel || facts.stage ||
     facts.contentBody || facts.contentVersion !== null || facts.contentSha256 || facts.scheduledAt !== null ||
     facts.sealedDocRef || facts.sealedDocBodySha256 || facts.adsBudgetMinor !== null ||
     facts.newsletterSegmentName !== null || facts.newsletterSendScheduledAt !== null || facts.newsletterSubject !== null ||
-    facts.estimatedCostMinor !== null;
+    facts.estimatedCostMinor !== null || facts.publishOutcome;
   return hasAny ? facts : null;
 }
 
@@ -791,6 +797,12 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
             {recipeStageLabel(facts.stage, tOrg)}
             {facts.stageRole ? ` (${stageRoleLabel(facts.stageRole, tOrg)})` : ''}
           </span>
+        </p>
+      ) : null}
+      {facts.publishOutcome ? (
+        <p>
+          <span className="text-muted-foreground">{t('recipeApprovalPublishOutcomeLabel')} · </span>
+          <span className="text-foreground">{facts.publishOutcome}</span>
         </p>
       ) : null}
       {facts.workItemRef ? (

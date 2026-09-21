@@ -324,6 +324,33 @@ describe('GateEvidence — 레시피 approve 게이트 승인 대상 실물 렌�
     expect(container.querySelectorAll('[role="button"], a, button').length).toBeGreaterThan(0);
   });
 
+  // story #4090([E-RECIPE-1] Publisher 슬롯) AC2·AC3 — 레시피 자동발행 훅의 기계 소유
+  // 결과(gate.publish_outcome, neutral_facts가 아니라 GateItem top-level 필드 — sealed
+  // 인자로 넘긴다)가 승인 카드에 실제로 렌더되는지(승인자가 「자동으로 발행됐는지」를
+  // 보는 유일한 자리, 페드루 PO 확定 2026-09-21).
+  it('story #4090 — gate.publish_outcome이 자동발행 결과 문장으로 실 DOM에 나타난다', async () => {
+    const gate = recipeApprovalGate(
+      { stage: 'published' },
+      { publish_outcome: 'published' },
+    );
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(container.textContent).toContain('published');
+  });
+
+  it('story #4090 — publish_outcome이 null(레시피 무관 게이트)이면 그 줄 자체가 렌더되지 않는다', async () => {
+    const gate = recipeApprovalGate({ stage: 'approve', channel: 'threads' }, { publish_outcome: null });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(container.textContent).not.toContain(koMessages.cage.recipeApprovalPublishOutcomeLabel);
+  });
+
   // PO 변경요청①(2026-09-02, PR#3710 리뷰) — BE `_escape_title`(reference_token.py)이 라벨 안
   // `\ [ ] ( )`를 백슬래시-escape한다. 초기 구현이 escape 없는 픽스처로만 테스트해 못 잡았던
   // 자리 — 실 게이트 09631e56 제목(팀 스토리 제목 관례 "[3바퀴·draft] ... v2(276/500자·반려
