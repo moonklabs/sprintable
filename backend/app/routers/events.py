@@ -1683,6 +1683,8 @@ async def _render_event_message_content(
     org, GET /api/v2/events/definitions): stage_metadata 있는 정의 10개 중 9개가 block_template도
     있어 자기설명 0(제네릭 폴백만)이었다. block_template 필드 자체는 무변경(FE 카드 회귀 0) —
     이 분기의 「block_template 있으면 스킵」 조건만 제거한다."""
+    from app.services.recipe_gate_hooks import _GATE_TYPE_SEALED_FIELDS
+
     if definition.key == "preset.gate.verdict":
         return await _render_gate_verdict_message(db, org_id=org_id, payload=payload, resolved_locale=resolved_locale)
     if not definition.stage_metadata:
@@ -1739,10 +1741,31 @@ async def _render_event_message_content(
         next_meta = definition.stage_metadata.get(next_stage) or {}
         next_role = next_meta.get("role")
         lines.append(f"- 다음 단계: {next_stage}" + (f" ({next_role})" if next_role else ""))
-        example_json = _next_stage_publish_payload_json(definition, next_stage, payload)
+
+        # story #4085 AC1(리허설 1호 실측) — 다음 stage가 게이트를 여는데 그 gate_type이
+        # 봉인 필드를 요구하면(recipe_gate_hooks.py::_GATE_TYPE_SEALED_FIELDS, 검증과 같은
+        # SSOT·레시피 하드코딩 0) 예시 payload에 그 필드를 실값 예시로 채운다 — 실사고:
+        # 예산 게이트가 estimated_cost_minor 없이 열려 승인 카드에 예상 비용이 비어 있었다
+        # (예시가 필드를 안 보여줘 에이전트가 몰랐다, "최저 지능 LLM도 이걸로 척척" 철학
+        # 미달). base_payload에 sealed field가 이미 있으면 덮지 않는다(발행자가 이미 그
+        # stage용으로 실은 값이 있을 리는 없지만 — payload는 "지금 stage"의 값이라
+        # 안전하게 덮어도 되나, 혹시 모를 우연한 동명 키 보존이 더 정직하다).
+        _next_gate_decl = next_meta.get("gate")
+        _sealed_specs = (
+            _GATE_TYPE_SEALED_FIELDS.get(_next_gate_decl["type"], ()) if _next_gate_decl is not None else ()
+        )
+        _example_base_payload = payload
+        if _sealed_specs:
+            _example_base_payload = {
+                **{spec.name: spec.example_value for spec in _sealed_specs if spec.name not in payload},
+                **payload,
+            }
+        example_json = _next_stage_publish_payload_json(definition, next_stage, _example_base_payload)
         lines.append(f"- {t('events.stage_next_publish_example', resolved_locale, example=example_json)}")
-        if next_meta.get("gate") is not None:
+        if _next_gate_decl is not None:
             lines.append(f"- {t('events.stage_gate_opens_on_publish', resolved_locale)}")
+            for spec in _sealed_specs:
+                lines.append(f"- {t(spec.explanation_catalog_key, resolved_locale)}")
     else:
         lines.append("- 다음 단계: 없음(마지막 stage)")
 
@@ -2067,7 +2090,7 @@ async def _publish_registry_event_core(
     # 먼저 정착시킨다(routing_resolver 호출과 동일 컴포지션 스타일 — 인라인 분기 아님).
     # definition에 이 stage의 gate 선언이 없으면 완전 no-op(AC3 회귀 0).
     from app.services.generation_budget import GenerationBudgetExceededError
-    from app.services.recipe_gate_hooks import maybe_create_stage_gate
+    from app.services.recipe_gate_hooks import MissingGateSealedFieldError, maybe_create_stage_gate
 
     try:
         await maybe_create_stage_gate(
@@ -2082,6 +2105,22 @@ async def _publish_registry_event_core(
                 "code": "GENERATION_BUDGET_EXCEEDED",
                 "limit_minor": e.limit_minor, "spent_minor": e.spent_minor,
                 "estimated_cost_minor": e.estimated_cost_minor, "remaining_minor": e.remaining_minor,
+            },
+        ) from e
+    except MissingGateSealedFieldError as e:
+        # story #4085(리허설 1호 실측, PO 확定) — "숫자 없는 예산 게이트는 게이트가
+        # 아니다": 봉인 필드가 빠지면 게이트를 만들지 않고 어떤 필드가 빠졌는지 명시한다
+        # (에이전트가 같은 발행을 그 필드만 채워 재시도할 수 있게).
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "GATE_SEALED_FIELD_MISSING",
+                "gate_type": e.gate_type,
+                "missing_fields": e.missing_fields,
+                "message": t(
+                    "events.gate_sealed_field_missing", resolved_locale,
+                    gate_type=e.gate_type, fields=", ".join(e.missing_fields),
+                ),
             },
         ) from e
 

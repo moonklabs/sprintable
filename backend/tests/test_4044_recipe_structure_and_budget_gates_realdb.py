@@ -318,9 +318,14 @@ async def test_generation_budget_gate_rejects_over_budget_estimate_with_422_befo
         await engine.dispose()
 
 
-async def test_generation_budget_gate_without_estimate_still_creates_gate_unsealed():
-    """회귀 0 — estimated_cost_minor를 안 실어도(선택 필드) 게이트는 정상 생성되고, 예산
-    검사 자체는 스킵(기존 check_generation_budget_or_raise 규약 그대로)."""
+async def test_generation_budget_gate_without_estimate_rejected_422_no_gate_created():
+    """⛔story #4085(리허설 1호 실측, PO 확定 2026-09-21)로 계약이 뒤집힌 자리 — 옛 테스트
+    (`test_generation_budget_gate_without_estimate_still_creates_gate_unsealed`)는 "숫자
+    없는 예산 게이트도 정상"을 회귀 0으로 고정하고 있었는데, 그게 정확히 리허설이 실측한
+    버그였다(결재 카드에 예상 비용이 안 뜸). "숫자 없는 예산 게이트는 게이트가 아니다"(PO
+    확定) — estimated_cost_minor 없이 structure_passed를 발행하면 게이트를 만들지 않고
+    422 GATE_SEALED_FIELD_MISSING으로 거부한다."""
+    from fastapi import HTTPException
     from app.routers.events import EventPublishRequest, publish_registry_event
     from app.models.gate import Gate
     from sqlalchemy import select
@@ -333,19 +338,97 @@ async def test_generation_budget_gate_without_estimate_still_creates_gate_unseal
             story_id = await _seed_story(s, org_id, project_id)
             await _seed_definition(s)
 
-            await publish_registry_event(
-                EventPublishRequest(
-                    definition_key=_MIG._KEY,
-                    payload={"stage": "structure_passed", "work_item_type": "story", "work_item_id": str(story_id)},
-                ),
-                BackgroundTasks(), _fake_request(), db=s, auth=_auth(agent_id, org_id), org_id=org_id,
-            )
+            with pytest.raises(HTTPException) as exc_info:
+                await publish_registry_event(
+                    EventPublishRequest(
+                        definition_key=_MIG._KEY,
+                        payload={
+                            "stage": "structure_passed", "work_item_type": "story", "work_item_id": str(story_id),
+                        },
+                    ),
+                    BackgroundTasks(), _fake_request(), db=s, auth=_auth(agent_id, org_id), org_id=org_id,
+                )
+            assert exc_info.value.status_code == 422
+            assert exc_info.value.detail["code"] == "GATE_SEALED_FIELD_MISSING"
+            assert exc_info.value.detail["gate_type"] == "generation_budget"
+            assert exc_info.value.detail["missing_fields"] == ["estimated_cost_minor"]
+            assert "estimated_cost_minor" in exc_info.value.detail["message"]
 
-            gate = (await s.execute(
+            gates = (await s.execute(
                 select(Gate).where(Gate.work_item_id == story_id, Gate.gate_type == "generation_budget")
-            )).scalar_one()
-            assert gate.status == "pending"
-            assert gate.sealed_estimated_cost_minor is None
-            assert "estimated_cost_minor" not in gate.neutral_facts
+            )).scalars().all()
+            assert gates == []
+    finally:
+        await engine.dispose()
+
+
+async def test_generation_budget_gate_wrong_type_estimate_rejected_422():
+    """형식 방어 — bool은 int의 서브클래스라 payload_schema(`type: integer|null`)의
+    상위 계층 검증(400)을 그냥 통과해 버릴 수 있다(JSON Schema draft 자체는 boolean을
+    거부하지만 이 레포 검증기 실측이 우선) — `maybe_create_stage_gate`를 직접 호출해
+    그 내부 방어(isinstance(v, int) and not isinstance(v, bool))가 단독으로도 막는지
+    확認한다(#4044의 기존 방어와 동형 판단, 새 갈래 0). 문자열류는 payload_schema가
+    이미 400으로 더 앞에서 막아(실측 확認) 이 내부 방어까지 안 옴 — 그 갈래는 스코프 밖."""
+    from app.services.recipe_gate_hooks import MissingGateSealedFieldError, maybe_create_stage_gate
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id, _owner_id = await _seed_org_with_owner(s, slug="r4044e")
+            agent_id = await _seed_agent(s, org_id, project_id)
+            story_id = await _seed_story(s, org_id, project_id)
+            definition = await _seed_definition(s)
+
+            with pytest.raises(MissingGateSealedFieldError) as exc_info:
+                await maybe_create_stage_gate(
+                    s, org_id=org_id, definition=definition,
+                    payload={
+                        "stage": "structure_passed", "work_item_type": "story", "work_item_id": str(story_id),
+                        "estimated_cost_minor": True,
+                    },
+                    requester_member_id=agent_id,
+                )
+            assert exc_info.value.gate_type == "generation_budget"
+            assert exc_info.value.missing_fields == ["estimated_cost_minor"]
+    finally:
+        await engine.dispose()
+
+
+async def test_generation_budget_gate_negative_estimate_rejected_422():
+    """⭐PO 리뷰 정정(#4085, PR 코멘트 5755879285) — 음수(-1)는 isinstance(int)만으로는
+    안 걸러진다(bool도 아니고 진짜 int라서). SealedFieldSpec.min_value(기본 0) 검사가
+    없으면 음수 예상 비용이 그대로 sealed_estimated_cost_minor에 봉인될 수 있었다."""
+    from fastapi import HTTPException
+    from app.routers.events import EventPublishRequest, publish_registry_event
+    from app.models.gate import Gate
+    from sqlalchemy import select
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id, _owner_id = await _seed_org_with_owner(s, slug="r4044f")
+            agent_id = await _seed_agent(s, org_id, project_id)
+            story_id = await _seed_story(s, org_id, project_id)
+            await _seed_definition(s)
+
+            with pytest.raises(HTTPException) as exc_info:
+                await publish_registry_event(
+                    EventPublishRequest(
+                        definition_key=_MIG._KEY,
+                        payload={
+                            "stage": "structure_passed", "work_item_type": "story", "work_item_id": str(story_id),
+                            "estimated_cost_minor": -1,
+                        },
+                    ),
+                    BackgroundTasks(), _fake_request(), db=s, auth=_auth(agent_id, org_id), org_id=org_id,
+                )
+            assert exc_info.value.status_code == 422
+            assert exc_info.value.detail["code"] == "GATE_SEALED_FIELD_MISSING"
+            assert exc_info.value.detail["missing_fields"] == ["estimated_cost_minor"]
+
+            gates = (await s.execute(
+                select(Gate).where(Gate.work_item_id == story_id, Gate.gate_type == "generation_budget")
+            )).scalars().all()
+            assert gates == []
     finally:
         await engine.dispose()

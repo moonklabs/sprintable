@@ -471,6 +471,61 @@ async def test_next_stage_gate_keeps_example_and_appends_opens_on_publish_note()
 
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 @pytest.mark.anyio
+async def test_next_stage_generation_budget_gate_seeds_example_with_sealed_field():
+    """⭐story #4085 AC1(리허설 1호 실측) — 다음 stage의 게이트가 generation_budget이면
+    발행 예시 payload에 estimated_cost_minor가 실값 예시로 채워지고, 바로 아래 그 값이
+    왜 필요한지 설명이 붙는다. 실사고: 이 필드가 예시에 없어 댄이 그대로 발행했다가
+    봉인 비용 없는 게이트가 열렸다(#4044 기존 "미설정이면 통과"는 예산 검사 규약이지
+    예시가 필드를 숨겨도 된다는 뜻이 아니었다). 뮤테이션 셀프체크 대상: 봉인필드 주입
+    로직을 지우면 estimated_cost_minor가 예시에서 사라져 RED."""
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project_with_owner(s, slug="e3313j")
+            publisher_id = await _seed_agent(s, org_id, project_id)
+            story_id = await _seed_story(s, org_id, project_id)
+            definition_key = await _seed_definition(
+                s, org_id, slug="e3313j",
+                stage_metadata={
+                    "structure_ok": {"role": "Director", "action": "구조 확인"},
+                    "structure_passed": {
+                        "role": "Creator", "action": "제작 착수",
+                        "gate": {"type": "generation_budget", "approver": "org_owner"},
+                    },
+                },
+                payload_schema={
+                    "type": "object", "additionalProperties": False,
+                    "required": ["stage", "work_item_type", "work_item_id"],
+                    "properties": {
+                        "stage": {"type": "string", "enum": ["structure_ok", "structure_passed"]},
+                        "work_item_type": {"type": "string"},
+                        "work_item_id": {"type": "string", "format": "uuid"},
+                        "estimated_cost_minor": {"type": ["integer", "null"]},
+                    },
+                },
+            )
+            payload = {"stage": "structure_ok", "work_item_type": "story", "work_item_id": str(story_id)}
+            content, _resp = await _publish_and_get_content(
+                s, definition_key=definition_key, payload=payload, publisher_id=publisher_id, org_id=org_id,
+            )
+            example_line = next(
+                line for line in content.splitlines()
+                if line.startswith("- 다음 단계로 넘기는 발행 예시: publish_event(")
+            )
+            example_json = example_line.removeprefix(
+                "- 다음 단계로 넘기는 발행 예시: publish_event("
+            ).removesuffix(")")
+            example = json.loads(example_json)
+            assert example["payload"]["stage"] == "structure_passed"
+            assert example["payload"]["estimated_cost_minor"] == 10_000
+            assert "estimated_cost_minor는 위 예시값이 아니라 실제 예상 비용" in content
+            assert "이 발행을 하면 사람 승인 게이트가 열려요" in content
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
 async def test_non_cyclic_definition_without_stage_metadata_renders_byte_identical():
     """⭐AC3-② — PO 확定(2026-09-02): block_template 없는 정의라도 stage_metadata 자체가
     빈(비사이클형) 정의는 바이트 동일(회귀 0) — 지어낼 role/action이 애초에 없다("담당자
