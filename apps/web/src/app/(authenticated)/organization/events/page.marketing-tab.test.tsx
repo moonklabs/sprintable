@@ -241,4 +241,57 @@ describe('/organization/events — 마케팅 탭(AC1·AC2)', () => {
     expect(document.body.querySelector('[data-testid="marketing-apply-warnings"]')).not.toBeNull();
     expect(document.body.textContent).toContain('커넥터가 아직 등록돼 있지 않아요');
   });
+
+  // story #4107 CHANGES(페드루 PO 리뷰, 2026-09-21) — 경고를 보여줄 때 성공 처리(토스트+
+  // 상세 뷰)를 버리는 게 아니라 다이얼로그가 닫힐 때(「확認」 클릭)까지 미룬다 — 저장은
+  // 이미 됐는데 화면은 끝까지 «실패처럼» 보이던 CHANGES 지적의 정공법.
+  it('경고 확認 후(「확인」 클릭) 다이얼로그가 닫히고 그제서야 상세 뷰로 이어간다(보류된 성공 처리)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/events/definitions') return { ok: true, json: async () => [MARKETING_RECIPE] };
+      if (url === '/api/projects') return { ok: true, json: async () => ({ data: [{ id: 'proj-1', name: '9월 영상 캠페인' }] }) };
+      if (url.startsWith('/api/team-members')) {
+        return { ok: true, json: async () => [{ id: 'agent-1', name: '댄', type: 'agent' }] };
+      }
+      if (url === `/api/events/definitions/${MARKETING_RECIPE.id}/apply` && init?.method === 'POST') {
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true, bindings_upserted: 1,
+            warnings: ["stage='published': connector_key='x' 커넥터가 아직 등록돼 있지 않아요"],
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({}) };
+    }));
+    await mount();
+    await switchToMarketingTab();
+
+    const applyBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent === '프로젝트에 적용');
+    await act(async () => { applyBtn!.click(); });
+    await flush();
+
+    const projectSelect = document.body.querySelector<HTMLSelectElement>('#marketing-recipe-apply-project')!;
+    await act(async () => { projectSelect.value = 'proj-1'; projectSelect.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+
+    const creatorSelect = document.body.querySelector<HTMLSelectElement>('[data-testid="creator-agent-select"]')!;
+    await act(async () => { creatorSelect.value = 'agent-1'; creatorSelect.dispatchEvent(new Event('change', { bubbles: true })); });
+
+    const submitBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent === '적용하기')!;
+    await act(async () => { submitBtn.click(); });
+    await flush();
+
+    // 경고 확認 전 — 아직 상세 뷰로 안 넘어감(위 테스트와 동일 전제).
+    expect(document.body.querySelector('[data-testid="recipe-stepper"]')).toBeNull();
+
+    const confirmBtn = document.body.querySelector<HTMLButtonElement>('[data-testid="marketing-apply-warnings-confirm"]')!;
+    await act(async () => { confirmBtn.click(); });
+    await flush();
+
+    // 「확認」 클릭 후 — 다이얼로그는 닫히고(경고 목록 사라짐), 보류됐던 성공 처리가 이제
+    // 이어져 상세 뷰(9단계 스텝퍼)로 넘어간다.
+    expect(document.body.querySelector('[data-testid="marketing-apply-warnings"]')).toBeNull();
+    expect(document.body.querySelector('[data-testid="recipe-stepper"]')).not.toBeNull();
+    expect(document.body.textContent).toContain('영상 제작 (릴스·쇼츠)');
+  });
 });

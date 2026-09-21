@@ -707,6 +707,7 @@
     "recipeApplyV2PersonPlaceholder": "Select a person…",
     "recipeApplyV2ModelSetPlaceholder": "Select a model set…",
     "recipeApplyV2ContractNote": "Each slot wires into its own mechanism — creator=role binding (agent) · director=approval authority (org member) · compute=model/budget config · publisher=publish channel. Not widened into a single role binding.",
+    "recipeApplyV2WarningsAppliedHeading": "Applied — please check the following.",
     "recipeApplyV2NotConfiguredNote": "This slot isn't wireable yet — a follow-up card connects it.",
     "recipeDetailSummary": "{stageCount} stages · {gateCount} gates · {roleCount} roles",
     "recipeDetailIrreversibleNote": "Irreversible commitments (paid generation, publish) always require human approval first.",

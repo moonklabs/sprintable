@@ -336,6 +336,15 @@ describe('MarketingRecipeApplyDialog — 4슬롯 다른 메커니즘', () => {
     expect(warningsBox).toBeTruthy();
     expect(warningsBox!.textContent).toContain("stage='published'");
     expect(document.body.textContent).not.toContain('저장된 배정이 없어요'); // no-op 에러 아님(적용은 성공).
+    // 페드루 PO CHANGES(PR #4484 리뷰) — 이미 저장됐다는 사실을 먼저 명시(중립 "주의" 아님).
+    expect(warningsBox!.textContent).toContain('적용됐어요');
+    // «취소»(거짓 문장)·«적용하기»(재클릭 시 같은 upsert 반복)는 숨고, «확인» 단일 버튼만.
+    expect([...document.body.querySelectorAll('button')].some((b) => b.textContent === '취소')).toBe(false);
+    expect([...document.body.querySelectorAll('button')].some((b) => b.textContent === '적용하기')).toBe(false);
+    const confirmBtn = document.body.querySelector<HTMLButtonElement>('[data-testid="marketing-apply-warnings-confirm"]')!;
+    expect(confirmBtn.textContent).toBe('확인');
+    await act(async () => { confirmBtn.click(); });
+    expect(onOpenChange).toHaveBeenCalledWith(false); // «확인» 클릭 = 그제서야 닫힘.
   });
 
   it('apply 응답에 warnings가 없으면(빈 배열) 경고 없이 그대로 성공 경로(다이얼로그 닫힘)', async () => {

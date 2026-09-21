@@ -302,7 +302,10 @@ export function MarketingRecipeApplyDialog({
 
         {warnings.length > 0 ? (
           <div className="space-y-1 rounded-md border border-warning-border bg-warning-tint p-2 text-xs text-foreground" data-testid="marketing-apply-warnings">
-            <p className="font-medium text-warning-strong">{t('eventApplyWarningsHeading')}</p>
+            {/* 페드루 PO CHANGES(PR #4484 리뷰, 2026-09-21) — 서버엔 이미 저장됐는데
+                («취소»는 거짓 문장) 제목이 중립("주의")이라 사용자가 「아직 적용 전」으로
+                오독할 수 있다. "적용됐어요 — 확認할 것"으로 결과를 먼저 명시한다. */}
+            <p className="font-medium text-warning-strong">{t('recipeApplyV2WarningsAppliedHeading')}</p>
             <ul className="list-disc space-y-0.5 pl-4">
               {warnings.map((w, i) => <li key={i}>{w}</li>)}
             </ul>
@@ -316,10 +319,23 @@ export function MarketingRecipeApplyDialog({
         ) : null}
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>{tc('cancel')}</Button>
-          <Button onClick={() => void submit()} disabled={submitting || !projectId || !creatorAgentId || (publisherRequired && !publisherConnectionId)}>
-            {submitting ? t('eventApplySubmitting') : t('eventApplySubmit')}
-          </Button>
+          {/* 페드루 PO CHANGES(PR #4484 리뷰, 2026-09-21) — 경고 상태에선 저장이 이미
+              끝났다(bindingsUpserted > 0 통과). «취소»(거짓 문장)·«적용하기»(재클릭 시
+              같은 upsert 반복) 둘 다 이 시점엔 잘못된 선택지라 숨기고, 결과를 인지했다는
+              «확認» 단일 버튼만 보여준다 — onOpenChange(false)가 페이지의 보류된 성공
+              처리(토스트+상세 뷰)를 그제서야 태운다(page.tsx 참고). */}
+          {warnings.length > 0 ? (
+            <Button onClick={() => onOpenChange(false)} data-testid="marketing-apply-warnings-confirm">
+              {tc('confirm')}
+            </Button>
+          ) : (
+            <>
+              <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>{tc('cancel')}</Button>
+              <Button onClick={() => void submit()} disabled={submitting || !projectId || !creatorAgentId || (publisherRequired && !publisherConnectionId)}>
+                {submitting ? t('eventApplySubmitting') : t('eventApplySubmit')}
+              </Button>
+            </>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
