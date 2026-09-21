@@ -83,6 +83,14 @@ class EventDefinition(Base):
     # stage.enum의 부분집합이어야 한다(event_definition_registry.validate_stage_metadata가 등록/
     # 수정 시점에 강제 — 오타 slug가 조용히 죽는 클래스 차단, 페드루 판정 2026-08-19).
     stage_metadata: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    # story #4092(E-RECIPE-1 팔로우업, PO 확定 2026-09-21 §b) — stage_metadata[stage].role은
+    # 저자 자유 문자열(고정 어휘 아님, recipe-role-slots.ts 기존 계약 그대로)이라, "이 role이
+    # 사람인가 에이전트인가"는 role 문자열 자체로 유도할 수 없다. 정의가 자기 role 어휘에 맞게
+    # 선언하는 옵션 사전(예: {"Creator":"agent","Director":"human"}) — 선언 없으면(레거시
+    # 정의 전부) "모름"이라 zero_reach 판정이 오늘과 동일하게 동작한다(개선은 선언한 정의만).
+    # 값 어휘는 event_definition_registry.validate_role_actor_kinds가 {"human","agent"}로
+    # 닫아 강제(stage_metadata.role/action과 동일 관례 — 쓰기 시점만).
+    role_actor_kinds: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
     version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)

@@ -51,3 +51,27 @@ async def test_normal_reach_no_warning_prefix():
     text = out[0].text
     assert not text.startswith("[경고]")
     assert json.loads(text) == response_data
+
+
+@pytest.mark.anyio
+async def test_human_stage_notice_prepends_안내_not_경고():
+    """story #4092(§c) — 사람 역할 stage 발행은 zero_reach_warning=False + notice가 온다.
+    경고와 다른 접두("[안내]")로 강조돼 에이전트가 "이건 경고가 아니다"를 즉시 구분한다."""
+    from sprintable_mcp.tools.events import PublishEventInput, publish_event
+
+    response_data = {
+        "conversation_id": "c1", "message_id": "m1",
+        "escalation_member_ids": [], "broadcast_member_ids": [],
+        "zero_reach_warning": False,
+        "notice": "이 단계는 사람이 판단해요 — 에이전트 바인딩이 필요 없어요.",
+    }
+    with patch("sprintable_mcp.tools.events.client") as mock_client:
+        mock_client.post = AsyncMock(return_value=response_data)
+        out = await publish_event(PublishEventInput(definition_key="org.acme.recipe", payload={}))
+
+    text = out[0].text
+    assert text.startswith("[안내]")
+    assert not text.startswith("[경고]")
+    assert "사람이 판단해요" in text
+    json_part = text.split("\n\n", 1)[1]
+    assert json.loads(json_part) == response_data
