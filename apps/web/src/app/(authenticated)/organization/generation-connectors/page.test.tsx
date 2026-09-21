@@ -60,10 +60,12 @@ async function flush() {
 const CONNECTOR_ACTIVE = {
   id: 'gen-1', provider_key: 'vertex_gemini', label: '메인 연산 커넥터',
   model_config_json: { image: 'imagen-3', video: 'veo-2' }, status: 'active', created_by: 'm1',
+  created_at: '2026-09-01T00:00:00Z', revoked_at: null,
 };
 const CONNECTOR_REVOKED = {
   id: 'gen-2', provider_key: 'vertex_gemini', label: '지난 캠페인 커넥터',
   model_config_json: {}, status: 'revoked', created_by: 'm1',
+  created_at: '2026-08-01T00:00:00Z', revoked_at: '2026-09-02T00:00:00Z',
 };
 
 // React controlled input/textarea는 raw .value= 대입으로 onChange가 안 불린다(네이티브
@@ -99,6 +101,23 @@ describe('OrganizationGenerationConnectorsPage — 목록·권한(AC1)', () => {
     // 해지된 커넥터엔 해지 버튼이 없다(이미 revoked).
     expect(document.body.querySelector('[data-testid="gc-revoke-gen-2"]')).toBeNull();
     expect(document.body.querySelector('[data-testid="gc-revoke-gen-1"]')).toBeTruthy();
+  });
+
+  // story #4117 FE 라이더(#4112 시안 프레임① "등록 시각" 행, PR #4492가 착지시킨
+  // BE DTO created_at/revoked_at 소비) — "지금"을 고정해(channels/page.test.tsx
+  // story #3486 관례와 동형) 결정적으로 잰다.
+  it('행에 등록 시각이 보이고, 해지된 커넥터는 해지 시각도 같이 보인다', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-03T00:00:00Z'));
+    try {
+      stubList([CONNECTOR_ACTIVE, CONNECTOR_REVOKED]);
+      await mount();
+
+      expect(document.body.textContent).toContain('등록 시각');
+      expect(document.body.textContent).toContain('해지 시각');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('일반 멤버 — 등록/해지 버튼 0 + 사유 한 줄, 목록은 그대로 보인다', async () => {
@@ -208,6 +227,43 @@ describe('OrganizationGenerationConnectorsPage — 등록 폼(AC2)', () => {
     expect(document.body.textContent).toContain(koMessages.organization.gcErrorProviderUnsupported);
     expect((document.body.querySelector<HTMLTextAreaElement>('#gc-field-credential'))?.value).toBe('');
   });
+
+  // story #4117 FE 라이더 — #4117-BE(PR #4492)가 이름 중복을 409
+  // {"code": "GENERATION_CONNECTOR_LABEL_DUPLICATE"}로 내도록 고쳤다(FastAPI
+  // HTTPException 관례대로 {"detail": {"code": ...}} 꼴로 프록시를 통과한다).
+  it('이름 중복 409 — gcErrorLabelDuplicate 문구로 분기한다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith(`/api/organizations/${ORG_ID}/generation-connectors`) && init?.method === 'POST') {
+        return {
+          ok: false, status: 409,
+          json: async () => ({ detail: { code: 'GENERATION_CONNECTOR_LABEL_DUPLICATE' } }),
+        };
+      }
+      if (url.startsWith(`/api/organizations/${ORG_ID}/generation-connectors`)) {
+        return { ok: true, json: async () => ({ data: { connectors: [] } }) };
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    }));
+    await mount();
+
+    const registerBtn = document.body.querySelector<HTMLButtonElement>('[data-testid="gc-first-register-action"]')!;
+    await act(async () => { registerBtn.click(); });
+    await flush();
+
+    const labelInput = document.body.querySelector<HTMLInputElement>('#gc-field-label')!;
+    const credInput = document.body.querySelector<HTMLTextAreaElement>('#gc-field-credential')!;
+    await act(async () => {
+      setInputValue(labelInput, '메인 연산 커넥터');
+      setInputValue(credInput, '{"type":"service_account"}');
+    });
+    const submitBtn = document.body.querySelector<HTMLButtonElement>('[data-testid="gc-register-submit"]')!;
+    await act(async () => { submitBtn.click(); });
+    await flush();
+
+    expect(document.body.textContent).toContain(koMessages.organization.gcErrorLabelDuplicate);
+    expect(document.body.textContent).not.toContain(koMessages.organization.gcErrorGeneric);
+    expect((document.body.querySelector<HTMLTextAreaElement>('#gc-field-credential'))?.value).toBe('');
+  });
 });
 
 describe('OrganizationGenerationConnectorsPage — 해지 확認(AC2)', () => {
@@ -224,8 +280,30 @@ describe('OrganizationGenerationConnectorsPage — 해지 확認(AC2)', () => {
     await flush();
 
     expect(postCalls).toHaveLength(0); // 다이얼로그만 뜨고 아직 호출 0.
-    // gcRevokeConfirmTitle 키 그대로: "{name}을(를) 해지할까요"(조사 자동 선택 없음, 원문 그대로).
-    expect(document.body.textContent).toContain('메인 연산 커넥터을(를) 해지할까요');
+    // story #4117 FE 라이더 — pickEulReulJosa가 받침 유무를 판정해 "을(를)" raw
+    // 표기(#4096류 재발) 대신 정확한 조사 하나를 고른다. "커넥터"는 "터"로 끝나
+    // 받침이 없어 "를".
+    expect(document.body.textContent).toContain('메인 연산 커넥터를 해지할까요');
+    expect(document.body.textContent).not.toContain('을(를)');
+  });
+
+  // story #4117 FE 라이더(유나 4491 앵커 비차단) — 받침 있음/없음 2값 모두 올바른
+  // 조사를 고르는지(위 테스트는 받침 없음 1값뿐이라 별도로 받침 있음도 고정).
+  it('받침 있는 이름 — 해지 확認 제목이 "을"을 고른다', async () => {
+    const withBatchim = { ...CONNECTOR_ACTIVE, id: 'gen-3', label: '테스트폼' };
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return { ok: true, json: async () => ({}) };
+      return { ok: true, json: async () => ({ data: { connectors: [withBatchim] } }) };
+    }));
+    await mount();
+
+    const revokeBtn = document.body.querySelector<HTMLButtonElement>('[data-testid="gc-revoke-gen-3"]')!;
+    await act(async () => { revokeBtn.click(); });
+    await flush();
+
+    // "폼"은 ㅁ 받침이 있어 "을".
+    expect(document.body.textContent).toContain('테스트폼을 해지할까요');
+    expect(document.body.textContent).not.toContain('을(를)');
   });
 
   it('확認 다이얼로그에서 해지를 누르면 revoke 엔드포인트를 호출하고 목록을 갱신한다', async () => {
