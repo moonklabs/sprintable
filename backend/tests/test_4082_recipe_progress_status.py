@@ -363,3 +363,59 @@ async def test_ac2_gate_neutral_facts_omits_stage_role_when_role_not_declared():
             assert "stage_role" not in gate.neutral_facts
     finally:
         await engine.dispose()
+
+
+# ─── story #4081 정정(미르코, head 03f8fb191, 페드루 지시 2026-09-21) — JSON 키
+# bind-parameter화 재발 방지를 `_find_latest_stage_publish`에도 ──────────────────────
+
+
+@_REAL_DB_SKIP
+@pytest.mark.anyio
+async def test_find_latest_stage_publish_real_call_emits_literal_json_keys_not_params():
+    """⭐`_find_existing_stage_publish`/`get_event_publish_history`와 동형 pin
+    (test_4081_conversation_messages_event_index.py) — `_find_latest_stage_publish`를
+    실제로 호출했을 때 DB로 나가는 진짜 SQL을 가로채(SQLAlchemy `before_cursor_execute`),
+    JSON 키('event'·'payload'·'work_item_type'·'work_item_id'·'event_key')가 bind
+    parameter가 아니라 SQL 문자열에 리터럴로 박혀 있는지 확認한다 — 0384 표현식 인덱스가
+    generic plan에서도 후보에 오르려면 이게 필수(미르코 실측 근거 그대로).
+
+    뮤테이션 pin: events.py를 `.msg_metadata["event"][...]` bracket accessor로 되돌리면
+    캡처된 SQL에 이 리터럴들이 사라지고 파라미터 자리표시자만 남아 이 테스트가 RED."""
+    from sqlalchemy import event as sa_event
+
+    from app.routers.events import _find_latest_stage_publish
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id, owner_id = await _seed_org_project_owner(s)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            schema, stage_metadata = _nine_stage_definition_fixtures()
+            definition = await _seed_definition(s, org_id=org_id, key="org.e4082.sqlcapture", schema=schema, stage_metadata=stage_metadata)
+            story_id = await _seed_story(s, org_id, project_id)
+            await _seed_role_binding(s, org_id=org_id, project_id=project_id, definition_key=definition.key, stage="stage1", agent_id=agent_id)
+            await _publish_stage(s, org_id=org_id, definition_key=definition.key, story_id=story_id, stage="stage1", requester_id=owner_id)
+
+            captured: list[str] = []
+
+            def _capture(conn, cursor, statement, parameters, context, executemany):
+                if "conversation_messages" in statement and "metadata" in statement:
+                    captured.append(statement)
+
+            sa_event.listen(engine.sync_engine, "before_cursor_execute", _capture)
+            try:
+                await _find_latest_stage_publish(
+                    s, org_id=org_id, definition_key=definition.key,
+                    work_item_type="story", work_item_id=str(story_id),
+                )
+            finally:
+                sa_event.remove(engine.sync_engine, "before_cursor_execute", _capture)
+
+        assert captured, "_find_latest_stage_publish가 DB 쿼리를 하나도 안 냄(seed/함수 시그니처 확認)"
+        stmt = captured[-1]
+        for literal in ("'event'", "'payload'", "'event_key'", "'work_item_type'", "'work_item_id'"):
+            assert literal in stmt, (
+                f"JSON 키 {literal}가 SQL 리터럴로 안 박혀 있음(파라미터로 샌 것으로 의심) — statement:\n{stmt}"
+            )
+    finally:
+        await engine.dispose()

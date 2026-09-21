@@ -27,7 +27,7 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, ValidationInfo, field_validator
-from sqlalchemy import String, and_, cast, delete, func, or_, select, update
+from sqlalchemy import String, and_, cast, delete, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import (
@@ -1855,7 +1855,14 @@ async def _find_latest_stage_publish(
     필터가 없다(이 work_item에 이 정의로 발행된 가장 최근 stage 이벤트 1건, 어느
     stage든) — "지금 몇 단계인지" 판정용. #4081(인덱스, 미르코 2026-09-21 확定)의
     `(event_key, work_item_type, work_item_id, created_at DESC)` 설계와 stage를 뺀 축이
-    정확히 같아 그 인덱스를 그대로 탄다(별도 정렬 불요)."""
+    정확히 같아 그 인덱스를 그대로 탄다(별도 정렬 불요).
+
+    ⛔story #4081 정정(미르코, head 03f8fb191, 페드루 지시 2026-09-21) — ORM bracket-
+    subscript accessor(`.msg_metadata["event"][...]`)는 JSON 키 자체를 bind parameter로
+    컴파일해(`.compile()` 실측: `metadata[$1][$2] ->> $3`) generic plan(`EXPLAIN
+    (GENERIC_PLAN)`, PG16 재현)에서 0384 표현식 인덱스가 후보에도 못 오르고 Seq Scan으로
+    조용히 되돌아간다 — `_find_existing_stage_publish`와 동일 함정이라 같은 처방(JSON 키는
+    `text()`로 리터럴 SQL에 직접 박고, 비교 값만 bind parameter)을 그대로 옮긴다."""
     from app.models.conversation import Conversation, ConversationMessage
 
     return (await db.execute(
@@ -1863,9 +1870,19 @@ async def _find_latest_stage_publish(
         .join(Conversation, Conversation.id == ConversationMessage.conversation_id)
         .where(
             Conversation.org_id == org_id,
-            ConversationMessage.msg_metadata["event"]["event_key"].astext == definition_key,
-            ConversationMessage.msg_metadata["event"]["payload"]["work_item_type"].astext == work_item_type,
-            ConversationMessage.msg_metadata["event"]["payload"]["work_item_id"].astext == work_item_id,
+            text("conversation_messages.metadata->'event'->>'event_key' = :event_lookup_definition_key"),
+            text(
+                "conversation_messages.metadata->'event'->'payload'->>'work_item_type' "
+                "= :event_lookup_work_item_type"
+            ),
+            text(
+                "conversation_messages.metadata->'event'->'payload'->>'work_item_id' "
+                "= :event_lookup_work_item_id"
+            ),
+        )
+        .params(
+            event_lookup_definition_key=definition_key, event_lookup_work_item_type=work_item_type,
+            event_lookup_work_item_id=work_item_id,
         )
         .order_by(ConversationMessage.created_at.desc())
         .limit(1)
