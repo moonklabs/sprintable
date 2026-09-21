@@ -102,6 +102,22 @@ class MissingGateSealedFieldError(ValueError):
 
 
 async def _resolve_org_owner(db: AsyncSession, *, org_id: uuid.UUID) -> uuid.UUID:
+    """story #4083(E-RECIPE-1, PO 확定 2026-09-21) — org가 `OrgGatePolicy.recipe_gate_
+    default_approver_member_id`를 설정해 뒀으면 그 멤버를 우선한다(merge_gate_default_
+    approver_member_id·merge_verdict_gate.py:527-533와 동일 패턴 — "org_owner 하드코딩"
+    실사고: 뭉클랩 org owner=선생님·마케팅 담당(sellerking)=admin이라 사람 게이트 4개가
+    전부 선생님 결재함으로 가고 admin은 #3319 rule B로 403이었다). 미설정(기본값)이면
+    기존 org owner 조회 그대로(회귀 0) — 이 함수 이름·역할참조 키("org_owner")는 안
+    바꾼다(APPROVER_ROLE_REFERENCES 재등록 불요, dispatch 자리 그대로)."""
+    from app.models.hitl_config import OrgGatePolicy
+
+    policy_member_id = (await db.execute(
+        select(OrgGatePolicy.recipe_gate_default_approver_member_id)
+        .where(OrgGatePolicy.org_id == org_id)
+    )).scalar_one_or_none()
+    if policy_member_id is not None:
+        return policy_member_id
+
     member_id = (await db.execute(
         select(OrgMember.id)
         .where(OrgMember.org_id == org_id, OrgMember.role == "owner", OrgMember.deleted_at.is_(None))

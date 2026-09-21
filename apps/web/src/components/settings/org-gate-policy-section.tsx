@@ -21,6 +21,11 @@ import { cn } from '@/lib/utils';
  * 승인자 픽커는 approval-request-card.tsx::DelegateApprovalControl과 동일 소스
  * (/api/org-members/eligible-approvers + buildApproverPickerOptions + OperatorDropdownSelect,
  * story #3040 v3 단일 소스 원칙 재사용 — 새 픽커 로직 발명 0).
+ *
+ * story #4083 — recipe_gate_default_approver_member_id 필드 1칸 추가(merge 칸과 완전
+ * 동형 — 같은 eligible-approvers 목록·같은 저장 흐름·같은 human-only 422 문구 표시).
+ * "org_owner 하드코딩" 실사고 처방(org owner≠마케팅 담당인 org에서 레시피 사람 게이트가
+ * 전부 owner 결재함으로만 가던 것).
  */
 
 type Posture = 'conservative' | 'balanced' | 'permissive';
@@ -36,6 +41,7 @@ interface OrgGatePolicyResponse {
   org_id: string;
   posture: string;
   merge_gate_default_approver_member_id: string | null;
+  recipe_gate_default_approver_member_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -58,6 +64,7 @@ export function OrgGatePolicySection({ canEdit }: OrgGatePolicySectionProps) {
   const [loading, setLoading] = useState(true);
   const [posture, setPosture] = useState<Posture>('balanced');
   const [approverId, setApproverId] = useState<string>(''); // '' = 미지정(현행)
+  const [recipeApproverId, setRecipeApproverId] = useState<string>(''); // '' = 미지정(현행, org owner)
   const [approverOptions, setApproverOptions] = useState<SelectOption[]>([]);
   const [loadingApprovers, setLoadingApprovers] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -76,6 +83,7 @@ export function OrgGatePolicySection({ canEdit }: OrgGatePolicySectionProps) {
           if (policy) {
             if ((POSTURES as string[]).includes(policy.posture)) setPosture(policy.posture as Posture);
             setApproverId(policy.merge_gate_default_approver_member_id ?? '');
+            setRecipeApproverId(policy.recipe_gate_default_approver_member_id ?? '');
           }
         } else {
           setMessage({ type: 'error', text: t('loadFailed') });
@@ -128,6 +136,7 @@ export function OrgGatePolicySection({ canEdit }: OrgGatePolicySectionProps) {
         body: JSON.stringify({
           posture,
           merge_gate_default_approver_member_id: approverId || null,
+          recipe_gate_default_approver_member_id: recipeApproverId || null,
         }),
       });
       if (res.ok) {
@@ -148,6 +157,9 @@ export function OrgGatePolicySection({ canEdit }: OrgGatePolicySectionProps) {
   const approverSelectOptions: SelectOption[] = [{ value: '', label: t('approverUnset') }, ...approverOptions];
   const currentApproverLabel = approverId
     ? (approverOptions.find((o) => o.value === approverId)?.label ?? approverId)
+    : t('approverUnset');
+  const currentRecipeApproverLabel = recipeApproverId
+    ? (approverOptions.find((o) => o.value === recipeApproverId)?.label ?? recipeApproverId)
     : t('approverUnset');
 
   return (
@@ -217,6 +229,21 @@ export function OrgGatePolicySection({ canEdit }: OrgGatePolicySectionProps) {
                 />
               ) : (
                 <p className="text-sm text-muted-foreground">{currentApproverLabel}</p>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-sm font-medium text-foreground">{t('recipeApproverLabel')}</p>
+              {canEdit ? (
+                <OperatorDropdownSelect
+                  value={recipeApproverId}
+                  onValueChange={setRecipeApproverId}
+                  options={approverSelectOptions}
+                  placeholder={loadingApprovers ? t('approverLoading') : t('approverPickPlaceholder')}
+                  disabled={loadingApprovers || saving}
+                />
+              ) : (
+                <p className="text-sm text-muted-foreground">{currentRecipeApproverLabel}</p>
               )}
             </div>
 
