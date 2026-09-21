@@ -538,12 +538,15 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
             )
             if recipe_ctx is not None:
                 recipe_gate, _definition_key, _next_stage = recipe_ctx
-                # 닫힌 어휘 코드만(channel_posts.py::publish_recipe_approved_draft의
-                # publish_failed 코드화와 동형, story #3779 가드) — 사람이 읽는 문구는
-                # 렌더 표면의 몫, 원문 사유는 last_error(이미 command.last_error로 별도
-                # 기록됨, publication_command.py의 record_publication_attempt/apply_
-                # command_failure)에만.
-                recipe_gate.publish_outcome = f"publish_failed:{error_code}"
+                # story #4090/#4093 정정(페드루 PO 지적 2026-09-21) — 꼬리도 닫힌
+                # 어휘 3값(channel_posts.py::classify_publish_failure_outcome
+                # 재사용, 커넥터 원문 error_code를 그대로 안 싣는다) — 원문 사유는
+                # last_error(이미 command.last_error로 별도 기록됨, record_
+                # publication_attempt/apply_command_failure)에만.
+                from app.services.channel_posts import classify_publish_failure_outcome
+
+                _failure_code = classify_publish_failure_outcome(error_code=error_code)
+                recipe_gate.publish_outcome = f"publish_failed:{_failure_code}"
                 await db.commit()
         except Exception:
             logger.warning(
