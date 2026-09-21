@@ -3272,10 +3272,20 @@ async def apply_recipe_role_bindings(
 
     warnings: list[str] = []
     for stage in body.role_mapping:
-        capability = (definition.stage_metadata.get(stage) or {}).get("capability")
+        stage_meta = definition.stage_metadata.get(stage) or {}
+        capability = stage_meta.get("capability")
         if not capability:
             continue
         kind = capability["kind"]
+        # story #4108(페드루 PO 確定, 2026-09-21) — 준비 경고 문장에 내부 식별자를 그대로
+        # 싣지 않는다(#4104가 해요체·목적지 문장으로 바꿨지만 stage 자체는 여전히 repr
+        # 토큰이었다). stage_metadata[stage].role은 정의 저자가 붙인 사람말 라벨(등록
+        # 시점 필수 필드, event_definition_registry.py 참고)이라 카탈로그
+        # events.apply_stage_role_label로 "{role} 단계" 문장을 짓는다(BE 한글 가드 —
+        # story #3779 — 대상이라 raw f-string이 아니라 카탈로그 경유) — role이 비어
+        # 있는 방어적 경우에만(이론상 도달 불가) stage 키로 폴백.
+        role = stage_meta.get("role")
+        stage_label = t("events.apply_stage_role_label", "ko", role=role) if role else stage
         # story #4104(페드루 PO 라이브 실측·판단, 2026-09-21) — 준비 경고는 «org 커넥터로
         # 채워지는 kind»만 대상이다. target 필드(#4090)로는 못 가른다 — collect/publish
         # 같은 커넥터-백드 kind도 target 기본값이 "agent"라 attach_video/generate(에이전트
@@ -3295,22 +3305,22 @@ async def apply_recipe_role_bindings(
             if declared_channel else None
         )
         if declared_channel and not connector_key:
-            warnings.append(t("events.apply_channel_connector_map_missing", "ko", stage=stage, channel=declared_channel))
+            warnings.append(t("events.apply_channel_connector_map_missing", "ko", stage_label=stage_label, channel=declared_channel))
             continue
         if connector_key:
             row = await get_org_connector(db, org_id=org_id, connector_key=connector_key)
             if row is None:
-                warnings.append(t("events.apply_connector_registered_missing", "ko", stage=stage, connector_key=connector_key))
+                warnings.append(t("events.apply_connector_registered_missing", "ko", stage_label=stage_label, connector_key=connector_key))
                 continue
             missing = missing_required_org_config(row)
             if missing:
-                warnings.append(t("events.apply_connector_config_incomplete", "ko", stage=stage, connector_key=connector_key, missing=missing))
+                warnings.append(t("events.apply_connector_config_incomplete", "ko", stage_label=stage_label, connector_key=connector_key, missing=missing))
         else:
             candidates = await find_org_connectors_by_kind(db, org_id=org_id, kind=kind)
             if not candidates:
-                warnings.append(t("events.apply_kind_connector_not_registered", "ko", stage=stage, kind=kind))
+                warnings.append(t("events.apply_kind_connector_not_registered", "ko", stage_label=stage_label, kind=kind))
             elif not any(not missing_required_org_config(c) for c in candidates):
-                warnings.append(t("events.apply_kind_connector_config_incomplete", "ko", stage=stage, kind=kind))
+                warnings.append(t("events.apply_kind_connector_config_incomplete", "ko", stage_label=stage_label, kind=kind))
 
     actor_id: uuid.UUID | None = None
     try:

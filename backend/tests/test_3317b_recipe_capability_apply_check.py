@@ -425,3 +425,73 @@ async def test_apply_agent_tool_hint_kind_yields_no_warning_even_with_zero_conne
             assert resp.warnings == []
     finally:
         await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_apply_warning_uses_stage_role_label_not_raw_stage_key():
+    """story #4108(페드루 PO 確定, 2026-09-21) — stage_metadata[stage].role이 있으면
+    준비 경고 문장이 그 라벨("{role} 단계")로 뜬다 — 원래 stage 키("publish_video")도
+    파이썬 repr 토큰(`stage='...'`)도 문장에 안 남는다."""
+    from app.routers.events import ApplyRecipeRoleBindingsRequest, apply_recipe_role_bindings
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s, slug="b4108a")
+            caller_id = await _seed_agent(s, org_id, project_id, name="caller")
+            agent_id = await _seed_agent(s, org_id, project_id, name="worker")
+            definition = await _seed_definition(
+                s, org_id=org_id, key="org.b4108a.recipe_cap",
+                stage_metadata={
+                    "publish_video": {
+                        "role": "발행 담당자", "action": "발행",
+                        "capability": {"kind": "publish"},
+                    },
+                },
+            )
+            resp = await apply_recipe_role_bindings(
+                definition.id,
+                ApplyRecipeRoleBindingsRequest(project_id=None, role_mapping={"publish_video": str(agent_id)}),
+                db=s, auth=_auth(caller_id, org_id), org_id=org_id,
+            )
+            assert len(resp.warnings) == 1
+            assert "발행 담당자 단계" in resp.warnings[0]
+            assert "publish_video" not in resp.warnings[0]
+            assert "='" not in resp.warnings[0]
+            assert "stage=" not in resp.warnings[0]
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_apply_warning_falls_back_to_stage_key_when_role_missing():
+    """story #4108 — role이 없는 stage_metadata(등록 API는 항상 role을 요구하지만,
+    이 realdb 테스트는 _seed_definition으로 그 검증을 우회해 방어적 폴백 경로를
+    직접 겨냥한다)는 라벨 없이 stage 키 그대로("editing_stage") 노출한다 — "단계"
+    접미사도 안 붙는다(있는 라벨을 사람말로 쓰는 것과 «지어내는» 것은 다르다)."""
+    from app.routers.events import ApplyRecipeRoleBindingsRequest, apply_recipe_role_bindings
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s, slug="b4108b")
+            caller_id = await _seed_agent(s, org_id, project_id, name="caller")
+            agent_id = await _seed_agent(s, org_id, project_id, name="worker")
+            definition = await _seed_definition(
+                s, org_id=org_id, key="org.b4108b.recipe_cap",
+                stage_metadata={
+                    "editing_stage": {"capability": {"kind": "publish"}},
+                },
+            )
+            resp = await apply_recipe_role_bindings(
+                definition.id,
+                ApplyRecipeRoleBindingsRequest(project_id=None, role_mapping={"editing_stage": str(agent_id)}),
+                db=s, auth=_auth(caller_id, org_id), org_id=org_id,
+            )
+            assert len(resp.warnings) == 1
+            assert "editing_stage" in resp.warnings[0]
+            assert "editing_stage 단계" not in resp.warnings[0]
+    finally:
+        await engine.dispose()
