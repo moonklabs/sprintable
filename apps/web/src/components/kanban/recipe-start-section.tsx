@@ -2,11 +2,13 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { extractBackendErrorMessage } from '@/lib/api-error-message';
 import { fetchWithAuth } from '@/lib/db/client';
+import { formatRelativeTime } from '@/lib/storage/format';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { useRecipeStartCandidates, type RecipeStartCandidate } from '@/hooks/use-recipe-start-candidates';
 
 interface RecipeStartSectionProps {
@@ -22,6 +24,8 @@ interface RecipeStartSectionProps {
 // (2개 이상이면 고르게, 페드루 확定).
 export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionProps) {
   const t = useTranslations('board');
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
   const { candidates, loading, error: loadError, refresh } = useRecipeStartCandidates(projectId, 'story', storyId);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [publishing, setPublishing] = useState(false);
@@ -119,16 +123,35 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
       )}
       {selected ? (
         selected.started ? (
-          selected.conversation_id ? (
-            <Link
-              href={`/chats/${selected.conversation_id}${selected.message_id ? `?messageId=${encodeURIComponent(selected.message_id)}` : ''}`}
-              className="text-xs font-medium text-primary hover:underline"
-            >
-              {t('recipeStarted')} · {t('recipeStartViewConversation')}
-            </Link>
-          ) : (
-            <p className="text-xs font-medium text-foreground">{t('recipeStarted')}</p>
-          )
+          // story #4082([E-RECIPE-1] 진행 위치 표시) AC1 — «시작됨» 한 줄 대신 현재
+          // 단계(역할)·다음 단계(역할, 없으면 «마지막 단계»)·마지막 발행 시각 3줄
+          // («stage» 내부어 대신 정의 저자가 시드한 role 낱말을 우선 노출, 유나 낱말 표 v5.1).
+          <div className="flex flex-col gap-1">
+            {selected.current_stage && (
+              <p className="text-xs font-medium text-foreground">
+                {t('recipeCurrentStageLabel')}: {selected.current_stage}
+                {selected.current_role ? ` (${selected.current_role})` : ''}
+              </p>
+            )}
+            <p className="text-xs text-muted-foreground">
+              {selected.next_stage
+                ? `${t('recipeNextStageLabel')}: ${selected.next_stage}${selected.next_role ? ` (${selected.next_role})` : ''}`
+                : t('recipeNoNextStage')}
+            </p>
+            {selected.last_published_at && (
+              <p className="text-[11px] text-muted-foreground">
+                {t('recipeLastPublishedLabel')}: {formatRelativeTime(selected.last_published_at, locale, displayTimezone)}
+              </p>
+            )}
+            {selected.conversation_id && (
+              <Link
+                href={`/chats/${selected.conversation_id}${selected.message_id ? `?messageId=${encodeURIComponent(selected.message_id)}` : ''}`}
+                className="text-xs font-medium text-primary hover:underline"
+              >
+                {t('recipeStartViewConversation')}
+              </Link>
+            )}
+          </div>
         ) : (
           <Button type="button" size="sm" onClick={() => void handleStart(selected)} disabled={publishing}>
             {publishing ? t('recipeStarting') : t('recipeStartButton')}

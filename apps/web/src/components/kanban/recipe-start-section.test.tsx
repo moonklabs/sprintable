@@ -41,7 +41,9 @@ afterEach(async () => {
 function candidateStub(overrides: Partial<RecipeStartCandidate> = {}): RecipeStartCandidate {
   return {
     definition_id: 'def-1', key: 'org.acme.recipe', name: '테스트 레시피', first_stage: 'draft',
-    role_bound: true, started: false, conversation_id: null, message_id: null, ...overrides,
+    role_bound: true, started: false, conversation_id: null, message_id: null,
+    current_stage: null, current_role: null, next_stage: null, next_role: null, last_published_at: null,
+    ...overrides,
   };
 }
 
@@ -82,7 +84,12 @@ describe('RecipeStartSection', () => {
         callCount += 1;
         const started = callCount > 1;
         return new Response(JSON.stringify({
-          candidates: [candidateStub({ started, conversation_id: started ? 'conv-1' : null, message_id: started ? 'msg-1' : null })],
+          candidates: [candidateStub({
+            started, conversation_id: started ? 'conv-1' : null, message_id: started ? 'msg-1' : null,
+            current_stage: started ? 'draft' : null, current_role: started ? '작성자' : null,
+            next_stage: started ? 'review' : null, next_role: started ? '검토자' : null,
+            last_published_at: started ? '2026-09-21T00:00:00Z' : null,
+          })],
         }));
       }
       if (url === '/api/events/publish' && init?.method === 'POST') {
@@ -105,16 +112,35 @@ describe('RecipeStartSection', () => {
     await act(async () => { button!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 
-    expect(container.textContent).toContain('시작됨');
+    // story #4082 — «시작됨» 한 줄 대신 현재/다음 단계+마지막 발행 3줄이 뜬다.
+    expect(container.textContent).toContain('draft');
+    expect(container.textContent).toContain('작성자');
+    expect(container.textContent).toContain('review');
     expect(container.querySelector(`a[href="/chats/conv-1?messageId=msg-1"]`)).not.toBeNull();
   });
 
-  it('이미 시작된 스토리는 버튼 대신 진행 상태(대화 링크)를 보인다(AC2)', async () => {
-    await render([candidateStub({ started: true, conversation_id: 'conv-9', message_id: 'msg-9' })]);
+  it('이미 시작된 스토리는 버튼 대신 진행 상태(현재/다음 단계·대화 링크)를 보인다(AC2, story #4082)', async () => {
+    await render([candidateStub({
+      started: true, conversation_id: 'conv-9', message_id: 'msg-9',
+      current_stage: 'draft', current_role: '작성자', next_stage: 'review', next_role: '검토자',
+      last_published_at: '2026-09-21T00:00:00Z',
+    })]);
     expect(container.querySelector('button')).toBeNull();
-    expect(container.textContent).toContain('시작됨');
+    expect(container.textContent).toContain('draft');
+    expect(container.textContent).toContain('작성자');
+    expect(container.textContent).toContain('review');
+    expect(container.textContent).toContain('검토자');
     const link = container.querySelector('a[href^="/chats/conv-9"]');
     expect(link).not.toBeNull();
+  });
+
+  it('마지막 단계까지 발행됐으면 다음 단계 대신 «마지막 단계» 문구를 보인다(story #4082)', async () => {
+    await render([candidateStub({
+      started: true, conversation_id: 'conv-9', message_id: 'msg-9',
+      current_stage: 'publish', current_role: '발행자', next_stage: null, next_role: null,
+      last_published_at: '2026-09-21T00:00:00Z',
+    })]);
+    expect(container.textContent).toContain('마지막 단계');
   });
 
   it('적용 레시피가 2개 이상이면 고르게 한다(선택 전엔 시작 버튼 없음)', async () => {

@@ -369,6 +369,15 @@ export default function GateDetailPage() {
                     ? ` · ${projectMemberships.find((p) => p.projectId === gate.project_id)?.projectName ?? gate.project_id.slice(0, 8)}`
                     : ''}
                 </p>
+                {/* story #4082([E-RECIPE-1] 진행 위치 표시) AC2 — approvals-queue.tsx 카드와
+                    동일 관례(neutral_facts.stage(+stage_role) denorm, 레시피 게이트가 아니면
+                    무변). */}
+                {typeof gate.neutral_facts?.stage === 'string' ? (
+                  <p className="text-xs text-muted-foreground">
+                    {t('gateStageLabel')}: {gate.neutral_facts.stage}
+                    {typeof gate.neutral_facts.stage_role === 'string' ? ` (${gate.neutral_facts.stage_role})` : ''}
+                  </p>
+                ) : null}
 
                 {/* story #3128 — needsAction/canAct와 무관하게 항상 렌더(이미 해소된 카드도
                     "무엇을 승인했는지" 원문을 감사할 수 있어야 한다 — decisionFacts·

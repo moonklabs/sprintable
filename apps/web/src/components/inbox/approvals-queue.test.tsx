@@ -298,6 +298,45 @@ describe('ApprovalsQueue', () => {
     expect(text).not.toContain('파일');
   });
 
+  // story #4082([E-RECIPE-1] 진행 위치 표시) AC2 — recipe_gate_hooks.py::
+  // maybe_create_stage_gate가 denorm한 neutral_facts.stage(+stage_role).
+  it('neutral_facts.stage_role이 있으면 「단계: X (역할)」을 표시한다', async () => {
+    mockFetches(
+      [gate({
+        id: 'g-stage', can_approve: true, requires_human: true,
+        neutral_facts: { stage: 'review', stage_role: '검토자' },
+      })],
+      [],
+    );
+    await mount();
+    const text = container.textContent ?? '';
+    expect(text).toContain(`${koMessages.cage.gateStageLabel}: review (검토자)`);
+  });
+
+  it('neutral_facts.stage만 있고 stage_role이 없으면 역할 괄호 없이 단계만 표시한다', async () => {
+    mockFetches(
+      [gate({
+        id: 'g-stage-no-role', can_approve: true, requires_human: true,
+        neutral_facts: { stage: 'review' },
+      })],
+      [],
+    );
+    await mount();
+    const text = container.textContent ?? '';
+    expect(text).toContain(`${koMessages.cage.gateStageLabel}: review`);
+    expect(text).not.toContain('(검토자)');
+  });
+
+  it('비레시피 게이트(neutral_facts.stage 없음)는 단계 줄 자체가 안 뜬다(회귀 0)', async () => {
+    mockFetches(
+      [gate({ id: 'g-no-stage', can_approve: true, requires_human: true, neutral_facts: { diff_size: 1 } })],
+      [],
+    );
+    await mount();
+    const text = container.textContent ?? '';
+    expect(text).not.toContain(koMessages.cage.gateStageLabel);
+  });
+
   // story #3369(§3-1-2-1, 페드루 PO 2026-09-03 06:56Z) — reapproval_required=true인
   // external_publish 게이트는 서버가 이미 approve를 409 SITE_POST_RESUBMIT_REQUIRED로
   // 막아 둔다("할 일 없는 카드"). 승인·반려 둘 다 비활성 + 안내 문구.

@@ -34,7 +34,9 @@ async function flush(times = 4) {
 function candidateStub(overrides: Partial<RecipeStartCandidate> = {}): RecipeStartCandidate {
   return {
     definition_id: 'def-1', key: 'org.acme.recipe', name: '테스트 레시피', first_stage: 'draft',
-    role_bound: true, started: false, conversation_id: null, message_id: null, ...overrides,
+    role_bound: true, started: false, conversation_id: null, message_id: null,
+    current_stage: null, current_role: null, next_stage: null, next_role: null, last_published_at: null,
+    ...overrides,
   };
 }
 

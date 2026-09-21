@@ -871,3 +871,23 @@ describe('GateDetailPage — ads_boost 실행 블록은 needsAction/gate.status�
     expect(document.body.querySelector('[data-testid="boost-execution-control"]')).toBeNull();
   });
 });
+
+// story #4082([E-RECIPE-1] 진행 위치 표시) AC2 — approvals-queue.tsx 카드와 동일 관례
+// (neutral_facts.stage(+stage_role) denorm, 레시피 게이트가 아니면 무변).
+describe('GateDetailPage — 단계(역할) 표시(story #4082)', () => {
+  it('neutral_facts.stage_role이 있으면 「단계: X (역할)」을 표시한다', async () => {
+    await mount(gate({ neutral_facts: { stage: 'review', stage_role: '검토자' } }));
+    expect(container.textContent).toContain(`${koMessages.cage.gateStageLabel}: review (검토자)`);
+  });
+
+  it('neutral_facts.stage만 있고 stage_role이 없으면 역할 괄호 없이 단계만 표시한다', async () => {
+    await mount(gate({ neutral_facts: { stage: 'review' } }));
+    expect(container.textContent).toContain(`${koMessages.cage.gateStageLabel}: review`);
+    expect(container.textContent).not.toContain('(검토자)');
+  });
+
+  it('비레시피 게이트(neutral_facts.stage 없음)는 단계 줄 자체가 안 뜬다(회귀 0)', async () => {
+    await mount(gate({ neutral_facts: null }));
+    expect(container.textContent).not.toContain(koMessages.cage.gateStageLabel);
+  });
+});

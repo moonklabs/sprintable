@@ -540,6 +540,16 @@ export function ApprovalsQueue() {
                 {gate.github_check_run_sha ? ` · ${gate.github_check_run_sha.slice(0, 7)}` : ''}
               </p>
             ) : null}
+            {/* story #4082([E-RECIPE-1] 진행 위치 표시) AC2 — recipe_gate_hooks.py::
+                maybe_create_stage_gate가 denorm한 neutral_facts.stage(+stage_role). 레시피
+                게이트가 아니면(stage 키 자체가 없으면) 이 블록은 안 그려진다 — 비레시피
+                게이트 회귀 0(신규 필드 읽기만, 없는 값은 없다고). */}
+            {typeof gate.neutral_facts?.stage === 'string' ? (
+              <p className="text-[11px] text-muted-foreground">
+                {t('gateStageLabel')}: {gate.neutral_facts.stage}
+                {typeof gate.neutral_facts.stage_role === 'string' ? ` (${gate.neutral_facts.stage_role})` : ''}
+              </p>
+            ) : null}
             {orgName ? <p className="text-[11px] text-muted-foreground">{orgName}</p> : null}
             {diffFacts ? (
               <p className="text-[11px] text-muted-foreground">

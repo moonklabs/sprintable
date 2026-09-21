@@ -17,6 +17,12 @@ export interface RecipeStartCandidate {
   started: boolean;
   conversation_id: string | null;
   message_id: string | null;
+  // story #4082([E-RECIPE-1] 진행 위치 표시) — started=true일 때만 채워진다.
+  current_stage: string | null;
+  current_role: string | null;
+  next_stage: string | null;
+  next_role: string | null;
+  last_published_at: string | null;
 }
 
 export interface UseRecipeStartCandidatesResult {
