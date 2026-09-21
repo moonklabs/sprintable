@@ -753,6 +753,14 @@ export const EXEMPT_PAIRS = new Set<string>([
   // 가리키는지 전달)라 겹치는 게 정상.
   'organization.gcRevokeAriaLabel <-> organization.gcTitle',
   'organization.gcRevokeAction <-> organization.gcRevokeAriaLabel',
+  // story #4117(CI RED, 페드루 PO 판정 2026-09-21) — organization.gcRevokedAt("해지
+  // 시각 {time}", 등록/해지 시각 행)이 같은 파일의 gcRevokeAction("해지", 해지 버튼
+  // 라벨)을 부분문자열로 품는다. page.tsx 렌더 조건이 서로 배타적이라(gcRevokedAt은
+  // `c.status === 'revoked' && c.revoked_at`일 때만, gcRevokeAction 버튼은
+  // `isOwnerOrAdmin && c.status === 'active'`일 때만 그림) 두 문구가 같은 행에
+  // 같이 서지 않는다 — #4116 gcRevokeAriaLabel 짝과 같은 자리(화면에서 실제로
+  // 겹쳐 보일 표면 자체가 없음).
+  'organization.gcRevokeAction <-> organization.gcRevokedAt',
 ]);
 
 // ⛔⭐오르테가군 지적(2026-07-31) — 이 목록에 «새로» 넣는 것은 PO 승인을 거친다. 이유 없이
