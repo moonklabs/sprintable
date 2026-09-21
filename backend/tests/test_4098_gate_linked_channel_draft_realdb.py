@@ -486,6 +486,43 @@ async def test_ac1e_unscoped_external_publish_gate_without_recipe_facts_gets_no_
         await engine.dispose()
 
 
+async def test_ac1f_scope_key_python_none_on_gate_object_does_not_crash_to_gate_response():
+    """CI RED 재발(페드루 PO REQUIRED, PR #4475 리뷰, test_1970/1972/1973 9건) — DB 컬럼은
+    NOT NULL DEFAULT ''(migration 0328)라 실제로 커밋된 행은 항상 문자열이지만, 아직
+    flush/refresh 前인 in-memory Gate ORM 객체(또는 이 필드를 세팅 안 한 옛 코드 경로)의
+    Python 값은 `None`일 수 있다 — model_validate(from_attributes=True)가 그 None을
+    그대로 검증해 ValidationError로 터졌다. GateResponse.scope_key를 `str | None`으로
+    넓혀 이 자리가 다시 죽지 않게 pin(뮤테이션: str = ""로 되돌리면 RED)."""
+    from app.models.gate import Gate
+    from app.routers.gates import to_gate_response
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id, owner_member_id = await _seed_org_with_owner_shim(s, slug="4098f")
+            story_id = await _seed_story(s, org_id, project_id)
+
+            gate = Gate(
+                id=uuid.uuid4(), org_id=org_id, work_item_id=story_id, work_item_type="story",
+                gate_type="merge", scope_key="", status="pending", neutral_facts={},
+            )
+            s.add(gate)
+            await s.commit()
+            gate_id = gate.id
+
+        async with Session() as s:
+            fetched = await s.get(Gate, gate_id)
+            # 실 DB 값은 NOT NULL이라 여기서만 Python 레벨 None을 명시 재현 — no_autoflush로
+            # to_gate_response 내부의 다른 조회가 이 미저장 변경을 실수로 flush(→ 실 제약
+            # 위반)하지 않게 막는다. 이 세션은 어차피 커밋 없이 버려진다(with 블록 종료).
+            with s.no_autoflush:
+                fetched.scope_key = None
+                resp = await to_gate_response(s, org_id, fetched)
+            assert resp.scope_key is None
+    finally:
+        await engine.dispose()
+
+
 async def _seed_org_with_owner_shim(session, *, slug):
     """story #4098 — team_members VIEW/TABLE 갭(test_3380 선례, #4090/#4093과 동형)을
     #4468 공용 헬퍼(seed_org_with_human_owner)로 바로 처방 — 이 파일은 human-owner

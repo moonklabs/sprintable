@@ -221,7 +221,15 @@ class GateResponse(BaseModel):
     # 를 직접 판별해야 linked_channel_draft/_pending의 "값 없음"과 "이 카드 자체가 대상이
     # 아님"을 구분할 수 있다(둘 다 null/false로 같아 보이는 값이라 별도 신호 필요). Gate
     # ORM 컬럼과 이름 일치 — from_attributes로 자동 채워짐(resolution_note와 동일 선례).
-    scope_key: str = ""
+    #
+    # ⛔페드루 PO REQUIRED(2026-09-21, PR #4475 리뷰, CI RED — test_1970/1972/1973 9건) —
+    # DB 컬럼은 `NOT NULL DEFAULT ''`(0328)지만, 아직 flush/refresh 안 된 in-memory Gate
+    # ORM 객체(또는 이 필드를 안 세팅한 옛 테스트 픽스처)는 Python 값이 `None`이라 model_
+    # validate(from_attributes=True)가 그대로 터진다 — 코드 곳곳의 `gate.scope_key or ""`
+    # 방어가 바로 그 증거. 응답 필드도 그 실태를 그대로 받아 `str | None`(FE는 이미
+    # `gate.scope_key ?? ''`로 처리 — gate-evidence.tsx). 기본값 ""는 "명시로 안 준 신규
+    # 필드는 무해한 기본값" 관례일 뿐 실제 None 유입을 못 막는다 — 타입 자체를 넓힌다.
+    scope_key: str | None = None
     status: str
     resolver_id: uuid.UUID | None = None
     resolved_at: datetime | None = None

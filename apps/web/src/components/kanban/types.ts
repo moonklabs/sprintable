@@ -61,7 +61,7 @@ export interface GateItem {
   gate_type: string;
   // story #4098 — "레시피 unscoped external_publish(scope_key="")인지" 판별(linked_
   // channel_draft/_pending의 "값 없음"과 "이 카드 대상 자체가 아님"을 가른다).
-  scope_key?: string;
+  scope_key?: string | null;
   status: string;
   resolver_id: string | null;
   // story #3001(선생님 정책 확定 2026-08-24) — 결재선(수신자) 지정+위임. resolver_id의
