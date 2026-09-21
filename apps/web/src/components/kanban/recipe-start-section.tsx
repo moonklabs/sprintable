@@ -45,17 +45,11 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
     return sectionShell(<p className="text-xs text-destructive">{t('recipeStartErrorGeneric')}</p>);
   }
 
-  // AC1 — 비활성일 땐 이유(적용 안 됨 / 역할 미배정)와 가는 곳을 보여준다(막다른 길 금지).
-  if (candidates.length === 0) {
-    return sectionShell(
-      <>
-        <p className="text-xs text-muted-foreground">{t('recipeStartNotApplied')}</p>
-        <Link href="/organization/events" className="mt-1 inline-block text-xs text-primary hover:underline">
-          {t('recipeStartGoToApply')}
-        </Link>
-      </>,
-    );
-  }
+  // story #4075 AC1(유나 design CHANGES, 페드루 확定 2026-09-21) — 적용 레시피가 프로젝트에
+  // 0개면 섹션 자체를 숨긴다(막다른 길 금지는 레시피가 실재하는데 못 시작하는 경우—역할
+  // 미배정·이미 시작—에서만 지키면 충분. 레시피 0은 per-story 문제가 아니라 프로젝트 셋업
+  // 관심사라 모든 스토리 패널에 뜨는 건 노이즈. 발견성은 organization/events 갤러리가 맡는다).
+  if (candidates.length === 0) return null;
 
   const active = candidates.filter((c) => c.role_bound);
   if (active.length === 0) {
@@ -112,6 +106,10 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
                 name={`recipe-start-${storyId}`}
                 checked={selectedKey === c.key}
                 onChange={() => setSelectedKey(c.key)}
+                // story #4075(유나 design CHANGES) — 다크에서 브라우저 기본 accent가 뜨던
+                // 것을 토큰으로(globals.css .tiptap-content 체크박스의 accent-color: var(...)
+                // 관례와 동형, 여긴 Tailwind arbitrary-value 유틸).
+                className="accent-[var(--primary)]"
               />
               {c.name}
               {c.started && <span className="text-[10px] text-muted-foreground">({t('recipeStarted')})</span>}

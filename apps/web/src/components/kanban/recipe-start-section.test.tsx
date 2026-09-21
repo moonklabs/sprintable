@@ -64,10 +64,9 @@ async function render(candidates: RecipeStartCandidate[], opts: { onPublish?: ()
 }
 
 describe('RecipeStartSection', () => {
-  it('AC1 — 적용된 레시피가 없으면 이유와 가는 곳을 보여준다(막다른 길 금지)', async () => {
+  it('story #4075 AC1(유나 design CHANGES) — 적용 레시피가 0개면 섹션 자체를 렌더하지 않는다(모든 스토리 패널 노이즈 방지)', async () => {
     await render([]);
-    expect(container.textContent).toContain('적용된 레시피가 없어요');
-    expect(container.querySelector('a[href="/organization/events"]')).not.toBeNull();
+    expect(container.textContent).toBe('');
   });
 
   it('AC1 — 레시피는 적용됐지만 첫 단계 역할 미배정이면 그 이유를 보여준다', async () => {
