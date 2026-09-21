@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { useLocale, useTranslations } from 'next-intl';
+import { pickEulReulJosa } from '@/lib/korean-particle';
 import type { KanbanStory, KanbanMember, LineStatusSummary } from './types';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { parseStoryCardTitle } from '@/lib/story-card-title';
@@ -717,6 +718,8 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
         title={t('deleteStoryDialogTitle')}
         description={t.rich('deleteStoryDialogBody', {
           title: story.title,
+          // story #4120 — 조사를 문자열에 고정하지 않고 렌더 시점에 결정적으로 고른다.
+          josa: pickEulReulJosa(story.title),
           b: (chunks) => <b className="font-semibold text-foreground">{chunks}</b>,
         })}
         cancelLabel={t('cancel')}

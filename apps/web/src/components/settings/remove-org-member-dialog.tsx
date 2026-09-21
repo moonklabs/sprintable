@@ -15,6 +15,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { fetchWithAuth } from '@/lib/db/client';
+import { pickEulReulJosa } from '@/lib/korean-particle';
 import { resolveRoleLabel } from '@/app/(authenticated)/organization/trust/trust-utils';
 
 interface AffectedProject {
@@ -76,7 +77,10 @@ export function RemoveOrgMemberDialog({
           <DialogDescription>
             <span className="font-medium text-foreground">{member.name}</span>
             {member.email ? <span className="text-muted-foreground"> ({member.email})</span> : null}
-            <span> {ts('removeMemberConfirmSuffix')}</span>
+            {/* story #4120 — 조사는 이름 뒤에 공백 없이 바로 붙는다(한글 맞춤법). 이전엔
+                고정 "을/를" 병기 앞에 literal 공백까지 있어 "{name} 을/를 조직에서"로
+                이중으로 샜다 — 조사 선택과 함께 그 공백도 뗀다. */}
+            <span>{ts('removeMemberConfirmSuffix', { josa: pickEulReulJosa(member.name) })}</span>
           </DialogDescription>
         </DialogHeader>
 

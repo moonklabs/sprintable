@@ -5,6 +5,7 @@ import { ChevronLeft, RefreshCw, UserX } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
+import { pickIGaJosa } from '@/lib/korean-particle';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { ChatBubble } from './chat-bubble';
 import { ConnectionLostBanner } from './connection-lost-banner';
@@ -935,7 +936,10 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
               <UserX className="h-3.5 w-3.5 flex-shrink-0" />
               <span className="flex-1">
                 {unconnectedAgentParticipants.length === 1
-                  ? t('agentNotConnectedBanner', { name: unconnectedAgentParticipants[0]!.name ?? '?' })
+                  ? t('agentNotConnectedBanner', {
+                      name: unconnectedAgentParticipants[0]!.name ?? '?',
+                      josa: pickIGaJosa(unconnectedAgentParticipants[0]!.name ?? '?'),
+                    })
                   : t('agentNotConnectedBannerMulti', { count: unconnectedAgentParticipants.length })}
               </span>
               <Link

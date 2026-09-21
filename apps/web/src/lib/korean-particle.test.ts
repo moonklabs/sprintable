@@ -98,3 +98,25 @@ describe('pickEulReulJosa — 받침 유무에 따른 을/를', () => {
     expect(pickEulReulJosa('')).toBe('를');
   });
 });
+
+// story #4120(PO 실측, 2026-09-21) — 숫자 끝(0/1/3/6/7/8=받침 有·2/4/5/9=받침 無, 한글
+// 숫자 읽기 고유 소리)이 이전엔 "완성형 한글 아님"으로 뭉뚱그려져 전부 받침 없음 취급이었다
+// (referenceCandidatePromptStory 등 `#2249`류 숫자 토큰이 실사례) — 4종 피커 전부 공유하는
+// hasBatchim이 이제 이 표를 따른다.
+describe('숫자 끝 — 받침 有/無 한글 숫자 읽기 표(4종 피커 공유)', () => {
+  it('받침 有(0/1/3/6/7/8)', () => {
+    expect(pickIGaJosa('버전0')).toBe('이'); // 영=ㅇ받침
+    expect(pickEulReulJosa('#2251')).toBe('을'); // 일=ㄹ받침
+    expect(pickEunNeunJosa('v3')).toBe('은'); // 삼=ㅁ받침
+    expect(pickIGaJosa('v6')).toBe('이'); // 육=ㄱ받침
+    expect(pickEulReulJosa('v7')).toBe('을'); // 칠=ㄹ받침
+    expect(pickEunNeunJosa('v8')).toBe('은'); // 팔=ㄹ받침
+  });
+
+  it('받침 無(2/4/5/9)', () => {
+    expect(pickIGaJosa('v2')).toBe('가'); // 이=받침없음
+    expect(pickEulReulJosa('v4')).toBe('를'); // 사=받침없음
+    expect(pickEunNeunJosa('v5')).toBe('는'); // 오=받침없음
+    expect(pickIGaJosa('v9')).toBe('가'); // 구=받침없음
+  });
+});

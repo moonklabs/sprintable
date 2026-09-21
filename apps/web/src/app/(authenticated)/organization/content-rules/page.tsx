@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
+import { pickEulReulJosa, pickIGaJosa } from '@/lib/korean-particle';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -714,10 +715,10 @@ export default function ContentRulesPage() {
               <AlertDescription>
                 {conflictField.viaUndo ? `${t('contentRulesUndoFailedPrefix')} ` : ''}
                 {conflictField.updatedByMemberId !== null && conflictField.updatedByMemberId === currentTeamMemberId
-                  ? t('versionConflictFieldSelfOtherTab', { field: fieldTitle(conflictField.field) })
+                  ? t('versionConflictFieldSelfOtherTab', { field: fieldTitle(conflictField.field), josa: pickEulReulJosa(fieldTitle(conflictField.field)) })
                   : conflictField.updatedByName
-                    ? t('versionConflictFieldWithName', { field: fieldTitle(conflictField.field), name: conflictField.updatedByName })
-                    : t('versionConflictFieldFact', { field: fieldTitle(conflictField.field) })}
+                    ? t('versionConflictFieldWithName', { field: fieldTitle(conflictField.field), name: conflictField.updatedByName, josa: pickEulReulJosa(fieldTitle(conflictField.field)) })
+                    : t('versionConflictFieldFact', { field: fieldTitle(conflictField.field), josa: pickIGaJosa(fieldTitle(conflictField.field)) })}
               </AlertDescription>
             </Alert>
           ) : null}

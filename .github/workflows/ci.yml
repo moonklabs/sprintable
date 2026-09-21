@@ -1742,6 +1742,14 @@ jobs:
       - name: "Verify no agent-tone Korean UI text in i18n message values (story #3824 regression guard)"
         run: pnpm --filter web verify:no-agent-tone-korean-ui-text
 
+      # story #4120 회귀가드: ko.json 값·apps/web/src·backend/app에 조사 플레이스홀더
+      # (「을(를)」「이(가)」「은(는)」「와(과)」 — 값의 받침 유무에 맞춰 렌더 시점에 고르는
+      # 대신 문자열에 두 선택지를 그대로 병기해 둔 자리)가 새로 생기면 실패한다. #4117이
+      # 잡은 1자리를 시작으로 같은 클래스 13자리를 이 카드가 전부 처리(baseline 0,
+      # clean-slate로 시작).
+      - name: "Verify no josa placeholder (story #4120 regression guard)"
+        run: pnpm --filter web verify:no-josa-placeholder
+
       # story #3877 AC3 회귀가드: 선생님 경로(오늘·일감 5탭·우패널·문서·스토리 패널+임베드)
       # i18n 스코프 키(SCOPED_KEYS 103개 — AC1 표 94 + AC4 orgBriefing 9) 값에 합니다체
       # (습니다·ㅂ니다·십시오)가 새로 섞여 드는 자리를 막는다. 이 스토리가 스코프 전수를

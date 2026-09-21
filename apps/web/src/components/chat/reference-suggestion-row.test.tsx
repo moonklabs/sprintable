@@ -66,13 +66,21 @@ describe('ReferenceSuggestionRow — story #2283', () => {
 
   it('본인 메시지에 평문 #번호가 있으면 「스토리로」 제안이 뜬다', async () => {
     await render({ messageId: 'm1', content: '#2249 확認 부탁', isMine: true, projectId: 'p1' });
-    expect(container.textContent).toContain(koMessages.chats.referenceCandidatePromptStory.replace('{token}', '#2249'));
+    // story #4120 — {token}이 "#2249"(숫자 kind, 마지막 자리 9=받침 없음)라 조사는 "를".
+    expect(container.textContent).toContain(
+      koMessages.chats.referenceCandidatePromptStory.replace('{token}', '#2249').replace('{josa}', '를'),
+    );
+    expect(container.textContent).not.toContain('을(를)');
     expect(container.textContent).toContain('예');
   });
 
   it('평문 #슬러그는 「문서로」 제안이 뜬다(스토리 아님)', async () => {
     await render({ messageId: 'm1', content: '#flow-map-v1 참조', isMine: true, projectId: 'p1' });
-    expect(container.textContent).toContain(koMessages.chats.referenceCandidatePromptDoc.replace('{token}', '#flow-map-v1'));
+    // story #4120 — {token}이 "#flow-map-v1"(마지막 자리 "1"=받침 있음/ㄹ)이라 조사는 "을".
+    expect(container.textContent).toContain(
+      koMessages.chats.referenceCandidatePromptDoc.replace('{token}', '#flow-map-v1').replace('{josa}', '을'),
+    );
+    expect(container.textContent).not.toContain('을(를)');
   });
 
   it('projectId가 없으면 「예」를 눌러도 실패로 처리된다(해소 스코프 없이 조회 안 함)', async () => {
@@ -168,7 +176,10 @@ describe('ReferenceSuggestionRow — story #2283', () => {
     await act(async () => { undoBtn!.click(); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 
-    expect(container.textContent).toContain(koMessages.chats.referenceCandidatePromptStory.replace('{token}', '#2249'));
+    // story #4120 — "#2249"(9=받침 없음) → "를".
+    expect(container.textContent).toContain(
+      koMessages.chats.referenceCandidatePromptStory.replace('{token}', '#2249').replace('{josa}', '를'),
+    );
   });
 
   it('「묻지 않기」를 누르면 그 후보가 즉시 사라진다(같은 렌더 인스턴스 내 즉시 반영)', async () => {
@@ -206,6 +217,9 @@ describe('ReferenceSuggestionRow — story #2283', () => {
     await act(async () => { root.unmount(); });
     root = createRoot(container);
     await render({ messageId: 'm2', content: '#2250 은 거절 안 함', isMine: true, projectId: 'p1' });
-    expect(container.textContent).toContain(koMessages.chats.referenceCandidatePromptStory.replace('{token}', '#2250'));
+    // story #4120 — "#2250"(0=받침 있음/ㅇ) → "을".
+    expect(container.textContent).toContain(
+      koMessages.chats.referenceCandidatePromptStory.replace('{token}', '#2250').replace('{josa}', '을'),
+    );
   });
 });

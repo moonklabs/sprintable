@@ -2086,11 +2086,16 @@ async def _resolve_artifact_canonicalize_gate(session: AsyncSession, gate: Gate,
         target_ids.discard(None)
         if target_ids:
             from app.services.notification_dispatch import dispatch_notification
+            from app.utils.korean_particle import pick_i_ga_josa
             await dispatch_notification(
                 session, org_id=gate.org_id, event_type="artifact.canonicalized",
                 target_member_ids=list(target_ids),
                 title=f"정본 확정: {artifact.title}",
-                body=f"v{version_number}이(가) 정본으로 확정됐어요." if version_number else None,
+                # story #4120 — 고정 "이/가" 병기 대신 마지막 자리 숫자 읽기로 조사를 고른다.
+                body=(
+                    f"v{version_number}{pick_i_ga_josa(str(version_number))} 정본으로 확정됐어요."
+                    if version_number else None
+                ),
                 reference_type="visual_artifact", reference_id=artifact.id,
                 source_project_id=artifact.project_id,
                 # story #2694: #2688(create_gate 2콜)과 동일 결함 클래스 — 이 호출부(transition_gate

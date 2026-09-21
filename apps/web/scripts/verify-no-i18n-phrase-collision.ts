@@ -761,6 +761,14 @@ export const EXEMPT_PAIRS = new Set<string>([
   // 같이 서지 않는다 — #4116 gcRevokeAriaLabel 짝과 같은 자리(화면에서 실제로
   // 겹쳐 보일 표면 자체가 없음).
   'organization.gcRevokeAction <-> organization.gcRevokedAt',
+  // story #4120(2026-09-21) — guideFileDeliveryNoteMcp에 {josa}/{promptJosa} 파라미터가
+  // 늘며 이 가드의 세그먼트 경계가 바뀌어 새로 걸렸다. 실제 겹침은 recruiter.back("이전",
+  // 위저드 STEP1~4 뒤로가기 버튼 라벨)과 guideFileDeliveryNoteMcp 문장 안의 "에이전트에게"
+  // 낱말이 "이전"을 부분문자열로 우연히 품는 것뿐(에이전트≠이전, 관련 없는 낱말의
+  // 음절 겹침) — docs.title<->docs.indexDocCount류와 동형(짧은 낱말이 완전히 다른
+  // 뜻의 긴 낱말 속 음절로 재등장). "이전" 버튼과 이 안내문이 같은 화면(STEP5)에 같이
+  // 서도 헷갈릴 표면이 아니다(하나는 버튼 라벨, 하나는 본문 문장 속 낱말 조각).
+  'recruiter.back <-> recruiter.guideFileDeliveryNoteMcp',
 ]);
 
 // ⛔⭐오르테가군 지적(2026-07-31) — 이 목록에 «새로» 넣는 것은 PO 승인을 거친다. 이유 없이

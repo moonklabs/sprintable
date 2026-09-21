@@ -1,7 +1,12 @@
 // story #3194 — 미연결 에이전트 참가자 판별의 pin. 무거운 ChatView 전체 마운트 없이(use-
 // reading-panel-stack.test.tsx와 동형 관례) 추출된 순수함수만 직접 잰다.
 import { describe, expect, it } from 'vitest';
+import { createTranslator } from 'next-intl';
 import { filterUnconnectedAgentParticipants } from './chat-view';
+import { pickIGaJosa } from '@/lib/korean-particle';
+import koMessages from '../../../messages/ko.json';
+
+const tChats = createTranslator({ locale: 'ko', messages: koMessages, namespace: 'chats' });
 
 const ME = 'me-1';
 
@@ -69,5 +74,22 @@ describe('filterUnconnectedAgentParticipants', () => {
 
   it('participants가 undefined면 빈 배열(graceful)', () => {
     expect(filterUnconnectedAgentParticipants(undefined, ME)).toEqual([]);
+  });
+});
+
+// story #4120(PO 실측, 2026-09-21) — agentNotConnectedBanner의 「{name}이(가)」 고정 조사를
+// pickIGaJosa로. 전체 ChatView 마운트는 무겁다(위 파일 docstring) — 이 파일의 기존
+// 방침대로 messages 템플릿을 createTranslator로 직접 검증한다.
+describe('agentNotConnectedBanner — 조사(story #4120)', () => {
+  it('받침 없는 이름 → «가»', () => {
+    const name = '올리베이라';
+    expect(tChats('agentNotConnectedBanner', { name, josa: pickIGaJosa(name) }))
+      .toBe('올리베이라가 아직 연결되지 않았어요 — 메시지가 전달되지 않을 수 있어요.');
+  });
+
+  it('받침 있는 이름 → «이»', () => {
+    const name = '담롱';
+    expect(tChats('agentNotConnectedBanner', { name, josa: pickIGaJosa(name) }))
+      .toBe('담롱이 아직 연결되지 않았어요 — 메시지가 전달되지 않을 수 있어요.');
   });
 });

@@ -17,6 +17,7 @@
     "verify:no-request-url-as-base": "tsx scripts/verify-no-request-url-as-base.ts",
     "verify:focus-inset-coverage": "tsx scripts/verify-focus-inset-coverage.ts",
     "verify:no-i18n-phrase-collision": "tsx scripts/verify-no-i18n-phrase-collision.ts",
+    "verify:no-josa-placeholder": "tsx scripts/verify-no-josa-placeholder.ts",
     "verify:no-unformatted-usage-count": "tsx scripts/verify-no-unformatted-usage-count.ts",
     "verify:no-orphan-resource-routes": "tsx scripts/verify-no-orphan-resource-routes.ts",
     "verify:reserved-first-segments-sync": "tsx scripts/verify-reserved-first-segments-sync.ts",
