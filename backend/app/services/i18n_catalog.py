@@ -225,6 +225,23 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "다음 행동: 할 일 없음 — 발행은 휴먼이 화면에서 해요.",
         "en": "Next action: nothing to do — a human publishes this from the screen.",
     },
+    # story #4076(BE, 페드루 PO 確定 2026-09-21) — events.py 레시피 stage 자기설명 렌더러
+    # (사이클)·판정 렌더러(_render_gate_verdict_message) 공용. stage_metadata[stage].gate
+    # 선언이 어느 발행에 묶이는지에 따라 두 문장으로 갈린다(recipe_gate_hooks.py::
+    # maybe_create_stage_gate — routing 직후·메시지 발송 전에 "지금 발행되는 그 stage"의
+    # 게이트를 만든다, events.py:1845-1854).
+    "events.stage_gate_already_open": {
+        "ko": "지금 사람 승인 게이트가 열려 있습니다(승인자 역할: {approver}) — 승인 알림"
+        "(preset.gate.verdict) 뒤 다음 단계를 발행하세요.",
+        "en": "A human approval gate is already open (approver role: {approver}) — publish "
+        "the next stage after you receive the approval notification (preset.gate.verdict).",
+    },
+    "events.stage_gate_opens_on_publish": {
+        "ko": "이 발행을 하면 사람 승인 게이트가 열립니다 — 승인 알림(preset.gate.verdict) "
+        "뒤에 그다음 단계를 발행하세요.",
+        "en": "Publishing this will open a human approval gate — publish the following stage "
+        "only after you receive the approval notification (preset.gate.verdict).",
+    },
     # story #3614 갭(BE, 페드루 PO 確定 2026-09-11) — 폐기(withdrawn, 종결)된 초안
     # submit 거부(409). 새 한글 사용자 문장이라 3796(insight_snapshots.py)과 같은
     # 형으로 처음부터 카탈로그에 등재(BE 한글 사용자 문장 가드 신규 위반 대응).

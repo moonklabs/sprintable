@@ -1,7 +1,12 @@
-"""story #3313(마케팅자동화·온보딩 결함) — block_template 없는 사이클형 정의의 stage 이벤트
-알림이 role/action·다음 stage·발행 예시·work item 참조 토큰을 싣는지(AC1/AC2) 실왕복 검증.
-block_template 있는 정의·stage_metadata 없는 비사이클형 정의는 바이트 동일 렌더(AC3, PO
-확定②로 두 갈래 다 커버)."""
+"""story #3313(마케팅자동화·온보딩 결함) — 사이클형 정의의 stage 이벤트 알림이 role/action·
+다음 stage·발행 예시·work item 참조 토큰을 싣는지(AC1/AC2) 실왕복 검증. stage_metadata 없는
+비사이클형 정의는 바이트 동일 렌더(AC3-②, 지어낼 stage_metadata 자체가 없다).
+
+⛔story #4076(2026-09-21) — AC3-①("block_template 있는 정의는 바이트 동일")은 폐기됐다.
+그 전제(block_template 있으면 FE P2 렌더러가 담당하니 이 plain body는 안 건드려도 된다)가
+틀렸다 — 멘션을 받는 에이전트는 block_template을 못 본다. 아래
+`test_definition_with_block_template_now_renders_self_describing_content`가 새 계약(자기
+설명 렌더가 block_template 유무와 무관하게 적용됨)을 pin한다."""
 from __future__ import annotations
 
 import json
@@ -64,6 +69,26 @@ async def _seed_org_project(session, *, slug="e3313"):
     await session.commit()
     project = Project(id=uuid.uuid4(), org_id=org.id, name="P")
     session.add(project)
+    await session.commit()
+    return org.id, project.id
+
+
+async def _seed_org_project_with_owner(session, *, slug="e3313"):
+    """story #4076 — `stage_metadata[stage].gate` 선언이 있는 stage를 발행하면
+    `maybe_create_stage_gate`가 approver="org_owner"를 실제로 해소하려 한다(test_3312의
+    `_seed_org_with_owner`와 동형) — org owner가 없으면 UnknownApproverRoleError로 발행
+    자체가 죽는다(이 함수는 events.py의 try/except GenerationBudgetExceededError 밖이라
+    안 잡힘). 게이트 문구 테스트는 이 helper로 org를 세운다."""
+    from app.models.organization import Organization
+    from app.models.project import OrgMember, Project
+
+    org = Organization(id=uuid.uuid4(), name="Org3313", slug=slug)
+    session.add(org)
+    await session.commit()
+    project = Project(id=uuid.uuid4(), org_id=org.id, name="P")
+    session.add(project)
+    owner_member = OrgMember(id=uuid.uuid4(), org_id=org.id, user_id=uuid.uuid4(), role="owner")
+    session.add(owner_member)
     await session.commit()
     return org.id, project.id
 
@@ -332,9 +357,11 @@ async def test_doc_work_item_now_resolves_to_reference_token():
 
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 @pytest.mark.anyio
-async def test_definition_with_block_template_renders_byte_identical_to_old_generic():
-    """⭐AC3-① — block_template이 있는 정의는 이 스토리 이전과 바이트 동일(회귀 0). P2(#2637)
-    FE 렌더러가 그 정의를 이미 담당하므로 이 plain body는 손대지 않는다."""
+async def test_definition_with_block_template_now_renders_self_describing_content():
+    """⭐story #4076 — AC3-①(옛 「block_template 있으면 바이트 동일」) 폐기를 직접 pin.
+    가드에서 `block_template is not None` 절을 되돌리면 이 테스트가 다시 제네릭 폴백만
+    받아 RED가 된다(뮤테이션 셀프체크 대상). block_template 필드 자체는 그대로 저장돼
+    있다는 것도 같이 확認(FE 카드 회귀 0 — 필드는 안 건드렸다는 근거)."""
     engine, Session = await _realdb_session()
     try:
         async with Session() as s:
@@ -343,14 +370,101 @@ async def test_definition_with_block_template_renders_byte_identical_to_old_gene
             story_id = await _seed_story(s, org_id, project_id)
             definition_key = await _seed_definition(
                 s, org_id, slug="e3313d",
-                stage_metadata={"monitor": {"role": "Scout", "action": "감지"}},
+                stage_metadata={
+                    "monitor": {"role": "Scout", "action": "감지"},
+                    "research": {"role": "Researcher", "action": "조사"},
+                },
                 block_template={"title": "템플릿 있음"},
             )
             payload = {"stage": "monitor", "work_item_type": "story", "work_item_id": str(story_id)}
             content, _resp = await _publish_and_get_content(
                 s, definition_key=definition_key, payload=payload, publisher_id=publisher_id, org_id=org_id,
             )
-            assert content == _generic_expected(definition_key, payload)
+            assert content != _generic_expected(definition_key, payload)
+            assert "- stage: monitor (Scout)" in content
+            assert "- 할 일: 감지" in content
+            assert "- 다음 단계: research (Researcher)" in content
+            assert "publish_event(" in content
+
+            from sqlalchemy import select
+            from app.models.event_definition import EventDefinition
+
+            row = (await s.execute(
+                select(EventDefinition).where(EventDefinition.key == definition_key)
+            )).scalar_one()
+            assert row.block_template == {"title": "템플릿 있음"}
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_current_stage_gate_shows_already_open_sentence_and_no_immediate_example():
+    """⭐story #4076 ④(스코프 B) — 지금 발행되는 stage 자체에 gate 선언이 있으면, 그
+    발행(=이 알림을 만드는 바로 그 발행)이 `maybe_create_stage_gate`로 이미 게이트를 열어
+    뒀다(events.py:1845 이하, routing 직후·메시지 발송 前). 다음 stage를 지금 발행하면
+    안 되므로(승인 대기 中) 즉시 발행 예시를 생략하고 "이미 열려 있습니다" 문구로 대체.
+    뮤테이션 셀프체크 대상: 이 gate 분기를 지우면 publish_event(가 다시 나타나 RED."""
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project_with_owner(s, slug="e3313h")
+            publisher_id = await _seed_agent(s, org_id, project_id)
+            story_id = await _seed_story(s, org_id, project_id)
+            definition_key = await _seed_definition(
+                s, org_id, slug="e3313h",
+                stage_metadata={
+                    "monitor": {
+                        "role": "Scout", "action": "감지",
+                        "gate": {"type": "checkpoint", "approver": "org_owner"},
+                    },
+                    "research": {"role": "Researcher", "action": "조사"},
+                },
+            )
+            payload = {"stage": "monitor", "work_item_type": "story", "work_item_id": str(story_id)}
+            content, _resp = await _publish_and_get_content(
+                s, definition_key=definition_key, payload=payload, publisher_id=publisher_id, org_id=org_id,
+            )
+            assert "지금 사람 승인 게이트가 열려 있습니다(승인자 역할: org_owner)" in content
+            assert "preset.gate.verdict" in content
+            assert "- 다음 단계: research (Researcher)" in content
+            assert "publish_event(" not in content
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_next_stage_gate_keeps_example_and_appends_opens_on_publish_note():
+    """⭐story #4076 ④(스코프 A) — 지금 stage엔 gate가 없지만, 안내하는 다음 stage 자체에
+    gate 선언이 있으면 그 발행이 게이트를 여는 트리거다. 발행 예시를 빼면 에이전트가 게이트를
+    여는 방법 자체를 모르게 되므로(페드루 PO 지적) 예시는 그대로 두고 결과 안내만 덧붙인다.
+    뮤테이션 셀프체크 대상: 안내 문장을 지우면 이 assert만 RED(예시 자체는 안 깨짐)."""
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project_with_owner(s, slug="e3313i")
+            publisher_id = await _seed_agent(s, org_id, project_id)
+            story_id = await _seed_story(s, org_id, project_id)
+            definition_key = await _seed_definition(
+                s, org_id, slug="e3313i",
+                stage_metadata={
+                    "monitor": {"role": "Scout", "action": "감지"},
+                    "research": {
+                        "role": "Researcher", "action": "조사",
+                        "gate": {"type": "checkpoint", "approver": "org_owner"},
+                    },
+                },
+            )
+            payload = {"stage": "monitor", "work_item_type": "story", "work_item_id": str(story_id)}
+            content, _resp = await _publish_and_get_content(
+                s, definition_key=definition_key, payload=payload, publisher_id=publisher_id, org_id=org_id,
+            )
+            assert "publish_event(" in content
+            assert "- 다음 단계: research (Researcher)" in content
+            assert "이 발행을 하면 사람 승인 게이트가 열립니다" in content
+            assert "preset.gate.verdict" in content
+            assert "지금 사람 승인 게이트가 열려 있습니다" not in content
     finally:
         await engine.dispose()
 

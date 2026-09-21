@@ -1367,6 +1367,28 @@ async def _tokenize_embedded_entity_refs(db: AsyncSession, *, org_id: uuid.UUID,
     return await _async_regex_sub(_EMBEDDED_HEX8_RE, _replace_prefix, text)
 
 
+def _next_recipe_stage(definition, stage: str) -> str | None:
+    """story #4076 — `definition.payload_schema.properties.stage.enum`에서 `stage` 바로
+    다음 원소. `_render_event_message_content`(사이클 렌더러)·`_render_gate_verdict_message`
+    (판정 렌더러) 둘 다 같은 계산을 쓴다 — 공유 추출, 드리프트 금지(PR11 `_captured_spend_
+    minor_for_gate` 선례 동형)."""
+    enum = ((definition.payload_schema.get("properties") or {}).get("stage") or {}).get("enum") or []
+    if stage not in enum:
+        return None
+    idx = enum.index(stage)
+    return enum[idx + 1] if idx + 1 < len(enum) else None
+
+
+def _build_next_stage_publish_example(definition, next_stage: str, base_payload: dict) -> str:
+    """story #4076 — `next_stage`로 넘어가는 `publish_event` 호출 예시 문자열. `base_payload`의
+    기존 키(`stage` 제외)를 그대로 이어받아 실값 예시를 만든다(스키마만이 아니라 실제로
+    복붙 가능한 예시 — AC3)."""
+    next_payload = {k: v for k, v in base_payload.items() if k != "stage"}
+    next_payload["stage"] = next_stage
+    example = json.dumps({"definition_key": definition.key, "payload": next_payload}, ensure_ascii=False)
+    return f"publish_event({example})"
+
+
 async def _render_gate_verdict_message(
     db: AsyncSession, *, org_id: uuid.UUID, payload: dict, resolved_locale: str = "ko",
 ) -> str:
@@ -1434,6 +1456,13 @@ async def _render_gate_verdict_message(
     # 채워진다 — publish 다음-행동 문구를 채널별 커넥터명으로 구체화하는 데 쓴다.
     gate_stage: str | None = None
     gate_channel: str | None = None
+    # story #4076 — gate_row.neutral_facts["triggered_by_event"]는 이 게이트를 만든 recipe
+    # 정의의 key(recipe_gate_hooks.py:188 `_build_approval_neutral_facts`가 게이트 생성
+    # 시점에 이미 찍어 둔다, 새 계산 0). ④ 구체 발행 예시가 이 값으로 정의를 재조회한다 —
+    # 이 필드가 없는 옛 게이트 row(그 주석이 추가되기 전에 생성된 게이트)는 None 그대로
+    # 남아 아래에서 기존 제네릭 문구로 폴백한다(크래시 대신 폴백, PO 확定).
+    triggered_by_event_key: str | None = None
+    gate_row = None
     # story #3487(0329) — payload에 gate_id가 있으면(이 함수의 유일한 발행부는 항상
     # 채운다) 그 행만 정확히 읽는다. story #3478(gate.scope_key) 이후 같은 work_item에
     # 목적지가 다른 external_publish 게이트가 둘 이상일 수 있어, 아래 (work_item_id,
@@ -1457,6 +1486,7 @@ async def _render_gate_verdict_message(
             )).scalar_one_or_none()
         if gate_row is not None:
             facts = gate_row.neutral_facts or {}
+            triggered_by_event_key = facts.get("triggered_by_event")
             token = facts.get("draft_doc_reference_token")
             if token and token != "미확認":
                 draft_doc_ref = token
@@ -1583,8 +1613,39 @@ async def _render_gate_verdict_message(
                     f"- 다음 행동: channel={gate_channel}에 대한 커넥터 매핑이 없습니다 — "
                     "조직 설정에 channel_connector_map을 등록하세요."
                 )
+        # story #4076 — ④ 갭 처방: "다음 stage 이벤트를 발행하세요"뿐이던 자리를
+        # triggered_by_event_key(위, gate_row.neutral_facts — 이 게이트를 만든 recipe
+        # 정의)로 그 정의를 재조회해 구체 definition_key+payload 예시로 채운다(사이클
+        # 렌더러 `_next_recipe_stage`/`_build_next_stage_publish_example`과 동일 계산 재사용,
+        # 새 로직 0). 키가 없는 옛 게이트 row·정의를 못 찾음·다음 stage가 없음(마지막
+        # stage) 중 하나라도 걸리면 크래시 대신 기존 제네릭 문구로 폴백(PO 확定).
+        _example_line: str | None = None
+        if _connector_line is None and triggered_by_event_key and gate_stage:
+            from app.models.event_definition import EventDefinition
+
+            _recipe_definition = (await db.execute(
+                select(EventDefinition).where(
+                    EventDefinition.key == triggered_by_event_key,
+                    EventDefinition.enabled.is_(True),
+                    or_(EventDefinition.org_id == org_id, EventDefinition.org_id.is_(None)),
+                ).order_by(EventDefinition.org_id.is_(None)).limit(1)
+            )).scalars().first()
+            if _recipe_definition is not None:
+                _next_stage = _next_recipe_stage(_recipe_definition, gate_stage)
+                if _next_stage is not None:
+                    _base_payload: dict = {"stage": gate_stage}
+                    if work_item_type:
+                        _base_payload["work_item_type"] = work_item_type
+                    if work_item_id_raw:
+                        _base_payload["work_item_id"] = work_item_id_raw
+                    _example = _build_next_stage_publish_example(_recipe_definition, _next_stage, _base_payload)
+                    _next_meta = (_recipe_definition.stage_metadata or {}).get(_next_stage) or {}
+                    _example_line = f"- 다음 행동: 이 정의의 다음 stage 이벤트를 발행하세요: {_example}"
+                    if _next_meta.get("gate") is not None:
+                        _example_line += f" — {t('events.stage_gate_opens_on_publish', resolved_locale)}"
         lines.append(
             _connector_line
+            or _example_line
             or "- 다음 행동: 이 정의의 다음 stage 이벤트를 발행하세요(publish 단계라면 이 "
             "승인 게이트를 확인하는 발행 도구를 쓰세요)."
         )
@@ -1603,17 +1664,25 @@ async def _render_event_message_content(
 
     ⚠️PO 확定(2026-09-02) — 조직 규칙/우리 문구를 기본값으로 박지 않는다: role/action은
     정의(stage_metadata)에 이미 적힌 값을 그대로 옮길 뿐 새 문구를 짓지 않고, 발행 예시도
-    definition_key+payload 골격만(값 없이 구조만). 회귀 0인 두 갈래(둘 다 기존 제네릭
-    그대로): ①block_template가 있는 정의(P2 렌더러가 그 정의는 이미 담당) ②stage_metadata가
-    비어있는 비사이클형 정의("담당자 없는 stage는 모르면 안 준다" 원칙과 동일 — 지어낼
-    stage_metadata 자체가 없다).
+    definition_key+payload 골격만(값 없이 구조만). 회귀 0인 한 갈래(기존 제네릭 그대로):
+    stage_metadata가 비어있는 비사이클형 정의("담당자 없는 stage는 모르면 안 준다" 원칙과
+    동일 — 지어낼 stage_metadata 자체가 없다).
 
-    story #3330 — `preset.gate.verdict`는 `stage_metadata`가 없는 비사이클형 정의라
-    ②로 떨어져 여태 제네릭 폴백뿐이었다(반려 사유·산출물 링크·다음 행동이 전혀 안
-    실림). 그 키만 전용 렌더(`_render_gate_verdict_message`)로 먼저 갈라낸다."""
+    story #3330 — `preset.gate.verdict`는 `stage_metadata`가 없는 비사이클형 정의라 위
+    갈래로 떨어져 여태 제네릭 폴백뿐이었다(반려 사유·산출물 링크·다음 행동이 전혀 안
+    실림). 그 키만 전용 렌더(`_render_gate_verdict_message`)로 먼저 갈라낸다.
+
+    ⛔story #4076(2026-09-21, 페드루 PO 確定) — 원설계는 「block_template가 있는 정의는
+    FE block_template 렌더러(event-block-card.tsx)가 이미 담당한다」는 전제로 이 자기설명
+    분기를 스킵시켰다. 그 전제가 틀렸다: block_template 렌더는 FE 채팅 UI 전용(chat-bubble.tsx
+    가 파싱 성공했을 때만 EventBlockCard를 태움)이고, 멘션을 받는 에이전트(webhook/SSE 채널)는
+    block_template을 전혀 못 본다 — content(이 함수의 반환값)가 그 채널의 전부다. 실측(moonklabs
+    org, GET /api/v2/events/definitions): stage_metadata 있는 정의 10개 중 9개가 block_template도
+    있어 자기설명 0(제네릭 폴백만)이었다. block_template 필드 자체는 무변경(FE 카드 회귀 0) —
+    이 분기의 「block_template 있으면 스킵」 조건만 제거한다."""
     if definition.key == "preset.gate.verdict":
         return await _render_gate_verdict_message(db, org_id=org_id, payload=payload, resolved_locale=resolved_locale)
-    if definition.block_template is not None or not definition.stage_metadata:
+    if not definition.stage_metadata:
         return "\n".join(_generic_event_message_lines(definition.key, payload))
 
     stage = payload.get("stage")
@@ -1642,21 +1711,35 @@ async def _render_event_message_content(
         f"- 할 일: {rendered_action}",
     ]
 
-    enum = ((definition.payload_schema.get("properties") or {}).get("stage") or {}).get("enum") or []
-    next_stage = None
-    if stage in enum:
-        idx = enum.index(stage)
-        if idx + 1 < len(enum):
-            next_stage = enum[idx + 1]
-    if next_stage is not None:
-        next_role = (definition.stage_metadata.get(next_stage) or {}).get("role")
-        lines.append(f"- 다음 단계: {next_stage}" + (f" ({next_role})" if next_role else ""))
-        next_payload = {k: v for k, v in payload.items() if k != "stage"}
-        next_payload["stage"] = next_stage
-        example = json.dumps(
-            {"definition_key": definition.key, "payload": next_payload}, ensure_ascii=False,
+    next_stage = _next_recipe_stage(definition, stage)
+
+    # story #4076 ④ — 게이트가 어느 발행에 걸리는지에 따라 다음 행동 문구가 갈린다
+    # (recipe_gate_hooks.py:1845-1854 — routing 해석 직후·메시지 발송 이전에
+    # `maybe_create_stage_gate(payload["stage"])`가 이미 실행됨, 즉 **지금 이 stage**의
+    # gate 선언은 이 알림을 만드는 바로 그 발행이 이미 열어 둔 게이트다):
+    #   ①지금 stage에 gate 있음 → 게이트가 이미 열려 있다(스코프 B). 다음 stage를 지금
+    #     발행하면 안 된다(승인 전 발행 유도 금지) — 발행 예시를 생략하고 대기 문구로.
+    #   ②지금 stage엔 gate가 없지만 다음 stage에 gate가 있음 → 그 발행 자체가 게이트를
+    #     여는 트리거다(스코프 A). 발행 예시는 그대로 두되(빼면 에이전트가 게이트를 여는
+    #     방법 자체를 모르게 됨, 페드루 PO 지적) 그 결과를 안내하는 문장만 덧붙인다.
+    current_gate = stage_meta.get("gate")
+    if current_gate is not None:
+        lines.append(
+            f"- {t('events.stage_gate_already_open', resolved_locale, approver=current_gate.get('approver') or '')}"
         )
-        lines.append(f"- 다음 단계로 넘기는 발행 예시: publish_event({example})")
+        if next_stage is not None:
+            next_role = (definition.stage_metadata.get(next_stage) or {}).get("role")
+            lines.append(f"- 다음 단계: {next_stage}" + (f" ({next_role})" if next_role else ""))
+        else:
+            lines.append("- 다음 단계: 없음(마지막 stage)")
+    elif next_stage is not None:
+        next_meta = definition.stage_metadata.get(next_stage) or {}
+        next_role = next_meta.get("role")
+        lines.append(f"- 다음 단계: {next_stage}" + (f" ({next_role})" if next_role else ""))
+        example = _build_next_stage_publish_example(definition, next_stage, payload)
+        lines.append(f"- 다음 단계로 넘기는 발행 예시: {example}")
+        if next_meta.get("gate") is not None:
+            lines.append(f"- {t('events.stage_gate_opens_on_publish', resolved_locale)}")
     else:
         lines.append("- 다음 단계: 없음(마지막 stage)")
 
