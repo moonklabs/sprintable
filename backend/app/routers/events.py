@@ -3632,6 +3632,197 @@ async def get_recipe_start_candidates(
     return RecipeStartCandidatesResponse(candidates=candidates)
 
 
+class GenerationConnectorReadResponse(BaseModel):
+    """story #4110(#4109 PO 결정, 2026-09-21) — 바인딩 crew 에이전트 전용 읽기 응답.
+    org_generation_connectors.py::GenerationConnectorResponse(사람용 BFF)와 달리
+    credentials 필드가 **있다** — 그쪽은 write-only 계약(사람 화면엔 절대 노출 안 함)이고
+    이 경로는 애초에 에이전트가 그 값으로 provider를 직접 호출하라고 짓는 자리라 반환이
+    곧 계약이다(#4095 Q①(b) — 제품이 아니라 에이전트가 자기 실행)."""
+    model_config = {"protected_namespaces": ()}
+
+    provider_key: str
+    label: str
+    model_config_json: dict
+    credentials: str
+
+
+@router.get(
+    "/work-items/{work_item_type}/{work_item_id}/generation-connector",
+    response_model=GenerationConnectorReadResponse,
+)
+async def get_my_generation_connector(
+    work_item_type: str,
+    work_item_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> GenerationConnectorReadResponse:
+    """story #4110(#4109 그라운딩 doc 733459ac «PO 결정», 2026-09-21) — 바인딩 crew
+    에이전트가 자기 레시피 적용의 generation_connector-target stage에 바인딩된 org
+    연산 커넥터 config·자격을 읽는다. `decrypt_generation_connector_credential()`의
+    첫 실제 호출처(#4101이 write-only로 지어둔 뒤 콜러 0이었던 것을 #4109 그라운딩이
+    확認 — 이 카드가 그 첫 독자).
+
+    판정 순서(전부 되돌리면 RED, #4110 AC1/AC2):
+    1. 호출자가 agent 아니면(human) 403 — 자격 노출은 에이전트 실행 경로만
+       (org_generation_connectors.py의 사람용 BFF는 애초에 credentials를 안 돌려주는
+       것과 대칭 축, 여기는 "누가 부르는지"로 가른다).
+    2. work_item → project를 못 찾으면(work item 자체가 없음) 404.
+    3. 그 project(+ org 전역)에 바인딩된 레시피 중 **이 work_item에 실제로 시작된**
+       것(`get_recipe_start_candidates`와 동일 SSOT — `_find_existing_stage_publish`로
+       "시작됐는가", `_find_latest_stage_publish`로 "지금 어느 stage인가")을 찾아, 그
+       현재 stage 중 `capability.target=="generation_connector"`인 게 하나도 없으면
+       403(stage 불일치 — "지금 이 도구를 쓸 차례가 아니다"). 여러 레시피가 동시에
+       걸려도 새 판정을 안 짓는다 — target이 맞는 stage가 하나라도 나오면 그것을 쓴다.
+    4. 호출 에이전트가 crew(#4109 PO 결정 — 같은 org·[project 특이 ∪ org 전역]·
+       event_definition_key의 `RecipeRoleBinding.agent_member_id` 집합) 밖이면 403.
+       `resolve_member().id` 직접비교는 휴먼 JWT caller에서 축이 어긋날 수 있다는
+       기존 경고(S19, 위 734행)가 있으나 그건 human 축 얘기 — 1번에서 이미 agent만
+       통과시켰고 `agent_member_id` 자체가 agent 전용 컬럼(TeamMember.id 공간)이라
+       여기선 axis-safe. ⛔story #4110 CHANGES-1(페드루 PO 리뷰, 2026-09-21) — 바인딩·
+       커넥터 조회보다 **먼저** 돈다: 원래 순서(바인딩→커넥터→crew)면 crew 밖
+       에이전트도 404/409로 "이 stage에 커넥터가 묶였는지·revoked인지"를 알 수
+       있었다 — 자격 인접 엔드포인트는 최소 정보 노출 순서(누가 봐도 되는지부터).
+    5. 그 stage에 바인딩된 `generation_connector_id`가 없으면 404(project 특이 우선,
+       org 전역 폴백 — `_resolve_recipe_role_binding`과 동일 우선순위).
+    6. 그 커넥터가 이 org 소속이 아니거나 존재하지 않으면 404, `status != "active"`면 409.
+    7. 감사 로그 1행 — `logger.info`(구조화, 자격값 절대 미포함). 신규 DB 테이블/마이그
+       0: `permission_audit_logs`는 `action` 닫힌 CHECK(member_added/member_removed/
+       role_changed, baseline/schema.sql 1541행 실측)라 이 목적에 안 맞아 재사용하지
+       않는다 — 새 테이블을 여는 대신(스코프 밖) 기존 로그 축에 싣는다.
+    8. `{provider_key, label, model_config_json, credentials}` 평문 1회 반환.
+    """
+    from app.models.event_definition import EventDefinition
+    from app.models.recipe_role_binding import RecipeRoleBinding
+    from app.services.event_routing_resolver import _resolve_work_item_project_id
+    from app.services.generation_connector_credential_crypto import (
+        decrypt_generation_connector_credential,
+    )
+    from app.services.member_resolver import resolve_member
+    from app.services.org_generation_connector import get_org_generation_connector
+
+    caller = await resolve_member(auth, org_id, db)
+    if caller.type != "agent":
+        raise HTTPException(status_code=403, detail={"code": "GENERATION_CONNECTOR_READ_AGENT_ONLY"})
+
+    project_id = await _resolve_work_item_project_id(
+        db, org_id=org_id,
+        payload={"work_item_type": work_item_type, "work_item_id": str(work_item_id)},
+    )
+    if project_id is None:
+        raise HTTPException(status_code=404, detail={"code": "GENERATION_CONNECTOR_WORK_ITEM_NOT_FOUND"})
+
+    binding_rows = (await db.execute(
+        select(RecipeRoleBinding.event_definition_key).where(
+            RecipeRoleBinding.org_id == org_id,
+            or_(RecipeRoleBinding.project_id == project_id, RecipeRoleBinding.project_id.is_(None)),
+        )
+    )).all()
+    applied_keys = sorted({k for (k,) in binding_rows})
+
+    matched_key: str | None = None
+    matched_stage: str | None = None
+    if applied_keys:
+        definitions = (await db.execute(
+            select(EventDefinition)
+            .where(
+                EventDefinition.key.in_(applied_keys),
+                EventDefinition.enabled.is_(True),
+                or_(EventDefinition.org_id == org_id, EventDefinition.org_id.is_(None)),
+            )
+            .order_by(EventDefinition.org_id.is_(None))
+        )).scalars().all()
+        by_key: dict[str, EventDefinition] = {}
+        for d in definitions:
+            by_key.setdefault(d.key, d)
+
+        for key in applied_keys:
+            definition = by_key.get(key)
+            if definition is None:
+                continue
+            stage_enum = ((definition.payload_schema.get("properties") or {}).get("stage") or {}).get("enum")
+            if not isinstance(stage_enum, list) or not stage_enum:
+                continue
+            first_stage = stage_enum[0]
+            existing_publish = await _find_existing_stage_publish(
+                db, org_id=org_id, definition_key=key,
+                work_item_type=work_item_type, work_item_id=str(work_item_id), stage=str(first_stage),
+            )
+            if existing_publish is None:
+                continue
+            latest = await _find_latest_stage_publish(
+                db, org_id=org_id, definition_key=key,
+                work_item_type=work_item_type, work_item_id=str(work_item_id),
+            )
+            if latest is None:
+                continue
+            event_payload = ((latest.msg_metadata or {}).get("event") or {}).get("payload") or {}
+            stage_value = event_payload.get("stage")
+            if not isinstance(stage_value, str):
+                continue
+            capability = (definition.stage_metadata.get(stage_value) or {}).get("capability") or {}
+            if capability.get("target") == "generation_connector":
+                matched_key, matched_stage = key, stage_value
+                break
+
+    if matched_stage is None or matched_key is None:
+        raise HTTPException(status_code=403, detail={"code": "GENERATION_CONNECTOR_STAGE_MISMATCH"})
+
+    # story #4110 CHANGES-1(페드루 PO 리뷰, 2026-09-21) — crew 판정을 바인딩·커넥터 조회
+    # **앞**으로. 원래 순서(바인딩→커넥터→crew)면 crew 밖 에이전트도 404/409 응답으로
+    # "이 stage에 커넥터가 묶였는지·revoked인지"를 알 수 있었다 — 자격 인접 엔드포인트는
+    # 그 정보 자체도 최소로(누가 봐도 되는 걸 먼저 걸러야, 그 뒤에야 "무엇이 있는지"를
+    # 답한다).
+    crew_ids = set((await db.execute(
+        select(RecipeRoleBinding.agent_member_id).where(
+            RecipeRoleBinding.org_id == org_id,
+            RecipeRoleBinding.event_definition_key == matched_key,
+            RecipeRoleBinding.agent_member_id.is_not(None),
+            or_(RecipeRoleBinding.project_id == project_id, RecipeRoleBinding.project_id.is_(None)),
+        )
+    )).scalars().all())
+    if caller.id not in crew_ids:
+        raise HTTPException(status_code=403, detail={"code": "GENERATION_CONNECTOR_CREW_ONLY"})
+
+    generation_connector_id = (await db.execute(
+        select(RecipeRoleBinding.generation_connector_id).where(
+            RecipeRoleBinding.org_id == org_id,
+            RecipeRoleBinding.project_id == project_id,
+            RecipeRoleBinding.event_definition_key == matched_key,
+            RecipeRoleBinding.stage == matched_stage,
+        )
+    )).scalar_one_or_none()
+    if generation_connector_id is None:
+        generation_connector_id = (await db.execute(
+            select(RecipeRoleBinding.generation_connector_id).where(
+                RecipeRoleBinding.org_id == org_id,
+                RecipeRoleBinding.project_id.is_(None),
+                RecipeRoleBinding.event_definition_key == matched_key,
+                RecipeRoleBinding.stage == matched_stage,
+            )
+        )).scalar_one_or_none()
+    if generation_connector_id is None:
+        raise HTTPException(status_code=404, detail={"code": "GENERATION_CONNECTOR_BINDING_NOT_FOUND"})
+
+    connector = await get_org_generation_connector(db, org_id=org_id, connector_id=generation_connector_id)
+    if connector is None:
+        raise HTTPException(status_code=404, detail={"code": "GENERATION_CONNECTOR_BINDING_NOT_FOUND"})
+    if connector.status != "active":
+        raise HTTPException(status_code=409, detail={"code": "GENERATION_CONNECTOR_REVOKED"})
+
+    logger.info(
+        "generation_connector_read: actor=%s org=%s connector=%s work_item=%s:%s stage=%s",
+        caller.id, org_id, connector.id, work_item_type, work_item_id, matched_stage,
+    )
+
+    return GenerationConnectorReadResponse(
+        provider_key=connector.provider_key,
+        label=connector.label,
+        model_config_json=connector.model_config_json,
+        credentials=decrypt_generation_connector_credential(connector.encrypted_credentials),
+    )
+
+
 class EventPublishHistoryItem(BaseModel):
     id: str
     conversation_id: str

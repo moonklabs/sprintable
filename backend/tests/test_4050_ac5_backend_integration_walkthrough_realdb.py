@@ -89,7 +89,7 @@ _NO_GATE_STAGES = ["draft", "live_generation", "verification", "editing", "publi
 # ─── 단위 축 — capability 소비자가 정확히 2곳뿐인지 고정(코드 위치 자체가 증거) ──────
 
 
-def test_capability_field_has_exactly_four_consumers_in_codebase():
+def test_capability_field_has_exactly_five_consumers_in_codebase():
     """AC2/AC3 근거 — stage_metadata.capability를 읽는 코드가 등록시점 검증 1곳 +
     apply시점 warning 1곳뿐임을 고정한다. 새 소비자가 추가되면 이 테스트가 그 사실을
     알려준다(연산/발행자 슬롯에 실제 배선이 생겼다는 뜻이므로 이 카드의 결론을 재검토
@@ -109,9 +109,13 @@ def test_capability_field_has_exactly_four_consumers_in_codebase():
 
     ⛔재갱신(story #4088 2/2, PO CI 리뷰 2026-09-21) — `_render_event_message_content`
     가 현재 stage의 capability.kind로 자기설명 멘션 힌트(attach_video/generate)를
-    고르는 네 번째 소비처가 추가돼 3→4로 또 늘었다. 함수 이름의 "two"도 이미 실값과
-    어긋난 지 오래라 이 갱신에서 같이 고친다(test_capability_field_has_exactly_
-    four_consumers_in_codebase — 참조하는 곳이 이 파일 하나뿐임을 확認 후 rename)."""
+    고르는 네 번째 소비처가 추가돼 3→4로 또 늘었다.
+
+    ⛔재갱신(story #4110, 2026-09-21) — 신규 `get_my_generation_connector`(바인딩 crew
+    에이전트가 자기 레시피의 generation_connector-target stage 판정에 capability.target을
+    읽는 REST)가 다섯 번째 소비처로 추가돼 4→5로 또 늘었다. 함수 이름의 "four"도 이미
+    실값과 어긋난 지 오래라 이 갱신에서 같이 고친다(참조하는 곳이 이 파일 하나뿐임을
+    확認 후 rename)."""
     import ast
     import inspect
 
@@ -126,11 +130,13 @@ def test_capability_field_has_exactly_four_consumers_in_codebase():
                 count += 1
         return count
 
-    # events.py: `.get("capability")` 4건 — 기존 warning 축(§3317 PR B)·story #4090 AC1
+    # events.py: `.get("capability")` 5건 — 기존 warning 축(§3317 PR B)·story #4090 AC1
     # `_is_channel_stage`(target 판별)·같은 스토리 AC3 `_render_gate_verdict_message`
     # (다음 stage capability.target으로 자동발행 안내 갈래 판별)·story #4088 2/2
-    # `_render_event_message_content`(현재 stage capability.kind로 힌트 갈래 판별).
-    assert _count_capability_subscripts(events_module) == 4
+    # `_render_event_message_content`(현재 stage capability.kind로 힌트 갈래 판별)·
+    # story #4110 `get_my_generation_connector`(현재 stage capability.target으로
+    # generation_connector-target 여부 판정).
+    assert _count_capability_subscripts(events_module) == 5
     # event_definition_registry.py: validate_stage_metadata 안의 `meta["capability"]`류 —
     # shape 검증 로직 안에서 "capability" 리터럴이 여러 번 등장(object 검사·에러 메시지 등)
     # 하므로 정확한 개수보다 "0이 아님(소비자가 실존)"만 고정한다.
