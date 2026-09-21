@@ -74,6 +74,22 @@ describe('verify-cross-element-tint-text (story #2590 A — 교차-요소 정적
     expect(count(jsx)).toBe(1);
   });
 
+  // ── story #4126 CHANGES(PO 확定) — 자기 불투명 중립 배경(bg-background 등 5종)이
+  // 조상 pale-bg를 서브트리에서 리셋한다(doc-status-rail.tsx 실사례: 경고색 아이콘이
+  // bg-background 원 위에 있어 조상 bg-warning-tint와 실제로 안 겹침). ──
+  it('does NOT flag warning icon nested inside an opaque bg-background wrapper on a pale ancestor', () => {
+    const jsx = '<div className="bg-warning-tint"><span className="grid size-8 bg-background"><Icon className="size-4 text-warning" /></span></div>';
+    expect(count(jsx)).toBe(0);
+  });
+  it('음성대조 — 같은 픽스처에서 bg-background를 빼면 다시 잡힌다(리셋 로직 자체를 증명)', () => {
+    const jsx = '<div className="bg-warning-tint"><span className="grid size-8"><Icon className="size-4 text-warning" /></span></div>';
+    expect(count(jsx)).toBe(1);
+  });
+  it('반투명(bg-background/50)은 리셋 자격이 없다(불투명만 조상을 가린다)', () => {
+    const jsx = '<div className="bg-warning-tint"><span className="grid size-8 bg-background/50"><Icon className="size-4 text-warning" /></span></div>';
+    expect(count(jsx)).toBe(1);
+  });
+
   // ── auditable suppress — 이유 있으면 통과, 이유 없으면 여전히 실패 ──
   it('suppresses with a reason (// tint-guard-ok: <reason>)', () => {
     const jsx = `<div className="bg-warning-tint">\n  {/* tint-guard-ok: 색이 데이터·PO 승인 #123 */}\n  <p className="text-xs text-warning">경고</p>\n</div>`;

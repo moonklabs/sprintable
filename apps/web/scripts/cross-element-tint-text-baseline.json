@@ -1,10 +1,4 @@
 {
-  "_comment": "story #2590 (A) 교차-요소 가드 grandfather baseline — can only shrink. story #4126(2026-09-21)이 재귀 버그를 고쳐 처음으로 드러난 기존 5건 — 사전 도입 코드에 이미 있던 자리라 이 PR은 코드를 안 바꾸고 등재만 한다(PR 본문에 자리별 트리아지 메모, PO 확認 요청). 유효한 오탐이면 각 자리에 tint-guard-ok: 사유로 옮기고 여기서 뺄 것.",
-  "keys": [
-    "components/docs/doc-status-rail.tsx::warning::size-4   text-success text-destructive text-warning",
-    "components/hypotheses/hypothesis-verdict-card.tsx::info::flex items-center gap-1.5 text-sm font-semibold text-success text-info",
-    "components/hypotheses/hypothesis-verdict-card.tsx::success::flex items-center gap-1.5 text-sm font-semibold text-success text-info",
-    "components/hypotheses/hypothesis-verdict-card.tsx::success::font-semibold text-success text-foreground",
-    "components/storage/storage-asset-row.tsx::info::inline-flex items-center gap-[5px] text-[11px] font-semibold text-info"
-  ]
+  "_comment": "story #2590 (A) 교차-요소 가드 grandfather baseline — can only shrink",
+  "keys": []
 }

@@ -119,6 +119,14 @@ export function violationKey(v: Pick<Violation, 'file' | 'family' | 'className'>
   return `${v.file}::${v.family}::${v.className}`;
 }
 
+// story #4126 CHANGES(PO 확定, 2026-09-21) — doc-status-rail.tsx의 아이콘이 중립
+// 불투명 원(bg-background) 위에 있어 조상 pale-bg(bg-warning-tint 등)와 실제로
+// 안 겹치는데(§4 의도적 패턴, #2955/#2534/#2420 인용) walk()가 그 사실을 몰라
+// 거짓 위반을 냈다 — 이 5개(명시, 넓히지 않기)만 "자기 불투명 배경이 조상 pale을
+// 리셋한다"로 인코딩한다. `/N` opacity 접미사가 붙으면(반투명) 매치 안 됨 — 불투명
+// 배경만 리셋 자격이 있다.
+const NEUTRAL_OPAQUE_BG_RE = /(?<![\w-])bg-(?:background|card|popover|proof-panel|proof-bg)(?![\w/-])/;
+
 function suppressWindows(content: string): { withReason: Set<number>; noReason: Set<number> } {
   const withReason = new Set<number>();
   const noReason = new Set<number>();
@@ -171,7 +179,11 @@ export function scanContent(content: string, file: string): Violation[] {
           }
         }
       }
-      if (children) for (const c of children) walk(c, ancestors.concat(selfPale));
+      // story #4126 CHANGES — 이 요소 자신이 명시 5종 중립 불투명 배경이면, 그 아래
+      // 서브트리는 조상 pale-bg와 무관하다(불투명 배경이 시각적으로 그 조상을 완전히
+      // 가린다) — 상속된 ancestors까지 포함해 [](완전 리셋)로 넘긴다.
+      const nextAncestors = NEUTRAL_OPAQUE_BG_RE.test(cls) ? [] : ancestors.concat(selfPale);
+      if (children) for (const c of children) walk(c, nextAncestors);
       return;
     }
     node.forEachChild((c) => walk(c, ancestors));
