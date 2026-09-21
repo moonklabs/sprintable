@@ -575,28 +575,47 @@ jobs:
       # 집합 diff(구현, comm -13)는 기존 항목의 "문구만 바뀐" rename을 신규 추가로
       # 오판했다(실 사고, PR#4316) — 판정 자체를 verify_no_new_korean_user_strings.py의
       # --check-growth(파일 단위+전역 비증가)로 옮겨 로컬 스캐너와 같은 코드로 판정한다.
-      - name: "Verify baseline can only shrink (story #3779/#3924 — no new grandfather entries, rename-aware)"
+      - name: "Verify baseline can only shrink (story #3779/#3924/#4113 — no new grandfather entries, rename-aware, merge-base compared)"
         working-directory: backend
         run: |
           set -e
           PR_BASE_REF="${{ github.event.pull_request.base.ref }}"
+          PR_HEAD_SHA="${{ github.event.pull_request.head.sha }}"
           PUSH_BEFORE_SHA="${{ github.event.before }}"
           COMPARE_REF=""
           COMPARE_LABEL=""
           if [ -n "$PR_BASE_REF" ]; then
-            git fetch origin "$PR_BASE_REF" --depth=1 2>&1 | tail -3 || true
-            COMPARE_REF="FETCH_HEAD"
-            COMPARE_LABEL="PR base:$PR_BASE_REF"
+            # story #4113(페드루 PO 確定, 2026-09-21) — "develop 지금 시점"이 아니라
+            # "이 PR이 분기한 시점의 develop"과 비교해야 "이 PR이 baseline을 늘렸는가"만
+            # 잰다. FETCH_HEAD(develop 현재 tip)와 직접 비교하면, 분기 뒤 develop이
+            # baseline을 줄이는 다른 PR을 착지시켰을 때 이 PR은 그 파일을 안 건드려도
+            # "순증"으로 오판된다(실사고 2026-09-21 12:57Z: PR #4480(#4104) 착지 뒤
+            # #4479·#4484·#4482 run B 동시 RED — 셋 다 이 파일 무접촉, 처방은 rebase/
+            # merge뿐이었다). merge-base(develop, PR head)가 정확한 분기점 — HEAD가
+            # 아니라 PR_HEAD_SHA를 명시로 써서 checkout이 merge ref(refs/pull/N/merge,
+            # actions/checkout 기본 동작)를 체크아웃했을 가능성과 무관하게 정확히
+            # 계산한다. develop은 --depth=1 없이 전체 이력으로 fetch(얕은 이력이면
+            # 공통 조상이 그 밖에 있을 때 merge-base 계산이 실패할 수 있다).
+            git fetch origin "$PR_BASE_REF" 2>&1 | tail -3 || true
+            DEVELOP_SHA="$(git rev-parse FETCH_HEAD 2>/dev/null || true)"
+            git fetch origin "$PR_HEAD_SHA" --depth=1 2>&1 | tail -3 || true
+            if [ -n "$DEVELOP_SHA" ]; then
+              MERGE_BASE_SHA="$(git merge-base "$DEVELOP_SHA" "$PR_HEAD_SHA" 2>/dev/null || true)"
+              if [ -n "$MERGE_BASE_SHA" ]; then
+                COMPARE_REF="$MERGE_BASE_SHA"
+                COMPARE_LABEL="merge-base(develop@$DEVELOP_SHA, head@$PR_HEAD_SHA)=$MERGE_BASE_SHA"
+              fi
+            fi
           elif [ -n "$PUSH_BEFORE_SHA" ] && [ "$PUSH_BEFORE_SHA" != "0000000000000000000000000000000000000000" ]; then
             git fetch origin "$PUSH_BEFORE_SHA" --depth=1 2>&1 | tail -3 || true
             COMPARE_REF="FETCH_HEAD"
             COMPARE_LABEL="push-before:$PUSH_BEFORE_SHA"
           fi
           if [ -n "$COMPARE_REF" ] && git show "$COMPARE_REF:backend/scripts/korean_user_strings_baseline.txt" > /tmp/base_baseline.txt 2>/dev/null; then
-            echo "comparing against ($COMPARE_LABEL)"
+            echo "comparing against ($COMPARE_LABEL) vs PR head ($PR_HEAD_SHA)"
             python3 scripts/verify_no_new_korean_user_strings.py --check-growth /tmp/base_baseline.txt scripts/korean_user_strings_baseline.txt
           elif [ -z "$COMPARE_REF" ]; then
-            echo "baseline growth check skipped: no comparison base (PR context 아님 + push-before 미상 — 예: 새 브랜치 최초 push)"
+            echo "baseline growth check skipped: no comparison base (PR context 아님 + push-before 미상 — 예: 새 브랜치 최초 push, 또는 merge-base 계산 실패)"
           else
             echo "baseline growth check skipped: no comparison base ($COMPARE_LABEL에 korean_user_strings_baseline.txt 없음 — 이 PR이 그 파일을 «처음 도입»하는 중이면 정상이다, story #3779 자신이 그 경우다. 다음 PR부터는 develop에 파일이 있어 실제 비교가 돈다)"
           fi
