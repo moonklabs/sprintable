@@ -638,8 +638,12 @@ describe('MarketingRecipeApplyDialog — 4슬롯 다른 메커니즘', () => {
     const creatorSelect = document.body.querySelector<HTMLSelectElement>('[data-testid="creator-agent-select"]')!;
     await act(async () => { creatorSelect.value = 'agent-1'; creatorSelect.dispatchEvent(new Event('change', { bubbles: true })); });
 
-    const emptyHint = document.body.querySelector('[data-testid="marketing-apply-generation-connectors-empty"]');
-    expect(emptyHint?.textContent).toBe(koMessages.organization.eventApplyGenerationConnectorsEmpty);
+    const emptyHint = document.body.querySelector('[data-testid="marketing-apply-generation-connectors-empty"]')!;
+    expect(emptyHint.textContent).toContain(koMessages.organization.eventApplyGenerationConnectorsEmpty);
+    // story #4116(#4112 시안 §6) — 빈 상태 문장 끝 목적지 링크(apply-recipe-dialog.tsx(v1) 동형).
+    const emptyLink = emptyHint.querySelector('a')!;
+    expect(emptyLink).toBeTruthy();
+    expect(emptyLink.getAttribute('href')).toBe('/organization/generation-connectors');
     const fallbackHint = document.body.querySelector('[data-testid="slot-compute"]')!.textContent;
     expect(fallbackHint).toContain(koMessages.organization.recipeApplyV2ComputeEmptyFallbackHint);
     const submitBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent === '적용하기')!;

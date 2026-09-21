@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -317,7 +318,12 @@ export function MarketingRecipeApplyDialog({
                   </div>
                 ) : generationConnectorsStatus === 'loaded' && activeGenerationConnectors.length === 0 ? (
                   <p className="mt-0.5 text-[11px] text-muted-foreground" data-testid="marketing-apply-generation-connectors-empty">
-                    {t('eventApplyGenerationConnectorsEmpty')}
+                    {t('eventApplyGenerationConnectorsEmpty')}{' '}
+                    {/* story #4116(#4112 시안 §6) — 빈 상태 문장 끝에 목적지 링크,
+                        apply-recipe-dialog.tsx(v1) 동형 배선. */}
+                    <Link href="/organization/generation-connectors" className="text-primary underline">
+                      {t('eventApplyGenerationConnectorsEmptyLinkAction')}
+                    </Link>
                   </p>
                 ) : null}
                 <p className="mt-0.5 text-[11px] text-muted-foreground">{t('recipeApplyV2ComputeEmptyFallbackHint')}</p>
