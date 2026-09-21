@@ -287,6 +287,11 @@ async def ensure_human_member(session: AsyncSession, org_member_id: uuid.UUID) -
     return True
 
 
+# story #4129 — MCP clientInfo(name/version)·세션 시작 시각·(있으면) plugin 버전. 새 컬럼
+# 없이(마이그레이션 0) agent_config JSONB의 runtime_identity 서브키로 쓴다.
+_RUNTIME_IDENTITY_FIELDS = ("client_name", "client_version", "plugin_version", "session_started_at")
+
+
 async def sync_agent_profile_presence(session: AsyncSession, member_id: uuid.UUID, **fields) -> None:
     """AC3-4 2-1 dual-write: 에이전트 presence를 agent_project_profiles에도 반영(team_members UPDATE와 동시).
 
@@ -322,12 +327,35 @@ async def sync_agent_profile_presence(session: AsyncSession, member_id: uuid.UUI
     뜻이지 엔드포인트가 죽어도 된다는 뜻이 아니다."""
     allowed = {"last_seen_at", "active_story_id", "agent_status"}
     upd = {k: v for k, v in fields.items() if k in allowed}
-    if not upd:
+    runtime_touched = any(k in fields for k in _RUNTIME_IDENTITY_FIELDS)
+    if not upd and not runtime_touched:
         return
     if upd.get("last_seen_at") is not None:
         upd["first_connected_at"] = func.coalesce(
             AgentProjectProfile.__table__.c.first_connected_at, upd["last_seen_at"]
         )
+    if runtime_touched:
+        # story #4129: 필드별 부분병합(이전 값 보존) 대신 4필드 통짜 스냅샷 — 이 호출이
+        # 안 실은 필드는 null이 "정직한 현재값"이라는 AC2 계약(문서: sync_agent_profile_presence
+        # 위 docstring). agent_config는 caller-set 임의 dict라 다른 top-level 키는 보존.
+        #
+        # SQL측 `coalesce(agent_config_column, cast({}, JSONB)) || cast(...)` 식(실측 그라운딩
+        # 2026-09-21)은 agent_config가 실제 NULL인 행에서 이 asyncpg 드라이버 조합 하에 결과가
+        # 그냥 NULL로 나오는(파라미터 인코딩 단 어딘가의 실드라이버 결함 — 순수 리터럴
+        # coalesce(CAST(NULL AS JSONB), cast({},JSONB))는 정상, 실 컬럼 참조가 섞이면 깨짐,
+        # postgres 서버 자체는 정상임을 raw asyncpg로 별도 확認) 재현 버그를 만났다 — SQL
+        # 표현식으로 병합하는 대신 현재 값을 먼저 읽어 파이썬에서 병합한 완성 dict를
+        # `.values()`에 직접 싣는다(이 타입의 실드라이버 결함 클래스를 통째로 피함).
+        current = (
+            await session.execute(
+                select(AgentProjectProfile.__table__.c.agent_config)
+                .where(AgentProjectProfile.__table__.c.member_id == member_id)
+            )
+        ).scalar_one_or_none()
+        runtime_identity = {k: fields.get(k) for k in _RUNTIME_IDENTITY_FIELDS}
+        merged = dict(current) if isinstance(current, dict) else {}
+        merged["runtime_identity"] = runtime_identity
+        upd["agent_config"] = merged
     result = await session.execute(
         sa_update(AgentProjectProfile.__table__)
         .where(AgentProjectProfile.__table__.c.member_id == member_id)

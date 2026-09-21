@@ -89,3 +89,44 @@ describe('AgentDetailPage — fetchOrgContext 격리(story #3519)', () => {
     expect(container.querySelector('[data-testid="project-access-projects-count"]')?.textContent).toBe('2');
   });
 });
+
+// story #4129 AC3 — 워크포스 상세도 목록과 같은 1줄(agent-management-tab.tsx의
+// formatAgentRuntimeLine 공유)·배지를 보인다.
+describe('AgentDetailPage — story #4129 런타임 신원 1줄 + 재기동 배지', () => {
+  function stubFetchWithAgent(extra: Record<string, unknown>) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (typeof url !== 'string') return { ok: false, json: async () => null };
+      if (url === '/api/team-members/agent-1') return { ok: true, json: async () => ({ data: { ...AGENT, ...extra } }) };
+      if (url.startsWith('/api/agents/') && url.endsWith('/api-key')) return { ok: true, json: async () => ({ data: [] }) };
+      if (url === '/api/projects') return { ok: true, json: async () => ({ data: [] }) };
+      if (url === '/api/me') return { ok: true, json: async () => ({ data: { user_id: 'u1', role: 'admin' } }) };
+      if (url.startsWith('/api/webhooks/config')) return { ok: true, json: async () => ({ data: [] }) };
+      return { ok: false, json: async () => null };
+    }));
+  }
+
+  it('client_version·session_started_at이 있으면 런타임 1줄을 보인다', async () => {
+    stubFetchWithAgent({ client_version: '2.1.0', session_started_at: new Date().toISOString() });
+    await mount();
+    expect(container.textContent).toContain('런타임 v2.1.0');
+  });
+
+  it('needs_restart=true면 «재기동 필요» 배지를 보인다', async () => {
+    stubFetchWithAgent({ client_version: '2.1.0', needs_restart: true });
+    await mount();
+    expect(container.textContent).toContain('재기동 필요');
+  });
+
+  it('needs_restart=false/null이면 배지를 보이지 않는다', async () => {
+    stubFetchWithAgent({ client_version: '2.1.0', needs_restart: null });
+    await mount();
+    expect(container.textContent).not.toContain('재기동 필요');
+  });
+
+  it('런타임 신원 데이터가 전부 없으면(마이그레이션 전 응답 등) 줄 자체를 숨긴다 — placeholder 없음', async () => {
+    stubFetchWithAgent({});
+    await mount();
+    expect(container.textContent).not.toContain('런타임 v');
+    expect(container.textContent).not.toContain('세션 시작');
+  });
+});

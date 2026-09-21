@@ -6,7 +6,9 @@ import inspect
 import json
 import logging
 import time
+import weakref
 from collections import OrderedDict
+from datetime import datetime, timezone
 from typing import get_type_hints
 
 from mcp.server.transport_security import TransportSecuritySettings
@@ -17,7 +19,7 @@ logger = logging.getLogger(__name__)
 # 스파이크(2026-08-19) 실 2.0.0 소스 대조 확認: private 내부(fn_metadata.arg_model·_tool_manager·
 # add_tool 반환값 None·구성시점 핸들러 바인딩) 전부 등가 재현 가능 — 이 파일의 로직 자체는 무변경,
 # import 경로만 이동.
-from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.tools.base import Tool as _FastMCPTool
 from mcp.types import TextContent
 from mcp.types import Tool as MCPTool
@@ -159,11 +161,62 @@ from .tools.webhooks import (
 )
 
 
-async def _heartbeat_fire_forget() -> None:
-    """AC3/4: tool 호출 완료 후 fire-and-forget. 실패해도 tool 결과에 영향 없음."""
+# story #4129 — 세션 시작 시각을 ctx.session 객체 자체에 매다는 weakref 맵. id()로 키를 잡으면
+# GC 후 재사용된 id가 다른 세션과 뒤섞이는 위험이 있어(정수 재사용 클래스 버그), 객체를 직접
+# 약한참조 키로 쓴다 — 세션이 죽으면 엔트리도 자동 회수(누수 0), 별도 evict 로직 불요.
+_SESSION_STARTED_AT: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+
+
+def _session_started_at(session: object) -> datetime:
+    """이 서버 프로세스가 이 session 객체를 처음 본 시각(=세션 시작으로 간주).
+
+    stdio(Claude Code 플릿 다수): 프로세스 수명=이 session 객체 수명이라, 재기동(새 프로세스)
+    마다 새 session 객체가 생겨 신뢰 가능한 "재기동 시각" 신호가 된다.
+    stateless HTTP(grok·codex, __main__.py `stateless_http=True`): mcp SDK가 요청마다 session을
+    새로 합성해 `ctx.session_id`조차 None(story #4129 그라운딩, mcp/server/context.py
+    docstring 확認) — 이 필드가 매 호출 "지금"으로 나올 수 있는 알려진 한계. 그쪽은
+    plugin_version 헤더가 주 신호(있을 때만 배지 판단에 사용, PO 확定 — 세션나이만으론
+    휴리스틱 배지 만들지 않기).
+    """
+    started = _SESSION_STARTED_AT.get(session)
+    if started is None:
+        started = datetime.now(timezone.utc)
+        _SESSION_STARTED_AT[session] = started
+    return started
+
+
+async def _heartbeat_fire_forget(ctx: Context | None = None) -> None:
+    """AC3/4: tool 호출 완료 후 fire-and-forget. 실패해도 tool 결과에 영향 없음.
+
+    story #4129: ctx가 있으면 MCP clientInfo(name/version)·세션 시작 시각·plugin-version
+    헤더(HTTP 전송만)를 실어 워크포스 "재기동 필요" 판단 근거를 team-members로 흘린다.
+    셋 다 best-effort(개별 실패해도 나머지·heartbeat 본체엔 영향 0) — presence_status
+    시맨틱(last_seen_at/agent_status)은 무변, 순수 additive.
+    """
     try:
-        if client.member_id:
-            await client.patch(f"/api/v2/team-members/{client.member_id}/heartbeat")
+        if not client.member_id:
+            return
+        body: dict = {}
+        if ctx is not None:
+            try:
+                client_params = ctx.session.client_params
+            except Exception:
+                client_params = None
+            if client_params is not None and client_params.client_info is not None:
+                body["client_name"] = client_params.client_info.name
+                body["client_version"] = client_params.client_info.version
+            try:
+                body["session_started_at"] = _session_started_at(ctx.session).isoformat()
+            except Exception:
+                pass
+            try:
+                headers = ctx.headers  # None on stdio(문서화된 계약) — HTTP 전송만 값 有
+                plugin_version = headers.get("x-sprintable-plugin-version") if headers else None
+            except Exception:
+                plugin_version = None
+            if plugin_version:
+                body["plugin_version"] = plugin_version
+        await client.patch(f"/api/v2/team-members/{client.member_id}/heartbeat", json=body or None)
     except Exception as exc:
         logger.warning("heartbeat failed (ignored): %s", exc)
 
@@ -259,7 +312,13 @@ def _flat(name: str, doc: str, input_cls: type[BaseModel], fn):
     # 파라미터를 앞으로 안정 정렬(MCP 는 keyword 호출이라 순서 변경 무해).
     params.sort(key=lambda p: p.default is not inspect.Parameter.empty)
 
-    async def wrapper(**kwargs):
+    async def wrapper(*, ctx: Context, **kwargs):
+        # story #4129: Context 타입 파라미터는 mcp SDK가 find_context_parameter()(typing
+        # 어노테이션 기반, __signature__ 오버라이드와 무관하게 __annotations__를 직접 읽음)로
+        # 자동감지→공개 스키마에서 자동제외→호출 시 자동주입한다(공식 지원 패턴, SDK
+        # tools/base.py Tool.run()의 context_kwarg 처리 실측 확認). 아래 wrapper.__signature__는
+        # 여전히 input_cls 필드만으로 만든다 — ctx는 실제 파이썬 함수 파라미터(호출 시 진짜
+        # 바인딩)일 뿐 그 시그니처엔 안 실어, 118개 도구 공개 스키마에 ctx가 새는 걸 원천 차단.
         # E-MCP S2: call-time enforcement — 키 허용 밖 도구는 호출 차단(403-shape).
         # E-MCP-HTTP S1: effective 키(http=per-request bearer override·stdio=env 단일키)별 scope 로드
         # (per-key bounded 캐시). 멀티테넌트서 키마다 다른 scope 정확 적용.
@@ -280,7 +339,7 @@ def _flat(name: str, doc: str, input_cls: type[BaseModel], fn):
         finally:
             reset_project_override(_tok)
             reset_tool_name_override(_tool_tok)
-        asyncio.create_task(_heartbeat_fire_forget())
+        asyncio.create_task(_heartbeat_fire_forget(ctx))
         return result
 
     wrapper.__name__ = name
@@ -439,9 +498,9 @@ mcp = SprintableMCPServer(
 
 
 @mcp.tool()
-async def ping() -> list[TextContent]:
+async def ping(ctx: Context) -> list[TextContent]:
     """서버 생존 확인용 smoke tool."""
-    asyncio.create_task(_heartbeat_fire_forget())
+    asyncio.create_task(_heartbeat_fire_forget(ctx))
     return ok({"status": "pong"})
 
 

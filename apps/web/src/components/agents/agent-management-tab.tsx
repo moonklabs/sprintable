@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { ChevronRight, Plus } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -18,6 +18,34 @@ import {
 } from '@/components/ui/dialog';
 import { fetchWithAuth } from '@/lib/db/client';
 import { resolveRoleLabel } from '@/app/(authenticated)/organization/trust/trust-utils';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatRelativeTime } from '@/lib/storage/format';
+
+/**
+ * story #4129 — 워크포스 1줄(«런타임 vX · (플러그인 vY) · 세션 시작 N시간 전», PO 확定
+ * 2026-09-21 23:25Z 문안 개정). client_version/session_started_at 둘 다 없으면 줄 전체를
+ * 숨긴다(placeholder로 "판단 불가"를 보여주지 않는다, AC3) — 있는 세그먼트만 · 로 잇는다.
+ */
+export function formatAgentRuntimeLine(
+  agent: Pick<OrgAgent, 'client_version' | 'plugin_version' | 'session_started_at'>,
+  locale: string,
+  displayTimezone: string,
+  t: (key: string, values?: Record<string, string>) => string,
+): string | null {
+  const segments: string[] = [];
+  if (agent.client_version) {
+    segments.push(t('agentRuntimeSegment', { version: agent.client_version }));
+  }
+  if (agent.plugin_version) {
+    segments.push(t('agentRuntimePluginSegment', { version: agent.plugin_version }));
+  }
+  if (agent.session_started_at) {
+    const relative = formatRelativeTime(agent.session_started_at, locale, displayTimezone);
+    if (relative) segments.push(t('agentRuntimeSessionSegment', { relative }));
+  }
+  if (segments.length === 0) return null;
+  return segments.join(' · ');
+}
 
 interface OrgAgent {
   id: string;
@@ -30,6 +58,15 @@ interface OrgAgent {
   // 방어) — 그 경우 CTA를 안 띄운다(거짓 "연결 안 됨" 낙인 방지, 침묵 실패보다 과소표시가
   // 안전한 방향).
   verified?: boolean | null;
+  // story #4129 — MCP clientInfo·(있으면)plugin 버전·세션 시작. 전부 BE computed_field라
+  // 값이 없으면 그냥 undefined(마이그레이션 0, 새 응답 계약 필드 아님 — 무회귀).
+  client_name?: string | null;
+  client_version?: string | null;
+  plugin_version?: string | null;
+  session_started_at?: string | null;
+  // BE `_inject_active_stories()`가 조직 내 plugin_version MAX 대비 배치 주입. null=판단
+  // 불가(플러그인 버전이 없거나 org에 비교대상 없음) — false와 구분(휴리스틱 배지 금지).
+  needs_restart?: boolean | null;
 }
 
 interface ProjectOption {
@@ -66,6 +103,8 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
   const ta = useTranslations('agents');
   const tc = useTranslations('common');
   const to = useTranslations('organization');
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
   const [agents, setAgents] = useState<OrgAgent[]>([]);
   const [grantCounts, setGrantCounts] = useState<Record<string, number>>({});
   const [isAdmin, setIsAdmin] = useState(false);
@@ -233,7 +272,16 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
                       {agent.verified === false ? (
                         <Badge variant="warning">{ta('agentNotConnected')}</Badge>
                       ) : null}
+                      {agent.needs_restart ? (
+                        <Badge variant="warning">{ta('agentNeedsRestartBadge')}</Badge>
+                      ) : null}
                     </div>
+                    {(() => {
+                      const runtimeLine = formatAgentRuntimeLine(agent, locale, displayTimezone, ta);
+                      return runtimeLine ? (
+                        <p className="mt-1 truncate text-xs text-muted-foreground">{runtimeLine}</p>
+                      ) : null;
+                    })()}
                   </Link>
                   <div className="flex shrink-0 items-center gap-2">
                     {agent.verified === false ? (

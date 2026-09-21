@@ -11,6 +11,7 @@ from app.core.config import settings
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db, get_read_db
 from app.dependencies.ownership import _is_org_admin, assert_agent_owner
+from app.models.member import AgentProjectProfile
 from app.models.pm import Story
 from app.models.project import OrgMember
 from app.models.team import TeamMember
@@ -54,6 +55,47 @@ async def _inject_online_single(resp: TeamMemberResponse, member_id) -> TeamMemb
     return _override_online(resp, om.get(str(member_id)))
 
 
+def _plugin_version_sort_key(version: str) -> tuple[int, ...]:
+    """story #4129 — "0.1.4" 류 점버전 비교. 비-숫자 세그먼트는 0 취급(정렬 크래시 방지, 배지는
+    형식이 이상해도 "판단 불가"보다 "낮게" 취급되는 쪽이 안전 — 과다 배지보다 과소 배지가 덜 시끄럽다)."""
+    parts = []
+    for seg in version.split("."):
+        try:
+            parts.append(int(seg))
+        except ValueError:
+            parts.append(0)
+    return tuple(parts)
+
+
+async def _org_max_plugin_version(org_id: uuid.UUID, session: AsyncSession) -> str | None:
+    """story #4129 AC — «재기동 필요» 배지의 조직 내 최신 기준. 이 함수를 호출한 리스트 응답의
+    부분집합(프로젝트 스코프 등)이 아니라 **조직 전체** agent들의 plugin_version 중 최댓값 —
+    "조직 내 최신"이 리스트 스코프에 따라 흔들리면 같은 에이전트가 호출 경로별로 다른 배지를
+    받는 모순이 생긴다."""
+    from app.models.member import Member
+
+    rows = (
+        await session.execute(
+            select(AgentProjectProfile.agent_config)
+            .join(Member, Member.id == AgentProjectProfile.member_id)
+            .where(Member.org_id == org_id, Member.type == "agent")
+        )
+    ).scalars().all()
+    versions: list[str] = []
+    for cfg in rows:
+        if not cfg:
+            continue
+        runtime_identity = cfg.get("runtime_identity")
+        if not isinstance(runtime_identity, dict):
+            continue
+        v = runtime_identity.get("plugin_version")
+        if isinstance(v, str) and v:
+            versions.append(v)
+    if not versions:
+        return None
+    return max(versions, key=_plugin_version_sort_key)
+
+
 async def _inject_active_stories(
     members: list, session: AsyncSession
 ) -> list[TeamMemberResponse]:
@@ -78,6 +120,12 @@ async def _inject_active_stories(
     from app.services.agent_verify import get_verified_map
     verified_map = await get_verified_map(session, [m.id for m in members])
 
+    # story #4129 — 조직 전체 기준 max(전달된 members 부분집합이 아니라, 같은 org_id면
+    # 매 호출 동일값 → 호출 경로별 배지 불일치 방지, 위 _org_max_plugin_version 참고).
+    org_max_plugin_version = (
+        await _org_max_plugin_version(members[0].org_id, session) if members else None
+    )
+
     out = []
     for m in members:
         resp = TeamMemberResponse.model_validate(m)
@@ -88,6 +136,15 @@ async def _inject_active_stories(
                 "active_story": ActiveStorySummary(id=s.id, title=s.title, status=s.status)
             })
         resp = resp.model_copy(update={"verified": verified_map.get(m.id)})
+        # AC — 이 에이전트도 plugin_version이 있고 org_max도 있을 때만 비교("플러그인 버전이
+        # 있는 에이전트끼리"만, PO 확定). 둘 중 하나라도 없으면 None(판단 불가, False 아님).
+        needs_restart = None
+        if resp.plugin_version and org_max_plugin_version:
+            needs_restart = (
+                _plugin_version_sort_key(resp.plugin_version)
+                < _plugin_version_sort_key(org_max_plugin_version)
+            )
+        resp = resp.model_copy(update={"needs_restart": needs_restart})
         out.append(resp)
     return out
 
@@ -629,9 +686,18 @@ async def delete_avatar_endpoint(
     return await _inject_online_single(TeamMemberResponse.model_validate(_m), _m.id)
 
 
+class HeartbeatRuntimeIdentity(BaseModel):
+    """story #4129 AC2 — MCP clientInfo·세션 시작·(있으면) plugin 버전. 전부 optional(무값=null)."""
+    client_name: str | None = None
+    client_version: str | None = None
+    plugin_version: str | None = None
+    session_started_at: str | None = None
+
+
 @router.patch("/{id}/heartbeat")
 async def heartbeat(
     id: uuid.UUID,
+    body: HeartbeatRuntimeIdentity | None = None,
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
@@ -645,6 +711,11 @@ async def heartbeat(
     S19(발견·회귀수정): resolve_member()/.id 직접비교는 휴먼 JWT caller에서 OrgMember.id를
     반환해 이 path의 team_members뷰 id와 축이 달라 본인 heartbeat도 403났다 —
     assert_caller_is_member(agent=id 직접비교·human=user_id 비교)로 axis-safe하게 교체.
+
+    story #4129: body(런타임 신원)는 optional·순수 additive — 미전송(None)이면 기존
+    presence-only 동작과 완전 동일(agent_config 무변경). 전송되면 4필드 전부를
+    agent_config.runtime_identity에 스냅샷으로 반영(이 호출이 안 실은 필드는 null —
+    "이전 값 보존"이 아니라 "이 순간의 실측"을 정직하게 반영, AC2 계약).
     """
     repo = TeamMemberRepository(session, org_id)
     member = await repo.get(id)
@@ -656,7 +727,15 @@ async def heartbeat(
     now = datetime.now(timezone.utc)
     # AC3-4 2-2: team_members 뷰 — presence는 agent_project_profiles가 유일 소스(anchor-only).
     from app.services.agent_anchor_sync import sync_agent_profile_presence
-    await sync_agent_profile_presence(session, id, last_seen_at=now, agent_status="online")
+    extra: dict = {}
+    if body is not None:
+        extra = {
+            "client_name": body.client_name,
+            "client_version": body.client_version,
+            "plugin_version": body.plugin_version,
+            "session_started_at": body.session_started_at,
+        }
+    await sync_agent_profile_presence(session, id, last_seen_at=now, agent_status="online", **extra)
     return {"ok": True, "last_seen_at": now.isoformat()}
 
 
