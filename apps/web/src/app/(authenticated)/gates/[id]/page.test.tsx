@@ -909,4 +909,19 @@ describe('GateDetailPage — 단계(역할) 표시(story #4082, #4091로 렌더 
     }));
     expect(container.textContent).toContain(`${koMessages.cage.gateStageLabel}: 컨셉 확정 (디렉터)`);
   });
+
+  // story #4091 정정(PO 3회째 라이브 재측정, 2026-09-21) — isSigFlowGate는 gate risk level만
+  // 보는 정적 값(라인 212)이라 이미 승인된 고위험 게이트에도 그대로 true다. 최초 처방은 그
+  // 정적 값만으로 meta 줄을 유지시켜, 이미 해소된(status≠pending → needsAction=false →
+  // !needsAction 분기로 GateEvidence/사실 블록이 뜨는) 고위험 게이트에서 meta+사실 블록이
+  // 동시에 떴다(실 external_publish 게이트 451b5813로 재현). 이 테스트가 그 회귀를 pin.
+  it('이미 승인된 고위험 게이트(status=approved, risk_grade=high)는 사실 블록만 뜨고 footer meta 줄은 안 뜬다(회귀 — #4091 재정정)', async () => {
+    await mount(gate({
+      status: 'approved', resolver_id: 'someone', resolved_at: new Date().toISOString(),
+      can_approve: true, risk_grade: 'high',
+      neutral_facts: { stage: 'concept_confirmed', stage_role: 'Director' },
+    }));
+    expect(container.textContent).not.toContain(`${koMessages.cage.gateStageLabel}:`);
+    expect(container.textContent).toContain(`${koMessages.cage.recipeApprovalStageLabel} · 컨셉 확정 (디렉터)`);
+  });
 });
