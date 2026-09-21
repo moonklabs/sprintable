@@ -117,22 +117,31 @@ jobs:
   alembic-fresh-db:
     name: Alembic upgrade head (fresh DB)
     needs: [detect-changed-scope]
-    # ⛔`if: always()` 필수 — 없으면 detect-changed-scope가 실패했을 때 GitHub 기본 동작으로
+    # ⛔`if:` 필수 — 없으면 detect-changed-scope가 실패했을 때 GitHub 기본 동작으로
     # 이 잡 자체가(required 체크!) «스킵»된다(의존 잡 실패 시 자동 스킵 cascade). 그러면 잡
     # 안 스텝의 fail-closed(`!= 'false'`, 아래)가 전혀 무의미해진다 — 잡 자체가 안 돈다.
-    # always()로 무조건 돌게 하고, 안에서 출력이 비어 있으면(=위 job 실패) 스텝 조건이
+    # 무조건 돌게 하고, 안에서 출력이 비어 있으면(=위 job 실패) 스텝 조건이
     # fail-closed로 정상 실행된다.
     #
     # story #3929(2026-09-15, PO 지시) → story #4099로 폐기(2026-09-21, 머지 안전 실사고).
     # `edited`(title/body만) 발화 시 이 잡 자체를 job-level `if:`로 skip하던 처방은
     # GitHub의 "job이 자기 if:로 skip되면 그 체크는 Success" 특성 때문에, 같은 head SHA의
     # 진짜 run이 아직 도는 중에도 이 required 체크가 조기에 초록으로 잡혀 머지를 열어버렸다
-    # (실사고: PR #4473 head 695390519). 처방 — 잡 자체는 always() 그대로 항상 돌게 두고,
+    # (실사고: PR #4473 head 695390519). 처방 — 잡 자체는 항상 돌게 두고,
     # edited-only일 때만 아래 「Mirror sibling run conclusion」 스텝이 돌아 같은 SHA의
     # 진짜 run이 완주할 때까지 폴링 후 그 결론을 미러한다(무거운 스텝은 전부 그 뒤 스텝들의
     # if:에 이 조건의 역을 얹어 skip). 폴링 중엔 잡이 in_progress로 정직하게 남아 조기 초록이
     # 안 난다.
-    if: always()
+    #
+    # story #4122(2026-09-21, PO 실측 — 오늘 4회 concurrency cancel-in-progress 무반응,
+    # 4495/4496/4497/4498 run 로그로 재현) — `always()`는 GitHub 문서상 "워크플로우가
+    # 취소됐어도 항상 실행"이 정의라(위 의도한 "detect-changed-scope 실패에도 실행"과
+    # 별개로), cancel-in-progress가 새 head push로 이 run을 대체해도 이 잡은 신호를
+    # 무시하고 자연 완주까지 계속 돈다 — «취소 신호를 삼킨다»의 실체가 이것이었다.
+    # `!cancelled()`는 "upstream 실패에도 실행"(원래 의도)은 그대로 지키면서 "실제
+    # 취소는 반영"(새 요건)만 추가한다 — always()가 겨냥한 캐스케이드-스킵 방지와
+    # 무관, edited-only 미러 폴링도 실취소 상황이 아니므로 그대로 작동한다.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     # story 8236bbc3(2026-07-03): 217초 실측(전체 스위트 3391개 대다수, 비파괴 real-DB 84개
     # 파일 포함) + 파괴적 54개 파일 격리 순회 오버헤드 버퍼. 규모상 샤딩 불요(설계 §1-D).
@@ -1067,11 +1076,17 @@ jobs:
   backend-test-destructive:
     name: Backend destructive-schema (shard)
     needs: [detect-changed-scope]
-    # alembic-fresh-db와 동일 이유 — always() 없으면 detect-changed-scope 실패 시 이 잡이
+    # alembic-fresh-db와 동일 이유 — 없으면 detect-changed-scope 실패 시 이 잡이
     # (backend-test의 필수 판정 근거) cascade로 스킵된다.
     # story #3929 — 이 잡이 바로 「edited 중복 run이 부하로 8샤드 timeout/실패」 실사고의
     # 본체(오늘 4328/4329 사고). alembic-fresh-db와 동일 근거로 명시적 skip 추가(위 참고).
-    if: always() && (github.event.action != 'edited' || github.event.changes.base != null)
+    #
+    # story #4122(2026-09-21, PO 실측) — 이 잡(12샤드 매트릭스, 파일당 격리 순회라
+    # 원래도 느림)이 always()의 실체적 피해자였다: 4495/4496/4497/4498 run 4건
+    # 전부에서 12샤드 중 최소 11개가 cancel-in-progress 신호(새 head push) 이후로도
+    # 6~17분을 더 돌아 자연 완주(concl=success, cancelled 아님) — 이게 「옛 run이
+    # 안 죽는다」 사고의 본체다. alembic-fresh-db와 동일 처방(!cancelled()).
+    if: ${{ !cancelled() && (github.event.action != 'edited' || github.event.changes.base != null) }}
     runs-on: ubuntu-latest
     # story #3383 AC3/AC4(2026-09-03 실측, PR CI run 33750476433, 템플릿 DB 적용 후):
     # 4샤드 9m31s·10m8s·9m21s·8m58s — 최대 10m8s·편차 1m10s(AC3 기준 12분/3분 이내 통과).
@@ -1343,11 +1358,16 @@ jobs:
     needs: [backend-test-destructive, detect-changed-scope]
     # story #3929(2026-09-15) → story #4099로 폐기(2026-09-21, 머지 안전 실사고 — PR #4473).
     # required 체크("Backend pytest") 자신을 edited(base 무변)에서 job-level if:로 skip하던
-    # 처방은 alembic-fresh-db 상단 주석과 동일한 이유로 폐기했다. 이제 always() 그대로 항상
-    # 돌고, edited-only일 때만 「Mirror sibling run conclusion」 스텝이 돌아 같은 head SHA의
+    # 처방은 alembic-fresh-db 상단 주석과 동일한 이유로 폐기했다. 이제 항상 돌고,
+    # edited-only일 때만 「Mirror sibling run conclusion」 스텝이 돌아 같은 head SHA의
     # 진짜 run이 완주할 때까지 기다렸다가 그 결론을 미러한다 — 무거운 나머지 스텝은 전부
     # 그 뒤 스텝들의 if:에 이 조건의 역을 얹어 skip.
-    if: always()
+    #
+    # story #4122(2026-09-21, PO 실측) — 이 잡도 always()라 cancel-in-progress에
+    # 무반응이었다(run 4건 전부 PO force-cancel까지 살아있었다 — backend-test-destructive
+    # 12샤드가 먼저 완주한 뒤에도 이 잡 자신이 또 취소를 무시). alembic-fresh-db와
+    # 동일 처방(!cancelled()).
+    if: ${{ !cancelled() }}
     # story #1982(2026-07-17): postgres service + real-PG env 배선. 이 갭은 story #1472
     # (2026-06-21)에서 이미 발견됐고, story 8236bbc3(#1619, 2026-07-03)이 "backend-test job
     # 무변경(회귀0 최대보수)"으로 의도적으로 유보했던 트레이드오프다 — 그 결과 `_REAL_DB_SKIP`
@@ -1574,7 +1594,8 @@ jobs:
     needs: [detect-changed-scope]
     # backend-test·alembic-fresh-db와 동형 이유(위 주석 반복 안 함) — 잡 자체는 항상 돌고
     # 스텝만 조건부 스킵해 "미실행=스킵"이 "통과"로 잡히는 모호함을 피한다.
-    if: always()
+    # story #4122 — 같은 이유로 cancel-in-progress 무반응 재발 방지(!cancelled()).
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     # 실측(2026-09-01, 로컬 87 passed 0.94초) — postgres 서비스 불요·CI 콜드 uv sync 포함해도
     # 수 분 이내로 예상. backend-test(7~8분, 실PG)·backend-test-destructive(#3269 실측
@@ -2325,10 +2346,14 @@ jobs:
   # ci-work가 자신의 if:(옛 #3929 조건)로 skip됐을 때도(edited-only) 이 잡 자체는 항상
   # 돌아야 Mirror 스텝이 실행되기 때문 — needs 실패 cascade-skip 기본 동작을 여기서도
   # 명시로 막는다.
+  #
+  # story #4122(2026-09-21, PO 실측) — always()는 ci-work의 needs-skip cascade뿐
+  # 아니라 워크플로우 cancel-in-progress도 무시한다(문서상 정의 그대로) — 다른
+  # always() 잡들과 동일 처방(!cancelled()).
   ci:
     name: Lint, Type Check, Test, Build
     needs: [ci-work]
-    if: always()
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     # story #4099 CHANGES-1(페드루 PO, 2026-09-21) — ci-work 자신의 timeout-minutes(20분)에
     # 큐 지연(러너 대기)이 얹히면 아래 Mirror 스텝의 `--max-wait-seconds 1500`(25분)에 붙을
