@@ -77,6 +77,47 @@ code_read_high_baseline:
     assert result.errors == [] and result.warnings == []
 
 
+def test_entry_expiring_in_exactly_14_days_is_collected(tmp_path):
+    """⭐카디르 QA 지적(#4407, 비차단 후속) — `0 <= horizon <= warning_days`(경계 포함)의
+    정확히 그 경계값(horizon == _WARNING_DAYS == 14)이 이전엔 테스트로 안 고정돼 있었다.
+    today=2026-09-17 + 14일 = 2026-10-01."""
+    _write_allowlist(tmp_path, "manual-env-allowlist.yml", """
+code_read_high_baseline:
+  - key: EXACTLY_14_KEY
+    reason: r
+    declared_by: PO
+    until: "2026-10-01"
+""")
+    _write_allowlist(tmp_path, "serving-reality-allowlist.yml", _EMPTY_SERVING_REALITY)
+    _write_allowlist(tmp_path, "mcp-path-contract-allowlist.yml", _EMPTY_MCP_PATH_CONTRACT)
+
+    from datetime import date
+    result = mod.collect_expiry_findings(repo_root=tmp_path, today=date(2026, 9, 17))
+    assert result.errors == []
+    assert len(result.warnings) == 1
+    rel_path, message = result.warnings[0]
+    assert rel_path == "infra/manual-env-allowlist.yml"
+    assert "EXACTLY_14_KEY" in message and "14일 뒤 만료" in message
+
+
+def test_entry_expiring_in_exactly_15_days_is_just_outside_window(tmp_path):
+    """위 테스트의 음성 대조 — 경계값 바로 밖(horizon == 15)은 수집되지 않는다. 이 둘이
+    쌍으로 있어야 `<=`(포함)를 `<`(미포함)로 실수해도 어느 한쪽이 반드시 RED가 된다."""
+    _write_allowlist(tmp_path, "manual-env-allowlist.yml", """
+code_read_high_baseline:
+  - key: EXACTLY_15_KEY
+    reason: r
+    declared_by: PO
+    until: "2026-10-02"
+""")
+    _write_allowlist(tmp_path, "serving-reality-allowlist.yml", _EMPTY_SERVING_REALITY)
+    _write_allowlist(tmp_path, "mcp-path-contract-allowlist.yml", _EMPTY_MCP_PATH_CONTRACT)
+
+    from datetime import date
+    result = mod.collect_expiry_findings(repo_root=tmp_path, today=date(2026, 9, 17))
+    assert result.errors == [] and result.warnings == []
+
+
 def test_already_expired_entry_is_not_double_reported(tmp_path):
     """이미 만료된 건 각 가드 본체(check_env_drift.py 등)의 FAIL 축이 담당 — 이 경량 축은
     «아직 안 만료됐지만 임박» 구간만 맡아 중복 신호를 안 낸다."""
