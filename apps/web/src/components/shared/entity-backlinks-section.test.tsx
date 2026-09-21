@@ -109,9 +109,32 @@ describe('EntityBacklinksSection', () => {
     }))));
     await render('story', 's1');
     expect(container.textContent).toContain('관찰된 참조 0건');
-    expect(container.textContent).toContain('chat_message');
+    // story #4096(리허설 1호 실측) — source_types 원문 코드(내부어)는 안 보이고 사람 낱말로만.
+    expect(container.textContent).not.toContain('chat_message');
+    expect(container.textContent).toContain('대화');
+    expect(container.textContent).toContain('문서');
     expect(container.textContent).toContain('PR/커밋');
     expect(container.textContent).toContain('증거');
+    // 조사 플레이스홀더(«참조은(는)»류)가 그대로 안 남고, 결정적으로 고른 조사(여기선 "증거
+    // 자유텍스트 참조"의 «참조»=받침 없음 → "는")가 실제로 붙는다.
+    expect(container.textContent).not.toContain('은(는)');
+    expect(container.textContent).toContain('참조는 미수집');
+  });
+
+  it('source_types/excludes 매핑에 없는 미지 코드는 원문 코드 그대로 보인다(지어내지 않는다)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      data: [],
+      meta: {
+        next_cursor: null, has_more: false,
+        collection_scope: { source_types: ['future_source_type'], forms: 'all', excludes: ['future_exclude_code'] },
+      },
+    }))));
+    await render('story', 's1');
+    expect(container.textContent).toContain('future_source_type');
+    expect(container.textContent).toContain('future_exclude_code');
+    // 받침 있는 미지 코드("_code"의 「e」는 한글이 아니므로 lastHangulChar가 한글만 훑는다 —
+    // 이 케이스는 완전 비한글이라 「는」으로 폴백(korean-particle.ts 관례).
+    expect(container.textContent).toContain('future_exclude_code는 미수집');
   });
 
   it('빈 목록에 살아있는 항목만 있으면 「대상이 없어요」가 안 뜬다(정상 케이스 오탐 방지)', async () => {
