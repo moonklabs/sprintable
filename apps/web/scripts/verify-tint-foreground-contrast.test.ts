@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { extractCssVarBlock, discoverTintFamilies, discoverBgFamilies, computeFamilyContrasts, computeCrossFamilyBgReference, computeCrossCheckContrasts } from './verify-tint-foreground-contrast';
+import { extractCssVarBlock, discoverTintFamilies, discoverBgFamilies, discoverBorderFamilies, computeFamilyContrasts, computeCrossFamilyBgReference, computeCrossCheckContrasts, computeNonTextCrossCheckContrasts, deriveCrossCheckTextVars } from './verify-tint-foreground-contrast';
 
 const GLOBALS_CSS_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src/app/globals.css');
 
@@ -63,6 +63,29 @@ describe('discoverBgFamilies — story #2575 AC1(단일-단어 -bg만, tint와 �
 
   it('returns empty when there are none (no crash)', () => {
     expect(discoverBgFamilies(new Map([['background', 'x']]))).toEqual([]);
+  });
+});
+
+// story #4094 AC2 — tint/bg와 대칭. sidebar-border(비-status UI 리전 경계색, NON_STATUS_
+// FAMILY_NAMES 등재)가 실 globals.css 실측에서 걸려 하드코딩 제외 목록에 새로 추가된 계기.
+describe('discoverBorderFamilies — story #4094 AC2(단일-단어 -border만, tint/bg와 동일 경계)', () => {
+  it('finds every single-word "-border" suffixed var', () => {
+    const vars = new Map([
+      ['destructive-border', 'x'], ['warning-border', 'x'], ['foo-border', 'x'],
+      ['destructive', 'x'], ['border', 'x'],
+    ]);
+    expect(discoverBorderFamilies(vars)).toEqual(['destructive', 'foo', 'warning']);
+  });
+
+  it('sidebar처럼 status family가 아닌 -border 토큰은 NON_STATUS_FAMILY_NAMES로 제외된다', () => {
+    const vars = new Map([
+      ['destructive-border', 'x'], ['sidebar-border', 'x'],
+    ]);
+    expect(discoverBorderFamilies(vars)).toEqual(['destructive']);
+  });
+
+  it('returns empty when there are none (no crash)', () => {
+    expect(discoverBorderFamilies(new Map([['border', 'x']]))).toEqual([]);
   });
 });
 
@@ -259,7 +282,28 @@ describe('computeCrossCheckContrasts — story #4055 못 틀리는 대조(AC3)',
     expect(hit!.ratio).toBeGreaterThanOrEqual(4.5);
   });
 
-  it('brand 변수가 없는 CSS에서도 죽지 않고 그냥 빈 배열을 낸다(옵셔널 강조색 — 조용히 스킵)', () => {
+  // story #4094 AC1 — 예전엔 CROSS_CHECK_TEXT_VARS가 고정 ['brand']라 "-tint/-bg 계열이
+  // CSS에 있어도 brand가 없으면 빈 배열"이 맞았다. 지금은 deriveCrossCheckTextVars가 상태색
+  // 자신(예: info)도 -tint/-bg만 있으면 자동 편입하므로, 그 전제 자체가 이 스토리로 바뀌었다
+  // — "정말 아무 계열도 없을 때만 빈 배열"로 픽스처를 좁혀 크래시-안전성 취지를 보존한다.
+  it('-tint/-bg 계열이 하나도 없는 CSS에서도 죽지 않고 그냥 빈 배열을 낸다(크래시-안전)', () => {
+    const css = `
+:root {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.141 0.005 285.823);
+}
+.dark {
+  --background: oklch(0.18 0.005 285.823);
+  --foreground: oklch(0.985 0 0);
+}
+`;
+    expect(computeCrossCheckContrasts(css)).toEqual([]);
+  });
+
+  // story #4094 AC1 — brand가 없어도 상태색(info)이 자기 -tint를 갖고 있으면 이제 자동으로
+  // 이 교차게이트 대상이 된다(deriveCrossCheckTextVars가 discoverTintFamilies/discoverBgFamilies
+  // 산출물을 그대로 흡수 — 손으로 'info'를 추가 등록할 필요 0, 하드코딩 0이라는 AC1의 핵심).
+  it('brand 없이 상태색(info)만 있어도 자기 자신의 -tint와 교차게이트된다(#4094 신규 동작)', () => {
     const css = `
 :root {
   --background: oklch(1 0 0);
@@ -274,7 +318,143 @@ describe('computeCrossCheckContrasts — story #4055 못 틀리는 대조(AC3)',
   --info-tint: oklch(0.65 0.18 250 / 12%);
 }
 `;
-    expect(computeCrossCheckContrasts(css)).toEqual([]);
+    const results = computeCrossCheckContrasts(css);
+    const hit = results.find((r) => r.theme === 'light' && r.textVar === 'info' && r.family === 'info' && r.kind === 'tint');
+    expect(hit).toBeDefined();
+  });
+});
+
+// story #4094 AC1 — 상태색-대-상태색 교차(예: text-destructive on info-tint)의 못 틀리는 대조.
+// deriveCrossCheckTextVars 확장 전에는 이 조합 자체가 검사 대상이 아니어서 어떤 값이든
+// 게이트를 안 탔다 — 지금은 진짜로 막는다는 것을 RED/GREEN 한 쌍으로 증명한다.
+describe('computeCrossCheckContrasts — story #4094 AC1 못 틀리는 대조(상태색 자신의 교차)', () => {
+  it('상태색끼리 교차가 미달이면(text-destructive on info-tint) RED(<4.5)', () => {
+    const css = `
+:root {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.141 0.005 285.823);
+  --destructive: oklch(0.60 0.20 25);
+  --destructive-tint: oklch(0.60 0.20 25 / 10%);
+  --info: oklch(0.60 0.20 25 / 1%);
+  --info-tint: oklch(0.60 0.20 25 / 8%);
+}
+.dark {
+  --background: oklch(0.18 0.005 285.823);
+  --foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.60 0.20 25);
+  --destructive-tint: oklch(0.60 0.20 25 / 10%);
+  --info: oklch(0.60 0.20 25 / 1%);
+  --info-tint: oklch(0.60 0.20 25 / 8%);
+}
+`;
+    const results = computeCrossCheckContrasts(css);
+    const hit = results.find((r) => r.theme === 'light' && r.textVar === 'destructive' && r.family === 'info' && r.kind === 'tint');
+    expect(hit).toBeDefined();
+    expect(hit!.ratio).toBeLessThan(4.5);
+  });
+
+  it('음성대조 — 충분히 대비되는 상태색 조합은 통과한다', () => {
+    const css = `
+:root {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.141 0.005 285.823);
+  --destructive: oklch(0.35 0.20 25);
+  --destructive-tint: oklch(0.35 0.20 25 / 10%);
+  --info: oklch(0.55 0.18 250);
+  --info-tint: oklch(0.97 0.02 250);
+}
+.dark {
+  --background: oklch(0.18 0.005 285.823);
+  --foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.90 0.05 25);
+  --destructive-tint: oklch(0.90 0.05 25 / 10%);
+  --info: oklch(0.65 0.18 250);
+  --info-tint: oklch(0.22 0.04 250);
+}
+`;
+    const results = computeCrossCheckContrasts(css);
+    const hit = results.find((r) => r.theme === 'light' && r.textVar === 'destructive' && r.family === 'info' && r.kind === 'tint');
+    expect(hit).toBeDefined();
+    expect(hit!.ratio).toBeGreaterThanOrEqual(4.5);
+  });
+});
+
+// story #4094 AC2 — computeNonTextCrossCheckContrasts(border-<family>-border·ring-<family>
+// × -tint/-bg, 3:1)의 못 틀리는 대조.
+describe('computeNonTextCrossCheckContrasts — story #4094 AC2 못 틀리는 대조(비텍스트 3:1)', () => {
+  it("border 미달('border' usage, 거의 안 보이는 명도차)이면 RED(<3)", () => {
+    const css = `
+:root {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.141 0.005 285.823);
+  --destructive: oklch(0.60 0.20 25);
+  --destructive-border: oklch(0.97 0.01 25);
+  --info: oklch(0.55 0.18 250);
+  --info-tint: oklch(0.97 0.02 250);
+}
+.dark {
+  --background: oklch(0.18 0.005 285.823);
+  --foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.70 0.19 22);
+  --destructive-border: oklch(0.97 0.01 25);
+  --info: oklch(0.65 0.18 250);
+  --info-tint: oklch(0.22 0.04 250);
+}
+`;
+    const results = computeNonTextCrossCheckContrasts(css);
+    const hit = results.find((r) => r.theme === 'light' && r.usage === 'border' && r.family === 'destructive' && r.bgFamily === 'info' && r.kind === 'tint');
+    expect(hit).toBeDefined();
+    expect(hit!.ratio).toBeLessThan(3);
+  });
+
+  it('음성대조 — 충분히 대비되는 border 조합은 3:1을 통과한다', () => {
+    const css = `
+:root {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.141 0.005 285.823);
+  --destructive: oklch(0.60 0.20 25);
+  --destructive-border: oklch(0.35 0.20 25);
+  --info: oklch(0.55 0.18 250);
+  --info-tint: oklch(0.97 0.02 250);
+}
+.dark {
+  --background: oklch(0.18 0.005 285.823);
+  --foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.70 0.19 22);
+  --destructive-border: oklch(0.90 0.05 25);
+  --info: oklch(0.65 0.18 250);
+  --info-tint: oklch(0.22 0.04 250);
+}
+`;
+    const results = computeNonTextCrossCheckContrasts(css);
+    const hit = results.find((r) => r.theme === 'light' && r.usage === 'border' && r.family === 'destructive' && r.bgFamily === 'info' && r.kind === 'tint');
+    expect(hit).toBeDefined();
+    expect(hit!.ratio).toBeGreaterThanOrEqual(3);
+  });
+
+  it("ring 축('ring' usage, 전용 토큰 없이 base family 색을 그대로 쓴다)도 같은 방식으로 게이트된다", () => {
+    const css = `
+:root {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.141 0.005 285.823);
+  --destructive: oklch(0.97 0.01 25);
+  --destructive-tint: oklch(0.97 0.01 25 / 10%);
+  --info: oklch(0.55 0.18 250);
+  --info-tint: oklch(0.97 0.02 250);
+}
+.dark {
+  --background: oklch(0.18 0.005 285.823);
+  --foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.70 0.19 22);
+  --destructive-tint: oklch(0.70 0.19 22 / 10%);
+  --info: oklch(0.65 0.18 250);
+  --info-tint: oklch(0.22 0.04 250);
+}
+`;
+    const results = computeNonTextCrossCheckContrasts(css);
+    const hit = results.find((r) => r.theme === 'light' && r.usage === 'ring' && r.family === 'destructive' && r.bgFamily === 'info' && r.kind === 'tint');
+    expect(hit).toBeDefined();
+    expect(hit!.ratio).toBeLessThan(3);
   });
 });
 
@@ -339,7 +519,33 @@ describe('real repo globals.css — 실제 정의가 전 조합 AA(4.5)를 통�
   // — grandfather 소멸은 축하할 일이지 막을 일이 아니다).
   it('brand 교차 미달 — 실 globals.css가 지금 딱 10건이고(발견 당시 그대로), 더 늘지 않았다', () => {
     const crossCheck = computeCrossCheckContrasts(css);
-    const failing = crossCheck.filter((r) => r.ratio < 4.5);
+    const failing = crossCheck.filter((r) => r.ratio < 4.5 && r.textVar === 'brand');
     expect(failing.length).toBeLessThanOrEqual(10);
+  });
+
+  // story #4094 AC1/AC3(전수벤치) — deriveCrossCheckTextVars가 상태색 자신을 처음 편입하며
+  // 이 스토리가 실측으로 발견한 신규 미달(전부 4.24~4.46, brand와 별개 원인) — 같은 계약
+  // (상한만·«늘지 않음»), PR 본문 수치 = 11건(발견 당시 그대로).
+  it('상태색-자신 교차 미달 — 실 globals.css가 지금 딱 11건이고(#4094 발견 당시 그대로), 더 늘지 않았다', () => {
+    const crossCheck = computeCrossCheckContrasts(css);
+    const failing = crossCheck.filter((r) => r.ratio < 4.5 && r.textVar !== 'brand');
+    expect(failing.length).toBeLessThanOrEqual(11);
+  });
+
+  // story #4094 AC2 — 비텍스트(border·ring) 3:1 게이트는 실 globals.css에서 신규 미달 0건
+  // (텍스트 4.5:1보다 문턱이 낮아 이미 여유 있던 조합들이 전부 통과). NONTEXT_GRANDFATHER_
+  // BASELINE이 빈 채로도 안전함을 pin — 향후 새 미달이 생기면 이 테스트가 먼저 깨진다.
+  it('비텍스트(border·ring) 교차 미달 — 실 globals.css는 지금 0건이다(#4094 AC2)', () => {
+    const nonTextCrossCheck = computeNonTextCrossCheckContrasts(css);
+    const failing = nonTextCrossCheck.filter((r) => r.ratio < 3);
+    expect(failing.length).toBe(0);
+  });
+
+  // story #4094 AC1 — deriveCrossCheckTextVars가 discoverTintFamilies/discoverBgFamilies
+  // 산출물(실 globals.css는 destructive·info·primary·success·warning 5종)을 그대로 흡수하는지
+  // 실물로 pin — "5종"이라는 AC1 숫자가 하드코딩이 아니라 유도 결과임을 보인다.
+  it('deriveCrossCheckTextVars가 실 globals.css에서 상태색 5종(destructive·info·primary·success·warning) + brand를 유도한다', () => {
+    const { vars } = extractCssVarBlock(css, ':root');
+    expect(deriveCrossCheckTextVars(vars)).toEqual(['brand', 'destructive', 'info', 'primary', 'success', 'warning']);
   });
 });

@@ -72,8 +72,12 @@ export function extractCssVarBlock(css: string, selector: string): CssVarBlock {
  * 아니라 정의 자체에서 읽는다(story #2420의 핵심 — 새 계열이 자동으로 대상이 되는 이유). */
 /** story #2917 — `--proof-bg` 등은 「값-SSOT」 기저층이지 destructive/success류 «status
  * family»가 아니다(proof-tint는 애초에 없고, proof-bg는 페이지 배경 자체 — family 취급하면
- * 의미 없는 자기-대조 행이 하나 더 생긴다). 한 단어 이름 규칙은 그대로 두고 이 이름만 제외. */
-const NON_STATUS_FAMILY_NAMES = new Set(['proof']);
+ * 의미 없는 자기-대조 행이 하나 더 생긴다). 한 단어 이름 규칙은 그대로 두고 이 이름만 제외.
+ * story #4094 — `--sidebar-border`/`--sidebar-ring`도 같은 클래스: 사이드바 자체의 UI
+ * 리전 경계색이지 status family가 아니다(sidebar-tint/sidebar-bg는 애초에 없다) —
+ * discoverBorderFamilies를 새로 추가하며 실측으로 드러남(sidebar border를 destructive-tint
+ * 등 무관한 배경과 대조하는 의미 없는 행이 생겼었다). */
+const NON_STATUS_FAMILY_NAMES = new Set(['proof', 'sidebar']);
 
 export function discoverTintFamilies(vars: Map<string, string>): string[] {
   const families: string[] = [];
@@ -93,6 +97,18 @@ export function discoverBgFamilies(vars: Map<string, string>): string[] {
   const families: string[] = [];
   for (const key of vars.keys()) {
     const m = /^([\w]+)-bg$/.exec(key);
+    if (m && !NON_STATUS_FAMILY_NAMES.has(m[1]!)) families.push(m[1]!);
+  }
+  return families.sort();
+}
+
+/** story #4094 AC2 — tint/bg와 대칭. `--<family>-border`(예: `--warning-border`)는 실 코드에서
+ * `border-warning-border` 클래스로 쓰이는 전용 비텍스트 토큰(globals.css 실측 — destructive·
+ * success·warning·info가 가짐, primary는 없음). 같은 단일-단어 경계 규율. */
+export function discoverBorderFamilies(vars: Map<string, string>): string[] {
+  const families: string[] = [];
+  for (const key of vars.keys()) {
+    const m = /^([\w]+)-border$/.exec(key);
     if (m && !NON_STATUS_FAMILY_NAMES.has(m[1]!)) families.push(m[1]!);
   }
   return families.sort();
@@ -206,7 +222,17 @@ export function computeFamilyContrasts(css: string): FamilyContrastResult[] {
  * discoverTintFamilies류처럼 CSS에서 자동 발견은 못 한다(이런 강조색엔 이름 규칙이 없다) —
  * 그래서 새 강조색이 status 배경 위에 쓰이기 시작하면 여기 추가해야 한다는 게 이 접근의
  * 알려진 한계다(전수벤치·못틀리는대조 둘 다 이 파일의 테스트가 진다). */
-const CROSS_CHECK_TEXT_VARS = ['brand'];
+const CROSS_CHECK_EXTRA_TEXT_VARS = ['brand'];
+
+/** story #4094 AC1 — 상태색 자신(destructive·info·success·warning·primary)은 brand와 달리
+ * 자기 -tint/-bg를 «가진다» — discoverTintFamilies/discoverBgFamilies가 이미 globals.css에서
+ * 유도하는 그 목록을 그대로 재사용한다(손으로 5개 이름을 다시 적지 않는다 — 하드코딩 0,
+ * 새 상태색이 -tint/-bg만 얻어도 자동으로 이 교차검사 대상이 된다). CROSS_CHECK_EXTRA_
+ * TEXT_VARS(brand류, 자기 -tint/-bg가 없어 자동발견 불가)와 합쳐 전체 집합을 만든다. */
+export function deriveCrossCheckTextVars(vars: Map<string, string>): string[] {
+  const statusFamilies = new Set([...discoverTintFamilies(vars), ...discoverBgFamilies(vars)]);
+  return [...new Set([...statusFamilies, ...CROSS_CHECK_EXTRA_TEXT_VARS])].sort();
+}
 
 /** story #4055 AC2(전수벤치) — CROSS_CHECK_TEXT_VARS를 처음 켠 실측(2026-09-18)에서 나온
  * 미달 10건 전부. ⚠️#4048의 흐름 밴드 컴포넌트 수정(text-brand→text-foreground)은 이 표의
@@ -226,7 +252,23 @@ const GRANDFATHER_BASELINE = new Set([
   'light|brand|success|tint', 'light|brand|success|bg',
   'light|brand|warning|tint', 'light|brand|warning|bg',
   'dark|brand|primary|tint',
+  // story #4094 AC1 — deriveCrossCheckTextVars가 상태색 자신(destructive·info·success·
+  // warning·primary)을 처음 이 교차게이트에 편입하며 실측으로 드러난 신규 미달 11건(전부
+  // 4.24~4.46, AA 문턱 바로 아래 — 별도 카드 밖 발견만, 이 스토리에서 고치지 않는다).
+  'light|destructive|info|tint', 'light|destructive|info|bg',
+  'light|success|info|tint', 'light|success|info|bg',
+  'light|warning|destructive|tint', 'light|warning|destructive|bg',
+  'light|warning|info|tint', 'light|warning|info|bg',
+  'light|warning|success|tint', 'light|warning|success|bg',
+  'dark|destructive|primary|tint',
 ]);
+
+/** story #4094 AC3 — CROSS_CHECK_EXTRA_TEXT_VARS(brand)에 붙던 GRANDFATHER_BASELINE과
+ * 같은 계약이지만 이 스토리가 새로 켠 두 게이트(AC1의 상태색-자신 교차·AC2의 비텍스트)가
+ * 처음 발견한 미달을 담는 별도 표 — «늘지 않음»만 단언, 해소는 별 카드(유나 디자인 게이트).
+ * 값은 실 globals.css를 이 스토리가 처음 스캔한 실측 그대로(추측 0) — 아래 main()의 로그가
+ * 그 스캔 결과를 그대로 찍는다. */
+const NONTEXT_GRANDFATHER_BASELINE = new Set<string>([]);
 
 function crossCheckKey(r: { theme: string; textVar: string; family: string; kind: string }): string {
   return `${r.theme}|${r.textVar}|${r.family}|${r.kind}`;
@@ -250,7 +292,7 @@ export function computeCrossCheckContrasts(css: string): CrossCheckTextResult[] 
     const pageBg = resolveOklchVar(vars, 'background');
     const pageBgRgb: [number, number, number] = [pageBg.r, pageBg.g, pageBg.b];
 
-    for (const textVar of CROSS_CHECK_TEXT_VARS) {
+    for (const textVar of deriveCrossCheckTextVars(vars)) {
       const textRaw = vars.get(textVar);
       if (!textRaw) continue;
       const textParsed = parseOklchToRgba(resolveCssVarValue(vars, textRaw));
@@ -270,6 +312,64 @@ export function computeCrossCheckContrasts(css: string): CrossCheckTextResult[] 
     }
   }
   return results;
+}
+
+const AA_NONTEXT_THRESHOLD = 3.0;
+
+/** story #4094 AC2 — WCAG 1.4.11(Non-text Contrast, 3:1)이 요구하는 UI 컴포넌트(border·
+ * focus ring) 대비. 텍스트 4.5:1 게이트와 별도 축이다. 두 가지 실제 사용 패턴을 실 코드에서
+ * 확認(border-*, ring-* 클래스를 src에서 grep)한 그대로 나눈다:
+ *  - 'border' — `border-<family>-border`(전용 토큰, 예: `--warning-border`)가 있으면
+ *    그 값. discoverBorderFamilies로 globals.css에서 유도(하드코딩 0).
+ *  - 'ring' — `ring-<family>`(예: `ring-destructive`)는 전용 `-ring` 토큰이 globals.css에
+ *    없다(실측 확認) — Tailwind가 base family 색(`--destructive` 등)을 그대로 쓴다. 그래서
+ *    deriveCrossCheckTextVars와 같은 상태색 목록(자기 -tint/-bg가 있는 계열)을 재사용한다.
+ */
+export interface NonTextCrossCheckResult {
+  theme: 'light' | 'dark';
+  usage: 'border' | 'ring';
+  family: string;
+  bgFamily: string;
+  kind: 'tint' | 'bg';
+  ratio: number;
+}
+
+export function computeNonTextCrossCheckContrasts(css: string): NonTextCrossCheckResult[] {
+  const results: NonTextCrossCheckResult[] = [];
+  for (const [theme, selector] of [['light', ':root'], ['dark', '.dark']] as const) {
+    const { vars } = extractCssVarBlock(css, selector);
+    const pageBg = resolveOklchVar(vars, 'background');
+    const pageBgRgb: [number, number, number] = [pageBg.r, pageBg.g, pageBg.b];
+    const bgFamilies = [...new Set([...discoverTintFamilies(vars), ...discoverBgFamilies(vars)])];
+
+    const usages: Array<{ usage: 'border' | 'ring'; families: string[]; resolve: (family: string) => string | undefined }> = [
+      { usage: 'border', families: discoverBorderFamilies(vars), resolve: (f) => vars.get(`${f}-border`) },
+      { usage: 'ring', families: [...new Set([...discoverTintFamilies(vars), ...discoverBgFamilies(vars)])], resolve: (f) => vars.get(f) },
+    ];
+
+    for (const { usage, families, resolve } of usages) {
+      for (const family of families) {
+        const raw = resolve(family);
+        if (!raw) continue;
+        const parsed = parseOklchToRgba(resolveCssVarValue(vars, raw));
+        if (!parsed) continue;
+        const fgRgb: [number, number, number] = [parsed.r, parsed.g, parsed.b];
+
+        for (const bgFamily of bgFamilies) {
+          for (const kind of ['tint', 'bg'] as const) {
+            const r = computeOneFamilyBackground(vars, pageBgRgb, fgRgb, bgFamily, kind);
+            if (!r) continue;
+            results.push({ theme, usage, family, bgFamily, kind, ratio: r.foregroundOnBackgroundRatio });
+          }
+        }
+      }
+    }
+  }
+  return results;
+}
+
+function nonTextCrossCheckKey(r: { theme: string; usage: string; family: string; bgFamily: string; kind: string }): string {
+  return `${r.theme}|${r.usage}|${r.family}|${r.bgFamily}|${r.kind}`;
 }
 
 /** story #2575 AC4 — 교차-계열 참고표(게이트 대상 아님, AC3 인간관문의 근거자료). #2960의
@@ -349,7 +449,8 @@ function main(): number {
     console.log(`  ${status === 'OK' ? '✅' : '❌'} ${r.theme}/${r.family}: foreground on bg = ${r.foregroundOnBackgroundRatio.toFixed(2)}${familyColorNote}`);
   }
 
-  console.log(`\n[story #4055] non-status 강조색 × 전 tint/bg 계열 교차 게이트 — 강조색 ${CROSS_CHECK_TEXT_VARS.length}개(${CROSS_CHECK_TEXT_VARS.join('·')}) · grandfather(발견만, 안 막음) ${GRANDFATHER_BASELINE.size}건`);
+  const crossCheckTextVarsPreview = deriveCrossCheckTextVars(extractCssVarBlock(css, ':root').vars);
+  console.log(`\n[story #4055/#4094 AC1] 강조색·상태색 × 전 tint/bg 계열 교차 게이트 — 대상 ${crossCheckTextVarsPreview.length}개(${crossCheckTextVarsPreview.join('·')}) · brand-grandfather(발견만, 안 막음) ${GRANDFATHER_BASELINE.size}건`);
   const crossCheck = computeCrossCheckContrasts(css);
   const grandfatherSeen = new Set<string>();
   let newCrossCheckFailures = 0;
@@ -369,6 +470,28 @@ function main(): number {
   }
   if (newCrossCheckFailures > 0) {
     console.error(`  ❌ grandfather 밖 신규 교차 미달 ${newCrossCheckFailures}건 — 이 스토리 범위(발견만) 밖이니 baseline에 추가하지 말고 원인(새 조합을 실제로 썼는지)부터 본다.`);
+  }
+
+  console.log(`\n[story #4094 AC2] 비텍스트(border·ring) × 전 tint/bg 계열 교차 게이트(3:1) · grandfather(발견만, 안 막음) ${NONTEXT_GRANDFATHER_BASELINE.size}건`);
+  const nonTextCrossCheck = computeNonTextCrossCheckContrasts(css);
+  const nonTextGrandfatherSeen = new Set<string>();
+  let newNonTextFailures = 0;
+  for (const r of nonTextCrossCheck) {
+    const key = nonTextCrossCheckKey(r);
+    const isFail = r.ratio < AA_NONTEXT_THRESHOLD;
+    const isGrandfathered = isFail && NONTEXT_GRANDFATHER_BASELINE.has(key);
+    if (isGrandfathered) nonTextGrandfatherSeen.add(key);
+    if (isFail && !isGrandfathered) { failed += 1; newNonTextFailures += 1; }
+    const label = isGrandfathered ? 'GRANDFATHER' : isFail ? 'FAIL' : 'OK';
+    const icon = label === 'OK' ? '✅' : label === 'GRANDFATHER' ? '📋' : '❌';
+    console.log(`  ${icon} ${r.theme}/${r.usage}-${r.family} on ${r.bgFamily}-${r.kind} = ${r.ratio.toFixed(2)}${label === 'GRANDFATHER' ? ' (grandfather)' : ''}`);
+  }
+  const staleNonTextGrandfather = [...NONTEXT_GRANDFATHER_BASELINE].filter((k) => !nonTextGrandfatherSeen.has(k));
+  if (staleNonTextGrandfather.length > 0) {
+    console.log(`  ℹ️ grandfather로 등재됐으나 이번 스캔에서 안 걸린(죽은 항목 후보, 목록에서 지워도 됨): ${staleNonTextGrandfather.join(', ')}`);
+  }
+  if (newNonTextFailures > 0) {
+    console.error(`  ❌ grandfather 밖 신규 비텍스트 미달 ${newNonTextFailures}건 — 이 스토리 범위(발견만) 밖이니 baseline에 추가하지 말고 원인부터 본다.`);
   }
 
   console.log(`\n[AC4(#2575) 참고 — 교차-계열, 게이트 대상 아님·AC3 인간관문 근거] textFamily 색이 다른 bgFamily의 -bg 위에 있을 때:`);
