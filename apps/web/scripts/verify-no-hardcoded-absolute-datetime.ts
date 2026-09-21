@@ -70,53 +70,53 @@ export interface Violation {
 
 export interface AllowlistEntry {
   file: string;
-  line: number;
   text: string;
   reason: string;
+  // story #4457 PR 리뷰(페드루·카디르 2026-09-21) — 줄번호를 키에 넣으면 그 파일의
+  // 무관한 윗줄 편집 한 번에 줄이 밀려 예외가 깨진다(#3609/#3611류 동형 위험 —
+  // verify-no-date-tolocalestring.ts가 이미 겪어 파일+줄내용 완전일치로 처방한 선례,
+  // 이 파일은 리터럴 값 자체가 이미 그 역할을 한다). (file, text)만으로 이미 유일하면
+  // 생략 — 같은 파일에 같은 리터럴이 둘 이상이라 (file, text)가 유일하지 않을 때만
+  // 예외적으로 채운다.
+  line?: number;
 }
 
 // story #4079 — 실측으로 안전을 확認한 개별 사각(사유 필수, 말없는 예외 금지).
 export const ALLOWLIST: AllowlistEntry[] = [
   {
-    file: 'components/hypotheses/hypothesis-row.test.tsx', line: 38, text: '2026-08-01T00:00:00Z',
+    file: 'components/hypotheses/hypothesis-row.test.tsx', text: '2026-08-01T00:00:00Z',
     reason: 'hypothesis() 픽스처 팩토리의 measure_after — 같은 함수의 created_at/updated_at이 `new Date()`(인자 0개)를 써 함수 단위 live-now 게이트를 통과시켰을 뿐, measure_after 자신은 hypothesis-row.tsx에서 .slice(0,10) 표시용(Date 파싱조차 안 함, #4077 문서 §AC2 (c) 5 실측).',
   },
-  // scheduled_at 표시/그룹핑 테스트 8건 — channel-post-card.tsx/channel-posts 목록/
+  // scheduled_at 표시/그룹핑 테스트 — channel-post-card.tsx/channel-posts 목록/
   // useChannelPostCalendarData 전부 `formatScheduledAt`(절대포맷 전용, 실 코드 확認)만
   // 쓴다. 어떤 소비처도 scheduled_at을 실 now류와 비교하지 않는다(그룹핑도 날짜끼리
   // 대조지 wall-clock 비교가 아니다) — #4077 문서 §AC2 (c) 5 "절대포맷으로만 뜨고
-  // 비교엔 안 쓰임" 부류와 동형.
+  // 비교엔 안 쓰임" 부류와 동형. page.test.tsx·calendar-data.test.tsx는 같은 파일에
+  // 같은 리터럴이 두 줄에 걸쳐 있어(각각 2042/2076·82/193) line 없이도 둘 다 통과한다
+  // (하나로 병합 — 두 자리 다 같은 이유로 안전해 줄로 가를 필요가 없다).
   {
-    file: 'app/(authenticated)/content/channel-posts/[draftId]/page.test.tsx', line: 2042, text: '2026-09-05T00:00:00Z',
-    reason: '예약 발행 성공 안내 표시 여부만 단언(scheduled_at 값 자체는 무관, #4453류와 달리 비교 없음).',
+    file: 'app/(authenticated)/content/channel-posts/[draftId]/page.test.tsx', text: '2026-09-05T00:00:00Z',
+    reason: '예약 발행 성공 안내 표시 여부만 단언(scheduled_at 값 자체는 무관, #4453류와 달리 비교 없음). 파일 내 2곳(2042·2076행) 전부 동일 이유.',
   },
   {
-    file: 'app/(authenticated)/content/channel-posts/[draftId]/page.test.tsx', line: 2076, text: '2026-09-05T00:00:00Z',
-    reason: '예약 발행 성공 안내 표시 여부만 단언(scheduled_at 값 자체는 무관, #4453류와 달리 비교 없음).',
-  },
-  {
-    file: 'app/(authenticated)/content/channel-posts/page.test.tsx', line: 396, text: '2026-09-15T09:00:00+00:00',
+    file: 'app/(authenticated)/content/channel-posts/page.test.tsx', text: '2026-09-15T09:00:00+00:00',
     reason: '목록 「나가는 시각」 칸 표시 — channel-post-card.tsx가 formatScheduledAt(절대포맷)만 쓴다.',
   },
   {
-    file: 'components/content/channel-post-card.test.tsx', line: 57, text: '2026-09-05T12:00:00Z',
-    reason: 'channel-post-card.tsx:65 formatScheduledAt(절대포맷 전용, 실 코드 확認) — 비교 없음.',
+    file: 'components/content/channel-post-card.test.tsx', text: '2026-09-05T12:00:00Z',
+    reason: 'channel-post-card.tsx formatScheduledAt(절대포맷 전용, 실 코드 확認) — 비교 없음.',
   },
   {
-    file: 'components/content/use-channel-post-calendar-data.test.tsx', line: 82, text: '2026-09-05T21:00:00Z',
+    file: 'components/content/use-channel-post-calendar-data.test.tsx', text: '2026-09-05T21:00:00Z',
+    reason: 'UTC 날짜 그룹핑 — scheduled_at끼리 대조(날짜 버킷)일 뿐 wall-clock 비교가 아니다. 파일 내 2곳(82·193행) 전부 동일 이유.',
+  },
+  {
+    file: 'components/content/use-channel-post-calendar-data.test.tsx', text: '2026-09-05T09:00:00Z',
     reason: 'UTC 날짜 그룹핑 — scheduled_at끼리 대조(날짜 버킷)일 뿐 wall-clock 비교가 아니다.',
   },
   {
-    file: 'components/content/use-channel-post-calendar-data.test.tsx', line: 83, text: '2026-09-05T09:00:00Z',
+    file: 'components/content/use-channel-post-calendar-data.test.tsx', text: '2026-09-10T00:00:00Z',
     reason: 'UTC 날짜 그룹핑 — scheduled_at끼리 대조(날짜 버킷)일 뿐 wall-clock 비교가 아니다.',
-  },
-  {
-    file: 'components/content/use-channel-post-calendar-data.test.tsx', line: 84, text: '2026-09-10T00:00:00Z',
-    reason: 'UTC 날짜 그룹핑 — scheduled_at끼리 대조(날짜 버킷)일 뿐 wall-clock 비교가 아니다.',
-  },
-  {
-    file: 'components/content/use-channel-post-calendar-data.test.tsx', line: 193, text: '2026-09-05T21:00:00Z',
-    reason: '재조회 실패 시 이전 데이터 유지 회귀가드 — scheduled_at 값 자체는 무관(존재 여부만 확認).',
   },
 ];
 
@@ -125,7 +125,7 @@ function isSentinelYear(year: number): boolean {
 }
 
 function isAllowed(file: string, line: number, text: string): boolean {
-  return ALLOWLIST.some((e) => e.file === file && e.line === line && e.text === text);
+  return ALLOWLIST.some((e) => e.file === file && e.text === text && (e.line === undefined || e.line === line));
 }
 
 /** `new Date(2026, 8, 20, ...)` 생성자 스타일 — 첫 인자가 숫자 리터럴 연도일 때만. */

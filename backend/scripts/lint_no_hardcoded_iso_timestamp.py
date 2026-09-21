@@ -60,8 +60,14 @@ test_3423_channel_post_scheduled_filter.py의 naive-datetime 422 검증용 임�
 값 자체가 무의미해 어떤 marker 패턴에도 안 걸린다·test_check_env_drift_code_read_
 axis.py의 위치인자 DI — 파라미터명이 이 파일에 안 나타나 이름 기반 marker가
 구조적으로 못 본다)는 기존 ALLOWLIST와 동형 원칙으로 `TEST_ALLOWLIST`에
-(file, line, literal)+사유로 개별 등재한다(#4077 문서가 실제로 읽어 안전을 확認한
-자리 — 새 예외 아님, 그 확認을 코드로 옮긴 것)."""
+(file, literal)+사유로 개별 등재한다(#4077 문서가 실제로 읽어 안전을 확認한
+자리 — 새 예외 아님, 그 확認을 코드로 옮긴 것). story #4457 PR 리뷰(페드루·카디르
+2026-09-21) — 처음엔 (file, line, literal)이었으나, 줄번호를 키에 넣으면 그 파일의
+무관한 윗줄 편집 한 번에 줄이 밀려 예외가 깨진다(#3609/#3611류 동형 위험, 이 파일의
+verify-no-date-tolocalestring.ts가 이미 겪어 파일+줄내용 완전일치로 처방한 선례).
+(file, literal)만으로 이미 유일하면(지금 4건 전부 그렇다) 줄을 아예 뺀다 — 같은
+파일에 같은 리터럴이 둘 이상이라 (file, literal)이 유일하지 않을 때만 예외적으로
+줄을 남긴다."""
 from __future__ import annotations
 
 import ast
@@ -87,30 +93,41 @@ _DI_NAME_RE = re.compile(r"^_*(now|today|current|frozen|as_of|fixed_now)", re.IG
 ALLOWLIST: frozenset[tuple[str, str]] = frozenset()
 
 # story #4079 — backend/tests 전용 개별 예외(파일 단위 marker 판정의 사각). §4-4 처방
-# 문단 참조 — #4077 문서가 실측으로 안전을 확認한 자리만, 사유와 함께.
-TEST_ALLOWLIST: frozenset[tuple[str, int, str]] = frozenset({
+# 문단 참조 — #4077 문서가 실측으로 안전을 확認한 자리만, 사유와 함께. (file, literal)
+# 만으로 유일하면 줄 없이(story #4457 PR 리뷰 반영 — 줄번호 키는 무관한 편집에 깨진다).
+# 같은 파일에 같은 리터럴이 둘 이상일 때만 세 번째 원소(line)를 덧붙여 좁힌다.
+TEST_ALLOWLIST: frozenset[tuple[str, str] | tuple[str, str, int]] = frozenset({
     (
-        "backend/tests/test_3423_channel_post_scheduled_filter.py", 455, "2026-09-10T00:00:00",
+        "backend/tests/test_3423_channel_post_scheduled_filter.py", "2026-09-10T00:00:00",
     ),  # naive-datetime(tz 없음) 422 검증용 임의값 — 비교 대상이 아니라 형식 검증 트리거,
         # 값 자체는 의미 없다(#4077 문서 §AC2 (b) 실측 확認).
     (
-        "backend/tests/test_check_env_drift_code_read_axis.py", 420, "date(2026, 7, 28)",
+        "backend/tests/test_check_env_drift_code_read_axis.py", "date(2026, 7, 28)",
     ),  # `mod._split_high_by_baseline(..., date(2026, 7, 28))`의 세 번째 위치인자
         # ("오늘"로 주입되는 DI값) — 파라미터명이 이 테스트 파일 자체엔 안 나타나(피
         # 대상 함수가 다른 모듈에 정의) 이름 기반 marker가 구조적으로 못 본다. #4077
         # 문서 §4-3이 직접 다룬 파일(같은 버그 klass의 선례이자 회귀가드 그 자체).
     (
-        "backend/tests/test_1994_backlink_api_realdb.py", 362, "datetime(2026, 7, 17, 8, 0, 0, tzinfo=timezone.utc)",
+        "backend/tests/test_1994_backlink_api_realdb.py", "datetime(2026, 7, 17, 8, 0, 0, tzinfo=timezone.utc)",
     ),  # `T0 = datetime(...)` — 상대오프셋(`_t(minutes)` 헬퍼)의 앵커일 뿐, 비교 대상이
         # 아니다(#4077 문서 §AC2 (c) 부류). 이름이 "T0"라 now/today류 DI 이름 관용구에
         # 안 걸린다.
     (
-        "backend/tests/test_s35.py", 29, "datetime(2026, 4, 30, tzinfo=timezone.utc)",
+        "backend/tests/test_s35.py", "datetime(2026, 4, 30, tzinfo=timezone.utc)",
     ),  # `_mock_key()`의 `k.created_at = datetime(2026, 4, 30, ...)` — MagicMock 속성에
         # 심는 표시용 값일 뿐 비교되지 않는다(같은 함수의 expires_at/revoked_at는
         # `datetime.now(...)` 상대 계산이라 이 함수가 live-now 게이트를 통과했지만,
         # created_at 자체는 그 비교에 안 낀다 — #4077 문서 §AC2 (c) mock-echo 부류).
 })
+
+
+def _is_test_allowlisted(file_label: str, line: int, text: str) -> bool:
+    """(file, literal) 매치를 우선 보고, 그 파일+리터럴 조합이 여러 줄에 걸쳐 등재된
+    경우에만(3-원소 형) 줄까지 대조한다 — 지금은 그런 경우 0건(위 4건 전부 파일마다
+    유일)이지만 향후 등재 시 이 구조가 필요해질 수 있어 남겨둔다."""
+    if (file_label, text) in TEST_ALLOWLIST:
+        return True
+    return (file_label, text, line) in TEST_ALLOWLIST
 
 # self-assert — 스캔 대상이 비정상적으로 적으면(경로가 헛돌면) 조용한 통과 대신 죽는다.
 MIN_EXPECTED_FILES = 300
@@ -350,7 +367,7 @@ def scan_tests_source(source: str, file_label: str) -> list[Violation]:
             scope = scope_of.get(id(node), tree)
             if not _has_live_now_call(scope) or scope_has_marker(scope):
                 continue
-            if (file_label, node.lineno, node.value) in TEST_ALLOWLIST:
+            if _is_test_allowlisted(file_label, node.lineno, node.value):
                 continue
             violations.append(Violation(file=file_label, line=node.lineno, text=node.value))
         elif isinstance(node, ast.Call) and _ctor_callee_name(node) is not None:
@@ -363,7 +380,7 @@ def scan_tests_source(source: str, file_label: str) -> list[Violation]:
             if not _has_live_now_call(scope) or scope_has_marker(scope):
                 continue
             text = ast.unparse(node)
-            if (file_label, node.lineno, text) in TEST_ALLOWLIST:
+            if _is_test_allowlisted(file_label, node.lineno, text):
                 continue
             violations.append(Violation(file=file_label, line=node.lineno, text=text))
     return violations

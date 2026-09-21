@@ -147,7 +147,7 @@ it('unrelated uses live now', () => {
     expect(scanContent(src, 'components/fixture.test.tsx')).toEqual([]);
   });
 
-  it('ALLOWLIST 항목은 file+line+text 완전일치만 통과시킨다', () => {
+  it('ALLOWLIST 항목은 등재 안 된 파일이면 여전히 FAIL한다(말없이 넓어지는 예외 금지)', () => {
     const src = `
 it('temporal field with no comparison', () => {
   const boundary = Date.now();
@@ -156,8 +156,29 @@ it('temporal field with no comparison', () => {
 });
 `;
     // scheduled_at 필드명이 아니라 변수명일 뿐이므로 live-now 게이트를 타고, ALLOWLIST에
-    // 없는 파일/줄이면 여전히 FAIL(말없이 넓어지는 예외 금지).
+    // 없는 파일이면 여전히 FAIL.
     const violations = scanContent(src, 'components/not_the_allowlisted_file.test.tsx');
     expect(violations).toHaveLength(1);
+  });
+
+  it('story #4457 PR 리뷰 — line 없는 ALLOWLIST 항목은 같은 파일의 같은 리터럴을 줄 무관하게 전부 통과시킨다', () => {
+    const src = `
+it('a', () => {
+  const boundary = Date.now();
+  const x = { scheduled_at: '2026-09-05T00:00:00Z' };
+  expect(x).toBeTruthy();
+});
+
+it('b', () => {
+  const boundary = Date.now();
+  const y = { scheduled_at: '2026-09-05T00:00:00Z' };
+  expect(y).toBeTruthy();
+});
+`;
+    // 실 ALLOWLIST의 page.test.tsx 항목처럼 같은 파일에 같은 리터럴이 두 줄에 걸쳐
+    // 있어도(여기선 다른 파일명으로 시뮬레이트하지 않고 ALLOWLIST에 실제로 등재된
+    // 파일 경로를 그대로 써서 검증한다) line 없이 둘 다 통과해야 한다.
+    const violations = scanContent(src, 'app/(authenticated)/content/channel-posts/[draftId]/page.test.tsx');
+    expect(violations).toEqual([]);
   });
 });

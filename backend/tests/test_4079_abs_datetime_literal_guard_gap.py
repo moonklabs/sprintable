@@ -214,9 +214,10 @@ def test_always_future_sentinel():
 
 
 def test_tests_policy_explicit_allowlist_entry_is_honored():
-    """TEST_ALLOWLIST는 (file, line, literal) 완전일치만 통과시킨다 — 같은 값이 다른
-    줄/다른 파일에 있으면 그대로 FAIL(말없이 넓어지는 예외 금지, 기존 ALLOWLIST와
-    동형 계약)."""
+    """TEST_ALLOWLIST는 (file, literal) 완전일치만 통과시킨다(story #4457 PR 리뷰 —
+    줄번호는 무관한 편집에 밀려 깨지므로 키에서 뺐다, (file, literal)이 유일하지 않을
+    때만 3-원소 형으로 줄을 덧붙인다) — 값이 같아도 등재 안 된 파일이면 그대로 FAIL
+    (말없이 넓어지는 예외 금지, 기존 ALLOWLIST와 동형 계약)."""
     source = '''
 from datetime import datetime, timezone
 
@@ -226,8 +227,6 @@ def test_uses_live_now():
     scheduled = datetime(2026, 9, 10, tzinfo=timezone.utc)
     assert scheduled > boundary
 '''
-    # 실제 TEST_ALLOWLIST엔 이 (file, line, literal) 조합이 없다 — 값이 같아도 등재
-    # 안 된 파일/줄이면 여전히 FAIL.
     violations = scan_tests_source(source, "tests/not_the_allowlisted_file.py")
     assert len(violations) == 1
 
@@ -235,6 +234,6 @@ def test_uses_live_now():
 # ─── AC — 실물 backend/app·backend/tests 전체가 지금 실제로 깨끗한지 ────────────
 
 def test_current_repo_passes_the_extended_guard():
-    """실측 367건(파일 단위 marker-만 요구하던 1차 설계)→2건(live-now 게이트 추가)→
-    0건(sentinel epoch·TEST_ALLOWLIST 2건 반영) — 이 pin이 그 최종 상태를 고정한다."""
+    """실측 367건(파일 단위 marker-만 요구하던 1차 설계)→30건(함수 단위로 좁힘)→2건→
+    0건(sentinel epoch·TEST_ALLOWLIST 4건 반영) — 이 pin이 그 최종 상태를 고정한다."""
     assert lint_main() == 0
