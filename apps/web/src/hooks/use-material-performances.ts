@@ -8,7 +8,11 @@ import { useAsyncResourceBatch } from './use-async-resource';
 // ?derived_id= 를 derivedIds 배열만큼 병렬 조회(useHookPerformances와 동형 — BE가 배치
 // 엔드포인트를 안 열었다). channel_post_draft(발행 前) 변주·org 밖 id는 API가 빈 배열로
 // 답한다(에러 아님) — 그 케이스는 실패가 아니라 "정직하게 0건"이라 맵에 빈 배열로 남는다.
-const MATERIAL_PERFORMANCE_API_PATH = '/api/v2/material-lineage/material-performance';
+//
+// story #4089(P0 핫픽스) — use-material-lineage.ts와 동일 결함 클래스(BFF route 없이
+// BE `/api/v2/...` 직접 호출 → false SessionExpiredDialog). BFF route
+// (apps/web/src/app/api/material-lineage/material-performance/route.ts) 경유로 전환.
+const MATERIAL_PERFORMANCE_API_PATH = '/api/material-lineage/material-performance';
 
 export interface UseMaterialPerformancesResult {
   // derived_id → snapshots(성공 시 빈 배열도 포함 — 미발행/무성과와 실패를 구분).

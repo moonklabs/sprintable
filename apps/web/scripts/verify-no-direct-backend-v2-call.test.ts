@@ -49,4 +49,44 @@ describe('extractDirectV2Calls — 순수 판정 함수(story #3300/#3701 재발
     const hits = extractDirectV2Calls('fetchWithAuth(`/api/v2/team-members/${agentId}`)', 'f.ts');
     expect(hits[0]!.urlPrefix).toBe('/api/v2/team-members/');
   });
+
+  // ⭐story #4089 실사고 픽스처 — 위 #3300 사고와 같은 클래스인데 이 가드가 못 잡았다.
+  // 호출부가 URL 리터럴을 fetchWithAuth() 인자 자리에 직접 안 쓰고, 파일 상단
+  // `const XXX_API_PATH = '/api/v2/...'`로 한 번 거친 뒤 템플릿 리터럴 `${XXX_API_PATH}...`
+  // 로 보간해서 불렀다(use-material-lineage.ts/use-hook-performances.ts/use-material-
+  // performances.ts 원문 그대로) — 정규식이 `fetchWithAuth(` 바로 뒤 리터럴이 `/api/v2/`로
+  // *시작*하는지만 보므로, 첫 문자가 `${`인 이 형태는 구조적으로 놓친다.
+  it('#4089 실사고 픽스처 — const 변수 경유 템플릿 보간도 잡는다(고치기 前 use-material-lineage.ts 원문)', () => {
+    const hits = extractDirectV2Calls(
+      [
+        "const MATERIAL_LINEAGE_API_PATH = '/api/v2/material-lineage';",
+        'const res = await fetchWithAuth(`${MATERIAL_LINEAGE_API_PATH}?${params.toString()}`);',
+      ].join('\n'),
+      'hooks/use-material-lineage.ts',
+    );
+    expect(hits).toHaveLength(1);
+    expect(hits[0]!.urlPrefix).toBe('/api/v2/material-lineage?');
+  });
+
+  it('BFF 경로 const로 고친 뒤에는 안 잡는다(회귀 0)', () => {
+    const hits = extractDirectV2Calls(
+      [
+        "const MATERIAL_LINEAGE_API_PATH = '/api/material-lineage';",
+        'const res = await fetchWithAuth(`${MATERIAL_LINEAGE_API_PATH}?${params.toString()}`);',
+      ].join('\n'),
+      'hooks/use-material-lineage.ts',
+    );
+    expect(hits).toEqual([]);
+  });
+
+  it('v2 const라도 fetchWithAuth 호출에서 안 쓰이면(다른 용도) 안 잡는다(과판정 0)', () => {
+    const hits = extractDirectV2Calls(
+      [
+        "const UNUSED_V2_PATH = '/api/v2/whatever';",
+        "const res = await fetchWithAuth('/api/stories');",
+      ].join('\n'),
+      'f.ts',
+    );
+    expect(hits).toEqual([]);
+  });
 });

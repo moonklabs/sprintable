@@ -7,7 +7,11 @@ import { useAsyncResourceBatch } from './use-async-resource';
 // story #4063(E-RECIPE-1 ④ 렌더, PR #4434 위) — GET /api/v2/material-lineage/hook-performance
 // ?hook_key= 를 hookKeys 배열만큼 병렬 조회. 훅 하나마다 별 호출이라(BE가 배치 엔드포인트를
 // 안 열었다, doc c7991109에 그런 계약 없음 — 지어내지 않는다) Promise.all로 묶는다.
-const HOOK_PERFORMANCE_API_PATH = '/api/v2/material-lineage/hook-performance';
+//
+// story #4089(P0 핫픽스) — use-material-lineage.ts와 동일 결함 클래스(BFF route 없이
+// BE `/api/v2/...` 직접 호출 → false SessionExpiredDialog). BFF route
+// (apps/web/src/app/api/material-lineage/hook-performance/route.ts) 경유로 전환.
+const HOOK_PERFORMANCE_API_PATH = '/api/material-lineage/hook-performance';
 
 export interface UseHookPerformancesResult {
   // hook_key → summary. 실패/미조회 hook_key는 이 맵에 아예 안 들어간다(0 위장 안 함).

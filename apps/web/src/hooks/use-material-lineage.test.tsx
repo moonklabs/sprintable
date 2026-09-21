@@ -45,10 +45,10 @@ const EDGE = (id: string) => ({
   master_title: null, channel: null,
 });
 
-describe('useMaterialLineage — GET /api/v2/material-lineage?work_item_id=', () => {
+describe('useMaterialLineage — GET /api/material-lineage?work_item_id=(story #4089 BFF route 경유)', () => {
   it('work_item_id 쿼리로 호출하고 응답 edges를 그대로 낸다', async () => {
     const fetchMock = vi.fn(async (url: string) => {
-      expect(url).toBe('/api/v2/material-lineage?work_item_id=story-1');
+      expect(url).toBe('/api/material-lineage?work_item_id=story-1');
       return { ok: true, json: async () => [EDGE('e1'), EDGE('e2')] };
     });
     vi.stubGlobal('fetch', fetchMock);
