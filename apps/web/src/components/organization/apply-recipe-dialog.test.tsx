@@ -12,6 +12,14 @@ import { NextIntlClientProvider } from 'next-intl';
 import { ApplyRecipeDialog } from './apply-recipe-dialog';
 import koMessages from '../../../messages/ko.json';
 
+// story #4106 — 채널/연산 leg(org 스코프 fetch)를 재현하려면 orgId가 필요한데
+// ApplyRecipeDialog는 useDashboardContext()에서 그 값을 직접 읽는다(props 아님).
+// organization/roles/page.test.tsx 선례와 동형 — useDashboardContext 자체를 mock.
+const { useDashboardContextMock } = vi.hoisted(() => ({ useDashboardContextMock: vi.fn() }));
+vi.mock('@/app/dashboard/dashboard-shell', () => ({
+  useDashboardContext: () => useDashboardContextMock(),
+}));
+
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let container: HTMLDivElement;
@@ -29,6 +37,9 @@ beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
+  // 기존 테스트 전부는 orgId 없이도(채널/연산 leg가 즉시 'loaded'로 no-op) 통과하던
+  // 회귀 기준 — 기본값을 undefined로 유지, orgId가 필요한 신규 테스트만 개별 override.
+  useDashboardContextMock.mockReturnValue({ orgId: undefined });
 });
 
 afterEach(async () => {
@@ -50,6 +61,18 @@ const TARGET = {
   payload_schema: { properties: { stage: { enum: ['step_1'] } } },
   stage_metadata: { step_1: { role: 'Developer', action: 'do it' } },
   enabled: true,
+};
+
+// story #4106 — 채널·연산 대상 stage가 있는 real-shape 픽스처(위 TARGET은 무선언이라
+// hasChannelStage/hasGenerationStage 자체가 안 걸려 이 두 leg를 검증 못 한다).
+const TARGET_WITH_CHANNEL_AND_GENERATION = {
+  ...TARGET,
+  payload_schema: { properties: { stage: { enum: ['step_1', 'publish', 'compute'] } } },
+  stage_metadata: {
+    step_1: { role: 'Developer', action: 'do it' },
+    publish: { role: 'Publisher', capability: { kind: 'publish', target: 'channel_connection' as const } },
+    compute: { role: 'Compute', capability: { kind: 'generate', target: 'generation_connector' as const } },
+  },
 };
 
 function stubFetch(applyBody: unknown, capture: { body: unknown }) {
@@ -312,5 +335,147 @@ describe('ApplyRecipeDialog', () => {
     await flush();
 
     expect(document.body.textContent).toContain('capability.connector_key 미해소 — org에 매칭되는 커넥터 여러 개');
+  });
+
+  // story #4106(페드루 PO 실측, PR #4478/#4479 리뷰 계기) — #3521 agentsLoadFailed와
+  // 동형 3값을 채널·연산 leg에도. t prop은 raw-key passthrough라 organization ns 키는
+  // 그 키 문자열 그대로 렌더 확認, 채널 실패 문구는 useTranslations('channelConnect')를
+  // 컴포넌트 내부에서 직접 호출하므로 wrap()의 실 ko 메시지로 대조한다.
+  it('채널 목록 fetch 실패 — «없어요» 대신 로드 실패 문구+재시도, 재시도 성공하면 옵션이 채워진다', async () => {
+    useDashboardContextMock.mockReturnValue({ orgId: 'org-1' });
+    let shouldFail = true;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/projects') return { ok: true, json: async () => ({ data: [{ id: 'proj-1', name: 'Proj One' }] }) };
+      if (url.includes('/api/team-members')) return { ok: true, json: async () => ({ data: [{ id: 'agent-1', name: '디디군' }] }) };
+      if (url.includes('/api/events/definitions/def-1/bindings')) return { ok: true, json: async () => ({ bindings: {} }) };
+      if (url.includes('/generation-connectors')) return { ok: true, json: async () => ({ data: { connectors: [] } }) };
+      if (url.includes('/channel-connections')) {
+        if (shouldFail) return { ok: false, status: 500, json: async () => ({}) };
+        return { ok: true, json: async () => ({ data: [{ id: 'conn-1', channel: 'instagram', account_label: '메인', account_id: 'a1', status: 'active' }] }) };
+      }
+      throw new Error('unexpected fetch: ' + url);
+    }));
+
+    await act(async () => {
+      root.render(wrap(
+        <ApplyRecipeDialog
+          target={TARGET_WITH_CHANNEL_AND_GENERATION} open onOpenChange={() => {}}
+          t={((k: string) => k) as never} tc={((k: string) => k) as never} addToast={() => {}}
+        />,
+      ));
+    });
+    await flush();
+    const projectSelect1 = document.body.querySelector('select') as HTMLSelectElement;
+    await act(async () => { projectSelect1.value = 'proj-1'; projectSelect1.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+
+    expect(document.body.querySelector('[data-testid="apply-recipe-channels-load-error"]')).toBeTruthy();
+    expect(document.body.textContent).toContain(koMessages.channelConnect.channelLoadFailed);
+    expect(document.body.querySelector('[data-testid="apply-recipe-channels-empty"]')).toBeNull();
+
+    shouldFail = false;
+    const retryBtn = document.body.querySelector('[data-testid="apply-recipe-channels-load-error"] button') as HTMLButtonElement;
+    await act(async () => { retryBtn.click(); });
+    await flush();
+
+    expect(document.body.querySelector('[data-testid="apply-recipe-channels-load-error"]')).toBeNull();
+    const selects = [...document.body.querySelectorAll('select')];
+    expect(selects.some((s) => s.textContent?.includes('메인'))).toBe(true);
+  });
+
+  it('연산 커넥터 목록 fetch 실패 — «없어요» 대신 로드 실패 문구+재시도', async () => {
+    useDashboardContextMock.mockReturnValue({ orgId: 'org-1' });
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/projects') return { ok: true, json: async () => ({ data: [{ id: 'proj-1', name: 'Proj One' }] }) };
+      if (url.includes('/api/team-members')) return { ok: true, json: async () => ({ data: [{ id: 'agent-1', name: '디디군' }] }) };
+      if (url.includes('/api/events/definitions/def-1/bindings')) return { ok: true, json: async () => ({ bindings: {} }) };
+      if (url.includes('/channel-connections')) return { ok: true, json: async () => ({ data: [] }) };
+      if (url.includes('/generation-connectors')) return { ok: false, status: 500, json: async () => ({}) };
+      throw new Error('unexpected fetch: ' + url);
+    }));
+
+    await act(async () => {
+      root.render(wrap(
+        <ApplyRecipeDialog
+          target={TARGET_WITH_CHANNEL_AND_GENERATION} open onOpenChange={() => {}}
+          t={((k: string) => k) as never} tc={((k: string) => k) as never} addToast={() => {}}
+        />,
+      ));
+    });
+    await flush();
+    const projectSelect2 = document.body.querySelector('select') as HTMLSelectElement;
+    await act(async () => { projectSelect2.value = 'proj-1'; projectSelect2.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+
+    expect(document.body.querySelector('[data-testid="apply-recipe-generation-connectors-load-error"]')).toBeTruthy();
+    expect(document.body.textContent).toContain('eventApplyGenerationConnectorsLoadError');
+    expect(document.body.querySelector('[data-testid="apply-recipe-generation-connectors-empty"]')).toBeNull();
+  });
+
+  it('채널·연산 둘 다 성공+0건이면 각각 «없어요»만 뜨고 실패 문구는 안 뜬다(진짜 0건과 실패를 혼동 X)', async () => {
+    useDashboardContextMock.mockReturnValue({ orgId: 'org-1' });
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/projects') return { ok: true, json: async () => ({ data: [{ id: 'proj-1', name: 'Proj One' }] }) };
+      if (url.includes('/api/team-members')) return { ok: true, json: async () => ({ data: [{ id: 'agent-1', name: '디디군' }] }) };
+      if (url.includes('/api/events/definitions/def-1/bindings')) return { ok: true, json: async () => ({ bindings: {} }) };
+      if (url.includes('/channel-connections')) return { ok: true, json: async () => ({ data: [] }) };
+      if (url.includes('/generation-connectors')) return { ok: true, json: async () => ({ data: { connectors: [] } }) };
+      throw new Error('unexpected fetch: ' + url);
+    }));
+
+    await act(async () => {
+      root.render(wrap(
+        <ApplyRecipeDialog
+          target={TARGET_WITH_CHANNEL_AND_GENERATION} open onOpenChange={() => {}}
+          t={((k: string) => k) as never} tc={((k: string) => k) as never} addToast={() => {}}
+        />,
+      ));
+    });
+    await flush();
+    const projectSelect3 = document.body.querySelector('select') as HTMLSelectElement;
+    await act(async () => { projectSelect3.value = 'proj-1'; projectSelect3.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+
+    expect(document.body.querySelector('[data-testid="apply-recipe-channels-empty"]')).toBeTruthy();
+    expect(document.body.querySelector('[data-testid="apply-recipe-generation-connectors-empty"]')).toBeTruthy();
+    expect(document.body.querySelector('[data-testid="apply-recipe-channels-load-error"]')).toBeNull();
+    expect(document.body.querySelector('[data-testid="apply-recipe-generation-connectors-load-error"]')).toBeNull();
+  });
+
+  it('로딩 中(fetch 미완)엔 두 leg 다 «없어요»·실패 문구 둘 다 안 뜬다(먼저 보이면 오독)', async () => {
+    useDashboardContextMock.mockReturnValue({ orgId: 'org-1' });
+    let resolveChannels: (() => void) | null = null;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/projects') return { ok: true, json: async () => ({ data: [{ id: 'proj-1', name: 'Proj One' }] }) };
+      if (url.includes('/api/team-members')) return { ok: true, json: async () => ({ data: [] }) };
+      if (url.includes('/api/events/definitions/def-1/bindings')) return { ok: true, json: async () => ({ bindings: {} }) };
+      if (url.includes('/generation-connectors')) return { ok: true, json: async () => ({ data: { connectors: [] } }) };
+      if (url.includes('/channel-connections')) {
+        return new Promise((resolve) => {
+          resolveChannels = () => resolve({ ok: true, json: async () => ({ data: [] }) });
+        });
+      }
+      throw new Error('unexpected fetch: ' + url);
+    }));
+
+    await act(async () => {
+      root.render(wrap(
+        <ApplyRecipeDialog
+          target={TARGET_WITH_CHANNEL_AND_GENERATION} open onOpenChange={() => {}}
+          t={((k: string) => k) as never} tc={((k: string) => k) as never} addToast={() => {}}
+        />,
+      ));
+    });
+    await flush();
+    const projectSelect4 = document.body.querySelector('select') as HTMLSelectElement;
+    await act(async () => { projectSelect4.value = 'proj-1'; projectSelect4.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+
+    expect(document.body.querySelector('[data-testid="apply-recipe-channels-empty"]')).toBeNull();
+    expect(document.body.querySelector('[data-testid="apply-recipe-channels-load-error"]')).toBeNull();
+
+    await act(async () => { resolveChannels?.(); });
+    await flush();
+    expect(document.body.querySelector('[data-testid="apply-recipe-channels-empty"]')).toBeTruthy();
   });
 });
