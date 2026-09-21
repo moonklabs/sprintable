@@ -18,6 +18,8 @@ import { gateApproveLabelKey, sigApproveAndSignLabelKey } from '@/lib/newsletter
 import { adsBoostObjectiveLabel } from '@/lib/ads-boost-objective-label';
 import { formatMinorCurrency, type GenerationBudgetCurrency } from '@/components/content/generation-budget-indicator';
 import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { recipeStageLabel } from '@/lib/recipe-stage-label';
+import { stageRoleLabel } from '@/lib/stage-role';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import type { GateInboxItem, GateItem, HitlInboxItem } from '@/components/kanban/types';
 import { ProofCapsule, type ProofState } from '@/components/proof-capsule/proof-capsule';
@@ -146,6 +148,9 @@ export function ApprovalsQueue() {
   // 「결재 카드」 그 자체(이 큐 카드)에 있어야 한다는 실측 지적. formatMinorCurrency
   // (content ns)·formatScheduledAt 재사용 — gate-evidence.tsx와 동일 포맷터.
   const tContent = useTranslations('content');
+  // story #4082(유나 design CHANGES 2026-09-21) — recipe-detail-view.tsx가 쓰는 같은
+  // SSOT(organization 네임스페이스)로 stage/role 낱말을 통일.
+  const tOrg = useTranslations('organization');
   const locale = useLocale();
   const displayTimezone = resolveDisplayTimezone().tz;
   const router = useRouter();
@@ -538,6 +543,18 @@ export function ApprovalsQueue() {
               <p className="text-[11px] font-medium text-muted-foreground">
                 PR #{gate.pr_number}
                 {gate.github_check_run_sha ? ` · ${gate.github_check_run_sha.slice(0, 7)}` : ''}
+              </p>
+            ) : null}
+            {/* story #4082([E-RECIPE-1] 진행 위치 표시) AC2 — recipe_gate_hooks.py::
+                maybe_create_stage_gate가 denorm한 neutral_facts.stage(+stage_role). 레시피
+                게이트가 아니면(stage 키 자체가 없으면) 이 블록은 안 그려진다 — 비레시피
+                게이트 회귀 0(신규 필드 읽기만, 없는 값은 없다고). 유나 design CHANGES —
+                raw slug 대신 recipe-stage-label.ts/stage-role.ts SSOT(recipe-detail-view.tsx
+                와 동일 낱말표). */}
+            {typeof gate.neutral_facts?.stage === 'string' ? (
+              <p className="text-[11px] text-muted-foreground">
+                {t('gateStageLabel')}: {recipeStageLabel(gate.neutral_facts.stage, tOrg)}
+                {typeof gate.neutral_facts.stage_role === 'string' ? ` (${stageRoleLabel(gate.neutral_facts.stage_role, tOrg)})` : ''}
               </p>
             ) : null}
             {orgName ? <p className="text-[11px] text-muted-foreground">{orgName}</p> : null}

@@ -1,0 +1,1 @@
+{"file": "tests/test_4082_recipe_progress_status.py", "sec": 28.0, "source": "story #4082(2026-09-21) 신규 추가 — 로컬 실측 4.6s(uv run pytest -q, disposable DB backend_test_4082_shardmeasure, 7건) × 로컬/CI ~6배 비율(measure_destructive_durations_local.py 주석, story #3383) 추정. CI 실측 전 잠정값 — 다음 전수 재측정(story #3558 절차)에서 실 CI 값으로 교체 권장."}

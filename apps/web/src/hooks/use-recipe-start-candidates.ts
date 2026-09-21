@@ -17,6 +17,16 @@ export interface RecipeStartCandidate {
   started: boolean;
   conversation_id: string | null;
   message_id: string | null;
+  // story #4082([E-RECIPE-1] 진행 위치 표시) — started=true일 때만 채워진다.
+  current_stage: string | null;
+  current_role: string | null;
+  next_stage: string | null;
+  next_role: string | null;
+  last_published_at: string | null;
+  // story #4082(유나 design CHANGES 2026-09-21) — recipe-stage-label.ts 미등재 slug일 때
+  // 「단계 n/9」 자리표시용(내부어 raw slug 노출 대신).
+  current_stage_position: number | null;
+  total_stages: number | null;
 }
 
 export interface UseRecipeStartCandidatesResult {

@@ -2,12 +2,30 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { extractBackendErrorMessage } from '@/lib/api-error-message';
 import { fetchWithAuth } from '@/lib/db/client';
+import { formatRelativeTime } from '@/lib/storage/format';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { recipeStageLabel } from '@/lib/recipe-stage-label';
+import { stageRoleLabel } from '@/lib/stage-role';
 import { useRecipeStartCandidates, type RecipeStartCandidate } from '@/hooks/use-recipe-start-candidates';
+
+// story #4082(유나 design CHANGES 2026-09-21) — recipe-stage-label.ts에 미등재된 slug는
+// raw 노출 대신 「단계 n/9」로 자리표시한다(recipeStageLabel 자신의 기존 pass-through
+// 계약은 detail/gallery용으로 그대로 두고, 여기 3표면만 이 wrapper로 좁힌다 — 새 기전
+// 발명이 아니라 기존 두 SSOT(recipeStageLabel·stageRoleLabel)를 조합만 한다).
+function displayStageLabel(
+  stage: string, position: number | null, total: number | null, tOrg: (key: string) => string,
+  t: (key: string, values?: Record<string, string | number | Date>) => string,
+): string {
+  const label = recipeStageLabel(stage, tOrg);
+  if (label !== stage) return label;
+  if (position !== null && total !== null) return t('recipeStagePositionFallback', { position, total });
+  return label;
+}
 
 interface RecipeStartSectionProps {
   storyId: string;
@@ -22,6 +40,11 @@ interface RecipeStartSectionProps {
 // (2개 이상이면 고르게, 페드루 확定).
 export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionProps) {
   const t = useTranslations('board');
+  // story #4082(유나 design CHANGES) — role/stage 정본 낱말표는 organization 네임스페이스
+  // (recipe-detail-view.tsx가 이미 쓰는 그 SSOT, 적용 다이얼로그와 화면 간 낱말 통일).
+  const tOrg = useTranslations('organization');
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
   const { candidates, loading, error: loadError, refresh } = useRecipeStartCandidates(projectId, 'story', storyId);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [publishing, setPublishing] = useState(false);
@@ -119,16 +142,39 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
       )}
       {selected ? (
         selected.started ? (
-          selected.conversation_id ? (
-            <Link
-              href={`/chats/${selected.conversation_id}${selected.message_id ? `?messageId=${encodeURIComponent(selected.message_id)}` : ''}`}
-              className="text-xs font-medium text-primary hover:underline"
-            >
-              {t('recipeStarted')} · {t('recipeStartViewConversation')}
-            </Link>
-          ) : (
-            <p className="text-xs font-medium text-foreground">{t('recipeStarted')}</p>
-          )
+          // story #4082([E-RECIPE-1] 진행 위치 표시) AC1 — «시작됨» 한 줄 대신 현재
+          // 단계(역할)·다음 단계(역할, 없으면 «마지막 단계»)·마지막 발행 시각 3줄
+          // («stage» 내부어 대신 정의 저자가 시드한 role 낱말을 우선 노출, 유나 낱말 표 v5.1).
+          <div className="flex flex-col gap-1">
+            {selected.current_stage && (
+              <p className="text-xs font-medium text-foreground">
+                {t('recipeCurrentStageLabel')}: {displayStageLabel(selected.current_stage, selected.current_stage_position, selected.total_stages, tOrg, t)}
+                {selected.current_role ? ` (${stageRoleLabel(selected.current_role, tOrg)})` : ''}
+              </p>
+            )}
+            <p className="text-xs text-muted-foreground">
+              {selected.next_stage
+                ? `${t('recipeNextStageLabel')}: ${displayStageLabel(
+                    selected.next_stage,
+                    selected.current_stage_position !== null ? selected.current_stage_position + 1 : null,
+                    selected.total_stages, tOrg, t,
+                  )}${selected.next_role ? ` (${stageRoleLabel(selected.next_role, tOrg)})` : ''}`
+                : t('recipeNoNextStage')}
+            </p>
+            {selected.last_published_at && (
+              <p className="text-[11px] text-muted-foreground">
+                {t('recipeLastPublishedLabel')}: {formatRelativeTime(selected.last_published_at, locale, displayTimezone)}
+              </p>
+            )}
+            {selected.conversation_id && (
+              <Link
+                href={`/chats/${selected.conversation_id}${selected.message_id ? `?messageId=${encodeURIComponent(selected.message_id)}` : ''}`}
+                className="text-xs font-medium text-primary hover:underline"
+              >
+                {t('recipeStartViewConversation')}
+              </Link>
+            )}
+          </div>
         ) : (
           <Button type="button" size="sm" onClick={() => void handleStart(selected)} disabled={publishing}>
             {publishing ? t('recipeStarting') : t('recipeStartButton')}

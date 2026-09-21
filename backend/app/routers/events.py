@@ -1867,6 +1867,47 @@ async def _find_existing_stage_publish(
     )).scalars().first()
 
 
+async def _find_latest_stage_publish(
+    db: AsyncSession, *, org_id: uuid.UUID, definition_key: str, work_item_type: str, work_item_id: str,
+) -> ConversationMessage | None:
+    """story #4082 — `_find_existing_stage_publish`와 동일 SSOT·동일 조인 축이되 stage
+    필터가 없다(이 work_item에 이 정의로 발행된 가장 최근 stage 이벤트 1건, 어느
+    stage든) — "지금 몇 단계인지" 판정용. #4081(인덱스, 미르코 2026-09-21 확定)의
+    `(event_key, work_item_type, work_item_id, created_at DESC)` 설계와 stage를 뺀 축이
+    정확히 같아 그 인덱스를 그대로 탄다(별도 정렬 불요).
+
+    ⛔story #4081 정정(미르코, head 03f8fb191, 페드루 지시 2026-09-21) — ORM bracket-
+    subscript accessor(`.msg_metadata["event"][...]`)는 JSON 키 자체를 bind parameter로
+    컴파일해(`.compile()` 실측: `metadata[$1][$2] ->> $3`) generic plan(`EXPLAIN
+    (GENERIC_PLAN)`, PG16 재현)에서 0384 표현식 인덱스가 후보에도 못 오르고 Seq Scan으로
+    조용히 되돌아간다 — `_find_existing_stage_publish`와 동일 함정이라 같은 처방(JSON 키는
+    `text()`로 리터럴 SQL에 직접 박고, 비교 값만 bind parameter)을 그대로 옮긴다."""
+    from app.models.conversation import Conversation, ConversationMessage
+
+    return (await db.execute(
+        select(ConversationMessage)
+        .join(Conversation, Conversation.id == ConversationMessage.conversation_id)
+        .where(
+            Conversation.org_id == org_id,
+            text("conversation_messages.metadata->'event'->>'event_key' = :event_lookup_definition_key"),
+            text(
+                "conversation_messages.metadata->'event'->'payload'->>'work_item_type' "
+                "= :event_lookup_work_item_type"
+            ),
+            text(
+                "conversation_messages.metadata->'event'->'payload'->>'work_item_id' "
+                "= :event_lookup_work_item_id"
+            ),
+        )
+        .params(
+            event_lookup_definition_key=definition_key, event_lookup_work_item_type=work_item_type,
+            event_lookup_work_item_id=work_item_id,
+        )
+        .order_by(ConversationMessage.created_at.desc())
+        .limit(1)
+    )).scalars().first()
+
+
 async def _publish_registry_event_core(
     db: AsyncSession,
     org_id: uuid.UUID,
@@ -3170,6 +3211,23 @@ class RecipeStartCandidate(BaseModel):
     started: bool
     conversation_id: str | None = None
     message_id: str | None = None
+    # story #4082([E-RECIPE-1] 진행 위치 표시) — started=True일 때만 채워진다(시작 전엔
+    # "지금 단계"라는 질문 자체가 성립하지 않는다). current_stage는 이 work_item에 이
+    # 정의로 발행된 가장 최근 stage(어느 stage든, _find_latest_stage_publish)이지 항상
+    # first_stage가 아니다 — 3단계까지 진행됐으면 current_stage="stage3". next_stage는
+    # payload_schema.stage.enum 순서상 다음 값(마지막 stage면 None — "마지막 단계"는 FE
+    # 표시 문구, BE는 정직하게 없음만 알린다).
+    current_stage: str | None = None
+    current_role: str | None = None
+    next_stage: str | None = None
+    next_role: str | None = None
+    last_published_at: datetime | None = None
+    # story #4082(유나 design CHANGES 2026-09-21) — current_stage가 recipe-stage-label.ts의
+    # 고정 테이블에 없는(미등재) slug일 때 FE가 raw 값을 그대로 못 띄우게(내부어 노출 0)
+    # «단계 n/9»류 자리표시로 대체할 수 있게, 이미 stage_enum.index()로 구한 위치를
+    # 1-indexed로 얹는다(새 조회 0 — next_stage 계산과 같은 자리에서 파생).
+    current_stage_position: int | None = None
+    total_stages: int | None = None
 
 
 class RecipeStartCandidatesResponse(BaseModel):
@@ -3244,6 +3302,33 @@ async def get_recipe_start_candidates(
             db, org_id=org_id, definition_key=key,
             work_item_type=work_item_type, work_item_id=str(work_item_id), stage=str(first_stage),
         )
+
+        # story #4082 — 시작된 레시피만 "지금 어느 단계·다음은 누구·언제 마지막으로
+        # 발행됐는지"를 추가로 읽는다(시작 전엔 물을 질문이 아니다). _render_event_
+        # message_content(위)의 "다음 단계" 계산과 동일 SSOT(payload_schema.stage.enum
+        # 순서 + stage_metadata) — 새 파생 로직 발명 안 함.
+        current_stage = current_role = next_stage = next_role = None
+        current_stage_position = None
+        last_published_at = None
+        if existing_publish is not None:
+            latest = await _find_latest_stage_publish(
+                db, org_id=org_id, definition_key=key,
+                work_item_type=work_item_type, work_item_id=str(work_item_id),
+            )
+            if latest is not None:
+                last_published_at = latest.created_at
+                event_payload = ((latest.msg_metadata or {}).get("event") or {}).get("payload") or {}
+                stage_value = event_payload.get("stage")
+                if isinstance(stage_value, str):
+                    current_stage = stage_value
+                    current_role = (definition.stage_metadata.get(stage_value) or {}).get("role")
+                    if stage_value in stage_enum:
+                        idx = stage_enum.index(stage_value)
+                        current_stage_position = idx + 1
+                        if idx + 1 < len(stage_enum):
+                            next_stage = stage_enum[idx + 1]
+                            next_role = (definition.stage_metadata.get(next_stage) or {}).get("role")
+
         candidates.append(RecipeStartCandidate(
             definition_id=str(definition.id),
             key=definition.key,
@@ -3253,6 +3338,13 @@ async def get_recipe_start_candidates(
             started=existing_publish is not None,
             conversation_id=str(existing_publish.conversation_id) if existing_publish else None,
             message_id=str(existing_publish.id) if existing_publish else None,
+            current_stage=current_stage,
+            current_role=current_role,
+            next_stage=next_stage,
+            next_role=next_role,
+            last_published_at=last_published_at,
+            current_stage_position=current_stage_position,
+            total_stages=len(stage_enum) if current_stage is not None else None,
         ))
 
     return RecipeStartCandidatesResponse(candidates=candidates)

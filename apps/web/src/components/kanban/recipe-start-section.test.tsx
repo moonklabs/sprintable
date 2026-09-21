@@ -41,7 +41,10 @@ afterEach(async () => {
 function candidateStub(overrides: Partial<RecipeStartCandidate> = {}): RecipeStartCandidate {
   return {
     definition_id: 'def-1', key: 'org.acme.recipe', name: '테스트 레시피', first_stage: 'draft',
-    role_bound: true, started: false, conversation_id: null, message_id: null, ...overrides,
+    role_bound: true, started: false, conversation_id: null, message_id: null,
+    current_stage: null, current_role: null, next_stage: null, next_role: null, last_published_at: null,
+    current_stage_position: null, total_stages: null,
+    ...overrides,
   };
 }
 
@@ -82,7 +85,13 @@ describe('RecipeStartSection', () => {
         callCount += 1;
         const started = callCount > 1;
         return new Response(JSON.stringify({
-          candidates: [candidateStub({ started, conversation_id: started ? 'conv-1' : null, message_id: started ? 'msg-1' : null })],
+          candidates: [candidateStub({
+            started, conversation_id: started ? 'conv-1' : null, message_id: started ? 'msg-1' : null,
+            current_stage: started ? 'draft' : null, current_role: started ? 'Creator' : null,
+            next_stage: started ? 'concept_confirmed' : null, next_role: started ? 'Director' : null,
+            last_published_at: started ? '2026-09-21T00:00:00Z' : null,
+            current_stage_position: started ? 1 : null, total_stages: started ? 9 : null,
+          })],
         }));
       }
       if (url === '/api/events/publish' && init?.method === 'POST') {
@@ -105,16 +114,53 @@ describe('RecipeStartSection', () => {
     await act(async () => { button!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 
-    expect(container.textContent).toContain('시작됨');
+    // story #4082(유나 design CHANGES) — 「시작됨」 한 줄 대신 현재/다음 단계+마지막 발행
+    // 3줄이 뜨고, stage/role은 raw enum이 아니라 recipe-stage-label.ts/stage-role.ts
+    // SSOT를 거친 한글 낱말로 뜬다(내부어 노출 0).
+    expect(container.textContent).toContain('초안');
+    expect(container.textContent).toContain('크리에이터');
+    expect(container.textContent).toContain('컨셉 확정');
+    expect(container.textContent).toContain('디렉터');
+    expect(container.textContent).not.toContain('draft');
+    expect(container.textContent).not.toContain('Creator');
     expect(container.querySelector(`a[href="/chats/conv-1?messageId=msg-1"]`)).not.toBeNull();
   });
 
-  it('이미 시작된 스토리는 버튼 대신 진행 상태(대화 링크)를 보인다(AC2)', async () => {
-    await render([candidateStub({ started: true, conversation_id: 'conv-9', message_id: 'msg-9' })]);
+  it('이미 시작된 스토리는 버튼 대신 진행 상태(한글 단계·역할·대화 링크)를 보인다(AC2, story #4082)', async () => {
+    await render([candidateStub({
+      started: true, conversation_id: 'conv-9', message_id: 'msg-9',
+      current_stage: 'draft', current_role: 'Creator', next_stage: 'concept_confirmed', next_role: 'Director',
+      last_published_at: '2026-09-21T00:00:00Z', current_stage_position: 1, total_stages: 9,
+    })]);
     expect(container.querySelector('button')).toBeNull();
-    expect(container.textContent).toContain('시작됨');
+    expect(container.textContent).toContain('초안');
+    expect(container.textContent).toContain('크리에이터');
+    expect(container.textContent).toContain('컨셉 확정');
+    expect(container.textContent).toContain('디렉터');
     const link = container.querySelector('a[href^="/chats/conv-9"]');
     expect(link).not.toBeNull();
+  });
+
+  it('마지막 단계까지 발행됐으면 다음 단계 대신 «마지막 단계» 문구를 보인다(story #4082)', async () => {
+    await render([candidateStub({
+      started: true, conversation_id: 'conv-9', message_id: 'msg-9',
+      current_stage: 'published', current_role: 'Publisher', next_stage: null, next_role: null,
+      last_published_at: '2026-09-21T00:00:00Z', current_stage_position: 9, total_stages: 9,
+    })]);
+    expect(container.textContent).toContain('마지막 단계');
+  });
+
+  it('story #4082(유나 design CHANGES) — recipe-stage-label.ts 미등재 slug는 raw 노출 대신 «단계 n/9」로 뜬다', async () => {
+    await render([candidateStub({
+      started: true, conversation_id: 'conv-9', message_id: 'msg-9',
+      current_stage: 'some_future_stage_slug', current_role: 'Creator',
+      next_stage: 'another_future_stage', next_role: 'Director',
+      last_published_at: '2026-09-21T00:00:00Z', current_stage_position: 4, total_stages: 9,
+    })]);
+    expect(container.textContent).toContain('단계 4/9');
+    expect(container.textContent).toContain('단계 5/9');
+    expect(container.textContent).not.toContain('some_future_stage_slug');
+    expect(container.textContent).not.toContain('another_future_stage');
   });
 
   it('적용 레시피가 2개 이상이면 고르게 한다(선택 전엔 시작 버튼 없음)', async () => {

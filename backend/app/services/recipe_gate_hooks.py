@@ -286,6 +286,12 @@ async def maybe_create_stage_gate(
     # gate.neutral_facts.stage로 client-side 필터한다(evidence.py 쪽 새 쿼리 파라미터
     # 불요, 최소 침습 원칙 그대로).
     neutral_facts["stage"] = stage
+    # story #4082([E-RECIPE-1] 진행 위치 표시) — stage 키만으론 사람이 못 읽는다(내부
+    # slug). 같은 stage_meta에서 이미 role을 쥐고 있으니 같이 denorm — 결재함 카드/게이트
+    # 상세가 별도 조회 없이 "단계(역할)" 1줄을 그린다. role 미선언(stage_meta에 role 키가
+    # 없는 정의)이면 키 자체를 안 싣는다(디디 AC2 — 없는 값은 없다고, "" 폴백 금지).
+    if stage_meta.get("role"):
+        neutral_facts["stage_role"] = stage_meta["role"]
 
     # story #4044 — gate_type="generation_budget"은 create_gate() 호출 *전*에 하드체크한다
     # (channel_posts.py/site_posts.py의 submit-시점 422와 동일 판정 지점 — 반쪽 봉인 없이
