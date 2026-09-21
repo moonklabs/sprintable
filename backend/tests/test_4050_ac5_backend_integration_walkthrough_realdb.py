@@ -145,34 +145,10 @@ async def _realdb_session():
     return engine, async_sessionmaker(engine, expire_on_commit=False)
 
 
-async def _seed_org_with_owner(session, *, slug):
-    """⚠️`team_members`는 실 스키마에서 `members ⋈ project_access` VIEW(0088, app/models/
-    team.py:21 참조) — 이 파일의 disposable schema는 `Base.metadata.create_all()`이라 그
-    뷰가 아니라 `TeamMember` ORM 그대로의 **평문 테이블**이 만들어진다(휴먼은 실 코드에서
-    이 테이블에 직접 안 쓰인다 — Member+ProjectAccess를 거쳐 뷰로 투영될 뿐). 그런데
-    `conversation_participants.member_id`가 `team_members.id`를 FK로 잡아, dispatch_
-    approval_request_cards가 org_owner(순수 OrgMember)를 참가자로 넣으려다 실 스키마에서는
-    절대 안 나는 FK 위반을 이 테스트 스키마에서만 낸다(뷰가 항상 보장하는 멤버십을 create_
-    all()이 몰라서 생기는 하네스 갭 — story #3186류와 동형 클래스, 제품 결함 아님). id를
-    맞춘 TeamMember(type="human") 행을 같이 심어 그 투영을 재현한다."""
-    from app.models.organization import Organization
-    from app.models.project import OrgMember, Project
-    from app.models.team import TeamMember
-
-    org = Organization(id=uuid.uuid4(), name="OrgAC5", slug=slug)
-    session.add(org)
-    await session.commit()
-    project = Project(id=uuid.uuid4(), org_id=org.id, name="P")
-    session.add(project)
-    owner_member = OrgMember(id=uuid.uuid4(), org_id=org.id, user_id=uuid.uuid4(), role="owner")
-    session.add(owner_member)
-    await session.commit()
-    session.add(TeamMember(
-        id=owner_member.id, org_id=org.id, project_id=project.id, type="human",
-        name="org owner", is_active=True,
-    ))
-    await session.commit()
-    return org.id, project.id, owner_member.id
+# story #4070 — 이 파일이 처음 겪고 고친 클래스(team_members 스키마 형상별 시드 분기)를
+# conftest.seed_org_with_human_owner로 공용화(SSOT). test_4044가 이 픽스를 못 받아 같은
+# 클래스의 FK 위반을 겪은 것이 계기 — 이 로컬 사본도 그 공용 헬퍼로 교체해 재발 표면을 줄인다.
+from tests.conftest import seed_org_with_human_owner as _seed_org_with_owner
 
 
 async def _seed_agent(session, org_id, project_id, *, name="agent"):
