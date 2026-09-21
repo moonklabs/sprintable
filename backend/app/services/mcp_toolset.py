@@ -381,10 +381,11 @@ _ORG_SCOPED_UNMAPPED_SEGMENTS_WITH_REASON: dict[str, str] = {
     # story #4101(org_generation_connectors.py, 페드루 CI 정정 2026-09-21) — 연산(생성모델)
     # 커넥터 CRUD. channel-connections와 같은 「자격 원장」 축이지만 사람 전용(목록도
     # _require_human, 등록/revoke는 admin+)이라 에이전트가 MCP로 다룰 자리가 아니다 —
-    # ads-boosts(3806)와 같은 이유(human-only), campaigns/connectors와 같은 사유(0건).
-    "generation-connectors": "human-only — org 자격 원장(credentials write-only, "
-                              "org_generation_connectors.py)·휴먼 전용(list도 human role만) "
-                              "· MCP 노출 대상 아님(campaigns/connectors·3806 ads-boosts와 동형)",
+    # ads-boosts(3806)와 같은 이유(human-only). 영문 사유(story #3779 BE 한글 사용자 문장
+    # 재발 가드 — 신규 문자열은 grandfather 대신 영문으로, api-usage-budget과 동형).
+    "generation-connectors": "human-only — org credential ledger (write-only credentials, "
+                              "org_generation_connectors.py), human role required even for list) "
+                              "— not exposed via MCP (same as campaigns/connectors, 3806 ads-boosts)",
 }
 
 
