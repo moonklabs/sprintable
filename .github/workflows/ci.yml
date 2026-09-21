@@ -200,7 +200,8 @@ jobs:
           scripts/ci/mirror_sibling_run_conclusion.sh \
             --job-name "Alembic upgrade head (fresh DB)" \
             --head-sha "${{ github.event.pull_request.head.sha }}" \
-            --this-run-id "${{ github.run_id }}"
+            --this-run-id "${{ github.run_id }}" \
+            --max-wait-seconds 1200
 
       - name: Install uv
         if: github.event.action != 'edited' || github.event.changes.base != null
@@ -1286,7 +1287,16 @@ jobs:
     # story #2285 AC4(2026-08-17 실측, develop 최근 10런): 이 job 본체(non-destructive
     # pytest, story #2293 이관 후) 7~8분 → 천장 25분 대비 여유 17~18분. 재검 기준: p95가
     # 15분을 넘으면 값을 다시 본다.
-    timeout-minutes: 25
+    #
+    # ⭐story #4099 CHANGES-1(페드루 PO, 2026-09-21) — edited-only일 때 이 잡은 Mirror
+    # 스텝만 돌지만, 그 스텝이 기다리는 대상(run A의 Backend pytest)은 backend-test-
+    # destructive 4샤드(timeout 30분·오늘 runner 캡으로 최대 3회) 완주 **후에야** 시작해
+    # 자기 25분 천장까지 갈 수 있다 — 최악 대기 ≈55분. 아래 Mirror 스텝의
+    # `--max-wait-seconds 3300`(55분)이 이 잡 자신의 timeout-minutes(25분 그대로면
+    # GitHub이 스크립트보다 먼저 잡을 죽인다)보다 짧아야 의미가 있어, edited-only일
+    # 때만 60분으로 늘린다(실작업 분기는 원래 25분 그대로 — 25분 예산이 필요한 쪽은
+    # non-destructive pytest 본체뿐이라 안 늘려도 된다).
+    timeout-minutes: ${{ github.event.action == 'edited' && 60 || 25 }}
 
     services:
       postgres:
@@ -1327,7 +1337,8 @@ jobs:
           scripts/ci/mirror_sibling_run_conclusion.sh \
             --job-name "Backend pytest" \
             --head-sha "${{ github.event.pull_request.head.sha }}" \
-            --this-run-id "${{ github.run_id }}"
+            --this-run-id "${{ github.run_id }}" \
+            --max-wait-seconds 3300
 
       - name: Install uv
         if: github.event.action != 'edited' || github.event.changes.base != null
@@ -2235,7 +2246,12 @@ jobs:
     needs: [ci-work]
     if: always()
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # story #4099 CHANGES-1(페드루 PO, 2026-09-21) — ci-work 자신의 timeout-minutes(20분)에
+    # 큐 지연(러너 대기)이 얹히면 아래 Mirror 스텝의 `--max-wait-seconds 1500`(25분)에 붙을
+    # 수 있다 — 이 잡 자신의 timeout-minutes가 그보다 짧으면 GitHub이 스크립트보다 먼저
+    # 잡을 죽인다. edited-only일 때만 30분으로 늘린다(실작업 분기는 이 잡 자체가 거의
+    # 즉시 끝나는 위임 스텝뿐이라 25분 그대로 충분).
+    timeout-minutes: ${{ github.event.action == 'edited' && 30 || 25 }}
 
     steps:
       - name: Checkout
@@ -2250,7 +2266,8 @@ jobs:
           scripts/ci/mirror_sibling_run_conclusion.sh \
             --job-name "Lint, Type Check, Test, Build" \
             --head-sha "${{ github.event.pull_request.head.sha }}" \
-            --this-run-id "${{ github.run_id }}"
+            --this-run-id "${{ github.run_id }}" \
+            --max-wait-seconds 1500
 
       # backend-test의 "Require all destructive-schema shards to have succeeded"와 동형 —
       # ci-work가 자신의 if:(edited-only 아닐 때만 실행)로 정상 skip된 경우(result=skipped)는

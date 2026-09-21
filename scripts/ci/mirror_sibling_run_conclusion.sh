@@ -51,6 +51,13 @@ fi
 # title/body 편집은 새 커밋을 안 만들므로(같은 SHA를 유지) 「이 run 자신을 뺀 나머지 중
 # run_id가 가장 작은 것」이 언제나 최초 트리거(진짜 run)다 — 이후 생긴 edited-only run은
 # 전부 그보다 늦게(큰 id로) 생긴다.
+#
+# PRECONDITION(페드루 PO CHANGES-1, 2026-09-21 명문화 요청) — 이 함수는 「같은 head_sha의
+# run들 중 가장 오래된(run_id 최소) 것 = 진짜(non-edited) run」을 전제로 한다. run A가
+# 사람 손으로 재실행(Re-run)되면 run_id는 그대로 유지되므로 이 전제는 안 깨지지만, 그
+# 재실행으로 바뀐 결론을 이미 완주해 리포트를 마친 옛 edited-only run(run B)은 자동으로
+# 다시 안 돈다 — run A를 재실행했으면 required 체크 최신화를 위해 run B도 수동으로 같이
+# 재실행할 것(운영 규칙, PR #4482 본문 참고).
 find_sibling_run_id() {
   gh api "repos/${GH_REPO}/actions/runs?head_sha=${HEAD_SHA}&event=pull_request&per_page=50" \
     --jq "[.workflow_runs[] | select(.name == \"CI\") | select(.id != ${THIS_RUN_ID})] | sort_by(.id) | .[0].id // empty"
