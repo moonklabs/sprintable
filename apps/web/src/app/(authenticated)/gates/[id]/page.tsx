@@ -380,12 +380,18 @@ export default function GateDetailPage() {
                     stage-role.ts SSOT.
                     story #4091(유나 design 라이브 관찰, PO 확定 2026-09-21) — 이 meta 줄과
                     GateEvidence의 RecipeApprovalFactsBlock(사실 블록, gate-evidence.tsx)이
-                    같은 neutral_facts.stage를 각자 렌더해 화면에 «단계»가 두 번 떴다. 사실
-                    블록은 4갈래 상태분기 중 3곳(!needsAction·!canAct·else)에서만 뜨고
-                    서명 플로우 분기(isSigFlowGate||rejectPanelOpen)엔 GateEvidence 자체가
-                    없어 중복이 아니다 — 그 분기에서만 이 meta 줄을 유지한다(PO 확定: 정보
-                    소실 0·중복 0 — stage_role은 사실 블록 쪽으로 이관, 아래 참조).*/}
-                {typeof gate.neutral_facts?.stage === 'string' && (isSigFlowGate || rejectPanelOpen) ? (
+                    같은 neutral_facts.stage를 각자 렌더해 화면에 «단계»가 두 번 떴다.
+                    ⚠️정정(PO 재확定, 3회째 라이브 재측정 2026-09-21) — 최초 처방은 «서명
+                    플로우 분기(isSigFlowGate||rejectPanelOpen)엔 GateEvidence가 없다»고
+                    가정했으나, isSigFlowGate는 gate risk level만 보는 정적 값(라인 212)이라
+                    이미 승인된 게이트에도 그대로 true다. 그런 게이트는 needsAction=false라
+                    첫 갈래(!needsAction)로 빠져 GateEvidence가 뜨는데, meta 줄 조건은
+                    isSigFlowGate만 봐서 같이 떴다(451b5813 실측 — 이미 approved인
+                    external_publish 게이트에서 meta+facts 동시 노출). 처방 — 4갈래 분기가
+                    실제로 GateSignatureApproval(증거 없음)로 가는 조건 그대로
+                    (needsAction && canAct && (isSigFlowGate||rejectPanelOpen))로 좁힌다 —
+                    "facts 블록이 안 뜰 때만" meta 유지, 서명 플로우 여부 자체는 무관.*/}
+                {typeof gate.neutral_facts?.stage === 'string' && needsAction && canAct && (isSigFlowGate || rejectPanelOpen) ? (
                   <p className="text-xs text-muted-foreground">
                     {t('gateStageLabel')}: {recipeStageLabel(gate.neutral_facts.stage, tOrg)}
                     {typeof gate.neutral_facts.stage_role === 'string' ? ` (${stageRoleLabel(gate.neutral_facts.stage_role, tOrg)})` : ''}
