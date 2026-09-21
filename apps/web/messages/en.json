@@ -714,6 +714,8 @@
     "recipeDetailLegendBuilding": "Being built by this card",
     "recipeDetailGateLiveBadge": "Enforced",
     "recipeDetailGateBuildingBadge": "Being built by this card",
+    "recipeGateApproverOrgOwner": "Organization owner",
+    "recipeGateApproverUnknown": "Approver not set",
     "recipeFlowRecipeLabel": "Recipe",
     "recipeFlowRecipeValue": "Picked here",
     "recipeFlowWorkflowLabel": "Workflow · single item · this screen",

@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { fetchWithAuth } from '@/lib/db/client';
 import type { EventDefinitionResponse } from '@/components/loops/loop-create-dialog';
 import { expandRoleSlotBindings, groupStagesByRole, stagesWithGate } from '@/lib/recipe-role-slots';
+import { gateApproverLabel } from '@/lib/gate-approver-label';
 import { useRecipeMemberOptions } from '@/hooks/use-recipe-member-options';
 
 // story #4048(E-RECIPE-1 ①) — 유나 v2 시안(artifact be718c0a §2) 4슬롯 적용 다이얼로그.
@@ -67,7 +68,10 @@ export function MarketingRecipeApplyDialog({
   const creatorStageCount = roleGroups[creatorRoleLabel]?.length ?? 0;
   const gates = stagesWithGate(recipe.stage_metadata);
   // 디렉터 슬롯 읽기 전용 표시용 — 이 레시피의 게이트 approver들(보통 전부 동일값, org_owner).
-  const gateApprovers = Array.from(new Set(gates.map((g) => g.gate.approver).filter((a): a is string => !!a)));
+  // story #4087 — raw 키를 그대로 join하면 «org_owner»가 노출된다. gate-approver-label.ts
+  // SSOT로 사람 낱말화한 뒤 dedupe(라벨 기준 — 서로 다른 raw 키가 같은 미지정 문구로
+  // 떨어지는 경우까지 한 줄로 접는다).
+  const gateApprovers = Array.from(new Set(gates.map((g) => gateApproverLabel(t, g.gate.approver))));
 
   const submit = async () => {
     if (!projectId || !creatorAgentId) return;
