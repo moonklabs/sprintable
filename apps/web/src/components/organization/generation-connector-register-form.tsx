@@ -65,16 +65,23 @@ export function GenerationConnectorRegisterForm({
         onRegistered();
         return;
       }
-      // story #4116 실측(그라운딩) — provider 미지원은 422로 깔끔히 분기되지만(라우터가
-      // 명시 try/except), 이름 중복(UNIQUE 제약)은 서비스 계층이 IntegrityError를 안
-      // 잡아 main.py::unhandled_exception_handler의 제네릭 500(code=INTERNAL_ERROR)으로
-      // 떨어진다 — «중복 이름» 케이스를 구조적으로 구분할 신호가 응답에 없다(디버그
-      // 모드가 아니면 message도 "Internal server error" 고정, str(exc) 매칭은 fragile해서
-      // 안 한다). gcErrorLabelDuplicate 문구(#4112 표)는 정본이지만 지금은 못 틔운다 —
-      // BE가 IntegrityError→409 처리를 추가해야 트리거 가능(PO에 발견 보고, 이 카드
-      // 범위 밖 — BE/BFF 무변 경계).
+      // story #4117 FE 라이더 — #4117-BE(PR #4492)가 이름 중복(UNIQUE 제약)의
+      // IntegrityError를 잡아 409 {"code": "GENERATION_CONNECTOR_LABEL_DUPLICATE"}로
+      // 바꿨다(라우트가 non-2xx는 그대로 pass-through하므로 FastAPI HTTPException
+      // 관례대로 {"detail": {"code": ...}} 꼴로 온다). 이 신호가 있을 때만
+      // gcErrorLabelDuplicate로 분기 — 다른 409(있다면)나 파싱 실패는 제네릭으로
+      // 안전하게 폴백(신호 없이 지어내지 않는다).
       if (res.status === 422) {
         setError(t('gcErrorProviderUnsupported'));
+      } else if (res.status === 409) {
+        let code: string | undefined;
+        try {
+          const body = await res.json() as { detail?: { code?: string } };
+          code = body.detail?.code;
+        } catch {
+          code = undefined;
+        }
+        setError(code === 'GENERATION_CONNECTOR_LABEL_DUPLICATE' ? t('gcErrorLabelDuplicate') : t('gcErrorGeneric'));
       } else {
         setError(t('gcErrorGeneric'));
       }

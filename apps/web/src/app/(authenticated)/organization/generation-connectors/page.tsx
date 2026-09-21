@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { PageHeader } from '@/components/ui/page-header';
 import { Card } from '@/components/ui/card';
@@ -10,6 +10,9 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { fetchWithAuth } from '@/lib/db/client';
+import { formatRelativeTime } from '@/lib/storage/format';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { pickEulReulJosa } from '@/lib/korean-particle';
 import { GenerationConnectorRegisterForm } from '@/components/organization/generation-connector-register-form';
 
 /**
@@ -23,11 +26,10 @@ import { GenerationConnectorRegisterForm } from '@/components/organization/gener
  * BFF는 #4101에 이미 있다(GET 목록·POST 등록·POST revoke) — 이 PR은 BE/BFF 무변,
  * 있는 것만 소비한다.
  *
- * ⚠️발견(그라운딩, BE/BFF 무변 경계라 이 카드에서 못 고침) — 시안 목록 행이 "등록
- * 시각"을 보여주지만, GenerationConnectorResponse(org_generation_connectors.py)에
- * created_at/revoked_at 필드가 없다(모델엔 있으나 응답 DTO에 미노출). 이 필드를
- * 추가하는 작은 BE 변경이 없으면 표시가 불가능해 이번 구현에서는 그 줄을 생략했다 —
- * PO/유나에 별도 보고.
+ * story #4117 FE 라이더(#4116 화면 위, PR #4492가 이미 착지시킨 BE DTO의
+ * created_at/revoked_at 소비) — #4116 최초 구현 당시엔 응답 DTO에 그 두 필드가
+ * 없어 "등록 시각" 행을 생략했다(위 주석 원문 그대로 보존, 그 발견이 이 라이더의
+ * 근거). #4117-BE가 필드를 추가했으니 이제 소비한다.
  */
 interface GenerationConnector {
   id: string;
@@ -36,6 +38,8 @@ interface GenerationConnector {
   model_config_json: Record<string, unknown>;
   status: string;
   created_by: string | null;
+  created_at: string;
+  revoked_at: string | null;
 }
 
 const STATUS_TONE: Record<string, { bg: string; dot: string; text: string }> = {
@@ -52,6 +56,8 @@ export default function OrganizationGenerationConnectorsPage() {
   const t = useTranslations('organization');
   const tc = useTranslations('common');
   const tChannel = useTranslations('channelConnect');
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
 
   const [connectors, setConnectors] = useState<GenerationConnector[]>([]);
   const [status, setStatus] = useState<'loading' | 'loaded' | 'failed'>('loading');
@@ -167,6 +173,14 @@ export default function OrganizationGenerationConnectorsPage() {
                       {t('gcModelCountSummary', { count: modalityCount })}
                     </p>
                   ) : null}
+                  {/* story #4117 FE 라이더 — #4112 시안 프레임①의 "등록 시각" 행.
+                      해지된 커넥터는 해지 시각도 같이(자격 소실 시점을 확認할 수 있게). */}
+                  <p className="mt-0.5 text-[11px] text-muted-foreground">
+                    {t('gcRegisteredAt', { time: formatRelativeTime(c.created_at, locale, displayTimezone) })}
+                    {c.status === 'revoked' && c.revoked_at
+                      ? ` · ${t('gcRevokedAt', { time: formatRelativeTime(c.revoked_at, locale, displayTimezone) })}`
+                      : null}
+                  </p>
                 </div>
                 {isOwnerOrAdmin && c.status === 'active' ? (
                   <Button
@@ -194,7 +208,13 @@ export default function OrganizationGenerationConnectorsPage() {
       <ConfirmDialog
         open={revokeTarget !== null}
         onOpenChange={(open) => { if (!open) setRevokeTarget(null); }}
-        title={t('gcRevokeConfirmTitle', { name: revokeTarget?.label ?? '' })}
+        title={t('gcRevokeConfirmTitle', {
+          name: revokeTarget?.label ?? '',
+          // story #4117 FE 라이더(유나 4491 앵커 비차단, 페드루 PO 확定) — 조사를
+          // 문자열에 고정하지 않고(#4096류 재발) pickEulReulJosa로 값의 받침 유무에
+          // 맞춘다(pickEunNeunJosa 계열과 동형 원칙).
+          josa: pickEulReulJosa(revokeTarget?.label ?? ''),
+        })}
         description={t('gcRevokeConfirmBody')}
         cancelLabel={tc('cancel')}
         confirmLabel={t('gcRevokeAction')}
