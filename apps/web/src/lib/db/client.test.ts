@@ -5,7 +5,7 @@
 // "401에는 재시도하지 않는다"는 처방이 무력화된다.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fetchWithAuth, loginWithPassword, refreshAuthTokens, registerUser } from './client';
-import { resetSessionExpired, signalSessionExpired } from '@/lib/auth/session-expired-signal';
+import { isSessionExpiredSignaled, resetSessionExpired, signalSessionExpired } from '@/lib/auth/session-expired-signal';
 
 beforeEach(() => {
   resetSessionExpired();
@@ -76,6 +76,84 @@ describe('fetchWithAuth — 동시 401 N건 → refresh single-flight(story #268
     expect(a.status).toBe(200);
     expect(b.status).toBe(200);
     expect(c.status).toBe(200);
+  });
+});
+
+// story #4089(페드루 PO 리뷰 REQUIRED, AC2 두 번째 클래스) — material-lineage 실사고의
+// 진짜 근원: refreshAuthTokens()는 BE가 401을 줘도 throw하지 않고 {error:{...}}로 정상
+// resolve한다(callAuthRoute 정의, 아래 failAuthResponse가 그 shape). 예전 코드는 그래서
+// "refresh 최종 실패"를 catch(네트워크 예외)만으로 판정했는데, 실제로는 한 번도 그
+// catch를 못 타는 경로가 있었고(refresh가 401로 정상 resolve하는 흔한 경우), 대신
+// "재시도까지 401"이면 signalSessionExpired()를 불러 그게 사실상의 유일한 판정축이
+// 됐다 — 그 축은 "이 세션이 죽었다"와 "이 엔드포인트 하나가 (세션과 무관하게) 401을
+// 낸다"를 구분 못 한다. 처방 확認 — 신호는 refresh가 진짜 실패(예외 또는 error 필드)한
+// 경우에서만 나오고, refresh가 성공했는데 원 요청이 다시 401을 내는 것만으로는 신호가
+// 안 뜬다(호출부가 그 401을 알아서 처리 — 세션 만료 취급 안 함).
+describe('fetchWithAuth — 세션만료 신호는 refresh 최종 실패에서만(story #4089 AC2)', () => {
+  it('401→refresh 성공→재시도도 401 — 신호 0(임의 엔드포인트의 401일 뿐, 세션 문제 아님)', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : (input as Request).url ?? String(input);
+      if (url.includes('/api/auth/refresh')) {
+        return new Response(JSON.stringify({ data: { access_token: 'new-at', refresh_token: 'new-rt', token_type: 'bearer' } }), {
+          status: 200, headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response(null, { status: 401 }); // 원 URL은 refresh 성공 후에도 계속 401(BFF 없는 엔드포인트류).
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await fetchWithAuth('/api/v2/some-broken-endpoint');
+
+    expect(res.status).toBe(401);
+    expect(isSessionExpiredSignaled()).toBe(false);
+  });
+
+  it('refresh 자체가 실패(error 응답)하면 신호 1', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : (input as Request).url ?? String(input);
+      if (url.includes('/api/auth/refresh')) {
+        return new Response(JSON.stringify({ error: { code: 'INVALID_REFRESH_TOKEN', message: 'expired' } }), {
+          status: 401, headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response(null, { status: 401 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await fetchWithAuth('/api/gates');
+
+    expect(isSessionExpiredSignaled()).toBe(true);
+  });
+
+  it('refresh 네트워크 예외(throw)에도 신호 1(기존 catch 경로 회귀 0)', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : (input as Request).url ?? String(input);
+      if (url.includes('/api/auth/refresh')) throw new Error('network down');
+      return new Response(null, { status: 401 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await fetchWithAuth('/api/gates');
+
+    expect(isSessionExpiredSignaled()).toBe(true);
+  });
+
+  it('refresh 성공+재시도도 성공(정상 회복) — 신호 0, 최종 응답 200', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : (input as Request).url ?? String(input);
+      if (url.includes('/api/auth/refresh')) {
+        return new Response(JSON.stringify({ data: { access_token: 'new-at', refresh_token: 'new-rt', token_type: 'bearer' } }), {
+          status: 200, headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'content-type': 'application/json' } });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await fetchWithAuth('/api/gates');
+
+    expect(res.status).toBe(200);
+    expect(isSessionExpiredSignaled()).toBe(false);
   });
 });
 
