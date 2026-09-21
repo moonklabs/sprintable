@@ -724,7 +724,7 @@ async def test_next_stage_external_publish_gate_shows_auto_satisfy_hint():
                 s, definition_key=definition_key, payload=payload, publisher_id=publisher_id, org_id=org_id,
             )
             assert "이 발행을 하면 사람 승인 게이트가 열려요" in content
-            assert "같은 스토리에 채널 초안을 만들어 제출하면 승인이 자동 충족돼요." in content
+            assert "같은 스토리에 채널 초안을 만들어 제출해 두면 사람 승인 한 번으로 자동 발행까지 이어져요." in content
     finally:
         await engine.dispose()
 
@@ -764,6 +764,6 @@ async def test_gate_type_other_than_external_publish_does_not_show_auto_satisfy_
                 s, definition_key=definition_key, payload=payload, publisher_id=publisher_id, org_id=org_id,
             )
             assert "이 발행을 하면 사람 승인 게이트가 열려요" in content
-            assert "승인이 자동 충족돼요" not in content
+            assert "자동 발행까지 이어져요" not in content
     finally:
         await engine.dispose()

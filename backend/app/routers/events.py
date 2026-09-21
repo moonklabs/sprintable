@@ -1711,7 +1711,7 @@ async def _render_gate_verdict_message(
 # story #4088(E-RECIPE-1, PO 분담조정 2026-09-21 "2/2") — stage_metadata[stage].capability.kind
 # → 안내 문구 i18n_catalog 키. recipe_gate_hooks.py::_GATE_TYPE_SEALED_FIELDS와 동일
 # 패턴(닫힌 조회, 새 kind 추가 시 여기 한 줄만 늘리면 됨) — "generate"는 live_generation
-# stage가 이미 쓰던 값(#4058/#4063), "attach_video"는 0387 마이그가 신설.
+# stage가 이미 쓰던 값(#4058/#4063), "attach_video"는 0389 마이그가 신설.
 _CAPABILITY_KIND_HINTS: dict[str, str] = {
     "attach_video": "events.capability_hint_attach_video",
     "generate": "events.capability_hint_master_cut_evidence",
@@ -1783,7 +1783,7 @@ async def _render_event_message_content(
     # 계보 생성에 필요한 evidence 형식(②)을 몰랐다. 하드코딩 0 — 지금 stage의 capability.
     # kind 선언에서만 유도(live_generation.capability.kind=="generate"는 #4058/#4063
     # 기존 선언 그대로, verification/editing.capability.kind=="attach_video"는 이 카드
-    # 0387 마이그 신설).
+    # 0389 마이그 신설).
     current_capability = stage_meta.get("capability")
     if isinstance(current_capability, dict):
         _capability_hint_key = _CAPABILITY_KIND_HINTS.get(current_capability.get("kind"))

@@ -365,9 +365,13 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "type=url·ref=live-run:master-cut evidence를 남겨야 계보가 생겨요.",
         "en": "Record evidence with type=url and ref=live-run:master-cut so lineage gets created.",
     },
+    # story #4088 CHANGES(페드루 PO 리뷰, 2026-09-21) — 원문 "승인이 자동 충족돼요"는
+    # "사람 승인이 아예 불요"로 오독될 수 있었다. 실물(#4069 자동충족 훅 + #4090 승인→
+    # 자동발행)은 "제출해 두면 그 뒤 사람 승인 한 번이 발행까지 이어진다"는 뜻 — 승인
+    # 단계 자체가 없어지는 게 아니라 승인 이후 사람 손(발행 클릭)이 없어지는 것.
     "events.gate_hint_external_publish_auto_satisfy": {
-        "ko": "같은 스토리에 채널 초안을 만들어 제출하면 승인이 자동 충족돼요.",
-        "en": "Creating and submitting a channel draft for the same story auto-satisfies the approval.",
+        "ko": "같은 스토리에 채널 초안을 만들어 제출해 두면 사람 승인 한 번으로 자동 발행까지 이어져요.",
+        "en": "Create and submit a channel draft for the same story; one human approval then publishes it automatically.",
     },
     # story #3614 갭(BE, 페드루 PO 確定 2026-09-11) — 폐기(withdrawn, 종결)된 초안
     # submit 거부(409). 새 한글 사용자 문장이라 3796(insight_snapshots.py)과 같은
