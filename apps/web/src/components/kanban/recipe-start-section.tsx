@@ -4,7 +4,9 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
 import { extractBackendErrorMessage } from '@/lib/api-error-message';
+import { fetchWithAuth } from '@/lib/db/client';
 import { useRecipeStartCandidates, type RecipeStartCandidate } from '@/hooks/use-recipe-start-candidates';
 
 interface RecipeStartSectionProps {
@@ -30,10 +32,13 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
   if (loading) return null;
 
   const sectionShell = (body: React.ReactNode) => (
-    <div className="rounded-lg border border-border bg-muted/20 p-3">
+    // story #3164 가드 — 손코딩 카드(rounded+border+card표면 bg 공존) 대신 Card 프리미티브
+    // (recipe-detail-view.tsx의 surface="subtle" 관례와 동형, Dispatch 섹션의 grandfathered
+    // 손코딩 div는 새로 안 따라간다).
+    <Card surface="subtle" className="p-3">
       <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('recipeStart')}</p>
       {body}
-    </div>
+    </Card>
   );
 
   if (loadError) {
@@ -70,7 +75,7 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
     setPublishing(true);
     setPublishError(null);
     try {
-      const res = await fetch('/api/events/publish', {
+      const res = await fetchWithAuth('/api/events/publish', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
