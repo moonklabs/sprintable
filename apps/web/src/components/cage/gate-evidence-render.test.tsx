@@ -399,6 +399,10 @@ describe('GateEvidence — 레시피 approve 게이트 승인 대상 실물 렌�
       expect(video).toBeTruthy();
       expect(video?.getAttribute('controls')).not.toBeNull();
       expect(video?.getAttribute('src')).toBe('https://storage.example/video.mp4');
+      // 유나 design:CHANGES(PR #4475 리뷰) — object-cover가 9:16 릴스 훅·CTA를 잘랐다.
+      // object-contain(크롭 0)으로 교정 — 클래스 자체를 단언해 회귀를 고정.
+      expect(video?.className).toContain('object-contain');
+      expect(video?.className).not.toContain('object-cover');
     });
 
     it('제출된 초안이 없으면(linked_channel_draft=null·pending=false) «제출된 초안 없음» 문구', async () => {

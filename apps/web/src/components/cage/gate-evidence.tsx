@@ -743,9 +743,13 @@ function LinkedChannelDraftCard({ gate }: { gate: GateItem }) {
         </p>
       ) : null}
       {draft.video_url ? (
+        // 유나 design:CHANGES(PR #4475 리뷰, PO 確定) — object-cover가 9:16 릴스의 상·하
+        // ~22%(훅·CTA)를 잘라 이 카드의 목적(실물 보고 승인)과 어긋났다. 채널 영상 aspect가
+        // 혼재(릴스 9:16·피드 1:1/4:5/16:9)라 세로 고정 대신 object-contain(레터박스 면은
+        // bg-muted)으로 크롭 0.
         <video
           controls preload="metadata" src={draft.video_url}
-          className="h-32 w-32 rounded object-cover" data-testid="linked-channel-draft-video"
+          className="max-h-64 w-auto max-w-full rounded bg-muted object-contain" data-testid="linked-channel-draft-video"
         />
       ) : draft.image_urls.length > 0 ? (
         <div className="flex flex-wrap gap-1">
