@@ -51,7 +51,11 @@ export interface EventDefinitionResponse {
     role?: string;
     action?: string;
     gate?: { type?: string; approver?: string };
-    capability?: { kind?: string; connector_key?: string };
+    // story #4090(alembic 0385) — target은 닫힌 어휘(event_definition_registry.py::
+    // _CAPABILITY_TARGETS), 생략 시 "agent"(기존 계약 그대로). "channel_connection"인
+    // stage만 적용 다이얼로그가 채널-연결 select로 분기한다 — kind는 여전히 열린 값이라
+    // target을 거기서 유도하지 않는다(events.py::apply_recipe_role_bindings 주석 참고).
+    capability?: { kind?: string; connector_key?: string; target?: 'agent' | 'channel_connection' };
   }>;
   // story #4092(E-RECIPE-1 팔로우업, PO 확定 2026-09-21 §b) — 정의가 자기 role 어휘로
   // 선언하는 옵션 사전({role명: "human"|"agent"}). 선언 없으면 undefined/null("모름") —

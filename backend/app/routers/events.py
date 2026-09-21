@@ -3108,6 +3108,7 @@ async def apply_recipe_role_bindings(
     그 자리) ②role_mapping 키 집합이 정의의 stage_metadata.keys()(=사실상 stage enum) ⊇
     하는지 검증 ③agent_id가 실제로 이 org의 TeamMember인지 검증.
     """
+    from app.models.channel_connection import ChannelConnection
     from app.models.event_definition import EventDefinition
     from app.models.recipe_role_binding import RecipeRoleBinding
     from app.models.team import TeamMember
@@ -3135,15 +3136,44 @@ async def apply_recipe_role_bindings(
             detail=f"role_mapping에 이 정의의 stage_metadata에 없는 stage가 있습니다: {unknown_stages}",
         )
 
-    agent_ids = {uuid.UUID(v) for v in body.role_mapping.values()}
+    # story #4090(alembic 0385, 페드루 PO 確定 2026-09-21) — capability.target=
+    # "channel_connection"인 stage(Publisher)는 알릴 사람이 아니라 **발행할 채널**을
+    # 가리킨다(0381 원 설계의 "Publisher도 Creator와 동형으로 agent 바인딩"을 이 카드가
+    # 대체 — 리허설 1호 ⑤가 발행자 슬롯 선택지 0으로 그 설계가 실사용을 못 견딘다는 것을
+    # 실측했다). ⚠️capability.kind(예: 'publish')로 판별하지 않는다 — kind는 열린 값이라
+    # 기존 정의(#3317 PR B, test_3317b/test_3359)가 "kind=publish + agent 바인딩"을 이미
+    # 쓰고 있다(회귀 7건이 그 계약을 pin) — target은 그 kind와 독립된 별도 닫힌 어휘
+    # 필드(event_definition_registry.py::_CAPABILITY_TARGETS, 명시 선언 없으면 기본
+    # "agent" = 오늘 계약 그대로).
+    def _is_channel_stage(stage: str) -> bool:
+        capability = (definition.stage_metadata.get(stage) or {}).get("capability")
+        return bool(capability) and capability.get("target") == "channel_connection"
+
+    channel_stage_values = {s: v for s, v in body.role_mapping.items() if _is_channel_stage(s)}
+    agent_stage_values = {s: v for s, v in body.role_mapping.items() if not _is_channel_stage(s)}
+
+    agent_ids = {uuid.UUID(v) for v in agent_stage_values.values()}
     valid_agents = set((await db.execute(
         select(TeamMember.id).where(TeamMember.id.in_(agent_ids), TeamMember.org_id == org_id)
-    )).scalars().all())
-    missing_agents = [v for v in body.role_mapping.values() if uuid.UUID(v) not in valid_agents]
+    )).scalars().all()) if agent_ids else set()
+    missing_agents = [v for v in agent_stage_values.values() if uuid.UUID(v) not in valid_agents]
     if missing_agents:
         raise HTTPException(
             status_code=422,
             detail=f"agent(s) not found in this org: {missing_agents}",
+        )
+
+    channel_connection_ids = {uuid.UUID(v) for v in channel_stage_values.values()}
+    valid_connections = set((await db.execute(
+        select(ChannelConnection.id).where(
+            ChannelConnection.id.in_(channel_connection_ids), ChannelConnection.org_id == org_id,
+        )
+    )).scalars().all()) if channel_connection_ids else set()
+    missing_connections = [v for v in channel_stage_values.values() if uuid.UUID(v) not in valid_connections]
+    if missing_connections:
+        raise HTTPException(
+            status_code=422,
+            detail=f"channel connection(s) not found in this org: {missing_connections}",
         )
 
     # story #3317 PR B — capability(publish:<channel> 등) 요구 stage의 커넥터 준비 상태를
@@ -3215,8 +3245,9 @@ async def apply_recipe_role_bindings(
     )
 
     upserted = 0
-    for stage, agent_id_str in body.role_mapping.items():
-        agent_id = uuid.UUID(agent_id_str)
+    for stage, value_str in body.role_mapping.items():
+        value_id = uuid.UUID(value_str)
+        is_channel = stage in channel_stage_values
         existing = (await db.execute(
             select(RecipeRoleBinding).where(
                 RecipeRoleBinding.org_id == org_id,
@@ -3226,11 +3257,19 @@ async def apply_recipe_role_bindings(
             )
         )).scalar_one_or_none()
         if existing is not None:
-            existing.agent_member_id = agent_id
+            # story #4090 — 재-apply가 같은 stage를 다른 target kind로 바꿀 수도 있다(예: 정의
+            # 개정으로 capability가 붙거나 빠짐) — 두 컬럼 다 명시로 재설정해야 CHECK
+            # (ck_recipe_role_bindings_exactly_one_target)가 안 걸린다(한쪽만 setattr하면
+            # 구 값이 다른 컬럼에 남아 XOR 위반).
+            existing.agent_member_id = None if is_channel else value_id
+            existing.channel_connection_id = value_id if is_channel else None
         else:
             db.add(RecipeRoleBinding(
                 org_id=org_id, project_id=body.project_id, event_definition_key=definition.key,
-                stage=stage, agent_member_id=agent_id, created_by=actor_id,
+                stage=stage,
+                agent_member_id=None if is_channel else value_id,
+                channel_connection_id=value_id if is_channel else None,
+                created_by=actor_id,
             ))
         upserted += 1
 
@@ -3275,27 +3314,31 @@ async def get_recipe_role_bindings(
     if definition is None:
         raise HTTPException(status_code=404, detail="event definition not found")
 
+    # story #4090 — 두 target 중 정확히 하나만 채워지므로(DB CHECK) coalesce로 하나의
+    # 문자열 값만 반환한다(agent_member_id/channel_connection_id 어느 쪽이든 호출부
+    # 입장에선 "이 stage의 role_mapping 값"으로 동형 — apply 요청 바디와 왕복 대칭).
     # org 전역(project_id IS NULL) 먼저 채우고, project 특이성으로 덮어써 우선순위를
     # 정확히 반영(project_scope_clause와 동형 우선순위, resolver의 실 조회 순서와 일치).
+    binding_value = func.coalesce(RecipeRoleBinding.agent_member_id, RecipeRoleBinding.channel_connection_id)
     org_wide = (await db.execute(
-        select(RecipeRoleBinding.stage, RecipeRoleBinding.agent_member_id).where(
+        select(RecipeRoleBinding.stage, binding_value).where(
             RecipeRoleBinding.org_id == org_id,
             RecipeRoleBinding.project_id.is_(None),
             RecipeRoleBinding.event_definition_key == definition.key,
         )
     )).all()
-    bindings: dict[str, str] = {stage: str(agent_id) for stage, agent_id in org_wide}
+    bindings: dict[str, str] = {stage: str(value) for stage, value in org_wide}
 
     if project_id is not None:
         project_scoped = (await db.execute(
-            select(RecipeRoleBinding.stage, RecipeRoleBinding.agent_member_id).where(
+            select(RecipeRoleBinding.stage, binding_value).where(
                 RecipeRoleBinding.org_id == org_id,
                 RecipeRoleBinding.project_id == project_id,
                 RecipeRoleBinding.event_definition_key == definition.key,
             )
         )).all()
-        for stage, agent_id in project_scoped:
-            bindings[stage] = str(agent_id)
+        for stage, value in project_scoped:
+            bindings[stage] = str(value)
 
     return RecipeRoleBindingsResponse(bindings=bindings)
 
