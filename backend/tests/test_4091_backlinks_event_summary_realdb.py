@@ -155,7 +155,7 @@ def _client_for(app):
 
 async def _setup_app_human(app, Session, user_id, org_id):
     from app.dependencies.auth import AuthContext, get_current_user
-    from app.dependencies.database import get_db
+    from tests.conftest import override_db_and_read
 
     async def _db():
         async with Session() as s:
@@ -172,7 +172,9 @@ async def _setup_app_human(app, Session, user_id, org_id):
             claims={"app_metadata": {"org_id": str(org_id)}},
         )
 
-    app.dependency_overrides[get_db] = _db
+    # story #2451(§6 Phase3) 가드(카디르 QA #4466 CI FAIL 발견) — get_db만 걸고 get_read_db를
+    # 빠뜨리면 read-replica 라우팅 경로가 이 테스트의 오버라이드를 안 타 구조적으로 놓친다.
+    override_db_and_read(app, _db)
     app.dependency_overrides[get_current_user] = _auth
 
 
