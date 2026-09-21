@@ -443,6 +443,29 @@ async def test_list_generation_connectors_org_boundary_403():
 
 
 @pytest.mark.anyio
+async def test_list_generation_connectors_member_role_succeeds_200():
+    """story #4101 CHANGES-1(페드루 PO 리뷰, 2026-09-21) — 목록 열람은 admin+가 아니라
+    휴먼 org 멤버 전원(channel_connections.py::_require_human과 동형 폭). 1차 구현은
+    admin+를 요구해 마케팅 담당(member role)이 403 → FE가 그 403을 "0건"과 구분 못 해
+    항상 «없어요»로 보였다."""
+    from app.routers.org_generation_connectors import list_generation_connectors_endpoint
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, _ = await _seed_org_project(s)
+            _member_id, member_user_id = await _seed_org_member(s, org_id, role="member")
+            connector_id = await _seed_generation_connector(s, org_id)
+
+            resp = await list_generation_connectors_endpoint(
+                org_id, db=s, auth=_auth(member_user_id, org_id), verified_org_id=org_id,
+            )
+            assert {c.id for c in resp.connectors} == {connector_id}
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_list_generation_connectors_active_only_filter_excludes_revoked():
     from app.routers.org_generation_connectors import list_generation_connectors_endpoint
 
