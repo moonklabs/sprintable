@@ -136,6 +136,31 @@ async def _seed_org_with_owner(session, *, slug):
     return org.id, project.id, owner_member.id, owner_user_id
 
 
+async def _seed_system_publisher_teammember_shim(session, org_id, project_id):
+    """⛔그라운딩 갭 정정(2026-09-21, story #4093 작업 中 발견 — 발견 즉시 수정) —
+    `team_members`는 실 DB에선 members/project_access 위 VIEW(0088+, `_get_or_create_
+    system_publisher` 자신의 docstring도 이미 이 사실을 적어 뒀었다)지만, 이 파일의
+    `Base.metadata.create_all()` 하네스는 raw op.execute로 정의된 그 VIEW를 못 만든다
+    (ORM 메타데이터에 없음). 이 shim 없이는 `emit_recipe_published_stage_event`가
+    published stage 이벤트 발행 內 `resolve_member`에서 "Team member not found"로
+    조용히 실패해도(그 함수 자신의 try/except가 삼킨다, 승인/발행 자체는 안 막는다는
+    설계 그대로) 이 파일의 기존 단언들(ChannelPublication·gate.publish_outcome)이
+    전혀 못 잡았다 — 즉 지금까지 이 실측 3건 전부가 「published stage 이벤트가 실제로
+    났다」는 한 번도 검증한 적이 없었다(test_3380_doc_nudge_system_sender_realdb.py의
+    동형 선례를 이번에 #4093에서 재확인해 여기로 역이식). shim 자체는 test_3380과
+    동형(시스템 발행자를 먼저 provision하고 그 id로 TeamMember shim 행을 심는다 —
+    이후 코드의 재호출은 멱등 get-or-create라 충돌 없음)."""
+    from app.models.team import TeamMember
+    from app.routers.events import _get_or_create_system_publisher
+
+    system_member = await _get_or_create_system_publisher(session, org_id)
+    session.add(TeamMember(
+        id=system_member.id, org_id=org_id, project_id=project_id, type="agent",
+        name="시스템 발행", is_active=True,
+    ))
+    await session.commit()
+
+
 async def _seed_agent(session, org_id, project_id, *, name="agent"):
     from app.models.team import TeamMember
 
@@ -308,6 +333,7 @@ async def test_ac2_order_a_approve_then_submit_auto_publishes_without_manual_cli
         async with Session() as s:
             org_id, project_id, owner_member_id, owner_user_id = await _seed_org_with_owner(s, slug="ac2a")
             await _seed_default_role(s, org_id)
+            await _seed_system_publisher_teammember_shim(s, org_id, project_id)
             creator_id = await _seed_agent(s, org_id, project_id, name="댄")
             story_id = await _seed_story(s, org_id, project_id)
             await _seed_definition(s)
@@ -362,6 +388,18 @@ async def test_ac2_order_a_approve_then_submit_auto_publishes_without_manual_cli
             assert gate_d.resolution_note == "ⓓ 발행 승인", (
                 "AC2 훅이 승인자 본인 resolution_note를 건드렸다(금지 — publish_outcome 전용 필드여야)"
             )
+
+            # ⛔그라운딩 갭 정정(story #4093 작업 中 발견) — 위 두 단언(ChannelPublication·
+            # publish_outcome)만으로는 「published stage 이벤트가 실제로 났다」를 한 번도
+            # 검증한 적이 없었다(TeamMember shim 없이는 emit이 조용히 실패해도 이 단언들은
+            # 전부 그대로 통과했다) — 이 단언이 그 갭을 직접 닫는다.
+            from app.routers.events import _find_existing_stage_publish
+
+            published_event = await _find_existing_stage_publish(
+                s, org_id=org_id, definition_key=_KEY, work_item_type="story",
+                work_item_id=str(story_id), stage="published",
+            )
+            assert published_event is not None, "AC2 자동발행 뒤 레시피 published stage 이벤트가 안 났다"
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
@@ -382,6 +420,7 @@ async def test_ac2_order_b_submit_then_approve_auto_publishes_without_manual_cli
         async with Session() as s:
             org_id, project_id, owner_member_id, owner_user_id = await _seed_org_with_owner(s, slug="ac2b")
             await _seed_default_role(s, org_id)
+            await _seed_system_publisher_teammember_shim(s, org_id, project_id)
             creator_id = await _seed_agent(s, org_id, project_id, name="댄")
             story_id = await _seed_story(s, org_id, project_id)
             await _seed_definition(s)
@@ -425,6 +464,14 @@ async def test_ac2_order_b_submit_then_approve_auto_publishes_without_manual_cli
 
             gate_d = await s.get(Gate, gate_d_id)
             assert gate_d.publish_outcome == "published"
+
+            from app.routers.events import _find_existing_stage_publish
+
+            published_event = await _find_existing_stage_publish(
+                s, org_id=org_id, definition_key=_KEY, work_item_type="story",
+                work_item_id=str(story_id), stage="published",
+            )
+            assert published_event is not None, "AC2 자동발행 뒤 레시피 published stage 이벤트가 안 났다"
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
@@ -445,6 +492,7 @@ async def test_ac2_no_submitted_draft_skips_with_machine_owned_outcome_not_resol
         async with Session() as s:
             org_id, project_id, owner_member_id, owner_user_id = await _seed_org_with_owner(s, slug="ac2c")
             await _seed_default_role(s, org_id)
+            await _seed_system_publisher_teammember_shim(s, org_id, project_id)
             creator_id = await _seed_agent(s, org_id, project_id, name="댄")
             story_id = await _seed_story(s, org_id, project_id)
             await _seed_definition(s)
