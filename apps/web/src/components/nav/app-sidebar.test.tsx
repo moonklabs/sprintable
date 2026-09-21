@@ -104,7 +104,8 @@ async function mount(userName?: string) {
 // 「보드」→「일감」으로, 「결과」는 org-insights-board(path 무변)가 「성과 보드」→「결과」로
 // 리라벨된다(라벨키만 갈림, navResults 신설 — orgInsightsBoard 재사용 시 insight-snapshot-
 // block.tsx의 다른 문맥 CTA까지 같이 바뀌는 걸 피함). 「연결·규칙」만 진짜 라벨 그룹(하위
-// 채널 연결/콘텐츠 규칙 2항목, 라벨·path 둘 다 무변) — 나머지 3(오늘·일감·결과)은 항목
+// 채널 연결/콘텐츠 규칙 2항목, 라벨·path 둘 다 무변 — story #4116(2026-09-21)이 채널
+// 연결의 형제 화면 「연산 커넥터」를 그 사이에 신설, 3항목으로) — 나머지 3(오늘·일감·결과)은 항목
 // 하나뿐인 헤더리스 그룹(옛 'settings' 그룹과 동형 관례, 접기 토글 없음). 「대화」는 이
 // 배열 밖 CHAT_CENTER_ITEM 그대로(라벨만 "채팅"→"대화"). 나머지 17항목(goals·loops·
 // standup·retro·docs·artifacts·storage·activity·org-trust·org-memory·content·channel-
@@ -115,7 +116,7 @@ const EXPECTED_GROUPS: Array<{ labelKey: string | null; labels: string[] }> = [
   { labelKey: null, labels: ['오늘'] },
   { labelKey: null, labels: ['일감'] },
   { labelKey: null, labels: ['결과'] },
-  { labelKey: 'zoneConnectRules', labels: ['채널 연결', '콘텐츠 규칙'] },
+  { labelKey: 'zoneConnectRules', labels: ['채널 연결', '연산 커넥터', '콘텐츠 규칙'] },
   // story #3836(UX-v3·셸 후속) — 「더보기」(LEGACY_GROUP_ID)는 기본 접힘(AC1)이라 이
   // 테스트(expandAllGroups가 'connect-rules'만 편다)에선 항목이 DOM에 없다 — 그룹
   // 자체(라벨+토글)는 렌더된다는 사실만 여기서 잠그고, 내용물은 전용 스위트에서.
@@ -130,6 +131,7 @@ const EXPECTED_HREF_BY_LABEL: Record<string, string> = {
   '일감': '/flow',
   '결과': '/organization/insights-board',
   '채널 연결': '/organization/channels',
+  '연산 커넥터': '/organization/generation-connectors',
   '콘텐츠 규칙': '/organization/content-rules',
 };
 

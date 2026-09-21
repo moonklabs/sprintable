@@ -162,6 +162,10 @@ export const WHOLE_VALUE_ALLOWLIST: ReadonlySet<string> = new Set<string>([
   'organization.channelLabelGhostSandbox', 'organization.channelLabelInstagram',
   'organization.channelLabelWordpress', 'organization.channelLabelYoutube',
   'organization.channelThreads',
+  // story #4116(2026-09-21) — 연산 커넥터 provider 브랜드명(제3자 고유명사, 위 채널
+  // 브랜드명과 동일 근거·동일 카테고리). 현재 vertex_gemini 1종만 지원(story
+  // GENERATION_CONNECTOR_PROVIDER_KEYS 닫힌 집합) — 새 provider 추가 시 같은 패턴으로.
+  'organization.gcProviderVertexGeminiLabel',
 
   // 제품/플랫폼 고정 식별자(PO 명시 카테고리 (b) — MCP Config·GitHub App·Webhook URL·
   // CI) 및 그 동류(App ID·App Secret·HTML 파일형식) — 번역하면 실제 설정 화면·API
