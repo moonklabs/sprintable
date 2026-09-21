@@ -14,12 +14,15 @@ video` MCP 도구, 플러그인 0.9.14)을 자기설명 멘션이 안내하지 �
 capability.kind=="generate"·pending_approval.gate.type=="external_publish")에서 그대로
 유도 — 이 마이그가 새로 건드릴 데이터가 없다(events.py 코드만).
 
-Revision ID: 0388
-Revises: 0387
+Revision ID: 0389
+Revises: 0388
 Create Date: 2026-09-21
 
-번호 조율(페드루 PO, 2026-09-21 07:33Z) — 0387은 디디군 #4090(1/2, 발행 축 임계 경로) 선점.
-착지 순서: #4467(#4092)→디디군 #4090 1/2→이 카드(0388) rebase·push.
+번호 조율(페드루 PO) — 1차(07:33Z) 0387은 디디군 #4090(1/2, 발행 축 임계 경로) 선점,
+이 카드=0388. 2차(07:54Z) 디디군 #4090 ②③이 gate.publish_outcome 컬럼 마이그를
+자체로 들고 와 ①②③ 한 PR로 묶여 0387+0388 두 자리를 다 쓰게 됨 — 이 카드는
+0389(down 0388)로 한 번 더 밀림. 착지 순서: #4467(0386)→디디군 #4090(0387+0388)→
+이 카드(0389)→#4083(0390).
 """
 from __future__ import annotations
 
@@ -28,8 +31,8 @@ import json
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0388"
-down_revision = "0387"
+revision = "0389"
+down_revision = "0388"
 branch_labels = None
 depends_on = None
 
