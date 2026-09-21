@@ -701,6 +701,7 @@
     "recipeApplyV2ComputeRole": "Compute",
     "recipeApplyV2ComputeBadge": "Model",
     "recipeApplyV2ComputeDesc": "The model set leased for the generation stage",
+    "recipeApplyV2ComputeEmptyFallbackHint": "Leave it empty and the crew agent handles it with its own tool.",
     "recipeApplyV2PublisherRole": "Publisher",
     "recipeApplyV2PublisherBadge": "Owner",
     "recipeApplyV2PublisherDesc": "Posts the approved material to the channel",

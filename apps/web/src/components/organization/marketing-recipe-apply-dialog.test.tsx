@@ -132,7 +132,11 @@ describe('MarketingRecipeApplyDialog — 4슬롯 다른 메커니즘', () => {
     expect(optionTexts).not.toContain('윤재');
   });
 
-  it('연산·발행자 select는 비활성(이 카드 범위 밖)', async () => {
+  // story #4114 — RECIPE 픽스처는 어느 stage도 capability.target을 선언하지 않는다
+  // (published stage조차 role만 있고 capability 필드 자체가 없음) — 그래서 연산 슬롯은
+  // computeRequired=false로 완전히 숨겨지고(정의 미선언 → 슬롯 자체 없음), 발행자는
+  // publisherRequired=false로 여전히 렌더는 되되 select만 비활성(이 카드 범위 밖 그대로).
+  it('연산 슬롯은 정의 미선언이면 숨겨지고, 발행자 select는 여전히 비활성(capability.target 없는 레시피)', async () => {
     stubMemberFetch();
     await act(async () => {
       root.render(wrap(
@@ -142,9 +146,8 @@ describe('MarketingRecipeApplyDialog — 4슬롯 다른 메커니즘', () => {
         />,
       ));
     });
-    const computeSelect = document.body.querySelector('[data-testid="slot-compute"] select') as HTMLSelectElement;
+    expect(document.body.querySelector('[data-testid="slot-compute"]')).toBeNull();
     const publisherSelect = document.body.querySelector('[data-testid="slot-publisher"] select') as HTMLSelectElement;
-    expect(computeSelect.disabled).toBe(true);
     expect(publisherSelect.disabled).toBe(true);
   });
 
@@ -569,6 +572,158 @@ describe('MarketingRecipeApplyDialog — 4슬롯 다른 메커니즘', () => {
     expect(publisherSelect.disabled).toBe(false);
     const optionTexts = Array.from(publisherSelect.querySelectorAll('option')).map((o) => o.textContent);
     expect(optionTexts).toContain('메인 인스타');
+  });
+
+  // story #4114 — 연산 슬롯(publisherStages와 동형 SSOT, capability.target=
+  // generation_connector). live_generation은 실 seed의 실제 stage 이름(#4101/#4110
+  // 설명 그대로).
+  const RECIPE_WITH_COMPUTE_TARGET: EventDefinitionResponse & { id: string } = {
+    ...RECIPE,
+    stage_metadata: {
+      ...RECIPE.stage_metadata,
+      live_generation: { role: '연산', capability: { kind: 'generate', target: 'generation_connector' } },
+    },
+  };
+
+  function stubMemberAndGenerationFetch(connectors: { id: string; provider_key: string; label: string; status: string }[]) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/api/team-members')) {
+        return { ok: true, json: async () => [{ id: 'agent-1', name: '댄', type: 'agent' }] };
+      }
+      if (url.startsWith('/api/organizations/org-1/generation-connectors')) {
+        return { ok: true, json: async () => ({ data: { connectors } }) };
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    }));
+  }
+
+  it('연산 — 있음: active 연산 커넥터가 select 옵션으로 렌더되고(revoked 등 비active는 제외)', async () => {
+    stubMemberAndGenerationFetch([
+      { id: 'gen-1', provider_key: 'vertex_gemini', label: '뭉클랩 기본 연산', status: 'active' },
+      { id: 'gen-2', provider_key: 'vertex_gemini', label: '해지된 연산', status: 'revoked' },
+    ]);
+    await act(async () => {
+      root.render(wrap(
+        <MarketingRecipeApplyDialog
+          recipe={RECIPE_WITH_COMPUTE_TARGET} open onOpenChange={() => {}} creatorRoleLabel="크리에이터"
+          projects={[{ id: 'proj-1', name: 'Proj' }]} orgId="org-1" onSubmit={async () => ({ ok: true })}
+        />,
+      ));
+    });
+    await flush();
+
+    const computeSelect = document.body.querySelector<HTMLSelectElement>('[data-testid="compute-connector-select"]')!;
+    expect(computeSelect.disabled).toBe(false);
+    const optionTexts = Array.from(computeSelect.querySelectorAll('option')).map((o) => o.textContent);
+    expect(optionTexts).toContain('뭉클랩 기본 연산');
+    expect(optionTexts).not.toContain('해지된 연산');
+  });
+
+  it('연산 — 없음: 0건이면 안내 문구가 뜨지만(발행자와 달리) 제출은 막히지 않는다(#4110 crew 폴백)', async () => {
+    stubMemberAndGenerationFetch([]);
+    const onSubmit = vi.fn(async () => ({ ok: true, bindingsUpserted: 2 }));
+    await act(async () => {
+      root.render(wrap(
+        <MarketingRecipeApplyDialog
+          recipe={RECIPE_WITH_COMPUTE_TARGET} open onOpenChange={() => {}} creatorRoleLabel="크리에이터"
+          projects={[{ id: 'proj-1', name: 'Proj' }]} orgId="org-1" onSubmit={onSubmit}
+        />,
+      ));
+    });
+    await flush();
+
+    const projectSelect = document.body.querySelector<HTMLSelectElement>('#marketing-recipe-apply-project')!;
+    await act(async () => { projectSelect.value = 'proj-1'; projectSelect.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+    const creatorSelect = document.body.querySelector<HTMLSelectElement>('[data-testid="creator-agent-select"]')!;
+    await act(async () => { creatorSelect.value = 'agent-1'; creatorSelect.dispatchEvent(new Event('change', { bubbles: true })); });
+
+    const emptyHint = document.body.querySelector('[data-testid="marketing-apply-generation-connectors-empty"]');
+    expect(emptyHint?.textContent).toBe(koMessages.organization.eventApplyGenerationConnectorsEmpty);
+    const fallbackHint = document.body.querySelector('[data-testid="slot-compute"]')!.textContent;
+    expect(fallbackHint).toContain(koMessages.organization.recipeApplyV2ComputeEmptyFallbackHint);
+    const submitBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent === '적용하기')!;
+    expect(submitBtn.hasAttribute('disabled')).toBe(false); // 발행자(publisherRequired)와 달리 필수 아님.
+
+    await act(async () => { submitBtn.click(); });
+    await flush();
+    // 비워둔 채 제출 — live_generation stage 자체가 roleMapping에 없다(빈 문자열을 안 싣는다).
+    expect(onSubmit).toHaveBeenCalledWith({
+      recipeId: 'mkt-1', projectId: 'proj-1',
+      roleMapping: { draft: 'agent-1', animatic: 'agent-1' },
+    });
+  });
+
+  it('연산 — 선택 제출: 고른 연산 커넥터 id가 role_mapping[live_generation]으로 실린다', async () => {
+    stubMemberAndGenerationFetch([
+      { id: 'gen-1', provider_key: 'vertex_gemini', label: '뭉클랩 기본 연산', status: 'active' },
+    ]);
+    const onSubmit = vi.fn(async () => ({ ok: true, bindingsUpserted: 3 }));
+    await act(async () => {
+      root.render(wrap(
+        <MarketingRecipeApplyDialog
+          recipe={RECIPE_WITH_COMPUTE_TARGET} open onOpenChange={() => {}} creatorRoleLabel="크리에이터"
+          projects={[{ id: 'proj-1', name: 'Proj' }]} orgId="org-1" onSubmit={onSubmit}
+        />,
+      ));
+    });
+    await flush();
+
+    const projectSelect = document.body.querySelector<HTMLSelectElement>('#marketing-recipe-apply-project')!;
+    await act(async () => { projectSelect.value = 'proj-1'; projectSelect.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+    const creatorSelect = document.body.querySelector<HTMLSelectElement>('[data-testid="creator-agent-select"]')!;
+    await act(async () => { creatorSelect.value = 'agent-1'; creatorSelect.dispatchEvent(new Event('change', { bubbles: true })); });
+    const computeSelect = document.body.querySelector<HTMLSelectElement>('[data-testid="compute-connector-select"]')!;
+    await act(async () => { computeSelect.value = 'gen-1'; computeSelect.dispatchEvent(new Event('change', { bubbles: true })); });
+
+    const submitBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent === '적용하기')!;
+    await act(async () => { submitBtn.click(); });
+    await flush();
+
+    expect(onSubmit).toHaveBeenCalledWith({
+      recipeId: 'mkt-1', projectId: 'proj-1',
+      roleMapping: { draft: 'agent-1', animatic: 'agent-1', live_generation: 'gen-1' },
+    });
+  });
+
+  it('연산 — 목록 fetch 실패: «없어요» 대신 로드 실패 문구+재시도, 재시도 성공하면 옵션이 채워진다', async () => {
+    let shouldFail = true;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/api/team-members')) {
+        return { ok: true, json: async () => [{ id: 'agent-1', name: '댄', type: 'agent' }] };
+      }
+      if (url.startsWith('/api/organizations/org-1/generation-connectors')) {
+        if (shouldFail) return { ok: false, json: async () => ({}) };
+        return { ok: true, json: async () => ({ data: { connectors: [{ id: 'gen-1', provider_key: 'vertex_gemini', label: '뭉클랩 기본 연산', status: 'active' }] } }) };
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    }));
+
+    await act(async () => {
+      root.render(wrap(
+        <MarketingRecipeApplyDialog
+          recipe={RECIPE_WITH_COMPUTE_TARGET} open onOpenChange={() => {}} creatorRoleLabel="크리에이터"
+          projects={[{ id: 'proj-1', name: 'Proj' }]} orgId="org-1" onSubmit={async () => ({ ok: true })}
+        />,
+      ));
+    });
+    await flush();
+
+    expect(document.body.querySelector('[data-testid="marketing-apply-generation-connectors-load-error"]')).toBeTruthy();
+    expect(document.body.querySelector('[data-testid="marketing-apply-generation-connectors-empty"]')).toBeNull();
+    const computeSelect = document.body.querySelector<HTMLSelectElement>('[data-testid="compute-connector-select"]')!;
+    expect(computeSelect.disabled).toBe(true);
+
+    shouldFail = false;
+    const retryBtn = [...document.body.querySelectorAll('[data-testid="marketing-apply-generation-connectors-load-error"] button')][0] as HTMLButtonElement;
+    await act(async () => { retryBtn.click(); });
+    await flush();
+
+    expect(document.body.querySelector('[data-testid="marketing-apply-generation-connectors-load-error"]')).toBeNull();
+    expect(computeSelect.disabled).toBe(false);
+    const optionTexts = Array.from(computeSelect.querySelectorAll('option')).map((o) => o.textContent);
+    expect(optionTexts).toContain('뭉클랩 기본 연산');
   });
 });
 

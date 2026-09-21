@@ -701,6 +701,7 @@
     "recipeApplyV2ComputeRole": "연산",
     "recipeApplyV2ComputeBadge": "모델",
     "recipeApplyV2ComputeDesc": "생성 단계에서 임대하는 모델 세트",
+    "recipeApplyV2ComputeEmptyFallbackHint": "비워두면 담당 에이전트가 자기 도구로 처리해요.",
     "recipeApplyV2PublisherRole": "발행자",
     "recipeApplyV2PublisherBadge": "담당",
     "recipeApplyV2PublisherDesc": "승인된 소재를 채널에 게시",
