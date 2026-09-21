@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { fetchWithAuth } from '@/lib/db/client';
 import { cyclicStages, isCyclicDefinition, type EventDefinitionResponse } from '@/components/loops/loop-create-dialog';
-import { RecipeRoleMappingFields, type ChannelConnectionOption } from '@/components/organization/recipe-role-mapping-fields';
+import { RecipeRoleMappingFields, type ChannelConnectionOption, type GenerationConnectorOption } from '@/components/organization/recipe-role-mapping-fields';
 
 // story #3293(도메인탈고정 축2-ⓒ) — 구세대 workflow_templates(story #3010 P3 등) 소비를
 // 신세대(EventDefinition/recipe_role_bindings, 축2-ⓐ story #3288)로 이전. doc
@@ -50,6 +50,8 @@ export function WorkflowTemplateGallerySection({
   const [agents, setAgents] = useState<TeamMember[]>([]);
   // story #4090(alembic 0385) — apply-recipe-dialog.tsx와 동형(org 스코프, project 무관).
   const [channelConnections, setChannelConnections] = useState<ChannelConnectionOption[]>([]);
+  // story #4101 — channelConnections와 동형(org 스코프, project 무관).
+  const [generationConnectors, setGenerationConnectors] = useState<GenerationConnectorOption[]>([]);
   const [loading, setLoading] = useState(true);
   // story #3521(유나 §22-2, PO 確定 2026-09-05) — defRes(주)는 3519 당시에도 catch가
   // 없었다(memberRes만 격리). §16-7 주 계약("주는 던져도 된다")은 지켜졌지만 그 throw를
@@ -83,11 +85,13 @@ export function WorkflowTemplateGallerySection({
       // (§16-7 주 계약 — 주는 던져도 된다). 대신 이제 이 함수를 감싸는 catch가 있어
       // defRes의 reject·!ok 둘 다 loadError로 정직하게 착지한다(예전엔 던져도 받을
       // 그릇이 없어 unhandled rejection으로 샜다).
-      const [defRes, memberRes, channelRes] = await Promise.all([
+      const [defRes, memberRes, channelRes, generationRes] = await Promise.all([
         fetchWithAuth('/api/events/definitions'),
         fetchWithAuth(`/api/team-members?project_id=${projectId}&type=agent`).catch(() => null),
         // story #4090 — org 스코프(project 무관), memberRes와 동형으로 격리(부수 leg).
         orgId ? fetchWithAuth(`/api/organizations/${orgId}/channel-connections`).catch(() => null) : Promise.resolve(null),
+        // story #4101 — 같은 원칙(부수 leg, 격리).
+        orgId ? fetchWithAuth(`/api/organizations/${orgId}/generation-connectors?active_only=true`).catch(() => null) : Promise.resolve(null),
       ]);
       if (!defRes.ok) {
         setLoadError(true);
@@ -124,6 +128,10 @@ export function WorkflowTemplateGallerySection({
       if (channelRes?.ok) {
         const json = await channelRes.json() as { data?: ChannelConnectionOption[] } | ChannelConnectionOption[];
         setChannelConnections(Array.isArray(json) ? json : (json.data ?? []));
+      }
+      if (generationRes?.ok) {
+        const json = await generationRes.json() as { data?: { connectors?: GenerationConnectorOption[] } };
+        setGenerationConnectors(json.data?.connectors ?? []);
       }
     } catch {
       setLoadError(true);
@@ -288,10 +296,12 @@ export function WorkflowTemplateGallerySection({
               stageMetadata={selected.stage_metadata}
               agents={agents}
               channelConnections={channelConnections}
+              generationConnectors={generationConnectors}
               roleMapping={roleMapping}
               onChange={(stage, value) => setRoleMapping(prev => ({ ...prev, [stage]: value }))}
               agentPlaceholder={tOrg('eventApplyAgentPlaceholder')}
               channelPlaceholder={tOrg('eventApplyChannelPlaceholder')}
+              generationConnectorPlaceholder={tOrg('eventApplyGenerationConnectorPlaceholder')}
             />
 
             {applyWarnings.length > 0 && (

@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Button } from '@/components/ui/button';
 import { fetchWithAuth } from '@/lib/db/client';
 import { cyclicStages, type EventDefinitionResponse } from '@/components/loops/loop-create-dialog';
-import { RecipeRoleMappingFields, type ChannelConnectionOption } from '@/components/organization/recipe-role-mapping-fields';
+import { RecipeRoleMappingFields, type ChannelConnectionOption, type GenerationConnectorOption } from '@/components/organization/recipe-role-mapping-fields';
 import type { useToast } from '@/components/ui/toast';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 
@@ -37,6 +37,8 @@ export function ApplyRecipeDialog({
   // story #4090(alembic 0385) — org 스코프(project 무관, channel-connections는 org
   // 소속)라 project 전환 useEffect가 아니라 다이얼로그 open 시 1회만 불러온다.
   const [channelConnections, setChannelConnections] = useState<ChannelConnectionOption[]>([]);
+  // story #4101 — 같은 org 스코프 원칙(project 무관, 다이얼로그 open 시 1회).
+  const [generationConnectors, setGenerationConnectors] = useState<GenerationConnectorOption[]>([]);
   const [roleMapping, setRoleMapping] = useState<Record<string, string>>({});
   const [loadingProjectData, setLoadingProjectData] = useState(false);
   // story #3521(유나 §22-2, PO 確定 2026-09-05) — memberRes leg 실패 여부. agents=[]가
@@ -51,6 +53,7 @@ export function ApplyRecipeDialog({
     setProjectId('');
     setAgents([]);
     setChannelConnections([]);
+    setGenerationConnectors([]);
     setRoleMapping({});
     setError(null);
     setWarnings([]);
@@ -69,6 +72,14 @@ export function ApplyRecipeDialog({
       if (!res.ok) return;
       const json = await res.json() as { data?: ChannelConnectionOption[] } | ChannelConnectionOption[];
       setChannelConnections(Array.isArray(json) ? json : (json.data ?? []));
+    })();
+    void (async () => {
+      // story #4101 — active_only=true(revoked는 애초에 선택지 밖, RecipeRoleMappingFields
+      // 의 status 필터와 이중 방어 — BE가 이미 걸러 주면 FE 필터는 no-op).
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/generation-connectors?active_only=true`);
+      if (!res.ok) return;
+      const json = await res.json() as { data?: { connectors?: GenerationConnectorOption[] } };
+      setGenerationConnectors(json.data?.connectors ?? []);
     })();
   }, [open, orgId]);
 
@@ -116,6 +127,9 @@ export function ApplyRecipeDialog({
   // story #4090 — 채널-대상 stage가 아예 없는 정의(레시피 1호 외 대부분)면 채널 목록
   // 로딩/빈 상태 문구 자체가 노이즈다(#4075 "0건이면 섹션 숨김" 원칙과 동형).
   const hasChannelStage = stages.some((s) => target.stage_metadata[s]?.capability?.target === 'channel_connection');
+  // story #4101 — 같은 원칙, generation_connector 대상 stage가 없는 정의면 연산 커넥터
+  // 목록/빈 상태 문구 자체를 안 그린다.
+  const hasGenerationStage = stages.some((s) => target.stage_metadata[s]?.capability?.target === 'generation_connector');
 
   const submit = async () => {
     if (!projectId) return;
@@ -197,15 +211,20 @@ export function ApplyRecipeDialog({
             {hasChannelStage && channelConnections.filter((c) => c.status === 'active').length === 0 ? (
               <p className="text-xs text-muted-foreground" data-testid="apply-recipe-channels-empty">{t('eventApplyChannelsEmpty')}</p>
             ) : null}
+            {hasGenerationStage && generationConnectors.filter((c) => c.status === 'active').length === 0 ? (
+              <p className="text-xs text-muted-foreground" data-testid="apply-recipe-generation-connectors-empty">{t('eventApplyGenerationConnectorsEmpty')}</p>
+            ) : null}
             <RecipeRoleMappingFields
               stages={stages}
               stageMetadata={target.stage_metadata}
               agents={agents}
               channelConnections={channelConnections}
+              generationConnectors={generationConnectors}
               roleMapping={roleMapping}
               onChange={(stage, value) => setRoleMapping((prev) => ({ ...prev, [stage]: value }))}
               agentPlaceholder={t('eventApplyAgentPlaceholder')}
               channelPlaceholder={t('eventApplyChannelPlaceholder')}
+              generationConnectorPlaceholder={t('eventApplyGenerationConnectorPlaceholder')}
             />
           </div>
         )}

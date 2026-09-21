@@ -21,6 +21,7 @@ from app.models.event import Event
 from app.models.event_outbox import EventOutbox
 from app.models.delivery_job import DeliveryJob
 from app.models.channel_connection import ChannelConnection
+from app.models.org_generation_connector import OrgGenerationConnector
 from app.models.channel_app_credential import ChannelAppCredentials
 from app.models.channel_oauth_pending_selection import ChannelOAuthPendingSelection
 from app.models.ga4_connection import GA4Connection

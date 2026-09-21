@@ -18,6 +18,12 @@ one_target)가 정본**, 여기 모델은 그 제약의 미러일 뿐(sealed_* �
 role_bindings)가 stage의 capability.target(닫힌 어휘, event_definition_registry.py::
 _CAPABILITY_TARGETS)로 판별한다 — capability.kind(열린 값, #3317 PR B)와는 독립된
 축이다. 이 모델 자체는 그 판별을 모른다.
+
+story #4101(alembic 0391, #4095 그라운딩 doc c65ce586 §3-1 후보A·PO Q③닫힌집합 確定,
+2026-09-21) — capability.target="generation_connector"인 stage(Compute)는 "발행할
+채널"도 아니고 "org의 생성 모델 커넥터"를 가리켜야 해 `generation_connector_id`를
+세 번째 target으로 더한다. XOR은 이제 "셋 중 정확히 하나"(0387의 두-값 XOR을 대체하는
+같은 CHECK 이름 재사용 — 새 이름 발명 0, DB CHECK가 여전히 정본).
 """
 from __future__ import annotations
 
@@ -46,10 +52,11 @@ class RecipeRoleBinding(Base):
             unique=True, postgresql_where=text("project_id IS NOT NULL"),
         ),
         Index("ix_recipe_role_bindings_lookup", "org_id", "event_definition_key", "stage"),
-        # story #4090(alembic 0385) — 미러, 정본은 마이그의 DB CHECK. 위 docstring 참고.
+        # story #4101(alembic 0391) — 미러, 정본은 마이그의 DB CHECK. 위 docstring 참고.
+        # 셋 중 정확히 하나(0387의 두-값 XOR을 대체) — num_nonnulls 패턴(0 또는 2+개 채움을
+        # 함께 막는다, 세 값 나열보다 확장에 안전).
         CheckConstraint(
-            "(agent_member_id IS NOT NULL AND channel_connection_id IS NULL) "
-            "OR (agent_member_id IS NULL AND channel_connection_id IS NOT NULL)",
+            "num_nonnulls(agent_member_id, channel_connection_id, generation_connector_id) = 1",
             name="ck_recipe_role_bindings_exactly_one_target",
         ),
     )
@@ -64,6 +71,8 @@ class RecipeRoleBinding(Base):
     # 등)은 이것, 발행할 채널(Publisher)은 channel_connection_id.
     agent_member_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     channel_connection_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # story #4101 — 세 번째 target(Compute 슬롯, capability.target="generation_connector").
+    generation_connector_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
