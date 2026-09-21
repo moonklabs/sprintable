@@ -659,6 +659,7 @@
     "gcFieldCredential": "Service account credential (JSON)",
     "gcCredentialPlaceholder": "Paste { \"type\": \"service_account\", \"project_id\": \"…\", \"private_key\": \"…\" }",
     "gcRevokeAction": "Revoke",
+    "gcRevokeAriaLabel": "Revoke generation connector {n}: {label}",
     "gcRevokeConfirmTitle": "Revoke {name}?",
     "gcRevokeConfirmBody": "Revoking erases this connector's credential and can't be undone. Recipes using it must pick another connector before the generation stage.",
     "gcOwnerOnlyReason": "Only the organization owner or admins can register or revoke connectors. You can still view the list.",

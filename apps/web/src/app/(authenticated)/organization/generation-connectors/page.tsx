@@ -139,7 +139,7 @@ export default function OrganizationGenerationConnectorsPage() {
         />
       ) : status === 'loaded' ? (
         <Card className="divide-y divide-border overflow-hidden">
-          {connectors.map((c) => {
+          {connectors.map((c, index) => {
             const tone = STATUS_TONE[c.status] ?? STATUS_TONE.active!;
             // story #4116 — model_config_json은 provider마다 자유 형식이라(§3-1 "공급자
             // 편애 없이") 값 있는 키 개수만 센다(어느 모달리티인지는 등록 폼에서 이미
@@ -174,6 +174,11 @@ export default function OrganizationGenerationConnectorsPage() {
                     size="sm"
                     onClick={() => setRevokeTarget({ id: c.id, label: c.label })}
                     data-testid={`gc-revoke-${c.id}`}
+                    // story #4116 CI RED(페드루 PO 지적, verify-repeated-row-action-names.ts
+                    // story #3592) — 행마다 같은 정적 라벨("해지")뿐이면 스크린리더가 항목을
+                    // 못 가른다. channels/page.tsx::channelRowActionAriaLabel과 동형(순번+
+                    // 그 행의 현재 라벨).
+                    aria-label={t('gcRevokeAriaLabel', { n: index + 1, label: c.label })}
                   >
                     {t('gcRevokeAction')}
                   </Button>

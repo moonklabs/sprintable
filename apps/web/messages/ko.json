@@ -659,6 +659,7 @@
     "gcFieldCredential": "서비스 계정 자격 (JSON)",
     "gcCredentialPlaceholder": "{ \"type\": \"service_account\", \"project_id\": \"…\", \"private_key\": \"…\" } 를 붙여넣어요",
     "gcRevokeAction": "해지",
+    "gcRevokeAriaLabel": "{n}번째 연산 커넥터 {label} 해지",
     "gcRevokeConfirmTitle": "{name}을(를) 해지할까요",
     "gcRevokeConfirmBody": "해지하면 이 커넥터의 자격이 지워지고 되돌릴 수 없어요. 이 커넥터를 쓰는 레시피는 생성 단계 전에 다른 커넥터를 골라야 해요.",
     "gcOwnerOnlyReason": "커넥터 등록·해지는 조직 소유자·관리자만 할 수 있어요. 목록은 확인할 수 있어요.",
