@@ -86,7 +86,14 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
     );
   }
 
-  const selected = active.length === 1 ? active[0] : (active.find((c) => c.key === selectedKey) ?? null);
+  // story #4091(유나 design 라이브 관찰 ①, 2026-09-21) — «켜면 보게» 미충족 처방: 시작된
+  // 후보는 라디오 선택과 무관하게 그 자리에서 바로 진행 3줄을 보여준다. 라디오는 이제
+  // «아직 안 시작한 것을 골라 시작»에만 쓰인다(started 항목은 더 고를 게 없다 — 이미
+  // 진행 중). #4075 단일 후보 자동 선택 관례는 notStarted 쪽으로 그대로 옮긴다(시작
+  // 前 동작 무변).
+  const started = active.filter((c) => c.started);
+  const notStarted = active.filter((c) => !c.started);
+  const selected = notStarted.length === 1 ? notStarted[0] : (notStarted.find((c) => c.key === selectedKey) ?? null);
 
   const handleStart = async (candidate: RecipeStartCandidate) => {
     setPublishing(true);
@@ -118,11 +125,53 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
     }
   };
 
+  // story #4082([E-RECIPE-1] 진행 위치 표시) AC1 — «시작됨» 한 줄 대신 현재
+  // 단계(역할)·다음 단계(역할, 없으면 «마지막 단계»)·마지막 발행 시각 3줄
+  // («stage» 내부어 대신 정의 저자가 시드한 role 낱말을 우선 노출, 유나 낱말 표 v5.1).
+  const progressLines = (c: RecipeStartCandidate) => (
+    <div key={c.key} className="flex flex-col gap-1">
+      {active.length > 1 && <p className="text-sm font-medium text-foreground">{c.name}</p>}
+      {c.current_stage && (
+        <p className="text-xs font-medium text-foreground">
+          {t('recipeCurrentStageLabel')}: {displayStageLabel(c.current_stage, c.current_stage_position, c.total_stages, tOrg, t)}
+          {c.current_role ? ` (${stageRoleLabel(c.current_role, tOrg)})` : ''}
+        </p>
+      )}
+      <p className="text-xs text-muted-foreground">
+        {c.next_stage
+          ? `${t('recipeNextStageLabel')}: ${displayStageLabel(
+              c.next_stage,
+              c.current_stage_position !== null ? c.current_stage_position + 1 : null,
+              c.total_stages, tOrg, t,
+            )}${c.next_role ? ` (${stageRoleLabel(c.next_role, tOrg)})` : ''}`
+          : t('recipeNoNextStage')}
+      </p>
+      {c.last_published_at && (
+        <p className="text-[11px] text-muted-foreground">
+          {t('recipeLastPublishedLabel')}: {formatRelativeTime(c.last_published_at, locale, displayTimezone)}
+        </p>
+      )}
+      {c.conversation_id && (
+        <Link
+          href={`/chats/${c.conversation_id}${c.message_id ? `?messageId=${encodeURIComponent(c.message_id)}` : ''}`}
+          className="text-xs font-medium text-primary hover:underline"
+        >
+          {t('recipeStartViewConversation')}
+        </Link>
+      )}
+    </div>
+  );
+
   return sectionShell(
     <>
-      {active.length > 1 && (
+      {started.length > 0 && (
+        <div className="mb-2 flex flex-col gap-3">
+          {started.map((c) => progressLines(c))}
+        </div>
+      )}
+      {notStarted.length > 1 && (
         <div className="mb-2 flex flex-col gap-1">
-          {active.map((c) => (
+          {notStarted.map((c) => (
             <label key={c.key} className="flex items-center gap-2 text-sm text-foreground">
               <input
                 type="radio"
@@ -135,53 +184,16 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
                 className="accent-[var(--primary)]"
               />
               {c.name}
-              {c.started && <span className="text-[10px] text-muted-foreground">({t('recipeStarted')})</span>}
             </label>
           ))}
         </div>
       )}
       {selected ? (
-        selected.started ? (
-          // story #4082([E-RECIPE-1] 진행 위치 표시) AC1 — «시작됨» 한 줄 대신 현재
-          // 단계(역할)·다음 단계(역할, 없으면 «마지막 단계»)·마지막 발행 시각 3줄
-          // («stage» 내부어 대신 정의 저자가 시드한 role 낱말을 우선 노출, 유나 낱말 표 v5.1).
-          <div className="flex flex-col gap-1">
-            {selected.current_stage && (
-              <p className="text-xs font-medium text-foreground">
-                {t('recipeCurrentStageLabel')}: {displayStageLabel(selected.current_stage, selected.current_stage_position, selected.total_stages, tOrg, t)}
-                {selected.current_role ? ` (${stageRoleLabel(selected.current_role, tOrg)})` : ''}
-              </p>
-            )}
-            <p className="text-xs text-muted-foreground">
-              {selected.next_stage
-                ? `${t('recipeNextStageLabel')}: ${displayStageLabel(
-                    selected.next_stage,
-                    selected.current_stage_position !== null ? selected.current_stage_position + 1 : null,
-                    selected.total_stages, tOrg, t,
-                  )}${selected.next_role ? ` (${stageRoleLabel(selected.next_role, tOrg)})` : ''}`
-                : t('recipeNoNextStage')}
-            </p>
-            {selected.last_published_at && (
-              <p className="text-[11px] text-muted-foreground">
-                {t('recipeLastPublishedLabel')}: {formatRelativeTime(selected.last_published_at, locale, displayTimezone)}
-              </p>
-            )}
-            {selected.conversation_id && (
-              <Link
-                href={`/chats/${selected.conversation_id}${selected.message_id ? `?messageId=${encodeURIComponent(selected.message_id)}` : ''}`}
-                className="text-xs font-medium text-primary hover:underline"
-              >
-                {t('recipeStartViewConversation')}
-              </Link>
-            )}
-          </div>
-        ) : (
-          <Button type="button" size="sm" onClick={() => void handleStart(selected)} disabled={publishing}>
-            {publishing ? t('recipeStarting') : t('recipeStartButton')}
-          </Button>
-        )
+        <Button type="button" size="sm" onClick={() => void handleStart(selected)} disabled={publishing}>
+          {publishing ? t('recipeStarting') : t('recipeStartButton')}
+        </Button>
       ) : (
-        <p className="text-xs text-muted-foreground">{t('recipeStartChooseRecipe')}</p>
+        notStarted.length > 1 && <p className="text-xs text-muted-foreground">{t('recipeStartChooseRecipe')}</p>
       )}
       {publishError && (
         <p role="alert" aria-live="assertive" className="mt-1 text-[11px] text-destructive">

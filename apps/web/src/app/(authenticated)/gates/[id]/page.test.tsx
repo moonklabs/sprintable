@@ -874,22 +874,39 @@ describe('GateDetailPage — ads_boost 실행 블록은 needsAction/gate.status�
 
 // story #4082([E-RECIPE-1] 진행 위치 표시) AC2 — approvals-queue.tsx 카드와 동일 관례
 // (neutral_facts.stage(+stage_role) denorm, 레시피 게이트가 아니면 무변).
-describe('GateDetailPage — 단계(역할) 표시(story #4082)', () => {
-  it('neutral_facts.stage_role이 있으면 「단계: X (역할)」을 한글 낱말표로 표시한다(유나 design CHANGES, 내부어 노출 0)', async () => {
+//
+// ⛔story #4091(유나 design 라이브 관찰, PO 확定 2026-09-21) 재정정 — 이 footer meta 줄과
+// GateEvidence의 RecipeApprovalFactsBlock(사실 블록)이 같은 neutral_facts.stage를 각자
+// 렌더해 화면에 «단계»가 두 번 뜨는 결함이 발견됐다. PO 확定(b안): 사실 블록에 stage_role도
+// 얹어 정보 소실 0으로 만들고, 사실 블록이 뜨는 분기(default fixture가 타는 !canAct
+// 분기 포함)에선 이 meta 줄을 뺀다 — 아래 테스트는 그 새 계약을 pin한다. 역할 표시 자체의
+// 회귀 핀은 gate-evidence.test.tsx 쪽(사실 블록)으로 자리를 옮겼다(핀 폐기 아님).
+describe('GateDetailPage — 단계(역할) 표시(story #4082, #4091로 렌더 위치 재배치)', () => {
+  it('사실 블록이 뜨는 분기(기본 fixture=!canAct)에선 footer meta 줄이 안 뜨고, 사실 블록 쪽 「단계 · X (역할)」만 뜬다(중복 제거)', async () => {
     await mount(gate({ neutral_facts: { stage: 'concept_confirmed', stage_role: 'Director' } }));
-    expect(container.textContent).toContain(`${koMessages.cage.gateStageLabel}: 컨셉 확정 (디렉터)`);
+    expect(container.textContent).not.toContain(`${koMessages.cage.gateStageLabel}:`);
+    expect(container.textContent).toContain(`${koMessages.cage.recipeApprovalStageLabel} · 컨셉 확정 (디렉터)`);
     expect(container.textContent).not.toContain('concept_confirmed');
     expect(container.textContent).not.toContain('Director');
   });
 
-  it('neutral_facts.stage만 있고 stage_role이 없으면 역할 괄호 없이 단계만 표시한다', async () => {
+  it('neutral_facts.stage만 있고 stage_role이 없으면(사실 블록) 역할 괄호 없이 단계만 표시한다', async () => {
     await mount(gate({ neutral_facts: { stage: 'concept_confirmed' } }));
-    expect(container.textContent).toContain(`${koMessages.cage.gateStageLabel}: 컨셉 확정`);
+    expect(container.textContent).toContain(`${koMessages.cage.recipeApprovalStageLabel} · 컨셉 확정`);
     expect(container.textContent).not.toContain('(디렉터)');
   });
 
   it('비레시피 게이트(neutral_facts.stage 없음)는 단계 줄 자체가 안 뜬다(회귀 0)', async () => {
     await mount(gate({ neutral_facts: null }));
     expect(container.textContent).not.toContain(koMessages.cage.gateStageLabel);
+    expect(container.textContent).not.toContain(koMessages.cage.recipeApprovalStageLabel);
+  });
+
+  it('서명 플로우 분기(risk_grade=high, 사실 블록 없음)는 footer meta 줄이 그대로 유지된다(중복이 아니므로 유지, story #4091)', async () => {
+    await mount(gate({
+      can_approve: true, risk_grade: 'high',
+      neutral_facts: { stage: 'concept_confirmed', stage_role: 'Director' },
+    }));
+    expect(container.textContent).toContain(`${koMessages.cage.gateStageLabel}: 컨셉 확정 (디렉터)`);
   });
 });
