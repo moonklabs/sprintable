@@ -60,6 +60,13 @@
  * 「상태색·브랜드 색을 다른 계열의 tint/bg 위 «텍스트»로 쓰지 않는다. tint/bg 위 글자는
  * 언제나 text-foreground — 계열 정체성은 border·bg·아이콘으로 전한다.」 brand·primary도
  * 이 가드의 텍스트 축이다(EXTRA_TEXT_COLORS, #4102 AC1 — cross-family, #4048 재현).
+ *
+ * story #4123 AC2(대비 가드 잔여 2, 페드루 PO 지시 2026-09-21) — #4102가 brand·primary만
+ * cross-family로 넓혔던 것을 FAMILIES(destructive·info·success·warning) 자신에게도
+ * 적용한다. 그라운딩 실측: token-math 층(verify-tint-foreground-contrast.ts)에서
+ * `text-{A} on bg-{B}-tint/bg`(A≠B, 상태색끼리 교차) 11건이 AA(4.5:1) 미달로 나왔는데
+ * usage 층은 same-family만 봐서 무방비였다 — 실사용 0건(usage 실측 확認)이라 baseline은
+ * 0으로 착지(아래 loadBaseline이 여전히 «늘지 않음»만 본다).
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
@@ -92,6 +99,18 @@ function extraTextRe(color: (typeof EXTRA_TEXT_COLORS)[number]): RegExp {
   return new RegExp(`(?<![\\w-])text-${color}(?![\\w-])`);
 }
 
+/** story #4123 AC2(대비 가드 잔여 2, 페드루 PO 지시 2026-09-21) — brand·primary만 cross-family로
+ * 보던 것을 FAMILIES(destructive·info·success·warning) 자신에게도 넓힌다. #4123 그라운딩
+ * 실측: 이 4색은 same-family(위 첫 루프)만 봤을 뿐 «다른 계열의 tint/bg 위 자기 색 텍스트»
+ * (예: text-warning on bg-info-tint)는 안 봤다 — token-math 층(verify-tint-foreground-
+ * contrast.ts)에서 이 조합 11건이 AA 미달로 실측됐는데(#4123 디디 실측 표), usage 층은
+ * 무방비였다. brand/primary와 정확히 같은 함수(textRe(color) + bg 아무거나)를 재사용하되
+ * `family === color`(자기 계열)는 건너뛴다 — same-family는 이미 첫 루프가 본다(중복 카운트
+ * 방지). */
+function textRe(color: TextColor): RegExp {
+  return (FAMILIES as readonly string[]).includes(color) ? familyTextRe(color as Family) : extraTextRe(color as (typeof EXTRA_TEXT_COLORS)[number]);
+}
+
 export interface TintTextHit {
   family: TextColor;
   literal: string;
@@ -99,7 +118,8 @@ export interface TintTextHit {
 
 /** 리터럴 하나(따옴표 안 내용물)에서 같은 계열의 bg-tint/알파 + text-family 쌍을 찾는다.
  * story #4102 — brand·primary는 위 EXTRA_TEXT_COLORS 주석대로 cross-family(기존 4계열의
- * bg 아무거나 + brand/primary 텍스트)로 추가 검사한다. */
+ * bg 아무거나 + brand/primary 텍스트)로 추가 검사한다. story #4123 AC2 — FAMILIES 4색도
+ * 같은 cross-family 축을 탄다(자기 계열만 skip). */
 export function findTintTextPairs(literal: string): TintTextHit[] {
   const hits: TintTextHit[] = [];
   for (const family of FAMILIES) {
@@ -107,9 +127,11 @@ export function findTintTextPairs(literal: string): TintTextHit[] {
       hits.push({ family, literal });
     }
   }
-  for (const color of EXTRA_TEXT_COLORS) {
-    if (!extraTextRe(color).test(literal)) continue;
+  const crossFamilyTextColors: readonly TextColor[] = [...FAMILIES, ...EXTRA_TEXT_COLORS];
+  for (const color of crossFamilyTextColors) {
+    if (!textRe(color).test(literal)) continue;
     for (const family of FAMILIES) {
+      if (family === color) continue; // same-family는 위 첫 루프가 이미 센다(중복 방지).
       if (familyBgRe(family).test(literal)) {
         hits.push({ family: color, literal });
       }
