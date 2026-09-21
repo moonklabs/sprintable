@@ -1708,6 +1708,16 @@ async def _render_gate_verdict_message(
     return "\n".join(lines)
 
 
+# story #4088(E-RECIPE-1, PO 분담조정 2026-09-21 "2/2") — stage_metadata[stage].capability.kind
+# → 안내 문구 i18n_catalog 키. recipe_gate_hooks.py::_GATE_TYPE_SEALED_FIELDS와 동일
+# 패턴(닫힌 조회, 새 kind 추가 시 여기 한 줄만 늘리면 됨) — "generate"는 live_generation
+# stage가 이미 쓰던 값(#4058/#4063), "attach_video"는 0387 마이그가 신설.
+_CAPABILITY_KIND_HINTS: dict[str, str] = {
+    "attach_video": "events.capability_hint_attach_video",
+    "generate": "events.capability_hint_master_cut_evidence",
+}
+
+
 async def _render_event_message_content(
     db: AsyncSession, *, org_id: uuid.UUID, definition, payload: dict, resolved_locale: str = "ko",
 ) -> str:
@@ -1768,6 +1778,18 @@ async def _render_event_message_content(
         f"- 할 일: {rendered_action}",
     ]
 
+    # story #4088(E-RECIPE-1, PO 분담조정 2026-09-21 "2/2") — 리허설 1호 실측 구멍 ①②:
+    # role/action만으로는 "무엇을 만들지"는 알아도 산출물을 제품에 편입시키는 방법(①)이나
+    # 계보 생성에 필요한 evidence 형식(②)을 몰랐다. 하드코딩 0 — 지금 stage의 capability.
+    # kind 선언에서만 유도(live_generation.capability.kind=="generate"는 #4058/#4063
+    # 기존 선언 그대로, verification/editing.capability.kind=="attach_video"는 이 카드
+    # 0387 마이그 신설).
+    current_capability = stage_meta.get("capability")
+    if isinstance(current_capability, dict):
+        _capability_hint_key = _CAPABILITY_KIND_HINTS.get(current_capability.get("kind"))
+        if _capability_hint_key:
+            lines.append(f"- {t(_capability_hint_key, resolved_locale)}")
+
     next_stage = _next_recipe_stage(definition, stage)
 
     # story #4076 ④ — 게이트가 어느 발행에 걸리는지에 따라 다음 행동 문구가 갈린다
@@ -1818,6 +1840,13 @@ async def _render_event_message_content(
             lines.append(f"- {t('events.stage_gate_opens_on_publish', resolved_locale)}")
             for spec in _sealed_specs:
                 lines.append(f"- {t(spec.explanation_catalog_key, resolved_locale)}")
+            # story #4088(E-RECIPE-1, PO 분담조정 "2/2") — 리허설 1호 실측 구멍 ③: 댄이
+            # pending_approval 게이트가 열리는 걸 몰라 승인 대기만 하다 "같은 스토리에
+            # 채널 초안을 제출하면 자동 충족"(story #4069, PR #4442, channel_posts.py 제출
+            # 시점 Hook A) 경로를 놓쳤다. gate_type 자체로 유도(stage 이름 하드코딩 0) —
+            # external_publish 게이트가 열리는 자리마다 동일하게 뜬다(레시피 1호뿐 아님).
+            if _next_gate_decl.get("type") == "external_publish":
+                lines.append(f"- {t('events.gate_hint_external_publish_auto_satisfy', resolved_locale)}")
     else:
         lines.append("- 다음 단계: 없음(마지막 stage)")
 
