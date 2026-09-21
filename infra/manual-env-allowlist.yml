@@ -105,6 +105,13 @@ services:
       - key: GATE_CONFIG_ENFORCE_ORG_ALLOWLIST
         reason: org allowlist 값 — 수동 편집.
         owner: TBD
+      - key: GENERATION_CONNECTOR_CREDENTIAL_ENCRYPTION_KEY
+        reason: >-
+          story #4101 MultiFernet 암호화 키 — org_generation_connectors.encrypted_
+          credentials 봉인용(generation_connector_credential_crypto.py, CHANNEL_
+          CREDENTIAL_ENCRYPTION_KEY와 동형·독립 시크릿). Secret Manager 등록·Cloud Run
+          env 배선 PO 수동 프로비저닝 — 부트스트랩 스크립트 미편입.
+        owner: TBD
       - key: GITHUB_APP_CLIENT_ID
         reason: GitHub App 자격증명 — 부트스트랩 스크립트 미편입, 수동 시크릿 계열.
         owner: TBD
