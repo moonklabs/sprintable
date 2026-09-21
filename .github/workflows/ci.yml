@@ -1891,6 +1891,15 @@ jobs:
       - name: "Verify non-text icon contrast (story #4123 AC3 regression guard)"
         run: pnpm --filter web verify:nontext-icon-contrast
 
+      # story #4125(라이브 실측, 페드루 PO 2026-09-21) — globals.css 최상위(레이어 밖) 단일-
+      # 클래스 선택자 규칙 재유입 가드. Cascade Layers 스펙상 레이어 밖 규칙은 명시도·순서
+      # 무관하게 모든 @layer를 항상 이긴다 — `.proof-surface`가 최상위에 있어 같은 요소의
+      # `lg:sticky` 유틸리티가 무력했던 것이 #4121 sticky 라이브 FAIL의 근본원인이었다.
+      # ALLOWLIST(.dark·.dashboard-shell-root, 둘 다 커스텀 프로퍼티만 선언해 유틸리티와
+      # 경쟁 불가) 밖의 새 최상위 클래스 규칙이 하나라도 있으면 즉시 FAIL(baseline 없음).
+      - name: "Verify no unlayered CSS class rules re-entry (story #4125 regression guard)"
+        run: pnpm --filter web verify:no-unlayered-css-class
+
       # story #2590 (A) 정적 프리필터: 자매 가드 verify:no-new-tint-color-text는 «한 리터럴 안»의
       # bg-X+text-X만 본다. 이 가드는 AST로 «조상 요소가 pale-tint 배경, 자식 요소가 계열색 글자»인
       # 교차-요소 조합을 잡는다(#2960 hitl-card·#2940 cluster류). baseline(develop 기준 시드) 밖의
