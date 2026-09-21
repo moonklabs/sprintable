@@ -206,6 +206,11 @@ export default function GateDetailPage() {
   // 독자 판정으로 서버를 덮지 않는다(AC2). needsAction=true인데 can_approve=false면(권한 없는
   // 뷰어) 아래에서 읽기전용 사유 문구로 분기한다(무권한 상태에서 액션 버튼 자체를 렌더하지 않음).
   const canAct = needsAction && gate?.can_approve === true;
+  // story #4121(E-RECIPE-1 Phase 3 폴리시, 유나 #4056 v2 제안·PO 확定 2026-09-21) — 2열+sticky
+  // 승인 패널은 우 열에 «액션»(GateSignatureApproval 또는 평문 승인/거부 버튼)이 실제로 있을
+  // 때만 의미가 있다. needsAction&&canAct(아래 4갈래 분기의 c·d 갈래)만 참 — a(이미 해소)·
+  // b(무권한)는 우 열이 빌 것이라 단일열 그대로 둔다(PO 지시 "우 열이 빌 때는 단일열").
+  const showActionColumn = !!gate && needsAction && canAct;
   // story #3113 — question 없으면(BE 미배선 예외 등) null → 기존 title/해시 폴백으로 자연 후퇴.
   const decisionFacts = gate && isDecisionGate(gate) ? deriveDecisionFacts(gate) : null;
   const requiresOptionChoice = decisionFacts !== null && decisionFacts.options.length > 0;
@@ -324,7 +329,20 @@ export default function GateDetailPage() {
           </button>
         }
       />
-      <div className="mx-auto flex min-h-full w-full max-w-2xl flex-1 flex-col gap-5 px-4 py-5">
+      {/* story #4121 — 컨테이너 폭은 우 열(sticky 승인 패널)이 실제로 그려질 때만 lg:에서
+          max-w-6xl로 넓어진다(2열 grid가 필요로 하는 여백). <lg 및 우 열 없는 상태는 기존
+          max-w-2xl 그대로(회귀 0 — 유나 시안 §2 "≤1024는 현 순서·폭 그대로").
+          ⚠️정정(페드루 PO CHANGES-1, 2026-09-21 18:14Z) — 2열 grid는 ProofCapsule
+          «밖»(페이지 레벨)이어야 한다. ProofCapsule의 셸(CutCornerShell, proof-capsule.tsx:152)
+          은 story #2978 사유로 overflow-hidden이 의도된 값인데, CSS 스펙상 position:sticky의
+          스크롤 컨테이너는 «overflow≠visible인 가장 가까운 조상»이라 grid를 그 footer 안에
+          두면 우 열이 캡슐 박스 기준으로만 붙고 실제 페이지 스크롤(dashboard-shell
+          overflow-y-auto)엔 안 반응한다(jsdom 클래스 단언으론 못 잡히고 dev-app 실측에서만
+          보임). grid를 이 컨테이너로 끌어올려 ProofCapsule과 액션 카드를 형제로 둔다. */}
+      <div
+        data-testid="gate-detail-container"
+        className={`mx-auto flex min-h-full w-full max-w-2xl flex-1 flex-col gap-5 px-4 py-5 ${showActionColumn ? 'lg:max-w-6xl lg:grid lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start lg:gap-6' : ''}`}
+      >
         {loading ? (
           <p className="text-sm text-muted-foreground">{t('gateInboxLoading')}</p>
         ) : notFound || !gate ? (
@@ -336,17 +354,15 @@ export default function GateDetailPage() {
           // 분기를 못 담아 — gate/human 프롭은 안 주고(GateRow 자체를 비활성) 전부 footer로
           // 이관했다. proofState/stateLabel은 gate-risk.ts의 deriveGateProofState()로 F1/F3와
           // 공유(카디르 F2 QA LOW①·② 처방 — 3곳 중복 로직 단일화+문구 통일).
-          <ProofCapsule
-            density="full"
-            proofState={deriveGateProofState(gate.status).proofState}
-            stateLabel={(() => {
-              const { statusKey } = deriveGateProofState(gate.status);
-              return statusKey ? t(statusKey) : gate.status;
-            })()}
-            claim={decisionFacts?.question ?? gate.work_item_summary?.title ?? `#${gate.work_item_id.slice(0, 8)}`}
-            className="max-w-none"
-            footer={
-              <div className="mt-3.5 space-y-3 border-t border-proof-line-soft pt-3">
+          //
+          // story #4121(2열+sticky, 유나 #4056 v2·PO 확定 2026-09-21) — 아래 IIFE는 footer
+          // JSX를 두 배치(showActionColumn true/false)에서 재사용할 지역 상수(gateMetaFacts·
+          // evidencePanels·resolvedStatusExtra·unauthorizedExtra·signatureBlock·
+          // plainActionExtra·asideExtras)를 return 전에 선언하기 위한 스코프일 뿐 — 로직·
+          // 컴포넌트 내부는 100% 무변경(diff 경계 = 레이아웃 유틸만).
+          (() => {
+            const gateMetaFacts = (
+              <>
                 <div className="flex flex-wrap items-center gap-1.5">
                   {/* story #2937(PR#3372, 2026-08-22)로 chip variant 기본 자체가
                       text-foreground로 이행 — PR#3367의 이 지점 className 오버라이드는
@@ -445,141 +461,148 @@ export default function GateDetailPage() {
                     ) : null}
                   </div>
                 ) : null}
+              </>
+            );
 
-                {!needsAction ? (
-                  <div className="space-y-3">
-                    <GateEvidence gate={gate} />
-                    <GateProductionWorkbenchEvidence gate={gate} />
-                    <GateLineagePerformance gate={gate} />
-                    {/* story #2043 AC1: status·requires_human·evidence_status 조합별 단일 문장 —
-                        조합표(코드 근거):
-                        - status≠pending → 이미 해소됨(무엇으로 닫혔는지)
-                        - status=pending, decision=block → 자동 차단·읽기전용
-                        - status=pending, decision=auto_merge(requires_human 무관, 실제 BE 판정값) → 자동 통과·액션 불필요
-                        - status=pending, 그 외 전부(decision=null 또는 requires_human=false라 액션 미노출)
-                          → "판정 미거침" — gateDecision()이 이미 requires_human을 반영해 null을
-                          리턴하므로 여기서 "Auto-passed"를 함부로 말하지 않는다(진짜 판정 없이
-                          Auto로 단정하던 게 자기모순의 절반이었다). */}
-                    <p className="text-[11px] text-muted-foreground">
-                      {gate.status !== 'pending'
-                        ? (gate.resolver_id && memberNames[gate.resolver_id]
-                            // story #3806 PR 9(페드루 PO 리뷰 2026-09-11 실측) — 이름을 아직
-                            // 모르면(비동기 조회 경합·조직 밖 등) id 스니펫을 날것으로 보여주던
-                            // 자리를 없앴다 — 이름을 확실히 알 때만 「{name}님이 처리」, 모르면
-                            // 그냥 「이미 처리됨」(gateDetailResolvedStatus)으로 조용히 물러난다
-                            // (raw id 노출 경로 자체를 제거 — 타이밍이든 진짜 미스든 둘 다 막힘).
-                            ? t('gateDetailResolvedByStatus', { name: memberNames[gate.resolver_id], status: gateStatusLabel(gate.status, t) })
-                            : t('gateDetailResolvedStatus', { status: gateStatusLabel(gate.status, t) }))
-                        : gateDecision(gate) === 'block' ? t('gateReadonlyBlock')
-                        : gateDecision(gate) === 'auto_merge' ? t('gateReadonlyAuto')
-                        : t('gateReadonlyNoVerdict')}
-                    </p>
-                    {/* story #2631 — 오클릭 정정(방금 본인이 해소한 게이트, 5분 창). */}
-                    {isUndoEligible(gate, currentTeamMemberId) ? (
-                      <GateUndoButton gateId={gate.id} onUndone={() => void fetchGate()} />
-                    ) : null}
-                  </div>
-                ) : !canAct ? (
-                  // story #2091(P0) — needsAction=true(게이트 자체는 사람 판단이 필요)이지만
-                  // gate.can_approve=false(이 caller는 승인 권한 없음, BE per-caller 판정). 액션
-                  // 버튼을 렌더하지 않고 왜 못 누르는지를 정직하게 알린다 — "이미 처리됨"과는
-                  // 다른 사유이므로 별개 문구(gateReadonlyNotAuthorized)를 쓴다.
-                  //
-                  // story #3006(유나 design 관찰, 페드루 확定 2026-08-24) — #3001 카드배타화
-                  // 이후 이 표면(gate 상세, 직접 URL/감사 진입)이 「무권한」과 「지정 결재선이
-                  // 걸려 있음」을 같은 문구로 뭉뚱그리던 유일한 실 표적(챗카드는 비지정자에게
-                  // 애초 안 감 — approval-request-card.tsx 주석 참조). 이름은 안 싣는다(BE도
-                  // 안 주고, 지어내지 않는다는 이 코드베이스 관례 그대로).
-                  <div className="space-y-3">
-                    <GateEvidence gate={gate} />
-                    <GateProductionWorkbenchEvidence gate={gate} />
-                    <GateLineagePerformance gate={gate} />
-                    <p className="text-[11px] text-muted-foreground">
-                      {gate.designated_approver_id && gate.designated_approver_id !== currentTeamMemberId
-                        ? t('gateReadonlyDesignatedElsewhere')
-                        : t('gateReadonlyNotAuthorized')}
-                    </p>
-                  </div>
-                ) : isSigFlowGate || rejectPanelOpen ? (
-                  // story #2975(유나양 design 판정 2026-08-24, PO 확定) — 409(gate_head_changed)
-                  // 후 fetchGate() 재조회로 gate.github_check_run_sha가 바뀌어도, key 없이는 이
-                  // 컴포넌트가 그대로 살아있어 evidenceViewed/reason state가 안 리셋된다 —
-                  // canSign이 true로 유지된 채 새 SHA(B)로 자동 재승인 가능(PO가 B를 실제로
-                  // 다시 안 봄) = 서버가 막은 "리뷰 안 한 SHA 승인"이 UX 층에서 그대로 뚫림.
-                  // key={SHA}로 SHA가 바뀔 때마다 강제 remount — 세밀한 useEffect 리셋 목록은
-                  // 미래 state 추가마다 리셋 누락 사각을 만드는 구조(이번 사고와 동형 클래스)라
-                  // PO가 명시 기각, remount가 미래 state까지 구조적으로 안전(최소안 채택).
-                  <div className="space-y-2">
-                    <GateSignatureApproval
-                      key={gate.github_check_run_sha}
-                      gate={gate}
-                      resolving={resolving}
-                      error={transitionError}
-                      onApprove={(reason) => void transition('approved', reason, true)}
-                      onReject={(reason) => void transition('rejected', reason)}
-                      onDiscuss={(reason) => void discuss(reason)}
-                    />
-                    {/* story #3334 — 저위험 게이트는 «변경 요청» 클릭으로만 이 패널에 들어온다
-                        (원래 근거열람+사유 요구가 없는 등급) — 잘못 눌렀을 때 원탭 승인 화면으로
-                        되돌아갈 길을 남긴다. 고위험(isSigFlowGate) 게이트는 이 패널이 유일한
-                        경로라 취소 버튼 자체가 무의미(숨김).*/}
-                    {!isSigFlowGate ? (
-                      <Button type="button" variant="ghost" size="sm" className="w-full text-muted-foreground" disabled={resolving} onClick={() => setRejectPanelOpen(false)}>
-                        {t('cancel')}
-                      </Button>
-                    ) : null}
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    <GateEvidence gate={gate} />
-                    <GateProductionWorkbenchEvidence gate={gate} />
-                    <GateLineagePerformance gate={gate} />
-                    {transitionError ? (
-                      <p
-                        className="rounded-lg border border-destructive/30 bg-destructive-tint px-3 py-2 text-xs text-foreground"
-                        role="alert"
-                        aria-live="assertive"
-                        aria-atomic="true"
-                      >
-                        {t('gateTransitionError', { reason: transitionError })}
-                      </p>
-                    ) : null}
-                    <div className="flex gap-2">
-                      <Button
-                        variant="outline"
-                        className="min-h-12 flex-1 gap-1.5"
-                        disabled={resolving}
-                        onClick={() => setRejectPanelOpen(true)}
-                      >
-                        <XCircle className="size-4" />
-                        {t('gateReject')}
-                      </Button>
-                      <Button
-                        className="min-h-12 flex-1 gap-1.5"
-                        disabled={resolving || (requiresOptionChoice && !selectedOption)}
-                        // story #3113(AC3) — 선택안을 note에 실어 resolution_note로 영구 기록.
-                        onClick={() => void transition('approved', requiresOptionChoice ? t('decisionSelectedNote', { option: selectedOption ?? '' }) : undefined)}
-                      >
-                        <CheckCircle className="size-4" />
-                        {resolving ? '...' : t(approveButtonLabelKey)}
-                      </Button>
-                    </div>
-                    {requiresOptionChoice && !selectedOption ? (
-                      <p className="text-center text-xs text-muted-foreground">{t('decisionSelectHint')}</p>
-                    ) : null}
-                    {/* story #2631 — 「보류(논의 필요)」. 저위험 경로엔 사유 입력창이 없어 다이얼로그로. */}
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      className="w-full text-muted-foreground"
-                      disabled={resolving}
-                      onClick={() => setDiscussDialogOpen(true)}
-                    >
-                      {t('gateDiscussSubmit')}
-                    </Button>
-                  </div>
-                )}
+            const evidencePanels = (
+              <>
+                <GateEvidence gate={gate} />
+                <GateProductionWorkbenchEvidence gate={gate} />
+                <GateLineagePerformance gate={gate} />
+              </>
+            );
 
+            // story #2043 AC1: status·requires_human·evidence_status 조합별 단일 문장 —
+            // 조합표(코드 근거):
+            // - status≠pending → 이미 해소됨(무엇으로 닫혔는지)
+            // - status=pending, decision=block → 자동 차단·읽기전용
+            // - status=pending, decision=auto_merge(requires_human 무관, 실제 BE 판정값) → 자동 통과·액션 불필요
+            // - status=pending, 그 외 전부(decision=null 또는 requires_human=false라 액션 미노출)
+            //   → "판정 미거침" — gateDecision()이 이미 requires_human을 반영해 null을
+            //   리턴하므로 여기서 "Auto-passed"를 함부로 말하지 않는다(진짜 판정 없이
+            //   Auto로 단정하던 게 자기모순의 절반이었다).
+            const resolvedStatusExtra = (
+              <>
+                <p className="text-[11px] text-muted-foreground">
+                  {gate.status !== 'pending'
+                    ? (gate.resolver_id && memberNames[gate.resolver_id]
+                        // story #3806 PR 9(페드루 PO 리뷰 2026-09-11 실측) — 이름을 아직
+                        // 모르면(비동기 조회 경합·조직 밖 등) id 스니펫을 날것으로 보여주던
+                        // 자리를 없앴다 — 이름을 확실히 알 때만 「{name}님이 처리」, 모르면
+                        // 그냥 「이미 처리됨」(gateDetailResolvedStatus)으로 조용히 물러난다
+                        // (raw id 노출 경로 자체를 제거 — 타이밍이든 진짜 미스든 둘 다 막힘).
+                        ? t('gateDetailResolvedByStatus', { name: memberNames[gate.resolver_id], status: gateStatusLabel(gate.status, t) })
+                        : t('gateDetailResolvedStatus', { status: gateStatusLabel(gate.status, t) }))
+                    : gateDecision(gate) === 'block' ? t('gateReadonlyBlock')
+                    : gateDecision(gate) === 'auto_merge' ? t('gateReadonlyAuto')
+                    : t('gateReadonlyNoVerdict')}
+                </p>
+                {/* story #2631 — 오클릭 정정(방금 본인이 해소한 게이트, 5분 창). */}
+                {isUndoEligible(gate, currentTeamMemberId) ? (
+                  <GateUndoButton gateId={gate.id} onUndone={() => void fetchGate()} />
+                ) : null}
+              </>
+            );
+
+            // story #2091(P0) — needsAction=true(게이트 자체는 사람 판단이 필요)이지만
+            // gate.can_approve=false(이 caller는 승인 권한 없음, BE per-caller 판정). 액션
+            // 버튼을 렌더하지 않고 왜 못 누르는지를 정직하게 알린다 — "이미 처리됨"과는
+            // 다른 사유이므로 별개 문구(gateReadonlyNotAuthorized)를 쓴다.
+            //
+            // story #3006(유나 design 관찰, 페드루 확定 2026-08-24) — #3001 카드배타화
+            // 이후 이 표면(gate 상세, 직접 URL/감사 진입)이 「무권한」과 「지정 결재선이
+            // 걸려 있음」을 같은 문구로 뭉뚱그리던 유일한 실 표적(챗카드는 비지정자에게
+            // 애초 안 감 — approval-request-card.tsx 주석 참조). 이름은 안 싣는다(BE도
+            // 안 주고, 지어내지 않는다는 이 코드베이스 관례 그대로).
+            const unauthorizedExtra = (
+              <p className="text-[11px] text-muted-foreground">
+                {gate.designated_approver_id && gate.designated_approver_id !== currentTeamMemberId
+                  ? t('gateReadonlyDesignatedElsewhere')
+                  : t('gateReadonlyNotAuthorized')}
+              </p>
+            );
+
+            // story #2975(유나양 design 판정 2026-08-24, PO 확定) — 409(gate_head_changed)
+            // 후 fetchGate() 재조회로 gate.github_check_run_sha가 바뀌어도, key 없이는 이
+            // 컴포넌트가 그대로 살아있어 evidenceViewed/reason state가 안 리셋된다 —
+            // canSign이 true로 유지된 채 새 SHA(B)로 자동 재승인 가능(PO가 B를 실제로
+            // 다시 안 봄) = 서버가 막은 "리뷰 안 한 SHA 승인"이 UX 층에서 그대로 뚫림.
+            // key={SHA}로 SHA가 바뀔 때마다 강제 remount — 세밀한 useEffect 리셋 목록은
+            // 미래 state 추가마다 리셋 누락 사각을 만드는 구조(이번 사고와 동형 클래스)라
+            // PO가 명시 기각, remount가 미래 state까지 구조적으로 안전(최소안 채택).
+            const signatureBlock = (
+              <div className="space-y-2">
+                <GateSignatureApproval
+                  key={gate.github_check_run_sha}
+                  gate={gate}
+                  resolving={resolving}
+                  error={transitionError}
+                  onApprove={(reason) => void transition('approved', reason, true)}
+                  onReject={(reason) => void transition('rejected', reason)}
+                  onDiscuss={(reason) => void discuss(reason)}
+                />
+                {/* story #3334 — 저위험 게이트는 «변경 요청» 클릭으로만 이 패널에 들어온다
+                    (원래 근거열람+사유 요구가 없는 등급) — 잘못 눌렀을 때 원탭 승인 화면으로
+                    되돌아갈 길을 남긴다. 고위험(isSigFlowGate) 게이트는 이 패널이 유일한
+                    경로라 취소 버튼 자체가 무의미(숨김).*/}
+                {!isSigFlowGate ? (
+                  <Button type="button" variant="ghost" size="sm" className="w-full text-muted-foreground" disabled={resolving} onClick={() => setRejectPanelOpen(false)}>
+                    {t('cancel')}
+                  </Button>
+                ) : null}
+              </div>
+            );
+
+            const plainActionExtra = (
+              <>
+                {transitionError ? (
+                  <p
+                    className="rounded-lg border border-destructive/30 bg-destructive-tint px-3 py-2 text-xs text-foreground"
+                    role="alert"
+                    aria-live="assertive"
+                    aria-atomic="true"
+                  >
+                    {t('gateTransitionError', { reason: transitionError })}
+                  </p>
+                ) : null}
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    className="min-h-12 flex-1 gap-1.5"
+                    disabled={resolving}
+                    onClick={() => setRejectPanelOpen(true)}
+                  >
+                    <XCircle className="size-4" />
+                    {t('gateReject')}
+                  </Button>
+                  <Button
+                    className="min-h-12 flex-1 gap-1.5"
+                    disabled={resolving || (requiresOptionChoice && !selectedOption)}
+                    // story #3113(AC3) — 선택안을 note에 실어 resolution_note로 영구 기록.
+                    onClick={() => void transition('approved', requiresOptionChoice ? t('decisionSelectedNote', { option: selectedOption ?? '' }) : undefined)}
+                  >
+                    <CheckCircle className="size-4" />
+                    {resolving ? '...' : t(approveButtonLabelKey)}
+                  </Button>
+                </div>
+                {requiresOptionChoice && !selectedOption ? (
+                  <p className="text-center text-xs text-muted-foreground">{t('decisionSelectHint')}</p>
+                ) : null}
+                {/* story #2631 — 「보류(논의 필요)」. 저위험 경로엔 사유 입력창이 없어 다이얼로그로. */}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="w-full text-muted-foreground"
+                  disabled={resolving}
+                  onClick={() => setDiscussDialogOpen(true)}
+                >
+                  {t('gateDiscussSubmit')}
+                </Button>
+              </>
+            );
+
+            const asideExtras = (
+              <>
                 {/* story #3806 PR 10(페드루 PO 실측 2026-09-11 16:18Z — 결함 1) — ads_boost
                     실행 블록(실행 중/시작·중지)을 gate.status===`'approved'`로 게이트하면
                     「승인됨→예산·기간 변경→pending 재오픈(reapproval_required)」 도중 실제로는
@@ -613,9 +636,76 @@ export default function GateDetailPage() {
                 <div className="border-t border-proof-line-soft pt-3">
                   <GateActivityHistory gateId={gate.id} refreshKey={activityRefreshKey} />
                 </div>
-              </div>
-            }
-          />
+              </>
+            );
+
+            const proofCapsuleEl = (
+              <ProofCapsule
+                density="full"
+                proofState={deriveGateProofState(gate.status).proofState}
+                stateLabel={(() => {
+                  const { statusKey } = deriveGateProofState(gate.status);
+                  return statusKey ? t(statusKey) : gate.status;
+                })()}
+                claim={decisionFacts?.question ?? gate.work_item_summary?.title ?? `#${gate.work_item_id.slice(0, 8)}`}
+                className="max-w-none"
+                footer={
+                  showActionColumn ? (
+                    // story #4121(페드루 PO CHANGES-1 정정, 2026-09-21 18:14Z) — 우 열이
+                    // 실제로 그려지는 갈래(c·d)에선 이 캡슐 footer엔 좌 열 콘텐츠(산출물·초안·
+                    // 역참조·이력)만 남는다 — 우 열(facts+액션)은 이제 캡슐 밖 형제 카드로
+                    // 옮겨졌다(sticky 스크롤 컨테이너 버그, 아래 gate-detail-container 주석
+                    // 참조).
+                    <div className="mt-3.5 space-y-3 border-t border-proof-line-soft pt-3">
+                      {evidencePanels}
+                      {asideExtras}
+                    </div>
+                  ) : (
+                    // story #4121 — 우 열이 빌 자리(이미 해소·무권한, 4갈래 a·b)는 기존
+                    // 단일열 그대로(diff 0 — 순서·폭 회귀 없음).
+                    <div data-testid="gate-detail-single-col" className="mt-3.5 space-y-3 border-t border-proof-line-soft pt-3">
+                      {gateMetaFacts}
+                      {!needsAction ? (
+                        <div className="space-y-3">
+                          {evidencePanels}
+                          {resolvedStatusExtra}
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          {evidencePanels}
+                          {unauthorizedExtra}
+                        </div>
+                      )}
+                      {asideExtras}
+                    </div>
+                  )
+                }
+              />
+            );
+
+            if (!showActionColumn) return proofCapsuleEl;
+
+            // story #4121(페드루 PO CHANGES-1, 2026-09-21 18:14Z) — 2열 grid는
+            // gate-detail-container(페이지 레벨, ProofCapsule 밖)에서 걸린다(위 컨테이너
+            // className 주석 참조) — 여기선 ProofCapsule과 우 열 액션 카드를 «형제»로만
+            // 반환한다(Fragment — 감싸는 DOM 없이 그리드 아이템 2개가 그대로 노출).
+            // 우 열은 캡슐과 같은 재질(proof-surface, doc ea94dac4 정본)이지만
+            // proof-surface-lift만 쓰고 overflow-hidden은 뺀다(그게 sticky를 깨는
+            // 원인이었다 — CutCornerShell 주석 §2978 참조, shrink-0도 overflow-hidden의
+            // 부작용 상쇄용이라 같이 불요해짐).
+            return (
+              <>
+                {proofCapsuleEl}
+                <div
+                  data-testid="gate-detail-action-column"
+                  className="proof-surface proof-surface-lift mt-3 space-y-3 border border-proof-line bg-proof-panel p-4 lg:mt-0 lg:sticky lg:top-12 lg:self-start"
+                >
+                  {gateMetaFacts}
+                  {isSigFlowGate || rejectPanelOpen ? signatureBlock : <div className="space-y-3">{plainActionExtra}</div>}
+                </div>
+              </>
+            );
+          })()
         )}
       </div>
       {gate ? (
