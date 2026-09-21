@@ -1736,6 +1736,32 @@ async def publish_registry_event(
     )
 
 
+async def _find_existing_stage_publish(
+    db: AsyncSession, *, org_id: uuid.UUID, definition_key: str, work_item_type: str, work_item_id: str, stage: str,
+) -> ConversationMessage | None:
+    """story #4075 — 게이트 없는 첫 stage(draft) 재발행 이력 조회. publish-history(#2665)와
+    동일 SSOT(conversation_messages.msg_metadata['event'], #2637 AC 0-a payload additive)를
+    work_item_type/work_item_id/stage까지 좁힌다 — 신규 로그 테이블 발명 안 함. 신규 index
+    없이 JSONB astext 필터라 org 규모가 커지면 느려질 수 있다(그라운딩만 — 이 스토리
+    스코프에선 draft 발행 시점에만, 그것도 org당 드물게 도는 쿼리라 실측 없이 낙관하지
+    않되 그대로 둔다. 느려지면 별 인덱스 카드)."""
+    from app.models.conversation import Conversation, ConversationMessage
+
+    return (await db.execute(
+        select(ConversationMessage)
+        .join(Conversation, Conversation.id == ConversationMessage.conversation_id)
+        .where(
+            Conversation.org_id == org_id,
+            ConversationMessage.msg_metadata["event"]["event_key"].astext == definition_key,
+            ConversationMessage.msg_metadata["event"]["payload"]["work_item_type"].astext == work_item_type,
+            ConversationMessage.msg_metadata["event"]["payload"]["work_item_id"].astext == work_item_id,
+            ConversationMessage.msg_metadata["event"]["payload"]["stage"].astext == stage,
+        )
+        .order_by(ConversationMessage.created_at.desc())
+        .limit(1)
+    )).scalars().first()
+
+
 async def _publish_registry_event_core(
     db: AsyncSession,
     org_id: uuid.UUID,
@@ -1819,6 +1845,55 @@ async def _publish_registry_event_core(
             status_code=400,
             detail={"code": "invalid_payload", "message": str(e), "errors": e.errors},
         ) from e
+
+    # story #4075(FE 실사고 그라운딩, 2026-09-20, 페드루 PO 確定) — «레시피 시작» 버튼이
+    # 첫 stage(draft)를 발행하는데, 사람의 새로고침+재클릭이 같은 work_item에 draft를
+    # 중복 발행시킬 수 있다. 게이트 있는 stage는 이미 안전(create_gate가 (work_item_id,
+    # work_item_type, gate_type) 키로 멱등, recipe_gate_hooks.py) — 게이트 없는 stage
+    # 전부로 넓히면 미르코 그라운딩(#4076 조사 중 확인)대로 디렉터 재작업 요청 등 정당한
+    # 동일-stage 재발행(에이전트발)을 조용히 삼켜 다음 역할에게 알림이 안 가는 클래스가
+    # 새로 생긴다 — 그래서 **첫 stage 한정**. recipe_repeat_schedule.py 실측(같은 문제
+    # 조사) — repeat 메커니즘은 항상 **다음 회차의 새 work_item_id**를 겨냥해(last_story_id
+    # 로 이전 회차와 분리 추적) 같은 work_item_id에 첫 stage를 다시 쏘는 정당한 경로가
+    # 원천적으로 없다 — 그래서 시간 창(N분) 없이 **영구** 이력 기반으로 막아도 정당한
+    # 경로를 안 삼킨다(오히려 시간 창을 두면 "창 밖이면 통과"라는 새 엣지케이스가 생겨
+    # 더 복잡해진다). FE "진행 중" 표시도 이 판정과 대칭인 영구 이력 기반(§publish-status
+    # 엔드포인트)이라 시간이 지나도 버튼이 되살아나지 않는다.
+    first_stage = (definition.payload_schema.get("properties") or {}).get("stage", {}).get("enum") or []
+    stage = payload.get("stage")
+    work_item_type = payload.get("work_item_type")
+    work_item_id = payload.get("work_item_id")
+    if (
+        first_stage and stage == first_stage[0]
+        and isinstance(work_item_type, str) and work_item_type
+        and work_item_id
+    ):
+        # AC7(두 탭 동시 클릭) — 아래 "조회 후 없으면 발행"은 그 자체로 TOCTOU다(check-then-
+        # insert, [[feedback_check_then_insert_toctou]] 동형 — SELECT는 동시 두 트랜잭션
+        # 모두에서 "없음"을 볼 수 있다). allocate_story_number의 story.py 관례를 그대로
+        # 재사용 — 이 (org, definition, work_item, stage) 조합을 pg_advisory_xact_lock으로
+        # 직렬화한다. 이 함수는 락 획득부터 아래 send_message()의 실제 커밋까지 중간 commit이
+        # 0(위 두 지점 사이 grep 확認) — 두 번째 요청은 첫 요청의 커밋이 끝난 뒤에야 락을
+        # 얻어 그때는 이미 첫 메시지가 보인다.
+        await db.execute(select(func.pg_advisory_xact_lock(func.hashtext(
+            f"recipe_start:{org_id}:{definition.key}:{work_item_type}:{work_item_id}:{stage}"
+        ))))
+        existing_publish = await _find_existing_stage_publish(
+            db, org_id=org_id, definition_key=definition.key,
+            work_item_type=work_item_type, work_item_id=str(work_item_id), stage=str(stage),
+        )
+        if existing_publish is not None:
+            return {
+                "conversation_id": str(existing_publish.conversation_id),
+                "message_id": str(existing_publish.id),
+                "escalation_member_ids": [],
+                "broadcast_member_ids": [],
+                "zero_reach_warning": False,
+                # story #4075 — 호출자(FE·에이전트)가 "새로 발행됐다"와 "이미 발행돼
+                # 있었다(그 기존 발행분을 그대로 돌려줬다)"를 가를 수 있게 조용히 삼키지
+                # 않는다.
+                "deduplicated": True,
+            }
 
     from app.services.event_routing_resolver import (
         InvalidWorkItemReferenceError,
@@ -2979,6 +3054,103 @@ async def get_recipe_role_bindings(
             bindings[stage] = str(agent_id)
 
     return RecipeRoleBindingsResponse(bindings=bindings)
+
+
+class RecipeStartCandidate(BaseModel):
+    definition_id: str
+    key: str
+    name: str
+    first_stage: str
+    role_bound: bool
+    started: bool
+    conversation_id: str | None = None
+    message_id: str | None = None
+
+
+class RecipeStartCandidatesResponse(BaseModel):
+    candidates: list[RecipeStartCandidate]
+
+
+@router.get("/definitions/start-candidates", response_model=RecipeStartCandidatesResponse)
+async def get_recipe_start_candidates(
+    project_id: uuid.UUID,
+    work_item_type: str = Query(...),
+    work_item_id: uuid.UUID = Query(...),
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> RecipeStartCandidatesResponse:
+    """GET /api/v2/events/definitions/start-candidates — story #4075 AC1/AC6.
+
+    스토리 화면 «레시피 시작» 진입점의 활성화 판단용 단일 읽기. "적용된 레시피"는 신규
+    상태 필드가 아니라 RecipeRoleBinding에 이 project(또는 org 전역, project_id IS NULL)
+    행이 하나라도 있는 정의(apply_recipe_role_bindings가 그 upsert 유일 진입점, story
+    #3288) — 여기서도 신규 "적용" 컬럼을 만들지 않는다. 정의별로 첫 stage
+    (payload_schema.stage.enum[0], _cyclic_stages·get_event_publish_history와 동일 SSOT)
+    에 role이 실제로 바인딩됐는지(role_bound)와 이미 발행됐는지(started —
+    `_find_existing_stage_publish` 재사용, `_publish_registry_event_core`의 dedup 판정과
+    동일 SSOT라 새로고침·다른 탭·다른 사람 화면에서도 같게 보인다, AC6)를 한 번에 반환해
+    FE가 정의 수만큼 왕복하지 않게 한다.
+    """
+    from app.models.event_definition import EventDefinition
+    from app.models.recipe_role_binding import RecipeRoleBinding
+    from app.services.project_auth import require_project_access
+
+    await require_project_access(db, uuid.UUID(auth.user_id), project_id, org_id, not_found_detail="Project not found")
+
+    binding_rows = (await db.execute(
+        select(RecipeRoleBinding.event_definition_key, RecipeRoleBinding.stage).where(
+            RecipeRoleBinding.org_id == org_id,
+            or_(RecipeRoleBinding.project_id == project_id, RecipeRoleBinding.project_id.is_(None)),
+        )
+    )).all()
+    if not binding_rows:
+        return RecipeStartCandidatesResponse(candidates=[])
+    bound_pairs = {(k, s) for k, s in binding_rows}
+    applied_keys = sorted({k for k, _s in binding_rows})
+
+    definitions = (await db.execute(
+        select(EventDefinition)
+        .where(
+            EventDefinition.key.in_(applied_keys),
+            EventDefinition.enabled.is_(True),
+            or_(EventDefinition.org_id == org_id, EventDefinition.org_id.is_(None)),
+        )
+        # org 커스텀이 프리셋보다 우선(apply_recipe_role_bindings·_publish_registry_event_core
+        # 와 동일 우선순위) — key당 먼저 만난 행만 채택.
+        .order_by(EventDefinition.org_id.is_(None))
+    )).scalars().all()
+    by_key: dict[str, "EventDefinition"] = {}
+    for d in definitions:
+        by_key.setdefault(d.key, d)
+
+    candidates: list[RecipeStartCandidate] = []
+    for key in applied_keys:
+        definition = by_key.get(key)
+        if definition is None:
+            continue
+        stage_enum = ((definition.payload_schema.get("properties") or {}).get("stage") or {}).get("enum")
+        if not isinstance(stage_enum, list) or not stage_enum:
+            continue
+        first_stage = stage_enum[0]
+        role_bound = (key, first_stage) in bound_pairs
+
+        existing_publish = await _find_existing_stage_publish(
+            db, org_id=org_id, definition_key=key,
+            work_item_type=work_item_type, work_item_id=str(work_item_id), stage=str(first_stage),
+        )
+        candidates.append(RecipeStartCandidate(
+            definition_id=str(definition.id),
+            key=definition.key,
+            name=definition.name,
+            first_stage=first_stage,
+            role_bound=role_bound,
+            started=existing_publish is not None,
+            conversation_id=str(existing_publish.conversation_id) if existing_publish else None,
+            message_id=str(existing_publish.id) if existing_publish else None,
+        ))
+
+    return RecipeStartCandidatesResponse(candidates=candidates)
 
 
 class EventPublishHistoryItem(BaseModel):

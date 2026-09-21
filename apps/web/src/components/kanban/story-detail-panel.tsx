@@ -41,6 +41,7 @@ import { RejectedRelationsSection } from '@/components/shared/rejected-relations
 import { StoryOriginSection } from '@/components/shared/story-origin-section';
 import { EntityAwareTextarea } from '@/components/shared/entity-aware-textarea';
 import { EntityDispatchPanel } from '@/components/dispatch/entity-dispatch-panel';
+import { RecipeStartSection } from '@/components/kanban/recipe-start-section';
 import { PrLinkSection } from '@/components/integrations/pr-link-section';
 import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/ui/status-badge';
@@ -1587,6 +1588,11 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                 </p>
               )}
             </div>
+
+            {/* story #4075([E-RECIPE-1] «레시피 시작») — assignee 인접·Dispatch 바로 위(위
+                Dispatch 주석과 동일 "킥오프=담당자 선택 후 액션" 배치 원칙). 활성화 판단·
+                dedup 판정 전부 RecipeStartSection 내부(useRecipeStartCandidates)에 위임. */}
+            <RecipeStartSection storyId={story.id} projectId={projectId} />
 
             {/* E-BOARD S1: Dispatch — assignee 인접(킥오프=assignee 선택 후 액션). EntityDispatchPanel 마운트만(신규 디자인 0). */}
             {projectId && (

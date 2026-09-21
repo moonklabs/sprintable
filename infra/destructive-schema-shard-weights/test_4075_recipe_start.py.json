@@ -1,0 +1,1 @@
+{"file": "tests/test_4075_recipe_start.py", "sec": 31.0, "source": "story #4075(2026-09-21) 신규 추가 — 로컬 실측 5.24s(uv run pytest -q --durations=0, disposable DB backend_test_4075_recipe_start) × 로컬/CI ~6배 비율(measure_destructive_durations_local.py 주석, story #3383) 추정. CI 실측 전 잠정값 — 다음 전수 재측정(story #3558 절차)에서 실 CI 값으로 교체 권장."}
