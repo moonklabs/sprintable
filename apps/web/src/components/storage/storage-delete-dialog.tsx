@@ -6,6 +6,7 @@ import { useTranslations } from 'next-intl';
 import { Dialog, DialogClose, DialogContent } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
+import { pickEulReulJosa } from '@/lib/korean-particle';
 import { StorageSourceUsageList } from './storage-source-usage-list';
 import type { Asset } from '@/lib/storage/types';
 
@@ -64,6 +65,9 @@ export function StorageDeleteDialog({ asset, open, onOpenChange, onDeleted }: St
               <div className="min-h-0 flex-1 overflow-y-auto px-[18px] pb-[14px] pt-[4px] text-[13px] leading-[1.55] text-muted-foreground">
                 {t.rich('deleteBody', {
                   name: asset.name,
+                  // story #4120 — 조사를 문자열에 고정하지 않고 렌더 시점에 결정적으로 고른다
+                  // (#4117 pickEulReulJosa 선례와 동형).
+                  josa: pickEulReulJosa(asset.name),
                   b: (chunks) => <b className="font-semibold text-foreground">{chunks}</b>,
                 })}
 

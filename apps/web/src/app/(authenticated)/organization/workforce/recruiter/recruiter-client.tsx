@@ -14,7 +14,7 @@ import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui
 import { Skeleton } from '@/components/ui/skeleton';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { cn } from '@/lib/utils';
-import { pickEulReulJosa } from '@/lib/korean-particle';
+import { pickEulReulJosa, pickEunNeunJosa } from '@/lib/korean-particle';
 import { VerifyRail, useVerificationRail } from '@/app/onboarding/verify-rail';
 import { emitOnboardingEvent, beaconOnboardingEvent } from '@/app/onboarding/onboarding-telemetry';
 import type { RoleTemplateSummary, RecruitResponse, McpConfigBundle, RuntimeCapabilityItem } from '@/services/recruit';
@@ -1335,7 +1335,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                       {/* story #2648(boss 08-14 재현·PO 특定) — guideFilename(SPRINTABLE_ONBOARDING.md)이
                           공백 없는 장토큰이라 word-break 부재 시 카드 라운드 경계를 뚫고 밖으로 샌다.
                           alert.tsx/toast.tsx/chat-bubble.tsx가 쓰는 [overflow-wrap:anywhere] 관례를 그대로. */}
-                      <p className="text-xs text-muted-foreground [overflow-wrap:anywhere]">{t('kitOrientingGuideBody', { filename: guideFilename })}</p>
+                      <p className="text-xs text-muted-foreground [overflow-wrap:anywhere]">{t('kitOrientingGuideBody', { filename: guideFilename, josa: pickEulReulJosa(guideFilename) })}</p>
                     </div>
                   </div>
                 </div>
@@ -1397,8 +1397,12 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                   {/* story 5ea9bafe(P1-b): "전달하세요"만으론 HOW가 없다는 유나 UX 지적 — 런타임-aware
                       구체적 방법(MCP-native=작업폴더에 두고 읽으라 지시 / 커넥터=수동 연결 完 後 전달). */}
                   {recruitResult.mcp_config
-                    ? t('guideFileDeliveryNoteMcp', { filename: guideFilename, promptFile: runtimePromptFileConvention })
-                    : t('guideFileDeliveryNoteConnector', { filename: guideFilename })}
+                    ? t('guideFileDeliveryNoteMcp', {
+                        filename: guideFilename, promptFile: runtimePromptFileConvention,
+                        josa: pickEulReulJosa(guideFilename),
+                        promptJosa: pickEunNeunJosa(runtimePromptFileConvention ?? ''),
+                      })
+                    : t('guideFileDeliveryNoteConnector', { filename: guideFilename, josa: pickEulReulJosa(guideFilename) })}
                 </p>
                 <pre className="max-h-64 overflow-auto bg-muted/40 p-3 text-xs leading-relaxed whitespace-pre-wrap">{recruitResult.system_prompt}</pre>
               </div>

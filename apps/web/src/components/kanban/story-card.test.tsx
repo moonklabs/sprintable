@@ -1,5 +1,8 @@
-import { describe, expect, it } from 'vitest';
+// @vitest-environment jsdom
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import { DndContext } from '@dnd-kit/core';
 import koMessages from '../../../messages/ko.json';
@@ -177,5 +180,56 @@ describe('StoryCard — story #32dcc294 「다음: …」1급 라인(boy-scout �
       />,
     );
     expect(markup).not.toContain('다음:');
+  });
+});
+
+// story #4120(PO 실측, 2026-09-21) — deleteStoryDialogBody의 「{title}을(를)」 고정 조사가
+// story.title 받침 유무와 안 맞으면 비문이 된다. 위 블록들은 정적 렌더(다이얼로그는 열림
+// 상태에서만 그려짐)라 이 자리만 인터랙티브 마운트(createRoot+act)로 우클릭 메뉴 →
+// 삭제 클릭 → 확認 다이얼로그 본문을 실제로 연다.
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+describe('StoryCard — deleteStoryDialogBody 조사(story #4120)', () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeEach(() => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(async () => {
+    await act(async () => { root.unmount(); });
+    container.remove();
+  });
+
+  async function openDeleteConfirm(title: string) {
+    act(() => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <DndContext>
+            <StoryCard story={story({ title })} onClick={() => {}} onDelete={() => {}} />
+          </DndContext>
+        </NextIntlClientProvider>,
+      );
+    });
+    const card = document.body.querySelector<HTMLDivElement>('[aria-haspopup="menu"]')!;
+    act(() => { card.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true })); });
+    const deleteMenuItem = [...document.body.querySelectorAll('button')]
+      .find((b) => b.textContent === koMessages.board.deleteStory)!;
+    act(() => { deleteMenuItem.click(); });
+  }
+
+  it('받침 없는 제목 → «를»', async () => {
+    await openDeleteConfirm('테스트 스토리');
+    expect(document.body.textContent).toContain('테스트 스토리를 삭제하면 되돌릴 수 없어요.');
+    expect(document.body.textContent).not.toContain('을(를)');
+  });
+
+  it('받침 있는 제목 → «을»', async () => {
+    await openDeleteConfirm('작업 항목');
+    expect(document.body.textContent).toContain('작업 항목을 삭제하면 되돌릴 수 없어요.');
+    expect(document.body.textContent).not.toContain('을(를)');
   });
 });

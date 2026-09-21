@@ -405,7 +405,7 @@ describe('ContentRulesPage — 행 저장(story #3747 AC2)', () => {
     const text = banner!.textContent ?? '';
     const prefixIdx = text.indexOf(koMessages.contentRules.contentRulesUndoFailedPrefix);
     const reasonIdx = text.indexOf(
-      koMessages.contentRules.versionConflictFieldWithName.replace('{name}', '유나').replace('{field}', koMessages.contentRules.toneLabel),
+      koMessages.contentRules.versionConflictFieldWithName.replace('{name}', '유나').replace('{field}', koMessages.contentRules.toneLabel).replace('{josa}', '을'), // story #4120 — 톤=ㄴ받침 → 을
     );
     expect(prefixIdx).toBeGreaterThanOrEqual(0);
     expect(reasonIdx).toBeGreaterThan(prefixIdx);
@@ -431,9 +431,35 @@ describe('ContentRulesPage — 행 저장(story #3747 AC2)', () => {
 
     const banner = container.querySelector('[data-testid="content-rules-version-conflict"]');
     expect(banner?.textContent).toContain(
-      koMessages.contentRules.versionConflictFieldSelfOtherTab.replace('{field}', koMessages.contentRules.toneLabel),
+      koMessages.contentRules.versionConflictFieldSelfOtherTab.replace('{field}', koMessages.contentRules.toneLabel).replace('{josa}', '을'), // story #4120
     );
     expect(banner?.textContent).not.toContain('유나');
+  });
+
+  // story #4120(PO 실측, 2026-09-21) — 누가 바꿨는지 모를 때(updated_by 자체가 없음) 떨어지는
+  // versionConflictFieldFact 갈래는 이 파일에 기존 커버리지가 0이었다. 「이/가」 조사 pin.
+  it('⭐충돌 상대를 모름(updated_by 없음) — 「「{field}」이(가) 바뀌었어요」 갈래', async () => {
+    stubFetch({
+      onPut: () => ({ status: 409, body: { code: 'CONTENT_RULES_VERSION_CONFLICT', current_version: 4, updated_by: null } }),
+      getAfterConflict: { rules: { ...RULES_V1, tone: '서버가 먼저 바꾼 톤' }, version: 4 },
+    });
+    await mount('owner');
+    await expandRow('tone');
+    const toneInput = container.querySelector('#content-rules-tone') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setter.call(toneInput, '내가 고친 톤');
+      toneInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => { rowSaveButton().click(); });
+    await flush();
+
+    const banner = container.querySelector('[data-testid="content-rules-version-conflict"]');
+    // story #4120 — "톤"=ㄴ받침 → "이".
+    expect(banner?.textContent).toContain(
+      koMessages.contentRules.versionConflictFieldFact.replace('{field}', koMessages.contentRules.toneLabel).replace('{josa}', '이'),
+    );
+    expect(banner?.textContent).not.toContain('이(가)');
   });
 
   it('403 CONTENT_RULES_ADMIN_ONLY — 그 행 안에 인라인 오류', async () => {
@@ -474,7 +500,7 @@ describe('ContentRulesPage — 겹침 기반 낙관적 잠금(story #3747ⓐ, �
 
     const banner = container.querySelector('[data-testid="content-rules-version-conflict"]');
     expect(banner?.textContent).toContain(
-      koMessages.contentRules.versionConflictFieldWithName.replace('{name}', '유나').replace('{field}', koMessages.contentRules.toneLabel),
+      koMessages.contentRules.versionConflictFieldWithName.replace('{name}', '유나').replace('{field}', koMessages.contentRules.toneLabel).replace('{josa}', '을'), // story #4120 — 톤=ㄴ받침 → 을
     );
     // 재시도 안 함 — 서버측 값(tone)으로 화면이 갈아끼워진다.
     expect(row('tone').textContent).toContain('서버가 먼저 바꾼 톤');

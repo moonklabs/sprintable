@@ -982,8 +982,8 @@ app/services/gate_service.py::상태입니다 (pending만 가능).
 app/services/gate_service.py::상태입니다 (승인/반려된 게이트만 취소 가능).
 app/services/gate_service.py::예약 명령 미생성(draft 해석 실패)
 app/services/gate_service.py::예약 명령 미생성(승인된 목적지와 초안의 현재 목적지 불일치)
-app/services/gate_service.py::이(가) 정본으로 확정됐어요.
 app/services/gate_service.py::정본 확정:
+app/services/gate_service.py::정본으로 확정됐어요.
 app/services/gate_service.py::취소 불가: 게이트가
 app/services/gate_service.py::취소 창(
 app/services/gate_service.py::컨셉 승인이 완료되지 않았습니다(gate_id=

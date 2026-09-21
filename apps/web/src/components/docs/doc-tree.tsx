@@ -3,6 +3,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslations } from 'next-intl';
+import { pickEulReulJosa } from '@/lib/korean-particle';
 import { ChevronDown, ChevronRight, FileText, Folder, FolderOpen, GripVertical, MoreVertical } from 'lucide-react';
 import { DndContext, DragEndEvent, closestCenter } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
@@ -337,6 +338,8 @@ function TreeNode({
         title={t('docTreeDeleteTitle')}
         description={t.rich('docTreeDeleteBody', {
           title: doc.title,
+          // story #4120 — 조사를 문자열에 고정하지 않고 렌더 시점에 결정적으로 고른다.
+          josa: pickEulReulJosa(doc.title),
           b: (chunks) => <b className="font-semibold text-foreground">{chunks}</b>,
         })}
         cancelLabel={t('cancel')}
