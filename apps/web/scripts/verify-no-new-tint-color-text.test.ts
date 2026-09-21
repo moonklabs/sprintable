@@ -53,6 +53,28 @@ describe('findTintTextPairs (story #2420 AC7)', () => {
     const hits = findTintTextPairs('bg-success/10 text-success bg-info-tint text-info');
     expect(hits.map((h) => h.family).sort()).toEqual(['info', 'success']);
   });
+
+  // ── story #4102(#4100 유나 定 A안) — brand·primary 텍스트 축, cross-family(자기 bg
+  // 계열이 없어/좁아 기존 4계열의 bg 아무거나 위에서 검사, #4048 text-brand on
+  // bg-info-tint 실사고 재현). ──
+  it('flags text-brand + bg-<X>-tint (any existing family) in the same literal (#4048형 양성대조)', () => {
+    const hits = findTintTextPairs('rounded-md bg-info-tint text-brand text-xs');
+    expect(hits.map((h) => h.family)).toEqual(['brand']);
+  });
+  it('flags text-primary + bg-<X>-tint (any existing family) in the same literal', () => {
+    const hits = findTintTextPairs('rounded-md bg-success-tint text-primary text-xs');
+    expect(hits.map((h) => h.family)).toEqual(['primary']);
+  });
+  it('does NOT flag text-foreground on the same tint bg (음성대조)', () => {
+    expect(findTintTextPairs('bg-info-tint text-foreground text-xs')).toEqual([]);
+  });
+  it('does not flag brand/primary in a literal with no tint/bg family present at all', () => {
+    expect(findTintTextPairs('text-brand text-primary text-xs')).toEqual([]);
+  });
+  it('existing same-family axis (destructive/info/success/warning) is unaffected by the extra-text-color addition', () => {
+    const hits = findTintTextPairs('bg-destructive-tint text-destructive');
+    expect(hits).toEqual([{ family: 'destructive', literal: 'bg-destructive-tint text-destructive' }]);
+  });
 });
 
 describe('scanContent (line numbers + literal extraction)', () => {

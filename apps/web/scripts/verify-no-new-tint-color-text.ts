@@ -55,6 +55,11 @@
  *      (§AC7 세 축)이 답할 자리다.
  *   4) "0건 증가"는 "전부 깨끗"이 아니라 "내가 새로 늘리지 않았다"일 뿐이다 — 민군이
  *      query_sentinel 가드에서 쓴 것과 같은 문장이 여기도 그대로 적용된다.
+ *
+ * 색 규율(story #4100·#4102, PO 결정 2026-09-21 10:45Z — [UX-v3] 토큰 표 §⑥-3):
+ * 「상태색·브랜드 색을 다른 계열의 tint/bg 위 «텍스트»로 쓰지 않는다. tint/bg 위 글자는
+ * 언제나 text-foreground — 계열 정체성은 border·bg·아이콘으로 전한다.」 brand·primary도
+ * 이 가드의 텍스트 축이다(EXTRA_TEXT_COLORS, #4102 AC1 — cross-family, #4048 재현).
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
@@ -62,6 +67,15 @@ import ts from 'typescript';
 
 export const FAMILIES = ['destructive', 'info', 'success', 'warning'] as const;
 export type Family = (typeof FAMILIES)[number];
+
+/** story #4102(#4100 유나 定 A안) — brand·primary는 이 파일의 "네 계열" 표(§본문) 밖이라
+ * 자기 자신과의 same-family 쌍은 없다(brand는 자기 -bg/-tint가 없고, primary-bg는 정의
+ * 자체가 없다 — 파일 상단 주석 참고). 대신 #4048 실사고(text-brand on bg-info-tint, 같은
+ * 문자열 리터럴)가 정확히 «brand 텍스트 + 다른 계열의 bg» 조합이었다 — 그래서 이 둘은
+ * cross-family로: FAMILIES의 bg 패턴 아무거나 위에서 브랜드·primary 텍스트로 쓰였는지만
+ * 본다(기존 4계열끼리의 same-family 축은 무변 — 이 스토리 범위 밖). */
+export const EXTRA_TEXT_COLORS = ['brand', 'primary'] as const;
+export type TextColor = Family | (typeof EXTRA_TEXT_COLORS)[number];
 
 function familyBgRe(family: Family): RegExp {
   // story #2575 AC2 — `-bg`(불투명 status 배경) 추가. `-bg`가 `-tint`보다 먼저 와도/나중에
@@ -74,17 +88,31 @@ function familyTextRe(family: Family): RegExp {
   return new RegExp(`(?<![\\w-])text-${family}(?![\\w-])`);
 }
 
+function extraTextRe(color: (typeof EXTRA_TEXT_COLORS)[number]): RegExp {
+  return new RegExp(`(?<![\\w-])text-${color}(?![\\w-])`);
+}
+
 export interface TintTextHit {
-  family: Family;
+  family: TextColor;
   literal: string;
 }
 
-/** 리터럴 하나(따옴표 안 내용물)에서 같은 계열의 bg-tint/알파 + text-family 쌍을 찾는다. */
+/** 리터럴 하나(따옴표 안 내용물)에서 같은 계열의 bg-tint/알파 + text-family 쌍을 찾는다.
+ * story #4102 — brand·primary는 위 EXTRA_TEXT_COLORS 주석대로 cross-family(기존 4계열의
+ * bg 아무거나 + brand/primary 텍스트)로 추가 검사한다. */
 export function findTintTextPairs(literal: string): TintTextHit[] {
   const hits: TintTextHit[] = [];
   for (const family of FAMILIES) {
     if (familyBgRe(family).test(literal) && familyTextRe(family).test(literal)) {
       hits.push({ family, literal });
+    }
+  }
+  for (const color of EXTRA_TEXT_COLORS) {
+    if (!extraTextRe(color).test(literal)) continue;
+    for (const family of FAMILIES) {
+      if (familyBgRe(family).test(literal)) {
+        hits.push({ family: color, literal });
+      }
     }
   }
   return hits;
@@ -93,7 +121,7 @@ export function findTintTextPairs(literal: string): TintTextHit[] {
 export interface Violation {
   file: string;
   line: number;
-  family: Family;
+  family: TextColor;
   literal: string;
 }
 
