@@ -3648,15 +3648,18 @@ async def get_my_generation_connector(
        현재 stage 중 `capability.target=="generation_connector"`인 게 하나도 없으면
        403(stage 불일치 — "지금 이 도구를 쓸 차례가 아니다"). 여러 레시피가 동시에
        걸려도 새 판정을 안 짓는다 — target이 맞는 stage가 하나라도 나오면 그것을 쓴다.
-    4. 그 stage에 바인딩된 `generation_connector_id`가 없으면 404(project 특이 우선,
-       org 전역 폴백 — `_resolve_recipe_role_binding`과 동일 우선순위).
-    5. 그 커넥터가 이 org 소속이 아니거나 존재하지 않으면 404, `status != "active"`면 409.
-    6. 호출 에이전트가 crew(#4109 PO 결정 — 같은 org·[project 특이 ∪ org 전역]·
+    4. 호출 에이전트가 crew(#4109 PO 결정 — 같은 org·[project 특이 ∪ org 전역]·
        event_definition_key의 `RecipeRoleBinding.agent_member_id` 집합) 밖이면 403.
        `resolve_member().id` 직접비교는 휴먼 JWT caller에서 축이 어긋날 수 있다는
        기존 경고(S19, 위 734행)가 있으나 그건 human 축 얘기 — 1번에서 이미 agent만
        통과시켰고 `agent_member_id` 자체가 agent 전용 컬럼(TeamMember.id 공간)이라
-       여기선 axis-safe.
+       여기선 axis-safe. ⛔story #4110 CHANGES-1(페드루 PO 리뷰, 2026-09-21) — 바인딩·
+       커넥터 조회보다 **먼저** 돈다: 원래 순서(바인딩→커넥터→crew)면 crew 밖
+       에이전트도 404/409로 "이 stage에 커넥터가 묶였는지·revoked인지"를 알 수
+       있었다 — 자격 인접 엔드포인트는 최소 정보 노출 순서(누가 봐도 되는지부터).
+    5. 그 stage에 바인딩된 `generation_connector_id`가 없으면 404(project 특이 우선,
+       org 전역 폴백 — `_resolve_recipe_role_binding`과 동일 우선순위).
+    6. 그 커넥터가 이 org 소속이 아니거나 존재하지 않으면 404, `status != "active"`면 409.
     7. 감사 로그 1행 — `logger.info`(구조화, 자격값 절대 미포함). 신규 DB 테이블/마이그
        0: `permission_audit_logs`는 `action` 닫힌 CHECK(member_added/member_removed/
        role_changed, baseline/schema.sql 1541행 실측)라 이 목적에 안 맞아 재사용하지
@@ -3739,6 +3742,22 @@ async def get_my_generation_connector(
     if matched_stage is None or matched_key is None:
         raise HTTPException(status_code=403, detail={"code": "GENERATION_CONNECTOR_STAGE_MISMATCH"})
 
+    # story #4110 CHANGES-1(페드루 PO 리뷰, 2026-09-21) — crew 판정을 바인딩·커넥터 조회
+    # **앞**으로. 원래 순서(바인딩→커넥터→crew)면 crew 밖 에이전트도 404/409 응답으로
+    # "이 stage에 커넥터가 묶였는지·revoked인지"를 알 수 있었다 — 자격 인접 엔드포인트는
+    # 그 정보 자체도 최소로(누가 봐도 되는 걸 먼저 걸러야, 그 뒤에야 "무엇이 있는지"를
+    # 답한다).
+    crew_ids = set((await db.execute(
+        select(RecipeRoleBinding.agent_member_id).where(
+            RecipeRoleBinding.org_id == org_id,
+            RecipeRoleBinding.event_definition_key == matched_key,
+            RecipeRoleBinding.agent_member_id.is_not(None),
+            or_(RecipeRoleBinding.project_id == project_id, RecipeRoleBinding.project_id.is_(None)),
+        )
+    )).scalars().all())
+    if caller.id not in crew_ids:
+        raise HTTPException(status_code=403, detail={"code": "GENERATION_CONNECTOR_CREW_ONLY"})
+
     generation_connector_id = (await db.execute(
         select(RecipeRoleBinding.generation_connector_id).where(
             RecipeRoleBinding.org_id == org_id,
@@ -3764,17 +3783,6 @@ async def get_my_generation_connector(
         raise HTTPException(status_code=404, detail={"code": "GENERATION_CONNECTOR_BINDING_NOT_FOUND"})
     if connector.status != "active":
         raise HTTPException(status_code=409, detail={"code": "GENERATION_CONNECTOR_REVOKED"})
-
-    crew_ids = set((await db.execute(
-        select(RecipeRoleBinding.agent_member_id).where(
-            RecipeRoleBinding.org_id == org_id,
-            RecipeRoleBinding.event_definition_key == matched_key,
-            RecipeRoleBinding.agent_member_id.is_not(None),
-            or_(RecipeRoleBinding.project_id == project_id, RecipeRoleBinding.project_id.is_(None)),
-        )
-    )).scalars().all())
-    if caller.id not in crew_ids:
-        raise HTTPException(status_code=403, detail={"code": "GENERATION_CONNECTOR_CREW_ONLY"})
 
     logger.info(
         "generation_connector_read: actor=%s org=%s connector=%s work_item=%s:%s stage=%s",
