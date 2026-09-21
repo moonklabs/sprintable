@@ -27,7 +27,7 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, ValidationInfo, field_validator
-from sqlalchemy import String, and_, cast, delete, func, or_, select, update
+from sqlalchemy import String, and_, cast, delete, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import (
@@ -1827,10 +1827,19 @@ async def _find_existing_stage_publish(
 ) -> ConversationMessage | None:
     """story #4075 — 게이트 없는 첫 stage(draft) 재발행 이력 조회. publish-history(#2665)와
     동일 SSOT(conversation_messages.msg_metadata['event'], #2637 AC 0-a payload additive)를
-    work_item_type/work_item_id/stage까지 좁힌다 — 신규 로그 테이블 발명 안 함. 신규 index
-    없이 JSONB astext 필터라 org 규모가 커지면 느려질 수 있다(그라운딩만 — 이 스토리
-    스코프에선 draft 발행 시점에만, 그것도 org당 드물게 도는 쿼리라 실측 없이 낙관하지
-    않되 그대로 둔다. 느려지면 별 인덱스 카드)."""
+    work_item_type/work_item_id/stage까지 좁힌다 — 신규 로그 테이블 발명 안 함.
+
+    ⛔story #4081(2026-09-21, 디디군 크로스세션 그라운딩) — `.msg_metadata["event"][...]`
+    (ORM bracket-subscript accessor)는 JSON 키 자체를 **bind parameter**로 컴파일한다
+    (`metadata[$1][$2] ->> $3` — `.compile()` 실측 확認, `literal_binds=True` 없이는
+    'event'/'payload'/'work_item_id' 전부 파라미터). 0384의 표현식 인덱스는 리터럴 키에
+    고정돼 있어, custom plan(파라미터 값을 알고 재계획)에선 우연히 맞아도 generic plan
+    (`EXPLAIN (GENERIC_PLAN)`로 PG16 로컬 재현 — 파라미터 값 무관 계획, asyncpg가 같은
+    커넥션에서 이 statement를 반복 실행하면 Postgres가 자동 전환할 수 있는 자리)에선
+    Seq Scan으로 조용히 되돌아간다(에러 없음 — `?` vs `IS NOT NULL` 사고와 같은 클래스).
+    처방: JSON 키는 `text()`로 리터럴 SQL에 직접 박고(코드에 고정된 상수라 인젝션 위험
+    없음), 비교 **값**만 bind parameter로 남긴다 — 이러면 GENERIC_PLAN에서도 Index Scan
+    확認(재실측)."""
     from app.models.conversation import Conversation, ConversationMessage
 
     return (await db.execute(
@@ -1838,10 +1847,20 @@ async def _find_existing_stage_publish(
         .join(Conversation, Conversation.id == ConversationMessage.conversation_id)
         .where(
             Conversation.org_id == org_id,
-            ConversationMessage.msg_metadata["event"]["event_key"].astext == definition_key,
-            ConversationMessage.msg_metadata["event"]["payload"]["work_item_type"].astext == work_item_type,
-            ConversationMessage.msg_metadata["event"]["payload"]["work_item_id"].astext == work_item_id,
-            ConversationMessage.msg_metadata["event"]["payload"]["stage"].astext == stage,
+            text("conversation_messages.metadata->'event'->>'event_key' = :event_lookup_definition_key"),
+            text(
+                "conversation_messages.metadata->'event'->'payload'->>'work_item_type' "
+                "= :event_lookup_work_item_type"
+            ),
+            text(
+                "conversation_messages.metadata->'event'->'payload'->>'work_item_id' "
+                "= :event_lookup_work_item_id"
+            ),
+            text("conversation_messages.metadata->'event'->'payload'->>'stage' = :event_lookup_stage"),
+        )
+        .params(
+            event_lookup_definition_key=definition_key, event_lookup_work_item_type=work_item_type,
+            event_lookup_work_item_id=work_item_id, event_lookup_stage=stage,
         )
         .order_by(ConversationMessage.created_at.desc())
         .limit(1)
@@ -3273,13 +3292,17 @@ async def get_event_publish_history(
     from app.models.conversation import Conversation, ConversationMessage
     from app.services.member_resolver import lookup_members_by_ids
 
+    # story #4081 — `.msg_metadata["event"]["event_key"]`(bracket accessor)는 JSON 키를
+    # bind parameter로 컴파일해 0384 표현식 인덱스가 generic plan에서 안 탈 수 있다
+    # (_find_existing_stage_publish 문서화 근거 그대로) — 키를 text()로 리터럴 고정.
     rows = (await db.execute(
         select(ConversationMessage)
         .join(Conversation, Conversation.id == ConversationMessage.conversation_id)
         .where(
             Conversation.org_id == org_id,
-            ConversationMessage.msg_metadata["event"]["event_key"].astext == definition_key,
+            text("conversation_messages.metadata->'event'->>'event_key' = :event_lookup_definition_key"),
         )
+        .params(event_lookup_definition_key=definition_key)
         .order_by(ConversationMessage.created_at.desc())
         .limit(limit)
     )).scalars().all()
