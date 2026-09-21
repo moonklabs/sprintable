@@ -75,19 +75,32 @@ export async function fetchWithAuth(input: RequestInfo | URL, init?: RequestInit
   if (!_refreshing) {
     _refreshing = refreshAuthTokens().finally(() => { _refreshing = null; });
   }
+  // story #4089(페드루 PO 리뷰 REQUIRED, AC2 두 번째 클래스) — refreshAuthTokens()(=
+  // callAuthRoute)는 BE가 401을 줘도 throw하지 않고 {data:null, error:{...}}로
+  // *정상 resolve*한다(위 callAuthRoute 정의 참고) — 그래서 이 함수의 진짜 "refresh
+  // 최종 실패" 판정은 catch(네트워크 예외)뿐 아니라 resolve된 결과의 error 필드도
+  // 봐야 한다. ⛔예전엔 여기서 안 멈추고 재시도까지 갔다가, 그 **재시도 자체의 401**도
+  // signalSessionExpired()를 불렀다(아래 옛 코드) — session-expired 신호를 "이 세션은
+  // 죽었다"가 아니라 "방금 이 요청이 401이었다"로 오염시켜, refresh가 실제로 성공해도
+  // (세션은 멀쩡해도) BFF route 없이 BE 401을 내는 임의 엔드포인트 하나가 전역
+  // SessionExpiredDialog를 띄우는 클래스 결함의 근원이었다(material-lineage 실사고,
+  // BFF route 자체를 다 갖춰도 이 클래스는 남는다 — 페드루 PO 지적). 처방: 신호는
+  // "refresh가 최종적으로 실패했다"(예외 또는 error 필드)는 사실 하나에서만 나온다 —
+  // 재시도 응답은 그 401이 세션 문제인지 그 엔드포인트만의 문제인지 이 함수가 원천적으로
+  // 구분할 수 없으므로 신호를 안 낸다(호출부가 자기 401을 알아서 처리).
+  let refreshResult: AuthResult;
   try {
-    await _refreshing;
+    refreshResult = await _refreshing;
   } catch {
-    // AC3: refresh 최종 실패 → bare redirect 대신 세션-만료 신호(SessionExpiredDialog·다중 401 dedupe).
+    if (typeof window !== 'undefined') signalSessionExpired();
+    return res;
+  }
+  if (refreshResult.error) {
     if (typeof window !== 'undefined') signalSessionExpired();
     return res;
   }
 
-  const retried = await fetch(input, init);
-  if (retried.status === 401 && typeof window !== 'undefined') {
-    signalSessionExpired();
-  }
-  return retried;
+  return fetch(input, init);
 }
 
 // ─── Rate-limited fetch helper ────────────────────────────────────────────────

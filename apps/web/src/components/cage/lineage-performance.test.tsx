@@ -50,13 +50,13 @@ function stubLineageAndHooks(
   materialPerformanceByDerivedId: Record<string, unknown[]> = {},
 ) {
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-    if (url.startsWith('/api/v2/material-lineage/hook-performance')) {
+    if (url.startsWith('/api/material-lineage/hook-performance')) {
       const key = new URL(url, 'http://x').searchParams.get('hook_key')!;
       const summary = hookPerformanceByKey[key];
       if (!summary) return { ok: false, status: 404, json: async () => ({}) };
       return { ok: true, json: async () => summary };
     }
-    if (url.startsWith('/api/v2/material-lineage/material-performance')) {
+    if (url.startsWith('/api/material-lineage/material-performance')) {
       const derivedId = new URL(url, 'http://x').searchParams.get('derived_id')!;
       return { ok: true, json: async () => (materialPerformanceByDerivedId[derivedId] ?? []) };
     }

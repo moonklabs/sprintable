@@ -6,7 +6,12 @@ import { useAsyncResource } from './use-async-resource';
 
 // story #4063(E-RECIPE-1 ④ 렌더, PR #4434 위) — GET /api/v2/material-lineage?work_item_id=
 // 페칭. #4059(useWorkItemProductionEvidence)와 같은 결: state+loading/loadFailed+refresh.
-const MATERIAL_LINEAGE_API_PATH = '/api/v2/material-lineage';
+//
+// story #4089(P0 핫픽스, story #3705와 동일 결함 클래스) — BE `/api/v2/...`를 직접
+// 호출하면 fetchWithAuth의 401→refresh→재시도가 BFF 인증 forwarding을 안 타 refresh
+// 후에도 401이 반복돼 SessionExpiredDialog가 뜬다. BFF route
+// (apps/web/src/app/api/material-lineage/route.ts) 경유로 전환.
+const MATERIAL_LINEAGE_API_PATH = '/api/material-lineage';
 
 export interface UseMaterialLineageResult {
   edges: MaterialLineageEdge[];
