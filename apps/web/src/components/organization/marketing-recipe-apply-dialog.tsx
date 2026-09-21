@@ -329,7 +329,9 @@ export function MarketingRecipeApplyDialog({
                 disabled={generationConnectorsStatus !== 'loaded'}
                 data-testid="compute-connector-select"
               >
-                <option value="">{t('recipeApplyV2ModelSetPlaceholder')}</option>
+                {/* 유나 문구 확定(2026-09-21 15:11Z) — «모델 세트 선택…» 대신 #4479
+                    eventApplyGenerationConnectorPlaceholder와 통일(별도 키 비유지). */}
+                <option value="">{t('eventApplyGenerationConnectorPlaceholder')}</option>
                 {activeGenerationConnectors.map((c) => (
                   <option key={c.id} value={c.id}>{c.label || c.provider_key}</option>
                 ))}
