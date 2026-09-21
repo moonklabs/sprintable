@@ -23,6 +23,7 @@ from app.schemas.hitl_config import (
 )
 from app.services.disposition_advisor import DEFAULT_MIN_VERDICTS, get_disposition_recommendation
 from app.services.gate_resolver import resolve_disposition
+from app.services.i18n_catalog import t
 
 router = APIRouter(prefix="/api/v2/gate-config", tags=["gate-config", "Trust"])
 
@@ -109,10 +110,7 @@ async def upsert_org_policy(
     ):
         raise HTTPException(
             status_code=422,
-            detail=(
-                "recipe_gate_default_approver_member_id는 이 조직의 human owner/admin 멤버여야 "
-                "합니다(에이전트는 requires_human 게이트에 서명할 수 없습니다)."
-            ),
+            detail=t("gates.recipe_default_approver_invalid_member", "ko"),
         )
     r = await session.execute(
         select(OrgGatePolicy).where(OrgGatePolicy.org_id == org_id).limit(1)

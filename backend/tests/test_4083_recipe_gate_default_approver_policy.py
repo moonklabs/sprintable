@@ -66,6 +66,9 @@ async def _seed_org_project(session, *, slug="org4083"):
 
 
 async def _seed_human_member(session, org_id, *, role="member"):
+    """반환 = (member_id, user_id). member_id=org_members.id(정책 필드·_resolve_org_owner
+    축), user_id=users.id(_is_org_admin/get_current_user 축 — OrgMember.user_id로 조회하므로
+    HTTP 호출자로 쓸 땐 이쪽이 필요)."""
     from app.core.security import hash_password
     from app.models.project import OrgMember
     from app.models.user import User
@@ -79,7 +82,7 @@ async def _seed_human_member(session, org_id, *, role="member"):
     member_id = uuid.uuid4()
     session.add(OrgMember(id=member_id, org_id=org_id, user_id=uid, role=role))
     await session.commit()
-    return member_id
+    return member_id, uid
 
 
 async def _seed_agent_member(session, org_id, *, role="admin"):
@@ -146,7 +149,7 @@ async def test_resolve_org_owner_returns_policy_member_when_set():
         async with Session() as s:
             org_id, _project_id = await _seed_org_project(s, slug="org4083resolve1")
             await _seed_human_member(s, org_id, role="owner")  # 실 owner 존재(정책이 이겨야 함)
-            admin_member_id = await _seed_human_member(s, org_id, role="admin")
+            admin_member_id, _ = await _seed_human_member(s, org_id, role="admin")
             s.add(OrgGatePolicy(
                 id=uuid.uuid4(), org_id=org_id, posture="balanced",
                 recipe_gate_default_approver_member_id=admin_member_id,
@@ -168,7 +171,7 @@ async def test_resolve_org_owner_falls_back_to_owner_when_policy_unset():
     try:
         async with Session() as s:
             org_id, _project_id = await _seed_org_project(s, slug="org4083resolve2")
-            owner_member_id = await _seed_human_member(s, org_id, role="owner")
+            owner_member_id, _ = await _seed_human_member(s, org_id, role="owner")
 
             resolved = await _resolve_org_owner(s, org_id=org_id)
             assert resolved == owner_member_id
@@ -203,8 +206,9 @@ async def test_recipe_gate_uses_policy_approver_not_owner():
     from app.models.event_definition import EventDefinition
     from app.models.gate import Gate
     from app.models.hitl_config import OrgGatePolicy
+    from app.models.member import AgentProjectProfile, Member
     from app.models.pm import Story
-    from app.models.team import TeamMember
+    from app.models.project_access import ProjectAccess
     from app.routers.events import EventPublishRequest, publish_registry_event
     from app.dependencies.auth import AuthContext
     from fastapi import BackgroundTasks
@@ -215,18 +219,28 @@ async def test_recipe_gate_uses_policy_approver_not_owner():
         async with Session() as s:
             org_id, project_id = await _seed_org_project(s, slug="org4083gate")
             await _seed_human_member(s, org_id, role="owner")
-            policy_admin_id = await _seed_human_member(s, org_id, role="admin")
+            policy_admin_id, _ = await _seed_human_member(s, org_id, role="admin")
             s.add(OrgGatePolicy(
                 id=uuid.uuid4(), org_id=org_id, posture="balanced",
                 recipe_gate_default_approver_member_id=policy_admin_id,
             ))
             await s.commit()
 
-            publisher = TeamMember(
-                id=uuid.uuid4(), org_id=org_id, project_id=project_id,
-                type="agent", name="agent", is_active=True,
-            )
-            s.add(publisher)
+            # team_members는 뷰(마이그 0088) — TeamMember(...) 직접 insert 불가.
+            # Member+AgentProjectProfile+ProjectAccess 3-write 앵커
+            # (test_1994_backlink_api_realdb.py::_make_agent_member와 동형).
+            publisher_id = uuid.uuid4()
+            s.add(Member(
+                id=publisher_id, org_id=org_id, type="agent", user_id=None,
+                name=f"agent-{publisher_id.hex[:6]}",
+            ))
+            await s.commit()
+            s.add(AgentProjectProfile(id=uuid.uuid4(), member_id=publisher_id, project_id=project_id))
+            await s.commit()
+            s.add(ProjectAccess(
+                id=uuid.uuid4(), project_id=project_id, org_member_id=None, member_id=publisher_id,
+                permission="granted", role="member",
+            ))
             await s.commit()
 
             definition = EventDefinition(
@@ -248,7 +262,7 @@ async def test_recipe_gate_uses_policy_approver_not_owner():
             await s.commit()
 
             auth = AuthContext(
-                user_id=str(publisher.id), email=None,
+                user_id=str(publisher_id), email=None,
                 claims={"app_metadata": {"api_key_id": str(uuid.uuid4())}}, org_id=str(org_id),
             )
             await publish_registry_event(
@@ -279,10 +293,10 @@ async def test_upsert_org_policy_rejects_agent_member_for_recipe_field_422():
     try:
         async with Session() as s:
             org_id, project_id = await _seed_org_project(s, slug="org4083put422")
-            owner_id = await _seed_human_member(s, org_id, role="owner")
+            _owner_member_id, owner_user_id = await _seed_human_member(s, org_id, role="owner")
             agent_admin_id = await _seed_agent_member(s, org_id, role="admin")
 
-        await _setup_app_jwt(app, Session, org_id, project_id, owner_id)
+        await _setup_app_jwt(app, Session, org_id, project_id, owner_user_id)
         try:
             async with _client_for(app) as client:
                 resp = await client.put(
@@ -291,7 +305,9 @@ async def test_upsert_org_policy_rejects_agent_member_for_recipe_field_422():
                     headers={"X-Org-Id": str(org_id)},
                 )
             assert resp.status_code == 422
-            assert "recipe_gate_default_approver_member_id" in resp.json()["detail"]
+            # 앱 전역 응답 envelope({"data","error":{"code","message"},"meta"}) — raw
+            # {"detail":...}가 아니다(fastapi-proxy envelope 경계, story #4083 조사로 확인).
+            assert "recipe_gate_default_approver_member_id" in resp.json()["error"]["message"]
         finally:
             app.dependency_overrides.clear()
     finally:
@@ -306,10 +322,10 @@ async def test_upsert_org_policy_accepts_recipe_field_200_round_trip():
     try:
         async with Session() as s:
             org_id, project_id = await _seed_org_project(s, slug="org4083put200")
-            owner_id = await _seed_human_member(s, org_id, role="owner")
-            admin_id = await _seed_human_member(s, org_id, role="admin")
+            _owner_member_id, owner_user_id = await _seed_human_member(s, org_id, role="owner")
+            admin_id, _admin_user_id = await _seed_human_member(s, org_id, role="admin")
 
-        await _setup_app_jwt(app, Session, org_id, project_id, owner_id)
+        await _setup_app_jwt(app, Session, org_id, project_id, owner_user_id)
         try:
             async with _client_for(app) as client:
                 put_resp = await client.put(

@@ -97,6 +97,15 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "본인이 상신한 doc 결재는 본인이 승인/거부할 수 없어요 (self-approval 금지·상신자 미검증 차단).",
         "en": "You cannot approve or reject a doc approval you submitted — self-approval is not allowed",
     },
+    # story #4083 — recipe_gate_default_approver_member_id도 merge_gate_default_approver_
+    # member_id(hitl_config.py, story #3319)와 같은 불변식(사람 owner/admin, 에이전트 불가)이라
+    # 검증 메시지 문구까지 같은 형으로 짓는다(발명 0). 다만 그 문구는 #3319 당시 grandfather돼
+    # baseline에 남아 있고, 이 필드는 새로 만드는 거라 korean_user_strings_baseline.txt에 얹지
+    # 않고(#4092 PO 정정 재적용) 이 카탈로그로 바로 옮긴다.
+    "gates.recipe_default_approver_invalid_member": {
+        "ko": "recipe_gate_default_approver_member_id는 이 조직의 human owner/admin 멤버여야 해요 (에이전트는 requires_human 게이트에 서명할 수 없어요).",
+        "en": "recipe_gate_default_approver_member_id must be a human owner/admin member of this organization — agents cannot sign a requires_human gate",
+    },
     "gates.approve_no_doc_access": {
         "ko": "doc 결재 권한이 없어요 (대상 프로젝트 접근 필요).",
         "en": "No permission to act on this doc approval — access to the target project is required",
