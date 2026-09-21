@@ -358,7 +358,11 @@ async def test_apply_kind_only_no_matching_connector_warns():
                 db=s, auth=_auth(caller_id, org_id), org_id=org_id,
             )
             assert len(resp.warnings) == 1
-            assert "collect" in resp.warnings[0]
+            # story #4119(2026-09-21) — {kind} 자리가 이제 raw 영어 식별자가 아니라
+            # 카탈로그 한글 라벨을 받는다(publish→발행/collect→수집, #4108 role 규칙과
+            # 동형). 이 pin은 그 전 계약(raw "collect")을 고정했던 것이라 새 계약으로 갱신.
+            assert "수집" in resp.warnings[0]
+            assert "collect" not in resp.warnings[0]
     finally:
         await engine.dispose()
 

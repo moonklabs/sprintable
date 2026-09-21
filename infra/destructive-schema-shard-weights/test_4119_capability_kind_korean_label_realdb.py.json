@@ -1,0 +1,1 @@
+{"file": "tests/test_4119_capability_kind_korean_label_realdb.py", "sec": 4.2, "source": "story-4119(2026-09-21, 신규 파일 — 3건, 로컬 raw pytest 전체 wall time 실측(throwaway pgvector:pg15) 그대로 등재 — test_4110/test_4115 등재 선례와 동일 방법론. 실 CI 샤드 로그로 재확認 필요(AC2 재측정 규칙)."}

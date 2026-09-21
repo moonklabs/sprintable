@@ -441,8 +441,19 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "{stage_label}: {connector_key} 커넥터가 아직 준비되지 않았어요 — 담당 발행 에이전트가 이 채널의 발행 도구를 먼저 설정해야 해요.",
         "en": "{stage_label}: connector {connector_key} isn't ready yet — the assigned publisher agent must set up its publish tool for this channel first",
     },
+    # story #4119(페드루 PO 確定, 2026-09-21) — #4108이 stage_metadata[stage].role을
+    # 한글 라벨로 바꿨지만 capability.kind는 영어 식별자(publish/collect) 그대로 남아
+    # 있었다(유나 #4115 앵커 비차단 지적). capability.kind는 열린 값이라(판별 기준으로
+    # 못 씀, event_definition_registry.py 49행) stage_role과 동형으로 닫힌 라벨 집합
+    # (등재 kind만) + 미등재 raw pass-through(events.py `_CAPABILITY_KIND_LABEL_KEYS`).
+    "events.capability_kind.publish": {"ko": "발행", "en": "Publish"},
+    "events.capability_kind.collect": {"ko": "수집", "en": "Collect"},
     "events.apply_kind_connector_not_registered": {
-        "ko": "{stage_label}: {kind} 종류 발행 커넥터가 아직 준비되지 않았어요 — 담당 발행 에이전트가 이 채널의 발행 도구를 먼저 설정해야 해요.",
+        # story #4119 — 원문 "{kind} 종류 발행 커넥터가…"는 kind가 publish로 라벨링되면
+        # "발행 종류 발행 커넥터"로 겹쳐 읽혔다("종류"+하드코딩된 "발행" 중복). {kind}
+        # 자리가 이제 사람말 라벨(발행/수집)을 직접 받으므로 "종류"를 떼고 라벨을
+        # 커넥터에 바로 붙인다 — "발행 커넥터가 아직 준비되지 않았어요"(PO 제시 목표문).
+        "ko": "{stage_label}: {kind} 커넥터가 아직 준비되지 않았어요 — 담당 발행 에이전트가 이 채널의 발행 도구를 먼저 설정해야 해요.",
         "en": "{stage_label}: the {kind} connector isn't ready yet — the assigned publisher agent must set up its publish tool for this channel first",
     },
     "events.apply_channel_connector_map_missing": {
@@ -454,7 +465,9 @@ _CATALOG: dict[str, dict[str, str]] = {
         "en": "{stage_label}: connector {connector_key} is missing required configuration — {missing}. Fill it in from organization settings",
     },
     "events.apply_kind_connector_config_incomplete": {
-        "ko": "{stage_label}: {kind} 종류 커넥터는 등록돼 있지만 필수 설정값이 아직 비어 있어요 — 조직 설정 화면에서 등록하세요.",
+        # story #4119 — 위 not_registered와 동형으로 "종류"를 떼고 라벨을 커넥터에 바로
+        # 붙인다("발행 커넥터는 등록돼 있지만…").
+        "ko": "{stage_label}: {kind} 커넥터는 등록돼 있지만 필수 설정값이 아직 비어 있어요 — 조직 설정 화면에서 등록하세요.",
         "en": "{stage_label}: a connector supporting kind {kind} is registered but its required configuration is incomplete — register it from organization settings",
     },
     # story #3614 갭(BE, 페드루 PO 確定 2026-09-11) — 폐기(withdrawn, 종결)된 초안
