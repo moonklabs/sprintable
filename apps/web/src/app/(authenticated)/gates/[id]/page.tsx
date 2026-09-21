@@ -377,8 +377,15 @@ export default function GateDetailPage() {
                 {/* story #4082([E-RECIPE-1] 진행 위치 표시) AC2 — approvals-queue.tsx 카드와
                     동일 관례(neutral_facts.stage(+stage_role) denorm, 레시피 게이트가 아니면
                     무변). 유나 design CHANGES — raw slug 대신 recipe-stage-label.ts/
-                    stage-role.ts SSOT. */}
-                {typeof gate.neutral_facts?.stage === 'string' ? (
+                    stage-role.ts SSOT.
+                    story #4091(유나 design 라이브 관찰, PO 확定 2026-09-21) — 이 meta 줄과
+                    GateEvidence의 RecipeApprovalFactsBlock(사실 블록, gate-evidence.tsx)이
+                    같은 neutral_facts.stage를 각자 렌더해 화면에 «단계»가 두 번 떴다. 사실
+                    블록은 4갈래 상태분기 중 3곳(!needsAction·!canAct·else)에서만 뜨고
+                    서명 플로우 분기(isSigFlowGate||rejectPanelOpen)엔 GateEvidence 자체가
+                    없어 중복이 아니다 — 그 분기에서만 이 meta 줄을 유지한다(PO 확定: 정보
+                    소실 0·중복 0 — stage_role은 사실 블록 쪽으로 이관, 아래 참조).*/}
+                {typeof gate.neutral_facts?.stage === 'string' && (isSigFlowGate || rejectPanelOpen) ? (
                   <p className="text-xs text-muted-foreground">
                     {t('gateStageLabel')}: {recipeStageLabel(gate.neutral_facts.stage, tOrg)}
                     {typeof gate.neutral_facts.stage_role === 'string' ? ` (${stageRoleLabel(gate.neutral_facts.stage_role, tOrg)})` : ''}

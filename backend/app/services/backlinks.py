@@ -182,6 +182,7 @@ from app.core.pagination import decode_cursor, encode_cursor
 from app.dependencies.auth import AuthContext
 from app.models.conversation import Conversation, ConversationMessage
 from app.models.doc import Doc
+from app.models.event_definition import EventDefinition
 from app.models.meeting import Meeting
 from app.models.pm import Story
 from app.models.reference import Reference
@@ -204,6 +205,53 @@ def build_content_snippet(text_value: str, max_len: int = _SNIPPET_MAX) -> str:
     if len(normalized) <= max_len:
         return normalized
     return normalized[:max_len].rstrip() + "…"
+
+
+def _chat_message_event_summary(
+    msg_metadata: dict | None, definition_by_key: dict[str, EventDefinition],
+) -> dict | None:
+    """story #4091(§c) — msg_metadata['event']가 있으면(story #2637 AC 0-a) `{definition_key,
+    name, stage, role, gate_type, approver}`를 구조화해 낸다. role/gate_type/approver는
+    EventDefinition.stage_metadata[stage]에서 뽑는다(_render_event_message_content·
+    get_recipe_start_candidates와 동일 SSOT — payload 자체엔 role/gate가 없다). name은
+    definition.name(사람 표시명, «영상 제작» 등, PO 예시 렌더 그대로) — FE가 raw key로 두
+    번째 이름표를 짓지 않게 원본을 그대로 전달한다. 정의를 못 찾거나(삭제 등) stage가 그
+    정의에 미등재면 지어내지 않고 null — definition_key·stage는 메시지 자체가 이미 아는
+    값이라 그 경우에도 그대로 남는다."""
+    if not isinstance(msg_metadata, dict):
+        return None
+    event_meta = msg_metadata.get("event")
+    if not isinstance(event_meta, dict):
+        return None
+    event_key = event_meta.get("event_key")
+    payload = event_meta.get("payload")
+    if not isinstance(event_key, str) or not isinstance(payload, dict):
+        return None
+    stage = payload.get("stage")
+    if not isinstance(stage, str):
+        return None
+
+    role: str | None = None
+    gate_type: str | None = None
+    approver: str | None = None
+    definition = definition_by_key.get(event_key)
+    if definition is not None and isinstance(definition.stage_metadata, dict):
+        stage_meta = definition.stage_metadata.get(stage)
+        if isinstance(stage_meta, dict):
+            role = stage_meta.get("role") if isinstance(stage_meta.get("role"), str) else None
+            gate = stage_meta.get("gate")
+            if isinstance(gate, dict):
+                gate_type = gate.get("type") if isinstance(gate.get("type"), str) else None
+                approver = gate.get("approver") if isinstance(gate.get("approver"), str) else None
+
+    return {
+        "definition_key": event_key,
+        "name": definition.name if definition is not None else None,
+        "stage": stage,
+        "role": role,
+        "gate_type": gate_type,
+        "approver": approver,
+    }
 
 
 def _member_summary_same_org(resolved: ResolvedMember | None, org_id: uuid.UUID) -> dict | None:
@@ -531,6 +579,11 @@ async def list_entity_backlinks(
             # story와 동형으로 deleted_at을 별도 컬럼으로 select(JOIN ON절엔 안 넣는다 — #2299
             # 교훈 그대로, 넣으면 conversation_id가 NULL이 되어 authz가 깨진다).
             ConversationMessage.deleted_at.label("msg_deleted_at"),
+            # story #4091(E-RECIPE-1 팔로우업, PO 확定 2026-09-21 §c) — 이벤트 발행 메시지(story
+            # #2637 AC 0-a, msg_metadata['event']={event_key,payload,refs})인지 판별하는 축.
+            # #4458(story #4081)가 이미 쓰는 그 필드 — 새 컬럼 0, 신규 인덱스 0(스캔은 이미
+            # page-limit LIMIT 이후 행 소수에만 적용).
+            ConversationMessage.msg_metadata.label("msg_metadata"),
             # story #2267(C-9): meeting·story도 source가 될 수 있다(창조-출처, relation=
             # 'created_from') — Doc과 동형(직접 project_id 보유·soft-delete)이라 같은 패턴.
             # #2299 교훈 그대로: deleted_at은 JOIN ON절에 안 넣는다(soft-delete돼도 project_id는
@@ -649,6 +702,29 @@ async def list_entity_backlinks(
     creator_ids = {r.Reference.created_by for r in page_rows if r.Reference.created_by is not None}
     member_map = await lookup_members_by_ids(sender_ids | creator_ids, db)
 
+    # story #4091(§c) — 이벤트 발행 메시지의 event_key 배치 해소(N+1 없음, member_map과 동일
+    # 관례). stage_metadata[stage]에서 role/gate만 뽑는다 — get_recipe_start_candidates(events.py)
+    # 와 동일 우선순위(org 커스텀이 프리셋보다 우선, setdefault로 먼저 만난 행만 채택).
+    event_keys: set[str] = set()
+    for r in page_rows:
+        if r.Reference.source_type != "chat_message":
+            continue
+        event_meta = (r.msg_metadata or {}).get("event") if isinstance(r.msg_metadata, dict) else None
+        if isinstance(event_meta, dict) and isinstance(event_meta.get("event_key"), str):
+            event_keys.add(event_meta["event_key"])
+    definition_by_key: dict[str, EventDefinition] = {}
+    if event_keys:
+        definitions = (await db.execute(
+            select(EventDefinition)
+            .where(
+                EventDefinition.key.in_(event_keys),
+                or_(EventDefinition.org_id == org_id, EventDefinition.org_id.is_(None)),
+            )
+            .order_by(EventDefinition.org_id.is_(None))
+        )).scalars().all()
+        for d in definitions:
+            definition_by_key.setdefault(d.key, d)
+
     data: list[dict] = []
     for r in page_rows:
         m = r.Reference
@@ -682,6 +758,14 @@ async def list_entity_backlinks(
                 "conversation_id": str(r.msg_conversation_id),
                 "content_snippet": build_content_snippet(r.msg_content),
                 "sender": _member_summary_same_org(sender, org_id),
+                # story #4091(§c, PO 확定 2026-09-21) — 이벤트 발행 메시지면(#2637 AC 0-a,
+                # msg_metadata.event 존재) FE가 content_snippet 원문(agent 채널 전용, raw
+                # stage/approver — events.py::_render_event_message_content docstring 참조)
+                # 대신 이 구조화 필드로 recipe-stage-label.ts/gate-approver-label.ts(#4464) SSOT
+                # 재구성 렌더를 하게 한다. stage_metadata 조회가 실패하면(정의 삭제·미등재
+                # stage 등) role/gate_type/approver는 지어내지 않고 null — definition_key·
+                # stage는 메시지 자체가 이미 아는 값이라 항상 present.
+                "event": _chat_message_event_summary(r.msg_metadata, definition_by_key),
             }
             # story #2319: tombstone된 메시지도 행은 살아있다(하드삭제 아님) — 그래서 아래는
             # "행이 있는가"가 아니라 "지워졌는가"를 잰다. FE는 still_exists=False를 보면 기존

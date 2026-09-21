@@ -16,6 +16,7 @@ import { channelLabel } from '@/lib/channel-label';
 import { formatMinorCurrency, type GenerationBudgetCurrency } from '@/components/content/generation-budget-indicator';
 import { adsBoostObjectiveLabel } from '@/lib/ads-boost-objective-label';
 import { recipeStageLabel } from '@/lib/recipe-stage-label';
+import { stageRoleLabel } from '@/lib/stage-role';
 
 /**
  * H1-S8 머지 verdict 게이트 evidence(read-only 표시). 3 surface(GateInbox row·story detail·
@@ -158,6 +159,10 @@ interface RecipeApprovalFacts {
   draftDocSummary: string | null;
   channel: string | null;
   stage: string | null;
+  // story #4091(#4082 팔로우업, PO 확定 2026-09-21 — «사실 블록에 역할까지 얹고, 사실
+  // 블록이 뜨는 분기에서만 meta 줄을 뺀다») — gates/[id]/page.tsx footer meta 줄이
+  // neutral_facts.stage_role까지 같이 보여주던 걸 이 블록으로 옮긴다(정보 소실 0).
+  stageRole: string | null;
   // story #3368(Phase0·마케팅운영 S4, doc phase0-post-manager-screen-design §4-3③·§6-3) —
   // 글 관리 화면의 승인 요청이 채우는 필드. draft_doc_summary(300자 截단, doc 기반 채널용)
   // 와 별개 — 이쪽은 "전문"이라 접힘 없이 항상 펼쳐 보인다(§6-3 "요약 → 전문" 확장 그대로).
@@ -265,6 +270,7 @@ function recipeApprovalFacts(gate: GateItem): RecipeApprovalFacts | null {
     draftDocSummary: realString(f?.['draft_doc_summary']),
     channel: realString(f?.['channel']),
     stage: realString(f?.['stage']),
+    stageRole: realString(f?.['stage_role']),
     contentBody,
     contentVersion,
     contentSha256,
@@ -781,7 +787,10 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
       {facts.stage ? (
         <p>
           <span className="text-muted-foreground">{t('recipeApprovalStageLabel')} · </span>
-          <span className="text-foreground">{recipeStageLabel(facts.stage, tOrg)}</span>
+          <span className="text-foreground">
+            {recipeStageLabel(facts.stage, tOrg)}
+            {facts.stageRole ? ` (${stageRoleLabel(facts.stageRole, tOrg)})` : ''}
+          </span>
         </p>
       ) : null}
       {facts.workItemRef ? (

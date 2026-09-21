@@ -179,6 +179,51 @@ describe('RecipeStartSection', () => {
     expect(container.querySelector('button')).not.toBeNull();
   });
 
+  // story #4091(유나 design 라이브 관찰 ①, PO 확定 2026-09-21) — «켜면 보게» 미충족 처방:
+  // 시작된 레시피가 2개 이상 적용된 상태 중 하나여도, 라디오 선택 없이 그 진행 3줄이
+  // 바로 보인다(선택은 «아직 안 시작한 것을 골라 시작»에만 관여).
+  it('적용 레시피 2개 중 1개가 이미 시작됐으면, 선택 없이도 그 항목 아래 진행 3줄이 바로 보인다(story #4091 AC1)', async () => {
+    await render([
+      candidateStub({
+        key: 'org.acme.a', name: '레시피 A', started: true, conversation_id: 'conv-a', message_id: 'msg-a',
+        current_stage: 'draft', current_role: 'Creator', next_stage: 'concept_confirmed', next_role: 'Director',
+        last_published_at: '2026-09-21T00:00:00Z', current_stage_position: 1, total_stages: 9,
+      }),
+      candidateStub({ key: 'org.acme.b', name: '레시피 B' }),
+    ]);
+    // 시작된 레시피 A의 진행 3줄 — 라디오를 하나도 안 눌렀는데 바로 보인다.
+    expect(container.textContent).toContain('레시피 A');
+    expect(container.textContent).toContain('초안');
+    expect(container.textContent).toContain('컨셉 확정');
+    const conversationLink = container.querySelector('a[href^="/chats/conv-a"]');
+    expect(conversationLink).not.toBeNull();
+    // 시작 안 한 후보가 레시피 B 하나뿐이라 라디오 없이 자동 선택(#4075 단일 후보 관례,
+    // 시작된 A는 애초 라디오 목록 대상이 아니다) — 시작 버튼이 바로 뜬다.
+    expect(container.querySelectorAll('input[type="radio"]').length).toBe(0);
+    expect(container.querySelector('button')?.textContent).toContain('레시피 시작');
+  });
+
+  it('적용 레시피 2개가 전부 이미 시작됐으면 라디오 없이 둘 다 진행 3줄이 각각 보인다(story #4091 AC1)', async () => {
+    await render([
+      candidateStub({
+        key: 'org.acme.a', name: '레시피 A', started: true, conversation_id: 'conv-a', message_id: 'msg-a',
+        current_stage: 'draft', current_role: 'Creator', next_stage: 'concept_confirmed', next_role: 'Director',
+        last_published_at: '2026-09-21T00:00:00Z', current_stage_position: 1, total_stages: 9,
+      }),
+      candidateStub({
+        key: 'org.acme.b', name: '레시피 B', started: true, conversation_id: 'conv-b', message_id: 'msg-b',
+        current_stage: 'animatic', current_role: 'Creator', next_stage: 'structure_passed', next_role: 'Director',
+        last_published_at: '2026-09-21T00:00:00Z', current_stage_position: 3, total_stages: 9,
+      }),
+    ]);
+    expect(container.querySelectorAll('input[type="radio"]').length).toBe(0);
+    expect(container.querySelector('button')).toBeNull();
+    expect(container.textContent).toContain('레시피 A');
+    expect(container.textContent).toContain('레시피 B');
+    expect(container.querySelector('a[href^="/chats/conv-a"]')).not.toBeNull();
+    expect(container.querySelector('a[href^="/chats/conv-b"]')).not.toBeNull();
+  });
+
   it('발행 실패 시 사용자 문장을 보여준다(AC3, 조용한 삼킴 없음)', async () => {
     await render(
       [candidateStub()],

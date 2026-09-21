@@ -124,6 +124,87 @@ describe('EntityBacklinksSection', () => {
     expect(container.textContent).not.toContain('대상이 없어요');
   });
 
+  // story #4091(E-RECIPE-1 팔로우업, PO 확定 2026-09-21 §c) — 이벤트 발행 메시지의 backlink
+  // 항목은 raw content_snippet(agent 채널용, «- stage: pending_approval (Director)»류) 대신
+  // BE가 얹은 message.event 구조화 필드를 recipe-stage-label.ts/gate-approver-label.ts
+  // SSOT로 재구성해서 보여준다.
+  it('이벤트 발행 메시지는 raw content_snippet 대신 「이름 · 단계 (역할) · 승인자」로 재구성된다(story #4091 AC3)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      data: [{
+        id: 'r1', source_type: 'chat_message', source_id: 'm1', created_by: null,
+        created_at: '2026-07-28T00:00:00Z', still_exists: true, doc: null,
+        message: {
+          id: 'm1', conversation_id: 'c1', sender: null,
+          content_snippet: '[이벤트] preset.marketing.video_production\n- stage: pending_approval (Director)',
+          event: {
+            definition_key: 'preset.marketing.video_production', name: '영상 제작(릴스·쇼츠)',
+            stage: 'pending_approval', role: 'Director', gate_type: 'external_publish', approver: 'org_owner',
+          },
+        },
+      }],
+      meta: { next_cursor: null, has_more: false, collection_scope: { source_types: ['chat_message'], forms: 'all', excludes: [] } },
+    }))));
+    await render('story', 's1');
+    expect(container.textContent).toContain('영상 제작(릴스·쇼츠)');
+    expect(container.textContent).toContain(koMessages.organization.recipeStageLabelPendingApproval);
+    expect(container.textContent).toContain(koMessages.organization.recipeGateApproverOrgOwner);
+    expect(container.textContent).not.toContain('pending_approval');
+    expect(container.textContent).not.toContain('org_owner');
+    expect(container.textContent).not.toContain('Director');
+    expect(container.textContent).not.toContain('preset.marketing.video_production');
+  });
+
+  it('gate_type이 없는 stage(게이트 자체가 없는 자리)는 승인자 세그먼트를 안 붙인다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      data: [{
+        id: 'r1', source_type: 'chat_message', source_id: 'm1', created_by: null,
+        created_at: '2026-07-28T00:00:00Z', still_exists: true, doc: null,
+        message: {
+          id: 'm1', conversation_id: 'c1', sender: null, content_snippet: '[이벤트] ...',
+          event: {
+            definition_key: 'preset.marketing.video_production', name: '영상 제작(릴스·쇼츠)',
+            stage: 'draft', role: 'Creator', gate_type: null, approver: null,
+          },
+        },
+      }],
+      meta: { next_cursor: null, has_more: false, collection_scope: { source_types: ['chat_message'], forms: 'all', excludes: [] } },
+    }))));
+    await render('story', 's1');
+    expect(container.textContent).toContain(koMessages.organization.recipeStageLabelDraft);
+    expect(container.textContent).not.toContain(koMessages.organization.recipeGateApproverOrgOwner);
+    expect(container.textContent).not.toContain(koMessages.organization.recipeGateApproverUnknown);
+  });
+
+  it('정의를 못 찾은(삭제 등) 이벤트 메시지는 definition_key 원문으로 물러나되 role/approver는 지어내지 않는다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      data: [{
+        id: 'r1', source_type: 'chat_message', source_id: 'm1', created_by: null,
+        created_at: '2026-07-28T00:00:00Z', still_exists: true, doc: null,
+        message: {
+          id: 'm1', conversation_id: 'c1', sender: null, content_snippet: '[이벤트] preset.gone.recipe',
+          event: { definition_key: 'preset.gone.recipe', name: null, stage: 'draft', role: null, gate_type: null, approver: null },
+        },
+      }],
+      meta: { next_cursor: null, has_more: false, collection_scope: { source_types: ['chat_message'], forms: 'all', excludes: [] } },
+    }))));
+    await render('story', 's1');
+    expect(container.textContent).toContain('preset.gone.recipe');
+    expect(container.textContent).toContain(koMessages.organization.recipeStageLabelDraft);
+  });
+
+  it('event가 없는 일반 멘션 메시지는 기존 content_snippet 그대로 렌더된다(회귀 0)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      data: [{
+        id: 'r1', source_type: 'chat_message', source_id: 'm1', created_by: null,
+        created_at: '2026-07-28T00:00:00Z', still_exists: true, doc: null,
+        message: { id: 'm1', conversation_id: 'c1', sender: null, content_snippet: '일반 멘션 메시지', event: null },
+      }],
+      meta: { next_cursor: null, has_more: false, collection_scope: { source_types: ['chat_message'], forms: 'all', excludes: [] } },
+    }))));
+    await render('story', 's1');
+    expect(container.textContent).toContain('일반 멘션 메시지');
+  });
+
   it('fetch 실패 시 조용히 아무것도 안 그린다(노이즈 0, 다른 애드온 섹션과 동형)', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 500 })));
     await render('story', 's1');
