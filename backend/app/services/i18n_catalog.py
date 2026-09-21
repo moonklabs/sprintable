@@ -431,21 +431,23 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "{role} 단계",
         "en": "{role} stage",
     },
+    # story #4115(유나 문구 정본, 페드루 PO 確定 2026-09-21 15:11Z) — "조직 설정에서
+    # 채널을 먼저 연결하세요"는 틀린 세계를 가리켰다(라이브 실사고: 채널은 이미 연결돼
+    # 있는데 org_connectors 레지스트리 행이 없어서 뜬 경고였다 — 사람이 "조직 설정"에서
+    # 할 수 있는 일이 아니라, 레지스트리 행은 에이전트가 설정 스킬(POST .../connectors/
+    # {key}, connectors.py 106행 — org member 누구나, owner/admin 전용 아님을 코드로
+    # 확認)로 등록하는 것). 목적지를 실물(담당 발행 에이전트가 설정)로 교정.
     "events.apply_connector_registered_missing": {
-        "ko": "{stage_label}: {connector_key} 커넥터가 아직 등록돼 있지 않아요 — 조직 설정에서 채널을 먼저 연결하세요.",
-        "en": "{stage_label}: connector {connector_key} is not registered yet — connect the channel in organization settings first",
+        "ko": "{stage_label}: {connector_key} 커넥터가 아직 준비되지 않았어요 — 담당 발행 에이전트가 이 채널의 발행 도구를 먼저 설정해야 해요.",
+        "en": "{stage_label}: connector {connector_key} isn't ready yet — the assigned publisher agent must set up its publish tool for this channel first",
     },
     "events.apply_kind_connector_not_registered": {
-        "ko": "{stage_label}: {kind} 종류 커넥터가 이 조직에 등록돼 있지 않아요 — 조직 설정에서 채널을 먼저 연결하세요.",
-        "en": "{stage_label}: no connector supporting kind {kind} is registered for this organization — connect the channel in organization settings first",
+        "ko": "{stage_label}: {kind} 종류 발행 커넥터가 아직 준비되지 않았어요 — 담당 발행 에이전트가 이 채널의 발행 도구를 먼저 설정해야 해요.",
+        "en": "{stage_label}: the {kind} connector isn't ready yet — the assigned publisher agent must set up its publish tool for this channel first",
     },
-    # story #4104 CHANGES(페드루 PO 리뷰, 2026-09-21) — 같은 루프의 나머지 3줄도 같은
-    # 클래스(합니다체·내부 용어)였다. "channel_connector_map"은 내부 테이블/설정 키 이름
-    # (화면에 노출하면 고객이 그 이름으로 뭘 찾아야 할지 모름) — 목적지 문장("그 채널을
-    # 먼저 연결하세요")으로 교체.
     "events.apply_channel_connector_map_missing": {
-        "ko": "{stage_label}: {channel} 채널에 대한 커넥터 연결이 없어요 — 조직 설정에서 그 채널을 먼저 연결하세요.",
-        "en": "{stage_label}: no connector is mapped for channel {channel} — connect that channel in organization settings first",
+        "ko": "{stage_label}: {channel} 채널에 대한 커넥터 연결이 없어요 — 담당 발행 에이전트가 이 채널의 발행 도구를 먼저 설정해야 해요.",
+        "en": "{stage_label}: no connector is mapped for channel {channel} — the assigned publisher agent must set up its publish tool for this channel first",
     },
     "events.apply_connector_config_incomplete": {
         "ko": "{stage_label}: {connector_key} 커넥터의 필수 설정값이 비어 있어요 — {missing}. 조직 설정 화면에서 채워주세요.",
