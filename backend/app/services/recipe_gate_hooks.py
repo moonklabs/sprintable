@@ -53,12 +53,16 @@ class SealedFieldSpec(NamedTuple):
     """story #4085 AC1 — 자기설명 렌더러(events.py)가 발행 예시 payload에 이 필드를
     실값 예시로 채우고(`example_value`), 그 바로 아래 "이 값이 왜 필요한지" 한 줄
     (`explanation_catalog_key`, i18n_catalog `events.*` 키)을 붙이는 데 쓰는 메타데이터.
-    검증(AC2)은 `name`만 본다 — example_value/explanation은 렌더링 전용, 검증 로직과
-    분리해 렌더러가 죽어도 검증은 안 죽는다(반대도 마찬가지)."""
+
+    ⚠️story #4085 PO 리뷰 정정(PR 코멘트 5755879285) — `min_value`(기본 0) 없이는 음수
+    (예: -1)가 isinstance(int) 검사만 통과해 음수 예상 비용이 그대로 봉인될 수 있었다.
+    검증(AC2)은 `name`·`min_value` 둘 다 본다 — example_value/explanation은 렌더링
+    전용, 검증 로직과 분리해 렌더러가 죽어도 검증은 안 죽는다(반대도 마찬가지)."""
 
     name: str
     example_value: int
     explanation_catalog_key: str
+    min_value: int = 0
 
 
 # story #4085(리허설 1호 실측, PO 확定 2026-09-21) — gate_type별 "이 게이트가 봉인에 쓰는
@@ -311,14 +315,18 @@ async def maybe_create_stage_gate(
         return
 
     # story #4085 AC2 — 이 stage의 gate_decl["type"]이 봉인 필드를 요구하는데(_GATE_TYPE_
-    # SEALED_FIELDS) payload에 없으면(또는 타입이 틀리면) 게이트를 아예 만들지 않고 여기서
-    # 막는다 — 승인자 해소·neutral_facts 조립·budget 하드체크보다 먼저(부분 부수효과 0).
-    # bool은 int의 서브클래스라 isinstance(v, int)만으로는 True/False가 새므로 명시 제외
-    # (기존 estimated_cost_minor 봉인 코드의 동일 방어와 동형, 새 방어 0).
+    # SEALED_FIELDS) payload에 없거나·타입이 틀리거나·min_value 미만이면 게이트를 아예
+    # 만들지 않고 여기서 막는다 — 승인자 해소·neutral_facts 조립·budget 하드체크보다
+    # 먼저(부분 부수효과 0). bool은 int의 서브클래스라 isinstance(v, int)만으로는 True/
+    # False가 새므로 명시 제외(기존 estimated_cost_minor 봉인 코드의 동일 방어와 동형).
+    # ⚠️PO 리뷰 정정(PR 코멘트 5755879285) — min_value 검사가 없으면 음수(-1)가 위 두
+    # 조건만으로는 걸러지지 않아 음수 예상 비용이 그대로 봉인될 수 있었다.
     _required_sealed_fields = _GATE_TYPE_SEALED_FIELDS.get(gate_decl["type"], ())
     _missing_sealed_fields = [
         spec.name for spec in _required_sealed_fields
-        if not isinstance(payload.get(spec.name), int) or isinstance(payload.get(spec.name), bool)
+        if not isinstance(payload.get(spec.name), int)
+        or isinstance(payload.get(spec.name), bool)
+        or payload.get(spec.name) < spec.min_value
     ]
     if _missing_sealed_fields:
         raise MissingGateSealedFieldError(gate_type=gate_decl["type"], missing_fields=_missing_sealed_fields)

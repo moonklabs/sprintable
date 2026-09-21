@@ -392,3 +392,43 @@ async def test_generation_budget_gate_wrong_type_estimate_rejected_422():
             assert exc_info.value.missing_fields == ["estimated_cost_minor"]
     finally:
         await engine.dispose()
+
+
+async def test_generation_budget_gate_negative_estimate_rejected_422():
+    """⭐PO 리뷰 정정(#4085, PR 코멘트 5755879285) — 음수(-1)는 isinstance(int)만으로는
+    안 걸러진다(bool도 아니고 진짜 int라서). SealedFieldSpec.min_value(기본 0) 검사가
+    없으면 음수 예상 비용이 그대로 sealed_estimated_cost_minor에 봉인될 수 있었다."""
+    from fastapi import HTTPException
+    from app.routers.events import EventPublishRequest, publish_registry_event
+    from app.models.gate import Gate
+    from sqlalchemy import select
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id, _owner_id = await _seed_org_with_owner(s, slug="r4044f")
+            agent_id = await _seed_agent(s, org_id, project_id)
+            story_id = await _seed_story(s, org_id, project_id)
+            await _seed_definition(s)
+
+            with pytest.raises(HTTPException) as exc_info:
+                await publish_registry_event(
+                    EventPublishRequest(
+                        definition_key=_MIG._KEY,
+                        payload={
+                            "stage": "structure_passed", "work_item_type": "story", "work_item_id": str(story_id),
+                            "estimated_cost_minor": -1,
+                        },
+                    ),
+                    BackgroundTasks(), _fake_request(), db=s, auth=_auth(agent_id, org_id), org_id=org_id,
+                )
+            assert exc_info.value.status_code == 422
+            assert exc_info.value.detail["code"] == "GATE_SEALED_FIELD_MISSING"
+            assert exc_info.value.detail["missing_fields"] == ["estimated_cost_minor"]
+
+            gates = (await s.execute(
+                select(Gate).where(Gate.work_item_id == story_id, Gate.gate_type == "generation_budget")
+            )).scalars().all()
+            assert gates == []
+    finally:
+        await engine.dispose()
